@@ -39,6 +39,10 @@
 // present: 检查变量是否存在且非空
 fn present(x) { type_of(x) != "()" }
 
+// nonempty_str: 是字符串且非空 —— 2026-10-12 起作为 diag_for 第 11 参
+// （report_present）的唯一判据：区分「节点完全无产物」与「有半截报告但无 VERDICT」。
+fn nonempty_str(s) { type_of(s) == "string" && s != "" }
+
 // safe_parse: 安全解析 JSON 字符串，失败返回 ()
 fn safe_parse(raw) {
     if !present(raw) { return (); }
@@ -1602,14 +1606,20 @@ let grade = if final_score >= 85.0 { "A" }
 //   class → 文案，**不再自己串 else-if 链**（历史缺陷：工具可信度与诊断各行一套口径）。
 //   第 9 参 `raw_ph_n` 仍保留：as-of 豁免生效时 `ph_n` 恒 0，需它才能在文案里写出
 //   「报告含 N 处失败标记（已豁免）」，否则会退化成「报告无失败标记」的假话。
-//   ⚠ 实参个数不匹配是**运行期**错误（`cargo check`/`clippy` 看不见）⇒ 11 个调用点必须同步改，
-//     守护见 `seed_consistency_tests.rs::data_quality_rhai_diag_for_arity_matches_all_call_sites`。
-// 2026-10-09：新增第 10 参 `v_present`（该节点本轮 scope 里**是否有输出**）。
+// 2026-10-09：新增第 10 参 `v_present`（该节点本轮 scope 里**是否有 verdict 产物**）。
 //   修的是 `cls == "missing"` 的归因含糊：原文案「节点未输出 VERDICT **或** confidence 字段缺失
 //   （可能原因：…）」把**两种可判定的情形**混成一句「或」——运行期其实分得清
 //   「完全没输出」与「有输出但缺 confidence」。截图实证：面板「缺口原因」列显示该「或」句，
 //   用户无法据此判断是节点没跑还是输出被截断。现按 presence 分支给**确定归因**。
-fn diag_for(cls, c, name, expected, ph_n, po_n, rq, attr_note, raw_ph_n, v_present) {
+// 2026-10-12：新增第 11 参 `report_present`（该节点 scope 里**是否有报告正文**，
+//   不要求 verdict 存在）。实证（688378 / run 3220c35d）：5 个分析师节点实际
+//   `completed` 且产出了半截 Markdown / 半截 JSON（content 非空），但无 VERDICT 机读结论，
+//   `v_present=false` 与「节点根本没跑」落入同一分支，面板误报「scope 中没有该节点的产物」。
+//   三分支：v_present ⇒ 输出模板缺陷；仅 report_present ⇒ 报告不完整（LLM 提前结束/
+//   截断/未遵守模板）；两者皆无 ⇒ 节点真无产物（超时/被跳过）。
+//   ⚠ 实参个数不匹配是**运行期**错误（`cargo check`/`clippy` 看不见）⇒ 11 个调用点
+//     （10 个 diagnostics map + 1 个 diagnostics_by_tier 循环）必须同步。
+fn diag_for(cls, c, name, expected, ph_n, po_n, rq, attr_note, raw_ph_n, v_present, report_present) {
     // 2026-09-12: status 判定从「只看 LLM 自评 confidence」升级为 **A ∪ B**
     //   A = 报告文本失败标记（客观，placeholder_hits）
     //   B = analyst 自评 confidence（主观）
@@ -1628,11 +1638,16 @@ fn diag_for(cls, c, name, expected, ph_n, po_n, rq, attr_note, raw_ph_n, v_prese
     let reason = if cls == "untrusted" {
         "strict_mode 降级（LLM 不可用/超时，confidence 为中性兜底，数据不可信）"
     } else if cls == "missing" {
-        // 2026-10-09：按 presence 给**确定归因**（不再把两种可判定的情形混成一句「或」）。
+        // 2026-10-09：按 presence 给**确定归因**；2026-10-12 再拆「有正文无机读结论」。
         if v_present {
             "本节点本轮**有输出**，但 output 里缺 confidence 字段（或类型非法）⇒ 系统无法判定该维度的数据可信度；请检查该角色的输出模板 / 引擎是否正确注入自评置信度"
+        } else if report_present {
+            // 实证（run 3220c35d）：节点 completed、content 有半截 Markdown / 半截 JSON，
+            // 但无 VERDICT 机读结论。旧文案误报「scope 中没有该节点的产物」，
+            // 把排查引向「节点没跑」；真实形态是「节点跑了、报告没收尾」。
+            "本节点本轮**已产出分析报告**（scope 中存在该节点 content），但报告不完整、未生成机读 VERDICT 结论（LLM 提前结束 / 输出截断 / 未遵守输出模板）⇒ 该维度未形成可评估结论，**并非节点未执行或取数工具失败**；strict_mode 兜底重试/降级生效后此类产物会带 __untrusted 标记改判「不可信」"
         } else {
-            "本节点本轮**无任何输出**（scope 中没有该节点的产物）⇒ 该维度数据未参与评估；可能原因：LLM 超时/截断/解析失败，或节点被跳过"
+            "本节点本轮**无任何输出**（scope 中既无该节点的 content 也无 verdict）⇒ 该维度数据未参与评估；可能原因：LLM 超时/节点被跳过/取数与分析均失败"
         }
     } else if cls == "asof_exempt" {
         `as-of 回放：本维度上游按设计降级（当下语义约束，非工具故障）—— 报告含 ${raw_ph_n} 处失败标记，已豁免不计扣分；置信度自评 ${c}`
@@ -1788,24 +1803,24 @@ fn attribution_note(report, tool_calls) {
 //   正控：`output/tmp-151-rhai-arity.mjs` 逐点核对本块的实参个数。
 let diagnostics = #{
     "mk": diag_for(mk_cls, mk_c, "技术面分析师", "K线形态、MACD/RSI、支撑阻力位、成交量（t-market-data）", mk_ph_e.len(), mk_po_e, mk_q,
-        merge_two_notes(attribution_note(mk_report, mk_tool_calls), mk_word_note), mk_ph.len(), present(mk_verdict)),
+        merge_two_notes(attribution_note(mk_report, mk_tool_calls), mk_word_note), mk_ph.len(), present(mk_verdict), nonempty_str(mk_r)),
     // 2026-09-21 修正归因（原值把用户引向 t-sentiment-data，而真实缺口在
     // t-dragon-tiger-data ⇒ 归因指向错误会误导排查方向，实证见
     // AUDIT-analyst-low-confidence-2026-09-21.md §八.1）：
     //   情绪面「席位数据缺失」与资金面「龙虎榜席位与北向数据缺失」同源于
     //   t-dragon-tiger-data（龙虎榜营业部明细，独立于 t-sentiment-data 的节点）。
     "sent": diag_for(sent_cls, sent_c, "情绪面分析师", "市场情绪、散户/机构态度（t-sentiment-data）；龙虎榜席位明细（t-dragon-tiger-data）", sent_ph_e.len(), sent_po_e, sent_q,
-        merge_two_notes(attribution_note(sent_report, sent_tool_calls), sent_word_note), sent_ph.len(), present(sent_verdict)),
+        merge_two_notes(attribution_note(sent_report, sent_tool_calls), sent_word_note), sent_ph.len(), present(sent_verdict), nonempty_str(sent_r)),
     "val": diag_for(val_cls, val_c, "价值评估官", "内在价值评估（value-investor；数值经 value-verify 覆写链校准）", val_ph_e.len(), val_po_e, val_q,
-        merge_two_notes(attribution_note(val_report, val_tool_calls), val_word_note), val_ph.len(), present(val_verdict)),
+        merge_two_notes(attribution_note(val_report, val_tool_calls), val_word_note), val_ph.len(), present(val_verdict), nonempty_str(val_r)),
     // 基本面/催化剂/行业的「同侪 PE/PB 全为 null」同源于 t-fundamentals-data 的
     // get_stock_peers（2026-09-21 已补 PE_TTM/PB_MRQ/市值/涨跌幅；ROE 仍未接入）。
     "fund": diag_for(fund_cls, fund_c, "基本面分析师", "PE/PB/ROE、营收利润、资产负债（t-fundamentals-data）；同侪估值（t-fundamentals-data: get_stock_peers）", fund_ph_e.len(), fund_po_e, fund_q,
-        merge_two_notes(attribution_note(fund_report, fund_tool_calls), fund_word_note), fund_ph.len(), present(fund_verdict)),
+        merge_two_notes(attribution_note(fund_report, fund_tool_calls), fund_word_note), fund_ph.len(), present(fund_verdict), nonempty_str(fund_r)),
     "pol": diag_for(pol_cls, pol_c, "政策面分析师", "宏观政策与行业政策影响（t-policy-data）", pol_ph_e.len(), pol_po_e, pol_q,
-        merge_two_notes(attribution_note(pol_report, pol_tool_calls), pol_word_note), pol_ph.len(), present(pol_verdict)),
+        merge_two_notes(attribution_note(pol_report, pol_tool_calls), pol_word_note), pol_ph.len(), present(pol_verdict), nonempty_str(pol_r)),
     "hm": diag_for(hm_cls, hm_c, "资金面分析师", "游资动向、主力资金净流入（t-hotmoney-data: get_stock_money_flow）；龙虎榜席位明细（t-dragon-tiger-data）与北向字段", hm_ph_e.len(), hm_po_e, hm_q,
-        merge_two_notes(attribution_note(hm_report, hm_tool_calls), hm_word_note), hm_ph.len(), present(hm_verdict)),
+        merge_two_notes(attribution_note(hm_report, hm_tool_calls), hm_word_note), hm_ph.len(), present(hm_verdict), nonempty_str(hm_r)),
     // 2026-09-21(v72) 修正：质押此前**从未接线**（无节点、无白名单授权），
     //   面板却在 expected_data 里写着「质押风险（t-lockup-data）」——**指明了错误的
     //   取数入口**，把使用者的排查方向一起带偏（该工具是解禁+增减持+大宗交易**三方**，
@@ -1813,13 +1828,13 @@ let diagnostics = #{
     //   此处同步为**真实来源**，避免「期望值自证」（拿声明当事实）继续误导。
     // P2-1：本节点正是伪归因的**实证现场**（报告写「工具调用被拒绝」而归因错维度）。
     "lk": diag_for(lk_cls, lk_c, "解禁观察员", "解禁减持、大宗交易（t-lockup-data）；股权质押（t-pledge-data）", lk_ph_e.len(), lk_po_e, lk_q,
-        merge_two_notes(attribution_note(lk_report, lk_tool_calls), lk_word_note), lk_ph.len(), present(lk_verdict)),
+        merge_two_notes(attribution_note(lk_report, lk_tool_calls), lk_word_note), lk_ph.len(), present(lk_verdict), nonempty_str(lk_r)),
     "res": diag_for(res_cls, res_c, "研报分析师", "券商研报观点汇总、目标价（t-research-data）", res_ph_e.len(), res_po_e, res_q,
-        merge_two_notes(attribution_note(res_report, res_tool_calls), res_word_note), res_ph.len(), present(res_verdict)),
+        merge_two_notes(attribution_note(res_report, res_tool_calls), res_word_note), res_ph.len(), present(res_verdict), nonempty_str(res_r)),
     "sec": diag_for(sec_cls, sec_c, "行业分析师", "行业景气度、轮动分析（t-sector-data）；同侪估值（t-fundamentals-data: get_stock_peers）", sec_ph_e.len(), sec_po_e, sec_q,
-        merge_two_notes(attribution_note(sec_report, sec_tool_calls), sec_word_note), sec_ph.len(), present(sec_verdict)),
+        merge_two_notes(attribution_note(sec_report, sec_tool_calls), sec_word_note), sec_ph.len(), present(sec_verdict), nonempty_str(sec_r)),
     "cat": diag_for(cat_cls, cat_c, "催化剂分析师", "催化剂与叙事完整度、公告关键词（t-catalyst-data）；同侪估值锚（t-fundamentals-data: get_stock_peers）", cat_ph_e.len(), cat_po_e, cat_q,
-        merge_two_notes(attribution_note(cat_report, cat_tool_calls), cat_word_note), cat_ph.len(), present(cat_verdict))
+        merge_two_notes(attribution_note(cat_report, cat_tool_calls), cat_word_note), cat_ph.len(), present(cat_verdict), nonempty_str(cat_r))
 };
 
 // ── 2026-10-09(v148)：逐档诊断 —— 把面板「代表实例」那一行摊成四档 ──
@@ -1922,7 +1937,7 @@ for abbr in tier_src.keys() {
         let po_e = if asof || ws { 0 } else { po };
         let q = report_quality(rr, c, asof, mc);
         let cls = conf_class(c, u, ph_e_n, asof, ph.len(), ws);
-        let d = diag_for(cls, c, diagnostics[abbr]["name"], diagnostics[abbr]["expected_data"], ph_e_n, po_e, q, merge_two_notes(attribution_note(rp, tc), wording_absence_note(ph, tc)), ph.len(), present(v));
+        let d = diag_for(cls, c, diagnostics[abbr]["name"], diagnostics[abbr]["expected_data"], ph_e_n, po_e, q, merge_two_notes(attribution_note(rp, tc), wording_absence_note(ph, tc)), ph.len(), present(v), nonempty_str(rr));
         d["tier"] = t;
         rows[t] = d;
     }

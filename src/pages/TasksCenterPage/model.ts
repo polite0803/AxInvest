@@ -16,6 +16,7 @@ export type SourceId =
   | "scheduled-cron"
   | "stock-pipeline"
   | "time-travel-batch"
+  | "mover-recall-analysis"
   // P2-2 起接入：
   | "background-tasks"
   | "workflow-dag"

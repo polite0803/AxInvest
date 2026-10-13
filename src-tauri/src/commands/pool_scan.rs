@@ -87,6 +87,9 @@ pub struct PoolCandidate {
     pub stock_name: String,
     pub period: Period,
     pub confidence: i32,
+    /// P2 漏检补分析：锚定的 mover_recall_events.id（仅 mover_recall 批次非 None）。
+    /// 透传至 stock_analyses.anchor_event_id，使补分析行可回溯到具体漏检事件。
+    pub anchor_event_id: Option<String>,
 }
 
 /// 一次 pool-scan 的候选筛选结果（三种缺席各报各的，不混成一个读数）
@@ -120,6 +123,7 @@ fn select_candidates(
             stock_name,
             period,
             confidence,
+            anchor_event_id: None,
         })
         .collect();
     let deduped = dedup_explicit_candidates(merged);
@@ -179,6 +183,10 @@ pub async fn load_pool_selection(
     let mut query = reco_picks::Entity::find()
         // synthetic = 1 是数据稀疏时的兜底合成 pick，没有技术信号支撑，分析它没有意义
         .filter(reco_picks::Column::Synthetic.eq(0))
+        // 代际过滤：本函数是**实盘**池分析（02:00 cron 与手动入口）的候选来源。
+        // 回放的候选由时间旅行批次自己传给 `run_analysis_for_candidates`，不经本查询；
+        // 若这里不过滤，实盘链会把历史口径的票当今天的候选再分析一遍。
+        .filter(reco_picks::Column::AsOfDate.is_null())
         // [2026-09-13 修正] 这里**不排除** style='serenity'（趋势智选工作流的产物）。
         // 用户诉求明确是「荐股 **和** 趋势智选 创建候选池 → 逐只分析」，
         // 排除它等于把趋势智选的候选全部挡在门外。
@@ -356,26 +364,32 @@ pub async fn run_pool_scan(
         selection.candidates,
         selection.skipped_analyzed_today,
         selection.truncated,
+        "live",
     )
     .await)
 }
 
-/// 对**显式给定**的候选队列逐只执行完整分析（时间旅行批次专用）。
+/// 对**显式给定**的候选队列逐只执行完整分析（时间旅行批次 / 漏检补分析批次专用）。
 ///
 /// 与 `run_pool_scan` 的唯一差别：**完全不读 `reco_picks` 主表** ——
-/// 批次在 as-of 封闭世界里内存荐股得到 picks，直接映射成本队列传入，
-/// 满足「回放荐股不落主表」铁律（B2）；也不做「当日已分析」去重
+/// 批次在 as-of 封闭世界里内存荐股得到 picks，直接映射成本队列传入（那批 picks 由批次
+/// 调用方按本批代际落库，见 `time_travel_batch`，此处不回读是为了让回放的输入封闭在
+/// 本批自己的选择上，而不是「落库与否」）；也不做「当日已分析」去重
 /// （回放世界的一批本来就是新建 replay 行，与 live 互不命中）。
+///
+/// `source` 为样本出处（`time_travel` / `mover_recall`），透传至
+/// stock_analyses.source；候选自带的 `anchor_event_id` 仅 mover_recall 非空。
 pub async fn run_analysis_for_candidates(
     db: &sea_orm::DatabaseConnection,
     client: &axagent_astock_data::AStockClient,
     engine: &std::sync::Arc<axagent_rt_workflow::work_engine::WorkEngine>,
     candidates: Vec<PoolCandidate>,
+    source: &str,
 ) -> PoolScanOutcome {
-    analyze_candidate_queue(db, client, engine, candidates, Vec::new(), false).await
+    analyze_candidate_queue(db, client, engine, candidates, Vec::new(), false, source).await
 }
 
-/// 候选队列逐只分析的唯一执行体（live 扫描与时间旅行批次共用，保证逐只口径一致）。
+/// 候选队列逐只分析的唯一执行体（live 扫描、时间旅行批次、漏检补分析共用，保证逐只口径一致）。
 async fn analyze_candidate_queue(
     db: &sea_orm::DatabaseConnection,
     client: &axagent_astock_data::AStockClient,
@@ -383,6 +397,7 @@ async fn analyze_candidate_queue(
     candidates: Vec<PoolCandidate>,
     skipped_codes: Vec<String>,
     truncated: bool,
+    source: &str,
 ) -> PoolScanOutcome {
     let mut ok = 0usize;
     let mut fail = 0usize;
@@ -407,6 +422,8 @@ async fn analyze_candidate_queue(
             &c.stock_name,
             Some(holding_days),
             None, // template_id — 候选池扫描恒走完整分析链
+            source,
+            c.anchor_event_id.as_deref(),
         )
         .await
         {
@@ -686,6 +703,7 @@ mod tests {
             stock_name: format!("{code}-name"),
             period,
             confidence,
+            anchor_event_id: None,
         }
     }
 

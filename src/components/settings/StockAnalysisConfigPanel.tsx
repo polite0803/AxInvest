@@ -24,9 +24,12 @@ export function getDefaultVariables(): Variable[] {
     vars.push({ name, varType: type, value: val, description: desc, isSecret: false });
   // 分析流程
   b("analysis_depth", "standard", "stockAnalysis.configDescriptions.analysisDepth", "enum");
-  // v48（2026-09-14）：3 → 1，与后端 seed_variables 及 harness 的 serde 缺省值收敛。
-  // 多轮在当前引擎中是「假多轮」（第 2+ 轮复用首轮输出 ⇒ 必然假收敛）。
-  b("debate_rounds", 1, "stockAnalysis.configDescriptions.debateRounds", "number");
+  // 权威源是后端 `seed_variables::DEFAULT_DEBATE_ROUNDS`（v154 起 = 2），此处只是
+  // 「模板 variables 为空时的初始化值」，而这条路径会把值写回库里 ⇒ 必须与工厂缺省同数。
+  // ⚠ 旧注释说「多轮是假多轮、与 harness serde 缺省收敛」，两句都已失效：
+  //   ① v59（2026-09-21）起每轮展开独立 bull-rN/bear-rN 节点，各轮真跑（见建图注释）；
+  //   ② harness 的 `default_debate_rounds()` 守护的是容器轮播次数（恒 1），不是轮数域。
+  b("debate_rounds", 2, "stockAnalysis.configDescriptions.debateRounds", "number");
   // #11（2026-10-05）：12 → 8，与后端工厂缺省收敛。权威源是
   // `seed_variables.rs` 的 `max_concurrent`（2026-09-08 依 429 重试占槽实证由 3 调到 8），
   // 此处只是「模板 variables 为空时的初始化值」——而那条路径**会把这批值写回库里**
@@ -115,7 +118,7 @@ export function getDefaultVariables(): Variable[] {
   // portfolio-mgr 决策阈值（修复 D7/D8: 与 portfolio-mgr.rhai 顶部可配置参数一一对应）
   b("action_buy_threshold", 0.63, "stockAnalysis.configDescriptions.actionBuyThreshold", "number");
   b("action_increase_threshold", 0.53, "stockAnalysis.configDescriptions.actionIncreaseThreshold", "number");
-  b("action_hold_threshold", 0.48, "stockAnalysis.configDescriptions.actionHoldThreshold", "number");
+  b("action_hold_threshold", 0.5, "stockAnalysis.configDescriptions.actionHoldThreshold", "number");
   b("action_watch_threshold", 0.38, "stockAnalysis.configDescriptions.actionWatchThreshold", "number");
   b("action_reduce_threshold", 0.30, "stockAnalysis.configDescriptions.actionReduceThreshold", "number");
   b("pos_buy_min", 15.0, "stockAnalysis.configDescriptions.posBuyMin", "number");

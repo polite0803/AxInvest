@@ -5,6 +5,7 @@ pub mod agent_role;
 pub mod agent_session;
 pub mod agent_session_repo;
 pub mod artifact;
+pub mod astock_daily_snapshot;
 pub mod backup;
 pub mod capability_domain_override;
 pub mod capability_policy;
@@ -36,6 +37,8 @@ pub mod loop_checkpoint;
 pub mod mcp_server;
 pub mod memory;
 pub mod message;
+pub mod mover_recall_analysis_batches;
+pub mod mover_recall_events;
 pub mod narrative;
 // [2026-09-03] `narrative_structure` repo 暂缓接线（勿删文件）：依赖 entities::narrative_structure
 // （单数，arcs/confluences/foreshadows 三字段旧 schema）。现行链是 narrative.rs +
@@ -52,6 +55,7 @@ pub mod provider;
 pub mod provider_key;
 pub mod reading_list_items;
 pub mod reading_lists;
+pub mod reco_pool;
 pub mod retrieval_hit;
 pub mod rl_experience;
 pub mod search_provider;

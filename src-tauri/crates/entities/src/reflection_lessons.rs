@@ -48,8 +48,15 @@ pub struct Model {
     /// 应用后成功次数
     pub success_count: i32,
     /// 规则置信度 0-1
+    ///
+    /// P3：`validation_rejected` 行恒为 0（入模校验未过、只留档）；
+    /// active 行的初始值由 verdict 推断（wrong=0.7 / partial=0.5 / else=0.3）。
     pub confidence: f64,
-    /// active / deprecated
+    /// 规则状态：
+    /// - `active`：入模生效，消费侧只查此态且 `confidence > 0.5`
+    /// - `deprecated`：事后命中率统计裁定废弃（见 `run_lesson_validation`）
+    /// - `validation_rejected`：P3 入模前校验未过（长度/无行动词/空话/纯疑问），
+    ///   行保留留档，驳回原因在 `rule_pattern` 的 `{"rejectedReasons":[...]}`，不生效
     #[sea_orm(indexed)]
     pub status: String,
     pub created_at: i64,

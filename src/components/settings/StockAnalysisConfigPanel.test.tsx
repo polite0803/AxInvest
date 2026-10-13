@@ -651,3 +651,41 @@ describe("StockAnalysisConfigPanel 默认变量与后端模板 v19 同步", () =
     ).toEqual([]);
   });
 });
+
+/**
+ * 辩论轮数「面板兜底值 ↔ 后端默认常量」同源门（v154，2026-10-12）。
+ *
+ * 为什么单独锁这一条：`getDefaultVariables()` 是「模板 variables 为空时的初始化值」，
+ * 而那条路径**会把值写回库里**（本文件上方 `max_concurrent` 的注释已记过同型踩坑）。
+ * 本批之前它是 1、后端 `DEFAULT_DEBATE_ROUNDS` 是 3 ⇒ 实际跑几轮取决于走哪条路径。
+ * 本文件既有的对账门只比**变量名集合**、不比值 ⇒ 值漂回去照样绿，所以补这一条。
+ *
+ * ⚠ 三个读数都**必须取到**：正则抓空不等于「无需检查」，而是门失去了读取面 —— 按
+ *   「缺键不得静默当空集」处理，直接红。
+ */
+describe("debate_rounds 默认值同源", () => {
+  it("面板兜底值 == 后端 DEFAULT_DEBATE_ROUNDS，且落在建图夹紧区间内", () => {
+    const panelSrc = readPanelSource();
+    const seedSrc = readFileSync(SEED_VARS_PATH, "utf8");
+    const setupSrc = readRustSource();
+
+    const panel = /b\(\s*"debate_rounds"\s*,\s*(\d+)/.exec(panelSrc)?.[1];
+    const seed = /const DEFAULT_DEBATE_ROUNDS:\s*u32\s*=\s*(\d+)/.exec(seedSrc)?.[1];
+    // 建图夹紧区间：resolve_debate_rounds 里的 `n.clamp(LO, HI) as usize`（该写法在 mod.rs 唯一）
+    const clamp = /n\.clamp\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*as\s*usize/.exec(setupSrc);
+
+    expect(panel, "面板里没抓到 b(debate_rounds, <值>) 兜底值 ⇒ 门失去读取面").toBeTruthy();
+    expect(seed, "seed_variables.rs 里没抓到 DEFAULT_DEBATE_ROUNDS 常量 ⇒ 门失去读取面").toBeTruthy();
+    expect(clamp, "mod.rs 里没抓到 resolve_debate_rounds 的 clamp 区间 ⇒ 门失去读取面").toBeTruthy();
+
+    expect(Number(panel), "面板兜底值与后端默认常量漂移").toBe(Number(seed));
+
+    const lo = Number(clamp![1]);
+    const hi = Number(clamp![2]);
+    expect(
+      Number(seed) >= lo && Number(seed) <= hi,
+      `默认轮数 ${seed} 必须落在建图夹紧区间 [${lo}, ${hi}] 内 —— `
+        + "否则默认值会被 clamp 改掉，图与变量二次不一致",
+    ).toBe(true);
+  });
+});

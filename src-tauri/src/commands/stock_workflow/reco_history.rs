@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
+use crate::commands::error_code::common;
 use crate::commands::error_code::stock_workflow as wf_err;
 use axagent_agent_macro::agent_command;
 use serde::Serialize;
@@ -24,6 +25,7 @@ pub async fn list_reco_history(
     exclude_styles: Option<String>,
     limit: Option<u32>,
     offset: Option<u32>,
+    generation: Option<String>,
 ) -> Result<Vec<RecoHistoryItem>, String> {
     use sea_orm::{ConnectionTrait, Statement};
     let db = state.harness.db();
@@ -117,6 +119,24 @@ pub async fn list_reco_history(
                 values.push(s.into());
             }
         }
+    }
+
+    // 代际过滤（2026-10-12）：回放的候选自本轮起与实盘同表 ⇒ 历史列表默认**只给实盘批次**，
+    // 否则「趋势智选历史 / 荐股历史」会把回放批次当成实盘出票记录（那正是当初靠"回放跳过
+    // 写库"守卫防住的事，现在改用代际列，同时满足"可持久化"与"不混码"）。
+    // 传 `generation` = 某次回放的截止日（YYYY-MM-DD），则列该次回放的批次。
+    let generation = axagent_astock_data::as_of::parse_generation_param(generation.as_deref())
+        .map_err(|e| ErrorResponse::new(common::INVALID_INPUT).with_detail(e))?;
+    match generation.as_deref() {
+        Some(d) => {
+            if is_pg {
+                sql.push_str(&format!(" AND as_of_date = ${}", values.len() + 1));
+            } else {
+                sql.push_str(" AND as_of_date = ?");
+            }
+            values.push(d.to_string().into());
+        },
+        None => sql.push_str(" AND as_of_date IS NULL"),
     }
 
     sql.push_str(" GROUP BY generated_at, period ORDER BY generated_at DESC");

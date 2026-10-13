@@ -42,6 +42,7 @@ use tauri::State;
 
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
+use crate::commands::error_code::common;
 use crate::commands::error_code::stock_workflow as wf_err;
 use axagent_agent_macro::agent_command;
 
@@ -231,6 +232,7 @@ pub(crate) async fn run_decision_backtest_inner(
                 &pick_model.id,
                 t_plus_n,
                 &pick_model.generated_at,
+                pick_model.as_of_date.as_deref(),
             )
             .await
             {
@@ -327,9 +329,15 @@ async fn fetch_and_validate(
     pick_id: &str,
     t_plus_n: i32,
     generated_at: &str,
+    as_of_date: Option<&str>,
 ) -> Result<(PickValidation, String), String> {
-    // 从 generated_at 提取决策日期（格式 "YYYY-MM-DDTHH:MM:SS.fff" → "YYYY-MM-DD"）
-    let decision_date = generated_at.get(..10).unwrap_or(generated_at);
+    // 决策日期：回放 pick 用**它的 as-of 截止日**，实盘 pick 用入库时刻的日期部分
+    // （格式 "YYYY-MM-DDTHH:MM:SS.fff" → "YYYY-MM-DD"）。回放的入库时刻是"今天"，
+    // 拿它当决策日会去验证一个过去决策之后的行情 ⇒ 命中率完全失真。
+    let decision_date = match as_of_date {
+        Some(d) => d,
+        None => generated_at.get(..10).unwrap_or(generated_at),
+    };
 
     // 拉取窗口：取 T+N 后 10 个交易日（防止节假日窗口不足）。
     // 修复 P0: 原 fetch_limit 太小（t_plus_n + 10），当 pick 距今较远时
@@ -364,8 +372,9 @@ async fn fetch_and_validate(
     // 因为 AStockClient 内部已做 vendor failover，统一标记）
     let data_source = "astock_client".to_string();
 
-    let validation =
+    let mut validation =
         build_pick_validation(reco_pick, pick_id, t_plus_n, &closes, &highs, &lows, &data_source);
+    validation.as_of_date = as_of_date.map(|s| s.to_string());
 
     Ok((validation, data_source))
 }
@@ -425,6 +434,7 @@ async fn write_decision_validations(
             hit_outcome: Set(v.hit_outcome.clone()),
             factor_snapshot: Set(factor_snapshot_json),
             data_source: Set(v.data_source.clone()),
+            as_of_date: Set(v.as_of_date.clone()),
             created_at: Set(now.clone()),
         };
 
@@ -477,11 +487,20 @@ pub async fn list_decision_validations(
     hit_outcome: Option<String>,
     limit: Option<u32>,
     offset: Option<u32>,
+    generation: Option<String>,
 ) -> Result<Vec<DecisionValidationItem>, String> {
     use sea_orm::{PaginatorTrait, QueryOrder};
     let db = state.harness.db();
+    let generation = axagent_astock_data::as_of::parse_generation_param(generation.as_deref())
+        .map_err(|e| ErrorResponse::new(common::INVALID_INPUT).with_detail(e))?;
 
-    let mut query = decision_validations::Entity::find();
+    let mut query = decision_validations::Entity::find()
+        // 代际过滤：默认只列**实盘**验证记录（与权重闭环同一口径）；要看某次回放的
+        // 验证结果，传 `generation`=那批的截止日。两套样本不并排显示。
+        .filter(match generation.as_deref() {
+            Some(d) => decision_validations::Column::AsOfDate.eq(d),
+            None => decision_validations::Column::AsOfDate.is_null(),
+        });
     if let Some(ref code) = stock_code {
         query = query.filter(decision_validations::Column::StockCode.eq(code.as_str()));
     }
@@ -544,8 +563,17 @@ pub struct ValidationReportResponse {
     pub excluded_pre_floor_generation: usize,
     /// 因「代际未知」被排除的记录数（pick 无 `reco_version`，或 pick 行已不存在）
     pub excluded_unknown_generation: usize,
-    /// 本次读到的 `decision_validations` 总行数 = 进分母 + 两类排除（自证分母没漏）
+    /// 本次读到的 `decision_validations` **全表**行数（跨代，含本轮没统计的那些代）。
+    /// 本轮实际参与筛样的行数 = 进分母 + 两类排除；两者之差就是被代际切分挡在外面的行数。
+    /// （「本字段 = 进分母 + 两类排除」那句自证在 `generation` 入参引入后不再成立。）
     pub total_rows: usize,
+    /// 本轮报表算的是哪一代：`None` = 实盘出票，`Some(YYYY-MM-DD)` = 那一次回放的出票。
+    /// 一次只出一代的报表 —— 实盘与回放的 T+N 不是同一种命中，并成一个分母会得出
+    /// 「回放提升了命中率」这类假结论（AGENTS.md「两套计数域不得并排显示成可比」）。
+    pub generation: Option<String>,
+    /// 库里**另有**多少条回放样本没进本轮分母（`generation=None` 时才可能非零）。
+    /// 给这个数是为了让「我没算它」看得见，而不是让报表看起来像「全都算了」。
+    pub replay_sample_rows: usize,
 }
 
 /// 聚合报告 —— 基于已写入的 decision_validations 重新计算
@@ -560,8 +588,11 @@ pub struct ValidationReportResponse {
 #[tauri::command]
 pub async fn compute_validation_report(
     state: State<'_, AppState>,
+    generation: Option<String>,
 ) -> Result<ValidationReportResponse, String> {
     let db = state.harness.db();
+    let generation = axagent_astock_data::as_of::parse_generation_param(generation.as_deref())
+        .map_err(|e| ErrorResponse::new(common::INVALID_INPUT).with_detail(e))?;
     let all = decision_validations::Entity::find().all(db).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL)
             .with_detail(format!("读取 decision_validations 失败: {e}"))
@@ -591,6 +622,8 @@ pub async fn compute_validation_report(
             excluded_pre_floor_generation: 0,
             excluded_unknown_generation: 0,
             total_rows,
+            generation,
+            replay_sample_rows: 0,
         });
     }
 
@@ -627,10 +660,30 @@ pub async fn compute_validation_report(
                 hit_outcome: m.hit_outcome,
                 factor_snapshot,
                 data_source: m.data_source,
+                // 代际随样本一起读出：报表侧要能把回放样本与实盘样本分开算，
+                // 两套计数域并排比会得出「回放提升了命中率」这类假结论。
+                as_of_date: m.as_of_date,
             };
             (version, validation)
         })
         .collect();
+
+    // 代际切分（先切代际、再筛算法代际）：报表一次只算一代。反过来会让「本轮分母从哪来」
+    // 说不清 —— 两类排除的计数必须与本轮样本集同源才自证得起来。
+    let replay_sample_rows = rows.iter().filter(|(_, v)| v.as_of_date.is_some()).count();
+    let rows: Vec<(Option<i32>, PickValidation)> = rows
+        .into_iter()
+        .filter(|(_, v)| match generation.as_deref() {
+            Some(d) => v.as_of_date.as_deref() == Some(d),
+            None => v.as_of_date.is_none(),
+        })
+        .collect();
+    if generation.is_none() && replay_sample_rows > 0 {
+        tracing::info!(
+            "[validation_report] 本轮按**实盘**口径统计；库里另有 {replay_sample_rows} 条回放\
+             样本未计入分母（要那一代就传 generation=<回放截止日>）"
+        );
+    }
 
     // 筛样（判据与 run 侧共用 `screen_by_reco_generation`，避免一个名目两套分母）
     let versions: Vec<Option<i32>> = rows.iter().map(|(v, _)| *v).collect();
@@ -663,6 +716,8 @@ pub async fn compute_validation_report(
         excluded_pre_floor_generation,
         excluded_unknown_generation,
         total_rows,
+        generation,
+        replay_sample_rows,
     })
 }
 

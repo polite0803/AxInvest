@@ -331,7 +331,7 @@ fn rhai_string_package_available() {
     let first: String =
         engine.eval(r#"let p = "正文<!-- VERDICTx".split("<!-- VERDICT"); p[0]"#).unwrap();
     assert_eq!(first, "正文", "Rhai split 不可用或行为改变");
-    // `replace`：脚本当前**不使用**它（`data-quality.rhai:165` 的历史注释称
+    // `replace`：脚本当前**不使用**它（`data-quality.rhai:169` 的历史注释称
     // 「原实现 text.replace(…) 链式调用 100% 报 Function not found」，与实况不符 ——
     // 实测可执行）。这里只在**能力**层钉住，不做任何依赖。
     //
@@ -2037,17 +2037,20 @@ fn validation_penalty_no_longer_scored() {
 /// 实证：面板「缺口原因」列显示
 /// 「节点未输出 VERDICT 或 confidence 字段缺失（可能原因：LLM 超时/截断/解析失败…）」——
 /// 一句「或」把两种**运行期可判定**的情形混在一起，用户无法判断是节点没跑还是输出被截断。
-/// 现两条分支各自点名（形参 `v_present` = 该节点本轮 scope 里是否有输出）。
+/// 现按 presence 分支给**确定归因**（形参 `v_present` = 该节点本轮 scope 里是否有 verdict）。
+/// 2026-10-12 再拆第三分支（形参 `report_present` = 报告正文是否非空）：
+/// run 3220c35d 的 5 个分析师节点 completed 且有半截报告（content 非空）但无 VERDICT，
+/// 旧文案误报「scope 中没有该节点的产物」，与「节点没跑」混为一谈。
 #[test]
 fn missing_gap_reason_is_definite_about_presence() {
-    // ① 该节点本轮**无任何输出**（scope 里是 `()`）
-    let no_output = run_quality_with_verdicts(&[("mk", CLEAN_REPORT)], &[]);
+    // ① 该节点本轮**无任何输出**（report / verdict 都是 `()`）
+    let no_output = run_quality_with_verdicts(&[], &[]);
     assert_eq!(status(&no_output, "mk"), "missing", "无输出应判 missing");
     let r1 = gap_reason(&no_output, "mk");
     assert!(r1.contains("无任何输出"), "无输出须点名「无任何输出」：{r1}");
     assert!(!r1.contains("或 confidence"), "不得再回落到含糊的「或」句：{r1}");
 
-    // ② 该节点**有输出**但缺 confidence 字段（present=true，`extract_conf` 仍得 <0）
+    // ② 该节点**有 verdict 输出**但缺 confidence 字段（present=true，`extract_conf` 仍得 <0）
     let mut no_conf = Map::new();
     no_conf.insert("verdict".into(), Dynamic::from("看多".to_string()));
     let with_output = run_quality_with_verdicts(&[("mk", CLEAN_REPORT)], &[("mk", no_conf)]);
@@ -2055,6 +2058,22 @@ fn missing_gap_reason_is_definite_about_presence() {
     let r2 = gap_reason(&with_output, "mk");
     assert!(r2.contains("有输出"), "有输出须点名「有输出」：{r2}");
     assert!(!r2.contains("无任何输出"), "有输出不得被判成「无任何输出」：{r2}");
+
+    // ③ 节点**有半截报告但无 VERDICT**（run 3220c35d 实证形态：
+    //    completed、content 非空（半截 Markdown / 半截 JSON）、verdict 缺失）
+    let report_only = run_quality_with_verdicts(&[("mk", CLEAN_REPORT)], &[]);
+    assert_eq!(
+        status(&report_only, "mk"),
+        "missing",
+        "有报告无 verdict 仍计 missing（计分口径不变）"
+    );
+    let r3 = gap_reason(&report_only, "mk");
+    assert!(r3.contains("已产出分析报告"), "有报告无 verdict 须点名「已产出分析报告」：{r3}");
+    assert!(r3.contains("VERDICT"), "须点明缺失的是机读 VERDICT：{r3}");
+    assert!(
+        !r3.contains("无任何输出"),
+        "有半截报告不得被判成「无任何输出」（run 3220c35d 误报根因）：{r3}"
+    );
 }
 
 /// 2026-10-09（截图病灶）：催化剂因子的**中性取值**（分析师判定「无」）须自我说明。

@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use axagent_astock_data::AStockClient;
 
-use super::types::{Period, RecoPick};
+use super::types::{Period, RecoPick, TrimmedPick};
 use super::{recommend_stocks_multi, RecoResponse};
 
 /// 一次定时荐股扫描的完整结果。
@@ -25,6 +25,12 @@ pub struct RecommendationScan {
     pub picks: Vec<RecoPick>,
     /// 首个成功 period 的 seed pool 快照（`[[code,name],...]` JSON）
     pub seed_pool_snapshot: Option<String>,
+    /// 各档的 L3 截断留痕（该档算出但被组内 top-N 截掉的候选）。
+    ///
+    /// 调用方要一并落 `reco_scan_audit`。此前本结构不透出留痕 ⇒ 定时链与时间旅行批次
+    /// 走这条路时该表**恒空**，只有经命令层 `recommend_stocks` 的批次才有留痕，
+    /// 于是漏检归因整批落到 `Unexplained`（语义边界见 `axagent_entities::reco_scan_audit`）。
+    pub period_audit: Vec<(Period, Vec<TrimmedPick>)>,
 }
 
 /// 跑一次"定时荐股扫描"，返回符合要求的 picks（按 confidence 降序）
@@ -46,7 +52,11 @@ pub async fn run_recommendation_scan(
     horizon_prior: Option<serde_json::Value>,
 ) -> RecommendationScan {
     if periods.is_empty() || top_n == 0 {
-        return RecommendationScan { picks: Vec::new(), seed_pool_snapshot: None };
+        return RecommendationScan {
+            picks: Vec::new(),
+            seed_pool_snapshot: None,
+            period_audit: Vec::new(),
+        };
     }
 
     // 1. 一次拿所有 period（共享同一个候选池）
@@ -54,11 +64,15 @@ pub async fn run_recommendation_scan(
 
     let mut all_picks: Vec<RecoPick> = Vec::new();
     let mut seed_pool_snapshot: Option<String> = None;
+    let mut period_audit: Vec<(Period, Vec<TrimmedPick>)> = Vec::new();
     for (period, res) in results {
         match res {
             Ok(resp) => {
                 if seed_pool_snapshot.is_none() {
                     seed_pool_snapshot = resp.seed_pool_snapshot.clone();
+                }
+                if !resp.scan_audit.is_empty() {
+                    period_audit.push((period, resp.scan_audit.clone()));
                 }
                 collect_real_picks(&resp, &mut all_picks)
             },
@@ -92,7 +106,7 @@ pub async fn run_recommendation_scan(
 
     // 5. top N
     filtered.truncate(top_n);
-    RecommendationScan { picks: filtered, seed_pool_snapshot }
+    RecommendationScan { picks: filtered, seed_pool_snapshot, period_audit }
 }
 
 fn collect_real_picks(resp: &RecoResponse, out: &mut Vec<RecoPick>) {

@@ -20,6 +20,10 @@
 //!   （它可能压根没把该票纳入评分）⇒ 归因侧落 `Unexplained`，不得据此降权。
 //!
 //! 与 `reco_picks` 同一次扫描用同一个 `generated_at`（批次键），便于按批对齐。
+//!
+//! **实盘与回放都留痕**（`as_of_date` 区分代际）：as-of 核查要与 live 同一口径，
+//! 否则回放的漏检归因只能落到 `Unexplained`。读侧凡按「实盘」筛的，必须带
+//! `as_of_date IS NULL`。
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -44,6 +48,10 @@ pub struct Model {
     pub confidence: i32,
     /// 组内名次（1 = 第一个被截断的）
     pub rank: i32,
+    /// **代际标记**：`NULL` = 实盘批次；非空 = 时间旅行回放的截止日（YYYY-MM-DD）。
+    /// 与 `reco_picks.as_of_date` 同口径，同一次扫描的两侧行共用同一个值。
+    #[serde(default)]
+    pub as_of_date: Option<String>,
     pub created_at: String,
 }
 

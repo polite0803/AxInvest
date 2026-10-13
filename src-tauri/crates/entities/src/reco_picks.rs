@@ -43,6 +43,16 @@ pub struct Model {
     /// `NULL` = 本列引入前的存量行，算法归属未知 ⇒ 同代筛样必须排除它（不得当作某版）。
     #[serde(default)]
     pub reco_version: Option<i32>,
+    /// **代际标记**：`NULL` = 实盘（live）批次产出；非空 = 时间旅行回放的截止日
+    /// （YYYY-MM-DD），与 `stock_analyses.as_of_date` 同口径（禁区 12 复用既有形态）。
+    ///
+    /// 为什么必须有：自 2026-10-12 裁定起，回放的候选**同样落本表**，供 as-of 反思
+    /// 闭环取样本。它与实盘行同表 ⇒ 一切「只看实盘」的读侧（缓存回读、趋势智选历史、
+    /// 退出信号/反馈刷新、漏检窗口）必须显式带 `as_of_date IS NULL`，否则会把历史口径
+    /// 的候选当成今天真出的票 —— 这正是 2026-10-11 那轮给本表加跳过守卫的原因，
+    /// 现在改用代际列满足两边：既持久化，又不混码。
+    #[serde(default)]
+    pub as_of_date: Option<String>,
     /// 记录创建时间
     pub created_at: String,
 }

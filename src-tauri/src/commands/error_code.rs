@@ -364,6 +364,20 @@ pub mod time_travel {
     pub const QUERY_FAILED: &str = "TIME_TRAVEL_BATCH_QUERY_FAILED";
 }
 
+/// 妖股漏检 → as-of 历史补分析批次（P2，`PLAN-batch-automation-mover-recall.md` §P2）
+pub mod mover_recall_analysis {
+    /// 请求参数非法（单批上限 / unexplained 占比阈值越界等）
+    pub const INVALID_PARAMS: &str = "MOVER_RECALL_ANALYSIS_INVALID_PARAMS";
+    /// 已有一个回放批次在运行（与时间旅行批次共用全局 as-of 互斥锁）
+    pub const ALREADY_RUNNING: &str = "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING";
+    /// 当前处于 live 流水线时间窗（23:50-02:10 / 17:50-18:10），禁止启动回放批次
+    pub const LIVE_WINDOW: &str = "MOVER_RECALL_ANALYSIS_LIVE_WINDOW";
+    /// 批次执行失败（选样 / as-of 回放 / 逐只分析阶段的基础设施错误）
+    pub const EXEC_FAILED: &str = "MOVER_RECALL_ANALYSIS_EXEC_FAILED";
+    /// 批次或事件历史查询 / 状态落库失败（数据库层错误）
+    pub const QUERY_FAILED: &str = "MOVER_RECALL_ANALYSIS_QUERY_FAILED";
+}
+
 /// OPC 需求发现工作流种子数据相关错误码
 pub mod opc_setup {
     /// 内部错误

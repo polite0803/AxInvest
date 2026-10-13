@@ -369,6 +369,12 @@ async fn ensure_pending_reflection(
                 // §七十一 按版归属：重放补建的反思行归属到**这条分析自己的代际**（不是重放
                 // 时跑的图）—— 复盘的是那一代做出的决策。分析行是 NULL 时保持 NULL。
                 analysis_template_version: rec.template_version,
+                // P3：与被重放分析行同源（mover_recall 补分析的补建行进漏检专项桶）
+                source: if rec.source == "mover_recall" {
+                    axagent_lib::REFLECTION_SOURCE_MOVER_RECALL
+                } else {
+                    axagent_lib::REFLECTION_SOURCE_DUE
+                },
                 now_ms: now,
             },
             missing_horizons,
@@ -404,6 +410,9 @@ async fn ensure_pending_reflection(
         am.what_went_wrong = Set(None);
         am.missed_signals = Set(None);
         am.fix_for_future = Set(None);
+        // P3：归因层是上一轮反思的结论性盖章，重跑覆盖原分析后旧结论失效，随三问一并清空
+        // （`source` 是建点属性、不随重跑变，故意保留不动）。
+        am.miss_layer = Set(None);
         am.parameter_suggestions_json = Set(None);
         am.decision_json = Set(None);
         am.blackboard_snapshot = Set(None);

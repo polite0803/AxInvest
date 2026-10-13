@@ -2969,7 +2969,12 @@
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "Un lot « voyage temporel » est déjà en cours ; attendez sa fin.",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "La fenêtre du pipeline en direct est active (23:50–02:10 / 17:50–18:10). Réessayez plus tard.",
     "TIME_TRAVEL_BATCH_EXEC_FAILED": "Le lot a échoué ; voir les détails du lot.",
-    "TIME_TRAVEL_BATCH_QUERY_FAILED": "Échec de la consultation de l'historique des lots de voyage temporel. Veuillez réessayer plus tard."
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "Échec de la consultation de l'historique des lots de voyage temporel. Veuillez réessayer plus tard.",
+    "MOVER_RECALL_ANALYSIS_INVALID_PARAMS": "Paramètres de rattrapage invalides ; vérifiez la limite du lot et le seuil de part inexpliquée.",
+    "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "Un lot de voyage temporel ou de rattrapage est déjà en cours ; attendez sa fin.",
+    "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "Dans la fenêtre du pipeline en direct (23:50–02:10 / 17:50–18:10) ; relancez en dehors.",
+    "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "Le lot de rattrapage a échoué ; consultez les détails du lot.",
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Échec de la requête d'historique des lots de rattrapage ; réessayez plus tard."
   },
   "errorBoundary": {
     "copied": "Copié",
@@ -7507,7 +7512,8 @@
     "source": {
       "scheduledCron": "Tâches planifiées",
       "stockPipeline": "Pipeline d'analyse d'actions",
-      "timeTravelBatch": "Lot Time-Travel"
+      "timeTravelBatch": "Lot Time-Travel",
+      "moverRecallAnalysis": "Rattrapage des hausses manquées"
     },
     "state": {
       "queued": "En file",
@@ -7540,7 +7546,8 @@
       "running": "En cours",
       "queued": "En file",
       "failed": "Échoué",
-      "waiting": "En attente"
+      "waiting": "En attente",
+      "pendingEvolution": "Approbations évolution"
     },
     "attention": {
       "title": "À surveiller",
@@ -7573,6 +7580,39 @@
       "range24h": "24 dernières h",
       "range7d": "7 derniers jours",
       "rangeAll": "Tout"
+    },
+    "moverRecall": {
+      "start": "Lancer le rattrapage",
+      "modalTitle": "Lancer l'analyse de rattrapage des hausses manquées",
+      "modalHint": "Rejoue l'analyse historique à la date de début de fenêtre (as-of) ; les analyses rattrapées sont marquées synthetic et exclues du dénominateur du taux de réussite réel.",
+      "batchLimit": "Événements max. par lot (1-100)",
+      "maxShare": "Seuil de part inexpliquée",
+      "maxShareHint": "Une vérification dont la part inexpliquée atteint ce seuil est entièrement ignorée.",
+      "runId": "Limiter à une vérification (facultatif)",
+      "runIdPlaceholder": "Vide = toutes les vérifications ; ou ID de vérification",
+      "submit": "Lancer le lot",
+      "started": "Lot lancé ({{id}})",
+      "drawerTitle": "Lot de rattrapage des hausses manquées",
+      "itemsTitle": "Détail par action ({{n}})",
+      "itemsEmpty": "Aucun détail par action",
+      "colStock": "Action",
+      "colPeriod": "Palier",
+      "colWindowStart": "Début de fenêtre",
+      "colAnchor": "Date de confirmation",
+      "colCum": "Gain cumulé",
+      "colLayer": "Couche de manque",
+      "colStatus": "Statut",
+      "colError": "Erreur / analyse",
+      "statusRunning": "Analyse en cours",
+      "statusAnalyzed": "Analysé",
+      "statusFailed": "Échec",
+      "batchStatus": {
+        "running": "En cours",
+        "completed": "Terminé",
+        "partial": "Partiel",
+        "failed": "Échec",
+        "interrupted": "Interrompu"
+      }
     }
   },
   "teammatePanel": {
@@ -15667,6 +15707,38 @@
         "neeq": "NEEQ",
         "b_share": "Actions B",
         "unknown": "Inconnu"
+      },
+      "review": {
+        "toggle": "Développer le rattrapage et la réflexion",
+        "loading": "Chargement de l'analyse de rattrapage et des réflexions…",
+        "loadError": "Échec du chargement de la revue : {{detail}}",
+        "notTracked": "Cet événement provient de la vue de vérification en direct et n'a pas encore été persisté par une vérification planifiée ; il apparaîtra ici une fois le rattrapage planifié terminé.",
+        "status_pending": "Rattrapage en attente",
+        "status_excluded": "Exclu ce tour",
+        "status_running": "Rattrapage en cours",
+        "status_analyzed": "Rattrapé",
+        "status_reflected": "Rattrapé · Revu",
+        "status_failed": "Rattrapage échoué",
+        "layerHint": "Couche de manque : {{layer}}",
+        "windowFacts": "Fenêtre {{start}} → {{anchor}} ({{days}} jours de bourse), cumul +{{gain}}%, meilleur jour +{{max}}%",
+        "errorDetail": "Cause de l'échec : {{detail}}",
+        "analysisHeading": "Analyse de rattrapage as-of ({{date}})",
+        "analysisMissing": "L'événement est marqué comme terminé mais son analyse de rattrapage est introuvable.",
+        "decisionLabel": "Décision : {{action}}",
+        "reflectionHeading": "Réflexion par palier",
+        "noReflection": "Le rattrapage est terminé ; les réflexions par palier sont générées automatiquement à l'échéance de chaque fenêtre de détention. Revenez plus tard.",
+        "verdictLabel": "Verdict",
+        "verdict_correct": "Correct",
+        "verdict_partial": "Partiellement correct",
+        "verdict_wrong": "Incorrect",
+        "rawReturn": "Rendement réel",
+        "lessonSummary": "Leçon retenue",
+        "missedSignals": "Signaux manqués",
+        "whatWentWrong": "Ce qui a mal tourné",
+        "fixForFuture": "Correction du critère à l'avenir",
+        "rfPending": "Réflexion en file d'attente",
+        "rfRunning": "Génération de la réflexion",
+        "rfFailed": "Réflexion échouée : {{detail}}"
       }
     },
     "export": {
@@ -18067,7 +18139,66 @@
     "unitLakh": " lakh",
     "horizonScoringWindows": "Fenêtres d'indicateurs de cet horizon : {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · Bollinger {{boll}} · Volume {{vol}}",
     "horizonScaleTrend": "Bandes de cet horizon : rapide {{fastBars}} barres {{fast}} / lente {{slowBars}} barres {{slow}}, écart {{diffPct}} %, pente rapide {{fastSlope}}",
-    "horizonScaleMomentum": "Momentum de cet horizon : RSI({{period}}) = {{value}}"
+    "horizonScaleMomentum": "Momentum de cet horizon : RSI({{period}}) = {{value}}",
+    "evolutionApproval": {
+      "drawerTitle": "Approbation du plan d'évolution",
+      "panelPendingTitle": "{{count}} plan(s) d'évolution en attente d'approbation",
+      "pendingTitle": "Plans en attente ({{count}})",
+      "emptyPending": "Aucun plan d'évolution en attente d'approbation",
+      "selectHint": "Sélectionnez un plan dans la liste ci-dessus pour voir les détails",
+      "reviewAction": "Examiner",
+      "viewAction": "Voir",
+      "approve": "Approuver et exécuter",
+      "approveConfirm": "L'approbation rejouera immédiatement ce plan et écrira le résultat dans la configuration active. Continuer ?",
+      "approveSuccess": "Plan d'évolution approuvé et exécuté",
+      "reject": "Rejeter",
+      "rejectTitle": "Rejeter le plan d'évolution",
+      "rejectConfirmOk": "Confirmer le rejet",
+      "rejectReasonPlaceholder": "Veuillez indiquer le motif du rejet (obligatoire ; conservé pour les évolutions futures)",
+      "rejectReasonRequired": "Le motif du rejet est obligatoire",
+      "rejectSuccess": "Plan d'évolution rejeté",
+      "rollback": "Annuler",
+      "rollbackConfirm": "La version actuelle sera annulée au profit de la dernière version acceptée. Continuer ?",
+      "rollbackSuccess": "Annulation terminée",
+      "rollbackUnavailable": "Il s'agit déjà de la configuration de première génération ; aucune version historique vers laquelle revenir",
+      "readonlyHint": "Cet enregistrement est un état historique en lecture seule",
+      "actionFailed": "Échec de l'action : {{msg}}",
+      "diffTitle": "Aperçu des changements de paramètres (meilleur backtest vs défaut)",
+      "samplesTitle": "Échantillons déclencheurs",
+      "samples": {
+        "expand": "Afficher la liste des id",
+        "reflections": "Échantillons de réflexion",
+        "validations": "Échantillons de validation",
+        "moverEvents": "Événements de rééquilibrage",
+        "blockedReflections": "Échantillons de réflexion (données indisponibles)",
+        "blockedValidations": "Échantillons de validation (données indisponibles)",
+        "blockedMoverEvents": "Événements de rééquilibrage (données indisponibles)",
+        "blockedHint": "Les échantillons dont l'accessibilité des données échoue sont écartés par règle stricte : ils ne déclenchent jamais de mutation structurelle et n'alimentent que le tableau de qualité des données."
+      },
+      "param": {
+        "ewmaAlpha": "Facteur de lissage EWMA",
+        "lookbackDays": "Jours de rétrospection",
+        "sampleSaturation": "Seuil de saturation des échantillons"
+      },
+      "meta": {
+        "status": "Statut",
+        "createdAt": "Créé le",
+        "trigger": "Raison du déclenchement",
+        "summary": "Résumé",
+        "reviewer": "Réviseur",
+        "reviewedAt": "Révisé le",
+        "rejectReason": "Motif de rejet / d'annulation",
+        "rollbackRef": "Version de référence d'annulation"
+      },
+      "status": {
+        "pendingApproval": "En attente d'approbation",
+        "accepted": "Accepté",
+        "rejected": "Rejeté",
+        "success": "Réussi (historique)",
+        "failed": "Échoué (historique)",
+        "unknown": "Statut inconnu"
+      }
+    }
   },
   "pipeline": {
     "title": "Pipeline d'Actions",

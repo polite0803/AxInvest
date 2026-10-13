@@ -93,6 +93,23 @@ pub struct Model {
     /// 其分析行的 `template_version` 本身就是显式 NULL（`hooks.rs` 的 A4 注释已裁定）。
     /// 值域 = `workflow_templates.version` 整数，不得另造口径。
     pub template_version: Option<i32>,
+    /// 反思样本来源（P3 妖股漏检闭环）：
+    /// - `"due"` = 常规到期反思（live / chat / 回放补建三通道的默认值）；
+    /// - `"mover_recall"` = 妖股漏检 as-of 补分析行触发的漏检回放反思。
+    ///
+    /// 命中率/教训统计按本列分桶，避免合成回放样本混进实盘分母
+    /// （与 `stock_analyses.source` 同族口径）。
+    ///
+    /// 读侧分桶口径：`source == "mover_recall"` 一个桶，**其余一切值（含本列引入前
+    /// 存量行 bootstrap 加列后的空串 `""`）一律归 due 桶**，不依赖存量数据回填。
+    pub source: String,
+    /// 漏检权威归因层（仅 `source == "mover_recall"` 行非空）。
+    ///
+    /// 值域 = `mover_recall_events.miss_layer`：`not_in_pool`（入池判据遗漏）/
+    /// `l3_scored_out`（L3 评分截断）/ `other_period`（档位错配）/ `unexplained`
+    /// （留痕不足无法归因）。由系统在反思收尾时从事件**盖章**写入，LLM 不得自报；
+    /// 反思 prompt 用它与 `what_went_wrong` 做对照。NULL = 非漏检反思。
+    pub miss_layer: Option<String>,
     pub status: String,
     pub created_at: i64,
     pub updated_at: i64,

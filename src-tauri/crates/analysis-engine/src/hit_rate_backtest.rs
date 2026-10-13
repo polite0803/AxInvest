@@ -65,6 +65,11 @@ pub struct PickValidation {
     /// 9 因子快照（key=factor_id, value=0-1 数值），供 IC 重标定
     pub factor_snapshot: Option<HashMap<String, f64>>,
     pub data_source: String,
+    /// **代际标记**：`None` = 验证实盘出票；`Some(YYYY-MM-DD)` = 验证时间旅行回放的
+    /// 出票，值同时是该样本的**决策日**（回放 pick 的验证窗口从这天往后推，而不是
+    /// 从入库时刻 `generated_at` 推 —— 后者会用决策之后的行情验证一个过去的决策）。
+    /// 与 `reco_picks.as_of_date` / `decision_validations.as_of_date` 同值。
+    pub as_of_date: Option<String>,
 }
 
 /// 按 action / style / t_plus_n 维度的统计
@@ -441,6 +446,9 @@ pub fn build_pick_validation(
         position_pct: pick.position_pct,
         confidence: pick.confidence as i32,
         inferred_action: action,
+        // 代际由调用方（知道这条 pick 来自实盘还是哪次回放的）事后赋值，见
+        // `backtest_validation::fetch_and_validate`
+        as_of_date: None,
         t_plus_n_price: m.t_plus_n_price,
         max_price: m.max_price,
         min_price: m.min_price,
@@ -602,6 +610,7 @@ mod tests {
                 hit_outcome: None,
                 factor_snapshot: Some(factors),
                 data_source: "test".into(),
+                as_of_date: None,
             });
         }
         let ic = compute_factor_ic(&validations);
@@ -641,6 +650,7 @@ mod tests {
                 hit_outcome: None,
                 factor_snapshot: Some(factors),
                 data_source: "test".into(),
+                as_of_date: None,
             });
         }
         let ic = compute_factor_ic(&validations);
@@ -675,6 +685,7 @@ mod tests {
             hit_outcome: Some(outcome.into()),
             factor_snapshot: None,
             data_source: "test".into(),
+            as_of_date: None,
         };
         let validations = vec![
             make("hit", 3.0),

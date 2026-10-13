@@ -13,12 +13,13 @@
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
+  AuditOutlined,
   MinusOutlined,
   ReloadOutlined,
   SettingOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
-import { App, Button, Empty, Modal, Spin, Table, Tag, Tooltip } from "antd";
+import { App, Button, Empty, Modal, Space, Spin, Table, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { ReactNode } from "react";
 import React, { useCallback, useEffect, useState } from "react";
@@ -27,52 +28,21 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@/lib/invoke";
 import { agreementColor } from "@/lib/stock-analysis-utils";
 import {
+  type EvolutionHistoryEntry,
   type EvolutionRecentChangeRow,
   type EvolutionStrategyStatRow,
   type EvolutionStrategySummaryRow,
   useStockAnalysisStore,
 } from "@/stores/feature/stockAnalysisStore";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { evolutionStatusMeta, formatEvolutionTime, parseTrigger } from "./evolution-ui-utils";
+import { EvolutionApprovalDrawer } from "./EvolutionApprovalDrawer";
 
 const trendIcon: Record<string, ReactNode> = {
   up: <ArrowUpOutlined style={{ color: "#cf1322" }} />,
   down: <ArrowDownOutlined style={{ color: "#389e0d" }} />,
   stable: <MinusOutlined style={{ color: "#8c8c8c" }} />,
 };
-
-function formatTime(ms: number): string {
-  if (!ms) { return "—"; }
-  const d = new Date(ms);
-  return d.toLocaleString();
-}
-
-/** 把后端落库的 trigger JSON（tagged enum，snake_case）解析成人类可读的原因 */
-function parseTrigger(raw: string, t: (key: string, params?: Record<string, unknown>) => string): string {
-  if (!raw) { return ""; }
-  try {
-    const obj = JSON.parse(raw);
-    switch (obj.type) {
-      case "low_quality":
-        return t("stockAnalysis.evolutionDrift.trigger.low_quality", {
-          score: obj.last_score,
-          count: obj.consecutive_count,
-          threshold: obj.threshold,
-        });
-      case "poor_signal_accuracy":
-        return t("stockAnalysis.evolutionDrift.trigger.poor_signal_accuracy", { score: obj.score });
-      case "missing_risk_assessment":
-        return t("stockAnalysis.evolutionDrift.trigger.missing_risk_assessment");
-      case "high_error_rate":
-        return t("stockAnalysis.evolutionDrift.trigger.high_error_rate", { count: obj.error_count });
-      case "manual_trigger":
-        return t("stockAnalysis.evolutionDrift.trigger.manual_trigger", { reason: obj.reason ?? "" });
-      default:
-        return raw;
-    }
-  } catch {
-    return raw;
-  }
-}
 
 export function EvolutionDriftPanel() {
   const { message } = App.useApp();
@@ -90,6 +60,9 @@ export function EvolutionDriftPanel() {
   const evolutionTriggering = useStockAnalysisStore((s) => s.evolutionTriggering);
   const fetchEvolutionHistory = useStockAnalysisStore((s) => s.fetchEvolutionHistory);
   const triggerStockEvolution = useStockAnalysisStore((s) => s.triggerStockEvolution);
+  // P4：待审批进化计划
+  const pendingEvolutionPlans = useStockAnalysisStore((s) => s.pendingEvolutionPlans);
+  const fetchPendingEvolutionPlans = useStockAnalysisStore((s) => s.fetchPendingEvolutionPlans);
   const asOfDate = useTimeAnchorStore((s) => s.asOfDate);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [timelineData, setTimelineData] = useState<
@@ -109,12 +82,33 @@ export function EvolutionDriftPanel() {
     } | null
   >(null);
   const [calibrateModalOpen, setCalibrateModalOpen] = useState(false);
+  // P4：进化审批抽屉
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approvalSelected, setApprovalSelected] = useState<EvolutionHistoryEntry | null>(null);
 
   useEffect(() => {
     fetchDashboard(asOfDate);
     fetchAgreementHistory(50);
     fetchEvolutionHistory(50);
-  }, [asOfDate, fetchDashboard, fetchAgreementHistory, fetchEvolutionHistory]);
+    fetchPendingEvolutionPlans();
+  }, [
+    asOfDate,
+    fetchDashboard,
+    fetchAgreementHistory,
+    fetchEvolutionHistory,
+    fetchPendingEvolutionPlans,
+  ]);
+
+  const openApproval = useCallback((row: EvolutionHistoryEntry) => {
+    setApprovalSelected(row);
+    setApprovalOpen(true);
+  }, []);
+
+  // 审批/拒绝/回滚后：历史与 dashboard 都可能变化（accepted 后生效配置切换）
+  const handleApprovalChanged = useCallback(async () => {
+    await fetchEvolutionHistory(50);
+    await fetchDashboard(asOfDate);
+  }, [fetchEvolutionHistory, fetchDashboard, asOfDate]);
 
   const handleRecalc = async () => {
     await recalc(asOfDate);
@@ -331,7 +325,7 @@ export function EvolutionDriftPanel() {
 
         <div style={{ marginBottom: 12, fontSize: 12, color: "#8c8c8c" }}>
           {t("stockAnalysis.evolutionDrift.lastRecalcAt", {
-            time: formatTime(dashboard.lastRecalcAt),
+            time: formatEvolutionTime(dashboard.lastRecalcAt),
           })}
           {asOfDate && (
             <Tag color="purple" style={{ marginLeft: 8 }}>
@@ -352,6 +346,52 @@ export function EvolutionDriftPanel() {
             </div>
           )}
         </div>
+
+        {/* P4：待人工审批的进化计划（计划-审批两段式：聚合落 pending_approval 后在此处理） */}
+        {(pendingEvolutionPlans?.length ?? 0) > 0 && (
+          <div
+            style={{
+              marginBottom: 16,
+              padding: "10px 12px",
+              border: "1px solid #ffd591",
+              borderRadius: 6,
+              background: "#fff7e6",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <Space>
+                <AuditOutlined style={{ color: "#fa8c16" }} />
+                <strong>
+                  {t("stockAnalysis.evolutionApproval.panelPendingTitle", {
+                    count: pendingEvolutionPlans!.length,
+                  })}
+                </strong>
+              </Space>
+              <Button
+                size="small"
+                type="primary"
+                ghost
+                onClick={() => openApproval(pendingEvolutionPlans![0])}
+              >
+                {t("stockAnalysis.evolutionApproval.reviewAction")}
+              </Button>
+            </div>
+            <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+              {pendingEvolutionPlans!.slice(0, 5).map((p) => (
+                <li
+                  key={p.id}
+                  style={{ cursor: "pointer", fontSize: 12, marginBottom: 2 }}
+                  onClick={() => openApproval(p)}
+                >
+                  <Tag color="orange">{p.evolutionType}</Tag>
+                  <span style={{ color: "#8c8c8c" }}>{formatEvolutionTime(p.createdAt)}</span>
+                  {" · "}
+                  {parseTrigger(p.trigger, t)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div style={{ marginBottom: 24 }}>
           <h4 style={{ marginTop: 0 }}>
@@ -425,7 +465,9 @@ export function EvolutionDriftPanel() {
                     <Tag color={r.deltaPct > 0 ? "red" : r.deltaPct < 0 ? "green" : "default"}>
                       {(r.deltaPct > 0 ? "+" : "") + r.deltaPct.toFixed(1) + "%"}
                     </Tag>
-                    <span style={{ color: "#8c8c8c", marginLeft: 8 }}>{formatTime(r.appliedAt)}</span>
+                    <span style={{ color: "#8c8c8c", marginLeft: 8 }}>
+                      {formatEvolutionTime(r.appliedAt)}
+                    </span>
                     {r.rationale && (
                       <div style={{ color: "#595959", marginTop: 2, marginLeft: 8 }}>
                         {r.rationale}
@@ -596,24 +638,40 @@ export function EvolutionDriftPanel() {
           ? <Empty description={t("stockAnalysis.evolutionDrift.noEvolutionData")} />
           : (
             <ul style={{ paddingLeft: 16, margin: 0 }}>
-              {evolutionHistory.map((h) => (
-                <li key={h.id} style={{ marginBottom: 10, fontSize: 13 }}>
-                  <Tag
-                    color={h.status === "success" ? "green" : h.status === "failed" ? "red" : "orange"}
-                  >
-                    {h.evolutionType}
-                  </Tag>
-                  <Tag>{formatTime(h.createdAt)}</Tag>
-                  <span style={{ color: "#595959", marginLeft: 4 }}>
-                    {parseTrigger(h.trigger, t)}
-                  </span>
-                  {h.improvementSummary && (
-                    <div style={{ color: "#8c8c8c", marginTop: 2, marginLeft: 4 }}>
-                      {h.improvementSummary}
-                    </div>
-                  )}
-                </li>
-              ))}
+              {evolutionHistory.map((h) => {
+                const meta = evolutionStatusMeta(h.status);
+                const pending = h.status === "pending_approval";
+                return (
+                  <li key={h.id} style={{ marginBottom: 10, fontSize: 13 }}>
+                    <Tag color={meta.color}>{t(meta.textKey)}</Tag>
+                    <Tag>{h.evolutionType}</Tag>
+                    <Tag>{formatEvolutionTime(h.createdAt)}</Tag>
+                    <span style={{ color: "#595959", marginLeft: 4 }}>
+                      {parseTrigger(h.trigger, t)}
+                    </span>
+                    <Button
+                      size="small"
+                      type={pending ? "primary" : "link"}
+                      style={{ marginLeft: 8, padding: pending ? undefined : 0 }}
+                      onClick={() => openApproval(h)}
+                    >
+                      {pending
+                        ? t("stockAnalysis.evolutionApproval.reviewAction")
+                        : t("stockAnalysis.evolutionApproval.viewAction")}
+                    </Button>
+                    {h.rejectReason && (
+                      <div style={{ color: "#cf1322", marginTop: 2, marginLeft: 4, fontSize: 12 }}>
+                        {h.rejectReason}
+                      </div>
+                    )}
+                    {h.improvementSummary && (
+                      <div style={{ color: "#8c8c8c", marginTop: 2, marginLeft: 4 }}>
+                        {h.improvementSummary}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
       </div>
@@ -638,6 +696,15 @@ export function EvolutionDriftPanel() {
             </div>
           )}
       </div>
+
+      {/* P4：进化计划审批抽屉（双入口之一：本面板待办卡 + 历史查看） */}
+      <EvolutionApprovalDrawer
+        open={approvalOpen}
+        selected={approvalSelected}
+        onSelect={setApprovalSelected}
+        onClose={() => setApprovalOpen(false)}
+        onChanged={() => void handleApprovalChanged()}
+      />
     </React.Fragment>
   );
 }

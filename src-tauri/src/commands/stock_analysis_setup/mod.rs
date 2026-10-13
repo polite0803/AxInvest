@@ -1480,6 +1480,50 @@ pub(crate) fn resolve_debate_rounds(old_variables_json: Option<&str>) -> usize {
     DEFAULT_DEBATE_ROUNDS as usize
 }
 
+/// 「库里图实际展开的辩论轮数」与「库里 `debate_rounds` 变量要求的轮数」是否漂移。
+///
+/// 返回 `Some((图中展开的最大轮号, 变量要求的轮数))` 表示漂移；一致或无法判读返回 `None`。
+///
+/// ## 为什么需要它（本门存在的全部理由）
+///
+/// 轮数**只在建图时**生效：`resolve_debate_rounds` 从旧变量求值后展开 N 对辩手节点。
+/// 而设置面板保存走 dao `update_workflow_template`，它对 `version` 只做「现值 +1」，
+/// 种子门 `existing.version >= TEMPLATE_VERSION ⇒ return` 因而**永远先于重展图成立**
+/// —— 用户把轮数从 3 改成 2，DAG 仍按 3 对辩手展开、仍跑 7 次 LLM。
+/// 实证：`PLAN-four-horizon-workflow-alignment.md` §四 需求⑤ 已把这条列为
+/// 「可调参数五点对账纸面化」的实例（面板项存在、改了不生效）。
+///
+/// 版本号回答不了「图与变量是否一致」，所以本判据直接比**事实**：从 `nodes` JSON 数
+/// `bull-r<N>` 的最大 N，与变量值对照。不一致即放行重播种；重建后二者收敛，门自然闭合
+/// （不是每次启动都重建）。
+///
+/// ⚠ 语义代价：`stock-analysis` 是种子托管模板，本门与版本门一样会重建整张图。
+///   若有人在工作流编辑器里手工增删过辩手节点，该改动会被重播种抹掉 —— 与版本门既有语义一致。
+///
+/// ⚠ `nodes` JSON 解析失败时返回 `None`（宁可漏判也不因脏数据触发重建，重建是破坏性的）。
+pub(crate) fn debate_rounds_graph_drift(
+    nodes_json: &str,
+    variables_json: Option<&str>,
+) -> Option<(usize, usize)> {
+    let nodes: Vec<serde_json::Value> = serde_json::from_str(nodes_json).ok()?;
+    let mut in_graph = 0usize;
+    for n in &nodes {
+        let Some(id) = n.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        // 辩手节点 id 形如 `bull-r1` / `bear-r2`。只数 `bull-r` 一侧，避免同号双计；
+        // 后缀必须**纯数字**，否则 `bull-researcher`（多方研究员）会被误当第 N 轮辩手。
+        let Some(tail) = id.strip_prefix("bull-r") else {
+            continue;
+        };
+        if let Ok(round) = tail.parse::<usize>() {
+            in_graph = in_graph.max(round);
+        }
+    }
+    let wanted = resolve_debate_rounds(variables_json);
+    (in_graph != wanted).then_some((in_graph, wanted))
+}
+
 // seed_debate_subworkflow: 辩论已通过 DebateNode 容器直接嵌入主模板，旧独立模板已移除
 
 /// 种子化反思复盘工作流模板（stock-reflection）。
@@ -1723,6 +1767,11 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                     分析前务必先阅读，direction_match=false 说明方向误判需深入分析错因。\n\n\
                     历史反思教训（避免重蹈覆辙）:\n\
                     {{stock_lessons}}\n\n\
+                    ——妖股漏检回放背景——\n\
+                    {{mover_recall_context}}\n\
+                    若背景含【漏检专项三问】，missed_signals / what_went_wrong / fix_for_future\n\
+                    必须按三问逐条回答并与权威归因层对照；若为「常规到期反思」占位句则忽略，\n\
+                    按常规单档复盘即可，禁止编造漏检事件。\n\n\
                     可用工具：\n\
                     - get_stock_kline: 获取实际操作期间的K线数据，对比预测走势与实际价格运动\n\n\
                     使用工具的原则：\n\
@@ -1794,6 +1843,10 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                         "review_expected_holding_days".to_string(),
                         "review_expected_holding_days".to_string(),
                     ),
+                    // P3 妖股漏检回放：权威归因层+窗口事实+专项三问（常规到期反思为占位句）。
+                    // 同样由 run_reflection_workflow 顶层无条件注入，漏映射则
+                    // {{mover_recall_context}} VARIABLE_NOT_FOUND ⇒ 反思链 Failed。
+                    ("mover_recall_context".to_string(), "mover_recall_context".to_string()),
                 ]
                 .into_iter()
                 .collect(),
@@ -1957,6 +2010,16 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
             description: Some("原分析公式定档的主周期档，未必等于本次复盘档".into()),
             is_secret: false,
         },
+        // P3 妖股漏检回放：run_reflection_workflow 无条件注入（占位句/事实块两态）。
+        Variable {
+            name: "mover_recall_context".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(String::new()),
+            description: Some(
+                "妖股漏检回放背景（权威归因层/窗口事实/专项三问）；常规到期反思为占位句".into(),
+            ),
+            is_secret: false,
+        },
     ];
 
     // serenity-reflection 模板版本。
@@ -1976,8 +2039,15 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     //   ③ 专家档案 reflection.md 同步改写 —— prompt 有**两处**（本节点内联 system_prompt
     //      与 reflection.md），只改一处不生效。
     //
+    // v4 (2026-10)：妖股漏检回放专项反思 ——
+    //   ① reflection-agent 内联 prompt + reflection.md 双处新增 {{mover_recall_context}}
+    //      （系统权威归因层/窗口硬数字/漏检专项三问；常规到期反思为占位句）；
+    //   ② input_mapping 与变量表同步登记 mover_recall_context（运行时无条件顶层注入）；
+    //   ③ 反思收尾按事件盖章 stock_reflections.miss_layer，并把首个 completed 档回填
+    //      mover_recall_events.status='reflected'（逻辑在 run_reflection_workflow）。
+    //
     // ⚠ 升版必做：不升版 DB 里会保留 v1 模板行，本次全部改动静默失效。
-    const REFLECTION_TEMPLATE_VERSION: i32 = 3;
+    const REFLECTION_TEMPLATE_VERSION: i32 = 4;
 
     // 版本检查：已有同版本或更新的记录则跳过
     if let Some(ref existing) =
@@ -3221,6 +3291,152 @@ mod version_gate_tests {
         .expect("source 侧的分析师悬空边也应被剔除");
         assert_eq!(pruned4.len(), 1, "{pruned4:?}");
         assert!(edges4.is_empty());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // v154：辩论轮数的**建图级**运行门（三条）。
+    //
+    // 为什么光有 `seed_consistency_tests` 里的纯函数断言不够：那条只证明
+    // `debate_rounds_graph_drift` 这个判据本身算得对，答不了「真播种一遍，库里到底
+    // 展开几对辩手」。而本批的缺陷恰恰长在**建图与变量脱钩**这一格 —— 判据绿、
+    // 图照旧 是可能的。三条各锁一格：
+    //   A 首次播种：图展开数 = 变量表值 = 默认常量，且上一版的第三对节点不残留；
+    //   B 漂移压过版本门：库 version 已 ≥ `TEMPLATE_VERSION`（版本门本该 return），
+    //     但变量与图不一致 ⇒ 必须重展图。这条就是「面板调轮数不生效」那个病根的正面取证；
+    //   C 一次性：库 version 已越过迁移门 ⇒ 默认值不得把用户自选轮数打回。
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// 落库变量表里某个变量的 `value`（缺名返回 `None`）。
+    async fn variable_value(db: &DatabaseConnection, name: &str) -> Option<serde_json::Value> {
+        let model = workflow_template::Entity::find_by_id(TEMPLATE_ID)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .expect("模板应已存在");
+        let vars: Vec<serde_json::Value> = serde_json::from_str(
+            model.variables.as_deref().expect("variables 列不应为 NULL（种子必写）"),
+        )
+        .expect("variables 应是 JSON 数组");
+        vars.iter()
+            .find(|v| v.get("name").and_then(|n| n.as_str()) == Some(name))
+            .and_then(|v| v.get("value").cloned())
+    }
+
+    /// 把落库变量表里某个变量的 `value` 改掉（模拟用户在设置面板保存新值）。
+    async fn set_variable(db: &DatabaseConnection, name: &str, value: serde_json::Value) {
+        let model = workflow_template::Entity::find_by_id(TEMPLATE_ID)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .expect("模板应已存在");
+        let mut vars: Vec<serde_json::Value> = serde_json::from_str(
+            model.variables.as_deref().expect("variables 列不应为 NULL（种子必写）"),
+        )
+        .expect("variables 应是 JSON 数组");
+        let hit = vars
+            .iter_mut()
+            .find(|v| v.get("name").and_then(|n| n.as_str()) == Some(name))
+            .unwrap_or_else(|| panic!("变量表里没有 {name} ⇒ 本判据失去读取面"));
+        hit["value"] = value;
+        let mut am: workflow_template::ActiveModel = model.into();
+        am.variables = Set(Some(serde_json::to_string(&vars).expect("序列化变量表失败")));
+        am.update(db).await.expect("改变量失败");
+    }
+
+    /// 图里 `bull-r<N>` 的最大 N —— 与 `debate_rounds_graph_drift` 同口径（只认纯数字后缀，
+    /// 故 `bull-researcher` 不会被误计），但这里读的是**真落库的 nodes**。
+    fn max_bull_round(nodes: &[serde_json::Value]) -> usize {
+        nodes
+            .iter()
+            .filter_map(|n| n.get("id").and_then(|v| v.as_str()))
+            .filter_map(|id| id.strip_prefix("bull-r"))
+            .filter_map(|tail| tail.parse::<usize>().ok())
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// A：首次播种后，图展开数 / 变量表 / 默认常量三者必须同号，且上一版的第三对不残留。
+    #[tokio::test]
+    async fn default_debate_rounds_really_expands_into_seeded_graph() {
+        // `TEMPLATE_VERSION` 由本模块顶部的 use 引入，此处不得重复 import
+        use super::seed_variables::DEFAULT_DEBATE_ROUNDS;
+
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed(db).await.expect("首次播种应成功");
+
+        let nodes = nodes_of(db).await;
+        assert_eq!(version_of(db).await, Some(TEMPLATE_VERSION), "落库版本应是当前常量");
+        assert_eq!(
+            max_bull_round(&nodes),
+            DEFAULT_DEBATE_ROUNDS as usize,
+            "图展开的辩手对数与默认常量不一致 ⇒ 建图没按新默认走"
+        );
+        assert_eq!(
+            variable_value(db, "debate_rounds").await,
+            Some(serde_json::json!(DEFAULT_DEBATE_ROUNDS)),
+            "变量表与建图不同源（force 段没生效）⇒ 面板显示与实际展开会二次不一致"
+        );
+
+        let ids: Vec<&str> =
+            nodes.iter().filter_map(|n| n.get("id").and_then(|v| v.as_str())).collect();
+        assert!(
+            !ids.contains(&"bull-r3") && !ids.contains(&"bear-r3"),
+            "默认已是 2 轮，图里却仍留第三对辩手 ⇒ 改了默认而图没跟上：{ids:?}"
+        );
+    }
+
+    /// B：库 version 已经 ≥ `TEMPLATE_VERSION`（版本门会直接 return），但变量与图不一致
+    /// ⇒ 漂移门必须压过版本门重展图。**这条就是本批要修的那个病根的正面证据**：
+    /// 删掉漂移门，它必红。
+    #[tokio::test]
+    async fn round_drift_reexpands_graph_even_when_version_gate_says_skip() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed(db).await.expect("首次播种应成功");
+
+        // 模拟「用户在面板把轮数改成 4 并保存」：dao 的保存路径只改值 + 抬 version，
+        // 不动 nodes —— 正是版本门会跳过、图永远不重展的那条路径。
+        set_variable(db, "debate_rounds", serde_json::json!(4)).await;
+        force_version(db, super::seed_stock_analysis::TEMPLATE_VERSION).await;
+
+        seed(db).await.expect("二次播种应成功");
+
+        assert_eq!(
+            max_bull_round(&nodes_of(db).await),
+            4,
+            "变量要 4 轮而图没重展 ⇒ 「面板调轮数不生效」未修好（漂移门没起作用）"
+        );
+        assert_eq!(
+            variable_value(db, "debate_rounds").await,
+            Some(serde_json::json!(4)),
+            "重播种把用户自选的 4 改回了默认值 ⇒ 一次性门变成了无条件门"
+        );
+    }
+
+    /// C：库 version 已越过 `DEBATE_ROUNDS_MIGRATION_VERSION` ⇒ 迁移门必须**已经关上**，
+    /// 默认值不得把用户自选轮数打回。
+    #[tokio::test]
+    async fn migration_gate_is_one_shot_and_respects_user_rounds() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed(db).await.expect("首次播种应成功");
+
+        // 先把库存到「用户自选 5 轮、且 version 高于迁移门」的状态
+        set_variable(db, "debate_rounds", serde_json::json!(5)).await;
+        force_version(db, super::seed_stock_analysis::DEBATE_ROUNDS_MIGRATION_VERSION + 1).await;
+        seed(db).await.expect("第三次播种应成功");
+        assert_eq!(max_bull_round(&nodes_of(db).await), 5, "越过迁移门后仍应按用户自选展开");
+
+        // 再播种一次：version 已被落库回 `TEMPLATE_VERSION`，此时图/变量一致 ⇒ 跳过，
+        // 且默认值不得插手。
+        seed(db).await.expect("第四次播种应成功");
+        assert_eq!(
+            max_bull_round(&nodes_of(db).await),
+            5,
+            "无关升版把用户面板调好的轮数打回了默认值 ⇒ 门没做成一次性"
+        );
+        assert_eq!(variable_value(db, "debate_rounds").await, Some(serde_json::json!(5)));
     }
 }
 

@@ -1796,3 +1796,29 @@ export function deriveAnalystConsensus(tally: AnalystSentimentTally): Consensus 
   if (bullRatio > 0 && bearRatio > 0) { return "divided"; }
   return "neutral";
 }
+
+/**
+ * 本次分析**应有的**辩论轮数，取自 `stock-analysis` 模板变量 `debate_rounds`。
+ *
+ * 为什么读变量而不是前端自造常量：轮数是**建图参数**（后端按它展开 N 对 `bull-rN`/`bear-rN`
+ * 节点），而种子在落库前用 `force_variable_value` 把变量值与 DAG 展开数强制同源
+ * （`src-tauri/src/commands/stock_analysis_setup/seed_stock_analysis.rs` 的辩论轮数 force 段）
+ * ⇒ 变量值就是图里真跑的轮数。前端此前两处写死 3（`AnalysisProgress.tsx` 的
+ * `TOTAL_DEBATE_ROUNDS`、`DebatePanel.tsx` 的 `EXPECTED_ROUNDS`），用户把轮数设成 2 或 5 后
+ * 分母仍显示 3、缺席的轮次被报成「失败轮次」。
+ *
+ * 返回 `null` = 没读到（IPC 失败 / 变量缺失 / 值非正数）。调用方**不得**把 `null` 当 0
+ * 或当默认值使用：拿不到期望轮数时就不得断言「某轮失败」—— 那会把「我们不知道」
+ * 伪装成「它跑坏了」。
+ */
+export async function fetchExpectedDebateRounds(): Promise<number | null> {
+  try {
+    const tmpl = await invoke<Record<string, unknown>>("get_workflow_template", { id: "stock-analysis" });
+    const vars = (tmpl?.variables ?? []) as Record<string, unknown>[];
+    const found = vars.find((v) => v.name === "debate_rounds");
+    const value = found?.value;
+    return typeof value === "number" && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}

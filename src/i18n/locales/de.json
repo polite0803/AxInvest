@@ -2969,7 +2969,12 @@
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "Es läuft bereits eine Zeitreise-Stapelprüfung; bitte warten.",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "Das Live-Pipeline-Fenster ist aktiv (23:50–02:10 / 17:50–18:10). Bitte später versuchen.",
     "TIME_TRAVEL_BATCH_EXEC_FAILED": "Der Stapel ist fehlgeschlagen; Details siehe Stapelprotokoll.",
-    "TIME_TRAVEL_BATCH_QUERY_FAILED": "Abfrage des Time-Travel-Batch-Verlaufs fehlgeschlagen. Bitte später erneut versuchen."
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "Abfrage des Time-Travel-Batch-Verlaufs fehlgeschlagen. Bitte später erneut versuchen.",
+    "MOVER_RECALL_ANALYSIS_INVALID_PARAMS": "Ungültige Parameter für die Rally-Lücken-Nachanalyse; Stapelgrenze und Schwellenwert für den ungeklärten Anteil prüfen.",
+    "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "Es läuft bereits ein Zeitreise- oder Rally-Lücken-Stapel; bitte auf Abschluss warten.",
+    "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "Innerhalb des Live-Pipeline-Zeitfensters (23:50–02:10 / 17:50–18:10); bitte außerhalb starten.",
+    "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "Der Rally-Lücken-Nachanalyse-Stapel ist fehlgeschlagen; Details prüfen.",
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Abfrage des Rally-Lücken-Stapelverlaufs fehlgeschlagen; später erneut versuchen."
   },
   "errorBoundary": {
     "copied": "Kopiert",
@@ -7507,7 +7512,8 @@
     "source": {
       "scheduledCron": "Geplante Aufgaben",
       "stockPipeline": "Aktienanalyse-Pipeline",
-      "timeTravelBatch": "Zeitreise-Batch"
+      "timeTravelBatch": "Zeitreise-Batch",
+      "moverRecallAnalysis": "Rally-Lücken-Nachanalyse"
     },
     "state": {
       "queued": "In Wartestellung",
@@ -7540,7 +7546,8 @@
       "running": "Läuft",
       "queued": "In Warteschlange",
       "failed": "Fehlgeschlagen",
-      "waiting": "Wartend"
+      "waiting": "Wartend",
+      "pendingEvolution": "Evolutionsgenehmigungen"
     },
     "attention": {
       "title": "Erfordert Aufmerksamkeit",
@@ -7573,6 +7580,39 @@
       "range24h": "Letzte 24 Std.",
       "range7d": "Letzte 7 Tage",
       "rangeAll": "Alle"
+    },
+    "moverRecall": {
+      "start": "Lücken-Nachanalyse starten",
+      "modalTitle": "Rally-Lücken-Nachanalyse starten",
+      "modalHint": "Spielt die historische Analyse zum Fensterbeginn (as-of) nach; nachanalysierte Ergebnisse werden als synthetic markiert und fließen nicht in die Echt-Trefferquote ein.",
+      "batchLimit": "Max. Ereignisse pro Stapel (1-100)",
+      "maxShare": "Obergrenze ungeklärter Anteil",
+      "maxShareHint": "Ein Prüflauf, dessen ungeklärter Anteil diesen Wert erreicht, wird komplett übersprungen.",
+      "runId": "Auf Prüflauf beschränken (optional)",
+      "runIdPlaceholder": "Leer = läufeübergreifend auswählen; oder Prüflauf-ID",
+      "submit": "Stapel starten",
+      "started": "Stapel gestartet ({{id}})",
+      "drawerTitle": "Rally-Lücken-Nachanalyse-Stapel",
+      "itemsTitle": "Detail pro Aktie ({{n}})",
+      "itemsEmpty": "Keine Aktiendetails",
+      "colStock": "Aktie",
+      "colPeriod": "Stufe",
+      "colWindowStart": "Fensterbeginn",
+      "colAnchor": "Stichtag",
+      "colCum": "Kum. Plus",
+      "colLayer": "Lückenebene",
+      "colStatus": "Status",
+      "colError": "Fehler / Analyse",
+      "statusRunning": "Analyse läuft",
+      "statusAnalyzed": "Analysiert",
+      "statusFailed": "Fehlgeschlagen",
+      "batchStatus": {
+        "running": "Läuft",
+        "completed": "Abgeschlossen",
+        "partial": "Teilweise",
+        "failed": "Fehlgeschlagen",
+        "interrupted": "Unterbrochen"
+      }
     }
   },
   "teammatePanel": {
@@ -15667,6 +15707,38 @@
         "neeq": "NEEQ",
         "b_share": "B-Aktien",
         "unknown": "Unbekannt"
+      },
+      "review": {
+        "toggle": "Nachanalyse und Reflexion aufklappen",
+        "loading": "Nachanalyse und Reflexionen werden geladen…",
+        "loadError": "Fehler beim Laden des Nachanalyse-Datensatzes: {{detail}}",
+        "notTracked": "Dieses Ereignis stammt aus der Live-Prüfansicht und wurde von keinem geplanten Prüflauf persistiert; es erscheint hier, sobald der geplante Lauf es nachanalysiert hat.",
+        "status_pending": "Nachanalyse ausstehend",
+        "status_excluded": "Dieser Lauf übersprungen",
+        "status_running": "Nachanalyse läuft",
+        "status_analyzed": "Nachanalysiert",
+        "status_reflected": "Nachanalysiert · Reflektiert",
+        "status_failed": "Nachanalyse fehlgeschlagen",
+        "layerHint": "Lückenebene: {{layer}}",
+        "windowFacts": "Fenster {{start}} → {{anchor}} ({{days}} Handelstage), kum. +{{gain}}%, bester Tag +{{max}}%",
+        "errorDetail": "Fehlerursache: {{detail}}",
+        "analysisHeading": "As-of-Nachanalyse ({{date}})",
+        "analysisMissing": "Das Ereignis ist als abgeschlossen markiert, aber die Nachanalyse wurde nicht gefunden.",
+        "decisionLabel": "Entscheidung: {{action}}",
+        "reflectionHeading": "Reflexion pro Stufe",
+        "noReflection": "Die Nachanalyse ist abgeschlossen; die Reflexionen pro Stufe werden automatisch erzeugt, sobald die jeweiligen Haltefenster auslaufen. Bitte später erneut prüfen.",
+        "verdictLabel": "Urteil",
+        "verdict_correct": "Korrekt",
+        "verdict_partial": "Teilweise korrekt",
+        "verdict_wrong": "Falsch",
+        "rawReturn": "Tatsächliche Rendite",
+        "lessonSummary": "Übernommene Lektion",
+        "missedSignals": "Übersehene Signale",
+        "whatWentWrong": "Was lief schief",
+        "fixForFuture": "Korrektur des Kriteriums für die Zukunft",
+        "rfPending": "Reflexion in Warteschlange",
+        "rfRunning": "Reflexion wird erstellt",
+        "rfFailed": "Reflexion fehlgeschlagen: {{detail}}"
       }
     },
     "export": {
@@ -18067,7 +18139,66 @@
     "unitLakh": " Lakh",
     "horizonScoringWindows": "Indikatorfenster dieser Halteperiode: {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · Bollinger {{boll}} · Volumen {{vol}}",
     "horizonScaleTrend": "Bänder dieser Periode: schnell {{fastBars}} Bars {{fast}} / langsam {{slowBars}} Bars {{slow}}, Abstand {{diffPct}}%, Steigung schnell {{fastSlope}}",
-    "horizonScaleMomentum": "Impuls dieser Periode: RSI({{period}}) = {{value}}"
+    "horizonScaleMomentum": "Impuls dieser Periode: RSI({{period}}) = {{value}}",
+    "evolutionApproval": {
+      "drawerTitle": "Evolutionärer Plan – Genehmigung",
+      "panelPendingTitle": "{{count}} evolutionäre Pläne warten auf Genehmigung",
+      "pendingTitle": "Ausstehende Pläne ({{count}})",
+      "emptyPending": "Keine evolutionären Pläne zur Genehmigung",
+      "selectHint": "Wählen Sie oben einen Plan aus, um Details anzuzeigen",
+      "reviewAction": "Prüfen",
+      "viewAction": "Ansehen",
+      "approve": "Genehmigen & ausführen",
+      "approveConfirm": "Bei Genehmigung wird der Plan sofort erneut ausgeführt und das Ergebnis in die aktive Konfiguration zurückgeschrieben. Fortfahren?",
+      "approveSuccess": "Evolutionsplan genehmigt und ausgeführt",
+      "reject": "Ablehnen",
+      "rejectTitle": "Evolutionsplan ablehnen",
+      "rejectConfirmOk": "Ablehnung bestätigen",
+      "rejectReasonPlaceholder": "Bitte Ablehnungsgrund angeben (erforderlich; wird für künftige Evolutionen protokolliert)",
+      "rejectReasonRequired": "Ein Ablehnungsgrund ist erforderlich",
+      "rejectSuccess": "Evolutionsplan abgelehnt",
+      "rollback": "Zurücksetzen",
+      "rollbackConfirm": "Die aktuelle Version wird auf die zuletzt akzeptierte Version zurückgesetzt. Fortfahren?",
+      "rollbackSuccess": "Zurücksetzung abgeschlossen",
+      "rollbackUnavailable": "Dies ist die Konfiguration der ersten Generation; es gibt keine frühere Version zum Zurücksetzen",
+      "readonlyHint": "Dieser Datensatz ist ein schreibgeschützter Verlaufsstatus",
+      "actionFailed": "Aktion fehlgeschlagen: {{msg}}",
+      "diffTitle": "Vorschau der Parameteränderungen (Backtest-Beste vs. Standard)",
+      "samplesTitle": "Auslöser-Stichproben",
+      "samples": {
+        "expand": "id-Liste anzeigen",
+        "reflections": "Reflexions-Stichproben",
+        "validations": "Validierungs-Stichproben",
+        "moverEvents": "Umschichtungsereignisse",
+        "blockedReflections": "Reflexions-Stichproben (Daten nicht verfügbar)",
+        "blockedValidations": "Validierungs-Stichproben (Daten nicht verfügbar)",
+        "blockedMoverEvents": "Umschichtungsereignisse (Daten nicht verfügbar)",
+        "blockedHint": "Stichproben mit fehlender Datenerreichbarkeit werden per Hard-Rule umgeleitet: Sie lösen niemals Strukturmutationen aus und fließen nur in das Datenqualitäts-Dashboard ein."
+      },
+      "param": {
+        "ewmaAlpha": "EWMA-Glättungsfaktor",
+        "lookbackDays": "Rückblickstage",
+        "sampleSaturation": "Sättigungsschwelle"
+      },
+      "meta": {
+        "status": "Status",
+        "createdAt": "Erstellt am",
+        "trigger": "Auslösegrund",
+        "summary": "Zusammenfassung",
+        "reviewer": "Prüfer",
+        "reviewedAt": "Geprüft am",
+        "rejectReason": "Ablehnungs-/Rollback-Grund",
+        "rollbackRef": "Rollback-Basisversion"
+      },
+      "status": {
+        "pendingApproval": "Genehmigung ausstehend",
+        "accepted": "Akzeptiert",
+        "rejected": "Abgelehnt",
+        "success": "Erfolgreich (historisch)",
+        "failed": "Fehlgeschlagen (historisch)",
+        "unknown": "Unbekannter Status"
+      }
+    }
   },
   "pipeline": {
     "title": "Aktien-Pipeline",

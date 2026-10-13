@@ -15,11 +15,15 @@ use std::collections::{BTreeMap, HashMap};
 
 use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::mover_recall::{self, Evidence, MissLayer, MoverEvent};
+use sea_orm::{EntityTrait, Set};
 use serde::Serialize;
 
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::stock_workflow as wf_err;
+
+/// 妖股漏检核查定时任务的 task_type（前端任务中心白名单与本常量逐字对齐）。
+pub const MOVER_RECALL_TASK_TYPE: &str = "mover-recall";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,7 +62,7 @@ fn date_of(iso: &str) -> &str {
     iso.get(..10).unwrap_or(iso)
 }
 
-/// 主入口：跑一次核查。
+/// 主入口：跑一次核查（手动面板用，**不落库**）。
 #[agent_command(
     domain = "finance",
     safety = Safe,
@@ -70,7 +74,18 @@ pub async fn analyze_mover_recall(
     state: tauri::State<'_, AppState>,
     to: Option<String>,
 ) -> Result<MoverRecallView, String> {
-    let db = state.harness.db();
+    let mut view = analyze_mover_recall_inner(state.harness.db(), to).await?;
+    // 面板只展示 top 200（inner 保留全集供调度侧落 mover_recall_events）
+    view.misses.truncate(200);
+    Ok(view)
+}
+
+/// 核查实现：命令与 `mover-recall` cron 共用同一套逻辑
+/// （同 `run_decision_backtest_inner` 的形态——cron 拿不到 `tauri::State`）。
+pub async fn analyze_mover_recall_inner(
+    db: &sea_orm::DatabaseConnection,
+    to: Option<String>,
+) -> Result<MoverRecallView, String> {
     let served =
         axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(db).await?;
     let rules = mover_recall::tier_rules_from_vars(&served);
@@ -99,8 +114,8 @@ pub async fn analyze_mover_recall(
     let collected_days = close_dates.iter().take_while(|d| d.as_str() <= upper.as_str()).count();
 
     let by_stock = mover_recall::load_closes_by_stock(db, &from, &upper).await?;
-    let picks = mover_recall::load_picks_in_range(db, &from, &upper).await?;
-    let trim_evidence = mover_recall::load_trim_evidence(db, &from, &upper).await?;
+    let picks = mover_recall::load_picks_in_range(db, &from, &upper, None).await?;
+    let trim_evidence = mover_recall::load_trim_evidence(db, &from, &upper, None).await?;
     let (universe_size, universe_confirmed) = mover_recall::load_universe_counts(db).await?;
 
     let mut layers: BTreeMap<&'static str, (MissLayer, usize, BTreeMap<String, usize>)> =
@@ -113,14 +128,10 @@ pub async fn analyze_mover_recall(
         let evs = mover_recall::events_for_tier(&by_stock, rule, &from, &upper);
         for mut ev in evs {
             events_total += 1;
-            let anchor_idx = match close_dates.iter().position(|d| *d == ev.anchor_date) {
-                Some(i) => i,
-                None => continue,
-            };
-            if anchor_idx + 1 < rule.window_days as usize {
-                continue;
-            }
-            let window_start = close_dates[anchor_idx + 1 - rule.window_days as usize].clone();
+            // window_start 由 events_for_tier 在识别事件时一并算定（同一窗口切片的首日），
+            // 此处不得再按 close_dates 重算一份 —— 两份日期序列同源但各算一遍会制造
+            // 「pick 过滤窗口」与「事件窗口」漂移的可能（单一来源，见禁区 12）。
+            let window_start = ev.window_start.clone();
             let in_window: Vec<_> = picks
                 .iter()
                 .filter(|p| {
@@ -194,7 +205,8 @@ pub async fn analyze_mover_recall(
         .collect();
 
     misses.sort_by(|a, b| b.event.cum_gain_pct.total_cmp(&a.event.cum_gain_pct));
-    misses.truncate(200);
+    // 注意：inner 返回**全集**（P2 落 mover_recall_events 需要），200 条截断是面板表现层
+    // 关注点，由薄命令 analyze_mover_recall 在返回前做；persist 走全集。
 
     Ok(MoverRecallView {
         from,
@@ -208,4 +220,246 @@ pub async fn analyze_mover_recall(
         layers: layer_rows,
         misses,
     })
+}
+
+/// 把一轮核查结果快照落 `mover_recall_runs`，并把漏检事件**全集**落
+/// `mover_recall_events`（P2 补分析样本池），同一事务，返回 run id。
+///
+/// 仅调度器分支调用（定时到点与任务中心「立即执行」共用同一 dispatch）；
+/// 前端面板的只读核查不落库。
+///
+/// 事件初态：`pool_degraded`（数据可达性问题，方案明确不进样本）落库即 `excluded`；
+/// 其余四层（not_in_pool / l3_scored_out / other_period / unexplained）为 `pending`。
+/// 注意 `unexplained` 是**事件级 pending + 批次级过滤**：补分析选 run 时再按
+/// `rates.unexplained_share` 整轮排除高占比轮次（见 mover_recall_analysis 模块）。
+pub async fn persist_mover_recall_run(
+    db: &sea_orm::DatabaseConnection,
+    view: &MoverRecallView,
+    trigger_source: &str,
+) -> Result<String, String> {
+    use axagent_entities::mover_recall_events::{
+        ActiveModel as EventActiveModel, Entity as EventEntity,
+    };
+    use axagent_entities::mover_recall_runs::ActiveModel;
+    use sea_orm::TransactionTrait;
+
+    let id = format!("mrr-{}", uuid::Uuid::new_v4());
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let rules_json = serde_json::to_string(&view.rules).map_err(|e| e.to_string())?;
+    let rates_json = serde_json::to_string(&view.rates).map_err(|e| e.to_string())?;
+    let layers_json = serde_json::to_string(&view.layers).map_err(|e| e.to_string())?;
+    let misses_json = if view.misses.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(&view.misses).map_err(|e| e.to_string())?)
+    };
+
+    let run_row = ActiveModel {
+        id: Set(id.clone()),
+        date_from: Set(view.from.clone()),
+        date_to: Set(view.to.clone()),
+        data_since: Set(view.data_since.clone()),
+        collected_days: Set(view.collected_days as i32),
+        universe_size: Set(view.universe_size),
+        universe_confirmed: Set(view.universe_confirmed),
+        rules_json: Set(rules_json),
+        rates_json: Set(rates_json),
+        layers_json: Set(layers_json),
+        events_total: Set(view.rates.events as i32),
+        miss_count: Set(view.rates.misses as i32),
+        misses_json: Set(misses_json),
+        status: Set("success".to_string()),
+        trigger_source: Set(trigger_source.to_string()),
+        created_at_ms: Set(now_ms),
+    };
+
+    // 事件全集（view.misses 此时未截断 —— 截断只在薄命令返回面板前做）
+    let event_rows: Vec<EventActiveModel> = view
+        .misses
+        .iter()
+        .map(|m| {
+            let status = if m.layer == MissLayer::PoolDegraded {
+                "excluded"
+            } else {
+                "pending"
+            };
+            let styles_json = if m.scored_out_styles.is_empty() {
+                None
+            } else {
+                serde_json::to_string(&m.scored_out_styles).ok()
+            };
+            EventActiveModel {
+                id: Set(format!("mre-{}", uuid::Uuid::new_v4())),
+                run_id: Set(id.clone()),
+                stock_code: Set(m.event.stock_code.clone()),
+                stock_name: Set(m.event.stock_name.clone()),
+                period: Set(m.event.period.clone()),
+                anchor_date: Set(m.event.anchor_date.clone()),
+                window_start: Set(m.event.window_start.clone()),
+                window_end: Set(m.event.anchor_date.clone()),
+                window_days: Set(m.event.window_days as i32),
+                cum_gain_pct: Set(m.event.cum_gain_pct),
+                max_daily_pct: Set(m.event.max_daily_pct),
+                threshold_pct: Set(m.event.threshold_pct),
+                market_type: Set(m.event.market_type.clone()),
+                miss_layer: Set(m.layer.as_str().to_string()),
+                picked_any_period: Set(if m.picked_any_period { 1 } else { 0 }),
+                scored_out_styles_json: Set(styles_json),
+                batch_id: Set(None),
+                analysis_id: Set(None),
+                reflection_id: Set(None),
+                status: Set(status.to_string()),
+                error_detail: Set(None),
+                created_at_ms: Set(now_ms),
+                updated_at_ms: Set(now_ms),
+            }
+        })
+        .collect();
+
+    let run_id_out = id.clone();
+    db.transaction::<_, _, sea_orm::DbErr>(|txn| {
+        let run_row = run_row.clone();
+        let event_rows = event_rows.clone();
+        Box::pin(async move {
+            axagent_entities::mover_recall_runs::Entity::insert(run_row).exec(txn).await?;
+            if !event_rows.is_empty() {
+                EventEntity::insert_many(event_rows).exec(txn).await?;
+            }
+            Ok(())
+        })
+    })
+    .await
+    .map_err(|e| format!("mover_recall 核查落库失败: {e}"))?;
+    Ok(run_id_out)
+}
+
+// ── P3：漏检事件 → 补分析报告 + 逐档反思结论（面板展开行懒加载）─────────────────
+
+/// 单个漏检事件的复盘视图：事件事实 + 补分析行（若已成功）+ 逐档反思行（若已复盘）。
+///
+/// 三键（stock_code + anchor_date + period）定位，因为实时核查视图 `MissRow`
+/// 不带 eventId/analysisId；同一三键跨多轮核查时取最新一轮（created_at_ms DESC）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoverRecallEventReview {
+    pub event_id: String,
+    pub run_id: String,
+    /// pending / excluded / running / analyzed / failed / reflected
+    pub status: String,
+    /// 权威归因层码（系统机械判定）
+    pub miss_layer: String,
+    pub period: String,
+    pub stock_code: String,
+    pub stock_name: String,
+    pub window_start: String,
+    pub anchor_date: String,
+    pub window_days: i32,
+    pub cum_gain_pct: f64,
+    pub max_daily_pct: f64,
+    pub batch_id: Option<String>,
+    pub analysis_id: Option<String>,
+    /// 首个 completed 反思档的行 id（事件 reflected 时非空）
+    pub reflection_id: Option<String>,
+    pub error_detail: Option<String>,
+    /// as-of 补分析整行（stock_analyses 序列化为 camelCase）；未跑到成功为 None
+    pub analysis: Option<serde_json::Value>,
+    /// 逐档反思行投影（与 list_reflections 同一投影函数），按 horizon 升序
+    pub reflections: Vec<serde_json::Value>,
+}
+
+/// 查单个漏检事件的补分析报告与反思结论（查无此事件返回 `Ok(None)`）。
+#[agent_command(
+    domain = "finance",
+    safety = Safe,
+    call_mode = StateInput,
+    description = "查询妖股漏检事件的补分析报告与逐档反思结论"
+)]
+#[tauri::command]
+pub async fn get_mover_recall_event_review(
+    state: tauri::State<'_, AppState>,
+    stock_code: String,
+    anchor_date: String,
+    period: String,
+) -> Result<Option<MoverRecallEventReview>, String> {
+    use axagent_entities::mover_recall_events::{Column as EventColumn, Entity as EventEntity};
+    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
+
+    let db = state.harness.db();
+    let anchor = date_of(&anchor_date);
+
+    // 同三键可能被多轮核查重复落（每轮全量替换各自 run 的行）⇒ 取最新一轮。
+    let event = match EventEntity::find()
+        .filter(EventColumn::StockCode.eq(&stock_code))
+        .filter(EventColumn::AnchorDate.eq(anchor))
+        .filter(EventColumn::Period.eq(&period))
+        .order_by_desc(EventColumn::CreatedAtMs)
+        .one(db)
+        .await
+    {
+        Ok(ev) => ev,
+        Err(e) => {
+            return Err(ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("查询漏检事件失败: {e}"))
+                .to_string());
+        },
+    };
+    let Some(ev) = event else {
+        return Ok(None);
+    };
+
+    // 补分析行：failed/pending/running 时 analysis_id 可能为空或指向非 completed 行，
+    // 都照实投影，前端按 event.status + analysis.status 分态展示。
+    let analysis = if let Some(aid) = ev.analysis_id.as_deref() {
+        axagent_entities::stock_analyses::Entity::find_by_id(aid)
+            .one(db)
+            .await
+            .map_err(|e| {
+                ErrorResponse::new(wf_err::INTERNAL)
+                    .with_detail(format!("查询补分析行失败: {e}"))
+                    .to_string()
+            })?
+            .and_then(|m| serde_json::to_value(m).ok())
+    } else {
+        None
+    };
+
+    // 逐档反思：按补分析行 id 反查（一个事件多档 = 多行）。
+    let reflections = if let Some(aid) = ev.analysis_id.as_deref() {
+        axagent_entities::stock_reflections::Entity::find()
+            .filter(axagent_entities::stock_reflections::Column::OriginalAnalysisId.eq(aid))
+            .order_by_asc(axagent_entities::stock_reflections::Column::Horizon)
+            .all(db)
+            .await
+            .map_err(|e| {
+                ErrorResponse::new(wf_err::INTERNAL)
+                    .with_detail(format!("查询逐档反思失败: {e}"))
+                    .to_string()
+            })?
+            .iter()
+            .map(crate::commands::stock_analysis::reflection_review_json)
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    Ok(Some(MoverRecallEventReview {
+        event_id: ev.id,
+        run_id: ev.run_id,
+        status: ev.status,
+        miss_layer: ev.miss_layer,
+        period: ev.period,
+        stock_code: ev.stock_code,
+        stock_name: ev.stock_name,
+        window_start: ev.window_start,
+        anchor_date: ev.anchor_date,
+        window_days: ev.window_days,
+        cum_gain_pct: ev.cum_gain_pct,
+        max_daily_pct: ev.max_daily_pct,
+        batch_id: ev.batch_id,
+        analysis_id: ev.analysis_id,
+        reflection_id: ev.reflection_id,
+        error_detail: ev.error_detail,
+        analysis,
+        reflections,
+    }))
 }

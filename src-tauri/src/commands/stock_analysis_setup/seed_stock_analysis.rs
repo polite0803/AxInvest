@@ -2,8 +2,8 @@
 //! 使用 include_str! 编译期嵌入 .md 内容，打包后无需文件 I/O。
 
 use super::{
-    PROFILE_TOOLS, build_analyst_input_mapping, force_variable_value, merge_variable_values,
-    resolve_debate_rounds,
+    PROFILE_TOOLS, build_analyst_input_mapping, debate_rounds_graph_drift, force_variable_value,
+    merge_variable_values, resolve_debate_rounds,
 };
 use crate::commands::error_code::stock_setup;
 
@@ -1311,10 +1311,40 @@ type AlgoToolRow = (
 ///   ⚠ **必须升版**：trader 节点的 input_mapping / context_sources / edges 是图内容，
 ///   不升版存量库不生效。
 ///
+/// **v152 → v153（2026-10-12）**：数据质量面板「缺口原因」归因修正。
+///   实证（688378 奥来德 / run 3220c35d）：5 个分析师节点 status=completed、
+///   content 是半截 Markdown / 半截 JSON，但无 VERDICT 机读结论，
+///   `data-quality.rhai` 的 `diag_for` 把「有半截报告无 verdict」误判为
+///   「scope 中没有该节点的产物」（与「节点根本没跑」同一文案）。
+///   修法：`diag_for` 新增第 11 形参 `report_present`（报告正文非空判据
+///   `nonempty_str(xx_r)`），missing 归因拆三分支：verdict 在 / 仅报告正文在 / 两者皆无；
+///   11 个调用点（10 诊断 map + 1 逐档循环）同步。计分口径不变（仍记 missing）。
+///   ⚠ **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入本模板节点 `code` 字段，
+///   不升版存量库被版本门挡住，面板文案一字不变。
+///
+/// **v153 → v154（2026-10-12）**：辩论轮数两处结构性修正 + 出厂默认 3 → 2。
+///   ① **漂移门**（真正的修复点）：轮数是**建图参数**，而设置面板保存走 dao
+///      `update_workflow_template`，它只把 `version` 抬「现值 +1」⇒ 版本门
+///      `existing.version >= TEMPLATE_VERSION ⇒ return` 永远先于重展图成立，
+///      用户改轮数**不重展图**（`PLAN-four-horizon-workflow-alignment.md` §四 需求⑤
+///      已实证为「可调参数纸面化」）。现在 `debate_rounds_graph_drift` 直接比
+///      「图内 `bull-r<N>` 的最大 N」与变量值，不一致就无视版本门重播种。
+///      这条同时覆盖了「DB 版本被别的路径写高 ⇒ 版本门永久关门」那类失效
+///      （本文件 :116 记的 v53/54/55 三批未落库事故同型）。
+///   ② **一次性迁移门** `DEBATE_ROUNDS_MIGRATION_VERSION = 154`：`merge_variable_values`
+///      无条件保留旧值 ⇒ 只改 `DEFAULT_DEBATE_ROUNDS` 对存量库是假修复（v74 DCF / v115
+///      kline 先例）。门把**建图求值点**（`debate_max_rounds`）也一并纳入，而不只是变量表
+///      —— 因为轮数决定节点数量，只覆写变量表会让图与变量二次不一致。
+///   ③ 默认 3 → 2：依据 `AUDIT-601166-chain-break-2026-09-14.md` 的逐节点请求体实测
+///      （18.5→85.8 KB，第 3 轮 `bear-r3` 504）；详见 `DEFAULT_DEBATE_ROUNDS` 文档。
+///      同步把变量 `description` 的「1~3」改为与夹紧区间一致的「可设 1~10，默认 2」。
+///   ⚠ **必须升版**：本条三项都是**图内容**（辩手节点数、边锚点、变量表），
+///   不升版存量库一字不变。
+///
 /// `pub` 而非 `pub(crate)`：`axagent-batch-rerun` 的「版本联查完整性」要读这**同一个**数字
 /// （bin 是独立 crate，`pub(crate)` 读不到）。它不能被抄第二份 —— 本条的用处正是
 /// 对比「代码会用的图版本」与「库里已播种到的版本」，两份数字一旦各写各的就永远对不上。
-pub const TEMPLATE_VERSION: i32 = 152;
+pub const TEMPLATE_VERSION: i32 = 154;
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -1368,6 +1398,47 @@ const _: () = assert!(
 // 并进 `TEMPLATE_VERSION` 或 `DCF_MIGRATION_VERSION` 任一者的文档都是**语义错位**；
 // 而普通 `//` 注释不参与文档归属 ⇒ 不会触发 clippy `empty_line_after_doc_comments`
 // （`-D warnings` 下该 lint 直接让构建失败）。
+// ⚠ 2026-10-12 更正：本句自称「让 version_gate_tests 引用它」与现状不符 ——
+//   `grep -n "KLINE_LIMIT_MIGRATION_VERSION\|DCF_MIGRATION_VERSION" mod.rs` **零命中**，
+//   那两条门没有任何守门断言。下方新增的轮数门不重复这个错误：它的断言在
+//   `seed_consistency_tests::debate_rounds_graph_drift_*`，那里能真引用到。
+
+/// 辩论轮数**一次性**迁移门的水位线（v154 新增）。
+///
+/// 语义：`previous_version < 本值` ⇒ 建图轮数无条件取 `DEFAULT_DEBATE_ROUNDS`，
+/// 并据此覆写落库变量（变量 force 段用的就是同一个 `debate_max_rounds`）。
+/// 取值判据与前两条门一致：**「被守护常量 `DEFAULT_DEBATE_ROUNDS` 最后一次变更时
+/// 对应的 `TEMPLATE_VERSION`」**，不是「比上一版 +1」。
+///
+/// ## 为什么必须连**建图**一起门控（而不是只覆写变量表）
+///
+/// DCF / kline 两个先例覆写的都是纯参数，图结构不变。轮数不同：它决定**节点与边的数量**
+/// （N 对 `bull-rN`/`bear-rN`、下游锚点 `bear-r{N}`、裁判的 `context_sources` 清单）。
+/// 只覆写变量表会制造出「变量=2 而图仍展开 3 对」的新不一致 —— 那正是本版要修的形状。
+/// 所以本门开在 `debate_max_rounds` 的**求值点**，让建图、下游锚点、变量表三处由同一个数派生。
+///
+/// ## 为什么是一次性而不是无条件
+///
+/// 无条件执行会让每次无关升版都把用户在面板调好的轮数打回默认 —— 这是 v74 DCF 已经
+/// 实测过的反模式，理由见 `DCF_MIGRATION_VERSION` 的「为什么门必须锚在旧版本 <」段。
+///
+/// ## 现网读数（2026-10-12，`node scripts/pg-connect.mjs sql`）
+///
+/// DB `workflow_templates.version`（id=`stock-analysis`）实测 **153** ⇒ 154 严格大于它，
+/// 版本门放行重建、本门随之生效。⚠ 对「DB 已被别的路径写到 ≥154」的库本门**不执行**
+/// （它们多半是自己在面板调过轮数，尊重其选择）；其图/变量一致性由
+/// `debate_rounds_graph_drift` 那道门独立保证，不依赖本水位线。
+pub(crate) const DEBATE_ROUNDS_MIGRATION_VERSION: i32 = 154;
+
+// 同一约束的第三条实例：`TEMPLATE_VERSION ≥ DEBATE_ROUNDS_MIGRATION_VERSION`（v154 新增）。
+// 与 DCF / kline 两条**同因同果**，仍并列而不是合并成一个常量（合并会让抬其中一个门
+// 连带把另一个门抬起来，把无关参数再打回一次默认值）。
+const _: () = assert!(
+    TEMPLATE_VERSION >= DEBATE_ROUNDS_MIGRATION_VERSION,
+    "版本号与辩论轮数迁移门水位线倒挂：`TEMPLATE_VERSION` 必须 ≥ `DEBATE_ROUNDS_MIGRATION_VERSION`。\
+     落库写的是前者、门读的是后者 ⇒ 倒挂会让门永远关不上，`DEFAULT_DEBATE_ROUNDS` 的变更\
+     落不到任何存量库（改默认值＝假修复）。详见两个常量的文档注释。"
+);
 
 /// 剔除**缺的那一端确为「已迁出本图的分析师 base id」**的悬空依赖边；其余悬空边一律拒绝播种。
 ///
@@ -1782,7 +1853,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //      ⚠️ **但已实测反证「衰减能翻转 action」**：用 DB 存档 σ/w 正算复现 v37
     //      （posterior 残差 0.035pt）后扫描 —— k=0.5 → eff 0.3027→**0.3318（仍「减持」）**；
     //      即使 k=0（σ 完全中性化）→ 0.3610 **仍「减持」**；把所有 σ<0 因子全部归零，
-    //      上限也只有 eff=**0.4327（「观望」）**，距 ACTION_HOLD_THRESHOLD(0.48) 还差 0.047。
+    //      上限也只有 eff=**0.4327（「观望」）**，距当时的 ACTION_HOLD_THRESHOLD(0.48)
+    //      还差 0.047（2026-10 默认已重标定为 0.50，差 0.067，结论不变）。
     //      故本版定位是**置信度纠正**（阻止退化锚定冒充证据）+ 文案格式化，
     //      **不是 action 翻转器**；603353 的「减持」由 `prior=0.45(bear)` +
     //      `risk_bias=−0.08(高风险)` + 正向因子合计仅 0.157 共同决定。
@@ -2210,13 +2282,24 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 edges_empty
             );
         } else if existing.version >= TEMPLATE_VERSION {
-            tracing::info!(
-                "[stock_analysis_setup] 模板已是最新版本 v{}，跳过种子化 (nodes={}, edges={})",
-                existing.version,
-                existing.nodes.len(),
-                existing.edges.len()
-            );
-            return Ok(());
+            // 版本门之上叠加辩论轮数漂移门：版本门只比「代码常量 vs 库版本号」，答不了
+            // 「图与变量是否一致」，而面板保存只抬 version 不重展图 ⇒ 漂移时必须无视版本门重建。
+            if let Some((in_graph, wanted)) =
+                debate_rounds_graph_drift(&existing.nodes, existing.variables.as_deref())
+            {
+                tracing::warn!(
+                    "[stock_analysis_setup] 辩论轮数漂移：图内展开 {in_graph} 轮，变量要求 {wanted} 轮 ⇒ 无视版本门 v{} 重新种子化",
+                    existing.version
+                );
+            } else {
+                tracing::info!(
+                    "[stock_analysis_setup] 模板已是最新版本 v{}，跳过种子化 (nodes={}, edges={})",
+                    existing.version,
+                    existing.nodes.len(),
+                    existing.edges.len()
+                );
+                return Ok(());
+            }
         }
 
         tracing::info!(
@@ -3749,7 +3832,17 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // 经 expert persona + context_sources（引用前序轮次输出）产出不同内容，
     // 即「真多轮」。该值同时用于下游锚点（bear-r{debate_max_rounds}）与落库变量，
     // 由 `resolve_debate_rounds` 从 DB 旧变量/默认值求值，保证三处同源（防悬空边）。
-    let debate_max_rounds: usize = resolve_debate_rounds(old_variables.as_deref());
+    //
+    // v154：叠加 `DEBATE_ROUNDS_MIGRATION_VERSION` 一次性门。`merge_variable_values` 的语义是
+    // 「新定义 + **无条件保留旧值**」⇒ 存量库里躺着的仍是上一版默认 3，只改 `DEFAULT_DEBATE_ROUNDS`
+    // 是假修复（v74 DCF / v115 kline 同型事故）。本门在**求值点**覆写，而不是只覆写变量表 ——
+    // 轮数决定节点与边的数量，二者不同步会立刻造出新的「变量↔图」不一致。
+    let debate_max_rounds: usize =
+        if previous_version.is_none_or(|v| v < DEBATE_ROUNDS_MIGRATION_VERSION) {
+            super::seed_variables::DEFAULT_DEBATE_ROUNDS as usize
+        } else {
+            resolve_debate_rounds(old_variables.as_deref())
+        };
 
     // ═══════════════════════════════════════════════════════════════════════
     // 【装饰节点 / Decorative Container】debate-bull-bear

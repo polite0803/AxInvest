@@ -119,6 +119,8 @@ const BUILTIN_TASK_TYPES: &[&str] = &[
     "validate-decisions",
     crate::commands::opc_demand_subscription::SCAN_JOB_TASK_TYPE,
     crate::commands::backtest_validation::DECISION_BACKTEST_TASK_TYPE,
+    crate::commands::mover_recall::MOVER_RECALL_TASK_TYPE,
+    crate::commands::evolution_proposal::EVOLUTION_PROPOSAL_TASK_TYPE,
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

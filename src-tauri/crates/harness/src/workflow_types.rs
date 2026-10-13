@@ -1299,12 +1299,20 @@ pub struct DebateNodeConfig {
     pub sub_graph: Option<SubGraph>,
 }
 
-/// `DebateNodeConfig::max_rounds` 的 serde 缺省值。
+/// `DebateNodeConfig::max_rounds` 的 serde 缺省值 = **容器轮播次数**，不是「辩论轮数」。
 ///
-/// v48（2026-09-14）由 2 改为 1，与 `seed_variables.rs` 的 `debate_rounds` 默认值、
-/// 前端 `getDefaultVariables()` 的兜底值收敛为**同一个数**。此前三处分别是 3 / 2 / 3
-/// —— 典型「同名散成多套值域」：模板省字段时按 2 跑、面板未加载时显示 3、
-/// 种子写 3，行为取决于走哪条路径。
+/// ⚠ 2026-10-12 更正：本注释此前写「与 `seed_variables.rs` 的 `debate_rounds` 默认值、
+/// 前端 `getDefaultVariables()` 的兜底值收敛为**同一个数**」—— 那句话把**两个计数域**
+/// 当成了同一个，会诱导下一个改默认轮数的人把这里也一起改（本次就差点改错）。实际是：
+///
+/// - 本函数守护 `DebateNode.config.max_rounds` —— DebateNode **容器**把 `debater_steps`
+///   整批轮播几遍。股票分析建图时它**刻意 = 1**（`seed_stock_analysis.rs` 的
+///   `max_rounds: 1` 及其上方注释：轮次由 distinct 节点 + 边承担，设成 N 会把整批辩手
+///   重放 N 遍、被引擎短路）。
+/// - 模板变量 `debate_rounds` —— 展开几**对** `bull-rN`/`bear-rN`，默认值见
+///   `seed_variables::DEFAULT_DEBATE_ROUNDS`（v154 起 = 2）。
+///
+/// 二者数值相等纯属巧合，语义上不可比，因此**不随轮数默认值联动修改**。
 fn default_debate_rounds() -> u32 {
     1
 }

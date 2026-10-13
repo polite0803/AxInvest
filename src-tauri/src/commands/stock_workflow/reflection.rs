@@ -120,6 +120,57 @@ fn build_tunable_params_catalog() -> String {
     format!("共 {} 项，按决策相关性排序（决策链上游优先）：\n{}", lines.len(), lines.join("\n"))
 }
 
+/// P3：构造注入反思模板的妖股漏检专项上下文（`{{mover_recall_context}}`）。
+///
+/// `None`（常规到期反思）⇒ 占位句：reflection.md 用自然语言声明忽略专项三问。
+/// `Some(事件)` ⇒ 事实块：系统机械判定的权威归因层 + 窗口硬数字 + 固定三问要求。
+///
+/// 纯函数（事件字段都是标量）便于单测锁住措辞要点；三问口径与 plan P3 第 1 条逐字对齐：
+/// 启动前可见信号 / 卡在哪一层（与权威层对照）/ 未来判据如何修（可执行）。
+fn mover_recall_context_text(
+    event: Option<&axagent_entities::mover_recall_events::Model>,
+) -> String {
+    let Some(ev) = event else {
+        return "（本次为常规到期反思，无妖股漏检事件背景：忽略漏检专项三问，按常规单档复盘即可。）"
+            .to_string();
+    };
+
+    // 层码 → 给 LLM 看的中文语义（前端展示翻译另走 i18n，两处不同用途、不共享文案）。
+    // pool_degraded 理论上不会走到（P2 落库即 excluded、不进补分析），保留兜底防沉默。
+    let layer_semantic = match ev.miss_layer.as_str() {
+        "not_in_pool" => "窗口起步时该股**未进入候选池**（入池判据/扫描覆盖遗漏）",
+        "l3_scored_out" => "已入池但在 **L3 评分阶段被截断**（评分/阈值判据没让它进入推荐）",
+        "other_period" => "窗口内有过其他档位的推荐（**档位错配**：推荐档与实际暴涨档不一致）",
+        "unexplained" => "现有留痕不足以机械归因（你需要在结论中说明还缺哪类留痕才能判定）",
+        "pool_degraded" => "核查时候选池数据可达性降级（数据质量问题，谨慎归因为算法判据）",
+        other => other,
+    };
+
+    format!(
+        "【妖股漏检回放背景】\n\
+         本次复盘的不是一笔实盘推荐，而是一笔「窗口内涨幅达标、但系统当时漏掉」的历史**回放补分析**。\n\
+         - 权威归因层（系统机械判定，不是你的自评）：{layer} —— {semantic}\n\
+         - 达标窗口：{start} → {end}（{days} 个交易日），窗口累计涨幅 +{cum:.1}%，窗口内最大单日涨幅 +{daily:.1}%\n\
+         - 本事件档位：{period}\n\n\
+         【漏检专项三问 —— 除常规复盘内容外必须逐条回答】\n\
+         ① missed_signals：只允许列窗口起点 {start} 当时系统**已经可见**的具体信号，逐条注明出处\
+         （哪个分析师报告 / 哪类数据节点）；禁止写窗口右端才出现的事后信息，禁止泛泛罗列。\n\
+         ② what_went_wrong：必须正面回答「卡在哪一层」——入池判据、L3 评分、还是档位错配，\
+         并与上面的权威归因层（{layer}）对照：证据一致就解释该层判据为何漏掉它，\
+         证据不一致要明确指出矛盾并给依据，既不得附和也不得无视权威层。\n\
+         ③ fix_for_future：给出**可执行的判据修正**（调哪个入池条件 / 评分阈值 / 档位映射，\
+         调整方向与触发条件），禁止「注意风险」「谨慎操作」「综合判断」这类不可执行的空话。",
+        layer = ev.miss_layer,
+        semantic = layer_semantic,
+        start = ev.window_start,
+        end = ev.anchor_date,
+        days = ev.window_days,
+        cum = ev.cum_gain_pct,
+        daily = ev.max_daily_pct,
+        period = ev.period,
+    )
+}
+
 /// #10 P7：算本条逐档反思行的妖股标签（判据只在 `mover_recall::mover_label_for` 一处）。
 ///
 /// 两条输入都取**既有权威**，不在这里另立口径：
@@ -283,6 +334,10 @@ pub async fn run_reflection_workflow(
             // 两者都不得被读侧当成「第 0 代」。业务反思的代际由建 pending 行时盖
             // （`build_pending_reflection_rows_for`），UPDATE 路径不改写它。
             template_version: Set(None),
+            // P3：手动反思 INSERT 兼容路径恒为常规到期反思；漏检回放反思只可能经
+            // pending 行 UPDATE 路径产生（建点在 `build_pending_reflection_rows_for`）。
+            source: Set("due".to_string()),
+            miss_layer: Set(None),
             status: Set("running".to_string()),
             created_at: Set(now_ms),
             updated_at: Set(now_ms),
@@ -351,6 +406,37 @@ pub async fn run_reflection_workflow(
         let h = a.decision_expected_holding_days?;
         Some((t, h))
     });
+
+    // ── P3 妖股漏检回放：取权威归因事件 ──
+    // 仅被复盘分析行是 mover_recall 补分析时查（anchor_event_id 在 P2 补分析落行时盖章）。
+    // 查不到只 warn 不阻断：反思仍按常规流程跑，只是漏检专项上下文退化为占位句。
+    let mover_event: Option<axagent_entities::mover_recall_events::Model> = match (
+        original_analysis.as_ref(),
+        original_analysis.as_ref().and_then(|a| a.anchor_event_id.as_deref()),
+    ) {
+        (Some(a), Some(eid)) if a.source == REFLECTION_SOURCE_MOVER_RECALL => {
+            match axagent_entities::mover_recall_events::Entity::find_by_id(eid.to_string())
+                .one(db)
+                .await
+            {
+                Ok(ev) => {
+                    if ev.is_none() {
+                        tracing::warn!(
+                            "[reflection] 分析 {original_analysis_id} 标注 anchor_event_id={eid} \
+                             但 mover_recall_events 查无此行 ⇒ 漏检专项上下文降级为占位句"
+                        );
+                    }
+                    ev
+                },
+                Err(e) => {
+                    tracing::warn!("[reflection] 查询漏检事件 {eid} 失败（不阻断反思）: {e}");
+                    None
+                },
+            }
+        },
+        _ => None,
+    };
+    let mover_recall_context = mover_recall_context_text(mover_event.as_ref());
 
     // 派生主周期快照：用于 comparator 顶层变量注入 + strategy_performance 单条写入
     let primary_horizon = review_horizon.unwrap_or_else(|| {
@@ -557,6 +643,20 @@ pub async fn run_reflection_workflow(
         var_type: "number".into(),
         value: serde_json::json!(review_days),
         description: Some("本次复盘档的期望持有天数（交易日）".into()),
+        is_secret: false,
+    });
+
+    // ── P3 妖股漏检回放专项上下文（无条件注入）──
+    // reflection.md 的「漏检回放专项复盘」节引用 {{mover_recall_context}}，缺注入会
+    // VARIABLE_NOT_FOUND 使 reflection-agent 节点 Failed ⇒ 常规到期反思也必须注入，
+    // 此时值为占位句，模板用自然语言声明「忽略专项三问」。
+    variables.push(axagent_harness::workflow_types::Variable {
+        name: "mover_recall_context".into(),
+        var_type: "string".into(),
+        value: serde_json::Value::String(mover_recall_context),
+        description: Some(
+            "妖股漏检回放背景（权威归因层/窗口事实/专项三问）；常规到期反思为占位句".into(),
+        ),
         is_secret: false,
     });
 
@@ -804,6 +904,12 @@ pub async fn run_reflection_workflow(
                 .col_expr(stock_reflections::Column::HoldingDays, Expr::value(holding_days))
                 // #10 P7：四态标签；NULL=尚未走到收尾（pending/running/failed 或本列引入前的存量行）
                 .col_expr(stock_reflections::Column::MoverLabel, Expr::value(mover_label))
+                // P3：权威归因层盖章。仅 mover_recall 反思（mover_event=Some）写层码，
+                // 这是**系统机械判定**不是 LLM 自报；常规到期反思恒 NULL。
+                .col_expr(
+                    stock_reflections::Column::MissLayer,
+                    Expr::value(mover_event.as_ref().map(|e| e.miss_layer.clone())),
+                )
                 .filter(stock_reflections::Column::Id.eq(&analysis_id))
                 .exec(db)
                 .await;
@@ -1082,6 +1188,39 @@ pub async fn run_reflection_workflow(
                 }
             }
 
+            // ── P3 妖股漏检事件闭环盖章 ──
+            // 一个事件对应多档反思行（四档各一行），只让**首个 completed 的档**盖章：
+            // UPDATE 带 `status != 'reflected'` 守卫形成行级竞争，rows_affected=0 即
+            // 「已被更早完成的档盖章」，这是正常幂等不是冲突。reflection_id 记盖章档的行 id。
+            if status_text == "completed" {
+                if let Some(ev) = mover_event.as_ref() {
+                    use axagent_entities::mover_recall_events as mre;
+                    match mre::Entity::update_many()
+                        .col_expr(mre::Column::Status, Expr::value("reflected"))
+                        .col_expr(mre::Column::ReflectionId, Expr::value(Some(analysis_id.clone())))
+                        .col_expr(mre::Column::UpdatedAtMs, Expr::value(now_ms))
+                        .filter(mre::Column::Id.eq(ev.id.clone()))
+                        .filter(mre::Column::Status.ne("reflected"))
+                        .exec(db)
+                        .await
+                    {
+                        Ok(r) if r.rows_affected > 0 => tracing::info!(
+                            "[reflection] 漏检事件 {} 已由本档（{}）反思完成，盖章 reflected",
+                            ev.id,
+                            primary_horizon
+                        ),
+                        Ok(_) => tracing::info!(
+                            "[reflection] 漏检事件 {} 已由更早 completed 的档盖章，本行不重复回填",
+                            ev.id
+                        ),
+                        Err(e) => tracing::warn!(
+                            "[reflection] 漏检事件 {} 盖章 reflected 失败（反思结论已落库，不影响）: {e}",
+                            ev.id
+                        ),
+                    }
+                }
+            }
+
             // ── [方向2] 接入 ExperiencePipeline，把反思转为 Experience 喂给 RLOptimizer ──
             // 设计要点:
             // - 用 verdict 映射 quality_score:correct=9, partial=5, wrong=2, 其他=4
@@ -1170,6 +1309,21 @@ pub async fn run_batch_reflection(
 
     let max_count = max_count.unwrap_or(20) as usize;
     let db = state.harness.db();
+    // 自愈：把「原始分析已不存在」的孤儿 pending 行落成终局，必须在扫 pending 之前
+    //（与下方 reclaim_stale_running 同一处置时点）。它们若留在 pending 就会被每轮重复捞起。
+    let orphans_retired =
+        match axagent_dao::repo::stock_lesson_queries::retire_orphan_pending_reflections(
+            db,
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .await
+        {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::warn!("[D1] 孤儿反思行自愈失败（本轮仍会照常处理其它行，下轮重试）: {e}");
+                0
+            },
+        };
 
     // 1. 扫所有 pending row,按 created_at ASC(最老的先处理,避免积压)
     let pendings: Vec<stock_reflections::Model> = stock_reflections::Entity::find()
@@ -1190,6 +1344,7 @@ pub async fn run_batch_reflection(
     let mut resolved = 0u32;
     let mut failed = 0u32;
     let mut skipped_young = 0u32; // 持仓期未到
+    let mut orphans = 0u32; // 原始分析已不存在 ⇒ 本轮落成终局，退出队列
     let mut errors: Vec<String> = Vec::new();
     let today_ms = chrono::Utc::now().timestamp_millis();
 
@@ -1199,12 +1354,18 @@ pub async fn run_batch_reflection(
             match stock_analyses::Entity::find_by_id(&p.original_analysis_id).one(db).await {
                 Ok(Some(a)) => a,
                 Ok(None) => {
+                    // 原始分析已不存在 ⇒ 这是**孤儿行**，不是「太新未到期」。旧形态只
+                    // `skipped_young += 1` 后 continue ⇒ 状态仍留 pending，每天 18:00 重新
+                    // 捞到、重新空转，队列永不自愈（现网实证：6 条 7 月的行连续数月
+                    // processed=6 / skippedYoung=6，而它们的到期日早已过去两个月）。
                     tracing::warn!(
-                        "[D1] pending reflection {} 关联 analysis_id={} 不存在,skip",
+                        "[D1] pending reflection {} 关联 analysis_id={} 不存在 ⇒ 置孤儿终局",
                         p.id,
                         p.original_analysis_id
                     );
-                    skipped_young += 1;
+                    // 不在此写库：孤儿终局化由本轮开头的 dao 自愈统一做（两个入口都已接），
+                    // 这里只如实计数，下一轮开头会把它们处置掉。
+                    orphans += 1;
                     continue;
                 },
                 Err(e) => {
@@ -1380,11 +1541,13 @@ pub async fn run_batch_reflection(
     tracing::info!("[D2 fifo_cleanup] 分批删除 {} 条超龄 completed row", cleaned_up);
 
     tracing::info!(
-        "[D1 batch_reflection] 完成: total={} resolved={} failed={} skipped_young={} cleaned={}",
+        "[D1 batch_reflection] 完成: total={} resolved={} failed={} skipped_young={} \
+         orphans={} cleaned={}",
         pendings.len(),
         resolved,
         failed,
         skipped_young,
+        orphans,
         cleaned_up
     );
 
@@ -1394,6 +1557,9 @@ pub async fn run_batch_reflection(
         "resolved": resolved,
         "failed": failed,
         "skippedYoung": skipped_young,
+        "orphans": orphans,
+        // 本轮开头由 dao 自愈落成终局的孤儿行数（与上面的"本轮撞到但没写库"分两件报）
+        "orphansRetired": orphans_retired,
         "cleanedUp": cleaned_up,
         "errors": errors,
     }))
@@ -1424,11 +1590,17 @@ async fn extract_lesson_to_rule(
     use sea_orm::QueryFilter;
     use sea_orm::Set;
 
-    // 短文本过短或无实际建议性内容则跳过
+    // P3 入模前校验：长度（10..=200，按字符非字节）/ 行动词 / 空洞短语 / 纯疑问。
+    // 与旧实现的区别：① 上界 250 → 200，与 Rhai 硬裁决及 prompt 的 ≤200 对齐；
+    // ② len()（UTF-8 字节，中文×3）→ chars().count()；
+    // ③ 不再静默跳过——不合格也建行**留档**（status=validation_rejected、confidence=0、
+    //   驳回原因写进 rule_pattern），消费侧只查 active+confidence>0.5 ⇒ 天然不生效，
+    //   面板上仍能看到「这条为什么没入模」。
     let trimmed = lesson_summary.trim();
-    if trimmed.len() < 10 || trimmed.len() > 250 {
-        return Ok(());
-    }
+    let admission =
+        axagent_analysis_engine::reflection_lesson_validator::validate_lesson_for_admission(
+            trimmed,
+        );
 
     // [P2-#9 修复] 去重：检查相同 lesson_summary 是否已存在
     // 同一只股票多次相似反思会产生大量重复规则，此处按 stock_code + lesson_summary 去重。
@@ -1467,16 +1639,33 @@ async fn extract_lesson_to_rule(
     let id = uuid::Uuid::new_v4().to_string();
     let now_ms = chrono::Utc::now().timestamp_millis();
     // 从 verdict 推断初始置信度
-    let confidence = match verdict {
+    let verdict_confidence = match verdict {
         Some("wrong") => 0.7, // wrong 的教训更有价值,给更高初始置信度
         Some("partial") => 0.5,
         _ => 0.3, // correct 或 None 的教训价值较低
     };
 
+    // P3：校验通过 ⇒ active + verdict 置信度 + rule_pattern=NULL；
+    // 校验失败 ⇒ validation_rejected + confidence=0 + 驳回原因 JSON 留档（不生效）。
+    let (status, confidence, rule_pattern) = match &admission {
+        Ok(()) => ("active".to_string(), verdict_confidence, None),
+        Err(reasons) => {
+            tracing::warn!(
+                "[F1] lesson 入模校验未过（只留档不生效）stock={stock_code} horizon={horizon}: {reasons:?}"
+            );
+            (
+                "validation_rejected".to_string(),
+                0.0,
+                Some(serde_json::json!({ "rejectedReasons": reasons }).to_string()),
+            )
+        },
+    };
+
     reflection_lessons::ActiveModel {
         id: Set(id),
         lesson_summary: Set(trimmed.to_string()),
-        rule_pattern: Set(None), // 后续由 F1 迭代扩展: LLM 分析 lesson_summary 自动提取
+        // active 行为 None（沿用原语义，后续 F1 扩展）；rejected 行写驳回原因 JSON
+        rule_pattern: Set(rule_pattern),
         source_reflection_id: Set(Some(source_reflection_id.to_string())),
         stock_code: Set(Some(stock_code.to_string())),
         // 周期章：由本次复盘档位盖章（值域 = Period::as_str），读侧据此同档过滤
@@ -1487,7 +1676,7 @@ async fn extract_lesson_to_rule(
         times_applied: Set(0),
         success_count: Set(0),
         confidence: Set(confidence),
-        status: Set("active".to_string()),
+        status: Set(status),
         created_at: Set(now_ms),
         updated_at: Set(now_ms),
     }
@@ -1831,6 +2020,12 @@ pub const DEFAULT_REFLECTION_MIN_CONFIDENCE: u8 = 70;
 /// 反思深度默认值（同上，此前手抄三处）。
 pub const DEFAULT_REFLECTION_DEPTH: &str = "light";
 
+// ── P3 妖股漏检闭环：反思样本来源取值 ──
+/// 常规到期反思（live / chat / 回放补建三通道默认值）。
+pub const REFLECTION_SOURCE_DUE: &str = "due";
+/// 妖股漏检 as-of 补分析触发的漏检回放反思。
+pub const REFLECTION_SOURCE_MOVER_RECALL: &str = "mover_recall";
+
 /// 建 pending 行所需的**最小**分析侧事实。
 pub struct PendingReflectionSeed<'a> {
     pub analysis_id: &'a str,
@@ -1857,6 +2052,12 @@ pub struct PendingReflectionSeed<'a> {
     /// ② 建行时 `template_version` 还没写（占位行阶段，见 `core.rs` 的写入顺序）；
     /// ③ 本列引入前的存量分析行。
     pub analysis_template_version: Option<i32>,
+    /// 反思样本来源（P3）：`"due"`（常规到期反思）/ `"mover_recall"`（妖股漏检回放）。
+    ///
+    /// 与被复盘分析行的 `stock_analyses.source` 同源透传：`core.rs` 单股通道直接传
+    /// `run_single_stock_analysis` 的 source 参数；chat / 回放补建两通道固定 `"due"`。
+    /// 建点即盖章，此后 UPDATE 不改写。
+    pub source: &'a str,
     pub now_ms: i64,
 }
 
@@ -2011,8 +2212,12 @@ pub fn build_pending_reflection_rows_for(
                 decision_json: Set(None),
                 blackboard_snapshot: Set(None),
                 // §七十一 按版归属：三个建点（单股 / 对话 / 回放补建）共用的唯一盖章处。
-                // 逐档各行**同一代际** —— 它们复盘的是同一笔决策。
+                // §七十一 按版归属：逐档各行**同一代际** —— 它们复盘的是同一笔决策。
                 template_version: Set(seed.analysis_template_version),
+                // P3：来源建点即盖章（与被复盘分析行同源）；权威归因层在反思收尾时
+                // 从 mover_recall_events 回查盖章，建点时拿不到，先留 NULL。
+                source: Set(seed.source.to_string()),
+                miss_layer: Set(None),
                 status: Set("pending".to_string()),
                 created_at: Set(seed.now_ms),
                 updated_at: Set(seed.now_ms),
@@ -2242,6 +2447,22 @@ pub async fn run_batch_reflection_inner(
 
     let max_count = max_count.unwrap_or(20) as usize;
     let today_ms = chrono::Utc::now().timestamp_millis();
+    // 自愈孤儿 pending 行（同 `run_batch_reflection`，两份实现都要有，否则 cron 与手动
+    // 入口行为不一致）；必须在扫 pending 之前。
+    let orphans_retired =
+        match axagent_dao::repo::stock_lesson_queries::retire_orphan_pending_reflections(
+            db, today_ms,
+        )
+        .await
+        {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::warn!(
+                    "[D1 batch_reflection] 孤儿反思行自愈失败（下轮重试，不静默当成没有）: {e}"
+                );
+                0
+            },
+        };
 
     // 0. 自愈：把卡死的 running 记录退回 pending（详见 reclaim_stale_running 文档）。
     //    必须在扫 pending 之前执行，否则被卡死的 row 本轮仍不会被处理。
@@ -2310,6 +2531,7 @@ pub async fn run_batch_reflection_inner(
     let mut resolved = 0u32;
     let mut failed = 0u32;
     let mut skipped_young = 0u32;
+    let mut orphans = 0u32;
     let mut skipped_by_filter = 0u32;
     let mut errors: Vec<String> = Vec::new();
 
@@ -2318,7 +2540,17 @@ pub async fn run_batch_reflection_inner(
             match stock_analyses::Entity::find_by_id(&p.original_analysis_id).one(db).await {
                 Ok(Some(a)) => a,
                 Ok(None) => {
-                    skipped_young += 1;
+                    // 同 `run_batch_reflection`：孤儿行必须落成终局并单独计数，
+                    // 不得继续冒充「太新未到期」被每轮重复捞起。
+                    tracing::warn!(
+                        "[D1 batch_reflection] pending reflection {} 关联 analysis_id={} \
+                         不存在 ⇒ 置孤儿终局",
+                        p.id,
+                        p.original_analysis_id
+                    );
+                    // 不在此写库：孤儿终局化由本轮开头的 dao 自愈统一做（两个入口都已接），
+                    // 这里只如实计数，下一轮开头会把它们处置掉。
+                    orphans += 1;
                     continue;
                 },
                 Err(e) => {
@@ -2466,11 +2698,12 @@ pub async fn run_batch_reflection_inner(
 
     tracing::info!(
         "[batch_reflection_inner] 完成: total={} resolved={} failed={} skipped_young={} \
-         skipped_by_filter={} reclaimed={} cleaned={}",
+         orphans={} skipped_by_filter={} reclaimed={} cleaned={}",
         pendings.len(),
         resolved,
         failed,
         skipped_young,
+        orphans,
         skipped_by_filter,
         reclaimed,
         cleaned_up
@@ -2482,6 +2715,9 @@ pub async fn run_batch_reflection_inner(
         "resolved": resolved,
         "failed": failed,
         "skippedYoung": skipped_young,
+        "orphans": orphans,
+        // 本轮开头由 dao 自愈落成终局的孤儿行数
+        "orphansRetired": orphans_retired,
         "skippedByFilter": skipped_by_filter,
         "reclaimed": reclaimed,
         "cleanedUp": cleaned_up,
@@ -3569,6 +3805,10 @@ mod market_snapshot_tests {
             outcome: None,
             llm_decision_json: None,
             parent_analysis_id: None,
+            // P2 溯源三列：本夹具是普通 live 分析（非补分析）
+            source: "live".to_string(),
+            synthetic: 0,
+            anchor_event_id: None,
             trade_intent_status: "pending".to_string(),
             trade_intent_source: None,
             trade_intent_source_ref_id: None,
@@ -3830,6 +4070,8 @@ mod deterministic_was_correct_tests {
             actual_outcome: Set("上涨".to_string()),
             lesson_summary: Set(Some(format!("反思教训 {id}，长度足够可注入"))),
             template_version: Set(g),
+            source: Set(REFLECTION_SOURCE_DUE.to_string()),
+            miss_layer: Set(None),
             status: Set("completed".to_string()),
             created_at: Set(now),
             updated_at: Set(now),
@@ -3890,6 +4132,7 @@ mod pending_rows_per_horizon_tests {
             min_confidence_threshold: DEFAULT_REFLECTION_MIN_CONFIDENCE,
             reflection_depth: DEFAULT_REFLECTION_DEPTH,
             analysis_template_version: None,
+            source: REFLECTION_SOURCE_DUE,
             now_ms: 1_754_200_000_000,
         }
     }
@@ -4003,6 +4246,80 @@ mod pending_rows_per_horizon_tests {
         s.analysis_template_version = None;
         for r in &build_pending_reflection_rows(&s) {
             assert_eq!(generation_of(r), None, "代际未知必须如实落 NULL");
+        }
+    }
+}
+
+// ── P3 妖股漏检回放：专项上下文构造 ──
+#[cfg(test)]
+mod mover_recall_context_tests {
+    use super::*;
+    use axagent_entities::mover_recall_events::Model as MreModel;
+
+    /// 只盖测试关心的标量字段，其余给类型默认值（上下文函数只读这 7 个字段）。
+    fn mk_event(miss_layer: &str) -> MreModel {
+        MreModel {
+            id: "mre-1".into(),
+            run_id: "run-1".into(),
+            stock_code: "600519".into(),
+            stock_name: "贵州茅台".into(),
+            period: "short".into(),
+            anchor_date: "2026-08-29".into(),
+            window_start: "2026-08-22".into(),
+            window_end: "2026-08-29".into(),
+            window_days: 5,
+            cum_gain_pct: 23.5,
+            max_daily_pct: 9.9,
+            threshold_pct: 20.0,
+            market_type: "main".into(),
+            miss_layer: miss_layer.into(),
+            picked_any_period: 0,
+            scored_out_styles_json: None,
+            batch_id: None,
+            analysis_id: Some("a-1".into()),
+            reflection_id: None,
+            status: "analyzed".into(),
+            error_detail: None,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+        }
+    }
+
+    #[test]
+    fn none_event_yields_placeholder_that_says_skip() {
+        let text = mover_recall_context_text(None);
+        assert!(text.contains("常规到期反思"), "占位句须自报常规反思: {text}");
+        assert!(text.contains("忽略漏检专项三问"), "占位句须指示忽略三问: {text}");
+    }
+
+    #[test]
+    fn event_block_carries_facts_layer_and_three_questions() {
+        let text = mover_recall_context_text(Some(&mk_event("l3_scored_out")));
+        // 窗口硬数字
+        assert!(text.contains("2026-08-22"), "窗口起点: {text}");
+        assert!(text.contains("2026-08-29"), "窗口右端: {text}");
+        assert!(text.contains("5 个交易日"), "窗口天数: {text}");
+        assert!(text.contains("+23.5%"), "累计涨幅: {text}");
+        assert!(text.contains("+9.9%"), "最大单日: {text}");
+        assert!(text.contains("short"), "档位: {text}");
+        // 权威层码 + 中文语义
+        assert!(text.contains("l3_scored_out"), "层码必须原样出现: {text}");
+        assert!(text.contains("L3 评分阶段被截断"), "层码中文语义: {text}");
+        // 固定三问锚点
+        assert!(text.contains("missed_signals"), "一问字段名: {text}");
+        assert!(text.contains("what_went_wrong"), "二问字段名: {text}");
+        assert!(text.contains("fix_for_future"), "三问字段名: {text}");
+        assert!(text.contains("已经可见"), "一问须限定窗口起点可见: {text}");
+        assert!(text.contains("可执行的判据修正"), "三问须要求可执行: {text}");
+    }
+
+    #[test]
+    fn every_known_layer_has_chinese_semantic() {
+        for layer in ["not_in_pool", "l3_scored_out", "other_period", "unexplained"] {
+            let text = mover_recall_context_text(Some(&mk_event(layer)));
+            assert!(text.contains(&format!("{layer} ——")), "{layer} 层码行缺失: {text}");
+            // 不得对已知层码退化为裸码（other 分支只会对未知码触发）
+            assert!(!text.contains(&format!("：{layer}\n")), "层码缺中文语义: {text}");
         }
     }
 }

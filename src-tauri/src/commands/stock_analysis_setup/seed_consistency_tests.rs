@@ -282,7 +282,11 @@ fn assert_all_resolvable(seed_rs: &str) {
 /// 没有归属就是把「旧算法的预测」和「新算法的预测」配进同一格。
 #[test]
 fn every_reco_picks_insert_stamps_algorithm_version() {
-    let files = ["src/commands/stock_analysis.rs", "src/commands/stock_workflow/serenity.rs"];
+    // 登记清单（2026-10-13）：`stock_analysis.rs` 的建行点已下沉到
+    // `crates/dao/src/repo/reco_pool.rs::insert_picks`（分层门禁止命令层构造 ActiveModel），
+    // ⇒ 本清单从「两个命令层文件」换成「智选命令层 + 共用 dao」。计数仍应是 2：
+    // 一处实盘/回放共用落库口、一处趋势智选逐档落库。
+    let files = ["crates/dao/src/repo/reco_pool.rs", "src/commands/stock_workflow/serenity.rs"];
     let mut checked = 0usize;
     for rel in files {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
@@ -1288,11 +1292,87 @@ fn resolve_debate_rounds_clamps_and_defaults() {
     );
 }
 
+/// 判据本体：`seed_stock_analysis.rs` 里 `debate_max_rounds` 的求值是否仍由变量驱动。
+///
+/// 抽成函数而不是内联在测试里，是为了能拿**合成坏样本**自证它会红 —— 内联判据只能对当前
+/// 源码给一个读数，说不清那个「绿」是「合规」还是「判据根本检不出违规」。
+///
+/// 三条实质要求：
+///   ① 右端**不得**直接跟数字字面量（v48 的病根就是 `= 1;` ⇒ 辩论永远只跑固定轮数）；
+///   ② 从该行起 8 行内必须出现 `resolve_debate_rounds(` —— 允许被一次性迁移门包裹
+///      （v154 起形如 `= if previous_version < 门 { 默认 } else { resolve_debate_rounds(…) }`），
+///      但变量求值必须仍在路径里，否则「面板调轮数不生效」会原样复发；
+///   ③ 找不到那一行 ⇒ **直接红**（判据失去读取面不等于「无需检查」）。
+fn debate_rounds_assignment_is_variable_driven(src: &str) -> Result<(), String> {
+    // 前缀**不带尾随空格**：长条件会被 rustfmt 折成「本行以 `=` 结尾 + 下一行才写值」，
+    // 带空格的前缀当场匹配不上 ⇒ 判据静默失去读取面（假绿的典型来源）。
+    const PREFIX: &str = "let debate_max_rounds: usize =";
+    let idx = src.lines().position(|l| l.trim_start().starts_with(PREFIX)).ok_or_else(|| {
+        "找不到 `let debate_max_rounds: usize = …` 求值行 ⇒ 判据失去读取面".to_string()
+    })?;
+    // 右端可能在本行，也可能被折到下一行（本版落盘就是折行形态），两者都要读。
+    let mut rest = src.lines().skip(idx);
+    let head = rest.next().unwrap_or("");
+    let mut rhs = head.trim_start().strip_prefix(PREFIX).unwrap_or("").trim().to_string();
+    if rhs.is_empty() {
+        rhs = rest.next().unwrap_or("").trim().to_string();
+    }
+    if rhs.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        return Err(format!("展开轮数被写成字面量（`{rhs}…`）⇒ 与面板变量 `debate_rounds` 脱钩"));
+    }
+    let window: Vec<&str> = src.lines().skip(idx).take(8).collect();
+    if !window.join("\n").contains("resolve_debate_rounds(") {
+        return Err(
+            "求值行起 8 行内没有出现 `resolve_debate_rounds(` ⇒ 轮数不再由变量驱动".to_string()
+        );
+    }
+    Ok(())
+}
+
+/// 自证上面那道判据**有牙齿**：五种形态各给一个确定读数。
+///
+/// 少了这条，`debate_expansion_is_parameterized_to_max_rounds` 的第 ① 项在 v154 改写后
+/// 就成了「只在新形态上跑过、没证明它还能检出旧病根」的弱门。
+#[test]
+fn debate_rounds_variable_driven_probe_has_teeth() {
+    // ① v48 病根形态（值写在同一行）：必须红
+    let literal = "    let debate_max_rounds: usize = 1;\n";
+    let err = debate_rounds_assignment_is_variable_driven(literal)
+        .expect_err("写成字面量 `= 1;` 必须被判据抓到（v48 的真实病根）");
+    assert!(err.contains("字面量"), "报错要点名病因，实际：{err}");
+
+    // ② 同一枚硬币的另一面：值被 rustfmt 折到**下一行**的字面量也必须红。
+    //    只测 ① 的话，「本行取不到右端就按空串处理」会带着折行字面量蒙混过关（假绿）。
+    let literal_wrapped = "    let debate_max_rounds: usize =\n        1;\n";
+    let err = debate_rounds_assignment_is_variable_driven(literal_wrapped)
+        .expect_err("折行形态的字面量同样必须被抓到");
+    assert!(err.contains("字面量"), "报错要点名病因，实际：{err}");
+
+    // ③ 纯变量派生（v59 形态）：必须绿
+    let plain =
+        "    let debate_max_rounds: usize = resolve_debate_rounds(old_variables.as_deref());\n";
+    assert!(debate_rounds_assignment_is_variable_driven(plain).is_ok(), "v59 形态不该被误伤");
+
+    // ④ 一次性迁移门包裹**且被 rustfmt 折行**（= 本版落盘的真实形态）：必须绿
+    let gated = "    let debate_max_rounds: usize =\n        if previous_version.is_none_or(|v| v < DEBATE_ROUNDS_MIGRATION_VERSION) {\n            super::seed_variables::DEFAULT_DEBATE_ROUNDS as usize\n        } else {\n            resolve_debate_rounds(old_variables.as_deref())\n        };\n";
+    assert!(
+        debate_rounds_assignment_is_variable_driven(gated).is_ok(),
+        "合法的折行门包裹形态不该被误伤"
+    );
+
+    // ⑤ 求值行整个消失：必须红，**不得**静默通过
+    let gone = "    let something_else: usize = 2;\n";
+    let err = debate_rounds_assignment_is_variable_driven(gone)
+        .expect_err("判据失去读取面时必须红，不能当作「无需检查」");
+    assert!(err.contains("读取面"), "报错要点名病因，实际：{err}");
+}
+
 /// 源码级不变式：seed 展开逻辑必须与 `resolve_debate_rounds` 同源。
 ///
 /// 逐条约束（与 `scan_round_literal_edge_endpoints` 同款「先证明扫描器看过了」风格）：
-///   ① 展开轮数 `debate_max_rounds` 必须由 `resolve_debate_rounds(...)` 派生，
-///      不得为字面量（否则辩论永远只跑固定轮数 / 与面板变量脱钩）；
+///   ① 展开轮数 `debate_max_rounds` 的求值路径里必须仍有 `resolve_debate_rounds(...)`，
+///      不得为字面量（否则辩论永远只跑固定轮数 / 与面板变量脱钩）。v154 起允许被
+///      `DEBATE_ROUNDS_MIGRATION_VERSION` 一次性门包裹，见上面 helper 的 ②；
 ///   ② `debater_steps` 必须按 `(0..debate_max_rounds).flat_map(...)` 生成 2N 个
 ///      独立辩手节点（写死数组 ⇒ 轮数一变即与展开的 bull/bear 对不上）；
 ///   ③ 容器的 `max_rounds` 必须保持固定 `1` —— 轮次由独立节点边承担；
@@ -1308,11 +1388,13 @@ fn debate_expansion_is_parameterized_to_max_rounds() {
     let src = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("读取 seed_stock_analysis.rs 失败: {e}"));
 
-    assert!(
-        src.lines().any(|l| l.contains("let debate_max_rounds: usize = resolve_debate_rounds(")),
-        "展开轮数 `debate_max_rounds` 必须由 `resolve_debate_rounds(...)` 从变量求值，\n\
-         不得写死字面量（否则辩论永远只跑固定轮数 / 与面板变量脱钩）。"
-    );
+    // ① 实质判据（v154 改写）：旧写法要求**整行逐字**等于
+    //    `let debate_max_rounds: usize = resolve_debate_rounds(` —— 那等于把「唯一合法形态」
+    //    写死，任何合法演进都会被误伤（本版给求值点加了一次性迁移门，就该行失配而红）。
+    //    它真正要防的只有「退化成字面量」这一件事，所以改判实质，判据本体见下面的 helper，
+    //    那里带四条合成样本自测（含「写成 `= 1;` 必须红」）。
+    debate_rounds_assignment_is_variable_driven(&src)
+        .unwrap_or_else(|why| panic!("展开轮数判据失效：{why}"));
 
     assert!(
         src.lines().any(|l| l.contains("debater_steps: (0..debate_max_rounds)")),
@@ -3824,4 +3906,78 @@ fn seed_defaults_land_on_unchanged_rust_defaults() {
     assert_eq!(pe, PeBands::default(), "val_pe_low / val_pe_high 的种子默认必须落回 15/50");
     assert_eq!(pe.low, 15.0);
     assert_eq!(pe.high, 50.0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 辩论轮数「图 ↔ 变量」漂移门（2026-10-12）。
+//
+// 版本门 `existing.version >= TEMPLATE_VERSION ⇒ return` 答不了「面板改了 debate_rounds
+// 之后图重展了没有」—— 实测答案是没重展（`PLAN-four-horizon-workflow-alignment.md` §四
+// 需求⑤）。本组测试锁的是新增的 `debate_rounds_graph_drift`：它直接比图内 `bull-r<N>`
+// 的最大 N 与变量值，所以必须在「漂移」时报红、在「一致」时闭嘴。
+// 两个方向都要锁：只锁正断言会让「恒报漂移」也绿（每次启动重建整图，抹掉编辑器手改）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 造 N 轮辩手节点的 `nodes` JSON（只给 id，判据只看 id）。
+fn debate_nodes_json(rounds: usize) -> String {
+    let ids: Vec<String> =
+        (1..=rounds).flat_map(|r| [format!("bull-r{r}"), format!("bear-r{r}")]).collect();
+    format!("[{}]", ids.iter().map(|i| format!(r#"{{"id":"{i}"}}"#)).collect::<Vec<_>>().join(","))
+}
+
+fn vars_json(rounds: u64) -> String {
+    format!(r#"[{{"name":"debate_rounds","value":{rounds}}}]"#)
+}
+
+#[test]
+fn debate_rounds_graph_drift_reports_mismatch_and_stays_quiet_on_match() {
+    use super::debate_rounds_graph_drift;
+    use super::seed_variables::DEFAULT_DEBATE_ROUNDS;
+
+    // ① 漂移：图按 3 轮展开、变量已改成 2 ⇒ 必须报，且报出两个数（供日志归因）
+    assert_eq!(
+        debate_rounds_graph_drift(&debate_nodes_json(3), Some(&vars_json(2))),
+        Some((3, 2)),
+        "面板把轮数改成 2 而图仍是 3 轮 ⇒ 漂移门必须放行重播种"
+    );
+
+    // ② 一致：图 2 轮 + 变量 2 ⇒ 不得报（否则每次启动都重建整图）
+    assert_eq!(
+        debate_rounds_graph_drift(&debate_nodes_json(2), Some(&vars_json(2))),
+        None,
+        "图与变量一致时漂移门必须闭嘴"
+    );
+
+    // ③ 负控：只有 `bull-researcher` / `bear-researcher`（分析师，非辩手）时
+    //    不得被 `bull-r` 前缀误数成第 1 轮 —— 这条若破，图会被判成「1 轮」而静默漏判。
+    let analysts_only = r#"[{"id":"bull-researcher"},{"id":"bear-researcher"}]"#;
+    assert_eq!(
+        debate_rounds_graph_drift(analysts_only, Some(&vars_json(2))),
+        Some((0, 2)),
+        "bull-researcher 不是辩手节点，图中轮数应记 0"
+    );
+
+    // ④ 变量缺席 ⇒ 回退 DEFAULT_DEBATE_ROUNDS，与图一致时不报
+    assert_eq!(
+        debate_rounds_graph_drift(
+            &debate_nodes_json(DEFAULT_DEBATE_ROUNDS as usize),
+            Some(r#"[{"name":"other","value":1}]"#)
+        ),
+        None,
+        "变量表缺 debate_rounds 时按默认值判，图恰好是默认轮数 ⇒ 不得报漂移"
+    );
+
+    // ⑤ 边界：脏 nodes 不得触发重建（重建会抹掉编辑器手工改动，宁可漏判）
+    assert_eq!(
+        debate_rounds_graph_drift("{ not json", Some(&vars_json(2))),
+        None,
+        "nodes 解析失败必须返回 None，不能因脏数据重建整图"
+    );
+
+    // ⑥ 夹紧值同源于 resolve_debate_rounds：变量写 39 ⇒ 期望 10，而不是 39
+    assert_eq!(
+        debate_rounds_graph_drift(&debate_nodes_json(3), Some(&vars_json(39))),
+        Some((3, 10)),
+        "漂移门的期望轮数必须走 resolve_debate_rounds 的夹紧口径"
+    );
 }

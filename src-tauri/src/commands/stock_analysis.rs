@@ -34,7 +34,7 @@ use axagent_astock_data::fundamentals_report::{FundamentalsAnalyzer, Fundamental
 use axagent_astock_data::{FinancialReport, StockQuote};
 use axagent_entities::{
     decision_validations, financial_snapshots, portfolio_holdings, price_alerts, reco_picks,
-    reco_scan_audit, stock_analyses, trades, watchlist_items,
+    stock_analyses, trades, watchlist_items,
 };
 use axagent_harness::market_data::KLine;
 use chrono::Datelike;
@@ -2994,6 +2994,9 @@ async fn backtest_reco_strategies_inner(
     // 若其晚于最近一次智能荐股，会污染回测的候选池解析与正负样本划分。
     let latest = reco_picks::Entity::find()
         .filter(reco_picks::Column::Style.ne("serenity"))
+        // 代际过滤：「最近一次荐股」指实盘最近一批，回放行不得参与（同文件
+        // `get_cached_recommendation` 同口径）
+        .filter(reco_picks::Column::AsOfDate.is_null())
         .order_by_desc(reco_picks::Column::GeneratedAt)
         .one(state.harness.db())
         .await
@@ -3014,6 +3017,7 @@ async fn backtest_reco_strategies_inner(
     // 2. 读取该次运行的所有推荐记录
     let all_picks = reco_picks::Entity::find()
         .filter(reco_picks::Column::GeneratedAt.eq(&run_ts))
+        .filter(reco_picks::Column::AsOfDate.is_null())
         .all(state.harness.db())
         .await
         .map_err(|e| {
@@ -3275,6 +3279,9 @@ pub async fn get_reco_signal_history(
     // 只取 recommend_stocks 的策略推荐（seed_pool_json 为 [[code,name]] 快照格式）。
     let latest = reco_picks::Entity::find()
         .filter(reco_picks::Column::Style.ne("serenity"))
+        // 代际过滤：「最近一次荐股」指实盘最近一批，回放行不得参与（同文件
+        // `get_cached_recommendation` 同口径）
+        .filter(reco_picks::Column::AsOfDate.is_null())
         .order_by_desc(reco_picks::Column::GeneratedAt)
         .one(state.harness.db())
         .await
@@ -3295,6 +3302,7 @@ pub async fn get_reco_signal_history(
     // 2. 读取该次运行的所有推荐记录
     let all_picks = reco_picks::Entity::find()
         .filter(reco_picks::Column::GeneratedAt.eq(&run_ts))
+        .filter(reco_picks::Column::AsOfDate.is_null())
         .all(state.harness.db())
         .await
         .map_err(|e| {
@@ -4508,109 +4516,6 @@ pub async fn run_daily_snapshot_sweep(
     Ok(format!("快照采集完成: 全市场 {} 项, 个股 {} 条", market_count, stock_count))
 }
 
-/// 把一次荐股扫描的 picks 持久化到 `reco_picks`。返回成功写入行数。
-///
-/// **为什么必须是 pub 共享函数**：此前落库代码只写在 Tauri 命令 `recommend_stocks`
-/// 里（即「只有前端点刷新才落库」），而定时任务走 `run_recommendation_scan`
-/// 拿到的 pick 从不落库 ⇒ 定时荐股虽有通知，却**永远不写候选池**，
-/// 下游「候选池→逐只分析→反思」整条链因此断在入口（见
-/// `AUDIT-scheduled-tasks-2026-09-13.md` 诉求①）。
-///
-/// 现在命令层（`recommend_stocks`）与定时层（cron executor 的
-/// `stock-recommendation` / `pool-scan` 分支）共用本函数，保证两条入口写的是
-/// 同一张表、同一套字段。
-///
-/// - `seed_pool_json`：本次扫描实际使用的候选池快照（回测负向样本的来源）
-/// - `strategy_weights_json`：策略权重快照（回溯某次荐股时的权重配置）
-/// - `generated_at`：本次扫描的批次标识（同批次所有行共用一个值，供
-///   `get_cached_recommendation` 按 `generated_at` 取回整批）
-pub async fn persist_reco_picks(
-    db: &DatabaseConnection,
-    picks: &[RecoPick],
-    seed_pool_json: Option<String>,
-    strategy_weights_json: Option<String>,
-    generated_at: &str,
-) -> usize {
-    let mut written = 0usize;
-    for pick in picks {
-        // 序列化完整 pick 到 pick_data —— get_cached_recommendation 会读这一列
-        // 还原 cache，与实时拉取结果 schema 完全等价。
-        let pick_data = serde_json::to_string(pick).ok();
-        let am = reco_picks::ActiveModel {
-            id: Set(uuid::Uuid::new_v4().to_string()),
-            generated_at: Set(generated_at.to_string()),
-            period: Set(pick.period.as_str().to_string()),
-            stock_code: Set(pick.stock_code.clone()),
-            stock_name: Set(pick.stock_name.clone()),
-            style: Set(pick.style.as_str().to_string()),
-            confidence: Set(pick.confidence as i32),
-            synthetic: Set(if pick.synthetic { 1 } else { 0 }),
-            seed_pool_json: Set(seed_pool_json.clone()),
-            strategy_weights_json: Set(strategy_weights_json.clone()),
-            pick_data: Set(pick_data),
-            // P2：算法归属必须随样本落库，否则闭环 IC 会把跨代样本混成一格（见常量文档）
-            reco_version: Set(Some(axagent_analysis_engine::recommender::RECO_ALGORITHM_VERSION)),
-            created_at: Set(generated_at.to_string()),
-        };
-        // 插入失败不静默：此前 `let _ = insert(...)` 失败无感知，
-        // 前端表现为"无缓存"，定时链路表现为"候选池为空"。
-        match am.insert(db).await {
-            Ok(_) => written += 1,
-            Err(e) => {
-                tracing::warn!(
-                    "[persist_reco_picks] 写入 reco_picks 失败 ({} {} {}): {}",
-                    pick.period.as_str(),
-                    pick.stock_code,
-                    pick.style.as_str(),
-                    e
-                );
-            },
-        }
-    }
-    written
-}
-
-/// 落 L3 截断留痕（`reco_scan_audit`，`PLAN-mover-recall-attribution.md` Phase 4 前置）。
-///
-/// 语义边界见实体文档：**有行** = 该风格算出了该票、只是组内 top-N 排不上；
-/// **无行** ≠ 该风格把它选出去了。写失败不静默（与 `persist_reco_picks` 同口径），
-/// 少留痕只会让漏检归因落到 `Unexplained`，但日志里必须看得见。
-pub async fn persist_reco_scan_audit(
-    db: &sea_orm::DatabaseConnection,
-    trimmed: &[recommender::TrimmedPick],
-    period: axagent_analysis_engine::recommender::Period,
-    generated_at: &str,
-) -> usize {
-    use sea_orm::ActiveModelTrait;
-    let mut written = 0usize;
-    for t in trimmed {
-        let am = reco_scan_audit::ActiveModel {
-            id: Set(uuid::Uuid::new_v4().to_string()),
-            generated_at: Set(generated_at.to_string()),
-            period: Set(period.as_str().to_string()),
-            stock_code: Set(t.stock_code.clone()),
-            stock_name: Set(t.stock_name.clone()),
-            style: Set(t.style.as_str().to_string()),
-            confidence: Set(t.confidence),
-            rank: Set(t.rank),
-            created_at: Set(generated_at.to_string()),
-        };
-        match am.insert(db).await {
-            Ok(_) => written += 1,
-            Err(e) => {
-                tracing::warn!(
-                    "[persist_reco_scan_audit] 写入失败 ({} {} {}): {}",
-                    period.as_str(),
-                    t.stock_code,
-                    t.style.as_str(),
-                    e
-                );
-            },
-        }
-    }
-    written
-}
-
 /// 拉取智能荐股结果（按周期）
 ///
 /// 前端传 period 序列化为 [Period] 枚举（"short" | "mid" | "long"）
@@ -4673,7 +4578,9 @@ fn reco_strategy_weights_snapshot(served_vars: &[(String, serde_json::Value)]) -
     })
 }
 
-/// 把一次扫描响应的 picks 落库（live 模式）。返回落库行数。
+/// 把一次扫描响应的 picks 落库（实盘与回放都落，代际由 `response.as_of_date` 承载）。
+///
+/// 返回落库行数。
 ///
 /// `generated_at` 由调用方给出，保证同一批（多档）各档可各自成一行历史。
 async fn persist_reco_response_picks(
@@ -4688,12 +4595,16 @@ async fn persist_reco_response_picks(
     // 且两次构建间数据变化会导致快照与真实扫描池不一致（preseed 模式更严重）。
     let seed_pool_json = response.seed_pool_snapshot.clone().unwrap_or_else(|| "[]".to_string());
     let flat: Vec<RecoPick> = response.picks.values().flat_map(|v| v.iter().cloned()).collect();
-    let written = persist_reco_picks(
+    // 代际标记直接取自响应本身（由 recommender 内部按 as_of_ctx 回填）⇒ 实盘为 None、
+    // 回放为该截止日，本函数不再按「是不是 live」决定要不要落库。
+    let as_of_date = response.as_of_date.as_deref();
+    let written = crate::commands::_shared_reco_pool::persist_reco_picks(
         state.harness.db(),
         &flat,
         Some(seed_pool_json),
         reco_strategy_weights_snapshot(served_vars),
         generated_at,
+        as_of_date,
     )
     .await;
     tracing::info!(
@@ -4703,11 +4614,12 @@ async fn persist_reco_response_picks(
     );
     // L3 截断留痕：与同一批 picks 共 generated_at，便于按批对齐
     if !response.scan_audit.is_empty() {
-        let audit = persist_reco_scan_audit(
+        let audit = crate::commands::_shared_reco_pool::persist_reco_scan_audit(
             state.harness.db(),
             &response.scan_audit,
             response.period,
             generated_at,
+            as_of_date,
         )
         .await;
         tracing::info!(
@@ -4747,11 +4659,12 @@ pub async fn recommend_stocks(
         recommender::recommend_stocks(client, period, &served_vars, None, prior).await
     }?;
 
-    // ── 持久化荐股结果（仅 live 模式） ──
-    if as_of_date.is_none() {
-        let generated_at = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
-        persist_reco_response_picks(&state, &response, &served_vars, &generated_at).await;
-    }
+    // ── 持久化荐股结果（实盘与回放都落；代际由每行 `as_of_date` 承载） ──
+    // 2026-10-12 裁定：回放的候选必须持久化，否则 as-of 之后无样本可反思。
+    // 不再用「仅 live」跳过整批，改为写同一张表 + 打代际标记；只读实盘的下游
+    // 一律显式加 `as_of_date IS NULL`（漏加由代际门拦）。
+    let generated_at = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
+    persist_reco_response_picks(&state, &response, &served_vars, &generated_at).await;
 
     Ok(response)
 }
@@ -4797,15 +4710,12 @@ pub async fn recommend_stocks_all_periods(
         std::collections::BTreeMap::new();
     let mut failed_horizons: std::collections::BTreeMap<Period, String> =
         std::collections::BTreeMap::new();
-    let live = as_of_date.is_none();
     let generated_at = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
     for (period, res) in results {
         match res {
             Ok(response) => {
-                if live {
-                    persist_reco_response_picks(&state, &response, &served_vars, &generated_at)
-                        .await;
-                }
+                // 逐档各落一行历史（实盘与回放都落，代际在 response.as_of_date 里）
+                persist_reco_response_picks(&state, &response, &served_vars, &generated_at).await;
                 by_horizon.insert(period, response);
             },
             Err(e) => {
@@ -4840,11 +4750,20 @@ pub async fn recommend_stocks_all_periods(
 #[tauri::command]
 pub async fn reco_ic_stats(
     state: State<'_, AppState>,
+    generation: Option<String>,
 ) -> Result<axagent_analysis_engine::recommender::ic::RecoIcStats, String> {
     use axagent_analysis_engine::recommender::ic::{RecoIcRow, aggregate_reco_ic};
 
+    let generation = axagent_astock_data::as_of::parse_generation_param(generation.as_deref())?;
     let served_vars = load_reco_served_vars(&state).await?;
+    // 代际：默认只算**实盘**样本（既有 IC 口径不变）。传 `generation`=某次回放的截止日，
+    // 则只算那一批回放样本，回答「同一批历史数据上算法的预测力如何」。
+    // 两批绝不合并成同一个分母 —— 回放的 T+N 与实盘的 T+N 不是同一种命中。
     let rows = decision_validations::Entity::find()
+        .filter(match generation.as_deref() {
+            Some(d) => decision_validations::Column::AsOfDate.eq(d),
+            None => decision_validations::Column::AsOfDate.is_null(),
+        })
         .all(state.harness.db())
         .await
         .map_err(|e| format!("{e}"))?;
@@ -5031,6 +4950,9 @@ pub async fn get_cached_recommendation(
         .filter(reco_picks::Column::Period.eq(period_str))
         .filter(reco_picks::Column::Style.ne("serenity"))
         .filter(reco_picks::Column::PickData.is_not_null()) // 跳过 v007 之前的旧行
+        // 代际过滤：缓存回读的是「上一批**实盘**结果」，回放行同表但绝不能被当成
+        // 上次的实盘出票读回前端（2026-10-12 起回放也落库，此谓词是防混码的正门）。
+        .filter(reco_picks::Column::AsOfDate.is_null())
         .order_by_desc(reco_picks::Column::GeneratedAt)
         .limit(1)
         .one(db)
@@ -5046,6 +4968,7 @@ pub async fn get_cached_recommendation(
         .filter(reco_picks::Column::Period.eq(period_str))
         .filter(reco_picks::Column::GeneratedAt.eq(&latest_row.generated_at))
         .filter(reco_picks::Column::PickData.is_not_null())
+        .filter(reco_picks::Column::AsOfDate.is_null())
         .all(db)
         .await
         .map_err(|e| {
@@ -5579,6 +5502,53 @@ pub async fn delete_batch_reflection_cron(
     Ok(())
 }
 
+/// 反思行 → 前端 JSON 投影（单一来源）。
+///
+/// `list_reflections` 与 P3 妖股漏检回放的 `get_mover_recall_event_review`
+/// （mover_recall.rs）共用这一份投影：字段增改只许动这里，禁止在第二处再抄一遍
+/// （AGENTS 禁区 12：同一 DTO 两个投影面必然漂移）。
+pub(crate) fn reflection_review_json(
+    r: &axagent_entities::stock_reflections::Model,
+) -> serde_json::Value {
+    let horizon_results = r
+        .horizon_results_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+    serde_json::json!({
+        "id": r.id,
+        "stockCode": r.stock_code,
+        "stockName": r.stock_name,
+        "originalAnalysisId": r.original_analysis_id,
+        "asOfDate": r.as_of_date,
+        "hindsightDate": r.hindsight_date,
+        "minConfidenceThreshold": r.min_confidence_threshold,
+        "reflectionDepth": r.reflection_depth,
+        // 〇-B v2 第 4 条：本次反思**复盘的档位**（NULL = 本列引入前，档未知）
+        "horizon": r.horizon,
+        "actualOutcome": r.actual_outcome,
+        "whatWentWrong": r.what_went_wrong,
+        "missedSignals": r.missed_signals,
+        "fixForFuture": r.fix_for_future,
+        // P3：漏检回放面板展开用 —— 裁决/教训摘要/原始收益/来源桶/权威归因层。
+        // source 读侧口径：`mover_recall` 一桶，其余（含老库空串）皆常规 due。
+        "verdict": r.verdict,
+        "lessonSummary": r.lesson_summary,
+        "rawReturn": r.raw_return,
+        "source": r.source,
+        "missLayer": r.miss_layer,
+        "decisionJson": r.decision_json,
+        "blackboardSnapshot": r.blackboard_snapshot,
+        "status": r.status,
+        "createdAt": r.created_at,
+        "alphaReturn": r.alpha_return,
+        // #10 P7 妖股标签（按档挂在逐档反思行上）。四态语义见
+        // `entities/src/stock_reflections.rs` 的列文档：达标/未达标/窗口未满/判据不可用，
+        // NULL=未复盘或本列引入前的存量行 ⇒ 面板必须分得开「没达标」与「没判定」。
+        "moverLabel": r.mover_label,
+        "horizonResults": horizon_results,
+    })
+}
+
 /// 查询反思复盘记录列表
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "查询反思复盘记录列表")]
 #[tauri::command]
@@ -5586,6 +5556,8 @@ pub async fn list_reflections(
     state: State<'_, AppState>,
     stock_code: Option<String>,
     limit: Option<u32>,
+    // P3：妖股漏检回放面板按补分析行 id 拉逐档反思（不传则保持原全量/按票口径）。
+    original_analysis_id: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
     use axagent_entities::stock_reflections;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
@@ -5596,46 +5568,16 @@ pub async fn list_reflections(
     if let Some(ref code) = stock_code {
         query = query.filter(stock_reflections::Column::StockCode.eq(code));
     }
+    if let Some(ref oid) = original_analysis_id {
+        query = query.filter(stock_reflections::Column::OriginalAnalysisId.eq(oid));
+    }
     let items = query.all(db).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询反思记录失败: {e}"))
     })?;
     let limit = limit.unwrap_or(50) as usize;
-    let result: Vec<serde_json::Value> = items
-        .into_iter()
-        .take(limit)
-        .map(|r| {
-            let horizon_results = r
-                .horizon_results_json
-                .as_deref()
-                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
-            serde_json::json!({
-                "id": r.id,
-                "stockCode": r.stock_code,
-                "stockName": r.stock_name,
-                "originalAnalysisId": r.original_analysis_id,
-                "asOfDate": r.as_of_date,
-                "hindsightDate": r.hindsight_date,
-                "minConfidenceThreshold": r.min_confidence_threshold,
-                "reflectionDepth": r.reflection_depth,
-                // 〇-B v2 第 4 条：本次反思**复盘的档位**（NULL = 本列引入前，档未知）
-                "horizon": r.horizon,
-                "actualOutcome": r.actual_outcome,
-                "whatWentWrong": r.what_went_wrong,
-                "missedSignals": r.missed_signals,
-                "fixForFuture": r.fix_for_future,
-                "decisionJson": r.decision_json,
-                "blackboardSnapshot": r.blackboard_snapshot,
-                "status": r.status,
-                "createdAt": r.created_at,
-                "alphaReturn": r.alpha_return,
-                // #10 P7 妖股标签（按档挂在逐档反思行上）。四态语义见
-                // `entities/src/stock_reflections.rs` 的列文档：达标/未达标/窗口未满/判据不可用，
-                // NULL=未复盘或本列引入前的存量行 ⇒ 面板必须分得开「没达标」与「没判定」。
-                "moverLabel": r.mover_label,
-                "horizonResults": horizon_results,
-            })
-        })
-        .collect();
+    // 投影走单一来源 `reflection_review_json`（P3 review 命令共用，勿在此内联第二份）。
+    let result: Vec<serde_json::Value> =
+        items.into_iter().take(limit).map(|r| reflection_review_json(&r)).collect();
     Ok(result)
 }
 

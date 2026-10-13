@@ -437,6 +437,37 @@ pub fn relative_valuation(inputs: &[MetricInput]) -> RelativeValuation {
 /// [`DCF_PRIMARY_MIN_HIGH_COVERAGE`]，两条判据**必须同时成立**。
 pub const FCF_YIELD_MIN_FOR_DCF_PRIMARY: f64 = 0.01;
 
+/// 正向 DCF 成为主口径所允许的最高**锚定 FCF 收益率**（= `fcf_anchor / 总市值`），
+/// 与 [`FCF_YIELD_MIN_FOR_DCF_PRIMARY`] 严格对称的**天花板**。
+///
+/// ## 为什么需要天花板（赛力斯 601127 实证，2026-10-13）
+///
+/// 1% 地板防的是「锚小到对现价无解释力」（301269 形态）；它对**反向病灶**完全失明：
+/// 锚被周期/扩张**顶点**的一次性现金流抬高时，收益率反而极高，地板与乐观档覆盖率
+/// 两条下界同时轻松越过 ⇒ 正向 DCF 以全额权重给出荒谬买点。
+///
+/// 赛力斯（现价 52.70 元、市值约 793 亿）那次输出：保守档 **412.62**、乐观档
+/// **1400.75 元**、保守档上行 **+683%**。以本模型常量反解，四个数字精确闭合于
+/// 年锚定 FCF **≈239 亿** ⇒ 锚定 FCF 收益率 **30.2%**。该锚来自最近完整年报
+/// `OCF − 资本开支`，而 OCF 远超同期净利（FCF/净利 ≈ 4），增量主要是扩张期
+/// 应付账款/合同负债随营收翻倍而膨胀 —— **营运资本一次性释放**，销量增速一放缓
+/// 即反向收缩，不可持续、不能复利。市场只给约 3.3× 锚 FCF 的定价，模型按永续
+/// 给了 20×+。
+///
+/// ## 为什么 15%
+///
+/// - 价值投资原理：正常经营企业 FCF 收益率 3–8%；能持续 >15% 的股东现金流收益率
+///   在竞争市场中不成立（会被资本流入套利抹平）。周期股的 FCF 收益率恰恰在
+///   **盈利顶点**虚高 —— 经典戒律正是「不可外推顶点 earnings」，此时外推得出的
+///   「极度低估」是最危险的假信号（顶点买入价值陷阱）。
+/// - 实测余量：本仓既有夹具健康侧 600406=5.91%、600887=6.58%、600276=2.75%，
+///   病侧赛力斯归一化前 30.2% —— 阈值两侧有 >2 倍空档，不敏感。
+/// - 锚选择层对该形态还有一道**治疗性归一化**（赛力斯归一化后收益率约 4.4%，
+///   正常越过本门）；本门只兜底漏过归一化的其他膨胀形态，是最后防线，不是首选
+///   处置。命中后与覆盖率失败同待遇：主口径让位永远有答案的 [`reverse_dcf`]，
+///   三档数值仍展示（敏感性带），但不得由正向 DCF 定调。
+pub const FCF_YIELD_MAX_FOR_DCF_PRIMARY: f64 = 0.15;
+
 /// 正向 DCF 成为主口径所需的最低**乐观档现价覆盖率**（= `high / current_price`）。
 ///
 /// ## 它测的是本模型的定价上界，不是标的贵不贵
@@ -552,14 +583,20 @@ pub fn build_conclusion(i: ConclusionInputs<'_>) -> ValuationConclusion {
     let mut legs: Vec<ConclusionLeg> = Vec::new();
     let mut not_applicable: Vec<String> = Vec::new();
 
-    // ① 正向 DCF 腿 —— 两条地板**同时成立**才有主口径资格。
+    // ① 正向 DCF 腿 —— 三条资格线**同时成立**才有主口径资格：
+    //    收益率地板（锚不能小到无解释力）+ 收益率天花板（锚不能是周期顶点一次性
+    //    现金流，赛力斯 601127 实证见 `FCF_YIELD_MAX_FOR_DCF_PRIMARY`）
+    //    + 乐观档覆盖率。
     //    只查 `fcf_yield` 会漏掉「锚真实存在、但折现倍数够不到现价」这一大类
     //    （600276 恒瑞：收益率 2.75% 过关，三档却只有现价的 28%~34%），
-    //    判据与实测余量见 [`DCF_PRIMARY_MIN_HIGH_COVERAGE`]。
+    // 判据与实测余量见 [`DCF_PRIMARY_MIN_HIGH_COVERAGE`]。
     let coverage_ok = i.dcf_high_to_price.is_some_and(|c| c >= DCF_PRIMARY_MIN_HIGH_COVERAGE);
+    let yield_floor_ok = i.fcf_yield.is_some_and(|y| y >= FCF_YIELD_MIN_FOR_DCF_PRIMARY);
+    let yield_ceiling_ok = i.fcf_yield.is_some_and(|y| y <= FCF_YIELD_MAX_FOR_DCF_PRIMARY);
     let dcf_ok = i.dcf_applicable
         && i.dcf_upside_pct.is_some()
-        && i.fcf_yield.is_some_and(|y| y >= FCF_YIELD_MIN_FOR_DCF_PRIMARY)
+        && yield_floor_ok
+        && yield_ceiling_ok
         && coverage_ok;
     // 拒绝原因只算一次，供 `not_applicable` 与 `headline` **逐字复用** ——
     // 两处各写一句必然漂移，而 headline 那句才是用户实际读到的。
@@ -569,11 +606,19 @@ pub fn build_conclusion(i: ConclusionInputs<'_>) -> ValuationConclusion {
         Some("模型前提不成立（数据形态命中不适用判据）".to_string())
     } else if i.dcf_upside_pct.is_none() {
         Some("三档数值缺失或超出量程".to_string())
-    } else if !i.fcf_yield.is_some_and(|y| y >= FCF_YIELD_MIN_FOR_DCF_PRIMARY) {
+    } else if !yield_floor_ok {
         Some(format!(
             "当期锚定 FCF 收益率仅 {:.2}% < {:.0}%，正向折现对现价无解释力",
             i.fcf_yield.unwrap_or_default() * 100.0,
             FCF_YIELD_MIN_FOR_DCF_PRIMARY * 100.0
+        ))
+    } else if !yield_ceiling_ok {
+        // 走到这里时收益率必为 Some 且越过地板（NaN 在地板分支已被拦）⇒ 可安全取值。
+        Some(format!(
+            "锚定 FCF 收益率高达 {:.1}% > {:.0}%：该现金流含周期/扩张顶点的一次性释放\
+             （营运资本膨胀），不具永续性，正向 DCF 不具备主口径资格",
+            i.fcf_yield.unwrap_or_default() * 100.0,
+            FCF_YIELD_MAX_FOR_DCF_PRIMARY * 100.0
         ))
     } else {
         // 走到这里必是覆盖率这一条没过（含乐观档缺数）
@@ -1262,5 +1307,63 @@ mod tests {
         assert!(c.headline.contains("腿间方向冲突"), "{}", c.headline);
         assert!(c.headline.contains("反向 DCF"), "冲突句要指名是哪条现金流腿：{}", c.headline);
         assert!(c.headline.contains("deep_value"), "必须并排给出反向证据：{}", c.headline);
+    }
+
+    // ── 赛力斯 601127（2026-10-13）：锚定 FCF 收益率 15% 天花板 ─────────────────
+
+    /// 收益率越过**天花板**（30% > 15%，周期/扩张顶点一次性现金流）：即便前提成立、
+    /// 乐观档覆盖率充足，正向 DCF 也必须让位反向 DCF，剔除原因须报出实际收益率与
+    /// 15% 阈值；同输入把收益率换成 10%（天花板内）则 DCF 保留主口径。
+    #[test]
+    fn dcf_primary_rejected_when_anchor_fcf_yield_above_ceiling() {
+        let r = reverse_dcf(ReverseDcfInputs {
+            fcf_anchor: 239.0e8,
+            total_shares: 15.05e8,
+            current_price: 52.70,
+            discount_rate: 0.077,
+            perpetual_growth: 0.013,
+            min_terminal_spread: 0.015,
+            forecast_years: 5,
+            revenue_0: None,
+            revenue_yoy: None,
+        })
+        .expect("正锚 + 正现价 ⇒ 必有解");
+        let rel = relative_valuation(&[MetricInput {
+            name: "PE",
+            value: Some(18.0),
+            percentile: Some(30.0),
+            peer_values: vec![],
+        }]);
+
+        // ① 30% > 15% 天花板 ⇒ 摘 DCF 腿、主口径让位反向 DCF。
+        let c = build_conclusion(ConclusionInputs {
+            dcf_applicable: true,
+            dcf_upside_pct: Some(683.0),
+            fcf_yield: Some(0.30),
+            dcf_high_to_price: Some(26.0), // 覆盖率刻意给足，隔离天花板这一条
+            reverse: Some(&r),
+            relative: &rel,
+            graham_upside_pct: None,
+        });
+        assert_eq!(c.primary_method, "reverse_dcf", "收益率越天花板 ⇒ 必须让位反向 DCF");
+        assert!(!c.legs.iter().any(|l| l.method == "dcf"), "DCF 腿不得进 legs");
+        let reason =
+            c.not_applicable.iter().find(|s| s.contains("正向 DCF")).expect("必须给出剔除原因");
+        assert!(reason.contains("30.0%"), "原因须含实际收益率，实得 {reason}");
+        assert!(reason.contains("15%"), "原因须含 15% 天花板阈值，实得 {reason}");
+        assert!(reason.contains("营运资本"), "原因须点名顶点一次性释放，实得 {reason}");
+
+        // ② 10% 在天花板内（且过 1% 地板、覆盖率达标）⇒ 同形态保留 DCF 主口径。
+        let c2 = build_conclusion(ConclusionInputs {
+            dcf_applicable: true,
+            dcf_upside_pct: Some(12.0),
+            fcf_yield: Some(0.10),
+            dcf_high_to_price: Some(1.35),
+            reverse: Some(&r),
+            relative: &rel,
+            graham_upside_pct: None,
+        });
+        assert_eq!(c2.primary_method, "dcf", "10% 在 15% 天花板内 ⇒ 不得误伤");
+        assert!(c2.legs.iter().any(|l| l.method == "dcf"));
     }
 }

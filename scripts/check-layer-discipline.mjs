@@ -208,6 +208,10 @@ const SHARED_INFRA_MODULES = new Set([
   "_workflow_ai_protocol",
   "provider_ctx",
   "spawn_guard",
+  // 候选池落库的共享入口：手动刷新命令 / 00:00 荐股 cron / 时间旅行批次三条入口
+  // 必须写同一张表的同一套字段（实盘与回放靠 as_of_date 分代）。留在任一命令模块里
+  // 都会被另外两条跨模块调用命中规则 2，故按 _shared_state 的先例登记为基础设施。
+  "_shared_reco_pool",
 ]);
 
 /**

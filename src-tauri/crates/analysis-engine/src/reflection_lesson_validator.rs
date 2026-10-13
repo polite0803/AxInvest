@@ -326,6 +326,136 @@ pub fn build_lesson_validation_report(validations: &[LessonValidation]) -> Lesso
 }
 
 // ─────────────────────────────────────────────────
+// 入模前校验（P3：妖股漏检回放闭环）
+// ─────────────────────────────────────────────────
+
+/// 教训摘要允许的长度区间（trim 后字符数）。
+///
+/// 上界 200 与 reflection-agent prompt / Rhai 硬裁决的 `lesson_summary ≤200` 对齐；
+/// 下界 10 拦「注意风险」级碎片。注意按 **chars().count()** 计（中文一个 char 一字），
+/// 不能用 len()（UTF-8 字节数会把中文算成 3 倍）。
+pub const LESSON_SUMMARY_MIN_CHARS: usize = 10;
+pub const LESSON_SUMMARY_MAX_CHARS: usize = 200;
+
+/// 行动性 token：命中至少一个才认为教训「可执行」。
+///
+/// 都是中文决策动作词，与 reflection.md 专项三问要求的措辞同源；
+/// `contains` 子串匹配（不是分词），宁可宽一点——真正的空话由空洞短语表拦。
+const ACTION_TOKENS: &[&str] = &[
+    "应", "必须", "建议", "避免", "下次", "提前", "上调", "下调", "止损", "加仓", "减仓", "阈值",
+    "确认", "等待", "剔除", "纳入", "不得", "优先",
+];
+
+/// 空洞短语：命中任意一个即拒（「正确的废话」清单）。
+///
+/// 这些表述在漏检专项反思里没有任何判据信息量——不指明改什么、往哪改、何时触发。
+/// 与 reflection.md 模板里明令禁止的措辞保持一致。
+const VAGUE_PHRASES: &[&str] =
+    &["不知道", "无法判断", "说不清", "数据不足", "注意风险", "谨慎操作", "随机", "运气"];
+
+/// 入模前校验教训摘要：不合格的教训**只留档不生效**（`validation_rejected`）。
+///
+/// 与本模块既有函数的区别：那些是教训**入库后**按命中率做事后置信度统计；
+/// 本函数是入库**前**的内容闸门，拦的是三类污染源：
+/// 1. 长度不合格（碎片 / 超长，超长说明 agent 没遵守 ≤200 约束）；
+/// 2. 没有可执行动作词（纯描述不构成「教训」）；
+/// 3. 空话 / 不可知论 / 纯疑问纯标点（「注意风险」「为什么会涨？」）。
+///
+/// 返回 `Err(原因列表)`：调用方把原因 JSON 落进 `rule_pattern` 供前端展示，
+/// 行仍 INSERT（留档），但 `status=validation_rejected` + `confidence=0` ⇒
+/// 消费侧只查 `status=active AND confidence>0.5`，天然读不到它。
+pub fn validate_lesson_for_admission(summary: &str) -> Result<(), Vec<String>> {
+    let trimmed = summary.trim();
+    let mut reasons: Vec<String> = Vec::new();
+
+    // ① 长度（按字符，不按字节）
+    let char_count = trimmed.chars().count();
+    if trimmed.is_empty() {
+        reasons.push("教训摘要为空".to_string());
+    } else if char_count < LESSON_SUMMARY_MIN_CHARS {
+        reasons.push(format!(
+            "教训摘要过短（{char_count} 字符 < {LESSON_SUMMARY_MIN_CHARS}），不构成可复用判据"
+        ));
+    } else if char_count > LESSON_SUMMARY_MAX_CHARS {
+        reasons.push(format!(
+            "教训摘要超长（{char_count} 字符 > {LESSON_SUMMARY_MAX_CHARS}），应收敛为单条判据"
+        ));
+    }
+
+    // ② 纯标点 / 纯疑问：剥掉标点与空白后没有实质文字 ⇒ 拦
+    //    （含「？?」结尾的纯问句：它可以进 what_went_wrong，但不是可入模的 fix 判据）
+    let stripped: String = trimmed.chars().filter(|c| !is_punct_or_space(*c)).collect();
+    if !trimmed.is_empty() && stripped.is_empty() {
+        reasons.push("教训摘要只含标点/空白，无实质判据".to_string());
+    }
+    let is_pure_question = trimmed.ends_with('？') || trimmed.ends_with('?');
+
+    // ③ 行动 token：纯问句豁免不了——问句天然不含行动承诺
+    let has_action = ACTION_TOKENS.iter().any(|tok| trimmed.contains(tok));
+    if !stripped.is_empty() && !has_action {
+        reasons.push(
+            "缺少可执行动作词（如：应/必须/建议/避免/阈值/上调/下调/提前/等待/剔除/纳入）"
+                .to_string(),
+        );
+    }
+    if is_pure_question && !has_action {
+        reasons.push("纯疑问句不是可执行教训（应写成判据修正而非提问）".to_string());
+    }
+
+    // ④ 空洞短语
+    for phrase in VAGUE_PHRASES {
+        if trimmed.contains(phrase) {
+            reasons.push(format!("命中空洞表述「{phrase}」，不指明改什么/何时触发，不可入模"));
+        }
+    }
+
+    if reasons.is_empty() {
+        Ok(())
+    } else {
+        Err(reasons)
+    }
+}
+
+/// 标点/空白判定（覆盖中英文常见标点）。只用于「剥光后还有没有字」这一保守判据，
+/// 不追求 Unicode 全覆盖——非常见标点剥不掉时只会让纯标点漏网到后续长度/动作词闸门，
+/// 不会误杀正常文本。
+fn is_punct_or_space(c: char) -> bool {
+    c.is_whitespace()
+        || matches!(
+            c,
+            '，' | '。'
+                | '！'
+                | '？'
+                | '、'
+                | '；'
+                | '：'
+                | '“'
+                | '”'
+                | '‘'
+                | '’'
+                | '（'
+                | '）'
+                | '《'
+                | '》'
+                | '…'
+                | '—'
+                | '·'
+                | ','
+                | '.'
+                | '!'
+                | '?'
+                | ';'
+                | ':'
+                | '"'
+                | '\''
+                | '('
+                | ')'
+                | '-'
+                | '~'
+        )
+}
+
+// ─────────────────────────────────────────────────
 // 单元测试
 // ─────────────────────────────────────────────────
 
@@ -548,5 +678,66 @@ mod tests {
         assert_eq!(report.confidence_adjustment_stats.increased, 1);
         assert_eq!(report.confidence_adjustment_stats.decreased, 1);
         assert_eq!(report.confidence_adjustment_stats.unchanged, 1);
+    }
+
+    // ── P3 入模前校验 ──
+
+    #[test]
+    fn test_admission_accepts_actionable_lesson() {
+        // 含行动词、长度合规、无空洞短语 ⇒ 通过
+        let ok = "北向资金连续3日净流出而技术面金叉时，应优先采纳资金面信号，confidence 上限60";
+        assert!(validate_lesson_for_admission(ok).is_ok());
+    }
+
+    #[test]
+    fn test_admission_rejects_too_short() {
+        let err = validate_lesson_for_admission("注意风险").expect_err("碎片必须被拒");
+        assert!(err.iter().any(|r| r.contains("过短")), "应报过短: {err:?}");
+        assert!(err.iter().any(|r| r.contains("空洞")), "应同时报空洞: {err:?}");
+    }
+
+    #[test]
+    fn test_admission_rejects_too_long() {
+        // 201 个中文字符 + 一个行动词，只应撞超长一条
+        let long = format!("应{}", "判".repeat(200));
+        let err = validate_lesson_for_admission(&long).expect_err("超长必须被拒");
+        assert!(err.iter().any(|r| r.contains("超长")), "应报超长: {err:?}");
+        // 边界：200 字符本身必须放行长度闸门
+        let boundary = format!("应{}", "判".repeat(199));
+        assert_eq!(boundary.chars().count(), 200);
+        assert!(validate_lesson_for_admission(&boundary).is_ok());
+    }
+
+    #[test]
+    fn test_admission_rejects_without_action_token() {
+        let err = validate_lesson_for_admission(
+            "该股当期走势与前期的分析结论存在一定程度上的方向性偏离现象",
+        )
+        .expect_err("纯描述无动作词必须被拒");
+        assert!(err.iter().any(|r| r.contains("动作词")), "应报缺动作词: {err:?}");
+    }
+
+    #[test]
+    fn test_admission_rejects_vague_and_question() {
+        let err = validate_lesson_for_admission("这次上涨到底是什么原因导致的呢？")
+            .expect_err("纯疑问必须被拒");
+        assert!(err.iter().any(|r| r.contains("疑问")), "应报纯疑问: {err:?}");
+
+        let err = validate_lesson_for_admission(
+            "后续应当继续注意风险，谨慎操作，市场有随机波动也有运气成分",
+        )
+        .expect_err("空话必须被拒");
+        let joined = err.join("|");
+        assert!(joined.contains("注意风险"));
+        assert!(joined.contains("谨慎操作"));
+        assert!(joined.contains("随机"));
+        assert!(joined.contains("运气"));
+    }
+
+    #[test]
+    fn test_admission_rejects_empty_and_pure_punctuation() {
+        assert!(validate_lesson_for_admission("   ").is_err());
+        let err = validate_lesson_for_admission("？？？，，。").expect_err("纯标点必须被拒");
+        assert!(err.iter().any(|r| r.contains("标点")), "应报纯标点: {err:?}");
     }
 }

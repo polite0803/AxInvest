@@ -570,6 +570,15 @@ pub async fn get_pipeline_run_detail(
                 .to_string()
         })?;
 
+    // 明细 / 候选列在批次落库时为 None（运行中/失败/旧批次从未回写），
+    // 或 JSON 解析失败 —— 这两种情况都按**空数组**返回（而非 null）：
+    // 前端 Drawer 直接读 `newAnalyses.length`，null 会整页崩
+    // （Cannot read properties of null，2026-10-12 实测）。
+    let json_array_or_empty = |raw: Option<String>| -> serde_json::Value {
+        raw.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .unwrap_or_else(|| serde_json::json!([]))
+    };
+
     Ok(json!({
         "id": run.id,
         "runDate": run.run_date,
@@ -578,9 +587,9 @@ pub async fn get_pipeline_run_detail(
         "startedAt": run.started_at,
         "completedAt": run.completed_at,
         "errorMessage": run.error_message,
-        "candidates": run.candidates_json.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
-        "newAnalyses": run.new_analyses_json.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
-        "reassessed": run.reassessed_json.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
+        "candidates": json_array_or_empty(run.candidates_json),
+        "newAnalyses": json_array_or_empty(run.new_analyses_json),
+        "reassessed": json_array_or_empty(run.reassessed_json),
         "summary": run.summary_json.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
     }))
 }

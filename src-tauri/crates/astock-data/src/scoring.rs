@@ -92,17 +92,22 @@ pub struct ScoreBands {
 
 impl Default for ScoreBands {
     fn default() -> Self {
+        // 乖离档分 2026-10 重标定（利好偏向 A 档根治）：原档 20/18/15/10/5 让
+        // 「bias=0（恰在均线上）」也拿 18/20=90% 的分，是全中性组合 totalScore=65（应为 50）
+        // 的最大单一偏置来源。重标后档 20/10/8/5/2：正偏离且贴合（>0 且 <1%）仍给满分 20，
+        // 但中性/微偏离（band_2）只给一半（10），全中性七分量组合恰为 50（见
+        // `neutral_inputs_anchor_total_score_at_50` 回归测试）。
         Self {
             deviation_band_1: 1.0,
             deviation_score_1: 20,
             deviation_band_2: 2.0,
-            deviation_score_2: 18,
+            deviation_score_2: 10,
             deviation_band_3: 3.0,
-            deviation_score_3: 15,
+            deviation_score_3: 8,
             deviation_band_4: 5.0,
-            deviation_score_4: 10,
+            deviation_score_4: 5,
             deviation_band_5: 8.0,
-            deviation_score_5: 5,
+            deviation_score_5: 2,
             rsi_oversold_deep: 20.0,
             rsi_oversold: 30.0,
             rsi_neutral_low: 40.0,
@@ -431,7 +436,8 @@ impl ScoringEngine {
     /// 而命名槽是按**周期数值**认领的 ⇒ 档尺度传 `[8,24]` 时它们全部静默退回初值。
     /// 本路径那五项改读 `scaleTrend` / `scaleMomentum` / 两带本身：
     /// - trend：`diff_pct` 对 `±deviation_band_1`（已按 `√d` 缩放）与快带斜率定档，
-    ///   分档值沿用既有的 30 / 20 / 12 / 0，**不新增常数**；
+    ///   分档值沿用既有的 30 / 20 / 15 / 0（中性档 2026-10 随 `score_trend` 重标定），
+    ///   **不新增常数**；
     /// - deviation：收盘价对**快带**的偏离（日线口径里那是「对 MA5」，同族量的粗尺度对应物）；
     /// - rsi：`scaleMomentum.value`（缺失 ⇒ 按中性 50 走既有分档，不是伪造读数）；
     /// - support：两条带本身（慢带 + 布林中轨）当支撑，沿用 `score_support` 的容差；
@@ -461,12 +467,12 @@ impl ScoringEngine {
         let band = bands.deviation_band_1;
         let rising = trend_facts.fast_slope.unwrap_or(0.0) >= 0.0;
         let (trend_raw, alignment): (u32, &str) = match trend_facts.diff_pct {
-            None => (12, "缠绕/交叉"),
+            None => (15, "缠绕/交叉"),
             Some(d) if d >= band && rising => (30, "多头排列"),
             Some(d) if d >= band => (20, "弱多头"),
             Some(d) if d <= -band && !rising => (0, "空头排列"),
             // 空头但在收敛：既有阶梯里没有这一档，落在「缠绕」而不是新造一个分值
-            Some(_) => (12, "缠绕/交叉"),
+            Some(_) => (15, "缠绕/交叉"),
         };
         let deviation_input = if trend_facts.fast > 0.0 {
             (latest_price - trend_facts.fast) / trend_facts.fast * 100.0
@@ -623,12 +629,14 @@ impl ScoringEngine {
     }
 
     fn score_trend(alignment: &str) -> u32 {
+        // 缠绕/未知 2026-10 重标定 12→15：中性形态应落在满分的一半（15/30），
+        // 旧值把「无趋势」判成偏空（40%），与其它分量的正向缺省档叠加后净偏多。
         match alignment {
             "多头排列" => 30,
             "弱多头" => 20,
-            "缠绕/交叉" => 12,
+            "缠绕/交叉" => 15,
             "空头排列" => 0,
-            _ => 12,
+            _ => 15,
         }
     }
 
@@ -648,6 +656,8 @@ impl ScoringEngine {
     }
 
     fn score_macd(signal: &str, macd_dif: f64) -> u32 {
+        // 缺省/未知档 2026-10 重标定 10→6：原始满分 15，未知信号原来拿 67%
+        // 属无根据加分；新值 6 严格落在「空头运行(5) < 未知 < 多头运行(12)」的中性偏下位置。
         match signal {
             "金叉" if macd_dif > 0.0 => 20,
             "金叉" => 15,
@@ -657,19 +667,22 @@ impl ScoringEngine {
             "死叉" => 5,
             "空头运行" if macd_dif < 0.0 => 3,
             "空头运行" => 5,
-            _ => 10,
+            _ => 6,
         }
     }
 
     fn score_volume(signal: &str) -> u32 {
+        // 2026-10 重标定：正常/缺省 10→7（满分 15 的约一半），缩量上涨 8→6
+        // （必须仍低于「正常」，旧值在正常档下调后会反超）；多头档（放量突破 20 /
+        // 放量上涨 18 / 缩量回调 12）与放量下跌 3 维持不变。
         match signal {
             "放量突破" => 20,
             "放量上涨" => 18,
             "缩量回调" => 12,
-            "正常" => 10,
-            "缩量上涨" => 8,
+            "正常" => 7,
+            "缩量上涨" => 6,
             "放量下跌" => 3,
-            _ => 10,
+            _ => 7,
         }
     }
 
@@ -692,8 +705,11 @@ impl ScoringEngine {
     }
 
     fn score_support(price: f64, supports: &[f64], _bands: &ScoreBands) -> u32 {
+        // 2026-10 重标定：空支撑（无数据）与远离支撑档 3→2。支撑分量满分按 5 计权
+        // （score_with_bands 里 raw*weight/5），raw=2 ⇒ 加权 4/10，与「无下跌保护」的
+        // 轻微谨慎语义一致；近支撑 8（贴近 = 有保护）与 5% 内 5 两档不变。
         if supports.is_empty() {
-            return 3;
+            return 2;
         }
         if price <= 0.0 {
             return 0;
@@ -704,21 +720,29 @@ impl ScoringEngine {
         } else if nearest < price * 0.05 {
             5
         } else {
-            3
+            2
         }
     }
 
     fn score_boll(position: &str, _bands: &ScoreBands) -> u32 {
+        // 中轨/缺省 2026-10 重标定 4→3：中轨=布林中性位置，应落在满分 5 的一半
+        // 附近；4/5=80% 是把「不在超买区间」当成了利好。下轨 8/6、上轨 2/0 不变。
         match position {
             "下轨下方" => 8,
             "下轨附近" => 6,
-            "中轨附近" => 4,
+            "中轨附近" => 3,
             "上轨附近" => 2,
             "上轨上方" => 0,
-            _ => 4,
+            _ => 3,
         }
     }
 
+    /// 总分 → 信号档位。
+    ///
+    /// 2026-10 重标定（与「全中性输入 totalScore=50」锚点对齐）：以 50 为中心对称布档——
+    /// 持有 55..=69（+5 起步）、观望 45..=54（−5 起步，**中性 50 落在本档**）、
+    /// 卖出 30..=44；强买/强卖外档（85+ / <30）维持原边界。
+    /// 45..=54 档内若趋势为空头排列，提前判卖出（弱势结构下的中性分不可持有）。
     fn map_signal(total: u32, alignment: &str) -> (&'static str, &'static str) {
         match total {
             85..=100 => match alignment {
@@ -727,11 +751,11 @@ impl ScoringEngine {
             },
             70..=84 => ("🔵买入", "buy"),
             55..=69 => ("🟡持有", "hold"),
-            40..=54 => match alignment {
+            45..=54 => match alignment {
                 "空头排列" => ("🟠卖出", "sell"),
                 _ => ("⚪观望", "watch"),
             },
-            25..=39 => ("🟠卖出", "sell"),
+            30..=44 => ("🟠卖出", "sell"),
             _ => ("🔴强烈卖出", "strong_sell"),
         }
     }
@@ -767,7 +791,7 @@ mod tests {
     /// 中性槽类型（测试夹具要直接构造两带事实）
     use crate::indicators::{ScaleTrend, ScaleValue};
 
-    /// 档位评分路径：命名槽被丢弃时**不再恒 12 分**，而按 `scaleTrend` 的两带定档。
+    /// 档位评分路径：命名槽被丢弃时**不再恒 15 分**，而按 `scaleTrend` 的两带定档。
     ///
     /// 夹具是「档尺度算出来的样子」：四个命名槽全是初值（`ma5..ma60 = 0.0` ⇒ `ma_alignment`
     /// 「无数据」），只有中性槽有值 —— 这正是 §九十八(2) 实测的退化输入。
@@ -845,6 +869,60 @@ mod tests {
         let weights = ScoringWeights { trend: 40.0, ..Default::default() };
         let score = ScoringEngine::score(&ind, 150.0, Some(&weights));
         assert!(score.total > 0 && score.total <= 100);
+    }
+
+    /// 2026-10 利好偏向 A 档根治的锚点回归：七个分量全部取中性/缺省档时，
+    /// `total` 必须**恰好 50**（旧标定为 65，系统性偏多的根因），信号落「观望」。
+    ///
+    /// 逐分量钉死，防止有人只调其中一档把锚点漂移：
+    /// trend 15（缠绕/未知 30 满分的一半）+ deviation 10（bias=0 落 band_2，满分 20 的一半）
+    /// + macd 6（未知档）+ volume 7（正常档）+ rsi 5（50 中性档）
+    /// + support 4（空支撑/远离支撑 raw=2，加权 2*10/5）+ boll 3（中轨档）= 50。
+    #[test]
+    fn neutral_inputs_anchor_total_score_at_50() {
+        let neutral = |supports: Vec<f64>| TechnicalIndicators {
+            ma_alignment: "缠绕/交叉".into(),
+            bias_ma5: 0.0,
+            macd_signal: "缠绕".into(),
+            macd_dif: 0.0,
+            volume_signal: "正常".into(),
+            rsi6: 50.0,
+            boll_position: "中轨附近".into(),
+            support_levels: supports,
+            ..Default::default()
+        };
+        // 两种「无支撑信息」形态：列表为空（未取到）与价格远离最近支撑（>5%），
+        // 旧标定两者档分不同是另一个隐性偏置来源，重标后都必须锚到同一总分。
+        for (label, price, supports) in
+            [("空支撑列表", 100.0, vec![]), ("价格远离支撑", 150.0, vec![100.0])]
+        {
+            let s = ScoringEngine::score(&neutral(supports), price, None);
+            assert_eq!(s.trend_score, 15, "{label} trend");
+            assert_eq!(s.deviation_score, 10, "{label} deviation");
+            assert_eq!(s.macd_score, 6, "{label} macd");
+            assert_eq!(s.volume_score, 7, "{label} volume");
+            assert_eq!(s.rsi_score, 5, "{label} rsi");
+            assert_eq!(s.support_score, 4, "{label} support");
+            assert_eq!(s.boll_score, 3, "{label} boll");
+            assert_eq!(s.total, 50, "{label} 全中性输入必须恰好 50，实际={}", s.total);
+            assert_eq!(s.signal_code, "watch", "{label} 中性 50 必须落观望档");
+        }
+    }
+
+    /// map_signal 分档以 50 为中心（2026-10 重标定）：50→watch（空头排列→sell），
+    /// 55→hold、45→watch、44→sell、29→strong_sell、30→sell。
+    #[test]
+    fn map_signal_bands_are_centered_on_50() {
+        assert_eq!(ScoringEngine::map_signal(50, "缠绕/交叉").1, "watch");
+        assert_eq!(ScoringEngine::map_signal(50, "空头排列").1, "sell");
+        assert_eq!(ScoringEngine::map_signal(55, "缠绕/交叉").1, "hold");
+        assert_eq!(ScoringEngine::map_signal(45, "缠绕/交叉").1, "watch");
+        assert_eq!(ScoringEngine::map_signal(44, "缠绕/交叉").1, "sell");
+        assert_eq!(ScoringEngine::map_signal(30, "缠绕/交叉").1, "sell");
+        assert_eq!(ScoringEngine::map_signal(29, "缠绕/交叉").1, "strong_sell");
+        assert_eq!(ScoringEngine::map_signal(70, "缠绕/交叉").1, "buy");
+        assert_eq!(ScoringEngine::map_signal(85, "多头排列").1, "strong_buy");
+        assert_eq!(ScoringEngine::map_signal(85, "缠绕/交叉").1, "buy");
     }
 
     /// 2026-09-21 新增（A 修复）：**亏损必须扣分，而「未取到」必须不调整** ——

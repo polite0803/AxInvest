@@ -2140,6 +2140,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
     // G17 delivery：此前 create_cron_delivery_sink 建好了 sink 却从未接进
     // executor，导致所有定时任务的 delivery 配置都是死配置。这里接上后，
     // 任务可通过 CronDeliveryConfig 把执行结果推送到 webhook / 文件 / 通知渠道。
+    let cron_stock_adaptive_engine = state.stock_adaptive_engine.clone();
     let delivery_sink: std::sync::Arc<dyn axagent_harness::cron_delivery::CronDeliverySink> =
         create_cron_delivery_sink(state);
     /// 定时任务必须**显式声明自己的模式**，且只能用 **task_local**、不能用进程级压栈。
@@ -2468,12 +2469,16 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         .iter()
                         .find(|(k, _)| k == "reco_strategy_weights")
                         .and_then(|(_, v)| v.is_object().then(|| v.to_string()));
-                    let written = crate::commands::stock_analysis::persist_reco_picks(
+                    let written = crate::commands::_shared_reco_pool::persist_reco_picks(
                         &db,
                         &picks,
                         scan.seed_pool_snapshot.clone(),
                         strategy_weights_json,
                         &generated_at,
+                        // 代际 = 实盘：本分支整体包在 `cron_live` 里（task_local 被压成
+                        // None），不可能产出回放行。用具名常量而非裸 None，让代际门读得出
+                        // 这里是**想过**代际的，而不是漏传。
+                        axagent_astock_data::as_of::LIVE_GENERATION,
                     )
                     .await;
                     tracing::info!(
@@ -2481,6 +2486,27 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         job_name,
                         picks.len()
                     );
+                    // L3 截断留痕：与 picks 共用同一个 generated_at（批次键）。
+                    // 此前定时链从不写这张表（`run_recommendation_scan` 没透出留痕），
+                    // 于是漏检核查读到的窗口大面积为空 ⇒ 归因整批落 `Unexplained`。
+                    for (audit_period, trimmed) in &scan.period_audit {
+                        let audit_written =
+                            crate::commands::_shared_reco_pool::persist_reco_scan_audit(
+                                &db,
+                                trimmed,
+                                *audit_period,
+                                &generated_at,
+                                None,
+                            )
+                            .await;
+                        tracing::info!(
+                            "[CronScheduler] 荐股任务 '{}' 落库 scan_audit: \
+                             {audit_written}/{} 行（档 {}）",
+                            job_name,
+                            trimmed.len(),
+                            audit_period.as_str()
+                        );
+                    }
                 }
 
                 // 4. 无 pick 时静默（不推空通知），但有 pick 必须推 —— 这是本任务的存在意义
@@ -2611,6 +2637,8 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         // 自选股扫描无周期语义：持有期交给决策自身声明，缺失时兜底 28 天
                         None,
                         None, // template_id — 自选股扫描恒走完整分析链
+                        "live",
+                        None, // anchor_event_id — 实盘扫描无漏检事件锚点
                     )
                     .await
                     {
@@ -3079,6 +3107,206 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             job_id
                         );
                     }
+                }
+            }));
+            return;
+        }
+        // 妖股漏检核查：task_type = mover-recall（PLAN-batch-automation-mover-recall P1）
+        //
+        // 周六 09:00 跑（cron `0 9 * * 6`）：消费的是已落库的周五收盘快照，
+        // **刻意不进交易日闸门**——闸门按"今天是否交易日"拦，周六必拦，与设计意图相反。
+        // 任意时点从任务中心「立即执行」也走这里，无最新快照时 inner 自行报错失败。
+        // 无漏检静默（不投递通知）；有漏检才投递，与荐股分支"无 pick 不轰炸"同口径。
+        if job.task_type.as_deref()
+            == Some(crate::commands::mover_recall::MOVER_RECALL_TASK_TYPE)
+        {
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let sink = delivery_sink.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            tokio::task::spawn(cron_live(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
+
+                let mut has_miss = false;
+                let result =
+                    match crate::commands::mover_recall::analyze_mover_recall_inner(&db, None).await
+                    {
+                        Ok(view) => {
+                            let events = view.rates.events;
+                            let misses = view.rates.misses;
+                            has_miss = misses > 0;
+                            // 快照落库失败不把整轮核查判失败（结果已算出），仅留痕
+                            let persist_msg =
+                                match crate::commands::mover_recall::persist_mover_recall_run(
+                                    &db, &view, "scheduler",
+                                )
+                                .await
+                                {
+                                    Ok(run_id) => format!("run_id={run_id}"),
+                                    Err(e) => {
+                                        tracing::error!(
+                                            "[CronScheduler] 妖股核查 '{}' 快照落库失败: {e}",
+                                            job_name
+                                        );
+                                        format!("快照落库失败: {e}")
+                                    },
+                                };
+                            let summary = format!(
+                                "区间 {}~{} 达标事件={} 漏检={} 召回率 reachability={:.3} \
+                                 coverage={:.3} unexplained_share={:.3} | {persist_msg}",
+                                view.from,
+                                view.to,
+                                events,
+                                misses,
+                                view.rates.reachability,
+                                view.rates.coverage,
+                                view.rates.unexplained_share
+                            );
+                            tracing::info!("[CronScheduler] 妖股核查 '{}' 完成: {summary}", job_name);
+                            axagent_runtime_core::TaskRunResult {
+                                success: true,
+                                output: Some(summary),
+                                error: None,
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                                skipped: false,
+                            }
+                        },
+                        Err(e) => {
+                            tracing::error!("[CronScheduler] 妖股核查 '{}' 失败: {e}", job_name);
+                            axagent_runtime_core::TaskRunResult {
+                                success: false,
+                                output: None,
+                                error: Some(e),
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                                skipped: false,
+                            }
+                        },
+                    };
+
+                // 有漏检才投递通知；零漏检/失败静默（失败已有 tracing + 任务列表红标）
+                let sink_ref = if result.success && has_miss {
+                    Some(sink.as_ref())
+                } else {
+                    None
+                };
+                store.record_run_with_delivery(&job_id, result, sink_ref).await;
+                if !recurring
+                    && !store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await
+                {
+                    tracing::warn!(
+                        "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                         （未找到该任务或持久化失败，下次到点会重复跑）",
+                        job_id
+                    );
+                }
+            }));
+            return;
+        }
+        // 进化计划聚合：task_type = evolution-proposal（PLAN P1/P4）
+        //
+        // 工作日 20:00（cron `0 20 * * 1-5`，在 18:00 到期反思之后）。消费的是已落库
+        // 样本，不依赖当日行情，故不进交易日闸门；节假日窗口样本少则自行 skip。
+        // 产出 pending_approval 计划（不执行任何变异），有计划才投递（需要人工审批）。
+        if job.task_type.as_deref()
+            == Some(crate::commands::evolution_proposal::EVOLUTION_PROPOSAL_TASK_TYPE)
+        {
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let engine = cron_stock_adaptive_engine.clone();
+            let sink = delivery_sink.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            let prompt = job.prompt.clone();
+            tokio::task::spawn(cron_live(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
+
+                let config =
+                    match crate::commands::evolution_proposal::EvolutionProposalConfig::from_json(
+                        &prompt,
+                    ) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::error!(
+                                "[CronScheduler] 进化聚合任务 '{}' 配置解析失败: {e}",
+                                job_name
+                            );
+                            store
+                                .record_run(
+                                    &job_id,
+                                    axagent_runtime_core::TaskRunResult {
+                                        success: false,
+                                        output: None,
+                                        error: Some(e),
+                                        duration_ms: elapsed(),
+                                        executed_at: started,
+                                        skipped: false,
+                                    },
+                                )
+                                .await;
+                            return;
+                        },
+                    };
+
+                let result = match crate::commands::evolution_proposal::run_evolution_proposal_inner(
+                    &db,
+                    engine.evolution_engine(),
+                    &config,
+                )
+                .await
+                {
+                    Ok(summary) => {
+                        tracing::info!(
+                            "[CronScheduler] 进化聚合 '{}' 完成: {summary}",
+                            job_name
+                        );
+                        axagent_runtime_core::TaskRunResult {
+                            success: true,
+                            output: Some(summary.to_string()),
+                            error: None,
+                            duration_ms: elapsed(),
+                            executed_at: started,
+                            skipped: summary.skipped,
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!("[CronScheduler] 进化聚合 '{}' 失败: {e}", job_name);
+                        axagent_runtime_core::TaskRunResult {
+                            success: false,
+                            output: None,
+                            error: Some(e),
+                            duration_ms: elapsed(),
+                            executed_at: started,
+                            skipped: false,
+                        }
+                    },
+                };
+
+                // 仅「真的产出待审批计划」才投递；skip（无样本/已有待审批）静默
+                let sink_ref = if !result.skipped && result.success {
+                    Some(sink.as_ref())
+                } else {
+                    None
+                };
+                store.record_run_with_delivery(&job_id, result, sink_ref).await;
+                if !recurring
+                    && !store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await
+                {
+                    tracing::warn!(
+                        "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                         （未找到该任务或持久化失败，下次到点会重复跑）",
+                        job_id
+                    );
                 }
             }));
             return;

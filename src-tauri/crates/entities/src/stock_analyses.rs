@@ -129,6 +129,22 @@ pub struct Model {
     /// 实则指向不存在分析的悬挂引用，与本注释声明的语义正好相反。
     #[sea_orm(indexed)]
     pub parent_analysis_id: Option<String>,
+    /// 样本来源（P2，`PLAN-batch-automation-mover-recall.md` §6.3）：
+    /// `live`（实盘逐只/池扫描/自选股）| `time_travel`（时间旅行回放）|
+    /// `mover_recall`（妖股漏检 as-of 补分析）| `chat`（对话直执行）。
+    /// 与 `analysis_kind` 分工：kind 只分 live/replay 两态，source 记**业务出处**，
+    /// 命中率/反思统计按 source 分桶，避免补分析样本混进实盘分母。
+    #[sea_orm(default_value = "live")]
+    pub source: String,
+    /// 合成样本标记（1 = 事后回放/补分析，0 = 真实时点决策）。
+    /// 与 `reco_picks.synthetic` 同族口径：任何真实推荐命中率分母都必须排除 1。
+    /// 补分析只落本分析表、**不写 reco_picks**，故决策回测（读 reco_picks）天然不含之，
+    /// 本列供直接读 stock_analyses 的统计侧过滤。
+    #[sea_orm(default_value = 0)]
+    pub synthetic: i32,
+    /// 漏检补分析时关联的 `mover_recall_events.id`（仅 source=mover_recall 非空）
+    #[sea_orm(indexed)]
+    pub anchor_event_id: Option<String>,
     /// 交易意图审核状态: pending / reviewed / executed / expired / rejected
     #[sea_orm(default_value = "pending", indexed)]
     pub trade_intent_status: String,

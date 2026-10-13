@@ -22,12 +22,49 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use axagent_entities::{strategy_performance, strategy_weight_history};
+use axagent_entities::{stock_evolution_history, strategy_performance, strategy_weight_history};
 
+use crate::evolution_optimizer::EvolutionResult;
 use crate::types::StrategyTrend;
 use crate::weight_decay::{
     compute_adjusted_weights, format_rationale, StrategyPerformanceRow, WeightDecayConfig,
 };
+
+/// 进化历史中「人工已接受」状态（P4 两段式审批的接受态）。
+const EVOLUTION_STATUS_ACCEPTED: &str = "accepted";
+
+/// 读取当前生效的权重衰减配置（P4 受控自动优化）。
+///
+/// 来源 = `stock_evolution_history` 中**最近一条 accepted 计划行**的
+/// `parameter_result_json.best_config`（人工审批接受后才生效）；
+/// 无 accepted 行 / 反序列化失败 ⇒ [`WeightDecayConfig::default`]（与历史行为一致）。
+///
+/// 回滚不需要额外开关：回滚命令新插一条 accepted 行（配置为上一版本快照），
+/// 本函数取「最新 accepted」自然读到旧配置。
+pub async fn load_active_weight_decay_config(db: &DatabaseConnection) -> WeightDecayConfig {
+    let row = stock_evolution_history::Entity::find()
+        .filter(stock_evolution_history::Column::Status.eq(EVOLUTION_STATUS_ACCEPTED))
+        .filter(stock_evolution_history::Column::ParameterResultJson.is_not_null())
+        .order_by_desc(stock_evolution_history::Column::CreatedAt)
+        .one(db)
+        .await;
+    let Ok(Some(row)) = row else {
+        if let Err(e) = row {
+            warn!("[evolution_drift] 读取生效进化配置失败，回退默认: {e}");
+        }
+        return WeightDecayConfig::default();
+    };
+    let Some(raw) = row.parameter_result_json.as_deref() else {
+        return WeightDecayConfig::default();
+    };
+    match serde_json::from_str::<EvolutionResult>(raw) {
+        Ok(r) => r.best_config,
+        Err(e) => {
+            warn!("[evolution_drift] 生效进化配置反序列化失败，回退默认: {e}");
+            WeightDecayConfig::default()
+        },
+    }
+}
 
 /// 前端 `EvolutionDriftPanel` 使用的统一响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,7 +263,8 @@ pub async fn recalc_and_persist(
     source_reflection_id: Option<&str>,
     as_of_date: Option<&str>,
 ) -> Result<(usize, HashMap<(String, String), f64>), String> {
-    let cfg = WeightDecayConfig::default();
+    // P4：读最近一次人工接受的进化配置；从未审批接受过则与历史一致用默认值。
+    let cfg = load_active_weight_decay_config(db).await;
     let current = load_current_weights(db).await?;
     let history = load_performance_window(db, cfg.lookback_days, as_of_date).await?;
     let new_map = compute_adjusted_weights(&history, &cfg, &current);
@@ -282,7 +320,7 @@ pub async fn get_dashboard(
     db: &DatabaseConnection,
     as_of_date: Option<&str>,
 ) -> Result<EvolutionDriftDashboard, String> {
-    let cfg = WeightDecayConfig::default();
+    let cfg = load_active_weight_decay_config(db).await;
     let current = load_current_weights(db).await?;
     let history = load_performance_window(db, cfg.lookback_days, as_of_date).await?;
     let new_map = compute_adjusted_weights(&history, &cfg, &current);

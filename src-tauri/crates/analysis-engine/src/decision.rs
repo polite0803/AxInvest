@@ -47,11 +47,12 @@ pub struct StockDecision {
 /// 后验概率阈值（规格）：
 ///   - p >= 0.63 → 强烈买入
 ///   - 0.53 <= p < 0.63 → 买入
-///   - 0.48 <= p < 0.53 → 增持
-///   - 0.38 <= p < 0.48 → 持有
+///   - 0.50 <= p < 0.53 → 增持
+///   - 0.38 <= p < 0.50 → 持有
 ///   - 0.30 <= p < 0.38 → 减持
 ///   - p < 0.30 → 卖出
 ///
+/// 2026-10：持有线 0.48→0.50（与贝叶斯中性锚点 0.50 对齐，利好偏置 A 档根治）。
 /// 同时提供与 astock-data/scoring.rs map_signal（100 分制 6 档）的桥接：
 ///   strong_buy / buy / hold / watch / sell / strong_sell
 ///   ↘ 强烈买入 / 买入 / 增持 / 持有 / 减持 / 卖出
@@ -60,7 +61,7 @@ pub fn map_posterior_to_action(posterior: f64) -> &'static str {
         "强烈买入"
     } else if posterior >= 0.53 {
         "买入"
-    } else if posterior >= 0.48 {
+    } else if posterior >= 0.50 {
         "增持"
     } else if posterior >= 0.38 {
         "持有"

@@ -122,7 +122,8 @@ try {
 // action 阈值（effective_posterior）
 let ACTION_BUY_THRESHOLD = if present(action_buy_threshold) { action_buy_threshold } else { 0.63 };
 let ACTION_INCREASE_THRESHOLD = if present(action_increase_threshold) { action_increase_threshold } else { 0.53 };
-let ACTION_HOLD_THRESHOLD = if present(action_hold_threshold) { action_hold_threshold } else { 0.48 };
+// 2026-10 重标定：默认 0.48→0.50，与后验中性锚点 0.50 对齐（利好偏向 A 档根治）
+let ACTION_HOLD_THRESHOLD = if present(action_hold_threshold) { action_hold_threshold } else { 0.50 };
 let ACTION_WATCH_THRESHOLD = if present(action_watch_threshold) { action_watch_threshold } else { 0.38 };
 let ACTION_REDUCE_THRESHOLD = if present(action_reduce_threshold) { action_reduce_threshold } else { 0.30 };
 // 仓位阈值（%）
@@ -1064,7 +1065,8 @@ let f5_signal = if f5_weight > 0.0 {
     //   即**即使把 f5 完全中性化也仍是「减持」**。action 的真实约束是
     //   `prior=0.45(bear) + risk_bias=−0.08(高风险)` 且正向因子合计仅 0.157：
     //   把所有 σ<0 的因子全部归零，上限也只有 eff=0.4327（观望），
-    //   距 ACTION_HOLD_THRESHOLD(0.48) 仍差 0.047。本衰减的定位是
+    //   距当时的 ACTION_HOLD_THRESHOLD(0.48) 差 0.047（2026-10 默认已重标定为 0.50，
+    //   差距 0.067，结论不变）。本衰减的定位是
     //   **置信度纠正（阻止退化锚定冒充证据）**，不是 action 翻转器。
     //
     // 为什么只压 σ、不动权重：σ 是**信号置信度**，权重是**信息配比**。
@@ -2561,7 +2563,7 @@ let weights_collapsed = !dqi_a_level && (
 	// 增持区（effective_posterior≥0.53 且凯利意愿仓位达标）
 	} else if effective_posterior >= ACTION_INCREASE_THRESHOLD && kelly_pos_uncapped >= POS_INCREASE_MIN {
 	    base_action = "增持";
-	// 持有区（effective_posterior≥0.48，与"观望"的模糊边界）
+	// 持有区（effective_posterior≥0.50，与"观望"的中性边界；2026-10 前为 0.48）
 	} else if effective_posterior >= ACTION_HOLD_THRESHOLD {
 	    base_action = "持有";
 	// 观望区（posterior 0.38-0.50，与"减持"的模糊边界）

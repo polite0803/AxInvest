@@ -9,8 +9,18 @@ use axagent_harness::workflow_types::Variable;
 ///
 /// 被三处引用保持一致，避免「同名散成多套值」：
 ///   1. 下方 `debate_rounds` 变量的 `value`（最终落库的变量表）；
-///   2. `seed_stock_analysis.rs` 借 `resolve_debate_rounds` 从旧变量解析建图轮数。
-pub(crate) const DEFAULT_DEBATE_ROUNDS: u32 = 3;
+///   2. `seed_stock_analysis.rs` 借 `resolve_debate_rounds` 从旧变量解析建图轮数；
+///   3. `seed_stock_analysis.rs` 的 `DEBATE_ROUNDS_MIGRATION_VERSION` 一次性门 —— 存量库
+///      在门未关上前无条件取本常量（`merge_variable_values` 会无条件保留旧值，只改这里
+///      不改存量 = 假修复，同 v74 DCF / v115 kline 先例）。
+///
+/// **v154（2026-10-12）由 3 改为 2**，依据是链尾请求体积的逐节点实测
+/// （`AUDIT-601166-chain-break-2026-09-14.md`）：辩手 prompt 随轮次单调膨胀
+/// 18.5 → 85.8 KB，而 provider 侧 `header_timeout = 10 + ⌊body/64KB⌋×5` 是**线性**加档、
+/// 上游 prefill 复杂度**超线性**增长 ⇒ 第 3 轮 `bear-r3` 实测 504 超时，且链尾单点失败
+/// 会掐断下游 29 个节点。增量集中在 R1→R2 的质询，R3 的再反驳边际最低、风险最高。
+/// 轮数仍是可配置变量（面板 `debate_rounds`），本版改的是**出厂初值**，不是能力上限。
+pub(crate) const DEFAULT_DEBATE_ROUNDS: u32 = 2;
 
 /// `kline_limit` 的默认值（**单一权威源**）—— 分析师链的 K 线取数根数。
 ///
@@ -108,8 +118,9 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             //   改动后需升 TEMPLATE_VERSION 强制重种才会生效（版本门见 seed）。
             value: serde_json::json!(DEFAULT_DEBATE_ROUNDS),
             description: Some(
-                "多空辩论轮数（1~3）。每轮展开一对独立辩手节点，各轮经不同专家 \
-                 persona 与前序辩论输出承接，逐轮真跑。建议 ≤3 以控制链尾请求体积。"
+                "多空辩论轮数（可设 1~10，默认 2）。每轮展开一对独立辩手节点，各轮经不同专家 \
+                 persona 与前序辩论输出承接，逐轮真跑。建议 ≤3：辩手 prompt 随轮次单调膨胀，\
+                 实测第 3 轮链尾 85.8 KB 触发 504 超时（见 `DEFAULT_DEBATE_ROUNDS` 文档）。"
                     .into(),
             ),
             is_secret: false,
@@ -2452,7 +2463,8 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
         Variable {
             name: "action_hold_threshold".into(),
             var_type: "number".into(),
-            value: serde_json::json!(0.48),
+            // 2026-10 重标定 0.48→0.50：与后验中性锚点 0.50 对齐（利好偏向 A 档根治）
+            value: serde_json::json!(0.50),
             description: Some("持有动作阈值（后验概率下限，0-1）".into()),
             is_secret: false,
         },

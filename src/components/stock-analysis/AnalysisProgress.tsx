@@ -19,8 +19,8 @@ const STAGES = [
 // store `analystReports` 的键是逐档实例（`market-analyst--mid`）或裸 base（历史快照）——
 // 进度按 base 去档归一后计数（见 subProgress）。
 const ANALYST_BASE_COUNT = 10;
-// 最大辩论轮数（bull/bear 配对数），与 workflow template 中的 maxDebateRounds 同步
-const TOTAL_DEBATE_ROUNDS = 3;
+// 辩论轮数的分母不写死：轮数是建图参数（后端按模板变量 debate_rounds 展开 N 对辩手节点），
+// 由 store `expectedDebateRounds` 每轮分析开始时重读。取不到时退回实跑轮数（只报已有、不报缺失）。
 
 /**
  * 秒 → `mm:ss`（T-1 P1）。
@@ -38,6 +38,7 @@ export function AnalysisProgress() {
   const currentStage = useStockAnalysisStore((s) => s.currentStage);
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
   const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
+  const expectedDebateRounds = useStockAnalysisStore((s) => s.expectedDebateRounds);
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
   const error = useStockAnalysisStore((s) => s.error);
   const llmStatus = useStockAnalysisStore((s) => s.llmStatus);
@@ -88,7 +89,10 @@ export function AnalysisProgress() {
           : null;
       case 2:
         return debateRounds.length > 0
-          ? t("stockAnalysis.debateRounds", { current: debateRounds.length, total: TOTAL_DEBATE_ROUNDS })
+          ? t("stockAnalysis.debateRounds", {
+            current: debateRounds.length,
+            total: expectedDebateRounds ?? debateRounds.length,
+          })
           : null;
       case 3:
         return Object.keys(riskAssessments).length > 0
@@ -97,7 +101,7 @@ export function AnalysisProgress() {
       default:
         return null;
     }
-  }, [status, currentStage, analystReports, debateRounds, riskAssessments, t]);
+  }, [status, currentStage, analystReports, debateRounds, expectedDebateRounds, riskAssessments, t]);
 
   const handlePause = useCallback(async () => {
     if (!workflowId) { return; }

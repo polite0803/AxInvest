@@ -366,6 +366,8 @@ if (canRunRust && !quick) {
   // helper」是错的：统一套下限会让呈现/单条类无端丢行（9 个入口普查后确认）。
   step("跨行聚合按代筛样登记自检（两方向负控）", "node scripts/check-generation-scope-registry.mjs --selftest");
   step("跨行聚合按代筛样登记（四类分列）", "node scripts/check-generation-scope-registry.mjs");
+  step("候选池代际一致自检（读侧谓词/写侧标记/负控）", "node scripts/check-reco-generation.mjs --selftest");
+  step("候选池代际一致（回放行与实盘行同表后不混读混写）", "node scripts/check-reco-generation.mjs");
 
   // ── 逐档分支的档内纯度门（#7 的 ②与④，2026-10-06）──
   // 扫描面按域限定：四个 `pm-h-<档>` 种子块 + 四份 `portfolio-mgr-h-<档>.rhai`。

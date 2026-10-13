@@ -2513,7 +2513,7 @@ impl NodeExecutorTrait for AgentExecutor {
                         "LLM 输出无 VERDICT 标签且非合法 JSON，但流被截断(streamTruncated=true) \
                          ⇒ 落降级 JSON（report 保留半截正文 + 中性 verdict + __untrusted）"
                     );
-                    final_content = build_truncation_degraded_output(&trimmed);
+                    final_content = build_incomplete_degraded_output(&trimmed, true);
                 } else if let Some(repaired) = repair_malformed_json_output(&trimmed) {
                     // ── 分支 A3（2026-10-09）：形似 JSON 但语法非法 → 就地修复 ──
                     // 典型是长文本字段（report）含未转义的 ASCII 引号。修复后整份
@@ -2556,6 +2556,45 @@ impl NodeExecutorTrait for AgentExecutor {
                     "通用后处理: 扁平 JSON verdict(字符串) 重构为嵌套 verdict(map)"
                 );
                 final_content = combined.to_string();
+            }
+        }
+
+        // ── strict_mode 最终 VERDICT 契约闸门（2026-10-12） ──
+        // 经上面「VERDICT 兜底重试 / tag 重构 / JSON 修复 / tool_json 拆包」后，
+        // Text 模式契约节点（strict_mode + tools 非空，与 1672 重试门同一判据）
+        // 仍可能拿不到含 verdict(map) 的产物，两种形态：
+        //  ① 半截 Markdown 报告：流收到终态 chunk（streamTruncated=false）但模型/网关
+        //     提前结束，无 VERDICT 标签（实证 run 3220c35d：a-policy--long /
+        //     a-sector--long / a-market-analyst--mid 等 13 个节点，token 远低于
+        //     32768 上限，节点却 completed）；
+        //  ② 半截 JSON 被 try_fix_truncated_json 补成「合法但无 verdict」对象
+        //     （同次 a-sentiment--ultra_short 产出 {"breadthState":...}）。
+        // output_mode=Text 的 validate_strict_mode_output 只查非空，二者此前都被原样放行，
+        // 下游 content.verdict.* 全空，data-quality 误报「节点无输出」。
+        // 仅限 Text 模式：serenity 等工作流的 tool_json 节点（输出 submit 参数 JSON、
+        // 无 verdict 字段）是 OutputMode::Json，不在此闸门内。
+        // 已是降级产物（strict_mode_fallback）或非 strict 工作流一律放行，行为不变。
+        if let Some(ref perms) = context.tool_permissions
+            && perms.strict_mode
+            && !an.config.tools.is_empty()
+            && matches!(an.config.output_mode, axagent_harness::workflow_types::OutputMode::Text)
+            && !final_content.trim().is_empty()
+            && !final_content.contains("strict_mode_fallback")
+        {
+            let has_verdict_map = serde_json::from_str::<serde_json::Value>(final_content.trim())
+                .ok()
+                .and_then(|v| v.get("verdict").cloned())
+                .is_some_and(|v| v.is_object() && !v.is_null());
+            if !has_verdict_map {
+                tracing::warn!(
+                    node_id = %node.base_id(),
+                    content_len = final_content.len(),
+                    stream_truncated,
+                    "strict_mode: Text 契约节点最终输出仍缺 verdict 机读结构 \
+                     ⇒ 落降级 JSON（report 保留原文 + 中性 verdict + __untrusted）"
+                );
+                final_content =
+                    build_incomplete_degraded_output(final_content.trim(), stream_truncated);
             }
         }
 
@@ -4951,14 +4990,19 @@ fn verdict_tag_without_body(text: &str) -> bool {
     extract_verdict_tag(text).is_some() && strip_verdict_tag(text).is_empty()
 }
 
-/// 构造「流截断 + 无任何可提取结构」时的降级输出（方案 A，2026-09-22）。
+/// 构造「报告不完整 + 无任何可提取的 VERDICT 结构」时的降级输出（方案 A，2026-09-22；
+/// 2026-10-12 扩展到非传输层截断形态）。
 ///
-/// 背景（a-sentiment / 300642 实证，2026-09-22 01:11）：主流在 847 字符处被掐断
+/// 背景 1（a-sentiment / 300642，2026-09-22）：主流在 847 字符处被掐断
 /// （`streamTruncated=true`），无 VERDICT 标签；VERDICT 兜底重试已执行（`strict_mode`
 /// 与 `tools` 两道门都满足，重试输出同样无标签），而 `output_mode=Text` 的
-/// `validate_strict_mode_output` **只校验非空** ⇒ 半截纯文本被原样放行
-/// （`agent_executor.rs` 重试段那句「让下游 strict_mode 校验走降级」是错误假设：
-/// Text 模式下不存在这个降级）。下游 `analyst-brief` 只能标「数据不可用」。
+/// `validate_strict_mode_output` **只校验非空** ⇒ 半截纯文本被原样放行。
+///
+/// 背景 2（a-policy / a-sector / a-market-analyst / run 3220c35d，2026-10-12）：
+/// LLM 网关**提前正常结束**——收到了终态 chunk（`streamTruncated=false`、usage 非零、
+/// token 远低于上限），但报告在句中终止、无 VERDICT 标签（甚至是半截 JSON）。
+/// P0 接线修复后兜底重试仍可能失败，Text 模式同样没有结构校验，半截内容以 `completed`
+/// 落盘，data-quality 误报「节点无输出」。两种形态都必须收敛为降级 JSON。
 ///
 /// 本函数把该形态**收敛为结构化 JSON**：
 /// - `report` 保留已获得的半截正文（人可读信息不丢）；
@@ -4967,8 +5011,21 @@ fn verdict_tag_without_body(text: &str) -> bool {
 ///   （`(0-50)/50 = -1`，见 V57 注释）；
 /// - 键集与既有两条降级路径（strict_mode 格式失败 `:2154`、空内容保护 `:2610`）保持一致，
 ///   仅以 `strict_mode_failure_reason` 文案区分归因，并额外标注 `stream_truncated`
-///   让「传输层截断」与「模型把 JSON 写坏」在产物层可分辨。
-fn build_truncation_degraded_output(report: &str) -> String {
+///   让「传输层截断」与「模型/网关提前结束但收到终态 chunk」在产物层可分辨。
+fn build_incomplete_degraded_output(report: &str, stream_truncated: bool) -> String {
+    let (reason, bull_point, bear_point) = if stream_truncated {
+        (
+            "LLM 流截断（未收到终态 chunk），报告不完整且未生成 VERDICT 标签",
+            "报告因传输中断被截断，未生成看多论据",
+            "报告因传输中断被截断，未生成看空论据",
+        )
+    } else {
+        (
+            "LLM 提前结束输出（收到终态 chunk 但报告在句中终止），未生成 VERDICT 机读结论",
+            "报告提前结束，未生成看多论据",
+            "报告提前结束，未生成看空论据",
+        )
+    };
     serde_json::json!({
         "report": report,
         "verdict": {
@@ -4977,15 +5034,15 @@ fn build_truncation_degraded_output(report: &str) -> String {
             "bear_score": 50,
             "confidence": 30,
             "position_pct": 50,
-            "bull_points": ["报告因传输中断被截断，未生成看多论据"],
-            "bear_points": ["报告因传输中断被截断，未生成看空论据"],
+            "bull_points": [bull_point],
+            "bear_points": [bear_point],
         },
         "strict_mode_fallback": true,
         "__data_quality_alert": true,
         "__untrusted": true,
-        "strict_mode_failure_reason": "LLM 流截断（未收到终态 chunk），报告不完整且未生成 VERDICT 标签",
+        "strict_mode_failure_reason": reason,
         "refusal_detected": false,
-        "stream_truncated": true,
+        "stream_truncated": stream_truncated,
     })
     .to_string()
 }
@@ -5558,22 +5615,32 @@ mod verdict_extract_tests {
     }
 
     #[test]
-    fn test_build_truncation_degraded_output_contract() {
+    fn test_build_incomplete_degraded_output_contract() {
         // 方案 A 的产出契约：下游按 content.verdict.* / __untrusted 下钻，
         // 且 bull_score 必须是中性 50 而非 0（V57：零值会被 portfolio-mgr 当成极端看空）。
-        let out = build_truncation_degraded_output("被截断的半截正文");
-        let v: serde_json::Value = serde_json::from_str(&out).expect("降级输出必须是合法 JSON");
-        assert_eq!(v["report"], "被截断的半截正文");
-        assert_eq!(v["verdict"]["verdict"], "数据不足");
-        assert_eq!(v["verdict"]["bull_score"], 50);
-        assert_eq!(v["verdict"]["bear_score"], 50);
-        assert_eq!(v["__untrusted"], true);
-        assert_eq!(v["strict_mode_fallback"], true);
-        assert_eq!(v["stream_truncated"], true);
-        assert!(
-            v["strict_mode_failure_reason"].as_str().unwrap().contains("截断"),
-            "归因文案必须写明截断，便于与『JSON 写坏』『空内容』两族降级区分"
-        );
+        // 两种形态：传输层截断（stream_truncated=true）与网关提前正常结束（false），
+        // 字段形态一致、仅归因文案与 stream_truncated 标记不同。
+        for truncated in [true, false] {
+            let out = build_incomplete_degraded_output("不完整的半截正文", truncated);
+            let v: serde_json::Value = serde_json::from_str(&out).expect("降级输出必须是合法 JSON");
+            assert_eq!(v["report"], "不完整的半截正文");
+            assert_eq!(v["verdict"]["verdict"], "数据不足");
+            assert_eq!(v["verdict"]["bull_score"], 50);
+            assert_eq!(v["verdict"]["bear_score"], 50);
+            assert_eq!(v["verdict"]["confidence"], 30);
+            assert_eq!(v["__untrusted"], true);
+            assert_eq!(v["strict_mode_fallback"], true);
+            assert_eq!(v["stream_truncated"], truncated);
+            let reason = v["strict_mode_failure_reason"].as_str().unwrap();
+            if truncated {
+                assert!(reason.contains("截断"), "截断形态归因必须写明截断: {reason}");
+            } else {
+                assert!(
+                    reason.contains("提前结束"),
+                    "非截断形态归因必须写明提前结束，便于与传输层截断区分: {reason}"
+                );
+            }
+        }
     }
 
     #[test]

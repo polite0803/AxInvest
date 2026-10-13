@@ -3,6 +3,7 @@
 import type { AggregatedRuns, RunQuery, SourceFetchError, SourceId, UnifiedRun } from "../model";
 import { filterRuns, sortRuns } from "../model";
 import { cronAdapter } from "./cron.adapter";
+import { moverRecallAnalysisAdapter } from "./moverRecallAnalysis.adapter";
 import { pipelineAdapter } from "./pipeline.adapter";
 import { timeTravelAdapter } from "./timeTravel.adapter";
 import type { TaskSourceAdapter } from "./types";
@@ -15,6 +16,7 @@ const REGISTRY: TaskSourceAdapter[] = [
   cronAdapter,
   pipelineAdapter,
   timeTravelAdapter,
+  moverRecallAnalysisAdapter,
 ];
 
 const BY_ID = new Map<SourceId, TaskSourceAdapter>(

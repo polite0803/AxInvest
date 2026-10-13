@@ -2969,7 +2969,12 @@
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "A time-travel batch is already running; wait for it to finish.",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "The live pipeline window is active (23:50-02:10 / 17:50-18:10). Please try later.",
     "TIME_TRAVEL_BATCH_EXEC_FAILED": "The time-travel batch failed; see batch details.",
-    "TIME_TRAVEL_BATCH_QUERY_FAILED": "Failed to query time-travel batch history. Please try again later."
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "Failed to query time-travel batch history. Please try again later.",
+    "MOVER_RECALL_ANALYSIS_INVALID_PARAMS": "Invalid mover-recall backfill parameters; check the batch limit and unexplained-share threshold.",
+    "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "A time-travel or mover-recall backfill batch is already running; wait for it to finish.",
+    "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "Inside the live pipeline window (23:50-02:10 / 17:50-18:10); start again outside it.",
+    "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "The mover-recall backfill batch failed; check the batch details.",
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Failed to query mover-recall backfill batch history; try again later."
   },
   "errorBoundary": {
     "copied": "Copied",
@@ -7507,7 +7512,8 @@
     "source": {
       "scheduledCron": "Scheduled Jobs",
       "stockPipeline": "Stock Analysis Pipeline",
-      "timeTravelBatch": "Time-Travel Batch"
+      "timeTravelBatch": "Time-Travel Batch",
+      "moverRecallAnalysis": "Mover-Recall Backfill"
     },
     "state": {
       "queued": "Queued",
@@ -7540,7 +7546,8 @@
       "running": "Running",
       "queued": "Queued",
       "failed": "Failed",
-      "waiting": "Waiting"
+      "waiting": "Waiting",
+      "pendingEvolution": "Evolution approvals"
     },
     "attention": {
       "title": "Needs attention",
@@ -7573,6 +7580,39 @@
       "range24h": "Last 24h",
       "range7d": "Last 7 days",
       "rangeAll": "All"
+    },
+    "moverRecall": {
+      "start": "Start recall backfill",
+      "modalTitle": "Start mover-recall backfill analysis",
+      "modalHint": "Replays historical analysis as-of each window start; backfilled analyses are flagged synthetic and excluded from the live hit-rate denominator.",
+      "batchLimit": "Max events per batch (1-100)",
+      "maxShare": "Max unexplained share",
+      "maxShareHint": "A recall run whose unexplained share reaches this threshold is skipped entirely.",
+      "runId": "Limit to recall run (optional)",
+      "runIdPlaceholder": "Empty = select across all runs; or enter a recall run ID",
+      "submit": "Start batch",
+      "started": "Batch started ({{id}})",
+      "drawerTitle": "Mover-recall backfill batch",
+      "itemsTitle": "Per-stock details ({{n}})",
+      "itemsEmpty": "No per-stock details yet",
+      "colStock": "Stock",
+      "colPeriod": "Tier",
+      "colWindowStart": "Window start",
+      "colAnchor": "Confirm date",
+      "colCum": "Cum. gain",
+      "colLayer": "Miss layer",
+      "colStatus": "Status",
+      "colError": "Error / analysis",
+      "statusRunning": "Analyzing",
+      "statusAnalyzed": "Analyzed",
+      "statusFailed": "Failed",
+      "batchStatus": {
+        "running": "Running",
+        "completed": "Completed",
+        "partial": "Partial",
+        "failed": "Failed",
+        "interrupted": "Interrupted"
+      }
     }
   },
   "teammatePanel": {
@@ -15886,6 +15926,38 @@
         "neeq": "NEEQ",
         "b_share": "B-shares",
         "unknown": "Unknown"
+      },
+      "review": {
+        "toggle": "Expand backfill and reflection",
+        "loading": "Loading backfill analysis and reflections…",
+        "loadError": "Failed to load review record: {{detail}}",
+        "notTracked": "This event comes from the live recall view and has not been persisted by a scheduled recall run yet; it will appear here once the scheduled run backfills it.",
+        "status_pending": "Backfill pending",
+        "status_excluded": "Excluded this run",
+        "status_running": "Backfilling",
+        "status_analyzed": "Backfilled",
+        "status_reflected": "Backfilled · Reflected",
+        "status_failed": "Backfill failed",
+        "layerHint": "Miss layer: {{layer}}",
+        "windowFacts": "Window {{start}} → {{anchor}} ({{days}} trading days), cum. +{{gain}}%, best single day +{{max}}%",
+        "errorDetail": "Failure reason: {{detail}}",
+        "analysisHeading": "As-of backfill analysis ({{date}})",
+        "analysisMissing": "The event is marked complete but its backfill analysis cannot be found.",
+        "decisionLabel": "Decision: {{action}}",
+        "reflectionHeading": "Per-tier reflection review",
+        "noReflection": "Backfill is complete; per-tier reflections are generated automatically as each holding window matures. Check back later.",
+        "verdictLabel": "Verdict",
+        "verdict_correct": "Correct",
+        "verdict_partial": "Partially correct",
+        "verdict_wrong": "Wrong",
+        "rawReturn": "Actual return",
+        "lessonSummary": "Admitted lesson",
+        "missedSignals": "Missed signals",
+        "whatWentWrong": "What went wrong",
+        "fixForFuture": "Criterion fix for the future",
+        "rfPending": "Reflection queued",
+        "rfRunning": "Generating reflection",
+        "rfFailed": "Reflection failed: {{detail}}"
       }
     },
     "export": {
@@ -18285,7 +18357,66 @@
     "unitLakh": " lakh",
     "horizonScoringWindows": "This tier's indicator windows: {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · Bollinger {{boll}} · Volume {{vol}}",
     "horizonScaleTrend": "Tier bands: fast {{fastBars}} bars {{fast}} / slow {{slowBars}} bars {{slow}}, gap {{diffPct}}%, fast slope {{fastSlope}}",
-    "horizonScaleMomentum": "Tier momentum: RSI({{period}}) = {{value}}"
+    "horizonScaleMomentum": "Tier momentum: RSI({{period}}) = {{value}}",
+    "evolutionApproval": {
+      "drawerTitle": "Evolution Plan Approval",
+      "panelPendingTitle": "{{count}} evolution plan(s) awaiting approval",
+      "pendingTitle": "Pending plans ({{count}})",
+      "emptyPending": "No evolution plans awaiting approval",
+      "selectHint": "Select a plan from the list above to view details",
+      "reviewAction": "Review",
+      "viewAction": "View",
+      "approve": "Approve & execute",
+      "approveConfirm": "Approving will immediately replay this plan and write the result back as the active config. Continue?",
+      "approveSuccess": "Evolution plan approved and executed",
+      "reject": "Reject",
+      "rejectTitle": "Reject evolution plan",
+      "rejectConfirmOk": "Confirm rejection",
+      "rejectReasonPlaceholder": "Provide a rejection reason (required; kept on record for future evolutions)",
+      "rejectReasonRequired": "Rejection reason is required",
+      "rejectSuccess": "Evolution plan rejected",
+      "rollback": "Roll back",
+      "rollbackConfirm": "The current version will be rolled back to the previously accepted version. Continue?",
+      "rollbackSuccess": "Rollback complete",
+      "rollbackUnavailable": "This is the first-generation config; there is no historical version to roll back to",
+      "readonlyHint": "This record is a read-only historical state",
+      "actionFailed": "Action failed: {{msg}}",
+      "diffTitle": "Parameter change preview (backtest best vs default)",
+      "samplesTitle": "Trigger samples",
+      "samples": {
+        "expand": "Show id list",
+        "reflections": "Reflection samples",
+        "validations": "Validation samples",
+        "moverEvents": "Rebalance events",
+        "blockedReflections": "Reflection samples (data unavailable)",
+        "blockedValidations": "Validation samples (data unavailable)",
+        "blockedMoverEvents": "Rebalance events (data unavailable)",
+        "blockedHint": "Samples failing data reachability are hard-routed away: they never trigger structural mutation and only count toward the data-quality dashboard."
+      },
+      "param": {
+        "ewmaAlpha": "EWMA smoothing factor",
+        "lookbackDays": "Lookback days",
+        "sampleSaturation": "Sample saturation threshold"
+      },
+      "meta": {
+        "status": "Status",
+        "createdAt": "Created at",
+        "trigger": "Trigger reason",
+        "summary": "Summary",
+        "reviewer": "Reviewer",
+        "reviewedAt": "Reviewed at",
+        "rejectReason": "Rejection / rollback reason",
+        "rollbackRef": "Rollback baseline version"
+      },
+      "status": {
+        "pendingApproval": "Pending approval",
+        "accepted": "Accepted",
+        "rejected": "Rejected",
+        "success": "Succeeded (legacy)",
+        "failed": "Failed (legacy)",
+        "unknown": "Unknown status"
+      }
+    }
   },
   "pipeline": {
     "title": "Stock Pipeline",

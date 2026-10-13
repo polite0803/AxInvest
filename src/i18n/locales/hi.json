@@ -2969,7 +2969,12 @@
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "एक टाइम-ट्रैवल बैच पहले से चल रहा है; इसके समाप्त होने की प्रतीक्षा करें।",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "लाइव पाइपलाइन विंडो सक्रिय है (23:50–02:10 / 17:50–18:10)। बाद में प्रयास करें।",
     "TIME_TRAVEL_BATCH_EXEC_FAILED": "बैच विफल रहा; बैच विवरण देखें।",
-    "TIME_TRAVEL_BATCH_QUERY_FAILED": "टाइम-ट्रैवल बैच इतिहास क्वेरी विफल। कृपया बाद में पुनः प्रयास करें।"
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "टाइम-ट्रैवल बैच इतिहास क्वेरी विफल। कृपया बाद में पुनः प्रयास करें।",
+    "MOVER_RECALL_ANALYSIS_INVALID_PARAMS": "अमान्य बैकफ़िल पैरामीटर; बैच सीमा और अस्पष्टीकृत अंश सीमा की जाँच करें।",
+    "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "कोई टाइम-ट्रैवल या बैकफ़िल बैच पहले से चल रहा है; इसके पूरा होने तक प्रतीक्षा करें।",
+    "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "लाइव पाइपलाइन विंडो (23:50–02:10 / 17:50–18:10) में हैं; विंडो के बाहर फिर शुरू करें।",
+    "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "बैकफ़िल बैच निष्पादन विफल; बैच विवरण देखें।",
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "बैकफ़िल बैच इतिहास क्वेरी विफल; बाद में पुनः प्रयास करें।"
   },
   "errorBoundary": {
     "copied": "कॉपी हुआ",
@@ -7507,7 +7512,8 @@
     "source": {
       "scheduledCron": "अनुसूचित कार्य",
       "stockPipeline": "स्टॉक विश्लेषण पाइपलाइन",
-      "timeTravelBatch": "टाइम-ट्रैवल बैच"
+      "timeTravelBatch": "टाइम-ट्रैवल बैच",
+      "moverRecallAnalysis": "छूटे रैली बैकफ़िल विश्लेषण"
     },
     "state": {
       "queued": "कतार में",
@@ -7540,7 +7546,8 @@
       "running": "चल रहा है",
       "queued": "कतार में",
       "failed": "विफल",
-      "waiting": "प्रतीक्षारत"
+      "waiting": "प्रतीक्षारत",
+      "pendingEvolution": "विकास अनुमोदन"
     },
     "attention": {
       "title": "ध्यान चाहिए",
@@ -7573,6 +7580,39 @@
       "range24h": "पिछले 24 घंटे",
       "range7d": "पिछले 7 दिन",
       "rangeAll": "सभी"
+    },
+    "moverRecall": {
+      "start": "बैकफ़िल विश्लेषण शुरू करें",
+      "modalTitle": "छूटे रैली बैकफ़िल विश्लेषण शुरू करें",
+      "modalHint": "विंडो प्रारंभ तिथि को as-of मानकर ऐतिहासिक विश्लेषण फिर से चलाता है; बैकफ़िल परिणाम synthetic चिह्नित होते हैं और वास्तविक हिट-रेट भाजक में नहीं गिने जाते।",
+      "batchLimit": "प्रति बैच अधिकतम ईवेंट (1-100)",
+      "maxShare": "अस्पष्टीकृत अंश सीमा",
+      "maxShareHint": "जिस जाँच रन का अस्पष्टीकृत अंश इस सीमा तक पहुँचता है, वह पूरा छोड़ दिया जाता है।",
+      "runId": "जाँच रन तक सीमित करें (वैकल्पिक)",
+      "runIdPlaceholder": "खाली = सभी रन से चयन; या जाँच रन ID",
+      "submit": "बैच शुरू करें",
+      "started": "बैच शुरू हुआ ({{id}})",
+      "drawerTitle": "छूटे रैली बैकफ़िल बैच",
+      "itemsTitle": "प्रति-स्टॉक विवरण ({{n}})",
+      "itemsEmpty": "कोई प्रति-स्टॉक विवरण नहीं",
+      "colStock": "स्टॉक",
+      "colPeriod": "स्तर",
+      "colWindowStart": "विंडो प्रारंभ",
+      "colAnchor": "पुष्टि तिथि",
+      "colCum": "संचयी बढ़त",
+      "colLayer": "चूक स्तर",
+      "colStatus": "स्थिति",
+      "colError": "त्रुटि / विश्लेषण",
+      "statusRunning": "विश्लेषण जारी",
+      "statusAnalyzed": "विश्लेषित",
+      "statusFailed": "विफल",
+      "batchStatus": {
+        "running": "चल रहा",
+        "completed": "पूर्ण",
+        "partial": "आंशिक",
+        "failed": "विफल",
+        "interrupted": "बाधित"
+      }
     }
   },
   "teammatePanel": {
@@ -15667,6 +15707,38 @@
         "neeq": "NEEQ",
         "b_share": "B शेयर",
         "unknown": "अज्ञात"
+      },
+      "review": {
+        "toggle": "बैकफ़िल विश्लेषण और समीक्षा विस्तृत करें",
+        "loading": "बैकफ़िल विश्लेषण और समीक्षाएँ लोड हो रही हैं…",
+        "loadError": "समीक्षा रिकॉर्ड लोड करने में विफल: {{detail}}",
+        "notTracked": "यह ईवेंट लाइव जाँच दृश्य से है और अभी तक किसी निर्धारित जाँच रन द्वारा संग्रहीत नहीं किया गया; निर्धारित बैकफ़िल पूरा होने पर यह यहाँ दिखेगा।",
+        "status_pending": "बैकफ़िल लंबित",
+        "status_excluded": "इस रन में बहिष्कृत",
+        "status_running": "बैकफ़िल चल रहा है",
+        "status_analyzed": "बैकफ़िल पूर्ण",
+        "status_reflected": "बैकफ़िल पूर्ण · समीक्षित",
+        "status_failed": "बैकफ़िल विफल",
+        "layerHint": "चूक स्तर: {{layer}}",
+        "windowFacts": "विंडो {{start}} → {{anchor}} ({{days}} ट्रेडिंग दिन), संचयी +{{gain}}%, सर्वश्रेष्ठ एकल दिन +{{max}}%",
+        "errorDetail": "विफलता का कारण: {{detail}}",
+        "analysisHeading": "as-of बैकफ़िल रिपोर्ट ({{date}})",
+        "analysisMissing": "ईवेंट पूर्ण चिह्नित है लेकिन उसका बैकफ़िल विश्लेषण नहीं मिला।",
+        "decisionLabel": "निर्णय: {{action}}",
+        "reflectionHeading": "प्रति-स्तर समीक्षा",
+        "noReflection": "बैकफ़िल पूर्ण हो चुका है; प्रत्येक होल्डिंग विंडो की परिपक्वता पर समीक्षाएँ स्वतः बनेंगी। बाद में फिर देखें।",
+        "verdictLabel": "निर्णय",
+        "verdict_correct": "सही",
+        "verdict_partial": "आंशिक रूप से सही",
+        "verdict_wrong": "गलत",
+        "rawReturn": "वास्तविक प्रतिफल",
+        "lessonSummary": "स्वीकृत सबक",
+        "missedSignals": "छूटे संकेत",
+        "whatWentWrong": "क्या गलत हुआ",
+        "fixForFuture": "भविष्य के लिए मानदंड सुधार",
+        "rfPending": "समीक्षा कतार में",
+        "rfRunning": "समीक्षा बन रही है",
+        "rfFailed": "समीक्षा विफल: {{detail}}"
       }
     },
     "export": {
@@ -18067,7 +18139,66 @@
     "unitLakh": " लाख",
     "horizonScoringWindows": "इस अवधि के संकेटक विंडो: {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · बोलिंजर {{boll}} · वॉल्यूम {{vol}}",
     "horizonScaleTrend": "इस अवधि की दो पट्टियाँ: तीव्र {{fastBars}} बार {{fast}} / मंद {{slowBars}} बार {{slow}}, अंतर {{diffPct}}%, तीव्र ढलान {{fastSlope}}",
-    "horizonScaleMomentum": "इस अवधि का मोमेंटम: RSI({{period}}) = {{value}}"
+    "horizonScaleMomentum": "इस अवधि का मोमेंटम: RSI({{period}}) = {{value}}",
+    "evolutionApproval": {
+      "drawerTitle": "विकास योजना अनुमोदन",
+      "panelPendingTitle": "{{count}} विकास योजनाएँ अनुमोदन की प्रतीक्षा में हैं",
+      "pendingTitle": "लंबित योजनाएँ ({{count}})",
+      "emptyPending": "अनुमोदन की प्रतीक्षा में कोई विकास योजना नहीं है",
+      "selectHint": "विवरण देखने के लिए ऊपर की सूची से एक योजना चुनें",
+      "reviewAction": "समीक्षा करें",
+      "viewAction": "देखें",
+      "approve": "स्वीकार करें और निष्पादित करें",
+      "approveConfirm": "स्वीकार करने पर यह योजना तुरंत फिर से चलेगी और परिणाम वर्तमान सक्रिय कॉन्फ़िगरेशन में लिखा जाएगा। जारी रखें?",
+      "approveSuccess": "विकास योजना स्वीकार और निष्पादित की गई",
+      "reject": "अस्वीकार करें",
+      "rejectTitle": "विकास योजना अस्वीकार करें",
+      "rejectConfirmOk": "अस्वीकृति की पुष्टि करें",
+      "rejectReasonPlaceholder": "कृपया अस्वीकृति का कारण भरें (आवश्यक; भविष्य के विकास के संदर्भ के लिए दर्ज रहेगा)",
+      "rejectReasonRequired": "अस्वीकृति का कारण आवश्यक है",
+      "rejectSuccess": "विकास योजना अस्वीकार कर दी गई",
+      "rollback": "रोलबैक",
+      "rollbackConfirm": "वर्तमान संस्करण को पिछले स्वीकृत संस्करण पर रोलबैक किया जाएगा। जारी रखें?",
+      "rollbackSuccess": "रोलबैक पूर्ण हुआ",
+      "rollbackUnavailable": "यह पहली पीढ़ी का कॉन्फ़िगरेशन है; रोलबैक के लिए कोई ऐतिहासिक संस्करण नहीं है",
+      "readonlyHint": "यह रिकॉर्ड केवल-पढ़ने योग्य ऐतिहासिक स्थिति है",
+      "actionFailed": "कार्रवाई विफल: {{msg}}",
+      "diffTitle": "पैरामीटर परिवर्तन पूर्वावलोकन (बैकटेस्ट सर्वश्रेष्ठ बनाम डिफ़ॉल्ट)",
+      "samplesTitle": "ट्रिगर नमूने",
+      "samples": {
+        "expand": "id सूची देखें",
+        "reflections": "चिंतन नमूने",
+        "validations": "सत्यापन नमूने",
+        "moverEvents": "पुनर्संतुलन घटनाएँ",
+        "blockedReflections": "चिंतन नमूने (डेटा अनुपलब्ध)",
+        "blockedValidations": "सत्यापन नमूने (डेटा अनुपलब्ध)",
+        "blockedMoverEvents": "पुनर्संतुलन घटनाएँ (डेटा अनुपलब्ध)",
+        "blockedHint": "डेटा पहुँच-योग्यता में विफल नमूनों को कठोर नियम द्वारा अलग किया जाता है: वे कभी भी संरचनात्मक उत्परिवर्तन ट्रिगर नहीं करते और केवल डेटा-गुणवत्ता डैशबोर्ड में गिने जाते हैं।"
+      },
+      "param": {
+        "ewmaAlpha": "EWMA स्मूथिंग गुणांक",
+        "lookbackDays": "लुकबैक दिन",
+        "sampleSaturation": "नमूना संतृप्ति सीमा"
+      },
+      "meta": {
+        "status": "स्थिति",
+        "createdAt": "निर्माण समय",
+        "trigger": "ट्रिगर कारण",
+        "summary": "निष्कर्ष सारांश",
+        "reviewer": "समीक्षक",
+        "reviewedAt": "समीक्षा समय",
+        "rejectReason": "अस्वीकृति/रोलबैक कारण",
+        "rollbackRef": "रोलबैक आधारभूत संस्करण"
+      },
+      "status": {
+        "pendingApproval": "अनुमोदन लंबित",
+        "accepted": "स्वीकृत",
+        "rejected": "अस्वीकृत",
+        "success": "सफल (पुराना)",
+        "failed": "विफल (पुराना)",
+        "unknown": "अज्ञात स्थिति"
+      }
+    }
   },
   "pipeline": {
     "title": "स्टॉक पाइपलाइन",

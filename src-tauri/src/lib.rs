@@ -102,7 +102,8 @@ pub use commands::stock_analysis_setup::seed_stock_analysis::TEMPLATE_VERSION;
 // `pub use reflection::…`，避免触碰 build.rs 的 re-export 解析面。
 pub use commands::stock_workflow::reflection::{
     DEFAULT_REFLECTION_DEPTH, DEFAULT_REFLECTION_MIN_CONFIDENCE, PendingReflectionSeed,
-    build_pending_reflection_rows_for, reviewable_horizons,
+    REFLECTION_SOURCE_DUE, REFLECTION_SOURCE_MOVER_RECALL, build_pending_reflection_rows_for,
+    reviewable_horizons,
 };
 
 /// 在独立线程中创建 current_thread tokio runtime 并执行 async 任务（阻塞等待完成）。
@@ -149,14 +150,35 @@ where
 /// 用于后台初始化（如能力索引、FTS5 构建等耗时操作），
 /// 这些操作不应阻塞启动流程。
 /// Windows 默认线程栈仅 1MB，因此显式分配 8MB 栈。
-fn spawn_fire_and_forget<F, T>(task_name: &'static str, f: F)
+///
+/// 同样用于**深嵌套 async 链路**的后台任务（如时间旅行批次复盘）：Tauri 全局 tokio
+/// runtime 的 worker 线程只有默认 2MB 栈，debug 构建下巨型 future 状态机轮询到深层
+/// （工作流引擎 → 多路 agent/LLM 流）会直接栈溢出（STATUS_ACCESS_VIOLATION，
+/// 2026-10-12 实测）。此类调用方用
+/// [`spawn_fire_and_forget_with_stack`] 指定 32MB 栈。
+pub(crate) fn spawn_fire_and_forget<F, T>(task_name: &'static str, f: F)
 where
     F: Send + 'static + std::future::Future<Output = T>,
     T: Send + 'static,
 {
-    const LARGE_STACK: usize = 8 * 1024 * 1024;
+    spawn_fire_and_forget_with_stack(task_name, 8 * 1024 * 1024, f);
+}
+
+/// 同 [`spawn_fire_and_forget`]，但允许显式指定线程栈大小。
+///
+/// 深嵌套 async 链路（时间旅行批次复盘：荐股扫描 + serenity 回放 + 逐只工作流分析）
+/// 在 debug 构建下单层 future 帧远大于 release，2MB worker 栈会溢出，8MB 也不保险，
+/// 此类调用方传 32MB（仅预留虚拟地址空间，实际提交按需增长）。
+pub(crate) fn spawn_fire_and_forget_with_stack<F, T>(
+    task_name: &'static str,
+    stack_size: usize,
+    f: F,
+) where
+    F: Send + 'static + std::future::Future<Output = T>,
+    T: Send + 'static,
+{
     let thread_name = format!("axagent:{task_name}");
-    match std::thread::Builder::new().name(thread_name).stack_size(LARGE_STACK).spawn(move || {
+    match std::thread::Builder::new().name(thread_name).stack_size(stack_size).spawn(move || {
         let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
             Ok(rt) => rt,
             Err(e) => {
@@ -169,7 +191,60 @@ where
     }) {
         Ok(_handle) => {
             tracing::info!(target: "startup",
-                "Spawned background task: {} (stack=8MB, fire-and-forget)", task_name);
+                "Spawned background task: {} (stack={} bytes, fire-and-forget)", task_name, stack_size);
+            // 不 .join() —— 让它在后台跑
+        },
+        Err(e) => {
+            tracing::error!(target: "startup",
+                "Failed to spawn thread for {}: {}", task_name, e);
+        },
+    }
+}
+
+/// 深嵌套 async 链路专用：独立**多线程** runtime + 大栈，fire-and-forget。
+///
+/// 与 [`spawn_fire_and_forget`]（current-thread runtime）的区别：批次复盘链路里的
+/// 工作流引擎 / 工具执行器存在 `tokio::task::block_in_place` 调用
+/// （`rt-workflow ... engine/mod.rs`、`tools/src/rhai_engine.rs`），
+/// 该 API 在 current-thread runtime 上会直接 panic，故必须用 multi-thread runtime。
+///
+/// 同时 Tauri 全局 runtime 的 worker 只有默认 2MB 栈：debug 构建下批次巨型 future
+/// （荐股扫描 → serenity 回放 → 逐只工作流分析 → 多路 agent/LLM 流）轮询到
+/// 深层会栈溢出（STATUS_ACCESS_VIOLATION，2026-10-12 实测）。因此宿主线程
+/// 与 worker 线程都显式给大栈（仅预留虚拟地址空间，实际提交按需增长）。
+pub(crate) fn spawn_fire_and_forget_multithread<F, T>(
+    task_name: &'static str,
+    host_stack_size: usize,
+    worker_threads: usize,
+    worker_stack_size: usize,
+    f: F,
+) where
+    F: Send + 'static + std::future::Future<Output = T>,
+    T: Send + 'static,
+{
+    let thread_name = format!("axagent:{task_name}");
+    match std::thread::Builder::new().name(thread_name).stack_size(host_stack_size).spawn(
+        move || {
+            let rt = match tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(worker_threads)
+                .thread_stack_size(worker_stack_size)
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    tracing::error!(target: "startup",
+                        "Failed to create tokio runtime for {}: {}", task_name, e);
+                    return;
+                },
+            };
+            rt.block_on(f);
+        },
+    ) {
+        Ok(_handle) => {
+            tracing::info!(target: "startup",
+                "Spawned background task: {} (multi-thread, host_stack={} bytes, workers={}, worker_stack={} bytes)",
+                task_name, host_stack_size, worker_threads, worker_stack_size);
             // 不 .join() —— 让它在后台跑
         },
         Err(e) => {

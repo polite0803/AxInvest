@@ -66,6 +66,10 @@ export function PipelineRunDetailDrawer({ run, onClose }: PipelineRunDetailDrawe
   }, [run, getRunDetail]);
 
   const summary = run?.summary ?? detail?.summary ?? null;
+  // 旧版后端对「运行中/失败/从未回写明细」的批次返回 null（2026-10-12 起后端
+  // 契约保证空数组，此处保留兜底兼容旧响应），直接读 .length 会触发整页 ErrorBoundary。
+  const newAnalyses = detail?.newAnalyses ?? [];
+  const reassessed = detail?.reassessed ?? [];
 
   const stockColumns: ColumnsType<PipelineAnalysisSummary> = [
     {
@@ -218,9 +222,9 @@ export function PipelineRunDetailDrawer({ run, onClose }: PipelineRunDetailDrawe
                 <Space orientation="vertical" size="middle" style={{ width: "100%", marginTop: 16 }}>
                   <div>
                     <Typography.Title level={5}>
-                      {t("tasksCenter.pipelineDetail.newAnalysesList", { n: detail.newAnalyses.length })}
+                      {t("tasksCenter.pipelineDetail.newAnalysesList", { n: newAnalyses.length })}
                     </Typography.Title>
-                    {detail.newAnalyses.length === 0
+                    {newAnalyses.length === 0
                       ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
                       : (
                         <Table
@@ -228,15 +232,15 @@ export function PipelineRunDetailDrawer({ run, onClose }: PipelineRunDetailDrawe
                           pagination={{ pageSize: 10 }}
                           rowKey={(r) => r.analysisId ?? `${r.stockCode}-new`}
                           columns={stockColumns}
-                          dataSource={detail.newAnalyses}
+                          dataSource={newAnalyses}
                         />
                       )}
                   </div>
                   <div>
                     <Typography.Title level={5}>
-                      {t("tasksCenter.pipelineDetail.reassessedList", { n: detail.reassessed.length })}
+                      {t("tasksCenter.pipelineDetail.reassessedList", { n: reassessed.length })}
                     </Typography.Title>
-                    {detail.reassessed.length === 0
+                    {reassessed.length === 0
                       ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
                       : (
                         <Table
@@ -244,7 +248,7 @@ export function PipelineRunDetailDrawer({ run, onClose }: PipelineRunDetailDrawe
                           pagination={{ pageSize: 10 }}
                           rowKey={(r) => r.analysisId ?? `${r.stockCode}-re`}
                           columns={stockColumns}
-                          dataSource={detail.reassessed}
+                          dataSource={reassessed}
                         />
                       )}
                   </div>

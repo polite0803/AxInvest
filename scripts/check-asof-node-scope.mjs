@@ -19,15 +19,20 @@
 // R1 硬：段内出现 `RunOptions {` 且带「本轮有 as-of」的任一标记
 //    （`parse_asof_param(` / `with_optional_asof(` / `as_of_ctx` / `AS_OF.scope(`）
 //    ⇒ 必须出现 `node_task_scope`。
-// R2 硬：段内出现 `pick.insert(db)` 或 `set_serenity_seed(` ⇒ 该调用点**前窗口**内必须有
-//    as-of 守卫（`as_of_ctx.is_none()` / `is_some()` / `as_of_date.is_none()` 之一）。
+// R2 硬：两类「写进实盘可见状态」的调用点，**判据不同向**（2026-10-12 裁定改了其一）——
+//    `pick.insert(db)` 的前窗口内必须有**代际写入**（`as_of_date: Set(`）：回放的候选
+//    现在要落库供反思，防污染靠代际列而不是靠跳过写库；
+//    `set_serenity_seed(` 的前窗口内仍必须有 **live 守卫**（`as_of_ctx.is_none()` 等）：
+//    那是进程内状态，没有代际可打，被回放写过就分不回来。
 // R4 硬：`init/services.rs` 里 cron 数据分支的 spawn 任务体必须压 `declare_cron_live_mode()`
 //    （下限 6 = 现网数据敏感分支数）。定时链从不接 `as_of_date`，不显式声明 live 时，
 //    并发回放留在全局作用域栈上的截止日会渗进取数 —— 那是 2026-09-23 事故的镜像形态。
 // R3 硬（前端）：趋势智选面板必须把「本轮口径」绑到 payload，而不是渲染时读全局时间锚点
 //    （T11 复发形态）⇒ 事件侧 `setLastRunAsOfDate(` 与渲染侧 `lastRunAsOfDate` 都必须存在。
-// 自证：`--selftest` 用合成骨架证明检测器不空转，并含四条负控（拆钩子 / 守卫挪远 /
-//    逐条拆面板绑定），以及「token 只出现在注释或字符串里不算数」的剥离负控。
+// 自证：`--selftest` 用合成骨架证明检测器不空转，共十组负控（拆钩子 / 拆 asOfDate 键 /
+//    代际写入后置 / 写入挪远 / 拆种子守卫 / 无调用点不误报 / 快照校验只剩定义 /
+//    调用点藏在注释里 / 逐条拆面板绑定 / 定时声明计数），
+//    以及「token 只出现在注释或字符串里不算数」的剥离负控。
 //
 // ⚠ 判据两侧都在**剥注释后、空白归一**的骨架上比 —— 直接 grep 原文件会被注释里的
 //   示例串骗过，也会被 rustfmt/dprint 的折行打断。
@@ -42,14 +47,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const COMMAND_DIR = path.join(ROOT, "src-tauri/src/commands");
 const PANEL_FILE = "src/components/stock-analysis/SerenityScreeningPanel.tsx";
 
-/** R2 的「前窗口」宽度（骨架字符数）：守卫与调用点之间只允许隔着少量代码。 */
+/** R2 的「前窗口」宽度（骨架字符数）：证据与调用点之间只允许隔着少量代码。 */
 const GUARD_WINDOW = 600;
-const ASOF_GUARDS = [
-  "as_of_ctx.is_none()",
-  "as_of_ctx.is_some()",
-  "as_of_date.is_none()",
-  "as_of_date.is_some()",
-];
 /** R1 的「本轮带 as-of」标记：命令侧解析，或上层已把 ctx 传进来。 */
 const ASOF_MARKERS = [
   "parse_asof_param(",
@@ -57,8 +56,26 @@ const ASOF_MARKERS = [
   "as_of_ctx",
   "AS_OF.scope(",
 ];
-/** R2 要盯的「写进实盘状态」的调用点。 */
-const PERSIST_CALLS = ["pick.insert(db)", "set_serenity_seed("];
+/**
+ * R2：两类「写进实盘可见状态」的调用点，判据**不同向**（2026-10-12 裁定改了其一）：
+ *  - `pick.insert(db)`：回放的候选**要**落库（不落就没有样本可供反思），所以这里锁的是
+ *    「写库时带上代际」（`as_of_date: Set(` 落在调用点前窗口），不再是 10-11 那版的
+ *    「回放跳过写库」。仍接受旧的 `is_none()` 守卫形态会让门对「忘了打标记」睁一只眼。
+ *  - `set_serenity_seed(`：进程内可变状态，没有代际可打，一旦被回放写过就分不回来
+ *    ⇒ 仍必须被 live 守卫挡住。
+ */
+const PERSIST_CALLS = [
+  {
+    call: "pick.insert(db)",
+    evidence: ["as_of_date: Set("],
+    label: "代际写入（as_of_date: Set(..)）",
+  },
+  {
+    call: "set_serenity_seed(",
+    evidence: ["as_of_ctx.is_none()", "as_of_date.is_none()"],
+    label: "live 守卫",
+  },
+];
 
 /**
  * 剥 Rust 注释，保留字符串与 raw string 原样。
@@ -209,19 +226,19 @@ export function checkRustSources(dump) {
           );
         }
       }
-      // R2：写进实盘状态的调用点必须被 as-of 守卫挡住
-      for (const call of PERSIST_CALLS) {
-        let at = fn.body.indexOf(call);
+      // R2：写进实盘可见状态的调用点必须带上各自的证据（代际写入 / live 守卫）
+      for (const spec of PERSIST_CALLS) {
+        let at = fn.body.indexOf(spec.call);
         while (at !== -1) {
           r2Hits += 1;
           const window = fn.body.slice(Math.max(0, at - GUARD_WINDOW), at);
-          if (!ASOF_GUARDS.some((g) => window.includes(g))) {
+          if (!spec.evidence.some((g) => window.includes(g))) {
             violations.push(
-              `R2 ${rel}::${fn.name} —— 调用点 \`${call}\` 的前 ${GUARD_WINDOW} 字符内没有 ` +
-                `as-of 守卫 ⇒ 回放结果会混进实盘表/全局种子池`,
+              `R2 ${rel}::${fn.name} —— 调用点 \`${spec.call}\` 的前 ${GUARD_WINDOW} 字符内没有 ` +
+                `${spec.label} ⇒ 回放产物会与实盘同表同种子、分不出代际`,
             );
           }
-          at = fn.body.indexOf(call, at + 1);
+          at = fn.body.indexOf(spec.call, at + 1);
         }
       }
       if (dump) console.log(`  段 ${rel}::${fn.name} (${fn.body.length} 字符)`);
@@ -293,6 +310,33 @@ export function checkCronLiveMode(minimum = 6) {
   return { violations, calls, minimum };
 }
 
+/** R5 的计数判据（抽成纯函数：自测要在合成骨架上拆它，读真文件的自测与现网同源、测不到判据）。 */
+export function batchSnapshotCalls(code) {
+  return countOccurrences(code, "require_pool_snapshot_coverage(");
+}
+
+/**
+ * R5：时间旅行批次进 guard 前必须校验「该 as-of 日有建池快照」。
+ * 热股榜与行业榜都申报 `NoHistoricalSemantic`，回放下唯一历史正门是本地每日快照；缺快照
+ * 就是空池 ⇒ 整批候选 0，而批次终态只留一句「均无候选（可能当日数据缺失或阈值过高）」——
+ * 把「这个日期根本不可回放」和「阈值太高所以没选出来」挤进同一句。
+ * 下限 2 = 定义 + 调用点各一处：只剩定义（死代码）比压根没写更坏，因为它让下一次摘掉
+ * 调用点看起来像"逻辑还在"。
+ */
+export function checkBatchSnapshotGate() {
+  const rel = "src-tauri/src/commands/time_travel_batch.rs";
+  const code = stripRustComments(fs.readFileSync(path.join(ROOT, rel), "utf8"));
+  const calls = batchSnapshotCalls(code);
+  const violations = [];
+  if (calls < 2) {
+    violations.push(
+      `R5 ${rel} —— 建池快照覆盖校验只出现 ${calls} 处（定义 + 调用点应各 1）` +
+        `⇒ 不可回放的日期会重新变成「跑完静默零候选」`,
+    );
+  }
+  return { violations, calls };
+}
+
 /** 出现次数（判据用字面计数，不做语义解析 —— 靶子是「有没有那一行」）。 */
 export function countOccurrences(haystack, needle) {
   let n = 0;
@@ -342,25 +386,33 @@ function selftest() {
     fail("剥离失败：字符串里的 // 把后面的代码当注释吃掉了");
   }
 
+  // 正样本要同时给出现代两种合法形态：落库**带代际写入**、种子**被 live 守卫挡住**
   const good =
     "fn run(x) { let ctx = parse_asof_param(d); let o = RunOptions { node_task_scope: Some(h) }; " +
     "let j = json!({ \"asOfDate\": d }); " +
-    "if as_of_ctx.is_none() { if let Err(e) = pick.insert(db) { } } }";
+    "let am = ActiveModel { as_of_date: Set(as_of_ctx.as_ref().map(|c| c.as_string())) }; " +
+    "if let Err(e) = pick.insert(db) { } " +
+    "if as_of_ctx.is_none() { set_serenity_seed(s); } }";
   const mk = (body) => skeleton(body);
   const seg = (body) => splitTopLevelFns(mk(body));
 
   // 正样本：R1/R2 都不报
-  const probe = (body, call) => {
+  const probe = (body, spec) => {
     const b = seg(body)[0]?.body ?? "";
-    const at = b.indexOf(call);
+    const at = b.indexOf(spec.call);
     if (at === -1) return "no-call";
     const window = b.slice(Math.max(0, at - GUARD_WINDOW), at);
-    return ASOF_GUARDS.some((g) => window.includes(g)) ? "guarded" : "unguarded";
+    return spec.evidence.some((g) => window.includes(g)) ? "guarded" : "unguarded";
   };
   if (missingEngineWirings(seg(good)[0].body).length !== 0) {
     fail(`自证失败：正样本被判缺接线 ${missingEngineWirings(seg(good)[0].body)}`);
   }
-  if (probe(good, "pick.insert(db)") !== "guarded") fail("自证失败：正样本的落库守卫没读出来");
+  if (probe(good, PERSIST_CALLS[0]) !== "guarded") {
+    fail("自证失败：正样本的落库代际写入没读出来");
+  }
+  if (probe(good, PERSIST_CALLS[1]) !== "guarded") {
+    fail("自证失败：正样本的 set_serenity_seed live 守卫没读出来");
+  }
 
   // 负控 1：拆掉 node_task_scope ⇒ R1 形态必须命中
   const noHook = good.replace(" node_task_scope: Some(h)", "");
@@ -376,22 +428,49 @@ function selftest() {
     fail("自证失败：拆掉 asOfDate 键后 R1 没报出（前端会绑到恒 undefined 的键）");
   }
 
-  // 负控 2：把守卫挪到调用点**之后** ⇒ R2 必须判成未守卫
-  const guardAfter =
-    "fn run(x) { if let Err(e) = pick.insert(db) { } if as_of_ctx.is_none() { } }";
-  if (probe(guardAfter, "pick.insert(db)") !== "unguarded") {
-    fail("自证失败：守卫写在调用点之后仍被当成已守卫（判据没方向性）");
+  // 负控 2：代际写入落在调用点**之后** ⇒ 必须判成未带代际（判据要有方向性）
+  const genAfter =
+    "fn run(x) { if let Err(e) = pick.insert(db) { } let am = ActiveModel { as_of_date: Set(d) }; }";
+  if (probe(genAfter, PERSIST_CALLS[0]) !== "unguarded") {
+    fail("自证失败：代际写入在调用点之后仍被当成已带代际（判据没方向性）");
   }
 
-  // 负控 3：守卫存在但离调用点超过前窗口 ⇒ 必须判成未守卫
-  const farGuard = `fn run(x) { as_of_ctx.is_none(); ${"let z = 0; ".repeat(160)} pick.insert(db); }`;
-  if (probe(farGuard, "pick.insert(db)") !== "unguarded") {
-    fail("自证失败：前窗口宽度不起作用（远处守卫被误当成本处守卫）");
+  // 负控 3：代际写入存在但离调用点超过前窗口 ⇒ 必须判成未带代际
+  const farGen =
+    `fn run(x) { let am = ActiveModel { as_of_date: Set(d) }; ${"let z = 0; ".repeat(160)} pick.insert(db); }`;
+  if (probe(farGen, PERSIST_CALLS[0]) !== "unguarded") {
+    fail("自证失败：前窗口宽度不起作用（远处写入被当成本处写入）");
+  }
+
+  // 负控 3b：拆掉 set_serenity_seed 的 live 守卫 ⇒ 必须判成未守卫
+  //（种子这半边判据没被新裁定退役，拆掉就该红）
+  const seedUnguarded =
+    "fn run(x) { let am = ActiveModel { as_of_date: Set(d) }; " +
+    "if let Err(e) = pick.insert(db) { } set_serenity_seed(s); }";
+  if (probe(seedUnguarded, PERSIST_CALLS[1]) !== "unguarded") {
+    fail("自证失败：种子调用点没了 live 守卫却没被判出 ⇒ 污染实盘池的形态会静默复活");
   }
 
   // 负控 4：完全没有落库调用 ⇒ 检测器不得凭空报（恒真判据的另一种形态）
   if (seg("fn run(x) { let a = 1; }")[0].body.includes("pick.insert(db)")) {
     fail("自证失败：无调用点的样本被读出调用点");
+  }
+
+  // 负控 4c（R5）：批次建池快照校验的三种形态必须给出不同读数
+  //（只剩定义 = 死代码，读数应是 1 而不是 2；调用点写在注释里不算调用）
+  const gateGood =
+    "fn require_pool_snapshot_coverage(db) { }\nfn run(x) { require_pool_snapshot_coverage(db); }";
+  if (batchSnapshotCalls(skeleton(gateGood)) !== 2) {
+    fail(`自证失败：R5 正样本读数应为 2，实得 ${batchSnapshotCalls(skeleton(gateGood))}`);
+  }
+  if (batchSnapshotCalls(skeleton("fn require_pool_snapshot_coverage(db) { }")) !== 1) {
+    fail("自证失败：R5 摘掉调用点后读数不是 1 ⇒ 下限 2 判不出「只剩定义」这种死代码");
+  }
+  const gateCallInComment =
+    "fn require_pool_snapshot_coverage(db) { }\n" +
+    "fn run(x) { /* require_pool_snapshot_coverage(db); */ }";
+  if (batchSnapshotCalls(skeleton(gateCallInComment)) !== 1) {
+    fail("自证失败：R5 把注释里的调用点当成真调用（判据会被注释蒙过）");
   }
 
   // 负控 5（前端 R3）：真面板的三条绑定必须在位，逐条拆掉后对应标志必须翻假
@@ -431,8 +510,9 @@ function selftest() {
     process.exit(1);
   }
   console.log(
-    "✅ 自证通过（剥注释不吞代码；正样本读得出钩子/回灌键/守卫；七组负控：拆钩子 / 拆 asOfDate 键 / " +
-      "守卫后置 / 守卫挪远 / 无调用点 / 面板绑定逐条拆 / 定时声明计数，均按预期）",
+    "✅ 自证通过（剥注释不吞代码；正样本读得出钩子/回灌键/代际写入；十组负控：拆钩子 / " +
+      "拆 asOfDate 键 / 代际写入后置 / 写入挪远 / 拆种子守卫 / 无调用点不误报 / " +
+      "快照校验只剩定义 / 调用点藏在注释里 / 面板绑定逐条拆 / 定时声明计数，均按预期）",
   );
   process.exit(0);
 }
@@ -445,12 +525,19 @@ function main() {
   const rust = checkRustSources(dump);
   const panel = checkPanel(dump);
   const cron = checkCronLiveMode();
-  const violations = [...rust.violations, ...panel.violations, ...cron.violations];
+  const batch = checkBatchSnapshotGate();
+  const violations = [
+    ...rust.violations,
+    ...panel.violations,
+    ...cron.violations,
+    ...batch.violations,
+  ];
 
   console.log(
     `扫描：Rust 命令层 ${rust.fileCount} 个文件 / ${rust.fnCount} 个顶层函数段；` +
       `R1 命中 ${rust.r1Hits} 处（as-of 标记 + RunOptions）、R2 命中 ${rust.r2Hits} 个落库调用点；` +
-      `R3 面板 1 个；R4 定时 live 声明 ${cron.calls}/${cron.minimum} 处`,
+      `R3 面板 1 个；R4 定时 live 声明 ${cron.calls}/${cron.minimum} 处；` +
+        `R5 批次建池快照校验 ${batch.calls} 处`,
   );
   if (violations.length > 0) {
     console.error(`❌ as-of 接线违规 ${violations.length} 条：`);

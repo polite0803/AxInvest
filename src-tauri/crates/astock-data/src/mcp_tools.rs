@@ -1543,8 +1543,24 @@ pub async fn execute_mcp_tool(
             //   而与爆炸值（6e6 × 现价）之间仍有 4 个数量级安全边际。
             // 同一把尺子也适用于格雷厄姆（见下方 graham_usable），否则两个消费者口径不一致。
             let iv_ceil = current_price * 100.0;
-            let dcf_usable =
-                current_price > 0.0 && dcf_mid.is_some_and(|m| m > iv_floor && m < iv_ceil);
+            // 天花板资格遮蔽（2026-10-13，601127 实证）：锚定 FCF 收益率 >15% ⇒
+            // 锚是周期/扩张顶点一次性现金流，正向三档会给出现价 8 倍的伪低估。
+            // 结论层同时把主口径让给 reverse_dcf；这里必须把三档一并遮蔽，
+            // 否则 value-verify.rhai（只消费 available/upsidePct/applicable）
+            // 仍把三档覆写成 intrinsic_value_range。判据见
+            // [`dcf_tiers_masked_by_anchor_ceiling`] 长注释。
+            let dcf_ceiling_rejected = dcf_assumptions.as_ref().is_some_and(|a| {
+                dcf_tiers_masked_by_anchor_ceiling(a.fcf_anchor, total_mv, a.applicable)
+            });
+            let dcf_usable = current_price > 0.0
+                && dcf_mid.is_some_and(|m| m > iv_floor && m < iv_ceil)
+                && !dcf_ceiling_rejected;
+            // 未遮蔽保守档仅供**结论层**使用：天花板/量程拒绝时，build_conclusion
+            // 仍需真实上行空间来给出正确的拒绝原因（否则先被
+            // 「upside 缺失」分支短路，拒绝文案会撒谎成「三档数值缺失」）。
+            // 乐观档覆盖率仍只用遮蔽值：量程退化值不得拿来证明「够得到现价」。
+            // 展示/payload/rhai 一律只用遮蔽后的 `dcf_low/mid/high`。
+            let dcf_low_raw = dcf_low;
             // 退化输出一律按「不可用」处理（V74 契约：输出 null 而非 0），
             // 避免下游把 ≈0 当成「内在价值 0 元」的真实估值。
             // 此处遮蔽 dcf_low/mid/high 后，下游所有 `dcf_mid.is_none()` 判断
@@ -1722,7 +1738,10 @@ pub async fn execute_mcp_tool(
                 (Some(mv), Some(a)) if mv > 0.0 => Some(a.fcf_anchor / mv),
                 _ => None,
             };
-            let dcf_upside_pct = match (dcf_low, current_price > 0.0) {
+            // 结论层用**未遮蔽**三档：天花板/量程拒绝正是结论要报告的事实，
+            // 喂遮蔽后的 None 会让拒绝原因被「三档数值缺失」分支错误短路
+            //（见遮蔽点 `dcf_low_raw` 注释）。
+            let dcf_upside_pct = match (dcf_low_raw, current_price > 0.0) {
                 (Some(low), true) => Some((low - current_price) / current_price * 100.0),
                 _ => None,
             };
@@ -3108,6 +3127,63 @@ const FCF_TO_NP_MIN_FOR_ANCHOR: f64 = 0.6;
 /// 且与 fallback 锚同口径，保证「当期 FCF 偏低」与「当期 FCF ≤ 0」两条路径可比。
 const OWNER_EARNINGS_CONVERSION: f64 = 0.90;
 
+/// FCF 锚的**质量上限**：当期真实 FCF 与 TTM 净利之比高于此值、**且**该 FCF 相对
+/// 公司自身多年历史构成一次性峰值（[`is_peak_annual_fcf`]）时，「当期 FCF」同样
+/// 不是可信的 DCF 分子 —— 锚改到跨周期所有者收益代理（近 5 年报正净利均值
+/// × [`OWNER_EARNINGS_CONVERSION`]）。与 [`FCF_TO_NP_MIN_FOR_ANCHOR`]（下半区 0.6）
+/// **严格对称**：一个治「FCF 被扩张性资本开支扣低」，一个治「FCF 被一次性营运
+/// 资本释放抬高」。
+///
+/// ## 病根（赛力斯 601127 实证，2026-10-13；这是 DCF 锚链第 6 个实证标的）
+///
+/// 2026-10-13 用户截图：现价 52.70 元，DCF 区间 **412.62–1400.75 元**、保守档
+/// 上行 **+683%**，同卡「财务健康：差」。以仓内常量反解，四个展示数字精确闭合于：
+/// 基准增速被夹在 [`MAX_GROWTH`] = 30% 上限、每股锚定 FCF **15.90 元**、
+/// 年锚 **≈239 亿**（股本 ~15.05 亿）、锚 FCF 收益率 **30.2%**。
+///
+/// 239 亿来自「最近完整年报 OCF − 资本开支」，而同期 FCF/净利 ≈ 4。增量主要是
+/// 扩张期**应付账款/合同负债随营收翻倍而膨胀**（营运资本一次性释放）：销量增速
+/// 一放缓即反向收缩，不可持续、不能复利。模型却把它当第 0 年股东现金流，按
+/// 永续 g 滚动 ⇒ 市场给约 3.3× 锚 FCF 的定价，模型给了 20×+。
+///
+/// ## 为什么必须**双条件**（ratio 超高 **且** 相对自身历史为峰值）
+///
+/// 稳态企业 FCF/净利长期在 0.7–1.2（折旧与资本开支大致抵消）；但确有健康的
+/// 轻资产/类加盟企业 FCF 长期 ≈ 净利的 1.5–2 倍（资本开支持续低于折旧）。
+/// 单看比值上界会误伤这类**持续**现金牛。第二条件要求「最新值 ≥
+/// [`ANCHOR_PEAK_HISTORY_MULT`] × 含亏损年份的近 5 年均值」：持续高现金流公司
+/// 最新值 ≈ 多年均值，不命中；周期/扩张顶点公司最新值数倍于含亏年的均值，命中。
+/// 判据锚定**数据形态**（自身时间序列），不锚行业标签。
+///
+/// 与下半区处置的差别：`< 0.3` 是「模型前提否决线」（判据 ② 判不适用），
+/// `> 1.5 + 峰值` 不是否决而是**换锚** —— 跨周期正净利均值是有意义的分子
+/// （巴菲特式周期归一化），故仍出三档但标 `is_fallback_anchor = true` 交 f5 降权；
+/// 漏过本臂的残余膨胀形态由结论层 `FCF_YIELD_MAX_FOR_DCF_PRIMARY`（15% 天花板）
+/// 兜底，主口径让位反向 DCF。
+const FCF_TO_NP_MAX_FOR_ANCHOR: f64 = 1.5;
+
+/// 峰值判定倍数：最近完整年报 FCF ≥ 本倍数 × 近 [`ANCHOR_PEAK_SAMPLE_YEARS`] 年
+/// 年报 FCF 均值（**含负值年份**）⇒ 视为一次性峰值。
+///
+/// 均值 ≤ 0（历史年度合计净流出）时，最新值只要为正即构成峰值（无需比较倍数）。
+const ANCHOR_PEAK_HISTORY_MULT: f64 = 2.0;
+
+/// 峰值检测的年报序列窗口（与其他跨周期归一化口径一致取 5 年）。
+const ANCHOR_PEAK_SAMPLE_YEARS: usize = 5;
+
+/// 峰值检测所需的**最小年度样本数**：只有 1 个年度值时无从判断「峰值 vs 常态」，
+/// 缺历史不臆断（与本模块「缺数 ≠ 模型不成立」的一贯纪律一致）。
+const ANCHOR_PEAK_MIN_SAMPLE: usize = 2;
+
+/// 年报脉冲「后验证伪」的 TTM 坍缩线：年报之后更新报告期的滚动 FCF
+/// （[`annual_fcf_pulse_disproven_by_ttm`]）相对该年报 FCF 跌破本比例 ⇒
+/// 视为脉冲已被后续报表证伪。
+///
+/// 取 0.5（消退过半）而非更严的 ≤0：方向逆转（TTM ≤ 0）是最强证伪，单独成条；
+/// 0.5 这条覆盖「仍为正但年报那笔现金流已大部分消失」的形态。正常高 FCF 公司
+/// 在随后 1–2 个季度内滚动 FCF 不会腰斩过半，故不误伤。
+const ANCHOR_PULSE_TTM_COLLAPSE_RATIO: f64 = 0.5;
+
 /// 理想买入价 / 长线加仓门要求的**安全边际**（接线前的现值，**百分数**口径 = 30%）。
 ///
 /// 与面板变量 `value_safety_margin`（描述「安全边际最低折扣 (%)」，默认 20）**同量纲**，
@@ -3544,13 +3620,10 @@ fn annualized_eps(financials: &[FinancialReport]) -> Option<f64> {
 /// 「当期FCF≤0」并触发历史均值锚定 —— 这正是本函数要消除的错误面。
 fn ttm_fcf(financials: &[FinancialReport]) -> Option<f64> {
     let latest = financials.first()?;
-    let from_ocf_capex = |f: &FinancialReport| -> Option<f64> {
-        Some(f.operating_cash_flow? - f.capital_expenditure?)
-    };
 
     // ① 年报口径
     if latest.report_date.contains("-12-31") {
-        return from_ocf_capex(latest).or(latest.free_cash_flow);
+        return annual_fcf_of(latest).or(latest.free_cash_flow);
     }
 
     // ② 中报/季报 → TTM 还原
@@ -3562,13 +3635,23 @@ fn ttm_fcf(financials: &[FinancialReport]) -> Option<f64> {
         let find = |target: &str| {
             financials.iter().find(|r| report_period_key(&r.report_date) == Some(target))
         };
-        let annual = from_ocf_capex(find(&format!("{prev_year}-12-31"))?)?;
-        let prev_same = from_ocf_capex(find(&format!("{prev_year}{month_day}"))?)?;
-        Some(annual + from_ocf_capex(latest)? - prev_same)
+        let annual = annual_fcf_of(find(&format!("{prev_year}-12-31"))?)?;
+        let prev_same = annual_fcf_of(find(&format!("{prev_year}{month_day}"))?)?;
+        Some(annual + annual_fcf_of(latest)? - prev_same)
     })();
 
     // ③ 还原不出 → vendor 直供兜底
     ttm.or(latest.free_cash_flow)
+}
+
+/// 单期报告的自由现金流（`OCF − 资本开支`，元）—— [`ttm_fcf`]、
+/// [`latest_annual_fcf`]、[`annual_fcf_series`] 的**共同单年口径**。
+///
+/// 不含 vendor 直供 `free_cash_flow` 回落：那是「整段缺数」的兜底，
+/// 由调用方按自身口径决定（TTM 只在全链还原失败后回落一次）。
+/// 缺任一项即 `None`，**不得**把缺失当 0。
+fn annual_fcf_of(r: &FinancialReport) -> Option<f64> {
+    Some(r.operating_cash_flow? - r.capital_expenditure?)
 }
 
 /// 最近一个**完整会计年度**的自由现金流（元）—— 正向 DCF 的默认锚口径。
@@ -3600,11 +3683,124 @@ fn ttm_fcf(financials: &[FinancialReport]) -> Option<f64> {
 /// 见 [`ttm_fcf`] 的说明）—— 故 `find` 命中的即**最新**年报，无需自行排序。
 fn latest_annual_fcf(financials: &[FinancialReport]) -> Option<f64> {
     let annual = financials.iter().find(|r| r.report_date.contains("-12-31"))?;
-    annual
-        .operating_cash_flow
-        .zip(annual.capital_expenditure)
-        .map(|(ocf, capex)| ocf - capex)
-        .or(annual.free_cash_flow)
+    annual_fcf_of(annual).or(annual.free_cash_flow)
+}
+
+/// 近 N 个**完整会计年度**的 FCF 序列（元，倒序：`[0]` 最新）—— 周期峰值检测用。
+///
+/// 与 [`latest_annual_fcf`] **逐年同口径**（优先 `OCF − 资本开支`，缺失回落 vendor
+/// 直供 `free_cash_flow`），保证「最新值」与「历史序列」可比。
+///
+/// ⚠️ 与 [`normalized_annual_profit`] 的关键差别：**保留负值年份**。峰值检测测的
+/// 正是「最新年相对含亏损年份的历史有多异常」；像正净利均值那样剔除负值会把
+/// 周期股的低谷从基准里抹掉，峰值倍数被系统性压低（赛力斯形态正是前几年 FCF
+/// 为负、最新年暴增）。非有限值（NaN/INF）丢弃；缺数年份跳过（不当 0）。
+///
+/// 依赖调用方**按报告期倒序**传入 `financials`（与 [`latest_annual_fcf`] 同前提）。
+fn annual_fcf_series(financials: &[FinancialReport], max_years: usize) -> Vec<f64> {
+    financials
+        .iter()
+        .filter(|r| r.report_date.contains("-12-31"))
+        .take(max_years)
+        .filter_map(|r| annual_fcf_of(r).or(r.free_cash_flow))
+        .filter(|v| v.is_finite())
+        .collect()
+}
+
+/// 最近完整年报 FCF 是否构成相对自身历史的**一次性峰值**（周期/扩张顶点形态）。
+///
+/// 判据（数据形态，不含行业标签）：
+/// - 近 [`ANCHOR_PEAK_SAMPLE_YEARS`] 年年报 FCF 序列至少有
+///   [`ANCHOR_PEAK_MIN_SAMPLE`] 个年度值（含最新年），否则**不判峰值**；
+/// - `latest_fcf > 0`，且满足其一：
+///   1. 多年均值 ≤ 0（历史年度合计净流出 ⇒ 最新年任何正现金流都是异常跃迁）；
+///   2. `latest_fcf ≥ ANCHOR_PEAK_HISTORY_MULT × 多年均值`。
+///
+/// 见 [`FCF_TO_NP_MAX_FOR_ANCHOR`] 的赛力斯 601127 实证注释。
+fn is_peak_annual_fcf(financials: &[FinancialReport], latest_fcf: f64) -> bool {
+    if !latest_fcf.is_finite() || latest_fcf <= 0.0 {
+        return false;
+    }
+    let series = annual_fcf_series(financials, ANCHOR_PEAK_SAMPLE_YEARS);
+    if series.len() < ANCHOR_PEAK_MIN_SAMPLE {
+        return false;
+    }
+    let mean = series.iter().sum::<f64>() / series.len() as f64;
+    mean <= 0.0 || latest_fcf >= ANCHOR_PEAK_HISTORY_MULT * mean
+}
+
+/// 年报脉冲的「后验」证伪判据：年报 FCF 异常高于自身净利、**且**其后更新报告期
+/// 的滚动现金流已经坍缩 ⇒ 该年报现金流是营运资本一次性释放，不可永续。
+///
+/// ## 为什么在 [`is_peak_annual_fcf`] 之外还需要这条（赛力斯 601127，2026-10-13 live）
+///
+/// 历史峰值判据要求 ≥2 个年度 FCF 样本，而东财现金流字段实际只回填最近约 5 个
+/// 报告期：601127 的 2024 及更早年报 OCF/capex 全部为 `None`，年度 FCF 序列
+/// 只有 `[FY2025 = 247.44 亿]` 一个样本 ⇒ 峰值判据**结构性失效**（这正是首次
+/// 修复在真实数据下漏检的原因：测试夹具臆造了 5 年现金流历史，生产数据没有）。
+///
+/// 但年报之后的报表本身就是更强的证据，不需要历史 FCF：
+///
+/// ```text
+/// FY2025  净利 59.57 亿  OCF 289.14 亿  capex 41.70 亿  FCF +247.44 亿
+/// 2026Q1  净利  7.54 亿  OCF -209.50 亿  capex  1.81 亿  FCF -227.60 亿
+/// 2026H1  净利 -17.17 亿  OCF -123.76 亿  capex  3.25 亿  FCF -156.25 亿
+/// ⇒ TTM FCF = -33.16 亿（FY2025 + 2026H1 − 2025H1）
+/// ```
+///
+/// 公司用自己的下一期报表把「289 亿 OCF 可永续」证伪了：那是扩张期应付/合同
+/// 负债随营收翻倍的一次性膨胀，销量一放缓即反向收缩。
+///
+/// ## 判据（四条同时成立，全部数据形态、无行业标签）
+///
+/// 1. `annual_fcf > 0`、`annual_np > 0` 且 `annual_fcf / annual_np >
+///    [`FCF_TO_NP_MAX_FOR_ANCHOR`]`。**比值用该年报自身净利**（同期间口径），
+///    不用 TTM 净利：公司随后转亏时 TTM 净利可能 ≤0，比值符号反转会让上半区
+///    判据静默漏检（601127 TTM 净利仅 13.0 亿，比值被夸成 19×；H1 亏损再深
+///    一点 TTM 转负，旧判据直接不命中）；
+/// 2. 最新报告期**晚于**该年报 —— 没有后验报表就无所谓「证伪」；
+/// 3. TTM FCF（[`ttm_fcf`]）可取且有限；
+/// 4. TTM FCF ≤ 0（现金流方向逆转，最强证伪），或 <
+///    [`ANCHOR_PULSE_TTM_COLLAPSE_RATIO`] × 年报 FCF（脉冲消退过半）。
+///
+/// `annual_np` 由调用方（compute_dcf 的 ① 臂）从锚同源的年报行取入，避免本函数
+/// 再次查找锚年报。
+fn annual_fcf_pulse_disproven_by_ttm(
+    financials: &[FinancialReport],
+    annual_fcf: f64,
+    annual_np: f64,
+) -> bool {
+    if !annual_fcf.is_finite()
+        || annual_fcf <= 0.0
+        || !annual_np.is_finite()
+        || annual_np <= 0.0
+        || annual_fcf / annual_np <= FCF_TO_NP_MAX_FOR_ANCHOR
+    {
+        return false;
+    }
+    // ② 最新报告期必须晚于最近完整年报（vendor 倒序，[0] 即最新；
+    //    `report_period_key` 统一截到 YYYY-MM-DD，字典序即时间序）。
+    let Some(annual_date) = financials
+        .iter()
+        .find(|r| r.report_date.contains("-12-31"))
+        .and_then(|r| report_period_key(&r.report_date))
+    else {
+        return false;
+    };
+    let Some(latest_date) = financials.first().and_then(|r| report_period_key(&r.report_date))
+    else {
+        return false;
+    };
+    if latest_date <= annual_date {
+        return false;
+    }
+    // ③④ TTM 坍缩
+    match ttm_fcf(financials) {
+        Some(ttm) if ttm.is_finite() => {
+            ttm <= 0.0 || ttm < annual_fcf * ANCHOR_PULSE_TTM_COLLAPSE_RATIO
+        },
+        _ => false,
+    }
 }
 
 /// 最近一个完整会计年度的**营业总收入**（元）—— 反向 DCF 的营收基数口径。
@@ -3884,8 +4080,9 @@ struct DcfAssumptions {
     discount_rate: f64,
     /// 预测期年数
     forecast_years: i32,
-    /// FCF 锚定值（元）—— ① 当期 FCF；或 ②/①b 代理锚（净利 × 0.90）
-    /// （`当期 FCF ≤ 0`、缺数、或 `FCF/净利 < 0.6` 三态之一）
+    /// FCF 锚定值（元）—— ① 当期 FCF；或 ①b/①c/②③ 代理锚（净利 × 0.90）
+    /// （`当期 FCF ≤ 0`、缺数、`FCF/净利 < 0.6`、或 `FCF/净利 > 1.5` 的一次性峰值
+    /// 四态之一）
     fcf_anchor: f64,
     /// 每股 FCF（元/股）
     fcf_per_share: f64,
@@ -3893,7 +4090,8 @@ struct DcfAssumptions {
     total_shares: f64,
     /// 口径说明（`fcf_anchor` 的来源），直接复用 `dcf.note`
     basis: String,
-    /// 锚定是否来自**代理锚**（`当期 FCF ≤ 0` / 缺数 / `FCF/净利 < 0.6` ⇒ 净利 × 0.90）
+    /// 锚定是否来自**代理锚**（`当期 FCF ≤ 0` / 缺数 / `FCF/净利 < 0.6` /
+    /// `FCF/净利 > 1.5` 的一次性峰值 ⇒ 净利 × 0.90）
     ///
     /// 2026-09-12（P0-I）新增，消费者是 `portfolio-mgr.rhai` 的 f5 估值因子。
     /// 该因子用它做**置信度衰减**：历史均值代理出来的锚定是回溯且偏低的，
@@ -3906,7 +4104,8 @@ struct DcfAssumptions {
     ///
     /// ⚠️ 但实测反证过「修它就能翻转 action」：k=0.5 → eff 0.3027→0.3318（仍减持）；
     /// k=0（σ 完全中性化）→ 0.3610（仍减持）；把全部 `σ < 0` 因子归零上限也只有
-    /// eff=0.4327（观望），距 `ACTION_HOLD_THRESHOLD`(0.48) 差 0.047。
+    /// eff=0.4327（观望），距当时的 `ACTION_HOLD_THRESHOLD`(0.48) 差 0.047
+    /// （2026-10 默认已重标定为 0.50，差 0.067，结论不变）。
     /// 故该字段的用途是**置信度纠正**，不是决策翻转的开关。
     is_fallback_anchor: bool,
     /// **我方采集缺陷**标记：当期 FCF 缺失的原因是**数据源未提供**，而非标的现金流为负。
@@ -4010,6 +4209,40 @@ fn dcf_unavailable_code(
     }
 }
 
+/// 正向 DCF 三档是否因「锚定 FCF 收益率越过天花板」必须遮蔽。
+///
+/// ## 为什么需要这个遮蔽（601127 赛力斯，2026-10-13 live 实证）
+///
+/// 结论层（`valuation::build_conclusion`）在收益率越顶时会把主口径让给
+/// reverse_dcf，但**三档数值若继续输出**，下游展示链照样消费它们：
+/// `value-verify.rhai` 的硬不可用只认 `dcf.available=false` / `upsidePct` 缺失 /
+/// `assumptions.applicable=false` 三个信号（不读 `conclusion.primaryMethod`），
+/// 仍把正向三档原样覆写成 `intrinsic_value_range`。实测：primary 已让位，
+/// 面板仍显示「412.62–1400.76 元 +687.7%」。
+///
+/// 调用方在量程遮蔽点合并本判据把三档置 null ⇒ rhai 既有 hard_unavailable
+/// ②（upsidePct 缺失）+ ①（available=false）自然生效（区间→null、买点→固定文案、
+/// f5 降权），**无需改 rhai / 前端 / i18n**。
+///
+/// 判据与结论层的 `yield_ceiling_ok` 严格同式（同常量、同 None 语义），两处必须
+/// 一起改：这里只判天花板，不判地板/覆盖率 —— 那两种形态的三档方向与结论同向
+/// （都在现价下方表达「偏贵」），保留为敏感性带不产生方向性误导；只有越顶会
+/// 制造与结论矛盾的数倍看多价格。
+fn dcf_tiers_masked_by_anchor_ceiling(
+    anchor_fcf: f64,
+    total_mv: Option<f64>,
+    applicable: bool,
+) -> bool {
+    applicable
+        && anchor_fcf.is_finite()
+        && anchor_fcf > 0.0
+        && total_mv.is_some_and(|mv| {
+            mv.is_finite()
+                && mv > 0.0
+                && anchor_fcf / mv > crate::valuation::FCF_YIELD_MAX_FOR_DCF_PRIMARY
+        })
+}
+
 fn compute_dcf(
     financials: &[FinancialReport],
     total_shares: Option<f64>,
@@ -4040,10 +4273,14 @@ fn compute_dcf(
     //   ① 锚 > 0 且与净利相称（`FCF/TTM净利 ≥ 0.6`）→ 直接使用
     //   ①b 锚 > 0 但 `FCF/TTM净利 < 0.6`（2026-09-27 新增）→ 扩张期/重资产
     //      公司的 FCF 被「全部资本开支」扣低，改用所有者收益代理锚（TTM净利 × 0.90）
+    //   ①c 锚 > 0、`FCF/TTM净利 > 1.5` 且为含亏损年份口径下的多年一次性峰值
+    //      （2026-10-13 新增，赛力斯 601127 实证）→ 扩张期营运资本一次性释放把
+    //      FCF 抬高，改用近 5 年报正净利均值 ×0.90 跨周期代理锚（双条件防误伤
+    //      持续高现金流公司，详见 `FCF_TO_NP_MAX_FOR_ANCHOR` 长注释）
     //   ② 锚 ≤ 0（亏损期/周期底部）→ 近 5 年报正净利均值 × 0.90 归一化锚定
     //      （沿用原 net_profit×0.90 估算惯例，季报为累计值故只取年报口径）
     //   ③ 近 5 年报无正净利年度（持续亏损）→ 返回 None，DCF 不适用
-    // ①②③三条代理路径**同口径**（净利 × 0.90 = `OWNER_EARNINGS_CONVERSION`），
+    // ①b/①c/②③ 代理路径**同系数**（净利 × 0.90 = `OWNER_EARNINGS_CONVERSION`），
     //   且都标记 `is_fallback_anchor = true`，由 f5 统一降权。
     // P0-I(2026-09-12): 锚口径文案提为常量 —— 既用于 `fcf_basis`，
     //   也用于给下游输出 `is_fallback_anchor` 布尔量（避免靠字符串前缀匹配判分支）。
@@ -4089,6 +4326,7 @@ fn compute_dcf(
         //    ⚠️ 判据用 `ttm_net_profit`（与判据 ② 同源同口径），不是 `latest.net_profit`
         //    （最新期累计值，中报口径下只有半年 —— 那正是判据 ② 2026-09-23 修掉的坑）。
         Some(v) if v > 0.0 => match ttm_net_profit(financials).filter(|np| *np > 0.0) {
+            // ①b 下半区：FCF 显著低于净利（扩张性资本开支扣低）
             Some(np) if v / np < FCF_TO_NP_MIN_FOR_ANCHOR => (
                 np * OWNER_EARNINGS_CONVERSION,
                 format!(
@@ -4096,7 +4334,65 @@ fn compute_dcf(
                      改用所有者收益代理锚（TTM净利×0.90）"
                 ),
             ),
-            _ => (v, anchor_basis.to_string()),
+            Some(np) => {
+                let ratio = v / np;
+                // ①c-α 历史路径（2026-10-13 首版，赛力斯 601127 实证）：FCF 显著高于
+                //   净利 **且** 是相对自身历史的一次性峰值 ⇒ 增量来自扩张期营运资本
+                //   一次性释放，不可永续 ⇒ 换跨周期代理锚。双条件的必要性与误伤防护
+                //   见 `FCF_TO_NP_MAX_FOR_ANCHOR` 上方长注释。
+                //   `is_finite` 守卫：NaN 穿过比较会静默不命中（NaN 已在
+                //   `ttm_net_profit(...).filter(>0)` 处被滤掉，这里是双保险，
+                //   防止上游口径变化后 NaN 混进比值）。
+                let historical_peak = ratio.is_finite()
+                    && ratio > FCF_TO_NP_MAX_FOR_ANCHOR
+                    && is_peak_annual_fcf(financials, v);
+                // ①c-β 后验路径（2026-10-13 live 复核补）：vendor 现金流字段只回填
+                //   最近约 5 个报告期（601127 的 2024 及更早年报 OCF/capex 全 None），
+                //   年度 FCF 序列凑不齐 2 个样本 ⇒ α 路径结构性失效。此时用**年报
+                //   之后更新报表**的 TTM 坍缩证伪脉冲（判据与实证见
+                //   [`annual_fcf_pulse_disproven_by_ttm`]）。
+                //   仅对**年报锚**生效：TTM 回落锚自身就是 TTM，不存在「被 TTM 证伪」。
+                let annual_np = financials
+                    .iter()
+                    .find(|r| r.report_date.contains("-12-31"))
+                    .and_then(|r| r.net_profit);
+                let ttm_disproven = anchor_basis == FCF_ANNUAL_BASIS
+                    && annual_np
+                        .is_some_and(|anp| annual_fcf_pulse_disproven_by_ttm(financials, v, anp));
+                if historical_peak || ttm_disproven {
+                    // 跨周期所有者收益：近 5 年报正净利均值 ×0.90（与 ②③ 代理臂
+                    // 同函数同系数）；无正净利年报（理论上 TTM 净利为正时不该发生）
+                    // 才回落 TTM 净利 ×0.90。
+                    let proxy = normalized_annual_profit(financials, ANCHOR_PEAK_SAMPLE_YEARS)
+                        .map(|avg_np| avg_np * OWNER_EARNINGS_CONVERSION)
+                        .unwrap_or(np * OWNER_EARNINGS_CONVERSION);
+                    let basis_detail = if historical_peak {
+                        format!(
+                            "{anchor_basis}显著高于净利（FCF/净利={ratio:.2}>\
+                             {FCF_TO_NP_MAX_FOR_ANCHOR}）且为近{ANCHOR_PEAK_SAMPLE_YEARS}年\
+                             一次性峰值（≥{ANCHOR_PEAK_HISTORY_MULT}×含亏损年份的多年均值）：\
+                             增量主要来自扩张期营运资本释放（应付/合同负债膨胀），不具永续性，\
+                             改用近5年报正净利均值×0.90跨周期代理锚定"
+                        )
+                    } else {
+                        // 走到这里 annual_np 必为 Some(>0)（disproven 内部已验）
+                        let anp = annual_np.unwrap_or(np);
+                        let aratio = v / anp;
+                        let ttm_yi = ttm_fcf(financials).unwrap_or(0.0) / 1e8;
+                        format!(
+                            "{anchor_basis}显著高于该年报自身净利（FCF/净利={aratio:.2}>\
+                             {FCF_TO_NP_MAX_FOR_ANCHOR}），且其后更新报告期的滚动现金流已\
+                             坍缩（TTM FCF {ttm_yi:.1}亿）：该年报现金流含应付/合同负债等\
+                             营运资本一次性释放，已被后续报表证伪、不具永续性，\
+                             改用近5年报正净利均值×0.90跨周期代理锚定"
+                        )
+                    };
+                    (proxy, basis_detail)
+                } else {
+                    (v, anchor_basis.to_string())
+                }
+            },
+            None => (v, anchor_basis.to_string()),
         },
         Some(_) => match normalized_annual_profit(financials, 5) {
             Some(avg_np) => (
@@ -7450,6 +7746,154 @@ mod valuation_tests {
         assert!((a.growth - DEFAULT_GROWTH).abs() < 1e-9);
         assert!(a.growth_basis.contains("默认增速"), "{}", a.growth_basis);
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ①c-β 年报脉冲「后验证伪」（2026-10-13 live 复核补；赛力斯 601127 实证）
+    //
+    // 首版修复的历史峰值判据（α）要求 ≥2 个年度 FCF 样本，但东财现金流字段
+    // 实际只回填最近约 5 个报告期 ⇒ 生产数据下年度序列只有 1 个样本，判据
+    // 结构性失效（412.62–1400.76 元 +687.7% 原样流出）。β 路径改用年报之后
+    // 更新报表的 TTM 坍缩证伪。下列测试复刻 live 真实形态，不再臆造历史。
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// 601127 live 形态（2026-10-13）：现金流仅 5 期、2025 年报 FCF 为自身净利
+    /// 4.15×、2026H1 现金流转负（TTM −33 亿）⇒ α 失效而 β 必须命中，锚归一化。
+    #[test]
+    fn seres_live_shape_anchor_normalized_via_ttm_disproof() {
+        let y = 1.0e8;
+        let f = vec![
+            report_cf("2026-06-30", -17.17 * y, -123.76 * y, 3.25 * y),
+            report_cf("2026-03-31", 7.54 * y, -209.50 * y, 1.81 * y),
+            report_cf("2025-12-31", 59.57 * y, 289.14 * y, 41.70 * y),
+            report_cf("2025-09-30", 53.12 * y, 226.49 * y, 29.75 * y),
+            report_cf("2025-06-30", 29.41 * y, 144.37 * y, 20.02 * y),
+            report("2025-03-31", Some(7.48 * y), None),
+            report("2024-12-31", Some(59.46 * y), None),
+            report("2023-12-31", Some(-24.50 * y), None),
+            report("2022-12-31", Some(-38.32 * y), None),
+            report("2021-12-31", Some(-18.24 * y), None),
+        ];
+        // 前置事实：α（历史峰值）在该形态下确实失效 —— 年度 FCF 仅 1 个样本
+        assert!(!is_peak_annual_fcf(&f, 247.44 * y), "单年度样本不得判历史峰值");
+        // β（后验证伪）必须命中
+        assert!(
+            annual_fcf_pulse_disproven_by_ttm(&f, 247.44 * y, 59.57 * y),
+            "年报 FCF/净利 4.15× 且 TTM −33 亿 ⇒ 必须判脉冲已证伪"
+        );
+
+        let (tiers, note, a) = compute_dcf(&f, Some(15.57e8), 52.10, None);
+        let a = a.expect("代理锚下三档必产出");
+        // 近 5 年报正净利 = (59.57 + 59.46)/2 = 59.515 亿 ×0.90 = 53.56 亿
+        assert!(
+            (a.fcf_anchor / y - 53.56).abs() < 0.2,
+            "锚应归一化为近5年报正净利均值×0.9 ≈ 53.56 亿，实得 {:.2} 亿",
+            a.fcf_anchor / y
+        );
+        assert!(a.is_fallback_anchor, "代理锚必须标 fallback 交 f5 降权");
+        assert!(a.applicable, "归一化锚仍产出适用三档");
+        assert!(note.contains("证伪"), "basis 必须写明后验证伪：{note}");
+        assert!(note.contains("营运资本"), "basis 必须写明营运资本：{note}");
+        // 归一化后锚 FCF 收益率 6.6%，落回天花板之下
+        let yld = a.fcf_anchor / (15.57e8 * 52.10);
+        assert!(yld < 0.10, "归一化后收益率应正常，实得 {:.2}%", yld * 100.0);
+        let (low, _mid, high) = tiers.expect("三档存在");
+        assert!(low > 0.0 && high > low);
+        // 修复前三档 412.62/789.18/1400.76（保守档为现价 7.9 倍）；修复后保守档
+        // 必须回到现价同量级（<3× 现价），不得再输出数倍看多价格
+        assert!(low < 52.10 * 3.0, "保守档实得 {low:.2} 仍远离现价量级");
+    }
+
+    /// β 判据四条合取的边界单测（TTM 还原需同年 H1 行，缺段即 None 不臆断）。
+    #[test]
+    fn pulse_disproven_four_way_conjunction() {
+        let y = 1.0e8;
+        // 基准：FY2025 FCF 190 亿（OCF 200 − capex 10）、净利 60 亿（比值 3.17）；
+        // 2025H1 FCF 65 亿（OCF 70 − 5）。
+        let base_with = |h1_2026_ocf: f64, annual_np: f64| {
+            vec![
+                report_cf("2026-06-30", 5.0 * y, h1_2026_ocf, 1.0 * y),
+                report_cf("2025-12-31", annual_np, 200.0 * y, 10.0 * y),
+                report_cf("2025-06-30", 20.0 * y, 70.0 * y, 5.0 * y),
+                report("2024-12-31", Some(50.0 * y), None),
+            ]
+        };
+
+        // ① TTM 转负（2026H1 OCF −130 ⇒ TTM = 190−131−65 = −6 亿）⇒ 命中
+        assert!(annual_fcf_pulse_disproven_by_ttm(
+            &base_with(-130.0 * y, 60.0 * y),
+            190.0 * y,
+            60.0 * y
+        ));
+        // ② TTM 仍正但坍缩过半（2026H1 OCF −60 ⇒ FCF −61；TTM = 190−61−65 = 64
+        //    亿 < 190×0.5 = 95 亿）⇒ 命中
+        assert!(annual_fcf_pulse_disproven_by_ttm(
+            &base_with(-60.0 * y, 60.0 * y),
+            190.0 * y,
+            60.0 * y
+        ));
+        // ③ 滚动现金流延续（2026H1 OCF 80 ⇒ FCF 75；TTM = 200 亿 > 95 亿）⇒ 不命中
+        assert!(!annual_fcf_pulse_disproven_by_ttm(
+            &base_with(80.0 * y, 60.0 * y),
+            190.0 * y,
+            60.0 * y
+        ));
+        // ④ FCF/年报净利不超阈值（净利 140 亿 ⇒ 比值 1.36 < 1.5），即使 TTM 转负也不命中
+        assert!(!annual_fcf_pulse_disproven_by_ttm(
+            &base_with(-130.0 * y, 140.0 * y),
+            190.0 * y,
+            140.0 * y
+        ));
+
+        // ⑤ 没有年报之后的报告期（最新即年报）⇒ 无「后验」可言，不命中
+        let annual_only = vec![
+            report_cf("2025-12-31", 60.0 * y, 200.0 * y, 10.0 * y),
+            report_cf("2024-12-31", 50.0 * y, 80.0 * y, 8.0 * y),
+        ];
+        assert!(!annual_fcf_pulse_disproven_by_ttm(&annual_only, 190.0 * y, 60.0 * y));
+
+        // ⑥ TTM 还原缺段（无 2025H1、vendor 直供 FCF 也没有）⇒ None，不臆断
+        let missing_ttm = vec![
+            report_cf("2026-06-30", 5.0 * y, -130.0 * y, 1.0 * y),
+            report_cf("2025-12-31", 60.0 * y, 200.0 * y, 10.0 * y),
+            report("2024-12-31", Some(50.0 * y), None),
+        ];
+        assert!(!annual_fcf_pulse_disproven_by_ttm(&missing_ttm, 190.0 * y, 60.0 * y));
+
+        // ⑦ 非有限值不命中
+        assert!(!annual_fcf_pulse_disproven_by_ttm(
+            &base_with(-130.0 * y, 60.0 * y),
+            f64::NAN,
+            60.0 * y
+        ));
+        assert!(!annual_fcf_pulse_disproven_by_ttm(
+            &base_with(-130.0 * y, 60.0 * y),
+            190.0 * y,
+            f64::NAN
+        ));
+        // ⑧ 年报亏损（np ≤ 0）不走上半区归一化
+        assert!(!annual_fcf_pulse_disproven_by_ttm(
+            &base_with(-130.0 * y, -5.0 * y),
+            190.0 * y,
+            -5.0 * y
+        ));
+    }
+
+    /// 天花板遮蔽与结论层 `yield_ceiling_ok` 同式（赛力斯修复前后两个锚）。
+    #[test]
+    fn ceiling_mask_tracks_anchor_yield() {
+        let mv = Some(811.3e8);
+        // 修复前：锚 247.44 亿 / 811.3 亿 = 30.5% > 15% ⇒ 遮蔽
+        assert!(dcf_tiers_masked_by_anchor_ceiling(247.44e8, mv, true));
+        // 修复后：53.56 亿 / 811.3 亿 = 6.6% ⇒ 不遮蔽
+        assert!(!dcf_tiers_masked_by_anchor_ceiling(53.56e8, mv, true));
+        // 前提不成立（applicable=false）⇒ 走适用性路径，不由天花板遮蔽
+        assert!(!dcf_tiers_masked_by_anchor_ceiling(247.44e8, mv, false));
+        // 市值缺失 / 非正 ⇒ 不臆断
+        assert!(!dcf_tiers_masked_by_anchor_ceiling(247.44e8, None, true));
+        assert!(!dcf_tiers_masked_by_anchor_ceiling(247.44e8, Some(0.0), true));
+        // 非有限锚 ⇒ 不遮蔽（交缺数路径）
+        assert!(!dcf_tiers_masked_by_anchor_ceiling(f64::NAN, mv, true));
+    }
 }
 
 #[cfg(test)]
@@ -7888,5 +8332,177 @@ mod value_tier_landing_tests {
             )])),
             100.0
         );
+    }
+}
+
+/// 2026-10-13 赛力斯 601127 实证：锚选择 ①c「上半区峰值代理臂」
+/// （`FCF_TO_NP_MAX_FOR_ANCHOR` + [`is_peak_annual_fcf`]）。
+///
+/// 病根：扩张期应付/合同负债膨胀使最新年报 OCF 一次性远超净利（赛力斯
+/// FCF/净利 ≈ 3.4、FCF 239 亿），被当成永续复利现金流 ⇒ 保守档 412.62、
+/// 乐观档 1400.75 元（现价 52.70）。修复是**双条件**归一化：比值 >1.5
+/// **且** 最新 FCF 相对自身含亏损年份历史构成一次性峰值，才换跨周期代理锚。
+/// 本组四个测试各锁一种复发/误伤形态。
+#[cfg(test)]
+mod peak_fcf_anchor_normalization_tests {
+    use super::*;
+
+    /// 年报构造器：`net_profit` / `operating_cash_flow` / `capital_expenditure`
+    /// 齐备（FCF = OCF − 资本开支），其余字段缺省（与 valuation_tests::report 同形）。
+    fn annual(date: &str, np: f64, ocf: f64, capex: f64) -> FinancialReport {
+        FinancialReport {
+            stock_code: "601127".into(),
+            report_date: date.into(),
+            revenue: None,
+            net_profit: Some(np),
+            eps: None,
+            bps: None,
+            roe: None,
+            debt_ratio: None,
+            gross_margin: None,
+            net_margin: None,
+            revenue_yoy: None,
+            profit_yoy: None,
+            total_assets: None,
+            operating_cash_flow: Some(ocf),
+            capital_expenditure: Some(capex),
+            free_cash_flow: None,
+            current_ratio: None,
+            quick_ratio: None,
+            goodwill: None,
+            accounts_receivable: None,
+            estimated: Some(false),
+            disclosure_date: None,
+        }
+    }
+
+    /// T1 赛力斯形态：最新年报 FCF 239 亿（FCF/净利 3.41）且 ≥2× 含亏损年份的
+    /// 5 年均值 ⇒ 锚必须归一化为「近 5 年报正净利均值 ×0.90」，绝不能拿 239 亿
+    /// 当永续锚；代理锚须标 fallback，保守档回到现价量级。
+    #[test]
+    fn peak_fcf_anchor_is_normalized_to_cross_cycle_proxy() {
+        let y = 1.0e8;
+        // 倒序（[0] 最新）：前三年亏损/微利且 FCF 为负，近两年盈利，最新年 FCF 暴增。
+        let f = vec![
+            annual("2025-12-31", 70.0 * y, 259.0 * y, 20.0 * y), // FCF +239 亿，FCF/净利 3.41
+            annual("2024-12-31", 60.0 * y, 40.0 * y, 10.0 * y),  // FCF +30 亿
+            annual("2023-12-31", -8.0 * y, -5.0 * y, 5.0 * y),   // FCF −10 亿
+            annual("2022-12-31", -15.0 * y, -12.0 * y, 8.0 * y), // FCF −20 亿
+            annual("2021-12-31", 5.0 * y, 2.0 * y, 3.0 * y),     // 微利，FCF −1 亿
+        ];
+
+        // 前置：本夹具必须真的构成「高比值 + 一次性峰值」，否则测试根本没走到 ①c。
+        let raw_anchor = 239.0 * y;
+        let ttm_np = ttm_net_profit(&f).expect("最新行为年报 ⇒ TTM 净利即年报净利 70 亿");
+        assert!(raw_anchor / ttm_np > FCF_TO_NP_MAX_FOR_ANCHOR);
+        assert!(is_peak_annual_fcf(&f, raw_anchor), "239 亿 ≥ 2× 含亏损年份均值 ⇒ 峰值");
+
+        let (tiers, note, a) = compute_dcf(&f, Some(15.05e8), 52.70, None);
+        let a = a.expect("代理锚为正 ⇒ 三档与快照必产出");
+
+        // ①c 命中：锚 == 近 5 年报正净利均值 ×0.90（(70+60+5)/3 = 45 亿 ⇒ 40.5 亿），
+        // 绝不等于顶点 FCF 239 亿（期望值由被测同口径函数现算，不写死 40.5 亿）。
+        let proxy = normalized_annual_profit(&f, ANCHOR_PEAK_SAMPLE_YEARS).expect("有正净利年报")
+            * OWNER_EARNINGS_CONVERSION;
+        assert!(
+            (a.fcf_anchor - proxy).abs() < 1.0,
+            "锚应归一化为正净利均值×0.90 = {:.2} 亿，实得 {:.2} 亿",
+            proxy / y,
+            a.fcf_anchor / y
+        );
+        assert!(
+            (a.fcf_anchor - raw_anchor).abs() > 1.0e8,
+            "顶点 FCF 239 亿不得成为永续锚，实得 {:.2} 亿",
+            a.fcf_anchor / y
+        );
+        assert!(a.is_fallback_anchor, "①c 代理锚必须标 fallback ⇒ f5 降权，否则全额权重喂出假买点");
+        assert!(a.basis.contains("峰值"), "诊断须自述一次性峰值：{}", a.basis);
+        assert!(a.basis.contains("营运资本"), "诊断须点名营运资本释放：{}", a.basis);
+        assert!(note.contains("峰值"), "note 与 basis 同源：{note}");
+        assert!(a.applicable, "高比值侧不命中任何不适用判据：{:?}", a.applicability_signals);
+
+        // 估值端：保守档必须回到现价量级（<100 元），绝不是修复前的 412.62 元。
+        let (low, _mid, _high) = tiers.expect("三档必产出");
+        assert!(low > 0.0, "代理锚为正 ⇒ 保守档应为正，实得 {low:.2}");
+        assert!(low < 100.0, "归一化后保守档应 <100 元，实得 {low:.2}（修复前 412.62）");
+    }
+
+    /// T2 防误伤：连续 5 年 FCF/净利 = 1.8（持续高现金流公司），最新 FCF 并非
+    /// 相对自身历史的峰值 ⇒ 比值虽 >1.5 也**不换锚、不降权**。
+    #[test]
+    fn sustained_high_fcf_to_profit_is_not_normalized() {
+        let y = 1.0e8;
+        let f = vec![
+            annual("2025-12-31", 100.0 * y, 200.0 * y, 20.0 * y), // FCF 180 亿
+            annual("2024-12-31", 100.0 * y, 200.0 * y, 20.0 * y),
+            annual("2023-12-31", 100.0 * y, 200.0 * y, 20.0 * y),
+            annual("2022-12-31", 100.0 * y, 200.0 * y, 20.0 * y),
+            annual("2021-12-31", 100.0 * y, 200.0 * y, 20.0 * y),
+        ];
+        let ratio = 180.0 * y / ttm_net_profit(&f).expect("最新年报净利即 TTM 净利");
+        assert!(ratio > FCF_TO_NP_MAX_FOR_ANCHOR, "前置：比值 {ratio:.2} 确在 1.5 之上");
+        assert!(!is_peak_annual_fcf(&f, 180.0 * y), "最新值 == 多年均值，绝非峰值");
+
+        let (_, _, a) = compute_dcf(&f, Some(10.0e8), 50.0, None);
+        let a = a.expect("三档必产出");
+        assert!(
+            (a.fcf_anchor - 180.0 * y).abs() < 1.0,
+            "持续高现金流公司的真实锚不得被替换，实得 {:.2} 亿",
+            a.fcf_anchor / y
+        );
+        assert!(!a.is_fallback_anchor, "非峰值形态不得被 f5 降权");
+        assert_eq!(a.basis, "最近完整年报FCF（OCF−资本开支）");
+    }
+
+    /// T3 边界严格性与 NaN 守卫：FCF/净利**恰好** = 1.5（严格大于才换锚）时
+    /// 即便峰值条件成立也保留真实锚；峰值判据对 NaN / +∞ / 非正一律 false。
+    #[test]
+    fn ratio_boundary_is_strict_and_non_finite_never_peaks() {
+        let y = 1.0e8;
+        // 最新 FCF 150 亿 / 净利 100 亿 = 1.50（恰好压线）；历史年均 FCF 仅 38 亿
+        // ⇒ 峰值条件成立 —— 专门隔离「比值边界」这一条来决定是否换锚。
+        let f = vec![
+            annual("2025-12-31", 100.0 * y, 160.0 * y, 10.0 * y), // FCF 150 亿
+            annual("2024-12-31", 100.0 * y, 20.0 * y, 10.0 * y),  // FCF 10 亿
+            annual("2023-12-31", 100.0 * y, 20.0 * y, 10.0 * y),
+            annual("2022-12-31", 100.0 * y, 20.0 * y, 10.0 * y),
+            annual("2021-12-31", 100.0 * y, 20.0 * y, 10.0 * y),
+        ];
+        assert!(is_peak_annual_fcf(&f, 150.0 * y), "前置：峰值条件本身成立（150 ≥ 2×38）");
+
+        let (_, _, a) = compute_dcf(&f, Some(10.0e8), 50.0, None);
+        let a = a.expect("三档必产出");
+        assert!(
+            (a.fcf_anchor - 150.0 * y).abs() < 1.0,
+            "ratio=1.5 严格不大于阈值 ⇒ 不换锚，实得 {:.2} 亿",
+            a.fcf_anchor / y
+        );
+        assert!(!a.is_fallback_anchor);
+
+        // 非有限值 / 非正最新 FCF 一律不得判峰值（NaN 穿过比较会静默失真）。
+        assert!(!is_peak_annual_fcf(&f, f64::NAN));
+        assert!(!is_peak_annual_fcf(&f, f64::INFINITY));
+        assert!(!is_peak_annual_fcf(&f, -y));
+        assert!(!is_peak_annual_fcf(&f, 0.0));
+    }
+
+    /// T4 样本不足不判峰值：只有 1 个年度 FCF 时，无从证明「相对自身历史异常」，
+    /// 即便 FCF/净利 = 3.4 也保留年报真实锚（残余形态由结论层 15% 天花板兜底）。
+    #[test]
+    fn single_annual_sample_never_treated_as_peak() {
+        let y = 1.0e8;
+        let f = vec![annual("2025-12-31", 70.0 * y, 259.0 * y, 20.0 * y)]; // FCF 239 亿
+        let ratio = 239.0 * y / ttm_net_profit(&f).expect("最新年报净利即 TTM 净利");
+        assert!(ratio > FCF_TO_NP_MAX_FOR_ANCHOR, "前置：比值 {ratio:.2} 越线");
+        assert!(!is_peak_annual_fcf(&f, 239.0 * y), "年度样本仅 1 个 ⇒ 不判峰值");
+
+        let (_, _, a) = compute_dcf(&f, Some(15.05e8), 52.70, None);
+        let a = a.expect("三档必产出");
+        assert!(
+            (a.fcf_anchor - 239.0 * y).abs() < 1.0,
+            "样本不足 ⇒ 保留年报真实锚，实得 {:.2} 亿",
+            a.fcf_anchor / y
+        );
+        assert!(!a.is_fallback_anchor);
     }
 }

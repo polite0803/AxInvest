@@ -25,6 +25,7 @@ import {
   analystNodeId,
   computeStockConsensus,
   deriveActionFromLlmDecision,
+  fetchExpectedDebateRounds,
   StockAction,
 } from "@/lib/stock-analysis-utils";
 import { detectFutureReferencesForNode } from "@/lib/timeTravel/futureReferenceDetector";
@@ -374,6 +375,22 @@ export interface EvolutionDriftDashboard {
   excludedUnknownGeneration?: number;
 }
 
+/** 进化触发样本快照（对应后端 TriggerSampleSnapshot，camelCase；P4 计划-审批两段式） */
+export interface EvolutionTriggerSamples {
+  /** 进入业务评估的反思行 id（有效样本） */
+  reflections: string[];
+  /** 进入业务评估的验证行 id */
+  validations: string[];
+  /** 进入业务评估的调仓事件 id */
+  moverEvents: string[];
+  /** 因数据可达性失败被分流的反思行 id（永不触发结构变异，只入数据质量分桶） */
+  blockedReflections: string[];
+  /** 因数据可达性失败被分流的验证行 id */
+  blockedValidations: string[];
+  /** 因数据可达性失败被分流的调仓事件 id */
+  blockedMoverEvents: string[];
+}
+
 /** 进化闭环留痕单条记录（对应后端 `stock_evolution_history` 实体，camelCase） */
 export interface EvolutionHistoryEntry {
   id: string;
@@ -385,6 +402,16 @@ export interface EvolutionHistoryEntry {
   workflowResultJson?: string | null;
   status: string;
   improvementSummary: string;
+  /** P4：触发样本 id 快照 JSON（EvolutionTriggerSamples 序列化） */
+  triggerSampleJson?: string | null;
+  /** P4：审批人 */
+  reviewer?: string | null;
+  /** P4：审批时间（毫秒） */
+  reviewedAt?: number | null;
+  /** P4：拒绝/回滚原因 */
+  rejectReason?: string | null;
+  /** P4：回滚时指向的上一已接受版本 id */
+  rollbackRef?: string | null;
   createdAt: number;
 }
 
@@ -546,6 +573,16 @@ interface StockAnalysisState {
    */
   jevJudgments: Record<string, JevJudgment>;
   debateRounds: Array<{ round: number; bull: string; bear: string }>;
+  /**
+   * **应有**的辩论轮数（分母），取自模板变量 `debate_rounds`，与后端 DAG 展开严格同源。
+   * `null` = 尚未取到或取失败。
+   *
+   * 与 `debateRounds`（分子：实际产出的轮次）**并列而非合并**：两者一个是配置事实、
+   * 一个是运行产物。前端此前用写死的 3 当分母（`TOTAL_DEBATE_ROUNDS` / `EXPECTED_ROUNDS`），
+   * 于是轮数一改就出现「显示 2/3」与「第 3 轮失败」两处假话。
+   * ⚠ `null` 不得当 0 或默认值用 —— 拿不到分母时不得断言任何轮次失败（见 fetchExpectedDebateRounds）。
+   */
+  expectedDebateRounds: number | null;
   /**
    * 流式增量预览（2026-09-08 修复）：nodeId → 当前累积输出文本。
    * 由 workflow-step-delta 事件（后端每 2s 节流）填充，节点完成后清除。
@@ -711,6 +748,8 @@ interface StockAnalysisState {
   getDryRun: () => Promise<boolean>;
   fetchHistory: (limit?: number, offset?: number) => Promise<void>;
   loadAnalysis: (analysisId: string) => Promise<void>;
+  /** 从模板变量重读「应有辩论轮数」并写入 `expectedDebateRounds`（实时跑与历史回放两条腿都要调）。 */
+  refreshExpectedDebateRounds: () => Promise<void>;
   reset: () => void;
   dismissChatIndicator: () => void;
   setReportLanguage: (lang: "zh" | "en") => void;
@@ -743,6 +782,23 @@ interface StockAnalysisState {
   evolutionTriggering: boolean;
   fetchEvolutionHistory: (limit?: number) => Promise<void>;
   triggerStockEvolution: (reason?: string) => Promise<void>;
+  /** P4：待人工审批的进化计划（status=pending_approval） */
+  pendingEvolutionPlans: EvolutionHistoryEntry[] | null;
+  pendingEvolutionLoading: boolean;
+  fetchPendingEvolutionPlans: () => Promise<void>;
+  /** P4：接受计划——后端重放执行并回写，返回更新后的行 */
+  approveEvolutionPlan: (historyId: string, reviewer?: string) => Promise<EvolutionHistoryEntry>;
+  /** P4：拒绝计划（reason 必填，去空白后非空） */
+  rejectEvolutionPlan: (
+    historyId: string,
+    reason: string,
+    reviewer?: string,
+  ) => Promise<EvolutionHistoryEntry>;
+  /** P4：一键回滚到上一已接受版本（historyId 缺省 = 最近 accepted） */
+  rollbackEvolution: (
+    historyId?: string | null,
+    reviewer?: string,
+  ) => Promise<EvolutionHistoryEntry>;
 
   // R2 组合监控
   portfolioDashboard: PortfolioDashboard | null;
@@ -826,6 +882,7 @@ const initialState = {
   analystReports: {},
   jevJudgments: {},
   debateRounds: [],
+  expectedDebateRounds: null,
   streamingPreviews: {},
   riskAssessments: {},
   valueAssessments: {},
@@ -881,6 +938,8 @@ const initialState = {
   evolutionHistory: null,
   evolutionHistoryLoading: false,
   evolutionTriggering: false,
+  pendingEvolutionPlans: null,
+  pendingEvolutionLoading: false,
   portfolioDashboard: null,
   portfolioCorrelations: [],
   portfolioCorrelationsError: null,
@@ -1099,6 +1158,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       analystReports: {},
       jevJudgments: {},
       debateRounds: [],
+      expectedDebateRounds: null,
       streamingPreviews: {},
       riskAssessments: {},
       valueAssessments: {},
@@ -1120,6 +1180,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       stockCodeConsensus: {},
       decisionInputsReport: [],
     });
+
+    // 辩论轮数分母：每轮分析开始时重读一次模板变量。图按它展开，所以本轮「应有几轮」
+    // 就是它；异步进行不阻塞分析启动。
+    void get().refreshExpectedDebateRounds();
 
     // 先拉取工作流模板（getDryRun），再注册事件监听
     // 顺序不可颠倒：getDryRun 可能失败，此时不应注册监听器
@@ -1295,6 +1359,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       analystReports: {},
       jevJudgments: {},
       debateRounds: [],
+      // 回放**不设**分母：该记录跑的时候用的轮数不在这条记录里（变量表存的是当前值）。
+      // 拿当前配置当历史期望，会把「当年 3 轮、现在设成 2」判成「第 3 轮失败」。
+      // 置 null ⇒ 面板只显示实跑出来的轮次，不宣告任何失败。
+      expectedDebateRounds: null,
       streamingPreviews: {},
       riskAssessments: {},
       valueAssessments: {},
@@ -1920,6 +1988,49 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
   },
 
+  // P4：计划-审批两段式
+  fetchPendingEvolutionPlans: async () => {
+    set({ pendingEvolutionLoading: true });
+    try {
+      const data = await invoke<EvolutionHistoryEntry[]>("list_pending_evolution_plans");
+      set({ pendingEvolutionPlans: data, pendingEvolutionLoading: false });
+    } catch (e) {
+      console.warn("[EvolutionApproval] 获取待审批进化计划失败:", e);
+      set({ pendingEvolutionLoading: false });
+    }
+  },
+
+  approveEvolutionPlan: async (historyId: string, reviewer?: string) => {
+    const row = await invoke<EvolutionHistoryEntry>("approve_evolution_plan", {
+      historyId,
+      reviewer: reviewer ?? null,
+    });
+    // 本地立刻剔除已处理行，组件仍应再拉一次以保证与后端一致
+    set((state) => ({
+      pendingEvolutionPlans: (state.pendingEvolutionPlans ?? []).filter((p) => p.id !== historyId),
+    }));
+    return row;
+  },
+
+  rejectEvolutionPlan: async (historyId: string, reason: string, reviewer?: string) => {
+    const row = await invoke<EvolutionHistoryEntry>("reject_evolution_plan", {
+      historyId,
+      reason,
+      reviewer: reviewer ?? null,
+    });
+    set((state) => ({
+      pendingEvolutionPlans: (state.pendingEvolutionPlans ?? []).filter((p) => p.id !== historyId),
+    }));
+    return row;
+  },
+
+  rollbackEvolution: async (historyId?: string | null, reviewer?: string) => {
+    return invoke<EvolutionHistoryEntry>("rollback_evolution", {
+      historyId: historyId ?? null,
+      reviewer: reviewer ?? null,
+    });
+  },
+
   // R2 组合监控
   fetchPortfolioDashboard: async (asOfDate?: string | null) => {
     try {
@@ -2066,6 +2177,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         } catch { /* noop */ }
       });
     }
+  },
+
+  refreshExpectedDebateRounds: async () => {
+    set({ expectedDebateRounds: await fetchExpectedDebateRounds() });
   },
 
   reset: () => {

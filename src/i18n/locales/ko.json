@@ -2969,7 +2969,12 @@
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "이미 실행 중인 타임트래블 배치가 있습니다. 종료될 때까지 기다려 주세요.",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "라이브 파이프라인 시간대(23:50–02:10 / 17:50–18:10)입니다. 나중에 다시 시도해 주세요.",
     "TIME_TRAVEL_BATCH_EXEC_FAILED": "배치 실행에 실패했습니다. 배치 상세를 확인하세요.",
-    "TIME_TRAVEL_BATCH_QUERY_FAILED": "타임 트래블 배치 기록 조회에 실패했습니다. 나중에 다시 시도해 주세요."
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "타임 트래블 배치 기록 조회에 실패했습니다. 나중에 다시 시도해 주세요.",
+    "MOVER_RECALL_ANALYSIS_INVALID_PARAMS": "누락 보완 분석 매개변수가 잘못되었습니다. 배치 한도와 미설명 비율 임계값을 확인하세요.",
+    "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "시간 여행 또는 누락 보완 분석 배치가 이미 실행 중입니다. 완료될 때까지 기다려 주세요.",
+    "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "실시간 파이프라인 시간대(23:50–02:10 / 17:50–18:10)입니다. 해당 시간대를 피해 다시 시작하세요.",
+    "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "누락 보완 분석 배치 실행에 실패했습니다. 배치 상세를 확인하세요.",
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "누락 보완 분석 배치 기록 조회에 실패했습니다. 나중에 다시 시도하세요."
   },
   "errorBoundary": {
     "copied": "복사됨",
@@ -7507,7 +7512,8 @@
     "source": {
       "scheduledCron": "예약 작업",
       "stockPipeline": "주식 분석 파이프라인",
-      "timeTravelBatch": "타임트래블 배치"
+      "timeTravelBatch": "타임트래블 배치",
+      "moverRecallAnalysis": "급등주 누락 보완 분석"
     },
     "state": {
       "queued": "대기 중",
@@ -7540,7 +7546,8 @@
       "running": "실행 중",
       "queued": "대기 중",
       "failed": "실패",
-      "waiting": "대기 중"
+      "waiting": "대기 중",
+      "pendingEvolution": "진화 승인 대기"
     },
     "attention": {
       "title": "주의 필요",
@@ -7573,6 +7580,39 @@
       "range24h": "최근 24시간",
       "range7d": "최근 7일",
       "rangeAll": "전체"
+    },
+    "moverRecall": {
+      "start": "누락 보완 분석 시작",
+      "modalTitle": "급등주 누락 보완 분석 배치 시작",
+      "modalHint": "윈도우 시작일을 as-of 날짜로 과거 분석을 재생합니다. 보완 분석 결과는 synthetic으로 표시되어 실제 적중률 분모에 포함되지 않습니다.",
+      "batchLimit": "배치당 이벤트 한도(1-100)",
+      "maxShare": "미설명 비율 상한",
+      "maxShareHint": "미설명 비율이 이 값에 도달한 점검 라운드는 전체를 제외합니다.",
+      "runId": "점검 라운드 지정(선택)",
+      "runIdPlaceholder": "비우면 전체 라운드에서 선별; 또는 점검 라운드 ID 입력",
+      "submit": "배치 시작",
+      "started": "배치가 시작되었습니다({{id}})",
+      "drawerTitle": "누락 보완 분석 배치",
+      "itemsTitle": "종목별 상세({{n}})",
+      "itemsEmpty": "종목별 상세 없음",
+      "colStock": "종목",
+      "colPeriod": "등급",
+      "colWindowStart": "윈도우 시작",
+      "colAnchor": "확인일",
+      "colCum": "누적 상승률",
+      "colLayer": "누락 계층",
+      "colStatus": "상태",
+      "colError": "오류 / 분석",
+      "statusRunning": "분석 중",
+      "statusAnalyzed": "분석 완료",
+      "statusFailed": "실패",
+      "batchStatus": {
+        "running": "실행 중",
+        "completed": "완료",
+        "partial": "부분 성공",
+        "failed": "실패",
+        "interrupted": "중단됨"
+      }
     }
   },
   "teammatePanel": {
@@ -15667,6 +15707,38 @@
         "neeq": "NEEQ",
         "b_share": "B주",
         "unknown": "미식별"
+      },
+      "review": {
+        "toggle": "보완 분석과 반성 펼치기",
+        "loading": "보완 분석 및 반성 불러오는 중…",
+        "loadError": "복습 기록을 불러오지 못했습니다: {{detail}}",
+        "notTracked": "이 이벤트는 실시간 점검 뷰에서 나온 것으로 예약 점검 라운드에 아직 저장되지 않았습니다. 예약 점검과 보완 분석이 완료된 후 여기서 확인할 수 있습니다.",
+        "status_pending": "보완 분석 대기",
+        "status_excluded": "이번 라운드 제외",
+        "status_running": "보완 분석 중",
+        "status_analyzed": "보완 분석 완료",
+        "status_reflected": "보완 분석 완료 · 복심 완료",
+        "status_failed": "보완 분석 실패",
+        "layerHint": "누락 계층: {{layer}}",
+        "windowFacts": "윈도우 {{start}} → {{anchor}}({{days}} 거래일), 누적 +{{gain}}%, 최대 일간 +{{max}}%",
+        "errorDetail": "실패 원인: {{detail}}",
+        "analysisHeading": "as-of 보완 분석 보고서({{date}})",
+        "analysisMissing": "이벤트는 완료로 표시되었지만 보완 분석 기록을 찾을 수 없습니다.",
+        "decisionLabel": "결정: {{action}}",
+        "reflectionHeading": "등급별 반성 복습",
+        "noReflection": "보완 분석은 완료되었으며, 등급별 반성은 각 보유 윈도우 만료 후 자동으로 생성됩니다. 나중에 다시 확인해 주세요.",
+        "verdictLabel": "평가",
+        "verdict_correct": "정확",
+        "verdict_partial": "부분 정확",
+        "verdict_wrong": "오류",
+        "rawReturn": "실제 수익률",
+        "lessonSummary": "반영된 교훈",
+        "missedSignals": "놓친 신호",
+        "whatWentWrong": "무엇이 잘못되었나",
+        "fixForFuture": "향후 판단 기준 수정",
+        "rfPending": "반성 대기 중",
+        "rfRunning": "반성 생성 중",
+        "rfFailed": "반성 실패: {{detail}}"
       }
     },
     "export": {
@@ -18067,7 +18139,66 @@
     "unitLakh": "10만",
     "horizonScoringWindows": "이 보유 구간의 지표 윈도우: {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · 볼린저 {{boll}} · 거래량 {{vol}}",
     "horizonScaleTrend": "이 구간의 2개 이평선: 단기 {{fastBars}} 봉 {{fast}} / 장기 {{slowBars}} 봉 {{slow}}, 격차 {{diffPct}}%, 단기 기울기 {{fastSlope}}",
-    "horizonScaleMomentum": "이 구간의 모멘텀: RSI({{period}}) = {{value}}"
+    "horizonScaleMomentum": "이 구간의 모멘텀: RSI({{period}}) = {{value}}",
+    "evolutionApproval": {
+      "drawerTitle": "진화 계획 승인",
+      "panelPendingTitle": "{{count}}개의 진화 계획이 승인을 기다리고 있습니다",
+      "pendingTitle": "승인 대기 계획({{count}})",
+      "emptyPending": "승인 대기 중인 진화 계획이 없습니다",
+      "selectHint": "위 목록에서 계획을 선택하여 세부 정보를 확인하세요",
+      "reviewAction": "검토",
+      "viewAction": "보기",
+      "approve": "승인 및 실행",
+      "approveConfirm": "승인 시 계획을 즉시 재실행하고 결과를 현재 적용 설정에 기록합니다. 계속할까요?",
+      "approveSuccess": "진화 계획을 승인하고 실행했습니다",
+      "reject": "거부",
+      "rejectTitle": "진화 계획 거부",
+      "rejectConfirmOk": "거부 확인",
+      "rejectReasonPlaceholder": "거부 사유를 입력하세요(필수, 향후 진화 참고용으로 기록됨)",
+      "rejectReasonRequired": "거부 사유는 필수입니다",
+      "rejectSuccess": "진화 계획을 거부했습니다",
+      "rollback": "롤백",
+      "rollbackConfirm": "현재 버전을 이전 승인 버전으로 롤백합니다. 계속할까요?",
+      "rollbackSuccess": "롤백이 완료되었습니다",
+      "rollbackUnavailable": "이미 1세대 설정이며 롤백할 과거 버전이 없습니다",
+      "readonlyHint": "이 레코드는 읽기 전용 과거 상태입니다",
+      "actionFailed": "작업 실패: {{msg}}",
+      "diffTitle": "파라미터 변경 미리보기(백테스트 최적 vs 기본값)",
+      "samplesTitle": "트리거 표본",
+      "samples": {
+        "expand": "id 목록 보기",
+        "reflections": "반성 표본",
+        "validations": "검증 표본",
+        "moverEvents": "리밸런싱 이벤트",
+        "blockedReflections": "반성 표본(데이터 미도달)",
+        "blockedValidations": "검증 표본(데이터 미도달)",
+        "blockedMoverEvents": "리밸런싱 이벤트(데이터 미도달)",
+        "blockedHint": "데이터 도달성에 실패한 표본은 하드 규칙으로 분기되어 구조 변이를 전혀 트리거하지 않으며 데이터 품질 대시보드에만 집계됩니다."
+      },
+      "param": {
+        "ewmaAlpha": "EWMA 평활 계수",
+        "lookbackDays": "룩백 일수",
+        "sampleSaturation": "표본 포화 임계값"
+      },
+      "meta": {
+        "status": "상태",
+        "createdAt": "생성 시각",
+        "trigger": "트리거 사유",
+        "summary": "결론 요약",
+        "reviewer": "검토자",
+        "reviewedAt": "검토 시각",
+        "rejectReason": "거부/롤백 사유",
+        "rollbackRef": "롤백 기준 버전"
+      },
+      "status": {
+        "pendingApproval": "승인 대기",
+        "accepted": "승인됨",
+        "rejected": "거부됨",
+        "success": "성공(과거 데이터)",
+        "failed": "실패(과거 데이터)",
+        "unknown": "알 수 없는 상태"
+      }
+    }
   },
   "pipeline": {
     "title": "주식 파이프라인",

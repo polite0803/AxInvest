@@ -1,0 +1,50 @@
+use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
+
+/// 妖股（窗口涨幅达标）漏检核查的逐轮快照
+///
+/// 每次 `analyze_mover_recall_inner` 成功执行对应一行（手动面板调用不落库，
+/// 仅 `mover-recall` 定时任务与任务中心「立即执行」落库）。P1 只存汇总与
+/// 截断后的漏检明细；逐事件规范化（`mover_recall_events` 表、as-of 补分析、
+/// 漏检反思关联）在 P2 落地。
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
+#[sea_orm(table_name = "mover_recall_runs")]
+#[serde(rename_all = "camelCase")]
+pub struct Model {
+    /// = `mrr-{uuid}`
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub id: String,
+    /// 核查覆盖起点（YYYY-MM-DD，= 首个有收盘快照的交易日）
+    pub date_from: String,
+    /// 核查覆盖终点（YYYY-MM-DD）
+    pub date_to: String,
+    /// 数据起点声明：早于此日没有快照
+    pub data_since: String,
+    /// 区间内实际采集的交易日数（只数到 date_to）
+    pub collected_days: i32,
+    pub universe_size: i64,
+    pub universe_confirmed: i64,
+    /// 四档判据（Vec<TierRule> JSON）
+    pub rules_json: String,
+    /// 召回率（RecallRates JSON）
+    pub rates_json: String,
+    /// 分层计数（Vec<LayerRow> JSON）
+    pub layers_json: String,
+    /// 达标事件总数
+    pub events_total: i32,
+    /// 漏检事件数（counts_as_miss 口径）
+    pub miss_count: i32,
+    /// 漏检明细 JSON（Vec<MissRow>，后端已按累计涨幅降序截断 200 条）
+    pub misses_json: Option<String>,
+    /// 执行状态："success"（核查本身成功，不代表零漏检）
+    pub status: String,
+    /// 触发来源：调度器执行（含定时到点与任务中心「立即执行」，两者共用同一 dispatch）
+    pub trigger_source: String,
+    /// 执行时间戳（ms）
+    pub created_at_ms: i64,
+}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}

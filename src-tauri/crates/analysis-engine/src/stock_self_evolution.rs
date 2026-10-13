@@ -259,6 +259,12 @@ impl StockSelfEvolutionEngine {
             workflow_result_json: Set(workflow_json),
             status: Set(status.to_string()),
             improvement_summary: Set(result.improvement_summary.clone()),
+            // P4 审批列：直接执行链（手动触发/自动触发）不经审批，统一留空。
+            trigger_sample_json: Set(None),
+            reviewer: Set(None),
+            reviewed_at: Set(None),
+            reject_reason: Set(None),
+            rollback_ref: Set(None),
             created_at: Set(chrono::Utc::now().timestamp_millis()),
         };
 
@@ -552,8 +558,33 @@ impl StockSelfEvolutionEngine {
         self.run_evolution(&plan).await
     }
 
-    /// 执行完整进化流程
+    /// 执行完整进化流程（含落库 `stock_evolution_history` 新行）。
+    ///
+    /// P4 审批链不要用本方法——审批接受的是**已存在的 pending_approval 行**，
+    /// 执行结果必须 UPDATE 回该行而非再 insert 一行（id 同为 `evo-{plan_id}` 会主键冲突）。
+    /// 审批路径走 [`Self::execute_pending_plan`]。
     pub async fn run_evolution(
+        &self,
+        plan: &EvolutionPlan,
+    ) -> Result<StockEvolutionResult, String> {
+        let result = self.run_evolution_inner(plan).await?;
+        // 进化结果落库（db 未注入时静默跳过，不阻断）
+        self.persist_evolution(plan, &result).await;
+        Ok(result)
+    }
+
+    /// P4 审批「接受」执行路径：跑进化执行体但**不写 history 新行**。
+    ///
+    /// 调用方（审批命令）负责把结果 UPDATE 回原 pending_approval 行（status=accepted）。
+    pub async fn execute_pending_plan(
+        &self,
+        plan: &EvolutionPlan,
+    ) -> Result<StockEvolutionResult, String> {
+        self.run_evolution_inner(plan).await
+    }
+
+    /// 进化执行体（参数/流程/混合 + 内存统计 + 结果缓存），不涉及 history 落库。
+    async fn run_evolution_inner(
         &self,
         plan: &EvolutionPlan,
     ) -> Result<StockEvolutionResult, String> {
@@ -645,9 +676,6 @@ impl StockSelfEvolutionEngine {
                 cache.drain(0..drop);
             }
         }
-
-        // 进化结果落库（db 未注入时静默跳过，不阻断）
-        self.persist_evolution(plan, &result).await;
 
         Ok(result)
     }

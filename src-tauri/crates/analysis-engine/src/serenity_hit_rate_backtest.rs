@@ -11,8 +11,8 @@
 //! 复用 hit_rate_backtest 中的 Spearman IC 计算（compute_factor_ic）。
 
 // ⚠️ 本文件当前未参与编译（analysis-engine/lib.rs 未声明，勿删）。
-// 与 crates/stock-analysis/src/serenity_hit_rate_backtest.rs 完全相同（diff 为空）。
-// 现行接线在 stock-analysis（已声明编译）。本文件是复制副本，待用户裁决后删除或保留。
+// 它曾经的孪生副本 crates/stock-analysis（已并入本 crate）在仓内已不存在，
+// 并入时也未声明本模块 ⇒ 全仓只剩这一份、零消费者（2026-10-13 实测）。待裁决后删除或接线。
 
 use std::collections::HashMap;
 
@@ -386,6 +386,8 @@ pub fn compute_serenity_hit_rate_report(
                     hit_outcome: v.hit_outcome.clone(),
                     factor_snapshot: Some(factors),
                     data_source: v.data_source.clone(),
+                    // 智选胜率线的样本来自 reco_picks 的实盘行，无回放代际
+                    as_of_date: None,
                 }
             })
         })

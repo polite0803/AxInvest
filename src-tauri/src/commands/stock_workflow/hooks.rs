@@ -65,14 +65,20 @@ pub(crate) async fn fetch_reco_prior(
     let cutoff = (chrono::Local::now() - chrono::Duration::days(max_age_days))
         .format("%Y-%m-%dT%H:%M:%S")
         .to_string();
-    let pick = match reco_picks::Entity::find()
+    let replay_as_of = axagent_astock_data::as_of::current_as_of();
+    let mut query = reco_picks::Entity::find()
         .filter(reco_picks::Column::StockCode.eq(stock_code))
         .filter(reco_picks::Column::Style.is_in(["serenity", "bottleneck"]))
-        .filter(reco_picks::Column::CreatedAt.gte(cutoff))
-        .order_by_desc(reco_picks::Column::CreatedAt)
-        .one(db)
-        .await
-    {
+        .filter(reco_picks::Column::CreatedAt.gte(cutoff));
+    // 代际对照：回放批次里的逐只分析要拿**同一次回放**的智选候选作先验，实盘分析拿
+    // 实盘候选。二者同表、靠 `as_of_date` 对齐 —— 不加这一层，回放分析会读到今天的
+    // 实盘票当先验，两链对照跨代际失真（与 `build_stock_analysis_variables` 里
+    // serenity_context 的对照语义同源）。
+    query = match replay_as_of.as_ref().map(|c| c.as_string()) {
+        Some(d) => query.filter(reco_picks::Column::AsOfDate.eq(d)),
+        None => query.filter(reco_picks::Column::AsOfDate.is_null()),
+    };
+    let pick = match query.order_by_desc(reco_picks::Column::CreatedAt).one(db).await {
         Ok(p) => p?,
         Err(e) => {
             tracing::warn!("[reco_prior] 查询智选推荐失败 ({}): {e}", stock_code);
@@ -1131,6 +1137,11 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
             decision_time_horizon: Set(time_horizon.clone()),
             decision_expected_holding_days: Set(expected_holding_days.map(|v| v as i64)),
             parent_analysis_id: Set(None),
+            // P2 样本溯源：对话直执行是用户当下触发的真实决策 ⇒ synthetic=0，
+            // 与 live 同进真实命中率分母；source 单独记 chat 便于分桶。
+            source: Set("chat".into()),
+            synthetic: Set(0),
+            anchor_event_id: Set(None),
             trade_intent_status: Set("pending".into()),
             trade_intent_source: Set(None),
             trade_intent_source_ref_id: Set(None),
@@ -1179,6 +1190,8 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
                     // ⇒ 反思行必须同为 NULL。这里的 NULL 是**有成因的未知**，不是漏接线，
                     // 读侧按「代际未知」处理（仍注入但显式声明），不得当成第 0 代。
                     analysis_template_version: None,
+                    // P3：对话直执行通道恒为常规到期反思
+                    source: super::reflection::REFLECTION_SOURCE_DUE,
                     now_ms,
                 },
             );
@@ -1229,6 +1242,10 @@ mod divergence_attribution_tests {
     /// 夹具 = 库里读出的真实形态（2026-10-02，`stock_analyses.id=75aac757…`，002812）。
     /// 证据后验 49.3% 本落在持有带，风险门槛压成生效后验 41.3% ⇒ 跨线到观望；
     /// 同票智选给 78 分 / 4.85% 试探仓。这正是用户问的「智选推荐、分析否决」。
+    ///
+    /// ⚠ `effective_params.action_hold_threshold` 保留快照值 0.48（2026-10 默认已重标定为 0.50）：
+    /// 本测锁的是「风险门槛把档位从持有压到观望」这一跨档归因，改成 0.50 后原始后验 49.3
+    /// 本身就落观望带，测的情形不复存在。快照值必须与 `divergence_attribution` 消费的 JSON 同源。
     fn real_case_002812() -> serde_json::Value {
         json!({
             "action": "观望",

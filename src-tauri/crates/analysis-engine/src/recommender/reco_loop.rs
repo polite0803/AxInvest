@@ -23,7 +23,7 @@
 
 use std::collections::HashMap;
 
-use sea_orm::{DatabaseConnection, EntityTrait, Set};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use serde::Serialize;
 
 use axagent_entities::decision_validations;
@@ -104,6 +104,12 @@ pub fn samples_from_validation_rows(rows: Vec<decision_validations::Model>) -> V
     let keys = style_keys();
 
     for r in rows {
+        // 代际闸门：回放样本（`as_of_date` 非空）不进**实盘**权重闭环。读侧 SQL 已过滤，
+        // 这里是同一判据在纯函数层的副本 —— 只有 SQL 过滤时单测查不到（要 create_test_pool
+        // 才碰得到），且未来若有调用方漏带谓词，这里不会静默混码。
+        if r.as_of_date.is_some() {
+            continue;
+        }
         let Some(style_key) =
             keys.iter().copied().find(|k| db_style_aliases(k).contains(&r.style.as_str()))
         else {
@@ -184,7 +190,12 @@ fn parse_ms(s: &str) -> Option<i64> {
 pub async fn load_reco_loop_samples(
     db: &DatabaseConnection,
 ) -> Result<Vec<RecoLoopSample>, String> {
+    // 代际过滤：实盘权重闭环只吃**实盘**样本。回放的验证行（`as_of_date` 非空）是另一套
+    // 计数域，混进来会让 IC 把「历史回放的预测」与「实盘的预测」配在同一格里降权
+    // （与分析链伪风格行同表混码是同一类错误，见本文件头 D1）。
+    // 回放样本的用途是代际对照/证伪，走显式入口，不在这里默认并入。
     let rows = decision_validations::Entity::find()
+        .filter(decision_validations::Column::AsOfDate.is_null())
         .all(db)
         .await
         .map_err(|e| format!("读取 decision_validations 失败: {e}"))?;
@@ -677,6 +688,8 @@ mod tests {
             hit_target: Some(0),
             hit_outcome: Some(outcome.into()),
             factor_snapshot: None,
+            // 夹具默认是实盘样本（代际为空）；回放样本另造，见本模块的代际负控测试
+            as_of_date: None,
             data_source: "astock_client".into(),
             created_at: "2026-09-10T10:00:00+00:00".into(),
         }
@@ -1184,5 +1197,28 @@ mod tests {
         let s = mk("trend", Period::Short, 50.0, 1.0, true, 1_700_000_000_000);
         assert_eq!(s.dqi_fused_at_prediction, None);
         assert_eq!(dqi_penalty_of(&[&s]), None);
+    }
+
+    /// 代际闸门：`as_of_date` 非空的回放样本不得进实盘权重闭环。
+    #[test]
+    fn replay_samples_do_not_enter_live_loop() {
+        let live = dv_row("p-live", "trend", "mid", 28, "hit");
+        let mut replay = dv_row("p-replay", "trend", "mid", 28, "hit");
+        replay.as_of_date = Some("2026-05-27".to_string());
+
+        // 前置：夹具本身进得了闭环（否则下面两条恒真，测的是别的 continue）
+        assert_eq!(
+            samples_from_validation_rows(vec![live.clone()]).len(),
+            1,
+            "前置不成立：实盘样本未被采纳"
+        );
+        // 混入一条回放样本 ⇒ 仍 1 条（被吃进就变 2）
+        assert_eq!(
+            samples_from_validation_rows(vec![live, replay.clone()]).len(),
+            1,
+            "回放样本混进了实盘闭环"
+        );
+        // 另一头：只给回放样本 ⇒ 0 条
+        assert_eq!(samples_from_validation_rows(vec![replay]).len(), 0);
     }
 }

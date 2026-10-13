@@ -21,6 +21,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getAdapter, getAllAdapters } from "./adapters/registry";
 import { formatDateTime, formatDuration } from "./formatUtils";
+import { StartMoverRecallBatchButton } from "./jobs/StartMoverRecallBatchModal";
 import type { RunState, RunTrigger, SourceId, UnifiedRun } from "./model";
 import { RunStatusTag } from "./RunStatusTag";
 import { SourceChip } from "./SourceChip";
@@ -240,18 +241,21 @@ export function RunsTab() {
           </Typography.Text>
           <Switch size="small" checked={autoRefresh} onChange={setAutoRefresh} />
         </Space>
-        <Button
-          size="small"
-          icon={
-            <RefreshCw
-              size={14}
-              className={refreshing ? "animate-spin" : undefined}
-            />
-          }
-          onClick={() => void loadRuns(false)}
-        >
-          {t("tasksCenter.runs.refresh")}
-        </Button>
+        <Space size={6}>
+          <StartMoverRecallBatchButton onStarted={() => void loadRuns(false)} />
+          <Button
+            size="small"
+            icon={
+              <RefreshCw
+                size={14}
+                className={refreshing ? "animate-spin" : undefined}
+              />
+            }
+            onClick={() => void loadRuns(false)}
+          >
+            {t("tasksCenter.runs.refresh")}
+          </Button>
+        </Space>
       </Space>
 
       {sourceErrors.length > 0 && (

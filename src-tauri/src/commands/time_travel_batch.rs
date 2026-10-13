@@ -12,9 +12,11 @@
 //! 流水线（见 `.trae/documents/time-travel-batch_plan.md`）：
 //! 1. 选定历史交易日 `as_of`，进入 [`as_of::with_optional_asof`] 封闭世界；
 //! 2. **guard 内**一轮统一回放两条选股链（顶层平级，批次不区分）：
-//!    a. 内存荐股（**不写 `reco_picks` 主表**，铁律 B2）；
-//!    b. 趋势智选 serenity 原工作流（静默复用，as-of 守卫使其同样不落
-//!    `reco_picks`）；两链候选合并去重（同 code 留置信最高一条）后，
+//!    a. 荐股链：候选**落 `reco_picks`，每行带 `as_of_date` = 本批截止日**。铁律 B2
+//!    于 2026-10-12 改写——回放的候选必须持久化才有样本可供反思，防污染的手段从
+//!    「跳过写库」换成「写库 + 打代际标记」；
+//!    b. 趋势智选 serenity 原工作流（同口径落库带代际，但**不写进程内全局种子**，
+//!    那层状态无代际可打）；两链候选合并去重（同 code 留置信最高一条）后，
 //!    经 [`run_analysis_for_candidates`] 逐只 replay 分析
 //!    （`analysis_kind='replay'`，分析日 / pending 锚点均为 `as_of`）；
 //!    serenity 链 best-effort：失败只降级批次终态，不拖垮荐股链；
@@ -321,7 +323,10 @@ fn beijing_today() -> chrono::NaiveDate {
 ///
 /// 边界与四个 live cron 的启动窗对齐：窗内启动批次，全局 as_of 栈可能串扰正在跑的
 /// live 任务（荐股 / pool-scan / batch-reflection），故一律拒绝。
-fn in_live_window() -> bool {
+///
+/// `pub(crate)`：漏检补分析批次（`mover_recall_analysis`）共用同一 as-of 进程栈，
+/// 必须共用同一时间窗判据（禁区 12：判据单点，不得各抄一份）。
+pub(crate) fn in_live_window() -> bool {
     let bj = chrono::Utc::now() + chrono::Duration::hours(8);
     let hm = bj.format("%H:%M").to_string();
     let (h, m): (u32, u32) = {
@@ -331,6 +336,52 @@ fn in_live_window() -> bool {
     let mins = h * 60 + m;
     // 23:50-24:00 或 00:00-02:10
     mins >= 23 * 60 + 50 || mins <= 2 * 60 + 10 || (17 * 60 + 50..=18 * 60 + 10).contains(&mins)
+}
+
+/// 进 guard 前的前置校验：该 as-of 日是否有建池两源的本地快照。
+///
+/// 为什么必须显式失败而不是让它跑出零候选：热股榜与行业榜都申报 `NoHistoricalSemantic`，
+/// 它们在回放里的唯一历史正门是本地每日快照（live 采集累积而来，**早于累积起点的日期
+/// 物理上不可回补**）。缺快照 ⇒ 建池得到空池 ⇒ 整批候选为 0，而批次只在终态留一句
+/// 「均无候选（可能当日数据缺失或阈值过高）」——那把「这个日期根本不可回放」和
+/// 「阈值太高所以没选出来」挤进了同一句（AGENTS.md「结构性缺口不得在 UI 造成歧义」）。
+///
+/// 现网实证：历史 5 次批次全取 2026-05-27，而热股榜快照最早只到 2026-09-30。
+async fn require_pool_snapshot_coverage(
+    db: &DatabaseConnection,
+    as_of: &chrono::NaiveDate,
+) -> Result<(), String> {
+    use axagent_analysis_engine::recommender::pool::POOL_SNAPSHOT_METHODS;
+
+    let as_of_str = as_of.format("%Y-%m-%d").to_string();
+    // 查的就是建池真实取的那两源 —— 清单由 pool.rs 单点导出，这里不另抄一份
+    let missing = axagent_dao::repo::astock_daily_snapshot::missing_snapshot_sources(
+        db,
+        &as_of_str,
+        &POOL_SNAPSHOT_METHODS,
+    )
+    .await
+    .map_err(|e| format!("读 astock_daily_snapshot 覆盖失败: {e}"))?;
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    // 给出「最早能回放的那一天」，拒绝才具备可操作性
+    let earliest = axagent_dao::repo::astock_daily_snapshot::earliest_snapshot_date(
+        db,
+        POOL_SNAPSHOT_METHODS[0],
+    )
+    .await
+    .map_err(|e| format!("读最早快照日期失败: {e}"))?;
+    let hint = match earliest.as_deref() {
+        Some(d) => format!("本地热股榜快照最早只到 {d}，请把批次日期改到 {d} 或之后"),
+        None => "本地还没有任何热股榜快照（每日采集尚未跑过），当前无日期可回放".to_string(),
+    };
+    Err(format!(
+        "{as_of_str} 缺建池快照（{}）⇒ 该日候选池不可回放。热股榜/行业榜无历史通道，\
+         {hint}；这不是阈值问题，改阈值不会让候选变出来",
+        missing.join(", ")
+    ))
 }
 
 // ── Tauri 命令 ────────────────────────────────────────────────────────────────
@@ -401,6 +452,12 @@ pub async fn run_time_travel_batch(
     let ctx = AsOfContext::new(as_of, AsOfSource::UserReplay)
         .map_err(|e| ErrorResponse::err_with_detail(ec::ASOF_INVALID, e.to_string()))?;
 
+    // 建池快照覆盖校验（先于 live 窗判断与抢锁）：不可回放的日期当场拒绝并给出可用日期，
+    // 不能放批次进去跑完只留一句含糊的「均无候选（可能当日数据缺失或阈值过高）」。
+    require_pool_snapshot_coverage(state.harness.db(), &as_of)
+        .await
+        .map_err(|e| ErrorResponse::err_with_detail(ec::ASOF_INVALID, e))?;
+
     // 3. live 时间窗拒绝（先于抢锁，给出可操作的拒绝原因）
     if in_live_window() {
         return Err(ErrorResponse::err_with_detail(
@@ -445,25 +502,37 @@ pub async fn run_time_travel_batch(
     let min_confidence = request.min_confidence;
     let top_n = request.top_n;
 
-    tauri::async_runtime::spawn(async move {
-        execute_batch(
-            batch_id,
-            ctx,
-            periods,
-            min_confidence,
-            top_n,
-            reflect,
-            db,
-            client,
-            engine,
-            vector_store,
-            master_key,
-            trajectory_storage,
-            permit,
-        )
-        .await;
-        tracing::info!("[time-travel-batch] 批次结束");
-    });
+    // ⚠ 不能用 tauri::async_runtime::spawn：Tauri 全局 runtime 的 worker 栈只有默认 2MB，
+    // debug 构建下本批次 future（荐股扫描 → serenity 回放 → 逐只工作流分析 → 多路
+    // agent/LLM 流）轮询到深层时直接栈溢出（STATUS_ACCESS_VIOLATION，
+    // 2026-10-12 实测三复现）。走独立多线程 runtime + 32MB 大栈
+    // （必须 multi-thread：引擎/工具链路含 block_in_place，current-thread runtime 会 panic）。
+    const BATCH_STACK: usize = 32 * 1024 * 1024;
+    crate::spawn_fire_and_forget_multithread(
+        "time_travel_batch",
+        BATCH_STACK,
+        4,
+        BATCH_STACK,
+        async move {
+            execute_batch(
+                batch_id,
+                ctx,
+                periods,
+                min_confidence,
+                top_n,
+                reflect,
+                db,
+                client,
+                engine,
+                vector_store,
+                master_key,
+                trajectory_storage,
+                permit,
+            )
+            .await;
+            tracing::info!("[time-travel-batch] 批次结束");
+        },
+    );
 
     Ok(batch_id_to_return)
 }
@@ -579,8 +648,49 @@ async fn execute_batch(
         )
         .await;
 
-        // picks 仅在内存映射为候选队列 —— 绝不调 persist_reco_picks（铁律 B2：
-        // 回放荐股不写 reco_picks 主表，避免污染 live 候选池）。
+        // 链 A 落库（铁律 B2 于 2026-10-12 改写：回放候选必须持久化才有样本可供反思）：
+        // 写同一张 reco_picks，每行带 `as_of_date` = 本批截止日 ⇒ 与实盘同表但不混码。
+        // 命令层那条 `persist_reco_response_picks` 在这里走不到（批次直连引擎的
+        // `run_recommendation_scan`），所以按荐股 cron 分支的同形态在这里落一次。
+        let reco_generated_at = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
+        let reco_strategy_weights_json = vars
+            .iter()
+            .find(|(k, _)| k == "reco_strategy_weights")
+            .and_then(|(_, v)| v.is_object().then(|| v.to_string()));
+        let reco_written = crate::commands::_shared_reco_pool::persist_reco_picks(
+            &db,
+            &scan.picks,
+            scan.seed_pool_snapshot.clone(),
+            reco_strategy_weights_json,
+            &reco_generated_at,
+            Some(&as_of_str),
+        )
+        .await;
+        tracing::info!(
+            "[time-travel-batch] {as_of_str} 链 A 落库 reco_picks: {reco_written}/{} 行\
+            （as_of_date={as_of_str}）",
+            scan.picks.len()
+        );
+        // L3 截断留痕逐档落库（同样带代际）。缺这一段会让回放的漏检归因整批落
+        // `Unexplained`——与实盘不同口径，正是 `reco_scan_audit` 文档要求避免的形态。
+        for (audit_period, trimmed) in &scan.period_audit {
+            let audit_written = crate::commands::_shared_reco_pool::persist_reco_scan_audit(
+                &db,
+                trimmed,
+                *audit_period,
+                &reco_generated_at,
+                Some(&as_of_str),
+            )
+            .await;
+            tracing::info!(
+                "[time-travel-batch] {as_of_str} 链 A 落库 scan_audit: {audit_written}/{} 行\
+                （档 {}，as_of_date={as_of_str}）",
+                trimmed.len(),
+                audit_period.as_str()
+            );
+        }
+
+        // picks 同时映射为内存候选队列，供下方与链 B 合并去重后逐只 replay 分析。
         let reco_candidates: Vec<PoolCandidate> = scan
             .picks
             .iter()
@@ -589,16 +699,19 @@ async fn execute_batch(
                 stock_name: p.stock_name.clone(),
                 period: p.period,
                 confidence: p.confidence as i32,
+                anchor_event_id: None,
             })
             .collect();
         let reco_count = reco_candidates.len();
         tracing::info!(
-            "[time-travel-batch] {as_of_str} 链A 内存荐股 {reco_count} 只候选（不落 reco_picks）"
+            "[time-travel-batch] {as_of_str} 链A 荐股 {reco_count} 只候选（已落 reco_picks，\
+             代际 as_of_date={as_of_str}）"
         );
 
         // 链 B：趋势智选 serenity 原工作流（静默 app=None；内部工作流节点自带同锚点
-        // as-of scope，与本 guard 嵌套安全）。as_of_ctx=Some 时其 reco_picks 落库分支
-        // 自带跳过守卫，回放不落库。best-effort：失败不阻断批次，候选只用荐股链。
+        // as-of scope，与本 guard 嵌套安全）。as_of_ctx=Some 时其落库分支把截止日写进行上的
+        // `as_of_date`（代际标记），与实盘同表不混码；进程内全局种子仍不写（无代际可打）。
+        // best-effort：失败不阻断批次，候选只用荐股链。
         let (serenity_candidates, serenity_error) =
             match serenity_replay(&db, &client, &engine, ctx).await {
                 Ok(v) => (v, None),
@@ -611,7 +724,8 @@ async fn execute_batch(
             };
         let serenity_count = serenity_candidates.len();
         tracing::info!(
-            "[time-travel-batch] {as_of_str} 链B 趋势智选 {serenity_count} 只逐档候选（不落 reco_picks）"
+            "[time-travel-batch] {as_of_str} 链B 趋势智选 {serenity_count} 只逐档候选（已落 \
+             reco_picks，代际 as_of_date={as_of_str}）"
         );
 
         // 两链合并去重：同 code 多条（四档 + mid/long、两链撞车）只留置信最高一条，
@@ -624,7 +738,8 @@ async fn execute_batch(
             "[time-travel-batch] {as_of_str} 两链去重后 {merged_count} 只进入逐只 replay 分析"
         );
 
-        let outcome = run_analysis_for_candidates(&db, &client, &engine, candidates).await;
+        let outcome =
+            run_analysis_for_candidates(&db, &client, &engine, candidates, "time_travel").await;
         (reco_count, serenity_count, serenity_error, outcome)
     };
 
@@ -746,8 +861,8 @@ async fn execute_batch(
 ///
 /// 复用 `run_serenity_screening_inner`（与手动 `run_serenity_screening` 命令同一实现）：
 /// inner 内部工作流节点自带同锚点 as-of scope（与批次外层 guard 嵌套安全），
-/// 且 `as_of_ctx=Some` 时自动跳过 reco_picks 落库与全局 serenity 种子同步 ——
-/// 回放不污染 live 候选池（铁律 B2）。
+/// `as_of_ctx=Some` 时候选**照落** `reco_picks`（代际 = 本批截止日，见 2026-10-12 裁定），
+/// 只跳过全局 serenity 种子同步 —— 种子是进程内单槽、无代际维度，回放写它会换掉 live 的建池输入。
 async fn serenity_replay(
     db: &DatabaseConnection,
     client: &AStockClient,
@@ -806,6 +921,7 @@ fn serenity_candidates_from_json(value: &serde_json::Value) -> Vec<PoolCandidate
             stock_name: name,
             period,
             confidence,
+            anchor_event_id: None,
         });
     }
     out

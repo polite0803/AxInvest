@@ -374,7 +374,7 @@ pub fn apply_covariance_decay(
 /// - `position_pct`: 计算后的仓位 [0, 100]
 /// - `buy_threshold`: 买入阈值（默认 0.63）
 /// - `increase_threshold`: 增持阈值（默认 0.53）
-/// - `hold_threshold`: 持有阈值（默认 0.48）
+/// - `hold_threshold`: 持有阈值（默认 0.50；2026-10 与「后验中性 = 0.50」锚点对齐）
 /// - `watch_threshold`: 观望阈值（默认 0.38）
 /// - `reduce_threshold`: 减持阈值（默认 0.30）
 /// - `pos_buy_min`: 买入所需最小仓位（默认 15.0%）
@@ -882,7 +882,9 @@ impl PortfolioMgrParamSet {
         Self {
             buy_threshold: 0.63,
             increase_threshold: 0.53,
-            hold_threshold: 0.48,
+            // 2026-10 重标定：0.48→0.50。原值让后验恰为中性（0.50）时也落「持有」，
+            // 与贝叶斯中性锚点及 t-scoring「全中性 totalScore=50」不一致（利好偏置 A 档根治）。
+            hold_threshold: 0.50,
             watch_threshold: 0.38,
             reduce_threshold: 0.30,
             cap_extreme: 10.0,
@@ -1387,28 +1389,28 @@ mod tests {
 
     #[test]
     fn action_buy() {
-        let a = compute_action(0.70, 20.0, 0.63, 0.53, 0.48, 0.38, 0.30, 15.0, 10.0);
+        let a = compute_action(0.70, 20.0, 0.63, 0.53, 0.50, 0.38, 0.30, 15.0, 10.0);
         assert_eq!(a, "买入");
     }
 
     #[test]
     fn action_buy_insufficient_position() {
-        let a = compute_action(0.70, 5.0, 0.63, 0.53, 0.48, 0.38, 0.30, 15.0, 10.0);
+        let a = compute_action(0.70, 5.0, 0.63, 0.53, 0.50, 0.38, 0.30, 15.0, 10.0);
         // effective_posterior >= 0.63 但 position < 15%，降级到下一个匹配阈值
         // next: 0.63 >= 0.53 但 position(5) < pos_increase_min(10) → 跳过
-        // 0.70 >= 0.48 → 持有
+        // 0.70 >= 0.50 → 持有
         assert_eq!(a, "持有");
     }
 
     #[test]
     fn action_hold() {
-        let a = compute_action(0.55, 10.0, 0.63, 0.53, 0.48, 0.38, 0.30, 15.0, 10.0);
+        let a = compute_action(0.55, 10.0, 0.63, 0.53, 0.50, 0.38, 0.30, 15.0, 10.0);
         assert_eq!(a, "增持");
     }
 
     #[test]
     fn action_sell() {
-        let a = compute_action(0.25, 0.0, 0.63, 0.53, 0.48, 0.38, 0.30, 15.0, 10.0);
+        let a = compute_action(0.25, 0.0, 0.63, 0.53, 0.50, 0.38, 0.30, 15.0, 10.0);
         assert_eq!(a, "卖出");
     }
 
@@ -1503,7 +1505,7 @@ mod tests {
         .unwrap();
         assert!((result.buy_threshold - 0.60).abs() < 0.001);
         assert!((result.cap_high - 30.0).abs() < 0.001);
-        assert!((result.hold_threshold - 0.48).abs() < 0.001); // default
+        assert!((result.hold_threshold - 0.50).abs() < 0.001); // default（2026-10 重标定 0.48→0.50）
     }
 
     #[test]

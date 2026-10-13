@@ -434,8 +434,8 @@ pub const CONCEPTS: &[ConceptDecl] = &[
         unit: Unit::Ratio,
         min: 0.0,
         max: 1.0,
-        meaning: "决策后验概率（阈值 0.63 / 0.53 / 0.48）",
-        evidence: "src-tauri/crates/analysis-engine/src/decision.rs:58",
+        meaning: "决策后验概率（阈值 0.63 / 0.53 / 0.50）",
+        evidence: "src-tauri/crates/analysis-engine/src/decision.rs:59",
     },
     ConceptDecl {
         id: "axinvest.decision.effective_posterior",

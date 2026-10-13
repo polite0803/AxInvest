@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { formatDateTime, formatDuration } from "./formatUtils";
 import { BatchRunDetailDrawer } from "./jobs/BatchRunDetailDrawer";
+import { MoverRecallBatchDrawer } from "./jobs/MoverRecallBatchDrawer";
 import { PipelineRunDetailDrawer } from "./jobs/PipelineRunDetailDrawer";
 
 /**
@@ -16,6 +17,7 @@ import { PipelineRunDetailDrawer } from "./jobs/PipelineRunDetailDrawer";
  *
  * - stock-pipeline → PipelineRunDetailDrawer（逐股明细）
  * - time-travel-batch → BatchRunDetailDrawer（analyses/horizons/反思）
+ * - mover-recall-analysis → MoverRecallBatchDrawer（逐票 as-of 补分析明细）
  * - scheduled-cron → 该任务的执行历史 Drawer（get_task_execution_history）
  *
  * 后续源（workflow/background/index…）在此扩展，调用方始终只面对 UnifiedRun。
@@ -38,6 +40,10 @@ export function RunDetailDrawer() {
 
   if (selected?.source === "time-travel-batch") {
     return <BatchRunDetailDrawer batchId={selected.nativeId} onClose={close} />;
+  }
+
+  if (selected?.source === "mover-recall-analysis") {
+    return <MoverRecallBatchDrawer batchId={selected.nativeId} onClose={close} />;
   }
 
   if (selected?.source === "scheduled-cron") {

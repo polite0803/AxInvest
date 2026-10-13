@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { EvolutionApprovalDrawer } from "@/components/stock-analysis/EvolutionApprovalDrawer";
 import { showBackendError } from "@/lib/errorI18n";
 import { useTaskCenterStore } from "@/stores";
+import type { EvolutionHistoryEntry } from "@/stores/feature/stockAnalysisStore";
+import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { Button, Card, Empty, List, message, Progress, Space, Statistic, Tag, Typography } from "antd";
-import { AlertTriangle, CheckCircle2, Clock4, ListChecks, Loader2 } from "lucide-react";
-import { useMemo } from "react";
+import { AlertTriangle, CheckCircle2, Clock4, ListChecks, Loader2, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getAdapter } from "./adapters/registry";
 import { formatDuration } from "./formatUtils";
@@ -30,6 +33,21 @@ export function OverviewTab({
   const setFilters = useTaskCenterStore((s) => s.setFilters);
   const selectRun = useTaskCenterStore((s) => s.selectRun);
   const loadRuns = useTaskCenterStore((s) => s.loadRuns);
+
+  // P4：待审批进化计划（独立本地状态，不走 runs store / UnifiedRun 白名单）
+  const pendingEvolutionPlans = useStockAnalysisStore((s) => s.pendingEvolutionPlans);
+  const fetchPendingEvolutionPlans = useStockAnalysisStore((s) => s.fetchPendingEvolutionPlans);
+  const [evolutionApprovalOpen, setEvolutionApprovalOpen] = useState(false);
+  const [evolutionApprovalSelected, setEvolutionApprovalSelected] = useState<EvolutionHistoryEntry | null>(null);
+
+  useEffect(() => {
+    void fetchPendingEvolutionPlans();
+  }, [fetchPendingEvolutionPlans]);
+
+  const openEvolutionApproval = useCallback(() => {
+    setEvolutionApprovalSelected(null);
+    setEvolutionApprovalOpen(true);
+  }, []);
 
   const health = useMemo(() => computeHealth(runs), [runs]);
   const attention = useMemo(() => attentionRuns(runs).slice(0, 8), [runs]);
@@ -92,6 +110,13 @@ export function OverviewTab({
           label={t("tasksCenter.health.waiting")}
           value={health.waiting}
           onClick={() => viewByState(["waiting", "paused"])}
+        />
+        <HealthCard
+          color="#722ed1"
+          icon={<ShieldCheck size={18} />}
+          label={t("tasksCenter.health.pendingEvolution")}
+          value={pendingEvolutionPlans?.length ?? 0}
+          onClick={openEvolutionApproval}
         />
       </Space>
 
@@ -237,6 +262,14 @@ export function OverviewTab({
           </Typography.Text>
         )}
       </Card>
+
+      {/* P4：进化计划审批抽屉（任务中心第二入口） */}
+      <EvolutionApprovalDrawer
+        open={evolutionApprovalOpen}
+        selected={evolutionApprovalSelected}
+        onSelect={setEvolutionApprovalSelected}
+        onClose={() => setEvolutionApprovalOpen(false)}
+      />
     </Space>
   );
 }

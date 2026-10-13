@@ -2969,7 +2969,12 @@
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "已有一個時間旅行批次在執行，請等待結束。",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "目前處於即時流水線時間窗（23:50–02:10 / 17:50–18:10），請避開後再試。",
     "TIME_TRAVEL_BATCH_EXEC_FAILED": "時間旅行批次執行失敗，請查看批次明細。",
-    "TIME_TRAVEL_BATCH_QUERY_FAILED": "查詢時間旅行批次歷史失敗，請稍後重試。"
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "查詢時間旅行批次歷史失敗，請稍後重試。",
+    "MOVER_RECALL_ANALYSIS_INVALID_PARAMS": "漏檢補分析參數無效，請檢查單批上限與不可歸因率閾值。",
+    "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "已有時間旅行/漏檢補分析批次在執行，請等它結束。",
+    "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "當前處於即時流水線時間窗（23:50–02:10 / 17:50–18:10），請避開後再發起。",
+    "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "漏檢補分析批次執行失敗，請查看批次明細。",
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "查詢漏檢補分析批次歷史失敗，請稍後重試。"
   },
   "errorBoundary": {
     "copied": "已複製",
@@ -7507,7 +7512,8 @@
     "source": {
       "scheduledCron": "定時任務",
       "stockPipeline": "股票分析管道",
-      "timeTravelBatch": "時間旅行批次"
+      "timeTravelBatch": "時間旅行批次",
+      "moverRecallAnalysis": "漏檢補分析批次"
     },
     "state": {
       "queued": "排隊中",
@@ -7540,7 +7546,8 @@
       "running": "執行中",
       "queued": "排隊中",
       "failed": "失敗",
-      "waiting": "等待處理"
+      "waiting": "等待處理",
+      "pendingEvolution": "待審批進化"
     },
     "attention": {
       "title": "需關注",
@@ -7573,6 +7580,39 @@
       "range24h": "近 24 小時",
       "range7d": "近 7 天",
       "rangeAll": "全部"
+    },
+    "moverRecall": {
+      "start": "發起漏檢補分析",
+      "modalTitle": "發起妖股漏檢補分析",
+      "modalHint": "以視窗起點為 as-of 日期回放歷史分析；補分析結果單獨標記（synthetic），不計入真實命中率分母。",
+      "batchLimit": "單批事件數上限（1-100）",
+      "maxShare": "不可歸因率上限",
+      "maxShareHint": "所屬核查輪次的不可歸因占比達到該值時，整輪不取。",
+      "runId": "限定核查輪次（可選）",
+      "runIdPlaceholder": "留空 = 跨全部輪次選樣；或填核查輪次 ID",
+      "submit": "發起批次",
+      "started": "批次已發起（{{id}}）",
+      "drawerTitle": "漏檢補分析批次",
+      "itemsTitle": "逐票明細（{{n}}）",
+      "itemsEmpty": "暫無逐票明細",
+      "colStock": "股票",
+      "colPeriod": "檔位",
+      "colWindowStart": "視窗起點",
+      "colAnchor": "確認日",
+      "colCum": "累計漲幅",
+      "colLayer": "歸因層",
+      "colStatus": "狀態",
+      "colError": "錯誤 / 分析記錄",
+      "statusRunning": "分析中",
+      "statusAnalyzed": "已分析",
+      "statusFailed": "失敗",
+      "batchStatus": {
+        "running": "執行中",
+        "completed": "已完成",
+        "partial": "部分成功",
+        "failed": "失敗",
+        "interrupted": "已中斷"
+      }
     }
   },
   "teammatePanel": {
@@ -15779,6 +15819,38 @@
         "neeq": "新三板",
         "b_share": "B股",
         "unknown": "未識別"
+      },
+      "review": {
+        "toggle": "展開補分析與反思",
+        "loading": "載入補分析與反思…",
+        "loadError": "覆盤記錄載入失敗：{{detail}}",
+        "notTracked": "該事件來自即時核查視圖，尚未被定時核查輪次落庫；定時核查完成並補分析後可在此檢視。",
+        "status_pending": "待補分析",
+        "status_excluded": "本輪排除",
+        "status_running": "補分析中",
+        "status_analyzed": "已補分析",
+        "status_reflected": "已補分析 · 已覆盤",
+        "status_failed": "補分析失敗",
+        "layerHint": "歸因層：{{layer}}",
+        "windowFacts": "視窗 {{start}} → {{anchor}}（{{days}} 個交易日），累計 +{{gain}}%，最大單日 +{{max}}%",
+        "errorDetail": "失敗原因：{{detail}}",
+        "analysisHeading": "as-of 補分析報告（{{date}}）",
+        "analysisMissing": "事件已標記完成但找不到補分析記錄。",
+        "decisionLabel": "決策：{{action}}",
+        "reflectionHeading": "逐檔反思覆盤",
+        "noReflection": "補分析已完成，逐檔反思將在各持有視窗到期後自動生成，請稍後再來檢視。",
+        "verdictLabel": "裁決",
+        "verdict_correct": "正確",
+        "verdict_partial": "部分正確",
+        "verdict_wrong": "錯誤",
+        "rawReturn": "實際收益",
+        "lessonSummary": "入模教訓",
+        "missedSignals": "漏檢訊號",
+        "whatWentWrong": "錯在哪",
+        "fixForFuture": "未來判據修正",
+        "rfPending": "反思排隊中",
+        "rfRunning": "反思生成中",
+        "rfFailed": "反思失敗：{{detail}}"
       }
     },
     "export": {
@@ -18291,7 +18363,66 @@
     "unitLakh": "十萬",
     "horizonScoringWindows": "本檔技術腿窗口：{{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · 布林 {{boll}} · 量能 {{vol}}",
     "horizonScaleTrend": "本檔兩帶：快 {{fastBars}} 根 {{fast}} ／ 慢 {{slowBars}} 根 {{slow}}，差 {{diffPct}}%，快帶斜率 {{fastSlope}}",
-    "horizonScaleMomentum": "本檔動量：RSI({{period}}) = {{value}}"
+    "horizonScaleMomentum": "本檔動量：RSI({{period}}) = {{value}}",
+    "evolutionApproval": {
+      "drawerTitle": "進化計劃審批",
+      "panelPendingTitle": "{{count}} 條進化計劃待審批",
+      "pendingTitle": "待審批計劃（{{count}}）",
+      "emptyPending": "暫無待審批的進化計劃",
+      "selectHint": "從上方列表選擇一條計劃檢視詳情",
+      "reviewAction": "審批",
+      "viewAction": "檢視",
+      "approve": "接受並執行",
+      "approveConfirm": "接受後將立即重放執行該計劃並寫回當前生效配置，是否繼續？",
+      "approveSuccess": "已接受並執行進化計劃",
+      "reject": "拒絕",
+      "rejectTitle": "拒絕進化計劃",
+      "rejectConfirmOk": "確認拒絕",
+      "rejectReasonPlaceholder": "請填寫拒絕原因（必填，將留痕供後續進化參考）",
+      "rejectReasonRequired": "拒絕原因不能為空",
+      "rejectSuccess": "已拒絕進化計劃",
+      "rollback": "回滾",
+      "rollbackConfirm": "將把當前版本回滾為上一已接受版本，是否繼續？",
+      "rollbackSuccess": "回滾完成",
+      "rollbackUnavailable": "已是第一代配置，沒有可回滾的歷史版本",
+      "readonlyHint": "該記錄為唯讀歷史狀態",
+      "actionFailed": "操作失敗：{{msg}}",
+      "diffTitle": "參數變更預覽（回測最優 vs 預設）",
+      "samplesTitle": "觸發樣本",
+      "samples": {
+        "expand": "檢視 id 列表",
+        "reflections": "反思樣本",
+        "validations": "驗證樣本",
+        "moverEvents": "調倉事件",
+        "blockedReflections": "反思樣本（資料不可達）",
+        "blockedValidations": "驗證樣本（資料不可達）",
+        "blockedMoverEvents": "調倉事件（資料不可達）",
+        "blockedHint": "資料可達性失敗的樣本已被硬規則分流：永不觸發結構變異，只計入資料品質儀表板。"
+      },
+      "param": {
+        "ewmaAlpha": "EWMA 平滑係數",
+        "lookbackDays": "回看天數",
+        "sampleSaturation": "樣本飽和閾值"
+      },
+      "meta": {
+        "status": "狀態",
+        "createdAt": "生成時間",
+        "trigger": "觸發原因",
+        "summary": "結論摘要",
+        "reviewer": "審批人",
+        "reviewedAt": "審批時間",
+        "rejectReason": "拒絕/回滾原因",
+        "rollbackRef": "回滾基準版本"
+      },
+      "status": {
+        "pendingApproval": "待審批",
+        "accepted": "已接受",
+        "rejected": "已拒絕",
+        "success": "已成功（歷史）",
+        "failed": "已失敗（歷史）",
+        "unknown": "未知狀態"
+      }
+    }
   },
   "pipeline": {
     "title": "股票管道",

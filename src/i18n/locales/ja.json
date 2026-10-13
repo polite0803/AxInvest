@@ -2969,7 +2969,12 @@
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "別のタイムトラベル・バッチが実行中です。終了をお待ちください。",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "ライブ処理の時間帯（23:50–02:10 / 17:50–18:10）です。時間をずらしてお試しください。",
     "TIME_TRAVEL_BATCH_EXEC_FAILED": "バッチ実行に失敗しました。バッチ詳細をご確認ください。",
-    "TIME_TRAVEL_BATCH_QUERY_FAILED": "タイムトラベル・バッチ履歴の取得に失敗しました。後でもう一度お試しください。"
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "タイムトラベル・バッチ履歴の取得に失敗しました。後でもう一度お試しください。",
+    "MOVER_RECALL_ANALYSIS_INVALID_PARAMS": "捕捉漏れバックフィルのパラメータが無効です。バッチ上限と原因不明率のしきい値を確認してください。",
+    "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "時間旅行または捕捉漏れバックフィルのバッチがすでに実行中です。終了までお待ちください。",
+    "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "ライブパイプライン時間帯（23:50–02:10 / 17:50–18:10）です。時間帯を外して開始してください。",
+    "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "捕捉漏れバックフィルバッチの実行に失敗しました。バッチ明細を確認してください。",
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "捕捉漏れバックフィルの履歴取得に失敗しました。後でもう一度お試しください。"
   },
   "errorBoundary": {
     "copied": "コピーしました",
@@ -7507,7 +7512,8 @@
     "source": {
       "scheduledCron": "定期タスク",
       "stockPipeline": "株式分析パイプライン",
-      "timeTravelBatch": "タイムトラベルバッチ"
+      "timeTravelBatch": "タイムトラベルバッチ",
+      "moverRecallAnalysis": "大化け株捕捉漏れバックフィル"
     },
     "state": {
       "queued": "待機中",
@@ -7540,7 +7546,8 @@
       "running": "実行中",
       "queued": "待機中",
       "failed": "失敗",
-      "waiting": "対応待ち"
+      "waiting": "対応待ち",
+      "pendingEvolution": "進化の承認待ち"
     },
     "attention": {
       "title": "要対応",
@@ -7573,6 +7580,39 @@
       "range24h": "過去24時間",
       "range7d": "過去7日間",
       "rangeAll": "すべて"
+    },
+    "moverRecall": {
+      "start": "捕捉漏れバックフィルを開始",
+      "modalTitle": "大化け株捕捉漏れのバックフィル分析を開始",
+      "modalHint": "ウィンドウ開始日を as-of 日付として過去分析を再現します。バックフィル結果は synthetic として記録され、実ヒット率の分母には含まれません。",
+      "batchLimit": "1バッチのイベント上限（1-100）",
+      "maxShare": "原因不明率の上限",
+      "maxShareHint": "原因不明の割合がこの値に達した検証ランは丸ごと除外します。",
+      "runId": "検証ラン指定（任意）",
+      "runIdPlaceholder": "空欄 = 全ランから選択、または検証ラン ID",
+      "submit": "バッチ開始",
+      "started": "バッチを開始しました（{{id}}）",
+      "drawerTitle": "捕捉漏れバックフィルバッチ",
+      "itemsTitle": "銘柄別明細（{{n}}）",
+      "itemsEmpty": "銘柄別明細はありません",
+      "colStock": "銘柄",
+      "colPeriod": "階級",
+      "colWindowStart": "ウィンドウ開始日",
+      "colAnchor": "確認日",
+      "colCum": "累積騰落率",
+      "colLayer": "漏れ要因",
+      "colStatus": "状態",
+      "colError": "エラー / 分析",
+      "statusRunning": "分析中",
+      "statusAnalyzed": "分析済み",
+      "statusFailed": "失敗",
+      "batchStatus": {
+        "running": "実行中",
+        "completed": "完了",
+        "partial": "部分成功",
+        "failed": "失敗",
+        "interrupted": "中断"
+      }
     }
   },
   "teammatePanel": {
@@ -15667,6 +15707,38 @@
         "neeq": "新三板",
         "b_share": "B株",
         "unknown": "未識別"
+      },
+      "review": {
+        "toggle": "補分析と反省を展開",
+        "loading": "補分析と反省を読み込み中…",
+        "loadError": "振り返り記録の読み込みに失敗しました：{{detail}}",
+        "notTracked": "このイベントはリアルタイム検証ビュー由来で、定時検証ランでまだ永続化されていません。定時検証と補分析の完了後にここで確認できます。",
+        "status_pending": "補分析待ち",
+        "status_excluded": "今回は除外",
+        "status_running": "補分析中",
+        "status_analyzed": "補分析済み",
+        "status_reflected": "補分析済み・反省済み",
+        "status_failed": "補分析失敗",
+        "layerHint": "漏れ要因：{{layer}}",
+        "windowFacts": "ウィンドウ {{start}} → {{anchor}}（{{days}} 営業日）、累計 +{{gain}}%、最大単日 +{{max}}%",
+        "errorDetail": "失敗理由：{{detail}}",
+        "analysisHeading": "as-of 補分析レポート（{{date}}）",
+        "analysisMissing": "イベントは完了と記録されていますが、補分析レコードが見つかりません。",
+        "decisionLabel": "判断：{{action}}",
+        "reflectionHeading": "階級別の反省",
+        "noReflection": "補分析は完了しています。階級別の反省は各保有ウィンドウの満了後に自動生成されます。後でもう一度ご確認ください。",
+        "verdictLabel": "判定",
+        "verdict_correct": "正解",
+        "verdict_partial": "部分的に正解",
+        "verdict_wrong": "不正解",
+        "rawReturn": "実際のリターン",
+        "lessonSummary": "採用された教訓",
+        "missedSignals": "見落としたシグナル",
+        "whatWentWrong": "何が悪かったか",
+        "fixForFuture": "今後の判断基準の修正",
+        "rfPending": "反省キュー待ち",
+        "rfRunning": "反省を生成中",
+        "rfFailed": "反省失敗：{{detail}}"
       }
     },
     "export": {
@@ -18067,7 +18139,66 @@
     "unitLakh": "10万",
     "horizonScoringWindows": "この保有区分の指標ウィンドウ：{{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · ボリンジャー {{boll}} · 出来高 {{vol}}",
     "horizonScaleTrend": "この区分の2本帯：速 {{fastBars}} 本 {{fast}} ／ 遅 {{slowBars}} 本 {{slow}}、差 {{diffPct}}%、速帯傾き {{fastSlope}}",
-    "horizonScaleMomentum": "この区分のモメンタム：RSI({{period}}) = {{value}}"
+    "horizonScaleMomentum": "この区分のモメンタム：RSI({{period}}) = {{value}}",
+    "evolutionApproval": {
+      "drawerTitle": "進化計画の承認",
+      "panelPendingTitle": "{{count}} 件の進化計画が承認待ちです",
+      "pendingTitle": "承認待ちの計画（{{count}}）",
+      "emptyPending": "承認待ちの進化計画はありません",
+      "selectHint": "上のリストから計画を選択して詳細を確認してください",
+      "reviewAction": "承認",
+      "viewAction": "表示",
+      "approve": "承認して実行",
+      "approveConfirm": "承認すると計画を即座に再実行し、結果を現在の有効設定に書き戻します。続行しますか？",
+      "approveSuccess": "進化計画を承認し実行しました",
+      "reject": "拒否",
+      "rejectTitle": "進化計画を拒否",
+      "rejectConfirmOk": "拒否を確認",
+      "rejectReasonPlaceholder": "拒否理由を入力してください（必須。今後の進化の参考として記録されます）",
+      "rejectReasonRequired": "拒否理由は必須です",
+      "rejectSuccess": "進化計画を拒否しました",
+      "rollback": "ロールバック",
+      "rollbackConfirm": "現在のバージョンを直前の承認済みバージョンへロールバックします。続行しますか？",
+      "rollbackSuccess": "ロールバックが完了しました",
+      "rollbackUnavailable": "これは第一世代の設定で、ロールバック先の過去バージョンがありません",
+      "readonlyHint": "このレコードは読み取り専用の履歴状態です",
+      "actionFailed": "操作に失敗しました：{{msg}}",
+      "diffTitle": "パラメータ変更プレビュー（バックテスト最良 vs デフォルト）",
+      "samplesTitle": "トリガーサンプル",
+      "samples": {
+        "expand": "id リストを表示",
+        "reflections": "反省サンプル",
+        "validations": "検証サンプル",
+        "moverEvents": "リバランスイベント",
+        "blockedReflections": "反省サンプル（データ取得不可）",
+        "blockedValidations": "検証サンプル（データ取得不可）",
+        "blockedMoverEvents": "リバランスイベント（データ取得不可）",
+        "blockedHint": "データ到達性に失敗したサンプルはハードルールで分流され、構造変異を一切トリガーせず、データ品質ダッシュボードにのみ計上されます。"
+      },
+      "param": {
+        "ewmaAlpha": "EWMA 平滑化係数",
+        "lookbackDays": "ルックバック日数",
+        "sampleSaturation": "サンプル飽和しきい値"
+      },
+      "meta": {
+        "status": "ステータス",
+        "createdAt": "生成日時",
+        "trigger": "トリガー理由",
+        "summary": "結論サマリー",
+        "reviewer": "承認者",
+        "reviewedAt": "承認日時",
+        "rejectReason": "拒否／ロールバック理由",
+        "rollbackRef": "ロールバック基準バージョン"
+      },
+      "status": {
+        "pendingApproval": "承認待ち",
+        "accepted": "承認済み",
+        "rejected": "拒否済み",
+        "success": "成功（過去データ）",
+        "failed": "失敗（過去データ）",
+        "unknown": "不明なステータス"
+      }
+    }
   },
   "pipeline": {
     "title": "株式パイプライン",

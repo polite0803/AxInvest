@@ -2969,7 +2969,12 @@
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "هناك دفعة سفر عبر الزمن قيد التشغيل بالفعل؛ انتظر انتهاءها.",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "نافذة خط الإنتاج المباشر نشطة (23:50–02:10 / 17:50–18:10). حاول لاحقًا.",
     "TIME_TRAVEL_BATCH_EXEC_FAILED": "فشلت الدفعة؛ راجع تفاصيل الدفعة.",
-    "TIME_TRAVEL_BATCH_QUERY_FAILED": "فشل الاستعلام عن سجل دفعات السفر عبر الزمن. يُرجى إعادة المحاولة لاحقًا."
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "فشل الاستعلام عن سجل دفعات السفر عبر الزمن. يُرجى إعادة المحاولة لاحقًا.",
+    "MOVER_RECALL_ANALYSIS_INVALID_PARAMS": "معاملات التحليل التكميلي غير صالحة؛ تحقق من حد الدفعة وعتبة نسبة غير المفسَّرة.",
+    "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "هناك دفعة سفر زمني أو تحليل تكميلي قيد التشغيل بالفعل؛ انتظر حتى تنتهي.",
+    "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "أنت داخل نافذة خط المعالجة المباشر (23:50–02:10 / 17:50–18:10)؛ ابدأ خارجها.",
+    "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "فشل تنفيذ دفعة التحليل التكميلي؛ راجع تفاصيل الدفعة.",
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "فشل الاستعلام عن سجل دفعات التحليل التكميلي؛ حاول لاحقًا."
   },
   "errorBoundary": {
     "copied": "تم النسخ",
@@ -7507,7 +7512,8 @@
     "source": {
       "scheduledCron": "المهام المجدولة",
       "stockPipeline": "خط أنابيب تحليل الأسهم",
-      "timeTravelBatch": "دفعة السفر الزمني"
+      "timeTravelBatch": "دفعة السفر الزمني",
+      "moverRecallAnalysis": "تحليل تكميلي لصفقات الارتفاع الفائتة"
     },
     "state": {
       "queued": "في الانتظار",
@@ -7540,7 +7546,8 @@
       "running": "قيد التشغيل",
       "queued": "في الانتظار",
       "failed": "فشل",
-      "waiting": "بانتظار المعالجة"
+      "waiting": "بانتظار المعالجة",
+      "pendingEvolution": "موافقات التطور"
     },
     "attention": {
       "title": "يحتاج انتباهًا",
@@ -7573,6 +7580,39 @@
       "range24h": "آخر 24 ساعة",
       "range7d": "آخر 7 أيام",
       "rangeAll": "الكل"
+    },
+    "moverRecall": {
+      "start": "بدء التحليل التكميلي",
+      "modalTitle": "بدء التحليل التكميلي لصفقات الارتفاع الفائتة",
+      "modalHint": "يعيد تشغيل التحليل التاريخي بتاريخ بدء النافذة (as-of)؛ تُوسَم التحاليل التكميلية بأنها synthetic ولا تُحتسب في مقام معدل الإصابة الفعلي.",
+      "batchLimit": "الحد الأقصى للأحداث لكل دفعة (1-100)",
+      "maxShare": "الحد الأعلى لنسبة غير المفسَّرة",
+      "maxShareHint": "يتم تخطي جولة الفحص بالكامل عند بلوغ نسبة غير المفسَّرة فيها هذا الحد.",
+      "runId": "تقييد بجولة فحص (اختياري)",
+      "runIdPlaceholder": "فارغ = الاختيار من كل الجولات؛ أو أدخل معرّف الجولة",
+      "submit": "بدء الدفعة",
+      "started": "بدأت الدفعة ({{id}})",
+      "drawerTitle": "دفعة التحليل التكميلي لصفقات الارتفاع الفائتة",
+      "itemsTitle": "تفاصيل كل سهم ({{n}})",
+      "itemsEmpty": "لا تفاصيل لكل سهم",
+      "colStock": "السهم",
+      "colPeriod": "الفئة",
+      "colWindowStart": "بداية النافذة",
+      "colAnchor": "تاريخ التأكيد",
+      "colCum": "إجمالي الارتفاع",
+      "colLayer": "طبقة الفوات",
+      "colStatus": "الحالة",
+      "colError": "خطأ / تحليل",
+      "statusRunning": "قيد التحليل",
+      "statusAnalyzed": "تم التحليل",
+      "statusFailed": "فشل",
+      "batchStatus": {
+        "running": "قيد التشغيل",
+        "completed": "مكتملة",
+        "partial": "جزئية",
+        "failed": "فشلت",
+        "interrupted": "متوقفة"
+      }
     }
   },
   "teammatePanel": {
@@ -15667,6 +15707,38 @@
         "neeq": "NEEQ",
         "b_share": "أسهم B",
         "unknown": "غير معروف"
+      },
+      "review": {
+        "toggle": "توسيع التحليل التكميلي والمراجعة",
+        "loading": "جارٍ تحميل التحليل التكميلي والمراجعات…",
+        "loadError": "فشل تحميل سجل المراجعة: {{detail}}",
+        "notTracked": "هذا الحدث من عرض الفحص المباشر ولم تتم أرشفته بعد عبر جولة فحص مجدولة؛ سيظهر هنا بعد اكتمال التحليل التكميلي المجدول.",
+        "status_pending": "بانتظار التحليل التكميلي",
+        "status_excluded": "مستبعد هذه الجولة",
+        "status_running": "التحليل التكميلي جارٍ",
+        "status_analyzed": "اكتمل التحليل التكميلي",
+        "status_reflected": "اكتمل التحليل التكميلي · روجع",
+        "status_failed": "فشل التحليل التكميلي",
+        "layerHint": "طبقة الفوات: {{layer}}",
+        "windowFacts": "النافذة {{start}} → {{anchor}} ({{days}} يوم تداول)، التراكمي +{{gain}}%، أفضل يوم +{{max}}%",
+        "errorDetail": "سبب الفشل: {{detail}}",
+        "analysisHeading": "تقرير التحليل التكميلي as-of ({{date}})",
+        "analysisMissing": "الحدث معلَّم كمكتمل لكن تعذّر العثور على سجل التحليل التكميلي.",
+        "decisionLabel": "القرار: {{action}}",
+        "reflectionHeading": "مراجعة تأملية لكل فئة",
+        "noReflection": "اكتمل التحليل التكميلي؛ ستُولَّد المراجعات التأملية لكل فئة تلقائيًا عند استحقاق نافذة الاحتفاظ. عُد لاحقًا.",
+        "verdictLabel": "الحكم",
+        "verdict_correct": "صحيح",
+        "verdict_partial": "صحيح جزئيًا",
+        "verdict_wrong": "خاطئ",
+        "rawReturn": "العائد الفعلي",
+        "lessonSummary": "درس معتمد",
+        "missedSignals": "إشارات مفوّتة",
+        "whatWentWrong": "مكمن الخطأ",
+        "fixForFuture": "تصحيح المعيار للمستقبل",
+        "rfPending": "التأمل في قائمة الانتظار",
+        "rfRunning": "جارٍ توليد التأمل",
+        "rfFailed": "فشل التأمل: {{detail}}"
       }
     },
     "export": {
@@ -18067,7 +18139,66 @@
     "unitLakh": " لاخ",
     "horizonScoringWindows": "نوافذ مؤشرات هذا الأفق: {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · بولنغر {{boll}} · التداول {{vol}}",
     "horizonScaleTrend": "نطاقا هذا الأفق: سريع {{fastBars}} شمعة {{fast}} / بطيء {{slowBars}} شمعة {{slow}}، الفارق {{diffPct}}%، ميل السريع {{fastSlope}}",
-    "horizonScaleMomentum": "زخم هذا الأفق: RSI({{period}}) = {{value}}"
+    "horizonScaleMomentum": "زخم هذا الأفق: RSI({{period}}) = {{value}}",
+    "evolutionApproval": {
+      "drawerTitle": "الموافقة على خطة التطور",
+      "panelPendingTitle": "{{count}} خطة تطور بانتظار الموافقة",
+      "pendingTitle": "الخطط قيد الانتظار ({{count}})",
+      "emptyPending": "لا توجد خطط تطور بانتظار الموافقة",
+      "selectHint": "اختر خطة من القائمة بالأعلى لعرض التفاصيل",
+      "reviewAction": "مراجعة",
+      "viewAction": "عرض",
+      "approve": "الموافقة والتنفيذ",
+      "approveConfirm": "عند الموافقة سيُعاد تشغيل الخطة فورًا وتُكتب النتيجة في الإعداد النشط الحالي. هل تريد المتابعة؟",
+      "approveSuccess": "تمت الموافقة على خطة التطور وتنفيذها",
+      "reject": "رفض",
+      "rejectTitle": "رفض خطة التطور",
+      "rejectConfirmOk": "تأكيد الرفض",
+      "rejectReasonPlaceholder": "يرجى ذكر سبب الرفض (إلزامي، ويُحفَظ للرجوع إليه في عمليات التطور المستقبلية)",
+      "rejectReasonRequired": "سبب الرفض إلزامي",
+      "rejectSuccess": "تم رفض خطة التطور",
+      "rollback": "تراجع",
+      "rollbackConfirm": "سيُعاد الإصدار الحالي إلى آخر إصدار مقبول. هل تريد المتابعة؟",
+      "rollbackSuccess": "اكتمل التراجع",
+      "rollbackUnavailable": "هذا هو إعداد الجيل الأول بالفعل؛ لا يوجد إصدار تاريخي للتراجع إليه",
+      "readonlyHint": "هذا السجل حالة تاريخية للقراءة فقط",
+      "actionFailed": "فشل الإجراء: {{msg}}",
+      "diffTitle": "معاينة تغيير المعلمات (أفضل نتيجة باكتيست مقابل الافتراضي)",
+      "samplesTitle": "عينات التشغيل",
+      "samples": {
+        "expand": "عرض قائمة المعرّفات",
+        "reflections": "عينات التأمل",
+        "validations": "عينات التحقق",
+        "moverEvents": "أحداث إعادة التوازن",
+        "blockedReflections": "عينات التأمل (البيانات غير متاحة)",
+        "blockedValidations": "عينات التحقق (البيانات غير متاحة)",
+        "blockedMoverEvents": "أحداث إعادة التوازن (البيانات غير متاحة)",
+        "blockedHint": "العينات التي يفشل فيها الوصول إلى البيانات تُحوَّل بقاعدة صارمة: لا تُطلق أي تحول بنيوي إطلاقًا، وتُحتسب فقط في لوحة جودة البيانات."
+      },
+      "param": {
+        "ewmaAlpha": "معامل تنعيم EWMA",
+        "lookbackDays": "أيام الرجوع للخلف",
+        "sampleSaturation": "عتبة تشبع العينة"
+      },
+      "meta": {
+        "status": "الحالة",
+        "createdAt": "وقت الإنشاء",
+        "trigger": "سبب التشغيل",
+        "summary": "ملخص النتيجة",
+        "reviewer": "المراجع",
+        "reviewedAt": "وقت المراجعة",
+        "rejectReason": "سبب الرفض/التراجع",
+        "rollbackRef": "إصدار أساس التراجع"
+      },
+      "status": {
+        "pendingApproval": "بانتظار الموافقة",
+        "accepted": "مقبول",
+        "rejected": "مرفوض",
+        "success": "ناجح (قديم)",
+        "failed": "فاشل (قديم)",
+        "unknown": "حالة غير معروفة"
+      }
+    }
   },
   "pipeline": {
     "title": "خط أنابيب الأسهم",

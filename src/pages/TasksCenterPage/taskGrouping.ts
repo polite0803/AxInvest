@@ -16,6 +16,8 @@ const INVEST_TASK_TYPES = new Set([
   "batch-reflection",
   "validate-decisions",
   "decision-backtest",
+  "mover-recall",
+  "evolution-proposal",
 ]);
 
 /** 系统维护内置 taskType 白名单。 */
@@ -40,6 +42,8 @@ const BUILTIN_EXECUTABLE_TYPES = new Set([
   "validate-decisions",
   "opc_demand_scan",
   "decision-backtest",
+  "mover-recall",
+  "evolution-proposal",
 ]);
 
 type TaskLike = {

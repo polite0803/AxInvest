@@ -253,3 +253,62 @@ pub async fn fetch_by_original_analysis_ids(
         .all(db)
         .await
 }
+
+/// 把「原始分析已不存在」的 pending 反思行落成显式终局，返回被处置的行数。
+///
+/// **为什么在 dao**：命令层写 `update_many` 会命中分层门禁（`commands-no-direct-db`），
+/// 而这件事本身就是一次数据自愈 —— 与命令层的 `reclaim_stale_running`（卡死 running 退回
+/// pending）同族，由每轮批处理**开头**执行一次，而不是在逐条循环里边判边写。
+///
+/// **治的是什么**：这类行在旧形态下只被计入 `skippedYoung` 后 continue，状态仍是 pending ⇒
+/// 每天 18:00 重新捞到、重新空转，队列永不自愈（现网实证：6 条指向已删除分析的行连续数月
+/// `processed=6 / skippedYoung=6 / resolved=0`，到期日早已过去两个月）。把它们冒充成
+/// 「太新未到期」是双重失真：既读不出真因，又让分母里一直挂着不会到期的行。
+///
+/// 状态串沿用本仓既有的 `failed: <码>: <人话>` 形态 ⇒ 面板与复盘按现成的失败呈现读它，
+/// 不新增一套状态值域（新增一个状态值要同时改前端识别逻辑，那是更大的面）。
+pub async fn retire_orphan_pending_reflections(
+    db: &DatabaseConnection,
+    now_ms: i64,
+) -> Result<usize, sea_orm::DbErr> {
+    use sea_orm::sea_query::Expr;
+
+    let pending = stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::Status.eq("pending"))
+        .all(db)
+        .await?;
+    if pending.is_empty() {
+        return Ok(0);
+    }
+    // 一次取回"还活着的 analysis_id"，避免逐条 find_by_id 的 N+1
+    let analysis_ids: Vec<String> =
+        pending.iter().map(|r| r.original_analysis_id.clone()).collect();
+    let alive: std::collections::HashSet<String> = stock_analyses::Entity::find()
+        .filter(stock_analyses::Column::Id.is_in(analysis_ids))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+
+    let mut retired = 0usize;
+    for r in pending {
+        if alive.contains(&r.original_analysis_id) {
+            continue;
+        }
+        stock_reflections::Entity::update_many()
+            .col_expr(
+                stock_reflections::Column::Status,
+                Expr::value(format!(
+                    "failed: ORIGINAL_ANALYSIS_MISSING: 原始分析 {} 已不存在，反思行已成孤儿",
+                    r.original_analysis_id
+                )),
+            )
+            .col_expr(stock_reflections::Column::UpdatedAt, Expr::value(now_ms))
+            .filter(stock_reflections::Column::Id.eq(r.id))
+            .exec(db)
+            .await?;
+        retired += 1;
+    }
+    Ok(retired)
+}

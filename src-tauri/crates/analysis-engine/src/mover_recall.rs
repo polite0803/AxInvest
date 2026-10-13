@@ -144,6 +144,9 @@ pub struct MoverEvent {
     pub period: String,
     /// 窗口右端（= 达标确认日）ISO 日期
     pub anchor_date: String,
+    /// 窗口起点 ISO 日期（anchor 当日及其前 window_days−1 个交易日的首日）。
+    /// P2 漏检补分析以此为 as-of 锚点：复盘问的是「窗口起步时系统该不该看出它」。
+    pub window_start: String,
     pub window_days: u32,
     /// 窗口累计涨幅（%），主判据
     pub cum_gain_pct: f64,
@@ -443,8 +446,10 @@ pub async fn load_mover_cell_signal(
     };
     let from = dates[from_idx].clone();
 
-    let trims = load_trim_evidence(db, &from, &to).await?;
-    let picks = load_picks_in_range(db, &from, &to).await?;
+    // 代际 = None：本函数算的是**实盘**格子的漏检信号（`to` 只做到期右端截断，与代际
+    // 是两件事）。回放的核查要按代际取留痕，走显式入口，不与实盘分子/分母并池。
+    let trims = load_trim_evidence(db, &from, &to, None).await?;
+    let picks = load_picks_in_range(db, &from, &to, None).await?;
 
     // 候选票集合 = 留痕涉及的 ∪ 该窗口内出过票的（其余票不可能进入任何一格的分子/分母）
     let mut codes: Vec<String> = trims.keys().map(|(_, c)| c.clone()).collect();
@@ -569,11 +574,13 @@ pub fn events_for_tier(
                 continue;
             }
             let max_daily = win.iter().cloned().fold(f64::MIN, f64::max);
+            let window_start = series[pos + 1 - rule.window_days as usize].0.clone();
             out.push(MoverEvent {
                 stock_code: code.clone(),
                 stock_name: name.clone(),
                 period: rule.period.as_str().to_string(),
                 anchor_date: date.clone(),
+                window_start,
                 window_days: rule.window_days,
                 cum_gain_pct: cum,
                 max_daily_pct: max_daily,
@@ -610,14 +617,20 @@ pub async fn load_trim_evidence(
     db: &sea_orm::DatabaseConnection,
     from: &str,
     to: &str,
+    as_of_date: Option<&str>,
 ) -> Result<HashMap<(String, String), Vec<String>>, String> {
     use axagent_entities::reco_scan_audit;
-    let rows = reco_scan_audit::Entity::find()
+    let query = reco_scan_audit::Entity::find()
         .filter(reco_scan_audit::Column::GeneratedAt.gte(from))
         .filter(reco_scan_audit::Column::GeneratedAt.lte(to))
-        .all(db)
-        .await
-        .map_err(|e| format!("读 reco_scan_audit 失败: {e}"))?;
+        // 代际：`None` = 只看实盘留痕（既有口径不变）；`Some(YYYY-MM-DD)` = 只看那一次
+        // 回放的留痕。回放行的 `generated_at` 是入库时刻（今天），不加这一条就会让
+        // 「今天的池」被历史池冒充 —— 两套计数域并排比是禁止形态。
+        .filter(match as_of_date {
+            Some(d) => reco_scan_audit::Column::AsOfDate.eq(d.to_string()),
+            None => reco_scan_audit::Column::AsOfDate.is_null(),
+        });
+    let rows = query.all(db).await.map_err(|e| format!("读 reco_scan_audit 失败: {e}"))?;
     let mut out: HashMap<(String, String), Vec<String>> = HashMap::new();
     for r in rows {
         let key = (r.period.clone(), r.stock_code.clone());
@@ -662,10 +675,17 @@ pub async fn load_picks_in_range(
     db: &sea_orm::DatabaseConnection,
     from: &str,
     to: &str,
+    as_of_date: Option<&str>,
 ) -> Result<Vec<reco_picks::Model>, String> {
     reco_picks::Entity::find()
         .filter(reco_picks::Column::GeneratedAt.gte(from.to_string()))
         .filter(reco_picks::Column::GeneratedAt.lte(format!("{to}T23:59:59")))
+        // 代际与 `load_trim_evidence` 同一条谓词：候选池快照（`seed_pool_json`）的
+        // 归因必须与留痕同代，否则会出现「实盘的票 + 回放的池」这种拼出来的证据。
+        .filter(match as_of_date {
+            Some(d) => reco_picks::Column::AsOfDate.eq(d.to_string()),
+            None => reco_picks::Column::AsOfDate.is_null(),
+        })
         .all(db)
         .await
         .map_err(|e| format!("读 reco_picks 失败: {e}"))
@@ -734,6 +754,31 @@ mod tests {
         assert_eq!(ev2.len(), 1, "窗口 2 天时应在 09-29 出事件");
         assert!((ev2[0].cum_gain_pct - 12.36).abs() < 1e-6);
         assert!((ev2[0].max_daily_pct - 6.0).abs() < 1e-6);
+        // P2：window_start 必须是窗口首日（补分析的 as-of 锚点），
+        // anchor_date 是窗口右端；二者不得互换或都取右端。
+        assert_eq!(ev2[0].anchor_date, "2026-09-29");
+        assert_eq!(ev2[0].window_start, "2026-09-28");
+    }
+
+    #[test]
+    fn window_start_rolls_with_each_anchor() {
+        // 连续 4 个交易日、窗口 3 天、低阈值 ⇒ 09-30 / 10-09 两个 anchor 各出一事件，
+        // window_start 分别为窗口首日（09-28 / 09-29）。
+        let closes = closes_map(vec![(
+            "600059".into(),
+            vec![
+                ("2026-09-28", 6.0),
+                ("2026-09-29", 6.0),
+                ("2026-09-30", 6.0),
+                ("2026-10-09", 6.0),
+            ],
+        )]);
+        let ev = events_for_tier(&closes, &rule(Period::Short, 1.0, 3), "2026-09-01", "2026-12-31");
+        assert_eq!(ev.len(), 2, "09-30 与 10-09 各满 3 日窗口");
+        assert_eq!(ev[0].anchor_date, "2026-09-30");
+        assert_eq!(ev[0].window_start, "2026-09-28");
+        assert_eq!(ev[1].anchor_date, "2026-10-09");
+        assert_eq!(ev[1].window_start, "2026-09-29");
     }
 
     #[test]

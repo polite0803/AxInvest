@@ -391,6 +391,183 @@ const MOCK_DOMAIN_OVERRIDES: Record<string, { enabled: boolean; extra_aliases: s
   finance: { enabled: true, extra_aliases: ["投资", "证券"] },
 };
 
+// ── P1-P4 股票批量自动化闭环：浏览器模式演示数据 ──────────────────────────
+// 桌面端这些数据由 Tauri 后端 seed（计划任务两行）/ cron 聚合（待审批计划）/
+// 手动批次（漏检补分析）真实产生；浏览器模式无持久层，给一份**同形演示数据**，
+// 让任务中心三个新入口可见、可点、可走通交互（接受/拒绝/发起批次/查看明细）。
+// 写操作只改内存状态，刷新页面即复位。
+
+/** P4：待审批进化计划（approve/reject 后从内存数组剔除，紫卡即时归零） */
+function mockPendingEvolutionPlans(): Array<Record<string, unknown>> {
+  // 用独立标志而非「数组为空」判懒初始化：approve/reject 后数组会真的变空，
+  // 若按长度判空，审批成功后刷新列表又会把演示行种回去（紫卡永不归零）。
+  if (!mockPendingEvolutionPlansSeeded) {
+    mockPendingEvolutionPlansSeeded = true;
+    const now = Date.now();
+    MOCK_PENDING_EVOLUTION_PLANS.push({
+      id: "evo-demo-20261014-01",
+      planId: "plan-demo-20261014-01",
+      // tagged enum 与后端 EvolutionTrigger 同形（snake_case），parseTrigger 按 type 翻译
+      trigger: JSON.stringify({ type: "high_error_rate", error_count: 6 }),
+      evolutionType: "weight_decay",
+      qualityBefore: 35,
+      // 参数 diff：bestConfig 25/0.4/18 vs 默认 30/0.3/20（抽屉三行红绿对比的数据源）
+      parameterResultJson: JSON.stringify({
+        bestConfig: { lookbackDays: 25, ewmaAlpha: 0.4, sampleSaturation: 18 },
+        defaultConfig: { lookbackDays: 30, ewmaAlpha: 0.3, sampleSaturation: 20 },
+        evolutionStats: {
+          sampleCount: 18,
+          winRateBefore: 0.42,
+          winRateAfter: 0.51,
+          note: "近 20 个持有窗口 6 次误差超阈，缩短回看+加大平滑系数回测加权胜率 +9pct",
+        },
+      }),
+      workflowResultJson: null,
+      status: "pending_approval",
+      improvementSummary:
+        "近窗口误差率 6 次超阈；回测显示回看 25 天 / α=0.4 时加权胜率 +9pct（18 个有效样本），建议接受。",
+      // 触发样本快照：3 个有效样本 + 1 个因数据可达性被分流（抽屉中红色「已拦截」分桶）
+      triggerSampleJson: JSON.stringify({
+        reflections: ["ref-20261012-01", "ref-20261011-07"],
+        validations: ["val-20261010-03"],
+        moverEvents: ["mre-20261009-02"],
+        blockedReflections: [],
+        blockedValidations: [],
+        blockedMoverEvents: ["mre-20261008-05"],
+      }),
+      reviewer: null,
+      reviewedAt: null,
+      rejectReason: null,
+      rollbackRef: null,
+      createdAt: now - 2 * 3_600_000,
+    });
+  }
+  return MOCK_PENDING_EVOLUTION_PLANS;
+}
+const MOCK_PENDING_EVOLUTION_PLANS: Array<Record<string, unknown>> = [];
+let mockPendingEvolutionPlansSeeded = false;
+
+/** P2：漏检补分析批次（预置 1 个已完成批次；新发起的批次追加进同表） */
+function mockMoverRecallBatches(): Array<Record<string, unknown>> {
+  // 同理用独立标志：批次表只有在首次访问时种预置数据
+  if (mockMoverRecallBatchesSeeded) {
+    return [...MOCK_MOVER_RECALL_BATCHES.values()];
+  }
+  mockMoverRecallBatchesSeeded = true;
+  const now = Date.now();
+  const runId = "mrr-20261011-0900";
+  const mkItem = (
+    eventId: string,
+    stockCode: string,
+    stockName: string,
+    period: string,
+    windowStart: string,
+    anchorDate: string,
+    cumGainPct: number,
+    missLayer: string,
+    status: string,
+    analysisId: string | null,
+    errorDetail: string | null,
+  ) => ({
+    eventId,
+    runId,
+    stockCode,
+    stockName,
+    period,
+    windowStart,
+    anchorDate,
+    cumGainPct,
+    missLayer,
+    status,
+    analysisId,
+    errorDetail,
+  });
+  const created = now - 26 * 3_600_000;
+  MOCK_MOVER_RECALL_BATCHES.set("mra-demo-20261013-01", {
+    batchId: "mra-demo-20261013-01",
+    // 5 票 4 成 1 败：失败票演示「as-of 封闭世界取数失败」如何被记为 fail
+    status: "partial",
+    message: "5 个漏检事件处理完成：成功 4，失败 1（as-of 行情快照缺失）",
+    total: 5,
+    ok: 4,
+    fail: 1,
+    items: [
+      mkItem(
+        "mre-20261009-01",
+        "300502",
+        "新易盛",
+        "20",
+        "2026-09-11",
+        "2026-10-09",
+        42.6,
+        "not_in_pool",
+        "analyzed",
+        "ana-demo-20261013-01",
+        null,
+      ),
+      mkItem(
+        "mre-20261009-02",
+        "603083",
+        "剑桥科技",
+        "5",
+        "2026-09-25",
+        "2026-10-09",
+        31.8,
+        "l3_scored_out",
+        "analyzed",
+        "ana-demo-20261013-02",
+        null,
+      ),
+      mkItem(
+        "mre-20261009-03",
+        "601127",
+        "赛力斯",
+        "60",
+        "2026-07-15",
+        "2026-10-09",
+        58.3,
+        "not_in_pool",
+        "analyzed",
+        "ana-demo-20261013-03",
+        null,
+      ),
+      mkItem(
+        "mre-20261009-04",
+        "002594",
+        "比亚迪",
+        "20",
+        "2026-09-11",
+        "2026-10-09",
+        27.4,
+        "unexplained",
+        "analyzed",
+        "ana-demo-20261013-04",
+        null,
+      ),
+      mkItem(
+        "mre-20261008-05",
+        "300308",
+        "中际旭创",
+        "5",
+        "2026-09-12",
+        "2026-10-08",
+        35.1,
+        "not_in_pool",
+        "failed",
+        null,
+        "as-of 2026-09-12 行情快照缺失，封闭世界回放取不到当日 K 线，已跳过",
+      ),
+    ],
+    errorDetail: null,
+    createdAtMs: created,
+    updatedAtMs: created + 4 * 60_000,
+    finishedAtMs: created + 4 * 60_000,
+  });
+  return [...MOCK_MOVER_RECALL_BATCHES.values()];
+}
+const MOCK_MOVER_RECALL_BATCHES = new Map<string, Record<string, unknown>>();
+let mockMoverRecallBatchesSeeded = false;
+
 /** 与后端 `CapabilityDomainEntryDto` 的 snake_case 源同形（命令出口会转 camelCase） */
 interface MockCapabilityDomainRow {
   id: string;
@@ -6516,6 +6693,20 @@ async function executeCommand<T>(
     case "list_reflections":
       return getStore<unknown[]>("mock.reflections", []) as unknown as T;
 
+    // 2026-09-25（P3）：`get_mover_recall_event_review` —— 漏检行展开的复盘视图。
+    // 浏览器模式没有 mover_recall 事件落库 ⇒ 如实返回 null（面板渲染「尚未落库」提示），
+    // 不能落 default 分支的 `get_` → `{}` 兜底：消费端按 `null` 区分「查无事件」，
+    // 给 `{}` 会被当成真实事件渲染出空壳。opt-in fixture：localStorage
+    // `axagent_mock.moverRecallReviews.<stockCode>|<anchorDate>|<period>` 预置单事件视图。
+    case "get_mover_recall_event_review": {
+      const a = args as
+        | { stock_code?: unknown; anchor_date?: unknown; period?: unknown }
+        | undefined;
+      const map = getStore<Record<string, unknown>>("mock.moverRecallReviews", {});
+      const key = `${String(a?.stock_code ?? "")}|${String(a?.anchor_date ?? "")}|${String(a?.period ?? "")}`;
+      return (map[key] ?? null) as unknown as T;
+    }
+
     // 2026-09-19（D1 配套）：`get_stock_analysis` 必须显式声明，否则会落到 default
     // 分支的 `get_` → `{}` 兜底，而 `{}` **不含 `id`** —— 新增的 IPC 契约校验
     // （`src/lib/ipc-schemas.ts` 的 `get_stock_analysis: z.object({ id: z.string() })`）
@@ -6663,6 +6854,24 @@ async function executeCommand<T>(
         mkTask("backup-daily", "数据备份", "backup", "0 3 * * *", null, "active"),
         mkTask("daily-summary-nightly", "每日摘要", "daily_summary", "30 23 * * *", null, "active"),
         mkTask("custom-weekly-report", "我的自定义任务", "custom", "0 10 * * 1", null, "active"),
+        // P1：股票批量自动化闭环两条内置任务（名称/cron/type 与后端 seed 逐字对齐，
+        // 见 stock_automation_cron_seed.rs；浏览器模式无 seed，故在 mock 中同形补齐）
+        mkTask(
+          "mover-recall-weekly",
+          "妖股漏检核查（内置）",
+          "mover-recall",
+          "0 9 * * 6",
+          null,
+          "active",
+        ),
+        mkTask(
+          "evolution-proposal-weekday",
+          "进化计划聚合（内置）",
+          "evolution-proposal",
+          "0 20 * * 1-5",
+          null,
+          "active",
+        ),
       ] as unknown as T;
     }
     case "get_task_execution_history":
@@ -6705,6 +6914,137 @@ async function executeCommand<T>(
     case "delete_scheduled_task":
     case "execute_scheduled_task":
       return undefined as unknown as T;
+
+    // P4：进化计划-审批两段式（浏览器模式返回 1 条演示待审批计划；
+    // 接受/拒绝只改内存数组，刷新页面复位）
+    case "list_pending_evolution_plans":
+      return mockPendingEvolutionPlans() as unknown as T;
+    case "approve_evolution_plan": {
+      // handleCommand 入口已把 args 递归转 snake_case，此处必须读 history_id
+      const { history_id: historyId, reviewer } = (args as {
+        history_id?: string;
+        reviewer?: string | null;
+      }) ?? {};
+      const idx = MOCK_PENDING_EVOLUTION_PLANS.findIndex((p) => p.id === historyId);
+      if (idx < 0) {
+        throw new Error(JSON.stringify({
+          code: "EVOLUTION_PLAN_NOT_PENDING",
+          category: "validation",
+          detail: historyId ?? "",
+        }));
+      }
+      const [row] = MOCK_PENDING_EVOLUTION_PLANS.splice(idx, 1);
+      return {
+        ...row,
+        status: "accepted",
+        reviewer: reviewer ?? "mock-reviewer",
+        reviewedAt: Date.now(),
+      } as unknown as T;
+    }
+    case "reject_evolution_plan": {
+      const { history_id: historyId, reason, reviewer } = (args as {
+        history_id?: string;
+        reason?: string;
+        reviewer?: string | null;
+      }) ?? {};
+      const idx = MOCK_PENDING_EVOLUTION_PLANS.findIndex((p) => p.id === historyId);
+      if (idx < 0) {
+        throw new Error(JSON.stringify({
+          code: "EVOLUTION_PLAN_NOT_PENDING",
+          category: "validation",
+          detail: historyId ?? "",
+        }));
+      }
+      const [row] = MOCK_PENDING_EVOLUTION_PLANS.splice(idx, 1);
+      return {
+        ...row,
+        status: "rejected",
+        rejectReason: reason ?? "",
+        reviewer: reviewer ?? "mock-reviewer",
+        reviewedAt: Date.now(),
+      } as unknown as T;
+    }
+    case "rollback_evolution":
+      // 演示回滚：返回一条合成的已接受回滚行（真实后端为 insert accepted + 旧行置 rejected）
+      return {
+        id: `evo-rollback-mock-${Date.now()}`,
+        planId: `plan-rollback-mock-${Date.now()}`,
+        trigger: JSON.stringify({ type: "manual_trigger", reason: "浏览器演示回滚" }),
+        evolutionType: "weight_decay",
+        qualityBefore: 0,
+        parameterResultJson: JSON.stringify({
+          bestConfig: { lookbackDays: 30, ewmaAlpha: 0.3, sampleSaturation: 20 },
+          defaultConfig: { lookbackDays: 30, ewmaAlpha: 0.3, sampleSaturation: 20 },
+        }),
+        workflowResultJson: null,
+        status: "accepted",
+        improvementSummary: "已回滚到上一已接受参数（30 / 0.3 / 20）",
+        triggerSampleJson: null,
+        reviewer: "mock-reviewer",
+        reviewedAt: Date.now(),
+        rejectReason: null,
+        rollbackRef: null,
+        createdAt: Date.now(),
+      } as unknown as T;
+
+    // P2：妖股漏检 → as-of 历史补分析批次（任务中心「全部运行」）
+    case "list_mover_recall_analysis_batches":
+      // 新批次排前面（与后端 ORDER BY created_at DESC 同序）
+      return mockMoverRecallBatches()
+        .sort((a, b) => (b.createdAtMs as number) - (a.createdAtMs as number)) as unknown as T;
+    case "get_mover_recall_analysis_batch": {
+      // 入参经 snake_case 转换：前端传 batchId → batch_id
+      const { batch_id: batchId } = (args as { batch_id?: string }) ?? {};
+      mockMoverRecallBatches();
+      return (MOCK_MOVER_RECALL_BATCHES.get(batchId ?? "") ?? null) as unknown as T;
+    }
+    case "run_mover_recall_analysis": {
+      // fire-and-forget：登记一条 running 批次立即返回 batchId，抽屉轮询可看到 3 票「分析中」
+      mockMoverRecallBatches();
+      const batchId = `mra-mock-${Date.now()}`;
+      const now = Date.now();
+      const runId = "mrr-20261011-0900";
+      const mkRunning = (
+        eventId: string,
+        stockCode: string,
+        stockName: string,
+        period: string,
+        windowStart: string,
+        cumGainPct: number,
+        missLayer: string,
+      ) => ({
+        eventId,
+        runId,
+        stockCode,
+        stockName,
+        period,
+        windowStart,
+        anchorDate: "2026-10-11",
+        cumGainPct,
+        missLayer,
+        status: "running",
+        analysisId: null,
+        errorDetail: null,
+      });
+      MOCK_MOVER_RECALL_BATCHES.set(batchId, {
+        batchId,
+        status: "running",
+        message: "正在以窗口起点为 as-of 日期逐票回放历史分析…",
+        total: 3,
+        ok: 0,
+        fail: 0,
+        items: [
+          mkRunning("mre-20261011-11", "002475", "立讯精密", "20", "2026-09-13", 29.7, "not_in_pool"),
+          mkRunning("mre-20261011-12", "300750", "宁德时代", "60", "2026-07-17", 33.2, "l3_scored_out"),
+          mkRunning("mre-20261011-13", "600519", "贵州茅台", "5", "2026-09-29", 24.9, "unexplained"),
+        ],
+        errorDetail: null,
+        createdAtMs: now,
+        updatedAtMs: now,
+        finishedAtMs: null,
+      });
+      return batchId as unknown as T;
+    }
 
     default: {
       console.warn(`[BrowserMock] Unhandled command: ${cmd}`, args);

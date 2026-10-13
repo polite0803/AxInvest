@@ -1,8 +1,8 @@
 import { invoke } from "@/lib/invoke";
 import { horizonSuffix } from "@/lib/stock-analysis-utils";
-import type { MoverRecallView } from "@/types/stock-analysis";
-import { Button, Card, Spin } from "antd";
-import { useEffect, useState } from "react";
+import type { MoverRecallEventReview, MoverRecallReviewReflection, MoverRecallView } from "@/types/stock-analysis";
+import { Button, Card, Spin, Tag } from "antd";
+import { Fragment, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 /**
@@ -25,6 +25,44 @@ export function MoverRecallPanel() {
   const [failed, setFailed] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [nonce, setNonce] = useState(0);
+  // P3：漏检明细行展开 → 懒加载补分析报告 + 逐档反思。key = 三键（票×右端日×档）。
+  const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<string>>(new Set());
+  const [reviews, setReviews] = useState<
+    Record<string, { loading: boolean; error: string | null; data: MoverRecallEventReview | null }>
+  >({});
+
+  const missKey = (stockCode: string, anchorDate: string, period: string): string =>
+    `${stockCode}-${anchorDate}-${period}`;
+
+  const toggleReview = async (key: string, stockCode: string, anchorDate: string, period: string) => {
+    if (expandedKeys.has(key)) {
+      setExpandedKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+      return;
+    }
+    setExpandedKeys((prev) => new Set(prev).add(key));
+    // 已加载过（含 null/失败留痕）不重复请求；失败后想重试靠面板顶部刷新整轮。
+    if (reviews[key] != null) {
+      return;
+    }
+    setReviews((prev) => ({ ...prev, [key]: { loading: true, error: null, data: null } }));
+    try {
+      const data = await invoke<MoverRecallEventReview | null>("get_mover_recall_event_review", {
+        stockCode,
+        anchorDate,
+        period,
+      });
+      setReviews((prev) => ({ ...prev, [key]: { loading: false, error: null, data: data ?? null } }));
+    } catch (e) {
+      setReviews((prev) => ({
+        ...prev,
+        [key]: { loading: false, error: detailOf(e), data: null },
+      }));
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -259,46 +297,84 @@ export function MoverRecallPanel() {
                           <th style={{ textAlign: "left", padding: "3px 0 3px 10px" }}>
                             {t("stockAnalysis.moverRecall.colLayer")}
                           </th>
+                          <th style={{ width: 40 }} />
                         </tr>
                       </thead>
                       <tbody>
-                        {data.misses.map((m) => (
-                          <tr key={`${m.event.stockCode}-${m.event.period}`}>
-                            <td style={{ padding: "3px 0" }}>
-                              {`${m.event.stockName} ${m.event.stockCode}`}
-                            </td>
-                            <td style={{ textAlign: "center", padding: "3px 0" }}>
-                              {tierName(m.event.period)}
-                            </td>
-                            <td
-                              style={{
-                                textAlign: "right",
-                                padding: "3px 0",
-                                color: "var(--sa-red)",
-                              }}
-                            >
-                              {`+${m.event.cumGainPct.toFixed(1)}%`}
-                            </td>
-                            <td style={{ textAlign: "right", padding: "3px 0" }}>
-                              {`+${m.event.maxDailyPct.toFixed(1)}%`}
-                            </td>
-                            <td style={{ padding: "3px 0 3px 10px" }}>
-                              {layerName(m.layer)}
-                              {m.scoredOutStyles.length > 0
-                                ? (
-                                  <div
-                                    style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}
-                                    data-testid="mover-scored-out"
+                        {data.misses.map((m) => {
+                          const key = missKey(m.event.stockCode, m.event.anchorDate, m.event.period);
+                          const expanded = expandedKeys.has(key);
+                          const reviewState = reviews[key];
+                          return (
+                            <Fragment key={key}>
+                              <tr>
+                                <td style={{ padding: "3px 0" }}>
+                                  {`${m.event.stockName} ${m.event.stockCode}`}
+                                </td>
+                                <td style={{ textAlign: "center", padding: "3px 0" }}>
+                                  {tierName(m.event.period)}
+                                </td>
+                                <td
+                                  style={{
+                                    textAlign: "right",
+                                    padding: "3px 0",
+                                    color: "var(--sa-red)",
+                                  }}
+                                >
+                                  {`+${m.event.cumGainPct.toFixed(1)}%`}
+                                </td>
+                                <td style={{ textAlign: "right", padding: "3px 0" }}>
+                                  {`+${m.event.maxDailyPct.toFixed(1)}%`}
+                                </td>
+                                <td style={{ padding: "3px 0 3px 10px" }}>
+                                  {layerName(m.layer)}
+                                  {m.scoredOutStyles.length > 0
+                                    ? (
+                                      <div
+                                        style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}
+                                        data-testid="mover-scored-out"
+                                      >
+                                        {t("stockAnalysis.moverRecall.scoredOut", {
+                                          styles: m.scoredOutStyles.join("、"),
+                                        })}
+                                      </div>
+                                    )
+                                    : null}
+                                </td>
+                                <td style={{ textAlign: "center", padding: "3px 0" }}>
+                                  <Button
+                                    size="small"
+                                    type="text"
+                                    aria-label={t("stockAnalysis.moverRecall.review.toggle")}
+                                    data-testid={`mover-review-toggle-${key}`}
+                                    onClick={() =>
+                                      void toggleReview(
+                                        key,
+                                        m.event.stockCode,
+                                        m.event.anchorDate,
+                                        m.event.period,
+                                      )}
                                   >
-                                    {t("stockAnalysis.moverRecall.scoredOut", {
-                                      styles: m.scoredOutStyles.join("、"),
-                                    })}
-                                  </div>
+                                    {expanded ? "−" : "+"}
+                                  </Button>
+                                </td>
+                              </tr>
+                              {expanded
+                                ? (
+                                  <tr key={`${key}-detail`}>
+                                    <td colSpan={6} style={{ padding: "6px 8px 10px" }}>
+                                      <MoverReviewDetail
+                                        state={reviewState ?? { loading: true, error: null, data: null }}
+                                        tierName={tierName}
+                                        layerName={layerName}
+                                      />
+                                    </td>
+                                  </tr>
                                 )
                                 : null}
-                            </td>
-                          </tr>
-                        ))}
+                            </Fragment>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -380,4 +456,324 @@ function detailOf(e: unknown): string {
     if (typeof parsed.code === "string") { return parsed.code; }
   } catch { /* 非 JSON ⇒ 原文 */ }
   return msg;
+}
+
+// ── P3：漏检行展开详情（补分析报告 + 逐档反思，懒加载自 `get_mover_recall_event_review`）──
+
+type ReviewState = {
+  loading: boolean;
+  error: string | null;
+  data: MoverRecallEventReview | null;
+};
+
+/** 反思卡固定档位顺序（后端按字母序返回，前端重排为超短→长）。 */
+const REVIEW_HORIZON_ORDER = ["ultra_short", "short", "mid", "long"];
+
+const EVENT_STATUS_COLOR: Record<string, string> = {
+  pending: "default",
+  excluded: "default",
+  running: "processing",
+  analyzed: "blue",
+  reflected: "green",
+  failed: "error",
+};
+
+const VERDICT_COLOR: Record<string, string> = {
+  correct: "green",
+  partial: "gold",
+  wrong: "red",
+};
+
+/** 展开区：加载/错误/未落库/事件四态 + 分析摘要与逐档反思卡。 */
+function MoverReviewDetail({
+  state,
+  tierName,
+  layerName,
+}: {
+  state: ReviewState;
+  tierName: (code: string) => string;
+  layerName: (code: string) => string;
+}) {
+  const { t } = useTranslation();
+
+  if (state.loading) {
+    return (
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }} data-testid="mover-review-loading">
+        <Spin size="small" />
+        <span style={{ fontSize: 12 }}>{t("stockAnalysis.moverRecall.review.loading")}</span>
+      </div>
+    );
+  }
+  if (state.error != null) {
+    return (
+      <div className="sa-failed" style={{ fontSize: 12 }} data-testid="mover-review-error">
+        {t("stockAnalysis.moverRecall.review.loadError", { detail: state.error })}
+      </div>
+    );
+  }
+  const r = state.data;
+  // 实时核查视图的 misses 不落库；命令按三键查不到事件 ⇒ 提示而非留白。
+  if (r == null) {
+    return (
+      <div style={{ fontSize: 12, color: "var(--color-text-tertiary)" }} data-testid="mover-review-not-tracked">
+        {t("stockAnalysis.moverRecall.review.notTracked")}
+      </div>
+    );
+  }
+
+  const statusColor = EVENT_STATUS_COLOR[r.status] ?? "default";
+  const sortedReflections = [...r.reflections].sort((a, b) => {
+    const ia = REVIEW_HORIZON_ORDER.indexOf(a.horizon ?? "");
+    const ib = REVIEW_HORIZON_ORDER.indexOf(b.horizon ?? "");
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  const showAnalysisBlock = r.status === "analyzed" || r.status === "reflected";
+  // 补分析整行是 Model 的 serde 直出（camelCase），宽松取值；缺字段不渲染该行。
+  const a = r.analysis;
+  const analysisDate = a == null
+    ? null
+    : (typeof a.asOfDate === "string" ? a.asOfDate : null)
+      ?? (typeof a.analysisDate === "string" ? a.analysisDate : null);
+  const decisionAction = a == null ? null : typeof a.decisionAction === "string" ? a.decisionAction : null;
+  const decisionReasoning = a == null
+    ? null
+    : typeof a.decisionReasoning === "string"
+    ? a.decisionReasoning
+    : null;
+
+  return (
+    <div
+      data-testid="mover-review-detail"
+      style={{
+        background: "var(--color-bg-secondary, rgba(127,127,127,0.06))",
+        border: "1px solid var(--color-border-secondary, rgba(127,127,127,0.2))",
+        borderRadius: 6,
+        padding: "8px 10px",
+        fontSize: 12,
+      }}
+    >
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <Tag color={statusColor}>{t(`stockAnalysis.moverRecall.review.status_${r.status}`)}</Tag>
+        {r.missLayer
+          ? (
+            <span style={{ color: "var(--color-text-secondary)" }}>
+              {t("stockAnalysis.moverRecall.review.layerHint", { layer: layerName(r.missLayer) })}
+            </span>
+          )
+          : null}
+        <span style={{ color: "var(--color-text-tertiary)" }}>
+          {t("stockAnalysis.moverRecall.review.windowFacts", {
+            start: r.windowStart,
+            anchor: r.anchorDate,
+            days: r.windowDays,
+            gain: r.cumGainPct.toFixed(1),
+            max: r.maxDailyPct.toFixed(1),
+          })}
+        </span>
+      </div>
+
+      {r.status === "failed"
+        ? (
+          <div className="sa-failed" style={{ marginTop: 6 }} data-testid="mover-review-failed">
+            {t("stockAnalysis.moverRecall.review.errorDetail", { detail: r.errorDetail ?? "-" })}
+          </div>
+        )
+        : null}
+      {(r.status === "pending" || r.status === "excluded" || r.status === "running") && r.errorDetail
+        ? (
+          <div style={{ marginTop: 6, color: "var(--color-text-tertiary)" }}>
+            {t("stockAnalysis.moverRecall.review.errorDetail", { detail: r.errorDetail })}
+          </div>
+        )
+        : null}
+
+      {showAnalysisBlock
+        ? (
+          <div style={{ marginTop: 8 }} data-testid="mover-review-analysis">
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>
+              {analysisDate
+                ? t("stockAnalysis.moverRecall.review.analysisHeading", { date: analysisDate })
+                : t("stockAnalysis.moverRecall.review.analysisHeading", { date: "-" })}
+            </div>
+            {a == null
+              ? (
+                <div style={{ color: "var(--color-text-tertiary)" }}>
+                  {t("stockAnalysis.moverRecall.review.analysisMissing")}
+                </div>
+              )
+              : (
+                <>
+                  {decisionAction
+                    ? (
+                      <div>
+                        <strong>
+                          {t("stockAnalysis.moverRecall.review.decisionLabel", { action: decisionAction })}
+                        </strong>
+                      </div>
+                    )
+                    : null}
+                  {decisionReasoning
+                    ? (
+                      <div
+                        style={{
+                          marginTop: 2,
+                          color: "var(--color-text-secondary)",
+                          display: "-webkit-box",
+                          WebkitLineClamp: 4,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                        title={decisionReasoning}
+                      >
+                        {decisionReasoning}
+                      </div>
+                    )
+                    : null}
+                </>
+              )}
+          </div>
+        )
+        : null}
+
+      {showAnalysisBlock
+        ? (
+          <div style={{ marginTop: 8 }} data-testid="mover-review-reflections">
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>
+              {t("stockAnalysis.moverRecall.review.reflectionHeading")}
+            </div>
+            {sortedReflections.length === 0
+              ? (
+                <div style={{ color: "var(--color-text-tertiary)" }}>
+                  {t("stockAnalysis.moverRecall.review.noReflection")}
+                </div>
+              )
+              : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {sortedReflections.map((rf) => <ReflectionCard key={rf.id} rf={rf} tierName={tierName} />)}
+                </div>
+              )}
+          </div>
+        )
+        : null}
+    </div>
+  );
+}
+
+/** 单档反思卡：completed 展示裁决 + 三问 + 收益；pending/running/failed 只出状态。 */
+function ReflectionCard({
+  rf,
+  tierName,
+}: {
+  rf: MoverRecallReviewReflection;
+  tierName: (code: string) => string;
+}) {
+  const { t } = useTranslation();
+
+  const horizonLabel = rf.horizon ? tierName(rf.horizon) : "-";
+  // status 失败行落库形如 "failed: <reason>"。
+  const failedMatch = /^failed(?::\s?(.*))?$/.exec(rf.status);
+  const signals = parseSignals(rf.missedSignals);
+
+  return (
+    <div
+      data-testid={`mover-review-rf-${rf.horizon ?? "unknown"}`}
+      style={{
+        border: "1px solid var(--color-border-secondary, rgba(127,127,127,0.2))",
+        borderRadius: 4,
+        padding: "6px 8px",
+      }}
+    >
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <strong>{horizonLabel}</strong>
+        {rf.status === "completed" && rf.verdict
+          ? (
+            <Tag color={VERDICT_COLOR[rf.verdict] ?? "default"}>
+              {t("stockAnalysis.moverRecall.review.verdictLabel")}
+              {": "}
+              {t(`stockAnalysis.moverRecall.review.verdict_${rf.verdict}`)}
+            </Tag>
+          )
+          : null}
+        {rf.status === "completed" && rf.rawReturn != null
+          ? (
+            <span style={{ color: "var(--color-text-tertiary)" }}>
+              {t("stockAnalysis.moverRecall.review.rawReturn")}
+              {": "}
+              {`${rf.rawReturn >= 0 ? "+" : ""}${rf.rawReturn.toFixed(1)}%`}
+            </span>
+          )
+          : null}
+        {rf.status === "pending"
+          ? <Tag>{t("stockAnalysis.moverRecall.review.rfPending")}</Tag>
+          : null}
+        {rf.status === "running"
+          ? <Tag color="processing">{t("stockAnalysis.moverRecall.review.rfRunning")}</Tag>
+          : null}
+        {failedMatch
+          ? (
+            <Tag color="error">
+              {t("stockAnalysis.moverRecall.review.rfFailed", {
+                detail: failedMatch[1] || "-",
+              })}
+            </Tag>
+          )
+          : null}
+      </div>
+
+      {rf.status === "completed"
+        ? (
+          <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 3 }}>
+            {rf.lessonSummary
+              ? (
+                <div>
+                  <strong>{t("stockAnalysis.moverRecall.review.lessonSummary")}</strong>
+                  {": "}
+                  {rf.lessonSummary}
+                </div>
+              )
+              : null}
+            {signals.length > 0
+              ? (
+                <div>
+                  <strong>{t("stockAnalysis.moverRecall.review.missedSignals")}</strong>
+                  {": "}
+                  <ul style={{ margin: "2px 0 0 18px", padding: 0 }}>
+                    {signals.map((s, i) => <li key={i}>{s}</li>)}
+                  </ul>
+                </div>
+              )
+              : null}
+            {rf.whatWentWrong
+              ? (
+                <div>
+                  <strong>{t("stockAnalysis.moverRecall.review.whatWentWrong")}</strong>
+                  {": "}
+                  {rf.whatWentWrong}
+                </div>
+              )
+              : null}
+            {rf.fixForFuture
+              ? (
+                <div>
+                  <strong>{t("stockAnalysis.moverRecall.review.fixForFuture")}</strong>
+                  {": "}
+                  {rf.fixForFuture}
+                </div>
+              )
+              : null}
+          </div>
+        )
+        : null}
+    </div>
+  );
+}
+
+/** missed_signals 落库为 JSON 数组字符串；非数组/解析失败时按单条原文展示（不丢信息）。 */
+function parseSignals(raw: string | null): string[] {
+  if (raw == null || raw.trim().length === 0) { return []; }
+  try {
+    const v: unknown = JSON.parse(raw);
+    if (Array.isArray(v) && v.every((x) => typeof x === "string")) { return v as string[]; }
+  } catch { /* 非 JSON ⇒ 原文 */ }
+  return [raw];
 }

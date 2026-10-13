@@ -967,10 +967,11 @@ pub async fn run_serenity_screening(
 
 /// 趋势智选执行参数 —— Tauri 命令与时间旅行批次共用同一份执行体。
 ///
-/// 两条入口的唯一分叉：
+/// 两条入口的分叉（2026-10-12 裁定「回放的 as-of 候选落库」之后，只剩一处行为差异）：
 /// - `app = None`（批次）：静默运行，不 emit step/completed/failed 前端事件；
-/// - `as_of_ctx = Some(_)`（回放）：尾部天然跳过 `reco_picks` 落库与全局种子同步，
-///   满足「回放不污染 live 候选池」铁律（与命令路径逐字同一段守卫）。
+/// - `as_of_ctx = Some(_)`（回放）：`reco_picks` **照落库**，`as_of_date` 写本批截止日 ⇒
+///   回放候选可供反思取样；只有**全局 serenity 种子同步**仍限 live —— 种子是进程内单槽、
+///   无代际维度，回放若写它，live 的下一轮建池会被换成历史池。
 pub(crate) struct SerenityScreeningArgs<'a> {
     pub db: &'a DatabaseConnection,
     pub client: &'a AStockClient,
@@ -1755,18 +1756,18 @@ pub(crate) async fn run_serenity_screening_inner(
                             reco_version: Set(Some(
                                 axagent_analysis_engine::recommender::RECO_ALGORITHM_VERSION,
                             )),
+                            // 代际标记：实盘 = None，回放 = 本批 as-of 截止日。与荐股链
+                            // `persist_reco_picks` 同一列口径（两链同名目、同一张 reco_picks）。
+                            as_of_date: Set(as_of_ctx.as_ref().map(|c| c.as_string())),
                             // 智选链与工作流链共用同一版本常量：两链同名目、同一张 reco_picks，
                             // 分版就会造出「同一批 pick 两种归属」。
                             created_at: Set(now_str.clone()),
                         };
-                        // 回放不落库（与 `recommend_stocks` 的 `as_of_date.is_none()` 守卫同口径）：
-                        // 历史口径的候选按 `generated_at=now`、`synthetic=0` 写进 reco_picks，
-                        // 就会与实盘票混进同一张「趋势智选历史」，面板分不出哪一行是回放产物。
-                        if as_of_ctx.is_some() {
-                            tracing::debug!(
-                                "[serenity] 回放模式跳过 reco_picks 落库 ({code} {tier_period})"
-                            );
-                        } else if let Err(e) = pick.insert(db).await {
+                        // 回放**同样落库**（2026-10-12 裁定：as-of 候选必须持久化，否则回放
+                        // 结束后无样本可供反思）。代际写在每行的 `as_of_date` 上 ⇒ 与实盘票
+                        // 同表但不混码；只读实盘的下游（趋势智选历史面板、退出信号 / 反馈
+                        // 刷新、缓存回读）必须带 `as_of_date IS NULL` 谓词。
+                        if let Err(e) = pick.insert(db).await {
                             tracing::warn!(
                                 "[serenity] 写入 reco_picks 失败 ({code} {tier_period}): {e}"
                             );
@@ -1801,6 +1802,8 @@ pub(crate) async fn run_serenity_screening_inner(
                 // 同步到全局种子 + 全量数据缓存
                 // 全局 serenity 种子会被**智能荐股的 live 扫描**消费（`recommender` 的
                 // `get_serenity_seed`）⇒ 回放写入会把历史候选带进下一次实盘池，只在 live 同步。
+                // 注意这与上面的落库裁定不冲突：落库是「持久化 + 代际标记」，这里是**进程内
+                // 可变状态**，没有代际可打，一旦被回放写过就分不回来，所以继续只在 live 写。
                 if !serenity_seed.is_empty() && as_of_ctx.is_none() {
                     axagent_analysis_engine::recommender::set_serenity_seed(serenity_seed);
                     axagent_analysis_engine::recommender::set_serenity_candidate_cache(
@@ -1936,6 +1939,9 @@ async fn do_refresh_exit_signals(state: &State<'_, AppState>) -> Result<serde_js
     // 加载最近 50 条 Serenity 候选（按 created_at 降序）
     let picks = reco_picks::Entity::find()
         .filter(reco_picks::Column::Style.eq("serenity"))
+        // 代际过滤：退出信号服务的是**实盘持仓**，回放候选没有真实仓位，
+        // 让它们进这一轮会按历史价算出"该止损"的信号推给用户。
+        .filter(reco_picks::Column::AsOfDate.is_null())
         .order_by_desc(reco_picks::Column::CreatedAt)
         .all(db)
         .await
@@ -2041,6 +2047,9 @@ async fn do_feedback_loop(state: &State<'_, AppState>) -> Result<serde_json::Val
     let picks = reco_picks::Entity::find()
         .filter(reco_picks::Column::Style.eq("serenity"))
         .filter(reco_picks::Column::CreatedAt.gte(cutoff))
+        // 代际过滤：本反馈环算的是实盘出票的真实表现；回放批次的数据由
+        // as-of 闭环（decision_validations 带 as_of_date）单独成组，不混进这一分母。
+        .filter(reco_picks::Column::AsOfDate.is_null())
         .order_by_desc(reco_picks::Column::CreatedAt)
         .all(db)
         .await

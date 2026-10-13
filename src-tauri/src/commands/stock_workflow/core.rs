@@ -653,6 +653,15 @@ pub async fn run_stock_workflow_inner(
             decision_time_horizon: Set(None),
             decision_expected_holding_days: Set(None),
             parent_analysis_id: Set(parent_for_record.clone()),
+            // P2 样本溯源：对话/回放主路径只可能是 live 或时间旅行回放，
+            // mover_recall 走 run_single_stock_analysis 独立建行。
+            source: Set(if as_of_date.is_some() {
+                "time_travel".into()
+            } else {
+                "live".into()
+            }),
+            synthetic: Set(if as_of_date.is_some() { 1 } else { 0 }),
+            anchor_event_id: Set(None),
             trade_intent_status: Set("pending".into()),
             trade_intent_source: Set(None),
             trade_intent_source_ref_id: Set(None),
@@ -1002,7 +1011,13 @@ pub async fn run_stock_workflow_inner(
             input_schema: input_schema.clone(),
             output_schema: output_schema.clone(),
             dry_run: dry_run.unwrap_or(false),
-            // 接线激活 strict_mode：VERDICT 缺失兜底重试 / strict JSON 校验与降级
+            // 接线激活 strict_mode：VERDICT 缺失兜底重试 / strict JSON 校验与降级。
+            // 2026-10-12 修复：此前仅有注释、字段漏写，本入口 tool_permissions 恒为
+            // None，三道 strict 防线全是死代码——模型网关提前断流（finish_reason
+            // 正常但内容半截、无 VERDICT 标签）时半截 Markdown 直接落盘，
+            // data-quality 误报「节点无输出」（实证 688378 / run 3220c35d）。
+            // 与批量入口 run_single_stock_analysis（本文件下方 opts）保持一致。
+            tool_permissions: Some(super::strict_tool_permissions()),
             // P1-8（2026-10-03）：把本轮 as-of 上下文显式带进**每个节点任务**。
             // 引擎为每个节点单独 spawn，而 `task_local` 不跨 spawn ⇒ 此前节点只能读
             // 进程级兜底栈（全局单值），并发执行会互相看见对方的截止日。
@@ -1899,6 +1914,11 @@ pub async fn run_single_stock_analysis(
     // 工作流模板 id —— 缺省 `"stock-analysis"`（完整分析链）。
     // 批量 / 定时扫描目前恒传 `None`；参数化是为了后续可切快速链而不必再动签名。
     template_id: Option<&str>,
+    // P2 样本溯源：业务出处（`live` / `time_travel` / `mover_recall`，权威值域见
+    // stock_analyses.source 列注释）。synthetic 由其派生（非 live 即 1）。
+    source: &str,
+    // 漏检补分析时的锚定事件 id（mover_recall_events.id），其余调用方传 None。
+    anchor_event_id: Option<&str>,
 ) -> Result<String, String> {
     // 1. 创建 stock_analyses 记录
     let now_ms = chrono::Utc::now().timestamp_millis();
@@ -1958,6 +1978,10 @@ pub async fn run_single_stock_analysis(
         decision_time_horizon: Set(None),
         decision_expected_holding_days: Set(expected_holding_days.map(|d| d as i64)),
         parent_analysis_id: Set(None),
+        // P2 样本溯源：非 live 即合成回放行（命中率/反思统计须排除或分桶）。
+        source: Set(source.to_string()),
+        synthetic: Set(if source == "live" { 0 } else { 1 }),
+        anchor_event_id: Set(anchor_event_id.map(str::to_string)),
         trade_intent_status: Set("pending".into()),
         trade_intent_source: Set(None),
         trade_intent_source_ref_id: Set(None),
@@ -2197,6 +2221,13 @@ pub async fn run_single_stock_analysis(
                     // 同一个值 —— 代际的权威是**本次实际跑的那张图**（从 `workflow_templates`
                     // 载入），不是编译期常量；库里若还停着旧版，盖旧版才是对的。
                     analysis_template_version: Some(loaded.version),
+                    // P3：反思来源与本分析行同源（live / time_travel / mover_recall）。
+                    // 注意：仅 `mover_recall` 走漏检专项桶，time_travel 等回放仍归常规 due 桶。
+                    source: if source == "mover_recall" {
+                        super::reflection::REFLECTION_SOURCE_MOVER_RECALL
+                    } else {
+                        super::reflection::REFLECTION_SOURCE_DUE
+                    },
                     now_ms: chrono::Utc::now().timestamp_millis(),
                 },
             );

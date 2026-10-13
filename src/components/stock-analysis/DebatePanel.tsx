@@ -1032,6 +1032,7 @@ export function DebatePanel() {
   const isDark = themeMode === "dark"
     || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
+  const expectedDebateRounds = useStockAnalysisStore((s) => s.expectedDebateRounds);
   const streamingPreviews = useStockAnalysisStore((s) => s.streamingPreviews);
   const workflowStatus = useStockAnalysisStore((s) => s.status);
   // 辩论本身**不分档**（`bull-rN`/`bear-rN` 无档后缀，v133 起四档共用同一份记录）
@@ -1074,11 +1075,16 @@ export function DebatePanel() {
   }));
 
   // 阶段 7: 检测失败轮次 + 降级轮次
-  // 期望 3 轮辩论,缺失的 round = 失败(LLM 输出空/超时导致整链雪崩,被 stage 1 过滤掉)
+  // 期望轮数 = 模板变量 `debate_rounds`（后端建图时与 DAG 展开强制同源），**不写死 3**。
+  // 缺失的 round = 失败(LLM 输出空/超时导致整链雪崩,被 stage 1 过滤掉)
+  // ⚠ `expectedDebateRounds === null`（未读到 / 历史回放）⇒ 期望集为空 ⇒ 不宣告任何失败：
+  //   「不知道应有几轮」不得显示成「某轮跑坏了」。
   // 降级轮次 = 内容含 [DEGRADED] 前缀(R1/R2 缺失时 LLM 走降级策略)
-  const EXPECTED_ROUNDS = [1, 2, 3] as const;
+  const expectedRounds = expectedDebateRounds === null
+    ? []
+    : Array.from({ length: expectedDebateRounds }, (_, i) => i + 1);
   const presentRounds = new Set(processedRounds.map((r) => r.round));
-  const failedRounds = EXPECTED_ROUNDS.filter((r) => !presentRounds.has(r));
+  const failedRounds = expectedRounds.filter((r) => !presentRounds.has(r));
   const degradedRounds = processedRounds.filter(
     (r) => r.bull.text.includes("[DEGRADED]") || r.bear.text.includes("[DEGRADED]"),
   );

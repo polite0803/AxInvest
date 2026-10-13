@@ -1250,6 +1250,8 @@ export interface MoverEvent {
   period: string;
   /** 窗口右端（= 达标确认日）ISO 日期 */
   anchorDate: string;
+  /** 窗口起点 ISO 日期（P2 漏检补分析的 as-of 锚点） */
+  windowStart: string;
   windowDays: number;
   cumGainPct: number;
   maxDailyPct: number;
@@ -1288,6 +1290,122 @@ export interface MoverRecallView {
   rates: MoverRecallRates;
   layers: MoverLayerRow[];
   misses: MoverMissRow[];
+}
+
+// ── 妖股漏检 → as-of 历史补分析批次（P2，`run_mover_recall_analysis`）──────────
+
+/** 发起补分析批次请求（字段与 Rust RunMoverRecallAnalysisRequest 一一对应）。 */
+export interface MoverRecallAnalysisRequest {
+  /** 单批最多补分析事件数（1-100，默认 20） */
+  batchLimit: number;
+  /** 所属核查轮次 unexplained 占比 ≥ 该阈值时整轮不取（0-1，默认 0.5） */
+  maxUnexplainedShare: number;
+  /** 限定核查轮次（mover_recall_runs.id）；null/缺省 = 跨全部轮次选样 */
+  runId?: string | null;
+}
+
+export type MoverRecallBatchStatus =
+  | "running"
+  | "completed"
+  | "partial"
+  | "failed"
+  | "interrupted";
+
+/** 批次内逐票状态（mover_recall_events 行的前端投影）。 */
+export interface MoverRecallEventItem {
+  eventId: string;
+  runId: string;
+  stockCode: string;
+  stockName: string;
+  period: string;
+  /** as-of 锚点（窗口起点） */
+  windowStart: string;
+  /** 窗口右端（达标确认日） */
+  anchorDate: string;
+  cumGainPct: number;
+  /** 归因层：not_in_pool / l3_scored_out / other_period / unexplained ... */
+  missLayer: string;
+  /** running / analyzed / failed（excluded/reflected 不进批次） */
+  status: string;
+  analysisId: string | null;
+  errorDetail: string | null;
+}
+
+// ── 妖股漏检 → 补分析报告 + 逐档反思复盘视图（P3，`get_mover_recall_event_review`）──
+
+/** 漏检复盘视图中的单档反思行（投影与 `list_reflections` 单一来源对齐）。 */
+export interface MoverRecallReviewReflection {
+  id: string;
+  stockCode: string;
+  stockName: string;
+  originalAnalysisId: string | null;
+  asOfDate: string;
+  hindsightDate: string;
+  /** 本反思行复盘的档位（ultra_short/short/mid/long） */
+  horizon: string | null;
+  actualOutcome: string;
+  whatWentWrong: string | null;
+  /** 漏检信号，落库为 JSON 数组字符串（展示前需 parse；失败按原文展示） */
+  missedSignals: string | null;
+  fixForFuture: string | null;
+  verdict: string | null;
+  lessonSummary: string | null;
+  rawReturn: number | null;
+  alphaReturn: number | null;
+  /** 来源桶：`mover_recall` = 漏检回放；其余（含空串）= 常规到期 due */
+  source: string;
+  /** 系统机械盖章的权威归因层（仅 mover_recall 行非空） */
+  missLayer: string | null;
+  moverLabel: string | null;
+  /** pending / running / completed / failed: ... */
+  status: string;
+  createdAt: number;
+}
+
+/**
+ * `get_mover_recall_event_review` 响应：事件事实 + as-of 补分析整行 + 逐档反思。
+ * 三键（stockCode + anchorDate + period）定位；查无事件时命令返回 `null`。
+ */
+export interface MoverRecallEventReview {
+  eventId: string;
+  runId: string;
+  /** pending / excluded / running / analyzed / failed / reflected */
+  status: string;
+  missLayer: string;
+  period: string;
+  stockCode: string;
+  stockName: string;
+  windowStart: string;
+  anchorDate: string;
+  windowDays: number;
+  cumGainPct: number;
+  maxDailyPct: number;
+  batchId: string | null;
+  analysisId: string | null;
+  /** 首个 completed 反思档的行 id（status=reflected 时非空） */
+  reflectionId: string | null;
+  errorDetail: string | null;
+  /** as-of 补分析整行（stock_analyses 全字段 camelCase）；未跑到成功为 null */
+  analysis: Record<string, unknown> | null;
+  reflections: MoverRecallReviewReflection[];
+}
+
+/**
+ * `get_mover_recall_analysis_batch` 响应；
+ * `list_mover_recall_analysis_batches` 返回同型但 `items` 为空数组（摘要）。
+ */
+export interface MoverRecallBatchState {
+  batchId: string;
+  status: MoverRecallBatchStatus;
+  message: string | null;
+  total: number;
+  ok: number;
+  fail: number;
+  items: MoverRecallEventItem[];
+  errorDetail: string | null;
+  createdAtMs: number;
+  updatedAtMs: number;
+  finishedAtMs: number | null;
 }
 
 // ── 决策时间线类型 ──

@@ -2969,7 +2969,12 @@
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "Ya hay un lote de viaje en el tiempo en ejecución; espere a que termine.",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "La ventana de la canalización en vivo está activa (23:50–02:10 / 17:50–18:10). Inténtelo más tarde.",
     "TIME_TRAVEL_BATCH_EXEC_FAILED": "El lote ha fallado; consulte los detalles del lote.",
-    "TIME_TRAVEL_BATCH_QUERY_FAILED": "Error al consultar el historial de lotes de viaje en el tiempo. Inténtelo de nuevo más tarde."
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "Error al consultar el historial de lotes de viaje en el tiempo. Inténtelo de nuevo más tarde.",
+    "MOVER_RECALL_ANALYSIS_INVALID_PARAMS": "Parámetros de cobertura no válidos; revise el límite del lote y el umbral de proporción sin explicar.",
+    "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "Ya hay un lote de viaje en el tiempo o de cobertura en ejecución; espere a que termine.",
+    "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "Dentro de la ventana del pipeline en vivo (23:50–02:10 / 17:50–18:10); inicie fuera de ella.",
+    "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "El lote de cobertura falló; revise los detalles del lote.",
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Falló la consulta del historial de lotes de cobertura; reintente más tarde."
   },
   "errorBoundary": {
     "copied": "Copiado",
@@ -7507,7 +7512,8 @@
     "source": {
       "scheduledCron": "Tareas programadas",
       "stockPipeline": "Pipeline de análisis de acciones",
-      "timeTravelBatch": "Lote de viaje en el tiempo"
+      "timeTravelBatch": "Lote de viaje en el tiempo",
+      "moverRecallAnalysis": "Cobertura de subidas perdidas"
     },
     "state": {
       "queued": "En cola",
@@ -7540,7 +7546,8 @@
       "running": "En ejecución",
       "queued": "En cola",
       "failed": "Fallido",
-      "waiting": "En espera"
+      "waiting": "En espera",
+      "pendingEvolution": "Aprobaciones de evolución"
     },
     "attention": {
       "title": "Requiere atención",
@@ -7573,6 +7580,39 @@
       "range24h": "Últimas 24 h",
       "range7d": "Últimos 7 días",
       "rangeAll": "Todo"
+    },
+    "moverRecall": {
+      "start": "Iniciar cobertura de perdidas",
+      "modalTitle": "Iniciar análisis de cobertura de subidas perdidas",
+      "modalHint": "Reproduce el análisis histórico con as-of al inicio de la ventana; los análisis complementados se marcan como synthetic y no entran en el denominador real de aciertos.",
+      "batchLimit": "Máx. eventos por lote (1-100)",
+      "maxShare": "Máx. proporción sin explicar",
+      "maxShareHint": "Se omite por completo una ronda cuya proporción sin explicar alcance este valor.",
+      "runId": "Limitar a ronda (opcional)",
+      "runIdPlaceholder": "Vacío = todas las rondas; o ID de ronda",
+      "submit": "Iniciar lote",
+      "started": "Lote iniciado ({{id}})",
+      "drawerTitle": "Lote de cobertura de subidas perdidas",
+      "itemsTitle": "Detalle por acción ({{n}})",
+      "itemsEmpty": "Sin detalle por acción",
+      "colStock": "Acción",
+      "colPeriod": "Nivel",
+      "colWindowStart": "Inicio de ventana",
+      "colAnchor": "Fecha de confirmación",
+      "colCum": "Ganancia acumulada",
+      "colLayer": "Capa de fallo",
+      "colStatus": "Estado",
+      "colError": "Error / análisis",
+      "statusRunning": "Analizando",
+      "statusAnalyzed": "Analizado",
+      "statusFailed": "Fallido",
+      "batchStatus": {
+        "running": "En curso",
+        "completed": "Completado",
+        "partial": "Parcial",
+        "failed": "Fallido",
+        "interrupted": "Interrumpido"
+      }
     }
   },
   "teammatePanel": {
@@ -15667,6 +15707,38 @@
         "neeq": "NEEQ",
         "b_share": "Acciones B",
         "unknown": "Desconocido"
+      },
+      "review": {
+        "toggle": "Expandir cobertura y reflexión",
+        "loading": "Cargando análisis de cobertura y reflexiones…",
+        "loadError": "Error al cargar el registro de revisión: {{detail}}",
+        "notTracked": "Este evento proviene de la vista de verificación en vivo y aún no ha sido guardado por una ronda programada; aparecerá aquí cuando la cobertura programada se complete.",
+        "status_pending": "Cobertura pendiente",
+        "status_excluded": "Excluido esta ronda",
+        "status_running": "Cubriendo",
+        "status_analyzed": "Cubierto",
+        "status_reflected": "Cubierto · Revisado",
+        "status_failed": "Cobertura fallida",
+        "layerHint": "Capa de fallo: {{layer}}",
+        "windowFacts": "Ventana {{start}} → {{anchor}} ({{days}} días de cotización), acum. +{{gain}}%, mejor día +{{max}}%",
+        "errorDetail": "Motivo del fallo: {{detail}}",
+        "analysisHeading": "Análisis de cobertura as-of ({{date}})",
+        "analysisMissing": "El evento está marcado como completado pero no se encuentra su análisis de cobertura.",
+        "decisionLabel": "Decisión: {{action}}",
+        "reflectionHeading": "Revisión de reflexión por nivel",
+        "noReflection": "La cobertura está completa; las reflexiones por nivel se generan automáticamente al vencer cada ventana de mantenimiento. Vuelva a consultar más tarde.",
+        "verdictLabel": "Veredicto",
+        "verdict_correct": "Correcto",
+        "verdict_partial": "Parcialmente correcto",
+        "verdict_wrong": "Incorrecto",
+        "rawReturn": "Rentabilidad real",
+        "lessonSummary": "Lección admitida",
+        "missedSignals": "Señales perdidas",
+        "whatWentWrong": "Qué salió mal",
+        "fixForFuture": "Corrección del criterio en el futuro",
+        "rfPending": "Reflexión en cola",
+        "rfRunning": "Generando reflexión",
+        "rfFailed": "Reflexión fallida: {{detail}}"
       }
     },
     "export": {
@@ -18067,7 +18139,66 @@
     "unitLakh": " lakh",
     "horizonScoringWindows": "Ventanas de indicadores de este horizonte: {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · Bollinger {{boll}} · Volumen {{vol}}",
     "horizonScaleTrend": "Bandas de este horizonte: rápida {{fastBars}} barras {{fast}} / lenta {{slowBars}} barras {{slow}}, diferencia {{diffPct}}%, pendiente rápida {{fastSlope}}",
-    "horizonScaleMomentum": "Momentum de este horizonte: RSI({{period}}) = {{value}}"
+    "horizonScaleMomentum": "Momentum de este horizonte: RSI({{period}}) = {{value}}",
+    "evolutionApproval": {
+      "drawerTitle": "Aprobación del plan de evolución",
+      "panelPendingTitle": "{{count}} plan(es) de evolución pendientes de aprobación",
+      "pendingTitle": "Planes pendientes ({{count}})",
+      "emptyPending": "No hay planes de evolución pendientes de aprobación",
+      "selectHint": "Seleccione un plan de la lista superior para ver los detalles",
+      "reviewAction": "Revisar",
+      "viewAction": "Ver",
+      "approve": "Aprobar y ejecutar",
+      "approveConfirm": "Al aprobar, el plan se repetirá de inmediato y el resultado se escribirá en la configuración activa. ¿Continuar?",
+      "approveSuccess": "Plan de evolución aprobado y ejecutado",
+      "reject": "Rechazar",
+      "rejectTitle": "Rechazar plan de evolución",
+      "rejectConfirmOk": "Confirmar rechazo",
+      "rejectReasonPlaceholder": "Indique el motivo del rechazo (obligatorio; queda registrado para futuras evoluciones)",
+      "rejectReasonRequired": "El motivo del rechazo es obligatorio",
+      "rejectSuccess": "Plan de evolución rechazado",
+      "rollback": "Revertir",
+      "rollbackConfirm": "La versión actual se revertirá a la última versión aceptada. ¿Continuar?",
+      "rollbackSuccess": "Reversión completada",
+      "rollbackUnavailable": "Ya es la configuración de primera generación; no hay una versión histórica a la que revertir",
+      "readonlyHint": "Este registro es un estado histórico de solo lectura",
+      "actionFailed": "Error de la acción: {{msg}}",
+      "diffTitle": "Vista previa de cambios de parámetros (mejor backtest vs predeterminado)",
+      "samplesTitle": "Muestras de activación",
+      "samples": {
+        "expand": "Mostrar lista de id",
+        "reflections": "Muestras de reflexión",
+        "validations": "Muestras de validación",
+        "moverEvents": "Eventos de rebalanceo",
+        "blockedReflections": "Muestras de reflexión (datos no disponibles)",
+        "blockedValidations": "Muestras de validación (datos no disponibles)",
+        "blockedMoverEvents": "Eventos de rebalanceo (datos no disponibles)",
+        "blockedHint": "Las muestras con fallo de accesibilidad de datos se desvían por regla dura: nunca disparan mutación estructural y solo cuentan en el panel de calidad de datos."
+      },
+      "param": {
+        "ewmaAlpha": "Factor de suavizado EWMA",
+        "lookbackDays": "Días de retrospectiva",
+        "sampleSaturation": "Umbral de saturación de muestras"
+      },
+      "meta": {
+        "status": "Estado",
+        "createdAt": "Creado el",
+        "trigger": "Motivo de activación",
+        "summary": "Resumen",
+        "reviewer": "Revisor",
+        "reviewedAt": "Revisado el",
+        "rejectReason": "Motivo de rechazo / reversión",
+        "rollbackRef": "Versión base de reversión"
+      },
+      "status": {
+        "pendingApproval": "Pendiente de aprobación",
+        "accepted": "Aceptado",
+        "rejected": "Rechazado",
+        "success": "Correcto (histórico)",
+        "failed": "Fallido (histórico)",
+        "unknown": "Estado desconocido"
+      }
+    }
   },
   "pipeline": {
     "title": "Pipeline de Acciones",

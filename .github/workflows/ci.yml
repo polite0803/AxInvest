@@ -277,6 +277,8 @@ jobs:
         run: |
           node scripts/check-generation-scope-registry.mjs --selftest
           node scripts/check-generation-scope-registry.mjs
+          node scripts/check-reco-generation.mjs --selftest
+          node scripts/check-reco-generation.mjs
       # B2-1 前置：分析师 id 形态门（base 域唯一 / 带档后缀只能由 helper 产出 / 裸匹配基线只许降）
       - name: Analyst id shape gate
         run: |

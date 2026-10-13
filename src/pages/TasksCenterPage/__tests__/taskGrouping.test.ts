@@ -19,6 +19,8 @@ const CLASSIFY_CASES: ReadonlyArray<{
   { name: "批次反思", taskType: "batch-reflection", workflowId: null, expected: "invest" },
   { name: "决策校验", taskType: "validate-decisions", workflowId: null, expected: "invest" },
   { name: "决策回测", taskType: "decision-backtest", workflowId: null, expected: "invest" },
+  { name: "妖股漏检核查", taskType: "mover-recall", workflowId: null, expected: "invest" },
+  { name: "进化计划聚合", taskType: "evolution-proposal", workflowId: null, expected: "invest" },
   // ── 投资自动化：serenity / trend-screening 工作流（taskType 为空或 workflow 兜底） ──
   { name: "serenity-fast 工作流", taskType: null, workflowId: "serenity-fast", expected: "invest" },
   {
@@ -90,6 +92,8 @@ describe("canExecuteNow", () => {
     expect(canExecuteNow({ taskType: "pool-scan", workflowId: null })).toBe(true);
     expect(canExecuteNow({ taskType: "opc_demand_scan", workflowId: null })).toBe(true);
     expect(canExecuteNow({ taskType: "knowledge_source_fetch_all", workflowId: null })).toBe(true);
+    expect(canExecuteNow({ taskType: "mover-recall", workflowId: null })).toBe(true);
+    expect(canExecuteNow({ taskType: "evolution-proposal", workflowId: null })).toBe(true);
   });
 
   it("绑定工作流即可执行（含自定义壳）", () => {

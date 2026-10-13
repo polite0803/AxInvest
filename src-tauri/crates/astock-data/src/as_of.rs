@@ -505,6 +505,37 @@ pub fn reset_global_degradation_log() {
     // total 不重置,保留"曾经降级过多少项"作为历史指标
 }
 
+/// 落库时的**实盘**代际实参。
+///
+/// 用具名常量而不是裸 `None`：`None` 与「忘了传代际」在源码里完全同形，代际门
+/// （`scripts/check-reco-generation.mjs`）读不出这里是想过代际的；具名常量强制每个
+/// 实盘入口显式表态。
+pub const LIVE_GENERATION: Option<&str> = None;
+
+/// 代际参数形状：`YYYY-MM-DD` = 某次回放的截止日；留空 = 实盘口径。
+///
+/// 错格式必须显式报错，不能静默当成「不过滤」—— 那会让一份实盘口径的统计或列表突然
+/// 长出回放样本（两套计数域并成一个数是最难发现的失真形态）。
+/// 放在本 crate 是因为「代际」语义本就属于 as-of 域，且荐股历史 / rank IC / 验证记录
+/// 列表 / 报表四个命令层读侧要共用一份判据（命令层互调会被分层护栏判越界）。
+pub fn parse_generation_param(s: Option<&str>) -> Result<Option<String>, String> {
+    let shape_ok = |d: &str| {
+        d.len() == 10
+            && d.bytes().enumerate().all(|(i, b)| match i {
+                4 | 7 => b == b'-',
+                _ => b.is_ascii_digit(),
+            })
+    };
+    match s {
+        None => Ok(None),
+        Some(d) if d.trim().is_empty() => Ok(None),
+        Some(d) if shape_ok(d) => Ok(Some(d.to_string())),
+        Some(d) => {
+            Err(format!("generation 需为回放截止日 YYYY-MM-DD，收到 {d:?}；留空则按实盘口径统计"))
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1218,5 +1249,22 @@ mod tests {
         })
         .await;
         reset_global_degradation_log();
+    }
+
+    /// 代际参数：留空 = 实盘、合法日期透传、错格式显式拒绝（不许静默当「不过滤」）。
+    #[test]
+    fn generation_param_accepts_blank_and_iso_but_rejects_rest() {
+        assert_eq!(parse_generation_param(None).unwrap(), None);
+        assert_eq!(parse_generation_param(Some("  ")).unwrap(), None);
+        assert_eq!(
+            parse_generation_param(Some("2026-05-27")).unwrap(),
+            Some("2026-05-27".to_string())
+        );
+        for bad in ["2026-5-27", "2026/05/27", "2026-05-27T00:00", "abcd-ef-gh"] {
+            assert!(
+                parse_generation_param(Some(bad)).is_err(),
+                "{bad:?} 应被显式拒绝，而不是退化成「不过滤」把回放样本混进实盘口径"
+            );
+        }
     }
 }

@@ -79,6 +79,15 @@ pub struct Model {
     pub factor_snapshot: Option<String>,
     /// 验证数据源说明（如 "akshare_daily" | "manual" | "fallback_seed"）
     pub data_source: String,
+    /// **代际标记**：`NULL` = 验证实盘出票；非空 = 验证时间旅行回放的出票
+    /// （值 = 该批 as-of 截止日，与 `reco_picks.as_of_date` 同值）。
+    ///
+    /// 为什么必须有：回放 pick 的**决策日是 `as_of_date`，不是入库时刻**（`generated_at`
+    /// 对两代都只是"什么时候写的"）。验证窗口必须从决策日往后推，否则回放样本会拿
+    /// 决策之后的行情去"验证"一个本来在过去做出的决策；与实盘样本混在同一格里，
+    /// IC 算的是混合体。读侧按代际分开，两套计数域不得并排比。
+    #[serde(default)]
+    pub as_of_date: Option<String>,
     pub created_at: String,
 }
 

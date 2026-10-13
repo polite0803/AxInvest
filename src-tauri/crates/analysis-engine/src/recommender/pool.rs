@@ -10,6 +10,13 @@ use super::FALLBACK_STOCKS;
 /// 候选池条目：(code, name, sector)
 pub type SeedItem = (String, String, Option<String>);
 
+/// 建池真实依赖的两个 vendor 方法名（也是 `astock_daily_snapshot.method` 的取值写法）。
+///
+/// 为什么导出：时间旅行批次要在进 guard 之前判断"所选日期到底有没有建池输入"，
+/// 查的必须正是这里取的那两源 —— 清单只在建池处说一次，校验处引用它，
+/// 不另抄一份（抄一份就会随建池改动而悄悄失真）。
+pub const POOL_SNAPSHOT_METHODS: [&str; 2] = ["get_hot_stocks", "get_industry_ranking"];
+
 /// 构造 seed pool
 ///
 /// 顺序：get_hot_stocks(30) ∪ get_industry_ranking 龙头(20) ∪ FALLBACK_STOCKS 冷门补全

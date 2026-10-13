@@ -2,7 +2,6 @@
 
 pub mod agent_turn_adapter;
 pub mod approval_rule_store;
-pub mod axinvest_decorators;
 pub mod browser_fetcher;
 pub mod cognitive_router_init;
 pub mod cron_delivery_sink;

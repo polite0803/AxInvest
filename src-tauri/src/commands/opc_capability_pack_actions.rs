@@ -2355,7 +2355,7 @@ pub(crate) async fn run_template_via_engine(
 
     // 创建工作流
     let wf_name = format!("opc-{domain_pack_id_normalized}-{template_id}");
-    // 必须用 with_hooks 变体携带模板 hooks_config（形态同 src/commands/stock_workflow/core.rs:819-822）：
+    // 必须用 with_hooks 变体携带模板 hooks_config（形态同 src/commands/stock_workflow/core.rs:828-831）：
     // `create_workflow` 内部转调 `create_workflow_with_hooks(..., None)`，
     // 模板声明的 post_exec 会被静默丢弃 —— 引擎只在内存 Workflow 对象上读声明
     // （rt-workflow engine/mod.rs:1064-1069），为 None 时直接 return，连日志都不打。

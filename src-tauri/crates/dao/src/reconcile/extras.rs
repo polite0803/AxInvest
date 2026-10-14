@@ -1244,9 +1244,22 @@ const PARTIAL_INDEXES: &[IndexDecl] = &[
         where_clause: Some("(name NOT LIKE 'rl_checkpoint:%')"),
         dialect: None, // ← 声明式新增（无迁移出处），缺陷编号 C-#2
     },
+    IndexDecl {
+        // 反思四档成熟样本物化进 strategy_performance 的幂等键（#31 管道打通）。
+        // 键粒度是「被复盘决策 × 档」：四周期一行一档，同决策的短档会在多条反思行重复成熟，
+        // 靠它收敛成一行，避免胜率被同一决策反复计票。部分索引：历史/其它通道（对话直回测）
+        // 的行 source_ref 为 NULL，不进唯一约束。
+        table: "strategy_performance",
+        name: "idx_strategy_performance_source_ref",
+        cols: &["source_ref"],
+        unique: true,
+        method: None,
+        where_clause: Some("(source_ref IS NOT NULL)"),
+        dialect: None,
+    },
 ];
 
-// 静态条目数自证：GIN 6 / MULTI 36 / PARTIAL 6
+// 静态条目数自证：GIN 6 / MULTI 36 / PARTIAL 7
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 汇总视图 —— 引擎（P3+）消费入口
@@ -1310,13 +1323,13 @@ mod counts {
     const EXPECT_MULTI: usize = 36;
     /// partial 索引条目数。
     ///
-    /// ⚠ 6 条里**前 5 条全部有迁移出处**（v100 / v111 / v112 / v117）；第 6 条
-    /// `uq_trajectory_patterns_name` 是**声明式新增**（无迁移），出处写本项的缺陷编号 C-#2。
-    /// 它是本清单**唯一一条 `unique: true`** 的 partial；`dialect` 分布是
-    /// **5 条 `None`（双方言）+ 1 条 `Some(Postgres)`** —— 唯一的 PG-only 是
-    /// `idx_retrieval_hits_feedback`（`v111` 的模板给 PG 分支加了 WHERE、SQLite 分支却是
-    /// **普通索引**，两侧不同形，故一条声明表达不了）。第 6 条刻意写 `None`，理由见该条注释。
-    const EXPECT_PARTIAL: usize = 6;
+    /// ⚠ 前 5 条全部有迁移出处（v100 / v111 / v112 / v117）；第 6 条
+    /// `uq_trajectory_patterns_name` 与第 7 条 `idx_strategy_performance_source_ref`
+    /// 均为**声明式新增**（无迁移）。unique partial 现有 2 条（第 6、7 条）；
+    /// `dialect` 分布是 **6 条 `None`（双方言）+ 1 条 `Some(Postgres)`** —— 唯一的
+    /// PG-only 是 `idx_retrieval_hits_feedback`（`v111` 的模板给 PG 分支加了 WHERE、
+    /// SQLite 分支却是**普通索引**，两侧不同形，故一条声明表达不了）。
+    const EXPECT_PARTIAL: usize = 7;
 
     #[test]
     fn l2_item_counts_are_frozen() {
@@ -1353,7 +1366,7 @@ mod counts {
     }
 
     #[test]
-    fn l2_total_is_seventy() {
+    fn l2_total_is_seventy_one() {
         let expect = EXPECT_VIRTUAL_TABLES
             + EXPECT_TRIGGERS
             + EXPECT_GENERATED_COLUMNS
@@ -1363,7 +1376,7 @@ mod counts {
             + EXPECT_GIN
             + EXPECT_MULTI
             + EXPECT_PARTIAL;
-        assert_eq!(expect, 70, "冻结总数常量自相矛盾");
+        assert_eq!(expect, 71, "冻结总数常量自相矛盾");
         assert_eq!(total_declarations(), expect, "total_declarations() 与各类求和不符");
     }
 

@@ -1973,15 +1973,8 @@ pub async fn execute_stock_mcp_tool(
 /// `watchlist`，而中文「观望」落到 `capital`：同一语义经两条入口得到两个策略。
 /// 归一化后各档穷举，新增值域由编译器报错提醒。
 pub(crate) fn map_action_to_strategy_id(action: &str) -> &'static str {
-    use axagent_analysis_engine::decision_action::{ActionKind, normalize_action};
-    match normalize_action(action) {
-        Some(ActionKind::Buy | ActionKind::Increase) => "trend",
-        Some(ActionKind::Sell | ActionKind::Reduce) => "reversion",
-        Some(ActionKind::Hold) => "value",
-        Some(ActionKind::Wait | ActionKind::Uncertain) => "capital",
-        // 决策缺失 / 未识别值域：无策略可回放，与「观望」区分开（观望是结论，缺失不是）
-        Some(ActionKind::Unavailable) | None => "watchlist",
-    }
+    // 唯一权威映射已收口到 analysis-engine（反思四档物化与回测共用同一策略格口径，#31）。
+    axagent_analysis_engine::evolution_drift::action_to_strategy_id(Some(action))
 }
 
 /// 回测单个分析决策

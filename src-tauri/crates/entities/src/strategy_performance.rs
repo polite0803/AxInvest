@@ -42,6 +42,19 @@ pub struct Model {
     /// 读侧按 `HORIZON_BRANCH_GENERATION_FLOOR` **下限**筛（不是等号：等号每次换代都会清零窗口）。
     /// NULL = 代际未知（本列引入前的存量行、对话直执行通道）⇒ 不进分母。
     pub template_version: Option<i32>,
+    /// 幂等来源键：标识本行由「哪条**被复盘决策**的哪个成熟档」物化而来，形如
+    /// `reflection-horizon:{stock_analyses.id}:{horizon}`。
+    ///
+    /// 为什么键里是**决策 id 而不是反思行 id**：四周期模型「一行一档」——同一条决策会建
+    /// 4 条独立 pending 反思行（ultra_short/short/mid/long 各一条），且每次反思都会当场
+    /// 重算**全部四档**快照，已到期的更短档在后续反思行里同样判为 mature。若按「反思行 ×
+    /// 档」去重，同一决策的 ultra_short 档会在 4 条反思行里各物化一行（胜率被一条决策反复
+    /// 计票）。按「**决策 × 档**」upsert，无论由哪条反思行展开都收敛到同一行。
+    /// 本列 + 部分唯一索引（`idx_strategy_performance_source_ref`，
+    /// `WHERE source_ref IS NOT NULL`）兜底。
+    ///
+    /// NULL = 非反思物化通道写入的历史/其它来源行（如对话直执行回测），不参与唯一约束。
+    pub source_ref: Option<String>,
     pub created_at: i64,
 }
 

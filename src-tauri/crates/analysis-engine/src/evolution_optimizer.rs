@@ -29,6 +29,16 @@ use axagent_trajectory::skill_evolution::EvolutionConfig;
 use crate::evolution_drift::{load_current_weights, load_performance_window};
 use crate::weight_decay::{compute_adjusted_weights, WeightDecayConfig};
 
+/// 参数进化读取策略表现样本的回看窗口（天）。
+///
+/// **唯一权威口径**：[`run_evolution`] 与定时聚合的「执行可行性闸门」
+/// （`commands::evolution_proposal`）共用此常量 —— 聚合闸门必须与真正执行
+/// 参数进化时 [`load_performance_window`] 的入参逐字一致，否则会产生
+/// 「聚合认为有料、审批执行却报无表现数据」的口径错位（历史 bug）。
+/// 注意代际下限（`HORIZON_BRANCH_GENERATION_FLOOR`）在 `load_performance_window`
+/// 内部另算，不在此常量内。
+pub const PARAM_EVOLUTION_LOOKBACK_DAYS: u32 = 180;
+
 /// 进化优化结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -135,7 +145,7 @@ pub async fn run_evolution(
     as_of_date: Option<&str>,
 ) -> Result<EvolutionResult, String> {
     let current_weights = load_current_weights(db).await?;
-    let history = load_performance_window(db, 180, as_of_date).await?;
+    let history = load_performance_window(db, PARAM_EVOLUTION_LOOKBACK_DAYS, as_of_date).await?;
 
     if history.is_empty() {
         return Err("无表现数据可供进化".to_string());

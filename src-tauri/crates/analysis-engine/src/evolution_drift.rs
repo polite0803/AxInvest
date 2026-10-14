@@ -13,18 +13,23 @@
 //! - Replay 模式（as_of_date = "2024-09-30"）：基于 as_of 之前的窗口，避免未来泄漏
 
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use chrono::Utc;
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, Set,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use axagent_entities::{stock_evolution_history, strategy_performance, strategy_weight_history};
+use axagent_harness::Period;
 
+use crate::decision_action::{normalize_action, ActionKind};
 use crate::evolution_optimizer::EvolutionResult;
+use crate::reflection_stats::{expand_horizon_samples, DecisionPerformanceSample};
 use crate::types::StrategyTrend;
 use crate::weight_decay::{
     compute_adjusted_weights, format_rationale, StrategyPerformanceRow, WeightDecayConfig,
@@ -521,6 +526,9 @@ pub async fn record_performance(
         horizon_pnl_json: Set(horizon_pnl_json.map(|s| s.to_string())),
         agreement_score: Set(agreement_score),
         template_version: Set(template_version),
+        // 非反思物化通道（cron / replay / 离线评测 / 对话直回测）不带来源键；
+        // 幂等 upsert 只走 `upsert_reflection_horizon_performance`。
+        source_ref: Set(None),
         created_at: Set(now),
     };
     strategy_performance::Entity::insert(am)
@@ -528,6 +536,178 @@ pub async fn record_performance(
         .await
         .map_err(|e| format!("写入 strategy_performance 失败: {e}"))?;
     Ok(id)
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// 到期反思四档 → strategy_performance 物化（#31 代际血缘管道）
+//
+// 为什么需要：参数进化执行器（`load_performance_window`）只吃 strategy_performance
+// 中近窗口、代际 >= HORIZON_BRANCH_GENERATION_FLOOR 的表现行；而最权威的「决策到期
+// 判定」一直只存在于 stock_reflections.horizon_results_json 的读时展开里
+// （`expand_horizon_samples`），从未物化进本表 ⇒ 进化窗口恒空。本节把每条到期反思的
+// 成熟档按「反思行 × 档」幂等 upsert 进真实策略格，打通代际血缘。
+// ───────────────────────────────────────────────────────────────────────────
+
+/// 决策方向 → 策略格 `strategy_id` 的**唯一权威映射**。
+///
+/// 口径与权重体系真实策略格一致（wiring 层 `map_action_to_strategy_id` 转发到这里，
+/// 禁止再各写一份）：
+/// - 买入 / 增持 → `trend`（顺势）
+/// - 卖出 / 减持 → `reversion`（反转）
+/// - 持有 → `value`
+/// - 观望 / 不确定 → `capital`
+/// - 数据缺失 / 无法归一（含 `None` / 空串）→ `watchlist`
+pub fn action_to_strategy_id(action: Option<&str>) -> &'static str {
+    match action.and_then(normalize_action) {
+        Some(ActionKind::Buy) | Some(ActionKind::Increase) => "trend",
+        Some(ActionKind::Sell) | Some(ActionKind::Reduce) => "reversion",
+        Some(ActionKind::Hold) => "value",
+        Some(ActionKind::Wait) | Some(ActionKind::Uncertain) => "capital",
+        Some(ActionKind::Unavailable) | None => "watchlist",
+    }
+}
+
+/// 构造幂等来源键：`reflection-horizon:{被复盘决策 id}:{档}`。
+///
+/// 用**决策 id**（`stock_analyses.id`）而非反思行 id：四周期「一行一档」，同一条决策的
+/// 已到期档会在多条反思行里重复成熟，按决策去重才能收敛成一行。
+fn reflection_horizon_source_ref(original_analysis_id: &str, horizon: &str) -> String {
+    format!("reflection-horizon:{original_analysis_id}:{horizon}")
+}
+
+/// 单个成熟反思档 → 一行 strategy_performance 的纯映射（无 IO，便于单测）。
+#[derive(Debug, Clone, PartialEq)]
+struct HorizonRowDraft {
+    source_ref: String,
+    strategy_id: &'static str,
+    period: String,
+    holding_days: i32,
+    return_pct: f64,
+    was_correct: i32,
+    decision_confidence: i32,
+    horizon_pnl_json: Option<String>,
+    template_version: Option<i32>,
+}
+
+/// 把展开后的成熟样本映射成行字段。
+///
+/// 返回 `None`：样本缺合法 `horizon`（不是四档键）—— 非四档键（`schemaVersion` 等）
+/// 在 `expand_horizon_samples` 阶段已剔除，这里再用 [`Period::from_str`] 兜底，
+/// 解析失败就不物化（不猜档位）。
+fn build_horizon_row_draft(
+    original_analysis_id: &str,
+    sample: &DecisionPerformanceSample,
+) -> Option<HorizonRowDraft> {
+    let horizon = sample.horizon.as_deref()?;
+    let period = Period::from_str(horizon).ok()?;
+    // 置信度口径 0–100；legacy 回退样本拿不到逐档置信度（None）→ 落 0，
+    // 与 record_performance 既有「无置信度」通道一致。
+    let confidence = sample.confidence.map(|c| c.round().clamp(0.0, 100.0) as i32).unwrap_or(0);
+    let pnl = serde_json::json!({
+        "returnPct": sample.return_pct,
+        "alphaPct": sample.alpha_pct,
+        "wasCorrect": sample.was_correct,
+        "targetReached": sample.target_reached,
+    });
+    Some(HorizonRowDraft {
+        source_ref: reflection_horizon_source_ref(original_analysis_id, horizon),
+        strategy_id: action_to_strategy_id(sample.action.as_deref()),
+        period: period.as_str().to_string(),
+        holding_days: period.default_holding_days() as i32,
+        return_pct: sample.return_pct,
+        was_correct: sample.was_correct,
+        decision_confidence: confidence,
+        horizon_pnl_json: Some(pnl.to_string()),
+        template_version: sample.template_version,
+    })
+}
+
+/// 把一条到期反思 `horizon_results_json` 中**所有成熟可判定档**幂等物化进
+/// strategy_performance。
+///
+/// 幂等键 = `reflection-horizon:{original_analysis_id}:{horizon}`（`source_ref` 列 +
+/// `idx_strategy_performance_source_ref` 部分唯一索引）。四周期模型「一行一档」：同一决策
+/// 有 4 条独立反思行，每条运行时都重算全部四档快照，已到期短档会在后续反思行重复 mature。
+/// 按「**被复盘决策 × 档**」upsert，无论由哪条反思行展开，同一决策的同一档永远收敛到一行
+/// （INSERT 首次、其后 UPDATE），绝不重复计票。
+///
+/// - `original_analysis_id`：被复盘的**决策行** id（`stock_analyses.id`），不是反思行 id。
+/// - `decision_at`：被复盘分析的决策时刻（`stock_analyses.created_at`）。
+/// - `exit_at`：本次判定时刻（重跑时刷新为最新一次成熟判定时间）。
+/// - 代际取样本自带的 `template_version`（= 被复盘分析的真实 workflow 代际）；拿不到
+///   传 `None`，读侧按下限规则排除，不猜代。
+///
+/// 返回本次 upsert 的成熟档数（`0` = 该反思当前还没有任何成熟可判定档，或 JSON 非
+/// 四周期对象——后者走 legacy/Gap1 通道）。
+#[allow(clippy::too_many_arguments)]
+pub async fn upsert_reflection_horizon_performance(
+    db: &DatabaseConnection,
+    original_analysis_id: &str,
+    stock_code: &str,
+    stock_name: &str,
+    decision_at: i64,
+    exit_at: i64,
+    horizon_results_json: &str,
+    template_version: Option<i32>,
+) -> Result<usize, String> {
+    // `None` = 不是四周期 JSON（旧记录），交由 legacy / Gap1 通道，不在此物化。
+    let samples = match expand_horizon_samples(horizon_results_json, template_version) {
+        Some(s) => s,
+        None => return Ok(0),
+    };
+
+    let mut upserted = 0usize;
+    for sample in &samples {
+        let Some(draft) = build_horizon_row_draft(original_analysis_id, sample) else {
+            continue;
+        };
+
+        let existing = strategy_performance::Entity::find()
+            .filter(strategy_performance::Column::SourceRef.eq(&draft.source_ref))
+            .one(db)
+            .await
+            .map_err(|e| format!("查询 strategy_performance 幂等键失败: {e}"))?;
+
+        if let Some(model) = existing {
+            // 重跑：刷新判定结果与判定时刻；保留 decision_at / created_at / 股票维度原值。
+            let mut am: strategy_performance::ActiveModel = model.into();
+            am.strategy_id = Set(draft.strategy_id.to_string());
+            am.period = Set(draft.period);
+            am.holding_days = Set(draft.holding_days);
+            am.return_pct = Set(draft.return_pct);
+            am.was_correct = Set(draft.was_correct);
+            am.decision_confidence = Set(draft.decision_confidence);
+            am.horizon_pnl_json = Set(draft.horizon_pnl_json);
+            am.template_version = Set(draft.template_version);
+            am.exit_at = Set(exit_at);
+            am.update(db).await.map_err(|e| format!("更新 strategy_performance 失败: {e}"))?;
+        } else {
+            let am = strategy_performance::ActiveModel {
+                id: Set(Uuid::new_v4().to_string()),
+                strategy_id: Set(draft.strategy_id.to_string()),
+                period: Set(draft.period),
+                stock_code: Set(stock_code.to_string()),
+                stock_name: Set(stock_name.to_string()),
+                decision_at: Set(decision_at),
+                exit_at: Set(exit_at),
+                holding_days: Set(draft.holding_days),
+                return_pct: Set(draft.return_pct),
+                was_correct: Set(draft.was_correct),
+                decision_confidence: Set(draft.decision_confidence),
+                horizon_pnl_json: Set(draft.horizon_pnl_json),
+                agreement_score: Set(None),
+                template_version: Set(draft.template_version),
+                source_ref: Set(Some(draft.source_ref)),
+                created_at: Set(exit_at),
+            };
+            strategy_performance::Entity::insert(am)
+                .exec(db)
+                .await
+                .map_err(|e| format!("插入 strategy_performance 失败: {e}"))?;
+        }
+        upserted += 1;
+    }
+    Ok(upserted)
 }
 
 #[cfg(test)]
@@ -677,6 +857,7 @@ mod tests {
             horizon_pnl_json: Set(None),
             agreement_score: Set(None),
             template_version: Set(generation),
+            source_ref: Set(None),
             created_at: Set(now),
         };
         for (sid, generation) in [
@@ -701,5 +882,198 @@ mod tests {
         let (pre, unk) =
             count_excluded_performance_window(&db, 30, None).await.expect("计数应成功");
         assert_eq!((pre, unk), (1, 1), "两类排除必须分开计数且如实（合成一个数就看不出处置差异）");
+    }
+
+    /// #31：action → 真实策略格映射穷举（中英文 / 缺失 / 未识别）。
+    #[test]
+    fn action_to_strategy_id_maps_every_bucket() {
+        // 顺势：买入 / 增持（中英文同义）
+        assert_eq!(action_to_strategy_id(Some("买入")), "trend");
+        assert_eq!(action_to_strategy_id(Some("BUY")), "trend");
+        assert_eq!(action_to_strategy_id(Some("增持")), "trend");
+        assert_eq!(action_to_strategy_id(Some("加仓")), "trend");
+        // 反转：卖出 / 减持
+        assert_eq!(action_to_strategy_id(Some("卖出")), "reversion");
+        assert_eq!(action_to_strategy_id(Some("减持")), "reversion");
+        // 价值：持有
+        assert_eq!(action_to_strategy_id(Some("持有")), "value");
+        assert_eq!(action_to_strategy_id(Some("HOLD")), "value");
+        // 资金/防御：观望 / 不确定
+        assert_eq!(action_to_strategy_id(Some("观望")), "capital");
+        assert_eq!(action_to_strategy_id(Some("不确定")), "capital");
+        // 观察池：数据缺失 / None / 空串 / 未识别值域，一律 watchlist（不 fail-open 成观望）
+        assert_eq!(action_to_strategy_id(Some("数据缺失")), "watchlist");
+        assert_eq!(action_to_strategy_id(None), "watchlist");
+        assert_eq!(action_to_strategy_id(Some("")), "watchlist");
+        assert_eq!(action_to_strategy_id(Some("不知所云")), "watchlist");
+    }
+
+    /// #31：四档 JSON 展开 → 真实策略格行字段映射（含置信度 clamp、代际透传、
+    /// 非四档对象键在 draft 层兜底剔除）。
+    #[test]
+    fn horizon_json_expands_into_real_strategy_rows() {
+        let json = serde_json::json!({
+            "schemaVersion": 1,
+            "ultra_short": {
+                "status": "mature",
+                "evaluation": { "wasCorrect": 1 },
+                "market": { "returnPct": 3.21, "alphaPct": 1.05, "targetReached": true },
+                "decision": { "action": "买入", "confidence": 72.4 }
+            },
+            "short": { "status": "unavailable" },
+            "mid": {
+                "status": "mature",
+                "evaluation": { "wasCorrect": 0 },
+                "market": { "returnPct": -1.5 },
+                // 130 超上限 → 必须 clamp 到 100
+                "decision": { "action": "持有", "confidence": 130.0 }
+            },
+            // expand 不校验对象键是否四档（会收成样本），draft 层必须用 Period 拒绝：
+            "weird_horizon": {
+                "status": "mature",
+                "evaluation": { "wasCorrect": 1 },
+                "market": { "returnPct": 2.0 },
+                "decision": { "action": "买入" }
+            }
+        })
+        .to_string();
+
+        let samples = expand_horizon_samples(&json, Some(154)).expect("四周期 JSON 应可展开");
+        // 3 个成熟对象键（含 1 个伪档），unavailable 档不入。
+        assert_eq!(samples.len(), 3, "expand 收所有 mature 对象键，不校验档名");
+
+        let drafts: Vec<HorizonRowDraft> =
+            samples.iter().filter_map(|s| build_horizon_row_draft("R1", s)).collect();
+        // 伪档 weird_horizon 必须在 draft 层被 Period::from_str 剔除，只剩真实两档。
+        assert_eq!(drafts.len(), 2, "非四档键不得物化成策略格行");
+
+        let by_period: HashMap<&str, &HorizonRowDraft> =
+            drafts.iter().map(|d| (d.period.as_str(), d)).collect();
+
+        let ultra = by_period.get("ultra_short").expect("应有 ultra_short 行");
+        assert_eq!(ultra.strategy_id, "trend", "买入→trend");
+        assert_eq!(ultra.holding_days, 2, "ultra_short 默认持有 2 天");
+        assert_eq!(ultra.was_correct, 1);
+        assert!((ultra.return_pct - 3.21).abs() < 1e-9);
+        assert_eq!(ultra.decision_confidence, 72, "72.4 四舍五入为 72");
+        assert_eq!(ultra.template_version, Some(154), "真实代际透传");
+        assert_eq!(ultra.source_ref, "reflection-horizon:R1:ultra_short");
+        // 审计切片保留 alpha / targetReached。
+        let pnl: serde_json::Value =
+            serde_json::from_str(ultra.horizon_pnl_json.as_deref().unwrap()).unwrap();
+        assert_eq!(pnl["alphaPct"], 1.05);
+        assert_eq!(pnl["targetReached"], true);
+
+        let mid = by_period.get("mid").expect("应有 mid 行");
+        assert_eq!(mid.strategy_id, "value", "持有→value");
+        assert_eq!(mid.holding_days, 28, "mid 默认持有 28 天");
+        assert_eq!(mid.was_correct, 0);
+        assert_eq!(mid.decision_confidence, 100, "置信度超上限必须 clamp 到 100");
+        assert_eq!(mid.source_ref, "reflection-horizon:R1:mid");
+    }
+
+    /// #31：幂等粒度是「**被复盘决策 × 档**」而非「反思行 × 档」。
+    ///
+    /// 四周期模型一行一档：同一条决策有 4 条独立反思行，每条运行时都重算全部四档快照。
+    /// 本测试模拟这个真实时序——
+    /// ① ultra_short 反思行（D0+2）运行：只有 ultra_short 成熟 ⇒ 物化 1 行；
+    /// ② mid 反思行（D0+28）运行：此时 ultra_short 也已到期再次 mature，mid 首次成熟 ⇒
+    ///    ultra_short 必须**更新同一行**（判定可随更长持有翻转），mid 新增，共仍 2 行
+    ///    （若错误地按反思行 id 去重，此处会变成 3 行）。
+    #[tokio::test]
+    async fn reflection_horizon_upsert_dedupes_by_analysis_and_horizon() {
+        // .count() 来自 PaginatorTrait；ColumnTrait / EntityTrait / QueryFilter 已由 super::* 提供。
+        use sea_orm::PaginatorTrait;
+
+        let db = axagent_dao::db::create_test_pool().await.expect("测试库应可创建").conn;
+        // 两次调用代表同一条被复盘决策的两条不同反思行 —— 传同一个 analysis_id。
+        let analysis_id = "analysis-dedupe-1";
+        let prefix = format!("reflection-horizon:{analysis_id}:");
+
+        // ① D0+2：仅 ultra_short 成熟。
+        let json_ultra = serde_json::json!({
+            "schemaVersion": 1,
+            "ultra_short": {
+                "status": "mature",
+                "evaluation": { "wasCorrect": 1 },
+                "market": { "returnPct": 3.2 },
+                "decision": { "action": "买入", "confidence": 70.0 }
+            }
+        })
+        .to_string();
+        let n1 = upsert_reflection_horizon_performance(
+            &db,
+            analysis_id,
+            "600519",
+            "贵州茅台",
+            500,
+            1000,
+            &json_ultra,
+            Some(154),
+        )
+        .await
+        .expect("首次 upsert 应成功");
+        assert_eq!(n1, 1, "D0+2 只有 ultra_short 一档成熟");
+        let c1 = strategy_performance::Entity::find()
+            .filter(strategy_performance::Column::SourceRef.starts_with(&prefix))
+            .count(&db)
+            .await
+            .expect("计数应成功");
+        assert_eq!(c1, 1, "首次后恰 1 行");
+
+        // ② D0+28：ultra_short 再次 mature（判定随更长持有翻转为错、收益改写），mid 首成熟。
+        let json_mid = serde_json::json!({
+            "schemaVersion": 1,
+            "ultra_short": {
+                "status": "mature",
+                "evaluation": { "wasCorrect": 0 },
+                "market": { "returnPct": 9.9 },
+                "decision": { "action": "买入", "confidence": 80.0 }
+            },
+            "mid": {
+                "status": "mature",
+                "evaluation": { "wasCorrect": 0 },
+                "market": { "returnPct": -1.0 },
+                "decision": { "action": "持有", "confidence": 60.0 }
+            }
+        })
+        .to_string();
+        let n2 = upsert_reflection_horizon_performance(
+            &db,
+            analysis_id,
+            "600519",
+            "贵州茅台",
+            500,
+            2000,
+            &json_mid,
+            Some(154),
+        )
+        .await
+        .expect("二次 upsert 应成功");
+        assert_eq!(n2, 2, "本次展开含 2 个成熟档");
+        let c2 = strategy_performance::Entity::find()
+            .filter(strategy_performance::Column::SourceRef.starts_with(&prefix))
+            .count(&db)
+            .await
+            .expect("计数应成功");
+        assert_eq!(
+            c2, 2,
+            "幂等：跨反思行重复成熟的 ultra_short 更新而非新增（仍 2 行，不是 3 行）"
+        );
+
+        // 同一决策的 ultra_short 行被刷新为二次判定，且保留决策建点时刻 / 代际 / 策略格。
+        let ultra_key = format!("reflection-horizon:{analysis_id}:ultra_short");
+        let row = strategy_performance::Entity::find()
+            .filter(strategy_performance::Column::SourceRef.eq(ultra_key))
+            .one(&db)
+            .await
+            .expect("查询应成功")
+            .expect("ultra_short 行应存在");
+        assert_eq!(row.was_correct, 0, "判定翻转必须更新既有行");
+        assert!((row.return_pct - 9.9).abs() < 1e-9, "收益必须刷新");
+        assert_eq!(row.exit_at, 2000, "判定时刻刷新为最新一次");
+        assert_eq!(row.decision_at, 500, "决策建点时刻保留不变");
+        assert_eq!(row.template_version, Some(154));
+        assert_eq!(row.strategy_id, "trend");
     }
 }

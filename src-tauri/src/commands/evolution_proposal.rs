@@ -27,6 +27,8 @@
 //! 变异属高风险动作，**未来开放时必须只在业务类样本上进行**（见 `is_data_reachability_blocked`）。
 
 use axagent_analysis_engine::StockReflectionReport;
+use axagent_analysis_engine::evolution_drift::load_performance_window;
+use axagent_analysis_engine::evolution_optimizer::PARAM_EVOLUTION_LOOKBACK_DAYS;
 use axagent_analysis_engine::stock_self_evolution::{
     EvolutionTrigger, EvolutionType, StockSelfEvolutionEngine,
 };
@@ -35,6 +37,7 @@ use axagent_dao::repo::decision_validations::{self, ValidationModel};
 use axagent_dao::repo::mover_recall_runs;
 use axagent_dao::repo::stock_evolution_history::{self, PendingProposalRecord};
 use axagent_dao::repo::stock_lesson_queries::{self, ReflectionModel};
+use axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR;
 use serde::{Deserialize, Serialize};
 
 /// 定时任务 task_type（与前端任务中心白名单、services.rs 执行分支逐字对齐）。
@@ -298,6 +301,30 @@ pub async fn run_evolution_proposal_inner(
             counts,
             message: format!("窗口内已有 {pending_count} 条待审批进化计划，跳过"),
         });
+    }
+
+    // 3.5 执行可行性闸门（修「审批即失败」）：上面数的业务样本（反思/验证/漏检）只回答
+    //     「有没有学习素材」；但参数进化执行器（`evolve_parameters → run_evolution`）真正
+    //     消费的是 `strategy_performance` 表现窗口（近 PARAM_EVOLUTION_LOOKBACK_DAYS 天且
+    //     `template_version >= HORIZON_BRANCH_GENERATION_FLOOR`），与业务样本并不同源。
+    //     若该窗口为空，审批接受时必然在 `run_evolution` 报「无表现数据可供进化」并把计划
+    //     打成 rejected —— 这种「注定失败的待审批计划」不应被产生，故此处用与执行器**完全
+    //     相同的函数 + 相同的常量**（None = 以今天为 as_of）预判，空则 skip。
+    let performable = load_performance_window(db, PARAM_EVOLUTION_LOOKBACK_DAYS, None)
+        .await
+        .map_err(|e| format!("读取策略表现窗口失败: {e}"))?;
+    if performable.is_empty() {
+        // 先绑 message 再 move counts（struct 字段按序求值，内联 format! 会先 move 后借用）
+        let message = format!(
+            "窗口内有 {} 条业务样本（反思/验证/漏检），但参数进化所需的策略表现样本 \
+             （strategy_performance：近 {} 天且算法代际≥{}）为 0，审批执行必然报 \
+             「无表现数据可供进化」；这些表现行当前未带算法代际（被代际下限规则排除），\
+             故跳过，不产生无法执行的计划",
+            counts.total(),
+            PARAM_EVOLUTION_LOOKBACK_DAYS,
+            HORIZON_BRANCH_GENERATION_FLOOR
+        );
+        return Ok(ProposalSummary { skipped: true, plan_id: None, counts, message });
     }
 
     // 4. 产出计划（仅构造，不执行变异）。固定参数类：结构变异的开放闸口见模块头硬规则。

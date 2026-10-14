@@ -601,7 +601,7 @@ fn find_bool_recursive(value: &serde_json::Value, key: &str) -> Option<bool> {
 /// - 已成熟周期的 action / 收益 / alpha / 目标价全部取自该周期自身条目，不与其他周期串线。
 ///
 /// 返回 `None` 表示该 JSON 不是四周期对象（无法解析 / 非对象），调用方回退 legacy 单周期字段。
-fn expand_horizon_samples(
+pub(crate) fn expand_horizon_samples(
     json: &str,
     template_version: Option<i32>,
 ) -> Option<Vec<DecisionPerformanceSample>> {

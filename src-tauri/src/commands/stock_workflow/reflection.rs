@@ -852,7 +852,8 @@ pub async fn run_reflection_workflow(
                 .col_expr(stock_reflections::Column::DecisionJson, Expr::value(dj_text))
                 .col_expr(
                     stock_reflections::Column::HorizonResultsJson,
-                    Expr::value(horizon_json),
+                    // clone：UPDATE 后还要用同一份 JSON 做 #31 四档成熟样本物化。
+                    Expr::value(horizon_json.clone()),
                 )
                 // 〇-B v2 第 4 条：本行**只复盘这一档**（其余三档只有客观判定，
                 // 没有反思叙述/教训）。该章是 lesson 与档位参数建议的归属依据。
@@ -980,6 +981,8 @@ pub async fn run_reflection_workflow(
                         .to_string(),
                     )),
                     agreement_score: Set(None),
+                    // Gap1 走 reflection_verdict 旧格（不去重、每次重跑追加），非 #31 四档通道。
+                    source_ref: Set(None),
                     created_at: Set(now_ms),
                 }
                 .insert(db)
@@ -1000,6 +1003,48 @@ pub async fn run_reflection_workflow(
                      （避免把「无判定」计为「判定为错」）",
                     stock_code
                 );
+            }
+
+            // ── #31 代际血缘管道：四档成熟样本 → 真实策略格 strategy_performance ──
+            // 与上方 Gap1 的分工：Gap1 只写 primary 一档到 `reflection_verdict` 格（供既有
+            // dashboard / 前缀消费方），其 strategy_id 不在参数进化权重矩阵里；这里把
+            // horizon_results_json 中**每一个成熟可判定档**按 action→真实策略格
+            // （trend/value/capital/reversion/watchlist）× 真实档（ultra_short/short/mid/long）
+            // 幂等 upsert，并盖被复盘决策的真实代际，供 load_performance_window 喂参数进化。
+            // best-effort：物化失败只告警，不阻断反思主流程落库。
+            // 物化必须锚到「被复盘决策」（original_analysis）—— 幂等键用决策 id 而非本反思行
+            // id（一行一档：同一决策的短档会在多条反思行重复成熟，按决策去重才不重复计票），
+            // decision_at 取决策建点时刻。拿不到原始决策（如手动触发无决策）或旧记录无四周期
+            // JSON（horizon_json=None）时无血缘可物化，直接跳过（旧记录走 legacy / Gap1）。
+            if let (Some(oa), Some(horizon_json)) =
+                (original_analysis.as_ref(), horizon_json.as_ref())
+            {
+                match axagent_analysis_engine::evolution_drift::upsert_reflection_horizon_performance(
+                    db,
+                    &oa.id,
+                    stock_code,
+                    stock_name,
+                    oa.created_at,
+                    now_ms,
+                    horizon_json,
+                    reflected_generation,
+                )
+                .await
+                {
+                    Ok(n) if n > 0 => tracing::info!(
+                        "[reflection] #31 四档成熟样本物化 {n} 条 → strategy_performance\
+                         （analysis={} reflection={analysis_id}）",
+                        oa.id
+                    ),
+                    Ok(_) => tracing::debug!(
+                        "[reflection] #31 暂无成熟可判定档，未物化\
+                         （analysis={} reflection={analysis_id}）",
+                        oa.id
+                    ),
+                    Err(e) => {
+                        tracing::warn!("[reflection] #31 四档样本物化失败（不阻断反思落库）: {e}")
+                    }
+                }
             }
 
             // ── Gap 3: 攒够 N 条一致建议自动触发 WFO 校准 ──

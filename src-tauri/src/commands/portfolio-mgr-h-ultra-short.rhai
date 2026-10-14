@@ -14,8 +14,9 @@
 // 1. **情绪广度是必要条件不是权重**：封板率 < 0.5（触板的票一半以上封不住）时，
 //    个股形态再好也不出「买入/增持」—— 涨停家数与封板率是市场级量，把它当加权腿
 //    会允许「广度很差但个股很强」合成出买入，那正是超短最贵的错。
-// 2. 方向证据只允许三腿（动量 / 广度 / 催化剂），基本面与估值**按构造不适用**
-//    （兑现周期 > 持有期，见 PLAN §十二）⇒ 不得为了让分母好看而补腿。
+// 2. 方向腿 = 短窗动量 + 事件催化剂（v156 起接回，#22 另一半；催化剂是个股级证据，
+//    2 日窗的事件驱动性正来自它）；广度是**市场级量**只作门（第 1 条），基本面与估值
+//    **按构造不适用**（兑现周期 > 持有期，见 PLAN §十二）⇒ 不得为了让分母好看而补腿。
 // 3. 出场 = `time_stop`：持有到期即出，止损只是尾部保护（1 个日波动），
 //    不设「目标价止盈」—— 2 日窗内的目标价没有分布含义。
 
@@ -42,11 +43,8 @@
 // pool_break_count   : 已接 —— 涨停池 breadth.breakCount（microstructure 条件腿）
 // pool_in_pool       : 未接且本脚本**不读** —— 语义是「本代码 ∈ entries[]」，点号路径表达不了
 //                      数组包含；下一片改成注入池子串 + 脚本内 parse 后，这个键才随映射一起回来
-// catalyst_level     : 未接且本脚本**不读** —— PLAN §十一 把催化剂列为超短三腿之一，但权威表
-//                      （`harness::holding_period::verdict_spec` 的 UltraShort.participating）
-//                      里没有 eventCatalyst ⇒ 接了也没有腿消费；先按缺席，等契约补齐再接回
-//                      ⚠ 这条作废现在**机器可见**（见下方 gaps.push），不再只活在本注释块里：
-//                        只写注释 = 呈现层读不到，用户看到的就是「超短没有催化剂结论」而无理由。
+// catalyst_level     : 已接（v156，P1 催化剂腿 · #22 另一半）—— `verdict_spec.UltraShort`
+//                      participating 已含 eventCatalyst；路径与主链 f3 的读法逐字一致
 // flow_persistence   : 未接且本脚本**不读** —— 不是本档腿，且 a-hot-money 的 verdict 还没这个字段
 // kline_bars         : 已接 —— **日线** t-scoring 的 kline_json（要的量是 σ_daily，见下方 ⑥）
 // overall_risk       : 已接 —— cls-risk-level.result.category（与主链同一四标签词表）
@@ -63,10 +61,10 @@ gaps.push("超短分支：基本面/估值/研报/政策/解禁按构造不适�
 // `absentLegs` 只说「这条腿没数」，分不清「市场今天没有涨停」与「成员判定根本没接线」⇒ 后者要单列，
 // 否则缺席会被读成市场事实（本仓「结构性缺口不得在呈现层造成歧义」的同一条裁定）。
 gaps.push("microstructure 腿本轮不可评估：涨停池成员判定（本代码 ∈ entries[]）尚未接进本分支 ⇒ 缺席是接线状态，不是盘面事实");
-// 事件催化剂：契约层（`verdict_spec::UltraShort.participating`）没有 eventCatalyst 这条腿 ⇒
-// 本档**显式作废**，与「今天没数据」区分开；主链 f3 仍在用 catalyst_level 是另一档口径的事，
-// 见 #22（腿集与计权的一致性另有一门，未立）。
-gaps.push("催化剂腿本档按构造不作废评估：权威分支表（verdict_spec.UltraShort）不含 eventCatalyst ⇒ 本档不出催化剂结论，不是漏数");
+// v156：催化剂腿已接入（#22 另一半）⇒ 原先那条「按构造不作废评估」的 gap 退役。
+// 缺席语义回到通用通道：催化剂为「无」/空/表外标签 ⇒ `leg_signal` 判缺席 ⇒ 出现在
+// `absentLegs` 里（那是「今天没有可计权的催化剂」，与接线状态无关 —— 该腿的接线由
+// `tier_fanout_inputs_are_complete` 与 `audit-inject-coverage.mjs` 两道门在 CI 上守）。
 
 // ── ① 分支表与档位自检：表错了必须点名，不能拿错表的配比继续算 ──
 let spec_ok = type_of(branch_json) == "map" && !branch_json.is_empty();
@@ -96,10 +94,10 @@ let band_lookback = if spec_ok { spec_int.call(branch_json["volLookbackDays"]) }
 //   **运行期 Variable not found ⇒ 整节点失败**（本仓 `Variable not found: horizon_prior_json`
 //   的同型事故，见 `stock_workflow/rhai_registry.rs:826`）。测试里不会暴露这一条 ——
 //   运行门按生产形态把 `present()` 的名字全铺 unit 再注入真值，**恰好把它糊过去了**。
-//   所以这里刻意没有 `catalystLevel` / `flowPersistence` / `inLimitUpPool`：
-//   催化剂不在本档腿集（PLAN §十一 与权威表的分歧，见下方 gaps）、资金持续性不是本档腿、
+//   所以这里刻意没有 `flowPersistence` / `inLimitUpPool`：资金持续性不是本档腿、
 //   涨停池成员判定要的是「本代码 ∈ entries[]」= 数组归约，点号路径表达不了（下一片改成注入
-//   池子串 + 脚本内 parse，届时这三个键才随各自的映射一起回来）。
+//   池子串 + 脚本内 parse，届时这两个键才随各自的映射一起回来）。
+//   （`catalystLevel` 已在 v156 随 P1 接线回来 —— 见下。）
 let raw = #{
     totalScore: if present(tier_score) { tier_score } else { () },
     macdDif: if present(macd_dif) { macd_dif } else { () },
@@ -107,6 +105,9 @@ let raw = #{
     rsi: if present(rsi_value) { rsi_value } else { () },
     sealRate: if present(seal_rate) { seal_rate } else { () },
     breakCount: if present(pool_break_count) { pool_break_count } else { () },
+    // v156（#22 另一半）：催化剂腿 —— `leg_signal` 的 eventCatalyst 走受控六级标签词表
+    // （L-3~L3），「无」/空/表外标签 ⇒ 缺席（不按 0 参与）。
+    catalystLevel: if present(catalyst_level) { catalyst_level } else { () },
 };
 let present_legs = [];
 let absent_legs = [];
@@ -205,7 +206,10 @@ let kelly = if confidence >= 0.50 && odds > 0.001 {
 } else {
     0.0
 };
-let position = kelly * (if spec_ok { branch_json["positionMultiplier"] } else { 0.6 });
+// v156（终审发现 ①）：档位乘数后**再过一次风险封顶** —— `pm_kelly_position` 内部已按风险档
+// 封顶，若乘数（长档 1.2）后置生效而不复封，"极高风险上限 10%"会被放大成 12%。
+// `pm_risk_cap` 与 kelly 内部用同一个上限表（`portfolio_formula::apply_risk_cap`）。
+let position = pm_risk_cap(kelly * (if spec_ok { branch_json["positionMultiplier"] } else { 0.6 }), overall_risk);
 
 // ── ⑨ 动作阶梯（本档自己的常量集，门 e：不得由他档常量 ± 偏移派生）──
 let action = if !gate_pass && posterior >= 0.62 { "持有" }
@@ -239,6 +243,14 @@ let tier_veto_note = "";
 if tier_vetoed {
     gaps.push(`本档风控否决:${original_action}→${action}(本档风险档=${overall_risk})`);
     tier_veto_note = ` 风控=档内否决(${original_action}→${action})`;
+}
+
+// v156 一致性修复：仓位只属于「持有及以上」的动作 ——「观望/减持/卖出」= 目标仓位 0。
+// 修两条产出「观望 + 正仓位」的路径（现网实证 002241/002080 与 002384/300045）：
+//   ① kelly 门槛（conf ≥ 0.50）低于「持有」阶梯（0.52）⇒ [0.50, 0.52) 算得出正仓位却落「观望」；
+//   ② 档内风控否决把动作折到「观望」时未清零仓位。
+if action != "买入" && action != "增持" && action != "持有" {
+    position = 0.0;
 }
 
 // ── ⑩ 输出：与主链 decisionsByHorizon 行同键（仲裁节点与面板按同一形状读）──

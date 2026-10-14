@@ -180,7 +180,10 @@ let kelly = if confidence >= 0.50 && odds > 0.001 {
 } else {
     0.0
 };
-let position = kelly * (if spec_ok { branch_json["positionMultiplier"] } else { 0.8 });
+// v156（终审发现 ①）：档位乘数后**再过一次风险封顶** —— `pm_kelly_position` 内部已按风险档
+// 封顶，若乘数（长档 1.2）后置生效而不复封，"极高风险上限 10%"会被放大成 12%。
+// `pm_risk_cap` 与 kelly 内部用同一个上限表（`portfolio_formula::apply_risk_cap`）。
+let position = pm_risk_cap(kelly * (if spec_ok { branch_json["positionMultiplier"] } else { 0.8 }), overall_risk);
 
 // ── ⑥ 动作阶梯（本档独立常量集，门 e 锁「不得由他档常量 ± 偏移派生」）──
 let capped = gate_state != "pass" || !min_legs_ok;
@@ -216,6 +219,14 @@ let tier_veto_note = "";
 if tier_vetoed {
     gaps.push(`本档风控否决:${original_action}→${action}(本档风险档=${overall_risk})`);
     tier_veto_note = ` 风控=档内否决(${original_action}→${action})`;
+}
+
+// v156 一致性修复：仓位只属于「持有及以上」的动作 ——「观望/减持/卖出」= 目标仓位 0。
+// 修两条产出「观望 + 正仓位」的路径（现网实证 002241/002080 与 002384/300045）：
+//   ① kelly 门槛（conf ≥ 0.50）低于「持有」阶梯（0.52）⇒ [0.50, 0.52) 算得出正仓位却落「观望」；
+//   ② 档内风控否决把动作折到「观望」时未清零仓位。
+if action != "买入" && action != "增持" && action != "持有" {
+    position = 0.0;
 }
 
 #{

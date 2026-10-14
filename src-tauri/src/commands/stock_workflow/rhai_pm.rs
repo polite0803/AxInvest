@@ -39,6 +39,14 @@ pub fn register_pm_functions(engine: &mut Engine) {
             portfolio_formula::compute_kelly_position(posterior, odds, cost_pct, risk_level)
         },
     );
+    // v156（PLAN-horizon-decision-repair.md §七 终审发现 ①）：风险档位仓位上限的**最终封顶**。
+    // 四份逐档分支脚本在 `position = kelly × positionMultiplier` **之后**必须再过本函数 ——
+    // 否则已按风险封顶的 kelly 会被档位乘数（长档 1.2）二次放大（极高 10 → 12 的口径穿透）。
+    // 口径单一实现 = `portfolio_formula::apply_risk_cap`（与 `compute_kelly_position`
+    // 内部用的是同一个函数 ⇒ 不存在第二份上限表）。
+    engine.register_fn("pm_risk_cap", |position: f64, risk_level: &str| -> f64 {
+        portfolio_formula::apply_risk_cap(position, risk_level)
+    });
     // ⚠️⚠️ 死映射警示（2026-09-13 实证）：本函数注册进引擎，但**全仓零调用** ——
     //   仓库内所有 `*.rhai` 均无 `pm_classify_risk` 出现，DB `workflow_templates`
     //   全表扫描（nodes/tool_defs）同样为 0（正对照 `pm_evidence_scale` 命中 1 条，

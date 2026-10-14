@@ -133,6 +133,27 @@ pub const VERDICT_FACTOR_OWNERS: &[(&str, &str)] = &[
 /// 跨档共用因子（在 [`VERDICT_COMMON_FIELDS`] 里，每档都必填）的属主。
 pub const COMMON_FACTOR_OWNERS: &[(&str, &str)] = &[("eventCatalyst", "a-catalyst")];
 
+/// **必须由 LLM 以 JSON 数值输出**的逐档因子 → (下界, 上界, 语义说明)。
+///
+/// 为什么需要本表（2026-10-14 现网实证）：`verdict_contract_prompt` 原先只给字段名、
+/// 不给产出形态，模型把 `flowPersistence` 当自由文本槽（"unknown" / "short_pulse" /
+/// 中文句子，抽查 0 条数值），而消费端 `analysis-engine::leg_signal` 严格只收
+/// `[-1, 1]` 数值 ⇒ **该腿自建成起从未参与过融合**；短档的联合门
+/// `trend_and_flow_same_sign` 因此恒「未判定」，买入/增持被封死
+/// （v150+ 现网 25/25 `entryGatePassed=false`）。本表让「契约承诺什么形态」与
+/// 「消费端接受什么形态」同源：契约渲染读它，消费侧的行为由 `leg_signal` 的测试
+/// 反向对齐（改区间不同批 ⇒ 测试红）。
+///
+/// 当前只有一条：`flowPersistence` 是逐档 VERDICT 里**唯一**由 LLM 直接给出、
+/// 且要进方向加权融合的数值因子。`eventCatalyst` 走受控六级标签词表，不在此表；
+/// 其余因子（momentumSignal / trendStrength / …）都来自工具或评分节点的数值。
+pub const NUMERIC_VERDICT_FACTORS: &[(&str, f64, f64, &str)] = &[(
+    "flowPersistence",
+    -1.0,
+    1.0,
+    "正 = 资金持续净流入的强度，负 = 持续净流出的强度，0 = 无明显持续性",
+)];
+
 /// 「按构造不适用」的显式文案键。
 ///
 /// ⚠ PLAN §十二 的「缺席时的显式文案键」一列每行只给了一个键，而**同一因子在不同档的缺席
@@ -182,6 +203,29 @@ fn qualified_reason(key: &str) -> &'static str {
         "sectorRotationAsOfGap" => "行业轮动 live 有源、回放结构性不可得，只作背景不进方向",
         other => panic!("未登记的条件字段标记键: {other}"),
     }
+}
+
+/// 渲染「数值型字段」说明节：只列出本档 `fields` 里、且落在 `table` 登记中的因子。
+///
+/// `table` 做成参数而不是在函数内硬读 [`NUMERIC_VERDICT_FACTORS`]，是为了让负控能走
+/// **同一个谓词**（传空表 ⇒ 该节必须消失；传真表 ⇒ 必须出现），而不必去魔改常量。
+/// 两个守卫（表读取、字段筛选）各配一条负控，见
+/// `numeric_section_has_two_guards_each_negatively_controlled`。
+fn numeric_fields_section(fields: &[&str], table: &[(&str, f64, f64, &str)]) -> String {
+    let rows: Vec<String> = table
+        .iter()
+        .filter(|(f, _, _, _)| fields.contains(f))
+        .map(|(f, lo, hi, meaning)| {
+            format!(
+                "- {f}：必须是 [{lo}, {hi}] 之间的 **JSON 数值**（{meaning}）；\
+                 确实无法判断时输出 null（不要写 \"unknown\"、\"无法判断\" 等文字）\n"
+            )
+        })
+        .collect();
+    if rows.is_empty() {
+        return String::new();
+    }
+    format!("数值型字段（必须是 JSON 数值或 null，不得输出文字描述或标签）：\n{}", rows.concat())
 }
 
 /// `stock_analyses.decision_horizon_source` 的**唯一值域** —— 主档「是谁定的档」。
@@ -374,6 +418,14 @@ impl Period {
         out.push_str(&spec.fields.join("、"));
         out.push('\n');
 
+        // v155：数值型字段的产出形态必须进契约 —— 原先只给字段名不给值域，模型把
+        // `flowPersistence` 当自由文本槽（现网实证 "unknown"/"short_pulse"/中文句子），
+        // 而消费端（`analysis-engine::leg_signal`）只收数值 ⇒ 该腿从未参与融合
+        // （短档联合门因此恒「未判定」、买入/增持被封死）。值域单源在
+        // [`NUMERIC_VERDICT_FACTORS`]，消费侧由 `leg_signal` 的测试反向对齐。
+        // 本档 fields 里没有数值型因子 ⇒ 该节为空串（超短/长档的契约逐字不变）。
+        out.push_str(&numeric_fields_section(&spec.fields, NUMERIC_VERDICT_FACTORS));
+
         out.push_str(&format!("`exitRule` 在本档固定为 `{}`。\n", spec.exit_rule));
 
         if !spec.qualified.is_empty() {
@@ -427,7 +479,14 @@ impl Period {
     pub fn verdict_spec(&self) -> HorizonVerdictSpec {
         // (该档直接用到的因子, 只作过滤/部分来源的因子 → 标记键, 出场口径)
         let (plain, qualified, exit_rule): (&[&str], &[(&str, &str)], &str) = match self {
-            // 超短（2 日）：方向腿**只有短窗动量**。
+            // 超短（2 日）：方向腿 = 短窗动量 **+ 事件催化剂**（v156，#22 另一半）。
+            // 催化剂是个股级事件证据、2 日窗恰是事件驱动窗口（PLAN §十一 原设计即三腿：
+            // 动量 / 广度 / 催化剂）；它是与 MACD 独立的信息源，接入后 posterior 不再
+            // 只由小时线 MACD 四态决定（此前单腿 × 离散阶梯 ⇒ 输出坍缩到 8 个离散值，
+            // 动作在买入/卖出间二值化，见 `PLAN-horizon-decision-repair.md` P1）。
+            // ⚠ 催化剂**不进** `not_applicable`/`fields` 的构建：它在 `VERDICT_COMMON_FIELDS`
+            //   里本就逐档必填，进 `plain` 只影响 `participating`（= 方向腿集合），
+            //   `analyst_subset()` 因 `COMMON_FACTOR_OWNERS` 早已含 `a-catalyst` ⇒ 子集不变。
             // 涨停板情绪广度（家数/封板率/炸板，P9-4 真字段）是**市场级量** —— 按本档
             // `entryGate`（`breadth_required`）只作入场必要条件，**不进方向加权**
             // （见 `portfolio-mgr-h-ultra-short.rhai` 头部第 1 条专属判据）。
@@ -435,7 +494,7 @@ impl Period {
             // ② 同一天不同个股拿到**同一个**方向信号（封板率与个股无关）。
             // `microstructure`（封单/连板结构）只到板级、无撮合级 ⇒ 条件字段。
             Period::UltraShort => (
-                &["momentumSignal"],
+                &["momentumSignal", "eventCatalyst"],
                 &[
                     ("microstructure", "microstructurePartialSource"),
                     ("breadthState", "breadthGateOnly"),
@@ -889,6 +948,14 @@ mod tests {
                 && ultra.fields.contains(&"breadthState"),
             "超短情绪广度是市场级量：必须输出（门要用）但不得进方向加权"
         );
+        // v156（#22 另一半）：超短方向腿 = 短窗动量 + 事件催化剂。
+        // 退回单腿会让 posterior 只由小时线 MACD 四态决定（输出坍缩为离散格、
+        // 动作二值化，见 `PLAN-horizon-decision-repair.md` P1 的审计证据）。
+        assert!(
+            ultra.participating.contains(&"eventCatalyst")
+                && ultra.fields.contains(&"eventCatalyst"),
+            "超短方向腿必须含事件催化剂（个股级证据，2 日窗的事件驱动性正来自它）"
+        );
         let short = Period::Short.verdict_spec();
         assert!(
             !short.participating.contains(&"breadthState")
@@ -963,6 +1030,19 @@ mod tests {
         assert!(long.contains("notApplicableMomentum"), "长档要显式声明短窗动量不适用");
         assert!(!long.contains("microstructurePartialSource"), "串档：超短的条件键跑到长档文案里");
 
+        // v155：数值型字段的产出形态（PLAN-horizon-decision-repair.md P0）——
+        // short/mid 的必填含 flowPersistence ⇒ 契约必须给值域与「无法判断输出 null」；
+        // 超短/长档的必填里没有数值型因子 ⇒ 该节整段不出现（不产出空壳标题）。
+        let short = Period::Short.verdict_contract_prompt();
+        assert!(short.contains("flowPersistence"), "短档必填含 flowPersistence");
+        assert!(short.contains("数值型字段"), "短档契约缺「数值型字段」说明节");
+        assert!(short.contains("[-1, 1]"), "短档契约缺 flowPersistence 的值域");
+        assert!(short.contains("null"), "短档契约未说明「无法判断输出 null」");
+        let mid = Period::Mid.verdict_contract_prompt();
+        assert!(mid.contains("数值型字段") && mid.contains("[-1, 1]"), "中档契约缺数值节");
+        assert!(!ultra.contains("数值型字段"), "超短必填里没有数值型因子 ⇒ 不应出现该节");
+        assert!(!long.contains("数值型字段"), "长档必填里没有数值型因子 ⇒ 不应出现该节");
+
         // 四段契约互不相同（同一段抄四遍 = 分叉是假的，这里必须红）
         let all: Vec<String> = Period::ALL.iter().map(|p| p.verdict_contract_prompt()).collect();
         for pair in all.windows(2) {
@@ -979,6 +1059,26 @@ mod tests {
             println!("{}", "-".repeat(30));
             print!("{}", p.verdict_contract_prompt());
         }
+    }
+
+    /// 数值节的两个守卫各自可拆（负控拆在**真正决定该断言的那道守卫**上）：
+    /// ① 表读取守卫 —— 空表 ⇒ 整节消失；② 字段筛选守卫 —— 字段不在表里 ⇒ 整节消失。
+    /// 只测「真表出文案」会漏掉「表被清空后照渲染空壳标题」与「字段不命中仍出节」两种形态。
+    #[test]
+    fn numeric_section_has_two_guards_each_negatively_controlled() {
+        // 正控：真表 + 命中字段 ⇒ 节在、且带区间与 null 约定
+        let s = numeric_fields_section(&["flowPersistence"], NUMERIC_VERDICT_FACTORS);
+        assert!(s.contains("[-1, 1]") && s.contains("null"), "{s}");
+        // 负控①（表读取守卫）：空表 ⇒ 整节消失
+        assert!(
+            numeric_fields_section(&["flowPersistence"], &[]).is_empty(),
+            "表为空时仍在渲染数值节 ⇒ 表读取守卫没电"
+        );
+        // 负控②（字段筛选守卫）：字段不在表里 ⇒ 整节消失
+        assert!(
+            numeric_fields_section(&["momentumSignal"], NUMERIC_VERDICT_FACTORS).is_empty(),
+            "字段不命中仍渲染数值节 ⇒ 字段筛选守卫没电"
+        );
     }
 
     /// 档位 ↔ 尺度 ↔ 评分节点 这三张臂必须**同向**，且由短到长严格变粗。

@@ -10,8 +10,8 @@
 //! ⚠ 为什么是**四份逐字定义**而不是一个循环：`scripts/audit-inject-coverage.mjs` 按
 //! `input_mapping: [` 块内的**字面量**配对 Rhai 脚本的 `present()` 面，`check-tier-purity.mjs`
 //! 的 R2 按字面量判「档内不读他档」。用 `format!` 拼装源路径会让这两道门**静默失效**
-//! （与 `commands/stock_analysis_setup/seed_stock_analysis.rs:5859-5862` 拒绝循环是同一条理由，
-//! 同文件 `:4604-4607` 也记着同一条史）。
+//! （与 `commands/stock_analysis_setup/seed_stock_analysis.rs:6190` 拒绝循环是同一条理由，
+//! 同文件 `:5075` 也记着同一条史）。
 //! 这里重复的是**节点声明**，不是类型或函数定义，不触 AGENTS.md 禁区 12。
 //!
 //! ⚠ 步骤 2 当年**留的一处偏离**，已在 v140 补齐（保留原因，因为它是「为什么曾经不是三节点」的史）：
@@ -303,6 +303,12 @@ fn ultra_short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
                     // `breadth` 为 None 时导航失败 ⇒ 注入补 unit ⇒ 脚本走「缺席」分支并留痕。
                     ("seal_rate", "t-limitup-pool.result.content.breadth.sealRate"),
                     ("pool_break_count", "t-limitup-pool.result.content.breadth.breakCount"),
+                    // v156（P1 催化剂腿 · #22 另一半）：个股级事件证据（与小时线 MACD 独立
+                    // 的信息源）。路径与主链 f3 的 `catalyst_level_ultra_short` 读法**逐字一致**；
+                    // `leg_signal` 的 eventCatalyst 走受控六级词表（L1~L3），"无"/空/表外标签
+                    // ⇒ 缺席（不补默认值）。父扇出必须同批带 `a-catalyst--ultra_short` 键+供给边，
+                    // 否则子图内该路径解析失败、整节点按缺席——那是「接线缺失」不是「没有催化剂」。
+                    ("catalyst_level", "a-catalyst--ultra_short.content.verdict.catalyst_level"),
                 ]
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))

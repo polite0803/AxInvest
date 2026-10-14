@@ -253,8 +253,14 @@ pub fn kelly_growth_rate(
     Some(g)
 }
 
-/// 根据风险等级施加仓位上限
-fn apply_risk_cap(position: f64, risk_level: &str) -> f64 {
+/// 根据风险等级施加仓位上限 —— **最终上限**语义：任何后置乘数都不得把它放大。
+///
+/// `pub` 并被注册为 Rhai 宿主函数 `pm_risk_cap`（v156）：四份逐档分支脚本的
+/// `position = kelly × positionMultiplier` 必须在**之后**再过一次本函数 ——
+/// 否则 `kelly` 内部已按本表封顶的仓位会被档位乘数（长档 1.2）二次放大，
+/// 产生「极高风险上限 10%、实际输出 12%」的口径穿透（`PLAN-horizon-decision-repair.md`
+/// §七 终审发现 ①；此前只有 `compute_kelly_position` 内部路径，mult 在其后生效）。
+pub fn apply_risk_cap(position: f64, risk_level: &str) -> f64 {
     match risk_level {
         "极高风险" | "极高" => position.min(10.0),
         "高风险" | "高" => position.min(35.0),
@@ -1302,6 +1308,21 @@ mod tests {
     fn kelly_position_extreme_risk_cap() {
         let pos = compute_kelly_position(0.70, 5.0, 0.01, "极高风险");
         assert!(pos <= 10.0, "extreme risk exceeded cap: {pos}");
+    }
+
+    /// v156（`PLAN-horizon-decision-repair.md` §七 终审发现 ①）：`apply_risk_cap` 是**最终上限**——
+    /// 档位乘数（长档 ×1.2）后置生效时必须能封回原上限，否则「极高风险上限 10%」会输出 12%。
+    /// 样本取乘数后的穿透值：12 = 10×1.2、42 = 35×1.2、60 = 50×1.2。
+    #[test]
+    fn risk_cap_is_final_upper_bound() {
+        assert!((apply_risk_cap(12.0, "极高风险") - 10.0).abs() < 1e-9, "极高档 12 未被封回 10");
+        assert!((apply_risk_cap(42.0, "高风险") - 35.0).abs() < 1e-9, "高档 42 未被封回 35");
+        assert!((apply_risk_cap(60.0, "中风险") - 50.0).abs() < 1e-9, "中档 60 未被封回 50");
+        // 未达上限 ⇒ 原样（cap 只压不抬）
+        assert!((apply_risk_cap(6.0, "极高风险") - 6.0).abs() < 1e-9);
+        // 低风险 / 未识别档 ⇒ 不 cap（与 `_ => position` 语义一致；空串是 overall_risk 缺席的兜底形态）
+        assert!((apply_risk_cap(80.0, "低风险") - 80.0).abs() < 1e-9);
+        assert!((apply_risk_cap(80.0, "") - 80.0).abs() < 1e-9);
     }
 
     // ── 风险分类 ──

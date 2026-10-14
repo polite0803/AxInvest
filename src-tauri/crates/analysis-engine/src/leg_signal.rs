@@ -295,6 +295,30 @@ mod tests {
         );
     }
 
+    /// v155：`flowPersistence` 的**消费域**必须与契约表
+    /// （`harness::holding_period::NUMERIC_VERDICT_FACTORS`）登记的区间同臂 ——
+    /// 契约按表向模型承诺 `[-1,1]`，消费端若收别的区间（或反之），就是
+    /// 「模型按契约吐了数、消费端仍拒收」的新版断链（2026-10-14 审计的正是该族：
+    /// 契约只给字段名、模型吐自由文本、消费端只收数值，三者互不知情）。
+    /// 样本用**表里的 lo/hi 现算**，改任一端的区间都会让本测试红。
+    #[test]
+    fn flow_persistence_bounds_follow_the_contract_table() {
+        let (_, lo, hi) = axagent_harness::holding_period::NUMERIC_VERDICT_FACTORS
+            .iter()
+            .find(|(f, _, _, _)| *f == "flowPersistence")
+            .map(|(f, lo, hi, _)| (*f, *lo, *hi))
+            .expect("契约表里必须登记 flowPersistence（消费端在读它）");
+        // 边界（含端点）⇒ 采信；越界 ⇒ 缺席
+        assert_sig("下界", leg_signal("flowPersistence", &json!({ "flowPersistence": lo })), lo);
+        assert_sig("上界", leg_signal("flowPersistence", &json!({ "flowPersistence": hi })), hi);
+        assert_eq!(leg_signal("flowPersistence", &json!({ "flowPersistence": hi + 1e-3 })), None);
+        assert_eq!(leg_signal("flowPersistence", &json!({ "flowPersistence": lo - 1e-3 })), None);
+        // 非数值仍判缺席（契约修复的正面检验：模型历史输出 "unknown" / 中文句子都落这里，
+        // 现网修复后应吐数值或 null —— null 也走本臂，属诚实的「无法判断」）
+        assert_eq!(leg_signal("flowPersistence", &json!({ "flowPersistence": "unknown" })), None);
+        assert_eq!(leg_signal("flowPersistence", &json!({ "flowPersistence": null })), None);
+    }
+
     /// 扫描面自证：本模块认识的因子必须与分支表的来源表**逐名相同**。
     /// 两边漂移的后果不对称（表里有、这里没有 ⇒ 腿静默拿不到数），所以由测试钉死。
     #[test]

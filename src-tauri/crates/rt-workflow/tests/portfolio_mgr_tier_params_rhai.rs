@@ -303,3 +303,53 @@ fn stop_and_take_profit_are_volatility_derived_with_labeled_fallback() {
         "k1 必须经 present() 守卫读取（旧快照缺该变量时不得抛 Variable not found）"
     );
 }
+
+/// v156 守卫块（四份 `portfolio-mgr-h-*.rhai` **逐字相同**）：仓位只属于「持有及以上」的动作。
+/// 逐字副本 + 下方 `contains` 断言 = 任一份脚本漂移即红（同本文件既有的副本纪律）。
+const POSITION_GUARD_SRC: &str = r#"// v156 一致性修复：仓位只属于「持有及以上」的动作 ——「观望/减持/卖出」= 目标仓位 0。
+// 修两条产出「观望 + 正仓位」的路径（现网实证 002241/002080 与 002384/300045）：
+//   ① kelly 门槛（conf ≥ 0.50）低于「持有」阶梯（0.52）⇒ [0.50, 0.52) 算得出正仓位却落「观望」；
+//   ② 档内风控否决把动作折到「观望」时未清零仓位。
+if action != "买入" && action != "增持" && action != "持有" {
+    position = 0.0;
+}"#;
+
+/// 逐档仓位两条不变量（`PLAN-horizon-decision-repair.md` §七 终审发现 ①②）的判据本体。
+/// 抽成函数供负控**复用同一谓词** —— 另写一套比较公式的负控证不到真判据（判据层既有纪律）。
+fn position_invariant_problems(code: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+    if !code.contains("pm_risk_cap(kelly *") {
+        problems.push("position 未经 pm_risk_cap 复封顶（档位乘数可穿透风险上限）".to_string());
+    }
+    if !code.contains(POSITION_GUARD_SRC) {
+        problems.push("缺「非买入/增持/持有 ⇒ position=0」守卫（观望+正仓位会复现）".to_string());
+    }
+    problems
+}
+
+/// 四份脚本都必须满足两条不变量；两个破坏样本**各只让对应那一条红**（一红全红＝其实只有一条门）。
+#[test]
+fn horizon_position_cap_and_guard_present_in_all_four_tiers() {
+    for (tier, code) in [
+        ("ultra_short", include_str!("../../../src/commands/portfolio-mgr-h-ultra-short.rhai")),
+        ("short", include_str!("../../../src/commands/portfolio-mgr-h-short.rhai")),
+        ("mid", include_str!("../../../src/commands/portfolio-mgr-h-mid.rhai")),
+        ("long", include_str!("../../../src/commands/portfolio-mgr-h-long.rhai")),
+    ] {
+        let problems = position_invariant_problems(code);
+        assert!(problems.is_empty(), "{tier} 档仓位不变量被破坏：{problems:?}");
+    }
+    // 负控①：去掉复封顶 ⇒ 只报「未经 pm_risk_cap」
+    let ultra = include_str!("../../../src/commands/portfolio-mgr-h-ultra-short.rhai");
+    let no_cap = ultra.replace("pm_risk_cap(kelly *", "kelly *");
+    assert_ne!(no_cap, ultra, "负控样本未生效（替换目标不在）");
+    let p1 = position_invariant_problems(&no_cap);
+    assert_eq!(p1.len(), 1, "破坏复封顶应只让①红，实得 {p1:?}");
+    assert!(p1[0].contains("pm_risk_cap"), "① 的报错文案未指向复封顶：{p1:?}");
+    // 负控②：去掉守卫 ⇒ 只报「缺守卫」
+    let no_guard = ultra.replace(POSITION_GUARD_SRC, "");
+    assert_ne!(no_guard, ultra, "负控样本未生效（守卫块不在）");
+    let p2 = position_invariant_problems(&no_guard);
+    assert_eq!(p2.len(), 1, "破坏守卫应只让②红，实得 {p2:?}");
+    assert!(p2[0].contains("守卫"), "② 的报错文案未指向守卫：{p2:?}");
+}

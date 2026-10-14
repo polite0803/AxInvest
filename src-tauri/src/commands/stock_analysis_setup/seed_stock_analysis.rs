@@ -1341,10 +1341,46 @@ type AlgoToolRow = (
 ///   ⚠ **必须升版**：本条三项都是**图内容**（辩手节点数、边锚点、变量表），
 ///   不升版存量库一字不变。
 ///
+/// **v154 → v155（2026-10-14）**：`flowPersistence` 契约补值域（决策链修复 P0，
+///   `PLAN-horizon-decision-repair.md`）。
+///   ① 根因（现网实证）：逐档 VERDICT 契约只给字段名、不给产出形态，模型把
+///      `flowPersistence` 当自由文本槽（"unknown"/"short_pulse"/中文句子，抽查 0 条数值），
+///      而消费端 `analysis-engine::leg_signal` 只收 [-1,1] 数值 ⇒ 该腿从未参与融合；
+///      短档联合门 `trend_and_flow_same_sign` 因此恒「未判定」、动作封顶「持有」
+///      （v150+ 现网 25/25 `entryGatePassed=false`，买入/增持不可达）。
+///   ② 修法：`harness::holding_period` 新增 `NUMERIC_VERDICT_FACTORS`（值域单源）；
+///      契约渲染读它并向模型说明「[-1,1] 数值或 null（无法判断）」；消费侧由
+///      `leg_signal::flow_persistence_bounds_follow_the_contract_table` 反向对齐。
+///   ③ **无图结构变更、无决策口径变更** —— 本版只为把新契约文本重播种进存量库
+///      （契约在播种时固化进节点 system_prompt）。
+///   ⚠ **必须升版**：不升版存量库的 system_prompt 仍是旧文本，修复一字不入现网。
+///
+/// **v155 → v156（2026-10-14）**：超短档「催化剂腿」接入（决策链修复 P1 = #22 另一半，
+///   `PLAN-horizon-decision-repair.md` §二）。
+///   ① 根因：超短 participating 只有 `momentumSignal` 一条腿（小时线 MACD 四态 × 离散阶梯）
+///      ⇒ posterior 只落 8 个离散值、动作二值化（现网 v150+ 读数：confidence 恒为
+///      11.5/66.5/77.5/99.5 四值）。催化剂是个股级事件证据（与 MACD 独立的信息源），
+///      2 日窗的事件驱动性正来自它；PLAN §十一 原设计即含它。
+///   ② 修法（四处同批）：`verdict_spec.UltraShort.participating` 加 `eventCatalyst`；
+///      超短子模板加 `catalyst_level` 映射（读法与主链 f3 逐字一致）；父扇出加
+///      `a-catalyst--ultra_short` 恒等键 + 供给边（照短档 `a-hot-money--short` 既有模式）；
+///      分支脚本 raw 加 `catalystLevel` 并退役「按构造不作废评估」的 gap。
+///   ③ **会改决策数值**（超短档）：两腿在场时方向融合不再由单一 MACD 决定；
+///      催化剂为「无」/缺席时 tw 减小、escale 随之下降（0.55→0.44 档），摆动收窄。
+///      跨代比较超短档结论须按代筛样。
+///   ④ **一致性修复 ①（终审发现）**：四份脚本 `position = kelly × mult` 之后加
+///      `pm_risk_cap` 复封顶（新宿主函数，与 kelly 内部同一上限表）——修复档位乘数
+///      穿透风险上限（长档：极高 10→12 / 高 35→42 / 中 50→60）。
+///   ⑤ **一致性修复 ②（终审发现）**：四份脚本加守卫「非买入/增持/持有 ⇒ position=0」——
+///      修复两条「观望 + 正仓位」路径（kelly 门槛 0.50 低于持有阶梯 0.52；档内否决折
+///      「观望」未清零；现网实证 002241/002080/002384/300045 共 8 条）。
+///      ⚠ ④⑤ 也会改四档分支行的 positionPct 输出 ⇒ 跨代比较仓位须按代筛样。
+///   ⚠ **必须升版**：图（扇出键/边）+ 子模板映射 + 脚本正文全是播种内容。
+///
 /// `pub` 而非 `pub(crate)`：`axagent-batch-rerun` 的「版本联查完整性」要读这**同一个**数字
 /// （bin 是独立 crate，`pub(crate)` 读不到）。它不能被抄第二份 —— 本条的用处正是
 /// 对比「代码会用的图版本」与「库里已播种到的版本」，两份数字一旦各写各的就永远对不上。
-pub const TEMPLATE_VERSION: i32 = 154;
+pub const TEMPLATE_VERSION: i32 = 156;
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -5036,7 +5072,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //
     // ⚠ 七个全局字段在每个节点里**逐字重写**而不是抽公共数组：`audit-inject-coverage.mjs`
     //   是按 `input_mapping: [` 块内的**字面量**配对脚本的 present() 面的，抽走字面量就是
-    //   把门的数据面拆掉（本文件 :5249 早已为同样的理由拒绝过循环）。
+    //   把门的数据面拆掉（本文件 :6190 早已为同样的理由拒绝过循环）。
     //
     // ⚠ 全局节点 `cls-risk-level` **保留**且不改判据：它的下游是 research-mgr 的
     //   `context_sources`（output_var "risk-level"）与 portfolio-mgr 的 `LLM回退` 分支，
@@ -6164,7 +6200,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //
     // 分支脚本「刻意没接的入参」及其原因（催化剂 / 解禁 / 年报 EPS / 行业排名四问）随映射一起
     //   搬进 `horizon_tier_template.rs`，那里的注释与字面量同处。
-    nodes.push(WorkflowNode::SubWorkflow(SubWorkflowNode {
+    let mut fanout = SubWorkflowNode {
         base: WorkflowNodeBase {
             id: "pm-h-ultra-short".into(),
             title: "超短分支决策（子工作流）".into(),
@@ -6210,7 +6246,15 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             output_var: "h_ultra_short".into(),
             sub_graph: None,
         },
-    }));
+    };
+    // v156（P1 催化剂腿 · #22 另一半）：本档催化实例的 verdict 是该档 `eventCatalyst` 腿的
+    // 唯一来源 —— 与子模板那条 `catalyst_level` 映射是**一对契约**，缺一即子图内路径
+    // 解析失败 ⇒ 整节点按缺席（那是「接线缺失」而非「没有催化剂」）。id 经
+    // `analyst_node_id` 生成，禁止手抄 `base--tier` 字面量（`check-analyst-id-shape.mjs` 的 R2）。
+    let cat_us = axagent_harness::holding_period::analyst_node_id("a-catalyst", "ultra_short");
+    fanout.config.input_mapping.insert(cat_us.clone(), cat_us.clone());
+    edges.push(edge(&format!("e-{cat_us}-pm-h-ultra-short"), &cat_us, "pm-h-ultra-short"));
+    nodes.push(WorkflowNode::SubWorkflow(fanout));
     for src in ["t-scoring", "t-risk", LIMITUP_TOOL_ID] {
         edges.push(edge(&format!("e-{src}-pm-h-ultra-short"), src, "pm-h-ultra-short"));
     }

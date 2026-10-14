@@ -241,13 +241,33 @@ pub async fn persist_mover_recall_run(
 ) -> Result<String, String> {
     let id = format!("mrr-{}", uuid::Uuid::new_v4());
     let now_ms = chrono::Utc::now().timestamp_millis();
-    let rules_json = serde_json::to_string(&view.rules).map_err(|e| e.to_string())?;
-    let rates_json = serde_json::to_string(&view.rates).map_err(|e| e.to_string())?;
-    let layers_json = serde_json::to_string(&view.layers).map_err(|e| e.to_string())?;
+    let rules_json = serde_json::to_string(&view.rules).map_err(|e| {
+        ErrorResponse::err_with_detail(
+            wf_err::SERIALIZE_FAILED,
+            format!("mover_recall_runs.rules_json 序列化失败: {e}"),
+        )
+    })?;
+    let rates_json = serde_json::to_string(&view.rates).map_err(|e| {
+        ErrorResponse::err_with_detail(
+            wf_err::SERIALIZE_FAILED,
+            format!("mover_recall_runs.rates_json 序列化失败: {e}"),
+        )
+    })?;
+    let layers_json = serde_json::to_string(&view.layers).map_err(|e| {
+        ErrorResponse::err_with_detail(
+            wf_err::SERIALIZE_FAILED,
+            format!("mover_recall_runs.layers_json 序列化失败: {e}"),
+        )
+    })?;
     let misses_json = if view.misses.is_empty() {
         None
     } else {
-        Some(serde_json::to_string(&view.misses).map_err(|e| e.to_string())?)
+        Some(serde_json::to_string(&view.misses).map_err(|e| {
+            ErrorResponse::err_with_detail(
+                wf_err::SERIALIZE_FAILED,
+                format!("mover_recall_runs.misses_json 序列化失败: {e}"),
+            )
+        })?)
     };
 
     let run_row = RunSnapshotRecord {

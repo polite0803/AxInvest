@@ -333,8 +333,10 @@ if (canRunRust && !quick) {
   // 补一条 CI 早已有、本地镜像却缺的 Rust 侧门禁（2026-09-14：漂移修复）。
   // CI 把它放在 `rust-check` job 的 `cargo check` **之后**（`ci.yml:230`）；
   // 本地放最前 —— 它是纯 Node 扫源码、秒级、不依赖编译产物，先跑才能最快失败。
-  // 拦的是「裸 map_err(|x| x.to_string())」：错误信息退化成自由文本，
-  // 前端拿不到错误码（与 check-errorcode-alignment 是同一契约的两端）。
+  // 拦两族「不带错误码」的 map_err：① 身份式 `|e| e.to_string()`（硬拦零容忍）；
+  // ② 中文裸串式 `|e| format!("…: {e}")`（棘轮，基线 raw-map-err-baseline.json，只许降）。
+  // 前端拿不到错误码就无法按 error.{CODE} 翻译（与 check-errorcode-alignment 是同一契约的两端）。
+  step("后端裸 map_err 自检（两族判据正负对照）", "node scripts/check-rust-raw-map-err.mjs --selftest");
   step("后端裸 map_err 检查（错误码契约）", "node scripts/check-rust-raw-map-err.mjs");
 
   // ── 每日快照白名单一致性（#20①，2026-10-05）──

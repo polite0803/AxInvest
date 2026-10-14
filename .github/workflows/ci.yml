@@ -467,7 +467,9 @@ jobs:
           node-version: 24
 
       - name: Lint backend error codes (forbid raw map_err)
-        run: node scripts/check-rust-raw-map-err.mjs
+        run: |
+          node scripts/check-rust-raw-map-err.mjs --selftest
+          node scripts/check-rust-raw-map-err.mjs
 
   test-unit:
     name: Unit Tests

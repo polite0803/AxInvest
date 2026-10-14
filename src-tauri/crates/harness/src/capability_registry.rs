@@ -1543,7 +1543,8 @@ mod tests {
                 tool_call_id: None,
                 thinking: None,
             }),
-        );
+        )
+        .unwrap();
         assert!(got.assert_replayable("s1").is_ok());
 
         handle.undo();

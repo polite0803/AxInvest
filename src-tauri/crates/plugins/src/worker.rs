@@ -578,8 +578,13 @@ impl HostPeer {
                     Ok(content) => content,
                     Err(response) => return response,
                 };
-                log.record_model_visible(&session_id, content);
-                FrameResponse::success(Value::Null)
+                match log.record_model_visible(&session_id, content) {
+                    // 违反也已在宿主侧落盘（证据保留），错误如实回传远程调用方
+                    Ok(()) => FrameResponse::success(Value::Null),
+                    Err(violation) => {
+                        FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, violation.to_string())
+                    },
+                }
             },
             "session.log.invariant" if op == "assert" => {
                 let Some(log) = self.registry.get_session_log_invariant() else {
@@ -1780,11 +1785,16 @@ struct RemoteSessionLogInvariant {
 }
 
 impl SessionLogInvariant for RemoteSessionLogInvariant {
-    fn record_model_visible(&self, session_id: &str, content: ModelVisibleContent) {
+    fn record_model_visible(
+        &self,
+        session_id: &str,
+        content: ModelVisibleContent,
+    ) -> Result<(), InvariantViolation> {
         let args = json!({ "session_id": session_id, "content": content });
-        if let Err(e) = self.invoker.invoke("record", args) {
-            // 契约无 `Result` ⇒ best-effort，只记日志。
-            tracing::warn!(error = %e, "远程 session.log.invariant::record 失败");
+        match self.invoker.invoke("record", args) {
+            Ok(_) => Ok(()),
+            // 宿主侧单条即时校验的违反必须如实报出（与 assert 同口径），不得吞掉。
+            Err(e) => Err(InvariantViolation { session_id: session_id.to_string(), detail: e }),
         }
     }
 
@@ -2615,7 +2625,8 @@ mod tests {
         assert_eq!(reply.as_deref(), Some("pong"));
     }
 
-    /// `session.log.invariant` 是同步接缝：`assert` 的违反必须**如实报出**，不得吞掉。
+    /// `session.log.invariant` 是同步接缝：`record` / `assert` 的违反必须**如实报出**，
+    /// 不得吞掉。
     #[test]
     fn remote_session_log_invariant_reports_violation() {
         let registry = CapabilityRegistry::new();
@@ -2624,7 +2635,10 @@ mod tests {
             "demo@external",
             "session.log.invariant",
             "",
-            Arc::new(ScriptedInvoker::new(&[("assert", json!({ "ok": true }))])),
+            Arc::new(ScriptedInvoker::new(&[
+                ("record", json!(null)),
+                ("assert", json!({ "ok": true })),
+            ])),
         )
         .expect("远程接缝应注册成功");
         let log = registry.get_session_log_invariant().expect("远程实现应可取回");
@@ -2633,11 +2647,43 @@ mod tests {
             ModelVisibleContent {
                 role: "user".to_string(),
                 text: "hi".to_string(),
+                thinking: String::new(),
                 tool_names: Vec::new(),
+                tool_call_id: None,
+                non_text_parts: Vec::new(),
                 content_hash: String::new(),
             },
-        );
+        )
+        .expect("宿主侧即时校验通过时应为 Ok");
         assert!(log.assert_replayable("s1").is_ok(), "无违反时应为 Ok");
+
+        // record 的宿主侧违反 / IPC 失败必须如实透传（未脚本化 ⇒ invoke 返回 Err）
+        let registry2 = CapabilityRegistry::new();
+        register_remote_seam(
+            &registry2,
+            "demo2@external",
+            "session.log.invariant",
+            "",
+            Arc::new(ScriptedInvoker::new(&[])),
+        )
+        .expect("远程接缝应注册成功");
+        let log2 = registry2.get_session_log_invariant().expect("远程实现应可取回");
+        let err = log2
+            .record_model_visible(
+                "s1",
+                ModelVisibleContent {
+                    role: "user".to_string(),
+                    text: "hi".to_string(),
+                    thinking: String::new(),
+                    tool_names: Vec::new(),
+                    tool_call_id: None,
+                    non_text_parts: Vec::new(),
+                    content_hash: String::new(),
+                },
+            )
+            .unwrap_err();
+        assert_eq!(err.session_id, "s1");
+        assert!(err.detail.contains("record"), "违反细节应原样透传: {}", err.detail);
     }
 
     /// `tool.set`：注册时先 `list` 取回工具元数据，再按名 `exec`。

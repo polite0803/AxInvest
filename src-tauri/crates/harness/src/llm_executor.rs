@@ -16,6 +16,7 @@ use std::sync::atomic::AtomicBool;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
+use crate::ModelVisibleContent;
 use crate::audit_trail::{AuditEntry, AuditRecorder};
 use crate::cache_interceptor::LlmCacheKey;
 use crate::confidence::{ConfidenceAction, ConfidenceConfig};
@@ -138,6 +139,10 @@ pub async fn execute_llm(
     let prepared = prepare_llm_call(request, config)?;
     let request = prepared.request;
     let cache_key = prepared.cache_key;
+
+    // ── 会话日志不变量（Model-visible means logged，缺陷 #3 05 项）──
+    // 与流式入口共用同一漏斗；此前非流式调用完全不记录，是覆盖缺口。
+    log_model_visible(&request);
 
     // ── 缓存命中检查 ──
     if let Some(ref cache) = config.cache
@@ -287,32 +292,7 @@ pub async fn execute_llm_stream(
     let prepared = prepare_llm_call(request, config)?;
 
     // ── 会话日志不变量（Model-visible means logged，缺陷 #3 05 项）──
-    // 统一漏斗：凡是进入模型的最终请求（含 PromptGuard/脱敏/截断后的消息）
-    // 都被记录到会话日志，并在 debug 构建下做可重建断言。经能力注册表
-    // session.log.invariant 接缝取回；未注册时优雅跳过（如单元测试）。
-    if let Some(session_log) = crate::get_capability_registry().get_session_log_invariant() {
-        // 优先取 conversation_id；如果是 None 或空字符串都回退到 model；
-        // 两个都空时兜底一个 "unknown" 避免 invariant 因空 id 报错。
-        let session_id = match prepared.request.conversation.as_deref() {
-            Some(c) if !c.is_empty() => c.to_string(),
-            _ if !prepared.request.model.is_empty() => prepared.request.model.clone(),
-            _ => format!(
-                "unknown-{}",
-                prepared.request.messages.first().map(|_| "msg").unwrap_or("empty")
-            ),
-        };
-        for msg in &prepared.request.messages {
-            session_log.record_model_visible(
-                &session_id,
-                crate::ModelVisibleContent::from_chat_message(msg),
-            );
-        }
-        if cfg!(debug_assertions)
-            && let Err(violation) = session_log.assert_replayable(&session_id)
-        {
-            tracing::error!("{violation}");
-        }
-    }
+    log_model_visible(&prepared.request);
 
     // ── 缓存命中短路：合成一个 content + done 流 ──
     //
@@ -379,6 +359,35 @@ pub async fn execute_llm_stream(
         metrics_polled: false,
     };
     Ok(Box::pin(wrapped))
+}
+
+/// 记录本次请求全部 model-visible 内容到会话日志（流式 / 非流式共用漏斗）。
+///
+/// 凡是进入模型的最终请求（PromptGuard / 脱敏 / 截断后的消息）都在此记录。
+/// 记录时由实现做单条即时校验（O(1)），**不**再每轮全量回放整个会话日志 ——
+/// 长会话下那会退化为 O(N²) 的读盘 + 逐条重算 SHA256。经能力注册表
+/// `session.log.invariant` 接缝取回；未注册时优雅跳过（如单元测试）。
+fn log_model_visible(request: &ChatRequest) {
+    let Some(session_log) = crate::get_capability_registry().get_session_log_invariant() else {
+        return;
+    };
+    // 优先取 conversation_id；None 或空字符串回退到 model；两个都空时兜底
+    // "unknown"，避免 invariant 因空 id 报错。
+    let session_id = match request.conversation.as_deref() {
+        Some(c) if !c.is_empty() => c.to_string(),
+        _ if !request.model.is_empty() => request.model.clone(),
+        _ => format!("unknown-{}", request.messages.first().map(|_| "msg").unwrap_or("empty")),
+    };
+    for msg in &request.messages {
+        let record_result = session_log
+            .record_model_visible(&session_id, ModelVisibleContent::from_chat_message(msg));
+        // release 构建同样记录，只是不打印违反（保持既有 debug 门控口径）。
+        if cfg!(debug_assertions)
+            && let Err(violation) = record_result
+        {
+            tracing::error!("{violation}");
+        }
+    }
 }
 
 /// 共享预处理：PromptGuard 过滤 → 输入脱敏 → 上下文截断 → 构建缓存键

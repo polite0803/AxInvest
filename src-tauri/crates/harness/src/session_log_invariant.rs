@@ -24,17 +24,32 @@ use crate::types::{ChatContent, ChatMessage};
 
 /// 一条模型可见内容摘要。
 ///
-/// 记录 `role` + 原文 + 命中的工具名 + 内容指纹。`content_hash` 用于
-/// 可重建校验：`assert_replayable` 时按原文重算指纹比对，防缺失 / 篡改。
+/// 记录 `role` + 原文 + 思维链 + 命中的工具名 + 工具结果槽位 + 多模态非文本
+/// 载体类型 + 内容指纹。`content_hash` 只覆盖正文 `text`（历史日志同口径，
+/// 改了会让全部旧行指纹失配），用于可重建校验：`assert_replayable` 时按原文
+/// 重算指纹比对，防缺失 / 篡改。
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelVisibleContent {
     pub role: String,
     pub text: String,
+    /// 思维链（经 `reasoning_content` 发送）。模型可见但不属于正文；
+    /// 「只思考不吐正文」的轮次靠它证明记录非空。`default` 兼容旧日志。
+    #[serde(default)]
+    pub thinking: String,
     /// `alias` 兼容 81ae885d 之前落盘的 snake_case 行（`tool_names`），
     /// 旧日志无需迁移即可读回；两个名字都缺失才算真损坏。
-    #[serde(alias = "tool_names")]
+    #[serde(default, alias = "tool_names")]
     pub tool_names: Vec<String>,
+    /// `role = "tool"` 结果消息对应的 tool_call 槽位。槽位存在即模型可见
+    /// —— 即便工具 output 为空字符串，模型仍看得到「该工具返回了空结果」
+    /// 这一事实。`default`/`alias` 兼容旧日志与旧 snake_case 键名。
+    #[serde(default, alias = "tool_call_id")]
+    pub tool_call_id: Option<String>,
+    /// 多模态非文本 part 的类型（如 `image_url`）。这类载体无法以文本重建，
+    /// 只记录类型作为「模型确实看到过」的存在性证据。`default` 兼容旧日志。
+    #[serde(default)]
+    pub non_text_parts: Vec<String>,
     /// 同上，兼容旧 `content_hash` 键名。
     #[serde(alias = "content_hash")]
     pub content_hash: String,
@@ -43,18 +58,64 @@ pub struct ModelVisibleContent {
 impl ModelVisibleContent {
     /// 从一条 ChatRequest 消息提取模型可见内容摘要。
     pub fn from_chat_message(msg: &ChatMessage) -> Self {
-        let (text, mut tool_names) = match &msg.content {
+        let (text, mut non_text_parts) = match &msg.content {
             ChatContent::Text(t) => (t.clone(), Vec::new()),
-            ChatContent::Multipart(parts) => (
-                parts.iter().filter_map(|p| p.text.clone()).collect::<Vec<_>>().join(" "),
-                Vec::new(),
-            ),
+            ChatContent::Multipart(parts) => {
+                let mut text_parts = Vec::new();
+                let mut non_text = Vec::new();
+                for part in parts {
+                    match part.text.as_ref() {
+                        Some(t) if !t.is_empty() => text_parts.push(t.clone()),
+                        // 文本为空 / 纯图片等非文本 part：记录类型作为存在性证据
+                        _ => non_text.push(part.r#type.clone()),
+                    }
+                }
+                (text_parts.join(" "), non_text)
+            },
         };
+        let mut tool_names = Vec::new();
         if let Some(tcs) = &msg.tool_calls {
             tool_names = tcs.iter().map(|t| t.function.name.clone()).collect();
         }
         let content_hash = fingerprint(&text);
-        Self { role: msg.role.clone(), text, tool_names, content_hash }
+        Self {
+            role: msg.role.clone(),
+            text,
+            thinking: msg.thinking.clone().unwrap_or_default(),
+            tool_names,
+            tool_call_id: msg.tool_call_id.clone(),
+            non_text_parts,
+            content_hash,
+        }
+    }
+
+    /// 是否携带任何模型可见载体：正文 / 思维链 / 工具调用名 / 工具结果槽位 /
+    /// 多模态非文本载体，五类**全空**才是真·空记录。
+    pub fn has_visible_content(&self) -> bool {
+        !self.text.is_empty()
+            || !self.thinking.is_empty()
+            || !self.tool_names.is_empty()
+            || !self.non_text_parts.is_empty()
+            || self.tool_call_id.is_some()
+    }
+
+    /// 单条即时校验（记录时 O(1) 调用）：零可见载体即违反。
+    ///
+    /// `content_hash` 在构造时按原文计算、与记录同源，必然自洽；指纹篡改 /
+    /// 丢失检测仍由低频的全量 `assert_replayable` 读盘重算承担。
+    fn check_visible(&self, session_id: &str) -> Result<(), InvariantViolation> {
+        if self.has_visible_content() {
+            Ok(())
+        } else {
+            Err(InvariantViolation {
+                session_id: session_id.to_string(),
+                detail: format!(
+                    "model-visible 内容为空（role={}，无正文/思维链/工具调用/工具结果/多模态载\
+                     体），无法重建模型所见",
+                    self.role
+                ),
+            })
+        }
     }
 }
 
@@ -78,10 +139,21 @@ impl std::error::Error for InvariantViolation {}
 /// 「记录 model-visible 内容」即 logged；`assert_replayable` 校验记录可重建。
 /// `+ Any` supertrait 支持经能力注册表类型擦除存取。
 pub trait SessionLogInvariant: Any + Send + Sync + std::fmt::Debug {
-    /// 记录一条模型可见内容（同一 session 内追加）。
-    fn record_model_visible(&self, session_id: &str, content: ModelVisibleContent);
+    /// 记录一条模型可见内容（同一 session 内追加）并**即时校验该条**非空。
+    ///
+    /// O(1) 热路径：只校验刚记录的这一条，不回放整个会话日志。即使校验失败
+    /// （零可见载体），内容仍会被记录 —— 「模型可见即 logged」，违反本身
+    /// 也是证据；如何上报由调用方决定。
+    fn record_model_visible(
+        &self,
+        session_id: &str,
+        content: ModelVisibleContent,
+    ) -> Result<(), InvariantViolation>;
 
-    /// 运行时断言：该 session 的所有记录均可重建（内容指纹与原文一致、非空）。
+    /// 全量回放审计：该 session 的所有记录均可重建（内容指纹与原文一致、非空）。
+    ///
+    /// 低频调用（外部插件 / 手动审计）：需读盘并逐条重算指纹；热路径的
+    /// 非空校验已由 `record_model_visible` 即时完成，不要在每轮调用本方法。
     fn assert_replayable(&self, session_id: &str) -> Result<(), InvariantViolation>;
 }
 
@@ -111,8 +183,15 @@ impl InMemorySessionLog {
 }
 
 impl SessionLogInvariant for InMemorySessionLog {
-    fn record_model_visible(&self, session_id: &str, content: ModelVisibleContent) {
+    fn record_model_visible(
+        &self,
+        session_id: &str,
+        content: ModelVisibleContent,
+    ) -> Result<(), InvariantViolation> {
+        // 先即时校验；无论是否违反都入内存（违反本身也是证据），再如实上报。
+        let result = content.check_visible(session_id);
         self.inner.write().entry(session_id.to_string()).or_default().push(content);
+        result
     }
 
     fn assert_replayable(&self, session_id: &str) -> Result<(), InvariantViolation> {
@@ -121,7 +200,7 @@ impl SessionLogInvariant for InMemorySessionLog {
             return Ok(());
         };
         for (i, c) in list.iter().enumerate() {
-            if c.text.is_empty() && c.tool_names.is_empty() {
+            if !c.has_visible_content() {
                 return Err(InvariantViolation {
                     session_id: session_id.to_string(),
                     detail: format!("第 {i} 条 model-visible 内容为空，无法重建模型所见"),
@@ -220,25 +299,32 @@ impl DiskSessionLog {
 }
 
 impl SessionLogInvariant for DiskSessionLog {
-    fn record_model_visible(&self, session_id: &str, content: ModelVisibleContent) {
+    fn record_model_visible(
+        &self,
+        session_id: &str,
+        content: ModelVisibleContent,
+    ) -> Result<(), InvariantViolation> {
+        // 先即时校验；无论是否违反都落盘（违反本身也是证据），再如实上报。
+        let result = content.check_visible(session_id);
         let path = match self.file_path(session_id) {
             Ok(p) => p,
             Err(e) => {
                 tracing::error!("[session.log] 非法会话 id `{session_id}`: {e}");
-                return;
+                return result;
             },
         };
         let line = match serde_json::to_string(&content) {
             Ok(l) => l,
             Err(e) => {
                 tracing::error!("[session.log] 序列化 model-visible 内容失败: {e}");
-                return;
+                return result;
             },
         };
         let _guard = self.write_lock.lock();
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
             let _ = writeln!(f, "{line}");
         }
+        result
     }
 
     fn assert_replayable(&self, session_id: &str) -> Result<(), InvariantViolation> {
@@ -259,7 +345,7 @@ impl SessionLogInvariant for DiskSessionLog {
             detail: format!("读日志失败: {e}"),
         })?;
         for (i, c) in records.iter().enumerate() {
-            if c.text.is_empty() && c.tool_names.is_empty() {
+            if !c.has_visible_content() {
                 return Err(InvariantViolation {
                     session_id: session_id.to_string(),
                     detail: format!("第 {i} 条 model-visible 内容为空，无法重建模型所见"),
@@ -293,8 +379,10 @@ mod tests {
     #[test]
     fn record_and_replay_passes() {
         let log = InMemorySessionLog::new();
-        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&user("你好")));
-        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&user("帮我写报告")));
+        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&user("你好")))
+            .unwrap();
+        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&user("帮我写报告")))
+            .unwrap();
         assert_eq!(log.count("s1"), 2);
         assert!(log.assert_replayable("s1").is_ok());
         // 未记录的 session 视为可重建（空日志）
@@ -304,7 +392,13 @@ mod tests {
     #[test]
     fn empty_content_is_violation() {
         let log = InMemorySessionLog::new();
-        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&user("")));
+        // 即时校验：record 当场返回违反
+        let err = log
+            .record_model_visible("s1", ModelVisibleContent::from_chat_message(&user("")))
+            .unwrap_err();
+        assert!(err.detail.contains("为空"));
+        // 违反也照记（模型可见即 logged），全量回放同样能发现
+        assert_eq!(log.count("s1"), 1);
         let err = log.assert_replayable("s1").unwrap_err();
         assert!(err.detail.contains("为空"));
     }
@@ -313,10 +407,76 @@ mod tests {
     fn tampered_hash_is_violation() {
         let log = InMemorySessionLog::new();
         let mut c = ModelVisibleContent::from_chat_message(&user("原始内容"));
-        c.text = "被篡改".into(); // 内容变了但指纹未更新
-        log.record_model_visible("s1", c);
+        c.text = "被篡改".into(); // 内容变了但指纹未更新（非空，即时校验通过）
+        log.record_model_visible("s1", c).unwrap();
         let err = log.assert_replayable("s1").unwrap_err();
         assert!(err.detail.contains("指纹不匹配"));
+    }
+
+    /// 纯思考轮：正文为空、无工具调用，但 thinking 经 reasoning_content
+    /// 发给模型 —— 属模型可见内容，记录与全量回放都不得判空（回归误报根因）。
+    #[test]
+    fn thinking_only_assistant_is_not_empty() {
+        let msg = ChatMessage {
+            role: "assistant".into(),
+            content: ChatContent::Text(String::new()),
+            tool_calls: None,
+            tool_call_id: None,
+            thinking: Some("让我分析一下这只股票的基本面".into()),
+        };
+        let c = ModelVisibleContent::from_chat_message(&msg);
+        assert!(c.text.is_empty());
+        assert!(!c.thinking.is_empty());
+        assert!(c.has_visible_content());
+
+        let log = InMemorySessionLog::new();
+        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&msg)).unwrap();
+        assert!(log.assert_replayable("s1").is_ok());
+    }
+
+    /// 工具成功但返回空字符串：role=tool 消息靠 tool_call_id 槽位证明
+    /// 模型可见（模型看得到「该工具返回空结果」），不得判空。
+    #[test]
+    fn empty_tool_result_with_slot_is_not_empty() {
+        let msg = ChatMessage {
+            role: "tool".into(),
+            content: ChatContent::Text(String::new()),
+            tool_calls: None,
+            tool_call_id: Some("call_42".into()),
+            thinking: None,
+        };
+        let c = ModelVisibleContent::from_chat_message(&msg);
+        assert!(c.text.is_empty());
+        assert_eq!(c.tool_call_id.as_deref(), Some("call_42"));
+        assert!(c.has_visible_content());
+
+        let log = InMemorySessionLog::new();
+        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&msg)).unwrap();
+        assert!(log.assert_replayable("s1").is_ok());
+    }
+
+    /// 纯图片多模态消息：无文本 part，但 image_url 载体模型可见，不得判空。
+    #[test]
+    fn image_only_multipart_is_not_empty() {
+        let msg = ChatMessage {
+            role: "user".into(),
+            content: ChatContent::Multipart(vec![crate::types::ContentPart {
+                r#type: "image_url".into(),
+                text: None,
+                image_url: Some(crate::types::ImageUrl { url: "https://x/y.png".into() }),
+            }]),
+            tool_calls: None,
+            tool_call_id: None,
+            thinking: None,
+        };
+        let c = ModelVisibleContent::from_chat_message(&msg);
+        assert!(c.text.is_empty());
+        assert_eq!(c.non_text_parts, vec!["image_url".to_string()]);
+        assert!(c.has_visible_content());
+
+        let log = InMemorySessionLog::new();
+        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&msg)).unwrap();
+        assert!(log.assert_replayable("s1").is_ok());
     }
 
     #[test]
@@ -358,8 +518,10 @@ mod tests {
     fn disk_record_and_replay_passes() {
         let root = temp_root("record");
         let log = DiskSessionLog::new(&root).unwrap();
-        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&user("你好")));
-        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&user("帮我写报告")));
+        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&user("你好")))
+            .unwrap();
+        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&user("帮我写报告")))
+            .unwrap();
         assert_eq!(log.count("s1"), 2);
         assert!(log.root().join("s1.jsonl").exists());
         assert!(log.assert_replayable("s1").is_ok());
@@ -376,7 +538,8 @@ mod tests {
             log.record_model_visible(
                 "s1",
                 ModelVisibleContent::from_chat_message(&user("持久内容")),
-            );
+            )
+            .unwrap();
         }
         // 重建实例（模拟进程重启），从磁盘恢复可重建
         let reopened = DiskSessionLog::new(&root).unwrap();
@@ -389,7 +552,8 @@ mod tests {
     fn disk_tampered_is_violation() {
         let root = temp_root("tamper");
         let log = DiskSessionLog::new(&root).unwrap();
-        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&user("原始内容")));
+        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&user("原始内容")))
+            .unwrap();
         // 直接改文件内容，指纹不再匹配
         std::fs::write(root.join("s1.jsonl"), "{\"role\":\"user\",\"text\":\"被篡改\",\"toolNames\":[],\"contentHash\":\"deadbeef\"}\n").unwrap();
         let err = log.assert_replayable("s1").unwrap_err();
@@ -403,7 +567,8 @@ mod tests {
         // alias 兼容 `tool_names` / `content_hash` 键名，指纹校验照常通过。
         let root = temp_root("legacy");
         let log = DiskSessionLog::new(&root).unwrap();
-        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&user("旧格式")));
+        log.record_model_visible("s1", ModelVisibleContent::from_chat_message(&user("旧格式")))
+            .unwrap();
         let legacy = format!(
             "{{\"role\":\"user\",\"text\":\"旧数据\",\"tool_names\":[],\"content_hash\":\"{}\"}}\n",
             fingerprint("旧数据")
@@ -420,6 +585,60 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
     }
 
+    /// Disk 端到端回归：纯思考轮 / 空工具结果 / 纯图片三类「正文为空但模型
+    /// 可见」的消息落盘后，重开实例做全量回放必须全部通过（生产报错场景）。
+    #[test]
+    fn disk_visible_but_empty_text_records_replay() {
+        let root = temp_root("visible_empty");
+        {
+            let log = DiskSessionLog::new(&root).unwrap();
+            // 纯思考轮（reasoning_content）
+            log.record_model_visible(
+                "s1",
+                ModelVisibleContent::from_chat_message(&ChatMessage {
+                    role: "assistant".into(),
+                    content: ChatContent::Text(String::new()),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    thinking: Some("推理过程".into()),
+                }),
+            )
+            .unwrap();
+            // 工具成功但返回空字符串，槽位仍在
+            log.record_model_visible(
+                "s1",
+                ModelVisibleContent::from_chat_message(&ChatMessage {
+                    role: "tool".into(),
+                    content: ChatContent::Text(String::new()),
+                    tool_calls: None,
+                    tool_call_id: Some("call_1".into()),
+                    thinking: None,
+                }),
+            )
+            .unwrap();
+            // 纯图片
+            log.record_model_visible(
+                "s1",
+                ModelVisibleContent::from_chat_message(&ChatMessage {
+                    role: "user".into(),
+                    content: ChatContent::Multipart(vec![crate::types::ContentPart {
+                        r#type: "image_url".into(),
+                        text: None,
+                        image_url: Some(crate::types::ImageUrl { url: "file:///x".into() }),
+                    }]),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    thinking: None,
+                }),
+            )
+            .unwrap();
+        }
+        let reopened = DiskSessionLog::new(&root).unwrap();
+        assert_eq!(reopened.count("s1"), 3);
+        assert!(reopened.assert_replayable("s1").is_ok());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
     #[test]
     fn disk_sanitizes_unsafe_session_id() {
         let root = temp_root("sanitize");
@@ -428,7 +647,8 @@ mod tests {
         log.record_model_visible(
             "../etc/passwd",
             ModelVisibleContent::from_chat_message(&user("x")),
-        );
+        )
+        .unwrap();
         let mut names = Vec::new();
         for entry in std::fs::read_dir(&root).unwrap() {
             let name = entry.unwrap().file_name().to_string_lossy().into_owned();

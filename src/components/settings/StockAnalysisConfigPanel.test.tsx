@@ -429,6 +429,12 @@ describe("StockAnalysisConfigPanel 默认变量与后端模板 v19 同步", () =
       "review_horizon",
       "review_expected_holding_days",
       "analysis_primary_horizon",
+      // [反思模板 v4 2026-10] mover_recall_context：妖股漏检回放专项上下文（权威归因层 /
+      // 窗口硬数字 / 专项三问），由 run_reflection_workflow **无条件注入** —— 常规到期反思
+      // 也要注入占位句，否则 reflection-agent 的 {{mover_recall_context}} 报
+      // VARIABLE_NOT_FOUND。值是**按本轮漏检事件现算的文本**，不是用户可配置参数
+      // ⇒ 面板无入口，与本集合上面一族（同由 run_reflection_workflow 写入）同源判定，非绕过。
+      "mover_recall_context",
     ]);
     const missingInPanel = [...rust]
       .filter((k) => !k.startsWith("vendor_"))

@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use chrono::{Datelike, Local, Timelike};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use super::executor::CronExecutor;
-use super::job_store::CronJobStore;
+use super::job_store::{CronJob, CronJobStore};
 
 pub struct CronScheduler {
     store: Arc<CronJobStore>,
@@ -38,41 +37,49 @@ impl CronScheduler {
         let running_flag = self.running.clone();
 
         let handle = tokio::spawn(async move {
-            let mut last_check = chrono::Utc::now();
-            // 同分钟重复触发防护：轮询周期 30s < 分钟粒度，同一任务在同一分钟内会
-            // 两次命中 `should_run_now` ⇒ 凌晨链（荐股/趋势智选/池分析）会跑出双倍批次。
-            let mut last_fired: HashMap<String, (i64, i64)> = HashMap::new();
+            // 在途去重：job.id → 派发时该任务的 next_run_at。
+            //
+            // executor handler 是「入队即返回」（内部再 tokio::spawn，长任务可达数
+            // 分钟），`record_run` 在任务真正结束时才把 next_run_at 推进到下一档期。
+            // 在这之前每轮 tick 都会看到同一到期值，必须靠本表保证同一档期只派一次；
+            // record_run 推进后值变化，下一档期自然可再次派发。进程重启本表清空 ⇒
+            // 重启时仍在跑的任务按 at-least-once 重跑一次（可接受，业务侧行级认领幂等）。
+            let mut dispatched: HashMap<String, Option<i64>> = HashMap::new();
 
             loop {
                 if !*running_flag.read().await {
                     break;
                 }
 
-                let now = chrono::Utc::now();
-                let jobs = store.list_active().await;
-
-                for job in &jobs {
-                    if let Some(next_run) = job.next_run_at {
-                        let next = chrono::DateTime::from_timestamp_millis(next_run)
-                            .unwrap_or(chrono::Utc::now());
-                        if now < next {
-                            continue;
-                        }
-                    }
-
-                    if should_run_now(&job.schedule, &last_check, &now) {
-                        let fired_at = minute_key(&now);
-                        if last_fired.get(&job.id) == Some(&fired_at) {
-                            continue;
-                        }
-                        last_fired.insert(job.id.clone(), fired_at);
-                        tracing::info!("Cron: running job '{}' ({})", job.name, job.id);
-                        // 异步执行，结果由 executor handler 写回 store
-                        executor.execute(job.clone()).await;
-                    }
+                // 兜底编排：next_run_at=None 的活跃任务（老版本遗留 / 外部直写内存）
+                // 按表达式补算下一档期并持久化。正常 add / 恢复路径已编排，通常为 0。
+                let materialized = store.materialize_next_runs().await;
+                if materialized > 0 {
+                    tracing::info!(
+                        "[CronScheduler] 为 {materialized} 个未编排任务补算下次触发时刻"
+                    );
                 }
 
-                last_check = now;
+                // 到期即触发：不再要求「当前分钟精确匹配 cron」。
+                //
+                // 旧实现 AND 上 `should_run_now(schedule)` 的当前分钟匹配，且轮询周期
+                // 30s、跨 tick 补偿被禁用 ⇒ 档期那一分钟机器睡眠 / 关机 / 正在重启，
+                // 当天档期就永久蒸发、重启也不补（next=0 只放开时间下界，仍要等分钟
+                // 匹配）。现在 next_run_at 已由 `record_run` 用同一套 cron 口径算成
+                // 精确档期时刻，到期即派发；错过的档期在恢复后补发**一次**（恢复策略
+                // 见 runtime-core 的 `resumed_next_run`），不逐档回溯。
+                //
+                // 每轮最多派发一个：重启补跑积压时按 list_due 的优先级排序逐个出队
+                // （30s 一个），避免荐股 / 池分析 / 反思等重任务在同一瞬间雪崩。
+                let due = store.list_due().await;
+                if let Some(job) = next_dispatch(&due, &dispatched) {
+                    let job = job.clone();
+                    dispatched.insert(job.id.clone(), job.next_run_at);
+                    tracing::info!("Cron: running job '{}' ({})", job.name, job.id);
+                    // 异步执行，结果由 executor handler 的 record_run 写回 store
+                    executor.execute(job).await;
+                }
+
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
             }
         });
@@ -110,150 +117,79 @@ impl CronScheduler {
     }
 }
 
-/// 本地时区的「年内日 + 本地分钟」键，用于同分钟去重。
+/// 从已排序的到期任务中选出本轮该派发的一个。
 ///
-/// ⚠ 必须细到**分钟**：只到小时会让 `*/15 * * * *` 这类分钟步进任务在整点后
-/// 第二次命中被误拦（同一小时内本该跑 4 次只跑 1 次）。单测
-/// `test_minute_key_stable_within_same_minute` 锁住这一点。
-fn minute_key(now: &chrono::DateTime<chrono::Utc>) -> (i64, i64) {
-    let local = now.with_timezone(&Local);
-    (local.ordinal() as i64, local.hour() as i64 * 60 + local.minute() as i64)
-}
-
-fn should_run_now(
-    schedule: &str,
-    last_check: &chrono::DateTime<chrono::Utc>,
-    now: &chrono::DateTime<chrono::Utc>,
-) -> bool {
-    let _ = last_check;
-    if schedule.contains('*')
-        || schedule.contains('/')
-        || schedule.contains(',')
-        || schedule.contains('-')
-    {
-        let parts: Vec<&str> = schedule.split_whitespace().collect();
-        if parts.len() == 5 {
-            // ⚠ 按**本地时区**匹配，不按 UTC：CronJob 的表达式（含前端所有默认值，
-            // 如 `0 17 * * *`）都是按北京时间书写的，旧实现用 `now.*()`（UTC）匹配
-            // ⇒ 所有定时任务实际晚 8 小时触发。
-            let local = now.with_timezone(&Local);
-            let minute_match = match_cron_field(parts[0], local.minute() as i64, 0, 59);
-            let hour_match = match_cron_field(parts[1], local.hour() as i64, 0, 23);
-            let day_match = match_cron_field(parts[2], local.day() as i64, 1, 31);
-            let month_match = match_cron_field(parts[3], local.month() as i64, 1, 12);
-            let weekday_match =
-                match_cron_field(parts[4], local.weekday().num_days_from_sunday() as i64, 0, 6);
-
-            return minute_match && hour_match && day_match && month_match && weekday_match;
-        }
-    }
-
-    false
-}
-
-fn match_cron_field(field: &str, current: i64, _min: i64, _max: i64) -> bool {
-    if field == "*" {
-        return true;
-    }
-
-    if let Some(step) = field.strip_prefix("*/")
-        && let Ok(interval) = step.parse::<i64>()
-    {
-        return current % interval == 0;
-    }
-
-    if field.contains(',') {
-        return field.split(',').any(|p| match_cron_field(p, current, _min, _max));
-    }
-
-    if field.contains('-') {
-        let parts: Vec<&str> = field.split('-').collect();
-        if parts.len() == 2
-            && let (Ok(lo), Ok(hi)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>())
-        {
-            return current >= lo && current <= hi;
-        }
-    }
-
-    if let Ok(exact) = field.parse::<i64>() {
-        return current == exact;
-    }
-
-    false
+/// `due` 必须是 `CronJobStore::list_due` 的结果（已按优先级 → 成本 → 创建时间
+/// 排序）；本函数只负责在途去重：跳过「派发时记录的 next_run_at 与当前值相同」
+/// 的任务（任务尚未 `record_run` 推进），返回第一个可派发者。
+fn next_dispatch<'a>(
+    due: &'a [CronJob],
+    dispatched: &HashMap<String, Option<i64>>,
+) -> Option<&'a CronJob> {
+    due.iter().find(|job| dispatched.get(&job.id) != Some(&job.next_run_at))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_match_cron_field_wildcard() {
-        assert!(match_cron_field("*", 30, 0, 59));
+    fn make_job(id: &str, next_run_at: Option<i64>) -> CronJob {
+        let mut job = CronJob::new(id, "0 9 * * *", "prompt", "desc");
+        job.id = id.to_string();
+        job.next_run_at = next_run_at;
+        job
     }
 
     #[test]
-    fn test_match_cron_field_exact() {
-        assert!(match_cron_field("30", 30, 0, 59));
-        assert!(!match_cron_field("30", 31, 0, 59));
+    fn empty_due_returns_none() {
+        let dispatched = HashMap::new();
+        assert!(next_dispatch(&[], &dispatched).is_none());
     }
 
     #[test]
-    fn test_match_cron_field_range() {
-        assert!(match_cron_field("10-20", 15, 0, 59));
-        assert!(!match_cron_field("10-20", 25, 0, 59));
+    fn first_seen_due_job_is_dispatched() {
+        let job = make_job("j1", Some(0));
+        let dispatched = HashMap::new();
+        assert_eq!(next_dispatch(&[job], &dispatched).unwrap().id, "j1");
     }
 
     #[test]
-    fn test_match_cron_field_list() {
-        assert!(match_cron_field("0,30", 30, 0, 59));
-        assert!(!match_cron_field("0,30", 15, 0, 59));
+    fn inflight_job_with_same_next_run_is_skipped() {
+        // 已按 next=1000 派发，但任务还没 record_run（值未推进）⇒ 不得重复派发。
+        let job = make_job("j1", Some(1000));
+        let mut dispatched = HashMap::new();
+        dispatched.insert("j1".to_string(), Some(1000));
+        assert!(next_dispatch(&[job], &dispatched).is_none());
     }
 
     #[test]
-    fn test_match_cron_field_step() {
-        assert!(match_cron_field("*/15", 30, 0, 59));
-        assert!(!match_cron_field("*/15", 31, 0, 59));
-    }
-
-    /// 时区纠偏锁单测：命中小时必须取 **Local**，不得取 UTC。
-    ///
-    /// 判据与机器时区绑定（本机东八区）：UTC 00:00 ⇒ 本地 08:00，
-    /// `0 8 * * *` 应命中、`0 0 * * *` 应不命中。旧实现（UTC 匹配）恰好相反，
-    /// 时区纠偏锁单测：命中判定必须取 **Local** 的分/时，不得取 UTC。
-    ///
-    /// 与机器时区无关：先用本地分时起一条「必命中」的表达式证明走 Local，
-    /// 再仅当本地分/时与 UTC 分/时确有差异时，断言 UTC 那一条**不命中**
-    /// （在东八区机器上两者恒差 8 小时 ⇒ 第二条必然执行）。
-    /// 旧实现按 UTC 匹配 ⇒ 第一条在本机就会红，可自证。
-    #[test]
-    fn test_should_run_now_matches_local_clock_not_utc() {
-        let now = chrono::Utc::now();
-        let last = now - chrono::Duration::seconds(30);
-        let local = now.with_timezone(&Local);
-        let local_expr = format!("{} {} * * *", local.minute(), local.hour());
-        assert!(should_run_now(&local_expr, &last, &now), "本地分时应命中 {local_expr}");
-
-        if local.hour() != now.hour() || local.minute() != now.minute() {
-            let utc_expr = format!("{} {} * * *", now.minute(), now.hour());
-            assert!(
-                !should_run_now(&utc_expr, &last, &now),
-                "本地与 UTC 钟点不同（{local_expr} vs {utc_expr}），UTC 那条不得命中"
-            );
-        }
+    fn job_is_redispatched_after_record_run_advances_next() {
+        // record_run 把 next 推进到未来后，到期再次出现时应可派发。
+        let job = make_job("j1", Some(2000));
+        let mut dispatched = HashMap::new();
+        dispatched.insert("j1".to_string(), Some(1000));
+        assert_eq!(next_dispatch(&[job], &dispatched).unwrap().id, "j1");
     }
 
     #[test]
-    fn test_minute_key_stable_within_same_minute() {
-        // 取当前分钟的起点，避免依赖真实时钟的秒数：+59s 仍在同一本地分钟，
-        // +60s 必然跨到下一分钟 ⇒ 两个方向的断言都是确定的，不闪断。
-        let minute_start = chrono::Utc::now()
-            .with_second(0)
-            .expect("0 秒恒有效")
-            .with_nanosecond(0)
-            .expect("0 纳秒恒有效");
-        let same_minute = minute_start + chrono::Duration::seconds(59);
-        let next_minute = minute_start + chrono::Duration::seconds(60);
-        assert_eq!(minute_key(&minute_start), minute_key(&same_minute));
-        assert_ne!(minute_key(&minute_start), minute_key(&next_minute));
+    fn first_dispatchable_wins_when_multiple_due() {
+        // 模拟重启补跑积压：j1 在途跳过，j2（list_due 排序后的下一个）被选中。
+        let j1 = make_job("j1", Some(1000));
+        let j2 = make_job("j2", Some(0));
+        let mut dispatched = HashMap::new();
+        dispatched.insert("j1".to_string(), Some(1000));
+        let due = [j1, j2];
+        let picked = next_dispatch(&due, &dispatched).unwrap();
+        assert_eq!(picked.id, "j2");
+    }
+
+    #[test]
+    fn none_next_run_dispatch_marker_roundtrips() {
+        // None 不会出现在 list_due 结果里（list_due 只收 Some 到期）；但在途标记
+        // 按 Option 比较，若出现 None 也必须与 Some 区分，不能误判为同一档期。
+        let job = make_job("j1", Some(5));
+        let mut dispatched = HashMap::new();
+        dispatched.insert("j1".to_string(), None);
+        assert!(next_dispatch(&[job], &dispatched).is_some());
     }
 }

@@ -12,7 +12,7 @@ use axagent_runtime_core::cron_job::now_millis;
 use axagent_runtime_core::{CronJob, CronJobStore};
 use std::sync::Arc;
 
-const DEMAND_DISCOVERY_JOB_ID: &str = "opc-demand-discovery-daily";
+pub const DEMAND_DISCOVERY_JOB_ID: &str = "opc-demand-discovery-daily";
 const DEMAND_WEEKLY_JOB_ID: &str = "opc-demand-discovery-weekly";
 
 /// 种子化需求发现定时任务到 CronJobStore

@@ -6865,7 +6865,7 @@ async function executeCommand<T>(
           "active",
         ),
         mkTask(
-          "evolution-proposal-weekday",
+          "evolution-proposal-daily",
           "进化计划聚合（内置）",
           "evolution-proposal",
           "0 20 * * 1-5",

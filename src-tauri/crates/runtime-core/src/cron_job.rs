@@ -19,7 +19,7 @@ use chrono::{Datelike, Timelike};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 // G17: 引入 Cron delivery 配置（来自 harness）
 pub use axagent_harness::cron_delivery::{
@@ -270,25 +270,30 @@ impl CronJob {
 
 /// 根据 cron 表达式计算 `now_ms` 之后下一次触发时刻（UTC 毫秒）。
 ///
-/// ⚠ 口径必须与 `runtime/src/cron/scheduler.rs::should_run_now` **逐字一致**：
-/// 1. 按**本地时区**匹配（表达式按北京时间书写，旧实现按 UTC 重算 ⇒ 显示的下次
-///    运行时间恒偏 8 小时）；
-/// 2. 五段全部参与匹配，包括日 / 月 / 星期（旧实现忽略这三段 ⇒ 「每周一 9:00」
-///    被算成「今天/明天 9:00」）；
-/// 3. day-of-month 与 day-of-week 同 scheduler 一样取 AND（scheduler 并非标准
-///    Vixie OR 语义，这里不得单方面「修正」，否则算出的时刻调度器并不触发）；
-/// 4. 词法门槛与怪癖（只认 `*`、`*/N`、逗号、a-b、纯数字；表达式须含
-///    `* , - /` 之一）也与 scheduler 相同。
+/// 这是调度器的**唯一**档期口径：调度循环（`runtime/src/cron/scheduler.rs`）
+/// 不再自行匹配 cron 字段，而是「`next_run_at` 到期即派发」；`next_run_at` 由
+/// `record_run`（触发后推进到下一档期）、`add`（新建即编排）、`resumed_next_run`
+/// （重启恢复）三处调用本函数算出。因此本函数的 Local 时区 / 五段 AND / 词法
+/// 怪癖就是调度器的全部语义，没有第二份需要同步的匹配实现。
 ///
-/// 从「当前分钟的下一分钟」起逐分钟扫描（上限 366 天）：本函数只在
-/// `record_run`（任务刚触发完）时调用，含当前分钟会再次命中自己。
-/// 无法算出（非法表达式 / 一年内无匹配）返回 None。
+/// 1. 按**本地时区**匹配（表达式按北京时间书写，按 UTC 重算 ⇒ 显示/触发的下次
+///    运行时间偏 8 小时）；
+/// 2. 五段全部参与匹配，包括日 / 月 / 星期（忽略这三段 ⇒ 「每周一 9:00」
+///    被算成「今天/明天 9:00」）；
+/// 3. day-of-month 与 day-of-week 取 AND（非标准 Vixie OR 语义，历史行为沿用）；
+/// 4. 词法门槛与怪癖（只认 `*`、`*/N`、逗号、a-b、纯数字；表达式须含
+///    `* , - /` 之一）。
+///
+/// 从「当前分钟的下一分钟」起逐分钟扫描（上限 366 天）：record_run 在触发当刻
+/// 调用，含当前分钟会再次命中自己。
+/// 无法算出（非法表达式 / 一年内无匹配）返回 None —— 调用方据此保持
+/// `next_run_at = None`，调度器对 None 不派发。
 fn calculate_next_run(schedule: &str, now_ms: i64) -> Option<i64> {
     let parts: Vec<&str> = schedule.split_whitespace().collect();
     if parts.len() != 5 {
         return None;
     }
-    // 与 scheduler::should_run_now 相同的词法门槛
+    // 词法门槛：不含 * / , - 的表达式无档期语义，直接判为算不出
     if !schedule.contains(['*', '/', ',', '-']) {
         return None;
     }
@@ -315,9 +320,9 @@ fn calculate_next_run(schedule: &str, now_ms: i64) -> Option<i64> {
     None
 }
 
-/// 单段 cron 字段匹配 —— 与 `runtime/src/cron/scheduler.rs::match_cron_field`
-/// 的行为（含只支持 `*/N` 前缀步进、不支持 `a-b/N` 等怪癖）保持一致。
-/// 两处任改一处，另一处必须同步。
+/// 单段 cron 字段匹配 —— 仅服务同文件的 `calculate_next_run`（调度器不再自带
+/// 匹配实现，档期口径以本文件为唯一权威）。
+/// 行为怪癖：只支持 `*/N` 前缀步进，不支持 `a-b/N`。
 fn cron_field_matches(field: &str, current: i64) -> bool {
     if field == "*" {
         return true;
@@ -346,8 +351,39 @@ fn cron_field_matches(field: &str, current: i64) -> bool {
     false
 }
 
+/// 重启恢复时 `next_run_at` 的取值策略（纯函数，便于单测锁死三态语义）。
+///
+/// 调度器是「到期即触发，错过的档期补发一次」模型（见
+/// `runtime/src/cron/scheduler.rs`），因此恢复值直接决定重启后会不会跑：
+///
+/// - **非活跃**（暂停/禁用）：原值原样保留，不动调度状态；
+/// - **活跃 + 未来档期**（`next > now`）：保留。今天已经跑过、next 已推进到
+///   明天的任务，重启后不得再跑一遍；
+/// - **活跃 + 过期/0**：置 `Some(0)` ⇒ 首轮 tick 即到期，补发**一次**
+///   （睡眠/关机/重启错过的档期只补一次，不逐档回溯，避免停机一周后任务雪崩）；
+/// - **活跃 + None（从未编排）**：当场按表达式算出下一档期；表达式非法 / 一年
+///   内无匹配则保持 `None` —— 与「非法表达式永不触发」的旧行为一致，调度器
+///   对 None 不派发。
+fn resumed_next_run(
+    current: Option<i64>,
+    schedule: &str,
+    active: bool,
+    now_ms: i64,
+) -> Option<i64> {
+    if !active {
+        return current;
+    }
+    match current {
+        Some(next) if next > now_ms => Some(next),
+        Some(_) => Some(0),
+        None => calculate_next_run(schedule, now_ms),
+    }
+}
+
 // ── CronJobStore ──────────────────────────────────────────────
 
+/// CronJobStore 的调度语义集中在本文件（`calculate_next_run` / `resumed_next_run`），
+/// 调度循环在 `runtime/src/cron/scheduler.rs`。
 pub struct CronJobStore {
     jobs: Arc<RwLock<Vec<CronJob>>>,
     /// `None`（`new_ephemeral`）时是**跳过一切 DB 读写的纯内存模式**。
@@ -367,8 +403,9 @@ impl CronJobStore {
 
     /// 构造 CronJobStore 并自动从 DB 恢复已持久化的任务。
     ///
-    /// 恢复的任务会重新计算 `next_run_at`：设为 0 使其在下次调度时立即触发，
-    /// 避免因重启导致错过的任务被无限推后。
+    /// 恢复的 `next_run_at` 三态策略见 [`resumed_next_run`]：未来档期保留（当天已
+    /// 跑过的任务重启不重跑）、过期/0 置 0（错过的档期在首轮 tick 补发一次）、
+    /// None 当场按表达式补算（非法表达式保持 None，调度器不触发）。
     ///
     /// 参数是端口对象而非 `DatabaseConnection`：把连接交进来就等于把「怎么读写 DB」
     /// 也交进来了（原实现正是如此，于是本 crate 里长出了建表语句和 upsert）。
@@ -391,7 +428,7 @@ impl CronJobStore {
         self.persistence.as_deref()
     }
 
-    /// 从 DB 加载全部任务，恢复时重置 next_run_at 为 0（立即触发）。
+    /// 从 DB 加载全部任务，按 [`resumed_next_run`] 恢复 `next_run_at`。
     ///
     /// `CronJob` 的**反序列化留在本层**（端口只给 JSON 字符串），排序也留在本层：
     /// 排序键 `created_at` 藏在 `data` JSON 内部，而两方言取 JSON 字段的写法不同
@@ -409,18 +446,26 @@ impl CronJobStore {
         };
 
         let now = now_millis();
-        let mut jobs: Vec<CronJob> = raw
-            .into_iter()
-            .filter_map(|data| {
-                let mut job: CronJob = serde_json::from_str(&data).ok()?;
-                // 重启后重置 next_run_at：活跃任务立即触发，暂停/禁用保持不变
-                if job.is_active() {
-                    job.next_run_at = Some(0);
-                }
-                job.updated_at = now;
-                Some(job)
-            })
-            .collect();
+        let mut jobs: Vec<CronJob> = Vec::with_capacity(raw.len());
+        for data in raw {
+            let Ok(mut job) = serde_json::from_str::<CronJob>(&data) else {
+                // 单条损坏不应拖垮全部任务（旧实现 filter_map 整体跳过本行）
+                continue;
+            };
+            let original_next = job.next_run_at;
+            job.next_run_at =
+                resumed_next_run(job.next_run_at, &job.schedule, job.is_active(), now);
+            job.updated_at = now;
+            // 恢复策略改变了档期（过期→0 的补发标记、None→补算的下一档期）时回写 DB：
+            // 否则 None→Some 只存在于内存，`materialize_next_runs` 又只扫内存中的
+            // None（此时已是 Some）⇒ DB 永远停在 None，外部工具看到的是陈旧状态。
+            if job.next_run_at != original_next
+                && let Ok(json) = serde_json::to_string(&job)
+            {
+                Self::upsert_job(persistence, &job.id, json).await;
+            }
+            jobs.push(job);
+        }
 
         jobs.sort_by_key(|j| j.created_at);
         jobs
@@ -437,8 +482,14 @@ impl CronJobStore {
         }
     }
 
-    pub async fn add(&self, job: CronJob) -> String {
+    pub async fn add(&self, mut job: CronJob) -> String {
         let id = job.id.clone();
+        // 新建活跃任务立即编排下次档期：调度器只认 `next_run_at` 到期，不再做
+        // 「当前分钟匹配 cron」判定，None 任务永远不会被触发。非法表达式算出 None
+        // 时保持 None（调度器不派发），与「非法表达式永不触发」的旧行为一致。
+        if job.is_active() && job.next_run_at.is_none() {
+            job.next_run_at = calculate_next_run(&job.schedule, now_millis());
+        }
         // 写入 DB（端口内部按 backend 生成占位符与冲突处理）；ephemeral 模式跳过
         if let Some(p) = self.port() {
             match serde_json::to_string(&job) {
@@ -508,12 +559,41 @@ impl CronJobStore {
         jobs.iter().filter(|j| j.is_active()).cloned().collect()
     }
 
+    /// 为 `next_run_at = None` 的活跃任务按 cron 表达式补算下次触发时刻并持久化。
+    ///
+    /// 正常路径（`add` / DB 恢复）已经编排好，这里只是运行期兜底（外部直接写内存、
+    /// 老版本遗留的 None 行）。返回补算条数；非法表达式（一年内无档期）保持 None，
+    /// 调度器不派发，也不会在每轮 tick 重复尝试写库。
+    pub async fn materialize_next_runs(&self) -> usize {
+        let pending: Vec<(String, String)> = {
+            let jobs = self.jobs.read().await;
+            jobs.iter()
+                .filter(|j| j.is_active() && j.next_run_at.is_none())
+                .map(|j| (j.id.clone(), j.schedule.clone()))
+                .collect()
+        };
+
+        let mut count = 0;
+        for (id, schedule) in pending {
+            let Some(next) = calculate_next_run(&schedule, now_millis()) else {
+                continue;
+            };
+            if self.update(&id, |job| job.next_run_at = Some(next)).await {
+                count += 1;
+            }
+        }
+        count
+    }
+
     pub async fn list_due(&self) -> Vec<CronJob> {
         let now = now_millis();
         let jobs = self.jobs.read().await;
         let mut due: Vec<CronJob> = jobs
             .iter()
-            .filter(|j| j.is_active() && j.next_run_at.is_none_or(|next| now >= next))
+            // 触发模型是「next_run_at 到期即触发」：只有显式编排了档期（Some）且已到期
+            // 的任务才进 due。None = 从未编排 / 非法表达式，**不**派发 —— 否则非法
+            // 表达式会在 record_run 反复算出 None 后被每轮 tick 重复触发。
+            .filter(|j| j.is_active() && j.next_run_at.is_some_and(|next| now >= next))
             .cloned()
             .collect();
         // 优先级排序：priority(高→低), 预估耗时(短→长), 提交时间(早→晚)
@@ -568,6 +648,47 @@ impl CronJobStore {
         }
 
         updated
+    }
+
+    /// 记录一次「系统兜底轮」执行到 `cron_job_history`，但**不推进任何调度状态**
+    /// （不写 `last_run_at` / `run_count`，尤其**不重排 `next_run_at`**）。
+    ///
+    /// 用途：与某个 cron 任务同源、但由独立 `tokio::interval` 驱动的兜底执行
+    /// （如每 6h 的批量反思兜底轮、每 12h 的需求发现扫描）。它们不是档期触发：
+    /// 走 `record_run` 会把档期提前重排、与调度器的「到期派发」互相干扰；但成败
+    /// 若只进 tracing 日志，前端任务历史面板零可见性 —— 故单独落一条历史，
+    /// 建议在 `output` 中以「系统兜底轮」前缀与档期触发记录区分。
+    ///
+    /// 返回 false：ephemeral 模式（无持久化端口）、`task_id` 在内存中无对应任务
+    /// （历史记录成了孤儿行）或落库失败。
+    pub async fn record_auxiliary_run(&self, task_id: &str, result: TaskRunResult) -> bool {
+        let Some(p) = self.port() else {
+            return false;
+        };
+        let exists = self.jobs.read().await.iter().any(|j| j.id == task_id);
+        if !exists {
+            warn!(
+                "[CronJobStore] 兜底轮历史引用了不存在的任务 {task_id}，跳过落库（避免孤儿历史行）"
+            );
+            return false;
+        }
+        let record = CronHistoryRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            task_id: task_id.to_string(),
+            started_at: result.executed_at,
+            completed_at: Some(result.executed_at + result.duration_ms as i64),
+            success: result.success,
+            output: Some(result.output.clone().unwrap_or_default()),
+            error: Some(result.error.clone().unwrap_or_default()),
+            duration_ms: result.duration_ms as i64,
+        };
+        match p.insert_history(record).await {
+            Ok(()) => true,
+            Err(e) => {
+                error!("[CronJobStore] 写入任务 {task_id} 的兜底轮执行历史失败: {e}");
+                false
+            },
+        }
     }
 
     /// G17: 记录执行结果并按 delivery 配置投递（如果配置了 sink）
@@ -766,7 +887,7 @@ impl axagent_harness::tool_service::CronJobStore for CronJobStore {
 
 #[cfg(test)]
 mod calculate_next_run_tests {
-    use super::calculate_next_run;
+    use super::{calculate_next_run, resumed_next_run};
     use chrono::{Datelike, Local, TimeZone, Timelike};
 
     /// 构造本地时区的毫秒时间戳
@@ -922,8 +1043,53 @@ mod calculate_next_run_tests {
         // 非法 / 段数不对
         assert!(calculate_next_run("not a cron", 0).is_none());
         assert!(calculate_next_run("0 9 * *", local_ms(2026, 10, 12, 8, 0, 0)).is_none());
-        // 与 scheduler::should_run_now 相同的词法门槛：不含 * , - / 的表达式
-        // 调度器本身永不触发，重算也必须返回 None
+        // 词法门槛：不含 * , - / 的表达式无档期语义，calculate_next_run 返回 None
+        // ⇒ next_run_at 保持 None，调度器不派发
         assert!(calculate_next_run("0 9 1 1 1", local_ms(2026, 10, 12, 8, 0, 0)).is_none());
+    }
+
+    // ── resumed_next_run 三态恢复策略 ──
+
+    #[test]
+    fn test_reserved_future_next_run_is_preserved() {
+        // 当天 06:00 重启：今天 09:00 的档期在未来，原样保留（不重跑已完成任务的前提
+        // 是 next 已推进；这里直接锁住「未来不动」这一半语义）。
+        let now = local_ms(2026, 10, 14, 6, 0, 0);
+        let future = local_ms(2026, 10, 14, 9, 0, 0);
+        assert_eq!(resumed_next_run(Some(future), "0 9 * * *", true, now), Some(future));
+    }
+
+    #[test]
+    fn test_expired_or_zero_next_run_becomes_zero_for_catch_up() {
+        // 昨天的档期 / 0（旧版本恢复值）⇒ 置 0，首轮 tick 即补发一次。
+        let now = local_ms(2026, 10, 14, 3, 22, 0);
+        let yesterday = local_ms(2026, 10, 13, 0, 0, 0);
+        assert_eq!(resumed_next_run(Some(yesterday), "0 0 * * *", true, now), Some(0));
+        assert_eq!(resumed_next_run(Some(0), "0 0 * * *", true, now), Some(0));
+    }
+
+    #[test]
+    fn test_none_next_run_active_is_scheduled_from_expression() {
+        // 周六 09:00 周任务，周三重启 ⇒ 算出本周六，不立即补发（周中没错过它的档期）。
+        let now = local_ms(2026, 10, 14, 3, 22, 0); // 2026-10-14 周三
+        let got = resumed_next_run(None, "0 9 * * 6", true, now).expect("应算出周六档期");
+        assert_local(Some(got), 2026, 10, 17, 9, 0);
+    }
+
+    #[test]
+    fn test_none_next_run_invalid_expression_stays_none() {
+        // 非法表达式保持 None：调度器对 None 不派发，避免每轮 tick 重复触发。
+        let now = local_ms(2026, 10, 14, 3, 22, 0);
+        assert!(resumed_next_run(None, "not a cron", true, now).is_none());
+        assert!(resumed_next_run(None, "0 9 1 1 1", true, now).is_none());
+    }
+
+    #[test]
+    fn test_inactive_job_next_run_is_untouched() {
+        // 暂停 / 禁用任务：任何现值（含过期 / None）原样保留。
+        let now = local_ms(2026, 10, 14, 3, 22, 0);
+        let expired = local_ms(2026, 10, 10, 2, 0, 0);
+        assert_eq!(resumed_next_run(Some(expired), "0 2 * * *", false, now), Some(expired));
+        assert_eq!(resumed_next_run(None, "0 9 * * *", false, now), None);
     }
 }

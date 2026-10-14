@@ -3867,6 +3867,11 @@ fn start_realtime_quote_watcher(app: &tauri::AppHandle, state: &AppState) {
 }
 
 /// 启动批量反思 cron（每 6 小时）：扫 pending 反思队列 → LLM 反思 → 回测验证
+///
+/// 这是 cron 任务 `reflection-due-daily` 之外的**系统兜底轮**（不限定周期档位、
+/// 处理全部 pending）。它不经过调度器派发，故不推进 `next_run_at`，但每轮成败
+/// 通过 `record_auxiliary_run` 落 `cron_job_history`（output 带「系统兜底轮」
+/// 前缀），避免只进 tracing 日志、前端历史面板零可见性。
 fn start_batch_reflection(state: &AppState) {
     let db = state.harness.db().clone();
     let client = state.astock_client.clone();
@@ -3874,6 +3879,7 @@ fn start_batch_reflection(state: &AppState) {
     let vector_store = state.vector_store.clone();
     let master_key = state.harness.master_key_owned();
     let trajectory_storage = state.trajectory_storage.clone();
+    let cron_store = state.cron_job_store.clone();
 
     tauri::async_runtime::spawn(async move {
         // 启动延迟 5 分钟，避开启动高峰
@@ -3881,7 +3887,8 @@ fn start_batch_reflection(state: &AppState) {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(6 * 3600));
         loop {
             interval.tick().await;
-            match crate::commands::stock_workflow::run_batch_reflection_inner(
+            let started = axagent_runtime_core::cron_job::now_millis();
+            let outcome = crate::commands::stock_workflow::run_batch_reflection_inner(
                 &db,
                 &client,
                 &engine,
@@ -3894,24 +3901,46 @@ fn start_batch_reflection(state: &AppState) {
                 None,
                 None,
             )
-            .await
-            {
+            .await;
+
+            let (success, output, error) = match outcome {
                 Ok(summary) => {
-                    tracing::info!("[batch-reflection] 批量反思完成: {summary}");
+                    tracing::info!("[batch-reflection] 批量反思兜底轮完成: {summary}");
+                    (true, Some(format!("[系统兜底轮·每6h] {summary}")), None)
                 },
                 Err(e) => {
-                    tracing::warn!("[batch-reflection] 批量反思失败: {e}");
+                    tracing::warn!("[batch-reflection] 批量反思兜底轮失败: {e}");
+                    (false, None, Some(format!("{e:#}")))
                 },
-            }
+            };
+            cron_store
+                .record_auxiliary_run(
+                    crate::init::stock_automation_cron_seed::REFLECTION_JOB_ID,
+                    axagent_runtime_core::TaskRunResult {
+                        success,
+                        output,
+                        error,
+                        duration_ms: (axagent_runtime_core::cron_job::now_millis() - started).max(0)
+                            as u64,
+                        executed_at: started,
+                        skipped: false,
+                    },
+                )
+                .await;
         }
     });
     tracing::info!("[startup] 批量反思定时任务已启动（每 6 小时）");
 }
 
 /// 启动 OPC 需求发现 cron（每 12 小时）：扫描已启用平台 → 评估线索 → 高价值推送
+///
+/// 这是 cron 任务 `opc-demand-discovery-daily` 之外的**系统兜底轮**，与
+/// [`start_batch_reflection`] 同口径：不经调度器、不推进 `next_run_at`，
+/// 每轮成败落 `cron_job_history` 备查。
 fn start_demand_discovery_cron(app: &tauri::AppHandle, state: &AppState) {
     let db = state.harness.db().clone();
     let app = app.clone();
+    let cron_store = state.cron_job_store.clone();
 
     tauri::async_runtime::spawn(async move {
         // 首轮延迟 10 分钟（等平台凭证配置完成后再扫）
@@ -3919,20 +3948,35 @@ fn start_demand_discovery_cron(app: &tauri::AppHandle, state: &AppState) {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(12 * 3600));
         loop {
             interval.tick().await;
-            match crate::commands::demand_discovery::run_demand_discovery_cron(
-                &db,
-                None,
-                Some(&app),
-            )
-            .await
-            {
+            let started = axagent_runtime_core::cron_job::now_millis();
+            let outcome =
+                crate::commands::demand_discovery::run_demand_discovery_cron(&db, None, Some(&app))
+                    .await;
+
+            let (success, output, error) = match outcome {
                 Ok(summary) => {
-                    tracing::info!("[demand-discovery] 定时扫描完成: {summary}");
+                    tracing::info!("[demand-discovery] 定时扫描兜底轮完成: {summary}");
+                    (true, Some(format!("[系统兜底轮·每12h] {summary}")), None)
                 },
                 Err(e) => {
-                    tracing::warn!("[demand-discovery] 定时扫描失败: {e}");
+                    tracing::warn!("[demand-discovery] 定时扫描兜底轮失败: {e}");
+                    (false, None, Some(format!("{e:#}")))
                 },
-            }
+            };
+            cron_store
+                .record_auxiliary_run(
+                    crate::commands::opc_setup::seed_opc_cron::DEMAND_DISCOVERY_JOB_ID,
+                    axagent_runtime_core::TaskRunResult {
+                        success,
+                        output,
+                        error,
+                        duration_ms: (axagent_runtime_core::cron_job::now_millis() - started).max(0)
+                            as u64,
+                        executed_at: started,
+                        skipped: false,
+                    },
+                )
+                .await;
         }
     });
     tracing::info!("[startup] 需求发现定时任务已启动（每 12 小时）");

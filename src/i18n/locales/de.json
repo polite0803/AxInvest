@@ -18045,7 +18045,10 @@
       "gapReasonLegacyConfidence": "Historische Konfidenz",
       "legacySummary": "Historische Zusammenfassung",
       "renderFailed": "Rendering fehlgeschlagen",
-      "staleRecordSummary": "Zusammenfassung abgelaufener Datensätze",
+      "snapshotAbsentTitle": "Kein Blackboard-Snapshot für diesen Datensatz",
+      "snapshotAbsentNotPersisted": "Die Analyse wurde abgeschlossen, aber der erzeugende Kanal hat die Knotenergebnisse nicht gespeichert; Datenqualitätsdiagnose, Nachweise je Analyst und Dashboard-Neuaufbau sind daher nicht verfügbar.",
+      "snapshotAbsentIncomplete": "Die Analyse ist noch nicht abgeschlossen, daher existiert kein Blackboard-Snapshot.",
+      "snapshotAbsentRerunHint": "Analyse-Kette erneut ausführen; dieser Kanal speichert jetzt den Snapshot.",
       "summaryLength": "Zusammenfassungslänge"
     },
     "dataWarning": {

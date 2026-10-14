@@ -18284,7 +18284,10 @@
       "gapReasonLegacyConfidence": "Legacy confidence",
       "legacySummary": "Legacy summary",
       "renderFailed": "Render failed",
-      "staleRecordSummary": "Stale record summary",
+      "snapshotAbsentTitle": "No blackboard snapshot for this record",
+      "snapshotAbsentNotPersisted": "The analysis completed, but its producing channel did not persist per-node results, so data-quality diagnosis, per-analyst evidence and dashboard rebuild are all unavailable.",
+      "snapshotAbsentIncomplete": "The analysis has not finished yet, so no blackboard snapshot exists.",
+      "snapshotAbsentRerunHint": "Re-run the full analysis chain; this channel now persists the blackboard snapshot.",
       "summaryLength": "Summary length"
     },
     "dataWarning": {

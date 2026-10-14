@@ -1083,3 +1083,75 @@ describe("syncTimeAnchorForRun - 头部模式与实际取数口径自洽", () =>
     expect(s.asOfDate).toBe("2020-01-05");
   });
 });
+
+// ────────────────────────────────────────────────────────────
+// 无黑板快照时的占位 JSON（2026-10-14 快照缺席轮）
+//
+// 上面 DecisionBanner 的三条测试钉的是**渲染**；这一组钉的是**生产**：
+// store 在 `record.blackboardSnapshot` 为空时到底写了什么。两格分开才叫接通 ——
+// 只测渲染会出现「组件按 `snapshot_absence` 分支写、store 还在发旧键 `stale_record`」，
+// 于是界面永远落到「渲染失败」块，而组件测试照样全绿。
+// ────────────────────────────────────────────────────────────
+describe("loadAnalysis 无黑板快照时的缺席标记", () => {
+  // 跨用例比对：两种缺席在导出侧也得是两句不同的话
+  let notPersistedSummary: string | undefined;
+
+  const setupNoSnapshot = (status: string) => {
+    invokeMock.mockResolvedValueOnce({
+      id: "an-1",
+      stockCode: "600519",
+      stockName: "茅台",
+      status,
+      decisionJson: JSON.stringify({ action: "BUY", confidence: 60 }),
+      blackboardSnapshot: null,
+    });
+  };
+
+  const absenceOf = () => {
+    const raw = useStockAnalysisStore.getState().dataQualitySummary;
+    expect(raw).not.toBe("");
+    return JSON.parse(raw) as Record<string, unknown>;
+  };
+
+  it("completed 但无快照 ⇒ not_persisted（跑完了却没落库，不是记录过期）", async () => {
+    setupNoSnapshot("completed");
+    await useStockAnalysisStore.getState().loadAnalysis("an-1");
+    const rec = absenceOf();
+    expect(rec.snapshot_absence).toBe("not_persisted");
+    // 旧键必须彻底消失：留着任一处在，呈现层就会继续按「过期 + 仅重跑决策」那套谎话渲染
+    expect(rec.stale_record).toBeUndefined();
+    // `summary` 必须仍在且是缺席那一句：导出报告（`stock-analysis-export`）把本字段原文
+    // 写进 Markdown，撤掉它会让导出里只剩裸 JSON。
+    expect(typeof rec.summary).toBe("string");
+    expect((rec.summary as string).length).toBeGreaterThan(0);
+    notPersistedSummary = rec.summary as string;
+  });
+
+  it("未 completed 且无快照 ⇒ incomplete（分析本身没跑完，与上面两种成因各占一句）", async () => {
+    setupNoSnapshot("running");
+    await useStockAnalysisStore.getState().loadAnalysis("an-1");
+    const rec = absenceOf();
+    expect(rec.snapshot_absence).toBe("incomplete");
+    // 两种缺席各占一句：若两处共用同一串，导出报告就分不开「通道没落库」与「没跑完」
+    expect(notPersistedSummary).toBeTruthy();
+    expect(rec.summary).toBeTruthy();
+    expect(rec.summary).not.toBe(notPersistedSummary);
+  });
+
+  it("有快照 ⇒ 不写缺席标记（否则正常记录会被一律判成不可诊断）", async () => {
+    invokeMock.mockResolvedValueOnce({
+      id: "an-1",
+      stockCode: "600519",
+      stockName: "茅台",
+      status: "completed",
+      decisionJson: JSON.stringify({ action: "BUY", confidence: 60 }),
+      blackboardSnapshot: JSON.stringify({
+        "data_quality_summary": JSON.stringify({ grade: "B", score: 70, diagnostics: {} }),
+      }),
+    });
+    await useStockAnalysisStore.getState().loadAnalysis("an-1");
+    const raw = useStockAnalysisStore.getState().dataQualitySummary;
+    expect(raw).not.toBe("");
+    expect(JSON.parse(raw).snapshot_absence).toBeUndefined();
+  });
+});

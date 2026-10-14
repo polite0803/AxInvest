@@ -18265,7 +18265,10 @@
       "gapReasonLegacyConfidence": "历史置信度",
       "legacySummary": "历史摘要",
       "renderFailed": "渲染失败",
-      "staleRecordSummary": "过期记录摘要",
+      "snapshotAbsentTitle": "本条记录无黑板快照",
+      "snapshotAbsentNotPersisted": "分析已完成，但该产出通道未把逐节点结果落库 ⇒ 数据质量诊断、分析师逐条依据与仪表盘重建均不可用。",
+      "snapshotAbsentIncomplete": "分析尚未完成，暂无黑板快照。",
+      "snapshotAbsentRerunHint": "重新运行完整分析链，本次起该通道会落黑板快照",
       "summaryLength": "摘要长度"
     },
     "dataWarning": {

@@ -18045,7 +18045,10 @@
       "gapReasonLegacyConfidence": "과거 신뢰도",
       "legacySummary": "과거 요약",
       "renderFailed": "렌더링 실패",
-      "staleRecordSummary": "만료된 기록 요약",
+      "snapshotAbsentTitle": "이 기록에 블랙보드 스냅샷이 없습니다",
+      "snapshotAbsentNotPersisted": "분석은 완료되었지만 해당 생성 채널이 노드별 결과를 저장하지 않아 데이터 품질 진단, 분석가별 근거, 대시보드 재구성을 사용할 수 없습니다.",
+      "snapshotAbsentIncomplete": "분석이 아직 완료되지 않아 블랙보드 스냅샷이 없습니다.",
+      "snapshotAbsentRerunHint": "분석 체인을 다시 실행하면 이 채널이 스냅샷을 저장합니다.",
       "summaryLength": "요약 길이"
     },
     "dataWarning": {

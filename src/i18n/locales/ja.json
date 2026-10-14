@@ -18045,7 +18045,10 @@
       "gapReasonLegacyConfidence": "历史置信度",
       "legacySummary": "历史摘要",
       "renderFailed": "渲染失败",
-      "staleRecordSummary": "过期记录摘要",
+      "snapshotAbsentTitle": "この記録にブラックボードスナップショットがありません",
+      "snapshotAbsentNotPersisted": "分析は完了しましたが、生成チャネルがノード別の結果を保存していないため、データ品質診断・分析師別の根拠・ダッシュボード再構築はいずれも利用できません。",
+      "snapshotAbsentIncomplete": "分析がまだ完了していないため、ブラックボードスナップショットはありません。",
+      "snapshotAbsentRerunHint": "分析チェーンを再実行すると、このチャネルはスナップショットを保存します。",
       "summaryLength": "摘要长度"
     },
     "dataWarning": {

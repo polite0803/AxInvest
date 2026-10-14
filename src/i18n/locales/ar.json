@@ -18045,7 +18045,10 @@
       "gapReasonLegacyConfidence": "الثقة التاريخية",
       "legacySummary": "الملخص التاريخي",
       "renderFailed": "فشل العرض",
-      "staleRecordSummary": "ملخص السجلات المنتهية",
+      "snapshotAbsentTitle": "لا توجد لقطة لوحة لهذه السلسلة",
+      "snapshotAbsentNotPersisted": "اكتمل التحليل لكن القناة التي أنتجته لم تحفظ نتائج كل عقدة؛ تشخيص جودة البيانات وأدلة كل محلل وإعادة بناء اللوحة غير متاحة.",
+      "snapshotAbsentIncomplete": "لم يكتمل التحليل بعد، لذلك لا توجد لقطة لوحة.",
+      "snapshotAbsentRerunHint": "أعد تشغيل سلسلة التحليل؛ هذه القناة تحفظ اللقطة الآن.",
       "summaryLength": "طول الملخص"
     },
     "dataWarning": {

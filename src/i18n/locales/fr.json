@@ -18045,7 +18045,10 @@
       "gapReasonLegacyConfidence": "Confiance historique",
       "legacySummary": "Résumé historique",
       "renderFailed": "Échec du rendu",
-      "staleRecordSummary": "Résumé des enregistrements expirés",
+      "snapshotAbsentTitle": "Aucun instantané de tableau pour cet enregistrement",
+      "snapshotAbsentNotPersisted": "L'analyse est terminée, mais le canal producteur n'a pas persisté les résultats par nœud ; le diagnostic de qualité des données, les justificatifs par analyste et la reconstruction du tableau sont indisponibles.",
+      "snapshotAbsentIncomplete": "L'analyse n'est pas encore terminée, il n'y a donc pas d'instantané de tableau.",
+      "snapshotAbsentRerunHint": "Relancez la chaîne d'analyse ; ce canal persiste désormais l'instantané.",
       "summaryLength": "Longueur du résumé"
     },
     "dataWarning": {

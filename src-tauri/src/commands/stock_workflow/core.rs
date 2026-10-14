@@ -2104,6 +2104,10 @@ pub async fn run_single_stock_analysis(
         ..Default::default()
     };
 
+    // 落库前取降级水位：与业务封装路径同一口径（按运行水位取全局切片），否则本轮快照的
+    // `degraded` 块会把**上一轮**的 vendor 降级算进来。
+    let deg_watermark = as_of::global_degradation_seq_watermark();
+
     let result = engine.run_workflow(&wf_id, opts).await;
 
     match result {
@@ -2115,7 +2119,13 @@ pub async fn run_single_stock_analysis(
             // 提取持有期（在 decision_json_str 被 move 之前）。
             // 决策里声明了就用它；没声明则回退到调用方传入的周期档位
             // （候选池扫描时 = pick 的 `Period::default_holding_days()` = 2/5/28/90）。
-            let (_, _, _, _, decision_holding_days) = extract_decision_fields(&decision_json_str);
+            let (
+                _action_from_json,
+                decision_position_pct,
+                decision_reasoning,
+                decision_time_horizon,
+                decision_holding_days,
+            ) = extract_decision_fields(&decision_json_str);
             let effective_holding_days = decision_holding_days.or(expected_holding_days);
             let decision_output = decision_json_str
                 .as_deref()
@@ -2140,15 +2150,42 @@ pub async fn run_single_stock_analysis(
             // 直接 `Set(None)`），于是「每档一行反思」在本通道退化成主档单行 —— 不是设计，
             // 是缺数据。现在与 `run_stock_workflow_inner` 通道同样落库。
             let horizon_decisions = extract_decisions_by_horizon(&decision_json_str);
+            let horizon_price_map = extract_horizon_price_map(&decision_json_str);
+            let horizon_source = extract_horizon_source(&decision_json_str);
+            let llm_decision_json = extract_llm_decision_json(&wf);
+
+            // 黑板快照：本通道历史上**从不落**这一列（连同下方 reasoning / position_pct /
+            // time_horizon / horizon_source / price_map / llm_decision_json 六列一起缺）。
+            // 后果不止是面板少一块 —— 快照同时是反思记忆、仪表盘现场重建、跨日关键价位、
+            // 证据引用、进化提案不可信标记的输入，且前端只能把它渲染成「记录已过期，请重跑
+            // 决策」，而重跑决策并不重写快照 ⇒ 用户按提示操作也拿不回诊断。实证 15 条
+            // `completed` 且 `blackboard_snapshot IS NULL` 的记录（07-23 起，2026-10-14 一天
+            // 占 6 条，因该日分析全部由本通道产出）。
+            let degradation_report = as_of::take_global_degradations_since(deg_watermark);
+            let bb_snapshot = serde_json::to_string(&build_blackboard_snapshot(
+                &wf.results,
+                asof_ctx.as_ref(),
+                &degradation_report,
+            ))
+            .unwrap_or_else(|_| "{}".to_string());
+            // 数据质量观测：与业务封装路径同源，快速链由 record_dqi_observation 内部拦下。
+            record_dqi_observation(db, &analysis_id, template_id, &bb_snapshot).await;
 
             let _ = stock_analyses::Entity::update(stock_analyses::ActiveModel {
                 id: Set(analysis_id.clone()),
                 status: Set("completed".into()),
                 decision_action: Set(decision_action),
+                decision_position_pct: Set(decision_position_pct),
                 decision_position_state: Set(decision_position_state),
+                decision_reasoning: Set(decision_reasoning),
+                decision_time_horizon: Set(decision_time_horizon.clone()),
+                decision_horizon_source: Set(horizon_source),
                 decision_json: Set(decision_json_str),
                 decision_expected_holding_days: Set(effective_holding_days.map(|d| d as i64)),
+                horizon_price_map: Set(horizon_price_map),
                 horizon_decisions: Set(horizon_decisions.clone()),
+                llm_decision_json: Set(llm_decision_json),
+                blackboard_snapshot: Set(Some(bb_snapshot)),
                 // §五十一-① 写侧落代际：本通道的行**会被读侧当决策样本**（每日自动化闭环 /
                 //   单股即时分析产出的 live 行），却从不写版本号 ⇒ 实测现网 44 条 `template_version
                 //   IS NULL` 全是 `analysis_kind=live` 的现役行。读侧按代筛样时它们只能整批排除，
@@ -2212,8 +2249,9 @@ pub async fn run_single_stock_analysis(
                     stock_name,
                     analysis_date: &anchor_date,
                     horizon_decisions: horizon_decisions.as_deref(),
-                    // 本通道不写 `decision_time_horizon` ⇒ 主档由期望天数最近邻派生
-                    primary_horizon: None,
+                    // 主档直取本轮决策声明的档位；缺席时 `reviewable_horizons` 自行退回
+                    // 期望天数最近邻代理。
+                    primary_horizon: decision_time_horizon.as_deref(),
                     primary_holding_days: effective_holding_days.map(|d| d as i64),
                     min_confidence_threshold: super::reflection::DEFAULT_REFLECTION_MIN_CONFIDENCE,
                     reflection_depth: super::reflection::DEFAULT_REFLECTION_DEPTH,
@@ -2378,9 +2416,11 @@ pub(crate) async fn fetch_stock_lessons(
     // ── same_ticker: 3 条同 ticker 近 90 天已完成反思 ──
     // 查询经 dao 下沉（`axagent_dao::repo::stock_lesson_queries`），命令层不得直连
     //（分层门禁规则 1）；档过滤语义见该模块文档，调用方只做 take(3) 截断。
+    // 取数失败 ⇒ 筛除条数记 `None` 而**不是**折算成 0：与下方 `pre_floor_note` 同一
+    // 三态口径，把「查不出来」写成「确实没有被依据筛掉的」就是伪造。
     let three_months_ago = Utc::now() - chrono::Duration::days(90);
-    let same_ticker: Vec<stock_reflections::Model> =
-        axagent_dao::repo::stock_lesson_queries::fetch_same_ticker_completed(
+    let (same_ticker_rows, same_ticker_no_evidence) =
+        match axagent_dao::repo::stock_lesson_queries::fetch_same_ticker_completed(
             db,
             stock_code,
             three_months_ago.timestamp_millis(),
@@ -2388,27 +2428,35 @@ pub(crate) async fn fetch_stock_lessons(
             generation_floor,
         )
         .await
-        .unwrap_or_default()
-        .into_iter()
-        .take(3)
-        .collect();
+        {
+            Ok((rows, dropped)) => (rows, Some(dropped)),
+            Err(e) => {
+                tracing::warn!("[lessons] 同股反思取数失败（筛除条数按未知处理）: {e}");
+                (Vec::new(), None)
+            },
+        };
+    let same_ticker: Vec<stock_reflections::Model> = same_ticker_rows.into_iter().take(3).collect();
 
     // ── all_recent: 2 条所有 ticker 近 7 天(跨 ticker 市场级教训)──
-    // 同上经 dao 下沉；调用方只做「排除本股 + take(2)」。
+    // 同上经 dao 下沉；「排除本股」已下推进 dao，与依据筛除同一条分母（理由见该函数文档）。
     let seven_days_ago = Utc::now() - chrono::Duration::days(7);
-    let all_recent: Vec<stock_reflections::Model> =
-        axagent_dao::repo::stock_lesson_queries::fetch_recent_completed(
+    let (all_recent_rows, all_recent_no_evidence) =
+        match axagent_dao::repo::stock_lesson_queries::fetch_recent_completed(
             db,
             seven_days_ago.timestamp_millis(),
             horizon,
             generation_floor,
+            Some(stock_code),
         )
         .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|r| r.stock_code != stock_code) // 排除 same_ticker 已经包含的
-        .take(2)
-        .collect();
+        {
+            Ok((rows, dropped)) => (rows, Some(dropped)),
+            Err(e) => {
+                tracing::warn!("[lessons] 跨票反思取数失败（筛除条数按未知处理）: {e}");
+                (Vec::new(), None)
+            },
+        };
+    let all_recent: Vec<stock_reflections::Model> = all_recent_rows.into_iter().take(2).collect();
 
     // ── §五十一-② 被起算代筛掉了多少（声明侧）──
     // 计数失败保持 `None` 而**不是**折算成 0 —— 否则「另有 0 条」会把「查不出来」写成
@@ -2445,22 +2493,35 @@ pub(crate) async fn fetch_stock_lessons(
         }
     };
 
+    // 「另有 N 条因源分析没留逐节点依据而未注入」的措辞（2026-10-14）。
+    // 三态与 `pre_floor_note` 同形：Some(0) 不写、Some(c) 写数字、None 写「条数查询失败」。
+    // 静默筛除会让模型把「有教训但依据不可得」读成「这段历史没有教训」—— 两个含义相反。
+    let evidence_note = |n: Option<usize>| -> String {
+        match n {
+            Some(0) => String::new(),
+            Some(c) => format!("；另有 {c} 条因源分析未落黑板快照（逐节点依据不可得）未注入"),
+            None => "；另有若干条因源分析未落黑板快照未注入（条数查询失败）".to_string(),
+        }
+    };
+
     let mut lines: Vec<String> = Vec::new();
 
     // 两组都空：这一句把「真没有」与「有但早于起算代」分开写，
     // 否则调用方会退回「（暂无历史反思）」—— 那是把结构性缺口读成空集。
     if same_ticker.is_empty() && all_recent.is_empty() {
         lines.push(format!(
-            "【同股近 90 天 / 全市场近 7 天反思：起算代（第 {generation_floor} 代）及之后 0 条{}】",
-            pre_floor_note(pre_floor_same_ticker.and_then(|a| pre_floor_all_recent.map(|b| a + b)))
+            "【同股近 90 天 / 全市场近 7 天反思：起算代（第 {generation_floor} 代）及之后 0 条{}{}】",
+            pre_floor_note(pre_floor_same_ticker.and_then(|a| pre_floor_all_recent.map(|b| a + b))),
+            evidence_note(same_ticker_no_evidence.and_then(|a| all_recent_no_evidence.map(|b| a + b)))
         ));
     }
 
     if !same_ticker.is_empty() {
         lines.push(format!(
-            "【同股近 90 天反思 {} 条{}】",
+            "【同股近 90 天反思 {} 条{}{}】",
             same_ticker.len(),
-            pre_floor_note(pre_floor_same_ticker)
+            pre_floor_note(pre_floor_same_ticker),
+            evidence_note(same_ticker_no_evidence)
         ));
         for (i, l) in same_ticker.iter().enumerate() {
             lines.push(format!("#{} ({}, 反思于 {})", i + 1, l.stock_code, l.hindsight_date));
@@ -2486,9 +2547,10 @@ pub(crate) async fn fetch_stock_lessons(
     if !all_recent.is_empty() {
         lines.push(String::new());
         lines.push(format!(
-            "【近期市场级反思 {} 条(跨 ticker 近 7 天){}】",
+            "【近期市场级反思 {} 条(跨 ticker 近 7 天){}{}】",
             all_recent.len(),
-            pre_floor_note(pre_floor_all_recent)
+            pre_floor_note(pre_floor_all_recent),
+            evidence_note(all_recent_no_evidence)
         ));
         for (i, l) in all_recent.iter().enumerate() {
             lines.push(format!("#{} {} ({}):", i + 1, l.stock_code, l.stock_name));

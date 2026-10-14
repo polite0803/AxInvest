@@ -53,10 +53,20 @@ pub struct Model {
     /// active 行的初始值由 verdict 推断（wrong=0.7 / partial=0.5 / else=0.3）。
     pub confidence: f64,
     /// 规则状态：
-    /// - `active`：入模生效，消费侧只查此态且 `confidence > 0.5`
+    /// - `active`：入模生效。⚠ **两条消费路径的下限不同**：决策重跑侧要 `confidence > 0.5`
+    ///   （`rerun_decision` 的 Gap2 段），主注入侧只要 `confidence >= 0.3`
+    ///   （`fetch_stock_lessons` 的 rule 段）⇒ 判「这条教训有没有真的进过 prompt」必须按
+    ///   **低的那个**下限看，只看 0.5 会把 0.3 的行读成「没生效过」（本轮实测踩过一次）。
     /// - `deprecated`：事后命中率统计裁定废弃（见 `run_lesson_validation`）
     /// - `validation_rejected`：P3 入模前校验未过（长度/无行动词/空话/纯疑问），
     ///   行保留留档，驳回原因在 `rule_pattern` 的 `{"rejectedReasons":[...]}`，不生效
+    /// - `retired: ANALYSIS_SNAPSHOT_MISSING`：源分析已出结论却没落黑板快照 ⇒ 这条教训是
+    ///   反思在**空记忆**上产出的，无逐节点依据可查，人工裁定退役（2026-10-14，3 行）。
+    ///   与 `validation_rejected` 刻意分开：那是「摘要写法不合格」，这是「依据不可得」，
+    ///   混用会让人以为改改措辞就能救回来。
+    ///   ⚠ 注意退役态不在 `run_lesson_validation` 的取数范围（它只加载 `active`）⇒ 不会被
+    ///   自动翻回；但同一条教训的**注入下限是 `confidence >= 0.3`**（见
+    ///   `fetch_stock_lessons` 的 rule 段），别按「`> 0.5` 才注入」判断某行有没有生效过。
     #[sea_orm(indexed)]
     pub status: String,
     pub created_at: i64,

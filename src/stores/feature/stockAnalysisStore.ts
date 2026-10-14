@@ -1805,14 +1805,24 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         console.error("[StockAnalysis] Failed to restore blackboard snapshot:", e);
       }
     } else {
-      // V66 修复(2026-07-29): 设置 stale_record 标记的占位 JSON，让 UI 能识别并提示用户重跑。
-      // 旧版静默降级导致用户不知道为什么看不到数据质量诊断。
+      // 无黑板快照 ⇒ 数据质量诊断与逐节点依据不可用。两种缺席必须分开说，不得都称「过期」：
+      // - `incomplete`：记录本身没跑完（还没有快照）
+      // - `not_persisted`：跑完了，但产出通道没把逐节点结果落库（历史上单股/批量通道即如此）
+      // 呈现层按 `snapshot_absence` 出文案与动作：不再显示「渲染失败」（那不是渲染失败），
+      // 也不给「仅重跑决策」—— 重跑决策不重写快照，按它拿不回诊断。
+      const absence = record.status === "completed" ? "not_persisted" : "incomplete";
       set({
         dataQualitySummary: JSON.stringify({
           grade: "N/A",
           score: 0,
-          stale_record: true,
-          summary: i18n.t("stockAnalysis.dataQuality.staleRecordSummary"),
+          snapshot_absence: absence,
+          // `summary` 与呈现层取**同一份 key**：导出报告把本字段原文写进 Markdown，
+          // 只留机器键会让导出里那句人话消失（两处各写一套则会漂移）。
+          summary: i18n.t(
+            absence === "not_persisted"
+              ? "stockAnalysis.dataQuality.snapshotAbsentNotPersisted"
+              : "stockAnalysis.dataQuality.snapshotAbsentIncomplete",
+          ),
         }),
       });
     }

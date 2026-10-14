@@ -1,5 +1,5 @@
-//! 写侧代际（`template_version`）落库形态门
-//! —— `PLAN-four-horizon-workflow-alignment.md` §五十一-①（批准于 2026-10-04）。
+//! 写侧落库形态门 —— `PLAN-four-horizon-workflow-alignment.md` §五十一-①（批准于 2026-10-04）
+//! + 2026-10-14 诊断列扩面。
 //!
 //! # 为什么锁源码形态而不是跑数据库
 //!
@@ -12,17 +12,39 @@
 //! | 特征 | 后果 | 本门怎么检 |
 //! |---|---|---|
 //! | 编译器不参与 | 少写一个字段是合法的 `..Default::default()` | 逐字读该函数的落库 update 块 |
-//! | 跑一次也不报错 | 行照样写进去，只是那列 NULL | 断言「会被当样本的通道必须带代」 |
-//! | 读侧无从区分 | 筛样时整批排除 ⇒ 指标假性「样本不足」 | 反向锁：不同名目（交易意图）**不得**被套上版本号 |
+//! | 跑一次也不报错 | 行照样写进去，只是那列 NULL | 反向锁：不同名目（交易意图）**不得**被套上版本号 |
+//! | 读侧无从区分 | 筛样时整批排除 ⇒ 指标假性「样本不足」 | 断言「会被当样本的通道必须带代」 |
 //!
 //! 最后一行是本计划的一条硬边界（禁区 12）：`crates/analysis-engine/src/trade_intent.rs` 写的是
 //! **交易意图行**，不是分析结论 ⇒ 它的 `template_version` 必须保持 NULL；给它套一个分析模板版本号
 //! 等于把两个名目焊成一个，比 NULL 更坏。
 //!
+//! # 2026-10-14：同一处 update 的第二批缺列（本门扩面的直接原因）
+//!
+//! §五十一-① 那轮**只补了代际一列、也只锁了代际一列**。同一个落库 update 另外七列照旧不写，
+//! 于是同一族缺陷换了个字段复发。实测（生产库 `axinvest`）：15 条 `status='completed'` 且
+//! `blackboard_snapshot IS NULL` 的记录（07-23 起，2026-10-14 一天占 6 条 —— 该日分析全部由本
+//! 通道产出），这七列**同时**为 NULL，且 `data_quality_observations` 里查不到对应观测行；
+//! 而 92 条有快照的记录七列齐全。逐列后果：
+//!
+//! - `blackboard_snapshot` 缺 ⇒ 反思记忆、仪表盘现场重建、跨日关键价位、证据引用、进化提案的
+//!   不可信标记判据全部退化成空；前端只能渲染成「记录已过期，请重跑决策」，而重跑决策**不重写
+//!   快照** ⇒ 用户按提示操作也拿不回诊断（呈现层说谎，另案收口）。
+//! - `decision_reasoning` / `llm_decision_json` 缺 ⇒ 决策理由与 LLM 原始决策不可比。
+//! - `decision_time_horizon` / `decision_horizon_source` 缺 ⇒ 主档归属与「主档怎么来的」丢失。
+//! - `decision_position_pct` / `horizon_price_map` 缺 ⇒ 仓位与四档价位映射要现算。
+//! - 不调 `record_dqi_observation` ⇒ 数据质量熔断的样本少一批，streak 偏低而无人知晓。
+//!
+//! **判据口径**：锚点只到「列名 + `Set(`」，不锁右值 —— 右值形态（`.clone()` / 直接 move）会随
+//! 借用检查合法演进，锁整行会让一次无害重构必然假红。但**快照列例外**：它的锚必须带变量名，
+//! 否则 `Set(Some("{}".to_string()))` 这种空壳照样命中（假改造负控专门锁这一格）；变量名再由
+//! 「生产者必须是 `build_blackboard_snapshot`」那条窗口级断言兜住。
+//!
 //! # 负控
 //!
-//! `single_stock_persist_sets_version` 对「摘掉那一行」的变异副本必须返回 `false` ——
-//! 否则本门只是恒真断言（本仓对每道新门的统一要求）。
+//! 每条锚都要能「摘掉即红」：`single_stock_persist_sets_version` 对「摘掉那一行」的变异副本
+//! 必须返回 `false`，`single_stock_channel_persists_diagnostic_columns` 对每条锚各做一次变异
+//! （本仓对每道新门的统一要求）。
 //!
 //! 定位器自己也有两条自证（2026-10-08 补）：① 本函数是文件最后一个顶层 item 时窗口照样定得了
 //! （现网形态，旧判据正因它而从没绿过）；② 收尾 `}` 被摘掉 ⇒ 窗口越界吃兄弟 item ⇒ 必须红。
@@ -49,10 +71,53 @@ fn single_stock_window(core_src: &str) -> &str {
     win
 }
 
+/// 取**成功落库那次** update 的块（`ActiveModel` 字面量到 `.exec(db)` 之前）。
+///
+/// 为什么必须切到块级、不能只在整个函数窗口里查列名：本函数有**三处** `Entity::update`
+/// （precheck 跳过分支 / 成功分支 / 运行失败分支），前两处都把 `decision_position_pct` 之类
+/// 写成 `Set(None)`。在整个窗口里查 `decision_position_pct: Set(` 会被建行与失败分支喂成
+/// 「已写」⇒ 判据恒真、负控失效。
+///
+/// 起点锚用 `status: Set("completed".into())` —— 只有成功分支写 `"completed"`，另两处写
+/// `"failed"`，据此把块钉死在成功落库那一次。
+fn persist_update_block(win: &str) -> &str {
+    let start = win
+        .find("status: Set(\"completed\".into()),")
+        .expect("找不到成功分支的落库 update（`status` 右值形态已变，须同步本门）");
+    let rest = &win[start..];
+    let end = rest
+        .find(".exec(db)")
+        .expect("成功分支的落库 update 没有 `.exec(db)` 收尾 ⇒ 块边界判据失效");
+    &rest[..end]
+}
+
 /// 代际写入语句的字面量。**带尾逗号**不是随手写的：本函数里有一条注释
 /// （`stock_workflow/core.rs:2196`）逐字抄了同一个表达式但没有逗号 ⇒ 少了逗号判据就会被注释喂成「已写代际」，
 /// 负控也就失效（正是本仓登记的「注释里抄一遍常量名原本算已筛」那一族伪装）。
 const PERSIST_WRITE: &str = "template_version: Set(Some(loaded.version)),";
+
+/// 成功落库那次 update **必须**写的诊断列（名目 → 块内锚点）。
+///
+/// 除快照一列外，锚点一律止于 `列名: Set(`：只锁「这一列被写了」，不锁写的是什么表达式。
+/// 快照例外的理由见模块文档「判据口径」段。
+const REQUIRED_PERSIST_COLS: &[(&str, &str)] = &[
+    ("黑板快照", "blackboard_snapshot: Set(Some(bb_snapshot"),
+    ("决策理由", "decision_reasoning: Set("),
+    ("仓位百分比", "decision_position_pct: Set("),
+    ("决策档位", "decision_time_horizon: Set("),
+    ("档位来源", "decision_horizon_source: Set("),
+    ("四周期价位映射", "horizon_price_map: Set("),
+    ("LLM 原始决策", "llm_decision_json: Set("),
+];
+
+/// 快照与观测的**生产者**锚（函数窗口级）。
+///
+/// 只锁 update 块里的 `Set(Some(bb_snapshot)` 是不够的：把 `bb_snapshot` 改成
+/// `"{}".to_string()` 照样命中，而空快照在下游四条链上与「没跑过分析」不可区分。
+/// 故另加两条：快照必须由 `build_blackboard_snapshot` 构造、且观测调用真的发生。
+const SNAPSHOT_PRODUCER: &str =
+    "let bb_snapshot = serde_json::to_string(&build_blackboard_snapshot(";
+const DQI_OBSERVATION: &str = "record_dqi_observation(db, &analysis_id, template_id, &bb_snapshot)";
 
 /// 该通道的落库 update 是否写了代际。
 fn single_stock_persist_sets_version(win: &str) -> bool {
@@ -94,6 +159,84 @@ fn single_stock_channel_writes_generation_at_persist() {
         !single_stock_persist_sets_version(&mutated),
         "负控失效：删掉代际写入后判据仍然为真，本门不构成防线"
     );
+}
+
+/// 成功落库那次 update 里缺席的诊断列名目（空 = 全写了）。
+fn missing_persist_cols(block: &str) -> Vec<&'static str> {
+    REQUIRED_PERSIST_COLS
+        .iter()
+        .filter(|(_, anchor)| !block.contains(anchor))
+        .map(|(label, _)| *label)
+        .collect()
+}
+
+#[test]
+fn single_stock_channel_persists_diagnostic_columns() {
+    let core_src = include_str!("../src/commands/stock_workflow/core.rs");
+    let win = single_stock_window(core_src);
+    let block = persist_update_block(win);
+
+    // ── 块边界自证 ──
+    // 本函数有三处 `Entity::update`（precheck 跳过 / 成功 / 运行失败），后两处的占位行把
+    // `decision_position_pct` 等写成 `Set(None)`。块定位一旦退化到整个窗口，下面每条锚都会
+    // 被那两处喂成「已写」⇒ 判据恒真。故先断言块里不含失败分支的字面量。
+    assert!(
+        !block.contains("status: Set(\"failed\""),
+        "块边界越界吃到了失败分支的 update ⇒ 定位器失效，本门全部锚退化为恒真"
+    );
+    assert!(
+        block.contains(PERSIST_WRITE),
+        "块边界没圈到代际写入 ⇒ 与既有 `single_stock_channel_writes_generation_at_persist` \
+         不同源，两处判据会各说一套"
+    );
+
+    // ── 正断言：七列 + 快照生产者 + 观测调用 ──
+    let missing = missing_persist_cols(block);
+    assert!(
+        missing.is_empty(),
+        "单股 / 每日自动化通道的落库 update 缺列：{missing:?} ⇒ 这些列恒 NULL，下游链只能把\
+         「本通道没写」读成「这次分析没跑」（2026-10-14 实证 15 条 completed 记录全缺）"
+    );
+    assert!(
+        win.contains(SNAPSHOT_PRODUCER),
+        "`bb_snapshot` 不是由 `build_blackboard_snapshot` 构造的 ⇒ 快照列即便写了也可能是空壳，\
+         而空快照在反思/仪表盘/关键价位/证据引用四条下游链上与「没跑过分析」不可区分"
+    );
+    assert!(
+        win.contains(DQI_OBSERVATION),
+        "本通道没调 `record_dqi_observation` ⇒ 数据质量熔断的观测样本整批缺失，streak 偏低且无人知晓"
+    );
+
+    // ── 负控 1：逐条摘锚，判据必须点名到那一列 ──
+    for (label, anchor) in REQUIRED_PERSIST_COLS {
+        let n = block.matches(anchor).count();
+        assert_eq!(
+            n, 1,
+            "「{label}」的锚点在块内命中 {n} 处（应为 1）⇒ 落库面积变了，须重新数并同步判据"
+        );
+        let mutated = block.replace(anchor, "");
+        assert_eq!(
+            missing_persist_cols(&mutated),
+            vec![*label],
+            "「{label}」的负控失效：摘掉该锚后判据没有点名它（说明还有别处在喂这条判据）"
+        );
+    }
+
+    // ── 负控 2（假改造）：把快照包成空壳，判据必须仍然报缺 ──
+    // 若锚点只写到 `blackboard_snapshot: Set(Some(`，`Set(Some("{}".to_string()))` 会照样命中
+    // —— 那是比 NULL 更坏的一种：列有值、下游四条链读到的是「一个节点都没有的快照」。
+    let hollow = block.replace("Set(Some(bb_snapshot", "Set(Some(\"{}\".to_string()");
+    assert_ne!(hollow, block, "空壳变异点未命中 —— 快照写入的字面量已变，须同步本测试");
+    assert!(
+        missing_persist_cols(&hollow).contains(&"黑板快照"),
+        "负控失效：把快照换成空 JSON 壳，本门仍然判它「已写」"
+    );
+
+    // ── 负控 3：摘掉观测调用与快照生产者，两条窗口级判据必须失效 ──
+    let no_obs = win.replace(DQI_OBSERVATION, "");
+    assert!(!no_obs.contains(DQI_OBSERVATION), "观测负控变异点未命中");
+    let no_prod = win.replace(SNAPSHOT_PRODUCER, "let bb_snapshot = String::new();");
+    assert!(!no_prod.contains(SNAPSHOT_PRODUCER), "生产者负控变异点未命中");
 }
 
 #[test]

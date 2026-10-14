@@ -18045,7 +18045,10 @@
       "gapReasonLegacyConfidence": "Confianza histórica",
       "legacySummary": "Resumen histórico",
       "renderFailed": "Error de renderizado",
-      "staleRecordSummary": "Resumen de registro caducado",
+      "snapshotAbsentTitle": "Sin instantánea del tablero para este registro",
+      "snapshotAbsentNotPersisted": "El análisis se completó, pero el canal que lo produjo no guardó los resultados por nodo; el diagnóstico de calidad de datos, las evidencias por analista y la reconstrucción del panel no están disponibles.",
+      "snapshotAbsentIncomplete": "El análisis aún no terminó, así que no hay instantánea del tablero.",
+      "snapshotAbsentRerunHint": "Vuelva a ejecutar la cadena de análisis; este canal ya guarda la instantánea.",
       "summaryLength": "Longitud del resumen"
     },
     "dataWarning": {

@@ -39,6 +39,18 @@
 //! 由注入文本显式声明「另有 N 条早于起算代，未注入」。档可以默认「跨档本就不该要」，
 //! 代际不行 —— 一个空结果既可能是「真没教训」也可能是「教训全在起算代之前」，
 //! 两者对模型的含义相反，静默合并就是伪造（本仓「结构性缺口不得造成歧义」口径）。
+//!
+//! ## 依据过滤（2026-10-14 补）
+//!
+//! 反思行「跑完了」不等于「它有依据」：被复盘的那次分析若没落黑板快照
+//! （`stock_analyses.blackboard_snapshot IS NULL`），反思是在**空记忆**上产出的 ——
+//! `build_sub_analysis_from_snapshot` 对这种行注入空 map 并 WARN，产出的教训文本看着
+//! 像结论，实际没有任何逐节点证据支撑。实证：15 条无快照的分析行已产出 14 条
+//! `completed` 反思行，全部落在同股 90 天注入窗口内。
+//!
+//! 所以注入语料按**被复盘的分析有没有留下依据**筛，不按反思行自己写没写完。
+//! 与代过滤同口径：被筛掉的条数一并交还调用方（两个 `fetch_*_completed` 返回元组的
+//! 第二项），由注入文本显式声明。静默筛除会把「有教训但依据不可得」伪装成「没有教训」。
 
 use axagent_entities::{reflection_lessons, stock_analyses, stock_reflections};
 
@@ -47,9 +59,11 @@ pub use stock_reflections::Model as ReflectionModel;
 
 // `count(db)` 由 `PaginatorTrait` 提供（sea-orm 2.x 把它从 QuerySelect 挪走了）⇒ 少这一个
 // import 就退化成 `Iterator::count`，编译器报的是「not an iterator」，看着完全不像缺 import。
+// 同一族：`select_only()` / `column()` / `columns()` / `into_tuple()` 全挂在 `QuerySelect` 上，
+// 漏它报的是「no method named `select_only`」（2026-10-14 实测踩过一次）。
 use sea_orm::{
     ColumnTrait, Condition, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder,
+    QueryOrder, QuerySelect,
 };
 
 /// 「同档 OR 复盘档未知(NULL)」组合子（〇-B v2 第 4 条）。
@@ -76,10 +90,43 @@ where
     Condition::any().add(col.gte(generation_floor)).add(col.is_null())
 }
 
+/// 「被复盘的分析留有黑板快照」的分析行 id 集合。
+///
+/// 只投影 `id`（`into_tuple`）：本表快照单行可达数 MB，为判「有没有」把整列读进内存是纯浪费。
+async fn analysis_ids_with_snapshot(
+    db: &DatabaseConnection,
+) -> Result<std::collections::HashSet<String>, sea_orm::DbErr> {
+    Ok(stock_analyses::Entity::find()
+        .select_only()
+        .column(stock_analyses::Column::Id)
+        .filter(stock_analyses::Column::BlackboardSnapshot.is_not_null())
+        .into_tuple::<String>()
+        .all(db)
+        .await?
+        .into_iter()
+        .collect())
+}
+
+/// 按「被复盘的分析有没有留依据」切分反思行 ⇒ `(可注入, 因无依据被筛除的条数)`。
+///
+/// 纯函数：判据与取数分离，筛除逻辑可在不连库的情况下逐情形验。指向**已删除**分析行的
+/// 反思与「行在但快照 NULL」同处置（两者都拿不到逐节点依据），不另立名目。
+fn partition_by_analysis_evidence(
+    rows: Vec<stock_reflections::Model>,
+    with_snapshot: &std::collections::HashSet<String>,
+) -> (Vec<stock_reflections::Model>, usize) {
+    let (kept, dropped): (Vec<_>, Vec<_>) =
+        rows.into_iter().partition(|r| with_snapshot.contains(&r.original_analysis_id));
+    (kept, dropped.len())
+}
+
 /// 同 ticker 近期已完成反思（按 `CreatedAt` 倒序）。
 ///
 /// 调用方（`fetch_stock_lessons` 的 same_ticker 段）传「90 天前毫秒时间戳」，
 /// 取回后自行 `take(3)` —— 截断数是呈现策略，留给调用方。
+///
+/// 返回元组第二项 = 因**源分析没留黑板快照**而被筛除的条数（见模块文档「依据过滤」）。
+/// 筛除发生在截断**之前**，否则被筛掉的行会让 `take(3)` 少拿行而无人知晓。
 pub async fn fetch_same_ticker_completed(
     db: &DatabaseConnection,
     stock_code: &str,
@@ -87,7 +134,7 @@ pub async fn fetch_same_ticker_completed(
     horizon: Option<&str>,
     // 当前分析所属代际（`None` = 不过滤，语义见模块头「代过滤语义」）
     generation_floor: i32,
-) -> Result<Vec<stock_reflections::Model>, sea_orm::DbErr> {
+) -> Result<(Vec<stock_reflections::Model>, usize), sea_orm::DbErr> {
     let q = stock_reflections::Entity::find()
         .filter(stock_reflections::Column::StockCode.eq(stock_code))
         .filter(stock_reflections::Column::Status.eq("completed")) // 只注入已 resolve 的教训
@@ -105,20 +152,34 @@ pub async fn fetch_same_ticker_completed(
         stock_reflections::Column::TemplateVersion,
         generation_floor,
     ));
-    q.order_by_desc(stock_reflections::Column::CreatedAt).all(db).await
+    let rows = q.order_by_desc(stock_reflections::Column::CreatedAt).all(db).await?;
+    let with_snapshot = analysis_ids_with_snapshot(db).await?;
+    Ok(partition_by_analysis_evidence(rows, &with_snapshot))
 }
 
-/// 全市场近期已完成反思（按 `CreatedAt` 倒序，调用方自行排除本股并 `take(2)`）。
+/// 全市场近期已完成反思（按 `CreatedAt` 倒序，调用方自行 `take(2)`）。
+///
+/// `exclude_stock` = 「跨 ticker 注入要排除本股」。**这条排除下推到 dao 而不是留在调用方**：
+/// 依据筛除的条数必须与「进 prompt 的行」同一条分母，否则调用方先按股票滤一遍、dao 再按
+/// 依据滤一遍，报出来的「另有 N 条未注入」会把同股那些本来就不要的行也算进去 —— 数字偏大
+/// 且名目混，正是要避免的「两套计数域并排显示成可比」。
+///
+/// 返回元组第二项 = 因源分析无黑板快照被筛除的条数（与 `exclude_stock` 同分母）。
 pub async fn fetch_recent_completed(
     db: &DatabaseConnection,
     since_ms: i64,
     horizon: Option<&str>,
     // 当前分析所属代际（`None` = 不过滤，语义见模块头「代过滤语义」）
     generation_floor: i32,
-) -> Result<Vec<stock_reflections::Model>, sea_orm::DbErr> {
+    exclude_stock: Option<&str>,
+) -> Result<(Vec<stock_reflections::Model>, usize), sea_orm::DbErr> {
     let q = stock_reflections::Entity::find()
         .filter(stock_reflections::Column::CreatedAt.gte(since_ms))
         .filter(stock_reflections::Column::Status.eq("completed")); // 只看已 resolve 的
+    let q = match exclude_stock {
+        Some(code) => q.filter(stock_reflections::Column::StockCode.ne(code)),
+        None => q,
+    };
     let q = match horizon {
         Some(h) => q.filter(
             Condition::any()
@@ -132,7 +193,9 @@ pub async fn fetch_recent_completed(
         stock_reflections::Column::TemplateVersion,
         generation_floor,
     ));
-    q.order_by_desc(stock_reflections::Column::CreatedAt).all(db).await
+    let rows = q.order_by_desc(stock_reflections::Column::CreatedAt).all(db).await?;
+    let with_snapshot = analysis_ids_with_snapshot(db).await?;
+    Ok(partition_by_analysis_evidence(rows, &with_snapshot))
 }
 
 /// 规则化教训（按 `Confidence` 倒序，调用方自行 `take(5)`）。
@@ -258,7 +321,7 @@ pub async fn fetch_by_original_analysis_ids(
         .await
 }
 
-/// 把「原始分析已不存在」的 pending 反思行落成显式终局，返回被处置的行数。
+/// 把「拿不到逐节点依据」的 pending 反思行落成显式终局，返回被处置的行数。
 ///
 /// **为什么在 dao**：命令层写 `update_many` 会命中分层门禁（`commands-no-direct-db`），
 /// 而这件事本身就是一次数据自愈 —— 与命令层的 `reclaim_stale_running`（卡死 running 退回
@@ -268,6 +331,13 @@ pub async fn fetch_by_original_analysis_ids(
 /// 每天 18:00 重新捞到、重新空转，队列永不自愈（现网实证：6 条指向已删除分析的行连续数月
 /// `processed=6 / skippedYoung=6 / resolved=0`，到期日早已过去两个月）。把它们冒充成
 /// 「太新未到期」是双重失真：既读不出真因，又让分母里一直挂着不会到期的行。
+///
+/// **两种成因分开写码**（同一格「拿不到依据」，但下一步动作完全不同）：
+/// - `ORIGINAL_ANALYSIS_MISSING`：分析行已不存在 ⇒ 永远等不到，孤儿。
+/// - `ANALYSIS_SNAPSHOT_MISSING`：分析行在、已出结论，却没落黑板快照 ⇒ 反思会在**空记忆**
+///   上跑并产出无依据的教训（实证：15 条无快照分析已产出 14 条 completed 反思行）。
+///   这种行**重跑该分析**就能取回依据，与孤儿不可恢复是两件事，所以必须另立码。
+/// - 分析行仍在跑（非 `completed`）⇒ **不处置**，快照缺席此时是正常中间态，等它落库。
 ///
 /// 状态串沿用本仓既有的 `failed: <码>: <人话>` 形态 ⇒ 面板与复盘按现成的失败呈现读它，
 /// 不新增一套状态值域（新增一个状态值要同时改前端识别逻辑，那是更大的面）。
@@ -284,30 +354,42 @@ pub async fn retire_orphan_pending_reflections(
     if pending.is_empty() {
         return Ok(0);
     }
-    // 一次取回"还活着的 analysis_id"，避免逐条 find_by_id 的 N+1
+    // 一次取回 pending 行引用的分析行 (id, status)，避免逐条 find_by_id 的 N+1。
+    // 只投影这两列：快照单行可达数 MB，判「有没有」不需要把它读进内存。
     let analysis_ids: Vec<String> =
         pending.iter().map(|r| r.original_analysis_id.clone()).collect();
-    let alive: std::collections::HashSet<String> = stock_analyses::Entity::find()
+    let analysis_status: std::collections::HashMap<String, String> = stock_analyses::Entity::find()
+        .select_only()
+        .columns([stock_analyses::Column::Id, stock_analyses::Column::Status])
         .filter(stock_analyses::Column::Id.is_in(analysis_ids))
+        .into_tuple::<(String, String)>()
         .all(db)
         .await?
         .into_iter()
-        .map(|a| a.id)
         .collect();
+    let with_evidence = analysis_ids_with_snapshot(db).await?;
 
     let mut retired = 0usize;
     for r in pending {
-        if alive.contains(&r.original_analysis_id) {
-            continue;
-        }
-        stock_reflections::Entity::update_many()
-            .col_expr(
-                stock_reflections::Column::Status,
-                Expr::value(format!(
-                    "failed: ORIGINAL_ANALYSIS_MISSING: 原始分析 {} 已不存在，反思行已成孤儿",
+        let reason = match analysis_status.get(&r.original_analysis_id) {
+            None => Some(format!(
+                "failed: ORIGINAL_ANALYSIS_MISSING: 原始分析 {} 已不存在，反思行已成孤儿",
+                r.original_analysis_id
+            )),
+            Some(st) if st == "completed" && !with_evidence.contains(&r.original_analysis_id) => {
+                Some(format!(
+                    "failed: ANALYSIS_SNAPSHOT_MISSING: 原始分析 {} 已出结论但未落黑板快照，\
+                     逐节点依据不可得，反思不予执行（重跑该分析可取回依据）",
                     r.original_analysis_id
-                )),
-            )
+                ))
+            },
+            Some(_) => None,
+        };
+        let Some(status_text) = reason else {
+            continue;
+        };
+        stock_reflections::Entity::update_many()
+            .col_expr(stock_reflections::Column::Status, Expr::value(status_text))
             .col_expr(stock_reflections::Column::UpdatedAt, Expr::value(now_ms))
             .filter(stock_reflections::Column::Id.eq(r.id))
             .exec(db)
@@ -393,4 +475,88 @@ pub fn reflection_review_json(r: &stock_reflections::Model) -> serde_json::Value
         "moverLabel": r.mover_label,
         "horizonResults": horizon_results,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn row(id: &str, analysis_id: &str) -> stock_reflections::Model {
+        stock_reflections::Model {
+            id: id.to_string(),
+            stock_code: "000001".to_string(),
+            stock_name: "测试".to_string(),
+            original_analysis_id: analysis_id.to_string(),
+            as_of_date: "2026-10-14".to_string(),
+            hindsight_date: "2026-11-11".to_string(),
+            min_confidence_threshold: 60,
+            reflection_depth: "light".to_string(),
+            horizon: None,
+            actual_outcome: String::new(),
+            raw_return: None,
+            alpha_return: None,
+            holding_days: None,
+            mover_label: None,
+            benchmark_name: None,
+            verdict: None,
+            alpha_cited: None,
+            lesson_summary: Some("测试教训".to_string()),
+            what_went_wrong: None,
+            missed_signals: None,
+            fix_for_future: None,
+            parameter_suggestions_json: None,
+            horizon_results_json: None,
+            decision_json: None,
+            blackboard_snapshot: None,
+            template_version: None,
+            source: "due".to_string(),
+            miss_layer: None,
+            status: "completed".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn ids(v: &[&str]) -> HashSet<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn kept_ids(kept: &[stock_reflections::Model]) -> Vec<&str> {
+        kept.iter().map(|r| r.id.as_str()).collect()
+    }
+
+    #[test]
+    fn drops_rows_whose_analysis_left_no_snapshot_and_counts_them() {
+        let rows = vec![row("r1", "a-has-snap"), row("r2", "a-null-snap"), row("r3", "a-deleted")];
+        let (kept, dropped) =
+            partition_by_analysis_evidence(rows, &ids(&["a-has-snap", "unrelated"]));
+        assert_eq!(kept_ids(&kept), vec!["r1"], "只有源分析留有快照的那行进语料");
+        assert_eq!(
+            dropped, 2,
+            "「快照为 NULL」与「分析行已删」两族都算依据不可得，必须一起计数而非静默消失"
+        );
+    }
+
+    #[test]
+    fn keeps_relative_order_so_truncation_still_takes_the_newest() {
+        // 调用方按 CreatedAt 倒序取回后再 `take(3)` ⇒ 筛除不得改变相对顺序，
+        // 否则「取最新 3 条」会退化成「取任意 3 条」。
+        let rows = vec![row("newest", "a1"), row("mid", "a-gone"), row("oldest", "a2")];
+        let (kept, dropped) = partition_by_analysis_evidence(rows, &ids(&["a1", "a2"]));
+        assert_eq!(kept_ids(&kept), vec!["newest", "oldest"]);
+        assert_eq!(dropped, 1);
+    }
+
+    #[test]
+    fn all_dropped_is_distinguishable_from_no_rows_at_all() {
+        // 负控：若实现把「全被筛除」写成空输入即返回 (空, 0)，注入文本就会谎称
+        // 「这段历史没有教训」—— 那正是本模块文档反对的「把结构性缺口读成空集」。
+        let (kept, dropped) = partition_by_analysis_evidence(vec![row("r1", "a-gone")], &ids(&[]));
+        assert!(kept.is_empty());
+        assert_eq!(dropped, 1, "空结果 + 1 条被筛除，必须与「本来 0 行」可区分");
+        let (kept0, dropped0) = partition_by_analysis_evidence(Vec::new(), &ids(&["a1"]));
+        assert!(kept0.is_empty());
+        assert_eq!(dropped0, 0, "真的没有行 ⇒ 计数为 0，注入文本不写这一句");
+    }
 }

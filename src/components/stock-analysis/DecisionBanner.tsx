@@ -223,10 +223,9 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     if (!parsed || typeof parsed !== "object" || typeof parsed.grade !== "string") {
       return null;
     }
-    // V66 修复(2026-07-29): stale_record 标记的占位 JSON（snapshot 为空时由
-    // stockAnalysisStore.loadAnalysis else 分支设置），返回 null 触发降级面板,
-    // 降级面板会检测 stale_record 并显示「重跑分析」按钮。
-    if (parsed.stale_record === true) {
+    // 无黑板快照时 store 写入的占位 JSON：本组件不渲染诊断，改由下方缺席块按
+    // `snapshot_absence` 分「没跑完」与「跑完但未落库」两种口径陈述。
+    if (typeof parsed.snapshot_absence === "string") {
       return null;
     }
 
@@ -340,15 +339,14 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     };
   }, [dataQualitySummary, t]);
 
-  // V66 修复(2026-07-29): 检测 stale_record 标记（snapshot 为空时 store 设置的占位 JSON）
-  // 用于在降级面板中显示「重跑分析」按钮，而非静默展示空字符串
-  const staleRecordSummary: string | null = useMemo(() => {
+  // 无黑板快照的缺席类型（store 在 `record.blackboardSnapshot` 为空时写入占位 JSON）。
+  // 两种缺席的后果与下一步完全不同，必须分开陈述，不得合并成「记录已过期」。
+  const snapshotAbsence: "not_persisted" | "incomplete" | null = useMemo(() => {
     if (!dataQualitySummary) { return null; }
     try {
       const parsed = JSON.parse(dataQualitySummary);
-      if (parsed?.stale_record === true && typeof parsed.summary === "string") {
-        return parsed.summary as string;
-      }
+      const v = parsed?.snapshot_absence;
+      if (v === "not_persisted" || v === "incomplete") { return v; }
     } catch {
       // 忽略解析失败，走默认降级面板
     }
@@ -2794,6 +2792,43 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               />
             </div>
           )
+          : snapshotAbsence
+          ? (
+            /* 无黑板快照 —— 不是「渲染失败」，是「这条记录没有可诊断的逐节点结果」。
+               两种缺席各占一句；动作只给「重跑分析」：重跑决策不重写快照，给它是假门。 */
+            <div
+              className="mb-4 p-2 rounded text-xs"
+              style={{ background: "var(--surface)", borderLeft: "3px solid var(--sa-amber, #f59e0b)" }}
+            >
+              <div className="font-semibold mb-1" style={{ color: "#f59e0b" }}>
+                {t("stockAnalysis.dataQuality.snapshotAbsentTitle")}
+              </div>
+              <div style={{ color: "var(--color-text-secondary)" }}>
+                {snapshotAbsence === "not_persisted"
+                  ? t("stockAnalysis.dataQuality.snapshotAbsentNotPersisted")
+                  : t("stockAnalysis.dataQuality.snapshotAbsentIncomplete")}
+              </div>
+              {snapshotAbsence === "not_persisted" && stockCode && (
+                <div className="mt-2">
+                  <Tooltip title={t("stockAnalysis.dataQuality.snapshotAbsentRerunHint")}>
+                    <Button
+                      size="small"
+                      type="primary"
+                      icon={<ReloadOutlined />}
+                      onClick={() => {
+                        useStockAnalysisStore.getState().startAnalysis(
+                          stockCode,
+                          analysisId ? { parentAnalysisId: analysisId } : undefined,
+                        );
+                      }}
+                    >
+                      {t("stockAnalysis.reAnalyze")}
+                    </Button>
+                  </Tooltip>
+                </div>
+              )}
+            </div>
+          )
           : (
             // dataQualityReport 为 null（解析失败/旧版输出）时显示原始数据片段
             // 方便用户/开发者一眼看出是"空"还是"格式不匹配"还是"字段缺失"
@@ -2819,24 +2854,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                     </pre>
                   </>
                 )}
-                {staleRecordSummary && (
-                  // V66 修复(2026-07-29): snapshot 为空的旧版记录，显示重跑按钮
-                  <div className="mt-2 flex items-center gap-2 flex-wrap">
-                    <span>{staleRecordSummary}</span>
-                    {analysisId && (
-                      <Tooltip title={t("stockAnalysis.rerunDecisionHint")}>
-                        <Button
-                          size="small"
-                          type="primary"
-                          onClick={() => useStockAnalysisStore.getState().rerunDecision(analysisId)}
-                        >
-                          {t("stockAnalysis.rerunDecision")}
-                        </Button>
-                      </Tooltip>
-                    )}
-                  </div>
-                )}
-                {dataQualitySummary.length === 0 && !staleRecordSummary && (
+                {dataQualitySummary.length === 0 && (
                   <div className="mt-1">{t("stockAnalysis.dataQuality.emptySummaryHint")}</div>
                 )}
               </div>

@@ -551,3 +551,55 @@ describe("DecisionBanner 主档来历行", () => {
     expect(text).not.toContain("actionSource");
   });
 });
+
+/**
+ * 无黑板快照的缺席陈述（2026-10-14）。
+ *
+ * 被测的硬约束是「结构性缺口不得在 UI 造成歧义」：store 在 `record.blackboardSnapshot`
+ * 为空时写一个占位 JSON，组件必须按 `snapshot_absence` 把两种缺席各说一句 ——
+ *   · `not_persisted`：分析跑完了，但产出通道没把逐节点结果落库；
+ *   · `incomplete`：分析本身没跑完。
+ * 旧实现把两者一律渲染成「渲染失败 + 过期记录摘要 + 仅重跑决策」，其中两处是假话：
+ * 那不是渲染失败（没有格式不匹配），而「仅重跑决策」不重写快照 ⇒ 用户按提示操作也拿不回诊断。
+ *
+ * 负控分工：第 3 条用**真·格式不匹配**的样本钉住「渲染失败」块仍归它专用 ——
+ * 若有人把缺席与格式不匹配重新合并成一个块，第 1、2 条即红；若有人把缺席也塞进渲染失败，
+ * 第 3 条的 `not.toContain(snapshotAbsentTitle)` 即红。
+ */
+describe("DecisionBanner 无黑板快照的缺席陈述", () => {
+  /** 定位缺席块容器（标题 div 的父级），用于把断言收在该块内 —— 组件别处合法存在
+   *  三枚「仅重跑决策」按钮（有快照的正常路径），全文级 `not.toContain` 会假红。 */
+  function absentBlock(): HTMLElement {
+    const title = Array.from(document.body.querySelectorAll("div")).find(
+      (el) => el.textContent === "stockAnalysis.dataQuality.snapshotAbsentTitle",
+    );
+    if (!title) { throw new Error("未找到无黑板快照缺席块的标题"); }
+    return title.parentElement as HTMLElement;
+  }
+
+  it("not_persisted ⇒ 缺席标题 + 该种说明 + 重跑分析，块内不给「仅重跑决策」", () => {
+    renderWithDq(JSON.stringify({ grade: "N/A", score: 0, snapshot_absence: "not_persisted" }));
+    const block = absentBlock();
+    expect(block.textContent).toContain("stockAnalysis.dataQuality.snapshotAbsentNotPersisted");
+    expect(block.textContent).toContain("stockAnalysis.reAnalyze");
+    expect(block.textContent).not.toContain("stockAnalysis.rerunDecision");
+    expect(document.body.textContent).not.toContain("stockAnalysis.dataQuality.renderFailed");
+  });
+
+  it("incomplete ⇒ 说「尚未完成」，不给重跑按钮（该态由决策缺失占位卡承接入口）", () => {
+    renderWithDq(JSON.stringify({ grade: "N/A", score: 0, snapshot_absence: "incomplete" }));
+    const block = absentBlock();
+    expect(block.textContent).toContain("stockAnalysis.dataQuality.snapshotAbsentIncomplete");
+    expect(block.textContent).not.toContain("stockAnalysis.dataQuality.snapshotAbsentNotPersisted");
+    expect(block.textContent).not.toContain("stockAnalysis.reAnalyze");
+    expect(document.body.textContent).not.toContain("stockAnalysis.dataQuality.renderFailed");
+  });
+
+  it("真·格式不匹配仍走「渲染失败」块并回显原文，不冒充快照缺席", () => {
+    renderWithDq("{not json");
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("stockAnalysis.dataQuality.renderFailed");
+    expect(text).toContain("{not json");
+    expect(text).not.toContain("stockAnalysis.dataQuality.snapshotAbsentTitle");
+  });
+});

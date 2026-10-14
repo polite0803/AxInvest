@@ -91,7 +91,7 @@ export function reportQualitySeverity(rq: number | undefined): DiagSeverity | nu
  * 返回 null 的四种情况（调用方应据此降级展示，而不是自行计算）：
  *   1. 空字符串 / 非法 JSON
  *   2. 缺少 `grade` 字段（不是 data-quality 节点的输出）
- *   3. `stale_record === true`（快照缺失时由 store 写入的占位 JSON）
+ *   3. 带 `snapshot_absence`（无黑板快照时由 store 写入的占位 JSON；呈现层按该键出缺席文案）
  *   4. 缺少 `diagnostics`（2026-07-23 之前的旧版快照，无法定位到单个分析师）
  */
 export function parseDataQualityReport(raw: string | null | undefined): DataQualityReport | null {
@@ -107,7 +107,7 @@ export function parseDataQualityReport(raw: string | null | undefined): DataQual
 
   const rec = parsed as Record<string, unknown>;
   if (typeof rec.grade !== "string") { return null; }
-  if (rec.stale_record === true) { return null; }
+  if (typeof rec.snapshot_absence === "string") { return null; }
   if (!rec.diagnostics || typeof rec.diagnostics !== "object") { return null; }
 
   return parsed as DataQualityReport;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { showBackendError } from "@/lib/errorI18n";
+import { showBackendError, translateBackendError } from "@/lib/errorI18n";
 import { invoke, isTauri, logIpcError } from "@/lib/invoke";
 import { useBackupStore, useSchedulerStore, useSettingsStore } from "@/stores";
 import type { TaskReport } from "@/types";
@@ -1033,7 +1033,11 @@ export function SchedulerSettings() {
                                     whiteSpace: "nowrap",
                                   }}
                                 >
-                                  {rec.output || rec.error || "-"}
+                                  {rec.output
+                                    ? translateBackendError(rec.output)
+                                    : rec.error
+                                    ? translateBackendError(rec.error)
+                                    : "-"}
                                 </span>
                                 {!isSkipped && (
                                   <span style={{ color: token.colorTextTertiary, whiteSpace: "nowrap" }}>

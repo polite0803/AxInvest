@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { showBackendError } from "@/lib/errorI18n";
+import { showBackendError, translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import type { ScheduledTask, TaskExecutionRecord } from "@/types";
 import {
@@ -511,11 +511,22 @@ export function ScheduledJobsTab() {
             {
               title: t("tasksCenter.history.detail"),
               key: "detail",
+              // 运行记录这两个字段可能带的是后端 ErrorResponse 的 **JSON 串**（命令层按
+              // 错误码规范返回），不译会让界面出现 `{"code":"...","detail":"..."}` 字面量；
+              // 非 JSON 的自由文本原样透传（translateBackendError 的零回归路径）。
               render: (_: unknown, r: TaskExecutionRecord) =>
                 r.error
-                  ? <Typography.Text type="danger" style={{ fontSize: 12 }}>{r.error}</Typography.Text>
+                  ? (
+                    <Typography.Text type="danger" style={{ fontSize: 12 }}>
+                      {translateBackendError(r.error)}
+                    </Typography.Text>
+                  )
                   : r.output
-                  ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>{r.output}</Typography.Text>
+                  ? (
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      {translateBackendError(r.output)}
+                    </Typography.Text>
+                  )
                   : "-",
             },
           ]}

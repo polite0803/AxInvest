@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { useTaskCenterStore } from "@/stores";
 import type { PipelineRun, TaskExecutionRecord } from "@/types";
@@ -150,11 +151,15 @@ function CronHistoryDrawer({
       key: "detail",
       render: (_: unknown, r: TaskExecutionRecord) =>
         r.error
-          ? <Typography.Text type="danger" style={{ fontSize: 12 }}>{r.error}</Typography.Text>
+          ? (
+            <Typography.Text type="danger" style={{ fontSize: 12 }}>
+              {translateBackendError(r.error)}
+            </Typography.Text>
+          )
           : r.output
           ? (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {r.output}
+              {translateBackendError(r.output)}
             </Typography.Text>
           )
           : "-",

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { translateBackendError } from "@/lib/errorI18n";
 import { useTaskCenterStore } from "@/stores";
 import {
   Alert,
@@ -99,7 +100,7 @@ export function RunsTab() {
             <Typography.Text strong>{r.name}</Typography.Text>
             {r.error?.message && (
               <Typography.Text type="danger" style={{ fontSize: 12 }} ellipsis>
-                {r.error.message}
+                {translateBackendError(r.error.message)}
               </Typography.Text>
             )}
           </Space>

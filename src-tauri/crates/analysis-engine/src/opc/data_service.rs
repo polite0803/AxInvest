@@ -863,7 +863,7 @@ impl OpcDataService for DefaultDataService {
                     ),
                     notes: sea_orm::Set(data["notes"].as_str().unwrap_or("").to_string()),
                     total_revenue: sea_orm::Set(data["total_revenue"].as_f64().unwrap_or(0.0)),
-                    invoice_count: sea_orm::Set(data["invoice_count"].as_i64().unwrap_or(0) as u32),
+                    invoice_count: sea_orm::Set(data["invoice_count"].as_i64().unwrap_or(0)),
                     status: sea_orm::Set(data["status"].as_str().unwrap_or("active").to_string()),
                     created_at: sea_orm::Set(now),
                     updated_at: sea_orm::Set(now),
@@ -972,7 +972,7 @@ impl OpcDataService for DefaultDataService {
             .all(&self.db)
             .await
             .map_err(|e| OpcError::Database(e.to_string()))?;
-        let total: u32 = posts.iter().map(|p| p.view_count).sum();
+        let total: i64 = posts.iter().map(|p| p.view_count).sum();
         Ok(total as f64)
     }
 

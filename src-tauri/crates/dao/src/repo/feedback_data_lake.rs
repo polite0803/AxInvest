@@ -130,7 +130,7 @@ impl FeedbackDataLake for FeedbackDataLakeDao {
             arguments: Set(serde_json::to_string(&record.arguments).unwrap_or_default()),
             result: Set(result_str),
             success: Set(if record.success { 1 } else { 0 }),
-            duration_ms: Set(record.duration_ms),
+            duration_ms: Set(record.duration_ms as i64),
             related_source_id: Set(record.related_source_id),
             created_at: Set(if record.created_at > 0 {
                 record.created_at
@@ -426,7 +426,7 @@ impl FeedbackDataLake for FeedbackDataLakeDao {
                 arguments: serde_json::from_str(&m.arguments).unwrap_or_default(),
                 result: m.result.and_then(|r| serde_json::from_str(&r).ok()),
                 success: m.success != 0,
-                duration_ms: m.duration_ms,
+                duration_ms: m.duration_ms as u64,
                 related_source_id: m.related_source_id,
                 created_at: m.created_at,
             })

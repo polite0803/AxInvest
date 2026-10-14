@@ -17,7 +17,13 @@ pub struct Model {
     /// 进化类型："parameter" | "workflow" | "hybrid"
     pub evolution_type: String,
     /// 进化前质量分
-    pub quality_before: u8,
+    ///
+    /// 类型用 `i32` 而非语义更窄的 `u8`：PostgreSQL 无任何 unsigned 整数类型，
+    /// sqlx-postgres 对 `u8` 列在**结果集解码阶段**直接报
+    /// `Type Error: u8 unsupported by sqlx-postgres`（SQL 在服务端执行成功，
+    /// PG 日志零报错，极具迷惑性），会让 list_pending_evolution_plans 整体失败。
+    /// 列实际类型为 int4，业务侧 0-100 的 u8 质量分在写入边界 `as i32`。
+    pub quality_before: i32,
     /// 参数进化结果（EvolutionResult JSON，Option）
     pub parameter_result_json: Option<String>,
     /// 流程进化结果（WorkflowModification JSON，含 genome）

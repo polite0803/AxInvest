@@ -23,7 +23,9 @@ pub struct Model {
     #[sea_orm(default_value = 0)]
     pub success: i32,
     #[sea_orm(default_value = 0)]
-    pub duration_ms: u64,
+    // i64 而非 u64：PG bigint 无 unsigned，sqlx-postgres 不支持 u64 解码
+    //（SELECT 即 decode 失败）。业务层 u64 时长在写入边界 `as i64`。
+    pub duration_ms: i64,
     pub related_source_id: Option<String>,
     #[sea_orm(indexed)]
     #[sea_orm(default_value = 0)]

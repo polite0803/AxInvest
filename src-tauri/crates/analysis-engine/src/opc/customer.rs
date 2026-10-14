@@ -284,7 +284,7 @@ fn entity_to_dto(e: opc_customers::Model) -> OpcResult<Customer> {
         tags,
         notes: e.notes,
         total_revenue: e.total_revenue,
-        invoice_count: e.invoice_count,
+        invoice_count: e.invoice_count as u32,
         status,
         created_at: e.created_at,
         updated_at: e.updated_at,

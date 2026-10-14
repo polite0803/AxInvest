@@ -34,7 +34,8 @@ pub struct Model {
     pub published: i32,
     pub published_at: Option<i64>,
     #[sea_orm(default_value = 0)]
-    pub view_count: u32,
+    // i64 对齐 PG bigint（u32 无法被 sqlx-postgres 解码）
+    pub view_count: i64,
     pub created_at: i64,
     pub updated_at: i64,
 }

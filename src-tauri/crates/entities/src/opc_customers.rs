@@ -33,7 +33,8 @@ pub struct Model {
     #[sea_orm(default_value = 0.0)]
     pub total_revenue: f64,
     #[sea_orm(default_value = 0)]
-    pub invoice_count: u32,
+    // i64 对齐 PG bigint（u32 无法被 sqlx-postgres 解码）
+    pub invoice_count: i64,
     #[sea_orm(indexed)]
     #[sea_orm(default_value = "lead")]
     pub status: String,

@@ -254,7 +254,7 @@ impl StockSelfEvolutionEngine {
             plan_id: Set(plan.plan_id.clone()),
             trigger: Set(serde_json::to_string(&plan.trigger).unwrap_or_default()),
             evolution_type: Set(evolution_type.to_string()),
-            quality_before: Set(*quality_before),
+            quality_before: Set(*quality_before as i32),
             parameter_result_json: Set(parameter_json),
             workflow_result_json: Set(workflow_json),
             status: Set(status.to_string()),

@@ -261,7 +261,7 @@ fn blog_entity_to_dto(e: opc_blog_posts::Model) -> BlogPost {
         tags,
         published: e.published != 0,
         published_at: e.published_at,
-        view_count: e.view_count,
+        view_count: e.view_count as u32,
         created_at: e.created_at,
         updated_at: e.updated_at,
     }

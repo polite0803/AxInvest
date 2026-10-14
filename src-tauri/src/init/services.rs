@@ -3151,7 +3151,13 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                             "[CronScheduler] 妖股核查 '{}' 快照落库失败: {e}",
                                             job_name
                                         );
-                                        format!("快照落库失败: {e}")
+                                        // 摘要会整行显示在任务中心，前端只对「整串是 JSON」的
+                                        // 错误做码翻译 ⇒ 拼进散文前先把 detail 取出来，
+                                        // 否则这一行出现 {"code":…,"detail":…} 字面量。
+                                        format!(
+                                            "快照落库失败: {}",
+                                            crate::commands::error::error_text_for_prose(&e)
+                                        )
                                     },
                                 };
                             let summary = format!(

@@ -3220,6 +3220,17 @@ fn build_sub_analysis_from_snapshot(
             continue;
         };
 
+        // 空 node_id（键字面为 `_raw.`）是 build_blackboard_snapshot 侧的畸形重复
+        // 写入（实测与 debate-bull-bear 节点同尺寸重复，见 2026-10-14 故障取证）。
+        // input_mapping 不可能引用空名节点，跳过以免污染并白占上下文。
+        if node_id.is_empty() {
+            tracing::warn!(
+                "[reflection] {}: snapshot 含空 node_id 的 _raw 键（疑似重复写入），已跳过",
+                stock_code
+            );
+            continue;
+        }
+
         // 克隆节点输出，对 content 字段做 JSON 解析预处理
         let mut node_output = val.clone();
         if let Some(node_obj) = node_output.as_object_mut() {
@@ -3243,7 +3254,121 @@ fn build_sub_analysis_from_snapshot(
         );
     }
 
+    // 上下文预算裁剪：_raw.* 全量恢复实测 57~73 万字符（raw-data 原始行情 JSON
+    // 单块 8~12 万、且 raw-data / raw-data-aggregated / portfolio-mgr.input_params
+    // 多处重复）⇒ 反思 LLM 输入达 72.7 万 token，超 agnes-2.5-flash 的 524k 上限
+    // 整条反思失败（2026-10-14 实证 4 行 ContextWindowExceeded）。
+    enforce_reflection_memory_budget(&mut sub_analysis);
+
     serde_json::Value::Object(sub_analysis)
+}
+
+/// 反思记忆（`sub-analysis` = 全部 `_raw.*` 节点输出）的总字符预算。
+///
+/// 取 12 万字符：中文混合 JSON 实测约 0.7~1 token/字，即 10 万 token 量级，
+/// 给系统 prompt、tunable 参数清单、行情事实、历史教训与工具结果留出充足空间，
+/// 对上最小上下文窗口的模型（agnes-2.5-flash 524k）也有 4 倍以上余量。
+const REFLECTION_MEMORY_TOTAL_CHAR_BUDGET: usize = 120_000;
+/// 单节点序列化预算：超过后逐趟压缩该节点内的字符串叶子。
+const REFLECTION_MEMORY_NODE_CHAR_BUDGET: usize = 20_000;
+/// 第一遍单字符串叶子预算（分析师结论 / 辩论共识通常不超过此量级）。
+const REFLECTION_MEMORY_LEAF_CHAR_BUDGET: usize = 8_000;
+/// 节点超预算时，叶预算逐趟减半的档位（8000 已在第一遍施加）。
+const REFLECTION_MEMORY_NODE_SHRINK_CAPS: [usize; 3] = [4_000, 2_000, 800];
+
+/// 估算 JSON 值序列化后的**字符**数（非字节：中文按字符计更贴近 token 量级）。
+fn reflection_json_chars(value: &serde_json::Value) -> usize {
+    serde_json::to_string(value).map(|s| s.chars().count()).unwrap_or(0)
+}
+
+/// 就地截断一个字符串，保留前 `max_chars` 个**字符**（按 Unicode scalar，不切碎
+/// 汉字）并追加裁剪标记。已在预算内则不动。
+///
+/// 标记刻意不记「原文长度」：节点压缩会对同一叶子多趟截断（8000→4000→…），
+/// 二趟起能看到的只是上一趟截断后的串，数字无法还原真原始长度，写了反而误导。
+fn cap_reflection_string(s: &mut String, max_chars: usize) {
+    if s.chars().count() <= max_chars {
+        return;
+    }
+    let kept: String = s.chars().take(max_chars).collect();
+    *s = format!("{kept}…[反思上下文裁剪：仅保留前 {max_chars} 字符，其余省略]");
+}
+
+/// 递归给 JSON 值内的所有字符串叶子施加同一预算（对象 / 数组逐层下钻）。
+fn cap_reflection_strings(value: &mut serde_json::Value, max_chars: usize) {
+    match value {
+        serde_json::Value::String(s) => cap_reflection_string(s, max_chars),
+        serde_json::Value::Array(items) => {
+            for item in items.iter_mut() {
+                cap_reflection_strings(item, max_chars);
+            }
+        },
+        serde_json::Value::Object(map) => {
+            for item in map.values_mut() {
+                cap_reflection_strings(item, max_chars);
+            }
+        },
+        _ => {},
+    }
+}
+
+/// 三层预算裁剪，保住「分析师结论节点」、砍掉「原始数据体积」：
+///
+/// 1. **叶裁剪**：所有节点内字符串叶子统一限到 8000 字符 —— 结论类文本几乎不
+///    受影响，被砍的是 raw-data 里整块行情 / 指标 JSON 这类叶子；
+/// 2. **节点压缩**：序列化仍超 2 万字符的节点，叶预算按 4000→2000→800 逐趟
+///    减半（叶子多的节点靠多叶分摊，单叶超大的节点在第一档即收敛）；
+/// 3. **总量淘汰**：仍超出总预算时，按节点体积**从大到小整体替换为占位**，
+///    直到总量达标 —— 实测最肥的总是 raw-data 类数据节点，砍 1~2 个即达标，
+///    分析师 / 多空辩论 / 决策节点全部保留。
+///
+/// 只动 `_raw` 恢复出来的记忆变量，不触碰数据库与其他 prompt 变量。
+fn enforce_reflection_memory_budget(nodes: &mut serde_json::Map<String, serde_json::Value>) {
+    let before: usize = nodes.values().map(reflection_json_chars).sum();
+
+    // 第 1 层：统一叶预算
+    for node in nodes.values_mut() {
+        cap_reflection_strings(node, REFLECTION_MEMORY_LEAF_CHAR_BUDGET);
+    }
+
+    // 第 2 层：单节点仍超预算 ⇒ 叶预算逐趟减半
+    for cap in REFLECTION_MEMORY_NODE_SHRINK_CAPS {
+        for node in nodes.values_mut() {
+            if reflection_json_chars(node) > REFLECTION_MEMORY_NODE_CHAR_BUDGET {
+                cap_reflection_strings(node, cap);
+            }
+        }
+    }
+
+    // 第 3 层：总预算淘汰（最肥节点先整体省略）
+    let mut sizes: Vec<(String, usize)> =
+        nodes.iter().map(|(id, node)| (id.clone(), reflection_json_chars(node))).collect();
+    sizes.sort_by_key(|(_, size)| std::cmp::Reverse(*size));
+
+    let mut total: usize = sizes.iter().map(|(_, size)| *size).sum();
+    for (node_id, size) in sizes {
+        if total <= REFLECTION_MEMORY_TOTAL_CHAR_BUDGET {
+            break;
+        }
+        if let Some(node) = nodes.get_mut(&node_id) {
+            let placeholder = serde_json::json!({
+                "_truncated": format!(
+                    "节点 {node_id} 原始载荷约 {size} 字符，超出反思上下文总预算已整体省略（原始数据仍可通过工具按 hindsight_date 复查）"
+                )
+            });
+            let placeholder_chars = reflection_json_chars(&placeholder);
+            *node = placeholder;
+            // 用占位体积替换原体积（占位远小于原体，总量单调下降）
+            total = total.saturating_sub(size).saturating_add(placeholder_chars);
+        }
+    }
+
+    let after: usize = nodes.values().map(reflection_json_chars).sum();
+    if after < before {
+        tracing::warn!(
+            "[reflection] sub-analysis 上下文预算裁剪: {before} → {after} 字符（总预算 {REFLECTION_MEMORY_TOTAL_CHAR_BUDGET}）"
+        );
+    }
 }
 
 /// [方向4/方向5] 提交反思结果的用户反馈（1-5 星评分）。
@@ -4363,5 +4488,132 @@ mod mover_recall_context_tests {
             // 不得对已知层码退化为裸码（other 分支只会对未知码触发）
             assert!(!text.contains(&format!("：{layer}\n")), "层码缺中文语义: {text}");
         }
+    }
+}
+
+/// 反思记忆（`sub-analysis`）上下文预算裁剪 —— 2026-10-14 反思输入 72.7 万
+/// token 超模型 524k 上限事故的回归锁。
+#[cfg(test)]
+mod reflection_memory_budget_tests {
+    use super::*;
+    use serde_json::{Map, json};
+
+    #[test]
+    fn cap_string_keeps_short_and_marks_long() {
+        let mut short = "短结论不动".to_string();
+        cap_reflection_string(&mut short, 10);
+        assert_eq!(short, "短结论不动");
+
+        let mut long = "甲".repeat(100);
+        cap_reflection_string(&mut long, 10);
+        // 按 Unicode 字符保留前 10 个，不切碎汉字
+        assert_eq!(long.chars().filter(|c| *c == '甲').count(), 10);
+        assert!(long.contains("反思上下文裁剪"), "截断标记缺失: {long}");
+        assert!(long.contains("仅保留前 10 字符"), "保留长度须记入标记: {long}");
+    }
+
+    #[test]
+    fn cap_strings_recurses_objects_and_arrays() {
+        let mut v = json!({
+            "result": "乙".repeat(50_000),
+            "rows": [{"text": "丙".repeat(20_000)}, "短", [{"deep": "丁".repeat(12_000)}]]
+        });
+        cap_reflection_strings(&mut v, 8_000);
+        // 按字符（非 UTF-8 字节）断言：中文每字 3 字节
+        assert!(v["result"].as_str().unwrap().chars().count() < 8_100);
+        assert!(v["rows"][0]["text"].as_str().unwrap().chars().count() < 8_100);
+        assert_eq!(v["rows"][1], json!("短"));
+        assert!(v["rows"][2][0]["deep"].as_str().unwrap().chars().count() < 8_100);
+    }
+
+    #[test]
+    fn small_snapshot_passes_through_with_content_parsed() {
+        let snapshot = json!({
+            "_raw.trader": {"content": json!({"action": "买入", "conviction": 0.8}).to_string()},
+            "_raw.debate-bull-bear": {"content": "多方占优，风险可控。"}
+        })
+        .to_string();
+        let v = build_sub_analysis_from_snapshot(Some(&snapshot), "600519");
+        // content JSON 字符串被解析为对象，点路径可下钻
+        assert_eq!(v["trader"]["content"]["action"], json!("买入"));
+        assert_eq!(v["trader"]["content"]["conviction"], json!(0.8));
+        assert_eq!(v["debate-bull-bear"]["content"], json!("多方占优，风险可控。"));
+    }
+
+    #[test]
+    fn empty_node_id_key_is_skipped() {
+        // 键字面 `_raw.`（空 node_id）实测是 build_blackboard_snapshot 的畸形重复写入
+        let snapshot = json!({
+            "_raw.": {"content": "畸形重复载荷"},
+            "_raw.trader": {"content": "正常"}
+        })
+        .to_string();
+        let v = build_sub_analysis_from_snapshot(Some(&snapshot), "600519");
+        let obj = v.as_object().expect("应返回 JSON 对象");
+        assert!(obj.get("").is_none(), "空 node_id 键必须被跳过");
+        assert!(obj.contains_key("trader"), "正常节点不得受牵连");
+    }
+
+    #[test]
+    fn oversized_raw_market_data_leaf_is_capped_end_to_end() {
+        // 复现事故现场：raw-data.result 整块 8~12 万字符原始行情
+        let snapshot = json!({
+            "_raw.raw-data": {"result": "乙".repeat(100_000)}
+        })
+        .to_string();
+        let v = build_sub_analysis_from_snapshot(Some(&snapshot), "000001");
+        let result = v["raw-data"]["result"].as_str().expect("result 应保留为字符串");
+        assert!(
+            result.chars().count() <= REFLECTION_MEMORY_LEAF_CHAR_BUDGET + 64,
+            "单叶超限未裁: {} 字符",
+            result.chars().count()
+        );
+        assert!(result.contains("反思上下文裁剪"));
+    }
+
+    #[test]
+    fn total_budget_evicts_fattest_nodes_but_keeps_conclusion() {
+        // 6 个多叶大数据节点：每节点 25 个 3 万字符叶子，800 档压缩后仍约 2.15 万
+        // 字符（> 节点预算），合计约 12.9 万 > 总预算 12 万 ⇒ 必须整体淘汰最肥者。
+        let mut root = Map::new();
+        for i in 0..6 {
+            let rows: Vec<serde_json::Value> =
+                (0..25).map(|_| json!("丁".repeat(30_000))).collect();
+            root.insert(format!("_raw.raw-data-{i}"), json!({"rows": rows}));
+        }
+        // 结论节点体积小，必须完整保留
+        root.insert(
+            "_raw.consensus".to_string(),
+            json!({"content": "维持买入评级，目标价 1850，风险收益比合适。"}),
+        );
+        let snapshot = serde_json::Value::Object(root).to_string();
+
+        let v = build_sub_analysis_from_snapshot(Some(&snapshot), "000001");
+        let obj = v.as_object().expect("应返回 JSON 对象");
+
+        let total: usize = obj.values().map(reflection_json_chars).sum();
+        assert!(
+            total <= REFLECTION_MEMORY_TOTAL_CHAR_BUDGET,
+            "裁剪后总量 {total} 仍超总预算 {REFLECTION_MEMORY_TOTAL_CHAR_BUDGET}"
+        );
+
+        let evicted = obj
+            .values()
+            .filter(|node| node.get("_truncated").and_then(|x| x.as_str()).is_some())
+            .count();
+        assert!(evicted >= 1, "总预算超限时必须整体淘汰最肥节点");
+
+        // 小体积的结论节点不在淘汰序列里
+        assert_eq!(
+            obj.get("consensus").and_then(|n| n.get("content")).and_then(|c| c.as_str()),
+            Some("维持买入评级，目标价 1850，风险收益比合适。")
+        );
+    }
+
+    #[test]
+    fn legacy_snapshot_without_raw_returns_empty_object() {
+        let snapshot = json!({"report.trader": "旧版报告文本"}).to_string();
+        let v = build_sub_analysis_from_snapshot(Some(&snapshot), "600519");
+        assert_eq!(v, json!({}));
     }
 }

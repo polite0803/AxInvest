@@ -325,9 +325,9 @@ pub async fn persist_mover_recall_run(
         })
         .collect();
 
-    mover_recall_runs::insert_run_snapshot(db, &run_row, &event_rows)
-        .await
-        .map_err(|e| format!("mover_recall 核查落库失败: {e}"))?;
+    mover_recall_runs::insert_run_snapshot(db, &run_row, &event_rows).await.map_err(|e| {
+        ErrorResponse::err_with_detail(wf_err::INTERNAL, format!("mover_recall 核查落库失败: {e}"))
+    })?;
     Ok(id)
 }
 

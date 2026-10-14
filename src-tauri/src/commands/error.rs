@@ -206,3 +206,55 @@ impl std::fmt::Display for ErrorResponse {
 // SECURITY (C9): 实现 std::error::Error trait，使 ErrorResponse 可用于 anyhow::Result
 // 和 `?` 操作符的错误链传播。
 impl std::error::Error for ErrorResponse {}
+
+/// 把命令层错误串压成**可以安全嵌进自然语言摘要**的一句技术详情。
+///
+/// 为什么需要：命令层按错误码规范返回的是 `ErrorResponse` 的 JSON 串，前端
+/// `translateBackendError` 只在「整串就是 JSON」时才解析（`src/lib/errorI18n.ts` 的
+/// `parseBackendError` 判 `startsWith("{") && endsWith("}")`）。定时任务把错误拼进
+/// `TaskRunResult.output` 的摘要散文时，JSON 会原样留在任务中心那一行里 —— 既读不通、
+/// 也翻不了（2026-10-14 实测形态）。所以落笔前先取 `detail`；没有 `detail` 就取 `code`
+/// （至少是可辨识的码串，不是整段 JSON）；**根本不是 JSON 的原文原样返回**（零回归）。
+pub fn error_text_for_prose(err: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(err) {
+        Ok(v) => {
+            let detail = v.get("detail").and_then(|d| d.as_str()).unwrap_or("");
+            if !detail.is_empty() {
+                return detail.to_string();
+            }
+            match v.get("code").and_then(|c| c.as_str()) {
+                Some(code) => code.to_string(),
+                None => err.to_string(),
+            }
+        },
+        Err(_) => err.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod error_text_for_prose_tests {
+    use super::error_text_for_prose;
+
+    #[test]
+    fn json_带_detail_时只取_detail() {
+        let s = r#"{"code":"STOCK_WORKFLOW_SERIALIZE_FAILED","category":"general","detail":"rules_json 序列化失败: io"}"#;
+        assert_eq!(error_text_for_prose(s), "rules_json 序列化失败: io");
+    }
+
+    #[test]
+    fn json_无_detail_时退到_code_不许漏出整段_json() {
+        let s = r#"{"code":"CONVERSATION_NOT_FOUND","category":"general","detail":null}"#;
+        assert_eq!(error_text_for_prose(s), "CONVERSATION_NOT_FOUND");
+    }
+
+    #[test]
+    fn 非_json_原文透传_零回归() {
+        assert_eq!(error_text_for_prose("no such table: x"), "no such table: x");
+    }
+
+    #[test]
+    fn 裸数字串_不当成结构化错误() {
+        // serde_json 会把 "5" 解析成数字 ⇒ 既无 detail 也无 code ⇒ 必须原样返回
+        assert_eq!(error_text_for_prose("5"), "5");
+    }
+}

@@ -1131,26 +1131,45 @@ if (process.argv.includes("--selftest")) {
     //   可疑数从真实量级虚涨到 186。判据是**目录语义**：`plans/` 会更新，`audits/` 是史料。
     chk("活栏混进 docs/ 下**非 plans** 的目录（如 audits/）", sc.live.some((p) => inDocs(p) && !inPlans(p)), false);
     chk("活栏非空（空面 ⇒ 取证静默输出 0，那是假绿）", sc.live.length > 0, true);
-    // ⚠ 非空自证须按**扫描面目录是否存在**门控：`.workbuddy/memory/`、`docs/`、`output/`
-    //   全被 `.gitignore` 忽略 ⇒ 本地有、CI（全新 checkout）**没有**。
-    //   「非空」的语义是「目录在、却静默吐出 0 ⇒ 假绿」；目录不在时空列是**合法**的，
-    //   断言若还硬要非空，就把本地文件系统状态泄漏进了判据（2026-09-18 CI 实测两红）。
-    const dirExists = (p) => {
-      try {
-        return fs.statSync(p).isDirectory();
-      } catch {
-        return false;
+    // ⚠ 「非空」自证的前提是**扫描面里有 .md** —— 不是「目录存在」，也不是无条件非空：
+    //   · 无条件非空会把本地文件系统状态泄漏进判据（`.workbuddy/memory/`、`output/` 全被
+    //     .gitignore 忽略 ⇒ 全新 checkout 里根本没有；2026-09-18 CI 实测两红）。
+    //   · 「目录存在」也不是正确前提（2026-10-14 CI 实测第三红，本地全绿复现不了）：
+    //     `docs/` 整目录被忽略，但 `docs/plans/PLAN-batch-automation-mover-recall.md` 是
+    //     **唯一被跟踪**的一份 ⇒ 全新 checkout 里 `docs/` **存在**、其非 plans 部分为空、
+    //     `output/` 不存在 ⇒ hist 栏为 0 是**正确**结果，旧前提却把它当成假绿。
+    //   ⇒ 改用与 collectDocFiles 的 walk **不同机制**的 `fs.globSync` 独立数一遍面内 md：
+    //     面为 0 份时空列合法；walk 真坏掉（前缀写错 / 漏 `.md`）时 glob 照样数得到 ⇒ 门仍有牙。
+    //     跳过的目录与 walk 逐条对齐（`node_modules` / `.git`），否则两侧口径打架会造新假红。
+    const faceMd = (patterns) => {
+      const hits = [];
+      for (const p of patterns) {
+        try {
+          hits.push(...fs.globSync(p, { cwd: ROOT }));
+        } catch {
+          // 目录不存在 ⇒ 该 pattern 记 0 份（与 walk 的 no-op 同口径）
+        }
       }
+      return hits
+        .map((r) => r.replaceAll("\\", "/")) // win32 下 glob 返回反斜杠，不归一则 startsWith 恒不命中
+        .filter((r) => !r.includes("node_modules/") && !r.startsWith(".git/") && !r.includes("/.git/"));
     };
-    const memDir = path.join(ROOT, ".workbuddy", "memory");
-    const histDirs = [path.join(ROOT, "docs"), path.join(ROOT, "output")];
+    const nonEmptyIfFace = (faceN, bucket, all = () => true) => faceN === 0 || (bucket.length > 0 && all(bucket));
+    // 前提自证：负控拆在**真正决定这条断言的那道守卫**上（面份数），少这几条 ⇒ 换前提时
+    // 会把它静默改成恒真死门，而现网读数照样全绿。
+    chk("非空自证：面 0 份 ⇒ 空列合法（全新 checkout 实测形态）", nonEmptyIfFace(0, []), true);
+    chk("非空自证：面有 md 却吐 0 ⇒ 必须红（walk 坏掉的形态）", nonEmptyIfFace(55, []), false);
+    chk("非空自证：面有 md 且有产出 ⇒ 绿", nonEmptyIfFace(55, ["a.md", "b.md"]), true);
+    chk("非空自证：all 谓词不过 ⇒ 红（记忆栏混进别的来源）", nonEmptyIfFace(1, ["a.md"], () => false), false);
+    const memFace = faceMd([".workbuddy/memory/**/*.md"]);
+    const histFace = faceMd(["docs/**/*.md", "output/**/*.md"]).filter((r) => !r.startsWith("docs/plans/"));
     chk(
       "记忆栏非空且只来自 .workbuddy/memory/",
-      !dirExists(memDir) || (sc.memory.length > 0 && sc.memory.every(inMem)),
+      nonEmptyIfFace(memFace.length, sc.memory, (b) => b.every(inMem)),
       true,
     );
     chk("历史栏含 `docs/plans/` 下的文件（= 把史料当待办的口径错）", sc.hist.some(inPlans), false);
-    chk("历史栏非空", !histDirs.some(dirExists) || sc.hist.length > 0, true);
+    chk("历史栏非空", nonEmptyIfFace(histFace.length, sc.hist), true);
     chk("三栏均为 .md", [...sc.live, ...sc.memory, ...sc.hist].every((p) => p.endsWith(".md")), true);
     // 三栏**互不重叠**：同一份文档被两种相反的处置方向同时要求 ⇒ 下面「分桶恒等」也没意义了
     chk(

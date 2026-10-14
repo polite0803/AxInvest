@@ -4,9 +4,20 @@
 import type { Variable } from "@/components/workflow/types";
 import { invoke } from "@/lib/invoke";
 import { toDbVariable } from "@/lib/workflowVariables";
-import { App, Button, Card, Input, Select, Space, Spin, Switch, Tag } from "antd";
+import { App, Button, Card, Input, Select, Space, Spin, Switch, Table, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+
+// 后端 `FallbackRecord`（`crates/astock-data/src/vendor_health.rs`，带
+// `#[serde(rename_all = "camelCase")]`）的 TS 投影；`timestamp` 单位是毫秒。
+interface FallbackRecordItem {
+  dataType: string;
+  stockCode: string;
+  primaryVendor: string;
+  usedVendor: string;
+  reason: string;
+  timestamp: number;
+}
 
 interface VendorDef {
   key: string;
@@ -276,6 +287,33 @@ export function DataVendorsTab() {
   const [checkingAll, setCheckingAll] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [fallbackLog, setFallbackLog] = useState<FallbackRecordItem[]>([]);
+  // 三种缺席各占一句：读失败 / 这台运行形态不提供该链路 / 本次运行确实没发生换源。
+  // 把「拿不到」显示成「没有」，正是本轮在取数侧修掉的那类失真，不能在自己面板上重演。
+  const [fallbackProbe, setFallbackProbe] = useState<"ok" | "failed" | "absent">("ok");
+
+  // 一条记录的含义：本轮实际供数的 vendor ≠ 第一个通过健康过滤的候选。
+  // reason 列故意不展示 —— 后端目前恒写 `primary_failed` 字面量，摆出来会让人以为它在说明失败原因。
+  const loadFallbackLog = useCallback(async () => {
+    try {
+      const r = await invoke<FallbackRecordItem[]>("get_vendor_fallback_log");
+      // 浏览器/mock 模式对未注册的 get_ 命令回的是 `{}` ⇒ 那是「本环境不提供该数据」，不是「没有换源」。
+      if (!Array.isArray(r)) {
+        setFallbackLog([]);
+        setFallbackProbe("absent");
+        return;
+      }
+      setFallbackLog(r);
+      setFallbackProbe("ok");
+    } catch {
+      setFallbackLog([]);
+      setFallbackProbe("failed");
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadFallbackLog();
+  }, [loadFallbackLog]);
 
   // vendor 英文名 → 依赖的工具列表（固定 + 暴露）
   const vendorTools = useMemo(() => {
@@ -444,6 +482,8 @@ export function DataVendorsTab() {
     for (const n of names) { setHealth((prev) => ({ ...prev, [n]: "pending" })); }
     for (const n of names) { await checkOne(n); }
     setCheckingAll(false);
+    // 健康检测本身就会走降级链 ⇒ 跑完立刻回读一次换源记录
+    void loadFallbackLog();
     // 延迟一帧读取 health 状态，自动关闭失败的 vendor
     setTimeout(() => {
       setHealth((prev) => {
@@ -461,7 +501,7 @@ export function DataVendorsTab() {
         return prev;
       });
     }, 100);
-  }, [checkOne, t, message]);
+  }, [checkOne, t, message, loadFallbackLog]);
 
   if (!loaded) {
     return (
@@ -682,6 +722,55 @@ export function DataVendorsTab() {
           </Card>
         );
       })}
+
+      {/* 换源记录：这一格回答的是「本轮实际由哪个 vendor 供数」，与时间旅行页的降级报告是两个事实 */}
+      <Card size="small" title={t("stockAnalysis.settings.vendors.fallbackTitle")}>
+        {fallbackProbe !== "ok"
+          ? (
+            <div className="text-xs text-gray-400">
+              {t(
+                fallbackProbe === "absent"
+                  ? "stockAnalysis.settings.vendors.fallbackUnavailable"
+                  : "stockAnalysis.settings.vendors.fallbackFailed",
+              )}
+            </div>
+          )
+          : (
+            <>
+              <div className="text-xs text-gray-400 mb-2">
+                {t("stockAnalysis.settings.vendors.fallbackScope", { count: fallbackLog.length })}
+              </div>
+              {fallbackLog.length === 0
+                ? <div className="text-xs text-gray-400">{t("stockAnalysis.settings.vendors.fallbackEmpty")}</div>
+                : (
+                  <Table<FallbackRecordItem>
+                    size="small"
+                    rowKey={(r) => `${r.timestamp}-${r.dataType}-${r.stockCode}-${r.usedVendor}`}
+                    // 后端是 push 到队尾（最旧在前）⇒ 这里倒序，让最近一次换源排在第一行
+                    dataSource={[...fallbackLog].reverse()}
+                    pagination={{ pageSize: 8, size: "small" }}
+                    columns={[
+                      {
+                        title: t("stockAnalysis.settings.vendors.fallbackColTime"),
+                        dataIndex: "timestamp",
+                        render: (v: unknown) => new Date(Number(v)).toLocaleString(),
+                      },
+                      {
+                        title: t("stockAnalysis.settings.vendors.fallbackColDimension"),
+                        key: "dimension",
+                        render: (_: unknown, r) => `${r.dataType} · ${r.stockCode}`,
+                      },
+                      {
+                        title: t("stockAnalysis.settings.vendors.fallbackColPath"),
+                        key: "path",
+                        render: (_: unknown, r) => `${r.primaryVendor} → ${r.usedVendor}`,
+                      },
+                    ]}
+                  />
+                )}
+            </>
+          )}
+      </Card>
 
       {/* 本地计算工具 */}
       <div className="pt-2">

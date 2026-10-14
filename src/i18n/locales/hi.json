@@ -16063,7 +16063,15 @@
         "noDeps": "No tools depend on this vendor",
         "fixedToolHeader": "Fixed tools (DAG ToolNode deterministic execution)",
         "exposedToolHeader": "LLM-exposed tools (Agent autonomous invocation)",
-        "localCompute": "Local compute tools (no remote vendor dependency)"
+        "localCompute": "Local compute tools (no remote vendor dependency)",
+        "fallbackTitle": "स्रोत परिवर्तन रिकॉर्ड",
+        "fallbackScope": "इस सत्र में {{count}} रिकॉर्ड (स्मृति में अधिकतम 1024, पुनःआरंभ पर मिटाए जाएँगे)",
+        "fallbackEmpty": "अभी तक कोई स्थिति नहीं जिसमें वास्तविक स्रोत पहले स्वस्थ उम्मीदवार से भिन्न हो। विश्लेषण या पूर्ण जाँच के बाद रिकॉर्ड जमा होंगे।",
+        "fallbackColTime": "समय",
+        "fallbackColDimension": "आयाम · कोड",
+        "fallbackColPath": "पहला स्वस्थ उम्मीदवार → वास्तविक स्रोत",
+        "fallbackUnavailable": "यह रनटाइम फॉलबैक-लॉग एंडपॉइंट उपलब्ध नहीं कराता (प्रतिक्रिया सूची नहीं है)। डेस्कटॉप ऐप में रिकॉर्ड दिखेंगे।",
+        "fallbackFailed": "फॉलबैक रिकॉर्ड पढ़े नहीं जा सके (कमांड ने त्रुटि लौटाई)।"
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

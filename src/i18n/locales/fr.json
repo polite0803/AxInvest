@@ -16063,7 +16063,15 @@
         "noDeps": "No tools depend on this vendor",
         "fixedToolHeader": "Fixed tools (DAG ToolNode deterministic execution)",
         "exposedToolHeader": "LLM-exposed tools (Agent autonomous invocation)",
-        "localCompute": "Local compute tools (no remote vendor dependency)"
+        "localCompute": "Local compute tools (no remote vendor dependency)",
+        "fallbackTitle": "Enregistrements de repli de source",
+        "fallbackScope": "{{count}} entrées pour cette session (1024 max. en mémoire, effacées au redémarrage)",
+        "fallbackEmpty": "Aucun cas où la source réelle diffère du premier candidat sain. Les entrées s'accumulent après une analyse ou une vérification complète.",
+        "fallbackColTime": "Heure",
+        "fallbackColDimension": "Dimension · Code",
+        "fallbackColPath": "Premier candidat sain → source réelle",
+        "fallbackUnavailable": "Cet environnement d'exécution n'expose pas l'endpoint des replis (la réponse n'est pas une liste). Les entrées s'affichent dans l'application de bureau.",
+        "fallbackFailed": "Lecture des enregistrements de repli échouée (la commande a renvoyé une erreur)."
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

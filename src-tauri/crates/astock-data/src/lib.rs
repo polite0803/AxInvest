@@ -249,27 +249,34 @@ impl VendorRouting {
                 "akshare".into(),
                 "neodata".into(), // 末位兜底
             ],
-            // 注意(2026-06): xueqiu 的 stock_timeline.json 被阿里云 WAF 拦截,
-            // 无有效 token 或非浏览器环境时返回 WAF 挑战页面(HTML)而非 JSON。
-            // sina 的 /corp/go.php/vCB_AllNewsStock/symbol/{code}.json 端点返回
-            // HTTP 200 + 空 body(接口疑似废弃), 已添加备选端点。
-            // 两个源失败后由 eastmoney(搜索API)兜底, 实际可用。
+            // 通道现状(2026-10-14 实测): xueqiu 的 stock_timeline.json 无有效 token 或
+            // 非浏览器环境时返 403 + 阿里云 WAF 挑战页(HTML)；sina 的两个 news 端点均已
+            // 失效（主端点 vCB_AllNewsStock/symbol/{code}.json 返 200 + text/html 空 body，
+            // 备选端点 Market_Center.getStockNews 返 __ERROR:3 Service not found）
+            // ⇒ sina 从本表摘除，形态同 financials 里的 baidu_stock：vendor 仍注册，
+            //   把 "sina" 加回本表即可试恢复。
+            // 原先 xueqiu/sina 的 get_news 内部会直接换用东财搜索 API ⇒ 这两档恒返 Ok，
+            // 本表里 eastmoney 及其后各档永不被调用，健康度还把它们记成「成功」，端点全废
+            // 这件事永不浮现（日志实证 2026-10-14 300285）。现各档如实报错，由本表降级。
             news: vec![
                 "xueqiu".into(),
-                "sina".into(),
                 "eastmoney".into(),
                 "browser_eastmoney".into(),
                 "ths".into(),
                 "akshare".into(),
                 "neodata".into(), // 末位兜底（docData 文章）
             ],
-            // 修复(2026-09-10): tencent ff_ 接口全面废弃(实测 002837/600519 均返回
-            // v_pv_none_match)，每次 money_flow 调用都白白浪费一次请求再 fallback。
-            // eastmoney push2his fflow/daykline 实测恢复可用，提到首位。
+            // 摘除(2026-10-14): tencent 的 q=ff_{code} 实测三个市场全返 v_pv_none_match="1"
+            // （002837 深主板 / 600519 沪主板 / 300285 创业板，HTTP 仍 200），与 2026-09-10
+            // 的两次实测一致 ⇒ 每次命中都是必死请求；解析不出字段时返回 None 又被路由层
+            // 判成「资金流向返回空(非故障)」，既白占一次往返又参与 round_all_empty 的等待。
+            // vendor 注册与 get_money_flow 实现均保留（tencent 仍在 klines 首位），
+            // 恢复时把 "tencent" 加回本表即可。
+            // eastmoney push2his fflow/daykline 实测可用，居首；本机 push2 族有累积/速率
+            // 触发的 RST（2026-09-30 收窄过一轮），故 sina、browser_eastmoney 留后两档兜住。
             money_flow: vec![
                 // push2his fflow/daykline ⇒ push2 族（划分见 `register_vendor` 处说明）
                 "eastmoney_push2".into(),
-                "tencent".into(),
                 "sina".into(),
                 "browser_eastmoney".into(),
             ],
@@ -8417,5 +8424,47 @@ mod supply_shock_tests {
         );
         assert_eq!(nan_mv["unavailableReason"], "no_float_market_cap");
         assert!(nan_mv.get("windows").is_none(), "NaN 分母不得产出一套窗口");
+    }
+}
+
+#[cfg(test)]
+mod dead_channel_routing_tests {
+    //! 必死通道不得留在路由表内 —— 形态同 2026-10-01 摘 `baidu_stock` 的裁定
+    //! （见 `default_routing` 的 financials 注释）：命中即白打一次请求，还会参与
+    //! `round_all_empty` 的重试等待。
+
+    use crate::VendorRouting;
+
+    #[test]
+    fn dead_channels_are_not_routed() {
+        let r = VendorRouting::default_routing();
+        // sina 的 news 主端点返 200 + text/html 空 body、备选端点返 `__ERROR:3 Service
+        // not found`（2026-10-14 实测）⇒ 已无可用 news 通道。
+        assert!(
+            !r.news.iter().any(|v| v == "sina"),
+            "sina 已无可用 news 端点，不得留在 news 路由表内"
+        );
+        // tencent 的 `q=ff_` 2026-10-14 实测 002837/600519/300285 三个市场全返
+        // `v_pv_none_match="1"`（与 2026-09-10 两次实测一致）。
+        assert!(
+            !r.money_flow.iter().any(|v| v == "tencent"),
+            "tencent 的 ff_ 资金流接口已废弃，不得留在 money_flow 路由表内"
+        );
+    }
+
+    /// 负控：上面两条断言必须「有电」。sina/tencent 仍是其他维度的现役源 —— 若哪天
+    /// 有人把它们整体摘除，这一半会红，而不是让 `dead_channels_are_not_routed`
+    /// 因为「表里根本没有这个 vendor」而静默通过。
+    #[test]
+    fn the_unrouted_vendors_are_still_live_elsewhere() {
+        let r = VendorRouting::default_routing();
+        assert!(r.klines.iter().any(|v| v == "sina"), "sina 仍应是 klines 现役源（分钟级通道）");
+        assert!(
+            r.money_flow.iter().any(|v| v == "sina"),
+            "sina 仍应是 money_flow 现役源（且申报 NativeDateParam）"
+        );
+        assert!(r.klines.iter().any(|v| v == "tencent"), "tencent 仍应是 klines 现役源");
+        // news 降级链必须仍能到达真正干活的 eastmoney（摘掉 sina 那档后它是第三顺位）。
+        assert!(r.news.iter().any(|v| v == "eastmoney"), "news 路由表仍须包含 eastmoney");
     }
 }

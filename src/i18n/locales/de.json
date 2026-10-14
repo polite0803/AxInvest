@@ -16063,7 +16063,15 @@
         "noDeps": "No tools depend on this vendor",
         "fixedToolHeader": "Fixed tools (DAG ToolNode deterministic execution)",
         "exposedToolHeader": "LLM-exposed tools (Agent autonomous invocation)",
-        "localCompute": "Local compute tools (no remote vendor dependency)"
+        "localCompute": "Local compute tools (no remote vendor dependency)",
+        "fallbackTitle": "Vendor-Fallback-Einträge",
+        "fallbackScope": "{{count}} Einträge in dieser Sitzung (max. 1024 im Prozess, beim Neustart gelöscht)",
+        "fallbackEmpty": "Noch kein Fall, in dem der tatsächliche Datenlieferant vom ersten gesunden Kandidaten abweicht. Einträge entstehen nach einer Analyse oder einem vollständigen Check.",
+        "fallbackColTime": "Zeit",
+        "fallbackColDimension": "Dimension · Code",
+        "fallbackColPath": "Erster gesunder Kandidat → tatsächliche Quelle",
+        "fallbackUnavailable": "Diese Laufzeit stellt den Fallback-Log-Endpunkt nicht bereit (die Antwort ist keine Liste). In der Desktop-App erscheinen die Einträge hier.",
+        "fallbackFailed": "Fallback-Einträge konnten nicht gelesen werden (der Befehl lieferte einen Fehler)."
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

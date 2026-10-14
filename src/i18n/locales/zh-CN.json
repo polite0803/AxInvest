@@ -16276,7 +16276,15 @@
         "noDeps": "无固定工具依赖此数据源",
         "fixedToolHeader": "固定工具（DAG ToolNode 确定性执行）",
         "exposedToolHeader": "LLM 暴露工具（Agent 自主调用）",
-        "localCompute": "本地计算工具（不依赖远程 vendor）"
+        "localCompute": "本地计算工具（不依赖远程 vendor）",
+        "fallbackTitle": "数据源换向记录",
+        "fallbackScope": "本次运行内 {{count}} 条（进程内最多保留 1024 条，重启后清空）",
+        "fallbackEmpty": "本次运行尚未出现「实际供数源 ≠ 首个健康候选」的情况；跑过分析或点「全部检测」之后这里才会累积记录",
+        "fallbackColTime": "时间",
+        "fallbackColDimension": "维度 · 代码",
+        "fallbackColPath": "首个健康候选 → 实际供数",
+        "fallbackUnavailable": "当前运行环境没有提供换源记录接口（返回值不是列表）；桌面版运行时这里才会显示记录",
+        "fallbackFailed": "换源记录读取失败（命令报错）"
       },
       "collapseGroup": "收起",
       "expandGroup": "展开（{{total}} 项）",

@@ -16063,7 +16063,15 @@
         "noDeps": "No tools depend on this vendor",
         "fixedToolHeader": "Fixed tools (DAG ToolNode deterministic execution)",
         "exposedToolHeader": "LLM-exposed tools (Agent autonomous invocation)",
-        "localCompute": "Local compute tools (no remote vendor dependency)"
+        "localCompute": "Local compute tools (no remote vendor dependency)",
+        "fallbackTitle": "Registros de cambio de fuente",
+        "fallbackScope": "{{count}} entradas en esta sesión (hasta 1024 en memoria, se borran al reiniciar)",
+        "fallbackEmpty": "Todavía no hay casos en que la fuente real difiera del primer candidato sano. Los registros se acumulan tras un análisis o una comprobación completa.",
+        "fallbackColTime": "Hora",
+        "fallbackColDimension": "Dimensión · Código",
+        "fallbackColPath": "Primer candidato sano → fuente real",
+        "fallbackUnavailable": "Este entorno de ejecución no expone el endpoint de registros de cambio (la respuesta no es una lista). Las entradas aparecen en la app de escritorio.",
+        "fallbackFailed": "No se pudieron leer los registros de cambio (el comando devolvió un error)."
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

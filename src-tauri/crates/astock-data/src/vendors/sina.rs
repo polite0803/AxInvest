@@ -18,109 +18,6 @@ impl SinaVendor {
         Ok(resp)
     }
 
-    /// 备选新闻端点：尝试其他已知的新浪新闻接口
-    async fn get_news_fallback(
-        &self,
-        stock_code: &str,
-        limit: u32,
-    ) -> Result<Vec<NewsItem>, DataError> {
-        let url = format!(
-            "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getStockNews?code={stock_code}&num={}&page=1&type=last",
-            limit.min(50)
-        );
-        let resp = self.sina_get(&url).await?;
-
-        // 修复 P0-A5: 原 `unwrap_or_default()` 把 HTTP body 解码错误吞为空串，
-        // 走到下面 `is_empty()` 分支报"返回空响应"丢失根因。
-        // 改用 `?` 透传原始 reqwest::Error 便于调试。
-        let body = resp.text().await?;
-        let trimmed = body.trim();
-
-        // 检查空响应
-        if trimmed.is_empty() {
-            return Err(DataError::VendorError {
-                vendor: "sina".into(),
-                message: "新浪新闻备选端点返回空响应".into(),
-            });
-        }
-
-        // 检查 JSONP 包裹
-        let json_str = if let Some(start) = trimmed.find('(') {
-            if let Some(end) = trimmed.rfind(')') {
-                if end > start {
-                    &trimmed[start + 1..end]
-                } else {
-                    trimmed
-                }
-            } else {
-                trimmed
-            }
-        } else {
-            trimmed
-        };
-
-        // 检查错误响应
-        if json_str.contains("__ERROR") || json_str.contains("Service not found") {
-            return Err(DataError::VendorError {
-                vendor: "sina".into(),
-                message: format!("新浪新闻备选端点不可用: {json_str:.100}"),
-            });
-        }
-
-        let json: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
-            DataError::ParseError(format!(
-                "sina fallback news parse: {e}, raw={}",
-                &trimmed[..trimmed.len().min(120)]
-            ))
-        })?;
-
-        let items = json
-            .as_array()
-            .or_else(|| json["result"].as_array())
-            .or_else(|| json["data"].as_array())
-            .cloned()
-            .unwrap_or_default();
-
-        Ok(items
-            .iter()
-            .map(|item| NewsItem {
-                title: item["title"].as_str().unwrap_or("").to_string(),
-                summary: item["summary"]
-                    .as_str()
-                    .or_else(|| item["digest"].as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                source: item["source"].as_str().unwrap_or("新浪财经").to_string(),
-                url: item["url"]
-                    .as_str()
-                    .or_else(|| item["article_url"].as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                publish_time: item["ctime"]
-                    .as_str()
-                    .or_else(|| item["date"].as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                sentiment_score: None,
-            })
-            .collect())
-    }
-
-    /// 备选新闻端点失败后，降级到东方财富搜索 API
-    async fn get_news_fallback_or_eastmoney(
-        &self,
-        stock_code: &str,
-        limit: u32,
-    ) -> Result<Vec<NewsItem>, DataError> {
-        match self.get_news_fallback(stock_code, limit).await {
-            Ok(news) => Ok(news),
-            Err(e) => {
-                tracing::warn!("[sina] 新闻备选端点也失败，降级到东方财富: {e}");
-                crate::vendors::fetch_eastmoney_news(&self.http, "sina", stock_code, limit).await
-            },
-        }
-    }
-
     /// 新浪 K 线通道（分钟级；日线继续走网易通道，未做切换）。
     ///
     /// 口径说明：
@@ -548,57 +445,25 @@ impl StockVendor for SinaVendor {
     }
 
     async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
-        // 降级链路：新浪主端点 → 新浪备选端点 → 东方财富
-        let primary_url = format!(
-            "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllNewsStock/symbol/{stock_code}.json?page=1&num={}",
-            limit.min(50)
-        );
-
-        let resp = match self.sina_get(&primary_url).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("[sina] 新闻主端点请求失败，尝试备选端点: {e}");
-                return self.get_news_fallback_or_eastmoney(stock_code, limit).await;
-            },
-        };
-
-        let ct = resp
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok().map(String::from))
-            .unwrap_or_default();
-
-        // 如果 Content-Type 不是 JSON，放弃解析并尝试备选端点
-        if !ct.contains("json") && !ct.contains("javascript") {
-            let body_len = resp.content_length().unwrap_or(0);
-            tracing::warn!(
-                "[sina] 新闻主端点返回非 JSON (Content-Type={ct}, Content-Length={body_len})，尝试备选端点"
-            );
-            return self.get_news_fallback_or_eastmoney(stock_code, limit).await;
-        }
-
-        let items: Vec<serde_json::Value> =
-            resp.json().await.map_err(|e| DataError::VendorError {
-                vendor: "sina".into(),
-                message: format!("新闻 JSON 解析失败: {e} (Content-Type={ct}, url={primary_url})"),
-            })?;
-
-        if items.is_empty() {
-            tracing::warn!("[sina] 新闻主端点返回空数组，尝试备选端点");
-            return self.get_news_fallback_or_eastmoney(stock_code, limit).await;
-        }
-
-        Ok(items
-            .iter()
-            .map(|item| NewsItem {
-                title: item["title"].as_str().unwrap_or("").to_string(),
-                summary: String::new(),
-                source: "新浪财经".to_string(),
-                url: format!("https://finance.sina.com.cn{}", item["url"].as_str().unwrap_or("")),
-                publish_time: item["ctime"].as_str().unwrap_or("").to_string(),
-                sentiment_score: None,
-            })
-            .collect())
+        // 原实现三段：主端点 `corp/go.php/vCB_AllNewsStock/symbol/{code}.json` → 备选端点
+        // `Market_Center.getStockNews` → 内部直接换东财搜索 API 兜底。
+        // 2026-10-14 实测两个端点都不再产出 JSON（主端点 HTTP 200 但 `Content-Type:
+        // text/html; charset=gbk` + 空 body；备选端点返 `__ERROR:3 Service not found`）
+        // ⇒ 通道整体不可用，整段删除，不留「能连上但解析出 0 条」的版本 —— 后者会伪装成
+        // 「该股没有新闻」，与 get_financials 同一条处置。
+        //
+        // 第三段「内部换东财源」同时是一处归因失真：它让 sina 这一档恒返 Ok ⇒ news 路由表里
+        // eastmoney 及其后 4 档永不被调用，健康度还把 sina 记成「成功」，两个端点全废这件事
+        // 因此永远不会浮现。改由路由表按序降级到 eastmoney vendor（同一套请求参数，且那条
+        // 实现另有 as-of 翻页通道）。
+        //
+        // 本 vendor 已不在 `news` 路由表内（见 `lib.rs` 的 `default_routing`），形态同
+        // `baidu_stock`：注册保留，把 "sina" 加回路由即可试恢复。
+        let _ = (stock_code, limit);
+        Err(DataError::VendorError {
+            vendor: "sina".into(),
+            message: "sina 新闻通道已下线（主/备端点实测均不返回 JSON）".into(),
+        })
     }
 
     async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {

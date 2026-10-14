@@ -16063,7 +16063,15 @@
         "noDeps": "No tools depend on this vendor",
         "fixedToolHeader": "Fixed tools (DAG ToolNode deterministic execution)",
         "exposedToolHeader": "LLM-exposed tools (Agent autonomous invocation)",
-        "localCompute": "Local compute tools (no remote vendor dependency)"
+        "localCompute": "Local compute tools (no remote vendor dependency)",
+        "fallbackTitle": "벤더 전환 기록",
+        "fallbackScope": "이번 실행에서 {{count}} 건 (프로세스 내 최대 1024건, 재시작 시 초기화)",
+        "fallbackEmpty": "아직 '실제로 공급한 벤더 ≠ 첫 번째 정상 후보' 사례가 없습니다. 분석 실행 또는 전체 점검 후 기록이 쌓입니다.",
+        "fallbackColTime": "시간",
+        "fallbackColDimension": "항목 · 코드",
+        "fallbackColPath": "첫 정상 후보 → 실제 공급",
+        "fallbackUnavailable": "이 실행 환경에서는 전환 기록 응답이 목록이 아니어서 표시할 수 없습니다. 데스크톱 앱에서 기록이 표시됩니다.",
+        "fallbackFailed": "전환 기록을 읽지 못했습니다(명령이 오류를 반환했습니다)."
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

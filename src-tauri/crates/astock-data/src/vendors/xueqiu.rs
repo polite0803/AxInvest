@@ -254,16 +254,10 @@ impl StockVendor for XueqiuVendor {
         let url = format!(
             "https://xueqiu.com/statuses/stock_timeline.json?symbol_id={symbol_id}&page=1&count={count}"
         );
-        let resp = match self.xq_get(&url).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("[xueqiu] 新闻原生接口请求失败，降级到东方财富: {e}");
-                return crate::vendors::fetch_eastmoney_news(
-                    &self.http, "xueqiu", stock_code, limit,
-                )
-                .await;
-            },
-        };
+        // 2026-10-14：这里原本「内部直接换东财搜索 API」兜底 ⇒ xueqiu 这一档对上游
+        // 恒返 Ok，news 路由表里 eastmoney 及其后各档永不被调用，健康度还把 xueqiu 记成
+        // 「成功」，原生接口失效这件事永远不会浮现。现如实上抛，由路由层按序降级。
+        let resp = self.xq_get(&url).await?;
 
         // 预检 Content-Type，防止将 WAF HTML 页面当作 JSON 解析
         let ct = resp
@@ -278,10 +272,13 @@ impl StockVendor for XueqiuVendor {
             };
             let preview = &body[..body.len().min(200)];
             tracing::warn!(
-                "[xueqiu] 新闻接口返回非 JSON (Content-Type={ct})，阿里云 WAF 拦截，降级到东方财富, preview={preview}"
+                "[xueqiu] 新闻接口返回非 JSON (Content-Type={ct})，阿里云 WAF 拦截, preview={preview}"
             );
-            return crate::vendors::fetch_eastmoney_news(&self.http, "xueqiu", stock_code, limit)
-                .await;
+            // 报错而非换源：文案刻意不含「空 / 返回空」类词，让路由层按真故障记降级。
+            return Err(DataError::VendorError {
+                vendor: "xueqiu".into(),
+                message: format!("新闻接口被阿里云 WAF 拦截 (Content-Type={ct})"),
+            });
         }
 
         let json: serde_json::Value = resp

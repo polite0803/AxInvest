@@ -16445,7 +16445,15 @@
         "noDeps": "No tools depend on this vendor",
         "fixedToolHeader": "Fixed tools (DAG ToolNode deterministic execution)",
         "exposedToolHeader": "LLM-exposed tools (Agent autonomous invocation)",
-        "localCompute": "Local compute tools (no remote vendor dependency)"
+        "localCompute": "Local compute tools (no remote vendor dependency)",
+        "fallbackTitle": "Vendor Fallback Records",
+        "fallbackScope": "{{count}} entries in this run (up to 1024 kept in-process, cleared on restart)",
+        "fallbackEmpty": "No case yet in this run where the actual data source differs from the first healthy candidate. Records accumulate after an analysis run or a full health check.",
+        "fallbackColTime": "Time",
+        "fallbackColDimension": "Dimension · Code",
+        "fallbackColPath": "First healthy candidate → Actual source",
+        "fallbackUnavailable": "This runtime does not expose the fallback-log endpoint (the response is not a list). Records appear when running the desktop app.",
+        "fallbackFailed": "Failed to read fallback records (the command returned an error)."
       },
       "workflow": {
         "title": "Stock Analysis Workflow",

@@ -16063,7 +16063,15 @@
         "noDeps": "No tools depend on this vendor",
         "fixedToolHeader": "Fixed tools (DAG ToolNode deterministic execution)",
         "exposedToolHeader": "LLM-exposed tools (Agent autonomous invocation)",
-        "localCompute": "Local compute tools (no remote vendor dependency)"
+        "localCompute": "Local compute tools (no remote vendor dependency)",
+        "fallbackTitle": "ベンダー切替記録",
+        "fallbackScope": "この起動で {{count}} 件（プロセス内は最大 1024 件、再起動で消去）",
+        "fallbackEmpty": "今回はまだ「実際に供給したベンダー ≠ 最初の正常な候補」の事例はありません。分析実行または全件チェック後に蓄積されます。",
+        "fallbackColTime": "時刻",
+        "fallbackColDimension": "項目 · コード",
+        "fallbackColPath": "最初の正常候補 → 実際の供給元",
+        "fallbackUnavailable": "この実行環境では切替記録の取得結果がリストではないため表示できません。デスクトップ版では記録が表示されます。",
+        "fallbackFailed": "切替記録の読み込みに失敗しました（コマンドがエラーを返しました）。"
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

@@ -16063,7 +16063,15 @@
         "noDeps": "No tools depend on this vendor",
         "fixedToolHeader": "Fixed tools (DAG ToolNode deterministic execution)",
         "exposedToolHeader": "LLM-exposed tools (Agent autonomous invocation)",
-        "localCompute": "Local compute tools (no remote vendor dependency)"
+        "localCompute": "Local compute tools (no remote vendor dependency)",
+        "fallbackTitle": "سجلات تبديل المصدر",
+        "fallbackScope": "{{count}} سجلًا في هذه الجلسة (حتى 1024 في الذاكرة، تُمسح عند إعادة التشغيل)",
+        "fallbackEmpty": "لا توجد حتى الآن حالات يختلف فيها المصدر الفعلي عن أول مرشح سليم. تظهر السجلات بعد تحليل أو فحص شامل.",
+        "fallbackColTime": "الوقت",
+        "fallbackColDimension": "البُعد · الرمز",
+        "fallbackColPath": "أول مرشح سليم → المصدر الفعلي",
+        "fallbackUnavailable": "لا يعرض وقت التشغيل هذا نقطة نهاية سجل التبديل (الاستجابة ليست قائمة). تظهر السجلات في تطبيق سطح المكتب.",
+        "fallbackFailed": "تعذّرت قراءة سجلات التبديل (أرجعت الأمر خطأ)."
       },
       "collapseGroup": "Collapse",
       "expandGroup": "Expand ({{total}})",

@@ -101,7 +101,12 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     //   代价是「代码改了图却没抬常量」会被版本号掩盖 ⇒ 原 `>= 即跳过` 让改脚本 / 改拓扑 /
     //   改 input_mapping 全部静默不落库。故版本门改为 `version` + **图谱指纹** 双判据，
     //   三态裁决见下方「版本门裁决」段：既保住用户修改优先，又让「能重种子化」成为常态。
-    const TEMPLATE_VERSION: i32 = 53;
+    // v60(2026-10-14): 收编 DB 现值 v59 的全部内容 —— ① 7 个 Agent 节点的知识库绑定
+    //      （此前只有 DB 里有，构造器给 `vec![]`，重建即丢；a-chain-trend1 按 prompt 的设计
+    //        补齐，DB 里它是漏绑的那一个）；② 19 个节点 position 对齐 DB 现值。
+    //      抬到 60 = DB 现值 + 1，是让「代码重新成为权威」的必要条件；在此之前 version(59) >
+    //      常量(53) 恒走「跳过重建」，代码侧任何图改动都落不了库。
+    const TEMPLATE_VERSION: i32 = 60;
 
     let now = chrono::Utc::now().timestamp_millis();
 
@@ -127,7 +132,7 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
             id: "trigger".into(),
             title: "启动 Serenity 筛选".into(),
             description: Some("自动扫描市场数据，发现产业瓶颈机会".into()),
-            position: Position { x: 340.0, y: 0.0 },
+            position: Position { x: 900.0, y: 80.0 },
             retry: RetryConfig::default(),
             timeout: None,
             enabled: true,
@@ -149,10 +154,10 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     // 仍披露**（datacenter-web RPT_MUTUAL_DEAL_HISTORY，eastmoney get_north_bound_flow v3
     // 已改返回成交额序列并标注 timestamp）。北向成交活跃度仍是有价值的资金面信号。
     let t_names = [
-        ("t-industry-rank", "行业排名", "get_industry_ranking", "t-industry-rank", 240.0, 80.0),
-        ("t-cls-flash", "实时快讯", "get_cls_flash", "t-cls-flash", 440.0, 80.0),
-        ("t-northbound", "北向资金", "get_north_bound_flow", "t-northbound", 840.0, 80.0),
-        ("t-policy-news", "政策新闻", "search_news", "t-policy-news", 1040.0, 80.0),
+        ("t-industry-rank", "行业排名", "get_industry_ranking", "t-industry-rank", 80.0, 216.0),
+        ("t-cls-flash", "实时快讯", "get_cls_flash", "t-cls-flash", 325.0, 216.0),
+        ("t-northbound", "北向资金", "get_north_bound_flow", "t-northbound", 990.0, 216.0),
+        ("t-policy-news", "政策新闻", "search_news", "t-policy-news", 1455.0, 216.0),
     ];
     let t_trend_ids: Vec<&str> = t_names.iter().map(|(id, _, _, _, _, _)| *id).collect();
     for (id, title, tool, output, x, y) in &t_names {
@@ -256,8 +261,9 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
         trend_scanner_prompt,
         t_trend_ids.clone(),
         ts_input_mapping,
-        340.0,
-        180.0,
+        &[SERENITY_INDUSTRY_RAG],
+        1260.0,
+        352.0,
     ));
     for tid in &t_trend_ids {
         edges.push(edge(&format!("e-{tid}-a-trend-scanner"), tid, "a-trend-scanner"));
@@ -277,7 +283,12 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     // 替代：行业/产业链信息由 agent 节点知识源（RAG）检索 kb 获取；
     //      财务指标由 chain-decomposer 按需调用 get_stock_financials 等工具拉取真实数据。
     let trend_names = ["trend1", "trend2", "trend3", "trend4", "trend5"];
-    let trend_x_positions = [60.0, 220.0, 380.0, 540.0, 700.0];
+    // 2026-10-14 按 DB 现值收编（用户在编辑器里重排过，代码常量停留在旧布局；不收编则抬版
+    // 瞬间整图布局回退）。y 同理见下方两处：唯一不复现的是 a-chain-trend4 的 y=480 —— 相对
+    // 其余 4 路的 488 是 8 像素手拖抖动、无排版含义，按 488 统一收。
+    let trend_x_positions = [310.0, 595.0, 1145.0, 1400.0, 1625.0];
+    // 评分节点在 DB 里已不等于「拆解节点 x + 20」（trend1 的评分甚至在它左侧），故独立成数组。
+    let scorer_x_positions = [157.5, 475.0, 695.0, 1040.0, 1290.0];
 
     for (i, tn) in trend_names.iter().enumerate() {
         let decomposer_id = format!("a-chain-{tn}");
@@ -376,8 +387,9 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
             &decomposer_prompt,
             vec!["a-trend-scanner"],
             cd_input_mapping,
+            &[SERENITY_INDUSTRY_RAG],
             trend_x_positions[i],
-            300.0,
+            488.0,
         ));
         edges.push(edge(
             &format!("e-a-trend-scanner-{decomposer_id}"),
@@ -407,7 +419,7 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
                 description: Some(
                     "多策略评分：bottleneck/policy/earnings/capital/event/technical".into(),
                 ),
-                position: Position { x: trend_x_positions[i] + 20.0, y: 360.0 },
+                position: Position { x: scorer_x_positions[i], y: 624.0 },
                 retry: RetryConfig::default(),
                 timeout: Some(30),
                 enabled: true,
@@ -470,7 +482,7 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
             id: "c-consistency-check".into(),
             title: "一致性检查".into(),
             description: Some("检查各 LLM 节点输出是否存在数据矛盾".into()),
-            position: Position { x: 380.0, y: 520.0 },
+            position: Position { x: 820.0, y: 760.0 },
             retry: RetryConfig::default(),
             timeout: Some(15),
             enabled: true,
@@ -616,8 +628,9 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
         mapper_prompt,
         mapper_ctx,
         mapper_input_mapping,
-        340.0,
-        660.0,
+        &[SERENITY_INDUSTRY_RAG],
+        940.0,
+        900.0,
     ));
     // 为所有 bottleneck-calc 节点添加直接边到 candidate-mapper
     for tn in &trend_names {
@@ -674,7 +687,7 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
             id: "c-data-verifier".into(),
             title: "财务数据验证".into(),
             description: Some("对候选股财务数据进行合理性验证".into()),
-            position: Position { x: 580.0, y: 660.0 },
+            position: Position { x: 945.0, y: 1032.0 },
             retry: RetryConfig::default(),
             timeout: Some(30),
             enabled: true,
@@ -931,6 +944,13 @@ pub(crate) fn serenity_tool_node(
     })
 }
 
+/// Serenity 链的行业知识库绑定源 —— 7 个 Agent 节点共用。
+///
+/// 2026-10-14 收编：这份绑定此前**只存在于数据库**（构造器给的是 `vec![]`），链上
+/// chain-decomposer 的 prompt 却明写「优先以知识库检索结果为行业背景依据」⇒ 重建一次
+/// 就丢一次绑定。绑定 id 只有一个权威出处，要换知识源改这里。
+const SERENITY_INDUSTRY_RAG: &str = "knowledge:lemonhu_knowledge_graph";
+
 /// Agent 节点构建器（`model` 留空 → 回落会话 / 全局默认模型）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn serenity_agent_node(
@@ -940,6 +960,7 @@ pub(crate) fn serenity_agent_node(
     system_prompt: &str,
     context_sources: Vec<&str>,
     input_mapping: HashMap<String, String>,
+    rag_source_ids: &[&str],
     x: f64,
     y: f64,
 ) -> WorkflowNode {
@@ -970,7 +991,7 @@ pub(crate) fn serenity_agent_node(
             agent_profile_id: Some(format!("stock-{expert_id}")),
             max_tool_rounds: Some(8),
             execution_mode: None,
-            rag_source_ids: vec![],
+            rag_source_ids: rag_source_ids.iter().map(|s| s.to_string()).collect(),
             consistency_check: None,
             // V74 关闭: hallucination_guard 锚定检查（同 stock-analysis，实测误报率 ~100%）
             hallucination_guard: Some(HallucinationGuardConfig {
@@ -1652,7 +1673,7 @@ mod serenity_version_gate_tests {
     /// ⚠ 它是**副本**：改源码里那个常量时必须一起改。不同步**不会静默失效** ——
     /// 状态①的 `assert_eq!(version, Some(TEMPLATE_VERSION))` 会当场失败（写成本测试的
     /// 第一道断言就是为了这个）。宁可响亮地红，也不要一条「看着在跑、其实没在测」的测试。
-    const TEMPLATE_VERSION: i32 = 53;
+    const TEMPLATE_VERSION: i32 = 60;
 
     async fn fresh_db() -> axagent_dao::db::DbHandle {
         axagent_dao::db::create_test_pool().await.expect("建临时测试库失败")
@@ -1763,5 +1784,56 @@ mod serenity_version_gate_tests {
         );
         assert_eq!(kept.name, "SENTINEL-KEEP", "用户保存过的行整体不得被覆盖");
         assert_eq!(kept.version, TEMPLATE_VERSION + 1, "跳过时不得篡改 version");
+    }
+
+    /// 落库层判据的检查对象。**抽成函数是为了让下面的负控能拆在同一道守卫上** ——
+    /// 直接把断言写在测试体里，就只能在「生产代码恰好出错」时才有电，无法自证它会红。
+    fn agents_without_industry_rag(
+        nodes: &[serde_json::Value],
+        want: &serde_json::Value,
+    ) -> Vec<String> {
+        nodes
+            .iter()
+            .filter(|n| n["type"].as_str() == Some("agent"))
+            .filter(|n| n["config"]["ragSourceIds"] != *want)
+            .map(|n| n["id"].as_str().unwrap_or("?").to_string())
+            .collect()
+    }
+
+    /// 7 个 Agent 节点都必须带上行业知识库绑定 —— 锁的是**生产者**：`serenity_agent_node` 的
+    /// `rag_source_ids` 形参只要被某处传回 `&[]`，链上 prompt 仍写着「优先以知识库检索结果为
+    /// 行业背景依据」⇒ 模型被要求引用它拿不到的东西。读的是播种**落库后的 `nodes`**，
+    /// 不是构造器返回值；键名按 serde 的 camelCase。
+    #[tokio::test]
+    async fn seeded_agents_carry_industry_rag_binding() {
+        let handle = fresh_db().await;
+        seed_serenity_screening_workflow_template(&handle.conn).await.expect("首次种子化应成功");
+        let nodes: Vec<serde_json::Value> =
+            serde_json::from_str(&row(&handle.conn).await.nodes).expect("nodes 应是 JSON 数组");
+        let want = serde_json::json!([super::SERENITY_INDUSTRY_RAG]);
+        assert!(
+            agents_without_industry_rag(&nodes, &want).is_empty(),
+            "存在未带行业知识库绑定的 Agent 节点"
+        );
+        let agents = nodes.iter().filter(|n| n["type"].as_str() == Some("agent")).count();
+        // 下限断言：漏绑某一路由上一条红，整个节点被摘掉则由这条红
+        assert_eq!(agents, 7, "serenity 链应有 7 个 Agent 节点，且每个都带绑定");
+    }
+
+    /// 负控：摘掉一个节点的绑定后，上面那条判据必须**点名到它**。若这里也「通过」，
+    /// 说明 `is_empty()` 恒真，前一条测试是假绿。
+    #[tokio::test]
+    async fn rag_probe_detects_a_removed_binding() {
+        let handle = fresh_db().await;
+        seed_serenity_screening_workflow_template(&handle.conn).await.expect("首次种子化应成功");
+        let mut nodes: Vec<serde_json::Value> =
+            serde_json::from_str(&row(&handle.conn).await.nodes).expect("nodes 应是 JSON 数组");
+        let want = serde_json::json!([super::SERENITY_INDUSTRY_RAG]);
+        let victim = nodes
+            .iter_mut()
+            .find(|n| n["id"].as_str() == Some("a-chain-trend3"))
+            .expect("夹具：a-chain-trend3 应在图内");
+        victim["config"]["ragSourceIds"] = serde_json::json!([]);
+        assert_eq!(agents_without_industry_rag(&nodes, &want), vec!["a-chain-trend3".to_string()]);
     }
 }

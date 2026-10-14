@@ -483,6 +483,9 @@ pub(crate) async fn seed_serenity_fast_workflow_template(
         // 而 `phase0_ids` 是 `Vec<String>`（下游 502 行还要按 String 复用）⇒ 在此借用转换。
         phase0_ids.iter().map(String::as_str).collect(),
         ts_input_mapping,
+        // 本链的 trend-scanner 在 DB 里未绑知识源，且 merged_prompt 不含「以知识库检索结果为
+        // 行业背景依据」的承诺 ⇒ 保持空；主链那 7 个节点见 `SERENITY_INDUSTRY_RAG`。
+        &[],
         340.0,
         660.0,
     );

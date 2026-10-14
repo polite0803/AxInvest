@@ -236,25 +236,20 @@ function extractEffectiveParamsFields(): string[] {
   return out;
 }
 
-/** 从 `b("name", ...)` 调用中抽取出所有的变量名 */
+/** 从 `b("name", ...)` 调用与 `resolve(["name", ...])` 分组清单中抽取出所有变量名 */
 function extractVarNamesFromPanel(): string[] {
   const src = readPanelSource();
+  const names = new Set<string>();
+  // 形态①：`b("key", 默认值, 描述键, 类型)` —— 面板自己声明默认值的那批。
   const re = /b\(\s*"([a-z_][a-z0-9_]*)"/g;
-  const names = new Set<string>();
   let m: RegExpExecArray | null;
   while ((m = re.exec(src)) !== null) { names.add(m[1]); }
-  return [...names];
-}
-
-/** 从 rust 文件的 `name: "...".into(),` 中抽取出种子化变量名 */
-function extractVarNamesFromRust(): string[] {
-  const src = readRustSource();
-  // 排除后端不种子化的占位（如 old_variables 序列化后再 read 时的 key）
-  // 仅匹配 v19 段：`name: "...".into(),` 且 var_type 是 number/string/boolean/enum
-  const re = /name:\s*"([a-z_][a-z0-9_]*)"\.into\(\),\s*\n\s*var_type:\s*"(number|string|boolean|enum)"/g;
-  const names = new Set<string>();
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(src)) !== null) { names.add(m[1]); }
+  // 形态②：分组声明里的 `vars: resolve(["key", ...])` —— 只登记键、默认值取自后端种子。
+  // ⚠ 漏掉这一形态会让面板的真实暴露面从 328 缩成 137（实测 2026-10-14），
+  //   于是所有「面板 ⊇ 后端」方向的对账都查不到那 191 个键。
+  for (const g of src.matchAll(/resolve\(\[([\s\S]*?)\]\)/g)) {
+    for (const x of g[1].matchAll(/"([a-z_][a-z0-9_]*)"/g)) { names.add(x[1]); }
+  }
   return [...names];
 }
 
@@ -409,38 +404,24 @@ describe("StockAnalysisConfigPanel 默认变量与后端模板 v19 同步", () =
     }
   });
 
-  it("面板定义的每个工作流参数 key 在后端模板 v19 中也存在（vendor_* 排除）", () => {
+  it("面板暴露的每个工作流参数 key 都在后端 v19 变量表里有定义（零例外名单）", () => {
     const panel = new Set(extractVarNamesFromPanel());
-    const rust = new Set(extractVarNamesFromRust());
-    // 排除 vendor_*：它们由 DataVendorsTab 单独管理，避免两边同时写入竞态。
-    // 排除 actual_outcome / reflection_depth / stock_lessons / actual_market_text：
-    // **反思复盘工作流**的运行时注入变量，非用户配置参数。
-    // ⚠️ 扫描源是 `stock_analysis_setup/mod.rs`（同时承载 reflection 模板定义），
-    // 因此这类变量会被带进来 —— 判定依据是「由 Rust 在运行时写入、模板 variables
-    // 里没有、也不该有面板入口」，与上一条注释的注入族同源，不是把检查绕过。
-    const runtimeInjected = new Set([
-      "actual_outcome",
-      "reflection_depth",
-      "stock_lessons",
-      "actual_market_text",
-      // [v3 单档复盘] reflection 模板变量（与上面四项同源）：运行时由
-      // run_reflection_workflow 注入/覆盖（review_horizon 用盖章后的 primary_horizon
-      // 覆盖），非 stock-analysis 用户配置参数 ⇒ 不进面板。
-      "review_horizon",
-      "review_expected_holding_days",
-      "analysis_primary_horizon",
-      // [反思模板 v4 2026-10] mover_recall_context：妖股漏检回放专项上下文（权威归因层 /
-      // 窗口硬数字 / 专项三问），由 run_reflection_workflow **无条件注入** —— 常规到期反思
-      // 也要注入占位句，否则 reflection-agent 的 {{mover_recall_context}} 报
-      // VARIABLE_NOT_FOUND。值是**按本轮漏检事件现算的文本**，不是用户可配置参数
-      // ⇒ 面板无入口，与本集合上面一族（同由 run_reflection_workflow 写入）同源判定，非绕过。
-      "mover_recall_context",
-    ]);
-    const missingInPanel = [...rust]
-      .filter((k) => !k.startsWith("vendor_"))
-      .filter((k) => !runtimeInjected.has(k))
-      .filter((k) => !panel.has(k));
-    expect(missingInPanel, `后端已种子化但面板缺失: ${missingInPanel.join(", ")}`).toEqual([]);
+    const seed = extractVarNamesFromSeedVariables();
+    // 方向就是本条标题说的这件事实：面板敢让人改的键，后端必须认得。
+    // ⚠ 2026-10-14 修掉的两个口径错（改之前这条**恒过、没有牙**）：
+    //   ① 后端面取的是 `stock_analysis_setup/mod.rs`，而 mod.rs 里那 8 个 `Variable` 块
+    //      全属 **serenity-reflection 模板**（股票分析那张表在 `seed_variables.rs`）⇒
+    //      扫到的 7 条键 100% 被「运行时注入」例外名单吃掉，扣完剩 0，任何真缺失都报不出。
+    //   ② 上面板面只认 `b("key", …)` 形态，漏了 `vars: resolve([...])` 那 191 个键。
+    // 换成真表面后例外名单归零：实测面板 328 键 ⊆ 变量表 352 键，差集为空，
+    // 连 vendor_*（由 DataVendorsTab 全权管理，另一条断言钉）和运行时注入键都不用排。
+    const missing = [...panel].filter((k) => !seed.has(k));
+    expect(
+      missing,
+      `面板暴露了变量表里不存在的参数 → 改了不生效的死配置`
+        + `（2026-09-11「面板声明但变量表无定义」形态）。请补 seed_variables.rs 定义`
+        + `，或从面板撤下: ${missing.join(", ")}`,
+    ).toEqual([]);
   });
 
   it("KNOWN_UNWIRED_PARAMS 必须为空（禁止用技术债清单绕过接线检查）", () => {

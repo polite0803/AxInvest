@@ -51,6 +51,7 @@ pub mod opc_delivery;
 pub mod opc_demand;
 pub mod paper_overviews;
 pub mod platform_config;
+pub mod price_alert;
 pub mod program_policy;
 pub mod prompt_template;
 pub mod provider;

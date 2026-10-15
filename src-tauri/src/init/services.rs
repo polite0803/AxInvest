@@ -3262,7 +3262,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
         //
         // 无参数（`CronJob.prompt` 留空）；只读库、不依赖当日行情 ⇒ **不进**交易日闸门。
         if job.task_type.as_deref()
-            == Some(crate::commands::stock_workflow::reflection::LESSON_VALIDATION_TASK_TYPE)
+            == Some(crate::commands::constants::LESSON_VALIDATION_TASK_TYPE)
         {
             let store = cron_store.clone();
             let db = sync_db.clone();

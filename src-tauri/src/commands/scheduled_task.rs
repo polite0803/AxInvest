@@ -121,7 +121,7 @@ const BUILTIN_TASK_TYPES: &[&str] = &[
     crate::commands::backtest_validation::DECISION_BACKTEST_TASK_TYPE,
     crate::commands::constants::MOVER_RECALL_TASK_TYPE,
     crate::commands::constants::EVOLUTION_PROPOSAL_TASK_TYPE,
-    crate::commands::stock_workflow::reflection::LESSON_VALIDATION_TASK_TYPE,
+    crate::commands::constants::LESSON_VALIDATION_TASK_TYPE,
     crate::commands::constants::PORTFOLIO_METRICS_TASK_TYPE,
     crate::commands::constants::INTENT_EXPIRY_TASK_TYPE,
 ];

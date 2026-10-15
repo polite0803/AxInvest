@@ -1796,13 +1796,14 @@ async fn extract_lesson_to_rule(
 // - 引用后决策成功率（success_count）：基于 stock_analyses 表的 posterior 字段
 // - 规则置信度衰减/提升：基于实际表现调整 confidence
 //
-/// `lesson-validation` 任务类型标识。
-///
-/// **单点声明**：`init/services.rs` 的分派分支与 `init/stock_automation_cron_seed.rs` 的内置
-/// 任务都引用它，不各写一份字面量（同 `backtest_validation::DECISION_BACKTEST_TASK_TYPE` 的
-/// 处置）。改名会静默切断派发 —— 而本函数一旦没有触发方，教训的 `confidence` / `success_count`
-/// / 退役三件事就全停摆，且界面看不出来（就是 2026-10-14 之前的状态）。
-pub const LESSON_VALIDATION_TASK_TYPE: &str = "lesson-validation";
+// `lesson-validation` 任务类型标识已按「定时任务 task_type 一律归 commands/constants.rs」
+// 的裁定收口到 `crate::commands::constants::LESSON_VALIDATION_TASK_TYPE`，本模块只引用，
+// 不再就地定义（避免长出第二权威）。
+//
+// **单点声明**：`init/services.rs` 的分派分支与 `init/stock_automation_cron_seed.rs` 的内置
+// 任务都引用它，不各写一份字面量（同 `backtest_validation::DECISION_BACKTEST_TASK_TYPE` 的
+// 处置）。改名会静默切断派发 —— 而本函数一旦没有触发方，教训的 `confidence` / `success_count`
+// / 退役三件事就全停摆，且界面看不出来（就是 2026-10-14 之前的状态）。
 
 // 调用方式：内置定时任务 `lesson-validation-daily`（工作日 21:00，排在 18:00 到期反思与
 // 20:00 进化聚合之后，见 `init/stock_automation_cron_seed.rs`）+ Tauri 命令

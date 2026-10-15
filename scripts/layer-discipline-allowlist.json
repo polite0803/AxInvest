@@ -3,7 +3,7 @@
   "note": "分层护栏棘轮基线：**只减不增**。修复违规后必须用 --update-baseline 下调，否则基线虚高会让棘轮失效。",
   "rules": {
     "commands-no-direct-db": {
-      "total": 659,
+      "total": 639,
       "files": {
         "src-tauri/src/commands/agency_expert.rs": 4,
         "src-tauri/src/commands/agent/command_bridge.rs": 1,
@@ -17,7 +17,6 @@
         "src-tauri/src/commands/backup.rs": 1,
         "src-tauri/src/commands/capability.rs": 2,
         "src-tauri/src/commands/cognitive.rs": 3,
-        "src-tauri/src/commands/conditional_order.rs": 5,
         "src-tauri/src/commands/context_breakdown.rs": 6,
         "src-tauri/src/commands/conversations/streaming.rs": 14,
         "src-tauri/src/commands/conversations_search.rs": 7,
@@ -93,7 +92,6 @@
         "src-tauri/src/commands/provider_ctx.rs": 1,
         "src-tauri/src/commands/quant_backtest.rs": 7,
         "src-tauri/src/commands/rl_training.rs": 2,
-        "src-tauri/src/commands/scheduled_task.rs": 2,
         "src-tauri/src/commands/screenshot_diagnosis.rs": 9,
         "src-tauri/src/commands/search.rs": 3,
         "src-tauri/src/commands/skill_decomposition.rs": 3,
@@ -101,8 +99,8 @@
         "src-tauri/src/commands/skills/analysis.rs": 2,
         "src-tauri/src/commands/skills_hub.rs": 2,
         "src-tauri/src/commands/sources.rs": 1,
-        "src-tauri/src/commands/stock_analysis.rs": 68,
-        "src-tauri/src/commands/stock_analysis_bridge.rs": 31,
+        "src-tauri/src/commands/stock_analysis.rs": 67,
+        "src-tauri/src/commands/stock_analysis_bridge.rs": 19,
         "src-tauri/src/commands/stock_analysis_bridge_tests.rs": 6,
         "src-tauri/src/commands/stock_analysis_setup/seed_concept_index.rs": 1,
         "src-tauri/src/commands/stock_analysis_setup/seed_daily_market_events.rs": 5,

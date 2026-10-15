@@ -159,9 +159,12 @@ async fn handle_alert_event(
 
 /// 精确把这一行 `price_alerts` 标为已触发（阶段 B 的正门）。
 ///
-/// 抽成函数是为了让判据能拆在这一道守卫上：查不到该 id 时必须点名，
+/// 抽出函数是为了让判据能拆在这一道守卫上：查不到该 id 时必须点名，
 /// 不能把「行已被删」压成「回写成功」。
-async fn mark_triggered_by_id(db: &DatabaseConnection, alert_id: &str, now_ms: i64) {
+///
+/// `pub(crate)`：命令层 `price_alert_upsert` 的判据要用它把一行置为终态
+/// （验证「已触发行不吸收新单」），复用本函数而非另写一份 UPDATE —— 重复定义会分叉。
+pub(crate) async fn mark_triggered_by_id(db: &DatabaseConnection, alert_id: &str, now_ms: i64) {
     match price_alerts::Entity::find_by_id(alert_id).one(db).await {
         Ok(Some(alert)) => {
             if alert.is_triggered != 0 {

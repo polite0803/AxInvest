@@ -212,6 +212,10 @@ const SHARED_INFRA_MODULES = new Set([
   // 必须写同一张表的同一套字段（实盘与回放靠 as_of_date 分代）。留在任一命令模块里
   // 都会被另外两条跨模块调用命中规则 2，故按 _shared_state 的先例登记为基础设施。
   "_shared_reco_pool",
+  // 价格告警写库的唯一入口（裁定 10）：stock_analysis / stock_analysis_bridge /
+  // stock_workflow::core 三个写入点必须共用同一套「同股同类型未触发行复用」upsert，
+  // 留在任一命令模块里都会被另外两处跨模块调用命中规则 2，故按 _shared_reco_pool 先例登记。
+  "price_alert_upsert",
 ]);
 
 /**

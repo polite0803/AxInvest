@@ -31,3 +31,7 @@ pub const PORTFOLIO_METRICS_TASK_TYPE: &str = "portfolio-metrics";
 /// pending 交易意图自动过期任务的 task_type
 /// （与前端任务中心白名单、`init/services.rs` 执行分支逐字对齐）。
 pub const INTENT_EXPIRY_TASK_TYPE: &str = "intent-expiry";
+
+/// 教训校验定时任务的 task_type
+/// （与前端任务中心白名单、`init/services.rs` 执行分支逐字对齐）。
+pub const LESSON_VALIDATION_TASK_TYPE: &str = "lesson-validation";

@@ -32,7 +32,9 @@ use std::sync::Arc;
 use crate::commands::backtest_validation::{
     DECISION_BACKTEST_TASK_TYPE, RunDecisionBacktestRequest,
 };
-use crate::commands::constants::{INTENT_EXPIRY_TASK_TYPE, PORTFOLIO_METRICS_TASK_TYPE};
+use crate::commands::constants::{
+    INTENT_EXPIRY_TASK_TYPE, LESSON_VALIDATION_TASK_TYPE, PORTFOLIO_METRICS_TASK_TYPE,
+};
 use crate::commands::evolution_proposal::EVOLUTION_PROPOSAL_TASK_TYPE;
 use crate::commands::mover_recall::MOVER_RECALL_TASK_TYPE;
 use crate::commands::pool_scan::{POOL_SCAN_TASK_TYPE, PoolScanConfig};
@@ -40,7 +42,6 @@ use crate::commands::recommendation_cron::{
     RecoCronConfig, TREND_SCREENING_TASK_TYPE, TREND_SCREENING_WORKFLOW_ID,
 };
 use crate::commands::stock_workflow::BatchReflectionConfig;
-use crate::commands::stock_workflow::reflection::LESSON_VALIDATION_TASK_TYPE;
 
 /// 任务固定 ID（幂等键，勿改 —— 改了会在用户库里长出第二份）
 pub const RECO_JOB_ID: &str = "stock-reco-daily";

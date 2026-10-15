@@ -11,25 +11,31 @@
 //! 收口后的形状：未触发行按 `(股票代码, 告警类型)` **复用并更新阈值**；
 //! 已触发的行是终态，不吸收新单（新一轮监控从一条新行开始）。
 //! 复用不改变 `id`，因此内存引擎侧的 `add_config`（按 `alert_id` 覆盖）天然对齐。
+//!
+//! ## 本模块只做归一化与编排，SQL 在 dao
+//!
+//! `price_alert` 表的查 / 复用更新 / 新建全部落在 `axagent_dao::repo::price_alert`
+//! （同 `_shared_reco_pool` 对 `reco_pool` 的拆法）：命令层出现 `sea_orm::` /
+//! `axagent_entities::` 字面量会命中分层门禁
+//! [`scripts/check-layer-discipline.mjs`] 规则 1，而本模块是**新文件**（基线为 0）。
+//! alert_type 归一化在 `axagent_analysis_engine::alert_mapping`，dao 反向依赖该 crate
+//! 会成环 ⇒ 归一化后的三个标量由本模块算好再传下去。
 
 use axagent_analysis_engine::alert_mapping::{
     condition_type_for, config_for_alert, legacy_condition_for, normalize_alert_type,
 };
 use axagent_analysis_engine::monitor::RealtimeMonitor;
-use axagent_entities::price_alerts;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
-};
+use axagent_dao::repo::price_alert::{self as alert_dao, AlertRow};
 use std::sync::Arc;
 
 /// 写一条价格告警。返回 `(行, 是否复用了既有未触发行)`。
 pub async fn upsert_price_alert(
-    db: &DatabaseConnection,
+    db: &axagent_dao::DatabaseConnection,
     stock_code: &str,
     stock_name: &str,
     alert_type_input: &str,
     threshold: f64,
-) -> Result<(price_alerts::Model, bool), String> {
+) -> Result<(AlertRow, bool), String> {
     let alert_type = normalize_alert_type(alert_type_input);
     let condition_type = condition_type_for(alert_type);
     let legacy_condition = legacy_condition_for(alert_type).ok_or_else(|| {
@@ -37,47 +43,41 @@ pub async fn upsert_price_alert(
     })?;
     let now = chrono::Utc::now().timestamp_millis();
 
-    let existing = price_alerts::Entity::find()
-        .filter(price_alerts::Column::StockCode.eq(stock_code))
-        .filter(price_alerts::Column::AlertType.eq(alert_type))
-        .filter(price_alerts::Column::IsTriggered.eq(0))
-        .order_by_desc(price_alerts::Column::CreatedAt)
-        .one(db)
+    let existing = alert_dao::find_open_untriggered(db, stock_code, alert_type)
         .await
         .map_err(|e| format!("查询既有价格告警失败: {e}"))?;
 
     if let Some(row) = existing {
         let id = row.id.clone();
-        let mut active: price_alerts::ActiveModel = row.into();
-        active.stock_name = Set(stock_name.to_string());
-        active.condition = Set(legacy_condition.to_string());
-        active.target_price = Set(threshold);
-        active.condition_type = Set(Some(condition_type.to_string()));
-        active.threshold = Set(Some(threshold));
-        active.updated_at = Set(now);
-        let saved = active.update(db).await.map_err(|e| format!("更新价格告警失败: {e}"))?;
+        let saved = alert_dao::reuse_open_alert(
+            db,
+            row,
+            stock_name,
+            legacy_condition,
+            condition_type,
+            threshold,
+            now,
+        )
+        .await
+        .map_err(|e| format!("更新价格告警失败: {e}"))?;
         tracing::info!(
             "[price_alert] 复用未触发行 id={id}：{stock_code} {alert_type} 阈值改为 {threshold}"
         );
         return Ok((saved, true));
     }
 
-    let model = price_alerts::ActiveModel {
-        id: Set(uuid::Uuid::new_v4().to_string()),
-        stock_code: Set(stock_code.to_string()),
-        stock_name: Set(stock_name.to_string()),
-        // 老列继续写，兼容仍在读它的代码
-        condition: Set(legacy_condition.to_string()),
-        target_price: Set(threshold),
-        alert_type: Set(Some(alert_type.to_string())),
-        condition_type: Set(Some(condition_type.to_string())),
-        threshold: Set(Some(threshold)),
-        is_triggered: Set(0),
-        triggered_at: Set(None),
-        created_at: Set(now),
-        updated_at: Set(now),
-    };
-    let saved = model.insert(db).await.map_err(|e| format!("创建价格告警失败: {e}"))?;
+    let saved = alert_dao::insert_open_alert(
+        db,
+        stock_code,
+        stock_name,
+        alert_type,
+        legacy_condition,
+        condition_type,
+        threshold,
+        now,
+    )
+    .await
+    .map_err(|e| format!("创建价格告警失败: {e}"))?;
     Ok((saved, false))
 }
 
@@ -90,13 +90,13 @@ pub async fn upsert_price_alert(
 /// `monitor` 传 `None`（引擎未装配）时**如实返回 `false`**：调用方据此在返回体里写明
 /// 「本轮未进引擎」，而不是静默假装已经生效。
 pub async fn upsert_price_alert_and_wire(
-    db: &DatabaseConnection,
+    db: &axagent_dao::DatabaseConnection,
     monitor: Option<&Arc<RealtimeMonitor>>,
     stock_code: &str,
     stock_name: &str,
     alert_type_input: &str,
     threshold: f64,
-) -> Result<(price_alerts::Model, bool, bool), String> {
+) -> Result<(AlertRow, bool, bool), String> {
     let (saved, reused) =
         upsert_price_alert(db, stock_code, stock_name, alert_type_input, threshold).await?;
 
@@ -137,23 +137,18 @@ mod tests {
     use super::*;
     // 六类常量只有测试在用（生产侧一律经 `normalize_alert_type` 归一，不列清单）
     use axagent_analysis_engine::alert_mapping::alert_types;
-    use sea_orm::{ActiveModelTrait, EntityTrait};
 
     async fn two_rows_same_code_and_type(
-        db: &DatabaseConnection,
+        db: &axagent_dao::DatabaseConnection,
         second: f64,
-    ) -> Vec<price_alerts::Model> {
+    ) -> Vec<AlertRow> {
         upsert_price_alert(db, "601899", "紫金矿业", "stop_loss", 12.0)
             .await
             .expect("第一次建单应成功");
         upsert_price_alert(db, "601899", "紫金矿业", "stop_loss", second)
             .await
             .expect("第二次建单应成功");
-        price_alerts::Entity::find()
-            .filter(price_alerts::Column::StockCode.eq("601899"))
-            .all(db)
-            .await
-            .unwrap()
+        alert_dao::find_by_stock(db, "601899").await.expect("按股票读回告警行应成功")
     }
 
     /// 裁定 10 的正主：同股同类型建两次 ⇒ 表里仍只有一行，且阈值是第二次给的那个。
@@ -177,16 +172,15 @@ mod tests {
 
         let (first, _) =
             upsert_price_alert(db, "600519", "贵州茅台", "take_profit", 30.0).await.unwrap();
-        let mut active: price_alerts::ActiveModel = first.clone().into();
-        active.is_triggered = Set(1);
-        active.triggered_at = Set(Some(1_760_000_000_000));
-        active.update(db).await.unwrap();
+        // 置为终态走监控侧既有的回写实现（同 `monitor_emitter` 生产路径），不另写一份 UPDATE
+        crate::init::monitor_emitter::mark_triggered_by_id(db, &first.id, 1_760_000_000_000).await;
 
         let (second, reused) =
             upsert_price_alert(db, "600519", "贵州茅台", "take_profit", 33.0).await.unwrap();
         assert!(!reused, "终态行不该被复用");
         assert_ne!(second.id, first.id, "新监控周期从一条新行开始");
-        let kept = price_alerts::Entity::find_by_id(&first.id).one(db).await.unwrap().unwrap();
+        let rows = alert_dao::find_by_stock(db, "600519").await.expect("按股票读回告警行应成功");
+        let kept = rows.iter().find(|r| r.id == first.id).expect("历史行应仍在表里");
         assert_eq!(kept.is_triggered, 1, "历史行保持已触发");
         assert_eq!(kept.threshold, Some(30.0), "历史行的阈值不能被改写");
     }
@@ -200,11 +194,7 @@ mod tests {
         for kind in ["stop_loss", "take_profit"] {
             upsert_price_alert(db, "300750", "宁德时代", kind, 12.0).await.unwrap();
         }
-        let rows = price_alerts::Entity::find()
-            .filter(price_alerts::Column::StockCode.eq("300750"))
-            .all(db)
-            .await
-            .unwrap();
+        let rows = alert_dao::find_by_stock(db, "300750").await.expect("按股票读回告警行应成功");
         assert_eq!(rows.len(), 2);
 
         // 再来一轮：仍各自复用，不追加
@@ -213,11 +203,7 @@ mod tests {
                 upsert_price_alert(db, "300750", "宁德时代", kind, 13.0).await.unwrap();
             assert!(reused, "{kind} 这一轮应命中既有未触发行");
         }
-        let after = price_alerts::Entity::find()
-            .filter(price_alerts::Column::StockCode.eq("300750"))
-            .all(db)
-            .await
-            .unwrap();
+        let after = alert_dao::find_by_stock(db, "300750").await.expect("按股票读回告警行应成功");
         assert_eq!(after.len(), 2, "重复跑分析不能再涨行数");
     }
 

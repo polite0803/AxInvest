@@ -5821,87 +5821,12 @@ pub async fn list_param_suggestions(
     Ok(result)
 }
 
-/// 参数名别名映射：反思/演进侧的输出名 → 模板变量名。
-///
-/// 背景（2026-09-11）：反思与 WFO 校准输出的参数名来自
-/// `analysis_engine::portfolio_formula::PortfolioMgrParamSet`（字段为
-/// `buy_threshold` / `cap_high` 等短名，`EvolutionDriftPanel` 再把 camelCase
-/// 转成 snake_case），而模板变量表与 `portfolio-mgr.rhai` 用的是
-/// `action_buy_threshold` / `pos_cap_high` 全名。两侧命名不一致会让
-/// `apply_param_suggestions` 找不到变量而静默丢弃全部建议 —— 反思优化链路
-/// 在本表落地之前 100% 失效。此处负责把短名归一到全名。
-const PARAM_ALIASES: &[(&str, &str)] = &[
-    // action 决策阈值
-    ("buy_threshold", "action_buy_threshold"),
-    ("increase_threshold", "action_increase_threshold"),
-    ("hold_threshold", "action_hold_threshold"),
-    ("watch_threshold", "action_watch_threshold"),
-    ("reduce_threshold", "action_reduce_threshold"),
-    // 风险仓位上限
-    ("cap_extreme", "pos_cap_extreme"),
-    ("cap_high", "pos_cap_high"),
-    ("cap_mid", "pos_cap_mid"),
-    // risk_ 前缀省略写法（LLM 反思时常漏前缀）
-    ("debt_extreme", "risk_debt_extreme"),
-    ("vol_extreme", "risk_vol_extreme"),
-    ("sharpe_extreme", "risk_sharpe_extreme"),
-    ("vol_high", "risk_vol_high"),
-    ("dd_high", "risk_dd_high"),
-    ("roe_high", "risk_roe_high"),
-    ("debt_high", "risk_debt_high"),
-    ("vol_low", "risk_vol_low"),
-    ("sharpe_low", "risk_sharpe_low"),
-    ("dd_low", "risk_dd_low"),
-    ("roe_low", "risk_roe_low"),
-    ("debt_low", "risk_debt_low"),
-    ("growth_low", "risk_growth_low"),
-    // 仓位阈值
-    ("buy_min", "pos_buy_min"),
-    ("increase_min", "pos_increase_min"),
-    // 市况先验（反思可直接校准先验）
-    ("prior_bull", "regime_prior_bull"),
-    ("prior_sideways", "regime_prior_sideways"),
-    ("prior_bear", "regime_prior_bear"),
-];
-
-/// 把 camelCase / kebab-case / 空格分隔的参数名归一化为 snake_case。
-fn to_snake_case(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 4);
-    for (i, ch) in s.chars().enumerate() {
-        if ch.is_ascii_uppercase() {
-            if i > 0 {
-                out.push('_');
-            }
-            out.push(ch.to_ascii_lowercase());
-        } else if ch == '-' || ch == ' ' {
-            out.push('_');
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
-/// 把外部（反思 / WFO 校准）传入的参数名解析为模板变量表中的真实名字。
-///
-/// 解析顺序：① 精确命中变量表 → ② snake_case 归一后命中变量表
-/// → ③ 别名表（先原样、再 snake_case）。全部失败返回 `None`，
-/// 由调用方记录为 skipped 明细而不是静默丢弃。
-fn resolve_param_name(raw: &str, known: &std::collections::HashSet<String>) -> Option<String> {
-    if known.contains(raw) {
-        return Some(raw.to_string());
-    }
-    let snake = to_snake_case(raw);
-    if known.contains(&snake) {
-        return Some(snake);
-    }
-    for (alias, canonical) in PARAM_ALIASES {
-        if raw == *alias || snake == *alias {
-            return Some((*canonical).to_string());
-        }
-    }
-    None
-}
+// 2026-10-14（PLAN-reflection-optimization-closure §一）：参数名别名表与名字归一
+// （原 `PARAM_ALIASES` / `to_snake_case` / `resolve_param_name`）**上收**到
+// `axagent_analysis_engine::portfolio_formula`。理由是单一权威源：反思建议的写侧
+// （本文件 `apply_param_suggestions`）与读侧（WFO 解析 `params_suggestion`）必须走
+// 同一张表；此前读侧另认一套拼写（`key`/`value` + 短名），两侧不同代 ⇒ 现网九条真建议
+// 全被读成出厂默认。本处只保留调用方。
 
 /// 应用用户选中的参数调整建议到 stock-analysis 模板变量
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "应用参数调整建议")]
@@ -5910,6 +5835,7 @@ pub async fn apply_param_suggestions(
     state: State<'_, AppState>,
     updates: Vec<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
+    use axagent_analysis_engine::portfolio_formula::resolve_param_name;
     use axagent_entities::workflow_template;
     use sea_orm::sea_query::Expr;
     use sea_orm::{EntityTrait, QueryFilter};
@@ -6096,12 +6022,23 @@ pub async fn calibrate_portfolio_mgr_params(
             Some((verdict, params))
         })
         .collect();
+    // 诚实计数：「有建议文本」与「建议里认得出可校准参数」是两件事。
+    // 2026-10-14 前解析器对任何非空数组都返回默认值，这里把两者混为一谈 ⇒ 网格得分
+    // 与反思内容无关却看不出来（现网 9 条建议、真被读进去 0 条）。
+    let parsed = suggestions.iter().filter(|(_, p)| p.is_some()).count();
 
-    if suggestions.is_empty() {
+    if parsed == 0 {
+        let message = if suggestions.is_empty() {
+            "没有任何反思带参数建议，请先生成反思（reflection）"
+        } else {
+            "反思写了参数建议，但其中没有一个名字属于可校准集合 ⇒ 本轮无可依据的样本"
+        };
         return Ok(serde_json::json!({
             "bestParams": null, "grid": [],
-            "totalReflections": reflections.len(), "parsedSuggestions": 0,
-            "message": "没有可解析的参数建议，请先生成反思（reflection）"
+            "totalReflections": reflections.len(),
+            "reflectionsWithSuggestionText": suggestions.len(),
+            "parsedSuggestions": 0,
+            "message": message
         }));
     }
 
@@ -6140,7 +6077,8 @@ pub async fn calibrate_portfolio_mgr_params(
         "bestParams": results.first(),
         "grid": results,
         "totalReflections": reflections.len(),
-        "parsedSuggestions": suggestions.len(),
+        "reflectionsWithSuggestionText": suggestions.len(),
+        "parsedSuggestions": parsed,
     }))
 } // ── R1 复盘→进化：EvolutionDriftPanel 命令 ──
 
@@ -6988,7 +6926,9 @@ pub async fn save_valuation_params(
 
 #[cfg(test)]
 mod param_name_resolution_tests {
-    use super::{resolve_param_name, to_snake_case};
+    // 2026-10-14：定义已上收到 engine（见 `apply_param_suggestions` 上方注释），
+    // 本套件按实现方的新位置导入，断言内容与口径未变。
+    use axagent_analysis_engine::portfolio_formula::{resolve_param_name, to_snake_case};
     use std::collections::HashSet;
 
     /// 变量表中的真实名字（stock-analysis v30 中与决策相关的子集）

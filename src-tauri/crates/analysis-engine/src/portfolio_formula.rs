@@ -1001,167 +1001,266 @@ impl PortfolioMgrParamSet {
 
 // ── Path 2: 从 LLM 反思输出解析 ParamSet ──
 
-/// 从 JSON 对象按多个候选键名取 `f64`。
+/// 参数名别名表：**反思 / WFO 侧名字 → 模板变量全名**的唯一权威源。
 ///
-/// 反思侧 LLM 输出的参数名可能是短名（`prior_bull`）、camelCase（`priorBull`）
-/// 或模板全名（`regime_prior_bull`），三者语义等价，需一并接受，
-/// 否则「LLM 用了全名」会被静默回落成默认值。
-fn pick_f64(obj: &serde_json::Map<String, serde_json::Value>, keys: &[&str]) -> Option<f64> {
-    keys.iter().find_map(|k| obj.get(*k).and_then(|v| v.as_f64()))
+/// 背景（2026-09-11 立，2026-10-14 从 `commands/stock_analysis.rs` 上收到此处）：
+/// 反思与 WFO 输出的参数名是 [`PortfolioMgrParamSet`] 的短名（`buy_threshold` / `cap_high`），
+/// 而模板变量表与 `portfolio-mgr.rhai` 用全名（`action_buy_threshold` / `pos_cap_high`）。
+/// 两侧不同代 ⇒ 各自解释对方的名字必然静默丢样，所以归一表只留这一份：
+/// 写侧 `apply_param_suggestions` 与读侧 [`try_parse_param_suggestion`] 都调它。
+pub const PARAM_ALIASES: &[(&str, &str)] = &[
+    // action 决策阈值
+    ("buy_threshold", "action_buy_threshold"),
+    ("increase_threshold", "action_increase_threshold"),
+    ("hold_threshold", "action_hold_threshold"),
+    ("watch_threshold", "action_watch_threshold"),
+    ("reduce_threshold", "action_reduce_threshold"),
+    // 风险仓位上限
+    ("cap_extreme", "pos_cap_extreme"),
+    ("cap_high", "pos_cap_high"),
+    ("cap_mid", "pos_cap_mid"),
+    // risk_ 前缀省略写法（LLM 反思时常漏前缀）
+    ("debt_extreme", "risk_debt_extreme"),
+    ("vol_extreme", "risk_vol_extreme"),
+    ("sharpe_extreme", "risk_sharpe_extreme"),
+    ("vol_high", "risk_vol_high"),
+    ("dd_high", "risk_dd_high"),
+    ("roe_high", "risk_roe_high"),
+    ("debt_high", "risk_debt_high"),
+    ("vol_low", "risk_vol_low"),
+    ("sharpe_low", "risk_sharpe_low"),
+    ("dd_low", "risk_dd_low"),
+    ("roe_low", "risk_roe_low"),
+    ("debt_low", "risk_debt_low"),
+    ("growth_low", "risk_growth_low"),
+    // 仓位阈值
+    ("buy_min", "pos_buy_min"),
+    ("increase_min", "pos_increase_min"),
+    // 市况先验（反思可直接校准先验）
+    ("prior_bull", "regime_prior_bull"),
+    ("prior_sideways", "regime_prior_sideways"),
+    ("prior_bear", "regime_prior_bear"),
+];
+
+/// 把 camelCase / kebab-case / 空格分隔的参数名归一化为 snake_case。
+pub fn to_snake_case(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for (i, ch) in s.chars().enumerate() {
+        if ch.is_ascii_uppercase() {
+            if i > 0 {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_lowercase());
+        } else if ch == '-' || ch == ' ' {
+            out.push('_');
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// 把外部（反思 / 演进 / 面板）传入的参数名解析为模板变量表中的真实名字。
+///
+/// 解析顺序：① 精确命中变量表 → ② snake_case 归一后命中变量表
+/// → ③ 别名表（先原样、再 snake_case）。全部失败返回 `None`，
+/// 由调用方记录为 skipped 明细而不是静默丢弃。
+pub fn resolve_param_name(raw: &str, known: &std::collections::HashSet<String>) -> Option<String> {
+    if known.contains(raw) {
+        return Some(raw.to_string());
+    }
+    let snake = to_snake_case(raw);
+    if known.contains(&snake) {
+        return Some(snake);
+    }
+    PARAM_ALIASES
+        .iter()
+        .find(|(alias, _)| *alias == raw || *alias == snake.as_str())
+        .map(|(_, canonical)| (*canonical).to_string())
+}
+
+/// 无变量表时的名字归一：短名 / camelCase → 模板全名；已是全名则原样返回。
+///
+/// 读侧（解析反思 JSON）用它 —— 那里拿不到 DB，但同样不得自己认拼写。
+fn canonicalize_param_name(raw: &str) -> String {
+    let snake = to_snake_case(raw);
+    PARAM_ALIASES
+        .iter()
+        .find(|(alias, _)| *alias == snake.as_str())
+        .map_or(snake, |(_, canonical)| (*canonical).to_string())
+}
+
+/// 按参数名把数值写进 ParamSet 的对应字段；名字不属于可校准集合 ⇒ `false`。
+///
+/// 只认归一后的**模板全名**（短名 / camelCase 已由 [`canonicalize_param_name`] 折算到这里），
+/// 因此本表是「哪些参数进得了 WFO 网格」的唯一答案。
+fn apply_param_value_by_name(p: &mut PortfolioMgrParamSet, raw: &str, v: f64) -> bool {
+    match canonicalize_param_name(raw).as_str() {
+        "action_buy_threshold" => {
+            p.buy_threshold = v;
+            true
+        },
+        "action_increase_threshold" => {
+            p.increase_threshold = v;
+            true
+        },
+        "action_hold_threshold" => {
+            p.hold_threshold = v;
+            true
+        },
+        "action_watch_threshold" => {
+            p.watch_threshold = v;
+            true
+        },
+        "action_reduce_threshold" => {
+            p.reduce_threshold = v;
+            true
+        },
+        "pos_cap_extreme" => {
+            p.cap_extreme = v;
+            true
+        },
+        "pos_cap_high" => {
+            p.cap_high = v;
+            true
+        },
+        "pos_cap_mid" => {
+            p.cap_mid = v;
+            true
+        },
+        "regime_prior_bull" => {
+            p.prior_bull = v;
+            true
+        },
+        "regime_prior_sideways" => {
+            p.prior_sideways = v;
+            true
+        },
+        "regime_prior_bear" => {
+            p.prior_bear = v;
+            true
+        },
+        _ => false,
+    }
+}
+
+/// JSON 数值取法：数字直取，字符串按数字解析（反思 prompt 把值写成 `"0.42"` 也要能读）。
+fn json_number(v: &serde_json::Value) -> Option<f64> {
+    v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok()))
+}
+
+/// 取一条建议的（参数名, 建议值）：生产形态是 `param` / `suggested_value`
+/// （反思 prompt 声明且实际落库的形态），早期形态是 `key` / `value`，两种都接受；
+/// 两者都没有 ⇒ `None`（该条不计入识别数）。
+fn suggestion_name_value(entry: &serde_json::Value) -> Option<(&str, f64)> {
+    let obj = entry.as_object()?;
+    let name = obj.get("param").or_else(|| obj.get("key")).and_then(|v| v.as_str())?;
+    let value = obj.get("suggested_value").or_else(|| obj.get("value")).and_then(json_number)?;
+    Some((name, value))
 }
 
 /// 从 reflection 的 `parameter_suggestions_json` 解析 `PortfolioMgrParamSet`。
 ///
-/// LLM 输出的格式可以是：
-/// - 完整 JSON 对象: `{"buy_threshold":0.60, "cap_high":30.0, ...}`
-/// - 部分 JSON: `{"buy_threshold":0.60}`（未指定的字段用默认值填充）
-/// - 数组格式（兼容旧格式）: `[{"key":"buy_threshold","value":0.60}, ...]`
+/// 接受的形态（参数名一律经 [`canonicalize_param_name`] 归一，本函数不再各自认拼写）：
+/// - **生产形态**（反思 prompt 声明、实际落库）：
+///   `[{"param":"action_watch_threshold","current_value":0.38,"suggested_value":0.42}, ...]`
+/// - 早期数组形态：`[{"key":"buy_threshold","value":0.60}, ...]`
+/// - 顶层对象形态：`{"buy_threshold":0.60,"pos_cap_high":30.0}`（未写的字段取默认）
+/// - 对象内藏数组：`{"params":[{...}]}`
 ///
-/// 返回 `None` 表示解析失败（非法的 JSON 或空输入）。
+/// `None` 的含义是**这条建议对本集合没有可识别内容**（空数组、`[]`、全是不认识的名字、
+/// 非法 JSON）。调用方必须把 `None` 当「无建议」，而不是「建议 = 出厂默认」。
+///
+/// ⚠ 2026-10-14 前本函数对**任何**非空数组都返回 `Some(默认值)`：数组条目要求 `key`/`value`
+/// 两个键，而生产实际写的是 `param`/`suggested_value` ⇒ 一个都不匹配、全部静默落默认，
+/// WFO 于是把每条真建议都读成「默认参数」，`score_param_set` 只按 verdict 计「与默认是否不同」，
+/// 校准结果与反思内容无关（现网实测：9 条非空建议、0 条被真正读进去）。
 pub fn try_parse_param_suggestion(json_str: &str) -> Option<PortfolioMgrParamSet> {
     let trimmed = json_str.trim();
-    if trimmed.is_empty() || trimmed == "null" || trimmed == "{}" {
+    if trimmed.is_empty() || trimmed == "null" || trimmed == "{}" || trimmed == "[]" {
         return None;
     }
 
-    // 尝试解析为完整对象或数组
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
-        // 顶层是数组 → 数组格式: [{"key":"buy_threshold","value":0.60}, ...]
-        if let Some(arr) = v.as_array() {
-            return parse_key_value_array(arr);
+    let v: serde_json::Value = serde_json::from_str(trimmed).ok()?;
+    let mut p = PortfolioMgrParamSet::v56_default();
+    let mut recognized = 0usize;
+
+    // 条目级解析：数组逐条、对象既认标量键值也认内藏数组
+    let mut feed = |p: &mut PortfolioMgrParamSet, name: &str, value: f64| {
+        if apply_param_value_by_name(p, name, value) {
+            recognized += 1;
         }
-        // 顶层是对象
-        if let Some(obj) = v.as_object() {
-            // 检查是否有结构化字段名
-            let has_structured = obj.keys().any(|k| {
-                matches!(
-                    k.as_str(),
-                    "buy_threshold"
-                        | "buyThreshold"
-                        | "increase_threshold"
-                        | "increaseThreshold"
-                        | "hold_threshold"
-                        | "holdThreshold"
-                        | "watch_threshold"
-                        | "watchThreshold"
-                        | "reduce_threshold"
-                        | "reduceThreshold"
-                        | "cap_extreme"
-                        | "capExtreme"
-                        | "cap_high"
-                        | "capHigh"
-                        | "cap_mid"
-                        | "capMid"
-                        | "prior_bull"
-                        | "priorBull"
-                        | "prior_sideways"
-                        | "priorSideways"
-                        | "prior_bear"
-                        | "priorBear"
-                        | "regime_prior_bull"
-                        | "regimePriorBull"
-                        | "regime_prior_sideways"
-                        | "regimePriorSideways"
-                        | "regime_prior_bear"
-                        | "regimePriorBear"
-                )
-            });
-            if has_structured {
-                let def = PortfolioMgrParamSet::v56_default();
-                return Some(PortfolioMgrParamSet {
-                    buy_threshold: obj
-                        .get("buy_threshold")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(def.buy_threshold),
-                    increase_threshold: obj
-                        .get("increase_threshold")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(def.increase_threshold),
-                    hold_threshold: obj
-                        .get("hold_threshold")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(def.hold_threshold),
-                    watch_threshold: obj
-                        .get("watch_threshold")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(def.watch_threshold),
-                    reduce_threshold: obj
-                        .get("reduce_threshold")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(def.reduce_threshold),
-                    cap_extreme: obj
-                        .get("cap_extreme")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(def.cap_extreme),
-                    cap_high: obj.get("cap_high").and_then(|v| v.as_f64()).unwrap_or(def.cap_high),
-                    cap_mid: obj.get("cap_mid").and_then(|v| v.as_f64()).unwrap_or(def.cap_mid),
-                    prior_bull: pick_f64(
-                        obj,
-                        &["prior_bull", "priorBull", "regime_prior_bull", "regimePriorBull"],
-                    )
-                    .unwrap_or(def.prior_bull),
-                    prior_sideways: pick_f64(
-                        obj,
-                        &[
-                            "prior_sideways",
-                            "priorSideways",
-                            "regime_prior_sideways",
-                            "regimePriorSideways",
-                        ],
-                    )
-                    .unwrap_or(def.prior_sideways),
-                    prior_bear: pick_f64(
-                        obj,
-                        &["prior_bear", "priorBear", "regime_prior_bear", "regimePriorBear"],
-                    )
-                    .unwrap_or(def.prior_bear),
-                });
+    };
+    match &v {
+        serde_json::Value::Array(arr) => {
+            for entry in arr {
+                if let Some((name, value)) = suggestion_name_value(entry) {
+                    feed(&mut p, name, value);
+                }
             }
-            // 对象内藏数组: {"params":[{"key":"buy_threshold","value":0.60}, ...]}
-            if let Some(arr) = obj.values().find_map(|v| v.as_array()) {
-                return parse_key_value_array(arr);
+        },
+        serde_json::Value::Object(obj) => {
+            for (k, val) in obj {
+                if let Some(value) = json_number(val) {
+                    feed(&mut p, k, value);
+                }
             }
-        }
+            for val in obj.values() {
+                if let Some(arr) = val.as_array() {
+                    for entry in arr {
+                        if let Some((name, value)) = suggestion_name_value(entry) {
+                            feed(&mut p, name, value);
+                        }
+                    }
+                }
+            }
+        },
+        _ => {},
     }
 
-    // 尝试整段解析为 PortfolioMgrParamSet
+    if recognized > 0 {
+        return Some(p);
+    }
+    // 整段就是一个完整的 ParamSet（serde 的 camelCase 字段形态）
     serde_json::from_str::<PortfolioMgrParamSet>(trimmed).ok()
 }
 
-/// 解析 key-value 数组: [{"key":"buy_threshold","value":0.60}, ...]
-fn parse_key_value_array(arr: &[serde_json::Value]) -> Option<PortfolioMgrParamSet> {
-    let mut p = PortfolioMgrParamSet::v56_default();
-    for entry in arr {
-        if let Some(e) = entry.as_object() {
-            if let (Some(k), Some(v)) =
-                (e.get("key").and_then(|k| k.as_str()), e.get("value").and_then(|v| v.as_f64()))
-            {
-                match k {
-                    "buy_threshold" | "buyThreshold" => p.buy_threshold = v,
-                    "increase_threshold" | "increaseThreshold" => p.increase_threshold = v,
-                    "hold_threshold" | "holdThreshold" => p.hold_threshold = v,
-                    "watch_threshold" | "watchThreshold" => p.watch_threshold = v,
-                    "reduce_threshold" | "reduceThreshold" => p.reduce_threshold = v,
-                    "cap_extreme" | "capExtreme" => p.cap_extreme = v,
-                    "cap_high" | "capHigh" => p.cap_high = v,
-                    "cap_mid" | "capMid" => p.cap_mid = v,
-                    // 市况先验（兼容模板全名 regime_prior_* / 短名 / camelCase）
-                    "prior_bull" | "priorBull" | "regime_prior_bull" | "regimePriorBull" => {
-                        p.prior_bull = v
-                    },
-                    "prior_sideways"
-                    | "priorSideways"
-                    | "regime_prior_sideways"
-                    | "regimePriorSideways" => p.prior_sideways = v,
-                    "prior_bear" | "priorBear" | "regime_prior_bear" | "regimePriorBear" => {
-                        p.prior_bear = v
-                    },
-                    _ => {},
-                }
+/// 把一条建议解析成「(模板全名, 建议值, 建议时的现值)」清单，**保留这条建议到底提了哪些参数**。
+///
+/// 为什么 [`try_parse_param_suggestion`] 不够它用：那个函数返回的是 ParamSet，
+/// 「某个字段没被提到」与「被提到了但恰好等于默认值」在返回值里不可区分。
+/// 需要**逐参数**比方向的消费方（反思 Gap3 的同方向计数）必须走本函数。
+/// 第三个元素取自条目的 `current_value`（反思 prompt 要求写、清单由变量表派生）；
+/// 没写或不是数字 ⇒ `None`，调用方据此判「方向不可知」而不是当成「无变化」。
+/// 不认识的名字直接跳过，不参与计数。
+pub fn parse_param_suggestion_entries(json_str: &str) -> Vec<(String, f64, Option<f64>)> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str.trim()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut feed = |entry: &serde_json::Value| {
+        if let Some((name, value)) = suggestion_name_value(entry) {
+            // 判据复用同一个 `apply_param_value_by_name`（而不是第二张名字表）：
+            // 「能被写进 ParamSet」= 「可校准」，两处的答案不可能漂移。
+            let mut probe = PortfolioMgrParamSet::v56_default();
+            if apply_param_value_by_name(&mut probe, name, value) {
+                let current = entry.get("current_value").and_then(json_number);
+                out.push((canonicalize_param_name(name), value, current));
             }
         }
+    };
+    match &v {
+        serde_json::Value::Array(arr) => arr.iter().for_each(&mut feed),
+        serde_json::Value::Object(obj) => {
+            for val in obj.values() {
+                if let Some(arr) = val.as_array() {
+                    arr.iter().for_each(&mut feed);
+                }
+            }
+        },
+        _ => {},
     }
-    Some(p)
+    out
 }
 
 // ── Path 1: 基于历史反思的参数校准评分 ──
@@ -1996,5 +2095,110 @@ mod kelly_growth_tests {
         assert_eq!(kelly_growth_rate(0.6, 1.0, 100.0, 2), None, "f=1 ⇒ ln(0) 无定义");
         let neg = kelly_growth_rate(0.40, 0.5, 10.0, 28).expect("负期望仍是可比的数值");
         assert!(neg < 0.0, "胜率 0.40 + 赔率 0.5 应为负增长率，实得 {neg}");
+    }
+
+    // ── 2026-10-14 参数建议解析单一权威源（PLAN-reflection-optimization-closure §一）──
+
+    /// **现网真实串**（2026-10-14 取自 `stock_reflections.parameter_suggestions_json`）：
+    /// 条目键是 `param` / `suggested_value`，名字是模板全名。此前这类条目一个都匹配不上，
+    /// 整段被洗成 `Some(出厂默认)` ⇒ WFO 的校准结果与反思内容无关。
+    #[test]
+    fn parse_reads_the_production_suggestion_shape() {
+        let real = r#"[{"param": "action_watch_threshold", "reason": "提高观望阈值可减少无效波动", "current_value": 0.38, "suggested_value": 0.42}]"#;
+        let p = try_parse_param_suggestion(real).expect("生产形态必须解析成功");
+        let def = PortfolioMgrParamSet::v56_default();
+        assert!(
+            (p.watch_threshold - 0.42).abs() < 1e-9,
+            "建议值必须进字段，实得 {}",
+            p.watch_threshold
+        );
+        // 未被提及的字段仍取默认 —— 证明「识别成功」不是靠全量兜底蒙对的
+        assert!((p.buy_threshold - def.buy_threshold).abs() < 1e-9);
+        assert!((p.cap_high - def.cap_high).abs() < 1e-9);
+    }
+
+    /// 负控 A：数组非空但名字不在可校准集合 ⇒ `None`（不得当成「建议 = 默认值」）。
+    #[test]
+    fn parse_returns_none_when_no_entry_is_calibratable() {
+        assert!(
+            try_parse_param_suggestion(
+                r#"[{"param": "nonsense_param", "current_value": 1.0, "suggested_value": 2.0}]"#
+            )
+            .is_none(),
+            "不认识的名字必须判为「无可识别建议」"
+        );
+    }
+
+    /// 负控 B：空数组 ⇒ `None`（现网 16 行建议里有 7 行就是 `[]`）。
+    #[test]
+    fn parse_returns_none_for_empty_array() {
+        assert!(try_parse_param_suggestion("[]").is_none());
+        assert!(try_parse_param_suggestion("  []  ").is_none());
+    }
+
+    /// 11 个可校准字段的**模板全名**必须逐个被接受（短名与全名折算到同一字段）。
+    /// 这条锁的是「判据表与字段表逐项同集」—— 漂移即红，不靠注释自觉。
+    #[test]
+    fn every_calibratable_field_name_is_accepted_by_its_full_name() {
+        let full_names = [
+            "action_buy_threshold",
+            "action_increase_threshold",
+            "action_hold_threshold",
+            "action_watch_threshold",
+            "action_reduce_threshold",
+            "pos_cap_extreme",
+            "pos_cap_high",
+            "pos_cap_mid",
+            "regime_prior_bull",
+            "regime_prior_sideways",
+            "regime_prior_bear",
+        ];
+        for name in full_names {
+            let json = format!(r#"{{"{name}": 0.424242}}"#);
+            let p =
+                try_parse_param_suggestion(&json).unwrap_or_else(|| panic!("全名 {name} 应被识别"));
+            let touched = [
+                p.buy_threshold,
+                p.increase_threshold,
+                p.hold_threshold,
+                p.watch_threshold,
+                p.reduce_threshold,
+                p.cap_extreme,
+                p.cap_high,
+                p.cap_mid,
+                p.prior_bull,
+                p.prior_sideways,
+                p.prior_bear,
+            ];
+            assert!(
+                touched.iter().any(|v| (v - 0.424242).abs() < 1e-9),
+                "全名 {name} 被识别但没有落到任何字段"
+            );
+        }
+        // 别名折算：短名与全名必须写进同一个字段
+        let by_short = try_parse_param_suggestion(r#"{"buy_threshold": 0.424242}"#).unwrap();
+        let by_full = try_parse_param_suggestion(r#"{"action_buy_threshold": 0.424242}"#).unwrap();
+        assert!((by_short.buy_threshold - by_full.buy_threshold).abs() < 1e-9);
+    }
+
+    /// 逐参数消费方（Gap3）要能区分「提了这个参数」与「没提」—— ParamSet 形态丢掉这层信息。
+    #[test]
+    fn entries_keep_which_params_were_suggested() {
+        let real = r#"[{"param": "action_watch_threshold", "current_value": 0.38, "suggested_value": 0.42}]"#;
+        let got = parse_param_suggestion_entries(real);
+        assert_eq!(got.len(), 1, "只提了一个参数，条目数必须是一");
+        assert_eq!(got[0].0, "action_watch_threshold", "名字须归一为模板全名");
+        assert!((got[0].1 - 0.42).abs() < 1e-9);
+        assert_eq!(got[0].2, Some(0.38), "建议时的现值必须带出来，否则方向无从判定");
+        // 负控：没提的参数不得凭空出现在条目清单里
+        assert!(!got.iter().any(|(n, _, _)| n == "action_buy_threshold"));
+        assert!(parse_param_suggestion_entries("[]").is_empty());
+        assert!(parse_param_suggestion_entries("not json").is_empty());
+        // 缺 current_value 的条目仍要保留（值是真建议），但现值维度如实为 None
+        let no_current = parse_param_suggestion_entries(
+            r#"[{"param": "pos_cap_high", "suggested_value": 28.0}]"#,
+        );
+        assert_eq!(no_current.len(), 1);
+        assert_eq!(no_current[0].2, None, "没写现值不得被当成 0 或当成默认值");
     }
 }

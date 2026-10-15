@@ -3981,3 +3981,66 @@ fn debate_rounds_graph_drift_reports_mismatch_and_stays_quiet_on_match() {
         "漂移门的期望轮数必须走 resolve_debate_rounds 的夹紧口径"
     );
 }
+
+/// 反思 → 参数闭环的**形态同源自证**（2026-10-14，PLAN-reflection-optimization-closure §一）。
+///
+/// 根因回顾：解析器只认条目键 `key`/`value`，而两处反思 prompt（md 模板与内联 system_prompt）
+/// 都要求模型写 `param`/`suggested_value` ⇒ 现网 9 条真建议一条都没被读进去，全被洗成出厂默认；
+/// 而锁这个函数的单测用的正是生产不产出的 `key`/`value` 形态（门绿、链路恒假）。
+/// 本门把「prompt 声明的条目键」与「解析器实际 `get(...)` 的条目键」钉成同集，
+/// 并把「参数名别名表只有一份」钉死 —— 写侧与读侧再各自认一套拼写即红。
+#[test]
+fn suggestion_entry_key_shape_is_identical_across_prompt_and_parser() {
+    fn read(rel: &str) -> String {
+        std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel))
+            .unwrap_or_else(|e| panic!("读取 {rel} 失败: {e}"))
+    }
+    /// prompt 侧：条目键以「带引号」形态出现即可（内联 prompt 里是 `\"param\"` 转义写法）。
+    fn prompt_declares(text: &str, key: &str) -> bool {
+        text.contains(&format!("\"{key}\"")) || text.contains(&format!("\\\"{key}\\\""))
+    }
+    /// 解析器侧：必须出现**读取动作** `get("key")`，注释里提一遍字面量不算接线。
+    fn parser_reads(text: &str, key: &str) -> bool {
+        text.contains(&format!("get(\"{key}\")"))
+    }
+    let keys = ["param", "suggested_value"];
+
+    let md = read("agency_experts/stock-analysis/reflection.md");
+    let inline = read("src/commands/stock_analysis_setup/mod.rs");
+    let parser = read("crates/analysis-engine/src/portfolio_formula.rs");
+
+    for (label, text) in [("reflection.md", &md), ("内联 system_prompt", &inline)] {
+        let missing: Vec<&str> =
+            keys.iter().copied().filter(|k| !prompt_declares(text, k)).collect();
+        assert!(missing.is_empty(), "{label} 未声明条目键 {missing:?} ⇒ 模型不会被要求写这个形态");
+    }
+    let unread: Vec<&str> = keys.iter().copied().filter(|k| !parser_reads(&parser, k)).collect();
+    assert!(
+        unread.is_empty(),
+        "解析器没有读条目键 {unread:?} —— 这正是「九条建议全被读成默认值」的成因，不得复发"
+    );
+
+    // 别名表唯一权威：engine 一份，wiring 只准调用不准另立
+    let wiring = read("src/commands/stock_analysis.rs");
+    assert!(parser.contains("pub const PARAM_ALIASES"), "别名表必须在 engine 里有一份权威");
+    assert!(
+        !wiring.contains("const PARAM_ALIASES"),
+        "`apply_param_suggestions` 侧不得再定义第二张别名表（禁区 12）"
+    );
+
+    // 负控：旧形态解析器（只认 key/value）必须被判为不同源，否则本门恒真
+    let legacy_parser = r#"let k = e.get("key"); let v = e.get("value");"#;
+    let legacy_missing: Vec<&str> =
+        keys.iter().copied().filter(|k| !parser_reads(legacy_parser, k)).collect();
+    assert_eq!(
+        legacy_missing,
+        vec!["param", "suggested_value"],
+        "负控失效：只认 key/value 的旧解析器应当被本门拦下"
+    );
+    // 负控 B：注释里提了键名但没有读取动作 ⇒ 仍判未接线
+    let comment_only = r#"// 生产形态是 "param" / "suggested_value"，本函数读 obj.get("key")"#;
+    assert!(
+        !parser_reads(comment_only, "suggested_value"),
+        "负控 B 失效：字面量只出现在注释里不应算读到了值"
+    );
+}

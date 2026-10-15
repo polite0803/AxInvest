@@ -19,6 +19,17 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+/// pending 意图的默认存活时长（小时）—— 命令面缺省与定时任务共用同一个数。
+///
+/// 裁定 14：意图自动过期原先只挂在下线的 `risk_inspection` 链上 ⇒ 没人触发，
+/// 过期态在现网从不产生。这里把它接到独立任务上；口径仍是接线前的 72 小时，
+/// **默认行为逐位不变**（改这个数要同时改两侧，写两份就会分叉）。
+///
+/// ⚠ 本任务的 `task_type` 常量**不在这里**，权威在 `commands/constants.rs`
+/// （`INTENT_EXPIRY_TASK_TYPE`）—— 定时任务的 task_type 一律归那里，业务模块只引用，
+/// 就地再定义一份就会长出第二权威（本文件 2026-10-15 曾短暂两处并存，值还不同）。
+pub const DEFAULT_INTENT_MAX_AGE_HOURS: i64 = 72;
+
 /// 查询待审核交易意图列表
 #[tauri::command]
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "查询待审核的交易意图列表")]
@@ -113,7 +124,20 @@ pub async fn expire_old_trade_intents(
     max_age_hours: Option<i64>,
 ) -> Result<u64, String> {
     let db = state.harness.db();
-    TradeIntentService::expire_old_intents(db, max_age_hours.unwrap_or(72)).await
+    TradeIntentService::expire_old_intents(
+        db,
+        max_age_hours.unwrap_or(DEFAULT_INTENT_MAX_AGE_HOURS),
+    )
+    .await
+}
+
+/// 定时任务侧的过期入口（裁定 14）。
+///
+/// 与命令面 `expire_old_trade_intents` 的缺省时长共用 [`DEFAULT_INTENT_MAX_AGE_HOURS`]，
+/// 且刻意**不接受** `max_age_hours` 参数：cron 任务的 prompt 里没有这条口径，
+/// 传参只会造出「面板一个值、定时另一个值」。
+pub async fn expire_intents_for_scheduler(db: &sea_orm::DatabaseConnection) -> Result<u64, String> {
+    TradeIntentService::expire_old_intents(db, DEFAULT_INTENT_MAX_AGE_HOURS).await
 }
 
 /// 交易意图统计

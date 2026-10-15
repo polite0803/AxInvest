@@ -21,6 +21,9 @@ const CLASSIFY_CASES: ReadonlyArray<{
   { name: "决策回测", taskType: "decision-backtest", workflowId: null, expected: "invest" },
   { name: "妖股漏检核查", taskType: "mover-recall", workflowId: null, expected: "invest" },
   { name: "进化计划聚合", taskType: "evolution-proposal", workflowId: null, expected: "invest" },
+  { name: "教训验证与退役", taskType: "lesson-validation", workflowId: null, expected: "invest" },
+  { name: "组合指标日更", taskType: "portfolio-metrics", workflowId: null, expected: "invest" },
+  { name: "交易意图过期", taskType: "intent-expiry", workflowId: null, expected: "invest" },
   // ── 投资自动化：serenity / trend-screening 工作流（taskType 为空或 workflow 兜底） ──
   { name: "serenity-fast 工作流", taskType: null, workflowId: "serenity-fast", expected: "invest" },
   {
@@ -94,6 +97,11 @@ describe("canExecuteNow", () => {
     expect(canExecuteNow({ taskType: "knowledge_source_fetch_all", workflowId: null })).toBe(true);
     expect(canExecuteNow({ taskType: "mover-recall", workflowId: null })).toBe(true);
     expect(canExecuteNow({ taskType: "evolution-proposal", workflowId: null })).toBe(true);
+    // 阶段 G 补的三条：原先 lesson-validation 两头都漏登记 ⇒ 种子任务在任务中心
+    // 既归不进「投资」组，「立即执行」也是灰的（后端会报 MANUAL_RUN_NOT_SUPPORTED）
+    expect(canExecuteNow({ taskType: "lesson-validation", workflowId: null })).toBe(true);
+    expect(canExecuteNow({ taskType: "portfolio-metrics", workflowId: null })).toBe(true);
+    expect(canExecuteNow({ taskType: "intent-expiry", workflowId: null })).toBe(true);
   });
 
   it("绑定工作流即可执行（含自定义壳）", () => {

@@ -399,6 +399,105 @@ pub async fn retire_orphan_pending_reflections(
     Ok(retired)
 }
 
+/// 失败反思行是否属于「可安全重试」的一类（纯判定，便于单测）。
+///
+/// 判据：
+/// - 必须是 `failed:` 开头的终局行；
+/// - 两类结构性终局**不可**重试：
+///   * `ORIGINAL_ANALYSIS_MISSING` —— 原始分析已删，重试永远拿不到依据；
+///   * `ANALYSIS_SNAPSHOT_MISSING` —— 须先重跑原分析补黑板快照，直接重试只会再失败一次。
+///
+/// 其余失败（反思工作流执行错误、LLM 节点失败、上下文超限等）均可原地重试：
+/// 三层上下文预算修复（2026-10-14，提交 c247e03e2）之后，旧的上下文超限行重试
+/// 不会再撞同一错误（现网实证：4 条 72 万 token 级超限行因此永久挂死）。
+pub fn is_retryable_failed_reflection(status: &str) -> bool {
+    let s = status.trim();
+    if !s.starts_with("failed:") {
+        return false;
+    }
+    // 两个码都含 `_MISSING`，但保留全名匹配，避免未来新增含 MISSING 的可重试码被误杀。
+    let terminal =
+        s.contains("ORIGINAL_ANALYSIS_MISSING") || s.contains("ANALYSIS_SNAPSHOT_MISSING");
+    !terminal
+}
+
+/// `requeue_failed_reflections` 的结果分桶。
+#[derive(Default, Debug, PartialEq, Eq)]
+pub struct RequeueFailedOutcome {
+    /// 已置回 pending、下一轮可被批量反思消费的行 id（原地 UPDATE，不造新行）。
+    pub requeued: Vec<String>,
+    /// 结构性终局（原始分析缺失 / 快照缺失）未重置，需先修复上游，不能静默吞掉。
+    pub skipped_terminal: Vec<String>,
+}
+
+/// 把可重试的 failed 反思行**原地**重置为 pending（P0-8 死信重试）。
+///
+/// ## 为什么原地 UPDATE 而非新建
+///
+/// 表上 `(original_analysis_id, horizon)` 无唯一约束（见同表索引声明），
+/// 新建行会造出同档重复反思；原地重置同一行后，下一轮 `run_batch_reflection_inner`
+/// 自动捞起（这些行的 hindsight_date 是历史日期，due_only 立即命中）。
+/// 清空结论列的集合与重放 bin（`src/bin/axagent-batch-rerun.rs` 的重置段）保持一致；
+/// `raw_return` / `alpha_return` / `holding_days` / `benchmark_name` 故意不清 ——
+/// 它们是分析日到评估时点的客观行情事实，与决策内容无关。
+///
+/// ## 参数
+///
+/// - `ids`：None 扫描全部 failed 行；Some 时仅处理给定 id（手动勾选重试）。
+/// - `limit`：单轮重置上限。表上暂无 attempts 列，某条持续失败时不能让它每轮都被
+///   重置并空烧 LLM 配额，由调用方控制节奏；超量的可重试行留在 failed 留待下一轮。
+pub async fn requeue_failed_reflections(
+    db: &DatabaseConnection,
+    now_ms: i64,
+    ids: Option<&[String]>,
+    limit: u64,
+) -> Result<RequeueFailedOutcome, sea_orm::DbErr> {
+    use sea_orm::ActiveModelTrait;
+    use sea_orm::Set;
+
+    let mut query = stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::Status.starts_with("failed:"));
+    if let Some(ids) = ids {
+        if ids.is_empty() {
+            return Ok(RequeueFailedOutcome::default());
+        }
+        query = query.filter(stock_reflections::Column::Id.is_in(ids.to_vec()));
+    }
+    // 最早失败的先重试：它们积压最久，且大概率是已被后续修复覆盖的历史性失败。
+    let failed_rows = query.order_by_asc(stock_reflections::Column::UpdatedAt).all(db).await?;
+
+    let mut outcome = RequeueFailedOutcome::default();
+    for row in failed_rows {
+        if !is_retryable_failed_reflection(&row.status) {
+            outcome.skipped_terminal.push(row.id);
+            continue;
+        }
+        if outcome.requeued.len() as u64 >= limit {
+            // 达到本轮上限即停：剩余可重试行原样保留，不计入 skipped（它们不是结构性终局）。
+            break;
+        }
+        let id = row.id.clone();
+        let mut am: stock_reflections::ActiveModel = row.into();
+        am.status = Set("pending".to_string());
+        am.verdict = Set(None);
+        am.alpha_cited = Set(None);
+        am.lesson_summary = Set(None);
+        am.what_went_wrong = Set(None);
+        am.missed_signals = Set(None);
+        am.fix_for_future = Set(None);
+        // 归因层是上一轮反思的结论性盖章，重试时旧结论失效，随三问一并清空。
+        am.miss_layer = Set(None);
+        am.parameter_suggestions_json = Set(None);
+        am.decision_json = Set(None);
+        am.blackboard_snapshot = Set(None);
+        am.actual_outcome = Set(String::new());
+        am.updated_at = Set(now_ms);
+        am.update(db).await?;
+        outcome.requeued.push(id);
+    }
+    Ok(outcome)
+}
+
 /// 取某时间戳之后新增的全部 completed 反思行（进化计划聚合的样本来源）。
 ///
 /// 与 [`fetch_recent_completed`] 刻意不同：这里不做档/代过滤，也不按票过滤 ——
@@ -558,5 +657,27 @@ mod tests {
         let (kept0, dropped0) = partition_by_analysis_evidence(Vec::new(), &ids(&["a1"]));
         assert!(kept0.is_empty());
         assert_eq!(dropped0, 0, "真的没有行 ⇒ 计数为 0，注入文本不写这一句");
+    }
+
+    #[test]
+    fn retryable_partitions_workflow_failures_from_structural_terminal_states() {
+        // P0-8：可重试族 —— 工作流/LLM 执行类失败（含三层上下文预算修复前的超限行）。
+        assert!(is_retryable_failed_reflection(
+            "failed: reflection-agent: this model's context length is 727019 tokens"
+        ));
+        assert!(is_retryable_failed_reflection("failed: 反思工作流失败: connection reset by peer"));
+        // 结构性终局 —— 必须先修上游，直接重试只会再失败一次。
+        assert!(!is_retryable_failed_reflection(
+            "failed: ORIGINAL_ANALYSIS_MISSING: 原始分析 a1 已不存在，反思行已成孤儿"
+        ));
+        assert!(!is_retryable_failed_reflection(
+            "failed: ANALYSIS_SNAPSHOT_MISSING: 原始分析 a2 已出结论但未落黑板快照"
+        ));
+        // 非失败状态一律不参与重试。
+        assert!(!is_retryable_failed_reflection("pending"));
+        assert!(!is_retryable_failed_reflection("running"));
+        assert!(!is_retryable_failed_reflection("completed"));
+        // 容错：首尾空白不应改变判定。
+        assert!(is_retryable_failed_reflection("  failed: reflection-agent: node timeout  "));
     }
 }

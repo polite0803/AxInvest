@@ -226,6 +226,7 @@ async fn workflow_execution_status_transition() {
         Some(r#"{"ok":true}"#),
         Some("[]"),
         Some(42),
+        None,
     )
     .await
     .expect("测试应成功");
@@ -234,6 +235,23 @@ async fn workflow_execution_status_transition() {
     let exec = get_workflow_execution(db, "exec-1").await.expect("测试：数据库操作应成功").unwrap();
     assert_eq!(exec.status, "success");
     assert_eq!(exec.total_time_ms, Some(42));
+    assert_eq!(exec.error_detail, None);
+
+    // 失败原因要能落库读回：此前 failed 只留状态，细节只进日志，界面无从自查
+    update_workflow_execution_status(
+        db,
+        "exec-1",
+        "failed",
+        None,
+        None,
+        None,
+        Some("input_schema 校验失败：\"\" is required"),
+    )
+    .await
+    .expect("测试应成功");
+    let exec = get_workflow_execution(db, "exec-1").await.expect("测试：数据库操作应成功").unwrap();
+    assert_eq!(exec.status, "failed");
+    assert_eq!(exec.error_detail.as_deref(), Some("input_schema 校验失败：\"\" is required"));
 
     // 按 workflow 列出
     let list = list_workflow_executions(db, "wf-1").await.expect("测试：数据库操作应成功");
@@ -241,7 +259,7 @@ async fn workflow_execution_status_transition() {
     assert_eq!(list[0].id, "exec-1");
 
     // 更新不存在的执行返回 false
-    let none = update_workflow_execution_status(db, "exec-x", "failed", None, None, None)
+    let none = update_workflow_execution_status(db, "exec-x", "failed", None, None, None, None)
         .await
         .expect("测试：数据库操作应成功");
     assert!(!none);

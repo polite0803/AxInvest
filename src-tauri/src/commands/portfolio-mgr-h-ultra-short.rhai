@@ -50,10 +50,46 @@
 // overall_risk       : 已接 —— cls-risk-level.result.category（与主链同一四标签词表）
 // stop_vol_mult      : 已接 —— 面板可调乘数，恒等映射；不接则脚本默认值会冒充面板值
 // horizon_prior_json : 已接 —— Rust 侧按档算方向命中率后经验贝叶斯收缩；缺本档那行 ⇒ 拒绝出结论
+// stock_code         : 已接（P0-5）—— 供 `pm_recent_strength` 判板块涨跌幅（10/20/30cm），
+//                      不接则宿主按未知板块（10cm）兜底，20cm 标的的涨停会漏判 ⇒ 必须显式接线
 
 // 与 `portfolio-mgr.rhai` 同规：`present` 是脚本自带的 1 行守卫（宿主引擎并未注册它，
 // 靠宿主注册会让脚本依赖「注册面在不在」，本仓有过 pm_* 静默未注册的前例）。
 fn present(x) { type_of(x) != "()" }
+
+// ── P0-5（`PLAN-stock-decision-reliability.md`）：breadth 门的个股前提 + 降杠杆封顶 ──
+// 近 5 日「强势股」的累计涨幅门槛（百分数）：没有涨停但 5 日涨 20%（≈ 两个涨停的量级）
+// 也算强势。内禀锚不是调参值——它要回答的是「这只票自身是否处在被资金追逐的状态」，
+// 5%/10% 这种小涨不构成超短接力的个股证据。
+// ⚠ 用无参函数而非顶层 `const`：本脚本由生产执行器 `engine.compile(code)` 无 scope 编译
+//   （见 `rhai_ast_cache.rs`），rhai 只把编译 scope 里的常量传播进函数体，顶层 const
+//   对同脚本函数不可见（2026-10-16 实测运行期 Variable not found）。
+fn strong_cum_gain_pct() { 20.0 }
+
+// 入场门纯判据（call_fn 测试直接钉死返回对，防阈值被悄悄改回去）：
+// ① 封板率缺席 ⇒ 未判定（缺席 ≠ 通过）；② 封板率 < 0.5 ⇒ 市场情绪否决；
+// ③ 个股强势特征缺席（K 线不足/宿主返回 unit）⇒ 个股前提未判定，同样不放行；
+// ④ 近 5 日有涨停 ⇒ 个股前提通过；⑤ 无涨停但累计涨幅 ≥ 20% ⇒ 通过；
+// ⑥ 否则 ⇒ 个股不强势（大盘情绪再好也不为这只票背书）。
+// 返回 [pass, basis]：basis 同时进 dataGaps 与输出的 gateBasis，呈现层不得靠文案反解。
+fn pm_ultra_entry_gate(seal_rate, lim_up_count, cum_gain_pct) {
+    if !present(seal_rate) { return [false, "breadth_missing"]; }
+    if seal_rate < 0.5 { return [false, "breadth_weak"]; }
+    if !present(lim_up_count) { return [false, "stock_unjudged"]; }
+    if lim_up_count >= 1 { return [true, "limit_up_recent"]; }
+    if present(cum_gain_pct) && cum_gain_pct >= strong_cum_gain_pct() {
+        return [true, "strong_momentum"];
+    }
+    [false, "stock_not_strong"]
+}
+
+// 降杠杆封顶（P0-5）：microstructure 个股腿（本代码 ∈ 涨停池 entries[]，封单/砸单/
+// 池内成员）未接线期间，超短档**最高只出「持有」**。门通过只说明「情绪 + 个股代理」
+// 不否决，并不等于拿到了个股微观结构的开仓证据 ⇒ 买入/增持一律压回持有，
+// 其余动作原样（观望/减持/卖出本就比持有更弱，不许被「封顶」反向抬升）。
+fn pm_cap_unwired_action(action) {
+    if action == "买入" || action == "增持" { "持有" } else { action }
+}
 
 let h = "ultra_short";
 let gaps = [];
@@ -167,15 +203,32 @@ let posterior = if prior_ok { clamp(prior_val + avg * escale, 0.0, 1.0) } else {
 // 「本档证据的合成方向强度」本身，不随持有期开方调整。
 let confidence = posterior;
 
-// ── ⑦ 入场广度门（必要条件）：封板率 < 0.5 ⇒ 封顶「持有」 ──
+// ── ⑦ 入场门（必要条件，P0-5 起双前提）：封板率 ≥ 0.5 **且** 个股近 5 日强势 ──
 // 0.5 是内禀锚（触板里一半封住 = 无方向信息），不是调参阈值。
-let gate_pass = present(seal_rate) && seal_rate >= 0.5;
-let gate_note = if !present(seal_rate) {
-    "breadth_required 未判定：涨停池广度缺失（缺席 ≠ 通过，按不通过处理）"
-} else if gate_pass {
-    "breadth_required 通过：封板率 >= 0.5"
+// P0-5 前本门只验封板率 —— 那是全市场共享的一个数，大盘情绪火热时任何票都能过门
+// （紫金 2026-10-09：84% 封板率 + 个股毫无涨停特征，照样出买入）。个股前提走
+// `pm_recent_strength`（近 5 日涨停次数 / 累计涨幅），微观结构腿（池内成员）接线后
+// 再升级成第三前提。
+let stock_strength = if present(kline_bars) && type_of(kline_bars) == "array" {
+    pm_recent_strength(kline_bars, stock_code, 5)
 } else {
-    `breadth_required 未过：封板率 ${seal_rate} < 0.5 ⇒ 本档不出买入/增持`
+    ()
+};
+let lim_up_count = if type_of(stock_strength) == "map" { stock_strength["limitUpCount"] } else { () };
+let cum_gain_pct = if type_of(stock_strength) == "map" { stock_strength["cumGainPct"] } else { () };
+let gate_pair = pm_ultra_entry_gate(seal_rate, lim_up_count, cum_gain_pct);
+let gate_pass = gate_pair[0];
+let gate_basis = gate_pair[1];
+let gate_note = if gate_basis == "breadth_missing" {
+    "breadth_required 未判定：涨停池广度缺失（缺席 ≠ 通过，按不通过处理）"
+} else if gate_basis == "breadth_weak" {
+    `breadth_required 未过：封板率 ${seal_rate} < 0.5 ⇒ 市场情绪否决，本档不出买入/增持`
+} else if gate_basis == "stock_unjudged" {
+    `breadth_required 未判定：封板率达标（${seal_rate}）但个股近 5 日强势特征算不出（K 线不足）⇒ 缺席 ≠ 通过`
+} else if gate_basis == "stock_not_strong" {
+    `breadth_required 未过：封板率 ${seal_rate} 达标，但个股近 5 日无涨停且涨幅 < ${strong_cum_gain_pct()}% ⇒ 市场级情绪不为非强势个股背书`
+} else {
+    `breadth_required 通过：封板率 ${seal_rate} >= 0.5 且个股前提=${gate_basis}`
 };
 if !gate_pass {
     gaps.push(gate_note);
@@ -223,6 +276,17 @@ if tw <= 0.0 || !prior_ok {
     action = "观望";
     position = 0.0;
     gaps.push("本档没有任何在场方向腿或先验不可得 ⇒ 动作退为观望（decision_degraded 哨兵），不产出仓位");
+}
+
+// ── ⑨″ P0-5 降杠杆封顶：microstructure 个股腿未接线期间，最高只出「持有」 ──
+// 封板率是市场级量、近 5 日强势只是粗代理；真正的个股微观结构证据（本代码 ∈ 涨停池
+// entries[]、封单/砸单强度）接线前，本档不给开仓动作。封顶点必须在动作阶梯之后、
+// 档内风控否决之前：退化哨兵（观望）比持有更弱，保持不动；风控否决只会更严，随后再压。
+let pre_cap_action = action;
+action = pm_cap_unwired_action(action);
+let p05_cap_applied = action != pre_cap_action;
+if p05_cap_applied {
+    gaps.push(`P0-5 降杠杆：microstructure 个股腿（涨停池成员判定）尚未接线 ⇒ 开仓动作封顶 ${pre_cap_action}→持有（breadth 门依据=${gate_basis}）；池内成员接线后放开`);
 }
 
 // ── ⑨′ 档内风控否决（2026-10-10 B 裁定）──
@@ -290,6 +354,11 @@ if action != "买入" && action != "增持" && action != "持有" {
     exitRule: if spec_ok { branch_json["exitRule"] } else { "missing_branch_table" },
     entryGate: if spec_ok { branch_json["entryGate"] } else { "missing_branch_table" },
     entryGatePassed: gate_pass,
+    // P0-5：门判据 basis 与个股强势原始量（审计/面板按字段读，不从 dataGaps 文案反解）
+    gateBasis: gate_basis,
+    stockStrength: stock_strength,
+    // P0-5 降杠杆封顶是否触发（true = 原动作是买入/增持、被压成持有）
+    p05CapApplied: p05_cap_applied,
     legs: present_legs,
     absentLegs: absent_legs,
     dataGaps: gaps,

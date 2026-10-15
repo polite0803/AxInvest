@@ -42,6 +42,8 @@ pub struct WorkflowExecutionData {
     pub execution_state_json: Option<String>,
     /// 暂停时间戳（毫秒），用于超时判断
     pub paused_at: Option<i64>,
+    /// 失败原因（校验失败 / 节点失败的细节）。仅失败时有值。
+    pub error_detail: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

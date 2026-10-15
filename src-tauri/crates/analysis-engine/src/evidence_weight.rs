@@ -331,7 +331,12 @@ fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
         // 中线：四档中唯一接近「不加权」的基准档，仍逐条显式列出不靠 `_` 兜底
         "mid" => {
             w.insert("a-fundamentals", 1.2);
-            w.insert("value-investor", 1.2);
+            // P0-3（PLAN-stock-decision-reliability）：估值腿在 28 日窗内无方向预测力，
+            // 偏置 1.2 → 0.32，归一化后占比 0.32/(0.9+1.0+0.32+1.0)=9.94% ≤10%
+            // （旧值 1.2 时占 29.3%，DCF/PE 分位事实上主导了中档方向）。
+            // 估值保留小幅方向权重作弱参考；长档已彻底降为高估否决腿（见 harness
+            // holding_period.rs 的 valuationFilterOnly）。
+            w.insert("value-investor", 0.32);
             w.insert("a-sector", 1.1);
             w.insert("research-mgr", 1.1);
             w.insert("a-market-analyst", 1.0);
@@ -601,6 +606,8 @@ fn role_of_marker(key: &str) -> &'static str {
         "trendFilterOnly" => "filter",
         // 情绪广度（超短 / 短档）：市场级量，只作入场必要条件 / 背景过滤，不进方向加权。
         "breadthGateOnly" => "filter",
+        // P0-3：长档估值腿只作高估否决（便宜不是买入理由），不进方向加权。
+        "valuationFilterOnly" => "filter",
         "supplyAsRiskNoteOnly" => "riskNote",
         _ => "partial",
     }
@@ -1276,6 +1283,46 @@ mod tests {
             vec!["momentumSignal", "flowPersistence", "trendStrength", "supplyShock"],
             "短档方向腿不得含 breadthState"
         );
+
+        // P0-3：长档估值腿必须输出但只作高估否决（role=filter、权重恒 0），
+        // 不再作为方向腿 —— 90 日窗内 DCF/PE 分位无方向预测力（实证 10-09 紫金）。
+        let long_legs = all["long"]["legs"].as_array().unwrap();
+        let long_val = long_legs
+            .iter()
+            .find(|l| l["factor"] == "valuationBand")
+            .expect("长档必须仍产出 valuationBand 腿（高估否决门要消费它）");
+        assert_eq!(long_val["role"], "filter", "长档估值腿不得进方向加权");
+        assert_eq!(long_val["weight"].as_f64().unwrap(), 0.0);
+        assert_eq!(long_val["constraint"], "valuationFilterOnly");
+        let long_dir: Vec<&str> = long_legs
+            .iter()
+            .filter(|l| l["role"] == "direction")
+            .map(|l| l["factor"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            long_dir,
+            vec!["earningsQuality", "expectationRevision", "macroRegime"],
+            "长档方向腿 = 盈利质量 / 预期修正 / 宏观；估值与趋势都只作过滤"
+        );
+
+        // P0-3：中档估值腿保留方向身份但占比必须 ≤10%（旧偏置 1.2 ⇒ 29.3%，DCF 主导中档方向）
+        let mid_legs = all["mid"]["legs"].as_array().unwrap();
+        let mid_val = mid_legs
+            .iter()
+            .find(|l| l["factor"] == "valuationBand")
+            .expect("中档应有 valuationBand 腿")
+            .clone();
+        assert_eq!(mid_val["role"], "direction");
+        let mid_val_w = mid_val["weight"].as_f64().unwrap();
+        assert!(mid_val_w <= 0.10, "中档估值腿归一化占比必须 ≤10%（P0-3），实得 {mid_val_w}");
+        assert!(mid_val_w > 0.08, "占比应在 ~9.9% 附近，实得 {mid_val_w} —— 偏置又漂移了");
+        // 方向腿权重合计仍归一
+        let mid_dir_sum: f64 = mid_legs
+            .iter()
+            .filter(|l| l["role"] == "direction")
+            .map(|l| l["weight"].as_f64().unwrap())
+            .sum();
+        assert!((mid_dir_sum - 1.0).abs() < 1e-6, "中档方向腿权重必须归一，实得 {mid_dir_sum}");
     }
 
     /// 三张表（因子集 / 属主 / 来源）必须互相覆盖 —— 分处两 crate 的三处清单，
@@ -1636,13 +1683,20 @@ mod tests {
         assert_eq!((u, s, m, l), (0.6, 0.8, 1.0, 1.2));
     }
 
-    /// 尺度语义锁（**从乘数表测试搬家而来**，2026-10-04）：技术属主随周期变弱、估值属主
-    /// 随周期变强。
+    /// 尺度语义锁（**从乘数表测试搬家而来**，2026-10-04；P0-3 修订，2026-10-15）：
+    /// 技术属主随周期变弱；基本面属主随周期变强。
     ///
     /// 原来这条挂在 `horizon_leg_multipliers()` 上（「f1 随周期衰减 / f5 随周期增长」），
     /// 乘数表随 R-11 退役后判据没有消失 —— 它锁的是**权威权重表本身**的方向，而分支表的
     /// 腿间配比正是从这张表派生的（`branch_specs_are_derived_and_role_partitioned` 只查
     /// 「派生得对不对」，查不出「偏置方向反了」）。删表不搬判据 = 悄悄丢掉一条不变量。
+    ///
+    /// ⚠ P0-3 后「估值属主随周期单调变强」**不再对 value-investor 成立**：
+    /// 28 日窗内估值无方向预测力（紫金 2026-10-09 实证），mid 偏置刻意从 1.2 压到 0.32
+    /// （归一占比 ≤10%，弱参考），低于 short；long 的 2.0 偏置虽保留，但估值腿在长档
+    /// verdict_spec 里是 `valuationFilterOnly`（role=filter ⇒ 方向权重 0），只做严重
+    /// 高估单向否决，不再是「随周期变强的方向腿」。故本测试把 a-fundamentals（仍单调）
+    /// 与 value-investor（P0-3 新形态）拆开锁。
     #[test]
     fn technical_bias_decays_and_valuation_bias_grows_with_horizon() {
         let w = |tier: &str, analyst: &str| {
@@ -1666,18 +1720,41 @@ mod tests {
             w(u, "a-market-analyst"),
             w(l, "a-market-analyst")
         );
-        for analyst in ["value-investor", "a-fundamentals"] {
-            assert!(
-                w(u, analyst) < w(s, analyst)
-                    && w(s, analyst) < w(m, analyst)
-                    && w(m, analyst) < w(l, analyst),
-                "估值属主 {analyst} 未随周期单调变强: {} < {} < {} < {}",
-                w(u, analyst),
-                w(s, analyst),
-                w(m, analyst),
-                w(l, analyst)
-            );
-        }
+        // 基本面分析师仍是单调的「随周期变强」方向腿
+        assert!(
+            w(u, "a-fundamentals") < w(s, "a-fundamentals")
+                && w(s, "a-fundamentals") < w(m, "a-fundamentals")
+                && w(m, "a-fundamentals") < w(l, "a-fundamentals"),
+            "基本面属主未随周期单调变强: {} < {} < {} < {}",
+            w(u, "a-fundamentals"),
+            w(s, "a-fundamentals"),
+            w(m, "a-fundamentals"),
+            w(l, "a-fundamentals")
+        );
+
+        // value-investor：P0-3 新形态（非单调，刻意的 U 型）
+        // ① mid 显式钉死 0.32 —— 与前端 ANALYST_TIME_HORIZON_WEIGHT 及
+        //    check-horizon-weight-parity.mjs 同源，改值必须三处同改并复核 ≤10% 占比。
+        assert_eq!(
+            w(m, "value-investor"),
+            0.32,
+            "P0-3：mid 估值偏置被刻意压到 0.32（归一占比 ≤10%），变回 1.2 等于推翻 P0-3"
+        );
+        // ② mid 估值弱参考定位：不得高过 short，也不得高过本档技术/基本面腿
+        assert!(
+            w(m, "value-investor") < w(s, "value-investor"),
+            "P0-3：mid 估值偏置（{}）必须低于 short（{}），旧单调不变量已被有意推翻",
+            w(m, "value-investor"),
+            w(s, "value-investor")
+        );
+        assert!(
+            w(m, "value-investor") < w(m, "a-market-analyst")
+                && w(m, "value-investor") < w(m, "a-fundamentals"),
+            "估值在 mid 只配做弱参考，不得压过技术/基本面腿"
+        );
+        // ③ long 的 2.0 偏置保留但不投方向票：valuationBand 在长档是 valuationFilterOnly
+        //    ⇒ role_of_marker 归 filter（权重 0），仅承担严重高估单向否决。
+        assert_eq!(role_of_marker("valuationFilterOnly"), "filter");
         // 搬家说明：原 `meta_legs_are_scale_invariant`（元约束腿 f4/f6/f7 恒 1.0）的等价内容
         // 现在由两处共同保证，不在本测试里重复：① 那三条腿在 `DECISION_LEG_ANALYST` 里桥到
         // `None` ⇒ 无任何逐档权重可作用；② 「桥到的 ∪ 显式无腿的 = 权威清单」由同文件的

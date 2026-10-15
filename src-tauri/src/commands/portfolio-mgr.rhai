@@ -56,6 +56,49 @@ fn risk_rank(label) {
         _ => 1
     }
 }
+// P0-1（PLAN-stock-decision-reliability）：动作保守序 + 阶梯，供 DQI 质量 cap
+// 联动动作复用 —— 阈值与序只在此定义一份（本文件 grade 阈值曾经有四份载体的教训）。
+// fn 只能操作自己的参数（见上方 present 的注释），故阈值全部由调用点传入。
+fn pm_action_rank(a) {
+    switch a {
+        "买入" => 5,
+        "增持" => 4,
+        "持有" => 3,
+        "观望" => 2,
+        "减持" => 1,
+        // 卖出 / 未知串按最保守处理（cap 联动是「取更保守者」，未知不应放宽）
+        _ => 0
+    }
+}
+fn pm_rank_to_action(r) {
+    if r >= 5 { "买入" }
+    else if r == 4 { "增持" }
+    else if r == 3 { "持有" }
+    else if r == 2 { "观望" }
+    else if r == 1 { "减持" }
+    else { "卖出" }
+}
+// 百分制置信 + 五档阈值（同为百分制）→ 动作串。
+// 分支档传 72/62/52/42/32（四份 portfolio-mgr-h-*.rhai 同一把尺）；
+// 主链兜底档传 ACTION_*_THRESHOLD × 100。
+fn pm_action_by_thresholds(conf_pct, buy_t, inc_t, hold_t, watch_t, reduce_t) {
+    if conf_pct >= buy_t { "买入" }
+    else if conf_pct >= inc_t { "增持" }
+    else if conf_pct >= hold_t { "持有" }
+    else if conf_pct >= watch_t { "观望" }
+    else if conf_pct >= reduce_t { "减持" }
+    else { "卖出" }
+}
+// P0-7：市场级硬门禁的动作映射（纯函数，便于 call_fn 单测）。
+// bear / unknown 只拦多头开仓方向（买入/增持 → 持有），其余动作原样返回；
+// 空串（变量缺席的 What-If 最小 scope）不在此发明门禁，沿用 prior 段既有回退。
+fn pm_regime_gate_action(state, action) {
+    if (state == "bear" || state == "unknown") && (action == "买入" || action == "增持") {
+        "持有"
+    } else {
+        action
+    }
+}
 // has_negation: 检查关键词前 N 字符是否含否定词（避免"没有退市风险"被误判为风险信号）
 // 必须位于全局作用域（Rhai 不允许在块内定义函数）
 fn has_negation(text, kw, negs) {
@@ -196,6 +239,20 @@ let prior = if present(market_regime_state) && type_of(market_regime_state) == "
     // 避免把 0.5~0.95 的分类置信度当成「95% 看多先验」。
     clamp(market_regime_prior, 0.35, 0.65)
 } else { REGIME_PRIOR_SIDEWAYS };
+
+// ── P0-7（2026-10-13，PLAN-stock-decision-reliability）：市场级硬门禁状态 ──
+// 先验 prior 把 unknown/sideways 都折成 0.50，只影响后验权重；动作层还需要**原始态**：
+//   - bear：禁止新开仓/加仓，风险预算下调一档；
+//   - unknown（hooks 拉沪深300 失败时显式注入，见 hooks.rs 市场状态注入）：未判定=不加仓，
+//     不得按 neutral 放行（R8 的核心教训：取数失败被当中性 ⇒ 熊市照发买入）。
+// 只认显式字符串：变量完全缺席（最小 scope 的 What-If）沿用上方 prior 段的既有回退，
+// 不在此凭空发明熊/未判定，避免扩大打击面。
+let regime_gate_state = if present(market_regime_state) && type_of(market_regime_state) == "string" {
+    market_regime_state
+} else {
+    ""
+};
+let regime_gate_blocks_new_position = regime_gate_state == "bear" || regime_gate_state == "unknown";
 
 // ── 因子权重：regime-weights（市场状态调节）优先，IC 归一化权重 fallback ──
 // P1-1 修复: regime_factor_weights 来自 regime-weights.rhai（熊/牛/高波动自适应），
@@ -2163,7 +2220,16 @@ let stop_source_for = |h| {
 // 此时本函数仍可用，但主链会另走 `fallback_kelly_x_mult` 分支标注。
 // SNR 判定的锚定天数：中线（28 交易日）不改，短档收窄、长档放大。
 let SNR_ANCHOR_DAYS = 28;
-let risk_budget_pct_v = if present(risk_budget_pct) { risk_budget_pct } else { 1.5 };
+let risk_budget_pct_v_raw = if present(risk_budget_pct) { risk_budget_pct } else { 1.5 };
+// P0-7（PLAN-stock-decision-reliability）：熊市总风险预算**下调一档**（×2/3：
+// 常规 1.5R → 1.0R）。对用户显式注入的 risk_budget_pct 同样生效 —— 这是市场状态
+// 叠加的政策约束（与风险档封顶同族，只降不升），不是默认值替换。
+// unknown 只在动作层禁止加仓、不缩预算：取数失败不应二次惩罚已有持仓的风险计算。
+let risk_budget_pct_v = if regime_is_bear {
+    (risk_budget_pct_v_raw * 2.0 / 3.0 * 100.0).round() / 100.0
+} else {
+    risk_budget_pct_v_raw
+};
 let risk_budget_position = |h| {
     let stop_pct = sl_pct_for.call(h);
     if stop_pct <= 0.0 {
@@ -2583,6 +2649,84 @@ let weights_collapsed = !dqi_a_level && (
 	// 已把这次决策标成 formula_no_branch 兜底，读侧与统计据此分代、不与分支代混池。
 	if branch_picked {
 		base_action = picked_row["action"];
+	}
+
+	// ── P0-1（2026-10-13）：DQI 质量 cap 联动动作（PLAN-stock-decision-reliability P0-1）──
+	// 旧实现的裂缝：`confidence_quality_cap` 只 clamp 展示置信（main_confidence，见上方
+	//   §五十三 同源段），而动作侧分支档直接吃 `picked_row["action"]` —— 它是分支脚本用
+	//   **未压 cap 的原始置信**走档内阶梯判出来的 ⇒ grade=D/F 或跨轮熔断把 cap 压到 60 时，
+	//   「置信度 54.5% + 动作买入」照样发出，质量闸门管不住动作，等于没有闸门。
+	// 修法（只降不升，与本块之后的 trader 封顶 / pm_risk_veto 同向）：
+	//   动作口径置信也取 min(原始置信, cap)，用**同一把阶梯**重判出「该质量档允许的动作上限」，
+	//   再与档内结论（gate / falsified / 无方向腿 / 档内 veto 都已并入 picked action）取更保守者。
+	//   取 min 而非直接覆盖：cap=85 分支 84.3 ⇒ 上限买入，档内 gate 否决已降到「持有」时不得反向升级。
+	// cap 最低 60 ⇒ 低置信侧（减持/卖出，conf<32）永远不受影响；主链兜底（四路全缺席）同源处理。
+	let dqi_action_capped = false;
+	let dqi_action_cap_from = base_action;
+	{
+	    let raw_action_conf = if branch_picked && present(branch_conf) {
+	        branch_conf
+	    } else if !branch_picked {
+	        effective_posterior * 100.0
+	    } else {
+	        ()
+	    };
+	    if present(raw_action_conf) {
+	        let capped_conf = if raw_action_conf > confidence_quality_cap {
+	            confidence_quality_cap
+	        } else {
+	            raw_action_conf
+	        };
+	        let ceiling = if branch_picked {
+	            // 分支档阶梯尺：72/62/52/42/32，与四份 portfolio-mgr-h-*.rhai 逐字一致
+	            pm_action_by_thresholds(capped_conf, 72.0, 62.0, 52.0, 42.0, 32.0)
+	        } else {
+	            // 主链兜底阶梯（阈值是可配置常量，乘 100 换百分制；凯利门已在原阶梯生效，
+	            // 被它压保守的情形由「取更保守者」天然保留）
+	            pm_action_by_thresholds(
+	                capped_conf,
+	                ACTION_BUY_THRESHOLD * 100.0,
+	                ACTION_INCREASE_THRESHOLD * 100.0,
+	                ACTION_HOLD_THRESHOLD * 100.0,
+	                ACTION_WATCH_THRESHOLD * 100.0,
+	                ACTION_REDUCE_THRESHOLD * 100.0,
+	            )
+	        };
+	        let picked_rank = pm_action_rank(base_action);
+	        let ceiling_rank = pm_action_rank(ceiling);
+	        if ceiling_rank < picked_rank {
+	            decision_trail.push(#{
+	                "rule_id": "R-DQI-CAP",
+	                "status": "ACTIVATED",
+	                "detail": `数据质量cap=${(confidence_quality_cap*10.0).round()/10.0}联动动作:${base_action}→${pm_rank_to_action(ceiling_rank)}(动作口径置信${(raw_action_conf*10.0).round()/10.0}%被压至${(capped_conf*10.0).round()/10.0}%)`,
+	                "timestamp": 0.0,
+	            });
+	            base_action = pm_rank_to_action(ceiling_rank);
+	            dqi_action_capped = true;
+	        }
+	    }
+	}
+
+	// ── P0-7（2026-10-13）：熊市/未判定市场级硬门禁（PLAN-stock-decision-reliability R8）──
+	// 位置与 P0-1 块同族：盖写之后、trader 封顶 / pm_risk_veto 之前 ⇒ 后续闸门只会更保守。
+	// 注意别重蹈 R5：门禁作用于**动作**而不是展示字段（regime/prior 仍如实展示）。
+	//   bear    ⇒ 买入/增持一律降持有（直接禁止新开仓/加仓的严口径，PLAN 允许的子集）；
+	//   unknown ⇒ 取数失败按「未判定=不加仓」，买入/增持降持有，不得当 neutral 放行。
+	// 持有/观望/减持/卖出不动：门禁只拦多头开仓方向，不伪造看空结论。
+	let regime_gate_action_before = base_action;
+	base_action = pm_regime_gate_action(regime_gate_state, base_action);
+	let regime_gate_downgraded = regime_gate_action_before != base_action;
+	if regime_gate_downgraded {
+	    decision_trail.push(#{
+	        "rule_id": "R-REGIME-GATE",
+	        "status": "ACTIVATED",
+	        "detail": if regime_gate_state == "bear" {
+	            `熊市市场级门禁:${regime_gate_action_before}→持有(熊市禁止新开仓/加仓,风险预算已下调一档)`
+	        } else {
+	            `市场状态未判定(unknown)门禁:${regime_gate_action_before}→持有(取数失败按不加仓处理,不得当neutral放行)`
+	        },
+	        "timestamp": 0.0,
+	    });
 	}
 
 	// V59: 试探仓激活 → 观望升级为持有（仓位>0 必须与行动对齐，否则 V42 对齐段清零）
@@ -3302,6 +3446,15 @@ let gap_note = if data_gaps.len() > 0 {
     "dqiStreak": dqi_abnormal_streak,
     "dqiObservations": dqi_observed_count,
     "confidenceQualityCap": confidence_quality_cap,
+    // P0-1：质量 cap 是否联动改了动作（true 时 dqiActionCapFrom 记录被压前的档内动作）。
+    // 结构化输出而非只写 trail：展示层可显式提示「买入被数据质量闸门拦下」，
+    // 反思统计也不得回去解析 decision_trail 的中文句子。
+    "dqiActionCapped": dqi_action_capped,
+    "dqiActionCapFrom": if dqi_action_capped { dqi_action_cap_from } else { "" },
+    // P0-7：市场级硬门禁的原始态（bull/bear/sideways/unknown；缺席为空串）与是否改了动作。
+    // 展示层据此显式提示「熊市/未判定，已禁止新开仓」，不得回去解析 trail 中文句。
+    "regimeGateState": regime_gate_state,
+    "regimeGateDowngraded": regime_gate_downgraded,
     "actionSource": action_source,
     // 风险调整后的置信度（= action 阶梯实际所用值），保留以支持归因。
     "confidenceRiskAdjusted": (final_confidence * 10.0).round() / 10.0,

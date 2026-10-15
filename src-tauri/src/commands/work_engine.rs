@@ -67,12 +67,17 @@ impl From<axagent_runtime::work_engine::execution_state::NodeExecutionRecord>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExecutionSummaryResponse {
     pub id: String,
     pub workflow_id: String,
     pub status: String,
     pub total_time_ms: Option<i32>,
-    pub created_at: i64,
+    /// 失败原因（校验失败 / 失败节点的错误细节）。成功时为 None。
+    pub error_detail: Option<String>,
+    /// 执行创建时刻，Unix 毫秒。源列 `workflow_executions.created_at` 存的是**秒**
+    /// （`now_ts()`），必须在此换算 —— 前端按毫秒消费，不换算会显示成 1970 年。
+    pub created_at_ms: i64,
 }
 
 impl From<WorkflowExecutionData> for ExecutionSummaryResponse {
@@ -82,7 +87,8 @@ impl From<WorkflowExecutionData> for ExecutionSummaryResponse {
             workflow_id: m.workflow_id,
             status: m.status,
             total_time_ms: m.total_time_ms,
-            created_at: m.created_at,
+            error_detail: m.error_detail,
+            created_at_ms: m.created_at * 1000,
         }
     }
 }
@@ -1019,4 +1025,60 @@ pub async fn cancel_all_paused_workflow_executions(
         ))
     })?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> WorkflowExecutionData {
+        WorkflowExecutionData {
+            id: "30a89877-b865-4d55-87a5-6eb5f3f55339".to_string(),
+            workflow_id: "stock-analysis".to_string(),
+            status: "failed".to_string(),
+            input_params: Some("{}".to_string()),
+            output_result: None,
+            node_executions: None,
+            total_time_ms: Some(0),
+            execution_state_json: None,
+            paused_at: None,
+            error_detail: Some("input_schema 校验失败：\"\" is required".to_string()),
+            // 取自现网读数：workflow_executions.created_at 存的是**秒**
+            created_at: 1_792_026_000,
+            updated_at: 1_792_026_000,
+        }
+    }
+
+    fn summary_json() -> serde_json::Value {
+        serde_json::to_value(ExecutionSummaryResponse::from(sample())).unwrap()
+    }
+
+    /// 序列化键名必须是 camelCase：前端按 camelCase 消费，snake_case 会让它静默读到
+    /// undefined，执行历史因此显示 Invalid Date。本条只锁键名形态。
+    #[test]
+    fn summary_uses_camel_case_keys() {
+        let v = summary_json();
+        for key in ["id", "workflowId", "status", "totalTimeMs", "errorDetail", "createdAtMs"] {
+            assert!(v.get(key).is_some(), "序列化输出缺键 {key}，实际：{v}");
+        }
+        assert!(v.get("created_at").is_none());
+        assert!(v.get("workflow_id").is_none());
+        assert!(v.get("error_detail").is_none());
+    }
+
+    /// 源列是秒而 `new Date()` 期望毫秒：不换算会落到 1970-01-21。
+    /// 直读字段、不经 JSON —— 与上面的键名判据各自独立，破坏其一不会连带另一。
+    #[test]
+    fn summary_converts_created_at_seconds_to_millis() {
+        assert_eq!(ExecutionSummaryResponse::from(sample()).created_at_ms, 1_792_026_000 * 1000);
+    }
+
+    /// 失败原因要随摘要端出去 —— 此前 failed 只有状态，细节只进日志。
+    #[test]
+    fn summary_carries_error_detail() {
+        assert_eq!(
+            ExecutionSummaryResponse::from(sample()).error_detail.as_deref(),
+            Some("input_schema 校验失败：\"\" is required")
+        );
+    }
 }

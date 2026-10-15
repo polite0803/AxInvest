@@ -22,8 +22,12 @@
 //! ## 使用场景
 //!
 //! - `RealtimeMonitor` 在每次轮询后将单股告警喂给聚合器
-//! - 聚合器输出 `PortfolioSignal` 通过 `broadcast::Sender` 推给订阅者
-//! - 前端 / 风控系统订阅组合级信号做调仓决策
+//! - 聚合器返回 `PortfolioSignal`，由 `RealtimeMonitor` 经 `MonitorEventEmitter`
+//!   以 `IpcEventName::PortfolioSignal` 推给前端（G-6）
+//!
+//! ⚠ 这里**没有** `broadcast` 订阅口：`feed()` 的返回值就是唯一出口，进程内那份
+//! `signal_tx` 自建自听、零消费者，已随 G-6 一起退役（留着一个没人听的频道，
+//! 与本轮在阶段 D 退役的那批假旋钮同形）。
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -198,27 +202,18 @@ pub struct CrossStockSignalAggregator {
     signal_buffer: RwLock<HashMap<String, StockSignal>>,
     /// 各方向最后触发组合信号的时间戳（用于冷却去重）
     last_triggered: RwLock<HashMap<SignalDirection, i64>>,
-    /// 组合信号广播器
-    signal_tx: tokio::sync::broadcast::Sender<PortfolioSignal>,
     /// 可选的组合快照回调（每次触发聚合时调用以获取当前持仓上下文）
     snapshot_provider: RwLock<Option<SnapshotProvider>>,
 }
 
 impl CrossStockSignalAggregator {
     pub fn new(config: AggregatorConfig) -> Self {
-        let (signal_tx, _) = tokio::sync::broadcast::channel(64);
         Self {
             config: RwLock::new(config),
             signal_buffer: RwLock::new(HashMap::new()),
             last_triggered: RwLock::new(HashMap::new()),
-            signal_tx,
             snapshot_provider: RwLock::new(None),
         }
-    }
-
-    /// 订阅组合级信号流
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<PortfolioSignal> {
-        self.signal_tx.subscribe()
     }
 
     /// 更新聚合器配置（运行时热更新）
@@ -340,9 +335,8 @@ impl CrossStockSignalAggregator {
             last.insert(candidate_dir, now);
         }
 
-        // 11) 广播
-        let _ = self.signal_tx.send(portfolio_signal.clone());
-
+        // 唯一出口就是返回值：调用方（`RealtimeMonitor`）拿到后按
+        // `IpcEventName::PortfolioSignal` emit 给前端。这里不再另开一条进程内广播。
         Some(portfolio_signal)
     }
 

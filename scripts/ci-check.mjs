@@ -423,6 +423,16 @@ if (canRunRust && !quick) {
   );
   step("告警事件名与 payload 单一权威对账", "node scripts/check-monitor-event-authority.mjs");
 
+  // 裁定 17（2026-10-15，PLAN-monitor-chain-closure）：内置 task_type 同时手抄在三处
+  // （后端「立即执行」白名单 / 前端可执行集 / 前端任务中心分组）⇒ 漏一处只在「手动执行」
+  // 或「任务中心分组」上露头，自动执行照常跑。本门逐值对账三处。
+  // 与 ci.yml 的对应 step 逐字同源。
+  step(
+    "内置 task_type 白名单跨语言对账自检（五个坏样本）",
+    "node scripts/check-task-type-whitelist.mjs --selftest",
+  );
+  step("内置 task_type 白名单跨语言对账", "node scripts/check-task-type-whitelist.mjs");
+
   step(
     "cargo fmt 格式化检查",
     "cargo fmt --check --all",

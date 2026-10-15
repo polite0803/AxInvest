@@ -2,11 +2,29 @@
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { ScheduledAnalysisPanel } from "@/components/stock-analysis/ScheduledAnalysisPanel";
 import { useStockJump } from "@/hooks/useStockJump";
-import { invoke } from "@/lib/invoke";
-import { App, Button, Card, Col, Modal, Row, Spin, Statistic, Table, Tabs, Tag } from "antd";
+import { invoke, listen } from "@/lib/invoke";
+import type { UnlistenFn } from "@/lib/invoke";
+import type { PortfolioSignalPayload } from "@/types";
+import { Alert, App, Button, Card, Col, Modal, Row, Spin, Statistic, Table, Tabs, Tag } from "antd";
+import type { TFunction } from "i18next";
 import { BarChart3, Calendar, Plus, RefreshCw, Trash2, TrendingDown, TrendingUp, Upload, Wallet } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+
+/**
+ * 后端 `SignalDirection` 的三档 → i18n 键。
+ * 未见的枚举值原样显示方向串，不塞进「中性」那一档（与告警类型的 `typeUnknown` 同一口径）。
+ */
+const DIRECTION_KEYS: Record<string, string> = {
+  bullish: "stockAnalysis.portfolio.signalBullish",
+  bearish: "stockAnalysis.portfolio.signalBearish",
+  neutral: "stockAnalysis.portfolio.signalNeutral",
+};
+
+export function directionLabel(t: TFunction, direction: string): string {
+  const key = DIRECTION_KEYS[direction];
+  return key ? t(key) : direction;
+}
 
 interface Holding {
   id: string;
@@ -22,6 +40,58 @@ interface Holding {
   createdAt: number;
 }
 
+/**
+ * 组合级信号横条（G-6）。
+ *
+ * 多只股票在时间窗内同向触发时由跨股聚合器产出 `PortfolioSignal`。此前这条发射点发的是
+ * 裸字面量、事件名不在权威表、前端零监听 ⇒ 信号真算出来了但没人收。
+ * 单独成组件是为了能被独立测到（不牵动整个看板的数据源）。
+ */
+export function PortfolioSignalBanner() {
+  const { t } = useTranslation();
+  const [signal, setSignal] = useState<PortfolioSignalPayload | null>(null);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    let cancelled = false;
+    listen<PortfolioSignalPayload>("portfolio-signal", (event) => {
+      if (cancelled) { return; }
+      setSignal(event.payload);
+    })
+      .then((fn) => {
+        if (cancelled) {
+          fn();
+          return;
+        }
+        unlisten = fn;
+      })
+      .catch(() => {/* 订阅失败不阻塞看板 */});
+    return () => {
+      if (unlisten) { unlisten(); }
+      cancelled = true;
+    };
+  }, []);
+
+  if (!signal) { return null; }
+
+  return (
+    <Alert
+      className="mx-3 mt-2"
+      type={signal.direction === "bearish" ? "warning" : "info"}
+      showIcon
+      closable
+      onClose={() => setSignal(null)}
+      title={t("stockAnalysis.portfolio.signalTitle")}
+      description={t("stockAnalysis.portfolio.signalBody", {
+        count: signal.stocks.length,
+        direction: directionLabel(t, signal.direction),
+        pct: (signal.strength * 100).toFixed(0),
+        action: signal.suggestedAction,
+      })}
+    />
+  );
+}
+
 /** 组合跟踪看板 — 借鉴 TradingAgents tracking board 设计 */
 export function PortfolioDashboard() {
   const { t } = useTranslation();
@@ -30,6 +100,7 @@ export function PortfolioDashboard() {
   return (
     <PageErrorBoundary title={t("stockAnalysis.page.portfolioDashboard")}>
       <div className="flex h-full flex-col">
+        <PortfolioSignalBanner />
         <Tabs
           activeKey={activeTab}
           onChange={(k) => setActiveTab(k as "holdings" | "scheduled")}

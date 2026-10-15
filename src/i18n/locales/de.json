@@ -2974,7 +2974,8 @@
     "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "Es läuft bereits ein Zeitreise- oder Rally-Lücken-Stapel; bitte auf Abschluss warten.",
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "Innerhalb des Live-Pipeline-Zeitfensters (23:50–02:10 / 17:50–18:10); bitte außerhalb starten.",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "Der Rally-Lücken-Nachanalyse-Stapel ist fehlgeschlagen; Details prüfen.",
-    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Abfrage des Rally-Lücken-Stapelverlaufs fehlgeschlagen; später erneut versuchen."
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Abfrage des Rally-Lücken-Stapelverlaufs fehlgeschlagen; später erneut versuchen.",
+    "TRADING_DISABLED": "Handelsfunktion ist deaktiviert. Aktivieren Sie sie vor der Erfassung von Trades."
   },
   "errorBoundary": {
     "copied": "Kopiert",
@@ -15343,7 +15344,44 @@
       "typeChange": "anormale Kursänderung",
       "typeVolume": "anormale Umschlagsrate",
       "typeUnknown": "unbekannter Typ",
-      "triggeredDetail": "{{name}}: {{type}}-Warnung ausgelöst, Kurs {{price}}"
+      "triggeredDetail": "{{name}}: {{type}}-Warnung ausgelöst, Kurs {{price}}",
+      "t0": {
+        "title": "T+0-Auto-Neulauf",
+        "cost": "Wenn aktiviert, startet jedes überwachte Wertpapier, das intraday die Schwelle überschreitet, den gesamten Analyse-Workflow neu (Kosten ≈ eine vollständige Analyse); Wiederholungen für dasselbe Wertpapier werden über das Mindestintervall entprellt",
+        "changePct": "Änderung %",
+        "turnover": "Umschlag %",
+        "intervalMin": "Min. Intervall (Min.)",
+        "saveFailed": "T+0-Einstellungen konnten nicht gespeichert werden: {{reason}}"
+      }
+    },
+    "conditional": {
+      "triggeredDetail": "Bedingter Auftrag ausgelöst: {{name}} {{condition}}, Aktion: {{action}}",
+      "title": "Bedingte Aufträge",
+      "action": "Aktion",
+      "enabled": "Aktiv",
+      "triggeredToday": "Heute",
+      "lastTriggered": "Zuletzt",
+      "empty": "Keine bedingten Aufträge",
+      "evaluating": "{{count}} aktiv geprüft",
+      "totalRows": "{{count}} Einträge (auch deaktivierte)",
+      "unreadable": "{{count}} Zeilen können nicht als Regeln gelesen werden (nicht bewertet)",
+      "create": "Anlegen",
+      "createFailed": "Anlegen fehlgeschlagen: {{reason}}",
+      "loadFailed": "Bedingte Aufträge konnten nicht geladen werden: {{reason}}",
+      "toggleFailed": "Umschalten fehlgeschlagen: {{reason}}",
+      "deleteFailed": "Löschen fehlgeschlagen: {{reason}}",
+      "confirmDelete": "Diesen bedingten Auftrag löschen?",
+      "thresholdPct": "Schwelle (%)",
+      "actionNotify": "Nur benachrichtigen",
+      "actionSell": "Verkaufen",
+      "actionBuy": "Kaufen",
+      "actionReduce": "Reduzieren",
+      "actionValueQty": "Stück",
+      "actionValueRatio": "Anteil",
+      "coolDown": "Abkühlung (Min.)",
+      "maxPerDay": "Max / Tag",
+      "windowStart": "Ab HH:MM",
+      "windowEnd": "Bis HH:MM"
     },
     "progress": {
       "fetchingData": "Aktiendaten werden abgerufen...",
@@ -15529,6 +15567,7 @@
     "revenueGrowth": "Umsatzwachstum",
     "riskHigh": "Hohes Risiko",
     "riskMid": "Mittleres Risiko",
+    "riskMidHigh": "Mittleres bis hohes Risiko",
     "riskLow": "Niedriges Risiko",
     "riskExtreme": "Extremes Risiko",
     "noHistory": "Kein Analyseverlauf",
@@ -16099,7 +16138,6 @@
         "moat": "Moat",
         "screener": "Screener",
         "signals": "Signals",
-        "keylevels": "Key Levels",
         "recommender": "Recommender",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
@@ -17198,7 +17236,9 @@
       "worstHit": "Worst hit",
       "m10": "Market -10%",
       "m20": "Market -20%",
-      "blackSwan": "Black Swan (-30%)"
+      "blackSwan": "Black Swan (-30%)",
+      "unpricedTitle": "Fehlende Kurse",
+      "unpricedNotice": "{{count}} Positionen ohne Kurs werden bei Konzentration und Diversifikation nicht berücksichtigt"
     },
     "evidence": {
       "concepts": "Fundamentaldaten/Bewertung",
@@ -17307,26 +17347,6 @@
       "dailyPreMarket": "Trading Day 08:00 (Pre-market)",
       "weeklyMonday": "Weekly Monday 21:00",
       "every2Hours": "Every 2 Hours"
-    },
-    "fundPanel": {
-      "fundFlow": "Fund Flow",
-      "type": "Type",
-      "deposit": "Deposit",
-      "withdrawal": "Withdrawal",
-      "amount": "Amount",
-      "date": "Date",
-      "fee": "Fee",
-      "notes": "Notes",
-      "totalDeposits": "Total Deposits",
-      "totalWithdrawals": "Total Withdrawals",
-      "netInflow": "Net Inflow",
-      "recordFundFlow": "Record Fund Flow",
-      "depositTransferIn": "Deposit (Transfer In)",
-      "withdrawalTransferOut": "Withdrawal (Transfer Out)",
-      "feeOptional": "Fee (Optional)",
-      "notesOptional": "Notes (Optional)",
-      "recorded": "Recorded",
-      "amountMustBeGreaterThanZero": "Amount must be > 0"
     },
     "marketSimPanel": {
       "simConfig": "Simulation Config",
@@ -17854,8 +17874,8 @@
       "moatFcfRatioMin": "Untergrenze FCF/Reingewinn-Verhältnis (0-1)",
       "monitorPollIntervalSecs": "Überwachungsabfrageintervall (Sekunden)",
       "monitorAlertCooldownSecs": "Abkühlungszeit für Alarmierung desselben Instruments (Sekunden, 10-3600)",
-      "monitorMinSeverity": "Mindest-Push-Alarmstufe: info / warn / critical",
-      "monitorChannels": "Push-Kanäle, kommagetrennt: in_app / lark / email / webhook",
+      "monitorMinSeverity": "Mindest-Push-Alarmstufe: info / warn / critical (derzeit ohne Konsumenten: eine Änderung hat keine Wirkung)",
+      "monitorChannels": "Push-Kanäle, kommagetrennt: in_app / lark / email / webhook (derzeit ohne Konsumenten: eine Änderung hat keine Wirkung)",
       "dualViewDisagreementThreshold": "Dual-Perspektive-Divergenzschwelle (0-100), bei Unterschreitung als manuelle Überprüfung erforderlich markieren",
       "minConfidence": "Mindestkonfidenz (0-100)",
       "varConfidence": "VaR-Konfidenz (0-1)",
@@ -17906,9 +17926,6 @@
       "signalMaFast": "MA Golden Cross Erkennung schnelle Linie Periode (3-30)",
       "signalMaSlow": "MA Golden Cross Erkennung langsame Linie Periode (10-120)",
       "signalBreakoutVolumeMult": "Ausbruch/Durchbruch Volumenmultiplikator-Schwellenwert (1.0-3.0)",
-      "keylevelLookbackDays": "Rückblickfenster für Schlüsselniveaus (Handelstage, 10-250)",
-      "keylevelTouchTolerancePct": "Toleranz für Berührung von Schlüsselniveaus (%, 0.1-5.0)",
-      "keylevelMinTouches": "Mindestanzahl Berührungen zur Bestätigung von Unterstützung/Widerstand (1-10)",
       "recoTrendEnabled": "Trendfolge-Substrategie aktivieren",
       "recoReversionEnabled": "Überverkauft-Rebound-Substrategie aktivieren",
       "recoValueEnabled": "Value-Aktienauswahl-Substrategie aktivieren",
@@ -18084,7 +18101,12 @@
     "pending": "Ausstehend",
     "portfolio": {
       "importPartial": "Teilweise importiert",
-      "yuan": "Yuan"
+      "yuan": "Yuan",
+      "signalTitle": "Portfolio-Signal",
+      "signalBody": "{{count}} Titel bewegen sich gemeinsam {{direction}}, Stärke {{pct}}% — {{action}}",
+      "signalBullish": "bullisch",
+      "signalBearish": "bärisch",
+      "signalNeutral": "neutral"
     },
     "references": "Referenzen",
     "resonancePoint": "Resonanzpunkt",
@@ -18222,6 +18244,21 @@
         "failed": "Fehlgeschlagen (historisch)",
         "unknown": "Unbekannter Status"
       }
+    },
+    "monitor": {
+      "readFailed": "Monitor-Status konnte nicht gelesen werden: {{reason}}",
+      "notAssembled": "Monitor-Engine nicht montiert: Alarme gespeichert, aber nichts wird abgefragt",
+      "pausedBySession": "{{session}} — Monitor-Abfrage pausiert",
+      "fetchFailed": "{{failed}}/{{total}} Titel in dieser Runde fehlgeschlagen, nicht bewertet",
+      "allFailedRounds": "{{rounds}} Runden in Folge komplett fehlgeschlagen — der Monitor liefert nichts",
+      "firstRoundPending": "Monitor gestartet, erste Runde noch offen (alle ~{{interval}} s)",
+      "emptyResponse": "Backend liefert keinen Monitor-Status",
+      "sessionNonTradingDay": "Kein Handelstag",
+      "sessionPreOpen": "Vor Handelsbeginn",
+      "sessionMorning": "Vormittagssitzung",
+      "sessionLunchBreak": "Mittagspause",
+      "sessionAfternoon": "Nachmittagssitzung",
+      "sessionPostClose": "Nach Börsenschluss"
     }
   },
   "pipeline": {

@@ -834,3 +834,12 @@ pub mod db {
 // 镜像 `crates/harness/src/error_codes.rs::unity`，两处定义值必须一致。
 // 权威源：`axagent_harness::error_codes::unity`。此处不再 re-export（零消费者 ⇒
 // `unused_imports`，说明见上方 `voice` 处）。需要时直接从 harness 导入。
+
+/// 手动交易功能相关错误码
+///
+/// `DISABLED` 取代原先写死在 `trading.rs` 里的裸中文串 —— 那种形态会让 10 个非中文
+/// 语言的用户直接看到中文。与前端 `error.TRADING_DISABLED` 翻译键对齐。
+pub mod trading {
+    /// 交易功能开关处于关闭状态，拒绝写入交易 / 持仓
+    pub const DISABLED: &str = "TRADING_DISABLED";
+}

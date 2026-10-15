@@ -12,7 +12,7 @@
 //      不得把 0/light 显示成生效值；
 //   ④ 点「保存配置」⇒ 必须以 camelCase 四项调用 update_validate_decisions_cron。
 import i18n from "@/i18n";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -48,6 +48,19 @@ function renderPanel() {
   );
 }
 
+/**
+ * 收尾：等挂载副作用（数据请求）落地。
+ *
+ * 为什么必须有：页面挂载后会异步拉数据，测试同步结束 ⇒ setState 落在测试之外 ⇒
+ * React 报 "not wrapped in act"。为什么必须放在**断言之后**：这些用例断言的是
+ * **初始渲染态**，提前 flush 会把组件推进"加载完成"态，断言随之失效（实测会让 3 条用例变红）。
+ * 为什么不能用 afterEach：React 是在 setState 那一刻检查的，而那一刻在测试函数返回后、
+ * afterEach 之前 —— 收尾钩子永远太晚。
+ */
+const settle = async () => {
+  await act(async () => {});
+};
+
 /** 数字输入框的实际显示值（用 DOM 值而不是文案，避免与语言包字面量耦合）。 */
 function numberInputValues(container: HTMLElement): string[] {
   return Array.from(container.querySelectorAll('input[type="number"]')).map(
@@ -81,6 +94,7 @@ describe("ReflectionPanel 定时配置回读", () => {
     // 读到了配置 ⇒ 不该出现「未配置」占位
     expect(screen.queryAllByText(NOT_SET)).toHaveLength(0);
     expect(screen.getByRole("button", { name: SAVE_BTN })).toBeEnabled();
+    await settle();
   });
 
   it("没有任何定时任务：三项显示「未配置」，保存按钮禁用", async () => {
@@ -96,6 +110,7 @@ describe("ReflectionPanel 定时配置回读", () => {
     expect(screen.getByRole("button", { name: SAVE_BTN })).toBeDisabled();
     // 「读不到配置」那句是另一种缺席（有任务但配置不可解析），无任务时不得同时出现
     expect(screen.queryByText(NOT_READABLE)).toBeNull();
+    await settle();
   });
 
   it("任务的 prompt 不是配置 JSON：显式声明读不到，不把出厂值显示成生效值", async () => {
@@ -113,6 +128,7 @@ describe("ReflectionPanel 定时配置回读", () => {
       expect(screen.getByText(NOT_READABLE)).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: SAVE_BTN })).toBeDisabled();
+    await settle();
   });
 
   it("点「保存配置」以 camelCase 四项调用 update_validate_decisions_cron", async () => {
@@ -147,7 +163,13 @@ describe("ReflectionPanel 定时配置回读", () => {
     ) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "55" } });
 
-    fireEvent.click(screen.getByRole("button", { name: SAVE_BTN }));
+    // 为什么用 await act 包住点击：保存链路是纯微任务链
+    // (invoke(update) → await load() → Promise.all 三路回读 → 一串 setState)，act 内整链
+    // 排空、更新全部进 actQueue，不再依赖"Scheduler 宏任务恰好在哪一刻渲染"的时序竞态
+    // (实测单/双 settle 都拦不住测试结束后才刷的那批渲染)。
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: SAVE_BTN }));
+    });
     await waitFor(() => {
       const call = invokeMock.mock.calls.find((c) => c[0] === "update_validate_decisions_cron");
       expect(call).toBeTruthy();
@@ -158,6 +180,7 @@ describe("ReflectionPanel 定时配置回读", () => {
         reflectionDepth: "deep",
       });
     });
+    await settle();
   });
 });
 

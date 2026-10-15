@@ -342,6 +342,7 @@ pub trait WorkflowExecutionRepository: Send + Sync {
         output_result: Option<&str>,
         node_executions: Option<&str>,
         total_time_ms: Option<i32>,
+        error_detail: Option<&str>,
     ) -> Result<bool, String>;
     async fn list_workflow_executions(
         &self,

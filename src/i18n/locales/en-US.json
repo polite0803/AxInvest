@@ -2974,7 +2974,8 @@
     "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "A time-travel or mover-recall backfill batch is already running; wait for it to finish.",
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "Inside the live pipeline window (23:50-02:10 / 17:50-18:10); start again outside it.",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "The mover-recall backfill batch failed; check the batch details.",
-    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Failed to query mover-recall backfill batch history; try again later."
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Failed to query mover-recall backfill batch history; try again later.",
+    "TRADING_DISABLED": "Trading is disabled. Turn it on before recording trades."
   },
   "errorBoundary": {
     "copied": "Copied",
@@ -15589,6 +15590,7 @@
     "riskUnknown": "Unknown",
     "riskHigh": "High Risk",
     "riskMid": "Medium Risk",
+    "riskMidHigh": "Medium-high risk",
     "riskLow": "Low Risk",
     "riskExtreme": "Extreme Risk",
     "search": "Search",
@@ -15717,7 +15719,44 @@
       "typeChange": "abnormal price change",
       "typeVolume": "abnormal turnover",
       "typeUnknown": "unknown type",
-      "triggeredDetail": "{{name}}: {{type}} alert triggered, price {{price}}"
+      "triggeredDetail": "{{name}}: {{type}} alert triggered, price {{price}}",
+      "t0": {
+        "title": "T+0 auto re-run",
+        "cost": "When enabled, any monitored stock crossing the threshold intraday re-runs the full analysis workflow (cost ≈ one full analysis); repeats for the same stock are suppressed by the minimum interval",
+        "changePct": "Change %",
+        "turnover": "Turnover %",
+        "intervalMin": "Min interval (min)",
+        "saveFailed": "Failed to save T+0 settings: {{reason}}"
+      }
+    },
+    "conditional": {
+      "triggeredDetail": "Conditional order triggered: {{name}} {{condition}} → {{action}}",
+      "title": "Conditional Orders",
+      "action": "Action",
+      "enabled": "Enabled",
+      "triggeredToday": "Today",
+      "lastTriggered": "Last",
+      "empty": "No conditional orders",
+      "evaluating": "Evaluating {{count}}",
+      "totalRows": "{{count}} rows (including disabled)",
+      "unreadable": "{{count}} rows cannot be read back as rules and are not evaluated",
+      "create": "Create",
+      "createFailed": "Create failed: {{reason}}",
+      "loadFailed": "Failed to load conditional orders: {{reason}}",
+      "toggleFailed": "Toggle failed: {{reason}}",
+      "deleteFailed": "Delete failed: {{reason}}",
+      "confirmDelete": "Delete this conditional order?",
+      "thresholdPct": "Threshold (%)",
+      "actionNotify": "Notify only",
+      "actionSell": "Sell",
+      "actionBuy": "Buy",
+      "actionReduce": "Reduce",
+      "actionValueQty": "Quantity",
+      "actionValueRatio": "Ratio",
+      "coolDown": "Cooldown (min)",
+      "maxPerDay": "Max / day",
+      "windowStart": "From HH:MM",
+      "windowEnd": "To HH:MM"
     },
     "period": {
       "1m": "1 Month",
@@ -16238,7 +16277,6 @@
         "moat": "Moat",
         "screener": "Screener",
         "signals": "Signals",
-        "keylevels": "Key Levels",
         "recommender": "Recommender",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
@@ -16990,7 +17028,9 @@
       "totalPnl": "Total P&L",
       "totalPnlPct": "P&L %",
       "warningTitle": "Concentration Warning",
-      "worstHit": "Worst Hit"
+      "worstHit": "Worst Hit",
+      "unpricedTitle": "Missing prices",
+      "unpricedNotice": "{{count}} positions have no current price and are excluded from concentration and diversification"
     },
     "recommendation": {
       "backtestWinrate": "Win Rate",
@@ -17508,26 +17548,6 @@
       "value": "Valuation",
       "trade": "Trading Plan",
       "decision": "Final Decision"
-    },
-    "fundPanel": {
-      "fundFlow": "Fund Flow",
-      "type": "Type",
-      "deposit": "Deposit",
-      "withdrawal": "Withdrawal",
-      "amount": "Amount",
-      "date": "Date",
-      "fee": "Fee",
-      "notes": "Notes",
-      "totalDeposits": "Total Deposits",
-      "totalWithdrawals": "Total Withdrawals",
-      "netInflow": "Net Inflow",
-      "recordFundFlow": "Record Fund Flow",
-      "depositTransferIn": "Deposit (Transfer In)",
-      "withdrawalTransferOut": "Withdrawal (Transfer Out)",
-      "feeOptional": "Fee (Optional)",
-      "notesOptional": "Notes (Optional)",
-      "recorded": "Recorded",
-      "amountMustBeGreaterThanZero": "Amount must be > 0"
     },
     "marketSimPanel": {
       "simConfig": "Simulation Config",
@@ -18072,8 +18092,8 @@
       "moatFcfRatioMin": "FCF/net income ratio floor (0-1)",
       "monitorPollIntervalSecs": "Monitoring poll interval (seconds)",
       "monitorAlertCooldownSecs": "Alert cooldown for the same symbol (seconds, 10-3600)",
-      "monitorMinSeverity": "Minimum alert level to push: info / warn / critical",
-      "monitorChannels": "Push channels, comma-separated: in_app / lark / email / webhook",
+      "monitorMinSeverity": "Minimum alert level to push: info / warn / critical (currently no consumer: changing it has no effect)",
+      "monitorChannels": "Push channels, comma-separated: in_app / lark / email / webhook (currently no consumer: changing it has no effect)",
       "dualViewDisagreementThreshold": "Dual-perspective divergence threshold (0-100), below which flagged for manual review",
       "minConfidence": "Minimum confidence (0-100)",
       "varConfidence": "VaR confidence (0-1)",
@@ -18124,9 +18144,6 @@
       "signalMaFast": "MA golden cross fast line period (3-30)",
       "signalMaSlow": "MA golden cross slow line period (10-120)",
       "signalBreakoutVolumeMult": "Breakout/breakdown volume multiple threshold (1.0-3.0)",
-      "keylevelLookbackDays": "Key price level lookback window (trading days, 10-250)",
-      "keylevelTouchTolerancePct": "Key price level touch tolerance (%, 0.1-5.0)",
-      "keylevelMinTouches": "Minimum touches to confirm support/resistance (1-10)",
       "recoTrendEnabled": "Enable trend-following sub-strategy",
       "recoReversionEnabled": "Enable oversold rebound sub-strategy",
       "recoValueEnabled": "Enable value stock selection sub-strategy",
@@ -18311,7 +18328,12 @@
     },
     "portfolio": {
       "importPartial": "Partial import",
-      "yuan": "CNY"
+      "yuan": "CNY",
+      "signalTitle": "Portfolio-level signal",
+      "signalBody": "{{count}} stocks moved {{direction}} together, strength {{pct}}% — {{action}}",
+      "signalBullish": "bullish",
+      "signalBearish": "bearish",
+      "signalNeutral": "neutral"
     },
     "riskReport": {
       "asymOpportunities": "Asymmetric Opportunities",
@@ -18440,6 +18462,21 @@
         "failed": "Failed (legacy)",
         "unknown": "Unknown status"
       }
+    },
+    "monitor": {
+      "readFailed": "Failed to read monitor status: {{reason}}",
+      "notAssembled": "Monitor engine not assembled: alerts are stored but nothing polls or fires them",
+      "pausedBySession": "{{session}} — monitor polling is paused",
+      "fetchFailed": "{{failed}}/{{total}} symbols failed to fetch this round and were not evaluated",
+      "allFailedRounds": "All fetches failed for {{rounds}} consecutive rounds — the monitor is producing nothing",
+      "firstRoundPending": "Monitor started; first round not finished yet (about every {{interval}}s)",
+      "emptyResponse": "Backend returned no monitor status",
+      "sessionNonTradingDay": "Non-trading day",
+      "sessionPreOpen": "Pre-open",
+      "sessionMorning": "Morning session",
+      "sessionLunchBreak": "Lunch break",
+      "sessionAfternoon": "Afternoon session",
+      "sessionPostClose": "After close"
     }
   },
   "pipeline": {

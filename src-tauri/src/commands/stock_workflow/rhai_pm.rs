@@ -285,6 +285,39 @@ pub fn register_pm_functions(engine: &mut Engine) {
             None => rhai::Dynamic::UNIT,
         }
     });
+    // P0-5（`PLAN-stock-decision-reliability.md`）：近 5 日个股强势特征 —— 超短档
+    // breadth 入场门在「全市场封板率 ≥ 0.5」之外再验**个股自身**（近 5 日出现过涨停，
+    // 或区间累计涨幅达强势股量级）。封板率是市场级量（同一天所有票同一个数），没有个股
+    // 前提时大盘情绪火热会给任何一只票放行，紫金矿业 2026-10-09 正是这样被推成「买入」。
+    //
+    // 返回 map `#{limitUpCount, cumGainPct, days}`；样本不足 / 无法解析 ⇒ unit
+    // （脚本按「个股前提未判定 ≠ 通过」处理）。板块涨跌幅取 harness 权威表
+    // （`detect_market_type` + `get_st_price_limit_pct`），本处不抄第二份。
+    // ⚠ is_st 信息脚本侧没有 ⇒ 按非 ST 取板幅：ST 股 5cm 封板 (+4.8%) 不会被计为涨停，
+    //   但累计涨幅通道仍可放行；ST 精确口径待个股微观结构（涨停池成员）接线时一并闭合。
+    engine.register_fn(
+        "pm_recent_strength",
+        |bars: rhai::Array, stock_code: rhai::Dynamic, lookback: i64| -> rhai::Dynamic {
+            let code = stock_code.into_string().unwrap_or_default();
+            let market = axagent_harness::market_data::detect_market_type(&code);
+            let limit_pct = axagent_harness::market_data::get_st_price_limit_pct(false, market);
+            let closes = closes_from_bars(&bars);
+            match axagent_harness::indicators::recent_strength(
+                &closes,
+                limit_pct,
+                lookback.max(0) as usize,
+            ) {
+                Some(s) => {
+                    let mut m = rhai::Map::new();
+                    m.insert("limitUpCount".into(), rhai::Dynamic::from(s.limit_up_count as i64));
+                    m.insert("cumGainPct".into(), rhai::Dynamic::from(s.cum_gain_pct));
+                    m.insert("days".into(), rhai::Dynamic::from(s.days as i64));
+                    rhai::Dynamic::from_map(m)
+                },
+                None => rhai::Dynamic::UNIT,
+            }
+        },
+    );
     // 「长线更值得」的判定侧折算（Phase D-2）：见 `harness::indicators::snr_confidence` 的推导。
     // 同样在 Rust 侧开方 —— 本仓共享 Rhai 引擎没有 sqrt/Math。
     engine.register_fn("pm_snr_confidence", |p: f64, holding_days: i64, anchor_days: i64| -> f64 {

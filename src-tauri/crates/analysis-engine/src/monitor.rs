@@ -4,9 +4,16 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, interval_at, Duration};
 
 use axagent_harness::market_data::{MarketDataProvider, StockQuote};
+
+/// 面板键：监控轮询间隔（秒）。权威在 `seed_variables.rs` / 设置面板，落点在本模块。
+const PANEL_POLL_INTERVAL_KEY: &str = "monitor_poll_interval_secs";
+/// 面板键：同一告警条目的冷却窗口（秒）。
+const PANEL_ALERT_COOLDOWN_KEY: &str = "monitor_alert_cooldown_secs";
+/// 轮询间隔可采纳区间：下界 1 秒（0 会让 `tokio::time::interval` panic），上界 1 小时。
+const POLL_INTERVAL_RANGE: (u64, u64) = (1, 3600);
 
 /// 前端事件推送桥接 trait
 ///
@@ -125,6 +132,45 @@ pub fn limit_state_of(quote: &StockQuote) -> LimitState {
     LimitState::NotLimited
 }
 
+/// 一轮轮询的取数读数（裁定 12 ①：「监控实际未在取数」必须是能被面板消费的聚合面）。
+///
+/// 改造前只有逐只 `tracing::warn!`：整条链路长期全挂时，唯一发现方式是人工翻日志，
+/// 而监控面板仍显示「监控运行中」。三条数各自只说一件事，不并排成可比的两个计数：
+/// - [`Self::codes_total`] / [`Self::codes_failed`]：**本轮**应取数的股票数与其中失败数；
+/// - [`Self::consecutive_all_failed_rounds`]：连续「整轮全失败」的轮数，用于判「通道挂了」；
+/// - [`Self::finished_at_ms`]：本轮落数时刻。非交易时段整轮跳过时**不更新**，
+///   所以它是「最后一次真取数的时刻」，不是「上一次心跳」。
+#[derive(Debug, Clone, Default)]
+pub struct PollRoundStats {
+    pub codes_total: u32,
+    pub codes_failed: u32,
+    pub consecutive_all_failed_rounds: u32,
+    pub finished_at_ms: i64,
+}
+
+/// 连续「整轮全失败」轮数的转移函数（纯函数，判据直接打在这一格上）。
+///
+/// 三档语义：
+/// - `codes_total == 0` ⇒ 归零。没有启用中的告警就没有「失败的取数」，把旧连击留着
+///   会让面板在空配置下说「连续 N 轮全失败」——那是把「没单」演成「通道坏了」。
+/// - 全失败 ⇒ 上一值 +1。
+/// - 任一成功 ⇒ 归零（半挂的轮次不算「未在取数」，由 `codes_failed/codes_total` 自己说话）。
+pub fn next_all_failed_streak(prev: u32, codes_total: u32, codes_failed: u32) -> u32 {
+    if codes_total == 0 {
+        0
+    } else if codes_failed >= codes_total {
+        prev + 1
+    } else {
+        0
+    }
+}
+
+/// 连击达到这个轮数时打一条 `error`（一轮 30s ⇒ 约 90s 确认整条取数链没在工作）。
+///
+/// 只在**恰好命中**这一档时打，不每轮重复：连击数本身仍在往上累加并暴露在
+/// [`PollRoundStats`] 里，日志只负责「让运维面知道」，不承担计数。
+pub const ALL_FAILED_STREAK_LOG_AT: u32 = 3;
+
 /// 实时监控引擎
 pub struct RealtimeMonitor {
     client: Arc<dyn MarketDataProvider>,
@@ -138,6 +184,8 @@ pub struct RealtimeMonitor {
     alert_states: RwLock<HashMap<String, bool>>,
     poll_interval_secs: RwLock<u64>,
     alert_cooldown_secs: RwLock<i64>,
+    /// 最近一轮轮询的取数读数（裁定 12）—— 面板「本轮 x/y 只取数失败」的唯一来源。
+    round_stats: RwLock<PollRoundStats>,
     // P2-6: T+0 自动重跑相关字段
     t0_config: RwLock<TZeroConfig>,
     t0_callback: RwLock<Option<TZeroCallback>>,
@@ -161,6 +209,7 @@ impl RealtimeMonitor {
             alert_states: RwLock::new(HashMap::new()),
             poll_interval_secs: RwLock::new(30),
             alert_cooldown_secs: RwLock::new(300),
+            round_stats: RwLock::new(PollRoundStats::default()),
             t0_config: RwLock::new(TZeroConfig::default()),
             t0_callback: RwLock::new(None),
             t0_last_trigger_ts: RwLock::new(HashMap::new()),
@@ -198,21 +247,17 @@ impl RealtimeMonitor {
     ///
     /// 不调用此方法时，RealtimeMonitor 仅产出单股告警；
     /// 调用后，每次 `check_alerts` 触发告警时会同步喂给聚合器，
-    /// 当多只股票同方向触发信号时，聚合器产出 `PortfolioSignal` 并通过
-    /// `subscribe_portfolio_signals()` 推送给订阅者。
+    /// 当多只股票同方向触发信号时，聚合器产出 `PortfolioSignal` 并以
+    /// `IpcEventName::PortfolioSignal` 推给前端（G-6）。
+    ///
+    /// 这里刻意**不**提供 `subscribe_portfolio_signals()`：进程内订阅口在本仓零消费者，
+    /// 而真正在用的那条路是 `event_emitter.emit(..)`（与价格告警同一出口）。
+    /// 留一个没人调的订阅口，正是本轮在阶段 D 退役的那类假旋钮。
     pub async fn set_aggregator(
         &self,
         agg: Arc<crate::cross_stock_aggregator::CrossStockSignalAggregator>,
     ) {
         *self.aggregator.write().await = Some(agg);
-    }
-
-    /// P3-3: 订阅组合级信号流（需先 `set_aggregator`）
-    pub async fn subscribe_portfolio_signals(
-        &self,
-    ) -> Option<tokio::sync::broadcast::Receiver<crate::cross_stock_aggregator::PortfolioSignal>>
-    {
-        self.aggregator.read().await.as_ref().map(|agg| agg.subscribe())
     }
 
     /// 添加/替换一条监控配置（键 = `price_alerts.id`，同 id 覆盖、不同 id 并存）
@@ -258,7 +303,7 @@ impl RealtimeMonitor {
         keys
     }
 
-    /// 启动监控循环（轮询间隔从 `poll_interval_secs` 读取，默认 30 秒）
+    /// 启动监控循环（轮询间隔**每轮重读** `poll_interval_secs`，默认 30 秒；改动下一轮生效）
     pub async fn start(&self) {
         {
             let mut running = self.running.write().await;
@@ -268,8 +313,14 @@ impl RealtimeMonitor {
             *running = true;
         }
 
-        let interval_secs = *self.poll_interval_secs.read().await;
-        let mut ticker = interval(Duration::from_secs(interval_secs));
+        // D-2：间隔**每轮重读**。原先是 `let interval_secs = …; let mut ticker = interval(…)`，
+        // 只在循环前读一次 ⇒ `set_poll_interval_secs` 与面板保存通路都成了摆设
+        // （「面板可调、改了没反应」，落点门 P2 的 calls 判定也照样绿）。
+        // 变化时用 `interval_at` 重建（不是 `interval`：后者的首个 tick 立即完成，
+        // 会把「等一个周期」吃掉，等于换档那一轮连打两次）。
+        // `.max(1)`：0 会让 tokio 的 interval panic —— 面板能把值改到 0，这条守卫必须在。
+        let mut ticker_secs = (*self.poll_interval_secs.read().await).max(1);
+        let mut ticker = interval(Duration::from_secs(ticker_secs));
         loop {
             ticker.tick().await;
             {
@@ -277,6 +328,14 @@ impl RealtimeMonitor {
                 if !*running {
                     break;
                 }
+            }
+
+            let want = (*self.poll_interval_secs.read().await).max(1);
+            if want != ticker_secs {
+                tracing::info!("[monitor] 轮询间隔 {}s → {}s（下一轮起按新值）", ticker_secs, want);
+                ticker_secs = want;
+                let period = Duration::from_secs(want);
+                ticker = interval_at(tokio::time::Instant::now() + period, period);
             }
 
             let configs = {
@@ -302,6 +361,8 @@ impl RealtimeMonitor {
                 continue;
             }
 
+            let codes_total = by_code.len() as u32;
+            let mut codes_failed = 0_u32;
             for (code, group) in by_code {
                 match self.client.get_quote(&code).await {
                     Ok(quote) => {
@@ -309,16 +370,19 @@ impl RealtimeMonitor {
                             self.check_alerts(config, &quote).await;
                         }
                     },
-                    // 这里只补了 E-1 的「不静默」这一半（失败要有读数）；
-                    // 聚合那一半（连续多轮全失败 ⇒ 一条「监控实际未在取数」的 error）刻意不做成单独日志：
-                    // 计数器没有消费者就是又一个假旋钮，必须与面板「本轮 x/y 只取数失败」同批落，归阶段 H。
+                    // E-1 的「不静默」与裁定 12 的「聚合」在这一格合流：逐只 warn 保留
+                    // （要看得见是哪只挂的），同时计入本轮读数，轮末由 `record_poll_round`
+                    // 汇成面板那句「本轮 x/y 只取数失败」。此前只有前者 ⇒ 整条链路长期全挂
+                    // 时唯一发现方式是人工翻日志，而面板仍显示「监控运行中」。
                     Err(err) => {
+                        codes_failed += 1;
                         tracing::warn!(
                             "[monitor] 取数失败，本轮该股票未求值: stock={code} err={err}"
                         );
                     },
                 }
             }
+            self.record_poll_round(codes_total, codes_failed).await;
         }
     }
 
@@ -350,13 +414,80 @@ impl RealtimeMonitor {
     }
 
     /// P1-1: 运行时热更新轮询间隔（无需重启 monitor）。
+    ///
+    /// ⚠ 光有这个 setter 不够：`start()` 的 ticker 必须**每轮重读**本值才会生效
+    /// （阶段 D-2 修的就是「读一次就定型」那个形态）。
     pub async fn set_poll_interval_secs(&self, secs: u64) {
         *self.poll_interval_secs.write().await = secs;
+    }
+
+    /// 保存设置后立即回灌两个运行期参数（阶段 D 的「保存即生效」通路）。
+    ///
+    /// 为什么不能只靠 `refresh_from_db`：这两条**不走快照读取** —— 轮询间隔在循环里读、
+    /// 冷却在每轮求值时读，而面板保存写的是变量表行 ⇒ 不显式回灌就退回「重启才生效」。
+    ///
+    /// 非法值**拒绝覆盖**并 warn（同 `PositionLimits::from_panel_vars` 的口径）：
+    /// 间隔 0 会让 `tokio::time::interval` panic（整条监控链停摆），冷却为负等于关掉去重
+    /// （每轮重复报同一只）。面板写错不该把现网参数改坏。
+    pub async fn apply_panel_runtime_vars(&self) {
+        let vars = axagent_harness::panel_variables::panel_variables();
+        self.apply_runtime_vars(&vars).await;
+    }
+
+    /// [`apply_panel_runtime_vars`] 的纯函数版（判据在此；直接测快照版会踩进程内全局、并行互踩）。
+    pub async fn apply_runtime_vars(&self, vars: &HashMap<String, serde_json::Value>) {
+        match axagent_harness::panel_variables::integer_in(vars, PANEL_POLL_INTERVAL_KEY) {
+            Some(v) if (POLL_INTERVAL_RANGE.0 as i64..=POLL_INTERVAL_RANGE.1 as i64).contains(&v) => {
+                self.set_poll_interval_secs(v as u64).await;
+            },
+            Some(v) => tracing::warn!(
+                "[monitor] 面板 {PANEL_POLL_INTERVAL_KEY} = {v} 不在 {}..={} 秒 ⇒ 拒绝覆盖，仍按现值轮询",
+                POLL_INTERVAL_RANGE.0,
+                POLL_INTERVAL_RANGE.1
+            ),
+            None => {},
+        }
+        match axagent_harness::panel_variables::integer_in(vars, PANEL_ALERT_COOLDOWN_KEY) {
+            Some(v) if v >= 0 => self.set_alert_cooldown_secs(v).await,
+            Some(v) => tracing::warn!(
+                "[monitor] 面板 {PANEL_ALERT_COOLDOWN_KEY} = {v} 为负 ⇒ 拒绝覆盖（负冷却等于关掉去重）"
+            ),
+            None => {},
+        }
     }
 
     /// P1-1: 查询当前轮询间隔
     pub async fn poll_interval_secs(&self) -> u64 {
         *self.poll_interval_secs.read().await
+    }
+
+    /// 最近一轮取数读数（`monitor_status` 命令的取数侧来源）
+    pub async fn poll_round_stats(&self) -> PollRoundStats {
+        self.round_stats.read().await.clone()
+    }
+
+    /// 收下一轮的取数读数：算连击、落盘、到档打一条 error，并返回新读数。
+    ///
+    /// 拆成独立方法而不是写在循环体里，是为了让判据能直接打在这一格上 ——
+    /// `start()` 是个不返回的 loop，没有这个方法就只能靠肉眼读循环代码。
+    pub async fn record_poll_round(&self, codes_total: u32, codes_failed: u32) -> PollRoundStats {
+        let stats = {
+            let mut s = self.round_stats.write().await;
+            s.consecutive_all_failed_rounds =
+                next_all_failed_streak(s.consecutive_all_failed_rounds, codes_total, codes_failed);
+            s.codes_total = codes_total;
+            s.codes_failed = codes_failed;
+            s.finished_at_ms = chrono::Utc::now().timestamp_millis();
+            s.clone()
+        };
+        if stats.consecutive_all_failed_rounds == ALL_FAILED_STREAK_LOG_AT {
+            tracing::error!(
+                "[monitor] 连续 {} 轮 {} 只全部取数失败 ⇒ 监控实际未在产出告警（此后连击继续累加，本条日志只打一次）",
+                stats.consecutive_all_failed_rounds,
+                stats.codes_total
+            );
+        }
+        stats
     }
 
     async fn check_alerts(&self, config: &MonitorConfig, quote: &StockQuote) {
@@ -663,11 +794,11 @@ impl RealtimeMonitor {
                 portfolio_signal.strength,
                 portfolio_signal.suggested_action
             );
-            // 通过 event_emitter 推送给前端
+            // 通过 event_emitter 推送给前端（事件名只认权威枚举，见 R14）
             let emitter = self.event_emitter.read().await.clone();
             if let Some(ref e) = emitter {
                 e.emit(
-                    "portfolio-signal",
+                    IpcEventName::PortfolioSignal.as_str(),
                     serde_json::to_value(&portfolio_signal).unwrap_or(serde_json::Value::Null),
                 );
             }
@@ -1092,5 +1223,88 @@ mod tests {
             monitor.edge_state_keys().await.iter().all(|k| !k.starts_with("alert-a:")),
             "摘除后不得留下按删除次数单调增长的状态"
         );
+    }
+
+    /// 连击转移函数的三档语义各钉一格（纯函数，负控就拆在这三格上）。
+    #[test]
+    fn all_failed_streak_has_three_distinct_buckets() {
+        assert_eq!(next_all_failed_streak(0, 3, 3), 1, "整轮全失败从 0 起算 1");
+        assert_eq!(next_all_failed_streak(4, 3, 3), 5, "继续全失败要累加");
+        assert_eq!(next_all_failed_streak(7, 3, 2), 0, "任一成功即归零：半挂不该报「未在取数」");
+        assert_eq!(next_all_failed_streak(7, 3, 0), 0, "全成功更要归零");
+        // 空配置不得演成「通道全挂」—— 这是呈现层歧义的唯一来源
+        assert_eq!(next_all_failed_streak(7, 0, 0), 0, "本轮没有启用中的告警 ⇒ 不得保留旧连击");
+    }
+
+    /// 轮末读数必须落在引擎上并能被 `poll_round_stats()` 读回 —— 面板那句
+    /// 「本轮 x/y 只取数失败」只有这一个来源。`start()` 是个不返回的 loop，
+    /// 判据打不进循环体，所以记数拆成了 `record_poll_round`。
+    #[tokio::test]
+    async fn record_poll_round_exposes_counters_and_resets_on_recovery() {
+        let (monitor, _recorder) = monitor_with_recorder().await;
+
+        monitor.record_poll_round(4, 4).await;
+        let s = monitor.record_poll_round(4, 4).await;
+        assert_eq!(s.codes_total, 4, "分母是本轮应取数的股票数，不是告警条数");
+        assert_eq!(s.codes_failed, 4);
+        assert_eq!(s.consecutive_all_failed_rounds, 2, "两轮整轮全失败要累加");
+        assert!(s.finished_at_ms > 0, "落数时刻必须是真实时间戳");
+
+        // 恢复一轮：连击归零，本轮失败数照实留着（两个计数域各说各话，不收敛成一个数）
+        let after = monitor.record_poll_round(4, 1).await;
+        assert_eq!(after.consecutive_all_failed_rounds, 0);
+        assert_eq!(after.codes_failed, 1);
+
+        let stored = monitor.poll_round_stats().await;
+        assert_eq!(stored.codes_total, 4, "读回的必须是引擎里那一格，不是调用方的临时值");
+        assert_eq!(stored.codes_failed, 1);
+        assert_eq!(stored.consecutive_all_failed_rounds, 0);
+    }
+
+    /// 阶段 D：保存设置后回灌两个运行期参数 —— 合法值采纳、非法值**拒绝覆盖**。
+    ///
+    /// 走纯函数版（`apply_runtime_vars`）而不是快照版：快照是进程内全局，并行用例会互踩。
+    /// 判据分四格各占一条：合法采纳 / 间隔 0 拒绝 / 间隔越上界拒绝 / 冷却为负拒绝，
+    /// 外加「键缺席一律不动」（面板没播种时不得把默认值抹成别的）。
+    #[tokio::test]
+    async fn apply_runtime_vars_adopts_valid_and_rejects_invalid() {
+        let monitor = RealtimeMonitor::new(Arc::new(StubProvider));
+        let vars = |pairs: &[(&str, i64)]| {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), serde_json::json!(*v)))
+                .collect::<HashMap<_, _>>()
+        };
+
+        // ① 合法值采纳
+        monitor
+            .apply_runtime_vars(&vars(&[
+                ("monitor_poll_interval_secs", 45),
+                ("monitor_alert_cooldown_secs", 600),
+            ]))
+            .await;
+        assert_eq!(monitor.poll_interval_secs().await, 45);
+        assert_eq!(monitor.alert_cooldown_secs().await, 600);
+
+        // ② 间隔 0 ⇒ 拒绝（0 会让 `tokio::time::interval` panic，整条监控链停摆）
+        monitor.apply_runtime_vars(&vars(&[("monitor_poll_interval_secs", 0)])).await;
+        assert_eq!(monitor.poll_interval_secs().await, 45, "0 秒必须被拒绝，不能带进循环");
+
+        // ③ 间隔越上界（3601）⇒ 拒绝；边界值 3600 采纳
+        monitor.apply_runtime_vars(&vars(&[("monitor_poll_interval_secs", 3601)])).await;
+        assert_eq!(monitor.poll_interval_secs().await, 45);
+        monitor.apply_runtime_vars(&vars(&[("monitor_poll_interval_secs", 3600)])).await;
+        assert_eq!(monitor.poll_interval_secs().await, 3600, "上界本身可用");
+
+        // ④ 冷却为负 ⇒ 拒绝（负冷却等于关掉去重）；0 合法（测试与「关冷却」都要用它）
+        monitor.apply_runtime_vars(&vars(&[("monitor_alert_cooldown_secs", -5)])).await;
+        assert_eq!(monitor.alert_cooldown_secs().await, 600);
+        monitor.apply_runtime_vars(&vars(&[("monitor_alert_cooldown_secs", 0)])).await;
+        assert_eq!(monitor.alert_cooldown_secs().await, 0);
+
+        // ⑤ 键缺席 ⇒ 一律不动（快照空 = 面板还没播种，不是「把它设成 0」）
+        monitor.apply_runtime_vars(&HashMap::new()).await;
+        assert_eq!(monitor.poll_interval_secs().await, 3600);
+        assert_eq!(monitor.alert_cooldown_secs().await, 0);
     }
 }

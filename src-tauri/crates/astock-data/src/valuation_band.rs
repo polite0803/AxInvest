@@ -41,6 +41,18 @@ pub struct ValuationBand {
     pub verdict: String,
     /// 数据来源描述
     pub note: Option<String>,
+    /// P0-4：PE 信号是否被**周期开关置空**（行业命中周期组：有色/煤炭/钢铁/
+    /// 石化/航运/养殖/券商）。
+    ///
+    /// 周期股的 E（盈利）随商品价格大起大落：周期高位 E 高 ⇒ PE 系统性落在自身
+    /// 历史低分位，看似「便宜」实则是卖出区间（紫金 2026-10-09 实证 PE 8% 分位 +
+    /// DCF +25.7% 同向上推长档买入）。置空时：
+    /// - PE 历史分位带**照常返回**（`metric_pe.percentiles`，图表分布仍可画）；
+    /// - `metric_pe.current_percentile = None`（当前分位是唯一进方向信号的字段，
+    ///   置 null 后 f5 腿 `valuationBand` 读不到 PE 分位 ⇒ 不产生信号）；
+    /// - `verdict` 改由 PB 单腿决定，不允许 PE 以任何权重参与。
+    #[serde(default)]
+    pub pe_suppressed: bool,
 }
 
 const PERCENTILE_KEYS: [f64; 7] = [5.0, 10.0, 25.0, 50.0, 75.0, 90.0, 95.0];
@@ -119,23 +131,42 @@ pub fn metric_band_from(samples: &[Option<f64>], current: Option<f64>) -> Metric
 /// 从历史快照 + 当前快照,计算完整估值带。
 ///
 /// 建议 historical 长度 ≥ 20 才有意义;不足时会设置 verdict = "insufficient"。
+///
+/// `pe_suppressed`（P0-4 周期开关）：见 [`ValuationBand::pe_suppressed`] 字段文档。
+/// 置 `true` 时 PE 当前分位被强制清空、verdict 只由 PB 决定 —— PE 历史分布照算，
+/// 但当前 PE 不再产生任何「便宜/贵」的方向含义。
 pub fn compute_valuation_band<S: FinancialSnapshotLike>(
     stock_code: &str,
     historical: &[S],
     current: Option<&S>,
+    pe_suppressed: bool,
 ) -> ValuationBand {
     let pe_vals: Vec<Option<f64>> = historical.iter().map(|s| s.pe_ttm()).collect();
     let pb_vals: Vec<Option<f64>> = historical.iter().map(|s| s.pb()).collect();
     let ps_vals: Vec<Option<f64>> = historical.iter().map(|s| s.ps_ttm()).collect();
 
-    let pe = metric_band_from(&pe_vals, current.and_then(|c| c.pe_ttm()));
+    let mut pe = metric_band_from(&pe_vals, current.and_then(|c| c.pe_ttm()));
     let pb = metric_band_from(&pb_vals, current.and_then(|c| c.pb()));
     let ps = metric_band_from(&ps_vals, current.and_then(|c| c.ps_ttm()));
+
+    // P0-4：周期股 PE 不进方向 —— 历史带保留（pe.percentiles 已算完），
+    // 只清空「当前分位」这个唯一被下游当信号读的字段。
+    if pe_suppressed {
+        pe.current_percentile = None;
+    }
 
     let sample_start = historical.iter().map(|s| s.snapshot_date().to_string()).min();
     let sample_end = historical.iter().map(|s| s.snapshot_date().to_string()).max();
 
-    let verdict = if pe.sample_size < 20 || pb.sample_size < 20 {
+    // verdict：常态需 PE/PB 双腿 ≥20 样本；周期开关下 PE 不参与，只要求 PB 够样本，
+    // 并走 PB 单腿定性（PE 分位即便算了也不允许进平均）。
+    let verdict = if pe_suppressed {
+        if pb.sample_size < 20 {
+            "insufficient"
+        } else {
+            verdict_from_avg_percentile(pb.current_percentile.unwrap_or(50.0))
+        }
+    } else if pe.sample_size < 20 || pb.sample_size < 20 {
         "insufficient"
     } else {
         verdict_from_bands(&pe, &pb)
@@ -144,7 +175,7 @@ pub fn compute_valuation_band<S: FinancialSnapshotLike>(
     // note 需区分两种"样本不足"：数据本来就少 vs 因亏损/负值被剔除。
     // 后者（长期亏损股）若只说"历史样本不足"，会让人误以为数据没拉到。
     let pe_dropped = pe_vals.iter().filter(|v| v.is_some()).count() - pe.sample_size;
-    let note = if pe.sample_size < 20 {
+    let insufficient_note = if pe.sample_size < 20 {
         if pe_dropped > 0 {
             Some(format!(
                 "PE 有效样本不足（剔除 {} 条亏损/负值后仅 {} < 20），分位仅供参考",
@@ -156,6 +187,16 @@ pub fn compute_valuation_band<S: FinancialSnapshotLike>(
     } else {
         None
     };
+    // P0-4：周期置空说明优先于普通样本说明（它解释了「为什么 PE 分位显示 —」）。
+    let note = if pe_suppressed {
+        Some(
+            "周期股估值开关（P0-4）：周期高位盈利高企会使 PE 系统性落在历史低分位，\
+             形成「便宜」假象；当前 PE 分位已置空、不进方向判定，综合口径仅参考 PB"
+                .to_string(),
+        )
+    } else {
+        insufficient_note
+    };
 
     ValuationBand {
         stock_code: stock_code.to_string(),
@@ -166,6 +207,7 @@ pub fn compute_valuation_band<S: FinancialSnapshotLike>(
         sample_end,
         verdict: verdict.to_string(),
         note,
+        pe_suppressed,
     }
 }
 
@@ -371,7 +413,7 @@ mod tests {
             pb: Some(3.0),
             ps: Some(3.0),
         };
-        let band = compute_valuation_band("000001", &samples, Some(&current));
+        let band = compute_valuation_band("000001", &samples, Some(&current), false);
         assert_eq!(band.stock_code, "000001");
         assert_eq!(band.metric_pe.sample_size, 60);
         // PE 30 落在 40/60 = 66.7%, PB 3.0 落在 (3.0-1.0)/0.05 = 第 40 名 → 66.7%
@@ -385,7 +427,7 @@ mod tests {
     #[test]
     fn band_insufficient_sample() {
         let samples = sample_data(5);
-        let band = compute_valuation_band("000002", &samples, None);
+        let band = compute_valuation_band("000002", &samples, None, false);
         assert_eq!(band.verdict, "insufficient");
         assert!(band.note.is_some());
     }
@@ -400,13 +442,13 @@ mod tests {
             pb: Some(1.05),
             ps: Some(2.05),
         };
-        let band = compute_valuation_band("000003", &samples, Some(&current));
+        let band = compute_valuation_band("000003", &samples, Some(&current), false);
         assert_eq!(band.verdict, "deep_value");
     }
 
     #[test]
     fn band_empty() {
-        let band: ValuationBand = compute_valuation_band::<MockSnap>("000004", &[], None);
+        let band: ValuationBand = compute_valuation_band::<MockSnap>("000004", &[], None, false);
         assert_eq!(band.verdict, "insufficient");
         assert_eq!(band.metric_pe.sample_size, 0);
     }
@@ -421,7 +463,7 @@ mod tests {
             pb: Some(3.8),
             ps: Some(4.0),
         };
-        let band = compute_valuation_band("000005", &samples, Some(&current));
+        let band = compute_valuation_band("000005", &samples, Some(&current), false);
         assert_eq!(band.verdict, "overvalued");
     }
 
@@ -433,7 +475,7 @@ mod tests {
             s.pe = None;
             s.pb = None;
         }
-        let band = compute_valuation_band("000006", &samples, None);
+        let band = compute_valuation_band("000006", &samples, None, false);
         assert_eq!(band.metric_pe.sample_size, 20);
         // 20 >= 20 阈值,verdict 不再是 "insufficient"
         assert_ne!(band.verdict, "insufficient");
@@ -447,7 +489,7 @@ mod tests {
             s.pe = None;
             s.pb = None;
         }
-        let band = compute_valuation_band("000007", &samples, None);
+        let band = compute_valuation_band("000007", &samples, None, false);
         assert_eq!(band.metric_pe.sample_size, 15);
         assert_eq!(band.verdict, "insufficient");
         assert!(band.note.is_some());
@@ -470,7 +512,7 @@ mod tests {
             pb: Some(2.0),
             ps: Some(3.0),
         };
-        let band = compute_valuation_band("000008", &samples, Some(&current));
+        let band = compute_valuation_band("000008", &samples, Some(&current), false);
         // 有效样本 = 40 - 10
         assert_eq!(band.metric_pe.sample_size, 30);
         // 分位带必须全为正
@@ -488,7 +530,7 @@ mod tests {
         for s in samples.iter_mut() {
             s.pe = Some(-8.0);
         }
-        let band = compute_valuation_band("000009", &samples, None);
+        let band = compute_valuation_band("000009", &samples, None, false);
         assert_eq!(band.metric_pe.sample_size, 0);
         assert_eq!(band.verdict, "insufficient");
         assert!(band.metric_pe.percentiles.iter().all(|v| *v == 0.0));
@@ -576,5 +618,57 @@ mod tests {
             .format("%Y-%m-%d")
             .to_string();
         assert_eq!(live, expect, "live 模式不得被锚到截止日");
+    }
+
+    // ── P0-4：周期股 PE 信号置空（紫金 2026-10-09 形态：周期高位 PE 8% 分位假便宜）──
+
+    /// PE 极低分位（11.0 ≈ 历史 2%）+ PB 高分位（3.8 ≈ 95%）：
+    /// 常态下 PE 把平均拉到中性附近；周期开关置空 PE 后，verdict 只跟 PB ⇒ overvalued，
+    /// 且当前 PE 分位字段必须为 None（下游 leg_signal / rhai 读到 unit）。
+    #[test]
+    fn p0_4_cyclical_pe_suppressed_drives_verdict_by_pb_only() {
+        let samples = sample_data(60);
+        let current = MockSnap {
+            date: "2025-01-01".to_string(),
+            pe: Some(11.0), // 周期顶部高盈利 ⇒ 假便宜的低分位
+            pb: Some(3.8),  // 价格维度仍在历史高位
+            ps: Some(2.05),
+        };
+
+        // 对照：不置空 ⇒ PE/PB 平均落在中性
+        let plain = compute_valuation_band("601899", &samples, Some(&current), false);
+        assert!(plain.metric_pe.current_percentile.is_some(), "前置：常态 PE 分位在场");
+        assert_ne!(plain.verdict, "overvalued", "前置：PE 把平均拉离高估区");
+
+        // 置空：verdict 只跟 PB 单腿
+        let band = compute_valuation_band("601899", &samples, Some(&current), true);
+        assert_eq!(
+            band.metric_pe.current_percentile, None,
+            "周期置空 ⇒ 当前 PE 分位必须为 None（历史带 percentiles 仍保留供画图）"
+        );
+        assert!(band.metric_pe.percentiles.iter().any(|v| *v > 0.0), "历史 PE 带不应被抹掉");
+        assert_eq!(band.verdict, "overvalued", "PE 踢出后只按 PB 高分位判高估");
+        assert!(band.pe_suppressed, "必须回传 pe_suppressed 标记");
+        let note = band.note.as_deref().unwrap_or_default();
+        assert!(note.contains("周期"), "note 必须点明周期开关：{note}");
+
+        // 序列化键名为 camelCase（前端契约：peSuppressed）
+        let json = serde_json::to_value(&band).expect("ValuationBand 可序列化");
+        assert_eq!(json["peSuppressed"], serde_json::json!(true));
+    }
+
+    /// 置空但 PB 样本不足 ⇒ 不得回落到 PE，应判 insufficient。
+    #[test]
+    fn p0_4_suppressed_pe_with_thin_pb_history_is_insufficient() {
+        let samples = sample_data(10);
+        let current = MockSnap {
+            date: "2025-01-01".to_string(),
+            pe: Some(11.0),
+            pb: Some(3.8),
+            ps: Some(2.05),
+        };
+        let band = compute_valuation_band("601899", &samples, Some(&current), true);
+        assert_eq!(band.verdict, "insufficient", "PB 单腿样本不足时不得用 PE 兜底");
+        assert_eq!(band.metric_pe.current_percentile, None);
     }
 }

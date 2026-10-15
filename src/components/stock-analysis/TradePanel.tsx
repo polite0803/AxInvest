@@ -3,7 +3,7 @@ import { invoke } from "@/lib/invoke";
 import { actionToDirection, getActionColor, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
-import { App, Button, Card, Input, InputNumber, Select, Space, Statistic, Switch, Table, Tag } from "antd";
+import { Alert, App, Button, Card, Input, InputNumber, Select, Space, Statistic, Switch, Table, Tag } from "antd";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -57,6 +57,7 @@ export function TradePanel() {
   // R2: 买入前 position_limits 校验
   const checkPositionLimits = useStockAnalysisStore((s) => s.checkPositionLimits);
   const [enabled, setEnabled] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
   const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [positions, setPositions] = useState<PositionSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -71,6 +72,7 @@ export function TradePanel() {
 
   const loadData = async () => {
     setLoading(true);
+    setFetchError(false);
     try {
       const [t, p] = await Promise.all([
         invoke<TradeRecord[]>("list_trades", { stockCode: null, limit: 100 }),
@@ -79,36 +81,38 @@ export function TradePanel() {
       if (Array.isArray(t)) { setTrades(t); }
       if (Array.isArray(p)) { setPositions(p); }
     } catch {
-      /* 静默 */
+      // 失败必须显式告知：静默留空会让「拿不到数据」看起来像「本来就没有交易记录」
+      setFetchError(true);
     } finally {
       setLoading(false);
     }
   };
 
+  // 挂载时回读后端的真实开关状态。此前 enabled 是纯本地 useState(false)，
+  // 只有写口没有读口 ⇒ 重进面板就显示成关闭，而 settings 里可能仍是启用状态，
+  // 界面与后端结论相反（用户以为关了，后端其实放行录入）。
   useEffect(() => {
-    if (!enabled) { return; }
     let cancelled = false;
-    Promise.resolve().then(() => {
-      if (cancelled) { return; }
-      setLoading(true);
-      return Promise.all([
-        invoke<TradeRecord[]>("list_trades", { stockCode: null, limit: 100 }),
-        invoke<PositionSummary[]>("get_trade_positions"),
-      ]);
-    })
-      .then((result) => {
-        if (!result || cancelled) { return; }
-        const [t, p] = result;
-        if (Array.isArray(t)) { setTrades(t); }
-        if (Array.isArray(p)) { setPositions(p); }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) { setLoading(false); }
-      });
+    const readBack = async () => {
+      try {
+        const v = await invoke<boolean>("get_trading_enabled");
+        if (!cancelled && typeof v === "boolean") { setEnabled(v); }
+      } catch {
+        // 读不到时保持本地默认（关闭）—— 保守方向，且后端门禁独立生效
+      }
+    };
+    void readBack();
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // 开关打开后加载数据，复用上面那条 loadData —— 此前这是同一逻辑的第二份手抄实现，
+  // 连「失败怎么处置」都各写各的（一份静默、一份空 catch）。
+  useEffect(() => {
+    if (!enabled) { return; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void loadData();
   }, [enabled]);
 
   // 同步分析页代码
@@ -245,6 +249,9 @@ export function TradePanel() {
       ),
     },
     { title: t("trade.stockCode"), dataIndex: "stockCode", width: 54 },
+    // 日期列此前缺失：批量导入的历史成交按入库时刻倒序排，没有成交日就无从分辨哪条是哪天的
+    // （导入写 created_at=now，与成交日无关）。复用导入预览表已用的同一个「日期」译名。
+    { title: t("trade.import.columns.tradeDate"), dataIndex: "tradeDate", width: 76, render: (v: string) => v || "-" },
     { title: t("trade.price"), dataIndex: "price", width: 50, render: (v: number) => v.toFixed(2) },
     { title: t("trade.quantity"), dataIndex: "quantity", width: 44 },
     {
@@ -281,6 +288,16 @@ export function TradePanel() {
         </div>
       }
     >
+      {/* 读取失败要说出来：否则下面的三块会整体消失，看起来像「本来就没有交易记录」 */}
+      {enabled && fetchError && (
+        <Alert
+          type="warning"
+          showIcon
+          message={t("stockAnalysis.settings.vendor.connectionFailed")}
+          style={{ marginBottom: 8 }}
+        />
+      )}
+
       {/* 绩效统计 */}
       {trades.length > 0 && (
         <div className="grid grid-cols-3 gap-1 mb-2 p-1 rounded" style={{ background: "var(--surface)" }}>

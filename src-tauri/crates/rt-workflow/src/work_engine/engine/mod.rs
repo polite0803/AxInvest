@@ -2016,7 +2016,7 @@ impl WorkEngine {
         // 同步取消所有关联的 DB 执行记录
         for exec_id in &running_exec_ids {
             workflow_execution_repository()
-                .update_workflow_execution_status(exec_id, "cancelled", None, None, None)
+                .update_workflow_execution_status(exec_id, "cancelled", None, None, None, None)
                 .await
                 .ok();
         }
@@ -2142,7 +2142,14 @@ impl WorkEngine {
             // 注意：workflow_executions 表当前没有 error_message 字段，错误细节
             // 仅记入日志；后续若加字段再透传。
             if let Err(e) = workflow_execution_repository()
-                .update_workflow_execution_status(&execution_id, "failed", None, None, None)
+                .update_workflow_execution_status(
+                    &execution_id,
+                    "failed",
+                    None,
+                    None,
+                    None,
+                    Some(&detail),
+                )
                 .await
             {
                 tracing::error!(
@@ -2360,6 +2367,7 @@ impl WorkEngine {
                                     None,
                                     None,
                                     None,
+                                    Some(msg.to_string().as_str()),
                                 )
                                 .await
                             {
@@ -4905,6 +4913,7 @@ impl WorkEngine {
                         Some(&output_json),
                         None,
                         Some(total_time_ms as i32),
+                        None,
                     )
                     .await
                 {
@@ -5274,7 +5283,7 @@ impl WorkEngine {
             self.cancel_tokens.lock().await.remove(execution_id);
             let _ = workflow_id; // 保留以兼容旧调用方语义；cancel_token 已按 execution_id 操作
             workflow_execution_repository()
-                .update_workflow_execution_status(execution_id, "cancelled", None, None, None)
+                .update_workflow_execution_status(execution_id, "cancelled", None, None, None, None)
                 .await
                 .map_err(WorkEngineError::Db)?;
             Ok(())
@@ -5849,6 +5858,14 @@ impl WorkEngine {
             state.updated_at = Utc::now().timestamp_millis();
             let node_executions = serde_json::to_string(&state.node_records).ok();
             let output_result = serde_json::to_string(output).ok();
+            // 失败终态时把首个带错误信息的节点细节一并落库：此前这类细节只进日志，
+            // 界面上只剩一个 failed 标签，用户无从自查失败原因。
+            let error_detail: Option<String> = match final_status {
+                ExecutionStatus::Failed | ExecutionStatus::PartiallyCompleted => {
+                    state.node_records.iter().find_map(|r| r.error.clone())
+                },
+                _ => None,
+            };
             drop(executions);
             let db_status = match final_status {
                 ExecutionStatus::Completed => "completed",
@@ -5864,6 +5881,7 @@ impl WorkEngine {
                     output_result.as_deref(),
                     node_executions.as_deref(),
                     Some(total_time_ms as i32),
+                    error_detail.as_deref(),
                 )
                 .await
                 .map_err(WorkEngineError::Db)?;

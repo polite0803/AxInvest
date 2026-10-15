@@ -112,6 +112,9 @@ pub mod platform_integration;
 pub mod plugin;
 pub mod plugin_profile;
 pub mod pool_scan;
+/// 价格告警写库的唯一入口（裁定 10：同股同类型的未触发行复用，不再无限追加行）。
+/// 本模块不含 `#[tauri::command]`，只被三个写入点调用。
+pub mod price_alert_upsert;
 pub mod proactive;
 pub mod profile;
 pub mod prompt_templates;

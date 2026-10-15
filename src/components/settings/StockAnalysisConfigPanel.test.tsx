@@ -324,10 +324,6 @@ describe("StockAnalysisConfigPanel 默认变量与后端模板 v19 同步", () =
       "signal_ma_fast",
       "signal_ma_slow",
       "signal_breakout_volume_mult",
-      // 关键价位
-      "keylevel_lookback_days",
-      "keylevel_touch_tolerance_pct",
-      "keylevel_min_touches",
       // 推荐器
       "reco_trend_enabled",
       "reco_reversion_enabled",

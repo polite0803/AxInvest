@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const enableD2 = vi.fn();
@@ -399,12 +399,16 @@ describe("AppRoot D2 setup", () => {
 
     render(<AppRoot />);
 
-    await vi.waitFor(
-      () => {
-        expect(enableD2).toHaveBeenCalledTimes(1);
-      },
-      { timeout: 5000 },
-    );
+    // AppRoot 启动期会拉起大量异步初始化。把这些异步的落地包进 act ——
+    // 只在末尾补一次 flush 不够：警告发生在 waitFor **期间**的更新上（那个窗口不在 act 内）。
+    await act(async () => {
+      await vi.waitFor(
+        () => {
+          expect(enableD2).toHaveBeenCalledTimes(1);
+        },
+        { timeout: 5000 },
+      );
+    });
     expect(preloadChatRenderers).toHaveBeenCalledTimes(1);
   }, 10000);
 });

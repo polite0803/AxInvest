@@ -2002,6 +2002,272 @@ fn portfolio_mgr_rhai_compiles() {
     );
 }
 
+/// P0-1（`PLAN-stock-decision-reliability.md`）：DQI 质量 cap 必须联动**动作**，
+/// 不能只压展示置信。
+///
+/// 旧裂缝：`confidence_quality_cap`（D/F 级或跨轮熔断时 = 60）只 clamp `confidence`，
+/// 分支动作吃的是档内**原始**置信 ⇒ cap=60 仍发「买入」。本测试真执行脚本里的纯函数
+/// （`Engine::call_fn` 只调指定 fn、不跑脚本顶层语句，故无需注入任何业务变量），钉死：
+/// 1. 分支阶梯尺（72/62/52/42/32）下，84.3 经 cap=60 压制后的动作上限是「持有」；
+/// 2. 动作保守序单调，「取更保守者」对 cap=60 的买入结论必然降级，且档内已降级时不反向升级。
+#[test]
+fn portfolio_mgr_dqi_cap_forces_action_ceiling() {
+    let code = include_str!("../portfolio-mgr.rhai");
+    let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
+    let ast = engine
+        .compile(code)
+        .expect("portfolio-mgr.rhai 必须在生产同配置下编译通过（P0-1 测试前置）");
+
+    // 分支档阶梯：与四份 portfolio-mgr-h-*.rhai 同一把尺 72/62/52/42/32
+    let branch_ladder = |conf: f64| -> String {
+        engine
+            .call_fn(
+                &mut rhai::Scope::new(),
+                &ast,
+                "pm_action_by_thresholds",
+                (conf, 72.0_f64, 62.0, 52.0, 42.0, 32.0),
+            )
+            .expect("pm_action_by_thresholds 必须可调用")
+    };
+    let rank = |a: &str| -> i64 {
+        engine
+            .call_fn(&mut rhai::Scope::new(), &ast, "pm_action_rank", (a.to_string(),))
+            .expect("pm_action_rank 必须可调用")
+    };
+
+    // PLAN 验收用例的前置事实：未压 cap 时分支置信 84.3 本就是「买入」
+    assert_eq!(branch_ladder(84.3), "买入");
+    // cap=60（D/F 级或熔断）⇒ min(84.3, 60)=60 落 [52,62) ⇒ 动作上限「持有」，禁买入/增持
+    assert_eq!(branch_ladder(60.0), "持有");
+    // cap=75（C 级）⇒ min(84.3,75)=75 ≥ 72 ⇒ 上限仍可「买入」（只收紧到本级，不一刀切）
+    assert_eq!(branch_ladder(75.0), "买入");
+    // 阶梯边界单调
+    assert_eq!(branch_ladder(72.0), "买入");
+    assert_eq!(branch_ladder(62.0), "增持");
+    assert_eq!(branch_ladder(52.0), "持有");
+    assert_eq!(branch_ladder(42.0), "观望");
+    assert_eq!(branch_ladder(32.0), "减持");
+    assert_eq!(branch_ladder(31.9), "卖出");
+
+    // 动作保守序：买入 5 > 增持 4 > 持有 3 > 观望 2 > 减持 1 > 卖出 0
+    assert_eq!(rank("买入"), 5);
+    assert_eq!(rank("增持"), 4);
+    assert_eq!(rank("持有"), 3);
+    assert_eq!(rank("观望"), 2);
+    assert_eq!(rank("减持"), 1);
+    assert_eq!(rank("卖出"), 0);
+
+    // 核心验收：cap=60 + 分支 84.3（档内结论=买入）⇒ 联动后动作必 ≠ 买入/增持
+    let capped_ceiling = branch_ladder(60.0);
+    let picked = "买入";
+    assert!(
+        rank(&capped_ceiling) < rank(picked),
+        "cap=60 时动作上限 {capped_ceiling} 必须比档内结论 {picked} 更保守"
+    );
+    assert!(capped_ceiling != "买入" && capped_ceiling != "增持");
+
+    // 只降不升的另一面：cap=85 上限买入(5)，档内 gate 已把结论降到持有(3) ⇒ 不得反向升级
+    let ceiling_rank = rank(&branch_ladder(85.0));
+    let picked_rank = rank("持有");
+    assert_eq!(ceiling_rank.min(picked_rank), picked_rank, "档内已降级时 cap 联动不得反向升级");
+}
+
+/// P0-7（`PLAN-stock-decision-reliability.md` R8）：熊市 / 市场状态未判定时，
+/// 动作层必须硬拦多头开仓，且只拦开仓方向。
+#[test]
+fn portfolio_mgr_regime_gate_blocks_new_positions() {
+    let code = include_str!("../portfolio-mgr.rhai");
+    let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
+    let ast = engine
+        .compile(code)
+        .expect("portfolio-mgr.rhai 必须在生产同配置下编译通过（P0-7 测试前置）");
+
+    let gate = |state: &str, action: &str| -> String {
+        engine
+            .call_fn(
+                &mut rhai::Scope::new(),
+                &ast,
+                "pm_regime_gate_action",
+                (state.to_string(), action.to_string()),
+            )
+            .expect("pm_regime_gate_action 必须可调用")
+    };
+
+    // PLAN 验收：bear + 分支买入（84.3 那一路）⇒ 动作 ≤ 持有；增持同样被拦
+    assert_eq!(gate("bear", "买入"), "持有");
+    assert_eq!(gate("bear", "增持"), "持有");
+    // unknown（沪深300 取数失败）按「未判定=不加仓」，不得当 neutral 放行
+    assert_eq!(gate("unknown", "买入"), "持有");
+    assert_eq!(gate("unknown", "增持"), "持有");
+    // 只拦多头开仓：不伪造看空，出场/中性动作原样保留
+    assert_eq!(gate("bear", "卖出"), "卖出");
+    assert_eq!(gate("bear", "减持"), "减持");
+    assert_eq!(gate("bear", "观望"), "观望");
+    assert_eq!(gate("bear", "持有"), "持有");
+    // bull / sideways 不放任何额外动作
+    assert_eq!(gate("bull", "买入"), "买入");
+    assert_eq!(gate("sideways", "增持"), "增持");
+    assert_eq!(gate("neutral", "买入"), "买入");
+    // 变量完全缺席（空串，最小 scope 的 What-If）不凭空发明门禁
+    assert_eq!(gate("", "买入"), "买入");
+}
+
+/// P0-3（`PLAN-stock-decision-reliability.md`）：长线档入场门由「便宜放行」反转为
+/// **单向严重高估否决** —— 便宜不再是买入理由（估值腿已降 filter、权重 0），
+/// 只有 DCF upside ≤ -35% 或 PE ≥ 80 分位才拦下；缺数仍按「未判定 ≠ 通过」。
+///
+/// 直接 call_fn 执行 long 分支脚本里的纯判定（不跑顶层：顶层依赖注入面），
+/// 钉死阈值与四分支，防有人把它改回「DCF 上行 ≥20% 才放行」的旧双响铃形态。
+#[test]
+fn portfolio_mgr_long_overvalued_veto_is_one_way() {
+    let code = include_str!("../portfolio-mgr-h-long.rhai");
+    let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
+    // 档脚本顶层是业务流程（引用注入面 branch_json 等），而 `call_fn` 会连同顶层语句
+    // 一起求值（空作用域下即 ErrorVariableNotFound）。`clone_functions_only` 只保留函数
+    // 定义（阈值也必须是无参函数而非顶层 const —— rhai 不把脚本顶层 const 传播进函数体），
+    // 让本测试只执行纯判据。
+    let ast = engine
+        .compile(code)
+        .expect("portfolio-mgr-h-long.rhai 必须在生产同配置下编译通过（P0-3 测试前置）")
+        .clone_functions_only();
+
+    // 阈值单点权威：防阈值被改值/改名（三个无参阈值函数与门共用同一定义）
+    let threshold = |name: &str| -> f64 {
+        engine
+            .call_fn(&mut rhai::Scope::new(), &ast, name, ())
+            .unwrap_or_else(|e| panic!("{name} 必须可调用: {e}"))
+    };
+    assert_eq!(threshold("overval_dcf_pct"), -35.0);
+    assert_eq!(threshold("overval_pe_pctile"), 80.0);
+    assert_eq!(threshold("cycle_margin_min_pct"), 35.0);
+
+    // (mos_pct, pe_percentile, cyclical) → (pass, basis)；缺席传 rhai unit
+    let veto = |mos: rhai::Dynamic, pe: rhai::Dynamic, cyclical: bool| -> (bool, String) {
+        let v: rhai::Array = engine
+            .call_fn(&mut rhai::Scope::new(), &ast, "pm_overvalued_veto", (mos, pe, cyclical))
+            .expect("pm_overvalued_veto 必须可调用");
+        assert_eq!(v.len(), 2, "pm_overvalued_veto 必须返回 [pass, basis] 两元");
+        (v[0].as_bool().expect("首元必须是 bool"), v[1].clone().cast::<String>())
+    };
+    let miss = rhai::Dynamic::UNIT;
+
+    // ① 严重高估否决：DCF 内在价值较现价低 35%+（紫金式周期顶部乐观 DCF 的镜像情形）
+    assert_eq!(veto((-35.0_f64).into(), miss.clone(), false), (false, "dcf_overvalued".into()));
+    assert_eq!(veto((-60.0_f64).into(), 10.0_f64.into(), false), (false, "dcf_overvalued".into()));
+    // ② PE 自身 5 年 80 分位以上否决（DCF 口径缺席也要拦）
+    assert_eq!(veto(miss.clone(), 80.0_f64.into(), false), (false, "pe_overvalued".into()));
+    assert_eq!(veto(20.0_f64.into(), 91.0_f64.into(), false), (false, "pe_overvalued".into()));
+    // ③ 反转核心：便宜不再是买入理由，但也不被门拦下 —— 动作交给 posterior
+    //    （旧门在此返回 dcf_margin_20pct/pe_bottom_quartile 双 PASS，现已不存在）
+    assert_eq!(veto(25.7_f64.into(), 20.0_f64.into(), false), (true, "not_overvalued".into()));
+    assert_eq!(veto(80.0_f64.into(), 5.0_f64.into(), false), (true, "not_overvalued".into()));
+    //    轻微高估（-10% / PE 65 分位）同样放行 —— 只否决「严重」
+    assert_eq!(veto((-10.0_f64).into(), 65.0_f64.into(), false), (true, "not_overvalued".into()));
+    // ④ 阈值边界：-35 / 80 恰好命中否决；-34.9 / 79.9 放行
+    assert_eq!(veto((-34.9_f64).into(), miss.clone(), false), (true, "not_overvalued".into()));
+    assert_eq!(veto(miss.clone(), 79.9_f64.into(), false), (true, "not_overvalued".into()));
+    // ⑤ 两口径都缺席 ⇒ 未判定（门不通过，动作侧降持有），不允许把缺数当合理
+    assert_eq!(veto(miss.clone(), miss.clone(), false), (false, "unjudged".into()));
+
+    // ── P0-4 周期股门形态：PE 已在工具侧置空，只剩中性化 DCF，须 ≥35% 上行才放行 ──
+    // 紫金中性化后若只剩 12% 上行 ⇒ 拦下（旧门 20% 口径下同样拦，但这里阈值是 35%）
+    assert_eq!(
+        veto(12.0_f64.into(), miss.clone(), true),
+        (false, "cyclical_margin_insufficient".into())
+    );
+    // 轻微高估（-10%）：周期门下不享受普通股的「非严重高估放行」
+    assert_eq!(
+        veto((-10.0_f64).into(), miss.clone(), true),
+        (false, "cyclical_margin_insufficient".into())
+    );
+    // 恰好 35% 放行；34.9% 拦
+    assert_eq!(veto(35.0_f64.into(), miss.clone(), true), (true, "cyclical_margin_pass".into()));
+    assert_eq!(
+        veto(34.9_f64.into(), miss.clone(), true),
+        (false, "cyclical_margin_insufficient".into())
+    );
+    // 周期股但 DCF 缺席 ⇒ unjudged（即使误传了 PE 分位也不读 —— PE 已被工具置空）
+    assert_eq!(veto(miss.clone(), 8.0_f64.into(), true), (false, "unjudged".into()));
+}
+
+/// P0-5（`PLAN-stock-decision-reliability.md`）：超短入场门的双前提纯判据。
+///
+/// 封板率是全市场共享的市场级量（同一天每只票同一个数），P0-5 前门只验它 ⇒
+/// 大盘情绪火热时任何票都能拿到买入（紫金 2026-10-09：封板率 84%、个股零涨停特征）。
+/// 门改为「封板率 ≥ 0.5 **且** 个股近 5 日涨停或累计涨 ≥20%」，六分支逐字钉死。
+#[test]
+fn portfolio_mgr_ultra_entry_gate_requires_stock_level_strength() {
+    let code = include_str!("../portfolio-mgr-h-ultra-short.rhai");
+    let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
+    // 档脚本顶层是业务流程（引用注入面 branch_json 等），`call_fn` 会连同顶层语句一起
+    // 求值（空作用域下即 ErrorVariableNotFound）⇒ `clone_functions_only` 只留函数定义。
+    // 阈值也必须是无参函数而非顶层 const：rhai 不把脚本顶层 const 传播进同脚本函数体。
+    let ast = engine
+        .compile(code)
+        .expect("portfolio-mgr-h-ultra-short.rhai 必须在生产同配置下编译通过（P0-5 测试前置）")
+        .clone_functions_only();
+
+    // 强势涨幅阈值单点权威：防被悄悄改值/改名
+    let strong_threshold: f64 = engine
+        .call_fn(&mut rhai::Scope::new(), &ast, "strong_cum_gain_pct", ())
+        .expect("strong_cum_gain_pct 必须可调用");
+    assert_eq!(strong_threshold, 20.0, "超短强势股累计涨幅内禀锚应为 20%");
+
+    let gate = |seal: rhai::Dynamic, lim: rhai::Dynamic, cum: rhai::Dynamic| -> (bool, String) {
+        let v: rhai::Array = engine
+            .call_fn(&mut rhai::Scope::new(), &ast, "pm_ultra_entry_gate", (seal, lim, cum))
+            .expect("pm_ultra_entry_gate 必须可调用");
+        assert_eq!(v.len(), 2, "门必须返回 [pass, basis] 两元");
+        (v[0].as_bool().expect("首元必须是 bool"), v[1].clone().cast::<String>())
+    };
+    let miss = rhai::Dynamic::UNIT;
+
+    // ① 封板率缺席 ⇒ 未判定（缺席 ≠ 通过），且不得落到个股分支造成误读
+    assert_eq!(
+        gate(miss.clone(), 1_i64.into(), 25.0_f64.into()),
+        (false, "breadth_missing".into())
+    );
+    // ② 封板率 < 0.5 ⇒ 市场情绪一票否决（个股再强也不放行）
+    assert_eq!(gate(0.4_f64.into(), 1_i64.into(), 25.0_f64.into()), (false, "breadth_weak".into()));
+    // ③ 封板率达标但个股强势特征算不出（K 线不足/宿主返回 unit）⇒ 同样不放行
+    assert_eq!(gate(0.8_f64.into(), miss.clone(), miss.clone()), (false, "stock_unjudged".into()));
+    // ④ 封板率 0.5 边界 + 近 5 日有涨停 ⇒ 通过
+    assert_eq!(
+        gate(0.5_f64.into(), 1_i64.into(), 0.0_f64.into()),
+        (true, "limit_up_recent".into())
+    );
+    assert_eq!(gate(0.9_f64.into(), 3_i64.into(), miss.clone()), (true, "limit_up_recent".into()));
+    // ⑤ 无涨停但累计涨幅 20% 边界 ⇒ 通过；19.9% ⇒ 不通过（紫金 10-09 当日 +4.87% 形态落这里）
+    assert_eq!(
+        gate(0.84_f64.into(), 0_i64.into(), 20.0_f64.into()),
+        (true, "strong_momentum".into())
+    );
+    assert_eq!(
+        gate(0.84_f64.into(), 0_i64.into(), 19.9_f64.into()),
+        (false, "stock_not_strong".into())
+    );
+    // ⑥ 无涨停 + 累计涨幅缺席 ⇒ 不通过，不得把缺席当 0 以外的任何东西
+    assert_eq!(gate(0.84_f64.into(), 0_i64.into(), miss), (false, "stock_not_strong".into()));
+
+    // ── 降杠杆封顶：microstructure 腿未接线期间，买入/增持一律压回持有；弱动作不得被抬升 ──
+    let cap = |action: &str| -> String {
+        engine
+            .call_fn::<String>(
+                &mut rhai::Scope::new(),
+                &ast,
+                "pm_cap_unwired_action",
+                (action.to_string(),),
+            )
+            .expect("pm_cap_unwired_action 必须可调用")
+    };
+    assert_eq!(cap("买入"), "持有");
+    assert_eq!(cap("增持"), "持有");
+    assert_eq!(cap("持有"), "持有");
+    assert_eq!(cap("观望"), "观望");
+    assert_eq!(cap("减持"), "减持");
+    assert_eq!(cap("卖出"), "卖出");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 白名单授权 ↔ ToolDef 登记 —— 「授权了但送不到 LLM」的静默丢弃守护
 //
@@ -3507,9 +3773,17 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
                 // `catalyst-analyst.md` 的 VERDICT 契约与 `config/llm-output-schemas.json`）——
                 // 给 "无"/空串/表外自造标签会让 `leg_signal` 正确地判缺席，本门测的就不是齐备输入。
                 "catalyst_level" => serde_json::json!("L2业绩拐点级"),
+                // P0-5：超短个股强势腿（`pm_recent_strength`）的板块判定入参 —— 齐备态必须
+                // 给真值让宿主真跑一遍（取沪市主板代码 = 10cm 板幅）。门本身的通过与否不是
+                // 本门断言对象（动作词表 / 价带 / 留痕才是），夹具 5 日窗约 +2.4% 无涨停，
+                // 门按 stock_not_strong 不通过正是 P0-5 要的「市场情绪不为非强势个股背书」。
+                "stock_code" => serde_json::json!("600519"),
                 "pmi" => serde_json::json!(51.0),
                 "valuation_dcf_upside" => serde_json::json!(38.0),
                 "valuation_dcf_applicable" => serde_json::json!(true),
+                // P0-4：齐备态按**普通股**形态给 false（周期分支由上面的 call_fn
+                // 纯判据测试逐分支钉死）；不登记则「齐备态」实为 unit，门会误走 unjudged。
+                "valuation_dcf_cyclical" => serde_json::json!(false),
                 // v138（裁定 3「让用户看出各档实际几根」）：本档评分节点的**窗口回显**与尺度。
                 // 齐备态必须给真实形态（字段名 = `indicators::IndicatorWindows` 的 serde camelCase 输出），
                 // 否则脚本里那条 `present(scoring_windows)` 分支从未被求值过 —— 与本门登记

@@ -188,6 +188,7 @@ pub mod analyst_feedback;
 // `crates/dao/src/reconcile/extras.rs` 声明式对账）。
 pub mod astock_daily_snapshot;
 pub mod business_roles;
+pub mod conditional_orders;
 pub mod data_quality_observations;
 pub mod decision_validations;
 pub mod earnings_events;

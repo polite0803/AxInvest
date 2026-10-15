@@ -71,6 +71,7 @@ impl WorkflowExecutionRepository for RecordingWorkflowExecutionRepo {
         _output_result: Option<&str>,
         _node_executions: Option<&str>,
         total_time_ms: Option<i32>,
+        _error_detail: Option<&str>,
     ) -> Result<bool, String> {
         self.updates.lock().await.push((id.to_string(), status.to_string(), total_time_ms));
         Ok(true)

@@ -2974,7 +2974,8 @@
     "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "已有时间旅行/漏检补分析批次在运行，请等它结束。",
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "当前处于实时流水线时间窗（23:50–02:10 / 17:50–18:10），请避开后再发起。",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "漏检补分析批次执行失败，请查看批次明细。",
-    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "查询漏检补分析批次历史失败，请稍后重试。"
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "查询漏检补分析批次历史失败，请稍后重试。",
+    "TRADING_DISABLED": "交易功能未启用，请先开启后再记录交易"
   },
   "errorBoundary": {
     "copied": "已复制",
@@ -15574,6 +15575,7 @@
     "riskUnknown": "未知",
     "riskHigh": "高风险",
     "riskMid": "中风险",
+    "riskMidHigh": "中高风险",
     "riskLow": "低风险",
     "riskExtreme": "极高风险",
     "tradingTitle": "交易记录",
@@ -16304,7 +16306,6 @@
         "moat": "护城河",
         "screener": "选股筛选",
         "signals": "信号检测",
-        "keylevels": "关键价位",
         "recommender": "推荐器",
         "strategyParams": "策略参数",
         "strategyGates": "策略门槛与过滤条件",
@@ -16846,7 +16847,44 @@
       "typeChange": "涨跌幅异常",
       "typeVolume": "换手率异常",
       "typeUnknown": "未知类型",
-      "triggeredDetail": "「{{name}}」触发{{type}}预警，现价 {{price}}"
+      "triggeredDetail": "「{{name}}」触发{{type}}预警，现价 {{price}}",
+      "t0": {
+        "title": "T+0 自动重跑",
+        "cost": "开启后，任一监控标的盘中触发阈值即重跑整条分析工作流（成本≈一次完整分析）；同一标的按最小间隔去重",
+        "changePct": "涨跌幅%",
+        "turnover": "换手率%",
+        "intervalMin": "最小间隔(分)",
+        "saveFailed": "T+0 设置保存失败：{{reason}}"
+      }
+    },
+    "conditional": {
+      "triggeredDetail": "条件单触发：{{name}} {{condition}}，动作：{{action}}",
+      "title": "条件单",
+      "action": "动作",
+      "enabled": "启用",
+      "triggeredToday": "今日触发",
+      "lastTriggered": "最后触发",
+      "empty": "暂无条件单",
+      "evaluating": "在评估 {{count}} 条",
+      "totalRows": "表内共 {{count}} 条（含已停用）",
+      "unreadable": "{{count}} 行无法读回为规则，不参与评估",
+      "create": "建单",
+      "createFailed": "建单失败：{{reason}}",
+      "loadFailed": "条件单读取失败：{{reason}}",
+      "toggleFailed": "启停失败：{{reason}}",
+      "deleteFailed": "删除失败：{{reason}}",
+      "confirmDelete": "删除这条条件单？",
+      "thresholdPct": "阈值(%)",
+      "actionNotify": "仅通知",
+      "actionSell": "卖出",
+      "actionBuy": "买入",
+      "actionReduce": "减仓",
+      "actionValueQty": "股数",
+      "actionValueRatio": "比例",
+      "coolDown": "冷却(分)",
+      "maxPerDay": "单日上限",
+      "windowStart": "起 HH:MM",
+      "windowEnd": "止 HH:MM"
     },
     "quantSim": {
       "title": "策略模拟",
@@ -17188,26 +17226,6 @@
       "target": "目标价",
       "targetHit": "达到目标"
     },
-    "fundPanel": {
-      "fundFlow": "资金流水",
-      "type": "类型",
-      "deposit": "入金",
-      "withdrawal": "出金",
-      "amount": "金额",
-      "date": "日期",
-      "fee": "手续费",
-      "notes": "备注",
-      "totalDeposits": "总入金",
-      "totalWithdrawals": "总出金",
-      "netInflow": "净入金",
-      "recordFundFlow": "记录资金流水",
-      "depositTransferIn": "入金（转入）",
-      "withdrawalTransferOut": "出金（转出）",
-      "feeOptional": "手续费（可选）",
-      "notesOptional": "备注（可选）",
-      "recorded": "已记录",
-      "amountMustBeGreaterThanZero": "金额必须 > 0"
-    },
     "marketSimPanel": {
       "simConfig": "模拟参数配置",
       "stockCode": "股票代码",
@@ -17544,7 +17562,9 @@
       "worstHit": "最大冲击",
       "m10": "市场 -10%",
       "m20": "市场 -20%",
-      "blackSwan": "黑天鹅 (-30%)"
+      "blackSwan": "黑天鹅 (-30%)",
+      "unpricedTitle": "现价缺失",
+      "unpricedNotice": "{{count}} 只持仓没有现价，未参与集中度与分散度计算"
     },
     "evidence": {
       "concepts": "基本面/估值数据",
@@ -18074,8 +18094,8 @@
       "moatFcfRatioMin": "FCF/净利润 比率下限 (0-1)",
       "monitorPollIntervalSecs": "监控轮询间隔 (秒)",
       "monitorAlertCooldownSecs": "同一标的告警冷却时间 (秒，10-3600)",
-      "monitorMinSeverity": "最低推送告警等级: info / warn / critical",
-      "monitorChannels": "推送渠道，逗号分隔: in_app / lark / email / webhook",
+      "monitorMinSeverity": "最低推送告警等级: info / warn / critical（当前无消费者：改它不会影响任何行为）",
+      "monitorChannels": "推送渠道，逗号分隔: in_app / lark / email / webhook（当前无消费者：改它不会影响任何行为）",
       "dualViewDisagreementThreshold": "双视角分歧阈值 (0-100)，低于此值标记为需人工复核",
       "minConfidence": "最低置信度 (0-100)",
       "varConfidence": "VaR 置信度 (0-1)",
@@ -18126,9 +18146,6 @@
       "signalMaFast": "MA 金叉检测快线周期 (3-30)",
       "signalMaSlow": "MA 金叉检测慢线周期 (10-120)",
       "signalBreakoutVolumeMult": "突破/破位放量倍数阈值 (1.0-3.0)",
-      "keylevelLookbackDays": "关键价位回看窗口 (交易日，10-250)",
-      "keylevelTouchTolerancePct": "关键价位触碰容差 (%，0.1-5.0)",
-      "keylevelMinTouches": "确认支撑/阻力最少触碰次数 (1-10)",
       "recoTrendEnabled": "启用趋势跟踪子策略",
       "recoReversionEnabled": "启用超跌反弹子策略",
       "recoValueEnabled": "启用价值选股子策略",
@@ -18304,7 +18321,12 @@
     "pending": "待处理",
     "portfolio": {
       "importPartial": "部分导入",
-      "yuan": "元"
+      "yuan": "元",
+      "signalTitle": "组合级信号",
+      "signalBody": "共 {{count}} 只股票同向{{direction}}，强度 {{pct}}%；{{action}}",
+      "signalBullish": "看多",
+      "signalBearish": "看空",
+      "signalNeutral": "中性"
     },
     "references": "参考资料",
     "resonancePoint": "共振点",
@@ -18442,6 +18464,21 @@
         "failed": "已失败（历史）",
         "unknown": "未知状态"
       }
+    },
+    "monitor": {
+      "readFailed": "监控运行读数读取失败：{{reason}}",
+      "notAssembled": "监控引擎未装配：告警已入库，但不会取数、不会触发",
+      "pausedBySession": "当前{{session}}，监控轮询已停摆",
+      "fetchFailed": "本轮 {{failed}}/{{total}} 只股票取数失败，这些股票未参与求值",
+      "allFailedRounds": "已连续 {{rounds}} 轮全部取数失败，监控实际未在产出告警",
+      "firstRoundPending": "监控已启动，尚未跑完第一轮（约每 {{interval}} 秒一轮）",
+      "emptyResponse": "后端未返回监控读数",
+      "sessionNonTradingDay": "非交易日",
+      "sessionPreOpen": "开盘前",
+      "sessionMorning": "上午盘中",
+      "sessionLunchBreak": "午间休市",
+      "sessionAfternoon": "下午盘中",
+      "sessionPostClose": "已收盘"
     }
   },
   "pipeline": {

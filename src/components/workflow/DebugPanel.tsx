@@ -3,6 +3,7 @@
 import { countTerminalNodes, isDeadEndNode } from "@/components/workflow/DebugPanel/deadEnd";
 import { invoke } from "@/lib/invoke";
 import { findCyclicSCCs } from "@/lib/workflowLayout";
+import { workflowStatusLabel } from "@/lib/workflowStatusI18n";
 import { useWorkflowEditorStore } from "@/stores";
 import { useTracerStore } from "@/stores/devtools/tracerStore";
 import { useWorkEngineStore } from "@/stores/feature/workEngineStore";
@@ -1672,9 +1673,9 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
                   {executionHistory.map((item) => (
                     <div key={item.id} className="py-3 flex items-center justify-between">
                       <Space>
-                        <Tag color={statusColor(item.status)}>{item.status}</Tag>
+                        <Tag color={statusColor(item.status)}>{workflowStatusLabel(item.status)}</Tag>
                         <Text type="secondary" className="text-xs">
-                          {new Date(item.createdAt).toLocaleString()}
+                          {new Date(item.createdAtMs).toLocaleString()}
                         </Text>
                         {item.totalTimeMs != null && (
                           <Text type="secondary" className="text-xs">

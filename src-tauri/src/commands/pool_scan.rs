@@ -53,20 +53,76 @@ pub const POOL_SCAN_TASK_TYPE: &str = "pool-scan";
 pub struct PoolScanConfig {
     /// 候选池回看窗口（天）：**0 = 全池**（自动化闭环默认——未分析的积压跨日必补）
     pub lookback_days: u32,
-    /// 单次最多分析只数：**0 = 不限**（依次全量；旧「必须大于 0」的成本闸门语义已改）
+    /// 用户配额截断：单次最多分析只数，**0 = 不限**（依次全量）。
+    /// 注意与 [`Self::max_per_run`] 的区别：这是用户显式设的配额，
+    /// `max_per_run` 是保护调度存活的单轮硬上限，两者取小。
     pub max_stocks: usize,
     /// 候选最低置信度（低于此值的 pick 不进分析队列）
     pub min_confidence: u8,
+    /// 单轮硬上限（只）。**0 = 用内置默认 [`Self::DEFAULT_MAX_PER_RUN`]**。
+    ///
+    /// P0-6 修复（`PLAN-stock-decision-reliability.md` R11）：旧「0 不限 + 全池串行」
+    /// 在桌面端每日关机的形态下，单轮可达数小时、必在中途被杀，且 `record_run`
+    /// 只在整轮结束后调一次 ⇒ 成功/失败历史行都没有、`next_run_at` 停 0、任务事实死亡。
+    /// 限量后未完成标的靠「当日未分析」判据（见 `load_pool_selection`）次日续跑。
+    #[serde(default = "PoolScanConfig::default_max_per_run")]
+    pub max_per_run: usize,
+    /// 单轮墙钟预算（秒）。每只分析**开始前**检查，到点即收尾返回「部分完成」
+    /// （不是失败，档期照常推进）。**0 = 用内置默认 [`Self::DEFAULT_RUN_DEADLINE_SECS`]**。
+    /// 仅约束 live cron / 手动入口；时间旅行批次传 None 不受限。
+    #[serde(default = "PoolScanConfig::default_run_deadline_secs")]
+    pub run_deadline_seconds: u64,
+}
+
+impl PoolScanConfig {
+    /// 单轮默认硬上限：20 只。单只完整 LLM 分析链约 1–3 分钟，20 只 ≈ 20–60 分钟，
+    /// 桌面端夜间任务（02:00）到用户开机之间能跑完；跑不完的次日续跑，不再暴毙。
+    pub const DEFAULT_MAX_PER_RUN: usize = 20;
+    /// 单轮默认墙钟预算：40 分钟。略小于「20 只 × 单只最坏预算」，留收尾余量。
+    pub const DEFAULT_RUN_DEADLINE_SECS: u64 = 40 * 60;
+
+    fn default_max_per_run() -> usize {
+        Self::DEFAULT_MAX_PER_RUN
+    }
+
+    fn default_run_deadline_secs() -> u64 {
+        Self::DEFAULT_RUN_DEADLINE_SECS
+    }
+
+    /// 实际生效的单轮上限：0 视为默认值。
+    pub fn effective_max_per_run(&self) -> usize {
+        if self.max_per_run == 0 {
+            Self::DEFAULT_MAX_PER_RUN
+        } else {
+            self.max_per_run
+        }
+    }
+
+    /// 实际生效的墙钟预算：0 视为默认值。
+    pub fn effective_run_deadline_secs(&self) -> u64 {
+        if self.run_deadline_seconds == 0 {
+            Self::DEFAULT_RUN_DEADLINE_SECS
+        } else {
+            self.run_deadline_seconds
+        }
+    }
 }
 
 impl Default for PoolScanConfig {
-    /// 自动化闭环口径：全池、不截断、置信度 50（与荐股档出厂先验一致）。
+    /// 自动化闭环口径：全池、置信度 50（与荐股档出厂先验一致）；
+    /// 单轮硬上限 20 只 / 40 分钟（R11 修复，见字段文档）。
     ///
     /// ⚠ 旧默认 `{3, 10, 60}` 的两处语义已废：`max_stocks=10` 会把排在 10 名之后、
     /// 尚未分析的候选静默挡掉；`min_confidence=60` 会挡掉大量超短档 pick
     /// （其置信度经反身性折扣后落在 50~64 区间）。
     fn default() -> Self {
-        Self { lookback_days: 0, max_stocks: 0, min_confidence: 50 }
+        Self {
+            lookback_days: 0,
+            max_stocks: 0,
+            min_confidence: 50,
+            max_per_run: Self::DEFAULT_MAX_PER_RUN,
+            run_deadline_seconds: Self::DEFAULT_RUN_DEADLINE_SECS,
+        }
     }
 }
 
@@ -296,8 +352,15 @@ pub struct PoolScanOutcome {
     pub fail: usize,
     /// 当日已分析过、本轮跳过的标的数
     pub skipped_analyzed_today: usize,
-    /// 队列被 max_stocks 截断（maxStocks=0 不限时恒 false）
+    /// 队列被 max_stocks 截断（maxStocks=0 不限时恒 false）。
+    /// P0-6 起也在「单轮硬上限 max_per_run 生效」时置 true —— 两种截断的后续动作相同：
+    /// 未分析标的靠「当日未分析」判据于后续轮次续跑，render 文案通用。
     pub truncated: bool,
+    /// 本轮达到墙钟预算、提前收尾（剩余标的未跑；属部分完成而非失败，档期照常推进）。
+    pub timed_out: bool,
+    /// 本轮未处理的候选只数（被单轮上限挡在队列外 + 墙钟到点未跑到的合计）。
+    /// 这些标的不是失败：次日轮次的「当日未分析」判据会重新把它们捞起。
+    pub pending_remaining: usize,
     pub first_error: Option<String>,
     /// 每只一行的人类可读明细（写入 TaskRunResult.output）
     pub details: Vec<String>,
@@ -337,7 +400,16 @@ impl PoolScanOutcome {
             s.push_str("\n（全部候选当日已分析过，本轮无待分析标的）");
         }
         if self.truncated {
-            s.push_str("\n（队列被 maxStocks 截断，未分析积压将于后续轮次继续）");
+            s.push_str("\n（队列被单轮上限截断，未分析积压将于后续轮次继续）");
+        }
+        if self.timed_out {
+            s.push_str("\n（达到单轮墙钟预算提前收尾，属部分完成；剩余标的下一轮继续）");
+        }
+        if self.pending_remaining > 0 {
+            s.push_str(&format!(
+                "\n（本轮剩余 {0} 只未处理，次日靠「当日未分析」判据续跑）",
+                self.pending_remaining
+            ));
         }
         if !self.details.is_empty() {
             s.push('\n');
@@ -356,17 +428,34 @@ pub async fn run_pool_scan(
     engine: &std::sync::Arc<axagent_rt_workflow::work_engine::WorkEngine>,
     config: &PoolScanConfig,
 ) -> Result<PoolScanOutcome, String> {
-    let selection = load_pool_selection(db, config).await?;
-    Ok(analyze_candidate_queue(
+    let mut selection = load_pool_selection(db, config).await?;
+
+    // P0-6（R11）单轮硬上限：旧「全池不限 + 串行」在桌面端每日关机下必在中途被杀，
+    // 而 record_run 只在整轮结束后调一次 ⇒ 零历史行、档期停 0。限量后未完成的标的
+    // 次日由 load_pool_selection 的「当日未分析」判据重新捞起，天然断点、无需检查表。
+    let queued_before_cap = selection.candidates.len();
+    let per_run = config.effective_max_per_run();
+    let capped = queued_before_cap > per_run;
+    if capped {
+        selection.candidates.truncate(per_run);
+    }
+    let deadline = std::time::Instant::now()
+        .checked_add(std::time::Duration::from_secs(config.effective_run_deadline_secs()));
+
+    let mut outcome = analyze_candidate_queue(
         db,
         client,
         engine,
         selection.candidates,
         selection.skipped_analyzed_today,
-        selection.truncated,
+        selection.truncated || capped,
+        deadline,
         "live",
     )
-    .await)
+    .await;
+    // 被硬上限挡在队列外的部分叠加到未处理计数（墙钟到点未跑的部分执行体内已计入）。
+    outcome.pending_remaining += queued_before_cap.saturating_sub(per_run);
+    Ok(outcome)
 }
 
 /// 对**显式给定**的候选队列逐只执行完整分析（时间旅行批次 / 漏检补分析批次专用）。
@@ -386,10 +475,15 @@ pub async fn run_analysis_for_candidates(
     candidates: Vec<PoolCandidate>,
     source: &str,
 ) -> PoolScanOutcome {
-    analyze_candidate_queue(db, client, engine, candidates, Vec::new(), false, source).await
+    // 时间旅行 / 漏检补分析批次必须完整回放，不受单轮限量与墙钟预算约束。
+    analyze_candidate_queue(db, client, engine, candidates, Vec::new(), false, None, source).await
 }
 
 /// 候选队列逐只分析的唯一执行体（live 扫描、时间旅行批次、漏检补分析共用，保证逐只口径一致）。
+///
+/// `deadline` 为协作式墙钟预算：每只分析**开始前**检查，到点即收尾返回部分完成。
+/// 不能用外层 `tokio::time::timeout` 取消整个任务 —— future 被取消后 `record_run`
+/// 不会执行，正是 R11 暴毙链的一环；协作式检查保证函数一定正常返回到记账点。
 async fn analyze_candidate_queue(
     db: &sea_orm::DatabaseConnection,
     client: &axagent_astock_data::AStockClient,
@@ -397,10 +491,12 @@ async fn analyze_candidate_queue(
     candidates: Vec<PoolCandidate>,
     skipped_codes: Vec<String>,
     truncated: bool,
+    deadline: Option<std::time::Instant>,
     source: &str,
 ) -> PoolScanOutcome {
     let mut ok = 0usize;
     let mut fail = 0usize;
+    let mut timed_out = false;
     let mut first_error: Option<String> = None;
     let mut details: Vec<String> = Vec::with_capacity(candidates.len() + skipped_codes.len());
     let mut results: Vec<PoolCandidateResult> = Vec::with_capacity(candidates.len());
@@ -410,6 +506,18 @@ async fn analyze_candidate_queue(
     }
 
     for c in &candidates {
+        // 墙钟预算在每只开始前检查：正在跑的一只让它跑完（LLM 链不可中途拆），
+        // 后续标的整体顺延到下一轮 —— 单只最坏数分钟，预算 40 分钟下浪费可控。
+        if let Some(dl) = deadline
+            && std::time::Instant::now() >= dl
+        {
+            timed_out = true;
+            let remaining = candidates.len() - ok - fail;
+            details.push(format!(
+                "⏱ 达到单轮墙钟预算，剩余 {remaining} 只未处理（部分完成，下一轮续跑）"
+            ));
+            break;
+        }
         // 周期 → 持有天数：这是「4 周期语义」的写入口。
         // 落进 stock_analyses.decision_expected_holding_days 后，
         // batch-reflection 的按周期分档筛选才有依据。
@@ -474,6 +582,14 @@ async fn analyze_candidate_queue(
         fail,
         skipped_analyzed_today: skipped_codes.len(),
         truncated,
+        timed_out,
+        // 墙钟到点 break 时剩余未跑只数；正常跑完为 0。
+        // 被单轮硬上限挡在队列外的部分由 run_pool_scan 叠加。
+        pending_remaining: if timed_out {
+            candidates.len() - ok - fail
+        } else {
+            0
+        },
         first_error,
         details,
         results,
@@ -495,12 +611,17 @@ pub async fn create_pool_scan_cron(
     max_stocks: Option<usize>,
     min_confidence: Option<u8>,
     enabled: Option<bool>,
+    max_per_run: Option<usize>,
+    run_deadline_seconds: Option<u64>,
 ) -> Result<crate::commands::stock_analysis::CronJobResponse, String> {
     let defaults = PoolScanConfig::default();
     let config = PoolScanConfig {
         lookback_days: lookback_days.unwrap_or(defaults.lookback_days),
         max_stocks: max_stocks.unwrap_or(defaults.max_stocks),
         min_confidence: min_confidence.unwrap_or(defaults.min_confidence),
+        // None / 0 都落默认硬上限（0 语义在 PoolScanConfig 内归一）
+        max_per_run: max_per_run.unwrap_or(defaults.max_per_run),
+        run_deadline_seconds: run_deadline_seconds.unwrap_or(defaults.run_deadline_seconds),
     };
     if config.min_confidence > 100 {
         return Err("min_confidence 必须在 0-100 之间".to_string());
@@ -582,16 +703,53 @@ mod tests {
 
     #[test]
     fn pool_scan_config_roundtrip() {
-        let c = PoolScanConfig { lookback_days: 5, max_stocks: 8, min_confidence: 70 };
+        let c = PoolScanConfig {
+            lookback_days: 5,
+            max_stocks: 8,
+            min_confidence: 70,
+            max_per_run: 12,
+            run_deadline_seconds: 900,
+        };
         let json = c.to_json().unwrap();
         // 必须是 camelCase，与前端 TS 类型一致（契约见 AGENTS.md 第 13 条）
         assert!(json.contains("lookbackDays"), "json = {json}");
         assert!(json.contains("\"maxStocks\""), "json = {json}");
         assert!(json.contains("\"minConfidence\""), "json = {json}");
+        assert!(json.contains("\"maxPerRun\""), "json = {json}");
+        assert!(json.contains("\"runDeadlineSeconds\""), "json = {json}");
         let back = PoolScanConfig::from_json(&json).unwrap();
         assert_eq!(back.lookback_days, 5);
         assert_eq!(back.max_stocks, 8);
         assert_eq!(back.min_confidence, 70);
+        assert_eq!(back.max_per_run, 12);
+        assert_eq!(back.run_deadline_seconds, 900);
+    }
+
+    #[test]
+    fn pool_scan_config_legacy_json_gets_safety_defaults() {
+        // P0-6 回归：存量 cron 的 prompt JSON 只有旧三字段（v156 前落库的任务），
+        // 反序列化必须成功并自动获得单轮硬上限/墙钟预算 —— 否则旧任务配置解析失败，
+        // 正是「任务事实死亡」要修的面。
+        let legacy = r#"{"lookbackDays":0,"maxStocks":0,"minConfidence":50}"#;
+        let c = PoolScanConfig::from_json(legacy).unwrap();
+        assert_eq!(c.max_per_run, PoolScanConfig::DEFAULT_MAX_PER_RUN);
+        assert_eq!(c.run_deadline_seconds, PoolScanConfig::DEFAULT_RUN_DEADLINE_SECS);
+        assert_eq!(c.effective_max_per_run(), 20);
+        assert_eq!(c.effective_run_deadline_secs(), 2400);
+    }
+
+    #[test]
+    fn pool_scan_config_zero_normalizes_to_defaults() {
+        // 显式传 0（前端「默认」占位）也归一为内置默认，而非真的「不限/不超时」
+        let c = PoolScanConfig {
+            lookback_days: 0,
+            max_stocks: 0,
+            min_confidence: 50,
+            max_per_run: 0,
+            run_deadline_seconds: 0,
+        };
+        assert_eq!(c.effective_max_per_run(), PoolScanConfig::DEFAULT_MAX_PER_RUN);
+        assert_eq!(c.effective_run_deadline_secs(), PoolScanConfig::DEFAULT_RUN_DEADLINE_SECS);
     }
 
     #[test]
@@ -677,6 +835,8 @@ mod tests {
             fail: 0,
             skipped_analyzed_today: 0,
             truncated: false,
+            timed_out: false,
+            pending_remaining: 0,
             first_error: None,
             details: vec![],
             results: vec![],
@@ -688,6 +848,8 @@ mod tests {
             fail: 0,
             skipped_analyzed_today: 3,
             truncated: false,
+            timed_out: false,
+            pending_remaining: 0,
             first_error: None,
             details: vec![],
             results: vec![],

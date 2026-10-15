@@ -35,7 +35,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  useStockAnalysisStore.setState({ violations: [] });
+  // 为什么包在 act 里: afterEach 钩子按逆序先于 RTL auto-cleanup(unmount) 执行,
+  // 此刻组件仍挂载 ⇒ store 通知会触发一次 act 外的重渲染 ⇒ 每个用例刷 1 条
+  // "An update to TimelineNodeCard ... not wrapped in act"(9 条 = 9 用例,已实测)。
+  act(() => {
+    useStockAnalysisStore.setState({ violations: [] });
+  });
 });
 
 describe("TimelineNodeCard — violations chip", () => {

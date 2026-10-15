@@ -121,7 +121,24 @@ const BUILTIN_TASK_TYPES: &[&str] = &[
     crate::commands::backtest_validation::DECISION_BACKTEST_TASK_TYPE,
     crate::commands::constants::MOVER_RECALL_TASK_TYPE,
     crate::commands::constants::EVOLUTION_PROPOSAL_TASK_TYPE,
+    crate::commands::stock_workflow::reflection::LESSON_VALIDATION_TASK_TYPE,
+    crate::commands::constants::PORTFOLIO_METRICS_TASK_TYPE,
+    crate::commands::constants::INTENT_EXPIRY_TASK_TYPE,
 ];
+
+/// 「立即执行」白名单的只读入口。
+///
+/// 供种子侧的齐备性判据核对（`init/stock_automation_cron_seed.rs`
+/// 的 `every_builtin_job_is_manually_executable`）：内置任务若漏登记这里，
+/// 任务中心的「立即执行」会报 `MANUAL_RUN_NOT_SUPPORTED` —— 而到点自动执行照常，
+/// 所以这个缺陷只有拿真实 task_type 对表才看得见。
+///
+/// 生产侧的手动执行门直接引用 `BUILTIN_TASK_TYPES` 常量（见同文件 `run_scheduled_task`），
+/// 故此访问器仅测试 target 需要，`#[cfg(test)]` 避免在 lib 产物里留死代码。
+#[cfg(test)]
+pub fn builtin_task_types() -> &'static [&'static str] {
+    BUILTIN_TASK_TYPES
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

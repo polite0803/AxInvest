@@ -1775,7 +1775,10 @@ export interface ExecutionSummary {
   workflowId: string;
   status: string;
   totalTimeMs: number | null;
-  createdAt: number;
+  /** 失败原因；成功时为 null。此前只进日志，界面上只剩一个 failed 标签 */
+  errorDetail: string | null;
+  /** Unix 毫秒，与后端 ExecutionSummaryResponse.createdAtMs 对齐 */
+  createdAtMs: number;
 }
 
 // ── Plan Mode (Agent Work Strategy) ──────────────────────────────────

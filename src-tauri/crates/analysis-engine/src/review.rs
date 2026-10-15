@@ -93,20 +93,12 @@ impl PostCloseReview {
     ) -> Result<DailyReview, String> {
         let now = chrono::Utc::now();
         let today = now.format("%Y-%m-%d").to_string();
-        // 修复 M-DS-2: 原代码 `NaiveDate::parse_from_str(&today, ...).unwrap_or_default()`
-        // 解析失败时返回 1970-01-01（Unix 纪元）。直接从 `now` 取 date_naive()
-        // 跳过字符串序列化/反序列化往返，杜绝 1970 错日期。
-        let today_date = now.date_naive();
 
-        let market_status = if calendar::is_trading_day(&today_date) {
-            if calendar::is_trading_time() {
-                "交易中".to_string()
-            } else {
-                "已收盘".to_string()
-            }
-        } else {
-            "非交易日".to_string()
-        };
+        // H-7（2026-10-15）：时段判定改走 `TradingSession`——原先「交易日 + `is_trading_time()`」
+        // 的两值判法把**午休**写成「已收盘」（`is_trading_time` 对 11:30 用 `minute<=30`、
+        // 对 15:00 用 `minute==0`，两处整点判法还互相矛盾）。这里是**写进复盘文本**的一格，
+        // 所以直接用中文标签（复盘正文本来就是中文，与 IPC 契约那套「只给稳定码」不同口径）。
+        let market_status = calendar::current_trading_session().status_label().to_string();
 
         let mut summaries = Vec::new();
         for (code, name) in watchlist {

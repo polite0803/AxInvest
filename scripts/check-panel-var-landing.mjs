@@ -1,7 +1,9 @@
-// 面板 13 条变量「Rust 内部读变量表」落地的**定向门**（2026-10-08 A 批 9 条 + 2026-10-09 B 批 4 条）
+// 面板 14 条变量「Rust 内部读变量表」落地的**定向门**（2026-10-08 A 批 9 条 + 2026-10-09 B 批 4 条
+// + 2026-10-15 G 批 1 条 `risk_correlation_lookback_days`，PLAN-monitor-chain-closure G-8
+// + 2026-10-15 D 批 1 条 `monitor_alert_cooldown_secs`，同 PLAN 阶段 D）
 //
 // ── 为什么必须有这道门（面积门 `check-variable-consumer-registry.mjs` 查不出这些）──
-// 这 13 条的接法不是 v137 那种「工具参数」，而是「下层 crate 读进程内变量表快照」
+// 这些条目的接法不是 v137 那种「工具参数」，而是「下层 crate 读进程内变量表快照」
 // （端口 `harness::panel_variables`，装入口 `init/panel_variables.rs`）。于是新增三类
 // **只有定向门能发现、编译门一条都查不出**的失效：
 //   ① **默认值漂移**：种子/面板那格是手抄的。落点的回落值（`ScoreBands::default()` 的 30/70、
@@ -33,7 +35,7 @@
 //       不剥就是「测试替自己作证」—— 生产表被删、测试里还剩五处 ⇒ 门照样绿。实测这条就是把
 //       负控「键被改名」逼成失败的那条（补剥离前 9/10，补后 13/13）。`.rhai` 面同样剥注释。）
 //   P3 单一权威：这些手抄字面量不许再出现，且必须引用落点；跨载体的那格两侧都在清单里
-//   P4 面积自证：落地清单恰 13 条（=A 批 9 + B 批 4），且每条都仍在声明面（退役一条要同步摘这里）
+//   P4 面积自证：落地清单恰 15 条（=A 批 9 + B 批 4 + G 批 1 + D 批 1），且每条都仍在声明面（退役一条要同步摘这里）
 //   P5 解析面自证：任一侧一条都取不到 ⇒ 判**红**（「判据没电」不等于「全绿」）
 //
 // ── 本门**看不见**的三件事（读数别过度解读，2026-10-08 验收时记下的实测盲区）──
@@ -74,7 +76,9 @@ const MCP_REL = "src-tauri/crates/astock-data/src/mcp_tools.rs";
 const FORMULA_REL = "src-tauri/crates/analysis-engine/src/portfolio_formula.rs";
 const TRADING_REL = "src-tauri/crates/analysis-engine/src/trading.rs";
 const SERVICES_REL = "src-tauri/src/init/services.rs";
+const WF_TEMPLATE_REL = "src-tauri/src/commands/workflow_template.rs";
 const REPLAY_REL = "src-tauri/src/commands/stock_analysis.rs";
+const PM_REL = "src-tauri/crates/analysis-engine/src/portfolio_monitor.rs";
 const SEED_REL = "src-tauri/src/commands/stock_analysis_setup/seed_variables.rs";
 // B 批 `value_safety_margin` 的两个**载体**（跨载体单一权威判据用）：
 // 决策脚本本体 + 宿主函数的注册点。`.rhai` 由 `include_str!` 进主 crate 二进制 ⇒
@@ -83,7 +87,7 @@ const RHAI_REL = "src-tauri/src/commands/portfolio-mgr-h-long.rhai";
 const RHAI_PM_REL = "src-tauri/src/commands/stock_workflow/rhai_pm.rs";
 
 /**
- * 落地面（本批的**唯一清单**，13 条 = A 批 9 + B 批 4）。
+ * 落地面（本门的**唯一清单**，15 条 = A 批 9 + B 批 4 + G 批 1 + D 批 1）。
  * 三侧的期望值一律**从源码现取**，门里不写死「当前权威是几」（写死了就变成第四份手抄）。
  * - `rust`：落点回落默认值的现取处（文件 + 锚定正则，捕获组按 `legacy` 的顺序给）
  * - `key` ：变量名必须以 `"名"` 形态出现的落点文件
@@ -119,7 +123,10 @@ export const LANDED = [
     calls: [
       { rel: FORMULA_REL, needle: "PositionLimits::panel_effective()", min: 2 },
       { rel: TRADING_REL, needle: "PositionLimits::panel_effective()", min: 1 },
-      { rel: REPLAY_REL, needle: "PositionLimits::panel_effective()", min: 3 },
+      // 2026-10-15 G-5 把这里的 3 改成 2：第三处是 `refresh_portfolio_metrics` 往
+      // `refresh_metrics` 透传的 **死参数**（`compute_dashboard` 从不读 limits ⇒ 传了没人看）。
+      // 撤参数后留下的两处才是真消费者（风控门 + `get_position_limits` 命令面板读数）。
+      { rel: REPLAY_REL, needle: "PositionLimits::panel_effective()", min: 2 },
     ],
   },
   {
@@ -153,10 +160,30 @@ export const LANDED = [
   {
     name: "monitor_poll_interval_secs",
     rust: { rel: MONITOR_REL, re: /poll_interval_secs:\s*RwLock::new\(\s*(-?[0-9.]+)\s*\)/ },
-    key: { rel: SERVICES_REL, table: "start_realtime_monitor 装配点" },
+    // 键的读取点 2026-10-15 从装配点挪到了引擎（`apply_panel_runtime_vars` 的常量）：
+    // 装配点与保存通路共用同一个方法，键名不该在 wiring 层再出现一次。
+    key: { rel: MONITOR_REL, table: "apply_panel_runtime_vars（面板键常量）" },
     calls: [
       // 正门 `start_with_config` 此前**全仓零调用者** ⇒ 必须至少有一次真装配。
       { rel: SERVICES_REL, needle: "start_with_config(", min: 1 },
+      // 阶段 D-2（2026-10-15）：还要有**热更新**通路，否则「面板改了要重启才生效」。
+      // 三条各锁一环：落点的回灌方法、启动装配的调用、保存设置的调用。
+      { rel: MONITOR_REL, needle: "apply_panel_runtime_vars(&self)", min: 1 },
+      { rel: SERVICES_REL, needle: "monitor_arc.apply_panel_runtime_vars().await;", min: 1 },
+      { rel: WF_TEMPLATE_REL, needle: "monitor.apply_panel_runtime_vars().await;", min: 1 },
+    ],
+  },
+  {
+    // 阶段 D（2026-10-15）：这条此前**只有播种与面板**、Rust 侧零读取者（与 poll 间隔同批
+    // 播种，但 A 批刻意没接）。回落值 = 接线前现值 300 ⇒ 按 A 批口径（逐位不变）。
+    name: "monitor_alert_cooldown_secs",
+    rust: { rel: MONITOR_REL, re: /alert_cooldown_secs:\s*RwLock::new\(\s*(-?[0-9.]+)\s*\)/ },
+    key: { rel: MONITOR_REL, table: "apply_panel_runtime_vars" },
+    calls: [
+      // 冷却的消费点是每轮求值时的 `alert_cooldown_secs.read()`（读侧早已活），
+      // 缺的是「面板值 ⇒ 引擎」这一环 —— 由回灌方法补齐（与上一条共用同三条 needle 中的两条）。
+      { rel: MONITOR_REL, needle: "apply_panel_runtime_vars(&self)", min: 1 },
+      { rel: WF_TEMPLATE_REL, needle: "monitor.apply_panel_runtime_vars().await;", min: 1 },
     ],
   },
   {
@@ -225,7 +252,23 @@ export const LANDED = [
       { rel: RHAI_REL, needle: "pm_required_margin_pct()", min: 1 },
     ],
   },
+  // ── G 批 2026-10-15（阶段 G，PLAN-monitor-chain-closure G-8）──
+  {
+    // 接线前的现值就是 60（刷新调用里那个裸字面量），落点回落值 ≡ 它 ⇒ 零数值变化，按 A 批口径。
+    // `calls` min=2 = 「`correlation_lookback_days()` 的定义 + 真被 `refresh_snapshot` 调用」。
+    // 有人把调用点换回裸数字 ⇒ 只剩定义那一处，当场红（第二权威复活由这条把关，不必另开 P3）。
+    name: "risk_correlation_lookback_days",
+    rust: { rel: PM_REL, re: /const CORRELATION_LOOKBACK_DAYS:\s*u32\s*=\s*(-?[0-9.]+)/ },
+    key: { rel: PM_REL, table: "correlation_lookback_days" },
+    calls: [{ rel: PM_REL, needle: "correlation_lookback_days()", min: 2 }],
+  },
 ];
+
+/**
+ * P4 用的**清单总数**（裁定快照：A 批 9 + B 批 4 + G 批 1 + D 批 1 = 15）。
+ * 刻意不从 `LANDED.length` 现取 —— 那样「删一条」就同时把期望值改小，判据自己没电。
+ */
+const EXPECTED_LANDED_TOTAL = 15;
 
 /**
  * P3 单一权威：这些**字面量形态**一旦出现就红（两侧各查一遍，防「改了一处、留了另一处」）。
@@ -422,9 +465,12 @@ export function checkAll(panelSrc, srcOf, seedSrc, landed = LANDED, authority = 
   const seed = seedDefaults(seedSrc);
   if (!panel) problems.push('P5 判据没电：面板 b("<名>", <数字>, …) 一条都没取到');
   if (!seed) problems.push("P5 判据没电：seed_variables.rs 的 name+value 一条都没取到");
-  // P4 面积自证：本门只管 A 批 9 条 + B 批 4 条，多一条少一条都要当场说清（悄悄删条目＝门失去读数）。
-  if (landed.length !== 13) {
-    problems.push(`P4 落地清单是 ${landed.length} 条（应为 13 条=A 批 9+B 批 4）⇒ 改判据前先讲清为什么`);
+  // P4 面积自证：本门只管 A 批 9 条 + B 批 4 条 + G 批 1 条 + D 批 1 条，多一条少一条都要当场说清
+  // （悄悄删条目＝门失去读数）。这个总数是**裁定快照**，不是当前权威：新增一条落地要同时改它。
+  if (landed.length !== EXPECTED_LANDED_TOTAL) {
+    problems.push(
+      `P4 落地清单是 ${landed.length} 条（应为 ${EXPECTED_LANDED_TOTAL} 条=A 批 9+B 批 4+G 批 1+D 批 1）⇒ 改判据前先讲清为什么`
+    );
   }
 
   for (const e of landed) {
@@ -542,7 +588,7 @@ function report(problems, srcOf) {
           e.name in panel ? `/面板${panel[e.name]}` : "/面板无控件"
         }${e.batch === "B" ? "（B 批：接上即改数值）" : ""}`
     );
-    console.log("✅ 面板 13 条变量落地：三面默认值对账 + 消费者存在 + 单一权威 + 面积自证 全部通过");
+    console.log(`✅ 面板 ${LANDED.length} 条变量落地：三面默认值对账 + 消费者存在 + 单一权威 + 面积自证 全部通过`);
     console.log(`   逐字读数：${rows.join("  ")}`);
     // 面积读数**逐条点名到文件**（只给总数就退回「一道会说谎的绿」）：每条的落点文件 + 生产调用处数。
     for (const e of LANDED) {
@@ -653,6 +699,24 @@ function selftest() {
       ).some((p) => p.startsWith("P2 ") && p.includes("start_with_config") && p.includes("services.rs")),
     ],
     [
+      "P2 相关性回看窗口的调用点退回裸数字 ⇒ 红（G 批新落点：函数还在、没人调）",
+      checkAll(
+        panelSrc,
+        withPatch(PM_REL, (s) =>
+          patchText(s, "positions, correlation_lookback_days(), as_of_date", "positions, 60, as_of_date")
+        ),
+        seedSrc
+      ).some((p) => p.includes("portfolio_monitor.rs") && p.includes("correlation_lookback_days()") && p.includes("只有 1 处")),
+    ],
+    [
+      "P1(G) 落点回落值被改、种子没跟 ⇒ 点名这条变量（G 批按 A 批口径：逐位不变）",
+      checkAll(
+        panelSrc,
+        withPatch(PM_REL, (s) => patchText(s, "CORRELATION_LOOKBACK_DAYS: u32 = 60", "CORRELATION_LOOKBACK_DAYS: u32 = 45")),
+        seedSrc
+      ).some((p) => p.startsWith("P1 risk_correlation_lookback_days") && p.includes("落点回落 45")),
+    ],
+    [
       "P3 回放链重新抄一份 PE 20/40 ⇒ 红",
       checkAll(panelSrc, withPatch(REPLAY_REL, (s) => patchText(s, "if *pe < pe_bands.low {", "if *pe < 20.0 {")), seedSrc).some(
         (p) => p.startsWith("P3") && p.includes("*pe < 20.0")
@@ -702,8 +766,8 @@ function selftest() {
       })(),
     ],
     [
-      "P4 落地清单被悄悄删成 12 条 ⇒ 红",
-      checkAll(panelSrc, srcOf, seedSrc, LANDED.slice(1)).some((p) => p.startsWith("P4 落地清单是 12 条")),
+      "P4 落地清单被悄悄删成 14 条 ⇒ 红",
+      checkAll(panelSrc, srcOf, seedSrc, LANDED.slice(1)).some((p) => p.startsWith("P4 落地清单是 14 条")),
     ],
     // ── B 批三条（2026-10-09）：这三条查的是「数值会变」这件事本身能不能被悄悄抹掉 ──
     [

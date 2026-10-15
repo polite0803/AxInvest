@@ -37,6 +37,7 @@ impl WorkflowExecutionRepository for DaoWorkflowExecutionRepository {
         output_result: Option<&str>,
         node_executions: Option<&str>,
         total_time_ms: Option<i32>,
+        error_detail: Option<&str>,
     ) -> Result<bool, String> {
         crate::repo::workflow_execution::update_workflow_execution_status(
             &self.db,
@@ -45,6 +46,7 @@ impl WorkflowExecutionRepository for DaoWorkflowExecutionRepository {
             output_result,
             node_executions,
             total_time_ms,
+            error_detail,
         )
         .await
         .map_err(|e| e.to_string())
@@ -69,6 +71,7 @@ impl WorkflowExecutionRepository for DaoWorkflowExecutionRepository {
                 node_executions: m.node_executions,
                 execution_state_json: m.execution_state_json,
                 paused_at: m.paused_at,
+                error_detail: m.error_detail,
                 total_time_ms: m.total_time_ms,
                 created_at: m.created_at,
                 updated_at: m.updated_at,
@@ -113,6 +116,7 @@ impl WorkflowExecutionRepository for DaoWorkflowExecutionRepository {
                 node_executions: m.node_executions,
                 execution_state_json: m.execution_state_json,
                 paused_at: m.paused_at,
+                error_detail: m.error_detail,
                 total_time_ms: m.total_time_ms,
                 created_at: m.created_at,
                 updated_at: m.updated_at,

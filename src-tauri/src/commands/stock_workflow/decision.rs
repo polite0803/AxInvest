@@ -1743,23 +1743,35 @@ pub(crate) fn compute_decision_agreement(
     };
 
     // ── V65: riskLevel 评分（满分 15）──
-    // 公式与 LLM 都输出 4 档风险等级，比较等级距离
-    let risk_rank = |s: &str| -> i32 {
+    // 公式与 LLM 都输出 4 档风险等级（低 / 中 / 高 / 极高），比较等级距离。
+    //
+    // 判据用**精确档位表**而不是子串扫描（2026-10-15）：子串判据下「中高风险」先命中
+    // 「中」⇒ 被判成中档，与它的实际位置（中与高之间）相反。本表把它归到「高」一侧 ——
+    // 宁可让「中高 vs 高」判为一致，也不把它压成「中」从而把与「高风险」的真实差距
+    // 掩盖成「相邻」。实测 71 条带 agreementBreakdown 的决策里两侧只出现过
+    // 低/中/高/极高、「中高风险」从未出现 ⇒ 不新增第 5 档，以免改变既有 17 条
+    // 「中 vs 高」记录的评分语义（它们按「相邻」得 8 分，新增档位会把它们打成「跨级」）。
+    //
+    // 缺失（空串 / 未识别）返回 None 而不是默认「中风险」：此前空串经 `_ => 1` 被当成
+    // 中档，两侧皆空时 diff=0 反而**拿满分 15**（实测 5 条记录两侧为空）。现在与相邻的
+    // pos_score / conf_score 同口径记 0 分 —— 拿不到不是结论。
+    let risk_rank = |s: &str| -> Option<i32> {
         match s {
-            s if s.contains("低") => 0,
-            s if s.contains("中") => 1,
-            s if s.contains("高") && !s.contains("极高") => 2,
-            s if s.contains("极高") => 3,
-            _ => 1, // 默认中风险
+            "低风险" | "低" => Some(0),
+            "中风险" | "中" | "中等风险" => Some(1),
+            "中高风险" | "高风险" | "高" => Some(2),
+            "极高风险" | "极高" => Some(3),
+            _ => None,
         }
     };
-    let f_risk_rank = risk_rank(&f_risk);
-    let l_risk_rank = risk_rank(&l_risk);
-    let risk_diff = (f_risk_rank - l_risk_rank).abs();
-    let risk_level_score: f64 = match risk_diff {
-        0 => 15.0, // 精确匹配
-        1 => 8.0,  // 相邻
-        _ => 0.0,  // 跨级
+    let risk_level_score: f64 = match (risk_rank(&f_risk), risk_rank(&l_risk)) {
+        (Some(a), Some(b)) => match (a - b).abs() {
+            0 => 15.0, // 精确匹配
+            1 => 8.0,  // 相邻
+            _ => 0.0,  // 跨级
+        },
+        // 单侧或双侧缺失 / 未识别：不给兜底分（与 pos_score / conf_score 同口径）
+        _ => 0.0,
     };
     let f_risk_raw = f_src
         .get("riskLevel")
@@ -1924,6 +1936,25 @@ pub(crate) fn compute_decision_agreement(
     })
 }
 
+/// P0-2（`PLAN-stock-decision-reliability.md`）：双视角方向对立时的动作硬门禁。
+///
+/// [`compute_decision_agreement`] 把「买方对卖方」（action_score=0）标为
+/// `opposite_direction`；此时两个独立视角在**方向**上互否，跟随任一侧都等于掷硬币，
+/// 故落库前把最终动作压为「观望」（不新开仓），原动作由调用方写入 `preConflictAction`。
+///
+/// 返回 `Some("观望")` 表示应改写；`None` 表示维持原动作
+/// （冲突类型不是 opposite_direction，或本来就是观望 —— 幂等，回放不重复改）。
+pub(crate) fn opposite_direction_gated_action(
+    conflict_type: &str,
+    action: &str,
+) -> Option<&'static str> {
+    if conflict_type == "opposite_direction" && action != "观望" {
+        Some("观望")
+    } else {
+        None
+    }
+}
+
 /// 解析 as_of_date 入参：None/空串 → None（live），Some(s) → 解析为 AsOfContext
 /// 抽出供单测：未来日期 / 错误格式必须 4xx-style 错误
 pub(crate) fn parse_asof_param(s: Option<String>) -> Result<Option<AsOfContext>, String> {
@@ -1986,6 +2017,46 @@ mod tests {
     use super::*;
     use axagent_harness::workflow_types::Variable;
     use serde_json::json;
+
+    /// 构造两侧 action 一致、只有风险档不同的最小夹具，返回 risk_level_score。
+    fn agreement_risk_score(f_risk: &str, l_risk: &str) -> f64 {
+        let f = json!({ "action": "买入", "riskLevel": f_risk }).to_string();
+        let l = json!({ "action": "买入", "riskLevel": l_risk }).to_string();
+        compute_decision_agreement(Some(&f), Some(&l))
+            .expect("两侧 JSON 合法，应产出 breakdown")
+            .risk_level_score
+    }
+
+    /// 风险档判据（2026-10-15）：精确档位表，不再用子串扫描。
+    ///
+    /// 修前「中高风险」先命中「中」⇒ 被判成中档，于是「中高风险 vs 中风险」diff=0 **拿满分 15**
+    /// —— 一个比「中」更险的档被算成与「中」完全一致。
+    #[test]
+    fn risk_rank_does_not_read_mid_high_as_mid() {
+        assert_eq!(
+            agreement_risk_score("中高风险", "中风险"),
+            8.0,
+            "中高应判为与中相邻，而不是一致"
+        );
+        assert_eq!(agreement_risk_score("中高风险", "高风险"), 15.0);
+    }
+
+    /// 缺失（空串 / 未识别）不给兜底分：此前空串经默认档被当成「中风险」，
+    /// 两侧皆空时 diff=0 反而拿满分（实测 5 条记录两侧为空）。
+    #[test]
+    fn risk_rank_missing_is_not_scored_as_mid() {
+        assert_eq!(agreement_risk_score("", ""), 0.0, "两侧都拿不到，不该算成完全一致");
+        assert_eq!(agreement_risk_score("", "高风险"), 0.0, "单侧缺失不该按「中 vs 高」算相邻");
+    }
+
+    /// 负控：既有值域（现网只出现这四档）的距离语义不得被改动 ——
+    /// 新增第 5 档会把 17 条「中 vs 高」记录从「相邻」打成「跨级」。
+    #[test]
+    fn risk_rank_keeps_existing_tier_distances() {
+        assert_eq!(agreement_risk_score("中风险", "高风险"), 8.0);
+        assert_eq!(agreement_risk_score("高风险", "高风险"), 15.0);
+        assert_eq!(agreement_risk_score("低风险", "极高风险"), 0.0);
+    }
 
     /// `decision_horizon_source` 的白名单必须**等于** harness 值域，且值域里每个合法值都能原样入库。
     ///
@@ -3125,6 +3196,52 @@ mod tests {
         let ab3 = compute_decision_agreement(Some(&formula), Some(&llm_long)).expect("必须产出");
         assert_eq!(ab3.formula_action, "买入", "公式缺该档行 ⇒ 退回顶层");
         assert_eq!(ab3.action_score, 6.0);
+    }
+
+    /// P0-2（`PLAN-stock-decision-reliability.md`）：双视角方向真对立时，
+    /// 落库动作必须被硬压为「观望」，且幂等；非对立冲突不动作。
+    #[test]
+    fn opposite_direction_gate_forces_wait_before_persist() {
+        // 纯函数契约
+        assert_eq!(opposite_direction_gated_action("opposite_direction", "买入"), Some("观望"));
+        assert_eq!(opposite_direction_gated_action("opposite_direction", "增持"), Some("观望"));
+        // 公式侧本就是卖方（卖出/减持）同样压观望 —— LLM 是买方，方向互否不跟随任一侧
+        assert_eq!(opposite_direction_gated_action("opposite_direction", "卖出"), Some("观望"));
+        // 幂等：已经是观望不再改写（回放/重复注入不产生伪 preConflictAction）
+        assert_eq!(opposite_direction_gated_action("opposite_direction", "观望"), None);
+        // 非对立冲突类型一律放行
+        assert_eq!(opposite_direction_gated_action("action_divergence", "买入"), None);
+        assert_eq!(opposite_direction_gated_action("lean_vs_wait", "增持"), None);
+        assert_eq!(opposite_direction_gated_action("", "买入"), None);
+
+        // 端到端：公式买入 vs LLM 卖出（action_score=0）⇒ conflict_type=opposite_direction
+        // ⇒ 门禁必然给出 Some(观望)；这正是 core.rs 落库前调用点的输入形态
+        let formula_buy = json!({
+            "action": "买入", "positionPct": 15.3, "confidence": 77.8, "riskLevel": "中"
+        })
+        .to_string();
+        let llm_sell = json!({
+            "action": "卖出", "positionPct": 0.0, "confidence": 54.5, "riskLevel": "中"
+        })
+        .to_string();
+        let ab = compute_decision_agreement(Some(&formula_buy), Some(&llm_sell))
+            .expect("买入 vs 卖出必须产出 breakdown");
+        assert_eq!(ab.conflict_type, "opposite_direction");
+        assert_eq!(ab.action_score, 0.0);
+        assert_eq!(
+            opposite_direction_gated_action(&ab.conflict_type, &ab.formula_action),
+            Some("观望"),
+            "PLAN 验收：10-12 类买方对卖方快照回放，结论必须变观望"
+        );
+
+        // 反向对称：公式卖出 vs LLM 买入同样拦
+        let ab2 = compute_decision_agreement(Some(&llm_sell), Some(&formula_buy))
+            .expect("必须产出 breakdown");
+        assert_eq!(ab2.conflict_type, "opposite_direction");
+        assert_eq!(
+            opposite_direction_gated_action(&ab2.conflict_type, &ab2.formula_action),
+            Some("观望")
+        );
     }
 }
 

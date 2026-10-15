@@ -463,6 +463,13 @@ export interface PortfolioDashboard {
   totalMarketValue: number;
   totalPnl: number;
   totalPnlPct: number;
+  /**
+   * 拿不到现价的持仓只数（后端 `PortfolioDashboard::unpriced_positions`）。
+   *
+   * 集中度与分散度只按**拿到价**的那几只算 ⇒ 这个数必须上屏，否则「按 5 只算的分数」
+   * 会配着 8 行持仓显示。历史快照路径不返回持仓明细，所以句子只报只数、不报「按几只算」。
+   */
+  unpricedPositions: number;
   cashPct: number;
   maxDrawdownPct: number;
   beta?: number;
@@ -2268,6 +2275,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   /**
    * P2-6: 更新 T+0 配置 (partial merge + 立即同步到后端)
+   *
+   * 保存失败必须**回滚乐观态并向上抛**（调用方 toast）：只 console.error 会让面板显示
+   * 「已开启」而后端仍是关的 —— 用户以为开着，实际什么都没发生（裁定 4 接面板时补）。
    */
   setT0Config: async (patch) => {
     const cur = get().t0Config;
@@ -2276,7 +2286,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     try {
       await invoke("set_t0_config", { config: next });
     } catch (e) {
+      set({ t0Config: cur });
       console.error("[StockAnalysis] Failed to set t0 config:", e);
+      throw e;
     } finally {
       set({ t0Loading: false });
     }

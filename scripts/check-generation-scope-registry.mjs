@@ -75,12 +75,6 @@ const REGISTRY = [
     note: "自适应评分权重；计数与取数同条件（§七十七）",
   },
   {
-    file: "src-tauri/crates/analysis-engine/src/key_levels.rs",
-    fn: "backtest_key_levels_with_config",
-    class: "statistics",
-    note: "关键位命中率（§七十七）",
-  },
-  {
     file: "src-tauri/src/commands/stock_analysis.rs",
     fn: "backtest_all_history",
     class: "statistics",

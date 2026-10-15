@@ -3,7 +3,7 @@
 // 流程：选择 CSV 文件 → 后端解析预览 → 确认导入 → 写入 trades 表 + 同步持仓。
 // 支持通达信/东方财富/通用 CSV 格式（后端自动识别列名）。
 
-import { invoke } from "@/lib/invoke";
+import { invoke, isTauri } from "@/lib/invoke";
 import { FileOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Space, Statistic, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -67,12 +67,13 @@ export function TradeImportPanel() {
         message.warning(t("trade.import.emptyFile"));
       }
     } catch (e) {
-      // 浏览器开发模式下 @tauri-apps/plugin-dialog 不可用
-      const err = e as Error;
-      if (err?.message?.includes("dialog") || err?.message?.includes("Tauri")) {
+      // 浏览器开发模式下 @tauri-apps/plugin-dialog 不可用。按**运行环境**判断，
+      // 不靠错误文案里有没有 "dialog"/"Tauri" 字样嗅探 —— 文案一变嗅探就失效，
+      // 会把「插件不可用」误报成「解析失败」（选文件这一步压根没到解析）。
+      if (!isTauri()) {
         message.error(t("trade.import.devModeHint"));
       } else {
-        message.error(`${t("trade.import.parseFailed")}: ${err?.message ?? e}`);
+        message.error(`${t("trade.import.parseFailed")}: ${(e as Error)?.message ?? e}`);
       }
     } finally {
       setLoading(false);
@@ -237,6 +238,28 @@ export function TradeImportPanel() {
             styles={{ content: { color: summary.failed > 0 ? "#ff4d4f" : undefined } }}
           />
         </Space>
+      )}
+
+      {
+        /* 失败明细必须列出来：导入成功后上面的预览表会被清空，不在这里给出行号与原因，
+          用户就再也追不到是哪几行失败、为什么失败（统计数字只会说「失败了 N 条」）。 */
+      }
+      {summary && summary.errors.length > 0 && (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={`${t("trade.import.columns.errors")} (${summary.errors.length})`}
+          description={
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {summary.errors.map(([row, msg]) => (
+                <li key={row}>
+                  <Text type="secondary">{t("trade.import.columns.row")} {row}</Text>：{msg}
+                </li>
+              ))}
+            </ul>
+          }
+        />
       )}
 
       {preview.length > 0 && (

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App, ConfigProvider } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -549,6 +549,19 @@ vi.mock("antd", () => {
   return antd;
 });
 
+/**
+ * 收尾：等挂载副作用（数据请求）落地。
+ *
+ * 为什么必须有：页面挂载后会异步拉数据，测试同步结束 ⇒ setState 落在测试之外 ⇒
+ * React 报 "not wrapped in act"。为什么必须放在**断言之后**：这些用例断言的是
+ * **初始渲染态**，提前 flush 会把组件推进"加载完成"态，断言随之失效（实测会让 3 条用例变红）。
+ * 为什么不能用 afterEach：React 是在 setState 那一刻检查的，而那一刻在测试函数返回后、
+ * afterEach 之前 —— 收尾钩子永远太晚。
+ */
+const settle = async () => {
+  await act(async () => {});
+};
+
 describe("InputArea", () => {
   let draftSeq = 0;
   beforeEach(() => {
@@ -661,6 +674,9 @@ describe("InputArea", () => {
     expect(createConversation).toHaveBeenCalled();
 
     conversationState.activeConversationId = "conv-1";
+    // 无活跃会话分支在 createConversation 落定后还有一串同步 setState
+    // (setValue/setAttachedFiles/setUserMinHeight)，不留出这一拍会落在测试之外 ⇒ act 警告
+    await settle();
   });
 
   it("shows stop button (hides send button) when streaming is active", () => {

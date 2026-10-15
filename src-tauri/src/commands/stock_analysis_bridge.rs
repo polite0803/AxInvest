@@ -16,7 +16,7 @@
 use crate::commands::agent::command_bridge::TauriCommandToolDef;
 use axagent_astock_data::AStockClient;
 use axagent_astock_data::as_of::{self, AsOfContext};
-use axagent_entities::{portfolio_holdings, price_alerts, watchlist_items};
+use axagent_entities::{portfolio_holdings, watchlist_items};
 use axagent_harness::IpcEventName;
 use axagent_harness::types::{ChatTool, ChatToolFunction};
 use axagent_tools::ToolError;
@@ -29,6 +29,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use tauri::AppHandle;
 use tauri::Emitter;
+use tauri::Manager;
 use tracing::{debug, instrument, warn};
 
 /// 股票写命令名单（is_read_only=false）
@@ -605,30 +606,37 @@ async fn dispatch_stock_command<R: tauri::Runtime>(
                 .as_f64()
                 .ok_or_else(|| "缺少 target_price 参数".to_string())?;
 
-            use axagent_analysis_engine::alert_mapping::{
-                condition_type_for, legacy_condition_to_alert_type,
-            };
-            let alert_type = legacy_condition_to_alert_type(condition)
-                .unwrap_or(axagent_analysis_engine::alert_mapping::alert_types::TAKE_PROFIT);
-            let condition_type = condition_type_for(alert_type);
-
-            let now = chrono::Utc::now().timestamp_millis();
-            let model = price_alerts::ActiveModel {
-                id: sea_orm::Set(uuid::Uuid::new_v4().to_string()),
-                stock_code: sea_orm::Set(stock_code.to_string()),
-                stock_name: sea_orm::Set(stock_name.to_string()),
-                condition: sea_orm::Set(condition.to_string()),
-                target_price: sea_orm::Set(target_price),
-                alert_type: sea_orm::Set(Some(alert_type.to_string())),
-                condition_type: sea_orm::Set(Some(condition_type.to_string())),
-                threshold: sea_orm::Set(Some(target_price)),
-                is_triggered: sea_orm::Set(0),
-                triggered_at: sea_orm::Set(None),
-                created_at: sea_orm::Set(now),
-                updated_at: sea_orm::Set(now),
-            };
-            let saved = model.insert(db).await.map_err(|e| format!("创建价格提醒失败: {e}"))?;
-            serde_json::to_string_pretty(&saved).map_err(|e| {
+            // 裁定 15（2026-10-15）：与面板命令走**同一份**实现（落库 + 进引擎），
+            // 不再让「agent 建的告警要等下次启动才生效」。
+            // ⚠ monitor 用 `AppHandle` **在调用时**取，不在注册时捕获：注册顺序与监控注入
+            //   顺序没有保证，注册时捕获会永久拿到 None（同 A 批「装配时机」那条教训）。
+            //   用 `try_state` 而不是 `state`：后者在未 manage 时 panic（测试用的 mock app
+            //   就没 manage），而我们这里缺状态本来就是合法的「未装配」。
+            let monitor = app_handle
+                .try_state::<crate::AppState>()
+                .and_then(|s| s.stock_monitor.get().cloned());
+            let (saved, _reused, wired) =
+                crate::commands::price_alert_upsert::upsert_price_alert_and_wire(
+                    db,
+                    monitor.as_ref(),
+                    stock_code,
+                    stock_name,
+                    condition,
+                    target_price,
+                )
+                .await
+                .map_err(|e| format!("创建价格提醒失败: {e}"))?;
+            // 返回体如实写明是否已进引擎：拿不到引擎时不得让调用方（LLM/用户）以为已经生效。
+            let mut out = serde_json::to_value(&saved).map_err(|e| {
+                String::from(crate::commands::error::ErrorResponse::from_error(
+                    e,
+                    crate::commands::error::ErrorCategory::Unrecoverable,
+                ))
+            })?;
+            if let Some(obj) = out.as_object_mut() {
+                obj.insert("monitorWired".to_string(), serde_json::json!(wired));
+            }
+            serde_json::to_string_pretty(&out).map_err(|e| {
                 String::from(crate::commands::error::ErrorResponse::from_error(
                     e,
                     crate::commands::error::ErrorCategory::Unrecoverable,

@@ -262,8 +262,21 @@ export interface HorizonDecision {
   entryGate?: string;
   /** 入场门判定结果（各档门不同，故不能由展示层反推） */
   entryGatePassed?: boolean;
-  /** 门的判定依据：`judged` / `unjudged`（算不出 ≠ 通过，也不得算成未通过） */
+  /** 门的判定依据：`judged` / `unjudged`（算不出 ≠ 通过，也不得算成未通过）；
+   *  超短档 P0-5 起为 `breadth_missing` / `breadth_weak` / `stock_unjudged` /
+   *  `limit_up_recent` / `strong_momentum` / `stock_not_strong` 六值之一 */
   gateBasis?: string;
+  /**
+   * 超短档 P0-5：breadth 门的**个股**前提原始量（近 5 日涨停次数 / 累计涨幅% / 评估天数）。
+   * 封板率是市场级量，门必须再验个股自身；K 线不足 ⇒ 整个字段为 null（未判定 ≠ 通过）。
+   */
+  stockStrength?: {
+    limitUpCount?: number;
+    cumGainPct?: number;
+    days?: number;
+  } | null;
+  /** 超短档 P0-5：microstructure 个股腿未接线期间动作封顶是否触发（买入/增持 → 持有） */
+  p05CapApplied?: boolean;
   /** 短线档：时机过滤是否放行（追高/带外判定） */
   timingFiltered?: boolean;
   /** 中线档：价带 z 值（×100，四舍五入到 0.1）；K 线不足 ⇒ null */
@@ -609,6 +622,132 @@ export interface MonitorAlertPayload {
   /** 后端 `timestamp: String`（求值时刻的 ISO 串，不是行情快照时刻） */
   timestamp: string;
   suggestedAction: string | null;
+}
+
+/**
+ * 条件单触发产物 —— 后端 `analysis_engine::conditional_order::ConditionTrigger` 的 serde 投影。
+ *
+ * 与 `MonitorAlertPayload` 是两个实体，不要混用：这一条来自 `conditional_orders` 表，
+ * 触发时**不写** `price_alerts`，也不共用告警类型枚举（条件类别与阈值都由后端 `describe()`
+ * 给成人话，前端不再自己拼类别串）。
+ */
+export interface ConditionTriggerPayload {
+  orderId: string;
+  stockCode: string;
+  stockName: string;
+  /** 条件描述（含单位）：如「跌破止损价 12.50」 */
+  condition: string;
+  /** 动作描述：如「卖出全部持仓」「仅通知」 */
+  action: string;
+  price: number;
+  changePct: number;
+  /** 触发时刻（UTC ms） */
+  triggeredAtMs: number;
+  /** 判定依据，缺席原因也写在这里（后端把「无法判定」与「条件未满足」分开给） */
+  reason: string;
+}
+
+/**
+ * 条件单列表项 —— 后端 `commands/conditional_order.rs::ConditionalOrderItem` 的投影。
+ *
+ * 类别与动作都成对给「机器可读串」+「后端 describe() 的人话」：前者供分支，后者供显示，
+ * 前端不再自己拼阈值与单位（`condition_value` 的单位随 `condition_type` 而变，拼错就是假数）。
+ */
+export interface ConditionalOrderItem {
+  orderId: string;
+  stockCode: string;
+  stockName: string;
+  /** `stop_loss` / `take_profit` / `resistance_break` / `support_break` / `change_pct` / `turnover_rate` */
+  conditionType: string;
+  /** 价格类为元，比率类为百分比数值 */
+  conditionValue: number;
+  conditionText: string;
+  /** `buy` / `sell` / `reduce` / `notify` */
+  actionType: string;
+  /** `buy` 股数 / `reduce` 比例；`sell` 的 null 是「卖出全部持仓」，`notify` 无参数 */
+  actionValue: number | null;
+  actionText: string;
+  enabled: boolean;
+  coolDownMinutes: number;
+  maxTriggersPerDay: number;
+  triggersToday: number;
+  /** 计数归属的北京日 `YYYY-MM-DD`；null = 从未触发 */
+  triggerDate: string | null;
+  lastTriggeredAt: number | null;
+  activeStart: string | null;
+  activeEnd: string | null;
+}
+
+/** 表里存在但读不回成规则的行 —— 必须与「表里没有」分列显示 */
+export interface UnreadableConditionalOrder {
+  orderId: string;
+  reason: string;
+}
+
+export interface ConditionalOrderListView {
+  items: ConditionalOrderItem[];
+  unreadable: UnreadableConditionalOrder[];
+  /** 正在被行情评估的条数（启用且可读回）—— 与 `items.length` 是两个计数域 */
+  evaluating: number;
+}
+
+// ── 监控引擎运行读数（裁定 12：「监控实际未在取数」必须是可消费的聚合面，不是日志）──
+
+/**
+ * 后端 `commands/stock_analysis.rs::MonitorStatusDto` 的投影。
+ *
+ * 每个键只说一件事，消费侧不得把它们收敛成一句：`assembled=false` 时其余计数**全是 0**，
+ * 那些 0 的含义是「没人在取数」，不是「没有失败」；`tradingNow=false` 时轮次计数是
+ * 上一盘的旧值。见 `PriceAlertPanel.tsx` 的 `monitorAbsenceSentences`。
+ */
+export interface MonitorStatus {
+  assembled: boolean;
+  /** 时段档位码（后端 `TradingSession::code()`）：前端按它查 i18n，不在 IPC 里收中文 */
+  session: string;
+  tradingNow: boolean;
+  pollIntervalSecs: number;
+  /** 引擎里**启用中**的告警条数（不是 `price_alerts` 表行数） */
+  configsActive: number;
+  /** 本轮应取数的股票数（同股多条告警共用一只） */
+  roundCodesTotal: number;
+  roundCodesFailed: number;
+  /** 连续「整轮全部取数失败」的轮数，任一成功即归零；本轮无启用告警也归零 */
+  consecutiveAllFailedRounds: number;
+  /** 最后一次落数的 UTC ms；0 = 引擎装好但还没跑完第一轮 */
+  roundFinishedAtMs: number;
+}
+
+/**
+ * 组合级信号 —— 后端 `analysis_engine::cross_stock_aggregator::PortfolioSignal` 的 serde 投影。
+ *
+ * 与 `MonitorAlertPayload`（单只股票的告警）是两个层级：这条由跨股聚合器在**多只同方向**
+ * 触发时产出，不写 `price_alerts`。此前它发的是裸字面量 `"portfolio-signal"`，
+ * 事件名不在权威表、前端零监听 ⇒ 信号真产出了但没人收（阶段 G 的 G-6）。
+ * `suggested_action` 是后端生成的人话（阈值与单位随主导信号而变，前端不自己拼），
+ * 其余字段全部结构化供分支与 i18n。
+ */
+export interface PortfolioSignalPayload {
+  /** `bullish` / `bearish` / `neutral`（后端 `SignalDirection` snake_case） */
+  direction: string;
+  /** 触发该组合信号的股票代码集合 */
+  stocks: string[];
+  /** 主导信号类型（后端 `SignalType` snake_case），值域随聚合器扩展 */
+  dominantSignal: string;
+  /** 组合信号强度 [0.0, 1.0] */
+  strength: number;
+  snapshot?: PortfolioSnapshotPayload | null;
+  /** 后端给的建议文案（非结构化，前端不再拆句） */
+  suggestedAction: string;
+  /** Unix 秒 */
+  timestamp: number;
+}
+
+/** 后端 `PortfolioSnapshot`：信号触发时的持仓上下文（各项都可能拿不到）。 */
+export interface PortfolioSnapshotPayload {
+  positionCount: number;
+  topConcentrationPct?: number | null;
+  maxSectorPct?: number | null;
+  riskLevel?: string | null;
 }
 
 // ── 决策仪表盘报告（借鉴 daily_stock_analysis 推送格式）──

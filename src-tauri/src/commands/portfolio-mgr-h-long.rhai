@@ -1,23 +1,22 @@
 // portfolio-mgr-h-long.rhai — **长线（90 交易日）** 决策分支（R-11 / PLAN §十一、§二十五）
 //
 // 本档的算法分支在**三处**与其余三档不同，且每处都是换了判据而不是换了倍数：
-// 1. 腿集合：方向只由「价值四腿」（估值带 / 盈利质量 / 预期修正 / 宏观状态）决定；
-//    技术腿 `trendStrength` 在本档 **role=filter** —— 只作入场时机过滤，不进方向加权
-//    （R-11 明文；权重恒 0 由分支表保证，不靠这里自觉）。行业轮动是 `partial`
+// 1. 腿集合：方向只由「盈利质量 / 预期修正 / 宏观状态」三条方向腿决定。
+//    估值腿 `valuationBand` 自 P0-3（PLAN-stock-decision-reliability，2026-10-16）起
+//    **role=filter** —— 90 日窗内估值无方向预测力（实证 10-09 紫金 DCF 放行长档买入），
+//    只作严重高估否决，便宜不再是买入理由（权重恒 0 由分支表保证，不靠这里自觉）。
+//    技术腿 `trendStrength` 同为 filter（R-11）。行业轮动是 `partial`
 //    （live 有源、回放结构性不可得 ⇒ 只作背景）。
-// 2. 门：`positive_margin_of_safety` —— 没有安全边际就不出加仓动作。锚取**面板参数**：
-//    DCF 上行空间 ≥ `pm_required_margin_pct()`（面板 `value_safety_margin`，默认 20%，
-//    变量缺失 / 越界 ⇒ 回落接线前的 30%）。2026-10-09 B 批之前这里是写死的 `30.0`
-//    （「Graham 的 conventional margin of safety，不是本仓调出来的阈值」），与 Rust 侧
-//    算理想买入价用的 0.30 是同一把尺子的**两处抄写**、面板那格从来没人读 ⇒ 改为同源。
-//    DCF 对本标的**不适用**（`applicable=false`：银行/保险/券商/地产/重资产周期，
-//    由 `compute_dcf` 按数据形态判）时，换用**第二条显式口径**：PE 落在自身 5 年
-//    下四分位（≤25 分位）。两条都拿不到 ⇒ 门「未判定」，按不通过处理。
-//    ⚠ 这不是「拿近似数据顶替」：两条口径各自成立、各自点名，输出里带 `gateBasis`。
+// 2. 门：`positive_margin_of_safety`（门名保留，语义 P0-3 反转为**单向高估否决**）——
+//    旧口径「DCF 上行 ≥20% 或 PE≤25 分位才放行」把便宜当买入必要条件，会在周期顶部被
+//    乐观 DCF 放行；新口径：DCF upside ≤ -35%（内在价值较现价低 35%+）或 PE ≥ 自身
+//    5 年 80 分位 ⇒ 否决开仓，其余可判情形放行，两口径都缺席按「未判定 ≠ 通过」不加仓。
+//    basis 取值：not_overvalued / dcf_overvalued / pe_overvalued / unjudged。
 // 3. 出场：`target_and_falsified` —— 止盈 = 估值目标价；止损 = **论点被证伪**
-//    （上行空间被走完 ⇒ `margin_basis_exhausted`；或盈利质量/预期修正两腿同时转负
-//    ⇒ `thesis_contradicted`）。价格波动本身不构成长线止损理由，这是本档与其余三档
-//    最根本的差别：短档的止损买的是「时间窗内的位移控制」，长档买的是「论点还成立」。
+//    （估值严重高估、上行依据耗尽 ⇒ `margin_basis_exhausted`，与门同尺 -35%；
+//    或盈利质量/预期修正两腿同时转负 ⇒ `thesis_contradicted`）。价格波动本身不构成
+//    长线止损理由，这是本档与其余三档最根本的差别：短档的止损买的是「时间窗内的位移
+//    控制」，长档买的是「论点还成立」。
 //
 // ⚠ 禁止出现（门 a）：`leg_mult` / `pm_snr_confidence` / `horizon_decision`。
 
@@ -25,13 +24,63 @@
 // 靠宿主注册会让脚本依赖「注册面在不在」，本仓有过 pm_* 静默未注册的前例）。
 fn present(x) { type_of(x) != "()" }
 
+// P0-3 严重高估阈值（门与 falsified 共用一把尺）。
+// ⚠ 必须用无参函数而非顶层 `const`：rhai 只把**编译 scope**（`compile_with_scope`）里的常量
+//   传播进函数体；本脚本由生产执行器 `engine.compile(code)` 无 scope 编译（见
+//   `rhai_ast_cache.rs`），顶层 const 对同脚本函数不可见 —— 函数内引用会在运行期
+//   `Variable not found`（2026-10-16 实测，call_fn 与 eval_ast 两种入口同报）。
+//   无参函数走 AST 函数库解析，函数内外同读一份，阈值仍是脚本内单点权威。
+fn overval_dcf_pct() { -35.0 }
+fn overval_pe_pctile() { 80.0 }
+// P0-4③：周期股安全边际门阈值（20% → 35%）。周期股估值中枢随商品价格大幅摆动，
+// 且本口径的 DCF 已用近 5 年 FCF 中位数中性化、PE 分位已在工具侧置空 ——
+// 中性化后仍要求 ≥35% 上行才允许开仓（旧门的「便宜放行」语义只在周期组保留）。
+fn cycle_margin_min_pct() { 35.0 }
+
+// P0-3 单向高估否决（门的纯判定，抽出以便 call_fn 钉死，防阈值被人改回「便宜放行」）。
+// 入参：mos_pct —— DCF 上行百分数，DCF 不适用/缺失时传 ()；
+//       pe_pct  —— PE 自身 5 年分位（0-100），缺失时传 ()；
+//       cyclical —— P0-4：是否命中周期组（读 dcf.assumptions.cyclical_normalized）。
+// 返回 `[pass, basis]`：
+//   · 普通股（P0-3，单向否决）：
+//     [false, "dcf_overvalued"]：DCF 内在价值较现价低 35%+（upside ≤ -35）
+//     [false, "pe_overvalued"]：PE ≥ 80 分位（valuation_band overvalued=75 再留半档缓冲）
+//     [true,  "not_overvalued"]：至少一条口径可判且未严重高估（便宜不再放行，也不拦下）
+//     [false, "unjudged"]：两条口径都缺席（缺席 ≠ 通过）
+//   · 周期股（P0-4，PE 已在工具侧置空，只剩中性化 DCF 单口径）：
+//     [true,  "cyclical_margin_pass"]：中性化 DCF upside ≥ 35%
+//     [false, "cyclical_margin_insufficient"]：upside 存在但 < 35%（含轻微高估）
+//     [false, "unjudged"]：DCF 不适用/缺席
+fn pm_overvalued_veto(mos_pct, pe_pct, cyclical) {
+    if cyclical {
+        if type_of(mos_pct) == "()" {
+            return [false, "unjudged"];
+        }
+        if mos_pct >= cycle_margin_min_pct() {
+            return [true, "cyclical_margin_pass"];
+        }
+        return [false, "cyclical_margin_insufficient"];
+    }
+    if type_of(mos_pct) != "()" && mos_pct <= overval_dcf_pct() {
+        return [false, "dcf_overvalued"];
+    }
+    if type_of(pe_pct) != "()" && pe_pct >= overval_pe_pctile() {
+        return [false, "pe_overvalued"];
+    }
+    if type_of(mos_pct) != "()" || type_of(pe_pct) != "()" {
+        return [true, "not_overvalued"];
+    }
+    return [false, "unjudged"];
+}
+
 let h = "long";
 let gaps = [];
 // ── 输入面（与节点 `input_mapping` 一一对应；读了没映射的名字 = 运行期 Variable not found）──
 // 已接：branch_json / horizon_prior_json / tier_score / macd_dif / macd_dea / rsi_value /
 //       pe_percentile / f_score / consensus_eps / consensus_estimated /
 //       latest_eps / latest_eps_basis / pmi /
-//       valuation_dcf_upside / valuation_dcf_applicable / kline_bars / overall_risk / stop_vol_mult / scoring_windows / scoring_scale / scale_trend / scale_momentum
+//       valuation_dcf_upside / valuation_dcf_applicable / valuation_dcf_cyclical /
+//       kline_bars / overall_risk / stop_vol_mult / scoring_windows / scoring_scale / scale_trend / scale_momentum
 // 刻意不读（有名字但没有数据面）：
 //   · 催化剂（本档腿集无 `eventCatalyst`，任务 #22）
 //   · 行业分位：行业排名的 as-of 通道仍有结构性缺口 ⇒ 不用个股涨幅近似（用户裁定③）
@@ -143,30 +192,43 @@ let escale = if dir_total > 0.0 { pm_evidence_scale(tw, dir_total) } else { 0.0 
 let posterior = if prior_ok { clamp(prior_val + avg * escale, 0.0, 1.0) } else { 0.0 };
 let confidence = posterior;
 
-// ── ④ 安全边际门（两条显式口径，各自点名）──
-// 门限来自宿主函数 `pm_required_margin_pct()` —— 它与 Rust 侧算 `dcf.idealBuyPrice`
-// 用的是**同一个函数**（面板 `value_safety_margin`，默认 20%，缺失/越界回落接线前的 30%）。
-// 2026-10-09 之前这里写死 `30.0`，与 Rust 那份 0.30 是同一把尺子的两处抄写 ⇒ 面板改了
-// 谁也不读；现在两个载体读同一个来源，换算（% ↔ 小数）只发生在 Rust 侧一处。
+// ── ④ 估值高估否决门（P0-3，PLAN-stock-decision-reliability）──
+// 2026-10-16 语义反转：旧门 `positive_margin_of_safety` 把「DCF 上行 ≥20% 或 PE≤25 分位」
+// 当作买入**必要条件**（便宜才放行）。实证（10-09 紫金矿业：DCF 上行 25.7% 放行长档买入，
+// 90 日内跌破决策价）表明估值在 90 日窗内没有方向预测力，周期顶部的乐观 DCF 反成开仓依据。
+// 新口径是**单向否决**：便宜不再是买入理由（方向 posterior 已只由
+// 盈利质量 / 预期修正 / 宏观三条方向腿决定，估值腿在分支表中已是 filter、权重 0），
+// 只有**严重高估**才否决开仓：
+//   · DCF 内在价值较现价低 35%+（upside ≤ -35%，dcf_overvalued）；
+//   · 或 PE 处自身 5 年 80 分位以上（pe_overvalued；valuation_band 的 overvalued=75 再留半档缓冲）。
+// 至少一条口径可判且未严重高估 ⇒ not_overvalued（放行，动作由 posterior 决定）；
+// 两条口径都缺席 ⇒ unjudged，沿用「缺席 ≠ 通过」，不出加仓（与缺数不加仓语义一致）。
 let dcf_ok = present(valuation_dcf_upside) && present(valuation_dcf_applicable) && valuation_dcf_applicable == true;
 let moS_pct = if dcf_ok { valuation_dcf_upside } else { () };
-let margin_min_pct = pm_required_margin_pct();
-let gate_pass = false;
-let gate_basis = "unjudged";
-if type_of(moS_pct) != "()" && moS_pct >= margin_min_pct {
-    gate_pass = true;
-    gate_basis = `dcf_margin_${margin_min_pct}pct`;
-} else if present(pe_percentile) && pe_percentile <= 25.0 {
-    gate_pass = true;
-    gate_basis = "pe_bottom_quartile";
-} else if type_of(moS_pct) != "()" || present(pe_percentile) {
-    gate_basis = "both_bells_failed";
-}
-if (gate_basis == "unjudged" || gate_basis == "both_bells_failed") && posterior >= 0.62 {
-    gaps.push(if gate_basis == "unjudged" {
-        "positive_margin_of_safety 未判定：DCF 不适用且 PE 分位缺失 ⇒ 不给出加仓动作（缺席 ≠ 通过）"
+// P0-4：周期开关标记由估值工具在 DCF 锚被近 5 年 FCF 中位数盖写时置 true
+// （dcf.assumptions.cyclical_normalized）。缺失/false 都按普通股单向否决门走。
+let dcf_cyclical = present(valuation_dcf_cyclical) && valuation_dcf_cyclical == true;
+let veto = pm_overvalued_veto(
+    moS_pct,
+    if present(pe_percentile) { pe_percentile } else { () },
+    dcf_cyclical
+);
+let gate_pass = veto[0];
+let gate_basis = veto[1];
+if gate_basis == "unjudged" && posterior >= 0.62 {
+    gaps.push(if dcf_cyclical {
+        "周期股估值门未判定：周期中性化 DCF 不适用/缺席 ⇒ 不给出加仓动作（缺席 ≠ 通过）"
     } else {
-        `安全边际两条口径都不满足（DCF 上行 < ${margin_min_pct}% 且 PE 不在下四分位）⇒ 本档不出买入`
+        "估值否决门未判定：DCF 不适用且 PE 分位缺失 ⇒ 不给出加仓动作（缺席 ≠ 通过）"
+    });
+} else if !gate_pass && posterior >= 0.62 {
+    gaps.push(if gate_basis == "dcf_overvalued" {
+        `估值高估否决：DCF 内在价值较现价低 35%+（upside=${(moS_pct*10.0).round()/10.0}%）⇒ 本档不出买入/增持（便宜不是买入理由，严重高估才拦下）`
+    } else if gate_basis == "pe_overvalued" {
+        `估值高估否决：PE 处自身 5 年 ${overval_pe_pctile()} 分位以上（${(pe_percentile*10.0).round()/10.0}）⇒ 本档不出买入/增持`
+    } else {
+        // cyclical_margin_insufficient
+        `周期股估值门（P0-4）：近5年FCF中位数中性化 DCF 上行 ${(moS_pct*10.0).round()/10.0}% < 安全边际要求 ${cycle_margin_min_pct()}%（PE 分位已因周期扭曲置空）⇒ 本档不出买入/增持`
     });
 }
 
@@ -202,7 +264,9 @@ if type_of(pm_leg_signal("expectationRevision", raw)) != "()" {
         falsified.push("expectation_reversed");
     }
 }
-if type_of(moS_pct) != "()" && moS_pct <= 0.0 {
+// P0-3：与估值高估否决门同尺（upside ≤ -35% 才算估值依据耗尽）。
+// 旧界 moS≤0 在「便宜不是理由」的新口径下过紧 —— 轻微高估不应直接判论点证伪。
+if type_of(moS_pct) != "()" && moS_pct <= overval_dcf_pct() {
     falsified.push("margin_basis_exhausted");
 }
 let exit_move =
@@ -281,7 +345,7 @@ if action != "买入" && action != "增持" && action != "持有" {
     // 档内否决前的方向值：读侧「何以降级」与冲突判定读它，不得从 verdict 文案反解。
     originalAction: original_action,
     tierVetoed: tier_vetoed,
-    verdict: `决策=${action} 置信=${(confidence*1000.0).round()/10.0}% 档=${h} 出场=target_and_falsified 安全边际=${gate_basis}${tier_veto_note}`,
+    verdict: `决策=${action} 置信=${(confidence*1000.0).round()/10.0}% 档=${h} 出场=target_and_falsified 估值门=${gate_basis}${tier_veto_note}`,
     positionPct: (position*10.0).round()/10.0,
     confidence: (confidence*1000.0).round()/10.0,
     posterior: (posterior*100.0).round()/10.0,

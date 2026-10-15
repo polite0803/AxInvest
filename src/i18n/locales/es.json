@@ -2974,7 +2974,8 @@
     "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "Ya hay un lote de viaje en el tiempo o de cobertura en ejecución; espere a que termine.",
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "Dentro de la ventana del pipeline en vivo (23:50–02:10 / 17:50–18:10); inicie fuera de ella.",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "El lote de cobertura falló; revise los detalles del lote.",
-    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Falló la consulta del historial de lotes de cobertura; reintente más tarde."
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Falló la consulta del historial de lotes de cobertura; reintente más tarde.",
+    "TRADING_DISABLED": "La función de trading está desactivada. Actívela antes de registrar operaciones."
   },
   "errorBoundary": {
     "copied": "Copiado",
@@ -15343,7 +15344,44 @@
       "typeChange": "variación anormal del precio",
       "typeVolume": "volumen de contratación anormal",
       "typeUnknown": "tipo desconocido",
-      "triggeredDetail": "{{name}}: alerta de {{type}} activada, precio {{price}}"
+      "triggeredDetail": "{{name}}: alerta de {{type}} activada, precio {{price}}",
+      "t0": {
+        "title": "Reejecución automática T+0",
+        "cost": "Al activarlo, cualquier valor vigilado que cruce el umbral en la sesión vuelve a ejecutar todo el flujo de análisis (coste ≈ un análisis completo); las repeticiones del mismo valor se limitan por el intervalo mínimo",
+        "changePct": "Variación %",
+        "turnover": "Rotación %",
+        "intervalMin": "Intervalo mín. (min)",
+        "saveFailed": "No se pudo guardar la configuración T+0: {{reason}}"
+      }
+    },
+    "conditional": {
+      "triggeredDetail": "Orden condicional activado: {{name}} {{condition}}, acción: {{action}}",
+      "title": "Órdenes condicionales",
+      "action": "Acción",
+      "enabled": "Activada",
+      "triggeredToday": "Hoy",
+      "lastTriggered": "Último",
+      "empty": "Sin órdenes condicionales",
+      "evaluating": "{{count}} en evaluación",
+      "totalRows": "{{count}} filas (incl. desactivadas)",
+      "unreadable": "{{count}} filas no legibles como reglas (sin evaluar)",
+      "create": "Crear",
+      "createFailed": "Error al crear: {{reason}}",
+      "loadFailed": "Error al cargar órdenes condicionales: {{reason}}",
+      "toggleFailed": "Error al alternar: {{reason}}",
+      "deleteFailed": "Error al eliminar: {{reason}}",
+      "confirmDelete": "¿Eliminar esta orden condicional?",
+      "thresholdPct": "Umbral (%)",
+      "actionNotify": "Solo notificar",
+      "actionSell": "Vender",
+      "actionBuy": "Comprar",
+      "actionReduce": "Reducir",
+      "actionValueQty": "Cantidad",
+      "actionValueRatio": "Proporción",
+      "coolDown": "Espera (min)",
+      "maxPerDay": "Máx. / día",
+      "windowStart": "Desde HH:MM",
+      "windowEnd": "Hasta HH:MM"
     },
     "progress": {
       "fetchingData": "Obteniendo datos de valores...",
@@ -15529,6 +15567,7 @@
     "revenueGrowth": "Crecimiento de ingresos",
     "riskHigh": "Riesgo alto",
     "riskMid": "Riesgo medio",
+    "riskMidHigh": "Riesgo medio-alto",
     "riskLow": "Riesgo bajo",
     "riskExtreme": "Riesgo extremo",
     "noHistory": "Sin historial de análisis",
@@ -16099,7 +16138,6 @@
         "moat": "Moat",
         "screener": "Screener",
         "signals": "Signals",
-        "keylevels": "Key Levels",
         "recommender": "Recommender",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
@@ -17198,7 +17236,9 @@
       "worstHit": "Worst hit",
       "m10": "Market -10%",
       "m20": "Market -20%",
-      "blackSwan": "Black Swan (-30%)"
+      "blackSwan": "Black Swan (-30%)",
+      "unpricedTitle": "Precios ausentes",
+      "unpricedNotice": "{{count}} posiciones sin precio actual quedan fuera del cálculo de concentración y diversificación"
     },
     "evidence": {
       "concepts": "Fundamentos/Valoración",
@@ -17307,26 +17347,6 @@
       "dailyPreMarket": "Trading Day 08:00 (Pre-market)",
       "weeklyMonday": "Weekly Monday 21:00",
       "every2Hours": "Every 2 Hours"
-    },
-    "fundPanel": {
-      "fundFlow": "Fund Flow",
-      "type": "Type",
-      "deposit": "Deposit",
-      "withdrawal": "Withdrawal",
-      "amount": "Amount",
-      "date": "Date",
-      "fee": "Fee",
-      "notes": "Notes",
-      "totalDeposits": "Total Deposits",
-      "totalWithdrawals": "Total Withdrawals",
-      "netInflow": "Net Inflow",
-      "recordFundFlow": "Record Fund Flow",
-      "depositTransferIn": "Deposit (Transfer In)",
-      "withdrawalTransferOut": "Withdrawal (Transfer Out)",
-      "feeOptional": "Fee (Optional)",
-      "notesOptional": "Notes (Optional)",
-      "recorded": "Recorded",
-      "amountMustBeGreaterThanZero": "Amount must be > 0"
     },
     "marketSimPanel": {
       "simConfig": "Simulation Config",
@@ -17854,8 +17874,8 @@
       "moatFcfRatioMin": "Límite inferior de ratio FCF/utilidad neta (0-1)",
       "monitorPollIntervalSecs": "Intervalo de sondeo de monitoreo (segundos)",
       "monitorAlertCooldownSecs": "Tiempo de enfriamiento de alerta para el mismo activo (segundos, 10-3600)",
-      "monitorMinSeverity": "Nivel mínimo de alerta push: info / warn / critical",
-      "monitorChannels": "Canales push, separados por comas: in_app / lark / email / webhook",
+      "monitorMinSeverity": "Nivel mínimo de alerta push: info / warn / critical (sin consumidor actualmente: cambiarlo no tiene efecto)",
+      "monitorChannels": "Canales push, separados por comas: in_app / lark / email / webhook (sin consumidor actualmente: cambiarlo no tiene efecto)",
       "dualViewDisagreementThreshold": "Umbral de divergencia de doble perspectiva (0-100); por debajo, marca para revisión manual",
       "minConfidence": "Confianza mínima (0-100)",
       "varConfidence": "Confianza VaR (0-1)",
@@ -17906,9 +17926,6 @@
       "signalMaFast": "Período de línea rápida de detección de cruce dorado de MA (3-30)",
       "signalMaSlow": "Período de línea lenta de detección de cruce dorado de MA (10-120)",
       "signalBreakoutVolumeMult": "Umbral de multiplicador de volumen para ruptura/rotura (1.0-3.0)",
-      "keylevelLookbackDays": "Ventana retrospectiva de niveles de precios clave (días de negociación, 10-250)",
-      "keylevelTouchTolerancePct": "Tolerancia de toque de nivel de precio clave (%, 0.1-5.0)",
-      "keylevelMinTouches": "Número mínimo de toques para confirmar soporte/resistencia (1-10)",
       "recoTrendEnabled": "Habilitar subestrategia de seguimiento de tendencia",
       "recoReversionEnabled": "Habilitar subestrategia de rebote por sobreventa",
       "recoValueEnabled": "Habilitar subestrategia de selección de valor",
@@ -18084,7 +18101,12 @@
     "pending": "Pendiente",
     "portfolio": {
       "importPartial": "Importación parcial",
-      "yuan": "yuanes"
+      "yuan": "yuanes",
+      "signalTitle": "Señal de cartera",
+      "signalBody": "{{count}} títulos se movieron en {{direction}}, fuerza {{pct}}% — {{action}}",
+      "signalBullish": "alcista",
+      "signalBearish": "bajista",
+      "signalNeutral": "neutral"
     },
     "references": "Referencias",
     "resonancePoint": "Punto de resonancia",
@@ -18222,6 +18244,21 @@
         "failed": "Fallido (histórico)",
         "unknown": "Estado desconocido"
       }
+    },
+    "monitor": {
+      "readFailed": "Error al leer el estado del monitor: {{reason}}",
+      "notAssembled": "Motor de monitorización no montado: alertas guardadas pero sin sondeo",
+      "pausedBySession": "{{session}} — sondeo en pausa",
+      "fetchFailed": "{{failed}}/{{total}} títulos fallaron este ciclo, sin evaluar",
+      "allFailedRounds": "{{rounds}} ciclos seguidos con todo fallido — la monitorización no genera alertas",
+      "firstRoundPending": "Monitor iniciado, primer ciclo sin terminar (~{{interval}} s)",
+      "emptyResponse": "El backend no devuelve estado del monitor",
+      "sessionNonTradingDay": "Día no negociable",
+      "sessionPreOpen": "Preapertura",
+      "sessionMorning": "Sesión de mañana",
+      "sessionLunchBreak": "Pausa de mediodía",
+      "sessionAfternoon": "Sesión de tarde",
+      "sessionPostClose": "Tras el cierre"
     }
   },
   "pipeline": {

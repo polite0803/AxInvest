@@ -188,6 +188,9 @@ fn na_key(factor: &'static str) -> &'static str {
 /// - `qualityRealizationBeyondHorizon`：盈利质量的兑现周期跨季，28 日窗口内只能部分反映。
 /// - `supplyAsRiskNoteOnly`：解禁/减持在中档已被趋势吸收，降为风险提示、不参与方向。
 /// - `trendFilterOnly`：长档技术腿只作入场时机过滤（R-11 明文不得进方向加权）。
+/// - `valuationFilterOnly`：90 日档估值腿只作**高估否决**（便宜不是买入理由，严重高估才拦下），
+///   不进方向加权（P0-3，`PLAN-stock-decision-reliability.md`：估值在 90 日窗内无方向预测力，
+///   实证 10-09 紫金 DCF 放行长档买入后 90 日内跌破决策价）。
 /// - `macroPartialSeriesOnly`：宏观只有五条真序列（P9-1），货币/社融类无供应。
 /// - `sectorRotationAsOfGap`：行业景气/轮动**live 有真源**（`get_industry_ranking`），
 ///   但回放不可得 —— BK 板块历史源已普查穷尽（本机对 push2* 族按累积量/速率触发 RST），
@@ -199,6 +202,7 @@ fn qualified_reason(key: &str) -> &'static str {
         "qualityRealizationBeyondHorizon" => "盈利质量兑现跨季，本窗口只能部分反映",
         "supplyAsRiskNoteOnly" => "供给冲击在窗口内已被趋势吸收，只作风险提示",
         "trendFilterOnly" => "技术腿只作入场时机过滤，不得进方向加权",
+        "valuationFilterOnly" => "90 日窗内估值无方向预测力：便宜不是买入理由，只作严重高估否决",
         "macroPartialSeriesOnly" => "宏观仅 CPI/PPI/PMI/非制造业 PMI/GDP 五条真序列",
         "sectorRotationAsOfGap" => "行业轮动 live 有源、回放结构性不可得，只作背景不进方向",
         other => panic!("未登记的条件字段标记键: {other}"),
@@ -522,9 +526,18 @@ impl Period {
                 "k_sigma_band",
             ),
             // 长档（90 日）：技术腿只作入场过滤；行业轮动 live 有源但回放不可得 ⇒ 条件字段。
+            //
+            // P0-3（`PLAN-stock-decision-reliability.md`，2026-10-16）：估值腿**移出方向加权、
+            // 降为高估否决过滤腿**（`valuationFilterOnly`）。实证：90 日窗口内估值分位/DCF
+            // 安全边际没有方向预测力（10-09 紫金矿业：DCF 上行 25.7% 放行长档买入，90 日内
+            // 即跌破决策价），而「低估 ⇒ 放行买入」的门会把周期顶部的乐观 DCF 当成开仓依据。
+            // 新口径（单向否决，与入场门 `portfolio-mgr-h-long.rhai` 同源改）：
+            //   估值**便宜不再是买入理由**，只有**严重高估才否决**；腿仍必产出（子图照挂
+            //   value-investor），信号照算，只是权重恒 0、不进 posterior。
             Period::Long => (
-                &["valuationBand", "earningsQuality", "expectationRevision", "macroRegime"],
+                &["earningsQuality", "expectationRevision", "macroRegime"],
                 &[
+                    ("valuationBand", "valuationFilterOnly"),
                     ("trendStrength", "trendFilterOnly"),
                     ("macroRegime", "macroPartialSeriesOnly"),
                     ("sectorRotation", "sectorRotationAsOfGap"),
@@ -822,11 +835,18 @@ mod tests {
         assert_eq!(
             long.qualified,
             vec![
+                ("valuationBand", "valuationFilterOnly"),
                 ("trendStrength", "trendFilterOnly"),
                 ("macroRegime", "macroPartialSeriesOnly"),
                 ("sectorRotation", "sectorRotationAsOfGap"),
             ],
-            "长档：趋势只作入场时机过滤、宏观仅五条真序列、行业轮动回放结构性不可得"
+            "长档：估值只作高估否决（P0-3）、趋势只作入场过滤、宏观仅五条真序列、行业轮动回放不可得"
+        );
+        // P0-3：估值腿降背景后仍必须**输出**（门要消费它做高估否决），只是不进方向加权
+        assert!(
+            long.fields.contains(&"valuationBand")
+                && !long.participating.contains(&"valuationBand"),
+            "长档估值腿必须是「必填但只作高估否决过滤」"
         );
         // 长档不得参与计算的短窗因子，必须走显式不适用而不是省略
         let na_long: Vec<&str> = long.not_applicable.iter().map(|(f, _)| *f).collect();
@@ -934,6 +954,7 @@ mod tests {
                 if *key == "trendFilterOnly"
                     || *key == "supplyAsRiskNoteOnly"
                     || *key == "breadthGateOnly"
+                    || *key == "valuationFilterOnly"
                 {
                     assert!(
                         !spec.participating.contains(f),
@@ -967,6 +988,11 @@ mod tests {
             long.fields.contains(&"trendStrength")
                 && !long.participating.contains(&"trendStrength"),
             "长档技术腿必须是「必填但只作过滤」"
+        );
+        assert!(
+            long.fields.contains(&"valuationBand")
+                && !long.participating.contains(&"valuationBand"),
+            "P0-3：长档估值腿必须是「必填但只作高估否决」，便宜不能当买入理由"
         );
         assert!(
             long.participating.contains(&"macroRegime"),
@@ -1027,6 +1053,10 @@ mod tests {
         assert!(long.contains("`target_and_falsified`"), "长档出场口径没渲染");
         assert!(long.contains("macroPartialSeriesOnly"), "长档宏观只有五条，必须标部分来源");
         assert!(long.contains("trendFilterOnly"), "长档技术腿只作入场过滤");
+        assert!(
+            long.contains("valuationFilterOnly"),
+            "P0-3：长档估值腿必须渲染为「只作高估否决」的条件字段"
+        );
         assert!(long.contains("notApplicableMomentum"), "长档要显式声明短窗动量不适用");
         assert!(!long.contains("microstructurePartialSource"), "串档：超短的条件键跑到长档文案里");
 

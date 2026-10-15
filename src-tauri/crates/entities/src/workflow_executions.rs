@@ -21,6 +21,9 @@ pub struct Model {
     pub execution_state_json: Option<String>,
     /// 暂停时间戳（毫秒），用于超时判断
     pub paused_at: Option<i64>,
+    /// 失败原因。表里没有这列时，校验失败/节点失败的细节只能落在日志里，
+    /// 界面上只剩一个 failed 标签，用户无从自查（见 ExecutionSummaryResponse.error_detail）。
+    pub error_detail: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

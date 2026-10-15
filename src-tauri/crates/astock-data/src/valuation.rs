@@ -542,6 +542,13 @@ pub struct ConclusionInputs<'a> {
     pub relative: &'a RelativeValuation,
     /// 格雷厄姆上行空间（%）
     pub graham_upside_pct: Option<f64>,
+    /// P0-4：行业是否命中周期组（有色/煤炭/钢铁/石化/航运/养殖/券商）。
+    ///
+    /// 仅在反向 DCF「经营上可达」分支生效：周期股的相对估值（PB/同业）在
+    /// 周期顶部同样会给出「便宜」读数，而现价若已隐含 **FCF 负增长**
+    /// （`implied_cagr < 0`），说明市场定价对应的是衰退预期 —— 此时
+    /// 「合理偏低 / 低估」结论与反向 DCF 直接矛盾，结论封顶「合理」。
+    pub cyclical: bool,
 }
 
 fn relative_stance(verdict: &str) -> &'static str {
@@ -767,15 +774,37 @@ pub fn build_conclusion(i: ConclusionInputs<'_>) -> ValuationConclusion {
                     )
                 },
                 _ => {
-                    let act = action_from_relative(&i.relative.verdict);
+                    let raw_act = action_from_relative(&i.relative.verdict);
+                    // P0-4④：周期股 + 现价隐含 FCF 负增长 ⇒ 禁「合理偏低 / 低估」。
+                    // 反向 DCF 可行（经营上可达）只说明假设不极端，并不说明便宜；
+                    // 隐含 g<0 表示现价对应的已是衰退预期，此时相对估值的「便宜」
+                    // 读数（周期顶部 PB/PE 同源扭曲）不得给出看多结论，封顶「合理」。
+                    let negative_g_cap = i.cyclical && r.implied_cagr < 0.0;
+                    let act = if negative_g_cap && (raw_act == "合理偏低" || raw_act == "低估")
+                    {
+                        "合理"
+                    } else {
+                        raw_act
+                    };
+                    let cap_note = if act != raw_act {
+                        format!(
+                            "（P0-4 周期股约束：现价已隐含 FCF 年复合 {:.1}% 的负增长，\
+                             相对估值「{}」结论不予采信，封顶「合理」）",
+                            r.implied_cagr * 100.0,
+                            raw_act
+                        )
+                    } else {
+                        String::new()
+                    };
                     (
                         act.to_string(),
                         format!(
                             "反向 DCF：现价隐含 FCF 年复合 {:.0}%（经营上可达）⇒ 市场假设不极端；\
-                             相对估值口径 {}，判为「{}」。",
+                             相对估值口径 {}，判为「{}」。{}",
                             r.implied_cagr * 100.0,
                             i.relative.verdict,
-                            act
+                            act,
+                            cap_note
                         ),
                     )
                 },
@@ -1036,6 +1065,7 @@ mod tests {
             reverse: Some(&r),
             relative: &rel,
             graham_upside_pct: None,
+            cyclical: false,
         });
         assert_eq!(c.primary_method, "reverse_dcf");
         assert_eq!(c.action, "高估");
@@ -1060,6 +1090,7 @@ mod tests {
             reverse: None,
             relative: &rel,
             graham_upside_pct: None,
+            cyclical: false,
         });
         assert_eq!(c.primary_method, "none");
         assert_eq!(c.action, "数据不足");
@@ -1083,6 +1114,7 @@ mod tests {
             reverse: None,
             relative: &rel,
             graham_upside_pct: Some(10.0),
+            cyclical: false,
         });
         assert_eq!(c.primary_method, "dcf");
         assert_eq!(c.action, "低估");
@@ -1141,6 +1173,7 @@ mod tests {
             reverse: Some(&r),
             relative: &rel,
             graham_upside_pct: Some(-88.5),
+            cyclical: false,
         });
         assert_eq!(c.primary_method, "reverse_dcf", "收益率过关、覆盖率不过关 ⇒ 必须让位");
         assert!(!c.legs.iter().any(|l| l.method == "dcf"), "不合格时 DCF 腿不得进 legs");
@@ -1169,6 +1202,7 @@ mod tests {
                 reverse: None,
                 relative: &rel,
                 graham_upside_pct: None,
+                cyclical: false,
             });
             assert_eq!(
                 c.primary_method, "dcf",
@@ -1185,6 +1219,7 @@ mod tests {
             reverse: None,
             relative: &rel,
             graham_upside_pct: None,
+            cyclical: false,
         });
         assert_ne!(c.primary_method, "dcf", "乐观档缺数时不得放行正向 DCF 主口径");
     }
@@ -1210,6 +1245,7 @@ mod tests {
             reverse: None,
             relative: &rel,
             graham_upside_pct: None,
+            cyclical: false,
         });
         assert_eq!(c.primary_method, "dcf", "两条地板都过 ⇒ 主口径仍是 DCF（冲突不等于剔除）");
         assert_eq!(c.conflicts.len(), 1, "方向相反 ⇒ 必须有一条冲突");
@@ -1244,6 +1280,7 @@ mod tests {
             reverse: None,
             relative: &cheap,
             graham_upside_pct: None,
+            cyclical: false,
         };
         assert!(
             build_conclusion(same_way).conflicts.is_empty(),
@@ -1258,6 +1295,7 @@ mod tests {
             reverse: None,
             relative: &dear,
             graham_upside_pct: None,
+            cyclical: false,
         };
         assert_eq!(
             build_conclusion(opposite).conflicts.len(),
@@ -1298,6 +1336,7 @@ mod tests {
             reverse: Some(&r),
             relative: &rel,
             graham_upside_pct: Some(-88.5),
+            cyclical: false,
         });
         // 前置：DCF 腿确实被摘（否则本测试没测到覆盖面）
         assert_eq!(c.primary_method, "reverse_dcf");
@@ -1344,6 +1383,7 @@ mod tests {
             reverse: Some(&r),
             relative: &rel,
             graham_upside_pct: None,
+            cyclical: false,
         });
         assert_eq!(c.primary_method, "reverse_dcf", "收益率越天花板 ⇒ 必须让位反向 DCF");
         assert!(!c.legs.iter().any(|l| l.method == "dcf"), "DCF 腿不得进 legs");
@@ -1362,8 +1402,74 @@ mod tests {
             reverse: Some(&r),
             relative: &rel,
             graham_upside_pct: None,
+            cyclical: false,
         });
         assert_eq!(c2.primary_method, "dcf", "10% 在 15% 天花板内 ⇒ 不得误伤");
         assert!(c2.legs.iter().any(|l| l.method == "dcf"));
+    }
+
+    /// P0-4④：周期股 + 现价隐含 FCF **负增长**（市场已定价温和衰退）+ 相对估值
+    /// 自身历史 30 分位（undervalued）⇒ 反向 DCF 虽经营上可达，也不得给「合理偏低」，
+    /// 必须封顶「合理」；非周期同一组输入保持「合理偏低」，证明差异只来自行业开关。
+    #[test]
+    fn p0_4_cyclical_negative_implied_g_caps_undervalued_conclusion() {
+        // fcf_ps=1.0；现价 12 元落在 pv(-95%) 与 pv(0) 之间 ⇒ 反解出温和负 g
+        let r = reverse_dcf(ReverseDcfInputs {
+            fcf_anchor: 10.0e8,
+            total_shares: 10.0e8,
+            current_price: 12.0,
+            discount_rate: 0.077,
+            perpetual_growth: 0.013,
+            min_terminal_spread: 0.015,
+            forecast_years: 5,
+            revenue_0: Some(100.0e8),
+            revenue_yoy: Some(0.0),
+        })
+        .expect("有解");
+        assert!(
+            r.implied_cagr < 0.0,
+            "前置：现价应隐含负增长，实得 {:.2}%",
+            r.implied_cagr * 100.0
+        );
+        assert_eq!(
+            r.feasibility, "Plausible",
+            "前置：营收基数大 ⇒ 经营上可达，不进 Impossible/Strained"
+        );
+
+        let rel = relative_valuation(&[MetricInput {
+            name: "PE",
+            value: Some(18.0),
+            percentile: Some(30.0), // 30 分位 ⇒ undervalued ⇒ 动作「合理偏低」
+            peer_values: vec![],
+        }]);
+        assert_eq!(rel.verdict, "undervalued");
+
+        let mk = |cyclical: bool| {
+            build_conclusion(ConclusionInputs {
+                dcf_applicable: false,
+                dcf_upside_pct: None,
+                fcf_yield: None,
+                dcf_high_to_price: None,
+                reverse: Some(&r),
+                relative: &rel,
+                graham_upside_pct: None,
+                cyclical,
+            })
+        };
+
+        // 周期股：封顶「合理」，headline 必须显式交代这是 P0-4 约束而非自然读数
+        let cyc = mk(true);
+        assert_eq!(cyc.primary_method, "reverse_dcf");
+        assert_eq!(cyc.action, "合理", "负 g + 周期 ⇒ 不得给看多动作");
+        assert!(
+            cyc.headline.contains("P0-4 周期股约束") && cyc.headline.contains("封顶「合理」"),
+            "headline 须点名封顶理由：{}",
+            cyc.headline
+        );
+
+        // 对照：非周期同输入 ⇒ 保留「合理偏低」
+        let plain = mk(false);
+        assert_eq!(plain.action, "合理偏低", "非周期不受负 g 封顶约束");
+        assert!(!plain.headline.contains("P0-4"));
     }
 }

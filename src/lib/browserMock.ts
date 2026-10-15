@@ -7046,6 +7046,26 @@ async function executeCommand<T>(
       return batchId as unknown as T;
     }
 
+    // ── 股票交易面板（TradePage：组合监控 + 交易日志 + 批量导入 + 执行回放）──
+    // 这些命令此前全落到 default 的兜底：`get_` 开头一律返回 `{}`、其余返回 `undefined`。
+    // 后果是「浏览器模式整个交易 tab 崩」——组合面板把 `{}` 当成有数据（`typeof {} === "object"`），
+    // 再往下读 positions / stressTest 就是 TypeError，被 PageErrorBoundary 兜成整页错误；
+    // parse_trades_csv 得到 undefined 后调用方读 `.length` 直接抛。此处给它们合法的空结构。
+    case "get_portfolio_dashboard":
+      // 必须返回 null 而不是 {}：面板用 `typeof === "object"` 判「有没有数据」，{} 会被当成有
+      return null as unknown as T;
+    case "list_trades":
+    case "get_trade_positions":
+    case "parse_trades_csv":
+      return [] as unknown as T;
+    case "get_trading_enabled":
+      return false as unknown as T;
+    case "import_trades":
+      return { total: 0, valid: 0, skipped: 0, failed: 0, errors: [], preview: [] } as unknown as T;
+    case "record_trade":
+    case "toggle_trading_enabled":
+      return null as unknown as T;
+
     default: {
       console.warn(`[BrowserMock] Unhandled command: ${cmd}`, args);
       // SAFE: browser mock fallback for unhandled commands — returns empty placeholder matching generic T

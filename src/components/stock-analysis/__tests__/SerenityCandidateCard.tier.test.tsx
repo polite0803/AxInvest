@@ -25,6 +25,19 @@ vi.mock("@/lib/invoke", () => ({
   isTauri: () => false,
 }));
 
+/**
+ * 收尾：等挂载副作用（数据请求）落地。
+ *
+ * 为什么必须有：页面挂载后会异步拉数据，测试同步结束 ⇒ setState 落在测试之外 ⇒
+ * React 报 "not wrapped in act"。为什么必须放在**断言之后**：这些用例断言的是
+ * **初始渲染态**，提前 flush 会把组件推进"加载完成"态，断言随之失效（实测会让 3 条用例变红）。
+ * 为什么不能用 afterEach：React 是在 setState 那一刻检查的，而那一刻在测试函数返回后、
+ * afterEach 之前 —— 收尾钩子永远太晚。
+ */
+const settle = async () => {
+  await act(async () => {});
+};
+
 function renderCard(candidate: SerenityCandidate) {
   return render(
     <MemoryRouter>
@@ -145,7 +158,7 @@ describe("面板一票一卡（逐档折叠，最多四档）", () => {
     );
   }
 
-  it("同票两档 ⇒ 折叠成一张卡、卡内两行档位（中期/长期），标题按票计数", () => {
+  it("同票两档 ⇒ 折叠成一张卡、卡内两行档位（中期/长期），标题按票计数", async () => {
     act(() => {
       useSerenityStore.setState({
         candidates: [
@@ -163,9 +176,10 @@ describe("面板一票一卡（逐档折叠，最多四档）", () => {
     expect(screen.getAllByText("落库中期")).toHaveLength(1);
     expect(screen.queryByText("落库长期")).toBeNull();
     expect(screen.getByText(/候选标的\s*\(1\s*只\)/)).toBeTruthy();
+    await settle();
   });
 
-  it("四档同票 ⇒ 一张卡内四行，按 超短→短→中→长 排列", () => {
+  it("四档同票 ⇒ 一张卡内四行，按 超短→短→中→长 排列", async () => {
     act(() => {
       useSerenityStore.setState({
         candidates: [
@@ -184,9 +198,10 @@ describe("面板一票一卡（逐档折叠，最多四档）", () => {
       "长期",
     ]);
     expect(screen.getByText(/候选标的\s*\(1\s*只\)/)).toBeTruthy();
+    await settle();
   });
 
-  it("两票 ⇒ 两张卡，标题按票数计 2 只", () => {
+  it("两票 ⇒ 两张卡，标题按票数计 2 只", async () => {
     act(() => {
       useSerenityStore.setState({
         candidates: [
@@ -198,5 +213,6 @@ describe("面板一票一卡（逐档折叠，最多四档）", () => {
     renderPanel();
     expect(screen.getAllByTestId("serenity-tier")).toHaveLength(2);
     expect(screen.getByText(/候选标的\s*\(2\s*只\)/)).toBeTruthy();
+    await settle();
   });
 });

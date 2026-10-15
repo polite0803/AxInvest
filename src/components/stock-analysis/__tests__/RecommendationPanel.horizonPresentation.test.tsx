@@ -1,7 +1,7 @@
 import i18n from "@/i18n";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { BacktestComparisonResponse, StrategyStats } from "@/types/stock-analysis";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -121,6 +121,19 @@ async function waitNotLoading() {
   await waitFor(() => expect(findRefreshButton()).not.toHaveClass("ant-btn-loading"));
 }
 
+/**
+ * 收尾：等挂载副作用（数据请求）落地。
+ *
+ * 为什么必须有：本用例渲染的 RecoStrategyMatrix 会挂载含异步取数的子面板，
+ * 用例同步结束 ⇒ setState 落在测试之外 ⇒ React 报 "not wrapped in act"。
+ * 为什么放在**断言之后**：断言针对的是挂载后的呈现态，提前 flush 会把组件推进
+ * "加载完成"态，有让断言失效的风险。为什么不能用 afterEach 兜底：React 是在 setState
+ * 那一刻检查的，而那一刻在测试函数返回后、afterEach 之前 —— 收尾钩子永远太晚。
+ */
+const settle = async () => {
+  await act(async () => {});
+};
+
 beforeEach(() => {
   invokeMock.mockReset();
   useTimeAnchorStore.setState({
@@ -150,7 +163,7 @@ describe("档位显示名（F1 / F2 / F8）", () => {
     expect(screen.getByText("midterm")).toBeTruthy();
   });
 
-  it("回测矩阵表头必须四档齐全（缺 ultra_short 即红）", () => {
+  it("回测矩阵表头必须四档齐全（缺 ultra_short 即红）", async () => {
     renderWithI18n(
       <RecoStrategyMatrix
         data={comparisonResponse([
@@ -162,6 +175,7 @@ describe("档位显示名（F1 / F2 / F8）", () => {
     for (const label of ["超短线", "短线", "中期", "长期"]) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
+    await settle();
   });
 });
 

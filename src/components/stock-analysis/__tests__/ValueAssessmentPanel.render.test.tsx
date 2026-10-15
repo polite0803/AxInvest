@@ -1,6 +1,6 @@
 // 估值评估 tab「页面错误」复现 + 回归测试：
 // 用 DB 实际 value-investor 输出渲染 ValueAssessmentPanel，并锁定 ReportMarkdown 的 content 收敛契约
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import fs from "node:fs";
 import path from "node:path";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -80,17 +80,42 @@ beforeEach(() => {
   invokeMock.mockClear();
 });
 
+/**
+ * 收尾：等挂载副作用（数据请求）落地。
+ *
+ * 为什么必须有：页面挂载后会异步拉数据，测试同步结束 ⇒ setState 落在测试之外 ⇒
+ * React 报 "not wrapped in act"。为什么必须放在**断言之后**：这些用例断言的是
+ * **初始渲染态**，提前 flush 会把组件推进"加载完成"态，断言随之失效。
+ * 为什么不能用 afterEach：React 是在 setState 那一刻检查的，而那一刻在测试函数返回后、
+ * afterEach 之前 —— 收尾钩子永远太晚。
+ *
+ * 本文件为何先 cleanup() 再排空（WatchlistPage 样板是裸 `await act(async () => {})`）：
+ * 这些用例的 store 都带 stockCode ⇒ 裸 flush 时 React 会在 invoke 链 settle **之前**
+ * 先提交一次 loading=true 的中间态（act 的 flush 紧随首个微任务，早于 .then/.finally 链），
+ * 于是挂载 ValuationBandChart → ECharts/zrender 在 jsdom 里取不到 2d context（未装 canvas
+ * 包）⇒ effect 里抛 TypeError（实测 18/18 用例变红，连写两次 settle 也救不回：第一次就 reject）。
+ * 先 cleanup（RTL 的卸载，内部已包 act）把 effect 的 cancelled 置真 ⇒ 异步链整体短路，
+ * 不产生任何测试外的 setState，也不触发绘图。异步更新链本身的覆盖由
+ * 「store.stockCode 有值时 → 触发 compute_valuation_band」用 waitFor 兜住。
+ */
+const settle = async () => {
+  cleanup();
+  await act(async () => {});
+};
+
 describe("ValueAssessmentPanel 真实数据渲染复现（页面错误回归）", () => {
-  it("600089 完整估值报告（V74 前形态）→ 渲染不抛错", () => {
+  it("600089 完整估值报告（V74 前形态）→ 渲染不抛错", async () => {
     seedStore(REPORT_600089, "600089");
     expect(() => render(<ValueAssessmentPanel />)).not.toThrow();
+    await settle();
   });
 
-  it("300620 V74 后形态（margin_of_safety 为 number）→ 渲染不抛错", () => {
+  it("300620 V74 后形态（margin_of_safety 为 number）→ 渲染不抛错", async () => {
     seedStore(REPORT_300620);
     // 修复前此处抛 TypeError: initialMarkdown.startsWith is not a function
     // → 整页落入 PageErrorBoundary 的「页面错误」兜底
     expect(() => render(<ValueAssessmentPanel />)).not.toThrow();
+    await settle();
   });
 
   it("store.stockCode 有值时 → 触发 compute_valuation_band（估值带不再是死路）", async () => {
@@ -144,7 +169,7 @@ describe("估值前提标注", () => {
     growthBandAllNegative: false,
   };
 
-  it("命中不适用 / 封顶 ⇒ 渲染标注，且**排在估值卡片之前**", () => {
+  it("命中不适用 / 封顶 ⇒ 渲染标注，且**排在估值卡片之前**", async () => {
     seedStore(REPORT_300620, "300620");
     useStockAnalysisStore.setState({ valuationApplicability: APPLICABILITY });
     render(<ValueAssessmentPanel />);
@@ -163,16 +188,18 @@ describe("估值前提标注", () => {
     expect(noticeIdx).toBeGreaterThan(-1);
     expect(cardIdx).toBeGreaterThan(-1);
     expect(noticeIdx).toBeLessThan(cardIdx);
+    await settle();
   });
 
-  it("dcfApplicable=false 时不再重复报「锚定是代理」（两条同因会互相冲淡）", () => {
+  it("dcfApplicable=false 时不再重复报「锚定是代理」（两条同因会互相冲淡）", async () => {
     seedStore(REPORT_300620, "300620");
     useStockAnalysisStore.setState({ valuationApplicability: APPLICABILITY });
     render(<ValueAssessmentPanel />);
     expect(screen.queryByText("stockAnalysis.valuationApplicability.anchorIsFallback")).toBeNull();
+    await settle();
   });
 
-  it("DCF 腿仍在参与但锚定是历史代理 ⇒ 必须报锚定口径", () => {
+  it("DCF 腿仍在参与但锚定是历史代理 ⇒ 必须报锚定口径", async () => {
     seedStore(REPORT_300620, "300620");
     useStockAnalysisStore.setState({
       valuationApplicability: {
@@ -187,22 +214,25 @@ describe("估值前提标注", () => {
     expect(
       screen.getAllByText("stockAnalysis.valuationApplicability.anchorIsFallback").length,
     ).toBeGreaterThanOrEqual(1);
+    await settle();
   });
 
-  it("两条腿都不可用 ⇒ 报「估值维度整体退出」", () => {
+  it("两条腿都不可用 ⇒ 报「估值维度整体退出」", async () => {
     seedStore(REPORT_300620, "300620");
     useStockAnalysisStore.setState({
       valuationApplicability: { ...APPLICABILITY, dcfLegUsed: false, grahamLegUsed: false },
     });
     render(<ValueAssessmentPanel />);
     expect(screen.getByText("stockAnalysis.valuationApplicability.allLegsExcluded")).toBeTruthy();
+    await settle();
   });
 
-  it("**反向对照**：valuationApplicability=null ⇒ 一条标注都不渲染（不凭空报警）", () => {
+  it("**反向对照**：valuationApplicability=null ⇒ 一条标注都不渲染（不凭空报警）", async () => {
     seedStore(REPORT_300620, "300620");
     render(<ValueAssessmentPanel />);
     expect(screen.queryByText("stockAnalysis.valuationApplicability.title")).toBeNull();
     expect(screen.queryByText("stockAnalysis.valuationApplicability.allLegsExcluded")).toBeNull();
+    await settle();
   });
 });
 
@@ -230,7 +260,7 @@ describe("I1：DCF 不适用时估值区间不进结论区", () => {
     growthBandAllNegative: false,
   };
 
-  it("applicable=false ⇒ 违规区间串（0.69-0.94）与安全边际不得出现在估值结论区", () => {
+  it("applicable=false ⇒ 违规区间串（0.69-0.94）与安全边际不得出现在估值结论区", async () => {
     seedStore(REPORT_601399, "601399");
     useStockAnalysisStore.setState({ valuationApplicability: NOT_APPLICABLE });
     render(<ValueAssessmentPanel />);
@@ -241,18 +271,20 @@ describe("I1：DCF 不适用时估值区间不进结论区", () => {
     // 闸口生效的可见证据：结论区出现「不适用」文案（前提标注 + 结论区至少各一）
     expect(screen.getAllByText("stockAnalysis.valuationApplicability.dcfNotApplicable").length)
       .toBeGreaterThanOrEqual(2);
+    await settle();
   });
 
-  it("**反向锁**：dcfApplicable=true ⇒ 区间照常展示（闸口不是无条件屏蔽）", () => {
+  it("**反向锁**：dcfApplicable=true ⇒ 区间照常展示（闸口不是无条件屏蔽）", async () => {
     seedStore(REPORT_601399, "601399");
     useStockAnalysisStore.setState({
       valuationApplicability: { ...NOT_APPLICABLE, dcfApplicable: true, anchorIsFallback: false },
     });
     render(<ValueAssessmentPanel />);
     expect(screen.getAllByText(/0\.69/).length).toBeGreaterThanOrEqual(1);
+    await settle();
   });
 
-  it("J1：dcfApplicable=true 但锚定是历史代理 ⇒ 区间同样不进结论区（只报口径）", () => {
+  it("J1：dcfApplicable=true 但锚定是历史代理 ⇒ 区间同样不进结论区（只报口径）", async () => {
     seedStore(REPORT_601399, "601399");
     useStockAnalysisStore.setState({
       valuationApplicability: { ...NOT_APPLICABLE, dcfApplicable: true, dcfLegUsed: true },
@@ -263,6 +295,7 @@ describe("I1：DCF 不适用时估值区间不进结论区", () => {
     expect(
       screen.getAllByText("stockAnalysis.valuationApplicability.anchorIsFallback").length,
     ).toBeGreaterThanOrEqual(1);
+    await settle();
   });
 });
 
@@ -290,7 +323,7 @@ const REPORT_WITH_CONCLUSION = JSON.stringify({
 });
 
 describe("V92：算法估值结论置顶", () => {
-  it("有 valuation_conclusion ⇒ 结论置顶且区块标题标为算法 DCF 区间", () => {
+  it("有 valuation_conclusion ⇒ 结论置顶且区块标题标为算法 DCF 区间", async () => {
     seedStore(REPORT_WITH_CONCLUSION, "301269");
     render(<ValueAssessmentPanel />);
 
@@ -308,13 +341,15 @@ describe("V92：算法估值结论置顶", () => {
     expect(algoIdx).toBeGreaterThan(-1);
     expect(cardIdx).toBeGreaterThan(-1);
     expect(algoIdx).toBeLessThan(cardIdx);
+    await settle();
   });
 
-  it("**反向锁**：无 valuation_conclusion ⇒ 不显示结论区（不伪造算法结论）", () => {
+  it("**反向锁**：无 valuation_conclusion ⇒ 不显示结论区（不伪造算法结论）", async () => {
     seedStore(REPORT_300620, "300620");
     render(<ValueAssessmentPanel />);
     expect(screen.queryByText("stockAnalysis.valueAssessment.algorithmConclusion")).toBeNull();
     expect(screen.queryByText("stockAnalysis.valueAssessment.algorithmRangeBand")).toBeNull();
+    await settle();
   });
 });
 
@@ -338,7 +373,7 @@ describe("K3：三档增速全负时区间必须改口", () => {
     growthBandAllNegative: true,
   };
 
-  it("命中 ⇒ 标题换成衰退带 + 前提标注出现，且旧标题不残留", () => {
+  it("命中 ⇒ 标题换成衰退带 + 前提标注出现，且旧标题不残留", async () => {
     seedStore(REPORT_WITH_CONCLUSION, "301269");
     useStockAnalysisStore.setState({ valuationApplicability: DECLINE });
     render(<ValueAssessmentPanel />);
@@ -352,9 +387,10 @@ describe("K3：三档增速全负时区间必须改口", () => {
     expect(screen.queryByText("stockAnalysis.valueAssessment.algorithmRangeBand")).toBeNull();
     // 区间数值本身**仍然展示**：K3 只纠措辞，不屏蔽（锚是真的，数值可用）
     expect(screen.getByText(/2\.16-4\.42/)).toBeTruthy();
+    await settle();
   });
 
-  it("**反向锁**：growthBandAllNegative=false ⇒ 两条新文案都不得出现", () => {
+  it("**反向锁**：growthBandAllNegative=false ⇒ 两条新文案都不得出现", async () => {
     seedStore(REPORT_WITH_CONCLUSION, "301269");
     useStockAnalysisStore.setState({
       valuationApplicability: { ...DECLINE, growthBandAllNegative: false },
@@ -367,9 +403,10 @@ describe("K3：三档增速全负时区间必须改口", () => {
       screen.queryByText("stockAnalysis.valuationApplicability.growthBandAllNegative"),
     ).toBeNull();
     expect(screen.getByText("stockAnalysis.valueAssessment.algorithmRangeBand")).toBeTruthy();
+    await settle();
   });
 
-  it("DCF 腿已被剔除 ⇒ 不重复报（区间本就不展示，报了是噪声）", () => {
+  it("DCF 腿已被剔除 ⇒ 不重复报（区间本就不展示，报了是噪声）", async () => {
     seedStore(REPORT_WITH_CONCLUSION, "301269");
     useStockAnalysisStore.setState({
       valuationApplicability: { ...DECLINE, dcfApplicable: false },
@@ -378,6 +415,7 @@ describe("K3：三档增速全负时区间必须改口", () => {
     expect(
       screen.queryByText("stockAnalysis.valuationApplicability.growthBandAllNegative"),
     ).toBeNull();
+    await settle();
   });
 });
 
@@ -402,15 +440,16 @@ describe("ValueAssessmentPanel 逐档 value 槽位（四周期回归）", () => 
     }
   }
 
-  it("只写带档键 ⇒ 主卡仍渲染（裸键回退不再必要）", () => {
+  it("只写带档键 ⇒ 主卡仍渲染（裸键回退不再必要）", async () => {
     seedTiered({ "value-investor--mid": REPORT_600089 });
     render(<ValueAssessmentPanel />);
     // 主卡标题（buffettLabel 与 title 两个 i18n 键都在）
     expect(screen.getByText("stockAnalysis.valueAssessment.buffettLabel")).toBeTruthy();
     expect(screen.getByText("stockAnalysis.valueAssessment.title")).toBeTruthy();
+    await settle();
   });
 
-  it("多档 ⇒ 出现档位切换条（中线 / 长线各一个）", () => {
+  it("多档 ⇒ 出现档位切换条（中线 / 长线各一个）", async () => {
     seedTiered(TIERED);
     render(<ValueAssessmentPanel />);
     // 切换条内每档一个 chip；用 testid 限定作用域 —— 当前档的标签同时出现在卡片标题的 Tag 里，
@@ -419,12 +458,14 @@ describe("ValueAssessmentPanel 逐档 value 槽位（四周期回归）", () => 
     expect(within(bar).getByText("stockAnalysis.timeHorizonMid")).toBeTruthy();
     expect(within(bar).getByText("stockAnalysis.timeHorizonLong")).toBeTruthy();
     expect(within(bar).getAllByRole("button")).toHaveLength(2);
+    await settle();
   });
 
-  it("裸键形态（≤v132 历史快照）⇒ 单卡、无切换条", () => {
+  it("裸键形态（≤v132 历史快照）⇒ 单卡、无切换条", async () => {
     seedTiered({ "value-investor": REPORT_600089 });
     render(<ValueAssessmentPanel />);
     expect(screen.getByText("stockAnalysis.valueAssessment.buffettLabel")).toBeTruthy();
     expect(screen.queryByText("stockAnalysis.timeHorizonMid")).toBeNull();
+    await settle();
   });
 });

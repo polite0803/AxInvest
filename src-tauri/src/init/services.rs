@@ -2141,6 +2141,9 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
     // executor，导致所有定时任务的 delivery 配置都是死配置。这里接上后，
     // 任务可通过 CronDeliveryConfig 把执行结果推送到 webhook / 文件 / 通知渠道。
     let cron_stock_adaptive_engine = state.stock_adaptive_engine.clone();
+    // 组合指标日更（裁定 5 ①）需要持仓来源 = 交易引擎；此前 cron 分支拿不到它
+    // （只有命令面的 `state` 能读），所以收盘刷新从来没有定时触发方。
+    let cron_trading_engine = state.trading_engine.clone();
     let delivery_sink: std::sync::Arc<dyn axagent_harness::cron_delivery::CronDeliverySink> =
         create_cron_delivery_sink(state);
     /// 定时任务必须**显式声明自己的模式**，且只能用 **task_local**、不能用进程级压栈。
@@ -2226,6 +2229,10 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
         // trend-screening 本身走下方 workflow_id 兜底分支，闸门按 task_type
         // 标记拦在它进入兜底分支之前。
         //
+        // portfolio-metrics（裁定 5 ①，收盘日更）进闸门：它的产物**就是**当日收盘净值行，
+        //   休市日跑等于把同一份旧价再落一行，还会把重复样本塞进 90 日回撤窗口。
+        // intent-expiry（裁定 14）**不进**闸门：只改库里的状态列，不读当日行情。
+        //
         // skip 也 record_run：任务列表里如实显示「非交易日，跳过」。静默 return 的
         // 话，「跑了但被闸门拦下」与「没跑」两种缺席在界面上长得一样。
         {
@@ -2237,6 +2244,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     | Some("batch-reflection")
                     | Some("validate-decisions")
                     | Some(crate::commands::recommendation_cron::TREND_SCREENING_TASK_TYPE)
+                    | Some(crate::commands::constants::PORTFOLIO_METRICS_TASK_TYPE)
             );
             if gated {
                 let today = chrono::Local::now().date_naive();
@@ -3416,6 +3424,158 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
             }));
             return;
         }
+        // 组合指标日更：task_type = portfolio-metrics（裁定 5 ①，收盘后 16:00）
+        //
+        // 这条链原先**只有面板「立即刷新」一个触发方** ⇒ 不点按钮就没有当日行，现网组合三表
+        // 恒 0 行；时间旅行读回来的空面板是「没人写过快照」，不是逻辑缺失。
+        // 走上方交易日闸门：休市日跑只会把同一份旧价再落一行，重复样本还会塞满 90 日回撤窗口。
+        // 无持仓 ⇒ skipped（`refresh_portfolio_for_scheduler` 返 None，不落全 0 行）。
+        if job.task_type.as_deref()
+            == Some(crate::commands::constants::PORTFOLIO_METRICS_TASK_TYPE)
+        {
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let quotes = astock_client.clone();
+            let engine = cron_trading_engine.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            tokio::task::spawn(cron_live(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
+
+                let result = match crate::commands::stock_analysis::refresh_portfolio_for_scheduler(
+                    &db,
+                    &*quotes,
+                    &engine,
+                )
+                .await
+                {
+                    Ok(Some(summary)) => {
+                        tracing::info!(
+                            "[CronScheduler] 组合日更 '{}' 完成：覆盖 {} 只持仓、相关性 {} 对",
+                            job_name,
+                            summary.positions_snapshotted,
+                            summary.correlation_pairs_written
+                        );
+                        axagent_runtime_core::TaskRunResult {
+                            success: true,
+                            output: Some(format!(
+                                "已落收盘快照：覆盖 {} 只持仓、相关性 {} 对",
+                                summary.positions_snapshotted, summary.correlation_pairs_written
+                            )),
+                            error: None,
+                            duration_ms: elapsed(),
+                            executed_at: started,
+                            skipped: false,
+                        }
+                    },
+                    // 空仓是合法状态，不是故障：既不落 0 行，也不报成功刷了快照
+                    Ok(None) => {
+                        tracing::info!("[CronScheduler] 组合日更 '{}' 跳过：当前无持仓", job_name);
+                        axagent_runtime_core::TaskRunResult {
+                            success: true,
+                            output: Some("当前无持仓，本轮不落快照".to_string()),
+                            error: None,
+                            duration_ms: elapsed(),
+                            executed_at: started,
+                            skipped: true,
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!("[CronScheduler] 组合日更 '{}' 失败: {e}", job_name);
+                        axagent_runtime_core::TaskRunResult {
+                            success: false,
+                            output: None,
+                            error: Some(e),
+                            duration_ms: elapsed(),
+                            executed_at: started,
+                            skipped: false,
+                        }
+                    },
+                };
+
+                store.record_run(&job_id, result).await;
+                if !recurring
+                    && !store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await
+                {
+                    tracing::warn!(
+                        "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                         （未找到该任务或持久化失败，下次到点会重复跑）",
+                        job_id
+                    );
+                }
+            }));
+            return;
+        }
+        // pending 交易意图自动过期：task_type = intent-expiry（裁定 14，开盘前 07:30）
+        //
+        // 过期能力原先只挂在下线的 risk_inspection 链上（阶段 F-5 退役），此后**没有任何触发方**
+        // ⇒ pending 只增不减，陈旧意图与新鲜的一起摆在待办里。时刻排在 07:00 决策回测之后、
+        // 09:30 开盘之前：用户早上审待办时看到的已是最新过期态。
+        // **不进**交易日闸门：只改库里的状态列，不读当日行情，休市日跑同样在推进。
+        // 时长取命令面同一个常量（`DEFAULT_INTENT_MAX_AGE_HOURS`），不在 cron 侧另抄一份。
+        if job.task_type.as_deref() == Some(crate::commands::constants::INTENT_EXPIRY_TASK_TYPE) {
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            tokio::task::spawn(cron_live(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
+                let hours = crate::commands::trade_intent::DEFAULT_INTENT_MAX_AGE_HOURS;
+
+                let result =
+                    match crate::commands::trade_intent::expire_intents_for_scheduler(&db).await {
+                        Ok(n) => {
+                            tracing::info!(
+                                "[CronScheduler] 意图过期 '{}' 完成：{} 条（超过 {hours} 小时）",
+                                job_name,
+                                n
+                            );
+                            axagent_runtime_core::TaskRunResult {
+                                success: true,
+                                output: Some(format!(
+                                    "已过期 {n} 条 pending 交易意图（超过 {hours} 小时未审核）"
+                                )),
+                                error: None,
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                                // 0 条 = 没有超时待办，如实记 skip，不伪装成「过期了一批」
+                                skipped: n == 0,
+                            }
+                        },
+                        Err(e) => {
+                            tracing::error!("[CronScheduler] 意图过期 '{}' 失败: {e}", job_name);
+                            axagent_runtime_core::TaskRunResult {
+                                success: false,
+                                output: None,
+                                error: Some(e),
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                                skipped: false,
+                            }
+                        },
+                    };
+
+                store.record_run(&job_id, result).await;
+                if !recurring
+                    && !store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await
+                {
+                    tracing::warn!(
+                        "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                         （未找到该任务或持久化失败，下次到点会重复跑）",
+                        job_id
+                    );
+                }
+            }));
+            return;
+        }
         if let Some(ref wf_id) = job.workflow_id {
             let engine = work_engine.clone();
             let store = cron_store.clone();
@@ -3920,6 +4080,23 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
                 },
             }
 
+            // 条件单定义读进内存引擎（与行情回调共用桥接层那一份「行 → 规则」映射）。
+            // 装载失败不阻断价格监控启动，但必须点名 —— 那意味着风控这一轮在盯空列表。
+            match axagent_analysis_engine::conditional_order_bridge::ConditionalOrderBridge::refresh(
+                &db,
+            )
+            .await
+            {
+                Ok(report) => tracing::info!(
+                    "[startup] 条件单装载完成：{} 条参与评估 / {} 行读不回",
+                    report.loaded,
+                    report.rejected.len()
+                ),
+                Err(e) => {
+                    tracing::warn!("[startup] 条件单装载失败（风控评估将从空规则开始）: {e}");
+                },
+            }
+
             let monitor_arc = std::sync::Arc::new(monitor);
             let injected = {
                 let state = app_for_spawn.state::<AppState>();
@@ -3931,27 +4108,20 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
             }
             // 启动轮询（内部永久循环，进程退出即结束）。
             //
-            // 轮询间隔走面板变量 `monitor_poll_interval_secs`（A 批接线，2026-10-08）：
+            // 轮询间隔与告警冷却都走面板变量，**回灌走同一个方法**（阶段 D，2026-10-15）：
+            // 这里是启动装配点，「保存设置」那条路（`update_workflow_template`）调的是同一个
+            // `apply_panel_runtime_vars()`。两处各写一份「读值 + 校验 + 覆盖」必然分叉
+            // （A 批就分过一次：间隔接了、冷却没接，且校验范围写在装配点里）。
+            // 校验范围（间隔 1..=3600 秒、冷却非负）现在住在引擎里，越界值拒绝覆盖并 warn；
+            // 面板没有值 ⇒ 沿用 `new()` 装的那份默认，回落值不另抄字面量。
             // 正门是 `start_with_config`，本段末尾就是它的唯一调用点（此处注释曾写「零调用者」，
             // 接线后未同步，2026-10-14 订正）。
-            //
-            // 回落值不另写一份字面量：`poll_interval_secs()` 读到的就是 `new()` 装的那个数
-            // （今天 = 30），装配点原样回读 ⇒ 「默认值」只有一处权威。越界值（<1 秒会把循环
-            // 打成忙等、>3600 秒等于关掉提醒）拒绝覆盖并 warn，理由同 v137 那批。
-            let default_poll = monitor_arc.poll_interval_secs().await;
-            let raw_panel = axagent_harness::panel_variables::integer("monitor_poll_interval_secs");
-            let panel_poll = raw_panel.filter(|v| (1..=3600).contains(v));
-            if raw_panel.is_some() && panel_poll.is_none() {
-                tracing::warn!(
-                    "[startup] 面板 monitor_poll_interval_secs 不在 1..=3600 秒内 ⇒ 按监控自身的 {default_poll}s 启动"
-                );
-            }
-            let poll = panel_poll.unwrap_or(default_poll as i64) as u64;
-            // 告警冷却本批**刻意不接**（不在 A 批那 9 条里）：原样回读 `new()` 的值再传回去，
-            // 数值一字不变；`start_with_config` 是唯一的正门，所以必须显式带上这一参。
+            monitor_arc.apply_panel_runtime_vars().await;
+            let poll = monitor_arc.poll_interval_secs().await;
             let cooldown = monitor_arc.alert_cooldown_secs().await;
             tracing::info!(
-                "[startup] 价格监控装配：轮询 {poll}s（面板 monitor_poll_interval_secs，回落 {default_poll}s）、冷却 {cooldown}s"
+                "[startup] 价格监控装配：轮询 {poll}s、冷却 {cooldown}s\
+                 （面板 monitor_poll_interval_secs / monitor_alert_cooldown_secs，缺失则用引擎默认）"
             );
             monitor_arc.start_with_config(poll, cooldown).await;
         });
@@ -3959,17 +4129,42 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
 }
 
 /// 启动实时行情推送：RealTimeQuoteWatcher 轮询 → 前端 `stock-quote-update` 事件
+///
+/// 同一条回调也驱动条件单：行情一跳 → `ConditionalOrderBridge::handle_quote_event`
+/// → 触发则把计数写回 `conditional_orders` 并发的 `conditional-order-triggered`。
+/// 事件名一律走 `IpcEventName` 权威枚举，评估失败不能让行情推送一起丢，故单独分支。
 fn start_realtime_quote_watcher(app: &tauri::AppHandle, state: &AppState) {
     use axagent_astock_data::realtime_quote::{QuoteCallback, RealTimeQuoteWatcher};
 
     let callback: QuoteCallback = {
         let app = app.clone();
+        let db = state.harness.db().clone();
         std::sync::Arc::new(move |event: axagent_astock_data::realtime_quote::QuoteChangeEvent| {
             let app = app.clone();
+            let db = db.clone();
             // payload 即 `QuoteChangeEvent` 自身（`rename_all = "camelCase"`）——
             // 这里不再手写 `json!` 摊平字段，那份副本与前端消费端的漂移是整页崩的根因。
             Box::pin(async move {
                 let _ = app.emit(IpcEventName::StockQuoteUpdate.as_str(), &event);
+                use axagent_analysis_engine::conditional_order_bridge::ConditionalOrderBridge;
+                match ConditionalOrderBridge::handle_quote_event(&db, &event).await {
+                    Ok(triggers) => {
+                        for trigger in triggers {
+                            match serde_json::to_value(&trigger) {
+                                Ok(payload) => {
+                                    let _ = app.emit(
+                                        IpcEventName::ConditionalOrderTriggered.as_str(),
+                                        payload,
+                                    );
+                                },
+                                Err(e) => tracing::warn!(
+                                    "[conditional] 触发产物序列化失败，该条不外推: {e}"
+                                ),
+                            }
+                        }
+                    },
+                    Err(e) => tracing::warn!("[conditional] 本轮行情回调评估失败: {e}"),
+                }
             })
         })
     };

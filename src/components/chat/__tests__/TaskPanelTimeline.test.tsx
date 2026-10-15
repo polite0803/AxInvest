@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("react-i18next", () => ({
@@ -58,6 +58,19 @@ beforeEach(() => {
   invokeMock.mockReset();
 });
 
+/**
+ * 收尾：等挂载副作用（数据请求）落地。
+ *
+ * 为什么必须有：页面挂载后会异步拉数据，测试同步结束 ⇒ setState 落在测试之外 ⇒
+ * React 报 "not wrapped in act"。为什么必须放在**断言之后**：这些用例断言的是
+ * **初始渲染态**，提前 flush 会把组件推进"加载完成"态，断言随之失效（实测会让 3 条用例变红）。
+ * 为什么不能用 afterEach：React 是在 setState 那一刻检查的，而那一刻在测试函数返回后、
+ * afterEach 之前 —— 收尾钩子永远太晚。
+ */
+const settle = async () => {
+  await act(async () => {});
+};
+
 describe("TaskPanel 字段契约与状态诚实性", () => {
   it("按 camelCase 消费后端字段：taskType 命中本地化标签", async () => {
     mockTasks([makeTask({ taskType: "bash" })]);
@@ -76,13 +89,19 @@ describe("TaskPanel 字段契约与状态诚实性", () => {
 
     // 展开任务详情
     const header = await screen.findByText("构建");
-    header.closest('[role="button"]')?.dispatchEvent(
-      new MouseEvent("click", { bubbles: true }),
-    );
+    // 为什么包在 act 里: raw dispatchEvent 的展开点击会在 act 外同步提交 3 个 setState
+    // (setExpandedId/setEventsLoading/setEventsError)，每次点击刷 3 条 act 警告；
+    // act 同步作用域只影响提交时机，点击后的异步取数链仍由后面的断言等待。
+    act(() => {
+      header.closest('[role="button"]')?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
 
     await waitFor(() => {
       expect(screen.getByText(/task\.exitCode/)).toBeTruthy();
     });
+    await settle();
   });
 
   it("未知 status 不映射为 pending（归因不得说谎）", async () => {
@@ -113,13 +132,19 @@ describe("TaskPanel 字段契约与状态诚实性", () => {
     render(<TaskPanel />);
 
     const header = await screen.findByText("构建");
-    header.closest('[role="button"]')?.dispatchEvent(
-      new MouseEvent("click", { bubbles: true }),
-    );
+    // 为什么包在 act 里: raw dispatchEvent 的展开点击会在 act 外同步提交 3 个 setState
+    // (setExpandedId/setEventsLoading/setEventsError)，每次点击刷 3 条 act 警告；
+    // act 同步作用域只影响提交时机，点击后的异步取数链仍由后面的断言等待。
+    act(() => {
+      header.closest('[role="button"]')?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
 
     // 失败必须出错误文案，而不是 task.timelineEmpty（那等于宣称「没有状态迁移」）
     expect(await screen.findByText("task.timelineLoadFail")).toBeTruthy();
     expect(screen.queryByText("task.timelineEmpty")).toBeNull();
+    await settle();
   });
 
   it("时间线渲染迁移记录（读路径真被消费）", async () => {
@@ -145,9 +170,14 @@ describe("TaskPanel 字段契约与状态诚实性", () => {
     render(<TaskPanel />);
 
     const header = await screen.findByText("构建");
-    header.closest('[role="button"]')?.dispatchEvent(
-      new MouseEvent("click", { bubbles: true }),
-    );
+    // 为什么包在 act 里: raw dispatchEvent 的展开点击会在 act 外同步提交 3 个 setState
+    // (setExpandedId/setEventsLoading/setEventsError)，每次点击刷 3 条 act 警告；
+    // act 同步作用域只影响提交时机，点击后的异步取数链仍由后面的断言等待。
+    act(() => {
+      header.closest('[role="button"]')?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
 
     await waitFor(() => {
       // 来源标签命中本地化 key ⇒ task_events.source 被真正消费
@@ -155,5 +185,6 @@ describe("TaskPanel 字段契约与状态诚实性", () => {
     });
     // from → to 两段都命中本地化标签，证明 fromStatus/toStatus 都被消费
     expect(screen.getByText(/task\.statusPending → /)).toBeTruthy();
+    await settle();
   });
 });

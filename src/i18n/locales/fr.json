@@ -2974,7 +2974,8 @@
     "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "Un lot de voyage temporel ou de rattrapage est déjà en cours ; attendez sa fin.",
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "Dans la fenêtre du pipeline en direct (23:50–02:10 / 17:50–18:10) ; relancez en dehors.",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "Le lot de rattrapage a échoué ; consultez les détails du lot.",
-    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Échec de la requête d'historique des lots de rattrapage ; réessayez plus tard."
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Échec de la requête d'historique des lots de rattrapage ; réessayez plus tard.",
+    "TRADING_DISABLED": "La fonction de trading est désactivée. Activez-la avant d'enregistrer des transactions."
   },
   "errorBoundary": {
     "copied": "Copié",
@@ -15343,7 +15344,44 @@
       "typeChange": "variation de prix anormale",
       "typeVolume": "taux de rotation anormal",
       "typeUnknown": "type inconnu",
-      "triggeredDetail": "{{name}} : alerte {{type}} déclenchée, cours {{price}}"
+      "triggeredDetail": "{{name}} : alerte {{type}} déclenchée, cours {{price}}",
+      "t0": {
+        "title": "Relance auto T+0",
+        "cost": "Une fois activé, tout titre surveillé franchissant le seuil en séance relance tout le workflow d'analyse (coût ≈ une analyse complète) ; les déclenchements répétés sur le même titre sont espacés par l'intervalle minimal",
+        "changePct": "Variation %",
+        "turnover": "Rotation %",
+        "intervalMin": "Intervalle min (min)",
+        "saveFailed": "Échec de l'enregistrement des paramètres T+0 : {{reason}}"
+      }
+    },
+    "conditional": {
+      "triggeredDetail": "Ordre conditionnel déclenché : {{name}} {{condition}}, action : {{action}}",
+      "title": "Ordres conditionnels",
+      "action": "Action",
+      "enabled": "Activé",
+      "triggeredToday": "Aujourd'hui",
+      "lastTriggered": "Dernier",
+      "empty": "Aucun ordre conditionnel",
+      "evaluating": "{{count}} en évaluation",
+      "totalRows": "{{count}} lignes (dont désactivées)",
+      "unreadable": "{{count}} lignes illisibles comme règles (non évaluées)",
+      "create": "Créer",
+      "createFailed": "Échec de création : {{reason}}",
+      "loadFailed": "Échec du chargement des ordres conditionnels : {{reason}}",
+      "toggleFailed": "Échec du basculement : {{reason}}",
+      "deleteFailed": "Échec de suppression : {{reason}}",
+      "confirmDelete": "Supprimer cet ordre conditionnel ?",
+      "thresholdPct": "Seuil (%)",
+      "actionNotify": "Notification seule",
+      "actionSell": "Vendre",
+      "actionBuy": "Acheter",
+      "actionReduce": "Réduire",
+      "actionValueQty": "Quantité",
+      "actionValueRatio": "Proportion",
+      "coolDown": "Pause (min)",
+      "maxPerDay": "Max / jour",
+      "windowStart": "De HH:MM",
+      "windowEnd": "À HH:MM"
     },
     "progress": {
       "fetchingData": "Récupération des données boursières...",
@@ -15529,6 +15567,7 @@
     "revenueGrowth": "Croissance du chiffre d'affaires",
     "riskHigh": "Risque élevé",
     "riskMid": "Risque moyen",
+    "riskMidHigh": "Risque moyen-élevé",
     "riskLow": "Risque faible",
     "riskExtreme": "Risque extrme",
     "noHistory": "Aucun historique d'analyse",
@@ -16099,7 +16138,6 @@
         "moat": "Moat",
         "screener": "Screener",
         "signals": "Signals",
-        "keylevels": "Key Levels",
         "recommender": "Recommender",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
@@ -17198,7 +17236,9 @@
       "worstHit": "Worst hit",
       "m10": "Market -10%",
       "m20": "Market -20%",
-      "blackSwan": "Black Swan (-30%)"
+      "blackSwan": "Black Swan (-30%)",
+      "unpricedTitle": "Prix manquants",
+      "unpricedNotice": "{{count}} positions sans cours actuel sont exclues du calcul de concentration et de diversification"
     },
     "evidence": {
       "concepts": "Fondamentaux/Évaluation",
@@ -17307,26 +17347,6 @@
       "dailyPreMarket": "Trading Day 08:00 (Pre-market)",
       "weeklyMonday": "Weekly Monday 21:00",
       "every2Hours": "Every 2 Hours"
-    },
-    "fundPanel": {
-      "fundFlow": "Fund Flow",
-      "type": "Type",
-      "deposit": "Deposit",
-      "withdrawal": "Withdrawal",
-      "amount": "Amount",
-      "date": "Date",
-      "fee": "Fee",
-      "notes": "Notes",
-      "totalDeposits": "Total Deposits",
-      "totalWithdrawals": "Total Withdrawals",
-      "netInflow": "Net Inflow",
-      "recordFundFlow": "Record Fund Flow",
-      "depositTransferIn": "Deposit (Transfer In)",
-      "withdrawalTransferOut": "Withdrawal (Transfer Out)",
-      "feeOptional": "Fee (Optional)",
-      "notesOptional": "Notes (Optional)",
-      "recorded": "Recorded",
-      "amountMustBeGreaterThanZero": "Amount must be > 0"
     },
     "marketSimPanel": {
       "simConfig": "Simulation Config",
@@ -17854,8 +17874,8 @@
       "moatFcfRatioMin": "Limite inférieure du ratio FCF/Résultat net (0-1)",
       "monitorPollIntervalSecs": "Intervalle d'interrogation de surveillance (secondes)",
       "monitorAlertCooldownSecs": "Temps de refroidissement des alertes pour le même actif (secondes, 10-3600)",
-      "monitorMinSeverity": "Niveau d'alerte minimum pour envoi: info / warn / critical",
-      "monitorChannels": "Canaux de notification, séparés par des virgules: in_app / lark / email / webhook",
+      "monitorMinSeverity": "Niveau d'alerte minimum pour envoi: info / warn / critical (aucun consommateur actuellement : la modifier est sans effet)",
+      "monitorChannels": "Canaux de notification, séparés par des virgules: in_app / lark / email / webhook (aucun consommateur actuellement : la modifier est sans effet)",
       "dualViewDisagreementThreshold": "Seuil de divergence à double perspective (0-100); en dessous, marqué comme nécessitant une vérification manuelle",
       "minConfidence": "Confiance minimale (0-100)",
       "varConfidence": "Confiance VaR (0-1)",
@@ -17906,9 +17926,6 @@
       "signalMaFast": "Période de ligne rapide pour la détection de croisement doré MA (3-30)",
       "signalMaSlow": "Période de ligne lente pour la détection de croisement doré MA (10-120)",
       "signalBreakoutVolumeMult": "Seuil du multiple de volume pour la rupture / cassure (1.0-3.0)",
-      "keylevelLookbackDays": "Fenêtre de rétrospection des niveaux clés (jours de trading, 10-250)",
-      "keylevelTouchTolerancePct": "Tolérance de toucher des niveaux clés (%, 0.1-5.0)",
-      "keylevelMinTouches": "Nombre minimum de touches pour confirmer le support/résistance (1-10)",
       "recoTrendEnabled": "Activer la sous-stratégie de suivi de tendance",
       "recoReversionEnabled": "Activer la sous-stratégie de rebond après survente",
       "recoValueEnabled": "Activer la sous-stratégie de sélection de titres value",
@@ -18084,7 +18101,12 @@
     "pending": "En attente",
     "portfolio": {
       "importPartial": "Import partiel",
-      "yuan": "yuan"
+      "yuan": "yuan",
+      "signalTitle": "Signal de portefeuille",
+      "signalBody": "{{count}} titres sont partis en {{direction}}, intensité {{pct}} % — {{action}}",
+      "signalBullish": "haussier",
+      "signalBearish": "baissier",
+      "signalNeutral": "neutre"
     },
     "references": "Références",
     "resonancePoint": "Point de résonance",
@@ -18222,6 +18244,21 @@
         "failed": "Échoué (historique)",
         "unknown": "Statut inconnu"
       }
+    },
+    "monitor": {
+      "readFailed": "Échec de lecture de l'état du moniteur : {{reason}}",
+      "notAssembled": "Moteur de surveillance non monté : alertes enregistrées mais rien n'est interrogé",
+      "pausedBySession": "{{session}} — interrogation en pause",
+      "fetchFailed": "{{failed}}/{{total}} titres en échec ce tour, non évalués",
+      "allFailedRounds": "{{rounds}} tours consécutifs tous en échec — la surveillance ne produit rien",
+      "firstRoundPending": "Surveillance démarrée, premier tour inachevé (~{{interval}} s)",
+      "emptyResponse": "Le backend ne renvoie aucun état du moniteur",
+      "sessionNonTradingDay": "Hors jour de bourse",
+      "sessionPreOpen": "Avant ouverture",
+      "sessionMorning": "Séance du matin",
+      "sessionLunchBreak": "Pause déjeuner",
+      "sessionAfternoon": "Séance de l'après-midi",
+      "sessionPostClose": "Après clôture"
     }
   },
   "pipeline": {

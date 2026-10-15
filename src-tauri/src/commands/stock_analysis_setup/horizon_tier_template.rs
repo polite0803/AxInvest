@@ -309,6 +309,9 @@ fn ultra_short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
                     // ⇒ 缺席（不补默认值）。父扇出必须同批带 `a-catalyst--ultra_short` 键+供给边，
                     // 否则子图内该路径解析失败、整节点按缺席——那是「接线缺失」不是「没有催化剂」。
                     ("catalyst_level", "a-catalyst--ultra_short.content.verdict.catalyst_level"),
+                    // P0-5：breadth 门个股前提。`pm_recent_strength` 要靠 code 判板块
+                    // 涨跌幅（10/20/30cm）；缺失时宿主按未知板块 10cm 兜底会漏判 20cm 涨停。
+                    ("stock_code", "stock_code"),
                 ]
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -671,6 +674,13 @@ fn long_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
                     (
                         "valuation_dcf_applicable",
                         "t-valuation.result.content.dcf.assumptions.applicable",
+                    ),
+                    // P0-4：周期股标记（DCF 锚被近 5 年 FCF 中位数盖写时为 true）。
+                    // 长档门据此切到周期形态：中性化 DCF 上行须 ≥35% 才放行开仓。
+                    // DcfAssumptions 无 rename_all，键为 snake_case（与 is_fallback_anchor 同）。
+                    (
+                        "valuation_dcf_cyclical",
+                        "t-valuation.result.content.dcf.assumptions.cyclical_normalized",
                     ),
                     // 宏观只取 PMI（本仓五条真序列里唯一自带荣枯线的量）
                     ("pmi", "t-macro-data.result.content.pmiManufacturing.value"),

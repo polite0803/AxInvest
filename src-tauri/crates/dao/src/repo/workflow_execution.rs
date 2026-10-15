@@ -23,6 +23,7 @@ pub async fn create_workflow_execution(
         node_executions: Set(None),
         execution_state_json: Set(None),
         paused_at: Set(None),
+        error_detail: Set(None),
         total_time_ms: Set(Some(0)),
         created_at: Set(now),
         updated_at: Set(now),
@@ -46,6 +47,7 @@ pub async fn update_workflow_execution_status(
     output_result: Option<&str>,
     node_executions: Option<&str>,
     total_time_ms: Option<i32>,
+    error_detail: Option<&str>,
 ) -> Result<bool> {
     let execution = workflow_executions::Entity::find_by_id(id).one(db).await?;
     if let Some(e) = execution {
@@ -56,6 +58,9 @@ pub async fn update_workflow_execution_status(
         }
         if let Some(v) = node_executions {
             active_model.node_executions = Set(Some(v.to_string()));
+        }
+        if let Some(v) = error_detail {
+            active_model.error_detail = Set(Some(v.to_string()));
         }
         if let Some(v) = total_time_ms {
             active_model.total_time_ms = Set(Some(v));

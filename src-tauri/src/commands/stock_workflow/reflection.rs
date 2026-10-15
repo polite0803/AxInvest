@@ -1354,6 +1354,46 @@ pub async fn run_reflection_workflow(
         },
     }
 }
+/// P0-8 死信重试：把可恢复的 failed 反思行**原地**置回 pending，由下一轮到期反思自动消费。
+///
+/// - `ids` 为 None 时扫描全部 failed 行；传入 id 列表时仅重试指定行（前端勾选/单条重试）。
+/// - 两类结构性终局（`ORIGINAL_ANALYSIS_MISSING` / `ANALYSIS_SNAPSHOT_MISSING`）不重试，
+///   原样在 `skippedTerminal` 返回；快照缺失需先重跑原分析。
+/// - 原地 UPDATE 同一行（不新建），天然幂等；重复调用只是再次把行置回 pending。
+#[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description = "重试失败的持仓反思")]
+#[tauri::command]
+pub async fn retry_failed_reflections(
+    state: State<'_, AppState>,
+    ids: Option<Vec<String>>,
+    limit: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    let db = state.harness.db();
+    // 无 attempts 列：用单轮上限控制节奏，避免持续失败行每轮被重置空烧 LLM 配额。
+    let limit = u64::from(limit.unwrap_or(20)).clamp(1, 200);
+    let outcome = axagent_dao::repo::stock_lesson_queries::requeue_failed_reflections(
+        db,
+        chrono::Utc::now().timestamp_millis(),
+        ids.as_deref(),
+        limit,
+    )
+    .await
+    .map_err(|e| {
+        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("重试失败反思行失败: {e}"))
+    })?;
+    tracing::info!(
+        "[D1 retry_failed_reflections] 置回 pending {} 条，结构性终局跳过 {} 条",
+        outcome.requeued.len(),
+        outcome.skipped_terminal.len()
+    );
+    Ok(serde_json::json!({
+        "requeued": outcome.requeued,
+        "requeuedCount": outcome.requeued.len(),
+        "skippedTerminal": outcome.skipped_terminal,
+        "skippedTerminalCount": outcome.skipped_terminal.len(),
+        "note": "已置回 pending，将由下一轮到期反思自动消费；快照缺失需先重跑原分析",
+    }))
+}
+
 #[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description =  "批量处理持仓到期反思")]
 #[tauri::command]
 pub async fn run_batch_reflection(

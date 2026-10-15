@@ -1,6 +1,7 @@
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "./_shared/PageHeader";
+import { ConditionalOrderPanel } from "./ConditionalOrderPanel";
 import { DailyReviewPanel } from "./DailyReviewPanel";
 import { PriceAlertPanel } from "./PriceAlertPanel";
 import { WatchlistPanel } from "./WatchlistPanel";
@@ -11,6 +12,7 @@ import { WatchlistPanel } from "./WatchlistPanel";
  * 布局：
  *   顶部：WatchlistPanel（全宽，自选股核心）
  *   下方：DailyReviewPanel + PriceAlertPanel（桌面端 2 列，移动端 1 列）
+ *   底部：ConditionalOrderPanel（全宽；与价格预警是两个实体，不并表也不共用刷新路）
  */
 export function WatchlistPage() {
   const { t } = useTranslation();
@@ -24,6 +26,7 @@ export function WatchlistPage() {
             <DailyReviewPanel />
             <PriceAlertPanel />
           </div>
+          <ConditionalOrderPanel />
         </div>
       </div>
     </PageErrorBoundary>

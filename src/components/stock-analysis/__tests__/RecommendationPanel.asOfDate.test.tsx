@@ -1,6 +1,6 @@
 import i18n from "@/i18n";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -50,8 +50,22 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
-  useTimeAnchorStore.setState({ asOfDate: null, mode: "live" });
+/**
+ * 收尾：重置时间锚点 store，回到 live。
+ *
+ * 为什么包在 act 里：本钩子在 RTL 的 auto-cleanup **之前**执行（vitest 逆序跑
+ * afterEach），此时上一条用例的组件树仍挂载；replay 用例的组件（ReplayBadge /
+ * ReplayWatermark 等）订阅了该 store，重置会触发它们重渲染 —— 不包 act 就是
+ * "not wrapped in act" 警告（2026-10-14 实测：本文件 68 条警告全部源自此处）。
+ * 为什么用 async 形态：重置会把 `loadCache` 推到 live 分支重新拉一次缓存，
+ * `await invoke(...)` 之后的 setState 是微任务续链，sync act 返回后才落地仍会告警；
+ * async act 会按宏任务轮询到队列稳定，把这条续链也收进 act 窗口。
+ * 重置语义与原实现完全一致，只是把 setState 挪进 act。
+ */
+afterEach(async () => {
+  await act(async () => {
+    useTimeAnchorStore.setState({ asOfDate: null, mode: "live" });
+  });
 });
 
 /**
@@ -60,6 +74,21 @@ afterEach(() => {
 function findCall(command: string): unknown[] | undefined {
   return invokeMock.mock.calls.find((c) => c[0] === command);
 }
+
+/**
+ * 收尾：等挂载副作用（数据请求）落地。
+ *
+ * 为什么要有：面板挂载后会异步拉数据，续链若落在测试收尾窗口，setState 就在
+ * act 之外 ⇒ React 报 "not wrapped in act"。为什么必须放在**断言之后**：这些用例
+ * 断言的是**挂载初始态**（发过哪些命令、没发哪些命令），提前 flush 会把组件推进
+ * "加载完成"态，断言随之失效。为什么不能只靠 afterEach 兜底：React 是在 setState
+ * 那一刻检查的，而那一刻在测试函数返回后、afterEach 之前 —— 收尾钩子永远太晚。
+ * 注：本文件改前的 68 条警告实际产自 afterEach 的 store 重置（见上），此处 settle
+ * 兜住的是用例体内可能残留的续链（防回归）。
+ */
+const settle = async () => {
+  await act(async () => {});
+};
 
 describe("RecommendationPanel — as-of propagation", () => {
   it("live 模式: 挂载时调用 get_cached_recommendation(period),不带 asOfDate", async () => {
@@ -81,6 +110,7 @@ describe("RecommendationPanel — as-of propagation", () => {
     expect(call).toBeDefined();
     expect(call?.[1]).toMatchObject({ asOfDate: "2026-06-01" });
     expect(findCall("recommend_stocks")).toBeUndefined();
+    await settle();
   });
 
   it("live 模式: 不调用扫描命令 (用户没点刷新)", async () => {
@@ -95,6 +125,7 @@ describe("RecommendationPanel — as-of propagation", () => {
     renderWithProviders();
     await waitFor(() => expect(invokeMock).toHaveBeenCalled());
     expect(findCall("get_cached_recommendation")).toBeUndefined();
+    await settle();
   });
 
   it("shows a replay banner when in replay mode", async () => {
@@ -107,6 +138,7 @@ describe("RecommendationPanel — as-of propagation", () => {
         ),
       ).toBeInTheDocument();
     });
+    await settle();
   });
 
   it("does NOT show a replay banner in live mode", async () => {
@@ -220,5 +252,6 @@ describe("RecommendationPanel — as-of propagation", () => {
     await waitFor(() => expect(invokeMock).toHaveBeenCalled());
     expect(findCall("recommend_stocks_all_periods")?.[1]).toMatchObject({ asOfDate: "2026-06-01" });
     expect(findCall("recommend_stocks")).toBeUndefined();
+    await settle();
   });
 });

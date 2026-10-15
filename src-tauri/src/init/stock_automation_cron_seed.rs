@@ -4,8 +4,9 @@
 //! PLAN-batch-automation-mover-recall P1）
 //!
 //! 前五条为**交易日**流水线（休市由 executor 的交易日闸门拦截，见
-//! `init/services.rs`）；后三条（妖股核查 / 进化聚合 / 教训验证）**刻意不进交易日闸门**，
-//! 各自的执行分支注释里说明了原因：
+//! `init/services.rs`）；第 9 条（组合指标日更）同样进闸门 —— 它的产物就是当日收盘快照，
+//! 休市日跑只会把同一份旧价再落一行。其余三条（妖股核查 / 进化聚合 / 教训验证）
+//! 与第 10 条（意图过期）**刻意不进闸门**，各自的执行分支注释里说明了原因：
 //!
 //! | 时刻 | 任务 | 产物 |
 //! |---|---|---|
@@ -13,6 +14,8 @@
 //! | 01:00 | 趋势智选（serenity-screening 工作流） | `reco_picks` style='serenity' 行 |
 //! | 02:00 | 候选池逐只深度分析（全池 + 当日未分析判据） | `stock_analyses` + 反思 pending |
 //! | 07:00 | 决策回测（T+N 验证历史 pick） | `decision_validations` = 荐股闭环的唯一样本源 |
+//! | 07:30 | pending 交易意图自动过期 | `stock_analyses.trade_intent_status` = expired |
+//! | 16:00 | 组合指标日更（收盘后） | `portfolio_metrics_daily` + `portfolio_correlation_snapshot` |
 //! | 18:00 | 四周期到期反思（due_only，覆盖超短/短/中/长） | `stock_reflections` resolved |
 //! | 周六 09:00 | 妖股（窗口涨幅达标）漏检核查 | `mover_recall_runs` 周度快照 |
 //! | 工作日 20:00 | 进化计划聚合（反思+验证+漏检） | `stock_evolution_history` pending_approval |
@@ -29,6 +32,7 @@ use std::sync::Arc;
 use crate::commands::backtest_validation::{
     DECISION_BACKTEST_TASK_TYPE, RunDecisionBacktestRequest,
 };
+use crate::commands::constants::{INTENT_EXPIRY_TASK_TYPE, PORTFOLIO_METRICS_TASK_TYPE};
 use crate::commands::evolution_proposal::EVOLUTION_PROPOSAL_TASK_TYPE;
 use crate::commands::mover_recall::MOVER_RECALL_TASK_TYPE;
 use crate::commands::pool_scan::{POOL_SCAN_TASK_TYPE, PoolScanConfig};
@@ -47,8 +51,10 @@ pub const DECISION_BACKTEST_JOB_ID: &str = "decision-backtest-daily";
 pub const MOVER_RECALL_JOB_ID: &str = "mover-recall-weekly";
 pub const EVOLUTION_PROPOSAL_JOB_ID: &str = "evolution-proposal-daily";
 pub const LESSON_JOB_ID: &str = "lesson-validation-daily";
+pub const PORTFOLIO_METRICS_JOB_ID: &str = "portfolio-metrics-daily";
+pub const INTENT_EXPIRY_JOB_ID: &str = "intent-expiry-daily";
 
-/// 种子化八条内置定时任务（启动时调用，失败不阻塞）。
+/// 种子化十条内置定时任务（启动时调用，失败不阻塞）。
 ///
 /// `overwrite = false`（生产）：已存在即跳过；
 /// `overwrite = true`（测试重置用）：先删同名再建。
@@ -72,7 +78,7 @@ pub async fn seed_stock_automation_crons(
     Ok(())
 }
 
-/// 构造八条内置任务（时刻均为**本地时区**口径，与调度器的 Local 匹配对齐）
+/// 构造十条内置任务（时刻均为**本地时区**口径，与调度器的 Local 匹配对齐）
 ///
 /// ⚠ `CronJob::new` 的首参是 **name**，`id` 由 uuid 现生成（crates/runtime-core/src/cron_job.rs:196-199）⇒
 /// 幂等键必须显式赋 `job.id`（同 `seed_opc_cron.rs` 的形态），否则每次启动长出新的任务。
@@ -208,6 +214,41 @@ fn build_builtin_jobs() -> Result<Vec<CronJob>, String> {
     lesson.id = LESSON_JOB_ID.to_string();
     jobs.push(lesson);
 
+    // 9) 16:00 组合指标日更：收盘后落 portfolio_metrics_daily + correlation_snapshot。
+    //    这条链原先**只有面板「立即刷新」一个触发方** ⇒ 不点按钮就没有当日行，现网组合三表
+    //    恒 0 行（PLAN-monitor-chain-closure 裁定 5 ①）；时间旅行读回来的空面板其实是
+    //    「没人写过快照」，而不是逻辑缺失。时刻取 16:00 = 收盘（15:00）之后、18:00 反思之前。
+    //    **进交易日闸门**：产物就是当日收盘净值序列，休市日跑只会把同一份旧价再落一行，
+    //    还会让 90 日回撤窗口里塞满重复样本。
+    //    prompt 留空 = 无参数（as_of_date 为 None ⇒ 引擎按北京会话日盖当天）。
+    let mut portfolio = CronJob::new(
+        "组合指标日更（内置）",
+        "0 16 * * *",
+        "",
+        "收盘后刷新组合快照，落 portfolio_metrics_daily 与相关性矩阵，供面板时间旅行与回撤取序列",
+    )
+    .with_task_type(PORTFOLIO_METRICS_TASK_TYPE);
+    portfolio.id = PORTFOLIO_METRICS_JOB_ID.to_string();
+    jobs.push(portfolio);
+
+    // 10) 07:30 pending 交易意图自动过期（裁定 14）。
+    //     过期能力原先只挂在下线的 risk_inspection 链上（阶段 F-5 退役），此后**没有任何触发方**
+    //     ⇒ pending 只增不减，待办列表里的陈旧意图与新鲜的一起参与决策。
+    //     时刻排在 07:00 决策回测之后、开盘（09:30）之前：用户早上审待办时看到的已是最新过期态。
+    //     **刻意不进交易日闸门**：本任务只改库里的状态列，不读当日行情，休市日跑同样在推进。
+    let mut expiry = CronJob::new(
+        "交易意图过期（内置）",
+        "30 7 * * *",
+        "",
+        &format!(
+            "把超过 {} 小时仍未审核的 pending 交易意图标记为 expired，避免待办只增不减",
+            crate::commands::trade_intent::DEFAULT_INTENT_MAX_AGE_HOURS
+        ),
+    )
+    .with_task_type(INTENT_EXPIRY_TASK_TYPE);
+    expiry.id = INTENT_EXPIRY_JOB_ID.to_string();
+    jobs.push(expiry);
+
     Ok(jobs)
 }
 
@@ -219,15 +260,15 @@ mod tests {
     use crate::commands::backtest_validation::parse_decision_backtest_config;
 
     #[tokio::test]
-    async fn seed_creates_eight_jobs_and_is_idempotent() {
+    async fn seed_creates_all_builtin_jobs_and_is_idempotent() {
         let store = Arc::new(CronJobStore::new_ephemeral());
         seed_stock_automation_crons(&store, false).await.unwrap();
-        assert_eq!(store.list().await.len(), 8);
+        assert_eq!(store.list().await.len(), 10);
 
         // 再跑两次：不重复建、不改写
         seed_stock_automation_crons(&store, false).await.unwrap();
         seed_stock_automation_crons(&store, false).await.unwrap();
-        assert_eq!(store.list().await.len(), 8);
+        assert_eq!(store.list().await.len(), 10);
     }
 
     /// 齐备性判据（PLAN §三.5）：**种出来的每个 task_type 都必须在 executor 源码里被显式处理**。
@@ -281,11 +322,12 @@ mod tests {
         let code_lines = strip_comments(&services_src);
 
         // seed 侧扫描面 = 生产代码：本测试自身源码里既有 marker 字面量（`".with_task_type("`）
-        // 又有文档 comment 提到它 ⇒ 不截到 `#[cfg(test)]` 之前会自指计数（实测 8 报成 10）。
+        // 又有文档 comment 提到它 ⇒ 不截到 `#[cfg(test)]` 之前会自指计数
+        // （条数比任务数多，且多的那几条是测试自己的字面量）。
         let seed_code = strip_comments(&seed_src);
         let seed_prose = seed_code.split("#[cfg(test)]").next().unwrap_or_default();
         let args = with_task_type_args(seed_prose);
-        assert_eq!(args.len(), 8, "内置任务应各有 1 个 with_task_type 实参，实得 {}", args.len());
+        assert_eq!(args.len(), 10, "内置任务应各有 1 个 with_task_type 实参，实得 {}", args.len());
         for arg in &args {
             let forms = expected_forms(arg);
             let handled = forms.iter().any(|f| code_lines.contains(f));
@@ -303,6 +345,31 @@ mod tests {
             !orphan.iter().any(|f| synthetic.contains(f)),
             "负控失效：本门应能认出「源码里没人处理这个 task_type」"
         );
+    }
+
+    /// 齐备性判据 ②：**每条内置任务都要能在任务中心「立即执行」**。
+    ///
+    /// 与上一条不同的失效面：task_type 有执行分支（到点自动跑），却漏登记
+    /// `scheduled_task::BUILTIN_TASK_TYPES` ⇒ 手动触发落到分支 3 报
+    /// `MANUAL_RUN_NOT_SUPPORTED`。现网 `lesson-validation` 就是这么漏了几个月。
+    /// 口径比上一条实：直接拿 `build_builtin_jobs()` 产出的**真实 task_type 值**对表，
+    /// 不解析文本（文本门会被注释与测试自己喂饱）。
+    #[test]
+    fn every_builtin_job_is_manually_executable() {
+        let jobs = build_builtin_jobs().expect("内置任务构造失败");
+        let allowed = crate::commands::scheduled_task::builtin_task_types();
+        assert!(allowed.len() >= jobs.len(), "白名单应不少于内置任务数，实得 {allowed:?}");
+        for job in &jobs {
+            let tt = job.task_type.as_deref().expect("内置任务必须带 task_type");
+            assert!(
+                allowed.contains(&tt),
+                "任务 '{}' 的 task_type `{tt}` 不在 BUILTIN_TASK_TYPES ⇒ 任务中心无法手动执行",
+                job.name
+            );
+        }
+
+        // 负控：一个没登记的 task_type 必须被判为不可手动执行，否则本门恒真
+        assert!(!allowed.contains(&"no-such-builtin-type"));
     }
 
     #[tokio::test]
@@ -376,5 +443,24 @@ mod tests {
         assert_eq!(lesson.task_type.as_deref(), Some(LESSON_VALIDATION_TASK_TYPE));
         assert_eq!(lesson.schedule, "0 21 * * 1-5");
         assert!(lesson.prompt.is_empty(), "教训验证无参数，prompt 应留空");
+
+        // 组合指标日更：收盘后 16:00、无参数、task_type 与 executor 分支同源
+        let portfolio = find(PORTFOLIO_METRICS_JOB_ID);
+        assert_eq!(portfolio.task_type.as_deref(), Some(PORTFOLIO_METRICS_TASK_TYPE));
+        assert_eq!(portfolio.schedule, "0 16 * * *", "必须在收盘（15:00）之后");
+        assert!(portfolio.prompt.is_empty(), "组合日更无参数，prompt 应留空");
+
+        // 意图过期：开盘（09:30）之前、无参数、时长取自命令面同一个常量（不另抄一份 72）
+        let expiry = find(INTENT_EXPIRY_JOB_ID);
+        assert_eq!(expiry.task_type.as_deref(), Some(INTENT_EXPIRY_TASK_TYPE));
+        assert_eq!(expiry.schedule, "30 7 * * *");
+        assert!(expiry.prompt.is_empty(), "意图过期无参数，prompt 应留空（时长由执行分支取常量）");
+        assert!(
+            expiry
+                .description
+                .contains(&crate::commands::trade_intent::DEFAULT_INTENT_MAX_AGE_HOURS.to_string()),
+            "描述里的时长必须与命令面常量一致，实得 {:?}",
+            expiry.description
+        );
     }
 }

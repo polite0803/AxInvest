@@ -73,6 +73,8 @@ export const IPC_EVENT_NAMES = [
   "pty_exit",
   "pty_output",
   "price-alert-triggered",
+  "conditional-order-triggered",
+  "portfolio-signal",
   "stock-monitor-t0-rerun-requested",
   "stock-quote-update",
   "simulation-ready",

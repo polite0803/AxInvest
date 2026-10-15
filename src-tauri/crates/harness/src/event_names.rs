@@ -108,6 +108,12 @@ pub enum IpcEventName {
     PtyExit,
     PtyOutput,
     PriceAlertTriggered,
+    ConditionalOrderTriggered,
+    /// 组合级信号（跨股聚合器在多只同向触发时产出）。
+    ///
+    /// 此前三条发射路里只有这一条发的是裸字面量 `"portfolio-signal"`，
+    /// 既不在权威表也不在生成物 ⇒ 前端类型面收不到，事件真产出了也没人收（PLAN 阶段 G 的 G-6）。
+    PortfolioSignal,
     StockMonitorT0RerunRequested,
     StockQuoteUpdate,
     SimulationReady,
@@ -203,6 +209,8 @@ impl IpcEventName {
             IpcEventName::PtyExit => "pty_exit",
             IpcEventName::PtyOutput => "pty_output",
             IpcEventName::PriceAlertTriggered => "price-alert-triggered",
+            IpcEventName::ConditionalOrderTriggered => "conditional-order-triggered",
+            IpcEventName::PortfolioSignal => "portfolio-signal",
             IpcEventName::StockMonitorT0RerunRequested => "stock-monitor-t0-rerun-requested",
             IpcEventName::StockQuoteUpdate => "stock-quote-update",
             IpcEventName::SimulationReady => "simulation-ready",
@@ -291,6 +299,8 @@ impl IpcEventName {
         IpcEventName::PtyExit,
         IpcEventName::PtyOutput,
         IpcEventName::PriceAlertTriggered,
+        IpcEventName::ConditionalOrderTriggered,
+        IpcEventName::PortfolioSignal,
         IpcEventName::StockMonitorT0RerunRequested,
         IpcEventName::StockQuoteUpdate,
         IpcEventName::SimulationReady,

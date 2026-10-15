@@ -36,6 +36,18 @@ pub struct TradingEngine {
     pub enabled: bool,
 }
 
+/// 交易功能开关的唯一读取口径 —— settings 表的 `trading_enabled`。
+///
+/// 此前这份判定只内联在 `record_trade` 里，命令层没有读口 ⇒ 前端面板无法回读真实
+/// 状态，重进 tab 就显示成本地默认值（界面看着关、后端仍放行）。门禁与前端都必须走本函数。
+pub async fn is_trading_enabled(db: &DatabaseConnection) -> bool {
+    axagent_dao::repo::settings::get_setting(db, "trading_enabled")
+        .await
+        .unwrap_or_default()
+        .map(|s| s == "true")
+        .unwrap_or(false)
+}
+
 /// 交易校验结果
 #[derive(Debug, Clone)]
 pub struct TradeValidation {
@@ -270,12 +282,7 @@ impl TradingEngine {
         analysis_id: Option<&str>,
     ) -> Result<trades::Model, String> {
         // 从 settings 表读取交易开关状态
-        let enabled: bool =
-            axagent_dao::repo::settings::get_setting(self.db.as_ref(), "trading_enabled")
-                .await
-                .unwrap_or_default()
-                .map(|s| s == "true")
-                .unwrap_or(false);
+        let enabled: bool = is_trading_enabled(self.db.as_ref()).await;
         if !self.enabled && !enabled {
             return Err("交易功能未启用，请先在设置中开启".into());
         }

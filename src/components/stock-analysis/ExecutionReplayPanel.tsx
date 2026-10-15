@@ -1,4 +1,5 @@
 import { invoke } from "@/lib/invoke";
+import { workflowStatusLabel } from "@/lib/workflowStatusI18n";
 import type { ExecutionStatusResponse, ExecutionSummary } from "@/types";
 import { Badge, Button, Card, Empty, Spin, Tag, Timeline } from "antd";
 import { CheckCircle, Clock, Loader, RefreshCw, XCircle } from "lucide-react";
@@ -25,6 +26,19 @@ const STATUS_ICON: Record<string, React.ReactNode> = {
   paused: <Clock size={14} />,
 };
 
+// 面板要覆盖两条分析链：完整链与「快速分析」的 Jev 判定链。两条链的执行都落在
+// 同一张 workflow_executions 表，但此前这里只拉完整链 ⇒ 用户点快速分析产生的
+// 执行记录永远不会出现在列表里。
+const WORKFLOW_IDS = ["stock-analysis", "stock-analysis-fast"];
+
+/** 拉取全部链路的执行记录，按创建时间倒序合并。 */
+async function fetchAllExecutions(): Promise<ExecutionSummary[]> {
+  const groups = await Promise.all(
+    WORKFLOW_IDS.map((workflowId) => invoke<ExecutionSummary[]>("list_workflow_executions", { workflowId })),
+  );
+  return groups.flat().sort((a, b) => (b.createdAtMs ?? 0) - (a.createdAtMs ?? 0));
+}
+
 export function ExecutionReplayPanel() {
   const { t } = useTranslation();
   const [executions, setExecutions] = useState<ExecutionSummary[]>([]);
@@ -38,36 +52,30 @@ export function ExecutionReplayPanel() {
     setLoading(true);
     setFetchError(false);
     try {
-      const list = await invoke<ExecutionSummary[]>("list_workflow_executions", {
-        workflowId: "stock-analysis",
-      });
-      setExecutions(list ?? []);
+      setExecutions(await fetchAllExecutions());
     } catch {
       setFetchError(true);
     }
     setLoading(false);
   };
 
+  // 挂载加载与「刷新」按钮共用上面那条 load：此前两者是同一逻辑的两份手抄实现，
+  // 改一处必漏另一处。
   useEffect(() => {
     let cancelled = false;
-    Promise.resolve().then(() => {
-      if (cancelled) { return; }
+    const run = async () => {
       setLoading(true);
       setFetchError(false);
-      return invoke<ExecutionSummary[]>("list_workflow_executions", {
-        workflowId: "stock-analysis",
-      });
-    })
-      .then((list) => {
-        if (cancelled || !list) { return; }
-        setExecutions(list ?? []);
-      })
-      .catch(() => {
+      try {
+        const list = await fetchAllExecutions();
+        if (!cancelled) { setExecutions(list); }
+      } catch {
         if (!cancelled) { setFetchError(true); }
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) { setLoading(false); }
-      });
+      }
+    };
+    void run();
     return () => {
       cancelled = true;
     };
@@ -135,26 +143,37 @@ export function ExecutionReplayPanel() {
                   key={e.id}
                   type="button"
                   onClick={() => handleSelect(e.id)}
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs text-left transition-colors ${
+                  className={`flex flex-col gap-0.5 px-2 py-1 rounded text-xs text-left transition-colors ${
                     selectedId === e.id ? "bg-blue-50 dark:bg-blue-900/20" : "hover:bg-gray-50 dark:hover:bg-gray-800"
                   }`}
                 >
-                  <Tag
-                    color={STATUS_COLOR[e.status] ?? "default"}
-                    className="text-xs m-0 leading-none shrink-0"
-                    style={{ fontSize: 10, padding: "0 4px", lineHeight: "16px" }}
-                  >
-                    {e.status}
-                  </Tag>
-                  <span className="flex-1 truncate text-gray-500 font-mono" style={{ fontSize: 10 }}>
-                    {e.id.slice(0, 8)}
-                  </span>
-                  <span className="text-gray-400 shrink-0" style={{ fontSize: 10 }}>
-                    {formatDate(e.createdAt)}
-                  </span>
-                  {e.totalTimeMs != null && (
+                  <span className="flex w-full items-center gap-1.5">
+                    <Tag
+                      color={STATUS_COLOR[e.status] ?? "default"}
+                      className="text-xs m-0 leading-none shrink-0"
+                      style={{ fontSize: 10, padding: "0 4px", lineHeight: "16px" }}
+                    >
+                      {workflowStatusLabel(e.status)}
+                    </Tag>
+                    <span className="flex-1 truncate text-gray-500 font-mono" style={{ fontSize: 10 }}>
+                      {e.id.slice(0, 8)}
+                    </span>
                     <span className="text-gray-400 shrink-0" style={{ fontSize: 10 }}>
-                      {formatMs(e.totalTimeMs)}
+                      {formatDate(e.createdAtMs)}
+                    </span>
+                    {e.totalTimeMs != null && (
+                      <span className="text-gray-400 shrink-0" style={{ fontSize: 10 }}>
+                        {formatMs(e.totalTimeMs)}
+                      </span>
+                    )}
+                  </span>
+                  {e.errorDetail && (
+                    <span
+                      className="w-full truncate text-red-400"
+                      style={{ fontSize: 10 }}
+                      title={e.errorDetail}
+                    >
+                      {e.errorDetail}
                     </span>
                   )}
                 </button>
@@ -200,7 +219,7 @@ export function ExecutionReplayPanel() {
                             : <Loader size={14} className="animate-spin" />,
                           children: (
                             <span className="font-medium" style={{ fontSize: 11 }}>
-                              {t("workEngine.status")}: {status.status}
+                              {t("workEngine.status")}: {workflowStatusLabel(status.status)}
                               {" · "}
                               {status.nodeCount} {t("stockAnalysis.execution.nodes")}
                               {" · "}

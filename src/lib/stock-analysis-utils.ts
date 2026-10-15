@@ -157,6 +157,13 @@ export const StockRiskLevel = {
   MID: "MID",
   HIGH: "HIGH",
   EXTREME: "EXTREME",
+  /**
+   * 「无法评级」——不是风险高低的一档，而是压根评不出来。
+   * 后端 `compute_risk_level` 在零持仓时返回中文哨兵值「无持仓」，此前它不在值域表内，
+   * 会被兜底成 MID ⇒ 空仓在界面上显示成「中风险」（把缺席伪装成正常结论）。
+   * ⚠ 本值刻意不进 `decision-agreement` 的 `RISK_RANK`：它没有风险高低序可比。
+   */
+  UNRATED: "UNRATED",
 } as const;
 
 export type StockRiskLevelType = (typeof StockRiskLevel)[keyof typeof StockRiskLevel];
@@ -453,8 +460,12 @@ export function parseRiskLevel(raw: unknown): StockRiskLevelType {
   }
   const clean = String(raw).trim().toUpperCase();
   if (clean in StockRiskLevel) { return clean as StockRiskLevelType; }
+  // 后端 compute_risk_level 的两个非标准档名，必须走精确匹配：「无持仓」不是风险高低的
+  // 一档（评不出来），「中等风险」此前只靠子串表里的「中」巧合命中 MID。放在末尾 MID
+  // 兜底之前判定，否则「无持仓」会被显示成「中风险」。
+  if (["无持仓", "无评级", "无法评级"].includes(clean)) { return StockRiskLevel.UNRATED; }
   if (["低", "低风险", "L"].includes(clean)) { return StockRiskLevel.LOW; }
-  if (["中", "中风险", "M"].includes(clean)) { return StockRiskLevel.MID; }
+  if (["中", "中风险", "中等风险", "M"].includes(clean)) { return StockRiskLevel.MID; }
   if (["高", "高风险", "H"].includes(clean)) { return StockRiskLevel.HIGH; }
   if (["极高", "极高风险", "E"].includes(clean)) { return StockRiskLevel.EXTREME; }
   for (const [label, level] of Object.entries(STOCK_RISK_LABELS)) {
@@ -600,8 +611,46 @@ export function getRiskTKey(level: string): string {
     [StockRiskLevel.MID]: "stockAnalysis.riskMid",
     [StockRiskLevel.LOW]: "stockAnalysis.riskLow",
     [StockRiskLevel.EXTREME]: "stockAnalysis.riskExtreme",
+    // 无法评级 ≠ 中风险：复用既有的「暂无持仓」文案，不新增键
+    [StockRiskLevel.UNRATED]: "stockAnalysis.noHoldings",
   };
   return map[normalized] ?? "stockAnalysis.riskMid";
+}
+
+// ── 集中度算法的风险档（与上面的决策链档位是两套独立体系）──
+//
+// 后端 `portfolio_monitor::compute_risk_level` 按持仓集中度分成「低风险 / 中等风险 /
+// 中高风险 / 高风险」四档、零持仓时返回「无持仓」，与决策链（rhai `overall_risk`）的
+// 「低 / 中 / 高 / 极高」不是一套划分。硬把前者的值喂进 `parseRiskLevel` 会串味：
+// 「中高风险」在决策链的 `contains` 判据里归「中」（后端 decision.rs），在前端的子串
+// 表里却归「高」——同一个词两个结论。故这两档各用各自的呈现，判据也各留一份。
+
+/** 集中度风险档 → i18n 键。 */
+export function portfolioRiskTKey(raw: unknown): string {
+  const map: Record<string, string> = {
+    "低风险": "stockAnalysis.riskLow",
+    "中等风险": "stockAnalysis.riskMid",
+    "中高风险": "stockAnalysis.riskMidHigh",
+    "高风险": "stockAnalysis.riskHigh",
+    "无持仓": "stockAnalysis.noHoldings",
+  };
+  return map[String(raw ?? "").trim()] ?? "stockAnalysis.riskMid";
+}
+
+/** 集中度风险档 → 颜色变量。判据与 `portfolioRiskTKey` 同源，避免文字一档、颜色另一档。 */
+export function portfolioRiskColor(raw: unknown): string {
+  switch (String(raw ?? "").trim()) {
+    case "低风险":
+      return "var(--sa-green)";
+    case "中高风险":
+    case "高风险":
+      return "var(--sa-red)";
+    case "无持仓":
+      return "var(--muted)";
+    default:
+      // 「中等风险」及未识别输入
+      return "var(--sa-amber)";
+  }
 }
 
 // ── 决策一致性分（0-100）的展示分档 ──
@@ -1141,7 +1190,11 @@ const ANALYST_TIME_HORIZON_WEIGHT: Record<string, Record<string, number>> = {
   mid: {
     "a-market-analyst": 1.0,
     "a-fundamentals": 1.2,
-    "value-investor": 1.2,
+    // P0-3（PLAN-stock-decision-reliability）：估值在 28 日窗无方向预测力，
+    // 偏置 1.2→0.32（归一化占比 29.3%→9.9%）。必须与后端
+    // evidence_weight.rs get_horizon_base_weights("mid") 逐值相等
+    // （check-horizon-weight-parity.mjs 判据 drift）。
+    "value-investor": 0.32,
     "a-research": 1.0,
     "research-mgr": 1.1,
     "a-catalyst": 1.0,

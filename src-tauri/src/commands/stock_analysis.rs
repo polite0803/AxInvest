@@ -5,6 +5,7 @@
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::stock_workflow as wf_err;
+use crate::commands::error_code::trading as trading_err;
 // `SOURCE_TEMPLATE_ID` / `TEMPLATE_VERSION`：图版本代际对照命令取用（权威定义在种子文件，
 // 本处只引用，**绝不**复制第二份数字 —— 复制必然与 `axagent-batch-rerun` 读的口径分叉）。
 use crate::commands::stock_analysis_setup::seed_stock_analysis::{
@@ -17,7 +18,6 @@ use axagent_analysis_engine::backtest::{
 };
 use axagent_analysis_engine::backtest_feedback;
 use axagent_analysis_engine::evidence_weight::{self, EvidenceWeightReport, EvidenceWeightRequest};
-use axagent_analysis_engine::key_levels::{KeyLevelBacktestStats, KeyLevelTracker};
 use axagent_analysis_engine::portfolio_monitor::{
     self, CorrelationCell, PortfolioDashboard, StressTestBundle,
 };
@@ -739,7 +739,6 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
 };
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tauri::State;
 
@@ -1649,70 +1648,6 @@ pub async fn extract_evidence_citations(
     Ok(report)
 }
 
-// ── 条件单 ──
-
-/// 获取所有条件单
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取条件单列表")]
-#[tauri::command]
-pub async fn conditional_order_list(
-    state: State<'_, AppState>,
-) -> Result<Vec<axagent_analysis_engine::conditional_order::ConditionalOrder>, String> {
-    use axagent_entities::settings;
-    let setting = settings::Entity::find_by_id("conditional_orders")
-        .one(state.harness.db())
-        .await
-        .map_err(|e| format!("查询条件单失败: {e}"))?;
-
-    match setting {
-        Some(s) => Ok(serde_json::from_str(&s.value).unwrap_or_default()),
-        None => Ok(vec![]),
-    }
-}
-
-/// 保存条件单列表
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "保存条件单列表")]
-#[tauri::command]
-pub async fn conditional_order_save(
-    state: State<'_, AppState>,
-    orders: Vec<axagent_analysis_engine::conditional_order::ConditionalOrder>,
-) -> Result<(), String> {
-    use axagent_entities::settings;
-    let value = serde_json::to_string(&orders).map_err(|e| format!("序列化条件单失败: {e}"))?;
-
-    let existing = settings::Entity::find_by_id("conditional_orders")
-        .one(state.harness.db())
-        .await
-        .map_err(|e| format!("查询设置失败: {e}"))?;
-
-    if let Some(s) = existing {
-        let mut active: settings::ActiveModel = s.into();
-        active.value = Set(value);
-        active.update(state.harness.db()).await.map_err(|e| format!("更新条件单失败: {e}"))?;
-    } else {
-        let active =
-            settings::ActiveModel { key: Set("conditional_orders".into()), value: Set(value) };
-        active.insert(state.harness.db()).await.map_err(|e| format!("保存条件单失败: {e}"))?;
-    }
-    Ok(())
-}
-
-/// 评估条件单（测试用）
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "评估条件单")]
-#[tauri::command]
-pub async fn conditional_order_evaluate(
-    _stock_code: String,
-    _current_price: f64,
-    _prev_close: f64,
-    _turnover_rate: Option<f64>,
-) -> Result<Vec<serde_json::Value>, String> {
-    use axagent_analysis_engine::conditional_order::ConditionalOrderEngine;
-
-    // 简化版：本地评估（不依赖 DB），返回匹配结果
-    let _engine = ConditionalOrderEngine::new();
-    // 这里仅做框架示例，实际评估由后台引擎完成
-    Ok(vec![])
-}
-
 /// 生成月度投资报告
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "生成月度投资报告")]
 #[tauri::command]
@@ -2213,9 +2148,12 @@ pub async fn run_replay_backtest(
 /// 创建价格告警
 ///
 /// v203 后参数语义：
-/// - `condition` 仍接收老值（above/below/change_up/change_down/volume_spike），命令内部映射到 6 类 alert_type
+/// - `condition` 收老值（above/below/change_up/change_down/volume_spike）与 6 类标准值，
+///   由 [`upsert_price_alert`] 内部归一到 6 类 alert_type
 /// - `target_price` 在 price 类告警是绝对价，在 change_pct 类是百分比，在 turnover_rate 类是换手率
 /// - 新增 `alert_type` + `condition_type` + `threshold` 三列同步写入，新代码读新列
+///
+/// 裁定 10：同股同类型的**未触发**行会被复用并改阈值，不再每建一次多一行。
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "创建价格告警")]
 #[tauri::command]
 pub async fn create_price_alert(
@@ -2225,87 +2163,27 @@ pub async fn create_price_alert(
     condition: String,
     target_price: f64,
 ) -> Result<price_alerts::Model, String> {
-    use axagent_analysis_engine::alert_mapping::{
-        condition_type_for, legacy_condition_to_alert_type,
-    };
-
-    // 映射老 condition 到 6 类 alert_type（未知值保守视为 take_profit）
-    let alert_type = legacy_condition_to_alert_type(&condition)
-        .unwrap_or(axagent_analysis_engine::alert_mapping::alert_types::TAKE_PROFIT);
-    let condition_type = condition_type_for(alert_type);
-    let threshold = target_price;
-
-    let now = chrono::Utc::now().timestamp_millis();
-    let model = price_alerts::ActiveModel {
-        id: Set(uuid::Uuid::new_v4().to_string()),
-        stock_code: Set(stock_code.clone()),
-        stock_name: Set(stock_name.clone()),
-        // 老字段同步写入，兼容旧代码读取
-        condition: Set(condition.clone()),
-        target_price: Set(target_price),
-        // 新字段（v203）
-        alert_type: Set(Some(alert_type.to_string())),
-        condition_type: Set(Some(condition_type.to_string())),
-        threshold: Set(Some(threshold)),
-        is_triggered: Set(0),
-        triggered_at: Set(None),
-        created_at: Set(now),
-        updated_at: Set(now),
-    };
-    let inserted = model.insert(state.harness.db()).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("创建价格告警失败: {e}"))
-            .to_string()
-    })?;
-
-    // P0: 同步加入 RealtimeMonitor 配置，即时生效（无需重启）
-    if let Some(monitor) = state.stock_monitor.get() {
-        use axagent_analysis_engine::monitor::MonitorConfig;
-        // 用 alert_type 直接构造 MonitorConfig 的 6 个 Option 字段
-        let mut config = MonitorConfig {
-            alert_id: inserted.id.clone(),
-            stock_code: stock_code.clone(),
-            stock_name: stock_name.clone(),
-            stop_loss: None,
-            take_profit: None,
-            resistance_break: None,
-            support_break: None,
-            change_pct_alert: None,
-            turnover_rate_alert: None,
-            enabled: true,
-        };
-        match alert_type {
-            axagent_analysis_engine::alert_mapping::alert_types::STOP_LOSS => {
-                config.stop_loss = Some(threshold);
-            },
-            axagent_analysis_engine::alert_mapping::alert_types::TAKE_PROFIT => {
-                config.take_profit = Some(threshold);
-            },
-            axagent_analysis_engine::alert_mapping::alert_types::RESISTANCE => {
-                config.resistance_break = Some(threshold);
-            },
-            axagent_analysis_engine::alert_mapping::alert_types::SUPPORT => {
-                config.support_break = Some(threshold);
-            },
-            axagent_analysis_engine::alert_mapping::alert_types::CHANGE => {
-                config.change_pct_alert = Some(threshold);
-            },
-            axagent_analysis_engine::alert_mapping::alert_types::VOLUME => {
-                config.turnover_rate_alert = Some(threshold);
-            },
-            _ => {},
-        }
-        monitor.add_config(config).await;
-        tracing::info!(
-            "[create_price_alert] 已加入实时监控: {} {} {} → alert_type={} threshold={:.2}",
-            stock_code,
-            stock_name,
-            condition,
-            alert_type,
-            threshold
-        );
-    } else {
-        tracing::warn!("[create_price_alert] RealtimeMonitor 未初始化，告警仅写入 DB，不会触发");
+    // 落库 + 进引擎**走同一份实现**（与 agent 工具那条路共用，见 `price_alert_upsert`）：
+    // 两条路各写一遍「归一化 → 造配置 → add_config」就会分叉 —— 裁定 15 之前正是如此
+    // （agent 那条只拿得到 db，建的告警要等下次启动才生效）。
+    // 复用未触发行时 `id` 不变 ⇒ `add_config` 按 `alert_id` 覆盖旧阈值，不会两行盯同一语义。
+    let (inserted, _reused, wired) =
+        crate::commands::price_alert_upsert::upsert_price_alert_and_wire(
+            state.harness.db(),
+            state.stock_monitor.get(),
+            &stock_code,
+            &stock_name,
+            &condition,
+            target_price,
+        )
+        .await
+        .map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("创建价格告警失败: {e}"))
+                .to_string()
+        })?;
+    if !wired {
+        tracing::warn!("[create_price_alert] 本行未进监控引擎（引擎未装配或类型落不成配置）");
     }
 
     Ok(inserted)
@@ -2353,6 +2231,63 @@ pub async fn delete_price_alert(state: State<'_, AppState>, id: String) -> Resul
     }
 
     Ok(())
+}
+
+/// 监控引擎的运行读数（裁定 12 ①：「监控实际未在取数」必须是可被面板消费的聚合面）。
+///
+/// 每个键只说一件事，前端不得把它们收敛成一句（H-4）：
+/// - `assembled=false` ⇒ 引擎没装配，**此时其余计数一律不得渲染**（0 不是「没有失败」，是「没人在取数」）
+/// - `tradingNow=false` ⇒ 非交易时段整轮跳过，轮次计数是上一盘的旧值
+/// - `roundCodesFailed/roundCodesTotal` ⇒ 本轮取数失败的股票数 / 应取数的股票数
+/// - `consecutiveAllFailedRounds` ⇒ 连续「整轮全失败」轮数（面板据此说「监控实际未在产出告警」）
+/// - `roundFinishedAtMs=0` ⇒ 装配好了但还没跑完第一轮，不能读成「本轮 0/0 失败」
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonitorStatusDto {
+    pub assembled: bool,
+    /// 时段档位码（`TradingSession::code()`），前端按它查 i18n，不在这里出中文
+    pub session: String,
+    pub trading_now: bool,
+    pub poll_interval_secs: u64,
+    pub configs_active: u32,
+    pub round_codes_total: u32,
+    pub round_codes_failed: u32,
+    pub consecutive_all_failed_rounds: u32,
+    pub round_finished_at_ms: i64,
+}
+
+#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "查询实时监控运行读数")]
+#[tauri::command]
+pub async fn monitor_status(state: State<'_, AppState>) -> Result<MonitorStatusDto, String> {
+    let session = axagent_astock_data::calendar::current_trading_session();
+    let Some(monitor) = state.stock_monitor.get() else {
+        // 未装配本身是一种缺席：计数全部留 0，由 `assembled` 告诉前端「这些 0 没有含义」
+        return Ok(MonitorStatusDto {
+            assembled: false,
+            session: session.code().to_string(),
+            trading_now: session.is_open(),
+            poll_interval_secs: 0,
+            configs_active: 0,
+            round_codes_total: 0,
+            round_codes_failed: 0,
+            consecutive_all_failed_rounds: 0,
+            round_finished_at_ms: 0,
+        });
+    };
+    let stats = monitor.poll_round_stats().await;
+    let configs_active =
+        monitor.list_configs().await.into_iter().filter(|c| c.enabled).count() as u32;
+    Ok(MonitorStatusDto {
+        assembled: true,
+        session: session.code().to_string(),
+        trading_now: session.is_open(),
+        poll_interval_secs: monitor.poll_interval_secs().await,
+        configs_active,
+        round_codes_total: stats.codes_total,
+        round_codes_failed: stats.codes_failed,
+        consecutive_all_failed_rounds: stats.consecutive_all_failed_rounds,
+        round_finished_at_ms: stats.finished_at_ms,
+    })
 }
 
 /// P1-2: 加入实时行情监控（前端订阅 stock-quote-update 事件接收推送）。
@@ -2514,8 +2449,7 @@ pub async fn generate_stock_report(
     let decision_json = record.decision_json.clone().unwrap_or_default();
 
     // 从 blackboard_snapshot 恢复分析师报告（仅提取 report.* 条目）
-    // 注：snapshot 是 JSON 对象，value 可能是字符串（来自工作流结果）或嵌套对象
-    // （来自 key_levels API 追加），用 Value 解析兼容两种情况。
+    // 注：snapshot 是 JSON 对象，value 可能是字符串（来自工作流结果）或嵌套对象，用 Value 解析兼容两种情况。
     let bb_value: serde_json::Value = record
         .blackboard_snapshot
         .as_ref()
@@ -2757,6 +2691,15 @@ pub async fn toggle_trading_enabled(
     })
 }
 
+/// 读取交易功能开关的真实状态（面板挂载时回读）。
+/// 此前本域只有写口：前端把开关当本地 useState，重进面板就显示成本地默认值，
+/// 与 settings 里的实际状态可能相反 —— 界面看着关着、后端仍在放行录入。
+#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "读取交易功能开关")]
+#[tauri::command]
+pub async fn get_trading_enabled(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(axagent_analysis_engine::trading::is_trading_enabled(state.harness.db()).await)
+}
+
 /// 获取最近分析记录（用于 Dashboard）
 /// 接线：register_commands.rs 注册 IPC handler + agent_command 宏注册 agent 工具索引
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取最近分析记录")]
@@ -2828,20 +2771,6 @@ pub async fn compare_trade_with_analysis(
     engine.compare_trade_vs_prediction(&trade).await
 }
 
-// ── Key Levels Commands ──
-
-/// 回测关键价位命中率
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "回测关键价位命中率")]
-#[tauri::command]
-pub async fn backtest_key_levels(
-    state: State<'_, AppState>,
-    lookback_days: u32,
-) -> Result<KeyLevelBacktestStats, String> {
-    let tracker =
-        KeyLevelTracker::new(Arc::new(state.harness.db().clone()), state.astock_client.clone());
-    tracker.backtest_key_levels(lookback_days).await
-}
-
 // ── Screen Commands ──
 
 /// 从自选股中筛选(自选股为空或 DB 异常时回退到 FALLBACK_STOCKS 池)
@@ -2875,15 +2804,18 @@ pub async fn discover_stock_candidates(
 // ── Calendar Commands ──
 
 /// 获取市场状态
+///
+/// H-6（2026-10-15）：返回值原先有三个键，前端只消费 `status`（`StockAnalysisPage.tsx`
+/// 的 `invoke<{ status: string }>`），`isTradingDay` / `isTradingTime` **全仓零消费者**
+/// （Rust / TS / rhai / 测试四面都查过）⇒ 按计划撤掉这两个键，不再让同一件事有 bool 与文案
+/// 两套表达。时段判定要结构化读数的地方走 `monitor_status` 的会话档位码
+/// （`TradingSession::code()`，11 语言各自翻译），不在这里再开一个中文口径。
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "获取市场状态")]
 #[tauri::command]
 pub async fn get_market_status() -> Result<serde_json::Value, String> {
-    // 交易日判定必须问北京日。旧写法把 UTC 的 `now()` 格式化成字符串再解析回来，
-    // 北京 00:00–07:59 这段时间里拿到的是「昨天」⇒ 开市日的凌晨会报「非交易日」。
-    let date = axagent_astock_data::calendar::beijing_today();
+    // 文案里的「下一个交易时点」必须按北京日推。旧写法把 UTC 的 `now()` 格式化成字符串再
+    // 解析回来，北京 00:00–07:59 这段时间里拿到的是「昨天」⇒ 开市日的凌晨会报「非交易日」。
     Ok(serde_json::json!({
-        "isTradingDay": axagent_astock_data::calendar::is_trading_day(&date),
-        "isTradingTime": axagent_astock_data::calendar::is_trading_time(),
         "status": axagent_astock_data::calendar::next_trading_time_desc(),
     }))
 }
@@ -2934,23 +2866,31 @@ pub async fn generate_daily_review(state: State<'_, AppState>) -> Result<DailyRe
         );
     }
     if let Ok(alerts) = triggered_alerts_result {
+        use axagent_analysis_engine::alert_mapping as am;
         for alert in alerts {
-            let desc = format!(
-                "{}触发: 价格{}{:.2}(目标{:.2})",
-                alert.condition,
-                if alert.condition == "above" {
-                    "≥"
-                } else {
-                    "≤"
+            // H-8：不再拼老 `condition` 列（那是英文 token 且 6→5 有损：`resistance` 与
+            // `take_profit` 同写 `above`）。类型与方向都走 `alert_type`，阈值优先读新列；
+            // `alert_type` 为 NULL 的老行（v203 之前）才回落到兼容列。
+            let raw_type = alert.alert_type.as_deref().unwrap_or(alert.condition.as_str());
+            let canonical = am::normalize_alert_type(raw_type);
+            let label = am::alert_type_label_zh(canonical);
+            let threshold = alert.threshold.unwrap_or(alert.target_price);
+            let price = state
+                .astock_client
+                .get_quote(&alert.stock_code)
+                .await
+                .map(|q| q.price)
+                .unwrap_or(0.0);
+            // 单位跟着 `condition_type` 分列：价格类说「现价」，涨跌幅/换手率类说「阈值 %」
+            let below = am::is_below_alert(canonical);
+            let dir_symbol = if below { "≤" } else { "≥" };
+            let dir_word = if below { "低于" } else { "高于" };
+            let desc = match am::condition_type_for(canonical) {
+                am::condition_types::PRICE => {
+                    format!("{label}触发: 现价{dir_symbol}{price:.2}（阈值 {threshold:.2}）")
                 },
-                state
-                    .astock_client
-                    .get_quote(&alert.stock_code)
-                    .await
-                    .map(|q| q.price)
-                    .unwrap_or(0.0),
-                alert.target_price
-            );
+                _ => format!("{label}触发: 现价 {price:.2}（阈值 {threshold:.2}%，{dir_word}）"),
+            };
             triggered_alerts.entry(alert.stock_code).or_default().push(desc);
         }
     }
@@ -3414,6 +3354,25 @@ pub async fn get_portfolio_dashboard(
     Ok(dashboard)
 }
 
+/// 收盘定时任务的组合刷新入口（裁定 5 ①）。
+///
+/// 三步链本身在引擎层 `portfolio_monitor::refresh_snapshot`，与命令面
+/// `refresh_portfolio_metrics` 共用 ⇒ 面板手动刷新与 cron 落的不是两套口径。
+///
+/// 返回 `None` = 当前**无持仓**：调用方记 `skipped` 而不落一行全 0 的快照 ——
+/// 那行会进 90 日回撤窗口（把「空仓」读成一次暴跌），也让 `get_dashboard` 显示 0 市值。
+pub async fn refresh_portfolio_for_scheduler(
+    db: &sea_orm::DatabaseConnection,
+    quotes: &dyn axagent_harness::market_data::MarketDataProvider,
+    engine: &tokio::sync::RwLock<axagent_analysis_engine::trading::TradingEngine>,
+) -> Result<Option<portfolio_monitor::RefreshSummary>, String> {
+    let positions = engine.read().await.get_positions().await?;
+    if positions.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(portfolio_monitor::refresh_snapshot(db, quotes, &positions, None).await?))
+}
+
 /// 立即刷新组合监控快照（写 portfolio_metrics_daily + correlation_snapshot）
 #[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "刷新组合监控快照")]
 #[tauri::command]
@@ -3424,46 +3383,19 @@ pub async fn refresh_portfolio_metrics(
     let engine = state.trading_engine.read().await;
     let positions = engine.get_positions().await?;
     drop(engine);
-    let as_of = as_of_date.as_deref();
 
-    // β 必须与实时面板（`get_portfolio_dashboard`）**同源同口径**：否则落库快照恒用
-    // 回退 1.0，而面板用真实历史 beta ⇒ 按 `as_of_date` 做时间旅行对比时，
-    // 等于在比两套不同的方法。
-    let betas = portfolio_monitor::estimate_betas(
-        &*state.astock_client,
-        &positions,
-        portfolio_monitor::BETA_LOOKBACK_DAYS,
-    )
-    .await;
-
-    let (id, count) = portfolio_monitor::refresh_metrics(
-        state.harness.db(),
-        &positions,
-        // 仓位三条走面板（回落 20/10/40 == 接线前的 `Default`），与风控门同一来源。
-        &PositionLimits::panel_effective(),
-        &betas,
-        None,
-        None,
-        None,
-        as_of,
-    )
-    .await?;
-
-    let corr_count = portfolio_monitor::refresh_correlation(
+    // G-7：β → 指标落库 → 相关性落库这三步已抽到引擎层 `portfolio_monitor::refresh_snapshot`。
+    // 原先它们只写在下面这段命令体里，定时任务无从复用 ⇒ 收盘日更任务只能再拼一遍，
+    // 两个生产者各拼一遍就是两套口径（面板与 cron 落库从此不同源）。
+    let summary = portfolio_monitor::refresh_snapshot(
         state.harness.db(),
         &*state.astock_client,
         &positions,
-        60,
-        as_of,
+        as_of_date.as_deref(),
     )
     .await?;
 
-    Ok(serde_json::json!({
-        "metricsId": id,
-        "positionsSnapshotted": count,
-        "correlationPairsWritten": corr_count,
-        "asOfDate": as_of,
-    }))
+    serde_json::to_value(&summary).map_err(|e| format!("serialize refresh summary: {e}"))
 }
 
 /// 拉取最近一次两两相关性快照（按 as_of_date 时间旅行）
@@ -3726,10 +3658,23 @@ pub async fn compute_valuation_band(
     //   `valuation_band::clip_valuation_history` 归一到升序才对得上。
     //   任何一侧丢了这一步 ⇒ 该侧 `current` 取到**最旧**那条，且**不会报错**
     //   （分位数与顺序无关，只有"当前分位"错）。
+    // P0-4：周期股 PE 置空须与工作流工具路径同口径（防「图表显示 PE 8% 分位便宜、
+    // 决策侧却已置空」的双结论）。行业接口失败不阻断图表（按普通股给全口径带）。
+    let pe_suppressed = state
+        .astock_client
+        .get_sector_info(&stock_code)
+        .await
+        .ok()
+        .flatten()
+        .map(|si| {
+            axagent_astock_data::cyclical::is_cyclical_sector(&si.sector_name, &si.sub_sector)
+        })
+        .unwrap_or(false);
     let band = axagent_astock_data::valuation_band::compute_valuation_band(
         &stock_code,
         &samples,
         samples.last(),
+        pe_suppressed,
     );
     Ok(band)
 }
@@ -6439,6 +6384,13 @@ pub async fn import_trades(
     state: State<'_, AppState>,
     file_path: String,
 ) -> Result<axagent_analysis_engine::trade_import::ImportSummary, String> {
+    // 交易开关关闭时不得写库。单条录入 `record_trade` 一直有这道检查，批量导入此前
+    // 完全没有 —— 用户显式关闭功能后，仍可被一次 CSV 导入绕过并写入 trades + 持仓。
+    if !axagent_analysis_engine::trading::is_trading_enabled(state.harness.db()).await {
+        return Err(ErrorResponse::new(trading_err::DISABLED)
+            .with_category(crate::commands::error::ErrorCategory::PermissionDenied)
+            .to_string());
+    }
     let rows = axagent_analysis_engine::trade_import::parse_csv(&file_path)?;
     let db = state.harness.db();
     axagent_analysis_engine::trade_import::batch_import_trades(db, &rows).await.map_err(|e| {

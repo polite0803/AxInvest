@@ -48,7 +48,6 @@ pub mod conditional_order_bridge;
 // P3-1: 跨股票信号聚合器 — 在 signals.rs（单股）和 portfolio_monitor.rs（持仓指标）之间填补信号聚合层
 pub mod cross_stock_aggregator;
 // P3-2: 板块联动分析 — 基于 ConceptIndex 识别同板块龙头-从属传导模式
-pub mod key_levels;
 pub mod market_close_store;
 pub mod market_mainline;
 pub mod market_regime;
@@ -74,7 +73,6 @@ pub mod reflection_stats;
 pub mod report;
 pub mod review;
 pub mod risk;
-pub mod risk_inspection;
 pub mod rules;
 pub mod schema_serde_regression;
 pub mod scoring;

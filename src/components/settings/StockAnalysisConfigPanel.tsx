@@ -149,10 +149,6 @@ export function getDefaultVariables(): Variable[] {
   b("signal_ma_fast", 5, "stockAnalysis.configDescriptions.signalMaFast", "number");
   b("signal_ma_slow", 20, "stockAnalysis.configDescriptions.signalMaSlow", "number");
   b("signal_breakout_volume_mult", 1.5, "stockAnalysis.configDescriptions.signalBreakoutVolumeMult", "number");
-  // 关键价位（key_levels.rs KeyLevelTracker）
-  b("keylevel_lookback_days", 60, "stockAnalysis.configDescriptions.keylevelLookbackDays", "number");
-  b("keylevel_touch_tolerance_pct", 1.0, "stockAnalysis.configDescriptions.keylevelTouchTolerancePct", "number");
-  b("keylevel_min_touches", 2, "stockAnalysis.configDescriptions.keylevelMinTouches", "number");
   // 推荐器策略开关（recommender/strategies）
   b("reco_trend_enabled", true, "stockAnalysis.configDescriptions.recoTrendEnabled", "boolean");
   b("reco_reversion_enabled", true, "stockAnalysis.configDescriptions.recoReversionEnabled", "boolean");
@@ -507,15 +503,6 @@ export function StockAnalysisConfigPanel(_props: Props) {
           "signal_ma_fast",
           "signal_ma_slow",
           "signal_breakout_volume_mult",
-        ]),
-      },
-      {
-        tool: "keylevels",
-        label: t("stockAnalysis.settings.group.keylevels"),
-        vars: resolve([
-          "keylevel_lookback_days",
-          "keylevel_touch_tolerance_pct",
-          "keylevel_min_touches",
         ]),
       },
       {

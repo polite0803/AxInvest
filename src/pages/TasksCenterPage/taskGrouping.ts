@@ -18,6 +18,9 @@ const INVEST_TASK_TYPES = new Set([
   "decision-backtest",
   "mover-recall",
   "evolution-proposal",
+  "lesson-validation",
+  "portfolio-metrics",
+  "intent-expiry",
 ]);
 
 /** 系统维护内置 taskType 白名单。 */
@@ -44,6 +47,11 @@ const BUILTIN_EXECUTABLE_TYPES = new Set([
   "decision-backtest",
   "mover-recall",
   "evolution-proposal",
+  // 与后端 `scheduled_task.rs::BUILTIN_TASK_TYPES` 逐字对齐的三条（漏一条就是「立即执行」
+  // 报 MANUAL_RUN_NOT_SUPPORTED，而到点自动执行照常 ⇒ 缺陷只在手动触发时露头）
+  "lesson-validation",
+  "portfolio-metrics",
+  "intent-expiry",
 ]);
 
 type TaskLike = {

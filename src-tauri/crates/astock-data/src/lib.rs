@@ -12,6 +12,8 @@ pub mod board;
 pub mod calendar;
 pub mod candlestick_pattern;
 mod code_form;
+/// P0-4：周期股估值开关（行业判定 + FCF 中位数中性化锚）。
+pub mod cyclical;
 pub mod daily_snapshot;
 pub mod disk_cache;
 pub mod divergence;

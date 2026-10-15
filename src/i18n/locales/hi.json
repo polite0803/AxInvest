@@ -2974,7 +2974,8 @@
     "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "कोई टाइम-ट्रैवल या बैकफ़िल बैच पहले से चल रहा है; इसके पूरा होने तक प्रतीक्षा करें।",
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "लाइव पाइपलाइन विंडो (23:50–02:10 / 17:50–18:10) में हैं; विंडो के बाहर फिर शुरू करें।",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "बैकफ़िल बैच निष्पादन विफल; बैच विवरण देखें।",
-    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "बैकफ़िल बैच इतिहास क्वेरी विफल; बाद में पुनः प्रयास करें।"
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "बैकफ़िल बैच इतिहास क्वेरी विफल; बाद में पुनः प्रयास करें।",
+    "TRADING_DISABLED": "ट्रेडिंग फ़ंक्शन अक्षम है। लेन-देन दर्ज करने से पहले इसे सक्षम करें"
   },
   "errorBoundary": {
     "copied": "कॉपी हुआ",
@@ -15343,7 +15344,44 @@
       "typeChange": "असामान्य मूल्य परिवर्तन",
       "typeVolume": "असामान्य टर्नओवर",
       "typeUnknown": "अज्ञात प्रकार",
-      "triggeredDetail": "{{name}}: {{type}} चेतावनी सक्रिय, वर्तमान मूल्य {{price}}"
+      "triggeredDetail": "{{name}}: {{type}} चेतावनी सक्रिय, वर्तमान मूल्य {{price}}",
+      "t0": {
+        "title": "T+0 स्वतः पुनः चालन",
+        "cost": "सक्षम करने पर, कोई भी निगरानी किया गया स्टॉक सत्र के दौरान सीमा पार करते ही पूरा विश्लेषण वर्कफ़्लो दोबारा चलाता है (लागत ≈ एक पूर्ण विश्लेषण); एक ही स्टॉक के लिए दोहराव न्यूनतम अंतराल से रोके जाते हैं",
+        "changePct": "बदलाव %",
+        "turnover": "टर्नओवर %",
+        "intervalMin": "न्यूनतम अंतराल (मिनट)",
+        "saveFailed": "T+0 सेटिंग्स सहेजना विफल: {{reason}}"
+      }
+    },
+    "conditional": {
+      "triggeredDetail": "सशर्त आदेश ट्रिगर हुआ: {{name}} {{condition}}, कार्रवाई: {{action}}",
+      "title": "सशर्त आदेश",
+      "action": "कार्रवाई",
+      "enabled": "सक्रिय",
+      "triggeredToday": "आज",
+      "lastTriggered": "अंतिम",
+      "empty": "कोई सशर्त आदेश नहीं",
+      "evaluating": "{{count}} का मूल्यांकन",
+      "totalRows": "कुल {{count}} पंक्तियाँ (निष्क्रिय सहित)",
+      "unreadable": "{{count}} पंक्तियाँ नियम के रूप में नहीं पढ़ी जा सकीं (मूल्यांकन से बाहर)",
+      "create": "बनाएँ",
+      "createFailed": "बनाने में विफल: {{reason}}",
+      "loadFailed": "सशर्त आदेश लोड नहीं हुए: {{reason}}",
+      "toggleFailed": "टॉगल विफल: {{reason}}",
+      "deleteFailed": "हटाना विफल: {{reason}}",
+      "confirmDelete": "यह सशर्त आदेश हटाएँ?",
+      "thresholdPct": "सीमा (%)",
+      "actionNotify": "केवल सूचित करें",
+      "actionSell": "बेचें",
+      "actionBuy": "खरीदें",
+      "actionReduce": "घटाएँ",
+      "actionValueQty": "मात्रा",
+      "actionValueRatio": "अनुपात",
+      "coolDown": "ठहराव (मिनट)",
+      "maxPerDay": "प्रतिदिन अधिकतम",
+      "windowStart": "से HH:MM",
+      "windowEnd": "तक HH:MM"
     },
     "progress": {
       "fetchingData": "स्टॉक डेटा लाया जा रहा है...",
@@ -15529,6 +15567,7 @@
     "revenueGrowth": "राजस्व वृद्धि",
     "riskHigh": "उच्च जोखिम",
     "riskMid": "मध्यम जोखिम",
+    "riskMidHigh": "मध्यम-उच्च जोखिम",
     "riskLow": "कम जोखिम",
     "riskExtreme": "अत्यधिक जोखिम",
     "noHistory": "कोई विश्लेषण इतिहास नहीं",
@@ -16099,7 +16138,6 @@
         "moat": "Moat",
         "screener": "Screener",
         "signals": "Signals",
-        "keylevels": "Key Levels",
         "recommender": "Recommender",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
@@ -17198,7 +17236,9 @@
       "worstHit": "Worst hit",
       "m10": "Market -10%",
       "m20": "Market -20%",
-      "blackSwan": "Black Swan (-30%)"
+      "blackSwan": "Black Swan (-30%)",
+      "unpricedTitle": "वर्तमान मूल्य अनुपलब्ध",
+      "unpricedNotice": "{{count}} स्थितियों का वर्तमान मूल्य नहीं है, सांद्रता और विविधता की गणना से बाहर"
     },
     "evidence": {
       "concepts": "फंडामेंटल/मूल्यांकन",
@@ -17307,26 +17347,6 @@
       "dailyPreMarket": "Trading Day 08:00 (Pre-market)",
       "weeklyMonday": "Weekly Monday 21:00",
       "every2Hours": "Every 2 Hours"
-    },
-    "fundPanel": {
-      "fundFlow": "Fund Flow",
-      "type": "Type",
-      "deposit": "Deposit",
-      "withdrawal": "Withdrawal",
-      "amount": "Amount",
-      "date": "Date",
-      "fee": "Fee",
-      "notes": "Notes",
-      "totalDeposits": "Total Deposits",
-      "totalWithdrawals": "Total Withdrawals",
-      "netInflow": "Net Inflow",
-      "recordFundFlow": "Record Fund Flow",
-      "depositTransferIn": "Deposit (Transfer In)",
-      "withdrawalTransferOut": "Withdrawal (Transfer Out)",
-      "feeOptional": "Fee (Optional)",
-      "notesOptional": "Notes (Optional)",
-      "recorded": "Recorded",
-      "amountMustBeGreaterThanZero": "Amount must be > 0"
     },
     "marketSimPanel": {
       "simConfig": "Simulation Config",
@@ -17854,8 +17874,8 @@
       "moatFcfRatioMin": "FCF/शुद्ध लाभ अनुपात निचली सीमा (0-1)",
       "monitorPollIntervalSecs": "निगरानी पोलिंग अंतराल (सेकंड)",
       "monitorAlertCooldownSecs": "एक ही लक्ष्य के लिए अलर्ट कूलडाउन समय (सेकंड, 10-3600)",
-      "monitorMinSeverity": "न्यूनतम पुश अलर्ट स्तर: जानकारी / चेतावनी / गंभीर",
-      "monitorChannels": "पुश चैनल, अल्पविराम से अलग: इन-ऐप / लार्क / ईमेल / वेबहुक",
+      "monitorMinSeverity": "न्यूनतम पुश अलर्ट स्तर: जानकारी / चेतावनी / गंभीर (फ़िलहाल कोई उपभोक्ता नहीं: इसे बदलने का कोई असर नहीं)",
+      "monitorChannels": "पुश चैनल, अल्पविराम से अलग: इन-ऐप / लार्क / ईमेल / वेबहुक (फ़िलहाल कोई उपभोक्ता नहीं: इसे बदलने का कोई असर नहीं)",
       "dualViewDisagreementThreshold": "दो-दृष्टिकोण असहमति सीमा (0-100), इससे कम होने पर मानव समीक्षा आवश्यक चिह्नित करें",
       "minConfidence": "न्यूनतम विश्वास स्तर (0-100)",
       "varConfidence": "VaR विश्वास स्तर (0-1)",
@@ -17906,9 +17926,6 @@
       "signalMaFast": "MA गोल्डन क्रॉस डिटेक्शन फास्ट लाइन अवधि (3-30)",
       "signalMaSlow": "MA गोल्डन क्रॉस डिटेक्शन स्लो लाइन अवधि (10-120)",
       "signalBreakoutVolumeMult": "ब्रेकआउट/ब्रेकडाउन वॉल्यूम गुणक थ्रेशोल्ड (1.0-3.0)",
-      "keylevelLookbackDays": "महत्वपूर्ण मूल्य स्तर पूर्वावलोकन विंडो (ट्रेडिंग दिन, 10-250)",
-      "keylevelTouchTolerancePct": "महत्वपूर्ण मूल्य स्तर स्पर्श सहनशीलता (%, 0.1-5.0)",
-      "keylevelMinTouches": "समर्थन/प्रतिरोध की पुष्टि के लिए न्यूनतम स्पर्श संख्या (1-10)",
       "recoTrendEnabled": "ट्रेंड फॉलोइंग उप-रणनीति सक्षम करें",
       "recoReversionEnabled": "ओवरसोल्ड रिबाउंड उप-रणनीति सक्षम करें",
       "recoValueEnabled": "मूल्य स्टॉक चयन उप-रणनीति सक्षम करें",
@@ -18084,7 +18101,12 @@
     "pending": "लंबित",
     "portfolio": {
       "importPartial": "आंशिक आयात",
-      "yuan": "युआन"
+      "yuan": "युआन",
+      "signalTitle": "पोर्टफोलियो-स्तर संकेत",
+      "signalBody": "{{count}} शेयर एक साथ {{direction}} गए, तीव्रता {{pct}}% — {{action}}",
+      "signalBullish": "तेज़",
+      "signalBearish": "मंदी",
+      "signalNeutral": "तटस्थ"
     },
     "references": "संदर्भ",
     "resonancePoint": "अनुनाद बिंदु",
@@ -18222,6 +18244,21 @@
         "failed": "विफल (पुराना)",
         "unknown": "अज्ञात स्थिति"
       }
+    },
+    "monitor": {
+      "readFailed": "मॉनिटर स्थिति पढ़ी नहीं जा सकी: {{reason}}",
+      "notAssembled": "मॉनिटर इंजन जोड़ा नहीं गया: अलर्ट संग्रहीत पर न लोड होता है न चलता है",
+      "pausedBySession": "{{session}} — मॉनिटर पोलिंग रुकी है",
+      "fetchFailed": "इस राउंड में {{failed}}/{{total}} प्रतिभूति विफल, मूल्यांकन से बाहर",
+      "allFailedRounds": "{{rounds}} राउंड लगातार पूर्ण विफल — मॉनिटर कोई अलर्ट नहीं दे रहा",
+      "firstRoundPending": "मॉनिटर चालू, पहला राउंड अधूरा (लगभग हर {{interval}} से.)",
+      "emptyResponse": "बैकएंड ने मॉनिटर स्थिति लौटाई नहीं",
+      "sessionNonTradingDay": "गैर-कार्यदिवस",
+      "sessionPreOpen": "खुलने से पहले",
+      "sessionMorning": "प्रातः सत्र",
+      "sessionLunchBreak": "दोपहर अवकाश",
+      "sessionAfternoon": "अपराह्न सत्र",
+      "sessionPostClose": "बंद होने के बाद"
     }
   },
   "pipeline": {

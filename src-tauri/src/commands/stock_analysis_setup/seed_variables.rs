@@ -608,28 +608,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             description: Some("突破/破位放量倍数阈值".into()),
             is_secret: false,
         },
-        // ── 关键价位参数 ──
-        Variable {
-            name: "keylevel_lookback_days".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(60),
-            description: Some("关键价位回看窗口 (交易日)".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "keylevel_touch_tolerance_pct".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(1.0),
-            description: Some("关键价位触碰容差 (%)".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "keylevel_min_touches".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(2),
-            description: Some("确认支撑/阻力最少触碰次数".into()),
-            is_secret: false,
-        },
         // ── 监控告警参数 ──
         Variable {
             name: "monitor_alert_cooldown_secs".into(),

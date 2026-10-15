@@ -2974,7 +2974,8 @@
     "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "已有時間旅行/漏檢補分析批次在執行，請等它結束。",
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "當前處於即時流水線時間窗（23:50–02:10 / 17:50–18:10），請避開後再發起。",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "漏檢補分析批次執行失敗，請查看批次明細。",
-    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "查詢漏檢補分析批次歷史失敗，請稍後重試。"
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "查詢漏檢補分析批次歷史失敗，請稍後重試。",
+    "TRADING_DISABLED": "交易功能未啟用，請先開啟後再記錄交易"
   },
   "errorBoundary": {
     "copied": "已複製",
@@ -15567,7 +15568,44 @@
       "typeChange": "漲跌幅異常",
       "typeVolume": "換手率異常",
       "typeUnknown": "未知類型",
-      "triggeredDetail": "「{{name}}」觸發{{type}}預警，現價 {{price}}"
+      "triggeredDetail": "「{{name}}」觸發{{type}}預警，現價 {{price}}",
+      "t0": {
+        "title": "T+0 自動重跑",
+        "cost": "開啟後，任一監控標的盤中觸發閾值即重跑整條分析工作流（成本≈一次完整分析）；同一標的按最小間隔去重",
+        "changePct": "漲跌幅%",
+        "turnover": "換手率%",
+        "intervalMin": "最小間隔(分)",
+        "saveFailed": "T+0 設定儲存失敗：{{reason}}"
+      }
+    },
+    "conditional": {
+      "triggeredDetail": "條件單觸發：{{name}} {{condition}}，動作：{{action}}",
+      "title": "條件單",
+      "action": "動作",
+      "enabled": "啟用",
+      "triggeredToday": "今日觸發",
+      "lastTriggered": "最後觸發",
+      "empty": "暫無條件單",
+      "evaluating": "在評估 {{count}} 條",
+      "totalRows": "表內共 {{count}} 條（含已停用）",
+      "unreadable": "{{count}} 行無法讀回為規則，不参与評估",
+      "create": "建單",
+      "createFailed": "建單失敗：{{reason}}",
+      "loadFailed": "條件單讀取失敗：{{reason}}",
+      "toggleFailed": "啟停失敗：{{reason}}",
+      "deleteFailed": "刪除失敗：{{reason}}",
+      "confirmDelete": "刪除這條條件單？",
+      "thresholdPct": "閾值(%)",
+      "actionNotify": "僅通知",
+      "actionSell": "賣出",
+      "actionBuy": "買入",
+      "actionReduce": "減倉",
+      "actionValueQty": "股數",
+      "actionValueRatio": "比例",
+      "coolDown": "冷卻(分)",
+      "maxPerDay": "單日上限",
+      "windowStart": "起 HH:MM",
+      "windowEnd": "止 HH:MM"
     },
     "progress": {
       "fetchingData": "取得股票資料...",
@@ -16211,7 +16249,6 @@
         "moat": "护城河",
         "screener": "选股筛选",
         "signals": "信号检测",
-        "keylevels": "关键价位",
         "recommender": "推荐器",
         "strategyParams": "策略参数",
         "strategyGates": "策略门槛与过滤条件",
@@ -16464,6 +16501,7 @@
     "highestRisk": "最高 {{label}} ({{score}})",
     "riskHigh": "高風險",
     "riskMid": "中風險",
+    "riskMidHigh": "中高風險",
     "riskLow": "低風險",
     "riskExtreme": "極高風險",
     "loading": "載入中...",
@@ -17422,7 +17460,9 @@
       "worstHit": "Worst hit",
       "m10": "Market -10%",
       "m20": "Market -20%",
-      "blackSwan": "Black Swan (-30%)"
+      "blackSwan": "Black Swan (-30%)",
+      "unpricedTitle": "現價缺失",
+      "unpricedNotice": "{{count}} 只持倉沒有現價，未參與集中度與分散度計算"
     },
     "evidence": {
       "concepts": "基本面/估值數據",
@@ -17598,26 +17638,6 @@
       "colExitPrice": "出场价",
       "colPnl": "盈亏",
       "colGrade": "评级"
-    },
-    "fundPanel": {
-      "fundFlow": "资金流水",
-      "type": "类型",
-      "deposit": "入金",
-      "withdrawal": "出金",
-      "amount": "金额",
-      "date": "日期",
-      "fee": "手续费",
-      "notes": "备注",
-      "totalDeposits": "总入金",
-      "totalWithdrawals": "总出金",
-      "netInflow": "净入金",
-      "recordFundFlow": "记录资金流水",
-      "depositTransferIn": "入金（转入）",
-      "withdrawalTransferOut": "出金（转出）",
-      "feeOptional": "手续费（可选）",
-      "notesOptional": "备注（可选）",
-      "recorded": "已记录",
-      "amountMustBeGreaterThanZero": "金额必须 > 0"
     },
     "marketSimPanel": {
       "simConfig": "模拟参数配置",
@@ -18078,8 +18098,8 @@
       "moatFcfRatioMin": "FCF/净利润 比率下限 (0-1)",
       "monitorPollIntervalSecs": "监控轮询间隔 (秒)",
       "monitorAlertCooldownSecs": "同一标的告警冷却时间 (秒，10-3600)",
-      "monitorMinSeverity": "最低推送告警等级: info / warn / critical",
-      "monitorChannels": "推送渠道，逗号分隔: in_app / lark / email / webhook",
+      "monitorMinSeverity": "最低推送告警等级: info / warn / critical（目前無消費者：改它不會影響任何行為）",
+      "monitorChannels": "推送渠道，逗号分隔: in_app / lark / email / webhook（目前無消費者：改它不會影響任何行為）",
       "dualViewDisagreementThreshold": "双视角分歧阈值 (0-100)，低于此值标记为需人工复核",
       "minConfidence": "最低置信度 (0-100)",
       "varConfidence": "VaR 置信度 (0-1)",
@@ -18130,9 +18150,6 @@
       "signalMaFast": "MA 金叉检测快线周期 (3-30)",
       "signalMaSlow": "MA 金叉检测慢线周期 (10-120)",
       "signalBreakoutVolumeMult": "突破/破位放量倍数阈值 (1.0-3.0)",
-      "keylevelLookbackDays": "关键价位回看窗口 (交易日，10-250)",
-      "keylevelTouchTolerancePct": "关键价位触碰容差 (%，0.1-5.0)",
-      "keylevelMinTouches": "确认支撑/阻力最少触碰次数 (1-10)",
       "recoTrendEnabled": "启用趋势跟踪子策略",
       "recoReversionEnabled": "启用超跌反弹子策略",
       "recoValueEnabled": "启用价值选股子策略",
@@ -18308,7 +18325,12 @@
     "pending": "待处理",
     "portfolio": {
       "importPartial": "部分导入",
-      "yuan": "元"
+      "yuan": "元",
+      "signalTitle": "組合級信號",
+      "signalBody": "共 {{count}} 檔股票同向{{direction}}，強度 {{pct}}%；{{action}}",
+      "signalBullish": "看多",
+      "signalBearish": "看空",
+      "signalNeutral": "中性"
     },
     "references": "参考资料",
     "resonancePoint": "共振点",
@@ -18446,6 +18468,21 @@
         "failed": "已失敗（歷史）",
         "unknown": "未知狀態"
       }
+    },
+    "monitor": {
+      "readFailed": "監控運行讀數讀取失敗：{{reason}}",
+      "notAssembled": "監控引擎未裝配：告警已入庫，但不會取數、不會觸發",
+      "pausedBySession": "目前{{session}}，監控輪詢已停擺",
+      "fetchFailed": "本輪 {{failed}}/{{total}} 檔股票取數失敗，這些股票未參與求值",
+      "allFailedRounds": "已連續 {{rounds}} 輪全部取數失敗，監控實際未在產出告警",
+      "firstRoundPending": "監控已啟動，尚未跑完第一輪（約每 {{interval}} 秒一輪）",
+      "emptyResponse": "後端未回傳監控讀數",
+      "sessionNonTradingDay": "非交易日",
+      "sessionPreOpen": "開盤前",
+      "sessionMorning": "上午盤中",
+      "sessionLunchBreak": "午間休市",
+      "sessionAfternoon": "下午盤中",
+      "sessionPostClose": "已收盤"
     }
   },
   "pipeline": {

@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("react-i18next", () => ({
@@ -24,6 +24,19 @@ vi.mock("@/lib/invoke", () => ({
 }));
 
 import { BacktestPanel } from "../BacktestPanel";
+
+/**
+ * 收尾：等挂载副作用（数据请求）落地。
+ *
+ * 为什么必须有：页面挂载后会异步拉数据，测试同步结束 ⇒ setState 落在测试之外 ⇒
+ * React 报 "not wrapped in act"。为什么必须放在**断言之后**：这些用例断言的是
+ * **初始渲染态**，提前 flush 会把组件推进"加载完成"态，断言随之失效（实测会让 3 条用例变红）。
+ * 为什么不能用 afterEach：React 是在 setState 那一刻检查的，而那一刻在测试函数返回后、
+ * afterEach 之前 —— 收尾钩子永远太晚。
+ */
+const settle = async () => {
+  await act(async () => {});
+};
 
 beforeEach(() => {
   invokeMock.mockReset();
@@ -76,10 +89,15 @@ describe("BacktestPanel — R2-Bug-I: 策略回测请求级 token 取消", () =>
       return btn as HTMLElement;
     };
     // 先在 React 状态更新之间点击两次(dispatchEvent 同步触发,不等待 React 提交)
+    // 为什么包在 act 里: raw .click() 的两个 setState 会在离散事件 flushSync 中于 act 外
+    // 提交,每次点击刷 3 条 "not wrapped in act";act 同步作用域让两次点击都不提交、
+    // 结束时统一 flush —— 与上方注释的语义(两次点击之间不等待 React 提交)一致。
     const btn1 = findRunBtn();
     const btn2 = findRunBtn();
-    btn1.click();
-    btn2.click();
+    act(() => {
+      btn1.click();
+      btn2.click();
+    });
 
     // 确认 2 次 invoke("backtest_reco_strategies") 都触发了
     await waitFor(() => {
@@ -104,10 +122,15 @@ describe("BacktestPanel — R2-Bug-I: 策略回测请求级 token 取消", () =>
       skipped: [],
     });
     // 等一帧让 React 有机会错误地应用第一个的结果
-    await new Promise((r) => setTimeout(r, 50));
+    // 为什么包在 act 里: 这段真实等待期间 CSSMotion 的动画帧会持续 setState,
+    // 在 act 外 flush 会刷出成批 "not wrapped in act";时长与语义不变。
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
 
     // 关键断言:UI 仍展示第二个调用的结果,没有回退到第一个
     expect(container.textContent).toContain("正向(2nd)");
     expect(container.textContent).not.toContain("正向(1st)");
+    await settle();
   });
 });

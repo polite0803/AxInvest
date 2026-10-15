@@ -2974,7 +2974,8 @@
     "MOVER_RECALL_ANALYSIS_ALREADY_RUNNING": "هناك دفعة سفر زمني أو تحليل تكميلي قيد التشغيل بالفعل؛ انتظر حتى تنتهي.",
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "أنت داخل نافذة خط المعالجة المباشر (23:50–02:10 / 17:50–18:10)؛ ابدأ خارجها.",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "فشل تنفيذ دفعة التحليل التكميلي؛ راجع تفاصيل الدفعة.",
-    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "فشل الاستعلام عن سجل دفعات التحليل التكميلي؛ حاول لاحقًا."
+    "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "فشل الاستعلام عن سجل دفعات التحليل التكميلي؛ حاول لاحقًا.",
+    "TRADING_DISABLED": "وظيفة التداول معطّلة. فعّلها قبل تسجيل الصفقات."
   },
   "errorBoundary": {
     "copied": "تم النسخ",
@@ -15343,7 +15344,44 @@
       "typeChange": "تغير سعري غير طبيعي",
       "typeVolume": "معدل دوران غير طبيعي",
       "typeUnknown": "نوع غير معروف",
-      "triggeredDetail": "{{name}}: تم تفعيل تنبيه {{type}}، السعر {{price}}"
+      "triggeredDetail": "{{name}}: تم تفعيل تنبيه {{type}}، السعر {{price}}",
+      "t0": {
+        "title": "إعادة التشغيل التلقائي T+0",
+        "cost": "عند التفعيل، أي سهم مراقب يتجاوز الحد أثناء الجلسة يعيد تشغيل سير عمل التحليل بالكامل (التكلفة ≈ تحليل كامل واحد)، وتُمنع التكرارات للسهم نفسه عبر الحد الأدنى للفاصل الزمني",
+        "changePct": "التغير %",
+        "turnover": "معدل الدوران %",
+        "intervalMin": "أدنى فاصل (دقيقة)",
+        "saveFailed": "فشل حفظ إعدادات T+0: {{reason}}"
+      }
+    },
+    "conditional": {
+      "triggeredDetail": "تم تشغيل أمر مشروط: {{name}} {{condition}}، الإجراء: {{action}}",
+      "title": "أوامر مشروطة",
+      "action": "الإجراء",
+      "enabled": "مفعّل",
+      "triggeredToday": "اليوم",
+      "lastTriggered": "الأخير",
+      "empty": "لا توجد أوامر مشروطة",
+      "evaluating": "جاري تقييم {{count}}",
+      "totalRows": "{{count}} صف (بما في ذلك المعطلة)",
+      "unreadable": "لا يمكن قراءة {{count}} صف كقواعد (غير مُقيَّمة)",
+      "create": "إنشاء",
+      "createFailed": "فشل الإنشاء: {{reason}}",
+      "loadFailed": "فشل تحميل الأوامر المشروطة: {{reason}}",
+      "toggleFailed": "فشل التبديل: {{reason}}",
+      "deleteFailed": "فشل الحذف: {{reason}}",
+      "confirmDelete": "هل تريد حذف هذا الأمر المشروط؟",
+      "thresholdPct": "العتبة (%)",
+      "actionNotify": "إشعار فقط",
+      "actionSell": "بيع",
+      "actionBuy": "شراء",
+      "actionReduce": "تقليل",
+      "actionValueQty": "الكمية",
+      "actionValueRatio": "النسبة",
+      "coolDown": "فتور (دقيقة)",
+      "maxPerDay": "الحد اليومي",
+      "windowStart": "من HH:MM",
+      "windowEnd": "إلى HH:MM"
     },
     "progress": {
       "fetchingData": "جارٍ جلب بيانات الأسهم...",
@@ -15529,6 +15567,7 @@
     "revenueGrowth": "Revenue Growth",
     "riskHigh": "مخاطر عالية",
     "riskMid": "مخاطر متوسطة",
+    "riskMidHigh": "مخاطر متوسطة إلى عالية",
     "riskLow": "مخاطر منخفضة",
     "riskExtreme": "مخاطر قصوى",
     "noHistory": "لا يوجد سجل تحليل",
@@ -16099,7 +16138,6 @@
         "moat": "Moat",
         "screener": "Screener",
         "signals": "Signals",
-        "keylevels": "Key Levels",
         "recommender": "Recommender",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
@@ -17198,7 +17236,9 @@
       "worstHit": "Worst hit",
       "m10": "Market -10%",
       "m20": "Market -20%",
-      "blackSwan": "Black Swan (-30%)"
+      "blackSwan": "Black Swan (-30%)",
+      "unpricedTitle": "أسعار مفقودة",
+      "unpricedNotice": "{{count}} مركزًا بلا سعر حالي مستثناة من حساب التركيز والتنويع"
     },
     "evidence": {
       "concepts": "الأساسيات/التقييم",
@@ -17307,26 +17347,6 @@
       "dailyPreMarket": "Trading Day 08:00 (Pre-market)",
       "weeklyMonday": "Weekly Monday 21:00",
       "every2Hours": "Every 2 Hours"
-    },
-    "fundPanel": {
-      "fundFlow": "Fund Flow",
-      "type": "Type",
-      "deposit": "Deposit",
-      "withdrawal": "Withdrawal",
-      "amount": "Amount",
-      "date": "Date",
-      "fee": "Fee",
-      "notes": "Notes",
-      "totalDeposits": "Total Deposits",
-      "totalWithdrawals": "Total Withdrawals",
-      "netInflow": "Net Inflow",
-      "recordFundFlow": "Record Fund Flow",
-      "depositTransferIn": "Deposit (Transfer In)",
-      "withdrawalTransferOut": "Withdrawal (Transfer Out)",
-      "feeOptional": "Fee (Optional)",
-      "notesOptional": "Notes (Optional)",
-      "recorded": "Recorded",
-      "amountMustBeGreaterThanZero": "Amount must be > 0"
     },
     "marketSimPanel": {
       "simConfig": "Simulation Config",
@@ -17854,8 +17874,8 @@
       "moatFcfRatioMin": "الحد الأدنى لنسبة التدفق النقدي الحر إلى صافي الربح (0-1)",
       "monitorPollIntervalSecs": "فترة استقصاء المراقبة (ثانية)",
       "monitorAlertCooldownSecs": "فترة تبريد التنبيه لنفس الأصل (ثانية، 10-3600)",
-      "monitorMinSeverity": "أدنى مستوى تنبيه للدفع: معلومات / تحذير / حرج",
-      "monitorChannels": "قنوات الدفع، مفصولة بفواصل: داخل التطبيق / لارك / بريد إلكتروني / ويب هوك",
+      "monitorMinSeverity": "أدنى مستوى تنبيه للدفع: معلومات / تحذير / حرج (لا يوجد مستهلك حالياً: تغييره لا يؤثر على أي سلوك)",
+      "monitorChannels": "قنوات الدفع، مفصولة بفواصل: داخل التطبيق / لارك / بريد إلكتروني / ويب هوك (لا يوجد مستهلك حالياً: تغييره لا يؤثر على أي سلوك)",
       "dualViewDisagreementThreshold": "عتبة الاختلاف ثنائي الرؤية (0-100)، أقل من هذه القيمة يُعلّم للمراجعة اليدوية",
       "minConfidence": "الحد الأدنى للثقة (0-100)",
       "varConfidence": "مستوى الثقة لـ VaR (0-1)",
@@ -17906,9 +17926,6 @@
       "signalMaFast": "دورة الخط السريع لكشف التقاطع الذهبي للمتوسط المتحرك (3-30)",
       "signalMaSlow": "دورة الخط البطيء لكشف التقاطع الذهبي للمتوسط المتحرك (10-120)",
       "signalBreakoutVolumeMult": "عتبة مضاعف حجم الاختراق / الانكسار (1.0-3.0)",
-      "keylevelLookbackDays": "نافذة الرجوع للنقاط السعرية الرئيسية (أيام التداول، 10-250)",
-      "keylevelTouchTolerancePct": "التسامح في لمس النقاط السعرية الرئيسية (٪، 0.1-5.0)",
-      "keylevelMinTouches": "الحد الأدنى لعدد مرات لمس الدعم / المقاومة للتأكيد (1-10)",
       "recoTrendEnabled": "تفعيل استراتيجية تتبع الاتجاه الفرعية",
       "recoReversionEnabled": "تفعيل استراتيجية الارتداد من الانخفاض المفرط الفرعية",
       "recoValueEnabled": "تفعيل استراتيجية اختيار الأسهم ذات القيمة الفرعية",
@@ -18084,7 +18101,12 @@
     "pending": "قيد الانتظار",
     "portfolio": {
       "importPartial": "استيراد جزئي",
-      "yuan": "يوان"
+      "yuan": "يوان",
+      "signalTitle": "إشارة على مستوى المحفظة",
+      "signalBody": "{{count}} رمزًا تحرّكت معًا نحو {{direction}}، القوة {{pct}}% — {{action}}",
+      "signalBullish": "صعودًا",
+      "signalBearish": "هبوطًا",
+      "signalNeutral": "محايدًا"
     },
     "references": "المراجع",
     "resonancePoint": "نقطة التماسك",
@@ -18222,6 +18244,21 @@
         "failed": "فاشل (قديم)",
         "unknown": "حالة غير معروفة"
       }
+    },
+    "monitor": {
+      "readFailed": "تعذّرت قراءة حالة المراقبة: {{reason}}",
+      "notAssembled": "محرك المراقبة غير مُهيّأ: التنبيهات محفوظة لكن لا استعلام ولا إطلاق",
+      "pausedBySession": "{{session}} — استعلام المراقبة متوقف",
+      "fetchFailed": "فشل جلب {{failed}}/{{total}} رمزًا هذه الجولة، وهي مستثناة من التقييم",
+      "allFailedRounds": "{{rounds}} جولات متتالية كلها فشل — المراقبة لا تُصدر تنبيهات",
+      "firstRoundPending": "بدأت المراقبة ولم تكتمل الجولة الأولى (كل ~{{interval}} ثانية)",
+      "emptyResponse": "الخادم لا يرجع حالة المراقبة",
+      "sessionNonTradingDay": "يوم غير تداول",
+      "sessionPreOpen": "قبل الافتتاح",
+      "sessionMorning": "جلسة الصباح",
+      "sessionLunchBreak": "استراحة الغداء",
+      "sessionAfternoon": "جلسة المساء",
+      "sessionPostClose": "بعد الإغلاق"
     }
   },
   "pipeline": {

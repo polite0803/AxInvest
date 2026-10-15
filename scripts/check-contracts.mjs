@@ -528,8 +528,13 @@ function checkEventSymmetry() {
  *   改为读 `NotificationDispatchSummary`，零渠道时显式 warn「通知不外推」、有渠道但失败时按字段 warn。
  *   同批删掉的 `AppMonitorEmitter` 里那处 `let _ = self.app.emit(..)` **不带 `.await`**，
  *   本就不在判据 H 的识别形态内 —— 所以净 −1 而不是 −2（复跑实测：`共 261 处，已排除 47 处豁免调用`）。
+ *   2026-10-15 阶段 F（同一 PLAN §6）261 → 259：条件单接线批退役两只「丢弃装载失败」的手 ——
+ *   `risk_inspection.rs:62` 的 5 分钟热加载 `let _ = load_from_db(..)`（整文件退役）与
+ *   `commands/conditional_order.rs:112` 列表命令里的同名丢弃（改成读新表并 `?` 传播）。
+ *   两处都是「装载失败仍然返回成功」的形态：前者让风控拿着上一次的规则继续跑，
+ *   后者让列表在表读不通时显示空集 —— 与本轮「拿不到不得伪装成没有」同一条线。
  */
-const SILENT_RESULT_BASELINE = 261;
+const SILENT_RESULT_BASELINE = 259;
 
 /** 已知的合理丢弃（按被调方名），计数时排除，避免基线被噪声撑大。 */
 const SILENT_RESULT_EXEMPT_CALLEES = new Set([
@@ -597,6 +602,13 @@ function checkSilentResultDiscard() {
     );
   }
 }
+
+// ---------- I. （已移出）内置 task_type 白名单跨语言对账 ----------
+//
+// 2026-10-15（裁定 17）先写在这一段，随后**整段移出**到 `scripts/check-task-type-whitelist.mjs`：
+// 本脚本当前不在 CI 的 35 道门里（只 `npm run contracts` 手动跑）⇒ 写在这里等于没牙齿。
+// 留下这段占位是为了让「I 段的判据去哪了」有迹可循，**不要在这里重新实现一遍**
+// （两份实现＝两套真相，正是被移出的那条判据要消灭的形态）。
 
 // ---------- 主流程 ----------
 const argv = process.argv.slice(2);

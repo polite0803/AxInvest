@@ -369,6 +369,59 @@ pub fn band_z(closes: &[f64], lookback: usize) -> Option<f64> {
     Some((window[window.len() - 1] - mean) / sd)
 }
 
+/// 近 `lookback` 个交易日的**个股强势特征**（P0-5：超短档 breadth 入场门的个股前提）。
+///
+/// 全市场封板率是市场级量（同一天每只票拿到同一个数），单靠它等于「大盘情绪火热时
+/// 任何股票都能过超短买入门」。故门必须再验个股自身：近 N 日**出现过涨停**，或区间累计
+/// 涨幅达到强势股量级。本函数只做这一件事，板块涨跌停幅度由调用方经 `limit_pct`
+/// （百分数，如 10.0 / 20.0 / 30.0 / 5.0）传入，与 `market_data::get_st_price_limit_pct`
+/// 同一把尺子，不在此重复板块判定。
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecentStrength {
+    /// 窗口内收盘封死涨停的天数（单日涨幅 ≥ 板块幅度的 95%，容差来自最小报价单位舍入）。
+    pub limit_up_count: usize,
+    /// 区间累计涨幅（百分数）：末收盘相对窗口起点收盘。
+    pub cum_gain_pct: f64,
+    /// 实际评估的交易日数（= 可用 bar 对数，样本不足时小于 lookback）。
+    pub days: usize,
+}
+
+/// 计算 [`RecentStrength`]。`closes` 按时间**升序**（末元素为最新收盘，与
+/// [`vol_move_pct`] / [`band_z`] 的输入约定一致）。
+///
+/// 返回 `None`：`lookback == 0`、可用收盘少于 2 根、或窗口起止价格非正。
+/// 窗口内个别脏价格（≤0 / NaN）只跳过该日配对，不污染计数；但起点或终点非正 ⇒ None
+/// （累计涨幅无定义）。
+pub fn recent_strength(closes: &[f64], limit_pct: f64, lookback: usize) -> Option<RecentStrength> {
+    if lookback == 0 || closes.len() < 2 {
+        return None;
+    }
+    let take = lookback.min(closes.len() - 1) + 1;
+    let window = &closes[closes.len() - take..];
+    let start = *window.first()?;
+    let last = *window.last()?;
+    if !start.is_finite() || start <= 0.0 || !last.is_finite() || last <= 0.0 {
+        return None;
+    }
+    // 挂单涨停价按最小报价单位四舍五入 ⇒ 实收涨幅可略低于板幅（10cm 常见 9.9x%）。
+    // 取板幅的 95% 作封板阈值：10cm→9.5%（与 regime.rs 的 0.095 同值）、
+    // 20cm→19%、5cm(ST)→4.75%。
+    let limit_threshold = (limit_pct * 0.95) / 100.0;
+    let mut limit_up_count = 0usize;
+    let mut days = 0usize;
+    for pair in window.windows(2) {
+        let (prev, curr) = (pair[0], pair[1]);
+        if !prev.is_finite() || prev <= 0.0 || !curr.is_finite() || curr <= 0.0 {
+            continue;
+        }
+        days += 1;
+        if (curr - prev) / prev >= limit_threshold {
+            limit_up_count += 1;
+        }
+    }
+    Some(RecentStrength { limit_up_count, cum_gain_pct: (last / start - 1.0) * 100.0, days })
+}
+
 /// SNR 时间折算的**放大上限**（倍数）。
 ///
 /// 为什么需要（2026-10-01 实证）：`√(h/anchor)` 的推导前提是「日边缘在整个持有期内
@@ -920,5 +973,52 @@ mod tests {
         // 序列中间的非正价格跳过：不作峰值种子，也不参与回撤
         assert!((max_drawdown_fraction(&[10.0, 0.0, 8.0]).unwrap() - 0.2).abs() < 1e-12);
         assert!((max_drawdown_fraction(&[10.0, f64::NAN, 5.0]).unwrap() - 0.5).abs() < 1e-12);
+    }
+
+    // ── P0-5：recent_strength（超短档 breadth 门的个股前提）──
+
+    #[test]
+    fn recent_strength_counts_limit_ups_and_window_gain() {
+        // 10.0 起步：次日 +10% 封板（11.0），随后小阳整理，末日 11.5；窗口 5 日
+        let closes = [10.0, 11.0, 10.5, 10.8, 11.2, 11.5];
+        let s = recent_strength(&closes, 10.0, 5).expect("样本充足");
+        assert_eq!(s.limit_up_count, 1, "仅 10→11 那天封板");
+        assert_eq!(s.days, 5);
+        assert!((s.cum_gain_pct - 15.0).abs() < 1e-9, "11.5/10−1 = +15%，实得 {}", s.cum_gain_pct);
+    }
+
+    #[test]
+    fn recent_strength_limit_threshold_follows_board_limit_pct() {
+        // 同一组 +9.8% 大阳：10cm 板块算封板（≥9.5%），20cm 板块不算（需 ≥19%）
+        let closes = [10.0, 10.98, 11.0, 11.0, 11.0, 11.0];
+        assert_eq!(recent_strength(&closes, 10.0, 5).unwrap().limit_up_count, 1);
+        assert_eq!(recent_strength(&closes, 20.0, 5).unwrap().limit_up_count, 0);
+        // ST 5cm：+4.8% 算封板（阈值 4.75%），+4.6% 不算
+        let st_hit = [5.0, 5.24, 5.2, 5.2, 5.2, 5.2];
+        assert_eq!(recent_strength(&st_hit, 5.0, 5).unwrap().limit_up_count, 1);
+        let st_miss = [5.0, 5.23, 5.2, 5.2, 5.2, 5.2];
+        assert_eq!(recent_strength(&st_miss, 5.0, 5).unwrap().limit_up_count, 0);
+    }
+
+    #[test]
+    fn recent_strength_uses_only_last_lookback_window() {
+        // 窗口外（最早一日）的旧涨停不得计入
+        let closes = [10.0, 11.0, 11.2, 11.1, 11.0, 11.05];
+        let s = recent_strength(&closes, 10.0, 3).unwrap();
+        assert_eq!(s.days, 3, "只评估末 3 个交易日");
+        assert_eq!(s.limit_up_count, 0, "10→11 在窗口外");
+        // 累计涨幅以窗口起点 11.1 为基
+        assert!((s.cum_gain_pct - (11.05 / 11.1 - 1.0) * 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn recent_strength_refuses_degenerate_inputs() {
+        assert_eq!(recent_strength(&[10.0], 10.0, 5), None, "单根无从算日涨幅");
+        assert_eq!(recent_strength(&[10.0, 11.0], 10.0, 0), None, "lookback=0 无定义");
+        assert_eq!(recent_strength(&[0.0, 11.0], 10.0, 5), None, "起点非正 ⇒ 累计涨幅无定义");
+        // 窗口内单日脏价格只跳过该对，其余照算
+        let s = recent_strength(&[10.0, 0.0, 11.0], 10.0, 5).unwrap();
+        assert_eq!(s.days, 1, "两对里一对脏价跳过");
+        assert_eq!(s.limit_up_count, 0, "0→11 不允许被当成涨停");
     }
 }

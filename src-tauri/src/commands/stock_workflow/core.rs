@@ -4,7 +4,8 @@ use super::decision::{
     extract_decision_fields, extract_decision_json, extract_decisions_by_horizon,
     extract_formula_decision_json, extract_horizon_price_map, extract_horizon_source,
     extract_llm_decision_json, extract_position_state, load_and_inject_template,
-    normalize_action_for_storage, parse_asof_param, resolve_runtime_options,
+    normalize_action_for_storage, opposite_direction_gated_action, parse_asof_param,
+    resolve_runtime_options,
 };
 use crate::AppState;
 use crate::commands::error::{ErrorCategory, ErrorResponse};
@@ -16,7 +17,6 @@ use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::blackboard::build_blackboard_snapshot;
 use axagent_analysis_engine::stock_reflection::{AnalysisStepResult, StockAnalysisOutcome};
 use axagent_astock_data::as_of::{self, AsOfContext};
-use axagent_entities::price_alerts;
 use axagent_entities::reflection_lessons;
 use axagent_entities::stock_analyses;
 use axagent_entities::stock_reflections;
@@ -1359,13 +1359,20 @@ pub async fn run_stock_workflow_inner(
                                         format!("(无f7={}/{})", fa, fs as i32),
                                     _ => String::new(),
                                 };
+                                // P0-2（PLAN-stock-decision-reliability）：方向完全对立时
+                                // banner 直接点名动作处置（动作改写在下方 decision_json 注入块）
+                                let force_watch_tag = if ab.conflict_type == "opposite_direction" {
+                                    " ⛔方向对立,动作强制观望(禁止开仓买入)"
+                                } else {
+                                    ""
+                                };
                                 format!(
-                                    "🔴双视角分歧:{}分(公式{} vs LLM{},维度:act={} pos={} conf={} risk={} evid={}){}{}",
+                                    "🔴双视角分歧:{}分(公式{} vs LLM{},维度:act={} pos={} conf={} risk={} evid={}){}{}{}",
                                     ab.total, ab.formula_action, ab.llm_action,
                                     ab.action_score as i32, ab.position_score as i32,
                                     ab.confidence_score as i32, ab.risk_level_score as i32,
                                     ab.evidence_score as i32,
-                                    f7_note, f7_free_note
+                                    f7_note, f7_free_note, force_watch_tag
                                 )
                             }
                         });
@@ -1404,6 +1411,41 @@ pub async fn run_stock_workflow_inner(
                                             "f7FreeAction": ab.f7_free_action,
                                             "f7FreeActionScore": ab.f7_free_action_score,
                                         }));
+                                        // ── P0-2（2026-10-13，PLAN-stock-decision-reliability）──
+                                        // 双视角方向完全对立（action_score=0：买方对卖方）时，
+                                        // 任一视角的方向结论都不得作为最终动作 —— 两个独立视角
+                                        // 互否意味着方向证据不可判定，此时跟随任一侧都是掷硬币。
+                                        // 强制 action=观望（不新开仓）；原动作留 preConflictAction，
+                                        // conflictForceDowngrade 供前端 banner 显红 / 反思统计消费。
+                                        // 落库 DecisionAction 由 extract_decision_fields 从本 json
+                                        // 二次抽取 ⇒ 推送/通知/反思读到的都是观望，天然禁推「买入」。
+                                        // 只改动作，不动 posterior/置信/仓位展示（避免重蹈 R5 改展示的覆辙；
+                                        // 持仓状态由 positionState 另一轴表达，与 V76 拆分约定一致）。
+                                        if ab.conflict_type == "opposite_direction" {
+                                            if let Some(cur) =
+                                                obj.get("action").and_then(|a| a.as_str())
+                                            {
+                                                if let Some(gated) =
+                                                    opposite_direction_gated_action(
+                                                        &ab.conflict_type,
+                                                        cur,
+                                                    )
+                                                {
+                                                    obj.insert(
+                                                        "preConflictAction".into(),
+                                                        serde_json::json!(cur),
+                                                    );
+                                                    obj.insert(
+                                                        "conflictForceDowngrade".into(),
+                                                        serde_json::json!(true),
+                                                    );
+                                                    obj.insert(
+                                                        "action".into(),
+                                                        serde_json::json!(gated),
+                                                    );
+                                                }
+                                            }
+                                        }
                                         // V50: 置信度调制 — 一致时 boost, 分歧时 penalty
                                         let formula_conf = obj.get("confidence")
                                             .and_then(|c| c.as_f64())
@@ -1505,8 +1547,7 @@ pub async fn run_stock_workflow_inner(
                         let mem_action = action.clone();
                         let mem_reasoning = reasoning.clone();
                         let mem_dj = decision_json.clone();
-                        // 持久化工作流结果到 blackboard_snapshot，供历史回放/报告
-                        // 生成/跨日 key_levels 聚合使用。修复 Defect #2。
+                        // 持久化工作流结果到 blackboard_snapshot，供历史回放与报告生成使用。修复 Defect #2。
                         // B7: 消费降级报告写入 `degraded` 块 (spec §4.1: vendor 降级报告)
                         // R1 修复(2026-09-26): 改按运行水位取全局切片，见 spawn 入口注释
                         let as_of_for_meta: Option<AsOfContext> = as_of::current_as_of();
@@ -1609,103 +1650,78 @@ pub async fn run_stock_workflow_inner(
                                     let stop_loss = dj_val
                                         .get("stopLoss")
                                         .and_then(|v| v.as_f64());
-                                    let now_ms = chrono::Utc::now().timestamp_millis();
-
-                                    // 创建止盈告警（above targetPrice → alert_type=take_profit）
-                                    if let Some(tp) = target_price {
-                                        if tp > 0.0 {
-                                            let alert_id = uuid::Uuid::new_v4().to_string();
-                                            let alert_model = price_alerts::ActiveModel {
-                                                id: Set(alert_id),
-                                                stock_code: Set(stock_code.clone()),
-                                                stock_name: Set(sc_name_for_spawn.clone()),
-                                                condition: Set("above".into()),
-                                                target_price: Set(tp),
-                                                alert_type: Set(Some(
-                                                    "take_profit".into(),
-                                                )),
-                                                condition_type: Set(Some("price".into())),
-                                                threshold: Set(Some(tp)),
-                                                is_triggered: Set(0),
-                                                triggered_at: Set(None),
-                                                created_at: Set(now_ms),
-                                                updated_at: Set(now_ms),
-                                            };
-                                            if let Ok(inserted) =
-                                                alert_model.insert(&db).await
+                                    // 止盈/止损两条自动建单共用这一条落库路（裁定 10），**且与面板命令、
+                                    // agent 工具走同一份实现**（`upsert_price_alert_and_wire`，2026-10-15 收编）：
+                                    // 同股同类型的未触发行复用并改阈值 + 同步进 RealtimeMonitor。
+                                    // 原先两处各抄一遍 ActiveModel + MonitorConfig，且 `if let Ok(inserted)`
+                                    // 把插入错误整个吞掉 —— 失败时界面仍是「分析已完成」，实际一条也没盯上。
+                                    async fn put_auto_alert(
+                                        db: &sea_orm::DatabaseConnection,
+                                        monitor: Option<
+                                            &std::sync::Arc<
+                                                axagent_analysis_engine::monitor::RealtimeMonitor,
+                                            >,
+                                        >,
+                                        stock_code: &str,
+                                        stock_name: &str,
+                                        alert_type: &'static str,
+                                        threshold: Option<f64>,
+                                    ) {
+                                        let Some(threshold) =
+                                            threshold.filter(|t| t.is_finite() && *t > 0.0)
+                                        else {
+                                            return;
+                                        };
+                                        // 2026-10-15：这条链（落库 → 归一化 → 造配置 → 进引擎）已收进
+                                        // `upsert_price_alert_and_wire`，与面板命令、agent 工具**同一份实现**
+                                        // —— 三处各写一遍的形态在本批被消掉（改一处漏两处的风险随之消失）。
+                                        let (row, reused, wired) =
+                                            match crate::commands::price_alert_upsert::upsert_price_alert_and_wire(
+                                                db, monitor, stock_code, stock_name, alert_type, threshold,
+                                            )
+                                            .await
                                             {
-                                                // 同步加入 RealtimeMonitor
-                                                if let Some(ref monitor) = monitor_for_spawn {
-                                                    use axagent_analysis_engine::monitor::MonitorConfig;
-                                                    let config = MonitorConfig {
-                                                        alert_id: inserted.id.clone(),
-                                                        stock_code: stock_code.clone(),
-                                                        stock_name: sc_name_for_spawn.clone(),
-                                                        stop_loss: None,
-                                                        take_profit: Some(tp),
-                                                        resistance_break: None,
-                                                        support_break: None,
-                                                        change_pct_alert: None,
-                                                        turnover_rate_alert: None,
-                                                        enabled: true,
-                                                    };
-                                                    monitor.add_config(config).await;
-                                                }
-                                                tracing::info!(
-                                                    "[auto_price_alert] 已创建止盈告警: {} {} above {:.2} (id={})",
-                                                    stock_code, sc_name_for_spawn, tp, inserted.id
-                                                );
-                                            }
+                                                Ok(v) => v,
+                                                Err(e) => {
+                                                    tracing::error!(
+                                                        "[auto_price_alert] {stock_code} {alert_type} 告警落库失败: {e}"
+                                                    );
+                                                    return;
+                                                },
+                                            };
+                                        if !wired {
+                                            tracing::warn!(
+                                                "[auto_price_alert] {stock_code} {alert_type} 已写库但未进引擎（引擎未装配或类型落不成配置）"
+                                            );
                                         }
+                                        tracing::info!(
+                                            "[auto_price_alert] 已{}{}告警: {} {:.2} (id={})",
+                                            if reused { "复用" } else { "新建" },
+                                            alert_type,
+                                            stock_code,
+                                            threshold,
+                                            row.id
+                                        );
                                     }
 
-                                    // 创建止损告警（below stopLoss → alert_type=stop_loss）
-                                    if let Some(sl) = stop_loss {
-                                        if sl > 0.0 {
-                                            let alert_id = uuid::Uuid::new_v4().to_string();
-                                            let alert_model = price_alerts::ActiveModel {
-                                                id: Set(alert_id),
-                                                stock_code: Set(stock_code.clone()),
-                                                stock_name: Set(sc_name_for_spawn.clone()),
-                                                condition: Set("below".into()),
-                                                target_price: Set(sl),
-                                                alert_type: Set(Some(
-                                                    "stop_loss".into(),
-                                                )),
-                                                condition_type: Set(Some("price".into())),
-                                                threshold: Set(Some(sl)),
-                                                is_triggered: Set(0),
-                                                triggered_at: Set(None),
-                                                created_at: Set(now_ms),
-                                                updated_at: Set(now_ms),
-                                            };
-                                            if let Ok(inserted) =
-                                                alert_model.insert(&db).await
-                                            {
-                                                // 同步加入 RealtimeMonitor
-                                                if let Some(ref monitor) = monitor_for_spawn {
-                                                    use axagent_analysis_engine::monitor::MonitorConfig;
-                                                    let config = MonitorConfig {
-                                                        alert_id: inserted.id.clone(),
-                                                        stock_code: stock_code.clone(),
-                                                        stock_name: sc_name_for_spawn.clone(),
-                                                        stop_loss: Some(sl),
-                                                        take_profit: None,
-                                                        resistance_break: None,
-                                                        support_break: None,
-                                                        change_pct_alert: None,
-                                                        turnover_rate_alert: None,
-                                                        enabled: true,
-                                                    };
-                                                    monitor.add_config(config).await;
-                                                }
-                                                tracing::info!(
-                                                    "[auto_price_alert] 已创建止损告警: {} {} below {:.2} (id={})",
-                                                    stock_code, sc_name_for_spawn, sl, inserted.id
-                                                );
-                                            }
-                                        }
-                                    }
+                                    put_auto_alert(
+                                        &db,
+                                        monitor_for_spawn.as_ref(),
+                                        &stock_code,
+                                        &sc_name_for_spawn,
+                                        axagent_analysis_engine::alert_mapping::alert_types::TAKE_PROFIT,
+                                        target_price,
+                                    )
+                                    .await;
+                                    put_auto_alert(
+                                        &db,
+                                        monitor_for_spawn.as_ref(),
+                                        &stock_code,
+                                        &sc_name_for_spawn,
+                                        axagent_analysis_engine::alert_mapping::alert_types::STOP_LOSS,
+                                        stop_loss,
+                                    )
+                                    .await;
                                 }
                             }
                         }

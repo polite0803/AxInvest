@@ -11,7 +11,7 @@ import { Alert, Button, Col, Empty, Progress, Row, Skeleton, Space, Statistic, T
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { getRiskColor, getRiskTKey } from "@/lib/stock-analysis-utils";
+import { portfolioRiskColor, portfolioRiskTKey } from "@/lib/stock-analysis-utils";
 import { type PortfolioCorrelationCell, useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 
@@ -33,10 +33,13 @@ function correlationColor(c: number): string {
   return "#8c8c8c";
 }
 
-// 2026-09-21: 本文件原有的本地 `riskColor`（`level.includes("高") ? "red" : …`）已删除。
-//   它用子串判据且只认中文，与权威 `getRiskColor`（先 `parseRiskLevel` 归一、再精确匹配枚举）
-//   判据相反 —— 中文在它这里能出色、英文落 `default`；而权威函数此前恰好相反（中文落灰）。
-//   两个函数各错一半，同一入参在两处结论不同。现统一调 `getRiskColor`。
+// 2026-09-21: 本文件原有的本地 `riskColor`（`level.includes("高") ? "red" : …`）已删除，
+//   改调权威函数，避免「同一入参两处结论不同」。
+// 2026-10-15: 但当时的权威 `getRiskColor`/`getRiskTKey` 是**决策链**那套档位（低/中/高/极高，
+//   由 rhai `overall_risk` 产出），而本面板的 `dashboard.riskLevel` 来自**集中度算法**
+//   （`compute_risk_level`：低/中等/中高/高 + 无持仓）。两套体系串味后，「中高风险」在
+//   决策链判据里归「中」、在本文件的子串表里归「高」——同一个词两个结论。
+//   故改用本面板自己那套的 `portfolioRiskColor`/`portfolioRiskTKey`，判据与文案同源。
 
 export function PortfolioMonitorPanel() {
   const { t } = useTranslation();
@@ -44,6 +47,7 @@ export function PortfolioMonitorPanel() {
   const mode = useTimeAnchorStore((s) => s.mode);
   const dashboard = useStockAnalysisStore((s) => s.portfolioDashboard);
   const correlations = useStockAnalysisStore((s) => s.portfolioCorrelations);
+  const correlationsError = useStockAnalysisStore((s) => s.portfolioCorrelationsError);
   const refreshing = useStockAnalysisStore((s) => s.portfolioRefreshing);
   const lastError = useStockAnalysisStore((s) => s.portfolioLastError);
   const fetchDashboard = useStockAnalysisStore((s) => s.fetchPortfolioDashboard);
@@ -132,6 +136,22 @@ export function PortfolioMonitorPanel() {
         />
       )}
 
+      {
+        /* G-1：集中度与分散度现在只按「拿到现价」的那几只算 ⇒ 缺价的只数必须跟着说出来，
+          否则「按 5 只算出的分散度」会配着 8 行持仓显示，同一张面板两套口径。
+          句子刻意不带「按几只算」那个数：历史快照路径不返回持仓明细，凑出来的 0 只会是假数。 */
+      }
+      {dashboard.unpricedPositions > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          title={t("stockAnalysis.portfolioMonitor.unpricedTitle")}
+          description={t("stockAnalysis.portfolioMonitor.unpricedNotice", {
+            count: dashboard.unpricedPositions,
+          })}
+        />
+      )}
+
       {/* 1) Metric Cards */}
       <Row gutter={[12, 12]}>
         <Col xs={12} sm={8} md={4}>
@@ -210,8 +230,8 @@ export function PortfolioMonitorPanel() {
       <Row gutter={[12, 12]} className="items-center">
         <Col flex="auto">
           <Space>
-            <Tag color={getRiskColor(dashboard.riskLevel)} icon={<SafetyOutlined />}>
-              {t("stockAnalysis.portfolioMonitor.riskLevel")}: {t(getRiskTKey(dashboard.riskLevel))}
+            <Tag color={portfolioRiskColor(dashboard.riskLevel)} icon={<SafetyOutlined />}>
+              {t("stockAnalysis.portfolioMonitor.riskLevel")}: {t(portfolioRiskTKey(dashboard.riskLevel))}
             </Tag>
             {dashboard.correlationAvg != null && (
               <Tag color="purple" icon={<ClusterOutlined />}>
@@ -275,7 +295,16 @@ export function PortfolioMonitorPanel() {
               <AlertOutlined />
               <span className="font-semibold">{t("stockAnalysis.portfolioMonitor.correlationHighlights")}</span>
             </div>
-            {sortedCorrelations.length === 0
+            {/* 三态各占一句：读取失败 ≠ 没有相关性数据（后者会让人以为「确实没有」） */}
+            {correlationsError
+              ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={t("stockAnalysis.settings.vendor.connectionFailed")}
+                />
+              )
+              : sortedCorrelations.length === 0
               ? <Empty description={t("stockAnalysis.portfolioMonitor.noCorrelation")} />
               : (
                 <ul className="space-y-1 text-sm">

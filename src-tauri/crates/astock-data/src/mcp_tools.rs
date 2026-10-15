@@ -1503,8 +1503,24 @@ pub async fn execute_mcp_tool(
             // 编码成「估值为0」，value-investor 据此输出「理想买入价0元」、f5 吃到
             // 0% 上行空间——全是退化垃圾。改为 Option + 归一化 FCF fallback：
             // 当期亏损（周期底部）用近 5 年报正净利均值×0.90 锚定，持续亏损才返回 None。
-            let (dcf_tiers, dcf_note, dcf_assumptions) =
-                compute_dcf(&financials, total_shares, current_price, valuation_config.as_ref());
+            //
+            // P0-4（2026-10-16）：先取行业判周期组。行业接口失败**不阻断**估值主链
+            // （unwrap_or(false) ⇒ 按普通股处理）；紫金式周期顶部形态要求行业先验在场
+            // 才触发 FCF 中位数中性化，取不到行业时宁可不触发也不发明周期标签。
+            let cyclical = client
+                .get_sector_info(code)
+                .await
+                .ok()
+                .flatten()
+                .map(|si| crate::cyclical::is_cyclical_sector(&si.sector_name, &si.sub_sector))
+                .unwrap_or(false);
+            let (dcf_tiers, dcf_note, dcf_assumptions) = compute_dcf_inner(
+                &financials,
+                total_shares,
+                current_price,
+                valuation_config.as_ref(),
+                cyclical,
+            );
             let (dcf_low, dcf_mid, dcf_high) = match dcf_tiers {
                 Some((l, m, h)) => (Some(l), Some(m), Some(h)),
                 None => (None, None, None),
@@ -1674,7 +1690,7 @@ pub async fn execute_mcp_tool(
                 let since =
                     crate::valuation_band::since_date_from_years(VALUATION_BAND_WINDOW_YEARS);
                 let snaps = crate::valuation_band::clip_valuation_history(snaps, &since);
-                crate::valuation_band::compute_valuation_band(code, &snaps, snaps.last())
+                crate::valuation_band::compute_valuation_band(code, &snaps, snaps.last(), cyclical)
             });
             let peer_pe: Vec<f64> =
                 peers.iter().filter_map(|p| p.pe).filter(|v| *v > 0.0).collect();
@@ -1768,6 +1784,7 @@ pub async fn execute_mcp_tool(
                     reverse: reverse.as_ref(),
                     relative: &relative,
                     graham_upside_pct,
+                    cyclical,
                 });
 
             // ── 综合估值判断 ──
@@ -2069,7 +2086,21 @@ pub async fn execute_mcp_tool(
             // 命令层读表是升序）—— 所以下面 `snaps.last()` 才是"窗口内最新一条"。
             // ⚠ 不要在这条链上换掉裁剪函数或自己 filter，否则 `current` 会取到**最旧**那天。
             let snaps = crate::valuation_band::clip_valuation_history(snaps, &since_date);
-            let band = crate::valuation_band::compute_valuation_band(code, &snaps, snaps.last());
+            // P0-4：周期股 PE 置空（紫金 2026-10-09 实证：周期高位 PE 8% 分位的假便宜）。
+            // 行业接口失败不阻断取带（unwrap_or(false) ⇒ 按普通股给全口径带）。
+            let pe_suppressed = client
+                .get_sector_info(code)
+                .await
+                .ok()
+                .flatten()
+                .map(|si| crate::cyclical::is_cyclical_sector(&si.sector_name, &si.sub_sector))
+                .unwrap_or(false);
+            let band = crate::valuation_band::compute_valuation_band(
+                code,
+                &snaps,
+                snaps.last(),
+                pe_suppressed,
+            );
             serde_json::to_string(&band).map_err(|e| e.to_string())
         },
         "compute_portfolio_risk" => {
@@ -3697,7 +3728,10 @@ fn latest_annual_fcf(financials: &[FinancialReport]) -> Option<f64> {
 /// 为负、最新年暴增）。非有限值（NaN/INF）丢弃；缺数年份跳过（不当 0）。
 ///
 /// 依赖调用方**按报告期倒序**传入 `financials`（与 [`latest_annual_fcf`] 同前提）。
-fn annual_fcf_series(financials: &[FinancialReport], max_years: usize) -> Vec<f64> {
+///
+/// `pub(crate)`：`cyclical::cyclical_median_annual_fcf`（P0-4 周期中性化锚）
+/// 复用同一序列口径，不另写一份年报 FCF 提取。
+pub(crate) fn annual_fcf_series(financials: &[FinancialReport], max_years: usize) -> Vec<f64> {
     financials
         .iter()
         .filter(|r| r.report_date.contains("-12-31"))
@@ -4084,6 +4118,11 @@ struct DcfAssumptions {
     /// （`当期 FCF ≤ 0`、缺数、`FCF/净利 < 0.6`、或 `FCF/净利 > 1.5` 的一次性峰值
     /// 四态之一）
     fcf_anchor: f64,
+    /// P0-4：FCF 锚是否经**周期中性化**盖写（行业命中周期组 ⇒ 近 5 年年报 FCF
+    /// 中位数）。与 [`DcfAssumptions::is_fallback_anchor`] 并存（中性化锚同时
+    /// `is_fallback_anchor=true`，交 f5 降权），本字段是**为什么降权**的结构化
+    /// 披露（行业先验），不让下游/LLM 靠 basis 文案子串匹配判分支。
+    cyclical_normalized: bool,
     /// 每股 FCF（元/股）
     fcf_per_share: f64,
     /// 总股本（股）
@@ -4243,11 +4282,27 @@ fn dcf_tiers_masked_by_anchor_ceiling(
         })
 }
 
+/// 非周期股的测试便捷入口（生产路径一律显式调 [`compute_dcf_inner`] 并传入由
+/// `is_cyclical_sector` 判出的开关；此包装仅让 40+ 既有 DCF 测试零改动复用）。
+#[cfg(test)]
 fn compute_dcf(
     financials: &[FinancialReport],
     total_shares: Option<f64>,
     current_price: f64,
     config: Option<&ValuationConfig>,
+) -> (Option<(f64, f64, f64)>, String, Option<DcfAssumptions>) {
+    compute_dcf_inner(financials, total_shares, current_price, config, false)
+}
+
+/// DCF 计算主体。`cyclical=true` 表示行业命中 P0-4 周期组
+/// （有色/煤炭/钢铁/石化/航运/养殖/券商），锚链最前面插入**周期中性化臂**：
+/// FCF 锚取近 5 年年报 FCF 中位数（含负值年份），绕开「最新年报=周期顶点」形态。
+fn compute_dcf_inner(
+    financials: &[FinancialReport],
+    total_shares: Option<f64>,
+    current_price: f64,
+    config: Option<&ValuationConfig>,
+    cyclical: bool,
 ) -> (Option<(f64, f64, f64)>, String, Option<DcfAssumptions>) {
     if financials.is_empty() {
         return (None, "无财务数据，DCF不可用".to_string(), None);
@@ -4318,7 +4373,7 @@ fn compute_dcf(
         Some(v) => (Some(v), FCF_ANNUAL_BASIS),
         None => (direct_fcf, FCF_TTM_BASIS),
     };
-    let (fcf, fcf_basis) = match anchor_raw {
+    let (mut fcf, mut fcf_basis) = match anchor_raw {
         // ① 锚 > 0，但显著低于净利 ⇒ 换 owner earnings 代理锚（2026-09-27）。
         //    判据与理由见 `FCF_TO_NP_MIN_FOR_ANCHOR` 上方长注释：FCF 口径扣的是
         //    **全部**资本开支（含扩张性），对扩张期/重资产公司系统性扣低；
@@ -4418,6 +4473,34 @@ fn compute_dcf(
             },
         },
     };
+    // ── P0-4 ⓪周期中性化臂（行业先验，盖写以上全部数据形态锚）──────────────────
+    //
+    // 紫金矿业 601899（有色金属）2026-10-09 实证：最近完整年报 FCF 444 亿处商品
+    // 价格周期高位。既有的 ①c 一次性峰值检测对本形态结构性失效 —— 资源景气可
+    // 持续多年，近 5 年 FCF 序列整体偏高、没有「含亏损年份的一次性跃迁」，峰值
+    // 倍数不触发。故周期行业命中时，**不管理数据形态如何**都改用近 5 年年报
+    // FCF 中位数（保留负值年份，见 `cyclical_median_annual_fcf`）：
+    //   · 中位数 > 0 ⇒ 盖写锚 + basis，并置 `cyclical_normalized=true`；
+    //     basis 不等于两个真实锚常量 ⇒ 下面 `is_fallback_anchor` 自动为 true，
+    //     f5 对中性化锚降权（历史外推锚不拿当期锚同等信号强度）；
+    //   · 中位数 ≤ 0 / 样本不足 ⇒ 保留数据形态链的既有结果（此时 ② 代理臂或
+    //     ③「持续亏损 ⇒ DCF 不适用」通常已给出更诚实的处置），不强行用非正中位数。
+    // 判据常量 `GROWTH_ANNUAL_SAMPLE`(=5) 即「近 5 年」口径，不另立同义常量。
+    let mut cyclical_normalized = false;
+    if cyclical {
+        if let Some(median_fcf) =
+            crate::cyclical::cyclical_median_annual_fcf(financials, GROWTH_ANNUAL_SAMPLE)
+        {
+            if median_fcf.is_finite() && median_fcf > 0.0 {
+                fcf = median_fcf;
+                fcf_basis = format!(
+                    "周期股行业开关触发（P0-4）：最近年报FCF可能处周期高位、不可永续外推，\
+                     改用近{GROWTH_ANNUAL_SAMPLE}年年报FCF中位数（含负值年份）作周期中性化锚定"
+                );
+                cyclical_normalized = true;
+            }
+        }
+    }
     // P0-I(2026-09-12): 锚定来源标记，随 `DcfAssumptions` 落库，供 f5 做置信度衰减。
     // 2026-09-21：判据由「等值于某一条 fallback 文案」改为「**不是**真实锚口径」
     //   —— 语义没变（该布尔量表达的就是「锚定是历史代理」），但两态 fallback
@@ -4847,6 +4930,7 @@ fn compute_dcf(
             discount_rate,
             forecast_years,
             fcf_anchor: fcf,
+            cyclical_normalized,
             fcf_per_share,
             total_shares: shares,
             is_fallback_anchor,
@@ -7893,6 +7977,77 @@ mod valuation_tests {
         assert!(!dcf_tiers_masked_by_anchor_ceiling(247.44e8, Some(0.0), true));
         // 非有限锚 ⇒ 不遮蔽（交缺数路径）
         assert!(!dcf_tiers_masked_by_anchor_ceiling(f64::NAN, mv, true));
+    }
+
+    /// P0-4 周期中性化臂（紫金矿业 601899 形态，2026-10-09 实证）：
+    /// 最近年报 FCF 444 亿处商品价格周期高位，但近 5 年 FCF 整体偏高、
+    /// 没有「含亏损年份的一次性跃迁」⇒ ①c 峰值检测**不触发**（ratio=1.11<1.5）。
+    /// 行业先验在场（cyclical=true）时锚必须被近 5 年 FCF 中位数（160 亿）盖写，
+    /// 且标 `cyclical_normalized` + `is_fallback_anchor`（交 f5 降权）；
+    /// cyclical=false 时同一组数据保持最新年报真实锚 —— 证明差异只来自行业开关。
+    #[test]
+    fn p0_4_cyclical_median_anchor_overrides_cycle_peak() {
+        let y = 1.0e8;
+        // (date, 净利, OCF, capex)；FCF = OCF − capex
+        let f = vec![
+            report_cf("2025-12-31", 400.0 * y, 444.0 * y, 0.0),
+            report_cf("2024-12-31", 180.0 * y, 200.0 * y, 0.0),
+            report_cf("2023-12-31", 150.0 * y, 160.0 * y, 0.0),
+            report_cf("2022-12-31", 110.0 * y, 120.0 * y, 0.0),
+            report_cf("2021-12-31", 80.0 * y, 90.0 * y, 0.0),
+        ];
+
+        // 普通股：保留最新年报 444 亿真实锚（①c 不触发：444/400=1.11 < 1.5）
+        let plain = compute_dcf_inner(&f, Some(263.0e8), 18.0, None, false)
+            .2
+            .expect("普通股必产出 assumptions");
+        assert!(
+            (plain.fcf_anchor - 444.0 * y).abs() < y,
+            "普通股锚应为最新年报 444 亿，实得 {:.1} 亿",
+            plain.fcf_anchor / y
+        );
+        assert!(!plain.cyclical_normalized, "普通股不得标周期中性化");
+        assert!(!plain.is_fallback_anchor, "最新年报真实锚不是代理锚");
+
+        // 周期股：盖写为中位数 160 亿
+        let cyc = compute_dcf_inner(&f, Some(263.0e8), 18.0, None, true)
+            .2
+            .expect("周期股必产出 assumptions");
+        assert!(
+            (cyc.fcf_anchor - 160.0 * y).abs() < y,
+            "周期中性化锚应为近 5 年 FCF 中位数 160 亿，实得 {:.1} 亿",
+            cyc.fcf_anchor / y
+        );
+        assert!(cyc.cyclical_normalized, "周期股必须标 cyclical_normalized");
+        assert!(
+            cyc.is_fallback_anchor,
+            "中性化锚是历史外推锚 ⇒ 必须同时 is_fallback_anchor 交 f5 降权"
+        );
+        assert!(cyc.basis.contains("中位数"), "basis 必须点名中位数口径，实得：{}", cyc.basis);
+    }
+
+    /// P0-4：周期开关在场但中位数 ≤ 0（周期底部全行业亏损）时**不强行盖写**，
+    /// 保留数据形态链既有处置（近 5 年正净利均值代理或 DCF 不适用）。
+    #[test]
+    fn p0_4_cyclical_switch_keeps_data_shape_chain_when_median_nonpositive() {
+        let y = 1.0e8;
+        // 近 3 年年报 FCF 全负（含负值的中位数为负）
+        let f = vec![
+            report_cf("2025-12-31", -50.0 * y, -40.0 * y, 10.0 * y),
+            report_cf("2024-12-31", -30.0 * y, -20.0 * y, 10.0 * y),
+            report_cf("2023-12-31", -60.0 * y, -50.0 * y, 10.0 * y),
+        ];
+        let (tiers, _note, a) = compute_dcf_inner(&f, Some(100.0e8), 10.0, None, true);
+        // 无正净利年报 ⇒ 数据形态链判 DCF 不适用（None）；周期臂不得用负锚硬算
+        if tiers.is_none() {
+            assert!(a.is_none(), "三档缺席时 assumptions 也应缺席");
+        } else {
+            let a = a.expect("有三档必有 assumptions");
+            assert!(
+                !a.cyclical_normalized || a.fcf_anchor > 0.0,
+                "周期臂只允许盖写成正中位数；负中位数不得成为锚"
+            );
+        }
     }
 }
 

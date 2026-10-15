@@ -24,10 +24,8 @@ const SAMPLES: { name: string; value: number }[] = [
   { name: "cap_long_nb_ratio_min", value: 0.1 },
   { name: "cap_conf_market", value: 0 },
   // ④ 计数类
-  { name: "keylevel_lookback_days", value: 60 },
   { name: "boll_period", value: 20 },
   { name: "scan_retry_max", value: 3 },
-  { name: "keylevel_min_touches", value: 2 },
   // ⑤ 1~3 的乘数
   { name: "cap_ultra_short_entry_high", value: 1.005 },
   { name: "cap_long_stop", value: 0.88 },

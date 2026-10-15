@@ -248,7 +248,10 @@ pub fn trading_days_between(start: NaiveDate, end: NaiveDate) -> i32 {
 ///
 /// 修复前: `is_trading_time()` 用 `now.date_naive()` (UTC 日期) 判定交易日，
 /// 在 UTC 16:00-24:00（北京次日 00:00-08:00）期间会判错日期。
-fn beijing_now() -> (u32, u32, NaiveDate) {
+///
+/// 公开给「要按北京墙上时钟判时段」的下游（条件单的时间窗与单日计数归属都读它），
+/// 让它们不再各自 `Local::now()` 拼字符串 —— 机器时区一换，规则就跟着漂移。
+pub fn beijing_now() -> (u32, u32, NaiveDate) {
     let now = Utc::now();
     let utc_hour = now.hour();
     let minute = now.minute();
@@ -287,6 +290,22 @@ impl TradingSession {
     /// 连续竞价进行中 —— 只有这两段取实时价才有意义（其余时段行情是冻结的）。
     pub fn is_open(self) -> bool {
         matches!(self, Self::Morning | Self::Afternoon)
+    }
+
+    /// 跨语言边界的稳定档位码（IPC 契约，不是给用户看的文本）。
+    ///
+    /// 为什么不用 [`Self::status_label`]：那是中文串，直接端给前端会让 11 种语言里
+    /// 9 种显示中文；而 `format!("{self:?}")` 又把 Debug 形态当成了契约 —— 改一次
+    /// 变体名就静默改掉前端键。前端按本码查 i18n 键（`stockAnalysis.monitor.session.*`）。
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::NonTradingDay => "non_trading_day",
+            Self::PreOpen => "pre_open",
+            Self::Morning => "morning",
+            Self::LunchBreak => "lunch_break",
+            Self::Afternoon => "afternoon",
+            Self::PostClose => "post_close",
+        }
     }
 
     /// 给用户看的分档名。抽成纯方法是为了让「五档各有一句」可被测试钉住 ——
@@ -727,5 +746,24 @@ mod tests {
             2,
             "「交易中」的档位集合变了 ⇒ 上面的文案表要一起重看"
         );
+    }
+
+    /// 档位码是跨语言边界（IPC → i18n 键）的契约：六档必须两两不同，且不随变体名改写。
+    #[test]
+    fn session_codes_are_distinct_and_stable() {
+        use TradingSession::*;
+        let codes: [(_, &str); 6] = [
+            (NonTradingDay, "non_trading_day"),
+            (PreOpen, "pre_open"),
+            (Morning, "morning"),
+            (LunchBreak, "lunch_break"),
+            (Afternoon, "afternoon"),
+            (PostClose, "post_close"),
+        ];
+        for (session, want) in codes {
+            assert_eq!(session.code(), want, "{session:?} 的档位码");
+        }
+        let uniq: std::collections::HashSet<&str> = codes.iter().map(|(_, c)| *c).collect();
+        assert_eq!(uniq.len(), 6, "两档共用一个码 ⇒ 前端那句缺席文案会把两档说成同一件事");
     }
 }

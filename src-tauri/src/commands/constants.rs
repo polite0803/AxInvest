@@ -23,3 +23,11 @@ pub const MOVER_RECALL_TASK_TYPE: &str = "mover-recall";
 /// 进化计划定时聚合任务的 task_type
 /// （与前端任务中心白名单、`init/services.rs` 执行分支逐字对齐）。
 pub const EVOLUTION_PROPOSAL_TASK_TYPE: &str = "evolution-proposal";
+
+/// 收盘组合指标日更任务的 task_type
+/// （与前端任务中心白名单、`init/services.rs` 执行分支逐字对齐）。
+pub const PORTFOLIO_METRICS_TASK_TYPE: &str = "portfolio-metrics";
+
+/// pending 交易意图自动过期任务的 task_type
+/// （与前端任务中心白名单、`init/services.rs` 执行分支逐字对齐）。
+pub const INTENT_EXPIRY_TASK_TYPE: &str = "intent-expiry";

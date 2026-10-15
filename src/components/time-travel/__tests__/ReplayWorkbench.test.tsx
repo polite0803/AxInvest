@@ -35,9 +35,26 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
-  useTimeAnchorStore.setState({ asOfDate: null, mode: "live" });
+afterEach(async () => {
+  // 收尾钩子在 RTL 自动 cleanup（卸载）之前执行 ⇒ 这里直接改 store 会让仍挂载的订阅
+  // 组件在 act 之外重渲染 ⇒ React 报 "not wrapped in act"。故须 act 包住。
+  await act(async () => {
+    useTimeAnchorStore.setState({ asOfDate: null, mode: "live" });
+  });
 });
+
+/**
+ * 收尾：等挂载副作用（数据请求）落地。
+ *
+ * 为什么必须有：页面挂载后会异步拉数据，测试同步结束 ⇒ setState 落在测试之外 ⇒
+ * React 报 "not wrapped in act"。为什么必须放在**断言之后**：这些用例断言的是
+ * **初始渲染态**，提前 flush 会把组件推进"加载完成"态，断言随之失效。
+ * 为什么不能用 afterEach：React 是在 setState 那一刻检查的，而那一刻在测试函数返回后、
+ * afterEach 之前 —— 收尾钩子永远太晚。
+ */
+const settle = async () => {
+  await act(async () => {});
+};
 
 describe("ReplayWorkbench", () => {
   it("renders the workbench title", () => {
@@ -45,11 +62,12 @@ describe("ReplayWorkbench", () => {
     expect(screen.getByText(i18n.t("replayWorkbench.title"))).toBeInTheDocument();
   });
 
-  it("does NOT pre-fill the date picker (forces re-selection)", () => {
+  it("does NOT pre-fill the date picker (forces re-selection)", async () => {
     useTimeAnchorStore.setState({ asOfDate: "2026-05-01", mode: "replay" });
     renderWithProviders();
     // 第一次进入 workbench 总是空白 picker，强迫用户重选
     expect(screen.getByText(i18n.t("replayWorkbench.step1.title"))).toBeInTheDocument();
+    await settle();
   });
 
   it("shows the action card only after picking a date", () => {
@@ -65,7 +83,7 @@ describe("ReplayWorkbench", () => {
     expect(screen.getByTestId("ttb-start-btn")).toBeInTheDocument();
   });
 
-  it("defaults the batch card to fixed-date mode seeded with a picked anchor", () => {
+  it("defaults the batch card to fixed-date mode seeded with a picked anchor", async () => {
     useTimeAnchorStore.setState({ asOfDate: "2026-05-01", mode: "replay" });
     renderWithProviders();
     const pickerHost = document.querySelector('[data-testid="ttb-fixed-date"]');
@@ -73,12 +91,14 @@ describe("ReplayWorkbench", () => {
       ? pickerHost
       : pickerHost?.querySelector("input");
     expect(pickerInput?.getAttribute("value")).toBe("2026-05-01");
+    await settle();
   });
 
-  it("renders an exit panel with Switch-to-Live button when mode is replay", () => {
+  it("renders an exit panel with Switch-to-Live button when mode is replay", async () => {
     useTimeAnchorStore.setState({ asOfDate: "2026-05-01", mode: "replay" });
     renderWithProviders();
     expect(screen.getByTestId("replay-exit-btn")).toBeInTheDocument();
+    await settle();
   });
 
   it("exit button triggers enterLive", () => {

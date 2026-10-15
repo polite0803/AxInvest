@@ -28,7 +28,6 @@ use axagent_harness::market_data::AdjType;
 use axagent_harness::market_data::KLine;
 use axagent_harness::market_data::MarketDataProvider;
 
-use super::position_limits::PositionLimits;
 use super::trading::PositionSummary;
 
 // ── 数据结构 ──
@@ -42,7 +41,17 @@ pub struct PortfolioDashboard {
     pub total_market_value: f64,
     pub total_pnl: f64,
     pub total_pnl_pct: f64,
+    /// 拿不到现价的持仓只数（`market_value` 为 `None`）。
+    ///
+    /// 必须跟着上屏：风险等级与分散度现在按**已定价的只数**判，而面板的持仓表仍列全部行
+    /// ⇒ 「按 5 只算出的分散度 70」配着「8 行持仓」显示就是两套口径，这个数用来把差额说清楚。
+    pub unpriced_positions: u32,
+    /// 现金占总资产百分比。**当前无数据来源，恒 0**（`cash_pct` 那一列照旧落库 0）：
+    /// 全仓没有任何地方存账户现金，唯一像是入口的工作流变量 `portfolio_cash` 注的是常量 0.0。
+    /// 见 PLAN `PLAN-monitor-chain-closure.md` 裁定 8 —— 在拿到来源之前这一格不进面板。
     pub cash_pct: f64,
+    /// 由 [`refresh_metrics`] 从历史净值序列补算（G-3）；[`compute_dashboard`] 自己
+    /// 手上没有历史，默认 0.0。
     pub max_drawdown_pct: f64,
     pub beta: Option<f64>,
     pub sharpe_30d: Option<f64>,
@@ -117,10 +126,13 @@ pub struct CorrelationCell {
 
 // ── 纯函数：可独立测试 ──
 
-/// 把"组合 P&L 序列"折算成最大回撤（百分比），复用 `crate::risk::peak_trough_drawdown`。
-pub fn compute_max_drawdown_pct(equity_curve_pct: &[f64]) -> f64 {
+/// 把"组合净值水平序列"折算成最大回撤（百分比），复用 `crate::risk::peak_trough_drawdown`。
+///
+/// ⚠ 入参是**水平值**（市值/净值本身，如 100 → 120 → 88），不是百分比序列 ——
+/// 原来的参数名 `equity_curve_pct` 会让人误以为要先除以 100，套错输入得到的是假数。
+pub fn compute_max_drawdown_pct(equity_curve: &[f64]) -> f64 {
     // peak_trough_drawdown 返回 0~1 比例，此处转为百分比
-    crate::risk::peak_trough_drawdown(equity_curve_pct) * 100.0
+    crate::risk::peak_trough_drawdown(equity_curve) * 100.0
 }
 
 /// Sharpe ratio（年化）—— 复用 `crate::risk::sharpe_components`（样本方差 n-1）。
@@ -142,6 +154,26 @@ pub fn pearson_correlation(x: &[f64], y: &[f64]) -> Option<f64> {
         return None;
     }
     axagent_harness::indicators::pearson(x, y)
+}
+
+/// 纯函数：按**日期交集**对齐两条「日期 → 日收益」序列，再求相关。
+///
+/// 取代原先的「取较短者的尾部」：两只票的停牌日/上市日不同 ⇒ 尾部对齐会把 A 的第 3 个
+/// 交易日和 B 的第 5 个交易日算成同一天，相关系数照常有值、却是错位的。本文件的
+/// `beta_from_aligned` 早就按日期交集对齐，`refresh_correlation` 却用另一套 ——
+/// 同一模块内两个组合级指标各按一套对齐规则（禁区 12 的同一形态）。
+/// 样本是否够用由 [`pearson_correlation`] 自己的门槛判（不足 5 点 ⇒ `None`）。
+pub fn aligned_pearson(a: &[(String, f64)], b: &[(String, f64)]) -> Option<f64> {
+    let by_date_b: HashMap<&str, f64> = b.iter().map(|(d, r)| (d.as_str(), *r)).collect();
+    let mut xa: Vec<f64> = Vec::new();
+    let mut xb: Vec<f64> = Vec::new();
+    for (d, r) in a {
+        if let Some(other) = by_date_b.get(d.as_str()) {
+            xa.push(*r);
+            xb.push(*other);
+        }
+    }
+    pearson_correlation(&xa, &xb)
 }
 
 /// 组合 beta = Cov(组合, 市场) / Var(市场)
@@ -168,9 +200,15 @@ pub fn compute_beta(portfolio_returns: &[f64], market_returns: &[f64]) -> Option
 }
 
 /// 集中度（refactored from portfolio_risk::compute_from_positions）
+///
+/// 口径：**分母 = 拿到现价的持仓市值之和**。写成显式 `filter_map` 而不是原来的
+/// `unwrap_or(0.0)` —— 两者数值相同（往分母里加 0 不改变任何一只的占比），所以
+/// **这一处原先不是缺陷**；真正的口径缺陷在「按几只算」的只数 `n` 与盈亏的分母，
+/// 见 [`compute_dashboard`]。这里只是让「分母只含已定价」由构造说明，不靠 0 的巧合。
 pub fn compute_concentration(positions: &[PositionSummary]) -> (f64, HashMap<String, f64>, f64) {
-    let total_mv: f64 = positions.iter().map(|p| p.market_value.unwrap_or(0.0)).sum();
-    let max_mv = positions.iter().map(|p| p.market_value.unwrap_or(0.0)).fold(0.0_f64, f64::max);
+    let priced: Vec<f64> = positions.iter().filter_map(|p| p.market_value).collect();
+    let total_mv: f64 = priced.iter().sum();
+    let max_mv = priced.into_iter().fold(0.0_f64, f64::max);
     let top_pct = if total_mv > 0.0 {
         (max_mv / total_mv) * 100.0
     } else {
@@ -187,6 +225,14 @@ pub fn compute_concentration(positions: &[PositionSummary]) -> (f64, HashMap<Str
     }
     let max_sector_pct = sector.values().cloned().fold(0.0_f64, f64::max);
     (top_pct, sector, max_sector_pct)
+}
+
+/// 拿不到现价的持仓数（`market_value` 为 `None`）。
+///
+/// 这个数必须跟着走：把缺价从分母里剔掉之后，「按 8 只算出的集中度」不再对应
+/// 「8 只持仓」——不报出来就是换了口径却不告知。
+pub fn count_unpriced(positions: &[PositionSummary]) -> usize {
+    positions.iter().filter(|p| p.market_value.is_none()).count()
 }
 
 /// 风险等级（与 portfolio_risk 对齐）
@@ -261,8 +307,12 @@ pub fn run_stress_scenario(
     betas: &BetaMap,
     scenario: StressScenario,
 ) -> StressTestResult {
-    let total_mv: f64 = positions.iter().map(|p| p.market_value.unwrap_or(0.0)).sum();
-    if total_mv <= 0.0 || positions.is_empty() {
+    // G-1：与集中度同口径 —— 缺现价的持仓不参与压测（它没有市值可放大，
+    // 按 0 计入只会让「组合下跌 x%」的百分比对着一个被削小的分母）。
+    let priced: Vec<&PositionSummary> =
+        positions.iter().filter(|p| p.market_value.is_some()).collect();
+    let total_mv: f64 = priced.iter().map(|p| p.market_value.unwrap_or(0.0)).sum();
+    if total_mv <= 0.0 || priced.is_empty() {
         return StressTestResult {
             scenario: scenario.code().to_string(),
             label: scenario.label().to_string(),
@@ -278,7 +328,7 @@ pub fn run_stress_scenario(
     let mut worst_hit: Option<(f64, &PositionSummary)> = None;
     let mut concentration_penalty_applied = false;
     let mut provenance = BetaProvenance::default();
-    for p in positions {
+    for p in priced {
         let mv = p.market_value.unwrap_or(0.0);
         // β 取自该股对沪深300的**真实历史回归**（`estimate_betas`）；无估计值时回退
         // 中性 1.0 并记账。**不再读 `p.sector_name` 查表** —— 见文件内
@@ -370,6 +420,42 @@ pub const BETA_LOOKBACK_DAYS: u32 = 120;
 pub const BETA_MIN_SAMPLES: usize = 30;
 /// beta 估计的市场基准代码（沪深300）
 pub const BETA_BENCHMARK_CODE: &str = "000300";
+/// 相关性回看窗口的**回落默认值**（个交易日 K 线）—— 与 `seed_variables.rs` 里
+/// `risk_correlation_lookback_days` 的声明值、设置面板 `b()` 的兜底值逐字相同。
+pub const CORRELATION_LOOKBACK_DAYS: u32 = 60;
+/// 面板值可采纳的区间：下界 20 —— 重叠日收益少于 20 时两两 pearson 基本是噪声
+/// （与 [`BETA_MIN_SAMPLES`] 同一理由）；上界 250 —— 一年，再长会把停牌期外的旧价对拉进窗口。
+const CORRELATION_LOOKBACK_RANGE: (u32, u32) = (20, 250);
+
+/// 相关性快照实际使用的回看窗口 —— 面板 `risk_correlation_lookback_days` **真实生效**。
+///
+/// G-8：这个键在设置面板可编辑、也播种进了变量表，但刷新链此前只吃调用方写的裸 `60`
+/// ⇒ 「面板改了没反应」的空接线（`check-panel-var-landing.mjs` 拦的正是这一形态，
+/// 现已随本条落地进清单）。缺省/非法一律回落 [`CORRELATION_LOOKBACK_DAYS`]：
+/// 回落值就是接线前的现值，所以接上之后**默认行为逐位不变**。
+///
+/// 拆成「纯函数 + 快照包装」两份（同 `PositionLimits::from_panel_vars` / `panel_effective`
+/// 的形态）：区间判据住在纯函数里才有可测面，直接测快照版会改到进程内全局、并行互踩。
+pub fn correlation_lookback_days_in(vars: &HashMap<String, serde_json::Value>) -> u32 {
+    let (lo, hi) = CORRELATION_LOOKBACK_RANGE;
+    match axagent_harness::panel_variables::integer_in(vars, "risk_correlation_lookback_days") {
+        Some(v) if (lo as i64..=hi as i64).contains(&v) => v as u32,
+        Some(v) => {
+            tracing::warn!(
+                "[portfolio_monitor] 面板 risk_correlation_lookback_days = {v} 不在 {lo}..={hi} ⇒ \
+                 回落 {CORRELATION_LOOKBACK_DAYS}（该窗口是日 K 根数，过小则相关性是噪声）"
+            );
+            CORRELATION_LOOKBACK_DAYS
+        },
+        // 键缺席 = 变量表还没装进来（首启空库 / 模板被删），属正常态，不 warn
+        None => CORRELATION_LOOKBACK_DAYS,
+    }
+}
+
+/// [`correlation_lookback_days_in`] 的快照版（生产路径用它）。
+pub fn correlation_lookback_days() -> u32 {
+    correlation_lookback_days_in(&axagent_harness::panel_variables::panel_variables())
+}
 
 /// 单只标的的 beta 估计结果
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -559,11 +645,10 @@ pub fn run_all_scenarios(
 }
 
 // ── 整合：组合 dashboard ──
-// 多参数是组合监控的统一输出需求（alpha + 风险 + 压力测试），不打包为结构体以保持调用方扁平。
-#[allow(clippy::too_many_arguments)]
+// 原先这里收一个 `_limits: &PositionLimits` 却从不读 —— 面板上并没有「仓位限制」这一行，
+// 传进来的三条上限在这条链上没有消费者（G-5 取「撤死参数」而不是「顺手造一行判据」）。
 pub fn compute_dashboard(
     positions: &[PositionSummary],
-    _limits: &PositionLimits,
     beta: Option<f64>,
     sharpe_30d: Option<f64>,
     correlation_avg: Option<f64>,
@@ -575,15 +660,28 @@ pub fn compute_dashboard(
     // 注: portfolio-mgr 的"建议仓位"存在 stock_analyses 表，不在此处聚合。
     //     真正的组合仓位归一化由 normalize_position_weights 函数提供，
     //     待前端/命令层集成后启用（当前版本保持 API 可用）。
-    let total_mv: f64 = positions.iter().map(|p| p.market_value.unwrap_or(0.0)).sum();
-    let total_pnl: f64 = positions.iter().map(|p| p.unrealized_pnl.unwrap_or(0.0)).sum();
-    let total_cost: f64 = positions.iter().map(|p| p.avg_cost * p.total_shares as f64).sum();
+    // 市值：已定价持仓之和（与改造前**数值相同** —— 往分母加 0 不改和）。这一处不是缺陷，
+    // 真正的两条口径缺陷是下面的「盈亏分母」与「按几只算」。
+    let priced: Vec<&PositionSummary> =
+        positions.iter().filter(|p| p.market_value.is_some()).collect();
+    let total_mv: f64 = priced.iter().map(|p| p.market_value.unwrap_or(0.0)).sum();
+    // 盈亏与其分母**同源**：原先分子把 `unrealized_pnl` 缺失的按 0 计、分母却按
+    // 「全部持仓的成本」算 ⇒ 拿不到盈亏的那几只只撑大分母，收益率被系统性低估。
+    let pnl_pairs: Vec<(f64, f64)> = positions
+        .iter()
+        .filter_map(|p| p.unrealized_pnl.map(|v| (v, p.avg_cost * p.total_shares as f64)))
+        .collect();
+    let total_pnl: f64 = pnl_pairs.iter().map(|(v, _)| *v).sum();
+    let total_cost: f64 = pnl_pairs.iter().map(|(_, c)| *c).sum();
     let total_pnl_pct = if total_cost > 0.0 {
         (total_pnl / total_cost) * 100.0
     } else {
         0.0
     };
-    let n = positions.len();
+    // G-1 的真缺陷之一：分散度与风险等级收的 `n` 原先是**表里的行数**（含拿不到价的），
+    // 而占比一律按已定价算 ⇒ 「8 只里 3 只没价」会被判成「8 只很分散」，
+    // 同一张面板里两套口径。现在 `n` 与占比同源，缺价只数另走 `unpriced_positions`。
+    let n = priced.len();
     let (top_pct, sector, max_sector_pct) = compute_concentration(positions);
     let risk_level = compute_risk_level(top_pct, max_sector_pct, n);
     let div_score = compute_diversification_score(n, top_pct, max_sector_pct);
@@ -595,8 +693,9 @@ pub fn compute_dashboard(
         total_market_value: total_mv,
         total_pnl,
         total_pnl_pct,
-        cash_pct: 0.0,         // 由 refresh_metrics 在落库前用"现金/总资产"补算
-        max_drawdown_pct: 0.0, // 由 refresh_metrics 走历史
+        cash_pct: 0.0, // 无现金来源 ⇒ 恒 0。接进面板前不得声称「由 refresh 补算」（PLAN 裁定 8）
+        max_drawdown_pct: 0.0, // 由 `refresh_metrics` 从历史净值序列补算（本函数手上没有历史）
+        unpriced_positions: count_unpriced(positions) as u32,
         beta,
         sharpe_30d,
         correlation_avg,
@@ -633,29 +732,74 @@ pub fn normalize_position_weights(positions: &[f64], max_total_pct: f64) -> Vec<
 
 // ── 持久化层 ──
 
-// 参数已达 8 个（新增 `betas` 后越过 clippy 默认阈值 7）：这是「组合监控一次刷新」
-// 的统一入参，拆结构体会污染调用方且无实际收益，显式豁免。
-#[allow(clippy::too_many_arguments)]
+/// 回撤序列往回取多少个日历日（约一个季度）。
+///
+/// 不设上限的话，一年多前那次真实暴跌会永远压着今天的「最大回撤」，面板读到的
+/// 是「历史最惨一次」而不是「近期回撤」——与本模块其余 30 日口径（`sharpe_30d`）不自洽。
+const DRAWDOWN_LOOKBACK_DAYS: i64 = 90;
+
+/// 从 `portfolio_metrics_daily` 的历史市值序列 + 当前市值算最大回撤（百分比）。
+///
+/// 两条真实约束各有一条会被红起来的判据（`.filter(...lte...)` 与回看窗那两行）：
+/// - **严格早于** `before_date` ⇒ 同一天重复刷新不会把自己算进历史（否则第二次刷新
+///   会把第一次那行当成「跌过一次」）；
+/// - 90 日上限 ⇒ 见 [`DRAWDOWN_LOOKBACK_DAYS`]。
+///
+/// 非正值（空组合那天的 0 市值）**不在这里过滤**：共享实现
+/// [`axagent_harness::indicators::max_drawdown_fraction`] 自己 `p <= 0 ⇒ continue`，
+/// 且「没有任何正值」时返回 `None` → `peak_trough_drawdown` 映射为 0.0。本批第一版
+/// 在本层又写了一遍 `filter` + `len < 2` 早退，两条变异体因此恒绿 —— 那是等价死码，
+/// 已删（见 §7.1）。
+async fn drawdown_from_history(
+    db: &DatabaseConnection,
+    before_date: &str,
+    now_mv: f64,
+) -> Result<f64, String> {
+    use axagent_entities::portfolio_metrics_daily;
+    let floor = match chrono::NaiveDate::parse_from_str(before_date, "%Y-%m-%d") {
+        Ok(d) => {
+            (d - chrono::Duration::days(DRAWDOWN_LOOKBACK_DAYS)).format("%Y-%m-%d").to_string()
+        },
+        Err(e) => {
+            tracing::warn!(
+                "[portfolio] 快照日期 {before_date} 不是 YYYY-MM-DD（{e}）⇒ 本轮不补算回撤，记 0.0"
+            );
+            return Ok(0.0);
+        },
+    };
+    let history = portfolio_metrics_daily::Entity::find()
+        .filter(portfolio_metrics_daily::Column::SnapshotDate.gte(floor))
+        .filter(portfolio_metrics_daily::Column::SnapshotDate.lt(before_date))
+        .order_by_asc(portfolio_metrics_daily::Column::SnapshotDate)
+        .all(db)
+        .await
+        .map_err(|e| format!("query portfolio_metrics_daily history: {e}"))?;
+    let mut curve: Vec<f64> = history.iter().map(|r| r.total_market_value).collect();
+    curve.push(now_mv);
+    Ok(compute_max_drawdown_pct(&curve))
+}
+
+// 参数 7 个：这是「组合监控一次刷新」的统一入参，拆结构体只会让调用方多一层构造。
 pub async fn refresh_metrics(
     db: &DatabaseConnection,
     positions: &[PositionSummary],
-    limits: &PositionLimits,
     betas: &BetaMap,
     beta: Option<f64>,
     sharpe_30d: Option<f64>,
     correlation_avg: Option<f64>,
     as_of_date: Option<&str>,
 ) -> Result<(String, u32), String> {
-    let today = as_of_date
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
+    // G-2：快照日期按**北京会话日**盖，不用 `Utc::now()`。原先 UTC 日期在北京早上 8 点前
+    //      会落到前一天（UTC 还是昨天）⇒ 同一天的两次刷新写出两行、日期还倒退一天。
+    let today = as_of_date.map(|s| s.to_string()).unwrap_or_else(|| {
+        axagent_astock_data::calendar::beijing_today().format("%Y-%m-%d").to_string()
+    });
     // 落库快照与实时面板必须**同口径**：`betas` 由调用方（持有 `MarketDataProvider`
     // 的那一层）传入。若此处自己传空表，快照会恒用回退 1.0，而面板用真实 beta ⇒
     // 「时间旅行」对比等于在比两套方法。
     let stress = run_all_scenarios(positions, &compute_concentration(positions).1, betas);
-    let dashboard = compute_dashboard(
+    let mut dashboard = compute_dashboard(
         positions,
-        limits,
         beta,
         sharpe_30d,
         correlation_avg,
@@ -663,6 +807,10 @@ pub async fn refresh_metrics(
         false,
         Some(today.clone()),
     );
+    // G-3：最大回撤真算。原先这列被 `compute_dashboard` 写死 0.0、注释却声称
+    //      「由 refresh_metrics 走历史」，而这段代码从来不存在 ⇒ 落库行的该列恒 0。
+    dashboard.max_drawdown_pct =
+        drawdown_from_history(db, &today, dashboard.total_market_value).await?;
 
     let sector_json = serde_json::to_string(&dashboard.sector_exposure)
         .map_err(|e| format!("serialize sector_exposure: {e}"))?;
@@ -683,12 +831,62 @@ pub async fn refresh_metrics(
         sharpe_30d: Set(dashboard.sharpe_30d),
         correlation_avg: Set(dashboard.correlation_avg),
         top_concentration_pct: Set(dashboard.top_concentration_pct),
+        // G-5：把「按几只算的」与「几只没价」一起落库 ⇒ 历史快照读回来时能复原
+        //      风险等级与分散度，而不是像原先那样硬编码 `"—"` / `0`。
+        position_count: Set(Some(
+            dashboard.positions.iter().filter(|p| p.market_value.is_some()).count() as i32,
+        )),
+        unpriced_count: Set(Some(dashboard.unpriced_positions as i32)),
         sector_exposure_json: Set(sector_json),
         stress_test_json: Set(Some(stress_json)),
         created_at: Set(now),
     };
     new_row.insert(db).await.map_err(|e| format!("insert portfolio_metrics_daily: {e}"))?;
-    Ok((id, 1))
+    // 第二条是**本次快照覆盖的持仓只数**（含缺价的那几只）。原先恒返 `1`（= 写了几行），
+    // 而命令面与前端类型都把它叫 `positionsSnapshotted` ⇒ 名字说的是只数、值给的是行数。
+    Ok((id, dashboard.positions.len() as u32))
+}
+
+/// 一次完整刷新的产物（面板「立即刷新」与收盘定时任务共用，避免两处各拼一份 JSON）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshSummary {
+    pub metrics_id: String,
+    /// 本次快照**覆盖的持仓只数**（含缺价那几只）；不是「写了几行」（行恒为一行聚合）
+    pub positions_snapshotted: u32,
+    pub correlation_pairs_written: u32,
+    pub as_of_date: Option<String>,
+}
+
+/// 组合快照刷新的**唯一**通路：β（真实历史回归）→ 指标落库 → 相关性落库。
+///
+/// G-7：这三步原先只写在 `commands::stock_analysis::refresh_portfolio_metrics` 的命令体里，
+/// 定时任务无从复用。收盘后的日更任务若自己再拼一遍，面板与 cron 落的就不是同一套口径
+/// （本项目反复出现的「同一逻辑两份实现，只改一处」形态）。
+///
+/// `as_of_date = None` ⇒ 按北京会话日盖当天（live）；面板时间旅行刷新时透传所选日期。
+pub async fn refresh_snapshot(
+    db: &DatabaseConnection,
+    client: &dyn MarketDataProvider,
+    positions: &[PositionSummary],
+    as_of_date: Option<&str>,
+) -> Result<RefreshSummary, String> {
+    // β 与实时面板同源同口径：若这里自己传空表，快照会恒用回退 1.0，
+    // 而面板用真实历史 beta ⇒ 按 as_of_date 做时间旅行对比等于在比两套方法。
+    let betas = estimate_betas(client, positions, BETA_LOOKBACK_DAYS).await;
+    // 仓位三条上限在这条链上从不被读（G-5 撤死参数）。它们的现役消费者是风控门
+    // `trading.rs` 与分析命令里的那几处 `PositionLimits::panel_effective()`，与此无关。
+    let (metrics_id, positions_snapshotted) =
+        refresh_metrics(db, positions, &betas, None, None, None, as_of_date).await?;
+    let correlation_pairs_written =
+        refresh_correlation(db, client, positions, correlation_lookback_days(), as_of_date).await?;
+
+    Ok(RefreshSummary {
+        metrics_id,
+        positions_snapshotted,
+        correlation_pairs_written,
+        as_of_date: as_of_date.map(|s| s.to_string()),
+    })
 }
 
 pub async fn get_dashboard(
@@ -723,6 +921,23 @@ pub async fn get_dashboard(
                 .as_deref()
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or_default();
+            // G-5：风险等级 / 分散度 / 集中度告警这三样原先在这条读取路径上被**硬编码**
+            // 成 `"—"`、`0` 与「阈值传 0」（`n<3` 那一档因此永不命中）——面板拿到的是常量，
+            // 不是快照。现在用落库的 `position_count` + 已存的集中度/行业暴露复原。
+            // `position_count` 为 `None`（本列之前落的老行）⇒ 保持 `"—"` 与 0，不硬造一个数。
+            let n_history = m.position_count.unwrap_or(0).max(0) as usize;
+            let (risk_level, diversification_score) = if m.position_count.is_some() {
+                (
+                    compute_risk_level(m.top_concentration_pct, max_sector_pct, n_history),
+                    compute_diversification_score(
+                        n_history,
+                        m.top_concentration_pct,
+                        max_sector_pct,
+                    ),
+                )
+            } else {
+                ("—".to_string(), 0)
+            };
             Ok(PortfolioDashboard {
                 is_historical: as_of_date.is_some(),
                 as_of_date: as_of_date.map(|s| s.to_string()).or(Some(m.snapshot_date.clone())),
@@ -731,19 +946,26 @@ pub async fn get_dashboard(
                 total_pnl_pct: m.total_pnl_pct,
                 cash_pct: m.cash_pct,
                 max_drawdown_pct: m.max_drawdown_pct,
+                unpriced_positions: m.unpriced_count.unwrap_or(0).max(0) as u32,
                 beta: m.beta,
                 sharpe_30d: m.sharpe_30d,
                 correlation_avg: m.correlation_avg,
                 top_concentration_pct: m.top_concentration_pct,
                 sector_exposure: sector,
-                concentration_warning: compute_concentration_warning(
-                    m.top_concentration_pct,
-                    max_sector_pct,
-                    0,
-                ),
-                risk_level: "—".to_string(),
-                diversification_score: 0,
+                concentration_warning: if m.position_count.is_some() {
+                    compute_concentration_warning(
+                        m.top_concentration_pct,
+                        max_sector_pct,
+                        n_history,
+                    )
+                } else {
+                    None
+                },
+                risk_level,
+                diversification_score,
                 stress_test: stress,
+                // 快照行不存持仓明细（本表按设计只存聚合值）⇒ 历史视图拿不到逐只持仓，
+                // 这是**数据结构**的限制，不是这条路径漏读；面板不得把空表读成「没有持仓」。
                 positions: vec![],
                 snapshot_at: m.created_at,
             })
@@ -758,6 +980,7 @@ pub async fn get_dashboard(
                 total_pnl_pct: 0.0,
                 cash_pct: 0.0,
                 max_drawdown_pct: 0.0,
+                unpriced_positions: 0,
                 beta: None,
                 sharpe_30d: None,
                 correlation_avg: None,
@@ -788,8 +1011,11 @@ pub async fn refresh_correlation(
         return Ok(0);
     }
     // N≤20 全算；N>20 退化为只算与最大持仓的相关性
+    // G-1：锚点只在**拿到现价**的持仓里选 —— 原先 `unwrap_or(0.0)` 让缺价的票参与比较，
+    //      三只都缺价时它会选中第一只（0.0 与 0.0 取 max），锚点就成了一次任意选择。
     let anchor = positions
         .iter()
+        .filter(|p| p.market_value.is_some())
         .max_by(|a, b| {
             a.market_value
                 .unwrap_or(0.0)
@@ -823,18 +1049,25 @@ pub async fn refresh_correlation(
         return Ok(0);
     }
 
-    // 拉每只股票的 K 线
-    let mut series: HashMap<String, Vec<f64>> = HashMap::new();
+    // 拉每只股票的 K 线并转成「日期 → 日收益」序列。
+    // G-2 两处口径订正：
+    // ① 原先传 `None`＝**不复权** ⇒ 除权日那根假价差直接进相关系数，而同一个文件里
+    //    `estimate_betas` 对个股用的是前复权（本文件 :513）—— 两个组合级指标各按一套价格算；
+    // ② 原先直接对**收盘价水平**求 pearson 且「取较短者尾部」对齐 —— 这正是本文件
+    //    `date_returns` 上方自己点过的缺陷（停牌/上市晚一天会整条序列错位）。
+    let mut series: HashMap<String, Vec<(String, f64)>> = HashMap::new();
     for code in &codes {
-        match client.get_klines(code, "daily", lookback_days, None).await {
+        match client.get_klines(code, "daily", lookback_days, Some(AdjType::Forward)).await {
             Ok(ks) => {
-                let closes: Vec<f64> = ks.iter().map(|k| k.close).collect();
-                if closes.len() >= 5 {
-                    series.insert(code.clone(), closes);
+                let rets = date_returns(&ks);
+                // 收益点比 K 线根数少一（`date_returns` 用 windows(2)）⇒ 门槛按收益点数判
+                if rets.len() >= 5 {
+                    series.insert(code.clone(), rets);
                 }
             },
             Err(e) => {
-                eprintln!("[portfolio_monitor] kline fetch failed for {code}: {e}");
+                // 原先是 `eprintln!` —— 它不进 tracing sink，生产日志里查不到这条失败
+                tracing::warn!("[portfolio_monitor] 相关性取 K 线失败: code={code} err={e}");
             },
         }
     }
@@ -842,20 +1075,17 @@ pub async fn refresh_correlation(
         return Ok(0);
     }
 
-    let today = as_of_date
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
+    // G-2：快照日期按北京会话日盖（与 `refresh_metrics` 同口径），不用 `Utc::now()`
+    let today = as_of_date.map(|s| s.to_string()).unwrap_or_else(|| {
+        axagent_astock_data::calendar::beijing_today().format("%Y-%m-%d").to_string()
+    });
     let now = chrono::Utc::now().timestamp_millis();
     let mut written = 0u32;
     for (a, b) in pairs {
         let (Some(x), Some(y)) = (series.get(&a), series.get(&b)) else {
             continue;
         };
-        // 长度对齐：取较短者尾部
-        let n = x.len().min(y.len());
-        let x_tail: Vec<f64> = x[x.len() - n..].to_vec();
-        let y_tail: Vec<f64> = y[y.len() - n..].to_vec();
-        let corr = match pearson_correlation(&x_tail, &y_tail) {
+        let corr = match aligned_pearson(x, y) {
             Some(c) => c,
             None => continue,
         };
@@ -869,7 +1099,10 @@ pub async fn refresh_correlation(
             correlation: Set(corr),
             created_at: Set(now),
         };
-        if row.insert(db).await.is_ok() {
+        // 写失败不再被 `if ...is_ok()` 吞掉：计数照旧只记成功，但每条失败要有读数
+        if let Err(e) = row.insert(db).await {
+            tracing::warn!("[portfolio_monitor] 相关性快照写库失败: {e}");
+        } else {
             written += 1;
         }
     }
@@ -937,6 +1170,17 @@ mod tests {
         }
     }
 
+    /// 缺现价的持仓：`market_value` 与 `unrealized_pnl` 都是 `None`（取不到价 ⇒ 盈亏也算不出）。
+    fn ps_unpriced(code: &str, cost: f64) -> PositionSummary {
+        let mut p = ps(code, cost * 100.0, Some("未知"), cost);
+        p.current_price = None;
+        p.market_value = None;
+        p.unrealized_pnl = None;
+        p.unrealized_pnl_pct = None;
+        p.sector_name = None;
+        p
+    }
+
     #[test]
     fn empty_positions_returns_zero_concentration() {
         let (top, sector, max_sec) = compute_concentration(&[]);
@@ -965,6 +1209,71 @@ mod tests {
         assert!((sector["科技"] - 90.0).abs() < 1e-6);
         assert!((sector["消费"] - 10.0).abs() < 1e-6);
         assert!((max_sec - 90.0).abs() < 1e-6);
+    }
+
+    /// G-1 的真缺陷之一：盈亏的**分母**必须与分子同源。
+    /// 改造前 `total_cost` 按全部持仓的成本算，而分子把拿不到盈亏的那只按 0 计 ⇒
+    /// 缺价的那只只撑大分母，收益率被系统性低估（下面这组数：-10% 会被算成 -6.67%）。
+    #[test]
+    fn unpriced_position_excluded_from_pnl_denominator() {
+        let pos = vec![
+            ps("a", 6000.0, Some("科技"), 50.0),
+            ps("b", 3000.0, Some("科技"), 50.0),
+            ps_unpriced("c", 50.0),
+        ];
+        let d = compute_dashboard(&pos, None, None, None, StressTestBundle::default(), false, None);
+        assert_eq!(d.total_market_value, 9000.0, "缺价的那只不计入市值");
+        assert_eq!(d.total_pnl, -1000.0);
+        assert!(
+            (d.total_pnl_pct - (-10.0)).abs() < 1e-9,
+            "分母应是两只已知成本 10000，不是三只 15000：实得 {}",
+            d.total_pnl_pct
+        );
+        assert_eq!(d.unpriced_positions, 1, "缺价只数必须跟着报出来");
+    }
+
+    /// G-1 的真缺陷之二：分散度/风险等级收的只数必须与占比同源。
+    /// 8 行里 4 行没价 ⇒ 占比按 4 只算（各 25%），原先 `n` 却按 8 行判 ⇒
+    /// `compute_diversification_score` 落到「≥5 只且单股≤25%」那一档（70 分），
+    /// 把「一半持仓拿不到价」演成「很分散」。
+    #[test]
+    fn diversification_uses_priced_count_not_row_count() {
+        let pos = vec![
+            ps("a", 2500.0, Some("科技"), 50.0),
+            ps("b", 2500.0, Some("消费"), 50.0),
+            ps("c", 2500.0, Some("医药"), 50.0),
+            ps("d", 2500.0, Some("金融"), 50.0),
+            ps_unpriced("e", 50.0),
+            ps_unpriced("f", 50.0),
+            ps_unpriced("g", 50.0),
+            ps_unpriced("h", 50.0),
+        ];
+        let d = compute_dashboard(&pos, None, None, None, StressTestBundle::default(), false, None);
+        assert_eq!(d.unpriced_positions, 4);
+        assert_eq!(
+            d.diversification_score, 50,
+            "只数口径变了这一档就要跟着变（按 8 行判会得到 70，那是把缺价当分散）"
+        );
+    }
+
+    /// G-2：相关性必须按**日期交集**对齐，不能按尾部位置。
+    /// A 有 d1..d7、B 停牌少 d4 ⇒ 交集 6 个点且逐日同值 ⇒ 真相关是 1.0；
+    /// 原先的「取较短者尾部」会把 A 的 d2 配到 B 的 d1，算出 ≈0.98 的假数。
+    #[test]
+    fn aligned_pearson_pairs_by_date_not_by_tail_position() {
+        let a: Vec<(String, f64)> = (1..=7).map(|i| (format!("d{i}"), i as f64)).collect();
+        let b: Vec<(String, f64)> =
+            [1, 2, 3, 5, 6, 7].iter().map(|i| (format!("d{i}"), *i as f64)).collect();
+        let c = aligned_pearson(&a, &b).expect("交集 6 个点，够算");
+        assert!((c - 1.0).abs() < 1e-9, "逐日同值的相关必须是 1.0，实得 {c}");
+    }
+
+    /// 两段完全不相交的日期窗口 ⇒ 不得产出一个相关数（老口径会照样算出 1.0）。
+    #[test]
+    fn aligned_pearson_refuses_disjoint_windows() {
+        let a: Vec<(String, f64)> = (1..=5).map(|i| (format!("d{i}"), i as f64)).collect();
+        let b: Vec<(String, f64)> = (6..=10).map(|i| (format!("d{i}"), (i - 5) as f64)).collect();
+        assert_eq!(aligned_pearson(&a, &b), None, "零重叠的窗口不可比，不是「相关性为 1」");
     }
 
     #[test]
@@ -1381,5 +1690,247 @@ mod tests {
         let m = estimate_betas(&p, &[], 120).await;
         assert!(m.is_empty());
         assert!(p.seen.lock().unwrap().is_empty(), "无持仓时不应发起任何取数");
+    }
+
+    /// G-3：刷新一次要把**非零**的最大回撤与两个只数一起落库。
+    ///
+    /// 改造前 `max_drawdown_pct` 这一列恒 0（`compute_dashboard` 写死、`refresh_metrics`
+    /// 原样写回，注释却声称「走历史」）。夹具日期一律由「北京今天」往回推 ⇒ 保证
+    /// 落在生产查询的 90 日回看窗内（写死日期会在几周后静默失效，门却照绿）。
+    #[tokio::test]
+    async fn refresh_metrics_persists_nonzero_drawdown_and_position_counts() {
+        use axagent_entities::portfolio_metrics_daily;
+        let h = axagent_dao::db::create_test_pool().await.expect("测试库应可创建");
+        let db = &h.conn;
+        let today = axagent_astock_data::calendar::beijing_today();
+
+        async fn seed(db: &DatabaseConnection, date: &str, mv: f64) {
+            let row = portfolio_metrics_daily::ActiveModel {
+                id: Set(Uuid::new_v4().to_string()),
+                snapshot_date: Set(date.to_string()),
+                total_market_value: Set(mv),
+                cash_pct: Set(0.0),
+                total_pnl: Set(0.0),
+                total_pnl_pct: Set(0.0),
+                max_drawdown_pct: Set(0.0),
+                beta: Set(None),
+                sharpe_30d: Set(None),
+                correlation_avg: Set(None),
+                top_concentration_pct: Set(0.0),
+                position_count: Set(None),
+                unpriced_count: Set(None),
+                sector_exposure_json: Set("{}".to_string()),
+                stress_test_json: Set(None),
+                created_at: Set(1),
+            };
+            row.insert(db).await.unwrap();
+        }
+        // 历史：9000 → 12000（峰）→ 8800；本次市值 6000（谷）⇒ 回撤 (12000-6000)/12000 = 50%
+        for (offset, mv) in [(20_i64, 9000.0_f64), (10, 12000.0), (3, 8800.0)] {
+            let d = (today - chrono::Duration::days(offset)).format("%Y-%m-%d").to_string();
+            seed(db, &d, mv).await;
+        }
+
+        let pos = vec![ps("a", 6000.0, Some("科技"), 50.0), ps_unpriced("b", 50.0)];
+        let (id, written) =
+            refresh_metrics(db, &pos, &BetaMap::new(), None, None, None, None).await.unwrap();
+        // 2 = 覆盖的**持仓只数**（含缺价那只），不是「写了 1 行」。命令面与前端把这个字段
+        // 叫 positionsSnapshotted ⇒ 恒返 1 会让「8 只持仓」显示成 1（G-9 订正）。
+        assert_eq!(written, 2, "第二条返回的是覆盖的持仓只数");
+
+        let row = portfolio_metrics_daily::Entity::find_by_id(id)
+            .one(db)
+            .await
+            .unwrap()
+            .expect("刷新必须留下那一行");
+        assert!(
+            (row.max_drawdown_pct - 50.0).abs() < 1e-6,
+            "峰值 12000 → 谷值 6000 应得 50%，实得 {}",
+            row.max_drawdown_pct
+        );
+        assert_eq!(row.position_count, Some(1), "只有拿到现价的那只参与判据");
+        assert_eq!(row.unpriced_count, Some(1), "缺价只数要一起落库");
+        assert_eq!(row.snapshot_date, today.format("%Y-%m-%d").to_string(), "日期按北京会话日盖");
+    }
+
+    /// 回撤序列的过滤规则（三条各一条测试，见下面三个用例的注释）。
+    ///
+    /// 第一版我把「空组合行」放在序列**开头**并断言结果为 0 ⇒ 去掉过滤的变异体也是 0
+    /// （0 在低点不构成回撤）、把 `lt` 改成 `lte` 也是 0 ⇒ 两个变异体都绿，探针根本没打在
+    /// 决定该断言的那道守卫上。现在 0 行/同日行/窗口外行一律放在**能改变读数**的位置。
+    async fn seed_day(db: &DatabaseConnection, day: chrono::NaiveDate, mv: f64) {
+        use axagent_entities::portfolio_metrics_daily;
+        portfolio_metrics_daily::ActiveModel {
+            id: Set(Uuid::new_v4().to_string()),
+            snapshot_date: Set(day.format("%Y-%m-%d").to_string()),
+            total_market_value: Set(mv),
+            cash_pct: Set(0.0),
+            total_pnl: Set(0.0),
+            total_pnl_pct: Set(0.0),
+            max_drawdown_pct: Set(0.0),
+            beta: Set(None),
+            sharpe_30d: Set(None),
+            correlation_avg: Set(None),
+            top_concentration_pct: Set(0.0),
+            position_count: Set(None),
+            unpriced_count: Set(None),
+            sector_exposure_json: Set("{}".to_string()),
+            stress_test_json: Set(None),
+            created_at: Set(1),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    /// 回撤按**日期升序**的峰谷算：峰 12000（20 天前）→ 谷 8800（5 天前）→ 本次回升到 11000
+    /// ⇒ 读数应是「这次下跌的最深一段」26.67%，不是「最后一段」8.33%。
+    /// 序列里那行 0（空组合日）由 `max_drawdown_fraction` 自己跳过 —— 本层不再重复过滤。
+    #[tokio::test]
+    async fn drawdown_uses_peak_and_trough_in_date_order() {
+        let h = axagent_dao::db::create_test_pool().await.expect("测试库应可创建");
+        let db = &h.conn;
+        let today = axagent_astock_data::calendar::beijing_today();
+        seed_day(db, today - chrono::Duration::days(20), 12000.0).await;
+        seed_day(db, today - chrono::Duration::days(10), 0.0).await;
+        seed_day(db, today - chrono::Duration::days(5), 8800.0).await;
+
+        let dd = drawdown_from_history(db, &today.format("%Y-%m-%d").to_string(), 11000.0)
+            .await
+            .unwrap();
+        assert!(
+            (dd - 80.0 / 3.0).abs() < 1e-6,
+            "序列必须按日期升序喂进去（改成降序会读成 8.33%）：实得 {dd}"
+        );
+    }
+
+    /// 同一天已落的那行是**自己**，不能被当成历史的一部分（严格早于 before_date）。
+    #[tokio::test]
+    async fn drawdown_excludes_the_same_day_row() {
+        let h = axagent_dao::db::create_test_pool().await.expect("测试库应可创建");
+        let db = &h.conn;
+        let today = axagent_astock_data::calendar::beijing_today();
+        let today_str = today.format("%Y-%m-%d").to_string();
+        seed_day(db, today - chrono::Duration::days(20), 12000.0).await;
+        seed_day(db, today, 3000.0).await;
+
+        let dd = drawdown_from_history(db, &today_str, 8800.0).await.unwrap();
+        assert!(
+            (dd - 80.0 / 3.0).abs() < 1e-6,
+            "今天那行（3000）不该进序列，否则会被读成跌过 75%：实得 {dd}"
+        );
+    }
+
+    /// 窗口外的老行不参与「近期回撤」：与 `sharpe_30d` 一类口径保持一致。
+    #[tokio::test]
+    async fn drawdown_honors_the_lookback_window() {
+        let h = axagent_dao::db::create_test_pool().await.expect("测试库应可创建");
+        let db = &h.conn;
+        let today = axagent_astock_data::calendar::beijing_today();
+        let today_str = today.format("%Y-%m-%d").to_string();
+        seed_day(db, today - chrono::Duration::days(200), 12000.0).await;
+        seed_day(db, today - chrono::Duration::days(20), 9000.0).await;
+
+        let dd = drawdown_from_history(db, &today_str, 8800.0).await.unwrap();
+        assert!(
+            (dd - (9000.0 - 8800.0) / 9000.0 * 100.0).abs() < 1e-6,
+            "200 天前那行在 90 日窗口之外，不该把回撤撑到 26.7%：实得 {dd}"
+        );
+    }
+
+    /// 面板值 → 回看窗口：区间内采纳、区间外回落、非数值回落、键缺席回落 —— 四格各一条。
+    ///
+    /// 只有**纯函数版**有可测面：快照版会改进程内全局变量表，与并行用例互踩
+    /// （同 `PositionLimits::from_panel_vars` 的拆法）。
+    #[test]
+    fn correlation_lookback_window_adopts_panel_value_only_within_range() {
+        let vars = |v: serde_json::Value| {
+            let mut m = HashMap::new();
+            m.insert("risk_correlation_lookback_days".to_string(), v);
+            m
+        };
+        assert_eq!(
+            correlation_lookback_days_in(&vars(serde_json::json!(90))),
+            90,
+            "区间内必须采纳"
+        );
+        assert_eq!(correlation_lookback_days_in(&vars(serde_json::json!(20))), 20, "下界本身可用");
+        assert_eq!(
+            correlation_lookback_days_in(&vars(serde_json::json!(250))),
+            250,
+            "上界本身可用"
+        );
+        assert_eq!(
+            correlation_lookback_days_in(&vars(serde_json::json!(19))),
+            CORRELATION_LOOKBACK_DAYS,
+            "过小（重叠收益不足以算相关）⇒ 回落"
+        );
+        assert_eq!(
+            correlation_lookback_days_in(&vars(serde_json::json!(251))),
+            CORRELATION_LOOKBACK_DAYS,
+            "超过一年 ⇒ 回落，别把停牌期外的旧价对拉进窗口"
+        );
+        assert_eq!(
+            correlation_lookback_days_in(&vars(serde_json::json!("60"))),
+            CORRELATION_LOOKBACK_DAYS,
+            "非数值 ⇒ 回落"
+        );
+        assert_eq!(
+            correlation_lookback_days_in(&HashMap::new()),
+            CORRELATION_LOOKBACK_DAYS,
+            "键缺席（变量表未装）⇒ 回落默认，与接线前的现值逐字相同"
+        );
+    }
+
+    /// G-7：`refresh_snapshot` 是面板「立即刷新」与收盘定时任务共用的**唯一**通路，
+    /// 三步（β → 指标落库 → 相关性落库）必须一次跑完并各自落到自己的表里。
+    ///
+    /// 判据分两层：先看返回值，再看**产物表真有几行** —— 只看前者会放过「函数被调用、
+    /// 但写库那步静默失败」的形态。
+    #[tokio::test]
+    async fn refresh_snapshot_runs_beta_metrics_and_correlation_in_one_pass() {
+        use axagent_entities::{portfolio_correlation_snapshot, portfolio_metrics_daily};
+
+        let h = axagent_dao::db::create_test_pool().await.expect("测试库应可创建");
+        let db = &h.conn;
+
+        let n = 60;
+        let dates = mk_dates(n);
+        let rets: Vec<f64> = (0..n - 1).map(|i| ((i as f64 * 0.41).cos()) * 0.012).collect();
+        let double: Vec<f64> = rets.iter().map(|r| r * 2.0).collect();
+        let inverse: Vec<f64> = rets.iter().map(|r| -r).collect();
+        let mut series = HashMap::new();
+        series.insert(BETA_BENCHMARK_CODE.to_string(), klines_from_dates(&dates, &rets));
+        series.insert("600000".to_string(), klines_from_dates(&dates, &double));
+        series.insert("600001".to_string(), klines_from_dates(&dates, &inverse));
+        let p = MockProvider::new(series);
+
+        let positions = vec![
+            ps("600000", 10000.0, Some("科技"), 50.0),
+            ps("600001", 5000.0, Some("医药"), 20.0),
+        ];
+        let summary = refresh_snapshot(db, &p, &positions, None).await.unwrap();
+
+        assert_eq!(summary.positions_snapshotted, 2, "返回的是覆盖的持仓只数，不是行数");
+        assert!(
+            summary.correlation_pairs_written >= 1,
+            "两只持仓至少该算出一对相关性，实得 {}",
+            summary.correlation_pairs_written
+        );
+        assert!(summary.as_of_date.is_none(), "cron 侧不传日期 ⇒ 由引擎按北京会话日盖当天");
+        // β 确实被算过（三步链的第一步不是摆设）：基准 + 两只个股都发起过取数
+        assert!(p.adj_for("600000").is_some(), "β 与相关性都要走过个股日 K 的取数");
+
+        assert_eq!(
+            portfolio_metrics_daily::Entity::find().all(db).await.unwrap().len(),
+            1,
+            "指标表应恰好落一行"
+        );
+        let pairs = portfolio_correlation_snapshot::Entity::find().all(db).await.unwrap();
+        assert!(!pairs.is_empty(), "相关性快照必须真落库，不只是算完返回个数");
+        assert_eq!(
+            pairs[0].lookback_days, CORRELATION_LOOKBACK_DAYS as i32,
+            "变量表未装 ⇒ 用回落默认"
+        );
     }
 }

@@ -12,6 +12,9 @@
 //    乐观 DCF 放行；新口径：DCF upside ≤ -35%（内在价值较现价低 35%+）或 PE ≥ 自身
 //    5 年 80 分位 ⇒ 否决开仓，其余可判情形放行，两口径都缺席按「未判定 ≠ 通过」不加仓。
 //    basis 取值：not_overvalued / dcf_overvalued / pe_overvalued / unjudged。
+//    周期组（P0-4）另走上限口径：中性化 DCF 上行 ≥ 面板 `value_safety_margin`（安全边际
+//    最低折扣，默认 20）与周期下限 35% 的**较大者** —— 基准仍读面板那一个来源（宿主函数
+//    `pm_required_margin_pct()`），周期下限是脚本自己的、更严的那一格。
 // 3. 出场：`target_and_falsified` —— 止盈 = 估值目标价；止损 = **论点被证伪**
 //    （估值严重高估、上行依据耗尽 ⇒ `margin_basis_exhausted`，与门同尺 -35%；
 //    或盈利质量/预期修正两腿同时转负 ⇒ `thesis_contradicted`）。价格波动本身不构成
@@ -35,7 +38,20 @@ fn overval_pe_pctile() { 80.0 }
 // P0-4③：周期股安全边际门阈值（20% → 35%）。周期股估值中枢随商品价格大幅摆动，
 // 且本口径的 DCF 已用近 5 年 FCF 中位数中性化、PE 分位已在工具侧置空 ——
 // 中性化后仍要求 ≥35% 上行才允许开仓（旧门的「便宜放行」语义只在周期组保留）。
-fn cycle_margin_min_pct() { 35.0 }
+// ⚠ `35` 是周期组**自己的下限**，不是面板那一格的抄写：面板 `value_safety_margin`（安全
+//   边际最低折扣，默认 20、缺失/越界回落 30）是全局下限，宿主函数 `pm_required_margin_pct()`
+//   原样转发它 ⇒ 两者取**较大者**。面板调到 40 时周期门跟着升到 40，「面板那格谁也不读」
+//   的老形态就此不复现；面板缺席（回落 30）时周期门仍钉在 35，不随回落值漂移。
+//   B 批跨载体门禁 `check-panel-var-landing.mjs` 的 P2/P3 钉的正是这一环：`.rhai` 里必须能
+//   寻到 `pm_required_margin_pct()`，且不许回潮成 `moS_pct >= 30.0` 那种第二权威字面量。
+fn cycle_margin_floor_pct() { 35.0 }
+fn cycle_margin_min_pct() {
+    if pm_required_margin_pct() > cycle_margin_floor_pct() {
+        pm_required_margin_pct()
+    } else {
+        cycle_margin_floor_pct()
+    }
+}
 
 // P0-3 单向高估否决（门的纯判定，抽出以便 call_fn 钉死，防阈值被人改回「便宜放行」）。
 // 入参：mos_pct —— DCF 上行百分数，DCF 不适用/缺失时传 ()；
@@ -48,8 +64,9 @@ fn cycle_margin_min_pct() { 35.0 }
 //     [true,  "not_overvalued"]：至少一条口径可判且未严重高估（便宜不再放行，也不拦下）
 //     [false, "unjudged"]：两条口径都缺席（缺席 ≠ 通过）
 //   · 周期股（P0-4，PE 已在工具侧置空，只剩中性化 DCF 单口径）：
-//     [true,  "cyclical_margin_pass"]：中性化 DCF upside ≥ 35%
-//     [false, "cyclical_margin_insufficient"]：upside 存在但 < 35%（含轻微高估）
+//     [true,  "cyclical_margin_pass"]：中性化 DCF upside ≥ `cycle_margin_min_pct()`
+//       （= max(面板 `value_safety_margin`, 周期下限 35)，面板默认 ⇒ 35）
+//     [false, "cyclical_margin_insufficient"]：upside 存在但低于该阈值（含轻微高估）
 //     [false, "unjudged"]：DCF 不适用/缺席
 fn pm_overvalued_veto(mos_pct, pe_pct, cyclical) {
     if cyclical {

@@ -308,8 +308,12 @@ export const SINGLE_AUTHORITY = [
     why:
       "安全边际 30% 的第二载体（Rhai 长线加仓门）必须读同一个来源；写回字面量就是「Rust 20% / Rhai 30%」两套真相",
     rel: RHAI_REL,
-    absent: ["moS_pct >= 30.0"],
-    present: ["pm_required_margin_pct()"],
+    // P0-4 起长线档周期分支走 `cycle_margin_min_pct()`（= max(面板值, 周期下限 35)）；
+    // 顶层形参是 `moS_pct`、`pm_overvalued_veto` 形参是 `mos_pct` ⇒ 两种拼写都登记。
+    absent: ["moS_pct >= 30.0", "mos_pct >= 30.0"],
+    // 两半缺一不可：前者证明脚本里确实读了面板那一格（宿主函数），后者证明**生产判据**
+    // 真的走这条比较 —— 只留函数定义、把调用点换回裸字面量，同样是一套半死的接线。
+    present: ["pm_required_margin_pct()", ">= cycle_margin_min_pct()"],
   },
   {
     why: "Rhai 侧那个名字必须由宿主函数注册表提供，否则运行期 Function not found 会被 try/catch 吞成静默兜底",
@@ -782,9 +786,9 @@ function selftest() {
       "P3 跨载体：Rhai 长线加仓门重新写死 30.0 ⇒ 红（留下「Rust 20% / Rhai 30%」两套真相）",
       checkAll(
         panelSrc,
-        withPatch(RHAI_REL, (s) => patchText(s, "moS_pct >= margin_min_pct", "moS_pct >= 30.0")),
+        withPatch(RHAI_REL, (s) => patchText(s, "mos_pct >= cycle_margin_min_pct()", "mos_pct >= 30.0")),
         seedSrc
-      ).some((p) => p.startsWith("P3") && p.includes("moS_pct >= 30.0")),
+      ).some((p) => p.startsWith("P3") && p.includes("mos_pct >= 30.0")),
     ],
     [
       "P2 跨载体：宿主注册被摘掉 ⇒ 红（脚本调用会在运行期 Function not found 被吞成静默兜底）",

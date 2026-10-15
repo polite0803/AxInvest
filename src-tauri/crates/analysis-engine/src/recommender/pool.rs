@@ -216,6 +216,14 @@ static KNOWN_VENDORS: &[&str] = &[
     // 以下 vendor 无需用户配置凭据，始终启用
     "browser_eastmoney",
     "guba",
+    // G1 跨市场 vendor（港股/美股/ETF/国际指数/外汇）。模板没有 vendor_international
+    // 开关、也无需凭据 —— 漏在白名单外时，工作流一跑 `inject_vendor_state` 就会把全局
+    // 过滤器设成 Some(不含 international) ⇒ `find_vendor("international")` 返 None，
+    // 跨市场面板的 get_benchmark_kline / get_forex_kline / get_international_* 全部硬报
+    // 「international vendor 未注册」（astock_client 是进程级单例，污染持续到重启）。
+    "international",
+    // 注意：`eastmoney_push2` 刻意不入此表 —— 它是 eastmoney 按域名族拆出的健康桶别名
+    // （同一实现），模板无独立开关，启用状态在本函数末尾跟随 vendor_eastmoney 联动。
 ];
 pub fn load_enabled_vendors_from_template(
     template_vars: &[(String, serde_json::Value)],
@@ -264,6 +272,16 @@ pub fn load_enabled_vendors_from_template(
         } else {
             set.remove(vendor_name); // 显式禁用
         }
+    }
+    // `eastmoney_push2` 是 2026-10-01 从 `eastmoney` 按域名族拆出的注册名（同一实现、
+    // 独立健康桶，承担 quote/klines/money_flow/index_quotes 等 push2 族取数），模板没有
+    // 独立开关。漏掉它时工作流一跑全局过滤器会把东财 push2 主源整片摘掉（路由有他源兜底，
+    // 只表现为静默降级）。启用状态跟随 vendor_eastmoney：用户关东财时它必须同步关，
+    // 不能留一个开关管不住的取数通道。
+    if set.contains("eastmoney") {
+        set.insert("eastmoney_push2".to_string());
+    } else {
+        set.remove("eastmoney_push2");
     }
     set
 }
@@ -418,5 +436,48 @@ mod tests {
             let v = required_vendors_for_style(s);
             assert!(!v.is_empty(), "{:?} missing vendors", s);
         }
+    }
+
+    /// 回归（2026-10-15，跨市场面板「international vendor 未注册」）：
+    /// 模板没有 vendor_international 开关时，international 必须默认在启用集中，
+    /// 否则工作流注入全局白名单后，跨市场面板全部硬失败。
+    #[test]
+    fn international_enabled_by_default_without_template_var() {
+        let s = load_enabled_vendors_from_template(&[]);
+        assert!(s.contains("international"), "international 必须默认启用: {s:?}");
+        // eastmoney_push2 是 eastmoney 的健康桶别名，默认跟随启用
+        assert!(s.contains("eastmoney_push2"), "eastmoney_push2 默认应跟随 eastmoney 启用: {s:?}");
+        // 其余始终启用的免凭据 vendor
+        assert!(s.contains("browser_eastmoney"));
+        assert!(s.contains("guba"));
+    }
+
+    /// 模板显式关闭 vendor_international 时必须尊重开关（前向兼容）。
+    #[test]
+    fn international_explicit_disable_respected() {
+        let vars = vec![("vendor_international".to_string(), serde_json::json!(false))];
+        let s = load_enabled_vendors_from_template(&vars);
+        assert!(!s.contains("international"), "显式关闭后不应启用: {s:?}");
+    }
+
+    /// eastmoney_push2 必须跟随 vendor_eastmoney 开关联动，
+    /// 不允许出现「关东财但 push2 桶仍在取数」的开关失管。
+    #[test]
+    fn eastmoney_push2_follows_eastmoney_toggle() {
+        // 显式关闭 eastmoney（布尔）
+        let vars = vec![("vendor_eastmoney".to_string(), serde_json::json!(false))];
+        let s = load_enabled_vendors_from_template(&vars);
+        assert!(!s.contains("eastmoney"));
+        assert!(!s.contains("eastmoney_push2"), "关东财后 push2 桶必须同步关闭: {s:?}");
+
+        // 显式关闭 eastmoney（字符串 "false"，兼容历史形态）
+        let vars = vec![("vendor_eastmoney".to_string(), serde_json::json!("false"))];
+        let s = load_enabled_vendors_from_template(&vars);
+        assert!(!s.contains("eastmoney_push2"), "字符串 false 同样应联动关闭: {s:?}");
+
+        // 显式开启 eastmoney
+        let vars = vec![("vendor_eastmoney".to_string(), serde_json::json!(true))];
+        let s = load_enabled_vendors_from_template(&vars);
+        assert!(s.contains("eastmoney_push2"), "开东财后 push2 桶应启用: {s:?}");
     }
 }

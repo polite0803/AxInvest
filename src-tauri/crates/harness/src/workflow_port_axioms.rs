@@ -12,7 +12,7 @@
 //! | `Switch` | `source_handle` == `SwitchCase.label`（`None` = 默认分支） |
 //! | `Condition` | `source_handle` == `"true"` / `"false"`（`None` 时由 `edge_type` 兜底） |
 //!
-//! 这些约定**只写在注释与文档里** —— 例：`src/commands/stock_analysis_setup/seed_stock_analysis.rs:6797-6799`
+//! 这些约定**只写在注释与文档里** —— 例：`src/commands/stock_analysis_setup/seed_stock_analysis.rs:6819-6821`
 //! 用注释解释「case 命中 ⇒ 具名边；default ⇒ 无 handle 的边」。引擎侧没有任何校验
 //! （`commands/workflow_template.rs::validate_workflow_template` 只查了边的源/目标节点是否存在、
 //! 以及 `ParallelBranch` 是否源自 `Parallel` 节点）。

@@ -3502,6 +3502,11 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
                 "lockup_float_ratio" => serde_json::json!(0.03),
                 "lockup_supply_reason" => serde_json::json!("no_float_market_cap"),
                 "flow_persistence" => serde_json::json!(0.4),
+                // v156（#22 另一半）：超短方向腿接回 `eventCatalyst`，其原料是本节点映射的
+                // `catalyst_level`。齐备态必须给**受控六级词表内**的标签（词表权威见
+                // `catalyst-analyst.md` 的 VERDICT 契约与 `config/llm-output-schemas.json`）——
+                // 给 "无"/空串/表外自造标签会让 `leg_signal` 正确地判缺席，本门测的就不是齐备输入。
+                "catalyst_level" => serde_json::json!("L2业绩拐点级"),
                 "pmi" => serde_json::json!(51.0),
                 "valuation_dcf_upside" => serde_json::json!(38.0),
                 "valuation_dcf_applicable" => serde_json::json!(true),
@@ -3654,6 +3659,24 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
                     == Some("supplyShock")
             });
             assert!(has_ss, "档 {tier} 齐备态没有 supplyShock 腿 ⇒ supply_shock 块没产出入，");
+        }
+        // v156（#22 另一半）：超短齐备态必须**真的有** `eventCatalyst` 这条腿。
+        //     接线批只补「映射键 + 父扇出 + 供给边」是可以全绿的 —— 腿在分支表里但值表没料
+        //     （或标签在词表外）时它只会静默进 `absentLegs`。本条锁的是「这腿真参与了融合」，
+        //     与上面 ①′ expectationRevision、①″ supplyShock 同形。
+        if tier == "ultra_short" {
+            let has_cat = legs.iter().any(|l| {
+                l.clone()
+                    .try_cast::<Map>()
+                    .and_then(|m| m.get("factor").cloned().and_then(|f| f.try_cast::<String>()))
+                    .as_deref()
+                    == Some("eventCatalyst")
+            });
+            assert!(
+                has_cat,
+                "档 {tier} 齐备态没有 eventCatalyst 腿 ⇒ catalyst_level 没进 raw，\
+                 或值表标签落在受控词表外被 leg_signal 判缺席"
+            );
         }
         // ①‴ v138 裁定 3「让用户看出各档实际几根」：齐备态必须把**本档自己的**窗口回显与尺度
         //     原样带进决策行。锁两件事：

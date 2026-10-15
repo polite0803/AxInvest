@@ -1244,7 +1244,14 @@ mod tests {
             .filter(|l| l["role"] == "direction")
             .map(|l| l["factor"].as_str().unwrap())
             .collect();
-        assert_eq!(us_dir, vec!["momentumSignal"], "超短方向腿只能是短窗动量");
+        // v156（#22 另一半）：超短方向腿 = 短窗动量 + 事件催化剂。
+        // 催化剂是个股级证据（与 MACD 独立的信息源）；退回单腿会让 posterior 只由
+        // 小时线 MACD 四态决定（输出坍缩为离散格，见 `PLAN-horizon-decision-repair.md` P1）。
+        assert_eq!(
+            us_dir,
+            vec!["momentumSignal", "eventCatalyst"],
+            "超短方向腿 = 短窗动量 + 事件催化剂（广度仍是只作门的 filter）"
+        );
         // 超短：广度门 + 时间止损 + 不做跨期缩放，三者必须同族
         assert_eq!(all["ultra_short"]["entryGate"], "breadth_required");
         assert_eq!(all["ultra_short"]["exitRule"], "time_stop");

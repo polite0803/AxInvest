@@ -58,7 +58,7 @@ pub struct ModelVisibleContent {
 impl ModelVisibleContent {
     /// 从一条 ChatRequest 消息提取模型可见内容摘要。
     pub fn from_chat_message(msg: &ChatMessage) -> Self {
-        let (text, mut non_text_parts) = match &msg.content {
+        let (text, non_text_parts) = match &msg.content {
             ChatContent::Text(t) => (t.clone(), Vec::new()),
             ChatContent::Multipart(parts) => {
                 let mut text_parts = Vec::new();

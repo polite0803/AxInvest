@@ -469,7 +469,9 @@ async fn run_serenity_backtest_pass(
     let picks: Vec<_> = query
         .all(db)
         .await
-        .map_err(|e| format!("读取智选候选失败: {e}"))?
+        .map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("读取智选候选失败: {e}"))
+        })?
         .into_iter()
         .take(max_picks as usize)
         .collect();
@@ -1072,8 +1074,11 @@ pub(crate) fn parse_decision_backtest_config(
     if prompt.trim().is_empty() {
         return Ok(RunDecisionBacktestRequest::default());
     }
-    serde_json::from_str(prompt)
-        .map_err(|e| format!("解析 {} 配置失败: {e}", DECISION_BACKTEST_TASK_TYPE))
+    serde_json::from_str(prompt).map_err(|e| {
+        ErrorResponse::new(common::INVALID_INPUT)
+            .with_detail(format!("解析 {} 配置失败: {e}", DECISION_BACKTEST_TASK_TYPE))
+            .to_string()
+    })
 }
 
 /// 创建决策回测定时任务。
@@ -1104,8 +1109,9 @@ pub async fn create_decision_backtest_cron(
         dry_run: Some(false),
         period_filter: period_filter.clone(),
     };
-    let prompt =
-        serde_json::to_string(&request).map_err(|e| format!("序列化决策回测配置失败: {e}"))?;
+    let prompt = serde_json::to_string(&request).map_err(|e| {
+        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("序列化决策回测配置失败: {e}"))
+    })?;
 
     let windows = t_plus_n_list
         .as_ref()

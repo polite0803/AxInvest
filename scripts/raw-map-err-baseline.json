@@ -1,14 +1,13 @@
 {
   "//": "src-tauri/src/commands 下「中文裸串式 map_err」的每文件处数基线（只许降不许升）。重生成：node scripts/check-rust-raw-map-err.mjs --update-baseline",
   "generated_by": "check-rust-raw-map-err.mjs --update-baseline",
-  "total": 478,
+  "total": 476,
   "files": {
     "src-tauri/src/commands/agency_expert.rs": 2,
     "src-tauri/src/commands/agent/mod.rs": 1,
     "src-tauri/src/commands/agent_advanced.rs": 6,
     "src-tauri/src/commands/agent_role.rs": 1,
     "src-tauri/src/commands/app_config.rs": 3,
-    "src-tauri/src/commands/backtest_validation.rs": 2,
     "src-tauri/src/commands/backup.rs": 9,
     "src-tauri/src/commands/capability.rs": 1,
     "src-tauri/src/commands/chart_generator.rs": 1,

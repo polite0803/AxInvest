@@ -195,7 +195,10 @@ function selftest() {
     [
       "后端白名单删一条 ⇒ 前端多出该值",
       checkWhitelist({
-        taskSrc: patch(taskSrc, "    crate::commands::stock_workflow::reflection::LESSON_VALIDATION_TASK_TYPE,\n", ""),
+        // 锚点须与 `scheduled_task.rs` 的**当前常量路径**逐字一致：
+        // `LESSON_VALIDATION_TASK_TYPE` 已从 `stock_workflow::reflection` 挪到 `commands::constants`
+        // （2026-10-15 `e3ea43eca` 下沉 dao 那批），旧路径锚点会直接抛「负控锚点未命中」。
+        taskSrc: patch(taskSrc, "    crate::commands::constants::LESSON_VALIDATION_TASK_TYPE,\n", ""),
         groupingSrc,
         rustSources,
       }).some((p) => p.includes("多了后端没有的") && p.includes("lesson-validation")),

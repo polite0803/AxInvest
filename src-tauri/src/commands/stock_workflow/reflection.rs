@@ -3130,7 +3130,10 @@ pub async fn compute_market_snapshots(
 ///
 /// 与个股同源前复权 K 线，保证可比性；任一端点缺失时返回 `Err`，
 /// 由调用方降级为「无基准对比」，而不是用 0.0 冒充。
-async fn compute_benchmark_change(
+///
+/// `pub(crate)`：智选（serenity）的 T+N 超额命中通道也用它（`commands/backtest_validation.rs`），
+/// 两处必须用同一个基准与同一份取数，否则「超额收益」在两条链上不是同一个数。
+pub(crate) async fn compute_benchmark_change(
     client: &axagent_astock_data::AStockClient,
     start_date: &str,
     end_date: &str,

@@ -279,6 +279,10 @@ jobs:
           node scripts/check-generation-scope-registry.mjs
           node scripts/check-reco-generation.mjs --selftest
           node scripts/check-reco-generation.mjs
+          # 孤儿模块门（2026-10-15，PLAN-reflection-optimization-closure §四.2）：
+          # 未被任何 mod/include 指向的 .rs 不参与编译，cargo 三件套全都看不见（先例：智选胜率线）。
+          # 与 scripts/ci-check.mjs 的对应 step **命令行逐字同源**。
+          node scripts/check-orphan-modules.mjs
       # B2-1 前置：分析师 id 形态门（base 域唯一 / 带档后缀只能由 helper 产出 / 裸匹配基线只许降）
       - name: Analyst id shape gate
         run: |

@@ -116,6 +116,7 @@
     "check:facts:docrefs": "node scripts/check-single-source-facts.mjs --dump-doc-refs",
     "check:valuation-parity": "node scripts/check-valuation-defaults-parity.mjs",
     "check:horizon-parity": "node scripts/check-horizon-weight-parity.mjs",
+    "check:orphan-modules": "node scripts/check-orphan-modules.mjs",
     "check:horizon-parity:selftest": "node scripts/check-horizon-weight-parity.mjs --selftest",
     "check:reco-horizon": "node scripts/check-reco-horizon-parity.mjs",
     "check:reco-horizon:selftest": "node scripts/check-reco-horizon-parity.mjs --selftest",

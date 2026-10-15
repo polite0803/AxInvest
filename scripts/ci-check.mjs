@@ -370,6 +370,11 @@ if (canRunRust && !quick) {
   step("跨行聚合按代筛样登记（四类分列）", "node scripts/check-generation-scope-registry.mjs");
   step("候选池代际一致自检（读侧谓词/写侧标记/负控）", "node scripts/check-reco-generation.mjs --selftest");
   step("候选池代际一致（回放行与实盘行同表后不混读混写）", "node scripts/check-reco-generation.mjs");
+  // 孤儿模块门（2026-10-15，PLAN-reflection-optimization-closure §四.2）：
+  // 文件可以整份存在、自带单测、甚至写着「待裁决」，只要没有 mod/include 指向它就不参与编译，
+  // cargo check/clippy/test 全都不抱怨。先例 = serenity_hit_rate_backtest.rs（11 个单测从未跑过）。
+  // 门绿 ≠ 待修面已清：脚本内 BASELINE 11 条（网关/agent/kit，非股票业务）仍未处置，只保证不再长出第 12 条。
+  step("无孤儿模块（存在即须被声明或不存在）", "node scripts/check-orphan-modules.mjs");
 
   // ── 逐档分支的档内纯度门（#7 的 ②与④，2026-10-06）──
   // 扫描面按域限定：四个 `pm-h-<档>` 种子块 + 四份 `portfolio-mgr-h-<档>.rhai`。

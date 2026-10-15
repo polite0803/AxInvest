@@ -32,6 +32,10 @@ use axagent_analysis_engine::hit_rate_backtest::{
 };
 use axagent_analysis_engine::recommender::RECO_GENERATION_FLOOR;
 use axagent_analysis_engine::recommender::types::RecoPick;
+use axagent_analysis_engine::serenity_hit_rate_backtest::{
+    SerenityHitRateReport, SerenityPickValidation, build_serenity_validation,
+    compute_serenity_hit_rate_report, serenity_validation_to_row,
+};
 use axagent_entities::decision_validations;
 use axagent_entities::reco_picks;
 use chrono::Utc;
@@ -83,7 +87,7 @@ pub struct RunDecisionBacktestResponse {
     pub written_count: usize,
     /// 跳过的条数（合成 pick / 缺数据等）
     pub skipped_count: usize,
-    /// 数据源（"eastmoney" | "sina" | "xueqiu" | "fallback_seed"）
+    /// 数据源（"eastmoney" | "sina" | "xueqiu" | "fallback_seed"；两趟都零产物时为 "none"）
     pub data_source: String,
     /// #49：本次报告分母的**起算代际**（= `RECO_GENERATION_FLOOR`）
     pub generation_floor: i32,
@@ -91,6 +95,12 @@ pub struct RunDecisionBacktestResponse {
     pub excluded_pre_floor_generation: usize,
     /// #49：因「代际未知」被排除出分母的验证记录数（pick 无 `reco_version`，会随写侧补章而减少）
     pub excluded_unknown_generation: usize,
+    /// 智选（serenity）候选的 T+N **超额**命中报表（判据是「跑赢基准多少」，
+    /// 与上面 `report` 的「是否到达目标价」是两个不同的计数域，**不得合并显示成一个命中率**）。
+    ///
+    /// `None` 只在智选一趟没跑到时出现；跑到就恒 `Some`（哪怕零样本 —— 零样本与没跑
+    /// 是两种缺席，见 `serenity_hit_rate_backtest::SERENITY_METRIC_NOT_PERSISTED`）。
+    pub serenity: Option<SerenityHitRateReport>,
 }
 
 /// #49 读侧筛样的**唯一判据**：按荐股代际把样本分成「进分母」与两类排除。
@@ -182,16 +192,8 @@ pub(crate) async fn run_decision_backtest_inner(
     })?;
 
     if picks.is_empty() {
-        // 空集合：返回空报告，避免前端拿到 None 报错
-        return Ok(RunDecisionBacktestResponse {
-            report: empty_report(),
-            written_count: 0,
-            skipped_count: 0,
-            data_source: "none".to_string(),
-            generation_floor: RECO_GENERATION_FLOOR,
-            excluded_pre_floor_generation: 0,
-            excluded_unknown_generation: 0,
-        });
+        // 不早退：智选（serenity）行走独立一趟（见下方 §6），这里只是通用通道无候选。
+        tracing::info!("[backtest] 通用通道无候选 pick（style≠serenity），本轮只跑智选超额验证");
     }
 
     // 限制条数：取最近 max_picks 条
@@ -307,15 +309,94 @@ pub(crate) async fn run_decision_backtest_inner(
         compute_hit_rate_report(&screened)
     };
 
+    // ── 6. 智选（serenity）超额命中通道 ──
+    // 单独一趟、单独报表：它的判据词表与通用通道不同，混进上面的 `compute_hit_rate_report`
+    // 会把智选显示成「命中率 0%」（全部落进 insufficient）。见 `run_serenity_backtest_pass`。
+    let (serenity_rows, serenity_report, serenity_skipped) =
+        run_serenity_backtest_pass(db, client, &t_plus_n_list, exclude_synthetic, max_picks)
+            .await?;
+    let serenity_written = if dry_run || serenity_rows.is_empty() {
+        0
+    } else {
+        write_decision_validations(db, &serenity_rows).await.map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("写智选超额验证行失败: {e}"))
+        })?
+    };
+    tracing::info!(
+        "[backtest] 智选超额命中：判过 {} 条 / 跑赢基准 {} 条 / 超额命中率 {:.3} / 平均超额 {:.2}% \
+         / 跳过 {} 条 / 落库 {serenity_written}",
+        serenity_report.validated_picks,
+        serenity_report.hit_count,
+        serenity_report.hit_rate,
+        serenity_report.avg_excess_return,
+        serenity_skipped,
+    );
+    if data_source == "unknown" {
+        // 两趟都零产物 ⇒ 沿用旧口径的 "none"（前端按它判「本轮没取到行情」）；
+        // 只有智选趟产了行 ⇒ 标 astock_client（智选趟固定走 client 的 vendor failover）
+        data_source = if serenity_rows.is_empty() {
+            "none".to_string()
+        } else {
+            "astock_client".to_string()
+        };
+    }
+
     Ok(RunDecisionBacktestResponse {
         report,
-        written_count,
-        skipped_count: skipped,
+        written_count: written_count + serenity_written,
+        skipped_count: skipped + serenity_skipped,
         data_source,
         generation_floor: RECO_GENERATION_FLOOR,
         excluded_pre_floor_generation,
         excluded_unknown_generation,
+        serenity: Some(serenity_report),
     })
+}
+
+/// 决策日期：回放 pick 用**它的 as-of 截止日**，实盘 pick 用入库时刻的日期部分
+/// （格式 "YYYY-MM-DDTHH:MM:SS.fff" → "YYYY-MM-DD"）。回放的入库时刻是"今天"，
+/// 拿它当决策日会去验证一个过去决策之后的行情 ⇒ 命中率完全失真。
+fn decision_date_of<'a>(generated_at: &'a str, as_of_date: Option<&'a str>) -> &'a str {
+    match as_of_date {
+        Some(d) => d,
+        None => generated_at.get(..10).unwrap_or(generated_at),
+    }
+}
+
+/// 取「决策日之后 N 个交易日」的窗口序列 —— 通用通道与智选通道**共用**，
+/// 不各写一遍取数与日期定位（两份实现曾经只在其中一侧修过下标口径的 P0）。
+///
+/// K 线按日期升序（各 vendor 均 sort_by date）。返回 `(closes, highs, lows, 窗口末日)`。
+async fn fetch_window_series(
+    client: &std::sync::Arc<axagent_astock_data::AStockClient>,
+    stock_code: &str,
+    decision_date: &str,
+    t_plus_n: i32,
+) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, String), String> {
+    // 拉取窗口：取 T+N 后 10 个交易日（防止节假日窗口不足）。
+    // 修复 P0: 原 fetch_limit 太小（t_plus_n + 10），当 pick 距今较远时
+    // 不包含决策日之后的足够数据。改为 500（约 2 个交易年）确保覆盖。
+    let fetch_limit = (t_plus_n as u32 + 10).max(500);
+    let klines = client.get_klines(stock_code, "daily", fetch_limit).await.map_err(|e| {
+        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("K 线拉取失败: {e}"))
+    })?;
+    if klines.is_empty() {
+        return Err("K 线为空".to_string());
+    }
+    // 修复 P0: 原代码 klines[..n] 取的是最早的 n 根 K 线（决策日之前的数据），
+    // 导致用决策前的价格"验证"决策，命中率完全失真。
+    // 正确逻辑：找到决策日之后的第一根 K 线，取该位置之后的 n 根。
+    let start_idx = klines
+        .iter()
+        .position(|k| k.date.as_str() > decision_date)
+        .ok_or_else(|| format!("决策日 {decision_date} 之后无 K 线数据"))?;
+    let valid_klines = &klines[start_idx..];
+    let n = (t_plus_n as usize).min(valid_klines.len());
+    let closes: Vec<f64> = valid_klines[..n].iter().map(|k| k.close).collect();
+    let highs: Vec<f64> = valid_klines[..n].iter().map(|k| k.high).collect();
+    let lows: Vec<f64> = valid_klines[..n].iter().map(|k| k.low).collect();
+    let end_date = valid_klines[n - 1].date.to_string();
+    Ok((closes, highs, lows, end_date))
 }
 
 /// 拉取 T+N 窗口日 K 线并构建 PickValidation
@@ -331,52 +412,149 @@ async fn fetch_and_validate(
     generated_at: &str,
     as_of_date: Option<&str>,
 ) -> Result<(PickValidation, String), String> {
-    // 决策日期：回放 pick 用**它的 as-of 截止日**，实盘 pick 用入库时刻的日期部分
-    // （格式 "YYYY-MM-DDTHH:MM:SS.fff" → "YYYY-MM-DD"）。回放的入库时刻是"今天"，
-    // 拿它当决策日会去验证一个过去决策之后的行情 ⇒ 命中率完全失真。
-    let decision_date = match as_of_date {
-        Some(d) => d,
-        None => generated_at.get(..10).unwrap_or(generated_at),
-    };
-
-    // 拉取窗口：取 T+N 后 10 个交易日（防止节假日窗口不足）。
-    // 修复 P0: 原 fetch_limit 太小（t_plus_n + 10），当 pick 距今较远时
-    // 不包含决策日之后的足够数据。改为 500（约 2 个交易年）确保覆盖。
-    let fetch_limit = (t_plus_n as u32 + 10).max(500);
-
-    let klines =
-        client.get_klines(&reco_pick.stock_code, "daily", fetch_limit).await.map_err(|e| {
-            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("K 线拉取失败: {e}"))
-        })?;
-
-    if klines.is_empty() {
-        return Err("K 线为空".to_string());
-    }
-
-    // 修复 P0: 原代码 klines[..n] 取的是最早的 n 根 K 线（决策日之前的数据），
-    // 导致用决策前的价格"验证"决策，命中率完全失真。
-    // 正确逻辑：找到决策日之后的第一根 K 线，取该位置之后的 n 根。
-    // K 线按日期升序排列（vendors/sina.rs 等都 sort_by date）
-    let start_idx = klines
-        .iter()
-        .position(|k| k.date.as_str() > decision_date)
-        .ok_or_else(|| format!("决策日 {decision_date} 之后无 K 线数据"))?;
-
-    let valid_klines = &klines[start_idx..];
-    let n = (t_plus_n as usize).min(valid_klines.len());
-    let closes: Vec<f64> = valid_klines[..n].iter().map(|k| k.close).collect();
-    let highs: Vec<f64> = valid_klines[..n].iter().map(|k| k.high).collect();
-    let lows: Vec<f64> = valid_klines[..n].iter().map(|k| k.low).collect();
-
-    // 数据源标识：优先用 K 线数据的 vendor 名（这里简化为 "astock_client"，
-    // 因为 AStockClient 内部已做 vendor failover，统一标记）
+    let decision_date = decision_date_of(generated_at, as_of_date);
+    let (closes, highs, lows, _end_date) =
+        fetch_window_series(client, &reco_pick.stock_code, decision_date, t_plus_n).await?;
+    // 数据源标识：AStockClient 内部已做 vendor failover，统一标记
     let data_source = "astock_client".to_string();
-
     let mut validation =
         build_pick_validation(reco_pick, pick_id, t_plus_n, &closes, &highs, &lows, &data_source);
-    validation.as_of_date = as_of_date.map(|s| s.to_string());
-
+    validation.as_of_date = as_of_date.map(str::to_string);
     Ok((validation, data_source))
+}
+
+/// 智选候选行里的诊断维度（`serenity_score` / `bottleneck_composite` / `data_reliability`）。
+///
+/// 为什么现读现取而不是加进 `RecoPick`：现网实测 75 条 serenity 行的 `pick_data`
+/// **一个都没有**这三个键（2026-10-15），而 `RecoPick` 的构造点有 20 处（多数是夹具）。
+/// 本函数按 camelCase 与 snake_case 两种拼写都试 ⇒ 生产侧哪天把键写进来了，
+/// 分层报表自动开始有数据，不需要再改这里；今天拿不到就如实 `None`。
+fn serenity_metrics(detail: &serde_json::Value) -> (Option<f64>, Option<f64>, Option<String>) {
+    let num = |keys: [&str; 2]| keys.iter().find_map(|k| detail.get(*k).and_then(|v| v.as_f64()));
+    (
+        num(["serenityScore", "serenity_score"]),
+        num(["bottleneckComposite", "bottleneck_composite"]),
+        ["dataReliability", "data_reliability"]
+            .iter()
+            .find_map(|k| detail.get(*k).and_then(|v| v.as_str()).map(str::to_string)),
+    )
+}
+
+/// 智选（serenity）候选的 T+N **超额**命中通道（2026-10-15，PLAN-reflection-optimization-closure §四）。
+///
+/// 为什么它此前被一刀切排除（2026-08-01 的 P1）：智选候选没有 target_price / stop_loss，
+/// 通用判据「是否到达目标价」对它不成立。但排除之后智选候选**再没有任何 T+N 数值消费者**
+/// —— 连 `serenity_hit_rate_backtest` 整份模块都不在编译清单里。本通道用该模块的判据补回：
+/// 同窗口收益 − 基准（沪深300）涨跌幅 ⇒ 四档超额标签，落同一张 `decision_validations`。
+///
+/// 产出的行**不进** `compute_hit_rate_report`：那张报表的分母只认
+/// `{hit, miss, false_hit}`，智选标签会全部落进 `insufficient` 并把命中率显示成 0%，
+/// 等于把「判据不适用」伪装成「一条都没命中」。它们的消费者是：
+/// ① 荐股 IC 矩阵的 serenity 格（`reco_ic_stats` 读表算 rank IC —— 该格此前恒为空观测）；
+/// ② 本函数返回的分层报表，由决策回测的运行摘要显示（任务中心）。
+///
+/// 基准取不到的行**不写**：不让「没取到基准」退化成「基准涨 0%」（那会把绝对收益
+/// 冒充成超额收益）。
+async fn run_serenity_backtest_pass(
+    db: &sea_orm::DatabaseConnection,
+    client: &std::sync::Arc<axagent_astock_data::AStockClient>,
+    t_plus_n_list: &[i32],
+    exclude_synthetic: bool,
+    max_picks: u32,
+) -> Result<(Vec<PickValidation>, SerenityHitRateReport, usize), String> {
+    let mut query = reco_picks::Entity::find().filter(reco_picks::Column::Style.eq("serenity"));
+    if exclude_synthetic {
+        query = query.filter(reco_picks::Column::Synthetic.eq(0));
+    }
+    let picks: Vec<_> = query
+        .all(db)
+        .await
+        .map_err(|e| format!("读取智选候选失败: {e}"))?
+        .into_iter()
+        .take(max_picks as usize)
+        .collect();
+
+    let mut rows: Vec<PickValidation> = Vec::new();
+    let mut validations: Vec<SerenityPickValidation> = Vec::new();
+    let mut skipped = 0usize;
+    for pick_model in &picks {
+        let Some(ref pick_data_str) = pick_model.pick_data else {
+            skipped += 1;
+            continue;
+        };
+        let Ok(detail) = serde_json::from_str::<serde_json::Value>(pick_data_str) else {
+            tracing::warn!(pick_id = %pick_model.id, "智选 pick_data 不是 JSON ⇒ 本条不做超额验证");
+            skipped += 1;
+            continue;
+        };
+        let Ok(reco_pick) = serde_json::from_value::<RecoPick>(detail.clone()) else {
+            tracing::warn!(pick_id = %pick_model.id, "智选 pick_data 不符合 RecoPick ⇒ 跳过");
+            skipped += 1;
+            continue;
+        };
+        if !reco_pick.price.is_finite() || reco_pick.price <= 0.0 {
+            // 入场价非法 ⇒ 收益率无从计算（不是「收益 0」）；NaN / INF 同判非法
+            skipped += 1;
+            continue;
+        }
+        let decision_date =
+            decision_date_of(&pick_model.generated_at, pick_model.as_of_date.as_deref());
+        let (score, composite, reliability) = serenity_metrics(&detail);
+        for &t_plus_n in t_plus_n_list {
+            let window =
+                fetch_window_series(client, &reco_pick.stock_code, decision_date, t_plus_n).await;
+            let (closes, _highs, _lows, end_date) = match window {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(pick_id = %pick_model.id, t_plus_n, error = %e, "智选窗口行情不可得");
+                    skipped += 1;
+                    continue;
+                },
+            };
+            let benchmark = crate::commands::stock_workflow::reflection::compute_benchmark_change(
+                client,
+                decision_date,
+                &end_date,
+            )
+            .await;
+            let benchmark = match benchmark {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(
+                        pick_id = %pick_model.id, t_plus_n, error = %e,
+                        "基准涨跌幅不可得 ⇒ 本条不判超额（不让绝对收益冒充超额）"
+                    );
+                    skipped += 1;
+                    continue;
+                },
+            };
+            let v = build_serenity_validation(
+                &pick_model.id,
+                &reco_pick.stock_code,
+                &reco_pick.stock_name,
+                &pick_model.generated_at,
+                t_plus_n,
+                score,
+                composite,
+                reliability.as_deref(),
+                false,
+                &closes,
+                Some(benchmark),
+                "astock_client",
+            );
+            rows.push(serenity_validation_to_row(
+                &v,
+                reco_pick.price,
+                i32::from(reco_pick.confidence),
+                reco_pick.position_pct,
+                &pick_model.period,
+                pick_model.as_of_date.as_deref(),
+            ));
+            validations.push(v);
+        }
+    }
+    let report = compute_serenity_hit_rate_report(&validations);
+    Ok((rows, report, skipped))
 }
 
 /// 批量写 decision_validations（按 (pick_id, t_plus_n) 幂等）

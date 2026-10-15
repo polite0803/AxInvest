@@ -82,6 +82,10 @@ pub mod screener;
 pub mod screenshot_diagnosis;
 pub mod sector_coherence;
 pub mod sentiment_analysis;
+/// 趋势智选（serenity-screening）候选股的 T+N 超额命中验证 —— 纯判据层，
+/// 由 `commands/backtest_validation.rs` 的回测任务消费（2026-10-14 恢复编译，
+/// 此前该文件整份存在但 `lib.rs` 未声明 ⇒ 不参与编译、门禁与测试都查不到它）。
+pub mod serenity_hit_rate_backtest;
 pub mod signals;
 pub mod trade_import;
 pub mod trade_intent;

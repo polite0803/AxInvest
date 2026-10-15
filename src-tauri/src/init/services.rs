@@ -3046,9 +3046,35 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
 
                 let result = match r {
                     Ok(resp) => {
+                        // 智选（serenity）超额命中报表的可见消费者：任务中心这条运行摘要。
+                        // 两个计数域**分行并列**而不是合成一个命中率 —— 通用趟问的是
+                        // 「到没到目标价」，智选趟问的是「跑没跑赢基准」，不可比。
+                        let serenity_summary = resp.serenity.as_ref().map_or_else(
+                            || "serenity=<智选趟未执行>".to_string(),
+                            |s| {
+                                let not_persisted = s
+                                    .score_bucket_hit_rates
+                                    .iter()
+                                    .find(|b| {
+                                        b.bucket
+                                            == axagent_analysis_engine::serenity_hit_rate_backtest::SERENITY_METRIC_NOT_PERSISTED
+                                    })
+                                    .map_or(0, |b| b.total);
+                                format!(
+                                    "serenity=[判过={} 跑赢基准={} 超额命中率={:.3} 平均超额={:.2}% \
+                                     评分未持久化={} 因子IC项={}]",
+                                    s.validated_picks,
+                                    s.hit_count,
+                                    s.hit_rate,
+                                    s.avg_excess_return,
+                                    not_persisted,
+                                    s.factor_ic.len(),
+                                )
+                            },
+                        );
                         let summary = format!(
                             "written={} skipped={} data_source={} hit_rate_report={} \
-                             代际筛样[floor={} 早于起算代={} 代际未知={}]",
+                             代际筛样[floor={} 早于起算代={} 代际未知={}] {}",
                             resp.written_count,
                             resp.skipped_count,
                             resp.data_source,
@@ -3056,7 +3082,8 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 .unwrap_or_else(|_| "<序列化失败>".to_string()),
                             resp.generation_floor,
                             resp.excluded_pre_floor_generation,
-                            resp.excluded_unknown_generation
+                            resp.excluded_unknown_generation,
+                            serenity_summary
                         );
                         tracing::info!(
                             "[CronScheduler] 决策回测任务 '{}' 完成: {}",

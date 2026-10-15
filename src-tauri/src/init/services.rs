@@ -3692,20 +3692,13 @@ fn start_retrieval_feedback_tick(state: &AppState) {
 // 功能组件本身一直存在（commands/stock_analysis.rs、stock_workflow、opc_workflows），
 // 缺失的只是本文件的启动调用。
 
-/// 前端事件推送桥接：把 RealtimeMonitor 告警桥接到 Tauri 前端事件
-struct AppMonitorEmitter {
-    app: tauri::AppHandle,
-}
-
-impl axagent_analysis_engine::monitor::MonitorEventEmitter for AppMonitorEmitter {
-    fn emit(&self, event: &str, payload: serde_json::Value) {
-        let _ = self.app.emit(event, payload);
-    }
-}
-
 /// 启动实时价格监控：恢复 DB 中的价格告警 → RealtimeMonitor 轮询 →
-/// 前端 `stock-monitor-alert` 事件 + P2-6 T+0 自动重跑（trigger_t0_rerun）+
-/// P3-3 跨股票信号聚合器（组合级告警）。
+/// 前端 `IpcEventName::PriceAlertTriggered` 事件（发射点与监听点同名）+
+/// P2-6 T+0 自动重跑（trigger_t0_rerun）+ P3-3 跨股票信号聚合器（组合级告警）。
+///
+/// 告警的「触发回写 + 通知外推」由 [`crate::init::monitor_emitter::TauriMonitorEmitter`] 承担。
+/// 此前这里是三行的 `AppMonitorEmitter`（只 `app.emit`，不回写也不外推），
+/// 而完整实现住在 `init/monitor_emitter.rs` 且全仓零构造点 —— 两份实现并存，正是「写了但没人装配」。
 fn start_realtime_monitor(app: &tauri::AppHandle) {
     use axagent_analysis_engine::alert_mapping::{alert_types, db_model_to_config_field};
     use axagent_analysis_engine::monitor::{MonitorConfig, RealtimeMonitor, TZeroCallback};
@@ -3739,11 +3732,17 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
                 state.harness.db().clone()
             };
 
-            // 事件桥接（stock-monitor-alert）
+            // 事件桥接：告警 → 前端事件 + `price_alerts` 触发回写 + 通知外推。
+            // 分发器此刻没有任何已注册渠道（装配归里程碑 M-NOTIF），外推侧会如实 warn，
+            // 不会把「没渠道」压成「没告警」。
             monitor
-                .set_event_emitter(std::sync::Arc::new(AppMonitorEmitter {
-                    app: app_for_spawn.clone(),
-                }))
+                .set_event_emitter(std::sync::Arc::new(
+                    crate::init::monitor_emitter::TauriMonitorEmitter::new(
+                        app_for_spawn.clone(),
+                        db.clone(),
+                        std::sync::Arc::new(axagent_notification::NotificationDispatcher::new()),
+                    ),
+                ))
                 .await;
             // 组合级告警
             monitor.set_aggregator(aggregator).await;
@@ -3767,6 +3766,9 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
             {
                 Ok(alerts) => {
                     let mut restored = 0usize;
+                    let mut unmapped = 0usize;
+                    let mut codes: std::collections::HashSet<String> =
+                        std::collections::HashSet::new();
                     for alert in &alerts {
                         let Some((field, value)) = db_model_to_config_field(
                             alert.alert_type.as_deref(),
@@ -3775,9 +3777,11 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
                             &alert.condition,
                             alert.target_price,
                         ) else {
+                            unmapped += 1;
                             continue;
                         };
                         let mut config = MonitorConfig {
+                            alert_id: alert.id.clone(),
                             stock_code: alert.stock_code.clone(),
                             stock_name: alert.stock_name.clone(),
                             stop_loss: None,
@@ -3795,12 +3799,22 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
                             alert_types::SUPPORT => config.support_break = Some(value),
                             alert_types::CHANGE => config.change_pct_alert = Some(value),
                             alert_types::VOLUME => config.turnover_rate_alert = Some(value),
-                            _ => continue,
+                            _ => {
+                                unmapped += 1;
+                                continue;
+                            },
                         }
                         monitor.add_config(config).await;
                         restored += 1;
+                        codes.insert(alert.stock_code.clone());
                     }
-                    tracing::info!("[startup] 价格告警恢复完成：{restored} 条已注入实时监控");
+                    // 三个数各有分母：注入的是**告警行数**（一股票可多行），`codes` 数是**每轮行情请求数**。
+                    // 并列而不收敛成一个数 —— 合成一个就会把「56 条配置只发 16 次请求」读成矛盾。
+                    tracing::info!(
+                        "[startup] 价格告警恢复完成：注入 {restored} 条配置 / 未触发库存 {} 行 / 涉及 {} 只股票 / 无法映射 {unmapped} 条",
+                        alerts.len(),
+                        codes.len()
+                    );
                 },
                 Err(e) => {
                     tracing::warn!("[startup] 恢复价格告警失败（监控将从空配置启动）: {e}");
@@ -3819,8 +3833,8 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
             // 启动轮询（内部永久循环，进程退出即结束）。
             //
             // 轮询间隔走面板变量 `monitor_poll_interval_secs`（A 批接线，2026-10-08）：
-            // 正门一直是 `start_with_config`，但它**全仓零调用者** ⇒ 现役 30 秒其实来自
-            // `RealtimeMonitor::new` 里的字段初值，面板那格改了没有任何东西读。
+            // 正门是 `start_with_config`，本段末尾就是它的唯一调用点（此处注释曾写「零调用者」，
+            // 接线后未同步，2026-10-14 订正）。
             //
             // 回落值不另写一份字面量：`poll_interval_secs()` 读到的就是 `new()` 装的那个数
             // （今天 = 30），装配点原样回读 ⇒ 「默认值」只有一处权威。越界值（<1 秒会把循环

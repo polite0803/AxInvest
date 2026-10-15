@@ -139,6 +139,17 @@ impl RealTimeQuoteWatcher {
                     break;
                 }
 
+                // 非交易时段不取数（阶段 E-5）：收盘后行情是冻结的，逐只请求既白打网络，
+                // 又会让下游「按时间冷却」的判定拿同一根冻结收盘价反复触发。
+                // 判据与监控循环共用 `calendar::current_trading_session`，不再各写一套时刻比较。
+                let session = crate::calendar::current_trading_session();
+                if !session.is_open() {
+                    // 停摆要说得出是哪一段，不能压成「没有行情变化」
+                    tracing::debug!("[RealTimeQuoteWatcher] 非交易时段（{session:?}），本轮不取数");
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                    continue;
+                }
+
                 let codes: Vec<(String, WatchPriority)> =
                     { watches.read().await.iter().map(|(k, v)| (k.clone(), *v)).collect() };
 

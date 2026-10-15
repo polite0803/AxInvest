@@ -322,6 +322,15 @@ jobs:
           node scripts/check-panel-var-landing.mjs --selftest
           node scripts/check-panel-var-landing.mjs
 
+      # 阶段 A（2026-10-14，PLAN-monitor-chain-closure）：告警的事件名与 payload 各抄一遍 ⇒
+      # 发射点发 `stock-monitor-alert`、前端听 `price-alert-triggered`、那份完整实现的发射器零构造点，
+      # 三件事叠加后 `cargo check` / `tsc` 全绿而用户什么都收不到。本门逐项对账两侧源文。
+      # 与 scripts/ci-check.mjs 的对应 step 逐字同源。
+      - name: "Check monitor alert event/payload authority (single authority + payload key parity)"
+        run: |
+          node scripts/check-monitor-event-authority.mjs --selftest
+          node scripts/check-monitor-event-authority.mjs
+
       - name: Check frontend formatting (dprint)
         run: npm run format:check
 

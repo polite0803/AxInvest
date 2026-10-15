@@ -53,6 +53,11 @@ pub type TZeroCallback = Arc<
 /// 监控条件
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MonitorConfig {
+    /// `price_alerts.id` —— 一条告警一行配置。
+    ///
+    /// 此前配置按 `stock_code` 存 `HashMap`，同一只股票的第二条告警会静默顶掉第一条
+    /// （现网 56 行 / 16 只股票 ⇒ 实际生效上限 16 条），且触发后无法只摘掉这一条。
+    pub alert_id: String,
     pub stock_code: String,
     pub stock_name: String,
     /// 止损价（跌破告警）
@@ -75,6 +80,8 @@ pub struct MonitorConfig {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MonitorAlert {
+    /// `price_alerts.id` —— 回写触发状态时精确定位这一行（同股同类型可能有重复行）
+    pub alert_id: String,
     pub stock_code: String,
     pub stock_name: String,
     /// "stop_loss" | "take_profit" | "resistance" | "support" | "change" | "volume"
@@ -87,14 +94,48 @@ pub struct MonitorAlert {
     pub suggested_action: Option<String>,
 }
 
+/// 封板状态（阶段 E-2，裁定 6 = 加标注不抑制告警）。
+///
+/// 四态而不是两态：`limit_up` / `limit_down` 由 vendor 给，sina / xueqiu 那两臂恒返回
+/// `None`（见 `astock-data/src/sina.rs` 与 `xueqiu.rs` 的构造处）—— 那种情况必须读成
+/// 「未知」，不能压成「未封板」，否则取数缺口会被当成一条正常结论卖给用户。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimitState {
+    /// 现价已达涨停价
+    LimitUp,
+    /// 现价已达跌停价
+    LimitDown,
+    /// 有涨跌停价数据且未达
+    NotLimited,
+    /// vendor 未提供涨跌停价 —— 未知，不等于未封板
+    Unknown,
+}
+
+/// 从行情推封板状态。涨跌停两个方向都给了值又都没达，才算 `NotLimited`。
+pub fn limit_state_of(quote: &StockQuote) -> LimitState {
+    if quote.limit_up.is_none() && quote.limit_down.is_none() {
+        return LimitState::Unknown;
+    }
+    if quote.limit_up.is_some_and(|up| quote.price >= up) {
+        return LimitState::LimitUp;
+    }
+    if quote.limit_down.is_some_and(|down| quote.price <= down) {
+        return LimitState::LimitDown;
+    }
+    LimitState::NotLimited
+}
+
 /// 实时监控引擎
 pub struct RealtimeMonitor {
     client: Arc<dyn MarketDataProvider>,
+    /// 键 = `MonitorConfig::alert_id`（一条 `price_alerts` 行一个键）
     configs: RwLock<HashMap<String, MonitorConfig>>,
     alert_tx: tokio::sync::broadcast::Sender<MonitorAlert>,
     running: RwLock<bool>,
     event_emitter: RwLock<Option<Arc<dyn MonitorEventEmitter>>>,
     last_alerts: RwLock<HashMap<String, i64>>,
+    /// 每条告警**上一次求值时是否越界**（键 = `alert_id:alert_type`），阶段 E-3 的边沿判据用。
+    alert_states: RwLock<HashMap<String, bool>>,
     poll_interval_secs: RwLock<u64>,
     alert_cooldown_secs: RwLock<i64>,
     // P2-6: T+0 自动重跑相关字段
@@ -117,6 +158,7 @@ impl RealtimeMonitor {
             running: RwLock::new(false),
             event_emitter: RwLock::new(None),
             last_alerts: RwLock::new(HashMap::new()),
+            alert_states: RwLock::new(HashMap::new()),
             poll_interval_secs: RwLock::new(30),
             alert_cooldown_secs: RwLock::new(300),
             t0_config: RwLock::new(TZeroConfig::default()),
@@ -173,16 +215,23 @@ impl RealtimeMonitor {
         self.aggregator.read().await.as_ref().map(|agg| agg.subscribe())
     }
 
-    /// 添加监控标的
+    /// 添加/替换一条监控配置（键 = `price_alerts.id`，同 id 覆盖、不同 id 并存）
     pub async fn add_config(&self, config: MonitorConfig) {
         let mut configs = self.configs.write().await;
-        configs.insert(config.stock_code.clone(), config);
+        configs.insert(config.alert_id.clone(), config);
     }
 
-    /// 移除监控标的
-    pub async fn remove_config(&self, stock_code: &str) {
+    /// 按告警条目摘除监控（删一条只退这一条），并回收它留下的冷却/边沿状态。
+    ///
+    /// 状态不清会随删除次数单调增长（`last_alerts` 与 `alert_states` 都没有别的清理路径）。
+    pub async fn remove_config_by_id(&self, alert_id: &str) {
         let mut configs = self.configs.write().await;
-        configs.remove(stock_code);
+        configs.remove(alert_id);
+        let mut last = self.last_alerts.write().await;
+        last.remove(alert_id);
+        let prefix = format!("{alert_id}:");
+        let mut states = self.alert_states.write().await;
+        states.retain(|k, _| !k.starts_with(&prefix));
     }
 
     pub fn serialize_configs(configs: &HashMap<String, MonitorConfig>) -> String {
@@ -197,6 +246,16 @@ impl RealtimeMonitor {
     pub async fn list_configs(&self) -> Vec<MonitorConfig> {
         let configs = self.configs.read().await;
         configs.values().cloned().collect()
+    }
+
+    /// 测试用读数：当前留存的边沿状态键集合（`alert_id:alert_type`）。
+    ///
+    /// 有它才能断「摘除一条告警时状态被回收」—— 那两个 HashMap 否则只有涨没有落点。
+    #[cfg(test)]
+    pub(crate) async fn edge_state_keys(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.alert_states.read().await.keys().cloned().collect();
+        keys.sort();
+        keys
     }
 
     /// 启动监控循环（轮询间隔从 `poll_interval_secs` 读取，默认 30 秒）
@@ -225,17 +284,39 @@ impl RealtimeMonitor {
                 c.values().cloned().collect::<Vec<_>>()
             };
 
+            // 按股票聚合：同一只股票的多条告警共用一次行情。配置粒度改成「按条」之后，
+            // 请求数必须仍按股票数走 —— 现网 56 条告警分布在 16 只股票上，逐条取数会把
+            // 每轮请求从 16 次撑到 56 次。
+            let mut by_code: HashMap<String, Vec<MonitorConfig>> = HashMap::new();
             for config in configs {
                 if !config.enabled {
                     continue;
                 }
-                // 非交易时段跳过
-                if !axagent_astock_data::calendar::is_trading_time() {
-                    continue;
-                }
+                by_code.entry(config.stock_code.clone()).or_default().push(config);
+            }
 
-                if let Ok(quote) = self.client.get_quote(&config.stock_code).await {
-                    self.check_alerts(&config, &quote).await;
+            // 非交易时段整轮跳过（判据与行情监视器共用 `calendar::current_trading_session`）
+            let session = axagent_astock_data::calendar::current_trading_session();
+            if !session.is_open() {
+                tracing::debug!("[monitor] 非交易时段（{session:?}），本轮不取数不求值");
+                continue;
+            }
+
+            for (code, group) in by_code {
+                match self.client.get_quote(&code).await {
+                    Ok(quote) => {
+                        for config in &group {
+                            self.check_alerts(config, &quote).await;
+                        }
+                    },
+                    // 这里只补了 E-1 的「不静默」这一半（失败要有读数）；
+                    // 聚合那一半（连续多轮全失败 ⇒ 一条「监控实际未在取数」的 error）刻意不做成单独日志：
+                    // 计数器没有消费者就是又一个假旋钮，必须与面板「本轮 x/y 只取数失败」同批落，归阶段 H。
+                    Err(err) => {
+                        tracing::warn!(
+                            "[monitor] 取数失败，本轮该股票未求值: stock={code} err={err}"
+                        );
+                    },
                 }
             }
         }
@@ -288,6 +369,7 @@ impl RealtimeMonitor {
                 let suggested =
                     Some(format!("建议: 考虑减仓50%，现价{:.2}低于止损{:.2}", quote.price, stop));
                 alerts.push(MonitorAlert {
+                    alert_id: config.alert_id.clone(),
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
                     alert_type: "stop_loss".into(),
@@ -309,6 +391,7 @@ impl RealtimeMonitor {
                 let suggested =
                     Some(format!("建议: 考虑卖出50%锁利，现价{:.2}≥止盈{:.2}", quote.price, tp));
                 alerts.push(MonitorAlert {
+                    alert_id: config.alert_id.clone(),
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
                     alert_type: "take_profit".into(),
@@ -329,6 +412,7 @@ impl RealtimeMonitor {
             if quote.price >= res {
                 let suggested = Some(format!("建议: 压力位突破{:.2}，关注持续性和量能配合", res));
                 alerts.push(MonitorAlert {
+                    alert_id: config.alert_id.clone(),
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
                     alert_type: "resistance".into(),
@@ -350,6 +434,7 @@ impl RealtimeMonitor {
                 let suggested =
                     Some(format!("建议: 支撑位{:.2}跌破，考虑减仓或设立更严格止损", sup));
                 alerts.push(MonitorAlert {
+                    alert_id: config.alert_id.clone(),
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
                     alert_type: "support".into(),
@@ -374,6 +459,7 @@ impl RealtimeMonitor {
                     dir, quote.change_pct
                 ));
                 alerts.push(MonitorAlert {
+                    alert_id: config.alert_id.clone(),
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
                     alert_type: "change".into(),
@@ -395,6 +481,7 @@ impl RealtimeMonitor {
                 let suggested =
                     Some(format!("建议: 换手率异常{:.2}%，关注主力进出痕迹", quote.turnover_rate));
                 alerts.push(MonitorAlert {
+                    alert_id: config.alert_id.clone(),
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
                     alert_type: "volume".into(),
@@ -410,11 +497,75 @@ impl RealtimeMonitor {
             }
         }
 
+        // ── 阶段 E-2：封板状态只加标注，不吞告警（裁定 6）──
+        // 涨停时的「突破压力位」跌停时的「跌破止损」是打不出去的价；把整条吞掉就等于把
+        // 「这条我现在操作不了」伪装成「没触发」，所以只在文案上点名。
+        // `Unknown` 也要点名：sina / xueqiu 两臂不返回涨跌停价，那不等于「未封板」。
+        let limit_note = match limit_state_of(quote) {
+            LimitState::LimitUp => "（涨停封板，该价暂时无法成交）",
+            LimitState::LimitDown => "（跌停封板，该价暂时无法成交）",
+            LimitState::Unknown => "（涨跌停价未知：该数据源不返回 limit_up/limit_down）",
+            LimitState::NotLimited => "",
+        };
+        // ST 只在「确实是」时点名 —— vendor 侧 `is_st` 有恒 false 的臂，不能反过来说它不是 ST。
+        let st_note = if quote.is_st { "（ST 股）" } else { "" };
+        if !limit_note.is_empty() || !st_note.is_empty() {
+            for alert in &mut alerts {
+                alert.alert_message.push_str(limit_note);
+                alert.alert_message.push_str(st_note);
+            }
+        }
+
+        // ── 阶段 E-3：只在「未越界 → 越界」的边沿报（裁定 2）──
+        // 旧形态是单边比较 + 按时间冷却 ⇒ 价格停在阈值那一侧时，每过一个冷却窗口就把同一件事
+        // 再报一次（收盘后读到冻结价尤其明显）。
+        // 「本轮哪几类越界」从已算出的 alerts 反推，不把六个比较各写第二遍（那会留第二套判据）。
+        let in_range: Vec<String> =
+            alerts.iter().map(|a| format!("{}:{}", a.alert_id, a.alert_type)).collect();
+        let configured_kinds = [
+            config.stop_loss.is_some().then_some("stop_loss"),
+            config.take_profit.is_some().then_some("take_profit"),
+            config.resistance_break.is_some().then_some("resistance"),
+            config.support_break.is_some().then_some("support"),
+            config.change_pct_alert.is_some().then_some("change"),
+            config.turnover_rate_alert.is_some().then_some("volume"),
+        ];
+        let mut states = self.alert_states.write().await;
+        let mut first_sight: Vec<String> = Vec::new();
+        alerts.retain(|a| {
+            let key = format!("{}:{}", a.alert_id, a.alert_type);
+            match states.get(&key).copied() {
+                // 上一次也越界 ⇒ 不是边沿 ⇒ 不再报
+                Some(true) => false,
+                Some(false) => true,
+                // 该条目从没有过读数（刚建 / 刚重启）⇒ 按裁定 3 报一次并标注原因
+                None => {
+                    first_sight.push(key);
+                    true
+                },
+            }
+        });
+        if !first_sight.is_empty() {
+            for alert in &mut alerts {
+                let key = format!("{}:{}", alert.alert_id, alert.alert_type);
+                if first_sight.contains(&key) {
+                    alert.alert_message.push_str("（进入监控时已越界）");
+                }
+            }
+        }
+        // 状态要为**该配置求过的每一类**更新（含这轮没越界的），否则「回落 → 再越界」取不到边沿。
+        for kind in configured_kinds.into_iter().flatten() {
+            let key = format!("{}:{}", config.alert_id, kind);
+            let value = in_range.iter().any(|k| k == &key);
+            states.insert(key, value);
+        }
+
         let now_ts = chrono::Utc::now().timestamp();
         let cooldown_secs = *self.alert_cooldown_secs.read().await;
         let mut last = self.last_alerts.write().await;
         alerts.retain(|a| {
-            let key = format!("{}:{}", a.stock_code, a.alert_type);
+            // 冷却按告警条目计（此前是 `stock_code:alert_type`，同一股同类型的重复行会互相顶掉冷却槽）
+            let key = a.alert_id.clone();
             if let Some(&last_ts) = last.get(&key) {
                 if now_ts - last_ts < cooldown_secs {
                     return false;
@@ -429,19 +580,15 @@ impl RealtimeMonitor {
         for alert in &alerts {
             let _ = self.alert_tx.send(alert.clone());
             if let Some(ref e) = emitter {
-                e.emit(
-                    "stock-monitor-alert",
-                    serde_json::json!({
-                        "stockCode": alert.stock_code,
-                        "stockName": alert.stock_name,
-                        "alertType": alert.alert_type,
-                        "alertMessage": alert.alert_message,
-                        "currentPrice": alert.current_price,
-                        "changePct": alert.change_pct,
-                        "suggestedAction": alert.suggested_action,
-                        "timestamp": alert.timestamp,
-                    }),
-                );
+                // payload 直接由 `MonitorAlert` 序列化得到（其 `rename_all = "camelCase"`）——
+                // 不再手写 `json!` 摊平字段：那份手抄副本与前端消费端的漂移正是这一层造出来的，
+                // 且后续给 `MonitorAlert` 加字段时，手抄副本会静默少一键。
+                match serde_json::to_value(alert) {
+                    Ok(payload) => e.emit(IpcEventName::PriceAlertTriggered.as_str(), payload),
+                    Err(err) => tracing::warn!(
+                        "[monitor] 告警序列化失败，该条不外推（已进内部 broadcast）: {err}"
+                    ),
+                }
             }
         }
 
@@ -643,5 +790,307 @@ impl RealtimeMonitor {
                 }),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! 阶段 B 的形态锁：监控配置必须按**告警条目**存，冷却也必须按条目计。
+    //!
+    //! 回归对象（2026-10-14 缺陷评估）：`configs` 以 `stock_code` 为键，而每条告警只填六个
+    //! 阈值字段中的一个 ⇒ 同一只股票的第二条静默顶掉第一条（现网 56 行分布在 16 只股票上，
+    //! 实际生效上限就是 16）；冷却键 `code:type` 又让同股同类型的重复行互相抢冷却槽。
+
+    use super::*;
+    use axagent_harness::core_error::AxAgentError;
+    use axagent_harness::market_data::{AdjType, KLine, StockSearchResult};
+
+    /// 只回固定行情的取数替身 —— 本模块锁的是配置粒度与冷却，不是取数。
+    struct StubProvider;
+
+    #[async_trait::async_trait]
+    impl MarketDataProvider for StubProvider {
+        async fn get_quote(
+            &self,
+            stock_code: &str,
+        ) -> axagent_harness::core_error::Result<StockQuote> {
+            Ok(quote_of(stock_code, 12.34))
+        }
+
+        async fn get_klines(
+            &self,
+            _stock_code: &str,
+            _period: &str,
+            _limit: u32,
+            _adj_type: Option<AdjType>,
+        ) -> axagent_harness::core_error::Result<Vec<KLine>> {
+            Err(AxAgentError::Provider("mock: 监控循环不该取 K 线".into()))
+        }
+
+        async fn search_stock(
+            &self,
+            _keyword: &str,
+        ) -> axagent_harness::core_error::Result<Vec<StockSearchResult>> {
+            Err(AxAgentError::Provider("mock: 监控循环不该搜股".into()))
+        }
+    }
+
+    fn quote_of(code: &str, price: f64) -> StockQuote {
+        StockQuote {
+            code: code.to_string(),
+            name: "测试股".to_string(),
+            price,
+            pre_close: 12.0,
+            open: 12.1,
+            high: 12.5,
+            low: 11.9,
+            volume: 1_000_000.0,
+            amount: 12_340_000.0,
+            change_pct: 2.83,
+            turnover_rate: 1.5,
+            pe: Some(10.0),
+            pb: Some(1.2),
+            total_mv: Some(1.2e10),
+            circulating_mv: Some(1.0e10),
+            limit_up: Some(13.2),
+            limit_down: Some(10.8),
+            is_st: false,
+            timestamp: "2026-10-15 10:00:00".to_string(),
+        }
+    }
+
+    /// 记录发射器收到的告警 payload。
+    // SAFETY: std::sync::Mutex 不跨 await —— `emit` 是同步 trait 方法，guard 是语句级临时量，
+    // 在任何 await 点之前已 drop。依据 `clippy.toml` 的合法例外（形态同本模块
+    // `portfolio_monitor.rs` 的 MockProvider）。
+    #[allow(clippy::disallowed_types)]
+    #[derive(Default)]
+    struct Recorder {
+        seen: std::sync::Mutex<Vec<serde_json::Value>>,
+    }
+
+    // SAFETY: 同上 —— `alerts()` 是同步函数，临界区内无 await 点。
+    #[allow(clippy::disallowed_types)]
+    impl Recorder {
+        fn alerts(&self) -> Vec<(String, String)> {
+            self.seen
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|p| {
+                    (
+                        p.get("alertId").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+                        p.get("alertType").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+                    )
+                })
+                .collect()
+        }
+
+        /// 收到的告警文案（E-2 / E-3 断的是文案里点了什么名）。
+        fn messages(&self) -> Vec<String> {
+            self.seen
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|p| {
+                    p.get("alertMessage").and_then(|v| v.as_str()).unwrap_or_default().to_string()
+                })
+                .collect()
+        }
+    }
+
+    impl MonitorEventEmitter for Recorder {
+        fn emit(&self, _event: &str, payload: serde_json::Value) {
+            self.seen.lock().unwrap().push(payload);
+        }
+    }
+
+    fn stop_loss_config(alert_id: &str, code: &str, stop: f64) -> MonitorConfig {
+        MonitorConfig {
+            alert_id: alert_id.to_string(),
+            stock_code: code.to_string(),
+            stock_name: "测试股".to_string(),
+            stop_loss: Some(stop),
+            take_profit: None,
+            resistance_break: None,
+            support_break: None,
+            change_pct_alert: None,
+            turnover_rate_alert: None,
+            enabled: true,
+        }
+    }
+
+    async fn monitor_with_recorder() -> (RealtimeMonitor, Arc<Recorder>) {
+        let recorder = Arc::new(Recorder::default());
+        let monitor = RealtimeMonitor::new(Arc::new(StubProvider));
+        monitor.set_event_emitter(recorder.clone()).await;
+        (monitor, recorder)
+    }
+
+    /// 同一只股票的两条告警都必须留在监控里，并且各自报一次。
+    #[tokio::test]
+    async fn same_stock_two_alert_rows_both_survive_and_both_fire() {
+        let (monitor, recorder) = monitor_with_recorder().await;
+        monitor.add_config(stop_loss_config("alert-a", "601899", 13.0)).await;
+        monitor.add_config(stop_loss_config("alert-b", "601899", 14.0)).await;
+
+        assert_eq!(
+            monitor.list_configs().await.len(),
+            2,
+            "同股两条告警不得互相顶掉（旧形态只剩 1 条）"
+        );
+
+        let quote = quote_of("601899", 12.34);
+        for id in ["alert-a", "alert-b"] {
+            let cfg = monitor
+                .list_configs()
+                .await
+                .into_iter()
+                .find(|c| c.alert_id == id)
+                .expect("配置必须还在");
+            monitor.check_alerts(&cfg, &quote).await;
+        }
+
+        let mut got = recorder.alerts();
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("alert-a".to_string(), "stop_loss".to_string()),
+                ("alert-b".to_string(), "stop_loss".to_string()),
+            ],
+            "两条都要报，且 payload 带各自的 alertId（回写按它精确定位）"
+        );
+    }
+
+    /// 同一条告警在冷却窗口内重复越界只报一次。
+    #[tokio::test]
+    async fn same_alert_row_is_cooled_within_window() {
+        let (monitor, recorder) = monitor_with_recorder().await;
+        let cfg = stop_loss_config("alert-a", "601899", 13.0);
+        monitor.add_config(cfg.clone()).await;
+
+        let quote = quote_of("601899", 12.34);
+        monitor.check_alerts(&cfg, &quote).await;
+        monitor.check_alerts(&cfg, &quote).await;
+
+        assert_eq!(recorder.alerts().len(), 1, "冷却窗口内同一条只应报一次");
+    }
+
+    /// 同 id 再次注入是替换，不是叠加（重启恢复与手建走同一条路）。
+    #[tokio::test]
+    async fn add_config_with_same_id_replaces_instead_of_duplicating() {
+        let (monitor, _recorder) = monitor_with_recorder().await;
+        monitor.add_config(stop_loss_config("alert-a", "601899", 13.0)).await;
+        monitor.add_config(stop_loss_config("alert-a", "601899", 11.0)).await;
+
+        let configs = monitor.list_configs().await;
+        assert_eq!(configs.len(), 1, "同 id 必须覆盖");
+        assert_eq!(configs[0].stop_loss, Some(11.0), "覆盖必须真取到新值");
+    }
+
+    /// 封板状态必须四态齐全：vendor 不给涨跌停价时判「未知」，不得当成「未封板」。
+    #[test]
+    fn limit_state_has_four_distinct_outcomes() {
+        let q = |price: f64, up: Option<f64>, down: Option<f64>| {
+            let mut quote = quote_of("601899", price);
+            quote.limit_up = up;
+            quote.limit_down = down;
+            quote
+        };
+        assert_eq!(limit_state_of(&q(13.5, Some(13.5), Some(12.5))), LimitState::LimitUp);
+        assert_eq!(limit_state_of(&q(12.5, Some(13.5), Some(12.5))), LimitState::LimitDown);
+        assert_eq!(limit_state_of(&q(13.0, Some(13.5), Some(12.5))), LimitState::NotLimited);
+        assert_eq!(
+            limit_state_of(&q(13.0, None, None)),
+            LimitState::Unknown,
+            "两列都缺 ⇒ 未知，不是未封板"
+        );
+        // 只给一边且未达：仍算「未封板」（有数据、结论成立）
+        assert_eq!(limit_state_of(&q(13.0, Some(13.5), None)), LimitState::NotLimited);
+    }
+
+    /// 阶段 E-3 的形态锁：停在阈值那一侧不重复报，回落后再越界才算第二次边沿。
+    #[tokio::test]
+    async fn alert_fires_on_crossing_not_while_staying_beyond() {
+        let (monitor, recorder) = monitor_with_recorder().await;
+        // 冷却归零：本测试要数的是边沿，不是冷却窗口
+        monitor.set_alert_cooldown_secs(0).await;
+        let cfg = stop_loss_config("alert-a", "601899", 13.0);
+        monitor.add_config(cfg.clone()).await;
+
+        // ① 首次观察即越界 ⇒ 报（并按裁定 3 标注）
+        monitor.check_alerts(&cfg, &quote_of("601899", 12.0)).await;
+        assert_eq!(recorder.alerts().len(), 1, "首次越界应报");
+        assert!(
+            recorder.messages()[0].contains("进入监控时已越界"),
+            "首次观察就处于越界侧，文案要说出原因：{}",
+            recorder.messages()[0]
+        );
+
+        // ② 价格仍在一侧 ⇒ 不是边沿 ⇒ 不报
+        monitor.check_alerts(&cfg, &quote_of("601899", 11.5)).await;
+        assert_eq!(recorder.alerts().len(), 1, "停在阈值内侧不得每轮重报");
+
+        // ③ 回到阈值之上 ⇒ 无告警，但要更新状态
+        monitor.check_alerts(&cfg, &quote_of("601899", 13.8)).await;
+        assert_eq!(recorder.alerts().len(), 1, "未越界不该报");
+
+        // ④ 再次跌破 ⇒ 新边沿 ⇒ 第二次报
+        monitor.check_alerts(&cfg, &quote_of("601899", 12.4)).await;
+        assert_eq!(recorder.alerts().len(), 2, "回落后再越界必须能再报一次");
+    }
+
+    /// 阶段 E-2 的落地形态：封板/未知都在告警文案里点名（裁定 6 = 不抑制）。
+    #[tokio::test]
+    async fn limit_state_is_annotated_without_suppressing_the_alert() {
+        let (monitor, recorder) = monitor_with_recorder().await;
+        let cfg = stop_loss_config("alert-up", "601899", 13.0);
+        monitor.add_config(cfg.clone()).await;
+
+        let mut stuck_down = quote_of("601899", 12.0);
+        stuck_down.limit_down = Some(12.0);
+        stuck_down.is_st = true;
+        monitor.check_alerts(&cfg, &stuck_down).await;
+
+        let msgs = recorder.messages();
+        assert_eq!(msgs.len(), 1, "封板不得把告警吞掉");
+        assert!(msgs[0].contains("跌停封板"), "要点名跌停：{}", msgs[0]);
+        assert!(msgs[0].contains("ST 股"), "ST 为真时要点名：{}", msgs[0]);
+
+        // 未知也要点名（sina / xueqiu 那两臂的形态）
+        let (monitor2, recorder2) = monitor_with_recorder().await;
+        let cfg2 = stop_loss_config("alert-unknown", "601899", 13.0);
+        monitor2.add_config(cfg2.clone()).await;
+        let mut blind = quote_of("601899", 12.0);
+        blind.limit_up = None;
+        blind.limit_down = None;
+        monitor2.check_alerts(&cfg2, &blind).await;
+        let msgs2 = recorder2.messages();
+        assert_eq!(msgs2.len(), 1);
+        assert!(
+            msgs2[0].contains("涨跌停价未知"),
+            "取数缺口要说成未知，不能读成未封板：{}",
+            msgs2[0]
+        );
+    }
+
+    /// 删一条告警必须连它的边沿状态一起回收，否则重建同 id 会丢「首次观察」这层语义。
+    #[tokio::test]
+    async fn removing_an_alert_prunes_its_edge_state() {
+        let (monitor, _recorder) = monitor_with_recorder().await;
+        let cfg = stop_loss_config("alert-a", "601899", 13.0);
+        monitor.add_config(cfg.clone()).await;
+        monitor.check_alerts(&cfg, &quote_of("601899", 12.0)).await;
+        assert!(
+            monitor.edge_state_keys().await.iter().any(|k| k.starts_with("alert-a:")),
+            "求过一次就该留下边沿状态"
+        );
+
+        monitor.remove_config_by_id("alert-a").await;
+        assert!(
+            monitor.edge_state_keys().await.iter().all(|k| !k.starts_with("alert-a:")),
+            "摘除后不得留下按删除次数单调增长的状态"
+        );
     }
 }

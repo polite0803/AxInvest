@@ -163,6 +163,16 @@ impl DiskCache {
 
     /// 查缓存;命中且未过期返回 Some(value),否则 None(顺便清理过期项)。
     pub fn get(&self, key: &str) -> Option<String> {
+        self.get_with_expiry(key).map(|(value, _)| value)
+    }
+
+    /// 与 `get` 同一套过期判据，但把该条目的**绝对到期点**一并交回。
+    ///
+    /// 为什么要这个形态：L1 命中失败退到 L2 时，调用方要把条目回填 L1，而回填写的必须是
+    /// 该条目自己的到期点。只有 `get` 时调用方拿不到这个信息，只能猜一个数 ——
+    /// 猜出来的 `now + 3600` 会让 30 秒 TTL 的实时行情在 L1 里活一小时（阶段 E-4 的原始缺陷）。
+    /// `expires_at == 0` 是「永不过期」（`set` 的 `ttl_secs == 0` 分支），原样交回由调用方决定哨兵。
+    pub fn get_with_expiry(&self, key: &str) -> Option<(String, i64)> {
         let now = Self::now_unix();
         let mut inner = self.inner.lock();
         let entry = inner.get_mut(key)?;
@@ -172,7 +182,7 @@ impl DiskCache {
             return None;
         }
         entry.last_access = now;
-        Some(entry.value.clone())
+        Some((entry.value.clone(), entry.expires_at))
     }
 
     /// 写缓存。
@@ -476,5 +486,31 @@ mod tests {
     fn default_budget_is_64mb() {
         let c = DiskCache::load_or_default(tmp_path("default_budget"));
         assert_eq!(c.max_bytes(), 64 * 1024 * 1024, "默认预算变了 ⇒ 说明有人改了常量");
+    }
+
+    /// 阶段 E-4 的前提：`get_with_expiry` 必须把条目**自己的**绝对到期点交回，
+    /// 且与 `get` 共用同一套过期判据（两条路径不得长成两套判据）。
+    #[test]
+    fn get_with_expiry_returns_the_entrys_own_deadline() {
+        let c = DiskCache::load_or_default(tmp_path("with_expiry"));
+        let before = DiskCache::now_unix();
+        c.set("quote".into(), "{\"price\":1.0}".into(), 30);
+
+        let (val, expires_at) = c.get_with_expiry("quote").expect("30 秒 TTL 的条目应命中");
+        assert_eq!(val, "{\"price\":1.0}");
+        assert!(
+            (before + 29..=before + 30).contains(&expires_at),
+            "交回的必须是写入时那个绝对到期点（实测 {expires_at}，写入时刻 {before}）"
+        );
+        assert_eq!(
+            c.get("quote").as_deref(),
+            Some("{\"price\":1.0}"),
+            "get 必须与 get_with_expiry 同判据（它只是丢掉到期点的薄封装）"
+        );
+
+        // 立即过期哨兵（ttl < 0 ⇒ expires_at=1）：两个读法都必须判未命中
+        c.set("stale".into(), "x".into(), -1);
+        assert!(c.get_with_expiry("stale").is_none(), "已过期的条目不得交回");
+        assert!(c.get("stale").is_none(), "同上，get 侧判据要一致");
     }
 }

@@ -955,6 +955,23 @@ impl AStockClient {
         &self.http
     }
 
+    /// L2 命中回填 L1 时该用的到期点。
+    ///
+    /// 规则只有一条：**沿用该条目自己的原始到期点，不许换数**。
+    /// `l2_expires_at == 0` 是 `DiskCache::set` 的「永不过期」哨兵（财报、日线这类低频数据），
+    /// 原样交回哨兵；有限 TTL（实时行情 = 30 秒）一律返回同一个绝对时间点。
+    ///
+    /// 为什么要单独抽出来：此前这里是 `now + 3600` 硬编码，于是 30 秒 TTL 的报价被 L2
+    /// 命中一次就能在 L1 活一小时 —— 监控循环拿一小时前的旧价比阈值，告警却按求值时刻盖章。
+    /// 判据（阶段 E-1）拆在这个函数上：把 `now + 3600` 写回来，端到端那条必须红。
+    fn l1_expiry_from_l2(l2_expires_at: i64) -> i64 {
+        if l2_expires_at == 0 {
+            i64::MAX
+        } else {
+            l2_expires_at
+        }
+    }
+
     /// C1 修复: 用 moka L1 替换手工 HashMap
     /// - L1: moka, 自动写入时 TTL + 1h idle
     /// - L2: 可选的 DiskCache(JSON 文件, 如配置)
@@ -972,9 +989,10 @@ impl AStockClient {
         }
         // 2) L2 磁盘
         if let Some(l2) = &self.l2 {
-            if let Some(val) = l2.get(key) {
-                let expires_at = chrono::Utc::now().timestamp() + 3600;
-                self.cache.insert(key.to_string(), (expires_at, val.clone())).await;
+            // 取「值 + 该条自己的到期点」而不是只取值：回填 L1 时必须沿用原始到期点。
+            if let Some((val, l2_expires_at)) = l2.get_with_expiry(key) {
+                let backfill_expires_at = Self::l1_expiry_from_l2(l2_expires_at);
+                self.cache.insert(key.to_string(), (backfill_expires_at, val.clone())).await;
                 tracing::debug!("[astock-data] 缓存命中(L2): key={key}");
                 return Some(val);
             }
@@ -8466,5 +8484,60 @@ mod dead_channel_routing_tests {
         assert!(r.klines.iter().any(|v| v == "tencent"), "tencent 仍应是 klines 现役源");
         // news 降级链必须仍能到达真正干活的 eastmoney（摘掉 sina 那档后它是第三顺位）。
         assert!(r.news.iter().any(|v| v == "eastmoney"), "news 路由表仍须包含 eastmoney");
+    }
+}
+
+#[cfg(test)]
+mod l2_readthrough_tests {
+    //! 阶段 E-4：L2 命中回填 L1 时，不得把条目自己的到期点换成别的数。
+    //!
+    //! 回归对象：`cache_get` 的 L2 分支此前写死 `now + 3600`。L2 与 L1 是同一份数据、
+    //! 各自的有效期不同 —— 30 秒 TTL 的实时行情只要被 L2 命中一次，就能在 L1 里活一小时；
+    //! 监控循环于是拿一小时前的旧价去比阈值，而告警时间戳盖的是求值时刻，现场看不出差别。
+
+    use super::*;
+    use serial_test::serial;
+
+    /// 纯函数面：有限 TTL 原样交回；`0`（`DiskCache::set` 的「永不过期」哨兵）转成 L1 的永不过期。
+    #[test]
+    fn l1_backfill_keeps_a_finite_expiry_verbatim() {
+        let base = chrono::Utc::now().timestamp();
+        assert_eq!(
+            AStockClient::l1_expiry_from_l2(base + 30),
+            base + 30,
+            "30 秒 TTL 的报价回填 L1 不得被换成一小时"
+        );
+        assert_eq!(
+            AStockClient::l1_expiry_from_l2(0),
+            i64::MAX,
+            "L2 的「永不过期」条目不得被回填成 30 秒（那会让低频数据每次都重取）"
+        );
+    }
+
+    /// 端到端：L1 空、L2 里躺着一条 30 秒 TTL 的行情 —— 就是重启后第一次读到磁盘缓存的真实形态。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn l2_hit_backfills_l1_with_the_original_deadline() {
+        let mut path = std::env::temp_dir();
+        path.push(format!("astock_e4_readthrough_{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let (client, l2) = AStockClient::new().with_l2_cache(path);
+        let key = "quote:600519:live";
+        l2.set(key.to_string(), "{\"price\":1.0}".to_string(), 30);
+
+        let hit = client.cache_get(key).await.expect("L2 应命中并返回值");
+        assert_eq!(hit, "{\"price\":1.0}");
+
+        let l2_expires_at = l2.get_with_expiry(key).expect("条目应仍在 L2").1;
+        let (l1_expires_at, _) = client.cache.get(key).await.expect("命中后应已回填 L1");
+        assert_eq!(l1_expires_at, l2_expires_at, "回填 L1 用的必须是该条自己的到期点");
+
+        let now = chrono::Utc::now().timestamp();
+        assert!(l1_expires_at > now, "回填进去的不该是一条已经过期的条目");
+        assert!(
+            l1_expires_at < now + 300,
+            "旧缺陷形态（硬编码 now + 3600）会在这一条红：实测剩余 {}s",
+            l1_expires_at - now
+        );
     }
 }

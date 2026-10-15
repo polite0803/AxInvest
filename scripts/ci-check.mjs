@@ -408,6 +408,16 @@ if (canRunRust && !quick) {
   );
   step("面板 9 条变量落地（A 批接线：默认值对账 + 生产调用处数 + 单一权威）", "node scripts/check-panel-var-landing.mjs");
 
+  // 阶段 A（2026-10-14，PLAN-monitor-chain-closure）：告警的事件名与 payload 各抄一遍 ⇒
+  // 发射点发 `stock-monitor-alert`、前端听 `price-alert-triggered`、那份完整实现的发射器零构造点，
+  // 三件事叠加后 `cargo check` / `tsc` 全绿而用户什么都收不到。本门逐项对账两侧源文。
+  // 与 ci.yml 的对应 step 逐字同源。
+  step(
+    "告警事件名与 payload 单一权威对账自检（正控 + 判据没电/形状漂移负控）",
+    "node scripts/check-monitor-event-authority.mjs --selftest",
+  );
+  step("告警事件名与 payload 单一权威对账", "node scripts/check-monitor-event-authority.mjs");
+
   step(
     "cargo fmt 格式化检查",
     "cargo fmt --check --all",

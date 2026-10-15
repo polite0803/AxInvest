@@ -15335,7 +15335,15 @@
       "conditionVolume": "📊 Volumen alto",
       "noHistory": "Sin registros de activación",
       "activeTab": "Activos ({{count}})",
-      "triggeredTab": "Activados ({{count}})"
+      "triggeredTab": "Activados ({{count}})",
+      "typeStopLoss": "limitación de pérdidas",
+      "typeTakeProfit": "toma de beneficios",
+      "typeResistance": "ruptura de resistencia",
+      "typeSupport": "ruptura de soporte",
+      "typeChange": "variación anormal del precio",
+      "typeVolume": "volumen de contratación anormal",
+      "typeUnknown": "tipo desconocido",
+      "triggeredDetail": "{{name}}: alerta de {{type}} activada, precio {{price}}"
     },
     "progress": {
       "fetchingData": "Obteniendo datos de valores...",

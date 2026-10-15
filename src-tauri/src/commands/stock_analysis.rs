@@ -2263,6 +2263,7 @@ pub async fn create_price_alert(
         use axagent_analysis_engine::monitor::MonitorConfig;
         // 用 alert_type 直接构造 MonitorConfig 的 6 个 Option 字段
         let mut config = MonitorConfig {
+            alert_id: inserted.id.clone(),
             stock_code: stock_code.clone(),
             stock_name: stock_name.clone(),
             stop_loss: None,
@@ -2341,10 +2342,14 @@ pub async fn delete_price_alert(state: State<'_, AppState>, id: String) -> Resul
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("删除价格告警失败: {e}"))
     })?;
 
-    // P0: 同步从 RealtimeMonitor 移除监控
+    // P0: 同步从 RealtimeMonitor 移除监控 —— 按条目摘，删一条不再让同股其余告警一起脱监
     if let (Some(monitor), Some(alert)) = (state.stock_monitor.get(), alert) {
-        monitor.remove_config(&alert.stock_code).await;
-        tracing::info!("[delete_price_alert] 已从实时监控移除: {}", alert.stock_code);
+        monitor.remove_config_by_id(&alert.id).await;
+        tracing::info!(
+            "[delete_price_alert] 已从实时监控摘除该条: id={} code={}",
+            alert.id,
+            alert.stock_code
+        );
     }
 
     Ok(())
@@ -2873,9 +2878,9 @@ pub async fn discover_stock_candidates(
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "获取市场状态")]
 #[tauri::command]
 pub async fn get_market_status() -> Result<serde_json::Value, String> {
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let date = chrono::NaiveDate::parse_from_str(&today, "%Y-%m-%d")
-        .unwrap_or_else(|_| chrono::Utc::now().date_naive());
+    // 交易日判定必须问北京日。旧写法把 UTC 的 `now()` 格式化成字符串再解析回来，
+    // 北京 00:00–07:59 这段时间里拿到的是「昨天」⇒ 开市日的凌晨会报「非交易日」。
+    let date = axagent_astock_data::calendar::beijing_today();
     Ok(serde_json::json!({
         "isTradingDay": axagent_astock_data::calendar::is_trading_day(&date),
         "isTradingTime": axagent_astock_data::calendar::is_trading_time(),
@@ -2906,14 +2911,28 @@ pub async fn generate_daily_review(state: State<'_, AppState>) -> Result<DailyRe
         .map(|w| (w.stock_code.clone(), w.stock_name.clone()))
         .collect();
 
-    // 查询当日已触发的价格告警
+    // 查询当日已触发的价格告警。
+    // 两处历史缺陷同批修：① 筛选写的是 `IsTriggered.eq(true)`，而该列在库里是 integer
+    // ⇒ PG 直接报「操作符不存在: integer = boolean」（2026-10-15 现网实测），错误又被下面的
+    // `if let Ok` 吞掉，于是这一段永远读成「今天没有告警」。② 注释说「当日」但查询没有任何
+    // 日期条件。现按 id 回写后 `triggered_at` 才会有值，故窗口按北京日界取。
+    let (day_start_ms, day_end_ms) = axagent_astock_data::calendar::beijing_day_window_ms(
+        &axagent_astock_data::calendar::beijing_today(),
+    );
     let triggered_alerts_result = price_alerts::Entity::find()
-        .filter(price_alerts::Column::IsTriggered.eq(true))
+        .filter(price_alerts::Column::IsTriggered.eq(1_i32))
+        .filter(price_alerts::Column::TriggeredAt.gte(day_start_ms))
+        .filter(price_alerts::Column::TriggeredAt.lt(day_end_ms))
         .all(state.harness.db())
         .await;
 
     let mut triggered_alerts: std::collections::HashMap<String, Vec<String>> =
         std::collections::HashMap::new();
+    if let Err(e) = &triggered_alerts_result {
+        tracing::warn!(
+            "[daily_review] 查询当日已触发告警失败（本段将显示为空，非「真的没有」）: {e}"
+        );
+    }
     if let Ok(alerts) = triggered_alerts_result {
         for alert in alerts {
             let desc = format!(

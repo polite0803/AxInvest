@@ -15335,7 +15335,15 @@
       "conditionVolume": "📊 Увеличение объема",
       "noHistory": "Нет записей о срабатываниях",
       "activeTab": "Активные ({{count}})",
-      "triggeredTab": "Сработавшие ({{count}})"
+      "triggeredTab": "Сработавшие ({{count}})",
+      "typeStopLoss": "стоп-лосс",
+      "typeTakeProfit": "фиксация прибыли",
+      "typeResistance": "пробой уровня сопротивления",
+      "typeSupport": "пробой уровня поддержки",
+      "typeChange": "аномальное изменение цены",
+      "typeVolume": "аномальная оборачиваемость",
+      "typeUnknown": "неизвестный тип",
+      "triggeredDetail": "{{name}}: сработало предупреждение «{{type}}», цена {{price}}"
     },
     "progress": {
       "fetchingData": "Получение данных акций...",

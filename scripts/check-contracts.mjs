@@ -523,8 +523,13 @@ function checkEventSymmetry() {
  *   这几处**不是**「丢弃 Result」语义：`set_status` 返 `bool`（`crates/runtime-core/src/cron_job.rs:491`），
  *   false = 未找到该任务或持久化失败 ⇒ 一次性 cron 任务仍留 Active ⇒ 下次到点重复跑。
  *   274 − 11 = 263，与 11 处一一对应（复跑实测：`共 263 处，已排除 47 处豁免调用`）。回滚 = 改回 274。
+ *   2026-10-15 阶段 A（`docs/plans/PLAN-monitor-chain-closure.md`）262 → 261：
+ *   `src-tauri/src/init/monitor_emitter.rs` 的 `let _ = dispatcher.dispatch_alert(..).await`
+ *   改为读 `NotificationDispatchSummary`，零渠道时显式 warn「通知不外推」、有渠道但失败时按字段 warn。
+ *   同批删掉的 `AppMonitorEmitter` 里那处 `let _ = self.app.emit(..)` **不带 `.await`**，
+ *   本就不在判据 H 的识别形态内 —— 所以净 −1 而不是 −2（复跑实测：`共 261 处，已排除 47 处豁免调用`）。
  */
-const SILENT_RESULT_BASELINE = 262;
+const SILENT_RESULT_BASELINE = 261;
 
 /** 已知的合理丢弃（按被调方名），计数时排除，避免基线被噪声撑大。 */
 const SILENT_RESULT_EXEMPT_CALLEES = new Set([

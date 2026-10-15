@@ -15335,7 +15335,15 @@
       "conditionVolume": "📊 Volumenanstieg",
       "noHistory": "Keine Auslöseaufzeichnungen",
       "activeTab": "Aktiv ({{count}})",
-      "triggeredTab": "Ausgelöst ({{count}})"
+      "triggeredTab": "Ausgelöst ({{count}})",
+      "typeStopLoss": "Stop-Loss",
+      "typeTakeProfit": "Gewinnmitnahme",
+      "typeResistance": "Widerstandsausbruch",
+      "typeSupport": "Unterstützungsbruch",
+      "typeChange": "anormale Kursänderung",
+      "typeVolume": "anormale Umschlagsrate",
+      "typeUnknown": "unbekannter Typ",
+      "triggeredDetail": "{{name}}: {{type}}-Warnung ausgelöst, Kurs {{price}}"
     },
     "progress": {
       "fetchingData": "Aktiendaten werden abgerufen...",

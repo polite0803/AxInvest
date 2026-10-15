@@ -15335,7 +15335,15 @@
       "conditionVolume": "📊 出来高増加",
       "noHistory": "トリガー記録なし",
       "activeTab": "アクティブ ({{count}})",
-      "triggeredTab": "トリガー済み ({{count}})"
+      "triggeredTab": "トリガー済み ({{count}})",
+      "typeStopLoss": "損切り",
+      "typeTakeProfit": "利確",
+      "typeResistance": "上値抵抗線のブレイク",
+      "typeSupport": "下値支持線の割れ",
+      "typeChange": "騰落率の異常",
+      "typeVolume": "売買回転率の異常",
+      "typeUnknown": "不明な種類",
+      "triggeredDetail": "{{name}}：{{type}}警戒が発動、現在値 {{price}}"
     },
     "progress": {
       "fetchingData": "获取股票数据...",

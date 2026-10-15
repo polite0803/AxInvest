@@ -262,44 +262,79 @@ fn beijing_now() -> (u32, u32, NaiveDate) {
     (beijing_hour, minute, beijing_date)
 }
 
-/// 判断当前是否为交易时间
-pub fn is_trading_time() -> bool {
-    let (hour, minute, today) = beijing_now();
-
-    if !is_trading_day(&today) {
-        return false;
-    }
-
-    // 上午 9:30-11:30
-    if hour == 9 && minute >= 30 {
-        return true;
-    }
-    if hour == 10 {
-        return true;
-    }
-    if hour == 11 && minute <= 30 {
-        return true;
-    }
-
-    // 下午 13:00-15:00
-    if hour == 13 {
-        return true;
-    }
-    if hour == 14 {
-        return true;
-    }
-    if hour == 15 && minute == 0 {
-        return true;
-    }
-
-    false
+/// A 股一天里的会话阶段（北京时间口径）。
+///
+/// 为什么要枚举而不是一个 bool：同一句「现在不是交易时间」在监控循环、行情监视器、
+/// 状态接口三处要说的话不一样（盘前 / 午休 / 收盘后 / 非交易日），而 bool 只能把它们
+/// 压成同一个读数。阶段 E 的告警冷却与 watcher 停摆都要能各自点名是哪一段。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TradingSession {
+    /// 非交易日（周末或已知休市，且无 K 线正向自证推翻）
+    NonTradingDay,
+    /// 交易日 09:30 之前的全部时段（自 00:00 起算，凌晨亦属此档；含 09:15–09:25 集合竞价，本枚举不单独区分）
+    PreOpen,
+    /// 上午连续竞价 09:30–11:30（左闭右开）
+    Morning,
+    /// 午间休市 11:30–13:00
+    LunchBreak,
+    /// 下午连续竞价 13:00–15:00（左闭右开）
+    Afternoon,
+    /// 15:00 收盘之后
+    PostClose,
 }
 
-/// 判断当前是否为午休时间（11:30-13:00）
-pub fn is_lunch_break() -> bool {
-    let (hour, minute, _) = beijing_now();
-    // A 股午休: 11:30-13:00（含 11:30，不含 13:00）
-    (hour == 11 && minute > 30) || hour == 12
+impl TradingSession {
+    /// 连续竞价进行中 —— 只有这两段取实时价才有意义（其余时段行情是冻结的）。
+    pub fn is_open(self) -> bool {
+        matches!(self, Self::Morning | Self::Afternoon)
+    }
+
+    /// 给用户看的分档名。抽成纯方法是为了让「五档各有一句」可被测试钉住 ——
+    /// 挂在墙上时钟上的话，非交易日那档一年只有几天能被读到。
+    pub fn status_label(self) -> &'static str {
+        match self {
+            Self::Morning | Self::Afternoon => "交易中",
+            Self::LunchBreak => "午休中，13:00恢复",
+            Self::PreOpen => "距开盘",
+            Self::PostClose => "已收盘",
+            Self::NonTradingDay => "非交易日",
+        }
+    }
+}
+
+/// 会话划分的判据本体（纯函数，表驱动测试拆在这里，不依赖墙上时钟）。
+///
+/// 边界是**左闭右开**：09:30 与 13:00 属开市，11:30 与 15:00 属休市/收盘。
+/// 这修掉的是原 `is_trading_time` 里两处整点判法不一致的形态
+/// （`hour==11 && minute<=30` 让 11:30 整点算开市、`hour==15 && minute==0` 让 15:00 之后
+/// 整整 59 分钟都算开市 —— 收盘后那一段既白打请求，又会让按时间冷却的告警拿冻结收盘价反复触发）。
+pub fn trading_session_of(hour: u32, minute: u32, trading_day: bool) -> TradingSession {
+    if !trading_day {
+        return TradingSession::NonTradingDay;
+    }
+    let mins = hour * 60 + minute;
+    if mins < 9 * 60 + 30 {
+        TradingSession::PreOpen
+    } else if mins < 11 * 60 + 30 {
+        TradingSession::Morning
+    } else if mins < 13 * 60 {
+        TradingSession::LunchBreak
+    } else if mins < 15 * 60 {
+        TradingSession::Afternoon
+    } else {
+        TradingSession::PostClose
+    }
+}
+
+/// 当前所处的会话阶段（北京时间 + 当日是否交易日）。
+pub fn current_trading_session() -> TradingSession {
+    let (hour, minute, today) = beijing_now();
+    trading_session_of(hour, minute, is_trading_day(&today))
+}
+
+/// 判断当前是否为交易时间（连续竞价进行中）
+pub fn is_trading_time() -> bool {
+    current_trading_session().is_open()
 }
 
 /// 从东方财富 API 获取最新交易日历
@@ -404,6 +439,19 @@ pub fn beijing_today() -> NaiveDate {
     beijing_now().2
 }
 
+/// 北京日 `date` 的 UTC 毫秒区间 `[00:00, 次日 00:00)`，即 A 股口径的「当日」。
+///
+/// 为什么要有它：多处按「当日」筛数据时各写各的，而 UTC 16:00–24:00 对应北京次日
+/// 00:00–08:00 —— 同一个「当日」会有两套答案（`beijing_now` 修的就是这个形态）。
+/// 阶段 B 的复盘窗口、阶段 E 的会话判定、阶段 G 的快照落日期都应走这一个helper。
+pub fn beijing_day_window_ms(date: &NaiveDate) -> (i64, i64) {
+    let start_naive = date.and_hms_opt(0, 0, 0).expect("日界 00:00 恒存在");
+    // 北京 00:00 = UTC 前一日 16:00
+    let start_utc = start_naive - Duration::hours(8);
+    let end_utc = start_utc + Duration::hours(24);
+    (start_utc.and_utc().timestamp_millis(), end_utc.and_utc().timestamp_millis())
+}
+
 /// 仅供测试:清空远程节假日缓存,恢复纯硬编码模式
 #[cfg(test)]
 pub fn clear_remote_holidays_for_test() {
@@ -411,23 +459,13 @@ pub fn clear_remote_holidays_for_test() {
     REMOTE_TRADING_DAYS.write().clear();
 }
 
-/// 获取距离下一个交易时间的描述
+/// 获取距离下一个交易时间的描述。
+///
+/// 阶段 E-5：这里不再自己重写一遍时刻比较，分档一律走 `TradingSession`。
+/// 旧形态给出过假读数：周六 16:00 命中 `hour >= 15` ⇒ 「已收盘」，而那天根本没有开盘这回事
+/// （非交易日只能从 9–15 点之外的兜底分支走到，等于把周末读成了收盘）。
 pub fn next_trading_time_desc() -> String {
-    if is_trading_time() {
-        return "交易中".to_string();
-    }
-    if is_lunch_break() {
-        return "午休中，13:00恢复".to_string();
-    }
-
-    let (hour, minute, _) = beijing_now();
-    if hour < 9 || (hour == 9 && minute < 30) {
-        return "距开盘".to_string();
-    }
-    if hour >= 15 {
-        return "已收盘".to_string();
-    }
-    "非交易时段".to_string()
+    current_trading_session().status_label().to_string()
 }
 
 #[cfg(test)]
@@ -633,5 +671,61 @@ mod tests {
         assert_eq!(trading_days_between(thu, thu), 0);
         // [09-24, 10-01)：09-24/28/29/30 共 4 个（端点 10-01 国庆休市且为半开排除端）
         assert_eq!(trading_days_between(thu, NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()), 4);
+    }
+
+    /// 阶段 E-5：会话边界的表驱动判据（纯函数，不读墙上时钟）。
+    ///
+    /// 拆在原缺陷上：旧 `is_trading_time` 对 11:30 与 15:00 两个整点用了两种判法
+    /// （`minute<=30` 与 `minute==0`），其中 15:00–15:59 整段被判成开市。
+    #[test]
+    fn trading_session_boundaries_are_half_open() {
+        use TradingSession::*;
+        let d = true;
+        let cases: &[((u32, u32), TradingSession, &str)] = &[
+            ((9, 14), PreOpen, "集合竞价前"),
+            ((9, 15), PreOpen, "开盘集合竞价起点仍算盘前"),
+            ((9, 29), PreOpen, "9:29 未开市"),
+            ((9, 30), Morning, "9:30 整点开市（左闭）"),
+            ((11, 29), Morning, "上午最后一分钟"),
+            ((11, 30), LunchBreak, "11:30 整点进午休（右开）"),
+            ((12, 59), LunchBreak, "12:59 仍午休"),
+            ((13, 0), Afternoon, "13:00 整点下午开市"),
+            ((14, 59), Afternoon, "14:59 仍开市"),
+            ((15, 0), PostClose, "15:00 整点收盘（右开）—— 旧形态这一段 59 分钟全算开市"),
+            ((15, 30), PostClose, "15:30 收盘后"),
+            ((3, 0), PreOpen, "凌晨与 09:14 同档：今日尚未开盘"),
+        ];
+        for ((h, m), want, why) in cases {
+            assert_eq!(trading_session_of(*h, *m, d), *want, "{h:02}:{m:02} — {why}");
+        }
+        // 非交易日压过一切时段
+        assert_eq!(trading_session_of(10, 0, false), NonTradingDay, "交易日判定优先于时段");
+        // 只有两段算「开市」
+        assert!(Morning.is_open() && Afternoon.is_open());
+        assert!(!PreOpen.is_open() && !LunchBreak.is_open() && !PostClose.is_open());
+        assert!(!NonTradingDay.is_open());
+    }
+
+    /// 阶段 E-5 的呈现面：五档各有自己的一句话，`next_trading_time_desc` 不再自带第二套判据。
+    #[test]
+    fn every_session_bucket_has_its_own_label() {
+        use TradingSession::*;
+        let labels: [(_, &str); 6] = [
+            (NonTradingDay, "非交易日"),
+            (PreOpen, "距开盘"),
+            (Morning, "交易中"),
+            (Afternoon, "交易中"),
+            (LunchBreak, "午休中，13:00恢复"),
+            (PostClose, "已收盘"),
+        ];
+        for (session, want) in labels {
+            assert_eq!(session.status_label(), want, "{session:?} 的分档文案");
+        }
+        // 只有上午与下午两段该说「交易中」：多一行 ⇒ 有档位被塌进了这两段（旧 bool 判法的复发形态）
+        assert_eq!(
+            labels.iter().filter(|(_, label)| *label == "交易中").count(),
+            2,
+            "「交易中」的档位集合变了 ⇒ 上面的文案表要一起重看"
+        );
     }
 }

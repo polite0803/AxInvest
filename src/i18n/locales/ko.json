@@ -15335,7 +15335,15 @@
       "conditionVolume": "📊 거래량 증가",
       "noHistory": "트리거 기록 없음",
       "activeTab": "활성 ({{count}})",
-      "triggeredTab": "트리거됨 ({{count}})"
+      "triggeredTab": "트리거됨 ({{count}})",
+      "typeStopLoss": "손절",
+      "typeTakeProfit": "익절",
+      "typeResistance": "저항선 돌파",
+      "typeSupport": "지지선 하향 이탈",
+      "typeChange": "등락률 이상",
+      "typeVolume": "회전율 이상",
+      "typeUnknown": "알 수 없는 유형",
+      "triggeredDetail": "{{name}}: {{type}} 경보 발동, 현재가 {{price}}"
     },
     "progress": {
       "fetchingData": "주식 데이터 가져오는 중...",

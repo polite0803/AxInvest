@@ -748,14 +748,19 @@ function selftest() {
   return pass === cases.length ? 0 : 1;
 }
 
-const args = process.argv.slice(2);
-if (args.includes("--selftest")) {
-  process.exitCode = selftest();
-} else {
-  const srcOf = sourceCache(allRels());
-  if (args.includes("--dump")) {
-    dump(srcOf);
+// 运行守卫（2026-10-14 补）：让本文件导出的 `stripComments` / `stripTestModules`
+// 能被别的门当模块复用，而不是第三份手抄剥离器。守卫前的行为逐字不变 ——
+// `node scripts/check-panel-var-landing.mjs [参数]` 仍是同一条命令、同一套判据。
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  if (args.includes("--selftest")) {
+    process.exitCode = selftest();
   } else {
-    process.exitCode = report(checkAll(read(PANEL_REL), srcOf, read(SEED_REL)), srcOf);
+    const srcOf = sourceCache(allRels());
+    if (args.includes("--dump")) {
+      dump(srcOf);
+    } else {
+      process.exitCode = report(checkAll(read(PANEL_REL), srcOf, read(SEED_REL)), srcOf);
+    }
   }
 }

@@ -53,6 +53,10 @@ pub fn condition_type_for(alert_type: &str) -> &'static str {
 ///
 /// 返回 Vec<(alert_type, threshold)>，每个非 None 的 Option 字段对应一条
 /// 用于在创建告警时一次性写入多行 price_alerts 记录（每种 alert_type 一行）。
+///
+/// ⚠ **生产路径零调用方**（2026-10-15 实测：只剩本文件内那条行为锁测试）。
+/// 现役新建告警走 `commands/stock_analysis.rs::create_price_alert`，一次只写一类阈值。
+/// 留着是因为它是「一条配置 ↔ 多行告警」这层映射的唯一成文形态，撤与否归 PLAN 阶段 F。
 pub fn extract_alerts_from_config(config: &MonitorConfig) -> Vec<(&'static str, f64)> {
     let mut out = Vec::new();
     if let Some(v) = config.stop_loss {
@@ -78,13 +82,15 @@ pub fn extract_alerts_from_config(config: &MonitorConfig) -> Vec<(&'static str, 
 
 /// 从 `MonitorAlert` 构造 price_alerts 的写入字段
 ///
+/// ⚠ **当前全仓零调用方**（2026-10-15 阶段 B 实测：只有本文件自身与一处文档提及）。
+/// 原文说「本函数仅用于 monitor_emitter 在告警触发时回写 DB」不成立 —— 回写走的是
+/// `init/monitor_emitter.rs::mark_triggered_by_id`（按 `alert_id` 精确改未触发行），
+/// 它**不插入新行**。若将来有人接这个口，会在每次触发时给同一股追加新行（与
+/// PLAN §11 裁定 10 的「行随分析无界增长」是同一族缺陷），接线前先确认去重口径。
+///
 /// 返回 `(alert_type, condition_type, threshold)` 三元组，用于构造 ActiveModel。
 /// `threshold` 取 `current_price`（price 类）或 `change_pct`（change_pct 类），
 /// 因为 MonitorAlert 不携带原始阈值，仅携带触发时的现价/涨跌幅。
-///
-/// **注意**：`threshold` 在此场景下是"触发时的值"，而非"用户设定的阈值"。
-/// 调用方应优先用 `extract_alerts_from_config` 拿到原始阈值；本函数仅用于
-/// monitor_emitter 在告警触发时回写 DB，标记"该告警在 X 价位被触发"。
 pub fn alert_to_db_fields(alert: &MonitorAlert) -> (&'static str, &'static str, f64) {
     let cond_type = condition_type_for(&alert.alert_type);
     let threshold = match cond_type {
@@ -179,6 +185,7 @@ mod tests {
     #[test]
     fn extract_alerts_from_config_returns_all_set_fields() {
         let config = MonitorConfig {
+            alert_id: "alert-1".into(),
             stock_code: "000001".into(),
             stock_name: "test".into(),
             stop_loss: Some(9.0),

@@ -1,7 +1,9 @@
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
+import type { MonitorAlertPayload } from "@/types";
 import { BellOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { App, Badge, Button, Card, Form, Input, InputNumber, Select, Table, Tabs, Tag } from "antd";
+import type { TFunction } from "i18next";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -14,6 +16,24 @@ interface PriceAlert {
   isTriggered: boolean;
   triggeredAt: number | null;
   createdAt: number;
+}
+
+/**
+ * 后端 `MonitorAlert.alert_type` 的六类 → i18n 键。
+ * 未知值一律落 `typeUnknown`，不把「没见过的类型」当成六类中的某一类。
+ */
+const ALERT_TYPE_KEYS: Record<string, string> = {
+  stop_loss: "stockAnalysis.alert.typeStopLoss",
+  take_profit: "stockAnalysis.alert.typeTakeProfit",
+  resistance: "stockAnalysis.alert.typeResistance",
+  support: "stockAnalysis.alert.typeSupport",
+  change: "stockAnalysis.alert.typeChange",
+  volume: "stockAnalysis.alert.typeVolume",
+};
+
+export function alertTypeLabel(t: TFunction, alertType: string | undefined): string {
+  const key = alertType ? ALERT_TYPE_KEYS[alertType] : undefined;
+  return key ? t(key) : t("stockAnalysis.alert.typeUnknown");
 }
 
 export function PriceAlertPanel() {
@@ -57,9 +77,16 @@ export function PriceAlertPanel() {
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
     let cancelled = false;
-    listen<PriceAlert>("price-alert-triggered", () => {
+    listen<MonitorAlertPayload>("price-alert-triggered", (event) => {
       if (cancelled) { return; }
-      message.info(t("stockAnalysis.alert.triggered"));
+      const alert = event.payload;
+      message.info(
+        t("stockAnalysis.alert.triggeredDetail", {
+          name: alert.stockName || alert.stockCode,
+          type: alertTypeLabel(t, alert.alertType),
+          price: alert.currentPrice.toFixed(2),
+        }),
+      );
       loadAlerts();
     })
       .then((fn) => {

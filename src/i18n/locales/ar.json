@@ -15335,7 +15335,15 @@
       "conditionVolume": "📊 حجم مرتفع",
       "noHistory": "لا توجد سجلات تفعيل",
       "activeTab": "نشط ({{count}})",
-      "triggeredTab": "مُفعَّل ({{count}})"
+      "triggeredTab": "مُفعَّل ({{count}})",
+      "typeStopLoss": "وقف الخسارة",
+      "typeTakeProfit": "جني الأرباح",
+      "typeResistance": "اختراق مستوى المقاومة",
+      "typeSupport": "كسر مستوى الدعم",
+      "typeChange": "تغير سعري غير طبيعي",
+      "typeVolume": "معدل دوران غير طبيعي",
+      "typeUnknown": "نوع غير معروف",
+      "triggeredDetail": "{{name}}: تم تفعيل تنبيه {{type}}، السعر {{price}}"
     },
     "progress": {
       "fetchingData": "جارٍ جلب بيانات الأسهم...",

@@ -579,6 +579,38 @@ export interface RecoCrossCheck {
   };
 }
 
+// ── 实时监控告警（`IpcEventName::PriceAlertTriggered` 的 payload）──
+
+/**
+ * 后端 `axagent_analysis_engine::monitor::MonitorAlert` 的 camelCase 投影。
+ *
+ * 两侧键名由 `scripts/check-monitor-event-authority.mjs` 逐项对账 ——
+ * 这个 payload 过去是在发射点手写 `json!` 摊平出来的，加字段时副本会静默少一键。
+ */
+export type MonitorAlertType =
+  | "stop_loss"
+  | "take_profit"
+  | "resistance"
+  | "support"
+  | "change"
+  | "volume"
+  | string;
+
+export interface MonitorAlertPayload {
+  /** `price_alerts.id` —— 回写触发状态按这一条精确命中（同股同类型可能有重复行） */
+  alertId: string;
+  stockCode: string;
+  stockName: string;
+  /** 六类告警之一；历史值/未知值消费侧必须按「未知」兜底，不得当成某一类 */
+  alertType: MonitorAlertType;
+  alertMessage: string;
+  currentPrice: number;
+  changePct: number;
+  /** 后端 `timestamp: String`（求值时刻的 ISO 串，不是行情快照时刻） */
+  timestamp: string;
+  suggestedAction: string | null;
+}
+
 // ── 决策仪表盘报告（借鉴 daily_stock_analysis 推送格式）──
 
 /** 风险警报条目 */

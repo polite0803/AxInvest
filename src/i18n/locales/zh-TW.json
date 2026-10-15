@@ -15559,7 +15559,15 @@
       "conditionVolume": "📊 放量",
       "noHistory": "暂无触发记录",
       "activeTab": "活跃 ({{count}})",
-      "triggeredTab": "已触发 ({{count}})"
+      "triggeredTab": "已触发 ({{count}})",
+      "typeStopLoss": "止損",
+      "typeTakeProfit": "止盈",
+      "typeResistance": "壓力位突破",
+      "typeSupport": "支撐位跌破",
+      "typeChange": "漲跌幅異常",
+      "typeVolume": "換手率異常",
+      "typeUnknown": "未知類型",
+      "triggeredDetail": "「{{name}}」觸發{{type}}預警，現價 {{price}}"
     },
     "progress": {
       "fetchingData": "取得股票資料...",

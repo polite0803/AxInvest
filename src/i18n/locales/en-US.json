@@ -15709,7 +15709,15 @@
       "conditionVolume": "📊 Volume spike",
       "noHistory": "No trigger records yet",
       "activeTab": "Active ({{count}})",
-      "triggeredTab": "Triggered ({{count}})"
+      "triggeredTab": "Triggered ({{count}})",
+      "typeStopLoss": "stop-loss",
+      "typeTakeProfit": "take-profit",
+      "typeResistance": "resistance breakout",
+      "typeSupport": "support breakdown",
+      "typeChange": "abnormal price change",
+      "typeVolume": "abnormal turnover",
+      "typeUnknown": "unknown type",
+      "triggeredDetail": "{{name}}: {{type}} alert triggered, price {{price}}"
     },
     "period": {
       "1m": "1 Month",

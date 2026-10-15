@@ -1638,6 +1638,7 @@ pub async fn run_stock_workflow_inner(
                                                 if let Some(ref monitor) = monitor_for_spawn {
                                                     use axagent_analysis_engine::monitor::MonitorConfig;
                                                     let config = MonitorConfig {
+                                                        alert_id: inserted.id.clone(),
                                                         stock_code: stock_code.clone(),
                                                         stock_name: sc_name_for_spawn.clone(),
                                                         stop_loss: None,
@@ -1685,6 +1686,7 @@ pub async fn run_stock_workflow_inner(
                                                 if let Some(ref monitor) = monitor_for_spawn {
                                                     use axagent_analysis_engine::monitor::MonitorConfig;
                                                     let config = MonitorConfig {
+                                                        alert_id: inserted.id.clone(),
                                                         stock_code: stock_code.clone(),
                                                         stock_name: sc_name_for_spawn.clone(),
                                                         stop_loss: Some(sl),

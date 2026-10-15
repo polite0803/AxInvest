@@ -15335,7 +15335,15 @@
       "conditionVolume": "Pic de volume",
       "noHistory": "Aucun enregistrement déclenché",
       "activeTab": "Actif ({{count}})",
-      "triggeredTab": "Déclenché ({{count}})"
+      "triggeredTab": "Déclenché ({{count}})",
+      "typeStopLoss": "stop à perte",
+      "typeTakeProfit": "prise de profit",
+      "typeResistance": "cassure de résistance",
+      "typeSupport": "rupture de support",
+      "typeChange": "variation de prix anormale",
+      "typeVolume": "taux de rotation anormal",
+      "typeUnknown": "type inconnu",
+      "triggeredDetail": "{{name}} : alerte {{type}} déclenchée, cours {{price}}"
     },
     "progress": {
       "fetchingData": "Récupération des données boursières...",

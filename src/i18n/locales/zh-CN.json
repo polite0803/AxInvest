@@ -16838,7 +16838,15 @@
       "conditionVolume": "📊 放量",
       "noHistory": "暂无触发记录",
       "activeTab": "活跃 ({{count}})",
-      "triggeredTab": "已触发 ({{count}})"
+      "triggeredTab": "已触发 ({{count}})",
+      "typeStopLoss": "止损",
+      "typeTakeProfit": "止盈",
+      "typeResistance": "压力位突破",
+      "typeSupport": "支撑位跌破",
+      "typeChange": "涨跌幅异常",
+      "typeVolume": "换手率异常",
+      "typeUnknown": "未知类型",
+      "triggeredDetail": "「{{name}}」触发{{type}}预警，现价 {{price}}"
     },
     "quantSim": {
       "title": "策略模拟",

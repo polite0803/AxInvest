@@ -15335,7 +15335,15 @@
       "conditionVolume": "📊 मात्रा में वृद्धि",
       "noHistory": "अभी कोई ट्रिगर रिकॉर्ड नहीं",
       "activeTab": "सक्रिय ({{count}})",
-      "triggeredTab": "ट्रिगर किया गया ({{count}})"
+      "triggeredTab": "ट्रिगर किया गया ({{count}})",
+      "typeStopLoss": "स्टॉप-लॉस",
+      "typeTakeProfit": "लाभ वसूली",
+      "typeResistance": "प्रतिरोध स्तर टूटा",
+      "typeSupport": "सहारा स्तर टूटा",
+      "typeChange": "असामान्य मूल्य परिवर्तन",
+      "typeVolume": "असामान्य टर्नओवर",
+      "typeUnknown": "अज्ञात प्रकार",
+      "triggeredDetail": "{{name}}: {{type}} चेतावनी सक्रिय, वर्तमान मूल्य {{price}}"
     },
     "progress": {
       "fetchingData": "स्टॉक डेटा लाया जा रहा है...",

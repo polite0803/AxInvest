@@ -71,6 +71,41 @@ interface CronJobResponse {
   name: string;
   schedule: string;
   status: string;
+  /** 任务配置原文（validate-decisions 是 `ValidateDecisionsConfig` 的 JSON）。 */
+  prompt?: string;
+}
+
+/** 定时反思任务三项配置的「库里实际值」。 */
+interface CronConfigView {
+  cronExpr: string | null;
+  threshold: number | null;
+  depth: string | null;
+}
+
+/**
+ * 从库里那条任务回读三项配置（§六：面板必须显示**生效值**而不是硬编码初值）。
+ *
+ * 读不到就返回 `null`，**不**用出厂默认顶上去 —— 「显示 0 而库里其实是 70」正是本轮要
+ * 根治的形态。`prompt` 不是配置 JSON（早期任务把中文描述写进了 prompt）也算读不到。
+ */
+function readCronConfig(job: CronJobResponse | undefined): CronConfigView {
+  if (!job) {
+    return { cronExpr: null, threshold: null, depth: null };
+  }
+  const expr = job.schedule || null;
+  if (!job.prompt) {
+    return { cronExpr: expr, threshold: null, depth: null };
+  }
+  try {
+    const cfg = JSON.parse(job.prompt) as { minConfidence?: unknown; reflectionDepth?: unknown };
+    return {
+      cronExpr: expr,
+      threshold: typeof cfg.minConfidence === "number" ? cfg.minConfidence : null,
+      depth: cfg.reflectionDepth === "light" || cfg.reflectionDepth === "deep" ? cfg.reflectionDepth : null,
+    };
+  } catch {
+    return { cronExpr: expr, threshold: null, depth: null };
+  }
 }
 
 export function ReflectionPanel() {
@@ -90,9 +125,14 @@ export function ReflectionPanel() {
   const [hitrate, setHitrate] = useState<HitrateStats | null>(null);
   // P1-5 修复: 加载状态 — 表格 Spin + 刷新按钮 loading
   const [loading, setLoading] = useState(false);
-  const [cronExpr, setCronExpr] = useState("0 6 * * *");
-  const [threshold, setThreshold] = useState(0);
-  const [depth, setDepth] = useState("light");
+  // 三项初值刻意是 null：库里还没有任务时界面显示「未配置」，而不是一个像真值的默认数。
+  // 旧形态是硬编码 "0 6 * * *"/0/"light" 且从不回读 ⇒ 显示的与真正生效的是两回事。
+  const [cronExpr, setCronExpr] = useState<string | null>(null);
+  const [threshold, setThreshold] = useState<number | null>(null);
+  const [depth, setDepth] = useState<string | null>(null);
+  // 用户已编辑但尚未保存 ⇒ 轮询回读不得覆盖草稿（本面板有 visibilitychange 定时器在跑 load）
+  const configDirtyRef = useRef(false);
+  const [savingConfig, setSavingConfig] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // P1-7 修复: 反思历史筛选 (股票代码 / 状态)
@@ -280,7 +320,17 @@ export function ReflectionPanel() {
       ]);
       if (myToken !== loadTokenRef.current) { return; }
       if (Array.isArray(r)) { setReflections(r); }
-      if (Array.isArray(c)) { setCronJobs(c); }
+      if (Array.isArray(c)) {
+        setCronJobs(c);
+        // §六 回读库里那条任务的真实配置（归链口径与 `activeCron` 一致：先 active，再任意一条）。
+        // 用户已编辑但还没保存时不回读覆盖 —— 本面板有 visibilitychange 定时器在跑 load()。
+        if (!configDirtyRef.current) {
+          const view = readCronConfig(c.find((j) => j.status === "active") ?? c[0]);
+          setCronExpr(view.cronExpr);
+          setThreshold(view.threshold);
+          setDepth(view.depth);
+        }
+      }
       if (h && typeof h === "object") { setHitrate(h); }
     } catch (e) {
       // P0-2 修复: 加载失败必须显式告知用户,否则后端挂掉时用户无感知
@@ -324,19 +374,43 @@ export function ReflectionPanel() {
   const toggleCron = async (enable: boolean) => {
     try {
       if (enable && !activeCron) {
+        // 新建时未选的值传 undefined ⇒ 由后端 create 命令的出厂默认决定，前端不另抄一份数
         await invoke("create_validate_decisions_cron", {
-          cronExpression: cronExpr,
-          minConfidenceThreshold: threshold,
-          reflectionDepth: depth,
+          cronExpression: cronExpr ?? undefined,
+          minConfidenceThreshold: threshold ?? undefined,
+          reflectionDepth: depth ?? undefined,
           enabled: true,
         });
+        configDirtyRef.current = false;
       } else if (activeCron) {
+        // 开关只改状态；配置改动必须走「保存配置」（旧形态是改完值再开关 ⇒ 编辑值零落库）
         await invoke("toggle_validate_decisions_cron", { id: activeCron.id, enabled: enable });
       }
       await load();
     } catch (e) {
       // P0-2 修复: 切换 cron 失败必须显式告知用户
       message.error(t("stockAnalysis.reflection.toggleCronFailed", { error: String(e) }));
+    }
+  };
+
+  /** 把三项编辑值写回库里那条任务（§六：没有这条通路，面板上的三个控件就是假开关）。 */
+  const saveCronConfig = async () => {
+    if (!activeCron || cronExpr === null || threshold === null || depth === null) { return; }
+    setSavingConfig(true);
+    try {
+      await invoke("update_validate_decisions_cron", {
+        id: activeCron.id,
+        cronExpression: cronExpr,
+        minConfidenceThreshold: threshold,
+        reflectionDepth: depth,
+      });
+      configDirtyRef.current = false;
+      await load();
+      message.success(t("stockAnalysis.reflection.saveConfigSuccess"));
+    } catch (e) {
+      message.error(t("stockAnalysis.reflection.saveConfigFailed", { error: String(e) }));
+    } finally {
+      setSavingConfig(false);
     }
   };
 
@@ -657,34 +731,59 @@ export function ReflectionPanel() {
           </Space>
           <Space wrap>
             <Select
-              value={cronExpr}
-              onChange={setCronExpr}
+              // 值一律来自库里那条任务；null 时显示占位而不是冒充一个生效值（三态各有其意）
+              value={cronExpr ?? undefined}
+              placeholder={t("stockAnalysis.reflection.configNotSet")}
+              onChange={(v) => {
+                setCronExpr(v);
+                configDirtyRef.current = true;
+              }}
               options={CRON_PRESETS}
               style={{ width: 150 }}
-              disabled={isEnabled}
             />
             <Select
-              value={depth}
-              onChange={setDepth}
+              value={depth ?? undefined}
+              placeholder={t("stockAnalysis.reflection.configNotSet")}
+              onChange={(v) => {
+                setDepth(v);
+                configDirtyRef.current = true;
+              }}
               options={[
                 { label: t("stockAnalysis.reflection.depthLight"), value: "light" },
                 { label: t("stockAnalysis.reflection.depthDeep"), value: "deep" },
               ]}
               style={{ width: 110 }}
-              disabled={isEnabled}
             />
             <Space.Compact style={{ width: 100 }}>
               <Input
                 type="number"
                 min={0}
                 max={100}
-                value={threshold}
-                onChange={(e) => setThreshold(Number(e.target.value))}
+                value={threshold ?? undefined}
+                placeholder={t("stockAnalysis.reflection.configNotSet")}
+                onChange={(e) => {
+                  setThreshold(e.target.value === "" ? null : Number(e.target.value));
+                  configDirtyRef.current = true;
+                }}
                 style={{ width: "100%" }}
-                disabled={isEnabled}
               />
               <Button disabled>{t("stockAnalysis.reflection.confidence")}</Button>
             </Space.Compact>
+            <Button
+              size="small"
+              onClick={saveCronConfig}
+              loading={savingConfig}
+              // 没有任务可改（走开关新建）/ 有项读不到或没填 ⇒ 都不给保存，
+              // 免得把「未填」当 0 / light 落库成生效配置
+              disabled={!activeCron || cronExpr === null || threshold === null || depth === null}
+            >
+              {t("stockAnalysis.reflection.saveConfigBtn")}
+            </Button>
+            {activeCron && (threshold === null || depth === null) && (
+              <Text type="warning" style={{ fontSize: 12 }}>
+                {t("stockAnalysis.reflection.configNotReadable")}
+              </Text>
+            )}
             {activeCron && (
               // P0-1 修复: 删除 cron 是高危操作(永久丢失调度),必须 Popconfirm 二次确认,
               // 与 deleteReflection (line 340) 的 UX 保持一致。

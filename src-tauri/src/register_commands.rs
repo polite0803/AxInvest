@@ -1320,6 +1320,7 @@ macro_rules! register_all_commands {
             commands::stock_analysis::trigger_stock_evolution,
             commands::stock_analysis::unwatch_stock_quotes,
             commands::stock_analysis::update_portfolio_holding,
+            commands::stock_analysis::update_validate_decisions_cron,
             commands::stock_analysis::validate_trade,
             commands::stock_analysis::watch_stock_quotes,
             commands::stock_analysis::watchlist_list_groups,

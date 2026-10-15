@@ -843,7 +843,8 @@ async fn run() -> Result<(), String> {
 
             // 为什么要**循环**而不是跑一轮：
             //   ① `run_batch_reflection_inner` 单轮只处理 `max_count` 条
-            //      （默认 20 = `stock_workflow/reflection.rs:1171`，截断发生在 `:1196` 的 `.take(max_count)`），
+            //      （默认 20 = `run_batch_reflection_inner` 里的 `max_count.unwrap_or(20)`，
+            //       截断就在同函数下方的 `.take(max_count)` —— 不写行号，两处同函数改名时一起可见），
             //      而本次重跑已为**每条成功分析**补建一行 pending
             //      （见本文件 `ensure_pending_reflection`）
             //      ⇒ 47 条需要至少 3 轮才消化完；

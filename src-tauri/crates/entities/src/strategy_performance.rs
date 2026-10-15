@@ -55,6 +55,21 @@ pub struct Model {
     ///
     /// NULL = 非反思物化通道写入的历史/其它来源行（如对话直执行回测），不参与唯一约束。
     pub source_ref: Option<String>,
+    /// **显式外键**：产出本行的那条反思行 id（`stock_reflections.id`）。
+    ///
+    /// 为什么不用 `source_ref` 承担：那一列的键是「决策 id × 档」且带部分唯一索引，
+    /// 语义是幂等去重；Gap1 旧格（`strategy_id='reflection_verdict'`）刻意**不去重、
+    /// 每次重跑追加**，塞进同一列会把重跑变成互相覆盖（两种意思挤一列，见实体上方
+    /// `source_ref` 的同款论证）。
+    ///
+    /// 为什么必须有它（2026-10-14，PLAN-reflection-optimization-closure §二）：
+    /// `build_hitrate_stats` 原先按 `(stock_code, created_at, 复盘档)` 匹配反思行，
+    /// 而本列的 `created_at` 写的是**反思完成时刻**、反思行的 `created_at` 是**建点时刻**
+    /// （pending 行由决策落盘时建）⇒ 两个时点必然不等，现网实测 8 行全部配不上，
+    /// 逐档展开（`horizon_results_json`）从未生效、统计恒落 legacy 回退。
+    ///
+    /// NULL = 本列引入前的存量行 ⇒ 读侧允许退回旧时间戳键，但会计数并告警。
+    pub reflection_id: Option<String>,
     pub created_at: i64,
 }
 

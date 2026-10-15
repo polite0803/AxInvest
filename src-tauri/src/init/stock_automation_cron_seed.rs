@@ -4,7 +4,7 @@
 //! PLAN-batch-automation-mover-recall P1）
 //!
 //! 前五条为**交易日**流水线（休市由 executor 的交易日闸门拦截，见
-//! `init/services.rs`）；后两条（妖股核查 / 进化聚合）**刻意不进交易日闸门**，
+//! `init/services.rs`）；后三条（妖股核查 / 进化聚合 / 教训验证）**刻意不进交易日闸门**，
 //! 各自的执行分支注释里说明了原因：
 //!
 //! | 时刻 | 任务 | 产物 |
@@ -16,6 +16,7 @@
 //! | 18:00 | 四周期到期反思（due_only，覆盖超短/短/中/长） | `stock_reflections` resolved |
 //! | 周六 09:00 | 妖股（窗口涨幅达标）漏检核查 | `mover_recall_runs` 周度快照 |
 //! | 工作日 20:00 | 进化计划聚合（反思+验证+漏检） | `stock_evolution_history` pending_approval |
+//! | 工作日 21:00 | 教训有效性验证与退役 | `reflection_lessons` 的 success_count/confidence/退役态 |
 //!
 //! 种子化语义：**存在即跳过，不改**（不同于 `seed_opc_cron` 的 upsert-overwrite）——
 //! 用户在定时任务面板改过时刻/阈值后，重启不得被静默回滚。
@@ -35,6 +36,7 @@ use crate::commands::recommendation_cron::{
     RecoCronConfig, TREND_SCREENING_TASK_TYPE, TREND_SCREENING_WORKFLOW_ID,
 };
 use crate::commands::stock_workflow::BatchReflectionConfig;
+use crate::commands::stock_workflow::reflection::LESSON_VALIDATION_TASK_TYPE;
 
 /// 任务固定 ID（幂等键，勿改 —— 改了会在用户库里长出第二份）
 pub const RECO_JOB_ID: &str = "stock-reco-daily";
@@ -44,8 +46,9 @@ pub const REFLECTION_JOB_ID: &str = "reflection-due-daily";
 pub const DECISION_BACKTEST_JOB_ID: &str = "decision-backtest-daily";
 pub const MOVER_RECALL_JOB_ID: &str = "mover-recall-weekly";
 pub const EVOLUTION_PROPOSAL_JOB_ID: &str = "evolution-proposal-daily";
+pub const LESSON_JOB_ID: &str = "lesson-validation-daily";
 
-/// 种子化七条内置定时任务（启动时调用，失败不阻塞）。
+/// 种子化八条内置定时任务（启动时调用，失败不阻塞）。
 ///
 /// `overwrite = false`（生产）：已存在即跳过；
 /// `overwrite = true`（测试重置用）：先删同名再建。
@@ -69,7 +72,7 @@ pub async fn seed_stock_automation_crons(
     Ok(())
 }
 
-/// 构造七条内置任务（时刻均为**本地时区**口径，与调度器的 Local 匹配对齐）
+/// 构造八条内置任务（时刻均为**本地时区**口径，与调度器的 Local 匹配对齐）
 ///
 /// ⚠ `CronJob::new` 的首参是 **name**，`id` 由 uuid 现生成（crates/runtime-core/src/cron_job.rs:196-199）⇒
 /// 幂等键必须显式赋 `job.id`（同 `seed_opc_cron.rs` 的形态），否则每次启动长出新的任务。
@@ -188,6 +191,23 @@ fn build_builtin_jobs() -> Result<Vec<CronJob>, String> {
     proposal.id = EVOLUTION_PROPOSAL_JOB_ID.to_string();
     jobs.push(proposal);
 
+    // 8) 工作日 21:00 教训有效性验证与退役：排在 18:00 到期反思、20:00 进化聚合之后，
+    //    吃当天新落的反思行与 `lesson_applications` 引用记录。
+    //    **刻意不进交易日闸门**：本任务只读库（反思行 / 引用记录 / 分析 outcome），
+    //    不依赖当日行情，休市日跑同样能推进退役判据。
+    //    接线前 `run_lesson_validation` **没有任何触发方**（PLAN-reflection-optimization-closure §三：
+    //    函数上方注释谎称已接入后台任务，实际全仓无该符号）⇒ 无效教训一直留在注入语料里，
+    //    反思链只剩「加教训」没有「删教训」。
+    let mut lesson = CronJob::new(
+        "教训验证与退役（内置）",
+        "0 21 * * 1-5",
+        "",
+        "统计每条教训被引用后的实际成功率，据此调整 confidence 并退役无效教训",
+    )
+    .with_task_type(LESSON_VALIDATION_TASK_TYPE);
+    lesson.id = LESSON_JOB_ID.to_string();
+    jobs.push(lesson);
+
     Ok(jobs)
 }
 
@@ -199,15 +219,90 @@ mod tests {
     use crate::commands::backtest_validation::parse_decision_backtest_config;
 
     #[tokio::test]
-    async fn seed_creates_seven_jobs_and_is_idempotent() {
+    async fn seed_creates_eight_jobs_and_is_idempotent() {
         let store = Arc::new(CronJobStore::new_ephemeral());
         seed_stock_automation_crons(&store, false).await.unwrap();
-        assert_eq!(store.list().await.len(), 7);
+        assert_eq!(store.list().await.len(), 8);
 
         // 再跑两次：不重复建、不改写
         seed_stock_automation_crons(&store, false).await.unwrap();
         seed_stock_automation_crons(&store, false).await.unwrap();
-        assert_eq!(store.list().await.len(), 7);
+        assert_eq!(store.list().await.len(), 8);
+    }
+
+    /// 齐备性判据（PLAN §三.5）：**种出来的每个 task_type 都必须在 executor 源码里被显式处理**。
+    ///
+    /// 根因形态就是「seed 有任务、services 没有对应判据」⇒ 任务到点什么都不发生且不报错
+    /// （教训验证就是这么空转了一个多月）。口径刻意笨：只要求该 task_type 的**字面值或常量名**
+    /// 出现在 `init/services.rs` 里（分派分支或交易日闸门判据都算被处理过），
+    /// 不做语义推断 —— 会「聪明地」推断分支的判据容易自己恒真。
+    #[test]
+    fn every_builtin_task_type_is_handled_by_the_executor() {
+        /// 把 `.with_task_type(X)` 的实参换算成 services.rs 里必须出现的形式之一。
+        fn expected_forms(arg: &str) -> Vec<String> {
+            let trimmed = arg.trim().trim_end_matches(')').trim();
+            if let Some(rest) = trimmed.strip_prefix('"') {
+                let value = rest.trim_end_matches('"').to_string();
+                vec![format!("\"{value}\"")]
+            } else {
+                let last = trimmed.rsplit("::").next().unwrap_or(trimmed).to_string();
+                vec![last]
+            }
+        }
+        fn with_task_type_args(seed_src: &str) -> Vec<String> {
+            let marker = ".with_task_type(";
+            let mut out = Vec::new();
+            let mut rest = seed_src;
+            while let Some(i) = rest.find(marker) {
+                let after = &rest[i + marker.len()..];
+                match after.find(')') {
+                    Some(end) => out.push(after[..end].to_string()),
+                    None => break,
+                }
+                rest = &after[1.min(after.len())..];
+            }
+            out
+        }
+
+        let seed_src = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src/init/stock_automation_cron_seed.rs"),
+        )
+        .expect("读取自身源码失败");
+        let services_src = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/init/services.rs"),
+        )
+        .expect("读取 src/init/services.rs 失败");
+
+        // 注释里的历史说明也含 task_type 字面量 ⇒ 先剥注释行（`//` 开头）再判，避免门被注释喂饱
+        let strip_comments = |src: &str| -> String {
+            src.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n")
+        };
+        let code_lines = strip_comments(&services_src);
+
+        // seed 侧扫描面 = 生产代码：本测试自身源码里既有 marker 字面量（`".with_task_type("`）
+        // 又有文档 comment 提到它 ⇒ 不截到 `#[cfg(test)]` 之前会自指计数（实测 8 报成 10）。
+        let seed_code = strip_comments(&seed_src);
+        let seed_prose = seed_code.split("#[cfg(test)]").next().unwrap_or_default();
+        let args = with_task_type_args(seed_prose);
+        assert_eq!(args.len(), 8, "内置任务应各有 1 个 with_task_type 实参，实得 {}", args.len());
+        for arg in &args {
+            let forms = expected_forms(arg);
+            let handled = forms.iter().any(|f| code_lines.contains(f));
+            assert!(
+                handled,
+                "task_type 实参 `{arg}` 在 services.rs 的代码里没有任何处置点 ⇒ 该任务到点静默不执行"
+            );
+        }
+
+        // 负控：一个没人处理的 task_type 必须被判为未处置，否则本门恒真
+        let orphan = expected_forms("\"lesson-validation\"");
+        assert_eq!(orphan, vec!["\"lesson-validation\""]);
+        let synthetic = String::from("if x { do_something() }");
+        assert!(
+            !orphan.iter().any(|f| synthetic.contains(f)),
+            "负控失效：本门应能认出「源码里没人处理这个 task_type」"
+        );
     }
 
     #[tokio::test]
@@ -274,5 +369,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cfg.window_hours_or_default(), 24);
+
+        // 教训验证：工作日 21:00、无参数、task_type 与 executor 分支同源
+        // （本任务的根因正是「有实现无触发」⇒ 常量必须两侧共用一份，见 §三.1）
+        let lesson = find(LESSON_JOB_ID);
+        assert_eq!(lesson.task_type.as_deref(), Some(LESSON_VALIDATION_TASK_TYPE));
+        assert_eq!(lesson.schedule, "0 21 * * 1-5");
+        assert!(lesson.prompt.is_empty(), "教训验证无参数，prompt 应留空");
     }
 }

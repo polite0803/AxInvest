@@ -4005,6 +4005,12 @@ pub struct CronJobResponse {
     /// 共用一个 `task_type`，前端只能靠本字段把列表项归到各自的链上 ——
     /// 否则「关掉快速链」会误关掉原链的任务（列表里 `[0]` 是谁取决于插入顺序）。
     workflow_id: Option<String>,
+    /// 任务配置原文（`CronJob.prompt`，各 task_type 自己的配置 JSON 或空串）。
+    ///
+    /// 必须回传：反思面板的「时刻 / 深度 / 最低置信度」三个控件此前用硬编码初值渲染，
+    /// 且库里已有任务时开关只改状态、不写配置 ⇒ 界面显示的值与真正生效的值可以长期不一致
+    /// （PLAN-reflection-optimization-closure §六）。回读实际配置才谈得上「改得动」。
+    prompt: String,
     run_count: u32,
     last_run_at: Option<i64>,
     next_run_at: Option<i64>,
@@ -4020,6 +4026,7 @@ impl From<&CronJob> for CronJobResponse {
             status: format!("{:?}", j.status).to_lowercase(),
             recurring: j.recurring,
             workflow_id: j.workflow_id.clone(),
+            prompt: j.prompt.clone(),
             run_count: j.run_count,
             last_run_at: j.last_run_at,
             next_run_at: j.next_run_at,
@@ -5339,6 +5346,12 @@ pub async fn delete_watchlist_scan_cron(
 /// - `min_confidence_threshold`: 只反思 `stock_reflections.min_confidence_threshold >= 此值` 的 pending
 ///   （0 = 全部；pending row 由分析链路写入，默认 70）
 /// - `reflection_depth`: "light"(简要) 或 "deep"(详细推理链)，覆盖 pending row 自带的深度
+///
+/// 决策校验任务的描述文案 —— `create` / `update` 共用一份，避免两处各写一句而漂移。
+fn validate_decisions_desc(threshold: i32, depth: &str) -> String {
+    format!("反思复盘：按待办队列逐条复盘（最低置信度:{threshold}, 深度:{depth}）")
+}
+
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "创建决策校验定时任务")]
 #[tauri::command]
 pub async fn create_validate_decisions_cron(
@@ -5352,7 +5365,7 @@ pub async fn create_validate_decisions_cron(
     let expr = cron_expression.unwrap_or_else(|| "0 6 * * *".to_string());
     let threshold = min_confidence_threshold.unwrap_or(0);
     let depth = reflection_depth.unwrap_or_else(|| "light".to_string());
-    let desc = format!("反思复盘：按待办队列逐条复盘（最低置信度:{}, 深度:{}）", threshold, depth);
+    let desc = validate_decisions_desc(threshold, &depth);
     // [2026-09-13] 配置必须序列化进 `prompt`。
     // executor 的 `validate-decisions` 分支从 `prompt` 反序列化
     // `ValidateDecisionsConfig`；此前 prompt 写的是「决策校验 + 反思复盘」这句中文，
@@ -5405,6 +5418,72 @@ pub async fn toggle_validate_decisions_cron(
         )
         .await;
     Ok(())
+}
+
+/// 更新决策校验定时任务的配置（时刻 / 深度 / 最低置信度）。
+///
+/// 为什么必须有它（PLAN-reflection-optimization-closure §六）：`create_*` 只在「库里还没有
+/// 任务」时被调用一次，`toggle_*` 只改状态 ⇒ 面板上三个控件改完值再开关，编辑值**零落库**；
+/// 加上控件初值是硬编码常量、从不回读，形成「显示 ≠ 生效」的假开关。本命令把三项写回
+/// `CronJob.schedule` 与 `prompt`（executor 的 `validate-decisions` 分支正是从 prompt
+/// 反序列化 `ValidateDecisionsConfig`，写 prompt 就是写生效配置）。
+///
+/// 三项都必须给全（面板一次提交三项）⇒ 不存在「留空表示不改」的第二种语义。
+/// 任务不存在 ⇒ `TARGET_NOT_FOUND`；参数越界 ⇒ `VALIDATION_FAILED`；**不得静默成功**
+/// （`CronJobStore::update` 返回 bool，旧形态 `let _ =` 会把「没找到该任务」报成保存成功）。
+#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "更新决策校验定时任务配置")]
+#[tauri::command]
+pub async fn update_validate_decisions_cron(
+    state: State<'_, AppState>,
+    id: String,
+    cron_expression: String,
+    min_confidence_threshold: i32,
+    reflection_depth: String,
+) -> Result<CronJobResponse, String> {
+    if !(0..=100).contains(&min_confidence_threshold) {
+        return Err(ErrorResponse::new(wf_err::VALIDATION_FAILED)
+            .with_detail(format!("最低置信度须在 0~100 之间，实得 {min_confidence_threshold}"))
+            .to_string());
+    }
+    if reflection_depth != "light" && reflection_depth != "deep" {
+        return Err(ErrorResponse::new(wf_err::VALIDATION_FAILED)
+            .with_detail(format!("反思深度只能是 light 或 deep，实得 {reflection_depth}"))
+            .to_string());
+    }
+    let expr = cron_expression.trim().to_string();
+    if expr.split_whitespace().count() != 5 {
+        return Err(ErrorResponse::new(wf_err::VALIDATION_FAILED)
+            .with_detail(format!("cron 表达式须为 5 段（分 时 日 月 周），实得 {expr}"))
+            .to_string());
+    }
+    let config = crate::commands::stock_workflow::ValidateDecisionsConfig {
+        min_confidence: min_confidence_threshold,
+        reflection_depth: Some(reflection_depth.clone()),
+        max_count: None,
+    };
+    let prompt = config.to_json()?;
+    let desc = validate_decisions_desc(min_confidence_threshold, &reflection_depth);
+
+    let found = state
+        .cron_job_store
+        .update(&id, |j| {
+            j.schedule = expr;
+            j.prompt = prompt;
+            j.description = desc;
+        })
+        .await;
+    if !found {
+        return Err(ErrorResponse::new(wf_err::TARGET_NOT_FOUND)
+            .with_detail(format!("定时任务 {id} 不存在（可能已被删除）"))
+            .to_string());
+    }
+    // 回读更新后的任务：前端据此立即显示库里真正生效的值，而不是显示刚提交的草稿
+    let jobs = state.cron_job_store.list().await;
+    jobs.iter().find(|j| j.id == id).map(CronJobResponse::from).ok_or_else(|| {
+        ErrorResponse::new(wf_err::INVALID_STATE)
+            .with_detail(format!("任务 {id} 更新成功但回读不到（存储状态不一致）"))
+            .to_string()
+    })
 }
 
 /// 删除决策校验定时任务

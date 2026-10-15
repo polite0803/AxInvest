@@ -3215,6 +3215,78 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
             }));
             return;
         }
+        // 教训有效性验证与退役：task_type = lesson-validation
+        // （PLAN-reflection-optimization-closure §三）
+        //
+        // [2026-10-14 接线] `run_lesson_validation` 的实现早在 P1-#5 就写完了（引用计数 +
+        // 引用后成功率 + confidence 调整 + 退役裁定），但**全仓没有触发方**：种子任务里没有它，
+        // 本 dispatch 也没有分支，只剩一个人手才会调的 Tauri 命令。现网佐证：
+        // `reflection_lessons` 7 行里 `success_count>0` 为 0 行、`lesson_applications` 仅 1 行。
+        // 后果不是「少一个统计」：退役判据不跑 ⇒ 无效教训一直留在注入语料里，
+        // 反思链只剩「加教训」没有「删教训」。
+        //
+        // 无参数（`CronJob.prompt` 留空）；只读库、不依赖当日行情 ⇒ **不进**交易日闸门。
+        if job.task_type.as_deref()
+            == Some(crate::commands::stock_workflow::reflection::LESSON_VALIDATION_TASK_TYPE)
+        {
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            tokio::task::spawn(cron_live(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
+
+                // 报告原样落 output：这些计数是任务中心里唯一能看出「退役环跑了但一条没判」
+                // 与「根本没跑」差别的读数，按字段重排/缺省填 0 都会把它读成假数。
+                let result =
+                    match crate::commands::stock_workflow::reflection::run_lesson_validation(&db)
+                        .await
+                    {
+                        Ok(report) => {
+                            let summary = report.to_string();
+                            tracing::info!(
+                                "[CronScheduler] 教训验证 '{}' 完成: {summary}",
+                                job_name
+                            );
+                            axagent_runtime_core::TaskRunResult {
+                                success: true,
+                                output: Some(summary),
+                                error: None,
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                                skipped: false,
+                            }
+                        },
+                        Err(e) => {
+                            tracing::error!("[CronScheduler] 教训验证 '{}' 失败: {e}", job_name);
+                            axagent_runtime_core::TaskRunResult {
+                                success: false,
+                                output: None,
+                                error: Some(e),
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                                skipped: false,
+                            }
+                        },
+                    };
+
+                store.record_run(&job_id, result).await;
+                if !recurring
+                    && !store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await
+                {
+                    tracing::warn!(
+                        "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                         （未找到该任务或持久化失败，下次到点会重复跑）",
+                        job_id
+                    );
+                }
+            }));
+            return;
+        }
         // 进化计划聚合：task_type = evolution-proposal（PLAN P1/P4）
         //
         // 工作日 20:00（cron `0 20 * * 1-5`，在 18:00 到期反思之后）。消费的是已落库

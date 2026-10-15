@@ -983,6 +983,10 @@ pub async fn run_reflection_workflow(
                     agreement_score: Set(None),
                     // Gap1 走 reflection_verdict 旧格（不去重、每次重跑追加），非 #31 四档通道。
                     source_ref: Set(None),
+                    // §二 显式外键：本行由**这条反思**产出。统计侧据此直连，不再依赖
+                    // (stock_code, created_at) 相等 —— 反思行的 created_at 是**建点时刻**、
+                    // 本行的是**完成时刻**，天然不等（旧键现网实测 8 行 0 命中）。
+                    reflection_id: Set(Some(analysis_id.clone())),
                     created_at: Set(now_ms),
                 }
                 .insert(db)
@@ -1047,63 +1051,72 @@ pub async fn run_reflection_workflow(
                 }
             }
 
-            // ── Gap 3: 攒够 N 条一致建议自动触发 WFO 校准 ──
-            // 当连续 3+ 条反思对某个参数提出同方向调整时，自动跑校准。
+            // ── Gap 3: 同方向建议的留痕计数（当前**不自动执行**任何校准）──
+            // 逐参数比方向，且只认「这条建议确实提了该参数」的行。
+            // 2026-10-14 两处更正：① 旧实现用 ParamSet 形态判方向，而解析器当时对任何非空
+            //   数组都返回出厂默认 ⇒ `suggested < default` 与 `prev < default` 恒同为 false，
+            //   「连续同方向」是必然成立的假信号；② 旧注释称「实际自动校准由 scheduler/cron
+            //   层接管」并不存在（全仓调 `calibrate_portfolio_mgr_params` 的只有漂移面板按钮），
+            //   本分支从头到尾只写日志，措辞按事实改为「仅留痕」。
             if verdict_str == "wrong" || verdict_str == "partial" {
-                if let Some(ref pj) = params_suggestion_json {
-                    use axagent_analysis_engine::portfolio_formula::try_parse_param_suggestion;
-                    if let Some(suggested) = try_parse_param_suggestion(pj) {
-                        tracing::info!(
-                            "[reflection] Gap3: 解析到参数建议 buy={:.2} capHi={:.0}, 检查一致性...",
-                            suggested.buy_threshold,
-                            suggested.cap_high
-                        );
-                        // 查询最近 10 条有参数建议的反思
-                        use axagent_entities::stock_reflections as sr;
-                        use sea_orm::QuerySelect;
-                        let recent = sr::Entity::find()
-                            .filter(sr::Column::Status.eq("completed"))
-                            .filter(sr::Column::ParameterSuggestionsJson.is_not_null())
-                            .order_by(sr::Column::CreatedAt, sea_orm::Order::Desc)
-                            .limit(10)
-                            .all(db)
-                            .await;
-                        if let Ok(rows) = recent {
-                            let mut same_direction = 1; // 当前这条算 1
+                use axagent_analysis_engine::portfolio_formula::parse_param_suggestion_entries;
+                let current_entries = match params_suggestion_json.as_deref() {
+                    Some(pj) => parse_param_suggestion_entries(pj),
+                    None => Vec::new(),
+                };
+                if !current_entries.is_empty() {
+                    // 查询最近 10 条有参数建议的反思
+                    use axagent_entities::stock_reflections as sr;
+                    use sea_orm::QuerySelect;
+                    let recent = sr::Entity::find()
+                        .filter(sr::Column::Status.eq("completed"))
+                        .filter(sr::Column::ParameterSuggestionsJson.is_not_null())
+                        .order_by(sr::Column::CreatedAt, sea_orm::Order::Desc)
+                        .limit(10)
+                        .all(db)
+                        .await;
+                    if let Ok(rows) = recent {
+                        for (name, value, base) in &current_entries {
+                            // 方向 = 建议值相对「清单当时的现值」升降。清单现值由变量表派生
+                            // （`build_tunable_params_catalog`），与面板改过的库里值可能有差
+                            // ⇒ 本计数只作留痕，不作为自动执行依据。
+                            let Some(base) = base else {
+                                tracing::info!(
+                                    "[reflection] Gap3: 参数 {name} 未带 current_value ⇒ 方向不可判，跳过计数"
+                                );
+                                continue;
+                            };
+                            let cur_dir = *value < *base;
+                            let mut same_direction = 1usize; // 当前这条算 1
                             for r in &rows {
                                 if r.id == analysis_id {
                                     continue;
                                 }
-                                if let Some(pj2) = r.parameter_suggestions_json.as_deref() {
-                                    if let Some(prev) = try_parse_param_suggestion(pj2) {
-                                        // 检查 buy_threshold 的调整方向是否一致
-                                        let def = axagent_analysis_engine::portfolio_formula::PortfolioMgrParamSet::v56_default();
-                                        let current_dir =
-                                            suggested.buy_threshold < def.buy_threshold;
-                                        let prev_dir = prev.buy_threshold < def.buy_threshold;
-                                        if current_dir == prev_dir {
-                                            same_direction += 1;
-                                        } else {
-                                            break; // 方向不同就停止计数
-                                        }
-                                        if same_direction >= 3 {
-                                            tracing::info!(
-                                                "[reflection] Gap3: 连续 {same_direction} 条建议降低 buy_threshold, \
-                                                 自动触发 WFO 校准"
-                                            );
-                                            // 为了避免异步阻塞 reflection 主流程，只记录不实际执行
-                                            // 实际自动校准由 scheduler/cron 层接管
-                                            break;
-                                        }
-                                    } else {
-                                        break;
-                                    }
-                                } else {
-                                    break;
+                                let pj =
+                                    r.parameter_suggestions_json.as_deref().unwrap_or_default();
+                                let prev = parse_param_suggestion_entries(pj);
+                                match prev.into_iter().find(|(n, _, _)| n == name) {
+                                    Some((_, pv, Some(pbase))) if (pv < pbase) == cur_dir => {
+                                        same_direction += 1;
+                                    },
+                                    _ => break, // 该参数没被提 / 方向不同 / 现值缺失 ⇒ 连续性断开
                                 }
+                            }
+                            if same_direction >= 3 {
+                                tracing::info!(
+                                    "[reflection] Gap3: 参数 {name} 连续 {same_direction} 条同方向建议（{}），\
+                                     仅留痕 —— 自动校准通路不存在，唯一入口是漂移面板按钮",
+                                    if cur_dir { "降低" } else { "提高" }
+                                );
                             }
                         }
                     }
+                } else if params_suggestion_json.is_some() {
+                    // 有建议文本、但一个可校准参数都没提到（自造名字或 `[]`）⇒ 显式留痕，
+                    // 不让「反思说过参数」被下游当成「已参与优化」。
+                    tracing::info!(
+                        "[reflection] Gap3: 本次 params_suggestion 无可校准参数，不参与同方向统计"
+                    );
                 }
             }
 
@@ -1743,8 +1756,22 @@ async fn extract_lesson_to_rule(
 // - 引用后决策成功率（success_count）：基于 stock_analyses 表的 posterior 字段
 // - 规则置信度衰减/提升：基于实际表现调整 confidence
 //
-// 调用方式：cron 调度器或 Tauri 命令 `run_lesson_validation_command`。
-// 已接入 start_background_services 的 start_lesson_validation 定时任务。
+/// `lesson-validation` 任务类型标识。
+///
+/// **单点声明**：`init/services.rs` 的分派分支与 `init/stock_automation_cron_seed.rs` 的内置
+/// 任务都引用它，不各写一份字面量（同 `backtest_validation::DECISION_BACKTEST_TASK_TYPE` 的
+/// 处置）。改名会静默切断派发 —— 而本函数一旦没有触发方，教训的 `confidence` / `success_count`
+/// / 退役三件事就全停摆，且界面看不出来（就是 2026-10-14 之前的状态）。
+pub const LESSON_VALIDATION_TASK_TYPE: &str = "lesson-validation";
+
+// 调用方式：内置定时任务 `lesson-validation-daily`（工作日 21:00，排在 18:00 到期反思与
+// 20:00 进化聚合之后，见 `init/stock_automation_cron_seed.rs`）+ Tauri 命令
+// `run_lesson_validation_command`。
+//
+// ⚠ 2026-10-14 更正：本块原写「已接入 start_background_services 的 start_lesson_validation
+// 定时任务」，而该符号全仓不存在 ⇒ `run_lesson_validation` 实际**没有任何触发方**
+// （现网佐证：`reflection_lessons` 7 行里 `success_count>0` 为 0 行、`lesson_applications` 仅 1 行）。
+// 触发通路本轮补齐，见 PLAN-reflection-optimization-closure §三。
 pub async fn run_lesson_validation(
     db: &sea_orm::DatabaseConnection,
 ) -> Result<serde_json::Value, String> {
@@ -1929,9 +1956,12 @@ pub async fn run_lesson_validation(
 
 /// P2-F15 修复: 手动触发 lesson 验证的 Tauri 命令包装。
 ///
-/// 内部核心函数 `run_lesson_validation` 已通过 `start_lesson_validation` 后台
-/// 定时任务自动调度，但未暴露为 Tauri 命令，导致前端无法手动触发校证。
-/// 此包装函数补齐该缺口，便于调试和紧急校证场景。
+/// 内部核心函数 `run_lesson_validation` 的 Tauri 包装，供手动校证 / 紧急重算使用。
+///
+/// ⚠ 2026-10-14 更正：本块原文称核心函数「已通过 `start_lesson_validation` 后台定时任务
+/// 自动调度」—— 该符号全仓不存在，当时它**没有任何自动触发方**（现网 `reflection_lessons`
+/// 的 `success_count` 全 0 即证）。自动调度本轮由内置任务 `lesson-validation-daily` 补上
+/// （`init/stock_automation_cron_seed.rs` 第 8 条 + `init/services.rs` 的分派分支）。
 #[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description =  "运行教训规则验证")]
 #[tauri::command]
 pub async fn run_lesson_validation_command(
@@ -4224,6 +4254,26 @@ mod deterministic_was_correct_tests {
         }
 
         // ── 反思行：起算代之后 / 之前（status 必须 completed 才会被注入）──
+        // ⚠ 前置夹具：注入侧按「被复盘的分析有没有留逐节点依据（blackboard_snapshot）」筛除
+        //（2026-10-14 §五十一-② 依据过滤，dao `partition_by_analysis_evidence`）。反思行指向的
+        // 分析行不存在 ⇒ 与「快照为 NULL」同处置，整条被筛掉，本门测的「按代际隔离」根本走不到。
+        // 因此两条反思各配一条**有快照**的分析行；快照内容本门不解析，非 NULL 即算有依据。
+        let mk_analysis = |id: &str| axagent_entities::stock_analyses::ActiveModel {
+            id: Set(id.to_string()),
+            stock_code: Set(code.to_string()),
+            stock_name: Set("恒瑞医药".to_string()),
+            analysis_date: Set("2026-09-01".to_string()),
+            provider_id: Set("test".to_string()),
+            conversation_id: Set("test-conv".to_string()),
+            status: Set("completed".to_string()),
+            blackboard_snapshot: Set(Some("{}".to_string())),
+            created_at: Set(now),
+            updated_at: Set(now),
+            ..Default::default()
+        };
+        for id in ["a-r-new", "a-r-old"] {
+            mk_analysis(id).insert(&db).await.expect("插入被复盘的分析行应成功（带黑板快照）");
+        }
         let mk_row = |id: &str, g: Option<i32>| stock_reflections::ActiveModel {
             id: Set(id.to_string()),
             stock_code: Set(code.to_string()),

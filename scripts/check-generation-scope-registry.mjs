@@ -161,14 +161,28 @@ const REGISTRY = [
     fn: "reco_ic_stats",
     class: "pending",
     marker: MARKER_RECO,
-    note: "#12：荐股逐档 rank IC 面板（读 decision_validations 全表，尚未按 reco_version 筛）",
+    note:
+      "#12 部分收口（2026-10-15）：本函数已按 pick 主键 join 出 `reco_version` 并逐行带上归属，" +
+      "真正的下限筛发生在 `recommender::ic::aggregate_reco_ic`（已登记为 statistics）；" +
+      "本函数体不引用常量属预期，pending 状态留给「源表仍无代际列、每次都要 join 回查」这笔债",
+  },
+  {
+    file: "src-tauri/crates/analysis-engine/src/recommender/ic.rs",
+    fn: "aggregate_reco_ic",
+    class: "statistics",
+    marker: MARKER_RECO,
+    note:
+      "#12 已收口：rank IC 的配对样本按荐股代际下限筛（`>= RECO_GENERATION_FLOOR`），" +
+      "跨代与代际未知**分列计数**；这是 `reco_ic_gate` 能翻 on 的前提（依赖锁见 seed_consistency_tests）",
   },
   {
     file: "src-tauri/crates/analysis-engine/src/recommender/reco_loop.rs",
     fn: "load_reco_loop_samples",
     class: "pending",
     marker: MARKER_RECO,
-    note: "#12：自动降权的样本装载 —— 未筛 ⇒ 跨代配对直接落在**写回**路径上",
+    note:
+      "#12 未收口：本函数带出了每条样本的 `reco_version`，但**胜率线**（weight_decay::compute_adjusted_weights）" +
+      "仍不按代际筛 ⇒ 自动降权的胜率分母还是跨代混池（IC 那半已在 ic.rs 收口）。下一步：给胜率线补同一条下限判据",
   },
 ];
 

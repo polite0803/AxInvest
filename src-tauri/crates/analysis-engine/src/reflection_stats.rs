@@ -682,6 +682,54 @@ fn nearest_analysis_dimensions<'a>(
         .min_by_key(|a| (a.created_at - decision_at).abs())
 }
 
+/// sp 行 → 反思行的匹配：**首选显式外键**，外键缺失/悬空时退回旧的时间戳批键。
+///
+/// 返回 `(与 sp_rows 同序的匹配结果, 走旧键回退的行数)`，纯函数（不碰 DB），
+/// 便于把「外键命中」与「旧键回退」两种情形各打一条样本直接锁住。
+///
+/// 为什么要这一层（2026-10-14，PLAN-reflection-optimization-closure §二）：旧键
+/// `(stock_code, created_at, 复盘档)` 要求两侧 `created_at` 相等，而 Gap1 写入的 sp 行用
+/// **反思完成时刻**、反思行用**建点时刻**（pending 行由决策落盘时建）⇒ 批量反思路径上
+/// 永远配不上（现网实测 8 行 0 命中），逐档展开分支从未生效、统计恒落 legacy。
+/// 现在写侧当场盖 `reflection_id`，读侧据此直连；NULL/悬空只可能是本列引入前的存量行。
+///
+/// 旧键里为什么仍要带档：〇-B v2 起**一行反思 = 一个周期档**，同一条分析产出的四行由建点用
+/// **同一个 now_ms** 写 `created_at` ⇒ 只用 (stock_code, created_at) 做键会四行同键、
+/// `.or_insert` 随机丢三档（命中率统计的档间差异被抹平）。sp 侧的档来自 `period` 的
+/// `reflection:{档}` 后缀（写入点：`commands/stock_workflow/reflection.rs` 的 Gap1 构造）；
+/// 老数据两侧同构：sp.period 无后缀 ⇔ 反思行 horizon NULL ⇒ 仍按 None 相配。
+pub fn match_sp_rows_to_reflections<'a>(
+    sp_rows: &'a [strategy_performance::Model],
+    ref_rows: &'a [stock_reflections::Model],
+) -> (Vec<Option<&'a stock_reflections::Model>>, usize) {
+    let ref_by_id: HashMap<&str, &'a stock_reflections::Model> =
+        ref_rows.iter().map(|r| (r.id.as_str(), r)).collect();
+    let mut ref_by_batch: HashMap<(String, i64, Option<String>), &'a stock_reflections::Model> =
+        HashMap::new();
+    for r in ref_rows {
+        ref_by_batch.entry((r.stock_code.clone(), r.created_at, r.horizon.clone())).or_insert(r);
+    }
+
+    let mut out = Vec::with_capacity(sp_rows.len());
+    let mut legacy_key_rows = 0usize;
+    for sp in sp_rows {
+        let by_fk = sp.reflection_id.as_deref().and_then(|rid| ref_by_id.get(rid).copied());
+        let matched = by_fk.or_else(|| {
+            // 只有 Gap1 旧格（写侧字面量 `"reflection_verdict"`，见
+            // `commands/stock_workflow/reflection.rs` 的 Gap1 构造）才该有反思行归属。
+            // 其它通道（#31 四档 / 分析回测 / 对话直执行）本来就不参与这个匹配，
+            // 把它们的 NULL 也计入回退数会让告警常年长亮、失去信号。
+            if sp.strategy_id == "reflection_verdict" {
+                legacy_key_rows += 1;
+            }
+            let sp_horizon = sp.period.strip_prefix("reflection:").map(str::to_string);
+            ref_by_batch.get(&(sp.stock_code.clone(), sp.created_at, sp_horizon)).copied()
+        });
+        out.push(matched);
+    }
+    (out, legacy_key_rows)
+}
+
 /// 取数 + 逐周期展开 + 聚合的**唯一实现**（三处调用方共用，禁区 12：不重复实现）。
 ///
 /// 2026-09-29 从命令体抽出：四周期科学化 Phase C 要在**工作流启动时**读同一份统计
@@ -705,24 +753,20 @@ pub async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<HitrateStats
     // 索引 1：stock_analyses.id → Model
     let ana_by_id: HashMap<&str, &stock_analyses::Model> =
         ana_rows.iter().map(|a| (a.id.as_str(), a)).collect();
-    // 索引 2：反思行按 (stock_code, created_at, 复盘档) 批匹配（同批写入的时间戳相同）。
-    //
-    // 为什么键里必须带档：〇-B v2 起**一行反思 = 一个周期档**，同一条分析产出的四个档行
-    // 由建点用**同一个 now_ms** 写入 `created_at` ⇒ 只用 (stock_code, created_at) 做键时
-    // 四行同键，`.or_insert` 会**随机丢掉三档**（命中率统计的档间差异被抹平）。
-    // sp 侧的档来自 `period` 的 `reflection:{档}` 后缀（写入点：
-    // `commands/stock_workflow/reflection.rs` 的 strategy_performance 构造）。
-    // 老数据两侧同构：sp.period 无后缀 ⇔ 反思行 horizon NULL ⇒ 仍按 None 相配。
-    let mut ref_by_batch: HashMap<(String, i64, Option<String>), &stock_reflections::Model> =
-        HashMap::new();
-    for r in &ref_rows {
-        ref_by_batch.entry((r.stock_code.clone(), r.created_at, r.horizon.clone())).or_insert(r);
+    // 索引 2：sp 行 → 反思行的匹配（首选显式外键 `reflection_id`，退回旧时间戳批键）。
+    let (ref_matches, legacy_key_rows) = match_sp_rows_to_reflections(&sp_rows, &ref_rows);
+    if legacy_key_rows > 0 {
+        tracing::warn!(
+            "[hitrate] {} 行 strategy_performance 没有可用的 reflection_id（缺失或悬空）⇒ 退回旧时间戳批键匹配。\
+             该旧键要求两侧 created_at 相等，而 sp 行写的是反思**完成**时刻、反思行写的是**建点**时刻，\
+             配不上的行会静默落 legacy 分支并丢掉逐档结果",
+            legacy_key_rows
+        );
     }
 
     let mut samples = Vec::with_capacity(sp_rows.len());
-    for sp in &sp_rows {
-        let sp_horizon = sp.period.strip_prefix("reflection:").map(str::to_string);
-        let matched = ref_by_batch.get(&(sp.stock_code.clone(), sp.created_at, sp_horizon.clone()));
+    for (idx, sp) in sp_rows.iter().enumerate() {
+        let matched = ref_matches[idx];
         // §七十三 代际归属：优先取**反思行的建点盖章**（#5 落的列），配不上反思行的 sp 行
         // 退到分析行的时间窗匹配（`nearest_analysis_dimensions` 与上面 action/horizon 同源）。
         // 两条都拿不到 ⇒ None = 代际未知，**不退回编译期版本**（那会把「不知道」写成「就是这一代」）。
@@ -1617,5 +1661,118 @@ mod reflection_stats_tests {
         let (kept, pre_floor, unknown) = filter_by_generation_floor(all_old, f);
         assert!(kept.is_empty(), "旧代样本不得进分母");
         assert_eq!((pre_floor, unknown), (2, 0), "排除量必须如实等于被剔掉的样本数");
+    }
+}
+
+/// §二 显式外键匹配的两种情形 + 两条负控
+/// （2026-10-14，PLAN-reflection-optimization-closure）。
+///
+/// 关键前提：反思行的 `created_at` 是**建点时刻**、Gap1 sp 行的是**完成时刻**，
+/// 二者在同一条反思路径上也就不相等 —— 旧键因此在现网 8 行里 0 命中。
+/// 本套件把「外键命中」与「旧键回退」各钉一条，并锁住回退计数。
+#[cfg(test)]
+mod hitrate_join_tests {
+    use super::match_sp_rows_to_reflections;
+    use axagent_entities::{stock_reflections, strategy_performance};
+
+    fn sp_row(
+        id: &str,
+        code: &str,
+        completed_at: i64,
+        period: &str,
+        reflection_id: Option<&str>,
+    ) -> strategy_performance::Model {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "strategyId": "reflection_verdict",
+            "period": period,
+            "stockCode": code,
+            "stockName": "测试股",
+            "decisionAt": 1_700_000_000_000_i64,
+            "exitAt": completed_at,
+            "holdingDays": 28,
+            "returnPct": 3.5,
+            "wasCorrect": 1,
+            "decisionConfidence": 60,
+            "reflectionId": reflection_id,
+            "createdAt": completed_at,
+        }))
+        .expect("strategy_performance 夹具必须能反序列化")
+    }
+
+    fn reflection_row(
+        id: &str,
+        code: &str,
+        built_at: i64,
+        horizon: Option<&str>,
+    ) -> stock_reflections::Model {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "stockCode": code,
+            "stockName": "测试股",
+            "originalAnalysisId": "ana-1",
+            "asOfDate": "2026-09-01",
+            "hindsightDate": "2026-09-29",
+            "minConfidenceThreshold": 50,
+            "reflectionDepth": "light",
+            "actualOutcome": "win",
+            "source": "due",
+            "status": "completed",
+            "horizon": horizon,
+            "createdAt": built_at,
+            "updatedAt": built_at,
+        }))
+        .expect("stock_reflections 夹具必须能反序列化")
+    }
+
+    #[test]
+    fn explicit_fk_matches_even_when_created_at_differs() {
+        // 建点 1_000、完成 9_000 —— 旧时间戳键在这个情形下必然配不上
+        let refs = vec![reflection_row("r-1", "600000", 1_000, Some("mid"))];
+        let sps = vec![sp_row("s-1", "600000", 9_000, "reflection:mid", Some("r-1"))];
+        let (matched, legacy) = match_sp_rows_to_reflections(&sps, &refs);
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].map(|r| r.id.as_str()), Some("r-1"), "显式外键必须命中反思行");
+        assert_eq!(legacy, 0, "走外键的行不得计入旧键回退数");
+    }
+
+    #[test]
+    fn legacy_timestamp_key_still_matches_pre_fk_rows_but_is_counted() {
+        // 存量行：reflection_id 为 NULL，两侧 created_at 恰好相同（老形态同批写入）
+        let refs = vec![reflection_row("r-old", "600001", 5_000, Some("short"))];
+        let sps = vec![sp_row("s-old", "600001", 5_000, "reflection:short", None)];
+        let (matched, legacy) = match_sp_rows_to_reflections(&sps, &refs);
+        assert_eq!(
+            matched[0].map(|r| r.id.as_str()),
+            Some("r-old"),
+            "存量行仍要按旧键配上，否则历史命中率凭空清零"
+        );
+        assert_eq!(legacy, 1, "回退行必须被计数，供调用方告警");
+    }
+
+    /// 负控 A：外键悬空 ⇒ 走回退，且回退仍要按档区分，不得随机拿同键的第一行。
+    #[test]
+    fn dangling_fk_falls_back_and_still_distinguishes_horizon() {
+        let refs = vec![
+            reflection_row("r-a", "600002", 7_000, Some("mid")),
+            reflection_row("r-b", "600002", 7_000, Some("long")),
+        ];
+        let sps = vec![sp_row("s-x", "600002", 7_000, "reflection:long", Some("nope"))];
+        let (matched, legacy) = match_sp_rows_to_reflections(&sps, &refs);
+        assert_eq!(legacy, 1, "悬空外键要走回退并计数");
+        assert_eq!(matched[0].map(|r| r.id.as_str()), Some("r-b"), "回退须按档筛到对应行");
+    }
+
+    /// 负控 B：旧键丢档 = 命中率档间差异被抹平，这条必须拦得住。
+    #[test]
+    fn legacy_key_distinguishes_horizon_rows() {
+        let refs = vec![
+            reflection_row("r-mid", "600003", 8_000, Some("mid")),
+            reflection_row("r-long", "600003", 8_000, Some("long")),
+        ];
+        let sps = vec![sp_row("s-long", "600003", 8_000, "reflection:long", None)];
+        let (matched, legacy) = match_sp_rows_to_reflections(&sps, &refs);
+        assert_eq!(legacy, 1);
+        assert_eq!(matched[0].map(|r| r.id.as_str()), Some("r-long"));
     }
 }

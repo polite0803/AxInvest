@@ -105,6 +105,10 @@ const EXEMPT = new Map([
     "R1：同上，删除按批次键",
   ],
   [
+    "src-tauri/crates/analysis-engine/src/recommender/reco_loop.rs|load_pick_versions",
+    "R1：按 pick 主键集合回查 `reco_version` —— 本函数读的就是代际列本身（供 IC 筛样），再加代际谓词是把同一判据写两遍",
+  ],
+  [
     "src-tauri/src/commands/stock_workflow/reco_history.rs|delete_serenity_pick",
     "R1：find_by_id 单行读删，主键即代际",
   ],

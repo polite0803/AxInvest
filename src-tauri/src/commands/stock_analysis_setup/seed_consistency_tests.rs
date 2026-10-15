@@ -322,12 +322,15 @@ fn every_reco_picks_insert_stamps_algorithm_version() {
     assert_eq!(checked, 2, "预期扫到 2 处 reco_picks 建行点，实际 {checked} —— 有新增写入点未入册");
 }
 
-/// P2 依赖锁：`reco_ic_gate` 要能翻到 `on`，前提是 IC 聚合已按算法版本筛同代样本。
+/// P2 依赖锁：`reco_ic_gate` 要能翻到 `on`，前提是 IC 聚合**已按算法代际筛样**。
 ///
-/// 现状（实证）：库里**根本没有** `reco_ic_gate` 这个变量 ⇒ 走代码缺省 `shadow`
-/// （`reco_loop.rs:530-537`），所以跨代混池**当前未激活**，但它离激活只差一个变量。
-/// 本锁把这条依赖固定下来：一旦 `IC 行结构` 里出现 `algorithm_version`（即筛样已实现），
-/// 才允许 seed 里出现 `on`；否则 seed 出现 `on` 即红。
+/// 2026-10-14 状态更新（PLAN-reflection-optimization-closure §五）：筛样已实现
+/// （`RecoIcRow.algorithm_version` + `aggregate_reco_ic` 按 `RECO_GENERATION_FLOOR` 下限筛，
+/// 两类排除分别计数），故本锁现在应判「ready」；库里 seed 仍出厂 `shadow`，翻 `on` 归用户裁定。
+///
+/// 判据口径也随之收紧：原写法只要 `ic.rs` 里出现 `algorithm_version` 字样就算 ready，
+/// 结构体加个字段（没人筛）也能骗过它 ⇒ 现在要求**同时**出现下限常量与排除计数，
+/// 这两者只在「真的按代际剔样本」的代码里同时存在。
 #[test]
 fn ic_gate_can_only_turn_on_after_version_screening_exists() {
     let ic_src = {
@@ -335,7 +338,14 @@ fn ic_gate_can_only_turn_on_after_version_screening_exists() {
             .join("crates/analysis-engine/src/recommender/ic.rs");
         std::fs::read_to_string(&path).expect("读取 recommender/ic.rs 失败")
     };
-    let screening_ready = ic_src.contains("algorithm_version");
+    // 剥注释再判：只在注释里写「按代际筛样」不得算已实现（同全仓禁词门的口径）
+    let code_only: String = ic_src
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("///") && !l.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let screening_ready = code_only.contains("RECO_GENERATION_FLOOR")
+        && code_only.contains("excluded_unknown_generation");
     let seed_turns_on = {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src/commands/stock_analysis_setup/seed_variables.rs");
@@ -345,11 +355,16 @@ fn ic_gate_can_only_turn_on_after_version_screening_exists() {
         seed_turns_on.lines().any(|l| l.contains("reco_ic_gate") && l.contains("\"on\""));
     assert!(
         !gate_on_seeded || screening_ready,
-        "seed 把 reco_ic_gate 设成 on，但 `RecoIcRow` 还不带 algorithm_version ⇒          IC 会把跨代样本混成一格后自动降权。先做同代筛样，再翻闸。"
+        "seed 把 reco_ic_gate 设成 on，但 IC 还没有按代际筛样 ⇒ 跨代样本会混成一格后自动降权。先做同代筛样，再翻闸。"
+    );
+    // 正断言（2026-10-14 起筛样已存在）：本门不得因「筛样实现被删」而静默失效
+    assert!(
+        screening_ready,
+        "IC 的代际筛样判据被移除了（缺 RECO_GENERATION_FLOOR 或排除计数）⇒ 上一段锁会退化成恒真"
     );
 }
 
-/// 负控：筛样判据本身要能红 —— 造一段「seed 已 on 且 ic 无版本谓词」的文本必须被识别。
+/// 负控：筛样判据本身要能红 —— 「seed 已 on 且 ic 无版本筛样」的组合必须被识别。
 #[test]
 fn ic_gate_dependency_lock_detects_the_bad_pairing() {
     let bad_seed = "    (\"reco_ic_gate\".into(), \"on\".into()),";
@@ -357,6 +372,19 @@ fn ic_gate_dependency_lock_detects_the_bad_pairing() {
     assert!(hits, "负控失效：判据认不出「seed=on」");
     let good_seed = "    (\"reco_ic_gate\".into(), \"shadow\".into()),";
     assert!(!good_seed.lines().any(|l| l.contains("reco_ic_gate") && l.contains("\"on\"")));
+    // 负控 B：只有字段声明、没有筛样判据的 ic.rs 文本 ⇒ 必须判为未 ready
+    let field_only = "pub struct RecoIcRow { pub algorithm_version: Option<i32> }\n\
+                      // RECO_GENERATION_FLOOR 出现在注释里不算\n";
+    let code_only: String = field_only
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("///") && !l.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !(code_only.contains("RECO_GENERATION_FLOOR")
+            && code_only.contains("excluded_unknown_generation")),
+        "负控 B 失效：光有字段、没有筛样判据也必须拦住"
+    );
 }
 
 /// P1-11（2026-10-03，需求③「时间旅行模式下不得让模型联网取数」）。

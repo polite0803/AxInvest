@@ -529,6 +529,8 @@ pub async fn record_performance(
         // 非反思物化通道（cron / replay / 离线评测 / 对话直回测）不带来源键；
         // 幂等 upsert 只走 `upsert_reflection_horizon_performance`。
         source_ref: Set(None),
+        // 同理不带反思行归属：本通道不是 Gap1 旧格，命中率统计的外键轴对它无意义。
+        reflection_id: Set(None),
         created_at: Set(now),
     };
     strategy_performance::Entity::insert(am)
@@ -698,6 +700,9 @@ pub async fn upsert_reflection_horizon_performance(
                 agreement_score: Set(None),
                 template_version: Set(draft.template_version),
                 source_ref: Set(Some(draft.source_ref)),
+                // #31 四档通道的归属键是 `source_ref`（决策 id × 档），不带反思行外键：
+                // 同一决策的四档行由**任意一条**反思行展开都必须收敛到同一行（实体注释论证）。
+                reflection_id: Set(None),
                 created_at: Set(exit_at),
             };
             strategy_performance::Entity::insert(am)
@@ -858,6 +863,7 @@ mod tests {
             agreement_score: Set(None),
             template_version: Set(generation),
             source_ref: Set(None),
+            reflection_id: Set(None),
             created_at: Set(now),
         };
         for (sid, generation) in [

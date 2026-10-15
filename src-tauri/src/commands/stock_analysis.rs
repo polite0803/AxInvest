@@ -4786,6 +4786,13 @@ pub async fn reco_ic_stats(
         .all(state.harness.db())
         .await
         .map_err(|e| format!("{e}"))?;
+    // 代际归属：与闭环侧共用同一个取数函数（两处看到的归属必须一致，禁区 12）。
+    // 查不到 ⇒ 该样本按「代际未知」被 `aggregate_reco_ic` 剔除并计入排除数，不冒充当代。
+    let versions = axagent_analysis_engine::recommender::reco_loop::load_pick_versions(
+        state.harness.db(),
+        &rows.iter().map(|r| r.pick_id.clone()).collect::<Vec<_>>(),
+    )
+    .await;
     let samples: Vec<RecoIcRow> = rows
         .iter()
         .filter_map(|r| {
@@ -4799,6 +4806,7 @@ pub async fn reco_ic_stats(
                 confidence: r.confidence as f64,
                 realized_return_pct: (after / r.entry_price - 1.0) * 100.0,
                 holding_days: r.t_plus_n.max(0) as u32,
+                algorithm_version: versions.get(&r.pick_id).copied(),
             })
         })
         .collect();

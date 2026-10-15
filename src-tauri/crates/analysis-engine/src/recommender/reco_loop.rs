@@ -60,6 +60,15 @@ pub struct RecoLoopSample {
     /// 压成 `false` 就等于让「设施没跑过」给策略发一张清白证明。
     /// 由 [`load_reco_loop_samples`] 用 dao 的熔断时间线标注；纯函数入口默认 `None`。
     pub dqi_fused_at_prediction: Option<bool>,
+    /// 来源 pick 的主键 —— 代际标注轴（[`load_reco_loop_samples`] 据此回查
+    /// `reco_picks.reco_version`）。
+    pub pick_id: String,
+    /// 产出这条 pick 时的**荐股算法代际**（`reco_picks.reco_version`）。
+    ///
+    /// 由 [`load_reco_loop_samples`] 标注，纯函数入口默认 `None`（= 归属未知）。
+    /// `None` 与 `Some(旧代)` 在 IC 筛样时都**不进分母**，但两类排除分别计数 ——
+    /// 前者该去补写侧盖章，后者是换代后的正常积累（同分析链 `filter_by_generation_floor` 裁定）。
+    pub reco_version: Option<i32>,
 }
 
 /// 逐格闭环态（Phase B 计算、Phase D 呈现共用）。
@@ -141,6 +150,9 @@ pub fn samples_from_validation_rows(rows: Vec<decision_validations::Model>) -> V
             predicted_at_ms,
             // 标注在 `load_reco_loop_samples` 里按时间线做（本纯函数不碰库）
             dqi_fused_at_prediction: None,
+            pick_id: r.pick_id.clone(),
+            // 代际同 `dqi`：纯函数不查库 ⇒ 由 `load_reco_loop_samples` 回查 pick 后标注
+            reco_version: None,
         };
         let dist = (t_plus_n as i64 - period.default_holding_days() as i64).abs();
         match best.get(&r.pick_id) {
@@ -172,6 +184,8 @@ impl RecoLoopSample {
             confidence: self.confidence,
             realized_return_pct: self.realized_return_pct,
             holding_days: self.holding_days,
+            // 代际跟着样本走：IC 筛样判据在 `aggregate_reco_ic`，本处只负责把归属带过去
+            algorithm_version: self.reco_version,
         }
     }
 }
@@ -184,6 +198,33 @@ fn parse_ms(s: &str) -> Option<i64> {
     chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
         .ok()
         .map(|dt| dt.and_utc().timestamp_millis())
+}
+
+/// 回查一批 pick 的算法代际：`pick_id → reco_version`，**只收录有代际的行**。
+///
+/// 为什么返回空 map 而不是报错：取数失败 ⇒ 所有样本都成「代际未知」⇒ IC 分母归零并
+/// 如实报 `excluded_unknown_generation`，**不**退回「当作当代」（那会把「不知道」写成「有把握」）。
+/// 面板侧（`reco_ic_stats`）与闭环侧（[`load_reco_loop_samples`]）共用本函数，
+/// 保证两处看到的是同一套归属（禁区 12）。
+pub async fn load_pick_versions(
+    db: &DatabaseConnection,
+    pick_ids: &[String],
+) -> HashMap<String, i32> {
+    use axagent_entities::reco_picks;
+    if pick_ids.is_empty() {
+        return HashMap::new();
+    }
+    match reco_picks::Entity::find()
+        .filter(reco_picks::Column::Id.is_in(pick_ids.to_vec()))
+        .all(db)
+        .await
+    {
+        Ok(picks) => picks.into_iter().filter_map(|p| p.reco_version.map(|v| (p.id, v))).collect(),
+        Err(e) => {
+            tracing::warn!("[reco_loop] 代际回查失败 ⇒ 本轮样本一律按「代际未知」剔除: {e}");
+            HashMap::new()
+        },
+    }
 }
 
 /// 从库中读取全部已验证的荐股样本（薄封装；归一化与判定全在纯函数里）。
@@ -213,6 +254,12 @@ pub async fn load_reco_loop_samples(
     for s in samples.iter_mut() {
         s.dqi_fused_at_prediction =
             axagent_dao::repo::data_quality_fuse::fused_at(&intervals, s.predicted_at_ms);
+    }
+    // 代际归属：回查来源 pick 的 `reco_version` 标到样本上（IC 筛样的输入）。
+    let pick_ids: Vec<String> = samples.iter().map(|s| s.pick_id.clone()).collect();
+    let versions = load_pick_versions(db, &pick_ids).await;
+    for s in samples.iter_mut() {
+        s.reco_version = versions.get(&s.pick_id).copied();
     }
     Ok(samples)
 }
@@ -811,6 +858,10 @@ mod tests {
             // 夹具默认「产出即验证前一刻」：lookback 过滤用 exit_at_ms，本字段只喂熔断线
             predicted_at_ms: exit_at_ms - 86_400_000,
             dqi_fused_at_prediction: None,
+            // 夹具默认「归属当代且可追认」：权重线测试不关心代际，代际筛样由 ic.rs 的
+            // `cross_generation_samples_are_screened_and_counted_separately` 单独锁住。
+            pick_id: format!("p-{style}-{exit_at_ms}"),
+            reco_version: Some(crate::recommender::RECO_GENERATION_FLOOR),
         }
     }
 

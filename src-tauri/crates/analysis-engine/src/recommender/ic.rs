@@ -34,6 +34,16 @@ pub struct RecoIcRow {
     pub realized_return_pct: f64,
     /// 该样本的验证窗口（天），半衰期拟合的横轴
     pub holding_days: u32,
+    /// 该样本出生时的**荐股算法代际**（= 产出这条 pick 的 `reco_picks.reco_version`）。
+    ///
+    /// 为什么 IC 必须有它：IC 是「同一套判据下，置信度与实现收益的单调关系」。
+    /// 换代（因子增删 / 判据口径改动 / 矩阵变动 ⇒ `RECO_ALGORITHM_VERSION` +1）之后，
+    /// 旧代样本的 x 轴含义已经变了，与新代样本配在同一格里算出来的 ρ 既不是旧代的
+    /// 也不是新代的结论（分析侧同一条裁定见 `reflection_stats::filter_by_generation_floor`）。
+    ///
+    /// `None` = 归属未知（`reco_version` 列引入前的存量 pick）⇒ **不进分母**，
+    /// 由 `RecoIcStats.excluded_unknown_generation` 如实计数。
+    pub algorithm_version: Option<i32>,
 }
 
 /// 一个 (风格, 档位) 格的度量结果。
@@ -72,6 +82,16 @@ pub struct RecoIcStats {
     pub total_cells: usize,
     pub usable_cells: usize,
     pub total_samples: usize,
+    /// 筛样分母下限（= `RECO_GENERATION_FLOOR`）；规则是**下限不是等号**，
+    /// 等号会让每次换代把整个窗口清零。
+    pub generation_floor: i32,
+    /// 因「属于更早的算法代」被剔除的样本数（永久性剔除，不会回到分母）。
+    pub excluded_pre_floor_generation: usize,
+    /// 因「代际未知」（存量行没有 `reco_version`）被剔除的样本数（会随补章减少）。
+    ///
+    /// 两个数**刻意不合成一个**：分母变小到底是「换代清了旧样」还是「存量还没补章」，
+    /// 是两种完全不同的下一步（前者等样本重新积累，后者查写侧盖章）。
+    pub excluded_unknown_generation: usize,
     /// 24 格契约视图（`contract_cells()`）——行的存在性与不成立理由的**唯一来源**。
     /// 与 `styles`（观测）分列：某格没有样本 ≠ 该格不存在。
     pub matrix: Vec<MatrixCellView>,
@@ -138,6 +158,28 @@ pub fn contract_cells() -> Vec<MatrixCellView> {
 
 /// 聚合：按 (风格, 档位) 分组算 rank IC，再按风格拟合预测半衰期。
 pub fn aggregate_reco_ic(rows: &[RecoIcRow]) -> RecoIcStats {
+    // ── 同代筛样（2026-10-14，PLAN-reflection-optimization-closure §五）──
+    // 判据 = **下限** `>= RECO_GENERATION_FLOOR`（不是等号：等号会让每次换代把窗口清零）。
+    // 两类排除分开计数，与 `reflection_stats::filter_by_generation_floor` 同一条裁定：
+    // 合成一个数就看不出「分母为什么变小」是哪一种。
+    let floor = crate::recommender::RECO_GENERATION_FLOOR;
+    let mut excluded_pre_floor = 0usize;
+    let mut excluded_unknown = 0usize;
+    let rows: Vec<&RecoIcRow> = rows
+        .iter()
+        .filter(|r| match r.algorithm_version {
+            Some(v) if v >= floor => true,
+            Some(_) => {
+                excluded_pre_floor += 1;
+                false
+            },
+            None => {
+                excluded_unknown += 1;
+                false
+            },
+        })
+        .collect();
+
     let mut styles: Vec<String> = rows.iter().map(|r| r.style.clone()).collect();
     styles.sort();
     styles.dedup();
@@ -158,7 +200,7 @@ pub fn aggregate_reco_ic(rows: &[RecoIcRow]) -> RecoIcStats {
         let mut fit_points: Vec<(f64, f64)> = Vec::new();
         for period in &periods {
             let group: Vec<&RecoIcRow> =
-                rows.iter().filter(|r| r.style == *style && &r.period == period).collect();
+                rows.iter().copied().filter(|r| r.style == *style && &r.period == period).collect();
             if group.is_empty() {
                 continue;
             }
@@ -204,6 +246,9 @@ pub fn aggregate_reco_ic(rows: &[RecoIcRow]) -> RecoIcStats {
         total_cells,
         usable_cells,
         total_samples: rows.len(),
+        generation_floor: floor,
+        excluded_pre_floor_generation: excluded_pre_floor,
+        excluded_unknown_generation: excluded_unknown,
         matrix: contract_cells(),
         loop_view: crate::recommender::reco_loop::RecoLoopView::default(),
     }
@@ -213,6 +258,7 @@ pub fn aggregate_reco_ic(rows: &[RecoIcRow]) -> RecoIcStats {
 mod tests {
     use super::*;
 
+    /// 默认代际 = 起算代 ⇒ 既有 IC 数学口径的测试不受筛样影响。
     fn row(style: &str, period: &str, conf: f64, ret: f64, days: u32) -> RecoIcRow {
         RecoIcRow {
             style: style.to_string(),
@@ -220,7 +266,59 @@ mod tests {
             confidence: conf,
             realized_return_pct: ret,
             holding_days: days,
+            algorithm_version: Some(crate::recommender::RECO_GENERATION_FLOOR),
         }
+    }
+
+    fn row_gen(
+        style: &str,
+        period: &str,
+        conf: f64,
+        ret: f64,
+        days: u32,
+        algorithm_version: Option<i32>,
+    ) -> RecoIcRow {
+        RecoIcRow { algorithm_version, ..row(style, period, conf, ret, days) }
+    }
+
+    /// 跨代样本不得混进同一格：旧代 + 未知代各造一批，分母只留当代，
+    /// 且两类排除**分别**计数（合成一个数就看不出下一步该查什么）。
+    #[test]
+    fn cross_generation_samples_are_screened_and_counted_separately() {
+        let floor = crate::recommender::RECO_GENERATION_FLOOR;
+        let mut rows: Vec<RecoIcRow> = (0..IC_MIN_SAMPLE)
+            .map(|i| row("trend", "short", 50.0 + i as f64, i as f64, 5))
+            .collect();
+        // 6 条旧代（floor-1）+ 4 条归属未知（None），都够不上门槛，但会计数
+        for i in 0..6 {
+            rows.push(row_gen("trend", "short", 50.0 + i as f64, i as f64, 5, Some(floor - 1)));
+        }
+        for i in 0..4 {
+            rows.push(row_gen("trend", "short", 50.0 + i as f64, i as f64, 5, None));
+        }
+        let stats = aggregate_reco_ic(&rows);
+        assert_eq!(stats.total_samples, IC_MIN_SAMPLE, "分母只能包含当代样本");
+        assert_eq!(
+            (stats.excluded_pre_floor_generation, stats.excluded_unknown_generation),
+            (6, 4)
+        );
+        assert_eq!(stats.generation_floor, floor);
+        // 当代那批本身够门槛 ⇒ IC 仍可测（筛样不是为了报「样本不足」）
+        assert_eq!(stats.styles[0].cells[0].ic_status, "ok");
+    }
+
+    /// 负控：若把下限改成等号（只认当前代），换代就会把窗口清零 —— 本门要能察觉
+    /// 「旧代但 ≥ floor 的样本」仍被保留这件事。
+    #[test]
+    fn generation_floor_is_a_lower_bound_not_equality() {
+        let floor = crate::recommender::RECO_GENERATION_FLOOR;
+        let rows = vec![row_gen("trend", "mid", 60.0, 3.0, 28, Some(floor + 3))];
+        let stats = aggregate_reco_ic(&rows);
+        assert_eq!(stats.total_samples, 1, "高于下限的代际必须留在分母里");
+        assert_eq!(
+            (stats.excluded_pre_floor_generation, stats.excluded_unknown_generation),
+            (0, 0)
+        );
     }
 
     /// 完美单调 ⇒ ρ = 1；样本刚好够门槛 ⇒ 报数而不是"样本不足"。

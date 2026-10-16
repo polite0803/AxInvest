@@ -24,12 +24,17 @@ export function getDefaultVariables(): Variable[] {
     vars.push({ name, varType: type, value: val, description: desc, isSecret: false });
   // 分析流程
   b("analysis_depth", "standard", "stockAnalysis.configDescriptions.analysisDepth", "enum");
-  // 权威源是后端 `seed_variables::DEFAULT_DEBATE_ROUNDS`（v154 起 = 2），此处只是
+  // 权威源是后端 `seed_variables::DEFAULT_DEBATE_ROUNDS`（**四档化后 = 1**），此处只是
   // 「模板 variables 为空时的初始化值」，而这条路径会把值写回库里 ⇒ 必须与工厂缺省同数。
   // ⚠ 旧注释说「多轮是假多轮、与 harness serde 缺省收敛」，两句都已失效：
   //   ① v59（2026-09-21）起每轮展开独立 bull-rN/bear-rN 节点，各轮真跑（见建图注释）；
   //   ② harness 的 `default_debate_rounds()` 守护的是容器轮播次数（恒 1），不是轮数域。
-  b("debate_rounds", 2, "stockAnalysis.configDescriptions.debateRounds", "number");
+  // ⚠ 2 → 1（B3 换代）：轮数语义从「每模板几轮」变为「**每档几轮**」，B3 明文 1 轮/档，
+  //   代价账 `4×(1+1+1)=12` 次 LLM 调用即按此数算出（见 seed_variables 的同项文档）。
+  //   存量库的自选轮数由 `DEBATE_ROUNDS_MIGRATION_VERSION` 一次性打回 1；
+  //   此处若留 2，空模板路径会把 2 写回库里 ⇒ 与迁移后的值当场打架，
+  //   且实测跑几轮又取决于走哪条初始化路径（同型踩坑见文件上方 max_concurrent 注释）。
+  b("debate_rounds", 1, "stockAnalysis.configDescriptions.debateRounds", "number");
   // #11（2026-10-05）：12 → 8，与后端工厂缺省收敛。权威源是
   // `seed_variables.rs` 的 `max_concurrent`（2026-09-08 依 429 重试占槽实证由 3 调到 8），
   // 此处只是「模板 variables 为空时的初始化值」——而那条路径**会把这批值写回库里**

@@ -15197,6 +15197,17 @@
     "finalStrength": "Endgültige Stärke",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "Schnellanalyse",
+    "interrupted": {
+      "title": "Diese Analyse hat kein Ergebnis erzeugt",
+      "hint": "Der Datensatz wurde vor Abschluss der Analyse unterbrochen (App beendet oder Prozess abgestürzt); es wurde keine Entscheidung erzeugt. Über die Schaltfläche unten kann die Analyse erneut gestartet werden."
+    },
+    "recordStatus": {
+      "running": "Läuft",
+      "interrupted": "Unterbrochen",
+      "failed": "Fehlgeschlagen",
+      "timeout": "Zeitüberschreitung",
+      "cancelled": "Abgebrochen"
+    },
     "templateVersion": {
       "matched": "Graphversion: DB v{{db}} entspricht Code v{{code}}",
       "behind": "Graphversion: DB v{{db}} ist {{gap}} Generation(en) hinter Code v{{code}} - beim nächsten Analyselauf wird automatisch neu geseedet",

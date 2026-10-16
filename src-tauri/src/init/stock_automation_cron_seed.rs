@@ -6,13 +6,16 @@
 //! 前五条为**交易日**流水线（休市由 executor 的交易日闸门拦截，见
 //! `init/services.rs`）；第 9 条（组合指标日更）同样进闸门 —— 它的产物就是当日收盘快照，
 //! 休市日跑只会把同一份旧价再落一行。其余三条（妖股核查 / 进化聚合 / 教训验证）
-//! 与第 10 条（意图过期）**刻意不进闸门**，各自的执行分支注释里说明了原因：
+//! 与第 10 条（意图过期）、第 11 条（中断分析补跑）**刻意不进闸门**，
+//! 各自的执行分支注释里说明了原因：补跑锚定的是各行的原 `analysis_date`（as-of 补历史），
+//! 与「今天是不是交易日」无关。
 //!
 //! | 时刻 | 任务 | 产物 |
 //! |---|---|---|
 //! | 00:00 | 智能荐股（四档共享池扫描） | `reco_picks` 四档行 = 真实候选股票池 |
 //! | 01:00 | 趋势智选（serenity-screening 工作流） | `reco_picks` style='serenity' 行 |
 //! | 02:00 | 候选池逐只深度分析（全池 + 当日未分析判据） | `stock_analyses` + 反思 pending |
+//! | 04:00 | 中断分析补跑（`status='interrupted'` 按原分析日原地重跑） | `stock_analyses` 的 interrupted 行收敛为 completed |
 //! | 07:00 | 决策回测（T+N 验证历史 pick） | `decision_validations` = 荐股闭环的唯一样本源 |
 //! | 07:30 | pending 交易意图自动过期 | `stock_analyses.trade_intent_status` = expired |
 //! | 16:00 | 组合指标日更（收盘后） | `portfolio_metrics_daily` + `portfolio_correlation_snapshot` |
@@ -54,8 +57,13 @@ pub const EVOLUTION_PROPOSAL_JOB_ID: &str = "evolution-proposal-daily";
 pub const LESSON_JOB_ID: &str = "lesson-validation-daily";
 pub const PORTFOLIO_METRICS_JOB_ID: &str = "portfolio-metrics-daily";
 pub const INTENT_EXPIRY_JOB_ID: &str = "intent-expiry-daily";
+/// 中断分析自动补跑（2026-10-17）。task_type = `stock-analysis-rerun`。
+///
+/// 与「启动后自动补一轮」互为补充：那条是「刚发现就补」的即时通路，
+/// 本任务是漏网兜底（例如应用整夜未启动、或上一轮重跑失败）。
+pub const STOCK_ANALYSIS_RERUN_JOB_ID: &str = "stock-analysis-rerun-daily";
 
-/// 种子化十条内置定时任务（启动时调用，失败不阻塞）。
+/// 种子化十一条内置定时任务（启动时调用，失败不阻塞）。
 ///
 /// `overwrite = false`（生产）：已存在即跳过；
 /// `overwrite = true`（测试重置用）：先删同名再建。
@@ -79,7 +87,7 @@ pub async fn seed_stock_automation_crons(
     Ok(())
 }
 
-/// 构造十条内置任务（时刻均为**本地时区**口径，与调度器的 Local 匹配对齐）
+/// 构造十一条内置任务（时刻均为**本地时区**口径，与调度器的 Local 匹配对齐）
 ///
 /// ⚠ `CronJob::new` 的首参是 **name**，`id` 由 uuid 现生成（crates/runtime-core/src/cron_job.rs:196-199）⇒
 /// 幂等键必须显式赋 `job.id`（同 `seed_opc_cron.rs` 的形态），否则每次启动长出新的任务。
@@ -128,6 +136,29 @@ fn build_builtin_jobs() -> Result<Vec<CronJob>, String> {
     .with_task_type(POOL_SCAN_TASK_TYPE);
     pool.id = POOL_SCAN_JOB_ID.to_string();
     jobs.push(pool);
+
+    // 3.5) 04:00 中断分析补跑（2026-10-17）
+    //
+    // 补的是 `status = 'interrupted'` 的记录 —— 「进程在分析跑完前消失、终态从未写入」
+    // 的遗留（成因与判据见 `scheduler/restore.rs::reclaim_stale_stock_analyses`）。
+    // 这类记录不会自己好：永远没有结论，历史面板里点开也只有一句「未产出结论」。
+    //
+    // 为什么取 04:00：避开 02:00 候选池逐只分析与 07:00 决策回测，让它独占一段
+    // LLM 配额（它是长任务，35 条量级可达 1~3 小时）。
+    //
+    // ⚠ **故意不进交易日闸门**：重跑锚定各行自己的 `analysis_date`（as-of 补历史），
+    //   与「今天是不是交易日」无关。同 `services.rs` 对应分支的注释，别顺手加进
+    //   那个 `matches!` 白名单，否则补跑会在周末与节假日静默停摆。
+    let rerun_config = crate::commands::stock_analysis_rerun::RerunConfig::default();
+    let mut rerun = CronJob::new(
+        "中断分析补跑（内置）",
+        "0 4 * * *",
+        &rerun_config.to_json()?,
+        "把中断（进程退出导致未产出结论）的历史分析按其原分析日原地补跑，直到产出决策",
+    )
+    .with_task_type(crate::commands::stock_analysis_rerun::STOCK_ANALYSIS_RERUN_TASK_TYPE);
+    rerun.id = STOCK_ANALYSIS_RERUN_JOB_ID.to_string();
+    jobs.push(rerun);
 
     // 4) 18:00 四周期到期反思：period=None + dueOnly=true ⇒ 一条任务覆盖四档
     //    （到期判据 hindsight_date<=今日 已下推到 SQL，配额不被未到期积压消耗）
@@ -264,12 +295,12 @@ mod tests {
     async fn seed_creates_all_builtin_jobs_and_is_idempotent() {
         let store = Arc::new(CronJobStore::new_ephemeral());
         seed_stock_automation_crons(&store, false).await.unwrap();
-        assert_eq!(store.list().await.len(), 10);
+        assert_eq!(store.list().await.len(), 11);
 
         // 再跑两次：不重复建、不改写
         seed_stock_automation_crons(&store, false).await.unwrap();
         seed_stock_automation_crons(&store, false).await.unwrap();
-        assert_eq!(store.list().await.len(), 10);
+        assert_eq!(store.list().await.len(), 11);
     }
 
     /// 齐备性判据（PLAN §三.5）：**种出来的每个 task_type 都必须在 executor 源码里被显式处理**。
@@ -328,7 +359,11 @@ mod tests {
         let seed_code = strip_comments(&seed_src);
         let seed_prose = seed_code.split("#[cfg(test)]").next().unwrap_or_default();
         let args = with_task_type_args(seed_prose);
-        assert_eq!(args.len(), 10, "内置任务应各有 1 个 with_task_type 实参，实得 {}", args.len());
+        // 2026-10-17：新增「中断分析补跑」⇒ 10 → 11。
+        // 这个数字是**门禁的锚**：加了种子任务却没改它，会在这里红；而忘了在
+        // `services.rs` 加执行分支，会在下面逐条 `contains` 检查里红。
+        // 两条各管一半 —— 只修一处会让另一半静默通过。
+        assert_eq!(args.len(), 11, "内置任务应各有 1 个 with_task_type 实参，实得 {}", args.len());
         for arg in &args {
             let forms = expected_forms(arg);
             let handled = forms.iter().any(|f| code_lines.contains(f));

@@ -1448,7 +1448,19 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       // 只有后端落定 `completed` 才按完成态渲染；其余一律按 running 呈现
       // （显示进度条 + 停止按钮，卡片回「等待中」），让「未定稿」与「已定稿但无决策」
       // 在 UI 上可区分。
-      status: record.status === "completed" ? "completed" : "running",
+      status: record.status === "completed"
+        ? "completed"
+        : record.status === "running"
+        ? "running"
+        // ⚠ 2026-10-17 修复：此前这里写死 `: "running"` —— 把 **一切**非 completed 的
+        // DB 状态（failed / timeout / cancelled / interrupted）都渲染成 running。
+        // 后果不止文案错：`running` 会同时触发 `StockSearchBar` 的按钮 `disabled`
+        // 与 `startAnalysis` 的防重入 `return` ⇒ **打开一条僵死记录就把「开始分析」
+        // 永久锁死**（用户实证：库里 35 条僵死 running，点开其中任一条即再也发不出
+        // 新分析，请求根本到不了后端）。现在：仍在跑 → running（保留 v145 的
+        // 「进度条 + 停止按钮」语义）；其余一律 interrupted（未产出结论），
+        // 既不显示进度条、也不参与任何锁按钮的判据。
+        : "interrupted",
       // 仪表盘报告由后端加载历史时从 snapshot 重建（V60：修复重开历史仪表盘永远空态）
       dashboardReport: record.dashboardReport ?? null,
       dashboardMd: record.dashboardMd ?? null,

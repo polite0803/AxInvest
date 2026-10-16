@@ -15418,6 +15418,17 @@
     "searchPlaceholder": "输入股票代码或名称",
     "parsedAs": "识别为",
     "fastAnalysis": "快速分析",
+    "interrupted": {
+      "title": "本次分析未产出结论",
+      "hint": "该记录在分析跑完前被中断（应用退出或进程异常结束），没有生成任何决策。可点击下方按钮重新发起分析。"
+    },
+    "recordStatus": {
+      "running": "进行中",
+      "interrupted": "已中断",
+      "failed": "失败",
+      "timeout": "超时",
+      "cancelled": "已取消"
+    },
     "templateVersion": {
       "matched": "图版本：库内 v{{db}} 与代码 v{{code}} 一致",
       "behind": "图版本：库内 v{{db}} 落后代码 v{{code}}（差 {{gap}} 代，下一次分析运行时会自动重播种）",

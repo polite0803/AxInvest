@@ -87,6 +87,24 @@ const COMPACT_TAG_STYLE = {
   background: "transparent",
 } as const;
 
+/**
+ * 记录状态 → i18n key。返回 `null` = 该值不在已知值域内（调用方退回显示原始字符串，
+ * **不吞信息**）。
+ *
+ * 修复（2026-10-17）：此前这里把 `r.status` **原样打印**，界面出现的是后端字面量
+ * 英文小写串（`running` / `interrupted`）；读者既看不懂，也无从分辨
+ * 「仍在跑」与「已中断」—— 用户据此报障「挂着好多过期记录状态为 running」。
+ * 后端值域见 `src-tauri/crates/entities/src/stock_analyses.rs` 的 `status` 列注释。
+ */
+export function recordStatusKey(status: string): string | null {
+  if (status === "running") { return "stockAnalysis.recordStatus.running"; }
+  if (status === "interrupted") { return "stockAnalysis.recordStatus.interrupted"; }
+  if (status === "failed") { return "stockAnalysis.recordStatus.failed"; }
+  if (status === "timeout") { return "stockAnalysis.recordStatus.timeout"; }
+  if (status === "cancelled") { return "stockAnalysis.recordStatus.cancelled"; }
+  return null;
+}
+
 /** 个股分析页搜索框下方的历史分析快捷按钮 */
 export function AnalysisHistoryButton() {
   const { message } = App.useApp();
@@ -540,13 +558,25 @@ export function AnalysisHistoryButton() {
                         </div>
                       )}
 
-                    {r.status !== "completed"
-                      ? (
-                        <span style={{ color: "var(--sa-red, #ef4444)", fontSize: 10, marginRight: 4 }}>
-                          {r.status}
+                    {(() => {
+                      // 完成态沿用 ✓；其余走 i18n 标签，未知值退回原始串（不吞信息）。
+                      if (r.status === "completed") {
+                        return (
+                          <span style={{ color: "var(--sa-green, #22c55e)", fontSize: 10, marginRight: 4 }}>✓</span>
+                        );
+                      }
+                      const key = recordStatusKey(r.status);
+                      // `running` 是**进行中**、不是错误 ⇒ 用 amber，不再一律标红
+                      // （红字配上「已中断」文案会让人以为分析失败，而真相是进程消失了）。
+                      const color = r.status === "running"
+                        ? "var(--sa-amber, #f59e0b)"
+                        : "var(--sa-red, #ef4444)";
+                      return (
+                        <span title={r.status} style={{ color, fontSize: 10, marginRight: 4 }}>
+                          {key ? t(key) : r.status}
                         </span>
-                      )
-                      : <span style={{ color: "var(--sa-green, #22c55e)", fontSize: 10, marginRight: 4 }}>✓</span>}
+                      );
+                    })()}
                     {/* 重命名按钮 */}
                     <span
                       title={t("stockAnalysis.rename")}

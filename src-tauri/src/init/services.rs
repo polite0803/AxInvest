@@ -69,6 +69,8 @@ pub async fn start_background_services(
     start_cron_scheduler(app, state).await;
     start_trigger_recovery(state);
     start_scheduler_recovery(app, state);
+    start_stale_analysis_reclaim(state);
+    start_interrupted_analysis_rerun(app, state);
     start_approval_event_bridge(app, state);
     start_platform_adapters(state);
     start_skill_watcher(app, state);
@@ -2826,6 +2828,116 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
             }));
             return;
         }
+        // 中断分析自动重跑：task_type = stock-analysis-rerun
+        //
+        // [2026-10-17] 用户报障「历史面板挂着 35 条过期 running」→ 根因：`stock_analyses`
+        // 的**终态写入全在 spawn 出去的后台任务里**，进程一旦非优雅退出（硬杀/崩溃/关机），
+        // 就没有任何分支写终态，该行永久停在 `running`；应用启动回收
+        // （`scheduler/restore.rs::reclaim_stale_stock_analyses`）把这类行订正成
+        // `interrupted`，本分支负责把它们**真正跑出结论**。
+        //
+        // 为什么落在这里而不是做成离线脚本：用户要的是「应用内的一种机制」——
+        // 手动「立即执行」、定时巡检、启动自动补跑，三条入口都由这套内置任务框架现成提供；
+        // 换成脚本就得自己维护调度、状态与日志，且任务中心看不到。
+        //
+        // ⚠ **故意不进上面那道交易日闸门**：重跑锚定的是各行自己的 `analysis_date`
+        //（as-of 补历史），与「今天是不是交易日」无关。闸门是按 task_type 的显式白名单
+        //（`matches!` 逐个列），本类型不在其中即自动免闸 —— 但**别顺手把它加进去**，
+        // 那会让补跑在周末与节假日静默停摆。
+        if job.task_type.as_deref()
+            == Some(crate::commands::stock_analysis_rerun::STOCK_ANALYSIS_RERUN_TASK_TYPE)
+        {
+            let store = cron_store.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            let prompt = job.prompt.clone();
+            let app_for_job = app_handle.clone();
+            tokio::task::spawn(cron_live(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
+
+                // 配置解析失败按任务失败记录，**不做静默兜底** —— 否则用户设的
+                // maxPerRun 会被默认值悄悄替换，而任务列表里显示的仍是原文。
+                // 注意：空串是**正常形态**（种子任务不写 prompt）⇒ `from_json` 里回退默认值。
+                let config = match crate::commands::stock_analysis_rerun::RerunConfig::from_json(
+                    &prompt,
+                ) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!("[CronScheduler] 中断分析重跑 '{}' 配置解析失败: {e}", job_name);
+                        store
+                            .record_run(&job_id, axagent_runtime_core::TaskRunResult {
+                                success: false,
+                                output: None,
+                                error: Some(e),
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                                skipped: false,
+                                partial: false,
+                            })
+                            .await;
+                        if !recurring
+                            && !store
+                                .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                                .await
+                        {
+                            tracing::warn!(
+                                "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                                 （未找到该任务或持久化失败，下次到点会重复跑）",
+                                job_id
+                            );
+                        }
+                        return;
+                    },
+                };
+
+                // ⚠ 这里必须拿到 `&AppState`：重跑走的是 `run_stock_workflow_inner`，
+                // 它的签名要 `&AppState`（该函数同时承担建行 / 载模板 / 落库）。
+                // 启动流程交给本闭包的是 `&AppState` 借用，**不能** move 进 `'static` 闭包
+                // ⇒ 唯一安全路径是拿 `AppHandle` 反查 managed state。
+                // `use tauri::Manager` 必须就近引入：本文件头只 `use tauri::Emitter`
+                // （`state()` 是 `Manager` trait 的方法，缺它编译不过）。
+                use tauri::Manager;
+                let state_ref = app_for_job.state::<crate::AppState>();
+                let outcome = crate::commands::stock_analysis_rerun::run_rerun(
+                    Some(app_for_job.clone()),
+                    state_ref.inner(),
+                    &config,
+                )
+                .await;
+
+                tracing::info!(
+                    "[CronScheduler] 中断分析重跑 '{}' 完成: {}",
+                    job_name,
+                    outcome.render()
+                );
+                let result = axagent_runtime_core::TaskRunResult {
+                    success: outcome.is_success(),
+                    output: Some(outcome.render()),
+                    // 首个错误如实带出：即使最终收敛，它也是排查线索，不该被成功态吞掉。
+                    error: outcome.first_error.clone(),
+                    duration_ms: elapsed(),
+                    executed_at: started,
+                    skipped: false,
+                    // 「部分完成」= 有收敛但没跑完 ⇒ 前端显示 partial 徽章而不是「失败」。
+                    partial: !outcome.is_success() && outcome.resolved() > 0,
+                };
+                store.record_run(&job_id, result).await;
+                if !recurring
+                    && !store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await
+                {
+                    tracing::warn!(
+                        "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                         （未找到该任务或持久化失败，下次到点会重复跑）",
+                        job_id
+                    );
+                }
+            }));
+            return;
+        }
         // 反思：task_type = batch-reflection | validate-decisions
         //
         // [2026-09-13 接线] 此前这两个 task_type 在 CronExecutor 里**没有任何分支**：
@@ -3740,6 +3852,110 @@ fn start_scheduler_recovery(app: &tauri::AppHandle, state: &AppState) {
             Err(e) => {
                 tracing::error!("[start_scheduler_recovery] 恢复引导失败: {}", e);
             },
+        }
+    });
+}
+
+/// 股票分析「僵死 running」启动回收钩子（2026-10-17 用户报障）。
+///
+/// 为什么必须有它：`stock_analyses` 的 `running` 是 fire-and-forget 建行写的占位态，
+/// 四个终态写入（completed/failed/timeout/cancelled）**全在 spawn 出去的后台任务里**
+/// ⇒ 进程非优雅退出后，该行**永久**停在 `running`。而前端把「非 completed」一律当
+/// running（`src/stores/feature/stockAnalysisStore.ts:1451`），`running` 又同时锁死
+/// 「开始分析」按钮与其防重入检查 ⇒ 打开一条僵死记录就再也发不出新分析。
+/// 本钩子把这类行订正为 `interrupted`，让前后端都恢复可用。
+///
+/// `cutoff` 在**本函数被调用的一刻**取（启动早期，早于任何用户操作）；延迟执行时据此
+/// 只回收「上一进程遗留」的行，不会误杀延迟期间用户新建的分析。
+/// 判据、实测与残留风险详见 `scheduler/restore.rs::reclaim_stale_stock_analyses`。
+fn start_stale_analysis_reclaim(state: &AppState) {
+    // ── 外部批量重跑正在跑 ⇒ 本次**跳过**回收 ──
+    // `axagent-batch-rerun` 是**另一个进程**，它重跑期间那些行同样是 `running`；
+    // 此处若照常回收，会把它们误判成僵死，并让 bin 的落定等待提前结束 ⇒ 两条并发跑
+    // （正是本项目「高并发触发 LLM 供应商限流降级」的成因）。
+    // 跳过不会漏掉什么：回收幂等，下次启动照做；陈旧标记另有 6 小时窗口兜底。
+    if crate::scheduler::restore::external_rerun_in_progress() {
+        tracing::warn!(
+            "[start_stale_analysis_reclaim] 检测到外部批量重跑运行标记（{}）\
+             ⇒ 本次跳过僵死回收，避免误杀正在重跑的分析",
+            crate::scheduler::restore::EXTERNAL_RERUN_LOCK_FILE
+        );
+        return;
+    }
+    let db = state.harness.db().clone();
+    let cutoff_ms = chrono::Utc::now().timestamp_millis();
+    tauri::async_runtime::spawn(async move {
+        // 延迟与 `start_scheduler_recovery` 同因：避开启动期 DB 初始化竞争。
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        match crate::scheduler::restore::reclaim_stale_stock_analyses(&db, cutoff_ms).await {
+            Ok(0) => tracing::info!("[start_stale_analysis_reclaim] 无僵死分析记录"),
+            Ok(n) => tracing::warn!(
+                "[start_stale_analysis_reclaim] 回收 {} 条僵死 running 分析记录 → interrupted\
+                 （持有它们的进程已消失，判据见 scheduler/restore.rs）",
+                n
+            ),
+            Err(e) => tracing::error!("[start_stale_analysis_reclaim] 回收失败: {}", e),
+        }
+    });
+}
+
+/// 启动后**自动补跑一轮**中断分析（2026-10-17）。
+///
+/// ## 为什么需要它
+///
+/// 启动回收刚把上一进程遗留的 `running` 订正成 `interrupted`，那些行此刻正是
+/// 「已知没有结论、且没有任何进程会再碰它」的状态。若不在这里主动补一轮，
+/// 它们要等到下一次定时巡检（最长 24 小时）才可能被处理。
+///
+/// 与定时巡检**不是重复**：这里是「刚发现就补」的即时通路，巡检是漏网兜底。
+///
+/// ## 时序（必需，不是保守取值）
+///
+/// 延迟 10 秒 > 回收的 5 秒：回收本身也是 spawn + 延迟 5 秒，本钩子必须等它
+/// **落库之后**再扫，否则扫到的还是回收前的 `running`，一条都挑不出来。
+///
+/// ## 与离线批量重跑互斥
+///
+/// 若用户在跑 `axagent-batch-rerun`，其运行标记仍在 ⇒ 本钩子一并让路
+/// （两边同时重跑同一批，正是「高并发触发 LLM 供应商限流降级」的成因）。
+/// 检查做两处（入口 + 发起前）：标记可能在等待的这 10 秒里才出现。
+///
+/// ## 已知限制（登记，不在本轮修）
+///
+/// 本钩子**不持久化「已尝试次数」** ⇒ 若某条因数据源缺失等原因永远失败，
+/// 每次启动都会再试一次。单次调用内的重试上限由 `RerunConfig::max_rounds`
+/// 控制；跨启动的累积上限需要一个 `attempt` 列，属另行设计。
+fn start_interrupted_analysis_rerun(app: &tauri::AppHandle, state: &AppState) {
+    let external_lock = crate::scheduler::restore::EXTERNAL_RERUN_LOCK_FILE;
+    if crate::scheduler::restore::external_rerun_in_progress() {
+        tracing::warn!(
+            "[start_interrupted_analysis_rerun] 检测到外部批量重跑运行标记（{external_lock}）\
+             ⇒ 本次跳过启动补跑"
+        );
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        // 二次检查：标记可能在上面那段等待里才出现。
+        if crate::scheduler::restore::external_rerun_in_progress() {
+            tracing::warn!(
+                "[start_interrupted_analysis_rerun] 等待期间出现外部批量重跑标记 ⇒ 跳过启动补跑"
+            );
+            return;
+        }
+        use tauri::Manager;
+        let state_ref = app.state::<crate::AppState>();
+        let outcome = crate::commands::stock_analysis_rerun::run_rerun(
+            Some(app.clone()),
+            state_ref.inner(),
+            &crate::commands::stock_analysis_rerun::RerunConfig::default(),
+        )
+        .await;
+        if outcome.pending_at_start == 0 {
+            tracing::info!("[start_interrupted_analysis_rerun] 无待补跑的中断分析");
+        } else {
+            tracing::info!("[start_interrupted_analysis_rerun] 启动补跑完成: {}", outcome.render());
         }
     });
 }

@@ -681,6 +681,41 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
                         </div>
                       )}
 
+                      {
+                        /* 「没有结论地消失」—— 与 error 分开渲染（2026-10-17）。
+                        为什么不能并进上面那个 error 面板：`error` 是「跑过了并失败」，
+                        面板要展示 failedNodes 与失败原因；本态是进程消失、**连原因都没留下**，
+                        挂失败节点清单只会伪造一个不存在的诊断。
+                        本面板的关键职责是**给出重新发起的入口** —— 此前这种记录被
+                        `loadAnalysis` 映射成 running，页面显示进度条且「开始分析」被锁死，
+                        用户既看不到真相、也发不出新分析。 */
+                      }
+                      {status === "interrupted" && (
+                        <div
+                          style={{
+                            padding: 16,
+                            margin: 16,
+                            border: "1px solid var(--sa-amber, #f59e0b)",
+                            borderRadius: 8,
+                            background: "var(--surface)",
+                          }}
+                        >
+                          <h3 style={{ margin: "0 0 8px 0", color: "var(--sa-amber, #f59e0b)" }}>
+                            {t("stockAnalysis.interrupted.title")}
+                          </h3>
+                          <p style={{ margin: "0 0 12px 0", color: "var(--muted)", whiteSpace: "pre-wrap" }}>
+                            {t("stockAnalysis.interrupted.hint")}
+                          </p>
+                          <Button
+                            type="primary"
+                            disabled={!stockCode}
+                            onClick={() => stockCode && startAnalysis(stockCode)}
+                          >
+                            {t("stockAnalysis.startAnalysis")}
+                          </Button>
+                        </div>
+                      )}
+
                       {(status === "running" || status === "completed") && (
                         <>
                           {status === "running" && (

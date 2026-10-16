@@ -21,6 +21,9 @@ const INVEST_TASK_TYPES = new Set([
   "lesson-validation",
   "portfolio-metrics",
   "intent-expiry",
+  // 中断分析自动重跑（2026-10-17）：把 `status='interrupted'` 的记录按原
+  // `analysis_date` 原地重跑，见后端 `commands/stock_analysis_rerun.rs`。
+  "stock-analysis-rerun",
 ]);
 
 /** 系统维护内置 taskType 白名单。 */
@@ -52,6 +55,9 @@ const BUILTIN_EXECUTABLE_TYPES = new Set([
   "lesson-validation",
   "portfolio-metrics",
   "intent-expiry",
+  // 中断分析自动重跑（2026-10-17）—— 后端 `BUILTIN_TASK_TYPES` 已同步登记。
+  // 漏这条的症状：任务中心「立即执行」报 MANUAL_RUN_NOT_SUPPORTED，而定时到点照跑。
+  "stock-analysis-rerun",
 ]);
 
 type TaskLike = {

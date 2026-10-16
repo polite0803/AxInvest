@@ -15197,6 +15197,17 @@
     "finalStrength": "Fuerza final",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "Análisis rápido",
+    "interrupted": {
+      "title": "Este análisis no produjo ninguna conclusión",
+      "hint": "El registro se interrumpió antes de terminar el análisis (la aplicación se cerró o el proceso finalizó de forma anormal), por lo que no se generó ninguna decisión. Use el botón de abajo para volver a ejecutarlo."
+    },
+    "recordStatus": {
+      "running": "En curso",
+      "interrupted": "Interrumpido",
+      "failed": "Fallido",
+      "timeout": "Tiempo agotado",
+      "cancelled": "Cancelado"
+    },
     "templateVersion": {
       "matched": "Versión del grafo: BD v{{db}} igual al código v{{code}}",
       "behind": "Versión del grafo: BD v{{db}} va {{gap}} generación(es) por detrás del código v{{code}} - se volverá a sembrar automáticamente en el próximo análisis",

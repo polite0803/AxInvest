@@ -15197,6 +15197,17 @@
     "finalStrength": "최종 강도",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "빠른 분석",
+    "interrupted": {
+      "title": "이 분석은 결론을 생성하지 못했습니다",
+      "hint": "분석이 끝나기 전에 중단되었습니다(앱 종료 또는 프로세스 비정상 종료). 생성된 결정이 없습니다. 아래 버튼으로 다시 실행할 수 있습니다."
+    },
+    "recordStatus": {
+      "running": "실행 중",
+      "interrupted": "중단됨",
+      "failed": "실패",
+      "timeout": "시간 초과",
+      "cancelled": "취소됨"
+    },
     "templateVersion": {
       "matched": "그래프 버전: DB v{{db}} = 코드 v{{code}}",
       "behind": "그래프 버전: DB v{{db}}가 코드 v{{code}}보다 {{gap}} 세대 뒤침 - 다음 분석 실행 시 자동으로 다시 시드됩니다",

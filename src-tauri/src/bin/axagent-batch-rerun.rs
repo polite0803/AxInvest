@@ -72,6 +72,11 @@ axagent-batch-rerun —— 批量 as-of 重跑历史股票分析
   --since <YYYY-MM-DD> 只处理 analysis_date >= 该日
   --until <YYYY-MM-DD> 只处理 analysis_date <= 该日
   --only-stale         只处理 template_version IS NULL 的记录
+  --status <S,...>     只处理 status 命中这些值的记录（如 interrupted、failed,timeout）。
+                       与日期/代码/代际筛选是**与**关系。这是**唯一**能精确对准
+                       「只重跑这些失败记录」的参数 —— 其余参数实测都会连带覆盖无关的
+                       已完成记录（--codes 连带 55 条、日期区间连带 64 条、--only-stale
+                       连带 43 条，均以本库 2026-10-17 实测计）。
   --template-version <N> 只处理 template_version = N 的记录（按代筛样，#13）
   --snapshot-report      只打印代际/快照完整性报告后退出（**不重跑任何分析**；
                        但仍会连库并走一次启动期 schema 对账 —— 说「不改库」是假的）
@@ -116,6 +121,16 @@ struct Args {
     since: Option<String>,
     until: Option<String>,
     only_stale: bool,
+    /// 按状态筛样：只处理 `status` 命中这些值的记录（如 `interrupted`、`failed`）。
+    ///
+    /// 2026-10-17 新增。起因：库里 35 条僵死 `running` 被启动回收订正为 `interrupted`
+    /// 后需要**精确**重跑，而既有参数全都打不准（实测连带面）：`--codes`（31 只股票）
+    /// 连带 55 条其它记录、`--since/--until` 连带 64 条 completed、`--only-stale`
+    /// 连带 43 条 completed ⇒ 用它们会把一批**无关的已完成结论**一并原地覆盖。
+    ///
+    /// 与 `--only-stale` / `--template-version` / `--codes` / 日期区间是**与**关系。
+    /// 空 = 不按状态筛（保持旧行为）。
+    status: Vec<String>,
     /// 按代筛样：只处理 `template_version = N` 的记录（任务 #13）。
     template_version: Option<i32>,
     /// 只打印代际/快照完整性报告后退出（不改库，供排障先看现状）。
@@ -144,6 +159,14 @@ impl Args {
                         it.next().ok_or_else(|| "--template-version 需要一个整数".to_string())?;
                     a.template_version =
                         Some(v.parse().map_err(|e| format!("--template-version 解析失败: {e}"))?);
+                },
+                "--status" => {
+                    let v = it.next().ok_or_else(|| "--status 需要逗号分隔的状态值".to_string())?;
+                    a.status = v
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
                 },
                 "--reflect-after" => a.reflect_after = true,
                 "--backfill-reflections" => a.backfill_reflections = true,
@@ -215,6 +238,55 @@ async fn delete_stale_reflection_perf(db: &sea_orm::DatabaseConnection, stock_co
         .await
         .map(|r| r.rows_affected)
         .unwrap_or(0)
+}
+
+/// 外部批量重跑的**运行标记**文件名（写在 `~/.axagent/` 下）。
+///
+/// ## 为什么需要它（2026-10-17）
+///
+/// 应用启动回收（`src-tauri/src/scheduler/restore.rs::reclaim_stale_stock_analyses`）
+/// 会把「上一进程遗留」的 `running` 行标为 `interrupted`。而本 bin 是**另一个进程**，
+/// 它重跑期间那些行确实是 `running` ⇒ 应用若在此期间启动，会把它们**误判成僵死**。
+///
+/// 后果不止状态难看：下方 `wait_until_settled` 靠轮询 `status` 判落定，看到
+/// `interrupted` 就会**提前认定该条已结束**（而 DAG 实际还在跑），随即启动下一条
+/// ⇒ 两条并发跑，正是本项目「高并发触发 LLM 供应商限流降级」的成因。
+///
+/// 故本 bin 在**真正执行重跑期间**持有该标记；应用看到「新鲜」标记就跳过本次回收。
+/// 回收是幂等的 ⇒ 跳过不会漏掉什么，下次启动照做。
+const RERUN_LOCK_FILE: &str = "batch-rerun.lock";
+
+/// 运行标记的 RAII 持有者：`acquire()` 即写入，`Drop` 即删除。
+///
+/// 用 RAII 而非「入口写、出口删」两处手工调用：后者的删除语句会被任何
+/// `?` / `return` / panic 绕过，留下一个**看起来还在跑**的陈旧标记。
+/// 即便如此，硬杀（任务管理器结束进程）仍会残留 —— 那种情形由应用侧的
+/// 「新鲜窗口」兜底（见 `scheduler/restore.rs::external_rerun_in_progress`），
+/// 过期后自动恢复回收，不需要人工清理。
+struct RerunLockGuard {
+    path: std::path::PathBuf,
+}
+
+impl RerunLockGuard {
+    fn acquire() -> Result<Self, String> {
+        let dir = axagent_home();
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建数据目录失败: {e}"))?;
+        let path = dir.join(RERUN_LOCK_FILE);
+        // 只写诊断信息，**不写任何凭据**（应用侧会读这个文件，且它可能被人翻看）。
+        let started_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let body = format!("pid={}\nstarted_unix={started_secs}\n", std::process::id());
+        std::fs::write(&path, body).map_err(|e| format!("写运行标记失败: {e}"))?;
+        Ok(Self { path })
+    }
+}
+
+impl Drop for RerunLockGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 /// 等待某条分析离开 `running`，返回其**终态** status 字符串（或超时说明）。
@@ -831,6 +903,10 @@ async fn run() -> Result<(), String> {
     if let Some(n) = args.template_version {
         q = q.filter(stock_analyses::Column::TemplateVersion.eq(n));
     }
+    // 按状态筛样（2026-10-17）：精确对准「重跑这些失败/中断记录」的唯一手段。
+    if !args.status.is_empty() {
+        q = q.filter(stock_analyses::Column::Status.is_in(args.status.clone()));
+    }
     if !args.codes.is_empty() {
         q = q.filter(stock_analyses::Column::StockCode.is_in(args.codes.clone()));
     }
@@ -875,6 +951,16 @@ async fn run() -> Result<(), String> {
         println!("[batch-rerun] 无对象，退出。");
         return Ok(());
     }
+
+    // ── 运行标记：让应用启动期的僵死回收**让路** ──
+    // 否则它会把本 bin 正在跑的行误判成僵死，使下方 `wait_until_settled` 提前认定
+    // 「已落定」并启动下一条 ⇒ 两条并发跑（见 `RerunLockGuard` 文档）。
+    // RAII ⇒ 本函数任何出口（含 `?` 提前返回）都会删除标记。
+    let _rerun_lock = RerunLockGuard::acquire()?;
+    println!(
+        "[batch-rerun] 已写运行标记 {}（应用启动期的僵死回收将跳过本次；跑完自动删除）",
+        RERUN_LOCK_FILE
+    );
 
     // ── 逐条重跑 ──
     // 刻意**串行**：本项目有「高并发触发 LLM 供应商限流降级」的历史教训，

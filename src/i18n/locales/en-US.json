@@ -15622,6 +15622,17 @@
     "sentimentNeutral": "Neutral",
     "sharesUnit": "shares",
     "fastAnalysis": "Fast Analysis",
+    "interrupted": {
+      "title": "This analysis produced no conclusion",
+      "hint": "This record was interrupted before the analysis finished (the app exited or the process ended abnormally), so no decision was produced. Use the button below to run it again."
+    },
+    "recordStatus": {
+      "running": "Running",
+      "interrupted": "Interrupted",
+      "failed": "Failed",
+      "timeout": "Timed out",
+      "cancelled": "Cancelled"
+    },
     "templateVersion": {
       "matched": "Graph version: DB v{{db}} matches code v{{code}}",
       "behind": "Graph version: DB v{{db}} is {{gap}} generation(s) behind code v{{code}} - it is reseeded automatically when the next analysis run starts",

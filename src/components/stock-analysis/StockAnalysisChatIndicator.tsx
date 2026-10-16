@@ -29,7 +29,10 @@ export function StockAnalysisChatIndicator() {
   const dismissChatIndicator = useStockAnalysisStore((s) => s.dismissChatIndicator);
 
   // 空闲或已关闭 → 不显示
-  if (status === "idle" || chatIndicatorDismissed) {
+  // `interrupted`（2026-10-17 新增）**同样不显示**：本指示器讲的是「后台正在跑什么 /
+  // 刚跑完什么」，而该态是「没有结论地消失」。下面各分支都不匹配它 ⇒ 若只在 idle
+  // 返回 null，它会兜底渲染出一个**空的彩色横条**（容器自带 border/背景，内容全空）。
+  if (status === "idle" || status === "interrupted" || chatIndicatorDismissed) {
     return null;
   }
 

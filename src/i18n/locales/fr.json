@@ -15197,6 +15197,17 @@
     "finalStrength": "Force finale",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "Analyse rapide",
+    "interrupted": {
+      "title": "Cette analyse n'a produit aucune conclusion",
+      "hint": "L'enregistrement a été interrompu avant la fin de l'analyse (fermeture de l'application ou fin anormale du processus) ; aucune décision n'a été produite. Utilisez le bouton ci-dessous pour relancer."
+    },
+    "recordStatus": {
+      "running": "En cours",
+      "interrupted": "Interrompu",
+      "failed": "Échec",
+      "timeout": "Délai dépassé",
+      "cancelled": "Annulé"
+    },
     "templateVersion": {
       "matched": "Version du graphe : DB v{{db}} identique au code v{{code}}",
       "behind": "Version du graphe : DB v{{db}} en retard de {{gap}} génération(s) sur le code v{{code}} - re-seeding automatique au prochain lancement d'analyse",

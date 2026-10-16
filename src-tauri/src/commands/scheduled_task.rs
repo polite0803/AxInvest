@@ -128,6 +128,10 @@ const BUILTIN_TASK_TYPES: &[&str] = &[
     crate::commands::constants::LESSON_VALIDATION_TASK_TYPE,
     crate::commands::constants::PORTFOLIO_METRICS_TASK_TYPE,
     crate::commands::constants::INTENT_EXPIRY_TASK_TYPE,
+    // 中断分析自动重跑（2026-10-17）。⚠ 与 `init/services.rs` 的 cron executor 分支、
+    // 以及前端 `taskGrouping.ts` 的两个白名单必须**同步**，漏一处 =
+    // 「立即执行」报 MANUAL_RUN_NOT_SUPPORTED（而到点自动执行照常 ⇒ 只在手动时露头）。
+    crate::commands::stock_analysis_rerun::STOCK_ANALYSIS_RERUN_TASK_TYPE,
 ];
 
 /// 「立即执行」白名单的只读入口。

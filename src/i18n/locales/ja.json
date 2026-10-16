@@ -15197,6 +15197,17 @@
     "finalStrength": "最終強度",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "高速分析",
+    "interrupted": {
+      "title": "この分析は結論を生成していません",
+      "hint": "分析の完了前に中断されました（アプリの終了またはプロセスの異常終了）。意思決定は生成されていません。下のボタンから再実行できます。"
+    },
+    "recordStatus": {
+      "running": "実行中",
+      "interrupted": "中断",
+      "failed": "失敗",
+      "timeout": "タイムアウト",
+      "cancelled": "キャンセル済み"
+    },
     "templateVersion": {
       "matched": "グラフバージョン：DB v{{db}} はコード v{{code}} と一致",
       "behind": "グラフバージョン：DB v{{db}} はコード v{{code}} より {{gap}} 世代遅延（次回の実行時に自動で再シードされます）",

@@ -177,6 +177,7 @@ pub mod quant_backtest;
 pub mod screenshot_diagnosis;
 pub mod stock_analysis;
 pub mod stock_analysis_bridge;
+pub mod stock_analysis_rerun;
 // 孤儿测试恢复挂载：P4 验证 20 个股票桥接工具（读/写闭环 + STOCK_WRITE_TOOLS 对账）
 #[cfg(test)]
 mod stock_analysis_bridge_tests;

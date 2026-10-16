@@ -1252,7 +1252,21 @@ export interface AnalysisEvent {
   payload: Record<string, unknown>;
 }
 
-export type AnalysisStatus = "idle" | "loading" | "running" | "paused" | "completed" | "error" | "cancelled";
+export type AnalysisStatus =
+  | "idle"
+  | "loading"
+  | "running"
+  | "paused"
+  | "completed"
+  | "error"
+  | "cancelled"
+  /**
+   * 记录**没有结论地消失**：进程在分析跑完前退出，终态从未写入。
+   *
+   * 由后端启动回收写入（`src-tauri/src/scheduler/restore.rs`）。与 `error` 互斥 ——
+   * `error` 是「跑过了并失败」（有失败原因），本态是「连原因都没留下」。
+   */
+  | "interrupted";
 
 // ── 回测类型 ──
 

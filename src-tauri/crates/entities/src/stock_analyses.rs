@@ -12,6 +12,12 @@ pub struct Model {
     pub analysis_date: String,
     pub provider_id: String,
     pub conversation_id: String,
+    /// `running` / `completed` / `failed` / `timeout` / `cancelled` / `interrupted`。
+    ///
+    /// 前五个由 `commands/stock_workflow/core.rs` 的建行与四个收尾分支写；
+    /// `interrupted` **只由启动回收**写（`scheduler/restore.rs::reclaim_stale_stock_analyses`）
+    /// —— 语义是「进程在跑完前消失，终态从未写入」，与 `failed`（跑过了并失败）不可互替。
+    /// 本列在库层**无 CHECK 约束**，值域不受保护，故在此显式声明。
     #[sea_orm(indexed)]
     pub status: String,
     pub decision_action: Option<String>,

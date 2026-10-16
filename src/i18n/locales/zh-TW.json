@@ -15421,6 +15421,17 @@
     "finalStrength": "最終強度",
     "searchPlaceholder": "输入股票代碼或名稱",
     "fastAnalysis": "快速分析",
+    "interrupted": {
+      "title": "本次分析未產出結論",
+      "hint": "該記錄在分析跑完前被中斷（應用退出或進程異常結束），沒有產生任何決策。可點擊下方按鈕重新發起分析。"
+    },
+    "recordStatus": {
+      "running": "進行中",
+      "interrupted": "已中斷",
+      "failed": "失敗",
+      "timeout": "逾時",
+      "cancelled": "已取消"
+    },
     "templateVersion": {
       "matched": "圖版本：庫內 v{{db}} 與程式碼 v{{code}} 一致",
       "behind": "圖版本：庫內 v{{db}} 落後程式碼 v{{code}}（差 {{gap}} 代，下一次分析執行時會自動重播種）",

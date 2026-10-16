@@ -17,7 +17,7 @@ vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 
-import { EvidenceCitationPanel } from "../EvidenceCitationPanel";
+import { EvidenceCitationPanel, notCheckedReasonKey } from "../EvidenceCitationPanel";
 
 /** 夹具按 600406 · 2026-10-15 真记录的**形状**裁剪（腿名/角色/档位取真值）。 */
 const BASE = {
@@ -86,6 +86,19 @@ const FACTOR_LEGS = [
 
 beforeEach(() => invokeMock.mockReset());
 
+describe("不适用原因码 → 文案键（纯映射，不走渲染）", () => {
+  it("每个码有专属文案，未知码走兜底而不是猜原因", () => {
+    // 后端现役四个码（`evidence_audit.rs` 的 UpstreamState::NotChecked）
+    expect(notCheckedReasonKey("TIER_SCORE_NOT_IN_SNAPSHOT")).toBe("tierScoreNotInSnapshot");
+    expect(notCheckedReasonKey("NO_CHANNEL_MAPPING")).toBe("noChannelMapping");
+    expect(notCheckedReasonKey("NO_OWNER")).toBe("noOwner");
+    expect(notCheckedReasonKey("UNREGISTERED_FACTOR")).toBe("unregisteredFactor");
+    // 负控：退役码与编造码都必须落到兜底，不许复用某一具体原因（那会把未知说成已知）
+    expect(notCheckedReasonKey("NO_SNAPSHOT_KEY")).toBe("unknownReason");
+    expect(notCheckedReasonKey("")).toBe("unknownReason");
+  });
+});
+
 describe("EvidenceCitationPanel 判据换新后的三态", () => {
   it("decisionDegraded=true 时显示不适用提示，且不渲染任何计数与状态标签", async () => {
     invokeMock.mockResolvedValue({ ...BASE, decisionDegraded: true, branchLegs: [], factorLegs: [] });
@@ -136,7 +149,7 @@ describe("EvidenceCitationPanel 判据换新后的三态", () => {
           weight: 0.1,
           participates: true,
           absenceDeclared: false,
-          upstream: { state: "notChecked", reason: "NO_SNAPSHOT_KEY" },
+          upstream: { state: "notChecked", reason: "TIER_SCORE_NOT_IN_SNAPSHOT" },
         }),
         leg({
           factor: "supplyShock",
@@ -145,7 +158,7 @@ describe("EvidenceCitationPanel 判据换新后的三态", () => {
           weight: 0,
           participates: false,
           absenceDeclared: false,
-          upstream: { state: "notChecked", reason: "NO_SNAPSHOT_KEY" },
+          upstream: { state: "notChecked", reason: "TIER_SCORE_NOT_IN_SNAPSHOT" },
         }),
       ],
       factorLegs: FACTOR_LEGS,

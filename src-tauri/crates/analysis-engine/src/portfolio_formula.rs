@@ -11,6 +11,29 @@ use crate::decision_action::{normalize_action, ActionKind};
 use crate::position_limits::RiskTier;
 use serde::{Deserialize, Serialize};
 
+// ── 评分 → 因子信号 ──
+
+/// 评分（0–100 制）→ 因子信号（`[-1, 1]`）的归一化中点 —— **唯一权威**。
+///
+/// 裁定 P-B1（2026-10-17）上收这条口径的原因：`(x − 50) / 50` 原先在**五处**各写一份 ——
+/// 主链 `portfolio-mgr.rhai` 内联四处（f1 趋势 / f2 共识 / f6 数据质量 / f13 瓶颈），
+/// 逐档腿那边 `leg_signal::leg_signal` 又内联一份（`trendStrength ← totalScore`）。
+/// 本仓的教训是「两处一致地不同，比一处缺失更难发现」（同 `VOL_LOOKBACK_DAYS` 的先例）——
+/// 五个 `50.0` 各写各的，改一个（比如某天想让中枢随档位移动）就只剩部分消费方跟着动。
+///
+/// 现在的接线：主链经宿主函数 `pm_score_to_signal` 调用本函数；逐档腿由
+/// `leg_signal::leg_signal` 直接调用本函数；审计侧回算 σ 也用同一个 —— 三侧不可能再漂移。
+pub const SCORE_SIGNAL_MIDPOINT: f64 = 50.0;
+
+/// 见 [`SCORE_SIGNAL_MIDPOINT`]：`(score − 50) / 50`。
+///
+/// ⚠ 刻意**不**钳制到 `[-1, 1]`：越界（评分 >100 或 <0）在调用方要能看出来 ——
+/// `leg_signal` 的 `cl()` 负责钳制、主链的 f13 用 `clamp(...)` 兜，两处各自显式。
+/// 在这里顺手钳死会把「上游给了个非法分」这件事静默抹平。
+pub fn score_to_signal(score: f64) -> f64 {
+    (score - SCORE_SIGNAL_MIDPOINT) / SCORE_SIGNAL_MIDPOINT
+}
+
 /// 计算因子数据完整度（0.0 ~ 1.0）。
 ///
 /// 用于 data-quality.rhai 评估因子层数据完整度，纳入综合评分。
@@ -2200,5 +2223,30 @@ mod kelly_growth_tests {
         );
         assert_eq!(no_current.len(), 1);
         assert_eq!(no_current[0].2, None, "没写现值不得被当成 0 或当成默认值");
+    }
+}
+
+/// 评分归一化口径的口径锁（裁定 P-B1）。
+#[cfg(test)]
+mod score_to_signal_tests {
+    use super::*;
+
+    /// 中点/两端必须精确 —— 这是五个调用点共同依赖的语义。
+    #[test]
+    fn midpoint_and_ends_are_exact() {
+        assert_eq!(score_to_signal(50.0), 0.0);
+        assert_eq!(score_to_signal(0.0), -1.0);
+        assert_eq!(score_to_signal(100.0), 1.0);
+        // 真记录锚点：600406 · 2026-10-15 的 `t-scoring.content.totalScore = 78`，
+        // 落库 `evidence.factors.f1.sigma = 0.56` —— 现算必须复现它（口径没漂的证据）。
+        assert_eq!(score_to_signal(78.0), 0.56);
+    }
+
+    /// **刻意不钳制**：越界要能被调用方看见（`leg_signal` 用 `cl()`、主链 f13 用 `clamp`）。
+    /// 这条同时是负控 —— 谁往本函数里塞一个 `.clamp(-1.0, 1.0)`，此断言立刻红。
+    #[test]
+    fn out_of_range_is_not_silently_clamped() {
+        assert_eq!(score_to_signal(150.0), 2.0);
+        assert_eq!(score_to_signal(-50.0), -2.0);
     }
 }

@@ -18051,9 +18051,11 @@
         "notChecked": "検証不可"
       },
       "notChecked": {
-        "noSnapshotKey": "この記録のスナップショットに当該ソースの出力キーが無いため、判定は適用外です",
         "noOwner": "このファクターには担当アナリストが登録されていません",
-        "unregisteredFactor": "このファクターはソース登録表に無いため、判定は適用外です"
+        "unregisteredFactor": "このファクターはソース登録表に無いため、判定は適用外です",
+        "tierScoreNotInSnapshot": "逐档評点ノードの出力はこの記録のスナップショットに含まれないため、この判定は適用外です",
+        "noChannelMapping": "このソース経路には保存キーが登録されていません（登録表の欠落）",
+        "unknownReason": "バックエンドが未登録の理由コードを返しました"
       },
       "sigma": {
         "consistent": "σ 一致",

@@ -325,7 +325,7 @@ let f_weights = if present(regime_factor_weights) && type_of(regime_factor_weigh
 let f1_default = 0.15;  // V49 修复: 从 0.25 下调 — 技术面(趋势跟踪)必然滞后,
                           // 股价涨完才触发"多头排列", 不应占最高权重
 let f1_weight = if present(totalScore) { get_weight(f_weights, "trend", f1_default) } else { 0.0 };
-let f1_signal = if present(totalScore) { (totalScore - 50.0) / 50.0 } else { 0.0 };
+let f1_signal = if present(totalScore) { pm_score_to_signal(totalScore) } else { 0.0 };
 
 // ── 因子 2: 共识 ──
 let f2_default = 0.25;
@@ -333,7 +333,7 @@ let f2_default = 0.25;
 // factor_weights 结构为 {trend:{...}, macd:{...}, rsi:{...}, consensus:{...}, ...}
 // 若回测数据无 "consensus" 键，get_weight 会 fallback 到 f2_default
 let f2_weight = if present(consensusScore) { get_weight(f_weights, "consensus", f2_default) } else { 0.0 };
-let f2_signal = if present(consensusScore) { (consensusScore - 50.0) / 50.0 } else { 0.0 };
+let f2_signal = if present(consensusScore) { pm_score_to_signal(consensusScore) } else { 0.0 };
 
 // ── 公告关键词风险检测（P2 新增，f3 催化剂修正）──
 // 数据源: t-catalyst-data → get_stock_announcements
@@ -1186,7 +1186,7 @@ let f6_default = 0.15;
 //   若需恢复"高质量数据略微加分"的建模意图，应改为调制 confidence 而非 posterior 方向。
 let f6_signal = if present(dqi_score) {
     if dqi_score < 25.0 { 0.0 }  // V66: F 级中性化，避免自指双重惩罚
-    else if dqi_score < 50.0 { (dqi_score - 50.0) / 50.0 }
+    else if dqi_score < 50.0 { pm_score_to_signal(dqi_score) }
     else { 0.0 }
 } else { 0.0 };
 // ── 2026-09-23「退出语义」：σ = 0 的因子必须**退出权重**，不得以 0 值占权重 ──
@@ -1649,7 +1649,7 @@ if present(serenity_context) && type_of(serenity_context) == "map" {
         -1.0
     };
     if ss_f >= 0.0 {
-        f13_signal = clamp((ss_f - 50.0) / 50.0, -1.0, 1.0);
+        f13_signal = clamp(pm_score_to_signal(ss_f), -1.0, 1.0);
         f13_weight = get_weight(f_weights, "bottleneck", f13_default);
     }
 }

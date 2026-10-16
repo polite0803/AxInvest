@@ -84,10 +84,27 @@ interface Props {
 }
 
 const NOT_CHECKED_REASON: Record<string, string> = {
-  NO_SNAPSHOT_KEY: "noSnapshotKey",
+  // 逐档评分节点的产出**不落主快照**（阶段 0 实测 0/49）⇒ 该腿判不了，如实说「不适用」
+  TIER_SCORE_NOT_IN_SNAPSHOT: "tierScoreNotInSnapshot",
+  // 来源通道没有登记落库键（映射表缺项）—— 有门在挡（通道齐备门），出现即表被写漏
+  NO_CHANNEL_MAPPING: "noChannelMapping",
   NO_OWNER: "noOwner",
   UNREGISTERED_FACTOR: "unregisteredFactor",
 };
+
+/** 原因码不在上表时的兜底 —— 不许猜原因，只如实说「后端给了个未登记的原因码」。 */
+const UNKNOWN_REASON = "unknownReason";
+
+/**
+ * 后端原因码 → i18n 文案键。
+ *
+ * 抽成**具名导出**是为了能被直测：原因句只出现在 antd `Tooltip` 的 title 里，而
+ * rc-tooltip 的正文是**懒渲染**的（不 hover 不进 DOM）⇒ 走渲染断言只能断到状态标签，
+ * 断不到「哪一种不适用」这句话。测这个纯映射，才能锁住「每个码有专属文案、未知码走兜底」。
+ */
+export function notCheckedReasonKey(reason: string): string {
+  return NOT_CHECKED_REASON[reason] ?? UNKNOWN_REASON;
+}
 
 const NO_BASIS_REASON: Record<string, string> = {
   NO_PERSISTED_BASIS: "noPersistedBasis",
@@ -238,9 +255,7 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
                 <Tooltip
                   title={leg.upstream.state === "notChecked"
                     ? t(
-                      `stockAnalysis.evidenceCitation.notChecked.${
-                        NOT_CHECKED_REASON[leg.upstream.reason] ?? "noSnapshotKey"
-                      }`,
+                      `stockAnalysis.evidenceCitation.notChecked.${notCheckedReasonKey(leg.upstream.reason)}`,
                     )
                     : undefined}
                 >

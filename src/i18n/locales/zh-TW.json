@@ -18275,9 +18275,11 @@
         "notChecked": "無法核查"
       },
       "notChecked": {
-        "noSnapshotKey": "本記錄快照不含該來源的產出鍵，判據不適用",
         "noOwner": "該因子沒有登記的屬主分析師",
-        "unregisteredFactor": "該因子不在來源登記表內，判據不適用"
+        "unregisteredFactor": "該因子不在來源登記表內，判據不適用",
+        "tierScoreNotInSnapshot": "逐檔評分節點的產出不落本記錄快照，該判據對本腿不適用",
+        "noChannelMapping": "該通道未登記落庫鍵（映射表缺項）",
+        "unknownReason": "後端回傳了未登記的原因碼"
       },
       "sigma": {
         "consistent": "σ 一致",

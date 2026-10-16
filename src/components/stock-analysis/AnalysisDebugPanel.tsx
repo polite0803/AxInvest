@@ -8,6 +8,7 @@
  * 不依赖独立的 Tauri 事件监听（与 store 重复且不可靠）。
  */
 
+import { analystBaseOf } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { Card, Table, Tag, Tooltip } from "antd";
 import { useMemo } from "react";
@@ -41,16 +42,20 @@ function getNodeColor(nodeId: string): string {
 }
 
 function getNodeTypeLabel(nodeId: string, t: (k: string) => string): string {
+  // v161：收敛节点带档后缀（`debate-convergence--mid`）⇒ 整串相等会静默落到「其他」。
+  // 统一按 base 判（`analystBaseOf` 只认四档后缀，非逐档 id 原样返回）。
+  const base = analystBaseOf(nodeId) ?? nodeId;
   if (nodeId.startsWith("a-")) { return t("stockAnalysis.debugLabel.analyst"); }
   if (
-    nodeId.startsWith("risk-") || nodeId === "p-risk-assess" || nodeId === "agg-risk" || nodeId === "risk-convergence"
+    base.startsWith("risk-") || base === "p-risk-assess" || base === "agg-risk"
+    || base === "risk-convergence"
   ) { return t("stockAnalysis.debugLabel.riskControl"); }
   if (nodeId.startsWith("bull-")) { return t("stockAnalysis.debugLabel.bullDebate"); }
   if (nodeId.startsWith("bear-")) { return t("stockAnalysis.debugLabel.bearDebate"); }
   if (nodeId.startsWith("t-")) { return t("stockAnalysis.debugLabel.dataTool"); }
-  if (nodeId === "debate-convergence") { return t("stockAnalysis.debugLabel.debateConvergence"); }
-  if (nodeId.includes("mgr") || nodeId.includes("manager")) { return t("stockAnalysis.debugLabel.decisionEngine"); }
-  if (nodeId.includes("checker") || nodeId === "rule-check") { return t("stockAnalysis.debugLabel.ruleCheck"); }
+  if (base === "debate-convergence") { return t("stockAnalysis.debugLabel.debateConvergence"); }
+  if (base.includes("mgr") || base.includes("manager")) { return t("stockAnalysis.debugLabel.decisionEngine"); }
+  if (base.includes("checker") || base === "rule-check") { return t("stockAnalysis.debugLabel.ruleCheck"); }
   return t("stockAnalysis.debugLabel.other");
 }
 

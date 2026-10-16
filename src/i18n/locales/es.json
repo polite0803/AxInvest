@@ -18051,9 +18051,11 @@
         "notChecked": "No verificable"
       },
       "notChecked": {
-        "noSnapshotKey": "La instantánea de este registro no incluye la clave de salida de esta fuente; el criterio no aplica",
         "noOwner": "No hay analista titular registrado para este factor",
-        "unregisteredFactor": "Este factor no está en el registro de fuentes (criterio no aplicable)"
+        "unregisteredFactor": "Este factor no está en el registro de fuentes (criterio no aplicable)",
+        "tierScoreNotInSnapshot": "La salida del nodo de puntuación por horizonte no está en la instantánea de este registro; el criterio no aplica",
+        "noChannelMapping": "No hay clave de instantánea registrada para este canal de origen (falta en el registro)",
+        "unknownReason": "El backend devolvió un código de motivo no registrado"
       },
       "sigma": {
         "consistent": "σ coherente",

@@ -30,6 +30,17 @@ use rhai::Engine;
 ///
 /// 纯数学/纯函数，无 DB / 无副作用；调用方负责沙箱限制（set_max_*）。
 pub fn register_pm_functions(engine: &mut Engine) {
+    // 裁定 P-B1（2026-10-17）：评分 → 因子信号的归一化口径**唯一权威在
+    // `portfolio_formula::score_to_signal`**，脚本侧不再内联 `(x - 50.0) / 50.0`
+    // （原先主链内联四处、逐档腿内联一处，五个 `50.0` 各写各的）。
+    // ⚠ 必须**双载**：`totalScore`/`dqi_score` 来自 JSON 数值 ⇒ Rhai 侧是 INT，
+    // 只注册 f64 会在运行时报 `Function not found`（拿不到分档、整段降级）。
+    engine.register_fn("pm_score_to_signal", |score: i64| -> f64 {
+        axagent_analysis_engine::portfolio_formula::score_to_signal(score as f64)
+    });
+    engine.register_fn("pm_score_to_signal", |score: f64| -> f64 {
+        axagent_analysis_engine::portfolio_formula::score_to_signal(score)
+    });
     engine.register_fn("pm_evidence_scale", |total_weight: f64, max_weight: f64| -> f64 {
         portfolio_formula::compute_evidence_scale(total_weight, max_weight)
     });

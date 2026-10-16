@@ -18051,9 +18051,11 @@
         "notChecked": "검증 불가"
       },
       "notChecked": {
-        "noSnapshotKey": "이 기록의 스냅샷에 해당 소스의 출력 키가 없어 판정 대상이 아닙니다",
         "noOwner": "이 팩터에 등록된 담당 분석가가 없습니다",
-        "unregisteredFactor": "이 팩터는 소스 등록표에 없어 판정 대상이 아닙니다"
+        "unregisteredFactor": "이 팩터는 소스 등록표에 없어 판정 대상이 아닙니다",
+        "tierScoreNotInSnapshot": "기간별 평가 노드의 산출물이 이 기록의 스냅샷에 없어 이 판정은 적용 대상이 아닙니다",
+        "noChannelMapping": "이 소스 채널에 저장 키가 등록되어 있지 않습니다(등록표 누락)",
+        "unknownReason": "백엔드가 등록되지 않은 사유 코드를 반환했습니다"
       },
       "sigma": {
         "consistent": "σ 일치",

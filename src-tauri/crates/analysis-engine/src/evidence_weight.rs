@@ -453,6 +453,39 @@ pub const VERDICT_FACTOR_SOURCES: &[(&str, &str, &str)] = &[
     ("sectorRotation", "sharedTool", "get_industry_ranking"),
 ];
 
+/// **通道 → 快照落库键**（`blackboard_snapshot` 里的 `result.*`）。裁定 P-B5 要求的唯一权威表。
+///
+/// 为什么必须单独登记：`VERDICT_FACTOR_SOURCES` 第 3 列对 `sharedTool` 给的是**工具名**
+/// （如 `get_limit_up_pool`），而快照里落的是**跑该工具的节点 id**（`result.t-limitup-pool`）——
+/// 两者不但字面不同，连拼法都不一致（通道写 `get_consensus_eps`，工具注册名是
+/// `get_stock_consensus_eps`）。审计侧原先只能「channel 字面量恰好等于节点键」才判在场，
+/// 于是 **7 条 sharedTool 通道里只有 3 条判得了**；补本表后 7 条全部可判。
+///
+/// 与 `VERDICT_FACTOR_SOURCES` 的分工：那边说「这个因子的数字从**哪个工具**拿」，
+/// 本表说「那个工具的产出**落在哪个键**」。两张表的键域必须一一对上 ——
+/// 由 `every_shared_tool_channel_has_a_snapshot_key` 逐条锁，且每个节点 id 还得
+/// 在播种源码里真实存在（见 `snapshot_node_ids_exist_in_seed`）。
+///
+/// **不含 `tierScore` 通道**（`macd` / `totalScore`）：那是逐档评分节点
+/// （`Period::scoring_node_id()`）的产出，阶段 0 实测**不落主快照**（最近 49 条记录里
+/// 含 `t-scoring-hour|week|month|quarter` 的为 0 条）⇒ 审计对该类只能报「不适用」，
+/// 登记一条假键会把「拿不到」伪装成「查过且在场」。
+pub const CHANNEL_SNAPSHOT_KEYS: &[(&str, &str)] = &[
+    // 通道（工具名 / 节点 id 二者混用，见上）→ 快照键
+    ("get_limit_up_pool", "result.t-limitup-pool"),
+    ("t-valuation-band", "result.t-valuation-band"),
+    ("t-valuation", "result.t-valuation"),
+    ("get_consensus_eps", "result.t-consensus-data"),
+    ("macro_data_snapshot", "result.t-macro-data"),
+    ("t-lockup-data", "result.t-lockup-data"),
+    ("get_industry_ranking", "result.t-sector-data"),
+];
+
+/// 查「某通道的产出落在哪个快照键」。表外通道 ⇒ `None`（审计侧据此报「不适用」）。
+pub fn channel_snapshot_key(channel: &str) -> Option<&'static str> {
+    CHANNEL_SNAPSHOT_KEYS.iter().find(|(c, _)| *c == channel).map(|(_, k)| *k)
+}
+
 /// 波动带统计窗口（交易日）。**唯一权威在这里**：
 ///
 /// 主链 `src/commands/portfolio-mgr.rhai` 里有一份同名的脚本内常量（`let VOL_LOOKBACK_DAYS = 20;`），
@@ -1760,5 +1793,55 @@ mod tests {
         // `None` ⇒ 无任何逐档权重可作用；② 「桥到的 ∪ 显式无腿的 = 权威清单」由同文件的
         // `horizon_weight_table_is_closed_over_real_analyst_nodes` 与
         // `scripts/check-horizon-weight-parity.mjs` 判据 ⑧ 锁住。
+    }
+}
+
+/// P-B5 的门：**通道 → 快照键** 表的两条自证。
+///
+/// 刻意另起一个 `#[cfg(test)] mod` 追加在文件末尾（而非插进上面那个 mod 中间）：
+/// 插在中间会让其后仍有生产项 ⇒ 触发 `clippy::items_after_test_module`，而那条 lint
+/// **只在 clippy 下暴露**（`cargo check` / `cargo test` 全绿也照样存在）。
+#[cfg(test)]
+mod channel_snapshot_key_tests {
+    use super::*;
+
+    /// `VERDICT_FACTOR_SOURCES` 里**每一条 sharedTool 通道**都必须在本表里有落库键。
+    ///
+    /// 为什么是硬门：审计 L1 对 sharedTool 腿只能经本表定位上游；漏登记一条 ⇒ 那条腿
+    /// 永远报「不适用」而不是报缺陷 —— 是**静默失去判据**，不是「少一条可选检查」。
+    #[test]
+    fn every_shared_tool_channel_has_a_snapshot_key() {
+        let missing: Vec<&str> = VERDICT_FACTOR_SOURCES
+            .iter()
+            .filter(|(_, kind, _)| *kind == "sharedTool")
+            .map(|(_, _, channel)| *channel)
+            .filter(|c| channel_snapshot_key(c).is_none())
+            .collect();
+        assert!(missing.is_empty(), "这些 sharedTool 通道没有落库键登记：{missing:?}");
+
+        // 正控：证明上面那条不是「表为空所以恒真」
+        assert_eq!(channel_snapshot_key("t-valuation-band"), Some("result.t-valuation-band"));
+        // 负控：表外通道必须查不到（否则「不适用」那一档永远不会出现）
+        assert_eq!(channel_snapshot_key("totalScore"), None, "tierScore 通道不得入表");
+    }
+
+    /// 本表登记的节点 id 必须在**播种源码**里真实存在。
+    ///
+    /// 夹具只能证明「我抄的键在某个历史记录里出现过」；播种源码才是节点 id 的产地。
+    /// 对着它断言 ⇒ 模板改了节点名而表没跟上就会红（负控：编造的 id 必须查不到）。
+    #[test]
+    fn snapshot_node_ids_exist_in_seed() {
+        const SEED: &str = include_str!(
+            "../../../../src-tauri/src/commands/stock_analysis_setup/seed_stock_analysis.rs"
+        );
+        for (channel, key) in CHANNEL_SNAPSHOT_KEYS {
+            let node = key.strip_prefix("result.").expect("键必须带 result. 前缀");
+            assert!(
+                SEED.contains(&format!("\"{node}\"")),
+                "通道 {channel} 的落库键 {key} 指向的节点 {node} 在播种源码里查不到 ⇒ 表已腐烂"
+            );
+        }
+        // 负控：编造的节点名必须查不到（证明上面那条不是恒真）
+        assert!(!SEED.contains("\"t-not-a-node\""), "负控失效：播种源码里竟然有该字符串");
     }
 }

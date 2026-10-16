@@ -3,7 +3,7 @@
 
 use super::{
     PROFILE_TOOLS, build_analyst_input_mapping, debate_rounds_graph_drift, force_variable_value,
-    merge_variable_values, resolve_debate_rounds,
+    merge_variable_values, resolve_debate_rounds, tiered_debate_graph_drift,
 };
 use crate::commands::error_code::stock_setup;
 
@@ -1427,10 +1427,42 @@ type AlgoToolRow = (
 ///   同名字段），`portfolio-mgr.rhai` 据此把「本档未达校准门槛」的置信封顶折进 `confidence_cap`
 ///   单一权威，并新增 `R-CALIB-CAP` 追溯链归因。图内容与脚本正文均变 ⇒ 必须重播种。
 ///
+/// **v160 → v161（2026-10-16）**：**逐档辩论落地**（A4，`PLAN-llm-horizon-decision-and-parity.md`
+///   §6.5 四条硬约束 + `PLAN-four-horizon-workflow-alignment.md` §五十四 B3 / §九 代价账）。
+///   图拓扑改动，四段：
+///   ① **brief 从一份变四份**：`analyst-brief--{四档}` 各只吃**本档**的逐档分析师实例
+///     （键名去掉档位后缀 ⇒ 一份脚本 + 四份映射；把同一份合并摘要复制四遍是 §五十三 明令
+///     禁止的伪装）。脚本 `analyst-brief.rhai` 的 present() 集与四档短名**并集**同集，
+///     每档节点的映射键集与该档 `analyst_subset()` 短名集同集，由
+///     `seed_consistency_tests::analyst_brief_keys_match_tiered_instances` 逐档锁。
+///   ② **四组辩论**：每档一个 `debate-bull-bear--{档}` 容器 + 该档 `bull-rN--{档}` /
+///     `bear-rN--{档}` + 该档 `debate-convergence--{档}`。容器**按档各一个**而不是共用
+///     `debate-bull-bear` 挂四组：`DebateExecutor` 按 `debater_steps` **顺序串行**驱动体节点
+///     （`crates/rt-workflow/src/work_engine/executors/debate_executor.rs:125`），一个容器装
+///     四档就是把 8 次 LLM 调用串成一条链，与拍板 8「并行节点同步进行」和 §九 的
+///     「四路并行 ⇒ 关键路径 ≈ 单档」直接冲突。
+///   ③ **轮数语义改为「每档几轮」**：`DEFAULT_DEBATE_ROUNDS` 2 → **1**（B3 明文 1 轮/档；
+///     成本 `4×(1+1+1)=12` 次，现状 5 次 ⇒ 净增 +7，与 §6.1 的账一致）。
+///     `DEBATE_ROUNDS_MIGRATION_VERSION` 同批 154 → **161**（`merge_variable_values`
+///     无条件保留旧值 ⇒ 不抬门就等于没改，v74 DCF / v115 kline 同型事故）。
+///   ④ **下游逐条改接**：`value-investor--{档}` 读本档收敛；`research-mgr` / `trader` /
+///     `portfolio-mgr` / `data-quality` 四个单值消费点改为**四档并注**（portfolio-mgr 的 f2
+///     按所选档 switch，与 v128 `overall_risk_*` / v133 `catalyst_level_*` 同形）；
+///     `p-risk-assess` 三视角按 §6.2 裁定**不动形状**，只把锚从 `bull-rN`/`bear-rN` 改指
+///     **mid 代表实例**（该层原有「mid 优先代表实例」规则，不是新发明）。
+///   新增漂移门 `tiered_debate_graph_drift`：版本门答不了「图是否真按四档展开」，
+///   照 `debate_rounds_graph_drift` 的形态直接比事实。
+///   ⚠ **会改决策数值**（f2 共识因子自本版起取「所选档」的收敛分，不再是全局一份）：
+///     跨代比较结论 / 仓位须按代筛样，不可与 v160 及更早混算。
+///   ⚠ 前端连带面（本批受禁区约束**没改**，归主树）：按整串 node id 精确匹配的三处
+///     `src/components/stock-analysis/AnalysisDebugPanel.tsx:51`、`src/lib/decisionInputDiagnosis.ts:66,194`、
+///     `src/lib/agentOutput.ts:254` 对带档后缀的收敛节点会静默失配（症状 = 那一格显示原始 id /
+///     诊断表少一行）；正解是走既有的 `analystBaseOf()` 剥后缀，与 v133 那批同一处置。
+///
 /// `pub` 而非 `pub(crate)`：`axagent-batch-rerun` 的「版本联查完整性」要读这**同一个**数字
 /// （bin 是独立 crate，`pub(crate)` 读不到）。它不能被抄第二份 —— 本条的用处正是
 /// 对比「代码会用的图版本」与「库里已播种到的版本」，两份数字一旦各写各的就永远对不上。
-pub const TEMPLATE_VERSION: i32 = 160;
+pub const TEMPLATE_VERSION: i32 = 162;
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -1514,7 +1546,20 @@ const _: () = assert!(
 /// 版本门放行重建、本门随之生效。⚠ 对「DB 已被别的路径写到 ≥154」的库本门**不执行**
 /// （它们多半是自己在面板调过轮数，尊重其选择）；其图/变量一致性由
 /// `debate_rounds_graph_drift` 那道门独立保证，不依赖本水位线。
-pub(crate) const DEBATE_ROUNDS_MIGRATION_VERSION: i32 = 154;
+///
+/// ## v161 抬门（154 → 161）—— 本批必须抬，否则「1 轮/档」是假修复
+///
+/// 判据没变（仍是「被守护常量 `DEFAULT_DEBATE_ROUNDS` 最后一次变更对应的
+/// `TEMPLATE_VERSION`」），变的是那个常量本身：辩论自 v161 起**按四档展开**，
+/// `DEFAULT_DEBATE_ROUNDS` 由 2 改 1，且语义从「整场几轮」改成「每档几轮」。
+/// 现网读数（2026-10-16 重取）：主模板 + 四个档分支模板**全部 160** ⇒ 161 严格大于它，
+/// 版本门放行重建、本门在同一次播种里把存量 `debate_rounds` 覆写成 1。
+///
+/// ⚠ **代价如实标注**：抬门会让存量库里用户在面板自选的轮数**一次性打回 1**。
+/// 这是刻意选择的后果，不是疏漏 —— 不抬门 = 库里继续按 2 轮/档展开 = `4×(2×2+1)=20` 次
+/// LLM 调用，与 §6.1 已拍板的 `4×(1+1+1)=12` 成本账直接冲突。
+/// 与 DCF / kline 两门的共同点：都只在「旧版本 < 本值」时执行一次，此后尊重用户设置。
+pub(crate) const DEBATE_ROUNDS_MIGRATION_VERSION: i32 = 161;
 
 // 同一约束的第三条实例：`TEMPLATE_VERSION ≥ DEBATE_ROUNDS_MIGRATION_VERSION`（v154 新增）。
 // 与 DCF / kline 两条**同因同果**，仍并列而不是合并成一个常量（合并会让抬其中一个门
@@ -2368,13 +2413,23 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 edges_empty
             );
         } else if existing.version >= TEMPLATE_VERSION {
-            // 版本门之上叠加辩论轮数漂移门：版本门只比「代码常量 vs 库版本号」，答不了
-            // 「图与变量是否一致」，而面板保存只抬 version 不重展图 ⇒ 漂移时必须无视版本门重建。
+            // 版本门之上叠加两道漂移门（都只认事实、不认版本号）：
+            //   ① 辩论轮数漂移：版本门只比「代码常量 vs 库版本号」，答不了「图与变量是否一致」，
+            //      而面板保存只抬 version 不重展图 ⇒ 漂移时必须无视版本门重建；
+            //   ② 逐档辩论是否真展开（v161）：库版本号被人为抬高 / 上次播种中途失败这两种
+            //      情形版本门都拦不下，表现是「四档辩论少跑一两档」的静默缺件。
             if let Some((in_graph, wanted)) =
                 debate_rounds_graph_drift(&existing.nodes, existing.variables.as_deref())
             {
                 tracing::warn!(
                     "[stock_analysis_setup] 辩论轮数漂移：图内展开 {in_graph} 轮，变量要求 {wanted} 轮 ⇒ 无视版本门 v{} 重新种子化",
+                    existing.version
+                );
+            } else if let Some(missing) = tiered_debate_graph_drift(&existing.nodes) {
+                tracing::warn!(
+                    "[stock_analysis_setup] 逐档辩论未按四档展开（缺 {} 个节点，前几个：{:?}）⇒ 无视版本门 v{} 重新种子化",
+                    missing.len(),
+                    &missing[..missing.len().min(4)],
                     existing.version
                 );
             } else {
@@ -3744,18 +3799,23 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         nodes.push(an);
     }
 
-    // 分析师节点 → debate-bull-bear 的出边（编辑器可视化 + 运行时依赖）。
-    // v133（B2-2）：按逐档实例展开（23 条）；逐档辩论拆分为后续批次，
-    //   本批保持「单辩论」结构（analyst-brief → 单个 debate-bull-bear）。
+    // 分析师节点 → 本档辩论容器的出边（编辑器可视化 + 运行时依赖）。
+    // v161（A4）：按档接回**本档**容器（21 条，23 减去 value-investor 的两条）。
+    // v133（B2-2）曾保持「单辩论」结构（全部实例 → 单个 `debate-bull-bear`），
+    //   本版把它拆成四组，理由与容器形状的选择见下方辩论段。
     // v144：**必须排除 `value-investor`** —— 它在权威档位子集里（中/长档的 `valuationBand`
     //   属主），但它在**本图**是辩论**下游**节点（下方 `e-debate-{vi_id}` /
     //   `e-convergence-{vi_id}` 入边）。留着这条出边即成环：
-    //   `debate-bull-bear → bull-r1 → … → bear-r3 → debate-convergence → value-investor--档
-    //    → debate-bull-bear`，引擎 `create_workflow` 的 Kahn 校验整图拒绝，
+    //   `debate-bull-bear--档 → bull-r1--档 → … → bear-r1--档 → debate-convergence--档
+    //    → value-investor--档 → debate-bull-bear--档`，引擎 `create_workflow` 的 Kahn 校验整图拒绝，
     //   用户侧 = 「创建工作流失败: Cycle detected in workflow」（现网实测 v143 就是这个）。
+    //   ⚠ 逐档化把这条环**复制了四遍**（每档一条自己的环），排除判据因此也只认同一个权威：
+    //   `!= VALUE_INVESTOR_ID`。逐档边的环已由 `mod.rs` 的 `seeded_main_graph_is_acyclic`
+    //   在播种后按 Kahn 现算复核（不是靠这段注释自称无环）。
     for (base, p, ..) in tiered.iter().filter(|(b, ..)| *b != VALUE_INVESTOR_ID) {
         let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
-        edges.push(edge(&format!("e-{tid}-debate"), tid.as_str(), "debate-bull-bear"));
+        let container = tier_id("debate-bull-bear", *p);
+        edges.push(edge(&format!("e-{tid}-debate"), tid.as_str(), &container));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3820,47 +3880,44 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //       2) deps_results 包含 10 个分析师节点的输出，input_mapping 路径解析正确。
     // 前端验证要求容器节点有至少一条入边/出边，入边 e-trigger-p-analysts 已满足。
 
-    // ── analyst-brief（分析师摘要）：CodeNode 聚合逐档 VERDICT 评分+关键论据 ──
-    // 替代原「辨手直接加载全量报告」方案，大幅降低辩论阶段上下文体积。
-    // 输出 analyst-brief 字符串，经 input_mapping 接收逐档实例的 .content.verdict。
-    // v133（B2-2）：保持「单 brief + 单条 analyst-brief → debate-bull-bear 边」
-    //   （逐档辩论属后续批次）；摘要文本改为**按档分组**（脚本侧 23 条显式列出）。
-    //
-    // 时序：p-analysts 全部完成后运行 → debate-bull-bear 依赖此摘要。
-    {
-        let ab_code = include_str!("../analyst-brief.rhai").to_string();
-        // v133：input_mapping 键 = `{短名}__{tier}`（Rhai 合法标识符；`--` 是 id 域的分隔符，
-        //   不能出现在变量名里），值 = `{带档节点 id}.content.verdict`。全部由 `tiered` 生成；
-        //   脚本侧 `analyst-brief.rhai` 的 21 条显式读取与本表**同集**（由
-        //   `seed_consistency_tests.rs::analyst_brief_keys_match_tiered_instances` 机械锁住）。
-        // 短名（`a_market_raw` 这类**词根**）仍按 base 查表 —— 消费者侧键名域零变化（B2-1 设计）。
-        // v145：排除 `value-investor` —— 它在主图是辩论**下游**节点（`e-debate-{vi}` /
-        //   `e-convergence-{vi}` 入边），brief 执行时它**必然还没跑** ⇒ 这两把键是恒缺席的死注入
-        //   （Rhai 侧 `present()` 走假分支，摘要里永远没有「价值评估」那一段，而没人报错）。
-        //   与上方两处 `!= VALUE_INVESTOR_ID` 的边循环同一个判据、同一个常量。
-        let ab_input: std::collections::HashMap<String, String> = tiered
-            .iter()
+    // ── analyst-brief--{档}（分析师摘要，**每档一份产出**）：CodeNode 聚合本档 VERDICT 评分+关键论据 ──
+    // 替代原「辩手直接加载全量报告」方案，大幅降低辩论阶段上下文体积。
+    // v161（A4）：**一份脚本 + 四份映射**。脚本 `analyst-brief.rhai` 的 `present()` 集 = 四档短名的
+    //   **并集**、键名**去档后缀**（`a_market_raw` 而非 `a_market_raw__mid`）；某条腿属不属于本档，
+    //   只由本节点的 `input_mapping` 决定 ⇒ 四份产出各自只含本档的腿。
+    //   （四份脚本 = `format_analyst` 那段逻辑复制四遍，禁区 12；一份脚本读全部 21 键 =
+    //   四份产出逐字相同，`PLAN-four-horizon-workflow-alignment.md` §五十三 明令禁止的伪装。）
+    //   两侧同集由 `seed_consistency_tests::analyst_brief_keys_match_tiered_instances` 机械锁住：
+    //   逐档比「本档节点键集 ↔ 该档 `analyst_subset()` 短名集」，并单独断言脚本 present() 集
+    //   == 四档短名并集。
+    // v145 的 `value-investor` 排除照旧（它在辩论**下游**，喂进本档 brief 就是本档的那条环）——
+    //   逐档化把这条环复制了四遍，排除判据仍只有 `!= VALUE_INVESTOR_ID` 一处权威。
+    // 时序：本档分析师全部完成 → 本档 brief → 本档辩论容器。
+    let ab_code = include_str!("../analyst-brief.rhai").to_string();
+    for (tier_idx, p) in axagent_harness::holding_period::Period::ALL.iter().enumerate() {
+        let brief_id = tier_id("analyst-brief", *p);
+        let ab_input: std::collections::HashMap<String, String> = tier_instances_for(&tiered, *p)
+            .into_iter()
             .filter(|(b, ..)| *b != VALUE_INVESTOR_ID)
-            .map(|(base, p, ..)| {
-                let short = analyst_short_key(base);
-                let key = format!("{short}__{}", p.as_str());
-                let node_id = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
-                // V58 修复(2026-07-23): 直接下钻到 .content.verdict，
-                // resolve_var_path 会自动解析 content JSON 字符串并提取 verdict map。
-                // V68 修复(2026-09-10): 统一走 .content.verdict（中途穿透 parse），
-                // 不用 `.content` 特例（终值不 auto-parse ⇒ rhai 收到字符串 ⇒ 判数据不可用）。
-                (key, format!("{node_id}.content.verdict"))
+            .map(|(base, tp, ..)| {
+                (
+                    analyst_short_key(base).to_string(),
+                    format!(
+                        "{}.content.verdict",
+                        axagent_harness::holding_period::analyst_node_id(base, tp.as_str())
+                    ),
+                )
             })
             .collect();
         nodes.push(WorkflowNode::Code(CodeNode {
             base: WorkflowNodeBase {
-                id: "analyst-brief".into(),
-                title: "分析师摘要（逐档 VERDICT 评分+关键论据）".into(),
+                id: brief_id.clone(),
+                title: format!("分析师摘要（{}·本档 VERDICT 评分+关键论据）", p.label_zh()),
                 description: Some(
-                    "将各档分析师的VERDICT评分和bull_points/bear_points按档归组压缩为摘要，供辩论阶段使用"
+                    "把本档分析师的 VERDICT 评分与 bull_points/bear_points 压缩为摘要，供本档辩论使用"
                         .into(),
                 ),
-                position: Position { x: 50.0, y: 1150.0 },
+                position: Position { x: 40.0 + tier_idx as f64 * 300.0, y: 1150.0 },
                 retry: RetryConfig::default(),
                 timeout: Some(10),
                 enabled: true,
@@ -3870,44 +3927,33 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             },
             config: CodeNodeConfig {
                 language: "rhai".into(),
-                code: ab_code,
-                output_var: "analyst-brief".into(),
+                code: ab_code.clone(),
+                output_var: brief_id.clone(),
                 tool_name: None,
                 execute_directly: true,
                 input_mapping: ab_input,
             },
         }));
+        // V58 修复 + v133（B2-2）: 本档逐档实例直连本档 brief 的 edges，
+        // 确保 deps_results 包含本档实例输出，且等本档实例全部完成后才执行本档 brief。
+        // v144：同样排除 `value-investor`（理由见上方 `e-{tid}-debate` 那段）。
+        for (base, tp, ..) in tier_instances_for(&tiered, *p) {
+            if base == VALUE_INVESTOR_ID {
+                continue;
+            }
+            let tid = axagent_harness::holding_period::analyst_node_id(base, tp.as_str());
+            edges.push(edge(&format!("e-{tid}-brief"), &tid, &brief_id));
+        }
+        // 本档 brief 直接喂给**本档**辩论阶段。个别维度缺数据的兜底由 brief 内的
+        // 「**数据不可用**」标记处理——辩手看到标记自然知道跳过该维度。
+        // 整份 brief 全空（极低概率）时辩手仍能输出「数据不足」的降级辩论，
+        // 下游 pipeline 不会因缺少辩论输出而断裂。
+        edges.push(edge(
+            &format!("e-{brief_id}-debate"),
+            &brief_id,
+            &tier_id("debate-bull-bear", *p),
+        ));
     }
-    // V58 修复 + v133（B2-2）: 添加 21 条从逐档分析师实例直连 analyst-brief 的 edges，
-    // 确保 deps_results 包含所有实例输出，且等所有实例完成后才执行 analyst-brief。
-    // v144：同样排除 `value-investor`（理由见上方 `e-{tid}-debate` 那段）—— 它在辩论**之后**才跑，
-    //   让它喂 brief 就是 `analyst-brief → debate → … → debate-convergence → value-investor--档
-    //   → analyst-brief` 的第二条环。
-    for (base, p, ..) in tiered.iter().filter(|(b, ..)| *b != VALUE_INVESTOR_ID) {
-        let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
-        edges.push(WorkflowEdge {
-            id: format!("e-{tid}-brief"),
-            source: tid,
-            source_handle: None,
-            target: "analyst-brief".into(),
-            target_handle: None,
-            edge_type: EdgeType::Direct,
-            label: None,
-        });
-    }
-    // analyst-brief 直接喂给辩论阶段。个别维度缺数据的兜底由 brief 内的
-    // 「**数据不可用**」标记处理——辩手看到标记自然知道跳过该维度。
-    // 整份 brief 全空（极低概率）时辩手仍能输出「数据不足」的降级辩论，
-    // 下游 pipeline 不会因缺少辩论输出而断裂。
-    edges.push(WorkflowEdge {
-        id: "e-brief-debate".into(),
-        source: "analyst-brief".into(),
-        source_handle: None,
-        target: "debate-bull-bear".into(),
-        target_handle: None,
-        edge_type: EdgeType::Direct,
-        label: None,
-    });
 
     // Phase 2: 决策检查点 — 记录分析师完成状态，辩论始终执行
     // 分析师节点已直接连接 DebateNode（无中间条件节点）
@@ -3931,79 +3977,101 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         };
 
     // ═══════════════════════════════════════════════════════════════════════
-    // 【装饰节点 / Decorative Container】debate-bull-bear
+    // 【装饰节点 / Decorative Container】debate-bull-bear--{档}（**每档一个容器**）
     // ═══════════════════════════════════════════════════════════════════════
-    // 语义：多空辩论的视觉分组容器，按轮展开展开辩论元数据（轮数由 debate_max_rounds 决定）
+    // 语义：本档多空辩论的视觉分组容器，按轮展开辩论元数据（轮数由 debate_max_rounds 决定，
+    //   v161 起该值的语义是「**每档**几轮」）。
+    // ⚠️ **容器必须按档各一个**，而不是共用 `debate-bull-bear` 挂四档的辩手：
+    //   `DebateExecutor` 按 `debater_steps` 的顺序**串行**驱动子节点
+    //   （`crates/rt-workflow/src/work_engine/executors/debate_executor.rs` 的 debater 循环），
+    //   一个容器装四档 = 把 8 次（r=1 时）LLM 调用串成一条链，与拍板 8「并行节点同步进行」
+    //   和 §九「四路并行 ⇒ 关键路径 ≈ 单档」直接冲突。
     // 调度：容器本身在引擎中立即 Completed；辩手由下方循环展开的独立实体节点承载，
     //      容器只把 debater_steps 配置列给引擎驱动，不返回辩论结果。
-    //      - debater_steps: 2 × debate_max_rounds 个**独立**辩手节点（bull-r1..bull-rN /
-    //        bear-r1..bear-rN），每轮一对、各带不同 expert persona 与 context_sources
-    //        （引用前序轮次输出）⇒ 各自真跑一次 LLM，即「真多轮」。
+    //      - debater_steps: 2 × debate_max_rounds 个**独立**本档辩手节点
+    //        （`bull-r1..bull-rN` / `bear-r1..bear-rN` 各带 `--{档}` 后缀），每轮一对、
+    //        各带不同 expert persona 与 context_sources（引用本档前序轮次输出 + 本档 brief）
+    //        ⇒ 各自真跑一次 LLM，即「真多轮」。
     //      - max_rounds: 固定 1（v59/2026-09-21）。轮次由 distinct 节点边承担，
     //        max_rounds 若 = debate_max_rounds 会对整批 debater_steps 做 N 遍轮播，
     //        第 2+ 遍被引擎「Completed 复用」短路 → 假多轮浪费。保持 1 = 单遍跑完。
     //      - convergence_prompt/model: 配置就绪但当前未启用（v59 起收敛由
-    //        debate-convergence 节点承担，无需引擎级相似度收敛循环）。
+    //        debate-convergence--{档} 节点承担，无需引擎级相似度收敛循环）。
     //
-    // ⚠️ 关键陷阱（P0 已修复）：
+    // ⚠️ 关键陷阱（P0 已修复，逐档化后同样成立）：
     //   历史 bug：曾将 value-investor 的入边连到本容器，导致 value-investor
     //   在容器 Completed 时立即启动——拿到的是"辩论配置"而非"辩论结果"。
-    //   正确接法：value-investor 应等待最后一个真实辩手节点完成，即
-    //   `bear-r{debate_max_rounds}`。⚠️ 禁止硬编码 `bear-r3` —— 轮数一变就会变成
+    //   正确接法：value-investor 应等待本档最后一个真实辩手节点完成，即
+    //   `bear-r{debate_max_rounds}--{档}`。⚠️ 禁止硬编码 `bear-r3` —— 轮数一变就会变成
     //   悬空入边，整条下游链静默 Skipped（见 debater_round_refs_are_parameterized）。
     //
-    // 真实调度依赖链（首轮 bull-r1 启动条件）：
-    //   trigger → tool → a-* → debate-bull-bear → bull-r1 → bear-r1 →
-    //   bull-r2 → bear-r2 → … → bull-rN → bear-rN（轮次由下方循环的边串联）
+    // 真实调度依赖链（首轮 bull-r1 启动条件，逐档各一条）：
+    //   trigger → tool → a-*--档 → debate-bull-bear--档 → bull-r1--档 → bear-r1--档 →
+    //   bull-r2--档 → bear-r2--档 → … → bear-rN--档 → debate-convergence--档
     // parent_id：仅供前端编辑器嵌套渲染用
     //
     // ⚠️ 坐标约定（FIX: 所有节点位置为画布绝对坐标）：
-    //   容器 debate-bull-bear 放在 (DEBATE_X, DEBATE_Y)
-    //   辩手节点 x = DEBATE_X + 20px（容器内偏移）
+    //   容器 debate-bull-bear--档 放在 (DEBATE_X + 档序 × DEBATE_COL_DX, DEBATE_Y)
+    //   辩手节点 x = 容器 x + 20px（容器内偏移）
     //   辩手节点 y = DEBATE_Y + 40px + round*2*180px（按轮次纵向排列）
     //   前端 WorkflowEditor 通过 parentId 减去容器坐标得到相对坐标交给 ReactFlow。
     // ═══════════════════════════════════════════════════════════════════════
     const DEBATE_X: f64 = 300.0;
     const DEBATE_Y: f64 = 1280.0;
-    nodes.push(WorkflowNode::Debate(DebateNode {
-        base: WorkflowNodeBase {
-            id: "debate-bull-bear".into(),
-            title: "多空辩论".into(),
-            description: Some(format!(
-                "{debate_max_rounds} 轮多空辩论：多方构建论点 → 空方反驳 → 循环"
-            )),
-            position: Position { x: DEBATE_X, y: DEBATE_Y },
-            retry: RetryConfig { enabled: true, max_retries: 1, ..Default::default() },
-            timeout: Some(900),
-            enabled: true,
-            parent_id: None,
-            compensation: None,
-            // v7: 容错降级。2026-09-08 实证：a-fundamentals 失败时本节点作为
-            // 调度枢纽被上游 Failed 边阻塞 → 整条辩论链/t-scoring/portfolio-mgr
-            // 全部停摆 → 决策降级观望。辩手只消费 analyst-brief（自带降级标注，
-            // 缺基本面时显示"数据不可用"），本容器仅做调度转发，可安全放行。
-            continue_on_fail: true,
-        },
-        config: DebateNodeConfig {
-            debater_steps: (0..debate_max_rounds)
-                .flat_map(|r| vec![format!("bull-r{}", r + 1), format!("bear-r{}", r + 1)])
-                .collect(),
-            // v59（2026-09-21）：固定 1 —— 单遍驱动全部 distinct 辩手节点。
-            // 轮次由独立节点的边串联，不要设成 debate_max_rounds（会重复轮播被短路）。
-            max_rounds: 1,
-            convergence_prompt: None,
-            convergence_model: None,
-            topic_var: "trigger.output".into(),
-            output_var: String::new(),
-            sub_graph: None, // v23+：稍后通过 inject_container_subgraphs 注入
-        },
-    }));
+    // 四档横向并列的列距：容器与辩手同列偏移，四组辩论在画布上互不重叠。
+    const DEBATE_COL_DX: f64 = 320.0;
+    for (tier_idx, p) in axagent_harness::holding_period::Period::ALL.iter().enumerate() {
+        let container_id = tier_id("debate-bull-bear", *p);
+        let debater_steps: Vec<String> = (0..debate_max_rounds)
+            .flat_map(|r| {
+                let round_num = r + 1;
+                vec![
+                    tier_id(&format!("bull-r{round_num}"), *p),
+                    tier_id(&format!("bear-r{round_num}"), *p),
+                ]
+            })
+            .collect();
+        nodes.push(WorkflowNode::Debate(DebateNode {
+            base: WorkflowNodeBase {
+                id: container_id.clone(),
+                title: format!("多空辩论（{}）", p.label_zh()),
+                description: Some(format!(
+                    "{} 轮多空辩论（{}档）：多方构建论点 → 空方反驳 → 循环",
+                    debate_max_rounds,
+                    p.label_zh()
+                )),
+                position: Position { x: DEBATE_X + tier_idx as f64 * DEBATE_COL_DX, y: DEBATE_Y },
+                retry: RetryConfig { enabled: true, max_retries: 1, ..Default::default() },
+                timeout: Some(900),
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+                // v7: 容错降级。2026-09-08 实证：a-fundamentals 失败时本节点作为
+                // 调度枢纽被上游 Failed 边阻塞 → 整条辩论链/t-scoring/portfolio-mgr
+                // 全部停摆 → 决策降级观望。辩手只消费本档 analyst-brief（自带降级标注，
+                // 缺基本面时显示"数据不可用"），本容器仅做调度转发，可安全放行。
+                continue_on_fail: true,
+            },
+            config: DebateNodeConfig {
+                debater_steps,
+                // v59（2026-09-21）：固定 1 —— 单遍驱动全部 distinct 辩手节点。
+                // 轮次由独立节点的边串联，不要设成 debate_max_rounds（会重复轮播被短路）。
+                max_rounds: 1,
+                convergence_prompt: None,
+                convergence_model: None,
+                topic_var: "trigger.output".into(),
+                output_var: String::new(),
+                sub_graph: None, // v23+：稍后通过 inject_container_subgraphs 注入
+            },
+        }));
+    }
 
     // DebateNode 的子节点：按轮次展开多方辩手和空方辩手
     // parentId 指向容器节点，前端将它们渲染在 DebateNode 内部
     // 位置：容器内 20px 左偏移，按轮次纵向排列（绝对坐标 = 容器坐标 + 偏移）
     // v16 历史工具集：辩手节点 v71 改为纯决策节点后不再使用，保留定义供未来恢复参考。
     // v17+ 可考虑给空方注入估值/风险类特色工具(td_var / td_maxdd / td_pledge / td_corr)。
+    // v161（A4）：整段按 `Period::ALL` 外层再套一层 —— 每档一对/每轮的辩手节点与容器同列。
     let _bull_tools = vec![
         td_quote.clone(),
         td_kline.clone(),
@@ -4016,152 +4084,181 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         td_divergence.clone(),
     ];
 
-    for round in 0..debate_max_rounds {
-        let round_num = round + 1;
-        let bull_id = format!("bull-r{round_num}");
-        let bear_id = format!("bear-r{round_num}");
-        // R1 走 bull-researcher / bear-researcher（初始论证型），R2 走 bull-r2 / bear-r2
-        // （质询型），R3 走 bull-r3 / bear-r3（最终反驳型）。R2/R3 工具集一致：
-        // 都需要 compute_scoring / compute_valuation 核实对方论据中的技术/估值假设。
-        let bull_expert = match round_num {
-            2 => "bull-r2",
-            3 => "bull-r3",
-            _ => "bull-researcher",
-        };
-        let bear_expert = match round_num {
-            2 => "bear-r2",
-            3 => "bear-r3",
-            _ => "bear-researcher",
-        };
-        let bull_title = format!("多方研究员·第{round_num}轮");
-        let bear_title = format!("空方研究员·第{round_num}轮");
-        // 绝对坐标 = 容器基准 + 内部偏移
-        let bull_x = DEBATE_X + 20.0;
-        let bull_y = DEBATE_Y + 40.0 + (round * 2) as f64 * 180.0;
-        let bear_x = DEBATE_X + 20.0;
-        let bear_y = DEBATE_Y + 40.0 + (round * 2 + 1) as f64 * 180.0;
+    for (tier_idx, p) in axagent_harness::holding_period::Period::ALL.iter().enumerate() {
+        let container_id = tier_id("debate-bull-bear", *p);
+        let tier_brief_id = tier_id("analyst-brief", *p);
+        let col_dx = tier_idx as f64 * DEBATE_COL_DX;
+        let tier_zh = p.label_zh();
+        for round in 0..debate_max_rounds {
+            let round_num = round + 1;
+            let bull_id = tier_id(&format!("bull-r{round_num}"), *p);
+            let bear_id = tier_id(&format!("bear-r{round_num}"), *p);
+            // R1 走 bull-researcher / bear-researcher（初始论证型），R2 走 bull-r2 / bear-r2
+            // （质询型），R3 走 bull-r3 / bear-r3（最终反驳型）。R2/R3 工具集一致：
+            // 都需要 compute_scoring / compute_valuation 核实对方论据中的技术/估值假设。
+            let bull_expert = match round_num {
+                2 => "bull-r2",
+                3 => "bull-r3",
+                _ => "bull-researcher",
+            };
+            let bear_expert = match round_num {
+                2 => "bear-r2",
+                3 => "bear-r3",
+                _ => "bear-researcher",
+            };
+            let bull_title = format!("多方研究员·第{round_num}轮（{tier_zh}）");
+            let bear_title = format!("空方研究员·第{round_num}轮（{tier_zh}）");
+            // 绝对坐标 = 本档容器基准 + 内部偏移
+            let bull_x = DEBATE_X + col_dx + 20.0;
+            let bull_y = DEBATE_Y + 40.0 + (round * 2) as f64 * 180.0;
+            let bear_x = DEBATE_X + col_dx + 20.0;
+            let bear_y = DEBATE_Y + 40.0 + (round * 2 + 1) as f64 * 180.0;
 
-        // 多方辩手：首轮无前置辩论上下文，后续轮次引用所有前序辩论输出
-        let mut bull_an =
-            agent(&bull_id, &bull_title, bull_expert, Some("debate-bull-bear"), bull_x, bull_y);
-        if let WorkflowNode::Agent(ref mut a) = bull_an {
-            // R1 用 bull_tools 工具集(含 get_stock_quote/kline/financials/news 等基础数据工具,
-            //   LLM 能直接调通拿数据,产出论据)。
-            // R2/R3 走 PROFILE_TOOLS 路径(质询/反驳需技术评分+估值工具)。
-            // 修复(v16):R1/R2/R3 多空辩手统一用 bull_tools(基础数据工具集)。
-            //   之前 R2/R3 走 PROFILE_TOOLS(只有 compute_scoring / compute_valuation
-            //   计算工具)—— R2/R3 没有上游数据节点,LLM 拿不到 stock_quote / kline
-            //   / financials / news 等基础数据,工具调用全部返回空,导致 R2/R3
-            //   输出 "暂无数据"。
-            //   R2 质询 / R3 反驳的角色由 bull-r2.md / bear-r2.md / bull-r3.md /
-            //   bear-r3.md prompt 控制,与工具集无关。
-            // ⚠️ 上方「R2/R3 走 PROFILE_TOOLS」「统一用 bull_tools」两段均为历史
-            //   记录，已被下方 `tools = vec![]`（纯决策节点）覆盖，
-            //   勿据其推断实际工具集（自证注释污染）。
-            // 修复(阶段 4):辩论子节点加 1 次重试。LLM 偶发超时/429 是单点失败
-            //   主因,max_retries=0 导致整链雪崩(bear-r1 拿不到 bull-r1 上下文则
-            //   后续轮次全部"暂无数据")。1 次重试覆盖 ~95% 瞬时失败。
-            //   ⚠️ 同批加的 "180s 超时" 已被下方 `timeout = None` 覆盖（改回继承
-            //   RunOptions.step_timeout）；且该 `max_retries=1` 直到 v48 才首次
-            //   真正生效 —— 容器体路径此前是裸 dispatch，从未消费本配置（B1 修复）。
-            a.base.retry = RetryConfig { enabled: true, max_retries: 1, ..Default::default() };
-            // 超时继承 RunOptions.step_timeout（来自 agent_timeout_secs 设置），用户可在面板控制
-            a.base.timeout = None;
-            // P0 修复(2026-07-22): 移除 bull_tools，改为纯决策节点。
-            // 原问题：bull_tools 含 td_quote/td_kline/td_fin 等需要 stock_code 的工具，
-            // 但 input_mapping 未注入 stock_code（只有分析师评分），LLM 会传空值。
-            // 辩手的 context_sources 已包含 analyst-brief 摘要（评分+关键论据），无需重新获取。
-            a.config.tools = vec![];
-            a.config.exposed_tools = vec![];
-            a.config.system_prompt = format!(
-                "{}\n\n--- 数据约束 ---\n\
+            // 多方辩手：首轮无前置辩论上下文，后续轮次引用所有前序辩论输出
+            let mut bull_an =
+                agent(&bull_id, &bull_title, bull_expert, Some(&container_id), bull_x, bull_y);
+            if let WorkflowNode::Agent(ref mut a) = bull_an {
+                // R1 用 bull_tools 工具集(含 get_stock_quote/kline/financials/news 等基础数据工具,
+                //   LLM 能直接调通拿数据,产出论据)。
+                // R2/R3 走 PROFILE_TOOLS 路径(质询/反驳需技术评分+估值工具)。
+                // 修复(v16):R1/R2/R3 多空辩手统一用 bull_tools(基础数据工具集)。
+                //   之前 R2/R3 走 PROFILE_TOOLS(只有 compute_scoring / compute_valuation
+                //   计算工具)—— R2/R3 没有上游数据节点,LLM 拿不到 stock_quote / kline
+                //   / financials / news 等基础数据,工具调用全部返回空,导致 R2/R3
+                //   输出 "暂无数据"。
+                //   R2 质询 / R3 反驳的角色由 bull-r2.md / bear-r2.md / bull-r3.md /
+                //   bear-r3.md prompt 控制,与工具集无关。
+                // ⚠️ 上方「R2/R3 走 PROFILE_TOOLS」「统一用 bull_tools」两段均为历史
+                //   记录，已被下方 `tools = vec![]`（纯决策节点）覆盖，
+                //   勿据其推断实际工具集（自证注释污染）。
+                // 修复(阶段 4):辩论子节点加 1 次重试。LLM 偶发超时/429 是单点失败
+                //   主因,max_retries=0 导致整链雪崩(bear-r1 拿不到 bull-r1 上下文则
+                //   后续轮次全部"暂无数据")。1 次重试覆盖 ~95% 瞬时失败。
+                //   ⚠️ 同批加的 "180s 超时" 已被下方 `timeout = None` 覆盖（改回继承
+                //   RunOptions.step_timeout）；且该 `max_retries=1` 直到 v48 才首次
+                //   真正生效 —— 容器体路径此前是裸 dispatch，从未消费本配置（B1 修复）。
+                a.base.retry = RetryConfig { enabled: true, max_retries: 1, ..Default::default() };
+                // 超时继承 RunOptions.step_timeout（来自 agent_timeout_secs 设置），用户可在面板控制
+                a.base.timeout = None;
+                // P0 修复(2026-07-22): 移除 bull_tools，改为纯决策节点。
+                // 原问题：bull_tools 含 td_quote/td_kline/td_fin 等需要 stock_code 的工具，
+                // 但 input_mapping 未注入 stock_code（只有分析师评分），LLM 会传空值。
+                // 辩手的 context_sources 已包含 analyst-brief 摘要（评分+关键论据），无需重新获取。
+                a.config.tools = vec![];
+                a.config.exposed_tools = vec![];
+                a.config.system_prompt = format!(
+                    "{}\n\n--- 数据约束 ---\n\
                  你是辩论辩手，所有数据来自分析师摘要节点和前序辩论输出，禁止调用任何工具重新获取数据。\n\
-                 基于分析师摘要中的评分数据和关键论据进行论证/质询/反驳。",
-                a.config.system_prompt
-            );
-            a.config.max_tool_rounds = Some(0);
-            // 注入前序轮次辩论输出 + analyst-brief 摘要作为上下文
-            // （替代原先加载10份全量报告，由 analyst-brief CodeNode 聚合）
-            let mut ctx: Vec<String> = Vec::new();
-            for r in 1..round_num {
-                ctx.push(format!("bull-r{r}"));
-                ctx.push(format!("bear-r{r}"));
+                 基于分析师摘要中的评分数据和关键论据进行论证/质询/反驳。\n\
+                 ⚠️ 本场辩论只服务**{tier_zh}**这一个持有周期：摘要里的每条论据都是本周期分析师的产出，\
+                 不要把它推广到别的持有周期（短周期论据在长周期上不成立是常态）。",
+                    a.config.system_prompt,
+                    tier_zh = tier_zh
+                );
+                a.config.max_tool_rounds = Some(0);
+                // 注入**本档**前序轮次辩论输出 + 本档 analyst-brief 摘要作为上下文
+                // （替代原先加载10份全量报告，由本档 analyst-brief CodeNode 聚合）
+                let mut ctx: Vec<String> = Vec::new();
+                for r in 1..round_num {
+                    ctx.push(tier_id(&format!("bull-r{r}"), *p));
+                    ctx.push(tier_id(&format!("bear-r{r}"), *p));
+                }
+                // 使用本档 analyst-brief CodeNode 的输出替代10份全量分析师报告
+                ctx.push(tier_brief_id.clone());
+                a.config.context_sources = ctx;
+                // 注：评分数据已嵌入 analyst-brief 文本，不再额外通过 input_mapping 注入 30 个字段
+                a.config.input_mapping = [].into_iter().collect();
             }
-            // 使用 analyst-brief CodeNode 的输出替代10份全量分析师报告
-            ctx.push("analyst-brief".to_string());
-            a.config.context_sources = ctx;
-            // 注：评分数据已嵌入 analyst-brief 文本，不再额外通过 input_mapping 注入 30 个字段
-            a.config.input_mapping = [].into_iter().collect();
-        }
-        nodes.push(bull_an);
+            nodes.push(bull_an);
 
-        // 空方辩手：引用本轮多方输出 + 前序轮次辩论输出
-        let mut bear_an =
-            agent(&bear_id, &bear_title, bear_expert, Some("debate-bull-bear"), bear_x, bear_y);
-        if let WorkflowNode::Agent(ref mut a) = bear_an {
-            // 同 bull_an:R1/R2/R3 空方统一用 bull_tools。
-            // 修复(阶段 4):同 bull_an,加 1 次重试 + 180s 超时,避免 LLM 瞬时失败
-            //   导致辩论链雪崩(详见 bull_an 注释)。
-            a.base.retry = RetryConfig { enabled: true, max_retries: 1, ..Default::default() };
-            // 超时继承 RunOptions.step_timeout（来自 agent_timeout_secs 设置），用户可在面板控制
-            a.base.timeout = None;
-            // P0 修复(2026-07-22): 移除 bull_tools，改为纯决策节点。
-            // 原问题：bull_tools 含 td_quote/td_kline/td_fin 等需要 stock_code 的工具，
-            // 但 input_mapping 未注入 stock_code（只有分析师评分），LLM 会传空值。
-            // 辩手的 context_sources 已包含 analyst-brief 摘要（评分+关键论据），无需重新获取。
-            a.config.tools = vec![];
-            a.config.exposed_tools = vec![];
-            a.config.system_prompt = format!(
-                "{}\n\n--- 数据约束 ---\n\
+            // 空方辩手：引用本轮多方输出 + 前序轮次辩论输出
+            let mut bear_an =
+                agent(&bear_id, &bear_title, bear_expert, Some(&container_id), bear_x, bear_y);
+            if let WorkflowNode::Agent(ref mut a) = bear_an {
+                // 同 bull_an:R1/R2/R3 空方统一用 bull_tools。
+                // 修复(阶段 4):同 bull_an,加 1 次重试 + 180s 超时,避免 LLM 瞬时失败
+                //   导致辩论链雪崩(详见 bull_an 注释)。
+                a.base.retry = RetryConfig { enabled: true, max_retries: 1, ..Default::default() };
+                // 超时继承 RunOptions.step_timeout（来自 agent_timeout_secs 设置），用户可在面板控制
+                a.base.timeout = None;
+                // P0 修复(2026-07-22): 移除 bull_tools，改为纯决策节点。
+                // 原问题：bull_tools 含 td_quote/td_kline/td_fin 等需要 stock_code 的工具，
+                // 但 input_mapping 未注入 stock_code（只有分析师评分），LLM 会传空值。
+                // 辩手的 context_sources 已包含 analyst-brief 摘要（评分+关键论据），无需重新获取。
+                a.config.tools = vec![];
+                a.config.exposed_tools = vec![];
+                a.config.system_prompt = format!(
+                    "{}\n\n--- 数据约束 ---\n\
                  你是辩论辩手，所有数据来自分析师摘要节点和前序辩论输出，禁止调用任何工具重新获取数据。\n\
-                 基于分析师摘要中的评分数据和关键论据进行论证/质询/反驳。",
-                a.config.system_prompt
-            );
-            a.config.max_tool_rounds = Some(0);
-            // 注入前序轮次 + 本轮多方输出 + analyst-brief 摘要作为上下文
-            let mut ctx: Vec<String> = Vec::new();
-            for r in 1..round_num {
-                ctx.push(format!("bull-r{r}"));
-                ctx.push(format!("bear-r{r}"));
+                 基于分析师摘要中的评分数据和关键论据进行论证/质询/反驳。\n\
+                 ⚠️ 本场辩论只服务**{tier_zh}**这一个持有周期：反驳只针对本周期成立的风险与机会，\
+                 不要把别的持有周期的结论当成对方的论点。",
+                    a.config.system_prompt,
+                    tier_zh = tier_zh
+                );
+                a.config.max_tool_rounds = Some(0);
+                // 注入本档前序轮次 + 本轮多方输出 + 本档 analyst-brief 摘要作为上下文
+                let mut ctx: Vec<String> = Vec::new();
+                for r in 1..round_num {
+                    ctx.push(tier_id(&format!("bull-r{r}"), *p));
+                    ctx.push(tier_id(&format!("bear-r{r}"), *p));
+                }
+                ctx.push(bull_id.clone());
+                // 使用本档 analyst-brief 替代全量分析师报告
+                ctx.push(tier_brief_id.clone());
+                a.config.context_sources = ctx;
+                // 评分数据已嵌入 analyst-brief 文本，不再额外注入
+                a.config.input_mapping = [].into_iter().collect();
             }
-            ctx.push(bull_id.clone());
-            // 使用 analyst-brief 替代全量分析师报告
-            ctx.push("analyst-brief".to_string());
-            a.config.context_sources = ctx;
-            // 评分数据已嵌入 analyst-brief 文本，不再额外注入
-            a.config.input_mapping = [].into_iter().collect();
-        }
-        nodes.push(bear_an);
+            nodes.push(bear_an);
 
-        // ── 轮次依赖边 ──
-        if round == 0 {
-            // 首轮：从 DebateNode 容器出发
-            edges.push(edge(&format!("e-debate-bull-r{round_num}"), "debate-bull-bear", &bull_id));
-        } else {
-            // 后续轮次：上一轮空方完成后启动本轮多方
-            let prev_bear = format!("bear-r{}", round);
-            edges.push(edge(&format!("e-r{round}-bull-r{round_num}"), &prev_bear, &bull_id));
+            // ── 轮次依赖边（本档内部串联；档与档之间无依赖 ⇒ 四路真并行）──
+            if round == 0 {
+                // 首轮：从**本档** DebateNode 容器出发
+                edges.push(edge(
+                    &format!("e-{container_id}-bull-r{round_num}"),
+                    &container_id,
+                    &bull_id,
+                ));
+            } else {
+                // 后续轮次：上一轮空方完成后启动本轮多方
+                let prev_bear = tier_id(&format!("bear-r{round}"), *p);
+                edges.push(edge(
+                    &format!("e-r{round}-bull-r{round_num}--{}", p.as_str()),
+                    &prev_bear,
+                    &bull_id,
+                ));
+            }
+            // 每轮：多方 → 空方（空方看到多方论点后反驳）
+            edges.push(edge(
+                &format!("e-bull-r{round_num}-bear-r{round_num}--{}", p.as_str()),
+                &bull_id,
+                &bear_id,
+            ));
         }
-        // 每轮：多方 → 空方（空方看到多方论点后反驳）
-        edges.push(edge(&format!("e-bull-r{round_num}-bear-r{round_num}"), &bull_id, &bear_id));
     }
 
-    // ── debate-convergence（辩论收敛分析）──
-    // 读取全部辩手输出（v48 起 2 个），输出 consensus_score 供 portfolio-mgr 公式使用。
-    // 入边从 bear-r{debate_max_rounds} 出发，确保等真辩论结束后再启动收敛。
-    // 出边到 value-investor 和 portfolio-mgr，确保收敛结果在决策前可用。
-    {
-        let last_debate_node = format!("bear-r{debate_max_rounds}");
+    // ── debate-convergence--{档}（本档辩论收敛分析）──
+    // 读取**本档**全部辩手输出（v48 起 2 个/轮），输出 consensus_score 供 portfolio-mgr 公式使用。
+    // 入边从 bear-r{debate_max_rounds}--{档} 出发，确保等本档真辩论结束后再启动收敛。
+    // v161（A4）：**每档一份收敛节点**（四份），不再是全局单份 —— 全局单份就是「四档共用一份
+    //   辩论结论」的数据层根因（`PLAN-llm-horizon-decision-and-parity.md` §1.2 断点所在）。
+    //   出边到本档 value-investor 与下游四个单值消费点（research-mgr / trader /
+    //   portfolio-mgr / data-quality 各按四档并注）。
+    for (tier_idx, p) in axagent_harness::holding_period::Period::ALL.iter().enumerate() {
+        let convergence_id = tier_id("debate-convergence", *p);
+        let last_debate_node = tier_id(&format!("bear-r{debate_max_rounds}"), *p);
+        let tier_zh = p.label_zh();
         let mut dc = agent(
-            "debate-convergence",
-            "辩论结果收敛：consensus_score 聚合",
+            &convergence_id,
+            &format!("辩论结果收敛：consensus_score 聚合（{tier_zh}）"),
             "debate-convergence",
             None,
-            500.0,
-            1420.0,
+            DEBATE_X + tier_idx as f64 * DEBATE_COL_DX + 220.0,
+            1900.0,
         );
         if let WorkflowNode::Agent(ref mut a) = dc {
-            // 动态构建 context_sources：仅引用辩手输出（6 轮 R1→R3 完整辩论轨迹）。
+            // 动态构建 context_sources：仅引用**本档**辩手输出（每档 R1→Rn 完整辩论轨迹）。
             //
             // v69 优化(2026-07-22): 移除 10 个分析师节点,context_sources 从 16 → 6。
             // 理由:
@@ -4174,16 +4271,17 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             //      是两条独立路径,input_mapping 从全局 blackboard 提取,不依赖
             //      context_sources),30 个评分字段仍可用。
             // 预期效果: input tokens ~30k-40k → ~15k-20k(减少约 50%),缓解 LLM TTFB 超时。
+            // v161: 逐档化后本节点只吃**本档**辩手与本档分析师实例 ⇒ 上下文体积不升反降。
             let mut ctx: Vec<String> = Vec::new();
             for r in 1..=debate_max_rounds {
-                ctx.push(format!("bull-r{r}"));
-                ctx.push(format!("bear-r{r}"));
+                ctx.push(tier_id(&format!("bull-r{r}"), *p));
+                ctx.push(tier_id(&format!("bear-r{r}"), *p));
             }
             a.config.context_sources = ctx;
             // 纯决策节点：tools 默认为空（agent 闭包），无需工具调用轮次
             a.config.max_tool_rounds = Some(0);
             a.config.output_mode = OutputMode::Json; // 输出结构化 JSON，确保 consensus_score / aggregate_prediction 被 input_mapping 解析
-            a.config.input_mapping = build_analyst_input_mapping(&tiered);
+            a.config.input_mapping = build_analyst_input_mapping(&tier_instances_for(&tiered, *p));
             // #1 修复(2026-07-22): debate-convergence 上下文极大
             // (6 轮辩手 + 30 个 input_mapping 结构化字段, ~15k-20k input tokens),
             // LLM 处理大上下文 TTFB 偶发 >120s 触发 stream chunk timeout。
@@ -4196,9 +4294,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         }
         nodes.push(dc);
         edges.push(edge(
-            &format!("e-{last_debate_node}-debate-convergence"),
+            &format!("e-{last_debate_node}-{convergence_id}"),
             &last_debate_node,
-            "debate-convergence",
+            &convergence_id,
         ));
     }
 
@@ -4217,7 +4315,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         } else {
             280.0
         };
-        let last_debate_node = format!("bear-r{debate_max_rounds}");
+        // v161（A4）：本档实例只等**本档**的最后一轮辩手与本档收敛节点 —— 不再挂全局单份。
+        let last_debate_node = tier_id(&format!("bear-r{debate_max_rounds}"), *p);
+        let convergence_id = tier_id("debate-convergence", *p);
         let mut vi = agent(&vi_id, &vi_title, VALUE_INVESTOR_ID, None, vi_x, vi_y);
         if let WorkflowNode::Agent(ref mut a) = vi {
             let mut cs: Vec<String> = Vec::new();
@@ -4227,7 +4327,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 }
             }
             cs.push(last_debate_node.clone());
-            cs.push("debate-convergence".into());
+            cs.push(tier_id("debate-convergence", *p));
             cs.push("t-valuation".into());
             cs.push("t-risk".into());
             a.config.context_sources = cs;
@@ -4246,7 +4346,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                  - 基本面叙述: 来自 a-fundamentals（LLM 分析文本）\n\
                  - 研报数据: 来自 a-research\n\
                  - 行业数据: 来自 a-sector\n\
-                 - 辩论共识: 来自 debate-convergence\n\
+                 - 辩论共识: 来自**本持有周期**的辩论收敛节点（debate-convergence 带档后缀）\n\
                  - **客观估值数据**: 来自 t-valuation（结构化算法结果）\n\
                    - result.dcf.{{low,mid,high}}: DCF 内在价值区间（不可用时为 null）\n\
                    - result.dcf.idealBuyPrice: **理想买入价**（= DCF 中性档 ×0.70，即要求 30% 安全边际；\n\
@@ -4382,9 +4482,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         nodes.push(vi);
         // v133：边名与目标均带档（每个实例各自等到辩论收敛 / t-valuation / t-risk 完成）。
         edges.push(edge(&format!("e-debate-{vi_id}"), &last_debate_node, &vi_id));
-        // value-investor 的 context_sources 中 debate-convergence 需要显式边，
-        // 否则只在 bear-r{debate_max_rounds} 完成后就调度，debate-convergence 还没跑完
-        edges.push(edge(&format!("e-convergence-{vi_id}"), "debate-convergence", &vi_id));
+        // v161（A4）：value-investor 的 context_sources 中**本档**收敛节点需要显式边，
+        // 否则只在本档 bear-r{debate_max_rounds}--档 完成后就调度，本档收敛还没跑完
+        edges.push(edge(&format!("e-convergence-{vi_id}"), &convergence_id, &vi_id));
         // V60/V73: t-valuation / t-risk 加入 context_sources 后需显式边等待，
         // 否则其输出不会进入 value-investor 的变量池（拓扑链 bear-r3 → t-scoring →
         // t-valuation → t-risk → value-investor，无回环）。
@@ -4569,24 +4669,26 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             sub_graph: None, // v23+：稍后通过 inject_container_subgraphs 注入
         },
     }));
-    edges.push(edge(
-        "e-debate-p-risk-assess",
-        &format!("bear-r{debate_max_rounds}"),
-        "p-risk-assess",
-    ));
-    // risk 节点的 context_sources 中 bull-r3/t-scoring/t-valuation/debate-convergence
-    // 需要显式边等待；否则 bear-r3 完成后就调度，但缺少边连接的节点输出
+    // ── v161（A4）辩论族节点的下游锚点 ──
+    // `p-risk-assess` 三视角按 §6.2 裁定**不动形状**（全局面板层，逐档四份会淹没 prompt），
+    // 只把锚从 `bull-rN`/`bear-rN`/`debate-convergence` 改指 **mid 代表实例** —— 该层本来就有
+    // 「mid 优先、否则首个」的代表实例规则（见下方 context_sources 的 by_base 取值），不是新发明。
+    // 四个单值消费点（research-mgr / trader / portfolio-mgr / data-quality）改为**四档并注**，
+    // 需要的是全部四个收敛节点 id；同样由 `Period::ALL` 渲染，不手抄档名。
+    let mid_period = axagent_harness::holding_period::Period::Mid;
+    let mid_last_bear = tier_id(&format!("bear-r{debate_max_rounds}"), mid_period);
+    let mid_last_bull = tier_id(&format!("bull-r{debate_max_rounds}"), mid_period);
+    let mid_convergence = tier_id("debate-convergence", mid_period);
+    edges.push(edge("e-debate-p-risk-assess", &mid_last_bear, "p-risk-assess"));
+    // risk 节点的 context_sources 中 bull-rN/t-scoring/t-valuation/debate-convergence
+    // 需要显式边等待；否则 bear-rN 完成后就调度，但缺少边连接的节点输出
     // 不会进入 deps_results/exec_ctx.variables，导致 context_sources 报 ERROR。
-    // 注：t-valuation 虽已可到达（链 bear-r3→t-scoring→t-valuation），但无直接边
-    // 则 bull-r3/t-scoring 的输出不进入变量池。
-    edges.push(edge(
-        &format!("e-bull-r{debate_max_rounds}-p-risk-assess"),
-        &format!("bull-r{debate_max_rounds}"),
-        "p-risk-assess",
-    ));
+    // 注：t-valuation 虽已可到达（链 bear-rN→t-scoring→t-valuation），但无直接边
+    // 则 bull-rN/t-scoring 的输出不进入变量池。
+    edges.push(edge("e-bull-r-p-risk-assess", &mid_last_bull, "p-risk-assess"));
     edges.push(edge("e-scoring-p-risk-assess", "t-scoring", "p-risk-assess"));
     edges.push(edge("e-valuation-p-risk-assess", "t-valuation", "p-risk-assess"));
-    edges.push(edge("e-convergence-p-risk-assess", "debate-convergence", "p-risk-assess"));
+    edges.push(edge("e-convergence-p-risk-assess", &mid_convergence, "p-risk-assess"));
 
     for (i, (rid, rtitle, rexpert, _rtools)) in [
         (
@@ -4681,14 +4783,18 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                             .unwrap_or_else(|| (*id).to_string())
                     })
                     .collect();
-                cs.push(format!("bull-r{debate_max_rounds}"));
-                cs.push(format!("bear-r{debate_max_rounds}"));
-                cs.push("debate-convergence".into());
+                let rep_mid = axagent_harness::holding_period::Period::Mid;
+                cs.push(tier_id(&format!("bull-r{debate_max_rounds}"), rep_mid));
+                cs.push(tier_id(&format!("bear-r{debate_max_rounds}"), rep_mid));
+                cs.push(tier_id("debate-convergence", rep_mid));
                 cs.push("t-scoring".into());
                 cs.push("t-valuation".into());
                 cs
             };
             a.config.input_mapping = {
+                // v161：收敛节点已逐档实例化（`debate-convergence--{档}`）⇒ 单值消费点取**代表档（mid）**，
+                // 与文件内既有代表实例规则（`a-*` 的 mid 优先、value-verify 的代表实例）同口径。
+                // 「逐档四注 + 按所选档 switch」是后续裁定，本轮不引入第五套参数。
                 let mut m = build_analyst_input_mapping(&tiered);
                 // 注入辩论收敛的 consensus_score 供 Kelly 公式使用
                 // 路径规则（V29 修复）：AgentNode 输出包裹在 {role, content: <json_string>, ...} 中，
@@ -4696,7 +4802,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 // 因此必须用 .content.field 路径访问 AgentNode 业务字段。
                 m.insert(
                     "consensus_score".to_string(),
-                    "debate-convergence.content.consensus_score".to_string(),
+                    "debate-convergence--mid.content.consensus_score".to_string(),
                 );
                 m
             };
@@ -4825,9 +4931,13 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //   `Node 't-scoring' depends on non-existent 'bear-r3'`（整条链连建模都过不去）。
     //   边名同为写死的 `e-bear-r3-...`，一并参数化，避免「名字撒谎」。
     //   守护测试：`seed_consistency_tests::debater_round_refs_are_parameterized`。
+    //   ⚠️ v161（逐档辩论）：末轮空方已带档后缀 ⇒ 源节点改指**代表档（mid）**，
+    //   与 `value-verify` 的代表实例同口径（`seed_stock_analysis.rs` 的 mid 优先约定）；
+    //   四档全接会让 t-scoring 依赖四条辩论链，而它只是单一技术评分工具节点。
+    let rep = axagent_harness::holding_period::Period::Mid;
     edges.push(edge(
-        &format!("e-bear-r{debate_max_rounds}-t-scoring"),
-        &format!("bear-r{debate_max_rounds}"),
+        &format!("e-bear-r{debate_max_rounds}-t-scoring--{}", rep.as_str()),
+        &tier_id(&format!("bear-r{debate_max_rounds}"), rep),
         "t-scoring",
     ));
     edges.push(edge("e-t-scoring-t-valuation", "t-scoring", "t-valuation"));
@@ -5208,6 +5318,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 tool_name: None,
                 execute_directly: true,
                 input_mapping: {
+                // v161：收敛节点已逐档实例化（`debate-convergence--{档}`）⇒ 单值消费点取**代表档（mid）**，
+                // 与文件内既有代表实例规则（`a-*` 的 mid 优先、value-verify 的代表实例）同口径；
+                // 「逐档四注 + 按所选档 switch」是后续裁定，本轮不引入第五套参数。
                     // ── v133（B2-2）：分析师侧 40 键按「代表实例」生成 ──
                     // 键名域保持（§五十六：「data-quality 的 40 键不新增条目」）；base 集 =
                     // 9 个 a-*（a-news 已摘）+ value-investor。source 取该 base 的**代表实例**：
@@ -5314,6 +5427,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                             format!("{cat_id}.content.verdict.catalyst_level"),
                         ));
                     // ④ 非分析师侧静态键（原静态数组改为 extend 追加；键集与 v133 前逐字一致）
+                    // v161：收敛节点已逐档实例化（`debate-convergence--{档}`）⇒ 单值消费点取**代表档（mid）**，
+                    // 与文件内既有代表实例规则（`a-*` 的 mid 优先、value-verify 的代表实例）同口径。
+                    // 「逐档四注 + 按所选档 switch」是后续裁定，本轮不引入第五套参数。
                     dq_input.extend(
                         [
                     // ── 因子数据完整度评估（供 pm_compute_factor_completeness 使用）──
@@ -5323,7 +5439,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // resolve_var_path 终值不再 auto-parse，rhai 收到 JSON 字符串
                     // 后按原契约 json_parse/safe_parse 解析。
                     ("total_score", "t-scoring.result.content.totalScore"),
-                    ("consensus_score", "debate-convergence.content.consensus_score"),
+                    ("consensus_score", "debate-convergence--mid.content.consensus_score"),
                     (
                         "risk_volatility",
                         "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct",
@@ -5406,7 +5522,12 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         edges.push(edge("e-t-lockup-data-quality", "t-lockup-data", dq_id));
         edges.push(edge("e-t-catalyst-data-quality", "t-catalyst-data", dq_id));
         edges.push(edge("e-pace-calc-data-quality", "pace-calc", dq_id));
-        edges.push(edge("e-debate-convergence-data-quality", "debate-convergence", dq_id));
+        // v161：辩论收敛已逐档 ⇒ data-quality 要等**四档**收敛都完成（四档并注）。
+        //   单条裸 `debate-convergence` 边在这版会悬空，被种子自身的悬空边守卫当场拒绝播种。
+        for p in axagent_harness::holding_period::Period::ALL {
+            let conv = tier_id("debate-convergence", p);
+            edges.push(edge(&format!("e-{conv}-data-quality"), &conv, dq_id));
+        }
         // v146(2026-10-09): 补 `value-verify--<代表档> → data-quality` 显式边 —— 修复
         //   「价值评估官」行**恒报**「节点未输出 VERDICT / confidence 缺失」。
         //   根因：`val` 槽的 source 是 `value-investor--<代表档>.result.verdict`（见上方
@@ -5457,6 +5578,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         a.base.continue_on_fail = true;
         // v133（B2-2）：value-investor 的两个逐档实例（中/长）都列入 context_sources。
         //   实例名由 `tiered` + `analyst_node_id` 生成，不手抄（新增档位时自动跟随）。
+        // v161：收敛节点已逐档实例化（`debate-convergence--{档}`）⇒ 单值消费点取**代表档（mid）**，
+        // 与文件内既有代表实例规则（`a-*` 的 mid 优先、value-verify 的代表实例）同口径。
+        // 「逐档四注 + 按所选档 switch」是后续裁定，本轮不引入第五套参数。
+        let rep_conv = tier_id("debate-convergence", axagent_harness::holding_period::Period::Mid);
         let mut rm_ctx: Vec<String> = tiered
             .iter()
             .filter(|(b, ..)| *b == VALUE_INVESTOR_ID)
@@ -5477,7 +5602,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 "risk-neu",
                 "risk-level",
                 // V29 修复: input_mapping 引用 debate-convergence，需在 context_sources 中声明
-                "debate-convergence",
+                // v161：收敛节点逐档化 ⇒ 声明**代表档（mid）**那一份（与 input_mapping 同源）。
+                rep_conv.as_str(),
             ]
             .into_iter()
             .map(str::to_string),
@@ -5500,7 +5626,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             // P1 修复(3.2 信息隔离): 提案阶段禁止暴露风险预算参数
             // 原 overall_risk / agg_risk_pos / cons_risk_pos / neut_risk_pos 已移除
             // AgentNode(Json mode) 输出包裹在 {role, content: <json_string>, ...} 中
-            ("consensus_score", "debate-convergence.content.consensus_score"),
+            ("consensus_score", "debate-convergence--mid.content.consensus_score"),
             ("stock_lessons", "stock_lessons"),
         ]
         .into_iter()
@@ -5563,10 +5689,15 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         // P2 修复: 扩展 context_sources 覆盖所有 input_mapping 引用的上游节点
         // （显式依赖原则：input_mapping 引用的上游节点必须有关联边或 context_sources）
         // v152: t-valuation 估值信号 | a-catalyst--mid 催化剂 | a-hot-money--mid 资金面
+        // v161：收敛节点已逐档实例化（`debate-convergence--{档}`）⇒ 单值消费点取**代表档（mid）**，
+        // 与文件内既有代表实例规则（`a-*` 的 mid 优先、value-verify 的代表实例）同口径。
+        // 「逐档四注 + 按所选档 switch」是后续裁定，本轮不引入第五套参数。
+        let rep_conv = tier_id("debate-convergence", axagent_harness::holding_period::Period::Mid);
         // risk-convergence: risk_disagreement 风险分歧度 | data-quality: dqi_score 数据质量
         a.config.context_sources = vec![
             "research-mgr".into(),
-            "debate-convergence".into(),
+            // v161：同理取代表档（mid）的收敛节点
+            rep_conv.clone(),
             "t-scoring".into(),
             // v152: 估值/催化剂/资金面三源 —— input_mapping 新增键的显式依赖
             "t-valuation".into(),
@@ -5618,7 +5749,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         );
         a.config.max_tool_rounds = Some(0); // 禁用工具调用轮次
         let mut trader_input_mapping: std::collections::HashMap<String, String> = [
-            ("consensus_score", "debate-convergence.content.consensus_score"),
+            ("consensus_score", "debate-convergence--mid.content.consensus_score"),
             ("stock_lessons", "stock_lessons"),
             // P1 修复: 注入标准参考价，确保 trader 与 portfolio-mgr 使用相同的 currentPrice
             // 避免 trader 自行调用 get_stock_quote 获取的实时价与 t-scoring 缓存的 currentPrice
@@ -5720,6 +5851,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             tool_name: None,
             execute_directly: true,
             input_mapping: {
+                // v161：收敛节点已逐档实例化（`debate-convergence--{档}`）⇒ 单值消费点取**代表档（mid）**，
+                // 与文件内既有代表实例规则（`a-*` 的 mid 优先、value-verify 的代表实例）同口径；
+                // 「逐档四注 + 按所选档 switch」是后续裁定，本轮不引入第五套参数。
                 // 静态映射：上游节点输出路径 → 变量名
                 let mut m: Vec<(&str, &str)> = vec![
                     // 2026-09-09 包装对齐修复：ToolNode 输出 result 为
@@ -5811,7 +5945,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     ("catalyst_level_short", "a-catalyst--short.content.verdict.catalyst_level"),
                     ("catalyst_level_mid", "a-catalyst--mid.content.verdict.catalyst_level"),
                     ("catalyst_level_long", "a-catalyst--long.content.verdict.catalyst_level"),
-                    ("consensusScore", "debate-convergence.content.consensus_score"),
+                    ("consensusScore", "debate-convergence--mid.content.consensus_score"),
                     // V65: trader 输出完整 6 维度字段（与 portfolio-mgr 同维度对齐用于双视角对比）
                     // 旧字段保留: trader_direction/trader_target_price/trader_stop_loss 供 f7 兼容路径
                     // 2026-09-09: trader content parse 后为 {report, verdict:{action, confidence, ...}}，
@@ -6202,8 +6336,12 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         edges.push(edge("e-regime-weights-portfolio-mgr", "regime-weights", "portfolio-mgr"));
     }
 
-    // debate-convergence → portfolio-mgr: 显式边确保 consensus_score 在公式执行前就绪
-    edges.push(edge("e-debate-convergence-portfolio-mgr", "debate-convergence", "portfolio-mgr"));
+    // debate-convergence → portfolio-mgr: 显式边确保 consensus_score 在公式执行前就绪。
+    // v161：收敛节点逐档化 ⇒ 四档并注（主链装配段按所选档取对应收敛分）。
+    for p in axagent_harness::holding_period::Period::ALL {
+        let conv = tier_id("debate-convergence", p);
+        edges.push(edge(&format!("e-{conv}-portfolio-mgr"), &conv, "portfolio-mgr"));
+    }
     // R-11 换心脏的供给边：主链装配段读四路分支输出 ⇒ 四路必须先于 portfolio-mgr 完成。
     //   缺边 = 「变量还没到账就被读」（本文件多处同类订正的那条时序竞态判据）。
     for src in ["pm-h-ultra-short", "pm-h-short", "pm-h-mid", "pm-h-long"] {
@@ -6212,8 +6350,12 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // V29 修复: debate-convergence → research-mgr / trader 显式边
     // research-mgr 和 trader 的 input_mapping 引用 debate-convergence.content.consensus_score，
     // 加显式边确保共识分数在节点执行前就绪（符合显式依赖原则）
-    edges.push(edge("e-debate-convergence-research-mgr", "debate-convergence", "research-mgr"));
-    edges.push(edge("e-debate-convergence-trader", "debate-convergence", "trader"));
+    // v161：收敛节点逐档化 ⇒ 两个消费者各接**四档**（按所选档取分）。
+    for p in axagent_harness::holding_period::Period::ALL {
+        let conv = tier_id("debate-convergence", p);
+        edges.push(edge(&format!("e-{conv}-research-mgr"), &conv, "research-mgr"));
+        edges.push(edge(&format!("e-{conv}-trader"), &conv, "trader"));
+    }
 
     // ── v135（B-2b #36）：四档分支由 CodeNode 换成 SubWorkflow 扇出 ──
     //
@@ -7627,11 +7769,20 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
     // 子图仅在编辑器的 ReactFlow 渲染层中用于坐标转换（绝对→相对），
     // 运行时引擎仍从顶层 nodes 读取所有节点。
     // 编辑器保存时会自动去重（上游 WorkflowEditor.tsx save 路径过滤 subGraph 子节点）。
-    let container_nodes: &[&str] = &["p-analysts", "debate-bull-bear", "p-risk-assess"];
-    for &cid in container_nodes {
+    // v161：辩论容器改为**每档一个** ⇒ 清单必须逐档现场拼出，否则四组辩论在编辑器里
+    // 看不到嵌套（运行时不受影响：引擎从顶层 nodes 读）。id 经 `tier_node_id` 拼，
+    // 不写 `debate-bull-bear--档` 字面量（`check-analyst-id-shape.mjs` 的扫描面）。
+    let mut container_nodes: Vec<String> =
+        vec!["p-analysts".to_string(), "p-risk-assess".to_string()];
+    container_nodes.extend(
+        axagent_harness::holding_period::Period::ALL
+            .iter()
+            .map(|p| axagent_harness::holding_period::tier_node_id("debate-bull-bear", p.as_str())),
+    );
+    for cid in &container_nodes {
         let child_ids: Vec<String> = nodes
             .iter()
-            .filter(|n| n.base().parent_id.as_deref() == Some(cid))
+            .filter(|n| n.base().parent_id.as_deref() == Some(cid.as_str()))
             .map(|n| n.base_id().to_string())
             .collect();
         if child_ids.is_empty() {
@@ -7914,7 +8065,10 @@ const FAST_REQUIRED_NODE_IDS: &[&str] = &[
     "t-risk",
     // 段 A · 聚合与简报
     "raw-data",
-    "analyst-brief",
+    // v161（逐档辩论）：源图的 `analyst-brief` 已逐档化（只剩 `analyst-brief--{档}`）⇒ 本清单
+    //   不能再要裸 id。本链不扇出（同上方 v135 条）⇒ 与 `t-news-data` 同一处置：**自建**
+    //   裸 id 节点（[`fast_analyst_brief_node`]），段 B/段 F 的 `analyst-brief.result.<段>`
+    //   引用因此一个字都不用改。
     "data-quality",
     // 段 E · 决策与落库契约
     "portfolio-mgr",
@@ -8293,6 +8447,29 @@ pub(super) fn analyst_short_key(base: &str) -> &str {
     }
 }
 
+/// 给**任意** base 节点 id 挂档位后缀（逐档节点族的装配口）。
+///
+/// 拼法本体是 `holding_period::tier_node_id`（全仓唯一实现，`--` 分隔符的权威也在那儿）；
+/// 本条只是把 `Period` 收成参数、省掉调用侧每次手写 `p.as_str()` —— 不是第二套拼接规则。
+/// v161（逐档辩论）带档后缀已不止分析师一族（`analyst-brief--档` / `debate-bull-bear--档` /
+/// `bull-rN--档` / `debate-convergence--档`），故建图侧统一走这里。
+pub(crate) fn tier_id(base: &str, p: axagent_harness::holding_period::Period) -> String {
+    axagent_harness::holding_period::tier_node_id(base, p.as_str())
+}
+
+/// 取 `tiered` 里属于本档的那一段实例（逐档 brief / 辩论 / 收敛的展开源）。
+///
+/// 不手抄档位子集：`tiered` 本身由权威矩阵 `Period::analyst_subset()` 推导（见上方自证），
+/// 再按 `Period` 过滤 ⇒ 子集变化会自动同时反映到四档的 brief/辩论形状上。
+fn tier_instances_for<'a>(
+    tiered: &'a [(&'a str, axagent_harness::holding_period::Period, &'a str, &'a str)],
+    p: axagent_harness::holding_period::Period,
+) -> Vec<(&'a str, axagent_harness::holding_period::Period, &'a str, &'a str)> {
+    // `tp` 在 match 绑定下已是 `&Period`（匹配的是 `&(…, Period, …)`）⇒ 解一层即可；
+    // 写 `**tp` 会撞 E0614（Period 不可再解引用）。返回项借用自 `tiered`，故签名显式声明 `'a`。
+    tiered.iter().filter(|(_, tp, ..)| *tp == p).copied().collect()
+}
+
 fn dimension_prompt(dimension: &str, criteria: &str, categories: &[&str]) -> String {
     format!(
         "你是 A 股判定器，**只**判定「{dimension}」这一个维度，不要综合其它维度、\
@@ -8340,6 +8517,45 @@ fn fast_news_tool_node() -> axagent_harness::workflow_types::WorkflowNode {
             tool_name: "get_stock_news".into(),
             input_mapping,
             output_var: "t-news-data".into(),
+        },
+    })
+}
+
+/// 快速链自建的 `analyst-brief` 节点（v161：源图该 id 已逐档化，只剩 `analyst-brief--{档}`）。
+///
+/// 与 [`fast_news_tool_node`] 同一处置（源图无、本链需要 ⇒ 自建），**node id 与 `output_var`
+/// 必须保持 `analyst-brief` 不变**：段 B 的 `input_var` 与段 F 的引用都写
+/// `analyst-brief.result.<段>`（见 `apply_fast_chain_overrides` ④），换 id 会让那些引用一并漂移。
+///
+/// 脚本与输入映射由 ④ 步覆写为 `raw-digest.rhai` + [`FAST_BRIEF_INPUTS`]（并靠
+/// `repair_orphan_nodes` 按新映射补边）⇒ 这里只给一个满足 `CodeNode` 形状的占位。
+fn fast_analyst_brief_node() -> axagent_harness::workflow_types::WorkflowNode {
+    use axagent_harness::workflow_types::{
+        CodeNode, CodeNodeConfig, Position, RetryConfig, WorkflowNode, WorkflowNodeBase,
+    };
+    WorkflowNode::Code(CodeNode {
+        base: WorkflowNodeBase {
+            id: FAST_BRIEF_NODE_ID.into(),
+            title: "数据摘要（快速链）".into(),
+            description: Some(
+                "把 14 路原始数据压成分维度短文本；脚本与映射由派生覆写为 raw-digest.rhai".into(),
+            ),
+            // 派生图画布坐标：与自建新闻节点同列错开，避开 j-* 区（仅影响编辑器观感）。
+            position: Position { x: -320.0, y: 240.0 },
+            retry: RetryConfig::default(),
+            timeout: None,
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+            continue_on_fail: true,
+        },
+        config: CodeNodeConfig {
+            language: "rhai".into(),
+            code: String::new(),
+            output_var: FAST_BRIEF_NODE_ID.into(),
+            tool_name: None,
+            execute_directly: true,
+            input_mapping: std::collections::HashMap::new(),
         },
     })
 }
@@ -9474,6 +9690,8 @@ fn derive_fast_workflow_graph(
         source_nodes.iter().filter(|n| keep.contains(n.base_id())).cloned().collect();
     // v133：注入自建的新闻取数节点（源图已无该节点 ⇒ 不在上面的筛选结果里）。
     nodes.push(fast_news_tool_node());
+    // v161：注入自建的 `analyst-brief`（源图已逐档化，理由见 FAST_REQUIRED_NODE_IDS 的 v161 条）。
+    nodes.push(fast_analyst_brief_node());
 
     // ③ 容器归属：父节点未保留 ⇒ 清空，避免指向不存在的父级
     for node in nodes.iter_mut() {
@@ -10011,7 +10229,9 @@ mod fast_workflow_derivation_tests {
         }
         assert!(seen.contains("end-output"), "trigger 无法到达 end-output");
 
-        // ⑤ H1 的**脚本级**守门：派生只改派生副本，源图的 `analyst-brief` 必须仍是原脚本。
+        // ⑤ H1 的**脚本级**守门：派生只改派生副本。v161 起源图 brief 已逐档化
+        //    （`analyst-brief--{档}` 四份）⇒ 判据相应改为「四份逐档 brief 都仍是原脚本」；
+        //    派生侧仍按裸 id 找自建的那一份（见 `fast_analyst_brief_node`）。
         //    判据锚在两侧各自独有的函数名上（原脚本 `format_analyst` / 新脚本 `render_nested`），
         //    而不是「包含某个共享工具名」——后者在任一脚本被改时都会假绿。
         let brief_code_of = |graph: &[WorkflowNode]| -> String {
@@ -10025,15 +10245,30 @@ mod fast_workflow_derivation_tests {
                 })
                 .unwrap_or_else(|| panic!("图里应含 `{FAST_BRIEF_NODE_ID}` Code 节点"))
         };
-        let src_code = brief_code_of(&parse_nodes(&source_after));
-        assert!(
-            src_code.contains("fn format_analyst"),
-            "H1 被破坏：源图 `{FAST_BRIEF_NODE_ID}` 的脚本已被改动"
+        let tiered_brief_codes: Vec<String> = parse_nodes(&source_after)
+            .iter()
+            .filter_map(|n| match n {
+                WorkflowNode::Code(c) if c.base.id.starts_with("analyst-brief--") => {
+                    Some(c.config.code.clone())
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            tiered_brief_codes.len(),
+            4,
+            "源图应有四份逐档 `analyst-brief--{{档}}`（逐档契约的一部分）"
         );
-        assert!(
-            !src_code.contains("fn render_nested"),
-            "H1 被破坏：源图 `{FAST_BRIEF_NODE_ID}` 被换成了快速链脚本"
-        );
+        for src_code in &tiered_brief_codes {
+            assert!(
+                src_code.contains("fn format_analyst"),
+                "H1 被破坏：源图逐档 brief 的脚本已被改动"
+            );
+            assert!(
+                !src_code.contains("fn render_nested"),
+                "H1 被破坏：源图 brief 被换成了快速链脚本"
+            );
+        }
 
         // ⑥ 派生侧：脚本已换、`output_var` 未换、20 路输入全部接线到位。
         let fast_brief_code = brief_code_of(&fast_nodes);

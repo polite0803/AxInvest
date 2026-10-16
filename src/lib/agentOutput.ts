@@ -11,6 +11,7 @@ interface AgentResult {
 
 import {
   alignReasoningDecisionLabel,
+  analystBaseOf,
   HORIZON_CAMEL_TO_SNAKE,
   parseAction,
   parsePositionState,
@@ -264,7 +265,15 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
     "t-kline",
   ];
   const looksLikeResultsMap = !("action" in raw) && !("confidence" in raw)
-    && WORKFLOW_NODE_KEYS.some((k) => {
+    // v161：`value-investor` / `debate-convergence` 等族已带档后缀（`value-investor--mid`），
+    // 整串相等会漏认 ⇒ 按 base 判（`analystBaseOf` 只剥四档后缀，非逐档键原样返回）。
+    // 漏认的后果不是报错，而是这份结果**收不到**下面的 `portfolio-mgr` 提取路径 ⇒
+    // 决策对象被当成「决策信息缺失」。
+    && Object.keys(raw).some((k) => {
+      const base = analystBaseOf(k) ?? k;
+      if (!WORKFLOW_NODE_KEYS.includes(base)) {
+        return false;
+      }
       const v = raw[k];
       return v != null && typeof v === "object" && !Array.isArray(v);
     });

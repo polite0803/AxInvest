@@ -18051,9 +18051,11 @@
         "notChecked": "Nicht prüfbar"
       },
       "notChecked": {
-        "noSnapshotKey": "Der Snapshot dieses Datensatzes enthält keinen Ausgabeschlüssel für diese Quelle; die Prüfung entfällt",
         "noOwner": "Für diesen Faktor ist kein zuständiger Analyst registriert",
-        "unregisteredFactor": "Dieser Faktor steht nicht im Quellenregister (Prüfung entfällt)"
+        "unregisteredFactor": "Dieser Faktor steht nicht im Quellenregister (Prüfung entfällt)",
+        "tierScoreNotInSnapshot": "Die Ausgabe des horizontspezifischen Bewertungsknotens liegt nicht im Snapshot dieses Datensatzes; die Prüfung entfällt",
+        "noChannelMapping": "Für diesen Quellenkanal ist kein Snapshot-Schlüssel registriert (Lücke im Register)",
+        "unknownReason": "Das Backend hat einen nicht registrierten Ursachencode zurückgegeben"
       },
       "sigma": {
         "consistent": "σ stimmig",

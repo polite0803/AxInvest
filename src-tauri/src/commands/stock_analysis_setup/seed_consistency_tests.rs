@@ -1424,8 +1424,11 @@ fn debate_expansion_is_parameterized_to_max_rounds() {
     debate_rounds_assignment_is_variable_driven(&src)
         .unwrap_or_else(|why| panic!("展开轮数判据失效：{why}"));
 
+    // ② 判实质不判字面形状：v161 给绑定加了类型标注（`Vec<String>`）⇒ 逐字锁
+    //    `debater_steps: (0..debate_max_rounds)` 会把合法改写误判成「写死数组」。
+    //    真正要防的只有一件事：debater_steps **不是**由 `(0..debate_max_rounds)` 展开的。
     assert!(
-        src.lines().any(|l| l.contains("debater_steps: (0..debate_max_rounds)")),
+        src.lines().any(|l| l.contains("debater_steps") && l.contains("(0..debate_max_rounds)")),
         "debater_steps 必须由 `(0..debate_max_rounds).flat_map(...)` 生成 2N 个辩手；\n\
          若改为写死数组，轮数一变即与展开的 bull-rN/bear-rN 节点对不上。"
     );
@@ -4230,14 +4233,16 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// v133（B2-2）：analyst-brief 的键集锁 —— 脚本 21 条显式读取 == seed 生成的映射键集。
-// v145：21 = 23 − 2（`value-investor--mid` / `--long` 不参与，理由见下方 want 的 filter）。
+// v133（B2-2）：analyst-brief 的键集锁 —— 脚本显式读取集 == seed 生成的映射键集。
+// v145：23 → 21（`value-investor--mid` / `--long` 不参与，理由见下方 want 的 filter）。
+// v161（逐档辩论）：脚本**一份**、消费者节点**四份**（`analyst-brief--{档}`），键名去掉档位后缀
+//   ⇒ 锁的形态改为「脚本 present() 集 == 四档子集短名的**并集**」+「每档映射非空且四档不全同」。
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// `analyst-brief.rhai` 的 21 条 `present(<var>)` 读取（变量名 = input_mapping 的键）
+/// `analyst-brief.rhai` 的显式 `present(<var>)` 读取集（v161 起 9 条，键名无档后缀）
 /// 必须与 seed 侧 `ab_input` 生成的键集**同集**。
 ///
-/// 为什么需要这条锁：Rhai 不能枚举 scope 变量 ⇒ 脚本侧「显式列 21 条」与 Rust 侧
+/// 为什么需要这条锁：Rhai 不能枚举 scope 变量 ⇒ 脚本侧「显式列 9 条」与 Rust 侧
 /// 「由 `tiered` 生成」是**两份**必须同步的清单；任一侧增删实例而另一侧没跟，
 /// 后果是静默少一段摘要（脚本读注入不存在的变量走 present=false 跳过；Rust 多生成的键
 /// 则白注入）——正是本仓「清单比表少一行」的老形态。该锁让不同步当场红。
@@ -4265,30 +4270,45 @@ fn analyst_brief_keys_match_tiered_instances() {
         rest = &after[j..];
     }
     // 正控：抽取面必须看见足量变量（避免解析失效后与空集比绿）。
-    assert!(script_vars.len() >= 21, "脚本 present() 抽取面失效: {script_vars:?}");
+    assert!(script_vars.len() >= 9, "脚本 present() 抽取面失效: {script_vars:?}");
 
-    // ② Rust 侧：重算期望键集（与 seed 的 ab_input **同一公式、同一排除**：
+    // ② Rust 侧：重算期望键集（与 seed 的 `ab_input` **同一公式、同一排除**：
     //    子集 × analyst_short_key，再剔掉辩论下游的 `value-investor`）。
     //    排除必须走 `VALUE_INVESTOR_ID` 这个模块级权威 —— 在本测试里另抄一遍
     //    "value-investor" 字面量，就等于允许「seed 改了、锁没改」继续绿。
+    //
+    //    ⚠ v161 起键名**不带档后缀**（脚本一份、节点四份，档位归属只存在于 `tiered`）：
+    //    脚本读的 `a_market_raw` 是「本节点注入的那一份」，故这里的期望集是**并集**。
     let mut want: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut per_tier: Vec<(&str, std::collections::BTreeSet<String>)> = Vec::new();
     for p in Period::ALL {
+        let mut keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for base in p.analyst_subset() {
             if base == super::seed_stock_analysis::VALUE_INVESTOR_ID {
                 continue;
             }
-            want.insert(format!(
-                "{}__{}",
-                super::seed_stock_analysis::analyst_short_key(base),
-                p.as_str()
-            ));
+            keys.insert(super::seed_stock_analysis::analyst_short_key(base).to_string());
         }
+        want.extend(keys.iter().cloned());
+        per_tier.push((p.as_str(), keys));
     }
-    assert_eq!(want.len(), 21, "期望键集应为 21（四档全跑 23 减 value-investor 两档）: {want:?}");
 
     assert_eq!(
         script_vars, want,
-        "analyst-brief.rhai 的 present() 变量集与 seed 生成的 input_mapping 键集不同步"
+        "analyst-brief.rhai 的 present() 变量集与四档子集短名的**并集**不同步"
+    );
+
+    // ③ 每档映射非空 + 四档不全同：四档键集若完全一致，「每档一份产出」就退化成
+    //    「一份合并摘要复制四遍」——那正是 `PLAN-four-horizon-workflow-alignment.md`
+    //    §五十三 明令禁止的伪装（面板四格各自显示，读者以为是四个独立摘要）。
+    for (tier, keys) in &per_tier {
+        assert!(!keys.is_empty(), "{tier} 档的 brief 映射为空 ⇒ 该档摘要恒为空");
+        assert!(keys.is_subset(&want), "{tier} 档键集不在并集内（自相矛盾）");
+    }
+    let distinct: std::collections::BTreeSet<_> = per_tier.iter().map(|(_, k)| k.clone()).collect();
+    assert!(
+        distinct.len() > 1,
+        "四档 brief 键集完全相同 ⇒ 四份产出逐字相同（§五十三 禁止的伪装）: {per_tier:?}"
     );
 }
 
@@ -4409,6 +4429,90 @@ fn debate_rounds_graph_drift_reports_mismatch_and_stays_quiet_on_match() {
         debate_rounds_graph_drift(&debate_nodes_json(3), Some(&vars_json(39))),
         Some((3, 10)),
         "漂移门的期望轮数必须走 resolve_debate_rounds 的夹紧口径"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v161（逐档辩论）：「图是否真按四档展开」漂移门。
+//
+// 版本门只比「代码常量 vs 库版本号」，而两种情形它都拦不下：① 库版本号被（恢复快照 /
+// 手工编辑）抬高但图仍是旧的；② 上次播种中途失败只写了一部分逐档节点。表现都是
+// 「四档辩论少跑一两档」的静默缺件。故本门照 `debate_rounds_graph_drift` 的形态直接比事实。
+// 两个方向都要锁：只锁正断言会让「恒报漂移」也绿（每次启动重建整图，抹掉编辑器手改）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 造「四档 × 四类逐档节点」的 `nodes` JSON（`skip` 抽掉某一类，模拟播种中途失败）。
+/// id 一律经 `tier_node_id` 现场拼 —— 写 `base--tier` 字面量会被 `check-analyst-id-shape.mjs` 扫到。
+fn tiered_debate_nodes_json(skip: &[&str]) -> String {
+    use axagent_harness::holding_period::{Period, tier_node_id};
+    let arms = ["analyst-brief", "debate-bull-bear", "bull-r1", "debate-convergence"];
+    let mut ids = Vec::new();
+    for p in Period::ALL {
+        for base in arms {
+            if skip.contains(&base) {
+                continue;
+            }
+            ids.push(tier_node_id(base, p.as_str()));
+        }
+    }
+    format!("[{}]", ids.iter().map(|i| format!(r#"{{"id":"{i}"}}"#)).collect::<Vec<_>>().join(","))
+}
+
+#[test]
+fn tiered_debate_graph_drift_names_missing_families_and_stays_quiet_on_full_graph() {
+    use super::tiered_debate_graph_drift;
+
+    // ① 完整四档 ⇒ 闭嘴（否则每次启动都重建整图，抹掉编辑器手改）
+    assert_eq!(
+        tiered_debate_graph_drift(&tiered_debate_nodes_json(&[])),
+        None,
+        "四档族齐全时漂移门必须闭嘴"
+    );
+
+    // ② 缺「本档收敛」一族 ⇒ 报 4 个（每档一个）且点名 —— 缺收敛 = 下游读到 ()
+    let missing = tiered_debate_graph_drift(&tiered_debate_nodes_json(&["debate-convergence"]))
+        .expect("缺一族必须报漂移");
+    assert_eq!(missing.len(), 4, "四档各缺一个收敛节点：{missing:?}");
+    assert!(
+        missing.iter().all(|m| m.contains("debate-convergence")),
+        "报出的必须是缺的那一族：{missing:?}"
+    );
+
+    // ③ 只缺**一档的一个**节点（播种中途失败的形态）⇒ 只报那一个，不得多报
+    let full: Vec<serde_json::Value> =
+        serde_json::from_str(&tiered_debate_nodes_json(&[])).unwrap();
+    let only_mid_brief_missing: Vec<serde_json::Value> = full
+        .into_iter()
+        .filter(|n| {
+            n.get("id").and_then(|v| v.as_str())
+                != Some(
+                    axagent_harness::holding_period::tier_node_id("analyst-brief", "mid").as_str(),
+                )
+        })
+        .collect();
+    let one = tiered_debate_graph_drift(&serde_json::to_string(&only_mid_brief_missing).unwrap())
+        .expect("缺一个节点也必须报");
+    assert_eq!(one.len(), 1, "只缺一个不该多报：{one:?}");
+    assert!(one[0].contains("analyst-brief"), "{}", one[0]);
+
+    // ④ 旧图（v133 形态：只有带档分析师、没有逐档辩论族）⇒ 报满 16 个。
+    //    ⚠ 带档 id 也必须经 `tier_node_id` 拼：手抄 `xxx--mid` 字面量会被
+    //    `check-analyst-id-shape.mjs` 的 R2 判红（本测试第一次跑就是这么红的）。
+    let old = format!(
+        r#"[{{"id":"{}"}},{{"id":"debate-bull-bear"}}]"#,
+        axagent_harness::holding_period::tier_node_id("a-market-analyst", "mid")
+    );
+    assert_eq!(
+        tiered_debate_graph_drift(&old).expect("旧图必须报").len(),
+        16,
+        "四档 × 四类 = 16 个全缺"
+    );
+
+    // ⑤ 边界：脏 nodes 不得触发重建（重建会抹掉编辑器手工改动，宁可漏判）
+    assert_eq!(
+        tiered_debate_graph_drift("{ not json"),
+        None,
+        "nodes 解析失败必须返回 None，不能因脏数据重建整图"
     );
 }
 

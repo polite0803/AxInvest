@@ -78,7 +78,9 @@ pub fn leg_signal(factor: &str, in_: &Value) -> Option<f64> {
         },
         // 该档评分节点（t-scoring-hour|week|month|quarter）的 totalScore ∈ [0,100]，
         // 50 = 评分体系的中性中枢 ⇒ 线性映射，无新常量。
-        "trendStrength" => num(in_, "totalScore").map(|ts| cl((ts - 50.0) / 50.0)),
+        "trendStrength" => {
+            num(in_, "totalScore").map(|ts| cl(crate::portfolio_formula::score_to_signal(ts)))
+        },
         // ── 从 portfolio-mgr.rhai 的 f3 催化剂阶梯原样搬运 ──
         // 判定次序与源脚本一致：先负后正（`L-1` 含 `-1`，反序会串档）。
         "eventCatalyst" => {

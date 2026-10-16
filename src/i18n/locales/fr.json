@@ -18051,9 +18051,11 @@
         "notChecked": "Non vérifiable"
       },
       "notChecked": {
-        "noSnapshotKey": "L'instantané de cet enregistrement ne contient aucune clé de sortie pour cette source ; le contrôle ne s'applique pas",
         "noOwner": "Aucun analyste titulaire n'est enregistré pour ce facteur",
-        "unregisteredFactor": "Ce facteur n'est pas dans le registre des sources (contrôle non applicable)"
+        "unregisteredFactor": "Ce facteur n'est pas dans le registre des sources (contrôle non applicable)",
+        "tierScoreNotInSnapshot": "La sortie du nœud de notation propre à l'horizon n'est pas capturée dans l'instantané de cet enregistrement ; le contrôle ne s'applique pas",
+        "noChannelMapping": "Aucune clé d'instantané n'est enregistrée pour ce canal source (lacune du registre)",
+        "unknownReason": "Le backend a renvoyé un code de raison non enregistré"
       },
       "sigma": {
         "consistent": "σ cohérent",

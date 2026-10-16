@@ -18269,9 +18269,11 @@
         "notChecked": "Not checkable"
       },
       "notChecked": {
-        "noSnapshotKey": "This record's snapshot has no output key for that source, so the check does not apply",
         "noOwner": "No owner analyst is registered for this factor",
-        "unregisteredFactor": "This factor is not in the source registry (check not applicable)"
+        "unregisteredFactor": "This factor is not in the source registry (check not applicable)",
+        "tierScoreNotInSnapshot": "The per-horizon scoring node's output is not captured in this record's snapshot, so the check does not apply",
+        "noChannelMapping": "No snapshot key is registered for this source channel (registry gap)",
+        "unknownReason": "The backend returned an unregistered reason code"
       },
       "sigma": {
         "consistent": "σ consistent",

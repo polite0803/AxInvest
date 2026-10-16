@@ -657,14 +657,47 @@ impl std::str::FromStr for Period {
     }
 }
 
-/// 档位后缀的分隔符。
+/// 档位后缀的分隔符 —— **唯一权威值**。
 ///
 /// 为什么不是单横线：base id 自身就含单横线（`a-market-analyst`、`a-hot-money`），
 /// 用单横线拼接后「该剥到哪一段」没有唯一解；`--` 不在 base 域里出现 ⇒ `strip` 唯一可逆。
 /// 配套的门反向锁「base 域里禁止出现 `--`」，否则这条前提会在未来某个新分析师身上静默失效。
-pub const ANALYST_TIER_SEP: &str = "--";
+pub const TIER_ID_SEP: &str = "--";
 
-/// 某档分析师子集里一个分析师的**实例节点 id**。
+/// 分隔符的历史名（v133 起就在用，当时只有分析师实例带档）。
+///
+/// ⚠ **不是第二份定义**：值由 [`TIER_ID_SEP`] 引过来，全仓只有那一个字面量。
+/// v161（逐档辩论）把带档后缀扩到摘要 / 辩论容器 / 辩手 / 收敛四类节点，
+/// 这些节点族不该借用「ANALYST」这个名字 ⇒ 新代码一律用 [`TIER_ID_SEP`] + [`tier_node_id`]；
+/// 保留本别名只是为了让既有引用面（`analyst_base_of` 与前端镜像）不必同批改名。
+/// （`AGENTS.md` 禁区 12：扩展而非重定义。）
+pub const ANALYST_TIER_SEP: &str = TIER_ID_SEP;
+
+/// 给**任意** base 节点 id 挂上档位后缀 —— 逐档节点的通用正门。
+///
+/// 存在理由（v161 逐档辩论）：后缀形态 `base--<tier>` 自 v133 起就不只属于分析师
+/// （`value-verify--<档>`、`analyst-brief--<档>`、`debate-convergence--<档>` 同形）。
+/// 拼法若各处再写一遍 `format!("{stem}--{tier}")`，就会出现「一处用 `--`、一处用 `-`」
+/// 这种剥不回来的分叉 —— 与 `analyst_node_id` 当初要解决的是同一个病。
+/// 故本函数是唯一拼口，[`analyst_node_id`] 只是它的分析师别名。
+///
+/// 用前自检两条（都是判据级，不是风格）：
+/// ① base 里**不得**已含 `--`（否则 [`base_of_tiered_id`] 剥不唯一）；
+/// ② 后缀必须是 [`Period::as_str`] 的四臂之一（调用侧用 `p.as_str()`，不手抄档名）。
+///
+/// ```
+/// use axagent_harness::holding_period::tier_node_id;
+/// assert_eq!(tier_node_id("debate-convergence", "mid"), "debate-convergence--mid");
+/// ```
+pub fn tier_node_id(base: &str, tier_snake: &str) -> String {
+    debug_assert!(
+        !base.contains(TIER_ID_SEP),
+        "base 域禁止包含分隔符 {TIER_ID_SEP}（会让按档剥离不唯一）"
+    );
+    format!("{base}{TIER_ID_SEP}{tier_snake}")
+}
+
+/// 某档分析师子集里一个分析师的**实例节点 id**（分析师族别名，拼法见 [`tier_node_id`]）。
 ///
 /// 存在理由（B2-1）：四档各跑 [`Period::analyst_subset`] 列出的分析师 ⇒ 同一个 base 需要多份
 /// 节点 id。若把档位后缀写死进字符串字面量，全仓十几处「按完整 id 精确匹配」的读端
@@ -678,11 +711,7 @@ pub const ANALYST_TIER_SEP: &str = "--";
 /// assert_eq!(analyst_node_id("a-market-analyst", "mid"), "a-market-analyst--mid");
 /// ```
 pub fn analyst_node_id(base: &str, tier_snake: &str) -> String {
-    debug_assert!(
-        !base.contains(ANALYST_TIER_SEP),
-        "base 域禁止包含分隔符 {ANALYST_TIER_SEP}（会让 analyst_base_of 的剥离不唯一）"
-    );
-    format!("{base}{ANALYST_TIER_SEP}{tier_snake}")
+    tier_node_id(base, tier_snake)
 }
 
 /// 从节点 id 剥回 base；不是「base--已知档」形状时返回 `None`。

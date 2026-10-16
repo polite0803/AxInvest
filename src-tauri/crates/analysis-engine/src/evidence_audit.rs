@@ -24,7 +24,7 @@
 //! [`crate::evidence_weight::DECISION_LEG_ANALYST`]、[`crate::evidence_weight::VERDICT_FACTOR_SOURCES`]、
 //! `axagent_harness::holding_period::Period::{factor_owner, verdict_spec}`。
 
-use crate::evidence_weight::{DECISION_LEG_ANALYST, VERDICT_FACTOR_SOURCES};
+use crate::evidence_weight::{channel_snapshot_key, DECISION_LEG_ANALYST, VERDICT_FACTOR_SOURCES};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -60,19 +60,61 @@ fn closure_tolerance(legs: usize, weight_sum: f64) -> f64 {
     rounding_bound(SIGMA_DECIMALS) + weight_term + rounding_bound(BASIS_DECIMALS)
 }
 
-/// 主档因子腿 → 其在**同一条记录内**可对的落库基准（JSON 指针）。
+/// 基准住在哪份文档里。
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum BasisDoc {
+    DecisionJson,
+    /// `blackboard_snapshot`（主图节点的产出）
+    Snapshot,
+}
+
+/// 拿到基准原值后要做的变换 —— 与产端**同一个函数**，不在这里复述公式。
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum BasisTransform {
+    /// 基准本身就是 σ
+    Identity,
+    /// 基准是 0–100 分，需经 `portfolio_formula::score_to_signal` 压到 `[-1, 1]`
+    ScoreToSignal,
+}
+
+/// 主档因子腿 → 其在**同一条记录内**可对的落库基准。
 ///
-/// 这张表登记的是「基准住在哪个键」这一**新事实**（此前无任何表登记），不是别处的第二份拷贝。
-/// 刻意**不含** f1/f2：它们的 σ 由 `(totalScore−50)/50` 归一化而来，而该口径目前住在
-/// `portfolio-mgr.rhai:328/336` ⇒ 在 Rust 侧再写一遍就是第二个权威源。裁定 P-B1 已批上收
-/// harness，上收完成后这两条才进本表（PLAN 阶段 1b）。
-const FACTOR_SIGMA_BASIS: &[(&str, &str)] = &[
-    ("f4", "/risk_quant/f4_adjusted"),
-    ("f9", "/evidence/f9_money_flow_signal"),
-    ("f10", "/evidence/f10_chip_signal"),
-    ("f11", "/evidence/f11_pace_signal"),
-    ("f12", "/evidence/f12_momentum_signal"),
+/// 这张表登记的是「基准住在哪份文档的哪个键、要不要归一化」这一**新事实**
+/// （此前无任何表登记），不是别处的第二份拷贝；归一化本身走
+/// [`crate::portfolio_formula::score_to_signal`]（裁定 P-B1 上收后的唯一权威）。
+///
+/// **f2 刻意不入表**：现网实测它的输入 `consensusScore` 取自收敛节点
+/// （`debate-convergence` 一族），而该节点正随「逐档实例化」在飞 —— 同一条记录上
+/// 老形态的键是裸 `debate-convergence.content.consensus_score`、新形态按 seed 指向
+/// `debate-convergence--mid.*`（v161），且**都不在 `result.*` 命名空间里**。
+/// 给一条会随模板漂移的静态路径＝把「对不上」伪装成「对过了」，所以如实报无基准。
+const FACTOR_SIGMA_BASIS: &[(&str, BasisDoc, &str, BasisTransform)] = &[
+    (
+        "f1",
+        BasisDoc::Snapshot,
+        "/result.t-scoring/content/totalScore",
+        BasisTransform::ScoreToSignal,
+    ),
+    ("f4", BasisDoc::DecisionJson, "/risk_quant/f4_adjusted", BasisTransform::Identity),
+    ("f9", BasisDoc::DecisionJson, "/evidence/f9_money_flow_signal", BasisTransform::Identity),
+    ("f10", BasisDoc::DecisionJson, "/evidence/f10_chip_signal", BasisTransform::Identity),
+    ("f11", BasisDoc::DecisionJson, "/evidence/f11_pace_signal", BasisTransform::Identity),
+    ("f12", BasisDoc::DecisionJson, "/evidence/f12_momentum_signal", BasisTransform::Identity),
 ];
+
+/// 按 `/` 分层取值，**途中遇到 JSON 字符串就剥壳继续**：工具节点在快照里是
+/// `{"content": "<JSON 字符串>"}` 这种双层形态，不剥壳取不到里层字段。
+fn resolve_path(doc: &Value, path: &str) -> Option<Value> {
+    let mut cur = doc.clone();
+    for seg in path.trim_start_matches('/').split('/') {
+        let next = match &cur {
+            Value::String(s) => serde_json::from_str::<Value>(s).ok()?.get(seg).cloned(),
+            other => other.get(seg).cloned(),
+        }?;
+        cur = next;
+    }
+    Some(cur)
+}
 
 /// 「查了但没有」与「没法查」必须可分：`NotChecked` 不得渲染成 `Absent`。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -353,20 +395,24 @@ pub fn audit_decision_evidence(
                         Some(_) => UpstreamState::SilentAbsent,
                         None => UpstreamState::NotChecked { reason: "NO_OWNER".into() },
                     },
-                    // tierScore / sharedTool：只有当 channel 字面量**本身就是**快照里的节点键
-                    // 时才判在场。阶段 0 实测：12 条登记里 4 条的 channel 是工具名而非节点 id，
-                    // 且逐档评分节点（`Period::scoring_node_id`）的产出根本不落主快照
-                    // ⇒ 判不了就标 NotChecked，不手抄一张 channel→节点 别名表当第二份权威
-                    // （PLAN 待裁 P-B5）。
-                    _ => {
-                        let located = !channel.is_empty()
-                            && pointer(blackboard, &format!("/result.{channel}")).is_some();
-                        if located {
-                            UpstreamState::Present
-                        } else {
-                            UpstreamState::NotChecked { reason: "NO_SNAPSHOT_KEY".into() }
-                        }
+                    // sharedTool：channel 是**工具名**、落库键是跑该工具的**节点 id**，两者
+                    // 字面不同（阶段 0 实测 7 条里只有 3 条同名）⇒ 走 `CHANNEL_SNAPSHOT_KEYS`
+                    // 这张权威表（裁定 P-B5）。
+                    // ⚠ 表里有映射而本记录缺该键 ⇒ 那个节点本轮**没产出**＝静默缺席，
+                    // 不是「判不了」：判据已经能判，只是上游真的没出数。
+                    "sharedTool" => match channel_snapshot_key(channel) {
+                        Some(key) => {
+                            if pointer(blackboard, &format!("/{key}")).is_some() {
+                                UpstreamState::Present
+                            } else {
+                                UpstreamState::SilentAbsent
+                            }
+                        },
+                        None => UpstreamState::NotChecked { reason: "NO_CHANNEL_MAPPING".into() },
                     },
+                    // tierScore（`macd` / `totalScore`）：逐档评分节点的产出**不落主快照**
+                    // （阶段 0 实测 0/49）⇒ 判据对本腿不适用，如实报出，不给假键。
+                    _ => UpstreamState::NotChecked { reason: "TIER_SCORE_NOT_IN_SNAPSHOT".into() },
                 }
             } else {
                 UpstreamState::NotChecked { reason: "UNREGISTERED_FACTOR".into() }
@@ -455,12 +501,27 @@ pub fn audit_decision_evidence(
                 .iter()
                 .find(|(l, _)| *l == id)
                 .and_then(|(_, a)| a.map(str::to_string));
-            let basis = FACTOR_SIGMA_BASIS.iter().find(|(l, _)| *l == id).map(|(_, p)| *p);
-            let reconcile = match (basis, basis.and_then(|p| as_f(pointer(decision_json, p)))) {
-                (Some(p), Some(bv)) => {
+            let spec = FACTOR_SIGMA_BASIS.iter().find(|(l, ..)| *l == id);
+            let frozen = spec.and_then(|(_, doc, path, tf)| {
+                let raw = match doc {
+                    BasisDoc::DecisionJson => pointer(decision_json, path).cloned(),
+                    BasisDoc::Snapshot => resolve_path(blackboard, path),
+                }?;
+                let value = raw.as_f64()?;
+                Some(match tf {
+                    BasisTransform::Identity => value,
+                    // 与产端**同一个函数**（裁定 P-B1）：这里若自己再写一遍 `(x-50)/50`
+                    // 就是第二个权威源 —— 脚本改了中枢而审计不跟着改也照样「一致」。
+                    BasisTransform::ScoreToSignal => {
+                        crate::portfolio_formula::score_to_signal(value)
+                    },
+                })
+            });
+            let reconcile = match (spec, frozen) {
+                (Some((_, _, path, _)), Some(bv)) => {
                     let tol = sigma_basis_tolerance();
                     let delta = (sigma - bv).abs();
-                    let basis = p.to_string();
+                    let basis = (*path).to_string();
                     if delta <= tol {
                         Reconcile::Consistent { delta, tolerance: tol, basis }
                     } else {
@@ -568,7 +629,10 @@ mod tests {
                 "dataGaps": ["microstructure 腿本轮不可评估：涨停池成员判定尚未接进本分支"]
             },
             "report.a-catalyst--ultra_short": "催化剂等级 3（事件驱动）",
-            "result.t-valuation-band": { "content": "{}" }
+            "result.t-valuation-band": { "content": "{}" },
+            "result.t-limitup-pool": { "content": "{}" },
+            // 工具节点在快照里是 `{"content": "<JSON 字符串>"}` 双层形态；取真记录的 78
+            "result.t-scoring": { "content": r#"{"totalScore": 78, "bollScore": 3}"# }
         });
         (dj, bb)
     }
@@ -615,15 +679,22 @@ mod tests {
         let l2 = r2.branch_legs.iter().find(|l| l.factor == "eventCatalyst").unwrap();
         assert_eq!(l2.upstream, UpstreamState::SilentAbsent, "撤掉正文后必须落到静默缺席");
 
-        // sharedTool 臂：夹具里 breadthState 的 channel 是工具名
-        // ⇒ 必须落 NotChecked 而不是 Absent，且单独计数
-        assert!(
-            matches!(leg("breadthState").upstream, UpstreamState::NotChecked { .. }),
-            "工具名 channel 不得被判成缺席，实际 {:?}",
-            leg("breadthState").upstream
+        // sharedTool 臂（P-B5）：channel 是工具名 `get_limit_up_pool`，经权威表定位到
+        // `result.t-limitup-pool`，该键在夹具里在场 ⇒ 判得到场
+        assert_eq!(
+            leg("breadthState").upstream,
+            UpstreamState::Present,
+            "工具名通道必须能经 CHANNEL_SNAPSHOT_KEYS 定位上游"
         );
-        assert!(r.upstream_not_checked_legs >= 1);
-        assert_eq!(r.upstream_present_legs, 1, "本夹具只有 eventCatalyst 一条能判到场");
+        // tierScore 臂：momentumSignal 的 channel 是字段名 `macd`，逐档评分节点产出不落主快照
+        // ⇒ 如实报「不适用」，既不算在场也不算缺席
+        assert!(
+            matches!(leg("momentumSignal").upstream, UpstreamState::NotChecked { .. }),
+            "tierScore 通道不得被判成在场，实际 {:?}",
+            leg("momentumSignal").upstream
+        );
+        assert_eq!(r.upstream_not_checked_legs, 1, "只剩 tierScore 那一条不可判");
+        assert_eq!(r.upstream_present_legs, 2, "eventCatalyst + breadthState 两条能判到场");
     }
 
     /// L1 的 sharedTool 臂上电：channel 字面量等于节点键时必须判 Present
@@ -642,12 +713,17 @@ mod tests {
         assert_eq!(leg.upstream, UpstreamState::Present, "channel 命中真实节点键时应判在场");
         assert_eq!(leg.owner.as_deref(), Some("value-investor"));
 
-        // 负控：撤掉该节点键 ⇒ 同一腿必须翻面（证明上一条不是恒真）
+        // 负控：撤掉该节点键 ⇒ 同一腿必须翻面。⚠ 翻到的是**静默缺席**而不是「判不了」：
+        // 映射表里有这个键（判据能判），缺的只是本记录里那个节点的产出 ⇒ 上游真没出数。
         let mut bb3 = bb2.clone();
         bb3.as_object_mut().unwrap().remove("result.t-valuation-band");
         let r3 = run(&dj, &bb3, false);
         let l3 = r3.branch_legs.iter().find(|l| l.factor == "valuationBand").unwrap();
-        assert!(matches!(l3.upstream, UpstreamState::NotChecked { .. }));
+        assert_eq!(
+            l3.upstream,
+            UpstreamState::SilentAbsent,
+            "映射在场而记录缺键 ⇒ 静默缺席（不是 NotChecked）"
+        );
     }
 
     /// L4：缺席必须有交代，且**缺席登记里的腿要显式成行**（真实形态：600406 · 2026-10-15 的
@@ -678,14 +754,12 @@ mod tests {
         let m2 = r2.branch_legs.iter().find(|l| l.factor == "microstructure").unwrap();
         assert_eq!(m2.upstream, UpstreamState::DeclaredAbsent, "dataGaps 里的声明也必须被回收");
 
-        // ③ 只作过滤、带 constraint 的腿：有交代；但上游判据仍是「无法核查」（channel 是工具名）
+        // ③ 只作过滤、带 constraint 的腿：角色上「有交代」与上游判据是**两条独立轴** ——
+        // 它不参与方向加权（role=filter），但上游经 P-B5 表判得到场
         let breadth = r.branch_legs.iter().find(|l| l.factor == "breadthState").unwrap();
         assert!(!breadth.participates, "role=filter 不得算参与");
         assert!(breadth.absence_declared, "带 constraint 的过滤腿必须有交代");
-        assert!(
-            matches!(breadth.upstream, UpstreamState::NotChecked { .. }),
-            "收了口径 ≠ 来源在场"
-        );
+        assert_eq!(breadth.upstream, UpstreamState::Present, "不参与 ≠ 上游不在场");
 
         // ④ 负控：撤掉 constraint ⇒ 同一腿必须翻成「未交代」（证明③不是恒真）
         let mut bb3 = bb.clone();
@@ -755,8 +829,8 @@ mod tests {
             },
             other => panic!("f4 应判一致，实际 {other:?}"),
         }
-        // 夹具里 f4/f11/f12 三条都登记了基准且都在容差内 ⇒ 一致者 3（f1 无基准，不算一致）
-        assert_eq!(r.sigma_reconciled_legs, 3);
+        // f1（快照总分）/ f4 / f11 / f12 四条都能在容差内回算 ⇒ 一致者 4
+        assert_eq!(r.sigma_reconciled_legs, 4);
         let f11 = r.factor_legs.iter().find(|l| l.leg_id == "f11").unwrap();
         assert!(matches!(f11.reconcile, Reconcile::Consistent { .. }));
 
@@ -775,14 +849,52 @@ mod tests {
         assert!(matches!(f4c.reconcile, Reconcile::NoBasis { .. }), "缺基准必须报 NoBasis");
     }
 
-    /// A 面 f1 必须报「无落库基准」：它的 σ 由 `(totalScore−50)/50` 归一化而来，
-    /// 该口径尚未上收（裁定 P-B1 的阶段 1b）⇒ 在 Rust 侧回算就是第二份权威。
+    /// A 面 f1：σ 必须能经**快照里的总评分** + 上收后的归一化口径回算出来（裁定 P-B1 落地）。
+    /// 夹具取真记录那一对：`totalScore = 78` ⇒ `score_to_signal(78) = 0.56` = 落库 σ。
     #[test]
-    fn f1_has_no_basis_until_normalization_is_centralized() {
+    fn f1_is_reconciled_from_the_snapshot_score() {
         let (dj, bb) = fixture();
         let r = run(&dj, &bb, false);
         let f1 = r.factor_legs.iter().find(|l| l.leg_id == "f1").unwrap();
-        assert_eq!(f1.reconcile, Reconcile::NoBasis { reason: "NO_PERSISTED_BASIS".into() });
+        match &f1.reconcile {
+            Reconcile::Consistent { delta, basis, .. } => {
+                assert_eq!(basis, "/result.t-scoring/content/totalScore");
+                assert_eq!(*delta, 0.0, "同一口径现算应与落库 σ 逐位相等");
+            },
+            other => panic!("f1 应判一致，实际 {other:?}"),
+        }
+
+        // 负控①：把快照里的总评分改掉 ⇒ 必须翻成不一致（证明上一条不是恒真）
+        let mut bb2 = bb.clone();
+        bb2["result.t-scoring"]["content"] = json!(r#"{"totalScore": 60}"#);
+        let r2 = run(&dj, &bb2, false);
+        let f1b = r2.factor_legs.iter().find(|l| l.leg_id == "f1").unwrap();
+        assert!(
+            matches!(f1b.reconcile, Reconcile::Inconsistent { .. }),
+            "总分变了而落库 σ 没变 ⇒ 必须报不一致"
+        );
+
+        // 负控②：撤掉快照键 ⇒ NoBasis（不是「一致」）
+        let mut bb3 = bb.clone();
+        bb3.as_object_mut().unwrap().remove("result.t-scoring");
+        let r3 = run(&dj, &bb3, false);
+        let f1c = r3.factor_legs.iter().find(|l| l.leg_id == "f1").unwrap();
+        assert!(matches!(f1c.reconcile, Reconcile::NoBasis { .. }), "缺快照键必须报 NoBasis");
+    }
+
+    /// A 面 f2：**如实报无基准**。它的输入取自收敛节点，而该节点正随「逐档实例化」在飞 ——
+    /// 同一条记录上老形态的键（裸 `debate-convergence.content.consensus_score`）与新形态
+    /// 按 seed 指向的 `debate-convergence--mid.*`（v161）**都不是 `result.*`**，给一条静态
+    /// 路径就是把「对不上」伪装成「对过了」。
+    #[test]
+    fn f2_stays_without_basis_until_the_convergence_node_settles() {
+        let (dj, bb) = fixture();
+        let mut dj2 = dj.clone();
+        dj2["evidence"]["factors"]["f2"] =
+            json!({ "name": "consensus", "sigma": 0.1, "weight": 0.25 });
+        let r = run(&dj2, &bb, false);
+        let f2 = r.factor_legs.iter().find(|l| l.leg_id == "f2").unwrap();
+        assert_eq!(f2.reconcile, Reconcile::NoBasis { reason: "NO_PERSISTED_BASIS".into() });
     }
 
     /// 全局闭合：容差按 `δσ + δw·n/W + δavg` 现算；越界必须报 Broken。
@@ -881,5 +993,32 @@ mod tests {
         let want =
             0.5 * 10f64.powi(-(SIGMA_DECIMALS as i32)) + 0.5 * 10f64.powi(-(BASIS_DECIMALS as i32));
         assert!((sigma_basis_tolerance() - want).abs() < 1e-12);
+    }
+
+    /// 门（P-B1）：评分 → 因子信号的归一化**不得再内联**，五处调用点必须全走唯一权威
+    /// `portfolio_formula::score_to_signal`（主链经宿主函数，逐档腿直接调）。
+    ///
+    /// 判据针对**实质**而非某一种写法：脚本侧只要求「调了宿主函数」，不锁整行格式
+    /// （rustfmt/手改缩进不该假红）。
+    #[test]
+    fn score_normalization_is_not_inlined_anywhere() {
+        const PM: &str = include_str!("../../../../src-tauri/src/commands/portfolio-mgr.rhai");
+        assert!(
+            !PM.contains("- 50.0) / 50.0"),
+            "主链又把归一化内联回来了 ⇒ 权威应只有 portfolio_formula::score_to_signal"
+        );
+        for call in [
+            "pm_score_to_signal(totalScore)",
+            "pm_score_to_signal(consensusScore)",
+            "pm_score_to_signal(dqi_score)",
+            "pm_score_to_signal(ss_f)",
+        ] {
+            assert!(PM.contains(call), "主链缺这条归一化调用：{call}");
+        }
+
+        // 逐档腿那一份也必须走同一实现（原先它自带一份内联的 `(ts - 50.0) / 50.0`）
+        const LEG: &str = include_str!("leg_signal.rs");
+        assert!(!LEG.contains("(ts - 50.0) / 50.0"), "leg_signal 又内联了归一化");
+        assert!(LEG.contains("score_to_signal(ts)"), "leg_signal 应复用唯一权威");
     }
 }

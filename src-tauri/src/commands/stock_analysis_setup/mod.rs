@@ -1516,12 +1516,53 @@ pub(crate) fn debate_rounds_graph_drift(
         let Some(tail) = id.strip_prefix("bull-r") else {
             continue;
         };
-        if let Ok(round) = tail.parse::<usize>() {
+        // v161：逐档辩手形如 `bull-r1--mid` ⇒ 先按档位分隔符截出轮号段再判纯数字。
+        // 不截会把带档 id 判成「非辩手」⇒ 图内轮数恒 0 ⇒ 漂移门**每次启动都报**
+        // （每次重建整图，抹掉编辑器手工改动）。
+        let round_part =
+            tail.split(axagent_harness::holding_period::TIER_ID_SEP).next().unwrap_or(tail);
+        if let Ok(round) = round_part.parse::<usize>() {
             in_graph = in_graph.max(round);
         }
     }
     let wanted = resolve_debate_rounds(variables_json);
     (in_graph != wanted).then_some((in_graph, wanted))
+}
+
+/// 「库里的图是否真按四档展开」——版本门答不了的那一格（v161 逐档辩论）。
+///
+/// 返回 `Some(缺失节点 id 清单)` 表示图缺逐档形态；完整或 `nodes` 解析失败返回 `None`
+/// （脏数据宁可漏判，重建是破坏性的 —— 与 [`debate_rounds_graph_drift`] 同一取舍）。
+///
+/// ## 为什么需要它
+///
+/// 版本门只比「代码常量 vs 库版本号」。而 v161 这类**图结构换代**会在两种情形下漏掉：
+/// ① 库版本号已 ≥ 161 但图是用户从旧快照恢复/手工编辑过的（版本号被人为抬高）；
+/// ② 上一次播种在中途失败，只写了一部分逐档节点。
+/// 两者都不会被版本门拦下，表现却是「四档辩论少跑一两档」——静默、且只在结果里显出来。
+///
+/// ## 判据（只认事实）
+///
+/// 四档 × 四类节点各一，任一缺失即漂移：
+/// `analyst-brief--{档}`（本档摘要）/ `debate-bull-bear--{档}`（容器）/
+/// `bull-r1--{档}`（首轮辩手）/ `debate-convergence--{档}`（本档收敛）。
+/// 这四类正是 v161 新增的逐档族；缺容器＝那一档根本没辩论，缺收敛＝下游读到 ()。
+/// id 一律经 [`tier_node_id`] 现场拼，**不写 `base--tier` 字面量**
+/// （`check-analyst-id-shape.mjs` 的扫描面才看得见）。
+pub(crate) fn tiered_debate_graph_drift(nodes_json: &str) -> Option<Vec<String>> {
+    let nodes: Vec<serde_json::Value> = serde_json::from_str(nodes_json).ok()?;
+    let ids: std::collections::HashSet<&str> =
+        nodes.iter().filter_map(|n| n.get("id").and_then(|v| v.as_str())).collect();
+    let mut missing = Vec::new();
+    for p in axagent_harness::holding_period::Period::ALL {
+        for base in ["analyst-brief", "debate-bull-bear", "bull-r1", "debate-convergence"] {
+            let want = axagent_harness::holding_period::tier_node_id(base, p.as_str());
+            if !ids.contains(want.as_str()) {
+                missing.push(want);
+            }
+        }
+    }
+    (!missing.is_empty()).then_some(missing)
 }
 
 // seed_debate_subworkflow: 辩论已通过 DebateNode 容器直接嵌入主模板，旧独立模板已移除
@@ -3240,6 +3281,43 @@ mod version_gate_tests {
         );
     }
 
+    /// v161：**真播种一遍**，逐档辩论族必须四档齐出（每档：摘要 / 容器 / 首轮辩手 / 收敛）。
+    ///
+    /// 与纯函数的 `tiered_debate_graph_drift`（合成 JSON，不落库）互补：
+    /// 那一门证明**判据**有区分力，这一门证明**播种路径**真的产出了这 16 个节点 ——
+    /// 只有纯函数门 = 判据算得对而图照旧也算过（本仓已有这类教训）。
+    #[tokio::test]
+    async fn seeded_graph_expands_debate_families_per_tier() {
+        use axagent_harness::holding_period::{Period, tier_node_id};
+
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed(db).await.expect("种子化应成功");
+
+        let node_ids: std::collections::HashSet<String> = nodes_of(db)
+            .await
+            .iter()
+            .filter_map(|n| n.get("id").and_then(|v| v.as_str()).map(str::to_string))
+            .collect();
+
+        let mut missing: Vec<String> = Vec::new();
+        for p in Period::ALL {
+            for base in ["analyst-brief", "debate-bull-bear", "bull-r1", "debate-convergence"] {
+                let want = tier_node_id(base, p.as_str());
+                if !node_ids.contains(&want) {
+                    missing.push(want);
+                }
+            }
+        }
+        assert!(missing.is_empty(), "逐档辩论族缺节点（四档各四类）：{missing:?}");
+
+        // 负控：旧形态的**无档**容器名不得同时存在（存在即说明新旧两套并存，辩论会重复跑）
+        assert!(
+            !node_ids.contains("debate-bull-bear"),
+            "裸 `debate-bull-bear` 应与逐档容器二选一，不得并存"
+        );
+    }
+
     /// 兜底函数**两条分支**都要直接打得到，且带「看着像分析师但不该放行」的负控。
     /// 拆成 `prune_dangling_analyst_edges` 就是为了这一条：`Err` 那一支若留在种子函数体内，
     /// 要触发得构造一整张坏图，实际等于没有测试。
@@ -3370,6 +3448,8 @@ mod version_gate_tests {
             .iter()
             .filter_map(|n| n.get("id").and_then(|v| v.as_str()))
             .filter_map(|id| id.strip_prefix("bull-r"))
+            // v161：逐档辩手带 `--{档}` 后缀 ⇒ 先截轮号段（与生产 `debate_rounds_graph_drift` 同口径）
+            .filter_map(|tail| tail.split(axagent_harness::holding_period::TIER_ID_SEP).next())
             .filter_map(|tail| tail.parse::<usize>().ok())
             .max()
             .unwrap_or(0)

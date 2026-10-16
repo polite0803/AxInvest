@@ -3862,13 +3862,17 @@ struct M1SampleInputs<'a> {
 /// 键名与判据都在 `analysis_engine::leg_weight_overlay`（单一权威源），本函数只管取数—算—存。
 async fn refresh_leg_ic_report(db: &DatabaseConnection) -> Result<(), String> {
     use axagent_analysis_engine::leg_weight_overlay as lo;
-    let pairs = axagent_dao::repo::stock_lesson_queries::leg_ic_pairs(db)
-        .await
-        .map_err(|e| format!("读取腿配对失败: {e}"))?;
+    let pairs = axagent_dao::repo::stock_lesson_queries::leg_ic_pairs(db).await.map_err(|e| {
+        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("读取腿配对失败: {e}")).to_string()
+    })?;
     let report = lo::build_report(&pairs, chrono::Utc::now().timestamp_millis());
     axagent_dao::repo::settings::set_setting(db, lo::LEG_IC_SETTING_KEY, &report.to_json_text())
         .await
-        .map_err(|e| format!("写入腿预测力报告失败: {e}"))?;
+        .map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("写入腿预测力报告失败: {e}"))
+                .to_string()
+        })?;
     let zeroable = report.cells.iter().filter(|c| lo::only_zeroing_status(&c.status)).count();
     tracing::info!(
         "[leg_ic] 报告刷新：配对 {} 行 / 观测 {} 条 / 分格 {} 个 / 判「无预测力」{} 格（门槛 n>={}）",
@@ -3910,7 +3914,11 @@ async fn persist_m1_sample_if_absent(
     let exists =
         axagent_dao::repo::stock_lesson_queries::has_reflection_m1_sample(db, inputs.reflection_id)
             .await
-            .map_err(|e| format!("M1 样本查重失败: {e}"))?;
+            .map_err(|e| {
+                ErrorResponse::new(wf_err::INTERNAL)
+                    .with_detail(format!("M1 样本查重失败: {e}"))
+                    .to_string()
+            })?;
     if exists {
         return Ok(false);
     }
@@ -3961,9 +3969,13 @@ async fn persist_m1_sample_if_absent(
         // 复盘档的客观判定切片（其余三档在 horizon_results_json）。
         horizon_pnl_json: Some(horizon_pnl_json),
     };
-    axagent_dao::repo::stock_lesson_queries::insert_reflection_m1_sample(db, draft)
-        .await
-        .map_err(|e| format!("写入 strategy_performance 失败: {e}"))?;
+    axagent_dao::repo::stock_lesson_queries::insert_reflection_m1_sample(db, draft).await.map_err(
+        |e| {
+            ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("写入 strategy_performance 失败: {e}"))
+                .to_string()
+        },
+    )?;
     tracing::info!(
         "[reflection] M1 样本落库 {sp_id}: reflection_id={} was_correct={was_correct} conf={decision_confidence}",
         inputs.reflection_id

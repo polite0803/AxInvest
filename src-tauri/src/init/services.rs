@@ -2204,7 +2204,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 );
                 store.record_run(&job_id, result).await;
                 if !recurring {
-                    // `set_status` 返 **bool**（非 Result，见 crates/runtime-core/src/cron_job.rs:491）：
+                    // `set_status` 返 **bool**（非 Result，见 crates/runtime-core/src/cron_job.rs:621）：
                     // false ⇒ 一次性任务仍留 Active ⇒ 下次到点重复跑，故显式判 false 并记 warn。
                     if !store
                         .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
@@ -2692,7 +2692,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 };
                 store.record_run(&job_id, result).await;
                 if !recurring {
-                    // `set_status` 返 **bool**（非 Result，见 crates/runtime-core/src/cron_job.rs:491）：
+                    // `set_status` 返 **bool**（非 Result，见 crates/runtime-core/src/cron_job.rs:621）：
                     // false ⇒ 一次性任务仍留 Active ⇒ 下次到点重复跑，故显式判 false 并记 warn。
                     if !store
                         .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
@@ -2810,7 +2810,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     };
                 store.record_run(&job_id, result).await;
                 if !recurring {
-                    // `set_status` 返 **bool**（非 Result，见 crates/runtime-core/src/cron_job.rs:491）：
+                    // `set_status` 返 **bool**（非 Result，见 crates/runtime-core/src/cron_job.rs:621）：
                     // false ⇒ 一次性任务仍留 Active ⇒ 下次到点重复跑，故显式判 false 并记 warn。
                     if !store
                         .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
@@ -2960,7 +2960,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 };
                 store.record_run(&job_id, result).await;
                 if !recurring {
-                    // `set_status` 返 **bool**（非 Result，见 crates/runtime-core/src/cron_job.rs:491）：
+                    // `set_status` 返 **bool**（非 Result，见 crates/runtime-core/src/cron_job.rs:621）：
                     // false ⇒ 一次性任务仍留 Active ⇒ 下次到点重复跑，故显式判 false 并记 warn。
                     if !store
                         .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
@@ -3031,7 +3031,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             store.record_run(&job_id, result).await;
                             if !recurring {
                                 // ⚠ `set_status` 返回 **bool**（是否找到并更新，见
-                                // `crates/runtime-core/src/cron_job.rs:491`），**不是** `Result`
+                                // `crates/runtime-core/src/cron_job.rs:621`），**不是** `Result`
                                 // ⇒ 不可照抄同 crate `:392` 那条 `upsert_job` 的
                                 // `if let Err(e)` 形态（两函数**返回类型不同型**，照抄会 E0308）。
                                 // 真正的风险是返回 false 时一次性任务仍留 Active ⇒ 下次到点重复跑。

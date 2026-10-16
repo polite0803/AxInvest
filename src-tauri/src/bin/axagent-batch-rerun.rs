@@ -273,7 +273,7 @@ async fn wait_until_settled(
 ///
 /// 业务封装路径（`run_stock_workflow_inner`）**不产生**反思 pending 行：
 /// `hooks.rs` 的 `stock-analysis-persist` 有守卫
-/// `if input_has_analysis_id(&ctx.input) { return Ok(()) }`（`stock_workflow/hooks.rs:1058-1060`），
+/// `if input_has_analysis_id(&ctx.input) { return Ok(()) }`（`stock_workflow/hooks.rs:1102-1104`），
 /// 而业务封装路径的 input 恒带 `analysis_id` ⇒ 该 hook 被跳过；它只服务
 /// **对话直执行通道**（`analysis_kind = "chat"`，见 `stock_workflow/hooks.rs:18-20` 模块注释）。
 ///

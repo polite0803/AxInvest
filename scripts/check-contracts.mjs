@@ -520,7 +520,7 @@ function checkEventSymmetry() {
  *   11 × set_status 一次性清完 —— `src-tauri/src/init/services.rs` 的 11 处 cron 分支
  *   `if !recurring { let _ = store.set_status(&job_id, CronJobStatus::Disabled).await; }`
  *   全部改为 `if !store.set_status(..).await { tracing::warn!(..) }`。
- *   这几处**不是**「丢弃 Result」语义：`set_status` 返 `bool`（`crates/runtime-core/src/cron_job.rs:491`），
+ *   这几处**不是**「丢弃 Result」语义：`set_status` 返 `bool`（`crates/runtime-core/src/cron_job.rs:621`），
  *   false = 未找到该任务或持久化失败 ⇒ 一次性 cron 任务仍留 Active ⇒ 下次到点重复跑。
  *   274 − 11 = 263，与 11 处一一对应（复跑实测：`共 263 处，已排除 47 处豁免调用`）。回滚 = 改回 274。
  *   2026-10-15 阶段 A（`docs/plans/PLAN-monitor-chain-closure.md`）262 → 261：

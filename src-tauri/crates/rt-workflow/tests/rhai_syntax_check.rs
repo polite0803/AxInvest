@@ -62,30 +62,6 @@ fn compile_one(path: &PathBuf) -> Result<(), String> {
     engine.compile(&code).map(|_| ()).map_err(|e| format!("{e}"))
 }
 
-/// 取 `needle` 之后**第一个** `{` 所引导的块体（花括号配对，不含最外层大括号）。
-///
-/// 为什么必须按花括号配对、而非「找到第一个 `}` 就停」：被取的块体内部本身
-/// 嵌有 `if position_pct <= 0.0 { … }` 与 `#{…}`（Rhai map 字面量），
-/// 浅层匹配会在这些内层闭合处提前截断，切出的片段无法代表整个块。
-fn block_body_after(code: &str, needle: &str) -> Option<String> {
-    let at = code.find(needle)?;
-    let open = code[at..].find('{')? + at;
-    let mut depth = 0usize;
-    for (i, c) in code[open..].char_indices() {
-        match c {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(code[open + 1..open + i].to_string());
-                }
-            },
-            _ => {},
-        }
-    }
-    None
-}
-
 #[test]
 fn all_rhai_scripts_compile() {
     let files = collect_rhai_files();
@@ -148,9 +124,11 @@ fn portfolio_mgr_has_no_hold_wait_mutual_rewrite() {
     //    不掺仓位语义）。原先「全文件 == 1」的写法会把它们误判成回归（2026-10-16 CI 实证：
     //    计数得 3，实为阶梯 1 处 + 两个风险门 2 处，均非升级向互改）。
     //    锚点行：`if probe_position_pct > 0.0 && base_action == "观望" {`
-    let probe_block =
-        block_body_after(&code_only, "if probe_position_pct > 0.0 && base_action == \"观望\" {")
-            .expect("试探仓块的判定行不见了 ⇒ 判据失去锚点，不得静默放过");
+    let probe_block = block_body_after_decl(
+        &code_only,
+        "if probe_position_pct > 0.0 && base_action == \"观望\" {",
+    )
+    .expect("试探仓块的判定行不见了 ⇒ 判据失去锚点，不得静默放过");
     assert!(
         !probe_block.contains("base_action = \"持有\";"),
         "试探仓块重新出现 `base_action = \"持有\"`（「观望 → 持有」互改的升级向）"
@@ -403,8 +381,15 @@ fn brace_body_at(src: &str, open: usize) -> Option<String> {
     None
 }
 
-/// 取 `decl` 之后第一个 `{` 起、配平到 `}` 的**内部**文本。
-fn block_body_after(src: &str, decl: &str) -> Option<String> {
+/// 取 `decl` 之后第一个 `{` 起、配平到 `}` 的**内部**文本（门内文本检查用）。
+///
+/// ⚠ 本文件一度有**两个**同名 helper：一批改动带 `code/needle` 形态（内联配平），
+/// 另一批带此处的 `decl` 形态（委托 `brace_body_at`）。二者实现等价、同时落在 master
+/// ⇒ `E0428 the name is defined multiple times`，使 `cargo clippy --workspace --all-targets`
+/// 与 `cargo test --workspace` 在这个 test target 上直接编译不过（挡住全仓终局门禁）。
+/// 现已**合并为唯一一份**（此处这份，复用 `brace_body_at` 的配平逻辑）；
+/// 保留 `_decl` 后缀以标注参数语义（`decl`，非泛化的 `needle`）。
+fn block_body_after_decl(src: &str, decl: &str) -> Option<String> {
     let i = src.find(decl)?;
     let open = i + src[i..].find('{')?;
     brace_body_at(src, open)
@@ -440,7 +425,7 @@ fn key_values(body: &str) -> Vec<(String, f64)> {
 /// `let factors = #{ "n": #{ "k": v, ... }, ... }` ⇒ [(n, [(k, v)])]。
 fn extract_factors(rw: &str) -> Vec<FactorEntry> {
     let code = strip_line_comments(rw);
-    let Some(body) = block_body_after(&code, "let factors = #{") else {
+    let Some(body) = block_body_after_decl(&code, "let factors = #{") else {
         return Vec::new();
     };
     let mut out = Vec::new();
@@ -500,7 +485,7 @@ fn extract_regime_keys(rw: &str) -> Vec<String> {
 /// 只看循环体：`get_weight` 函数体内也有 `f["weight"]`，全局扫会把它误收成必需键（假红）。
 fn extract_loop_required_keys(rw: &str) -> (Vec<String>, bool) {
     let code = strip_line_comments(rw);
-    let Some(body) = block_body_after(&code, "for name in factor_names {") else {
+    let Some(body) = block_body_after_decl(&code, "for name in factor_names {") else {
         return (Vec::new(), false);
     };
     let mut out: Vec<String> = Vec::new();

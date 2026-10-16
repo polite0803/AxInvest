@@ -28,7 +28,11 @@
 // ⚠ 解析面说明（本门刻意只做**字面量**解析，不跑 Rhai）：
 //   分支脚本的输出块 = 文件里**最后一个**独占一行的 `#{` 到与之配对的行首 `}`；
 //   键必须行首缩进后紧跟 `ident:`。装配追加键 = `8< assembly-begin` 段内的 `row["k"] =`。
-//   TS 侧按**大括号深度**只取 interface 顶层键（`legs: Array<{ factor: … }>` 的内层键不算）。
+//   TS 侧按**大括号深度**只取 interface 顶层键（`legs: Array<{ factor: … }>` 的内层键不算），
+//   扫键前**先剥注释**（等长替换成空格）：否则注释里的散文会把
+//   `foo::BAR` 中的 `_BAR::` 读成一个键 —— 实证 2026-10-16：`calibrationReady` 的
+//   JSDoc 写了 `reflection_stats::CALIBRATION_MIN_SAMPLES` ⇒ 幽灵键 `stats` ⇒ R2/R4 对散文报红
+//   （同 `check-reco-horizon-parity.mjs` 的 `stripFullLineComments` 纪律：判据不得被注释触红）。
 //   三处解析都带自证（`--dump`），解析不出就当红，不当「没有违规」。
 
 import { readFileSync } from "node:fs";
@@ -81,11 +85,40 @@ export function assemblyKeys(src) {
   return [...keys];
 }
 
+/** 剥掉 TS 的行注释（双斜杠）与块注释（斜杠星号对），**等长替换成空格**（换行保留）——
+ *  长度与花括号深度都不变，扫描索引仍与原文对齐，但注释里的 `foo::BAR` 不会再被当成键。
+ *  纪律同 `check-reco-horizon-parity.mjs` 的 `stripFullLineComments`：判据不得被注释触红。
+ */
+function stripTsComments(src) {
+  const out = src.split("");
+  const blank = (from, to) => {
+    for (let k = from; k < to; k += 1) { if (out[k] !== "\n") out[k] = " "; }
+  };
+  let i = 0;
+  while (i < src.length) {
+    if (src.startsWith("//", i)) {
+      const j = src.indexOf("\n", i);
+      const end = j < 0 ? src.length : j;
+      blank(i, end);
+      i = end;
+    } else if (src.startsWith("/*", i)) {
+      const j = src.indexOf("*/", i + 2);
+      const end = j < 0 ? src.length : j + 2;
+      blank(i, end);
+      i = end;
+    } else {
+      i += 1;
+    }
+  }
+  return out.join("");
+}
+
 /** TS interface 的**顶层**键（带是否可选）；按大括号深度过滤嵌套类型定义的键 */
 export function tsKeys(src, iface = "HorizonDecision") {
-  const start = src.indexOf(`export interface ${iface} {`);
+  const clean = stripTsComments(src);
+  const start = clean.indexOf(`export interface ${iface} {`);
   if (start < 0) return null;
-  const body = src.slice(start + `export interface ${iface} `.length);
+  const body = clean.slice(start + `export interface ${iface} `.length);
   let depth = 0;
   const out = [];
   for (let i = 0; i < body.length; i += 1) {

@@ -1,8 +1,8 @@
 {
   "version": "2",
-  "generated": "2026-09-20",
-  "total_entries": 433,
-  "total_files": 433,
+  "generated": "2026-10-16",
+  "total_entries": 434,
+  "total_files": 434,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -2024,6 +2024,12 @@
       "file": "src/pages/SkillsPage.tsx",
       "lines": "596,816,821,874",
       "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/pages/TasksCenterPage/adapters/cron.adapter.ts",
+      "lines": "16",
+      "reason": "数据格式哨兵：`[系统兜底轮` 须与后端 record_auxiliary_run 写出的 output 前缀逐字匹配，不是 UI 文案（翻译会致失配）",
       "phase": 3
     },
     {

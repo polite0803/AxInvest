@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-10-15",
+  "generatedAt": "2026-10-16",
   "note": "分层护栏棘轮基线：**只减不增**。修复违规后必须用 --update-baseline 下调，否则基线虚高会让棘轮失效。",
   "rules": {
     "commands-no-direct-db": {
-      "total": 639,
+      "total": 638,
       "files": {
         "src-tauri/src/commands/agency_expert.rs": 4,
         "src-tauri/src/commands/agent/command_bridge.rs": 1,
@@ -116,7 +116,7 @@
         "src-tauri/src/commands/stock_workflow/hooks.rs": 6,
         "src-tauri/src/commands/stock_workflow/misc.rs": 6,
         "src-tauri/src/commands/stock_workflow/reco_history.rs": 11,
-        "src-tauri/src/commands/stock_workflow/reflection.rs": 36,
+        "src-tauri/src/commands/stock_workflow/reflection.rs": 35,
         "src-tauri/src/commands/stock_workflow/serenity.rs": 4,
         "src-tauri/src/commands/trade_intent.rs": 2,
         "src-tauri/src/commands/webdav.rs": 4,
@@ -129,7 +129,7 @@
       }
     },
     "commands-no-sibling-call": {
-      "total": 93,
+      "total": 94,
       "files": {
         "src-tauri/src/commands/agent/mod.rs": 8,
         "src-tauri/src/commands/backtest_validation.rs": 6,
@@ -158,7 +158,7 @@
         "src-tauri/src/commands/scheduled_task.rs": 3,
         "src-tauri/src/commands/skill_decomposition.rs": 1,
         "src-tauri/src/commands/skill_workflow.rs": 2,
-        "src-tauri/src/commands/stock_analysis.rs": 9,
+        "src-tauri/src/commands/stock_analysis.rs": 10,
         "src-tauri/src/commands/stock_analysis_bridge.rs": 1,
         "src-tauri/src/commands/stock_analysis_bridge_tests.rs": 3,
         "src-tauri/src/commands/stock_analysis_setup/seed_consistency_tests.rs": 1,

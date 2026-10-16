@@ -1456,6 +1456,8 @@ const SCHEMA: &[(&str, &[(&str, &str)])] = &[
             ("node_executions", "TEXT"),
             ("execution_state_json", "TEXT"),
             ("paused_at", "BIGINT"),
+            // 实体已有、曾漏登（该列由条件单面板/价格告警写库引入，此前被 clippy 失败掩盖）
+            ("error_detail", "TEXT"),
             ("total_time_ms", "BIGINT"),
             ("created_at", "BIGINT"),
             ("updated_at", "BIGINT"),

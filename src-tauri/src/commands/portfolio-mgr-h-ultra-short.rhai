@@ -186,6 +186,13 @@ let prior_ok = type_of(hp_row) == "map"
 let prior_val = if prior_ok { hp_row["prior"] } else { () };
 let prior_src = if prior_ok { hp_row["source"] } else { "unavailable" };
 let prior_samples = if prior_ok { hp_row["samples"] } else { 0 };
+// P2-c（PLAN-stock-decision-reliability）：本档**原始方向命中率**（未收缩口径）。
+// 缺席 ⇒ 前端不渲染命中率段 —— 先验此时借自全档合并基准，不得拿 pooled 值冒充本档命中率。
+let prior_hit_rate = if prior_ok && type_of(hp_row["hitRate"]) == "f64" { hp_row["hitRate"] } else { () };
+// P1-3（R3/R7）：本档校准可得性。判据在 Rust `reflection_stats::CALIBRATION_MIN_SAMPLES`，
+// 脚本只读结论（同 DQI 熔断纪律：阈值有两份载体就早晚不一致）。先验不可得 ⇒ false ⇒
+// 主链按「未校准」封顶 —— fail-closed，缺席不得当成「已校准」。
+let prior_cal_ready = prior_ok && hp_row["calibrationReady"] == true;
 if !prior_ok {
     gaps.push("本档先验不可得（`horizon_prior_json` 缺失或缺本档那一行）=> 拒绝出结论：观望且不产出仓位");
 }
@@ -346,6 +353,8 @@ if action != "买入" && action != "增持" && action != "持有" {
     riskCategory: if present(overall_risk) { overall_risk } else { () },
     priorSource: prior_src,
     priorSamples: prior_samples,
+    calibrationReady: prior_cal_ready,
+    priorHitRate: prior_hit_rate,
     stopSource: if exit_move > 0.0 { "vol_band" } else { "fallback_pct" },
     positionSource: "kelly_x_position_multiplier",
     // 本档分支的自证字段（审计与门禁读这里，不再从文案反解）

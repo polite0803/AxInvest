@@ -167,6 +167,13 @@ pub struct TaskRunResult {
     /// `#[serde(default)]`：兼容 cron_jobs JSON 中的历史记录。
     #[serde(default)]
     pub skipped: bool,
+    /// P1-10（`PLAN-stock-decision-reliability.md`）：批量任务「部分完成」——
+    /// 达到单轮墙钟预算提前收尾 / 队列被单轮上限截断（属部分完成而非失败，剩余标的
+    /// 下轮续跑）。超墙钟收尾时 `success` 记 false（本轮没跑完规划量），前端据
+    /// `partial` 与 `success` 的组合显示「部分完成」而非「失败」。
+    /// `#[serde(default)]`：兼容 cron_jobs JSON 中的历史记录。
+    #[serde(default)]
+    pub partial: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

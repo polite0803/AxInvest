@@ -11,6 +11,8 @@
  * 本文件为纯类型 + 纯函数，不允许引 React，便于单测。
  */
 
+import type { ScheduledTask } from "@/types";
+
 // ── 源标识：新增源时在此扩联合并注册适配器 ─────────────────────────────
 export type SourceId =
   | "scheduled-cron"
@@ -266,4 +268,30 @@ export function summarizeWindow(
     }
   }
   return out;
+}
+
+/** next_run 停滞：档期已过（或为 0 = 待补发）且距上次运行超过该时长。 */
+const NEXT_RUN_STALE_AFTER_MS = 24 * 3600 * 1000;
+
+/**
+ * P1-10：`next_run_at` 停滞判据（计划任务面板）。
+ *
+ * 调度器是「到期即派发 + 错过补发一次」模型：正常任务跑完后 `next_run_at` 会被
+ * `record_run` 推进到下一档期。若档期已过 —— 含后端的 `next_run_at = 0`
+ * （"待补发"）经 RFC3339 序列化成的 1970-01-01 形态 —— 且距上次运行超过 24 小时，
+ * 说明派发一直没落地（长任务被关机打断、`record_run` 从未执行；pool-scan
+ * 十月中旬的实际状态正是如此），面板须显式标出而不是让 1970 日期静默躺着。
+ * 排除：非活跃任务、从未运行过的任务（新建待首跑，交给别的信号）。
+ */
+export function isNextRunStale(task: ScheduledTask, now: number = Date.now()): boolean {
+  if (task.status !== "active" || !task.lastRunAt) {
+    return false;
+  }
+  const lastMs = Date.parse(task.lastRunAt);
+  if (!Number.isFinite(lastMs)) {
+    return false;
+  }
+  const nextMs = task.nextRunAt ? Date.parse(task.nextRunAt) : Number.NaN;
+  const overdue = !Number.isFinite(nextMs) || nextMs < now;
+  return overdue && now - lastMs > NEXT_RUN_STALE_AFTER_MS;
 }

@@ -402,7 +402,35 @@ pub(crate) async fn build_stock_analysis_variables(
     // 恒注入且缺失不 throw：脚本自己会在 `type_of(branch_json) == "()"` 时拒绝出结论
     // （退等权等于拿简化填架构缺口，脚本注释里已写明这条取舍）。
     {
-        let branches = axagent_analysis_engine::evidence_weight::horizon_branch_specs();
+        let mut branches = axagent_analysis_engine::evidence_weight::horizon_branch_specs();
+        // P2-a：把测出的「无预测力」方向腿权重置零（报告由反思收尾 `refresh_leg_ic_report` 写 settings）。
+        // 读不到报告、或所有格样本不足 ⇒ 分支表逐字不变，权重仍是先验值；判据单一来源在引擎侧。
+        {
+            use axagent_analysis_engine::leg_weight_overlay as lo;
+            let ic_text = axagent_dao::repo::settings::get_setting(db, lo::LEG_IC_SETTING_KEY)
+                .await
+                .ok()
+                .flatten();
+            if let Some(text) = ic_text.as_deref() {
+                match lo::LegIcReportInput::from_json_text(text) {
+                    Some(rep) => {
+                        let zeroed = lo::apply_leg_weight_overlay(&mut branches, &rep);
+                        if zeroed > 0 {
+                            tracing::info!(
+                                "[leg_ic] 本次分析按测量置零 {zeroed} 条方向腿权重（报告生成于 {}，观测 {} 条）",
+                                rep.generated_at_ms,
+                                rep.observations
+                            );
+                        }
+                    },
+                    None => {
+                        tracing::warn!(
+                            "[leg_ic] settings 里的腿预测力报告无法解析 ⇒ 本次分析仍按先验权重"
+                        );
+                    },
+                }
+            }
+        }
         if let Some(existing) = merged_vars.iter_mut().find(|v| v.name == "horizon_branch_json") {
             existing.value = branches;
         } else {
@@ -607,32 +635,42 @@ pub(crate) async fn build_stock_analysis_variables(
         });
     }
 
-    // 注入市场状态（沪深300判断牛/熊/震荡）
     // （原工作区路径在 spawn 前计算，现统一在执行前此处计算）
-    let regime_value = client
-        .get_klines("000300", "daily", 60)
-        .await
-        .ok()
-        .and_then(|klines| {
-            if klines.is_empty() {
-                return None;
-            }
-            let r = axagent_analysis_engine::market_regime::classify_regime(&klines);
-            Some(json!({
-                "regime": r.regime,
-                "confidence": r.confidence,
-                "volatility": r.volatility,
-                "description": r.description,
-            }))
+    // 注入市场状态（P2-e：沪深300 / 中证全指 / 上证50 三指数确认 + 波段结构补票）。
+    // 用**显式东财 secid**（1.000300 等）而非裸码：裸码会被 `to_em_secid` 按首位数字推市场位，
+    // 现役只靠 vendor 兜底侥幸拿回指数序列（实测见 `index_secid_live_probe`）。
+    // 三只都拉不到才落 unknown —— 单只失败仍按剩余指数投票，并在描述里点名缺席。
+    let regime_fetched = futures::future::join_all(
+        axagent_analysis_engine::market_regime::REGIME_INDEX_SECIDS
+            .iter()
+            .map(|(secid, _label)| client.get_klines(secid, "daily", 60)),
+    )
+    .await;
+    let mut regime_series: Vec<(&str, Vec<axagent_astock_data::KLine>)> = Vec::new();
+    for ((_secid, label), res) in
+        axagent_analysis_engine::market_regime::REGIME_INDEX_SECIDS.iter().zip(regime_fetched)
+    {
+        regime_series.push((label, res.unwrap_or_default()));
+    }
+    let all_empty = regime_series.iter().all(|(_l, k)| k.is_empty());
+    let regime_value = if all_empty {
+        json!({
+            "regime": "unknown",
+            "confidence": null,
+            "volatility": null,
+            "description": "⚠️ 市场状态数据暂不可用（沪深300／中证全指／上证50 三指 K 线均拉取失败），请勿据此做多空判断，基于个股自身数据完成分析"
         })
-        .unwrap_or_else(|| {
-            json!({
-                "regime": "unknown",
-                "confidence": null,
-                "volatility": null,
-                "description": "⚠️ 市场状态数据暂不可用（沪深300 K线拉取失败），请勿据此做多空判断，基于个股自身数据完成分析"
-            })
-        });
+    } else {
+        let refs: Vec<(&str, &[axagent_astock_data::KLine])> =
+            regime_series.iter().map(|(l, k)| (*l, k.as_slice())).collect();
+        let r = axagent_analysis_engine::market_regime::classify_regime_multi(&refs);
+        json!({
+            "regime": r.regime,
+            "confidence": r.confidence,
+            "volatility": r.volatility,
+            "description": r.description,
+        })
+    };
     merged_vars.push(Variable {
         name: "market_regime".into(),
         var_type: "object".into(),

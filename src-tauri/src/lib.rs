@@ -102,8 +102,8 @@ pub use commands::stock_analysis_setup::seed_stock_analysis::TEMPLATE_VERSION;
 // `pub use reflection::…`，避免触碰 build.rs 的 re-export 解析面。
 pub use commands::stock_workflow::reflection::{
     DEFAULT_REFLECTION_DEPTH, DEFAULT_REFLECTION_MIN_CONFIDENCE, PendingReflectionSeed,
-    REFLECTION_SOURCE_DUE, REFLECTION_SOURCE_MOVER_RECALL, build_pending_reflection_rows_for,
-    reviewable_horizons,
+    REFLECTION_SOURCE_BACKFILL, REFLECTION_SOURCE_DUE, REFLECTION_SOURCE_MOVER_RECALL,
+    build_pending_reflection_rows_for, expected_holding_days_for, reviewable_horizons,
 };
 
 /// 在独立线程中创建 current_thread tokio runtime 并执行 async 任务（阻塞等待完成）。

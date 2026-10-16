@@ -140,6 +140,23 @@ pub fn horizon_prior_map(stats: &HitrateStats, kappa: f64) -> serde_json::Value 
                 "prior": (est.prior * 10_000.0).round() / 10_000.0,
                 "samples": est.samples,
                 "source": est.source,
+                // P2-c（`PLAN-stock-decision-reliability.md`）：本档**原始方向命中率**
+                // （未收缩口径 = `HitrateStats.direction_hit_rate`）。样本不足 ⇒ null，
+                // 前端据此不渲染命中率段 —— 先验此时借自全档合并基准，不得拿 pooled
+                // 值冒充本档命中率（同「结构性缺口不得在呈现层造成歧义」的纪律）。
+                "hitRate": group.and_then(|g| g.direction_hit_rate),
+                // P1-3（`PLAN-stock-decision-reliability.md` R3/R7）：本档**校准可得性**。
+                // 判据 = 本档自己的原始判定样本数 ≥ `CALIBRATION_MIN_SAMPLES`；刻意不用
+                // `est.samples` —— 那是收缩后的口径，样本不足时会借到全档合并基准，
+                // 拿它当「本档够不够」的依据，别档的样本就把本档的不足掩盖掉了
+                //（与 R4「唯一的不利证据整批不可见」同型）。
+                // 消费端：四份 `portfolio-mgr-h-*.rhai` 透传 ⇒ 主链据此决定是否把置信封顶
+                //   压到 `cap_floor`（脚本侧只读结论，不比阈值 —— 同 DQI 熔断的纪律）。
+                // ⚠ 达标后仍只是「不再封顶」，真正的 confidence→胜率 映射（isotonic/Platt）
+                //   尚未实施；本键为真即放行，不得据此宣称已校准。
+                "calibrationReady": group
+                    .map(|g| g.samples >= crate::reflection_stats::CALIBRATION_MIN_SAMPLES)
+                    .unwrap_or(false),
             }),
         );
     }
@@ -249,6 +266,39 @@ mod horizon_prior_tests {
         }
         assert_eq!(map["short"]["source"], "shrunk");
         assert_eq!(map["mid"]["source"], "pooled");
+    }
+
+    /// P1-3：`calibrationReady` 只认**本档自身**的判定样本数，边界取「≥ 门槛」。
+    ///
+    /// 负控就是 `small_pool_is_shrunk_toward_neutral` 那个形态：本档 2 条但先验借自合并
+    /// 基准（`est.samples` 非零、prior 有值）—— 若判据错用 `est.samples`，别档的样本会
+    /// 把本档的不足掩盖成「已校准」，主链随即解除封顶，正是 R3/R7 的复发路径。
+    #[test]
+    fn calibration_ready_follows_own_tier_samples_not_the_borrowed_prior() {
+        let floor = crate::reflection_stats::CALIBRATION_MIN_SAMPLES;
+        let stats = HitrateStats {
+            by_horizon: vec![
+                group("short", floor, Some(0.60)),   // 恰好达标 ⇒ 边界上为真
+                group("mid", floor - 1, Some(0.60)), // 差一条 ⇒ 假（锁「≥」不是「>」）
+                group("ultra_short", 2, None),       // 自身不足、先验借自 pooled ⇒ 仍须假
+            ],
+            ..Default::default()
+        };
+        let map = horizon_prior_map(&stats, 20.0);
+        assert_eq!(map["short"]["calibrationReady"], serde_json::json!(true));
+        assert_eq!(map["mid"]["calibrationReady"], serde_json::json!(false));
+        assert_eq!(map["ultra_short"]["calibrationReady"], serde_json::json!(false));
+        // 该档借得到的 pooled 基准不得让它看起来「已校准」：先验有值 ≠ 映射可信。
+        assert_eq!(map["ultra_short"]["source"], "pooled", "夹具前提：本档先验来自合并基准");
+        // 完全缺档（无任何样本记录）⇒ 假，且键必须在（缺键会被脚本按「未标注」漏掉）。
+        assert_eq!(map["long"]["calibrationReady"], serde_json::json!(false));
+        for p in Period::ALL {
+            assert!(
+                map[p.as_str()].get("calibrationReady").is_some(),
+                "档 {} 缺 calibrationReady（消费端会按缺席处理）",
+                p.as_str()
+            );
+        }
     }
 
     /// **根因 2 的回归测试**（2026-10-01 实证）。

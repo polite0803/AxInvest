@@ -6576,7 +6576,7 @@
       "period-ultra-short": "Ultra-Short",
       "period-short": "Short-Term",
       "period-mid": "Mid-Term",
-      "period-long": "Long-Term",
+      "period-long": "ربع سنوي",
       "placeholder-periods": "اختر فترة واحدة أو أكثر",
       "label-min-confidence": "الحد الأدنى للثقة",
       "label-top-n": "حد Top N",
@@ -7384,7 +7384,8 @@
       "none": "لم يُشغَّل بعد",
       "skipped": "تم التخطي",
       "success": "نجاح",
-      "failed": "فشل"
+      "failed": "فشل",
+      "partial": "جزئي"
     },
     "scheduled": {
       "autoRefresh": "تحديث تلقائي كل 15 ثانية",
@@ -7614,6 +7615,10 @@
         "failed": "فشلت",
         "interrupted": "متوقفة"
       }
+    },
+    "nextRun": {
+      "stale": "توقف الجدولة",
+      "staleHint": "تجاوز الجدول موعده (أو ينتظر الاستئناف) أكثر من 24 ساعة دون تقدّم: قد تكون المهمة انقطعت بسبب الإغلاق أو متوقفة. استخدم «تشغيل الآن» للتحقق."
     }
   },
   "teammatePanel": {
@@ -14829,7 +14834,7 @@
         "ultra_short": "قصير جدًا",
         "short": "قصير",
         "mid": "متوسط",
-        "long": "طويل"
+        "long": "ربع سنوي"
       },
       "dueYes": "مستحق",
       "dueNo": "معلّق",
@@ -15053,7 +15058,7 @@
     "boolYes": "نعم",
     "boolNo": "لا",
     "backendCallFailed": "فشل استدعاء الواجهة الخلفية",
-    "tierScopeHint": "الأفق: يخدم مستويَي المتوسط والطويل (محفّات الاختناق/السياسة/الأرباح تتحقق عبر أسابيع إلى أشهر)؛ الأقصر والقصير لا يُنتجان حسب التصميم — سطر لكل مستوى ومدة الاحتفاظ من قيمة المستوى المعتمدة.",
+    "tierScopeHint": "الأفق: يخدم مستويَي المتوسط وربع السنوي (محفّات الاختناق/السياسة/الأرباح تتحقق عبر أسابيع إلى أشهر)؛ الأقصر والقصير لا يُنتجان حسب التصميم — سطر لكل مستوى ومدة الاحتفاظ من قيمة المستوى المعتمدة.",
     "timeBasisNoTier": "المرشّح الحيّ بلا مستوى ⇒ لا نافذة مقترحة (السطور حسب المستوى في السجل)",
     "entryBand": "نطاق الدخول ±{{pct}}%",
     "entryBandHalfFallback": "النطاق نصف مضاد وقف ثابت ⇒ ليست مشتقة من التذبذب",
@@ -15439,7 +15444,7 @@
       "ultraShort": "فائق القصر",
       "short": "قصير الأجل",
       "mid": "متوسط الأجل",
-      "long": "طويل الأجل"
+      "long": "ربع سنوي"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15483,7 +15488,7 @@
     "periodUltraShort": "Short",
     "periodShort": "Short",
     "periodMid": "Mid",
-    "periodLong": "Long",
+    "periodLong": "ربع سنوي",
     "generatedAt": "Generated at {{time}}",
     "bannerVendorDisabled": "Some styles are disabled: {styles}",
     "openSettings": "Open Settings",
@@ -15514,7 +15519,7 @@
     "timeHorizonUltraShort": "Ultra Short",
     "timeHorizonShort": "Short Term",
     "timeHorizonMid": "Mid Term",
-    "timeHorizonLong": "Long Term",
+    "timeHorizonLong": "ربع سنوي",
     "horizonSourceFormula": "صيغة",
     "horizonSourceModel": "تقرير النموذج",
     "horizonSourceBranchPick": "اختيار الفرع",
@@ -15688,7 +15693,7 @@
       "matrixAbsence": {
         "serenity_needs_week_or_longer_realization": "حسب التصميم: دليل الاختناق يحتاج أفق أسبوع أو أكثر",
         "oversold_rebound_needs_at_least_mid_horizon": "حسب التصميم: ارتداد التشبع السلبي يحتاج أفقًا متوسطًا على الأقل",
-        "oversold_rebound_not_applied_to_long_horizon": "حسب التصميم: ارتداد التشبع السلبي لا يُطبَّق على الأفق الطويل",
+        "oversold_rebound_not_applied_to_long_horizon": "حسب التصميم: ارتداد التشبع السلبي لا يُطبَّق على الأفق الربع السنوي",
         "cell_not_in_matrix": "الخلية مفقودة من جدول العقد (ربما ثغرة تنفيذية وليس حسب التصميم)"
       },
       "matrixMisfit": {
@@ -16818,7 +16823,7 @@
       "periodUltraShort": "Ultra-Short",
       "periodShort": "Short-Term",
       "periodMid": "Mid-Term",
-      "periodLong": "Long-Term",
+      "periodLong": "ربع سنوي",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -16955,7 +16960,7 @@
       "trendScreening": "فرز الاتجاهات المجدول",
       "trendScreeningHint": "يشغّل بشكل دوري سير عمل فرز الاتجاهات (serenity-screening) وتُضاف نتائجه إلى مجموعة المرشحين",
       "reflectionScan": "مراجعة دورية",
-      "reflectionScanHint": "يراجع تلقائياً التحليلات المكتملة بفواصل قصير جداً (يومان) / قصير (5 أيام) / متوسط (28 يوماً) / طويل (90 يوماً)",
+      "reflectionScanHint": "يراجع تلقائياً التحليلات المكتملة بفواصل قصير جداً (يومان) / قصير (5 أيام) / متوسط (28 يوماً) / ربع سنوي (90 يوماً)",
       "decisionBacktest": "اختبار القرارات",
       "decisionBacktestHint": "يعيد تشغيل التوصيات السابقة ويجلب الشموع الفعلية لنوافذ T+N ويقيس معدل الإصابة وفعالية العوامل ثم يعيد كتابة النتيجة في سجل التحليل",
       "decisionBacktestWindow": "T+{{n}}",
@@ -16992,7 +16997,7 @@
         "ultraShort": "قصير جداً",
         "short": "قصير",
         "mid": "متوسط",
-        "long": "طويل"
+        "long": "ربع سنوي"
       },
       "column": {
         "id": "ID",
@@ -17155,7 +17160,7 @@
       "horizonUltraShort": "قصير جدًا",
       "horizonShort": "قصير",
       "horizonMid": "متوسط",
-      "horizonLong": "طويل",
+      "horizonLong": "ربع سنوي",
       "horizonAuto": "حسب الفئة الرئيسية",
       "horizonUnknown": "أفق غير معروف",
       "colHorizon": "أفق المراجعة",
@@ -17204,8 +17209,23 @@
       "horizonImmatureNote": "لم تنقضِ بعد فترة الاحتفاظ المتوقعة لهذا الأفق؛ البيانات الحالية للإشارة فقط ولا تُستخدم كحكم ربح/خسارة.",
       "hitrateMatureSamples": "العينات الناضجة",
       "hitrateLegacyHint": "يتضمن {{samples}} سجلًا قديمًا",
-      "hitrateGenerationScope": "الجيل الابتدائي: الجيل {{generation}} (تم استبعاد {{foreign}} من أجيال أقدم و{{unknown}} مجهولة)",
-      "noData": "لا توجد بيانات"
+      "hitrateGenerationScope": "الجيل الابتدائي: الجيل {{generation}} (استُبعد {{foreign}} من أجيال أقدم؛ وأُدرج {{unknown}} مجهولة مع الانكماش)",
+      "noData": "لا توجد بيانات",
+      "failureModesTitle": "أنماط الفشل",
+      "failureModesRows": "قرارات تمت مراجعتها",
+      "failureModesLabelled": "مُصنَّفة",
+      "failureModesUnlabelled": "غير مُصنَّفة",
+      "failureModesUnlabelledHint": "{{count}} مراجعة مكتملة بلا نمط فشل — القالب لم يُنتج هذا الحقل، وهذا لا يعني «لا نمط».",
+      "failureModesEmpty": "لا توجد مراجعة مطابقة للمفردات بعد",
+      "failureModesRejected": "تحتوي الصفوف المحفوظة على أسباب خارج المفردات: {{tokens}}",
+      "failureModeCol": "النمط",
+      "failureModeCount": "العدد",
+      "failureModeShare": "نسبة المُصنَّفة",
+      "failureModeDcfCycleTop": "تفاؤل DCF عند قمة الدورة",
+      "failureModeChaseUpBar": "مطاردة شمعة صاعدة كبيرة",
+      "failureModeRegimeEndorsement": "تأييد حالة السوق لسهم مفرد",
+      "failureModeReverseDcfIgnored": "تجاهل DCF العكسي",
+      "failureModeOther": "أخرى"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",
@@ -18259,7 +18279,8 @@
       "sessionLunchBreak": "استراحة الغداء",
       "sessionAfternoon": "جلسة المساء",
       "sessionPostClose": "بعد الإغلاق"
-    }
+    },
+    "horizonPriorHitRate": "معدل الإصابة {{rate}}%"
   },
   "pipeline": {
     "title": "خط أنابيب الأسهم",

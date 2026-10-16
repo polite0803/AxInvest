@@ -145,15 +145,15 @@ beforeEach(() => {
 });
 
 describe("档位显示名（F1 / F2 / F8）", () => {
-  it("缩略视图 ultra_short 渲染「超短线」，绝不渲染成「长期」", () => {
+  it("缩略视图 ultra_short 渲染「超短线」，绝不渲染成「季度」（long 档）", () => {
     renderWithI18n(
       <CompactRecommendation
         data={recoResponse({ trend: [makePick()] }, { period: "ultra_short" })}
       />,
     );
     expect(screen.getByText("超短线")).toBeTruthy();
-    // 反控：旧三元走 else ⇒ 这里会出现「长期」
-    expect(screen.queryByText("长期")).toBeNull();
+    // 反控：旧三元走 else ⇒ 这里会出现「季度」
+    expect(screen.queryByText("季度")).toBeNull();
   });
 
   it("缩略视图认不出的档名原样显示键名，不猜档", () => {
@@ -172,7 +172,7 @@ describe("档位显示名（F1 / F2 / F8）", () => {
         ])}
       />,
     );
-    for (const label of ["超短线", "短线", "中期", "长期"]) {
+    for (const label of ["超短线", "短线", "中期", "季度"]) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
     await settle();
@@ -512,7 +512,7 @@ describe("矩阵契约驱动（S4）", () => {
     });
     const text = cells.map((el) => el.textContent).join(" | ");
     expect(text).toContain("瓶颈证据需以周为单位兑现");
-    expect(text).toContain("超跌反弹不适用于长线");
+    expect(text).toContain("超跌反弹不适用于季度档");
     expect(text).toContain("超跌反弹需至少中线兑现");
     // 出票但没样本的格走另一条句（与「按设计不做」分开）
     expect(screen.getAllByTestId("matrix-no-sample").length).toBeGreaterThan(0);

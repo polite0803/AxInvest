@@ -54,6 +54,11 @@ export interface TaskRunResult {
   durationMs: number;
   /** 被前置闸门跳过（非交易日等），未真正执行业务（旧记录缺省为 false） */
   skipped?: boolean;
+  /**
+   * P1-10：批量任务「部分完成」——达到单轮墙钟预算提前收尾 / 队列被单轮上限
+   * 截断（属部分完成而非失败，剩余标的下轮续跑；旧记录缺省为 false）。
+   */
+  partial?: boolean;
 }
 
 /**

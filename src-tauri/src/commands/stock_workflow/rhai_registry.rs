@@ -877,7 +877,12 @@ mod tests {
         let (conf, pos, action, days, sl, tp) = match tier {
             "ultra_short" => (48.0_f64, 0.0_f64, "观望", 2_i64, 2.6_f64, 2.6_f64),
             "short" => (55.0, 0.0, "观望", 5, 6.0, 12.0),
-            "mid" => (61.0, 12.0, "增持", 28, 4.0, 8.0),
+            // ⚠ 置信与动作必须**同族自洽**：四份 portfolio-mgr-h-*.rhai 的动作阶梯是
+            //   72/62/52/42/32（见各自 `let action` 段），mid 报「增持」就必须 conf ≥ 62；
+            //   夹具原写 61（阶梯只到「持有」）⇒ 被 P0-1 的 R-DQI-CAP 按同一把尺重算上限
+            //   压回「持有」，与本门的「主 action 取自所选档」判据当场打架（首跑即红）。
+            //   取 66：仍 < long 的 70（「置信最高档不可执行」这一格不变），且 ≥62 ⇒ 合法「增持」。
+            "mid" => (66.0, 12.0, "增持", 28, 4.0, 8.0),
             "long" => (70.0, 0.0, "观望", 90, 15.5, 41.0),
             _ => (52.0, 0.0, "观望", 5, 6.0, 12.0),
         };
@@ -895,7 +900,12 @@ mod tests {
             "evidenceScale": 60.0,
             "scoreSource": "tier_native",
             "priorSource": "gate_hitrate",
-            "priorSamples": 12.0,
+            "priorSamples": 40.0,
+            // P1-3：夹具**键集合必须真、值不必与生产同**（见本函数文档）。这里给「已校准」形态
+            // —— 当前生产真值是 false（本仓尚无一个档达到 30 条判定样本），但默认给 false 会让
+            // 本组每一道与本判据无关的门都被 60 封顶改写（实测 3 条门连带红）。未校准一侧由
+            // `portfolio_mgr_uncalibrated_tier_caps_confidence_and_leaves_trace` 单独锁。
+            "calibrationReady": true,
             "stopSource": "vol_band",
             "positionSource": "kelly_x_position_multiplier",
             "confidenceMethod": method,
@@ -943,6 +953,20 @@ mod tests {
         let mut scope = rhai::Scope::new();
         for name in production_injection_names(script) {
             if overrides.iter().any(|(k, _)| *k == name) {
+                continue;
+            }
+            // DQI 等级 = 夹具基线「C」（置信上限 75）——模拟一次正常的 data-quality 产出。
+            // 不给（或给 D/F）时 cap=60（fail-closed），P0-1 的 R-DQI-CAP 会把任何
+            // 「买入/增持」档按分支阶梯（72/62/52）重算的上限压回「持有」⇒ 本门
+            // 「主 action 取自所选档」这一格就永远看不到开仓方向（首跑红正是此形态）。
+            // 取 C 而非 A/B：三者里只有 C 与「grade 缺席」同属 `threshold=0.3` 一档
+            // （见脚本 `weight_collapse_threshold`），故对 weights_collapsed 一族零改扰。
+            // 需要别的档（含 A）的测试走 `overrides`，本基线会被显式跳过。
+            if name == "dqi_grade" {
+                scope.push_constant(
+                    "dqi_grade",
+                    axagent_harness::json_value_to_dynamic(&serde_json::json!("C")),
+                );
                 continue;
             }
             scope.push_constant(name, rhai::Dynamic::UNIT);
@@ -1137,7 +1161,7 @@ mod tests {
         }
 
         // ── ⑤ 阶段2（Q1=C）：主档由四档结论选出，且**可执行优先于置信最大** ──
-        // 夹具里 long 置信最高（70）但仓位 0、mid 次高（61）且仓位 12 ⇒ 正确产物是 mid。
+        // 夹具里 long 置信最高（70）但仓位 0、mid 次高（66）且仓位 12 ⇒ 正确产物是 mid。
         // 判据写反（只按 confidence 取最大）就会落到 long，本断言当场红 —— 这就是夹具
         // 四档数值刻意不同的理由。
         assert_eq!(
@@ -1717,5 +1741,189 @@ mod tests {
         //   代码域那两条住在
         //   `seed_consistency_tests::main_chain_risk_grade_is_tier_scoped_in_code_domain`
         //   —— 门的存放位置由可用基础设施决定，判据只有一位主人。
+    }
+
+    /// P1-3（R3/R7）：本档未达校准门槛 ⇒ 置信封顶压到 `cap_floor`，并由 P0-1 同一条阶梯
+    /// 联动**动作**（不得重蹈 R5「只降展示数字，不降动作」）。
+    ///
+    /// 判别面刻意选在「DQI 给 A 级」的形态上：此时质量 cap=99.9 完全不收紧，
+    /// 唯一还在压置信的来源就是校准封顶 ⇒ 两侧的置信差值与追溯链 rule_id 各自唯一对应
+    /// 一条判据（若两侧都断 action，会被 P0-7 的市况门禁同时压成持有，分不出谁在做的事）。
+    #[test]
+    fn portfolio_mgr_uncalibrated_tier_caps_confidence_and_leaves_trace() {
+        let src = PRODUCTION_SCRIPTS
+            .iter()
+            .find(|(l, _)| *l == "portfolio-mgr")
+            .expect("脚本清单缺 portfolio-mgr")
+            .1;
+        let buy_row = |tier: &str, method: &str, calibrated: bool| {
+            let mut row = branch_row_fixture(tier, method);
+            // 夹具默认已是「已校准」形态（见 branch_row_fixture 的注），未校准一侧在此改回生产真值。
+            if !calibrated {
+                row["calibrationReady"] = serde_json::json!(false);
+                row["priorSamples"] = serde_json::json!(12.0);
+            }
+            row["action"] = serde_json::json!("买入");
+            row["positionPct"] = serde_json::json!(8.0);
+            row["confidence"] = serde_json::json!(95.0);
+            row["posterior"] = serde_json::json!(0.95);
+            row
+        };
+        let dqi_a = [
+            ("dqi_grade", serde_json::json!("A")),
+            ("dqi_observations", serde_json::json!(3)),
+            ("dqi_streak", serde_json::json!(0)),
+            ("dqi_fuse_flag", serde_json::json!(0)),
+        ];
+        let rows = |calibrated: bool| {
+            [
+                ("h_ultra_short", buy_row("ultra_short", "no_cross_horizon_scaling", calibrated)),
+                ("h_short", buy_row("short", "no_cross_horizon_scaling", calibrated)),
+                ("h_mid", buy_row("mid", "inside_sigma_band", calibrated)),
+                ("h_long", buy_row("long", "snr_free_target_and_falsified", calibrated)),
+            ]
+        };
+        let run = |calibrated: bool| -> serde_json::Value {
+            let mut ov: Vec<(&str, serde_json::Value)> = dqi_a.to_vec();
+            ov.extend_from_slice(&rows(calibrated));
+            run_portfolio_mgr_fully(src, &[], &ov)
+        };
+
+        let out = run(false);
+        let conf = out["confidence"].as_f64().expect("confidence 必须是数值");
+        assert!(conf <= 60.0 + 1e-9, "未校准的本档置信必须被压到 cap_floor(60) 以下，实得 {conf}");
+        let trail = out["decision_trail"].as_array().cloned().unwrap_or_default();
+        let calib = trail
+            .iter()
+            .find(|t| t["rule_id"].as_str() == Some("R-CALIB-CAP"))
+            .unwrap_or_else(|| panic!("未校准 + 开仓动作必须留下 R-CALIB-CAP 痕: {trail:?}"));
+        assert_eq!(calib["status"].as_str(), Some("ACTIVATED"), "{calib}");
+        // 归因只有一条：质量 cap 在 A 级下不收紧，不得把同一件事记到 R-DQI-CAP 名下。
+        assert!(
+            !trail.iter().any(|t| t["rule_id"].as_str() == Some("R-DQI-CAP")),
+            "A 级下质量 cap=99.9 不应收紧，追溯链却出现 R-DQI-CAP: {trail:?}"
+        );
+        // 缺席必须说人话：reasoning 里那句封顶说明是展示侧唯一的归因载体（banner 直读它）。
+        let reasoning = out["reasoning"].as_str().unwrap_or_default();
+        assert!(
+            reasoning.contains("校准"),
+            "未封顶只在追溯链留痕不够，reasoning 必须有一句: {reasoning}"
+        );
+
+        // 正控（同一条判据的另一侧）：本档样本达标 ⇒ 本封顶不施加。
+        // 两侧**同夹具同 mod**，唯一差别就是 calibrationReady ⇒ 用严格大小关系判别，
+        // 不断绝对值（展示置信还要乘视角分歧 mod，绝对值是那条 mod 的口径不是本门的）。
+        let ok = run(true);
+        let ok_conf = ok["confidence"].as_f64().expect("confidence 必须是数值");
+        assert!(
+            ok_conf > conf + 1.0,
+            "已校准档的展示置信必须高于未校准档（封顶应被解除），实得 {ok_conf} vs {conf}"
+        );
+        let ok_trail = ok["decision_trail"].as_array().cloned().unwrap_or_default();
+        assert!(
+            !ok_trail.iter().any(|t| t["rule_id"].as_str() == Some("R-CALIB-CAP")),
+            "已校准不得出现 R-CALIB-CAP: {ok_trail:?}"
+        );
+        assert!(
+            !ok["reasoning"].as_str().unwrap_or_default().contains("未达校准门槛"),
+            "已校准不得再声明未达门槛"
+        );
+    }
+
+    /// P1-4（`PLAN-stock-decision-reliability.md` R6）：追涨门 —— 大阳放量的当日
+    /// 不得盘后直接出开仓（紫金 10-09 形态：+4.87% 天量、次日接力被套）。
+    #[test]
+    fn portfolio_mgr_surge_gate_caps_open_on_big_up_bar() {
+        let src = PRODUCTION_SCRIPTS
+            .iter()
+            .find(|(l, _)| *l == "portfolio-mgr")
+            .expect("脚本清单缺 portfolio-mgr")
+            .1;
+
+        // 大阳放量夹具：末两根 29.37 → 30.80（+4.87%），末根成交额 1e9 远超窗内 1e8；
+        // 四档全给「买入」高置信 ⇒ 分支 pick 的 base_action 恒为开仓方向，门必被求值。
+        let mut bars: Vec<serde_json::Value> = Vec::new();
+        for _ in 0..30 {
+            bars.push(serde_json::json!({
+                "close": 29.2, "high": 29.5, "amount": 100_000_000.0, "volume": 1.0,
+            }));
+        }
+        bars.push(serde_json::json!({
+            "close": 29.37, "high": 29.6, "amount": 100_000_000.0, "volume": 1.0,
+        }));
+        bars.push(serde_json::json!({
+            "close": 30.80, "high": 30.9, "amount": 1_000_000_000.0, "volume": 1.0,
+        }));
+        let buy_row = |tier: &str, method: &str| {
+            let mut row = branch_row_fixture(tier, method);
+            row["action"] = serde_json::json!("买入");
+            row["positionPct"] = serde_json::json!(8.0);
+            row["confidence"] = serde_json::json!(85.0);
+            row["posterior"] = serde_json::json!(0.85);
+            row
+        };
+        let out = run_portfolio_mgr_fully(
+            src,
+            &[],
+            &[
+                ("kline_json", serde_json::Value::Array(bars)),
+                // DQI 良好形态：解除 P0-1 的 cap 对开仓的压制。默认 grade 空 ⇒ cap=60 ⇒
+                // 买入先被 R-DQI-CAP 压成持有，本门就永远看不到开仓动作（首跑实测即此形态）。
+                // A 级 ⇒ cap=99.9；R-203 的降级只动仓位与置信度、不改 action（V59 起）。
+                ("dqi_grade", serde_json::json!("A")),
+                ("dqi_observations", serde_json::json!(3)),
+                ("dqi_streak", serde_json::json!(0)),
+                ("dqi_fuse_flag", serde_json::json!(0)),
+                ("h_ultra_short", buy_row("ultra_short", "no_cross_horizon_scaling")),
+                ("h_short", buy_row("short", "no_cross_horizon_scaling")),
+                ("h_mid", buy_row("mid", "inside_sigma_band")),
+                ("h_long", buy_row("long", "snr_free_target_and_falsified")),
+            ],
+        );
+
+        let trail = out["decision_trail"].as_array().cloned().unwrap_or_default();
+        let surge = trail
+            .iter()
+            .find(|t| t["rule_id"].as_str() == Some("R-SURGE-GATE"))
+            .unwrap_or_else(|| panic!("大阳放量形态必须留下 R-SURGE-GATE 痕: {trail:?}"));
+        assert_eq!(surge["status"].as_str(), Some("ACTIVATED"), "{surge}");
+        // 门的语义 = 开仓动作被压回保守档；用输出 action 再锁一次（不依赖 trail 文案）。
+        assert!(
+            matches!(out["action"].as_str(), Some("持有") | Some("观望")),
+            "追涨门应当把开仓压回保守档，实际 action = {:?}",
+            out["action"]
+        );
+    }
+
+    /// P1-4③：RSI>75 且动量腿为负 ⇒ f12 有效权重升为 0.15（下限），并留 R-F12-OVERBOUGHT 痕。
+    #[test]
+    fn portfolio_mgr_f12_overbought_weight_floor_activates() {
+        let src = PRODUCTION_SCRIPTS
+            .iter()
+            .find(|(l, _)| *l == "portfolio-mgr")
+            .expect("脚本清单缺 portfolio-mgr")
+            .1;
+
+        // 零下空头（dif=-1 < dea=-0.5）+ RSI=78（>75 过热调制 −0.2）⇒ f12 信号为负，
+        // 升权条件成立；f12_weight 初值 = 默认 0.10 < 0.15 ⇒ 应抬到 0.15。
+        let out = run_portfolio_mgr_fully(
+            src,
+            &[],
+            &[
+                ("macd_dif", serde_json::json!(-1.0)),
+                ("macd_dea", serde_json::json!(-0.5)),
+                ("rsi_14", serde_json::json!(78.0)),
+            ],
+        );
+        let trail = out["decision_trail"].as_array().cloned().unwrap_or_default();
+        let hit = trail
+            .iter()
+            .find(|t| t["rule_id"].as_str() == Some("R-F12-OVERBOUGHT"))
+            .unwrap_or_else(|| panic!("超买+负动量应触发 f12 升权痕: {trail:?}"));
+        assert_eq!(hit["status"].as_str(), Some("ACTIVATED"), "{hit}");
+        assert!(
+            hit["detail"].as_str().unwrap_or_default().contains("0.15"),
+            "留痕须给出升后的权重: {hit}"
+        );
     }
 }

@@ -439,6 +439,10 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
     //   两族键名都收（现网 camelCase，旧快照 snake_case）。
     actionSource: nonEmptyString(source.actionSource) ?? nonEmptyString(source.action_source) ?? undefined,
     confidenceSource: nonEmptyString(source.confidenceSource) ?? nonEmptyString(source.confidence_source) ?? undefined,
+    // ── P2-c（PLAN-stock-decision-reliability）：主档「谁定的」 ──
+    // 同白名单重建纪律：不在此显式带上，产端发的 `horizonSource`（portfolio-mgr.rhai
+    // 的锁档段输出）就会被归一化静默丢弃，live banner 永远渲染不出「依据档位」。
+    horizonSource: nonEmptyString(source.horizonSource) ?? nonEmptyString(source.horizon_source) ?? undefined,
     // ── v149(L1/L2/L3)：动作判定口径（与展示 confidence 可能不同源）+ 估值对账 ──
     // 同属白名单重建：不在此显式带上，产端发的字段就会被静默丢弃（同上一行注释的教训）。
     actionConfidenceBasis: numberField(source, "actionConfidenceBasis", "action_confidence_basis"),

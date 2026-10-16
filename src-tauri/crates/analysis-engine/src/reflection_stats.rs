@@ -30,6 +30,16 @@ pub const MIN_SAMPLE: usize = 5;
 /// 阈值宁可提供「样本不足」这一诚实缺席，也不产出无法与噪声区分的数字。
 pub const IC_MIN_SAMPLE: usize = 8;
 
+/// 置信度**校准可得性**的最低本档样本数（P1-3，`PLAN-stock-decision-reliability.md` R3/R7）。
+///
+/// 为什么与上面两个分列：那两个管「某个统计量算不算得出」，本常量管「`confidence → 实际胜率`
+/// 这条映射可不可信」。个位数样本上拟合出来的可靠性曲线是一条过拟合阶梯，拿它去压 Kelly
+/// 输入比不校准更误导 —— 所以未达标时不做映射，改由消费端按最保守上限封顶（诚实缺席）。
+///
+/// ⚠ 达标后该标志不会自动带来校准：映射本身（isotonic/Platt）仍待实施，
+/// 落点见 [`crate::horizon_prior::horizon_prior_map`] 的 `calibrationReady` 与 PLAN 的 P1-3 行。
+pub const CALIBRATION_MIN_SAMPLES: usize = 30;
+
 /// 判定口径水印的锚定天数（与 `portfolio-mgr.rhai` 的 `SNR_ANCHOR_DAYS` 同值）。
 /// 引擎侧只把它当「有没有」的水印用，不参与任何数值计算。
 pub const SNR_ANCHOR: i64 = 28;
@@ -254,6 +264,9 @@ pub struct HitrateGroup {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct HitrateStats {
+    /// P2-b 失败模式看板（按 completed 反思行的 `failure_modes` 列聚合）。
+    /// 计数域与 `miss_layer`（漏检链机械归因）不同，面板不得并列成可比数字。
+    pub failure_modes: crate::failure_mode::FailureModeBoard,
     /// 参与统计的已结算样本总数
     pub total_samples: usize,
     /// 方向命中率 = was_correct=1 / 已判定样本；样本 < [`MIN_SAMPLE`] → None
@@ -284,10 +297,12 @@ pub struct HitrateStats {
     /// 与 `ic_regime_excluded` 的区别：那个只管 IC 这一项，这个管命中率/收益/IC/先验全套。
     #[serde(default)]
     pub excluded_pre_floor_generation: usize,
-    /// 因「代际未知(NULL)」被排除的样本数 —— 与上一项分开计数，因为处置不同：
-    /// 旧代样本**永远不会**再进分母（算法不可比），代际未知的会随写侧补章而减少。
+    /// 代际未知（NULL）的样本数 —— 与上一项分开计数，因为处置不同：
+    /// 旧代样本**永远不会**再进分母（算法不可比）；代际未知的
+    /// **P2-f 起按收缩纳入**（不再排除，见 `filter_by_generation_floor` 的文档），
+    /// 本字段即「其中有多少条是代际未知的」供面板如实报出。
     #[serde(default)]
-    pub excluded_unknown_generation: usize,
+    pub unknown_generation_samples: usize,
 }
 
 /// 命中率：分母为 0 或样本不足 → None
@@ -542,7 +557,8 @@ pub fn compute_reflection_stats(samples: &[DecisionPerformanceSample]) -> Hitrat
         // 代际三项由取数侧（`build_hitrate_stats`）填 —— 纯函数不做筛样。
         generation_floor: 0,
         excluded_pre_floor_generation: 0,
-        excluded_unknown_generation: 0,
+        unknown_generation_samples: 0,
+        failure_modes: Default::default(),
     }
 }
 
@@ -745,6 +761,14 @@ pub async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<HitrateStats
         .all(db)
         .await
         .map_err(|e| format!("读取 stock_reflections 失败: {e}"))?;
+    // P2-b：失败模式看板复用同一批反思行（零额外 IO）—— 只统计 completed 行，
+    // pending/failed 行还没判定，计入会把「未产出」虚报成「未标注」。
+    let fm_rows: Vec<Option<String>> = ref_rows
+        .iter()
+        .filter(|r| r.status.starts_with("completed"))
+        .map(|r| r.failure_modes.clone())
+        .collect();
+    let failure_modes = crate::failure_mode::build_failure_mode_board(&fm_rows);
     let ana_rows = stock_analyses::Entity::find()
         .all(db)
         .await
@@ -834,22 +858,54 @@ pub async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<HitrateStats
     // §七十三 按代筛样：把**全部统计量的分母**收窄到当前代。
     // 为什么必须筛：跨代混池算出来的命中率/IC/先验是「两套判据的加权平均」，
     // 既不是旧代的结论也不是新代的结论（本仓已为此付过代价：换算法后指标的含义悄悄变了）。
-    // 为什么两类排除要**分开计数**：异代样本是永久性剔除，代际未知的会随存量补章而减少 ——
-    // 合成一个数字就看不出「样本为什么变少」到底是哪一种。
+    // 为什么两类要**分开计数**：旧代样本是永久性剔除（不可比，只报数）；
+    // 代际未知样本 P2-f 起按收缩纳入（`unknown_generation_samples` 报其中未知的条数）——
+    // 合成一个数字就看不出「样本为什么变少」到底是不是真少了。
     let (kept, pre_floor, unknown) =
         filter_by_generation_floor(samples, HORIZON_BRANCH_GENERATION_FLOOR);
     let mut stats = compute_reflection_stats(&kept);
     stats.generation_floor = HORIZON_BRANCH_GENERATION_FLOOR;
     stats.excluded_pre_floor_generation = pre_floor;
-    stats.excluded_unknown_generation = unknown;
+    stats.unknown_generation_samples = unknown;
+    // P2-b：失败模式看板（同一次读库的 completed 反思行聚合，不额外查询）。
+    stats.failure_modes = failure_modes;
     Ok(stats)
 }
 
-/// 按**起算代际**筛样 + 两类排除计数（§五十一-②/§七十三）。纯函数，便于打表直接锁行为。
+/// 代际归属的**单格判定**（全 crate 唯一载体）。
 ///
-/// 规则是下限 `>= floor`（不是等号，理由见常量注释）。两类排除分开计数而不是合成一个数：
-/// 旧代样本永久性剔除（不会回到分母），代际未知的会随写侧补章而减少 ——
-/// 合成一个数就看不出「分母为什么变小」是哪一种。
+/// 为什么要有这一层而不是各处自己比 `>= floor`：按代筛样的三分（本代 / 旧代 / 代际未知）
+/// 已经在 P2-f 改过一次口径（未知从「整批丢弃」改成「收缩纳入」）。改一次要同步改所有
+/// 抄了字面比较的地方 —— 漏一处就出现两份判据（本仓为这类裂缝付过多次代价，禁区 12）。
+/// 新增的腿级预测力检验（[`crate::leg_predictiveness`]）与命中率筛样必须同一把尺。
+pub(crate) enum GenerationBucket {
+    /// `>= floor` 的本代样本
+    Current,
+    /// 早于起算代 —— 算法口径不可比，永久排除（不会再回到分母）
+    PreFloor,
+    /// 代际未知（`None`）—— P2-f 起纳入分母，但仍单独计数
+    Unknown,
+}
+
+pub(crate) fn generation_bucket(template_version: Option<i32>, floor: i32) -> GenerationBucket {
+    match template_version {
+        Some(v) if v >= floor => GenerationBucket::Current,
+        Some(_) => GenerationBucket::PreFloor,
+        None => GenerationBucket::Unknown,
+    }
+}
+
+/// 按**起算代际**筛样 + 代际未知样本的计数（§五十一-②/§七十三；P2-f 改口径）。
+///
+/// 规则是下限 `>= floor`（不是等号，理由见常量注释）。三类样本的处置：
+/// - `>= floor`：正常纳入；
+/// - 早于 floor（**已知是旧代**）：永久性剔除（算法口径不可比，不会再回分母）；
+/// - `None`（**代际未知**）：P2-f（`PLAN-stock-decision-reliability.md` R4/R12）起
+///   **纳入统计**而非整批丢弃 —— 唯一存在的 8 条 legacy 样本（均收益 -2.82%、
+///   方向胜率 3/8）曾被「代际未知 ⇒ 排除」规则整批压掉，系统对唯一的不利证据完全
+///   不可见。小样本过拟合由先验侧收缩（`shrink_prior` 向 0.5 收缩、强度随样本量）
+///   自然抑制，无须在筛样层一刀切。unknown 仍**单独计数**
+///   （`unknown_generation_samples`）供面板如实报出。
 fn filter_by_generation_floor(
     samples: Vec<DecisionPerformanceSample>,
     floor: i32,
@@ -858,10 +914,14 @@ fn filter_by_generation_floor(
     let mut pre_floor = 0usize;
     let mut unknown = 0usize;
     for s in samples {
-        match s.template_version {
-            Some(v) if v >= floor => kept.push(s),
-            Some(_) => pre_floor += 1,
-            None => unknown += 1,
+        match generation_bucket(s.template_version, floor) {
+            GenerationBucket::Current => kept.push(s),
+            GenerationBucket::PreFloor => pre_floor += 1,
+            // P2-f：代际未知 ≠ 旧代 —— 「不知道」不得被当成「不可比」整批丢弃。
+            GenerationBucket::Unknown => {
+                kept.push(s);
+                unknown += 1;
+            },
         }
     }
     (kept, pre_floor, unknown)
@@ -1412,7 +1472,8 @@ mod reflection_stats_tests {
             // §五十一-②/§七十三 三字段：同样进 IPC ⇒ 必须一起锁 camelCase 键（见下方断言）
             generation_floor: 125,
             excluded_pre_floor_generation: 4,
-            excluded_unknown_generation: 7,
+            unknown_generation_samples: 7,
+            failure_modes: Default::default(),
         };
         let value = serde_json::to_value(&stats).unwrap();
         let top = value.as_object().unwrap();
@@ -1429,7 +1490,10 @@ mod reflection_stats_tests {
             "usableIcTiers",
             "generationFloor",
             "excludedPreFloorGeneration",
-            "excludedUnknownGeneration",
+            // P2-f：代际未知样本改「收缩纳入」后字段更名（未知条数如实报出）。
+            "unknownGenerationSamples",
+            // P2-b：失败模式看板随命中率一并出 IPC（面板零新增 invoke）。
+            "failureModes",
         ] {
             assert!(top.contains_key(key), "HitrateStats 顶层缺 camelCase 键 {key}：{top:?}");
         }
@@ -1646,11 +1710,18 @@ mod reflection_stats_tests {
             sample_gen(Some("卖出"), Some("mid"), 1, 1.0, None),          // 代际未知
         ];
         let (kept, pre_floor, unknown) = filter_by_generation_floor(samples, f);
-        assert_eq!(kept.len(), 2, "floor 及其之后都必须留在分母里");
-        assert_eq!((pre_floor, unknown), (1, 1));
+        // P2-f：代际未知样本**纳入分母**（收缩而非丢弃）⇒ kept = 2（>= floor）+ 1（None）。
+        assert_eq!(kept.len(), 3, "floor 及其之后、以及代际未知的都必须留在分母里");
+        assert_eq!((pre_floor, unknown), (1, 1), "两类计数仍如实分开");
         assert!(
-            kept.iter().all(|s| s.template_version.is_some_and(|v| v >= f)),
-            "留下的每个样本都必须 >= 起算代"
+            kept.iter()
+                .filter(|s| s.template_version.is_some())
+                .all(|s| s.template_version.is_some_and(|v| v >= f)),
+            "留下的**已知代**样本都必须 >= 起算代"
+        );
+        assert!(
+            kept.iter().any(|s| s.template_version.is_none()),
+            "P2-f：代际未知样本必须进分母（收缩而非整批丢弃）"
         );
 
         // 负控：全部旧代 ⇒ 分母归 0，但**排除计数必须等于原样本数**（「为什么是 0」的唯一解释来源）。

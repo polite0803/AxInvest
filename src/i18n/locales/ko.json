@@ -6576,7 +6576,7 @@
       "period-ultra-short": "Ultra-Short",
       "period-short": "Short-Term",
       "period-mid": "Mid-Term",
-      "period-long": "Long-Term",
+      "period-long": "분기",
       "placeholder-periods": "하나 이상의 기간 선택",
       "label-min-confidence": "최소 신뢰도",
       "label-top-n": "Top N 제한",
@@ -7384,7 +7384,8 @@
       "none": "미실행",
       "skipped": "건너뜀",
       "success": "성공",
-      "failed": "실패"
+      "failed": "실패",
+      "partial": "부분 완료"
     },
     "scheduled": {
       "autoRefresh": "15초마다 자동 새로고침",
@@ -7614,6 +7615,10 @@
         "failed": "실패",
         "interrupted": "중단됨"
       }
+    },
+    "nextRun": {
+      "stale": "일정 정체",
+      "staleHint": "일정이 24시간 넘게 진척되지 않았습니다(기한 초과 또는 재발송 대기). 종료로 인한 중단이나 정체 가능성이 있으니 “지금 실행”으로 확인하세요."
     }
   },
   "teammatePanel": {
@@ -14829,7 +14834,7 @@
         "ultra_short": "초단기",
         "short": "단기",
         "mid": "중기",
-        "long": "장기"
+        "long": "분기"
       },
       "dueYes": "도래",
       "dueNo": "미도래",
@@ -15053,7 +15058,7 @@
     "boolYes": "예",
     "boolNo": "아니오",
     "backendCallFailed": "백엔드 호출 실패",
-    "tierScopeHint": "등급 기준: 중기·장기 두 등급을 담당(병목/정책/실적 촉매는 주~월 단위 실현). 초단기·단기는 설계상 미제공 — 등급별로 한 행씩 저장, 보유일수는 각 등급의 권위 값 사용.",
+    "tierScopeHint": "등급 기준: 중기·분기 두 등급을 담당(병목/정책/실적 촉매는 주~월 단위 실현). 초단기·단기는 설계상 미제공 — 등급별로 한 행씩 저장, 보유일수는 각 등급의 권위 값 사용.",
     "timeBasisNoTier": "실시간 후보는 등급 미표기 ⇒ 권장 보유 창 없음(등급별 행은 이력 참조)",
     "entryBand": "진입 밴드 ±{{pct}}%",
     "entryBandHalfFallback": "밴드는 고정 스탑 배수의 절반 ⇒ 변동성 유도가 아님",
@@ -15439,7 +15444,7 @@
       "ultraShort": "초단기",
       "short": "단기",
       "mid": "중기",
-      "long": "장기"
+      "long": "분기"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15483,7 +15488,7 @@
     "periodUltraShort": "단기",
     "periodShort": "단기",
     "periodMid": "중기",
-    "periodLong": "장기",
+    "periodLong": "분기",
     "generatedAt": "생성 시간: {{time}}",
     "bannerVendorDisabled": "일부 스타일 비활성화: {styles}",
     "openSettings": "설정 열기",
@@ -15514,7 +15519,7 @@
     "timeHorizonUltraShort": "초단기",
     "timeHorizonShort": "단기",
     "timeHorizonMid": "중기",
-    "timeHorizonLong": "장기",
+    "timeHorizonLong": "분기",
     "horizonSourceFormula": "수식 판정",
     "horizonSourceModel": "모델 자체 보고",
     "horizonSourceBranchPick": "브랜치 선택",
@@ -15688,7 +15693,7 @@
       "matrixAbsence": {
         "serenity_needs_week_or_longer_realization": "설계상 제외: 병목 근거는 주 단위 이상 실현 필요",
         "oversold_rebound_needs_at_least_mid_horizon": "설계상 제외: 과매도 반등은 최소 중기 실현 필요",
-        "oversold_rebound_not_applied_to_long_horizon": "설계상 제외: 과매도 반등은 장기에 적용하지 않음",
+        "oversold_rebound_not_applied_to_long_horizon": "설계상 제외: 과매도 반등은 분기에 적용하지 않음",
         "cell_not_in_matrix": "계약 표에 이 셀이 없음(설계가 아니라 구현 누락일 수 있음)"
       },
       "matrixMisfit": {
@@ -16818,7 +16823,7 @@
       "periodUltraShort": "Ultra-Short",
       "periodShort": "Short-Term",
       "periodMid": "Mid-Term",
-      "periodLong": "Long-Term",
+      "periodLong": "분기",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -16955,7 +16960,7 @@
       "trendScreening": "추세 선별 정기 실행",
       "trendScreeningHint": "추세 선별(serenity-screening) 워크플로를 주기적으로 실행하여 결과를 후보 풀에 반영합니다",
       "reflectionScan": "주기 회고",
-      "reflectionScanHint": "초단기 2일 / 단기 5일 / 중기 28일 / 장기 90일 간격으로 완료된 분석을 자동 회고합니다",
+      "reflectionScanHint": "초단기 2일 / 단기 5일 / 중기 28일 / 분기 90일 간격으로 완료된 분석을 자동 회고합니다",
       "decisionBacktest": "의사결정 백테스트",
       "decisionBacktestHint": "과거 추천 종목을 재생하고 T+N 구간의 실제 캔들 데이터를 조회하여 적중률과 팩터 유효성을 산출한 뒤 결과를 분석 기록에 기록합니다",
       "decisionBacktestWindow": "T+{{n}}",
@@ -16992,7 +16997,7 @@
         "ultraShort": "초단기",
         "short": "단기",
         "mid": "중기",
-        "long": "장기"
+        "long": "분기"
       },
       "column": {
         "id": "ID",
@@ -17155,7 +17160,7 @@
       "horizonUltraShort": "초단기",
       "horizonShort": "단기",
       "horizonMid": "중기",
-      "horizonLong": "장기",
+      "horizonLong": "분기",
       "horizonAuto": "주 단계 기준",
       "horizonUnknown": "알 수 없는 주기",
       "colHorizon": "복기 구간",
@@ -17204,8 +17209,23 @@
       "horizonImmatureNote": "이 주기는 기대 보유 기간을 지나지 않았습니다. 현재 데이터는 참고용이며 승패 판정에 사용하지 않습니다.",
       "hitrateMatureSamples": "성숙 표본",
       "hitrateLegacyHint": "구 기록 {{samples}}건 포함",
-      "hitrateGenerationScope": "기산 세대: {{generation}}세대 (그 이전 {{foreign}}건, 세대 미상 {{unknown}}건 제외)",
-      "noData": "데이터 없음"
+      "hitrateGenerationScope": "기산 세대: {{generation}}세대 (그 이전 {{foreign}}건 제외, 세대 미상 {{unknown}}건은 축소 반영으로 포함)",
+      "noData": "데이터 없음",
+      "failureModesTitle": "실패 패턴 분포",
+      "failureModesRows": "회고 건수",
+      "failureModesLabelled": "분류됨",
+      "failureModesUnlabelled": "미분류",
+      "failureModesUnlabelledHint": "완료된 회고 중 {{count}} 건은 실패 패턴 필드가 없습니다 — 템플릿이 출력하지 않은 것이지, “해당 없음”이 아닙니다.",
+      "failureModesEmpty": "아직 용어집에 일치하는 회고가 없습니다",
+      "failureModesRejected": "저장된 데이터에 용어집 밖 원인 값이 있습니다: {{tokens}}",
+      "failureModeCol": "패턴",
+      "failureModeCount": "건수",
+      "failureModeShare": "분류 대비 비율",
+      "failureModeDcfCycleTop": "사이클 고점 DCF 낙관",
+      "failureModeChaseUpBar": "대양봉 추격 매수",
+      "failureModeRegimeEndorsement": "시장 상황으로 개별 종목 옹호",
+      "failureModeReverseDcfIgnored": "역방향 DCF 무시",
+      "failureModeOther": "기타"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",
@@ -18259,7 +18279,8 @@
       "sessionLunchBreak": "점심 휴장",
       "sessionAfternoon": "오후 장",
       "sessionPostClose": "장 마감 후"
-    }
+    },
+    "horizonPriorHitRate": "적중률 {{rate}}%"
   },
   "pipeline": {
     "title": "주식 파이프라인",

@@ -217,7 +217,7 @@ if present(untrusted_risk_conv) && untrusted_risk_conv == true { untrusted_count
 //     `(|price_above_ma60| × 2.0).clamp(0.5, 0.95)`
 //   即它只反映「价格偏离 MA60 的幅度」，**完全不含方向信息**；且偏离落在
 //   3%~25% 区间时 ×2 的结果 < 0.5 会被夹到下界，于是常态下恒等于 0.5。
-//   实测：bear 市况（沪深300 空头排列）下 prior 恒 = 0.5，
+//   实测（P2-e 前的单指数时代）：bear 市况（沪深300 空头排列）下 prior 恒 = 0.5，
 //   相当于把市场状态信息整体屏蔽，posterior 只剩个股因子在动。
 //   更荒谬的是：牛市/熊市偏离幅度越大 confidence 越高 → 先验越看多。
 // 正确语义：prior 是「无个股证据时对上涨的基础概率判断」，必须由 regime **方向**派生。
@@ -243,7 +243,7 @@ let prior = if present(market_regime_state) && type_of(market_regime_state) == "
 // ── P0-7（2026-10-13，PLAN-stock-decision-reliability）：市场级硬门禁状态 ──
 // 先验 prior 把 unknown/sideways 都折成 0.50，只影响后验权重；动作层还需要**原始态**：
 //   - bear：禁止新开仓/加仓，风险预算下调一档；
-//   - unknown（hooks 拉沪深300 失败时显式注入，见 hooks.rs 市场状态注入）：未判定=不加仓，
+//   - unknown（hooks 三指数均拉不到时显式注入；P2-e 起确认面 = 沪深300／中证全指／上证50，见 hooks.rs 市场状态注入）：未判定=不加仓，
 //     不得按 neutral 放行（R8 的核心教训：取数失败被当中性 ⇒ 熊市照发买入）。
 // 只认显式字符串：变量完全缺席（最小 scope 的 What-If）沿用上方 prior 段的既有回退，
 // 不在此凭空发明熊/未判定，避免扩大打击面。
@@ -1686,6 +1686,10 @@ if f1_weight > 0.0 && f9_weight >= 0.06 {
 if f1_weight > 0.0 && f12_weight > 0.0 {
     f12_weight = f12_weight * 0.75;
 }
+// P1-4③ 的 f12 超买升权**不在此处**：`decision_trail` 在下方才定义，脚本按顺序求值 ⇒
+// 在此 push 会以 `Variable not found` 落 catch（同下方 R-200~R-204 的历史教训，
+// 2026-10-16 复现：R-F12-OVERBOUGHT 前向引用致整脚本降级）。升权段已移至
+// 「决策追溯链」之后（`decision_trail` 定义行下方，`total_weight` 计算之前）。
 
 // ── P1 新增: 技术面硬约束否决（内联计算，从 t-scoring.indicators 注入 rsi_14/macd_dif/macd_dea）──
 // 规则：
@@ -1730,6 +1734,28 @@ let decision_trail = [];
 for t in tech_veto_trail {
     decision_trail.push(t);
 }
+
+// ── P1-4③（`PLAN-stock-decision-reliability.md`）：f12 超买警示升权 ──
+// 位置必须在 `decision_trail` 定义（本段上方）之后 —— 脚本按顺序求值，前向引用
+// `decision_trail.push` 会以 Variable not found 落 catch（本文件 R-200~R-204 的历史
+// 教训，2026-10-16 R-F12-OVERBOUGHT 首版复现）。且在 `total_weight` 计算之前（下方），
+// 确保升权后的 f12_weight 真正进入后验合成。
+// RSI>75 且动量腿为负 ⇒ f12 有效权重下限 0.15（旧 0.075 = 0.10 × 共振 0.75，对追高的
+// 抑制作用不足；R6 实证 f12 是 10-09 全链唯一的反向领先信号）。只抬**负信号**的权重，
+// 不改信号口径与正向加成；口径说明：主链权重无「档」上下文（分支档的 momentumSignal
+// 归一化占比本就 ≥15%），故按全局超买条件生效；分支档的开仓拦截由 R-SURGE-GATE 与
+// 超短档封顶负责。
+if present(rsi_14) && type_of(rsi_14) == "f64" && rsi_14 > 75.0
+    && f12_signal < 0.0 && f12_weight > 0.0 && f12_weight < 0.15 {
+    f12_weight = 0.15;
+    decision_trail.push(#{
+        "rule_id": "R-F12-OVERBOUGHT",
+        "status": "ACTIVATED",
+        "detail": `超买(RSI=${(rsi_14*10.0).round()/10.0})且动量信号转负(${(f12_signal*1000.0).round()/1000.0})⇒f12有效权重升为0.15(下限)`,
+        "timestamp": 0.0,
+    });
+}
+
 // P0-1 修复: R-200/R-201/R-202/R-204 原在此处前向引用未声明变量（risk_downgraded/
 // bearish_downgraded/trader_data_valid/position_pct/base_action），被 catch_unwind
 // 吞掉后永不生效。已移至各变量定义之后，参照 C2.1 修复 R-203/R-205 的模式。
@@ -2401,6 +2427,30 @@ let disagreement_mod = if present(risk_disagreement) {
 	} else {
 	    confidence_quality_cap_by_grade
 	};
+	// ── P1-3（2026-10-16）：置信**校准可得性**封顶（PLAN-stock-decision-reliability R3/R7）──
+	// 根因形态：紫金 10-09 超短档在该档**一条历史判定都没有**的情况下报 82.9% 置信，
+	//   后验未过任何 confidence→胜率的映射就直接进 Kelly 与 banner（R7）。收缩后的先验
+	//   在样本不足时借自全档合并基准 ⇒「先验有值」推不出「本档的置信刻度可信」。
+	// 判据（本档样本 ≥ `reflection_stats::CALIBRATION_MIN_SAMPLES`）在 Rust 侧，脚本只读
+	//   `calibrationReady` 结论 —— 与上面 DQI 熔断同一条纪律：阈值有两份载体就早晚不一致。
+	// 未达标 ⇒ 封顶取**本文件已有的最低一级** `cap_floor`，不新增常数（同熔断段的理由）。
+	// ⚠ 主链兜底路径（四路分支全缺席）没有「档」⇒ 按未达标处理：那条路径的置信本就来自
+	//   市况先验，比任何单档都更该保守，不得因为「没有分支输出」而绕过本封顶。
+	// ⚠ 校准映射本身（isotonic/Platt）尚未实施 —— 本段只做「未校准 ⇒ 封顶」，
+	//   `calibrationReady` 为真时是**不再封顶**，不得对外宣称已校准（PLAN P1-3 已记这一格待办）。
+	let tier_calibration_ready = if branch_picked {
+	    picked_row["calibrationReady"] == true
+	} else {
+	    false
+	};
+	let calibration_cap_binds = !tier_calibration_ready && confidence_quality_cap > cap_floor;
+	// 两条封顶取最小：质量 cap 与校准 cap 各自独立生效，谁更严谁定终值（只收紧不放宽）。
+	let confidence_cap = if calibration_cap_binds { cap_floor } else { confidence_quality_cap };
+	let calibration_cap_note = if tier_calibration_ready {
+	    ""
+	} else {
+	    ` | ⚠️本档历史判定样本未达校准门槛,置信度上限压至${cap_floor}(未校准的置信不作面值)`
+	};
 	// 本段只**陈述**上面那条封顶，不再判一次：判据在 `dqi_fuse_state` 里已定，
 	//   文案里再比一次阈值就会出现两份载体。三种状态各占一句，缺席不得留空成"没问题"。
 	let dqi_fuse_note = if dqi_fuse_state == "fused" {
@@ -2419,22 +2469,23 @@ let disagreement_mod = if present(risk_disagreement) {
 		1.0 - effective_posterior
 	} * 100.0;
 	let signal_strength_raw = (effective_posterior - 0.5).abs() * 200.0;
-	let final_confidence = clamp(bayes_confidence * disagreement_mod, 0.0, confidence_quality_cap);
+	let final_confidence = clamp(bayes_confidence * disagreement_mod, 0.0, confidence_cap);
 	// 纯口径版本（同上，不含 risk_bias）—— 对外报它；`disagreement_mod` 与
-	// `confidence_quality_cap` 属**数据质量/一致性约束**（不是风险溢价），两者都保留。
+	// `confidence_cap`（数据质量 + 校准可得性两条封顶的终值）属**质量/一致性约束**
+	//（不是风险溢价），两者都保留。
 	let final_confidence_pure =
-	    clamp(bayes_confidence_pure * disagreement_mod, 0.0, confidence_quality_cap);
+	    clamp(bayes_confidence_pure * disagreement_mod, 0.0, confidence_cap);
 
 	// ── 主档置信度与**所选档**同源（§五十三 ①，2026-10-04 批准）──
 	// 为什么必须同源：v125 已把仓位/止损/止盈/天数搬到所选档，但 `confidence` 仍是主链日线口径
 	//   ⇒ 000710 实测同屏两个置信度（主档 46.9 vs 超短线分支 87.8），且**无从反解谁是准的**。
-	// 保留的是主链的两个**档位无关**约束（分析师视角分歧 `disagreement_mod` 与数据质量上限
-	//   `confidence_quality_cap`）—— 它们不是「哪一档」的属性，对任何来源的置信度都该生效；
+	// 保留的是主链的**档位无关**约束（分析师视角分歧 `disagreement_mod`、数据质量上限与
+	//   校准可得性上限合成后的 `confidence_cap`）—— 它们不是「哪一档」的属性，对任何来源的置信度都该生效；
 	//   丢掉它们就等于让分支口径绕过质量闸门（那是升级，不是同源）。
 	// 来源必须显式：`confidenceSource` 两值，缺档时如实标 `main_chain_posterior`。
 	let branch_conf = if branch_picked { num_of(picked_row["confidence"]) } else { () };
 	let main_confidence = if present(branch_conf) {
-		clamp(branch_conf * disagreement_mod, 0.0, confidence_quality_cap)
+		clamp(branch_conf * disagreement_mod, 0.0, confidence_cap)
 	} else {
 		final_confidence_pure
 	};
@@ -2448,7 +2499,7 @@ let disagreement_mod = if present(risk_disagreement) {
 	// 处理（**不改任何决策数值**）：把 action 阶梯实际消费的那个后验也输出，两个口径同屏可反解。
 	//   分支口径 = 所选档行自报的 `confidence`（% 刻度，与主档 `confidence` 同量纲）；
 	//   主链口径 = `effective_posterior`（action 阶梯读的就是它，见下方 V42 段）。
-	// ⚠ 这不是给 `confidence` 找补：`disagreement_mod` / `confidence_quality_cap` 是数据质量与
+	// ⚠ 这不是给 `confidence` 找补：`disagreement_mod` / `confidence_cap` 是数据质量、校准可得性与
 	//   视角一致性的约束，压在展示值上是对的；缺的是「动作那边是几分」这一格。
 	let action_conf_basis = if branch_picked { num_of(picked_row["confidence"]) } else { effective_posterior * 100.0 };
 	let action_confidence_basis_source =
@@ -2672,8 +2723,8 @@ let weights_collapsed = !dqi_a_level && (
 	        ()
 	    };
 	    if present(raw_action_conf) {
-	        let capped_conf = if raw_action_conf > confidence_quality_cap {
-	            confidence_quality_cap
+	        let capped_conf = if raw_action_conf > confidence_cap {
+	            confidence_cap
 	        } else {
 	            raw_action_conf
 	        };
@@ -2695,10 +2746,14 @@ let weights_collapsed = !dqi_a_level && (
 	        let picked_rank = pm_action_rank(base_action);
 	        let ceiling_rank = pm_action_rank(ceiling);
 	        if ceiling_rank < picked_rank {
+	            // 归因按**实际收紧的那条** cap 分开点名：质量 cap 与校准 cap 是两条独立判据，
+	            // 合成一句就说不清「这次是谁把买入压成持有的」（呈现层不得制造歧义）。
+	            let cap_rule_id = if calibration_cap_binds { "R-CALIB-CAP" } else { "R-DQI-CAP" };
+	            let cap_label = if calibration_cap_binds { "校准未达标cap" } else { "数据质量cap" };
 	            decision_trail.push(#{
-	                "rule_id": "R-DQI-CAP",
+	                "rule_id": cap_rule_id,
 	                "status": "ACTIVATED",
-	                "detail": `数据质量cap=${(confidence_quality_cap*10.0).round()/10.0}联动动作:${base_action}→${pm_rank_to_action(ceiling_rank)}(动作口径置信${(raw_action_conf*10.0).round()/10.0}%被压至${(capped_conf*10.0).round()/10.0}%)`,
+	                "detail": `${cap_label}=${(confidence_cap*10.0).round()/10.0}联动动作:${base_action}→${pm_rank_to_action(ceiling_rank)}(动作口径置信${(raw_action_conf*10.0).round()/10.0}%被压至${(capped_conf*10.0).round()/10.0}%)`,
 	                "timestamp": 0.0,
 	            });
 	            base_action = pm_rank_to_action(ceiling_rank);
@@ -2727,6 +2782,47 @@ let weights_collapsed = !dqi_a_level && (
 	        },
 	        "timestamp": 0.0,
 	    });
+	}
+
+	// ── P1-4（`PLAN-stock-decision-reliability.md` R6）：追涨 / 阻力门 ──
+	// 位置与 P0-1 / P0-7 同族：分支盖写之后、trader 封顶 / pm_risk_veto 之前 ⇒
+	// 后续闸门只会更保守。只拦**开仓方向**（买入/增持），不伪造看空、不动减持/卖出。
+	// 判据全部来自 `pm_surge_state` 的客观量，阈值在此持有：
+	//   ① R-SURGE-GATE：当日涨幅 > 4% 且成交额 > 前 90 日 90 分位 ⇒ 盘后不直接出开仓，
+	//      压回持有（「次日回踩确认」；本仓决策盘后跑，大阳线次日接力正是 10-09 紫金形态）。
+	//   ② R-RESISTANCE-GATE：现价落在前高 5% 带内 ⇒ 上方套牢/阻力压制，开仓压回持有。
+	//      5% 取值的理由：紫金 10-09 收盘 30.80 距 9 月前高 31.77 = 3.05%（3% 界会漏掉
+	//      该案例）；前高影响区的经验带为 3~5%，取外沿 5%。
+	let surge_gate_state = if type_of(kline_bars) == "array" {
+		pm_surge_state(kline_bars, 90)
+	} else {
+		()
+	};
+	if type_of(surge_gate_state) == "map" && (base_action == "买入" || base_action == "增持") {
+		let surge_gain = surge_gate_state["lastGainPct"];
+		let surge_amt = surge_gate_state["lastAmount"];
+		let surge_p90 = surge_gate_state["amountP90"];
+		let surge_ratio = surge_gate_state["highRatio"];
+		let surge_hit = type_of(surge_gain) == "f64" && surge_gain > 4.0
+			&& type_of(surge_amt) == "f64" && type_of(surge_p90) == "f64" && surge_amt > surge_p90;
+		let resist_hit = type_of(surge_ratio) == "f64" && surge_ratio >= 0.95;
+		if surge_hit {
+			decision_trail.push(#{
+			    "rule_id": "R-SURGE-GATE",
+			    "status": "ACTIVATED",
+			    "detail": `大阳放量(涨${(surge_gain*100.0).round()/100.0}%,成交额超90日90分位${(surge_p90/100000000.0*100.0).round()/100.0}亿)⇒盘后不开仓,次日回踩确认:${base_action}→持有`,
+			    "timestamp": 0.0,
+			});
+			base_action = "持有";
+		} else if resist_hit {
+			decision_trail.push(#{
+			    "rule_id": "R-RESISTANCE-GATE",
+			    "status": "ACTIVATED",
+			    "detail": `现价为前高${surge_gate_state["priorHigh"]}的${(surge_ratio*100.0).round()/100.0}%(5%带内)⇒上方套牢区压制,不开仓:${base_action}→持有`,
+			    "timestamp": 0.0,
+			});
+			base_action = "持有";
+		}
 	}
 
 	// V59: 试探仓激活 → 观望升级为持有（仓位>0 必须与行动对齐，否则 V42 对齐段清零）
@@ -3520,7 +3616,7 @@ let gap_note = if data_gaps.len() > 0 {
     //   沿用本文件既有写法 `${(x*10.0).round()/10.0}`（见 bearish_downgrade_note 的 to_int 惯例）。
     // 2026-09-22: 结论名回归 `final_action`（方向档）—— 展示档派生已移除，
     //   见上方说明：结论名必须由确定性后验阶梯唯一决定，不得掺入仓位/LLM 措辞。
-    "reasoning": `决策=${final_action} 置信=${(main_confidence*10.0).round()/10.0}(${confidence_source}) 仓位=${(position_pct*10.0).round()/10.0}%${valuation_conflict_note}${gap_note}${bayes_note}${conf_basis_note}${kelly_note}${valuation_note}${disagreement_note}${contradiction_note}${risk_downgrade_note}${bearish_downgrade_note}${risk_note}${collapse_note}${dqi_fuse_note}`,
+    "reasoning": `决策=${final_action} 置信=${(main_confidence*10.0).round()/10.0}(${confidence_source}) 仓位=${(position_pct*10.0).round()/10.0}%${valuation_conflict_note}${gap_note}${bayes_note}${conf_basis_note}${kelly_note}${valuation_note}${disagreement_note}${contradiction_note}${risk_downgrade_note}${bearish_downgrade_note}${risk_note}${collapse_note}${dqi_fuse_note}${calibration_cap_note}`,
     "data_gaps": data_gaps,
     "timeHorizon": time_horizon,
     // Phase 1：「谁定的档」出口（唯一判定见上方锁档段），落 decision_horizon_source

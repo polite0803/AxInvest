@@ -435,6 +435,7 @@ mod tests {
             template_version: None,
             source: "due".to_string(),
             miss_layer: None,
+            failure_modes: None,
             status: "completed".to_string(),
             created_at: 0,
             updated_at: 0,

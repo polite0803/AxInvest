@@ -17,6 +17,7 @@ import {
   getRiskColor,
   getRiskTKey,
   HORIZON_T_SUFFIX,
+  horizonSourceLabelKey,
   readDecisionProvenance,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
@@ -716,6 +717,12 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     }`)
     : null;
 
+  // ── P2-c：主档「谁定的」（`horizonSource`：分支选档 / 公式定档）──
+  // 与档名标签并列展示（「季度 · 分支选档」）。值域白名单 = `horizonSourceLabelKey`；
+  // 缺席（该字段引入前的记录）返回 null ⇒ 整块不渲染，不给旧记录编它没有的来历
+  // （与 provenanceLine 同纪律）。
+  const horizonSourceKey = horizonSourceLabelKey(decision.horizonSource);
+
   // ── 主档来历（v127，PLAN §五十三 ①）──
   // 档是分支选的、action 可能被后置规则**单向降级** ⇒ 不成句说明就会与下方四档并列互斥
   //   （000710 实测「主档持有 / 超短线 chip 买入」，唯一解释藏在 reasoning 的中文句子里）。
@@ -822,6 +829,11 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
             {timeHorizonLabel && (
               <Tag color="geekblue" style={{ margin: 0, fontSize: 11, lineHeight: "18px", paddingInline: 4 }}>
                 {timeHorizonLabel}
+              </Tag>
+            )}
+            {horizonSourceKey && (
+              <Tag color="cyan" style={{ margin: 0, fontSize: 11, lineHeight: "18px", paddingInline: 4 }}>
+                {t(horizonSourceKey)}
               </Tag>
             )}
             {provenanceLine}
@@ -1000,6 +1012,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       }`)}
                     </Tag>
                   )}
+                  {horizonSourceKey && <Tag color="cyan">{t(horizonSourceKey)}</Tag>}
                   {provenanceLine}
                   {valuationReconLine}
                   {/* 决策可信度受限：标题行用紧凑标签，完整警示条在下方正文区 */}
@@ -1736,6 +1749,12 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                               source: d.priorSource,
                               n: d.priorSamples ?? 0,
                             })}
+                            {d.priorHitRate != null
+                              && ` · ${
+                                t("stockAnalysis.horizonPriorHitRate", {
+                                  rate: Math.round(d.priorHitRate * 100),
+                                })
+                              }`}
                           </span>
                         )}
                       </div>

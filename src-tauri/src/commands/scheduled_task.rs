@@ -102,6 +102,10 @@ pub struct TaskRunResultDto {
     /// 本轮被闸门跳过（非交易日等），未真正执行业务
     #[serde(default)]
     pub skipped: bool,
+    /// P1-10：批量任务「部分完成」（超墙钟预算收尾 / 单轮上限截断）——
+    /// 前端据此显示「部分完成」徽章而非「失败」（旧记录缺省 false）。
+    #[serde(default)]
+    pub partial: bool,
 }
 
 /// 拥有内置执行 handler、但**没有**关联工作流的 task_type 集合。
@@ -188,6 +192,7 @@ pub(crate) fn cron_to_dto(job: &CronJob) -> ScheduledTaskDto {
             error: r.error.clone(),
             duration_ms: r.duration_ms,
             skipped: r.skipped,
+            partial: r.partial,
         }),
         status: status.to_string(),
         config: TaskConfigDto {
@@ -389,6 +394,7 @@ pub async fn execute_scheduled_task(
                     duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
                     executed_at: started,
                     skipped: false,
+                    partial: false,
                 }
             },
             Err(e) => {
@@ -404,6 +410,7 @@ pub async fn execute_scheduled_task(
                     duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
                     executed_at: started,
                     skipped: false,
+                    partial: false,
                 }
             },
         };
@@ -415,6 +422,7 @@ pub async fn execute_scheduled_task(
             error: result.error,
             duration_ms: result.duration_ms,
             skipped: false,
+            partial: result.partial,
         });
     }
 
@@ -438,6 +446,7 @@ pub async fn execute_scheduled_task(
                 error: None,
                 duration_ms: 0,
                 skipped: false,
+                partial: false,
             });
         }
         // 调度器未启动（启动流程异常）：无法安全执行内置 handler

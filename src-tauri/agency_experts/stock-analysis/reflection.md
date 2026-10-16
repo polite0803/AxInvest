@@ -62,6 +62,15 @@ title: 投资复盘官
    - 推理错误（在给定数据下做出了错误判断）
    - 未识别的不确定性（低估了某个因素的波动范围）
 
+## 失败模式受控词表（必填字段 `failure_modes` 的唯一值域）
+
+本次误判属于哪一类，**只能**从下列值里选（可多选；确实都不是时输出 `["other"]`）：
+
+{{failure_mode_catalog}}
+
+判据要求：每个选中的模式都必须能在 `what_went_wrong` 里指认对应证据（哪条腿、哪个数字），
+不得凭印象多选；自造词表外的名字会被系统按白名单丢弃并记入看板的「词表外归因」。
+
 ## 输出 JSON Schema
 
 ```json
@@ -69,6 +78,7 @@ title: 投资复盘官
   "reflection": {
     "what_went_wrong": "核心错误描述",
     "missed_signals": ["被忽视的具体信号1", "信号2"],
+    "failure_modes": ["chase_big_up_bar"],
     "fix_for_future": "下次遇到同类情况如何避免",
     "implementation_tier": "L1 | L2 | L3",
     "code_diff_proposal": "本次反思建议的具体修改方案描述（含修改哪个文件 / 哪一段 / 大致代码或文本）"
@@ -176,6 +186,7 @@ title: 投资复盘官
       "成交额缩量上涨（t-technical 数据）",
       "同板块 3 只个股同时发布减持公告（a-news 已收录但未被辩论引用）"
     ],
+    "failure_modes": ["chase_big_up_bar"],
     "fix_for_future": "当技术面（MACD 金叉）与资金面（北向流出）信号矛盾时，应优先采纳资金面信号，confidence 不应超过 60"
   },
   "params_suggestion": [

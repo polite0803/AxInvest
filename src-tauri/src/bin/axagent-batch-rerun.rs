@@ -77,6 +77,11 @@ axagent-batch-rerun —— 批量 as-of 重跑历史股票分析
                        但仍会连库并走一次启动期 schema 对账 —— 说「不改库」是假的）
   --reflect-after      重跑完成后，在同一进程内立即跑一轮批量反思
   --reflect-max <N>    --reflect-after 单轮反思条数上限（默认 20）
+  --backfill-reflections  只补建缺档的反思 pending 行（**不重跑任何分析**、不触碰
+                       已有反思行），为历史 live 分析补齐复盘样本（P1-6）。
+                       支持 --codes/--since/--until/--limit 过滤；默认 dry-run。
+  --recompute-hindsight   把存量 pending 行的 hindsight_date 重算到交易日口径（P1-9）。
+                       公式与建点同源（as_of + N 交易日），幂等；默认 dry-run。
   -h, --help           显示本帮助
 
 说明:
@@ -119,6 +124,10 @@ struct Args {
     reflect_after: bool,
     /// 反思的 `max_count`（None ⇒ 用 `run_batch_reflection_inner` 内部默认 20）。
     reflect_max: Option<u32>,
+    /// P1-6：只补建缺档的反思 pending 行（**不重跑任何分析**）。
+    backfill_reflections: bool,
+    /// P1-9：把存量 pending 行的 hindsight_date 重算到交易日口径（幂等）。
+    recompute_hindsight: bool,
 }
 
 impl Args {
@@ -137,6 +146,8 @@ impl Args {
                         Some(v.parse().map_err(|e| format!("--template-version 解析失败: {e}"))?);
                 },
                 "--reflect-after" => a.reflect_after = true,
+                "--backfill-reflections" => a.backfill_reflections = true,
+                "--recompute-hindsight" => a.recompute_hindsight = true,
                 "--limit" => {
                     let v = it.next().ok_or_else(|| "--limit 需要一个数字".to_string())?;
                     a.limit = v.parse().map_err(|e| format!("--limit 解析失败: {e}"))?;
@@ -304,6 +315,8 @@ async fn ensure_pending_reflection(
     db: &sea_orm::DatabaseConnection,
     analysis_id: &str,
     fallback_anchor: &str,
+    source_override: Option<&str>,
+    reset_existing: bool,
 ) -> Result<(bool, String), String> {
     let rec = stock_analyses::Entity::find_by_id(analysis_id)
         .one(db)
@@ -326,8 +339,10 @@ async fn ensure_pending_reflection(
 
     let anchor = rec.as_of_date.clone().unwrap_or_else(|| fallback_anchor.to_string());
     let hold_days = rec.decision_expected_holding_days.unwrap_or(28).max(1);
+    // P1-9：重置分支的 hindsight 与建点（`build_pending_reflection_rows_for`）
+    // 必须同口径（交易日）—— 旧实现此处是自然日，会与建点的交易日算法分叉出两种到期日。
     let hindsight = chrono::NaiveDate::parse_from_str(&anchor, "%Y-%m-%d")
-        .map(|d| d + chrono::Duration::days(hold_days))
+        .map(|d| axagent_astock_data::calendar::nth_trading_day(d, hold_days as i32))
         .map_err(|e| format!("锚点 {anchor} 解析失败: {e}"))?
         .format("%Y-%m-%d")
         .to_string();
@@ -348,6 +363,7 @@ async fn ensure_pending_reflection(
         rec.horizon_decisions.as_deref(),
         rec.decision_time_horizon.as_deref(),
         rec.decision_expected_holding_days,
+        &rec.id,
     )
     .into_iter()
     .filter(|(h, _)| !existing_horizons.contains(h))
@@ -369,12 +385,13 @@ async fn ensure_pending_reflection(
                 // §七十一 按版归属：重放补建的反思行归属到**这条分析自己的代际**（不是重放
                 // 时跑的图）—— 复盘的是那一代做出的决策。分析行是 NULL 时保持 NULL。
                 analysis_template_version: rec.template_version,
-                // P3：与被重放分析行同源（mover_recall 补分析的补建行进漏检专项桶）
-                source: if rec.source == "mover_recall" {
+                // P3：与被重放分析行同源（mover_recall 补分析的补建行进漏检专项桶）；
+                // P1-6：backfill 模式由调用方显式指定独立 source 便于回溯。
+                source: source_override.unwrap_or(if rec.source == "mover_recall" {
                     axagent_lib::REFLECTION_SOURCE_MOVER_RECALL
                 } else {
                     axagent_lib::REFLECTION_SOURCE_DUE
-                },
+                }),
                 now_ms: now,
             },
             missing_horizons,
@@ -387,10 +404,32 @@ async fn ensure_pending_reflection(
 
     if existing.is_empty() {
         let sp = delete_stale_reflection_perf(db, &rec.stock_code).await;
+        if created_ids.is_empty() {
+            // P1-6 文案（2026-10-16）：四档全为中性且抽样未命中时 `missing_horizons` 为空 ⇒
+            // 旧实现打印「补建 pending （空名单）」，读起来像补建失败。如实成句：无可建档。
+            return Ok((
+                false,
+                fmt_reflect_note("无可建复盘档（四档全为中性且未抽中，或决策未含方向档）", sp),
+            ));
+        }
         return Ok((
             true,
             fmt_reflect_note(&format!("补建 pending {}", created_ids.join(", ")), sp),
         ));
+    }
+
+    // P1-6 backfill 模式：只补缺档、**绝不动**已有行 —— 那些行对应的是**原决策**
+    // （backfill 不覆盖分析行），把 completed 打回 pending 等于抹掉已有复盘结论。
+    // 注意顺序：通用补建块（上方 `if !missing_horizons.is_empty()`）**先于本分支执行** ⇒
+    // backfill 对「已有部分档行」的分析**仍会补齐缺档**（2026-10-16：修复 camel 键后
+    // 重跑即可补上历史分析缺失的 ultra 档），本分支只负责「不重置」并如实报数。
+    if !reset_existing {
+        let note = if created_ids.is_empty() {
+            format!("已有 {} 条反思行且无缺档，跳过", existing.len())
+        } else {
+            format!("补缺档 {}（不重置已有 {} 行）", created_ids.join(", "), existing.len())
+        };
+        return Ok((!created_ids.is_empty(), note));
     }
 
     // 已存在 ⇒ 重置为 pending（重跑已覆盖原分析，旧反思结论失效）。
@@ -444,6 +483,185 @@ fn fmt_reflect_note(base: &str, perf_deleted: u64) -> String {
     } else {
         base.to_string()
     }
+}
+
+/// P1-6：为历史 live 分析**只补建**反思 pending 行（不重跑、不覆盖分析行）。
+///
+/// 与重跑路径的区别：`stock_analyses` 原样保留 —— 复盘的对象就是**彼时做出的决策**
+/// 本身（重跑会把决策换成当前公式的结论，失去「复盘旧误判」的意义）。
+/// 复用 `ensure_pending_reflection` 的缺档判据与建点构造器（`reset_existing=false`，
+/// 已有反思行一律不动），补建行盖 `backfill` source 便于与常规 `due` 样本分开回溯。
+async fn backfill_reflections_only(
+    db: &sea_orm::DatabaseConnection,
+    args: &Args,
+) -> Result<(), String> {
+    let mut q = stock_analyses::Entity::find()
+        .filter(stock_analyses::Column::Source.eq("live"))
+        .filter(stock_analyses::Column::Status.eq("completed"));
+    if !args.codes.is_empty() {
+        q = q.filter(stock_analyses::Column::StockCode.is_in(args.codes.clone()));
+    }
+    if let Some(s) = &args.since {
+        q = q.filter(stock_analyses::Column::AnalysisDate.gte(s.clone()));
+    }
+    if let Some(u) = &args.until {
+        q = q.filter(stock_analyses::Column::AnalysisDate.lte(u.clone()));
+    }
+    let mut rows = q
+        .order_by_asc(stock_analyses::Column::AnalysisDate)
+        .order_by_asc(stock_analyses::Column::StockCode)
+        .all(db)
+        .await
+        .map_err(|e| format!("查询 stock_analyses 失败: {e}"))?;
+    let matched = rows.len();
+    if args.limit > 0 && rows.len() > args.limit {
+        rows.truncate(args.limit);
+    }
+
+    println!(
+        "[batch-rerun] --backfill-reflections：匹配 {matched} 条 live completed 分析，本次处理 {} 条",
+        rows.len()
+    );
+    for r in &rows {
+        println!(
+            "  - {} {} analysis_date={} template_version={}",
+            r.stock_code,
+            r.stock_name,
+            r.analysis_date,
+            r.template_version.map(|v| v.to_string()).unwrap_or_else(|| "NULL".into()),
+        );
+    }
+    if !args.apply {
+        println!(
+            "\n[batch-rerun] dry-run：未补建任何反思行。\n\
+             确认清单无误后加 --apply 真正执行（只补缺档；不触碰已有反思行与分析行）。"
+        );
+        return Ok(());
+    }
+
+    let mut written = 0usize;
+    let mut skipped = 0usize;
+    for r in &rows {
+        match ensure_pending_reflection(
+            db,
+            &r.id,
+            &r.analysis_date,
+            Some(axagent_lib::REFLECTION_SOURCE_BACKFILL),
+            false,
+        )
+        .await
+        {
+            Ok((did, note)) => {
+                if did {
+                    written += 1;
+                } else {
+                    skipped += 1;
+                }
+                println!("  {} {} -> {}", r.stock_code, r.analysis_date, note);
+            },
+            Err(e) => {
+                skipped += 1;
+                eprintln!("  {} {} -> 补建失败: {e}", r.stock_code, r.analysis_date);
+            },
+        }
+    }
+    println!("[batch-rerun] backfill 完成：{written} 条有补建动作，{skipped} 条跳过/失败");
+    Ok(())
+}
+
+/// P1-9：把存量 pending 反思行的 `hindsight_date` 重算到**交易日口径**。
+///
+/// 公式 = `as_of_date + N 个交易日`，N 取该档决策声明的期望持有天数、缺回 `Period`
+/// 默认表 —— 与 `build_pending_reflection_rows_for` 的建点公式**同一把尺**。
+/// 幂等：已是交易日口径的行重算结果与现值相同，不会重复改写。
+/// `horizon` 为 NULL 的老行**跳过**（无档可定天数；其待反思时机由消费端旧兜底口径负责）。
+async fn recompute_pending_hindsight(
+    db: &sea_orm::DatabaseConnection,
+    args: &Args,
+) -> Result<(), String> {
+    let mut q =
+        stock_reflections::Entity::find().filter(stock_reflections::Column::Status.eq("pending"));
+    if !args.codes.is_empty() {
+        q = q.filter(stock_reflections::Column::StockCode.is_in(args.codes.clone()));
+    }
+    let mut rows = q
+        .order_by_asc(stock_reflections::Column::AsOfDate)
+        .all(db)
+        .await
+        .map_err(|e| format!("查询 stock_reflections 失败: {e}"))?;
+    let matched = rows.len();
+    if args.limit > 0 && rows.len() > args.limit {
+        rows.truncate(args.limit);
+    }
+    println!(
+        "[batch-rerun] --recompute-hindsight：pending {matched} 条，本次处理 {} 条",
+        rows.len()
+    );
+
+    // 同一分析的多档行共享 horizon_decisions —— 逐条查库浪费，缓存一次。
+    let mut decision_cache: std::collections::HashMap<String, Option<String>> =
+        std::collections::HashMap::new();
+    let mut changed = 0usize;
+    let mut unchanged = 0usize;
+    let mut skipped = 0usize;
+    for r in &rows {
+        let Some(horizon) = r.horizon.clone().filter(|h| !h.is_empty()) else {
+            skipped += 1;
+            println!(
+                "  - {} as_of={} horizon=NULL ⇒ 跳过（无档可定天数，消费端按旧兜底口径处理）",
+                r.stock_code, r.as_of_date
+            );
+            continue;
+        };
+        let as_of_nd = match chrono::NaiveDate::parse_from_str(&r.as_of_date, "%Y-%m-%d") {
+            Ok(d) => d,
+            Err(e) => {
+                skipped += 1;
+                eprintln!("  - {} as_of={} 解析失败: {e}", r.stock_code, r.as_of_date);
+                continue;
+            },
+        };
+        if !decision_cache.contains_key(&r.original_analysis_id) {
+            let hd = stock_analyses::Entity::find_by_id(&r.original_analysis_id)
+                .one(db)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|a| a.horizon_decisions);
+            decision_cache.insert(r.original_analysis_id.clone(), hd);
+        }
+        let days = axagent_lib::expected_holding_days_for(
+            decision_cache.get(&r.original_analysis_id).and_then(|v| v.as_deref()),
+            &horizon,
+        );
+        let new_hd = axagent_astock_data::calendar::nth_trading_day(as_of_nd, days as i32)
+            .format("%Y-%m-%d")
+            .to_string();
+        if new_hd == r.hindsight_date {
+            unchanged += 1;
+            continue;
+        }
+        println!(
+            "  - {} {} as_of={} : {} -> {}（{days} 交易日）",
+            r.stock_code, horizon, r.as_of_date, r.hindsight_date, new_hd
+        );
+        if args.apply {
+            let mut am: stock_reflections::ActiveModel = r.clone().into();
+            am.hindsight_date = Set(new_hd);
+            am.updated_at = Set(chrono::Utc::now().timestamp_millis());
+            am.update(db).await.map_err(|e| format!("更新 {} 失败: {e}", r.id))?;
+        }
+        changed += 1;
+    }
+    println!(
+        "[batch-rerun] recompute 完成：{} {changed} 条，不变 {unchanged} 条，跳过 {skipped} 条",
+        if args.apply {
+            "改写"
+        } else {
+            "待改写（dry-run）"
+        }
+    );
+    Ok(())
 }
 
 #[tokio::main]
@@ -588,6 +806,14 @@ async fn run() -> Result<(), String> {
     if args.snapshot_report {
         println!("[batch-rerun] --snapshot-report：只报告代际与快照现状，本次不重跑。");
         return Ok(());
+    }
+
+    // ── P1-6 / P1-9：反思元数据两个只读/补写模式（与重跑互斥的早退分支）──
+    if args.backfill_reflections {
+        return backfill_reflections_only(&db, &args).await;
+    }
+    if args.recompute_hindsight {
+        return recompute_pending_hindsight(&db, &args).await;
     }
     // ── 目标集合 ──
     // `--only-stale`（IS NULL）与 `--template-version`（= N）同时给 ⇒ 恒空集。
@@ -739,7 +965,7 @@ async fn run() -> Result<(), String> {
                 let (reflect_ok, reflect_note) = if aid == "?" {
                     (true, "反思跳过（未取到 analysisId）".to_string())
                 } else {
-                    match ensure_pending_reflection(&db, aid, &as_of).await {
+                    match ensure_pending_reflection(&db, aid, &as_of, None, true).await {
                         // `written == false` ⇒ 分析未成功（DAG 失败也返回 Ok，见函数文档）
                         Ok((written, note)) => (written, note),
                         // 重跑成功、仅反思补建失败 ⇒ 仍算重跑成功，但显式标注出来

@@ -6576,7 +6576,7 @@
       "period-ultra-short": "Ultra-Short",
       "period-short": "Short-Term",
       "period-mid": "Mid-Term",
-      "period-long": "Long-Term",
+      "period-long": "त्रैमासिक",
       "placeholder-periods": "एक या अधिक अवधि चुनें",
       "label-min-confidence": "न्यूनतम विश्वास",
       "label-top-n": "Top N सीमा",
@@ -7384,7 +7384,8 @@
       "none": "अभी तक नहीं चला",
       "skipped": "छोड़ा गया",
       "success": "सफल",
-      "failed": "विफल"
+      "failed": "विफल",
+      "partial": "आंशिक"
     },
     "scheduled": {
       "autoRefresh": "हर 15 सेकंड में स्वतः रिफ़्रेश",
@@ -7614,6 +7615,10 @@
         "failed": "विफल",
         "interrupted": "बाधित"
       }
+    },
+    "nextRun": {
+      "stale": "अनुसूची ठप",
+      "staleHint": "शेड्यूल 24 घंटे से अधिक समय से लंबित (या पुनः-निर्धारण प्रतीक्षित) है: कार्य बंद होने से बाधित या अटका हो सकता है। “अभी चलाएँ” से जाँचें।"
     }
   },
   "teammatePanel": {
@@ -14829,7 +14834,7 @@
         "ultra_short": "अति-लघु",
         "short": "लघु",
         "mid": "मध्यम",
-        "long": "दीर्घ"
+        "long": "त्रैमासिक"
       },
       "dueYes": "देय",
       "dueNo": "लंबित",
@@ -15053,7 +15058,7 @@
     "boolYes": "हाँ",
     "boolNo": "नहीं",
     "backendCallFailed": "बैकएंड कॉल विफल",
-    "tierScopeHint": "क्षितिज: मध्य और दीर्घ दो स्तरों की सेवा (बॉतल-नेक/नीति/उपार्जन उत्प्रेरक सप्ताह-महीनों में साकार होते हैं); अत्यल्प और लघु स्तर डिज़ाइन अनुसार नहीं बनते — प्रति स्तर एक पंक्ति, अवधि उस स्तर का प्राधिकृत मान।",
+    "tierScopeHint": "क्षितिज: मध्य और त्रैमासिक दो स्तरों की सेवा (बॉतल-नेक/नीति/उपार्जन उत्प्रेरक सप्ताह-महीनों में साकार होते हैं); अत्यल्प और लघु स्तर डिज़ाइन अनुसार नहीं बनते — प्रति स्तर एक पंक्ति, अवधि उस स्तर का प्राधिकृत मान।",
     "timeBasisNoTier": "लाइव उम्मीदवार स्तर-रहित ⇒ सुझाई विंडो नहीं (स्तर-वार पंक्तियाँ इतिहास में)",
     "entryBand": "प्रवेश बैंड ±{{pct}}%",
     "entryBandHalfFallback": "बैंड स्थित स्टॉप गुणक का आधा ⇒ वोलैटिलिटी-व्युत्पन्न नहीं",
@@ -15439,7 +15444,7 @@
       "ultraShort": "अति अल्पकालिक",
       "short": "अल्पकालिक",
       "mid": "मध्यमकालिक",
-      "long": "दीर्घकालिक"
+      "long": "त्रैमासिक"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15483,7 +15488,7 @@
     "periodUltraShort": "Short",
     "periodShort": "Short",
     "periodMid": "Mid",
-    "periodLong": "Long",
+    "periodLong": "त्रैमासिक",
     "generatedAt": "Generated at {{time}}",
     "bannerVendorDisabled": "Some styles are disabled: {styles}",
     "openSettings": "Open Settings",
@@ -15514,7 +15519,7 @@
     "timeHorizonUltraShort": "अति अल्पकालिक",
     "timeHorizonShort": "अल्पकालिक",
     "timeHorizonMid": "मध्यमकालिक",
-    "timeHorizonLong": "दीर्घकालिक",
+    "timeHorizonLong": "त्रैमासिक",
     "horizonSourceFormula": "सूत्र",
     "horizonSourceModel": "मॉडल रिपोर्ट",
     "horizonSourceBranchPick": "ब्रांच चयन",
@@ -15688,7 +15693,7 @@
       "matrixAbsence": {
         "serenity_needs_week_or_longer_realization": "डिज़ाइन अनुसार: बोतल-गर्दन प्रमाण को एक सप्ताह या उससे लंबा क्षितिज चाहिए",
         "oversold_rebound_needs_at_least_mid_horizon": "डिज़ाइन अनुसार: अति-विक्रय प्रतिगमन को कम-से-कम मध्यम अवधि चाहिए",
-        "oversold_rebound_not_applied_to_long_horizon": "डिज़ाइन अनुसार: अति-विक्रय प्रतिगमन दीर्घ अवधि पर लागू नहीं",
+        "oversold_rebound_not_applied_to_long_horizon": "डिज़ाइन अनुसार: अति-विक्रय प्रतिगमन त्रैमासिक अवधि पर लागू नहीं",
         "cell_not_in_matrix": "अनुबंध तालिका में यह सेल ग़ायब (संभवतः कार्यान्वयन अंतर, डिज़ाइन नहीं)"
       },
       "matrixMisfit": {
@@ -16818,7 +16823,7 @@
       "periodUltraShort": "Ultra-Short",
       "periodShort": "Short-Term",
       "periodMid": "Mid-Term",
-      "periodLong": "Long-Term",
+      "periodLong": "त्रैमासिक",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -16955,7 +16960,7 @@
       "trendScreening": "निर्धारित ट्रेंड स्क्रीनिंग",
       "trendScreeningHint": "समय-समय पर ट्रेंड स्क्रीनिंग (serenity-screening) वर्कफ़्लो चलाता है; परिणाम उम्मीदवार पूल में जाते हैं",
       "reflectionScan": "आवधिक समीक्षा",
-      "reflectionScanHint": "अल्ट्रा-शॉर्ट (2 दिन) / शॉर्ट (5 दिन) / मिड (28 दिन) / लॉन्ग (90 दिन) के अंतराल पर पूर्ण किए गए विश्लेषणों की स्वतः समीक्षा करता है",
+      "reflectionScanHint": "अल्ट्रा-शॉर्ट (2 दिन) / शॉर्ट (5 दिन) / मिड (28 दिन) / त्रैमासिक (90 दिन) के अंतराल पर पूर्ण किए गए विश्लेषणों की स्वतः समीक्षा करता है",
       "decisionBacktest": "निर्णय बैकटेस्ट",
       "decisionBacktestHint": "ऐतिहासिक सिफ़ारिशों को दोबारा चलाकर T+N विंडो की वास्तविक कैंडल लाता है, हिट रेट और फ़ैक्टर प्रभावशीलता मापता है, और परिणाम को विश्लेषण रिकॉर्ड में वापस लिखता है",
       "decisionBacktestWindow": "T+{{n}}",
@@ -16992,7 +16997,7 @@
         "ultraShort": "अल्ट्रा-शॉर्ट",
         "short": "शॉर्ट",
         "mid": "मिड",
-        "long": "लॉन्ग"
+        "long": "त्रैमासिक"
       },
       "column": {
         "id": "ID",
@@ -17155,7 +17160,7 @@
       "horizonUltraShort": "अल्ट्रा-शॉर्ट",
       "horizonShort": "शॉर्ट",
       "horizonMid": "मिड",
-      "horizonLong": "लॉन्ग",
+      "horizonLong": "त्रैमासिक",
       "horizonAuto": "मुख्य स्तर अनुसार",
       "horizonUnknown": "अज्ञात अवधि",
       "colHorizon": "समीक्षा क्षितिज",
@@ -17204,8 +17209,23 @@
       "horizonImmatureNote": "इस अवधि की अपेक्षित होल्डिंग अवधि पूरी नहीं हुई है; वर्तमान डेटा केवल संदर्भ के लिए है और जीत/हार निर्णय में उपयोग नहीं होता।",
       "hitrateMatureSamples": "परिपक्व नमूने",
       "hitrateLegacyHint": "{{samples}} पुराने रिकॉर्ड शामिल",
-      "hitrateGenerationScope": "आरंभिक जनरेशन: जनरेशन {{generation}} (पुराने {{foreign}} और अज्ञात {{unknown}} हटाए गए)",
-      "noData": "कोई डेटा नहीं"
+      "hitrateGenerationScope": "आरंभिक जनरेशन: जनरेशन {{generation}} (पुराने {{foreign}} हटाए गए; अज्ञात {{unknown}} संकुचन सहित सम्मिलित)",
+      "noData": "कोई डेटा नहीं",
+      "failureModesTitle": "विफलता के पैटर्न",
+      "failureModesRows": "समीक्षित पंक्तियाँ",
+      "failureModesLabelled": "चिह्नित",
+      "failureModesUnlabelled": "अचिह्नित",
+      "failureModesUnlabelledHint": "{{count}} पूरी की गई समीक्षाओं में विफलता-पैटर्न फ़ील्ड नहीं है — टेम्पलेट ने इसे उत्पन्न नहीं किया, इसका अर्थ “कोई पैटर्न नहीं” नहीं है।",
+      "failureModesEmpty": "अभी कोई समीक्षा शब्दावली से मेल नहीं खाती",
+      "failureModesRejected": "सहेजी गई पंक्तियों में शब्दावली-बाह्य कारण मान हैं: {{tokens}}",
+      "failureModeCol": "पैटर्न",
+      "failureModeCount": "संख्या",
+      "failureModeShare": "चिह्नित का अनुपात",
+      "failureModeDcfCycleTop": "चक्र शिखर पर DCF आशावाद",
+      "failureModeChaseUpBar": "बड़ी तेज़ मोमबत्ती का पीछा",
+      "failureModeRegimeEndorsement": "बाज़ार स्थिति से अकेले शेयर को समर्थन",
+      "failureModeReverseDcfIgnored": "उलटा DCF नज़रअंदाज़",
+      "failureModeOther": "अन्य"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",
@@ -18259,7 +18279,8 @@
       "sessionLunchBreak": "दोपहर अवकाश",
       "sessionAfternoon": "अपराह्न सत्र",
       "sessionPostClose": "बंद होने के बाद"
-    }
+    },
+    "horizonPriorHitRate": "हिट दर {{rate}}%"
   },
   "pipeline": {
     "title": "स्टॉक पाइपलाइन",

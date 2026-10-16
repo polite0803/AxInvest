@@ -6576,7 +6576,7 @@
       "period-ultra-short": "Ultra-Short",
       "period-short": "Short-Term",
       "period-mid": "Mid-Term",
-      "period-long": "Long-Term",
+      "period-long": "Trimestral",
       "placeholder-periods": "Seleccionar uno o más períodos",
       "label-min-confidence": "Confianza mínima",
       "label-top-n": "Límite Top N",
@@ -7384,7 +7384,8 @@
       "none": "Nunca ejecutado",
       "skipped": "Omitido",
       "success": "Correcto",
-      "failed": "Fallido"
+      "failed": "Fallido",
+      "partial": "Parcial"
     },
     "scheduled": {
       "autoRefresh": "Actualización automática cada 15 segundos",
@@ -7614,6 +7615,10 @@
         "failed": "Fallido",
         "interrupted": "Interrumpido"
       }
+    },
+    "nextRun": {
+      "stale": "Planificación estancada",
+      "staleHint": "La planificación lleva más de 24 horas vencida (o pendiente de recuperación) sin avanzar: puede que la tarea se interrumpiera por apagado o esté bloqueada. Usa «Ejecutar ahora» para verificarla."
     }
   },
   "teammatePanel": {
@@ -14829,7 +14834,7 @@
         "ultra_short": "Ultra corto",
         "short": "Corto",
         "mid": "Medio",
-        "long": "Largo"
+        "long": "Trimestral"
       },
       "dueYes": "Vencido",
       "dueNo": "Pendiente",
@@ -15053,7 +15058,7 @@
     "boolYes": "Sí",
     "boolNo": "No",
     "backendCallFailed": "Error en la llamada al backend",
-    "tierScopeHint": "Horizonte: atiende los niveles medio y largo (los catalizadores de cuello de botella / política / resultados se materializan en semanas o meses); ultra corto y corto no se producen por diseño: una fila por nivel, con los días autorizados de cada nivel.",
+    "tierScopeHint": "Horizonte: atiende los niveles medio y trimestral (los catalizadores de cuello de botella / política / resultados se materializan en semanas o meses); ultra corto y corto no se producen por diseño: una fila por nivel, con los días autorizados de cada nivel.",
     "timeBasisNoTier": "Candidato en vivo sin nivel ⇒ sin ventana sugerida (filas por nivel en el historial)",
     "entryBand": "Banda de entrada ±{{pct}}%",
     "entryBandHalfFallback": "La banda es la mitad de un multiplicador fijo ⇒ no derivada de volatilidad",
@@ -15439,7 +15444,7 @@
       "ultraShort": "Ultracorto plazo",
       "short": "Corto plazo",
       "mid": "Medio plazo",
-      "long": "Largo plazo"
+      "long": "Trimestral"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15483,7 +15488,7 @@
     "periodUltraShort": "Corto",
     "periodShort": "Corto",
     "periodMid": "Medio",
-    "periodLong": "Largo",
+    "periodLong": "Trimestral",
     "generatedAt": "Generado a las {{time}}",
     "bannerVendorDisabled": "Algunos estilos están desactivados: {styles}",
     "openSettings": "Abrir configuración",
@@ -15514,7 +15519,7 @@
     "timeHorizonUltraShort": "Ultra corto",
     "timeHorizonShort": "Corto plazo",
     "timeHorizonMid": "Medio plazo",
-    "timeHorizonLong": "Largo plazo",
+    "timeHorizonLong": "Trimestral",
     "horizonSourceFormula": "fórmula",
     "horizonSourceModel": "reportado por el modelo",
     "horizonSourceBranchPick": "Elegido por rama",
@@ -15688,7 +15693,7 @@
       "matrixAbsence": {
         "serenity_needs_week_or_longer_realization": "Por diseño: la evidencia de cuello de botella requiere un horizonte de una semana o más",
         "oversold_rebound_needs_at_least_mid_horizon": "Por diseño: el rebote de sobreventa necesita al menos un horizonte medio",
-        "oversold_rebound_not_applied_to_long_horizon": "Por diseño: el rebote de sobreventa no se aplica al horizonte largo",
+        "oversold_rebound_not_applied_to_long_horizon": "Por diseño: el rebote de sobreventa no se aplica al horizonte trimestral",
         "cell_not_in_matrix": "Celda ausente en la tabla de contrato (posible omisión, no por diseño)"
       },
       "matrixMisfit": {
@@ -16818,7 +16823,7 @@
       "periodUltraShort": "Ultra-Short",
       "periodShort": "Short-Term",
       "periodMid": "Mid-Term",
-      "periodLong": "Long-Term",
+      "periodLong": "Trimestral",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -16955,7 +16960,7 @@
       "trendScreening": "Selección de tendencias programada",
       "trendScreeningHint": "Ejecuta periódicamente el flujo de selección de tendencias (serenity-screening); los resultados alimentan el grupo de candidatos",
       "reflectionScan": "Reflexión periódica",
-      "reflectionScanHint": "Reflexiona automáticamente sobre los análisis completados con intervalos ultracorto (2 d) / corto (5 d) / medio (28 d) / largo (90 d)",
+      "reflectionScanHint": "Reflexiona automáticamente sobre los análisis completados con intervalos ultracorto (2 d) / corto (5 d) / medio (28 d) / trimestral (90 d)",
       "decisionBacktest": "Backtest de decisión",
       "decisionBacktestHint": "Reproduce las recomendaciones históricas, obtiene las velas reales de las ventanas T+N, mide la tasa de acierto y la eficacia de los factores y escribe el resultado en el registro de análisis",
       "decisionBacktestWindow": "T+{{n}}",
@@ -16992,7 +16997,7 @@
         "ultraShort": "Ultracorto",
         "short": "Corto",
         "mid": "Medio",
-        "long": "Largo"
+        "long": "Trimestral"
       },
       "column": {
         "id": "ID",
@@ -17155,7 +17160,7 @@
       "horizonUltraShort": "Ultracorto",
       "horizonShort": "Corto",
       "horizonMid": "Medio",
-      "horizonLong": "Largo",
+      "horizonLong": "Trimestral",
       "horizonAuto": "Según el nivel principal",
       "horizonUnknown": "Horizonte desconocido",
       "colHorizon": "Horizonte revisado",
@@ -17204,8 +17209,23 @@
       "horizonImmatureNote": "Este horizonte aún no ha completado el período de tenencia esperado; los datos actuales son solo de referencia y no se usan como veredicto.",
       "hitrateMatureSamples": "Muestras maduras",
       "hitrateLegacyHint": "Incluye {{samples}} registros antiguos",
-      "hitrateGenerationScope": "Generación inicial: gen. {{generation}} (excluidas {{foreign}} anteriores y {{unknown}} desconocidas)",
-      "noData": "Sin datos"
+      "hitrateGenerationScope": "Generación inicial: gen. {{generation}} (excluidas {{foreign}} anteriores; {{unknown}} desconocidas incluidas con contracción)",
+      "noData": "Sin datos",
+      "failureModesTitle": "Modos de fallo",
+      "failureModesRows": "Reflexiones analizadas",
+      "failureModesLabelled": "Etiquetadas",
+      "failureModesUnlabelled": "Sin etiquetar",
+      "failureModesUnlabelledHint": "{{count}} reflexiones completadas no tienen modo de fallo — la plantilla no emitió el campo, no es «ningún modo».",
+      "failureModesEmpty": "Ninguna reflexión coincide aún con el vocabulario",
+      "failureModesRejected": "Hay valores fuera del vocabulario en las filas guardadas: {{tokens}}",
+      "failureModeCol": "Modo",
+      "failureModeCount": "Recuento",
+      "failureModeShare": "Proporción de etiquetadas",
+      "failureModeDcfCycleTop": "Optimismo DCF en techo de ciclo",
+      "failureModeChaseUpBar": "Perseguir una vela grande",
+      "failureModeRegimeEndorsement": "Régimen de mercado avalando un valor",
+      "failureModeReverseDcfIgnored": "DCF inverso ignorado",
+      "failureModeOther": "Otro"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",
@@ -18259,7 +18279,8 @@
       "sessionLunchBreak": "Pausa de mediodía",
       "sessionAfternoon": "Sesión de tarde",
       "sessionPostClose": "Tras el cierre"
-    }
+    },
+    "horizonPriorHitRate": "tasa de acierto {{rate}} %"
   },
   "pipeline": {
     "title": "Pipeline de Acciones",

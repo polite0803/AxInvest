@@ -6576,7 +6576,7 @@
       "period-ultra-short": "Ultra-Short",
       "period-short": "Short-Term",
       "period-mid": "Mid-Term",
-      "period-long": "Long-Term",
+      "period-long": "Quartal",
       "placeholder-periods": "Einen oder mehrere Zeiträume wählen",
       "label-min-confidence": "Mindestkonfidenz",
       "label-top-n": "Top-N-Limit",
@@ -7384,7 +7384,8 @@
       "none": "Nie ausgeführt",
       "skipped": "Übersprungen",
       "success": "Erfolg",
-      "failed": "Fehlgeschlagen"
+      "failed": "Fehlgeschlagen",
+      "partial": "Teilweise"
     },
     "scheduled": {
       "autoRefresh": "Automatische Aktualisierung alle 15 Sekunden",
@@ -7614,6 +7615,10 @@
         "failed": "Fehlgeschlagen",
         "interrupted": "Unterbrochen"
       }
+    },
+    "nextRun": {
+      "stale": "Zeitplan stockt",
+      "staleHint": "Der Zeitplan ist seit über 24 Stunden überfällig (oder wartet auf Nachholung) ohne Fortschritt: Die Aufgabe wurde möglicherweise durch Herunterfahren unterbrochen oder hängt. Mit „Jetzt ausführen“ prüfen."
     }
   },
   "teammatePanel": {
@@ -14829,7 +14834,7 @@
         "ultra_short": "Ultrakurz",
         "short": "Kurz",
         "mid": "Mittel",
-        "long": "Lang"
+        "long": "Quartal"
       },
       "dueYes": "Fällig",
       "dueNo": "Ausstehend",
@@ -15053,7 +15058,7 @@
     "boolYes": "Ja",
     "boolNo": "Nein",
     "backendCallFailed": "Backend-Aufruf fehlgeschlagen",
-    "tierScopeHint": "Horizont: bedient die mittleren und langen Stufen (Engpass-/Politik-/Gewinnkatalysatoren wirken über Wochen bis Monate); ultrakurz und kurz entfallen per Design — eine Zeile je Stufe, Haltedauer aus der maßgeblichen Stufe.",
+    "tierScopeHint": "Horizont: bedient die mittleren und vierteljährlichen Stufen (Engpass-/Politik-/Gewinnkatalysatoren wirken über Wochen bis Monate); ultrakurz und kurz entfallen per Design — eine Zeile je Stufe, Haltedauer aus der maßgeblichen Stufe.",
     "timeBasisNoTier": "Live-Kandidat ohne Stufe ⇒ kein empfohlenes Fenster (Stufendetails im Verlauf)",
     "entryBand": "Einstiegsband ±{{pct}}%",
     "entryBandHalfFallback": "Band = Hälfte des festen Stop-Multiplikators ⇒ nicht volabilitätsabgeleitet",
@@ -15439,7 +15444,7 @@
       "ultraShort": "Ultrakurzfristig",
       "short": "Kurzfristig",
       "mid": "Mittelfristig",
-      "long": "Langfristig"
+      "long": "Quartal"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15483,7 +15488,7 @@
     "periodUltraShort": "Kurz",
     "periodShort": "Kurz",
     "periodMid": "Mittel",
-    "periodLong": "Lang",
+    "periodLong": "Quartal",
     "generatedAt": "Generiert am {{time}}",
     "bannerVendorDisabled": "Einige Stile sind deaktiviert: {styles}",
     "openSettings": "Einstellungen öffnen",
@@ -15514,7 +15519,7 @@
     "timeHorizonUltraShort": "Ultrakurz",
     "timeHorizonShort": "Kurzfristig",
     "timeHorizonMid": "Mittelfristig",
-    "timeHorizonLong": "Langfristig",
+    "timeHorizonLong": "Quartal",
     "horizonSourceFormula": "Formel",
     "horizonSourceModel": "Modellangabe",
     "horizonSourceBranchPick": "Branchenwahl",
@@ -15688,7 +15693,7 @@
       "matrixAbsence": {
         "serenity_needs_week_or_longer_realization": "Per Design: Engpass-Nachweis braucht einen Horizont von einer Woche oder länger",
         "oversold_rebound_needs_at_least_mid_horizon": "Per Design: Overdraft-Rebounds brauchen mindestens einen mittelfristigen Horizont",
-        "oversold_rebound_not_applied_to_long_horizon": "Per Design: Overdraft-Rebounds werden auf den langfristigen Horizont nicht angewandt",
+        "oversold_rebound_not_applied_to_long_horizon": "Per Design: Overdraft-Rebounds werden auf den vierteljährlichen Horizont nicht angewandt",
         "cell_not_in_matrix": "Zelle fehlt in der Tabelle (möglicherweise Implementierungslücke, nicht per Design)"
       },
       "matrixMisfit": {
@@ -16818,7 +16823,7 @@
       "periodUltraShort": "Ultra-Short",
       "periodShort": "Short-Term",
       "periodMid": "Mid-Term",
-      "periodLong": "Long-Term",
+      "periodLong": "Quartal",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -16955,7 +16960,7 @@
       "trendScreening": "Geplantes Trend-Screening",
       "trendScreeningHint": "Führt den Trend-Screening-Workflow (serenity-screening) regelmäßig aus; Ergebnisse fließen in den Kandidatenpool",
       "reflectionScan": "Periodische Reflexion",
-      "reflectionScanHint": "Reflektiert abgeschlossene Analysen automatisch in Intervallen von Ultrakurz (2 T) / Kurz (5 T) / Mittel (28 T) / Lang (90 T)",
+      "reflectionScanHint": "Reflektiert abgeschlossene Analysen automatisch in Intervallen von Ultrakurz (2 T) / Kurz (5 T) / Mittel (28 T) / Quartal (90 T)",
       "decisionBacktest": "Entscheidungs-Backtest",
       "decisionBacktestHint": "Spielt historische Empfehlungen nach, lädt die tatsächlichen Kerzen der T+N-Fenster, misst Trefferquote und Faktoreffektivität und schreibt das Ergebnis in den Analysedatensatz zurück",
       "decisionBacktestWindow": "T+{{n}}",
@@ -16992,7 +16997,7 @@
         "ultraShort": "Ultrakurz",
         "short": "Kurz",
         "mid": "Mittel",
-        "long": "Lang"
+        "long": "Quartal"
       },
       "column": {
         "id": "ID",
@@ -17155,7 +17160,7 @@
       "horizonUltraShort": "Ultrakurz",
       "horizonShort": "Kurz",
       "horizonMid": "Mittel",
-      "horizonLong": "Lang",
+      "horizonLong": "Quartal",
       "horizonAuto": "Nach Hauptstufe",
       "horizonUnknown": "Unbekannter Horizont",
       "colHorizon": "Review-Horizont",
@@ -17204,8 +17209,23 @@
       "horizonImmatureNote": "Die erwartete Haltedauer dieses Horizonts ist noch nicht abgelaufen; die aktuellen Daten dienen nur als Referenz und sind kein Gewinn-/Verlusturteil.",
       "hitrateMatureSamples": "Ausgereifte Stichproben",
       "hitrateLegacyHint": "Enthält {{samples}} Altbestand-Einträge",
-      "hitrateGenerationScope": "Startgeneration: Gen {{generation}} ({{foreign}} frühere und {{unknown}} unbekannte Generationen ausgeschlossen)",
-      "noData": "Keine Daten"
+      "hitrateGenerationScope": "Startgeneration: Gen {{generation}} ({{foreign}} frühere ausgeschlossen; {{unknown}} unbekannte mit Schrumpfung einbezogen)",
+      "noData": "Keine Daten",
+      "failureModesTitle": "Fehlermuster",
+      "failureModesRows": "Reflektierte Zeilen",
+      "failureModesLabelled": "Markiert",
+      "failureModesUnlabelled": "Nicht markiert",
+      "failureModesUnlabelledHint": "{{{count}} abgeschlossene Reflektionen tragen kein Fehlermuster — das Feld fehlt, das ist nicht dasselbe wie „kein Muster“.",
+      "failureModesEmpty": "Noch kein Reflexionstreffer im Vokabular",
+      "failureModesRejected": "Gespeicherte Zeilen enthalten Ursachen außerhalb des Vokabulars: {{tokens}}",
+      "failureModeCol": "Muster",
+      "failureModeCount": "Anzahl",
+      "failureModeShare": "Anteil an markierten",
+      "failureModeDcfCycleTop": "DCF-Optimismus am Zyklushoch",
+      "failureModeChaseUpBar": "Laufen auf große Tageskerze",
+      "failureModeRegimeEndorsement": "Marktregime als Beleg für eine Einzelaktie",
+      "failureModeReverseDcfIgnored": "Umgekehrtes DCF ignoriert",
+      "failureModeOther": "Sonstige"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",
@@ -18259,7 +18279,8 @@
       "sessionLunchBreak": "Mittagspause",
       "sessionAfternoon": "Nachmittagssitzung",
       "sessionPostClose": "Nach Börsenschluss"
-    }
+    },
+    "horizonPriorHitRate": "Trefferquote {{rate}} %"
   },
   "pipeline": {
     "title": "Aktien-Pipeline",

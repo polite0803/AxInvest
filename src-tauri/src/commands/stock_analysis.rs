@@ -11,6 +11,8 @@ use crate::commands::error_code::trading as trading_err;
 use crate::commands::stock_analysis_setup::seed_stock_analysis::{
     FAST_TEMPLATE_ID, SOURCE_TEMPLATE_ID, TEMPLATE_VERSION,
 };
+// 行情快照的「样本不足 vs 取数失败」判据（定义在 reflection.rs，两条反思入口共用）。
+use crate::commands::stock_workflow::{SnapshotGap, take_primary_snapshot};
 use axagent_agent::self_improvement_executor::{SelfImprovementConfig, SelfImprovementExecutor};
 use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::backtest::{
@@ -5735,22 +5737,22 @@ pub async fn run_reflection_now(
     )
     .await;
 
-    // 取**本次复盘档**的行情快照（缺陷 ③：原实现写死 "short"）
-    let primary_snap = match snapshots_raw.get(&review_horizon).and_then(|r| r.as_ref().ok()) {
-        Some(s) if s.trading_days >= 1 => s.clone(),
-        Some(s) => {
+    // 取**本次复盘档**的行情快照（缺陷 ③：原实现写死 "short"）。
+    // 「样本不足」与「取数失败」分道：前者是等行情成熟（不是错误），后者才是真故障（2026-10-16）。
+    let primary_snap = match take_primary_snapshot(snapshots_raw.get(&review_horizon)) {
+        Ok(s) => s.clone(),
+        Err(SnapshotGap::Young) => {
             return Err(ErrorResponse::new(wf_err::INTERNAL)
                 .with_detail(format!(
-                    "{stock_code} 在 {as_of_date} 之后仅 {} 个交易日的新行情，\
-                     不足以构成「{review_horizon} 分析结论 vs 实际行情」对比",
-                    s.trading_days
+                    "{stock_code} 在 {as_of_date} 之后尚无完整交易日的新行情，\
+                     不足以构成「{review_horizon} 分析结论 vs 实际行情」对比（稍后再试）"
                 ))
                 .to_string());
         },
-        None => {
+        Err(SnapshotGap::Failed(reason)) => {
             return Err(ErrorResponse::new(wf_err::INTERNAL)
                 .with_detail(format!(
-                    "{stock_code} 的 {review_horizon} 档实际行情获取失败，无法反思"
+                    "{stock_code} 的 {review_horizon} 档实际行情获取失败，无法反思: {reason}"
                 ))
                 .to_string());
         },

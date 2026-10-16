@@ -4,10 +4,13 @@
 // 1. **腿集合**：趋势 / 资金持续性 / 估值带 / 预期修正进方向；盈利质量只作「兑现跨季」的
 //    部分来源（constraint=qualityRealizationBeyondHorizon）；解禁供给在本档**降为风险提示**
 //    （role=riskNote，权重恒 0）—— 28 日内它已被趋势吸收，再进方向就是重复计数。
-// 2. **门形态**：`inside_sigma_band` —— 建仓要求价格仍在均线波动带内（|z| ≤ 2）。
+// 2. **门形态**：`inside_sigma_band` —— 建仓要求价格仍在均线波动带内（|z| ≤ 1）。
 //    短档的门是「两个证据同不同向」，本档的门是「还在不在带里」：中线做的是
 //    均值回归意义上的位置，追高（带外向上）时最强的正向证据恰恰是最该回避的。
 //    z 的口径在 Rust 侧（`harness::indicators::band_z`），四档共用一份实现。
+//    P1-4（`PLAN-stock-decision-reliability.md`）：旧界 |z| ≤ 2 覆盖约 95% 常态波动，
+//    时机过滤几乎不生效（10-09 紫金 bandZ=-0.97 仍 PASS）；收紧到 1σ（约 68%）让
+//    「带外向上/向下的追高与追空」真正被拦。界值在此是**口径常量**，改它须同步测试。
 // 3. **出场口径**：`k_sigma_band` —— 止盈/止损都由带出（不是固定百分比、也不是到期强出）。
 //
 // ⚠ 禁止出现（门 a）：`leg_mult` / `pm_snr_confidence` / `horizon_decision`。
@@ -160,6 +163,13 @@ let prior_ok = type_of(hp_row) == "map"
 let prior_val = if prior_ok { hp_row["prior"] } else { () };
 let prior_src = if prior_ok { hp_row["source"] } else { "unavailable" };
 let prior_samples = if prior_ok { hp_row["samples"] } else { 0 };
+// P2-c（PLAN-stock-decision-reliability）：本档**原始方向命中率**（未收缩口径）。
+// 缺席 ⇒ 前端不渲染命中率段 —— 先验此时借自全档合并基准，不得拿 pooled 值冒充本档命中率。
+let prior_hit_rate = if prior_ok && type_of(hp_row["hitRate"]) == "f64" { hp_row["hitRate"] } else { () };
+// P1-3（R3/R7）：本档校准可得性。判据在 Rust `reflection_stats::CALIBRATION_MIN_SAMPLES`，
+// 脚本只读结论（同 DQI 熔断纪律：阈值有两份载体就早晚不一致）。先验不可得 ⇒ false ⇒
+// 主链按「未校准」封顶 —— fail-closed，缺席不得当成「已校准」。
+let prior_cal_ready = prior_ok && hp_row["calibrationReady"] == true;
 if !prior_ok {
     gaps.push("本档先验不可得（`horizon_prior_json` 缺失或缺本档那一行）=> 拒绝出结论：观望且不产出仓位");
 }
@@ -179,9 +189,9 @@ let z = if bars_ok && band_lookback > 0 {
 };
 let gate_state = if type_of(z) == "()" {
     "unjudged"
-} else if z > 2.0 {
+} else if z > 1.0 {
     "above_band"
-} else if z < -2.0 {
+} else if z < -1.0 {
     "below_band"
 } else {
     "inside"
@@ -190,7 +200,7 @@ if gate_state == "unjudged" {
     gaps.push("inside_sigma_band 未判定：K 线不足或窗口退化（停盘/一字板 σ=0）⇒ 不给出加仓动作，且不得把「算不出」当「正居中」");
 }
 if gate_state == "above_band" {
-    gaps.push(`带外向上（z=${(z*100.0).round()/100.0} > 2）⇒ 本档封顶持有：中线的正向证据在追高时不构成加仓理由`);
+    gaps.push(`带外向上（z=${(z*100.0).round()/100.0} > 1）⇒ 本档封顶持有：中线的正向证据在追高时不构成加仓理由`);
 }
 // 带内 ⇒ 出场由带出：止盈取带顶方向（k_take 个到期位移），止损取 k_stop 个。
 let exit_move =
@@ -285,6 +295,8 @@ if action != "买入" && action != "增持" && action != "持有" {
     riskCategory: if present(overall_risk) { overall_risk } else { () },
     priorSource: prior_src,
     priorSamples: prior_samples,
+    calibrationReady: prior_cal_ready,
+    priorHitRate: prior_hit_rate,
     stopSource: if exit_move > 0.0 { "sigma_band" } else { "fallback_pct" },
     positionSource: "kelly_x_position_multiplier",
     horizon: h,

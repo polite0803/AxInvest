@@ -684,6 +684,18 @@ fn long_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
                     ),
                     // 宏观只取 PMI（本仓五条真序列里唯一自带荣枯线的量）
                     ("pmi", "t-macro-data.result.content.pmiManufacturing.value"),
+                    // P1-8（`PLAN-stock-decision-reliability.md` R10）：宏观块时效门的输入 ——
+                    // 各序列的发布日 + 分析锚点（snapshotDate）。超滞或缺失 ⇒ 脚本经
+                    // `pm_macro_stale_reason` 把 macroRegime 腿按缺席处理（10-09 实证：
+                    // GDP 停在 2026 Q1、距锚点 6 个月，旧实现仍按完整权重喂给长档）。
+                    ("macro_snapshot_date", "t-macro-data.result.content.snapshotDate"),
+                    ("gdp_release_date", "t-macro-data.result.content.gdp.releaseDate"),
+                    ("cpi_release_date", "t-macro-data.result.content.cpi.releaseDate"),
+                    ("ppi_release_date", "t-macro-data.result.content.ppi.releaseDate"),
+                    (
+                        "pmi_release_date",
+                        "t-macro-data.result.content.pmiManufacturing.releaseDate",
+                    ),
                     // v128（B1）：本档风险档 ← **本档**的 cls-risk-level-long 节点
                     ("overall_risk", "cls-risk-level-long.result.category"),
                     ("kline_bars", "t-scoring.result.content.kline_json"),

@@ -422,6 +422,75 @@ pub fn recent_strength(closes: &[f64], limit_pct: f64, lookback: usize) -> Optio
     Some(RecentStrength { limit_up_count, cum_gain_pct: (last / start - 1.0) * 100.0, days })
 }
 
+/// 追涨形态与上方阻力（P1-4，`PLAN-stock-decision-reliability.md` R6）。
+///
+/// 供决策脚本的「大阳放量不追 / 逼近前高不追」两道门使用：本结构只给**客观量**
+/// （涨幅、成交额、分位、前高距离），门阈值（4% / 90 分位 / 5% 带）由脚本侧持有，
+/// 与 `recent_strength` 的分工一致。
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurgeState {
+    /// 最近一根 bar 的单日涨幅（百分数）：末收盘相对前收盘。
+    pub last_gain_pct: f64,
+    /// 最近一根 bar 的成交额（与窗口同口径，由调用方构造：`amount` 有效用 amount，
+    /// 否则 `volume × close` 兜底 —— 本仓 K 线 amount 常为 0，见 `pm_avg_turnover`）。
+    pub last_amount: f64,
+    /// 前 `lookback` 根（**不含当日**）成交额的 90 分位（nearest-rank）。
+    /// 有效样本 < 2 根 ⇒ None（分位无定义）。
+    pub amount_p90: Option<f64>,
+    /// 前 `lookback` 根（不含当日）的最高价（前高）。无有效样本 ⇒ None。
+    pub prior_high: Option<f64>,
+    /// 现行价 ÷ 前高（1.0 = 正好触及前高）。None = 前高不可得。
+    pub high_ratio: Option<f64>,
+}
+
+/// 计算 [`SurgeState`]。三个数组按时间**升序**、逐日对齐（本函数按下标配对，
+/// 长度不齐时取最短 —— 调用方应构造等长数组）。
+///
+/// 返回 None：任一数组少于 2 根、或末两根收盘非正/非有限（当日涨幅无定义）。
+/// 窗口内个别脏值（NaN / ≤0）只跳过该日，不污染分位与最高价。
+pub fn surge_state(
+    closes: &[f64],
+    amounts: &[f64],
+    highs: &[f64],
+    lookback: usize,
+) -> Option<SurgeState> {
+    let n = closes.len().min(amounts.len()).min(highs.len());
+    if n < 2 {
+        return None;
+    }
+    let prev_close = closes[n - 2];
+    let last_close = closes[n - 1];
+    if !prev_close.is_finite() || prev_close <= 0.0 || !last_close.is_finite() || last_close <= 0.0
+    {
+        return None;
+    }
+    let last_gain_pct = (last_close / prev_close - 1.0) * 100.0;
+    let last_amount = amounts[n - 1];
+
+    // 前 lookback 根（不含当日）：样本窗口至多 lookback 根
+    let take_start = n.saturating_sub(1 + lookback.max(1));
+
+    let mut prev_amounts: Vec<f64> =
+        amounts[take_start..n - 1].iter().copied().filter(|v| v.is_finite() && *v > 0.0).collect();
+    let amount_p90 = if prev_amounts.len() >= 2 {
+        prev_amounts.sort_by(f64::total_cmp);
+        // nearest-rank：秩 = ceil(0.9 × n)，1-based
+        let rank = ((90 * prev_amounts.len()).div_ceil(100)).max(1).min(prev_amounts.len());
+        Some(prev_amounts[rank - 1])
+    } else {
+        None
+    };
+
+    let prior_high = highs[take_start..n - 1]
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .fold(None, |acc: Option<f64>, v| Some(acc.map_or(v, |m| m.max(v))));
+    let high_ratio = prior_high.map(|h| last_close / h);
+
+    Some(SurgeState { last_gain_pct, last_amount, amount_p90, prior_high, high_ratio })
+}
+
 /// SNR 时间折算的**放大上限**（倍数）。
 ///
 /// 为什么需要（2026-10-01 实证）：`√(h/anchor)` 的推导前提是「日边缘在整个持有期内
@@ -1007,8 +1076,10 @@ mod tests {
         let s = recent_strength(&closes, 10.0, 3).unwrap();
         assert_eq!(s.days, 3, "只评估末 3 个交易日");
         assert_eq!(s.limit_up_count, 0, "10→11 在窗口外");
-        // 累计涨幅以窗口起点 11.1 为基
-        assert!((s.cum_gain_pct - (11.05 / 11.1 - 1.0) * 100.0).abs() < 1e-9);
+        // 累计涨幅以窗口起点 11.2 为基（lookback=3 个交易日 = 4 个收盘点；末 4 点 =
+        // [11.2, 11.1, 11.0, 11.05] —— 原注释写 11.1/原期望按 3 点算，与 days=3 的
+        // 期待自身互斥，2026-10-16 按实现逐值复核后订正）。
+        assert!((s.cum_gain_pct - (11.05 / 11.2 - 1.0) * 100.0).abs() < 1e-9);
     }
 
     #[test]
@@ -1016,9 +1087,64 @@ mod tests {
         assert_eq!(recent_strength(&[10.0], 10.0, 5), None, "单根无从算日涨幅");
         assert_eq!(recent_strength(&[10.0, 11.0], 10.0, 0), None, "lookback=0 无定义");
         assert_eq!(recent_strength(&[0.0, 11.0], 10.0, 5), None, "起点非正 ⇒ 累计涨幅无定义");
-        // 窗口内单日脏价格只跳过该对，其余照算
+        // 窗口内脏价：**含脏端点的配对整对跳过**（0 不是有效前收，涨幅无定义）——
+        // 两对 (10,0) 与 (0,11) 都含 0 ⇒ days=0。原期望 days=1 基于「只跳脏点本身」
+        // 的旧读法，与实现（任一端非正即跳过整对）矛盾，2026-10-16 按实现订正。
         let s = recent_strength(&[10.0, 0.0, 11.0], 10.0, 5).unwrap();
-        assert_eq!(s.days, 1, "两对里一对脏价跳过");
+        assert_eq!(s.days, 0, "两对均含缺失点（前收为 0）⇒ 全部跳过");
         assert_eq!(s.limit_up_count, 0, "0→11 不允许被当成涨停");
+    }
+
+    // ── surge_state（P1-4 追涨/阻力判据的客观量）──
+
+    #[test]
+    fn surge_state_gain_p90_and_prior_high() {
+        // 前 4 日成交额 1..4 亿，当日 10 亿（远超历史）= 放量；当日涨幅 +4.87%（紫金 10-09 实况量级）
+        let closes = [30.0, 29.8, 29.4, 29.37, 30.80];
+        let amounts = [1.0e8, 2.0e8, 3.0e8, 4.0e8, 1.0e9];
+        let highs = [30.5, 30.1, 29.9, 30.2, 31.0];
+        let s = surge_state(&closes, &amounts, &highs, 4).unwrap();
+        assert!((s.last_gain_pct - (30.80 / 29.37 - 1.0) * 100.0).abs() < 1e-9);
+        assert_eq!(s.last_amount, 1.0e9);
+        // nearest-rank ceil(0.9×4)=4 ⇒ 第 4 小 = 最大值 4e8（不含当日）
+        assert_eq!(s.amount_p90, Some(4.0e8));
+        assert!(s.last_amount > s.amount_p90.unwrap(), "当日放量判定基础成立");
+        // 前高不含当日：max(31.0) 不得计入
+        assert_eq!(s.prior_high, Some(30.5));
+        assert_eq!(s.high_ratio, Some(30.80 / 30.5));
+    }
+
+    #[test]
+    fn surge_state_excludes_current_bar_from_window() {
+        // 当日新高会让「距前高」恒 1.0 —— 前高必须取**当日之前**的窗口
+        let closes = [10.0, 10.5, 11.0];
+        let amounts = [1.0, 1.0, 1.0];
+        let highs = [10.0, 10.5, 99.0];
+        let s = surge_state(&closes, &amounts, &highs, 2).unwrap();
+        assert_eq!(s.prior_high, Some(10.5), "当日 99 的新高不得进前高");
+        assert!(s.high_ratio.unwrap() > 1.0, "相对前高的实时位置仍可 >1（突破）");
+    }
+
+    #[test]
+    fn surge_state_refuses_degenerate_inputs_and_short_windows() {
+        assert_eq!(surge_state(&[10.0], &[1.0], &[10.0], 5), None, "单根无从算涨幅");
+        assert_eq!(surge_state(&[0.0, 11.0], &[1.0, 1.0], &[1.0, 1.0], 5), None, "前收非正");
+        // 前窗口只有 1 根 ⇒ p90 无定义（None），但前高仍取得到
+        let s = surge_state(&[10.0, 11.0], &[1.0, 2.0], &[10.2, 11.1], 5).unwrap();
+        assert_eq!(s.amount_p90, None, "单样本分位无定义");
+        assert_eq!(s.prior_high, Some(10.2));
+        // 长度不齐取最短：amounts 多出的尾巴不得参与
+        let s2 = surge_state(&[10.0, 11.0], &[1.0, 2.0, 999.0], &[10.2, 11.1, 999.0], 5).unwrap();
+        assert_eq!(s2.last_amount, 2.0, "按最短长度对齐");
+    }
+
+    #[test]
+    fn surge_state_skips_dirty_values_in_window() {
+        let closes = [10.0, 10.2];
+        let amounts = [f64::NAN, 5.0]; // 窗口内 NaN 只跳过
+        let highs = [0.0, 10.3]; // ≤0 的脏高只跳过
+        let s = surge_state(&closes, &amounts, &highs, 5).unwrap();
+        assert_eq!(s.amount_p90, None, "脏值跳过后不足 2 根 ⇒ 分位 None");
+        assert_eq!(s.prior_high, None, "脏高跳过后无有效样本");
     }
 }

@@ -1772,6 +1772,9 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                     若背景含【漏检专项三问】，missed_signals / what_went_wrong / fix_for_future\n\
                     必须按三问逐条回答并与权威归因层对照；若为「常规到期反思」占位句则忽略，\n\
                     按常规单档复盘即可，禁止编造漏检事件。\n\n\
+                    ——失败模式受控词表（P2-b）——\n\
+                    本次误判属于哪一类，只能从下列值里选（可多选；都不是时输出 [\"other\"]）：\n\
+                    {{failure_mode_catalog}}\n\n\
                     可用工具：\n\
                     - get_stock_kline: 获取实际操作期间的K线数据，对比预测走势与实际价格运动\n\n\
                     使用工具的原则：\n\
@@ -1800,6 +1803,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                       \"what_went_wrong\": \"哪里判断错了，简要说明\",\n\
                       \"missed_signals\": [\"被忽略的信号1\", \"被忽略的信号2\"],\n\
                       \"fix_for_future\": \"下次如何避免同样的错误\",\n\
+                      \"failure_modes\": [\"词表内的失败模式（可多选，禁止自造名字）\"],\n\
                       \"implementation_tier\": \"L1 | L2 | L3\",\n\
                       \"code_diff_proposal\": \"具体修改方案描述（L1简述 / L2-L3含文件路径和代码段）\",\n\
                       \"params_suggestion\": [\n\
@@ -1847,6 +1851,9 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                     // 同样由 run_reflection_workflow 顶层无条件注入，漏映射则
                     // {{mover_recall_context}} VARIABLE_NOT_FOUND ⇒ 反思链 Failed。
                     ("mover_recall_context".to_string(), "mover_recall_context".to_string()),
+                    // P2-b 失败模式受控词表：单一权威源 failure_mode::FailureMode::catalog_for_prompt，
+                    // 由 run_reflection_workflow 无条件注入；漏映射则 {{failure_mode_catalog}} VARIABLE_NOT_FOUND ⇒ 反思链 Failed。
+                    ("failure_mode_catalog".to_string(), "failure_mode_catalog".to_string()),
                 ]
                 .into_iter()
                 .collect(),
@@ -2020,6 +2027,14 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
             ),
             is_secret: false,
         },
+        // P2-b 失败模式受控词表：内联 prompt 与 reflection.md 共用同一渲染结果（防手抄漂移）。
+        Variable {
+            name: "failure_mode_catalog".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(String::new()),
+            description: Some("失败模式受控词表（权威源 analysis_engine::failure_mode）".into()),
+            is_secret: false,
+        },
     ];
 
     // serenity-reflection 模板版本。
@@ -2047,7 +2062,12 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     //      mover_recall_events.status='reflected'（逻辑在 run_reflection_workflow）。
     //
     // ⚠ 升版必做：不升版 DB 里会保留 v1 模板行，本次全部改动静默失效。
-    const REFLECTION_TEMPLATE_VERSION: i32 = 4;
+    // v5 (2026-10-16)：反思输出新增「失败模式」受控字段（PLAN P2-b）——
+    //   ① 内联 prompt 与 reflection.md 双处新增 {{failure_mode_catalog}} 与 failure_modes 字段；
+    //   ② 词表单一权威源 = analysis_engine::failure_mode::FailureMode::catalog_for_prompt（模板不抄值）；
+    //   ③ 反思收尾按白名单过滤后盖章 stock_reflections.failure_modes，非法 token 进看板 rejectedTokens。
+    //
+    const REFLECTION_TEMPLATE_VERSION: i32 = 5;
 
     // 版本检查：已有同版本或更新的记录则跳过
     if let Some(ref existing) =

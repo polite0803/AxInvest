@@ -141,6 +141,23 @@ if !present(latest_eps) {
         gaps.push("long 档 expectationRevision 缺分母：t-valuation 节点未产出 latestEps ⇒ 接线状态，不是「预期没变化」");
     }
 }
+// ── P1-8（`PLAN-stock-decision-reliability.md` R10）：宏观块时效门 ──
+// 超滞（或发布日缺失）⇒ macroRegime 腿**按缺席处理**（不进 raw 的 pmi ⇒ 腿自然缺席、
+// 不占权重、进 absent_legs）并如实进 gaps；旧实现把「GDP 停在 Q1、CPI/PPI 是 8 月值」的
+// 残缺块按约 18% 名义权重喂给长档（10-09 紫金实证）。
+let macro_stale = pm_macro_stale_reason(
+    if present(macro_snapshot_date) { macro_snapshot_date } else { () },
+    if present(gdp_release_date) { gdp_release_date } else { () },
+    if present(cpi_release_date) { cpi_release_date } else { () },
+    if present(ppi_release_date) { ppi_release_date } else { () },
+    if present(pmi_release_date) { pmi_release_date } else { () },
+);
+let macro_fresh = if type_of(macro_stale) == "string" && macro_stale != "" {
+    gaps.push(`宏观数据时效门：${macro_stale}`);
+    false
+} else {
+    true
+};
 let raw = #{
     totalScore: if present(tier_score) { tier_score } else { () },
     macdDif: if present(macd_dif) { macd_dif } else { () },
@@ -150,7 +167,7 @@ let raw = #{
     fScore: if present(f_score) { f_score } else { () },
     consensusEps: if present(consensus_eps) && !cons_is_estimated { consensus_eps } else { () },
     latestEps: if present(latest_eps) { latest_eps } else { () },
-    pmi: if present(pmi) { pmi } else { () },
+    pmi: if present(pmi) && macro_fresh { pmi } else { () },
 };
 let present_legs = [];
 let absent_legs = [];
@@ -202,6 +219,13 @@ let prior_ok = type_of(hp_row) == "map"
 let prior_val = if prior_ok { hp_row["prior"] } else { () };
 let prior_src = if prior_ok { hp_row["source"] } else { "unavailable" };
 let prior_samples = if prior_ok { hp_row["samples"] } else { 0 };
+// P2-c（PLAN-stock-decision-reliability）：本档**原始方向命中率**（未收缩口径）。
+// 缺席 ⇒ 前端不渲染命中率段 —— 先验此时借自全档合并基准，不得拿 pooled 值冒充本档命中率。
+let prior_hit_rate = if prior_ok && type_of(hp_row["hitRate"]) == "f64" { hp_row["hitRate"] } else { () };
+// P1-3（R3/R7）：本档校准可得性。判据在 Rust `reflection_stats::CALIBRATION_MIN_SAMPLES`，
+// 脚本只读结论（同 DQI 熔断纪律：阈值有两份载体就早晚不一致）。先验不可得 ⇒ false ⇒
+// 主链按「未校准」封顶 —— fail-closed，缺席不得当成「已校准」。
+let prior_cal_ready = prior_ok && hp_row["calibrationReady"] == true;
 if !prior_ok {
     gaps.push("本档先验不可得（`horizon_prior_json` 缺失或缺本档那一行）=> 拒绝出结论：观望且不产出仓位");
 }
@@ -383,6 +407,8 @@ if action != "买入" && action != "增持" && action != "持有" {
     riskCategory: if present(overall_risk) { overall_risk } else { () },
     priorSource: prior_src,
     priorSamples: prior_samples,
+    calibrationReady: prior_cal_ready,
+    priorHitRate: prior_hit_rate,
     stopSource: if exit_move > 0.0 { "thesis_falsified_half_band" } else { "fallback_pct" },
     takeProfitSource: take_profit_source,
     positionSource: "kelly_x_position_multiplier",

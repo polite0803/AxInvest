@@ -2,10 +2,11 @@
 
 import type { PipelineRun, ScheduledTask, TimeTravelBatchSummary } from "@/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cronAdapter, mapLastRun } from "../adapters/cron.adapter";
+import { cronAdapter, mapExecutionRecord, mapLastRun } from "../adapters/cron.adapter";
 import { mapPipelineRun } from "../adapters/pipeline.adapter";
 import { aggregateRuns } from "../adapters/registry";
 import { mapBatchSummary } from "../adapters/timeTravel.adapter";
+import { isNextRunStale } from "../model";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 
@@ -88,6 +89,22 @@ describe("cron.mapLastRun", () => {
     expect(run.badges).toEqual(["skipped"]);
   });
 
+  it("partial（部分完成）不落 failed，主状态 succeeded + partial badge", () => {
+    const run = mapLastRun(
+      makeTask({
+        lastResult: {
+          success: false,
+          output: "候选池扫描完成: 12 只入队（达到单轮墙钟预算提前收尾，属部分完成）",
+          error: null,
+          durationMs: 3,
+          partial: true,
+        },
+      }),
+    );
+    expect(run.state).toBe("succeeded");
+    expect(run.badges).toEqual(["partial"]);
+  });
+
   it("绑定 workflow 的任务开放 retry", () => {
     const run = mapLastRun(
       makeTask({ taskType: "custom", workflowId: "opc-demand-discovery" }),
@@ -102,6 +119,92 @@ describe("cron.mapLastRun", () => {
     ]);
     const runs = await cronAdapter.list!();
     expect(runs.map((r) => r.nativeId)).toEqual(["ran"]);
+  });
+});
+
+describe("cron.mapExecutionRecord（兜底轮区分）", () => {
+  const rec = (
+    over: Partial<Parameters<typeof mapExecutionRecord>[1]>,
+  ): Parameters<typeof mapExecutionRecord>[1] => ({
+    id: "h1",
+    task_id: "t1",
+    started_at: 1,
+    completed_at: 2,
+    success: true,
+    output: null,
+    error: null,
+    duration_ms: 1,
+    ...over,
+  });
+
+  it("output 带 [系统兜底轮 前缀 → trigger=system", () => {
+    const run = mapExecutionRecord(
+      "t1",
+      rec({ output: "[系统兜底轮·每6h] 完成 3 条" }),
+      makeTask({}),
+    );
+    expect(run.trigger).toBe("system");
+  });
+
+  it("档期触发记录保持 trigger=schedule", () => {
+    const run = mapExecutionRecord(
+      "t1",
+      rec({ output: "候选池扫描完成: 3 只入队" }),
+      makeTask({}),
+    );
+    expect(run.trigger).toBe("schedule");
+  });
+});
+
+describe("isNextRunStale（next_run 停滞标记）", () => {
+  const NOW = Date.parse("2026-10-16T10:00:00+08:00");
+
+  it("档期过期且距上次运行超 24h → stale", () => {
+    expect(
+      isNextRunStale(
+        makeTask({
+          nextRunAt: "2026-10-14T02:00:00+08:00",
+          lastRunAt: "2026-10-14T02:00:00+08:00",
+        }),
+        NOW,
+      ),
+    ).toBe(true);
+  });
+
+  it("next_run_at=0 序列化成的 1970 形态同样命中", () => {
+    expect(
+      isNextRunStale(
+        makeTask({
+          nextRunAt: "1970-01-01T00:00:00+00:00",
+          lastRunAt: "2026-10-10T02:00:00+08:00",
+        }),
+        NOW,
+      ),
+    ).toBe(true);
+  });
+
+  it("未来档期 / 禁用 / 从未运行 不标", () => {
+    expect(
+      isNextRunStale(
+        makeTask({
+          nextRunAt: "2026-10-17T02:00:00+08:00",
+          lastRunAt: "2026-10-15T02:00:00+08:00",
+        }),
+        NOW,
+      ),
+    ).toBe(false);
+    expect(
+      isNextRunStale(
+        makeTask({ status: "paused", nextRunAt: "1970-01-01T00:00:00+00:00" }),
+        NOW,
+      ),
+    ).toBe(false);
+    expect(
+      isNextRunStale(
+        makeTask({ lastRunAt: null, nextRunAt: "1970-01-01T00:00:00+00:00" }),
+        NOW,
+      ),
+    ).toBe(false);
   });
 });
 

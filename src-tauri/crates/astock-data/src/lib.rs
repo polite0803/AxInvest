@@ -516,6 +516,13 @@ pub fn is_benchmark_code(code: &str) -> bool {
             | "399001"
             | "399006"
             | "000300"
+            // 大盘 regime 确认（P2-e）改用**显式东财 secid** 取指数，而复权短路按代码字面
+            // 匹配 ⇒ secid 形态必须同时进表，否则会对指数发起分红查询并被本地复权算歪。
+            | "000985"
+            | "000016"
+            | "1.000300"
+            | "1.000985"
+            | "1.000016"
     )
 }
 
@@ -2678,6 +2685,16 @@ impl AStockClient {
         adj_type: Option<crate::types::AdjType>,
         stock_code: &str,
     ) -> Vec<KLine> {
+        // 指数/基准没有复权概念（也无分红可除）：整段短路（2026-10-16 现场）。
+        // 不加这道短路时，基准 000300 的日线由「不复权端点」的兜底源供给（`adj_factor=None`）
+        // ⇒ 每个反思周期都会对一只**指数**发起分红查询，渠道空集被记成 vendor 失败
+        // （现场日志「[降级] dividend 000300 eastmoney 失败: 分红数据为空」）；
+        // 更实质的是判据本身：一旦指数分红真被供出，本地复权会把基准曲线按「个股除息」算歪。
+        // 复用 `is_benchmark_code`（指数/基准代码的既有清单，此前零调用点）。
+        if is_benchmark_code(stock_code) {
+            return klines;
+        }
+
         // 不复权或无复权请求：直接返回
         let adj = match adj_type {
             None | Some(crate::types::AdjType::None) => return klines,
@@ -7730,6 +7747,45 @@ mod asof_boundary_tests {
         assert_eq!(got.len(), 1, "截止日前那条应保留");
     }
 
+    /// 指数/基准不做本地复权（2026-10-16 现场）。
+    ///
+    /// 基准 000300 的日线由不复权端点供给（`adj_factor=None`），旧逻辑把它当个股送进
+    /// 本地复权回退：对一只**指数**发起分红查询（渠道空集被记成 vendor 失败 ——
+    /// 现场日志「[降级] dividend 000300 eastmoney 失败: 分红数据为空」打在每个反思周期上）；
+    /// 更坏的是判据本身：指数分红一旦真被供出，基准曲线会被按「个股除息」复权算歪。
+    ///
+    /// 判据两头：基准代码 ⇒ K 线原样返回；同一份未标记 K 线走**普通个股代码**时，
+    /// 替身分红非空 ⇒ 复权必须照常施加（负控 —— 否则守卫会退化成「本地复权整个失效」）。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn local_adjustment_skips_benchmark_index_codes() {
+        let client = stub_client();
+        // 跨过替身除权日（2024-05-20 / 2024-07-01）的两根未标记 K 线
+        let klines = vec![bar("2024-05-15", 100.0), bar("2024-06-10", 105.0)];
+
+        let idx = client
+            .apply_local_adjustment_if_needed(
+                klines.clone(),
+                Some(crate::types::AdjType::Forward),
+                "000300",
+            )
+            .await;
+        assert_eq!(idx[0].open, 100.0, "指数 K 线不得被本地复权改写");
+        assert!(idx[0].adj_factor.is_none(), "指数不应获得复权标记");
+
+        let stock = client
+            .apply_local_adjustment_if_needed(
+                klines,
+                Some(crate::types::AdjType::Forward),
+                "600519",
+            )
+            .await;
+        assert!(
+            (stock[0].open - 100.0).abs() > 1e-9,
+            "负控：普通个股的本地复权必须照常施加（替身分红非空 ⇒ 价格应被改写）"
+        );
+    }
+
     /// 分组名=代码回归(2026-09-26)：快照名称回填(R8)只认 eastmoney 的
     /// `get_valuation_snapshot_asof`，该源被限流/禁用时 miss ⇒ 合成 quote 的 name
     /// 恒=代码，落库后历史分析记录分组标题=代码。search_stock 的
@@ -8319,6 +8375,39 @@ mod asof_boundary_tests {
             "USD/CNY 收盘应在 5~10 区间（量级自证），实得 {}",
             last.close
         );
+    }
+
+    /// 2026-10-16：**大盘 regime 取数标的探针**（`#[ignore]`，需外网，手动跑）。
+    ///
+    /// 裸码 `000300` 过 `to_em_secid` 会按**首位数字**推市场位，拼成深圳 `0.000300`，
+    /// 而沪深300 指数的东财 secid 是上海 `1.000300`。`market_regime` 的现役取数正是裸码
+    /// （hooks 的 `get_klines("000300","daily",60)`），所以它可能在算另一只标的。
+    /// 本探针把裸码与显式 secid 的最新收盘并排打印，量级差（指数约千点 / 个股约十元）即结论。
+    /// 跑法：`cargo test -p axagent-astock-data --lib index_secid_live -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "需外网：手动运行以核对大盘 regime 的指数 secid 取数标的"]
+    async fn index_secid_live_probe() {
+        let client = AStockClient::new();
+        for (code, label) in [
+            ("000300", "bare-code CSI300 (current call)"),
+            ("1.000300", "explicit secid CSI300"),
+            ("1.000985", "explicit secid CSI All Share"),
+            ("1.000016", "explicit secid SSE50"),
+            ("0.399300", "explicit secid SZSE300"),
+        ] {
+            match client.get_klines(code, "daily", 60).await {
+                Ok(ks) => match ks.last() {
+                    Some(last) => println!(
+                        "{label} [{code}]: {} bars, last {} close={:.2}",
+                        ks.len(),
+                        last.date,
+                        last.close
+                    ),
+                    None => println!("{label} [{code}]: empty array"),
+                },
+                Err(e) => println!("{label} [{code}]: fetch failed {e:?}"),
+            }
+        }
     }
 }
 

@@ -1790,7 +1790,12 @@ impl WorkEngine {
         }
         if let Some(r) = result {
             workflow.results.insert(node_id.to_string(), r.clone());
-            if let Some(var) = output_var {
+            // 空 `output_var` 的语义 = 「无变量别名」（DebateNodeConfig 等以 `String::new()`
+            // 表达），不是「变量名叫空串」：照写会在 results 里铸造一个 `""` 键 —— 黑板快照
+            // 把它落成 `_raw.`（空 node_id）畸形键，实测 127 行存量快照带此键、反思读取侧
+            // 要专门跳过（2026-10-14 故障取证）。此处是从节点 config 铸造 results 键的
+            // 唯一咽喉（两条 update 入口都汇到本函数），缺省即不写。
+            if let Some(var) = output_var.filter(|v| !v.is_empty()) {
                 workflow.results.insert(var.to_string(), r);
             }
         }
@@ -6875,8 +6880,8 @@ mod tests {
         Workflow, sanitize_container_step_orders, sub_workflow_output_or_fail, topo_sort_step_list,
     };
     use axagent_harness::workflow_types::{
-        DebateNode, DebateNodeConfig, EdgeType, Position, RetryConfig, WorkflowEdge, WorkflowNode,
-        WorkflowNodeBase, WorkflowStatus,
+        DebateNode, DebateNodeConfig, EdgeType, NodeRuntimeState, NodeStatus, Position,
+        RetryConfig, WorkflowEdge, WorkflowNode, WorkflowNodeBase, WorkflowStatus,
     };
 
     fn debate_container(steps: Vec<String>) -> WorkflowNode {
@@ -7067,5 +7072,68 @@ mod tests {
             "exec-2",
         );
         assert!(e.is_err(), "失败终态带 output 也不能算成功");
+    }
+
+    // ── 空 output_var 不得铸造空 results 键（2026-10-16）──
+
+    /// 现场：`debate-bull-bear`（DebateNode）的 `output_var` 是空串（「无别名」语义），
+    /// 引擎却照写 `results[""]` ⇒ 黑板快照落出 `_raw.`（空 node_id）畸形键 —— 实测
+    /// 127 行存量快照带它、反思读取侧要专门跳过（2026-10-14 故障取证）。
+    /// 判据两头：空串**不写**空键；非空串照写（负控 —— 别顺手把别名键也砍掉）。
+    #[test]
+    fn empty_output_var_mints_no_empty_results_key() {
+        let mk = |out_var: &str| {
+            let mut node = debate_container(vec!["bull-r1".into()]);
+            match &mut node {
+                WorkflowNode::Debate(d) => d.config.output_var = out_var.into(),
+                _ => unreachable!("debate_container 必须返回 Debate 节点"),
+            }
+            let id = node.base_id().to_string();
+            let mut wf = Workflow {
+                id: "wf_test".into(),
+                name: "test".into(),
+                nodes: vec![node],
+                edges: Vec::new(),
+                status: WorkflowStatus::Running,
+                created_at: 0,
+                completed_at: None,
+                results: Default::default(),
+                node_states: Default::default(),
+                output: None,
+                error_config: None,
+                error_workflow_id: None,
+                hooks_config: None,
+            };
+            wf.node_states.insert(
+                id.clone(),
+                NodeRuntimeState { status: NodeStatus::Running, ..Default::default() },
+            );
+            (wf, id)
+        };
+
+        let (mut wf, id) = mk("");
+        WorkEngine::apply_node_status_update(
+            &mut wf,
+            &id,
+            NodeStatus::Completed,
+            Some(serde_json::json!({"rounds": []})),
+            None,
+            Some(""),
+        )
+        .expect("Running → Completed 应合法");
+        assert!(wf.results.contains_key(id.as_str()), "node_id 键必须照写");
+        assert!(!wf.results.contains_key(""), "空 output_var 不得铸造空键（_raw. 畸形键的根因）");
+
+        let (mut wf2, id2) = mk("debate");
+        WorkEngine::apply_node_status_update(
+            &mut wf2,
+            &id2,
+            NodeStatus::Completed,
+            Some(serde_json::json!({"rounds": []})),
+            None,
+            Some("debate"),
+        )
+        .expect("Running → Completed 应合法");
+        assert!(wf2.results.contains_key("debate"), "负控：非空 output_var 必须照写别名键");
     }
 }

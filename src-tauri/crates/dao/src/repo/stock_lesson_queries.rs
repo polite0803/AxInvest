@@ -52,7 +52,9 @@
 //! 与代过滤同口径：被筛掉的条数一并交还调用方（两个 `fetch_*_completed` 返回元组的
 //! 第二项），由注入文本显式声明。静默筛除会把「有教训但依据不可得」伪装成「没有教训」。
 
-use axagent_entities::{reflection_lessons, stock_analyses, stock_reflections};
+use axagent_entities::{
+    reflection_lessons, stock_analyses, stock_reflections, strategy_performance,
+};
 
 /// 反思行类型重导出（命令层投影 / 分类函数签名走 dao 合规出口）。
 pub use stock_reflections::Model as ReflectionModel;
@@ -62,8 +64,8 @@ pub use stock_reflections::Model as ReflectionModel;
 // 同一族：`select_only()` / `column()` / `columns()` / `into_tuple()` 全挂在 `QuerySelect` 上，
 // 漏它报的是「no method named `select_only`」（2026-10-14 实测踩过一次）。
 use sea_orm::{
-    ColumnTrait, Condition, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect,
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, Set,
 };
 
 /// 「同档 OR 复盘档未知(NULL)」组合子（〇-B v2 第 4 条）。
@@ -563,6 +565,9 @@ pub fn reflection_review_json(r: &stock_reflections::Model) -> serde_json::Value
         "rawReturn": r.raw_return,
         "source": r.source,
         "missLayer": r.miss_layer,
+        // P2-b：本行的失败模式标注（JSON 数组文本，值域见 analysis_engine::failure_mode）。
+        // NULL = 模板未产出该字段，与「产出但全被白名单丢弃」的空数组是两件事。
+        "failureModes": r.failure_modes,
         "decisionJson": r.decision_json,
         "blackboardSnapshot": r.blackboard_snapshot,
         "status": r.status,
@@ -574,6 +579,108 @@ pub fn reflection_review_json(r: &stock_reflections::Model) -> serde_json::Value
         "moverLabel": r.mover_label,
         "horizonResults": horizon_results,
     })
+}
+
+/// 腿预测力报告的配对取数（P2-a 裁决层的唯一 IO 面）。
+///
+/// 只取「completed 且带四周期结果、且原始分析行带决策 JSON」的行，返回
+/// `(分析 decision_json, 反思 horizon_results_json)` 配对。缺任一一侧就不出：
+/// 没有后验收益的信号不是样本，硬配会造出伪观测（装配层同样拒收，这里连 IO 面也不给）。
+///
+/// 下沉到 dao 的理由同文件头：`commands-no-direct-db` 棘轮（命令层不得出现实体/ORM 字面量）。
+pub async fn leg_ic_pairs(
+    db: &DatabaseConnection,
+) -> Result<Vec<(String, String)>, sea_orm::DbErr> {
+    let rows = stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::Status.starts_with("completed"))
+        .filter(stock_reflections::Column::HorizonResultsJson.is_not_null())
+        .all(db)
+        .await?;
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<&str> = rows.iter().map(|r| r.original_analysis_id.as_str()).collect();
+    let anas = stock_analyses::Entity::find()
+        .filter(stock_analyses::Column::Id.is_in(ids))
+        .all(db)
+        .await?;
+    let by_id: std::collections::HashMap<&str, &stock_analyses::Model> =
+        anas.iter().map(|a| (a.id.as_str(), a)).collect();
+    Ok(rows
+        .iter()
+        .filter_map(|r| {
+            let results = r.horizon_results_json.as_deref()?;
+            if results.is_empty() {
+                return None;
+            }
+            let dec = by_id.get(r.original_analysis_id.as_str())?.decision_json.as_deref()?;
+            if dec.is_empty() {
+                return None;
+            }
+            Some((dec.to_string(), results.to_string()))
+        })
+        .collect())
+}
+
+/// M1 确定性样本的落库草稿（P1-1② 写侧下沉）。字段语义见 `strategy_performance` 实体的列文档。
+///
+/// 判定（`was_correct`）由命令层的纯函数算好再传 —— dao 不碰业务判据，只负责「查在不在 / 写一行」。
+pub struct ReflectionM1Draft {
+    pub id: String,
+    pub reflection_id: String,
+    pub stock_code: String,
+    pub stock_name: String,
+    pub period: String,
+    pub decision_at: i64,
+    pub exit_at: i64,
+    pub holding_days: i32,
+    pub return_pct: f64,
+    /// `was_correct` 列是 i32（0/1），不是 bool
+    pub was_correct: i32,
+    pub decision_confidence: i32,
+    pub template_version: Option<i32>,
+    pub horizon_pnl_json: Option<String>,
+}
+
+/// 该反思行是否已经落过 M1 样本（`strategy_id` 固定 `reflection_verdict`）。幂等查重用。
+pub async fn has_reflection_m1_sample(
+    db: &DatabaseConnection,
+    reflection_id: &str,
+) -> Result<bool, sea_orm::DbErr> {
+    let n = strategy_performance::Entity::find()
+        .filter(strategy_performance::Column::ReflectionId.eq(reflection_id))
+        .filter(strategy_performance::Column::StrategyId.eq("reflection_verdict"))
+        .count(db)
+        .await?;
+    Ok(n > 0)
+}
+
+/// 写入一条 M1 样本。`created_at` 与 `exit_at` 同源（= 本次判定时刻）。
+pub async fn insert_reflection_m1_sample(
+    db: &DatabaseConnection,
+    d: ReflectionM1Draft,
+) -> Result<(), sea_orm::DbErr> {
+    let row = strategy_performance::ActiveModel {
+        id: Set(d.id),
+        strategy_id: Set("reflection_verdict".to_string()),
+        period: Set(d.period),
+        stock_code: Set(d.stock_code),
+        stock_name: Set(d.stock_name),
+        decision_at: Set(d.decision_at),
+        exit_at: Set(d.exit_at),
+        holding_days: Set(d.holding_days),
+        return_pct: Set(d.return_pct),
+        was_correct: Set(d.was_correct),
+        decision_confidence: Set(d.decision_confidence),
+        template_version: Set(d.template_version),
+        horizon_pnl_json: Set(d.horizon_pnl_json),
+        agreement_score: Set(None),
+        source_ref: Set(None),
+        // §二 显式外键：本行由**这条反思**产出（统计侧直连依据）。
+        reflection_id: Set(Some(d.reflection_id)),
+        created_at: Set(d.exit_at),
+    };
+    row.insert(db).await.map(|_| ())
 }
 
 #[cfg(test)]
@@ -611,6 +718,7 @@ mod tests {
             template_version: None,
             source: "due".to_string(),
             miss_layer: None,
+            failure_modes: None,
             status: "completed".to_string(),
             created_at: 0,
             updated_at: 0,

@@ -3,9 +3,17 @@
 import { invoke } from "@/lib/invoke";
 import type { ScheduledTask, TaskExecutionRecord } from "@/types";
 import { toEpochMs } from "../formatUtils";
-import { runIdOf, type RunState, type UnifiedRun } from "../model";
+import { type RunBadge, runIdOf, type RunState, type UnifiedRun } from "../model";
 import { canExecuteNow } from "../taskGrouping";
 import type { TaskSourceAdapter } from "./types";
+
+/**
+ * 兜底轮历史行的 output 前缀约定 —— 后端 `record_auxiliary_run`
+ * （runtime-core cron_job.rs）自述的区分约定：与档期触发的历史行同表，
+ * 靠 output 前缀「[系统兜底轮…]」标明「非档期触发」。这里据此把 trigger
+ * 标为 "system"（面板显示「系统」而非「调度」）。
+ */
+const AUXILIARY_OUTPUT_PREFIX = "[系统兜底轮";
 
 /**
  * scheduled-cron 源：CronJob 「定义」与其「最近一次执行」。
@@ -50,13 +58,22 @@ export const cronAdapter: TaskSourceAdapter = {
 export function mapLastRun(task: ScheduledTask): UnifiedRun {
   const result = task.lastResult;
   const finishedAt = toEpochMs(task.lastRunAt);
+  // P1-10：partial（超墙钟预算提前收尾 / 单轮上限截断）不是失败，
+  // 主状态保持 succeeded，由 partial 徽章表达「没跑完」。
   const state: RunState = !result
     ? "queued"
-    : result.skipped
+    : result.partial || result.skipped
     ? "succeeded"
     : result.success
     ? "succeeded"
     : "failed";
+  const badges: RunBadge[] = [];
+  if (result?.skipped) {
+    badges.push("skipped");
+  }
+  if (result?.partial) {
+    badges.push("partial");
+  }
   return {
     id: runIdOf("scheduled-cron", task.id),
     source: "scheduled-cron",
@@ -64,7 +81,7 @@ export function mapLastRun(task: ScheduledTask): UnifiedRun {
     name: task.name,
     trigger: "schedule",
     state,
-    badges: result?.skipped ? ["skipped"] : undefined,
+    badges: badges.length > 0 ? badges : undefined,
     attempts: 0,
     startedAt: finishedAt !== null && result ? finishedAt - (result.durationMs ?? 0) : undefined,
     finishedAt: finishedAt ?? undefined,
@@ -91,7 +108,8 @@ export function mapExecutionRecord(
     source: "scheduled-cron",
     nativeId: rec.task_id || taskId,
     name: task?.name ?? taskId,
-    trigger: "schedule",
+    // P1-10：兜底轮（非档期触发）与档期记录显式区分，见文件头前缀约定。
+    trigger: rec.output?.startsWith(AUXILIARY_OUTPUT_PREFIX) ? "system" : "schedule",
     state: rec.success ? "succeeded" : "failed",
     attempts: 0,
     startedAt: rec.started_at,

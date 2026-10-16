@@ -6577,7 +6577,7 @@
       "period-ultra-short": "Ultra-Short",
       "period-short": "Short-Term",
       "period-mid": "Mid-Term",
-      "period-long": "Long-Term",
+      "period-long": "Quarterly",
       "placeholder-periods": "Select one or more periods",
       "label-min-confidence": "Minimum confidence",
       "label-top-n": "Top N limit",
@@ -7384,7 +7384,8 @@
       "none": "Never run",
       "skipped": "Skipped",
       "success": "Success",
-      "failed": "Failed"
+      "failed": "Failed",
+      "partial": "Partial"
     },
     "scheduled": {
       "autoRefresh": "Auto-refreshes every 15 seconds",
@@ -7614,6 +7615,10 @@
         "failed": "Failed",
         "interrupted": "Interrupted"
       }
+    },
+    "nextRun": {
+      "stale": "Stalled",
+      "staleHint": "The schedule has been overdue (or awaiting catch-up) for over 24 hours without progress: the task may have been interrupted by shutdown or is stuck. Use “Run now” to verify it is alive."
     }
   },
   "teammatePanel": {
@@ -14996,7 +15001,7 @@
         "ultra_short": "Ultra-short",
         "short": "Short",
         "mid": "Mid",
-        "long": "Long"
+        "long": "Quarterly"
       },
       "dueYes": "Due",
       "dueNo": "Pending",
@@ -15252,7 +15257,7 @@
     "boolYes": "Yes",
     "boolNo": "No",
     "backendCallFailed": "Backend call failed",
-    "tierScopeHint": "Horizon scope: serves the mid and long tiers (bottleneck / policy / earnings catalysts play out over weeks to months); ultra-short and short are not produced by design — one row per tier, holding period from that tier's authoritative days.",
+    "tierScopeHint": "Horizon scope: serves the mid and quarterly tiers (bottleneck / policy / earnings catalysts play out over weeks to months); ultra-short and short are not produced by design — one row per tier, holding period from that tier's authoritative days.",
     "timeBasisNoTier": "Live candidate has no tier ⇒ no suggested window (per-tier rows are in Serenity history)",
     "entryBand": "Entry band ±{{pct}}%",
     "entryBandHalfFallback": "Entry band is half a fixed stop multiplier ⇒ not volatility-derived",
@@ -15467,7 +15472,7 @@
     "timeHorizonUltraShort": "Ultra Short",
     "timeHorizonShort": "Short Term",
     "timeHorizonMid": "Mid Term",
-    "timeHorizonLong": "Long Term",
+    "timeHorizonLong": "Quarterly",
     "horizonSourceFormula": "Formula",
     "horizonSourceModel": "Model-reported",
     "horizonSourceBranchPick": "Branch-picked",
@@ -15571,7 +15576,7 @@
     "optionsEmpty": "No options data",
     "peers": "Peer Comparison",
     "peersEmpty": "No peer data",
-    "periodLong": "Long Term",
+    "periodLong": "Quarterly",
     "periodMid": "Mid Term",
     "periodUltraShort": "Ultra Short",
     "periodShort": "Short Term",
@@ -15776,7 +15781,7 @@
       "ultraShort": "Ultra-short term",
       "short": "Short term",
       "mid": "Medium term",
-      "long": "Long term"
+      "long": "Quarterly"
     },
     "progress": {
       "fetchingData": "Fetching stock data...",
@@ -15907,7 +15912,7 @@
       "matrixAbsence": {
         "serenity_needs_week_or_longer_realization": "By design: bottleneck evidence needs a week-or-longer horizon",
         "oversold_rebound_needs_at_least_mid_horizon": "By design: oversold rebound needs at least a mid-term horizon",
-        "oversold_rebound_not_applied_to_long_horizon": "By design: oversold rebound is not applied to the long horizon",
+        "oversold_rebound_not_applied_to_long_horizon": "By design: oversold rebound is not applied to the quarterly horizon",
         "cell_not_in_matrix": "Cell missing from the contract table (possibly an implementation gap, not by design)"
       },
       "matrixMisfit": {
@@ -17063,7 +17068,7 @@
       "outcome": "Outcome",
       "outcomeLoss": "Loss",
       "outcomeWin": "Win",
-      "periodLong": "Long-Term",
+      "periodLong": "Quarterly",
       "periodMid": "Mid-Term",
       "periodUltraShort": "Ultra-Short",
       "periodShort": "Short-Term",
@@ -17270,7 +17275,7 @@
       "horizonUltraShort": "Ultra-short",
       "horizonShort": "Short",
       "horizonMid": "Mid",
-      "horizonLong": "Long",
+      "horizonLong": "Quarterly",
       "horizonAuto": "By primary tier",
       "horizonUnknown": "Unknown horizon",
       "colHorizon": "Review horizon",
@@ -17319,8 +17324,23 @@
       "horizonImmatureNote": "The expected holding period for this horizon has not elapsed; current data is for reference only and is not used as a win/loss verdict.",
       "hitrateMatureSamples": "Mature samples",
       "hitrateLegacyHint": "Includes {{samples}} legacy record(s)",
-      "hitrateGenerationScope": "Starting generation: gen {{generation}} (excluded {{foreign}} earlier-generation and {{unknown}} unknown-generation samples)",
-      "noData": "No data"
+      "hitrateGenerationScope": "Starting generation: gen {{generation}} (excluded {{foreign}} earlier-generation; {{unknown}} unknown-generation samples included with shrinkage)",
+      "noData": "No data",
+      "failureModesTitle": "Failure modes",
+      "failureModesRows": "Reflected rows",
+      "failureModesLabelled": "Labelled",
+      "failureModesUnlabelled": "Unlabelled",
+      "failureModesUnlabelledHint": "{{count}} completed reflection(s) carry no failure-mode label — the template did not emit the field, which is not the same as “no pattern”.",
+      "failureModesEmpty": "No reflection matched the vocabulary yet",
+      "failureModesRejected": "Stored rows contain attributions outside the vocabulary: {{tokens}}",
+      "failureModeCol": "Mode",
+      "failureModeCount": "Count",
+      "failureModeShare": "Share of labelled",
+      "failureModeDcfCycleTop": "DCF optimism at cycle top",
+      "failureModeChaseUpBar": "Chasing a big up bar",
+      "failureModeRegimeEndorsement": "Market regime endorsing a single stock",
+      "failureModeReverseDcfIgnored": "Reverse DCF ignored",
+      "failureModeOther": "Other"
     },
     "row": {
       "confidence": "Confidence",
@@ -17362,7 +17382,7 @@
         "ultraShort": "Ultra-short",
         "short": "Short",
         "mid": "Mid",
-        "long": "Long"
+        "long": "Quarterly"
       },
       "description": "Persisted via CronJobStore — run full analysis periodically for specified stocks",
       "disabled": "Disabled",
@@ -17390,7 +17410,7 @@
       "decisionBacktestWindow": "T+{{n}}",
       "decisionBacktestMaxPicks": "Max",
       "decisionBacktestPeriodAll": "All periods",
-      "reflectionScanHint": "Automatically reflects on completed analyses at ultra-short (2d) / short (5d) / mid (28d) / long (90d) intervals",
+      "reflectionScanHint": "Automatically reflects on completed analyses at ultra-short (2d) / short (5d) / mid (28d) / quarterly (90d) intervals",
       "noTask": "No task created yet",
       "title": "Scheduled Analysis",
       "addTask": "Add Task",
@@ -18477,7 +18497,8 @@
       "sessionLunchBreak": "Lunch break",
       "sessionAfternoon": "Afternoon session",
       "sessionPostClose": "After close"
-    }
+    },
+    "horizonPriorHitRate": "hit rate {{rate}}%"
   },
   "pipeline": {
     "title": "Stock Pipeline",

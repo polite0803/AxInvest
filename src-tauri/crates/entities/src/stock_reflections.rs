@@ -119,6 +119,15 @@ pub struct Model {
     /// （留痕不足无法归因）。由系统在反思收尾时从事件**盖章**写入，LLM 不得自报；
     /// 反思 prompt 用它与 `what_went_wrong` 做对照。NULL = 非漏检反思。
     pub miss_layer: Option<String>,
+    /// 失败模式标注（PLAN P2-b）：反思模板从受控词表里选出的**本条误判属于哪一类**。
+    ///
+    /// 落库形态 = JSON 数组文本（与 `missed_signals` 同族），值域权威是
+    /// `analysis_engine::failure_mode::FailureMode`，由 Rust 侧白名单过滤后写入 —— 词表外的
+    /// 自造 token 不进本列，而是进看板的 `rejectedTokens`。
+    /// 与 `miss_layer` 的分界：后者是漏检链的机械归因（系统盖章、LLM 不得自报），本列是
+    /// 反思判定；两条链的计数域不同，面板不得并列成可比数字。
+    /// NULL = 模板未产出该字段（结构性缺口，面板必须显式报「未标注」，不得折算进 other）。
+    pub failure_modes: Option<String>,
     pub status: String,
     pub created_at: i64,
     pub updated_at: i64,

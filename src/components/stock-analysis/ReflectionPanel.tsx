@@ -3,7 +3,14 @@ import type { AiChatAction } from "@/components/workflow/types/workflow.types";
 import { invoke, listen } from "@/lib/invoke";
 import { horizonIcAbsenceKey, moverLabelPresentation } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
-import type { HitrateGroup, HitrateStats, HorizonResultsMap, ReflectionFeedbackResult } from "@/types";
+import type {
+  FailureModeBoard,
+  FailureModeCell,
+  HitrateGroup,
+  HitrateStats,
+  HorizonResultsMap,
+  ReflectionFeedbackResult,
+} from "@/types";
 import {
   Button,
   Card,
@@ -873,7 +880,7 @@ export function ReflectionPanel() {
               {t("stockAnalysis.reflection.hitrateGenerationScope", {
                 generation: hitrate.generationFloor ?? 0,
                 foreign: hitrate.excludedPreFloorGeneration ?? 0,
-                unknown: hitrate.excludedUnknownGeneration ?? 0,
+                unknown: hitrate.unknownGenerationSamples ?? 0,
               })}
             </Text>
           </div>
@@ -886,6 +893,18 @@ export function ReflectionPanel() {
           dataSource={hitrate?.byAction ?? []}
           columns={hitrateGroupColumns(t("stockAnalysis.reflection.hitrateByAction"))}
         />
+      </Card>
+
+      {
+        /* 失败模式看板（P2-b）：把「这次错在哪一类」从 LLM 叙述升成受控词表计数。
+          三种缺席各占一句，不得收敛成一个数；抽成 FailureModesSummary 是为了让三态各自可测。 */
+      }
+      <Card
+        title={t("stockAnalysis.reflection.failureModesTitle")}
+        size="small"
+        style={{ marginBottom: 16 }}
+      >
+        <FailureModesSummary board={hitrate?.failureModes ?? EMPTY_FAILURE_MODE_BOARD} t={t} />
       </Card>
 
       {/* 反思历史 */}
@@ -1217,6 +1236,102 @@ function renderBlackboardSnapshot(raw: string, label: string) {
 // 导出仅为便于定向单测（四周期 Tab 不串线 / null 不显示为 0 / 空周期不误报）：
 // 该组件不在模块外被生产代码引用，测试入口见
 // `src/components/stock-analysis/__tests__/ReflectionPanel.horizon.test.tsx`。
+// 反思统计还没回来时的占位（面板不许出现 undefined 读数）。
+const EMPTY_FAILURE_MODE_BOARD: FailureModeBoard = {
+  totalRows: 0,
+  labelled: 0,
+  unlabelled: 0,
+  cells: [],
+  rejectedTokens: [],
+};
+
+// 词表 → i18n 键的**显式映射**：词表外的值直出原串，面板不伪造译名。
+const FAILURE_MODE_LABEL_KEYS: Record<string, string> = {
+  dcf_optimistic_at_cycle_top: "failureModeDcfCycleTop",
+  chase_big_up_bar: "failureModeChaseUpBar",
+  market_regime_endorsement: "failureModeRegimeEndorsement",
+  reverse_dcf_ignored: "failureModeReverseDcfIgnored",
+  other: "failureModeOther",
+};
+
+/**
+ * 失败模式看板（P2-b）。三种缺席各占一句，绝不收敛成一个数：
+ * ① `unlabelled` = 模板没产出该字段（结构性缺口，不是「没有失败模式」）；
+ * ② `rejectedTokens` = 库里存着词表外的自造归因；
+ * ③ `cells` 为空 = 有标注但一条都没进词表。
+ *
+ * 抽成独立组件：主面板要拉起整棵 store 与多个 invoke，组件测试打不进去。
+ */
+export function FailureModesSummary({
+  board,
+  t,
+}: {
+  board: FailureModeBoard;
+  t: (key: string, opts?: Record<string, unknown>) => string;
+}) {
+  const columns: ColumnsType<FailureModeCell> = [
+    {
+      title: t("stockAnalysis.reflection.failureModeCol"),
+      dataIndex: "mode",
+      key: "mode",
+      render: (mode: string) => {
+        const key = FAILURE_MODE_LABEL_KEYS[mode];
+        return key ? t(`stockAnalysis.reflection.${key}`) : mode;
+      },
+    },
+    {
+      title: t("stockAnalysis.reflection.failureModeCount"),
+      dataIndex: "count",
+      key: "count",
+      width: 90,
+    },
+    {
+      // 分母是「已标注反思行」，一行可命中多个模式 ⇒ 各格占比之和可 >100%
+      title: t("stockAnalysis.reflection.failureModeShare"),
+      dataIndex: "share",
+      key: "share",
+      width: 120,
+      render: (share: number) => `${(share * 100).toFixed(1)}%`,
+    },
+  ];
+  return (
+    <>
+      <Descriptions size="small" bordered column={3}>
+        <Descriptions.Item label={t("stockAnalysis.reflection.failureModesRows")}>
+          {board.totalRows}
+        </Descriptions.Item>
+        <Descriptions.Item label={t("stockAnalysis.reflection.failureModesLabelled")}>
+          {board.labelled}
+        </Descriptions.Item>
+        <Descriptions.Item label={t("stockAnalysis.reflection.failureModesUnlabelled")}>
+          {board.unlabelled}
+        </Descriptions.Item>
+      </Descriptions>
+      {board.unlabelled > 0 && (
+        <Text type="secondary" style={{ fontSize: 12, display: "block", marginTop: 8 }}>
+          {t("stockAnalysis.reflection.failureModesUnlabelledHint", { count: board.unlabelled })}
+        </Text>
+      )}
+      <Table
+        size="small"
+        rowKey="mode"
+        pagination={false}
+        style={{ marginTop: 12 }}
+        dataSource={board.cells}
+        columns={columns}
+        locale={{ emptyText: t("stockAnalysis.reflection.failureModesEmpty") }}
+      />
+      {board.rejectedTokens.length > 0 && (
+        <Text type="warning" style={{ fontSize: 12, display: "block", marginTop: 8 }}>
+          {t("stockAnalysis.reflection.failureModesRejected", {
+            tokens: board.rejectedTokens.join("、"),
+          })}
+        </Text>
+      )}
+    </>
+  );
+}
+
 export function ExpandedReflectionRow(
   { row, t, onRefresh }: {
     row: ReflectionRow;

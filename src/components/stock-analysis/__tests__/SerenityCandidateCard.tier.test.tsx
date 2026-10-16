@@ -158,7 +158,7 @@ describe("面板一票一卡（逐档折叠，最多四档）", () => {
     );
   }
 
-  it("同票两档 ⇒ 折叠成一张卡、卡内两行档位（中期/长期），标题按票计数", async () => {
+  it("同票两档 ⇒ 折叠成一张卡、卡内两行档位（中期/季度），标题按票计数", async () => {
     act(() => {
       useSerenityStore.setState({
         candidates: [
@@ -170,7 +170,7 @@ describe("面板一票一卡（逐档折叠，最多四档）", () => {
     renderPanel();
     expect(screen.getAllByTestId("serenity-tier").map((el) => el.textContent)).toEqual([
       "中期",
-      "长期",
+      "季度",
     ]);
     // 一票一卡 ⇒ 卡头（代表候选）只渲染一次；第二档的名字不出现在卡头
     expect(screen.getAllByText("落库中期")).toHaveLength(1);
@@ -195,7 +195,7 @@ describe("面板一票一卡（逐档折叠，最多四档）", () => {
       "超短线",
       "短线",
       "中期",
-      "长期",
+      "季度",
     ]);
     expect(screen.getByText(/候选标的\s*\(1\s*只\)/)).toBeTruthy();
     await settle();

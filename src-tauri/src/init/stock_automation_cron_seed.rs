@@ -350,26 +350,44 @@ mod tests {
 
     /// 齐备性判据 ②：**每条内置任务都要能在任务中心「立即执行」**。
     ///
-    /// 与上一条不同的失效面：task_type 有执行分支（到点自动跑），却漏登记
-    /// `scheduled_task::BUILTIN_TASK_TYPES` ⇒ 手动触发落到分支 3 报
+    /// 与上一条不同的失效面：task_type 有执行分支（到点自动跑），却既漏登记
+    /// `scheduled_task::BUILTIN_TASK_TYPES`、又没有 `workflow_id` ⇒ 手动触发落进分支 3 报
     /// `MANUAL_RUN_NOT_SUPPORTED`。现网 `lesson-validation` 就是这么漏了几个月。
-    /// 口径比上一条实：直接拿 `build_builtin_jobs()` 产出的**真实 task_type 值**对表，
-    /// 不解析文本（文本门会被注释与测试自己喂饱）。
+    ///
+    /// ⚠ 判据必须覆盖**两条**手动执行路径（`execute_scheduled_task` 的实际分支顺序）：
+    ///   分支 1 = 带 `workflow_id`（趋势智选两条链走这条；它的 `trend-screening` task_type
+    ///          只是前端归链标记，executor 没有对应分支 —— 见 `recommendation_cron.rs` 的设计注）；
+    ///   分支 2 = 无工作流但 task_type 在白名单（荐股 / 池分析 / 反思 / 回测等）。
+    /// 只查白名单会把分支 1 的任务判成「无法手动执行」（本版首跑即为此假红），
+    /// 而为了让门变绿去把 `trend-screening` 加进白名单更错 —— 那是宣称 executor 有它
+    /// 并不存在的分支，门从此失去意义。
     #[test]
     fn every_builtin_job_is_manually_executable() {
         let jobs = build_builtin_jobs().expect("内置任务构造失败");
         let allowed = crate::commands::scheduled_task::builtin_task_types();
-        assert!(allowed.len() >= jobs.len(), "白名单应不少于内置任务数，实得 {allowed:?}");
+        assert!(allowed.len() >= 10, "白名单下限异常（{allowed:?}）");
+        // 两条路径的谓词 = 生产分支顺序的镜像，负控也拆在同一处守卫上。
+        let manually_executable = |j: &CronJob| -> bool {
+            j.workflow_id.as_deref().is_some_and(|w| !w.is_empty())
+                || j.task_type.as_deref().is_some_and(|tt| allowed.contains(&tt))
+        };
         for job in &jobs {
             let tt = job.task_type.as_deref().expect("内置任务必须带 task_type");
             assert!(
-                allowed.contains(&tt),
-                "任务 '{}' 的 task_type `{tt}` 不在 BUILTIN_TASK_TYPES ⇒ 任务中心无法手动执行",
+                manually_executable(job),
+                "任务 '{}' 的 task_type `{tt}` 既不在 BUILTIN_TASK_TYPES，\
+                 又没有 workflow_id 可走分支 1 ⇒ 任务中心无法手动执行",
                 job.name
             );
         }
 
-        // 负控：一个没登记的 task_type 必须被判为不可手动执行，否则本门恒真
+        // 负控：两条路径都拿不到 ⇒ 必须被判为不可手动执行，否则本门恒真。
+        let mut orphan =
+            CronJob::new("负控空壳", "0 0 * * *", "既无工作流也无内置 handler", "负控夹具")
+                .with_task_type("no-such-builtin-type");
+        assert!(!manually_executable(&orphan), "两条路径皆无的任务必须被拦下");
+        orphan = orphan.with_workflow_id("some-workflow".to_string());
+        assert!(manually_executable(&orphan), "补上 workflow_id 后必须放行（分支 1）");
         assert!(!allowed.contains(&"no-such-builtin-type"));
     }
 

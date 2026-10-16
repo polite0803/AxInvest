@@ -25,6 +25,7 @@ import { useNavigate } from "react-router-dom";
 import { type FieldState, parseCronFields } from "./CronScheduleBuilder";
 import { formatDateTime, formatDuration, formatRelativeOrAbsolute } from "./formatUtils";
 import { TaskCreateModal } from "./forms/TaskCreateModal";
+import { isNextRunStale } from "./model";
 import { canExecuteNow, classifyScheduledTask, isBuiltinTask, type ScheduledTaskGroup } from "./taskGrouping";
 
 const AUTO_REFRESH_INTERVAL_MS = 15_000;
@@ -308,14 +309,25 @@ export function ScheduledJobsTab() {
       },
       {
         title: t("tasksCenter.column.nextRun"),
-        dataIndex: "nextRunAt",
         key: "nextRunAt",
-        width: 150,
-        render: (v: string | null) => (
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {v ? formatRelativeOrAbsolute(v, locale) : "-"}
-          </Typography.Text>
-        ),
+        width: 170,
+        render: (_: unknown, task: ScheduledTask) => {
+          const stale = isNextRunStale(task);
+          return (
+            <Space size={4}>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {task.nextRunAt ? formatRelativeOrAbsolute(task.nextRunAt, locale) : "-"}
+              </Typography.Text>
+              {stale && (
+                <Tooltip title={t("tasksCenter.nextRun.staleHint")}>
+                  <Tag color="warning" style={{ marginInlineEnd: 0 }}>
+                    {t("tasksCenter.nextRun.stale")}
+                  </Tag>
+                </Tooltip>
+              )}
+            </Space>
+          );
+        },
       },
       {
         title: t("tasksCenter.column.lastRun"),
@@ -328,6 +340,8 @@ export function ScheduledJobsTab() {
           const r = task.lastResult;
           const tag = r.skipped
             ? <Tag color="default">{t("tasksCenter.lastRun.skipped")}</Tag>
+            : r.partial
+            ? <Tag color="warning">{t("tasksCenter.lastRun.partial")}</Tag>
             : r.success
             ? <Tag color="success">{t("tasksCenter.lastRun.success")}</Tag>
             : <Tag color="error">{t("tasksCenter.lastRun.failed")}</Tag>;

@@ -1399,10 +1399,38 @@ type AlgoToolRow = (
 ///      而非展示数字（避免 R5「只降数字不降动作」）。
 ///   ⚠ **会改决策数值**（四档）：跨代比较结论 / 仓位须按代筛样，不可与 v156 及更早混算。
 ///
+/// **v157 → v158（2026-10-16）**：决策链可靠性 P1 批（`PLAN-stock-decision-reliability.md`
+///   的 P1-4 / P1-8 / P2-c）。主链 + 四档脚本 + 子模板映射变更：
+///   ① **P1-4 追涨 / 阻力门**（主链 `portfolio-mgr.rhai`）：R-SURGE-GATE（当日涨幅 > 4%
+///      且成交额 > 前 90 日 90 分位 ⇒ 买入/增持压回持有，「次日回踩确认」）+
+///      R-RESISTANCE-GATE（现价落在前高 5% 带内 ⇒ 开仓压回持有）；
+///      f12 超买升权（RSI > 75 且动量腿为负 ⇒ f12 有效权重下限 0.15）。
+///   ② **P1-4 mid 档 σ 带收紧**：`inside_sigma_band` 由 |z| ≤ 2 收紧到 **|z| ≤ 1**
+///      （2σ 覆盖约 95% 常态波动、时机过滤近乎失效；紫金 10-09 bandZ=-0.97 仍 PASS）。
+///   ③ **P1-8 宏观时效门**（h-long）：GDP 发布距锚点 > 3 个月、CPI/PPI/PMI > 1 个月
+///      ⇒ `macroRegime` 腿按缺席处理并进 gaps（旧实现把「GDP 停 Q1」的残缺块按
+///      ~18% 名义权重喂给长档）；本档映射新增 5 个发布日期键。
+///   ④ **P2-c priorHitRate**：逐档先验输出新增本档原始方向命中率（四条 h-*.rhai 落字段）。
+///   ⚠ **会改决策数值**（主链 + 四档）：跨代比较结论 / 仓位须按代筛样，不可与 v157 及更早混算。
+///
+/// **v158 → v159（2026-10-16）**：v158 于 04:30 已播种，但此后工作树又修了两处**必须重播种**
+///   的问题（同版本号不会重播种 —— 版本门是 `existing.version >= TEMPLATE_VERSION ⇒ return`，
+///   故必须再升一版）：
+///   ① **R-F12-OVERBOUGHT 前向引用修复**：v158 快照里的首版把 `decision_trail.push` 写在
+///      其定义行之前 —— 一旦某标的 RSI>75 且动量转负即 `Variable not found` 落 catch
+///      （`action="数据缺失"`）；已整段迁移到追溯链定义之后。
+///   ② **P1-4/P1-8/P2-c 的后续修复与测试面**（surge 夹具、宏观门测试、priorHitRate 收尾）——
+///      随本版一并固化。
+///
+/// **v159 → v160（2026-10-16）**：P1-3 置信校准封顶（`PLAN-stock-decision-reliability.md` R3/R7）
+///   —— 四份 `portfolio-mgr-h-*.rhai` 返回段新增 `calibrationReady`（逐档透传 Rust 注入的先验表
+///   同名字段），`portfolio-mgr.rhai` 据此把「本档未达校准门槛」的置信封顶折进 `confidence_cap`
+///   单一权威，并新增 `R-CALIB-CAP` 追溯链归因。图内容与脚本正文均变 ⇒ 必须重播种。
+///
 /// `pub` 而非 `pub(crate)`：`axagent-batch-rerun` 的「版本联查完整性」要读这**同一个**数字
 /// （bin 是独立 crate，`pub(crate)` 读不到）。它不能被抄第二份 —— 本条的用处正是
 /// 对比「代码会用的图版本」与「库里已播种到的版本」，两份数字一旦各写各的就永远对不上。
-pub const TEMPLATE_VERSION: i32 = 157;
+pub const TEMPLATE_VERSION: i32 = 160;
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -6514,11 +6542,12 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-t-lockup-data-portfolio-mgr", "t-lockup-data", "portfolio-mgr"));
     // ── P2 新增: 龙虎榜数据源 → portfolio-mgr 显式边 ──
     edges.push(edge("e-t-dragon-tiger-data-portfolio-mgr", "t-dragon-tiger-data", "portfolio-mgr"));
-    // ── 2026-07-25 修复: 龙虎榜数据 → a-hot-money 显式边 ──
-    // t-dragon-tiger-data 输出 get_stock_dragon_tiger 结果（机构席位/游资动向/上榜原因），
-    // a-hot-money 需要此数据做资金面追踪分析。LLM 仍可通过 PROFILE_TOOLS 调 get_stock_dragon_tiger
-    // 补充，但有了这条边 + input_mapping 注入后可免 LLM 自行调用。
-    edges.push(edge("e-t-dragon-tiger-data-hot-money", "t-dragon-tiger-data", "a-hot-money"));
+    // （已删）`e-t-dragon-tiger-data-hot-money`：2026-07-25 曾为 a-hot-money 直供龙虎榜数据。
+    //   B-2b（v135）把分析师搬进档子模板后 `a-hot-money` 不在主图 ⇒ 这条边自 v143 起
+    //   每次播种都由 `prune_dangling_analyst_edges` 兜底剔除并打 WARN（该兜底与其
+    //   测试**保留**，继续对将来误写的分析师类悬空边告警）。2026-10-16 清理源头：
+    //   落库产物逐字节不变（反正必被剔除），只是不再让兜底替源头擦屁股。
+    //   档模板侧龙虎榜数据的供给走各自的工具调用与 input_mapping，不经主图这条边。
     // ── P2 新增: 公告数据源 → portfolio-mgr 显式边 ──
     // t-catalyst-data 输出公司公告列表，用于公告关键词风险检测
     edges.push(edge("e-t-catalyst-data-portfolio-mgr", "t-catalyst-data", "portfolio-mgr"));

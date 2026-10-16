@@ -6576,7 +6576,7 @@
       "period-ultra-short": "Ultra-Short",
       "period-short": "Short-Term",
       "period-mid": "Mid-Term",
-      "period-long": "Long-Term",
+      "period-long": "Квартальный",
       "placeholder-periods": "Выберите один или несколько периодов",
       "label-min-confidence": "Минимальная достоверность",
       "label-top-n": "Лимит Top N",
@@ -7384,7 +7384,8 @@
       "none": "Ещё не запускалась",
       "skipped": "Пропущено",
       "success": "Успешно",
-      "failed": "Ошибка"
+      "failed": "Ошибка",
+      "partial": "Частично"
     },
     "scheduled": {
       "autoRefresh": "Автообновление каждые 15 секунд",
@@ -7614,6 +7615,10 @@
         "failed": "Ошибка",
         "interrupted": "Прервано"
       }
+    },
+    "nextRun": {
+      "stale": "Расписание зависло",
+      "staleHint": "Расписание просрочено (или ожидает дозапуска) более 24 часов без движения: задача могла быть прервана выключением или зависла. Нажмите «Запустить сейчас», чтобы проверить."
     }
   },
   "teammatePanel": {
@@ -14829,7 +14834,7 @@
         "ultra_short": "Ультракороткий",
         "short": "Короткий",
         "mid": "Средний",
-        "long": "Длинный"
+        "long": "Квартальный"
       },
       "dueYes": "Наступил",
       "dueNo": "Ожидается",
@@ -15053,7 +15058,7 @@
     "boolYes": "Да",
     "boolNo": "Нет",
     "backendCallFailed": "Ошибка вызова бэкенда",
-    "tierScopeHint": "Горизонт: обслуживаются средний и длинный уровни (катализаторы узких мест / политики / прибыли реализуются неделями-месяцами); сверхкороткий и короткий по замыслу не выпускаются — по строке на уровень, срок из авторитетного значения уровня.",
+    "tierScopeHint": "Горизонт: обслуживаются средний и квартальный уровни (катализаторы узких мест / политики / прибыли реализуются неделями-месяцами); сверхкороткий и короткий по замыслу не выпускаются — по строке на уровень, срок из авторитетного значения уровня.",
     "timeBasisNoTier": "Живой кандидат без уровня ⇒ нет рекомендуемого окна (строки по уровням — в истории)",
     "entryBand": "Диапазон входа ±{{pct}}%",
     "entryBandHalfFallback": "Диапазон = половина фиксированного множителя ⇒ не из волатильности",
@@ -15439,7 +15444,7 @@
       "ultraShort": "Сверхкраткосрочный",
       "short": "Краткосрочный",
       "mid": "Среднесрочный",
-      "long": "Долгосрочный"
+      "long": "Квартальный"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15483,7 +15488,7 @@
     "periodUltraShort": "Краткосрочно",
     "periodShort": "Краткосрочно",
     "periodMid": "Среднесрочно",
-    "periodLong": "Долгосрочно",
+    "periodLong": "Квартальный",
     "generatedAt": "Сгенерировано: {{time}}",
     "bannerVendorDisabled": "Некоторые стили отключены: {styles}",
     "openSettings": "Открыть настройки",
@@ -15514,7 +15519,7 @@
     "timeHorizonUltraShort": "Сверхкратко",
     "timeHorizonShort": "Краткосрочно",
     "timeHorizonMid": "Среднесрочно",
-    "timeHorizonLong": "Долгосрочно",
+    "timeHorizonLong": "Квартальный",
     "horizonSourceFormula": "формула",
     "horizonSourceModel": "от модели",
     "horizonSourceBranchPick": "Выбор ветки",
@@ -15688,7 +15693,7 @@
       "matrixAbsence": {
         "serenity_needs_week_or_longer_realization": "По замыслу: подтверждения узкого места требуют горизонта не менее недели",
         "oversold_rebound_needs_at_least_mid_horizon": "По замыслу: отскок перепроданности требует как минимум среднесрочного горизонта",
-        "oversold_rebound_not_applied_to_long_horizon": "По замыслу: отскок перепроданности не применяется к долгосрочному горизонту",
+        "oversold_rebound_not_applied_to_long_horizon": "По замыслу: отскок перепроданности не применяется к квартальному горизонту",
         "cell_not_in_matrix": "Ячейка отсутствует в договорной таблице (возможно, пробел реализации, а не по замыслу)"
       },
       "matrixMisfit": {
@@ -16818,7 +16823,7 @@
       "periodUltraShort": "Ultra-Short",
       "periodShort": "Short-Term",
       "periodMid": "Mid-Term",
-      "periodLong": "Long-Term",
+      "periodLong": "Квартальный",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -16955,7 +16960,7 @@
       "trendScreening": "Периодический отбор трендов",
       "trendScreeningHint": "Периодически запускает workflow отбора трендов (serenity-screening); результаты попадают в пул кандидатов",
       "reflectionScan": "Периодическая рефлексия",
-      "reflectionScanHint": "Автоматически рефлексирует завершённые анализы с интервалами ультракороткий (2 д) / короткий (5 д) / средний (28 д) / длинный (90 д)",
+      "reflectionScanHint": "Автоматически рефлексирует завершённые анализы с интервалами ультракороткий (2 д) / короткий (5 д) / средний (28 д) / квартальный (90 д)",
       "decisionBacktest": "Бэктест решений",
       "decisionBacktestHint": "Воспроизводит исторические рекомендации, загружает реальные свечи за окна T+N, измеряет долю попаданий и эффективность факторов и записывает результат в запись анализа",
       "decisionBacktestWindow": "T+{{n}}",
@@ -16992,7 +16997,7 @@
         "ultraShort": "Ультракороткий",
         "short": "Короткий",
         "mid": "Средний",
-        "long": "Длинный"
+        "long": "Квартальный"
       },
       "column": {
         "id": "ID",
@@ -17155,7 +17160,7 @@
       "horizonUltraShort": "Сверхкраткий",
       "horizonShort": "Краткий",
       "horizonMid": "Средний",
-      "horizonLong": "Долгий",
+      "horizonLong": "Квартальный",
       "horizonAuto": "По основной ступени",
       "horizonUnknown": "Неизвестный горизонт",
       "colHorizon": "Горизонт разбора",
@@ -17204,8 +17209,23 @@
       "horizonImmatureNote": "Ожидаемый период удержания по этому горизонту ещё не истёк; текущие данные носят справочный характер и не используются как вердикт.",
       "hitrateMatureSamples": "Зрелые выборки",
       "hitrateLegacyHint": "Включая {{samples}} старых записей",
-      "hitrateGenerationScope": "Начальное поколение: {{generation}} (исключено {{foreign}} более ранних и {{unknown}} неизвестных)",
-      "noData": "Нет данных"
+      "hitrateGenerationScope": "Начальное поколение: {{generation}} ({{foreign}} более ранних исключено; {{unknown}} неизвестных включены со сжатием)",
+      "noData": "Нет данных",
+      "failureModesTitle": "Модели ошибок",
+      "failureModesRows": "Разобранные решения",
+      "failureModesLabelled": "С меткой",
+      "failureModesUnlabelled": "Без метки",
+      "failureModesUnlabelledHint": "{{count}} завершённых разборов не имеют модели ошибки — шаблон не выдал поле; это не то же самое, что «ошибки нет».",
+      "failureModesEmpty": "Пока ни один разбор не совпал со словарём",
+      "failureModesRejected": "В сохранённых строках есть причины вне словаря: {{tokens}}",
+      "failureModeCol": "Модель",
+      "failureModeCount": "Количество",
+      "failureModeShare": "Доля от помеченных",
+      "failureModeDcfCycleTop": "Оптимизм DCF на вершине цикла",
+      "failureModeChaseUpBar": "Гонка за сильной свечой",
+      "failureModeRegimeEndorsement": "Режим рынка как поручитель за бумагу",
+      "failureModeReverseDcfIgnored": "Обратный DCF проигнорирован",
+      "failureModeOther": "Прочее"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",
@@ -18259,7 +18279,8 @@
       "sessionLunchBreak": "Обеденный перерыв",
       "sessionAfternoon": "Дневная сессия",
       "sessionPostClose": "После закрытия"
-    }
+    },
+    "horizonPriorHitRate": "доля попаданий {{rate}} %"
   },
   "pipeline": {
     "title": "Конвейер акций",

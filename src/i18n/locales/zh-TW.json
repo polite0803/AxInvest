@@ -6577,7 +6577,7 @@
       "period-ultra-short": "超短线",
       "period-short": "短线",
       "period-mid": "中线",
-      "period-long": "长线",
+      "period-long": "季度",
       "placeholder-periods": "選擇一個或多個週期",
       "label-min-confidence": "最低信心度",
       "label-top-n": "推薦數量上限",
@@ -7384,7 +7384,8 @@
       "none": "尚未執行",
       "skipped": "已略過",
       "success": "成功",
-      "failed": "失敗"
+      "failed": "失敗",
+      "partial": "部分完成"
     },
     "scheduled": {
       "autoRefresh": "每 15 秒自動重新整理",
@@ -7614,6 +7615,10 @@
         "failed": "失敗",
         "interrupted": "已中斷"
       }
+    },
+    "nextRun": {
+      "stale": "排程停滯",
+      "staleHint": "檔期已過（或待補發）超過 24 小時未推進：任務可能被關機打斷或執行卡死，點擊「立即執行」可驗證存活。"
     }
   },
   "teammatePanel": {
@@ -14942,7 +14947,7 @@
         "ultra_short": "超短",
         "short": "短線",
         "mid": "中線",
-        "long": "長線"
+        "long": "季度"
       },
       "dueYes": "已到期",
       "dueNo": "未到期",
@@ -15166,7 +15171,7 @@
     "boolYes": "是",
     "boolNo": "否",
     "backendCallFailed": "後端呼叫失敗",
-    "tierScopeHint": "檔位口徑：服務中線與長線兩檔（瓶頸/政策/業績催化劑以週-月兌現）；短/超短檔按設計不做，落庫按檔各一列、持有期取該檔權威天數。",
+    "tierScopeHint": "檔位口徑：服務中線與季度兩檔（瓶頸/政策/業績催化劑以週-月兌現）；短/超短檔按設計不做，落庫按檔各一列、持有期取該檔權威天數。",
     "timeBasisNoTier": "即時候選未標檔 ⇒ 無建議視窗（逐檔記錄見趨勢智選歷史）",
     "entryBand": "建倉帶 ±{{pct}}%",
     "entryBandHalfFallback": "建倉帶取自固定止損乘數之半 ⇒ 非波動率推導",
@@ -15663,7 +15668,7 @@
       "ultraShort": "超短线",
       "short": "短线",
       "mid": "中线",
-      "long": "长线"
+      "long": "季度"
     },
     "subtitle": "AxInvest · 智能驱动 · 多维分析",
     "riskScore": "風險分: {{score}}",
@@ -15799,7 +15804,7 @@
       "matrixAbsence": {
         "serenity_needs_week_or_longer_realization": "按設計不做：瓶頸證據需以周為單位兌現",
         "oversold_rebound_needs_at_least_mid_horizon": "按設計不做：超跌反彈需至少中線兌現",
-        "oversold_rebound_not_applied_to_long_horizon": "按設計不做：超跌反彈不適用於長線",
+        "oversold_rebound_not_applied_to_long_horizon": "按設計不做：超跌反彈不適用於季度檔",
         "cell_not_in_matrix": "契約表缺該格（可能是實作漏了，不是按設計不做）"
       },
       "matrixMisfit": {
@@ -16481,7 +16486,7 @@
     "periodUltraShort": "超短線",
     "periodShort": "短期",
     "periodMid": "中期",
-    "periodLong": "長期",
+    "periodLong": "季度",
     "generatedAt": "生成於 {{time}}",
     "bannerVendorDisabled": "部分風格已禁用: {styles}",
     "openSettings": "打開設定",
@@ -16525,7 +16530,7 @@
     "timeHorizonUltraShort": "超短線",
     "timeHorizonShort": "短線",
     "timeHorizonMid": "中期",
-    "timeHorizonLong": "長期",
+    "timeHorizonLong": "季度",
     "horizonSourceFormula": "公式定檔",
     "horizonSourceModel": "模型自報",
     "horizonSourceBranchPick": "分支選檔",
@@ -17042,7 +17047,7 @@
       "periodUltraShort": "超短线",
       "periodShort": "短期",
       "periodMid": "中期",
-      "periodLong": "长期",
+      "periodLong": "季度",
       "title": "推荐结果",
       "emptyNoCache": "暂无缓存结果，请点击刷新获取最新推荐",
       "generatedAt": "生成于 {{time}}",
@@ -17179,7 +17184,7 @@
       "trendScreening": "趨勢智選定時篩選",
       "trendScreeningHint": "定時執行趨勢智選（serenity-screening）工作流，產物（style=serenity）併入候選池",
       "reflectionScan": "週期反思",
-      "reflectionScanHint": "依超短線 2 天 / 短線 5 天 / 中線 28 天 / 長線 90 天的間隔，自動反思已完成的股票分析",
+      "reflectionScanHint": "依超短線 2 天 / 短線 5 天 / 中線 28 天 / 季度 90 天的間隔，自動反思已完成的股票分析",
       "decisionBacktest": "決策回測",
       "decisionBacktestHint": "回放歷史薦股，拉取 T+N 窗口的真實 K 線，測算命中率與因子有效性，並將結果回寫到分析記錄的交易結果",
       "decisionBacktestWindow": "T+{{n}}",
@@ -17216,7 +17221,7 @@
         "ultraShort": "超短線",
         "short": "短線",
         "mid": "中線",
-        "long": "長線"
+        "long": "季度"
       },
       "column": {
         "id": "ID",
@@ -17379,7 +17384,7 @@
       "horizonUltraShort": "超短線",
       "horizonShort": "短線",
       "horizonMid": "中線",
-      "horizonLong": "長線",
+      "horizonLong": "季度",
       "horizonAuto": "按主檔",
       "horizonUnknown": "未知週期",
       "colHorizon": "復盤檔",
@@ -17428,8 +17433,23 @@
       "horizonImmatureNote": "該週期行情尚未走完期望持有期，當前資料僅供參考，不作為勝負判定。",
       "hitrateMatureSamples": "成熟樣本",
       "hitrateLegacyHint": "含舊記錄 {{samples}} 筆",
-      "hitrateGenerationScope": "起算代際：第 {{generation}} 代（已排除更早代的 {{foreign}} 條、代際未知的 {{unknown}} 條）",
-      "noData": "暫無資料"
+      "hitrateGenerationScope": "起算代際：第 {{generation}} 代（已排除更早代的 {{foreign}} 條；代際未知的 {{unknown}} 條按收縮納入）",
+      "noData": "暫無資料",
+      "failureModesTitle": "失敗模式分布",
+      "failureModesRows": "已反思行",
+      "failureModesLabelled": "已標註",
+      "failureModesUnlabelled": "未標註",
+      "failureModesUnlabelledHint": "{{count}} 条已完成反思沒有失敗模式標註 —— 模板未產出該欄位，與「不屬於任何一類」不是一回事。",
+      "failureModesEmpty": "尚無一條反思命中詞表",
+      "failureModesRejected": "庫內存在詞表外的歸因值：{{tokens}}",
+      "failureModeCol": "模式",
+      "failureModeCount": "條數",
+      "failureModeShare": "佔已標註",
+      "failureModeDcfCycleTop": "週期頂部 DCF 樂觀",
+      "failureModeChaseUpBar": "大陽線追漲",
+      "failureModeRegimeEndorsement": "大盤情緒替個股背書",
+      "failureModeReverseDcfIgnored": "反向 DCF 被無視",
+      "failureModeOther": "其它"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",
@@ -18483,7 +18503,8 @@
       "sessionLunchBreak": "午間休市",
       "sessionAfternoon": "下午盤中",
       "sessionPostClose": "已收盤"
-    }
+    },
+    "horizonPriorHitRate": "命中率 {{rate}}%"
   },
   "pipeline": {
     "title": "股票管道",

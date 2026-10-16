@@ -318,6 +318,76 @@ pub fn register_pm_functions(engine: &mut Engine) {
             }
         },
     );
+    // P1-4（`PLAN-stock-decision-reliability.md` R6）：追涨形态的**客观量** ——
+    // 当日涨幅 / 当日成交额 / 前窗（不含当日）成交额 90 分位 / 前高距离。
+    // 门阈值（涨幅 4% / 90 分位 / 前高 5% 带）由决策脚本持有；样本不足 ⇒ unit
+    // （门按「未判定 ≠ 通过」处理，与超短 breadth 门同纪律）。
+    engine.register_fn("pm_surge_state", |bars: rhai::Array, lookback: i64| -> rhai::Dynamic {
+        let (closes, amounts, highs) = surge_series_from_bars(&bars);
+        match axagent_harness::indicators::surge_state(
+            &closes,
+            &amounts,
+            &highs,
+            lookback.max(0) as usize,
+        ) {
+            Some(s) => {
+                let mut m = rhai::Map::new();
+                m.insert("lastGainPct".into(), rhai::Dynamic::from(s.last_gain_pct));
+                m.insert("lastAmount".into(), rhai::Dynamic::from(s.last_amount));
+                m.insert(
+                    "amountP90".into(),
+                    match s.amount_p90 {
+                        Some(v) => rhai::Dynamic::from(v),
+                        None => rhai::Dynamic::UNIT,
+                    },
+                );
+                m.insert(
+                    "priorHigh".into(),
+                    match s.prior_high {
+                        Some(v) => rhai::Dynamic::from(v),
+                        None => rhai::Dynamic::UNIT,
+                    },
+                );
+                m.insert(
+                    "highRatio".into(),
+                    match s.high_ratio {
+                        Some(v) => rhai::Dynamic::from(v),
+                        None => rhai::Dynamic::UNIT,
+                    },
+                );
+                rhai::Dynamic::from_map(m)
+            },
+            None => rhai::Dynamic::UNIT,
+        }
+    });
+    // P1-8（`PLAN-stock-decision-reliability.md` R10）：宏观块时效门 ——
+    // 返回**非空字符串** = 宏观块已超滞（调用方须把 macroRegime 腿按缺席处理并把原因进 gaps）。
+    // 判据 = 发布日与分析锚点（snapshotDate）的**月差**：
+    //   · GDP：> 3 个月（超 1 季度）⇒ stale；
+    //   · CPI / PPI / PMI：> 1 个月 ⇒ stale；
+    //   · 任一序列发布日缺失/不可解析 ⇒ 时效不可自证 ⇒ stale（不静默放行）。
+    // 10-09 紫金实况（4419bd01）：GDP releaseDate 2026-04-20 距锚点 6 个月 ⇒ 命中。
+    engine.register_fn(
+        "pm_macro_stale_reason",
+        |snapshot: rhai::Dynamic,
+         gdp_release: rhai::Dynamic,
+         cpi_release: rhai::Dynamic,
+         ppi_release: rhai::Dynamic,
+         pmi_release: rhai::Dynamic|
+         -> rhai::Dynamic {
+            let s = |d: rhai::Dynamic| d.into_string().unwrap_or_default();
+            rhai::Dynamic::from(
+                macro_stale_reason(
+                    &s(snapshot),
+                    &s(gdp_release),
+                    &s(cpi_release),
+                    &s(ppi_release),
+                    &s(pmi_release),
+                )
+                .unwrap_or_default(),
+            )
+        },
+    );
     // 「长线更值得」的判定侧折算（Phase D-2）：见 `harness::indicators::snr_confidence` 的推导。
     // 同样在 Rust 侧开方 —— 本仓共享 Rhai 引擎没有 sqrt/Math。
     engine.register_fn("pm_snr_confidence", |p: f64, holding_days: i64, anchor_days: i64| -> f64 {
@@ -386,4 +456,166 @@ fn closes_from_bars(bars: &[rhai::Dynamic]) -> Vec<f64> {
             close.into_immutable_string().ok().and_then(|s| s.trim().parse::<f64>().ok())
         })
         .collect()
+}
+
+/// K 线三元组（收盘 / 成交额 / 最高价）—— P1-4 追涨判据的输入，**逐行同进同出**
+/// 保证下标对齐（`closes_from_bars` 是跳行式收集，单独配 amounts 会错位）。
+///
+/// 口径：只收「close 可解析」的行；`high` 缺失记 `NaN`（`surge_state` 侧跳过）；
+/// 成交额按 `amount > 0 ? amount : volume × close`（本仓 K 线 amount 常为 0，
+/// 与 `pm_avg_turnover` 的兜底同源），两源都缺记 0。
+fn surge_series_from_bars(bars: &[rhai::Dynamic]) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    fn num(v: Option<&rhai::Dynamic>) -> Option<f64> {
+        let v = v?;
+        if let Some(f) = v.clone().try_cast::<f64>() {
+            return Some(f);
+        }
+        if let Some(i) = v.clone().try_cast::<i64>() {
+            return Some(i as f64);
+        }
+        v.clone().into_immutable_string().ok().and_then(|s| s.trim().parse::<f64>().ok())
+    }
+    let mut closes = Vec::with_capacity(bars.len());
+    let mut amounts = Vec::with_capacity(bars.len());
+    let mut highs = Vec::with_capacity(bars.len());
+    for b in bars {
+        let Some(map) = b.clone().try_cast::<rhai::Map>() else { continue };
+        let Some(close) = num(map.get("close")) else { continue };
+        let amount = num(map.get("amount"));
+        let volume = num(map.get("volume"));
+        let amt = match (amount, volume) {
+            (Some(a), _) if a > 0.0 => a,
+            (_, Some(v)) if v > 0.0 && close > 0.0 => close * v,
+            _ => 0.0,
+        };
+        closes.push(close);
+        amounts.push(amt);
+        highs.push(num(map.get("high")).unwrap_or(f64::NAN));
+    }
+    (closes, amounts, highs)
+}
+
+/// 解析 `YYYY-MM-DD` 为 (年, 月)。空串 / 格式异常 ⇒ None。
+/// P1-8 的宏观时效判据只做**月差**比较（不引入日历运算）。
+fn parse_ym(s: &str) -> Option<(i64, u32)> {
+    use chrono::Datelike;
+    let d = chrono::NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok()?;
+    Some((i64::from(d.year()), d.month()))
+}
+
+/// P1-8（`PLAN-stock-decision-reliability.md` R10）宏观时效判据（纯函数；注册闭包为薄包装）。
+///
+/// 返回 `Some(原因)` = 超滞或不可判定（调用方把 `macroRegime` 腿按缺席处理）；
+/// `None` = 新鲜。判据 = 发布日与分析锚点（snapshotDate）的**月差**：
+/// GDP > 3 个月、CPI/PPI/PMI > 1 个月 ⇒ 超滞；任一发布日缺失/不可解析 ⇒ 不可判定。
+pub(crate) fn macro_stale_reason(
+    snapshot: &str,
+    gdp_release: &str,
+    cpi_release: &str,
+    ppi_release: &str,
+    pmi_release: &str,
+) -> Option<String> {
+    let Some((anchor_y, anchor_m)) = parse_ym(snapshot) else {
+        return Some("宏观时效不可判定：分析锚点日期缺失或格式异常".to_string());
+    };
+    let anchor_key = anchor_y * 12 + i64::from(anchor_m);
+    let checks: [(&str, &str, i64); 4] = [
+        ("GDP", gdp_release, 3),
+        ("CPI", cpi_release, 1),
+        ("PPI", ppi_release, 1),
+        ("PMI", pmi_release, 1),
+    ];
+    for (name, rel, max_gap) in checks {
+        let Some((rel_y, rel_m)) = parse_ym(rel) else {
+            return Some(format!("{name} 发布日缺失或不可解析 ⇒ 宏观块时效不可自证，按未判定处理"));
+        };
+        let gap = anchor_key - (rel_y * 12 + i64::from(rel_m));
+        if gap > max_gap {
+            return Some(format!(
+                "{name} 最新发布 {rel} 距分析锚点 {snapshot} 已 {gap} 个月（阈值 {max_gap}）⇒ 宏观块超滞，macroRegime 腿按缺席处理"
+            ));
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod macro_stale_reason_tests {
+    use super::macro_stale_reason;
+
+    #[test]
+    fn fresh_block_passes_with_quarter_end_gdp() {
+        // 齐备态（与 seed 一致性测试的夹具同形）：GDP 用 Q2 发布日（恰 3 个月，不超 3）、
+        // 月度序列用最近一期发布。
+        assert_eq!(
+            macro_stale_reason(
+                "2026-10-09",
+                "2026-07-15",
+                "2026-09-09",
+                "2026-09-09",
+                "2026-09-30"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn stale_gdp_beyond_one_quarter_is_reported() {
+        // 10-09 紫金实况（4419bd01）：GDP releaseDate 2026-04-20 ⇒ 距锚点 6 个月。
+        let r = macro_stale_reason(
+            "2026-10-09",
+            "2026-04-20",
+            "2026-09-09",
+            "2026-09-09",
+            "2026-09-30",
+        )
+        .expect("应判超滞");
+        assert!(r.contains("GDP"), "原因须点名序列: {r}");
+        assert!(r.contains("6 个月"), "原因须给出实测滞后: {r}");
+    }
+
+    #[test]
+    fn stale_monthly_series_beyond_one_month_is_reported() {
+        // CPI 卡在 7 月（release 8 月）⇒ 距 10 月锚点 2 个月 > 1。
+        let r = macro_stale_reason(
+            "2026-10-09",
+            "2026-07-15",
+            "2026-08-09",
+            "2026-09-09",
+            "2026-09-30",
+        )
+        .expect("应判超滞");
+        assert!(r.contains("CPI"), "{r}");
+    }
+
+    #[test]
+    fn missing_release_date_is_unjudged_not_fresh() {
+        // 发布日缺失 ⇒ 不可自证 ⇒ 必须报出（不得静默放行）。
+        assert!(
+            macro_stale_reason("2026-10-09", "", "2026-09-09", "2026-09-09", "2026-09-30")
+                .unwrap()
+                .contains("GDP")
+        );
+        // 锚点缺失 ⇒ 全局不可判定。
+        assert!(
+            macro_stale_reason("", "2026-07-15", "2026-09-09", "2026-09-09", "2026-09-30")
+                .unwrap()
+                .contains("不可判定")
+        );
+    }
+
+    #[test]
+    fn future_release_date_does_not_trigger_stale() {
+        // 非单调输入（脏数据）：release 晚于锚点 ⇒ gap 为负 ⇒ 不判超滞（不发明新语义）。
+        assert_eq!(
+            macro_stale_reason(
+                "2026-10-09",
+                "2026-11-01",
+                "2026-09-09",
+                "2026-09-09",
+                "2026-09-30"
+            ),
+            None
+        );
+    }
 }

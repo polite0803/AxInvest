@@ -6576,7 +6576,7 @@
       "period-ultra-short": "Ultra-Short",
       "period-short": "Short-Term",
       "period-mid": "Mid-Term",
-      "period-long": "Long-Term",
+      "period-long": "四半期",
       "placeholder-periods": "1つ以上の期間を選択",
       "label-min-confidence": "最小信頼度",
       "label-top-n": "Top N 上限",
@@ -7384,7 +7384,8 @@
       "none": "未実行",
       "skipped": "スキップ済み",
       "success": "成功",
-      "failed": "失敗"
+      "failed": "失敗",
+      "partial": "一部完了"
     },
     "scheduled": {
       "autoRefresh": "15秒ごとに自動更新",
@@ -7614,6 +7615,10 @@
         "failed": "失敗",
         "interrupted": "中断"
       }
+    },
+    "nextRun": {
+      "stale": "スケジュール停滞",
+      "staleHint": "スケジュールが 24 時間以上進んでいません（期限超過または再送待ち）。シャットダウンによる中断や停止の可能性があります。「今すぐ実行」で生存確認できます。"
     }
   },
   "teammatePanel": {
@@ -14829,7 +14834,7 @@
         "ultra_short": "超短期",
         "short": "短期",
         "mid": "中期",
-        "long": "長期"
+        "long": "四半期"
       },
       "dueYes": "期日到来",
       "dueNo": "未到来",
@@ -15053,7 +15058,7 @@
     "boolYes": "はい",
     "boolNo": "いいえ",
     "backendCallFailed": "バックエンド呼び出しに失敗しました",
-    "tierScopeHint": "档位口径：中期・長期の2档を担当（ボトルネック/政策/業績カタリストは週〜月単位で実現）。超短期・短期は設計上提供せず、档ごとに1行ずつ保存し、保有日数は各档の権威値を使用。",
+    "tierScopeHint": "档位口径：中期・四半期の2档を担当（ボトルネック/政策/業績カタリストは週〜月単位で実現）。超短期・短期は設計上提供せず、档ごとに1行ずつ保存し、保有日数は各档の権威値を使用。",
     "timeBasisNoTier": "リアルタイム候補は档位なし ⇒ 推奨ウィンドウなし（档位別の明細は履歴参照）",
     "entryBand": "建玉バンド ±{{pct}}%",
     "entryBandHalfFallback": "バンドは固定ストップ倍率の半分 ⇒ ボラティリティ由来ではない",
@@ -15439,7 +15444,7 @@
       "ultraShort": "超短线",
       "short": "短线",
       "mid": "中线",
-      "long": "长线"
+      "long": "四半期"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15483,7 +15488,7 @@
     "periodUltraShort": "超短线",
     "periodShort": "Short Term",
     "periodMid": "Mid Term",
-    "periodLong": "Long Term",
+    "periodLong": "四半期",
     "generatedAt": "生成于",
     "bannerVendorDisabled": "Some styles disabled: {styles}",
     "openSettings": "Open Settings",
@@ -15514,7 +15519,7 @@
     "timeHorizonUltraShort": "超短期",
     "timeHorizonShort": "短期",
     "timeHorizonMid": "中期",
-    "timeHorizonLong": "長期",
+    "timeHorizonLong": "四半期",
     "horizonSourceFormula": "数式判定",
     "horizonSourceModel": "モデル自己申告",
     "horizonSourceBranchPick": "ブランチ選定",
@@ -15688,7 +15693,7 @@
       "matrixAbsence": {
         "serenity_needs_week_or_longer_realization": "設計上なし：ボトルネック証拠は週単位以上の実現が必要",
         "oversold_rebound_needs_at_least_mid_horizon": "設計上なし：売られすぎ反発は最低でも中期の実現が必要",
-        "oversold_rebound_not_applied_to_long_horizon": "設計上なし：売られすぎ反発は長期には適用しません",
+        "oversold_rebound_not_applied_to_long_horizon": "設計上なし：売られすぎ反発は四半期には適用しません",
         "cell_not_in_matrix": "契約表にこのセルが無い（設計ではなく実装漏れの可能性）"
       },
       "matrixMisfit": {
@@ -16818,7 +16823,7 @@
       "periodUltraShort": "Ultra-Short",
       "periodShort": "Short-Term",
       "periodMid": "Mid-Term",
-      "periodLong": "Long-Term",
+      "periodLong": "四半期",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -16955,7 +16960,7 @@
       "trendScreening": "トレンド選別の定期実行",
       "trendScreeningHint": "トレンド選別（serenity-screening）ワークフローを定期的に実行し、結果を候補プールに取り込みます",
       "reflectionScan": "周期リフレクション",
-      "reflectionScanHint": "超短期2日 / 短期5日 / 中期28日 / 長期90日の間隔で、完了した分析を自動的に振り返ります",
+      "reflectionScanHint": "超短期2日 / 短期5日 / 中期28日 / 四半期90日の間隔で、完了した分析を自動的に振り返ります",
       "decisionBacktest": "意思決定バックテスト",
       "decisionBacktestHint": "過去の銘柄推奨を再生し、T+N ウィンドウの実際のローソク足を取得して的中率と要因の有効性を算出し、結果を分析記録に書き戻します",
       "decisionBacktestWindow": "T+{{n}}",
@@ -16992,7 +16997,7 @@
         "ultraShort": "超短期",
         "short": "短期",
         "mid": "中期",
-        "long": "長期"
+        "long": "四半期"
       },
       "column": {
         "id": "ID",
@@ -17155,7 +17160,7 @@
       "horizonUltraShort": "超短期",
       "horizonShort": "短期",
       "horizonMid": "中期",
-      "horizonLong": "長期",
+      "horizonLong": "四半期",
       "horizonAuto": "主档に従う",
       "horizonUnknown": "不明な期間",
       "colHorizon": "復盤期間",
@@ -17204,8 +17209,23 @@
       "horizonImmatureNote": "この期間は期待保有期間を経過していません。現在のデータは参考情報であり、勝敗判定には使用しません。",
       "hitrateMatureSamples": "成熟サンプル",
       "hitrateLegacyHint": "旧レコード {{samples}} 件を含む",
-      "hitrateGenerationScope": "起算世代：第 {{generation}} 世代（それ以前の {{foreign}} 件・世代不明 {{unknown}} 件を除外）",
-      "noData": "データなし"
+      "hitrateGenerationScope": "起算世代：第 {{generation}} 世代（それ以前の {{foreign}} 件は除外、世代不明 {{unknown}} 件は収縮込みで算入）",
+      "noData": "データなし",
+      "failureModesTitle": "失敗パターン分布",
+      "failureModesRows": "振り返り件数",
+      "failureModesLabelled": "分類済み",
+      "failureModesUnlabelled": "未分類",
+      "failureModesUnlabelledHint": "完了した振り返りのうち {{count}} 件は失敗パターンの欄がありません —— テンプレートが出力していないだけで、「該当なし」ではありません。",
+      "failureModesEmpty": "まだ語彙に一致する振り返りはありません",
+      "failureModesRejected": "保存済みに語彙外の帰因値があります：{{tokens}}",
+      "failureModeCol": "パターン",
+      "failureModeCount": "件数",
+      "failureModeShare": "分類済みに対する割合",
+      "failureModeDcfCycleTop": "サイクル天井での DCF 楽観",
+      "failureModeChaseUpBar": "大陽線の追い乗り",
+      "failureModeRegimeEndorsement": "地合い判断で個別株を後押し",
+      "failureModeReverseDcfIgnored": "逆方向 DCF の無視",
+      "failureModeOther": "その他"
     },
     "portfolioMonitor": {
       "title": "株式分析",
@@ -18259,7 +18279,8 @@
       "sessionLunchBreak": "昼休場",
       "sessionAfternoon": "午後場",
       "sessionPostClose": "引け後"
-    }
+    },
+    "horizonPriorHitRate": "的中率 {{rate}}%"
   },
   "pipeline": {
     "title": "株式パイプライン",

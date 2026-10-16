@@ -231,6 +231,20 @@ export interface HorizonDecision {
   priorSource?: string;
   /** 该档先验样本数（配合 κ 判断收缩强度是否够可信） */
   priorSamples?: number;
+  /**
+   * P1-3（`PLAN-stock-decision-reliability.md` R3/R7）：该档置信度是否已过**校准可得性**门槛
+   * （本档判定样本 ≥ `reflection_stats::CALIBRATION_MIN_SAMPLES`）。产端 = 四份
+   * `portfolio-mgr-h-*.rhai`，值来自 Rust 注入的逐档先验表 ⇒ 本类型只镜像生产形态。
+   * `false`/缺席 = 未校准，主链会把对外置信封顶压到最保守一级（见 `R-CALIB-CAP` 追溯链）。
+   * ⚠ 键缺席按未校准处理（fail-closed）；不得读成「0 样本」以外的含义。
+   */
+  calibrationReady?: boolean;
+  /**
+   * P2-c（`PLAN-stock-decision-reliability.md`）：该档**原始方向命中率**
+   * （0~1，未收缩口径 = `HitrateStats.direction_hit_rate`）；缺席 = 该档样本
+   * 未达阈值（此时先验借自全档合并基准，别拿它当本档命中率）。
+   */
+  priorHitRate?: number;
   /** 止损口径：`vol_band` = k·σ_daily·√本档持有天数 导出；`fallback_pct` = σ 不可得，退回固定百分比档 */
   stopSource?: string;
   /**
@@ -453,6 +467,14 @@ export interface StockDecision {
    * 展示层不得回退成「branch_pick」那种乐观默认。
    */
   actionSource?: string;
+  /**
+   * P2-c（`PLAN-stock-decision-reliability.md`）：主档 `timeHorizon` 的**定档来源**。
+   * 产出方 `portfolio-mgr.rhai` 的锁档段（与 `decision_horizon_source` 列同源），
+   * 值域 `HORIZON_SOURCES`（`branch_pick` / `formula_no_branch` / 历史值）。
+   * 标签映射见 `stock-analysis-utils.ts` 的 `horizonSourceLabelKey`；缺席 = 记录产
+   * 生于该字段引入之前（无此信息），展示层不得回退成乐观默认。
+   */
+  horizonSource?: string;
   /**
    * 主档 confidence 的口径（v127 起与所选档同源）。值域 `CONFIDENCE_SOURCES`。
    * · `branch_row` = 取自被选中的那一档分支输出（再乘档位无关的视角分歧/数据质量约束）
@@ -1648,6 +1670,28 @@ export interface HitrateGroup {
 export type HorizonHitrateGroup = HitrateGroup;
 
 /** 命中率聚合结果 —— 消费 strategy_performance + stock_reflections + stock_analyses */
+/** 一格失败模式计数（PLAN P2-b）。`share` 的分母是**已标注反思行**，不是全部反思行。 */
+export interface FailureModeCell {
+  mode: string;
+  count: number;
+  share: number;
+}
+
+/**
+ * 失败模式看板（随 `reflection_stats` 一起出 IPC，面板零新增 invoke）。
+ * 三种缺席必须各占一句，不得收敛成一个数：
+ * `unlabelled`（模板没产出该字段）／`rejectedTokens`（模型自报了词表外的名字）／
+ * `cells` 为空（已标注但都落在词表外）。
+ */
+export interface FailureModeBoard {
+  /** 参与统计的 completed 反思行数 */
+  totalRows: number;
+  labelled: number;
+  unlabelled: number;
+  cells: FailureModeCell[];
+  rejectedTokens: string[];
+}
+
 export interface HitrateStats {
   totalSamples: number;
   directionHitRate: number | null;
@@ -1667,6 +1711,11 @@ export interface HitrateStats {
   /** 参与半衰期拟合的档数（有持有期且 IC 有值） */
   usableIcTiers: number;
   /**
+   * 失败模式分布（P2-b）：按 completed 反思行的 `failure_modes` 列聚合。
+   * 计数域与 `missLayer`（漏检链的机械归因层）不同，两者不得并排成可比数字。
+   */
+  failureModes: FailureModeBoard;
+  /**
    * 本次统计采用的**起算代际**下限（`HORIZON_BRANCH_GENERATION_FLOOR`）。
    * 语义是「这一代及之后才算同一套判据」，**不是**「等于当前代」—— 用等号的话每次换代
    * 分母都会被清零（见常量注释）。回传它是为了让面板说清「分母为什么变小」。
@@ -1674,8 +1723,12 @@ export interface HitrateStats {
   generationFloor?: number;
   /** 因「早于起算代」被排除出统计分母的样本数（旧代样本永久不可比） */
   excludedPreFloorGeneration?: number;
-  /** 因「代际未知」被排除的样本数（会随写侧补章而减少，与上一项处置不同） */
-  excludedUnknownGeneration?: number;
+  /**
+   * 代际未知（NULL）的样本数 —— P2-f 起这些样本**按收缩纳入**所有统计的分母
+   * （不再整批排除；见 `filter_by_generation_floor`），本字段 = 其中代际未知的条数，
+   * 供面板如实报出。
+   */
+  unknownGenerationSamples?: number;
 }
 
 // ── 四周期反思结果（批次 3/4：horizon_results_json 结构化）──

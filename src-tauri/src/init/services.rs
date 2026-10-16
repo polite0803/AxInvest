@@ -2195,6 +2195,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
                     executed_at: started,
                     skipped: false,
+                    partial: false,
                 };
                 tracing::info!(
                     "[CronScheduler] 知识源刷新任务 '{}' 完成: {:?}",
@@ -2263,6 +2264,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         duration_ms: 0,
                         executed_at: started,
                         skipped: true,
+                        partial: false,
                     };
                     tokio::spawn(async move {
                         store.record_run(&job_id, result).await;
@@ -2308,6 +2310,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                         as u64,
                                     executed_at: started,
                                     skipped: false,
+                                    partial: false,
                                 },
                                 has_hits,
                             )
@@ -2327,6 +2330,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                         as u64,
                                     executed_at: started,
                                     skipped: false,
+                                    partial: false,
                                 },
                                 true,
                             )
@@ -2399,6 +2403,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             duration_ms: elapsed(),
                             executed_at: started,
                             skipped: false,
+                            partial: false,
                         };
                         store.record_run(&job_id, result).await;
                         if !recurring {
@@ -2566,6 +2571,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     duration_ms: elapsed(),
                     executed_at: started,
                     skipped: false,
+                    partial: false,
                 };
                 // 无 pick → 不投递（success 但静默），避免定时轰炸通知渠道
                 let sink_ref = if picks.is_empty() { None } else { Some(sink.as_ref()) };
@@ -2615,6 +2621,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             as u64,
                         executed_at: started,
                         skipped: false,
+                        partial: false,
                     };
                     store.record_run(&job_id, result).await;
                     if !recurring {
@@ -2681,6 +2688,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
                     executed_at: started,
                     skipped: false,
+                    partial: false,
                 };
                 store.record_run(&job_id, result).await;
                 if !recurring {
@@ -2738,6 +2746,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             duration_ms: elapsed(),
                             executed_at: started,
                             skipped: false,
+                            partial: false,
                         };
                         store.record_run(&job_id, result).await;
                         if !recurring {
@@ -2774,13 +2783,16 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             );
                             axagent_runtime_core::TaskRunResult {
                                 // 候选池为空不算失败（可能只是当天没扫出 pick），
-                                // 但有个别分析失败要如实标记
-                                success: outcome.fail == 0,
+                                // 但有个别分析失败要如实标记；
+                                // P1-10：达到墙钟预算提前收尾 ⇒ 本轮没跑完规划量，success 记 false
+                                //（属「部分完成」而非失败，前端据 partial 徽章显示）。
+                                success: outcome.fail == 0 && !outcome.timed_out,
                                 output: Some(outcome.render()),
                                 error: outcome.first_error.clone(),
                                 duration_ms: elapsed(),
                                 executed_at: started,
                                 skipped: false,
+                                partial: outcome.timed_out || outcome.truncated,
                             }
                         },
                         Err(e) => {
@@ -2792,6 +2804,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 duration_ms: elapsed(),
                                 executed_at: started,
                                 skipped: false,
+                                partial: false,
                             }
                         },
                     };
@@ -2876,6 +2889,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             duration_ms: elapsed(),
                             executed_at: started,
                             skipped: false,
+                            partial: false,
                         };
                         store.record_run(&job_id, result).await;
                         if !recurring {
@@ -2925,6 +2939,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             duration_ms: elapsed(),
                             executed_at: started,
                             skipped: false,
+                            partial: false,
                         }
                     },
                     Err(e) => {
@@ -2939,6 +2954,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             duration_ms: elapsed(),
                             executed_at: started,
                             skipped: false,
+                            partial: false,
                         }
                     },
                 };
@@ -3010,6 +3026,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 duration_ms: elapsed(),
                                 executed_at: started,
                                 skipped: false,
+                                partial: false,
                             };
                             store.record_run(&job_id, result).await;
                             if !recurring {
@@ -3110,6 +3127,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             duration_ms: elapsed(),
                             executed_at: started,
                             skipped: false,
+                            partial: false,
                         }
                     },
                     Err(e) => {
@@ -3124,6 +3142,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             duration_ms: elapsed(),
                             executed_at: started,
                             skipped: false,
+                            partial: false,
                         }
                     },
                 };
@@ -3214,6 +3233,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 duration_ms: elapsed(),
                                 executed_at: started,
                                 skipped: false,
+                                partial: false,
                             }
                         },
                         Err(e) => {
@@ -3225,6 +3245,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 duration_ms: elapsed(),
                                 executed_at: started,
                                 skipped: false,
+                                partial: false,
                             }
                         },
                     };
@@ -3292,6 +3313,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 duration_ms: elapsed(),
                                 executed_at: started,
                                 skipped: false,
+                                partial: false,
                             }
                         },
                         Err(e) => {
@@ -3303,6 +3325,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 duration_ms: elapsed(),
                                 executed_at: started,
                                 skipped: false,
+                                partial: false,
                             }
                         },
                     };
@@ -3362,6 +3385,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                         duration_ms: elapsed(),
                                         executed_at: started,
                                         skipped: false,
+                                        partial: false,
                                     },
                                 )
                                 .await;
@@ -3388,6 +3412,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             duration_ms: elapsed(),
                             executed_at: started,
                             skipped: summary.skipped,
+                            partial: false,
                         }
                     },
                     Err(e) => {
@@ -3399,6 +3424,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             duration_ms: elapsed(),
                             executed_at: started,
                             skipped: false,
+                            partial: false,
                         }
                     },
                 };
@@ -3468,6 +3494,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             duration_ms: elapsed(),
                             executed_at: started,
                             skipped: false,
+                            partial: false,
                         }
                     },
                     // 空仓是合法状态，不是故障：既不落 0 行，也不报成功刷了快照
@@ -3480,6 +3507,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             duration_ms: elapsed(),
                             executed_at: started,
                             skipped: true,
+                            partial: false,
                         }
                     },
                     Err(e) => {
@@ -3491,6 +3519,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             duration_ms: elapsed(),
                             executed_at: started,
                             skipped: false,
+                            partial: false,
                         }
                     },
                 };
@@ -3546,6 +3575,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 executed_at: started,
                                 // 0 条 = 没有超时待办，如实记 skip，不伪装成「过期了一批」
                                 skipped: n == 0,
+                                partial: false,
                             }
                         },
                         Err(e) => {
@@ -3557,6 +3587,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 duration_ms: elapsed(),
                                 executed_at: started,
                                 skipped: false,
+                                partial: false,
                             }
                         },
                     };
@@ -3601,6 +3632,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 as u64,
                             executed_at: started,
                             skipped: false,
+                            partial: false,
                         }
                     },
                     Err(e) => {
@@ -3617,6 +3649,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 as u64,
                             executed_at: started,
                             skipped: false,
+                            partial: false,
                         }
                     },
                 };
@@ -4238,6 +4271,7 @@ fn start_batch_reflection(state: &AppState) {
                             as u64,
                         executed_at: started,
                         skipped: false,
+                        partial: false,
                     },
                 )
                 .await;
@@ -4288,6 +4322,7 @@ fn start_demand_discovery_cron(app: &tauri::AppHandle, state: &AppState) {
                             as u64,
                         executed_at: started,
                         skipped: false,
+                        partial: false,
                     },
                 )
                 .await;

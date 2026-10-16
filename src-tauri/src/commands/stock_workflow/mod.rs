@@ -66,5 +66,9 @@ pub use reflection::ValidateDecisionsConfig;
 // 错误信息完全指不到真因（详见 build.rs `parse_submodule_mod_rs` 的注释）。
 // 另：`MarketSnapshot` 类型无需 re-export，用 `reflection::MarketSnapshot` 访问即可。
 pub use reflection::compute_market_snapshots;
+// 「样本不足 vs 取数失败」判据的类型与判据函数（2026-10-16）：
+// 手动反思入口（`stock_analysis.rs::run_reflection_now`）与批量入口共用同一判据点。
+pub use reflection::SnapshotGap;
+pub use reflection::take_primary_snapshot;
 
 // Re-export public structs

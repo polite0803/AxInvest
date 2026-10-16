@@ -3701,10 +3701,10 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
     // 退化态用的**空先验表**（必须是具名绑定，不能内联 `&json!({})` —— 那会在借用仍存活时被释放）
     let empty_prior_table = serde_json::json!({});
     let prior_table = serde_json::json!({
-        "ultra_short": { "prior": 0.5, "source": "gate_hitrate", "samples": 12.0 },
-        "short": { "prior": 0.5, "source": "gate_hitrate", "samples": 12.0 },
-        "mid": { "prior": 0.5, "source": "gate_hitrate", "samples": 12.0 },
-        "long": { "prior": 0.5, "source": "gate_hitrate", "samples": 12.0 },
+        "ultra_short": { "prior": 0.5, "source": "gate_hitrate", "samples": 12.0, "calibrationReady": false },
+        "short": { "prior": 0.5, "source": "gate_hitrate", "samples": 12.0, "calibrationReady": false },
+        "mid": { "prior": 0.5, "source": "gate_hitrate", "samples": 12.0, "calibrationReady": false },
+        "long": { "prior": 0.5, "source": "gate_hitrate", "samples": 12.0, "calibrationReady": false },
     });
     // 夹具必须是**有离散度**的价格序列：单调等差数列的日收益率标准差只有 1e-5 量级，
     // `k·σ·√h` 四舍五入到两位小数后恒为 0 ⇒ 「价带算出来了」这条断言会失去区分力。
@@ -3779,6 +3779,14 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
                 // 门按 stock_not_strong 不通过正是 P0-5 要的「市场情绪不为非强势个股背书」。
                 "stock_code" => serde_json::json!("600519"),
                 "pmi" => serde_json::json!(51.0),
+                // P1-8：宏观时效门的输入。齐备态必须**不触发** stale（否则测的不是齐备输入）：
+                // 锚点 10-09 下 GDP 用 Q2 发布日（3 个月整，不超阈值 3）、月度序列用最近一期发布
+                // （各 1 个月，不超阈值 1）。
+                "macro_snapshot_date" => serde_json::json!("2026-10-09"),
+                "gdp_release_date" => serde_json::json!("2026-07-15"),
+                "cpi_release_date" => serde_json::json!("2026-09-09"),
+                "ppi_release_date" => serde_json::json!("2026-09-09"),
+                "pmi_release_date" => serde_json::json!("2026-09-30"),
                 "valuation_dcf_upside" => serde_json::json!(38.0),
                 "valuation_dcf_applicable" => serde_json::json!(true),
                 // P0-4：齐备态按**普通股**形态给 false（周期分支由上面的 call_fn
@@ -3810,10 +3818,18 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
             .into_iter()
             .position(|p| p.as_str() == tier)
             .expect("档名必须落进 Period::ALL");
-        let run_with = |names: &[String], full: bool| -> Result<Map, String> {
+        let run_with = |names: &[String], full: bool, masked: &[&str]| -> Result<Map, String> {
             let mut scope = Scope::new();
             let mut unhandled: Vec<&str> = Vec::new();
             for name in names {
+                // P1-5「单腿剥离态」：键**仍在 scope**（剥掉名字走的是下方 ③ 的越界负控），
+                // 只把值换成 unit —— 与生产里「映射到了但源没产出」完全同形。
+                // 这条通道存在的理由：①② 只覆盖两极（全齐备 / 全退化），而 P1-5 的靶心
+                // 是**中间态**（齐备输入少一条腿时语义必须仍然对）。
+                if masked.iter().any(|m| *m == name.as_str()) {
+                    scope.push_constant(name.as_str(), Dynamic::UNIT);
+                    continue;
+                }
                 let dyn_value = match name.as_str() {
                     "branch_json" => value_to_dynamic(&branch_all[tier]),
                     // 退化态故意给**空表**：脚本必须把「表在但没有本档那行」也判成先验不可得
@@ -3886,7 +3902,7 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
         };
 
         // ① 齐备态：按**节点真实 scope** 必须跑通，且形状与上一门一致
-        let out = run_with(&keys, true).unwrap_or_else(|e| {
+        let out = run_with(&keys, true, &[]).unwrap_or_else(|e| {
             panic!(
                 "档 {tier} 按节点真实 scope（{} 个键）运行失败：{e}\n键集合 {keys:?}",
                 keys.len()
@@ -4048,7 +4064,7 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
 
         // ② 退化态（全 unit，只给分支表 + 空先验表）：拒绝出结论、不产仓位
         let empty =
-            run_with(&keys, false).unwrap_or_else(|e| panic!("档 {tier} 退化态运行失败：{e}"));
+            run_with(&keys, false, &[]).unwrap_or_else(|e| panic!("档 {tier} 退化态运行失败：{e}"));
         assert_eq!(
             empty.get("action").and_then(|v| v.clone().try_cast::<String>()).unwrap_or_default(),
             "观望",
@@ -4080,10 +4096,99 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
             keys.len() - 1,
             "负控失效：节点映射里没有 `{peel}` 可剥，键集合 {keys:?}"
         );
-        let err = run_with(&narrowed, true).err();
+        let err = run_with(&narrowed, true, &[]).err();
         assert!(err.is_some(), "剥掉 `{peel}` 后仍跑通 ⇒ 越界读取查不出来，本门对档 {tier} 无效");
         let msg = err.unwrap_or_default();
         assert!(msg.contains(peel), "负控报的不是被剥掉的名字，可能被别的错误掩盖：{msg}");
+
+        // ── ④ P1-5「缺数统一语义」：单腿剥离态（2026-10-16）──
+        // ①②③ 只锁两极：全齐备 / 全退化 / 越界读取。而 P1-5 的靶心是**中间态** ——
+        // 齐备输入里只少**一条方向腿**（或只缺**一个门输入**）时，语义必须仍是：
+        //   ① 该腿按 0 计权、**同步扣减 `evidenceScale`**（`tw` 只累在场腿、分母是 `dir_total`
+        //      ⇒ 缺腿 = 证据量下降，posterior 因 `avg*escale` 随之向先验收缩）；
+        //   ② 关键门缺数一律「未判定 ≠ 通过」（不放行开仓），不得当中性放行。
+        // 实证背景（R5-3，10-09 紫金）：short 门因资金持续性缺数正确降级，而同一份缺数在
+        // 别的档「不构成任何阻碍」。v133/v156 起四份脚本已统一成上述形态，但缺一条判据锁
+        // 中间态 —— 谁把缺席腿改回计权、或把门改成缺数放行，此前没有任何一条会红。
+        // 负控拆法（同一守卫）：① 若缺席腿仍计入 tw（旧形态）⇒ escale 与齐备相等 ⇒ 断言①红；
+        // ② 若门把缺数当通过 ⇒ entryGatePassed 不会是 false ⇒ 断言②红。
+        let leg_masks: [(&str, &str, &str); 4] = [
+            // (档, 要剥离的**方向腿源键**, 该腿在 `absentLegs` 里的 factor 名)
+            ("ultra_short", "catalyst_level", "eventCatalyst"),
+            ("short", "flow_persistence", "flowPersistence"),
+            ("mid", "flow_persistence", "flowPersistence"),
+            ("long", "pmi", "macroRegime"),
+        ];
+        let leg_row = leg_masks
+            .iter()
+            .find(|(t, _, _)| *t == tier)
+            .unwrap_or_else(|| panic!("leg_masks 少登记档 {tier}（漏一档 = 该档静默少测）"));
+        let (leg_key, leg_name) = (leg_row.1, leg_row.2);
+        let masked_run = run_with(&keys, true, &[leg_key])
+            .unwrap_or_else(|e| panic!("档 {tier} 单腿剥离态运行失败（缺一条腿不该崩）：{e}"));
+        let esc_full = out.get("evidenceScale").and_then(|v| v.clone().try_cast::<f64>());
+        let esc_masked = masked_run.get("evidenceScale").and_then(|v| v.clone().try_cast::<f64>());
+        let (esc_full, esc_masked) = match (esc_full, esc_masked) {
+            (Some(f), Some(m)) => (f, m),
+            other => panic!("档 {tier} evidenceScale 读数缺失：{other:?}"),
+        };
+        assert!(esc_full > 0.0, "前提：档 {tier} 齐备态 evidenceScale 应为正（实得 {esc_full}）");
+        assert!(
+            esc_masked < esc_full,
+            "档 {tier} 剥掉方向腿源 `{leg_key}` 后 evidenceScale 未下降（{esc_masked} vs 齐备 {esc_full}）\
+             ⇒ 缺席腿被当成「0 权重但满证据」或仍计入 tw（P1-5 靶心形态）"
+        );
+        let absent_names: Vec<String> = masked_run
+            .get("absentLegs")
+            .and_then(|v| v.clone().try_cast::<rhai::Array>())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| v.clone().try_cast::<String>())
+            .collect();
+        assert!(
+            absent_names.iter().any(|n| n == leg_name),
+            "档 {tier} 剥掉 `{leg_key}` 后 absentLegs 里没有 {leg_name}（实得 {absent_names:?}）\
+             ⇒ 缺席必须挂回**本腿**名单，而不是只留文案"
+        );
+
+        let gate_masks: [(&str, &[&str]); 4] = [
+            // (档, 要剥离的**门输入键**)：缺数 ⇒ 门必须按「未判定 ≠ 通过」不放行
+            ("ultra_short", &["seal_rate"]),
+            ("short", &["flow_persistence"]),
+            ("mid", &["kline_bars"]),
+            ("long", &["valuation_dcf_upside", "pe_percentile"]),
+        ];
+        let gate_row = gate_masks
+            .iter()
+            .find(|(t, _)| *t == tier)
+            .unwrap_or_else(|| panic!("gate_masks 少登记档 {tier}（漏一档 = 该档静默少测）"));
+        let gate_keys = gate_row.1;
+        let masked_gate = run_with(&keys, true, gate_keys)
+            .unwrap_or_else(|e| panic!("档 {tier} 门输入剥离态运行失败（缺门输入不该崩）：{e}"));
+        let gate_pass_masked = masked_gate
+            .get("entryGatePassed")
+            .and_then(|v| v.clone().try_cast::<bool>())
+            .unwrap_or(true);
+        assert!(
+            !gate_pass_masked,
+            "档 {tier} 剥掉门输入 {gate_keys:?} 后 entryGatePassed 仍为 true \
+             ⇒ 门把「算不出」当成了「通过」（P1-5：未判定 ≠ 通过）"
+        );
+        if tier == "ultra_short" {
+            // ultra 的夹具个股腿恒为 stock_not_strong（P0-5 设计：市场情绪不得为非强势个股背书）
+            // ⇒ `entryGatePassed=false` 在齐备态与剥离态**同为假**，单凭它分不出「breadth 缺数
+            // 被正确识别」还是「绕过了 breadth 检查」。用 basis 归因区分：缺数必须记
+            // breadth_missing，而不是落到 stock_not_strong。
+            let basis = masked_gate
+                .get("gateBasis")
+                .and_then(|v| v.clone().try_cast::<String>())
+                .unwrap_or_default();
+            assert_eq!(
+                basis, "breadth_missing",
+                "剥掉 seal_rate 后门的归因应为 breadth_missing（实得 {basis:?}）\
+                 ⇒ 缺数被绕过或未判定归因错位"
+            );
+        }
     }
 
     // ── 仲裁节点（P5）：同一个判据，换一份 scope 来源 ──

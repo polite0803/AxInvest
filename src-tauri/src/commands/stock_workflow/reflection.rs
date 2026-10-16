@@ -338,6 +338,7 @@ pub async fn run_reflection_workflow(
             // pending 行 UPDATE 路径产生（建点在 `build_pending_reflection_rows_for`）。
             source: Set("due".to_string()),
             miss_layer: Set(None),
+            failure_modes: Set(None),
             status: Set("running".to_string()),
             created_at: Set(now_ms),
             updated_at: Set(now_ms),
@@ -657,6 +658,18 @@ pub async fn run_reflection_workflow(
         is_secret: false,
     });
 
+    // ── P2-b 失败模式受控词表（无条件注入）──
+    // 词表由引擎侧 FailureMode 渲染，模板不抄值 ⇒ 增删一个模式只改一处（反手抄漂移）。
+    variables.push(axagent_harness::workflow_types::Variable {
+        name: "failure_mode_catalog".into(),
+        var_type: "string".into(),
+        value: serde_json::Value::String(
+            axagent_analysis_engine::failure_mode::FailureMode::catalog_for_prompt(),
+        ),
+        description: Some("失败模式受控词表（反思 failure_modes 字段的唯一值域）".into()),
+        is_secret: false,
+    });
+
     if let Some((time_horizon, _analysis_holding_days)) = original_ctx {
         variables.push(axagent_harness::workflow_types::Variable {
             name: "original_time_horizon".into(),
@@ -812,6 +825,18 @@ pub async fn run_reflection_workflow(
             let params_suggestion_json =
                 deep_get_reflection_text(&reflection_json, "params_suggestion");
 
+            // P2-b：失败模式白名单化。列值与「模板未产出」的区分口径见 `failure_modes_column_of`；
+            // 被丢弃的词表外 token 只记日志（含本行 id），面板的「词表外归因」另有来源（见引擎模块注释）。
+            let fm_raw = deep_get_reflection_text(&reflection_json, "failure_modes");
+            let (failure_modes_column, fm_rejected) = failure_modes_column_of(fm_raw.as_deref());
+            if !fm_rejected.is_empty() {
+                tracing::warn!(
+                    "[reflection] 反思自报了词表外的失败模式，已丢弃：{:?}（analysis_id={}）",
+                    fm_rejected,
+                    analysis_id
+                );
+            }
+
             // 诊断: 检查反思节点是否成功,如果不成功,把状态/错误信息附到 status 字段
             // (Failed 节点 result 是 None,work_engine 不会写入 results,所以
             // wf.results 不等于完整执行轨迹 —— 之前只能看到"completed"但实际反思节点没跑)。
@@ -908,105 +933,57 @@ pub async fn run_reflection_workflow(
                     stock_reflections::Column::MissLayer,
                     Expr::value(mover_event.as_ref().map(|e| e.miss_layer.clone())),
                 )
+                // P2-b：失败模式受控标注（值域权威 = analysis_engine::failure_mode::FailureMode，
+                // 白名单外的自造 token 不落本列，只记日志）。NULL = 模板未产出该字段。
+                .col_expr(
+                    stock_reflections::Column::FailureModes,
+                    Expr::value(failure_modes_column),
+                )
                 .filter(stock_reflections::Column::Id.eq(&analysis_id))
                 .exec(db)
                 .await;
+
+            // P2-a：本次反思刚产出一条「腿信号 × 到期结果」配对 ⇒ 顺手刷新预测力报告（裁决层写侧）。
+            // 刷新失败只降级为「权重仍按先验」，不影响本次反思落库 ⇒ 不向上传错。
+            if let Err(e) = refresh_leg_ic_report(db).await {
+                tracing::warn!("[leg_ic] 报告刷新失败（权重仍按先验）: {e}");
+            }
 
             // ── Path 2: 反思参数建议自动解析 ──
             // D1 修复：verdict 改走 deep_get（兼容「一层嵌套」与「双重编码字符串」）。
             let verdict_opt = deep_get_reflection_str(&reflection_json, "verdict");
             let verdict_str = verdict_opt.as_deref().unwrap_or("");
 
-            // ── Gap 1: 确定性判定 → Strategy Performance 自动写入 ──
-            // M1 改写：was_correct 不再由反思 agent 的 verdict（LLM 自评）映射，
-            // 改由行情快照**确定性反推**（deterministic_was_correct，见下方纯函数）。
-            // verdict 仍写 stock_reflections 供反思阅读；但判胜依据（weight_decay.rs:79
-            // 以 `was_correct != 0` 判胜）改用客观符号判定，消除 LLM 幻觉污染。
-            //
-            // 保留 D2 语义：「未判定」与「判定为错」在数据上可区分 ——
-            // 无法判定（无行情 / 中性档 / 期中观察）→ **不写行**：
-            // strategy_performance.was_correct 是 i32 非空列，表达不了第三态，
-            // 而"没写入"本身就是"没有判定依据"的正确表达。
-            let was_correct: Option<i32> = deterministic_was_correct(
-                original_analysis.as_ref().and_then(|a| a.decision_action.as_deref()),
-                primary_snapshot,
-            );
-
-            if let Some(was_correct) = was_correct {
-                use axagent_entities::strategy_performance;
-                let sp_id = uuid::Uuid::new_v4().to_string();
-                let decision_at = now_ms - (holding_days.unwrap_or(30) as i64 * 86_400_000);
-                // D3 修复：decision_confidence 不再硬编码 0。
-                // 来源 = 原分析的决策置信度（`decision_json.confidence`，回退 `decisionConfidence`），
-                // 实测量纲已是 0-100（min 0 / max 75，非 0-1 小数）。
-                // ⚠ 已知残留：该列为 i32 非空，取不到置信度时只能落 0，
-                //   与"置信度极低"不可区分 —— 属性缺口，已在 PLAN 登记。
-                let decision_confidence = original_analysis
-                    .as_ref()
-                    .and_then(|a| a.decision_json.as_deref())
-                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-                    .and_then(|dj| {
-                        dj.get("confidence")
-                            .or_else(|| dj.get("decisionConfidence"))
-                            .and_then(|v| v.as_f64())
-                    })
-                    .map(|c| c.round().clamp(0.0, 100.0) as i32)
-                    .unwrap_or(0);
-                // 〇-B v2 第 4 条：本行是「复盘某一档」的绩效，period 必须带档，
-                //   否则四档共写 period="reflection" ⇒ 按档统计读不出差异（PLAN 断点⑤）。
-                //   保留 `reflection:` 前缀：既有消费方按前缀识别反思来源，不做破坏性改名。
-                let sp_insert = strategy_performance::ActiveModel {
-                    id: Set(sp_id.clone()),
-                    strategy_id: Set("reflection_verdict".to_string()),
-                    period: Set(format!("reflection:{primary_horizon}")),
-                    stock_code: Set(stock_code.to_string()),
-                    stock_name: Set(stock_name.to_string()),
-                    decision_at: Set(decision_at),
-                    exit_at: Set(now_ms),
-                    holding_days: Set(holding_days.unwrap_or(30)),
-                    return_pct: Set(raw_return.unwrap_or(0.0)),
-                    was_correct: Set(was_correct),
-                    decision_confidence: Set(decision_confidence),
-                    // #31：与反思行同一个建点盖章 —— 被复盘决策的代际（权威仍是分析行）。
-                    template_version: Set(reflected_generation),
-                    // 复盘档的客观判定切片（其余三档在 horizon_results_json）
-                    horizon_pnl_json: Set(Some(
-                        serde_json::json!({
-                            primary_horizon: {
-                                "returnPct": raw_return,
-                                "wasCorrect": was_correct,
-                                "holdingDays": holding_days,
-                            }
-                        })
-                        .to_string(),
-                    )),
-                    agreement_score: Set(None),
-                    // Gap1 走 reflection_verdict 旧格（不去重、每次重跑追加），非 #31 四档通道。
-                    source_ref: Set(None),
-                    // §二 显式外键：本行由**这条反思**产出。统计侧据此直连，不再依赖
-                    // (stock_code, created_at) 相等 —— 反思行的 created_at 是**建点时刻**、
-                    // 本行的是**完成时刻**，天然不等（旧键现网实测 8 行 0 命中）。
-                    reflection_id: Set(Some(analysis_id.clone())),
-                    created_at: Set(now_ms),
-                }
-                .insert(db)
-                .await;
-                match sp_insert {
-                    Ok(_) => tracing::info!(
-                        "[reflection] Gap1: 写入 strategy_performance {sp_id}: \
-                         verdict={verdict_str} was_correct(deterministic)={was_correct} \
-                         decision_confidence={decision_confidence}"
-                    ),
-                    Err(e) => tracing::warn!("[reflection] 写入 strategy_performance 失败: {e}"),
-                }
-            } else {
-                // 无判定依据（无行情 / 中性档 / 期中观察）⇒ 不写 strategy_performance，
-                // 避免把「无法判定」计为「判定为错」而污染胜率统计。
-                tracing::warn!(
-                    "[reflection] {}: 无判定依据，跳过 strategy_performance 写入\
-                     （避免把「无判定」计为「判定为错」）",
+            // ── Gap 1: 确定性判定 → Strategy Performance（P1-1②：与失败路径共用同一幂等落库）──
+            // M1 改写：was_correct 由行情快照**确定性反推**（`deterministic_was_correct`），
+            // 消除 LLM 幻觉污染；「未判定」与「判定为错」在数据上可区分 ——
+            // 无法判定（无行情 / 中性档 / 期中观察）→ **不写行**（strategy_performance
+            // 的 was_correct 是 i32 非空列，表达不了第三态；「没写入」即「没有判定依据」）。
+            // 原实现整块（构造 17 列 + insert）2026-10-16 抽为 `persist_m1_sample_if_absent`，
+            // 使失败路径（工作流 Err）也能留下确定性战绩。
+            match persist_m1_sample_if_absent(
+                db,
+                &M1SampleInputs {
+                    reflection_id: &analysis_id,
+                    original_analysis: original_analysis.as_ref(),
+                    primary_snapshot,
+                    stock_code,
+                    stock_name,
+                    raw_return,
+                    holding_days,
+                    primary_horizon,
+                    reflected_generation,
+                    now_ms,
+                },
+            )
+            .await
+            {
+                Ok(true) => {},
+                Ok(false) => tracing::warn!(
+                    "[reflection] {}: 无判定依据或该反思行已有样本，跳过 strategy_performance 写入",
                     stock_code
-                );
+                ),
+                Err(e) => tracing::warn!("[reflection] 写入 strategy_performance 失败: {e}"),
             }
 
             // ── #31 代际血缘管道：四档成熟样本 → 真实策略格 strategy_performance ──
@@ -1342,6 +1319,38 @@ pub async fn run_reflection_workflow(
         },
         Err(e) => {
             let err_msg = format!("反思工作流失败: {e}");
+
+            // P1-1②（PLAN-stock-decision-reliability R4/R12）：工作流失败 ≠ 无样本 ——
+            // M1 的原料（主档动作 + 行情快照）在失败前已具备 ⇒ 借确定性判定留下战绩，
+            // 让「LLM 侧失败」不再等于系统对已发生的错误完全失忆；幂等（重试成功后
+            // 的二次物化会被同反思行查重跳过）。
+            match persist_m1_sample_if_absent(
+                db,
+                &M1SampleInputs {
+                    reflection_id: &analysis_id,
+                    original_analysis: original_analysis.as_ref(),
+                    primary_snapshot,
+                    stock_code,
+                    stock_name,
+                    raw_return,
+                    holding_days,
+                    primary_horizon,
+                    reflected_generation,
+                    now_ms,
+                },
+            )
+            .await
+            {
+                Ok(true) => tracing::info!(
+                    "[reflection] {}: 失败路径已补落 M1 确定性样本（reflection_id={analysis_id}）",
+                    stock_code
+                ),
+                Ok(false) => {},
+                Err(e2) => {
+                    tracing::warn!("[reflection] 失败路径 M1 物化异常（不影响 failed 落库）: {e2}")
+                },
+            }
+
             let _ = stock_reflections::Entity::update_many()
                 .col_expr(
                     stock_reflections::Column::Status,
@@ -2138,6 +2147,10 @@ pub const DEFAULT_REFLECTION_DEPTH: &str = "light";
 pub const REFLECTION_SOURCE_DUE: &str = "due";
 /// 妖股漏检 as-of 补分析触发的漏检回放反思。
 pub const REFLECTION_SOURCE_MOVER_RECALL: &str = "mover_recall";
+/// 历史 live 分析的口径补建（P1-6，`PLAN-stock-decision-reliability.md`）：
+/// 10-14 之前 live 分析几乎零反思行，离线 bin 按缺档补建时盖此标记便于回溯，
+/// 与常规 `due` 反思维度分开统计。
+pub const REFLECTION_SOURCE_BACKFILL: &str = "backfill";
 
 /// 建 pending 行所需的**最小**分析侧事实。
 pub struct PendingReflectionSeed<'a> {
@@ -2174,15 +2187,37 @@ pub struct PendingReflectionSeed<'a> {
     pub now_ms: i64,
 }
 
-/// 本次可复盘的档集 = 四档里**决策有明确方向**的那些（裁定 Q1）。
+/// 持有/观望档的反思建点抽样率（百分比）。方向动作全量建点；中性档没有多空可判，
+/// 全量建只会灌爆反思 LLM 配额，按此比例做确定性抽样（P1-9）。
+const NEUTRAL_SAMPLE_PCT: u64 = 20;
+
+/// 确定性抽样：FNV-1a(`token:horizon`) 落在 [0,100) 的前 [`NEUTRAL_SAMPLE_PCT`] 段。
+/// 刻意不用随机数：同一分析重跑/重放必须得到同一结果（幂等），换股自然重抽。
+fn sampled_in(token: &str, horizon: &str) -> bool {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in token.bytes().chain(*b":").chain(horizon.bytes()) {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100_0000_01b3);
+    }
+    h % 100 < NEUTRAL_SAMPLE_PCT
+}
+
+/// 本次可复盘的档集 = 四档里**决策有明确方向**的那些（裁定 Q1），
+/// 外加**持有/观望档的确定性抽样**（P1-9，`PLAN-stock-decision-reliability.md`）。
 ///
-/// 观望/持有/不确定/无法判断的档没有多空可判（`deterministic_was_correct` 对它们返回
-/// `None`），为其反思只会产出空洞叙述并沉淀成脏教训 ⇒ 不建行。
+/// 方向动作全量建点；持有/观望档没有多空可判（`deterministic_was_correct` 对它们返回
+/// `None`），全量建只会灌爆反思 LLM 配额，故按 [`NEUTRAL_SAMPLE_PCT`] 抽样 ——
+/// 让「该买没买 / 该拿没拿」这类中性决策也有少量样本可回看（反思端对这些行不产出
+/// 伪结论，只落区间行情事实）。不确定/无法判断/未识别仍不建行。
 /// 返回 `(档名, 该档期望持有交易日)`；天数优先取该档决策声明值，缺失回 `Period` 默认表。
+///
+/// `sample_token`：中性档抽样种子（调用方传 `analysis_id`）——同一分析重跑/重放
+/// 结果稳定，同一批分析中各股独立抽样。
 pub fn reviewable_horizons(
     horizon_decisions: Option<&str>,
     primary_horizon: Option<&str>,
     primary_holding_days: Option<i64>,
+    sample_token: &str,
 ) -> Vec<(String, i64)> {
     let parsed = horizon_decisions
         .filter(|s| !s.is_empty())
@@ -2190,18 +2225,27 @@ pub fn reviewable_horizons(
         .and_then(|v| v.as_object().map(|o| parse_horizon_decisions(o).unwrap_or_default()))
         .unwrap_or_default();
 
-    let directional = |action: &str| {
-        matches!(
-            normalize_action(action),
-            Some(ActionKind::Buy | ActionKind::Increase | ActionKind::Sell | ActionKind::Reduce)
-        )
+    let keep = |action: &str, p: &Period| -> bool {
+        match normalize_action(action) {
+            Some(
+                ActionKind::Buy | ActionKind::Increase | ActionKind::Sell | ActionKind::Reduce,
+            ) => true,
+            Some(ActionKind::Hold | ActionKind::Wait) => sampled_in(sample_token, p.as_str()),
+            _ => false,
+        }
     };
 
     let mut out: Vec<(String, i64)> = Period::ALL
         .iter()
         .filter_map(|p| {
-            let d = parsed.get(p.as_str())?;
-            if !directional(&d.action) {
+            // 双键取：`decisionsByHorizon` 的键是 **camelCase**（`ultraShort`；
+            // `Period::camel_key` 为权威拼写），而本函数输出/落库用 snake（`as_str`）。
+            // 旧实现只取 snake ⇒ **ultra 档在逐档路径系统性 miss**（snake==camel 的
+            // short/mid/long 无此问题）——这正是「超短档反思样本长期只有主档兜底
+            // 那几条」的根因（2026-10-16 查：全库 101 条分析均为 camel 键、ultra 逐档
+            // 行仅 6 条且全部来自主档恰为 ultra 的兜底路径）。
+            let d = parsed.get(p.as_str()).or_else(|| parsed.get(p.camel_key()))?;
+            if !keep(&d.action, p) {
                 return None;
             }
             Some((
@@ -2212,6 +2256,11 @@ pub fn reviewable_horizons(
         })
         .collect();
     if !out.is_empty() {
+        return out;
+    }
+    // 有逐档决策、但过滤后为空（四档全为中性且未抽中）⇒ 如实返回空表。
+    // ⚠ 不能掉进下方「无逐档决策」的兜底：那会无条件给主档建行，让「未抽中」全部作弊命中。
+    if !parsed.is_empty() {
         return out;
     }
 
@@ -2244,6 +2293,19 @@ pub fn reviewable_horizons(
     out
 }
 
+/// 取该分析某档的期望持有交易日：决策声明优先、`Period` 默认兜底。
+///
+/// P1-9：存量 pending 的 `hindsight_date` 重算必须与建点（`reviewable_horizons`）
+/// 用同一把尺 —— 两处都走「声明优先、默认兜底」，否则重算会把口径改出第三种。
+pub fn expected_holding_days_for(horizon_decisions: Option<&str>, horizon: &str) -> i64 {
+    horizon_decisions
+        .filter(|s| !s.is_empty())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|v| v.as_object().map(|o| parse_horizon_decisions(o).unwrap_or_default()))
+        .and_then(|parsed| parsed.get(horizon).and_then(|d| d.expected_holding_days))
+        .unwrap_or_else(|| default_expected_holding_days(horizon))
+}
+
 /// 按复盘档集生成 pending 行（每档一行，`horizon` 建点即写、不留 NULL）。
 ///
 /// 三个建点（`core.rs` 单股通道 / `hooks.rs` 对话通道 / `bin/axagent-batch-rerun.rs`
@@ -2258,6 +2320,7 @@ pub fn build_pending_reflection_rows(
             seed.horizon_decisions,
             seed.primary_horizon,
             seed.primary_holding_days,
+            seed.analysis_id,
         ),
     )
 }
@@ -2280,21 +2343,16 @@ pub fn build_pending_reflection_rows_for(
             chrono::Local::now().date_naive()
         });
 
-    // 时间旅行批次（2026-10-11）：as_of 激活时，四档 hindsight 必须按**交易日**外推
-    // （T+2/T+5/T+28/T+90 交易日，权威值 `Period::default_holding_days`），而不是自然日 ——
-    // 否则跨周末/长假会系统性提前到期。live（无 as_of）行为逐字不变（自然日）。
+    // P1-9（`PLAN-stock-decision-reliability.md`，2026-10-16）：四档 hindsight **统一**
+    // 按交易日外推（T+2/T+5/T+28/T+90 交易日）—— 旧实现 live 走自然日、仅 as_of 批次走
+    // 交易日；自然日口径让长档样本成熟额外推迟约 40%（90 自然日 ≈ 63 交易日），长假后失真。
     // 未来交易日历缺口由 is_trading_day「工作日默认开市」兜底，名义到期日误差仅限未公告假期，
     // 实际反思取数另有「≤ hindsight 最后一根真实 K 线」自证。
-    let asof_active = axagent_astock_data::as_of::current_as_of().is_some();
-
     horizons
         .into_iter()
         .map(|(horizon, days)| {
-            let hindsight_nd = if asof_active {
-                axagent_astock_data::calendar::nth_trading_day(analysis_nd, days as i32)
-            } else {
-                analysis_nd + chrono::Duration::days(days)
-            };
+            let hindsight_nd =
+                axagent_astock_data::calendar::nth_trading_day(analysis_nd, days as i32);
             let hindsight_date = hindsight_nd.format("%Y-%m-%d").to_string();
             stock_reflections::ActiveModel {
                 id: Set(uuid::Uuid::new_v4().to_string()),
@@ -2331,6 +2389,7 @@ pub fn build_pending_reflection_rows_for(
                 // 从 mover_recall_events 回查盖章，建点时拿不到，先留 NULL。
                 source: Set(seed.source.to_string()),
                 miss_layer: Set(None),
+                failure_modes: Set(None),
                 status: Set("pending".to_string()),
                 created_at: Set(seed.now_ms),
                 updated_at: Set(seed.now_ms),
@@ -2437,28 +2496,28 @@ async fn perform_single_reflection(
             "short"
         }),
     };
-    let primary_snap_opt =
-        snapshots_raw.get(primary_horizon).and_then(|r| r.as_ref().ok()).cloned();
-
-    match primary_snap_opt {
-        Some(s) if s.trading_days < 1 => {
+    // 主档快照的处置判定统一走 `take_primary_snapshot`（「样本不足 vs 取数失败」的唯一判据点）。
+    // ⚠ 跳过必须**先于**降级：2026-10-16 前取数侧把「不足」写进 Err 通道，这里的
+    // `Some(s) if s.trading_days < 1` 永远不可达 ⇒ 幼龄行被写成 completed 盲反思。
+    let primary_snap_opt = match take_primary_snapshot(snapshots_raw.get(primary_horizon)) {
+        Ok(s) => Some(s.clone()),
+        Err(SnapshotGap::Young) => {
             tracing::info!(
-                "[{log_prefix}] {} ({}) {primary_horizon} 分析日之后仅 {} 个交易日,行情样本不足 skip",
-                pending_row.id,
-                pending_row.stock_code,
-                s.trading_days
-            );
-            return Ok(ReflectionOutcome::SkippedYoung);
-        },
-        None => {
-            tracing::warn!(
-                "[{log_prefix}] {} ({}) {primary_horizon} 行情快照不可用,降级",
+                "[{log_prefix}] {} ({}) {primary_horizon} 分析日之后尚无完整交易日的新行情,样本不足 skip",
                 pending_row.id,
                 pending_row.stock_code
             );
+            return Ok(ReflectionOutcome::SkippedYoung);
         },
-        _ => {},
-    }
+        Err(SnapshotGap::Failed(reason)) => {
+            tracing::warn!(
+                "[{log_prefix}] {} ({}) {primary_horizon} 行情快照不可用({reason}),降级",
+                pending_row.id,
+                pending_row.stock_code
+            );
+            None
+        },
+    };
 
     let horizon_snapshots: std::collections::BTreeMap<String, Option<MarketSnapshot>> =
         snapshots_raw.into_iter().map(|(k, v)| (k, v.ok())).collect();
@@ -2997,6 +3056,45 @@ impl MarketSnapshot {
     }
 }
 
+/// 单档行情快照「拿不到」的两种成因 —— 两条消费链的处置**完全不同**，
+/// 不能再压进同一个 `Err(String)` 通道（2026-10-16 现场：幼龄行被降级成 completed 盲反思）：
+///
+/// - `Young`：分析日之后**尚未跨过 1 个完整交易日的新行情**（一根 K 线都没有，或只有
+///   入场那一根）⇒ 样本不足。批量链**跳过并保持行 pending**（下个批次再看），
+///   手动链如实报「不足以构成对比」；
+/// - `Failed(String)`：取数或数据本身异常 ⇒ 如实降级，原因随值带回（旧实现把原因
+///   吞在 `Err` 里只留一句「不可用」，2026-10-14 取证时只能靠翻库反推）。
+#[derive(Debug, Clone)]
+pub enum SnapshotGap {
+    Young,
+    Failed(String),
+}
+
+/// 单档窗口的「出场脚标 + 已走完的交易日数」；`None` = 分析日之后尚未跨过
+/// 1 个完整交易日（只有入场那一根）⇒ 样本不足。
+///
+/// 「分析日之后仅 N 个交易日 ⇒ 跳过」这条判据的唯一出处。⚠ 历史教训：不足曾被打包成
+/// `Err(String)` 出函数，而消费侧的跳过判据全建在 `Ok(快照)` 支上 ⇒ 判据静默失效三周
+/// （11aa58772 起，002371 / 10-14 批次实证），修好前不要再引入第三处口径。
+fn horizon_window(klines_len: usize, entry_idx: usize, expected_days: i64) -> Option<(usize, i64)> {
+    let exit_idx = std::cmp::min(klines_len.saturating_sub(1), entry_idx + expected_days as usize);
+    let trading_days = (exit_idx - entry_idx) as i64;
+    (trading_days >= 1).then_some((exit_idx, trading_days))
+}
+
+/// 取主档快照并判其处置：`None`（快照表中缺该档键，理论不可达）折成 `Failed` 归因 ——
+/// 「样本不足 vs 取数失败」的**唯一**判据点，批量链与手动链都走这里，不各写一份 match。
+pub fn take_primary_snapshot(
+    cell: Option<&Result<MarketSnapshot, SnapshotGap>>,
+) -> Result<&MarketSnapshot, SnapshotGap> {
+    match cell {
+        Some(Ok(s)) => Ok(s),
+        Some(Err(SnapshotGap::Young)) => Err(SnapshotGap::Young),
+        Some(Err(SnapshotGap::Failed(reason))) => Err(SnapshotGap::Failed(reason.clone())),
+        None => Err(SnapshotGap::Failed("快照表中缺该档位键".into())),
+    }
+}
+
 /// ── 四周期行情快照（PLAN-stock-reflection-four-horizon 批次 3）──
 ///
 /// 一次 K 线读取，按四个目标交易日索引分别生成窗口快照，避免每周期重复请求。
@@ -3004,8 +3102,9 @@ impl MarketSnapshot {
 ///
 /// 状态语义（对每个周期）：
 /// - `Ok` + `within_expected_horizon=false` → mature（数据充足，可做终评）
-/// - `Ok` + `within_expected_horizon=true` → immature（数据不足，期中观察）
-/// - `Err` → unavailable（行情源失败）
+/// - `Ok` + `within_expected_horizon=true` → immature（期中观察，出场=最新一根）
+/// - `Err(SnapshotGap::Young)` → 样本不足（分析日之后尚未跨过完整交易日，等后续批次）
+/// - `Err(SnapshotGap::Failed)` → unavailable（行情源失败 / 数据异常）
 ///
 /// 基准（沪深300）仅计算一次（从 entry 到全窗口最新），
 /// 所有周期共享同一个基准涨幅（不同窗口的基准偏差在统计上远小于方向误差）。
@@ -3015,7 +3114,7 @@ pub async fn compute_market_snapshots(
     analysis_date: &str,
     horizon_expected_days: &std::collections::BTreeMap<String, i64>,
     target_price: Option<f64>,
-) -> std::collections::BTreeMap<String, Result<MarketSnapshot, String>> {
+) -> std::collections::BTreeMap<String, Result<MarketSnapshot, SnapshotGap>> {
     use axagent_harness::market_data::{AdjType, MarketDataProvider};
 
     let mut results = std::collections::BTreeMap::new();
@@ -3033,14 +3132,14 @@ pub async fn compute_market_snapshots(
         Ok(_) => {
             let err = format!("{stock_code} 无K线数据");
             for key in horizon_expected_days.keys() {
-                results.insert(key.clone(), Err(err.clone()));
+                results.insert(key.clone(), Err(SnapshotGap::Failed(err.clone())));
             }
             return results;
         },
         Err(e) => {
             let err = format!("获取 {stock_code} K线失败: {e}");
             for key in horizon_expected_days.keys() {
-                results.insert(key.clone(), Err(err.clone()));
+                results.insert(key.clone(), Err(SnapshotGap::Failed(err.clone())));
             }
             return results;
         },
@@ -3049,9 +3148,12 @@ pub async fn compute_market_snapshots(
     let entry_idx = match klines.iter().position(|k| k.date.as_str() > analysis_date) {
         Some(i) => i,
         None => {
-            let err = format!("{stock_code} 在 {analysis_date} 之后无K线数据");
+            // 分析日之后**一根新 K 线都没有**（含「分析日 = 最新交易日」的当天场景，
+            // 02:00 自动化次日凌晨跑反思即此形态）⇒ 同样是样本不足，等后续批次。
+            // ⚠ 旧实现把这支写成 `Err("...在 X 之后无K线数据")`，消费侧无法与真故障区分，
+            // 每根幼龄行都被降级后写成 completed 盲反思（2026-10-16 修复）。
             for key in horizon_expected_days.keys() {
-                results.insert(key.clone(), Err(err.clone()));
+                results.insert(key.clone(), Err(SnapshotGap::Young));
             }
             return results;
         },
@@ -3062,7 +3164,7 @@ pub async fn compute_market_snapshots(
     if entry_price.is_nan() || entry_price <= 0.0 {
         let err = format!("{stock_code} 入场基准价非法: {entry_price}");
         for key in horizon_expected_days.keys() {
-            results.insert(key.clone(), Err(err.clone()));
+            results.insert(key.clone(), Err(SnapshotGap::Failed(err.clone())));
         }
         return results;
     }
@@ -3084,22 +3186,20 @@ pub async fn compute_market_snapshots(
         if expected_days <= 0 {
             results.insert(
                 horizon_key.clone(),
-                Err(format!("{horizon_key}: 无效持有期 {expected_days}")),
+                Err(SnapshotGap::Failed(format!("{horizon_key}: 无效持有期 {expected_days}"))),
             );
             continue;
         }
 
-        let exit_idx = std::cmp::min(klines.len() - 1, entry_idx + expected_days as usize);
+        let Some((exit_idx, trading_days)) = horizon_window(klines.len(), entry_idx, expected_days)
+        else {
+            // 尚未跨过 1 个完整交易日（只有入场那一根）⇒ 样本不足，不是故障
+            results.insert(horizon_key.clone(), Err(SnapshotGap::Young));
+            continue;
+        };
         let within_expected_horizon = exit_idx < entry_idx + expected_days as usize;
         let exit_bar = &klines[exit_idx];
         let latest_price = exit_bar.close;
-        let trading_days = (exit_idx - entry_idx) as i64;
-
-        if trading_days < 1 {
-            results
-                .insert(horizon_key.clone(), Err(format!("{horizon_key}: 分析日之后无交易数据")));
-            continue;
-        }
 
         // 区间高低 + 最大回撤（entry_idx..=exit_idx）
         let window = &klines[entry_idx..=exit_idx];
@@ -3339,16 +3439,40 @@ fn build_sub_analysis_from_snapshot(
 
 /// 反思记忆（`sub-analysis` = 全部 `_raw.*` 节点输出）的总字符预算。
 ///
-/// 取 12 万字符：中文混合 JSON 实测约 0.7~1 token/字，即 10 万 token 量级，
-/// 给系统 prompt、tunable 参数清单、行情事实、历史教训与工具结果留出充足空间，
-/// 对上最小上下文窗口的模型（agnes-2.5-flash 524k）也有 4 倍以上余量。
-const REFLECTION_MEMORY_TOTAL_CHAR_BUDGET: usize = 120_000;
+/// P1-2（`PLAN-stock-decision-reliability.md`）：从 12 万收紧到 3.6 万字符 ——
+/// 目标是「只传决策 JSON + 逐档腿信号 + 区间行情摘要」，整体上下文压在数万 token
+/// （中文混合 JSON 实测约 0.7~1 token/字 ⇒ 3.6 万字符 ≈ 25k~36k token）。
+/// ⚠ 收紧依赖第 3 层的「非保护节点优先淘汰」：否则按体积从大到小硬砍会把
+/// 四档决策节点（约 2.5 万字符级）一并砍掉 —— 反思反而读不到决策。
+const REFLECTION_MEMORY_TOTAL_CHAR_BUDGET: usize = 36_000;
 /// 单节点序列化预算：超过后逐趟压缩该节点内的字符串叶子。
-const REFLECTION_MEMORY_NODE_CHAR_BUDGET: usize = 20_000;
+const REFLECTION_MEMORY_NODE_CHAR_BUDGET: usize = 8_000;
 /// 第一遍单字符串叶子预算（分析师结论 / 辩论共识通常不超过此量级）。
-const REFLECTION_MEMORY_LEAF_CHAR_BUDGET: usize = 8_000;
-/// 节点超预算时，叶预算逐趟减半的档位（8000 已在第一遍施加）。
-const REFLECTION_MEMORY_NODE_SHRINK_CAPS: [usize; 3] = [4_000, 2_000, 800];
+const REFLECTION_MEMORY_LEAF_CHAR_BUDGET: usize = 4_000;
+/// 节点超预算时，叶预算逐档收紧的档位（4000 已在第一遍施加）。
+const REFLECTION_MEMORY_NODE_SHRINK_CAPS: [usize; 3] = [2_000, 1_000, 400];
+
+/// 反思记忆硬引用保护名单（P1-2）：总预算淘汰时**最后**才动这些节点。
+///
+/// 来源 = `stock_analysis_setup/mod.rs` 反思模板 `reflection-comparator` 的
+/// input_mapping 中全部 `sub-analysis.<node>.*` 直接路径（trader_action /
+/// portfolio_action / debate_consensus / total_score / 六个 `__untrusted` 等）——
+/// 被整体淘汰会让映射变量静默变空。改模板映射时必须同步本表。
+const REFLECTION_MEMORY_PROTECTED_NODES: &[&str] = &[
+    "trader",
+    "portfolio-mgr",
+    "debate-convergence",
+    "t-scoring",
+    "research-mgr",
+    "a-catalyst",
+    "data-quality",
+    "risk-convergence",
+];
+
+/// 该节点是否属「反思硬引用面」（见 [`REFLECTION_MEMORY_PROTECTED_NODES`]）。
+fn is_protected_reflection_node(node_id: &str) -> bool {
+    REFLECTION_MEMORY_PROTECTED_NODES.contains(&node_id)
+}
 
 /// 估算 JSON 值序列化后的**字符**数（非字节：中文按字符计更贴近 token 量级）。
 fn reflection_json_chars(value: &serde_json::Value) -> usize {
@@ -3386,15 +3510,17 @@ fn cap_reflection_strings(value: &mut serde_json::Value, max_chars: usize) {
     }
 }
 
-/// 三层预算裁剪，保住「分析师结论节点」、砍掉「原始数据体积」：
+/// 三层预算裁剪，保住「决策 / 结论节点」、砍掉「原始数据体积」：
 ///
-/// 1. **叶裁剪**：所有节点内字符串叶子统一限到 8000 字符 —— 结论类文本几乎不
-///    受影响，被砍的是 raw-data 里整块行情 / 指标 JSON 这类叶子；
-/// 2. **节点压缩**：序列化仍超 2 万字符的节点，叶预算按 4000→2000→800 逐趟
-///    减半（叶子多的节点靠多叶分摊，单叶超大的节点在第一档即收敛）；
-/// 3. **总量淘汰**：仍超出总预算时，按节点体积**从大到小整体替换为占位**，
-///    直到总量达标 —— 实测最肥的总是 raw-data 类数据节点，砍 1~2 个即达标，
-///    分析师 / 多空辩论 / 决策节点全部保留。
+/// 1. **叶裁剪**：所有节点内字符串叶子统一限到 [`REFLECTION_MEMORY_LEAF_CHAR_BUDGET`]
+///    —— 结论类文本几乎不受影响，被砍的是 raw-data 里整块行情 / 指标 JSON 这类叶子；
+/// 2. **节点压缩**：序列化仍超 [`REFLECTION_MEMORY_NODE_CHAR_BUDGET`] 的节点，
+///    叶预算按 [`REFLECTION_MEMORY_NODE_SHRINK_CAPS`] 逐档收紧；
+/// 3. **总量淘汰（分两趟，P1-2）**：先按体积从大到小淘汰**非保护**节点（原始数据 /
+///    工具节点），仍超预算才动保护名单（[`REFLECTION_MEMORY_PROTECTED_NODES`]）里的
+///    硬引用节点 —— 旧实现单趟「最肥先砍」在 12 万预算下能靠几个十几万字符的数据块
+///    垫背；预算收紧到 3.6 万后，单趟会把四档决策节点（2.5 万级）一并砍掉。
+///    占位对象保留原节点的 `__untrusted` 哨兵（comparator 的健康度映射依赖它）。
 ///
 /// 只动 `_raw` 恢复出来的记忆变量，不触碰数据库与其他 prompt 变量。
 fn enforce_reflection_memory_budget(nodes: &mut serde_json::Map<String, serde_json::Value>) {
@@ -3405,7 +3531,7 @@ fn enforce_reflection_memory_budget(nodes: &mut serde_json::Map<String, serde_js
         cap_reflection_strings(node, REFLECTION_MEMORY_LEAF_CHAR_BUDGET);
     }
 
-    // 第 2 层：单节点仍超预算 ⇒ 叶预算逐趟减半
+    // 第 2 层：单节点仍超预算 ⇒ 叶预算逐档收紧
     for cap in REFLECTION_MEMORY_NODE_SHRINK_CAPS {
         for node in nodes.values_mut() {
             if reflection_json_chars(node) > REFLECTION_MEMORY_NODE_CHAR_BUDGET {
@@ -3414,26 +3540,43 @@ fn enforce_reflection_memory_budget(nodes: &mut serde_json::Map<String, serde_js
         }
     }
 
-    // 第 3 层：总预算淘汰（最肥节点先整体省略）
+    // 第 3 层：总预算淘汰（非保护节点优先，保护节点最后）
     let mut sizes: Vec<(String, usize)> =
         nodes.iter().map(|(id, node)| (id.clone(), reflection_json_chars(node))).collect();
     sizes.sort_by_key(|(_, size)| std::cmp::Reverse(*size));
 
     let mut total: usize = sizes.iter().map(|(_, size)| *size).sum();
-    for (node_id, size) in sizes {
+    for protect_pass in [false, true] {
         if total <= REFLECTION_MEMORY_TOTAL_CHAR_BUDGET {
             break;
         }
-        if let Some(node) = nodes.get_mut(&node_id) {
-            let placeholder = serde_json::json!({
+        for (node_id, size) in &sizes {
+            if total <= REFLECTION_MEMORY_TOTAL_CHAR_BUDGET {
+                break;
+            }
+            if is_protected_reflection_node(node_id) != protect_pass {
+                continue;
+            }
+            let Some(node) = nodes.get(node_id) else { continue };
+            if node.get("_truncated").is_some() {
+                // 上游趟次已淘汰（sizes 快照按替换前体积记账，这里防重复扣减）
+                continue;
+            }
+            let untrusted = node.get("__untrusted").cloned();
+            let mut placeholder = serde_json::json!({
                 "_truncated": format!(
                     "节点 {node_id} 原始载荷约 {size} 字符，超出反思上下文总预算已整体省略（原始数据仍可通过工具按 hindsight_date 复查）"
                 )
             });
+            if let Some(u) = untrusted {
+                // 硬引用面里的 `u_*` 映射只取 `__untrusted`：占位保留该哨兵，
+                // 让「该节点输出是否可信」在节点被省略后仍可判定。
+                placeholder["__untrusted"] = u;
+            }
             let placeholder_chars = reflection_json_chars(&placeholder);
-            *node = placeholder;
+            nodes.insert(node_id.clone(), placeholder);
             // 用占位体积替换原体积（占位远小于原体，总量单调下降）
-            total = total.saturating_sub(size).saturating_add(placeholder_chars);
+            total = total.saturating_sub(*size).saturating_add(placeholder_chars);
         }
     }
 
@@ -3686,6 +3829,146 @@ fn deterministic_was_correct(
             None
         },
     }
+}
+
+/// P1-1②（`PLAN-stock-decision-reliability.md` R4/R12）：M1 确定性样本的**幂等落库**。
+///
+/// **成功 / 失败两条路径共用本函数** —— 工作流失败 ≠ 无样本：M1 的原料（主档动作 +
+/// 行情快照）在失败前已具备，旧实现只在成功路径物化 ⇒ LLM 侧失败的行在统计里完全
+/// 消失（R4「系统永远没有记忆」的一角；2026-10-16 现网实证：failed 行对应的
+/// strategy_performance 恒 0 行）。
+///
+/// **幂等**：同一条反思行（`reflection_id`）至多一行 `reflection_verdict` 样本。
+/// 这不改变「重跑」语义 —— 反思行绑定的是固定决策，重跑同行的旧样本与新样本等价，
+/// 追加即双重计数（旧注释「不去重、每次重跑追加」正是 bin `delete_stale_reflection_perf`
+/// 要擦的那类重复；此处从源头上收敛）。
+/// 返回 `Ok(true)` = 本次落了行；`Ok(false)` = 无判定依据（无行情 / 中性档 / 期中观察，
+/// D2 语义：不写行）或已有样本（幂等跳过）。
+struct M1SampleInputs<'a> {
+    reflection_id: &'a str,
+    original_analysis: Option<&'a stock_analyses::Model>,
+    primary_snapshot: Option<&'a MarketSnapshot>,
+    stock_code: &'a str,
+    stock_name: &'a str,
+    raw_return: Option<f64>,
+    holding_days: Option<i32>,
+    primary_horizon: &'a str,
+    reflected_generation: Option<i32>,
+    now_ms: i64,
+}
+
+/// 重算「腿 × 档」预测力报告并落 `settings`（P2-a 裁决层的**写侧**；读侧在 `hooks.rs` 注入分支表时）。
+///
+/// 键名与判据都在 `analysis_engine::leg_weight_overlay`（单一权威源），本函数只管取数—算—存。
+async fn refresh_leg_ic_report(db: &DatabaseConnection) -> Result<(), String> {
+    use axagent_analysis_engine::leg_weight_overlay as lo;
+    let pairs = axagent_dao::repo::stock_lesson_queries::leg_ic_pairs(db)
+        .await
+        .map_err(|e| format!("读取腿配对失败: {e}"))?;
+    let report = lo::build_report(&pairs, chrono::Utc::now().timestamp_millis());
+    axagent_dao::repo::settings::set_setting(db, lo::LEG_IC_SETTING_KEY, &report.to_json_text())
+        .await
+        .map_err(|e| format!("写入腿预测力报告失败: {e}"))?;
+    let zeroable = report.cells.iter().filter(|c| lo::only_zeroing_status(&c.status)).count();
+    tracing::info!(
+        "[leg_ic] 报告刷新：配对 {} 行 / 观测 {} 条 / 分格 {} 个 / 判「无预测力」{} 格（门槛 n>={}）",
+        pairs.len(),
+        report.observations,
+        report.cells.len(),
+        zeroable,
+        report.min_samples
+    );
+    Ok(())
+}
+
+/// 把反思输出的 `failure_modes` 字段变成落库值（P2-b 的列语义唯一口径）。
+///
+/// 返回 `(列值, 被丢弃的词表外 token)`。两态必须分得开：
+/// - `None` = 模板**没产出**该字段（结构性缺口，面板要报「未标注」）；
+/// - `Some("[]")` = 产出了但**一个都不在词表内**（判据缺口，token 已回传供记日志）。
+///
+/// 入参来自 `deep_get_reflection_text`，故实测三种形态都要吃：数组 / 裸串 / 双重编码的 JSON 字符串。
+fn failure_modes_column_of(raw: Option<&str>) -> (Option<String>, Vec<String>) {
+    use axagent_analysis_engine::failure_mode::parse_failure_modes;
+    let Some(text) = raw else { return (None, Vec::new()) };
+    let parsed = parse_failure_modes(text);
+    (Some(parsed.to_json_text()), parsed.rejected)
+}
+
+async fn persist_m1_sample_if_absent(
+    db: &DatabaseConnection,
+    inputs: &M1SampleInputs<'_>,
+) -> Result<bool, String> {
+    // M1 判定（与成功路径同一纯函数、同一输入口径）。
+    let Some(was_correct) = deterministic_was_correct(
+        inputs.original_analysis.and_then(|a| a.decision_action.as_deref()),
+        inputs.primary_snapshot,
+    ) else {
+        return Ok(false);
+    };
+    // 幂等查重（见函数文档）。
+    let exists =
+        axagent_dao::repo::stock_lesson_queries::has_reflection_m1_sample(db, inputs.reflection_id)
+            .await
+            .map_err(|e| format!("M1 样本查重失败: {e}"))?;
+    if exists {
+        return Ok(false);
+    }
+    // decision_confidence：与旧成功路径同源（原分析 `decision_json.confidence`，
+    // 回退 `decisionConfidence`；量纲 0-100）。⚠ 取不到时落 0 的已知残留同旧实现。
+    let decision_confidence = inputs
+        .original_analysis
+        .and_then(|a| a.decision_json.as_deref())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|dj| {
+            dj.get("confidence").or_else(|| dj.get("decisionConfidence")).and_then(|v| v.as_f64())
+        })
+        .map(|c| c.round().clamp(0.0, 100.0) as i32)
+        .unwrap_or(0);
+    let decision_at = inputs.now_ms - (inputs.holding_days.unwrap_or(30) as i64 * 86_400_000);
+    let sp_id = uuid::Uuid::new_v4().to_string();
+    // P1-1 物化切片：键 = **复盘档名**（与字段文档「各 horizon 的盈亏序列」同形；其余三档在
+    // `horizon_results_json`）。⚠ 2026-10-16 上午的中间态把键写成裸 ident `primary_horizon`
+    // （该名不在本函数作用域 ⇒ E0425，整棵树编译不过）——按同文件 `results.insert(key, …)`
+    // 的既有形态改为显式 Map，语义 = 动态键 `inputs.primary_horizon`。
+    let horizon_pnl_json = serde_json::Value::Object({
+        let mut m = serde_json::Map::new();
+        m.insert(
+            inputs.primary_horizon.to_string(),
+            serde_json::json!({
+                "returnPct": inputs.raw_return,
+                "wasCorrect": was_correct,
+                "holdingDays": inputs.holding_days,
+            }),
+        );
+        m
+    })
+    .to_string();
+    let draft = axagent_dao::repo::stock_lesson_queries::ReflectionM1Draft {
+        id: sp_id.clone(),
+        reflection_id: inputs.reflection_id.to_string(),
+        stock_code: inputs.stock_code.to_string(),
+        stock_name: inputs.stock_name.to_string(),
+        period: format!("reflection:{}", inputs.primary_horizon),
+        decision_at,
+        exit_at: inputs.now_ms,
+        holding_days: inputs.holding_days.unwrap_or(30),
+        return_pct: inputs.raw_return.unwrap_or(0.0),
+        was_correct,
+        decision_confidence,
+        // #31：与反思行同一个建点盖章 —— 被复盘决策的代际（权威仍是分析行）。
+        template_version: inputs.reflected_generation,
+        // 复盘档的客观判定切片（其余三档在 horizon_results_json）。
+        horizon_pnl_json: Some(horizon_pnl_json),
+    };
+    axagent_dao::repo::stock_lesson_queries::insert_reflection_m1_sample(db, draft)
+        .await
+        .map_err(|e| format!("写入 strategy_performance 失败: {e}"))?;
+    tracing::info!(
+        "[reflection] M1 样本落库 {sp_id}: reflection_id={} was_correct={was_correct} conf={decision_confidence}",
+        inputs.reflection_id
+    );
+    Ok(true)
 }
 
 /// 构建四周期反思结果 JSON（PLAN-stock-reflection-four-horizon 批次 2+3）。
@@ -4071,6 +4354,50 @@ mod market_snapshot_tests {
         model.blackboard_snapshot = Some("{}".to_string());
         assert_eq!(extract_target_price(&model), None);
     }
+
+    // ── 「样本不足」与「取数失败」的分道（2026-10-16 现场回归）──
+    //
+    // 现场：002371（as_of 10-14）在 10-16 凌晨批次里报「行情快照不可用,降级」并被写成
+    // completed —— 当时东财已有 10-15 的 K 线（只有一根、未跨过完整交易日），不是取数故障。
+    // 根因：取数侧把「不足」塞进 `Err`，消费侧却把「跳过」判在 `Ok(快照)` 支上。
+
+    /// 只有入场那一根 ⇒ 未跨过完整交易日 ⇒ `None`（样本不足）；多出一根才可用。
+    #[test]
+    fn horizon_window_requires_a_full_day_after_entry() {
+        // 002371 形态：2 根 K 线、入场=最后一根
+        assert_eq!(horizon_window(2, 1, 2), None, "仅入场一根不得算可用窗口");
+        // 负控（另一头）：入场后又多出一根 ⇒ 可用，天数=1
+        assert_eq!(horizon_window(3, 1, 2), Some((2, 1)));
+        // 出场被期望持有期截断
+        assert_eq!(horizon_window(10, 1, 2), Some((3, 2)));
+        // 尚未到期望持有期（期中观察）：出场=最新一根，天数如实
+        assert_eq!(horizon_window(4, 1, 90), Some((3, 2)));
+    }
+
+    /// 三种缺口必须分道：`Young` 保 `Young`、`Failed` 保因、可用不被截走。
+    #[test]
+    fn primary_snapshot_routes_young_and_failed_apart() {
+        let young: Result<MarketSnapshot, SnapshotGap> = Err(SnapshotGap::Young);
+        assert!(
+            matches!(take_primary_snapshot(Some(&young)), Err(SnapshotGap::Young)),
+            "样本不足必须原样透出为 Young（它决定「跳过留 pending」而不是「降级写盲反思」）"
+        );
+
+        let failed: Result<MarketSnapshot, SnapshotGap> =
+            Err(SnapshotGap::Failed("基准 K 线获取失败: timeout".into()));
+        match take_primary_snapshot(Some(&failed)) {
+            Err(SnapshotGap::Failed(r)) => assert!(r.contains("timeout"), "原因不得被吞: {r}"),
+            Err(SnapshotGap::Young) => panic!("取数失败被误判成样本不足"),
+            Ok(_) => panic!("取数失败不得被当作可用快照"),
+        }
+
+        // 负控：可用快照不得被任何缺口分支截走
+        let ready: Result<MarketSnapshot, SnapshotGap> = Ok(sample());
+        assert!(take_primary_snapshot(Some(&ready)).is_ok());
+
+        // 键缺失（理论不可达）归取数失败：至少降级留痕，不伪装成「再等等」
+        assert!(matches!(take_primary_snapshot(None), Err(SnapshotGap::Failed(_))));
+    }
 }
 
 // ── 单元测试：M1 确定性判定（deterministic_was_correct）──
@@ -4333,6 +4660,7 @@ mod deterministic_was_correct_tests {
             template_version: Set(g),
             source: Set(REFLECTION_SOURCE_DUE.to_string()),
             miss_layer: Set(None),
+            failure_modes: Set(None),
             status: Set("completed".to_string()),
             created_at: Set(now),
             updated_at: Set(now),
@@ -4426,6 +4754,23 @@ mod pending_rows_per_horizon_tests {
         );
     }
 
+    /// 2026-10-16：`decisionsByHorizon` 的**生产键是 camelCase**（全库 100/100 为
+    /// `ultraShort`；snake 键只存在于本 mod 的旧夹具里）—— 逐档建点必须两族键都认：
+    /// 旧实现只取 snake ⇒ ultra 档在真实链路上系统性 miss（现网 ultra 逐档反思行
+    /// 仅 6 条、且全部来自「主档恰为 ultra」的兜底路径，逐档路径一条都没有）。
+    #[test]
+    fn camel_case_ultra_short_key_is_recognized() {
+        let hd = r#"{"ultraShort":{"action":"买入"},"short":{"action":"观望"},
+                     "mid":{"action":"持有"},"long":{"action":"减持"}}"#;
+        let rows = build_pending_reflection_rows(&seed(Some(hd), Some("mid"), Some(28)));
+        let got: Vec<String> = rows.iter().map(|r| horizon_of(r).unwrap()).collect();
+        assert!(
+            got.contains(&"ultra_short".to_string()),
+            "camel 键 ultraShort 必须被识别并建行（生产形态）: {got:?}"
+        );
+        assert!(got.contains(&"long".to_string()), "方向档 long 必须建行: {got:?}");
+    }
+
     /// 每档的 hindsight_date 必须按**该档**天数外推，不能四档共用主档一个窗口。
     #[test]
     fn each_row_carries_its_own_horizon_hindsight_date() {
@@ -4453,12 +4798,25 @@ mod pending_rows_per_horizon_tests {
         let rows2 = build_pending_reflection_rows(&seed(None, None, Some(6)));
         assert_eq!(horizon_of(&rows2[0]).as_deref(), Some("short"));
 
-        // 负控：四档全中性 ⇒ 无逐档方向可判，退回主档单行而不是四行伪复盘
+        // 负控（P1-9 抽样裁定）：四档全为中性 ⇒ **只给抽中的档建行**，一个没抽中就是空表。
+        // ⚠ 不得退回「无条件给主档建一行」：那等于让 20% 抽样全部作弊命中（本函数上方
+        //   `if !parsed.is_empty() { return out; }` 的注释与 bin 的空名单文案同口径）。
+        // 期望集按**同一条 `sampled_in` 判据**现推，而不是写死条数 —— 写死就是把这格的
+        // 成败交给 token 哈希的运气（夹具 token 固定，抽中哪几档是可算的，不是巧合）。
         let all_neutral = r#"{"ultra_short":{"action":"观望"},"short":{"action":"持有"},
                               "mid":{"action":"观望"},"long":{"action":"持有"}}"#;
         let rows3 = build_pending_reflection_rows(&seed(Some(all_neutral), Some("mid"), Some(28)));
-        assert_eq!(rows3.len(), 1);
-        assert_eq!(horizon_of(&rows3[0]).as_deref(), Some("mid"));
+        let expected: Vec<String> = Period::ALL
+            .iter()
+            .filter(|p| sampled_in("a-1", p.as_str()))
+            .map(|p| p.as_str().to_string())
+            .collect();
+        let got3: Vec<String> = rows3.iter().map(|r| horizon_of(r).unwrap()).collect();
+        assert_eq!(got3, expected, "全中性档的建点集合必须恰为被抽中的那几档: {got3:?}");
+        assert!(
+            expected.len() < Period::ALL.len(),
+            "20% 抽样下不可能四档全命中（全命中=伪复盘四行），实得 {expected:?}"
+        );
     }
 
     /// `build_pending_reflection_rows_for` 只补给定档集（bin 的「缺哪档补哪档」）。
@@ -4667,8 +5025,8 @@ mod reflection_memory_budget_tests {
 
     #[test]
     fn total_budget_evicts_fattest_nodes_but_keeps_conclusion() {
-        // 6 个多叶大数据节点：每节点 25 个 3 万字符叶子，800 档压缩后仍约 2.15 万
-        // 字符（> 节点预算），合计约 12.9 万 > 总预算 12 万 ⇒ 必须整体淘汰最肥者。
+        // 6 个多叶大数据节点：每节点 25 个 3 万字符叶子，逐档压缩后仍远超节点预算，
+        // 合计远超总预算 ⇒ 必须整体淘汰最肥者（全部非保护 ⇒ 走第一趟）。
         let mut root = Map::new();
         for i in 0..6 {
             let rows: Vec<serde_json::Value> =
@@ -4709,5 +5067,95 @@ mod reflection_memory_budget_tests {
         let snapshot = json!({"report.trader": "旧版报告文本"}).to_string();
         let v = build_sub_analysis_from_snapshot(Some(&snapshot), "600519");
         assert_eq!(v, json!({}));
+    }
+
+    #[test]
+    fn protected_nodes_are_not_evicted_while_budget_can_meet_by_unprotected() {
+        // P1-2：两个超肥非保护数据块（各自压缩后仍 ~4.4 万字符）+ 一个小的保护节点。
+        // 预算 3.6 万：两数据块被整体淘汰即达标 ⇒ 保护节点必须原样完整保留。
+        let fat = |leaf_char: &str| -> serde_json::Value {
+            json!({"rows": (0..100).map(|_| json!(leaf_char.repeat(3_000))).collect::<Vec<_>>()})
+        };
+        let snapshot = json!({
+            "_raw.raw-data-a": fat("甲"),
+            "_raw.raw-data-b": fat("乙"),
+            "_raw.data-quality": {"__untrusted": false, "note": "结论节点体积小"}
+        })
+        .to_string();
+        let v = build_sub_analysis_from_snapshot(Some(&snapshot), "000001");
+        let obj = v.as_object().expect("应返回 JSON 对象");
+
+        assert!(obj["raw-data-a"].get("_truncated").is_some(), "非保护数据块必须先被整体淘汰");
+        assert!(obj["raw-data-b"].get("_truncated").is_some(), "非保护数据块必须先被整体淘汰");
+        assert!(
+            obj["data-quality"].get("_truncated").is_none(),
+            "预算可由非保护节点满足时，保护节点不得被淘汰"
+        );
+        assert_eq!(obj["data-quality"]["note"], json!("结论节点体积小"));
+
+        let total: usize = obj.values().map(reflection_json_chars).sum();
+        assert!(total <= REFLECTION_MEMORY_TOTAL_CHAR_BUDGET, "裁剪后总量 {total} 超预算");
+    }
+
+    #[test]
+    fn evicted_protected_node_keeps_untrusted_sentinel() {
+        // 保护节点自身超预算且无非保护者可垫背 ⇒ 兜底趟淘汰它，但 `__untrusted`
+        // 哨兵必须留在占位里（comparator 的 u_* 映射在节点省略后仍要可判定）。
+        let snapshot = json!({
+            "_raw.data-quality": {
+                "__untrusted": true,
+                "rows": (0..100).map(|_| json!("丙".repeat(3_000))).collect::<Vec<_>>()
+            }
+        })
+        .to_string();
+        let v = build_sub_analysis_from_snapshot(Some(&snapshot), "000001");
+        let obj = v.as_object().expect("应返回 JSON 对象");
+
+        let placeholder = &obj["data-quality"];
+        assert!(placeholder.get("_truncated").is_some(), "唯一超预算节点（保护）应被兜底淘汰");
+        assert_eq!(
+            placeholder["__untrusted"],
+            json!(true),
+            "占位必须保留原节点的 __untrusted 哨兵"
+        );
+        assert!(placeholder.get("rows").is_none(), "原始载荷必须被省略");
+    }
+}
+
+#[cfg(test)]
+mod failure_modes_column_tests {
+    use super::*;
+
+    #[test]
+    fn column_is_null_when_template_omits_the_field() {
+        assert_eq!(failure_modes_column_of(None), (None, Vec::new()));
+    }
+
+    #[test]
+    fn column_holds_empty_array_when_every_token_is_outside_vocabulary() {
+        let (col, rejected) = failure_modes_column_of(Some(r#"["sentiment_over_signal"]"#));
+        assert_eq!(col.as_deref(), Some("[]"), "产出过字段就不能落 NULL，否则与未产出混态");
+        assert_eq!(rejected, vec!["sentiment_over_signal".to_string()]);
+    }
+
+    #[test]
+    fn column_accepts_all_three_observed_output_shapes() {
+        for raw in [r#"["chase_big_up_bar"]"#, "chase_big_up_bar", r#""chase_big_up_bar""#] {
+            let (col, rejected) = failure_modes_column_of(Some(raw));
+            assert_eq!(col.as_deref(), Some(r#"["chase_big_up_bar"]"#), "形态未归一：{raw}");
+            assert!(rejected.is_empty(), "不该有丢弃：{raw} -> {rejected:?}");
+        }
+    }
+
+    #[test]
+    fn column_keeps_legal_tokens_and_drops_only_illegal_ones() {
+        let (col, rejected) =
+            failure_modes_column_of(Some(r#"["other","invented_mode","chase_big_up_bar"]"#));
+        assert_eq!(
+            col.as_deref(),
+            Some(r#"["chase_big_up_bar","other"]"#),
+            "落库顺序按词表序，非法值不得进列"
+        );
+        assert_eq!(rejected, vec!["invented_mode".to_string()]);
     }
 }

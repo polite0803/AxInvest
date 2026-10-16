@@ -6576,7 +6576,7 @@
       "period-ultra-short": "Ultra-Short",
       "period-short": "Short-Term",
       "period-mid": "Mid-Term",
-      "period-long": "Long-Term",
+      "period-long": "Trimestre",
       "placeholder-periods": "Sélectionner une ou plusieurs périodes",
       "label-min-confidence": "Confiance minimale",
       "label-top-n": "Limite Top N",
@@ -7384,7 +7384,8 @@
       "none": "Jamais exécuté",
       "skipped": "Ignoré",
       "success": "Succès",
-      "failed": "Échec"
+      "failed": "Échec",
+      "partial": "Partiel"
     },
     "scheduled": {
       "autoRefresh": "Actualisation automatique toutes les 15 secondes",
@@ -7614,6 +7615,10 @@
         "failed": "Échec",
         "interrupted": "Interrompu"
       }
+    },
+    "nextRun": {
+      "stale": "Planification bloquée",
+      "staleHint": "La planification est en retard (ou en attente de rattrapage) depuis plus de 24 h sans progression : la tâche a peut-être été interrompue par un arrêt ou est bloquée. Utilisez « Exécuter maintenant » pour vérifier."
     }
   },
   "teammatePanel": {
@@ -14829,7 +14834,7 @@
         "ultra_short": "Ultra-court",
         "short": "Court",
         "mid": "Moyen",
-        "long": "Long"
+        "long": "Trimestre"
       },
       "dueYes": "Échu",
       "dueNo": "En attente",
@@ -15053,7 +15058,7 @@
     "boolYes": "Oui",
     "boolNo": "Non",
     "backendCallFailed": "Échec de l'appel backend",
-    "tierScopeHint": "Horizon : couvre les niveaux moyen et long (les catalyseurs goulot / politique / résultats se realized en semaines à mois) ; très court et court ne sont pas produits par conception — une ligne par niveau, durée de détention issue du niveau de référence.",
+    "tierScopeHint": "Horizon : couvre les niveaux moyen et trimestriel (les catalyseurs goulot / politique / résultats se realized en semaines à mois) ; très court et court ne sont pas produits par conception — une ligne par niveau, durée de détention issue du niveau de référence.",
     "timeBasisNoTier": "Candidat en direct sans palier ⇒ pas de fenêtre suggérée (lignes par palier dans l'historique)",
     "entryBand": "Bande d'entrée ±{{pct}}%",
     "entryBandHalfFallback": "Bande = moitié d'un multiplicateur fixe ⇒ non dérivée de la volatilité",
@@ -15439,7 +15444,7 @@
       "ultraShort": "Ultra court terme",
       "short": "Court terme",
       "mid": "Moyen terme",
-      "long": "Long terme"
+      "long": "Trimestre"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15483,7 +15488,7 @@
     "periodUltraShort": "Court",
     "periodShort": "Court",
     "periodMid": "Moyen",
-    "periodLong": "Long",
+    "periodLong": "Trimestre",
     "generatedAt": "Généré à {{time}}",
     "bannerVendorDisabled": "Certains styles sont désactivés: {styles}",
     "openSettings": "Ouvrir les paramètres",
@@ -15514,7 +15519,7 @@
     "timeHorizonUltraShort": "Ultra court",
     "timeHorizonShort": "Court terme",
     "timeHorizonMid": "Moyen terme",
-    "timeHorizonLong": "Long terme",
+    "timeHorizonLong": "Trimestre",
     "horizonSourceFormula": "formule",
     "horizonSourceModel": "signalé par le modèle",
     "horizonSourceBranchPick": "Choisi par la branche",
@@ -15688,7 +15693,7 @@
       "matrixAbsence": {
         "serenity_needs_week_or_longer_realization": "Par conception : la preuve de goulot d'étranglement exige un horizon d'une semaine ou plus",
         "oversold_rebound_needs_at_least_mid_horizon": "Par conception : le rebond de survente exige au moins un horizon moyen",
-        "oversold_rebound_not_applied_to_long_horizon": "Par conception : le rebond de survente ne s'applique pas à l'horizon long",
+        "oversold_rebound_not_applied_to_long_horizon": "Par conception : le rebond de survente ne s'applique pas à l'horizon trimestriel",
         "cell_not_in_matrix": "Case absente du tableau de contrat (écart d'implémentation, pas par conception)"
       },
       "matrixMisfit": {
@@ -16818,7 +16823,7 @@
       "periodUltraShort": "Ultra-Short",
       "periodShort": "Short-Term",
       "periodMid": "Mid-Term",
-      "periodLong": "Long-Term",
+      "periodLong": "Trimestre",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -16955,7 +16960,7 @@
       "trendScreening": "Sélection de tendances planifiée",
       "trendScreeningHint": "Exécute périodiquement le workflow de sélection de tendances (serenity-screening) ; les résultats alimentent le pool de candidats",
       "reflectionScan": "Rétrospection périodique",
-      "reflectionScanHint": "Rétrospecte automatiquement les analyses terminées aux intervalles ultra-court (2 j) / court (5 j) / moyen (28 j) / long (90 j)",
+      "reflectionScanHint": "Rétrospecte automatiquement les analyses terminées aux intervalles ultra-court (2 j) / court (5 j) / moyen (28 j) / trimestre (90 j)",
       "decisionBacktest": "Backtest de décision",
       "decisionBacktestHint": "Rejoue les recommandations historiques, récupère les bougies réelles des fenêtres T+N, mesure le taux de réussite et l'efficacité des facteurs, puis réécrit le résultat dans l'enregistrement d'analyse",
       "decisionBacktestWindow": "T+{{n}}",
@@ -16992,7 +16997,7 @@
         "ultraShort": "Ultra-court",
         "short": "Court",
         "mid": "Moyen",
-        "long": "Long"
+        "long": "Trimestre"
       },
       "column": {
         "id": "ID",
@@ -17155,7 +17160,7 @@
       "horizonUltraShort": "Ultra-court",
       "horizonShort": "Court",
       "horizonMid": "Moyen",
-      "horizonLong": "Long",
+      "horizonLong": "Trimestre",
       "horizonAuto": "Selon le palier principal",
       "horizonUnknown": "Horizon inconnu",
       "colHorizon": "Horizon analysé",
@@ -17204,8 +17209,23 @@
       "horizonImmatureNote": "Cet horizon n'a pas encore atteint la durée de détention attendue ; les données actuelles sont indicatives et ne servent pas de verdict.",
       "hitrateMatureSamples": "Échantillons matures",
       "hitrateLegacyHint": "Inclut {{samples}} enregistrements hérités",
-      "hitrateGenerationScope": "Génération de départ : gén. {{generation}} ({{foreign}} antérieures et {{unknown}} inconnues exclues)",
-      "noData": "Pas de données"
+      "hitrateGenerationScope": "Génération de départ : gén. {{generation}} ({{foreign}} antérieures exclues ; {{unknown}} inconnues incluses avec rétraction)",
+      "noData": "Pas de données",
+      "failureModesTitle": "Modes d'échec",
+      "failureModesRows": "Rectifications analysées",
+      "failureModesLabelled": "Qualifiés",
+      "failureModesUnlabelled": "Non qualifiés",
+      "failureModesUnlabelledHint": "{{count}} rectification(s) terminée(s) n'ont pas de mode d'échec — le champ n'a pas été produit, ce n'est pas « aucun mode ».",
+      "failureModesEmpty": "Aucune rectification ne correspond encore au vocabulaire",
+      "failureModesRejected": "Des valeurs hors vocabulaire existent dans les lignes stockées : {{tokens}}",
+      "failureModeCol": "Mode",
+      "failureModeCount": "Nombre",
+      "failureModeShare": "Part des qualifiés",
+      "failureModeDcfCycleTop": "Optimisme DCF en haut de cycle",
+      "failureModeChaseUpBar": "Course après une forte hausse",
+      "failureModeRegimeEndorsement": "Régime de marché cautionnant une valeur",
+      "failureModeReverseDcfIgnored": "DCF inversé ignoré",
+      "failureModeOther": "Autre"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",
@@ -18259,7 +18279,8 @@
       "sessionLunchBreak": "Pause déjeuner",
       "sessionAfternoon": "Séance de l'après-midi",
       "sessionPostClose": "Après clôture"
-    }
+    },
+    "horizonPriorHitRate": "taux de réussite {{rate}} %"
   },
   "pipeline": {
     "title": "Pipeline d'Actions",

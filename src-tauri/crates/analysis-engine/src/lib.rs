@@ -24,6 +24,7 @@ pub mod evolution_drift;
 pub mod evolution_optimizer;
 pub mod exit_recommend;
 pub mod factor_analysis;
+pub mod failure_mode;
 pub mod hit_rate_backtest;
 pub mod horizon_prior;
 // G3 产业链传导映射（P2-8 从 astock-data 迁回）
@@ -32,6 +33,8 @@ pub mod intent_parser;
 pub mod knowledge_loader;
 /// P4′-b：逐档分支的腿信号单一实现（因子原始量 → `[-1,1]`，缺失=None）
 pub mod leg_signal;
+/// P2-a 的权重裁决层：把「腿 × 档」预测力读数应用到逐档分支表（只有「测过且不显著」才置零）
+pub mod leg_weight_overlay;
 // Phase 2: fundamentals_report 迁移到 astock-data 层(被 tools crate 依赖),
 // 此处用 pub use 保持向后兼容。
 // re-export conserved for backward compat

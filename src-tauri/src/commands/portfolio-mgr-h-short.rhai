@@ -129,7 +129,7 @@ let prior_src = if prior_ok { hp_row["source"] } else { "unavailable" };
 let prior_samples = if prior_ok { hp_row["samples"] } else { 0 };
 // P2-c（PLAN-stock-decision-reliability）：本档**原始方向命中率**（未收缩口径）。
 // 缺席 ⇒ 前端不渲染命中率段 —— 先验此时借自全档合并基准，不得拿 pooled 值冒充本档命中率。
-let prior_hit_rate = if prior_ok && type_of(hp_row["hitRate"]) == "f64" { hp_row["hitRate"] } else { () };
+let prior_hit_rate = if prior_ok { num_of(hp_row["hitRate"]) } else { () };
 // P1-3（R3/R7）：本档校准可得性。判据在 Rust `reflection_stats::CALIBRATION_MIN_SAMPLES`，
 // 脚本只读结论（同 DQI 熔断纪律：阈值有两份载体就早晚不一致）。先验不可得 ⇒ false ⇒
 // 主链按「未校准」封顶 —— fail-closed，缺席不得当成「已校准」。

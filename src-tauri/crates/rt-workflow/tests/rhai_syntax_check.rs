@@ -62,6 +62,30 @@ fn compile_one(path: &PathBuf) -> Result<(), String> {
     engine.compile(&code).map(|_| ()).map_err(|e| format!("{e}"))
 }
 
+/// 取 `needle` 之后**第一个** `{` 所引导的块体（花括号配对，不含最外层大括号）。
+///
+/// 为什么必须按花括号配对、而非「找到第一个 `}` 就停」：被取的块体内部本身
+/// 嵌有 `if position_pct <= 0.0 { … }` 与 `#{…}`（Rhai map 字面量），
+/// 浅层匹配会在这些内层闭合处提前截断，切出的片段无法代表整个块。
+fn block_body_after(code: &str, needle: &str) -> Option<String> {
+    let at = code.find(needle)?;
+    let open = code[at..].find('{')? + at;
+    let mut depth = 0usize;
+    for (i, c) in code[open..].char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(code[open + 1..open + i].to_string());
+                }
+            },
+            _ => {},
+        }
+    }
+    None
+}
+
 #[test]
 fn all_rhai_scripts_compile() {
     let files = collect_rhai_files();
@@ -117,11 +141,19 @@ fn portfolio_mgr_has_no_hold_wait_mutual_rewrite() {
     let code_only: String =
         code.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
 
-    // ① 「观望 → 持有」升级向：`base_action = "持有"` 应只剩后验阶梯判定那一处
-    assert_eq!(
-        code_only.matches("base_action = \"持有\";").count(),
-        1,
-        "portfolio-mgr.rhai 重新出现了试探仓的 `base_action = \"持有\"`（互改的升级向）"
+    // ① 「观望 → 持有」升级向：**试探仓块内**不得把 `base_action` 由「观望」写成「持有」。
+    //    判据刻意只落在该块（按花括号配对取块体），**不做全文件计数** —— 同形字面量
+    //    `base_action = "持有";` 在文件里还有两处**合法**用法：两个风险门
+    //    R-SURGE-GATE / R-RESISTANCE-GATE 把「买入/增持」封顶为「持有」（**降级向**，
+    //    不掺仓位语义）。原先「全文件 == 1」的写法会把它们误判成回归（2026-10-16 CI 实证：
+    //    计数得 3，实为阶梯 1 处 + 两个风险门 2 处，均非升级向互改）。
+    //    锚点行：`if probe_position_pct > 0.0 && base_action == "观望" {`
+    let probe_block =
+        block_body_after(&code_only, "if probe_position_pct > 0.0 && base_action == \"观望\" {")
+            .expect("试探仓块的判定行不见了 ⇒ 判据失去锚点，不得静默放过");
+    assert!(
+        !probe_block.contains("base_action = \"持有\";"),
+        "试探仓块重新出现 `base_action = \"持有\"`（「观望 → 持有」互改的升级向）"
     );
     // ② 「零仓位 ⇒ 降级为观望」降级向
     assert!(

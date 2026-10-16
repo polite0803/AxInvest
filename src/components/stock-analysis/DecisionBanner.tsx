@@ -31,6 +31,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { DecisionExplanationPanel } from "./DecisionExplanationPanel";
 import { DecisionTrustNotice } from "./DecisionTrustNotice";
+import { LlmHorizonDecisionStrip } from "./LlmHorizonDecisionStrip";
 import { ReportMarkdown } from "./ReportMarkdown";
 import { cleanToolCallTags } from "./utils";
 
@@ -1457,6 +1458,8 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                 </div>
               </div>
             )}
+
+            <LlmHorizonDecisionStrip llmDecisionJson={llmDecisionJson} testId="llm-horizon-strip" />
 
             {
               /* 阶段2：四周期独立决策面板（PROPOSAL-stock-decision-four-horizon.md）

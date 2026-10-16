@@ -222,7 +222,7 @@ export interface HorizonDecision {
   /**
    * 该档技术腿吃的是哪一份评分（结构性缺席声明）：
    * `tier_native` = 本档专属粒度评分节点出数；
-   * `daily_fallback` = 该粒度评分没出数（超短无 60 分钟 / 长线无季度），f1 腿退回主链日线。
+   * `daily_fallback` = 该粒度评分没出数（超短档无 60 分钟线 / 长线档无季线），f1 腿退回主链日线。
    * ⚠ 缺席必须成句，不得压成「评分低」或干脆不显示 —— 见 AGENTS.md 禁区 12 与本轮 §七-F。
    * 退化时主链装配还会往顶层 `dataGaps` 追加一条（横幅的「数据缺口 N 项」读那里）。
    */
@@ -382,6 +382,105 @@ export interface DecisionsByHorizon {
   mid?: HorizonDecision | null;
   long?: HorizonDecision | null;
 }
+
+/**
+ * LLM（trader 节点）自报的**逐档决策**一行。
+ *
+ * 字段集 = `src-tauri/config/llm-output-schemas.json` 里 `trader_output.decisions.*` 的 7 个
+ * required，也是 `decision.rs::normalize_llm_horizon_decisions` 归一后的落库形态；
+ * 两侧由 `scripts/check-horizon-decision-keys.mjs` 对账（改一侧不同批改另一侧即红）。
+ *
+ * ⚠ 与 `HorizonDecision`（公式侧逐档，35 键）**不是同一种行**：那一侧带腿 / 门 / 先验 / 后验等
+ * 自证，这一侧只有 trader 的结论本身。两侧**同键名**（camel）以便逐档并列，但不得互相顶替字段，
+ * 也不得把两侧的仓位读成同一个口径（LLM 侧不含档内风控否决与仓位上限）。
+ */
+export interface LlmHorizonDecision {
+  action: string;
+  verdict: string;
+  positionPct: number;
+  confidence: number;
+  stopLossPct: number;
+  takeProfitPct: number;
+  expectedHoldingDays: number;
+}
+
+/** 与 `DecisionsByHorizon` 同一族 camel 键；**键缺席 = 该档 LLM 没给**（由 `data_gaps` 逐档点名） */
+export interface LlmDecisionsByHorizon {
+  ultraShort?: LlmHorizonDecision | null;
+  short?: LlmHorizonDecision | null;
+  mid?: LlmHorizonDecision | null;
+  long?: LlmHorizonDecision | null;
+}
+
+/**
+ * 一档的「公式 vs LLM」逐档对照结果（产端 `stock_workflow/core.rs` 嵌在
+ * `decision.agreementByHorizon`，判据正主 = `decision.rs::compute_horizon_agreements`）。
+ *
+ * ⚠ **与主档 `agreementBreakdown` 不是同一个计数域**：主档五维 / 内部满分 90，
+ * 逐档三维（方向 / 仓位 / 置信）/ 满分 65。两者归一后都叫 0-100，但**不可并排比较**，
+ * 所以 `dimsUsed` / `dimsMissing` 必须由产端带出来、由面板原样说给用户。
+ * 逐档不含 `riskLevel`（该维只有一侧有）与 `evidenceCited`（论据是一次调用的全局产出）。
+ *
+ * `total === null && comparable === false` = **无从比对**（成因见 `absence`），
+ * 不是 0 分 —— 0 分是「一致得零分」，两者在面板上必须各占一句。
+ */
+export interface HorizonAgreement {
+  /** camel 档位键，与 `decisionsByHorizon` / LLM `decisions` 同族拼写 */
+  tier: string;
+  /** 档位中文名（产端 `Period::label_zh`，前端不再手抄第四份档名） */
+  tierLabel: string;
+  comparable: boolean;
+  total?: number | null;
+  absence?: string | null;
+  formulaAction?: string | null;
+  llmAction?: string | null;
+  actionScore?: number | null;
+  actionNote?: string | null;
+  actionOk?: boolean | null;
+  positionScore?: number | null;
+  positionGap?: number | null;
+  confidenceScore?: number | null;
+  confidenceGap?: number | null;
+  conflictType?: string | null;
+  /** 拍板 4：该档公式腿里数值来自 LLM 分析师的权重占比（%）。null = 无从判断，**不是 0%** */
+  sharedEvidenceWeightPct?: number | null;
+  dimsUsed: string[];
+  dimsMissing: string[];
+}
+
+/**
+ * 一档的分歧归因（产端 `decision.divergenceByHorizon`，判据 = `decision.rs::attribute_horizon_divergence`）。
+ *
+ * 读的是**档行自己的键域**（`legs[].bias` / `absentLegs` / `entryGatePassed` / `tierVetoed`），
+ * 与主档 `crossCheck.divergence` 的顶层指针（`/evidence/factors`、`/effective_params/*`）互不重叠，
+ * 所以两侧驱动项码表也不同 —— 不要在前端把它们合并成一个列表。
+ */
+export interface HorizonDivergence {
+  tier: string;
+  tierLabel: string;
+  /** 结构化码表：tier_risk_veto / entry_gate_failed / llm_tier_absent / negative_legs / absent_legs / data_gap / formula_tier_absent */
+  drivers: string[];
+  entryGate?: string | null;
+  entryGatePassed?: boolean | null;
+  gateBasis?: string | null;
+  /** 档内风控否决的 [否决前方向, 否决后动作] */
+  veto?: [string, string] | null;
+  /** 贡献最负的至多三条腿：[factor, bias, weight] */
+  negativeLegs?: Array<[string, number, number]> | null;
+  absentLegs?: string[] | null;
+  dataGaps?: string[] | null;
+  llmAbsence?: string | null;
+}
+
+/**
+ * 逐档 LLM 决策的读侧状态（四态互斥）。判据的正主是 Rust 侧
+ * `decision.rs::LLM_HORIZON_DECISION_CONTRACT`（代码盖章的代际标记），此处只镜像其读法：
+ * · `absent` —— `llm_decision_json` 整列为空（trader 没跑 / 没落库）
+ * · `parseFailed` —— 整列不是合法 JSON（含半截围栏），**不进任何分母**
+ * · `preContract` —— 可解析但**无代际标记** ⇒ 该记录产自逐档契约上线前
+ * · `ok` —— 有标记；此时某档缺键 = 「LLM 未给出该档」（与 `preContract` 不是一回事）
+ */
+export type LlmHorizonReadState = "absent" | "parseFailed" | "preContract" | "ok";
 
 /**
  * v149(L2/L3)：主档 action 与算法估值结论的**对账结果**（产出方 `portfolio-mgr.rhai`
@@ -555,6 +654,14 @@ export interface StockDecision {
   adjustedConfidence?: number;
   /** V50: 双视角一致性分维度诊断 */
   agreementBreakdown?: AgreementBreakdown;
+  /**
+   * B1 逐档对照四行（产端 `core.rs` 嵌在 `decision.agreementByHorizon`）。
+   * 键缺席 = 该记录产自逐档对照上线前 ⇒ 面板说「未产出」，**不得**渲染成四个 0 分。
+   * 与上面 `agreementBreakdown` 不同计数域（三维 65 制 vs 五维 90 制），不可并排比较。
+   */
+  agreementByHorizon?: HorizonAgreement[] | null;
+  /** B2：逐档分歧归因四行（驱动项码表见 `HorizonDivergence`） */
+  divergenceByHorizon?: HorizonDivergence[] | null;
   /** 跨系统互证：近 14 天趋势智选推荐 vs 本次工作流决策（后端在决策持久化时注入） */
   crossCheck?: RecoCrossCheck;
 }
@@ -1775,6 +1882,16 @@ export interface HorizonResultEntry {
   market?: HorizonResultMarket | null;
   evaluation?: HorizonResultEvaluation | null;
   reflection?: Record<string, unknown> | null;
+  /**
+   * B3：该档 **LLM 侧**的三个键，与公式侧（`decision`/`evaluation`）同层并列 ——
+   * 产端 = `reflection.rs::build_horizon_results_json`，落库列 = `strategy_performance.{llm_action,llm_was_correct,horizon_agreement}`。
+   * 三者的缺席语义各不同，都不要当 0 读：`llmAction=null` = 该档 LLM 没给（或该记录产自逐档契约上线前）；
+   * `llmWasCorrect=null` = 窗口未满**或**该动作不是方向判断（观望/持有）；
+   * `horizonAgreement=null` = 该档无从比对。⚠ 它是**三维 65 制**归一分，与主档五维分不同计数域。
+   */
+  llmAction?: string | null;
+  llmWasCorrect?: 0 | 1 | null;
+  horizonAgreement?: number | null;
 }
 
 /** 四周期结果 Map（后端键为 snake_case，前端消费同键） */

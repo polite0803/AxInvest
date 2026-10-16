@@ -4733,6 +4733,22 @@ pub async fn reco_ic_stats(
         .all(state.harness.db())
         .await
         .map_err(|e| format!("{e}"))?;
+    // B3 窗口换代（拍板 6/7）：T+N 不属于当前四档窗口集的行（旧默认 [5,20,60] 产的 20/60）
+    // **不进 IC 分母**。为什么必须筛：IC 配的是「出票时的置信度 ↔ 该 N 日之后的实际收益」，
+    // 20 日与 28 日是两个不同的预测任务，混在一格里 ρ 就不再是任何一个任务的预测力。
+    // 行不删、不回填，只在分母外计数并点名 —— 与 `compute_validation_report` 的
+    // `excluded_pre_window_set_rows` 同一判据（`Period::is_validation_window`）。
+    let (window_rows, pre_window_rows): (Vec<_>, Vec<_>) = rows
+        .into_iter()
+        .partition(|r| axagent_harness::holding_period::Period::is_validation_window(r.t_plus_n));
+    if !pre_window_rows.is_empty() {
+        tracing::info!(
+            "[reco_ic_stats] {} 条 T+N 属**上线前窗口集** ⇒ 未进 IC 分母（当前窗口集 = {:?}）",
+            pre_window_rows.len(),
+            axagent_harness::holding_period::Period::validation_windows()
+        );
+    }
+    let rows = window_rows;
     // 代际归属：与闭环侧共用同一个取数函数（两处看到的归属必须一致，禁区 12）。
     // 查不到 ⇒ 该样本按「代际未知」被 `aggregate_reco_ic` 剔除并计入排除数，不冒充当代。
     let versions = axagent_analysis_engine::recommender::reco_loop::load_pick_versions(

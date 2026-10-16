@@ -371,7 +371,7 @@ export function ScheduledJobsTab() {
           return (
             <Space size={4}>
               <Tooltip
-                title={executable ? undefined : t("tasksCenter.execute.unsupported")}
+                title={executable ? t("tasksCenter.action.execute") : t("tasksCenter.execute.unsupported")}
               >
                 <Button
                   type="text"

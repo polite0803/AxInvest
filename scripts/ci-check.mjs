@@ -227,6 +227,14 @@ if (canRunFrontend) {
   //   「本门通过」不具区分力（本文件上方 reco 门同纪律）。与 ci.yml 的对应 step **逐字同源**。
   step("前后端档位权重门自检（判据①—⑧正负对照）", "node scripts/check-horizon-weight-parity.mjs --selftest");
   step("前后端档位权重逐字段一致（含档名不手抄天数）", "node scripts/check-horizon-weight-parity.mjs");
+  // 2026-10-16（`AUDIT-horizon-naming-2026-10-16.md`）：档名这条链此前**整体没有门** ——
+  //   判据 ④ 只读 `stockAnalysis.reflection` 段（8 套键族里只覆盖 1 套），于是
+  //   「第 4 档 = 季度」这类漂移在 `cargo check` / `typecheck` / 既有门全绿下存活，
+  //   并与后端 `tierLabel` / `dataGaps`（用权威 `label_zh`）**同屏两名**。
+  //   本门补整链：族间逐字一致 + 禁尺度词（`quarterly` 是 bar 粒度，不是持有期）+ 与
+  //   `Period::label_zh()` 逐字对账。自检复刻事故形态（含「全族一致地错」这条最隐蔽支）。
+  step("四周期档名一致性自检（判据 A/B/C 正负对照）", "node scripts/check-horizon-label-parity.mjs --selftest");
+  step("四周期档名一致（族间逐字 / 禁尺度词 / 与 label_zh 对账）", "node scripts/check-horizon-label-parity.mjs");
   step("可调参数注入覆盖（五点对账，strict）", "node scripts/audit-inject-coverage.mjs --strict");
   // v135（B-2b #36）：四个 `pm-h-<档>` 分支节点已从主图种子搬进**档子模板 builder** ⇒ 审计面
   // 必须跟着搬。不搬的话这四处会同时失去读取面而**照样绿**（§九十一(2.5)：门跟着搬，
@@ -370,6 +378,11 @@ if (canRunRust && !quick) {
   step("跨行聚合按代筛样登记（四类分列）", "node scripts/check-generation-scope-registry.mjs");
   step("候选池代际一致自检（读侧谓词/写侧标记/负控）", "node scripts/check-reco-generation.mjs --selftest");
   step("候选池代际一致（回放行与实盘行同表后不混读混写）", "node scripts/check-reco-generation.mjs");
+  // T+N 窗口集唯一权威门（B3，2026-10-16，PLAN-llm-horizon-decision-and-parity §6.4/拍板 7）：
+  // 旧默认 [5,20,60] 抄在写侧与三个跨行池化读点上；窗口集换代而漏改任一处不报错，只会把
+  // 两种窗口的命中并成一个分母。R1 权威现场推导 / R2 代码无手抄 / R3 三读点同判据 / R4 写侧取权威。
+  step("T+N 窗口集权威自检（五条负控 + 剥注释自证）", "node scripts/check-validation-window-authority.mjs --selftest");
+  step("T+N 窗口集唯一权威（四档现场推导）", "node scripts/check-validation-window-authority.mjs");
   // 孤儿模块门（2026-10-15，PLAN-reflection-optimization-closure §四.2）：
   // 文件可以整份存在、自带单测、甚至写着「待裁决」，只要没有 mod/include 指向它就不参与编译，
   // cargo check/clippy/test 全都不抱怨。先例 = serenity_hit_rate_backtest.rs（11 个单测从未跑过）。

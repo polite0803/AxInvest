@@ -227,6 +227,14 @@ jobs:
         run: |
           node scripts/check-horizon-weight-parity.mjs --selftest
           node scripts/check-horizon-weight-parity.mjs
+          # 2026-10-16（`AUDIT-horizon-naming-2026-10-16.md`）：档名这条链此前**整体没有门** ——
+          # 判据 ④ 只读 `stockAnalysis.reflection` 段（8 套键族里只覆盖 1 套），于是
+          # 「第 4 档 = 季度」这类漂移在 cargo check / typecheck / 既有门全绿下存活，
+          # 并与后端 tierLabel / dataGaps（用权威 label_zh）**同屏两名**。
+          # 本门补整链：族间逐字一致 + 禁尺度词 + 与 `Period::label_zh()` 逐字对账。
+          # 与 scripts/ci-check.mjs 的对应两条 step **命令行逐字同源**。
+          node scripts/check-horizon-label-parity.mjs --selftest
+          node scripts/check-horizon-label-parity.mjs
           node scripts/audit-inject-coverage.mjs --strict
           # v135（B-2b #36）：四个 `pm-h-<档>` 分支节点已从主图种子搬进档子模板 builder
           # ⇒ 审计面跟着搬（不搬就四处同时失去读取面而照样绿，PLAN §九十一(2.5)）。
@@ -279,6 +287,10 @@ jobs:
           node scripts/check-generation-scope-registry.mjs
           node scripts/check-reco-generation.mjs --selftest
           node scripts/check-reco-generation.mjs
+          # T+N 窗口集唯一权威门（B3，2026-10-16，PLAN-llm-horizon-decision-and-parity §6.4/拍板 7）。
+          # 与 scripts/ci-check.mjs 对应两条 step **逐字同源**。
+          node scripts/check-validation-window-authority.mjs --selftest
+          node scripts/check-validation-window-authority.mjs
           # 孤儿模块门（2026-10-15，PLAN-reflection-optimization-closure §四.2）：
           # 未被任何 mod/include 指向的 .rs 不参与编译，cargo 三件套全都看不见（先例：智选胜率线）。
           # 与 scripts/ci-check.mjs 的对应 step **命令行逐字同源**。

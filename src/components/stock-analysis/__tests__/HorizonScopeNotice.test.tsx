@@ -1,5 +1,5 @@
 import { render } from "@testing-library/react";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { HorizonScopeNotice } from "../HorizonScopeNotice";
@@ -67,10 +67,16 @@ describe("HorizonScopeNotice", () => {
    * `seeded_template_carries_horizon_scoped_risk_nodes` 锁）；本测试把那份轴表与文案逐字对上，
    * 改判据不同批改文案就会红（反手抄门）。
    *
-   * 同批反向锁 analyst / debate 两格**仍然**是共用 —— B2/B3 尚未落地，
-   * 若有人顺手把三格一起改成「已按档」，本条当场红。
+   * 反向锁 **debate** 一格**仍然**是共用 —— 逐档辩论（A4）尚未落地，
+   * 若有人顺手把它改成「已按档」，本条当场红。
+   *
+   * **analyst 一格已于 2026-10-16 反向收口**：v133（B2-2）起分析师实例由
+   * `Period::analyst_subset()` 逐档展开，而本格文案长期仍写「四档共用同一批分析师输出」——
+   * 上一版这条断言把那句谎**锁成了期望值**（`toContain("四档共用")`），于是门反过来挡住了修正本身。
+   * 现改为：analyst 必须声明按档，且**与被声明的事实同源核对**（读种子现场确认逐档展开仍在发生），
+   * 被锁的旧文案降级成负控样本。
    */
-  it("v129 的 risk 声明与 axisScope 事实一致，且 analyst/debate 未被顺手改宽", () => {
+  it("v129 的 risk 声明与 axisScope 事实一致，analyst 已按档，debate 未被顺手改宽", () => {
     // 谓词只写一次，正样本与变异样本走同一条判据（否则「负控」只是把字符串再说一遍）
     const riskClaimIsHorizonScoped = (text: string) =>
       text.includes("回撤深度")
@@ -91,7 +97,40 @@ describe("HorizonScopeNotice", () => {
     expect(rhai).toContain('"global60"');
     expect(rhai).toContain('"latestReport"');
 
-    expect(zh.horizonScopeAnalyst).toContain("四档共用");
+    // analyst：声明必须与数据层事实同向（v133 B2-2 起逐档展开）。谓词同样只写一次，正负样本共用。
+    const analystClaimIsHorizonScoped = (text: string) =>
+      text.includes("已按档展开")
+      && text.includes("分析师子集")
+      && text.includes("仍然共用一份的是辩论")
+      && !text.includes("四档共用");
+    expect(analystClaimIsHorizonScoped(zh.horizonScopeAnalyst)).toBe(true);
+    // 负控：被本轮撤下的那句谎（v133 之前的现网文案）必须被同一谓词拒掉
+    expect(
+      analystClaimIsHorizonScoped("分析师报告：本轮四档共用同一批分析师输出；按档独立的是评分、决策与出场。"),
+    ).toBe(false);
+    // 负控 2：只说「已按档」而不点名子集来源与仍共用的那一格（写宽的那类谎报）同样拒掉
+    expect(analystClaimIsHorizonScoped("分析师报告：已按档展开。")).toBe(false);
+
+    // 事实侧同判据：种子现场仍在逐档展开实例 —— 声明与实现缝在同一来源上，
+    // 分析师若退化回单份，本条与文案判据一起红（而不是留着一句正确的谎）。
+    const seed = readFileSync(
+      path.join(ROOT, "src-tauri/src/commands/stock_analysis_setup/seed_stock_analysis.rs"),
+      "utf8",
+    );
+    expect(seed).toContain("p.analyst_subset().contains(id)");
+
+    // 11 语言同批改口：新句每种语言都带 `VERDICT` 这个语言中立标记，旧句没有 ⇒ 漏改即红。
+    // （清单由目录现场列出，不手抄 11 个文件名 —— 第 12 种语言落地时本条自动覆盖它。）
+    const localeFiles = readdirSync(path.join(ROOT, "src/i18n/locales"))
+      .filter((f) => f.endsWith(".json"));
+    expect(localeFiles.length).toBeGreaterThanOrEqual(11);
+    for (const f of localeFiles) {
+      const v = JSON.parse(
+        readFileSync(path.join(ROOT, "src/i18n/locales", f), "utf8"),
+      ).stockAnalysis.horizonScopeAnalyst as string;
+      expect(v, `${f} 未随本轮改口`).toContain("VERDICT");
+    }
+
     expect(zh.horizonScopeDebate).toContain("四档共用");
 
     // 负控：改回 v127 那句「四档共用」的文案必须被同一谓词拒掉

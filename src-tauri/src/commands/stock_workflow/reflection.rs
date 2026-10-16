@@ -3934,6 +3934,21 @@ async fn persist_m1_sample_if_absent(
         .map(|c| c.round().clamp(0.0, 100.0) as i32)
         .unwrap_or(0);
     let decision_at = inputs.now_ms - (inputs.holding_days.unwrap_or(30) as i64 * 86_400_000);
+    // B3：主档五维分随 M1 样本一起落库。此前全仓**没有任何写入方**给 `agreement_score`
+    // （唯一调用方 `record_performance` 那条通道拿不到 LLM 侧，只能传 None）⇒
+    // `get_agreement_score_history` 的 `IS NOT NULL` 筛出来恒空，面板显示「暂无数据」。
+    // 取不到 = 该分析没有一致性诊断 ⇒ 保持 None，不补 0（0 会被画进趋势线读成「一致得零分」）。
+    let agreement_score = inputs
+        .original_analysis
+        .and_then(|a| a.decision_json.as_deref())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|dj| {
+            dj.get("agreementBreakdown")
+                .and_then(|b| b.get("total"))
+                .or_else(|| dj.get("formulaLlmAgreement"))
+                .and_then(serde_json::Value::as_i64)
+                .and_then(|v| i32::try_from(v).ok())
+        });
     let sp_id = uuid::Uuid::new_v4().to_string();
     // P1-1 物化切片：键 = **复盘档名**（与字段文档「各 horizon 的盈亏序列」同形；其余三档在
     // `horizon_results_json`）。⚠ 2026-10-16 上午的中间态把键写成裸 ident `primary_horizon`
@@ -3968,6 +3983,7 @@ async fn persist_m1_sample_if_absent(
         template_version: inputs.reflected_generation,
         // 复盘档的客观判定切片（其余三档在 horizon_results_json）。
         horizon_pnl_json: Some(horizon_pnl_json),
+        agreement_score,
     };
     axagent_dao::repo::stock_lesson_queries::insert_reflection_m1_sample(db, draft).await.map_err(
         |e| {
@@ -4009,6 +4025,29 @@ fn build_horizon_results_json(
 
     let horizon_keys = ["ultra_short", "short", "mid", "long"];
 
+    // B3（§18）：该档的「公式 vs LLM」三维对照行 —— 产端 = `core.rs` 嵌进
+    // `decision_json.agreementByHorizon`，其 `tier` 用的是 **camel** 档键（`ultraShort`），
+    // 而本函数的档键是 snake ⇒ 经 harness `Period` 换算，不做字符串拼接（拼错不会报错，只会静默失配）。
+    // 取不到 = 该记录产自逐档对照上线前 ⇒ 三键一律 null，**不得拿主档五维分顶替**（两个计数域）。
+    let agreement_rows: std::collections::HashMap<String, serde_json::Value> = original_analysis
+        .and_then(|a| a.decision_json.as_deref())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|v| v.get("agreementByHorizon").and_then(serde_json::Value::as_array).cloned())
+        .map(|arr| {
+            arr.into_iter()
+                .filter_map(|row| {
+                    let tier = row.get("tier").and_then(serde_json::Value::as_str)?.to_string();
+                    Some((tier, row))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let camel_of = |snake: &str| -> Option<String> {
+        <axagent_harness::holding_period::Period as std::str::FromStr>::from_str(snake)
+            .ok()
+            .map(|p| p.camel_key().to_string())
+    };
+
     // 如果四周期决策全缺且旧字段也无决策 → 不生成 JSON（旧记录无数据）
     let has_horizon_decisions = horizon_decisions.is_some();
     let has_legacy_data = original_analysis.and_then(|a| a.decision_action.as_deref()).is_some();
@@ -4042,6 +4081,28 @@ fn build_horizon_results_json(
                 .unwrap_or_else(|| default_expected_holding_days(key));
 
             let snap = horizon_snapshots.get(key).and_then(|s| s.as_ref());
+
+            // B3 三键：`llmAction` / `horizonAgreement` 只依赖对照行；`llmWasCorrect` 还要该档快照，
+            // 且必须调**同一个函数、同一份 net_return_pct、同一个成熟判据** —— 换分母就与公式侧不可比。
+            // 缺席一律 null：`0` 会被读成「LLM 这一档判错」，而这里是「没有这一档的结论」。
+            let agr = camel_of(key).and_then(|c| agreement_rows.get(&c));
+            let llm_action = agr
+                .and_then(|r| r.get("llmAction"))
+                .and_then(serde_json::Value::as_str)
+                .map(|s| s.to_string());
+            let horizon_agreement = agr
+                .filter(|r| r.get("comparable").and_then(serde_json::Value::as_bool) == Some(true))
+                .and_then(|r| r.get("total"))
+                .and_then(serde_json::Value::as_i64)
+                .and_then(|v| i32::try_from(v).ok());
+            let llm_was_correct = match (snap, llm_action.as_deref()) {
+                (Some(s), Some(a)) => deterministic_horizon_was_correct(
+                    a,
+                    s.net_return_pct,
+                    s.within_expected_horizon,
+                ),
+                _ => None,
+            };
 
             // 状态判定：每周期独立查找自己的快照
             let (status, market_json, eval_json, reflection_section) = match snap {
@@ -4110,6 +4171,11 @@ fn build_horizon_results_json(
                     "market": market_json,
                     "evaluation": eval_json,
                     "reflection": reflection_section,
+                    // B3：LLM 侧该档的三个键与公式侧同层并列（`expand_horizon_samples` 按这三个
+                    // 键名读，落库列 = strategy_performance.{horizon_agreement,llm_action,llm_was_correct}）
+                    "llmAction": llm_action,
+                    "llmWasCorrect": llm_was_correct,
+                    "horizonAgreement": horizon_agreement,
                 }),
             );
         }

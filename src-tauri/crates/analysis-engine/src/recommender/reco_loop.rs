@@ -240,7 +240,21 @@ pub async fn load_reco_loop_samples(
         .all(db)
         .await
         .map_err(|e| format!("读取 decision_validations 失败: {e}"))?;
-    let mut samples = samples_from_validation_rows(rows);
+    // B3 窗口换代（拍板 6/7）：本闭环的分母只吃**当前四档窗口集**里的 T+N 行。
+    // 判据与分析链两处读点同源（`Period::is_validation_window`），三处不同源就会出现
+    // 「报表里有、闭环里没有」这类无法裁决的差异。旧窗口集 [5,20,60] 产的 20/60 行
+    // 留在库里不删不回填，只是不计票。
+    let (window_rows, pre_window_rows): (Vec<_>, Vec<_>) = rows
+        .into_iter()
+        .partition(|r| axagent_harness::holding_period::Period::is_validation_window(r.t_plus_n));
+    if !pre_window_rows.is_empty() {
+        tracing::info!(
+            "[reco_loop] {} 条 T+N 属上线前窗口集 ⇒ 未进闭环分母（当前窗口集 = {:?}）",
+            pre_window_rows.len(),
+            axagent_harness::holding_period::Period::validation_windows()
+        );
+    }
+    let mut samples = samples_from_validation_rows(window_rows);
     // #8 P5 第三生效面：把每条样本按**产出时刻**标成「当时是否处于熔断态」。
     // 判据（什么算异常、几轮熔断、去重口径）全在 dao，本处只取时间线做归因。
     // 取数失败 ⇒ 时间线为空 ⇒ 全部 `None` ⇒ 降权线不参与（不是参与并按正常处理）。

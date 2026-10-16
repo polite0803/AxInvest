@@ -19,8 +19,11 @@ const SCOPE_KEY: Record<HorizonScope, string> = {
  *   · 按档：本档持仓窗口（2/5/28/90 交易日）的回撤深度（`cls-risk-level-{tier}` 四节点），
  *     以及**消费侧**的 f4 风险证据、`risk_bias`、仓位上限与 `pm_risk_veto`
  *     —— 自 v129 起它们读的都是「按所选档收紧后的 `overall_risk`」（两条轴都只升不降）
- *   · 仍共用一份：波动率 / 夏普（60 日全局）、基本面四项（最新财报）、
- *     分析师（10 个节点）、辩论（一轮跨视角）
+ *   · 按档：**分析师**（v133 B2-2）——实例由 `Period::analyst_subset()` 逐档展开，
+ *     每档各跑自己的子集并按该档契约各自产出 VERDICT。本格文案此前长期仍写「四档共用同一批
+ *     分析师输出」，而同一屏下的 `AnalystReportGrid` 早已按档列实例（见其 `tierOrderOf`）——
+ *     正是本文件下方「声明落后于数据层」那条禁物。2026-10-16 收口（`PLAN-llm-horizon-decision-and-parity.md` §6.3）。
+ *   · 仍共用一份：波动率 / 夏普（60 日全局）、基本面四项（最新财报）、辩论（跨视角一份）
  *
  * ⇒ 三种伪装都不许：把共用内容复制四遍（读者会以为是四份独立判断）、
  *   什么都不说（同屏「四档并列」+「一份输入」而无说明会被读成缺陷），
@@ -31,7 +34,9 @@ const SCOPE_KEY: Record<HorizonScope, string> = {
  * 判据词表的正主是 `risk-level.rhai` 输出的 `axisScope` 字段（Rust 侧由
  * `seeded_template_carries_horizon_scoped_risk_nodes` 锁），改判据必须三处同批。
  *
- * 分析师 / 辩论两格的补齐是 PLAN §五十四 B2 / B3（独立轮次）。
+ * 分析师一格已随 B2-2 收口（本格文案与数据层同批改口）；**辩论一格仍写「共用」是对的**，
+ * 它要等 `PLAN-llm-horizon-decision-and-parity.md` 阶段 A4（逐档辩论）落地后才随之改口，
+ * 届时同一测试里的 analyst 判据形态即为本格的模板。
  */
 export function HorizonScopeNotice({ scope }: { scope: HorizonScope }) {
   const { t } = useTranslation();

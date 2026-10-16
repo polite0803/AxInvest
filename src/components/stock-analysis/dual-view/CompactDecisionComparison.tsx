@@ -19,7 +19,7 @@ import {
   parseAction,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
-import type { DecisionsByHorizon } from "@/types";
+import type { DecisionsByHorizon, HorizonAgreement, HorizonDivergence } from "@/types";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { HorizonDecisionStrip } from "../HorizonDecisionStrip";
@@ -76,6 +76,14 @@ export interface CompactDecisionShape {
    * 缺席（本字段引入前的记录）时为 null/undefined ⇒ `HorizonDecisionStrip` 整条不渲染。
    */
   decisionsByHorizon?: DecisionsByHorizon | null;
+  /**
+   * B1：逐档「公式 vs LLM」对照四行。键缺席 = 该记录产自逐档对照上线前
+   * （由 `HorizonAgreementList` 说成「未产出」，不渲染成四个 0 分）。
+   * ⚠ 与主档一致性分数不同计数域：逐档三维 / 满分 65，主档五维 / 满分 90。
+   */
+  agreementByHorizon?: HorizonAgreement[] | null;
+  /** B2：逐档分歧归因（渲染随 i18n 码表那一批一起上，见 PLAN §19） */
+  divergenceByHorizon?: HorizonDivergence[] | null;
 }
 
 interface CompactDecisionComparisonProps {

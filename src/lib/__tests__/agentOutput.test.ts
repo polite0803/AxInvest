@@ -89,6 +89,10 @@ describe("agentOutput decision parsing", () => {
     dataGaps: undefined,
     isContradictory: false,
     crossCheck: undefined,
+    // B1（2026-10-16）：`normalizeDecision` 的白名单里多了逐档对照的搬运位——
+    // 不加它就会像当年 `decisionsByHorizon` 那样「产端写了、透传丢了」，面板永远读不到。
+    agreementByHorizon: null,
+    divergenceByHorizon: null,
   };
 
   it("parses plain JSON string into StockDecision", () => {

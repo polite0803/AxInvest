@@ -296,8 +296,12 @@ function stripFullLineComments(src) {
  * 同时锁住「不得把权威天数抄进文案」：28/90 的唯一来源是 `Period::default_holding_days`，
  * 抄进 i18n 就成了改了权威表也不会跟着变的死数字（同 `check-horizon-weight-parity.mjs` ④）。
  *
- * 长线档的**对外名** 2026-10-16 起正名为「季度」（11 语言同步，见 `PLAN-stock-decision-reliability.md`），
- * 故本门认两种写法（`长线|季度`）—— 若只认旧名，改名后这条「文案须声明长线档」的锁会**静默失效**。
+ * 长线档的**对外名** = 「长线」（`Period::label_zh`，全仓唯一档名）。
+ * 2026-10-16 当天曾按「90 天 = 一个季度」把对外名改成「季度」，本门当时**放宽**成认两种写法
+ * （`长线|季度`）—— 那等于改判据去适配改名。同日取证后已回退，本门恢复严格：只认「长线」，
+ * 并**显式禁「季度」**（`quarterly` 是尺度名 = 60 交易日/bar，而第 4 档持有 90 交易日，差 1.5 倍）。
+ * 档名整链路的门见 `scripts/check-horizon-label-parity.mjs`，事故取证见
+ * `AUDIT-horizon-naming-2026-10-16.md`。
  */
 function checkTierScopeHint(hint) {
   const violations = [];
@@ -306,13 +310,14 @@ function checkTierScopeHint(hint) {
   if (!hint) { return { violations: ["tierScopeHint 为空 ⇒ 无从核对档位口径"], scanned }; }
   for (const [pat, why] of [
     [/恒为\s*mid/, "文案仍声明「落库恒为 mid」⇒ 与代码的 mid+long 双档矛盾"],
-    [/仅服务中线|只服务中\/(长线|季度)/, "文案仍声明单档 ⇒ 与代码的 mid+long 双档矛盾"],
+    [/仅服务中线|只服务中\/长线/, "文案仍声明单档 ⇒ 与代码的 mid+long 双档矛盾"],
+    [/季度/, "文案把第 4 档叫「季度」⇒ 尺度名（60 交易日/bar）被当成了持有期名（90 交易日）"],
   ]) {
     scanned += 1;
     if (pat.test(hint)) { violations.push(why); }
   }
   scanned += 1;
-  if (!/(长线|季度)/.test(hint)) { violations.push("文案未声明服务长线（季度）档 ⇒ Q2 的双档在 UI 上不可见"); }
+  if (!/长线/.test(hint)) { violations.push("文案未声明服务长线档 ⇒ Q2 的双档在 UI 上不可见"); }
   scanned += 1;
   if (/\b(28|90)\s*天/.test(hint)) {
     violations.push("文案抄了权威天数（28/90）⇒ 与 `Period::default_holding_days` 两处真相");
@@ -771,12 +776,21 @@ function selftest() {
     },
     {
       // Q2 落地前的真实文案（面板已随双档改造，这段是它当时的样子）：
-      // 单档声明 + 抄了权威表的 28 天 ⇒ 三条各红一次（恒为 mid、缺长线/季度、抄天数）。
+      // 单档声明 + 抄了权威表的 28 天 ⇒ 四条各红一次（恒为 mid、单档声明、缺长线、抄天数）。
       name: "i 负控（文案仍声明单档且抄权威天数）应红",
       got: checkTierScopeHint(
         "档位口径：仅服务中线（瓶颈/政策/业绩催化剂以周-月兑现）；短/超短档不适用，落库 period 恒为 mid、持有期按该档权威 28 天。",
       ).violations.length,
       want: 4,
+    },
+    {
+      // 2026-10-16 回退新增的判据：把第 4 档叫「季度」必须红 —— 尺度名（60 交易日/bar）
+      // 被当成持有期名（90 交易日）。此负控只命中这一条，证明该判据**单独具区分力**。
+      name: "i 负控（文案把第 4 档叫「季度」）应红",
+      got: checkTierScopeHint(
+        "档位口径：服务中线与长线两档（瓶颈/政策/业绩催化剂以季度兑现）；短/超短档按设计不做。",
+      ).violations.length,
+      want: 1,
     },
     {
       name: "i 负控（文案为空 ⇒ 无从核对）应红",

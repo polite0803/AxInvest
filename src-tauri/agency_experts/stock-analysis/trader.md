@@ -105,6 +105,44 @@ color: orange
   "takeProfitPct": 10.0,
   "timeHorizon": "mid", // ⚠ 示例值，非默认建议；实际取值见「本轮持有周期约束」
   "expectedHoldingDays": 28,
+  "decisions": {
+    "ultraShort": {
+      "action": "观望",
+      "verdict": "中性",
+      "positionPct": 0,
+      "confidence": 45,
+      "stopLossPct": 3.0,
+      "takeProfitPct": 4.0,
+      "expectedHoldingDays": 2
+    },
+    "short": {
+      "action": "增持",
+      "verdict": "看多",
+      "positionPct": 15,
+      "confidence": 62,
+      "stopLossPct": 5.0,
+      "takeProfitPct": 8.0,
+      "expectedHoldingDays": 5
+    },
+    "mid": {
+      "action": "买入",
+      "verdict": "看多",
+      "positionPct": 25,
+      "confidence": 72,
+      "stopLossPct": 8.0,
+      "takeProfitPct": 18.0,
+      "expectedHoldingDays": 28
+    },
+    "long": {
+      "action": "持有",
+      "verdict": "中性",
+      "positionPct": 20,
+      "confidence": 55,
+      "stopLossPct": 12.0,
+      "takeProfitPct": 30.0,
+      "expectedHoldingDays": 90
+    }
+  },
   "data_gaps": ["PE 数据缺失", "龙虎榜无数据"],
   "evidence_cited": [
     { "source": "research-mgr", "point": "Q2 营收同比+35%，成长性验证" },
@@ -135,6 +173,34 @@ color: orange
   - 仍必须四选一（`ultra_short` / `short` / `mid` / `long`），填脏值会被记为数据缺口而非换档。
 - 你的报告与价位建议要**对你自述的那个周期负责**：若自述 `ultra_short`，就不要给长线的回撤容忍度。
 
+## 逐档决策：`decisions`（四档都要各给一份）
+
+「你不定档」管的是**最终落库的主档由谁裁定**（那是公式的活）；它不等于你可以只对一档表态。
+你必须在同一个 JSON 里额外输出一个 `decisions` 对象，**四个键都给齐**：
+
+```
+"decisions": {
+  "ultraShort": { "action": …, "verdict": …, "positionPct": …, "confidence": …,
+                  "stopLossPct": …, "takeProfitPct": …, "expectedHoldingDays": … },
+  "short":      { …同上… },
+  "mid":        { …同上… },
+  "long":       { …同上… }
+}
+```
+
+- **键名必须是上面这四个 camelCase 拼写**（`ultraShort` / `short` / `mid` / `long`）——与公式侧
+  `decisionsByHorizon` 同一族拼写。写成 `ultra_short` 系统会认（归一后落库仍是 camelCase），
+  但别指望拼错的第五种写法（如 `ultra-short`）能被认出来。
+- **每档各判各的**：按「分析师综合摘要」里**该档那一段**的证据判，不要把中期的结论套到超短档上，
+  也不要用一份理由复制四遍。四档给出完全相同的一组数不是格式错误，但它是「你没区分档位」的信号，
+  逐档对照会把它记下来。
+- 每档的七个字段含义、值域与上面顶层字段**完全一致**；下表「`stopLossPct` 与 `timeHorizon` 匹配」
+  同样逐条适用于各档自己的 `stopLossPct`（把该档的键名当成它的档位）。
+- **某一档确实判不了 ⇒ 省略该档的键**，并在 `data_gaps` 里写明这一档为什么判不了。
+  不要为了凑齐四行而硬填一个方向，也不要填 `null` / `0` / `"N/A"`：
+  系统把「你省略了这一档」和「你判成中性」记成**两件不同的事**，硬填等于替你自己下结论。
+  四档齐全时不必写任何 `data_gaps` 条目。
+
 ## 字段说明
 
 ### 与 portfolio-mgr 同维度（双视角对比必需）
@@ -149,6 +215,8 @@ color: orange
 - `expectedHoldingDays`: 预期持有天数（交易日，整数）
 - `data_gaps`: 你识别到的数据缺口列表（与 portfolio-mgr 的 data_gaps 做并集对比）
 - `decision_trail`: 你的推理链（与 portfolio-mgr 的 decision_trail 做结构对比）
+- `decisions`: **逐档四份决策**（`ultraShort`/`short`/`mid`/`long`，见上方「逐档决策：`decisions`」）——
+  与 portfolio-mgr 的 `decisionsByHorizon` **同档同键**，是逐档对照唯一的对齐面
 
 ### LLM 决策特有字段
 

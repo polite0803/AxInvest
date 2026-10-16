@@ -300,6 +300,23 @@ impl Period {
         }
     }
 
+    /// 四档的**验证窗口集**（荐股线 T+N 默认值与逐档表现窗口的唯一来源）。
+    ///
+    /// 为什么收在这里而不是各读点手抄：`[5, 20, 60]` 那组数此前同时抄在
+    /// `backtest_validation.rs` 的默认值、两处文档注释与三个统计读点上 ⇒ 换窗口集必然漏一处，
+    /// 而漏掉的那处会把「旧窗口的命中」和「新窗口的命中」并成同一个分母
+    /// （`compute_hit_rate_report` 的 by_action / by_style 就是**跨窗口池化**的）。
+    /// 单位 = 交易日，与 [`Period::default_holding_days`] 同口径（K 线 bar 位移天然只数交易日）。
+    pub fn validation_windows() -> Vec<i32> {
+        Self::ALL.iter().map(|p| p.default_holding_days() as i32).collect()
+    }
+
+    /// 某个 T+N 是否属于**当前**窗口集。统计读点用它把「上线前窗口」的样本挡在分母外
+    /// （拍板 6：不回填、如实标成上线前样本，而不是拿旧窗口的命中跟新窗口比大小）。
+    pub fn is_validation_window(t_plus_n: i32) -> bool {
+        Self::ALL.iter().any(|p| p.default_holding_days() as i32 == t_plus_n)
+    }
+
     /// 本档的**技术面尺度**（取值 = `astock-data::scale::ScaleProfile::resolve` 认的那些键）。
     ///
     /// 存在理由：「超短=小时线 / 短=周线 / 中=月线 / 长=季线」是阶段 2 的拍板，但此前**只写在**
@@ -456,10 +473,25 @@ impl Period {
         out
     }
 
-    /// 档位的中文标签（注入文案与荐股面板用同一串，不再各处手抄）。
+    /// 档位的中文标签 —— **全仓唯一档名**。
+    ///
+    /// 三处必须逐字与本题字面一致，任一处漂移都会被门抓红
+    /// （`scripts/check-horizon-label-parity.mjs`）：
+    /// ① 前端 i18n 的 8 套档名键族（`stockAnalysis.period*` / `timeHorizon*` /
+    ///    `reflection.horizon*` / `scheduledAnalysis.period.*` / `recommendation.period*`、
+    ///    `replayWorkbench.batch.period.*`、`settings.scheduled-recommendation.period-*`）；
+    /// ② Rhai 装配段的 `cn_tier`（`portfolio-mgr.rhai`，写进 `dataGaps`）；
+    /// ③ 导出模块的 `labelMap`（`src/lib/stock-analysis-export.ts`）。
+    ///
+    /// ⚠ 第 4 档是「长线」而**不是**「季度」：`quarterly` 是**评分尺度名**
+    /// （`Scale::Quarterly` = 60 交易日/bar，见 `astock-data/src/scale.rs`），
+    /// 而本档的持有期是 **90 交易日**（≈ 4.2 自然月）—— 二者相差 1.5 倍。
+    /// 2026-10-16 曾按「90 天 = 一个季度」把对外名误改为「季度」，
+    /// 造成「季度 90 天」这类自相矛盾文案与前后端同屏两名；当日已回退。
+    /// 事故与本轮更正的完整取证见 `AUDIT-horizon-naming-2026-10-16.md`。
     pub fn label_zh(&self) -> &'static str {
         match self {
-            Period::UltraShort => "超短",
+            Period::UltraShort => "超短线",
             Period::Short => "短线",
             Period::Mid => "中线",
             Period::Long => "长线",
@@ -1167,6 +1199,26 @@ mod tests {
                 None,
                 "未登记的尺度名 {bad:?} 被反查吞掉了 ⇒ 必须返回 None 让调用方显式处理"
             );
+        }
+    }
+
+    /// B3（拍板 7）：验证窗口集必须是**四档天数现场推导**的那一份，不是手抄的第二套参数。
+    ///
+    /// 判据写法：正断言只锁「与 `default_holding_days` 同序列」和条数，**不锁具体数字**——
+    /// 把 2/5/28/90 再抄一遍进测试，等于允许权威与测试各自漂移还互相看不见。
+    /// 负控锁旧窗口集的 20/60：它们不属于当前四档 ⇒ 三个统计读点必须把它们挡在分母外。
+    #[test]
+    fn validation_windows_derive_from_tier_days_and_reject_the_old_set() {
+        let want: Vec<i32> = Period::ALL.iter().map(|p| p.default_holding_days() as i32).collect();
+        assert_eq!(Period::validation_windows(), want, "窗口集与四档天数分了家");
+        assert_eq!(Period::validation_windows().len(), 4, "窗口集条数必须等于档数");
+        for n in &want {
+            assert!(Period::is_validation_window(*n), "{n} 是自己产出的窗口却不被认");
+        }
+        // 旧默认 [5,20,60]：5 两代同义（留在分母），20/60 属上线前窗口
+        assert!(Period::is_validation_window(5), "N=5 新旧同义，筛掉它等于丢真样本");
+        for stale in [20, 60, 0, -3, 91] {
+            assert!(!Period::is_validation_window(stale), "{stale} 不该被当成当前窗口");
         }
     }
 }

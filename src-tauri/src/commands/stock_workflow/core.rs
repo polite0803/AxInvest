@@ -1,11 +1,11 @@
 use super::decision::QualityPrecheckResult;
 use super::decision::{
-    build_dashboard_from_workflow_result, compute_decision_agreement, data_quality_precheck,
-    extract_decision_fields, extract_decision_json, extract_decisions_by_horizon,
-    extract_formula_decision_json, extract_horizon_price_map, extract_horizon_source,
-    extract_llm_decision_json, extract_position_state, load_and_inject_template,
-    normalize_action_for_storage, opposite_direction_gated_action, parse_asof_param,
-    resolve_runtime_options,
+    attribute_horizon_divergence, build_dashboard_from_workflow_result, compute_decision_agreement,
+    compute_horizon_agreements, data_quality_precheck, extract_decision_fields,
+    extract_decision_json, extract_decisions_by_horizon, extract_formula_decision_json,
+    extract_horizon_price_map, extract_horizon_source, extract_llm_decision_json,
+    extract_position_state, load_and_inject_template, normalize_action_for_storage,
+    opposite_direction_gated_action, parse_asof_param, resolve_runtime_options,
 };
 use crate::AppState;
 use crate::commands::error::{ErrorCategory, ErrorResponse};
@@ -1314,6 +1314,16 @@ pub async fn run_stock_workflow_inner(
                             formula_dj_agr.as_deref(),
                             llm_dj_agr.as_deref(),
                         );
+
+                        // B1（2026-10-16，PLAN-llm-horizon-decision-and-parity.md §14）：逐档四对一致性。
+                        // 与下面主档那一对**不是同一个计数域**（主档五维 / 内部满分 90；逐档三维 / 满分 65），
+                        // 两边各自归一后都叫 0-100 但不可并排比较 ⇒ dimsUsed / dimsMissing 随产物一起带出。
+                        let horizon_agreements =
+                            compute_horizon_agreements(formula_dj_agr.as_deref(), llm_dj_agr.as_deref());
+                        // B2（PLAN §17）：逐档分歧归因。读的是**档行自己的键域**（legs/absentLegs/
+                        // entryGate/tierVetoed），与主档那条 `divergence_attribution` 互不重叠。
+                        let horizon_divergences =
+                            attribute_horizon_divergence(formula_dj_agr.as_deref(), &horizon_agreements);
                         // V50: 预计算分歧诊断文本（供 reasoning 追加和 UI 展示）
                         let disagreement_note = agreement_breakdown.as_ref().map(|ab| {
                             // P0: 存在 f7 自指时标注污染程度
@@ -1380,6 +1390,56 @@ pub async fn run_stock_workflow_inner(
                         let decision_json = decision_json.map(|dj| {
                             if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&dj) {
                                 if let Some(obj) = v.as_object_mut() {
+                                    if !horizon_agreements.is_empty() {
+                                        obj.insert(
+                                            "agreementByHorizon".into(),
+                                            serde_json::json!(horizon_agreements
+                                                .iter()
+                                                .map(|h| serde_json::json!({
+                                                    "tier": h.tier,
+                                                    "tierLabel": h.tier_label,
+                                                    "comparable": h.comparable,
+                                                    "total": h.total,
+                                                    "absence": h.absence,
+                                                    "formulaAction": h.formula_action,
+                                                    "llmAction": h.llm_action,
+                                                    "actionScore": h.action_score,
+                                                    "actionNote": h.action_note,
+                                                    "actionOk": h.action_ok,
+                                                    "positionScore": h.position_score,
+                                                    "positionGap": h.position_gap,
+                                                    "confidenceScore": h.confidence_score,
+                                                    "confidenceGap": h.confidence_gap,
+                                                    "conflictType": h.conflict_type,
+                                                    "sharedEvidenceWeightPct": h.shared_evidence_weight_pct,
+                                                    "dimsUsed": h.dims_used,
+                                                    "dimsMissing": h.dims_missing,
+                                                }))
+                                                .collect::<Vec<_>>()),
+                                        );
+                                    }
+                                    if !horizon_divergences.is_empty() {
+                                        obj.insert(
+                                            "divergenceByHorizon".into(),
+                                            serde_json::json!(horizon_divergences
+                                                .iter()
+                                                .map(|d| serde_json::json!({
+                                                    "tier": d.tier,
+                                                    "tierLabel": d.tier_label,
+                                                    "drivers": d.drivers,
+                                                    "entryGate": d.entry_gate,
+                                                    "entryGatePassed": d.entry_gate_passed,
+                                                    "gateBasis": d.gate_basis,
+                                                    "veto": d.veto,
+                                                    "negativeLegs": d.negative_legs,
+                                                    "absentLegs": d.absent_legs,
+                                                    "dataGaps": d.data_gaps,
+                                                    "llmAbsence": d.llm_absence,
+                                                }))
+                                                .collect::<Vec<_>>()),
+                                        );
+                                    }
+
                                     if let Some(ref ab) = agreement_breakdown {
                                         // 向后兼容: formulaLlmAgreement = 总分
                                         obj.insert(

@@ -525,6 +525,11 @@ pub async fn record_performance(
         decision_confidence: Set(decision_confidence),
         horizon_pnl_json: Set(horizon_pnl_json.map(|s| s.to_string())),
         agreement_score: Set(agreement_score),
+        // B3 三键在本通道一律 None：这里是 cron / replay / 离线评测的**单条决策**回测，
+        // 入参既没有逐档对照行也没有 LLM 侧动作 —— 拿公式侧反填等于凭空造一个「LLM 也这么判」。
+        horizon_agreement: Set(None),
+        llm_action: Set(None),
+        llm_was_correct: Set(None),
         template_version: Set(template_version),
         // 非反思物化通道（cron / replay / 离线评测 / 对话直回测）不带来源键；
         // 幂等 upsert 只走 `upsert_reflection_horizon_performance`。
@@ -589,6 +594,10 @@ struct HorizonRowDraft {
     decision_confidence: i32,
     horizon_pnl_json: Option<String>,
     template_version: Option<i32>,
+    /// B3：该档三维分 / LLM 该档动作与判定 —— 三个 `None` 都是**缺席**，不得折算成 0。
+    horizon_agreement: Option<i32>,
+    llm_action: Option<String>,
+    llm_was_correct: Option<i32>,
 }
 
 /// 把展开后的成熟样本映射成行字段。
@@ -621,6 +630,13 @@ fn build_horizon_row_draft(
         decision_confidence: confidence,
         horizon_pnl_json: Some(pnl.to_string()),
         template_version: sample.template_version,
+        // B3 三键直传：判定发生在产端（`reflection.rs` 拿的是**同一份档快照**，调的是
+        // [`crate::reflection_stats::deterministic_horizon_was_correct`] 同一个函数），
+        // 这里不重算 —— 重算就要在这里再拿一次 `within_expected_horizon`，等于给同一件事
+        // 立第二个真相（两次读数不同时无从裁决）。
+        horizon_agreement: sample.horizon_agreement,
+        llm_action: sample.llm_action.clone(),
+        llm_was_correct: sample.llm_was_correct,
     })
 }
 
@@ -681,6 +697,11 @@ pub async fn upsert_reflection_horizon_performance(
             am.decision_confidence = Set(draft.decision_confidence);
             am.horizon_pnl_json = Set(draft.horizon_pnl_json);
             am.template_version = Set(draft.template_version);
+            // B3：逐档三键在 UPDATE 分支同样要刷 —— 重跑时 LLM 侧可能从「缺席」变成「有结论」
+            // （代际标记补上 / 该档补吐），只刷 INSERT 分支会让首写为 NULL 的行永久停在 NULL。
+            am.horizon_agreement = Set(draft.horizon_agreement);
+            am.llm_action = Set(draft.llm_action);
+            am.llm_was_correct = Set(draft.llm_was_correct);
             am.exit_at = Set(exit_at);
             am.update(db).await.map_err(|e| format!("更新 strategy_performance 失败: {e}"))?;
         } else {
@@ -698,6 +719,12 @@ pub async fn upsert_reflection_horizon_performance(
                 decision_confidence: Set(draft.decision_confidence),
                 horizon_pnl_json: Set(draft.horizon_pnl_json),
                 agreement_score: Set(None),
+                // ⚠ 本通道**不写** `agreement_score`（上面那行保持 None）：那一列的计数域是
+                // 主档五维分，而这里是逐档行 —— 把 65 制的分写进 90 制那列，同一列就两种尺子，
+                // `get_agreement_score_history` 的历史线会变成两种口径的平均。逐档分走 `horizon_agreement`。
+                horizon_agreement: Set(draft.horizon_agreement),
+                llm_action: Set(draft.llm_action),
+                llm_was_correct: Set(draft.llm_was_correct),
                 template_version: Set(draft.template_version),
                 source_ref: Set(Some(draft.source_ref)),
                 // #31 四档通道的归属键是 `source_ref`（决策 id × 档），不带反思行外键：
@@ -861,6 +888,9 @@ mod tests {
             decision_confidence: Set(50),
             horizon_pnl_json: Set(None),
             agreement_score: Set(None),
+            horizon_agreement: Set(None),
+            llm_action: Set(None),
+            llm_was_correct: Set(None),
             template_version: Set(generation),
             source_ref: Set(None),
             reflection_id: Set(None),
@@ -924,7 +954,11 @@ mod tests {
                 "status": "mature",
                 "evaluation": { "wasCorrect": 1 },
                 "market": { "returnPct": 3.21, "alphaPct": 1.05, "targetReached": true },
-                "decision": { "action": "买入", "confidence": 72.4 }
+                "decision": { "action": "买入", "confidence": 72.4 },
+                // B3 三键（该档 LLM 侧）：产端 = reflection.rs 的 build_horizon_results_json
+                "llmAction": "观望",
+                "llmWasCorrect": null,
+                "horizonAgreement": 63
             },
             "short": { "status": "unavailable" },
             "mid": {
@@ -976,6 +1010,16 @@ mod tests {
         assert_eq!(mid.was_correct, 0);
         assert_eq!(mid.decision_confidence, 100, "置信度超上限必须 clamp 到 100");
         assert_eq!(mid.source_ref, "reflection-horizon:R1:mid");
+
+        // ── B3 三键透传（一列一个计数域：逐档分不得顶替公式侧任何既有列）──
+        assert_eq!(ultra.horizon_agreement, Some(63), "该档三维分透传");
+        assert_eq!(ultra.llm_action.as_deref(), Some("观望"));
+        // 观望不是方向判断 ⇒ 产端判 None；这里必须停在 None，**不得**被折成 0（0 = 「LLM 判错」）
+        assert_eq!(ultra.llm_was_correct, None, "LLM 侧未判定 ≠ LLM 判错");
+        // 该档 JSON 没给这三键 ⇒ 三键全 None（缺席），而不是 0 / 空串
+        assert_eq!(mid.horizon_agreement, None, "缺键不得当 0 分");
+        assert_eq!(mid.llm_action, None);
+        assert_eq!(mid.llm_was_correct, None);
     }
 
     /// #31：幂等粒度是「**被复盘决策 × 档**」而非「反思行 × 档」。

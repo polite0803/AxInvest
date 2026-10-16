@@ -1,13 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "version": "1.0.0",
-  "description": "AxAgent LLM Agent 输出格式强约束 Schema。所有 LLM Agent（trader/research-mgr/catalyst/debate-convergence）的输出必须通过本 Schema 验证，否则触发 strict_mode 降级。注：原列在其中的 risk-level 与 data-quality 均已下沉为 Rhai CodeNode（v55 / v58），不再经本 Schema 校验。",
-
+  "description": "AxAgent LLM Agent 输出格式契约（文档）。⚠ 本文件**没有运行期消费者**——rt-workflow 的 agent_executor 六处 response_format: None，结构化输出并未下发给模型；原描述「必须通过本 Schema 验证，否则触发 strict_mode 降级」与代码不符，已按现状改写。实际强制分三处：专家 md 的 prompt 契约、Rust 解析侧（如 decision.rs::normalize_llm_decision_* ）、以及 scripts/check-horizon-decision-keys.mjs 等 CI 门对账本文件与生产侧字面量。注：原列在其中的 risk-level 与 data-quality 均已下沉为 Rhai CodeNode（v55 / v58），不再经本 Schema 校验。",
   "schemas": {
     "base_event": {
       "description": "事件基础字段（所有事件类 Agent 输出必须绑定此五字段）",
       "type": "object",
-      "required": ["Target_Entity", "Event_Type", "Impact_Direction", "Impact_Timeline", "Confidence_Score"],
+      "required": [
+        "Target_Entity",
+        "Event_Type",
+        "Impact_Direction",
+        "Impact_Timeline",
+        "Confidence_Score"
+      ],
       "properties": {
         "Target_Entity": {
           "type": "string",
@@ -55,12 +60,21 @@
         },
         "Impact_Direction": {
           "type": "string",
-          "enum": ["Positive", "Negative", "Neutral"],
+          "enum": [
+            "Positive",
+            "Negative",
+            "Neutral"
+          ],
           "description": "事件对目标实体的影响方向：Positive=利好，Negative=利空，Neutral=中性"
         },
         "Impact_Timeline": {
           "type": "string",
-          "enum": ["Immediate", "Short_Term", "Medium_Term", "Long_Term"],
+          "enum": [
+            "Immediate",
+            "Short_Term",
+            "Medium_Term",
+            "Long_Term"
+          ],
           "description": "事件影响的时间维度：Immediate=即时（T+0~1），Short_Term=短期（1~5日），Medium_Term=中期（1~4周），Long_Term=长期（1月+）"
         },
         "Confidence_Score": {
@@ -71,7 +85,6 @@
         }
       }
     },
-
     "trader_output": {
       "description": "LLM Trader Agent 输出格式 — 双视角冗余校验的 LLM 视角（V65 升级：与 portfolio-mgr 公式决策同维度对齐）",
       "type": "object",
@@ -88,17 +101,29 @@
         "timeHorizon",
         "expectedHoldingDays",
         "evidence_cited",
-        "reasoning"
+        "reasoning",
+        "decisions"
       ],
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"],
+          "enum": [
+            "买入",
+            "增持",
+            "持有",
+            "观望",
+            "减持",
+            "卖出"
+          ],
           "description": "操作指令（与 portfolio-mgr 的 action 同维度，用于双视角对比）"
         },
         "verdict": {
           "type": "string",
-          "enum": ["看多", "看空", "中性"],
+          "enum": [
+            "看多",
+            "看空",
+            "中性"
+          ],
           "description": "方向结论，必须与 action 严格一致（买入/增持→看多，卖出/减持→看空，持有/观望→中性）"
         },
         "positionPct": {
@@ -115,7 +140,12 @@
         },
         "riskLevel": {
           "type": "string",
-          "enum": ["低风险", "中风险", "高风险", "极高风险"],
+          "enum": [
+            "低风险",
+            "中风险",
+            "高风险",
+            "极高风险"
+          ],
           "description": "风险等级（与 portfolio-mgr 的 riskLevel 同维度，用于双视角对比）"
         },
         "currentPrice": {
@@ -147,7 +177,12 @@
         },
         "timeHorizon": {
           "type": "string",
-          "enum": ["ultra_short", "short", "mid", "long"],
+          "enum": [
+            "ultra_short",
+            "short",
+            "mid",
+            "long"
+          ],
           "description": "时间视角：ultra_short=1-2天，short=1周，mid=1月，long=3月"
         },
         "expectedHoldingDays": {
@@ -158,7 +193,9 @@
         },
         "data_gaps": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "LLM 视角识别到的数据缺口列表（与 portfolio-mgr 的 data_gaps 做 Jaccard 相似度对比）",
           "maxItems": 20
         },
@@ -166,7 +203,10 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["source", "point"],
+            "required": [
+              "source",
+              "point"
+            ],
             "properties": {
               "source": {
                 "type": "string",
@@ -187,11 +227,29 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["name", "severity"],
+            "required": [
+              "name",
+              "severity"
+            ],
             "properties": {
-              "name": { "type": "string", "minLength": 2 },
-              "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
-              "probability": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+              "name": {
+                "type": "string",
+                "minLength": 2
+              },
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "critical"
+                ]
+              },
+              "probability": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0
+              }
             }
           },
           "maxItems": 5,
@@ -201,11 +259,24 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["step", "input", "conclusion"],
+            "required": [
+              "step",
+              "input",
+              "conclusion"
+            ],
             "properties": {
-              "step": { "type": "string", "description": "推理步骤名（如方向判断/仓位计算/价位设定）" },
-              "input": { "type": "string", "description": "该步骤的输入依据" },
-              "conclusion": { "type": "string", "description": "该步骤的结论" }
+              "step": {
+                "type": "string",
+                "description": "推理步骤名（如方向判断/仓位计算/价位设定）"
+              },
+              "input": {
+                "type": "string",
+                "description": "该步骤的输入依据"
+              },
+              "conclusion": {
+                "type": "string",
+                "description": "该步骤的结论"
+              }
             }
           },
           "maxItems": 10,
@@ -213,7 +284,9 @@
         },
         "lessons_applied": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "本次方案吸取的历史教训列表（来自 stock_lessons）",
           "maxItems": 5
         },
@@ -223,61 +296,139 @@
           "description": "完整推理过程，必须引用 ≥3 个上游节点的具体论据，禁止空话"
         },
         "decisions": {
-          "description": "V80 四周期独立决策，与 portfolio-mgr rhai 的 decisionsByHorizon 同维对齐。每周期字段均可选（缺失时前端回退到顶级主决策字段）。超短线(ultra_short)走方案B：单后验+档位映射+置信度下限 0.35",
+          "description": "四周期独立决策（2026-10-16 拍板：甲案＝单次调用出四档；落库嵌在本列 llm_decision_json 内，不另建列）。与 portfolio-mgr rhai 的 decisionsByHorizon 同档同键。键名必须是下列四个 camelCase 拼写；snake 形态（ultra_short）读侧会归一成 camel 后落库。某一档确实判不了 ⇒ 省略该键并在 data_gaps 写明原因，禁止硬填方向、也禁止填 null/0 占位。落库前由 decision.rs 的 normalize_llm_horizon_decisions 归一并逐档点名缺席。⚠ 本文件无运行期消费者（agent_executor 六处 response_format: None），它是**契约文档**，真正的强制在 prompt + 解析器 + scripts/check-horizon-decision-keys.mjs 三处。",
           "type": "object",
+          "required": [
+            "ultraShort",
+            "short",
+            "mid",
+            "long"
+          ],
           "properties": {
-            "ultra_short": {
-              "description": "超短线（1-2日）决策，方案B：confLowerBound 固定 0.35",
+            "ultraShort": {
+              "description": "超短线（2 个交易日）决策，七字段与顶层同域同值",
               "type": "object",
+              "required": [
+                "action",
+                "verdict",
+                "positionPct",
+                "confidence",
+                "stopLossPct",
+                "takeProfitPct",
+                "expectedHoldingDays"
+              ],
               "properties": {
                 "action": {
                   "type": "string",
-                  "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"],
+                  "enum": [
+                    "买入",
+                    "增持",
+                    "持有",
+                    "观望",
+                    "减持",
+                    "卖出"
+                  ],
                   "description": "操作指令"
                 },
-                "verdict": { "type": "string", "enum": ["看多", "看空", "中性"], "description": "方向结论" },
-                "positionPct": { "type": "number", "minimum": 0, "maximum": 95, "description": "建议仓位百分比 0-95" },
-                "confidence": { "type": "number", "minimum": 0, "maximum": 100, "description": "置信度 0-100" },
-                "stopLossPct": {
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "看多",
+                    "看空",
+                    "中性"
+                  ],
+                  "description": "方向结论"
+                },
+                "positionPct": {
                   "type": "number",
                   "minimum": 0,
-                  "maximum": 30,
-                  "description": "止损百分比（ultra_short:2-4）"
+                  "maximum": 95,
+                  "description": "建议仓位百分比 0-95"
                 },
-                "takeProfitPct": { "type": "number", "minimum": 0, "maximum": 50, "description": "止盈百分比" },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "置信度 0-100"
+                },
+                "stopLossPct": {
+                  "type": "number",
+                  "minimum": 2,
+                  "maximum": 4,
+                  "description": "止损百分比（超短: 2-4）"
+                },
+                "takeProfitPct": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 50,
+                  "description": "止盈百分比"
+                },
                 "expectedHoldingDays": {
                   "type": "integer",
                   "minimum": 1,
                   "maximum": 250,
                   "description": "预期持有天数（交易日）"
-                },
-                "confLowerBound": {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 1,
-                  "description": "置信度下限（方案B 固定 0.35）"
                 }
               }
             },
             "short": {
-              "description": "短线（1周）决策，完整多周期评分",
+              "description": "短线（5 个交易日）决策，七字段与顶层同域同值",
               "type": "object",
+              "required": [
+                "action",
+                "verdict",
+                "positionPct",
+                "confidence",
+                "stopLossPct",
+                "takeProfitPct",
+                "expectedHoldingDays"
+              ],
               "properties": {
                 "action": {
                   "type": "string",
-                  "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"],
+                  "enum": [
+                    "买入",
+                    "增持",
+                    "持有",
+                    "观望",
+                    "减持",
+                    "卖出"
+                  ],
                   "description": "操作指令"
                 },
-                "verdict": { "type": "string", "enum": ["看多", "看空", "中性"], "description": "方向结论" },
-                "positionPct": { "type": "number", "minimum": 0, "maximum": 95, "description": "建议仓位百分比 0-95" },
-                "confidence": { "type": "number", "minimum": 0, "maximum": 100, "description": "置信度 0-100" },
-                "stopLossPct": {
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "看多",
+                    "看空",
+                    "中性"
+                  ],
+                  "description": "方向结论"
+                },
+                "positionPct": {
                   "type": "number",
                   "minimum": 0,
-                  "maximum": 30,
-                  "description": "止损百分比（short:4-7）"
+                  "maximum": 95,
+                  "description": "建议仓位百分比 0-95"
                 },
-                "takeProfitPct": { "type": "number", "minimum": 0, "maximum": 50, "description": "止盈百分比" },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "置信度 0-100"
+                },
+                "stopLossPct": {
+                  "type": "number",
+                  "minimum": 4,
+                  "maximum": 7,
+                  "description": "止损百分比（短线: 4-7）"
+                },
+                "takeProfitPct": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 50,
+                  "description": "止盈百分比"
+                },
                 "expectedHoldingDays": {
                   "type": "integer",
                   "minimum": 1,
@@ -287,24 +438,63 @@
               }
             },
             "mid": {
-              "description": "中期（1月）决策，完整多周期评分",
+              "description": "中线（28 个交易日）决策，七字段与顶层同域同值",
               "type": "object",
+              "required": [
+                "action",
+                "verdict",
+                "positionPct",
+                "confidence",
+                "stopLossPct",
+                "takeProfitPct",
+                "expectedHoldingDays"
+              ],
               "properties": {
                 "action": {
                   "type": "string",
-                  "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"],
+                  "enum": [
+                    "买入",
+                    "增持",
+                    "持有",
+                    "观望",
+                    "减持",
+                    "卖出"
+                  ],
                   "description": "操作指令"
                 },
-                "verdict": { "type": "string", "enum": ["看多", "看空", "中性"], "description": "方向结论" },
-                "positionPct": { "type": "number", "minimum": 0, "maximum": 95, "description": "建议仓位百分比 0-95" },
-                "confidence": { "type": "number", "minimum": 0, "maximum": 100, "description": "置信度 0-100" },
-                "stopLossPct": {
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "看多",
+                    "看空",
+                    "中性"
+                  ],
+                  "description": "方向结论"
+                },
+                "positionPct": {
                   "type": "number",
                   "minimum": 0,
-                  "maximum": 30,
-                  "description": "止损百分比（mid:6-12）"
+                  "maximum": 95,
+                  "description": "建议仓位百分比 0-95"
                 },
-                "takeProfitPct": { "type": "number", "minimum": 0, "maximum": 50, "description": "止盈百分比" },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "置信度 0-100"
+                },
+                "stopLossPct": {
+                  "type": "number",
+                  "minimum": 6,
+                  "maximum": 12,
+                  "description": "止损百分比（中线: 6-12）"
+                },
+                "takeProfitPct": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 50,
+                  "description": "止盈百分比"
+                },
                 "expectedHoldingDays": {
                   "type": "integer",
                   "minimum": 1,
@@ -314,24 +504,63 @@
               }
             },
             "long": {
-              "description": "长期（3月）决策，完整多周期评分",
+              "description": "长线（90 个交易日）决策，七字段与顶层同域同值",
               "type": "object",
+              "required": [
+                "action",
+                "verdict",
+                "positionPct",
+                "confidence",
+                "stopLossPct",
+                "takeProfitPct",
+                "expectedHoldingDays"
+              ],
               "properties": {
                 "action": {
                   "type": "string",
-                  "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"],
+                  "enum": [
+                    "买入",
+                    "增持",
+                    "持有",
+                    "观望",
+                    "减持",
+                    "卖出"
+                  ],
                   "description": "操作指令"
                 },
-                "verdict": { "type": "string", "enum": ["看多", "看空", "中性"], "description": "方向结论" },
-                "positionPct": { "type": "number", "minimum": 0, "maximum": 95, "description": "建议仓位百分比 0-95" },
-                "confidence": { "type": "number", "minimum": 0, "maximum": 100, "description": "置信度 0-100" },
-                "stopLossPct": {
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "看多",
+                    "看空",
+                    "中性"
+                  ],
+                  "description": "方向结论"
+                },
+                "positionPct": {
                   "type": "number",
                   "minimum": 0,
-                  "maximum": 30,
-                  "description": "止损百分比（long:10-15）"
+                  "maximum": 95,
+                  "description": "建议仓位百分比 0-95"
                 },
-                "takeProfitPct": { "type": "number", "minimum": 0, "maximum": 50, "description": "止盈百分比" },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "置信度 0-100"
+                },
+                "stopLossPct": {
+                  "type": "number",
+                  "minimum": 10,
+                  "maximum": 15,
+                  "description": "止损百分比（长线: 10-15）"
+                },
+                "takeProfitPct": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 50,
+                  "description": "止盈百分比"
+                },
                 "expectedHoldingDays": {
                   "type": "integer",
                   "minimum": 1,
@@ -344,7 +573,6 @@
         }
       }
     },
-
     "catalyst_output": {
       "description": "LLM Catalyst Agent 输出格式（与 catalyst-analyst.md 及 seed a-catalyst 强制约束保持一致）",
       "type": "object",
@@ -362,7 +590,11 @@
       "properties": {
         "verdict": {
           "type": "string",
-          "enum": ["看多", "看空", "中性"],
+          "enum": [
+            "看多",
+            "看空",
+            "中性"
+          ],
           "description": "方向结论（analyst-brief.rhai 消费该对象的多空评分做共识计算）"
         },
         "bull_score": {
@@ -396,7 +628,12 @@
         },
         "institutional_trace": {
           "type": "string",
-          "enum": ["无", "疑似建仓", "有建仓痕迹", "明显建仓"],
+          "enum": [
+            "无",
+            "疑似建仓",
+            "有建仓痕迹",
+            "明显建仓"
+          ],
           "description": "机构资金布局痕迹"
         },
         "narrative_completeness": {
@@ -417,35 +654,69 @@
         }
       }
     },
-
     "risk_output": {
       "description": "风险等级分类输出格式。原由 LLM Risk Level Agent 产出，v55(2026-09-20) 起该节点已下沉为 Rhai CodeNode（`risk-level.rhai`）—— 形状保持不变（`category` 仍为四档枚举），`risk_factors` 因无事件级数据而恒为空数组。",
       "type": "object",
-      "required": ["category", "risk_factors"],
+      "required": [
+        "category",
+        "risk_factors"
+      ],
       "properties": {
         "category": {
           "type": "string",
-          "enum": ["低风险", "中风险", "高风险", "极高风险"],
+          "enum": [
+            "低风险",
+            "中风险",
+            "高风险",
+            "极高风险"
+          ],
           "description": "综合风险等级"
         },
         "risk_factors": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["Target_Entity", "Event_Type", "Impact_Direction", "Confidence_Score"],
+            "required": [
+              "Target_Entity",
+              "Event_Type",
+              "Impact_Direction",
+              "Confidence_Score"
+            ],
             "properties": {
-              "Target_Entity": { "type": "string" },
-              "Event_Type": { "type": "string" },
-              "Impact_Direction": { "type": "string", "enum": ["Positive", "Negative", "Neutral"] },
-              "Confidence_Score": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
-              "Impact_Timeline": { "type": "string", "enum": ["Immediate", "Short_Term", "Medium_Term", "Long_Term"] }
+              "Target_Entity": {
+                "type": "string"
+              },
+              "Event_Type": {
+                "type": "string"
+              },
+              "Impact_Direction": {
+                "type": "string",
+                "enum": [
+                  "Positive",
+                  "Negative",
+                  "Neutral"
+                ]
+              },
+              "Confidence_Score": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0
+              },
+              "Impact_Timeline": {
+                "type": "string",
+                "enum": [
+                  "Immediate",
+                  "Short_Term",
+                  "Medium_Term",
+                  "Long_Term"
+                ]
+              }
             }
           }
         }
       }
     }
   },
-
   "validation_rules": {
     "strict_mode_threshold": {
       "description": "任一必填字段缺失或类型不匹配 → 触发 strict_mode 降级，agent_executor 注入 __untrusted=true",
@@ -453,7 +724,9 @@
     },
     "backward_compatibility": {
       "description": "V65: targetPrice/stopLoss 恢复为价位维度（双视角对比需要）；V94(2026-09-28): targetPrice 由必填改为**条件字段** —— 持有/观望留空（等值会被下游判为无效价格信号，002371 实证），stopLoss 仍必填；direction 字段被 verdict 取代",
-      "deprecated_fields": ["direction"],
+      "deprecated_fields": [
+        "direction"
+      ],
       "grace_period": "2026-09-01"
     },
     "trader_strict_mode_rules": {
@@ -472,7 +745,7 @@
     },
     "event_type_enum_loose": {
       "description": "Event_Type 枚举允许 '其他' 兜底，但若 '其他' 占比 > 30% 触发数据质量警告",
-      "other_ratio_threshold": 0.30
+      "other_ratio_threshold": 0.3
     }
   }
 }

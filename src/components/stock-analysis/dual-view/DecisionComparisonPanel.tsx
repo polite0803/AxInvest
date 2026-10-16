@@ -18,6 +18,7 @@ import {
 import { Empty, Tag, Tooltip } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { HorizonAgreementList } from "../HorizonAgreementList";
 import { HorizonDecisionStrip } from "../HorizonDecisionStrip";
 import type { CompactDecisionShape } from "./CompactDecisionComparison";
 
@@ -345,6 +346,16 @@ export function DecisionComparisonPanel({ data }: DecisionComparisonPanelProps) 
         decisions={view.decisionsByHorizon}
         mode="decision"
         testId="decision-horizon-strip"
+      />
+
+      {
+        /* B1（PLAN-llm-horizon-decision-and-parity.md §14）：逐档「公式 vs LLM」对照。
+        与上方主档一致性分数**不同计数域**（三维 65 制 vs 五维 90 制），组件自带那句声明。 */
+      }
+      <HorizonAgreementList
+        agreements={view.agreementByHorizon}
+        divergences={view.divergenceByHorizon}
+        testId="horizon-agreement-list"
       />
 
       {/* LLM 缺失提示 */}

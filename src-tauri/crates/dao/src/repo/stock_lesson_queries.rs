@@ -640,6 +640,14 @@ pub struct ReflectionM1Draft {
     pub decision_confidence: i32,
     pub template_version: Option<i32>,
     pub horizon_pnl_json: Option<String>,
+    /// B3：该行所属**主档**那一对的五维归一分（产端 = 被复盘分析的
+    /// `decision_json.agreementBreakdown.total`，判据 = `decision.rs::compute_decision_agreement`）。
+    ///
+    /// 为什么由本通道写：全仓只有这里同时拿得到「被复盘决策的 decision_json」与「到期判定」，
+    /// 而 `evolution_drift::record_performance` 那条唯一调用方（分析回测）入参只有
+    /// `analysis_date`，没有分析行 id 也没有 LLM 侧 ⇒ 它给不出这一对，只能继续传 None。
+    /// `None` = 该分析没有一致性诊断（LLM 侧缺席 / 该记录产自诊断上线前）⇒ 面板按缺席处理，不补 0。
+    pub agreement_score: Option<i32>,
 }
 
 /// 该反思行是否已经落过 M1 样本（`strategy_id` 固定 `reflection_verdict`）。幂等查重用。
@@ -674,7 +682,13 @@ pub async fn insert_reflection_m1_sample(
         decision_confidence: Set(d.decision_confidence),
         template_version: Set(d.template_version),
         horizon_pnl_json: Set(d.horizon_pnl_json),
-        agreement_score: Set(None),
+        agreement_score: Set(d.agreement_score),
+        // B3 逐档三键对本格一律 None：这条是「反思裁决」旧格（`strategy_id='reflection_verdict'`，
+        // 不去重、每次重跑追加），既不是逐档物化行、也没有该档的三维分与 LLM 动作 ——
+        // 拿 `was_correct` 反推 LLM 侧会把「公式判对」当成「LLM 判错」。
+        horizon_agreement: Set(None),
+        llm_action: Set(None),
+        llm_was_correct: Set(None),
         source_ref: Set(None),
         // §二 显式外键：本行由**这条反思**产出（统计侧直连依据）。
         reflection_id: Set(Some(d.reflection_id)),

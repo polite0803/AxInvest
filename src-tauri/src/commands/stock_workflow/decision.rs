@@ -1358,7 +1358,15 @@ fn conservative_placeholder(
 /// 优先取 `results["trader"]["result"]`（AgentNode 包装内的实际输出），
 /// 回退到 `results["trader"]` 本身。
 pub(crate) fn extract_llm_decision_json(wf: &Workflow) -> Option<String> {
-    let trader = wf.results.get("trader")?;
+    llm_decision_json_from_trader(wf.results.get("trader")?)
+}
+
+/// [`extract_llm_decision_json`] 的被测内核：输入 trader 节点的原始产出值。
+///
+/// 拆这一层的唯一理由是让负控能拆在「围栏剥除 / 逐档归一」这两道守卫本身，
+/// 而不是拆在 Workflow 夹具的拼写上（本仓既有教训：检查逻辑不外露＝负控只能造在外围，
+/// 那种负控拆错位置时照样绿）。
+fn llm_decision_json_from_trader(trader: &serde_json::Value) -> Option<String> {
     // V37 修复: trader 是 AgentNode，输出结构为 {role, content: <json_string>, ...}，
     // LLM 的业务字段（action/targetPrice/confidence）在 content JSON 字符串内部。
     // 旧代码取 .result（CodeNode 的字段），AgentNode 无此字段→永远 fallback 到包装对象，
@@ -1369,6 +1377,11 @@ pub(crate) fn extract_llm_decision_json(wf: &Workflow) -> Option<String> {
     match trader {
         serde_json::Value::Object(obj) => {
             if let Some(content_str) = obj.get("content").and_then(|v| v.as_str()) {
+                // 现网实证（2026-10-16 取数）：`llm_decision_json` 138 行里有 **6 行首字符是反引号**
+                // —— 模型把整个方案包在 ```json 围栏里，下面的 `from_str` 当场失败，
+                // 于是走「回退返回原始 content 字符串」那条，把带围栏的文本原样落库。
+                // 嵌列方案（拍板 2）下这一条会把主决策**和四档一起**吞掉，故在解析前先剥一层围栏。
+                let content_str = unwrap_json_fence(content_str);
                 // 解析 content 内层 JSON 字符串为 JSON 对象，再序列化
                 if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(content_str) {
                     // V60 修复: 展开 report 字段的嵌套 JSON
@@ -1418,6 +1431,7 @@ pub(crate) fn extract_llm_decision_json(wf: &Workflow) -> Option<String> {
                     // 通过白名单强制映射, 防止 DB 和 UI 出现非标准值。
                     // 注意: 不修改 targetPrice/stopLoss/confidence 等数值字段,
                     // 它们错误时 portfolio-mgr 的 sanity 预检会兜底。
+                    normalize_llm_horizon_decisions(&mut parsed);
                     normalize_llm_action(&mut parsed);
                     return serde_json::to_string(&parsed).ok();
                 }
@@ -1427,6 +1441,164 @@ pub(crate) fn extract_llm_decision_json(wf: &Workflow) -> Option<String> {
             serde_json::to_string(trader).ok()
         },
         _ => serde_json::to_string(trader).ok(),
+    }
+}
+
+/// 剥掉模型把整个方案包进围栏时套的那一层。
+///
+/// 现网实证（2026-10-16 取数）：`llm_decision_json` 138 行里有 **6 行首字符是反引号** ——
+/// 输出被 \`\`\`json 围栏包住 ⇒ 下面的 `from_str` 当场失败 ⇒ 走「回退返回原始串」那条，
+/// 带围栏的文本原样落库。嵌列方案（拍板 2）下这一步失效会**连带丢掉四档**，所以必须在解析前剥。
+///
+/// 只剥最外一层且要求首尾都是围栏；半截围栏（输出被截断）不猜、不补，
+/// 原样交回 `from_str` 失败 ⇒ 读侧仍按「解析失败」态呈现，不伪装成「LLM 没表态」。
+///
+/// ⚠ 仓内已有六处同类私有实现（`llm_classifier_executor.rs:229`、`demand_llm.rs:85`、
+/// `dynamic_ui.rs:759`、`pattern_analyzer.rs:785`、`chart_generator.rs:124`、`agency_expert.rs:561`），
+/// 全部各自私有、跨 crate 提升签名属另一批的改动面 ⇒ 本处不新建第七个公共工具，
+/// 只把「为什么这一步在本链路是必需的」钉在这里。
+fn unwrap_json_fence(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    let Some(after_tick) = trimmed.strip_prefix("```") else {
+        return raw;
+    };
+    let after_lang = after_tick
+        .strip_prefix("json")
+        .or_else(|| after_tick.strip_prefix("JSON"))
+        .unwrap_or(after_tick);
+    let body = after_lang.trim_start();
+    let Some(end) = body.rfind("```") else {
+        return raw;
+    };
+    let inner = body[..end].trim();
+    if inner.is_empty() { raw } else { inner }
+}
+
+/// LLM 逐档决策的**契约代次**（写进 `llm_decision_json` 顶层 `horizonDecisionContract`）。
+///
+/// 存在理由：读侧要分四态，其中「该记录产自逐档契约上线前」这一态没有别的判据 ——
+/// `template_version` 用不上（A1 只改 prompt 与解析器、**不改图 ⇒ 不 bump 代**，新行与历史行同值），
+/// 时间戳更糟（回放样本的 `as_of_date` 会把今天入库的逐档记录推到「上线前」）。
+/// 记值由**代码盖章**，与 harness 里「档位标签不是模型自报字段」同源。
+/// 读侧只判「键在不在」，不判具体值 ⇒ TS 侧不存在第二份真相。
+const LLM_HORIZON_DECISION_CONTRACT: u8 = 1;
+
+/// 把 trader 自报的逐档决策 `decisions` 归一到 camel 键，并**逐档点名缺席**。
+///
+/// 2026-10-16 拍板：甲案（单次调用出四档）+ 嵌进 `llm_decision_json`（不加新列）。
+/// 键域权威 = [`axagent_harness::holding_period::Period::camel_key`]，与公式侧
+/// `decisionsByHorizon` **同一族拼写**（读侧 TS `HorizonDecision` 与
+/// `scripts/check-horizon-decision-keys.mjs` 都按 camel 判）。输入三种拼写都收
+/// （camel / snake / 历史 `ultrashort`），归一后只写 camel 落库。
+///
+/// 三类「没有」必须分开，不许互相顶替 —— 否则逐档对照的分母会说谎：
+/// - 整个 `decisions` 没给 ⇒ 一条**汇总**缺口（本轮 trader 未按四档契约输出）；
+/// - 给了但漏某档 ⇒ **逐档**点名（缺席档不出键，与公式侧已批口径 A 一致）；
+/// - 键不认识（第五档 / 脏键）⇒ 点名它，**不静默丢弃** —— 丢弃会让「模型吐了别的东西」
+///   与「模型漏吐了这一档」在库里长同一个样子。
+///
+/// 刻意不做：不补占位行、不把缺席档兜成「观望」（那是替 LLM 下结论，与
+/// [`normalize_llm_action`] 里「不确定 ≠ 观望」那条语义修正同源）。
+fn normalize_llm_horizon_decisions(parsed: &mut serde_json::Value) {
+    use axagent_harness::holding_period::Period;
+
+    let Some(obj) = parsed.as_object_mut() else {
+        return;
+    };
+    // 主键名 `decisions`；一并接受 `horizonDecisions` 是防「prompt 已改、解析未改」这类
+    // 先后错位造成整档静默失踪（两侧同名都能读，读不到才是真缺陷）
+    let raw = obj.remove("decisions").or_else(|| obj.remove("horizonDecisions"));
+    let mut gaps: Vec<String> = Vec::new();
+    let mut norm = serde_json::Map::new();
+
+    match raw {
+        None => {
+            gaps.push(
+                "LLM 未给出逐档决策 decisions（本轮 trader 未按四档契约输出，四档均无 LLM 侧结论）"
+                    .to_string(),
+            );
+        },
+        Some(serde_json::Value::Object(map)) => {
+            for (k, mut row) in map {
+                // camel / snake / 历史 ultrashort 三族拼写归一：转小写 + 去下划线后交给权威 FromStr
+                let key = k.to_ascii_lowercase().replace('_', "");
+                match key.parse::<Period>() {
+                    Ok(period) => {
+                        // 逐档也要 verdict→action：与顶层 V64 同一映射，值域仍只有 `decision_action` 一份
+                        if let Some(o) = row.as_object_mut() {
+                            let no_action = o.get("action").and_then(|a| a.as_str()).is_none();
+                            if no_action {
+                                let verdict = o
+                                    .get("verdict")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string());
+                                if let Some(v) = verdict {
+                                    if let Some(kind) =
+                                        axagent_analysis_engine::decision_action::verdict_to_action(
+                                            &v,
+                                        )
+                                    {
+                                        o.insert(
+                                            "action".to_string(),
+                                            serde_json::Value::String(
+                                                kind.as_storage_cn().to_string(),
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        norm.insert(period.camel_key().to_string(), row);
+                    },
+                    Err(_) => {
+                        gaps.push(format!("LLM 的 decisions 含未知档位键 `{k}`（未计入四档对照）"));
+                    },
+                }
+            }
+            for period in Period::ALL {
+                if !norm.contains_key(period.camel_key()) {
+                    gaps.push(format!(
+                        "LLM 未给出{}档决策（该档不参与逐档对照）",
+                        period.label_zh()
+                    ));
+                }
+            }
+        },
+        Some(_) => {
+            gaps.push("LLM 的 decisions 不是对象，四档逐档结论均不可用".to_string());
+        },
+    }
+
+    // 走到这里 = 本次 LLM 产出**已被成功解析** ⇒ 无条件盖代际标记（与四档齐不齐无关）。
+    // 缺该键 ⇒ 读侧判成「上线前样本」；有该键 + 逐档点名 ⇒ 判成「该档未给出」；
+    // 整列不可解析 ⇒ 走不到这里，读侧按「解析失败」态处理（四态互斥，见 PLAN §10）。
+    obj.insert(
+        "horizonDecisionContract".to_string(),
+        serde_json::Value::from(LLM_HORIZON_DECISION_CONTRACT),
+    );
+
+    if !norm.is_empty() {
+        obj.insert("decisions".to_string(), serde_json::Value::Object(norm));
+    }
+    if !gaps.is_empty() {
+        // 追加进**既有**缺口清单（trader 与公式侧都写这个键），不另立第二个缺口键域。
+        // 两侧历史拼写都可能在（snake 为主、camel 为装配段产物）⇒ 哪个已存在就往哪个续，
+        // 都不存在才新建 snake 形态（与 `decision.data_gaps` 的既有读侧一致）。
+        let existing_key = if obj.contains_key("data_gaps") {
+            Some("data_gaps")
+        } else if obj.contains_key("dataGaps") {
+            Some("dataGaps")
+        } else {
+            None
+        };
+        let key = existing_key.unwrap_or("data_gaps");
+        let mut merged: Vec<serde_json::Value> = match obj.remove(key) {
+            Some(serde_json::Value::Array(arr)) => arr,
+            Some(other) if !other.is_null() => vec![other],
+            _ => Vec::new(),
+        };
+        merged.extend(gaps.into_iter().map(serde_json::Value::String));
+        obj.insert(key.to_string(), serde_json::Value::Array(merged));
     }
 }
 
@@ -1478,6 +1650,495 @@ pub(crate) fn normalize_llm_action(parsed: &mut serde_json::Value) {
         },
     };
     obj.insert("action".to_string(), serde_json::Value::String(mapped.as_storage_cn().to_string()));
+}
+
+/// 方向档位别名的**模块级**导入 —— 主档与逐档两处判据共用同一个 `ActionKind` 权威。
+///
+/// 为什么提到模块层而不是各函数内 `use`：抽出来的判据函数（[`action_score_table`] 等）
+/// 与被抽取的原函数分居两处作用域，原那份 `use` 在函数体内，模块级函数看不见它。
+use axagent_analysis_engine::decision_action::ActionKind;
+
+/// **方向维度唯一的评分表**（满分 30）—— 主档一致性与逐档一致性**共用这一张**。
+///
+/// 存在理由（2026-10-16 B1）：逐档对照要复用同一套方向语义，而这张表是 P1-6(2026-09-14)
+/// 与 2026-10-10 两次纠错的落点（英文值域 / 判据重叠不可达分支 / 「倾向 vs 观望」不是对立）。
+/// 抄第二份必然漂移，且漂的那份通常是没被纠正过的那份。
+///
+/// 分支语义（原样搬自内联实现，分值一字未改）：
+/// - 精确匹配 30 > 同向同类 20 > 持有 vs 观望 10 > 倾向 vs 观望 6 > 观望 vs 不确定 6
+///   > 持有 vs 不确定 3 > 对立 0；
+/// - 缺失哨兵 `Unavailable` **不是方向判断**，按「单侧缺失」档处理（15），不得落进「对立 0」；
+/// - 单侧缺失 / 未识别值域 = 15（拿不到不是结论，既不算一致也不算矛盾）。
+///
+/// ⚠ 本文件里还留着**第四份**方向表 —— `f7_free_action_score`（自指诊断用）：
+/// 它对「单侧缺失」返回 `None` 而不是 15，语义是「无从判断 f7 影响度」，与这里不同。
+/// 本批**不合并**它（合并会改变 f7 诊断的显示条件，属另一条裁定），但记下这笔债。
+fn action_score_table(f_kind: Option<ActionKind>, l_kind: Option<ActionKind>) -> f64 {
+    let is_bull = |k: ActionKind| matches!(k, ActionKind::Buy | ActionKind::Increase);
+    let is_bear = |k: ActionKind| matches!(k, ActionKind::Sell | ActionKind::Reduce);
+    match (f_kind, l_kind) {
+        (Some(a), Some(b)) if a == b => 30.0,
+        (Some(a), Some(b)) if is_bull(a) && is_bull(b) => 20.0,
+        (Some(a), Some(b)) if is_bear(a) && is_bear(b) => 20.0,
+        // 中性但不同义: 持有 vs 观望 = 10
+        (Some(ActionKind::Hold), Some(ActionKind::Wait))
+        | (Some(ActionKind::Wait), Some(ActionKind::Hold)) => 10.0,
+        // 2026-10-10：倾向 vs 观望（偏多/偏空 ↔ 观望）= 6。
+        //   原实现让这一对直接落进下面的「对立方向 0」兜底 ⇒ 「增持 vs 观望」与
+        //   「买入 vs 卖出」同分同标签（conflictType=opposite_direction、
+        //   actionNote=opposite），前端据此显示「反向 / 建议复核」。
+        //   但「倾向 vs 观望」是**立场轻重的分歧**，不是多空对立 —— 只有买方对卖方
+        //   （bull × bear）才算对立。实证 002241/2026-10-10：公式增持 vs LLM 观望 被判「反向」。
+        (Some(ActionKind::Buy | ActionKind::Increase), Some(ActionKind::Wait))
+        | (Some(ActionKind::Wait), Some(ActionKind::Buy | ActionKind::Increase)) => 6.0,
+        (Some(ActionKind::Sell | ActionKind::Reduce), Some(ActionKind::Wait))
+        | (Some(ActionKind::Wait), Some(ActionKind::Sell | ActionKind::Reduce)) => 6.0,
+        // 观望 vs 不确定 = 6（观望与「说不好」比持有更接近）
+        (Some(ActionKind::Wait), Some(ActionKind::Uncertain))
+        | (Some(ActionKind::Uncertain), Some(ActionKind::Wait)) => 6.0,
+        // 明确中性 vs 不确定: 持有 vs 不确定 = 3
+        (Some(ActionKind::Hold), Some(ActionKind::Uncertain))
+        | (Some(ActionKind::Uncertain), Some(ActionKind::Hold)) => 3.0,
+        // 缺失哨兵不是方向判断，不参与方向比对（与「单侧缺失」同档）
+        (Some(ActionKind::Unavailable), Some(_)) | (Some(_), Some(ActionKind::Unavailable)) => 15.0,
+        // 对立方向
+        (Some(_), Some(_)) => 0.0,
+        // 单侧缺失 / 未识别值域
+        _ => 15.0,
+    }
+}
+
+/// 「倾向 vs 观望」判据 —— 与 [`action_score_table`] 的 6 分档同一条件。
+/// 抽出来供 `conflict_type` / `action_note` / `action_ok` 三处复用，免得配对表写三遍。
+fn lean_vs_wait_pair(f_kind: Option<ActionKind>, l_kind: Option<ActionKind>) -> bool {
+    matches!(
+        (f_kind, l_kind),
+        (Some(ActionKind::Buy | ActionKind::Increase), Some(ActionKind::Wait))
+            | (Some(ActionKind::Wait), Some(ActionKind::Buy | ActionKind::Increase))
+            | (Some(ActionKind::Sell | ActionKind::Reduce), Some(ActionKind::Wait))
+            | (Some(ActionKind::Wait), Some(ActionKind::Sell | ActionKind::Reduce))
+    )
+}
+
+/// action_note 分类阶梯（主档与逐档共用；分值口径见 [`action_score_table`]）。
+fn action_note_of(action_score: f64, lean_vs_wait: bool) -> &'static str {
+    if lean_vs_wait {
+        // 2026-10-10：倾向 vs 观望 = 「分歧」而非「反向」。新值 —— 前端
+        //   `DecisionComparisonPanel` 对非 opposite/same_direction 的 actionNote 一律兜底
+        //   `t("stockAnalysis.decision.disagreement")`，无需新增 i18n。
+        "lean_vs_wait"
+    } else if action_score >= 30.0 {
+        "exact_match"
+    } else if action_score >= 20.0 {
+        "same_direction"
+    } else if action_score >= 10.0 {
+        "hold_vs_watch"
+    } else if action_score >= 6.0 {
+        "watch_vs_uncertain"
+    } else if action_score >= 3.0 {
+        "definite_vs_uncertain"
+    } else if action_score == 0.0 {
+        "opposite"
+    } else {
+        "missing_one_side"
+    }
+}
+
+/// 仓位维度（满分 20）：≤10% 满分 / ≤20% 半分 / >20% 零分。
+/// **单侧缺失记 0**（V65：不给兜底分，避免虚高）。
+fn position_score_of(f_pos: Option<f64>, l_pos: Option<f64>) -> f64 {
+    match (f_pos, l_pos) {
+        (Some(a), Some(b)) => {
+            let diff = (a - b).abs();
+            if diff <= 10.0 {
+                20.0
+            } else if diff <= 20.0 {
+                10.0
+            } else {
+                0.0
+            }
+        },
+        _ => 0.0,
+    }
+}
+
+/// 置信维度（满分 15）：≤10 满分 / ≤20 半分 / ≤40 得 5 / 否则 0；单侧缺失记 0。
+/// 两侧同为 0-100 口径（trader 的 confidence 是 0-100 整数），无需换算。
+fn confidence_score_of(f_conf: Option<f64>, l_conf: Option<f64>) -> f64 {
+    match (f_conf, l_conf) {
+        (Some(a), Some(b)) => {
+            let diff = (a - b).abs();
+            if diff <= 10.0 {
+                15.0
+            } else if diff <= 20.0 {
+                10.0
+            } else if diff <= 40.0 {
+                5.0
+            } else {
+                0.0
+            }
+        },
+        _ => 0.0,
+    }
+}
+
+/// 风险档的**精确档位表**（2026-10-15）：不用子串扫描 —— 子串判据下「中高风险」先命中「中」
+/// ⇒ 被判成中档，与它的实际位置（中与高之间）相反；本表把它归到「高」一侧。
+/// 现网 71 条带 `agreementBreakdown` 的决策里两侧只出现过 低/中/高/极高，「中高风险」从未出现
+/// ⇒ 不新增第 5 档（新增会把既有 17 条「中 vs 高」记录从「相邻 8 分」打成「跨级 0 分」）。
+/// 缺失（空串 / 未识别）返回 `None` 而不是默认「中风险」：此前空串经 `_ => 1` 被当成中档，
+/// 两侧皆空时 diff=0 反而**拿满分 15**（实测 5 条）。
+fn risk_rank(s: &str) -> Option<i32> {
+    match s {
+        "低风险" | "低" => Some(0),
+        "中风险" | "中" | "中等风险" => Some(1),
+        "中高风险" | "高风险" | "高" => Some(2),
+        "极高风险" | "极高" => Some(3),
+        _ => None,
+    }
+}
+
+/// 风险档维度（满分 15）：精确匹配 15 / 相邻 8 / 跨级 0；任一侧未识别记 0（与上面两维同口径）。
+fn risk_level_score_of(f_risk: &str, l_risk: &str) -> f64 {
+    match (risk_rank(f_risk), risk_rank(l_risk)) {
+        (Some(a), Some(b)) => match (a - b).abs() {
+            0 => 15.0,
+            1 => 8.0,
+            _ => 0.0,
+        },
+        _ => 0.0,
+    }
+}
+
+/// **一档**的公式 / LLM 一致性明细（2026-10-16 B1；拍板 3 / 4 / 7 的落点）。
+///
+/// ⚠ 与主档 [`AgreementBreakdown`] **不是同一个计数域**：本结构只有三维（内部满分 65），
+/// 主档是五维（满分 90）；两者归一后都叫 0-100，但**不可并排比较**，
+/// 所以产物里必须带 `dimsUsed` / `dimsMissing` 让人看见为什么不可比。
+///
+/// 逐档用得上三维：方向（`originalAction` 优先、缺席回退 `action`，沿用 2026-10-10 B 裁定）、
+/// 仓位、置信。
+/// 用不上两维，且**不静默补 0**（补 0 会把「这一维只有一侧有」伪装成「两侧差得远」）：
+/// · `riskLevel` —— LLM 逐档行按 schema 没有风险档，而公式侧的按档风险来自
+///   `cls-risk-level-<档>`（工具节点，不是 LLM）⇒ 逐档只有一侧有这一维；
+/// · `evidence_cited` —— 论据清单是**一次调用**的全局产出，逐档挂它等于把同一批引用复制四遍，
+///   是伪指标。
+pub(crate) struct HorizonAgreement {
+    /// 档位 camel 键（与 `decisionsByHorizon` / LLM `decisions` 同一族拼写）
+    pub tier: &'static str,
+    /// 档位中文名（`Period::label_zh`）—— 面板直接用，不再在文案里手抄第四份档名
+    pub tier_label: &'static str,
+    /// 两侧任缺一档 ⇒ `None`。**不是 0 分**：0 分是「一致得零分」，缺席是「无从比对」
+    pub total: Option<i32>,
+    pub comparable: bool,
+    /// 不可比的成因（LLM 契约上线前的记录 / 该档 LLM 没给 / 公式该档分支未产出）
+    pub absence: Option<String>,
+    pub action_score: Option<f64>,
+    pub action_note: Option<String>,
+    pub action_ok: Option<bool>,
+    pub formula_action: Option<String>,
+    pub llm_action: Option<String>,
+    pub position_score: Option<f64>,
+    pub position_gap: Option<f64>,
+    pub confidence_score: Option<f64>,
+    pub confidence_gap: Option<f64>,
+    pub conflict_type: Option<String>,
+    /// 拍板 4：公式侧「两腿来自 LLM 分析师」（`flowPersistence` / `eventCatalyst`）的权重占比。
+    /// ⇒ 两侧不独立，一致率不能读作互相确认；本字段只作解读折扣，**不参与打分**。取不到 = `None`。
+    pub shared_evidence_weight_pct: Option<f64>,
+    pub dims_used: [&'static str; 3],
+    pub dims_missing: [&'static str; 2],
+}
+
+/// 逐档三维一致性的内部满分（action 30 + position 20 + confidence 15）。
+const HORIZON_RAW_MAX: f64 = 65.0;
+
+/// 计算**四档各自**的公式 / LLM 一致性（拍板 1 甲案落地后 LLM 侧才有逐档表态可比）。
+///
+/// 与 `compute_decision_agreement`（主档一对）互不替代：主档那一对继续走五维 90 制、
+/// 继续喂 `core.rs` 的 `factor = 1 + (total-50)/100` 与前端 60 分档文案；
+/// 本函数产四对三维，逐档并列显示用。
+///
+/// 冲突类型优先级沿用主档那条链，但**去掉 `risk_gap`**（该维逐档不参与）与
+/// **去掉 f7 自指分支**（那一支的前提是「LLM 完全没给 action」，而逐档那种情形
+/// 在这里已先走缺席路径、根本不产出分数）。
+pub(crate) fn compute_horizon_agreements(
+    formula_json: Option<&str>,
+    llm_json: Option<&str>,
+) -> Vec<HorizonAgreement> {
+    use axagent_analysis_engine::decision_action::normalize_action;
+    use axagent_harness::holding_period::Period;
+
+    let fj = formula_json
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let lj = llm_json
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let dbh = fj.get("decisionsByHorizon");
+    let ldec = lj.get("decisions");
+    // LLM 侧代际标记缺席 ⇒ 四档一律判「上线前记录」，**不得**算成「四档都没给」
+    let llm_has_contract = lj.get("horizonDecisionContract").is_some();
+
+    // 独立性折扣（拍板 4）：读**该档行自带的 `legs`** —— 四份分支脚本每档都返回
+    // `legs:[{factor,owner,role,bias,weight,source:{kind,channel},…}]`，`source.kind == "verdict"`
+    // 的腿就是「数值来自 LLM 分析师逐档 VERDICT」那一批（evidence_weight.rs 的
+    // VERDICT_FACTOR_SOURCES 把 flowPersistence / eventCatalyst 登记为 verdict 通道）。
+    // ⚠ 不读 `horizon_branch_json`：那份分支表是**注入给 Rhai 的工作流变量**，不在
+    //   `decision_json` 里 ⇒ 生产路径恒取不到，拍板 4 的折扣会变成纸面条款
+    //   （本函数首版正是这么写的，靠测试夹具喂了一份生产不会有的键才没暴露）。
+    // 取不到给 None，不给 0% —— 0% 会被读成「两条链完全独立」，那是没有证据的强结论。
+    let shared_pct = |row: Option<&serde_json::Value>| -> Option<f64> {
+        let legs = row?.get("legs")?.as_array()?;
+        let mut total_w = 0.0;
+        let mut shared_w = 0.0;
+        for leg in legs {
+            let w = leg.get("weight").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            total_w += w;
+            let from_verdict =
+                leg.get("source").and_then(|s| s.get("kind")).and_then(|v| v.as_str())
+                    == Some("verdict")
+                    || leg.get("role").and_then(|v| v.as_str()) == Some("consensus");
+            if from_verdict {
+                shared_w += w;
+            }
+        }
+        if total_w > 0.0 {
+            Some(shared_w / total_w * 100.0)
+        } else {
+            None
+        }
+    };
+
+    let mut out = Vec::with_capacity(4);
+    for period in Period::ALL {
+        let f_row = dbh.and_then(|d| d.get(period.camel_key()));
+        let l_row = ldec.and_then(|d| d.get(period.camel_key()));
+        let formula_action = f_row
+            .and_then(|r| r.get("originalAction").or_else(|| r.get("action")))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let llm_action =
+            l_row.and_then(|r| r.get("action")).and_then(|v| v.as_str()).map(|s| s.to_string());
+
+        let mut row = HorizonAgreement {
+            tier: period.camel_key(),
+            tier_label: period.label_zh(),
+            total: None,
+            comparable: false,
+            absence: None,
+            action_score: None,
+            action_note: None,
+            action_ok: None,
+            formula_action: formula_action.clone(),
+            llm_action: llm_action.clone(),
+            position_score: None,
+            position_gap: None,
+            confidence_score: None,
+            confidence_gap: None,
+            conflict_type: None,
+            shared_evidence_weight_pct: shared_pct(f_row),
+            dims_used: ["action", "positionPct", "confidence"],
+            dims_missing: ["riskLevel", "evidenceCited"],
+        };
+
+        // 「无从比对」的三种成因先落定，不算分（顺序有意义：契约缺席优先于单档缺席）
+        let absence = if !llm_has_contract {
+            Some("LLM 逐档契约上线前的记录，四档均无 LLM 侧结论".to_string())
+        } else if f_row.is_none() {
+            Some("公式侧该档分支未产出（已批口径 A：该档不出键）".to_string())
+        } else if l_row.is_none() {
+            Some("LLM 未给出该档决策（逐档点名见 data_gaps）".to_string())
+        } else {
+            None
+        };
+        if let Some(why) = absence {
+            row.absence = Some(why);
+            out.push(row);
+            continue;
+        }
+        let f_src = f_row.expect("上面已保证该档公式行存在");
+        let l_src = l_row.expect("上面已保证该档 LLM 行存在");
+
+        let f_pos = f_src.get("positionPct").and_then(|v| v.as_f64());
+        let l_pos = l_src.get("positionPct").and_then(|v| v.as_f64());
+        let f_conf = f_src.get("confidence").and_then(|v| v.as_f64());
+        let l_conf = l_src.get("confidence").and_then(|v| v.as_f64());
+
+        let f_kind = formula_action.as_deref().and_then(normalize_action);
+        let l_kind = llm_action.as_deref().and_then(normalize_action);
+        let a_score = action_score_table(f_kind, l_kind);
+        let lean = lean_vs_wait_pair(f_kind, l_kind);
+        let p_score = position_score_of(f_pos, l_pos);
+        let c_score = confidence_score_of(f_conf, l_conf);
+
+        row.action_score = Some(a_score);
+        row.action_note = Some(action_note_of(a_score, lean).to_string());
+        // 与主档同口径：倾向 vs 观望 也算「不矛盾」（2026-10-10）
+        row.action_ok = Some(a_score >= 20.0 || lean);
+        row.position_score = Some(p_score);
+        row.position_gap = match (f_pos, l_pos) {
+            (Some(a), Some(b)) => Some((a - b).abs()),
+            _ => None,
+        };
+        row.confidence_score = Some(c_score);
+        row.confidence_gap = match (f_conf, l_conf) {
+            (Some(a), Some(b)) => Some((a - b).abs()),
+            _ => None,
+        };
+        row.conflict_type = Some(
+            if a_score >= 25.0 && p_score >= 15.0 && c_score >= 12.0 {
+                "all_agree"
+            } else if a_score == 0.0 {
+                "opposite_direction"
+            } else if lean || a_score <= 5.0 {
+                "action_divergence"
+            } else if p_score == 0.0 && f_pos.is_some() && l_pos.is_some() {
+                "position_gap"
+            } else {
+                "confidence_gap"
+            }
+            .to_string(),
+        );
+        // 三维 → 归一化回百分制（与主档的 90 制归一同一手法，但**分母不同**，见结构体文档）
+        row.total = Some(((a_score + p_score + c_score) / HORIZON_RAW_MAX * 100.0).round() as i32);
+        row.comparable = true;
+        out.push(row);
+    }
+    out
+}
+
+/// 一档的**分歧归因**：这一档两侧不一致，到底是哪一步造成的。
+///
+/// 与主档那条 `divergence_attribution`（`commands/stock_workflow/hooks.rs:137`）**读的不是同一套键**，故另写一个而不是给它加参数：
+/// 顶层决策 JSON 有 `/evidence/factors`、`/effective_params/action_*_threshold`、`posteriorRaw`；
+/// 而档行只有 `legs[]`（带 **`bias`**，不是顶层的 `sigma`）、`absentLegs[]`、
+/// `entryGate`/`entryGatePassed`/`gateBasis`、`tierVetoed`+`originalAction`、`dataGaps[]`。
+/// 两套键互不重叠 ⇒ 硬套会把「该档没有证据因子数组」读成「证据无负贡献」（假清白），那是最坏的一种静默。
+///
+/// 驱动项按**信息量**排（不是按发现顺序）：
+/// - `tier_risk_veto`：本档「分歧」其实是**自家档内风控**改的动作（`tierVetoed` 且 `originalAction != action`）
+///   —— 这一条只有逐档看得见，主档层面会把它记成「两个视角反号」；
+/// - `entry_gate_failed`：该档的入场结构门没过（四档四套门），带 `gateBasis` 说明差在哪；
+/// - `llm_tier_absent`：LLM 这一档根本没给 ⇒「无从比对」不是「判得相反」，分母必须分开；
+/// - `negative_legs`：本档实际生效的腿里 `bias < 0 && weight > 0` 的前 3 条（按 `bias × weight` 升序）；
+/// - `absent_legs` / `data_gap`：缺腿与证据缺口，**与「判据为负」是两件事**，各列一条不合并。
+pub(crate) struct HorizonDivergence {
+    pub tier: &'static str,
+    pub tier_label: &'static str,
+    pub drivers: Vec<&'static str>,
+    /// 该档的入场门名（`breadth_required` / `trend_and_flow_same_sign` / …）；缺席 = None
+    pub entry_gate: Option<String>,
+    pub entry_gate_passed: Option<bool>,
+    /// 门没过时的判据原文（产端给的，前端不重算）
+    pub gate_basis: Option<String>,
+    /// 档内风控否决：`(否决前方向, 否决后动作)`
+    pub veto: Option<(String, String)>,
+    /// 贡献最负的至多三条腿 `(factor, bias, weight)`
+    pub negative_legs: Vec<(String, f64, f64)>,
+    pub absent_legs: Vec<String>,
+    pub data_gaps: Vec<String>,
+    /// LLM 侧该档缺席成因（取自 [`HorizonAgreement`]；无 = None）
+    pub llm_absence: Option<String>,
+}
+
+/// 对四档各做一次分歧归因。两侧全空也返回四行 —— 缺席那一行要说得出成因，不能少一格。
+pub(crate) fn attribute_horizon_divergence(
+    formula_json: Option<&str>,
+    agreements: &[HorizonAgreement],
+) -> Vec<HorizonDivergence> {
+    use axagent_harness::holding_period::Period;
+
+    let fj = formula_json
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let dbh = fj.get("decisionsByHorizon");
+    let str_field = |row: &serde_json::Value, k: &str| {
+        row.get(k).and_then(|v| v.as_str()).map(|s| s.to_string())
+    };
+
+    let mut out = Vec::with_capacity(4);
+    for period in Period::ALL {
+        let agreement = agreements.iter().find(|a| a.tier == period.camel_key());
+        let mut row = HorizonDivergence {
+            tier: period.camel_key(),
+            tier_label: period.label_zh(),
+            drivers: Vec::new(),
+            entry_gate: None,
+            entry_gate_passed: None,
+            gate_basis: None,
+            veto: None,
+            negative_legs: Vec::new(),
+            absent_legs: Vec::new(),
+            data_gaps: Vec::new(),
+            llm_absence: agreement.and_then(|a| a.absence.clone()),
+        };
+        let Some(f_row) = dbh.and_then(|d| d.get(period.camel_key())) else {
+            // 公式侧这一档整行没有：只能说「该档分支未产出」，不得凭空造驱动项
+            if row.llm_absence.is_none() {
+                row.drivers.push("formula_tier_absent");
+            }
+            out.push(row);
+            continue;
+        };
+
+        row.entry_gate = str_field(f_row, "entryGate");
+        row.entry_gate_passed = f_row.get("entryGatePassed").and_then(|v| v.as_bool());
+        row.gate_basis = str_field(f_row, "gateBasis");
+
+        let vetoed = f_row.get("tierVetoed").and_then(|v| v.as_bool()).unwrap_or(false);
+        if vetoed {
+            if let (Some(from), Some(to)) =
+                (str_field(f_row, "originalAction"), str_field(f_row, "action"))
+            {
+                if from != to {
+                    row.veto = Some((from.clone(), to.clone()));
+                    row.drivers.push("tier_risk_veto");
+                }
+            }
+        }
+        if row.entry_gate_passed == Some(false) {
+            row.drivers.push("entry_gate_failed");
+        }
+        if row.llm_absence.as_deref().is_some_and(|a| a.contains("LLM 未给出该档决策")) {
+            row.drivers.push("llm_tier_absent");
+        }
+
+        if let Some(legs) = f_row.get("legs").and_then(|v| v.as_array()) {
+            let mut neg: Vec<(f64, String, f64, f64)> = legs
+                .iter()
+                .filter_map(|l| {
+                    let bias = l.get("bias").and_then(|v| v.as_f64())?;
+                    let weight = l.get("weight").and_then(|v| v.as_f64())?;
+                    if bias < 0.0 && weight > 0.0 {
+                        Some((bias * weight, l.get("factor")?.as_str()?.to_string(), bias, weight))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            neg.sort_by(|a, b| a.0.total_cmp(&b.0));
+            row.negative_legs = neg.into_iter().take(3).map(|(_, n, b, w)| (n, b, w)).collect();
+            if !row.negative_legs.is_empty() {
+                row.drivers.push("negative_legs");
+            }
+        }
+        if let Some(absent) = f_row.get("absentLegs").and_then(|v| v.as_array()) {
+            row.absent_legs =
+                absent.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
+            if !row.absent_legs.is_empty() {
+                row.drivers.push("absent_legs");
+            }
+        }
+        if let Some(gaps) = f_row.get("dataGaps").and_then(|v| v.as_array()) {
+            row.data_gaps = gaps.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
+            if !row.data_gaps.is_empty() {
+                row.drivers.push("data_gap");
+            }
+        }
+        out.push(row);
+    }
+    out
 }
 
 /// 双视角一致性诊断结果
@@ -1648,131 +2309,30 @@ pub(crate) fn compute_decision_agreement(
     };
 
     // ── V65: action 评分（满分 30，原满分 50 的 60%）──
-    // 精确匹配 30 > 同向同类 20 > 中性不同义 5-10 > 对立 0
-    //
-    // P1-6(2026-09-14): 判定改走统一归一化（`decision_action::normalize_action`）。
-    // 原实现用中文字符包含 / 全等判定：链路上 action 一旦是英文（BUY / HOLD / WAIT）
-    // 或 dashboard 值域短语，`is_buy`/`is_sell`/`is_hold` 全不命中 ⇒ 同向双方被
-    // 误判成「对立方向 0 分」（一致性分数虚假偏低）。
-    //
-    // ⚠️ 同时修掉两处**不可达 / 判据重叠**：
-    //   ① 原 `(持有|观望) vs 不确定 = 3` 已包含 is_watch 分支，紧随其后的
-    //      `观望 vs 不确定 = 6` 永远命中不到（同一判据被两条分支共用，靠前的吞掉靠后的）；
-    //   ② 无「缺失哨兵」分支 ⇒ 哨兵会被当英文串落入「对立 0 分」。
-    // 现按原**声明分值**保留语义（持有 vs 不确定 = 3、观望 vs 不确定 = 6，观望更接近
-    // 「说不好」），并使各分支真正互斥；缺失哨兵按「单侧缺失」档处理。
+    // 表体已上收为 [`action_score_table`]（2026-10-16 B1）：逐档一致性必须吃同一张表，
+    // 抄两份的话谁被纠正过、谁没被纠正过将无法追溯。
     use axagent_analysis_engine::decision_action::{ActionKind, normalize_action};
     let f_kind = f_action.as_deref().and_then(normalize_action);
     let l_kind = l_action.as_deref().and_then(normalize_action);
-    let is_bull = |k: ActionKind| matches!(k, ActionKind::Buy | ActionKind::Increase);
-    let is_bear = |k: ActionKind| matches!(k, ActionKind::Sell | ActionKind::Reduce);
-    let action_score: f64 = match (f_kind, l_kind) {
-        (Some(a), Some(b)) if a == b => 30.0,
-        (Some(a), Some(b)) if is_bull(a) && is_bull(b) => 20.0,
-        (Some(a), Some(b)) if is_bear(a) && is_bear(b) => 20.0,
-        // 中性但不同义: 持有 vs 观望 = 10
-        (Some(ActionKind::Hold), Some(ActionKind::Wait))
-        | (Some(ActionKind::Wait), Some(ActionKind::Hold)) => 10.0,
-        // 2026-10-10：倾向 vs 观望（偏多/偏空 ↔ 观望）= 6。
-        //   原实现让这一对直接落进下面的「对立方向 0」兜底 ⇒ 「增持 vs 观望」与
-        //   「买入 vs 卖出」同分同标签（conflictType=opposite_direction、
-        //   actionNote=opposite），前端据此显示「反向 / 建议复核」。
-        //   但「倾向 vs 观望」是**立场轻重的分歧**，不是多空对立 —— 只有买方对卖方
-        //   （bull × bear）才算对立。实证 002241/2026-10-10：公式增持 vs LLM 观望 被判「反向」。
-        (Some(ActionKind::Buy | ActionKind::Increase), Some(ActionKind::Wait))
-        | (Some(ActionKind::Wait), Some(ActionKind::Buy | ActionKind::Increase)) => 6.0,
-        (Some(ActionKind::Sell | ActionKind::Reduce), Some(ActionKind::Wait))
-        | (Some(ActionKind::Wait), Some(ActionKind::Sell | ActionKind::Reduce)) => 6.0,
-        // 观望 vs 不确定 = 6（观望与「说不好」比持有更接近）
-        (Some(ActionKind::Wait), Some(ActionKind::Uncertain))
-        | (Some(ActionKind::Uncertain), Some(ActionKind::Wait)) => 6.0,
-        // 明确中性 vs 不确定: 持有 vs 不确定 = 3
-        (Some(ActionKind::Hold), Some(ActionKind::Uncertain))
-        | (Some(ActionKind::Uncertain), Some(ActionKind::Hold)) => 3.0,
-        // 缺失哨兵不是方向判断，不参与方向比对（与「单侧缺失」同档）
-        (Some(ActionKind::Unavailable), Some(_)) | (Some(_), Some(ActionKind::Unavailable)) => 15.0,
-        // 对立方向
-        (Some(_), Some(_)) => 0.0,
-        // 单侧缺失 / 未识别值域
-        _ => 15.0,
-    };
-    // 2026-10-10：倾向 vs 观望 —— 「立场轻重」的分歧，不是多空对立。
-    //   仅上方第 1646-1649 行那四对算「轻分歧」：不进 `opposite_direction`（那是买方对
-    //   卖方的专属标签），也不把 `action_ok` 打到「矛盾」。用于 002241/2026-10-10
-    //   「公式增持 vs LLM 观望」被误判为「反向 / 建议复核」的根因修复。
-    let lean_vs_wait = matches!(
-        (f_kind, l_kind),
-        (Some(ActionKind::Buy | ActionKind::Increase), Some(ActionKind::Wait))
-            | (Some(ActionKind::Wait), Some(ActionKind::Buy | ActionKind::Increase))
-            | (Some(ActionKind::Sell | ActionKind::Reduce), Some(ActionKind::Wait))
-            | (Some(ActionKind::Wait), Some(ActionKind::Sell | ActionKind::Reduce))
-    );
+    let action_score: f64 = action_score_table(f_kind, l_kind);
+    // 2026-10-10：倾向 vs 观望 —— 「立场轻重」的分歧，不是多空对立。判据同表上收为
+    //   [`lean_vs_wait_pair`]。用于 002241/2026-10-10「公式增持 vs LLM 观望」被误判为
+    //   「反向 / 建议复核」的根因修复：不进 `opposite_direction`（那是买方对卖方的专属标签），
+    //   也不把 `action_ok` 打到「矛盾」。
+    let lean_vs_wait = lean_vs_wait_pair(f_kind, l_kind);
 
     // ── V65: positionPct 评分（满分 20，原满分 30 的 2/3）──
-    let pos_score: f64 = match (f_pos, l_pos) {
-        (Some(a), Some(b)) => {
-            let diff = (a - b).abs();
-            if diff <= 10.0 {
-                20.0
-            } else if diff <= 20.0 {
-                10.0
-            } else {
-                0.0
-            }
-        },
-        // V65: 单侧缺失不再给兜底分（避免虚高），记 0
-        _ => 0.0,
-    };
+    let pos_score: f64 = position_score_of(f_pos, l_pos);
 
     // ── V65: confidence 评分（满分 15，原满分 20 的 75%）──
     // 注意：trader 的 confidence 是 0-100 整数，公式也是 0-100
-    let conf_score: f64 = match (f_conf, l_conf) {
-        (Some(a), Some(b)) => {
-            let diff = (a - b).abs();
-            if diff <= 10.0 {
-                15.0
-            } else if diff <= 20.0 {
-                10.0
-            } else if diff <= 40.0 {
-                5.0
-            } else {
-                0.0
-            }
-        },
-        _ => 0.0,
-    };
+    let conf_score: f64 = confidence_score_of(f_conf, l_conf);
 
     // ── V65: riskLevel 评分（满分 15）──
     // 公式与 LLM 都输出 4 档风险等级（低 / 中 / 高 / 极高），比较等级距离。
-    //
-    // 判据用**精确档位表**而不是子串扫描（2026-10-15）：子串判据下「中高风险」先命中
-    // 「中」⇒ 被判成中档，与它的实际位置（中与高之间）相反。本表把它归到「高」一侧 ——
-    // 宁可让「中高 vs 高」判为一致，也不把它压成「中」从而把与「高风险」的真实差距
-    // 掩盖成「相邻」。实测 71 条带 agreementBreakdown 的决策里两侧只出现过
-    // 低/中/高/极高、「中高风险」从未出现 ⇒ 不新增第 5 档，以免改变既有 17 条
-    // 「中 vs 高」记录的评分语义（它们按「相邻」得 8 分，新增档位会把它们打成「跨级」）。
-    //
-    // 缺失（空串 / 未识别）返回 None 而不是默认「中风险」：此前空串经 `_ => 1` 被当成
-    // 中档，两侧皆空时 diff=0 反而**拿满分 15**（实测 5 条记录两侧为空）。现在与相邻的
-    // pos_score / conf_score 同口径记 0 分 —— 拿不到不是结论。
-    let risk_rank = |s: &str| -> Option<i32> {
-        match s {
-            "低风险" | "低" => Some(0),
-            "中风险" | "中" | "中等风险" => Some(1),
-            "中高风险" | "高风险" | "高" => Some(2),
-            "极高风险" | "极高" => Some(3),
-            _ => None,
-        }
-    };
-    let risk_level_score: f64 = match (risk_rank(&f_risk), risk_rank(&l_risk)) {
-        (Some(a), Some(b)) => match (a - b).abs() {
-            0 => 15.0, // 精确匹配
-            1 => 8.0,  // 相邻
-            _ => 0.0,  // 跨级
-        },
-        // 单侧或双侧缺失 / 未识别：不给兜底分（与 pos_score / conf_score 同口径）
-        _ => 0.0,
-    };
+    // 判据（精确档位表 + 缺失不给兜底分）上收为 [`risk_level_score_of`] —— 理由与
+    // 方向表同一笔：逐档对照不重算这一维，但**判定口径只能有一份**。
+    let risk_level_score: f64 = risk_level_score_of(&f_risk, &l_risk);
     let f_risk_raw = f_src
         .get("riskLevel")
         .or_else(|| f_src.get("riskCategory"))
@@ -1890,27 +2450,8 @@ pub(crate) fn compute_decision_agreement(
     } else {
         "confidence_gap"
     };
-    // action_note 分类
-    let action_note: &str = if lean_vs_wait {
-        // 2026-10-10：倾向 vs 观望 = 「分歧」而非「反向」。新值 —— 前端
-        //   `DecisionComparisonPanel` 对非 opposite/same_direction 的 actionNote 一律兜底
-        //   `t("stockAnalysis.decision.disagreement")`，无需新增 i18n。
-        "lean_vs_wait"
-    } else if action_score >= 30.0 {
-        "exact_match"
-    } else if action_score >= 20.0 {
-        "same_direction"
-    } else if action_score >= 10.0 {
-        "hold_vs_watch"
-    } else if action_score >= 6.0 {
-        "watch_vs_uncertain"
-    } else if action_score >= 3.0 {
-        "definite_vs_uncertain"
-    } else if action_score == 0.0 {
-        "opposite"
-    } else {
-        "missing_one_side"
-    };
+    // action_note 分类（阶梯上收为 [`action_note_of`] —— 逐档一致性共用同一阶梯）
+    let action_note: &str = action_note_of(action_score, lean_vs_wait);
 
     Some(AgreementBreakdown {
         total,
@@ -3242,6 +3783,527 @@ mod tests {
             opposite_direction_gated_action(&ab2.conflict_type, &ab2.formula_action),
             Some("观望")
         );
+    }
+
+    // ── 2026-10-16（拍板 1 甲案 + 拍板 2 嵌列）：LLM 逐档决策的解析完整性 ──
+
+    /// 只喂被测函数本身（不经 Workflow 包装），返回（decisions 键集已排序, data_gaps 清单）。
+    /// 检查逻辑抽成这一层，负控才能拆在「归一」这同一道守卫上，而不是拆在夹具拼写上。
+    fn normalized_llm(input: serde_json::Value) -> (Vec<String>, Vec<String>) {
+        let mut parsed = input;
+        normalize_llm_horizon_decisions(&mut parsed);
+        let mut keys: Vec<String> = parsed
+            .get("decisions")
+            .and_then(|d| d.as_object())
+            .map(|d| d.keys().cloned().collect())
+            .unwrap_or_default();
+        keys.sort();
+        let gaps = parsed
+            .get("data_gaps")
+            .or_else(|| parsed.get("dataGaps"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+        (keys, gaps)
+    }
+
+    /// 断言 gaps 里「点名某档缺席」的条目是否存在 —— 按 `label_zh()` 现推，不手抄档位中文名。
+    fn names_absent_tier(gaps: &[String], p: axagent_harness::holding_period::Period) -> bool {
+        gaps.iter().any(|g| g.contains(p.label_zh()) && g.contains("LLM 未给出"))
+    }
+
+    #[test]
+    fn llm_decisions_four_camel_keys_pass_through_untouched() {
+        use axagent_harness::holding_period::Period;
+        let input = json!({ "decisions": {
+            "ultraShort": { "action": "买入" },
+            "short": { "action": "观望" },
+            "mid": { "action": "持有" },
+            "long": { "action": "卖出" }
+        }});
+        let (keys, gaps) = normalized_llm(input);
+        let want: Vec<String> = {
+            let mut k: Vec<String> =
+                Period::ALL.iter().map(|p| p.camel_key().to_string()).collect();
+            k.sort();
+            k
+        };
+        assert_eq!(keys, want, "四档齐备时四个 camel 键都要出");
+        assert!(gaps.is_empty(), "四档齐备不得登记任何缺口：{gaps:?}");
+    }
+
+    #[test]
+    fn llm_decisions_normalize_snake_and_legacy_keys_to_camel() {
+        use axagent_harness::holding_period::Period;
+        let (keys, gaps) = normalized_llm(json!({ "decisions": {
+            "ultra_short": { "action": "买入" },
+            "mid": { "action": "持有" }
+        }}));
+        assert_eq!(keys, vec!["mid".to_string(), "ultraShort".to_string()], "输出只允许 camel 族");
+        // 负控：归一若退化成恒等，snake 键会原样留在输出里
+        assert!(!keys.contains(&"ultra_short".to_string()), "snake 键必须被改写，不能并存");
+        // 缺席两档 ⇒ 两条逐档点名，且**不出占位键**（口径 A）
+        assert_eq!(gaps.len(), 2, "两档缺席应点名两次：{gaps:?}");
+        assert!(names_absent_tier(&gaps, Period::Short) && names_absent_tier(&gaps, Period::Long));
+        assert!(
+            !gaps.iter().any(|g| g.contains("未按四档契约输出")),
+            "容器存在时不得改用汇总那条：{gaps:?}"
+        );
+    }
+
+    #[test]
+    fn llm_decisions_whole_container_absent_is_one_aggregate_gap() {
+        let (keys, gaps) = normalized_llm(json!({ "action": "买入" }));
+        assert!(keys.is_empty(), "没给 decisions 就不该凭空造出该键");
+        assert_eq!(gaps.len(), 1, "整档缺席只登记一条汇总，不刷四条：{gaps:?}");
+        assert!(gaps[0].contains("未按四档契约输出"), "汇总条要能自证成因：{gaps:?}");
+    }
+
+    /// 代际标记必须是**代码盖章**：模型自报的那种值不得作数，也不得由模型决定是否盖章。
+    /// 这一条锁的是四态里「上线前样本」那一格的判据本身 —— 它能被伪造，四态就塌回两态。
+    #[test]
+    fn llm_horizon_decision_contract_stamp_is_code_stamped_not_self_reported() {
+        let raw = json!({ "action": "买入" });
+        assert!(
+            raw.get("horizonDecisionContract").is_none(),
+            "夹具不得自带标记，否则「盖章」这条断言恒真"
+        );
+        let mut stamped = raw.clone();
+        normalize_llm_horizon_decisions(&mut stamped);
+        assert_eq!(
+            stamped["horizonDecisionContract"],
+            serde_json::Value::from(LLM_HORIZON_DECISION_CONTRACT),
+            "成功解析就必须盖章（与四档齐不齐无关）"
+        );
+
+        // 负控：模型自己塞一个别的代次 ⇒ 必须被代码值顶掉，不能让它伪装成已按新契约产出
+        let mut smuggled = json!({ "horizonDecisionContract": 99, "action": "买入" });
+        normalize_llm_horizon_decisions(&mut smuggled);
+        assert_eq!(smuggled["horizonDecisionContract"], serde_json::Value::from(1_u8));
+    }
+
+    /// 四态里三态由「标记 + 缺口点名 + 键在不在」三者共同决定，任何一格不得与另一格同形。
+    #[test]
+    fn llm_horizon_decision_states_are_mutually_distinguishable() {
+        let mut full = json!({ "decisions": {
+            "ultraShort": { "action": "买入" }, "short": { "action": "观望" },
+            "mid": { "action": "持有" }, "long": { "action": "卖出" }
+        }});
+        let mut partial = json!({ "decisions": { "mid": { "action": "持有" } }});
+        let mut none_given = json!({ "action": "买入" });
+        for v in [&mut full, &mut partial, &mut none_given] {
+            normalize_llm_horizon_decisions(v);
+        }
+        let gap_count = |v: &serde_json::Value| v["data_gaps"].as_array().map_or(0, |a| a.len());
+        // ① 齐备：四键 + 零缺口
+        assert_eq!(full["decisions"].as_object().map_or(0, |o| o.len()), 4);
+        assert_eq!(gap_count(&full), 0);
+        // ② 该档未给出：一键 + 三档点名 ⇒ 与①不同形
+        assert_eq!(gap_count(&partial), 3, "三档缺席必须逐档点名：{}", partial["data_gaps"]);
+        // ③ 整档没给：零键 + 一条汇总 ⇒ 与①②都不同形（这是本轮新增判据的关键分格）
+        assert!(full["decisions"].is_object() && none_given.get("decisions").is_none());
+        assert_eq!(gap_count(&none_given), 1);
+        // ④ 解析失败走不到这里（整列非 JSON），故「无标记」= ④ 或上线前样本，与 ①②③ 天然互斥
+        for v in [&full, &partial, &none_given] {
+            assert!(v.get("horizonDecisionContract").is_some());
+        }
+    }
+
+    #[test]
+    fn llm_decisions_unknown_tier_key_is_named_not_dropped() {
+        let (keys, gaps) = normalized_llm(json!({ "decisions": { "hyper": { "action": "买入" } }}));
+        assert!(keys.is_empty(), "未知键不得混进四档：{keys:?}");
+        assert_eq!(gaps.len(), 5, "未知键 1 条 + 四档各 1 条：{gaps:?}");
+        assert!(gaps.iter().any(|g| g.contains("hyper")), "未知键必须被点名：{gaps:?}");
+    }
+
+    #[test]
+    fn llm_decisions_non_object_container_is_reported() {
+        let (keys, gaps) = normalized_llm(json!({ "decisions": "四档都看好" }));
+        assert!(keys.is_empty());
+        assert_eq!(gaps.len(), 1);
+        assert!(gaps[0].contains("不是对象"), "形态不符要说形态不符：{gaps:?}");
+    }
+
+    #[test]
+    fn llm_decisions_verdict_only_row_gets_action_from_the_same_mapping() {
+        // 期望值按权威现算：verdict_to_action("看多") = Buy ⇒ as_storage_cn() = "买入"
+        use axagent_analysis_engine::decision_action::{ActionKind, verdict_to_action};
+        let want = verdict_to_action("看多").expect("看多必须在映射表里").as_storage_cn();
+        assert_eq!(want, ActionKind::Buy.as_storage_cn());
+        let mut parsed = json!({ "decisions": { "mid": { "verdict": "看多" } }});
+        normalize_llm_horizon_decisions(&mut parsed);
+        let got = parsed["decisions"]["mid"]["action"].as_str().unwrap_or("<absent>");
+        assert_eq!(got, want, "逐档行缺 action 时应按顶层同一映射降维补齐");
+    }
+
+    #[test]
+    fn llm_decisions_verdict_uncertain_does_not_become_wait() {
+        // 同一条语义修正落到逐档行：方向未知 ≠ 判断为中性，兜底不得压成观望
+        let mut parsed = json!({ "decisions": { "mid": { "verdict": "不确定" } }});
+        normalize_llm_horizon_decisions(&mut parsed);
+        assert_eq!(parsed["decisions"]["mid"]["action"].as_str(), Some("不确定"));
+    }
+
+    #[test]
+    fn llm_decisions_gaps_append_to_existing_list_and_keep_camel_when_that_is_what_exists() {
+        let (_keys, gaps) = normalized_llm(json!({
+            "data_gaps": ["PE 缺失"],
+            "decisions": { "mid": { "action": "持有" } }
+        }));
+        assert_eq!(gaps[0], "PE 缺失", "模型自述的缺口不得被覆盖");
+        assert_eq!(gaps.len(), 4, "1 条原有 + 3 条逐档缺席：{gaps:?}");
+
+        let mut parsed = json!({
+            "dataGaps": ["公告 PDF 未解析"],
+            "decisions": { "mid": { "action": "持有" } }
+        });
+        normalize_llm_horizon_decisions(&mut parsed);
+        assert!(parsed.get("data_gaps").is_none(), "不得同时造出两族缺口清单");
+        let arr = parsed["dataGaps"].as_array().expect("camel 形态存在时应续写 camel");
+        assert_eq!(arr.len(), 4, "{arr:?}");
+    }
+
+    // ── 2026-10-16（B1）：逐档一致性 —— 与主档共用同一张表，且三种缺席不折算成 0 分 ──
+
+    /// 一档可比对的最小夹具（公式行 + LLM 行）
+    fn horizon_pair(
+        f_action: &str,
+        f_pos: f64,
+        f_conf: f64,
+        l_action: &str,
+        l_pos: f64,
+        l_conf: f64,
+    ) -> (String, String) {
+        let formula = json!({ "decisionsByHorizon": { "mid": {
+            "originalAction": f_action, "action": f_action,
+            "positionPct": f_pos, "confidence": f_conf, "riskCategory": "中风险"
+        }}});
+        // 两条消费路**读键位置不同**，夹具必须同时给出 —— 这就是生产形态（trader 顶层那份
+        // 单档决策与 A1 新增的 `decisions` 四档并列，谁也不替换谁）：
+        //   · 主档 `compute_decision_agreement` 读**顶层** `action`/`positionPct`/`confidence`，
+        //     并用顶层 `timeHorizon` 把公式侧对齐到 `decisionsByHorizon[mid]`（3a 口径）；
+        //   · 逐档 `compute_horizon_agreements` 读 `decisions[mid]`，不看 `timeHorizon`。
+        // 只给 `decisions` 时主档拿的是「单侧缺失 15 分」⇒ 这条「两侧同表」的对照断言测的
+        // 就不是同一对了（本测试头两次跑分别这样红在 `timeHorizon` 与顶层 `action` 上）。
+        let llm = json!({
+            "horizonDecisionContract": 1, "riskLevel": "中风险", "timeHorizon": "mid",
+            "action": l_action, "positionPct": l_pos, "confidence": l_conf,
+            "decisions": { "mid": {
+                "action": l_action, "verdict": "中性",
+                "positionPct": l_pos, "confidence": l_conf
+            }
+        }});
+        (formula.to_string(), llm.to_string())
+    }
+
+    fn mid_row(rows: &[HorizonAgreement]) -> &HorizonAgreement {
+        rows.iter().find(|r| r.tier == "mid").expect("必须返回四档，含 mid")
+    }
+
+    #[test]
+    fn horizon_agreement_never_returns_fewer_than_four_rows() {
+        // 四档各占一行是「四档并列且互斥」展示层承诺的前提；缺一行就是面板少一格
+        let rows = compute_horizon_agreements(None, None);
+        assert_eq!(rows.len(), 4, "两侧全空也要四行（缺席各占一句，不是少一行）");
+        let keys: Vec<&str> = rows.iter().map(|r| r.tier).collect();
+        assert_eq!(keys, vec!["ultraShort", "short", "mid", "long"]);
+        assert!(rows.iter().all(|r| !r.comparable && r.total.is_none()));
+    }
+
+    #[test]
+    fn horizon_agreement_reuses_the_main_action_table() {
+        // 「增持 vs 观望」在两张表里必须同分同标签 —— 这是把表抽成一份的验收判据
+        let (formula, llm) = horizon_pair("增持", 20.0, 60.0, "观望", 22.0, 65.0);
+        let rows = compute_horizon_agreements(Some(&formula), Some(&llm));
+        let mid = mid_row(&rows);
+        let main = compute_decision_agreement(Some(&formula), Some(&llm)).expect("主档必须产出");
+        assert_eq!(mid.action_score, Some(main.action_score), "方向分两侧不同表 ⇒ 有一张是抄错的");
+        assert_eq!(mid.action_note.as_deref(), Some("lean_vs_wait"));
+        assert_eq!(main.action_note, "lean_vs_wait");
+        assert_eq!(mid.conflict_type.as_deref(), Some("action_divergence"));
+        assert_eq!(mid.action_ok, Some(true), "倾向 vs 观望 不算矛盾（2026-10-10 口径）");
+    }
+
+    #[test]
+    fn horizon_agreement_normalizes_over_its_own_65_max_not_the_mains_90() {
+        // 期望值按被测公式现算：action 6 + position 20 + confidence 15 = 41 → 41/65×100
+        let (formula, llm) = horizon_pair("增持", 20.0, 60.0, "观望", 22.0, 65.0);
+        let want = (41.0_f64 / 65.0 * 100.0).round() as i32;
+        let rows = compute_horizon_agreements(Some(&formula), Some(&llm));
+        let mid = mid_row(&rows);
+        assert_eq!(mid.total, Some(want));
+        assert_eq!(want, 63, "分母写错（90 制）会得到 46 —— 那条红就是本断言的意义");
+        assert_eq!(mid.dims_missing, ["riskLevel", "evidenceCited"]);
+        assert_eq!(mid.dims_used, ["action", "positionPct", "confidence"]);
+    }
+
+    #[test]
+    fn horizon_agreement_llm_absent_tier_is_absence_not_zero() {
+        // 只有 mid 一档给了 LLM 决策 ⇒ 另三档 comparable=false + 成因点名，**不得**产出 0 分
+        let formula = json!({ "decisionsByHorizon": {
+            "mid": { "originalAction": "买入", "positionPct": 25, "confidence": 70 }
+        }})
+        .to_string();
+        let llm = json!({ "horizonDecisionContract": 1, "decisions": {
+            "mid": { "action": "买入", "positionPct": 25, "confidence": 70 }
+        }})
+        .to_string();
+        let rows = compute_horizon_agreements(Some(&formula), Some(&llm));
+        assert_eq!(mid_row(&rows).total, Some(100), "同档同值应满分");
+        let absent: Vec<&HorizonAgreement> = rows.iter().filter(|r| !r.comparable).collect();
+        assert_eq!(absent.len(), 3, "其余三档都应判成无从比对");
+        assert!(absent.iter().all(|r| r.total.is_none()), "缺席不得折算成 0 分");
+        assert!(absent.iter().all(|r| r.absence.as_deref().is_some_and(|a| {
+            a.contains("公式侧该档分支未产出") || a.contains("LLM 未给出该档决策")
+        })));
+    }
+
+    #[test]
+    fn horizon_agreement_pre_contract_llm_row_does_not_fabricate_four_absences() {
+        // 有 decisions 内容但没代际标记 ⇒ 四档一律「上线前记录」，不得说成「LLM 逐档没给」
+        let (formula, llm_with_marker) = horizon_pair("买入", 25.0, 70.0, "买入", 25.0, 70.0);
+        let marked = compute_horizon_agreements(Some(&formula), Some(&llm_with_marker));
+        assert!(mid_row(&marked).comparable);
+        let stripped: serde_json::Value = {
+            let mut v: serde_json::Value = serde_json::from_str(&llm_with_marker).unwrap();
+            v.as_object_mut().unwrap().remove("horizonDecisionContract");
+            v
+        };
+        let rows = compute_horizon_agreements(Some(&formula), Some(&stripped.to_string()));
+        assert_eq!(rows.iter().filter(|r| r.comparable).count(), 0);
+        assert!(
+            rows.iter().all(|r| r.absence.as_deref().is_some_and(|a| a.contains("契约上线前"))),
+            "误标成「四档都没给」= 把历史数据读成模型弃权，是伪装"
+        );
+    }
+
+    #[test]
+    fn horizon_agreement_opposite_pair_is_zero_and_keeps_its_label() {
+        // 公式买入 vs LLM 卖出：方向 0 → 归一后只剩 35/65≈54（**不是 0 分**，因为仓位/置信仍一致）
+        let (formula, llm) = horizon_pair("买入", 20.0, 70.0, "卖出", 20.0, 70.0);
+        let rows = compute_horizon_agreements(Some(&formula), Some(&llm));
+        let mid = mid_row(&rows);
+        assert_eq!(mid.action_score, Some(0.0));
+        assert_eq!(mid.conflict_type.as_deref(), Some("opposite_direction"));
+        assert_eq!(mid.action_note.as_deref(), Some("opposite"));
+        assert_eq!(mid.total, Some(((35.0_f64 / 65.0 * 100.0).round()) as i32));
+        assert_eq!(mid.action_ok, Some(false));
+    }
+
+    #[test]
+    fn horizon_agreement_original_action_takes_precedence_over_vetoed_action() {
+        // 拍板 3：逐档行优先取 `originalAction`（否决前方向），否则把「本方风控政策」记成两视角分歧
+        let formula = json!({ "decisionsByHorizon": { "mid": {
+            "originalAction": "买入", "action": "观望", "tierVetoed": true,
+            "positionPct": 0, "confidence": 40
+        }}})
+        .to_string();
+        let llm = json!({ "horizonDecisionContract": 1, "decisions": { "mid": {
+            "action": "买入", "positionPct": 0, "confidence": 40
+        }}})
+        .to_string();
+        let rows = compute_horizon_agreements(Some(&formula), Some(&llm));
+        let mid = mid_row(&rows);
+        assert_eq!(mid.formula_action.as_deref(), Some("买入"), "被否决后的终值不代表方向判断");
+        assert_eq!(mid.action_score, Some(30.0));
+    }
+
+    #[test]
+    fn horizon_agreement_shared_evidence_pct_absent_when_tier_row_has_no_legs() {
+        // 独立性折扣取不到 ⇒ None，不给 0%（0% 会被读成「两条链完全独立」= 无证据的强结论）
+        let (formula, llm) = horizon_pair("买入", 25.0, 70.0, "买入", 25.0, 70.0);
+        let rows = compute_horizon_agreements(Some(&formula), Some(&llm));
+        let mid = mid_row(&rows);
+        assert_eq!(mid.shared_evidence_weight_pct, None);
+
+        let with_legs = json!({
+            "decisionsByHorizon": { "mid": {
+                "originalAction": "买入", "positionPct": 25, "confidence": 70,
+                "legs": [
+                    { "factor": "flowPersistence", "role": "consensus", "weight": 10.0, "source": { "kind": "verdict" }},
+                    { "factor": "momentumSignal", "role": "direction", "weight": 30.0, "source": { "kind": "tierScore" }}
+                ]
+            }}
+        })
+        .to_string();
+        let rows = compute_horizon_agreements(Some(&with_legs), Some(&llm));
+        let mid2 = mid_row(&rows);
+        assert_eq!(mid2.shared_evidence_weight_pct, Some(25.0), "10/(10+30) 应为 25%");
+    }
+
+    #[test]
+    fn unwrap_json_fence_peels_only_a_complete_fence() {
+        assert_eq!(unwrap_json_fence("```json\n{\"a\":1}\n```"), "{\"a\":1}");
+        assert_eq!(unwrap_json_fence("```JSON\n{\"a\":1}\n```"), "{\"a\":1}");
+        assert_eq!(unwrap_json_fence("```\n{\"a\":1}\n```"), "{\"a\":1}");
+        assert_eq!(unwrap_json_fence("  ```json\n{\"a\":1}\n```  "), "{\"a\":1}");
+        // 负控：半截围栏（输出被截断）不猜不补 —— 原样交回，让上层按「解析失败」呈现
+        assert_eq!(unwrap_json_fence("```json\n{\"a\":1}"), "```json\n{\"a\":1}");
+        assert_eq!(unwrap_json_fence("{\"a\":1}"), "{\"a\":1}");
+        assert_eq!(unwrap_json_fence("```json\n```"), "```json\n```");
+    }
+
+    #[test]
+    fn llm_decision_from_fenced_trader_content_stores_camel_four_tiers() {
+        // 端到端一格：AgentNode 包装 + ```json 围栏 + snake 逐档键 ⇒ 落库必须是 camel 四档 + 缺口点名
+        use axagent_harness::holding_period::Period;
+        let content = json!({
+            "verdict": "看多",
+            "action": "买入",
+            "decisions": { "ultra_short": { "action": "买入" }, "mid": { "action": "持有" } }
+        });
+        let trader = json!({ "role": "trader", "content": format!("```json\n{content}\n```") });
+        let out = llm_decision_json_from_trader(&trader).expect("围栏夹具必须解析成功");
+        let stored: serde_json::Value = serde_json::from_str(&out).expect("落库串必须是合法 JSON");
+        assert!(!out.starts_with('`'), "围栏必须被剥掉，否则整列不可解析");
+        let mut keys: Vec<String> =
+            stored["decisions"].as_object().expect("四档容器必须在").keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, vec!["mid".to_string(), "ultraShort".to_string()]);
+        assert!(!out.contains("ultra_short"), "落库不得留 snake 族逐档键");
+        let gaps = stored["data_gaps"].as_array().expect("缺席必须点名");
+        assert_eq!(gaps.len(), 2, "短线/长线两档缺席各一条：{gaps:?}");
+        assert!(names_absent_tier(
+            &gaps.iter().filter_map(|x| x.as_str().map(String::from)).collect::<Vec<_>>(),
+            Period::Short
+        ));
+    }
+
+    // ── 2026-10-16（B2）：逐档分歧归因 ──
+
+    /// 造一份带 `decisionsByHorizon` 的决策 JSON；`rows` 是 `(档 camel 键, 该行 JSON)`。
+    fn decision_with_rows(rows: &[(&str, serde_json::Value)]) -> String {
+        let mut obj = serde_json::Map::new();
+        let mut dbh = serde_json::Map::new();
+        for (k, v) in rows {
+            dbh.insert((*k).to_string(), v.clone());
+        }
+        obj.insert("decisionsByHorizon".to_string(), serde_json::Value::Object(dbh));
+        serde_json::Value::Object(obj).to_string()
+    }
+
+    fn drivers_of(rows: &[HorizonDivergence], tier: &str) -> Vec<&'static str> {
+        rows.iter().find(|r| r.tier == tier).expect("该行必须存在").drivers.clone()
+    }
+
+    fn agr(tier: &str, absence: Option<&str>) -> HorizonAgreement {
+        // 档位键走权威解析拿 `'static`，不用 `leak()`：测试里也要复用同一套档名域
+        let period: axagent_harness::holding_period::Period =
+            tier.parse().expect("夹具档名必须是权威值域");
+        HorizonAgreement {
+            tier: period.camel_key(),
+            tier_label: "",
+            total: if absence.is_some() { None } else { Some(63) },
+            comparable: absence.is_none(),
+            absence: absence.map(|s| s.to_string()),
+            action_score: None,
+            action_note: None,
+            action_ok: None,
+            formula_action: None,
+            llm_action: None,
+            position_score: None,
+            position_gap: None,
+            confidence_score: None,
+            confidence_gap: None,
+            conflict_type: None,
+            shared_evidence_weight_pct: None,
+            dims_used: ["action", "positionPct", "confidence"],
+            dims_missing: ["riskLevel", "evidenceCited"],
+        }
+    }
+
+    #[test]
+    fn divergence_always_returns_four_rows_and_says_why_when_formula_row_missing() {
+        let json = decision_with_rows(&[("mid", json!({ "action": "买入" }))]);
+        let rows = attribute_horizon_divergence(Some(&json), &[]);
+        assert_eq!(rows.len(), 4, "四档各占一行，缺档不能少格");
+        assert_eq!(drivers_of(&rows, "long"), vec!["formula_tier_absent"]);
+        let long = rows.iter().find(|r| r.tier == "long").unwrap();
+        // 没有那一行 ⇒ 不得凭空造出负腿 / 门判据（假清白与假归因同样是谎）
+        assert!(long.negative_legs.is_empty() && long.entry_gate.is_none() && long.veto.is_none());
+    }
+
+    #[test]
+    fn divergence_names_tier_risk_veto_and_keeps_both_actions() {
+        let json = decision_with_rows(&[(
+            "ultraShort",
+            json!({ "originalAction": "买入", "action": "观望", "tierVetoed": true, "entryGatePassed": true }),
+        )]);
+        let rows = attribute_horizon_divergence(Some(&json), &[agr("ultraShort", None)]);
+        assert_eq!(drivers_of(&rows, "ultraShort"), vec!["tier_risk_veto"]);
+        assert_eq!(
+            rows.iter().find(|r| r.tier == "ultraShort").unwrap().veto.as_ref(),
+            Some(&("买入".to_string(), "观望".to_string())),
+            "否决前后两个动作都要带出来，否则用户看不出是自家风控改的"
+        );
+    }
+
+    #[test]
+    fn divergence_does_not_call_a_veto_a_veto_when_action_unchanged() {
+        // tierVetoed=true 但动作没变（例如本就观望）⇒ 不算改判，免得把没发生的事报成主因
+        let json = decision_with_rows(&[(
+            "short",
+            json!({ "originalAction": "观望", "action": "观望", "tierVetoed": true }),
+        )]);
+        let rows = attribute_horizon_divergence(Some(&json), &[agr("short", None)]);
+        assert!(drivers_of(&rows, "short").is_empty());
+    }
+
+    #[test]
+    fn divergence_carries_gate_basis_when_entry_gate_failed() {
+        let json = decision_with_rows(&[(
+            "mid",
+            json!({ "entryGate": "inside_sigma_band", "entryGatePassed": false, "gateBasis": "|z|=1.6 超出 1.0" }),
+        )]);
+        let rows = attribute_horizon_divergence(Some(&json), &[agr("mid", None)]);
+        assert_eq!(drivers_of(&rows, "mid"), vec!["entry_gate_failed"]);
+        let mid = rows.iter().find(|r| r.tier == "mid").unwrap();
+        assert_eq!(mid.entry_gate.as_deref(), Some("inside_sigma_band"));
+        assert_eq!(mid.gate_basis.as_deref(), Some("|z|=1.6 超出 1.0"));
+    }
+
+    #[test]
+    fn divergence_keeps_llm_absence_separate_from_negative_evidence() {
+        let json = decision_with_rows(&[(
+            "long",
+            json!({
+                "action": "持有",
+                "legs": [
+                    { "factor": "valuationBand", "bias": -0.6, "weight": 20.0 },
+                    { "factor": "trendStrength", "bias": -0.1, "weight": 10.0 },
+                    { "factor": "earningsQuality", "bias": 0.4, "weight": 15.0 },
+                    { "factor": "macroRegime", "bias": -0.9, "weight": 5.0 }
+                ]
+            }),
+        )]);
+        let rows = attribute_horizon_divergence(
+            Some(&json),
+            &[agr("long", Some("LLM 未给出该档决策（该档不参与逐档对照）"))],
+        );
+        let d = drivers_of(&rows, "long");
+        assert_eq!(
+            d,
+            vec!["llm_tier_absent", "negative_legs"],
+            "缺席在前、证据在后：先说无从比对，再说本档哪条腿反号"
+        );
+        let legs = &rows.iter().find(|r| r.tier == "long").unwrap().negative_legs;
+        assert_eq!(
+            legs.iter().map(|(n, ..)| n.as_str()).collect::<Vec<_>>(),
+            vec!["valuationBand", "macroRegime", "trendStrength"],
+            "按 bias × weight 升序取前 3（正号腿不得混进负贡献清单）"
+        );
+    }
+
+    #[test]
+    fn divergence_lists_absent_legs_and_data_gaps_as_two_different_things() {
+        // 「这条腿没算」与「这条腿算出来是负的」是两件事；混进一条就分不出该补数据还是该改判断
+        let json = decision_with_rows(&[(
+            "mid",
+            json!({ "action": "持有", "absentLegs": ["expectationRevision"], "dataGaps": ["PE 缺失"] }),
+        )]);
+        let rows = attribute_horizon_divergence(Some(&json), &[agr("mid", None)]);
+        assert_eq!(drivers_of(&rows, "mid"), vec!["absent_legs", "data_gap"]);
     }
 }
 

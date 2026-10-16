@@ -33,7 +33,31 @@ pub struct Model {
     /// 各 horizon 的盈亏序列 JSON（1d/3d/5d/10d/20d）
     pub horizon_pnl_json: Option<String>,
     /// 公式 vs LLM 决策一致性分数（0-100，Phase 3 新增）
+    ///
+    /// ⚠ **计数域 = 主档那一对的五维分**（`decision.rs::compute_decision_agreement`，内部满分 90
+    /// 归一化回 100）。逐档分数**不得**写进本列 —— 那是三维 / 满分 65 的另一把尺子，混进同一列
+    /// 后 `get_agreement_score_history` 的历史线就成了两种口径的平均，自证失效。
+    /// 逐档那把尺子住在 [`horizon_agreement`]。
     pub agreement_score: Option<i32>,
+    /// B3（拍板 5，`PLAN-llm-horizon-decision-and-parity` §18）：**该档**公式 vs LLM 三维
+    /// 归一分（65 制 → 100），产端 = `decision_json.agreementByHorizon[].total`。
+    ///
+    /// 与 `agreement_score` 是**两个计数域**，故分列而不是复用：同一档行内两套分数的分母不同，
+    /// 并排或混池都会让人拿 63 与 46 比大小。
+    /// NULL = 该档「无从比对」（LLM 逐档契约上线前的记录 / 该档单侧缺席），**不是 0 分**。
+    pub horizon_agreement: Option<i32>,
+    /// B3：同一窗口、同一判定函数（`deterministic_horizon_was_correct`）跑在 **LLM 该档动作**
+    /// 上的结果 1/0 —— 与 `was_correct`（公式侧该档）同分母，才配得出一张 2×2。
+    ///
+    /// 为什么单列而不是拿 `was_correct` 反推：`was_correct` 判的是公式动作，反推等于假设
+    /// 「LLM 与公式相反 ⇒ LLM 错」，那是把两个视角的结论焊在一起，样本会自己证明自己。
+    /// NULL = 未成熟 / 该档 LLM 缺席 ⇒ 不进 2×2 的任何一格。
+    pub llm_was_correct: Option<i32>,
+    /// B3：LLM 该档动作原文（`agreementByHorizon[].llmAction`）。
+    ///
+    /// 统计列必须能回查到具体记录，否则 2×2 的每一格不可复核；本列只作溯源与呈现，
+    /// **不参与**任何判定（判定走 `llm_was_correct`）。
+    pub llm_action: Option<String>,
     /// 本行所**复盘的那条分析**所属的算法代际（= `stock_analyses.template_version` 的建点副本，
     /// 与 `stock_reflections.template_version` 同源同值）。
     ///

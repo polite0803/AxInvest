@@ -44,6 +44,12 @@ const HORIZON_KEYWORDS: &[(&str, &str)] = &[
     ("长线", "long"),
     ("长期", "long"),
     ("长持", "long"),
+    // 输入侧别名：用户口语说「季度」时指的是最长档（90 交易日 ≈ 4.2 自然月 ≈ 1.4 季度）。
+    // ⚠ 仅作**输入解析别名**，不是展示名 —— 展示名一律取 `Period::label_zh()`（长线）与
+    //   i18n 档名键族，二者不得混。把**尺度名** quarterly 当档名会造成「90 交易日 = 一个季度」
+    //   的单位错读（尺度层 `Scale::Quarterly` 为 60 交易日/bar，见 `astock-data/src/scale.rs`；
+    //   事故与本轮更正见 `AUDIT-horizon-naming-2026-10-16.md`）。
+    ("季度", "long"),
 ];
 
 /// 提取动作类型（由内部匹配取代）

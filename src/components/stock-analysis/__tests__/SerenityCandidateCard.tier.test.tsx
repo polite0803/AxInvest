@@ -68,7 +68,7 @@ const MID_ROW: SerenityCandidate = {
 describe("卡片档位徽标（A）", () => {
   it("落库行按 period 出档名，走全仓唯一键族（中期 = stockAnalysis.timeHorizonMid）", () => {
     renderCard(MID_ROW);
-    expect(screen.getByTestId("serenity-tier").textContent).toBe("中期");
+    expect(screen.getByTestId("serenity-tier").textContent).toBe("中线");
   });
 
   it("实时候选没有 period ⇒ 出「未知周期」，不猜成任何一档", () => {
@@ -76,7 +76,7 @@ describe("卡片档位徽标（A）", () => {
     const badge = screen.getByTestId("serenity-tier").textContent;
     expect(badge).toBe("未知周期");
     // 反控：旧三元/兜底会把它显示成某一档，或直接没有这个徽标
-    expect(badge).not.toContain("中期");
+    expect(badge).not.toContain("中线");
   });
 
   it("认不出的档名原样出「未知周期」，不映射到最近的一档", () => {
@@ -158,7 +158,7 @@ describe("面板一票一卡（逐档折叠，最多四档）", () => {
     );
   }
 
-  it("同票两档 ⇒ 折叠成一张卡、卡内两行档位（中期/季度），标题按票计数", async () => {
+  it("同票两档 ⇒ 折叠成一张卡、卡内两行档位（中线/长线），标题按票计数", async () => {
     act(() => {
       useSerenityStore.setState({
         candidates: [
@@ -169,8 +169,8 @@ describe("面板一票一卡（逐档折叠，最多四档）", () => {
     });
     renderPanel();
     expect(screen.getAllByTestId("serenity-tier").map((el) => el.textContent)).toEqual([
-      "中期",
-      "季度",
+      "中线",
+      "长线",
     ]);
     // 一票一卡 ⇒ 卡头（代表候选）只渲染一次；第二档的名字不出现在卡头
     expect(screen.getAllByText("落库中期")).toHaveLength(1);
@@ -194,8 +194,8 @@ describe("面板一票一卡（逐档折叠，最多四档）", () => {
     expect(screen.getAllByTestId("serenity-tier").map((el) => el.textContent)).toEqual([
       "超短线",
       "短线",
-      "中期",
-      "季度",
+      "中线",
+      "长线",
     ]);
     expect(screen.getByText(/候选标的\s*\(1\s*只\)/)).toBeTruthy();
     await settle();

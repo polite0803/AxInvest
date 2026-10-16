@@ -218,6 +218,19 @@ pub struct DecisionPerformanceSample {
     pub template_version: Option<i32>,
     /// 数据源标识（四周期展开 / legacy 回退）
     pub data_source: SampleDataSource,
+    /// B3（§18）：该档 **LLM 侧**动作原文，产端 = `decision_json.agreementByHorizon[].llmAction`。
+    /// 只做溯源/呈现与 `llm_was_correct` 的输入，不参与命中率判定。
+    #[serde(default)]
+    pub llm_action: Option<String>,
+    /// B3：把 [`deterministic_horizon_was_correct`] 用**同一窗口、同一 return_pct、同一分母**
+    /// 再跑一次到 LLM 该档动作上的结果。
+    /// `None` = 该档 LLM 缺席或窗口未满 ⇒ **不进 2×2 的任何一格**（不得当作「LLM 判错」）。
+    #[serde(default)]
+    pub llm_was_correct: Option<i32>,
+    /// B3：该档三维归一分（65 制 → 100，产端 `agreementByHorizon[].total`）。
+    /// ⚠ 与主档五维分（落 `strategy_performance.agreement_score`）不同计数域，不可并排比大小。
+    #[serde(default)]
+    pub horizon_agreement: Option<i32>,
 }
 
 /// 按维度分组的方向命中率与分周期指标
@@ -680,6 +693,19 @@ pub(crate) fn expand_horizon_samples(
             } else {
                 SampleDataSource::Reflection
             },
+            // B3 三键：档级兄弟键（产端 = reflection.rs 的 build_horizon_results_json）。
+            // 旧记录没这些键 ⇒ 全 None；None 与 0 的差别在这里是结论级的：
+            // 0 会被读成「LLM 这一档判错了」或「这一档一致性 0 分」。
+            llm_action: entry.get("llmAction").and_then(|v| v.as_str()).map(str::to_string),
+            llm_was_correct: entry
+                .get("llmWasCorrect")
+                .and_then(|v| v.as_i64())
+                .and_then(|v| i32::try_from(v).ok())
+                .filter(|v| *v == 0 || *v == 1),
+            horizon_agreement: entry
+                .get("horizonAgreement")
+                .and_then(|v| v.as_i64())
+                .and_then(|v| i32::try_from(v).ok()),
         });
     }
     Some(samples)
@@ -852,6 +878,12 @@ pub async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<HitrateStats
             snr_anchor_days: None,
             template_version: sp_template_version,
             data_source: SampleDataSource::Legacy,
+            // B3 三键在 legacy 回退路径**就从本行自己带回**（这四列正是本表的列）：
+            // 同一行的公式侧与 LLM 侧成对出现，去 `agreementByHorizon` 另取反而会与
+            // 落库时那次判定不一致（同一决策两次读数）。
+            llm_action: sp.llm_action.clone(),
+            llm_was_correct: sp.llm_was_correct,
+            horizon_agreement: sp.horizon_agreement,
         });
     }
 
@@ -967,6 +999,9 @@ mod reflection_stats_tests {
             snr_anchor_days: None,
             template_version,
             data_source: SampleDataSource::Reflection,
+            llm_action: None,
+            llm_was_correct: None,
+            horizon_agreement: None,
         }
     }
 

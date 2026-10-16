@@ -24,7 +24,9 @@
 //! ## 关键设计
 //! - **dry_run=true**：不写表，只返回 report（用于预览）
 //! - **synthetic_filter**：默认排除 synthetic=1 的兜底 pick（这些不是真实决策）
-//! - **T+N 默认值**：[5, 20, 60]（短/中/长三个窗口）
+//! - **T+N 默认值**：由四档权威现场推导（`Period::validation_windows()` = 2/5/28/90 交易日），
+//!   不再是手抄的 `[5, 20, 60]`。旧窗口集的存量行**不回填**，三个统计读点按
+//!   `Period::is_validation_window` 把它们挡在分母外并计数（拍板 6/7）。
 //! - **K 线拉取**：复用 astock_client.get_klines，自动 vendor failover + 缓存
 
 use axagent_analysis_engine::hit_rate_backtest::{
@@ -65,7 +67,8 @@ use axagent_agent_macro::agent_command;
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct RunDecisionBacktestRequest {
-    /// T+N 验证窗口（默认 [5, 20, 60]）
+    /// T+N 验证窗口（默认 = 四档期望持有交易日，权威见 `harness::holding_period::Period::validation_windows`；
+    /// 手抄一份数字就是第五套参数，见拍板 7）
     pub t_plus_n_list: Option<Vec<i32>>,
     /// 是否排除 synthetic=1 的兜底 pick（默认 true）
     pub exclude_synthetic: Option<bool>,
@@ -170,7 +173,9 @@ pub(crate) async fn run_decision_backtest_inner(
     request: RunDecisionBacktestRequest,
 ) -> Result<RunDecisionBacktestResponse, String> {
     // ── 参数标准化 ──
-    let t_plus_n_list = request.t_plus_n_list.unwrap_or_else(|| vec![5, 20, 60]);
+    let t_plus_n_list = request
+        .t_plus_n_list
+        .unwrap_or_else(axagent_harness::holding_period::Period::validation_windows);
     let exclude_synthetic = request.exclude_synthetic.unwrap_or(true);
     let max_picks = request.max_picks.unwrap_or(200).min(2000);
     let dry_run = request.dry_run.unwrap_or(false);
@@ -754,6 +759,10 @@ pub struct ValidationReportResponse {
     /// 库里**另有**多少条回放样本没进本轮分母（`generation=None` 时才可能非零）。
     /// 给这个数是为了让「我没算它」看得见，而不是让报表看起来像「全都算了」。
     pub replay_sample_rows: usize,
+    /// B3 窗口换代：多少条记录的 T+N **不属于当前四档窗口集**（旧默认 `[5,20,60]` 产的 20/60 行）
+    /// 因而被挡在分母外。行不删、不回填 —— 与 `excluded_pre_floor_generation` 一样是「有数据但不可比」，
+    /// 不是「没有数据」。
+    pub excluded_pre_window_set_rows: usize,
 }
 
 /// 聚合报告 —— 基于已写入的 decision_validations 重新计算
@@ -804,6 +813,7 @@ pub async fn compute_validation_report(
             total_rows,
             generation,
             replay_sample_rows: 0,
+            excluded_pre_window_set_rows: 0,
         });
     }
 
@@ -865,6 +875,26 @@ pub async fn compute_validation_report(
         );
     }
 
+    // B3 窗口换代（拍板 6 + 7）：旧窗口集 [5,20,60] 产出的 20/60 行**不进本轮分母**。
+    // 为什么不并进来：`compute_hit_rate_report` 的 by_action / by_style 是**跨窗口池化**的，
+    // 20 天的命中与 28 天的命中并成一格就成了两种尺子的平均（本表没有窗口集列，也不回填，
+    // 所以按 T+N 是否属于当前窗口集筛 —— N=5 两代同义，留在分母是对的，不是漏筛）。
+    let excluded_pre_window_set_rows = rows
+        .iter()
+        .filter(|(_, v)| !axagent_harness::holding_period::Period::is_validation_window(v.t_plus_n))
+        .count();
+    let rows: Vec<(Option<i32>, PickValidation)> = rows
+        .into_iter()
+        .filter(|(_, v)| axagent_harness::holding_period::Period::is_validation_window(v.t_plus_n))
+        .collect();
+    if excluded_pre_window_set_rows > 0 {
+        tracing::info!(
+            "[validation_report] {excluded_pre_window_set_rows} 条属**上线前窗口集**（T+N 不在 \
+             {:?}）⇒ 未计入分母；这些行不回填也不删，只是与当代窗口不可比",
+            axagent_harness::holding_period::Period::validation_windows()
+        );
+    }
+
     // 筛样（判据与 run 侧共用 `screen_by_reco_generation`，避免一个名目两套分母）
     let versions: Vec<Option<i32>> = rows.iter().map(|(v, _)| *v).collect();
     let (kept, excluded_pre_floor_generation, excluded_unknown_generation) =
@@ -898,6 +928,7 @@ pub async fn compute_validation_report(
         total_rows,
         generation,
         replay_sample_rows,
+        excluded_pre_window_set_rows,
     })
 }
 

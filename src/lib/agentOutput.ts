@@ -17,7 +17,14 @@ import {
   parseRiskLevel,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
-import type { StockDecision } from "@/types/stock-analysis";
+import type {
+  HorizonAgreement,
+  HorizonDivergence,
+  LlmDecisionsByHorizon,
+  LlmHorizonDecision,
+  LlmHorizonReadState,
+  StockDecision,
+} from "@/types/stock-analysis";
 
 /**
  * 四周期价位映射的键归一（v125，PLAN §五十）。
@@ -421,6 +428,16 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
     stopLoss: stopLoss != null && !isNaN(stopLoss) ? stopLoss : null,
     horizonPriceMap,
     decisionsByHorizon,
+    // B1（2026-10-16）：逐档「公式 vs LLM」对照 —— **只搬运不计算**（判据在
+    // `decision.rs::compute_horizon_agreements`）。这里不加它就会被白名单丢掉，
+    // 面板那条 `agreementByHorizon` 就永远是 undefined ⇒ 与 `decisionsByHorizon`
+    // 当年「类型断了透传、四档从不显示」是同一族失效。
+    agreementByHorizon: Array.isArray(source.agreementByHorizon)
+      ? (source.agreementByHorizon as unknown as HorizonAgreement[])
+      : null,
+    divergenceByHorizon: Array.isArray(source.divergenceByHorizon)
+      ? (source.divergenceByHorizon as unknown as HorizonDivergence[])
+      : null,
     // 2026-09-22 修复：reasoning 开头的 `决策=X` 必须与**最终方向档**同判据。
     //   背景：`portfolio-risk-gate.rhai` 覆盖 action 时**不更新** reasoning 的结论名
     //   （只追加 `| [风控门] ...`）⇒ 文本会停留在 pm 档位，与最终 action 不同名。
@@ -651,6 +668,52 @@ export function parseJsonLoose(text: string | null): Record<string, unknown> | n
     if (sliced) { return sliced; }
   }
   return null;
+}
+
+/**
+ * 逐档 LLM 决策的读侧（拍板 1 甲案 + 拍板 2 嵌列，`PLAN-llm-horizon-decision-and-parity.md` §A2）。
+ *
+ * 这里**不重做键归一**：落库前 `decision.rs::normalize_llm_horizon_decisions` 已把三族拼写成
+ * camel、并逐档点名缺席；在此再收一遍就是第二份真相（AGENTS.md 禁区 12）。
+ * 本函数只判一件事 —— 这份记录属于四态里的哪一态，交给呈现层各占一句，
+ * 因为「没给」「还没上线」「整列坏了」在库里长得不一样、在面板上更不许长成一个样子。
+ *
+ * 代际标记 `horizonDecisionContract` 由**代码盖章**（判据正主 = Rust 的
+ * `LLM_HORIZON_DECISION_CONTRACT`），TS 侧只判「键在不在」，不判具体值 ⇒ 不留第二份真相。
+ */
+export interface LlmHorizonDecisionView {
+  state: LlmHorizonReadState;
+  rows: LlmDecisionsByHorizon;
+  /** LLM 自述 + 系统点名的缺口清单（整条给「数据缺口」区，不按档在此匹配中文串） */
+  gaps: string[];
+}
+
+const LLM_HORIZON_ABSENT: LlmHorizonDecisionView = {
+  state: "absent",
+  rows: {},
+  gaps: [],
+};
+
+export function readLlmHorizonDecisions(llmDecisionJson: string | null): LlmHorizonDecisionView {
+  if (!llmDecisionJson) { return LLM_HORIZON_ABSENT; }
+  const parsed = parseJsonLoose(llmDecisionJson);
+  if (!parsed) { return { state: "parseFailed", rows: {}, gaps: [] }; }
+  if (typeof parsed.horizonDecisionContract !== "number") {
+    return { state: "preContract", rows: {}, gaps: [] };
+  }
+  const src = (parsed.decisions ?? {}) as Record<string, unknown>;
+  const rows: Record<string, LlmHorizonDecision> = {};
+  for (const camel of Object.keys(HORIZON_CAMEL_TO_SNAKE)) {
+    const row = src[camel];
+    if (row && typeof row === "object" && typeof (row as LlmHorizonDecision).action === "string") {
+      rows[camel] = row as LlmHorizonDecision;
+    }
+  }
+  const gapsRaw = parsed.data_gaps ?? parsed.dataGaps;
+  const gaps = Array.isArray(gapsRaw)
+    ? gapsRaw.filter((g): g is string => typeof g === "string")
+    : [];
+  return { rows: rows as LlmDecisionsByHorizon, gaps, state: "ok" };
 }
 
 export function extractLlmField(llmDecisionJson: string | null, field: string): unknown {

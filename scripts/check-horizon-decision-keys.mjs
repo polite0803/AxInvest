@@ -37,7 +37,7 @@
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(resolve(ROOT, rel), "utf8");
@@ -46,6 +46,18 @@ const TIERS = ["ultra-short", "short", "mid", "long"];
 const BRANCH_PATH = (t) => `src-tauri/src/commands/portfolio-mgr-h-${t}.rhai`;
 const MAIN_PATH = "src-tauri/src/commands/portfolio-mgr.rhai";
 const TS_PATH = "src/types/stock-analysis.ts";
+// ── R5 的四份来源（2026-10-16，PLAN-llm-horizon-decision-and-parity.md 拍板 1 甲案 + 拍板 2 嵌列）──
+// LLM 逐档决策**没有 Rhai 产端**：它的「产端」是 prompt 契约 + schema 文档，归一在 Rust 解析器，
+// 读侧是 TS 类型 ⇒ 同一条「键名对不上不报错、只是那一格永远空」的失效机制照旧成立，
+// 只是四个源换了一批，所以扩进本门而不是另起一炉（禁区 12：判据也只留这一处）。
+const LLM_SCHEMA_PATH = "src-tauri/config/llm-output-schemas.json";
+const LLM_PROMPT_PATH = "src-tauri/agency_experts/stock-analysis/trader.md";
+const LLM_CAMEL_AUTH_PATH = "src-tauri/crates/harness/src/holding_period.rs";
+const LLM_RUST_PARSE_PATH = "src-tauri/src/commands/stock_workflow/decision.rs";
+const LLM_TS_READER_PATH = "src/lib/agentOutput.ts";
+const LLM_CORE_PATH = "src-tauri/src/commands/stock_workflow/core.rs";
+/** 代际标记的键名（判「键在不在」，不判值 ⇒ Rust 与 TS 只共享这一个串） */
+const LLM_CONTRACT_KEY = "horizonDecisionContract";
 
 /** 装配段负责追加的键（绝对价只在**真出仓位**时由主链算，见 portfolio-mgr.rhai 装配段注释） */
 const ASSEMBLY_OWNED = ["targetPrice", "stopLoss"];
@@ -139,8 +151,132 @@ export function tsKeys(src, iface = "HorizonDecision") {
   return out;
 }
 
+/** 档位 camel 键的**权威**：现场读 harness `Period::camel_key()` 的 match 臂（不手抄四档表） */
+export function camelAuthority(src) {
+  const lines = src.split("\n");
+  const i = lines.findIndex((l) => l.includes("pub fn camel_key("));
+  if (i < 0) return null;
+  const out = [];
+  for (let k = i + 1; k < lines.length; k += 1) {
+    const m = lines[k].match(/Period::[A-Za-z]+\s*=>\s*"([A-Za-z][A-Za-z0-9]*)"/);
+    if (m) out.push(m[1]);
+    if (/^\s{4}\}\s*$/.test(lines[k])) break;
+  }
+  return out.length === 4 ? out : null;
+}
+
+/** schema 文档里 `trader_output.decisions` 的档位键与每档 required 字段集 */
+export function llmSchema(jsonText) {
+  let doc = null;
+  try { doc = JSON.parse(jsonText); } catch { return null; }
+  const dec = doc?.schemas?.trader_output?.properties?.decisions;
+  if (!dec?.properties) return null;
+  const perTierRequired = {};
+  for (const [k, v] of Object.entries(dec.properties)) {
+    perTierRequired[k] = Array.isArray(v?.required) ? [...v.required].sort() : null;
+  }
+  return { tiers: Object.keys(dec.properties), perTierRequired, containerRequired: Array.isArray(dec.required) ? [...dec.required].sort() : null };
+}
+
+/**
+ * prompt（trader.md）里**每一处** `"decisions": {` 的顶层键集。
+ * 逐处收而不是收第一处：契约段与输出示例段各写了一遍，只改一段就是「文档自己跟文档打脸」，
+ * 而模型读的是整篇 prompt ⇒ 两处必须同时等于权威。
+ */
+export function llmPromptTiers(md) {
+  const MARK = '"decisions": {';
+  const sets = [];
+  let from = 0;
+  for (;;) {
+    const i = md.indexOf(MARK, from);
+    if (i < 0) break;
+    from = i + MARK.length;
+    const open = i + MARK.length - 1;
+    let depth = 0; let end = -1;
+    for (let k = open; k < md.length; k += 1) {
+      if (md[k] === "{") depth += 1;
+      else if (md[k] === "}") { depth -= 1; if (depth === 0) { end = k; break; } }
+    }
+    if (end < 0) return null;
+    const inner = md.slice(open + 1, end);
+    const keys = [];
+    let d = 0;
+    for (let k = 0; k < inner.length; k += 1) {
+      const ch = inner[k];
+      if (ch === "{") d += 1;
+      else if (ch === "}") d -= 1;
+      else if (d === 0 && ch === '"') {
+        const j = inner.indexOf('"', k + 1);
+        if (j < 0) return null;
+        const name = inner.slice(k + 1, j);
+        if (/^[A-Za-z][A-Za-z0-9]*$/.test(name) && /^\s*:/.test(inner.slice(j + 1))) keys.push(name);
+        k = j;
+      }
+    }
+    if (keys.length === 0) return null;
+    sets.push(keys);
+  }
+  return sets.length > 0 ? sets : null;
+}
+
+
+/**
+ * 产端 `core.rs` 往 decision_json 里嵌 `agreementByHorizon` 时写下的那批键（R5d 用）。
+ * 只认该 json! 块**顶层**的 `"k":` —— 块里嵌套的对象一层都没有，但一旦有人加嵌套，
+ * 深度计数会让内层键不被收（宁少不误，漏收会在 R5d 里表现为「TS 多声明」而不是静默通过）。
+ */
+export function coreEmbeddedKeys(src, key = "agreementByHorizon") {
+  const at = src.indexOf(`"${key}"`);
+  if (at < 0) return null;
+  const open = src.indexOf("json!(", at);
+  if (open < 0) return null;
+  let i = src.indexOf("{", open);
+  if (i < 0) return null;
+  const start = i;
+  let depth = 0;
+  let end = -1;
+  for (let k = start; k < src.length; k += 1) {
+    if (src[k] === "{") depth += 1;
+    else if (src[k] === "}") { depth -= 1; if (depth === 0) { end = k; break; } }
+  }
+  if (end < 0) return null;
+  const body = src.slice(start + 1, end);
+  const keys = [];
+  let d = 0;
+  for (let k = 0; k < body.length; k += 1) {
+    const ch = body[k];
+    if (ch === "{" || ch === "[") d += 1;
+    else if (ch === "}" || ch === "]") d -= 1;
+    else if (d === 0 && ch === '"') {
+      const j = body.indexOf('"', k + 1);
+      if (j < 0) return null;
+      const name = body.slice(k + 1, j);
+      if (/^[A-Za-z][A-Za-z0-9]*$/.test(name) && /^\s*:/.test(body.slice(j + 1))) keys.push(name);
+      k = j;
+    }
+  }
+  return keys.length > 0 ? keys : null;
+}
+
+/** LLM 侧四份来源 + 代际标记两处的整体采集（任一份解析失败 ⇒ null，由 check 判红） */
+function collectLlm() {
+  return {
+    authority: camelAuthority(read(LLM_CAMEL_AUTH_PATH)),
+    schema: llmSchema(read(LLM_SCHEMA_PATH)),
+    promptTierSets: llmPromptTiers(read(LLM_PROMPT_PATH)),
+    tsRows: tsKeys(read(TS_PATH), "LlmDecisionsByHorizon"),
+    tsFields: tsKeys(read(TS_PATH), "LlmHorizonDecision"),
+    embedded: coreEmbeddedKeys(read(LLM_CORE_PATH)),
+    embeddedDiv: coreEmbeddedKeys(read(LLM_CORE_PATH), "divergenceByHorizon"),
+    tsAgreement: tsKeys(read(TS_PATH), "HorizonAgreement"),
+    tsDiv: tsKeys(read(TS_PATH), "HorizonDivergence"),
+    rustHasStamp: read(LLM_RUST_PARSE_PATH).includes(`"${LLM_CONTRACT_KEY}"`),
+    tsHasStamp: read(LLM_TS_READER_PATH).includes(LLM_CONTRACT_KEY),
+  };
+}
+
 /** 主判据：返回违规字符串数组（空 = 通过） */
-export function check({ perTier, assembly, ts }) {
+export function check({ perTier, assembly, ts, llm }) {
   const bad = [];
   const produced = new Map(); // key → 产它的档位列表
   for (const [tier, keys] of Object.entries(perTier)) {
@@ -181,13 +317,89 @@ export function check({ perTier, assembly, ts }) {
   for (const [k] of declared) {
     if (!producedSet.has(k) && !assemblySet.has(k)) bad.push(`R4 幽灵声明：TS 有 \`${k}\`，四档与装配都不产`);
   }
+
+  // ── R5：LLM 逐档决策的档位键 / 字段集 / 代际标记四源一致（2026-10-16）──
+  //   权威是 harness 的 `Period::camel_key()`；prompt、schema 文档、TS 类型、Rust 归一四处都必须是它，
+  //   因为这一侧**没有 Rhai 产端可对照**，漂了不会报错，只会让某一格永远「未给出」。
+  if (!llm) {
+    bad.push("R5a 采集面缺 LLM 侧来源（门自己的采集面退化也算违规，不当「无违规」）");
+  } else {
+    const auth = llm.authority;
+    if (!auth) bad.push("R5a 权威解析失败：harness `Period::camel_key()` 的 match 臂没读满 4 条");
+    const cmp = (label, got) => {
+      if (!got) {
+        bad.push(`R5a ${label} 解析失败（结构变了就判红，不当「没有违规」）`);
+        return;
+      }
+      if (auth && [...got].sort().join("/") !== [...auth].sort().join("/")) {
+        bad.push(`R5a 档位键漂移：${label} = ${[...got].sort().join("/")}，权威 camel_key() = ${auth.join("/")}`);
+      }
+    };
+    cmp("schema `decisions.properties`", llm.schema?.tiers);
+    const sets = llm.promptTierSets;
+    if (!sets) bad.push("R5a prompt 里读不到任何 `\"decisions\": {` 的顶层键（契约段形状变了？）");
+    else sets.forEach((s, i) => cmp(`prompt 第 ${i + 1} 处`, s));
+    cmp("TS `LlmDecisionsByHorizon`", llm.tsRows?.map(([k]) => k));
+
+    // 每档字段集：四档之间必须同集，且等于 TS `LlmHorizonDecision` 的**必填**字段集
+    const req = llm.schema?.perTierRequired ?? {};
+    const shapes = new Set(Object.values(req).map((v) => (v ? v.join("/") : "<无required>")));
+    if (shapes.size > 1) {
+      bad.push(`R5b 各档 required 不一致（同一份 LLM 逐档决策不得有的档 7 字段、有的档 6）：${[...shapes].join(" ｜ ")}`);
+    }
+    const one = Object.values(req).find((v) => Array.isArray(v));
+    const tsFields = llm.tsFields?.filter(([, optional]) => !optional).map(([k]) => k);
+    if (tsFields === undefined || !one || !tsFields) {
+      bad.push("R5b 字段集解析失败（TS `LlmHorizonDecision` 或 schema 每档 required 读不出来）");
+    } else if ([...one].sort().join("/") !== [...tsFields].sort().join("/")) {
+      bad.push(`R5b 字段集漂移：schema required = ${[...one].sort().join("/")}，TS 必填 = ${[...tsFields].sort().join("/")}`);
+    }
+
+    // 代际标记：Rust 盖的串与 TS 判的串必须是同一个字面量，否则「上线前」那一格静默消失
+    // R5d 逐档对照：产端 core.rs 嵌出的 JSON 键 ↔ TS `HorizonAgreement` 字段集。
+    //   这一格没有 Rhai 产端可对照，键名对不上**不报错**，只会让面板那一列永远 undefined。
+    if (!llm.embedded || !llm.tsAgreement) {
+      bad.push("R5d 采集失败：core.rs 的 `agreementByHorizon` json! 块或 TS `HorizonAgreement` 读不出来");
+    } else {
+      const declared2 = new Set(llm.tsAgreement.map(([k]) => k));
+      const emitted = new Set(llm.embedded);
+      for (const k of emitted) {
+        if (!declared2.has(k)) bad.push(`R5d 产端嵌出但 TS 未声明：${k} ⇒ 前端拿不到，等于没产出`);
+      }
+      for (const k of declared2) {
+        if (!emitted.has(k)) bad.push(`R5d TS 声明但产端从不嵌出：${k} ⇒ 永远 undefined，会被读成「没有这一档」`);
+      }
+    }
+
+    // R5e 逐档归因：产端嵌出键 ↔ TS `HorizonDivergence` 字段集（与 R5d 同一失效族）
+    if (!llm.embeddedDiv || !llm.tsDiv) {
+      bad.push("R5e 采集失败：core.rs 的 `divergenceByHorizon` json! 块或 TS `HorizonDivergence` 读不出来");
+    } else {
+      const dDeclared = new Set(llm.tsDiv.map(([k]) => k));
+      const dEmitted = new Set(llm.embeddedDiv);
+      for (const k of dEmitted) {
+        if (!dDeclared.has(k)) bad.push(`R5e 产端嵌出但 TS 未声明：${k} ⇒ 前端拿不到`);
+      }
+      for (const k of dDeclared) {
+        if (!dEmitted.has(k)) bad.push(`R5e TS 声明但产端从不嵌出：${k} ⇒ 永远 undefined`);
+      }
+    }
+
+    if (!llm.rustHasStamp) bad.push(`R5c Rust 解析器不再盖 \`${LLM_CONTRACT_KEY}\` ⇒ 读侧四态塌回三态，历史行会被读成「四档都没给」`);
+    if (!llm.tsHasStamp) bad.push(`R5c TS 读侧不再判 \`${LLM_CONTRACT_KEY}\` ⇒ 「上线前样本」与「该档未给出」不可区分`);
+  }
   return bad;
 }
 
 function collect() {
   const perTier = {};
   for (const t of TIERS) perTier[t] = branchKeys(read(BRANCH_PATH(t)));
-  return { perTier, assembly: assemblyKeys(read(MAIN_PATH)), ts: tsKeys(read(TS_PATH)) };
+  return {
+    perTier,
+    assembly: assemblyKeys(read(MAIN_PATH)),
+    ts: tsKeys(read(TS_PATH)),
+    llm: collectLlm(),
+  };
 }
 
 /** 四条负控：把判据打在**已知会红**的样本上，证明它不是恒真断言 */
@@ -214,6 +426,47 @@ function selftest() {
       m.ts.push(["phantomField", true]);
       return check(m);
     }],
+    // ── R5 三条负控：每条只打红自己那一格（拆错守卫的负控等于另一种假绿）──
+    ["R5a schema 少一档", () => {
+      const m = structuredClone(base);
+      m.llm.schema.tiers = m.llm.schema.tiers.filter((x) => x !== "ultraShort");
+      return check(m);
+    }],
+    ["R5a prompt 两处不一致", () => {
+      const m = structuredClone(base);
+      m.llm.promptTierSets[m.llm.promptTierSets.length - 1] = ["ultraShort", "short", "mid"];
+      return check(m);
+    }],
+    ["R5b 各档 required 不等", () => {
+      const m = structuredClone(base);
+      m.llm.schema.perTierRequired.mid = m.llm.schema.perTierRequired.mid.filter((f) => f !== "verdict");
+      return check(m);
+    }],
+    ["R5b TS 字段集漂移", () => {
+      const m = structuredClone(base);
+      m.llm.tsFields = m.llm.tsFields.filter(([k]) => k !== "verdict");
+      return check(m);
+    }],
+    ["R5d 产端多嵌一键", () => {
+      const m = structuredClone(base);
+      m.llm.embedded.push("inventedByCoreOnly");
+      return check(m);
+    }],
+    ["R5d TS 多声明一键", () => {
+      const m = structuredClone(base);
+      m.llm.tsAgreement.push(["phantomAgreementField", true]);
+      return check(m);
+    }],
+    ["R5e TS 多声明一键", () => {
+      const m = structuredClone(base);
+      m.llm.tsDiv.push(["phantomDriverField", true]);
+      return check(m);
+    }],
+    ["R5c 代际标记读侧失明", () => {
+      const m = structuredClone(base);
+      m.llm.tsHasStamp = false;
+      return check(m);
+    }],
   ];
   let fail = 0;
   for (const [name, run] of cases) {
@@ -233,7 +486,7 @@ function selftest() {
     for (const c of clean) console.log(`   ${c}`);
     fail += 1;
   } else {
-    console.log("✓ 正控：现网三份键集一致（R1-R4 全清）");
+    console.log("✓ 正控：现网键集一致（公式侧 R1-R4 + LLM 侧 R5a-R5e 全清）");
   }
   console.log(fail === 0 ? "\nselftest 全过" : `\nselftest 失败 ${fail} 项`);
   process.exit(fail === 0 ? 0 : 1);
@@ -243,17 +496,31 @@ function dump(x) {
   for (const t of TIERS) console.log(`${t} (${x.perTier[t]?.length ?? "解析失败"})`, x.perTier[t]?.join(" "));
   console.log(`assembly (${x.assembly?.length})`, x.assembly?.join(" "));
   console.log(`TS (${x.ts?.length})`, x.ts?.map(([k, o]) => o ? `${k}?` : k).join(" "));
+  console.log("R5 权威 camel_key", x.llm?.authority?.join("/"));
+  console.log("R5 schema 档位", x.llm?.schema?.tiers?.join("/"), "| 每档字段", Object.values(x.llm?.schema?.perTierRequired ?? {})[0]?.length);
+  console.log("R5 prompt 各处", (x.llm?.promptTierSets ?? []).map((s) => s.length).join("/"), "键 | TS 行", x.llm?.tsRows?.map(([k]) => k).join("/"), "| TS 字段", x.llm?.tsFields?.length);
+  console.log("R5d 产端嵌出", (x.llm?.embedded ?? []).length, "键 | TS HorizonAgreement", (x.llm?.tsAgreement ?? []).map(([k, o]) => (o ? `${k}?` : k)).join("/"));
+  console.log("R5e 产端嵌出", (x.llm?.embeddedDiv ?? []).length, "键 | TS HorizonDivergence", (x.llm?.tsDiv ?? []).map(([k, o]) => (o ? `${k}?` : k)).join("/"));
 }
 
-if (process.argv.includes("--selftest")) selftest();
-else if (process.argv.includes("--dump")) dump(collect());
-else {
-  const bad = check(collect());
-  if (bad.length === 0) {
-    console.log("OK  HorizonDecision 键集与四档分支输出 + 装配追加一致（R1-R4 全清）");
-    process.exit(0);
+// 只在**直接执行**时跑 CLI。被 `import` 复用解析器时（例如拿 HEAD 源文自证判据有没有电）
+// 不得顺手跑门禁、更不得 `process.exit` —— 那会把调用方整段吞掉，看起来像「门跑过了」。
+const invokedDirectly = typeof process.argv[1] === "string"
+  && pathToFileURL(process.argv[1]).href === import.meta.url;
+
+if (invokedDirectly) {
+  if (process.argv.includes("--selftest")) {
+    selftest();
+  } else if (process.argv.includes("--dump")) {
+    dump(collect());
+  } else {
+    const bad = check(collect());
+    if (bad.length === 0) {
+      console.log("OK  逐档决策键集一致：公式侧（四档分支 + 装配 + TS HorizonDecision，R1-R4）＋ LLM 侧（prompt / schema / camel_key 权威 / TS 类型 / 代际标记，R5a-R5e）");
+      process.exit(0);
+    }
+    console.log(`FAIL  ${bad.length} 条键集漂移：`);
+    for (const b of bad) console.log(`  · ${b}`);
+    process.exit(1);
   }
-  console.log(`FAIL  ${bad.length} 条键集漂移：`);
-  for (const b of bad) console.log(`  · ${b}`);
-  process.exit(1);
 }

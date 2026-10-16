@@ -6573,10 +6573,6 @@
       "group-presets": "सामान्य प्रीसेट",
       "group-custom-interval": "कस्टम अंतराल",
       "label-periods": "सिफारिश अवधि",
-      "period-ultra-short": "अति अल्पकालिक",
-      "period-short": "अल्पकालिक",
-      "period-mid": "मध्यमकालिक",
-      "period-long": "दीर्घकालिक",
       "placeholder-periods": "एक या अधिक अवधि चुनें",
       "label-min-confidence": "न्यूनतम विश्वास",
       "label-top-n": "Top N सीमा",
@@ -14830,12 +14826,6 @@
       "okCount": "{{n}} सफल",
       "failCount": "{{n}} विफल",
       "totalCount": "कुल {{n}}",
-      "period": {
-        "ultra_short": "अति अल्पकालिक",
-        "short": "अल्पकालिक",
-        "mid": "मध्यमकालिक",
-        "long": "दीर्घकालिक"
-      },
       "dueYes": "देय",
       "dueNo": "लंबित",
       "analysisOk": "विश्लेषण सफल",
@@ -15440,11 +15430,7 @@
       "1d": "दैनिक",
       "1w": "साप्ताहिक",
       "1M": "मासिक",
-      "zoomHint": "बॉक्स ज़ूम",
-      "ultraShort": "अति अल्पकालिक",
-      "short": "अल्पकालिक",
-      "mid": "मध्यमकालिक",
-      "long": "दीर्घकालिक"
+      "zoomHint": "बॉक्स ज़ूम"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15485,10 +15471,6 @@
     "industryRanking": "Industry Ranking",
     "clsFlash": "CLS Flash",
     "leader": "Leader",
-    "periodUltraShort": "अति अल्पकालिक",
-    "periodShort": "अल्पकालिक",
-    "periodMid": "मध्यमकालिक",
-    "periodLong": "दीर्घकालिक",
     "generatedAt": "Generated at {{time}}",
     "bannerVendorDisabled": "Some styles are disabled: {styles}",
     "openSettings": "Open Settings",
@@ -16841,10 +16823,6 @@
         "holding": "Holding Days",
         "confidence": "Confidence"
       },
-      "periodUltraShort": "अति अल्पकालिक",
-      "periodShort": "अल्पकालिक",
-      "periodMid": "मध्यमकालिक",
-      "periodLong": "दीर्घकालिक",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -17014,12 +16992,6 @@
         "daily0700": "प्रतिदिन 07:00",
         "tradeDay1600": "Trading Day 16:00 (After Close)"
       },
-      "period": {
-        "ultraShort": "अति अल्पकालिक",
-        "short": "अल्पकालिक",
-        "mid": "मध्यमकालिक",
-        "long": "दीर्घकालिक"
-      },
       "column": {
         "id": "ID",
         "description": "Description",
@@ -17178,10 +17150,6 @@
       "hitrateByHorizon": "समय क्षितिज के अनुसार",
       "hitrateGroupRate": "समूह हिट दर",
       "insufficientSamples": "अपर्याप्त नमूने",
-      "horizonUltraShort": "अति अल्पकालिक",
-      "horizonShort": "अल्पकालिक",
-      "horizonMid": "मध्यमकालिक",
-      "horizonLong": "दीर्घकालिक",
       "horizonAuto": "मुख्य स्तर अनुसार",
       "horizonUnknown": "अज्ञात अवधि",
       "colHorizon": "समीक्षा क्षितिज",
@@ -17246,6 +17214,13 @@
       "failureModeChaseUpBar": "बड़ी तेज़ मोमबत्ती का पीछा",
       "failureModeRegimeEndorsement": "बाज़ार स्थिति से अकेले शेयर को समर्थन",
       "failureModeReverseDcfIgnored": "उलटा DCF नज़रअंदाज़",
+      "horizonConfusionTitle": "प्रति-टियर परिणाम मिलान (फ़ॉर्म्युला × LLM)",
+      "horizonConfusionNotProduced": "इस रिकॉर्ड के लिए प्रति-टियर परिणाम मिलान नहीं है (आँकड़े शुरू होने से पहले का डेटा, या कोई मूल्यांकन-योग्य नमूना नहीं)",
+      "horizonConfusionInsufficient": "नमूने अपर्याप्त ({{judged}} मूल्यांकित) — नीचे की गिनती कच्चे रिकॉर्ड हैं, निष्कर्ष नहीं",
+      "horizonConfusionCells": "दोनों सही {{both}} · केवल फ़ॉर्म्युला {{formulaOnly}} · केवल LLM {{llmOnly}} · दोनों गलत {{bothWrong}}",
+      "horizonConfusionUndecided": "{{undecided}} में LLM का निर्णय नहीं (अनुपस्थित / विंडो पूरी नहीं / प्रतीक्षा-होल्ड जैसी दिशाहीन क्रिया) — किसी खाने में नहीं गिने जाते",
+      "horizonConfusionAvgAgreement": "इस टियर की त्रि-आयामी सहमति का औसत {{pct}}",
+      "horizonConfusionScopeNote": "दोनों पक्ष एक ही विंडो और एक ही निर्णय फ़ंक्शन पर हैं; चारों खाने केवल दिशा की सही-गलत तुलना करते हैं, प्रतिफल नहीं, और ऊपर की हिट-रेट से भिन्न हर हैं।",
       "failureModeOther": "अन्य"
     },
     "portfolioMonitor": {
@@ -18055,16 +18030,50 @@
       "error": "निष्कर्षण विफल",
       "noData": "कोई उद्धरण डेटा नहीं",
       "title": "साक्ष्य उद्धरण ऑडिट",
-      "supportRate": "डेटा समर्थन दर",
-      "analystCount": "स्रोत विश्लेषक",
-      "claimCount": "निर्णय कारण",
-      "supported": "डेटा सहित",
-      "unsupported": "डेटा रहित",
-      "source": "स्रोत",
       "extractFailed": "साक्ष्य निष्कर्षण विफल",
-      "matchConfidence": "मिलान विश्वास स्तर",
       "notApplicable": "प्रमाण उद्धरण ऑडिट लागू नहीं (इस रन में निर्णय उत्पन्न नहीं हुआ)",
-      "notApplicableDetail": "इस रन में कोई निर्णय उत्पन्न नहीं हुआ (action={{action}} डेटा-अनुपलब्धता का sentinel है, निष्कर्ष नहीं); अतः कारण फ़ील्ड में फ़ॉलबैक निदान जानकारी है, ऑडिट-योग्य विश्लेषक प्रमाण नहीं। इसलिए समर्थन दर यहाँ परिभाषित नहीं है और इसे 0% के रूप में नहीं दिखाया जाता।"
+      "notApplicableDetail": "इस रन में कोई निर्णय उत्पन्न नहीं हुआ (action={{action}} डेटा-अनुपलब्धता का sentinel है, निष्कर्ष नहीं); अतः कारण फ़ील्ड में फ़ॉलबैक निदान जानकारी है, ऑडिट-योग्य विश्लेषक प्रमाण नहीं। इसलिए समर्थन दर यहाँ परिभाषित नहीं है और इसे 0% के रूप में नहीं दिखाया जाता।",
+      "branchSection": "इस क्षितिज के शाखा-पादों की जाँच",
+      "factorSection": "मुख्य स्तर के कारकों का मिलान",
+      "expectedLegs": "अपेक्षित",
+      "participatingLegs": "वास्तविक भागीदारी",
+      "upstreamPresentCount": "स्रोत उपस्थित",
+      "upstreamNotCheckedCount": "जाँच असंभव",
+      "sigmaReconciled": "σ मिलान हुआ",
+      "weight": "भार",
+      "signal": "संकेत",
+      "absenceUndeclared": "अनुपस्थिति घोषित नहीं",
+      "metaLeg": "मेटा",
+      "upstream": {
+        "present": "उपस्थित",
+        "declaredAbsent": "अनुपस्थिति घोषित",
+        "silentAbsent": "मौन अनुपस्थिति",
+        "notChecked": "जाँच असंभव"
+      },
+      "notChecked": {
+        "noSnapshotKey": "इस रिकॉर्ड के स्नैपशॉट में इस स्रोत की आउटपुट कुंजी नहीं है, इसलिए यह मानदंड लागू नहीं होता",
+        "noOwner": "इस कारक के लिए कोई ज़िम्मेदार विश्लेषक पंजीकृत नहीं है",
+        "unregisteredFactor": "यह कारक स्रोत रजिस्ट्री में नहीं है (मानदंड लागू नहीं)"
+      },
+      "sigma": {
+        "consistent": "σ सुसंगत",
+        "inconsistent": "σ असंगत",
+        "noBasis": "कोई आधार नहीं"
+      },
+      "noBasis": {
+        "noPersistedBasis": "इस रिकॉर्ड में मिलान के लिए कोई संग्रहीत आधार नहीं है (मानकीकरण अभी केंद्रीकृत नहीं है)",
+        "basisMissingInRecord": "आधार कुंजी पंजीकृत है पर इस रिकॉर्ड में अनुपस्थित है"
+      },
+      "closure": {
+        "closed": "संवृत",
+        "broken": "असंवृत",
+        "notComputable": "अनिर्धार्य"
+      },
+      "closureReason": {
+        "decisionDegraded": "इस बार कोई निर्णय नहीं बना, इसलिए संवृत्ति अनिर्धार्य है",
+        "noWeightSumOrFactors": "weightSum या कारक तालिका अनुपस्थित है, इसलिए संवृत्ति अनिर्धार्य है"
+      },
+      "supported": "डेटा सहित"
     },
     "charts": {
       "noSectorData": "कोई क्षेत्र डेटा नहीं",

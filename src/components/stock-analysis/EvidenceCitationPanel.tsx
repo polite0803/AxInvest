@@ -1,48 +1,81 @@
 /**
- * 证据引用审计溯源面板
+ * 决策证据对账审计面板
  *
- * 展示决策理由 → 分析师报告 → 数据源的完整引用链。
- * 数据来自 extract_evidence_citations 后端命令。
+ * 数据来自 `audit_decision_evidence` 命令。判据在 2026-10-16 换成**决策因子对账**
+ * （旧实现是文本相似度：把理由按句拆开后与分析师报告做字符集 Jaccard，实测对
+ * 83% 的记录只读出「文案长度」——动机与实证见 `PLAN-evidence-factor-audit.md` §〇）。
+ *
+ * 面板分两面，**两套计数各自成句、不并排成一个数字**：
+ * - 本档分支腿：上游在场 / 显式缺席 / 静默缺席 / 无法核查（快照不携带来源键）
+ * - 主档因子腿：σ 可回算 / 不可回算 / 无基准 + 全局闭合
  */
 
 import { invoke } from "@/lib/invoke";
-import { Alert, Button, Collapse, Spin, Tag, Tooltip } from "antd";
+import { Alert, Button, Spin, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { confidenceBar } from "./evidenceConfidenceBar";
 
-/** 单条证据引用（对齐后端 EvidenceCitation） */
-interface EvidenceCitation {
-  claim: string;
-  sourceAnalystId: string;
-  sourceAnalystName: string;
-  /**
-   * 匹配置信度，量纲契约 = **`[0, 1]`**
-   *
-   * 后端类型是 `axagent_harness::domain_semantics::Ratio01`（构造即钳制），
-   * `serde(transparent)` 保证过线后仍是裸数字 —— 所以这里乘 100 才是对的。
-   * ⚠ 展示方**不要**再夹 `Math.min(…, 100)` 把越界压平：那会掩盖契约破坏。
-   */
-  matchConfidence: number;
-  sourceSnippet: string;
-  hasDataSupport: boolean;
-  dataSource: string | null;
+/** 上游在场判据（对齐后端 `UpstreamState`，serde 内部标签 `state`） */
+type UpstreamState =
+  | { state: "present" }
+  | { state: "declaredAbsent" }
+  | { state: "silentAbsent" }
+  | { state: "notChecked"; reason: string };
+
+/** σ 回算结果（对齐后端 `Reconcile`） */
+type Reconcile =
+  | { state: "consistent"; delta: number; tolerance: number; basis: string }
+  | { state: "inconsistent"; delta: number; tolerance: number; basis: string }
+  | { state: "noBasis"; reason: string };
+
+/** 全局闭合（对齐后端 `Closure`） */
+type Closure =
+  | { state: "closed"; recomputed: number; stored: number; tolerance: number }
+  | { state: "broken"; recomputed: number; stored: number; tolerance: number }
+  | { state: "notComputable"; reason: string };
+
+interface BranchLegAudit {
+  factor: string;
+  owner: string | null;
+  ownerName: string;
+  role: string;
+  signal: number | null;
+  weight: number;
+  participates: boolean;
+  expectedToParticipate: boolean;
+  upstream: UpstreamState;
+  absenceDeclared: boolean;
 }
 
-/** 引用报告（对齐后端 CitationReport） */
-interface CitationReport {
+interface FactorLegAudit {
+  legId: string;
+  name: string;
+  sigma: number;
+  weight: number;
+  owner: string | null;
+  participates: boolean;
+  reconcile: Reconcile;
+}
+
+interface EvidenceAuditReport {
   stockCode: string;
   stockName: string;
   analysisDate: string;
   decisionAction: string;
   decisionConfidence: number;
-  citations: EvidenceCitation[];
-  /** 本轮决策未产出（后端按 `Unavailable` 哨兵判定），支撑率**不适用** */
+  /** 本轮决策未产出（后端按 `Unavailable` 哨兵判定）⇒ 无可审计对象 */
   decisionDegraded: boolean;
-  supportedClaims: number;
-  totalClaims: number;
-  supportRate: number;
-  analystCount: number;
+  tier: string;
+  branchLegs: BranchLegAudit[];
+  factorLegs: FactorLegAudit[];
+  closure: Closure;
+  expectedBranchLegs: number;
+  participatingBranchLegs: number;
+  upstreamPresentLegs: number;
+  upstreamNotCheckedLegs: number;
+  sigmaReconciledLegs: number;
+  participatingFactorLegs: number;
+  factorLegsTotal: number;
 }
 
 interface Props {
@@ -50,20 +83,42 @@ interface Props {
   visible?: boolean;
 }
 
+const NOT_CHECKED_REASON: Record<string, string> = {
+  NO_SNAPSHOT_KEY: "noSnapshotKey",
+  NO_OWNER: "noOwner",
+  UNREGISTERED_FACTOR: "unregisteredFactor",
+};
+
+const NO_BASIS_REASON: Record<string, string> = {
+  NO_PERSISTED_BASIS: "noPersistedBasis",
+  BASIS_MISSING_IN_RECORD: "basisMissingInRecord",
+};
+
+const CLOSURE_REASON: Record<string, string> = {
+  DECISION_DEGRADED: "decisionDegraded",
+  NO_WEIGHT_SUM_OR_FACTORS: "noWeightSumOrFactors",
+};
+
+const UPSTREAM_TAG_COLOR: Record<UpstreamState["state"], string> = {
+  present: "green",
+  declaredAbsent: "default",
+  silentAbsent: "orange",
+  notChecked: "default",
+};
+
 export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
   const { t } = useTranslation();
-  const [report, setReport] = useState<CitationReport | null>(null);
+  const [report, setReport] = useState<EvidenceAuditReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 依赖只留 analysisId：react-i18next 的 `t` 每轮渲染都是新引用，放进 deps 会让本
-  // callback 每轮重建 ⇒ 下方 effect 每轮重跑（实测一次挂载把这条 IPC 刷了 38 次）。
-  // 故 callback 内不引用 t，「无消息可用」时的文案兜底挪到渲染处。
-  const loadCitations = useCallback(async () => {
+  // 依赖只留 analysisId：`t` 每轮渲染都是新引用，放进 deps 会让本 callback 每轮重建
+  // ⇒ effect 自激（实测一次挂载把这条 IPC 刷了 38 次，回归用例锁在 1 次）。
+  const loadAudit = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke<CitationReport>("extract_evidence_citations", {
+      const result = await invoke<EvidenceAuditReport>("audit_decision_evidence", {
         analysisId,
       });
       setReport(result);
@@ -76,9 +131,9 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
 
   useEffect(() => {
     if (visible && analysisId) {
-      loadCitations();
+      loadAudit();
     }
-  }, [visible, analysisId, loadCitations]);
+  }, [visible, analysisId, loadAudit]);
 
   if (!visible) { return null; }
 
@@ -90,8 +145,7 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
     );
   }
 
-  // 用 `!== null` 而非真值判断：错误已发生但消息为空串时，也必须停在错误态，
-  // 不能落到下面的「暂无数据」（那会把「取数失败」说成「没有数据」）。
+  // 用 `!== null` 而非真值判断：错误已发生但消息为空串时也必须停在错误态。
   if (error !== null) {
     return (
       <Alert
@@ -103,9 +157,7 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
     );
   }
 
-  // 决策未产出：理由栏装的是降级诊断串，没有任何「引用」可审计。
-  // ⚠ 必须**先于**下方 citations 空态分支，且**不得**渲染统计卡 —— 支撑率 0/0 显示成
-  // 「0%」会把「拿不到」伪装成「查了、结果是零分」，与「理由无数据支撑」同形。
+  // 决策未产出：本轮没有可审计对象。必须**先于**任何空态分支，且不得渲染任何计数。
   if (report?.decisionDegraded) {
     return (
       <Alert
@@ -119,7 +171,7 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
     );
   }
 
-  if (!report || report.citations.length === 0) {
+  if (!report || (report.branchLegs.length === 0 && report.factorLegs.length === 0)) {
     return (
       <div className="text-gray-400 text-sm text-center py-6">
         {t("stockAnalysis.evidenceCitation.noData")}
@@ -129,114 +181,163 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
 
   return (
     <div className="space-y-3">
-      {/* 概览头部 */}
       <div className="flex items-center justify-between">
         <div>
           <span className="text-sm font-medium text-gray-200">
             {t("stockAnalysis.evidenceCitation.title")}
           </span>
           <span className="text-xs text-gray-500 ml-2">
-            {report.stockCode} · {report.analysisDate}
+            {report.stockCode} · {report.analysisDate} · {report.tier}
           </span>
         </div>
-        <Button size="small" onClick={loadCitations}>
+        <Button size="small" onClick={loadAudit}>
           {t("common.refresh")}
         </Button>
       </div>
 
-      {/* 统计卡 */}
-      <div className="grid grid-cols-3 gap-2">
-        <div className="bg-gray-800/60 rounded p-2 text-center">
-          <div className="text-lg font-semibold text-green-400">
-            {Math.round(report.supportRate * 100)}%
+      {/* ── B 面：本档分支腿 ── */}
+      {report.branchLegs.length > 0 && (
+        <div className="bg-gray-800/40 rounded p-2 space-y-2">
+          <div className="text-xs font-medium text-gray-300">
+            {t("stockAnalysis.evidenceCitation.branchSection")}
           </div>
-          <div className="text-[10px] text-gray-400">
-            {t("stockAnalysis.evidenceCitation.supportRate")}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-400">
+            <span>
+              {t("stockAnalysis.evidenceCitation.expectedLegs")}: {report.expectedBranchLegs}
+            </span>
+            <span>
+              {t("stockAnalysis.evidenceCitation.participatingLegs")}: {report.participatingBranchLegs}
+            </span>
+            <span className="text-green-400/80">
+              {t("stockAnalysis.evidenceCitation.upstreamPresentCount")}: {report.upstreamPresentLegs}
+            </span>
+            <span>
+              {t("stockAnalysis.evidenceCitation.upstreamNotCheckedCount")}: {report.upstreamNotCheckedLegs}
+            </span>
           </div>
-        </div>
-        <div className="bg-gray-800/60 rounded p-2 text-center">
-          <div className="text-lg font-semibold text-blue-400">{report.analystCount}</div>
-          <div className="text-[10px] text-gray-400">
-            {t("stockAnalysis.evidenceCitation.analystCount")}
-          </div>
-        </div>
-        <div className="bg-gray-800/60 rounded p-2 text-center">
-          <div className="text-lg font-semibold text-yellow-400">{report.totalClaims}</div>
-          <div className="text-[10px] text-gray-400">
-            {t("stockAnalysis.evidenceCitation.claimCount")}
-          </div>
-        </div>
-      </div>
-
-      {/* 理由列表 */}
-      <Collapse
-        size="small"
-        items={report.citations.map((citation, i) => {
-          // 契约 [0,1]；越界必须可见（判据与回归测试见 evidenceConfidenceBar.ts）
-          const bar = confidenceBar(citation.matchConfidence);
-          return {
-            key: String(i),
-            label: (
+          <div className="space-y-1">
+            {report.branchLegs.map((leg) => (
               <div
-                className="flex items-center gap-2 text-sm"
-                style={{ maxWidth: "100%", minWidth: 0 }}
+                key={leg.factor}
+                className="flex items-baseline gap-2 text-xs"
+                style={{ flexWrap: "wrap" }}
               >
-                <span className="text-gray-400 font-mono text-xs shrink-0">#{i + 1}</span>
-                <span
-                  className="text-gray-200 flex-1"
-                  style={{
-                    overflowWrap: "anywhere",
-                    wordBreak: "break-all",
-                    whiteSpace: "normal",
-                  }}
-                >
-                  {citation.claim}
+                <span className="font-mono text-gray-300 shrink-0">{leg.factor}</span>
+                <Tag className="text-[10px] leading-none px-1 py-0 shrink-0">{leg.ownerName}</Tag>
+                <span className="text-gray-500 font-mono text-[11px]">
+                  {t("stockAnalysis.evidenceCitation.weight")}={leg.weight.toFixed(3)}
+                  {leg.signal !== null
+                    ? ` ${t("stockAnalysis.evidenceCitation.signal")}=${leg.signal.toFixed(3)}`
+                    : ""}
                 </span>
-                <Tag
-                  className="text-[10px] leading-none px-1 py-0 shrink-0"
-                  color={citation.hasDataSupport ? "green" : "orange"}
+                {!leg.participates && !leg.absenceDeclared && (
+                  <Tag color="orange" className="text-[10px] leading-none px-1 py-0 shrink-0">
+                    {t("stockAnalysis.evidenceCitation.absenceUndeclared")}
+                  </Tag>
+                )}
+                <Tooltip
+                  title={leg.upstream.state === "notChecked"
+                    ? t(
+                      `stockAnalysis.evidenceCitation.notChecked.${
+                        NOT_CHECKED_REASON[leg.upstream.reason] ?? "noSnapshotKey"
+                      }`,
+                    )
+                    : undefined}
                 >
-                  {citation.hasDataSupport
-                    ? t("stockAnalysis.evidenceCitation.supported")
-                    : t("stockAnalysis.evidenceCitation.unsupported")}
-                </Tag>
-              </div>
-            ),
-            children: (
-              <div className="text-xs space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-400">
-                    {t("stockAnalysis.evidenceCitation.source")}:
-                  </span>
-                  <Tag className="text-xs">{citation.sourceAnalystName}</Tag>
-                  <Tooltip
-                    title={t("stockAnalysis.evidenceCitation.matchConfidence", {
-                      percent: (citation.matchConfidence * 100).toFixed(0),
-                    })}
+                  <Tag
+                    color={UPSTREAM_TAG_COLOR[leg.upstream.state]}
+                    className="text-[10px] leading-none px-1 py-0 shrink-0"
                   >
-                    <div className="h-1.5 w-16 bg-gray-700 rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full"
-                        style={{ width: `${bar.widthPct}%`, backgroundColor: bar.color }}
-                      />
-                    </div>
-                  </Tooltip>
-                </div>
-                {citation.sourceSnippet && (
-                  <div className="bg-gray-900/60 rounded p-1.5 text-gray-400 italic border-l-2 border-gray-600">
-                    {citation.sourceSnippet}
-                  </div>
-                )}
-                {citation.dataSource && (
-                  <div className="text-green-400/80">
-                    📊 {citation.dataSource}
-                  </div>
-                )}
+                    {t(`stockAnalysis.evidenceCitation.upstream.${leg.upstream.state}`)}
+                  </Tag>
+                </Tooltip>
               </div>
-            ),
-          };
-        })}
-      />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── A 面：主档因子闭合对账 ── */}
+      {report.factorLegs.length > 0 && (
+        <div className="bg-gray-800/40 rounded p-2 space-y-2">
+          <div className="text-xs font-medium text-gray-300">
+            {t("stockAnalysis.evidenceCitation.factorSection")}
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-400">
+            <span className="text-green-400/80">
+              {t("stockAnalysis.evidenceCitation.sigmaReconciled")}: {report.sigmaReconciledLegs}/
+              {report.factorLegsTotal}
+            </span>
+            <span>
+              {t("stockAnalysis.evidenceCitation.participatingLegs")}:{" "}
+              {report.participatingFactorLegs}/{report.factorLegsTotal}
+            </span>
+            <Tooltip
+              title={report.closure.state === "notComputable"
+                ? t(
+                  `stockAnalysis.evidenceCitation.closureReason.${
+                    CLOSURE_REASON[report.closure.reason] ?? "noWeightSumOrFactors"
+                  }`,
+                )
+                : undefined}
+            >
+              <span
+                className={report.closure.state === "closed"
+                  ? "text-green-400/80"
+                  : report.closure.state === "broken"
+                  ? "text-red-400/80"
+                  : "text-gray-400"}
+              >
+                {t(`stockAnalysis.evidenceCitation.closure.${report.closure.state}`)}
+              </span>
+            </Tooltip>
+          </div>
+          <div className="space-y-1">
+            {report.factorLegs.map((leg) => (
+              <div
+                key={leg.legId}
+                className="flex items-baseline gap-2 text-xs"
+                style={{ flexWrap: "wrap" }}
+              >
+                <span className="font-mono text-gray-400 shrink-0">{leg.legId}</span>
+                <span className="text-gray-300 shrink-0">{leg.name}</span>
+                <Tag className="text-[10px] leading-none px-1 py-0 shrink-0">
+                  {leg.owner ?? t("stockAnalysis.evidenceCitation.metaLeg")}
+                </Tag>
+                <span className="text-gray-500 font-mono text-[11px]">
+                  σ={leg.sigma} w={leg.weight}
+                </span>
+                <Tooltip
+                  title={leg.reconcile.state === "noBasis"
+                    ? t(
+                      `stockAnalysis.evidenceCitation.noBasis.${
+                        NO_BASIS_REASON[leg.reconcile.reason] ?? "noPersistedBasis"
+                      }`,
+                    )
+                    : leg.reconcile.state !== "inconsistent"
+                    ? `${leg.reconcile.basis} Δ=${leg.reconcile.delta.toFixed(4)} ≤ ${
+                      leg.reconcile.tolerance.toFixed(4)
+                    }`
+                    : `${leg.reconcile.basis} Δ=${leg.reconcile.delta.toFixed(4)} > ${
+                      leg.reconcile.tolerance.toFixed(4)
+                    }`}
+                >
+                  <Tag
+                    color={leg.reconcile.state === "consistent"
+                      ? "green"
+                      : leg.reconcile.state === "inconsistent"
+                      ? "red"
+                      : "default"}
+                    className="text-[10px] leading-none px-1 py-0 shrink-0"
+                  >
+                    {t(`stockAnalysis.evidenceCitation.sigma.${leg.reconcile.state}`)}
+                  </Tag>
+                </Tooltip>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

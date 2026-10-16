@@ -346,16 +346,6 @@ pub const CONCEPTS: &[ConceptDecl] = &[
         evidence: "src-tauri/crates/analysis-engine/src/stock_analysis_round.rs:312 | src-tauri/crates/analysis-engine/src/stock_analysis_round.rs:343",
     },
     ConceptDecl {
-        id: "axinvest.evidence.match_confidence",
-        name: "match_confidence",
-        carrier: "EvidenceCitation",
-        unit: Unit::Ratio,
-        min: 0.0,
-        max: 1.0,
-        meaning: "证据引用与分析师报告的匹配度",
-        evidence: "src-tauri/crates/analysis-engine/src/evidence_citation.rs:58 | src-tauri/crates/analysis-engine/src/evidence_citation.rs:260",
-    },
-    ConceptDecl {
         id: "axagent.calibration.score",
         name: "score",
         carrier: "CalibrationResult（市场模拟参数校准）",

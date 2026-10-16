@@ -228,13 +228,16 @@ if (canRunFrontend) {
   step("前后端档位权重门自检（判据①—⑧正负对照）", "node scripts/check-horizon-weight-parity.mjs --selftest");
   step("前后端档位权重逐字段一致（含档名不手抄天数）", "node scripts/check-horizon-weight-parity.mjs");
   // 2026-10-16（`AUDIT-horizon-naming-2026-10-16.md`）：档名这条链此前**整体没有门** ——
-  //   判据 ④ 只读 `stockAnalysis.reflection` 段（8 套键族里只覆盖 1 套），于是
+  //   判据 ④ 只读 `stockAnalysis.reflection` 段（当时 8 套键族里只覆盖 1 套），于是
   //   「第 4 档 = 季度」这类漂移在 `cargo check` / `typecheck` / 既有门全绿下存活，
   //   并与后端 `tierLabel` / `dataGaps`（用权威 `label_zh`）**同屏两名**。
-  //   本门补整链：族间逐字一致 + 禁尺度词（`quarterly` 是 bar 粒度，不是持有期）+ 与
-  //   `Period::label_zh()` 逐字对账。自检复刻事故形态（含「全族一致地错」这条最隐蔽支）。
-  step("四周期档名一致性自检（判据 A/B/C 正负对照）", "node scripts/check-horizon-label-parity.mjs --selftest");
-  step("四周期档名一致（族间逐字 / 禁尺度词 / 与 label_zh 对账）", "node scripts/check-horizon-label-parity.mjs");
+  //   本门补整链：禁尺度词（`quarterly` 是 bar 粒度，不是持有期）+ 与
+  //   `Period::label_zh()` 逐字对账 + e2e 硬编码锚点 + 四档互异。
+  //   同日第二批把 7 套冗余族**整体删除**（值统一了但定义仍是 8 份）⇒ 主判据换成
+  //   **唯一族 + 禁回流（判据 E）**：防的不是不一致，是重复定义再生。
+  //   自检复刻事故形态（含「禁回流」「四档同值」这两条收敛后才存在的支）。
+  step("四周期档名一致性自检（判据 B/C/D/E/F 正负对照）", "node scripts/check-horizon-label-parity.mjs --selftest");
+  step("四周期档名一致（唯一族 / 禁回流 / 禁尺度词 / 与 label_zh 对账）", "node scripts/check-horizon-label-parity.mjs");
   step("可调参数注入覆盖（五点对账，strict）", "node scripts/audit-inject-coverage.mjs --strict");
   // v135（B-2b #36）：四个 `pm-h-<档>` 分支节点已从主图种子搬进**档子模板 builder** ⇒ 审计面
   // 必须跟着搬。不搬的话这四处会同时失去读取面而**照样绿**（§九十一(2.5)：门跟着搬，
@@ -298,14 +301,24 @@ if (canRunFrontend) {
   step("主题前景 token（--accent 上禁写死白）自检", "node scripts/check-accent-foreground.mjs --selftest");
   step("主题前景 token（--accent 上禁写死白）", "node scripts/check-accent-foreground.mjs");
 
-  // ── i18n 三道互补门禁（2026-09-14 补：此前本地镜像**一条都没有**）──
-  // 为什么必须三道都在：它们查的是**互不重叠**的东西，缺一条就有一种逃逸路径 ——
+  // ── i18n **五道**互补门禁（2026-09-14 补三道：此前本地镜像**一条都没有**）──
+  // 为什么必须五道都在：它们查的是**互不重叠**的东西，缺一条就有一种逃逸路径 ——
   //   ① 硬编码文案：代码里直接写死中文字面量（值层查不到，因为压根没进 locale）
   //   ② key 对齐  ：JSON 语法 / zh-CN 空值 / 代码 t() 引用的 key 是否存在
   //   ③ 值未翻译  ：非 CJK locale 的值是否**仍是中文**（key 齐全但值是中文 ⇒ 只有这条能拦）
+  //   ④ key 集合  ：zh-CN ↔ 其余 10 语言的**双向叶子路径差集**（← 2026-09-21 CI 补、
+  //      2026-10-16 才接进本地镜像）。缺这条时：往 zh-CN 加/删 key 而漏掉其它语言，
+  //      ①②③ 全绿，运行时靠 `fallbackLng: "zh-CN"` **静默回退**（用户看到中文揣在日文界面里）。
+  //   ⑤ 占位符    ：资源值与调用点对账（值==键本身、或 `{{count}}` 从未插值）（← 2026-10-01 CI 补、
+  //      2026-10-16 才接进本地镜像）。缺这条时用户在界面上直接看到模板原文。
+  //
+  // ⚠ ④⑤ 的接线断过一次的形态：它们**只被加进 `ci.yml`**、没进本地镜像，而
+  //   `src/__tests__/ci.workflow.test.ts` 的「同步护栏」当时也只守 2026-09-14 那三道
+  //   ⇒ **本地绿冒充 CI 绿**，且守卫自身也腐烂。该测试已同步扩到五道。
   // 调用方式刻意走 **node 直调**（`i18n-scan.mjs` / `check-i18n-untranslated.mjs`），
   // 不用 `.sh` 包装 —— Windows 本地下 `bash` 未必在 PATH，会造成「本地跑不起来」。
-  // ③ 的自检**内建在每次运行里**（含「豁免既生效又不过宽」对照），无需单独的 --selftest 步骤。
+  // ③④⑤ 的自检**内建在每次运行里**（③含「豁免既生效又不过宽」对照、④含「查不存在路径」正控），
+  // 无需单独的 --selftest 步骤。
   step("i18n 硬编码文案", "node scripts/i18n-scan.mjs --strict");
   step("i18n 未翻译值（非 CJK locale 不得含汉字）", "node scripts/check-i18n-untranslated.mjs");
   if (hasPython) {
@@ -317,6 +330,9 @@ if (canRunFrontend) {
       `  ${"i18n key 对齐 + zh-CN 空值".padEnd(52)}${c.yellow}跳过（未找到 python，**跳过 ≠ 通过**）${c.reset}`,
     );
   }
+  // ④⑤ 命令行与 `.github/workflows/ci.yml:405/418` **逐字同源**（两处都写 `node`，不用 npx）。
+  step("i18n key 集合（zh-CN ↔ 其余 10 语言）", "node scripts/check-i18n-key-parity.mjs");
+  step("i18n 占位符使用（值不得==键名；{{x}} 必须被插值）", "node scripts/check-i18n-placeholder-usage.mjs");
 
   step("dprint 格式化检查", "npx dprint check --incremental=false");
 

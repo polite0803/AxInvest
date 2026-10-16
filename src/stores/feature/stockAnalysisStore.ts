@@ -1440,9 +1440,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       // `decision_action = NULL`，见 core.rs 的建行分支）⇒ 重开一条**尚未定稿**的记录
       // （仍在跑 / 中断 / 取消）时，此前一律走 completed 布局，于是同一屏出现两句自相矛盾的话：
       //   · 分析师卡：`isRunning` 为假 ⇒ 每个 base 落「失败·节点无数据」；
-      //   · 决策区：`EvidenceCitationPanel` 照常挂载，后端 `extract_evidence_citations`
+      //   · 决策区：`EvidenceCitationPanel` 照常挂载，后端 `audit_decision_evidence`
       //     读到的还是建行时的 NULL ⇒ 兜底成 `ACTION_UNAVAILABLE` 哨兵
-      //     ⇒ 面板显示「证据引用审计不适用（本轮决策未产出）」。
+      //     ⇒ 面板显示「证据对账审计不适用（本轮决策未产出）」。
       // 换句话说，**把「没跑完」当成「已完成」**才是那组矛盾文案的来源，而非真实的缺失。
       //
       // 只有后端落定 `completed` 才按完成态渲染；其余一律按 running 呈现

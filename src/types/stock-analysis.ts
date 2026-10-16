@@ -1810,6 +1810,13 @@ export interface HitrateStats {
   byAction: HitrateGroup[];
   byHorizon: HitrateGroup[];
   /**
+   * 逐档结局 2×2（B4）：公式判对否 × LLM 判对否，同窗口、同判定函数（产端
+   * `reflection_stats::build_horizon_confusion`）。四档恒各一行 —— 没样本的档是
+   * `judged === 0`，不是「没有这一档」。
+   * ⚠ 计数域与 `byHorizon`（只统计公式侧）不同，两者不得并成同一个分母读。
+   */
+  horizonConfusion: HorizonConfusionRow[];
+  /**
    * 预测半衰期（交易日）：由逐档 rank IC 的指数衰减拟合导出（IC(h)≈IC₀·e^(−λh)）。
    * null = 无法拟合（有效档 < 3 / IC 非正 / 拟合优度不达标），不是「无限长」。
    * Phase E 仅观测，不回写任何权重。
@@ -1836,6 +1843,32 @@ export interface HitrateStats {
    * 供面板如实报出。
    */
   unknownGenerationSamples?: number;
+}
+
+/**
+ * 逐档结局 2×2 的一行（B4，产端 `reflection_stats.rs::HorizonConfusionRow`）。
+ *
+ * 每一格 = 「公式这一档判对/判错 × LLM 这一档判对/判错」；两侧同一份 `returnPct`、
+ * 同一个判定函数、同一个成熟窗口 ⇒ 四格可直接对比。
+ * ⚠ `llmUndecided` **不进任何一格**：LLM 缺席 / 窗口未满 / 动作非方向性（观望、持有）
+ * 都不构成「LLM 判错」；把它折进 `bothWrong`/`formulaOnly` 会让 LLM 胜率凭空变差。
+ * ⚠ `sufficient === false` ⇒ 四格只是计数、不是结论（门槛 = 产端 `MIN_SAMPLE`）。
+ */
+export interface HorizonConfusionRow {
+  /** 档位键（snake，与 `horizonResults` 的键族一致） */
+  tier: string;
+  /** 档位中文名（与 `HorizonAgreement.tierLabel` 同口径；显示名仍走本项目 i18n） */
+  tierLabel: string;
+  bothCorrect: number;
+  formulaOnly: number;
+  llmOnly: number;
+  bothWrong: number;
+  llmUndecided: number;
+  /** 四格合计 = 这档 2×2 的分母 */
+  judged: number;
+  /** 该档三维分均值（只收有值的行）；一条都没有 → null（不是 0 分） */
+  avgHorizonAgreement: number | null;
+  sufficient: boolean;
 }
 
 // ── 四周期反思结果（批次 3/4：horizon_results_json 结构化）──

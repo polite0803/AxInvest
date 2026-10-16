@@ -719,7 +719,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     : null;
 
   // ── P2-c：主档「谁定的」（`horizonSource`：分支选档 / 公式定档）──
-  // 与档名标签并列展示（「季度 · 分支选档」）。值域白名单 = `horizonSourceLabelKey`；
+  // 与档名标签并列展示（「长线 · 分支选档」）。值域白名单 = `horizonSourceLabelKey`；
   // 缺席（该字段引入前的记录）返回 null ⇒ 整块不渲染，不给旧记录编它没有的来历
   // （与 provenanceLine 同纪律）。
   const horizonSourceKey = horizonSourceLabelKey(decision.horizonSource);

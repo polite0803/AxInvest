@@ -6574,10 +6574,6 @@
       "group-presets": "Common presets",
       "group-custom-interval": "Custom interval",
       "label-periods": "Recommendation periods",
-      "period-ultra-short": "Ultra-short term",
-      "period-short": "Short term",
-      "period-mid": "Medium term",
-      "period-long": "Long term",
       "placeholder-periods": "Select one or more periods",
       "label-min-confidence": "Minimum confidence",
       "label-top-n": "Top N limit",
@@ -14997,12 +14993,6 @@
       "okCount": "{{n}} ok",
       "failCount": "{{n}} failed",
       "totalCount": "{{n}} total",
-      "period": {
-        "ultra_short": "Ultra-short term",
-        "short": "Short term",
-        "mid": "Medium term",
-        "long": "Long term"
-      },
       "dueYes": "Due",
       "dueNo": "Pending",
       "analysisOk": "Analysis OK",
@@ -15597,10 +15587,6 @@
     "optionsEmpty": "No options data",
     "peers": "Peer Comparison",
     "peersEmpty": "No peer data",
-    "periodLong": "Long term",
-    "periodMid": "Medium term",
-    "periodUltraShort": "Ultra-short term",
-    "periodShort": "Short term",
     "position": "Position",
     "price": "Price",
     "profitGrowth": "Profit Growth",
@@ -15798,11 +15784,7 @@
       "1d": "Daily",
       "1w": "Weekly",
       "1M": "Monthly",
-      "zoomHint": "Drag to zoom",
-      "ultraShort": "Ultra-short term",
-      "short": "Short term",
-      "mid": "Medium term",
-      "long": "Long term"
+      "zoomHint": "Drag to zoom"
     },
     "progress": {
       "fetchingData": "Fetching stock data...",
@@ -17089,10 +17071,6 @@
       "outcome": "Outcome",
       "outcomeLoss": "Loss",
       "outcomeWin": "Win",
-      "periodLong": "Long term",
-      "periodMid": "Medium term",
-      "periodUltraShort": "Ultra-short term",
-      "periodShort": "Short term",
       "realTooltip": "Primary strategy real hits (K-line/Financial/Fund flow signals complete)",
       "reportCountSuffix": " reports",
       "row": {
@@ -17293,10 +17271,6 @@
       "hitrateByHorizon": "By Horizon",
       "hitrateGroupRate": "Group Hit Rate",
       "insufficientSamples": "Insufficient samples",
-      "horizonUltraShort": "Ultra-short term",
-      "horizonShort": "Short term",
-      "horizonMid": "Medium term",
-      "horizonLong": "Long term",
       "horizonAuto": "By primary tier",
       "horizonUnknown": "Unknown horizon",
       "colHorizon": "Review horizon",
@@ -17361,6 +17335,13 @@
       "failureModeChaseUpBar": "Chasing a big up bar",
       "failureModeRegimeEndorsement": "Market regime endorsing a single stock",
       "failureModeReverseDcfIgnored": "Reverse DCF ignored",
+      "horizonConfusionTitle": "Per-tier outcome cross-check (formula × LLM)",
+      "horizonConfusionNotProduced": "No per-tier outcome cross-check for this record (pre-launch data, or no judged samples)",
+      "horizonConfusionInsufficient": "Insufficient samples ({{judged}} judged) — the counts below are raw records, not conclusions",
+      "horizonConfusionCells": "Both right {{both}} · formula only {{formulaOnly}} · LLM only {{llmOnly}} · both wrong {{bothWrong}}",
+      "horizonConfusionUndecided": "{{undecided}} with no LLM verdict (absent / window not matured / non-directional action such as hold or wait) — counted in no cell",
+      "horizonConfusionAvgAgreement": "Mean 3-dim agreement for this tier {{pct}}",
+      "horizonConfusionScopeNote": "Both sides share one window and one verdict function; the four cells compare direction only, not returns, and use a different denominator than the hit rate above.",
       "failureModeOther": "Other"
     },
     "row": {
@@ -17398,12 +17379,6 @@
         "daily1800": "Daily 18:00",
         "daily0700": "Daily 07:00",
         "tradeDay1600": "Trading Day 16:00 (After Close)"
-      },
-      "period": {
-        "ultraShort": "Ultra-short term",
-        "short": "Short term",
-        "mid": "Medium term",
-        "long": "Long term"
       },
       "description": "Persisted via CronJobStore — run full analysis periodically for specified stocks",
       "disabled": "Disabled",
@@ -18273,16 +18248,50 @@
       "error": "Extraction Failed",
       "noData": "No Evidence Citation Data",
       "title": "Evidence Citation Audit",
-      "supportRate": "Data Support Rate",
-      "analystCount": "Source Analysts",
-      "claimCount": "Decision Reasons",
-      "supported": "With Data",
-      "unsupported": "No Data",
-      "source": "Source",
       "extractFailed": "Evidence extraction failed",
-      "matchConfidence": "Match confidence",
       "notApplicable": "Evidence citation audit not applicable (no decision was produced)",
-      "notApplicableDetail": "This run produced no decision (action={{action}} is the missing-data sentinel, not a conclusion), so the reasoning field holds degradation diagnostics with no auditable analyst evidence. The support rate is undefined in this case, so it is not shown as 0%."
+      "notApplicableDetail": "This run produced no decision (action={{action}} is the missing-data sentinel, not a conclusion), so the reasoning field holds degradation diagnostics with no auditable analyst evidence. The support rate is undefined in this case, so it is not shown as 0%.",
+      "branchSection": "Branch legs for this horizon",
+      "factorSection": "Main-tier factor closure",
+      "expectedLegs": "Expected",
+      "participatingLegs": "Participating",
+      "upstreamPresentCount": "Upstream present",
+      "upstreamNotCheckedCount": "Not checkable",
+      "sigmaReconciled": "σ reconciled",
+      "weight": "w",
+      "signal": "signal value",
+      "absenceUndeclared": "Absence undeclared",
+      "metaLeg": "meta",
+      "upstream": {
+        "present": "Present",
+        "declaredAbsent": "Declared absent",
+        "silentAbsent": "Silent absence",
+        "notChecked": "Not checkable"
+      },
+      "notChecked": {
+        "noSnapshotKey": "This record's snapshot has no output key for that source, so the check does not apply",
+        "noOwner": "No owner analyst is registered for this factor",
+        "unregisteredFactor": "This factor is not in the source registry (check not applicable)"
+      },
+      "sigma": {
+        "consistent": "σ consistent",
+        "inconsistent": "σ mismatch",
+        "noBasis": "No basis"
+      },
+      "noBasis": {
+        "noPersistedBasis": "No persisted basis to reconcile in this record (the normalization is not centralized yet)",
+        "basisMissingInRecord": "The basis key is registered but missing in this record"
+      },
+      "closure": {
+        "closed": "Closed",
+        "broken": "Not closed",
+        "notComputable": "Undetermined"
+      },
+      "closureReason": {
+        "decisionDegraded": "No decision was produced this round, so closure cannot be determined",
+        "noWeightSumOrFactors": "weightSum or the factor table is missing, so closure cannot be determined"
+      },
+      "supported": "With Data"
     },
     "charts": {
       "noSectorData": "No Sector Allocation Data",

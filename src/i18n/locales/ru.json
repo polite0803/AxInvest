@@ -6573,10 +6573,6 @@
       "group-presets": "Частые пресеты",
       "group-custom-interval": "Пользовательский интервал",
       "label-periods": "Периоды рекомендаций",
-      "period-ultra-short": "Сверхкраткосрочный",
-      "period-short": "Краткосрочный",
-      "period-mid": "Среднесрочный",
-      "period-long": "Долгосрочный",
       "placeholder-periods": "Выберите один или несколько периодов",
       "label-min-confidence": "Минимальная достоверность",
       "label-top-n": "Лимит Top N",
@@ -14830,12 +14826,6 @@
       "okCount": "{{n}} ок",
       "failCount": "{{n}} ошибок",
       "totalCount": "{{n}} всего",
-      "period": {
-        "ultra_short": "Сверхкраткосрочный",
-        "short": "Краткосрочный",
-        "mid": "Среднесрочный",
-        "long": "Долгосрочный"
-      },
       "dueYes": "Наступил",
       "dueNo": "Ожидается",
       "analysisOk": "Анализ ок",
@@ -15440,11 +15430,7 @@
       "1d": "Дневной",
       "1w": "Недельный",
       "1M": "Месячный",
-      "zoomHint": "Масштабирование рамкой",
-      "ultraShort": "Сверхкраткосрочный",
-      "short": "Краткосрочный",
-      "mid": "Среднесрочный",
-      "long": "Долгосрочный"
+      "zoomHint": "Масштабирование рамкой"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15485,10 +15471,6 @@
     "industryRanking": "Industry Ranking",
     "clsFlash": "CLS Flash",
     "leader": "Leader",
-    "periodUltraShort": "Сверхкраткосрочный",
-    "periodShort": "Краткосрочный",
-    "periodMid": "Среднесрочный",
-    "periodLong": "Долгосрочный",
     "generatedAt": "Сгенерировано: {{time}}",
     "bannerVendorDisabled": "Некоторые стили отключены: {styles}",
     "openSettings": "Открыть настройки",
@@ -16841,10 +16823,6 @@
         "holding": "Holding Days",
         "confidence": "Confidence"
       },
-      "periodUltraShort": "Сверхкраткосрочный",
-      "periodShort": "Краткосрочный",
-      "periodMid": "Среднесрочный",
-      "periodLong": "Долгосрочный",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -17014,12 +16992,6 @@
         "daily0700": "Ежедневно 07:00",
         "tradeDay1600": "Trading Day 16:00 (After Close)"
       },
-      "period": {
-        "ultraShort": "Сверхкраткосрочный",
-        "short": "Краткосрочный",
-        "mid": "Среднесрочный",
-        "long": "Долгосрочный"
-      },
       "column": {
         "id": "ID",
         "description": "Description",
@@ -17178,10 +17150,6 @@
       "hitrateByHorizon": "По горизонту",
       "hitrateGroupRate": "Точность в группе",
       "insufficientSamples": "Недостаточно выборки",
-      "horizonUltraShort": "Сверхкраткосрочный",
-      "horizonShort": "Краткосрочный",
-      "horizonMid": "Среднесрочный",
-      "horizonLong": "Долгосрочный",
       "horizonAuto": "По основной ступени",
       "horizonUnknown": "Неизвестный горизонт",
       "colHorizon": "Горизонт разбора",
@@ -17246,6 +17214,13 @@
       "failureModeChaseUpBar": "Гонка за сильной свечой",
       "failureModeRegimeEndorsement": "Режим рынка как поручитель за бумагу",
       "failureModeReverseDcfIgnored": "Обратный DCF проигнорирован",
+      "horizonConfusionTitle": "Сверка исходов по горизонтам (формула × LLM)",
+      "horizonConfusionNotProduced": "Для этой записи нет сверки исходов по горизонтам (данные до запуска статистики либо нет оценённых образцов)",
+      "horizonConfusionInsufficient": "Недостаточно образцов (оценено {{judged}}) — числа ниже это сырые записи, а не выводы",
+      "horizonConfusionCells": "Оба верны {{both}} · только формула {{formulaOnly}} · только LLM {{llmOnly}} · оба неверны {{bothWrong}}",
+      "horizonConfusionUndecided": "Без вердикта LLM: {{undecided}} (отсутствие / окно не истекло / недирекциональное действие вроде ожидания или удержания) — не входит ни в одну клетку",
+      "horizonConfusionAvgAgreement": "Средняя трёхмерная согласованность горизонта {{pct}}",
+      "horizonConfusionScopeNote": "У обеих сторон одно окно и одна функция вердикта; четыре клетки сравнивают только направление, не доходность, и имеют другой знаменатель, чем доля попаданий выше.",
       "failureModeOther": "Прочее"
     },
     "portfolioMonitor": {
@@ -18055,16 +18030,50 @@
       "error": "Ошибка извлечения",
       "noData": "Нет данных цитат",
       "title": "Аудит цитат",
-      "supportRate": "Доля поддержки данными",
-      "analystCount": "Аналитики-источники",
-      "claimCount": "Причины решения",
-      "supported": "С данными",
-      "unsupported": "Без данных",
-      "source": "Источник",
       "extractFailed": "Не удалось извлечь доказательства",
-      "matchConfidence": "Уверенность совпадения",
       "notApplicable": "Аудит ссылок на доказательства неприменим (решение не сформировано)",
-      "notApplicableDetail": "Этот запуск не сформировал решение (action={{action}} — служебное значение отсутствия данных, а не вывод); поле обоснования содержит диагностику деградации и не содержит аудитуемых доказательств аналитиков. Поэтому показатель поддержки здесь не определён и не отображается как 0 %."
+      "notApplicableDetail": "Этот запуск не сформировал решение (action={{action}} — служебное значение отсутствия данных, а не вывод); поле обоснования содержит диагностику деградации и не содержит аудитуемых доказательств аналитиков. Поэтому показатель поддержки здесь не определён и не отображается как 0 %.",
+      "branchSection": "Аудит плеч этого горизонта",
+      "factorSection": "Сверка факторов основного уровня",
+      "expectedLegs": "Ожидается",
+      "participatingLegs": "Участвует",
+      "upstreamPresentCount": "Источник есть",
+      "upstreamNotCheckedCount": "Не проверяемо",
+      "sigmaReconciled": "σ сверен",
+      "weight": "вес",
+      "signal": "сигнал",
+      "absenceUndeclared": "Отсутствие не объявлено",
+      "metaLeg": "мета",
+      "upstream": {
+        "present": "Присутствует",
+        "declaredAbsent": "Отсутствие объявлено",
+        "silentAbsent": "Молчаливое отсутствие",
+        "notChecked": "Не проверяемо"
+      },
+      "notChecked": {
+        "noSnapshotKey": "В снимке этой записи нет ключа вывода для данного источника; критерий неприменим",
+        "noOwner": "Для этого фактора не зарегистрирован аналитик-владелец",
+        "unregisteredFactor": "Этот фактор отсутствует в реестре источников (критерий неприменим)"
+      },
+      "sigma": {
+        "consistent": "σ совпадает",
+        "inconsistent": "σ расходится",
+        "noBasis": "Нет базы"
+      },
+      "noBasis": {
+        "noPersistedBasis": "В этой записи нет сохранённой базы для сверки (нормализация ещё не централизована)",
+        "basisMissingInRecord": "Ключ базы зарегистрирован, но в этой записи отсутствует"
+      },
+      "closure": {
+        "closed": "Замкнуто",
+        "broken": "Не замкнуто",
+        "notComputable": "Не определимо"
+      },
+      "closureReason": {
+        "decisionDegraded": "В этот раз решение не было сформировано; замкнутость не определима",
+        "noWeightSumOrFactors": "Отсутствует weightSum или таблица факторов; замкнутость не определима"
+      },
+      "supported": "С данными"
     },
     "charts": {
       "noSectorData": "Нет данных по секторам",

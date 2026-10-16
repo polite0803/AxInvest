@@ -1,6 +1,6 @@
 import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
-import { FAST_TEMPLATE_ID } from "@/lib/stock-analysis-utils";
+import { FAST_TEMPLATE_ID, horizonLabelKey } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { App, Button, Input, Segmented, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useState } from "react";
@@ -15,13 +15,6 @@ interface ParsedIntent {
   success: boolean;
   description: string;
 }
-
-const HORIZON_LABELS: Record<string, string> = {
-  ultra_short: "ultraShort",
-  short: "short",
-  mid: "mid",
-  long: "long",
-};
 
 /**
  * 从搜索框文本解析出股票代码。
@@ -209,12 +202,7 @@ export function StockSearchBar() {
           <Tag color="blue" className="text-xs">{intent.stockQuery || intent.stockCode}</Tag>
           {intent.timeHorizon && (
             <Tag color="green" className="text-xs">
-              {t(`stockAnalysis.recommendation.${
-                HORIZON_LABELS[intent.timeHorizon] === "ultraShort"
-                  ? "periodUltraShort"
-                  : "period" + HORIZON_LABELS[intent.timeHorizon][0].toUpperCase()
-                    + HORIZON_LABELS[intent.timeHorizon].slice(1)
-              }`)}
+              {t(horizonLabelKey(intent.timeHorizon) ?? intent.timeHorizon)}
             </Tag>
           )}
           <span className="text-xs">{intent.description}</span>

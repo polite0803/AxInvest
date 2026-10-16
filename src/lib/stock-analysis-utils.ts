@@ -1447,6 +1447,21 @@ export function horizonSuffix(key: string): string | null {
 }
 
 /**
+ * 任意形态档名（camel 或 snake）→ **全仓唯一一套档名 i18n 键** `stockAnalysis.timeHorizon*`；
+ * 认不出 → `null`（调用方自己兜底显示原始键，不得瞎猜档位）。
+ *
+ * 存在理由（2026-10-16 收敛）：档名此前有 **8 套键族**（`period.*` / `period*` /
+ * `recommendation.period*` / `reflection.horizon*` / `scheduledAnalysis.period.*` /
+ * `replayWorkbench.batch.period.*` / `settings.scheduled-recommendation.period-*` +
+ * 本族），值虽已统一但**定义仍是 8 份** ⇒ 任一族漏改就前后端同屏两名。
+ * 收敛后只此一族，取键也走这一个函数：`t(horizonLabelKey(p) ?? p)`。
+ */
+export function horizonLabelKey(key: string): string | null {
+  const suffix = horizonSuffix(key);
+  return suffix ? `stockAnalysis.timeHorizon${suffix}` : null;
+}
+
+/**
  * rank IC 缺席原因 → i18n 键。**四种缺席各占一句**：把它们并成一句「暂无数据」，
  * 就等于告诉用户「这里没东西」，而真实情况分别是「要补字段」「要攒样本」
  * 「取值无差异（本档算不出相关系数）」、「要等口径换代」——要做的事完全不同。

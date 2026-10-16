@@ -159,21 +159,30 @@ describe(".github/workflows/ci.yml — 静态门禁接线", () => {
     expect(src).toContain("check-ontology-consistency.mjs");
   });
 
-  // ── i18n 三道互补门禁（2026-09-14 补）────────────────────────────────
-  // 为什么单独守：这三道查的是**互不重叠**的东西，缺一条就有一种逃逸路径 ——
+  // ── i18n **五道**互补门禁（2026-09-14 补三道；2026-10-16 扩到五道）────────────
+  // 为什么单独守：这五道查的是**互不重叠**的东西，缺一条就有一种逃逸路径 ——
   //   ① 硬编码文案：代码里直接写死中文字面量
   //   ② key 对齐  ：JSON 语法 / zh-CN 空值 / 代码 t() 引用的 key 是否存在
   //   ③ 值未翻译  ：非 CJK locale 的值是否仍是中文（key 齐全但值是中文 ⇒ 只有这条能拦）
+  //   ④ key 集合  ：zh-CN ↔ 其余 10 语言的**双向叶子路径差集**（2026-09-21 加）
+  //   ⑤ 占位符    ：资源值与调用点对账（值==键名 / `{{x}}` 从未插值）（2026-10-01 加）
   // 此前 ①② 之一（check_i18n.py）**根本没被 CI 调用**，且它在非 strict 模式下**退出码恒为 0**
   // —— 即「装了门禁但门禁从不失败」。故这里同时守「被调用」与「用 strict」两件事。
-  describe("i18n 门禁接线（三道互补，缺一即逃逸）", () => {
+  //
+  // ⚠ 2026-10-16 补记（本描述块存在的意义）：④⑤ 加了之后**只进了 `ci.yml`，没进本地镜像**，
+  //   而本 describe 当时仍只列 ①②③ ⇒ 两道门「CI 有、本地无」持续了近一个月而**没有任何东西红**。
+  //   形态与文件头那两条反面教材同源：**守卫只守它被写下的那一刻已存在的门**。
+  //   凡往 `ci.yml` 加 i18n 门禁，必须同时改三处：ci.yml、`ci-check.mjs`、本数组。
+  describe("i18n 门禁接线（五道互补，缺一即逃逸）", () => {
     const I18N_STEPS = [
       "Check i18n hardcoded strings",
       "Check i18n key alignment (syntax / empty values / t() key existence)",
       "Check i18n untranslated values (non-CJK locale must not contain CJK chars)",
+      "Check i18n key parity (all locales must expose the same key paths)",
+      "Check i18n placeholder usage (value must not echo its key; {{x}} must be interpolated)",
     ];
 
-    it("三条 i18n 门禁步骤都存在于 ci.yml", () => {
+    it("五条 i18n 门禁步骤都存在于 ci.yml", () => {
       const yml = loadCi();
       for (const name of I18N_STEPS) {
         expect(stepBlock(yml, name), `找不到门禁步骤「${name}」—— 被删或改名了？`).not.toBeNull();
@@ -186,7 +195,7 @@ describe(".github/workflows/ci.yml — 静态门禁接线", () => {
       expect(block as string).toMatch(/check_i18n\.py\s+--strict/);
     });
 
-    it("三条 i18n 门禁都不得被静默放行（`|| true` / `continue-on-error`）", () => {
+    it("五条 i18n 门禁都不得被静默放行（`|| true` / `continue-on-error`）", () => {
       const yml = loadCi();
       for (const name of I18N_STEPS) {
         const block = stepBlock(yml, name);
@@ -199,11 +208,14 @@ describe(".github/workflows/ci.yml — 静态门禁接线", () => {
       }
     });
 
-    it("同步护栏：本地 ci-check.mjs 也跑这三道（防本地绿、CI 红）", () => {
+    it("同步护栏：本地 ci-check.mjs 也跑这五道（防本地绿、CI 红）", () => {
       const src = readFileSync(resolve(process.cwd(), "scripts/ci-check.mjs"), "utf8");
       expect(src).toContain("i18n-scan.mjs --strict");
       expect(src).toContain("check-i18n-untranslated.mjs");
       expect(src).toMatch(/check_i18n\.py\s+--strict/);
+      // ④⑤ —— 2026-10-16 补：这两道此前**只在 ci.yml 里**，本地镜像没有（见本 describe 顶部批注）
+      expect(src).toContain("check-i18n-key-parity.mjs");
+      expect(src).toContain("check-i18n-placeholder-usage.mjs");
     });
   });
 

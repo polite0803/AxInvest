@@ -70,7 +70,7 @@ const ROW_ALL_MATURE = {
   },
 };
 
-/** 部分成熟：超短成熟 / 短线未到期 / 中线行情不可用 / 季度无记录 */
+/** 部分成熟：超短线成熟 / 短线未到期 / 中线行情不可用 / 长线无记录 */
 const ROW_PARTIAL = {
   id: "ref-partial",
   stockCode: "000001",
@@ -205,13 +205,36 @@ function activePane(expanded: Locator): Locator {
   return expanded.locator('[role="tabpanel"][aria-hidden="false"]');
 }
 
-/** 展开行内按**完整可访问名**取周期 Tab（`getByRole` 名称是精确匹配）。
+/** 展开行内按**完整可访问名**点击周期 Tab（`getByRole` 名称是精确匹配）。
  *
  * 注意：页签文本是裸档名（"短线"），它是"超短线"的子串 ⇒ 不能用子串包含定位，
  * 必须精确到含状态徽标的完整文本（如 "🟢 短线"）。徽标由该周期 status 决定
- * （mature 🟢 / immature 🟠 / unavailable ⚪ / legacy 🟣），用例按 fixture 写死。 */
-function horizonTab(expanded: Locator, accessibleName: string): Locator {
-  return expanded.getByRole("tab", { name: accessibleName });
+ * （mature 🟢 / immature 🟠 / unavailable ⚪ / legacy 🟣），用例按 fixture 写死。
+ *
+ * ⚠ **先可见性断言、再点击**（2026-10-16 CI 实测教训）：锚点是**硬编码档名**，属档名的
+ * 第 10 套副本（见 `AUDIT-horizon-naming-2026-10-16.md`）—— 一旦档名改名/回退而本文件
+ * 未跟随，裸 `click()` 会吃满用例级 120s 超时，CI 再乘重试（2 次）＝**一次漂移烧 6 分钟**，
+ * 且报错只有「waiting for locator…」，看不出是锚点漂了。此处改为先断言可见，
+ * 失败时把展开行里**实际存在**的 Tab 文本一起打出来，让漂移一眼可判。
+ *
+ * 函数名与调用形态 `horizonTab(expanded, "🟢 长线")` **刻意保留**：门禁
+ * `scripts/check-horizon-label-parity.mjs` 的判据 D 按正则
+ * `/horizonTab\(\s*[\w$]+\s*,\s*"([^"]+)"\s*\)/g` 抽锚点，改名会让它「0 命中判红」。 */
+const HORIZON_TAB_TIMEOUT_MS = 5_000;
+
+async function horizonTab(expanded: Locator, accessibleName: string): Promise<void> {
+  const tab = expanded.getByRole("tab", { name: accessibleName });
+  try {
+    await expect(tab).toBeVisible({ timeout: HORIZON_TAB_TIMEOUT_MS });
+  } catch {
+    // 把「实际有哪些 Tab」带进错误 —— 本用例要防的就是锚点与 UI 档名脱钩
+    const actual = await expanded.locator(".ant-tabs-tab").allInnerTexts();
+    throw new Error(
+      `展开行内不存在周期 Tab「${accessibleName}」，实际 Tab 文本 = ${JSON.stringify(actual)}`
+        + ` ⇒ 核对 spec 硬编码档名锚点是否仍与 i18n / Period::label_zh() 同源`,
+    );
+  }
+  await tab.click();
 }
 
 test.describe("四周期反思面板（批次 5 fixture 验收）", () => {
@@ -229,15 +252,15 @@ test.describe("四周期反思面板（批次 5 fixture 验收）", () => {
     await expect(activePane(expanded)).toContainText("✓ 正确");
 
     // 切到短线：显示自己的方向/收益，不得带上超短线的值
-    await horizonTab(expanded, "🟢 短线").click();
+    await horizonTab(expanded, "🟢 短线");
     await expect(activePane(expanded)).toContainText("SHORT_SELL");
     await expect(activePane(expanded)).toContainText("-2.25%");
     await expect(activePane(expanded)).toContainText("✗ 错误");
     await expect(activePane(expanded)).not.toContainText("ULTRA_BUY");
     await expect(activePane(expanded)).not.toContainText("+3.50%");
 
-    // 切到季度（原「长线」档，2026-10-16 正名）：同样不得串用中线/短线
-    await horizonTab(expanded, "🟢 季度").click();
+    // 切到长线档：同样不得串用中线/短线
+    await horizonTab(expanded, "🟢 长线");
     await expect(activePane(expanded)).toContainText("LONG_ACCUMULATE");
     await expect(activePane(expanded)).toContainText("+12.75%");
     await expect(activePane(expanded)).not.toContainText("MID_HOLD");
@@ -248,7 +271,7 @@ test.describe("四周期反思面板（批次 5 fixture 验收）", () => {
     await openReflectionPanel(page);
     const expanded = await expandRow(page, 0);
 
-    // 季度无记录 ⇒ 只生成 3 个 Tab，且不出现「该周期无记录」占位
+    // 长线无记录 ⇒ 只生成 3 个 Tab，且不出现「该周期无记录」占位
     await expect(expanded.locator(".ant-tabs-tab")).toHaveCount(3);
     await expect(expanded).not.toContainText("该周期无记录");
 
@@ -256,7 +279,7 @@ test.describe("四周期反思面板（批次 5 fixture 验收）", () => {
     await expect(activePane(expanded)).toContainText("✓ 正确");
 
     // 短线未到期
-    await horizonTab(expanded, "🟠 短线").click();
+    await horizonTab(expanded, "🟠 短线");
     await expect(activePane(expanded)).toContainText("未到期");
     await expect(activePane(expanded)).toContainText("行情尚未到达期望持有期");
     await expect(activePane(expanded)).not.toContainText("✓ 正确");
@@ -266,7 +289,7 @@ test.describe("四周期反思面板（批次 5 fixture 验收）", () => {
     await expect(activePane(expanded)).not.toContainText("0.00%");
 
     // 中线行情不可用
-    await horizonTab(expanded, "⚪ 中线").click();
+    await horizonTab(expanded, "⚪ 中线");
     await expect(activePane(expanded)).toContainText("无数据");
     await expect(activePane(expanded)).toContainText("该周期行情数据不可用");
     await expect(activePane(expanded)).not.toContainText("行情事实");

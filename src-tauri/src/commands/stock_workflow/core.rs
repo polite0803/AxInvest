@@ -1879,7 +1879,7 @@ pub async fn run_stock_workflow_inner(
                                 ).await;
                             });
                         }
-                        // DB 写入完成后再 emit，避免前端 extract_evidence_citations 读到空数据
+                        // DB 写入完成后再 emit，避免前端 audit_decision_evidence 读到空数据
                         if let Err(e) = emit_opt(&app_h,
                             IpcEventName::WorkflowCompleted.as_str(),
                             serde_json::json!({

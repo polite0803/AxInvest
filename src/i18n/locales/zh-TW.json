@@ -6574,10 +6574,6 @@
       "group-presets": "常用預設",
       "group-custom-interval": "自訂間隔",
       "label-periods": "推薦週期",
-      "period-ultra-short": "超短線",
-      "period-short": "短線",
-      "period-mid": "中線",
-      "period-long": "長線",
       "placeholder-periods": "選擇一個或多個週期",
       "label-min-confidence": "最低信心度",
       "label-top-n": "推薦數量上限",
@@ -14943,12 +14939,6 @@
       "okCount": "成功 {{n}}",
       "failCount": "失敗 {{n}}",
       "totalCount": "總計 {{n}}",
-      "period": {
-        "ultra_short": "超短線",
-        "short": "短線",
-        "mid": "中線",
-        "long": "長線"
-      },
       "dueYes": "已到期",
       "dueNo": "未到期",
       "analysisOk": "分析成功",
@@ -15664,11 +15654,7 @@
       "1d": "日线",
       "1w": "周线",
       "1M": "月线",
-      "zoomHint": "框選縮放",
-      "ultraShort": "超短線",
-      "short": "短線",
-      "mid": "中線",
-      "long": "長線"
+      "zoomHint": "框選縮放"
     },
     "subtitle": "AxInvest · 智能驱动 · 多维分析",
     "riskScore": "風險分: {{score}}",
@@ -16483,10 +16469,6 @@
     "industryRanking": "行业排名",
     "clsFlash": "财联社快讯",
     "leader": "领涨",
-    "periodUltraShort": "超短線",
-    "periodShort": "短線",
-    "periodMid": "中線",
-    "periodLong": "長線",
     "generatedAt": "生成於 {{time}}",
     "bannerVendorDisabled": "部分風格已禁用: {styles}",
     "openSettings": "打開設定",
@@ -17065,10 +17047,6 @@
         "holding": "持仓天数",
         "confidence": "置信度"
       },
-      "periodUltraShort": "超短線",
-      "periodShort": "短線",
-      "periodMid": "中線",
-      "periodLong": "長線",
       "title": "推荐结果",
       "emptyNoCache": "暂无缓存结果，请点击刷新获取最新推荐",
       "generatedAt": "生成于 {{time}}",
@@ -17238,12 +17216,6 @@
         "daily0700": "每日 07:00",
         "tradeDay1600": "交易日 16:00 (盘后)"
       },
-      "period": {
-        "ultraShort": "超短線",
-        "short": "短線",
-        "mid": "中線",
-        "long": "長線"
-      },
       "column": {
         "id": "ID",
         "description": "描述",
@@ -17402,10 +17374,6 @@
       "hitrateByHorizon": "按時間維度",
       "hitrateGroupRate": "組內命中率",
       "insufficientSamples": "樣本不足",
-      "horizonUltraShort": "超短線",
-      "horizonShort": "短線",
-      "horizonMid": "中線",
-      "horizonLong": "長線",
       "horizonAuto": "按主檔",
       "horizonUnknown": "未知週期",
       "colHorizon": "復盤檔",
@@ -17470,6 +17438,13 @@
       "failureModeChaseUpBar": "大陽線追漲",
       "failureModeRegimeEndorsement": "大盤情緒替個股背書",
       "failureModeReverseDcfIgnored": "反向 DCF 被無視",
+      "horizonConfusionTitle": "逐檔結局對照（公式 × LLM）",
+      "horizonConfusionNotProduced": "本紀錄未產出逐檔結局對照（統計上線前的資料，或可判樣本為空）",
+      "horizonConfusionInsufficient": "樣本不足（已判 {{judged}} 條）—— 下方計數僅為原始紀錄，不是結論",
+      "horizonConfusionCells": "雙對 {{both}} · 公式單對 {{formulaOnly}} · LLM 單對 {{llmOnly}} · 雙錯 {{bothWrong}}",
+      "horizonConfusionUndecided": "LLM 無從判定 {{undecided}} 條（缺席 / 窗口未滿 / 觀望持有這類非方向動作）—— 不計入任何一格",
+      "horizonConfusionAvgAgreement": "該檔三維一致率均值 {{pct}}",
+      "horizonConfusionScopeNote": "兩側同一窗口、同一判定函式；四格只比方向對錯，不含收益高低，也與上方命中率不同分母。",
       "failureModeOther": "其它"
     },
     "portfolioMonitor": {
@@ -18279,16 +18254,50 @@
       "error": "提取失敗",
       "noData": "無可用證據引用資料",
       "title": "證據引用稽核",
-      "supportRate": "資料支撐率",
-      "analystCount": "來源分析師",
-      "claimCount": "決策理由",
-      "supported": "有資料",
-      "unsupported": "無資料",
-      "source": "來源",
       "extractFailed": "证据提取失败",
-      "matchConfidence": "匹配置信度",
       "notApplicable": "證據引用稽核不适用（本輪決策未產出）",
-      "notApplicableDetail": "本輪決策未產出（action={{action}} 是資料缺失哨兵，不是結論），理由欄裝的是降級診斷資訊，沒有可稽核的分析師證據。支撐率在此情形下沒有定義，故不顯示為 0%。"
+      "notApplicableDetail": "本輪決策未產出（action={{action}} 是資料缺失哨兵，不是結論），理由欄裝的是降級診斷資訊，沒有可稽核的分析師證據。支撐率在此情形下沒有定義，故不顯示為 0%。",
+      "branchSection": "本檔分支腿審計",
+      "factorSection": "主檔因子閉合對帳",
+      "expectedLegs": "應參與",
+      "participatingLegs": "實際參與",
+      "upstreamPresentCount": "上游在場",
+      "upstreamNotCheckedCount": "無法核查",
+      "sigmaReconciled": "σ 可回算",
+      "weight": "權重",
+      "signal": "訊號",
+      "absenceUndeclared": "未交代缺席",
+      "metaLeg": "元約束",
+      "upstream": {
+        "present": "在場",
+        "declaredAbsent": "顯式缺席",
+        "silentAbsent": "靜默缺席",
+        "notChecked": "無法核查"
+      },
+      "notChecked": {
+        "noSnapshotKey": "本記錄快照不含該來源的產出鍵，判據不適用",
+        "noOwner": "該因子沒有登記的屬主分析師",
+        "unregisteredFactor": "該因子不在來源登記表內，判據不適用"
+      },
+      "sigma": {
+        "consistent": "σ 一致",
+        "inconsistent": "σ 不一致",
+        "noBasis": "無基準"
+      },
+      "noBasis": {
+        "noPersistedBasis": "本記錄沒有可對帳的落庫基準（該腿的正規化口徑尚未上收）",
+        "basisMissingInRecord": "基準鍵已登記，但本記錄缺該鍵"
+      },
+      "closure": {
+        "closed": "閉合",
+        "broken": "不閉合",
+        "notComputable": "無從判定"
+      },
+      "closureReason": {
+        "decisionDegraded": "本輪決策未產出，閉合無從判定",
+        "noWeightSumOrFactors": "缺 weightSum 或因子表，閉合無從判定"
+      },
+      "supported": "有資料"
     },
     "charts": {
       "noSectorData": "無產業配置資料",

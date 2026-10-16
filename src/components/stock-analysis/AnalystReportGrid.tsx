@@ -7,6 +7,7 @@ import {
   type Consensus,
   deriveAnalystConsensus,
   extractBullBearScores,
+  horizonLabelKey,
   normalizeVerdictScore,
   tallyAnalystSentiment,
 } from "@/lib/stock-analysis-utils";
@@ -23,7 +24,8 @@ import { cleanToolCallTags } from "./utils";
 // v133（B2-2）：a-news 已摘除（公告通道由 a-catalyst 承载）；value-investor 上线。
 // 逐档实例化后 store 键形如 `market-analyst--mid`（带档）或裸 `market-analyst`
 // （历史快照）——显示名一律经 `analystBaseOf`（`@/lib/stock-analysis-utils`）归一再查 i18n，
-// 档位标签另取 `stockAnalysis.period.*`。
+// 档位标签另取 `stockAnalysis.timeHorizon*`（经 `horizonLabelKey()`；旧 `stockAnalysis.period.*`
+// 那套持有期键已于 2026-10-16 收敛删除，该命名空间现只剩 K 线粒度键）。
 // 顺序按工作流惯常执行顺序（与技术面→…→催化剂一致），value-investor 殿后。
 const ANALYST_BASE_IDS = [
   "market-analyst",
@@ -484,14 +486,8 @@ export function AnalystReportGrid() {
     // v133：行 = 逐档实例（与上方 entries 同集、同序）；name 带档位（如 `技术面·中线`）。
     return entries.map((entry) => {
       const baseName = t(`stockAnalysis.workflow.analyst.${entry.base}`, entry.base);
-      const name = entry.tier
-        ? `${baseName}·${
-          t(
-            `stockAnalysis.period.${entry.tier === "ultra_short" ? "ultraShort" : entry.tier}`,
-            entry.tier,
-          )
-        }`
-        : baseName;
+      const tierLabel = entry.tier ? t(horizonLabelKey(entry.tier) ?? entry.tier) : null;
+      const name = tierLabel ? `${baseName}·${tierLabel}` : baseName;
       const report = entry.status === "done" ? entry.report : undefined;
       if (!report) {
         return {
@@ -884,12 +880,7 @@ export function AnalystReportGrid() {
               );
           })
           : entries.map((entry) => {
-            const tierLabel = entry.tier
-              ? t(
-                `stockAnalysis.period.${entry.tier === "ultra_short" ? "ultraShort" : entry.tier}`,
-                entry.tier,
-              )
-              : undefined;
+            const tierLabel = entry.tier ? t(horizonLabelKey(entry.tier) ?? entry.tier) : undefined;
             if (entry.status === "done") {
               return (
                 <AnalystReportCard

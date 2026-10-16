@@ -6573,10 +6573,6 @@
       "group-presets": "Häufige Voreinstellungen",
       "group-custom-interval": "Benutzerdefiniertes Intervall",
       "label-periods": "Empfehlungszeiträume",
-      "period-ultra-short": "Ultrakurzfristig",
-      "period-short": "Kurzfristig",
-      "period-mid": "Mittelfristig",
-      "period-long": "Langfristig",
       "placeholder-periods": "Einen oder mehrere Zeiträume wählen",
       "label-min-confidence": "Mindestkonfidenz",
       "label-top-n": "Top-N-Limit",
@@ -14830,12 +14826,6 @@
       "okCount": "{{n}} ok",
       "failCount": "{{n}} fehlgeschlagen",
       "totalCount": "{{n}} gesamt",
-      "period": {
-        "ultra_short": "Ultrakurzfristig",
-        "short": "Kurzfristig",
-        "mid": "Mittelfristig",
-        "long": "Langfristig"
-      },
       "dueYes": "Fällig",
       "dueNo": "Ausstehend",
       "analysisOk": "Analyse ok",
@@ -15440,11 +15430,7 @@
       "1d": "Täglich",
       "1w": "Wöchentlich",
       "1M": "Monatlich",
-      "zoomHint": "Auswahl-Zoom",
-      "ultraShort": "Ultrakurzfristig",
-      "short": "Kurzfristig",
-      "mid": "Mittelfristig",
-      "long": "Langfristig"
+      "zoomHint": "Auswahl-Zoom"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15485,10 +15471,6 @@
     "industryRanking": "Industry Ranking",
     "clsFlash": "CLS Flash",
     "leader": "Leader",
-    "periodUltraShort": "Ultrakurzfristig",
-    "periodShort": "Kurzfristig",
-    "periodMid": "Mittelfristig",
-    "periodLong": "Langfristig",
     "generatedAt": "Generiert am {{time}}",
     "bannerVendorDisabled": "Einige Stile sind deaktiviert: {styles}",
     "openSettings": "Einstellungen öffnen",
@@ -16841,10 +16823,6 @@
         "holding": "Holding Days",
         "confidence": "Confidence"
       },
-      "periodUltraShort": "Ultrakurzfristig",
-      "periodShort": "Kurzfristig",
-      "periodMid": "Mittelfristig",
-      "periodLong": "Langfristig",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -17014,12 +16992,6 @@
         "daily0700": "Täglich 07:00",
         "tradeDay1600": "Trading Day 16:00 (After Close)"
       },
-      "period": {
-        "ultraShort": "Ultrakurzfristig",
-        "short": "Kurzfristig",
-        "mid": "Mittelfristig",
-        "long": "Langfristig"
-      },
       "column": {
         "id": "ID",
         "description": "Description",
@@ -17178,10 +17150,6 @@
       "hitrateByHorizon": "Nach Zeithorizont",
       "hitrateGroupRate": "Gruppen-Trefferquote",
       "insufficientSamples": "Stichproben unzureichend",
-      "horizonUltraShort": "Ultrakurzfristig",
-      "horizonShort": "Kurzfristig",
-      "horizonMid": "Mittelfristig",
-      "horizonLong": "Langfristig",
       "horizonAuto": "Nach Hauptstufe",
       "horizonUnknown": "Unbekannter Horizont",
       "colHorizon": "Review-Horizont",
@@ -17246,6 +17214,13 @@
       "failureModeChaseUpBar": "Laufen auf große Tageskerze",
       "failureModeRegimeEndorsement": "Marktregime als Beleg für eine Einzelaktie",
       "failureModeReverseDcfIgnored": "Umgekehrtes DCF ignoriert",
+      "horizonConfusionTitle": "Ergebnis-Abgleich je Ebene (Formel × LLM)",
+      "horizonConfusionNotProduced": "Für diesen Datensatz liegt kein Ergebnis-Abgleich je Ebene vor (Daten von vor Einführung der Statistik oder keine bewertbaren Stichproben)",
+      "horizonConfusionInsufficient": "Zu wenige Stichproben ({{judged}} bewertet) — die Zahlen unten sind Rohdaten, keine Schlussfolgerungen",
+      "horizonConfusionCells": "Beide richtig {{both}} · nur Formel {{formulaOnly}} · nur LLM {{llmOnly}} · beide falsch {{bothWrong}}",
+      "horizonConfusionUndecided": "{{undecided}} ohne LLM-Urteil (fehlend / Fenster nicht abgelaufen / nicht richtungsweisende Aktion wie Halten oder Abwarten) — zählt in keine Zelle",
+      "horizonConfusionAvgAgreement": "Mittlere dreidimensionale Übereinstimmung dieser Ebene {{pct}}",
+      "horizonConfusionScopeNote": "Beide Seiten nutzen dasselbe Fenster und dieselbe Urteilsfunktion; die vier Zellen vergleichen nur die Richtung, nicht die Rendite, und haben einen anderen Nenner als die Trefferquote oben.",
       "failureModeOther": "Sonstige"
     },
     "portfolioMonitor": {
@@ -18055,16 +18030,50 @@
       "error": "Extraktion fehlgeschlagen",
       "noData": "Keine Belegzitatdaten",
       "title": "Belegzitat-Audit",
-      "supportRate": "Datenunterstützungsrate",
-      "analystCount": "Quellenanalysten",
-      "claimCount": "Entscheidungsgründe",
-      "supported": "Mit Daten",
-      "unsupported": "Ohne Daten",
-      "source": "Quelle",
       "extractFailed": "Belegextraktion fehlgeschlagen",
-      "matchConfidence": "Übereinstimmungskonfidenz",
       "notApplicable": "Nachweis-Audit nicht anwendbar (keine Entscheidung erzeugt)",
-      "notApplicableDetail": "Dieser Lauf hat keine Entscheidung erzeugt (action={{action}} ist der Sentinel für fehlende Daten, keine Schlussfolgerung); das Begründungsfeld enthält daher Fallback-Diagnose statt auditierbarer Analystennachweise. Die Stützungsrate ist in diesem Fall nicht definiert und wird nicht als 0 % angezeigt."
+      "notApplicableDetail": "Dieser Lauf hat keine Entscheidung erzeugt (action={{action}} ist der Sentinel für fehlende Daten, keine Schlussfolgerung); das Begründungsfeld enthält daher Fallback-Diagnose statt auditierbarer Analystennachweise. Die Stützungsrate ist in diesem Fall nicht definiert und wird nicht als 0 % angezeigt.",
+      "branchSection": "Prüfung der Zweig-Legs dieses Horizonts",
+      "factorSection": "Abgleich der Faktorgeschlossenheit",
+      "expectedLegs": "Erwartet",
+      "participatingLegs": "Beteiligt",
+      "upstreamPresentCount": "Vorstufe vorhanden",
+      "upstreamNotCheckedCount": "Nicht prüfbar",
+      "sigmaReconciled": "σ abgeglichen",
+      "weight": "Gewicht",
+      "signal": "Signal",
+      "absenceUndeclared": "Fehlen nicht erklärt",
+      "metaLeg": "Meta",
+      "upstream": {
+        "present": "Vorhanden",
+        "declaredAbsent": "Fehlen erklärt",
+        "silentAbsent": "Stilles Fehlen",
+        "notChecked": "Nicht prüfbar"
+      },
+      "notChecked": {
+        "noSnapshotKey": "Der Snapshot dieses Datensatzes enthält keinen Ausgabeschlüssel für diese Quelle; die Prüfung entfällt",
+        "noOwner": "Für diesen Faktor ist kein zuständiger Analyst registriert",
+        "unregisteredFactor": "Dieser Faktor steht nicht im Quellenregister (Prüfung entfällt)"
+      },
+      "sigma": {
+        "consistent": "σ stimmig",
+        "inconsistent": "σ abweichend",
+        "noBasis": "Keine Basis"
+      },
+      "noBasis": {
+        "noPersistedBasis": "Keine gespeicherte Basis zum Abgleich in diesem Datensatz (Normalisierung noch nicht zentralisiert)",
+        "basisMissingInRecord": "Der Basisschlüssel ist registriert, fehlt aber in diesem Datensatz"
+      },
+      "closure": {
+        "closed": "Geschlossen",
+        "broken": "Nicht geschlossen",
+        "notComputable": "Nicht bestimmbar"
+      },
+      "closureReason": {
+        "decisionDegraded": "In dieser Runde wurde keine Entscheidung erzeugt; Geschlossenheit nicht bestimmbar",
+        "noWeightSumOrFactors": "weightSum oder Faktortabelle fehlt; Geschlossenheit nicht bestimmbar"
+      },
+      "supported": "Mit Daten"
     },
     "charts": {
       "noSectorData": "Keine Sektorallokationsdaten",

@@ -231,7 +231,7 @@ describe("RecommendationPanel — as-of propagation", () => {
     });
     invokeMock.mockClear();
     invokeMock.mockResolvedValue(null);
-    fireEvent.click(screen.getByText(i18n.t("stockAnalysis.recommendation.periodMid")));
+    fireEvent.click(screen.getByText(i18n.t("stockAnalysis.timeHorizonMid")));
     await waitFor(() => expect(findCall("get_cached_recommendation")).toBeDefined());
     expect(findCall("get_cached_recommendation")?.[1]).toEqual({ period: "mid" });
   });

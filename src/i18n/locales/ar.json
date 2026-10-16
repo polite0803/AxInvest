@@ -6573,10 +6573,6 @@
       "group-presets": "الإعدادات المسبقة الشائعة",
       "group-custom-interval": "فاصل زمني مخصص",
       "label-periods": "فترات التوصية",
-      "period-ultra-short": "فائق القصر",
-      "period-short": "قصير الأجل",
-      "period-mid": "متوسط الأجل",
-      "period-long": "طويل الأجل",
       "placeholder-periods": "اختر فترة واحدة أو أكثر",
       "label-min-confidence": "الحد الأدنى للثقة",
       "label-top-n": "حد Top N",
@@ -14830,12 +14826,6 @@
       "okCount": "{{n}} ناجحة",
       "failCount": "{{n}} فاشلة",
       "totalCount": "{{n}} إجمالي",
-      "period": {
-        "ultra_short": "فائق القصر",
-        "short": "قصير الأجل",
-        "mid": "متوسط الأجل",
-        "long": "طويل الأجل"
-      },
       "dueYes": "مستحق",
       "dueNo": "معلّق",
       "analysisOk": "نجح التحليل",
@@ -15440,11 +15430,7 @@
       "1d": "Daily",
       "1w": "Weekly",
       "1M": "Monthly",
-      "zoomHint": "Drag to zoom",
-      "ultraShort": "فائق القصر",
-      "short": "قصير الأجل",
-      "mid": "متوسط الأجل",
-      "long": "طويل الأجل"
+      "zoomHint": "Drag to zoom"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15485,10 +15471,6 @@
     "industryRanking": "Industry Ranking",
     "clsFlash": "CLS Flash",
     "leader": "Leader",
-    "periodUltraShort": "فائق القصر",
-    "periodShort": "قصير الأجل",
-    "periodMid": "متوسط الأجل",
-    "periodLong": "طويل الأجل",
     "generatedAt": "Generated at {{time}}",
     "bannerVendorDisabled": "Some styles are disabled: {styles}",
     "openSettings": "Open Settings",
@@ -16841,10 +16823,6 @@
         "holding": "Holding Days",
         "confidence": "Confidence"
       },
-      "periodUltraShort": "فائق القصر",
-      "periodShort": "قصير الأجل",
-      "periodMid": "متوسط الأجل",
-      "periodLong": "طويل الأجل",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -17014,12 +16992,6 @@
         "daily0700": "يوميًا 07:00",
         "tradeDay1600": "Trading Day 16:00 (After Close)"
       },
-      "period": {
-        "ultraShort": "فائق القصر",
-        "short": "قصير الأجل",
-        "mid": "متوسط الأجل",
-        "long": "طويل الأجل"
-      },
       "column": {
         "id": "ID",
         "description": "Description",
@@ -17178,10 +17150,6 @@
       "hitrateByHorizon": "حسب الأفق",
       "hitrateGroupRate": "نسبة إصابة المجموعة",
       "insufficientSamples": "عينات غير كافية",
-      "horizonUltraShort": "فائق القصر",
-      "horizonShort": "قصير الأجل",
-      "horizonMid": "متوسط الأجل",
-      "horizonLong": "طويل الأجل",
       "horizonAuto": "حسب الفئة الرئيسية",
       "horizonUnknown": "أفق غير معروف",
       "colHorizon": "أفق المراجعة",
@@ -17246,6 +17214,13 @@
       "failureModeChaseUpBar": "مطاردة شمعة صاعدة كبيرة",
       "failureModeRegimeEndorsement": "تأييد حالة السوق لسهم مفرد",
       "failureModeReverseDcfIgnored": "تجاهل DCF العكسي",
+      "horizonConfusionTitle": "مقارنة النتائج حسب الفئة (المعادلة × النموذج)",
+      "horizonConfusionNotProduced": "لا توجد لهذا السجل مقارنة نتائج حسب الفئة (بيانات ما قبل الإحصاء أو لا توجد عينات قابلة للحكم)",
+      "horizonConfusionInsufficient": "العينات غير كافية ({{judged}} محكومة) — الأعداد أدناه سجلات خام وليست استنتاجات",
+      "horizonConfusionCells": "كلاهما صحيح {{both}} · المعادلة وحدها {{formulaOnly}} · النموذج وحده {{llmOnly}} · كلاهما خاطئ {{bothWrong}}",
+      "horizonConfusionUndecided": "{{undecided}} بلا حكم من النموذج (غائب / النافذة لم تكتمل / فعل غير اتجاهي مثل الانتظار أو الاحتفاظ) — لا تُحسب في أي خلية",
+      "horizonConfusionAvgAgreement": "متوسط التوافق ثلاثي الأبعاد لهذه الفئة {{pct}}",
+      "horizonConfusionScopeNote": "الطرفان يستخدمان النافذة نفسها ودالة الحكم نفسها؛ الخلايا الأربع تقارن الاتجاه فقط لا العائد، ولها مقام مختلف عن نسبة الإصابة أعلاه.",
       "failureModeOther": "أخرى"
     },
     "portfolioMonitor": {
@@ -18055,16 +18030,50 @@
       "error": "فشل الاستخراج",
       "noData": "لا توجد بيانات استشهاد",
       "title": "تدقيق الاستشهادات",
-      "supportRate": "معدل دعم البيانات",
-      "analystCount": "محللون المصدر",
-      "claimCount": "أسباب القرار",
-      "supported": "مع بيانات",
-      "unsupported": "بدون بيانات",
-      "source": "المصدر",
       "extractFailed": "فشل استخراج الأدلة",
-      "matchConfidence": "ثقة المطابقة",
       "notApplicable": "تدقيق الاستشهاد بالأدلة غير منطبق (لم يُنتَج أي قرار)",
-      "notApplicableDetail": "لم يُنتج هذا التشغيل أي قرار (action={{action}} هي علامة غياب البيانات وليست نتيجة)؛ لذا يحتوي حقل التبرير على معلومات تشخيصية للتراجع ولا يحتوي على أدلة قابلة للتدقيق من المحللين. ولهذا لا تُعرَّف نسبة الدعم في هذه الحالة ولا تُعرض على أنها 0%."
+      "notApplicableDetail": "لم يُنتج هذا التشغيل أي قرار (action={{action}} هي علامة غياب البيانات وليست نتيجة)؛ لذا يحتوي حقل التبرير على معلومات تشخيصية للتراجع ولا يحتوي على أدلة قابلة للتدقيق من المحللين. ولهذا لا تُعرَّف نسبة الدعم في هذه الحالة ولا تُعرض على أنها 0%.",
+      "branchSection": "تدقيق أرجل هذا الأفق",
+      "factorSection": "مطابقة عوامل المستوى الرئيسي",
+      "expectedLegs": "المتوقّع",
+      "participatingLegs": "المشارك فعلاً",
+      "upstreamPresentCount": "المصدر موجود",
+      "upstreamNotCheckedCount": "غير قابل للتحقق",
+      "sigmaReconciled": "σ مطابَق",
+      "weight": "الوزن",
+      "signal": "الإشارة",
+      "absenceUndeclared": "غياب بلا إفصاح",
+      "metaLeg": "قيد وصفي",
+      "upstream": {
+        "present": "موجود",
+        "declaredAbsent": "غياب مُفصح عنه",
+        "silentAbsent": "غياب صامت",
+        "notChecked": "غير قابل للتحقق"
+      },
+      "notChecked": {
+        "noSnapshotKey": "لا تحتوي لقطة هذه السجلة على مفتاح مخرجات لهذا المصدر، لذا لا ينطبق المعيار",
+        "noOwner": "لا يوجد محلل مسؤول مسجَّل لهذا العامل",
+        "unregisteredFactor": "هذا العامل غير مدرج في سجل المصادر (المعيار غير منطبق)"
+      },
+      "sigma": {
+        "consistent": "σ متوافق",
+        "inconsistent": "σ متباين",
+        "noBasis": "لا مرجع"
+      },
+      "noBasis": {
+        "noPersistedBasis": "لا يوجد مرجع مخزَّن للمطابقة في هذه السجلة (التوحيد لم يُنجز بعد)",
+        "basisMissingInRecord": "مفتاح المرجع مسجَّل لكنه مفقود في هذه السجلة"
+      },
+      "closure": {
+        "closed": "مغلق",
+        "broken": "غير مغلق",
+        "notComputable": "غير قابل للتحديد"
+      },
+      "closureReason": {
+        "decisionDegraded": "لم يصدر قرار هذه المرة، لذا لا يمكن تحديد الإغلاق",
+        "noWeightSumOrFactors": "weightSum أو جدول العوامل مفقود، لذا لا يمكن تحديد الإغلاق"
+      },
+      "supported": "مع بيانات"
     },
     "charts": {
       "noSectorData": "لا توجد بيانات القطاع",

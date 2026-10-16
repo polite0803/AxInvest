@@ -11,20 +11,23 @@ import type { InvestTaskKind } from "./investTaskDefs";
  * 文案策略：业务术语一律复用旧设置页已有 i18n 键（stockAnalysis.scheduledAnalysis.* /
  * settings.scheduled-recommendation.* / serenityPanel.*），仅结构性 label 用
  * tasksCenter.create.field.* 新键。
+ * **例外（2026-10-16 收敛）**：四档**档名**不属上述任何一段，全仓只有一族
+ * `stockAnalysis.timeHorizon*`—— 档名落在哪个面板都不改变，故不随宿主页命名空间走。
  */
 
-const REFLECTION_PERIOD_OPTIONS = [
-  { value: "ultra_short", labelKey: "stockAnalysis.scheduledAnalysis.period.ultraShort" },
-  { value: "short", labelKey: "stockAnalysis.scheduledAnalysis.period.short" },
-  { value: "mid", labelKey: "stockAnalysis.scheduledAnalysis.period.mid" },
-  { value: "long", labelKey: "stockAnalysis.scheduledAnalysis.period.long" },
-];
-
-const RECO_PERIOD_OPTIONS = [
-  { value: "ultra_short", labelKey: "settings.scheduled-recommendation.period-ultra-short" },
-  { value: "short", labelKey: "settings.scheduled-recommendation.period-short" },
-  { value: "mid", labelKey: "settings.scheduled-recommendation.period-mid" },
-  { value: "long", labelKey: "settings.scheduled-recommendation.period-long" },
+/**
+ * 四档周期下拉选项（反思 / 决策回测 / 荐股三处共用这一份）。
+ *
+ * 收紧理由（2026-10-16）：此前是**两张只差键前缀的同形表**
+ * （`stockAnalysis.scheduledAnalysis.period.*` 与 `settings.scheduled-recommendation.period-*`），
+ * 值虽一致但**定义有两份** ⇒ 改一处漏一处即同屏两名，且新增档位要改三处。
+ * 现统一到全仓唯一档名键族 `stockAnalysis.timeHorizon*`。
+ */
+const PERIOD_OPTIONS = [
+  { value: "ultra_short", labelKey: "stockAnalysis.timeHorizonUltraShort" },
+  { value: "short", labelKey: "stockAnalysis.timeHorizonShort" },
+  { value: "mid", labelKey: "stockAnalysis.timeHorizonMid" },
+  { value: "long", labelKey: "stockAnalysis.timeHorizonLong" },
 ];
 
 /** T+N 验证窗口候选（与后端 RunDecisionBacktestRequest 默认 [5,20,60] 一致） */
@@ -96,7 +99,7 @@ export function InvestTaskFields({ kind }: { kind: InvestTaskKind }) {
   if (kind === "batch-reflection") {
     return (
       <Form.Item name="period" label={t("tasksCenter.create.field.period")}>
-        <Select options={REFLECTION_PERIOD_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))} />
+        <Select options={PERIOD_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))} />
       </Form.Item>
     );
   }
@@ -117,7 +120,7 @@ export function InvestTaskFields({ kind }: { kind: InvestTaskKind }) {
           <Select
             options={[
               { value: "all", label: t("stockAnalysis.scheduledAnalysis.decisionBacktestPeriodAll") },
-              ...REFLECTION_PERIOD_OPTIONS
+              ...PERIOD_OPTIONS
                 .filter((o) => o.value !== "ultra_short")
                 .map((o) => ({ value: o.value, label: t(o.labelKey) })),
             ]}
@@ -143,7 +146,7 @@ export function InvestTaskFields({ kind }: { kind: InvestTaskKind }) {
       <Form.Item name="periods" label={t("settings.scheduled-recommendation.label-periods")}>
         <Select
           mode="multiple"
-          options={RECO_PERIOD_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+          options={PERIOD_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
           placeholder={t("settings.scheduled-recommendation.placeholder-periods")}
           maxTagCount="responsive"
         />

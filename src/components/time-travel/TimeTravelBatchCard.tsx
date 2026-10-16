@@ -1,6 +1,7 @@
 import { JobCard } from "@/components/tasks/JobCard";
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
+import { horizonLabelKey } from "@/lib/stock-analysis-utils";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { TimeTravelBatchAnalysis, TimeTravelBatchState, TimeTravelPeriod } from "@/types";
 import {
@@ -210,7 +211,7 @@ export function TimeTravelBatchCard() {
             value={periods}
             onChange={(v) => setPeriods(v as TimeTravelPeriod[])}
             options={ALL_PERIODS.map((p) => ({
-              label: t(`replayWorkbench.batch.period.${p}`),
+              label: t(horizonLabelKey(p) ?? p),
               value: p,
             }))}
           />

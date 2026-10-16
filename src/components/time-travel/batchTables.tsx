@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { horizonLabelKey } from "@/lib/stock-analysis-utils";
 import type { TimeTravelBatchAnalysis, TimeTravelHorizonSummary } from "@/types";
 import { Space, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -30,7 +31,7 @@ export function useBatchAnalysisColumns(): ColumnsType<TimeTravelBatchAnalysis> 
       dataIndex: "period",
       key: "period",
       width: 96,
-      render: (p: string) => <Tag>{t(`replayWorkbench.batch.period.${p}`, { defaultValue: p })}</Tag>,
+      render: (p: string) => <Tag>{t(horizonLabelKey(p) ?? p)}</Tag>,
     },
     {
       title: t("replayWorkbench.batch.col.confidence"),
@@ -68,7 +69,7 @@ export function useBatchHorizonColumns(): ColumnsType<TimeTravelHorizonSummary> 
       title: t("replayWorkbench.batch.col.period"),
       dataIndex: "period",
       key: "period",
-      render: (p: string) => <Tag>{t(`replayWorkbench.batch.period.${p}`, { defaultValue: p })}</Tag>,
+      render: (p: string) => <Tag>{t(horizonLabelKey(p) ?? p)}</Tag>,
     },
     {
       title: t("replayWorkbench.batch.col.holdingDays"),

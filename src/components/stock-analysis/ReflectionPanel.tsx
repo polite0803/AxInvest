@@ -1,7 +1,7 @@
 // i18n-exempt: 业务逻辑判断字符串，非 UI 展示文本
 import type { AiChatAction } from "@/components/workflow/types/workflow.types";
 import { invoke, listen } from "@/lib/invoke";
-import { horizonIcAbsenceKey, moverLabelPresentation } from "@/lib/stock-analysis-utils";
+import { horizonIcAbsenceKey, horizonLabelKey, moverLabelPresentation } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import type {
   FailureModeBoard,
@@ -39,6 +39,7 @@ import type { Dayjs } from "dayjs";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { HorizonConfusionBoard } from "./HorizonConfusionBoard";
 
 const { Text } = Typography;
 
@@ -190,14 +191,9 @@ export function ReflectionPanel() {
   };
   /** 周期键 → 本地化名称（byHorizon 的 key 为 ultra_short / short / mid / long / unknown） */
   const horizonKeyLabel = (key: string): string => {
-    const map: Record<string, string> = {
-      ultra_short: t("stockAnalysis.reflection.horizonUltraShort"),
-      short: t("stockAnalysis.reflection.horizonShort"),
-      mid: t("stockAnalysis.reflection.horizonMid"),
-      long: t("stockAnalysis.reflection.horizonLong"),
-      unknown: t("stockAnalysis.reflection.horizonUnknown"),
-    };
-    return map[key] ?? key;
+    const k = horizonLabelKey(key);
+    if (k) { return t(k); }
+    return key === "unknown" ? t("stockAnalysis.reflection.horizonUnknown") : key;
   };
   /**
    * #10 P7 妖股标签单元格。分层判据在 `moverLabelPresentation`（与 IC 缺席四分句同族）：
@@ -907,6 +903,18 @@ export function ReflectionPanel() {
         <FailureModesSummary board={hitrate?.failureModes ?? EMPTY_FAILURE_MODE_BOARD} t={t} />
       </Card>
 
+      {
+        /* 逐档结局 2×2（B4）：公式判对否 × LLM 判对否。与上面的命中率**不同分母**
+          （那里只统计公式侧），故独立成卡；样本不足时四格只是计数、不是结论。 */
+      }
+      <Card
+        title={t("stockAnalysis.reflection.horizonConfusionTitle")}
+        size="small"
+        style={{ marginBottom: 16 }}
+      >
+        <HorizonConfusionBoard rows={hitrate?.horizonConfusion} testId="horizon-confusion-board" />
+      </Card>
+
       {/* 反思历史 */}
       <Card
         title={t("stockAnalysis.reflection.historyTitle")}
@@ -1577,13 +1585,6 @@ export function ExpandedReflectionRow(
             );
           }
 
-          const HORIZON_LABELS: Record<string, string> = {
-            ultra_short: t("stockAnalysis.reflection.horizonUltraShort"),
-            short: t("stockAnalysis.reflection.horizonShort"),
-            mid: t("stockAnalysis.reflection.horizonMid"),
-            long: t("stockAnalysis.reflection.horizonLong"),
-          };
-
           const statusTag = (status: string) => {
             const map: Record<string, { color: string; label: string }> = {
               mature: { color: "green", label: t("stockAnalysis.reflection.horizonStatusMature") },
@@ -1756,7 +1757,8 @@ export function ExpandedReflectionRow(
             ["ultra_short", "short", "mid", "long"] as const
           ).map((key) => {
             const entry = hr![key];
-            const label = HORIZON_LABELS[key] ?? key;
+            const labelKey = horizonLabelKey(key);
+            const label = labelKey ? t(labelKey) : key;
             if (!entry) {
               return { key, label: <span style={{ color: "#aaa" }}>{label}</span>, children: null };
             }

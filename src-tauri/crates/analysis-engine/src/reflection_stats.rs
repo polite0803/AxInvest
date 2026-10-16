@@ -280,6 +280,10 @@ pub struct HitrateStats {
     /// P2-b 失败模式看板（按 completed 反思行的 `failure_modes` 列聚合）。
     /// 计数域与 `miss_layer`（漏检链机械归因）不同，面板不得并列成可比数字。
     pub failure_modes: crate::failure_mode::FailureModeBoard,
+    /// B4：逐档**结局 2×2**（公式判对否 × LLM 判对否，同窗口、同判定函数）。
+    /// 四档恒各一行 —— 没样本的档是 `judged == 0`，**不是**「没有这一档」。
+    /// 计数域与 `by_horizon`（只统计公式侧）不同，两者不得并成同一个分母读。
+    pub horizon_confusion: Vec<HorizonConfusionRow>,
     /// 参与统计的已结算样本总数
     pub total_samples: usize,
     /// 方向命中率 = was_correct=1 / 已判定样本；样本 < [`MIN_SAMPLE`] → None
@@ -572,6 +576,8 @@ pub fn compute_reflection_stats(samples: &[DecisionPerformanceSample]) -> Hitrat
         excluded_pre_floor_generation: 0,
         unknown_generation_samples: 0,
         failure_modes: Default::default(),
+        // 2×2 与代际三项同理：由取数侧按**筛完代的样本**填（`build_hitrate_stats`），纯函数不筛。
+        horizon_confusion: Vec::new(),
     }
 }
 
@@ -901,6 +907,9 @@ pub async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<HitrateStats
     stats.unknown_generation_samples = unknown;
     // P2-b：失败模式看板（同一次读库的 completed 反思行聚合，不额外查询）。
     stats.failure_modes = failure_modes;
+    // B4：逐档 2×2 用**同一批筛完代的样本**（`kept`）——分母必须与上面的命中率同源，
+    // 否则「命中率按代、2×2 跨代」就成了同一张面板上两种口径。
+    stats.horizon_confusion = build_horizon_confusion(&kept);
     Ok(stats)
 }
 
@@ -957,6 +966,84 @@ fn filter_by_generation_floor(
         }
     }
     (kept, pre_floor, unknown)
+}
+
+/// B4（`PLAN-llm-horizon-decision-and-parity` §18/§21）：**逐档结局 2×2**的一行。
+///
+/// 每一格回答的是「公式这一档判对/判错 × LLM 这一档判对/判错」——
+/// 两侧用的是**同一份 `net_return_pct`、同一个判定函数、同一个成熟窗口**（判定发生在
+/// `reflection.rs` 落 `horizon_results_json` 时，本模块只做聚合），所以四格可直接对比。
+///
+/// ⚠ 两个「不计入任何一格」的分母必须单列，别折叠成 0：
+/// - `llm_undecided`：LLM 侧无从判定（该档缺席 / 窗口未满 / 动作不是方向性的（观望/持有））——
+///   把这类记成「LLM 判错」会让 LLM 的胜率**凭空变差**；
+/// - 公式侧无对应行（该档树没长出来）时整档缺席，由 `judged == 0` 表达。
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HorizonConfusionRow {
+    /// 档位键（snake，与 `strategy_performance.horizon_results_json` 同族）
+    pub tier: String,
+    /// 档位中文名（与 `HorizonAgreement.tier_label` 同口径；前端显示名仍走自己的 i18n）
+    pub tier_label: String,
+    pub both_correct: usize,
+    /// 公式判对而 LLM 判错
+    pub formula_only: usize,
+    /// 公式判错而 LLM 判对
+    pub llm_only: usize,
+    pub both_wrong: usize,
+    /// LLM 侧无从判定的条数（**不进四格**，见结构体文档）
+    pub llm_undecided: usize,
+    /// 四格合计（= 上式四项之和）。它就是这档 2×2 的分母。
+    pub judged: usize,
+    /// 该档三维分均值（只收 `horizon_agreement` 有值的行）；一条都没有 → None（不是 0 分）
+    pub avg_horizon_agreement: Option<f64>,
+    /// `judged < MIN_SAMPLE` ⇒ 面板只能说「样本不足」，**不得**把这四个计数当结论读
+    pub sufficient: bool,
+}
+
+/// 逐档 2×2 的**纯函数**聚合（四档恒各出一行，缺样本的档用 `judged == 0` 表达）。
+///
+/// 判定口径（为什么不在这里重算）：`was_correct` / `llm_was_correct` 都是产端用
+/// [`deterministic_horizon_was_correct`] 在**同一份档快照**上算好落库的；这里重算需要
+/// 快照与 `within_expected_horizon`，那是给同一件事立第二个真相。
+pub fn build_horizon_confusion(samples: &[DecisionPerformanceSample]) -> Vec<HorizonConfusionRow> {
+    let mut out = Vec::with_capacity(Period::ALL.len());
+    for period in Period::ALL {
+        let tier = period.as_str();
+        let mut row = HorizonConfusionRow {
+            tier: tier.to_string(),
+            tier_label: period.label_zh().to_string(),
+            ..Default::default()
+        };
+        let mut agr_sum = 0.0_f64;
+        let mut agr_n = 0usize;
+        for s in samples.iter().filter(|s| s.horizon.as_deref() == Some(tier)) {
+            if let Some(a) = s.horizon_agreement {
+                agr_sum += a as f64;
+                agr_n += 1;
+            }
+            // 两侧都必须可判才进四格：公式侧理论恒为 0/1（`expand_horizon_samples` 已过滤），
+            // 但这里按元组匹配 ⇒ 万一出现越界值也落「无从判定」而**不是**被算成某一格。
+            match (s.was_correct, s.llm_was_correct) {
+                (1, Some(1)) => row.both_correct += 1,
+                (1, Some(0)) => row.formula_only += 1,
+                (0, Some(1)) => row.llm_only += 1,
+                (0, Some(0)) => row.both_wrong += 1,
+                // 含 LLM 侧 None（缺席/未满/非方向性动作）⇒ 单列，不进四格
+                _ => {
+                    row.llm_undecided += 1;
+                    continue;
+                },
+            }
+            row.judged += 1;
+        }
+        if agr_n > 0 {
+            row.avg_horizon_agreement = Some(agr_sum / agr_n as f64);
+        }
+        row.sufficient = row.judged >= MIN_SAMPLE;
+        out.push(row);
+    }
+    out
 }
 
 // ── 单元测试 ── 追加在文件末尾（防 clippy::items_after_test_module）
@@ -1509,6 +1596,20 @@ mod reflection_stats_tests {
             excluded_pre_floor_generation: 4,
             unknown_generation_samples: 7,
             failure_modes: Default::default(),
+            // B4：齐备态值给**生产形态**（四格都有数、均值有值）—— 只在断言里数键、
+            // 值给 Default 的话，「格子字段改了名/漏了」这类断裂照样查不出来。
+            horizon_confusion: vec![HorizonConfusionRow {
+                tier: "short".into(),
+                tier_label: "短线".into(),
+                both_correct: 3,
+                formula_only: 2,
+                llm_only: 1,
+                both_wrong: 4,
+                llm_undecided: 5,
+                judged: 10,
+                avg_horizon_agreement: Some(61.5),
+                sufficient: true,
+            }],
         };
         let value = serde_json::to_value(&stats).unwrap();
         let top = value.as_object().unwrap();
@@ -1529,9 +1630,28 @@ mod reflection_stats_tests {
             "unknownGenerationSamples",
             // P2-b：失败模式看板随命中率一并出 IPC（面板零新增 invoke）。
             "failureModes",
+            // B4：逐档结局 2×2 同批出 IPC（与命中率同源分母，面板零新增 invoke）。
+            "horizonConfusion",
         ] {
             assert!(top.contains_key(key), "HitrateStats 顶层缺 camelCase 键 {key}：{top:?}");
         }
+        // B4：2×2 的行级键同样逐条锁（少一个字段前端就是 undefined，格子会静默显示 0）
+        let cell = value["horizonConfusion"][0].as_object().unwrap();
+        for key in [
+            "tier",
+            "tierLabel",
+            "bothCorrect",
+            "formulaOnly",
+            "llmOnly",
+            "bothWrong",
+            "llmUndecided",
+            "judged",
+            "avgHorizonAgreement",
+            "sufficient",
+        ] {
+            assert!(cell.contains_key(key), "HorizonConfusionRow 缺 camelCase 键 {key}：{cell:?}");
+        }
+        assert!(!cell.contains_key("both_correct"), "2×2 行又出现 snake_case 键");
         let group = value["byHorizon"][0].as_object().unwrap();
         for key in [
             "key",
@@ -1767,6 +1887,77 @@ mod reflection_stats_tests {
         let (kept, pre_floor, unknown) = filter_by_generation_floor(all_old, f);
         assert!(kept.is_empty(), "旧代样本不得进分母");
         assert_eq!((pre_floor, unknown), (2, 0), "排除量必须如实等于被剔掉的样本数");
+    }
+    // ── B4：逐档结局 2×2 的纯函数判据 ──
+
+    fn b4_sample(
+        horizon: &str,
+        formula: i32,
+        llm: Option<i32>,
+        agr: Option<i32>,
+    ) -> DecisionPerformanceSample {
+        let mut s = sample_gen(Some("买入"), Some(horizon), formula, 1.0, Some(200));
+        s.llm_was_correct = llm;
+        s.horizon_agreement = agr;
+        s
+    }
+
+    /// 四格各归各位 + 「无从判定」单列（**不得**混进任何一格，尤其不得算成 LLM 判错）。
+    #[test]
+    fn confusion_quarters_are_distinct_and_undecided_is_not_a_wrong_cell() {
+        let rows = build_horizon_confusion(&[
+            b4_sample("mid", 1, Some(1), Some(60)),
+            b4_sample("mid", 1, Some(0), None),
+            b4_sample("mid", 0, Some(1), None),
+            b4_sample("mid", 0, Some(0), None),
+            // LLM 观望/持有 ⇒ 产端判 None（不是方向判断）⇒ 只能落 undecided
+            b4_sample("mid", 1, None, None),
+        ]);
+        let mid = rows.iter().find(|r| r.tier == "mid").unwrap();
+        assert_eq!(
+            (mid.both_correct, mid.formula_only, mid.llm_only, mid.both_wrong),
+            (1, 1, 1, 1)
+        );
+        assert_eq!(mid.llm_undecided, 1, "无从判定必须单列");
+        assert_eq!(mid.judged, 4, "分母只数四格");
+        assert_eq!(mid.tier_label, "中线", "档名口径跟随 harness::Period::label_zh");
+        // 负控向：undecided 若被折进「LLM 判错」那两格，下面这条会红
+        assert_eq!(
+            mid.formula_only + mid.llm_only + mid.both_wrong + mid.both_correct,
+            4,
+            "四格相加不得含 undecided"
+        );
+    }
+
+    /// 四档恒各出一行；「样本不足」按 `MIN_SAMPLE` 判，且边界值（恰 5 条）算够。
+    #[test]
+    fn confusion_always_has_four_rows_and_sufficiency_uses_min_sample_boundary() {
+        let empty = build_horizon_confusion(&[]);
+        assert_eq!(empty.len(), 4, "四档恒各一行，缺样本不是「没有这一档」");
+        for r in &empty {
+            assert_eq!(r.judged, 0);
+            assert!(!r.sufficient, "0 条可判样本不得判成「够」");
+            assert_eq!(r.avg_horizon_agreement, None, "无值给 None，不是 0 分");
+        }
+        let five: Vec<_> = (0..MIN_SAMPLE).map(|_| b4_sample("long", 1, Some(1), None)).collect();
+        let rows = build_horizon_confusion(&five);
+        let long = rows.iter().find(|r| r.tier == "long").unwrap();
+        assert_eq!(long.judged, 5);
+        assert!(long.sufficient, "恰达 MIN_SAMPLE({MIN_SAMPLE}) 即算够 —— 边界不许写成 >");
+        assert!(!rows.iter().find(|r| r.tier == "short").unwrap().sufficient);
+    }
+
+    /// 三维分均值只收有值的行；一条都没有 ⇒ None（不是 0 分）。
+    #[test]
+    fn confusion_avg_agreement_divides_only_by_rows_that_have_a_value() {
+        let rows = build_horizon_confusion(&[
+            b4_sample("short", 1, Some(1), Some(60)),
+            b4_sample("short", 0, Some(0), Some(70)),
+            b4_sample("short", 1, None, None),
+        ]);
+        let short = rows.iter().find(|r| r.tier == "short").unwrap();
+        assert_eq!(short.avg_horizon_agreement, Some(65.0), "分母只能是有值的那两条");
+        assert_eq!(short.judged, 2, "第三条无从判定不进四格");
     }
 }
 

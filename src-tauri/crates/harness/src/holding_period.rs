@@ -477,11 +477,19 @@ impl Period {
     ///
     /// 三处必须逐字与本题字面一致，任一处漂移都会被门抓红
     /// （`scripts/check-horizon-label-parity.mjs`）：
-    /// ① 前端 i18n 的 8 套档名键族（`stockAnalysis.period*` / `timeHorizon*` /
-    ///    `reflection.horizon*` / `scheduledAnalysis.period.*` / `recommendation.period*`、
-    ///    `replayWorkbench.batch.period.*`、`settings.scheduled-recommendation.period-*`）；
+    /// ① 前端 i18n 的**唯一**档名键族 `stockAnalysis.timeHorizon*`
+    ///    （取值一律经 `horizonLabelKey()`，`src/lib/stock-analysis-utils.ts`）；
     /// ② Rhai 装配段的 `cn_tier`（`portfolio-mgr.rhai`，写进 `dataGaps`）；
     /// ③ 导出模块的 `labelMap`（`src/lib/stock-analysis-export.ts`）。
+    /// 另有第 ④ 处**非 i18n** 副本：`e2e/stock-reflection-four-horizon.spec.ts` 的
+    /// `horizonTab(..., "🟢 长线")` 硬编码锚点（判据 D 盯它）。
+    ///
+    /// ⚠ 2026-10-16 收敛：此前前端有 **8 套**档名键族（`period.*` / `period*` /
+    /// `recommendation.period*` / `reflection.horizon*` / `scheduledAnalysis.period.*`、
+    /// `replayWorkbench.batch.period.*`、`settings.scheduled-recommendation.period-*`
+    /// 与 `timeHorizon*`），值虽统一但**定义是 8 份** ⇒ 任一族漏改即前后端同屏两名。
+    /// 当日把另 7 套整体删除（28 键 × 11 语言 + 2 个被删空的壳对象），门禁改为
+    /// 「唯一族 + 禁回流」（判据 E）。列在此处是为了说明**为何只剩一族**，不是现存清单。
     ///
     /// ⚠ 第 4 档是「长线」而**不是**「季度」：`quarterly` 是**评分尺度名**
     /// （`Scale::Quarterly` = 60 交易日/bar，见 `astock-data/src/scale.rs`），

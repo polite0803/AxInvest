@@ -6573,10 +6573,6 @@
       "group-presets": "一般プリセット",
       "group-custom-interval": "カスタム間隔",
       "label-periods": "推薦期間",
-      "period-ultra-short": "超短期",
-      "period-short": "短期",
-      "period-mid": "中期",
-      "period-long": "長期",
       "placeholder-periods": "1つ以上の期間を選択",
       "label-min-confidence": "最小信頼度",
       "label-top-n": "Top N 上限",
@@ -14830,12 +14826,6 @@
       "okCount": "成功 {{n}}",
       "failCount": "失敗 {{n}}",
       "totalCount": "合計 {{n}}",
-      "period": {
-        "ultra_short": "超短期",
-        "short": "短期",
-        "mid": "中期",
-        "long": "長期"
-      },
       "dueYes": "期日到来",
       "dueNo": "未到来",
       "analysisOk": "分析成功",
@@ -15440,11 +15430,7 @@
       "1d": "日线",
       "1w": "周线",
       "1M": "月线",
-      "zoomHint": "框选缩放",
-      "ultraShort": "超短期",
-      "short": "短期",
-      "mid": "中期",
-      "long": "長期"
+      "zoomHint": "框选缩放"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15485,10 +15471,6 @@
     "industryRanking": "Industry Ranking",
     "clsFlash": "CLS Flash News",
     "leader": "Leader",
-    "periodUltraShort": "超短期",
-    "periodShort": "短期",
-    "periodMid": "中期",
-    "periodLong": "長期",
     "generatedAt": "生成于",
     "bannerVendorDisabled": "Some styles disabled: {styles}",
     "openSettings": "Open Settings",
@@ -16841,10 +16823,6 @@
         "holding": "Holding Days",
         "confidence": "Confidence"
       },
-      "periodUltraShort": "超短期",
-      "periodShort": "短期",
-      "periodMid": "中期",
-      "periodLong": "長期",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -17014,12 +16992,6 @@
         "daily0700": "毎日 07:00",
         "tradeDay1600": "Trading Day 16:00 (After Close)"
       },
-      "period": {
-        "ultraShort": "超短期",
-        "short": "短期",
-        "mid": "中期",
-        "long": "長期"
-      },
       "column": {
         "id": "ID",
         "description": "Description",
@@ -17178,10 +17150,6 @@
       "hitrateByHorizon": "時間軸別",
       "hitrateGroupRate": "グループ内命中率",
       "insufficientSamples": "サンプル不足",
-      "horizonUltraShort": "超短期",
-      "horizonShort": "短期",
-      "horizonMid": "中期",
-      "horizonLong": "長期",
       "horizonAuto": "主档に従う",
       "horizonUnknown": "不明な期間",
       "colHorizon": "復盤期間",
@@ -17246,6 +17214,13 @@
       "failureModeChaseUpBar": "大陽線の追い乗り",
       "failureModeRegimeEndorsement": "地合い判断で個別株を後押し",
       "failureModeReverseDcfIgnored": "逆方向 DCF の無視",
+      "horizonConfusionTitle": "区分別の結果照合（数式 × LLM）",
+      "horizonConfusionNotProduced": "この記録には区分別の結果照合がありません（統計開始前のデータ、または判定可能なサンプルが空）",
+      "horizonConfusionInsufficient": "サンプル不足（判定済み {{judged}} 件）—— 下の数値は生の記録であり、結論ではありません",
+      "horizonConfusionCells": "両方正解 {{both}} · 数式のみ {{formulaOnly}} · LLM のみ {{llmOnly}} · 両方不正解 {{bothWrong}}",
+      "horizonConfusionUndecided": "LLM 判定不能 {{undecided}} 件（欠落 / 窓未到来 / 様子見・保有などの非方向アクション）—— どの欄にも数えません",
+      "horizonConfusionAvgAgreement": "この区分の三次元一致率の平均 {{pct}}",
+      "horizonConfusionScopeNote": "両側は同一の窓・同一の判定関数です。四欄は方向の正誤のみを比べ、収益の大小は含みません。上の的中率とは分母が異なります。",
       "failureModeOther": "その他"
     },
     "portfolioMonitor": {
@@ -18055,16 +18030,50 @@
       "error": "抽出失敗",
       "noData": "証拠引用データなし",
       "title": "証拠引用監査",
-      "supportRate": "データ支持率",
-      "analystCount": "ソースアナリスト",
-      "claimCount": "意思決定理由",
-      "supported": "データあり",
-      "unsupported": "データなし",
-      "source": "ソース",
       "extractFailed": "证据提取失败",
-      "matchConfidence": "匹配置信度",
       "notApplicable": "証拠引用監査は対象外（今回の判断は生成されていません）",
-      "notApplicableDetail": "今回の実行では判断が生成されていません（action={{action}} は結論ではなくデータ欠如のセンチネル値です）。理由欄には降格時の診断情報が格納され、監査可能なアナリスト根拠を含みません。したがってサポート率はこの情形で定義されず、0% として表示されません。"
+      "notApplicableDetail": "今回の実行では判断が生成されていません（action={{action}} は結論ではなくデータ欠如のセンチネル値です）。理由欄には降格時の診断情報が格納され、監査可能なアナリスト根拠を含みません。したがってサポート率はこの情形で定義されず、0% として表示されません。",
+      "branchSection": "本ホライズンの分岐脚の監査",
+      "factorSection": "主体系ファクターの整合照合",
+      "expectedLegs": "本来の参加",
+      "participatingLegs": "実際の参加",
+      "upstreamPresentCount": "上流あり",
+      "upstreamNotCheckedCount": "検証不可",
+      "sigmaReconciled": "σ 照合済み",
+      "weight": "重み",
+      "signal": "シグナル",
+      "absenceUndeclared": "欠落の申告なし",
+      "metaLeg": "メタ制約",
+      "upstream": {
+        "present": "上流あり",
+        "declaredAbsent": "欠落を明示",
+        "silentAbsent": "無申告の欠落",
+        "notChecked": "検証不可"
+      },
+      "notChecked": {
+        "noSnapshotKey": "この記録のスナップショットに当該ソースの出力キーが無いため、判定は適用外です",
+        "noOwner": "このファクターには担当アナリストが登録されていません",
+        "unregisteredFactor": "このファクターはソース登録表に無いため、判定は適用外です"
+      },
+      "sigma": {
+        "consistent": "σ 一致",
+        "inconsistent": "σ 不一致",
+        "noBasis": "基準なし"
+      },
+      "noBasis": {
+        "noPersistedBasis": "この記録には照合できる保存済み基準がありません（正規化の一元化が未了）",
+        "basisMissingInRecord": "基準キーは登録済みですが、この記録には存在しません"
+      },
+      "closure": {
+        "closed": "整合",
+        "broken": "不整合",
+        "notComputable": "判定不能"
+      },
+      "closureReason": {
+        "decisionDegraded": "今回は意思決定が出力されていないため、整合性は判定できません",
+        "noWeightSumOrFactors": "weightSum またはファクター表が無いため、整合性は判定できません"
+      },
+      "supported": "データあり"
     },
     "charts": {
       "noSectorData": "セクター配分データなし",

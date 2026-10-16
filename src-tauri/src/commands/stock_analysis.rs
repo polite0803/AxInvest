@@ -1597,56 +1597,67 @@ pub async fn list_watchlist(
         })
 }
 
-/// 提取证据引用链（审计溯源）
+/// 决策证据对账审计（替代旧 `extract_evidence_citations` 的文本相似度判据）
 ///
-/// 从指定股票分析的 `decision_json` + `blackboard_snapshot` 中
-/// 提取每条决策理由的来源分析师报告引用。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "提取证据引用链")]
+/// 判据与动机见 `PLAN-evidence-factor-audit.md`；实现见
+/// `axagent_analysis_engine::evidence_audit::audit_decision_evidence`。
+#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "决策证据对账审计")]
 #[tauri::command]
-pub async fn extract_evidence_citations(
+pub async fn audit_decision_evidence(
     state: State<'_, AppState>,
     analysis_id: String,
-) -> Result<axagent_analysis_engine::evidence_citation::CitationReport, String> {
-    use axagent_analysis_engine::evidence_citation::extract_citations;
+) -> Result<axagent_analysis_engine::evidence_audit::EvidenceAuditReport, String> {
+    use axagent_analysis_engine::evidence_audit::audit_decision_evidence as audit;
 
     let analysis = axagent_entities::stock_analyses::Entity::find_by_id(&analysis_id)
         .one(state.harness.db())
         .await
-        .map_err(|e| format!("查询分析记录失败: {e}"))?
-        .ok_or_else(|| format!("分析记录 {analysis_id} 不存在"))?;
+        .map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("查询分析记录失败: {e}"))
+                .to_string()
+        })?
+        .ok_or_else(|| {
+            ErrorResponse::new(wf_err::TARGET_NOT_FOUND)
+                .with_detail(format!("分析记录不存在: {analysis_id}"))
+                .to_string()
+        })?;
 
-    let reasoning = analysis.decision_reasoning.unwrap_or_default();
-    let snapshot = analysis.blackboard_snapshot.unwrap_or_else(|| "{}".into());
+    let decision_json: serde_json::Value = analysis
+        .decision_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let blackboard: serde_json::Value = analysis
+        .blackboard_snapshot
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or(serde_json::Value::Null);
 
-    // P0-5(2026-09-14): 决策缺失统一下发显式哨兵。
-    // 原实现 `unwrap_or_default()` 得到空串，前端 `parseAction("")` 退化成「观望」——
-    // 把「没有决策」伪装成一条业务结论。空串/纯空白同样按缺失处理。
+    // P0-5(2026-09-14): 决策缺失统一下发显式哨兵 —— 空串/纯空白同样按缺失处理，
+    // 不把「没有决策」伪装成业务结论。
     let decision_action =
         analysis.decision_action.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| {
             axagent_analysis_engine::decision_action::ACTION_UNAVAILABLE.to_string()
         });
-    // 2026-09-28：决策未产出 ⇒ 本轮 `decision_reasoning` 是降级路径的诊断串（异常文本），
-    // 不是「决策理由」。把它送进匹配器会必然全 miss ⇒ 支撑率读出 **0%**，与
-    // 「理由确有陈述、但没有数据支撑」在 UI 上同形。闸口按上面的**权威哨兵**判，
-    // 不按 reasoning 文本形态猜。
+    // 2026-09-28：决策未产出 ⇒ 理由栏装的是降级诊断串，本轮没有可审计的决策。
+    // 闸口按**权威哨兵**判，不按任何文本形态猜。
     let degraded = axagent_analysis_engine::decision_action::is_unavailable(&decision_action);
+    let confidence = decision_json.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
 
-    let mut report = extract_citations(&reasoning, &snapshot, degraded);
-    report.stock_code = analysis.stock_code;
-    report.stock_name = analysis.stock_name;
-    report.analysis_date = analysis.analysis_date;
-    report.decision_action = decision_action;
-    report.decision_confidence = 0.0; // 从 decision_json 解析
-
-    // 尝试从 decision_json 解析置信度
-    if let Some(dj) = &analysis.decision_json {
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(dj) {
-            if let Some(conf) = parsed.get("confidence").and_then(|v| v.as_f64()) {
-                report.decision_confidence = conf;
-            }
-        }
-    }
-
+    // 档位：模块读 `decision_json.timeHorizon`（分支产出键 `result.h_<档>` 由它派生）。
+    // 它与列 `decision_time_horizon` 在现网 127/127 条 completed 行上逐一相等（2026-10-16 实测），
+    // 故此处不引入第二处取值口径。
+    let report = audit(
+        &analysis.stock_code,
+        &analysis.stock_name,
+        &analysis.analysis_date,
+        &decision_action,
+        confidence,
+        degraded,
+        &decision_json,
+        &blackboard,
+    );
     Ok(report)
 }
 
@@ -5131,7 +5142,7 @@ pub async fn get_latest_analysis_for_stock(
     Ok(Some(LatestAnalysisSummary {
         analysis_id: model.id,
         analysis_date: model.analysis_date,
-        // P0-5: 与 extract_evidence_citations 共用同一哨兵（原先此处是硬编码 "uncertain"，
+        // P0-5: 与 audit_decision_evidence 共用同一哨兵（原先此处是硬编码 "uncertain"，
         // 与另一处的空串构成「同一缺失两种语义」）。
         decision_action: model.decision_action.filter(|s| !s.trim().is_empty()).unwrap_or_else(
             || axagent_analysis_engine::decision_action::ACTION_UNAVAILABLE.to_string(),

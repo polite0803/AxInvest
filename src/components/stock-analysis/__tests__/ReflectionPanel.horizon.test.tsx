@@ -82,8 +82,11 @@ function activePaneText(): string {
  * 点击某个周期的 Tab。
  *
  * 不依赖 `data-node-key`（antd 内部属性，版本间可能变），改为按 Tab 文案里的
- * i18n key 定位（`horizonUltraShort` / `horizonShort` / `horizonMid` / `horizonLong`
- * 四个 key 互不为子串，故唯一）。
+ * i18n key 定位（`timeHorizonUltraShort` / `timeHorizonShort` / `timeHorizonMid` /
+ * `timeHorizonLong` 四个 key 互不为子串，故唯一）。
+ *
+ * 2026-10-16 档名收敛：Tab 显示名已由 `reflection.horizon*`（该族**已删除**）
+ * 改走唯一族 `stockAnalysis.timeHorizon*`（经 `horizonLabelKey()`）⇒ 定位前缀随之更新。
  */
 function clickHorizonTab(key: string): void {
   const tabs = Array.from(document.querySelectorAll(".ant-tabs-nav .ant-tabs-tab"));
@@ -100,7 +103,7 @@ function navTabCount(): number {
   return document.querySelectorAll(".ant-tabs-nav .ant-tabs-tab").length;
 }
 
-const LABEL = "stockAnalysis.reflection.horizon";
+const LABEL = "stockAnalysis.timeHorizon";
 
 describe("ExpandedReflectionRow 四周期 Tab（批次 4）", () => {
   it("四个周期各自成熟时，切 Tab 只显示该周期自己的 action 与收益（不串线）", () => {

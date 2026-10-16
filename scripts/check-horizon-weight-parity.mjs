@@ -29,8 +29,12 @@
  *    「扫到 0 条」的门等于没有门（本仓已多次为这类假绿付过代价）；
  * ④ **四档显示名不得再手抄天数**：持有天数的唯一来源是 Rust
  *    `harness/src/holding_period.rs` 的 `default_holding_days`（2/5/28/90）。
- *    实证缺陷（2026-09-29 审计）：`stockAnalysis.reflection.horizonUltraShort` 在 11 个语言里
- *    写「(1-3天)」，而权威是 **2 交易日** —— 抄本腐烂了，且没有任何门会响。
+ *    实证缺陷（2026-09-29 审计）：该档名族在 11 个语言里写「(1-3天)」，
+ *    而权威是 **2 交易日** —— 抄本腐烂了，且没有任何门会响。
+ *    ⚠ 2026-10-16 收敛：档名键族由 8 套并为 1 套（`stockAnalysis.timeHorizon*`），
+ *    本判据的读取路径随之从 `stockAnalysis.reflection.horizon*` 改为
+ *    `stockAnalysis.timeHorizon*` —— 原路径已被删除，继续读它会恒得 `undefined`
+ *    并报「缺失」（= 假红），或被误当成「已通过」（= 假绿）。
  *    所以判据不是「数字要对」而是「标签里不许出现数字」：要显示天数，就渲染
  *    `byHorizon[].holdingDays`（后端权威表经 DTO 出边界），别再抄一遍。
  *
@@ -61,7 +65,8 @@ const FRONTEND = "src/lib/stock-analysis-utils.ts";
 const HOLDING = "src-tauri/crates/harness/src/holding_period.rs";
 const SEED = "src-tauri/src/commands/stock_analysis_setup/seed_stock_analysis.rs";
 const LOCALE_DIR = "src/i18n/locales";
-const LABEL_KEYS = ["horizonUltraShort", "horizonShort", "horizonMid", "horizonLong"];
+/** 唯一档名键族的四档键名（扁平，挂 `stockAnalysis` 段；2026-10-16 由 8 族收敛而来）。 */
+const LABEL_KEYS = ["timeHorizonUltraShort", "timeHorizonShort", "timeHorizonMid", "timeHorizonLong"];
 const TIERS = ["ultra_short", "short", "mid", "long"];
 
 /** 相对仓库根读文件；读不到返回 null ⇒ 判据报「覆盖面失效」，不静默放行。 */
@@ -269,8 +274,8 @@ function checkLabelsCarryNoDayRange(localeObjs) {
   for (const [lang, obj] of Object.entries(localeObjs)) {
     for (const key of LABEL_KEYS) {
       const v = obj[key];
-      if (typeof v !== "string") { errs.push(`${lang}: reflection.${key} 缺失或非字符串`); continue; }
-      if (/\d/.test(v)) { errs.push(`${lang}: reflection.${key} = ${JSON.stringify(v)} 里手抄了天数 ⇒ 权威表一改就静默腐烂`); }
+      if (typeof v !== "string") { errs.push(`${lang}: stockAnalysis.${key} 缺失或非字符串`); continue; }
+      if (/\d/.test(v)) { errs.push(`${lang}: stockAnalysis.${key} = ${JSON.stringify(v)} 里手抄了天数 ⇒ 权威表一改就静默腐烂`); }
     }
   }
   return errs;
@@ -329,7 +334,7 @@ function checkReflectionPromptSingleHorizon(read) {
   return errs;
 }
 
-/** 读 11 个语言里 reflection 段的四个档名（解析不出 ⇒ 护栏）。 */
+/** 读 11 个语言里 `stockAnalysis` 段的四个档名（解析不出 ⇒ 护栏）。 */
 function readHorizonLabels() {
   const dir = path.join(ROOT, LOCALE_DIR);
   const out = {};
@@ -338,8 +343,8 @@ function readHorizonLabels() {
     let d;
     try { d = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")); }
     catch { out[lang] = { __broken: true }; continue; }
-    const ref = d?.stockAnalysis?.reflection ?? {};
-    out[lang] = Object.fromEntries(LABEL_KEYS.map((k) => [k, ref[k]]));
+    const sa = d?.stockAnalysis ?? {};
+    out[lang] = Object.fromEntries(LABEL_KEYS.map((k) => [k, sa[k]]));
   }
   return out;
 }
@@ -514,12 +519,12 @@ function selftest() {
   cases.push({ name: "④负控 磁盘现状（标签已剥离天数）⇒ 应无问题", got: checkLabelsCarryNoDayRange(realLabels).length, want: 0 });
 
   const rebaked = structuredClone(realLabels);
-  rebaked["zh-CN"].horizonUltraShort = "超短线 (1-3天)";
+  rebaked["zh-CN"].timeHorizonUltraShort = "超短线 (1-3天)";
   cases.push({ name: "④正控 把「(1-3天)」抄回一个标签 ⇒ 必须报 1 处", got: checkLabelsCarryNoDayRange(rebaked).length, want: 1 });
 
   const allBad = {};
   for (const lang of Object.keys(realLabels)) {
-    allBad[lang] = { horizonUltraShort: "超短线 (1-3天)", horizonShort: "短线 (5天)", horizonMid: "中线 (28天)", horizonLong: "长线 (90天)" };
+    allBad[lang] = { timeHorizonUltraShort: "超短线 (1-3天)", timeHorizonShort: "短线 (5天)", timeHorizonMid: "中线 (28天)", timeHorizonLong: "长线 (90天)" };
   }
   cases.push({ name: "④规模 11 语言全抄 ⇒ 必须报 44 处（不是只报第一处）", got: checkLabelsCarryNoDayRange(allBad).length, want: 44 });
 

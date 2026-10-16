@@ -6573,10 +6573,6 @@
       "group-presets": "일반 프리셋",
       "group-custom-interval": "사용자 지정 간격",
       "label-periods": "추천 기간",
-      "period-ultra-short": "초단기",
-      "period-short": "단기",
-      "period-mid": "중기",
-      "period-long": "장기",
       "placeholder-periods": "하나 이상의 기간 선택",
       "label-min-confidence": "최소 신뢰도",
       "label-top-n": "Top N 제한",
@@ -14830,12 +14826,6 @@
       "okCount": "성공 {{n}}",
       "failCount": "실패 {{n}}",
       "totalCount": "합계 {{n}}",
-      "period": {
-        "ultra_short": "초단기",
-        "short": "단기",
-        "mid": "중기",
-        "long": "장기"
-      },
       "dueYes": "도래",
       "dueNo": "미도래",
       "analysisOk": "분석 성공",
@@ -15440,11 +15430,7 @@
       "1d": "일봉",
       "1w": "주봉",
       "1M": "월봉",
-      "zoomHint": "박스 선택 확대/축소",
-      "ultraShort": "초단기",
-      "short": "단기",
-      "mid": "중기",
-      "long": "장기"
+      "zoomHint": "박스 선택 확대/축소"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15485,10 +15471,6 @@
     "industryRanking": "Industry Ranking",
     "clsFlash": "CLS Flash",
     "leader": "Leader",
-    "periodUltraShort": "초단기",
-    "periodShort": "단기",
-    "periodMid": "중기",
-    "periodLong": "장기",
     "generatedAt": "생성 시간: {{time}}",
     "bannerVendorDisabled": "일부 스타일 비활성화: {styles}",
     "openSettings": "설정 열기",
@@ -16841,10 +16823,6 @@
         "holding": "Holding Days",
         "confidence": "Confidence"
       },
-      "periodUltraShort": "초단기",
-      "periodShort": "단기",
-      "periodMid": "중기",
-      "periodLong": "장기",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -17014,12 +16992,6 @@
         "daily0700": "매일 07:00",
         "tradeDay1600": "Trading Day 16:00 (After Close)"
       },
-      "period": {
-        "ultraShort": "초단기",
-        "short": "단기",
-        "mid": "중기",
-        "long": "장기"
-      },
       "column": {
         "id": "ID",
         "description": "Description",
@@ -17178,10 +17150,6 @@
       "hitrateByHorizon": "시간 축별",
       "hitrateGroupRate": "그룹 적중률",
       "insufficientSamples": "표본 부족",
-      "horizonUltraShort": "초단기",
-      "horizonShort": "단기",
-      "horizonMid": "중기",
-      "horizonLong": "장기",
       "horizonAuto": "주 단계 기준",
       "horizonUnknown": "알 수 없는 주기",
       "colHorizon": "복기 구간",
@@ -17246,6 +17214,13 @@
       "failureModeChaseUpBar": "대양봉 추격 매수",
       "failureModeRegimeEndorsement": "시장 상황으로 개별 종목 옹호",
       "failureModeReverseDcfIgnored": "역방향 DCF 무시",
+      "horizonConfusionTitle": "등급별 결과 대조 (수식 × LLM)",
+      "horizonConfusionNotProduced": "이 기록에는 등급별 결과 대조가 없습니다 (통계 도입 이전 데이터이거나 판정 가능한 표본이 없음)",
+      "horizonConfusionInsufficient": "표본 부족 (판정 {{judged}}건) — 아래 수치는 원시 기록이며 결론이 아닙니다",
+      "horizonConfusionCells": "양쪽 정답 {{both}} · 수식만 {{formulaOnly}} · LLM만 {{llmOnly}} · 양쪽 오답 {{bothWrong}}",
+      "horizonConfusionUndecided": "LLM 판정 불가 {{undecided}}건 (누락 / 창 미도래 / 관망·보유 같은 비방향 동작) — 어느 칸에도 세지 않습니다",
+      "horizonConfusionAvgAgreement": "이 등급의 3차원 일치율 평균 {{pct}}",
+      "horizonConfusionScopeNote": "양측은 같은 창과 같은 판정 함수를 씁니다. 네 칸은 방향의 정오만 비교하며 수익률은 포함하지 않고, 위 적중률과 분모가 다릅니다.",
       "failureModeOther": "기타"
     },
     "portfolioMonitor": {
@@ -18055,16 +18030,50 @@
       "error": "추출 실패",
       "noData": "증거 인용 데이터 없음",
       "title": "증거 인용 감사",
-      "supportRate": "데이터 지지율",
-      "analystCount": "출처 분석가",
-      "claimCount": "결정 근거",
-      "supported": "데이터 있음",
-      "unsupported": "데이터 없음",
-      "source": "출처",
       "extractFailed": "증거 추출 실패",
-      "matchConfidence": "매칭 신뢰도",
       "notApplicable": "증거 인용 감사 대상 아님(이번 실행에서 판정이 산출되지 않음)",
-      "notApplicableDetail": "이번 실행에서는 판정이 산출되지 않았습니다(action={{action}}는 결론이 아닌 데이터 부재 표시값). 사유 칸에는 강등 진단 정보가 저장되어 감사 가능한 애널리스트 증거가 없습니다. 따라서 지원율은 이 상황에서 정의되지 않으며 0%로 표시되지 않습니다."
+      "notApplicableDetail": "이번 실행에서는 판정이 산출되지 않았습니다(action={{action}}는 결론이 아닌 데이터 부재 표시값). 사유 칸에는 강등 진단 정보가 저장되어 감사 가능한 애널리스트 증거가 없습니다. 따라서 지원율은 이 상황에서 정의되지 않으며 0%로 표시되지 않습니다.",
+      "branchSection": "이 기간의 분기 레그 감사",
+      "factorSection": "주 계층 팩터 정합 대조",
+      "expectedLegs": "참여 예정",
+      "participatingLegs": "실제 참여",
+      "upstreamPresentCount": "상류 존재",
+      "upstreamNotCheckedCount": "검증 불가",
+      "sigmaReconciled": "σ 대조됨",
+      "weight": "가중치",
+      "signal": "신호",
+      "absenceUndeclared": "결손 미신고",
+      "metaLeg": "메타 제약",
+      "upstream": {
+        "present": "상류 존재",
+        "declaredAbsent": "결손 신고됨",
+        "silentAbsent": "무신고 결손",
+        "notChecked": "검증 불가"
+      },
+      "notChecked": {
+        "noSnapshotKey": "이 기록의 스냅샷에 해당 소스의 출력 키가 없어 판정 대상이 아닙니다",
+        "noOwner": "이 팩터에 등록된 담당 분석가가 없습니다",
+        "unregisteredFactor": "이 팩터는 소스 등록표에 없어 판정 대상이 아닙니다"
+      },
+      "sigma": {
+        "consistent": "σ 일치",
+        "inconsistent": "σ 불일치",
+        "noBasis": "기준 없음"
+      },
+      "noBasis": {
+        "noPersistedBasis": "이 기록에는 대조할 저장된 기준이 없습니다(정규화 일원화 미완)",
+        "basisMissingInRecord": "기준 키는 등록되어 있으나 이 기록에는 없습니다"
+      },
+      "closure": {
+        "closed": "정합",
+        "broken": "불정합",
+        "notComputable": "판정 불가"
+      },
+      "closureReason": {
+        "decisionDegraded": "이번에는 결정이 산출되지 않아 정합성을 판정할 수 없습니다",
+        "noWeightSumOrFactors": "weightSum 또는 팩터 표가 없어 정합성을 판정할 수 없습니다"
+      },
+      "supported": "데이터 있음"
     },
     "charts": {
       "noSectorData": "섹터 배분 데이터 없음",

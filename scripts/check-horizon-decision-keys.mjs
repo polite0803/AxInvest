@@ -56,6 +56,8 @@ const LLM_CAMEL_AUTH_PATH = "src-tauri/crates/harness/src/holding_period.rs";
 const LLM_RUST_PARSE_PATH = "src-tauri/src/commands/stock_workflow/decision.rs";
 const LLM_TS_READER_PATH = "src/lib/agentOutput.ts";
 const LLM_CORE_PATH = "src-tauri/src/commands/stock_workflow/core.rs";
+/** B4：逐档结局 2×2 的 DTO 权威（Rust 结构体在 engine 里，TS 镜像在同一份 `stock-analysis.ts`） */
+const REFLECTION_STATS_RS_PATH = "src-tauri/crates/analysis-engine/src/reflection_stats.rs";
 /** 代际标记的键名（判「键在不在」，不判值 ⇒ Rust 与 TS 只共享这一个串） */
 const LLM_CONTRACT_KEY = "horizonDecisionContract";
 
@@ -149,6 +151,38 @@ export function tsKeys(src, iface = "HorizonDecision") {
     }
   }
   return out;
+}
+
+/**
+ * Rust 结构体的 `pub <field>:` 字段名（R5f 用），**按 serde camelCase 折算后**返回。
+ *
+ * 为什么在这里也要一道对账：DTO 的 Rust 侧字段名与 TS 侧字段名分居两个仓角，
+ * 改一个忘一个**不会报错** —— 前端读到的就是 `undefined`，2×2 的格子会静默显示 0
+ * （即「LLM 判错 0 条」，一个看起来完全合理的假数）。
+ */
+export function rustStructFields(src, structName) {
+  const clean = stripRsComments(src);
+  const start = clean.indexOf(`pub struct ${structName} {`);
+  if (start < 0) return null;
+  const body = clean.slice(start);
+  const end = body.indexOf("\n}");
+  const block = end < 0 ? body : body.slice(0, end);
+  const out = [];
+  for (const m of block.matchAll(/^\s*pub ([a-z][a-z0-9_]*):/gm)) {
+    out.push(m[1].replace(/_([a-z])/g, (_, c) => c.toUpperCase()));
+  }
+  return out.length > 0 ? out : null;
+}
+
+/** 去掉 `//` 行注释与 `///` 文档注释（Rust 侧扫描前的骨架化） */
+export function stripRsComments(src) {
+  return src
+    .split("\n")
+    .filter((ln) => {
+      const t = ln.trim();
+      return !(t.startsWith("//") || t.startsWith("/*") || t.startsWith("*"));
+    })
+    .join("\n");
 }
 
 /** 档位 camel 键的**权威**：现场读 harness `Period::camel_key()` 的 match 臂（不手抄四档表） */
@@ -276,7 +310,7 @@ function collectLlm() {
 }
 
 /** 主判据：返回违规字符串数组（空 = 通过） */
-export function check({ perTier, assembly, ts, llm }) {
+export function check({ perTier, assembly, ts, llm, confusion }) {
   const bad = [];
   const produced = new Map(); // key → 产它的档位列表
   for (const [tier, keys] of Object.entries(perTier)) {
@@ -387,6 +421,22 @@ export function check({ perTier, assembly, ts, llm }) {
 
     if (!llm.rustHasStamp) bad.push(`R5c Rust 解析器不再盖 \`${LLM_CONTRACT_KEY}\` ⇒ 读侧四态塌回三态，历史行会被读成「四档都没给」`);
     if (!llm.tsHasStamp) bad.push(`R5c TS 读侧不再判 \`${LLM_CONTRACT_KEY}\` ⇒ 「上线前样本」与「该档未给出」不可区分`);
+
+    // R5f 逐档结局 2×2：Rust `HorizonConfusionRow` 字段（按 serde camelCase 折算）
+    //   ↔ TS `HorizonConfusionRow` 字段集。与 R5d/R5e 同一失效族 —— 两侧分居两个仓角，
+    //   改一个忘一个不报错，只会让 2×2 的格子显示成 0（看起来完全合理的假数）。
+    if (!confusion?.rust || !confusion?.ts) {
+      bad.push("R5f 采集失败：Rust `HorizonConfusionRow` 或 TS `HorizonConfusionRow` 读不出来");
+    } else {
+      const rset = new Set(confusion.rust);
+      const tset = new Set(confusion.ts);
+      for (const k of rset) {
+        if (!tset.has(k)) bad.push(`R5f Rust 有而 TS 未声明：${k} ⇒ 前端读不到，格子会是 undefined`);
+      }
+      for (const k of tset) {
+        if (!rset.has(k)) bad.push(`R5f TS 声明而 Rust 从不产出：${k} ⇒ 永远 undefined`);
+      }
+    }
   }
   return bad;
 }
@@ -399,6 +449,10 @@ function collect() {
     assembly: assemblyKeys(read(MAIN_PATH)),
     ts: tsKeys(read(TS_PATH)),
     llm: collectLlm(),
+    confusion: {
+      rust: rustStructFields(read(REFLECTION_STATS_RS_PATH), "HorizonConfusionRow"),
+      ts: tsKeys(read(TS_PATH), "HorizonConfusionRow")?.map(([k]) => k) ?? null,
+    },
   };
 }
 
@@ -467,6 +521,17 @@ function selftest() {
       m.llm.tsHasStamp = false;
       return check(m);
     }],
+    // ── R5f 两条负控：两侧各打一边（只打一边＝另一半的漂移仍能过门）──
+    ["R5f Rust 多一字段", () => {
+      const m = structuredClone(base);
+      m.confusion.rust.push("inventedByRustOnly");
+      return check(m);
+    }],
+    ["R5f TS 多声明一字段", () => {
+      const m = structuredClone(base);
+      m.confusion.ts.push("phantomConfusionField");
+      return check(m);
+    }],
   ];
   let fail = 0;
   for (const [name, run] of cases) {
@@ -486,7 +551,7 @@ function selftest() {
     for (const c of clean) console.log(`   ${c}`);
     fail += 1;
   } else {
-    console.log("✓ 正控：现网键集一致（公式侧 R1-R4 + LLM 侧 R5a-R5e 全清）");
+    console.log("✓ 正控：现网键集一致（公式侧 R1-R4 + LLM 侧 R5a-R5e + 结局 2×2 的 R5f 全清）");
   }
   console.log(fail === 0 ? "\nselftest 全过" : `\nselftest 失败 ${fail} 项`);
   process.exit(fail === 0 ? 0 : 1);
@@ -516,7 +581,7 @@ if (invokedDirectly) {
   } else {
     const bad = check(collect());
     if (bad.length === 0) {
-      console.log("OK  逐档决策键集一致：公式侧（四档分支 + 装配 + TS HorizonDecision，R1-R4）＋ LLM 侧（prompt / schema / camel_key 权威 / TS 类型 / 代际标记，R5a-R5e）");
+      console.log("OK  逐档决策键集一致：公式侧（四档分支 + 装配 + TS HorizonDecision，R1-R4）＋ LLM 侧（prompt / schema / camel_key 权威 / TS 类型 / 代际标记，R5a-R5e）＋ 结局 2×2（Rust↔TS 字段集，R5f）");
       process.exit(0);
     }
     console.log(`FAIL  ${bad.length} 条键集漂移：`);

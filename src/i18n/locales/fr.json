@@ -6573,10 +6573,6 @@
       "group-presets": "Préréglages courants",
       "group-custom-interval": "Intervalle personnalisé",
       "label-periods": "Périodes de recommandation",
-      "period-ultra-short": "Ultra court terme",
-      "period-short": "Court terme",
-      "period-mid": "Moyen terme",
-      "period-long": "Long terme",
       "placeholder-periods": "Sélectionner une ou plusieurs périodes",
       "label-min-confidence": "Confiance minimale",
       "label-top-n": "Limite Top N",
@@ -14830,12 +14826,6 @@
       "okCount": "{{n}} réussies",
       "failCount": "{{n}} échouées",
       "totalCount": "{{n}} au total",
-      "period": {
-        "ultra_short": "Ultra court terme",
-        "short": "Court terme",
-        "mid": "Moyen terme",
-        "long": "Long terme"
-      },
       "dueYes": "Échu",
       "dueNo": "En attente",
       "analysisOk": "Analyse OK",
@@ -15440,11 +15430,7 @@
       "1d": "Journalier",
       "1w": "Hebdomadaire",
       "1M": "Mensuel",
-      "zoomHint": "Zoom par sélection",
-      "ultraShort": "Ultra court terme",
-      "short": "Court terme",
-      "mid": "Moyen terme",
-      "long": "Long terme"
+      "zoomHint": "Zoom par sélection"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -15485,10 +15471,6 @@
     "industryRanking": "Industry Ranking",
     "clsFlash": "CLS Flash",
     "leader": "Leader",
-    "periodUltraShort": "Ultra court terme",
-    "periodShort": "Court terme",
-    "periodMid": "Moyen terme",
-    "periodLong": "Long terme",
     "generatedAt": "Généré à {{time}}",
     "bannerVendorDisabled": "Certains styles sont désactivés: {styles}",
     "openSettings": "Ouvrir les paramètres",
@@ -16841,10 +16823,6 @@
         "holding": "Holding Days",
         "confidence": "Confidence"
       },
-      "periodUltraShort": "Ultra court terme",
-      "periodShort": "Court terme",
-      "periodMid": "Moyen terme",
-      "periodLong": "Long terme",
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -17014,12 +16992,6 @@
         "daily0700": "Tous les jours 07:00",
         "tradeDay1600": "Trading Day 16:00 (After Close)"
       },
-      "period": {
-        "ultraShort": "Ultra court terme",
-        "short": "Court terme",
-        "mid": "Moyen terme",
-        "long": "Long terme"
-      },
       "column": {
         "id": "ID",
         "description": "Description",
@@ -17178,10 +17150,6 @@
       "hitrateByHorizon": "Par horizon",
       "hitrateGroupRate": "Taux de réussite du groupe",
       "insufficientSamples": "Échantillons insuffisants",
-      "horizonUltraShort": "Ultra court terme",
-      "horizonShort": "Court terme",
-      "horizonMid": "Moyen terme",
-      "horizonLong": "Long terme",
       "horizonAuto": "Selon le palier principal",
       "horizonUnknown": "Horizon inconnu",
       "colHorizon": "Horizon analysé",
@@ -17246,6 +17214,13 @@
       "failureModeChaseUpBar": "Course après une forte hausse",
       "failureModeRegimeEndorsement": "Régime de marché cautionnant une valeur",
       "failureModeReverseDcfIgnored": "DCF inversé ignoré",
+      "horizonConfusionTitle": "Comparaison des issues par horizon (formule × LLM)",
+      "horizonConfusionNotProduced": "Cet enregistrement n'a pas de comparaison des issues par horizon (données antérieures à la statistique ou aucune observation évaluable)",
+      "horizonConfusionInsufficient": "Échantillons insuffisants ({{judged}} évalués) — les comptes ci-dessous sont des relevés bruts, pas des conclusions",
+      "horizonConfusionCells": "Les deux justes {{both}} · formule seule {{formulaOnly}} · LLM seul {{llmOnly}} · les deux faux {{bothWrong}}",
+      "horizonConfusionUndecided": "{{undecided}} sans verdict du LLM (absent / fenêtre non échue / action non directionnelle comme attendre ou conserver) — comptés dans aucune case",
+      "horizonConfusionAvgAgreement": "Concordance tridimensionnelle moyenne de cet horizon {{pct}}",
+      "horizonConfusionScopeNote": "Les deux côtés partagent la même fenêtre et la même fonction de verdict ; les quatre cases ne comparent que la direction, pas le rendement, et n'ont pas le même dénominateur que le taux de réussite ci-dessus.",
       "failureModeOther": "Autre"
     },
     "portfolioMonitor": {
@@ -18055,16 +18030,50 @@
       "error": "Échec de l'extraction",
       "noData": "Aucune donnée de citation",
       "title": "Audit des citations",
-      "supportRate": "Taux de support des données",
-      "analystCount": "Analystes sources",
-      "claimCount": "Raisons de décision",
-      "supported": "Avec données",
-      "unsupported": "Sans données",
-      "source": "Source",
       "extractFailed": "Échec de l'extraction des preuves",
-      "matchConfidence": "Confiance de correspondance",
       "notApplicable": "Audit des citations de preuves non applicable (aucune décision produite)",
-      "notApplicableDetail": "Cette exécution n'a produit aucune décision (action={{action}} est la sentinelle d'absence de données, pas une conclusion) ; le champ de motivation contient donc un diagnostic de repli, sans preuve d'analyste auditable. Le taux d'étayage n'est pas défini dans ce cas et n'est pas affiché comme 0 %."
+      "notApplicableDetail": "Cette exécution n'a produit aucune décision (action={{action}} est la sentinelle d'absence de données, pas une conclusion) ; le champ de motivation contient donc un diagnostic de repli, sans preuve d'analyste auditable. Le taux d'étayage n'est pas défini dans ce cas et n'est pas affiché comme 0 %.",
+      "branchSection": "Audit des jambes de cet horizon",
+      "factorSection": "Réconciliation des facteurs du niveau principal",
+      "expectedLegs": "Attendues",
+      "participatingLegs": "Participantes",
+      "upstreamPresentCount": "Amont présent",
+      "upstreamNotCheckedCount": "Non vérifiable",
+      "sigmaReconciled": "σ réconcilié",
+      "weight": "poids",
+      "signal": "valeur du signal",
+      "absenceUndeclared": "Absence non déclarée",
+      "metaLeg": "méta",
+      "upstream": {
+        "present": "Présent",
+        "declaredAbsent": "Absence déclarée",
+        "silentAbsent": "Absence silencieuse",
+        "notChecked": "Non vérifiable"
+      },
+      "notChecked": {
+        "noSnapshotKey": "L'instantané de cet enregistrement ne contient aucune clé de sortie pour cette source ; le contrôle ne s'applique pas",
+        "noOwner": "Aucun analyste titulaire n'est enregistré pour ce facteur",
+        "unregisteredFactor": "Ce facteur n'est pas dans le registre des sources (contrôle non applicable)"
+      },
+      "sigma": {
+        "consistent": "σ cohérent",
+        "inconsistent": "σ divergent",
+        "noBasis": "Sans référence"
+      },
+      "noBasis": {
+        "noPersistedBasis": "Aucune référence persistée à réconcilier dans cet enregistrement (normalisation pas encore centralisée)",
+        "basisMissingInRecord": "La clé de référence est enregistrée mais absente de cet enregistrement"
+      },
+      "closure": {
+        "closed": "Bouclé",
+        "broken": "Non bouclé",
+        "notComputable": "Indéterminable"
+      },
+      "closureReason": {
+        "decisionDegraded": "Aucune décision produite cette fois ; le bouclage est indéterminable",
+        "noWeightSumOrFactors": "weightSum ou la table des facteurs manque ; le bouclage est indéterminable"
+      },
+      "supported": "Avec données"
     },
     "charts": {
       "noSectorData": "Aucune donnée de répartition sectorielle",

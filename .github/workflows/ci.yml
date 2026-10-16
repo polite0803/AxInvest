@@ -228,10 +228,11 @@ jobs:
           node scripts/check-horizon-weight-parity.mjs --selftest
           node scripts/check-horizon-weight-parity.mjs
           # 2026-10-16（`AUDIT-horizon-naming-2026-10-16.md`）：档名这条链此前**整体没有门** ——
-          # 判据 ④ 只读 `stockAnalysis.reflection` 段（8 套键族里只覆盖 1 套），于是
+          # 判据 ④ 只读 `stockAnalysis.reflection` 段（当时 8 套键族里只覆盖 1 套），于是
           # 「第 4 档 = 季度」这类漂移在 cargo check / typecheck / 既有门全绿下存活，
           # 并与后端 tierLabel / dataGaps（用权威 label_zh）**同屏两名**。
-          # 本门补整链：族间逐字一致 + 禁尺度词 + 与 `Period::label_zh()` 逐字对账。
+          # 本门补整链：禁尺度词 + 与 `Period::label_zh()` 逐字对账 + e2e 锚点 + 四档互异。
+          # 同日第二批把 7 套冗余族整体删除 ⇒ 主判据换成**唯一族 + 禁回流（判据 E）**。
           # 与 scripts/ci-check.mjs 的对应两条 step **命令行逐字同源**。
           node scripts/check-horizon-label-parity.mjs --selftest
           node scripts/check-horizon-label-parity.mjs

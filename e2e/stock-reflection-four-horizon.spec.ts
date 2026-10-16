@@ -70,7 +70,7 @@ const ROW_ALL_MATURE = {
   },
 };
 
-/** 部分成熟：超短成熟 / 短线未到期 / 中线行情不可用 / 长线无记录 */
+/** 部分成熟：超短成熟 / 短线未到期 / 中线行情不可用 / 季度无记录 */
 const ROW_PARTIAL = {
   id: "ref-partial",
   stockCode: "000001",
@@ -236,8 +236,8 @@ test.describe("四周期反思面板（批次 5 fixture 验收）", () => {
     await expect(activePane(expanded)).not.toContainText("ULTRA_BUY");
     await expect(activePane(expanded)).not.toContainText("+3.50%");
 
-    // 切到长线：同样不得串用中线/短线
-    await horizonTab(expanded, "🟢 长线").click();
+    // 切到季度（原「长线」档，2026-10-16 正名）：同样不得串用中线/短线
+    await horizonTab(expanded, "🟢 季度").click();
     await expect(activePane(expanded)).toContainText("LONG_ACCUMULATE");
     await expect(activePane(expanded)).toContainText("+12.75%");
     await expect(activePane(expanded)).not.toContainText("MID_HOLD");
@@ -248,7 +248,7 @@ test.describe("四周期反思面板（批次 5 fixture 验收）", () => {
     await openReflectionPanel(page);
     const expanded = await expandRow(page, 0);
 
-    // 长线无记录 ⇒ 只生成 3 个 Tab，且不出现「该周期无记录」占位
+    // 季度无记录 ⇒ 只生成 3 个 Tab，且不出现「该周期无记录」占位
     await expect(expanded.locator(".ant-tabs-tab")).toHaveCount(3);
     await expect(expanded).not.toContainText("该周期无记录");
 

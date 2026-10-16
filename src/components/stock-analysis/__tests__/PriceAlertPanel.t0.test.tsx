@@ -39,7 +39,7 @@ const DEFAULT_T0 = {
 
 /** 后端各命令的最小应答；`set_t0_config` 默认成功，个别用例改成 reject。 */
 function wireBackend(overrides: { setFails?: boolean; t0?: Partial<typeof DEFAULT_T0> } = {}) {
-  const t0 = { ...DEFAULT_T0, ...(overrides.t0 ?? {}) };
+  const t0 = { ...DEFAULT_T0, ...overrides.t0 };
   invokeMock.mockImplementation((cmd: string, args?: unknown) => {
     switch (cmd) {
       case "get_t0_config":

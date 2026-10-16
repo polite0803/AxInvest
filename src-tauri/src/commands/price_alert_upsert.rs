@@ -21,6 +21,8 @@
 //! alert_type 归一化在 `axagent_analysis_engine::alert_mapping`，dao 反向依赖该 crate
 //! 会成环 ⇒ 归一化后的三个标量由本模块算好再传下去。
 
+use crate::commands::error::ErrorResponse;
+use crate::commands::error_code::common as common_err;
 use axagent_analysis_engine::alert_mapping::{
     condition_type_for, config_for_alert, legacy_condition_for, normalize_alert_type,
 };
@@ -39,13 +41,20 @@ pub async fn upsert_price_alert(
     let alert_type = normalize_alert_type(alert_type_input);
     let condition_type = condition_type_for(alert_type);
     let legacy_condition = legacy_condition_for(alert_type).ok_or_else(|| {
-        format!("告警类型 {alert_type} 没有对应的兼容列取值，拒绝落库（不要静默写一个错值）")
+        ErrorResponse::err_with_detail(
+            common_err::INVALID_INPUT,
+            format!("告警类型 {alert_type} 没有对应的兼容列取值，拒绝落库（不要静默写一个错值）"),
+        )
     })?;
     let now = chrono::Utc::now().timestamp_millis();
 
-    let existing = alert_dao::find_open_untriggered(db, stock_code, alert_type)
-        .await
-        .map_err(|e| format!("查询既有价格告警失败: {e}"))?;
+    let existing =
+        alert_dao::find_open_untriggered(db, stock_code, alert_type).await.map_err(|e| {
+            ErrorResponse::err_with_detail(
+                common_err::INTERNAL,
+                format!("查询既有价格告警失败: {e}"),
+            )
+        })?;
 
     if let Some(row) = existing {
         let id = row.id.clone();
@@ -59,7 +68,9 @@ pub async fn upsert_price_alert(
             now,
         )
         .await
-        .map_err(|e| format!("更新价格告警失败: {e}"))?;
+        .map_err(|e| {
+            ErrorResponse::err_with_detail(common_err::INTERNAL, format!("更新价格告警失败: {e}"))
+        })?;
         tracing::info!(
             "[price_alert] 复用未触发行 id={id}：{stock_code} {alert_type} 阈值改为 {threshold}"
         );
@@ -77,7 +88,9 @@ pub async fn upsert_price_alert(
         now,
     )
     .await
-    .map_err(|e| format!("创建价格告警失败: {e}"))?;
+    .map_err(|e| {
+        ErrorResponse::err_with_detail(common_err::INTERNAL, format!("创建价格告警失败: {e}"))
+    })?;
     Ok((saved, false))
 }
 

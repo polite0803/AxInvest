@@ -2225,7 +2225,7 @@ let risk_budget_pct_v_raw = if present(risk_budget_pct) { risk_budget_pct } else
 // 常规 1.5R → 1.0R）。对用户显式注入的 risk_budget_pct 同样生效 —— 这是市场状态
 // 叠加的政策约束（与风险档封顶同族，只降不升），不是默认值替换。
 // unknown 只在动作层禁止加仓、不缩预算：取数失败不应二次惩罚已有持仓的风险计算。
-let risk_budget_pct_v = if regime_is_bear {
+let risk_budget_pct_v = if regime_gate_state == "bear" {
     (risk_budget_pct_v_raw * 2.0 / 3.0 * 100.0).round() / 100.0
 } else {
     risk_budget_pct_v_raw

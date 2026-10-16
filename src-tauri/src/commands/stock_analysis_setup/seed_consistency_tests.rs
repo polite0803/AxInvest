@@ -3826,7 +3826,7 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
                 // 只把值换成 unit —— 与生产里「映射到了但源没产出」完全同形。
                 // 这条通道存在的理由：①② 只覆盖两极（全齐备 / 全退化），而 P1-5 的靶心
                 // 是**中间态**（齐备输入少一条腿时语义必须仍然对）。
-                if masked.iter().any(|m| *m == name.as_str()) {
+                if masked.contains(&name.as_str()) {
                     scope.push_constant(name.as_str(), Dynamic::UNIT);
                     continue;
                 }

@@ -277,7 +277,7 @@ describe("回测徽章按当前档取值，不跨档平均（F3）", () => {
 });
 
 describe("缺席不冒充读数（F4）", () => {
-  it("持有天数与置信度缺失时渲染「—」，不渲染 0d / 置信 0", async () => {
+  it("持有天数与证据强度缺失时渲染「—」，不渲染 0d / 强度 0", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "get_cached_recommendation" || cmd === "recommend_stocks") {
         return Promise.resolve(recoResponse({
@@ -290,9 +290,10 @@ describe("缺席不冒充读数（F4）", () => {
 
     await waitFor(() => expect(screen.getAllByText("测试甲").length).toBeGreaterThan(0));
     expect(screen.queryByText(/0d/)).toBeNull();
-    // 「持有」「置信度」两处各渲染一个 —（文本与标签在同一元素内，按整串匹配）
+    // 「持有」「证据强度」两处各渲染一个 —（文本与标签在同一元素内，按整串匹配）
+    // 标签名随 v4 置信度语义重构改名（`recommendation.row.confidence` 值 = 证据强度），断言跟着改口径
     expect(screen.getAllByText(/持仓天数\s*—/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/置信度\s*—/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/证据强度\s*—/).length).toBeGreaterThan(0);
   });
 });
 
@@ -367,9 +368,10 @@ describe("口径标注透传与跨档同分（R-C / R-D / R-F）", () => {
     mockBatchShort(makePick({ confidence: 62, confidencePercentile: 30 }));
     await mountAndRefresh();
     expect(screen.getAllByText(/组内当日分位 30/).length).toBeGreaterThan(0);
-    // 绝对置信仍是 62（旧实现会把 62 覆写成分位 30 ⇒ 概率与分位混成同一个数）
+    // 绝对强度仍是 62（旧实现会把 62 覆写成分位 30 ⇒ 概率与分位混成同一个数）
     expect(screen.getAllByText(/62/).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/置信度\s*30/)).toBeNull();
+    // 负控必须跟着 v4 的标签名（写旧名会一条恒真断言冒充检查）
+    expect(screen.queryByText(/证据强度\s*30/)).toBeNull();
   });
 
   it("同一票在另一档同分 ⇒ 必须点名（分不清收敛与复制不可接受）", async () => {

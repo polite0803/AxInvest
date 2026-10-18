@@ -224,13 +224,14 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
    * 无缓存(emptyKind=noData)时改用 emptyNoCache 文案,引导用户点"刷新"。
    */
   const loadCache = useCallback(async () => {
-    // replay 模式没有缓存(缓存永远是 live 产物),回退到实时
-    if (anchorMode !== "live") {
-      void load();
-      return;
-    }
     // 本会话已经一次拿过四档 ⇒ 切档直接取整批切片，不再发任何请求
     // （整批结果里带着逐档失败归因，读缓存命令给不了这个信息）
+    //
+    // ⚠ 这一条必须在 live/replay 分支**之前**。原来写在后面，而 replay 分支是
+    // `if (anchorMode !== "live") { void load(); return; }` —— 于是 as-of 回放模式下
+    // 每切一个 tab 都绕过整批切片、重跑一次 `recommend_stocks_all_periods`：
+    // 「一次刷新出四档」退化成「一切 tab 刷一次」，而回放扫描本身要几十秒且互斥，
+    // 用户看到的就是列表反复清空。live 才有的「缓存」概念与本条无关（本条读的是内存整批）。
     const inBatch = batchRef.current?.byHorizon?.[period];
     if (inBatch) {
       setData(inBatch);
@@ -238,6 +239,11 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       setErrorDetail(null);
       setIsCached(false);
       setGeneratedAtText(formatGeneratedAtText(inBatch.generatedAt, i18n.language));
+      return;
+    }
+    // replay 模式没有缓存(缓存永远是 live 产物),回退到实时
+    if (anchorMode !== "live") {
+      void load();
       return;
     }
     const myToken = ++reqTokenRef.current;
@@ -1009,8 +1015,15 @@ function PickRow(
           </Tag>
         )}
         {
-          /* v4（2026-10-18）：priorSource 恒为 "evidence"（证据强度语义），
-            旧的「该档无历史先验样本」分支随之死亡——档位先验不再进入个股数字。 */
+          /* v4 只把**策略荐股主链**的 prior_source 统一改写成 "evidence"
+             （`recommender/mod.rs` 的 R-C 段），智选链仍逐条如实标 absent/pooled
+             （`stock_workflow/serenity.rs` 走 `candidate_score_to_win_rate`）⇒ 本分支不是死代码，
+             撤掉它会让智选行显示一个从未与先验合成过的数、却不声明。 */
+          pick.priorSource === "absent" && (
+            <Tag color="default" className="m-0 text-[10px]">
+              {t("stockAnalysis.recommendation.row.rowPriorAbsent")}
+            </Tag>
+          )
         }
         {typeof pick.confidencePercentile === "number" && (
           <span className="text-gray-400">

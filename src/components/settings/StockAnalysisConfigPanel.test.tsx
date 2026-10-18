@@ -53,6 +53,12 @@ const RUNTIME_INJECTED = new Set([
   // 而本集合是「不在 seed 变量表里、但也不属于断链」的**排除名单** —— 从名单里删掉它，
   // 下面的断言会把它当作断链而变红。
   "serenity_context",
+  // 新证据腿的运行时注入变量（2026-10-18，阶段 1）：生产者是 `stock_workflow/hooks.rs`
+  // 的 `relative_strength` 节点变量（基准中证全指的同窗超额收益），消费面是档模板
+  // input_mapping 的 `("relative_strength", "relative_strength")` 与三份档脚本的
+  // `excessReturnPct`（`horizon_tier_template.rs`）。它**刻意不进 seed_variables.rs**——
+  // 面板不调它，所以不在面板变量表里。
+  "relative_strength",
   "holdings_json",
   "portfolio_cash",
   // 周期常量表（2 / 5 / 28 / 90 天 + 仓位乘数）：权威源是

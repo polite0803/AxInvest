@@ -34,11 +34,15 @@
 // scoring_windows    : v138 起接 —— 本档评分节点**实际用过**的指标窗口回显（`indicators.windows`，
 //                      裁定 3「让用户看出各档实际几根」，PLAN §一○六）。产端是回显不是「想要的配置」，
 //                      所以面板印出来的那组就是这一档算过的那组。
-// scoring_scale      : v138 起接 —— 本档尺度名（hourly/weekly/monthly/quarterly），与窗口并列成句；
-//                      短/中/长三档的根数按公式本就是同一组，差别只在这里才可读
+// scoring_scale      : v138 起接 —— 本档尺度名（hourly/daily/weekly/monthly，本档 = hourly；
+//                      档→尺度的定阶规则 d ≤ h/3 见 `Period::scale_key`），与窗口并列成句；
+//                      根数按公式由持有期换算，差别只在这里才可读
 // scale_trend        : v139 起接 —— 本档两带趋势事实（快/慢带 bar 数与数值、diffPct、fastSlope）；
 //                      产端是 `indicators.scaleTrend`，`diffPct`/`fastSlope` 可为 null ⇒ 面板印「—」不印 0
 // scale_momentum     : v139 起接 —— 本档动量的「周期 + 值」对（与 `rsi_value` 同一个数，成对给出才自证口径）
+// excess_return_pct  : 阶段 2 起接 —— `relative_strength.ultra_short`（本档窗口相对中证全指
+//                      的累计超额，百分点）。**只作入场门的个股前提并列分支**，不是方向腿
+//                      （未进 `verdict_spec` 的 participating，与 `breadthState` 只作门同源）
 // seal_rate          : 已接 —— 涨停池 breadth.sealRate（breadthState 腿 + breadth_required 门的必要条件）
 // pool_break_count   : 已接 —— 涨停池 breadth.breakCount（microstructure 条件腿）
 // pool_in_pool       : 未接且本脚本**不读** —— 语义是「本代码 ∈ entries[]」，点号路径表达不了
@@ -70,15 +74,24 @@ fn strong_cum_gain_pct() { 20.0 }
 // ① 封板率缺席 ⇒ 未判定（缺席 ≠ 通过）；② 封板率 < 0.5 ⇒ 市场情绪否决；
 // ③ 个股强势特征缺席（K 线不足/宿主返回 unit）⇒ 个股前提未判定，同样不放行；
 // ④ 近 5 日有涨停 ⇒ 个股前提通过；⑤ 无涨停但累计涨幅 ≥ 20% ⇒ 通过；
+// ⑤b 无涨停、涨幅未达标，但**同期相对中证全指为正超额** ⇒ 以「抗跌蓄势」放行入门
+//     （阶段 2，2026-10-19）。立项实证：002696 as-of 2026-09-28 判 `stock_not_strong`，
+//     而那天大盘 −4.53%、它只 −2.41%（5 日窗超额 +2.25pt）——「还没启动」被当成「没有证据」。
+// ⚠ 本分支**只放宽入场门这个必要条件**，不新增方向腿、不改融合权重 ⇒ 放行 ≠ 看多：
+//    本档方向腿仍是 短窗动量 + 事件催化剂，且 microstructure 未接线期间
+//    `pm_cap_unwired_action` 仍把买入/增持压回持有（见下方封顶）。
 // ⑥ 否则 ⇒ 个股不强势（大盘情绪再好也不为这只票背书）。
 // 返回 [pass, basis]：basis 同时进 dataGaps 与输出的 gateBasis，呈现层不得靠文案反解。
-fn pm_ultra_entry_gate(seal_rate, lim_up_count, cum_gain_pct) {
+fn pm_ultra_entry_gate(seal_rate, lim_up_count, cum_gain_pct, excess_return_pct) {
     if !present(seal_rate) { return [false, "breadth_missing"]; }
     if seal_rate < 0.5 { return [false, "breadth_weak"]; }
     if !present(lim_up_count) { return [false, "stock_unjudged"]; }
     if lim_up_count >= 1 { return [true, "limit_up_recent"]; }
     if present(cum_gain_pct) && cum_gain_pct >= strong_cum_gain_pct() {
         return [true, "strong_momentum"];
+    }
+    if present(excess_return_pct) && excess_return_pct > 0.0 {
+        return [true, "relative_strength_emerging"];
     }
     [false, "stock_not_strong"]
 }
@@ -223,7 +236,10 @@ let stock_strength = if present(kline_bars) && type_of(kline_bars) == "array" {
 };
 let lim_up_count = if type_of(stock_strength) == "map" { stock_strength["limitUpCount"] } else { () };
 let cum_gain_pct = if type_of(stock_strength) == "map" { stock_strength["cumGainPct"] } else { () };
-let gate_pair = pm_ultra_entry_gate(seal_rate, lim_up_count, cum_gain_pct);
+// 阶段 2 第 4 参：本档窗口的相对强度（wiring 层按 `Period::ALL` 逐档算好注入，
+// 口径单点在 `harness::indicators::excess_return_pct`；缺席 = null ⇒ 本分支不参与，
+// 不折成 0 —— 0 会被读成「与基准同步」，那是另一个事实）
+let gate_pair = pm_ultra_entry_gate(seal_rate, lim_up_count, cum_gain_pct, excess_return_pct);
 let gate_pass = gate_pair[0];
 let gate_basis = gate_pair[1];
 let gate_note = if gate_basis == "breadth_missing" {
@@ -368,6 +384,10 @@ if action != "买入" && action != "增持" && action != "持有" {
     stockStrength: stock_strength,
     // P0-5 降杠杆封顶是否触发（true = 原动作是买入/增持、被压成持有）
     p05CapApplied: p05_cap_applied,
+    // P2a（2026-10-18）：封顶**前置动作**的结构化自证 —— 主链摘要「动作=封顶结果(买入被
+    //   压回…)」读这里，不从 dataGaps 文案反解。未封顶时恒等于 action（消费方以
+    //   p05CapApplied==true 为准，本键只供展示封顶前是什么）。
+    actionBeforeCap: pre_cap_action,
     legs: present_legs,
     absentLegs: absent_legs,
     dataGaps: gaps,

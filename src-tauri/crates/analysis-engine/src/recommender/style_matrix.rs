@@ -26,17 +26,24 @@ pub type Cell2 = (&'static str, &'static str, &'static str);
 
 /// 全部 24 格（6 风格 × 4 档位）。顺序固定为「风格分组 × `Period::ALL`」，便于 diff 与门禁解析。
 pub const MATRIX: [Cell; 24] = [
-    // ── trend 趋势跟踪：四档全开（短期动量 → 长期趋势，期限结构上本就跨尺度）
+    // ── trend 趋势跟踪：仅超短/短/中线（2026-10-18 用户裁定：trend 退役长线档）──
+    // 裁定原文：「智能荐股的长线和趋势智选是两个不同的概念，不能混为一谈」。
+    // trend 的证据是短期动量（均线/MACD），把它外推成「长线候选」正是 002696（百洋股份）
+    // 案例的错配源头：四连板题材股以 trend-long 身份进了长线候选，随后被分析端长线档
+    // 判卖出。长线候选的语义 = 基本面/产业链兑现型论点（value / serenity 家族）。
+    // ⚠ 命名纪律：**「趋势智选」是 serenity 家族的专名**（瓶颈/政策/业绩…）——
+    //   不得把 trend 的长线缺席叫「趋势池」，那是第二处混为一谈。
     ("trend", "ultra_short", None),
     ("trend", "short", None),
     ("trend", "mid", None),
-    ("trend", "long", None),
+    ("trend", "long", Some("trend_momentum_not_a_long_thesis")),
     // ── value 价值低估：四档全开，但超短档是**已知错配**（见 MISFIT_DECLARATIONS）
     ("value", "ultra_short", None),
     ("value", "short", None),
     ("value", "mid", None),
     ("value", "long", None),
-    // ── capital 资金驱动：四档全开
+    // ── capital 资金驱动：四档全开（long 格带错配声明，见 MISFIT_DECLARATIONS ——
+    //    证据为日级快照且北向停披，长线证据腿换血立项 `PLAN-capital-long-evidence.md`）
     ("capital", "ultra_short", None),
     ("capital", "short", None),
     ("capital", "mid", None),
@@ -63,8 +70,19 @@ pub const MATRIX: [Cell; 24] = [
 ///
 /// 为什么单列：矩阵只能表达「做 / 不做」，而「做但这个方法论在这个尺度上兑现不了」
 /// 是第三种状态；把它混进 `None` 就等于继续假装它没问题。
-pub const MISFIT_DECLARATIONS: [(&str, &str, &str); 1] =
-    [("value", "ultra_short", "valuation_needs_weeks_to_realize_kept_by_user_decision")];
+///
+/// ## capital × long（2026-10-18，用户质疑「为什么要退役而不是真正实现」的裁定结果）
+///
+/// 事实（`strategies/capital.rs`）：主力净流入是**当日快照**（头注释自认"仅当日，
+/// 多日窗口需扩接口"）；北向个股持仓已全源失效；long 档门槛反而比 mid 松。
+/// ⇒ 当前证据与 90 交易日持有期之间没有兑现路径。但资金面**存在**真长线证据形态
+/// （股东户数连降 / 机构持仓季度变化 / 融资余额趋势 / 大宗交易折溢价）——
+/// 问题在证据本体不在概念 ⇒ 处置 = **声明错配保留出票（本条）+ 立项换证据腿**
+/// （`PLAN-capital-long-evidence.md`），退役仅作换血被判定不值得投入时的 fallback。
+pub const MISFIT_DECLARATIONS: [(&str, &str, &str); 2] = [
+    ("value", "ultra_short", "valuation_needs_weeks_to_realize_kept_by_user_decision"),
+    ("capital", "long", "capital_evidence_is_daily_snapshot_declared_misfit"),
+];
 
 /// 该档实际应选的风格（`mod.rs` 的策略选择必须由本表驱动，两处不得各列一份清单）。
 pub fn styles_for(period: Period) -> Vec<Style> {
@@ -215,7 +233,35 @@ mod tests {
         assert_eq!(styles_for(Period::UltraShort).len(), 4, "超短: trend/value/capital/watchlist");
         assert_eq!(styles_for(Period::Short).len(), 5, "短线再加 reversion");
         assert_eq!(styles_for(Period::Mid).len(), 6, "中线全开");
-        assert_eq!(styles_for(Period::Long).len(), 5, "长线无 reversion");
+        assert_eq!(styles_for(Period::Long).len(), 4, "长线无 reversion/trend（2026-10-18 裁定）");
+    }
+
+    /// 裁定锁（2026-10-18）：trend 不出长线 ——「智能荐股的长线」与「趋势智选」
+    /// 是两个不同的概念，不能混为一谈；trend 的短期动量证据没有长线兑现路径
+    /// （002696 案例的错配源头）。锁理由码本体，防止改措辞时丢机器可读性。
+    #[test]
+    fn trend_does_not_issue_long_picks() {
+        assert!(!is_active(Style::Trend, Period::Long));
+        assert_eq!(
+            absence_reason(Style::Trend, Period::Long),
+            Some("trend_momentum_not_a_long_thesis")
+        );
+        // 裁定只收长线档：中线及以下 trend 照常出票。
+        assert!(is_active(Style::Trend, Period::Mid));
+        assert!(is_active(Style::Trend, Period::Short));
+    }
+
+    /// 裁定锁（2026-10-18）：capital×long **保留出票但必须带错配声明** —— 证据是日级
+    /// 快照（北向停披），长线兑现路径未验证；用户质疑「为什么要退役而不是真正实现」
+    /// ⇒ 处置 = 声明 + 立项换证据腿（`PLAN-capital-long-evidence.md`），不退役。
+    /// 锁两条：声明在表 + 格仍出票（声明不得把格子变成「不做」——那是 trend 的处置）。
+    #[test]
+    fn capital_long_is_active_with_declared_misfit() {
+        assert!(is_active(Style::Capital, Period::Long));
+        assert_eq!(
+            misfit_reason("capital", Period::Long),
+            Some("capital_evidence_is_daily_snapshot_declared_misfit")
+        );
     }
 
     /// 名目空间锁：`Style::Bottleneck`（落库写法）必须解析到矩阵行名目 `serenity`。

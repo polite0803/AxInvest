@@ -564,6 +564,8 @@ type AlgoToolRow = (
 /// **v100(2026-09-29)**：四周期科学化 Phase B —— 长档改吃**季线**评分
 /// （新节点 `t-scoring-quarter`，由 `compute_scoring(period="quarterly")` 把月线按自然季度
 /// 本地聚合；`totalScore_long` 映射随之改指）。旧形态是 mid/long 共用月线 ⇒ 两档方向永远一样。
+/// ⚠ 历史记录：`t-scoring-quarter` **v166 已不存在**（长档改月线后改名 `t-scoring-month`，
+/// 改名映射见本文件 `v165 → v166` 段）—— 此处保留为当时的实况，勿按它找节点。
 /// **必须升版**：节点、边与映射都随模板快照落库。
 /// **v101(2026-09-29)**：Phase B-3 —— 超短档不再吃日线技术评分。新节点 `t-scoring-hour`
 /// （`compute_scoring(period="hourly")`，vendor klt=60）+ 新映射 `totalScore_ultra_short`，
@@ -1071,6 +1073,10 @@ type AlgoToolRow = (
 ///      尺度→档 的反查是 `Period::from_scale_key`（与 `scale_key` 同一张表，不写第二份）。
 ///      **日线链逐位不变**：`from_scale_key("daily") == None` ⇒ 主链 `t-scoring` 仍吃既有
 ///      常数与命名槽（零回归锚 = `plan_derived_config_reproduces_daily_numbers`）。
+///      ⚠ 括号补注（v166，2026-10-18）：本句的判据 **v166 起失效** —— 短档尺度由 weekly
+///      下移到 daily 后 `from_scale_key("daily") == Some(Short)`，主链日线与档侧日线**同为
+///      `daily`**，只能靠显式 `horizon` 参数分辨（见 `mcp_tools.rs:compute_scoring` 的
+///      `horizon` 优先解析）。此句保留为 v136 当时的实况记录，**不得**照着它写新代码。
 ///   ② **片 B（脚本 + 映射）**：四张档子模板的 `("rsi_14", "…indicators.rsi14")` 换成
 ///      `("rsi_value", "…indicators.scaleMomentum.value")`；四份 `portfolio-mgr-h-*.rhai` 的
 ///      动量腿 payload 键 `rsi14` → 中立名 `rsi`；`leg_signal::momentumSignal` 跟着读 `rsi`；
@@ -1459,10 +1465,78 @@ type AlgoToolRow = (
 ///     `src/lib/agentOutput.ts:254` 对带档后缀的收敛节点会静默失配（症状 = 那一格显示原始 id /
 ///     诊断表少一行）；正解是走既有的 `analystBaseOf()` 剥后缀，与 v133 那批同一处置。
 ///
+/// **v162 → v163（2026-10-17）**：**单维度取数失败不再掐死终审**。
+///   实证（华如科技 301302 运行 `8706c500` / 执行 `079f73cd`）：87 个节点里**只有**
+///   `t-sentiment-data`（东财股吧）失败（重试 3 次，报「股吧 HTML 中未找到 article_list」），
+///   四档分析师、四档辩论、四组 `pm-h-*`、风控聚合、`research-mgr`、`trader` 全部完成，
+///   LLM 四档决策也完整落库（`llm_decision_json` 含 ultraShort/short/mid/long 四键）——
+///   但 `portfolio-mgr` 一次都没执行，整条分析显示「数据缺失」。
+///   阻断链：`t-sentiment-data → raw-data → portfolio-mgr`，而 `raw-data` 的
+///   `continue_on_fail` 是 `false`。引擎只对 **Failed** 上游放开容错，`raw-data` 卡在
+///   Pending 时 `portfolio-mgr` 自己那格 `continue_on_fail: true` 完全不生效。
+///   改法只动 `raw-data` 一处：舆情是 16 路原始数据里的一路，聚合器对缺源**本就不报错**
+///   （`collect_sources` 取不到即 `Null`），而 `portfolio-mgr.rhai` 零处读 sentiment ——
+///   即该维度**不在决策数学里**，它只被当作调度前置。同图已有 44/97 个节点开着这格
+///   （含消费同一路舆情的 `a-sentiment--{档}`），不是新发明。
+///   ⚠ **不改任何决策数值** ⇒ 不引入新代际，`HORIZON_BRANCH_GENERATION_FLOOR` 不动。
+///   ⚠ 图拓扑不变（只改节点布尔字段），但版本门 `>=` 必须先升版才会重播种。
+///
+/// **v163 → v164（2026-10-17）**：把 v163 那条判据补完 —— 风险支的同型硬阻断。
+///   `agg-risk`（聚合 激进/保守/中性 三视角）原来也是 `continue_on_fail: false`，
+///   任一视角 LLM 失败 ⇒ `agg-risk` Pending ⇒ 其唯一出边下游 `risk-convergence` Pending ⇒
+///   `portfolio-mgr` / `trader` / `research-mgr` 一起断，症状与 v163 修的舆情那条一字不差。
+///   放开依据：`risk-aggregated` 在全图**零节点消费者**（与 `raw-data-aggregated` 同一读数），
+///   这条例外只是调度前置。同批改由门 `zero_consumer_aggregators_are_tolerant` 枚举全部
+///   聚合器，不再靠人记第二遍。
+///   ⚠ 仍**不改决策数值**（聚合数组无人读），代际不变。
+///
+/// **v164 → v165（2026-10-17）**：把前两版逐点补的容错**换成一条图级规则** ——
+///   种子末尾新增 `harden_decision_chain`：遍历 `portfolio-mgr` 的传递祖先，凡「有非
+///   `trigger` 上游」且 `continue_on_fail == false` 的格，一律置 true。
+///   触发实证（P-b 裁定）：09:07 批量 58 次运行里 8 个辩手节点全 `failed`，而
+///   `debate-convergence--档` / `value-investor--档` 在那些运行里**一次都没出现**
+///   （＝被 Pending 卡住从未执行）；现图按此规则共 24 格属同类（四档辩手 8、逐档收敛 4、
+///   逐档价值投资者 2、`a-*` 分析师 9、`p-risk-assess`/`risk-*` 支若干）。
+///   缺席仍不静默：Failed 节点由落库侧写进 `data_gaps`（v163 同批）。
+///   ⚠ **不改决策数值**（只写容错布尔，不动边/映射/脚本）⇒ 代际不变。
+///   ⚠ 刻意排除「唯一上游是 trigger」的 12 个 `t-*` 取数节点：trigger 失败时整图不跑，
+///     给它们开容错不改行为，只会让清单虚长（48 → 24）。
+///   新门 `no_single_point_blocks_portfolio_mgr` 按同一条性质断言「违规格为空」，
+///   并自带负控（摘掉 `debate-convergence--mid` 那一格必须被点名）。
+///
+/// **v165 → v166（2026-10-18）**：四档技术尺度按「`d ≤ h/3`」定阶重排
+///   （`PLAN-horizon-scale-alignment.md`）—— 短/中/长三档由 `weekly/monthly/quarterly`
+///   改为 **`daily/weekly/monthly`**；长期档的持有期是 **90 交易日**，季线（60 交易日/根）
+///   只有 1.5 根、按构造分辨不出持有期，已退役出档位。
+///   ① 四张档子模板的评分节点改名：`t-scoring-week`→**`t-scoring-day`**（短）、
+///      `t-scoring-month`→**`t-scoring-week`**（中）、`t-scoring-quarter`→**`t-scoring-month`**（长）；
+///      边 id（`e-t-scoring-<x>-pm-h-<档>` / `e-const-scoring-horizon-t-scoring-<x>`）同批改。
+///   ② 档位常量节点 `const-scoring-period`→**`const-scoring-horizon`**，产出值从**尺度名**
+///      改成**档位名**（`"short"` 等）：档→尺度只留 harness 一处权威，模板不再抄第二份。
+///      工具参数随之 `period`→**`horizon`**（`compute_scoring` 收 `horizon` 后自己按
+///      `Period::scale_key()` 解析尺度与 `ScaleWindowPlan`）。
+///   ③ 出分下限/取数根数改由 `ScaleWindowPlan`（按持有期换算）接管：长档 15 根月线（≈15 个月）
+///      而非旧 `min_bars=60`（季线 = 15 年）—— 这是「长期档恒空」的直接修因。
+///   ⚠ **会改决策数值**（该档评分从周/月/季线改为日/周/月线，窗口根数同时变）；
+///     旧分析不重算，新分析才吃新图 ⇒ 换代 166。
+///
+/// **v166 → v167（2026-10-18）**：mid/long 出票门 + 主档语义成句标注（002696 案例复盘）
+///   背景：百洋股份（002696）四连板题材股以「热门 ∪ 行业领涨」入池（荐股端零基本面门），
+///   分析端长线档判「卖出」，荐股端却照常出票 ⇒「入池按趋势、分析按基本面」结构性对立。
+///   ① 荐股侧（`recommender/gates.rs`，不在本模板内）：mid/long 出票口加财报门
+///      （首亏 / 连续两期同比下滑 ⇒ 拦）与分析回环门（30 天内 live 分析对本档判
+///      卖出/减持 ⇒ 拦，判定源 `stock_analyses.horizon_decisions`）；
+///   ② `portfolio-mgr-h-ultra-short.rhai`：分支行新增 `actionBeforeCap` 自证字段
+///      （与既有 `p05CapApplied` 配对，供主链摘要成句）；
+///   ③ `portfolio-mgr.rhai`：主档摘要新增两句 —— `主档=<档>档(可执行档优先/…)` 与
+///      `动作=封顶结果(买入被压回:microstructure腿未接线,非公式看好)`（消费 ② 的字段）。
+///   ⚠ **不改任何决策数值**（门在荐股链；分析链只加展示性标注）⇒ 历史决策重算不受影响，
+///     但摘要文案与分支行 schema 变了，换代让「新旧摘要形态」可按代区分。
+///
 /// `pub` 而非 `pub(crate)`：`axagent-batch-rerun` 的「版本联查完整性」要读这**同一个**数字
 /// （bin 是独立 crate，`pub(crate)` 读不到）。它不能被抄第二份 —— 本条的用处正是
 /// 对比「代码会用的图版本」与「库里已播种到的版本」，两份数字一旦各写各的就永远对不上。
-pub const TEMPLATE_VERSION: i32 = 162;
+pub const TEMPLATE_VERSION: i32 = 169;
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -3218,7 +3292,20 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 position: Position { x, y },
                 retry: RetryConfig {
                     enabled: true,
-                    max_retries: 3, // v24: 从 2 提升到 3，GLM-5.1 429 限流可持续 30s+
+                    // v165（P-c）：3 → **5**。判据是「退避总时长必须越过限流窗口」：
+                    // 上面那行注释自己写明「429 限流可持续 30s+」，而 3 次重试的指数退避
+                    // 只覆盖 3+6+12 = **21 秒** ⇒ 每次都恰好在窗口内放弃，节点以
+                    // `LLM_CALL_FAILED … 429` 收场（09:07 批量里 71 条取数正常的运行
+                    // 就是这么全线 0 决策的）。5 次 = 3+6+12+24+48 = **93 秒**，
+                    // 首次覆盖住 30s+ 窗口再加一倍余量。
+                    // ⚠ 这是**工作流路径唯一真正生效的退避**：`crates/harness/src/retry_policy.rs`
+                    //   的 `default_llm()`（含 429 名单）只被 react_engine / init 消费，
+                    //   模型级 `request_delay_ms` 在工作流侧零消费点（它长在
+                    //   `AxAgentApiClient::stream` 这一层，工作流不经那里）。把节流接进
+                    //   `execute_llm_stream` 统一入口是应到的终态，但那要同时删掉客户端
+                    //   那一处以免双倍 sleep、并改 5 个调用点 ⇒ 属另一次带验证的改动，
+                    //   不与本批混做（混做会让「谁在节流」再次变成两个地方各写一半）。
+                    max_retries: 5,
                     base_delay_ms: 3000, // v24: 从 1000 提升到 3000，避免短退避对限流无效
                     max_delay_ms: 60000, // v24: 从 30000 提升到 60000
                     backoff_type: BackoffType::Exponential,
@@ -4140,6 +4227,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 a.base.retry = RetryConfig { enabled: true, max_retries: 1, ..Default::default() };
                 // 超时继承 RunOptions.step_timeout（来自 agent_timeout_secs 设置），用户可在面板控制
                 a.base.timeout = None;
+                // P-b（v165）辩手容错：判据与现网读数见本文件 `for (tier_idx, p)` 逐档辩论段首注释。
+                a.base.continue_on_fail = true;
                 // P0 修复(2026-07-22): 移除 bull_tools，改为纯决策节点。
                 // 原问题：bull_tools 含 td_quote/td_kline/td_fin 等需要 stock_code 的工具，
                 // 但 input_mapping 未注入 stock_code（只有分析师评分），LLM 会传空值。
@@ -4181,6 +4270,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 a.base.retry = RetryConfig { enabled: true, max_retries: 1, ..Default::default() };
                 // 超时继承 RunOptions.step_timeout（来自 agent_timeout_secs 设置），用户可在面板控制
                 a.base.timeout = None;
+                // P-b（v165）辩手容错：判据与现网读数见本文件 `for (tier_idx, p)` 逐档辩论段首注释。
+                a.base.continue_on_fail = true;
                 // P0 修复(2026-07-22): 移除 bull_tools，改为纯决策节点。
                 // 原问题：bull_tools 含 td_quote/td_kline/td_fin 等需要 stock_code 的工具，
                 // 但 input_mapping 未注入 stock_code（只有分析师评分），LLM 会传空值。
@@ -4824,7 +4915,16 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             enabled: true,
             parent_id: None,
             compensation: None,
-            continue_on_fail: false,
+            // v164：与 `raw-data` 同型（见其 v163 条目）。这台的失效面与 301302 那次一字不差：
+            // 三个风险视角任一 LLM 失败 ⇒ `agg-risk` 停 Pending ⇒ 它唯一的出边下游
+            // `risk-convergence` 也停 Pending ⇒ `portfolio-mgr` / `trader` / `research-mgr`
+            // 全断（那三者的入边都来自 `risk-convergence`）。
+            // 放开的依据同 `raw-data`：`risk-aggregated` 在全图**零节点消费者**
+            // （按节点 JSON 全文查，除它自己以外没有任何节点引用 `agg-risk` /
+            // `risk-aggregated`；`risk-convergence` 的 `context_sources` 与 `input_mapping`
+            // 均为空，它吃的是引擎按边注入的上游输出，不是这个聚合数组）。
+            // ⇒ 这格只决定「单视角失败要不要连坐整条终审」，不进出路数值。
+            continue_on_fail: true,
         },
         config: AggregatorNodeConfig {
             strategy: "all".into(),
@@ -5109,7 +5209,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             enabled: true,
             parent_id: None,
             compensation: None,
-            continue_on_fail: false,
+            // v163：16 路原始数据里任何一路取数失败，都不得让整条终审停在 Pending。
+            // 实证见 `TEMPLATE_VERSION` 的 v162 → v163 条目（301302 运行 `8706c500`）。
+            continue_on_fail: true,
         },
         config: AggregatorNodeConfig {
             strategy: "all".into(),
@@ -6416,6 +6518,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             ),
             input_mapping: [
                 ("stock_code", "stock_code"),
+                // 阶段 1/2：档脚本的 `excessReturnPct` 原料是父侧注入变量 `relative_strength`。
+                // 少这一条不是「那条不生效」，而是**该档整段子执行失败**（子执行侧是严格
+                // `map_inputs`）；`tier_fanout_inputs_are_complete` 正是为此而红。
+                ("relative_strength", "relative_strength"),
                 ("t-scoring", "t-scoring"),
                 // v140：风险节点已进子模板 ⇒ 子图要读的是父侧 t-risk 的产出（恒等键）
                 ("t-risk", "t-risk"),
@@ -6473,6 +6579,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 ),
                 input_mapping: [
                     ("stock_code", "stock_code"),
+                    // 阶段 1：`relativeStrength` 是本档方向腿 ⇒ 父扇出必须带上原料变量
+                    // （少一条 = 该档子执行整段失败，理由同超短档那条注释）
+                    ("relative_strength", "relative_strength"),
                     ("t-scoring", "t-scoring"),
                     // v140：风险节点已进子模板 ⇒ 子图要读的是父侧 t-risk 的产出（恒等键）
                     ("t-risk", "t-risk"),
@@ -6526,6 +6635,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 ),
                 input_mapping: [
                     ("stock_code", "stock_code"),
+                    // 阶段 1：`relativeStrength` 是本档方向腿 ⇒ 父扇出必须带上原料变量
+                    // （少一条 = 该档子执行整段失败，理由同超短档那条注释）
+                    ("relative_strength", "relative_strength"),
                     ("t-scoring", "t-scoring"),
                     // v140：风险节点已进子模板 ⇒ 子图要读的是父侧 t-risk 的产出（恒等键）
                     ("t-risk", "t-risk"),
@@ -7873,6 +7985,18 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
         );
     }
 
+    // ── v165：决策链「单点不得连坐终审」硬化（P-a 的 `raw-data` / P-a 的 `agg-risk` /
+    //   P-b 的四档辩论链是同一个缺陷的三次复发，改由一条图级规则统一收口）──
+    let hardened = harden_decision_chain(&mut nodes, &edges, "portfolio-mgr", "trigger");
+    if !hardened.is_empty() {
+        tracing::info!(
+            template_id = TEMPLATE_ID,
+            count = hardened.len(),
+            "决策链单点连坐硬化：这些祖先节点的 continue_on_fail 已置为 true（只改容错格，             不动边/映射/脚本）: {:?}",
+            hardened
+        );
+    }
+
     let nodes_json = serde_json::to_string(&nodes).map_err(|e| {
         ErrorResponse::new(stock_setup::INTERNAL).with_detail(format!("序列化节点失败: {e}"))
     })?;
@@ -8978,8 +9102,11 @@ fn jev_classifier_node(
 /// （见 `seed_serenity_fast::classifier_node`）—— 两处命名约定必须一致，否则聚合器
 /// 收集到的是全 `Null` 数组（不报错）。
 ///
-/// `continue_on_fail` 保持 `false`（与源图 `agg-risk` / `raw-data` 同）：上游 `j-*` 已
+/// `continue_on_fail` 保持 `false`（与源图 `agg-risk` 同）：上游 `j-*` 已
 /// 配 `continue_on_fail: true` + `fallback_label`，聚合器本身没有可降级的语义。
+/// （源图 `raw-data` 自 v163 起已改成 `true`，本节点**不跟随** —— 它那 16 路是决策的
+/// 输入面，而快速链的上游 `j-*` 各自带 `fallback_label`，语义不同。别再拿 `raw-data`
+/// 当这里的先例引用。）
 fn jev_aggregator_node(
     id: &str,
     title: &str,
@@ -9097,7 +9224,7 @@ pub(crate) fn direct_edge(
 /// 结果是「跑得很快、全是空」——比缺节点更难查。故此类节点必须先尝试按声明依赖接线；
 /// 声明不到保留集内任何节点时（说明其上游在本图已被整体裁掉）才退回 trigger，并打 WARN。
 fn repair_orphan_nodes(
-    nodes: &[axagent_harness::workflow_types::WorkflowNode],
+    nodes: &[WorkflowNode],
     edges: &mut Vec<axagent_harness::workflow_types::WorkflowEdge>,
     keep: &std::collections::HashSet<&str>,
 ) {
@@ -9655,8 +9782,8 @@ fn apply_fast_chain_overrides(
 ///    以**可执行**的形式承接；在那之前本链的 `trader_*` 输入走既有 `present()` 守卫 +
 ///    波动率 fallback（与源链「trader 失败」时同一降级路径），不做任何假声明。
 fn derive_fast_workflow_graph(
-    source_nodes: &[axagent_harness::workflow_types::WorkflowNode],
-    source_edges: &[axagent_harness::workflow_types::WorkflowEdge],
+    source_nodes: &[WorkflowNode],
+    source_edges: &[WorkflowEdge],
     decision_model: Option<&str>,
 ) -> Result<DerivedFastGraph, String> {
     use std::collections::{HashMap, HashSet};
@@ -9787,8 +9914,8 @@ fn derive_fast_workflow_graph(
 ///   ④ trigger 可达全部节点（③ 只保证有入边，不保证与 trigger 连通）；
 ///   ⑤ 无环（Kahn）。
 fn validate_fast_workflow_graph(
-    nodes: &[axagent_harness::workflow_types::WorkflowNode],
-    edges: &[axagent_harness::workflow_types::WorkflowEdge],
+    nodes: &[WorkflowNode],
+    edges: &[WorkflowEdge],
 ) -> Result<(), String> {
     use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -10071,6 +10198,107 @@ pub(crate) async fn seed_stock_analysis_fast_workflow_template(
     Ok(())
 }
 
+// 这三个函数在文件作用域，而本文件其它地方是在各函数内 `use` 这两个类型 ⇒ 这里显式引入。
+use axagent_harness::workflow_types::{WorkflowEdge, WorkflowNode};
+
+/// `sink`（`portfolio-mgr`）的**传递祖先**表：`节点 id -> 其直接上游集合`。
+///
+/// 唯一一份图上遍历实现 —— 种子用它求「该开容错却没开」的格子，门
+/// `no_single_point_blocks_portfolio_mgr` 也用它断言「违规格为空」，两处不得各写一遍 BFS。
+pub(crate) fn ancestors_of<'a>(
+    edges: &'a [WorkflowEdge],
+    sink: &str,
+) -> std::collections::HashMap<&'a str, Vec<&'a str>> {
+    let mut incoming: std::collections::HashMap<&'a str, Vec<&'a str>> =
+        std::collections::HashMap::new();
+    for e in edges {
+        incoming.entry(e.target.as_str()).or_default().push(e.source.as_str());
+    }
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut stack: Vec<&str> = incoming.get(sink).into_iter().flatten().copied().collect();
+    while let Some(u) = stack.pop() {
+        if seen.insert(u) {
+            stack.extend(incoming.get(u).into_iter().flatten().copied());
+        }
+    }
+    incoming.retain(|k, _| *k == sink || seen.contains(k));
+    incoming
+}
+
+/// 违反「单点失败不许把终审卡在 Pending」的节点：`sink` 的祖先里，**有非 `root` 上游**
+/// 且 `continue_on_fail == false` 的那些（判据与排除理由见 [`harden_decision_chain`]）。
+pub(crate) fn decision_chain_single_points(
+    nodes: &[WorkflowNode],
+    edges: &[WorkflowEdge],
+    sink: &str,
+    root: &str,
+) -> Vec<String> {
+    let incoming = ancestors_of(edges, sink);
+    let mut out: Vec<String> = Vec::new();
+    for n in nodes {
+        let id = n.base_id();
+        let Some(ups) = incoming.get(id) else { continue };
+        if ups.is_empty() || ups.iter().all(|u| *u == root) {
+            continue;
+        }
+        if !n.base_continue_on_fail() {
+            out.push(id.to_string());
+        }
+    }
+    out.sort();
+    out
+}
+
+/// 把「任何一个节点失败，都不许把终审卡在 Pending」这条规则一次性落到图上。
+///
+/// ## 为什么是图级遍历，而不是逐点标注
+///
+/// 引擎的容错只认 **Failed** 上游，且 `continue_on_fail` 查的是**下游节点**那一格
+/// （`dag_store::compute_ready_nodes` 按 target 查表）。于是一条链上只要有一格是
+/// `false`，它上游一失败就变 Pending —— 而 Pending 永不被任何下游容错放行 ⇒ 终审停摆。
+/// 逐点修就是每次踩坑补一格：`raw-data`（v163，舆情失败掐死 301302 的终审）、
+/// `agg-risk`（v164，风险支同型）、四档辩论链（v165，09:07 批量里 8 个辩手全 failed
+/// 而 `debate-convergence--档` / `value-investor--档` 一次都没出现）。这条性质本身
+/// 在图上可算，就不该再靠人记第四遍。
+///
+/// ## 判据与两处刻意排除
+///
+/// - 范围 = `sink`（`portfolio-mgr`）的**传递祖先**，不含 sink 自身（它早就是 true）。
+/// - 排除「唯一上游是 `root`（`trigger`）」的节点：trigger 失败时整张图都不跑，给它们
+///   开容错不改变任何行为，只会让清单虚长 —— 实测 48 个祖先里 12 个 `t-*` 取数节点属此类。
+/// - 只写 `continue_on_fail`，**不动**边、id、`input_mapping` 与脚本 ⇒ 不改任何决策数值，
+///   代际不变（`HORIZON_BRANCH_GENERATION_FLOOR` 不动）。
+///
+/// ⚠ 代价如实标注：被放开的节点可能在**本该有的输入缺席**时照常执行（例如本档辩手全失败，
+/// 收敛仍会出一份 `consensus_score`）。缺席不是静默的 —— 落库侧
+/// `stock_workflow::decision::tolerated_failure_notes` 把每个 Failed 节点写进
+/// `data_gaps`，面板「可信度受限」格按节点 id 逐条点名；辩手/分析师的 system_prompt
+/// 原则 2/4 本就要求「拿不到就诚实标注该维度失败并评估影响」。
+///
+/// ⚠ 若这条被推翻（回到「该档宁可不出结论」）：改法是给本函数加**显式白名单并逐格点名**，
+/// 而不是把 24 处字面量散回去 —— 由门 `no_single_point_blocks_portfolio_mgr` 兜住口径。
+///
+/// 返回**本轮被改动**的节点 id（已排序），供调用点写日志。
+fn harden_decision_chain(
+    nodes: &mut [WorkflowNode],
+    edges: &[WorkflowEdge],
+    sink: &str,
+    root: &str,
+) -> Vec<String> {
+    let targets = decision_chain_single_points(nodes, edges, sink, root);
+    let mut changed: Vec<String> = Vec::new();
+    for want in &targets {
+        if let Some(n) = nodes.iter_mut().find(|n| n.base_id() == want.as_str()) {
+            if !n.base_continue_on_fail() {
+                n.base_mut().continue_on_fail = true;
+                changed.push(want.clone());
+            }
+        }
+    }
+    changed.sort();
+    changed
+}
+
 // ⚠ 本测试模块**必须**留在文件末尾：`clippy::items_after_test_module` 只在 clippy 下暴露
 //   （`cargo check` / `cargo test` 都不跑），插在中间会让后续所有代码踩该 lint。
 #[cfg(test)]
@@ -10081,9 +10309,9 @@ mod fast_workflow_derivation_tests {
         FAST_JEV_DIMENSIONS, FAST_JEV_SUMMARY_NODE_IDS, FAST_JEV_TRADER_INPUTS,
         FAST_JEV_VERDICTS_VAR, FAST_QUALITY_GATE_CASE_EXPR, FAST_QUALITY_GATE_INPUT_VAR,
         FAST_REQUIRED_NODE_IDS, FAST_TEMPLATE_ID, FAST_TRADER_PROXY_NODE_ID, SOURCE_TEMPLATE_ID,
-        TRADER_AGENT_PREFIX, TRADER_FAST_PREFIX, fast_jev_nodes,
-        seed_stock_analysis_fast_workflow_template, seed_stock_analysis_workflow_template,
-        validate_fast_workflow_graph,
+        TRADER_AGENT_PREFIX, TRADER_FAST_PREFIX, ancestors_of, decision_chain_single_points,
+        fast_jev_nodes, seed_stock_analysis_fast_workflow_template,
+        seed_stock_analysis_workflow_template, validate_fast_workflow_graph,
     };
     use axagent_entities::workflow_template;
     use axagent_harness::workflow_types::{WorkflowEdge, WorkflowNode};
@@ -11165,5 +11393,47 @@ mod fast_workflow_derivation_tests {
                 );
             }
         }
+    }
+
+    /// v165：**任一节点失败都不许把终审 `portfolio-mgr` 卡在 Pending**（图上可算的性质，
+    /// 不是「某个节点开没开容错」的逐点记忆）。
+    ///
+    /// 同一条链上已经付过三次账：`raw-data`（v163，舆情失败掐死 301302 的终审）→
+    /// `agg-risk`（v164，风险支同型）→ 四档辩论链（v165，批量运行里 8 个辩手全 failed、
+    /// 该档收敛从未执行）。引擎只对 **Failed** 上游放行且查的是**下游**那一格，
+    /// 所以链上留一格 `false` 就会把 Pending 一路传到终审。
+    ///
+    /// 负控拆在同一判据上：把 `debate-convergence--mid` 那格改回 `false`，
+    /// 同一个纯函数必须**只**点名它；另断言祖先数量，防止本判据在空集上恒真。
+    #[tokio::test]
+    async fn no_single_point_blocks_portfolio_mgr() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_both(db).await;
+        let model = row(db, SOURCE_TEMPLATE_ID).await;
+        let nodes = parse_nodes(&model);
+        let edges = parse_edges(&model);
+
+        let ancestors = ancestors_of(&edges, "portfolio-mgr");
+        assert!(
+            ancestors.len() > 40,
+            "前置：`portfolio-mgr` 的传递祖先应有数十个，实测 {} ⇒ 少于此数说明图没建全，本判据会在小集上恒真",
+            ancestors.len()
+        );
+
+        let violators = decision_chain_single_points(&nodes, &edges, "portfolio-mgr", "trigger");
+        assert!(violators.is_empty(), "这些节点会把终审卡在 Pending（单点连坐）：{violators:?}");
+
+        let mut mutated = nodes.clone();
+        let target = mutated
+            .iter_mut()
+            .find(|n| n.base_id() == "debate-convergence--mid")
+            .expect("前置：主图应有 `debate-convergence--mid`");
+        target.base_mut().continue_on_fail = false;
+        assert_eq!(
+            decision_chain_single_points(&mutated, &edges, "portfolio-mgr", "trigger"),
+            vec!["debate-convergence--mid".to_string()],
+            "摘掉一格容错，必须被同一个函数点名（否则本判据没电）"
+        );
     }
 }

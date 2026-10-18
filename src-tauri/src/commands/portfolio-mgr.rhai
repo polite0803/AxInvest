@@ -2939,6 +2939,33 @@ let weights_collapsed = !dqi_a_level && (
 	    });
 	}
 
+	// ── P2a（2026-10-18，002696 实证）：主档来历 + 封顶动作的成句标注 ──
+	// 主档「持有」有两种极易混淆的来源：① 四档里唯一可执行的分支（常是超短档）按本档
+	//   证据判出；② 该分支的买入/增持被 P0-5 封顶（microstructure 腿未接线）压回持有
+	//   —— 后者语义是「没有开仓证据」，**不是「公式看好」**。此前这两个事实只活在
+	//   dataGaps 文案与分支行自证字段里，面板摘要读不出来 ⇒ 用户把封顶持有读成看多
+	//   （002696 面板：公式「持有 8.7%」实为封顶产物，Kelly=0.0）。
+	// 两句各自缺席（四路全缺席 / 未封顶 / 存量模板代缺键）= 空串，不加噪声。
+	// 消费的自证字段：`p05CapApplied`（v156 起分支行自带）、`actionBeforeCap`（v167 新增）；
+	//   `p05CapApplied` 有值但 `actionBeforeCap` 缺席（旧代）⇒ 仍成句，前置动作写「开仓动作」。
+	let tier_cn_label = switch picked_tier {
+	    "ultra_short" => "超短线",
+	    "short" => "短线",
+	    "mid" => "中线",
+	    "long" => "长线",
+	    _ => "",
+	};
+	let picked_tier_note = if branch_picked {
+	    let tier_why = if exec_tier != "" { "可执行档优先" } else { "四档均不可执行⇒取置信最大" };
+	    ` 主档=${tier_cn_label}档(${tier_why})`
+	} else { "" };
+	let action_cap_note = if branch_picked
+	        && present(picked_row["p05CapApplied"]) && picked_row["p05CapApplied"] == true
+	        && final_action == "持有" {
+	    let pre_cap = if present(picked_row["actionBeforeCap"]) { picked_row["actionBeforeCap"] } else { "开仓动作" };
+	    ` 动作=封顶结果(${pre_cap}被压回:microstructure腿未接线,非公式看好)`
+	} else { "" };
+
 	// ── V47 新增: 空头 trader 预测否决 ──
 	// 当 trader 预测 targetPrice 显著低于 currentPrice（≥15%）时，意味着系统自身
 	// 的交易员认为股价将大幅下跌。此时给出"持有"或更积极的建议是逻辑矛盾。
@@ -3616,7 +3643,7 @@ let gap_note = if data_gaps.len() > 0 {
     //   沿用本文件既有写法 `${(x*10.0).round()/10.0}`（见 bearish_downgrade_note 的 to_int 惯例）。
     // 2026-09-22: 结论名回归 `final_action`（方向档）—— 展示档派生已移除，
     //   见上方说明：结论名必须由确定性后验阶梯唯一决定，不得掺入仓位/LLM 措辞。
-    "reasoning": `决策=${final_action} 置信=${(main_confidence*10.0).round()/10.0}(${confidence_source}) 仓位=${(position_pct*10.0).round()/10.0}%${valuation_conflict_note}${gap_note}${bayes_note}${conf_basis_note}${kelly_note}${valuation_note}${disagreement_note}${contradiction_note}${risk_downgrade_note}${bearish_downgrade_note}${risk_note}${collapse_note}${dqi_fuse_note}${calibration_cap_note}`,
+    "reasoning": `决策=${final_action} 置信=${(main_confidence*10.0).round()/10.0}(${confidence_source}) 仓位=${(position_pct*10.0).round()/10.0}%${picked_tier_note}${valuation_conflict_note}${gap_note}${bayes_note}${conf_basis_note}${kelly_note}${valuation_note}${disagreement_note}${contradiction_note}${risk_downgrade_note}${bearish_downgrade_note}${action_cap_note}${risk_note}${collapse_note}${dqi_fuse_note}${calibration_cap_note}`,
     "data_gaps": data_gaps,
     "timeHorizon": time_horizon,
     // Phase 1：「谁定的档」出口（唯一判定见上方锁档段），落 decision_horizon_source

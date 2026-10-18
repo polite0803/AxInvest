@@ -2216,10 +2216,14 @@ fn portfolio_mgr_ultra_entry_gate_requires_stock_level_strength() {
         .expect("strong_cum_gain_pct 必须可调用");
     assert_eq!(strong_threshold, 20.0, "超短强势股累计涨幅内禀锚应为 20%");
 
-    let gate = |seal: rhai::Dynamic, lim: rhai::Dynamic, cum: rhai::Dynamic| -> (bool, String) {
+    let gate = |seal: rhai::Dynamic,
+                lim: rhai::Dynamic,
+                cum: rhai::Dynamic,
+                rs: rhai::Dynamic|
+     -> (bool, String) {
         let v: rhai::Array = engine
-            .call_fn(&mut rhai::Scope::new(), &ast, "pm_ultra_entry_gate", (seal, lim, cum))
-            .expect("pm_ultra_entry_gate 必须可调用");
+            .call_fn(&mut rhai::Scope::new(), &ast, "pm_ultra_entry_gate", (seal, lim, cum, rs))
+            .expect("pm_ultra_entry_gate 必须可调用（阶段 2 起为四参：封板率/涨停数/累计涨幅/相对强度）");
         assert_eq!(v.len(), 2, "门必须返回 [pass, basis] 两元");
         (v[0].as_bool().expect("首元必须是 bool"), v[1].clone().cast::<String>())
     };
@@ -2227,30 +2231,66 @@ fn portfolio_mgr_ultra_entry_gate_requires_stock_level_strength() {
 
     // ① 封板率缺席 ⇒ 未判定（缺席 ≠ 通过），且不得落到个股分支造成误读
     assert_eq!(
-        gate(miss.clone(), 1_i64.into(), 25.0_f64.into()),
+        gate(miss.clone(), 1_i64.into(), 25.0_f64.into(), miss.clone()),
         (false, "breadth_missing".into())
     );
     // ② 封板率 < 0.5 ⇒ 市场情绪一票否决（个股再强也不放行）
-    assert_eq!(gate(0.4_f64.into(), 1_i64.into(), 25.0_f64.into()), (false, "breadth_weak".into()));
+    assert_eq!(
+        gate(0.4_f64.into(), 1_i64.into(), 25.0_f64.into(), miss.clone()),
+        (false, "breadth_weak".into())
+    );
     // ③ 封板率达标但个股强势特征算不出（K 线不足/宿主返回 unit）⇒ 同样不放行
-    assert_eq!(gate(0.8_f64.into(), miss.clone(), miss.clone()), (false, "stock_unjudged".into()));
+    assert_eq!(
+        gate(0.8_f64.into(), miss.clone(), miss.clone(), miss.clone()),
+        (false, "stock_unjudged".into())
+    );
     // ④ 封板率 0.5 边界 + 近 5 日有涨停 ⇒ 通过
     assert_eq!(
-        gate(0.5_f64.into(), 1_i64.into(), 0.0_f64.into()),
+        gate(0.5_f64.into(), 1_i64.into(), 0.0_f64.into(), miss.clone()),
         (true, "limit_up_recent".into())
     );
-    assert_eq!(gate(0.9_f64.into(), 3_i64.into(), miss.clone()), (true, "limit_up_recent".into()));
+    assert_eq!(
+        gate(0.9_f64.into(), 3_i64.into(), miss.clone(), miss.clone()),
+        (true, "limit_up_recent".into())
+    );
     // ⑤ 无涨停但累计涨幅 20% 边界 ⇒ 通过；19.9% ⇒ 不通过（紫金 10-09 当日 +4.87% 形态落这里）
     assert_eq!(
-        gate(0.84_f64.into(), 0_i64.into(), 20.0_f64.into()),
+        gate(0.84_f64.into(), 0_i64.into(), 20.0_f64.into(), miss.clone()),
         (true, "strong_momentum".into())
     );
     assert_eq!(
-        gate(0.84_f64.into(), 0_i64.into(), 19.9_f64.into()),
+        gate(0.84_f64.into(), 0_i64.into(), 19.9_f64.into(), miss.clone()),
         (false, "stock_not_strong".into())
     );
     // ⑥ 无涨停 + 累计涨幅缺席 ⇒ 不通过，不得把缺席当 0 以外的任何东西
-    assert_eq!(gate(0.84_f64.into(), 0_i64.into(), miss), (false, "stock_not_strong".into()));
+    assert_eq!(
+        gate(0.84_f64.into(), 0_i64.into(), miss.clone(), miss),
+        (false, "stock_not_strong".into())
+    );
+
+    // ⑤b 阶段 2（2026-10-19）：无涨停、涨幅未达标，但**同期相对中证全指为正超额**
+    //   ⇒ 以「抗跌蓄势」放行入门。四参全用 002696 @ 2026-09-28 的真实读数：
+    //   封板率 0.75（那次输出里的 breadth）、近 5 日涨停 0 次、累计涨幅 −3.13%、
+    //   5 日窗超额 +2.2474824760pt（个股 −5.39% / 基准 −7.64%）—— 当时判 `stock_not_strong`。
+    assert_eq!(
+        gate(0.75_f64.into(), 0_i64.into(), (-3.13_f64).into(), 2.247482476_f64.into()),
+        (true, "relative_strength_emerging".into())
+    );
+    // 负超额 ⇒ 仍不通过：放行的理由是「跑赢基准」，不是「这条数据存在」
+    assert_eq!(
+        gate(0.75_f64.into(), 0_i64.into(), (-3.13_f64).into(), (-2.0_f64).into()),
+        (false, "stock_not_strong".into())
+    );
+    // 0 超额 = 与基准同步 ⇒ 不是抗跌证据（0 有含义，不能当"有数就行"）
+    assert_eq!(
+        gate(0.75_f64.into(), 0_i64.into(), (-3.13_f64).into(), 0.0_f64.into()),
+        (false, "stock_not_strong".into())
+    );
+    // 市场情绪弱 ⇒ 个股再抗跌也不放行（并列分支只加在"个股前提"这一侧，不越过封板率否决）
+    assert_eq!(
+        gate(0.4_f64.into(), 0_i64.into(), 0.0_f64.into(), 9.9_f64.into()),
+        (false, "breadth_weak".into())
+    );
 
     // ── 降杠杆封顶：microstructure 腿未接线期间，买入/增持一律压回持有；弱动作不得被抬升 ──
     let cap = |action: &str| -> String {
@@ -3752,6 +3792,10 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
                 "macd_dea" => serde_json::json!(0.04),
                 "rsi_value" => serde_json::json!(58.0),
                 "seal_rate" => serde_json::json!(0.72),
+                // 阶段 1/2（2026-10-19）：`relativeStrength` 腿的原料。齐备态必须给
+                // **有值**形态 ⇒ 直接用 002696@2026-09-28 的现网真读数（+2.247482476pp
+                // 对中证全指），这样「齐备态」同时也是那条样本的复现，而不是随手挑的数。
+                "excess_return_pct" => serde_json::json!(2.247482476),
                 "pool_break_count" => serde_json::json!(0.0),
                 "stop_vol_mult" => serde_json::json!(1.2),
                 "take_profit_vol_mult" => serde_json::json!(2.0),

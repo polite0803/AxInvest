@@ -70,7 +70,7 @@ pub async fn start_background_services(
     start_trigger_recovery(state);
     start_scheduler_recovery(app, state);
     start_stale_analysis_reclaim(state);
-    start_interrupted_analysis_rerun(app, state);
+    start_interrupted_analysis_rerun(app);
     start_approval_event_bridge(app, state);
     start_platform_adapters(state);
     start_skill_watcher(app, state);
@@ -2845,7 +2845,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
         //（`matches!` 逐个列），本类型不在其中即自动免闸 —— 但**别顺手把它加进去**，
         // 那会让补跑在周末与节假日静默停摆。
         if job.task_type.as_deref()
-            == Some(crate::commands::stock_analysis_rerun::STOCK_ANALYSIS_RERUN_TASK_TYPE)
+            == Some(crate::commands::constants::STOCK_ANALYSIS_RERUN_TASK_TYPE)
         {
             let store = cron_store.clone();
             let job_id = job.id.clone();
@@ -3884,6 +3884,10 @@ fn start_stale_analysis_reclaim(state: &AppState) {
     }
     let db = state.harness.db().clone();
     let cutoff_ms = chrono::Utc::now().timestamp_millis();
+    // ⚠ 执行表的时间列是**秒**（分析表是毫秒）⇒ 两处 cutoff 各算各的，不能共用一个数。
+    // 传成毫秒会把本次正在跑的新行一起误标（本表 created_at 全都小于它），判据与两端后果
+    // 见 `scheduler/restore.rs::reclaim_stale_workflow_executions`。
+    let cutoff_ts_sec = chrono::Utc::now().timestamp();
     tauri::async_runtime::spawn(async move {
         // 延迟与 `start_scheduler_recovery` 同因：避开启动期 DB 初始化竞争。
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
@@ -3895,6 +3899,18 @@ fn start_stale_analysis_reclaim(state: &AppState) {
                 n
             ),
             Err(e) => tracing::error!("[start_stale_analysis_reclaim] 回收失败: {}", e),
+        }
+        // 同族第二张表：`workflow_executions` 的终态写入此前被「内存里必须还有这次执行」
+        // 这个前提卡住，幽灵 running 现网累积到 85 条（历史列表永久转圈、评估把它们当样本）。
+        match crate::scheduler::restore::reclaim_stale_workflow_executions(&db, cutoff_ts_sec).await
+        {
+            Ok(0) => tracing::info!("[start_stale_analysis_reclaim] 无僵死执行记录"),
+            Ok(n) => tracing::warn!(
+                "[start_stale_analysis_reclaim] 回收 {} 条僵死 running 执行记录 → interrupted\
+                 （判据与单位说明见 scheduler/restore.rs）",
+                n
+            ),
+            Err(e) => tracing::error!("[start_stale_analysis_reclaim] 执行表回收失败: {}", e),
         }
     });
 }
@@ -3925,7 +3941,26 @@ fn start_stale_analysis_reclaim(state: &AppState) {
 /// 本钩子**不持久化「已尝试次数」** ⇒ 若某条因数据源缺失等原因永远失败，
 /// 每次启动都会再试一次。单次调用内的重试上限由 `RerunConfig::max_rounds`
 /// 控制；跨启动的累积上限需要一个 `attempt` 列，属另行设计。
-fn start_interrupted_analysis_rerun(app: &tauri::AppHandle, state: &AppState) {
+/// 启动补跑的**单轮条数上限**（定时巡检不受此限，走任务自己的 `prompt` 配置）。
+///
+/// ## 为什么启动这一路要限，而巡检不限
+///
+/// 现网读数（2026-10-17）：36 行待补，每行约 7 分钟、约 30 次 LLM 调用。而开发形态下
+/// `tauri dev` 的看门狗会因**任何一次存盘**重启应用 —— 重启即在「补到第几条」的中途，
+/// 那条被打断的行由启动回收订正回 `interrupted`，下一轮又被选中 ⇒ 实测两小时内只补完
+/// 1 行，其余 35 行原地不动，配额却照烧。也就是说：把「排空整批」放在启动钩子上，
+/// 在开发机上既不收敛也不省，只是把同一批反复重跑。
+///
+/// 限成 3 条的效果是「先补最老的三条、其余交给 04:00 巡检」——巡检跑在应用稳定持有
+/// 的时段，才有把整批补完的可能。判据仍是 dao 侧同一套 `(analysis_date, stock_code)` 升序。
+///
+/// ## 被推翻时改哪一格
+///
+/// 若要回到「启动就排空」：把本常量改成 `0`（`RerunConfig.max_per_run == 0` = 不限），
+/// 语义即完全恢复成本改动之前的形态，无其它连带面。
+const STARTUP_RERUN_MAX_PER_ROUND: usize = 3;
+
+fn start_interrupted_analysis_rerun(app: &tauri::AppHandle) {
     let external_lock = crate::scheduler::restore::EXTERNAL_RERUN_LOCK_FILE;
     if crate::scheduler::restore::external_rerun_in_progress() {
         tracing::warn!(
@@ -3949,7 +3984,10 @@ fn start_interrupted_analysis_rerun(app: &tauri::AppHandle, state: &AppState) {
         let outcome = crate::commands::stock_analysis_rerun::run_rerun(
             Some(app.clone()),
             state_ref.inner(),
-            &crate::commands::stock_analysis_rerun::RerunConfig::default(),
+            &crate::commands::stock_analysis_rerun::RerunConfig {
+                max_per_run: STARTUP_RERUN_MAX_PER_ROUND,
+                ..Default::default()
+            },
         )
         .await;
         if outcome.pending_at_start == 0 {

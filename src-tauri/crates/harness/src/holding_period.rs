@@ -319,20 +319,38 @@ impl Period {
 
     /// 本档的**技术面尺度**（取值 = `astock-data::scale::ScaleProfile::resolve` 认的那些键）。
     ///
-    /// 存在理由：「超短=小时线 / 短=周线 / 中=月线 / 长=季线」是阶段 2 的拍板，但此前**只写在**
-    /// 种子注释（`seed_stock_analysis.rs` 的「本档尺度节点 = 周线」）和「哪档读哪个 `t-scoring-*`」
-    /// 的字面量里，代码里没有权威 ⇒ 于是 PLAN §九十二 量到的那条 `period` 死参数（四档实际取的都是
-    /// 同一份日线）**没有任何门能发现**：字面量之间互相印证，没人对得上「这一档该用哪个尺度」。
+    /// ## 定阶规则（2026-10-18 用户裁定，`PLAN-horizon-scale-alignment.md` §一）
+    ///
+    /// **`d ≤ h / 3`**：每根 bar 覆盖的交易日 `d` 不得超过本档持有期 `h` 的三分之一 ——
+    /// 否则「这一档的走势」只由 1~2 根 bar 决定，按构造分辨不出持有期内的结构。
+    ///
+    /// | 档 | `h`（交易日） | 尺度 | `d` | `h/d` |
+    /// |---|---|---|---|---|
+    /// | 超短 | 2 | hourly | 0.25 | 8.0 |
+    /// | 短 | 5 | daily | 1 | 5.0 |
+    /// | 中 | 28 | weekly | 5 | 5.6 |
+    /// | 长 | **90** | monthly | 20 | 4.5 |
+    ///
+    /// ⚠ **第 4 档是「90 交易日」，不是「季线」**：`quarterly` 的 `d = 60`，`h/d = 1.5`
+    /// ⇒ 违反本条规则（且季线自身的 60 期地板要 **15 年**历史，见
+    /// `recommender/scale.rs` 与 `PLAN-horizon-scale-alignment.md` D2）。2026-10-18 之前
+    /// 短/中/长三档分别是 weekly/monthly/quarterly（`h/d` = 1.0 / 1.4 / 1.5），三档**同时**违规。
+    ///
+    /// 存在理由（历史）：「超短=小时线 / 短=周线 / 中=月线 / 长=季线」曾是阶段 2 的拍板，但此前
+    /// **只写在**种子注释和「哪档读哪个 `t-scoring-*`」的字面量里，代码里没有权威 ⇒ 于是
+    /// PLAN §九十二 量到的那条 `period` 死参数（四档实际取的都是同一份日线）**没有任何门能发现**。
     ///
     /// 分工（分层依赖方向）：本函数只定「哪档配哪个尺度」；尺度自身的日历跨度
     /// （`trading_days_per_bar`）与窗口根数换算住在 `astock-data::scale`，那里才是有 `d_s` 的地方
     /// —— 把换算放 harness 会让 `0.25/1/5/20/60` 这张表出现第二份（禁区 12）。
+    /// 荐股链（`analysis-engine/recommender/scale.rs`）**不得**再写自己的四臂表，
+    /// 一律转调本函数（门 `check-reco-horizon-parity.mjs` 的门 n 锁这条）。
     pub fn scale_key(&self) -> &'static str {
         match self {
             Period::UltraShort => "hourly",
-            Period::Short => "weekly",
-            Period::Mid => "monthly",
-            Period::Long => "quarterly",
+            Period::Short => "daily",
+            Period::Mid => "weekly",
+            Period::Long => "monthly",
         }
     }
 
@@ -341,12 +359,16 @@ impl Period {
     /// 放在 harness 而不是让种子自己拼字符串：`scripts/check-tier-purity.mjs` 的 R5 要拿权威
     /// 反查种子（「这一档的 `tier_score` 来源节点 ≡ 本档尺度对应的节点」），
     /// 拼接的话门就只能猜后缀（`hour` vs `hourly` 的差别正是曾经出错的地方）。
+    ///
+    /// ⚠ 命名后缀 = 尺度名的短形，**不是**持有期名：`t-scoring-day` 属短档（5 交易日）、
+    /// `t-scoring-month` 属长档（**90 交易日**）。「月」在这里指 bar 粒度（20 交易日/根），
+    /// 不是「持有一个月」—— 长期档的口径永远是 90 交易日（见 [`Self::scale_key`] 的定阶表）。
     pub fn scoring_node_id(&self) -> &'static str {
         match self {
             Period::UltraShort => "t-scoring-hour",
-            Period::Short => "t-scoring-week",
-            Period::Mid => "t-scoring-month",
-            Period::Long => "t-scoring-quarter",
+            Period::Short => "t-scoring-day",
+            Period::Mid => "t-scoring-week",
+            Period::Long => "t-scoring-month",
         }
     }
 
@@ -360,8 +382,19 @@ impl Period {
     ///
     /// 实现刻意**不写第二份映射**：遍历 [`Self::ALL`] 比 `scale_key()` ⇒ 加第五档时
     /// 只有 `as_str` / `scale_key` / `scoring_node_id` 三处必须一起长（编译器 + R5 门），
-    /// 本函数自动跟着变。`daily` 与未登记的尺度名返回 `None`（日线不属于任何一档，
-    /// 它是主链 σ_daily 与主评分的共同来源 ⇒ 不走按档窗口）。
+    /// 本函数自动跟着变。
+    ///
+    /// ⚠ **2026-10-18 起 `daily` 与 `quarterly` 的角色对调了**（`PLAN-horizon-scale-alignment.md`
+    /// §一）：短档的尺度由 weekly 下移到 `daily`，长档由 `quarterly` 上移到 `monthly`。于是
+    /// ①`from_scale_key("daily") == Some(Short)`，日线**不再是**「无主的公共尺度」；
+    /// ②`from_scale_key("quarterly") == None`，季线**才是**新晋的无主尺度（它的 60 期地板要
+    /// 15 年历史，见 `recommender/scale.rs` 的 D2）。
+    ///
+    /// ⇒ **调用方不得再用「尺度串能否反查到档」来区分「主链日线」与「按档日线」** ——
+    /// 两者都是 `daily`，只能靠显式 `horizon` 参数分辨（`astock-data::mcp_tools::compute_scoring`
+    /// 就是这么做的：`horizon` 优先，`period` 仅作冲突校验）。这正是本函数注释必须写清
+    /// 正反两侧现状的原因：留一句「daily 返回 None」的旧话，下一个读它的人会照着写出
+    /// 「主链走 None 分支」的错代码，而编译器不会反对。
     pub fn from_scale_key(scale: &str) -> Option<Period> {
         Period::ALL.into_iter().find(|p| p.scale_key() == scale)
     }
@@ -553,12 +586,35 @@ impl Period {
                 // 广度 = 封板率 0.683，与个股无关，却把短档后验抬高）。
                 // ⚠ 本档的门仍是 `trend_and_flow_same_sign`（趋势 × 资金同号），**不是**广度门
                 //   —— `breadthGateOnly` 在这里只借「市场级量、只作过滤、权重恒 0」这层语义。
-                &["momentumSignal", "flowPersistence", "trendStrength", "supplyShock"],
+                // ⚠ 短线（5 日）：本档窗内基准用**中证全指**同窗累计收益（口径与注入口
+                //   同 mid 档那条注释；实现在 `harness::indicators::excess_return_pct`，
+                //   单一实现，Rhai 侧不重算）。
+                &[
+                    "momentumSignal",
+                    "flowPersistence",
+                    "trendStrength",
+                    "supplyShock",
+                    "relativeStrength",
+                ],
                 &[("breadthState", "breadthGateOnly")],
                 "time_stop+fixed_stop",
             ),
             Period::Mid => (
-                &["flowPersistence", "trendStrength", "valuationBand", "expectationRevision"],
+                // `relativeStrength`（阶段 1，2026-10-19）：同窗「个股累计收益 − 基准累计收益」。
+                // 与 `breadthState`（封板率）**相反**，它是**个股自身**的量 —— 同一天每只票拿到
+                // 不同的数，所以可以进方向加权而不犯「市场级量被逐票共享 ⇒ 全市场同向抬后验」
+                // 那条错（002241/2026-10-10 的实证教训）。
+                // 立项实证：002696 as-of 2026-09-28 判「观望 3.3%」，其后 12 交易日 +65.3%，
+                // 而同期创业板 −11.7%；锚点当天的 5 日窗实测超额 **+2.25 个百分点**
+                // （个股 −5.39% / 中证全指 −7.64%，见 `indicators::excess_return_pct` 的同名真数据测试）
+                // —— 这份证据在框架里**从来没有入口**。
+                &[
+                    "flowPersistence",
+                    "trendStrength",
+                    "valuationBand",
+                    "expectationRevision",
+                    "relativeStrength",
+                ],
                 &[
                     ("earningsQuality", "qualityRealizationBeyondHorizon"),
                     ("supplyShock", "supplyAsRiskNoteOnly"),
@@ -1184,13 +1240,19 @@ mod tests {
     ///
     /// 期望表写死在这里是有意的：§九十二 的缺陷正是「四档尺度实际相同（都是日线）」而各处
     /// 字面量互相印证、没有权威可对。本条把那件事变成改一臂就红。
+    ///
+    /// 2026-10-18 按「`d ≤ h/3`」定阶重排（`PLAN-horizon-scale-alignment.md` §一）：
+    /// 短/中/长三档由 weekly/monthly/quarterly 改为 daily/weekly/monthly ——
+    /// 旧三档的 `h/d` 是 1.0 / 1.4 / 1.5，全部违反规则；长期档的口径是 **90 交易日**，不是季线。
+    /// ⚠ 这条表**不含** `d`：`trading_days_per_bar` 属 `astock-data::scale`（分层方向见 `scale_key` 的文档），
+    /// 规则 R 的数值断言在那边（`tier_scales_resolve_the_horizon_with_at_least_three_bars`）。
     #[test]
     fn scale_key_and_scoring_node_are_one_table_per_tier() {
         let expected = [
             (Period::UltraShort, "hourly", "t-scoring-hour", 2),
-            (Period::Short, "weekly", "t-scoring-week", 5),
-            (Period::Mid, "monthly", "t-scoring-month", 28),
-            (Period::Long, "quarterly", "t-scoring-quarter", 90),
+            (Period::Short, "daily", "t-scoring-day", 5),
+            (Period::Mid, "weekly", "t-scoring-week", 28),
+            (Period::Long, "monthly", "t-scoring-month", 90),
         ];
         let mut scale_keys: Vec<&str> = Vec::new();
         let mut node_ids: Vec<&str> = Vec::new();
@@ -1226,10 +1288,23 @@ mod tests {
                 "尺度 {want_scale:?} 反查不到 {period:?} ⇒ 正反两张臂分了家"
             );
         }
-        // `daily` 不属于任何一档（主链 σ_daily 与主评分的共同来源）；未登记/拼错的尺度名
-        // 一律 `None`，**不得**就近归到某档（负控向：`weekl` 若被归成 short，就等于把
-        // §九十二 那条「静默降级」在反方向上重做一遍）。
-        assert_eq!(Period::from_scale_key("daily"), None, "日线不该被算成某一档");
+        // 无主尺度必须反查成 `None`，且**不得**就近归到某档（负控向：`weekl` 若被归成
+        // short，就等于把 §九十二 那条「静默降级」在反方向上重做一遍）。
+        //
+        // ⚠ 负控值随 §一定阶一起换过：2026-10-18 之前无主的是 `daily`（短档当时配周线），
+        // 现在无主的是 **`quarterly`** —— 长档从季线上移到月线后，没有任何档再落在季线。
+        // 断言这里仍写 `daily` 会红（它已是短档的尺度），而「红」本身就是这条负控仍有效的证明：
+        // 它锁住的不是「日线」这个名字，而是「四档之外的尺度一律 None」这条规则。
+        assert_eq!(
+            Period::from_scale_key("daily"),
+            Some(Period::Short),
+            "日线已是短档（5 交易日）的尺度 —— 若回到 None，说明短档又挪走了"
+        );
+        assert_eq!(
+            Period::from_scale_key("quarterly"),
+            None,
+            "季线不该被算成某一档（60 期地板 = 15 年历史，无档可用）"
+        );
         for bad in ["", "weekl", "Monthly", "quarter"] {
             assert_eq!(
                 Period::from_scale_key(bad),

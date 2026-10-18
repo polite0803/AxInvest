@@ -428,7 +428,7 @@ pub const UNBRIDGED_ANALYST_IDS: &[&str] = &["a-fundamentals", "a-research", "a-
 /// 因子 → 数值来源通道（P4′ 子图的 `input_mapping` 必须满足这张表的声明）。
 ///
 /// 三种语义，**不是**「模型想不想给」而是「数字从哪儿拿」：
-/// - `tierScore`：该档**自己的**评分节点（`t-scoring-hour|week|month|quarter`）——
+/// - `tierScore`：该档**自己的**评分节点（`t-scoring-hour|day|week|month`）——
 ///   这是 R-11「逐档取该档数据」的正解，跨档共用一份评分正是被退役的形态；
 /// - `sharedTool`：与持有尺度无关的确定性工具输出（涨停池 / 估值带 / 一致预期 / 宏观快照 /
 ///   解禁包 / 行业排名），四档共用同一次取数，但**只有该档参与该因子时**才进融合；
@@ -451,6 +451,12 @@ pub const VERDICT_FACTOR_SOURCES: &[(&str, &str, &str)] = &[
     ("macroRegime", "sharedTool", "macro_data_snapshot"),
     ("supplyShock", "sharedTool", "t-lockup-data"),
     ("sectorRotation", "sharedTool", "get_industry_ranking"),
+    // 阶段 1（2026-10-19）：`injectedVar` —— 值由 wiring 层（`hooks::build_stock_analysis_variables`）
+    // 复用**已在拉的基准指数序列**算好后注入，既不是 LLM 判定（verdict）、也没有跑它的节点
+    // （sharedTool）。第三种通道类别必须显式登记：填 `sharedTool` 会要求一条快照键映射
+    // （`every_shared_tool_channel_has_a_snapshot_key` 那条测试当场红），填 `tierScore`
+    // 会让审计把「没在场」判成「不适用」而放走静默缺席。
+    ("relativeStrength", "injectedVar", "relative_strength"),
 ];
 
 /// **通道 → 快照落库键**（`blackboard_snapshot` 里的 `result.*`）。裁定 P-B5 要求的唯一权威表。
@@ -468,7 +474,7 @@ pub const VERDICT_FACTOR_SOURCES: &[(&str, &str, &str)] = &[
 ///
 /// **不含 `tierScore` 通道**（`macd` / `totalScore`）：那是逐档评分节点
 /// （`Period::scoring_node_id()`）的产出，阶段 0 实测**不落主快照**（最近 49 条记录里
-/// 含 `t-scoring-hour|week|month|quarter` 的为 0 条）⇒ 审计对该类只能报「不适用」，
+/// 含 `t-scoring-hour|day|week|month` 的为 0 条）⇒ 审计对该类只能报「不适用」，
 /// 登记一条假键会把「拿不到」伪装成「查过且在场」。
 pub const CHANNEL_SNAPSHOT_KEYS: &[(&str, &str)] = &[
     // 通道（工具名 / 节点 id 二者混用，见上）→ 快照键
@@ -1372,16 +1378,23 @@ mod tests {
         assert!(VERDICT_FACTOR_SOURCES.iter().any(|(cf, _, _)| *cf == "eventCatalyst"));
         for (f, kind, channel) in VERDICT_FACTOR_SOURCES {
             assert!(
-                matches!(*kind, "verdict" | "tierScore" | "sharedTool"),
+                matches!(*kind, "verdict" | "tierScore" | "sharedTool" | "injectedVar"),
                 "因子 {f} 的来源种类非法: {kind}"
             );
             if *kind != "verdict" {
                 assert!(!channel.is_empty(), "因子 {f} 是 {kind} 却没写通道名");
             }
-            assert!(
-                Period::factor_owner(f).is_some(),
-                "来源表里的 {f} 没有属主分析师（因子改名要同步三处）"
-            );
+            // `injectedVar` 没有**分析师**属主是设计使然：它的值由 wiring 层（`hooks`）用
+            // 单一实现 `harness::indicators::excess_return_pct` 算好后注入，不经任何模型转述
+            // —— 硬塞一个分析师属主，等于宣称「这条证据是某个 LLM 判断的」，那是假归因。
+            // 放宽的只是"分析师属主"这一条；"必须有生产者"由
+            // `scripts/check-leg-producers.mjs` 的 L5 在源码层钉（那里能做，且有负控）。
+            if *kind != "injectedVar" {
+                assert!(
+                    Period::factor_owner(f).is_some(),
+                    "来源表里的 {f} 没有属主分析师（因子改名要同步三处）"
+                );
+            }
         }
     }
 

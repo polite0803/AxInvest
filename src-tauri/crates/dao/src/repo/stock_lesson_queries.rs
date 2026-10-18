@@ -733,6 +733,9 @@ mod tests {
             source: "due".to_string(),
             miss_layer: None,
             failure_modes: None,
+            // 阶段 3：反思产出的层级轴（测试夹具 = 未标注，读侧不得当成 L1）
+            implementation_tier: None,
+            code_diff_proposal: None,
             status: "completed".to_string(),
             created_at: 0,
             updated_at: 0,

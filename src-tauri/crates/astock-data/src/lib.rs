@@ -1252,22 +1252,20 @@ impl AStockClient {
             })
             .collect();
         if unpublished > 0 {
-            crate::as_of::record_degradation_kind(
-                "financials",
-                "truncate_financials_by_asof",
-                &format!(
-                    "{} 条财报披露日未早于截止日,回放里按「当时尚未公开」裁掉(前视防线)",
-                    unpublished
-                ),
-                crate::as_of::DegradationKind::NoData,
+            // 正常裁剪，不是降级：源返回了「截止日尚未公开」的财报，裁掉正是前视防线
+            // 在生效。记成 NoData 会把正确行为刷进降级面板（2026-10-18 用户指出）。
+            // 与 `truncate_klines_by_asof` 的正常截断同口径：只留 info。
+            tracing::info!(
+                "[asof] financials: {unpublished} 条财报披露日晚于截止日，按「当时尚未公开」裁掉（前视防线）"
             );
         }
         if undated > 0 {
-            crate::as_of::record_degradation_kind(
-                "financials",
-                "truncate_financials_by_asof",
-                &format!("{} 条财报报告期不是四类期末,无法推断披露日,已裁掉", undated),
-                crate::as_of::DegradationKind::Failure,
+            // 同样是**正常保守裁剪**：报告期不是四类期末、又无披露日 ⇒ 证明不了截止日
+            // 当时已公开，只能丢。若全部被裁光，外层 `get_financials` 会记一条维度级
+            // 「财务全链不可得」；部分被裁时下游仍有可用财报，不需要在这里标红。
+            // 2026-10-18 用户指出：as-of 里为「无法证明未来披露」记 Failure 是过度告警。
+            tracing::warn!(
+                "[asof] financials: {undated} 条财报报告期非四类期末且无披露日，无法证明截止日前已公开，按前视防线裁掉（正常保守裁剪）"
             );
         }
         kept
@@ -2026,11 +2024,42 @@ impl AStockClient {
             );
         };
         if hit == 0 {
-            return format!(
-                "该截止日无本地快照，且截至该日的最近 {n} 个交易日里一天都没采到（0/{n}）\
-                 ⇒ 采集侧整段断供（后台 sweep 未运行 / 归档未装配 / 每轮全源失败），\
-                 不是单日漏采，重跑那一天也解不了"
-            );
+            // 「该日之前 N 天全空」有三种完全不同的病，必须分开：
+            //   ① 本地归档**开始得比截止日还晚**（002696 as_of=2026-09-28 实测：热股快照
+            //      最早 09-30 ⇒ 此前怎么查都是 0/20，而采集侧此时是健康的）；
+            //   ② 采集侧在该日之前已经停了（更早时期有快照，该日前后都没有）；
+            //   ③ 从未采到过（归档没装配 / 后台 sweep 没跑 / 每轮全源失败）。
+            // 先看向后窗口，再用「全量归档」与「截止日之后」两个聚合把三者分开。
+            let today =
+                (chrono::Utc::now() + chrono::Duration::hours(8)).format("%Y-%m-%d").to_string();
+            let all_time = store.count_by_date_range(method, "2000-01-01", &today).await;
+            let after = store.count_by_date_range(method, date, &today).await;
+            return match (all_time, after) {
+                (Some(0), _) => format!(
+                    "该截止日无本地快照，且截至该日的最近 {n} 个交易日里一天都没采到（0/{n}）\
+                     ⇒ 采集侧整段断供（后台 sweep 未运行 / 归档未装配 / 每轮全源失败），\
+                     不是单日漏采，重跑那一天也解不了"
+                ),
+                (Some(_), Some(later)) if later > 0 => format!(
+                    "该截止日无本地快照，且此前 {n} 个交易日均未采到；但该截止日之后已有本地快照\
+                     ⇒ 本地归档是在此之后才开始积累的（或中间断档），不是采集侧从未运行；\
+                     历史日期不可回补"
+                ),
+                (Some(_), Some(_)) => format!(
+                    "该截止日无本地快照，且该截止日前后都没有本地快照（更早时期有）\
+                     ⇒ 采集侧在截止日之前已经停止，不是「归档起始日晚」；请先查后台 sweep 为何停跑"
+                ),
+                (None, _) => format!(
+                    "该截止日无本地快照，且此前 {n} 个交易日均未采到；全量归档聚合\
+                     本次不可得（诊断查询失败）⇒ 无法区分「归档开始得晚」与「采集侧断供」，\
+                     此处不对采集侧下结论"
+                ),
+                (Some(_), None) => format!(
+                    "该截止日无本地快照，且此前 {n} 个交易日均未采到；截止日之后的归档聚合\
+                     本次不可得（诊断查询失败）⇒ 无法区分「起始日晚」与「中途停跑」，\
+                     此处不对采集侧下结论"
+                ),
+            };
         }
         if hit * 2 < n {
             return format!(
@@ -2801,12 +2830,45 @@ impl AStockClient {
                     }
                 }
             }
-            crate::as_of::record_degradation_kind(
-                "astock-data",
-                "get_social_sentiment",
-                &format!("as-of 模式无 {stock_code} 当日舆情快照（该维度只有当日快照一条通道）"),
-                crate::as_of::DegradationKind::StructuralGap,
-            );
+            // 快照 miss → guba 的按发帖时间翻页重建（与 live 共用同一套情感计算）
+            let names =
+                self.routing.vendors_for("social_sentiment", &self.routing.social_sentiment);
+            let (hit, probe) = self
+                .asof_probe(
+                    "get_social_sentiment",
+                    names,
+                    &[AsOfCapability::NativeDateParam],
+                    |_, vendor, _| {
+                        let sc = stock_code.to_string();
+                        Box::pin(async move {
+                            let v = vendor.get_social_sentiment_with_asof(&sc).await?;
+                            if v.is_empty() {
+                                Ok(None)
+                            } else {
+                                Ok(Some(v))
+                            }
+                        })
+                    },
+                )
+                .await;
+            if let Some(v) = hit {
+                // 回填个股快照：同截止日后续调用不再翻 20+ 页
+                if let Ok(json) = serde_json::to_string(&v) {
+                    self.set_stock_daily_snapshot("get_social_sentiment", stock_code, &date, &json)
+                        .await;
+                }
+                return Ok(v);
+            }
+            // 通道明确回答「截止日前没有帖子」⇒ 与 live 的空页同义，不记降级；
+            // 只有源真报错（页面取不到 / 结构变了）才留 Failure。
+            if !probe.failed.is_empty() {
+                crate::as_of::record_degradation_kind(
+                    "astock-data",
+                    "get_social_sentiment",
+                    &probe.reason(&format!("as-of {stock_code} 舆情")),
+                    probe.kind(),
+                );
+            }
             return Ok(vec![]);
         }
         let vendor_names: Vec<String> =
@@ -3810,6 +3872,52 @@ impl AStockClient {
         }
     }
 
+    /// 融资余额序列（P1 影子腿数据源，`PLAN-capital-long-evidence.md` E3）。
+    ///
+    /// live：按 `routing.margin` 路由取最近 `days` 条（日期倒序；eastmoney 端
+    /// `RPTA_WEB_RZRQ_GGMX` 报表）。
+    /// **as-of（P2 已接）**：eastmoney 覆写内部按 `current_as_of` 追加 `(DATE<=截止日)`
+    /// 范围过滤 —— 回放拿到「截止日前最近 N 个交易日」，不穿越（判据与
+    /// `get_margin_data_with_asof` 同源，含「必须 `<=` 而非等值」的实测结论）。
+    pub async fn get_margin_balance_trend(
+        &self,
+        stock_code: &str,
+        days: u32,
+    ) -> Result<Vec<MarginData>, DataError> {
+        // 缓存仅 live 读写：cache_key 不带代际后缀，回放共用会与 live 缓存互踩；
+        // 回放是一次性批处理，放弃这点缓存收益换正确性。
+        let as_of_active = crate::as_of::is_asof_active();
+        let cache_key = Self::cache_key_for("margin_trend", stock_code);
+        if !as_of_active {
+            if let Some(cached) = self.cache_get(&cache_key).await {
+                if let Ok(v) = serde_json::from_str::<Vec<MarginData>>(&cached) {
+                    return Ok(v);
+                }
+            }
+        }
+        let vendor_names: Vec<String> = self.routing.margin.iter().map(|n| n.to_string()).collect();
+        let sc = stock_code.to_string();
+        let result = self
+            .try_vendors_retry(stock_code, "margin_trend", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    let v = vendor.get_margin_balance_trend(&sc, days).await?;
+                    if v.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "融资余额序列为空（该源未实现或非两融标的）".into(),
+                        });
+                    }
+                    Ok(v)
+                })
+            })
+            .await?;
+        if !as_of_active {
+            self.cache_set_serialized(cache_key, &result, 300).await;
+        }
+        Ok(result)
+    }
+
     pub async fn get_margin_data(&self, stock_code: &str) -> Result<Option<MarginData>, DataError> {
         // P4: 按 vendor 申报的 capability 决策
         // eastmoney 已申报 NativeDateParam,as-of 模式调 with_asof 可拿到当日数据
@@ -3835,6 +3943,7 @@ impl AStockClient {
             let mut unsupported = 0usize;
             let mut supported = 0usize;
             let mut all_confirmed_empty = true;
+            let mut failures: Vec<String> = Vec::new();
             for name in &self.routing.margin {
                 if let Some(vendor) = self.find_vendor(name) {
                     match vendor.asof_capability("get_margin_data") {
@@ -3849,11 +3958,8 @@ impl AStockClient {
                                 Ok(None) => continue,
                                 Err(e) => {
                                     all_confirmed_empty = false;
-                                    crate::as_of::record_degradation(
-                                        name,
-                                        "get_margin_data",
-                                        &format!("with_asof 失败: {e}"),
-                                    );
+                                    // 不在循环里逐源留痕（会刷屏），收进末尾那一条汇总
+                                    failures.push(format!("{name}={e}"));
                                     continue;
                                 },
                             }
@@ -3867,32 +3973,30 @@ impl AStockClient {
                     }
                 }
             }
-            // 三种「拿不到两融」的语义必须分开，否则提示会把「确实没有」与「本模块没通道」混为一谈
-            // （T14：三档也分别对应面板的三个严重度，不能都标红）
-            let (reason, kind) = if supported == 0 {
-                (
-                    format!(
+            // 三种「拿不到两融」的语义必须分开，否则提示会把「确实没有」与「本模块没通道」混为一谈：
+            // - 完全没有 as-of 通道 ⇒ StructuralGap（灰档，可解释）
+            // - 有通道且源全部报错 ⇒ Failure（红档，真故障）
+            // - 有通道、源明确回答「截止日没有这只票的两融数据」⇒ **与 live 的 Ok(None) 同义**，
+            //   不记降级。非两融标的 / 该日无披露都是可判定的业务事实，live 也不为它留痕；
+            //   回放若单独标一条，就会让同一只非两融标的在两种模式下读数不一致（2026-10-18）。
+            if supported == 0 {
+                crate::as_of::record_degradation_kind(
+                    "astock-data",
+                    "get_margin_data",
+                    &format!(
                         "as-of 模式 {stock_code} 两融无历史通道：{} 个源均未申报 as-of 能力，且无当日快照",
                         unsupported
                     ),
                     crate::as_of::DegradationKind::StructuralGap,
-                )
-            } else if all_confirmed_empty {
-                (
-                    format!(
-                        "as-of 模式 {stock_code} 无融资融券披露数据（非两融标的，或该日无披露）"
-                    ),
-                    crate::as_of::DegradationKind::NoData,
-                )
-            } else {
-                (
-                    format!(
-                        "as-of 模式 {stock_code} 两融取数失败：{supported} 个有 as-of 通道的源全部报错"
-                    ),
+                );
+            } else if !all_confirmed_empty {
+                crate::as_of::record_degradation_kind(
+                    "astock-data",
+                    "get_margin_data",
+                    &format!("as-of 模式 {stock_code} 两融取数失败：[{}]", failures.join("; ")),
                     crate::as_of::DegradationKind::Failure,
-                )
-            };
-            crate::as_of::record_degradation_kind("astock-data", "get_margin_data", &reason, kind);
+                );
+            }
             return Ok(None);
         }
         {
@@ -4377,13 +4481,16 @@ impl AStockClient {
                 self.cache_set_serialized(cache_key, &reports, 3600).await;
                 return Ok(reports);
             }
-            // T4：`Err` 不再吞成「没有研报」——原因逐源留在这一条汇总里
-            crate::as_of::record_degradation_kind(
-                "astock-data",
-                "get_research_reports",
-                &probe.reason(&format!("as-of {stock_code} 研报")),
-                probe.kind(),
-            );
+            // 「截止日前确实没有研报」与 live 的 Ok(空) 同义 ⇒ 不记降级；
+            // 只有源真报错才留 Failure（T4：Err 不得再被吞成「没有研报」）。
+            if !probe.failed.is_empty() {
+                crate::as_of::record_degradation_kind(
+                    "astock-data",
+                    "get_research_reports",
+                    &probe.reason(&format!("as-of {stock_code} 研报")),
+                    crate::as_of::DegradationKind::Failure,
+                );
+            }
             return Ok(vec![]);
         }
         let vendor_names: Vec<String> = self
@@ -4423,11 +4530,11 @@ impl AStockClient {
         stock_code: &str,
     ) -> Result<Option<ConsensusEPS>, DataError> {
         // P4: 按 vendor 申报的 capability 决策。
-        // ⚠ 原注释写「所有 vendor 均为 Fallthrough」已过时：eastmoney 自 P9-3 起申报
-        //   `NoHistoricalSemantic` 且弃用了「用最近财报 trailing EPS 充当一致预期」的代理。
+        // 2026-10-18 起 eastmoney 申报 `NativeDateParam`：官方聚合无日期列，但同一批研报
+        // 有 `publishDate` ⇒ 按截止日截窗做 PIT 聚合（见 get_consensus_eps_with_asof）。
         if crate::as_of::is_asof_active() {
-            // ① 个股级每日快照（`run_daily_snapshot_sweep` 当日采过则直接回放）。
-            // 与资金流/两融同形：快照是这类「当日值」在回放里的**唯一**历史通道。
+            // ① 每日快照是快路径（采集侧当天存过官方聚合就直接用）。
+            // 快照 miss 才走 ② eastmoney 的研报 PIT 聚合。
             let date = crate::as_of::current_date_or_now();
             if let Some(cached) =
                 self.try_stock_daily_snapshot("get_consensus_eps", stock_code, &date).await
@@ -4451,21 +4558,18 @@ impl AStockClient {
             if let Some(r) = hit {
                 return Ok(Some(r));
             }
-            // P9-3（2026-10-03）：删除「用最近一期财报 trailing EPS 充当一致预期」的代理分支。
-            // 它是「换个语义的真数字冒充预期」——用户裁定（P9）明确要求补真实数据源，
-            // 而不是用近似值顶替。真源（RPT_WEB_RESPREDICT）已接入且**只有当前值**
-            // ⇒ 回放拿不到就明确拿不到，由下面的降级承接。
-            // #20①（2026-10-05）：历史值通道已接（① 的个股快照 + 采集侧登记）——
-            // 因此这条降级的含义是「**该截止日**没采到」，随采集累积可解，不是机制缺失。
-            crate::as_of::record_degradation_kind(
-                "astock-data",
-                "get_consensus_eps",
-                &format!(
-                    "{}；基于当前年份的板块均值估算在回放中禁用，且截止日前财报无可用 EPS",
-                    probe.reason("as-of 一致预期 EPS")
-                ),
-                probe.kind(),
-            );
+            // P9-3 的「不用 trailing EPS 代理 / 不用板块常数估算」仍然成立；2026-10-18 起
+            // 官方聚合之外又接了**研报 PIT 聚合**（publishDate <= 截止日、每机构取最新一篇），
+            // 所以「该截止日没有可用预期」现在是与 live 的 Ok(None) 同义的空答案，
+            // 不再记降级。只有源真报错（接口失败/结构变化）才留 Failure。
+            if !probe.failed.is_empty() {
+                crate::as_of::record_degradation_kind(
+                    "astock-data",
+                    "get_consensus_eps",
+                    &probe.reason(&format!("as-of {stock_code} 一致预期 EPS")),
+                    crate::as_of::DegradationKind::Failure,
+                );
+            }
             return Ok(None);
         }
         let vendor_names: Vec<String> = self
@@ -4805,14 +4909,18 @@ impl AStockClient {
     }
 
     pub async fn get_hot_stocks(&self) -> Result<Vec<HotStock>, DataError> {
-        // P4: 按 vendor 申报的 capability 决策
-        // eastmoney/ths/iwencai 申报 NoHistoricalSemantic（当日榜单语义，见上面 #19 的②）
+        // as-of：快照 → 同花顺「热榜回溯」（history/v1/rank，按截止日取当日分段榜）。
+        // 白名单仍只放 NativeDateParam，**关掉 Fallthrough 后门**：热股榜是「那一天」的
+        // 产物，容忍当下值等于把截止日之后的信息塞进回放。
         if crate::as_of::is_asof_active() {
             // P5:先查每日快照缓存
             let as_of = crate::as_of::current_as_of();
-            if let Some(ref ctx) = as_of {
-                let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
-                if let Some(cached) = self.try_daily_snapshot("get_hot_stocks", &date).await {
+            let snap_date = as_of
+                .as_ref()
+                .map(|c| c.as_of_date.format("%Y-%m-%d").to_string())
+                .unwrap_or_default();
+            if !snap_date.is_empty() {
+                if let Some(cached) = self.try_daily_snapshot("get_hot_stocks", &snap_date).await {
                     if let Ok(r) = serde_json::from_str::<Vec<HotStock>>(&cached) {
                         if !r.is_empty() {
                             return Ok(r);
@@ -4824,22 +4932,10 @@ impl AStockClient {
                 .asof_probe(
                     "get_hot_stocks",
                     &self.routing.hot_stocks,
-                    // #19(2026-09-27)：白名单只放 NativeDateParam，**关掉 Fallthrough 后门**。
-                    // 两条理由叠在一起：
-                    //   ① 链上会被 Fallthrough 放行的两个源都已实测必失败 ——
-                    //      baidu_stock 的旧 opendata 全线 301 后回「参数错误」，新端点要
-                    //      Acs-Token 签名（缺则 403 hit risk）；neodata 无凭据（TOKEN_MISSING）。
-                    //      留着等于每次回放白打两次请求，再把面板撑成红档「取数失败」。
-                    //   ② 与 T15 同论证：热股榜是「那一天」的产物，容忍当下值
-                    //      等于把截止日之后的信息塞进回放。宁可可解释地返空。
                     &[AsOfCapability::NativeDateParam],
-                    |_, vendor, cap| {
+                    |_, vendor, _| {
                         Box::pin(async move {
-                            let items = if cap == AsOfCapability::NativeDateParam {
-                                vendor.get_hot_stocks_with_asof().await?
-                            } else {
-                                vendor.get_hot_stocks().await?
-                            };
+                            let items = vendor.get_hot_stocks_with_asof().await?;
                             if items.is_empty() {
                                 Ok(None)
                             } else {
@@ -4850,22 +4946,31 @@ impl AStockClient {
                 )
                 .await;
             if let Some(r) = hit {
+                // 回填当日快照：历史回溯通道让「没有快照的旧日期」也能自愈，
+                // 后续同截止日不再打接口（也让 0/20 那类归档缺口不再扩大）。
+                // snap_date 为空只发生在 `is_asof_active` 与 context 的 race 分支，
+                // 此时不写（空日期会造一条谁也读不到的孤儿行）。
+                if !snap_date.is_empty() {
+                    if let Ok(json) = serde_json::to_string(&r) {
+                        self.set_daily_snapshot("get_hot_stocks", &snap_date, &json).await;
+                    }
+                }
                 return Ok(r);
             }
-            let snap_date = as_of
-                .as_ref()
-                .map(|c| c.as_of_date.format("%Y-%m-%d").to_string())
-                .unwrap_or_default();
-            crate::as_of::record_degradation_kind(
-                "astock-data",
-                "get_hot_stocks",
-                &format!(
-                    "{}；本地快照兜底：{}",
-                    probe.reason("as-of 热门股榜单"),
-                    self.snapshot_absence_clause("get_hot_stocks", &snap_date).await
-                ),
-                probe.kind(),
-            );
+            // 通道明确回答「该日没有历史榜单」⇒ 与 live 的空列表同义，不记降级；
+            // 只有源真报错才留 Failure（并把快照兜底为什么没接住写清楚）。
+            if !probe.failed.is_empty() {
+                crate::as_of::record_degradation_kind(
+                    "astock-data",
+                    "get_hot_stocks",
+                    &format!(
+                        "{}；本地快照兜底：{}",
+                        probe.reason("as-of 热门股榜单"),
+                        self.snapshot_absence_clause("get_hot_stocks", &snap_date).await
+                    ),
+                    crate::as_of::DegradationKind::Failure,
+                );
+            }
             return Ok(vec![]);
         }
         // ── live 模式 ──
@@ -5396,21 +5501,42 @@ impl AStockClient {
     /// 「`data_gaps`：股东人数数据缺失」⇒ 命中失败标记词表 ⇒ 判「⚠️ 低置信」
     /// （300604 运行 `cd044375` 实证：自评 75.0 却被这一处标记压成低置信）。
     ///
-    /// ⚠ **无 as-of 通道**（能力申报 `NoHistoricalSemantic`）：回放时按**结构性缺口**留痕
-    /// 并返回 `None` —— 这与「北向净流入停披」同类（报表本身是「最新一期」快照），
-    /// 不是「工具坏了」。历史多期在 `RPT_F10_EH_HOLDERNUM`，接它属下一轮。
+    /// as-of 走历史多期表 `RPT_F10_EH_HOLDERNUM`（2026-10-18 接通）：
+    /// 按 `NOTICE_DATE <= 截止日` 取最近一期，与 live 的「最新一期」同义，只是把
+    /// 「最新」锚到回放时点。源明确回答「截止日前没披露」时与 live 一样返回 `None`，
+    /// 不记降级；只有真报错才留 Failure。
     pub async fn get_holder_count(
         &self,
         stock_code: &str,
     ) -> Result<Option<HolderCount>, DataError> {
         if crate::as_of::is_asof_active() {
-            crate::as_of::record_degradation_kind(
-                "astock-data",
-                "get_holder_count",
-                "股东户数取「最新一期」快照（RPT_HOLDERNUMLATEST），无 as-of 通道；\
-                 历史多期在 RPT_F10_EH_HOLDERNUM，接它属下一轮",
-                crate::as_of::DegradationKind::StructuralGap,
-            );
+            // 历史多期表 `RPT_F10_EH_HOLDERNUM`：按 NOTICE_DATE<=截止日取最近一期。
+            // 与 live 的「最新一期」同义，只是把「最新」锚到回放时点。
+            let names = self.routing.vendors_for("holder_count", &self.routing.shareholder_trades);
+            let (hit, probe) = self
+                .asof_probe(
+                    "get_holder_count",
+                    names,
+                    &[AsOfCapability::NativeDateParam],
+                    |_, vendor, _| {
+                        let code = stock_code.to_string();
+                        Box::pin(async move { vendor.get_holder_count_with_asof(&code).await })
+                    },
+                )
+                .await;
+            if let Some(v) = hit {
+                return Ok(Some(v));
+            }
+            // 源明确回答「截止日前一期都没披露」⇒ 与 live 的 Ok(None) 同义，不记降级；
+            // 只有真报错才留 Failure。
+            if !probe.failed.is_empty() {
+                crate::as_of::record_degradation_kind(
+                    "astock-data",
+                    "get_holder_count",
+                    &probe.reason(&format!("as-of {stock_code} 股东户数")),
+                    crate::as_of::DegradationKind::Failure,
+                );
+            }
             return Ok(None);
         }
         // 与质押/两融同域（datacenter-web）⇒ 复用 `shareholder_trades` 路由（dc 桶）
@@ -6576,15 +6702,19 @@ mod asof_truncate_tests {
     // 旧判据按 `report_date <= as_of` 截断，会让尚未披露的报告期进入回放 = 前视泄露。
 
     /// 半年报（法定截止 08-31）在 10-01 已可看；三季报（法定截止 10-31）当时还没公开 ⇒ 裁掉。
+    ///
+    /// 同时锁住：这是**正常前视裁剪**，不得记降级（2026-10-18 用户指出：
+    /// 旧实现把它记成 NoData「取数窗口到顶」，把正确行为刷进了降级面板）。
     #[tokio::test]
     async fn truncate_financials_drops_reports_not_yet_disclosed_at_asof() {
-        use crate::as_of::AS_OF;
+        use crate::as_of::{self, AS_OF};
         let q3 = fin("2026-09-30");
         // 先把「旧判据会留它」锁住：报告期确实不晚于截止日。
         assert!(q3.report_date.as_str() <= "2026-10-01");
         let ctx =
             AsOfContext::new(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(), AsOfSource::UserReplay)
                 .unwrap();
+        let wm = as_of::global_degradation_seq_watermark();
         let out = AS_OF
             .scope(Some(ctx), async {
                 AStockClient::truncate_financials_by_asof(vec![fin("2026-06-30"), q3])
@@ -6592,6 +6722,16 @@ mod asof_truncate_tests {
             .await;
         assert_eq!(out.len(), 1, "三季报在 10-01 尚未披露");
         assert_eq!(out[0].report_date, "2026-06-30");
+        let fresh = as_of::take_global_degradations_since(wm);
+        // 只按**本条被移除的 reason**断言：全局降级缓冲是进程级的，
+        // 并行跑的「非期末报告期」用例会同时写入另一条同 method 的 Failure，
+        // 按 method 断言会被它误伤（与判据本身无关）。
+        assert!(
+            !fresh.iter().any(|e| {
+                e.method == "truncate_financials_by_asof" && e.reason.contains("披露日未早于截止日")
+            }),
+            "正常的前视裁剪不是降级，不得进降级面板: {fresh:?}"
+        );
     }
 
     /// vendor 自证公告日时**不过度裁剪**：公告 09-28 ⇒ 10-01 可看，即使法定截止日还没到。
@@ -6636,10 +6776,12 @@ mod asof_truncate_tests {
         assert_eq!(out2.len(), 1, "截止日已过 ⇒ 推断可保留");
     }
 
-    /// 报告期不是四类期末 ⇒ 无法推断披露日 ⇒ 丢弃**且必须留痕**，
-    /// 否则下游会把「证明不了」读成「该股没有财报」。
+    /// 报告期不是四类期末 ⇒ 无法推断披露日 ⇒ 保守丢弃，但**不记降级**。
+    ///
+    /// 为什么不再是 Failure（2026-10-18 用户指出）：这是 as-of 的正常保守裁剪，
+    /// 不是源故障；若全部被裁光，外层 `get_financials` 已经会记维度级不可得。
     #[tokio::test]
-    async fn truncate_financials_drops_offcycle_period_and_records_degradation() {
+    async fn truncate_financials_drops_offcycle_period_without_degradation() {
         use crate::as_of::{self, AS_OF};
         let wm = as_of::global_degradation_seq_watermark();
         let r = fin("2026-08-15");
@@ -6652,11 +6794,10 @@ mod asof_truncate_tests {
         assert!(out.is_empty(), "非期末报告期证明不了已公开 ⇒ 丢弃");
         let fresh = as_of::take_global_degradations_since(wm);
         assert!(
-            fresh.iter().any(|e| {
-                e.method == "truncate_financials_by_asof"
-                    && e.kind == crate::as_of::DegradationKind::Failure
+            !fresh.iter().any(|e| {
+                e.method == "truncate_financials_by_asof" && e.reason.contains("报告期不是四类期末")
             }),
-            "丢弃必须记一条 Failure 级降级"
+            "保守裁剪不是源故障，不得进降级面板（全裁光时由 get_financials 记维度级不可得）: {fresh:?}"
         );
     }
 
@@ -6858,96 +6999,10 @@ mod asof_realtime_degrade_tests {
         assert!(!crate::as_of::is_asof_active());
     }
 
-    // ── 实时性方法 as-of 守卫回归测试 ───────────────────────────
-    // 这些方法在 replay 模式下没有"过去某日的实时"语义，必须整方法跳过
-    // 以免把 today 之后的数据塞入 backtest 视图。
-
-    #[tokio::test]
-    #[serial(asof)]
-    async fn get_hot_stocks_returns_empty_in_asof_scope() {
-        use crate::as_of::{peek_global_degradation_report, AS_OF};
-        crate::as_of::reset_global_degradation_log();
-        let client = AStockClient::new();
-        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
-        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
-        let r = AS_OF.scope(Some(ctx), async { client.get_hot_stocks().await }).await;
-        assert!(r.is_ok());
-        assert!(r.unwrap().is_empty(), "replay 模式必须返回空列表");
-        // #19：该维度在回放里是「结构性不适用」，不是红档故障 —— 且链上没有任何源被真正
-        // 探测（关掉 Fallthrough 后门后，不会再为必 403 的源白打请求）。
-        let hits: Vec<_> = peek_global_degradation_report()
-            .into_iter()
-            .filter(|e| e.method == "get_hot_stocks")
-            .collect();
-        assert_eq!(hits.len(), 1, "只一条: {hits:?}");
-        assert_eq!(
-            hits[0].kind,
-            crate::as_of::DegradationKind::StructuralGap,
-            "当日榜单语义 ⇒ 灰档，不该占红档: {:?}",
-            hits[0]
-        );
-        assert!(
-            hits[0].reason.contains("均未申报 as-of 能力"),
-            "文案要说清是「没有日期通道」: {:?}",
-            hits[0].reason
-        );
-        // H4(2026-09-27)：同一句话里两种「拿不到」必须分开表述。本用例的 client 没装
-        // 快照缓存 ⇒ 快照侧只能说「未启用」；旧文案统一写「当日快照亦未命中」，等于对着
-        // 一个结构性缺口让用户去找"采集开关"。
-        assert!(
-            hits[0].reason.contains("本地每日快照未启用"),
-            "要同时交代快照兜底为什么没接住: {:?}",
-            hits[0].reason
-        );
-        assert!(
-            !hits[0].reason.contains("当日快照亦未命中"),
-            "反面形态：不得把「无通道」与「快照没采到」挤进同一个括号: {:?}",
-            hits[0].reason
-        );
-    }
-
-    /// H4：装好了快照归档、但该截止日没有条目 ⇒ 文案必须是「可回填/可累积」那一档，
-    /// 与上一条（归档未启用、以及无历史通道）**逐字不同**。
-    ///
-    /// 这条区分对用户是有后果的：热股榜只有当日通道，历史日期不可回补，只能自今日起累积；
-    /// 而「未启用」是装配缺失，改配置即可。两者混说，用户要么白等，要么去找不存在的数据源。
-    #[tokio::test]
-    #[serial(asof)]
-    async fn hot_stocks_asof_reason_distinguishes_missing_snapshot_from_no_channel() {
-        use crate::as_of::{peek_global_degradation_report, AS_OF};
-        crate::as_of::reset_global_degradation_log();
-        // 归档走内存替身（#20② 起端口是 `DailySnapshotStore`，替身见
-        // `daily_snapshot::test_store`）⇒ 本用例只读不写，零临时文件、零 flush 任务。
-        let client = AStockClient::new().with_daily_snapshot_store(Arc::new(
-            daily_snapshot::test_store::MemorySnapshotStore::new(),
-        ));
-        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
-        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
-        let r = AS_OF.scope(Some(ctx), async { client.get_hot_stocks().await }).await;
-        assert!(r.unwrap().is_empty(), "快照 miss + 无通道 ⇒ 仍须返回空列表");
-
-        let hits: Vec<_> = peek_global_degradation_report()
-            .into_iter()
-            .filter(|e| e.method == "get_hot_stocks")
-            .collect();
-        assert_eq!(hits.len(), 1, "只一条: {hits:?}");
-        assert!(
-            hits[0].reason.contains("该截止日无本地快照"),
-            "缓存已启用，就该说「那天的快照没采到」: {:?}",
-            hits[0].reason
-        );
-        assert!(
-            !hits[0].reason.contains("未启用"),
-            "不得把「未启用」扣在一个已经装好缓存的 client 上: {:?}",
-            hits[0].reason
-        );
-        // 通道侧仍要说清是结构性无通道（与快照缺席并列，各占一段）
-        assert!(
-            hits[0].reason.contains("均未申报 as-of 能力"),
-            "通道缺席与快照缺席必须各写一段: {:?}",
-            hits[0].reason
-        );
-    }
+    // 热股榜的 as-of 守卫判据已迁到 `asof_channel_alignment_tests`：
+    // 2026-10-18 起该维度有真日期通道（同花顺 `history/v1/rank`），
+    // 「回放必须返回空列表 + StructuralGap」的前提已被推翻；旧写法还会用真实 vendor
+    // 在单测里打网络（flaky 之源），故一并删除。
 
     // `get_industry_ranking` 的 as-of 守卫判据已迁到
     // `asof_boundary_tests::industry_ranking_in_asof_never_falls_back_to_today_list`
@@ -7366,6 +7421,29 @@ mod asof_snapshot_first_tests {
         // ── 负控：窗口聚合是按 method 的，别的 method 不得串数 ──
         let clause_other = client.snapshot_absence_clause("get_cls_flash", anchor).await;
         assert!(clause_other.contains("整段断供"), "未写过的方法仍是 0 天: {clause_other}");
+    }
+
+    /// 新档（2026-10-18，002696 as_of=2026-09-28 现场）：该日**之前** 20 个交易日
+    /// 0 天，但该日**之后**已有快照（热股最早 09-30）⇒ 必须说「本地归档开始得晚」，
+    /// 不得说「采集侧整段断供」—— 后者会让人去查一个健康的定时任务。
+    ///
+    /// 夹具刻意用 2020 年的日期而不是现场的 2026-09-28：本函数取「today」做向前查询，
+    /// 若把锚点写死成 2026-09 而机器时钟早于 09-30，这条用例会随日期漂移。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn snapshot_absence_clause_distinguishes_archive_start_after_anchor() {
+        let anchor = "2020-01-02";
+        let client = AStockClient::new().with_daily_snapshot_store(Arc::new(
+            daily_snapshot::test_store::MemorySnapshotStore::new(),
+        ));
+        for d in ["2020-01-03", "2020-01-06"] {
+            client.set_daily_snapshot("get_hot_stocks", d, "[{\"stockCode\":\"000592\"}]").await;
+        }
+        let clause = client.snapshot_absence_clause("get_hot_stocks", anchor).await;
+        assert!(clause.contains("该截止日无本地快照"), "仍要说清该日缺: {clause}");
+        assert!(clause.contains("开始积累"), "应指出归档起点晚于截止日: {clause}");
+        assert!(!clause.contains("整段断供"), "不得把归档起点晚说成采集断供: {clause}");
+        assert!(!clause.contains("0/20"), "不要再报误导性的 0/N: {clause}");
     }
 
     /// 负控（2026-10-08）：**聚合查询失败 ⇒ 不许说成「采集侧整段断供」**。
@@ -7902,7 +7980,10 @@ mod asof_boundary_tests {
         crate::as_of::reset_global_degradation_log();
         let client = stub_client();
 
-        // ① 未命中快照 ⇒ 空 + 留痕（替身返回的"当下"值绝不能漏出来）
+        // ① 未命中快照 ⇒ 空（替身返回的"当下"值绝不能漏出来）。
+        //    - 舆情：替身未申报 as-of 通道 ⇒ 与 live 一样静默返空，不记降级
+        //      （2026-10-18 起生产侧 guba 有真通道；无通道时也不再拿「回放不适用」刷面板）；
+        //    - 质押：仍按旧口径留 StructuralGap（本轮未改它的降级语义）。
         let s_empty = AS_OF
             .scope(Some(cutoff_ctx()), async { client.get_social_sentiment("600519").await })
             .await
@@ -7914,9 +7995,14 @@ mod asof_boundary_tests {
             .expect("降级应返回 Ok(None)");
         assert!(p_empty.is_none(), "无快照时质押必须为空，不得取当下比例");
         let report = peek_global_degradation_report();
-        for m in ["get_social_sentiment", "get_pledge_data"] {
-            assert!(report.iter().any(|e| e.method == m), "{m} 应留降级痕迹: {report:?}");
-        }
+        assert!(
+            report.iter().any(|e| e.method == "get_pledge_data"),
+            "质押应留降级痕迹: {report:?}"
+        );
+        assert!(
+            !report.iter().any(|e| e.method == "get_social_sentiment"),
+            "舆情明确无数据 / 无通道时不得记降级（与 live 静默一致）: {report:?}"
+        );
 
         // ② 命中个股级快照 ⇒ 回放快照值（归档是 `DailySnapshotStore` 的替身，与 L2 无耦合）
         let snap_client = stub_client().with_daily_snapshot_store(Arc::new(
@@ -8630,5 +8716,352 @@ mod l2_readthrough_tests {
             "旧缺陷形态（硬编码 now + 3600）会在这一条红：实测剩余 {}s",
             l1_expires_at - now
         );
+    }
+}
+
+#[cfg(test)]
+mod asof_channel_alignment_tests {
+    use super::*;
+    use crate::as_of::{
+        peek_global_degradation_report, AsOfContext, AsOfSource, DegradationKind, AS_OF,
+    };
+    use chrono::NaiveDate;
+    use serial_test::serial;
+
+    /// 六条通道的替身行为：Data = 有真实数据；Empty = 源明确回答「没有」；
+    /// Fail = 源报错（真故障）。
+    #[derive(Clone, Copy, PartialEq)]
+    enum Reply {
+        Data,
+        Empty,
+        Fail,
+    }
+
+    struct ChannelStub {
+        reply: Reply,
+    }
+
+    fn err() -> DataError {
+        DataError::VendorError { vendor: "channel_stub".into(), message: "接口 502".into() }
+    }
+
+    fn sample_reports() -> Vec<ResearchReport> {
+        vec![ResearchReport {
+            title: "点评".into(),
+            institution: "民生证券".into(),
+            analyst: Some("张三".into()),
+            rating: Some("增持".into()),
+            target_price: Some(12.0),
+            eps_forecast: vec![EpsForecast { year: "今年".into(), eps: Some(1.2) }],
+            publish_date: "2026-08-01".into(),
+            pdf_url: None,
+        }]
+    }
+
+    fn sample_margin() -> MarginData {
+        MarginData {
+            stock_code: "002696".into(),
+            date: "2026-09-28".into(),
+            margin_buy: 1.0,
+            margin_balance: 2.0,
+            short_sell_volume: 3.0,
+            short_balance: 4.0,
+        }
+    }
+
+    fn sample_holder() -> HolderCount {
+        HolderCount {
+            stock_code: "002696".into(),
+            end_date: "2026-06-30".into(),
+            holder_num: Some(13685.0),
+            holder_num_ratio: Some(-8.3819),
+            avg_hold_num: Some(25265.1978),
+            notice_date: Some("2026-08-28".into()),
+        }
+    }
+
+    fn sample_consensus() -> ConsensusEPS {
+        ConsensusEPS {
+            stock_code: "002696".into(),
+            consensus_eps: Some(0.52),
+            consensus_target_price: Some(5.2),
+            rating_avg: None,
+            rating_count: Some(3),
+            year: "2026".into(),
+            is_estimated: false,
+            estimate_source: None,
+        }
+    }
+
+    fn sample_social() -> Vec<SocialSentiment> {
+        vec![SocialSentiment {
+            stock_code: "002696".into(),
+            stock_name: "百洋股份".into(),
+            platform: "guba".into(),
+            post_count: 12,
+            hot_rank: None,
+            sentiment_score: Some(0.1),
+            bull_ratio: Some(0.55),
+            // 必须是截止日而不是 now：下游据此判断是不是历史值
+            fetched_at: 1791647999,
+        }]
+    }
+
+    fn sample_hot() -> Vec<HotStock> {
+        vec![HotStock {
+            stock_code: "000592".into(),
+            stock_name: "平潭发展".into(),
+            // 历史回溯榜不提供涨跌幅 ⇒ None，不得写 0.0
+            change_pct: None,
+            turnover_rate: None,
+            reason_tags: vec![],
+            sector: None,
+            rank: Some(1),
+            hot_value: Some(718264.8),
+        }]
+    }
+
+    #[async_trait::async_trait]
+    impl StockVendor for ChannelStub {
+        async fn get_quote(&self, _: &str) -> Result<StockQuote, DataError> {
+            Err(DataError::NotFound("channel_stub".into()))
+        }
+        async fn get_klines(
+            &self,
+            _: &str,
+            _: &str,
+            _: u32,
+            _: Option<AdjType>,
+        ) -> Result<Vec<KLine>, DataError> {
+            Ok(vec![])
+        }
+        async fn get_financials(&self, _: &str) -> Result<Vec<FinancialReport>, DataError> {
+            Ok(vec![])
+        }
+        async fn get_news(&self, _: &str, _: u32) -> Result<Vec<NewsItem>, DataError> {
+            Ok(vec![])
+        }
+        async fn get_money_flow(&self, _: &str) -> Result<Option<MoneyFlow>, DataError> {
+            Ok(None)
+        }
+        async fn get_dragon_tiger(&self, _: &str) -> Result<Vec<DragonTigerEntry>, DataError> {
+            Ok(vec![])
+        }
+        async fn get_lockup_schedule(&self, _: &str) -> Result<Vec<LockupSchedule>, DataError> {
+            Ok(vec![])
+        }
+        async fn search_stock(&self, _: &str) -> Result<Vec<StockSearchResult>, DataError> {
+            Ok(vec![])
+        }
+
+        async fn get_research_reports_with_asof(
+            &self,
+            _: &str,
+        ) -> Result<Vec<ResearchReport>, DataError> {
+            match self.reply {
+                Reply::Data => Ok(sample_reports()),
+                Reply::Empty => Ok(vec![]),
+                Reply::Fail => Err(err()),
+            }
+        }
+
+        async fn get_margin_data_with_asof(
+            &self,
+            _: &str,
+        ) -> Result<Option<MarginData>, DataError> {
+            match self.reply {
+                Reply::Data => Ok(Some(sample_margin())),
+                Reply::Empty => Ok(None),
+                Reply::Fail => Err(err()),
+            }
+        }
+
+        async fn get_holder_count_with_asof(
+            &self,
+            _: &str,
+        ) -> Result<Option<HolderCount>, DataError> {
+            match self.reply {
+                Reply::Data => Ok(Some(sample_holder())),
+                Reply::Empty => Ok(None),
+                Reply::Fail => Err(err()),
+            }
+        }
+
+        async fn get_consensus_eps_with_asof(
+            &self,
+            _: &str,
+        ) -> Result<Option<ConsensusEPS>, DataError> {
+            match self.reply {
+                Reply::Data => Ok(Some(sample_consensus())),
+                Reply::Empty => Ok(None),
+                Reply::Fail => Err(err()),
+            }
+        }
+
+        async fn get_social_sentiment_with_asof(
+            &self,
+            _: &str,
+        ) -> Result<Vec<SocialSentiment>, DataError> {
+            match self.reply {
+                Reply::Data => Ok(sample_social()),
+                Reply::Empty => Ok(vec![]),
+                Reply::Fail => Err(err()),
+            }
+        }
+
+        async fn get_hot_stocks_with_asof(&self) -> Result<Vec<HotStock>, DataError> {
+            match self.reply {
+                Reply::Data => Ok(sample_hot()),
+                Reply::Empty => Ok(vec![]),
+                Reply::Fail => Err(err()),
+            }
+        }
+
+        fn asof_capability(&self, method: &str) -> AsOfCapability {
+            match method {
+                "get_research_reports"
+                | "get_margin_data"
+                | "get_holder_count"
+                | "get_consensus_eps"
+                | "get_social_sentiment"
+                | "get_hot_stocks" => AsOfCapability::NativeDateParam,
+                _ => AsOfCapability::Fallthrough,
+            }
+        }
+    }
+
+    const CHANNELS: [&str; 6] = [
+        "get_research_reports",
+        "get_margin_data",
+        "get_holder_count",
+        "get_consensus_eps",
+        "get_social_sentiment",
+        "get_hot_stocks",
+    ];
+
+    fn client_with_stub(reply: Reply) -> AStockClient {
+        let mut client = AStockClient::new().with_daily_snapshot_store(Arc::new(
+            daily_snapshot::test_store::MemorySnapshotStore::new(),
+        ));
+        client.register_vendor("channel_stub", Box::new(ChannelStub { reply }));
+        client.routing.research_reports = vec!["channel_stub".into()];
+        client.routing.margin = vec!["channel_stub".into()];
+        client.routing.shareholder_trades = vec!["channel_stub".into()];
+        client.routing.consensus_eps = vec!["channel_stub".into()];
+        client.routing.social_sentiment = vec!["channel_stub".into()];
+        client.routing.hot_stocks = vec!["channel_stub".into()];
+        client.set_enabled_vendors(Some(HashSet::from(["channel_stub".to_string()])));
+        client
+    }
+
+    fn replay(date: &str) -> AsOfContext {
+        let d = NaiveDate::parse_from_str(date, "%Y-%m-%d").unwrap();
+        AsOfContext::new(d, AsOfSource::UserReplay).unwrap()
+    }
+
+    /// 用户要求「as-of 与 live 一致而不是存在降级」：六条通道都能取到数时，
+    /// 一条降级都不许留；热股/舆情还要把结果回填成当日快照。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn all_six_channels_hit_without_degradations() {
+        crate::as_of::reset_global_degradation_log();
+        let client = client_with_stub(Reply::Data);
+        let (reports, margin, holder, consensus, social, hot) = AS_OF
+            .scope(Some(replay("2026-09-28")), async {
+                (
+                    client.get_research_reports("002696").await,
+                    client.get_margin_data("002696").await,
+                    client.get_holder_count("002696").await,
+                    client.get_consensus_eps("002696").await,
+                    client.get_social_sentiment("002696").await,
+                    client.get_hot_stocks().await,
+                )
+            })
+            .await;
+        assert_eq!(reports.unwrap().len(), 1);
+        assert!(margin.unwrap().is_some());
+        assert!(holder.unwrap().is_some());
+        assert!(consensus.unwrap().is_some());
+        assert_eq!(social.unwrap().len(), 1);
+        assert_eq!(hot.unwrap().len(), 1);
+
+        let entries = peek_global_degradation_report();
+        for m in CHANNELS {
+            assert!(!entries.iter().any(|e| e.method == m), "{m} 命中通道却留了降级: {entries:?}");
+        }
+        assert!(
+            client.try_daily_snapshot("get_hot_stocks", "2026-09-28").await.is_some(),
+            "热股历史通道命中后必须回填当日快照"
+        );
+        assert!(
+            client
+                .try_stock_daily_snapshot("get_social_sentiment", "002696", "2026-09-28")
+                .await
+                .is_some(),
+            "舆情重建结果必须回填个股快照"
+        );
+    }
+
+    /// 反向契约：源明确回答「截止日没有数据」时，与 live 的 Ok(None)/空列表同义，
+    /// 六条通道都不得写降级（这正是用户看到的「取数窗口到顶 / 回放不适用」噪音来源）。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn explicit_empty_matches_live_and_stays_silent() {
+        crate::as_of::reset_global_degradation_log();
+        let client = client_with_stub(Reply::Empty);
+        let (reports, margin, holder, consensus, social, hot) = AS_OF
+            .scope(Some(replay("2026-09-28")), async {
+                (
+                    client.get_research_reports("002696").await,
+                    client.get_margin_data("002696").await,
+                    client.get_holder_count("002696").await,
+                    client.get_consensus_eps("002696").await,
+                    client.get_social_sentiment("002696").await,
+                    client.get_hot_stocks().await,
+                )
+            })
+            .await;
+        assert!(reports.unwrap().is_empty());
+        assert!(margin.unwrap().is_none());
+        assert!(holder.unwrap().is_none());
+        assert!(consensus.unwrap().is_none());
+        assert!(social.unwrap().is_empty());
+        assert!(hot.unwrap().is_empty());
+
+        let entries = peek_global_degradation_report();
+        for m in CHANNELS {
+            assert!(
+                !entries.iter().any(|e| e.method == m),
+                "{m} 明确无数据不得记降级（live 同样静默）: {entries:?}"
+            );
+        }
+    }
+
+    /// 真故障不能被「不记降级」顺手洗白：源报错时六条通道都要留 Failure。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn source_failures_still_report_failure() {
+        crate::as_of::reset_global_degradation_log();
+        let client = client_with_stub(Reply::Fail);
+        let _ = AS_OF
+            .scope(Some(replay("2026-09-28")), async {
+                (
+                    client.get_research_reports("002696").await,
+                    client.get_margin_data("002696").await,
+                    client.get_holder_count("002696").await,
+                    client.get_consensus_eps("002696").await,
+                    client.get_social_sentiment("002696").await,
+                    client.get_hot_stocks().await,
+                )
+            })
+            .await;
+
+        let entries = peek_global_degradation_report();
+        for m in CHANNELS {
+            assert!(
+                entries.iter().any(|e| e.method == m && e.kind == DegradationKind::Failure),
+                "{m} 源报错必须留红档: {entries:?}"
+            );
+        }
     }
 }

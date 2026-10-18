@@ -88,6 +88,12 @@ pub struct LlmCallConfig {
     pub node_id: Option<String>,
     /// 工作流 ID（用于审计记录）
     pub workflow_id: Option<String>,
+    /// 每次**真实** API 请求前的节流毫秒数（模型级配置，`ModelParamOverrides::request_delay_ms`）。
+    ///
+    /// 本字段是这条节流在全仓的**唯一消费点**（见 `apply_request_delay`）：调用方只负责将面板值
+    /// 带到这里，不得在自己那一层再 sleep —— 两处各睡一次等于双倍延时，而「谁在节流」又会变成
+    /// 两个地方各写一半。缓存命中不 sleep（那趟根本没有 API 请求，限流无从谈起）。
+    pub request_delay_ms: Option<u64>,
 }
 
 impl Default for LlmCallConfig {
@@ -108,7 +114,18 @@ impl Default for LlmCallConfig {
             cache_ttl_secs: 300,
             node_id: None,
             workflow_id: None,
+            request_delay_ms: None,
         }
+    }
+}
+
+/// 请求节流：模型级 `request_delay_ms` 的**唯一**落点。
+///
+/// 只在两个中心化入口（[`execute_llm`] / [`execute_llm_stream`]）**确认要打真实请求之后**调用，
+/// 因此缓存命中的那一路不会被拖慢。`None` / `Some(0)` 都直通。
+async fn apply_request_delay(config: &LlmCallConfig) {
+    if let Some(delay_ms) = config.request_delay_ms.filter(|ms| *ms > 0) {
+        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
     }
 }
 
@@ -160,6 +177,9 @@ pub async fn execute_llm(
             cached: true,
         });
     }
+
+    // ── 请求节流（模型级 `request_delay_ms`，唯一消费点）──
+    apply_request_delay(config).await;
 
     // ── 实际调用（带可选的重试策略包装） ──
     let response = if let Some(ref policy) = config.retry_policy {
@@ -334,6 +354,9 @@ pub async fn execute_llm_stream(
         ];
         return Ok(Box::pin(stream::iter(chunks)));
     }
+
+    // ── 请求节流（模型级 `request_delay_ms`，唯一消费点；上面缓存命中已 return，不受影响）──
+    apply_request_delay(config).await;
 
     let inner = Box::pin(
         // BE-I1 修复：流式 LLM 调用失败返回携带错误码的结构化错误
@@ -887,6 +910,47 @@ fn sha256(input: &str) -> String {
     let mut hasher = sha2::Sha256::new();
     hasher.update(input.as_bytes());
     hex::encode(hasher.finalize())
+}
+
+#[cfg(test)]
+mod request_delay_tests {
+    use super::{LlmCallConfig, apply_request_delay};
+    use std::time::Instant;
+
+    const MARK: u64 = 40;
+
+    /// 正控：面板那格（`ModelParamOverrides::request_delay_ms`）的值在统一入口**真的睡**了。
+    /// 反向锁 —— 把 `apply_request_delay` 改成空函数 ⇒ 本条红（节流接线又变回「声明未接线」）。
+    #[tokio::test]
+    async fn configured_delay_is_applied_at_the_single_chokepoint() {
+        let cfg = LlmCallConfig { request_delay_ms: Some(MARK), ..Default::default() };
+        let start = Instant::now();
+        apply_request_delay(&cfg).await;
+        assert!(
+            start.elapsed().as_millis() >= MARK as u128,
+            "配了 {MARK}ms 却没睡够（实测 {}ms）⇒ 工作流/聊天两条路径都会照旧打爆限流",
+            start.elapsed().as_millis()
+        );
+    }
+
+    /// 负控：`None`（没配）与 `Some(0)` 都**不得**睡。
+    /// 反向锁 —— 把判据写成「无条件 sleep」或把 `Some(0)` 当「要睡」⇒ 本条红。
+    /// 这一条同时钉住「改前语义」：没配延时的模型不能因为这次接线被平白拖慢。
+    #[tokio::test]
+    async fn absent_or_zero_delay_does_not_sleep() {
+        for (label, cfg) in [
+            ("未配置", LlmCallConfig::default()),
+            ("配成 0", LlmCallConfig { request_delay_ms: Some(0), ..Default::default() }),
+        ] {
+            let start = Instant::now();
+            apply_request_delay(&cfg).await;
+            assert!(
+                start.elapsed().as_millis() < MARK as u128,
+                "{label} 时不该 sleep（实测 {}ms）",
+                start.elapsed().as_millis()
+            );
+        }
+    }
 }
 
 #[cfg(test)]

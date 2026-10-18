@@ -350,7 +350,7 @@ pub(crate) async fn seed_serenity_fast_workflow_template(
 
     // 候选首选：`categories_var` 从候选池动态读 labels（空/读取失败时回落静态兜底项）。
     // labels 不带序号 —— LlmClassifierExecutor 会自己加 "N. " 前缀
-    // （llm_classifier_executor.rs:76-81），脚本再带序号会出现双重编号。
+    // （llm_classifier_executor.rs:80），脚本再带序号会出现双重编号。
     nodes.push(classifier_node(
         "j-candidate-pick",
         "候选首选",

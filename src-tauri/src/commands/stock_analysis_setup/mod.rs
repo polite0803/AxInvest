@@ -1814,8 +1814,12 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                     必须按三问逐条回答并与权威归因层对照；若为「常规到期反思」占位句则忽略，\n\
                     按常规单档复盘即可，禁止编造漏检事件。\n\n\
                     ——失败模式受控词表（P2-b）——\n\
-                    本次误判属于哪一类，只能从下列值里选（可多选；都不是时输出 [\"other\"]）：\n\
+                    本次误判属于哪一类，只能从下列值里选（可多选；都不是时须给新问题命名）：\n\
                     {{failure_mode_catalog}}\n\n\
+                    ——落地层级（决定这条反思能不能靠调参修）——\n\
+                    implementation_tier 只能取下列值之一；判不出落在哪一层就输出 null，\n\
+                    不要因为「大概是要调参」而蒙 L1 —— 参数校准会据此决定这条要不要进网格：\n\
+                    {{reflection_tier_catalog}}\n\n\
                     可用工具：\n\
                     - get_stock_kline: 获取实际操作期间的K线数据，对比预测走势与实际价格运动\n\n\
                     使用工具的原则：\n\
@@ -1895,6 +1899,8 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                     // P2-b 失败模式受控词表：单一权威源 failure_mode::FailureMode::catalog_for_prompt，
                     // 由 run_reflection_workflow 无条件注入；漏映射则 {{failure_mode_catalog}} VARIABLE_NOT_FOUND ⇒ 反思链 Failed。
                     ("failure_mode_catalog".to_string(), "failure_mode_catalog".to_string()),
+                    // 阶段 3 / 决-3：落地层级清单同上（权威 = analysis_engine::reflection_tier）
+                    ("reflection_tier_catalog".to_string(), "reflection_tier_catalog".to_string()),
                 ]
                 .into_iter()
                 .collect(),
@@ -2076,6 +2082,15 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
             description: Some("失败模式受控词表（权威源 analysis_engine::failure_mode）".into()),
             is_secret: false,
         },
+        // 阶段 3 / 决-3：落地层级清单（权威源 analysis_engine::reflection_tier）。
+        // 与 failure_mode_catalog 同形：模板不抄值，增删一个层级只改 Rust 一处。
+        Variable {
+            name: "reflection_tier_catalog".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(String::new()),
+            description: Some("反思落地层级清单（L1 参数 / L2 公式 / L3 提示词）".into()),
+            is_secret: false,
+        },
     ];
 
     // serenity-reflection 模板版本。
@@ -2108,7 +2123,16 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     //   ② 词表单一权威源 = analysis_engine::failure_mode::FailureMode::catalog_for_prompt（模板不抄值）；
     //   ③ 反思收尾按白名单过滤后盖章 stock_reflections.failure_modes，非法 token 进看板 rejectedTokens。
     //
-    const REFLECTION_TEMPLATE_VERSION: i32 = 5;
+    // v6 (2026-10-19)：反思落地层级轴接通（PLAN-mover-coverage 阶段 3 / 决-3）——
+    //   ① 内联 prompt 与 reflection.md 双处新增 {{reflection_tier_catalog}}，清单由
+    //      analysis_engine::reflection_tier::ReflectionTier 渲染（模板不抄值，同 failure_mode 口径）；
+    //   ② 失败模式那行撤掉「都不是时输出 other」的免答通道，改为「须给新问题命名」，词表同时
+    //      扩四类（题材没进证据面 / 逆势强度没参与 / 门形态拦住正确方向 / 没进候选宇宙）——
+    //      扩表前现网 32 条有标注反思里 23 条单独就是 other，兜底值已成了主值；
+    //   ③ 收尾把 implementation_tier 过白名单后落 stock_reflections.implementation_tier 列
+    //      （非法值与缺席都落 NULL，不替模型兜底成 L1），code_diff_proposal 同步落列；
+    //   ④ 消费侧：WFO 参数校准与定时进化聚合按 may_enter_param_grid 把 L2/L3 挡在网格外。
+    const REFLECTION_TEMPLATE_VERSION: i32 = 6;
 
     // 版本检查：已有同版本或更新的记录则跳过
     if let Some(ref existing) =
@@ -3219,6 +3243,87 @@ mod version_gate_tests {
         );
     }
 
+    /// 判据本体（**纯函数**，为的是让负控能拆在同一道守卫上）：
+    /// 返回 `(零消费者聚合器 id, 其中 continue_on_fail 仍为 false 的 id)`。
+    fn aggregator_tolerance_split(nodes: &[serde_json::Value]) -> (Vec<String>, Vec<String>) {
+        let mut orphans: Vec<String> = Vec::new();
+        let mut strict: Vec<String> = Vec::new();
+        for n in nodes {
+            if n.get("type").and_then(|v| v.as_str()) != Some("aggregator") {
+                continue;
+            }
+            let id = n.get("id").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+            let out_var = n
+                .get("config")
+                .and_then(|c| c.get("output_var"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            // 别的节点有没有引用它（id 或输出变量名，任一形态都算消费者）。
+            let consumed = nodes.iter().any(|other| {
+                if other.get("id").and_then(|v| v.as_str()) == Some(id.as_str()) {
+                    return false;
+                }
+                let text = other.to_string();
+                text.contains(&id) || (!out_var.is_empty() && text.contains(&out_var))
+            });
+            if consumed {
+                continue;
+            }
+            orphans.push(id.clone());
+            let tolerant = n.get("continueOnFail").and_then(|v| v.as_bool()).unwrap_or(false);
+            if !tolerant {
+                strict.push(id);
+            }
+        }
+        (orphans, strict)
+    }
+
+    /// v164：**没有任何节点消费的聚合器，不得硬阻断下游**（整图枚举，不是逐点记忆）。
+    ///
+    /// 这一族的失效面已经付过两次账：`raw-data`（v163，舆情失败掐死 301302 的终审）与
+    /// `agg-risk`（v164，任一风险视角失败掐死同一处）。两处的共同点不是「哪个节点坏了」，
+    /// 而是**聚合器的输出无人读、它的 `continue_on_fail` 却决定整条下游能不能开工** ——
+    /// 也就是说，这格填 `false` 只换来连坐，换不来任何数据正确性。
+    ///
+    /// 判据按现场读：某聚合器是「无人消费」= 除它自己以外，**没有任何节点的 JSON 文本**
+    /// 提到它的 id 或 `output_var`（按全文查，键名 snake/camel 之争不影响结论）。
+    /// 前提样本：现场必须真有 ≥2 个这种聚合器，否则本测试会在空集上恒真。
+    #[tokio::test]
+    async fn zero_consumer_aggregators_are_tolerant() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed(db).await.expect("种子化应成功");
+        let nodes = nodes_of(db).await;
+
+        let (orphans, strict) = aggregator_tolerance_split(&nodes);
+        assert!(
+            orphans.len() >= 2,
+            "前置：主图应至少有 `raw-data` / `agg-risk` 两个零消费者聚合器，实测 {orphans:?}"
+        );
+        assert!(
+            strict.is_empty(),
+            "零消费者聚合器填 `continue_on_fail: false` = 单点取数/评估失败连坐整条终审，\
+             而它的数组没人读 ⇒ 这格没有任何反面代价可换。待修 {strict:?}（全集 {orphans:?}）"
+        );
+
+        // 负控拆在同一道守卫上：把其中一个的容错位改回 `false`，**同一个纯函数**必须
+        // 只报出它。不做这一步的话，本断言可能在「聚合器根本没被识别」的空集上长绿。
+        let mut mutated = nodes.to_vec();
+        let target = mutated
+            .iter_mut()
+            .find(|n| n.get("id").and_then(|v| v.as_str()) == Some("agg-risk"))
+            .expect("前提：主图应有 `agg-risk` 节点");
+        target["continueOnFail"] = serde_json::Value::Bool(false);
+        let (m_orphans, m_strict) = aggregator_tolerance_split(&mutated);
+        assert_eq!(m_orphans, orphans, "只改容错位不得改变聚合器集合（否则被报出来的不是这一格）");
+        assert_eq!(
+            m_strict,
+            vec!["agg-risk".to_string()],
+            "摘掉零消费者聚合器的容错位，必须被同一个函数点名"
+        );
+    }
+
     /// v144：**种子落库的主图必须无环**（引擎 `create_workflow` 的第三条校验，前两条已各有一道门）。
     ///
     /// 为什么单独一条：`dag_store`/`WorkEngine::create_workflow_inner` 的校验顺序是
@@ -3757,7 +3862,7 @@ mod horizon_tier_fanout_tests {
             assert_eq!(
                 ids,
                 vec![
-                    "const-scoring-period".to_string(),
+                    "const-scoring-horizon".to_string(),
                     period.scoring_node_id().to_string(),
                     format!("cls-risk-level-{}", period.as_str().replace('_', "-")),
                     format!("pm-h-{}", period.as_str().replace('_', "-")),
@@ -3917,21 +4022,21 @@ mod horizon_tier_fanout_tests {
         let (mut nodes, _) = horizon_tier_template_nodes(Period::Mid);
         let provided: std::collections::BTreeSet<String> =
             external_reads(&nodes, &mut std::collections::BTreeSet::new());
-        // 前提：未改动前本档全绿（`scoring_period` 由模板内的常量节点自产）。
+        // 前提：未改动前本档全绿（`scoring_horizon` 由模板内的常量节点自产）。
         assert!(tool_arg_problems("stock-horizon-mid", &nodes, &provided).is_empty());
         let mut patched = false;
         for node in &mut nodes {
             if let WorkflowNode::Tool(t) = node {
                 // 写成一个「看起来像变量名、但本图没人产出、父也没传」的串
-                t.config.input_mapping.insert("period".into(), "monthlyx".into());
+                t.config.input_mapping.insert("horizon".into(), "midx".into());
                 patched = true;
             }
         }
         assert!(patched, "档模板里没有 ToolNode ⇒ 本负控失去前提");
         let problems = tool_arg_problems("stock-horizon-mid", &nodes, &provided);
         assert!(
-            problems.iter().any(|p| p.contains("monthlyx")),
-            "把 period 指向不存在的变量后仍不报 ⇒ 死参数判据没电：{problems:?}"
+            problems.iter().any(|p| p.contains("midx")),
+            "把 horizon 指向不存在的变量后仍不报 ⇒ 死参数判据没电：{problems:?}"
         );
     }
 

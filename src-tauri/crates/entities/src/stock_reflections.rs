@@ -128,6 +128,19 @@ pub struct Model {
     /// 反思判定；两条链的计数域不同，面板不得并列成可比数字。
     /// NULL = 模板未产出该字段（结构性缺口，面板必须显式报「未标注」，不得折算进 other）。
     pub failure_modes: Option<String>,
+    /// 反思结论要落在哪一层（阶段 3 / 决-3）：`"L1"` / `"L2"` / `"L3"`。
+    ///
+    /// 值域权威 = `analysis_engine::reflection_tier::ReflectionTier`，由写侧过白名单后落库 ——
+    /// **非法值不落列**（不在库里保留脏拼写，也不替模型兜底成 L1）。
+    ///
+    /// NULL 的含义是「本次反思没判层级」，两种成因都会落 NULL：模板未产出该字段、
+    /// 以及本列引入前的存量行（现网实测 79/80 条属后者）。**读侧不得把 NULL 当成 L1**：
+    /// 那正是本列要消除的伪造（面板旧实现写死缺省 `"L1"`，等于把「没判」报成「判成参数层」）。
+    /// 与 `miss_layer`（漏检链机械盖章）、`failure_modes`（错成什么样）是三套计数域。
+    pub implementation_tier: Option<String>,
+    /// 结构层（L2/L3）提案的目标与最小改动描述（模板早就要求，此前只活在 `decision_json`
+    /// 文本里、无法计数也无法核对）。NULL = 未产出。
+    pub code_diff_proposal: Option<String>,
     pub status: String,
     pub created_at: i64,
     pub updated_at: i64,

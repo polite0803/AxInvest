@@ -44,6 +44,22 @@ pub trait StockVendor: Send + Sync {
         Ok(None)
     }
 
+    /// 融资余额序列（最近 `days` 条，日期倒序）—— P1 影子腿数据源
+    /// （`PLAN-capital-long-evidence.md` E3）。
+    ///
+    /// 默认空实现：影子腿对缺席静默容忍（非两融标的/源未实现都归为「缺席」，
+    /// 不区分「真没有」与「没能力」——那是主证据才需要的三态语义）。
+    /// 已知实现：eastmoney（`RPTA_WEB_RZRQ_GGMX` 报表 pageSize=days，
+    /// as-of 按 `current_as_of` 自动追加 `DATE<=` 范围过滤）。
+    async fn get_margin_balance_trend(
+        &self,
+        stock_code: &str,
+        days: u32,
+    ) -> Result<Vec<MarginData>, DataError> {
+        let _ = (stock_code, days);
+        Ok(vec![])
+    }
+
     /// 获取北向资金持仓
     async fn get_north_bound_holding(
         &self,
@@ -99,6 +115,20 @@ pub trait StockVendor: Send + Sync {
         Ok(vec![])
     }
 
+    /// 舆情的 as-of 通道。默认**显式失败**而不是转调 live ——
+    /// 舆情 live 取的是「此刻的帖子列表」，回退过去等于把截止日之后的情绪塞进回放。
+    /// 只有申报 `NativeDateParam` 的源（目前 guba：按发布日翻页重建）才会被路由层调用。
+    async fn get_social_sentiment_with_asof(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<SocialSentiment>, DataError> {
+        let _ = stock_code;
+        Err(DataError::VendorError {
+            vendor: "all".into(),
+            message: "该数据源未实现 as-of 舆情（按截止日前帖子重建）".into(),
+        })
+    }
+
     async fn get_research_reports(
         &self,
         stock_code: &str,
@@ -144,11 +174,24 @@ pub trait StockVendor: Send + Sync {
 
     /// 获取股东户数（筹码集中度）。新增(2026-10-01)：默认 `None`，由 eastmoney 覆盖。
     ///
-    /// 无 as-of 通道（申报 `NoHistoricalSemantic`）：`RPT_HOLDERNUMLATEST` 只有「最新一期」，
-    /// 历史多期在另一张报表（`RPT_F10_EH_HOLDERNUM`）；接它属下一轮，本轮先让 live 不再恒缺。
+    /// live 走 `RPT_HOLDERNUMLATEST`（最新一期）；as-of 走
+    /// `get_holder_count_with_asof`（历史多期表 `RPT_F10_EH_HOLDERNUM`）。
     async fn get_holder_count(&self, stock_code: &str) -> Result<Option<HolderCount>, DataError> {
         let _ = stock_code;
         Ok(None)
+    }
+
+    /// 股东户数的 as-of 通道（`RPT_F10_EH_HOLDERNUM`）。默认显式失败：
+    /// `RPT_HOLDERNUMLATEST` 只有「最新一期」，转调它就是把当下户数塞进历史回放。
+    async fn get_holder_count_with_asof(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<HolderCount>, DataError> {
+        let _ = stock_code;
+        Err(DataError::VendorError {
+            vendor: "all".into(),
+            message: "该数据源未实现 as-of 股东户数（历史多期表）".into(),
+        })
     }
 
     async fn get_concept_blocks(

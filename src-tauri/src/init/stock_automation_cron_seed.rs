@@ -156,7 +156,7 @@ fn build_builtin_jobs() -> Result<Vec<CronJob>, String> {
         &rerun_config.to_json()?,
         "把中断（进程退出导致未产出结论）的历史分析按其原分析日原地补跑，直到产出决策",
     )
-    .with_task_type(crate::commands::stock_analysis_rerun::STOCK_ANALYSIS_RERUN_TASK_TYPE);
+    .with_task_type(crate::commands::constants::STOCK_ANALYSIS_RERUN_TASK_TYPE);
     rerun.id = STOCK_ANALYSIS_RERUN_JOB_ID.to_string();
     jobs.push(rerun);
 

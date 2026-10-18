@@ -336,8 +336,13 @@ pub struct ConsensusEPS {
 pub struct HotStock {
     pub stock_code: String,
     pub stock_name: String,
-    /// 涨跌幅 %（热股榜的 `rise_and_fall` **实测已是百分比原值**，勿再乘 100）
-    pub change_pct: f64,
+    /// 涨跌幅 %（热股榜的 `rise_and_fall` **实测已是百分比原值**，勿再乘 100）。
+    ///
+    /// 同日历史回溯榜（`history/v1/rank`）只给名次/热度值、**没有涨跌幅字段** ⇒
+    /// 回放路径为 `None`。不用 0.0 顶替：「涨跌 0%」与「该接口不提供」在数值上不可区分，
+    /// 下游会把后者读成前者（与本仓 `data_gaps` 同一条红线）。
+    #[serde(default)]
+    pub change_pct: Option<f64>,
     /// 换手率 % —— 热股榜不提供，恒 `None`（真值在 `LimitUpPoolEntry` 那边）
     pub turnover_rate: Option<f64>,
     /// 题材标签（热股榜 `tag.concept_tag`）

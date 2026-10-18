@@ -25,6 +25,15 @@
 //!
 //! 计划类型固定 `parameter`（权重/阈值/horizon_prior 类调参）；模板结构（节点/边）
 //! 变异属高风险动作，**未来开放时必须只在业务类样本上进行**（见 `is_data_reachability_blocked`）。
+//!
+//! ## 2026-10-19 阶段 3 / 决-3：结构层根因不塞进参数计划
+//!
+//! 反思的 `implementation_tier`（权威 = `analysis_engine::reflection_tier`）判为 **L2/L3**
+//! 的那些行，其根因是「门形状 / 腿集合 / 提示词判据」，不是某个标量取值。本聚合器把它们
+//! **从驱动样本里分出**、id 落 `trigger_sample_json.structuralReflectionIds` 进审批抽屉待裁区，
+//! 而不是留在 `reflections` 里 —— 让它们驱动参数计划会造成两种坏：① 网格朝一个与根因无关的
+//! 数字收敛；② 审批人以为接受计划就等于处置了本窗口的全部反思。
+//! 层级未标注（NULL，含本列引入前的存量）按既有行为继续参与，见 `may_enter_param_grid`。
 
 use axagent_analysis_engine::StockReflectionReport;
 use axagent_analysis_engine::evolution_drift::load_performance_window;
@@ -103,6 +112,9 @@ struct TriggerSampleSnapshot {
     mover_run_ids: Vec<String>,
     /// 数据可达性失败样本（只进数据质量看板，不驱动进化）
     data_blocked: DataBlockedSamples,
+    /// 结构层根因样本（阶段 3 / 决-3）：反思判为 L2/L3 ⇒ 不驱动参数进化，
+    /// 落本字段进审批抽屉的待裁区，等人处置而不是被网格折算。
+    structural_reflection_ids: Vec<String>,
     counts: SnapshotCounts,
 }
 
@@ -225,12 +237,32 @@ pub async fn run_evolution_proposal_inner(
 
     let mut reflection_ids = Vec::new();
     let mut blocked_reflection_ids = Vec::new();
+    let mut structural_reflection_ids = Vec::new();
     for r in &reflection_rows {
         if reflection_data_blocked(r) {
             blocked_reflection_ids.push(r.id.clone());
+        } else if !axagent_analysis_engine::reflection_tier::may_enter_param_grid(
+            axagent_analysis_engine::reflection_tier::parse_reflection_tier(
+                r.implementation_tier.as_deref(),
+            ),
+        ) {
+            // 阶段 3 / 决-3：结构层根因（L2 改公式 / L3 改提示词）**不驱动参数进化计划**。
+            // 本聚合器产出的计划类型固定 `parameter`，而审批接受会真的执行
+            // `execute_pending_plan` 并要求 `parameter_result` ⇒ 把结构层塞进来等于
+            // 用调参去修一个不是参数的问题（更坏的是它必然在执行期被打成 rejected）。
+            // NULL（未判层级 / 本列引入前的存量）按既有行为继续参与，理由见
+            // `reflection_tier::may_enter_param_grid`。
+            structural_reflection_ids.push(r.id.clone());
         } else {
             reflection_ids.push(r.id.clone());
         }
+    }
+    if !structural_reflection_ids.is_empty() {
+        tracing::info!(
+            "[evolution-proposal] {} 条反思判为结构层（L2/L3），已从参数进化样本中分出：{:?}",
+            structural_reflection_ids.len(),
+            structural_reflection_ids
+        );
     }
 
     let validation_rows = decision_validations::list_validated_since_date(db, &since_date)
@@ -278,14 +310,26 @@ pub async fn run_evolution_proposal_inner(
 
     // 2. 无业务样本 ⇒ skip（数据失败再多也不产进化计划）
     if counts.total() == 0 {
-        let message = if counts.data_blocked > 0 {
+        let message = if structural_reflection_ids.is_empty() {
+            if counts.data_blocked > 0 {
+                format!(
+                    "窗口内 {} 条样本全部为数据可达性失败（行情缺失/判据不可用/候选池降级），\
+                     只入数据质量看板，不触发进化，跳过",
+                    counts.data_blocked
+                )
+            } else {
+                "窗口内无新增反思/验证/漏检样本，跳过".to_string()
+            }
+        } else {
+            // 结构层单独成句：说「无新增反思」是假的（有新反思，只是被判在 L2/L3），
+            // 而「有反思却不产计划」如果没有这一句，读起来就像闭环坏了。
             format!(
-                "窗口内 {} 条样本全部为数据可达性失败（行情缺失/判据不可用/候选池降级），\
-                 只入数据质量看板，不触发进化，跳过",
+                "窗口内 {} 条反思判为结构层（L2 改公式 / L3 改提示词），不驱动参数进化，\
+                 需在待裁清单处置；数据可达性失败 {} 条（只入数据质量看板）⇒ 无可驱动\
+                 参数进化的业务样本，跳过",
+                structural_reflection_ids.len(),
                 counts.data_blocked
             )
-        } else {
-            "窗口内无新增反思/验证/漏检样本，跳过".to_string()
         };
         return Ok(ProposalSummary { skipped: true, plan_id: None, counts, message });
     }
@@ -330,12 +374,22 @@ pub async fn run_evolution_proposal_inner(
     // 4. 产出计划（仅构造，不执行变异）。固定参数类：结构变异的开放闸口见模块头硬规则。
     let reason = format!(
         "定时聚合（窗口 {}h）：到期反思 {} 条、决策验证 {} 条、妖股漏检 {} 起\
-         （数据可达性失败 {} 条已隔离，不驱动进化）",
+         （数据可达性失败 {} 条已隔离，不驱动进化）{}",
         config.window_hours_or_default(),
         counts.reflections,
         counts.validations,
         counts.mover_misses,
-        counts.data_blocked
+        counts.data_blocked,
+        // 审批人要能看出「本轮计划只覆盖参数层，另有 N 条结构层根因没人管」，
+        // 否则他会以为接受它就等于把这一窗口的反思都处置了。
+        if structural_reflection_ids.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "；另有 {} 条反思判为结构层（L2/L3），不在本计划的参数动作范围内",
+                structural_reflection_ids.len()
+            )
+        }
     );
     let report = StockReflectionReport {
         execution_id: format!("proposal-{}", uuid::Uuid::new_v4()),
@@ -362,6 +416,7 @@ pub async fn run_evolution_proposal_inner(
             validation_ids: blocked_validation_ids,
             mover_run_ids: blocked_mover_run_ids,
         },
+        structural_reflection_ids,
         counts: SnapshotCounts {
             reflections: counts.reflections,
             validations: counts.validations,
@@ -436,6 +491,9 @@ mod tests {
             source: "due".to_string(),
             miss_layer: None,
             failure_modes: None,
+            // 阶段 3：反思产出的层级轴（测试夹具 = 未标注，读侧不得当成 L1）
+            implementation_tier: None,
+            code_diff_proposal: None,
             status: "completed".to_string(),
             created_at: 0,
             updated_at: 0,

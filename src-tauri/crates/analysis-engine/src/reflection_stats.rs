@@ -273,6 +273,108 @@ pub struct HitrateGroup {
     pub holding_days: Option<i64>,
 }
 
+/// 阶段 3 / 决-3：反思落地层级看板 —— **结构层待裁清单的数据源**。
+///
+/// 为什么必须有一个活的落点：L2/L3 被 WFO 与定时聚合挡在参数网格之外之后，如果只「排除」
+/// 而不「落到某处」，这些反思行就消失了 —— 排除没有出口等于把根因藏得更深。
+/// 本看板住在 `HitrateStats`（面板每次打开都读，是**活路径**），而不是
+/// `stock_evolution_history.trigger_sample_json`：现网实测 89 行进化计划里该列
+/// **0 行非空、且无一行 `pending_approval`**（2026-10-19 取数）⇒ 那条通道当前没有产出，
+/// 把待裁项只写在那里就是惰性接线。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TierBoard {
+    /// 参与统计的 completed 反思行全集
+    pub total_rows: usize,
+    /// L1（改参数）——唯一可进参数网格的层级
+    pub l1: usize,
+    /// L2（改 .rhai 公式 / 算法约束）
+    pub l2: usize,
+    /// L3（改 .md 提示词）
+    pub l3: usize,
+    /// NULL = 本次反思**没判**层级（含本列引入前的存量行）。
+    /// 不得折算进 `l1` —— 那正是本轴引入前要消除的那类伪造。
+    pub unlabelled: usize,
+    /// 结构层明细（按更新时间倒序，上限 [`STRUCTURAL_ROWS_CAP`] 条）
+    pub structural_rows: Vec<StructuralReflectionRow>,
+}
+
+/// 结构层待裁项的一行明细。文本字段在装配处按字符截断（IPC 不带整段快照）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StructuralReflectionRow {
+    pub reflection_id: String,
+    pub stock_code: String,
+    pub stock_name: String,
+    /// 该反思复盘的档（NULL = 未记录）
+    pub horizon: Option<String>,
+    /// `"L2"` / `"L3"`
+    pub tier: String,
+    /// 建议动的文件/段落描述（反思的 `code_diff_proposal`）
+    pub proposal: Option<String>,
+    /// 错因原文（截断）
+    pub what_went_wrong: Option<String>,
+    pub updated_at: i64,
+}
+
+/// 明细上限：待裁清单是给人逐条看的，超过这个数就该先看计数而不是往下滚。
+const STRUCTURAL_ROWS_CAP: usize = 30;
+
+/// 按字符数截断（中文一字符＝一个字，不按字节切，避免把一个汉字切成半个）。
+fn clip_chars(src: &str, max_chars: usize) -> String {
+    let mut out: String = src.chars().take(max_chars).collect();
+    if src.chars().count() > max_chars {
+        out.push('…');
+    }
+    out
+}
+
+/// 从 completed 反思行装配层级看板（纯函数，入参已筛过状态）。
+pub fn build_tier_board(rows: &[&axagent_entities::stock_reflections::Model]) -> TierBoard {
+    use crate::reflection_tier::parse_reflection_tier;
+    let mut b = TierBoard { total_rows: rows.len(), ..Default::default() };
+    for r in rows {
+        match parse_reflection_tier(r.implementation_tier.as_deref()) {
+            Some(crate::reflection_tier::ReflectionTier::L1) => b.l1 += 1,
+            Some(t) => {
+                // L2/L3 ⇒ 既计数也进明细（这就是「待裁」的那一摞）
+                if t == crate::reflection_tier::ReflectionTier::L2 {
+                    b.l2 += 1;
+                } else {
+                    b.l3 += 1;
+                }
+                b.structural_rows.push(StructuralReflectionRow {
+                    reflection_id: r.id.clone(),
+                    stock_code: r.stock_code.clone(),
+                    stock_name: r.stock_name.clone(),
+                    horizon: r.horizon.clone(),
+                    tier: t.as_str().to_string(),
+                    proposal: r
+                        .code_diff_proposal
+                        .as_deref()
+                        .map(|s| clip_chars(s, STRUCTURAL_PROPOSAL_CHARS)),
+                    what_went_wrong: r
+                        .what_went_wrong
+                        .as_deref()
+                        .map(|s| clip_chars(s, STRUCTURAL_WRONG_CHARS)),
+                    updated_at: r.updated_at,
+                });
+            },
+            None => b.unlabelled += 1,
+        }
+    }
+    // 最近的先处理；同刻按 id 稳定排序（否则同一批数据两次打开顺序不同）
+    b.structural_rows.sort_by(|a, c| {
+        c.updated_at.cmp(&a.updated_at).then_with(|| a.reflection_id.cmp(&c.reflection_id))
+    });
+    b.structural_rows.truncate(STRUCTURAL_ROWS_CAP);
+    b
+}
+
+/// 明细文本截断长度：一屏能读完，又能看出建议到底指向哪个文件。
+const STRUCTURAL_PROPOSAL_CHARS: usize = 240;
+const STRUCTURAL_WRONG_CHARS: usize = 160;
+
 /// 命中率聚合结果（DTO；前端按 camelCase 消费，见 src/types/stock-analysis.ts）
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -280,6 +382,10 @@ pub struct HitrateStats {
     /// P2-b 失败模式看板（按 completed 反思行的 `failure_modes` 列聚合）。
     /// 计数域与 `miss_layer`（漏检链机械归因）不同，面板不得并列成可比数字。
     pub failure_modes: crate::failure_mode::FailureModeBoard,
+    /// 阶段 3 / 决-3：落地层级看板（结构层待裁清单）。
+    /// 与 `failure_modes`（错成什么样）、`miss_layer`（漏在哪一层）是三套计数域，
+    /// 面板不得把三者并排成可比数字。
+    pub tiers: TierBoard,
     /// B4：逐档**结局 2×2**（公式判对否 × LLM 判对否，同窗口、同判定函数）。
     /// 四档恒各一行 —— 没样本的档是 `judged == 0`，**不是**「没有这一档」。
     /// 计数域与 `by_horizon`（只统计公式侧）不同，两者不得并成同一个分母读。
@@ -576,6 +682,7 @@ pub fn compute_reflection_stats(samples: &[DecisionPerformanceSample]) -> Hitrat
         excluded_pre_floor_generation: 0,
         unknown_generation_samples: 0,
         failure_modes: Default::default(),
+        tiers: Default::default(),
         // 2×2 与代际三项同理：由取数侧按**筛完代的样本**填（`build_hitrate_stats`），纯函数不筛。
         horizon_confusion: Vec::new(),
     }
@@ -801,6 +908,11 @@ pub async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<HitrateStats
         .map(|r| r.failure_modes.clone())
         .collect();
     let failure_modes = crate::failure_mode::build_failure_mode_board(&fm_rows);
+    // 阶段 3：层级看板复用同一批 completed 行（零额外 IO，与上面同一判据：
+    // pending/failed 行还没判定，计入会把「未产出」虚报成「未标注」）。
+    let completed_ref_rows: Vec<&stock_reflections::Model> =
+        ref_rows.iter().filter(|r| r.status.starts_with("completed")).collect();
+    let tiers = build_tier_board(&completed_ref_rows);
     let ana_rows = stock_analyses::Entity::find()
         .all(db)
         .await
@@ -907,6 +1019,8 @@ pub async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<HitrateStats
     stats.unknown_generation_samples = unknown;
     // P2-b：失败模式看板（同一次读库的 completed 反思行聚合，不额外查询）。
     stats.failure_modes = failure_modes;
+    // 阶段 3：层级看板随行装配（面板的结构层待裁清单读它）
+    stats.tiers = tiers;
     // B4：逐档 2×2 用**同一批筛完代的样本**（`kept`）——分母必须与上面的命中率同源，
     // 否则「命中率按代、2×2 跨代」就成了同一张面板上两种口径。
     stats.horizon_confusion = build_horizon_confusion(&kept);
@@ -1596,6 +1710,25 @@ mod reflection_stats_tests {
             excluded_pre_floor_generation: 4,
             unknown_generation_samples: 7,
             failure_modes: Default::default(),
+            // 阶段 3：层级看板同样进 IPC ⇒ 齐备态给生产形态（四类计数都有值、明细非空），
+            // 只数键名不给值的话「行字段改名」这类断裂照样查不出来。
+            tiers: TierBoard {
+                total_rows: 12,
+                l1: 4,
+                l2: 3,
+                l3: 1,
+                unlabelled: 4,
+                structural_rows: vec![StructuralReflectionRow {
+                    reflection_id: "r-1".into(),
+                    stock_code: "002696".into(),
+                    stock_name: "百洋股份".into(),
+                    horizon: Some("ultra_short".into()),
+                    tier: "L2".into(),
+                    proposal: Some("portfolio-mgr-h-ultra-short.rhai 进门门加相对强度分支".into()),
+                    what_went_wrong: Some("近 5 日未涨停 ⇒ 进门门否掉，方向本身没判错".into()),
+                    updated_at: 1_760_000_000_000,
+                }],
+            },
             // B4：齐备态值给**生产形态**（四格都有数、均值有值）—— 只在断言里数键、
             // 值给 Default 的话，「格子字段改了名/漏了」这类断裂照样查不出来。
             horizon_confusion: vec![HorizonConfusionRow {
@@ -1632,8 +1765,30 @@ mod reflection_stats_tests {
             "failureModes",
             // B4：逐档结局 2×2 同批出 IPC（与命中率同源分母，面板零新增 invoke）。
             "horizonConfusion",
+            // 阶段 3：层级看板（结构层待裁清单）同批出 IPC，面板同样零新增 invoke。
+            "tiers",
         ] {
             assert!(top.contains_key(key), "HitrateStats 顶层缺 camelCase 键 {key}：{top:?}");
+        }
+        // 阶段 3：层级看板四类计数 + 明细行键逐条锁 —— `unlabelled` 必须是**独立一格**，
+        // 被折进 `l1` 就是本轴引入前要消除的那类伪造（现网 79/80 条属此形态）。
+        let tb = value["tiers"].as_object().unwrap();
+        for key in ["totalRows", "l1", "l2", "l3", "unlabelled", "structuralRows"] {
+            assert!(tb.contains_key(key), "TierBoard 缺 camelCase 键 {key}：{tb:?}");
+        }
+        assert_eq!(tb["unlabelled"].as_u64(), Some(4), "未标注条数必须单独报出，不得折进 L1");
+        let sr = value["tiers"]["structuralRows"][0].as_object().unwrap();
+        for key in [
+            "reflectionId",
+            "stockCode",
+            "stockName",
+            "horizon",
+            "tier",
+            "proposal",
+            "whatWentWrong",
+            "updatedAt",
+        ] {
+            assert!(sr.contains_key(key), "StructuralReflectionRow 缺键 {key}：{sr:?}");
         }
         // B4：2×2 的行级键同样逐条锁（少一个字段前端就是 undefined，格子会静默显示 0）
         let cell = value["horizonConfusion"][0].as_object().unwrap();
@@ -1970,6 +2125,8 @@ mod reflection_stats_tests {
 #[cfg(test)]
 mod hitrate_join_tests {
     use super::match_sp_rows_to_reflections;
+    // 阶段 3：层级看板的装配面（本 mod 按符号逐个 use，不加 `super::*`）
+    use super::{build_tier_board, STRUCTURAL_PROPOSAL_CHARS, STRUCTURAL_ROWS_CAP};
     use axagent_entities::{stock_reflections, strategy_performance};
 
     fn sp_row(
@@ -2020,6 +2177,69 @@ mod hitrate_join_tests {
             "updatedAt": built_at,
         }))
         .expect("stock_reflections 夹具必须能反序列化")
+    }
+
+    /// 阶段 3：层级看板装配 —— 四类计数互不折算、明细按新→旧、脏值按缺席处理。
+    #[test]
+    fn tier_board_counts_four_states_without_folding_absence_into_l1() {
+        let mk = |id: &str, tier: Option<&str>, proposal: Option<&str>, at: i64| {
+            let mut r = reflection_row(id, "002696", at, Some("ultra_short"));
+            r.implementation_tier = tier.map(str::to_string);
+            r.code_diff_proposal = proposal.map(str::to_string);
+            r
+        };
+        let rows = [
+            mk("r-l1", Some("L1"), None, 3_000),
+            mk("r-l2", Some("L2"), Some("改 .rhai 进门门"), 5_000),
+            mk("r-l3", Some("L3"), Some("改 reflection.md"), 4_000),
+            mk("r-none", None, None, 1_000),
+            // 脏值（模型自造 L9）在读侧同样走白名单 ⇒ 与缺席同桶，不得蒙进任何一层
+            mk("r-junk", Some("L9"), None, 2_000),
+        ];
+        let refs: Vec<&stock_reflections::Model> = rows.iter().collect();
+        let b = build_tier_board(&refs);
+        assert_eq!(b.total_rows, 5);
+        assert_eq!((b.l1, b.l2, b.l3), (1, 1, 1));
+        // 缺席(NULL) 与脏值(L9) 各算一条 ⇒ 2，不是 3（5 行里 3 行有层级）
+        assert_eq!(b.unlabelled, 2, "缺席与脏值都算未标注，不得折进 L1: {b:?}");
+        assert_eq!(
+            b.l1 + b.l2 + b.l3 + b.unlabelled,
+            b.total_rows,
+            "四格之和必须等于全集，有行被漏计: {b:?}"
+        );
+        assert_eq!(b.structural_rows.len(), 2, "只有 L2/L3 进待裁明细");
+        assert_eq!(b.structural_rows[0].reflection_id, "r-l2", "明细按更新时间倒序");
+        assert_eq!(b.structural_rows[0].tier, "L2");
+    }
+
+    /// 截断按**字符**（按字节会把一个汉字切成两半），且明细有上限而计数没有。
+    #[test]
+    fn tier_board_clips_by_chars_and_caps_rows() {
+        let long: String = "测".repeat(400);
+        let mut r = reflection_row("r-long", "002696", 9_000, Some("mid"));
+        r.implementation_tier = Some("L2".into());
+        r.code_diff_proposal = Some(long);
+        let b = build_tier_board(&[&r]);
+        let p = b.structural_rows[0].proposal.clone().expect("L2 行必须带提案");
+        assert!(p.starts_with("测测") && p.ends_with('…'), "截断须以省略号收尾: {p}");
+        assert_eq!(
+            p.chars().count(),
+            STRUCTURAL_PROPOSAL_CHARS + 1,
+            "截断后应恰为上限字符数 + 省略号，实得 {}",
+            p.chars().count()
+        );
+
+        let many: Vec<stock_reflections::Model> = (0..(STRUCTURAL_ROWS_CAP + 5))
+            .map(|i| {
+                let mut r = reflection_row(&format!("r-{i}"), "000001", i as i64, Some("mid"));
+                r.implementation_tier = Some("L3".into());
+                r
+            })
+            .collect();
+        let refs: Vec<&stock_reflections::Model> = many.iter().collect();
+        let b2 = build_tier_board(&refs);
+        assert_eq!(b2.l3, STRUCTURAL_ROWS_CAP + 5, "计数不受明细上限影响");
+        assert_eq!(b2.structural_rows.len(), STRUCTURAL_ROWS_CAP);
     }
 
     #[test]

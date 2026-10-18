@@ -405,13 +405,6 @@ fn spawn_stream_task(
                     break;
                 }
 
-                // Apply request delay to avoid rate limits (per-model configuration)
-                if let Some(delay_ms) = request_delay_ms {
-                    if delay_ms > 0 && iteration > 0 {
-                        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
-                    }
-                }
-
                 let request = ChatRequest {
                     model: model_id.clone(),
                     messages: chat_messages.clone(),
@@ -435,8 +428,12 @@ fn spawn_stream_task(
                     response_format: None,
                 };
 
+                // 节流值送到统一入口（sleep 在 `execute_llm_stream` 里做，本层不再睡）。
+                // 口径随之变成「**每次**请求前」，含首轮 —— 与设置页那句
+                // 「每次调用 API 前等待的毫秒数」一致；旧写法只在 `iteration > 0` 睡，首轮漏节流。
                 let llm_config = axagent_runtime_core::LlmCallConfig {
                     session_id: Some(conversation_id.clone()),
+                    request_delay_ms,
                     ..Default::default()
                 };
                 let mut stream = match axagent_runtime_core::execute_llm_stream(

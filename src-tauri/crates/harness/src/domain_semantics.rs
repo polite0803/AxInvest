@@ -394,7 +394,7 @@ pub const CONCEPTS: &[ConceptDecl] = &[
         min: 0.0,
         max: 100.0,
         meaning: "荐股筛选的最小置信阈值（对比对象是 0–100 的 RecommenderPick.confidence）",
-        evidence: "src-tauri/crates/analysis-engine/src/recommender/mod.rs:346 | src-tauri/crates/analysis-engine/src/recommender/mod.rs:280",
+        evidence: "src-tauri/crates/analysis-engine/src/recommender/mod.rs:291 | src-tauri/crates/analysis-engine/src/recommender/mod.rs:355",
     },
     ConceptDecl {
         id: "axinvest.opc.min_confidence",

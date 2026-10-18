@@ -461,8 +461,7 @@ fn build_streaming_api_client(
         .with_max_tokens(effective_max_tokens)
         .with_thinking_budget(thinking_budget)
         .with_use_max_completion_tokens(use_max_completion_tokens)
-        .with_thinking_param_style(thinking_param_style)
-        .with_request_delay_ms(request_delay_ms);
+        .with_thinking_param_style(thinking_param_style);
 
     // 2.5 语义缓存拦截器（可选）：注入后主聊天路径经 execute_llm_stream 走中心化入口，
     // 相同请求命中缓存即合成流短路，省去真实 LLM 调用。缓存开关关闭时 llm_cache 为 None，
@@ -474,6 +473,11 @@ fn build_streaming_api_client(
             ..Default::default()
         });
     }
+
+    // ⚠ 模型级「请求延时」必须挂在 2.5 **之后**：缓存分支是**整份替换** `llm_config`
+    //   （`..Default::default()`），写在它前面会被静默抹掉 ⇒ 症状是「开了语义缓存就不节流」，
+    //   不报错也不掉日志。节流本身由 `execute_llm_stream` 单点执行，本行只负责把值送到那里。
+    client = client.with_request_delay_ms(request_delay_ms);
 
     // 3. streaming 事件回调（4 类事件 + 兜底）
     client.with_on_event(Box::new(move |event: &AssistantEvent| match event {

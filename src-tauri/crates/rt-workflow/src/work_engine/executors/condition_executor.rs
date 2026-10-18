@@ -7,6 +7,7 @@
 //!   2. LLM 动态路由：调用 LLM 根据上下文判断走 true/false 分支
 
 use async_trait::async_trait;
+use axagent_harness::types::provider_model::request_delay_ms_for_model;
 use axagent_harness::workflow_types::{CompareOperator, LogicalOperator, WorkflowNode};
 use std::sync::Arc;
 
@@ -319,7 +320,10 @@ impl ConditionExecutor {
             response_format: None,
         };
 
-        let llm_config = axagent_harness::LlmCallConfig::default();
+        let llm_config = axagent_harness::LlmCallConfig {
+            request_delay_ms: request_delay_ms_for_model(prov, model),
+            ..Default::default()
+        };
         let response = axagent_harness::execute_llm(&**adapter, &req_ctx, request, &llm_config)
             .await
             .map_err(|e| format!("LLM 调用失败: {e}"))?;

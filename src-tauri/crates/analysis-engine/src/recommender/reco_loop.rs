@@ -23,10 +23,14 @@
 
 use std::collections::HashMap;
 
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ColumnTrait, DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
+    QuerySelect, Set,
+};
 use serde::Serialize;
 
 use axagent_entities::decision_validations;
+use axagent_entities::stock_analyses;
 use axagent_entities::workflow_template;
 use axagent_harness::workflow_types::Variable;
 
@@ -188,6 +192,70 @@ impl RecoLoopSample {
             algorithm_version: self.reco_version,
         }
     }
+}
+
+/// ── 证据分桶校准（2026-10-18，v4 语义重构的「真概率最后一公里」）──
+///
+/// `confidence` 自 v4 起是**证据强度**（策略条件满足度 × 风格权重），不是概率。
+/// 真概率的唯一正路：按 (style, period, 证据分桶) 统计**闭环真实 T+N 胜率**
+/// （`decision_validations.hit_outcome`），样本足够的桶才允许输出「校准置信度」，
+/// 不足的桶显式返回 `None`（前端标「样本不足」）——样本不足时任何「区分个股的
+/// 概率」都是新的造假。
+///
+/// 口径事实：`decision_validations.confidence` = 出票时的 `confidence`（证据 × 该格
+/// 风格权重）。同格 (style, period) 内权重是**同一常数** ⇒ 它对桶只是整体平移，
+/// 不影响桶内胜率纯度，无需反推原值。
+/// 代际隔离：旧代（≤v3）的 confidence 是伪概率常数（60/56/53/51），混桶即污染
+/// ⇒ `min_reco_version` 以下的样本不计。
+///
+/// 证据桶宽（20 分一桶，0-100 共 5 桶）。桶宽取粗不取细：桶越细样本越稀，
+/// 「校准了个寂寞」比「校准得粗」更糟。
+pub const EVIDENCE_BUCKET_WIDTH: f64 = 20.0;
+
+/// 桶达标的最小样本数（与 `ic::IC_MIN_SAMPLE` 同量纲精神：没有下限的统计都是噪声）。
+pub const EVIDENCE_BUCKET_MIN_SAMPLES: usize = 20;
+
+/// 证据分 → 桶下标（0..=4）；100 落最后一桶。
+pub fn evidence_bucket_index(confidence: f64) -> usize {
+    ((confidence / EVIDENCE_BUCKET_WIDTH) as usize).min(4)
+}
+
+/// 桶校准（纯函数）：统计 (style, period, 证据桶) 格内的闭环真实胜率。
+///
+/// 返回 `Some((胜率 0~1, 桶内样本数))` 当且仅当样本数 ≥ `min_samples`；
+/// 否则 `None`（调用方显式标「样本不足」，不得回落到任何合成值）。
+pub fn bucket_calibrated_win_rate(
+    samples: &[RecoLoopSample],
+    style_key: &str,
+    period: Period,
+    confidence: f64,
+    min_reco_version: i32,
+    min_samples: usize,
+) -> Option<(f64, usize)> {
+    let bucket = evidence_bucket_index(confidence);
+    let mut n = 0usize;
+    let mut wins = 0usize;
+    for s in samples {
+        if s.style_key != style_key || s.period != period {
+            continue;
+        }
+        // 代际闸门：旧代 confidence 是伪概率常数，混桶即污染（与 IC 的
+        // `filter_by_generation_floor` 同一裁定；未知代（None）同样不计）。
+        if s.reco_version.unwrap_or(0) < min_reco_version {
+            continue;
+        }
+        if evidence_bucket_index(s.confidence) != bucket {
+            continue;
+        }
+        n += 1;
+        if s.win {
+            wins += 1;
+        }
+    }
+    if n < min_samples {
+        return None;
+    }
+    Some((wins as f64 / n as f64, n))
 }
 
 /// rfc3339 与「YYYY-MM-DDTHH:MM:SS.fff」（reco_picks.generated_at 形态）两种时间写法都读。
@@ -680,10 +748,27 @@ pub async fn load_reco_served_vars_db(
         .await
         .map_err(|e| format!("查询模板失败: {e}"))?;
 
-    let vars: Vec<(String, serde_json::Value)> = match template {
+    let mut vars: Vec<(String, serde_json::Value)> = match template {
         Some(t) => extract_template_vars(&t),
         None => Vec::new(),
     };
+
+    // ── 分析回环否决（P1，2026-10-18，002696 案例复盘）──────────────────────
+    // 与下方 IC 权重闭环**相互独立**（所以放在 gate != "on" 早返回之前）：IC 闭环管
+    // 「该风格该不该降权」，这里管「这只票最近被判过卖出，别再出」。判定源是
+    // `stock_analyses.horizon_decisions` 既有列（不新建表），消费方是
+    // `gates::apply_exit_gates`（mid/long 出票口）。加载失败 fail-open（warn 留痕），
+    // 与财报门同一纪律：宁可放过不可错杀，但「门没生效」必须可归因。
+    // ⚠ 回放过滤**不在加载侧做**：served_vars 在命令层 as_of scope 之外加载，
+    //   此刻 current_as_of() 恒为 None，加载侧守卫是假守卫。唯一权威守卫在消费侧
+    //   （`scan_period`：回放不消费否决表 ⇒ 回测语义 =「当时的判定」）。
+    match load_analysis_veto_var(db).await {
+        Ok(Some(v)) => vars.push(("reco_analysis_vetoes".to_string(), v)),
+        Ok(None) => {},
+        Err(e) => {
+            tracing::warn!("[reco_loop] 分析否决表加载失败（fail-open，回环门不生效）: {e}")
+        },
+    }
 
     let gate = vars
         .iter()
@@ -711,10 +796,225 @@ pub async fn load_reco_served_vars_db(
     Ok(v)
 }
 
+// ── P1 分析回环否决表（2026-10-18）────────────────────────────────────────
+
+/// 判定源窗口（天）：更早的分析不构成否决。见 `gates::ANALYSIS_VETO_WINDOW_DAYS`。
+const ANALYSIS_VETO_WINDOW_DAYS: i64 = 30;
+
+/// 否决查询的投影行（不取 `blackboard_snapshot` 大列 —— 那是整份黑板 JSON，
+/// 拉它会把这个本该廉价的查询变成 IO 事故）。
+#[derive(Debug, FromQueryResult)]
+struct AnalysisVetoRow {
+    stock_code: String,
+    horizon_decisions: String,
+    #[allow(dead_code)]
+    created_at: i64,
+}
+
+/// 从 `stock_analyses` 加载 30 天内的分析否决表（纯读，无写入）。
+///
+/// 判定口径（三条过滤器缺一不可）：
+/// - `status = 'completed'`：failed/timeout/interrupted 的记录没有可信结论；
+/// - `analysis_kind = 'live'` + `synthetic = 0`：回放/补分析样本不构成实盘否决
+///   （与 `reco_loop` 样本层的代际闸门同一裁定）；
+/// - `horizon_decisions IS NOT NULL`：**只用四周期独立决策**判档位动作 —— 主档
+///   `decision_action` 可能来自超短档（选档规则），拿它否决长线出票就是张冠李戴。
+///   存量记录该列为 NULL ⇒ 天然无否决（采集时点没有该信息，不得脑补）。
+///
+/// 同一 code 只保留**最新**一条分析的表态（按 `created_at` 降序取首见）：
+/// 最新分析判「观望」⇒ 旧「卖出」不得翻案 —— 回环跟人走，改判即解锁。
+pub async fn load_analysis_veto_var(
+    db: &DatabaseConnection,
+) -> Result<Option<serde_json::Value>, String> {
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let since = now_ms - ANALYSIS_VETO_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    let rows = stock_analyses::Entity::find()
+        .select_only()
+        .column(stock_analyses::Column::StockCode)
+        .column(stock_analyses::Column::HorizonDecisions)
+        .column(stock_analyses::Column::CreatedAt)
+        .filter(stock_analyses::Column::Status.eq("completed"))
+        .filter(stock_analyses::Column::AnalysisKind.eq("live"))
+        .filter(stock_analyses::Column::Synthetic.eq(0))
+        .filter(stock_analyses::Column::HorizonDecisions.is_not_null())
+        .filter(stock_analyses::Column::CreatedAt.gte(since))
+        .order_by_desc(stock_analyses::Column::CreatedAt)
+        .into_model::<AnalysisVetoRow>()
+        .all(db)
+        .await
+        .map_err(|e| format!("查询 stock_analyses 否决投影失败: {e}"))?;
+    Ok(veto_var_from_rows(rows))
+}
+
+/// 行集 → 否决变量（纯函数，供单测直接喂构造行）。
+///
+/// 输出形态：`[{"code":"002696","mid":"减持","long":"卖出"}, ...]` —— **只含**有
+/// 卖出/减持档位的条目；一条否决都没有 ⇒ `None`（消费侧对 `None` 与空数组同判不拦）。
+fn veto_var_from_rows(rows: Vec<AnalysisVetoRow>) -> Option<serde_json::Value> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    for r in rows {
+        // 行已按 created_at 降序 ⇒ 首见即最新。
+        if !seen.insert(r.stock_code.clone()) {
+            continue;
+        }
+        let Ok(hd) = serde_json::from_str::<serde_json::Value>(&r.horizon_decisions) else {
+            // 损坏快照不是否决证据：跳过（与 blackboard_snapshot 三态表同一处置取向）。
+            continue;
+        };
+        let mut entry = serde_json::Map::new();
+        entry.insert("code".to_string(), serde_json::Value::String(r.stock_code));
+        for tier in ["mid", "long"] {
+            let Some(action) = hd.get(tier).and_then(|t| t.get("action")).and_then(|v| v.as_str())
+            else {
+                continue;
+            };
+            if action == "卖出" || action == "减持" {
+                entry.insert(tier.to_string(), serde_json::Value::String(action.to_string()));
+            }
+        }
+        if entry.len() > 1 {
+            entries.push(serde_json::Value::Object(entry));
+        }
+    }
+    if entries.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Array(entries))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::reflection_stats::IC_MIN_SAMPLE;
+
+    fn loop_sample(
+        style_key: &'static str,
+        period: Period,
+        confidence: f64,
+        win: bool,
+    ) -> RecoLoopSample {
+        RecoLoopSample {
+            style_key,
+            period,
+            exit_at_ms: 0,
+            predicted_at_ms: 0,
+            win,
+            confidence,
+            realized_return_pct: 0.0,
+            holding_days: period.default_holding_days(),
+            dqi_fused_at_prediction: None,
+            pick_id: "test-pick".to_string(),
+            reco_version: Some(5),
+        }
+    }
+
+    #[test]
+    fn bucket_index_maps_scores_to_five_buckets() {
+        assert_eq!(evidence_bucket_index(0.0), 0);
+        assert_eq!(evidence_bucket_index(19.9), 0);
+        assert_eq!(evidence_bucket_index(45.0), 2);
+        assert_eq!(evidence_bucket_index(100.0), 4);
+        // 越界防御：>100 不落出桶集
+        assert_eq!(evidence_bucket_index(130.0), 4);
+    }
+
+    #[test]
+    fn bucket_calibration_requires_min_samples() {
+        let mut samples: Vec<RecoLoopSample> = (0..19)
+            .map(|i| loop_sample("trend", Period::Long, 50.0 + f64::from(i % 3), true))
+            .collect();
+        // 19 条同桶（45~59）< 20 ⇒ None（显式样本不足，不回落合成值）
+        assert_eq!(
+            bucket_calibrated_win_rate(
+                &samples,
+                "trend",
+                Period::Long,
+                50.0,
+                5,
+                EVIDENCE_BUCKET_MIN_SAMPLES
+            ),
+            None
+        );
+        // 第 20 条补足 ⇒ 出真统计
+        samples.push(loop_sample("trend", Period::Long, 50.0, false));
+        let (wr, n) = bucket_calibrated_win_rate(
+            &samples,
+            "trend",
+            Period::Long,
+            50.0,
+            5,
+            EVIDENCE_BUCKET_MIN_SAMPLES,
+        )
+        .expect("20 条达标");
+        assert_eq!(n, 20);
+        // 19 win + 1 loss ⇒ 0.95
+        assert!((wr - 0.95).abs() < 1e-9, "实得 {wr}");
+    }
+
+    #[test]
+    fn bucket_calibration_filters_generation_and_cell() {
+        let mut samples = vec![
+            // 旧代（v4 伪概率常数 60）同格 ⇒ 代际闸门必须排除（60 落桶 3，即便同桶也拦）
+            loop_sample("trend", Period::Long, 60.0, true),
+        ];
+        samples[0].reco_version = Some(4);
+        // 新代同桶同格 1 条
+        samples.push(loop_sample("trend", Period::Long, 50.0, true));
+        // 旧代样本 < min（1 < 20）即便混入也不计票 ⇒ None
+        assert_eq!(bucket_calibrated_win_rate(&samples, "trend", Period::Long, 55.0, 5, 2), None);
+        // 补足 2 条新代同桶样本 ⇒ 计票 2
+        samples.push(loop_sample("trend", Period::Long, 55.0, false));
+        let (wr, n) = bucket_calibrated_win_rate(&samples, "trend", Period::Long, 55.0, 5, 2)
+            .expect("2 条新代达标");
+        assert_eq!(n, 2, "旧代样本不计入");
+        assert!((wr - 0.5).abs() < 1e-9, "实得 {wr}");
+        // 其它风格/档位不同格 ⇒ 不计入
+        samples.push(loop_sample("value", Period::Long, 50.0, true));
+        samples.push(loop_sample("trend", Period::Mid, 50.0, true));
+        let (_, n2) = bucket_calibrated_win_rate(&samples, "trend", Period::Long, 55.0, 5, 2)
+            .expect("仍达标");
+        assert_eq!(n2, 2, "跨格样本不计入");
+    }
+
+    fn veto_row(code: &str, horizon_json: &str) -> AnalysisVetoRow {
+        AnalysisVetoRow {
+            stock_code: code.to_string(),
+            horizon_decisions: horizon_json.to_string(),
+            created_at: 0,
+        }
+    }
+
+    #[test]
+    fn veto_var_keeps_latest_per_code_and_only_exit_tiers() {
+        // 行按 created_at 降序传入（调用方保证）；首见即最新。
+        let rows = vec![
+            veto_row("002696", r#"{"long":{"action":"观望"},"mid":{"action":"观望"}}"#),
+            // 旧账「卖出」不得翻新判「观望」的案 —— 首见（更新）已表态。
+            veto_row("002696", r#"{"long":{"action":"卖出"}}"#),
+            veto_row("600519", r#"{"long":{"action":"卖出"},"mid":{"action":"持有"}}"#),
+            veto_row("300750", r#"{"long":{"action":"买入"}}"#),
+            veto_row("000001", "not-json"),
+        ];
+        let var = veto_var_from_rows(rows).expect("有否决条目");
+        let arr = var.as_array().expect("数组形态");
+        assert_eq!(
+            arr.len(),
+            1,
+            "只应有 600519 一条（002696 最新无否决/300750 无卖出/000001 损坏）"
+        );
+        assert_eq!(arr[0]["code"], "600519");
+        assert_eq!(arr[0]["long"], "卖出");
+        assert!(arr[0].get("mid").is_none(), "「持有」档不进否决表");
+    }
+
+    #[test]
+    fn veto_var_none_when_no_exit_verdicts() {
+        let rows = vec![veto_row("002696", r#"{"long":{"action":"观望"}}"#)];
+        assert!(veto_var_from_rows(rows).is_none());
+        assert!(veto_var_from_rows(Vec::new()).is_none());
+    }
 
     fn dv_row(
         pick_id: &str,

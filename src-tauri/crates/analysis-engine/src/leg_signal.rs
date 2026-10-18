@@ -76,7 +76,7 @@ pub fn leg_signal(factor: &str, in_: &Value) -> Option<f64> {
             };
             Some(cl(modulated))
         },
-        // 该档评分节点（t-scoring-hour|week|month|quarter）的 totalScore ∈ [0,100]，
+        // 该档评分节点（t-scoring-hour|day|week|month）的 totalScore ∈ [0,100]，
         // 50 = 评分体系的中性中枢 ⇒ 线性映射，无新常量。
         "trendStrength" => {
             num(in_, "totalScore").map(|ts| cl(crate::portfolio_formula::score_to_signal(ts)))
@@ -149,6 +149,13 @@ pub fn leg_signal(factor: &str, in_: &Value) -> Option<f64> {
             Some(v) if (-1.0..=1.0).contains(&v) => Some(v),
             _ => None,
         },
+        // 相对强度（阶段 1，2026-10-19）：同窗内**个股累计收益 − 基准累计收益**（百分点）。
+        // 零点 = 与基准同步（`0` 是量纲自带的中性，不是选参）；幅度用 ±10 个百分点截断 ——
+        // 这是**超出即满强度的上界**，不是阈值：本仓 5 年指数级月波动通常在 5~10pt 带内，
+        // 个股同窗跑赢/跑输两位数即属极端，继续放大只会让单只票的强度压过其它腿。
+        // 基准与窗口由 wiring 层（`hooks::build_stock_analysis_variables`）按档算好后注入
+        // （`relative_strength.<档>`）；缺值 ⇒ 缺席，**不得折成 0**（0 已被"真同步"占用）。
+        "relativeStrength" => num(in_, "excessReturnPct").map(|p| cl(p / 10.0)),
         other => {
             // 未登记的名字 = 分支表与信号实现漂移（例如因子改名只改了一处）。
             // 必须点名：静默 None 会让那条腿「永远缺席」，而面板上只看到「证据不足」。
@@ -169,6 +176,7 @@ pub const SUPPORTED_FACTORS: &[&str] = &[
     "macroRegime",
     "supplyShock",
     "sectorRotation",
+    "relativeStrength",
     "breadthState",
     "microstructure",
     "flowPersistence",
@@ -321,6 +329,32 @@ mod tests {
         assert_eq!(leg_signal("flowPersistence", &json!({ "flowPersistence": null })), None);
     }
 
+    /// 阶段 1（2026-10-19）：`relativeStrength` 的零点必须来自量纲本身（0 = 与基准同步），
+    /// 截断是**上界**而非阈值，且缺值走缺席 —— 三条各锁一格，改任一方向都红。
+    #[test]
+    fn relative_strength_anchor_is_synchrony_and_the_cap_is_an_upper_bound() {
+        // 真数据换算核对（002696 @ 2026-09-28 的 5 日窗，见 harness::indicators 同名测试）：
+        //   超额 +2.2474824760 pt ⇒ 2.2474824760 / 10 = **+0.2247482476**
+        let got = leg_signal("relativeStrength", &json!({ "excessReturnPct": 2.2474824760 }))
+            .expect("有值必须出信号");
+        assert!((got - 0.2247482476).abs() < 1e-9, "实得 {got}");
+        // 同步 ⇒ 0（这是事实，不是缺席）；跑输 ⇒ 负
+        assert_eq!(leg_signal("relativeStrength", &json!({ "excessReturnPct": 0.0 })), Some(0.0));
+        assert!(
+            leg_signal("relativeStrength", &json!({ "excessReturnPct": -3.5 })).unwrap() < 0.0,
+            "跑输基准 ⇒ 负号"
+        );
+        // 上界：±10pt 之外不再累加（12 与 40 都给满强度）
+        assert_eq!(leg_signal("relativeStrength", &json!({ "excessReturnPct": 12.0 })), Some(1.0));
+        assert_eq!(leg_signal("relativeStrength", &json!({ "excessReturnPct": 40.0 })), Some(1.0));
+        assert_eq!(
+            leg_signal("relativeStrength", &json!({ "excessReturnPct": -40.0 })),
+            Some(-1.0)
+        );
+        // 键缺失 ⇒ 缺席（不得折成 0，0 已被「真同步」占用）
+        assert_eq!(leg_signal("relativeStrength", &json!({ "sealRate": 0.7 })), None);
+    }
+
     /// 扫描面自证：本模块认识的因子必须与分支表的来源表**逐名相同**。
     /// 两边漂移的后果不对称（表里有、这里没有 ⇒ 腿静默拿不到数），所以由测试钉死。
     #[test]
@@ -344,6 +378,7 @@ mod tests {
                 "catalystLevel": "L2业绩拐点级", "pePercentile": 20.0, "fScore": 7.0,
                 "consensusEps": 3.0, "latestEps": 2.0, "pmi": 51.0,
                 "lockupFloatRatio": 0.02, "industryRankPercentile": 70.0, "sealRate": 0.7,
+                "excessReturnPct": 4.0,
                 "inLimitUpPool": true, "breakCount": 1.0, "flowPersistence": 0.3
             });
             assert!(

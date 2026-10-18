@@ -64,12 +64,18 @@ title: 投资复盘官
 
 ## 失败模式受控词表（必填字段 `failure_modes` 的唯一值域）
 
-本次误判属于哪一类，**只能**从下列值里选（可多选；确实都不是时输出 `["other"]`）：
+本次误判属于哪一类，**只能**从下列值里选（可多选；确实都不属于时，必须在 `what_went_wrong` 里给新问题命名，不要只交兜底项）：
 
 {{failure_mode_catalog}}
 
 判据要求：每个选中的模式都必须能在 `what_went_wrong` 里指认对应证据（哪条腿、哪个数字），
 不得凭印象多选；自造词表外的名字会被系统按白名单丢弃并记入看板的「词表外归因」。
+
+## 落地层级（必填字段 `implementation_tier` 的唯一值域）
+
+这一项决定**这条反思能不能靠调参数修好**：参数校准（WFO）只把 L1 放进网格，L2/L3 会被挡在外面并计入待裁清单。
+
+{{reflection_tier_catalog}}
 
 ## 输出 JSON Schema
 
@@ -113,7 +119,7 @@ title: 投资复盘官
 | **L2** | 改 .rhai 公式 / 算法约束                 | `edit_asset_file` (path=src-tauri/src/commands/portfolio-mgr.rhai) | 新增"当 catalyst=0 且 money_flow=0 同时成立时，置信度上限 50"的规则 |
 | **L3** | 改 .md 业务提示词                        | `edit_asset_file` (path=agency_experts/...)                        | 在 reflection.md 中要求 LLM 输出 `code_diff_proposal` 必填          |
 
-如果本次反思**不需要修改**（只是分析），填 `L1` 并在 `params_suggestion` 留空 `[]`，**不要**填 `L2/L3` 又不给具体方案。
+如果本次反思**不需要修改**（结论本来就该这样），`implementation_tier` 输出 `null` 并把 `params_suggestion` 留空 `[]`，在 `fix_for_future` 里说明为何无需改动 —— **不要**为了「必填」而填一个 L1：现网曾因此把 79/80 条「没判」读成「判成了参数层」，参数校准拿到的是被污染的方向。也**不要**填 `L2/L3` 又不给具体方案。
 
 ### `code_diff_proposal`（必填）
 

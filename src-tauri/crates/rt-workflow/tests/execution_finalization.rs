@@ -19,12 +19,23 @@ use axagent_harness::repositories::{
 };
 use axagent_harness::test_support::empty_loop_checkpoint_repo;
 use axagent_harness::workflow_types::{
-    EdgeType, EndNode, EndNodeConfig, Position, RetryConfig, TriggerConfig, TriggerNode,
-    TriggerType, WorkflowEdge, WorkflowNode, WorkflowNodeBase, WorkflowStatus,
+    EdgeType, EndNode, EndNodeConfig, ExecutionStatus, Position, RetryConfig, TriggerConfig,
+    TriggerNode, TriggerType, WorkflowEdge, WorkflowNode, WorkflowNodeBase, WorkflowStatus,
 };
 
 use axagent_rt_workflow::work_engine::{RunOptions, WorkEngine};
 use common::{EmptyProviderRegistry, RecordingWorkflowExecutionRepo};
+
+/// 本文件每个用例都要**进程级**注册自己的替身仓储
+/// （`set_workflow_execution_repository` 是全局替换，不是 per-test 注入）。
+/// 两个用例并行时，后注册的一方会把前一方换成自己的记录器 ⇒ 断言拿到的
+/// `updates` 永远是空的（实测红在「执行行必须收到一次终态写入」）。
+/// 用 `tokio::sync::Mutex`（持锁跨 await，且 `clippy.toml` 禁 std 锁）。
+static REGISTRY_GUARD: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+
+fn registry_guard() -> &'static tokio::sync::Mutex<()> {
+    REGISTRY_GUARD.get_or_init(|| tokio::sync::Mutex::new(()))
+}
 
 // ── 节点构造 helpers ─────────────────────────────────────────────────
 //
@@ -76,6 +87,8 @@ fn make_edge(source: &str, target: &str) -> WorkflowEdge {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn sub_workflow_and_partial_finalize_persist_terminal_status() {
+    // 串行化见 `REGISTRY_GUARD` 文档。
+    let _registry = registry_guard().lock().await;
     let repo = Arc::new(RecordingWorkflowExecutionRepo::default());
     let updates = repo.updates.clone();
     // 全局 registry 覆盖式注入；单测试函数内顺序执行，无并行 set 冲突。
@@ -157,4 +170,40 @@ async fn sub_workflow_and_partial_finalize_persist_terminal_status() {
         }
     }
     assert!(partial_seen_final, "PartiallyCompleted DB 记录应收到 partially_completed 终态");
+}
+
+/// 内存里没有这次执行 ⇒ **仍必须把终态写进库**。旧写法在这里返回 `NotFound`、调用点又用
+/// `.ok()` 吞掉，于是没人再写这行的终态 —— 现网后果：一条分析已完成并落库，它对应的
+/// `workflow_executions` 行却永久停在 `running`、`total_time_ms=0`（全表累积 85 条），
+/// 历史列表一直转圈，批量评估还会把这些行当样本抽走。
+///
+/// 反向锁：把 `complete_execution` 的 else 分支改回 `Err(NotFound)` ⇒ 本条既拿不到
+/// `Ok(())`、也看不到任何 update 记录，两处都红。
+#[tokio::test]
+async fn complete_execution_persists_terminal_status_when_memory_state_is_gone() {
+    // 串行化见 `REGISTRY_GUARD` 文档。
+    let _registry = registry_guard().lock().await;
+    let repo = Arc::new(RecordingWorkflowExecutionRepo::default());
+    let updates = repo.updates.clone();
+    set_workflow_execution_repository(repo);
+    set_loop_checkpoint_repository(empty_loop_checkpoint_repo());
+    let engine = WorkEngine::new([0u8; 32], Arc::new(EmptyProviderRegistry));
+
+    // 关键前提：这个 id 从未在本引擎登记过（不调 run_workflow）⇒ 内存 map 里必不存在，
+    // 走的正是「内存丢了、库里还在」那条现实路径。
+    engine
+        .complete_execution(
+            "ghost-execution-id",
+            &serde_json::json!({ "ok": true }),
+            4_321,
+            ExecutionStatus::Completed,
+        )
+        .await
+        .expect("内存缺失时也要写库终态，不得再返回 NotFound");
+
+    let log = updates.lock().await;
+    let hit = log.iter().find(|(id, _, _)| id == "ghost-execution-id");
+    let (_, status, total_time) = hit.expect("执行行必须收到一次终态写入");
+    assert_eq!(status, "completed", "终态应为 completed，实际: {status}");
+    assert_eq!(*total_time, Some(4_321), "耗时必须照写 —— 留 0 就是现网幽灵行的那个形态");
 }

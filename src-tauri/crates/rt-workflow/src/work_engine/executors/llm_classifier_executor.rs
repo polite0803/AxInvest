@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use async_trait::async_trait;
+use axagent_harness::types::provider_model::request_delay_ms_for_model;
 use axagent_harness::workflow_types::WorkflowNode;
 use std::sync::Arc;
 
@@ -178,7 +179,10 @@ impl NodeExecutorTrait for LlmClassifierExecutor {
             response_format: None,
         };
 
-        let llm_config = axagent_harness::LlmCallConfig::default();
+        let llm_config = axagent_harness::LlmCallConfig {
+            request_delay_ms: request_delay_ms_for_model(&prov, &model),
+            ..Default::default()
+        };
         // v9 补丁(2026-09-08 死锁实证)：LLM 调用失败（超时/供应商 500）时，
         // 配置了 fallback_label 的分类器应降级输出而非节点 Failed ——
         // retry 耗尽后 Failed 仍会经 Direct 边阻塞下游（cls-risk-level →

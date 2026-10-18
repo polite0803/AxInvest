@@ -21,7 +21,7 @@ let gaps = [];
 // ── 输入面（与节点 `input_mapping` 一一对应；读了没映射的名字 = 运行期 Variable not found，
 //    不是缺席。判据与来历见 PLAN §三十五）──
 // 已接：branch_json / horizon_prior_json / tier_score / macd_dif / macd_dea / rsi_value /
-//       lockup_float_ratio / lockup_supply_reason /     seal_rate / flow_persistence / kline_bars / overall_risk / stop_vol_mult / take_profit_vol_mult / scoring_windows / scoring_scale / scale_trend / scale_momentum
+//       lockup_float_ratio / lockup_supply_reason /     seal_rate / flow_persistence / kline_bars / overall_risk / stop_vol_mult / take_profit_vol_mult / scoring_windows / scoring_scale / scale_trend / scale_momentum / excess_return_pct
 // 刻意不读（读了也没数据源 ⇒ 越界读取会打死节点）：
 //   · 催化剂 —— 本档腿集里没有 `eventCatalyst`（PLAN §十一 与权威表的分歧，任务 #22 收编）
 //   · 解禁供给 —— **v132 已接**（取数层按本档交易日窗归约的小数占比），缺席走下面条件式
@@ -78,6 +78,10 @@ let raw = #{
     sealRate: if present(seal_rate) { seal_rate } else { () },
     // #23（v132）：本档解禁供给占比（小数，取数层已按该档交易日窗归约）
     lockupFloatRatio: if present(lockup_float_ratio) { lockup_float_ratio } else { () },
+    // 阶段 1（2026-10-19）：本档交易日窗的相对强度（`relative_strength.short`，
+    // 基准 = 中证全指；口径单一实现在 `harness::indicators::excess_return_pct`，此处不重算）。
+    // 缺值 ⇒ `()` ⇒ 该腿缺席，不折成 0（0 = 「与基准同步」这个事实，已被占用）。
+    excessReturnPct: if present(excess_return_pct) { excess_return_pct } else { () },
 };
 let present_legs = [];
 let absent_legs = [];

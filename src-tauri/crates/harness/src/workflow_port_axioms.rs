@@ -462,7 +462,7 @@ fn validate_switch(node: &SwitchNode, edges: &[WorkflowEdge], out: &mut Vec<Port
     let outgoing: Vec<&WorkflowEdge> = edges.iter().filter(|e| e.source == node_id).collect();
 
     // ① 具名出边的 handle 必须**可达**：`matched_label` 的取值域是
-    //    `{case.label} ∪ {default_case}`（`switch_executor.rs:180-377` 三个分支都取
+    //    `{case.label} ∪ {default_case}`（`switch_executor.rs:206-372` 三个分支都取
     //    `case.label`；`actual` 缺失或全不命中时取 `default_case`）
     //    ⇒ handle 落在这个集合之外才是真正的死边。
     for edge in &outgoing {

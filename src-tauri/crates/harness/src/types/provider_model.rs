@@ -268,6 +268,22 @@ pub fn resolve_model_type(prov: &ProviderConfig, model_id: &str) -> ModelType {
         .unwrap_or_else(|| detect_model_type(model_id))
 }
 
+/// 取某 provider 下某模型的**请求节流**毫秒数（设置页「请求延时」那一格，
+/// `ModelParamOverrides::request_delay_ms`）。
+///
+/// 与 [`resolve_model_type`] 同一查找形态（按 `model_id` 在 `prov.models` 里定位），全仓只此一份：
+/// 调用方（聊天发送链路、`rt-workflow` 的 LLM 节点）只把值送到 `LlmCallConfig::request_delay_ms`，
+/// **sleep 由 `llm_executor::apply_request_delay` 单点执行** —— 两层各睡一次就是双倍延时。
+///
+/// 模型未登记（手工填 model id、模板导入等路径）或未配 override ⇒ `None` = 不节流，与改前一致。
+pub fn request_delay_ms_for_model(prov: &ProviderConfig, model_id: &str) -> Option<u64> {
+    prov.models
+        .iter()
+        .find(|m| m.model_id == model_id)
+        .and_then(|m| m.param_overrides.as_ref())
+        .and_then(|p| p.request_delay_ms)
+}
+
 impl std::fmt::Display for ModelType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -301,7 +317,8 @@ pub enum ModelCapability {
     RealtimeVoice,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+/// 全部字段都是 `Option` ⇒ `Default` 的语义就是「一格 override 都没配」，与「不改动模型参数」等价。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelParamOverrides {
     pub temperature: Option<f32>,
@@ -327,3 +344,76 @@ pub struct ModelParamOverrides {
 }
 
 // === Conversation & Message ===
+
+#[cfg(test)]
+mod request_delay_lookup_tests {
+    use super::{
+        Model, ModelParamOverrides, ProviderConfig, ProviderType, request_delay_ms_for_model,
+    };
+
+    fn model(model_id: &str, param_overrides: Option<ModelParamOverrides>) -> Model {
+        Model {
+            provider_id: "p1".to_string(),
+            model_id: model_id.to_string(),
+            name: model_id.to_string(),
+            group_name: None,
+            model_type: crate::types::ModelType::Chat,
+            capabilities: vec![],
+            max_tokens: None,
+            max_output_tokens: None,
+            enabled: true,
+            param_overrides,
+            input_price_per_mtok: None,
+            output_price_per_mtok: None,
+        }
+    }
+
+    fn prov(models: Vec<Model>) -> ProviderConfig {
+        ProviderConfig {
+            id: "p1".to_string(),
+            name: "测试 provider".to_string(),
+            provider_type: ProviderType::OpenAI,
+            api_host: "https://example.invalid".to_string(),
+            api_path: None,
+            enabled: true,
+            models,
+            keys: vec![],
+            proxy_config: None,
+            tool_adaptation: None,
+            tool_adaptation_marker_prefix: None,
+            custom_headers: None,
+            icon: None,
+            builtin_id: None,
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn overrides(request_delay_ms: u64) -> ModelParamOverrides {
+        ModelParamOverrides { request_delay_ms: Some(request_delay_ms), ..Default::default() }
+    }
+
+    /// 正控：登记的模型带 override ⇒ 取到那一格的值。
+    #[test]
+    fn reads_the_value_off_the_matching_registered_model() {
+        let prov = prov(vec![model("fast", Some(overrides(700)))]);
+        assert_eq!(request_delay_ms_for_model(&prov, "fast"), Some(700));
+    }
+
+    /// 负控一（挡住「按位置取模型」那类写法）：值在**另一条**模型上，被查的那条没有 override。
+    /// 反向锁 —— 把 `find` 换成 `first()` ⇒ 本条红（会把邻居的 700 当成它的）。
+    #[test]
+    fn does_not_borrow_a_sibling_model_delay() {
+        let prov = prov(vec![model("other", Some(overrides(700))), model("fast", None)]);
+        assert_eq!(request_delay_ms_for_model(&prov, "fast"), None);
+    }
+
+    /// 负控二：模型整条未登记（手工填 model id、模板导入等路径）⇒ `None` = 不节流，
+    /// 与接线前的行为逐字一致 —— 本函数**不得**为「查不到」编一个默认延时。
+    #[test]
+    fn unregistered_model_yields_no_throttle() {
+        let prov = prov(vec![model("other", Some(overrides(700)))]);
+        assert_eq!(request_delay_ms_for_model(&prov, "not-registered"), None);
+    }
+}

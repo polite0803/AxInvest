@@ -69,6 +69,14 @@ pub(crate) async fn fetch_reco_prior(
     let mut query = reco_picks::Entity::find()
         .filter(reco_picks::Column::StockCode.eq(stock_code))
         .filter(reco_picks::Column::Style.is_in(["serenity", "bottleneck"]))
+        // P-g A 类（2026-10-18，PLAN-mover-coverage-and-reflection-exit §P-g）：这条读点把
+        // 候选行当**两链对照的先验**注入分析，而 `synthetic=1` 是降级产物（capital 的
+        // 「K线代理模式：无资金流向数据」/ watchlist 的「初筛列表，无技术信号」）——
+        // 拿代理产物当先验，等于让对照链替主口径背书。现网 `bottleneck` 990 降级 / 11 主口径，
+        // `serenity` 全部是主口径（写入侧固定 `synthetic=0`，`serenity.rs` 写候选行那处），
+        // 所以本过滤只削掉降级先验；削掉后落 `None` = 「本档没有可对照的智选候选」，
+        // 是缺席而不是 0，下游按既有 `None` 分支处理。
+        .filter(reco_picks::Column::Synthetic.eq(0))
         .filter(reco_picks::Column::CreatedAt.gte(cutoff));
     // 代际对照：回放批次里的逐只分析要拿**同一次回放**的智选候选作先验，实盘分析拿
     // 实盘候选。二者同表、靠 `as_of_date` 对齐 —— 不加这一层，回放分析会读到今天的
@@ -679,11 +687,57 @@ pub(crate) async fn build_stock_analysis_variables(
         is_secret: false,
     });
 
+    // 个股日线（30 根）—— 原来只为下面的 DES 模拟指标现取现用；提到外层是为了让
+    // 「相对强度」与它**共用同一次取数**：两只序列若各自单独取，锚点日错位会把
+    // 节假日差异读成 alpha（同一天少一根 = 凭空多出一天涨跌）。
+    let stock_klines = client.get_klines(stock_code, "daily", 30).await.unwrap_or_default();
+
+    // ── 阶段 1（2026-10-19）：逐档相对强度 ──
+    // 立项实证：002696 as-of 2026-09-28 判「观望 3.3%」，其后 12 交易日 +65.3%、同期创业板
+    // −11.7%；而锚点当天的 5 日窗实测超额 **+2.25 个百分点**（个股 −5.39% / 基准 −7.64%）——
+    // 这份证据在框架里从来没有入口（`f1 trend` 只有个股自身均线，`sectorRotation` 零生产者）。
+    // 基准选**中证全指**而不是沪深300：给 24 亿流通市值的小盘票拿大盘蓝筹当基准会系统性偏严。
+    // 零新增取数：指数序列上面为大盘 regime 已经并发拉好，个股序列与 DES 指标共用同一次。
+    const RELATIVE_STRENGTH_BENCH: &str = "中证全指";
+    let bench_closes: Vec<f64> = regime_series
+        .iter()
+        .find(|(label, k)| *label == RELATIVE_STRENGTH_BENCH && !k.is_empty())
+        .map(|(_, k)| k.iter().map(|x| x.close).collect())
+        .unwrap_or_default();
+    let stock_closes: Vec<f64> = stock_klines.iter().map(|k| k.close).collect();
+    let mut relative_strength = serde_json::Map::new();
+    relative_strength.insert(
+        "benchmark".into(),
+        if bench_closes.is_empty() {
+            json!(null)
+        } else {
+            json!(RELATIVE_STRENGTH_BENCH)
+        },
+    );
+    // 缺基准与「该档窗口不够长」是两种缺席，读侧必须分得开（后者会带 bars）
+    relative_strength.insert("benchmarkBars".into(), json!(bench_closes.len()));
+    relative_strength.insert("stockBars".into(), json!(stock_closes.len()));
+    for p in axagent_harness::holding_period::Period::ALL {
+        // lookback = 持有交易日数 + 1 根：首尾两点之间才是一个 N 日区间
+        let lookback = p.default_holding_days() as usize + 1;
+        let excess =
+            axagent_harness::indicators::excess_return_pct(&stock_closes, &bench_closes, lookback)
+                .map(|x| (x * 100.0).round() / 100.0);
+        relative_strength.insert(p.as_str().to_string(), json!(excess));
+    }
+    merged_vars.push(Variable {
+        name: "relative_strength".into(),
+        var_type: "object".into(),
+        value: serde_json::Value::Object(relative_strength),
+        description: Some(
+            "逐档相对基准（中证全指）同窗累计超额收益，单位百分点；null = 该档窗口不可得（不是 0）"
+                .into(),
+        ),
+        is_secret: false,
+    });
+
     // 注入市场模拟指标（DES 轻量版，从个股 K 线估算，无需额外 API 调用）
-    let sim_metrics = client
-        .get_klines(stock_code, "daily", 30)
-        .await
-        .ok()
+    let sim_metrics = Some(&stock_klines)
         .and_then(|klines| {
             if klines.len() < 5 {
                 return None;

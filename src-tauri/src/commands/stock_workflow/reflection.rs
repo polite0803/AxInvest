@@ -339,6 +339,9 @@ pub async fn run_reflection_workflow(
             source: Set("due".to_string()),
             miss_layer: Set(None),
             failure_modes: Set(None),
+            // 阶段 3：手动反思 INSERT 路径此刻还没有反思产出 ⇒ 两列留 NULL（不是「判成 L1」）
+            implementation_tier: Set(None),
+            code_diff_proposal: Set(None),
             status: Set("running".to_string()),
             created_at: Set(now_ms),
             updated_at: Set(now_ms),
@@ -670,6 +673,21 @@ pub async fn run_reflection_workflow(
         is_secret: false,
     });
 
+    // ── 阶段 3 / 决-3 落地层级清单（无条件注入）──
+    // 同 failure_mode_catalog 的口径：清单由引擎侧 ReflectionTier 渲染，模板不抄值。
+    // 漏注入会让 {{reflection_tier_catalog}} VARIABLE_NOT_FOUND ⇒ 反思链 Failed。
+    variables.push(axagent_harness::workflow_types::Variable {
+        name: "reflection_tier_catalog".into(),
+        var_type: "string".into(),
+        value: serde_json::Value::String(format!(
+            "{}\n- {}",
+            axagent_analysis_engine::reflection_tier::ReflectionTier::catalog_for_prompt(),
+            axagent_analysis_engine::reflection_tier::ReflectionTier::absence_rule()
+        )),
+        description: Some("反思落地层级清单（implementation_tier 字段的唯一值域）".into()),
+        is_secret: false,
+    });
+
     if let Some((time_horizon, _analysis_holding_days)) = original_ctx {
         variables.push(axagent_harness::workflow_types::Variable {
             name: "original_time_horizon".into(),
@@ -837,6 +855,28 @@ pub async fn run_reflection_workflow(
                 );
             }
 
+            // 阶段 3 / 决-3：落地层级轴（L1 改参数 / L2 改公式 / L3 改提示词）。
+            // 写侧过一次白名单：非法值与缺席都落 NULL，**不在这里替模型兜底成 L1** ——
+            // 面板旧实现把缺省写成 `"L1"`，于是现网 79/80 条「模型压根没判」被报成
+            // 「判成了参数层」，参数校准因此拿不到「这条其实是结构层」这个信息。
+            let tier_raw = deep_get_reflection_str(&reflection_json, "implementation_tier");
+            let tier_parsed = axagent_analysis_engine::reflection_tier::parse_reflection_tier(
+                tier_raw.as_deref(),
+            );
+            if let Some(bad) = tier_raw
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && tier_parsed.is_none())
+            {
+                tracing::warn!(
+                    "[reflection] implementation_tier 自报值 '{bad}' 不在 L1/L2/L3 值域内 ⇒ \
+                     按未标注落 NULL（analysis_id={analysis_id}）"
+                );
+            }
+            let implementation_tier_column = tier_parsed.map(|t| t.as_str().to_string());
+            let code_diff_proposal_column =
+                deep_get_reflection_str(&reflection_json, "code_diff_proposal");
+
             // 诊断: 检查反思节点是否成功,如果不成功,把状态/错误信息附到 status 字段
             // (Failed 节点 result 是 None,work_engine 不会写入 results,所以
             // wf.results 不等于完整执行轨迹 —— 之前只能看到"completed"但实际反思节点没跑)。
@@ -938,6 +978,15 @@ pub async fn run_reflection_workflow(
                 .col_expr(
                     stock_reflections::Column::FailureModes,
                     Expr::value(failure_modes_column),
+                )
+                // 阶段 3：层级轴 + 结构层提案描述（值域见 `reflection_tier`，NULL = 没判）
+                .col_expr(
+                    stock_reflections::Column::ImplementationTier,
+                    Expr::value(implementation_tier_column),
+                )
+                .col_expr(
+                    stock_reflections::Column::CodeDiffProposal,
+                    Expr::value(code_diff_proposal_column),
                 )
                 .filter(stock_reflections::Column::Id.eq(&analysis_id))
                 .exec(db)
@@ -2390,6 +2439,9 @@ pub fn build_pending_reflection_rows_for(
                 source: Set(seed.source.to_string()),
                 miss_layer: Set(None),
                 failure_modes: Set(None),
+                // 阶段 3：pending 行还没复盘 ⇒ 层级轴留 NULL（读侧不得当成 L1，见列文档）
+                implementation_tier: Set(None),
+                code_diff_proposal: Set(None),
                 status: Set("pending".to_string()),
                 created_at: Set(seed.now_ms),
                 updated_at: Set(seed.now_ms),
@@ -4617,6 +4669,17 @@ mod deterministic_was_correct_tests {
         assert!(text.contains("教训文本 l-same"), "同档教训应被注入: {text}");
         assert!(text.contains("教训文本 l-any"), "通用（NULL 档）教训应被注入: {text}");
         assert!(!text.contains("教训文本 l-other"), "跨档（short）教训不得进长线 prompt: {text}");
+        // 阶段 4：标签与规则必须出现在**注入文本**里（不是只在库里）。三件事各自可证伪：
+        // ① 每条教训带自身档位；② NULL 档显式写「档未知」，不读成「适用于所有档」；
+        // ③ 末尾两句（筛样口径 + 跨档只作风险提示）在，且代理档被点名。
+        assert!(text.contains("long 档"), "同档教训应标出自己的档: {text}");
+        assert!(text.contains("档未知"), "NULL 档教训应显式标「档未知」: {text}");
+        assert!(text.contains("【筛样口径】"), "筛样口径必须随文本注入: {text}");
+        assert!(text.contains("按 long 档筛样"), "筛样口径要点名实际用的代理档: {text}");
+        assert!(
+            text.contains("只作风险提示，不得据此否决本档的方向腿"),
+            "跨档使用规则必须注入（否则模型会拿别档教训否决本档方向）: {text}"
+        );
         let _ = ids;
 
         // ③ 去重键含 horizon：同一文字教训在两档是两行

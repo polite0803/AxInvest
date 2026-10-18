@@ -20,6 +20,16 @@
 //!   → L1 上游在场 + L3 参与 + L4 缺席有交代。
 //!   分母取 `Period::verdict_spec().participating`（裁定 P-B3）。
 //!
+//! ## 「一致」与「闭合」的效力边界（2026-10-18）
+//!
+//! 这两个判据**只能证明构造自洽**，不能证明信号算对，必须按效力分档呈现：
+//!
+//! - σ 一致分两类（见 [`BasisSource`]）：基准独立于 σ 才算核对过；基准与 σ 是同一
+//!   rhai 变量的两条落库副本时，delta 上限恒等于容差推导值 ⇒ 恒真。计数
+//!   [`EvidenceAuditReport::sigma_reconciled_legs`] 只认前者，且只认参与腿。
+//! - 闭合（[`Closure::Closed`]）只验 `Σ(σ·w)/weightSum ≟ avgSignal` 这条算术，
+//!   两侧同源于一次脚本执行 ⇒ 附带 `unverified_weight_ratio` 交代「多少权重其实没核过」。
+//!
 //! 归因与来源**一律现场推导自既有权威表**，不抄第二份：
 //! [`crate::evidence_weight::DECISION_LEG_ANALYST`]、[`crate::evidence_weight::VERDICT_FACTOR_SOURCES`]、
 //! `axagent_harness::holding_period::Period::{factor_owner, verdict_spec}`。
@@ -77,10 +87,32 @@ enum BasisTransform {
     ScoreToSignal,
 }
 
+/// 基准的**来源独立性** —— 决定「一致」这条结论能证明什么。
+///
+/// 没有这一列时，两条性质完全不同的比对会被渲染成同一个绿标签：
+///
+/// - 独立上游（`f1`）：快照里的 `totalScore` 是**产出侧真值**，σ 由它经
+///   `score_to_signal` 派生 ⇒ 改中枢而审计不跟着改、落库与快照不一致，都会红。
+/// - 同源副本（`f4` / `f9` / `f10` / `f11` / `f12`）：基准键与 `factors.fN.sigma`
+///   是**同一个 rhai 变量的两条落库副本**（`(x*1000).round()/1000` vs
+///   `(x*100).round()/100`）⇒ delta 上限恒等于两侧舍入界之和、恰好等于
+///   [`sigma_basis_tolerance`] 的推导值 ⇒ **数学上永不越界**。
+///
+/// 后者只能证明「副本没被篡改」，不能证明「信号算对了」。2026-10-18 截图上
+/// `6/12` 全绿正是这个构造的产物，故必须分成两类展示与计数。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BasisSource {
+    /// 基准是独立上游产出，经产端同一函数变换
+    IndependentUpstream,
+    /// 基准与 σ 是同一变量的第二条落库副本（舍入位数不同）
+    SameVariableCopy,
+}
+
 /// 主档因子腿 → 其在**同一条记录内**可对的落库基准。
 ///
-/// 这张表登记的是「基准住在哪份文档的哪个键、要不要归一化」这一**新事实**
-/// （此前无任何表登记），不是别处的第二份拷贝；归一化本身走
+/// 这张表登记的是「基准住在哪份文档的哪个键、要不要归一化、**来源是否独立**」
+/// 这组事实（此前无任何表登记），不是别处的第二份拷贝；归一化本身走
 /// [`crate::portfolio_formula::score_to_signal`]（裁定 P-B1 上收后的唯一权威）。
 ///
 /// **f2 刻意不入表**：现网实测它的输入 `consensusScore` 取自收敛节点
@@ -88,19 +120,70 @@ enum BasisTransform {
 /// 老形态的键是裸 `debate-convergence.content.consensus_score`、新形态按 seed 指向
 /// `debate-convergence--mid.*`（v161），且**都不在 `result.*` 命名空间里**。
 /// 给一条会随模板漂移的静态路径＝把「对不上」伪装成「对过了」，所以如实报无基准。
-const FACTOR_SIGMA_BASIS: &[(&str, BasisDoc, &str, BasisTransform)] = &[
+///
+/// 第 5 列 [`BasisSource`] 的取值判据是**变量同一性**，不是路径形态：
+/// 基准键取到的值若与 `factors.fN.sigma` 出自同一个 rhai 变量，就是 `SameVariableCopy`。
+const FACTOR_SIGMA_BASIS: &[(&str, BasisDoc, &str, BasisTransform, BasisSource)] = &[
     (
         "f1",
         BasisDoc::Snapshot,
         "/result.t-scoring/content/totalScore",
         BasisTransform::ScoreToSignal,
+        BasisSource::IndependentUpstream,
     ),
-    ("f4", BasisDoc::DecisionJson, "/risk_quant/f4_adjusted", BasisTransform::Identity),
-    ("f9", BasisDoc::DecisionJson, "/evidence/f9_money_flow_signal", BasisTransform::Identity),
-    ("f10", BasisDoc::DecisionJson, "/evidence/f10_chip_signal", BasisTransform::Identity),
-    ("f11", BasisDoc::DecisionJson, "/evidence/f11_pace_signal", BasisTransform::Identity),
-    ("f12", BasisDoc::DecisionJson, "/evidence/f12_momentum_signal", BasisTransform::Identity),
+    // 以下 5 条全部取自 `portfolio-mgr.rhai` 的同一批变量：
+    //   f4  ← `f4_adjusted`（`:3667` 的 σ 与 `:3689` 的基准）
+    //   f9  ← `f9_signal`（`:3671` vs `:3644`）
+    //   f10 ← `f10_signal`（`:3672` vs `:3645`）
+    //   f11 ← `f11_signal`（`:3673` vs `:3646`）
+    //   f12 ← `f12_signal`（`:3674` vs `:3647`）
+    (
+        "f4",
+        BasisDoc::DecisionJson,
+        "/risk_quant/f4_adjusted",
+        BasisTransform::Identity,
+        BasisSource::SameVariableCopy,
+    ),
+    (
+        "f9",
+        BasisDoc::DecisionJson,
+        "/evidence/f9_money_flow_signal",
+        BasisTransform::Identity,
+        BasisSource::SameVariableCopy,
+    ),
+    (
+        "f10",
+        BasisDoc::DecisionJson,
+        "/evidence/f10_chip_signal",
+        BasisTransform::Identity,
+        BasisSource::SameVariableCopy,
+    ),
+    (
+        "f11",
+        BasisDoc::DecisionJson,
+        "/evidence/f11_pace_signal",
+        BasisTransform::Identity,
+        BasisSource::SameVariableCopy,
+    ),
+    (
+        "f12",
+        BasisDoc::DecisionJson,
+        "/evidence/f12_momentum_signal",
+        BasisTransform::Identity,
+        BasisSource::SameVariableCopy,
+    ),
 ];
+
+/// `f1` → `1`、`f13` → `13`；非 `f<n>` 形态按字面量排在最后。
+///
+/// 面板原先直接 `ids.sort()`（字符串序）⇒ `f10` 落在 `f2` 前面，读者按 f1→f13
+/// 找腿时顺序全乱。键里带一个「形态位」是为了让未知 id 的次序仍然**确定**。
+fn leg_sort_key(id: &str) -> (u8, u32, String) {
+    match id.strip_prefix('f').and_then(|n| n.parse::<u32>().ok()) {
+        Some(n) => (0, n, String::new()),
+        None => (1, 0, id.to_string()),
+    }
+}
 
 /// 按 `/` 分层取值，**途中遇到 JSON 字符串就剥壳继续**：工具节点在快照里是
 /// `{"content": "<JSON 字符串>"}` 这种双层形态，不剥壳取不到里层字段。
@@ -140,6 +223,9 @@ pub enum Reconcile {
         /// 由两侧舍入界推导
         tolerance: f64,
         basis: String,
+        /// 基准的来源独立性 —— `sameVariableCopy` 时「一致」是构造恒真，
+        /// UI 不得染成与 `independentUpstream` 同一种绿。
+        source: BasisSource,
     },
     Inconsistent {
         delta: f64,
@@ -150,6 +236,14 @@ pub enum Reconcile {
     NoBasis {
         reason: String,
     },
+    /// 该腿的落库 `sigma` 字段**缺失或类型不对**。
+    ///
+    /// 与 [`Reconcile::NoBasis`] 严格区分：`NoBasis` 缺的是**基准**（对账参照物没建），
+    /// 本态缺的是**被检对象本身**。把两者混在一起会让面板把「这条腿根本没数」
+    /// 说成「这条腿没有可对账的基准」——归因正好反了。
+    InputMissing {
+        field: String,
+    },
 }
 
 /// A 面：主档一条因子腿。
@@ -158,11 +252,18 @@ pub enum Reconcile {
 pub struct FactorLegAudit {
     pub leg_id: String,
     pub name: String,
-    pub sigma: f64,
-    pub weight: f64,
+    /// 落库 σ。**`None` = 本记录该腿的 `sigma` 键缺失或类型不对，不是 0**。
+    ///
+    /// 2026-10-18 前这里 `unwrap_or(0.0)`：缺失被兜成 0 之后，它照样进 `Σ(σ·w)`
+    /// 和 `participates` 判定，于是「字段坏了」在面板上与「信号真的是零」同形，
+    /// 而闭合还能照常通过 —— 等于用缺失值把判据喂绿。
+    pub sigma: Option<f64>,
+    /// 落库权重。`None` 语义同上；`participates` 因此不能只看 `> 0.0`。
+    pub weight: Option<f64>,
     /// 证据属主分析师 id；`None` = 元约束腿（风险分类 / 数据质量 / trader 观点），
     /// 按 `DECISION_LEG_ANALYST` 的**显式**登记，不是「查不到」。
     pub owner: Option<String>,
+    /// 是否进方向加权 = `weight` **存在**且 > 0。字段缺失不算参与（也不能算 0 权重参与）。
     pub participates: bool,
     pub reconcile: Reconcile,
 }
@@ -176,7 +277,8 @@ pub struct BranchLegAudit {
     pub owner_name: String,
     pub role: String,
     pub signal: Option<f64>,
-    pub weight: f64,
+    /// 落库权重。`None` = 字段缺失/类型不对，与「权重真的是 0」可分。
+    pub weight: Option<f64>,
     pub participates: bool,
     /// 本档 `verdict_spec().participating` 是否要求这条腿进方向加权
     pub expected_to_participate: bool,
@@ -186,6 +288,11 @@ pub struct BranchLegAudit {
 }
 
 /// 主档全局闭合：`Σ(σ·w)/weightSum` 是否等于落库的 `avgSignal`。
+///
+/// ⚠ **闭合只证明算术自洽**：`weightSum` 与 `avgSignal` 与 `factors.fN` 出自同一次
+/// rhai 执行（`portfolio-mgr.rhai:1895` 的除法 + `:3683` 的落库），审计拿同一批 σ·w
+/// 复算 ⇒ 除非舍入越界，它恒成立。因此 `Closed` 额外携带**权重覆盖率**，
+/// 让「37% 的权重经独立核对、63% 从未被任何外部数据核过」这种状态不再显示成纯绿。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "state")]
 pub enum Closure {
@@ -193,13 +300,19 @@ pub enum Closure {
         recomputed: f64,
         stored: f64,
         tolerance: f64,
+        /// 参与腿里「σ 未经独立上游核对」的权重占比 ∈ [0, 1]。
+        /// `0.0` = 全部权重都有独立基准；`1.0` = 一条都没有。
+        unverified_weight_ratio: f64,
     },
     Broken {
         recomputed: f64,
         stored: f64,
         tolerance: f64,
     },
-    /// 缺 `weightSum` / `avgSignal` 或分母为 0 ⇒ 无从判定
+    /// 无从判定。三个原因码：
+    /// - `NO_WEIGHT_SUM_OR_FACTORS`：缺 `weightSum` / `avgSignal`，或分母为 0
+    /// - `MISSING_FACTOR_INPUT`：某条腿的 σ / 权重字段缺失 —— **不得**补 0 硬算
+    /// - `DECISION_DEGRADED`：本轮决策未产出，没有可审计对象
     NotComputable {
         reason: String,
     },
@@ -224,15 +337,21 @@ pub struct EvidenceAuditReport {
     // ── 计数分三族，**不得并排成同一个可比数字**（两套计数域各自有消费点）──
     /// 本档 `verdict_spec().participating` 的腿数（裁定 P-B3 的总分母）
     pub expected_branch_legs: usize,
-    /// B 面里 `role=direction` 且 `weight>0` 的腿数
+    /// B 面里 `role=direction` 且 `weight` **有值且 > 0** 的腿数（字段缺失不算参与）
     pub participating_branch_legs: usize,
     /// B 面里 L1 判为 `Present` 的腿数
     pub upstream_present_legs: usize,
     /// B 面里 L1 **不适用**（快照不携带该来源键）的腿数 —— 单独计数，不并入缺席
     pub upstream_not_checked_legs: usize,
-    /// A 面里 L2 判为 `Consistent` 的腿数
+    /// A 面里「**参与**且经**独立上游**回算一致」的腿数（判据见 [`BasisSource`]）。
+    ///
+    /// 三项各自排除一类假绿：
+    /// - 不参与（`weight = 0`）的腿即使「一致」也不构成证据 —— f10 的 σ=0 ⇒ w=0
+    ///   是产端构造耦合（`portfolio-mgr.rhai:1533`），把它计入分子会让可核率虚高；
+    /// - 同源副本互比恒真（`SameVariableCopy`），只能证明副本没被篡改；
+    /// - 越界（`Inconsistent`）当然不算。
     pub sigma_reconciled_legs: usize,
-    /// A 面里 `weight>0` 的腿数
+    /// A 面里 `weight` **有值且 > 0** 的腿数（字段缺失不算参与）
     pub participating_factor_legs: usize,
     pub factor_legs_total: usize,
 }
@@ -374,7 +493,9 @@ pub fn audit_decision_evidence(
         for leg in legs {
             let Some(factor) = as_s(leg.get("factor")) else { continue };
             let role = as_s(leg.get("role")).unwrap_or("").to_string();
-            let weight = as_f(leg.get("weight")).unwrap_or(0.0);
+            // 缺失即 `None`，绝不兜 0：「权重字段坏了」与「权重真的是 0」在
+            // `participates`、覆盖率、闭合求和三处的后果完全不同。
+            let weight = as_f(leg.get("weight"));
             let signal = as_f(leg.get("signal"));
             let owner = period
                 .and_then(|_| axagent_harness::holding_period::Period::factor_owner(factor))
@@ -410,6 +531,15 @@ pub fn audit_decision_evidence(
                         },
                         None => UpstreamState::NotChecked { reason: "NO_CHANNEL_MAPPING".into() },
                     },
+                    // injectedVar（阶段 1 的 `relativeStrength`）：值由 wiring 层注入，
+                    // **实测确实进了快照**（002696 那次黑板里 `market_regime` 出现 8 次、
+                    // `input_params` 25 次），但本仓**没有**「注入变量 → 哪个节点键的 input_params」
+                    // 这张权威表 ⇒ 硬造一个 pointer 会把「我猜它在该节点」伪装成「查过且在场」。
+                    // 如实报不适用；要升级为可判，先补一张与 `CHANNEL_SNAPSHOT_KEYS` 同形的
+                    // 注入变量键表（并给它自己的负控），别在这里凑数。
+                    "injectedVar" => {
+                        UpstreamState::NotChecked { reason: "INJECTED_VAR_HAS_NO_KEY_TABLE".into() }
+                    },
                     // tierScore（`macd` / `totalScore`）：逐档评分节点的产出**不落主快照**
                     // （阶段 0 实测 0/49）⇒ 判据对本腿不适用，如实报出，不给假键。
                     _ => UpstreamState::NotChecked { reason: "TIER_SCORE_NOT_IN_SNAPSHOT".into() },
@@ -423,7 +553,7 @@ pub fn audit_decision_evidence(
                     owner.as_deref().unwrap_or(factor),
                 ),
                 factor: factor.to_string(),
-                participates: role == "direction" && weight > 0.0,
+                participates: role == "direction" && weight.is_some_and(|w| w > 0.0),
                 expected_to_participate: participating_set.contains(factor),
                 absence_declared: declared_absent || constraint,
                 owner,
@@ -455,7 +585,9 @@ pub fn audit_decision_evidence(
                 owner,
                 role: "absent".to_string(),
                 signal: None,
-                weight: 0.0,
+                // 审计**合成**的缺席行：明确记为 0 权重（不是字段缺失），
+                // 与 `as_f` 读不到键的 `None` 语义分开。
+                weight: Some(0.0),
                 participates: false,
                 expected_to_participate: participating_set.contains(f.as_str()),
                 upstream: UpstreamState::DeclaredAbsent,
@@ -478,7 +610,9 @@ pub fn audit_decision_evidence(
                 owner,
                 role: "absent".to_string(),
                 signal: None,
-                weight: 0.0,
+                // 审计**合成**的缺席行：明确记为 0 权重（不是字段缺失），
+                // 与 `as_f` 读不到键的 `None` 语义分开。
+                weight: Some(0.0),
                 participates: false,
                 expected_to_participate: true,
                 upstream: UpstreamState::SilentAbsent,
@@ -492,17 +626,19 @@ pub fn audit_decision_evidence(
     let mut factor_legs: Vec<FactorLegAudit> = Vec::new();
     if let Some(map) = factors.as_object() {
         let mut ids: Vec<&String> = map.keys().collect();
-        ids.sort();
+        // 数值序，不是字符串序：后者会把 f10/f11/f12/f13 排到 f2 前面
+        ids.sort_by_key(|id| leg_sort_key(id.as_str()));
         for id in ids {
             let node = &map[id];
-            let sigma = as_f(node.get("sigma")).unwrap_or(0.0);
-            let weight = as_f(node.get("weight")).unwrap_or(0.0);
+            // 两个字段都保留 `Option`：缺失不进任何求和，也不被当作 0 参与。
+            let sigma = as_f(node.get("sigma"));
+            let weight = as_f(node.get("weight"));
             let owner = DECISION_LEG_ANALYST
                 .iter()
                 .find(|(l, _)| *l == id)
                 .and_then(|(_, a)| a.map(str::to_string));
             let spec = FACTOR_SIGMA_BASIS.iter().find(|(l, ..)| *l == id);
-            let frozen = spec.and_then(|(_, doc, path, tf)| {
+            let frozen = spec.and_then(|(_, doc, path, tf, _)| {
                 let raw = match doc {
                     BasisDoc::DecisionJson => pointer(decision_json, path).cloned(),
                     BasisDoc::Snapshot => resolve_path(blackboard, path),
@@ -517,24 +653,30 @@ pub fn audit_decision_evidence(
                     },
                 })
             });
-            let reconcile = match (spec, frozen) {
-                (Some((_, _, path, _)), Some(bv)) => {
+            let reconcile = match (sigma, spec, frozen) {
+                // σ 缺失优先于一切：没有被检对象时，「有没有基准」无从谈起，
+                // 更不能拿 0 去和基准比出一个「一致」。
+                (None, _, _) => Reconcile::InputMissing { field: "sigma".into() },
+                (Some(sg), Some((_, _, path, _, source)), Some(bv)) => {
                     let tol = sigma_basis_tolerance();
-                    let delta = (sigma - bv).abs();
+                    let delta = (sg - bv).abs();
                     let basis = (*path).to_string();
+                    let source = *source;
                     if delta <= tol {
-                        Reconcile::Consistent { delta, tolerance: tol, basis }
+                        Reconcile::Consistent { delta, tolerance: tol, basis, source }
                     } else {
                         Reconcile::Inconsistent { delta, tolerance: tol, basis }
                     }
                 },
-                (Some(_), None) => Reconcile::NoBasis { reason: "BASIS_MISSING_IN_RECORD".into() },
-                (None, _) => Reconcile::NoBasis { reason: "NO_PERSISTED_BASIS".into() },
+                (Some(_), Some(_), None) => {
+                    Reconcile::NoBasis { reason: "BASIS_MISSING_IN_RECORD".into() }
+                },
+                (Some(_), None, _) => Reconcile::NoBasis { reason: "NO_PERSISTED_BASIS".into() },
             };
             factor_legs.push(FactorLegAudit {
                 leg_id: id.clone(),
                 name: as_s(node.get("name")).unwrap_or_default().to_string(),
-                participates: weight > 0.0,
+                participates: weight.is_some_and(|w| w > 0.0),
                 sigma,
                 weight,
                 owner,
@@ -543,18 +685,52 @@ pub fn audit_decision_evidence(
         }
     }
 
+    // 「已核对」的唯一定义：参与 + 一致 + 基准独立于 σ。计数与覆盖率共用，避免两处判据分叉。
+    let is_verified = |l: &FactorLegAudit| {
+        l.participates
+            && matches!(
+                l.reconcile,
+                Reconcile::Consistent { source: BasisSource::IndependentUpstream, .. }
+            )
+    };
+    // 只累加**确实取到值**的腿：`weight = null` 的腿连参与都不算，不进分母
+    let participating_weight: f64 =
+        factor_legs.iter().filter(|l| l.participates).filter_map(|l| l.weight).sum();
+    let verified_weight: f64 =
+        factor_legs.iter().filter(|l| is_verified(l)).filter_map(|l| l.weight).sum();
+    // 参与权重为 0 时没有「未覆盖」可言，报 0 而不是 NaN
+    let unverified_weight_ratio = if participating_weight > 0.0 {
+        (1.0 - verified_weight / participating_weight).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
+    // 任一腿的 σ / 权重缺失 ⇒ 闭合**无从判定**。
+    // 理由：落库的 `avgSignal` 是脚本拿它自己的默认值算出来的，审计若在这里补 0，
+    // 就是拿一个伪造的输入去验证一个伪造的结论 —— 缺失反而被"闭合"背书，比不判更糟。
+    let inputs_complete = factor_legs.iter().all(|l| l.sigma.is_some() && l.weight.is_some());
+
     let closure = match (
         as_f(pointer(decision_json, "/evidence/weightSum")),
         as_f(pointer(decision_json, "/evidence/avgSignal")),
     ) {
         (Some(w), Some(stored)) if w > 0.0 && !factor_legs.is_empty() => {
-            let recomputed: f64 = factor_legs.iter().map(|l| l.sigma * l.weight).sum::<f64>() / w;
-            let tol = closure_tolerance(factor_legs.len(), w);
-            let delta = (recomputed - stored).abs();
-            if delta <= tol {
-                Closure::Closed { recomputed, stored, tolerance: tol }
+            if !inputs_complete {
+                Closure::NotComputable { reason: "MISSING_FACTOR_INPUT".into() }
             } else {
-                Closure::Broken { recomputed, stored, tolerance: tol }
+                // 已被 `inputs_complete` 证明全为 Some；兜底分支不会命中
+                let recomputed: f64 = factor_legs
+                    .iter()
+                    .map(|l| l.sigma.unwrap_or_default() * l.weight.unwrap_or_default())
+                    .sum::<f64>()
+                    / w;
+                let tol = closure_tolerance(factor_legs.len(), w);
+                let delta = (recomputed - stored).abs();
+                if delta <= tol {
+                    Closure::Closed { recomputed, stored, tolerance: tol, unverified_weight_ratio }
+                } else {
+                    Closure::Broken { recomputed, stored, tolerance: tol }
+                }
             }
         },
         _ => Closure::NotComputable { reason: "NO_WEIGHT_SUM_OR_FACTORS".into() },
@@ -568,8 +744,7 @@ pub fn audit_decision_evidence(
         .iter()
         .filter(|l| matches!(l.upstream, UpstreamState::NotChecked { .. }))
         .count();
-    let sigma_reconciled_legs =
-        factor_legs.iter().filter(|l| matches!(l.reconcile, Reconcile::Consistent { .. })).count();
+    let sigma_reconciled_legs = factor_legs.iter().filter(|l| is_verified(l)).count();
     let participating_factor_legs = factor_legs.iter().filter(|l| l.participates).count();
     let factor_legs_total = factor_legs.len();
 
@@ -816,8 +991,11 @@ mod tests {
         let r = run(&dj, &bb, false);
         let f4 = r.factor_legs.iter().find(|l| l.leg_id == "f4").unwrap();
         match &f4.reconcile {
-            Reconcile::Consistent { delta, tolerance, basis } => {
+            Reconcile::Consistent { delta, tolerance, basis, source } => {
                 assert_eq!(basis, "/risk_quant/f4_adjusted");
+                // f4 的 σ 与基准取自同一个 `f4_adjusted` 变量 ⇒ 必须标成同源副本，
+                // 否则面板会把它和 f1（独立快照）染成同一种「已核对」绿。
+                assert_eq!(*source, BasisSource::SameVariableCopy);
                 assert!((delta - 0.004).abs() < 1e-9, "delta 应现算得 0.004，实际 {delta}");
                 // 容差按公式现算，不写死常数
                 let expect = 0.5 * 10f64.powi(-3) + 0.5 * 10f64.powi(-2);
@@ -829,8 +1007,16 @@ mod tests {
             },
             other => panic!("f4 应判一致，实际 {other:?}"),
         }
-        // f1（快照总分）/ f4 / f11 / f12 四条都能在容差内回算 ⇒ 一致者 4
-        assert_eq!(r.sigma_reconciled_legs, 4);
+        // f1（独立快照）/ f4 / f11 / f12 四条都在容差内，但只有 f1 的基准独立于 σ
+        // ⇒ 可核计数只认 f1 一条。这是 2026-10-18 修掉「同源副本互比算作已核对」后的读数。
+        assert_eq!(r.sigma_reconciled_legs, 1, "只有独立上游基准能计入可核");
+        let f1 = r.factor_legs.iter().find(|l| l.leg_id == "f1").unwrap();
+        match &f1.reconcile {
+            Reconcile::Consistent { source, .. } => {
+                assert_eq!(*source, BasisSource::IndependentUpstream)
+            },
+            other => panic!("f1 应判一致，实际 {other:?}"),
+        }
         let f11 = r.factor_legs.iter().find(|l| l.leg_id == "f11").unwrap();
         assert!(matches!(f11.reconcile, Reconcile::Consistent { .. }));
 
@@ -902,10 +1088,20 @@ mod tests {
     fn closure_tolerance_is_derived_and_breaks_when_out_of_range() {
         let (dj, bb) = fixture();
         let r = run(&dj, &bb, false);
-        let (recomputed, stored, tolerance) = match r.closure {
-            Closure::Closed { recomputed, stored, tolerance } => (recomputed, stored, tolerance),
+        let (recomputed, stored, tolerance, unverified) = match r.closure {
+            Closure::Closed { recomputed, stored, tolerance, unverified_weight_ratio } => {
+                (recomputed, stored, tolerance, unverified_weight_ratio)
+            },
             ref other => panic!("夹具应闭合，实际 {other:?}"),
         };
+        // 覆盖率必须与「闭合」一起给出：夹具 4 条参与腿（权重 .105/.15/.052/.075）里
+        // 只有 f1 的基准独立 ⇒ 72.5% 的参与权重从未经任何外部数据核对。
+        // 没有这个读数时，「闭合」会被读成「证据链已核对」，而它只证明算术自洽。
+        let expected_unverified = 1.0 - 0.105 / (0.105 + 0.15 + 0.052 + 0.075);
+        assert!(
+            (unverified - expected_unverified).abs() < 1e-9,
+            "未核权重占比应为 {expected_unverified}，实际 {unverified}"
+        );
         // 期望按公式现算（n 条腿、W = 1.105）
         let n = r.factor_legs.len();
         let expect = 0.5e-3 + (0.5e-4 * n as f64 / 1.105) + 0.5e-2;
@@ -949,6 +1145,129 @@ mod tests {
         let r2 = run(&dj2, &bb, false);
         assert_eq!(r2.expected_branch_legs, 0);
         assert!(r2.branch_legs.is_empty());
+    }
+
+    /// 2026-10-18：可核计数的**三重排除**各配一个负控。
+    ///
+    /// 修前分子是「`Consistent` 腿数」，把两类不构成证据的绿都算了进去：
+    /// ① `weight = 0` 的腿 —— f10 的 σ=0 ⇒ w=0 是产端构造耦合（`portfolio-mgr.rhai:1533`），
+    /// ② 基准与 σ 同变量的副本互比 —— delta 上限恒等于容差推导值，数学上永不越界。
+    #[test]
+    fn reconciled_count_excludes_nonparticipating_and_same_source_copies() {
+        let (dj, bb) = fixture();
+        let r = run(&dj, &bb, false);
+
+        // 修前口径（四条全绿）与修后口径（只认独立源）必须能被区分开
+        let raw_consistent = r
+            .factor_legs
+            .iter()
+            .filter(|l| matches!(l.reconcile, Reconcile::Consistent { .. }))
+            .count();
+        assert_eq!(raw_consistent, 4, "f1/f4/f11/f12 都在容差内 —— 这正是修前的分子");
+        assert_eq!(r.sigma_reconciled_legs, 1, "修后只认基准独立的 f1");
+
+        // ① 参与过滤：f1 权重清零后仍「一致」，但不得再计入分子
+        let mut dj2 = dj.clone();
+        dj2["evidence"]["factors"]["f1"]["weight"] = json!(0.0);
+        let r2 = run(&dj2, &bb, false);
+        let f1b = r2.factor_legs.iter().find(|l| l.leg_id == "f1").unwrap();
+        assert!(matches!(f1b.reconcile, Reconcile::Consistent { .. }), "改权重不动 σ 与基准的关系");
+        assert_eq!(r2.sigma_reconciled_legs, 0, "w=0 的腿不构成证据");
+
+        // ② 同源副本的恒真性：把 σ 与基准**同时**改成同一个值 ⇒ 照样「一致」
+        //    （证明这条绿来自两个副本同源，不是数据干净）
+        let mut dj3 = dj.clone();
+        dj3["evidence"]["f11_pace_signal"] = json!(0.77);
+        dj3["evidence"]["factors"]["f11"]["sigma"] = json!(0.77);
+        let r3 = run(&dj3, &bb, false);
+        let f11c = r3.factor_legs.iter().find(|l| l.leg_id == "f11").unwrap();
+        assert!(matches!(f11c.reconcile, Reconcile::Consistent { .. }), "两副本同改必然一致");
+        assert_eq!(r3.sigma_reconciled_legs, 1, "同源副本仍不进分子");
+
+        // ③ 但要保留它的唯一价值：**单边**改动必须翻红（副本托管检测仍有效）
+        let mut dj4 = dj.clone();
+        dj4["evidence"]["f11_pace_signal"] = json!(0.77);
+        let r4 = run(&dj4, &bb, false);
+        let f11d = r4.factor_legs.iter().find(|l| l.leg_id == "f11").unwrap();
+        assert!(matches!(f11d.reconcile, Reconcile::Inconsistent { .. }), "单边改动必须翻红");
+    }
+
+    /// 因子腿必须按**数值序**排列。`ids.sort()` 的字符串序会把 `f10`~`f13` 排到 `f2`
+    /// 前面（2026-10-18 截图上 12 行顺序逐行印证），读者按 f1→f13 找腿时全乱。
+    #[test]
+    fn factor_legs_are_ordered_numerically_not_lexicographically() {
+        let (mut dj, bb) = fixture();
+        for id in ["f2", "f3", "f5", "f6", "f7", "f9", "f10", "f13"] {
+            dj["evidence"]["factors"][id] = json!({ "name": id, "sigma": 0.0, "weight": 0.0 });
+        }
+        let r = run(&dj, &bb, false);
+        let ids: Vec<&str> = r.factor_legs.iter().map(|l| l.leg_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f9", "f10", "f11", "f12", "f13"],
+            "必须是数值序"
+        );
+        // 负控：两种排法确实不同，否则本测试证明不了「换掉了字符串序」
+        let mut lex = ids.clone();
+        lex.sort_unstable();
+        assert_ne!(lex, ids, "字符串序与本序列相同 ⇒ 夹具无法区分两种排法");
+    }
+
+    /// 2026-10-18：「字段缺失」与「值真的是 0」必须可分，且**缺失不得让闭合通过**。
+    ///
+    /// 修前两处 `unwrap_or(0.0)` 把缺失兜成 0：σ 照样进 `Σ(σ·w)`、weight 照样参与
+    /// `participates` 判定 ⇒ 数据坏了在面板上与「信号为零」同形，闭合还能照常绿。
+    /// 最坏的一种是「用缺失值喂出一个闭合」——比不判更糟，因为它给了通过背书。
+    #[test]
+    fn missing_input_is_distinct_from_zero_and_blocks_closure() {
+        let (dj, bb) = fixture();
+        let base = run(&dj, &bb, false);
+        assert!(matches!(base.closure, Closure::Closed { .. }), "夹具基线应闭合");
+
+        // ① 把 f4 的 sigma 键整个删掉（不是设 0）
+        let mut dj2 = dj.clone();
+        dj2["evidence"]["factors"]["f4"].as_object_mut().unwrap().remove("sigma");
+        let r2 = run(&dj2, &bb, false);
+        let f4 = r2.factor_legs.iter().find(|l| l.leg_id == "f4").unwrap();
+        assert_eq!(f4.sigma, None, "缺键必须解析成 None，不是 0");
+        assert_eq!(f4.reconcile, Reconcile::InputMissing { field: "sigma".into() });
+        assert_eq!(
+            r2.closure,
+            Closure::NotComputable { reason: "MISSING_FACTOR_INPUT".into() },
+            "输入缺失时闭合必须报无从判定，不得拿 0 补齐后照常通过"
+        );
+
+        // ② 负控：把 sigma 显式设成 0 ⇒ 仍属「有值」，走正常对账而非 InputMissing
+        let mut dj3 = dj.clone();
+        dj3["evidence"]["factors"]["f4"]["sigma"] = json!(0.0);
+        let r3 = run(&dj3, &bb, false);
+        let f4b = r3.factor_legs.iter().find(|l| l.leg_id == "f4").unwrap();
+        assert_eq!(f4b.sigma, Some(0.0), "显式 0 是「有值」");
+        assert!(
+            matches!(f4b.reconcile, Reconcile::Inconsistent { .. }),
+            "σ=0 与基准 −0.17 差 0.17 ⇒ 报不一致，而不是「缺失」"
+        );
+
+        // ③ 权重缺失：不得静默变成「0 权重参与」
+        let mut dj4 = dj.clone();
+        dj4["evidence"]["factors"]["f11"].as_object_mut().unwrap().remove("weight");
+        let r4 = run(&dj4, &bb, false);
+        let f11 = r4.factor_legs.iter().find(|l| l.leg_id == "f11").unwrap();
+        assert_eq!(f11.weight, None);
+        assert!(!f11.participates, "权重缺失不得算作参与");
+        assert!(matches!(r4.closure, Closure::NotComputable { .. }));
+
+        // ④ B 面同族：分支腿的 weight 缺失同样不得被当作 0
+        let mut bb2 = bb.clone();
+        bb2["result.h_ultra_short"]["legs"][0].as_object_mut().unwrap().remove("weight");
+        let r5 = run(&dj, &bb2, false);
+        let momentum = r5.branch_legs.iter().find(|l| l.factor == "momentumSignal").unwrap();
+        assert_eq!(momentum.weight, None);
+        assert!(!momentum.participates);
+        assert!(
+            momentum.expected_to_participate,
+            "它本该参与 —— 正是「应参与未计入」那一格要报的形态"
+        );
     }
 
     /// 门（2026-10-16）：本模块的三个**舍入位数常量**必须与产端字面量逐一对应。

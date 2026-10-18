@@ -88,7 +88,7 @@ fn tier_end_node(decision_output_var: &str, y: f64) -> WorkflowNode {
     })
 }
 
-/// 本档尺度常量节点 —— 产出子模板自有的 `scoring_period` 字符串变量。
+/// 本档**档位**常量节点 —— 产出子模板自有的 `scoring_horizon` 字符串变量（档位 snake 名）。
 ///
 /// 为什么必须有它（PLAN §一○○(1)，根因见 §九十二(4)）：`tool_executor.rs:75-80` 对
 /// `input_mapping` 的**值**一律走 `resolve_var_path`，取不到就落 `Value::Null` —— **没有**
@@ -96,17 +96,24 @@ fn tier_end_node(decision_output_var: &str, y: f64) -> WorkflowNode {
 /// **变量** hourly」，而全仓不存在名为 `hourly/weekly/monthly/quarterly` 的工作流变量
 /// ⇒ `compute_scoring` 的 `as_str().unwrap_or("daily")` 恒命中缺省 ⇒ 四档评分实际全是日线
 /// （§九十二(4) 普查出的既有死参数）。
-/// 尺度**不做成面板可调**（`seed_variables.rs` 已记这条裁定，且新增可调参数要满五点对账）⇒
-/// 不新增种子变量，改由每张档子模板自己产常量。字面量逐档写死在各模板里（不用
-/// `period.scale_key()`），这样「常量与本档尺度是否一致」有字面量可对 —— 那条一致性
-/// 由本文件末尾的 `scoring_period_constant_matches_scale_key_authority` 现场核对权威。
-fn tier_scoring_period_const_node(period_literal: &str, y: f64) -> WorkflowNode {
+/// 档位**不做成面板可调**（`seed_variables.rs` 已记这条裁定，且新增可调参数要满五点对账）⇒
+/// 不新增种子变量，改由每张档子模板自己产常量。
+///
+/// ## 2026-10-18：常量从「尺度名」改成「档位名」
+///
+/// 旧形态每档写 `"hourly"/"weekly"/"monthly"/"quarterly"` —— 那是**档 → 尺度映射的第二份副本**，
+/// 于是必须另配一条测试（`scoring_horizon_constant_matches_scale_key_authority`）去和权威对账。
+/// 改成写档位名（`"short"` 等）后，「档 → 尺度」只剩 harness 一处：`compute_scoring` 拿
+/// `horizon` 参数自己按 `Period::scale_key()` 解析尺度与窗口计划。
+/// 另一条硬理由：`daily` 同时是主链 `t-scoring` 与短档的尺度，**尺度名反查档位不唯一**
+/// （`PLAN-horizon-scale-alignment.md` §四 P2）。
+fn tier_scoring_horizon_const_node(horizon_literal: &str, y: f64) -> WorkflowNode {
     WorkflowNode::DataTransformer(DataTransformerNode {
         base: WorkflowNodeBase {
-            id: "const-scoring-period".into(),
-            title: "本档评分尺度常量".into(),
+            id: "const-scoring-horizon".into(),
+            title: "本档评分档位常量".into(),
             description: Some(
-                "产出 scoring_period（本档尺度名），供 compute_scoring 的 period 参数取用".into(),
+                "产出 scoring_horizon（本档档位名），供 compute_scoring 的 horizon 参数取用".into(),
             ),
             position: Position { x: 900.0, y },
             retry: RetryConfig::default(),
@@ -118,14 +125,14 @@ fn tier_scoring_period_const_node(period_literal: &str, y: f64) -> WorkflowNode 
         },
         config: DataTransformerNodeConfig {
             input_var: String::new(),
-            expression: format!("\"{period_literal}\""),
-            output_var: "scoring_period".into(),
+            expression: format!("\"{horizon_literal}\""),
+            output_var: "scoring_horizon".into(),
         },
     })
 }
 
-/// 本档评分工具节点（`compute_scoring`）。`period` 取**变量** `scoring_period`
-/// —— 由同模板内的 [`tier_scoring_period_const_node`] 产出，不是字面量（见其文档）。
+/// 本档评分工具节点（`compute_scoring`）。`horizon` 取**变量** `scoring_horizon`
+/// —— 由同模板内的 [`tier_scoring_horizon_const_node`] 产出，不是字面量（见其文档）。
 ///
 /// ⚠ v137 起本节点**只接阈值域三条**（布林标准差倍数 / 放量比 / 缩量比），
 /// 窗口域五条（MACD 快慢信号、布林周期、量能回看）**一律不接**：档侧的「几根 bar」
@@ -136,7 +143,8 @@ fn tier_scoring_period_const_node(period_literal: &str, y: f64) -> WorkflowNode 
 fn tier_scoring_tool_node(id: &str, title: &str, x: f64, y: f64) -> WorkflowNode {
     let mut input_mapping = HashMap::new();
     input_mapping.insert("stock_code".to_string(), "stock_code".to_string());
-    input_mapping.insert("period".to_string(), "scoring_period".to_string());
+    // `horizon`（不是 `period`）：档 → 尺度由 harness 权威解析，本模板不再抄尺度名。
+    input_mapping.insert("horizon".to_string(), "scoring_horizon".to_string());
     // 阈值域三条**逐字写**（不循环生成、不从别处拼）：与 §九十一(2.5) 拒绝 `format!` 拼装同一条
     // 理由 —— 按字面量配对的那些 node 门（`audit-inject-coverage.mjs` / `check-tier-purity.mjs`）
     // 读的就是这里的字面量，拼装会让它们静默失明。
@@ -169,7 +177,7 @@ fn tier_scoring_tool_node(id: &str, title: &str, x: f64, y: f64) -> WorkflowNode
 ///
 /// 输入面 = 7 条全局轴 + 2 条本档轴（`riskWindows.<camel档>`），与父图旧形态**逐字一致** ⇒
 /// 数值零变化。`t-risk` 由父扇出以恒等键传进子快照（它不是子节点，所以子图里**不给它建边**：
-/// 子图的根仍只有 `const-scoring-period`，风险节点无入边 = 与评分节点并行起跑，
+/// 子图的根仍只有 `const-scoring-horizon`，风险节点无入边 = 与评分节点并行起跑，
 /// 而它要的 `t-risk` 在扇出开工前就已到账 —— 父侧的 `t-risk → pm-h-<档>` 供给边保证这点）。
 ///
 /// ⚠ 九个映射的**字面量在四个调用点各写一遍**（含七条全局轴），不在这个 helper 里用 `format!` 拼、
@@ -220,7 +228,7 @@ fn tier_risk_node(
 
 fn ultra_short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
     let nodes = vec![
-        tier_scoring_period_const_node("hourly", 2700.0),
+        tier_scoring_horizon_const_node("ultra_short", 2700.0),
         tier_scoring_tool_node("t-scoring-hour", "技术评分（60 分钟）", 1020.0, 2700.0),
         // v140：本档按档风险节点（父图搬入，见 `tier_risk_node` 的文档）。
         tier_risk_node(
@@ -291,6 +299,9 @@ fn ultra_short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
                     // 不只窗口根数 —— 读者要能看出「这一档的两带差是多少」。
                     ("scale_trend", "t-scoring-hour.result.content.indicators.scaleTrend"),
                     ("scale_momentum", "t-scoring-hour.result.content.indicators.scaleMomentum"),
+                    // 阶段 2（2026-10-19）：入场门「抗跌蓄势」并列分支的输入（只作门必要条件，
+                    // 不是本档方向腿 —— 未进 verdict_spec 的 participating）
+                    ("excess_return_pct", "relative_strength.ultra_short"),
                     // v128（B1）：本档风险档 ← **本档**的 cls-risk-level-ultra-short 节点
                     ("overall_risk", "cls-risk-level-ultra-short.result.category"),
                     // `kline_bars` 取**日线** `t-scoring` 而非本档尺度节点：本档要的量是 `σ_daily`
@@ -325,8 +336,8 @@ fn ultra_short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
         // 常量节点是子图唯一的根（它不读任何变量），评分节点必须有它的入边，
         // 否则 DAG 上评分会在常量之前起跑 —— 「有边才等」，无入边的非根节点立刻跑。
         direct_edge(
-            "e-const-scoring-period-t-scoring-hour",
-            "const-scoring-period",
+            "e-const-scoring-horizon-t-scoring-hour",
+            "const-scoring-horizon",
             "t-scoring-hour",
         ),
         direct_edge("e-t-scoring-hour-pm-h-ultra-short", "t-scoring-hour", "pm-h-ultra-short"),
@@ -348,8 +359,8 @@ fn ultra_short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
 
 fn short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
     let nodes = vec![
-        tier_scoring_period_const_node("weekly", 2700.0),
-        tier_scoring_tool_node("t-scoring-week", "技术评分（周线）", 1140.0, 2700.0),
+        tier_scoring_horizon_const_node("short", 2700.0),
+        tier_scoring_tool_node("t-scoring-day", "技术评分（日线）", 1140.0, 2700.0),
         // v140：本档按档风险节点（父图搬入，见 `tier_risk_node` 的文档）。
         tier_risk_node(
             "cls-risk-level-short",
@@ -405,17 +416,21 @@ fn short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
                 input_mapping: [
                     ("branch_json", "horizon_branch_json.short"),
                     ("horizon_prior_json", "horizon_prior_json"),
-                    // 本档尺度节点 = 周线（阶段 2 拍板：短=周线 / 中=月线 / 长=季线）
-                    ("tier_score", "t-scoring-week.result.content.totalScore"),
-                    ("macd_dif", "t-scoring-week.result.content.indicators.macdDif"),
-                    ("macd_dea", "t-scoring-week.result.content.indicators.macdDea"),
-                    ("rsi_value", "t-scoring-week.result.content.indicators.scaleMomentum.value"),
+                    // 本档评分节点 = `t-scoring-day`（短档 5 交易日的权威尺度 = 日线，
+                    // 见 `Period::scale_key` 的定阶表；节点名后缀是**尺度名**，不是持有期名）
+                    ("tier_score", "t-scoring-day.result.content.totalScore"),
+                    ("macd_dif", "t-scoring-day.result.content.indicators.macdDif"),
+                    ("macd_dea", "t-scoring-day.result.content.indicators.macdDea"),
+                    ("rsi_value", "t-scoring-day.result.content.indicators.scaleMomentum.value"),
                     // v138 裁定 3：本档窗口回显 + 尺度（详注见超短模板那一处）
-                    ("scoring_windows", "t-scoring-week.result.content.indicators.windows"),
-                    ("scoring_scale", "t-scoring-week.result.content.period"),
+                    ("scoring_windows", "t-scoring-day.result.content.indicators.windows"),
+                    ("scoring_scale", "t-scoring-day.result.content.period"),
                     // v139 呈现层补齐（详注见超短模板那一处）
-                    ("scale_trend", "t-scoring-week.result.content.indicators.scaleTrend"),
-                    ("scale_momentum", "t-scoring-week.result.content.indicators.scaleMomentum"),
+                    ("scale_trend", "t-scoring-day.result.content.indicators.scaleTrend"),
+                    ("scale_momentum", "t-scoring-day.result.content.indicators.scaleMomentum"),
+                    // 阶段 1（2026-10-19）：本档窗口的相对强度（wiring 层算好注入，见
+                    // `hooks::RELATIVE_STRENGTH_BENCH`）。缺值 ⇒ null ⇒ 该腿按缺席处理。
+                    ("excess_return_pct", "relative_strength.short"),
                     // #23（v132）：本档解禁供给占比 —— 取数层按**权威交易日窗**归约后的**小数**占比
                     // （`Σ解禁市值 ÷ 流通市值`，锚点 = as-of 截止日）。
                     (
@@ -446,11 +461,11 @@ fn short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
     ];
     let edges = vec![
         direct_edge(
-            "e-const-scoring-period-t-scoring-week",
-            "const-scoring-period",
-            "t-scoring-week",
+            "e-const-scoring-horizon-t-scoring-day",
+            "const-scoring-horizon",
+            "t-scoring-day",
         ),
-        direct_edge("e-t-scoring-week-pm-h-short", "t-scoring-week", "pm-h-short"),
+        direct_edge("e-t-scoring-day-pm-h-short", "t-scoring-day", "pm-h-short"),
         // v140：风险节点 → 本档分支（同超短那一处注释）
         direct_edge("e-cls-risk-level-short-pm-h-short", "cls-risk-level-short", "pm-h-short"),
         direct_edge("e-pm-h-short-end", "pm-h-short", "end"),
@@ -464,8 +479,8 @@ fn short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
 
 fn mid_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
     let nodes = vec![
-        tier_scoring_period_const_node("monthly", 2700.0),
-        tier_scoring_tool_node("t-scoring-month", "技术评分（月线）", 1260.0, 2700.0),
+        tier_scoring_horizon_const_node("mid", 2700.0),
+        tier_scoring_tool_node("t-scoring-week", "技术评分（周线）", 1260.0, 2700.0),
         // v140：本档按档风险节点（父图搬入，见 `tier_risk_node` 的文档）。
         tier_risk_node(
             "cls-risk-level-mid",
@@ -521,16 +536,18 @@ fn mid_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
                 input_mapping: [
                     ("branch_json", "horizon_branch_json.mid"),
                     ("horizon_prior_json", "horizon_prior_json"),
-                    ("tier_score", "t-scoring-month.result.content.totalScore"),
-                    ("macd_dif", "t-scoring-month.result.content.indicators.macdDif"),
-                    ("macd_dea", "t-scoring-month.result.content.indicators.macdDea"),
-                    ("rsi_value", "t-scoring-month.result.content.indicators.scaleMomentum.value"),
+                    ("tier_score", "t-scoring-week.result.content.totalScore"),
+                    ("macd_dif", "t-scoring-week.result.content.indicators.macdDif"),
+                    ("macd_dea", "t-scoring-week.result.content.indicators.macdDea"),
+                    ("rsi_value", "t-scoring-week.result.content.indicators.scaleMomentum.value"),
                     // v138 裁定 3：本档窗口回显（详注见超短模板那一处）
-                    ("scoring_windows", "t-scoring-month.result.content.indicators.windows"),
-                    ("scoring_scale", "t-scoring-month.result.content.period"),
+                    ("scoring_windows", "t-scoring-week.result.content.indicators.windows"),
+                    ("scoring_scale", "t-scoring-week.result.content.period"),
                     // v139 呈现层补齐（详注见超短模板那一处）
-                    ("scale_trend", "t-scoring-month.result.content.indicators.scaleTrend"),
-                    ("scale_momentum", "t-scoring-month.result.content.indicators.scaleMomentum"),
+                    ("scale_trend", "t-scoring-week.result.content.indicators.scaleTrend"),
+                    ("scale_momentum", "t-scoring-week.result.content.indicators.scaleMomentum"),
+                    // 阶段 1（2026-10-19）：本档窗口相对强度（口径与基准同短档那一处注释）
+                    ("excess_return_pct", "relative_strength.mid"),
                     // #23（v132）：mid 的 `supplyShock` 是 riskNote（权重恒 0、不进方向），
                     // 但「有数可报」与「无数可报」是两件事 —— 接通后 riskNotes 才真能给出该档窗口内的解禁占比。
                     (
@@ -571,11 +588,11 @@ fn mid_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
     ];
     let edges = vec![
         direct_edge(
-            "e-const-scoring-period-t-scoring-month",
-            "const-scoring-period",
-            "t-scoring-month",
+            "e-const-scoring-horizon-t-scoring-week",
+            "const-scoring-horizon",
+            "t-scoring-week",
         ),
-        direct_edge("e-t-scoring-month-pm-h-mid", "t-scoring-month", "pm-h-mid"),
+        direct_edge("e-t-scoring-week-pm-h-mid", "t-scoring-week", "pm-h-mid"),
         // v140：风险节点 → 本档分支（同超短那一处注释）
         direct_edge("e-cls-risk-level-mid-pm-h-mid", "cls-risk-level-mid", "pm-h-mid"),
         direct_edge("e-pm-h-mid-end", "pm-h-mid", "end"),
@@ -589,10 +606,12 @@ fn mid_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
 
 fn long_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
     let nodes = vec![
-        tier_scoring_period_const_node("quarterly", 2700.0),
-        tier_scoring_tool_node("t-scoring-quarter", "技术评分（季度）", 1380.0, 2700.0),
+        tier_scoring_horizon_const_node("long", 2700.0),
+        tier_scoring_tool_node("t-scoring-month", "技术评分（月线）", 1380.0, 2700.0),
         // v140：本档按档风险节点（父图搬入，见 `tier_risk_node` 的文档）。
-        // 季线的 `riskWindows.long` 由 `windows_for_horizon` 按 3 根季线 = 60 交易日口径给出。
+        // 长档的 `riskWindows.long` 由 `compute_portfolio_risk` 按本档持有期
+        // （`Period::default_holding_days()` = **90 交易日**）切峰谷窗口给出 —— 不是「3 根季线」：
+        // 90 交易日只有 1.5 根季线，2026-10-18 起本档尺度是月线（`PLAN-horizon-scale-alignment.md`）。
         tier_risk_node(
             "cls-risk-level-long",
             "长线风险等级分类",
@@ -647,19 +666,16 @@ fn long_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
                 input_mapping: [
                     ("branch_json", "horizon_branch_json.long"),
                     ("horizon_prior_json", "horizon_prior_json"),
-                    ("tier_score", "t-scoring-quarter.result.content.totalScore"),
-                    ("macd_dif", "t-scoring-quarter.result.content.indicators.macdDif"),
-                    ("macd_dea", "t-scoring-quarter.result.content.indicators.macdDea"),
-                    (
-                        "rsi_value",
-                        "t-scoring-quarter.result.content.indicators.scaleMomentum.value",
-                    ),
+                    ("tier_score", "t-scoring-month.result.content.totalScore"),
+                    ("macd_dif", "t-scoring-month.result.content.indicators.macdDif"),
+                    ("macd_dea", "t-scoring-month.result.content.indicators.macdDea"),
+                    ("rsi_value", "t-scoring-month.result.content.indicators.scaleMomentum.value"),
                     // v138 裁定 3：本档窗口回显 + 尺度（详注见超短模板那一处）
-                    ("scoring_windows", "t-scoring-quarter.result.content.indicators.windows"),
-                    ("scoring_scale", "t-scoring-quarter.result.content.period"),
+                    ("scoring_windows", "t-scoring-month.result.content.indicators.windows"),
+                    ("scoring_scale", "t-scoring-month.result.content.period"),
                     // v139 呈现层补齐（详注见超短模板那一处）
-                    ("scale_trend", "t-scoring-quarter.result.content.indicators.scaleTrend"),
-                    ("scale_momentum", "t-scoring-quarter.result.content.indicators.scaleMomentum"),
+                    ("scale_trend", "t-scoring-month.result.content.indicators.scaleTrend"),
+                    ("scale_momentum", "t-scoring-month.result.content.indicators.scaleMomentum"),
                     ("pe_percentile", "t-valuation-band.result.content.metricPe.currentPercentile"),
                     ("f_score", "t-valuation.result.content.fScore.score"),
                     ("consensus_eps", "t-consensus-data.result.content.consensusEps"),
@@ -711,11 +727,11 @@ fn long_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
     ];
     let edges = vec![
         direct_edge(
-            "e-const-scoring-period-t-scoring-quarter",
-            "const-scoring-period",
-            "t-scoring-quarter",
+            "e-const-scoring-horizon-t-scoring-month",
+            "const-scoring-horizon",
+            "t-scoring-month",
         ),
-        direct_edge("e-t-scoring-quarter-pm-h-long", "t-scoring-quarter", "pm-h-long"),
+        direct_edge("e-t-scoring-month-pm-h-long", "t-scoring-month", "pm-h-long"),
         // v140：风险节点 → 本档分支（同超短那一处注释）
         direct_edge("e-cls-risk-level-long-pm-h-long", "cls-risk-level-long", "pm-h-long"),
         direct_edge("e-pm-h-long-end", "pm-h-long", "end"),
@@ -748,7 +764,7 @@ fn tier_template_name(period: Period) -> &'static str {
 /// 版本门 `existing.version >= 本常量 ⇒ 跳过`，否则 `upsert_workflow_template` 整行覆盖。
 /// - 四行都 `is_preset=true`、`is_public=false`、`visibility=SystemOnly` —— 它们只由父图
 ///   那个 `pm-h-<档>` 扇出启动，不该出现在模板列表里让用户单独跑（跑也跑不起来：入参全靠扇出）；
-/// - **无 trigger**：档子模板与 L1/L2/L3 同形，首节点是 `const-scoring-period`；
+/// - **无 trigger**：档子模板与 L1/L2/L3 同形，首节点是 `const-scoring-horizon`；
 /// - **不写快照历史**：`upsert_workflow_template` 本身不写 `workflow_template_versions`
 ///   （写快照的是 `update_workflow_template`，那是「用户保存」路径），而代际回查只服务主链；
 /// - `hooks_config=None`：子执行**继承**父注入的变量（`horizon_branch_json` 等已由父侧
@@ -833,11 +849,11 @@ mod tests {
     /// 判据本体：本档模板的 needs 里出现了**兄弟模板的节点 id** ⇒ 返回那些 id。
     ///
     /// §九十一(5) 决策点 3 要的计数断言（R2 的跨模板版）：错峰链在改图后物理断开，
-    /// 若有人为了「复用月线」把兄弟档的评分节点接进季线子模板，四档就重新变成同一份输入。
+    /// 若有人为了「复用同一份评分」把兄弟档的评分节点接进本档子模板，四档就重新变成同一份输入。
     ///
     /// 兄弟档的节点 id 不是人抄的清单 —— 由 `horizon_tier_template_nodes(其他档)` **现算**，
     /// 所以改任何一档的节点命名都不会让本判据静默失效。四张模板**共用**的 id
-    /// （`end` 与 `const-scoring-period`）先做差集剔除，否则会把「同名的节点」误报成跨档引用。
+    /// （`end` 与 `const-scoring-horizon`）先做差集剔除，否则会把「同名的节点」误报成跨档引用。
     ///
     /// ⚠ 口径边界要说清：`external_reads` 给的是**根名**，所以这条查「有没有引用兄弟档的节点」，
     /// 查不出「同一节点里读了他档那一格路径」（如 `riskWindows.mid` 出现在超短模板）——
@@ -902,7 +918,7 @@ mod tests {
         }
     }
 
-    /// 负控：把超短模板里 `tier_score` 的源改成**周线**评分节点 ⇒ `sibling_id_hits` 必须报出它。
+    /// 负控：把超短模板里 `tier_score` 的源改成**短档**（`t-scoring-day`）评分节点 ⇒ `sibling_id_hits` 必须报出它。
     ///
     /// 没有这条，判据二可能只是在「needs 根本不含任何节点 id」的假象上绿（本轮实测就踩过一次：
     /// `root_of` 丢段时 needs 里只剩 `result`/`content`，跨档断言恒真）。
@@ -918,52 +934,55 @@ mod tests {
             {
                 c.config
                     .input_mapping
-                    .insert("tier_score".into(), "t-scoring-week.result.content.totalScore".into());
+                    .insert("tier_score".into(), "t-scoring-day.result.content.totalScore".into());
                 patched = true;
             }
         }
         assert!(patched, "模板里没有 pm-h-ultra-short ⇒ 本负控失去前提");
         let hits = sibling_id_hits(Period::UltraShort, &nodes);
         assert!(
-            hits.contains(&"t-scoring-week".to_string()),
-            "把 tier_score 改成周线评分节点后仍不报 ⇒ 跨档判据没电（抽取面或比较面失效）"
+            hits.contains(&"t-scoring-day".to_string()),
+            "把 tier_score 改成短档评分节点后仍不报 ⇒ 跨档判据没电（抽取面或比较面失效）"
         );
     }
 
-    /// 判据本体：本档常量节点产出的 `scoring_period` 必须**逐字**等于本档权威尺度名。
+    /// 判据本体：本档常量节点产出的 `scoring_horizon` 必须**逐字**等于本档档位名。
+    ///
+    /// 2026-10-18 起判据的期望值从「本档尺度名」改成「本档档位名」：
+    /// 常量里再写尺度名就是**档 → 尺度映射的第二份副本**，而那条映射现在只允许活在
+    /// `harness::holding_period::Period::scale_key()`（`PLAN-horizon-scale-alignment.md` §四 P4）。
     ///
     /// 返回问题清单（空 = 该档合格）。抽成函数而不是内联断言，是为了让下面的负控走
     /// **同一个**谓词 —— 另写一份比较公式的那种负控证不到真判据（判据层 4z 同族教训）。
-    fn scoring_period_const_problems(period: Period, nodes: &[WorkflowNode]) -> Vec<String> {
-        // 权威 = `Period::scale_key()`（harness 里档↔尺度那张表），四档各取自己那一臂。
-        let want_expr = format!("\"{}\"", period.scale_key());
+    fn scoring_horizon_const_problems(period: Period, nodes: &[WorkflowNode]) -> Vec<String> {
+        let want_expr = format!("\"{}\"", period.as_str());
         let consts: Vec<&DataTransformerNode> = nodes
             .iter()
             .filter_map(|n| match n {
-                WorkflowNode::DataTransformer(d) if d.base.id == "const-scoring-period" => Some(d),
+                WorkflowNode::DataTransformer(d) if d.base.id == "const-scoring-horizon" => Some(d),
                 _ => None,
             })
             .collect();
         if consts.len() != 1 {
             return vec![format!(
-                "{} 档模板里 `const-scoring-period` 节点有 {} 个（应为 1 个）⇒ 尺度常量面不在",
+                "{} 档模板里 `const-scoring-horizon` 节点有 {} 个（应为 1 个）⇒ 档位常量面不在",
                 period.as_str(),
                 consts.len()
             )];
         }
         let c = &consts[0];
         let mut problems = Vec::new();
-        if c.config.output_var != "scoring_period" {
+        if c.config.output_var != "scoring_horizon" {
             problems.push(format!(
-                "{} 档常量节点的 output_var 是 {:?}，而评分节点的 period 取的是 `scoring_period`",
+                "{} 档常量节点的 output_var 是 {:?}，而评分节点的 horizon 取的是 `scoring_horizon`",
                 period.as_str(),
                 c.config.output_var
             ));
         }
         if c.config.expression != want_expr {
             problems.push(format!(
-                "{} 档常量节点的 expression 是 {:?}，权威 `Period::scale_key()` 要的是 {want_expr:?} \
-                 ⇒ 串档（四档取同一尺度）或拼错（compute_scoring 对未知尺度值是显式失败）",
+                "{} 档常量节点的 expression 是 {:?}，权威 `Period::as_str()` 要的是 {want_expr:?} \
+                 ⇒ 串档（四档取同一档）或写了尺度名（那会让档→尺度出现第二份副本）",
                 period.as_str(),
                 c.config.expression
             ));
@@ -971,44 +990,44 @@ mod tests {
         problems
     }
 
-    /// 尺度常量与权威一致（正断言）。
+    /// 档位常量与权威一致（正断言）。
     ///
     /// 为什么要钉这一条：四份常量是**逐字写**的（`check-tier-purity` 与本文件的 R2 要有
     /// 字面量读取面，所以不 `format!` 生成），写错一档不会有任何运行期报错 ——
-    /// 串档时四档评分恒等，拼错时 `ScaleProfile::resolve` 显式失败（`crates/astock-data/src/mcp_tools.rs:1336`）。
+    /// 串档时四档评分恒等，写了未知档位时 `Period::from_str` 显式失败。
     #[test]
-    fn scoring_period_constant_matches_scale_key_authority() {
+    fn scoring_horizon_constant_matches_period_authority() {
         for period in Period::ALL {
             let (nodes, _) = horizon_tier_template_nodes(period);
-            let problems = scoring_period_const_problems(period, &nodes);
+            let problems = scoring_horizon_const_problems(period, &nodes);
             assert!(problems.is_empty(), "{problems:?}");
         }
     }
 
-    /// 负控：把超短档常量的字面量改成**周线**尺度 ⇒ 同一个谓词必须报出它。
+    /// 负控：把超短档常量的字面量改成**中档** ⇒ 同一个谓词必须报出它。
     ///
     /// 没有这条，上面的正断言可能只是在「取不到常量节点却当没这回事」的假象上绿。
     #[test]
-    fn wrong_scale_key_constant_is_caught() {
+    fn wrong_horizon_constant_is_caught() {
         let (mut nodes, _) = horizon_tier_template_nodes(Period::UltraShort);
         assert!(
-            scoring_period_const_problems(Period::UltraShort, &nodes).is_empty(),
+            scoring_horizon_const_problems(Period::UltraShort, &nodes).is_empty(),
             "前提被破坏：未改动前常量就不一致"
         );
         let mut patched = false;
         for node in &mut nodes {
             if let WorkflowNode::DataTransformer(d) = node
-                && d.base.id == "const-scoring-period"
+                && d.base.id == "const-scoring-horizon"
             {
-                d.config.expression = "\"weekly\"".into();
+                d.config.expression = "\"mid\"".into();
                 patched = true;
             }
         }
-        assert!(patched, "超短档模板里没有 const-scoring-period ⇒ 本负控失去前提");
-        let problems = scoring_period_const_problems(Period::UltraShort, &nodes);
+        assert!(patched, "超短档模板里没有 const-scoring-horizon ⇒ 本负控失去前提");
+        let problems = scoring_horizon_const_problems(Period::UltraShort, &nodes);
         assert!(
-            problems.iter().any(|p| p.contains("weekly")),
-            "把常量改成周线尺度后仍不报 ⇒ 尺度一致性判据没电：{problems:?}"
+            problems.iter().any(|p| p.contains("mid")),
+            "把常量改成中档后仍不报 ⇒ 档位一致性判据没电：{problems:?}"
         );
     }
 

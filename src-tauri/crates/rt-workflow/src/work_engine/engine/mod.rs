@@ -4976,14 +4976,23 @@ impl WorkEngine {
                 _ => ExecutionStatus::Completed,
             };
             tracing::info!(execution_id = %execution_id, "[TRACE] run_workflow break 后: 即将调 complete_execution");
-            self.complete_execution(
-                &execution_id,
-                &persist_output,
-                total_time_ms,
-                final_exec_status,
-            )
-            .await
-            .ok();
+            // 错误**不再被 `.ok()` 吞掉**：吐掉的那一刻就是「库里那行永远停在 running」的
+            // 成因（幽灵 running 的现网实证与判据见 `complete_execution` 内注释）。
+            if let Err(e) = self
+                .complete_execution(
+                    &execution_id,
+                    &persist_output,
+                    total_time_ms,
+                    final_exec_status,
+                )
+                .await
+            {
+                tracing::error!(
+                    execution_id = %execution_id,
+                    "[run_workflow] 执行行终态写入失败: {e} ⇒ 该行会停在 running，\
+                     由启动回收兜底（判据见 scheduler/restore.rs）"
+                );
+            }
             tracing::info!(execution_id = %execution_id, "[TRACE] run_workflow break 后: complete_execution 已完成");
 
             tracing::info!(execution_id = %execution_id, "[TRACE] run_workflow break 后: 即将调 post_execution_reflect");
@@ -5857,6 +5866,14 @@ impl WorkEngine {
         final_status: ExecutionStatus,
     ) -> Result<(), WorkEngineError> {
         let mut executions = self.executions.lock().await;
+        // 落库口径只在这一处算（两个分支共用）：写两遍就会在「内存命中/未命中」之间漂移。
+        let db_status = match final_status {
+            ExecutionStatus::Completed => "completed",
+            ExecutionStatus::Failed => "failed",
+            ExecutionStatus::Cancelled => "cancelled",
+            ExecutionStatus::PartiallyCompleted => "partially_completed",
+            _ => "completed",
+        };
         if let Some(state) = executions.get_mut(execution_id) {
             state.status = final_status.clone();
             state.total_time_ms = total_time_ms;
@@ -5872,13 +5889,6 @@ impl WorkEngine {
                 _ => None,
             };
             drop(executions);
-            let db_status = match final_status {
-                ExecutionStatus::Completed => "completed",
-                ExecutionStatus::Failed => "failed",
-                ExecutionStatus::Cancelled => "cancelled",
-                ExecutionStatus::PartiallyCompleted => "partially_completed",
-                _ => "completed",
-            };
             workflow_execution_repository()
                 .update_workflow_execution_status(
                     execution_id,
@@ -5892,7 +5902,39 @@ impl WorkEngine {
                 .map_err(WorkEngineError::Db)?;
             Ok(())
         } else {
-            Err(WorkEngineError::NotFound(execution_id.to_string()))
+            // **内存里没有这次执行 ≠ 库里那行不存在**。现网实证：一条股票分析已完成并落库
+            // （`stock_analyses.status='completed'`、四档决策齐全），而它在
+            // `workflow_executions` 的那行仍是 `running`、`total_time_ms=0`、
+            // `updated_at == created_at` —— 全表累积 85 条这种幽灵行（历史列表永远转圈，
+            // 批量评估还会把它们当样本）。旧写法在这里直接返回 `NotFound`，而调用点
+            // （本文件 `run_workflow` 收尾处）用 `.ok()` 吞掉 ⇒ 没有任何分支再写终态。
+            //
+            // 内存丢失是有正常成因的：进程重启、并发清理、以及本文件上方那条子工作流捷径。
+            // 拿不到的只有 `node_executions`（它只活在内存），该列按 repo 的 `None 不动列`
+            // 语义留原值，**不伪造**；其余（终态、耗时、输出）照实写。
+            drop(executions);
+            let output_result = serde_json::to_string(output).ok();
+            let wrote = workflow_execution_repository()
+                .update_workflow_execution_status(
+                    execution_id,
+                    db_status,
+                    output_result.as_deref(),
+                    None,
+                    Some(total_time_ms as i32),
+                    None,
+                )
+                .await
+                .map_err(WorkEngineError::Db)?;
+            if !wrote {
+                // 库里确实没有这行（例如从未落过库的测试路径）⇒ 保留 NotFound 语义，
+                // 让调用点的日志能区分「写失败」与「无此行」。
+                return Err(WorkEngineError::NotFound(execution_id.to_string()));
+            }
+            tracing::warn!(
+                execution_id = %execution_id,
+                "[complete_execution] 内存无此执行 ⇒ 仅写库终态（node_executions 缺失，不伪造）"
+            );
+            Ok(())
         }
     }
 }

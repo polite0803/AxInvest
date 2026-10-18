@@ -5,12 +5,13 @@
 //! ## 设计动机
 //!
 //! DojoAgents 宣传口径中的"产业链传导映射"要求系统能识别新闻事件影响的上下游
-//! 关联股票，并提供跨市场传导路径。本模块预定义 5 条 A 股核心产业链：
+//! 关联股票，并提供跨市场传导路径。本模块预定义 6 条 A 股核心产业链：
 //! 1. AI 算力链（GPU/光模块/IDC/液冷/电力）
 //! 2. 半导体链（设备/材料/代工/封测/EDA/IP）
 //! 3. 光模块链（硅光/CPO/光芯片/连接器）
 //! 4. 新能源车链（锂矿/正极/电池/电机/整车/充电桩）
 //! 5. 消费电子链（面板/声学/光学/连接器/组装）
+//! 6. 农业/水产蛋白链（鱼粉豆粕/饲料/水产养殖，旁支：种植投入品、乳业/畜禽）
 //!
 //! ## 数据结构
 //!
@@ -388,6 +389,7 @@ pub fn list_industry_chains() -> Vec<IndustryChain> {
         optical_module_chain(),
         new_energy_vehicle_chain(),
         consumer_electronics_chain(),
+        agri_aqua_protein_chain(),
     ]
 }
 
@@ -1129,6 +1131,170 @@ fn consumer_electronics_chain() -> IndustryChain {
     }
 }
 
+// ── 链 6：农业 / 水产蛋白链（2026-10-19，PLAN-mover-coverage 阶段 6）─────────────
+//
+// 建链动因是本例实证：as-of 2026-09-28 的 002696 百洋股份被判「观望」，其后 12 交易日
+// +65.3%，驱动是鱼粉/水产料涨价带出的题材与连板。前五条链全是科技制造，
+// `map_news_to_chain` 对这类新闻**没有任何节点可以命中** ⇒ 工具层对这条主线是失明的，
+// 分析师拿不到「上游涨价 → 中游成本 → 下游养殖」这条传导路径。
+//
+// ⚠ `codes` 只列**本机库能核实**的成员（`market_stock_universe` 与 `mover_recall_events`
+// 的 code↔name 对照，2026-10-19 实查）；未核实的代码一律不写 —— 节点的作用是
+// 「新闻命中后把影响传给这些票」，写错代码等于把误传自动化。清单当前只覆盖全市场约 12.6%
+// （见 `check-universe-coverage.mjs` 读数），覆盖率抬起来后这条链的成员应当继续补齐。
+//
+// ⚠ 上游**现货价格**（鱼粉/豆粕报价）本仓仍无通道：那是新增外部数据面，需要点名的数据源，
+// 不能由代码单方面补 ⇒ 留在待裁 P-b。本链只补「结构与关键词」这一半。
+fn agri_aqua_protein_chain() -> IndustryChain {
+    IndustryChain {
+        id: "agri_aqua_protein".to_string(),
+        name: "农业/水产蛋白链".to_string(),
+        description: "蛋白原料（鱼粉/豆粕）→ 饲料 → 水产养殖与加工，旁支挂种植投入品与乳业/畜禽"
+            .to_string(),
+        nodes: vec![
+            ChainNode {
+                id: "feed_protein".to_string(),
+                name: "蛋白原料（鱼粉/豆粕）".to_string(),
+                role: ChainRole::Upstream,
+                codes: vec![
+                    "002696".to_string(), // 百洋股份（鱼粉与水产饲料原料端）
+                ],
+                us_codes: vec![],
+                hk_codes: vec![],
+                description: "鱼粉、豆粕等蛋白原料的进口与加工".to_string(),
+            },
+            ChainNode {
+                id: "feed_making".to_string(),
+                name: "饲料".to_string(),
+                role: ChainRole::Midstream,
+                codes: vec![
+                    "001313".to_string(), // 粤海饲料
+                    "000876".to_string(), // 新希望
+                    "002696".to_string(), // 百洋股份（水产料）
+                ],
+                us_codes: vec![],
+                hk_codes: vec![],
+                description: "水产料与畜禽料配方生产，原料成本的第一承受环节".to_string(),
+            },
+            ChainNode {
+                id: "aquaculture".to_string(),
+                name: "水产养殖与加工".to_string(),
+                role: ChainRole::Downstream,
+                codes: vec![
+                    "002696".to_string(), // 百洋股份（水产品加工）
+                ],
+                us_codes: vec![],
+                hk_codes: vec![],
+                description: "养殖端与水产品加工出口，饲料成本与鱼价双向挤压".to_string(),
+            },
+            ChainNode {
+                id: "agri_inputs".to_string(),
+                name: "种植投入品（农药/种子）".to_string(),
+                role: ChainRole::Upstream,
+                codes: vec![
+                    "001231".to_string(), // 农心科技
+                ],
+                us_codes: vec![],
+                hk_codes: vec![],
+                description: "种植端投入品，经粮油原料供给影响饲料粮成本".to_string(),
+            },
+            ChainNode {
+                id: "dairy_livestock".to_string(),
+                name: "乳业/畜禽".to_string(),
+                role: ChainRole::Downstream,
+                codes: vec![
+                    "001318".to_string(), // 阳光乳业
+                ],
+                us_codes: vec![],
+                hk_codes: vec![],
+                description: "畜禽与乳业，饲料成本与终端价格之间的承受端".to_string(),
+            },
+        ],
+        edges: vec![
+            ChainEdge {
+                from: "feed_protein".to_string(),
+                to: "feed_making".to_string(),
+                edge_type: ChainEdgeType::CostPassThrough,
+                lag_days: 2,
+                strength: 0.8,
+            },
+            ChainEdge {
+                from: "feed_making".to_string(),
+                to: "aquaculture".to_string(),
+                edge_type: ChainEdgeType::CostPassThrough,
+                lag_days: 3,
+                strength: 0.7,
+            },
+            ChainEdge {
+                from: "feed_making".to_string(),
+                to: "dairy_livestock".to_string(),
+                edge_type: ChainEdgeType::CostPassThrough,
+                lag_days: 3,
+                strength: 0.6,
+            },
+            ChainEdge {
+                from: "agri_inputs".to_string(),
+                to: "feed_making".to_string(),
+                edge_type: ChainEdgeType::SupplyDemand,
+                lag_days: 5,
+                strength: 0.35,
+            },
+        ],
+        keywords: vec![
+            // 上游涨价对原料端是利好、对中下游是利空 —— 两个方向必须拆成两条关键词，
+            // 合成一条就会把「谁承压」读反。
+            ChainKeyword {
+                keyword: "鱼粉".to_string(),
+                activates_nodes: vec!["feed_protein".to_string()],
+                direction: ImpactDirection::Positive,
+                default_strength: 0.7,
+            },
+            ChainKeyword {
+                keyword: "鱼粉涨价".to_string(),
+                activates_nodes: vec!["feed_making".to_string(), "aquaculture".to_string()],
+                direction: ImpactDirection::Negative,
+                default_strength: 0.6,
+            },
+            ChainKeyword {
+                keyword: "豆粕".to_string(),
+                activates_nodes: vec!["feed_protein".to_string(), "feed_making".to_string()],
+                direction: ImpactDirection::Neutral,
+                default_strength: 0.5,
+            },
+            ChainKeyword {
+                keyword: "捕鱼配额".to_string(),
+                activates_nodes: vec!["feed_protein".to_string()],
+                direction: ImpactDirection::Positive,
+                default_strength: 0.6,
+            },
+            ChainKeyword {
+                keyword: "饲料涨价".to_string(),
+                activates_nodes: vec!["feed_making".to_string()],
+                direction: ImpactDirection::Positive,
+                default_strength: 0.6,
+            },
+            ChainKeyword {
+                keyword: "水产料".to_string(),
+                activates_nodes: vec!["feed_making".to_string(), "aquaculture".to_string()],
+                direction: ImpactDirection::Positive,
+                default_strength: 0.5,
+            },
+            ChainKeyword {
+                keyword: "猪瘟".to_string(),
+                activates_nodes: vec!["dairy_livestock".to_string()],
+                direction: ImpactDirection::Negative,
+                default_strength: 0.7,
+            },
+            ChainKeyword {
+                keyword: "原奶价格".to_string(),
+                activates_nodes: vec!["dairy_livestock".to_string()],
+                direction: ImpactDirection::Neutral,
+                default_strength: 0.5,
+            },
+        ],
+    }
+}
+
 // ── 单元测试 ─────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1138,13 +1304,14 @@ mod tests {
     #[test]
     fn test_list_chains() {
         let chains = list_industry_chains();
-        assert_eq!(chains.len(), 5);
+        assert_eq!(chains.len(), 6);
         let ids: Vec<_> = chains.iter().map(|c| c.id.clone()).collect();
         assert!(ids.contains(&"ai_compute".to_string()));
         assert!(ids.contains(&"semiconductor".to_string()));
         assert!(ids.contains(&"optical_module".to_string()));
         assert!(ids.contains(&"nev".to_string()));
         assert!(ids.contains(&"consumer_electronics".to_string()));
+        assert!(ids.contains(&"agri_aqua_protein".to_string()));
     }
 
     #[test]
@@ -1178,6 +1345,26 @@ mod tests {
     fn test_map_news_to_chain_no_hit() {
         let hits = map_news_to_chain("今天天气不错");
         assert!(hits.is_empty());
+    }
+
+    /// 本例（002696@2026-09-28）的正证：鱼粉类新闻必须能命中这条链，
+    /// 且从上游出发能把成本影响传给中游/下游（工具层此前对这条主线完全失明）。
+    #[test]
+    fn test_agri_aqua_chain_hits_and_propagates() {
+        let hits = map_news_to_chain("秘鲁捕鱼配额下调，鱼粉涨价，水产料成本抬升");
+        assert!(
+            hits.iter().any(|h| h.chain_id == "agri_aqua_protein"),
+            "鱼粉类新闻应命中农业/水产蛋白链，实得 {hits:?}"
+        );
+        let chain = agri_aqua_protein_chain();
+        let results = propagate_impact(&chain, "feed_protein", ImpactDirection::Positive, 0.1);
+        assert!(results.iter().any(|r| r.node_id == "feed_making"));
+        assert!(results.iter().any(|r| r.node_id == "aquaculture"));
+        // codes 只允许本机库核实过的 6 位代码（理由见链定义头部）
+        for c in chain.all_a_share_codes() {
+            assert_eq!(c.len(), 6, "A 股代码必须是 6 位: {c}");
+            assert!(c.chars().all(|ch| ch.is_ascii_digit()), "代码形态异常: {c}");
+        }
     }
 
     #[test]

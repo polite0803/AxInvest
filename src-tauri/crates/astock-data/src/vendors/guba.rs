@@ -4,11 +4,14 @@
 //! 仅实现 `get_social_sentiment`，其他行情/财务类方法返回空或错误，
 //! 由路由层 (`VendorRouting`) 自动降级到其他 vendor。
 
+use crate::as_of_capability::AsOfCapability;
 use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::StockVendor;
 use async_trait::async_trait;
+use chrono::TimeZone;
 use serde_json::Value;
+use std::collections::HashSet;
 
 pub struct GubaVendor {
     pub http: reqwest::Client,
@@ -319,74 +322,228 @@ impl StockVendor for GubaVendor {
         // 兜底:如果 bar_name 缺失,则 stock_name 为空字符串
         let stock_name = bar_name.map(|s| s.trim_end_matches("吧").to_string()).unwrap_or_default();
 
-        if posts.is_empty() {
-            return Ok(vec![SocialSentiment {
-                stock_code: stock_code.to_string(),
-                stock_name,
-                platform: "guba".to_string(),
-                post_count: 0,
-                hot_rank,
-                sentiment_score: None,
-                bull_ratio: None,
-                fetched_at: chrono::Utc::now().timestamp(),
-            }]);
+        // live 与 as-of 共用同一个情感计算（as-of 只是在「取哪些帖子」上不同）
+        Ok(vec![social_sentiment_from_posts(
+            stock_code,
+            stock_name,
+            &posts,
+            hot_rank,
+            chrono::Utc::now().timestamp(),
+        )])
+    }
+
+    /// 舆情的 as-of 通道：按**发帖时间**翻页重建截止日可见的帖子集合。
+    ///
+    /// 页面 `list,{code},f_N.html` 按最后回复倒序，但每条都带 `post_publish_time`；
+    /// 逐页收集 `publish <= 截止日 23:59:59` 的帖子，按发帖时间去重后取最近 81 条
+    /// （与 live 首页条数同量级），再交给**同一个** `social_sentiment_from_posts`。
+    /// 两路只在「取哪些帖子」上不同，情感算法完全一致。
+    ///
+    /// 提前停止：已集满 81 条且当前页最大发帖时间也 <= 截止日；上限 40 页
+    /// （实测 002696 的 40 页覆盖约 3 个月，足够任意常用回放锚点）。
+    /// 结果由调用方写入每日快照 ⇒ 同一截止日后续不再翻页。
+    async fn get_social_sentiment_with_asof(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<SocialSentiment>, DataError> {
+        const TARGET_POSTS: usize = 81;
+        const MAX_PAGES: usize = 40;
+        let ctx = crate::as_of::current_as_of()
+            .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
+        let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
+        let cutoff_end = format!("{cutoff} 23:59:59");
+        let pure_code =
+            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
+        let mut bar_name: Option<String> = None;
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut picked: Vec<(String, Value)> = Vec::new();
+        for page in 1..=MAX_PAGES {
+            let url = if page == 1 {
+                format!("https://guba.eastmoney.com/list,{pure_code}.html")
+            } else {
+                format!("https://guba.eastmoney.com/list,{pure_code},f_{page}.html")
+            };
+            // 第 1 页取不到 ⇒ 真失败（源不可达/结构变了）；后续页取不到则用已收集的
+            // 结果收尾 —— 翻页途中被风控掐断不应把前面 20 页已拿到的帖子全丢掉。
+            let html = match self.guba_get_html(&url).await {
+                Ok(h) => h,
+                Err(e) if page == 1 => return Err(e),
+                Err(e) => {
+                    tracing::warn!("[guba] as-of 翻页在第 {page} 页中断，使用已收集帖子: {e}");
+                    break;
+                },
+            };
+            let Some((json_str, name)) = Self::extract_article_list(&html) else {
+                if page == 1 {
+                    return Err(DataError::VendorError {
+                        vendor: "guba".into(),
+                        message: format!(
+                            "股吧 as-of 页面未找到 article_list（page=1, stock={stock_code}）"
+                        ),
+                    });
+                }
+                tracing::warn!("[guba] as-of 第 {page} 页无 article_list，使用已收集帖子");
+                break;
+            };
+            if bar_name.is_none() {
+                bar_name = name.map(|s| s.trim_end_matches("吧").to_string());
+            }
+            let posts: Vec<Value> = serde_json::from_str(json_str).map_err(|e| {
+                DataError::ParseError(format!("股吧 as-of article_list 解析失败: {e}"))
+            })?;
+            if posts.is_empty() {
+                break;
+            }
+            let page_max = collect_posts_as_of(posts, &cutoff_end, &mut seen, &mut picked);
+            let enough = picked.len() >= TARGET_POSTS
+                && page_max.as_deref().is_some_and(|m| m <= cutoff_end.as_str());
+            if enough {
+                break;
+            }
+            // 轻节流：避免连续翻 40 页触发站点风控
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
         }
-
-        // 统计帖子数 + 情感分析(P2-B4: 改用统一词典)
-        let post_count = posts.len() as u32;
-        let mut bull_count = 0u32;
-        let mut bear_count = 0u32;
-        // P2-B4: 累积每条帖子的细粒度 sentiment_score,用于计算平均情感分
-        let mut score_sum = 0.0f64;
-        let mut score_count = 0u32;
-
-        for post in &posts {
-            let title = post["post_title"].as_str().unwrap_or("");
-
-            // 基于统一词典的情感分析(替换原 8 词硬编码)
-            // bull/bear 计数保留(用于 bull_ratio),score 累加用于 sentiment_score
-            let is_bull = crate::sentiment::POSITIVE_KEYWORDS.iter().any(|kw| title.contains(kw));
-            let is_bear = crate::sentiment::RISK_KEYWORDS.iter().any(|kw| title.contains(kw))
-                || crate::sentiment::HIGH_RISK_KEYWORDS.iter().any(|kw| title.contains(kw));
-
-            if is_bull {
-                bull_count += 1;
-            }
-            if is_bear {
-                bear_count += 1;
-            }
-
-            // 细粒度 score(标题单文本评分,[-1.0, 1.0])
-            if let Some(s) = crate::sentiment::compute_text_sentiment(title) {
-                score_sum += s;
-                score_count += 1;
-            }
+        if picked.is_empty() {
+            return Ok(vec![]);
         }
+        picked.sort_by(|a, b| b.0.cmp(&a.0));
+        picked.truncate(TARGET_POSTS);
+        let posts: Vec<Value> = picked.into_iter().map(|(_, p)| p).collect();
+        // fetched_at 必须是截止日，不是 now —— 否则下游会把历史舆情读成刚采的
+        let fetched_at = chrono::NaiveDate::parse_from_str(&cutoff, "%Y-%m-%d")
+            .ok()
+            .and_then(|d| d.and_hms_opt(23, 59, 59))
+            .and_then(|dt| {
+                chrono::FixedOffset::east_opt(8 * 3600)?.from_local_datetime(&dt).single()
+            })
+            .map(|dt| dt.timestamp())
+            .unwrap_or_else(|| chrono::Utc::now().timestamp());
+        Ok(vec![social_sentiment_from_posts(
+            stock_code,
+            bar_name.unwrap_or_default(),
+            &posts,
+            // 东财人气榜只有当下名次；历史行情里不跨平台借位，如实留 None
+            None,
+            fetched_at,
+        )])
+    }
 
-        let total = bull_count + bear_count;
-        let bull_ratio = if total > 0 {
-            Some(bull_count as f64 / total as f64)
-        } else {
-            None
-        };
-        // sentiment_score: P2-B4 改为统一词典的平均评分(更精确,包含否定词检测)
-        // fallback: 若统一词典全部未命中(纯水帖),用 bull_ratio 兜底
-        let sentiment_score = if score_count > 0 {
-            Some(score_sum / score_count as f64)
-        } else {
-            bull_ratio.map(|r| (r - 0.5) * 2.0)
-        };
+    fn asof_capability(&self, method: &str) -> AsOfCapability {
+        match method {
+            // 2026-10-18：股吧列表页带 post_publish_time 且可按 f_N 翻页 ⇒ 有真日期通道
+            "get_social_sentiment" => AsOfCapability::NativeDateParam,
+            _ => AsOfCapability::Fallthrough,
+        }
+    }
+}
 
-        Ok(vec![SocialSentiment {
+/// 把一页帖子中 `post_publish_time <= cutoff_end` 的部分收进 `picked`（按 post_id 去重）。
+///
+/// 返回该页的**最大发帖时间**（含截止日之后的帖子）：调用方用它判断
+/// 「是否已经翻过截止日边界」。`post_publish_time` 是 `YYYY-MM-DD HH:MM:SS`，
+/// 字典序即时间序，无需解析成 DateTime。
+fn collect_posts_as_of(
+    posts: Vec<Value>,
+    cutoff_end: &str,
+    seen: &mut HashSet<String>,
+    picked: &mut Vec<(String, Value)>,
+) -> Option<String> {
+    let mut page_max: Option<String> = None;
+    for post in posts {
+        let Some(publish) = post.get("post_publish_time").and_then(Value::as_str) else {
+            continue;
+        };
+        if page_max.as_deref().is_none_or(|m| publish > m) {
+            page_max = Some(publish.to_string());
+        }
+        if publish > cutoff_end {
+            continue;
+        }
+        let key = post
+            .get("post_id")
+            .and_then(|v| v.as_i64())
+            .map(|v| v.to_string())
+            .or_else(|| post.get("post_id").and_then(Value::as_str).map(str::to_string))
+            .unwrap_or_else(|| {
+                format!(
+                    "{publish}:{}",
+                    post.get("post_title").and_then(Value::as_str).unwrap_or("")
+                )
+            });
+        if seen.insert(key) {
+            picked.push((publish.to_string(), post));
+        }
+    }
+    page_max
+}
+
+/// 帖集合 → 舆情指标（live 与 as-of 的唯一实现）。
+///
+/// 空帖集合返回 `post_count = 0` 的**有效观测**（live 页面空列表就是这个语义）；
+/// 调用方不要把它当成「没取到」——没取到是 `Err`。
+fn social_sentiment_from_posts(
+    stock_code: &str,
+    stock_name: String,
+    posts: &[Value],
+    hot_rank: Option<u32>,
+    fetched_at: i64,
+) -> SocialSentiment {
+    if posts.is_empty() {
+        return SocialSentiment {
             stock_code: stock_code.to_string(),
             stock_name,
             platform: "guba".to_string(),
-            post_count,
+            post_count: 0,
             hot_rank,
-            sentiment_score,
-            bull_ratio,
-            fetched_at: chrono::Utc::now().timestamp(),
-        }])
+            sentiment_score: None,
+            bull_ratio: None,
+            fetched_at,
+        };
+    }
+
+    let mut bull_count = 0u32;
+    let mut bear_count = 0u32;
+    let mut score_sum = 0.0f64;
+    let mut score_count = 0u32;
+    for post in posts {
+        let title = post["post_title"].as_str().unwrap_or("");
+        let is_bull = crate::sentiment::POSITIVE_KEYWORDS.iter().any(|kw| title.contains(kw));
+        let is_bear = crate::sentiment::RISK_KEYWORDS.iter().any(|kw| title.contains(kw))
+            || crate::sentiment::HIGH_RISK_KEYWORDS.iter().any(|kw| title.contains(kw));
+        if is_bull {
+            bull_count += 1;
+        }
+        if is_bear {
+            bear_count += 1;
+        }
+        if let Some(s) = crate::sentiment::compute_text_sentiment(title) {
+            score_sum += s;
+            score_count += 1;
+        }
+    }
+
+    let total = bull_count + bear_count;
+    let bull_ratio = if total > 0 {
+        Some(bull_count as f64 / total as f64)
+    } else {
+        None
+    };
+    // 统一词典全部未命中（纯水帖）时用 bull_ratio 兜底；两者都没有 ⇒ None
+    let sentiment_score = if score_count > 0 {
+        Some(score_sum / score_count as f64)
+    } else {
+        bull_ratio.map(|r| (r - 0.5) * 2.0)
+    };
+
+    SocialSentiment {
+        stock_code: stock_code.to_string(),
+        stock_name,
+        platform: "guba".to_string(),
+        post_count: posts.len() as u32,
+        hot_rank,
+        sentiment_score,
+        bull_ratio,
+        fetched_at,
     }
 }
 
@@ -488,5 +645,72 @@ mod tests {
         let arr = rows.as_array().unwrap();
         assert_eq!(pick_guba_rank(arr, "600519"), None);
         assert_eq!(pick_guba_rank(arr, "600520"), None);
+    }
+
+    /// as-of 选帖：只收截止日及之前的帖子；截止日之后的必须被滤掉；
+    /// 同一 post_id 跨页只算一次；返回的 page_max 含**截止日之后**的帖子
+    /// （调用方靠它判断翻页是否已越过边界）。
+    #[test]
+    fn collect_posts_as_of_filters_cutoff_and_dedups() {
+        let page = vec![
+            serde_json::json!({"post_id": 1, "post_title": "旧帖", "post_publish_time": "2026-09-20 10:00:00"}),
+            serde_json::json!({"post_id": 2, "post_title": "截止日当天", "post_publish_time": "2026-09-28 23:59:59"}),
+            serde_json::json!({"post_id": 3, "post_title": "未来帖", "post_publish_time": "2026-10-01 09:00:00"}),
+            serde_json::json!({"post_id": 1, "post_title": "旧帖重复", "post_publish_time": "2026-09-20 10:00:00"}),
+            serde_json::json!({"post_title": "无 id", "post_publish_time": "2026-09-21 08:00:00"}),
+        ];
+        let mut seen = HashSet::new();
+        let mut picked = Vec::new();
+        let page_max = collect_posts_as_of(page, "2026-09-28 23:59:59", &mut seen, &mut picked);
+        assert_eq!(page_max.as_deref(), Some("2026-10-01 09:00:00"), "page_max 必须含未来帖");
+        assert_eq!(picked.len(), 3, "旧帖 + 截止日当天 + 无 id 帖；重复/未来帖被滤掉: {picked:?}");
+        assert!(picked.iter().all(|(t, _)| t.as_str() <= "2026-09-28 23:59:59"));
+    }
+
+    /// live/as-of 共用的情感计算：空帖返回 post_count=0 的有效观测，不是 None/Err。
+    #[test]
+    fn sentiment_from_posts_same_algorithm_for_both_paths() {
+        let posts = vec![
+            serde_json::json!({"post_title": "涨停 利好 看好"}),
+            serde_json::json!({"post_title": "下跌 风险 利空"}),
+        ];
+        let s = social_sentiment_from_posts("002696", "百洋股份".into(), &posts, None, 123);
+        assert_eq!(s.post_count, 2);
+        assert!(s.bull_ratio.is_some());
+        assert!(s.sentiment_score.is_some());
+        assert_eq!(s.fetched_at, 123);
+        let empty = social_sentiment_from_posts("002696", "百洋股份".into(), &[], None, 456);
+        assert_eq!(empty.post_count, 0);
+        assert!(empty.sentiment_score.is_none());
+        assert_eq!(empty.fetched_at, 456);
+    }
+
+    /// 真接口冒烟（`#[ignore]`，约 20–30 页、~10s）：
+    /// `cargo test -p axagent-astock-data social_asof_live -- --ignored --nocapture`
+    ///
+    /// 002696 / 2026-09-28 实测：26 页可收到 142 条截止日前帖子，取最近 81 条。
+    #[tokio::test]
+    #[ignore = "需真实网络 + 多页翻页；仅在手工验证舆情 as-of 通道时跑"]
+    async fn social_asof_live() {
+        use crate::as_of::{AsOfContext, AsOfSource, AS_OF};
+        let v = GubaVendor::new(reqwest::Client::new());
+        let ctx = AsOfContext::new(
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 28).unwrap(),
+            AsOfSource::UserReplay,
+        )
+        .unwrap();
+        let got = AS_OF
+            .scope(Some(ctx), async { v.get_social_sentiment_with_asof("002696").await })
+            .await
+            .expect("股吧翻页应可达");
+        let s = got.first().expect("002696 在 09-28 前应有帖子");
+        assert!(s.post_count > 0, "重建出的帖子数应 > 0");
+        assert_eq!(s.stock_name, "百洋股份");
+        // 截止日 23:59:59 北京时间
+        assert!(s.fetched_at > 1_790_000_000, "fetched_at 应是 2026-09-28 附近的历史时间戳");
+        println!(
+            "002696 as-of 舆情: posts={} score={:?} bull={:?}",
+            s.post_count, s.sentiment_score, s.bull_ratio
+        );
     }
 }

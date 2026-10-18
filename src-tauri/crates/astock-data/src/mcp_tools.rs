@@ -458,6 +458,9 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
                     "stock_code": { "type": "string", "description": "6位股票代码" },
                     "kline_json": { "type": "string", "description": "上游K线节点输出的JSON" },
                     "period": { "type": "string", "description": "评分尺度：hourly/daily/weekly/monthly/quarterly（季线由月线本地按自然季度聚合）。**未知值直接报错，不静默回退 daily**；阈值按 √(每 bar 交易日数) 缩放", "default": "daily" },
+                    // 档位（按持有期分档的四个子流程专用）。为什么必须显式给：`daily` 同时是主链
+                    // 与短档的尺度，尺度名反查档位不唯一（2026-10-18，PLAN-horizon-scale-alignment.md）。
+                    "horizon": { "type": "string", "description": "档位：ultra_short/short/mid/long。给了 ⇒ 由该档的 ScaleWindowPlan 接管取数根数/出分下限/指标窗口（尺度由权威表定，本参数不可与 period 冲突）" },
                     // 面板「技术指标」两组可调值（PLAN §一○五）。⚠ **两域**：ind_* 窗口五个只在
                     // period=daily 时被接受，接进按档尺度会**显式失败**（档侧窗口由 ScaleWindowPlan 决定）；
                     // 三个阈值全链接受（§九十六(2)：阈值不随尺度缩）。
@@ -1331,21 +1334,53 @@ pub async fn execute_mcp_tool(
             // 五尺度（hourly/daily/weekly/monthly/quarterly），**未知值显式失败**，
             // 不再像旧实现那样把任何拼错/未支持的取值静默归成 daily。
             // 缺省仍是 daily（无参路径零回归）。
-            let period_arg = arguments["period"].as_str().unwrap_or("daily");
+            //
+            // ── 档位解析（2026-10-18，`PLAN-horizon-scale-alignment.md` §四 P2）──────────
+            // ⚠ **档位不得由尺度名反查**：`daily` 同时是主链 `t-scoring`（σ_daily 与主评分的
+            // 共同来源）与短档（5 交易日）的尺度 —— 一旦按 `from_scale_key("daily")` 反查，
+            // 主链会被当成短档接管（出分下限 60→15、指标窗口换成按档、`score_with_bands`
+            // 换成 `score_scale_aware`，且带 8 个窗口参数的节点直接报错）。
+            // 此前这段反查之所以"看起来"唯一，是靠「短档=周线」这个巧合。
+            // ⇒ 档位一律走**显式 `horizon` 参数**（档子模板的 `const-scoring-horizon` 产出），
+            //   主链不传 ⇒ 与历史逐位相同。档 → 尺度仍只有 harness 一处权威。
+            let tier = match arguments["horizon"].as_str().map(str::trim).filter(|s| !s.is_empty())
+            {
+                Some(h) => {
+                    Some(h.parse::<axagent_harness::holding_period::Period>().map_err(|e| {
+                        format!("compute_scoring: {e}（horizon 取档位 snake 名，如 short/mid）")
+                    })?)
+                },
+                None => None,
+            };
+            let period_arg = match (tier, arguments["period"].as_str()) {
+                (Some(p), Some(given)) => {
+                    // 两处口径都给了 ⇒ 必须指向同一尺度；不一致时显式失败，不猜谁优先
+                    let want = p.scale_key();
+                    let got = crate::scale::ScaleProfile::resolve(given)
+                        .map_err(|e| e.to_string())?
+                        .period;
+                    if got != want {
+                        return Err(format!(
+                            "compute_scoring: horizon={}（权威尺度 {want}）与 period={given} 冲突 \
+                             ⇒ 拒绝出分（两处口径必须同源，不按其中一侧猜）",
+                            p.as_str()
+                        ));
+                    }
+                    want
+                },
+                (Some(p), None) => p.scale_key(),
+                (None, Some(given)) => given,
+                (None, None) => "daily",
+            };
             let profile =
                 crate::scale::ScaleProfile::resolve(period_arg).map_err(|e| e.to_string())?;
-            // ── #41 片 A（PLAN §一○二(4)）：尺度若属于某一档 ⇒ 该档的**窗口计划**接管 ──
+            // ── #41 片 A（PLAN §一○二(4)）：本档的**窗口计划**接管 ──
             //
             // 接管三件事：① 向 vendor 取的根数（`fetch_limit`；季线取的是**聚合前**的月线根数
             // `parent_fetch_limit`）、② 出分下限 `min_bars`、③ 指标窗口（`IndicatorConfig`）。
-            // 反查权威是 `Period::from_scale_key`（与 `scale_key` 同一张表，不另写第二份）。
-            //
-            // ⚠ **日线不在接管之列**（`from_scale_key("daily") == None`）：主链的 `t-scoring`
-            // 是 σ_daily 与主评分的共同来源，它要继续吃既有常数与命名槽 ⇒ **日线链零回归**。
-            // 按档尺度改的是「拿多少根、按几根算」，而 §九十二(5) 那条「月线=5 年才出分」的
-            // 失败面正是被这里收敛掉的：长档回答 90 交易日的问题，就不该要 15 年历史。
-            let plan = axagent_harness::holding_period::Period::from_scale_key(period_arg)
-                .map(crate::scale::ScaleWindowPlan::for_period);
+            // 计划由**档位**（`horizon`）直推，不由尺度名反查（理由见上）。
+            // `plan == None` ⇔ 主链日线调用或手工 `period=` 调用 ⇒ 走既有常数与命名槽。
+            let plan = tier.map(crate::scale::ScaleWindowPlan::for_period);
             let fetch_limit = plan
                 .map(|p| p.parent_fetch_limit.unwrap_or(p.fetch_limit) as u32)
                 .unwrap_or(profile.fetch_limit);
@@ -2201,9 +2236,12 @@ pub async fn execute_mcp_tool(
             // 样本不足（次新股 / 窗口内 σ 无定义）⇒ 两个数值一律 null 并留 `windowBars`，
             // 不拿短窗硬充长窗，也不把「算不出」写成 0（0 深度会被读成「这档很安全」）。
             let mut risk_windows = serde_json::Map::new();
-            for (tier_key, window_days) in
-                [("ultraShort", 2usize), ("short", 5), ("mid", 28), ("long", 90)]
-            {
+            // 逐档窗口天数**现推**自权威（`Period::default_holding_days()` = 2/5/28/90）——
+            // 此前这里手抄了同一张天数表，属「天数第二份真相」（`PLAN-horizon-scale-alignment.md` D4）：
+            // 改持有期时它不会跟着变，而下游四个 `cls-risk-level-<档>` 节点会继续按旧窗口读。
+            for tier_period in axagent_harness::holding_period::Period::ALL {
+                let tier_key = tier_period.camel_key();
+                let window_days = tier_period.default_holding_days() as usize;
                 let need = window_days + 1;
                 let (dd_v, depth_v) = if klines.len() >= need {
                     let win_closes: Vec<f64> =

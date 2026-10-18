@@ -2962,6 +2962,15 @@ async fn backtest_reco_strategies_inner(
         // 代际过滤：「最近一次荐股」指实盘最近一批，回放行不得参与（同文件
         // `get_cached_recommendation` 同口径）
         .filter(reco_picks::Column::AsOfDate.is_null())
+        // P-g A 类（2026-10-18，PLAN-mover-coverage-and-reflection-exit §P-g）：本函数把整批
+        // picks 当**正负样本分母**，而 `synthetic=1` 是**降级产物**——capital 的
+        // 「K线代理模式：无资金流向数据，仅基于量价」与 watchlist 的「初筛列表，无技术信号」，
+        // 两者都带真价格真置信，但用的是代理数据面或根本没信号。把它们与主口径算进同一个
+        // 命中率，等于让「数据源缺失时的降级行为」替主策略背成绩（现网 bottleneck
+        // 990 降级 / 11 主口径）。口径沿用仓内既有写法（`backtest_validation.rs` 的 `exclude_synthetic` 分支、
+        // `pool_scan.rs::load_pool_selection`）。**下方第 2 步取同批行的查询必须一起加**——两处不同口径会出现
+        // 「找得到批次、批内过滤后为空」的假「荐股记录为空」。
+        .filter(reco_picks::Column::Synthetic.eq(0))
         .order_by_desc(reco_picks::Column::GeneratedAt)
         .one(state.harness.db())
         .await
@@ -2980,9 +2989,12 @@ async fn backtest_reco_strategies_inner(
     let run_ts = latest_run.generated_at;
 
     // 2. 读取该次运行的所有推荐记录
+    //    与上方第 1 步同口径（P-g A 类）：批次的「存在性」与批内样本的「计入」必须用
+    //    同一个过滤集，否则会出现「按主口径行找到的批次」配「含降级行的样本数」的错分母。
     let all_picks = reco_picks::Entity::find()
         .filter(reco_picks::Column::GeneratedAt.eq(&run_ts))
         .filter(reco_picks::Column::AsOfDate.is_null())
+        .filter(reco_picks::Column::Synthetic.eq(0))
         .all(state.harness.db())
         .await
         .map_err(|e| {
@@ -3247,6 +3259,12 @@ pub async fn get_reco_signal_history(
         // 代际过滤：「最近一次荐股」指实盘最近一批，回放行不得参与（同文件
         // `get_cached_recommendation` 同口径）
         .filter(reco_picks::Column::AsOfDate.is_null())
+        // P-g A 类（2026-10-18，PLAN-mover-coverage-and-reflection-exit §P-g）：本命令产出
+        // `StrategySignalResult` = **策略信号明细**，而 `synthetic=1` 恰恰是「策略没给出信号」
+        // 时的降级替身（capital 无资金流数据 ⇒ K线代理；watchlist ⇒ 初筛无技术信号）。
+        // 把降级替身记进策略信号史，等于给该策略记了一次它自己没做过的判断。
+        // 与同文件 `backtest_reco_strategies_inner` 同口径；下方第 2 步必须一起加。
+        .filter(reco_picks::Column::Synthetic.eq(0))
         .order_by_desc(reco_picks::Column::GeneratedAt)
         .one(state.harness.db())
         .await
@@ -3264,10 +3282,11 @@ pub async fn get_reco_signal_history(
     };
     let run_ts = latest_run.generated_at;
 
-    // 2. 读取该次运行的所有推荐记录
+    // 2. 读取该次运行的所有推荐记录（与第 1 步同口径 —— 见上方 P-g A 类注释）
     let all_picks = reco_picks::Entity::find()
         .filter(reco_picks::Column::GeneratedAt.eq(&run_ts))
         .filter(reco_picks::Column::AsOfDate.is_null())
+        .filter(reco_picks::Column::Synthetic.eq(0))
         .all(state.harness.db())
         .await
         .map_err(|e| {
@@ -4570,7 +4589,13 @@ async fn persist_reco_response_picks(
     // P3 修复(2026-08-01): 直接复用扫描实际使用的池（流动性过滤后 seed），不再二次 build_seed_pool ——
     // 旧逻辑浪费 get_hot_stocks + get_industry_ranking 两次请求，
     // 且两次构建间数据变化会导致快照与真实扫描池不一致（preseed 模式更严重）。
-    let seed_pool_json = response.seed_pool_snapshot.clone().unwrap_or_else(|| "[]".to_string());
+    // 0-C（2026-10-18，PLAN-mover-coverage-and-reflection-exit）：**不得**把 `None` 折成字面量
+    // `"[]"`。两者含义相反 —— `None` = 「这批候选到底是从哪个池挑的，取数侧没给」；
+    // `"[]"` = 「池子是空的，确实一个候选都没有」。而 `mover_recall::code_in_pool_snapshot`
+    // 对两者**同判**「不在池」⇒ 折成 `"[]"` 等于把一次取数缺痕写成一条「该票未进候选池」的结论，
+    // 是「把拿不到伪装成正常结果」那一类。现网实证：回放侧 `seed_pool_json` 全为 `"[]"`
+    // 且真实候选（`synthetic=0`）行数 = 0 —— 折空之后这个矛盾在库里读不出来。
+    let seed_pool_json = response.seed_pool_snapshot.clone();
     let flat: Vec<RecoPick> = response.picks.values().flat_map(|v| v.iter().cloned()).collect();
     // 代际标记直接取自响应本身（由 recommender 内部按 as_of_ctx 回填）⇒ 实盘为 None、
     // 回放为该截止日，本函数不再按「是不是 live」决定要不要落库。
@@ -4578,7 +4603,7 @@ async fn persist_reco_response_picks(
     let written = crate::commands::_shared_reco_pool::persist_reco_picks(
         state.harness.db(),
         &flat,
-        Some(seed_pool_json),
+        seed_pool_json,
         reco_strategy_weights_snapshot(served_vars),
         generated_at,
         as_of_date,
@@ -5036,6 +5061,8 @@ pub async fn get_cached_recommendation(
         seed_pool_snapshot: None,
         // 缓存还原不是一次扫描 ⇒ 无本批截断留痕（留痕只在 persist 时写库）
         scan_audit: vec![],
+        // 缓存还原自历史批次 ⇒ 拦截留痕属于产生该批的那次扫描，这里无从还原（空即可）
+        gate_blocked: vec![],
     }))
 }
 
@@ -6074,15 +6101,41 @@ pub async fn calibrate_portfolio_mgr_params(
         .await
         .map_err(|e| format!("查询反思失败: {e}"))?;
 
+    // 阶段 3 / 决-3：结构层反思（L2 改公式 / L3 改提示词）**不得**进参数网格。
+    // 网格只能在既有标量里挪数字，而根因是门形状/腿集合时，任何挪法都是在替一个
+    // 不相干的假设调参，且把「N 条结构层根因」这个信号读成「本轮校准有效」。
+    // NULL（本列引入前的 79/80 存量 + 模型真没判的增量）仍入池：排除它们等于把
+    // 参数校准的样本清零 ⇒「新列生效」变成「校准失效」，与修复目的相反
+    // （判据与理由见 `reflection_tier::may_enter_param_grid`）。
+    use axagent_analysis_engine::reflection_tier::{may_enter_param_grid, parse_reflection_tier};
+    let mut structural_ids: Vec<String> = Vec::new();
     let suggestions: Vec<(String, Option<PortfolioMgrParamSet>)> = reflections
         .iter()
         .filter_map(|r| {
+            let tier = parse_reflection_tier(r.implementation_tier.as_deref());
+            if !may_enter_param_grid(tier) {
+                structural_ids.push(r.id.clone());
+                return None;
+            }
             let verdict = r.verdict.as_deref()?.to_string();
             let params_json = r.parameter_suggestions_json.as_deref()?;
             let params = try_parse_param_suggestion(params_json);
             Some((verdict, params))
         })
         .collect();
+    // 「没判层级」单独计数：它既不是 L1 也不是结构层，面板必须能与 L1 分开显示，
+    // 否则新列引入期的存量会被当成「都判成了参数层」。
+    let tier_unlabelled = reflections
+        .iter()
+        .filter(|r| parse_reflection_tier(r.implementation_tier.as_deref()).is_none())
+        .count();
+    if !structural_ids.is_empty() {
+        tracing::info!(
+            "[wfo] {} 条反思判为结构层（L2/L3），未进参数网格；id={:?}",
+            structural_ids.len(),
+            structural_ids
+        );
+    }
     // 诚实计数：「有建议文本」与「建议里认得出可校准参数」是两件事。
     // 2026-10-14 前解析器对任何非空数组都返回默认值，这里把两者混为一谈 ⇒ 网格得分
     // 与反思内容无关却看不出来（现网 9 条建议、真被读进去 0 条）。
@@ -6099,6 +6152,9 @@ pub async fn calibrate_portfolio_mgr_params(
             "totalReflections": reflections.len(),
             "reflectionsWithSuggestionText": suggestions.len(),
             "parsedSuggestions": 0,
+            "structuralExcluded": structural_ids.len(),
+            "structuralIds": structural_ids,
+            "tierUnlabelled": tier_unlabelled,
             "message": message
         }));
     }
@@ -6140,6 +6196,11 @@ pub async fn calibrate_portfolio_mgr_params(
         "totalReflections": reflections.len(),
         "reflectionsWithSuggestionText": suggestions.len(),
         "parsedSuggestions": parsed,
+        // 阶段 3：结构层被挡在网格之外的条数与其 id —— 让「本轮没调出东西」与
+        // 「本轮的根因本来就不在参数层」在面板上可区分
+        "structuralExcluded": structural_ids.len(),
+        "structuralIds": structural_ids,
+        "tierUnlabelled": tier_unlabelled,
     }))
 } // ── R1 复盘→进化：EvolutionDriftPanel 命令 ──
 
@@ -7164,6 +7225,7 @@ mod reco_batch_contract_tests {
             error_detail: None,
             seed_pool_snapshot: None,
             scan_audit: vec![],
+            gate_blocked: vec![],
         }
     }
 

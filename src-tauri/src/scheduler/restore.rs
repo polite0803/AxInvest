@@ -189,6 +189,59 @@ pub async fn reclaim_stale_stock_analyses(
     Ok(res.rows_affected)
 }
 
+/// 执行表（`workflow_executions`）的「没有结论地消失」终态值。
+///
+/// 本值**只由启动回收通路写**（见下方 `reclaim_stale_workflow_executions`）。
+/// 刻意不复用 `cancelled`：那个值在本表里是「用户主动取消」的专有价值
+/// （`cancel_workflow` 写它），拿它标僵死等于替用户编造一次他做过的操作 ——
+/// 与分析表那边 `interrupted` / `failed` / `cancelled` 不可互替是同一条纪律。
+pub const WORKFLOW_EXECUTION_STATUS_INTERRUPTED: &str = "interrupted";
+
+/// 启动回收（与分析表同一时机、同一判据）：把**上一进程遗留**、停在 `running` 的
+/// 工作流执行行标为 `interrupted`。
+///
+/// ## 为什么这是另一条，而不是 `reclaim_stale_stock_analyses` 的重复
+///
+/// 同族缺陷、不同一张表。现网读数：`workflow_executions` 共 1376 行，其中 **85 行是
+/// `running`、80 行早于三天前** —— 历史执行列表面对这些行永久转圈，批量评估
+/// （`commands/evaluator.rs`）还会把它们当样本抽走。引擎侧的终态写入此前有个前提
+/// 「内存 `executions` map 里必须还有这次执行」，未命中就返回 `NotFound` 而调用点用
+/// `.ok()` 吞掉 ⇒ 进程重启/子工作流捷径那条路上，谁都不写这行的终态。
+///
+/// ## ⚠ 时间单位与本函数的一致性
+///
+/// 本表 `created_at` / `updated_at` 写的是**秒**（`dao/src/repo/workflow_execution.rs`
+/// 走 `now_ts()`），而 `stock_analyses` 是**毫秒**。两个方向的抄错都不是「报错」，而是行为变了：
+/// - 把 cutoff 传成毫秒 ⇒ 本表所有 `created_at`（秒）都 `< cutoff` ⇒ **连本次正在跑的新行
+///   一起误标**（误杀活的）。
+/// - 反过来若本表哪天改回毫秒而 cutoff 仍传秒 ⇒ 一行也扫不到、平静地报 0（静默失效）。
+///
+/// 两种都由下方 `reclaim_stale_workflow_executions_matches_seconds_and_only_running`
+/// 的最后一段断言钉住（单位是这条判据的一部分，不是实现细节）。
+///
+/// 判据、cutoff 取法与残留风险（多进程并发前提）与 `reclaim_stale_stock_analyses` 完全一致，
+/// 故调用点与分析表共用同一道外部重跑互斥门。
+pub async fn reclaim_stale_workflow_executions(
+    db: &sea_orm::DatabaseConnection,
+    cutoff_ts_sec: i64,
+) -> Result<u64, sea_orm::DbErr> {
+    use sea_orm::sea_query::Expr;
+    let res = axagent_entities::workflow_executions::Entity::update_many()
+        .col_expr(
+            axagent_entities::workflow_executions::Column::Status,
+            Expr::value(WORKFLOW_EXECUTION_STATUS_INTERRUPTED),
+        )
+        .col_expr(
+            axagent_entities::workflow_executions::Column::UpdatedAt,
+            Expr::value(chrono::Utc::now().timestamp()),
+        )
+        .filter(axagent_entities::workflow_executions::Column::Status.eq("running"))
+        .filter(axagent_entities::workflow_executions::Column::CreatedAt.lt(cutoff_ts_sec))
+        .exec(db)
+        .await?;
+    Ok(res.rows_affected)
+}
+
 /// 外部批量重跑（`axagent-batch-rerun`）的运行标记文件名（与 bin 内 `RERUN_LOCK_FILE` 同值）。
 ///
 /// ⚠ 两处各写一份字面量是刻意的：bin 是**独立目标**，把 bin 专用常量提到 lib 公开 API
@@ -227,5 +280,61 @@ pub fn external_rerun_in_progress() -> bool {
         Ok(age) => age < EXTERNAL_RERUN_FRESH,
         // 时钟倒退（`elapsed` 报 Err）⇒ 保守认为新鲜。
         Err(_) => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 执行表回收的四条判据一次锁住：① 只碰 `running`；② 只碰早于 cutoff 的（本次在跑的不许动）；
+    /// ③ 写的值是 `interrupted` 而不是 `cancelled`（后者在本表是「用户主动取消」的专有价值）；
+    /// ④ **时间单位是判据的一部分**：把 cutoff 传成毫秒会连新行一起误标，最后一段就是钉这个。
+    #[tokio::test]
+    async fn reclaim_stale_workflow_executions_matches_seconds_and_only_running() {
+        use axagent_entities::workflow_executions;
+        use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+        let handle = axagent_dao::db::create_test_pool().await.expect("建临时测试库失败");
+        let db = &handle.conn;
+        let now_sec = chrono::Utc::now().timestamp();
+
+        // 用局部 `async fn` 而不是「返回 future 的闭包」：闭包那写法会把 `db` 的借用
+        // 推进它返回的 async block ⇒ 编译器报 lifetime may not live long enough。
+        async fn put(db: &sea_orm::DatabaseConnection, id: &str, status: &str, created_at: i64) {
+            workflow_executions::ActiveModel {
+                id: Set(id.to_string()),
+                workflow_id: Set("stock-analysis".to_string()),
+                status: Set(status.to_string()),
+                created_at: Set(created_at),
+                updated_at: Set(created_at),
+                ..Default::default()
+            }
+            .insert(db)
+            .await
+            .expect("插入执行行应成功");
+        }
+        put(db, "old-running", "running", now_sec - 3_600).await;
+        put(db, "old-completed", "completed", now_sec - 3_600).await;
+        // 「新行」= 本进程正在跑的那条：cutoff 取于启动一刻，它必然在边界之后。
+        put(db, "fresh-running", "running", now_sec + 60).await;
+
+        let n = reclaim_stale_workflow_executions(db, now_sec).await.expect("回收应成功");
+        assert_eq!(n, 1, "只该回收『running 且早于 cutoff』的那一行，实际 {n}");
+
+        let rows = workflow_executions::Entity::find().all(db).await.expect("查询应成功");
+        let status_of = |id: &str| {
+            rows.iter().find(|r| r.id == id).map(|r| r.status.clone()).unwrap_or_default()
+        };
+        assert_eq!(status_of("old-running"), WORKFLOW_EXECUTION_STATUS_INTERRUPTED);
+        assert_eq!(status_of("old-completed"), "completed", "已收口的行不得被改");
+        assert_eq!(status_of("fresh-running"), "running", "cutoff 之后的行是本次在跑的，不许误杀");
+
+        // 单位负控：把 cutoff 传成**毫秒**。本表 `created_at` 是秒 ⇒ 全部落在 `< cutoff` 一侧，
+        // 于是连 `fresh-running` 也被误标。这一条断言的作用是把「秒/毫秒」从实现细节
+        // 变成会被判据抓住的东西（错了必红，而不是静默换一种坏行为）。
+        let over = reclaim_stale_workflow_executions(db, chrono::Utc::now().timestamp_millis())
+            .await
+            .expect("毫秒 cutoff 不该报错，只会误标");
+        assert_eq!(over, 1, "毫秒 cutoff 必须把剩下的新行也误标（本表时间列是秒）");
     }
 }

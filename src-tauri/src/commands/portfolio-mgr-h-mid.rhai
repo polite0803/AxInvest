@@ -27,7 +27,7 @@ let gaps = [];
 // 已接：branch_json / horizon_prior_json / tier_score / macd_dif / macd_dea / rsi_value /
 //       pe_percentile / f_score / consensus_eps / consensus_estimated / lockup_float_ratio / lockup_supply_reason
 //       latest_eps / latest_eps_basis / flow_persistence /
-//       kline_bars / overall_risk / stop_vol_mult / take_profit_vol_mult / scoring_windows / scoring_scale / scale_trend / scale_momentum
+//       kline_bars / overall_risk / stop_vol_mult / take_profit_vol_mult / scoring_windows / scoring_scale / scale_trend / scale_momentum / excess_return_pct
 // 刻意不读（有名字但没有数据面 ⇒ 读它只会打死节点）：
 //   · 催化剂（本档腿集无 `eventCatalyst`，任务 #22）
 //   · 解禁占比（窗口归约 + 百分数→小数换算未闭合，任务 #23；本档它本来也只是风险提示）
@@ -110,6 +110,11 @@ let raw = #{
     lockupFloatRatio: if present(lockup_float_ratio) { lockup_float_ratio } else { () },
     consensusEps: if present(consensus_eps) && !cons_is_estimated { consensus_eps } else { () },
     latestEps: if present(latest_eps) { latest_eps } else { () },
+    // 阶段 1（2026-10-19）：相对强度。值由 wiring 层按**本档交易日窗**算好后注入
+    // （`relative_strength.mid`，口径见 `harness::indicators::excess_return_pct`），
+    // 本脚本**不重算** —— 同一个量在四档各算一遍就是「一个算法四套参数」的老坑。
+    // 缺值走 `()` ⇒ `pm_leg_signal` 拿不到键 ⇒ 该腿缺席（不是 0：0 已被「与基准同步」占用）。
+    excessReturnPct: if present(excess_return_pct) { excess_return_pct } else { () },
 };
 let present_legs = [];
 let absent_legs = [];

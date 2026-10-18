@@ -8,6 +8,7 @@
 //! ## 公开 API
 //! - [`recommend_stocks`] — Tauri command 调用
 
+pub mod gates;
 pub mod ic;
 
 /// 荐股算法的**自身版本**（与 `stock_analysis_setup` 的工作流 `TEMPLATE_VERSION` 无关 ——
@@ -18,7 +19,17 @@ pub mod ic;
 ///
 /// 为什么由代码常量而不是模板变量承载：荐股链没有「重种」语义，变量可被面板随手改，
 /// 而版本必须是样本的**不可变归属**，否则同代筛样本身就是可伪造的。
-pub const RECO_ALGORITHM_VERSION: i32 = 1;
+/// v2（2026-10-18）：`trend × long` 按设计不做（`trend_momentum_not_a_long_thesis`）——
+/// 用户裁定「智能荐股的长线和趋势智选是两个不同的概念，不能混为一谈」；trend 的短期
+/// 动量证据没有长线兑现路径（002696 案例错配源头，见 `style_matrix::MATRIX` 处长注释）。
+/// v4（2026-10-18）：**置信度语义重构——撤伪概率链**。用户裁定「同档所有票同一个
+/// 置信度（60/56/53/51）基本上就是造假」——根因是策略「条件满足度」评分被**当概率**
+/// 做 logit 合成 + SNR 折算 + quality 校准（对非概率量的伪概率运算，且策略输入几乎
+/// 全是模板常数 ⇒ 同档原始置信趋同、输出塌成档位常数）。v4 起 `confidence` =
+/// **证据强度**（策略条件满足度 × 风格权重），个股维度、不再自称概率；伪概率链与
+/// 其数据依赖（market_regime/style_baseline/conf_sensitivity）整体撤除。
+/// 真概率的正路 = 证据分桶 × 闭环 T+N 胜率校准（PLAN-capital-long-evidence §六）。
+pub const RECO_ALGORITHM_VERSION: i32 = 4;
 
 /// 荐股链样本的**起算代际** —— 读侧筛样分母的下限（#49 / #12 共用这一条判据）。
 ///
@@ -440,6 +451,7 @@ fn empty_error_response(period: Period, detail: String) -> RecoResponse {
         error_detail: Some(detail),
         seed_pool_snapshot: None,
         scan_audit: vec![],
+        gate_blocked: vec![],
     }
 }
 
@@ -534,82 +546,18 @@ struct PreparedScan {
     use_cache: bool,
     /// 行情 + K 线两源全挂时的归因文本；非 `None` 时逐档直接出降级响应（不静默出空表）
     all_sources_down: Option<String>,
-    /// 扫描时刻的市场状态键（`"bull"` / `"bear"` / `""`），供信号校准的先验。
-    /// `""` = 指数K线取不到 ⇒ 被调方走无差别先验，**不是在调用点写死 `"neutral"`**（那等于谎称已知市场状态）。
-    market_regime: String,
-    /// 同风格跨四档的合并胜率 p_pool（质量校准基准）。缺该风格样本 ⇒ 该风格**不校准**，而不是拿 0.50 假装。
-    style_baseline: HashMap<String, f64>,
     /// 逐档先验表（`horizon_prior::horizon_prior_map` 的输出，与分析链**同一份实现**）：
-    /// `{档位: {prior, samples, source}}`。`None` ⇒ 该档退回纯评分并标 `priorSource="absent"`。
+    /// `{档位: {prior, samples, source}}`。
+    /// v4（2026-10-18）起**不再进入个股置信度合成**（伪概率链撤除，见 scan_period），
+    /// 保留为档位级观测（debug 留痕）——它的正确展示位是档位级「历史胜率」，
+    /// 个股级校准等证据分桶样本积累（`PLAN-capital-long-evidence.md` §六）。
     horizon_prior: Option<serde_json::Value>,
-    /// 评分进入 logit 合成的斜率（`reco_conf_sensitivity`）。
-    conf_sensitivity: f64,
 }
 
-/// 计算「同风格跨四档合并胜率」p_pool（按信号数加权），作为逐档质量校准的**基准**。
-///
-/// 为什么不能沿用固定 0.50：0.50 是掷硬币先验，它使每个风格的因子都围绕同一个常数缩放，
-/// 于是「这档比该风格自己的平均水准好多少」这一真实信息被丢掉，不同风格之间的差异也全部
-/// 变成同一个尺子下的伪差异。
-fn compute_style_baselines() -> HashMap<String, f64> {
-    use crate::backtest_strategy::get_signal_quality;
-    let styles = [
-        "trend",
-        "value",
-        "capital",
-        "reversion",
-        "watchlist",
-        "bottleneck",
-        "policy",
-        "earnings",
-        "capital_flow",
-        "event",
-        "technical",
-        "serenity",
-    ];
-    let mut out = HashMap::new();
-    for style in styles {
-        let mut weighted = 0.0;
-        let mut signals = 0u32;
-        for p in Period::ALL {
-            if let Some(q) = get_signal_quality(&format!("{style}_{p}", p = p.as_str())) {
-                if q.total_signals > 0 {
-                    weighted += q.win_rate_pct * q.total_signals as f64;
-                    signals += q.total_signals;
-                }
-            }
-        }
-        if signals > 0 {
-            out.insert(style.to_string(), weighted / signals as f64 / 100.0);
-        }
-    }
-    out
-}
-
-/// 取扫描时刻的市场状态（用上证综指日线跑 [`RegimeDetector`]）。
-///
-/// 取不到就返回空串 —— 宁可「不知道」并在下游走无差别先验，也不在调用点硬写 `"neutral"` 假装知道。
-async fn detect_market_regime(client: &AStockClient) -> String {
-    let klines = match client.get_klines("000001.SH", "daily", 60).await {
-        Ok(k) => k,
-        Err(e) => {
-            tracing::warn!(
-                "[recommender] 指数K线不可得，市场状态按未知处理（不假装 neutral）: {e}"
-            );
-            return String::new();
-        },
-    };
-    let report = axagent_astock_data::regime::RegimeDetector::detect(&klines);
-    match report.regime {
-        axagent_astock_data::regime::MarketRegime::Bull => "bull".to_string(),
-        axagent_astock_data::regime::MarketRegime::Bear => "bear".to_string(),
-        other => {
-            tracing::info!("[recommender] 市场状态={}，校准先验取无差别分支", other.label());
-            String::new()
-        },
-    }
-}
-
+/// ⚠ v4（2026-10-18）：`compute_style_baselines` 与 `detect_market_regime` 已随伪概率链
+/// 撤除（它们只服务 quality 校准——校正一个假起点只会让假数字显得更可信）。
+/// 个股级校准（证据分桶 × 真实 T+N 胜率）是恢复这条链的**唯一正当理由**，
+/// 设计要点留在 `PLAN-capital-long-evidence.md` §六与本项目记忆 2026-10-18。
 async fn recommend_stocks_inner(
     client: Arc<AStockClient>,
     period: Period,
@@ -757,8 +705,6 @@ async fn prepare_scan(
     //    workflow template 中往往 vendor_* 变量为空，导致 4 个 style 全 disabled。
     //    现在所有 style 都跑；data 真的取不到时该 style 自然返回空 picks，
     //    前端展示 "no data" 而非误报 "数据源未启用"）
-    // 市场状态取一次，四档共享（`client` 随后被移入结构，故必须在构造前取）
-    let market_regime = detect_market_regime(&client).await;
 
     PreparedScan {
         client,
@@ -774,16 +720,7 @@ async fn prepare_scan(
         per_code_locks: PerCodeLocks::new(),
         use_cache,
         all_sources_down,
-        // 市场状态与风格基准各取一次，供四档共享（此前是每个 pick 现算、且基准写死 0.50）
-        market_regime,
-        style_baseline: compute_style_baselines(),
         horizon_prior,
-        conf_sensitivity: template_vars
-            .iter()
-            .find(|(k, _)| k == "reco_conf_sensitivity")
-            .and_then(|(_, v)| v.as_f64())
-            .unwrap_or(1.0)
-            .clamp(0.0, 4.0),
     }
 }
 
@@ -811,10 +748,7 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
     let strategy_weights = &prepared.strategy_weights;
     let per_code_locks = prepared.per_code_locks.clone();
     let use_cache = prepared.use_cache;
-    let market_regime = prepared.market_regime.clone();
-    let style_baseline = prepared.style_baseline.clone();
     let horizon_prior = prepared.horizon_prior.clone();
-    let conf_sensitivity = prepared.conf_sensitivity;
 
     // 3. 选定该 period 下的所有子策略（不再做 vendor 禁用检查——
     //    原本要求 "enabled_vendors" 至少覆盖一个 required vendor，但生产环境
@@ -879,10 +813,6 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
         };
         let period_val = period;
         let vars_for_future = vars_map.clone();
-        // 每个策略任务各自带走一份（市场状态与风格基准是**整批共享的同一份值**，
-        // 逐策略 clone 只为满足所有权，不重算）
-        let market_regime = market_regime.clone();
-        let style_baseline = style_baseline.clone();
         let horizon_prior = horizon_prior.clone();
         // 复盘→进化：该 (style, period) 当前的权重
         let style_weight = strategy_weights.get(&(s.style(), period)).copied().unwrap_or(1.0);
@@ -898,42 +828,30 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
             // 应用自适应权重：confidence 与 position_pct 同步缩放
             for p in raw.iter_mut() {
                 let old_conf = p.confidence;
-                // ── 逐档置信（Phase R-C）──
-                // 旧形态：`calc_confidence` 根本没有 period 参数 ⇒ 同一票同一风格在四个档上
-                // 是**同一个数**，档间差异只剩一个经验乘数（诊断 R1/E1）。
-                // 现：该档先验（该档历史方向命中率经经验贝叶斯收缩，实现与分析链共用
-                // `horizon_prior_map`）与该风格评分在 logit 空间合成；先验不可得 ⇒ 退回纯评分
-                // 并把 `priorSource="absent"` 标出来，不假装四档各自成立。
-                let score = old_conf as f64 / 100.0;
-                let tier_row = horizon_prior.as_ref().and_then(|j| j.get(period_val.as_str()));
-                let prior = tier_row.and_then(|r| r.get("prior")).and_then(|v| v.as_f64());
-                p.prior_source = Some(
-                    tier_row
-                        .and_then(|r| r.get("source"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("absent")
-                        .to_string(),
-                );
-                p.prior_samples = tier_row
-                    .and_then(|r| r.get("samples"))
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as u32);
-                // 口径与分析链**同标尺**：先 logit 空间合成先验与评分，再按该档持有期做
-                // 时间折算（`snr_confidence`，锚 `reflection_stats::SNR_ANCHOR` —— 与脚本侧
-                // `pm_snr_confidence(heff, daysh, SNR_ANCHOR_DAYS)` 同函数、同值）。
-                // 2026-10-01 用户裁定「统一口径」：补上时间折算，否则荐股的四档胜率
-                // 没有时间维度，而分析链有 ⇒ 同一个「长期」概念在两侧是两把尺子。
-                let new_conf = match crate::recommender::scoring::blend_win_rate(
-                    prior,
-                    score,
-                    conf_sensitivity,
-                    period_val.default_holding_days(),
-                    crate::reflection_stats::SNR_ANCHOR as u32,
-                ) {
-                    Some(win_rate) => (win_rate * 100.0 * style_weight).clamp(0.0, 100.0) as u8,
-                    // 先验不可得 ⇒ 退回纯评分（逐位保持原行为，含 round 时机）
-                    None => ((score * 100.0).round() * style_weight).clamp(0.0, 100.0) as u8,
-                };
+                // ── 置信度语义重构（2026-10-18，v4）：撤伪概率链 ──
+                // 旧链（v1~v3）把策略「条件满足度」评分**当概率**喂给 logit 合成（对
+                // 非概率量做贝叶斯运算，数学上从第一步就错）→ SNR 时间折算（第二次伪
+                // 概率操作）→ quality 校准。而策略层输入几乎全是模板常数（value 五参
+                // 全常数 / trend·capital 仅量比二值）⇒ 同档所有票塌成「档位常数」
+                // （60/56/53/51）—— 用户裁定「这基本上就是造假」。
+                // 新语义：`confidence` = **证据强度**（策略条件满足度 × 风格权重），
+                // 个股维度（v3 已把连续证据强度引入策略层），明确不是「上涨概率」。
+                // 风格权重保留：IC 闭环的真数据（该风格该档该不该降权），对同档所有
+                // 票统一缩放，不伪造个股区分。
+                // 档位历史胜率（真数据）的正确展示位是**档位级**——个股级校准等证据
+                // 分桶样本积累（`PLAN-capital-long-evidence.md` §六）。
+                let new_conf = ((old_conf as f64) * style_weight).round().clamp(0.0, 100.0) as u8;
+                p.prior_source = Some("evidence".to_string());
+                p.prior_samples = None;
+                // 原始证据分（风格权重调制前）随 pick_data JSON 落库——分桶校准的输入
+                // （校准必须用权重调制前的值：权重是闭环降权因子，混入会把「风格被
+                // 降权」误读成「该票证据弱」，见 types.rs 字段注释）。
+                p.evidence_score = Some(old_conf);
+                // 档位先验降级为观测留痕（debug 档——它是档位级真数据，但不再进入
+                // 个股数字；观察其长期形态供 §六 校准设计参考）。
+                if let Some(row) = horizon_prior.as_ref().and_then(|j| j.get(period_val.as_str())) {
+                    tracing::debug!("[reco] period={} tier_prior={}", period_val.as_str(), row);
+                }
                 // 还原策略给出的 base：主路径已**不乘**经验周期乘数（见 scoring.rs 注释），
                 // 故这里只除掉置信度一项。
                 let base = if old_conf > 0 {
@@ -1016,33 +934,12 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
                     budget.unwrap_or(0.0),
                     drag
                 ));
-                // 信号质量校准：把「该 (style, period) 的后验胜率」相对**该风格自己的跨档合并胜率**
-                // p_pool 来放大/缩小。基准来自数据而不是写死的 0.50（掷硬币先验）；
-                // p_pool 取不到 ⇒ 该风格**不校准**（factor=1.0），而不是拿 0.50 假装校准过。
-                let quality_id = format!("{}_{}", p.style.as_str(), p.period.as_str());
-                let (posterior_win_rate, sample_count, _prior) =
-                    crate::backtest_strategy::weighted_signal_calibration(
-                        &quality_id,
-                        &market_regime,
-                    );
-                let quality_factor = match style_baseline.get(p.style.as_str()) {
-                    Some(pool) if *pool > 0.0 && sample_count >= 5 => {
-                        ((posterior_win_rate / pool) - 0.20).clamp(0.7, 1.3)
-                    },
-                    _ => 1.0,
-                };
-                // 旧「反身性」折扣（只对超短 ×0.85）已删：它是拍的数、无推导，
-                // 且「短持有期该更保守」这件事的正确形态是**换手成本按 1/持有天数摊薄**（Phase R-D）。
-                let combined = quality_factor;
-                let delta = if combined > 1.0 {
-                    combined - 1.0
-                } else {
-                    1.0 - combined
-                };
-                if delta > 0.01 {
-                    p.confidence = (p.confidence as f64 * combined).clamp(0.0, 100.0) as u8;
-                    p.position_pct = (p.position_pct * combined).clamp(0.0, 100.0);
-                }
+                // ── 信号质量校准已随 v4 撤下（2026-10-18）──
+                // 它校正的对象是伪概率（旧链的「先验合成 + SNR 折算」输出）——校准一个
+                // 假起点只会让假数字显得更可信。`weighted_signal_calibration`（真数据：
+                // 按 (style, period) 的后验胜率）保留为 pub，个股级校准恢复时以
+                // 「证据分桶 × 真实 T+N 胜率」的形态回来（PLAN-capital-long-evidence §六）。
+                // 旧「反身性」折扣（只对超短 ×0.85）此前已删：拍的数、无推导。
             }
             Ok::<_, String>(raw)
         };
@@ -1116,6 +1013,35 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
             p.style == types::Style::Watchlist || p.confidence >= reco_cfg.min_confidence
         });
         tracing::info!("[recommender] after confidence filter, picks={}", all_picks.len());
+    }
+
+    // ── P0+P1 出票门（2026-10-18，002696 案例复盘）：mid/long 档财报预检 + 分析回环否决 ──
+    // 入池判据是「热门 ∪ 行业领涨」（零基本面门，pool.rs），题材脉冲股必然入池；分析端
+    // 又会对同一批票判「长线卖出」⇒「入池按趋势、分析按基本面」结构性对立。本门把两条
+    // 硬否决前移到出票口：最新一期净利 ≤0 / 连续两期同比下滑 ⇒ 拦（P0 财报门）；最近
+    // 30 天 live 分析对本档判 卖出/减持 ⇒ 拦（P1 回环门，否决表由 `reco_loop` 经
+    // `reco_analysis_vetoes` 模板变量注入，as-of 回放不注入）。只拦非 synthetic picks；
+    // 财报取数失败 fail-open（gates.rs 内 warn 留痕）；拦截逐条进 resp.gate_blocked
+    // （结构化载体，不靠日志反查）。ultra_short/short 不设此门 —— 与
+    // `portfolio-mgr-h-ultra-short.rhai`「基本面按构造不适用」同一档位裁定。
+    let mut gate_blocked: Vec<types::GateBlockedPick> = Vec::new();
+    if matches!(period, Period::Mid | Period::Long) {
+        // ⚠ 回放不消费否决表（回测语义 =「当时的判定」，不带今天的回环）。
+        //   守卫必须在这里而不是加载侧：served_vars 在命令层 as_of scope 之外加载，
+        //   加载时 current_as_of() 恒为 None ⇒ 加载侧守卫是假守卫（防线漂移经典形态）。
+        let veto_var = if as_of::current_as_of().is_none() {
+            vars_map.get("reco_analysis_vetoes")
+        } else {
+            None
+        };
+        gate_blocked = gates::apply_exit_gates(&client, period, &mut all_picks, veto_var).await;
+        if !gate_blocked.is_empty() {
+            tracing::info!(
+                "[reco_gate] period={} 出票门拦截 {} 只（逐条理由见 [reco_gate] 拦截行）",
+                period.as_str(),
+                gate_blocked.len()
+            );
+        }
     }
 
     // 7. 按风格分组 + 限 10（截断尾部留痕，供 L3 归因与 Phase 4 降权）
@@ -1212,6 +1138,7 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
             .unwrap_or_default(),
         ),
         scan_audit,
+        gate_blocked,
     };
     if use_cache {
         cache_put(period, resp.clone());
@@ -1287,6 +1214,7 @@ mod tests {
             confidence_percentile: None,
             prior_source: None,
             prior_samples: None,
+            evidence_score: None,
             stop_source: None,
             position_source: None,
 
@@ -1309,11 +1237,24 @@ mod tests {
             error_detail: None,
             seed_pool_snapshot: None,
             scan_audit: vec![],
+            gate_blocked: vec![],
         }
     }
 
-    #[test]
-    fn cache_invalidate_works() {
+    /// 进程级缓存是 `static RESULT_CACHE`，而 `invalidate_cache()` 清**整张表**
+    /// ⇒ 任何两条碰缓存的测试并发跑都会互删条目（实测：本文件的
+    /// `cache_invalidate_works` 把 `cache_live_and_replay_are_isolated` step-1 写入的
+    /// live 条目清掉，使它在「切回 live 仍应命中」那一步假红）。
+    /// 修在测试侧而不是给每条测试挑一个"没人用的 Period"——那只是把下一次踩雷
+    /// 留给第三个加缓存测试的人。⚠ 用 `tokio::sync::Mutex`：`std::sync::Mutex` 及其
+    /// Guard 在 `clippy.toml` 的 `disallowed-types` 里，且这里持锁要跨 `await`，
+    /// 不属于「不跨 await 的同步临界区」那条例外。
+    static CACHE_TEST_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+        LazyLock::new(|| tokio::sync::Mutex::new(()));
+
+    #[tokio::test]
+    async fn cache_invalidate_works() {
+        let _g = CACHE_TEST_LOCK.lock().await;
         invalidate_cache();
         let resp = dummy_resp(Period::Short, 0, "live");
         cache_put(Period::Short, resp);
@@ -1326,6 +1267,8 @@ mod tests {
     async fn cache_live_and_replay_are_isolated() {
         use axagent_astock_data::as_of::{AsOfContext, AsOfSource};
         use chrono::NaiveDate;
+        // 与 `cache_invalidate_works` 共用一把锁（见上方 `CACHE_TEST_LOCK` 的说明）
+        let _g = CACHE_TEST_LOCK.lock().await;
         invalidate_cache();
 
         // 1) live scope 写入
@@ -1391,6 +1334,7 @@ mod tests {
             error_detail: None,
             seed_pool_snapshot: None,
             scan_audit: vec![],
+            gate_blocked: vec![],
         };
         let s = serde_json::to_string(&resp).unwrap();
         assert!(s.contains("\"asOfDate\":\"2026-06-01\""));
@@ -1414,6 +1358,7 @@ mod tests {
             error_detail: None,
             seed_pool_snapshot: None,
             scan_audit: vec![],
+            gate_blocked: vec![],
         };
         let s = serde_json::to_string(&resp).unwrap();
         assert!(!s.contains("asOfDate"), "as_of_date should be skipped when None");
@@ -1441,6 +1386,7 @@ mod tests {
             confidence_percentile: None,
             prior_source: None,
             prior_samples: None,
+            evidence_score: None,
             stop_source: None,
             position_source: None,
 

@@ -35,3 +35,17 @@ pub const INTENT_EXPIRY_TASK_TYPE: &str = "intent-expiry";
 /// 教训校验定时任务的 task_type
 /// （与前端任务中心白名单、`init/services.rs` 执行分支逐字对齐）。
 pub const LESSON_VALIDATION_TASK_TYPE: &str = "lesson-validation";
+
+/// 中断分析自动补跑任务的 task_type
+/// （与前端任务中心白名单、`init/services.rs` 执行分支逐字对齐）。
+///
+/// ⚠ 名字**必须带域前缀**，不能叫 `TASK_TYPE`：门禁测试
+/// `stock_automation_cron_seed::every_builtin_task_type_is_handled_by_the_executor`
+/// 会把路径常量取**最后一段**（`rsplit("::")`）去 `init/services.rs` 里做子串查找，
+/// 而 `TASK_TYPE` 是 `POOL_SCAN_TASK_TYPE` 的子串 ⇒ 门禁会因他人名字而恒真，
+/// 真正「seed 有任务、executor 没分支」的缺陷就检不出来了。
+///
+/// 定义在此（而非业务模块 `stock_analysis_rerun`）的理由见本模块头部 ⚠：
+/// 它被任务中心白名单 / cron seed / 执行分支三方横向共享，留在业务模块会逼出
+/// `crate::commands::stock_analysis_rerun::` 互调，撞分层护栏规则 2。
+pub const STOCK_ANALYSIS_RERUN_TASK_TYPE: &str = "stock-analysis-rerun";

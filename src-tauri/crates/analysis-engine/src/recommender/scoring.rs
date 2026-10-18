@@ -409,6 +409,7 @@ mod tests {
                 confidence_percentile: None,
                 prior_source: None,
                 prior_samples: None,
+                evidence_score: None,
                 stop_source: None,
                 position_source: None,
 
@@ -434,6 +435,7 @@ mod tests {
                 confidence_percentile: None,
                 prior_source: None,
                 prior_samples: None,
+                evidence_score: None,
                 stop_source: None,
                 position_source: None,
 
@@ -472,6 +474,7 @@ mod tests {
                 confidence_percentile: None,
                 prior_source: None,
                 prior_samples: None,
+                evidence_score: None,
                 stop_source: None,
                 position_source: None,
 
@@ -497,6 +500,7 @@ mod tests {
                 confidence_percentile: None,
                 prior_source: None,
                 prior_samples: None,
+                evidence_score: None,
                 stop_source: None,
                 position_source: None,
 
@@ -535,6 +539,7 @@ mod tests {
                 confidence_percentile: None,
                 prior_source: None,
                 prior_samples: None,
+                evidence_score: None,
                 stop_source: None,
                 position_source: None,
 

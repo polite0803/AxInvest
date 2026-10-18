@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use axagent_harness::types::provider_model::request_delay_ms_for_model;
 use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest, RagContextResult};
 use axagent_harness::workflow_types::{StepProgressEvent, WorkflowNode};
 use futures::StreamExt;
@@ -493,6 +494,11 @@ impl NodeExecutorTrait for AgentExecutor {
         let (prov, key, model, adapter, api_key) = self
             .resolve_provider(node_model, session_model, session_provider_id, profile_suggested)
             .await?;
+
+        // 模型级「请求延时」（设置页那一格）。本函数只把值送到下面每个 `LlmCallConfig`，
+        // sleep 由统一入口 `execute_llm_stream` 单点执行 —— 工作流路径此前对该格**零消费点**，
+        // 面板调了不生效（只有聊天路径读它）。回退模型另取，见下方 `fb_prov` / `fb_model` 两处。
+        let request_delay_ms = request_delay_ms_for_model(&prov, &model);
 
         // 根据 provider 类型决定是否需要扫描非标准的文本式工具调用
         // 部分模型/代理不输出 OpenAI 标准 tool_calls delta，而是将工具调用
@@ -1160,7 +1166,8 @@ impl NodeExecutorTrait for AgentExecutor {
             };
 
             // 流式调用 LLM（经统一入口 execute_llm_stream，获得 PromptGuard/截断/缓存/审计）
-            let llm_config = axagent_harness::LlmCallConfig::default();
+            let llm_config =
+                axagent_harness::LlmCallConfig { request_delay_ms, ..Default::default() };
             // H4.3: 初始化失败（429/503/网络）时先试 fallback 流，fallback 也失败才返回原错误。
             // 旧逻辑直接 map_err(?) 返回，引擎用同一限流 provider 重试，回退模型形同虚设。
             let mut stream = match axagent_harness::execute_llm_stream(
@@ -1838,7 +1845,8 @@ impl NodeExecutorTrait for AgentExecutor {
                     store: None,
                     response_format: None,
                 };
-                let llm_config = axagent_harness::LlmCallConfig::default();
+                let llm_config =
+                    axagent_harness::LlmCallConfig { request_delay_ms, ..Default::default() };
                 match axagent_harness::execute_llm_stream(
                     adapter.as_ref(),
                     &req_ctx,
@@ -2238,7 +2246,12 @@ impl NodeExecutorTrait for AgentExecutor {
                                             store: None,
                                             response_format: None,
                                         };
-                                        let llm_config = axagent_harness::LlmCallConfig::default();
+                                        let llm_config = axagent_harness::LlmCallConfig {
+                                            request_delay_ms: request_delay_ms_for_model(
+                                                &fb_prov, &fb_model,
+                                            ),
+                                            ..Default::default()
+                                        };
                                         match axagent_harness::execute_llm_stream(
                                             fb_adapter.as_ref(),
                                             &fb_req_ctx,
@@ -2753,7 +2766,10 @@ impl NodeExecutorTrait for AgentExecutor {
                         store: None,
                         response_format: None,
                     };
-                    let llm_config = axagent_harness::LlmCallConfig::default();
+                    let llm_config = axagent_harness::LlmCallConfig {
+                        request_delay_ms: request_delay_ms_for_model(&fb_prov, &fb_model),
+                        ..Default::default()
+                    };
                     match axagent_harness::execute_llm_stream(
                         fb_adapter.as_ref(),
                         &fb_req_ctx,
@@ -2935,7 +2951,10 @@ impl AgentExecutor {
             previous_response_id: None,
             store_response: None,
         };
-        let llm_config = axagent_harness::LlmCallConfig::default();
+        let llm_config = axagent_harness::LlmCallConfig {
+            request_delay_ms: request_delay_ms_for_model(prov, model),
+            ..Default::default()
+        };
         let resp = axagent_harness::execute_llm(
             &**adapter,
             &plan_ctx,
@@ -3486,7 +3505,10 @@ impl AgentExecutor {
             store: None,
             response_format: None,
         };
-        let llm_config = axagent_harness::LlmCallConfig::default();
+        let llm_config = axagent_harness::LlmCallConfig {
+            request_delay_ms: request_delay_ms_for_model(&fb_prov, &fb_model),
+            ..Default::default()
+        };
         let stream = axagent_harness::execute_llm_stream(
             fb_adapter.as_ref(),
             &fb_req_ctx,

@@ -34,7 +34,9 @@ pub enum Scale {
     Daily,
     Weekly,
     Monthly,
-    /// 季度（长档专用；由月线本地聚合而成 —— vendor 无稳定的季度 klt，不猜）
+    /// 季度（**2026-10-18 起不再属于任何档位**：90 交易日只有 1.5 根季线，违反定阶规则
+    /// `d ≤ h/3`；仍供手工 `compute_scoring(period="quarterly")` 使用 —— 由月线本地聚合，
+    /// vendor 无稳定的季度 klt，不猜）
     Quarterly,
 }
 
@@ -52,6 +54,10 @@ pub struct ScaleProfile {
     pub fetch_limit: u32,
     /// 出分所需最少 bar 数（聚合后计数）：不足 ⇒ 调用方必须显式失败，
     /// 不得拿 3 根 bar 去算 MA60 再给出一个看起来正常的分数。
+    ///
+    /// ⚠ 2026-10-18 起**按档调用不再读本字段**：档侧下限由 [`ScaleWindowPlan::min_bars`]
+    /// （按 `default_holding_days` 换算）接管。本字段只剩「无档的手工尺度调用」一条路径 ——
+    /// 它原来的 60 期地板在季线上等于 **15 年**历史，正是长期档恒空的直接原因。
     pub min_bars: usize,
 }
 
@@ -215,8 +221,25 @@ impl ScaleWindowPlan {
     pub fn for_period(period: axagent_harness::holding_period::Period) -> Self {
         let profile = ScaleProfile::resolve(period.scale_key())
             .unwrap_or_else(|e| panic!("{e} —— `Period::scale_key` 与尺度表白名单不同步"));
+        Self::for_scale_and_holding_days(&profile, period.default_holding_days())
+    }
+
+    /// `尺度剖面 × 持有交易日` → 窗口计划（[`Self::for_period`] 的实际换算体）。
+    ///
+    /// 为什么独立成函数（2026-10-18，`PLAN-horizon-scale-alignment.md` §四 P1）：
+    /// 按「`d ≤ h/3`」定阶后**没有任何档位落在 `quarterly`**（长档 90 交易日 = 4.5 根月线；
+    /// 季线 60 交易日/根只有 1.5 根 ⇒ 按构造分辨不出持有期）。若换算体仍焊在 `for_period` 里，
+    /// `parent_fetch_limit` 那条「季线由月线聚合」的分支就再没有测试能走到 —— 而它仍是
+    /// 手工 `compute_scoring(period="quarterly")` 的活路径。抽出来才能对它下判据。
+    ///
+    /// 结构判据（测试钉）：
+    /// - `short_bars = clamp(ceil(h / d), 2, 60)` —— 中带必须盖住持有期；
+    /// - `long_bars = 3 × short_bars`（日线锚：MA60 = 3×MA20）；
+    /// - `min_bars = long_bars`、`fetch_limit = 2 × long_bars`；
+    /// - 季线的聚合前根数 = `3 × fetch_limit`（1 季 = 3 月）。
+    pub fn for_scale_and_holding_days(profile: &ScaleProfile, holding_days: u32) -> Self {
         let d = profile.trading_days_per_bar;
-        let h = period.default_holding_days() as f64;
+        let h = holding_days as f64;
         let short_bars = (h / d).ceil() as usize;
         let short_bars = short_bars.clamp(2, 60);
         let long_bars = 3 * short_bars;
@@ -225,7 +248,7 @@ impl ScaleWindowPlan {
         let parent_fetch_limit = (profile.scale == Scale::Quarterly).then(|| 3 * 2 * long_bars);
         Self {
             scale_key: profile.period,
-            holding_days: period.default_holding_days(),
+            holding_days,
             short_bars,
             long_bars,
             rsi_period: scaled(short_bars, 0.7, 2),
@@ -440,29 +463,43 @@ mod tests {
         }
     }
 
-    /// 四档计划的结构性判据：中带至少要盖住持有期，且 `min_bars ≤ fetch_limit`（否则永远出不了分）。
+    /// 四档计划的结构性判据：**定阶规则 `d ≤ h/3`**、中带盖住持有期、`min_bars ≤ fetch_limit`。
     ///
-    /// ⚠ 刻意**不**断言「四档的根数互不相同」：短/中/长三档的 `short_bars` 按换算就是同一个整数 2，
-    /// 区别在**尺度**（2 周 / 2 月 / 2 季）—— 拿整数当判据会当场恒假，
-    /// 而「两档输入恒等」的真判据是 R5 那条（节点 id 是否等于本档尺度的节点）。
+    /// 定阶规则（2026-10-18 用户裁定，`PLAN-horizon-scale-alignment.md` §一）就是本条的主断言：
+    /// 每根 bar 覆盖的交易日不得超过持有期的三分之一 —— 否则该档走势只由 1~2 根 bar 决定，
+    /// 按构造分辨不出持有期。旧阶梯（短=周/中=月/长=季）的 `h/d` 是 1.0 / 1.4 / 1.5，**三档同时违规**；
+    /// 长档的违规最刺眼：90 交易日的问题被交给 1.5 根季线，而季线自身的地板又要 15 年历史。
+    ///
+    /// ⚠ 刻意**不**断言「四档的根数互不相同」：短/中/长的 `short_bars` 按换算可能撞值，
+    /// 区别在**尺度**；「两档输入恒等」的真判据是 R5（节点 id 是否等于本档尺度的节点）。
     #[test]
-    fn tier_window_plans_cover_holding_period_and_are_admissible() {
+    fn tier_scales_resolve_the_horizon_with_at_least_three_bars() {
         use axagent_harness::holding_period::Period;
         for period in Period::ALL {
             let plan = ScaleWindowPlan::for_period(period);
             let d = ScaleProfile::resolve(plan.scale_key).unwrap().trading_days_per_bar;
+            let h = period.default_holding_days() as f64;
+            let bars_per_horizon = h / d;
+            assert!(
+                bars_per_horizon >= 3.0,
+                "{}：持有 {h} 交易日，而一根 {} bar 覆盖 {d} 日 ⇒ 只有 {bars_per_horizon:.1} 根 \
+                 ⇒ 违反定阶规则 d ≤ h/3（该档的走势由 1~2 根 bar 决定，按构造不可分辨）",
+                period.as_str(),
+                plan.scale_key
+            );
             let short_span = plan.short_bars as f64 * d;
             assert!(
-                short_span >= period.default_holding_days() as f64,
-                "{}：中带只有 {short_span:.1} 交易日，盖不住 {} 天的持有期",
-                period.as_str(),
-                period.default_holding_days()
+                short_span >= h,
+                "{}：中带只有 {short_span:.1} 交易日，盖不住 {h} 天的持有期",
+                period.as_str()
             );
             assert_eq!(
                 plan.long_bars,
                 3 * plan.short_bars,
                 "长带必须 = 3×中带（日线锚 MA60=3×MA20）"
             );
+            assert_eq!(plan.min_bars, plan.long_bars, "出分下限 = 长带");
+            assert_eq!(plan.fetch_limit, 2 * plan.long_bars, "取数 = 2×长带（留一倍前置窗口）");
             assert!(plan.macd_slow > plan.macd_fast, "MACD 慢线必须 > 快线");
             assert!(
                 plan.min_bars <= plan.fetch_limit,
@@ -478,20 +515,27 @@ mod tests {
         }
     }
 
-    /// 季线由月线聚合 ⇒ 计划必须同时给出「聚合前该取多少根月线」，其余尺度不得给这个值。
+    /// 档位不再落在 `quarterly`（规则 R 的推论）—— 但那条聚合前根数的分支仍必须活着可测。
+    ///
+    /// 两半都要断言：① 四档 `parent_fetch_limit` 全为 None（谁再给某档改回季线，这里红）；
+    /// ② 直接把 quarterly 剖面喂进换算体 ⇒ 仍算出 `3 × fetch_limit`（手工
+    /// `compute_scoring(period="quarterly")` 走的就是这条）。
     #[test]
-    fn quarterly_plan_carries_parent_fetch_and_others_do_not() {
+    fn no_tier_lands_on_quarterly_but_the_aggregate_path_stays_testable() {
         use axagent_harness::holding_period::Period;
-        let long_plan = ScaleWindowPlan::for_period(Period::Long);
-        assert_eq!(long_plan.scale_key, "quarterly");
+        for p in Period::ALL {
+            let plan = ScaleWindowPlan::for_period(p);
+            assert_ne!(plan.scale_key, "quarterly", "{} 又落回季线了", p.as_str());
+            assert_eq!(plan.parent_fetch_limit, None, "{} 不该有聚合前根数", p.as_str());
+        }
+        let q = ScaleProfile::resolve("quarterly").unwrap();
+        let plan = ScaleWindowPlan::for_scale_and_holding_days(&q, 90);
+        assert_eq!(plan.scale_key, "quarterly");
         assert_eq!(
-            long_plan.parent_fetch_limit,
-            Some(3 * long_plan.fetch_limit),
+            plan.parent_fetch_limit,
+            Some(3 * plan.fetch_limit),
             "季线根数 × 3 才是聚合前的月线根数"
         );
-        for p in [Period::UltraShort, Period::Short, Period::Mid] {
-            assert_eq!(ScaleWindowPlan::for_period(p).parent_fetch_limit, None);
-        }
     }
 
     /// 样本不足时的口径判据：要显式失败并点名尺度与两者根数，**不得**出分。
@@ -508,28 +552,40 @@ mod tests {
             "compute_scoring: 尺度 {} 只有 {bars} 根 bar，出分需要 {} 根 ⇒ 拒绝出分",
             plan.scale_key, plan.min_bars
         );
-        assert!(err.contains("quarterly") && err.contains("6"), "诊断没点名尺度或根数: {err}");
+        assert!(
+            err.contains(plan.scale_key) && err.contains(&plan.min_bars.to_string()),
+            "诊断没点名尺度或根数: {err}"
+        );
+        // 长档的读数必须是「15 根月线」（≈15 个月），不是「6 根季线」也不是「60 根」
+        assert_eq!(
+            (plan.scale_key, plan.min_bars),
+            ("monthly", 15),
+            "长档 = 90 交易日 ⇒ 5 根中带 / 15 根长带；读数漂了说明定阶或换算被改，必须同批改文档"
+        );
     }
 
     /// 负控（对齐 PLAN §九十三(1) 读数 2 那条半接线史）：计划里的窗口若被写死成
-    /// **日线专属**的数（5/10/20/60），粗尺度就退化成「换个标签」。这条钉住
-    /// 「档位计划的 short 带不等于日线默认」，除非两者本来就是同一尺度。
+    /// **日线专属**的数（5/10/20/60），粗尺度就退化成「换个标签」。
+    ///
+    /// 判据取**整行指纹**（尺度 + 中带 + 长带 + 出分下限 + 取数）而不是单看 `short_bars`：
+    /// 2026-10-18 起短档自身就落在 `daily`，与日线默认**同尺度不同持有期**（5 日 vs 主链的
+    /// 日常窗口）—— 只比 `short_bars` 的话，短档 5 与日线默认 20 的差别会被误读成
+    /// 「尺度退化了」，而真正的判据是「这一档的窗口是按自己的持有期算的」。
     #[test]
     fn tier_plans_are_not_copies_of_the_daily_default() {
         use axagent_harness::holding_period::Period;
         let daily = ScaleWindowPlan::daily_default();
+        let fingerprint = |p: &ScaleWindowPlan| {
+            (p.scale_key, p.short_bars, p.long_bars, p.min_bars, p.fetch_limit)
+        };
         for period in Period::ALL {
             let plan = ScaleWindowPlan::for_period(period);
-            if period.scale_key() == "daily" {
-                assert_eq!(plan.short_bars, daily.short_bars);
-            } else {
-                assert_ne!(
-                    plan.scale_key,
-                    daily.scale_key,
-                    "{} 档不该落回日线尺度",
-                    period.as_str()
-                );
-            }
+            assert_ne!(
+                fingerprint(&plan),
+                fingerprint(&daily),
+                "{} 档的窗口计划与日线默认逐项相同 ⇒ 这一档没按自己的持有期换算",
+                period.as_str()
+            );
         }
     }
 

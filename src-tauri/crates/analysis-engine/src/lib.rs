@@ -74,6 +74,9 @@ pub mod recommender;
 pub mod reflection_lesson_validator;
 // PLAN-stock-decision-hitrate-validation M2：反思命中率聚合（消费 strategy_performance）
 pub mod reflection_stats;
+// PLAN-mover-coverage 阶段 3：反思结论「要改哪一处」的权威层级轴（L1/L2/L3）。
+// 与 `failure_mode`（错成什么样）、`mover_recall::MissLayer`（漏在哪一层）是三套不同计数域。
+pub mod reflection_tier;
 pub mod report;
 pub mod review;
 pub mod risk;

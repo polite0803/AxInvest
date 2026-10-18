@@ -274,6 +274,22 @@ impl TrajectoryStorage {
         }
     }
 
+    /// 只统计有效轨迹条数（`SELECT COUNT(*)`），不加载实体、不取 steps/rewards。
+    ///
+    /// 存在理由：[`get_trajectories`] 除了全表扫描，还会**对每条轨迹各做两次子查询**
+    /// （`get_trajectory_steps` / `get_trajectory_rewards`）。`get_evolution_stats` 只需要
+    /// 一个数字，原实现却调 `get_trajectories(Some(1000))` ⇒ 2000 次 DB 往返，实测单次
+    /// 4.4 秒，且每 60 秒被轮询一次。用 COUNT(*) 后降到毫秒级。
+    ///
+    /// 另外原实现把 `total_trajectories` 钉死在 1000 上限，语义也是错的。
+    pub async fn count_trajectories(&self) -> Result<u64> {
+        let n = trajectories::Entity::find()
+            .filter(trajectories::Column::IsInvalidated.eq(0))
+            .count(self.db.as_ref())
+            .await?;
+        Ok(n)
+    }
+
     /// 获取有效的轨迹列表（已标记失效的 append-only 证据不参与活动查询）。
     pub async fn get_trajectories(&self, limit: Option<usize>) -> Result<Vec<Trajectory>> {
         let models = trajectories::Entity::find()

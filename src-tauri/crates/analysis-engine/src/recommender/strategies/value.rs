@@ -8,6 +8,25 @@ use axagent_harness::market_data::MarketDataProvider;
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// value 个股证据强度（0~1，2026-10-18 四档常数塌缩修复）。
+///
+/// 便宜程度 = PE 相对该档上限的余量 60% + PB 余量 40%（上限与过滤门同源同变量）。
+/// **pe ≤ 0（亏损/无披露）⇒ 整体 0** —— 亏损是价值策略的根本性否定信号，不是
+/// 「缺一个维度」；pe_max ≤ 0（配置错误）同此处置。pb ≤ 0 / pb_max ≤ 0（无 PB 数据）
+/// ⇒ 仅 PB 维度 0（保守：缺数据不奖励也不重归一权重）。
+fn value_evidence_strength(pe: f64, pb: f64, pe_max: f64, pb_max: f64) -> f64 {
+    if pe <= 0.0 || pe_max <= 0.0 {
+        return 0.0;
+    }
+    let pe_headroom = ((pe_max - pe) / pe_max).clamp(0.0, 1.0);
+    let pb_headroom = if pb > 0.0 && pb_max > 0.0 {
+        ((pb_max - pb) / pb_max).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (0.6 * pe_headroom + 0.4 * pb_headroom).clamp(0.0, 1.0)
+}
+
 pub struct ValueStrategy {
     pub period: Period,
 }
@@ -52,7 +71,7 @@ impl ValueStrategy {
                     return None;
                 },
             };
-        if !crate::recommender::scale::enough_bars(&klines, &profile) {
+        if !crate::recommender::scale::enough_bars(&klines, self.period) {
             return None;
         }
         let cs: Vec<f64> = klines.iter().map(|k| k.close).collect();
@@ -202,9 +221,17 @@ impl ValueStrategy {
             }
         }
 
+        // ── 个股证据强度（2026-10-18，四档常数塌缩修复）──
+        // 此前 conf 五个输入**全部是模板常数** ⇒ value 出的每一只票原始置信完全相同，
+        // 经合成后塌成档位常数。现以「便宜程度」调制 signal 槽：
+        //   PE 相对该档上限的余量 60% + PB 余量 40%（上限走各档既有模板变量，与过滤门同源）
+        // pe<=0（亏损/无披露）⇒ headroom 0 —— 价值策略不奖励亏损标的。
+        let pe_max = read_f64(vars, &format!("val_{}_pe_max", self.period.as_str()), 40.0);
+        let pb_max = read_f64(vars, &format!("val_{}_pb_max", self.period.as_str()), 6.0);
+        let evidence = value_evidence_strength(pe, pb, pe_max, pb_max);
         let conf = calc_confidence(
             read_f64(vars, "val_conf_consistency", 0.75),
-            read_f64(vars, "val_conf_signal", 0.7),
+            read_f64(vars, "val_conf_signal", 0.7) * (0.6 + 0.4 * evidence),
             read_f64(vars, "val_conf_direction", 0.6),
             read_f64(vars, "val_conf_market", 0.0),
             1.0, // turnover_anomaly: 价值策略无量比数据，默认无惩罚
@@ -237,6 +264,7 @@ impl ValueStrategy {
             confidence_percentile: None,
             prior_source: None,
             prior_samples: None,
+            evidence_score: None,
             stop_source: None,
             position_source: None,
 
@@ -280,6 +308,24 @@ impl RecommendStrategy for ValueStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn value_evidence_headroom_and_fail_open() {
+        // PE 20/上限 40 ⇒ 余量 0.5；PB 2/上限 6 ⇒ 余量 2/3×0.4=0.267；合计 0.5×0.6+0.267=0.567
+        let p = value_evidence_strength(20.0, 2.0, 40.0, 6.0);
+        assert!((p - (0.6 * 0.5 + 0.4 * (2.0 / 3.0))).abs() < 1e-9, "实得 {p}");
+        // 越便宜证据越高（单调）
+        assert!(value_evidence_strength(10.0, 2.0, 40.0, 6.0) > p);
+        // pe<=0（亏损/无披露）⇒ 0 —— 价值策略不奖励亏损标的
+        assert_eq!(value_evidence_strength(-1.0, 2.0, 40.0, 6.0), 0.0);
+        assert_eq!(value_evidence_strength(0.0, 2.0, 40.0, 6.0), 0.0);
+        // 上限 ≤0（配置错误）⇒ 0（fail-open）
+        assert_eq!(value_evidence_strength(20.0, 2.0, 0.0, 6.0), 0.0);
+        // 高于上限（不可能通过过滤门，防御性）⇒ PE 维度 clamp 到 0（不为负拖累），
+        // PB 维度照常贡献：0.4 × (4/6)
+        let p = value_evidence_strength(50.0, 2.0, 40.0, 6.0);
+        assert!((p - 0.4 * (4.0 / 6.0)).abs() < 1e-9, "实得 {p}");
+    }
 
     #[test]
     fn value_strategy_ids() {

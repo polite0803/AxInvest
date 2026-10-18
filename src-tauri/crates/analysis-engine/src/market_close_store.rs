@@ -216,6 +216,33 @@ pub async fn refresh_universe_pages(
         .await
         .map_err(|e| format!("统计清单失败: {e}"))?;
 
+    // 0-D（2026-10-18，PLAN-mover-coverage-and-reflection-exit）：把**接口自报的分母**一起落库。
+    // 原先 `reported_total` 只进 `tracing::info!`，于是「清单到底缺多少」在库里无法回答
+    // —— 而这张清单就是荐股的候选宇宙，覆盖率等于「智能荐股能看见多少只票」。
+    // ⚠ **只在有分母时落行**：页全失败时 `reported_total` 还是初值 0，落一行 0 分母
+    //   会被读侧当成「全市场就 0 只票」——「拿不到」与「确实是 0」是两件事。
+    if reported_total > 0 {
+        use axagent_entities::market_universe_stats;
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let am = market_universe_stats::ActiveModel {
+            observed_at: Set(now_ms),
+            universe_size: Set(universe_size as i32),
+            reported_total: Set(reported_total),
+            // 存两位小数的比值：读侧现算也行，但那样「当初按哪条公式算的」会留给
+            // 下一个改公式的人 —— 落库的那个数就是本次 tick 的口径快照。
+            coverage_pct: Set(
+                ((universe_size as f64 / reported_total as f64) * 10000.0).round() / 100.0
+            ),
+            pages_requested: Set(pages.len() as i32),
+            pages_failed: Set(pages_failed as i32),
+            rows_upserted: Set(rows_upserted as i32),
+            created_at: Set(now_ms),
+        };
+        if let Err(e) = market_universe_stats::Entity::insert(am).exec(db).await {
+            tracing::warn!("[universe] 覆盖率读数落库失败: {e}");
+        }
+    }
+
     Ok(UniverseReport {
         pages_requested: pages.len(),
         pages_failed,

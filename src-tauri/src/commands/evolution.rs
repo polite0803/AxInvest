@@ -44,8 +44,10 @@ pub async fn get_evolution_stats(
     let sandbox_enabled = skill_evolution.has_sandbox().await;
     drop(skill_evolution);
 
-    let trajectories =
-        state.trajectory_storage.get_trajectories(Some(1000)).await.unwrap_or_default();
+    // 只取条数：`get_trajectories(Some(1000))` 会为每条轨迹各查一次 steps/rewards
+    // （2000 次往返，实测 4.4s），而本命令只用到 `.len()`（第 91、133 行）。
+    let total_trajectories =
+        state.trajectory_storage.count_trajectories().await.unwrap_or(0) as usize;
 
     let auto_tool = state.auto_tool_creator.lock().await;
     let auto_tools_count = auto_tool.tool_count();
@@ -88,7 +90,7 @@ pub async fn get_evolution_stats(
             name: "RL Reward".into(),
             running: true,
             last_run: None,
-            items_processed: trajectories.len() as u64,
+            items_processed: total_trajectories as u64,
         },
         EvolutionEngineStatus {
             name: "Process Reward Model".into(),
@@ -130,7 +132,7 @@ pub async fn get_evolution_stats(
 
     Ok(EvolutionStats {
         skill_count,
-        total_trajectories: trajectories.len(),
+        total_trajectories,
         evolution_engines,
         auto_tools_count,
         auto_tool_patterns,

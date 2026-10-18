@@ -1024,11 +1024,90 @@ pub(crate) fn extract_decision_from_results_map(results: &serde_json::Value) -> 
     pick_chain_tail_decision(|node_id| results.get(node_id)).0
 }
 
+/// 本轮**失败但没有连坐掉决策**的节点，转成缺席条目。
+///
+/// 为什么必须有：v163 / v164 把两处硬阻断放开（`raw-data`、`agg-risk` 改为容错）之后，
+/// 单路取数失败不再让终审停摆 ⇒ 决策照常产出，但面板上**没有任何地方说这一路没取到**。
+/// 放开连坐与如实声明必须同批落地，否则「结构性缺口不得在 UI 造成歧义」只是从
+/// 「整条没结论」换成「结论看起来完整」。
+///
+/// 通道**复用既有 `data_gaps`**（`portfolio-mgr.rhai` 写、`normalizeDecision` 解析成
+/// `decision.dataGaps`、`DecisionBanner` 渲染并计数）⇒ 不在旁边另立一套同义字段；
+/// 同义两套就是本仓禁区 12 防的那种漂移。
+///
+/// 只列 `Failed`：`Pending` / `Skipped` 不属于本函数 —— 那种情形决策本来就没产出，
+/// 走哨兵分支自带的 `diagnostics`（见 `build_missing_decision_fallback`）。
+///
+/// 顺序按 node id 排序：来源是 `HashMap`，不排序则同一轮两次落库的 JSON 逐字节不同，
+/// 前端快照比对与测试都会变成 flaky。
+///
+/// ⚠ 覆盖范围只有**工作流链**：对话直执行链拿到的 `HookOutcome`
+/// （`crates/harness/src/workflow_lifecycle.rs:65`）只有 `status` / `results`，
+/// **没有节点状态**，那条链无法在此声明缺席。给它补上是 harness DTO 变更，未列入本轮 ——
+/// 宁可少一条链有声明，也不要在那里造一条恒空的假声明。
+pub(crate) fn tolerated_failure_notes(wf: &Workflow) -> Vec<String> {
+    let mut rows: Vec<(String, String)> = wf
+        .node_states
+        .iter()
+        .filter(|(_, st)| st.status == NodeStatus::Failed)
+        .map(|(nid, st)| {
+            // 错误串可能带整段上游 JSON（实测单条数百 KB），而 `data_gaps` 是给人读的一句话
+            // 条目 ⇒ 按**字符**截断（按字节切中文会切出非法 UTF-8）。
+            let reason: String = st
+                .error
+                .clone()
+                .unwrap_or_else(|| "该节点未带回错误详情".to_string())
+                .chars()
+                .take(180)
+                .collect();
+            (nid.clone(), reason)
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows.into_iter().map(|(nid, reason)| format!("节点本轮执行失败({nid})：{reason}")).collect()
+}
+
+/// 把缺席条目并入**已产出**的那份决策 JSON 的 `data_gaps`。
+///
+/// 判重按「该节点 id 是否已被脚本报过」：同一节点堆两条，前端会数成「2 处缺失」，
+/// 正是本仓反复防的那种数字虚高。非对象形态（异常决策串）原样返回，不在这里制造第二次失败。
+fn with_tolerated_failures(json: String, wf: &Workflow) -> String {
+    let notes = tolerated_failure_notes(wf);
+    if notes.is_empty() {
+        return json;
+    }
+    let mut value: serde_json::Value = match serde_json::from_str(&json) {
+        Ok(v) => v,
+        Err(_) => return json,
+    };
+    let Some(obj) = value.as_object_mut() else {
+        return json;
+    };
+    let existing: Vec<String> = obj
+        .get("data_gaps")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    let mut merged = existing.clone();
+    for note in notes {
+        let node =
+            note.split('(').nth(1).and_then(|rest| rest.split(')').next()).unwrap_or_default();
+        if !node.is_empty() && !existing.iter().any(|e| e.contains(node)) {
+            merged.push(note);
+        }
+    }
+    obj.insert(
+        "data_gaps".to_string(),
+        serde_json::Value::Array(merged.into_iter().map(serde_json::Value::from).collect()),
+    );
+    value.to_string()
+}
+
 pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
     // 三级链尾选链（唯一实现，与 hooks.rs 的落库链共用）
     let (chain_tail, unusable_reason) = pick_chain_tail_decision(|node_id| wf.results.get(node_id));
     if let Some(json) = chain_tail {
-        return Some(json);
+        return Some(with_tolerated_failures(json, wf));
     }
 
     // ── V57 硬化：portfolio-mgr 节点未成功产出结果时（Failed / Skipped /
@@ -2775,6 +2854,121 @@ mod tests {
         assert_eq!(parsed["confidence"], 75.0);
         assert_eq!(parsed["positionPct"], 50.0);
         assert_eq!(parsed["riskLevel"], "中");
+    }
+
+    /// 构造一份「链尾决策有效」的 Workflow，供缺席声明的两条判据共用。
+    /// `extra_states` 里给的节点状态就是本轮的失败/跳过面。
+    fn wf_with_decision_and_states(
+        extra_states: Vec<(&str, NodeStatus, Option<&str>)>,
+    ) -> Workflow {
+        use std::collections::HashMap;
+        let mut results = HashMap::new();
+        results.insert(
+            "portfolio-mgr".to_string(),
+            json!({
+                "status": "executed",
+                "result": {
+                    "action": "买入",
+                    "positionPct": 50.0,
+                    "confidence": 75.0,
+                    "riskLevel": "中",
+                    "reasoning": "技术面强势",
+                },
+            }),
+        );
+        let mut node_states = HashMap::new();
+        for (nid, status, error) in extra_states {
+            node_states.insert(
+                nid.to_string(),
+                NodeRuntimeState {
+                    status,
+                    attempts: 1,
+                    error: error.map(str::to_string),
+                    started_at: None,
+                    completed_at: None,
+                    skip_reason: None,
+                },
+            );
+        }
+        Workflow {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            nodes: vec![],
+            edges: vec![],
+            status: axagent_rt_workflow::workflow_engine::WorkflowStatus::PartiallyCompleted,
+            created_at: 0,
+            completed_at: None,
+            results,
+            node_states,
+            output: Some(json!({})),
+            hooks_config: None,
+            error_config: None,
+            error_workflow_id: None,
+        }
+    }
+
+    /// v163/v164 放开连坐的**另一半**：决策出来了，本轮失败的节点必须逐条进 `data_gaps`。
+    ///
+    /// 反向锁：把 `with_tolerated_failures` 改回直接返回原串 ⇒ 本测试红（条目根本不存在）。
+    /// 只列 `Failed`：`Skipped` / `Completed` 不得混进来 —— 那种条目会让用户去查一条
+    /// 本来没坏的通道（与 `skip_reason` 的既有分工一致）。
+    #[test]
+    fn produced_decision_declares_failed_nodes_in_data_gaps() {
+        let wf = wf_with_decision_and_states(vec![
+            (
+                "t-sentiment-data",
+                NodeStatus::Failed,
+                Some("Vendor error from guba: 股吧 HTML 中未找到 article_list 数据"),
+            ),
+            ("t-market-data", NodeStatus::Completed, None),
+            ("sim-verify", NodeStatus::Skipped, Some("disabled")),
+        ]);
+        let dj = extract_decision_json(&wf).expect("链尾决策应取到");
+        let parsed: serde_json::Value = serde_json::from_str(&dj).expect("决策 JSON 应可解析");
+        // 决策本体不能被这层改写坏（哨兵判据仍按 action 走）。
+        assert_eq!(parsed["action"], "买入");
+        let gaps = parsed["data_gaps"]
+            .as_array()
+            .unwrap_or_else(|| panic!("缺席条目没进 data_gaps，整份决策：{parsed}"));
+        assert_eq!(gaps.len(), 1, "只该列出本轮真失败的那一条，实测 {gaps:?}");
+        let note = gaps[0].as_str().unwrap_or_default();
+        assert!(
+            note.contains("(t-sentiment-data)"),
+            "条目要按既有 `(节点id)` 形态点名节点：{note}"
+        );
+        assert!(note.contains("guba"), "条目要带回错误原句，否则用户无从定位通道：{note}");
+    }
+
+    /// 无节点失败时**不得凭空造 `data_gaps`**：该键的既有语义是「脚本报出的缺失」，
+    /// 无失败还写一个空数组，等于让每条正常决策都带上一行没人看的空表。
+    #[test]
+    fn decision_without_failures_is_left_byte_for_byte_untouched() {
+        let wf = wf_with_decision_and_states(vec![("t-market-data", NodeStatus::Completed, None)]);
+        let dj = extract_decision_json(&wf).expect("链尾决策应取到");
+        let parsed: serde_json::Value = serde_json::from_str(&dj).expect("决策 JSON 应可解析");
+        assert!(parsed.get("data_gaps").is_none(), "本轮无失败却写了 data_gaps：{parsed}");
+    }
+
+    /// 判重：脚本侧已经就同一节点报过一条 ⇒ 不再堆第二条。
+    /// 两条同义条目会被前端数成「2 处缺失」，那是本仓反复防的数字虚高，不是信息增量。
+    #[test]
+    fn failed_node_already_reported_by_the_script_is_not_duplicated() {
+        let mut wf = wf_with_decision_and_states(vec![(
+            "t-sentiment-data",
+            NodeStatus::Failed,
+            Some("Vendor error from guba"),
+        )]);
+        // 让链尾决策自己带一条已经点名该节点的 data_gaps。
+        match wf.results.get_mut("portfolio-mgr").and_then(|v| v.get_mut("result")) {
+            Some(res) => {
+                res["data_gaps"] = json!(["t-sentiment-data 舆情未取到（通道故障）"]);
+            },
+            None => panic!("夹具：portfolio-mgr.result 应存在"),
+        }
+        let dj = extract_decision_json(&wf).expect("链尾决策应取到");
+        let parsed: serde_json::Value = serde_json::from_str(&dj).expect("决策 JSON 应可解析");
+        let gaps = parsed["data_gaps"].as_array().expect("data_gaps 应是数组");
+        assert_eq!(gaps.len(), 1, "同一节点不得被登记两条，实测 {gaps:?}");
     }
 
     /// 2026-09-13 契约变更：`portfolio-risk-gate` 优先于 `portfolio-mgr`。

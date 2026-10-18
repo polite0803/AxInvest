@@ -134,11 +134,23 @@ pub struct RecoPick {
     pub confidence_percentile: Option<u8>,
     /// 先验来源：`shrunk` / `own` / `pooled` / `neutral_default` / `absent`
     ///（与分析链 `horizon_prior` 同一词表，不另造）。
+    /// v4（2026-10-18）起荐股主链恒 `evidence`（证据强度语义，伪概率链撤除）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prior_source: Option<String>,
     /// 该档参与收缩的历史样本数（0 = 无样本，先验退化合并基准）
+    /// v4 起荐股主链恒 `None`（先验不进个股数字；档位胜率走响应级/闭环校准）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prior_samples: Option<u32>,
+    /// **策略原始证据强度**（0-100，`calc_confidence` 输出，未乘风格权重）——
+    /// `confidence`（= evidence × 风格权重）的调制前底数。
+    ///
+    /// 为什么单独落库（2026-10-18，随 pick_data JSON 进 `reco_picks`，零 DB 迁移）：
+    /// 真概率的正路 = 按 (style, period, 证据分桶) 统计闭环 T+N 胜率（v4 语义重构时
+    /// 裁定）。校准的输入必须是不带风格权重的原始证据分——权重是闭环自己产出的
+    /// 降权因子，混进校准输入会把「风格被降权」误读成「该票证据弱」。
+    /// `None` = v4 之前的存量行（无证据分概念，校准筛样排除）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_score: Option<u8>,
     /// 命中理由
     pub reasons: Vec<String>,
     /// 风险提示
@@ -214,6 +226,25 @@ impl From<axagent_astock_data::as_of::DegradationEntry> for RecoDegradation {
     }
 }
 
+/// mid/long 档出票门拦截留痕（P0 财报预检 + P1 分析回环，2026-10-18）。
+///
+/// 背景（002696 实证）：四连板题材股以「热门 + 行业领涨」入池（`build_seed_pool` 零
+/// 基本面门），分析端长线档判「卖出」，荐股端却照常出票 ⇒「入池按趋势、分析按基本面」
+/// 结构性对立。本结构把**出票口被拦下**的候选逐条带回响应（不进 `reco_scan_audit`，
+/// 那张表语义是「组内 top-N 截断」，混入会污染 L3 归因），前端可据此展示「被拦截」，
+/// 日志之外有结构化载体可查。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GateBlockedPick {
+    pub stock_code: String,
+    pub stock_name: String,
+    pub style: Style,
+    /// 拦截时的置信度（0-100）
+    pub confidence: i32,
+    /// 机器可读理由码：`first_loss` / `two_period_decline` / `analysis_veto_<档>:<动作>`
+    pub reasons: Vec<String>,
+}
+
 /// 荐股响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -278,4 +309,13 @@ pub struct RecoResponse {
     /// 保证回放核查与 live 同一口径。
     #[serde(skip)]
     pub scan_audit: Vec<TrimmedPick>,
+    /// mid/long 档被出票门拦截的候选（P0 财报预检 / P1 分析回环；2026-10-18）。
+    /// 空 = 本批没有拦截发生。ultra_short/short 恒为空（门按构造只作用于 mid/long，
+    /// 超短/短档的基本面/估值按构造不适用 —— 与 `portfolio-mgr-h-ultra-short.rhai`
+    /// 的档位判据同一裁定）。
+    /// 回放语义：P0 财报门在 as-of 下同样生效（财报取数自带披露日截断）；P1 回环门
+    /// **仅 live**（回测不带今天的否决；守卫在 `scan_period` 消费侧，不在加载侧 ——
+    /// served_vars 在命令层 as_of scope 之外加载，加载侧守卫是假守卫）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gate_blocked: Vec<GateBlockedPick>,
 }

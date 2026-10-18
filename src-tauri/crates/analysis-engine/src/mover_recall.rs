@@ -216,8 +216,15 @@ pub struct Evidence {
     pub picks_for_period: Vec<String>,
     /// 该股在其他档位有过推荐
     pub picked_in_other_period: bool,
-    /// 该票是否出现在本轮任一候选池快照
-    pub in_pool: bool,
+    /// 该票是否出现在本轮任一候选池快照。
+    ///
+    /// `None` 的语义是**本窗内一条荐股批次都没有** ⇒ 无从判定它在不在池里，这不是「不在池里」。
+    /// 旧实现用 `bool`，把「没扫描过」和「扫描了但宇宙里没有它」压成同一个 `false`：
+    /// 现网实测 46 个漏检事件里 **25 个被打成 `not_in_pool`**，而那 4400 条回放行的
+    /// `seed_pool_json` 全是 `"[]"`（2026-10-19 取数）——归因层因此把一个留痕问题报成了
+    /// 候选宇宙问题，优化方向会被带去「扩池」，而真缺的是批次本身。
+    /// `None` 走 [`MissLayer::Unexplained`]（既有兜底桶，语义正是「留痕不足无法归因」），不新造一层。
+    pub in_pool: Option<bool>,
     /// 本轮候选池是否降级（空/取数失败）
     pub pool_degraded: bool,
     /// 该 (风格, 档位) 是否成立（`style_matrix::is_active` 口径）
@@ -241,8 +248,11 @@ pub fn attribute(layer_period_ok: bool, ev: &Evidence) -> MissLayer {
     if ev.pool_degraded {
         return MissLayer::PoolDegraded;
     }
-    if !ev.in_pool {
-        return MissLayer::NotInPool;
+    match ev.in_pool {
+        // 本窗内没有任何荐股批次 ⇒ 无从判定，落「留痕不足」而不是自证「池子漏了它」
+        None => return MissLayer::Unexplained,
+        Some(false) => return MissLayer::NotInPool,
+        Some(true) => {},
     }
     if ev.picked_in_other_period {
         return MissLayer::OtherPeriod;
@@ -804,7 +814,11 @@ mod tests {
         assert_eq!(mid.gain_pct, 35.0, "字符串形态的变量值也要吃");
     }
 
-    /// 默认「该档确实出票」，各用例只改自己要判的那一件事
+    /// 默认「该档确实出票」，各用例只改自己要判的那一件事。
+    ///
+    /// ⚠ 默认构造里 `in_pool = None`（= 本窗没有任何荐股批次），因此**什么都不改的那条
+    /// 断言现在落 `Unexplained` 而不是 `NotInPool`** —— 这正是阶段 5 / G1 的修复点：
+    /// 「没扫描过」以前被压成「不在池里」，把留痕问题报成了候选宇宙问题。
     fn ev(mutate: impl FnOnce(&mut Evidence)) -> Evidence {
         let mut e = Evidence { matrix_active: true, ..Default::default() };
         mutate(&mut e);
@@ -820,25 +834,28 @@ mod tests {
         // 按设计不出票 ⇒ 优先于池层（严禁进待优化清单）
         assert_eq!(attribute(true, &ev(|e| e.matrix_active = false)), MissLayer::ByDesign);
         assert_eq!(attribute(true, &ev(|e| e.pool_degraded = true)), MissLayer::PoolDegraded);
-        assert_eq!(attribute(true, &ev(|_| {})), MissLayer::NotInPool);
+        // 确有批次、快照里查无此票 ⇒ 这才是「不在候选宇宙」
+        assert_eq!(attribute(true, &ev(|e| e.in_pool = Some(false))), MissLayer::NotInPool);
+        // G1 负控：无批次（None）与「不在池里」必须落在不同的桶
+        assert_eq!(attribute(true, &ev(|_| {})), MissLayer::Unexplained);
         assert_eq!(
             attribute(
                 true,
                 &ev(|e| {
-                    e.in_pool = true;
+                    e.in_pool = Some(true);
                     e.picked_in_other_period = true;
                 })
             ),
             MissLayer::OtherPeriod
         );
         // 入池但无截断留痕 ⇒ 判不出（策略内部否决不落痕），进兜底桶
-        assert_eq!(attribute(true, &ev(|e| e.in_pool = true)), MissLayer::Unexplained);
+        assert_eq!(attribute(true, &ev(|e| e.in_pool = Some(true))), MissLayer::Unexplained);
         // 入池 + 截断留痕 ⇒ 唯一可归因到具体风格、可据此降权的一层
         assert_eq!(
             attribute(
                 true,
                 &ev(|e| {
-                    e.in_pool = true;
+                    e.in_pool = Some(true);
                     e.l3_scored_out_styles.push("trend".into());
                 })
             ),

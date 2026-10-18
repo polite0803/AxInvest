@@ -2602,7 +2602,18 @@ pub(crate) async fn fetch_stock_lessons(
             evidence_note(same_ticker_no_evidence)
         ));
         for (i, l) in same_ticker.iter().enumerate() {
-            lines.push(format!("#{} ({}, 反思于 {})", i + 1, l.stock_code, l.hindsight_date));
+            // 阶段 4：每条教训必须带上**它自己的档**（复盘哪一档产出的）。这里此前只渲染
+            // 代码 + 日期，而四档分支共用同一段文本 ⇒ 模型拿到一条无档标签的教训就会拿它
+            // 否决别的档（实证：`bear-r1--mid` 引用 601127 的**超短档**教训否决中线趋势腿）。
+            // 档缺席要写成「档未知」而不是留空位 —— 空位读起来像「适用于所有档」。
+            let own_horizon = l.horizon.as_deref().unwrap_or("档未知");
+            lines.push(format!(
+                "#{} ({}, {} 档, 反思于 {})",
+                i + 1,
+                l.stock_code,
+                own_horizon,
+                l.hindsight_date
+            ));
             if let Some(ref ls) = l.lesson_summary {
                 lines.push(format!("  - 总结：{}", ls));
             }
@@ -2631,7 +2642,15 @@ pub(crate) async fn fetch_stock_lessons(
             evidence_note(all_recent_no_evidence)
         ));
         for (i, l) in all_recent.iter().enumerate() {
-            lines.push(format!("#{} {} ({}):", i + 1, l.stock_code, l.stock_name));
+            // 跨票的市场级教训同样必须带自身档位（理由见同股那一组）
+            let own_horizon = l.horizon.as_deref().unwrap_or("档未知");
+            lines.push(format!(
+                "#{} {} ({}, {} 档):",
+                i + 1,
+                l.stock_code,
+                l.stock_name,
+                own_horizon
+            ));
             if let Some(ref ls) = l.lesson_summary {
                 lines.push(format!("  - {}", ls));
             } else if let Some(ref w) = l.what_went_wrong {
@@ -2644,6 +2663,27 @@ pub(crate) async fn fetch_stock_lessons(
     let (rule_lines, lesson_ids) = fetch_rule_lessons(stock_code, db, horizon).await;
     if let Some(rule_text) = rule_lines {
         lines.push(rule_text);
+    }
+
+    // 阶段 4：使用规则与筛样口径各占一句，**每次有教训注入都带**（不能指望模型自己想起来）。
+    // 为什么放在末尾：前面两组标题已带各自条数，而「按哪档筛」是对整段的一个约束，
+    // 写在任何一组里都会被读成只管那一组。一组教训都没有时不写 —— 那时这两句是噪音。
+    if !same_ticker.is_empty() || !all_recent.is_empty() || !lesson_ids.is_empty() {
+        let filter_note = match horizon {
+            // 代理档来源见 `hooks.rs::latest_known_horizon`：enhance 钩子跑在公式定档**之前**
+            Some(h) => format!(
+                "【筛样口径】以上教训按 {h} 档筛样；该档是代理档（取该股最近一条已产出主档的分析），\
+                 与本轮公式定档可能不同。"
+            ),
+            None => "【筛样口径】代理档不可得 ⇒ 以上未按档筛样，属跨档混合注入（非事实陈述）。"
+                .to_string(),
+        };
+        lines.push(filter_note);
+        lines.push(
+            "【使用规则】只有与本档**同名**的教训可作方向判据；跨档教训（含标「档未知」的存量行）\
+             只作风险提示，不得据此否决本档的方向腿或进门条件。"
+                .to_string(),
+        );
     }
 
     let text = if lines.is_empty() {
@@ -2724,10 +2764,14 @@ async fn fetch_rule_lessons(
     lines.push(String::new());
     lines.push(format!("【规则化教训 {} 条(按置信度降序){foreign_suffix}】", rule_lessons.len()));
     for (i, l) in rule_lessons.iter().enumerate() {
+        // 阶段 4：规则化教训也要带自身档位（与上面两组反思教训同一口径）——
+        // 跨档使用规则对三组一视同仁，任何一组缺标签都会让那条教训被当成通用判据。
+        let own_horizon = l.horizon.as_deref().unwrap_or("档未知");
         lines.push(format!(
-            "#{} (confidence={:.2}, 应用{}次/成功{}次): {}",
+            "#{} (confidence={:.2}, {} 档, 应用{}次/成功{}次): {}",
             i + 1,
             l.confidence,
+            own_horizon,
             l.times_applied,
             l.success_count,
             l.lesson_summary

@@ -245,9 +245,19 @@ impl DiskCache {
     }
 
     /// 同步 flush 到磁盘;失败仅 warn,不阻塞。
+    ///
+    /// ⚠ 锁的作用域是整个函数的**核心约束**（见本文件顶部第 2 条）：
+    /// 锁内只做 `entries.clone()`，`serde_json::to_string` + `fs::write` 必须在锁外。
+    /// 原实现把三者全包在 `let inner = self.inner.lock()` 的作用域里，实测缓存在 75 MB 时
+    /// clone ≈ 0.3s、序列化 + 写盘 ≈ 2~4s，**这 2~4 秒内所有 `get()`/`set()` 全部阻塞**，
+    /// 直接把 astock 相关 invoke 顶到 4~5 秒（表现为前端"假死"），
+    /// 而 flush 循环是每 30s 一次 —— 与 `get_vendor_health_all` 的 30s 轮询同步成拍。
     pub fn flush_to_disk(&self) {
-        let inner = self.inner.lock();
-        let snap = DiskSnapshot { entries: inner.clone() };
+        let snap = {
+            let inner = self.inner.lock();
+            DiskSnapshot { entries: inner.clone() }
+        };
+        let entry_count = snap.entries.len();
         match serde_json::to_string(&snap) {
             Ok(json) => {
                 if let Some(parent) = self.path.parent() {
@@ -265,7 +275,7 @@ impl DiskCache {
                 }
                 self.dirty_count.store(0, Ordering::Relaxed);
                 self.last_flush_unix.store(Self::now_unix(), Ordering::Relaxed);
-                tracing::debug!("[l2] flushed {} entries to disk", inner.len());
+                tracing::debug!("[l2] flushed {} entries to disk", entry_count);
             },
             Err(e) => tracing::warn!("[l2] serialize failed: {}", e),
         }
@@ -348,13 +358,18 @@ pub fn spawn_flush_loop(cache: Arc<DiskCache>) -> FlushLoopHandle {
             if shutdown_clone.load(Ordering::Acquire) {
                 tracing::info!("[l2] flush loop 收到 shutdown 信号，执行最后一次 flush");
                 if cache.should_flush() {
-                    cache.flush_to_disk();
+                    // 走 blocking 池：flush 内部是同步序列化 + 同步写盘（75 MB 实测 2~4s），
+                    // 直接在本 worker 上跑会占死一个 tokio worker 线程，
+                    // 连带延迟同期到达的其它 IPC 命令。
+                    let c = Arc::clone(&cache);
+                    let _ = tokio::task::spawn_blocking(move || c.flush_to_disk()).await;
                 }
                 break;
             }
             interval.tick().await;
             if cache.should_flush() {
-                cache.flush_to_disk();
+                let c = Arc::clone(&cache);
+                let _ = tokio::task::spawn_blocking(move || c.flush_to_disk()).await;
             }
         }
     });

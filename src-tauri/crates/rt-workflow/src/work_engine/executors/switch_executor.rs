@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use async_trait::async_trait;
+use axagent_harness::types::provider_model::request_delay_ms_for_model;
 use axagent_harness::workflow_types::WorkflowNode;
 use std::sync::Arc;
 
@@ -307,7 +308,10 @@ impl NodeExecutorTrait for SwitchExecutor {
                             response_format: None,
                         };
 
-                        let llm_config = axagent_harness::LlmCallConfig::default();
+                        let llm_config = axagent_harness::LlmCallConfig {
+                            request_delay_ms: request_delay_ms_for_model(&prov, &model),
+                            ..Default::default()
+                        };
                         let response =
                             axagent_harness::execute_llm(&*adapter, &req_ctx, request, &llm_config)
                                 .await

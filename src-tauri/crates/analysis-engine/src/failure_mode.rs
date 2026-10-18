@@ -9,6 +9,15 @@
 //!
 //! 与 `miss_layer` 的分界：后者是**漏检链**的机械归因层（由系统从事件盖章，LLM 不得自报），
 //! 本枚举是**反思判定**。两者语义不同域，不得互相顶替或并列为可比计数。
+//!
+//! ## 2026-10-19 扩四类（PLAN-mover-coverage 阶段 3 / 决-3）
+//!
+//! 扩表前现网实测：80 条 completed 反思里只有 32 条带标注，其中 **23 条单独就是
+//! `["other"]`** —— 兜底值成了主值，看板的失败模式格等于没有信息。逐条读那 23 条的
+//! `what_went_wrong` 可以归出四个反复出现、而旧四类都装不下的成因（题材没进证据面 /
+//! 逆势相对强度没参与 / 门形态拦住正确方向 / 标的没进候选宇宙），且每一类都在
+//! 002696@2026-09-28 那个样本上有实据。因此**扩词表**而不是放宽 `other` 的门槛：
+//! `other` 退回它本该有的位置（真兜底），其占比即词表覆盖度的可观测指标。
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -25,7 +34,22 @@ pub enum FailureMode {
     MarketRegimeEndorsement,
     /// 反向 DCF 被无视（估值结论与最终动作方向相反却未处置）
     ReverseDcfIgnored,
-    /// 不属于以上四类：占比走高即说明词表覆盖不足，必须上看板而不是被折算进别类
+    /// 题材/热点轮动没进证据面 —— 驱动是所属题材与连板梯队，而本档没有任何腿能读到它。
+    /// 实证：as-of 2026-10-18 复盘的 002696@09-28，12 交易日 +65.3% 的驱动是水产/鱼粉题材，
+    /// 全仓当时**零通道**（`industry_chain.rs` 无农业链、无商品价）。
+    ThemeRotationMissed,
+    /// 逆势抗跌的相对强度被忽略 —— 同期基准下跌而个股跌得少甚至上涨，这个量没参与判定。
+    /// 实证：同一样本 09-28 大盘 −7.3% 而该股 +2.25%（超额），当时四档无一条腿读它。
+    CounterTrendStrengthIgnored,
+    /// 进门形态把正确方向拦在门外 —— 方向判断本身没错，错在门只接受「已在σ带内 / 已涨停」
+    /// 这类**已经发生**的形状，埋伏型（未涨但相对强度刚起）天然进不去。
+    /// 实证：002696 超短档 `sealRate=0.75` 广度达标，却因「近 5 日未涨停」被进门门否掉。
+    EntryGateShapeBlocked,
+    /// 标的根本没进候选宇宙 —— 荐股/扫描的候选池来源退化或覆盖不足，连被判定一次的机会都没有。
+    /// 与 [`crate::mover_recall::MissLayer::NotInPool`] 的分工：那一层由系统从漏检事件机械盖章，
+    /// 本层是**反思侧承认这次错在这里**，两者计数域不同，面板不得并列成可比数字。
+    CandidatePoolCoverageMissed,
+    /// 不属于其余八类：占比走高即说明词表覆盖不足，必须上看板而不是被折算进别类
     Other,
 }
 
@@ -36,6 +60,10 @@ impl FailureMode {
         FailureMode::ChaseBigUpBar,
         FailureMode::MarketRegimeEndorsement,
         FailureMode::ReverseDcfIgnored,
+        FailureMode::ThemeRotationMissed,
+        FailureMode::CounterTrendStrengthIgnored,
+        FailureMode::EntryGateShapeBlocked,
+        FailureMode::CandidatePoolCoverageMissed,
         FailureMode::Other,
     ];
 
@@ -46,6 +74,10 @@ impl FailureMode {
             Self::ChaseBigUpBar => "chase_big_up_bar",
             Self::MarketRegimeEndorsement => "market_regime_endorsement",
             Self::ReverseDcfIgnored => "reverse_dcf_ignored",
+            Self::ThemeRotationMissed => "theme_rotation_missed",
+            Self::CounterTrendStrengthIgnored => "counter_trend_strength_ignored",
+            Self::EntryGateShapeBlocked => "entry_gate_shape_blocked",
+            Self::CandidatePoolCoverageMissed => "candidate_pool_coverage_missed",
             Self::Other => "other",
         }
     }
@@ -67,7 +99,19 @@ impl FailureMode {
             Self::ReverseDcfIgnored => {
                 "反向 DCF 被无视（估值/DCF 结论与最终动作方向相反，却未据此降动作或降置信）"
             },
-            Self::Other => "以上四类都不是（须在 what_went_wrong 里写清具体是哪一类新问题）",
+            Self::ThemeRotationMissed => {
+                "题材/热点轮动未进证据面（驱动是所属题材与连板梯队，而本档没有任何腿能读到它）"
+            },
+            Self::CounterTrendStrengthIgnored => {
+                "逆势抗跌的相对强度被忽略（同期基准下跌而个股跌得少甚至上涨，该量未参与判定）"
+            },
+            Self::EntryGateShapeBlocked => {
+                "进门形态拦住正确方向（方向本身没判错，但门只接受「已在σ带内 / 已涨停」这类已发生的形状）"
+            },
+            Self::CandidatePoolCoverageMissed => {
+                "标的未进候选宇宙（荐股/扫描候选池来源退化或覆盖不足，连被判定一次的机会都没有）"
+            },
+            Self::Other => "以上八类都不是 —— 选它必须同时在 what_went_wrong 里给新问题命名（词表按该名字扩类）；只写 other 等于没有归因",
         }
     }
 
@@ -208,14 +252,43 @@ mod failure_mode_tests {
     use super::*;
 
     #[test]
-    fn catalog_covers_every_variant_in_declared_order() {
-        assert_eq!(FailureMode::ALL.len(), 5);
+    fn catalog_covers_every_variant_and_keeps_other_last() {
+        // 9 = 旧四类 + 2026-10-19 扩四类 + other
+        assert_eq!(FailureMode::ALL.len(), 9);
         assert_eq!(FailureMode::ALL[0].as_str(), "dcf_optimistic_at_cycle_top");
-        assert_eq!(FailureMode::ALL[4].as_str(), "other");
+        // `other` 必须排在最后：它进 prompt 清单的位置就是「以上都不是」，
+        // 插到中间会让模型把兜底值当普通选项多选（实测 23/32 就是这么来的）。
+        assert_eq!(FailureMode::ALL[FailureMode::ALL.len() - 1].as_str(), "other");
         let txt = FailureMode::catalog_for_prompt();
         for m in FailureMode::ALL {
             assert!(txt.contains(m.as_str()), "模板清单必须逐项列出 {}", m.as_str());
         }
+        // 兜底项的说明必须带「给新问题命名」的要求，否则 other 仍是免答通道
+        assert!(txt.contains("给新问题命名"), "other 的提示语必须要求具名: {txt}");
+    }
+
+    /// 2026-10-19 扩的四类：必须**逐名可解析**且顺序稳定（看板单元格顺序 = 词表顺序）。
+    #[test]
+    fn the_four_added_modes_are_parseable_and_ordered() {
+        let added = [
+            "theme_rotation_missed",
+            "counter_trend_strength_ignored",
+            "entry_gate_shape_blocked",
+            "candidate_pool_coverage_missed",
+        ];
+        for s in added {
+            let m = FailureMode::parse(s).unwrap_or_else(|| panic!("{s} 未进值域"));
+            assert_eq!(m.as_str(), s);
+        }
+        // 反手抄：新增四类必须排在旧四类之后、other 之前（顺序变了 ⇒ 看板列序与历史读数不可比）
+        let idx = |s: &str| {
+            FailureMode::ALL
+                .iter()
+                .position(|m| m.as_str() == s)
+                .unwrap_or_else(|| panic!("{s} 不在 ALL"))
+        };
+        assert!(idx("reverse_dcf_ignored") < idx("theme_rotation_missed"));
+        assert!(idx("candidate_pool_coverage_missed") < idx("other"));
     }
 
     #[test]

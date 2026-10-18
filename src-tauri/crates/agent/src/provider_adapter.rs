@@ -47,8 +47,6 @@ pub struct AxAgentApiClient {
     use_max_completion_tokens: Option<bool>,
     /// Thinking parameter format: "reasoning_effort" (default) or "enable_thinking" (SiliconFlow).
     thinking_param_style: Option<String>,
-    /// Delay in milliseconds before each API request, used to avoid rate limits.
-    request_delay_ms: Option<u64>,
     /// Optional callback invoked for each streamed event (for real-time Tauri event emission).
     on_event: Option<Arc<StreamEventCallback>>,
     /// Image URLs (data: URLs) to inject into the last user message for multimodal support.
@@ -88,7 +86,6 @@ impl AxAgentApiClient {
             thinking_budget: None,
             use_max_completion_tokens: None,
             thinking_param_style: None,
-            request_delay_ms: None,
             on_event: None,
             image_urls: Vec::new(),
             cancel_token: None,
@@ -116,7 +113,6 @@ impl AxAgentApiClient {
             thinking_budget: None,
             use_max_completion_tokens: None,
             thinking_param_style: None,
-            request_delay_ms: None,
             on_event: None,
             image_urls: Vec::new(),
             cancel_token: None,
@@ -211,9 +207,12 @@ impl AxAgentApiClient {
         self
     }
 
-    /// Set request delay in milliseconds (applied before each API call to avoid rate limits).
+    /// 把模型级「请求延时」的值带进 `llm_config`，由统一入口 `execute_llm_stream` 去 sleep。
+    ///
+    /// 本 client 不再自己睡：那样一来每层各睡一次就是双倍延时，而工作流路径根本不经过这里
+    /// ⇒ 面板那格在分析链上是零消费点。唯一消费点是 `axagent_harness` 的 `apply_request_delay`。
     pub fn with_request_delay_ms(mut self, request_delay_ms: Option<u64>) -> Self {
-        self.request_delay_ms = request_delay_ms;
+        self.llm_config.request_delay_ms = request_delay_ms;
         self
     }
 
@@ -468,16 +467,7 @@ fn resolve_continuation(conversation: Option<&str>, history_len: usize) -> (Opti
 
 impl ApiClient for AxAgentApiClient {
     fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
-        // Apply request delay to avoid rate limits.
-        // `stream` 是同步 trait 方法，使用 `tokio::task::block_in_place`
-        // 通知 tokio 运行时当前线程即将阻塞，允许其将其他任务迁移到其他 worker。
-        if let Some(delay_ms) = self.request_delay_ms
-            && delay_ms > 0
-        {
-            tokio::task::block_in_place(|| {
-                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-            });
-        }
+        // 请求节流已上移到 `execute_llm_stream`（下面就是它的调用点），此处**不得**再 sleep。
 
         // Convert Runtime's ApiRequest to AxAgent's ChatRequest
         // Prepend system_prompt as System messages so they reach the LLM.

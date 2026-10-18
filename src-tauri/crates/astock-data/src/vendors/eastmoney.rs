@@ -55,6 +55,25 @@ impl EastMoneyVendor {
         Ok(parse_consensus_forward(stock_code, &rows))
     }
 
+    /// 研报列表接口的公共取数（一致预期的 live 回退与 as-of 共用）。
+    async fn fetch_report_rows(
+        &self,
+        stock_code: &str,
+        begin: &str,
+        end: &str,
+        page_size: u32,
+    ) -> Result<Vec<Value>, DataError> {
+        let url = format!(
+            "https://reportapi.eastmoney.com/report/list?industryCode=*&pageSize={page_size}&\
+             industry=%2A&rating=&ratingChange=&beginTime={begin}&endTime={end}&\
+             pageNo=1&fields=&qType=0&orgCode=&code={stock_code}&rcode=&\
+             p=1&pageNum=1&pageNumber=1"
+        );
+        let resp = self.em_get(&url).await?;
+        let json: Value = resp.json().await?;
+        Ok(json["data"].as_array().cloned().unwrap_or_default())
+    }
+
     /// 从环境变量 EASTMONEY_PROXY 读取初始代理（如 http://127.0.0.1:12026）
     pub fn build_proxy_client() -> Option<reqwest::Client> {
         let proxy_url = std::env::var("EASTMONEY_PROXY").ok()?;
@@ -1036,7 +1055,9 @@ fn pick_peer_roe(rows: &[Value]) -> HashMap<String, (String, f64)> {
 /// 为什么选「最新一期」而非多期历史：`lockup-watcher.md` 要的是**当前筹码集中度及其变化**
 /// —— 该表一行里同时给了 `HOLDER_NUM`（户数）、`HOLDER_NUM_RATIO`（较上期变化率）、
 /// `AVG_HOLD_NUM`（户均持股）、`END_DATE` + `HOLD_NOTICE_DATE`（判是否过时），
-/// 一次请求即可回答，不需要历史序列。多期历史（`RPT_F10_EH_HOLDERNUM`）留待需要趋势时再接。
+/// 一次请求即可回答，live 不需要历史序列。**as-of 走另一张表**
+/// `RPT_F10_EH_HOLDERNUM`（多期历史，见 `holder_count_history_url`），
+/// 两路字段语义必须对齐（`parse_holder_count` vs `parse_holder_count_history`）。
 fn holder_count_url(secucode: &str) -> String {
     format!(
         "https://datacenter-web.eastmoney.com/api/data/v1/get?\
@@ -1060,6 +1081,37 @@ fn parse_holder_count(stock_code: &str, row: &Value) -> HolderCount {
         holder_num_ratio: row["HOLDER_NUM_RATIO"].as_f64(),
         avg_hold_num: row["AVG_HOLD_NUM"].as_f64(),
         notice_date: day("HOLD_NOTICE_DATE"),
+    }
+}
+
+/// 股东户数历史多期 URL（`RPT_F10_EH_HOLDERNUM`，东财 F10）。
+///
+/// `NOTICE_DATE <= cutoff` 是 as-of 的关键：报告期末不等于可知日，用 `END_DATE`
+/// 会把「尚未披露的季报」提前塞进回放。排序用 `END_DATE` 倒序取最近一期。
+fn holder_count_history_url(secucode: &str, cutoff: &str) -> String {
+    format!(
+        "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+         reportName=RPT_F10_EH_HOLDERNUM&\
+         columns=SECUCODE,END_DATE,HOLDER_TOTAL_NUM,TOTAL_NUM_RATIO,AVG_TOTAL_SHARES,NOTICE_DATE&\
+         filter=(SECUCODE%3D%22{secucode}%22)(NOTICE_DATE%3C%3D%27{cutoff}%27)&\
+         source=WEB&pageNumber=1&pageSize=1&sortColumns=END_DATE&sortTypes=-1"
+    )
+}
+
+/// 历史多期行的字段映射（与 live 的 `RPT_HOLDERNUMLATEST` 不同名，但语义必须对齐）：
+/// `HOLDER_TOTAL_NUM`↔`HOLDER_NUM`、`TOTAL_NUM_RATIO`↔`HOLDER_NUM_RATIO`、
+/// `AVG_TOTAL_SHARES`↔`AVG_HOLD_NUM`、`NOTICE_DATE`↔`HOLD_NOTICE_DATE`。
+fn parse_holder_count_history(stock_code: &str, row: &Value) -> HolderCount {
+    let day = |k: &str| -> Option<String> {
+        row[k].as_str().map(|s| s.get(..10).unwrap_or(s).to_string())
+    };
+    HolderCount {
+        stock_code: stock_code.to_string(),
+        end_date: day("END_DATE").unwrap_or_default(),
+        holder_num: row["HOLDER_TOTAL_NUM"].as_f64(),
+        holder_num_ratio: row["TOTAL_NUM_RATIO"].as_f64(),
+        avg_hold_num: row["AVG_TOTAL_SHARES"].as_f64(),
+        notice_date: day("NOTICE_DATE"),
     }
 }
 
@@ -2671,6 +2723,73 @@ impl StockVendor for EastMoneyVendor {
         }))
     }
 
+    /// 融资余额序列（P1 影子腿，`PLAN-capital-long-evidence.md` E3）：同
+    /// `RPTA_WEB_RZRQ_GGMX` 报表，`pageSize=days` 取最近 N 个交易日（DATE 倒序）。
+    ///
+    /// as-of 回放（P2）：自动带 `(DATE<=截止日)` 范围过滤 —— 语法与「必须 `<=` 而非
+    /// 等值（非交易日/未披露日等值必空）」的实测结论来自 `get_margin_data_with_asof`
+    /// （4390 区域），两处同源同判据。空数组 ⇒ 非两融标的或截止日前无披露
+    /// （调用方影子腿静默缺席，不刷降级面板）。
+    async fn get_margin_balance_trend(
+        &self,
+        stock_code: &str,
+        days: u32,
+    ) -> Result<Vec<MarginData>, DataError> {
+        let code =
+            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
+        // as-of 上下文存在 ⇒ 追加 DATE<=截止日 范围过滤（回放不穿越）；live ⇒ 不过滤
+        let as_of_filter = match crate::as_of::current_as_of() {
+            Some(ctx) => {
+                let d = ctx.as_of_date.format("%Y-%m-%d");
+                format!("(DATE%3C%3D%27{d}%27)")
+            },
+            None => String::new(),
+        };
+        let url = format!(
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+            reportName=RPTA_WEB_RZRQ_GGMX&columns=ALL&\
+            filter=(scode%3D%22{code}%22){as_of_filter}&source=WEB&\
+            sortColumns=DATE&sortTypes=-1&pageNumber=1&pageSize={days}"
+        );
+        let resp = self.em_get(&url).await?;
+        let json: Value = resp.json().await?;
+        if json["success"].as_bool() == Some(false) {
+            let msg = json["message"].as_str().unwrap_or("unknown error");
+            return Err(DataError::VendorError {
+                vendor: "eastmoney".into(),
+                message: format!(
+                    "get_margin_balance_trend API 错误: {msg}(stock_code={stock_code})"
+                ),
+            });
+        }
+        let rows = match json["result"]["data"].as_array() {
+            Some(arr) if !arr.is_empty() => arr,
+            _ => return Ok(vec![]),
+        };
+        Ok(rows
+            .iter()
+            .map(|d| {
+                // DATE 字段形态 "2026-07-03 00:00:00" —— 截取日期部分（先例 4433），
+                // 否则带时间后缀的字典序会破坏排序与 <= 比较。
+                let date = d["DATE"]
+                    .as_str()
+                    .unwrap_or("")
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                MarginData {
+                    stock_code: stock_code.to_string(),
+                    date,
+                    margin_buy: d["RZMRE"].as_f64().unwrap_or(0.0),
+                    margin_balance: d["RZYE"].as_f64().unwrap_or(0.0),
+                    short_sell_volume: d["RQMCL"].as_f64().unwrap_or(0.0),
+                    short_balance: d["RQYE"].as_f64().unwrap_or(0.0),
+                }
+            })
+            .collect())
+    }
+
     /// P1-2 新增: eastmoney 实现 consensus_eps
     /// 复用 reportapi.eastmoney.com/report/list 接口，聚合最近研报的 EPS 预测。
     /// 此接口与 get_research_reports 同源，是 eastmoney 稳定的 emweb 系列接口，
@@ -2680,79 +2799,53 @@ impl StockVendor for EastMoneyVendor {
     // 原代码用 predictThisYearPe(预测PE) 直接当目标价，语义错误。
     // 正确做法: 目标价 = 预测PE × 预测EPS，二者均可用时才算出目标价。
     async fn get_consensus_eps(&self, stock_code: &str) -> Result<Option<ConsensusEPS>, DataError> {
-        // 优先官方聚合；取不到才退到下面的研报均值（两者都是真数据，区别只在权威口径，\n        // 不存在「缺数时编一个」的分支）。
-        if let Some(c) = self.fetch_consensus_official(stock_code).await? {
-            return Ok(Some(c));
+        // 优先官方聚合；取不到才退到研报聚合（两者都是真数据，区别只在权威口径，
+        // 不存在「缺数时编一个」的分支）。
+        // ⚠ 「取不到」包括 `success:false 返回数据为空`（002696 实测就是这种信封）：
+        //   旧写法用 `?` 会把它当致命错误直接返回，永远走不到研报回退。
+        match self.fetch_consensus_official(stock_code).await {
+            Ok(Some(c)) => return Ok(Some(c)),
+            Ok(None) => {},
+            Err(e) => tracing::debug!(
+                "[eastmoney] 官方一致预期不可用，回退研报 PIT 聚合（stock={stock_code}）: {e}"
+            ),
         }
-        let url = format!(
-            "https://reportapi.eastmoney.com/report/list?industryCode=*&pageSize=20&industry=%2A&rating=&ratingChange=&beginTime=2000-01-01&endTime=2030-01-01&pageNo=1&fields=&qType=0&orgCode=&code={}&rcode=&p=1&pageNum=1&pageNumber=1",
-            stock_code
-        );
-        let resp = self.em_get(&url).await?;
-        let json: Value = resp.json().await?;
-        let reports = match json["data"].as_array() {
-            Some(arr) if !arr.is_empty() => arr,
-            _ => return Ok(None),
-        };
-
-        // 聚合今年 EPS 预测（predictThisYearEps），取均值作为一致预期
-        let mut eps_sum = 0.0_f64;
-        let mut eps_count = 0_i32;
-        let mut rating_count = 0_i32;
-        // 目标价 = 预测PE × 预测EPS（每篇研报独立计算后取均值）
-        let mut target_price_sum = 0.0_f64;
-        let mut target_price_count = 0_i32;
-        let mut rating_avg: Option<String> = None;
-
-        for r in reports {
-            let eps_val = r["predictThisYearEps"].as_str().and_then(|s| s.parse::<f64>().ok());
-            if let Some(val) = eps_val {
-                eps_sum += val;
-                eps_count += 1;
-            }
-            // 目标价 = PE × EPS（二者均可用时）
-            if let (Some(eps), Some(pe_str)) = (eps_val, r["predictThisYearPe"].as_str()) {
-                if let Ok(pe) = pe_str.parse::<f64>() {
-                    if pe > 0.0 && eps > 0.0 {
-                        target_price_sum += pe * eps;
-                        target_price_count += 1;
-                    }
-                }
-            }
-            rating_count += 1;
-            if rating_avg.is_none() {
-                if let Some(rating) = r["emRatingName"].as_str() {
-                    rating_avg = Some(rating.to_string());
-                }
-            }
-        }
-
-        if eps_count == 0 && rating_count == 0 {
+        // 回退与 as-of **同一套点时聚合**：只看最近 180 天、每机构取最新一篇、
+        // 只取目标财年有 EPS 预测的研报。旧实现用 2000-2030 全窗 + 把「报告篇数」
+        // 当 rating_count ⇒ 002696 这种十年前的研报会被包装成「有 20 家机构覆盖、
+        // EPS 为空」的 Some，与回放的 None 不一致；`derive_consensus_from_reports`
+        // 是同一份判据（2026-10-18 收编）。
+        let today = crate::as_of::current_date_or_now();
+        let Some(begin) = iso_days_before(&today, 180) else {
             return Ok(None);
-        }
-
-        let consensus_eps = if eps_count > 0 {
-            Some(eps_sum / eps_count as f64)
-        } else {
-            None
         };
-        let consensus_target_price = if target_price_count > 0 {
-            Some(target_price_sum / target_price_count as f64)
-        } else {
-            None
+        let rows = self.fetch_report_rows(stock_code, &begin, &today, 100).await?;
+        let Some(target_year) = today.get(..4).and_then(|s| s.parse::<i32>().ok()) else {
+            return Ok(None);
         };
+        Ok(derive_consensus_from_reports(stock_code, &today, target_year, &rows))
+    }
 
-        Ok(Some(ConsensusEPS {
-            stock_code: stock_code.to_string(),
-            consensus_eps,
-            consensus_target_price,
-            rating_avg,
-            rating_count: Some(rating_count),
-            year: chrono::Utc::now().format("%Y").to_string(),
-            // vendor 返回的真实一致预期 ⇒ 非估算
-            is_estimated: false,
-            estimate_source: None,
-        }))
+    /// 一致预期的 as-of 通道：官方聚合无日期列（P9-3 实测），但同一批研报有
+    /// `publishDate` + 逐年 EPS 预测 ⇒ 按截止日截窗后聚合，得到当时可见的一致预期。
+    ///
+    /// 与 live 回退共用 `derive_consensus_from_reports`（同一套「每机构取最新」判据）；
+    /// 窗口左端取截止日前 180 天（太老的预测只反映当年，不是当前一致预期）。
+    async fn get_consensus_eps_with_asof(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<ConsensusEPS>, DataError> {
+        let ctx = crate::as_of::current_as_of()
+            .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
+        let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
+        let Some(begin) = iso_days_before(&cutoff, 180) else {
+            return Ok(None);
+        };
+        let rows = self.fetch_report_rows(stock_code, &begin, &cutoff, 100).await?;
+        let Some(target_year) = cutoff.get(..4).and_then(|s| s.parse::<i32>().ok()) else {
+            return Ok(None);
+        };
+        Ok(derive_consensus_from_reports(stock_code, &cutoff, target_year, &rows))
     }
 
     async fn get_north_bound_holding(
@@ -3124,10 +3217,7 @@ impl StockVendor for EastMoneyVendor {
         &self,
         stock_code: &str,
     ) -> Result<Vec<ResearchReport>, DataError> {
-        let url = format!(
-            "https://reportapi.eastmoney.com/report/list?industryCode=*&pageSize=20&industry=%2A&rating=&ratingChange=&beginTime=2000-01-01&endTime=2030-01-01&pageNo=1&fields=&qType=0&orgCode=&code={}&rcode=&p=1&pageNum=1&pageNumber=1",
-            stock_code
-        );
+        let url = research_reports_url(stock_code, "2000-01-01", "2030-01-01");
 
         let resp = self.em_get(&url).await?;
 
@@ -3138,63 +3228,10 @@ impl StockVendor for EastMoneyVendor {
             None => return Ok(vec![]),
         };
 
-        Ok(reports
-            .iter()
-            .map(|r| {
-                let mut eps_forecast = Vec::new();
-                let mut this_year_eps: Option<f64> = None;
-                if let Some(eps) = r["predictThisYearEps"].as_str() {
-                    if let Ok(val) = eps.parse::<f64>() {
-                        eps_forecast.push(EpsForecast { year: "今年".into(), eps: Some(val) });
-                        this_year_eps = Some(val);
-                    }
-                }
-                if let Some(eps) = r["predictNextYearEps"].as_str() {
-                    if let Ok(val) = eps.parse::<f64>() {
-                        eps_forecast.push(EpsForecast { year: "明年".into(), eps: Some(val) });
-                    }
-                }
-                if let Some(eps) = r["predictNextTwoYearEps"].as_str() {
-                    if let Ok(val) = eps.parse::<f64>() {
-                        eps_forecast.push(EpsForecast { year: "后年".into(), eps: Some(val) });
-                    }
-                }
-
-                // 修复(2026-07-22 #6): 目标价 = 预测PE × 预测EPS
-                // 原代码硬编码 target_price: None,导致所有研报目标价为 null。
-                // 东方财富 reportapi 不直接返回目标价,但返回预测PE和预测EPS,
-                // 二者相乘可得隐含目标价。
-                let target_price = if let (Some(eps), Some(pe_str)) =
-                    (this_year_eps, r["predictThisYearPe"].as_str())
-                {
-                    pe_str
-                        .parse::<f64>()
-                        .ok()
-                        .filter(|&pe| pe > 0.0 && eps > 0.0)
-                        .map(|pe| pe * eps)
-                } else {
-                    None
-                };
-
-                let info_code = r["infoCode"].as_str().unwrap_or("");
-                let pdf_url = if info_code.is_empty() {
-                    None
-                } else {
-                    Some(format!("https://pdf.dfcfw.com/pdf/H3_{}_1.pdf", info_code))
-                };
-
-                ResearchReport {
-                    title: r["title"].as_str().unwrap_or("").to_string(),
-                    institution: r["orgSName"].as_str().unwrap_or("").to_string(),
-                    analyst: r["researcher"].as_str().map(|s| s.to_string()),
-                    rating: r["emRatingName"].as_str().map(|s| s.to_string()),
-                    target_price,
-                    eps_forecast,
-                    publish_date: r["publishDate"].as_str().unwrap_or("").to_string(),
-                    pdf_url,
-                }
-            })
-            .collect())
+        // live 与 as-of 共用同一个行解析函数（`parse_research_report_row`）：
+        // 此前两处各抄一份，as-of 曾因此丢掉 epsForecast / targetPrice（2026-09-08 修复），
+        // 把「两处同步改」这种约定留给下一个人就是下一次漂移的来源。
+        Ok(reports.iter().map(parse_research_report_row).collect())
     }
 
     async fn get_market_dragon_tiger(&self) -> Result<Vec<MarketDragonTiger>, DataError> {
@@ -3795,6 +3832,40 @@ impl StockVendor for EastMoneyVendor {
         Ok(Some(parse_holder_count(code, row)))
     }
 
+    /// 股东户数的 as-of 通道：历史多期表 `RPT_F10_EH_HOLDERNUM`。
+    ///
+    /// 关键判据是 **`NOTICE_DATE <= 截止日`**，不是 `END_DATE <= 截止日`：
+    /// 2026-06-30 的户数在 2026-08-28 才披露，用 END_DATE 会把它提前当作 08-01 已知信息
+    /// （前视）。同一截止日可能有多期同日披露（年报/一季报），按 END_DATE 倒序取最新一期。
+    async fn get_holder_count_with_asof(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<HolderCount>, DataError> {
+        let ctx = crate::as_of::current_as_of()
+            .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
+        let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
+        let code =
+            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
+        let url = holder_count_history_url(&to_em_secucode(code), &cutoff);
+        let resp = self.em_get(&url).await?;
+        let json: Value = resp.json().await.map_err(|e| DataError::VendorError {
+            vendor: "eastmoney".into(),
+            message: format!("get_holder_count_with_asof JSON 解析失败: {e}"),
+        })?;
+        if json["success"].as_bool() == Some(false) {
+            // 「截止日前一期都没披露」是明确无数据，不是接口故障
+            tracing::debug!(
+                "[eastmoney] get_holder_count_with_asof 无数据(stock_code={stock_code}, cutoff={cutoff}): {}",
+                json["message"].as_str().unwrap_or("unknown")
+            );
+            return Ok(None);
+        }
+        let Some(row) = json["result"]["data"].as_array().and_then(|a| a.first()) else {
+            return Ok(None);
+        };
+        Ok(Some(parse_holder_count_history(code, row)))
+    }
+
     /// T5：按截止日回溯质押数据（2026-09-26）。
     ///
     /// 旧认知「质押无历史语义」是错的：`RPT_CSDC_LIST` 有 `TRADE_DATE` 列且支持
@@ -4043,21 +4114,20 @@ impl StockVendor for EastMoneyVendor {
             | "get_peers"
             // T15(2026-09-27)：板块指数日 K 有原生 end= 参数 ⇒ 行业排名可按截止日合成，
             // 见 get_industry_ranking_with_asof
-            | "get_industry_ranking" => AsOfCapability::NativeDateParam,
+            | "get_industry_ranking"
+            // 2026-10-18：股东户数接历史多期表 RPT_F10_EH_HOLDERNUM（NOTICE_DATE<=截止日），
+            // 见 get_holder_count_with_asof；不再申报 NoHistoricalSemantic。
+            | "get_holder_count"
+            // 2026-10-18：一致预期接研报 PIT 聚合（publishDate<=截止日），
+            // 见 get_consensus_eps_with_asof；官方聚合无日期列，但研报是同一批预期的来源。
+            | "get_consensus_eps" => AsOfCapability::NativeDateParam,
             // SynthesizeFromKline: 实时报价/指数,用 K 线最后一行合成
             "get_quote" | "get_index_quotes" => AsOfCapability::SynthesizeFromKline,
             // NoHistoricalSemantic: 当下榜单（快照唯一通道，给当下值没有意义）
             // ⚠ 行业排名不在此列（T15 起有合成通道，见 get_industry_ranking_with_asof）
-            // ⚠ get_holder_count（2026-10-01）同列：`RPT_HOLDERNUMLATEST` 本身就是
-            //   「最新一期」快照表，没有日期参数可收窄；历史多期在 `RPT_F10_EH_HOLDERNUM`，
-            //   接它属下一轮（届时改申报 NativeDateParam）。当下回放按**结构性缺口**留痕。
-            // P9-3（2026-10-03）：一致预期从 `Fallthrough` **改为** `NoHistoricalSemantic`。
-            // 它是**点时序列**（每天随新研报变化），而官方聚合行里**没有任何日期列**（实测）
-            // ⇒ 回放时给当下值等于把未来信息当进入决策（原申报的容忍语义「慢变量」对它不成立）。
-            // 回放要想拿到，只能靠每日归档（PLAN P9-5），不用任何近似值顶替。
-            "get_hot_stocks" | "get_holder_count" | "get_consensus_eps" => {
-                AsOfCapability::NoHistoricalSemantic
-            }
+            // ⚠ 股东户数 / 一致预期也已移出（2026-10-18 各自接了真实日期通道），
+            //   现在这一档只剩热股榜本身（eastmoney 不供应该维度，路由里只有 ths）。
+            "get_hot_stocks" => AsOfCapability::NoHistoricalSemantic,
             // T12(2026-09-27)：板块归属**不是**「无历史语义」而是「只有当下值、且是慢变量」
             // —— 与 `get_sector_info` 同一张 `RPT_F10_CORETHEME_BOARDTYPE`（无日期列）。
             // 此前申报 `NoHistoricalSemantic` 使路由层的 as-of 白名单**跳过本仓唯一还活着的
@@ -4170,7 +4240,11 @@ impl StockVendor for EastMoneyVendor {
             .collect())
     }
 
-    /// research_reports 升级:beginTime/endTime 用 as_of 窗口(原本硬编码 2000-2030)
+    /// research_reports 的 as-of 通道：只把窗口的**右端**收到截止日。
+    ///
+    /// ⚠ 左端必须与 live 同为 2000-01-01。曾写成「截止日前 365 天」⇒ 对长期无新研报的
+    /// 标的（002696 的研报止于 2019 年）回放恒空，而 live 能返回同一批研报 ——
+    /// 这不是「那天没有研报」，是两条路径用了两个窗口。2026-10-18 对齐。
     async fn get_research_reports_with_asof(
         &self,
         stock_code: &str,
@@ -4178,73 +4252,15 @@ impl StockVendor for EastMoneyVendor {
         let as_of = crate::as_of::current_as_of()
             .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
         let end_time = as_of.as_of_date.format("%Y-%m-%d").to_string();
-        let begin_time =
-            (as_of.as_of_date - chrono::Duration::days(365)).format("%Y-%m-%d").to_string();
-        let url = format!(
-            "https://reportapi.eastmoney.com/report/list?industryCode=*&pageSize=20&\
-            industry=%2A&rating=&ratingChange=&\
-            beginTime={begin_time}&endTime={end_time}&\
-            pageNo=1&fields=&qType=0&orgCode=&code={stock_code}&rcode=&\
-            p=1&pageNum=1&pageNumber=1"
-        );
+        let url = research_reports_url(stock_code, "2000-01-01", &end_time);
         let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
         let reports = match json["data"].as_array() {
             Some(arr) => arr,
             None => return Ok(vec![]),
         };
-        Ok(reports
-            .iter()
-            .map(|r| {
-                // 2026-09-08 修复: as-of 路径原先硬编码 eps_forecast: Vec::new() +
-                // target_price: None,与 live 路径(get_research_reports)不对齐,
-                // 导致回放模式下所有研报 epsForecast 全空、目标价恒 null,
-                // 下游 a-research 分析师报"数据缺口"。此处解析逻辑必须与
-                // live 路径保持一致(predictThisYearEps/NextYear/NextTwoYearEps
-                // + 目标价 = 预测PE × 预测EPS)。上游字段变更时两处同步改。
-                let mut eps_forecast = Vec::new();
-                let mut this_year_eps: Option<f64> = None;
-                if let Some(eps) = r["predictThisYearEps"].as_str() {
-                    if let Ok(val) = eps.parse::<f64>() {
-                        eps_forecast.push(EpsForecast { year: "今年".into(), eps: Some(val) });
-                        this_year_eps = Some(val);
-                    }
-                }
-                if let Some(eps) = r["predictNextYearEps"].as_str() {
-                    if let Ok(val) = eps.parse::<f64>() {
-                        eps_forecast.push(EpsForecast { year: "明年".into(), eps: Some(val) });
-                    }
-                }
-                if let Some(eps) = r["predictNextTwoYearEps"].as_str() {
-                    if let Ok(val) = eps.parse::<f64>() {
-                        eps_forecast.push(EpsForecast { year: "后年".into(), eps: Some(val) });
-                    }
-                }
-                let target_price = if let (Some(eps), Some(pe_str)) =
-                    (this_year_eps, r["predictThisYearPe"].as_str())
-                {
-                    pe_str
-                        .parse::<f64>()
-                        .ok()
-                        .filter(|&pe| pe > 0.0 && eps > 0.0)
-                        .map(|pe| pe * eps)
-                } else {
-                    None
-                };
-                ResearchReport {
-                    title: r["title"].as_str().unwrap_or("").to_string(),
-                    institution: r["orgSName"].as_str().unwrap_or("").to_string(),
-                    analyst: r["researcher"].as_str().map(|s| s.to_string()),
-                    rating: r["emRatingName"].as_str().map(|s| s.to_string()),
-                    target_price,
-                    eps_forecast,
-                    publish_date: r["publishDate"].as_str().unwrap_or("").to_string(),
-                    pdf_url: r["infoCode"]
-                        .as_str()
-                        .map(|s| format!("https://pdf.dfcfw.com/pdf/H3_{}_1.pdf", s)),
-                }
-            })
-            .collect())
+        // 与 live 共用同一份行解析（见 `parse_research_report_row`）
+        Ok(reports.iter().map(parse_research_report_row).collect())
     }
 
     // ── SynthesizeFromKline 类的 quote 合成 ──
@@ -4567,6 +4583,10 @@ mod asof_capability_tests {
             "get_peers",
             // T15(2026-09-27)：板块指数日 K 有原生 end= ⇒ 行业排名可按截止日合成
             "get_industry_ranking",
+            // 2026-10-18：历史多期表按 NOTICE_DATE<=截止日取最近一期
+            "get_holder_count",
+            // 2026-10-18：官方聚合无日期列，但研报有 publishDate ⇒ PIT 聚合
+            "get_consensus_eps",
         ] {
             assert_eq!(
                 v.asof_capability(m),
@@ -4601,13 +4621,17 @@ mod asof_capability_tests {
             "get_hot_stocks 应该是 NoHistoricalSemantic"
         );
 
-        // P9-3(2026-10-03)：一致预期是点时序列且官方行**没有日期列** ⇒ 回放不容忍当下值。
-        // 原申报 `Fallthrough`（= 容忍当日值，为「慢变量」而设）对它是错的：
-        // 拿今天的机构一致预期进三个月前的回放，等于把未来信息喂进决策。
-        assert_eq!(
+        // 2026-10-18：股东户数 / 一致预期已移出本档（各自接了真实日期通道），
+        // 现在这一档只剩 eastmoney 并不供应的热股榜本身。
+        assert_ne!(
+            v.asof_capability("get_holder_count"),
+            AsOfCapability::NoHistoricalSemantic,
+            "股东户数已有历史多期通道，不得再申报 NoHistoricalSemantic"
+        );
+        assert_ne!(
             v.asof_capability("get_consensus_eps"),
             AsOfCapability::NoHistoricalSemantic,
-            "get_consensus_eps 应申报 NoHistoricalSemantic"
+            "一致预期已有研报 PIT 通道，不得再申报 NoHistoricalSemantic"
         );
     }
 
@@ -4693,14 +4717,14 @@ mod asof_capability_tests {
         assert!((360..=366).contains(&diff), "窗口应在 360-366 天之间,实际: {diff} 天");
     }
 
+    /// 2026-10-18（002696 现场）：as-of 只收右端，左端必须与 live 同为 2000-01-01。
+    /// 旧实现用「截止日前 365 天」⇒ 十年前的研报在回放里恒空、live 却能看到。
     #[test]
-    fn research_reports_url_uses_actual_asof_window() {
-        let end = "2024-12-31";
-        let begin = "2023-12-31";
-        let url =
-            format!("https://reportapi.eastmoney.com/report/list?beginTime={begin}&endTime={end}");
-        assert!(url.contains("beginTime=2023-12-31"));
-        assert!(url.contains("endTime=2024-12-31"));
+    fn research_reports_url_shares_live_left_edge() {
+        let url = research_reports_url("002696", "2000-01-01", "2026-09-28");
+        assert!(url.contains("beginTime=2000-01-01"), "as-of 左端必须与 live 相同: {url}");
+        assert!(url.contains("endTime=2026-09-28"), "as-of 右端收在截止日: {url}");
+        assert!(!url.contains("2025-09-28"), "不得再退回「截止日前 365 天」窗口: {url}");
     }
 
     /// as-of 模式 + asof_capability 决策集成测试
@@ -5665,6 +5689,166 @@ mod earnings_notice_tests {
     }
 }
 
+/// `YYYY-MM-DD` 往前推 `days` 天；解析失败返回 None（调用方据此跳过，不做猜测）。
+fn iso_days_before(date: &str, days: i64) -> Option<String> {
+    let d = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
+    Some((d - chrono::Duration::days(days)).format("%Y-%m-%d").to_string())
+}
+
+/// 研报列表 URL（live 与 as-of 共用）。
+///
+/// **左端在两条路径上必须相同**：live 用 2000-01-01，as-of 也只收右端到截止日。
+/// 曾把 as-of 左端写成「截止日前 365 天」，导致长期无新研报的标的（002696 研报止于 2019）
+/// 回放恒空、而 live 能返回同一批研报 —— 那是窗口不一致，不是「那天没有研报」。
+fn research_reports_url(stock_code: &str, begin: &str, end: &str) -> String {
+    format!(
+        "https://reportapi.eastmoney.com/report/list?industryCode=*&pageSize=20&\
+         industry=%2A&rating=&ratingChange=&\
+         beginTime={begin}&endTime={end}&\
+         pageNo=1&fields=&qType=0&orgCode=&code={stock_code}&rcode=&\
+         p=1&pageNum=1&pageNumber=1"
+    )
+}
+
+/// 研报行 → `ResearchReport`（live 与 as-of 共用）。
+///
+/// 2026-09-08 曾因 as-of 路径另抄一份解析而丢了 `epsForecast` / `targetPrice`；
+/// 抽成唯一实现后，字段口径不可能再漂移。
+fn parse_research_report_row(r: &Value) -> ResearchReport {
+    let mut eps_forecast = Vec::new();
+    let mut this_year_eps: Option<f64> = None;
+    if let Some(eps) = r["predictThisYearEps"].as_str() {
+        if let Ok(val) = eps.parse::<f64>() {
+            eps_forecast.push(EpsForecast { year: "今年".into(), eps: Some(val) });
+            this_year_eps = Some(val);
+        }
+    }
+    if let Some(eps) = r["predictNextYearEps"].as_str() {
+        if let Ok(val) = eps.parse::<f64>() {
+            eps_forecast.push(EpsForecast { year: "明年".into(), eps: Some(val) });
+        }
+    }
+    if let Some(eps) = r["predictNextTwoYearEps"].as_str() {
+        if let Ok(val) = eps.parse::<f64>() {
+            eps_forecast.push(EpsForecast { year: "后年".into(), eps: Some(val) });
+        }
+    }
+
+    // 目标价 = 预测PE × 预测EPS（reportapi 不直接给目标价）
+    let target_price =
+        if let (Some(eps), Some(pe_str)) = (this_year_eps, r["predictThisYearPe"].as_str()) {
+            pe_str.parse::<f64>().ok().filter(|&pe| pe > 0.0 && eps > 0.0).map(|pe| pe * eps)
+        } else {
+            None
+        };
+
+    let info_code = r["infoCode"].as_str().unwrap_or("");
+    ResearchReport {
+        title: r["title"].as_str().unwrap_or("").to_string(),
+        institution: r["orgSName"].as_str().unwrap_or("").to_string(),
+        analyst: r["researcher"].as_str().map(|s| s.to_string()),
+        rating: r["emRatingName"].as_str().map(|s| s.to_string()),
+        target_price,
+        eps_forecast,
+        publish_date: r["publishDate"].as_str().unwrap_or("").to_string(),
+        pdf_url: if info_code.is_empty() {
+            None
+        } else {
+            Some(format!("https://pdf.dfcfw.com/pdf/H3_{}_1.pdf", info_code))
+        },
+    }
+}
+
+/// 用研报构造**点时一致预期**（live 回退与 as-of 共用）。
+///
+/// 官方聚合 `RPT_WEB_RESPREDICT` 没有日期列 ⇒ 回放拿不到历史；但研报本身带
+/// `publishDate` 与逐年 EPS 预测，按截止日截窗后聚合就是「当时市场能看到的一致预期」。
+///
+/// 两个容易写错的点：
+/// - 年份映射：研报的 `predictThisYear/NextYear/NextTwoYear` 是**相对发布年**的，
+///   目标财年取 `target_year`，必须按 `publish_year - target_year` 选字段，
+///   不能按字段位置硬取（否则 2025 年写的「明年」会被当成 2026 年的「后年」）。
+/// - 聚合粒度：**每家机构只取最新一篇**，再对机构值求均值。机构的当前预测就是它
+///   最后一篇报告；把同一家半年前的旧报告再平均进去会拖偏均值（实测茅台 365 天
+///   窗口的「按机构平均」= 74.3，而「每机构取最新」≈ 70.5，后者才接近官方 67.2）。
+///   `rating_count` 因此是**机构数**而非报告篇数。
+///
+/// 没有一篇落在目标财年 ⇒ `None`（源明确「没有可用的预期」，不是估算兜底）。
+fn derive_consensus_from_reports(
+    stock_code: &str,
+    cutoff: &str,
+    target_year: i32,
+    rows: &[Value],
+) -> Option<ConsensusEPS> {
+    struct Pick {
+        publish: String,
+        eps: f64,
+        target: Option<f64>,
+    }
+    let mut by_org: HashMap<String, Pick> = HashMap::new();
+    for r in rows {
+        let publish = r.get("publishDate").and_then(Value::as_str).unwrap_or("");
+        if publish.is_empty() || publish.get(..10).is_none_or(|d| d > cutoff) {
+            continue;
+        }
+        let Ok(publish_year) = publish.get(..4).unwrap_or("").parse::<i32>() else {
+            continue;
+        };
+        let (eps_key, pe_key) = match publish_year - target_year {
+            0 => ("predictThisYearEps", "predictThisYearPe"),
+            -1 => ("predictNextYearEps", "predictNextYearPe"),
+            -2 => ("predictNextTwoYearEps", "predictNextTwoYearPe"),
+            _ => continue,
+        };
+        let Some(eps) = r
+            .get(eps_key)
+            .and_then(Value::as_str)
+            .and_then(|s| s.parse::<f64>().ok())
+            .filter(|v| v.is_finite())
+        else {
+            continue;
+        };
+        let target = r
+            .get(pe_key)
+            .and_then(Value::as_str)
+            .and_then(|s| s.parse::<f64>().ok())
+            .filter(|pe| pe.is_finite() && *pe > 0.0 && eps > 0.0)
+            .map(|pe| pe * eps);
+        let org = r
+            .get("orgCode")
+            .and_then(Value::as_str)
+            .or_else(|| r.get("orgSName").and_then(Value::as_str))
+            .filter(|s| !s.is_empty())
+            .unwrap_or("__unknown__")
+            .to_string();
+        let replace = by_org.get(&org).is_none_or(|cur| publish > cur.publish.as_str());
+        if replace {
+            by_org.insert(org, Pick { publish: publish.to_string(), eps, target });
+        }
+    }
+    if by_org.is_empty() {
+        return None;
+    }
+    let eps_values: Vec<f64> = by_org.values().map(|p| p.eps).collect();
+    let targets: Vec<f64> = by_org.values().filter_map(|p| p.target).collect();
+    Some(ConsensusEPS {
+        stock_code: stock_code.to_string(),
+        consensus_eps: Some(eps_values.iter().sum::<f64>() / eps_values.len() as f64),
+        consensus_target_price: if targets.is_empty() {
+            None
+        } else {
+            Some(targets.iter().sum::<f64>() / targets.len() as f64)
+        },
+        // 研报不带「综合评级名」这一口径；不拿某一篇的评级冒充全市场
+        rating_avg: None,
+        rating_count: Some(by_org.len() as i32),
+        year: target_year.to_string(),
+        // 来自真实研报的点时聚合，不是板块常数/代理值
+        is_estimated: false,
+        estimate_source: None,
+    })
+}
+
 /// 从 `RPT_WEB_RESPREDICT` 行取「第一个预测年（`YEAR_MARKn == "E"`）」的一致预期。
 ///
 /// `A` 是**已披露实际值**（实测 `YEAR1=2025 / MARK1=A / EPS1=65.85`），按字段顺序取就把
@@ -5767,6 +5951,205 @@ mod consensus_official_tests {
         println!(
             "consensus: year={} eps={:?} target={:?} orgs={:?}",
             c.year, c.consensus_eps, c.consensus_target_price, c.rating_count
+        );
+    }
+}
+
+#[cfg(test)]
+mod asof_pit_aggregation_tests {
+    use super::*;
+
+    #[test]
+    fn iso_days_before_handles_regular_and_invalid() {
+        assert_eq!(iso_days_before("2026-09-28", 365).as_deref(), Some("2025-09-28"));
+        assert_eq!(iso_days_before("2026-03-01", 1).as_deref(), Some("2026-02-28"));
+        assert_eq!(iso_days_before("不是日期", 1), None);
+    }
+
+    /// live/as-of 共用解析：此前 as-of 另抄一份丢掉 epsForecast 与目标价（2026-09-08）。
+    #[test]
+    fn research_report_row_parsing_is_shared_and_complete() {
+        let row = serde_json::json!({
+            "title": "点评",
+            "orgSName": "民生证券",
+            "researcher": "张三",
+            "emRatingName": "增持",
+            "predictThisYearEps": "1.2",
+            "predictNextYearEps": "1.5",
+            "predictNextTwoYearEps": "1.8",
+            "predictThisYearPe": "10",
+            "publishDate": "2026-08-01 00:00:00.000",
+            "infoCode": "AP1"
+        });
+        let r = parse_research_report_row(&row);
+        assert_eq!(r.institution, "民生证券");
+        assert_eq!(r.eps_forecast.len(), 3);
+        assert_eq!(r.eps_forecast[0].eps, Some(1.2));
+        assert_eq!(r.target_price, Some(12.0), "目标价 = PE × EPS");
+        assert_eq!(r.pdf_url.as_deref(), Some("https://pdf.dfcfw.com/pdf/H3_AP1_1.pdf"));
+    }
+
+    fn report(publish: &str, org: &str, this: &str, next: &str, next2: &str) -> Value {
+        serde_json::json!({
+            "publishDate": publish,
+            "orgCode": org,
+            "predictThisYearEps": this,
+            "predictNextYearEps": next,
+            "predictNextTwoYearEps": next2,
+            "predictThisYearPe": "10",
+            "predictNextYearPe": "10",
+            "predictNextTwoYearPe": "10"
+        })
+    }
+
+    /// 年份映射 + 每机构取最新 + 截止日过滤，一条用例锁全。
+    ///
+    /// 目标财年 2026：2026 年报告取 this、2025 年报告取 next、2024 年报告取 next-two；
+    /// 2023 年及更早/2026-10 之后发布的报告必须忽略。
+    #[test]
+    fn consensus_aggregates_target_year_by_org_and_skips_future() {
+        let rows = vec![
+            // 机构 A 在 2026 发两篇：最新那篇是 10（旧的那篇 8 不得再平均进来）
+            report("2026-08-01", "A", "10", "11", "12"),
+            report("2026-07-01", "A", "8", "9", "10"),
+            // 机构 B 在 2025 发：next 字段才是 2026 预测 ⇒ 10
+            report("2025-12-01", "B", "7", "10", "13"),
+            // 机构 C 在 2024 发：next-two 才是 2026 预测 ⇒ 12
+            report("2024-11-01", "C", "1", "2", "12"),
+            // 2023 年报告没有 2026 的预测字段 ⇒ 忽略
+            report("2023-01-01", "D", "99", "99", "99"),
+            // 截止日之后的报告必须忽略（防 URL 参数未来失效）
+            report("2026-10-01", "E", "100", "100", "100"),
+        ];
+        let c = derive_consensus_from_reports("600519", "2026-09-28", 2026, &rows)
+            .expect("应有一致预期");
+        assert_eq!(c.year, "2026");
+        // (10 + 10 + 12) / 3 = 10.666...
+        let eps = c.consensus_eps.expect("EPS");
+        assert!((eps - 10.666667).abs() < 1e-4, "每机构取最新后应为 10.667，实得 {eps}");
+        assert_eq!(c.rating_count, Some(3), "机构数不是报告篇数");
+        assert!(!c.is_estimated);
+    }
+
+    #[test]
+    fn consensus_returns_none_without_target_year_forecasts() {
+        assert!(derive_consensus_from_reports("002696", "2026-09-28", 2026, &[]).is_none());
+        let old = vec![report("2019-05-05", "A", "", "", "")];
+        assert!(derive_consensus_from_reports("002696", "2026-09-28", 2026, &old).is_none());
+    }
+
+    /// 股东户数历史行映射：字段名与 live 不同，语义必须逐项对上。
+    #[test]
+    fn holder_history_row_maps_to_live_semantics() {
+        let row = serde_json::json!({
+            "END_DATE": "2026-06-30 00:00:00",
+            "NOTICE_DATE": "2026-08-28 00:00:00",
+            "HOLDER_TOTAL_NUM": 13685,
+            "TOTAL_NUM_RATIO": -8.3819,
+            "AVG_TOTAL_SHARES": 25265.1978078188
+        });
+        let h = parse_holder_count_history("002696", &row);
+        assert_eq!(h.end_date, "2026-06-30");
+        assert_eq!(h.notice_date.as_deref(), Some("2026-08-28"));
+        assert_eq!(h.holder_num, Some(13685.0));
+        assert_eq!(h.holder_num_ratio, Some(-8.3819));
+        assert_eq!(h.avg_hold_num, Some(25265.1978078188));
+    }
+
+    /// as-of 的关键是 NOTICE_DATE 而不是 END_DATE：URL 必须带披露日上界。
+    #[test]
+    fn holder_history_url_filters_by_notice_date_and_sorts_end_date() {
+        let u = holder_count_history_url("002696.SZ", "2026-09-28");
+        assert!(u.contains("RPT_F10_EH_HOLDERNUM"));
+        assert!(u.contains("NOTICE_DATE%3C%3D%272026-09-28%27"), "必须按披露日截断: {u}");
+        assert!(u.contains("sortColumns=END_DATE&sortTypes=-1"), "取最近一期: {u}");
+    }
+
+    fn vendor() -> EastMoneyVendor {
+        EastMoneyVendor {
+            http: reqwest::Client::new(),
+            proxy_http: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        }
+    }
+
+    fn replay_0928() -> crate::as_of::AsOfContext {
+        crate::as_of::AsOfContext::new(
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 28).unwrap(),
+            crate::as_of::AsOfSource::UserReplay,
+        )
+        .unwrap()
+    }
+
+    /// 真接口冒烟（`#[ignore]`）：
+    /// `cargo test -p axagent-astock-data holder_history_live -- --ignored --nocapture`
+    ///
+    /// 002696 现场：截止 2026-09-28 应能取到 2026-06-30 那一期（披露日 2026-08-28），
+    /// 而不是被尚未披露的更早/更新一期顶掉。
+    #[tokio::test]
+    #[ignore = "需真实网络；仅在手工验证股东户数历史通道时跑"]
+    async fn holder_history_live() {
+        use crate::as_of::AS_OF;
+        let v = vendor();
+        let got = AS_OF
+            .scope(Some(replay_0928()), async { v.get_holder_count_with_asof("002696").await })
+            .await
+            .expect("股东户数历史接口应可达");
+        let h = got.expect("002696 截止 2026-09-28 应已披露 2026-06-30 户数");
+        assert_eq!(h.end_date, "2026-06-30");
+        assert_eq!(h.notice_date.as_deref(), Some("2026-08-28"));
+        assert!(h.holder_num.is_some(), "户数不应为空");
+        println!("002696 股东户数: {:?}", h);
+    }
+
+    /// 真接口冒烟（`#[ignore]`）：
+    /// `cargo test -p axagent-astock-data research_reports_asof_live -- --ignored --nocapture`
+    ///
+    /// 002696 的研报止于 2019：as-of 左端若仍写「截止日前 365 天」这里恒空；
+    /// 与 live 一样用 2000-01-01 左端才能拿到同一批研报。
+    #[tokio::test]
+    #[ignore = "需真实网络；仅在手工验证研报 as-of 窗口时跑"]
+    async fn research_reports_asof_live() {
+        use crate::as_of::AS_OF;
+        let v = vendor();
+        let got = AS_OF
+            .scope(Some(replay_0928()), async { v.get_research_reports_with_asof("002696").await })
+            .await
+            .expect("研报接口应可达");
+        assert!(!got.is_empty(), "002696 的 2019 年研报必须在 as-of 里可见");
+        assert!(got.iter().all(|r| r.publish_date.as_str() <= "2026-09-28"), "研报不得越过截止日");
+        println!("002696 as-of 研报: {} 条，首条 {}", got.len(), got[0].publish_date);
+    }
+
+    /// 真接口冒烟（`#[ignore]`）：002696 非两融标的，as-of 与 live 都返回 None。
+    #[tokio::test]
+    #[ignore = "需真实网络；仅在手工验证两融空语义时跑"]
+    async fn margin_asof_live_is_empty_for_non_margin_stock() {
+        use crate::as_of::AS_OF;
+        let v = vendor();
+        let got = AS_OF
+            .scope(Some(replay_0928()), async { v.get_margin_data_with_asof("002696").await })
+            .await
+            .expect("两融接口应可达");
+        assert!(got.is_none(), "002696 非两融标的 ⇒ as-of 必须与 live 一样是 None");
+    }
+
+    /// 真接口冒烟（`#[ignore]`）：
+    /// `cargo test -p axagent-astock-data consensus_asof_live -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "需真实网络；仅在手工验证一致预期 PIT 聚合时跑"]
+    async fn consensus_asof_live() {
+        use crate::as_of::AS_OF;
+        let v = vendor();
+        let got = AS_OF
+            .scope(Some(replay_0928()), async { v.get_consensus_eps_with_asof("600519").await })
+            .await
+            .expect("研报接口应可达");
+        let c = got.expect("茅台在截止日前 180 天应有研报覆盖");
+        assert!(c.consensus_eps.unwrap_or(0.0) > 0.0, "应收敛出正的 2026 EPS");
+        assert!(c.rating_count.unwrap_or(0) > 0, "应有机构数");
+        println!(
+            "600519 as-of 一致预期: year={} eps={:?} orgs={:?}",
+            c.year, c.consensus_eps, c.rating_count
         );
     }
 }

@@ -151,9 +151,16 @@ pub async fn analyze_mover_recall_inner(
             let picked_any_period =
                 in_window.iter().any(|p| p.stock_code == ev.stock_code && p.period == ev.period)
                     || in_window.iter().any(|p| p.stock_code == ev.stock_code);
-            let in_pool = in_window.iter().any(|p| {
-                mover_recall::code_in_pool_snapshot(p.seed_pool_json.as_deref(), &ev.stock_code)
-            });
+            // 阶段 5 / G1：本窗没有批次 ⇒ 是「不知道」，不是「不在池里」。
+            // 这一格直接决定事件落 `not_in_pool` 还是 `unexplained`，也就是把优化方向
+            // 带去「扩候选宇宙」还是「补留痕」——现网 25/46 条 not_in_pool 是这么来的。
+            let in_pool = if in_window.is_empty() {
+                None
+            } else {
+                Some(in_window.iter().any(|p| {
+                    mover_recall::code_in_pool_snapshot(p.seed_pool_json.as_deref(), &ev.stock_code)
+                }))
+            };
             // 本轮池快照为空 ⇒ 降级（判据绑定本轮，不用别轮的值兜）
             let pool_degraded = !in_window.is_empty()
                 && in_window.iter().any(|p| match p.seed_pool_json.as_deref() {

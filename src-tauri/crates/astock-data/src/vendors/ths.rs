@@ -4,6 +4,7 @@ use crate::types::*;
 use crate::vendors::StockVendor;
 use async_trait::async_trait;
 use serde_json::Value;
+use std::collections::HashMap;
 
 pub struct ThsVendor {
     pub http: reqwest::Client,
@@ -312,28 +313,84 @@ impl StockVendor for ThsVendor {
             .filter_map(|item| {
                 let code = item.get("code")?.as_str()?.to_string();
                 let name = item.get("name")?.as_str()?.to_string();
-                let change_pct = item.get("rise_and_fall").and_then(val_to_f64).unwrap_or(0.0);
+                // 缺字段就是 None —— 「涨跌 0%」与「该字段没给」是两件事（as-of 历史榜
+                // 整条接口都没有 rise_and_fall，见 get_hot_stocks_with_asof）
+                let change_pct = item.get("rise_and_fall").and_then(val_to_f64);
                 let rank = item.get("order").and_then(Value::as_u64).map(|v| v as u32);
                 let hot_value = item.get("rate").and_then(val_to_f64);
-                let reason_tags = item
-                    .get("tag")
-                    .and_then(|t| t.get("concept_tag"))
-                    .and_then(Value::as_array)
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-                    .unwrap_or_default();
                 Some(HotStock {
                     stock_code: code,
                     stock_name: name,
                     change_pct,
                     // 热股榜不给换手率（真值在涨停池那边）—— 留 None，不用 0 顶替
                     turnover_rate: None,
-                    reason_tags,
+                    reason_tags: concept_tag_names(item),
                     sector: None,
                     rank,
                     hot_value,
                 })
             })
             .collect())
+    }
+
+    /// 热股榜的 as-of 通道：同花顺「热榜回溯」（`history/v1/rank`）。
+    ///
+    /// 实测（2026-10-18）：`type=stock&date=YYYYMMDD&market=a` 返回当日**按 5 分钟切片**
+    /// 的榜单（`data.stock_list` 的键是 `YYYYMMDDHHMM`），每个切片含前 10 只股票 + 指数；
+    /// 接口只覆盖交易日 ⇒ 周末锚点先归一到上一交易日。合并当日全部切片、按
+    /// 「最后出现的时段 → 该时段名次」排序，得到当日热榜。
+    ///
+    /// ⚠ 历史切片**没有** `rise_and_fall` 字段 ⇒ `change_pct = None`；
+    /// 不用 0.0 顶替（「涨跌 0%」与「接口不提供」数值上不可区分）。
+    async fn get_hot_stocks_with_asof(&self) -> Result<Vec<HotStock>, DataError> {
+        let ctx = crate::as_of::current_as_of()
+            .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
+        let target = crate::calendar::previous_trading_day(ctx.as_of_date);
+        let date = target.format("%Y%m%d").to_string();
+        let url = format!(
+            "https://eq.10jqka.com.cn/open/api/hot_list/history/v1/rank\
+             ?type=stock&date={date}&market=a&code="
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+            .header("Referer", "https://eq.10jqka.com.cn/frontend/thsTopRank/index.html")
+            .send()
+            .await?;
+        crate::check_response_429(&resp, "ths")?;
+        let json: Value = resp.json().await?;
+        let status = json.get("status_code").and_then(Value::as_i64);
+        // -20001 = 该日期不在回溯覆盖范围内（实测 2025-01-02 回这个，2026-09 可正常返回）。
+        // 它是**源明确回答「那天没有历史数据」**，不是接口故障 ⇒ 走 Ok(空)，不记红档；
+        // 其余非 0（参数非法/-10000 等）才是真失败。
+        if status == Some(-20001) {
+            tracing::debug!("[ths] 热榜回溯无 {date} 数据（No data error，超出覆盖范围）");
+            return Ok(vec![]);
+        }
+        if status != Some(0) {
+            let msg = json.get("status_msg").and_then(Value::as_str).unwrap_or("无");
+            return Err(DataError::VendorError {
+                vendor: "ths".into(),
+                message: format!(
+                    "get_hot_stocks_with_asof 接口拒绝: status_code={status:?} msg={msg:?} date={date}"
+                ),
+            });
+        }
+        // 空对象 = 源明确回答「该日没有历史榜单」，不是失败
+        let Some(slots) = json.pointer("/data/stock_list").and_then(Value::as_object) else {
+            return Ok(vec![]);
+        };
+        let merged = merge_hot_history_slots(slots);
+        if merged.is_empty() && !slots.is_empty() {
+            // 有响应但一只沪深个股都没认出来 ⇒ 更可能是 market 过滤口径变了，
+            // 不是「那天榜上没人」。留日志，不伪装成正常空榜。
+            tracing::warn!(
+                "[ths] 热榜回溯 {date} 返回 {} 个时段，但合并后无沪深个股（market 过滤口径可能变了）",
+                slots.len()
+            );
+        }
+        Ok(merged)
     }
 
     /// 涨停池（连板数 / 涨停天数 / 换手 / 封单 / 炸板次数 / 板型 / 涨停逻辑）。
@@ -519,7 +576,7 @@ impl StockVendor for ThsVendor {
     // ── P3:ths 能力申报 ──
     // 真实实现:
     // - get_market_dragon_tiger:带 date 字段 → Fallthrough
-    // - get_hot_stocks:当下榜单 → NoHistoricalSemantic
+    // - get_hot_stocks:热榜回溯接口（history/v1/rank，含 date）→ NativeDateParam
     // - get_industry_ranking:当下排名 → NoHistoricalSemantic
     // - get_north_bound_flow:带 date 字段 → Fallthrough
     // - get_consensus_eps:带 year 字段 → Fallthrough
@@ -529,9 +586,10 @@ impl StockVendor for ThsVendor {
     // 其他 stub:Fallthrough
     fn asof_capability(&self, method: &str) -> AsOfCapability {
         match method {
-            "get_hot_stocks" | "get_industry_ranking" | "get_concept_blocks" => {
-                AsOfCapability::NoHistoricalSemantic
-            },
+            // 2026-10-18：`history/v1/rank` 实测按 date 返回当日分段热榜
+            //（每段前 10 只 + 指数，历史段无 rise_and_fall）⇒ 有真日期通道。
+            "get_hot_stocks" => AsOfCapability::NativeDateParam,
+            "get_industry_ranking" | "get_concept_blocks" => AsOfCapability::NoHistoricalSemantic,
             // P9-4(2026-10-03)：涨停池是本仓目前**唯一按日可回溯**的涨停通道 ——
             // 实测 2025-09-18 起至最新交易日逐日可取（`data.date` 恒等于请求日），
             // 越界日期回 `status_code=-1`（⇒ 判「不可得」），非交易日回 `total=0`（⇒ 判「真无」）。
@@ -540,6 +598,97 @@ impl StockVendor for ThsVendor {
             _ => AsOfCapability::Fallthrough,
         }
     }
+}
+
+/// 热榜 `tag.concept_tag` → 可读题材名。
+///
+/// live 榜给纯名称；历史回溯榜给 `["48","885768","无人零售"]`（板块 id + 名称）
+/// ⇒ 滤掉纯数字项，两路得到同一语义。
+fn concept_tag_names(item: &Value) -> Vec<String> {
+    item.get("tag")
+        .and_then(|t| t.get("concept_tag"))
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .filter(|s| !s.is_empty() && !s.chars().all(|c| c.is_ascii_digit()))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 合并「热榜回溯」的多时段切片。
+///
+/// 同一代码在多个时段出现时保留**最后出现**的那一次（名次/热度取该时刻值）；
+/// 排序与回溯 UI 一致：最后出现时段越晚越靠前，同一时段内按 `order` 升序。
+/// 只保留沪深个股（`market` = 17/33；32 是指数、48 是板块）。
+fn merge_hot_history_slots(slots: &serde_json::Map<String, Value>) -> Vec<HotStock> {
+    struct Pick {
+        slot: String,
+        order: u32,
+        name: String,
+        rate: Option<f64>,
+        tags: Vec<String>,
+    }
+    let mut latest: HashMap<String, Pick> = HashMap::new();
+    for (slot, rows) in slots {
+        let Some(rows) = rows.as_array() else { continue };
+        for row in rows {
+            let Some(code) = row.get("code").and_then(Value::as_str) else { continue };
+            if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            let market = row.get("market").and_then(Value::as_str).unwrap_or("");
+            if market != "17" && market != "33" {
+                continue;
+            }
+            let order = row.get("order").and_then(Value::as_u64).unwrap_or(u64::MAX) as u32;
+            let name = row.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+            let rate = row.get("rate").and_then(val_to_f64);
+            let tags = concept_tag_names(row);
+            let replace = latest.get(code).is_none_or(|cur| {
+                slot.as_str() > cur.slot.as_str()
+                    || (slot.as_str() == cur.slot.as_str() && order < cur.order)
+            });
+            if replace {
+                // 新时段缺字段（历史切片有时只给名次/热度）⇒ 沿用上一时段的值，
+                // 不把「这一时段没给」写成「没有题材/没有热度」。
+                let prev = latest.get(code);
+                let name = if name.is_empty() {
+                    prev.map(|c| c.name.clone()).unwrap_or_default()
+                } else {
+                    name
+                };
+                let tags = if tags.is_empty() {
+                    prev.map(|c| c.tags.clone()).unwrap_or_default()
+                } else {
+                    tags
+                };
+                let rate = rate.or_else(|| prev.and_then(|c| c.rate));
+                latest
+                    .insert(code.to_string(), Pick { slot: slot.clone(), order, name, rate, tags });
+            }
+        }
+    }
+    let mut picks: Vec<(String, Pick)> = latest.into_iter().collect();
+    picks.sort_by(|a, b| {
+        b.1.slot.cmp(&a.1.slot).then_with(|| a.1.order.cmp(&b.1.order)).then_with(|| a.0.cmp(&b.0))
+    });
+    picks
+        .into_iter()
+        .enumerate()
+        .map(|(i, (code, p))| HotStock {
+            stock_code: code,
+            stock_name: p.name,
+            change_pct: None,
+            turnover_rate: None,
+            reason_tags: p.tags,
+            sector: None,
+            rank: Some(i as u32 + 1),
+            hot_value: p.rate,
+        })
+        .collect()
 }
 
 const POOL_URL_BASE: &str = "https://data.10jqka.com.cn/dataapi/limit_up/limit_up_pool?";
@@ -685,11 +834,13 @@ mod capability_tests {
     }
 
     #[test]
-    fn ths_no_historical_methods() {
+    fn ths_remaining_no_historical_methods() {
         let v = make_vendor();
-        for m in &["get_hot_stocks", "get_industry_ranking", "get_concept_blocks"] {
+        // 2026-10-18：get_hot_stocks 已接热榜回溯接口 ⇒ NativeDateParam，移出本档
+        for m in &["get_industry_ranking", "get_concept_blocks"] {
             assert_eq!(v.asof_capability(m), AsOfCapability::NoHistoricalSemantic);
         }
+        assert_eq!(v.asof_capability("get_hot_stocks"), AsOfCapability::NativeDateParam);
     }
 
     #[test]
@@ -935,8 +1086,9 @@ mod limit_up_pool_tests {
     fn limit_up_pool_is_declared_native_date_param() {
         let v = ThsVendor { http: reqwest::Client::new() };
         assert_eq!(v.asof_capability("get_limit_up_pool"), AsOfCapability::NativeDateParam);
-        // 同一 URL 的 get_hot_stocks 仍是当下榜单 —— 两者语义不同，不可混用申报
-        assert_eq!(v.asof_capability("get_hot_stocks"), AsOfCapability::NoHistoricalSemantic);
+        // 2026-10-18：热股榜也有自己的日期通道（history/v1/rank），
+        // 与涨停池是两个不同业务名目，各自申报 NativeDateParam。
+        assert_eq!(v.asof_capability("get_hot_stocks"), AsOfCapability::NativeDateParam);
     }
 
     /// 真接口冒烟（`#[ignore]`，手工跑：
@@ -1009,12 +1161,12 @@ mod hot_list_tests {
             prev = r;
         }
         assert!(list.iter().all(|h| h.hot_value.is_some()), "热度值实测每行都有");
-        let max_abs = list.iter().map(|h| h.change_pct.abs()).fold(0.0f64, f64::max);
-        let over_one = list.iter().filter(|h| h.change_pct.abs() > 1.0).count();
+        let max_abs = list.iter().filter_map(|h| h.change_pct).fold(0.0f64, |a, b| a.max(b.abs()));
+        let over_one = list.iter().filter(|h| h.change_pct.is_some_and(|v| v.abs() > 1.0)).count();
         assert!(max_abs <= 500.0, "若涨幅被再乘 100，新股首日会出现上万量级，实得 {max_abs}");
         assert!(over_one > 0, "全榜 |涨幅| 都 < 1 说明把百分比当成了小数比例");
         println!(
-            "热股榜 {} 行 榜首={}/{} 涨幅={:.2}% 热度={:?} 题材={:?}",
+            "热股榜 {} 行 榜首={}/{} 涨幅={:?}% 热度={:?} 题材={:?}",
             list.len(),
             list[0].stock_code,
             list[0].stock_name,
@@ -1022,5 +1174,72 @@ mod hot_list_tests {
             list[0].hot_value,
             list[0].reason_tags
         );
+    }
+
+    /// 真接口冒烟（`#[ignore]`，手工跑：
+    /// `cargo test -p axagent-astock-data hot_history_live -- --ignored --nocapture`）。
+    ///
+    /// 用 002696 现场同一天的 2026-09-28：验 `history/v1/rank` 真能按日期返回、
+    /// 合并非空、且历史接口没有涨跌幅（`change_pct = None`）。
+    #[tokio::test]
+    #[ignore = "需真实网络；仅在手工验证热榜回溯通道时跑"]
+    async fn hot_history_live() {
+        use crate::as_of::{AsOfContext, AsOfSource, AS_OF};
+        let v = ThsVendor { http: reqwest::Client::new() };
+        let ctx = AsOfContext::new(
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 28).unwrap(),
+            AsOfSource::UserReplay,
+        )
+        .unwrap();
+        let got = AS_OF
+            .scope(Some(ctx), async { v.get_hot_stocks_with_asof().await })
+            .await
+            .expect("热榜回溯接口应可达");
+        assert!(!got.is_empty(), "2026-09-28 实测应有当日榜单");
+        assert!(got.iter().all(|h| h.change_pct.is_none()), "历史接口无涨跌幅 ⇒ 必须是 None");
+        println!(
+            "热榜回溯 2026-09-28: {} 只，榜首 {}/{} 热度 {:?}",
+            got.len(),
+            got[0].stock_code,
+            got[0].stock_name,
+            got[0].hot_value
+        );
+    }
+
+    /// 历史回溯榜的合并判据（零网络，夹具照 2026-09-28 实测形状）：
+    /// - 只保留沪深个股（market 17/33），指数(32)必须被滤掉；
+    /// - 同一代码跨时段出现取**最后时段**的名次/热度；
+    /// - 最后时段越晚越靠前，同段内按 order 升序；
+    /// - `change_pct` 必须为 None（历史接口没有 rise_and_fall，不得用 0 顶替）；
+    /// - 历史 tag 的纯数字板块 id 不得混进题材名。
+    #[test]
+    fn merge_hot_history_slots_keeps_latest_slot_and_drops_indices() {
+        let json: Value = serde_json::json!({
+            "202609281115": [
+                {"order": 1, "code": "600825", "name": "新华传媒", "time": "202609281115", "rate": "782640.2", "market": "17", "tag": {"concept_tag": ["48", "885768", "无人零售"]}},
+                {"order": 1, "code": "399006", "name": "创业板指", "time": "202609281115", "rate": "4375837.5", "market": "32"},
+                {"order": 2, "code": "000592", "name": "平潭发展", "time": "202609281115", "rate": "722171.2", "market": "33"},
+                {"order": 9, "code": "600000", "name": "浦发银行", "time": "202609281115", "rate": "100.0", "market": "17"}
+            ],
+            "202609281500": [
+                {"order": 1, "code": "000592", "name": "平潭发展", "time": "202609281500", "rate": "718264.8", "market": "33"},
+                {"order": 2, "code": "600825", "name": "新华传媒", "time": "202609281500", "rate": "364193.1", "market": "17"}
+            ]
+        });
+        let slots = json.as_object().unwrap();
+        let got = merge_hot_history_slots(slots);
+        assert_eq!(got.len(), 3, "指数不得入榜；同一代码跨时段只留一行: {got:?}");
+        assert_eq!(got[0].stock_code, "000592", "15:00 的榜首必须排第一");
+        assert_eq!(got[0].rank, Some(1));
+        assert_eq!(got[0].hot_value, Some(718264.8), "必须取最后时段的热度值");
+        assert_eq!(got[1].stock_code, "600825");
+        assert_eq!(got[1].hot_value, Some(364193.1));
+        assert_eq!(got[1].reason_tags, vec!["无人零售".to_string()], "板块 id 不得混进题材名");
+        assert_eq!(got[2].stock_code, "600000", "只在早盘出现的票排在最后时段之后");
+        assert!(
+            got.iter().all(|h| h.change_pct.is_none()),
+            "历史接口无涨跌幅 ⇒ 必须是 None，不得用 0.0 顶替: {got:?}"
+        );
+        assert!(got.iter().all(|h| h.stock_code != "399006"), "指数必须被滤掉");
     }
 }

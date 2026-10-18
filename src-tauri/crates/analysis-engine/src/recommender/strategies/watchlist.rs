@@ -156,6 +156,7 @@ impl WatchlistStrategy {
             confidence_percentile: None,
             prior_source: None,
             prior_samples: None,
+            evidence_score: None,
             stop_source: None,
             position_source: None,
 
@@ -366,6 +367,7 @@ async fn scan_synthetic_one(
         confidence_percentile: None,
         prior_source: None,
         prior_samples: None,
+        evidence_score: None,
         stop_source: None,
         position_source: None,
 

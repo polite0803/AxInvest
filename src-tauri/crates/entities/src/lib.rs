@@ -198,6 +198,7 @@ pub mod lesson_applications;
 pub mod market_daily_close;
 pub mod market_mainlines;
 pub mod market_stock_universe;
+pub mod market_universe_stats;
 pub mod mover_recall_analysis_batches;
 pub mod mover_recall_events;
 pub mod mover_recall_runs;

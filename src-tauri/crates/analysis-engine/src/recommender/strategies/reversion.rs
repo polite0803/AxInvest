@@ -47,7 +47,7 @@ impl ReversionStrategy {
                     return None;
                 },
             };
-        if !crate::recommender::scale::enough_bars(&klines, &profile) {
+        if !crate::recommender::scale::enough_bars(&klines, self.period) {
             return None;
         }
         let price = klines.last()?.close;
@@ -232,6 +232,7 @@ impl ReversionStrategy {
             confidence_percentile: None,
             prior_source: None,
             prior_samples: None,
+            evidence_score: None,
             stop_source: None,
             position_source: None,
 

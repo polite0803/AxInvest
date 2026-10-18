@@ -360,7 +360,7 @@ pub async fn seed_startup_mvp_workflow(db: &DatabaseConnection) -> Result<(), St
     //
     // ⚠ **2026-09-14 修复（C1 端口公理实测捕获）**：本节点的 case `value` 是机器比对值
     // （exact 模式按 `case.value` 与 `input_var` 比），而 **引擎写进 `matched_label` 的是
-    // `case.label`**（`switch_executor.rs:180-377` 三个分支都取 `case.label`），
+    // `case.label`**（`switch_executor.rs:206-372` 三个分支都取 `case.label`），
     // `switch_edge_should_follow` 又把出边 `source_handle` 与 `matched_label` 比
     // （`dag_store.rs:110-122`）⇒ 出边 handle **必须是 case label**。
     //

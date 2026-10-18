@@ -647,6 +647,37 @@ pub fn spearman_rank_ic(pairs: &[(f64, f64)]) -> Option<f64> {
     pearson(&average_ranks(&xs), &average_ranks(&ys))
 }
 
+/// 个股在**同长窗口**内相对基准的累计超额收益（百分点，正=跑赢基准）。
+///
+/// 口径（阶段 1，`PLAN-mover-coverage-and-reflection-exit`）：
+/// `(个股末/个股初 − 1) − (基准末/基准初 − 1)`，两端用**同一批交易日**的收盘价。
+/// 之所以是「区间累计收益之差」而不是 beta 回归：`portfolio_monitor::compute_beta`
+/// 是组合风险监控用的 Cov/Var 回归（另一套窗口与用途），把它搬进决策链会让同一个
+/// 「相对强度」有两套不同分母的算法 —— 本仓为「两名目两套算法」付过多次代价。
+/// 这里只做**最朴素、可手算核对**的那一个量。
+///
+/// 窗口长度由**调用方**传入（逐档各用自己的持有期尺度，中线档就该拿中线的窗），
+/// 本函数不含任何常量 ⇒ 不构成第五套可调参数。
+///
+/// 返回 `None`（调用方按「该腿缺席」处理，**不得折成 0**）：
+/// 窗口不足 `lookback`、两序列长度不齐（错位一日就会把节假日差异读成 alpha）、
+/// 任一价格非正或非有限、首价非正（比值无定义）。
+/// 0 只留给「真的与基准同步」这个事实 —— 与 [`band_z`] 的 `σ≈0` 同一族处理。
+pub fn excess_return_pct(stock: &[f64], benchmark: &[f64], lookback: usize) -> Option<f64> {
+    if lookback < 2 || stock.len() != benchmark.len() || stock.len() < lookback {
+        return None;
+    }
+    let s = &stock[stock.len() - lookback..];
+    let b = &benchmark[benchmark.len() - lookback..];
+    if s.iter().chain(b.iter()).any(|v| !v.is_finite() || *v <= 0.0) {
+        return None;
+    }
+    let s_ret = s[s.len() - 1] / s[0] - 1.0;
+    let b_ret = b[b.len() - 1] / b[0] - 1.0;
+    let excess = (s_ret - b_ret) * 100.0;
+    excess.is_finite().then_some(excess)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1146,5 +1177,55 @@ mod tests {
         let s = surge_state(&closes, &amounts, &highs, 5).unwrap();
         assert_eq!(s.amount_p90, None, "脏值跳过后不足 2 根 ⇒ 分位 None");
         assert_eq!(s.prior_high, None, "脏高跳过后无有效样本");
+    }
+
+    // ── excess_return_pct（阶段 1 逆势强度，2026-10-18）──
+    #[test]
+    fn excess_return_is_the_difference_of_window_returns() {
+        // 手算核对：个股 100→110 = +10%；基准 100→95 = −5%；超额 = +10 −(−5) = **+15**
+        let s = [100.0, 110.0];
+        let b = [100.0, 95.0];
+        let got = excess_return_pct(&s, &b, 2).expect("两根有效价格必须出数");
+        assert!((got - 15.0).abs() < 1e-9, "实得 {got}，期望 +15");
+        // 反向：跑输 ⇒ 负
+        assert!(excess_return_pct(&b, &s, 2).unwrap() < 0.0);
+    }
+
+    #[test]
+    fn synchronous_move_is_zero_not_absence() {
+        // 真·与基准同步 ⇒ Some(0)：0 在这里是事实，不是「拿不到」的伪装
+        let s = [10.0, 11.0, 12.1];
+        let b = [100.0, 110.0, 121.0];
+        assert_eq!(excess_return_pct(&s, &b, 3), Some(0.0));
+    }
+
+    #[test]
+    fn misaligned_or_dirty_windows_are_absence_not_zero() {
+        // 两序列长度不齐（差一日 = 节假日错位）⇒ 必须 None，不能截短硬算
+        assert_eq!(excess_return_pct(&[1.0, 2.0, 3.0], &[1.0, 2.0], 2), None);
+        // 窗口不足 lookback
+        assert_eq!(excess_return_pct(&[1.0, 2.0], &[1.0, 2.0], 5), None);
+        // lookback < 2 ⇒ 单根无「区间」可言
+        assert_eq!(excess_return_pct(&[1.0, 2.0], &[1.0, 2.0], 1), None);
+        // 非正值 / 非有限值 ⇒ None（首价 ≤0 时比值无定义）
+        assert_eq!(excess_return_pct(&[0.0, 2.0], &[1.0, 2.0], 2), None);
+        assert_eq!(excess_return_pct(&[1.0, f64::NAN], &[1.0, 2.0], 2), None);
+    }
+
+    #[test]
+    fn excess_return_on_the_real_2026_09_28_anchor_window_is_positive() {
+        // 真数据夹具（新浪日线收盘价，2026-10-18 取）：百洋股份 002696 vs 创业板指 399006，
+        // 锚点日 2026-09-28 收尾的 5 个交易日窗（09-21 / 09-22 / 09-23 / 09-24 / 09-28）。
+        // 期望值**按被测公式现算**（另用 Python 独立复核过，不是从取数脚本的截断输出手敲）：
+        //   个股  6.49 / 6.86 − 1 = −0.0539358601 → −5.3935860058%
+        //   基准 3139.825 / 3399.59 − 1 = −0.0764106848 → −7.6410684818%
+        //   超额 = −5.3935860058 − (−7.6410684818) = **+2.2474824760**（百分点）
+        // 这条断言锁的是「大盘暴跌日本股显著抗跌 ⇒ 该腿点亮且为正」——
+        // 002696 那轮归因里，锚点当天唯一可用却没人消费的正向证据就是这个量。
+        let stock = [6.86, 7.02, 6.59, 6.65, 6.49];
+        let bench = [3399.59, 3399.93, 3379.61, 3288.948, 3139.825];
+        let got = excess_return_pct(&stock, &bench, 5).expect("真实窗必须出数");
+        assert!(got > 0.0, "抗跌 ⇒ 超额必须为正，实得 {got}");
+        assert!((got - 2.2474824760).abs() < 1e-6, "实得 {got}，按公式现算期望 2.2474824760");
     }
 }

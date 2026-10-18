@@ -65,6 +65,7 @@ pub mod search_provider;
 pub mod session_state;
 pub mod settings;
 pub mod skill;
+pub mod stock_analysis_rerun_queue;
 pub mod stock_analysis_snapshot;
 pub mod stock_evolution_history;
 pub mod stock_lesson_queries;

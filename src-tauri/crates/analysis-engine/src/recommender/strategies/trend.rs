@@ -23,11 +23,43 @@ const DEFAULT_STOP_MULT: f64 = 1.0; // 止损乘数（1.0=标准，0.8=更紧）
 const DEFAULT_TARGET_MULT: f64 = 1.0; // 目标乘数（1.0=标准，1.2=更激进）
 const DEFAULT_POS_ADJ: f64 = 1.0; // 仓位调整（1.0=标准，0.5=半仓）
 
-/// 尺度窗口组（单位=**该档尺度的 bar**，不是日历日；由 `recommender::scale` 决定尺度）。
+/// trend 个股证据强度（0~1，2026-10-18 四档常数塌缩修复）。
 ///
-/// 为什么必须自带一组而不是「日线窗口换个条数」：`fast/slow/anchor` 要覆盖该档的决策视野 ——
-/// 超短看几小时到两天，长线看数季到两年。换算依据写在各档注释里（1 小时线=0.25 交易日、
-/// 1 周线=5 日、1 季线=60 日）。
+/// 均线多头间距 40% + 站上 anchor 幅度 30% + 量比强度 30%。
+/// 归一化刻度（**非过滤阈值**，不拦票只调强度）：间距 >10% 满格、
+/// 站上 >8% 满格、量比 3x 满格。负值/非有限输入按 0 处理（clamp 语义）。
+fn trend_evidence_strength(fast: f64, slow: f64, last: f64, anchor: f64, amount_ratio: f64) -> f64 {
+    if slow <= 0.0
+        || anchor <= 0.0
+        || !amount_ratio.is_finite()
+        || !fast.is_finite()
+        || !last.is_finite()
+    {
+        return 0.0;
+    }
+    let ma_spread = ((fast - slow) / slow).clamp(0.0, 0.10) / 0.10;
+    let anchor_lift = ((last / anchor) - 1.0).clamp(0.0, 0.08) / 0.08;
+    let vol_intensity = (amount_ratio / 3.0).clamp(0.0, 1.0);
+    (0.4 * ma_spread + 0.3 * anchor_lift + 0.3 * vol_intensity).clamp(0.0, 1.0)
+}
+
+/// 尺度窗口组（单位=**该档尺度的 bar**，不是日历日）。
+///
+/// ## 2026-10-18：改为由窗口计划现推，不再手抄四档数字
+///
+/// 此前这里有一张手抄表（超短 8/16/40、短 5/10/20、中 4/8/13、长 3/6/8），它隐含的前提是
+/// 「短=日线、中=周线、长=季线」——正是 `PLAN-horizon-scale-alignment.md` D3 那条：
+/// 档位阶梯一改（长档 90 交易日 = 月线），手抄表立刻与权威脱节，而且**没有任何门能发现**
+/// （每个数字在注释里都自洽）。
+///
+/// 现在的推导（锚在日线默认形状 5/10/20 的**比值**上，与 `ScaleWindowPlan` 的
+/// 「长带 = 3 × 中带」同源）：
+/// - `anchor = 长带`（3 × 中带，覆盖 3 倍持有期）
+/// - `slow = 2/3 · anchor`、`fast = 1/3 · anchor`（下限 2 根，否则指标退化成常数）
+/// - `high_window = amount_window = 中带`（最近一个持有期的高点与量能基线）
+///
+/// 四档读数（`cargo test -p axagent-astock-data horizon_window_plan_dump` 核对）：
+/// 超短 8/16/24、短 5/10/15、中 6/12/18、长 5/10/15。
 #[derive(Clone, Copy)]
 struct Windows {
     fast: usize,
@@ -35,54 +67,23 @@ struct Windows {
     anchor: usize,
     high_window: usize,
     amount_window: usize,
-    /// 是否要求突破近期高点（长线看的是「回踩未破」，不要求创新高）
+    /// 是否要求突破近期高点（长档看的是「回踩未破」，不要求创新高）
     require_high_breakout: bool,
     /// 是否加 MACD 方向条件（仅中线原形态有此条件，不擅自扩到别的档）
     require_macd: bool,
 }
 
 fn windows_for(p: Period) -> Windows {
-    match p {
-        // 小时线：8 根=2 日、16 根=4 日、40 根=10 日；高点看 2 日
-        Period::UltraShort => Windows {
-            fast: 8,
-            slow: 16,
-            anchor: 40,
-            high_window: 8,
-            amount_window: 20,
-            require_high_breakout: true,
-            require_macd: false,
-        },
-        // 日线：原形态 5/10/20
-        Period::Short => Windows {
-            fast: 5,
-            slow: 10,
-            anchor: 20,
-            high_window: 20,
-            amount_window: 20,
-            require_high_breakout: true,
-            require_macd: false,
-        },
-        // 周线：4 周=20 日、8 周=40 日、13 周=一季度；高点看 8 周
-        Period::Mid => Windows {
-            fast: 4,
-            slow: 8,
-            anchor: 13,
-            high_window: 8,
-            amount_window: 13,
-            require_high_breakout: true,
-            require_macd: true,
-        },
-        // 季线：3 季=9 月、6 季=18 月、8 季=2 年；长档不要求创新高（原形态是「回踩未破 MA60」）
-        Period::Long => Windows {
-            fast: 3,
-            slow: 6,
-            anchor: 8,
-            high_window: 4,
-            amount_window: 8,
-            require_high_breakout: false,
-            require_macd: false,
-        },
+    let plan = crate::recommender::scale::window_plan(p);
+    let anchor = plan.long_bars.max(3);
+    Windows {
+        fast: (anchor / 3).max(2),
+        slow: (anchor * 2 / 3).max(2),
+        anchor,
+        high_window: plan.short_bars,
+        amount_window: plan.short_bars,
+        require_high_breakout: !matches!(p, Period::Long),
+        require_macd: matches!(p, Period::Mid),
     }
 }
 
@@ -133,8 +134,9 @@ impl TrendStrategy {
         let (el, eh, sl, tg, bp) = price_bands(self.period);
         let w = windows_for(self.period);
 
-        // 尺度由档位决定（超短=60 分钟、短=日线、中=周线、长=季度）。取不到该尺度、
-        // 或聚合后 bar 数不足 ⇒ **该风格在该档不出票**，绝不退回日线冒充（门 f 锁这一点）。
+        // 尺度由档位权威决定（`Period::scale_key`：超短=60 分钟、短=日线、中=周线、长=月线，
+        // 定阶规则 `d ≤ h/3` 见 harness 的该函数文档）。取不到该尺度、或聚合后 bar 数不足
+        // ⇒ **该风格在该档不出票**，绝不退回日线冒充（门 f 锁这一点）。
         let (klines, profile) =
             match crate::recommender::scale::fetch(client, code, self.period).await {
                 Ok(v) => v,
@@ -143,7 +145,7 @@ impl TrendStrategy {
                     return None;
                 },
             };
-        if !crate::recommender::scale::enough_bars(&klines, &profile) {
+        if !crate::recommender::scale::enough_bars(&klines, self.period) {
             return None;
         }
 
@@ -224,9 +226,18 @@ impl TrendStrategy {
         let conf_consistency = read_f64(vars, "trend_conf_consistency", 0.85);
         let conf_signal = read_f64(vars, "trend_conf_signal", 0.7);
         let conf_market = read_f64(vars, "trend_conf_market", 0.0);
+        // ── 个股证据强度（2026-10-18，四档常数塌缩修复）──
+        // 此前 signal 槽是**模板常数**、liquidity 槽是量比二值 ⇒ 同档所有票的原始
+        // 置信几乎相同，经 logit 合成 + SNR 折算后塌成「档位常数」（60/56/53/51），
+        // 置信度不携带任何个股信息。现把三个连续证据量归一成 evidence ∈ [0,1]：
+        //   均线多头间距 40% + 站上 anchor 幅度 30% + 量比强度 30%
+        // （间距 >10% 满格 / 站上 >8% 满格 / 量比 3x 满格——归一化刻度，非过滤阈值）。
+        // signal 槽调制：`signal × (0.6 + 0.4×evidence)` —— 证据满格不变、零证据六折，
+        // 满跨度 ≈ w.signal(0.35)×0.7×0.4 ≈ 10 个置信点，足以穿透档位常数。
+        let evidence = trend_evidence_strength(fast, slow, last, anchor, amount_ratio);
         let conf = calc_confidence(
             conf_consistency,
-            conf_signal,
+            conf_signal * (0.6 + 0.4 * evidence),
             if amount_ratio > 1.5 { 0.8 } else { 0.5 },
             conf_market,
             turnover_anomaly,
@@ -253,6 +264,7 @@ impl TrendStrategy {
             confidence_percentile: None,
             prior_source: None,
             prior_samples: None,
+            evidence_score: None,
             stop_source: None,
             position_source: None,
 
@@ -349,5 +361,29 @@ mod tests {
         assert_eq!(TrendStrategy::long().id(), "trend_long");
         assert_eq!(TrendStrategy::short().style(), Style::Trend);
         assert_eq!(TrendStrategy::mid().period(), Period::Mid);
+    }
+
+    #[test]
+    fn trend_evidence_is_monotonic_in_each_input() {
+        let base = trend_evidence_strength(10.2, 10.0, 10.1, 10.0, 1.0);
+        assert!(base > 0.0 && base < 1.0, "中性输入应落在 (0,1)，实得 {base}");
+        // 均线间距 ↑ ⇒ 证据 ↑
+        assert!(trend_evidence_strength(11.0, 10.0, 10.1, 10.0, 1.0) > base);
+        // 站上 anchor 幅度 ↑ ⇒ 证据 ↑
+        assert!(trend_evidence_strength(10.2, 10.0, 10.5, 10.0, 1.0) > base);
+        // 量比 ↑ ⇒ 证据 ↑
+        assert!(trend_evidence_strength(10.2, 10.0, 10.1, 10.0, 2.0) > base);
+    }
+
+    #[test]
+    fn trend_evidence_clamps_and_fails_open_on_degenerate_inputs() {
+        // 满格：间距 ≥10% + 站上 ≥8% + 量比 ≥3 ⇒ 1.0
+        assert!((trend_evidence_strength(11.0, 10.0, 10.9, 10.0, 3.0) - 1.0).abs() < 1e-9);
+        // 零证据：均线死叉形态（fast=slow）+ 贴 anchor + 无量 ⇒ 0
+        assert!((trend_evidence_strength(10.0, 10.0, 10.0, 10.0, 0.0) - 0.0).abs() < 1e-9);
+        // 退化输入：slow/anchor ≤0、NaN 量比 ⇒ 0（fail-open）
+        assert_eq!(trend_evidence_strength(10.2, 0.0, 10.1, 10.0, 1.0), 0.0);
+        assert_eq!(trend_evidence_strength(10.2, 10.0, 10.1, 0.0, 1.0), 0.0);
+        assert_eq!(trend_evidence_strength(10.2, 10.0, 10.1, 10.0, f64::NAN), 0.0);
     }
 }

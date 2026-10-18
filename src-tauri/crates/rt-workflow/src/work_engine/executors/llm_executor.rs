@@ -7,6 +7,7 @@ use crate::work_engine::node_executor_trait::{
     NodeError, NodeExecutorTrait, NodeOutput, check_cancellation_or_pause, error_code,
 };
 use async_trait::async_trait;
+use axagent_harness::types::provider_model::request_delay_ms_for_model;
 use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest};
 use axagent_harness::workflow_types::WorkflowNode;
 use std::sync::Arc;
@@ -173,6 +174,7 @@ impl NodeExecutorTrait for LlmExecutor {
         };
 
         let llm_config = LlmCallConfig {
+            request_delay_ms: request_delay_ms_for_model(&prov, &model),
             max_context_tokens: llm_node.config.max_context_tokens,
             reserved_output_tokens: llm_node.config.reserved_output_tokens,
             strict_mode: context.tool_permissions.as_ref().map(|p| p.strict_mode).unwrap_or(false),

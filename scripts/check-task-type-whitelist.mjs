@@ -25,7 +25,7 @@
 //
 // ── 用法 ──
 //   node scripts/check-task-type-whitelist.mjs             # 门禁（0/1）
-//   node scripts/check-task-type-whitelist.mjs --selftest  # 负控全集（五个坏样本，逐条必须真红）
+//   node scripts/check-task-type-whitelist.mjs --selftest  # 负控全集（5 条坏样本 + 1 条负控自证，逐条必须真红）
 //
 // 退出码：0 通过 ｜ 1 违规（含判据没电）
 
@@ -185,6 +185,26 @@ function selftest() {
     return src.replace(from, to);
   };
 
+  /**
+   * 负控专用：在指定 `const NAME = new Set([...])` 块内删掉一条字面量。
+   * 定位只靠「Set 名 + 条目行」两件结构事实，不抄注释文案也不抄数组收尾 `]);` ——
+   * 旧锚点写死了 `"intent-expiry",\n]);`，4398b1b9d 在其后追加 `"stock-analysis-rerun",` 就抛错。
+   * 也不能只写条目行：同一条目在另一个 Set 里重复，`replace` 只命中第一处 ⇒ mutant 拆错守卫＝假绿。
+   */
+  const removeTsSetEntry = (src, name, entry) => {
+    const m = src.match(new RegExp(`const\\s+${name}\\s*=\\s*new Set\\(\\[([\\s\\S]*?)\\]\\)`));
+    if (!m) {
+      throw new Error(`负控锚点未命中：解析不到 Set ${name}`);
+    }
+    const line = `  "${entry}",\n`;
+    const at = m[1].indexOf(line);
+    if (at < 0) {
+      throw new Error(`负控锚点未命中：${name} 里没有条目 ${entry}`);
+    }
+    const open = m.index + m[0].indexOf("[") + 1;
+    return src.slice(0, open + at) + src.slice(open + at + line.length);
+  };
+
   const clean = checkWhitelist({ taskSrc, groupingSrc, rustSources });
   if (clean.length > 0) {
     console.error("❌ 正控失败（现网就该绿）：\n" + clean.join("\n"));
@@ -207,13 +227,7 @@ function selftest() {
       "前端可执行集删一条 ⇒ 后端那条没用处",
       checkWhitelist({
         taskSrc,
-        groupingSrc: patch(
-          groupingSrc,
-          // 锚点必须带上下文：两个 Set 的结尾三行**逐字相同**（`"portfolio-metrics", "intent-expiry", ]);`），
-          // 只写那三行会替换到投资组那份 —— 断言就会指向另一条判据（当晚实测）
-          '  // 报 MANUAL_RUN_NOT_SUPPORTED，而到点自动执行照常 ⇒ 缺陷只在手动触发时露头）\n  "lesson-validation",\n  "portfolio-metrics",\n  "intent-expiry",\n]);',
-          '  // 报 MANUAL_RUN_NOT_SUPPORTED，而到点自动执行照常 ⇒ 缺陷只在手动触发时露头）\n  "lesson-validation",\n  "portfolio-metrics",\n]);',
-        ),
+        groupingSrc: removeTsSetEntry(groupingSrc, "BUILTIN_EXECUTABLE_TYPES", "intent-expiry"),
         rustSources,
       }).some((p) => p.includes("不在前端 BUILTIN_EXECUTABLE_TYPES")),
     ],
@@ -221,7 +235,9 @@ function selftest() {
       "前端投资组删一条 ⇒ 归不进任何内置组",
       checkWhitelist({
         taskSrc,
-        groupingSrc: patch(groupingSrc, '  "portfolio-metrics",\n', ""),
+        // 同一条目行在两个 Set 里都出现 ⇒ 必须点名 INVEST_TASK_TYPES，
+        // 否则 mutant 落在别的块上，断言指向另一条判据（假绿）
+        groupingSrc: removeTsSetEntry(groupingSrc, "INVEST_TASK_TYPES", "portfolio-metrics"),
         rustSources,
       }).some((p) => p.includes("归不进任何内置组")),
     ],
@@ -242,6 +258,17 @@ function selftest() {
         groupingSrc,
         rustSources,
       }).some((p) => p.startsWith("判据没电")),
+    ],
+    [
+      "负控自证：条目不在点名的 Set 里 ⇒ 抛错，不许静默交出一个「没改动的破坏样本」（旧锚点就是这么空放的）",
+      (() => {
+        try {
+          removeTsSetEntry(groupingSrc, "SYSTEM_TASK_TYPES", "portfolio-metrics");
+          return false;
+        } catch {
+          return true;
+        }
+      })(),
     ],
   ];
 

@@ -475,7 +475,7 @@ if (canRunRust && !quick) {
   // 或「任务中心分组」上露头，自动执行照常跑。本门逐值对账三处。
   // 与 ci.yml 的对应 step 逐字同源。
   step(
-    "内置 task_type 白名单跨语言对账自检（五个坏样本）",
+    "内置 task_type 白名单跨语言对账自检（5 坏样本 + 1 负控自证）",
     "node scripts/check-task-type-whitelist.mjs --selftest",
   );
   step("内置 task_type 白名单跨语言对账", "node scripts/check-task-type-whitelist.mjs");

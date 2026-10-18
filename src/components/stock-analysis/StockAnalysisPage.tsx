@@ -24,6 +24,7 @@ import {
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useShallow } from "zustand/react/shallow";
 import { AnalysisDebugPanel } from "./AnalysisDebugPanel";
 import { AnalysisProgress } from "./AnalysisProgress";
 import { AnalystReportGrid } from "./AnalystReportGrid";
@@ -46,7 +47,16 @@ import { VendorHealthDashboard } from "./VendorHealthDashboard";
 
 /** 决策双视角 Tab 内容：从 store 取 LLM vs 公式决策数据传入 DualViewRenderer */
 function DecisionComparisonTabContent() {
-  const store = useStockAnalysisStore();
+  // 窄订阅（2026-10-17）：原为 `useStockAnalysisStore()` 无 selector，等于订阅整个 store。
+  // zustand v5 无默认浅比较 ⇒ 工作流运行期间每次 set 都会重渲染本 Tab 内容及其子树
+  // （DualViewRenderer 含多档决策卡片）；改成 useShallow 只订阅实际用到的 3 个字段。
+  const store = useStockAnalysisStore(
+    useShallow((s) => ({
+      decision: s.decision,
+      llmDecisionJson: s.llmDecisionJson,
+      decisionAgreementScore: s.decisionAgreementScore,
+    })),
+  );
   const dualViewData = {
     decisionAction: store.decision?.action,
     // V76: 持仓状态轴（来自 portfolio-mgr.rhai 的 positionState）

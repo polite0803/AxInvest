@@ -222,7 +222,7 @@ export interface HorizonDecision {
   /**
    * 该档技术腿吃的是哪一份评分（结构性缺席声明）：
    * `tier_native` = 本档专属粒度评分节点出数；
-   * `daily_fallback` = 该粒度评分没出数（超短档无 60 分钟线 / 长线档无季线），f1 腿退回主链日线。
+   * `daily_fallback` = 该粒度评分没出数（超短档无 60 分钟线 / 长线档无月线），f1 腿退回主链日线。
    * ⚠ 缺席必须成句，不得压成「评分低」或干脆不显示 —— 见 AGENTS.md 禁区 12 与本轮 §七-F。
    * 退化时主链装配还会往顶层 `dataGaps` 追加一条（横幅的「数据缺口 N 项」读那里）。
    */
@@ -291,6 +291,13 @@ export interface HorizonDecision {
   } | null;
   /** 超短档 P0-5：microstructure 个股腿未接线期间动作封顶是否触发（买入/增持 → 持有） */
   p05CapApplied?: boolean;
+  /**
+   * 超短档 P2a（2026-10-18）：封顶**前**的动作（结构化自证，与 `p05CapApplied` 配对）。
+   * 产端 `portfolio-mgr-h-ultra-short.rhai` 恒写本键（未封顶时等于 `action`），
+   * 主链摘要「动作=封顶结果（买入被压回…）」读这里，**不从 dataGaps 文案反解**。
+   * 消费判定以 `p05CapApplied === true` 为准，本字段只回答「封顶前是什么」。
+   */
+  actionBeforeCap?: string;
   /** 短线档：时机过滤是否放行（追高/带外判定） */
   timingFiltered?: boolean;
   /** 中线档：价带 z 值（×100，四舍五入到 0.1）；K 线不足 ⇒ null */
@@ -333,7 +340,7 @@ export interface HorizonDecision {
    * 不是「该档没有窗口」。因此展示侧只在有值时成句，缺席不渲染任何一行 —— 不得压成 0 或空数组。
    */
   scoringWindows?: HorizonScoringWindows | null;
-  /** 本档评分所在尺度（`hourly` / `weekly` / `monthly` / `quarterly`），与 `scoringWindows` 同批出现 */
+  /** 本档评分所在尺度（`hourly` / `daily` / `weekly` / `monthly`），与 `scoringWindows` 同批出现 */
   scoringScale?: string;
   /**
    * 本档**两带趋势事实**（产端 = `indicators.scaleTrend`，v139）。
@@ -1387,8 +1394,18 @@ export interface RecoPick {
   positionPct: number;
   /** 持有天数(后端 u32) */
   holdingDays: number;
-  /** 置信度 0-100（后端 u8，**绝对口径**：逐档先验与评分在 logit 空间合成后的概率） */
+  /**
+   * v4（2026-10-18）：置信度语义 = **证据强度**（策略条件满足度 × 风格权重），
+   * 个股维度、明确不是「上涨概率」（旧伪概率链已撤——同档所有票曾塌成档位常数）。
+   * 真概率将来自闭环分桶校准（`PLAN-capital-long-evidence.md` §六），样本足够才输出。
+   */
   confidence: number;
+  /**
+   * v4: 策略原始证据强度（0-100，风格权重调制前）——分桶校准的输入。
+   * 缺字段 = v4 之前的存量行（无证据分概念，校准筛样排除）。
+   * ⚠ 与分析链 V65 的 `evidenceScore`（evidence_cited 维度分）同名不同义。
+   */
+  evidenceScore?: number;
   /** 组内当日分位 0-100（后端 Phase R-C 起与绝对置信分列；同组无差异时缺字段） */
   confidencePercentile?: number;
   /** 该档先验来源：shrunk / own / pooled / neutral_default / absent（absent = 无历史样本，仅评分） */
@@ -1452,6 +1469,19 @@ export interface RecoResponse {
   mode: string;
   /** 数据获取错误详情(picks 为空时的具体原因)。后端填充,前端据此显示具体错误文本而非泛化的"连接失败" */
   errorDetail?: string;
+  /**
+   * mid/long 档被出票门拦截的候选(P0 财报门 / P1 分析回环门,2026-10-18)。
+   * 后端 `RecoResponse.gate_blocked`(camelCase)。空数组 = 本批无拦截,字段可能缺省。
+   * 展示建议:与 picks 并列呈现「已拦截」分组,理由码 first_loss / two_period_decline /
+   * analysis_veto_<档>:<动作> 直接透出,不再靠日志反查「为什么候选少了」。
+   */
+  gateBlocked?: Array<{
+    stockCode: string;
+    stockName: string;
+    style: StyleKey;
+    confidence: number;
+    reasons: string[];
+  }>;
 }
 
 /**
@@ -1813,6 +1843,37 @@ export interface FailureModeBoard {
   rejectedTokens: string[];
 }
 
+/**
+ * 阶段 3 / 决-3：结构层待裁项的一行明细（反思判为 L2/L3，即「根因不在参数层」）。
+ * 文本已在后端按**字符**截断，前端不再二次裁剪。
+ */
+export interface StructuralReflectionRow {
+  reflectionId: string;
+  stockCode: string;
+  stockName: string;
+  /** 该反思复盘的档；null = 未记录（不是「所有档通用」） */
+  horizon: string | null;
+  /** "L2" = 改 .rhai 公式；"L3" = 改 .md 提示词 */
+  tier: string;
+  /** 反思给的目标与最小改动描述；null = 模板未产出 */
+  proposal: string | null;
+  whatWentWrong: string | null;
+  updatedAt: number;
+}
+
+/**
+ * 反思落地层级看板。四类计数**互不折算**：
+ * `unlabelled` = 本次反思没判层级（含本列引入前的存量行），不得读成 `l1`。
+ */
+export interface TierBoard {
+  totalRows: number;
+  l1: number;
+  l2: number;
+  l3: number;
+  unlabelled: number;
+  structuralRows: StructuralReflectionRow[];
+}
+
 export interface HitrateStats {
   totalSamples: number;
   directionHitRate: number | null;
@@ -1843,6 +1904,8 @@ export interface HitrateStats {
    * 计数域与 `missLayer`（漏检链的机械归因层）不同，两者不得并排成可比数字。
    */
   failureModes: FailureModeBoard;
+  /** 阶段 3 / 决-3：落地层级看板（结构层待裁清单）。与 failureModes 计数域不同，不得并列成可比数字。 */
+  tiers: TierBoard;
   /**
    * 本次统计采用的**起算代际**下限（`HORIZON_BRANCH_GENERATION_FLOOR`）。
    * 语义是「这一代及之后才算同一套判据」，**不是**「等于当前代」—— 用等号的话每次换代

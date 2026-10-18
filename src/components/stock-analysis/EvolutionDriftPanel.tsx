@@ -78,6 +78,11 @@ export function EvolutionDriftPanel() {
       grid: Array<Record<string, number>>;
       totalReflections: number;
       parsedSuggestions: number;
+      // 阶段 3 / 决-3：结构层（L2/L3）被挡在参数网格外的条数与「未声明层级」条数。
+      // 两者都不是 0 时必须在弹窗里出声，否则「本轮没调出参数」与「本轮根因本来就不在
+      // 参数层」在用户眼里是同一件事。
+      structuralExcluded?: number;
+      tierUnlabelled?: number;
       message?: string;
     } | null
   >(null);
@@ -167,6 +172,8 @@ export function EvolutionDriftPanel() {
         grid: Array<Record<string, number>>;
         totalReflections: number;
         parsedSuggestions: number;
+        structuralExcluded?: number;
+        tierUnlabelled?: number;
         message?: string;
       }>("calibrate_portfolio_mgr_params");
       setCalibrateResult(result);
@@ -628,6 +635,20 @@ export function EvolutionDriftPanel() {
           </div>
         )}
         {calibrateResult?.message && !calibrateResult.bestParams && <Empty description={calibrateResult.message} />}
+        {(calibrateResult?.structuralExcluded ?? 0) > 0 && (
+          <div style={{ marginTop: 12, fontSize: 12, color: "#d46b08" }}>
+            {t("stockAnalysis.evolutionDrift.calibrateStructuralCount", {
+              count: calibrateResult!.structuralExcluded,
+            })}
+          </div>
+        )}
+        {(calibrateResult?.tierUnlabelled ?? 0) > 0 && (
+          <div style={{ marginTop: 4, fontSize: 12, color: "var(--muted, #8c8c8c)" }}>
+            {t("stockAnalysis.evolutionDrift.calibrateTierUnlabelledCount", {
+              count: calibrateResult!.tierUnlabelled,
+            })}
+          </div>
+        )}
       </Modal>
 
       <div style={{ marginTop: 24 }}>

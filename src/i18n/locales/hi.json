@@ -1243,7 +1243,8 @@
         "strategyOverwrite": "अधिलेखित करें (सब बदलें)",
         "strategyMerge": "मर्ज करें (मौजूदा रखें)",
         "strategyDryRun": "ड्राई रन (केवल मान्य करें)",
-        "paused": "रुका हुआ"
+        "paused": "रुका हुआ",
+        "interrupted": "बाधित"
       },
       "pause": "रोकें",
       "pauseFailed": "रोकने में विफल",
@@ -15708,10 +15709,12 @@
         "serenity_needs_week_or_longer_realization": "डिज़ाइन अनुसार: बोतल-गर्दन प्रमाण को एक सप्ताह या उससे लंबा क्षितिज चाहिए",
         "oversold_rebound_needs_at_least_mid_horizon": "डिज़ाइन अनुसार: अति-विक्रय प्रतिगमन को कम-से-कम मध्यम अवधि चाहिए",
         "oversold_rebound_not_applied_to_long_horizon": "डिज़ाइन अनुसार: अति-विक्रय प्रतिगमन दीर्घकालिक अवधि पर लागू नहीं",
+        "trend_momentum_not_a_long_thesis": "डिज़ाइन अनुसार: ट्रेंड फ़ॉलोइंग अल्पकालिक मोमेंटम है और दीर्घकालिक चयन नहीं करता",
         "cell_not_in_matrix": "अनुबंध तालिका में यह सेल ग़ायब (संभवतः कार्यान्वयन अंतर, डिज़ाइन नहीं)"
       },
       "matrixMisfit": {
-        "valuation_needs_weeks_to_realize_kept_by_user_decision": "ज्ञात विसंगति: मूल्यांकन को सप्ताह लगते; निर्णय अनुसार रखा गया"
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "ज्ञात विसंगति: मूल्यांकन को सप्ताह लगते; निर्णय अनुसार रखा गया",
+        "capital_evidence_is_daily_snapshot_declared_misfit": "ज्ञात बेमेल: पूंजी-प्रवाह साक्ष्य दैनिक स्नैपशॉट (नॉर्थ-बाउंड बंद) है; दीर्घकालिक प्राप्ति असत्यापित — निर्णय से जारी"
       },
       "loopUncalibratedSamples": "लूप कैलिब्रेट नहीं: नमूने अपर्याप्त",
       "loopUncalibratedIc": "लूप कैलिब्रेट नहीं: IC मापने योग्य नहीं",
@@ -16759,6 +16762,8 @@
       "calibrateApplyDone": "इष्टतम पैरामीटर टेम्पलेट पर लागू किए गए",
       "calibrateRefreshCount": "{{total}} रिफ़्लेक्शन के आधार पर",
       "calibrateParsedCount": "{{parsed}} मान्य सुझाव पार्स किए गए",
+      "calibrateStructuralCount": "इस राउंड {{count}} रिफ्लेक्शन संरचनात्मक (L2 सूत्र / L3 प्रॉम्प्ट) माने गए, पैरामीटर ग्रिड में नहीं — एक-एक निपटाएँ",
+      "calibrateTierUnlabelledCount": "{{count}} रिफ्लेक्शन में स्तर घोषित नहीं (इसका अर्थ पैरामीटर स्तर नहीं)",
       "trigger": {
         "low_quality": "Quality score {{score}} below threshold {{threshold}} for {{count}} consecutive times",
         "poor_signal_accuracy": "Signal accuracy score {{score}}, optimize signal strategy",
@@ -16832,7 +16837,7 @@
         "target": "Target Price",
         "position": "Suggested Position",
         "holding": "Holding Days",
-        "confidence": "Confidence"
+        "confidence": "साक्ष्य शक्ति"
       },
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
@@ -16866,6 +16871,12 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "इस दौर में यह क्षितिज ({{horizon}}) स्कैन नहीं हो सका: {{reason}}; अन्य क्षितिज प्रभावित नहीं हैं",
       "bannerPoolFallbackOnly": "कुल {{fallback}} उम्मीदवार अंतर्निहित नमूना पूल से हैं; लोकप्रिय शेयर या क्षेत्र-नेता रैंकिंग उपलब्ध नहीं थी, इसलिए परिणाम बाज़ार के वास्तविक नेताओं को नहीं दर्शाते।",
+      "bannerGateBlocked": "लॉन्ग-हराइज़न गेट ने {{count}} उम्मीदवारों को रोका (पहली हानि / दो अवधि गिरावट / 30 दिनों में बेचने का निर्णय)",
+      "gateReason": {
+        "firstLoss": "पहली हानि: मूल कंपनी शुद्ध लाभ ≤ 0",
+        "twoPeriodDecline": "शुद्ध लाभ लगातार दो अवधि गिरा",
+        "analysisVeto": "विश्लेषण {{period}}: \"{{action}}\" (30 दिनों में)"
+      },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "lastAnalysis": "Last Analysis",
@@ -17225,6 +17236,10 @@
       "failureModeChaseUpBar": "बड़ी तेज़ मोमबत्ती का पीछा",
       "failureModeRegimeEndorsement": "बाज़ार स्थिति से अकेले शेयर को समर्थन",
       "failureModeReverseDcfIgnored": "उलटा DCF नज़रअंदाज़",
+      "failureModeThemeRotationMissed": "थीम घुमाव साक्ष्य सूची में नहीं था",
+      "failureModeCounterTrendStrengthIgnored": "उल्टे रुख में अतिरिक्त मजबूती नजरअंदाज",
+      "failureModeEntryGateShapeBlocked": "एंट्री गेट का स्वरूप सही संकेत को रोक रहा है",
+      "failureModeCandidatePoolCoverageMissed": "स्टॉक कभी कैंडिडेट पूल में नहीं आया",
       "horizonConfusionTitle": "प्रति-टियर परिणाम मिलान (फ़ॉर्म्युला × LLM)",
       "horizonConfusionNotProduced": "इस रिकॉर्ड के लिए प्रति-टियर परिणाम मिलान नहीं है (आँकड़े शुरू होने से पहले का डेटा, या कोई मूल्यांकन-योग्य नमूना नहीं)",
       "horizonConfusionInsufficient": "नमूने अपर्याप्त ({{judged}} मूल्यांकित) — नीचे की गिनती कच्चे रिकॉर्ड हैं, निष्कर्ष नहीं",
@@ -17232,6 +17247,14 @@
       "horizonConfusionUndecided": "{{undecided}} में LLM का निर्णय नहीं (अनुपस्थित / विंडो पूरी नहीं / प्रतीक्षा-होल्ड जैसी दिशाहीन क्रिया) — किसी खाने में नहीं गिने जाते",
       "horizonConfusionAvgAgreement": "इस टियर की त्रि-आयामी सहमति का औसत {{pct}}",
       "horizonConfusionScopeNote": "दोनों पक्ष एक ही विंडो और एक ही निर्णय फ़ंक्शन पर हैं; चारों खाने केवल दिशा की सही-गलत तुलना करते हैं, प्रतिफल नहीं, और ऊपर की हिट-रेट से भिन्न हर हैं।",
+      "tierTitle": "निवारण स्तर (संरचनात्मक सूची)",
+      "tierL1": "पैरामीटर स्तर L1",
+      "tierL2": "सूत्र स्तर L2",
+      "tierL3": "प्रॉम्प्ट स्तर L3",
+      "tierUnlabelled": "स्तर घोषित नहीं",
+      "tierUnlabelledHint": "{{count}} रिफ्लेक्शन में स्तर नहीं है — फ़ील्ड नहीं बना, इसका मतलब पैरामीटर स्तर होना नहीं।",
+      "tierGridNote": "L2/L3 कारण पैरामीटर परत के नहीं हैं: वे कैलिब्रेशन ग्रिड से बाहर हैं और एक-एक कर निपटाने होंगे।",
+      "tierEmpty": "कोई संरचनात्मक प्रतीक्षा नहीं (कोई रिफ्लेक्शन L2/L3 नहीं)",
       "failureModeOther": "अन्य"
     },
     "portfolioMonitor": {
@@ -18054,6 +18077,7 @@
       "weight": "भार",
       "signal": "संकेत",
       "absenceUndeclared": "अनुपस्थिति घोषित नहीं",
+      "expectedButIdle": "अपेक्षित पर शामिल नहीं",
       "metaLeg": "मेटा",
       "upstream": {
         "present": "उपस्थित",
@@ -18070,6 +18094,10 @@
       },
       "sigma": {
         "consistent": "σ सुसंगत",
+        "sameSourceCopy": "समान स्रोत से पुनर्गणना",
+        "sameSourceCopyHint": "आधार और σ एक ही स्क्रिप्ट चर की दो सहेजी गई प्रतियाँ हैं; अंतर की सीमा दोनों पक्षों की राउंडिंग त्रुटि के योग के बराबर है ⇒ यह मेल सदैव सत्य है और केवल यह सिद्ध करता है कि किसी प्रति को अकेले बदला नहीं गया",
+        "inputMissing": "σ अनुपलब्ध",
+        "inputMissingHint": "इस पैर का sigma फ़ील्ड अनुपलब्ध या गलत प्रकार है ⇒ यह शून्य नहीं है, इसलिए संवृत निर्धारणीय नहीं",
         "inconsistent": "σ असंगत",
         "noBasis": "कोई आधार नहीं"
       },
@@ -18079,11 +18107,13 @@
       },
       "closure": {
         "closed": "संवृत",
+        "coverage": "कवरेज",
         "broken": "असंवृत",
         "notComputable": "अनिर्धार्य"
       },
       "closureReason": {
         "decisionDegraded": "इस बार कोई निर्णय नहीं बना, इसलिए संवृत्ति अनिर्धार्य है",
+        "missingFactorInput": "किसी कारक पैर का σ या भार अनुपलब्ध है, इसलिए संवृत निर्धारणीय नहीं",
         "noWeightSumOrFactors": "weightSum या कारक तालिका अनुपस्थित है, इसलिए संवृत्ति अनिर्धार्य है"
       },
       "supported": "डेटा सहित"

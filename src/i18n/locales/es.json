@@ -1243,7 +1243,8 @@
         "strategyOverwrite": "Sobrescribir (reemplazar todo)",
         "strategyMerge": "Combinar (conservar existentes)",
         "strategyDryRun": "Prueba en seco (solo validar)",
-        "paused": "Pausado"
+        "paused": "Pausado",
+        "interrupted": "Interrumpido"
       },
       "pause": "Pausar",
       "pauseFailed": "Error al pausar",
@@ -15708,10 +15709,12 @@
         "serenity_needs_week_or_longer_realization": "Por diseño: la evidencia de cuello de botella requiere un horizonte de una semana o más",
         "oversold_rebound_needs_at_least_mid_horizon": "Por diseño: el rebote de sobreventa necesita al menos un horizonte medio",
         "oversold_rebound_not_applied_to_long_horizon": "Por diseño: el rebote de sobreventa no se aplica al horizonte largo plazo",
+        "trend_momentum_not_a_long_thesis": "Por diseño: el seguimiento de tendencias es momentum a corto plazo y no emite candidatas de largo plazo",
         "cell_not_in_matrix": "Celda ausente en la tabla de contrato (posible omisión, no por diseño)"
       },
       "matrixMisfit": {
-        "valuation_needs_weeks_to_realize_kept_by_user_decision": "Desajuste conocido: la valoración necesita semanas; se conserva por decisión"
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "Desajuste conocido: la valoración necesita semanas; se conserva por decisión",
+        "capital_evidence_is_daily_snapshot_declared_misfit": "Desajuste conocido: la evidencia de flujos es una instantánea diaria (north-bound detenido); realización a largo plazo sin verificar — se mantiene por decisión"
       },
       "loopUncalibratedSamples": "Bucle sin calibrar: muestras insuficientes",
       "loopUncalibratedIc": "Bucle sin calibrar: IC no medible",
@@ -16759,6 +16762,8 @@
       "calibrateApplyDone": "Parámetros óptimos aplicados a la plantilla",
       "calibrateRefreshCount": "Basado en {{total}} reflexiones",
       "calibrateParsedCount": "{{parsed}} recomendaciones válidas analizadas",
+      "calibrateStructuralCount": "{{count}} reflexiones se clasificaron estructurales (L2 fórmula / L3 prompt) y quedaron fuera de la rejilla — trátalas una a una",
+      "calibrateTierUnlabelledCount": "{{count}} reflexiones no declaran nivel (eso no significa que sean de parámetros)",
       "trigger": {
         "low_quality": "Quality score {{score}} below threshold {{threshold}} for {{count}} consecutive times",
         "poor_signal_accuracy": "Signal accuracy score {{score}}, optimize signal strategy",
@@ -16832,7 +16837,7 @@
         "target": "Target Price",
         "position": "Suggested Position",
         "holding": "Holding Days",
-        "confidence": "Confidence"
+        "confidence": "Fuerza de evidencia"
       },
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
@@ -16866,6 +16871,12 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "Este horizonte temporal ({{horizon}}) no se pudo analizar en esta ronda: {{reason}}; los demás horizontes no se ven afectados",
       "bannerPoolFallbackOnly": "Los {{fallback}} candidatos proceden del pool de muestra integrado; no se obtuvo ningún ranking de valores destacados ni de sectores líderes, por lo que el resultado no refleja los líderes reales del mercado.",
+      "bannerGateBlocked": "El filtro de largo plazo bloqueó {{count}} candidatas (primera pérdida / caída en 2 periodos / veredicto de venta en 30 días)",
+      "gateReason": {
+        "firstLoss": "Primera pérdida: beneficio neto atribuible ≤ 0",
+        "twoPeriodDecline": "Beneficio neto a la baja dos periodos consecutivos",
+        "analysisVeto": "Análisis {{period}}: \"{{action}}\" (en 30 días)"
+      },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "lastAnalysis": "Last Analysis",
@@ -17225,6 +17236,10 @@
       "failureModeChaseUpBar": "Perseguir una vela grande",
       "failureModeRegimeEndorsement": "Régimen de mercado avalando un valor",
       "failureModeReverseDcfIgnored": "DCF inverso ignorado",
+      "failureModeThemeRotationMissed": "Rotación temática ausente de las evidencias",
+      "failureModeCounterTrendStrengthIgnored": "Fuerza contra tendencia ignorada",
+      "failureModeEntryGateShapeBlocked": "La forma de la puerta de entrada bloqueó una señal correcta",
+      "failureModeCandidatePoolCoverageMissed": "La acción nunca entró al conjunto de candidatos",
       "horizonConfusionTitle": "Contraste de resultados por horizonte (fórmula × LLM)",
       "horizonConfusionNotProduced": "Este registro no tiene contraste de resultados por horizonte (datos previos a la estadística o sin muestras evaluables)",
       "horizonConfusionInsufficient": "Muestras insuficientes ({{judged}} evaluadas) — los recuentos de abajo son registros brutos, no conclusiones",
@@ -17232,6 +17247,14 @@
       "horizonConfusionUndecided": "{{undecided}} sin veredicto del LLM (ausente / ventana no cumplida / acción no direccional como esperar o mantener) — no cuentan en ninguna casilla",
       "horizonConfusionAvgAgreement": "Media de concordancia tridimensional de este horizonte {{pct}}",
       "horizonConfusionScopeNote": "Ambos lados comparten una ventana y una función de veredicto; las cuatro casillas solo comparan la dirección, no la rentabilidad, y usan un denominador distinto al de la tasa de acierto de arriba.",
+      "tierTitle": "Nivel de corrección (pila estructural)",
+      "tierL1": "Parámetros L1",
+      "tierL2": "Fórmula L2",
+      "tierL3": "Prompt L3",
+      "tierUnlabelled": "Nivel no declarado",
+      "tierUnlabelledHint": "{{count}} reflexiones no declaran nivel — la plantilla no emitió el campo, eso no significa que sean de parámetros.",
+      "tierGridNote": "Las causas L2/L3 no son de capa de parámetros: quedan fuera de la rejilla de calibración y exigen tratamiento individual.",
+      "tierEmpty": "Sin elementos estructurales pendientes (ninguna reflexión clasificada L2/L3)",
       "failureModeOther": "Otro"
     },
     "portfolioMonitor": {
@@ -18054,6 +18077,7 @@
       "weight": "peso",
       "signal": "señal",
       "absenceUndeclared": "Ausencia sin declarar",
+      "expectedButIdle": "Esperado pero excluido",
       "metaLeg": "meta",
       "upstream": {
         "present": "Presente",
@@ -18070,6 +18094,10 @@
       },
       "sigma": {
         "consistent": "σ coherente",
+        "sameSourceCopy": "Recálculo misma fuente",
+        "sameSourceCopyHint": "La base y σ son dos copias persistidas de la misma variable del script; el límite del delta es por construcción la suma de ambos errores de redondeo ⇒ esta coincidencia siempre es cierta y solo prueba que ninguna copia se editó por separado",
+        "inputMissing": "σ ausente",
+        "inputMissingHint": "El campo sigma de esta pata falta o tiene tipo incorrecto ⇒ no es 0, el cierre no es evaluable",
         "inconsistent": "σ discrepante",
         "noBasis": "Sin referencia"
       },
@@ -18079,11 +18107,13 @@
       },
       "closure": {
         "closed": "Cerrado",
+        "coverage": "cobertura",
         "broken": "No cerrado",
         "notComputable": "Indeterminable"
       },
       "closureReason": {
         "decisionDegraded": "Esta vez no se produjo decisión; el cierre es indeterminable",
+        "missingFactorInput": "Una pata de factor carece de σ o peso, el cierre no es evaluable",
         "noWeightSumOrFactors": "Falta weightSum o la tabla de factores; el cierre es indeterminable"
       },
       "supported": "Con datos"

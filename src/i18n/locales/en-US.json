@@ -1243,7 +1243,8 @@
         "strategyOverwrite": "Overwrite (replace all)",
         "strategyMerge": "Merge (keep existing)",
         "strategyDryRun": "Dry run (validate only)",
-        "paused": "Paused"
+        "paused": "Paused",
+        "interrupted": "Interrupted"
       },
       "pause": "Pause",
       "pauseFailed": "Pause failed",
@@ -15927,10 +15928,12 @@
         "serenity_needs_week_or_longer_realization": "By design: bottleneck evidence needs a week-or-longer horizon",
         "oversold_rebound_needs_at_least_mid_horizon": "By design: oversold rebound needs at least a mid-term horizon",
         "oversold_rebound_not_applied_to_long_horizon": "By design: oversold rebound is not applied to the long-term horizon",
+        "trend_momentum_not_a_long_thesis": "By design: trend-following is short-horizon momentum and does not issue long-horizon picks",
         "cell_not_in_matrix": "Cell missing from the contract table (possibly an implementation gap, not by design)"
       },
       "matrixMisfit": {
-        "valuation_needs_weeks_to_realize_kept_by_user_decision": "Known mismatch: valuation needs weeks to realize; kept by user decision"
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "Known mismatch: valuation needs weeks to realize; kept by user decision",
+        "capital_evidence_is_daily_snapshot_declared_misfit": "Known misfit: capital-flow evidence is a daily snapshot (north-bound halted); long-horizon realization unverified — kept by decision"
       },
       "loopUncalibratedSamples": "Loop not calibrated: insufficient samples",
       "loopUncalibratedIc": "Loop not calibrated: IC unmeasurable",
@@ -17002,6 +17005,8 @@
       "calibrateApplyDone": "Optimal parameters applied to template",
       "calibrateRefreshCount": "Based on {{total}} reflections",
       "calibrateParsedCount": "Parsed {{parsed}} valid suggestions",
+      "calibrateStructuralCount": "{{count}} reflection(s) this round were judged structural (L2 formula / L3 prompt) and kept out of the parameter grid — handle them item by item",
+      "calibrateTierUnlabelledCount": "{{count}} reflection(s) declare no remediation tier (that does not mean they are parameter-tier)",
       "trigger": {
         "low_quality": "Quality score {{score}} below threshold {{threshold}} for {{count}} consecutive times",
         "poor_signal_accuracy": "Signal accuracy score {{score}}, optimize signal strategy",
@@ -17072,6 +17077,12 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "This horizon ({{horizon}}) failed to scan in this round: {{reason}}; other horizons are unaffected",
       "bannerPoolFallbackOnly": "All {{fallback}} candidates came from the built-in sample pool; no hot-stock or industry-leader ranking was retrieved, so the result does not reflect the market's actual leaders.",
+      "bannerGateBlocked": "Long-horizon gate blocked {{count}} candidates (first loss / two-period decline / sell verdict within 30 days)",
+      "gateReason": {
+        "firstLoss": "First loss: latest parent net profit ≤ 0",
+        "twoPeriodDecline": "Net profit declined YoY for two consecutive periods",
+        "analysisVeto": "Analysis {{period}} verdict: \"{{action}}\" (within 30 days)"
+      },
       "empty": "No recommendation data",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",
@@ -17098,7 +17109,7 @@
         "target": "Target Price",
         "position": "Suggested Position",
         "holding": "Holding Days",
-        "confidence": "Confidence"
+        "confidence": "Evidence strength"
       },
       "styleCapital": "Capital Flow",
       "styleDisabled": "(Disabled)",
@@ -17346,6 +17357,10 @@
       "failureModeChaseUpBar": "Chasing a big up bar",
       "failureModeRegimeEndorsement": "Market regime endorsing a single stock",
       "failureModeReverseDcfIgnored": "Reverse DCF ignored",
+      "failureModeThemeRotationMissed": "Theme rotation absent from the evidence set",
+      "failureModeCounterTrendStrengthIgnored": "Counter-trend excess strength ignored",
+      "failureModeEntryGateShapeBlocked": "Entry gate shape blocked a correct call",
+      "failureModeCandidatePoolCoverageMissed": "Stock never entered the candidate pool",
       "horizonConfusionTitle": "Per-tier outcome cross-check (formula × LLM)",
       "horizonConfusionNotProduced": "No per-tier outcome cross-check for this record (pre-launch data, or no judged samples)",
       "horizonConfusionInsufficient": "Insufficient samples ({{judged}} judged) — the counts below are raw records, not conclusions",
@@ -17353,6 +17368,14 @@
       "horizonConfusionUndecided": "{{undecided}} with no LLM verdict (absent / window not matured / non-directional action such as hold or wait) — counted in no cell",
       "horizonConfusionAvgAgreement": "Mean 3-dim agreement for this tier {{pct}}",
       "horizonConfusionScopeNote": "Both sides share one window and one verdict function; the four cells compare direction only, not returns, and use a different denominator than the hit rate above.",
+      "tierTitle": "Remediation tier (structural backlog)",
+      "tierL1": "Parameter tier L1",
+      "tierL2": "Formula tier L2",
+      "tierL3": "Prompt tier L3",
+      "tierUnlabelled": "Tier not declared",
+      "tierUnlabelledHint": "{{count}} reflection(s) declare no remediation tier — the template omitted the field, which does not mean they are parameter-tier.",
+      "tierGridNote": "Root causes judged L2/L3 are not parameter-tier: they are excluded from the calibration grid and need item-by-item handling.",
+      "tierEmpty": "No structural backlog items (no reflection judged L2/L3)",
       "failureModeOther": "Other"
     },
     "row": {
@@ -18272,6 +18295,7 @@
       "weight": "w",
       "signal": "signal value",
       "absenceUndeclared": "Absence undeclared",
+      "expectedButIdle": "Expected but excluded",
       "metaLeg": "meta",
       "upstream": {
         "present": "Present",
@@ -18288,6 +18312,10 @@
       },
       "sigma": {
         "consistent": "σ consistent",
+        "sameSourceCopy": "Same-source replay",
+        "sameSourceCopyHint": "Basis and σ are two persisted copies of the same script variable; the delta bound equals the sum of both rounding errors by construction ⇒ this match is always true and only proves neither copy was edited alone",
+        "inputMissing": "σ missing",
+        "inputMissingHint": "This leg's sigma field is missing or mistyped ⇒ it is not 0, and closure cannot be judged",
         "inconsistent": "σ mismatch",
         "noBasis": "No basis"
       },
@@ -18297,11 +18325,13 @@
       },
       "closure": {
         "closed": "Closed",
+        "coverage": "coverage",
         "broken": "Not closed",
         "notComputable": "Undetermined"
       },
       "closureReason": {
         "decisionDegraded": "No decision was produced this round, so closure cannot be determined",
+        "missingFactorInput": "A factor leg is missing its σ or weight field, so closure cannot be judged",
         "noWeightSumOrFactors": "weightSum or the factor table is missing, so closure cannot be determined"
       },
       "supported": "With Data"

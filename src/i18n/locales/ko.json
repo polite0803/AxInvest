@@ -1243,7 +1243,8 @@
         "strategyOverwrite": "덮어쓰기 (모두 교체)",
         "strategyMerge": "병합 (기존 유지)",
         "strategyDryRun": "시험 실행 (검증만)",
-        "paused": "일시정지됨"
+        "paused": "일시정지됨",
+        "interrupted": "중단됨"
       },
       "pause": "일시정지",
       "pauseFailed": "일시정지 실패",
@@ -15708,10 +15709,12 @@
         "serenity_needs_week_or_longer_realization": "설계상 제외: 병목 근거는 주 단위 이상 실현 필요",
         "oversold_rebound_needs_at_least_mid_horizon": "설계상 제외: 과매도 반등은 최소 중기 실현 필요",
         "oversold_rebound_not_applied_to_long_horizon": "설계상 제외: 과매도 반등은 장기에 적용하지 않음",
+        "trend_momentum_not_a_long_thesis": "설계상 제외: 추세 추종은 단기 모멘텀이며 장기에는 출표하지 않음",
         "cell_not_in_matrix": "계약 표에 이 셀이 없음(설계가 아니라 구현 누락일 수 있음)"
       },
       "matrixMisfit": {
-        "valuation_needs_weeks_to_realize_kept_by_user_decision": "알려진 불일치: 밸류에이션 실현엔 수 주, 결정에 따라 유지"
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "알려진 불일치: 밸류에이션 실현엔 수 주, 결정에 따라 유지",
+        "capital_evidence_is_daily_snapshot_declared_misfit": "알려진 부정합: 자금 에비던스는 일간 스냅샷(북향 중단)으로 장기 실현 미검증 — 결정에 따라 출표 유지"
       },
       "loopUncalibratedSamples": "루프 미보정: 표본 부족",
       "loopUncalibratedIc": "루프 미보정: IC로 강도를 측정할 수 없음",
@@ -16759,6 +16762,8 @@
       "calibrateApplyDone": "템플릿에 최적 파라미터 적용됨",
       "calibrateRefreshCount": "{{total}}개 반성 기반",
       "calibrateParsedCount": "{{parsed}}개 유효 제안 파싱됨",
+      "calibrateStructuralCount": "이번 라운드에서 {{count}}건의 회고가 구조 계열(L2 수식 / L3 프롬프트)로 판정돼 보정 그리드에서 제외됐습니다. 항목별로 처리하세요",
+      "calibrateTierUnlabelledCount": "{{count}}건은 계층 미선언입니다 (파라미터 계층이라는 뜻 아님)",
       "trigger": {
         "low_quality": "Quality score {{score}} below threshold {{threshold}} for {{count}} consecutive times",
         "poor_signal_accuracy": "Signal accuracy score {{score}}, optimize signal strategy",
@@ -16832,7 +16837,7 @@
         "target": "Target Price",
         "position": "Suggested Position",
         "holding": "Holding Days",
-        "confidence": "Confidence"
+        "confidence": "근거 강도"
       },
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
@@ -16866,6 +16871,12 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "이번 라운드에서 이 기간({{horizon}}) 스캔에 실패했습니다: {{reason}}; 다른 기간은 영향을 받지 않습니다",
       "bannerPoolFallbackOnly": "후보 {{fallback}}개가 모두 내장 샘플 풀에서 왔습니다. 인기 종목/업종 리더 랭킹을 가져오지 못해 결과가 시장의 실제 인기 종목을 반영하지 않습니다.",
+      "bannerGateBlocked": "장기 게이트가 {{count}} 종목 차단 (첫 적자/2기 연속 감소/30일 내 매도 판정)",
+      "gateReason": {
+        "firstLoss": "첫 적자: 최근 지배기업 순이익 ≤ 0",
+        "twoPeriodDecline": "순이익 2기 연속 전년 대비 하락",
+        "analysisVeto": "분석 {{period}} 판정 \"{{action}}\" (30일 내)"
+      },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "lastAnalysis": "Last Analysis",
@@ -17225,6 +17236,10 @@
       "failureModeChaseUpBar": "대양봉 추격 매수",
       "failureModeRegimeEndorsement": "시장 상황으로 개별 종목 옹호",
       "failureModeReverseDcfIgnored": "역방향 DCF 무시",
+      "failureModeThemeRotationMissed": "테마 로테이션이 근거에 포함되지 않음",
+      "failureModeCounterTrendStrengthIgnored": "역추세 초과 강세가 무시됨",
+      "failureModeEntryGateShapeBlocked": "진입 조건 형식이 올바른 판단을 막음",
+      "failureModeCandidatePoolCoverageMissed": "종목이 후보 풀에 들어가지 못함",
       "horizonConfusionTitle": "등급별 결과 대조 (수식 × LLM)",
       "horizonConfusionNotProduced": "이 기록에는 등급별 결과 대조가 없습니다 (통계 도입 이전 데이터이거나 판정 가능한 표본이 없음)",
       "horizonConfusionInsufficient": "표본 부족 (판정 {{judged}}건) — 아래 수치는 원시 기록이며 결론이 아닙니다",
@@ -17232,6 +17247,14 @@
       "horizonConfusionUndecided": "LLM 판정 불가 {{undecided}}건 (누락 / 창 미도래 / 관망·보유 같은 비방향 동작) — 어느 칸에도 세지 않습니다",
       "horizonConfusionAvgAgreement": "이 등급의 3차원 일치율 평균 {{pct}}",
       "horizonConfusionScopeNote": "양측은 같은 창과 같은 판정 함수를 씁니다. 네 칸은 방향의 정오만 비교하며 수익률은 포함하지 않고, 위 적중률과 분모가 다릅니다.",
+      "tierTitle": "적용 계층 (구조 항목 대기 목록)",
+      "tierL1": "파라미터 계층 L1",
+      "tierL2": "수식 계층 L2",
+      "tierL3": "프롬프트 계층 L3",
+      "tierUnlabelled": "계층 미선언",
+      "tierUnlabelledHint": "{{count}}건의 회고에 계층이 없습니다 — 필드가 생성되지 않은 것이지 파라미터 계층이라는 뜻이 아닙니다.",
+      "tierGridNote": "L2/L3 원인은 파라미터 계층이 아닙니다. 보정 그리드에서 제외됐으며 항목별로 처리해야 합니다.",
+      "tierEmpty": "대기 중인 구조 항목이 없습니다 (L2/L3 회고 없음)",
       "failureModeOther": "기타"
     },
     "portfolioMonitor": {
@@ -18054,6 +18077,7 @@
       "weight": "가중치",
       "signal": "신호",
       "absenceUndeclared": "결손 미신고",
+      "expectedButIdle": "참여 대상이나 제외됨",
       "metaLeg": "메타 제약",
       "upstream": {
         "present": "상류 존재",
@@ -18070,6 +18094,10 @@
       },
       "sigma": {
         "consistent": "σ 일치",
+        "sameSourceCopy": "동일 출처 재계산",
+        "sameSourceCopyHint": "기준과 σ는 같은 스크립트 변수의 저장 사본 2개입니다. 차이 상한이 양측 반올림 오차의 합과 항상 같으므로 이 일치는 구조적으로 참이며, 한쪽만 변조되지 않았음만 보여줍니다",
+        "inputMissing": "σ 누락",
+        "inputMissingHint": "이 항목의 sigma 필드가 없거나 형식이 잘못됨 ⇒ 0이 아니며, 폐합을 판정할 수 없습니다",
         "inconsistent": "σ 불일치",
         "noBasis": "기준 없음"
       },
@@ -18079,11 +18107,13 @@
       },
       "closure": {
         "closed": "정합",
+        "coverage": "커버리지",
         "broken": "불정합",
         "notComputable": "판정 불가"
       },
       "closureReason": {
         "decisionDegraded": "이번에는 결정이 산출되지 않아 정합성을 판정할 수 없습니다",
+        "missingFactorInput": "일부 요인의 σ 또는 가중치 필드가 없어 폐합을 판정할 수 없습니다",
         "noWeightSumOrFactors": "weightSum 또는 팩터 표가 없어 정합성을 판정할 수 없습니다"
       },
       "supported": "데이터 있음"

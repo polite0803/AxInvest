@@ -1243,7 +1243,8 @@
         "strategyOverwrite": "上書き（すべて置換）",
         "strategyMerge": "マージ（既存を保持）",
         "strategyDryRun": "ドライラン（検証のみ）",
-        "paused": "一時停止中"
+        "paused": "一時停止中",
+        "interrupted": "中断"
       },
       "pause": "一時停止",
       "pauseFailed": "一時停止に失敗しました",
@@ -15708,10 +15709,12 @@
         "serenity_needs_week_or_longer_realization": "設計上なし：ボトルネック証拠は週単位以上の実現が必要",
         "oversold_rebound_needs_at_least_mid_horizon": "設計上なし：売られすぎ反発は最低でも中期の実現が必要",
         "oversold_rebound_not_applied_to_long_horizon": "設計上なし：売られすぎ反発は長期には適用しません",
+        "trend_momentum_not_a_long_thesis": "設計上なし：トレンドフォローは短中期のモメンタムであり、長期には出票しません",
         "cell_not_in_matrix": "契約表にこのセルが無い（設計ではなく実装漏れの可能性）"
       },
       "matrixMisfit": {
-        "valuation_needs_weeks_to_realize_kept_by_user_decision": "既知のミスマッチ：評価額は実現に数週間、決定により採用継続"
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "既知のミスマッチ：評価額は実現に数週間、決定により採用継続",
+        "capital_evidence_is_daily_snapshot_declared_misfit": "既知のミスマッチ：資金エビデンスは日次スナップショット（北向き停止）で長期の実現は未検証——裁定により出票を維持"
       },
       "loopUncalibratedSamples": "ループ未校正：サンプル不足",
       "loopUncalibratedIc": "ループ未校正：IC で強度を測定不可",
@@ -16759,6 +16762,8 @@
       "calibrateApplyDone": "已应用最优参数到模板",
       "calibrateRefreshCount": "基于 {{total}} 条反思",
       "calibrateParsedCount": "解析到 {{parsed}} 条有效建议",
+      "calibrateStructuralCount": "今回 {{count}} 件の振り返りは構造系（L2 数式 / L3 プロンプト）と判定され、補正グリッド外に出されました。1件ずつ処置してください",
+      "calibrateTierUnlabelledCount": "{{count}} 件は層が未宣言です（パラメータ層という意味ではありません）",
       "trigger": {
         "low_quality": "Quality score {{score}} below threshold {{threshold}} for {{count}} consecutive times",
         "poor_signal_accuracy": "Signal accuracy score {{score}}, optimize signal strategy",
@@ -16832,7 +16837,7 @@
         "target": "Target Price",
         "position": "Suggested Position",
         "holding": "Holding Days",
-        "confidence": "Confidence"
+        "confidence": "エビデンス強度"
       },
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
@@ -16866,6 +16871,12 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "この回はこの期間（{{horizon}}）のスキャンに失敗しました：{{reason}}。他の期間は影響を受けません",
       "bannerPoolFallbackOnly": "候補 {{fallback}} 件はすべて内蔵サンプルプール由来です。人気株／業種リーダーのランキングを取得できなかったため、結果は市場の実際の人気株を反映していません。",
+      "bannerGateBlocked": "長期ゲートが {{count}} 銘柄を遮断（初赤字/2期連続減益/30日以内の売り判定）",
+      "gateReason": {
+        "firstLoss": "初赤字：最新の親会社純利益 ≤ 0",
+        "twoPeriodDecline": "純利益が2期連続で前年割れ",
+        "analysisVeto": "分析{{period}}の判定「{{action}}」（30日以内）"
+      },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "lastAnalysis": "Last Analysis",
@@ -17225,6 +17236,10 @@
       "failureModeChaseUpBar": "大陽線の追い乗り",
       "failureModeRegimeEndorsement": "地合い判断で個別株を後押し",
       "failureModeReverseDcfIgnored": "逆方向 DCF の無視",
+      "failureModeThemeRotationMissed": "テーマローテーションが根拠に含まれていなかった",
+      "failureModeCounterTrendStrengthIgnored": "逆風下の超過リターンが無視された",
+      "failureModeEntryGateShapeBlocked": "エントリー条件の形が正しい判断を遮った",
+      "failureModeCandidatePoolCoverageMissed": "対象銘柄が候補プールに入れなかった",
       "horizonConfusionTitle": "区分別の結果照合（数式 × LLM）",
       "horizonConfusionNotProduced": "この記録には区分別の結果照合がありません（統計開始前のデータ、または判定可能なサンプルが空）",
       "horizonConfusionInsufficient": "サンプル不足（判定済み {{judged}} 件）—— 下の数値は生の記録であり、結論ではありません",
@@ -17232,6 +17247,14 @@
       "horizonConfusionUndecided": "LLM 判定不能 {{undecided}} 件（欠落 / 窓未到来 / 様子見・保有などの非方向アクション）—— どの欄にも数えません",
       "horizonConfusionAvgAgreement": "この区分の三次元一致率の平均 {{pct}}",
       "horizonConfusionScopeNote": "両側は同一の窓・同一の判定関数です。四欄は方向の正誤のみを比べ、収益の大小は含みません。上の的中率とは分母が異なります。",
+      "tierTitle": "適用層（構造系の未処置一覧）",
+      "tierL1": "パラメータ層 L1",
+      "tierL2": "数式層 L2",
+      "tierL3": "プロンプト層 L3",
+      "tierUnlabelled": "層の未宣言",
+      "tierUnlabelledHint": "{{count}} 件の振り返りは層が宣言されていません — テンプレートが当該項目を出力しなかっただけで、パラメータ層という意味ではありません。",
+      "tierGridNote": "L2/L3 と判定された原因はパラメータ層の外です。補正グリッドから除外済みで、明細を1件ずつ処理する必要があります。",
+      "tierEmpty": "構造系の未処置項目はありません（L2/L3 の振り返りなし）",
       "failureModeOther": "その他"
     },
     "portfolioMonitor": {
@@ -18054,6 +18077,7 @@
       "weight": "重み",
       "signal": "シグナル",
       "absenceUndeclared": "欠落の申告なし",
+      "expectedButIdle": "参加対象だが除外",
       "metaLeg": "メタ制約",
       "upstream": {
         "present": "上流あり",
@@ -18070,6 +18094,10 @@
       },
       "sigma": {
         "consistent": "σ 一致",
+        "sameSourceCopy": "同一ソース再計算",
+        "sameSourceCopyHint": "基準と σ は同一スクリプト変数の保存コピー2つ。差分上限は両側の丸め誤差の和に恒等 ⇒ この「一致」は構造的に常に真で、片側だけの改変がないことしか示せない",
+        "inputMissing": "σ 欠落",
+        "inputMissingHint": "この脚の sigma フィールドが欠落または型不正 ⇒ 0 ではない。閉合は判定できない",
         "inconsistent": "σ 不一致",
         "noBasis": "基準なし"
       },
@@ -18079,11 +18107,13 @@
       },
       "closure": {
         "closed": "整合",
+        "coverage": "カバレッジ",
         "broken": "不整合",
         "notComputable": "判定不能"
       },
       "closureReason": {
         "decisionDegraded": "今回は意思決定が出力されていないため、整合性は判定できません",
+        "missingFactorInput": "いずれかの因子脚の σ または重みが欠落しているため、閉合は判定できない",
         "noWeightSumOrFactors": "weightSum またはファクター表が無いため、整合性は判定できません"
       },
       "supported": "データあり"

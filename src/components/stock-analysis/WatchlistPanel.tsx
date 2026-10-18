@@ -8,6 +8,7 @@ import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { App, Button, Card, Dropdown, Empty, Input, Popconfirm, Select, Space, Spin, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 
 interface WatchlistItem {
   id: string;
@@ -50,7 +51,18 @@ export function WatchlistPanel() {
   const { t } = useTranslation();
   // 跳转统一走 useStockJump（URL 是当前股票的唯一真相源）
   const jumpToStock = useStockJump();
-  const store = useStockAnalysisStore();
+  // 窄订阅（2026-10-17）：原为 `useStockAnalysisStore()` 无 selector，等于订阅整个 store。
+  // zustand v5 无默认浅比较 ⇒ 工作流运行期间每次 set（节点 delta / 日志 / 进度 / 反思轮询）
+  // 都会连带重渲染本面板；改成 useShallow 只订阅实际用到的 5 个字段。
+  const store = useStockAnalysisStore(
+    useShallow((s) => ({
+      stockCode: s.stockCode,
+      stockName: s.stockName,
+      getStockQuote: s.getStockQuote,
+      getStockKline: s.getStockKline,
+      startAnalysis: s.startAnalysis,
+    })),
+  );
   const stockCode = store.stockCode;
   const stockName = store.stockName;
   const getStockQuote = store.getStockQuote;

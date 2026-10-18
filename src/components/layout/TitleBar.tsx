@@ -61,7 +61,10 @@ function useEvolutionStatus() {
         .catch(logIpcError("fetch_backend_status"));
     };
     fetch();
-    const id = setInterval(fetch, 60000);
+    // 60s → 300s：`get_evolution_stats` 曾在后端全量拉 1000 条轨迹（N+1 查询 2000 次，
+    // 单次实测 4.4s），每 60s 一次等于常驻 7% 的后端负载并拖慢其它 invoke。
+    // 后端已改为 COUNT(*)，这里保持 5 分钟——进化状态不是实时指标，没必要高频轮询。
+    const id = setInterval(fetch, 300000);
     return () => clearInterval(id);
   }, []);
   return status;
@@ -313,7 +316,10 @@ export function TitleBar() {
     const intervalMs = (backupSettings.intervalHours ?? 24) * 3600000;
     if (lastLocalBackup) {
       const lastTime = new Date(lastLocalBackup).getTime();
-      if (!Number.isNaN(lastTime)) {
+      // intervalMs 必须为正：`next += intervalMs` 在 intervalMs<=0 时永不推进，
+      // while 循环会把 JS 主线程打满（TitleBar 常挂载 ⇒ 整个窗口冻死，单核 100%）。
+      // 上方 WebDAV 分支已有 `interval > 0` 守卫，此处原先缺失，补上。
+      if (!Number.isNaN(lastTime) && intervalMs > 0) {
         let next = lastTime + intervalMs;
         // If overdue, advance to the next future interval
         while (next < Date.now()) {

@@ -1243,7 +1243,8 @@
         "strategyOverwrite": "覆盖（全部替换）",
         "strategyMerge": "合并（保留现有）",
         "strategyDryRun": "试运行（仅验证）",
-        "paused": "已暂停"
+        "paused": "已暂停",
+        "interrupted": "已中断"
       },
       "pause": "暂停",
       "pauseFailed": "暂停失败",
@@ -15876,10 +15877,12 @@
         "serenity_needs_week_or_longer_realization": "按设计不做：瓶颈证据需以周为单位兑现",
         "oversold_rebound_needs_at_least_mid_horizon": "按设计不做：超跌反弹需至少中线兑现",
         "oversold_rebound_not_applied_to_long_horizon": "按设计不做：超跌反弹不适用于长线档",
+        "trend_momentum_not_a_long_thesis": "按设计不做：趋势跟踪是短期动量语义，不出长线候选",
         "cell_not_in_matrix": "契约表缺该格（可能是实现漏了，不是按设计不做）"
       },
       "matrixMisfit": {
-        "valuation_needs_weeks_to_realize_kept_by_user_decision": "已知错配：估值需数周兑现，按裁定保留出票"
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "已知错配：估值需数周兑现，按裁定保留出票",
+        "capital_evidence_is_daily_snapshot_declared_misfit": "已知错配：资金证据为日级快照（北向停披），长线兑现未验证，按裁定保留出票"
       },
       "loopUncalibratedSamples": "闭环未校准：样本不足",
       "loopUncalibratedIc": "闭环未校准：IC 测不出力度",
@@ -17026,6 +17029,8 @@
       "calibrateApplyDone": "已应用最优参数到模板",
       "calibrateRefreshCount": "基于 {{total}} 条反思",
       "calibrateParsedCount": "解析到 {{parsed}} 条有效建议",
+      "calibrateStructuralCount": "本轮 {{count}} 条反思判为结构层（L2 改公式 / L3 改提示词），未进参数网格，需在待裁清单逐条处置",
+      "calibrateTierUnlabelledCount": "{{count}} 条反思未声明落地层级（这不代表它们属于参数层）",
       "tableTitle": "参数变化",
       "table": {
         "strategy": "策略",
@@ -17106,7 +17111,7 @@
         "target": "目标价",
         "position": "建议仓位",
         "holding": "持仓天数",
-        "confidence": "置信度"
+        "confidence": "证据强度"
       },
       "title": "推荐结果",
       "emptyNoCache": "暂无缓存结果，请点击刷新获取最新推荐",
@@ -17140,6 +17145,12 @@
       "styleOnlySynthetic": "该风格暂无真实命中（{{count}} 条兜底候选已隐藏）",
       "horizonFailed": "该档位（{{horizon}}）本轮扫描失败：{{reason}}；其余档位不受影响",
       "bannerPoolFallbackOnly": "本次候选池 {{fallback}} 只全部来自内置样本池，未取到热股榜/行业龙头榜——结果不代表市场真实热门。",
+      "bannerGateBlocked": "长线门已拦截 {{count}} 只候选（财报首亏/连降 或 30 天内分析判卖出/减持）",
+      "gateReason": {
+        "firstLoss": "首亏：最新一期归母净利 ≤ 0",
+        "twoPeriodDecline": "连续两期净利同比下滑",
+        "analysisVeto": "分析端{{period}}档判「{{action}}」（30 天内）"
+      },
       "backtestWinrate": "胜率",
       "bannerDegraded": "资料风格 {{styles}} 因 as-of {{date}} 截断,已以降级模式输出,请低于非降级风格的可信度处理。",
       "lastAnalysis": "上次分析",
@@ -17551,6 +17562,10 @@
       "failureModeChaseUpBar": "大阳线追涨",
       "failureModeRegimeEndorsement": "大盘情绪替个股背书",
       "failureModeReverseDcfIgnored": "反向 DCF 被无视",
+      "failureModeThemeRotationMissed": "题材轮动未进证据面",
+      "failureModeCounterTrendStrengthIgnored": "逆势抗跌超额未参与",
+      "failureModeEntryGateShapeBlocked": "门形态拦住正确方向",
+      "failureModeCandidatePoolCoverageMissed": "标的未进候选宇宙",
       "horizonConfusionTitle": "逐档结局对照（公式 × LLM）",
       "horizonConfusionNotProduced": "本记录未产出逐档结局对照（统计上线前的数据，或可判样本为空）",
       "horizonConfusionInsufficient": "样本不足（已判 {{judged}} 条）—— 下面的计数只是原始记录，不是结论",
@@ -17558,6 +17573,14 @@
       "horizonConfusionUndecided": "LLM 无从判定 {{undecided}} 条（缺席 / 窗口未满 / 观望持有这类非方向动作）—— 不计入任何一格",
       "horizonConfusionAvgAgreement": "该档三维一致率均值 {{pct}}",
       "horizonConfusionScopeNote": "两侧同一窗口、同一判定函数；四格只比方向对错，不含收益高低，也与上方命中率不同分母。",
+      "tierTitle": "落地层级（结构层待裁清单）",
+      "tierL1": "参数层 L1",
+      "tierL2": "公式层 L2",
+      "tierL3": "提示词层 L3",
+      "tierUnlabelled": "未声明层级",
+      "tierUnlabelledHint": "{{count}} 条反思没有声明落地层级 —— 模板未产出该字段，不等于它们属于参数层。",
+      "tierGridNote": "判为 L2/L3 的根因不在参数层，已排除在参数校准网格之外，需按明细逐条处置。",
+      "tierEmpty": "暂无结构层待裁项（没有反思判为 L2/L3）",
       "failureModeOther": "其它"
     },
     "portfolioMonitor": {
@@ -18274,6 +18297,7 @@
       "weight": "权重",
       "signal": "信号",
       "absenceUndeclared": "未交代缺席",
+      "expectedButIdle": "应参与未计入",
       "metaLeg": "元约束",
       "upstream": {
         "present": "在场",
@@ -18290,6 +18314,10 @@
       },
       "sigma": {
         "consistent": "σ 一致",
+        "sameSourceCopy": "同源复算",
+        "sameSourceCopyHint": "基准与 σ 出自同一脚本变量的两条落库副本，差值上限恒等于两侧舍入误差之和 ⇒ 该「一致」为构造恒真，只能证明副本未被单边篡改",
+        "inputMissing": "σ 缺失",
+        "inputMissingHint": "该腿的 sigma 字段缺失或类型不对 ⇒ 不是 0；闭合因此无从判定",
         "inconsistent": "σ 不一致",
         "noBasis": "无基准"
       },
@@ -18299,11 +18327,13 @@
       },
       "closure": {
         "closed": "闭合",
+        "coverage": "覆盖",
         "broken": "不闭合",
         "notComputable": "无从判定"
       },
       "closureReason": {
         "decisionDegraded": "本轮决策未产出，闭合无从判定",
+        "missingFactorInput": "某条因子腿的 σ 或权重字段缺失，闭合无从判定",
         "noWeightSumOrFactors": "缺 weightSum 或因子表，闭合无从判定"
       },
       "supported": "有数据"

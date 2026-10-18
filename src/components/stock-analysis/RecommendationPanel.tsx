@@ -516,6 +516,38 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
         )}
 
         {
+          /* 长线门拦截留痕（P0 财报门 / P1 分析回环，2026-10-18）：候选「变少」的
+            结构化归因——此前只有日志，用户读不到「为什么这只票没出现在长线候选里」。
+            非空才渲染；回放仅财报门生效（回环门消费侧守卫）。 */
+        }
+        {data && (data.gateBlocked?.length ?? 0) > 0 && (
+          <Alert
+            type="info"
+            showIcon
+            className="text-xs! mb-2!"
+            data-testid="reco-gate-blocked"
+            title={
+              <span className="text-xs">
+                {t("stockAnalysis.recommendation.bannerGateBlocked", {
+                  count: data.gateBlocked!.length,
+                })}
+              </span>
+            }
+            description={
+              <div className="text-[10px] leading-4">
+                {data.gateBlocked!.map((b) => (
+                  <div key={`${b.stockCode}-${b.style}`}>
+                    {b.stockName}({b.stockCode})·
+                    {t(`stockAnalysis.recommendation.style${capitalize(b.style)}`)}：
+                    {b.reasons.map((r) => gateReasonText(r, t)).join("；")}
+                  </div>
+                ))}
+              </div>
+            }
+          />
+        )}
+
+        {
           /* B15: 降级风格提示 —— 与 disabled 不同,degraded 是"可用但效果减弱",用橙色 info 区分。
             后端逐风格的 `degradedReasons` 归因文本此前从未被消费（只列风格名），
             用户读不到「为什么这个风格在这个截止日降级」。 */
@@ -756,6 +788,25 @@ function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/** 长线门拦截理由码 → 用户文案（机器可读理由码由后端 gates.rs 产出）。
+ *  `analysis_veto_<档>:<动作>` 拆参插值；未知码原样透出（不猜）。 */
+function gateReasonText(r: string, t: TFunction): string {
+  if (r === "first_loss") {
+    return t("stockAnalysis.recommendation.gateReason.firstLoss");
+  }
+  if (r === "two_period_decline") {
+    return t("stockAnalysis.recommendation.gateReason.twoPeriodDecline");
+  }
+  if (r.startsWith("analysis_veto_")) {
+    const [period, action] = r.slice("analysis_veto_".length).split(":");
+    return t("stockAnalysis.recommendation.gateReason.analysisVeto", {
+      period: t(`stockAnalysis.timeHorizon${horizonSuffix(period ?? "")}`),
+      action: action ?? "",
+    });
+  }
+  return r;
+}
+
 /** 荐股 ↔ 分析师共识交叉验证徽章
  *  - 推荐为 BUY，仅在有缓存共识时显示（避免噪音）
  *  - 共识看多 → 绿色 ✓
@@ -957,11 +1008,10 @@ function PickRow(
             {t("stockAnalysis.recommendation.row.rowStopFallback")}
           </Tag>
         )}
-        {pick.priorSource === "absent" && (
-          <Tag color="default" className="m-0 text-[10px]">
-            {t("stockAnalysis.recommendation.row.rowPriorAbsent")}
-          </Tag>
-        )}
+        {
+          /* v4（2026-10-18）：priorSource 恒为 "evidence"（证据强度语义），
+            旧的「该档无历史先验样本」分支随之死亡——档位先验不再进入个股数字。 */
+        }
         {typeof pick.confidencePercentile === "number" && (
           <span className="text-gray-400">
             {t("stockAnalysis.recommendation.row.rowPercentile", { p: pick.confidencePercentile })}

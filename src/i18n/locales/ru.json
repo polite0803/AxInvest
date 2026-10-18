@@ -1243,7 +1243,8 @@
         "strategyOverwrite": "Перезаписать (заменить все)",
         "strategyMerge": "Объединить (сохранить существующее)",
         "strategyDryRun": "Пробный запуск (только проверка)",
-        "paused": "Приостановлено"
+        "paused": "Приостановлено",
+        "interrupted": "Прервано"
       },
       "pause": "Приостановить",
       "pauseFailed": "Ошибка приостановки",
@@ -15708,10 +15709,12 @@
         "serenity_needs_week_or_longer_realization": "По замыслу: подтверждения узкого места требуют горизонта не менее недели",
         "oversold_rebound_needs_at_least_mid_horizon": "По замыслу: отскок перепроданности требует как минимум среднесрочного горизонта",
         "oversold_rebound_not_applied_to_long_horizon": "По замыслу: отскок перепроданности не применяется к долгосрочному горизонту",
+        "trend_momentum_not_a_long_thesis": "По замыслу: следование тренду — краткосрочный импульс и не даёт долгосрочных кандидатов",
         "cell_not_in_matrix": "Ячейка отсутствует в договорной таблице (возможно, пробел реализации, а не по замыслу)"
       },
       "matrixMisfit": {
-        "valuation_needs_weeks_to_realize_kept_by_user_decision": "Известное несоответствие: оценке нужны недели для реализации; оставлено по решению"
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "Известное несоответствие: оценке нужны недели для реализации; оставлено по решению",
+        "capital_evidence_is_daily_snapshot_declared_misfit": "Известное несоответствие: данные о потоках — дневной снимок (северные потоки остановлены); долгосрочная реализация не проверена — сохранено по решению"
       },
       "loopUncalibratedSamples": "Цикл не калиброван: мало выборок",
       "loopUncalibratedIc": "Цикл не калиброван: IC неизмерим",
@@ -16759,6 +16762,8 @@
       "calibrateApplyDone": "Оптимальные параметры применены к шаблону",
       "calibrateRefreshCount": "На основе {{total}} рефлексий",
       "calibrateParsedCount": "Разобрано {{parsed}} действительных рекомендаций",
+      "calibrateStructuralCount": "В этом цикле {{count}} рефлексий признаны структурными (L2 формула / L3 промпт) и исключены из сетки — разбирать по одной",
+      "calibrateTierUnlabelledCount": "{{count}} рефлексий без уровня (это не означает «уровень параметров»)",
       "trigger": {
         "low_quality": "Quality score {{score}} below threshold {{threshold}} for {{count}} consecutive times",
         "poor_signal_accuracy": "Signal accuracy score {{score}}, optimize signal strategy",
@@ -16832,7 +16837,7 @@
         "target": "Target Price",
         "position": "Suggested Position",
         "holding": "Holding Days",
-        "confidence": "Confidence"
+        "confidence": "Сила доказательств"
       },
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
@@ -16866,6 +16871,12 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "В этом запуске сканирование этого горизонта ({{horizon}}) не удалось: {{reason}}; другие горизонты не затронуты",
       "bannerPoolFallbackOnly": "Все {{fallback}} кандидатов взяты из встроенного пула выборки; рейтинги популярных акций и отраслевых лидеров не получены, поэтому результат не отражает реальных лидеров рынка.",
+      "bannerGateBlocked": "Долгосрочный фильтр отклонил {{count}} кандидатов (первый убыток / снижение 2 периода / вердикт о продаже за 30 дней)",
+      "gateReason": {
+        "firstLoss": "Первый убыток: чистая прибыль материнской компании ≤ 0",
+        "twoPeriodDecline": "Чистая прибыль снижается два периода подряд",
+        "analysisVeto": "Анализ ({{period}}): «{{action}}» (за 30 дней)"
+      },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "lastAnalysis": "Last Analysis",
@@ -17225,6 +17236,10 @@
       "failureModeChaseUpBar": "Гонка за сильной свечой",
       "failureModeRegimeEndorsement": "Режим рынка как поручитель за бумагу",
       "failureModeReverseDcfIgnored": "Обратный DCF проигнорирован",
+      "failureModeThemeRotationMissed": "Ротация тем отсутствовала в доказательствах",
+      "failureModeCounterTrendStrengthIgnored": "Сила против тренда проигнорирована",
+      "failureModeEntryGateShapeBlocked": "Форма входа заблокировала верный сигнал",
+      "failureModeCandidatePoolCoverageMissed": "Бумага не попала в список кандидатов",
       "horizonConfusionTitle": "Сверка исходов по горизонтам (формула × LLM)",
       "horizonConfusionNotProduced": "Для этой записи нет сверки исходов по горизонтам (данные до запуска статистики либо нет оценённых образцов)",
       "horizonConfusionInsufficient": "Недостаточно образцов (оценено {{judged}}) — числа ниже это сырые записи, а не выводы",
@@ -17232,6 +17247,14 @@
       "horizonConfusionUndecided": "Без вердикта LLM: {{undecided}} (отсутствие / окно не истекло / недирекциональное действие вроде ожидания или удержания) — не входит ни в одну клетку",
       "horizonConfusionAvgAgreement": "Средняя трёхмерная согласованность горизонта {{pct}}",
       "horizonConfusionScopeNote": "У обеих сторон одно окно и одна функция вердикта; четыре клетки сравнивают только направление, не доходность, и имеют другой знаменатель, чем доля попаданий выше.",
+      "tierTitle": "Уровень исправления (структурная очередь)",
+      "tierL1": "Параметры L1",
+      "tierL2": "Формула L2",
+      "tierL3": "Промпт L3",
+      "tierUnlabelled": "Уровень не указан",
+      "tierUnlabelledHint": "{{count}} рефлексий без уровня — поле не сгенерировано, это не значит «уровень параметров».",
+      "tierGridNote": "Причины L2/L3 не относятся к слою параметров: они исключены из сетки калибровки и требуют разбора по одной.",
+      "tierEmpty": "Структурных заявок нет (ни одна рефлексия не помечена L2/L3)",
       "failureModeOther": "Прочее"
     },
     "portfolioMonitor": {
@@ -18054,6 +18077,7 @@
       "weight": "вес",
       "signal": "сигнал",
       "absenceUndeclared": "Отсутствие не объявлено",
+      "expectedButIdle": "Ожидался, но не учтён",
       "metaLeg": "мета",
       "upstream": {
         "present": "Присутствует",
@@ -18070,6 +18094,10 @@
       },
       "sigma": {
         "consistent": "σ совпадает",
+        "sameSourceCopy": "Пересчёт из того же источника",
+        "sameSourceCopyHint": "База и σ — две сохранённые копии одной переменной скрипта; граница дельты по построению равна сумме двух ошибок округления ⇒ это совпадение истинно всегда и доказывает лишь то, что копии не правились по отдельности",
+        "inputMissing": "σ отсутствует",
+        "inputMissingHint": "Поле sigma этой ноги отсутствует или неверного типа ⇒ это не 0, замыкание не проверяемо",
         "inconsistent": "σ расходится",
         "noBasis": "Нет базы"
       },
@@ -18079,11 +18107,13 @@
       },
       "closure": {
         "closed": "Замкнуто",
+        "coverage": "покрытие",
         "broken": "Не замкнуто",
         "notComputable": "Не определимо"
       },
       "closureReason": {
         "decisionDegraded": "В этот раз решение не было сформировано; замкнутость не определима",
+        "missingFactorInput": "У одной из ног отсутствует σ или вес, замыкание не проверяемо",
         "noWeightSumOrFactors": "Отсутствует weightSum или таблица факторов; замкнутость не определима"
       },
       "supported": "С данными"

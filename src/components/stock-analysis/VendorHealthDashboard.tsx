@@ -184,8 +184,10 @@ export function VendorHealthDashboard() {
 
   useEffect(() => {
     load();
-    // 每 30s 自动刷新
-    const interval = setInterval(load, 30_000);
+    // 30s → 120s：单次实测 4.0~5.2s（与后端 astock L2 落盘同步，见 disk_cache.rs 注释），
+    // 30s 一次意味着每 30 秒有 4~5 秒在排队。vendor 健康状态变化尺度是分钟级，
+    // 降到 2 分钟即可，顺带把「面板可见时才刷新」留给后续优化。
+    const interval = setInterval(load, 120_000);
     return () => clearInterval(interval);
   }, [load]);
 

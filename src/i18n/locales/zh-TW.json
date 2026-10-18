@@ -1243,7 +1243,8 @@
         "strategyOverwrite": "覆寫（全部取代）",
         "strategyMerge": "合併（保留現有）",
         "strategyDryRun": "試執行（僅驗證）",
-        "paused": "已暫停"
+        "paused": "已暫停",
+        "interrupted": "已中斷"
       },
       "pause": "暫停",
       "pauseFailed": "暫停失敗",
@@ -15802,10 +15803,12 @@
         "serenity_needs_week_or_longer_realization": "按設計不做：瓶頸證據需以周為單位兌現",
         "oversold_rebound_needs_at_least_mid_horizon": "按設計不做：超跌反彈需至少中線兌現",
         "oversold_rebound_not_applied_to_long_horizon": "按設計不做：超跌反彈不適用於長線檔",
+        "trend_momentum_not_a_long_thesis": "按設計不做：趨勢跟蹤是短期動量語義，不出長線候選",
         "cell_not_in_matrix": "契約表缺該格（可能是實作漏了，不是按設計不做）"
       },
       "matrixMisfit": {
-        "valuation_needs_weeks_to_realize_kept_by_user_decision": "已知錯配：估值需數周兌現，按裁定保留出票"
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "已知錯配：估值需數周兌現，按裁定保留出票",
+        "capital_evidence_is_daily_snapshot_declared_misfit": "已知錯配：資金證據為日級快照（北向停披），長線兌現未驗證，按裁定保留出票"
       },
       "loopUncalibratedSamples": "迴圈未校正：樣本不足",
       "loopUncalibratedIc": "迴圈未校正：IC 無法度量力度",
@@ -16983,6 +16986,8 @@
       "calibrateApplyDone": "已應用最優參數到模板",
       "calibrateRefreshCount": "基於 {{total}} 條反思",
       "calibrateParsedCount": "解析到 {{parsed}} 條有效建議",
+      "calibrateStructuralCount": "本輪 {{count}} 條反思判為結構層（L2 改公式 / L3 改提示詞），未進參數網格，需在待裁清單逐條處置",
+      "calibrateTierUnlabelledCount": "{{count}} 條反思未聲明落地層級（這不代表它們屬於參數層）",
       "trigger": {
         "low_quality": "品質分 {{score}} 連續 {{count}} 次低於閾值 {{threshold}}",
         "poor_signal_accuracy": "訊號準確性得分 {{score}}，優化訊號策略",
@@ -17056,7 +17061,7 @@
         "target": "目标价",
         "position": "建议仓位",
         "holding": "持仓天数",
-        "confidence": "置信度"
+        "confidence": "證據強度"
       },
       "title": "推荐结果",
       "emptyNoCache": "暂无缓存结果，请点击刷新获取最新推荐",
@@ -17090,6 +17095,12 @@
       "styleOnlySynthetic": "該風格暫無真實命中（{{count}} 條兜底候選已隱藏）",
       "horizonFailed": "該檔位（{{horizon}}）本輪掃描失敗：{{reason}}；其餘檔位不受影響",
       "bannerPoolFallbackOnly": "本次候選池 {{fallback}} 只全部來自內建樣本池，未取到熱股榜／行業龍頭榜——結果不代表市場真實熱門。",
+      "bannerGateBlocked": "長線門已攔截 {{count}} 只候選（財報首虧/連降 或 30 天內分析判賣出/減持）",
+      "gateReason": {
+        "firstLoss": "首虧：最新一期歸母淨利 ≤ 0",
+        "twoPeriodDecline": "連續兩期淨利同比下滑",
+        "analysisVeto": "分析端{{period}}檔判「{{action}}」（30 天內）"
+      },
       "backtestWinrate": "胜率",
       "bannerDegraded": "资料风格 {{styles}} 因 as-of {{date}} 截断,已以降级模式输出,请低于非降级风格的可信度处理。",
       "styleSerenity": "瓶颈掘金",
@@ -17449,6 +17460,10 @@
       "failureModeChaseUpBar": "大陽線追漲",
       "failureModeRegimeEndorsement": "大盤情緒替個股背書",
       "failureModeReverseDcfIgnored": "反向 DCF 被無視",
+      "failureModeThemeRotationMissed": "題材輪動未進證據面",
+      "failureModeCounterTrendStrengthIgnored": "逆勢抗跌超額未參與",
+      "failureModeEntryGateShapeBlocked": "門形態攔住正確方向",
+      "failureModeCandidatePoolCoverageMissed": "標的未進候選宇宙",
       "horizonConfusionTitle": "逐檔結局對照（公式 × LLM）",
       "horizonConfusionNotProduced": "本紀錄未產出逐檔結局對照（統計上線前的資料，或可判樣本為空）",
       "horizonConfusionInsufficient": "樣本不足（已判 {{judged}} 條）—— 下方計數僅為原始紀錄，不是結論",
@@ -17456,6 +17471,14 @@
       "horizonConfusionUndecided": "LLM 無從判定 {{undecided}} 條（缺席 / 窗口未滿 / 觀望持有這類非方向動作）—— 不計入任何一格",
       "horizonConfusionAvgAgreement": "該檔三維一致率均值 {{pct}}",
       "horizonConfusionScopeNote": "兩側同一窗口、同一判定函式；四格只比方向對錯，不含收益高低，也與上方命中率不同分母。",
+      "tierTitle": "落地層級（結構層待裁清單）",
+      "tierL1": "參數層 L1",
+      "tierL2": "公式層 L2",
+      "tierL3": "提示詞層 L3",
+      "tierUnlabelled": "未聲明層級",
+      "tierUnlabelledHint": "{{count}} 條反思未聲明落地層級 —— 模板未產出該欄位，不代表它們屬於參數層。",
+      "tierGridNote": "判為 L2/L3 的根因不在參數層，已排除在參數校準網格之外，需依明細逐條處置。",
+      "tierEmpty": "暫無結構層待裁項（沒有反思判為 L2/L3）",
       "failureModeOther": "其它"
     },
     "portfolioMonitor": {
@@ -18278,6 +18301,7 @@
       "weight": "權重",
       "signal": "訊號",
       "absenceUndeclared": "未交代缺席",
+      "expectedButIdle": "應參與未計入",
       "metaLeg": "元約束",
       "upstream": {
         "present": "在場",
@@ -18294,6 +18318,10 @@
       },
       "sigma": {
         "consistent": "σ 一致",
+        "sameSourceCopy": "同源複算",
+        "sameSourceCopyHint": "基準與 σ 出自同一腳本變數的兩條落庫副本，差值上限恆等於兩側捨入誤差之和 ⇒ 該「一致」為構造恆真，只能證明副本未被單邊竄改",
+        "inputMissing": "σ 缺失",
+        "inputMissingHint": "該腿的 sigma 欄位缺失或型別不對 ⇒ 不是 0；閉合因此無從判定",
         "inconsistent": "σ 不一致",
         "noBasis": "無基準"
       },
@@ -18303,11 +18331,13 @@
       },
       "closure": {
         "closed": "閉合",
+        "coverage": "覆蓋",
         "broken": "不閉合",
         "notComputable": "無從判定"
       },
       "closureReason": {
         "decisionDegraded": "本輪決策未產出，閉合無從判定",
+        "missingFactorInput": "某條因子腿的 σ 或權重欄位缺失，閉合無從判定",
         "noWeightSumOrFactors": "缺 weightSum 或因子表，閉合無從判定"
       },
       "supported": "有資料"

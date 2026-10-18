@@ -16,6 +16,9 @@ const STATUS_I18N_KEY: Record<string, string> = {
   failed: "failed",
   cancelled: "cancelled",
   partially_completed: "partiallyCompleted",
+  // 启动回收写进来的终态（`scheduler/restore.rs`）：上一进程消失、没有结论地中断。
+  // 与 `cancelled` 严格不同 —— 那是用户主动取消，二者不可互替。
+  interrupted: "interrupted",
 };
 
 const T_KEY_PREFIX = "chat.workflow.workflowStatus.";

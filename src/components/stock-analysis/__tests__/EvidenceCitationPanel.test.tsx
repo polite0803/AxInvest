@@ -17,7 +17,18 @@ vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 
-import { EvidenceCitationPanel, notCheckedReasonKey } from "../EvidenceCitationPanel";
+import {
+  type Closure,
+  closureCoverage,
+  closureLabel,
+  closureTooltip,
+  EvidenceCitationPanel,
+  fmtNum,
+  notCheckedReasonKey,
+  sigmaLabelKey,
+  sigmaTagColor,
+  sigmaTooltip,
+} from "../EvidenceCitationPanel";
 
 /** 夹具按 600406 · 2026-10-15 真记录的**形状**裁剪（腿名/角色/档位取真值）。 */
 const BASE = {
@@ -35,7 +46,7 @@ const BASE = {
   sigmaReconciledLegs: 1,
   participatingFactorLegs: 2,
   factorLegsTotal: 3,
-  closure: { state: "closed", recomputed: 0.084, stored: 0.08, tolerance: 0.0057 },
+  closure: { state: "closed", recomputed: 0.084, stored: 0.08, tolerance: 0.0057, unverifiedWeightRatio: 0.4 },
 };
 
 function leg(over: Record<string, unknown>) {
@@ -61,8 +72,16 @@ const FACTOR_LEGS = [
     sigma: -0.174,
     weight: 0.15,
     owner: null,
+    // ⚠ 刻意构造成**独立上游**基准：真记录里 f4 的基准与 σ 同变量（sameVariableCopy），
+    //   但本用例需要一条「真的核对过」的绿腿来和下面 f11 的同源副本做区分对照。
     participates: true,
-    reconcile: { state: "consistent", delta: 0.004, tolerance: 0.0055, basis: "/risk_quant/f4_adjusted" },
+    reconcile: {
+      state: "consistent",
+      delta: 0.004,
+      tolerance: 0.0055,
+      basis: "/risk_quant/f4_adjusted",
+      source: "independentUpstream",
+    },
   },
   {
     legId: "f1",
@@ -81,6 +100,22 @@ const FACTOR_LEGS = [
     owner: "a-sector",
     participates: false,
     reconcile: { state: "noBasis", reason: "NO_PERSISTED_BASIS" },
+  },
+  {
+    // 真记录同形：基准 `/evidence/f11_pace_signal` 与 σ 都是 `f11_signal` 的落库副本
+    legId: "f11",
+    name: "pace",
+    sigma: 0.31,
+    weight: 0.052,
+    owner: "a-sentiment",
+    participates: true,
+    reconcile: {
+      state: "consistent",
+      delta: 0.0,
+      tolerance: 0.0055,
+      basis: "/evidence/f11_pace_signal",
+      source: "sameVariableCopy",
+    },
   },
 ];
 
@@ -174,10 +209,14 @@ describe("EvidenceCitationPanel 判据换新后的三态", () => {
     expect(screen.queryByText("stockAnalysis.evidenceCitation.upstream.silentAbsent")).toBeTruthy();
     // 「未交代」只在「不参与且无缺席声明」的那一腿上出现 ⇒ 恰好一条
     expect(screen.getAllByText("stockAnalysis.evidenceCitation.absenceUndeclared").length).toBe(1);
-    // A 面：无基准与一致各自成句，闭合有读数
+    // A 面：无基准与一致各自成句，闭合带覆盖率读数
     expect(screen.getAllByText("stockAnalysis.evidenceCitation.sigma.noBasis").length).toBe(2);
+    // 「真的核对过」与「同源副本复算」必须分成两句话 —— 修前二者共用一个 `consistent` 绿标
     expect(screen.getByText("stockAnalysis.evidenceCitation.sigma.consistent")).toBeTruthy();
-    expect(screen.getByText("stockAnalysis.evidenceCitation.closure.closed")).toBeTruthy();
+    expect(screen.getByText("stockAnalysis.evidenceCitation.sigma.sameSourceCopy")).toBeTruthy();
+    // 闭合必须带覆盖率（`unverifiedWeightRatio=0.4` ⇒ 覆盖 60%），不能只说「闭合」
+    expect(screen.getByText(/evidenceCitation\.closure\.closed.*closure\.coverage 60%/))
+      .toBeTruthy();
     // 元约束腿（owner=null）不得显示空白，必须有专门文案
     expect(screen.getByText("stockAnalysis.evidenceCitation.metaLeg")).toBeTruthy();
   });
@@ -202,5 +241,154 @@ describe("EvidenceCitationPanel 判据换新后的三态", () => {
     render(<EvidenceCitationPanel analysisId="a-6" />);
     expect(await screen.findByText("stockAnalysis.evidenceCitation.noData")).toBeTruthy();
     expect(screen.queryByText("stockAnalysis.evidenceCitation.branchSection")).toBeNull();
+  });
+});
+
+describe("判据分档：同源副本 / 覆盖率 / 应参与未计入（2026-10-18 假绿修复）", () => {
+  const tk = (key: string) => key;
+
+  it("σ 标签：只有独立上游才算「一致」，同源副本单独成档且不染绿", () => {
+    const independent = {
+      state: "consistent",
+      delta: 0,
+      tolerance: 0.0055,
+      basis: "/result.t-scoring/content/totalScore",
+      source: "independentUpstream",
+    } as const;
+    const copy = {
+      state: "consistent",
+      delta: 0,
+      tolerance: 0.0055,
+      basis: "/evidence/f11_pace_signal",
+      source: "sameVariableCopy",
+    } as const;
+
+    expect(sigmaLabelKey(independent)).toBe("consistent");
+    expect(sigmaLabelKey(copy)).toBe("sameSourceCopy");
+    expect(sigmaLabelKey({ state: "inconsistent", delta: 1, tolerance: 0.0055, basis: "b" }))
+      .toBe("inconsistent");
+    expect(sigmaLabelKey({ state: "noBasis", reason: "NO_PERSISTED_BASIS" })).toBe("noBasis");
+
+    // 负控：两档不得共用同一个颜色，否则只改文案仍看不出区别
+    expect(sigmaTagColor(independent)).toBe("green");
+    expect(sigmaTagColor(copy)).not.toBe("green");
+    // 同源副本的悬浮说明必须解释「为什么这个一致不算证据」
+    expect(sigmaTooltip(copy, tk)).toContain("sigma.sameSourceCopyHint");
+  });
+
+  it("闭合必须带覆盖率；broken / notComputable 不得凭空给百分比", () => {
+    const low: Closure = {
+      state: "closed",
+      recomputed: 0.084,
+      stored: 0.08,
+      tolerance: 0.0057,
+      unverifiedWeightRatio: 0.63,
+    };
+    expect(closureCoverage(low)).toBeCloseTo(0.37, 10);
+    expect(closureLabel(low, tk)).toBe(
+      "stockAnalysis.evidenceCitation.closure.closed · stockAnalysis.evidenceCitation.closure.coverage 37%",
+    );
+
+    const full: Closure = { ...low, unverifiedWeightRatio: 0 };
+    expect(closureCoverage(full)).toBe(1);
+
+    expect(closureCoverage({ state: "broken", recomputed: 0, stored: 0, tolerance: 0 })).toBeNull();
+    expect(closureLabel({ state: "notComputable", reason: "NO_WEIGHT_SUM_OR_FACTORS" }, tk)).toBe(
+      "stockAnalysis.evidenceCitation.closure.notComputable",
+    );
+  });
+
+  it("闭合失败时必须给出差值（修前 broken 连 tooltip 都没有）", () => {
+    const tip = closureTooltip({ state: "broken", recomputed: 0.5, stored: 0.08, tolerance: 0.0057 }, tk);
+    expect(tip).toContain("Δ=0.4200");
+    expect(tip).toContain("> tol=0.0057");
+    expect(tip).not.toContain("unverifiedWeight");
+  });
+
+  it("应参与却未计入的腿必须显式成标，否则「应参与 N / 实际参与 N-1」无法归因", async () => {
+    invokeMock.mockResolvedValue({
+      ...BASE,
+      branchLegs: [
+        leg({ factor: "earningsQuality", expectedToParticipate: true, participates: true }),
+        // 应参与、有缺席声明、但没进加权 —— 修前这一行与「正常参与」在 UI 上同形
+        leg({
+          factor: "macroRegime",
+          ownerName: "宏观分析师",
+          role: "absent",
+          weight: 0,
+          participates: false,
+          expectedToParticipate: true,
+          absenceDeclared: true,
+          upstream: { state: "declaredAbsent" },
+        }),
+        // 对照：本就不该参与的过滤腿不得挂这个标（证明它判的是 expectedToParticipate）
+        leg({
+          factor: "valuationBand",
+          ownerName: "价值投资者",
+          role: "filter",
+          weight: 0,
+          participates: false,
+          expectedToParticipate: false,
+          absenceDeclared: true,
+          upstream: { state: "present" },
+        }),
+      ],
+      factorLegs: FACTOR_LEGS,
+    });
+    render(<EvidenceCitationPanel analysisId="a-7" />);
+    expect(await screen.findByText("stockAnalysis.evidenceCitation.expectedButIdle")).toBeTruthy();
+    expect(screen.getAllByText("stockAnalysis.evidenceCitation.expectedButIdle").length).toBe(1);
+  });
+});
+
+describe("输入缺失与「真的是 0」可分（2026-10-18 去掉 unwrap_or(0.0)）", () => {
+  it("fmtNum：null 渲染成 — 而不是 0.000", () => {
+    expect(fmtNum(null)).toBe("—");
+    // 负控：显式 0 仍要显示成数字，否则「真零」会被误读成「没给」
+    expect(fmtNum(0)).toBe("0.000");
+    expect(fmtNum(0.105)).toBe("0.105");
+  });
+
+  it("σ 缺失与无基准必须分成两句（归因方向相反：缺被检对象 vs 缺参照物）", () => {
+    expect(sigmaLabelKey({ state: "inputMissing", field: "sigma" })).toBe("inputMissing");
+    expect(sigmaLabelKey({ state: "noBasis", reason: "NO_PERSISTED_BASIS" })).toBe("noBasis");
+    // 缺失比「无基准」更需要被看见，不得共用默认灰
+    expect(sigmaTagColor({ state: "inputMissing", field: "sigma" })).not.toBe("default");
+    expect(sigmaTooltip({ state: "inputMissing", field: "sigma" }, (k) => k)).toContain(
+      "sigma.inputMissingHint",
+    );
+  });
+
+  it("两面都不得把缺失值渲染成 0", async () => {
+    invokeMock.mockResolvedValue({
+      ...BASE,
+      branchLegs: [
+        leg({
+          factor: "earningsQuality",
+          weight: null,
+          signal: null,
+          participates: false,
+          expectedToParticipate: true,
+        }),
+      ],
+      factorLegs: [{
+        legId: "f4",
+        name: "risk",
+        sigma: null,
+        weight: 0.15,
+        owner: null,
+        participates: true,
+        reconcile: { state: "inputMissing", field: "sigma" },
+      }],
+      closure: { state: "notComputable", reason: "MISSING_FACTOR_INPUT" },
+    });
+    render(<EvidenceCitationPanel analysisId="a-8" />);
+
+    expect(await screen.findByText("stockAnalysis.evidenceCitation.sigma.inputMissing")).toBeTruthy();
+    // A 面：σ 缺失显示 —，权重照常有值
+    expect(screen.getByText(/σ=— w=0\.150/)).toBeTruthy();
+    // B 面：权重缺失同样显示 —，不出现 0.000
+    expect(screen.getByText(/evidenceCitation\.weight=—/)).toBeTruthy();
+    expect(screen.queryByText(/weight=0\.000/)).toBeNull();
   });
 });

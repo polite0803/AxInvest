@@ -18,7 +18,8 @@ import { checkVendorEnabled, PANEL_VENDORS } from "./vendorCheck";
 interface HotStock {
   stockCode: string;
   stockName: string;
-  changePct: number;
+  /** 涨跌幅 %；历史回溯榜不提供该字段 ⇒ null（不是 0%） */
+  changePct: number | null;
   turnoverRate: number | null;
   reasonTags: string[];
   sector: string | null;

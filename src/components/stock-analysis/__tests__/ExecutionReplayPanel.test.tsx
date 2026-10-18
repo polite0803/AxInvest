@@ -96,4 +96,17 @@ describe("ExecutionReplayPanel", () => {
     const { container } = render(<ExecutionReplayPanel />);
     await waitFor(() => expect(container.textContent).toContain("feedface"));
   });
+
+  // 启动回收会把上一进程遗留的执行行写成 `interrupted`（`scheduler/restore.rs`）。
+  // 本条只锁「该状态有译文键、且不再显示转圈的 running 图标」：`STATUS_I18N_KEY` 里
+  // 漏加 interrupted 时，`workflowStatusLabel` 会回退成后端原文 `interrupted` ⇒ 本条红。
+  it("回收写入的 interrupted 状态走译文键，不再是转圈态", async () => {
+    stubExecutions({
+      "stock-analysis": [row({ id: "aborted1-0000-0000-0000-000000000001", status: "interrupted" })],
+    });
+    const { container } = render(<ExecutionReplayPanel />);
+    await waitFor(() => expect(container.textContent).toContain("aborted1"));
+    expect(container.textContent).toContain("T(chat.workflow.workflowStatus.interrupted)");
+    expect(container.querySelector(".animate-spin")).toBeNull();
+  });
 });

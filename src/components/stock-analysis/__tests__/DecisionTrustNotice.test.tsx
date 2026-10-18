@@ -222,6 +222,21 @@ describe("DecisionTrustNotice", () => {
     expect(screen.getByText("公告数据(t-catalyst-data)")).toBeTruthy();
   });
 
+  // v163/v164 放开「单路取数失败不再连坐终审」的另一半：失败必须在这一格现身。
+  // 生产侧条目由 `decision.rs::tolerated_failure_notes` 生成（形态 `…(节点id)：原因`），
+  // 这里钉的是「该形态真能被渲染出来」，不是只钉生产侧写了字符串。
+  it("节点执行失败条目（后端 v163 起写入 data_gaps）展开后可见", async () => {
+    const note = "节点本轮执行失败(t-sentiment-data)：Vendor error from guba: 股吧 HTML 中未找到 article_list 数据";
+    render(
+      <DecisionTrustNotice
+        decision={mkDecision({ action: "WAIT", positionPct: 0, dataGaps: [note] })}
+        variant="banner"
+      />,
+    );
+    await userEvent.click(screen.getByText("查看缺口"));
+    expect(screen.getByText(note)).toBeTruthy();
+  });
+
   it("tag 形态渲染紧凑标签（简洁模式 / 工具栏用）", () => {
     render(
       <DecisionTrustNotice

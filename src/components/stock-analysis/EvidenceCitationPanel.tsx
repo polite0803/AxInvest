@@ -22,15 +22,48 @@ type UpstreamState =
   | { state: "silentAbsent" }
   | { state: "notChecked"; reason: string };
 
-/** σ 回算结果（对齐后端 `Reconcile`） */
-type Reconcile =
-  | { state: "consistent"; delta: number; tolerance: number; basis: string }
-  | { state: "inconsistent"; delta: number; tolerance: number; basis: string }
-  | { state: "noBasis"; reason: string };
+/**
+ * 基准与 σ 的关系（对齐后端 `BasisSource`）。
+ *
+ * - `independentUpstream`：基准是快照里的独立产出 ⇒ 一致 = 真的核对过
+ * - `sameVariableCopy`：基准与 σ 是同一个脚本变量的两条落库副本 ⇒ delta 上限恒等于
+ *   两侧舍入界之和，**永远一致**。它只能证明副本未被单边篡改，不能证明信号算对，
+ *   因此必须与前者区分展示（2026-10-18 前两者共用一个绿标签）。
+ */
+type BasisSource = "independentUpstream" | "sameVariableCopy";
 
-/** 全局闭合（对齐后端 `Closure`） */
-type Closure =
-  | { state: "closed"; recomputed: number; stored: number; tolerance: number }
+/** σ 回算结果（对齐后端 `Reconcile`） */
+export type Reconcile =
+  | {
+    state: "consistent";
+    delta: number;
+    tolerance: number;
+    basis: string;
+    source: BasisSource;
+  }
+  | { state: "inconsistent"; delta: number; tolerance: number; basis: string }
+  | { state: "noBasis"; reason: string }
+  /**
+   * 该腿落库的 `sigma` 字段缺失/类型不对。与 `noBasis` 严格区分：
+   * 后者缺的是**基准**，前者缺的是**被检对象**——归因正好相反。
+   */
+  | { state: "inputMissing"; field: string };
+
+/**
+ * 全局闭合（对齐后端 `Closure`）。
+ *
+ * ⚠ `closed` 只代表 `Σ(σ·w)/weightSum ≟ avgSignal` 这条算术自洽，两侧同源于一次脚本
+ * 执行 ⇒ 恒成立。`unverifiedWeightRatio` 交代「参与权重里有多少从未被独立核对」，
+ * 没有它，面板会把「63% 权重没核过」显示成纯绿。
+ */
+export type Closure =
+  | {
+    state: "closed";
+    recomputed: number;
+    stored: number;
+    tolerance: number;
+    unverifiedWeightRatio: number;
+  }
   | { state: "broken"; recomputed: number; stored: number; tolerance: number }
   | { state: "notComputable"; reason: string };
 
@@ -40,7 +73,8 @@ interface BranchLegAudit {
   ownerName: string;
   role: string;
   signal: number | null;
-  weight: number;
+  /** `null` = 字段缺失/类型不对，与「权重真的是 0」可分 */
+  weight: number | null;
   participates: boolean;
   expectedToParticipate: boolean;
   upstream: UpstreamState;
@@ -50,8 +84,9 @@ interface BranchLegAudit {
 interface FactorLegAudit {
   legId: string;
   name: string;
-  sigma: number;
-  weight: number;
+  /** `null` = 字段缺失，**不是 0**（后端已不再 `unwrap_or(0.0)`） */
+  sigma: number | null;
+  weight: number | null;
   owner: string | null;
   participates: boolean;
   reconcile: Reconcile;
@@ -114,7 +149,16 @@ const NO_BASIS_REASON: Record<string, string> = {
 const CLOSURE_REASON: Record<string, string> = {
   DECISION_DEGRADED: "decisionDegraded",
   NO_WEIGHT_SUM_OR_FACTORS: "noWeightSumOrFactors",
+  MISSING_FACTOR_INPUT: "missingFactorInput",
 };
+
+/**
+ * 数值渲染。`null` **不得**显示成 0 —— 0 是「算出来是零」，`null` 是「根本没给」，
+ * 二者在面板上同形正是这条链路上一版假绿的成因之一。
+ */
+export function fmtNum(v: number | null, digits = 3): string {
+  return v === null ? "—" : v.toFixed(digits);
+}
 
 const UPSTREAM_TAG_COLOR: Record<UpstreamState["state"], string> = {
   present: "green",
@@ -123,8 +167,90 @@ const UPSTREAM_TAG_COLOR: Record<UpstreamState["state"], string> = {
   notChecked: "default",
 };
 
+/**
+ * σ 标签的文案键。
+ *
+ * `consistent` 与 `sameSourceCopy` **必须分成两句话**：后者的基准与 σ 是同一脚本变量的
+ * 两条落库副本，delta 上限恒等于两侧舍入界之和 ⇒ 它永远一致，不构成「信号被核对过」的
+ * 证据。合并成一句绿标签就是 2026-10-18 截图里 `6/12` 那个假读数的来源。
+ */
+export function sigmaLabelKey(
+  r: Reconcile,
+): "consistent" | "sameSourceCopy" | "inconsistent" | "noBasis" | "inputMissing" {
+  if (r.state === "consistent") {
+    return r.source === "sameVariableCopy" ? "sameSourceCopy" : "consistent";
+  }
+  if (r.state === "inputMissing") {
+    return "inputMissing";
+  }
+  return r.state === "inconsistent" ? "inconsistent" : "noBasis";
+}
+
+/** 同源副本不得用与「独立核对」相同的绿色；σ 缺失比「不一致」更靠上游，单独一色。 */
+export function sigmaTagColor(r: Reconcile): string {
+  if (r.state === "consistent") {
+    return r.source === "sameVariableCopy" ? "gold" : "green";
+  }
+  if (r.state === "inputMissing") {
+    return "volcano";
+  }
+  return r.state === "inconsistent" ? "red" : "default";
+}
+
+/** σ 腿的悬浮说明：先交代基准关系，再给读数。 */
+export function sigmaTooltip(r: Reconcile, t: (key: string) => string): string {
+  const prefix = "stockAnalysis.evidenceCitation";
+  if (r.state === "inputMissing") {
+    return t(`${prefix}.sigma.inputMissingHint`);
+  }
+  if (r.state === "noBasis") {
+    return t(`${prefix}.noBasis.${NO_BASIS_REASON[r.reason] ?? "noPersistedBasis"}`);
+  }
+  const relation = r.state === "consistent" && r.source === "sameVariableCopy"
+    ? t(`${prefix}.sigma.sameSourceCopyHint`)
+    : "";
+  const delta = `Δ=${r.delta.toFixed(4)} ${r.delta <= r.tolerance ? "≤" : ">"} ${r.tolerance.toFixed(4)}`;
+  return [r.basis, delta, relation].filter(Boolean).join("\n");
+}
+
+/** 闭合覆盖率：参与权重里「经过独立核对」的比例；`notComputable` / `broken` 无覆盖率可言。 */
+export function closureCoverage(c: Closure): number | null {
+  return c.state === "closed" ? 1 - c.unverifiedWeightRatio : null;
+}
+
+/**
+ * 闭合标签。`closed` 必须**带上覆盖率**——它只证明算术自洽，同源两侧恒成立；
+ * 只说「闭合」会把「63% 权重没核过」读成「证据链已对账」。
+ */
+export function closureLabel(c: Closure, t: (key: string) => string): string {
+  const prefix = "stockAnalysis.evidenceCitation";
+  const base = t(`${prefix}.closure.${c.state === "notComputable" ? "notComputable" : c.state}`);
+  const coverage = closureCoverage(c);
+  if (coverage === null) {
+    return base;
+  }
+  return `${base} · ${t(`${prefix}.closure.coverage`)} ${Math.round(coverage * 100)}%`;
+}
+
+/** 闭合的悬浮读数：`broken` 时也必须给出差值，否则红了也不知道差多少。 */
+export function closureTooltip(c: Closure, t: (key: string) => string): string {
+  const prefix = "stockAnalysis.evidenceCitation";
+  if (c.state === "notComputable") {
+    return t(`${prefix}.closureReason.${CLOSURE_REASON[c.reason] ?? "noWeightSumOrFactors"}`);
+  }
+  const delta = Math.abs(c.recomputed - c.stored);
+  const base = `Σ(σ·w)/W=${c.recomputed.toFixed(4)} stored=${c.stored.toFixed(4)} `
+    + `Δ=${delta.toFixed(4)} ${delta <= c.tolerance ? "≤" : ">"} tol=${c.tolerance.toFixed(4)}`;
+  return c.state === "closed"
+    ? `${base} unverifiedWeight=${(c.unverifiedWeightRatio * 100).toFixed(0)}%`
+    : base;
+}
+
 export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
   const { t } = useTranslation();
+  // 辅助函数只要「键 → 文案」这一层能力：`TFunction` 的返回类型含 object，
+  // 直接传给 `(key: string) => string` 不兼容，故在此显式收窄一次。
+  const tk = (key: string) => String(t(key));
   const [report, setReport] = useState<EvidenceAuditReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -196,6 +322,10 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
     );
   }
 
+  // 覆盖率只在 `closed` 时存在。低于 50% ⇒ 大部分参与权重从未被独立核对，
+  // 「闭合」不得染成与「核对通过」同一种绿。
+  const closureCov = closureCoverage(report.closure);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -242,11 +372,20 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
                 <span className="font-mono text-gray-300 shrink-0">{leg.factor}</span>
                 <Tag className="text-[10px] leading-none px-1 py-0 shrink-0">{leg.ownerName}</Tag>
                 <span className="text-gray-500 font-mono text-[11px]">
-                  {t("stockAnalysis.evidenceCitation.weight")}={leg.weight.toFixed(3)}
+                  {t("stockAnalysis.evidenceCitation.weight")}={fmtNum(leg.weight)}
                   {leg.signal !== null
                     ? ` ${t("stockAnalysis.evidenceCitation.signal")}=${leg.signal.toFixed(3)}`
                     : ""}
                 </span>
+                {
+                  /* 应参与却未计入 —— 后端 `expectedToParticipate` 早已算好，旧前端零消费，
+                    「应参与 3 / 实际参与 2」的差值因此在 UI 上无法归因（2026-10-18 修）。 */
+                }
+                {leg.expectedToParticipate && !leg.participates && (
+                  <Tag color="gold" className="text-[10px] leading-none px-1 py-0 shrink-0">
+                    {t("stockAnalysis.evidenceCitation.expectedButIdle")}
+                  </Tag>
+                )}
                 {!leg.participates && !leg.absenceDeclared && (
                   <Tag color="orange" className="text-[10px] leading-none px-1 py-0 shrink-0">
                     {t("stockAnalysis.evidenceCitation.absenceUndeclared")}
@@ -279,31 +418,29 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
             {t("stockAnalysis.evidenceCitation.factorSection")}
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-400">
+            {
+              /* 分子 = 参与且经独立上游核对；分母 = 参与腿数。两侧同口径，
+                读者不会把「6/12 与 9/12」误读成「9 条参与里 6 条可核」。 */
+            }
             <span className="text-green-400/80">
               {t("stockAnalysis.evidenceCitation.sigmaReconciled")}: {report.sigmaReconciledLegs}/
-              {report.factorLegsTotal}
+              {report.participatingFactorLegs}
             </span>
             <span>
               {t("stockAnalysis.evidenceCitation.participatingLegs")}:{" "}
               {report.participatingFactorLegs}/{report.factorLegsTotal}
             </span>
-            <Tooltip
-              title={report.closure.state === "notComputable"
-                ? t(
-                  `stockAnalysis.evidenceCitation.closureReason.${
-                    CLOSURE_REASON[report.closure.reason] ?? "noWeightSumOrFactors"
-                  }`,
-                )
-                : undefined}
-            >
+            <Tooltip title={closureTooltip(report.closure, tk)}>
               <span
                 className={report.closure.state === "closed"
-                  ? "text-green-400/80"
+                  ? closureCov !== null && closureCov >= 0.5
+                    ? "text-green-400/80"
+                    : "text-amber-400/80"
                   : report.closure.state === "broken"
                   ? "text-red-400/80"
                   : "text-gray-400"}
               >
-                {t(`stockAnalysis.evidenceCitation.closure.${report.closure.state}`)}
+                {closureLabel(report.closure, tk)}
               </span>
             </Tooltip>
           </div>
@@ -320,32 +457,14 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
                   {leg.owner ?? t("stockAnalysis.evidenceCitation.metaLeg")}
                 </Tag>
                 <span className="text-gray-500 font-mono text-[11px]">
-                  σ={leg.sigma} w={leg.weight}
+                  σ={fmtNum(leg.sigma)} w={fmtNum(leg.weight)}
                 </span>
-                <Tooltip
-                  title={leg.reconcile.state === "noBasis"
-                    ? t(
-                      `stockAnalysis.evidenceCitation.noBasis.${
-                        NO_BASIS_REASON[leg.reconcile.reason] ?? "noPersistedBasis"
-                      }`,
-                    )
-                    : leg.reconcile.state !== "inconsistent"
-                    ? `${leg.reconcile.basis} Δ=${leg.reconcile.delta.toFixed(4)} ≤ ${
-                      leg.reconcile.tolerance.toFixed(4)
-                    }`
-                    : `${leg.reconcile.basis} Δ=${leg.reconcile.delta.toFixed(4)} > ${
-                      leg.reconcile.tolerance.toFixed(4)
-                    }`}
-                >
+                <Tooltip title={sigmaTooltip(leg.reconcile, tk)}>
                   <Tag
-                    color={leg.reconcile.state === "consistent"
-                      ? "green"
-                      : leg.reconcile.state === "inconsistent"
-                      ? "red"
-                      : "default"}
+                    color={sigmaTagColor(leg.reconcile)}
                     className="text-[10px] leading-none px-1 py-0 shrink-0"
                   >
-                    {t(`stockAnalysis.evidenceCitation.sigma.${leg.reconcile.state}`)}
+                    {t(`stockAnalysis.evidenceCitation.sigma.${sigmaLabelKey(leg.reconcile)}`)}
                   </Tag>
                 </Tooltip>
               </div>

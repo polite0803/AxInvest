@@ -10,6 +10,7 @@ import type {
   HitrateStats,
   HorizonResultsMap,
   ReflectionFeedbackResult,
+  TierBoard,
 } from "@/types";
 import {
   Button,
@@ -43,7 +44,9 @@ import { HorizonConfusionBoard } from "./HorizonConfusionBoard";
 
 const { Text } = Typography;
 
-interface ReflectionRow {
+// 导出理由：`buildAiAssistPrompt` / `parseActionsFromAccumulated` 是本面板的结构层出口，
+// 两者各有一条回归测试（层级缺席不得冒充 L1、action 拼写两侧都得认），夹具需要这个类型。
+export interface ReflectionRow {
   id: string;
   stockCode: string;
   stockName: string;
@@ -904,6 +907,18 @@ export function ReflectionPanel() {
       </Card>
 
       {
+        /* 落地层级看板（阶段 3 / 决-3）：L2/L3 不进参数网格，这里给它们一个可见的出口。
+          与上面的失败模式看板**不同计数域**（一个答「错成什么样」，一个答「要改哪一处」）。 */
+      }
+      <Card
+        title={t("stockAnalysis.reflection.tierTitle")}
+        size="small"
+        style={{ marginBottom: 16 }}
+      >
+        <TierSummary board={hitrate?.tiers ?? EMPTY_TIER_BOARD} t={t} />
+      </Card>
+
+      {
         /* 逐档结局 2×2（B4）：公式判对否 × LLM 判对否。与上面的命中率**不同分母**
           （那里只统计公式侧），故独立成卡；样本不足时四格只是计数、不是结论。 */
       }
@@ -1259,6 +1274,12 @@ const FAILURE_MODE_LABEL_KEYS: Record<string, string> = {
   chase_big_up_bar: "failureModeChaseUpBar",
   market_regime_endorsement: "failureModeRegimeEndorsement",
   reverse_dcf_ignored: "failureModeReverseDcfIgnored",
+  // 2026-10-19 扩词表（本例 002696 误判实证）：这四类此前只能落 `other`，
+  // 而 `other` 单独占已标注样本 23/32 ⇒ 看板等于没有归因。
+  theme_rotation_missed: "failureModeThemeRotationMissed",
+  counter_trend_strength_ignored: "failureModeCounterTrendStrengthIgnored",
+  entry_gate_shape_blocked: "failureModeEntryGateShapeBlocked",
+  candidate_pool_coverage_missed: "failureModeCandidatePoolCoverageMissed",
   other: "failureModeOther",
 };
 
@@ -1336,6 +1357,81 @@ export function FailureModesSummary({
           })}
         </Text>
       )}
+    </>
+  );
+}
+
+export const EMPTY_TIER_BOARD: TierBoard = {
+  totalRows: 0,
+  l1: 0,
+  l2: 0,
+  l3: 0,
+  unlabelled: 0,
+  structuralRows: [],
+};
+
+/**
+ * 落地层级看板（阶段 3 / 决-3）。四类计数**互不折算**：
+ * `unlabelled`（反思没判层级，含本列引入前的存量行）绝不折进 L1 ——
+ * 面板此前把缺省写死 "L1"，于是现网 79/80 条「没判」被显示成「判成了参数层」。
+ *
+ * 明细就是结构层待裁清单：L2/L3 已被排除在参数校准网格之外，这里是它们的出口
+ * （排除没有出口 = 把根因藏起来，而不是处置它）。
+ */
+export function TierSummary({
+  board,
+  t,
+}: {
+  board: TierBoard;
+  t: (key: string, opts?: Record<string, unknown>) => string;
+}) {
+  const horizonLabel = (key: string | null): string => {
+    if (!key) { return "—"; }
+    const k = horizonLabelKey(key);
+    if (k) { return t(k); }
+    return key === "unknown" ? t("stockAnalysis.reflection.horizonUnknown") : key;
+  };
+  return (
+    <>
+      <Descriptions size="small" bordered column={5}>
+        <Descriptions.Item label={t("stockAnalysis.reflection.failureModesRows")}>
+          {board.totalRows}
+        </Descriptions.Item>
+        <Descriptions.Item label={t("stockAnalysis.reflection.tierL1")}>{board.l1}</Descriptions.Item>
+        <Descriptions.Item label={t("stockAnalysis.reflection.tierL2")}>{board.l2}</Descriptions.Item>
+        <Descriptions.Item label={t("stockAnalysis.reflection.tierL3")}>{board.l3}</Descriptions.Item>
+        <Descriptions.Item label={t("stockAnalysis.reflection.tierUnlabelled")}>
+          {board.unlabelled}
+        </Descriptions.Item>
+      </Descriptions>
+      {board.unlabelled > 0 && (
+        <Text type="secondary" style={{ fontSize: 12, display: "block", marginTop: 8 }}>
+          {t("stockAnalysis.reflection.tierUnlabelledHint", { count: board.unlabelled })}
+        </Text>
+      )}
+      {board.l2 + board.l3 > 0 && (
+        <Text type="warning" style={{ fontSize: 12, display: "block", marginTop: 8 }}>
+          {t("stockAnalysis.reflection.tierGridNote")}
+        </Text>
+      )}
+      {board.structuralRows.length === 0
+        ? (
+          <Text type="secondary" style={{ fontSize: 12, display: "block", marginTop: 8 }}>
+            {t("stockAnalysis.reflection.tierEmpty")}
+          </Text>
+        )
+        : (
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+            {board.structuralRows.map((r) => (
+              <li key={r.reflectionId} style={{ marginBottom: 8, fontSize: 12 }}>
+                <Tag color={r.tier === "L2" ? "geekblue" : "purple"}>{r.tier}</Tag>
+                <Text strong>{r.stockCode}</Text> {r.stockName} · {horizonLabel(r.horizon)}
+                {r.proposal && <div style={{ color: "#595959", marginTop: 2 }}>{r.proposal}</div>}
+                {r.whatWentWrong && <div style={{ color: "#8c8c8c", marginTop: 2 }}>{r.whatWentWrong}</div>}
+              </li>
+            ))}
+          </ul>
+        )}
     </>
   );
 }
@@ -2061,10 +2157,13 @@ const ACTION_COLOR: Record<string, string> = {
   apply_diff_with_validation: "green",
 };
 
-function buildAiAssistPrompt(row: ReflectionRow): string {
+export function buildAiAssistPrompt(row: ReflectionRow): string {
   // 解析 decisionJson 里的 params_suggestion / implementation_tier / code_diff_proposal
   let paramsText = "(无)";
-  let tierText = "L1";
+  // ⚠ 旧实现把缺省写成 "L1" —— 那是伪造：库内实测 79/80 条 completed 反思根本没有
+  // implementation_tier 这个键，于是每条结构层根因（该改 .rhai / 该改提示词）都被
+  // 下游 AI 读成「参数问题」，产出一个改不动根因的 update_variable 动作。
+  let tierText = "(反思未声明 implementation_tier —— 请按【根因】自行判定 L1/L2/L3 并在中文说明里写明依据)";
   let diffText = "(无)";
   try {
     const parsed = row.decisionJson ? JSON.parse(row.decisionJson) : null;
@@ -2146,7 +2245,7 @@ edit_asset_file 的 description 必填（≤ 200 字）。
 不要输出除 :::action 块以外的其他内容（除简短中文解释外）。`;
 }
 
-function parseActionsFromAccumulated(content: string): AiChatAction[] {
+export function parseActionsFromAccumulated(content: string): AiChatAction[] {
   const regex = /:::action\s*\n([\s\S]*?)\n:::/g;
   const out: AiChatAction[] = [];
   const seen = new Set<string>(); // P1-8 dedup
@@ -2161,7 +2260,10 @@ function parseActionsFromAccumulated(content: string): AiChatAction[] {
   while ((match = regex.exec(content)) !== null) {
     try {
       const parsed = JSON.parse(match[1].trim());
-      const actionType = parsed.actionType;
+      // 两种拼写都得认：本文件的 prompt 与 reflection.md 声明的是 snake_case
+      // `action_type`，而旧实现只读 camelCase `actionType` ⇒ 严格照 schema 输出的
+      // 动作块会静默丢弃（`known.has(undefined)` 恒 false），结构层出口到此归零。
+      const actionType = parsed.actionType ?? parsed.action_type;
       if (!known.has(actionType as AiChatAction["actionType"])) { continue; }
       // 防御：LLM 可能输出 camelCase（templateId/anchorLine/rollbackOnFailure），
       // 归一化为 snake_case 以匹配上游 ChatAction enum 序列化要求。

@@ -1243,7 +1243,8 @@
         "strategyOverwrite": "Überschreiben (alles ersetzen)",
         "strategyMerge": "Zusammenführen (vorhandene behalten)",
         "strategyDryRun": "Probelauf (nur validieren)",
-        "paused": "Pausiert"
+        "paused": "Pausiert",
+        "interrupted": "Unterbrochen"
       },
       "pause": "Pause",
       "pauseFailed": "Pause fehlgeschlagen",
@@ -15708,10 +15709,12 @@
         "serenity_needs_week_or_longer_realization": "Per Design: Engpass-Nachweis braucht einen Horizont von einer Woche oder länger",
         "oversold_rebound_needs_at_least_mid_horizon": "Per Design: Overdraft-Rebounds brauchen mindestens einen mittelfristigen Horizont",
         "oversold_rebound_not_applied_to_long_horizon": "Per Design: Overdraft-Rebounds werden auf den langfristigen Horizont nicht angewandt",
+        "trend_momentum_not_a_long_thesis": "Per Design: Trendfolge ist kurzfristiges Momentum und erzeugt keine Langfrist-Kandidaten",
         "cell_not_in_matrix": "Zelle fehlt in der Tabelle (möglicherweise Implementierungslücke, nicht per Design)"
       },
       "matrixMisfit": {
-        "valuation_needs_weeks_to_realize_kept_by_user_decision": "Bekannte Fehlpaarung: Bewertung braucht Wochen zur Realisierung; per Entscheidung behalten"
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "Bekannte Fehlpaarung: Bewertung braucht Wochen zur Realisierung; per Entscheidung behalten",
+        "capital_evidence_is_daily_snapshot_declared_misfit": "Bekannte Fehlanpassung: Kapitalfluss-Evidenz ist ein Tages-Snapshot (North-bound eingestellt); langfristige Realisierung unverifiziert – bleibt per Beschluss aktiv"
       },
       "loopUncalibratedSamples": "Loop nicht kalibriert: zu wenig Stichproben",
       "loopUncalibratedIc": "Loop nicht kalibriert: IC nicht messbar",
@@ -16759,6 +16762,8 @@
       "calibrateApplyDone": "Optimale Parameter auf Vorlage angewendet",
       "calibrateRefreshCount": "Basierend auf {{total}} Reflexionen",
       "calibrateParsedCount": "{{parsed}} gültige Empfehlungen erkannt",
+      "calibrateStructuralCount": "{{count}} Reflektionen wurden als Struktur eingestuft (L2 Formel / L3 Prompt) und bleiben außerhalb des Rasters — einzeln behandeln",
+      "calibrateTierUnlabelledCount": "{{count}} Reflektionen nennen keine Ebene (das heißt nicht: Parameter-Ebene)",
       "trigger": {
         "low_quality": "Quality score {{score}} below threshold {{threshold}} for {{count}} consecutive times",
         "poor_signal_accuracy": "Signal accuracy score {{score}}, optimize signal strategy",
@@ -16832,7 +16837,7 @@
         "target": "Target Price",
         "position": "Suggested Position",
         "holding": "Holding Days",
-        "confidence": "Confidence"
+        "confidence": "Evidenzstärke"
       },
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
@@ -16866,6 +16871,12 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "Dieser Zeithorizont ({{horizon}}) konnte in dieser Runde nicht gescannt werden: {{reason}}; andere Horizonte sind nicht betroffen",
       "bannerPoolFallbackOnly": "Alle {{fallback}} Kandidaten stammen aus dem integrierten Beispiel-Pool; kein Ranking beliebter Aktien oder Sektor-Anführer verfügbar – die Ergebnisse bilden nicht die tatsächlichen Marktführer ab.",
+      "bannerGateBlocked": "Langfrist-Gate hat {{count}} Kandidaten blockiert (Erstverlust / zwei Perioden rückläufig / Verkaufsurteil innerhalb 30 Tagen)",
+      "gateReason": {
+        "firstLoss": "Erstverlust: Konzernergebnis ≤ 0",
+        "twoPeriodDecline": "Nettogewinn zwei Perioden in Folge rückläufig",
+        "analysisVeto": "Analyse {{period}}: \"{{action}}\" (innerhalb 30 Tagen)"
+      },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "lastAnalysis": "Last Analysis",
@@ -17225,6 +17236,10 @@
       "failureModeChaseUpBar": "Laufen auf große Tageskerze",
       "failureModeRegimeEndorsement": "Marktregime als Beleg für eine Einzelaktie",
       "failureModeReverseDcfIgnored": "Umgekehrtes DCF ignoriert",
+      "failureModeThemeRotationMissed": "Themenrotation fehlte in der Evidenz",
+      "failureModeCounterTrendStrengthIgnored": "Gegentrend-Überschuss ignoriert",
+      "failureModeEntryGateShapeBlocked": "Eingangstor-Form blockierte richtige Entscheidung",
+      "failureModeCandidatePoolCoverageMissed": "Aktie war nie im Kandidatenpool",
       "horizonConfusionTitle": "Ergebnis-Abgleich je Ebene (Formel × LLM)",
       "horizonConfusionNotProduced": "Für diesen Datensatz liegt kein Ergebnis-Abgleich je Ebene vor (Daten von vor Einführung der Statistik oder keine bewertbaren Stichproben)",
       "horizonConfusionInsufficient": "Zu wenige Stichproben ({{judged}} bewertet) — die Zahlen unten sind Rohdaten, keine Schlussfolgerungen",
@@ -17232,6 +17247,14 @@
       "horizonConfusionUndecided": "{{undecided}} ohne LLM-Urteil (fehlend / Fenster nicht abgelaufen / nicht richtungsweisende Aktion wie Halten oder Abwarten) — zählt in keine Zelle",
       "horizonConfusionAvgAgreement": "Mittlere dreidimensionale Übereinstimmung dieser Ebene {{pct}}",
       "horizonConfusionScopeNote": "Beide Seiten nutzen dasselbe Fenster und dieselbe Urteilsfunktion; die vier Zellen vergleichen nur die Richtung, nicht die Rendite, und haben einen anderen Nenner als die Trefferquote oben.",
+      "tierTitle": "Ebenen der Behebung (strukturbildige Liste)",
+      "tierL1": "Parameter L1",
+      "tierL2": "Formel L2",
+      "tierL3": "Prompt L3",
+      "tierUnlabelled": "Ebene nicht erklärt",
+      "tierUnlabelledHint": "{{count}} Reflektionen nennen keine Ebene — das Feld fehlt, das heißt nicht: Parameter-Ebene.",
+      "tierGridNote": "Als L2/L3 eingestufte Ursachen sind keine Parameterprobleme: sie bleiben außerhalb des Kalibrierungsrasters und sind einzeln zu behandeln.",
+      "tierEmpty": "Keine Struktureinträge (keine Reflektion als L2/L3 eingestuft)",
       "failureModeOther": "Sonstige"
     },
     "portfolioMonitor": {
@@ -18054,6 +18077,7 @@
       "weight": "Gewicht",
       "signal": "Signal",
       "absenceUndeclared": "Fehlen nicht erklärt",
+      "expectedButIdle": "Erwartet, nicht gewichtet",
       "metaLeg": "Meta",
       "upstream": {
         "present": "Vorhanden",
@@ -18070,6 +18094,10 @@
       },
       "sigma": {
         "consistent": "σ stimmig",
+        "sameSourceCopy": "Rechnung aus gleicher Quelle",
+        "sameSourceCopyHint": "Basis und σ sind zwei gespeicherte Kopien derselben Skriptvariable; die Delta-Schranke entspricht konstruktiv der Summe beider Rundungsfehler ⇒ diese Übereinstimmung ist immer wahr und belegt nur, dass keine Kopie einseitig geändert wurde",
+        "inputMissing": "σ fehlt",
+        "inputMissingHint": "Das sigma-Feld dieser Säule fehlt oder hat den falschen Typ ⇒ es ist nicht 0, der Abschluss ist nicht prüfbar",
         "inconsistent": "σ abweichend",
         "noBasis": "Keine Basis"
       },
@@ -18079,11 +18107,13 @@
       },
       "closure": {
         "closed": "Geschlossen",
+        "coverage": "Abdeckung",
         "broken": "Nicht geschlossen",
         "notComputable": "Nicht bestimmbar"
       },
       "closureReason": {
         "decisionDegraded": "In dieser Runde wurde keine Entscheidung erzeugt; Geschlossenheit nicht bestimmbar",
+        "missingFactorInput": "Einer Faktorsäule fehlt σ oder Gewicht, der Abschluss ist nicht prüfbar",
         "noWeightSumOrFactors": "weightSum oder Faktortabelle fehlt; Geschlossenheit nicht bestimmbar"
       },
       "supported": "Mit Daten"

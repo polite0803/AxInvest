@@ -1243,7 +1243,8 @@
         "strategyOverwrite": "استبدال (استبدال الكل)",
         "strategyMerge": "دمج (الاحتفاظ بالموجود)",
         "strategyDryRun": "تشغيل تجريبي (تحقق فقط)",
-        "paused": "متوقف"
+        "paused": "متوقف",
+        "interrupted": "تمت المقاطعة"
       },
       "pause": "إيقاف مؤقت",
       "pauseFailed": "فشل الإيقاف المؤقت",
@@ -15708,10 +15709,12 @@
         "serenity_needs_week_or_longer_realization": "حسب التصميم: دليل الاختناق يحتاج أفق أسبوع أو أكثر",
         "oversold_rebound_needs_at_least_mid_horizon": "حسب التصميم: ارتداد التشبع السلبي يحتاج أفقًا متوسطًا على الأقل",
         "oversold_rebound_not_applied_to_long_horizon": "حسب التصميم: ارتداد التشبع السلبي لا يُطبَّق على الأفق طويل الأجل",
+        "trend_momentum_not_a_long_thesis": "حسب التصميم: تتبع الاتجاه زخم قصير المدى ولا يُصدر مرشحات طويلة المدى",
         "cell_not_in_matrix": "الخلية مفقودة من جدول العقد (ربما ثغرة تنفيذية وليس حسب التصميم)"
       },
       "matrixMisfit": {
-        "valuation_needs_weeks_to_realize_kept_by_user_decision": "عدم تطابق معروف: التقييم يحتاج أسابيع ليتحقق; أُبقي بقرار"
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "عدم تطابق معروف: التقييم يحتاج أسابيع ليتحقق; أُبقي بقرار",
+        "capital_evidence_is_daily_snapshot_declared_misfit": "عدم تطابق معروف: دليل التدفقات لقطة يومية (توقف التدفقات الشمالية)؛ التحقق طويل المدى غير مُتحقق — الاستمرار بقرار"
       },
       "loopUncalibratedSamples": "الحلقة غير معايرة: عينات غير كافية",
       "loopUncalibratedIc": "الحلقة غير معايرة: لا يمكن قياس IC",
@@ -16759,6 +16762,8 @@
       "calibrateApplyDone": "تم تطبيق المعاملات المثلى على القالب",
       "calibrateRefreshCount": "استناداً إلى {{total}} مراجعة",
       "calibrateParsedCount": "تم تحليل {{parsed}} توصية صالحة",
+      "calibrateStructuralCount": "في هذه الجولة حُكمت {{count}} مراجعة بأنها هيكلية (L2 صيغة / L3 مطالبة) وبقيت خارج الشبكة — عالجها بندًا بندًا",
+      "calibrateTierUnlabelledCount": "{{count}} مراجعة بلا مستوى معلن (وهذا لا يعني أنها من مستوى المعلمات)",
       "trigger": {
         "low_quality": "Quality score {{score}} below threshold {{threshold}} for {{count}} consecutive times",
         "poor_signal_accuracy": "Signal accuracy score {{score}}, optimize signal strategy",
@@ -16832,7 +16837,7 @@
         "target": "Target Price",
         "position": "Suggested Position",
         "holding": "Holding Days",
-        "confidence": "Confidence"
+        "confidence": "قوة الدليل"
       },
       "title": "Recommendation Results",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
@@ -16866,6 +16871,12 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "تعذّر فحص هذا الأفق الزمني ({{horizon}}) في هذه الجولة: {{reason}}؛ لا تتأثر الآفاق الأخرى",
       "bannerPoolFallbackOnly": "جميع المرشحين وعددهم {{fallback}} مأخوذون من مجموعة العينات المدمجة؛ لم يتم جلب تصنيف الأسهم الشائعة أو القطاعات الرائدة، لذا لا تعكس النتيجة القادة الحقيقيين للسوق.",
+      "bannerGateBlocked": "بوابة المدى الطويل حظرت {{count}} مرشحا (أول خسارة / انخفاض لفترتين / حكم بيع خلال 30 يوما)",
+      "gateReason": {
+        "firstLoss": "أول خسارة: صافي ربح الشركة الأم ≤ 0",
+        "twoPeriodDecline": "صافي الربح ينخفض لفترتين متتاليتين",
+        "analysisVeto": "تحليل {{period}}: \"{{action}}\" (خلال 30 يوما)"
+      },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "lastAnalysis": "Last Analysis",
@@ -17225,6 +17236,10 @@
       "failureModeChaseUpBar": "مطاردة شمعة صاعدة كبيرة",
       "failureModeRegimeEndorsement": "تأييد حالة السوق لسهم مفرد",
       "failureModeReverseDcfIgnored": "تجاهل DCF العكسي",
+      "failureModeThemeRotationMissed": "دوران الموضوعات خارج أدلة القرار",
+      "failureModeCounterTrendStrengthIgnored": "تم تجاهل القوة الفائضة عكس الاتجاه",
+      "failureModeEntryGateShapeBlocked": "شكل بوابة الدخول حال دون إشارة صحيحة",
+      "failureModeCandidatePoolCoverageMissed": "لم يدخل السهم أبدًا في قائمة المرشحين",
       "horizonConfusionTitle": "مقارنة النتائج حسب الفئة (المعادلة × النموذج)",
       "horizonConfusionNotProduced": "لا توجد لهذا السجل مقارنة نتائج حسب الفئة (بيانات ما قبل الإحصاء أو لا توجد عينات قابلة للحكم)",
       "horizonConfusionInsufficient": "العينات غير كافية ({{judged}} محكومة) — الأعداد أدناه سجلات خام وليست استنتاجات",
@@ -17232,6 +17247,14 @@
       "horizonConfusionUndecided": "{{undecided}} بلا حكم من النموذج (غائب / النافذة لم تكتمل / فعل غير اتجاهي مثل الانتظار أو الاحتفاظ) — لا تُحسب في أي خلية",
       "horizonConfusionAvgAgreement": "متوسط التوافق ثلاثي الأبعاد لهذه الفئة {{pct}}",
       "horizonConfusionScopeNote": "الطرفان يستخدمان النافذة نفسها ودالة الحكم نفسها؛ الخلايا الأربع تقارن الاتجاه فقط لا العائد، ولها مقام مختلف عن نسبة الإصابة أعلاه.",
+      "tierTitle": "مستوى الإصلاح (قائمة المهام الهيكلية)",
+      "tierL1": "مستوى المعلمات L1",
+      "tierL2": "مستوى الصيغة L2",
+      "tierL3": "مستوى المطالبة L3",
+      "tierUnlabelled": "لم يُعلن المستوى",
+      "tierUnlabelledHint": "{{count}} مراجعة بلا مستوى معلن — الحقل لم يُنتَج، وهذا لا يعني أنها من مستوى المعلمات.",
+      "tierGridNote": "أسباب L2/L3 ليست في طبقة المعلمات: هي مستبعدة من شبكة المعايرة وتحتاج معالجة بندًا بندًا.",
+      "tierEmpty": "لا بنود هيكلية معلّقة (لا مراجعة حُكمت L2/L3)",
       "failureModeOther": "أخرى"
     },
     "portfolioMonitor": {
@@ -18054,6 +18077,7 @@
       "weight": "الوزن",
       "signal": "الإشارة",
       "absenceUndeclared": "غياب بلا إفصاح",
+      "expectedButIdle": "متوقع لكنه مستبعد",
       "metaLeg": "قيد وصفي",
       "upstream": {
         "present": "موجود",
@@ -18070,6 +18094,10 @@
       },
       "sigma": {
         "consistent": "σ متوافق",
+        "sameSourceCopy": "إعادة حساب من المصدر نفسه",
+        "sameSourceCopyHint": "الأساس و σ هما نسختان محفوظتان للمتغير نفسه في السكربت؛ حد الفرق يساوي مجموع خطأي التقريب بحكم البناء ⇒ هذا التطابق صحيح دائمًا ولا يثبت سوى عدم تعديل إحدى النسختين منفردة",
+        "inputMissing": "σ مفقود",
+        "inputMissingHint": "حقل sigma لهذه الرجل مفقود أو نوعه خاطئ ⇒ ليس صفرًا، والإغلاق غير قابل للتقييم",
         "inconsistent": "σ متباين",
         "noBasis": "لا مرجع"
       },
@@ -18079,11 +18107,13 @@
       },
       "closure": {
         "closed": "مغلق",
+        "coverage": "التغطية",
         "broken": "غير مغلق",
         "notComputable": "غير قابل للتحديد"
       },
       "closureReason": {
         "decisionDegraded": "لم يصدر قرار هذه المرة، لذا لا يمكن تحديد الإغلاق",
+        "missingFactorInput": "إحدى رجلي العامل يفتقد σ أو الوزن، والإغلاق غير قابل للتقييم",
         "noWeightSumOrFactors": "weightSum أو جدول العوامل مفقود، لذا لا يمكن تحديد الإغلاق"
       },
       "supported": "مع بيانات"

@@ -57,6 +57,8 @@
     "build:skip-typecheck": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "dev:app": "node scripts/dev-app.mjs",
+    "diag": "node scripts/diag-app.mjs",
     "tauri:build": "node scripts/tauri-build.mjs",
     "build:clean": "node scripts/sccache-clean-build.mjs",
     "tauri:android:init": "tauri android init",

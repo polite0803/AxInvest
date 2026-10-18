@@ -1,8 +1,21 @@
-@import "tailwindcss";
+/* ⚠ 必须限定扫描范围（2026-10-18 实测）：
+   Tailwind v4 的「自动内容探测」会从项目根开始扫描**所有未被 .gitignore 忽略的文本文件**。
+   本仓库根下 knowledge-sources/（约 2.4 万个 md）、website/、docs/、dist/ 等都不在
+   .gitignore 覆盖内 ⇒ 每次 CSS 冷编译要遍历数万个文件，单次 transform 实测 **56 秒**
+   （`curl /src/index.css?probe` = 56335ms），守在首屏关键路径上 ⇒ 启动黑屏数分钟。
+   因此关闭自动探测（source(none)），显式声明只扫应用真正用到的两处：
+     · src/ 下全部源码（类名来源）
+     · 根 index.html
+   新增类名来源目录时**必须在这里补 @source**，否则样式会静默缺失。
+   路径相对本文件（src/index.css）解析。 */
+@import "tailwindcss" source(none);
 @import "markstream-react/index.css";
 @import "overlayscrollbars/overlayscrollbars.css";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/jetbrains-mono";
+
+@source "./**/*.{ts,tsx,js,jsx,md,mdx,html}";
+@source "../index.html";
 
 /* ── Tailwind v4 语义化颜色别名（参考 nomifun 设计） ── */
 @theme {

@@ -269,7 +269,19 @@ export default defineConfig(async () => ({
     strictPort: true,
     host: host || "127.0.0.1",
     hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
-    watch: { ignored: ["**/src-tauri/**"] },
+    // ignored 追加产物/日志目录：这些目录里的文件（尤其 output/*.log 的持续写入）
+    // 不属于前端源码，却会触发 HMR 与 Tailwind 的候选重扫 —— 后者单次重编译实测
+    // 1.6~2s（旧配置扫全仓库时 56s），凭空拖慢首屏。
+    watch: {
+      ignored: [
+        "**/src-tauri/**",
+        "**/output/**",
+        "**/dist/**",
+        "**/playwright-report/**",
+        "**/test-results/**",
+        "**/*.log",
+      ],
+    },
   },
   test: {
     environment: "jsdom",

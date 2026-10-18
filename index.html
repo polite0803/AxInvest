@@ -8,17 +8,66 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>AxInvest</title>
+    <style>
+      /* 首屏占位：dev 模式要按需转换 1300+ 模块，期间 #root 为空会呈现纯黑/纯白，
+         容易被误判为“卡死”。这里给一个纯 CSS 的加载态，React 挂载后由 createRoot
+         覆盖掉 #root 内容，无需任何 JS 清理。
+         注意 CSP：style-src 允许 unsafe-inline，script-src 不允许 ⇒ 只能用 CSS，不能用内联脚本
+         （原先那段靠内联脚本设置 body 背景色的代码实际被 CSP 全部拦掉，从未生效）。 */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #fff;
+      }
+      @media (prefers-color-scheme: dark) {
+        html,
+        body {
+          background: #141414;
+        }
+      }
+      #boot-placeholder {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        font: 13px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+        color: #8a8a8a;
+        background: inherit;
+        user-select: none;
+      }
+      @media (prefers-color-scheme: dark) {
+        #boot-placeholder {
+          color: #6f6f6f;
+        }
+      }
+      #boot-placeholder .ring {
+        width: 22px;
+        height: 22px;
+        border: 2px solid currentColor;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: boot-spin 700ms linear infinite;
+      }
+      #boot-placeholder .tip {
+        letter-spacing: 0.04em;
+      }
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
   </head>
 
   <body>
-    <div id="root"></div>
+    <div id="root"><div id="boot-placeholder">
+        <div class="ring"></div>
+        <div class="tip">AxInvest 正在加载…</div>
+      </div></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script>
-      // Match initial background to theme to avoid white flash
-      try {
-        var m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
-        if (m && m.matches) document.body.style.backgroundColor = '#141414';
-      } catch(e) {}
-    </script>
   </body>
 </html>

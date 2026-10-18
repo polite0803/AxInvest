@@ -60,6 +60,8 @@ use axagent_dao::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
+use crate::commands::error::ErrorResponse;
+use crate::commands::error_code::common as common_err;
 use crate::scheduler::restore::STOCK_ANALYSIS_STATUS_INTERRUPTED;
 
 /// 内置任务类型标识（cron executor 路由键，勿改）—— **权威定义在
@@ -130,14 +132,22 @@ impl RerunConfig {
         if raw.trim().is_empty() {
             return Ok(Self::default());
         }
-        serde_json::from_str(raw)
-            .map_err(|e| format!("解析 {STOCK_ANALYSIS_RERUN_TASK_TYPE} 配置失败: {e}"))
+        serde_json::from_str(raw).map_err(|e| {
+            ErrorResponse::err_with_detail(
+                common_err::INVALID_INPUT,
+                format!("解析 {STOCK_ANALYSIS_RERUN_TASK_TYPE} 配置失败: {e}"),
+            )
+        })
     }
 
     /// 序列化（种子任务写入 `CronJob.prompt` 用，与 `PoolScanConfig::to_json` 同形）。
     pub fn to_json(&self) -> Result<String, String> {
-        serde_json::to_string(self)
-            .map_err(|e| format!("序列化 {STOCK_ANALYSIS_RERUN_TASK_TYPE} 配置失败: {e}"))
+        serde_json::to_string(self).map_err(|e| {
+            ErrorResponse::err_with_detail(
+                common_err::INTERNAL,
+                format!("序列化 {STOCK_ANALYSIS_RERUN_TASK_TYPE} 配置失败: {e}"),
+            )
+        })
     }
 }
 
@@ -188,7 +198,9 @@ impl RerunOutcome {
 
 /// 统计命中给定状态的行数（持久化在 dao 的 `count_analyses_by_status`）。
 async fn count_by_status(db: &DatabaseConnection, statuses: &[&str]) -> Result<usize, String> {
-    count_analyses_by_status(db, statuses).await.map_err(|e| format!("统计待重跑分析失败: {e}"))
+    count_analyses_by_status(db, statuses).await.map_err(|e| {
+        ErrorResponse::err_with_detail(common_err::INTERNAL, format!("统计待重跑分析失败: {e}"))
+    })
 }
 
 /// 取出本轮要处理的行，按 `(analysis_date, stock_code, created_at, id)` 升序，同键已去重。
@@ -200,9 +212,9 @@ async fn load_batch(
     statuses: &[&str],
     max_per_run: usize,
 ) -> Result<Vec<RerunCandidate>, String> {
-    load_rerun_candidates(db, statuses, max_per_run)
-        .await
-        .map_err(|e| format!("查询待重跑分析失败: {e}"))
+    load_rerun_candidates(db, statuses, max_per_run).await.map_err(|e| {
+        ErrorResponse::err_with_detail(common_err::INTERNAL, format!("查询待重跑分析失败: {e}"))
+    })
 }
 
 /// 等待某条分析离开 `running`，返回其**终态** status 字符串（或超时说明）。

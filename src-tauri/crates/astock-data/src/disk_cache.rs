@@ -362,14 +362,21 @@ pub fn spawn_flush_loop(cache: Arc<DiskCache>) -> FlushLoopHandle {
                     // 直接在本 worker 上跑会占死一个 tokio worker 线程，
                     // 连带延迟同期到达的其它 IPC 命令。
                     let c = Arc::clone(&cache);
-                    let _ = tokio::task::spawn_blocking(move || c.flush_to_disk()).await;
+                    // flush_to_disk 内部已对序列化/写盘失败 warn，这里只补它够不着的那一层：
+                    // 阻塞任务被取消或 panic ⇒ 返回的是 JoinError ⇒ 不记就等于「最后一次 flush
+                    // 其实没发生」而日志里一切正常。
+                    if let Err(e) = tokio::task::spawn_blocking(move || c.flush_to_disk()).await {
+                        tracing::warn!("[l2] 收尾 flush 的阻塞任务未跑完: {e}");
+                    }
                 }
                 break;
             }
             interval.tick().await;
             if cache.should_flush() {
                 let c = Arc::clone(&cache);
-                let _ = tokio::task::spawn_blocking(move || c.flush_to_disk()).await;
+                if let Err(e) = tokio::task::spawn_blocking(move || c.flush_to_disk()).await {
+                    tracing::warn!("[l2] 周期 flush 的阻塞任务未跑完: {e}");
+                }
             }
         }
     });

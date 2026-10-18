@@ -394,6 +394,24 @@ if (canRunRust && !quick) {
   step("跨行聚合按代筛样登记（四类分列）", "node scripts/check-generation-scope-registry.mjs");
   step("候选池代际一致自检（读侧谓词/写侧标记/负控）", "node scripts/check-reco-generation.mjs --selftest");
   step("候选池代际一致（回放行与实盘行同表后不混读混写）", "node scripts/check-reco-generation.mjs");
+  // 逐档决策腿键级生产者-消费者对账门（2026-10-18，PLAN-mover-coverage-and-reflection-exit §0-A）：
+  // 建门起因是现网实测两条恒缺席腿（138 条有效决策行 × 4 档 = 552 格里 sectorRotation 与
+  // microstructure 各缺席 80/80）——腿声明在、实现在、数据源也在，**只有输入键没人生产**。
+  // `leg_signal.rs` 自带的齐备态测试查不出，因为它比的是自己手写的夹具，从不经过真实 raw 对象。
+  // 门绿 ≠ 待修面已清：BASELINE 3 条每次运行都打印，棘轮只准缩短。
+  step("决策腿键级对账自检（五条负控 + 删腿即红）", "node scripts/check-leg-producers.mjs --selftest");
+  step("决策腿输入键两侧对齐（消费键全有生产者）", "node scripts/check-leg-producers.mjs");
+  // 清单覆盖率门（0-D / P-e，2026-10-18）：**CI 里只跑 `--selftest`**。判据 C1/C2/C3/C4 要从
+  // 实库取 `market_universe_stats` 与清单构成，CI 没有本机 PG ⇒ 把正式跑挂进 CI 只会得到
+  // 「取数失败」这种与覆盖率无关的红。合成读数的负控不依赖库，所以进 CI。
+  step("清单覆盖率门自检（合成读数四条负控）", "node scripts/check-universe-coverage.mjs --selftest");
+  // 反思词表与落地层级三处同域门（2026-10-19，PLAN-mover-coverage 阶段 3 / 决-3）：
+  // 建门实证——32 条有标注反思里 23 条单独就是 other（兜底成主值）；模板早就要求
+  // implementation_tier，但 JSON 路径实测 1/80 有值，而面板把缺省写死 "L1" ⇒ 79 条「没判」
+  // 被显示成「判成参数层」。词表住在 Rust、映射住在面板、译名住在 11 份 locale，三份手抄
+  // 没有任何东西钉住 —— 漂移不报错，只让数字变难看。只读源码与 locale，CI 无 PG 也能跑。
+  step("反思词表门自检（五类破坏各命中自己那条）", "node scripts/check-reflection-vocabulary.mjs --selftest");
+  step("反思词表与落地层级三处同域", "node scripts/check-reflection-vocabulary.mjs");
   // T+N 窗口集唯一权威门（B3，2026-10-16，PLAN-llm-horizon-decision-and-parity §6.4/拍板 7）：
   // 旧默认 [5,20,60] 抄在写侧与三个跨行池化读点上；窗口集换代而漏改任一处不报错，只会把
   // 两种窗口的命中并成一个分母。R1 权威现场推导 / R2 代码无手抄 / R3 三读点同判据 / R4 写侧取权威。

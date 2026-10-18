@@ -17,6 +17,12 @@
 //          ⇒ 同段必须出现 `as_of_date`（写入字段或参数），否则等于落库后无法归代。
 // R3 闭环：段内出现 `decision_validations::Entity::find()` ⇒ 同段必须能读出处置代际
 //          （谓词或逐行 `as_of_date`），防两套计数域被并成一个命中率分母。
+// R5（2026-10-18 追加，PLAN-mover-coverage §0-C）：写侧段内 `seed_pool_snapshot` 的**前向邻域**
+//          出现 `unwrap_or_else` 或字面量 `"[]"` ⇒ 红。`None`（来源不可得）折成 `"[]"`（池真的空）
+//          是把取数缺痕写成一条「该票未进候选池」的结论 —— 现网回放侧 3520 行全是 `"[]"`，
+//          而真实候选行数 = 0，这个矛盾在库里正因为被折空而读不出来。
+//          判据必须落在表达式邻域：`start_cron_scheduler` 这类巨型函数里 `unwrap_or_else`
+//          会为别的目的出现，整段共现即假阳（首跑实测误报过一次，已收窗口并补负控 9）。
 // 豁免：必须写明理由，**每次运行都打印**；豁免不是清零，是带日期的显式债务。
 // 自证：`--selftest` 含拆谓词负控、"谓词只写在注释里"负控、假改造（包成 Some(..) 但没过滤）
 //       仍须命中、以及扫描面为空即红。
@@ -165,10 +171,108 @@ function evaluateBody(body) {
   const write = anyIn(body, WRITE_FORMS);
   if (write) {
     out.push({ rule: "R2", form: write, ok: !!evidenceAtCallSite(body, write) });
+    // R5（2026-10-18，PLAN-mover-coverage §0-C）：写候选池的段内**不得**把「池来源不可得」
+    // 折成空数组字面量。`None` 与 `"[]"` 含义相反（前者=取数侧没给，后者=池子真的空），
+    // 而 `mover_recall::code_in_pool_snapshot` 对两者同判「不在池」⇒ 折空即把取数缺痕
+    // 写成一条「该票未进候选」的结论。
+    // ⚠ 判据必须落在**表达式邻域**而不是整段共现：`start_cron_scheduler` 这类巨型函数里
+    //   `unwrap_or_else` 会为别的目的出现，整段共现 ⇒ 假阳（2026-10-18 首跑实测就误报了它）。
+    //   折空形态永远是 `seed_pool_snapshot…` 后面紧跟 `.unwrap_or_else(…)` 或 `"[]"`，
+    //   所以取 `seed_pool_snapshot` 命中点起的前向窗口即可；窗口宽度按 rustfmt 折行余量取 200。
+    const foldAt = (body, needle) => {
+      let at = body.indexOf(needle);
+      while (at !== -1) {
+        const win = body.slice(at, at + 200);
+        if (win.includes("unwrap_or_else") || win.includes('"[]"')) return needle;
+        at = body.indexOf(needle, at + needle.length);
+      }
+      return null;
+    };
+    const foldsPool = foldAt(body, "seed_pool_snapshot");
+    if (foldsPool) {
+      out.push({ rule: "R5", form: `${foldsPool} 后随 unwrap_or_else / "[]"`, ok: false });
+    }
   }
   const vread = anyIn(body, VALIDATION_READ_FORMS);
   if (vread) out.push({ rule: "R3", form: vread, ok: !!anyIn(body, R3_PREDICATES) });
   return out;
+}
+
+// ── R6/R7/R8（2026-10-18，PLAN-mover-coverage-and-reflection-exit §P-g）──────────────
+// `reco_picks.synthetic=1` 是**降级产物**（capital 无资金流数据 ⇒ K线代理；watchlist ⇒ 初筛无技术
+// 信号）：价格与置信都真，但**不是该策略自己做的判断**。每个读点必须先归一类再决定要不要排除它
+// —— 四类口径互斥，混用等于把两套计数域并成一个分母：
+//   A 必须排除（算分母 / 记策略信号史 / 当对照先验）⇒ 缺 `Synthetic` 谓词即 R6 红；
+//   B 必须包含（候选池覆盖证据，漏检归因靠它）⇒ 加谓词即 R7 红（会把「进过池」读成「没进池」）；
+//   C 与降级无关（按主键回查元数据）⇒ 加谓词即 R7 红（同一判据写两遍）；
+//   P 呈现类（荐股页缓存回读）⇒ 必须包含，降级声明在 reasons/risk_notes，抹掉即丢证据。
+// R8：出现**未登记**的读点 ⇒ 红。名单腐烂比缺门更坏 —— 新读点必须先判语义再登记，不能静默通过。
+const POOL_A = new Map([
+  ["src-tauri/src/commands/stock_analysis.rs|backtest_reco_strategies_inner", "正负样本分母"],
+  ["src-tauri/src/commands/stock_analysis.rs|get_reco_signal_history", "策略信号明细"],
+  ["src-tauri/src/commands/stock_workflow/hooks.rs|fetch_reco_prior", "两链对照先验"],
+  ["src-tauri/src/commands/pool_scan.rs|load_pool_selection", "池分析分母"],
+  ["src-tauri/src/commands/backtest_validation.rs|run_decision_backtest_inner", "验证样本分母"],
+  ["src-tauri/src/commands/backtest_validation.rs|run_serenity_backtest_pass", "智选命中率分母"],
+]);
+const POOL_B = new Map([
+  [
+    "src-tauri/crates/analysis-engine/src/mover_recall.rs|load_picks_in_range",
+    "池覆盖证据：排除降级会把「进过池」读成「没进池」",
+  ],
+]);
+const POOL_C = new Map([
+  [
+    "src-tauri/crates/analysis-engine/src/recommender/reco_loop.rs|load_pick_versions",
+    "按 pick_id 主键回查 reco_version，与降级无关",
+  ],
+  ["src-tauri/src/commands/backtest_validation.rs|compute_validation_report", "报告侧主键回查"],
+  ["src-tauri/src/commands/stock_workflow/reco_history.rs|get_reco_detail", "按主键取详情"],
+  ["src-tauri/src/commands/stock_workflow/reco_history.rs|batch_delete_reco_history", "按批次键删除"],
+  ["src-tauri/src/commands/stock_workflow/reco_history.rs|delete_serenity_pick", "按主键删单行"],
+]);
+const POOL_P = new Map([
+  [
+    "src-tauri/src/commands/stock_analysis.rs|get_cached_recommendation",
+    "荐股页缓存回读：降级候选必须显示，声明已在 reasons/risk_notes",
+  ],
+]);
+/** A 类待补（显式豁免、每次打印，不是清零）：serenity 行由写入侧固定 `synthetic=0`
+ *  （`serenity.rs` 写 `reco_picks::ActiveModel` 那处），所以这两处现在加谓词是**零行为变更**；登记为债是为了防止
+ *  将来有别的产端往 style='serenity' 写降级行时，这里静默混进分母。 */
+const POOL_A_PENDING = new Map([
+  ["src-tauri/src/commands/stock_workflow/serenity.rs|do_refresh_exit_signals", "退出信号刷新；同上"],
+  ["src-tauri/src/commands/stock_workflow/serenity.rs|do_feedback_loop", "反馈闭环；同上"],
+]);
+const POOL_READ_FORMS = [
+  "reco_picks::Entity::find()",
+  "reco_picks::Entity::find_by_id(",
+  "reco_picks::Entity::delete_many()",
+];
+
+/** 该段是否含 `reco_picks` 读形态（含则返回该形态，用于 R8/R9 的命中记账）。 */
+export function poolReadForm(body) {
+  return POOL_READ_FORMS.find((f) => body.includes(f)) || null;
+}
+
+/** 键级归类判定：无读形态返回 null（不参与本组规则）。 */
+export function poolClassCheck(key, body) {
+  const form = POOL_READ_FORMS.find((f) => body.includes(f));
+  if (!form) return null;
+  const hasPred = body.includes("Column::Synthetic");
+  if (POOL_A.has(key)) {
+    return hasPred
+      ? null
+      : { rule: "R6", msg: `A 类读点（${POOL_A.get(key)}）缺 Synthetic 谓词 ⇒ 降级产物被计进分母` };
+  }
+  const mustNot = POOL_B.get(key) || POOL_C.get(key) || POOL_P.get(key);
+  if (mustNot) {
+    return hasPred ? { rule: "R7", msg: `非分母读点却加了 Synthetic 谓词（应属类：${mustNot}）` } : null;
+  }
+  if (POOL_A_PENDING.has(key)) {
+    return hasPred ? null : { pending: POOL_A_PENDING.get(key) };
+  }
+  return { rule: "R8", msg: `未登记的 reco_picks 读点（读形态：${form}）⇒ 必须先判 A/B/C/P 再登记` };
 }
 
 /**
@@ -178,9 +282,10 @@ function evaluateBody(body) {
 export function checkSources(files, dump) {
   const violations = [];
   const rows = [];
-  const hits = { R1: 0, R2: 0, R3: 0 };
+  const hits = { R1: 0, R2: 0, R3: 0, R5: 0, R6: 0, R7: 0, R8: 0, R9: 0 };
   const exemptHits = [];
   let examined = 0;
+  const poolSeen = new Set();
 
   for (const abs of files) {
     const rel = path.relative(ROOT, abs).replace(/\\/g, "/");
@@ -202,6 +307,34 @@ export function checkSources(files, dump) {
           continue;
         }
         violations.push(`${rule} ${key}：读到/写到候选池（${form}）却没有任何代际处置`);
+      }
+      // ⚠ 记账必须在**任何判定之前**：`poolClassCheck` 对合规的 A 类点返回 null，
+      //   若只在「有判定结果」时 add，则所有**已经合规**的登记点都会被 R9 判成名单过期
+      //   （2026-10-18 首跑实测：15 条假红，全是已加谓词的 A 类）。
+      if (poolReadForm(body)) poolSeen.add(key);
+      const pc = poolClassCheck(key, body);
+      if (pc) {
+        if (pc.pending) exemptHits.push(`R6 ${key} — 豁免：${pc.pending}`);
+        else {
+          hits[pc.rule] += 1;
+          violations.push(`${pc.rule} ${key}：${pc.msg}`);
+        }
+      }
+    }
+  }
+  // R9：登记表里的键若本轮一个读点都没命中 ⇒ 名单已腐烂（函数改名 / 读点搬迁），
+  // 而门会安静地对一个不存在的对象「保证」它合规。与 R8 成对：R8 抓漏登记，R9 抓过期登记。
+  for (const [tbl, name] of [
+    [POOL_A, "A"],
+    [POOL_B, "B"],
+    [POOL_C, "C"],
+    [POOL_P, "P"],
+    [POOL_A_PENDING, "A(待补)"],
+  ]) {
+    for (const key of tbl.keys()) {
+      if (!poolSeen.has(key)) {
+        hits.R9 += 1;
+        violations.push(`R9 ${key}：登记为 ${name} 类，但本轮扫描找不到它的 reco_picks 读点 ⇒ 名单过期，须重定位或删除`);
       }
     }
   }
@@ -287,6 +420,35 @@ pub async fn report(db: &DatabaseConnection) -> u32 {
 `;
   cases.push({ name: "负控·只读出代际字段不设谓词", fns: mk(readOutOnly), expect: 1 });
 
+  // ── R5（2026-10-18，PLAN-mover-coverage-and-reflection-exit §0-C）──
+  // 负控 8：写候选池的段内把「池来源不可得」折成空数组 ⇒ 必须命中。
+  // 该段已带 as_of_date（R2 通过），所以唯一红来自 R5 —— 负控拆在真正决定它的那道守卫上。
+  const foldPool = `
+async fn persist_reco_response_picks(state: &AppState, response: &RecoResponse) -> usize {
+    let seed_pool_json = response.seed_pool_snapshot.clone().unwrap_or_else(|| "[]".to_string());
+    let written = persist_reco_picks(db, &flat, Some(seed_pool_json), weights, &generated_at, as_of_date).await;
+    written
+}
+`;
+  cases.push({ name: "负控·池快照折成空数组", fns: mk(foldPool), expect: 1 });
+
+  // 正控：原样透传 Option（拿不到就是 NULL）⇒ 不得报
+  const honestPool = foldPool
+    .replace('.unwrap_or_else(|| "[]".to_string())', "")
+    .replace("Some(seed_pool_json)", "seed_pool_json");
+  cases.push({ name: "正控·池快照原样透传", fns: mk(honestPool), expect: 0 });
+
+  // 负控 9：同段远处偶遇 unwrap_or_else 不得算折空（巨型函数假阳的那次实测反例）
+  const distant = `
+async fn start_cron_scheduler_big(db: &Db) -> usize {
+    let other = lookup(db).unwrap_or_else(|e| 0);
+    let _ = other;
+    let written = persist_reco_picks(db, &picks, scan.seed_pool_snapshot.clone(), weights, &generated_at, as_of_date).await;
+    written
+}
+`;
+  cases.push({ name: "负控·同段远处偶遇不算折空", fns: mk(distant), expect: 0 });
+
   let failed = 0;
   for (const c of cases) {
     const got = c.fns.reduce(
@@ -304,6 +466,33 @@ pub async fn report(db: &DatabaseConnection) -> u32 {
   } else {
     console.log("  ✅ 空骨架切出 0 段（分段器行为可预期）");
   }
+  // ── R6/R7/R8（2026-10-18，PLAN §P-g）：键级归类是纯函数，负控拆在它自己的守卫上 ──
+  const A_KEY = "src-tauri/src/commands/pool_scan.rs|load_pool_selection";
+  const B_KEY = "src-tauri/crates/analysis-engine/src/mover_recall.rs|load_picks_in_range";
+  const FIND = "reco_picks::Entity::find()";
+  const PRED = "reco_picks::Column::Synthetic.eq(0)";
+  const pcChecks = [
+    { name: "R6 A 类缺谓词 ⇒ 红", got: poolClassCheck(A_KEY, FIND), want: "R6" },
+    { name: "R6 A 类有谓词 ⇒ 不报", got: poolClassCheck(A_KEY, `${FIND}.filter(${PRED})`), want: null },
+    { name: "R7 池覆盖证据被加谓词 ⇒ 红", got: poolClassCheck(B_KEY, `${FIND}.filter(${PRED})`), want: "R7" },
+    { name: "R8 未登记读点 ⇒ 红", got: poolClassCheck("x.rs|brand_new_reader", FIND), want: "R8" },
+    { name: "R8 无读形态的段 ⇒ 不参与", got: poolClassCheck("x.rs|anything", "let a = 1;"), want: null },
+  ];
+  for (const c of pcChecks) {
+    const got = c.got === null ? null : c.got.rule || "pending";
+    const ok = got === c.want;
+    if (!ok) failed += 1;
+    console.log(`  ${ok ? "✅" : "❌"} ${c.name}（实得 ${got}）`);
+  }
+  // R9 的负控已经在真跑里自证过一轮：登记两个不存在的键时它报出 2 条假登记
+  //（2026-10-18 实测 R9 15 → 摘掉过期键后 0），这里只锁它的记账依据还在。
+  if (!poolReadForm(FIND)) {
+    console.log("  ❌ poolReadForm 认不出标准读形态 ⇒ R8/R9 的记账依据已失效");
+    failed += 1;
+  } else {
+    console.log("  ✅ poolReadForm 认出入口读形态（R8/R9 记账依据在位）");
+  }
+
   if (failed > 0) {
     console.error(`❌ 自检未通过：${failed} 条`);
     process.exit(1);
@@ -322,7 +511,7 @@ function main() {
   }
   console.log(
     `扫描：${files.length} 个文件 / ${r.examined} 个顶层函数段；` +
-      `R1 ${r.hits.R1} 处读侧、R2 ${r.hits.R2} 处写侧、R3 ${r.hits.R3} 处闭环读侧`,
+      `R1 ${r.hits.R1} 处读侧、R2 ${r.hits.R2} 处写侧、R3 ${r.hits.R3} 处闭环读侧、R5 ${r.hits.R5} 处折空、R6 ${r.hits.R6} 处漏排除、R7 ${r.hits.R7} 处误排除、R8 ${r.hits.R8} 处未登记、R9 ${r.hits.R9} 处名单过期`,
   );
   if (r.exemptHits.length > 0) {
     console.log(`显式豁免 ${r.exemptHits.length} 条（债务，不是清零）：`);

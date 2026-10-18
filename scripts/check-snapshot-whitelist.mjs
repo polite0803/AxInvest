@@ -9,6 +9,10 @@
 // 而降级文案还写着「等每日归档」——归档从来不会采它。
 // 形态复述：**申报了通道 ≠ 通道接上了**。白名单与申报是两处清单，缺一处就恒 miss。
 //
+// ⚠ 2026-10-18 现状更新：`get_consensus_eps` 已接研报 PIT 聚合、`get_holder_count`
+//   已接历史多期表，两者都改申报 `NativeDateParam`（不再是 NHS）⇒ `get_holder_count`
+//   的旧豁免已删除；本门的扫描面与三条规则不变。
+//
 // ## 规则
 // R1 硬：`PER_STOCK_METHODS ⊆ SNAPSHOT_METHODS` —— 只加一边等于没接（采集侧的个股臂
 //    与读取侧的 `contains` 各查一处）。
@@ -40,14 +44,8 @@ const LIST_FILE = path.join(ROOT, "src-tauri/crates/astock-data/src/daily_snapsh
  * 失效即删 —— 留着过期豁免等于把门改软。
  */
 const EXEMPT = [
-  {
-    method: "get_holder_count",
-    since: "2026-10-05",
-    why:
-      "eastmoney 申报 NHS（`RPT_HOLDERNUMLATEST` 无日期参数），但**有意不归档**：" +
-      "历史多期在 `RPT_F10_EH_HOLDERNUM`，计划改申报 NativeDateParam 走原生通道；" +
-      "当下回放按结构性缺口留痕（见 vendors/eastmoney.rs 该臂注释）。",
-  },
+  // get_holder_count 的豁免已于 2026-10-18 删除：eastmoney 改申报
+  // NativeDateParam（历史多期表 RPT_F10_EH_HOLDERNUM），不再需要归档兜底。
   {
     method: "get_peers",
     since: "2026-10-05",

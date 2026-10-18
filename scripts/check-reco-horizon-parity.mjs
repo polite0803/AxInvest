@@ -30,6 +30,8 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const STRATEGIES_DIR = "src-tauri/crates/analysis-engine/src/recommender/strategies";
 const SCORING = "src-tauri/crates/analysis-engine/src/recommender/scoring.rs";
 const RECO_MOD = "src-tauri/crates/analysis-engine/src/recommender/mod.rs";
+/** 荐股链尺度层 —— 门 n 要它**转发** harness 的档→尺度权威，而不是自带四臂表。 */
+const RECO_SCALE = "src-tauri/crates/analysis-engine/src/recommender/scale.rs";
 const MATRIX_SRC = "src-tauri/crates/analysis-engine/src/recommender/style_matrix.rs";
 const HOLDING = "src-tauri/crates/harness/src/holding_period.rs";
 const PANEL = "src/components/stock-analysis/RecommendationPanel.tsx";
@@ -177,8 +179,43 @@ function checkScaleSingleSource(files) {
   return { violations, scanned, exempted };
 }
 
-const LOCALE_LANGS = ["ar", "de", "en-US", "es", "fr", "hi", "ja", "ko", "ru", "zh-CN", "zh-TW"];
-const LOCALES_DIR = "src/i18n/locales";
+/**
+ * 门 n：**档 → 尺度阶梯只允许存在于 harness 一处**。
+ *
+ * 为什么必须锁（`PLAN-horizon-scale-alignment.md` D1）：2026-10-18 之前荐股链自己有一张
+ * `hourly/daily/weekly/quarterly` 的四臂表，分析链 harness 里是 `hourly/weekly/monthly/quarterly`
+ * —— 两套各自「有注释、有测试、有拍的板」，`cargo check` / `tsc` / 既有门全绿，而同一个
+ * 「短期」在两条链上不是同一尺度（短/中各差一档）。
+ *
+ * 判据两条：
+ * ① **荐股链里不得再出现 `Period::X => "<尺度名>"` 的臂** —— 这类臂就是第二份阶梯；
+ * ② `recommender/scale.rs` 必须**转发** `Period::scale_key()` —— 只判①的话，
+ *    把四臂表搬到别处（或删了转发却没接上）同样「零违规」，与「判据不存在≠绿」同族。
+ */
+const SCALE_NAMES = ["hourly", "daily", "weekly", "monthly", "quarterly"];
+
+function checkTierScaleLadderSingleSource(files, scaleSrc) {
+  const violations = [];
+  for (const { name, src } of files) {
+    src.split("\n").forEach((line, i) => {
+      if (line.trim().startsWith("//")) { return; }
+      const m = line.match(/Period::[A-Za-z]+\s*=>\s*"([a-z0-9_]+)"/);
+      if (m && SCALE_NAMES.includes(m[1])) {
+        violations.push(
+          `${name}:${i + 1} 写了第二个「档 → 尺度」臂（${m[1]}）⇒ 阶梯只允许在 harness::Period::scale_key，其他位置一律转发`,
+        );
+      }
+    });
+  }
+  if (scaleSrc !== null && !/scale_key\(\)/.test(scaleSrc)) {
+    violations.push(
+      "recommender/scale.rs 不再转发 `Period::scale_key()` ⇒ 「没有第二份表」可能只是把它搬到了别处",
+    );
+  }
+  return { violations, scanned: files.length + (scaleSrc === null ? 0 : 1) };
+}
+
+const LOCALE_LANGS = ["ar", "de", "en-US", "es", "fr", "hi", "ja", "ko", "ru", "zh-CN", "zh-TW"];const LOCALES_DIR = "src/i18n/locales";
 
 /**
  * 取 `const <name>… = [ … ];` 的数组体。
@@ -699,6 +736,37 @@ function selftest() {
       want: 0,
     },
     {
+      // 2026-10-18 前的真实形态：荐股链自带的四臂表（与分析链各差一档）
+      name: "n 负控（荐股链自带档→尺度四臂表）应红",
+      got: checkTierScaleLadderSingleSource(
+        [
+          {
+            name: "scale.rs",
+            src: 'pub fn scale_name(p: Period) -> &\'static str {\n    match p {\n        Period::Long => "quarterly",\n        _ => "daily",\n    }\n}',
+          },
+        ],
+        "pub fn scale_name(p: Period) -> &'static str { p.scale_key() }",
+      ).violations.length,
+      want: 1,
+    },
+    {
+      // 判据②：只删表、不转发 ⇒ 阶梯可能被搬走，必须红
+      name: "n 负控（scale.rs 不再转发权威）应红",
+      got: checkTierScaleLadderSingleSource(
+        [{ name: "scale.rs", src: "pub fn scale_name(_: Period) -> &'static str { \"daily\" }" }],
+        "pub fn scale_name(_: Period) -> &'static str { \"daily\" }",
+      ).violations.length,
+      want: 1,
+    },
+    {
+      name: "n 正控（转发权威且无四臂臂）应绿",
+      got: checkTierScaleLadderSingleSource(
+        [{ name: "scale.rs", src: "pub fn scale_name(p: Period) -> &'static str { p.scale_key() }" }],
+        "pub fn scale_name(p: Period) -> &'static str { p.scale_key() }",
+      ).violations.length,
+      want: 0,
+    },
+    {
       // 新加理由码却忘了补 11 语言翻译 —— 正是本轮要在动手前就被拦住的形态
       name: "g 负控（新不成立理由码没翻译）应红",
       got: checkAbsenceReasonTranslated(
@@ -1024,6 +1092,13 @@ function main() {
       fs.existsSync(path.join(ROOT, REFLECTION_CMD))
         ? checkMoverLabelConsumer(read(REFLECTION_CMD))
         : { violations: [REFLECTION_CMD + " 不存在 ⇒ 无从核对标签判据单源"], scanned: 0 },
+    ],
+    [
+      "n 档→尺度阶梯单源（荐股链禁第二份）",
+      checkTierScaleLadderSingleSource(
+        readStrategyFiles(),
+        fs.existsSync(path.join(ROOT, RECO_SCALE)) ? read(RECO_SCALE) : null,
+      ),
     ],
   ];
 

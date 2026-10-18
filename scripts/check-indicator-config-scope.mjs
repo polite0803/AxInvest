@@ -160,8 +160,8 @@ function selftest() {
     [
       "档模板塞进窗口域参数 ⇒ 必须点名 ind_macd_fast 焊档",
       checkAll(panel, cfg, seed, builder.replace(
-        'input_mapping.insert("period".to_string(), "scoring_period".to_string());',
-        'input_mapping.insert("period".to_string(), "scoring_period".to_string());\n    input_mapping.insert("ind_macd_fast".to_string(), "macd_fast".to_string());'
+        'input_mapping.insert("horizon".to_string(), "scoring_horizon".to_string());',
+        'input_mapping.insert("horizon".to_string(), "scoring_horizon".to_string());\n    input_mapping.insert("ind_macd_fast".to_string(), "macd_fast".to_string());'
       )).some((p) => p.includes("ind_macd_fast") && p.includes("焊成同一份")),
     ],
     [

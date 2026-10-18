@@ -288,6 +288,21 @@ jobs:
           node scripts/check-generation-scope-registry.mjs
           node scripts/check-reco-generation.mjs --selftest
           node scripts/check-reco-generation.mjs
+          # 逐档决策腿键级生产者-消费者对账门（2026-10-18，PLAN-mover-coverage-and-reflection-exit §0-A）：
+          # 现网两条恒缺席腿（sectorRotation / microstructure 各 80/80）的成因是输入键没人生产，
+          # 只有键级对账能查；与 scripts/ci-check.mjs 对应两条 step **逐字同源**。
+          node scripts/check-leg-producers.mjs --selftest
+          node scripts/check-leg-producers.mjs
+          # 清单覆盖率门（0-D / P-e，2026-10-18）：CI 里**只跑 selftest** —— C1/C2/C3/C4 要从
+          # 本机 PG 取 `market_universe_stats` 与清单构成，CI 无库，正式跑只会得到与覆盖率无关的
+          # 「取数失败」红。合成读数负控不依赖库，故进 CI；与 scripts/ci-check.mjs 逐字同源。
+          node scripts/check-universe-coverage.mjs --selftest
+          # 反思词表与落地层级三处同域门（2026-10-19，PLAN-mover-coverage 阶段 3 / 决-3）：
+          # 词表(Rust)⇄面板映射⇄11 份 locale 三份手抄，漂移不报错只让数字变难看；
+          # 现网实证 23/32 条标注单独是 other、层级轴 1/80 有值而面板缺省写死 "L1"。
+          # 只读源码与 locale（无 PG 依赖），与 scripts/ci-check.mjs 对应两条 step **逐字同源**。
+          node scripts/check-reflection-vocabulary.mjs --selftest
+          node scripts/check-reflection-vocabulary.mjs
           # T+N 窗口集唯一权威门（B3，2026-10-16，PLAN-llm-horizon-decision-and-parity §6.4/拍板 7）。
           # 与 scripts/ci-check.mjs 对应两条 step **逐字同源**。
           node scripts/check-validation-window-authority.mjs --selftest

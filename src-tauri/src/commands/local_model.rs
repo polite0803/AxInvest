@@ -1665,7 +1665,10 @@ fn extract_zip(archive_path: &Path, dest: &Path) -> Result<(), String> {
         let mut file = archive.by_index(i).map_err(|e| {
             String::from(ErrorResponse::from_error(e, ErrorCategory::Unrecoverable))
         })?;
-        let out_path = dest.join(file.mangled_name());
+        // zip 9 起 `mangled_name()` 返回 `ZipResult<PathBuf>`（内部先取 `name()`）。
+        let out_path = dest.join(file.mangled_name().map_err(|e| {
+            String::from(ErrorResponse::from_error(e, ErrorCategory::Unrecoverable))
+        })?);
 
         if file.is_dir() {
             std::fs::create_dir_all(&out_path).map_err(|e| {

@@ -986,7 +986,18 @@ async fn fetch_openclaw_skill_content(repo: &str) -> Result<MarketplaceSkillCont
         if file.is_dir() {
             continue;
         }
-        let name = file.name().to_string();
+        // zip 9 起 `name()` 返回 `ZipResult<Cow<str>>`；读不出名字就无法判定 SKILL.md / README.md
+        // 的优先级，按与上面 `by_index` 同一条口径直接中止，不拿空名去猜。
+        // 报错走错误码（`check-rust-raw-map-err` 棘轮：本文件基线 11 处，不得再加裸串）。
+        let name = file
+            .name()
+            .map_err(|e| {
+                crate::commands::error::ErrorResponse::err_with_detail(
+                    crate::commands::error_code::common::INVALID_INPUT,
+                    format!("读取 zip 条目 {i} 的名字失败: {e}"),
+                )
+            })?
+            .to_string();
         let lower = name.to_lowercase();
         if lower.ends_with(".md") {
             let depth = name.matches('/').count();

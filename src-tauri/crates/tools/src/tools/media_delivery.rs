@@ -566,7 +566,12 @@ fn estimate_docx_pages(data: &[u8]) -> Option<u64> {
             Ok(f) => f,
             Err(_) => continue,
         };
-        let name = file.name().to_string();
+        // zip 9 起 `name()` 返回 `ZipResult<Cow<str>>`；读不出名字就跳过该条目
+        // （与上面 by_index 失败即 continue 同一条退化纪律，本函数只做字数统计）。
+        let Ok(name) = file.name() else {
+            continue;
+        };
+        let name = name.to_string();
         if name.ends_with("document.xml") {
             let mut content = String::new();
             if std::io::Read::read_to_string(&mut file, &mut content).is_err() {

@@ -614,7 +614,14 @@ pub fn extract_backup_zip(
         let mut entry = archive
             .by_index(i)
             .map_err(|e| AxAgentError::Gateway(format!("ZIP read error: {}", e)))?;
-        let name = entry.name().to_string();
+        // zip 9 起 `name()` 返回 `Result<Cow<str>, ZipError>`。**这里必须失败即中止而不是取默认空名**：
+        // 下面紧跟着就是 zip-slip 守卫（`..` / 前导斜杠），空名会直接通过守卫被还原出去。
+        let name = entry
+            .name()
+            .map_err(|e| {
+                AxAgentError::Gateway(format!("ZIP entry name unreadable, aborting restore: {e}"))
+            })?
+            .to_string();
         let size = entry.size();
 
         if name.contains("..") || name.starts_with('/') || name.starts_with('\\') {

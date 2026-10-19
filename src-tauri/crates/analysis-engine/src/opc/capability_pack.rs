@@ -733,7 +733,10 @@ pub async fn import_capability_pack(
     let mut has_manifest = false;
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| format!("读取条目失败: {e}"))?;
-        let entry_name = entry.name().to_string();
+        // zip 9 起 `name()` 返回 `ZipResult<Cow<str>>`。**名字读不出来就必须中止**：
+        // 下面紧跟着是 zip-slip 判据（绝对路径 / `..`），空名会伪装成合法条目被解包出去。
+        let entry_name =
+            entry.name().map_err(|e| format!("读取条目名失败，已拒绝解包: {e}"))?.to_string();
         // P2-3：zip-slip 防护——拒绝绝对路径与 `..` 穿越（恶意 .opcip 可写任意目录）
         let normalized = entry_name.replace('\\', "/");
         if std::path::Path::new(&normalized).is_absolute()

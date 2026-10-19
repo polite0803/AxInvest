@@ -245,7 +245,7 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "chrono"] }
 urlencoding = "2"
 uuid = { workspace = true }
 walkdir = "2"
-zip = "8"
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 font-kit = "0.14"

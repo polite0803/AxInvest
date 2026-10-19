@@ -697,8 +697,11 @@ async fn install_from_github_zipball(
     let top_dir = archive
         .file_names()
         .next()
-        .and_then(|n| n.split('/').next())
-        .map(String::from)
+        // zip 9 起 `file_names()` 逐条产出 `ZipResult<Cow<str>>`；首条名字读不出来
+        // 就按「空归档」处理，不拿一个猜出来的目录名去装技能。
+        // Cow 是闭包内的局部值，所以必须在这里就转成 String，不能返回它的切片。
+        .and_then(|n| n.ok())
+        .and_then(|n| n.split('/').next().map(str::to_string))
         .ok_or("Empty archive")?;
 
     let commit = top_dir.split('-').next_back().unwrap_or("unknown").to_string();
@@ -788,9 +791,9 @@ async fn install_from_openclaw(pkg: &str, target_dir: &Path) -> Result<(String, 
     let top_dir = archive
         .file_names()
         .next()
-        .and_then(|n| n.split('/').next())
-        .filter(|s| !s.is_empty())
-        .map(String::from);
+        .and_then(|n| n.ok()) // zip 9：条目名是 `ZipResult<Cow<str>>`，读不出即视为无顶层目录
+        .and_then(|n| n.split('/').next().map(str::to_string))
+        .filter(|s| !s.is_empty());
 
     // 安全解压（含路径遍历防护与二次验证），复用公共逻辑
     extract_zip_secure(&mut archive, temp_dir.path())?;
@@ -858,11 +861,20 @@ fn extract_zip_secure<R: std::io::Read + std::io::Seek>(
         if file.is_dir() {
             continue;
         }
+        // zip 9 起 `name()` 返回 `ZipResult<Cow<str>>`。**读不出来就中止**：它同时是
+        // 符号链接判据的报错内容与 `safe_zip_path`（zip-slip 判据）的入参，缺它就没有判据。
+        // 报错走错误码（`check-rust-raw-map-err` 棘轮：本文件基线 10 处，不得再加裸串）。
+        let entry_name = file.name().map_err(|e| {
+            crate::commands::error::ErrorResponse::err_with_detail(
+                crate::commands::error_code::common::INVALID_INPUT,
+                format!("读取 zip 条目 {i} 的名字失败: {e}"),
+            )
+        })?;
         // 拒绝符号链接条目，防止通过链接逃逸目标目录
         if file.unix_mode().is_some_and(|m| m & 0o170000 == 0o120000) {
-            return Err(format!("Zip entry contains a symlink: {}", file.name()));
+            return Err(format!("Zip entry contains a symlink: {entry_name}"));
         }
-        let out_path = safe_zip_path(dest, file.name())?;
+        let out_path = safe_zip_path(dest, &entry_name)?;
         if let Some(parent) = out_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
                 String::from(crate::commands::error::ErrorResponse::from_error(

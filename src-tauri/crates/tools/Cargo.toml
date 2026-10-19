@@ -34,7 +34,7 @@ regex = "1"
 reqwest = { workspace = true, features = ["multipart", "cookies"] }
 rhai = { version = "1", features = ["sync"] }
 rusqlite = { version = "0.39", features = ["bundled"] }
-rust_xlsxwriter = "0.96"
+rust_xlsxwriter = "0.100"
 sea-orm = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -47,7 +47,7 @@ urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2"
 which = "8"
-zip = "8"
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile = "3"

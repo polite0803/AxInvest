@@ -486,7 +486,7 @@ pub const RELATION_DECLS: &[RelationDecl] = &[
         domain: None,
         range: None,
         meaning: "实体属于某行业（`stock_industry.csv` 导入）",
-        evidence: "src/commands/knowledge.rs:2923（另有文档示例 harness/src/knowledge_graph.rs:195）",
+        evidence: "src/commands/knowledge.rs:2928（另有文档示例 harness/src/knowledge_graph.rs:195）",
         observed: true,
     },
     RelationDecl {
@@ -495,7 +495,7 @@ pub const RELATION_DECLS: &[RelationDecl] = &[
         domain: None,
         range: None,
         meaning: "实体关联概念（`stock_concept.csv` 导入）",
-        evidence: "src/commands/knowledge.rs:2908",
+        evidence: "src/commands/knowledge.rs:2913",
         observed: true,
     },
     // ── 只有文档、没有写入方的取值（悬空契约）──
@@ -515,7 +515,7 @@ pub const RELATION_DECLS: &[RelationDecl] = &[
 
 /// **前缀族**：id 不固定、按模板生成的关系类型。
 ///
-/// 存在的理由有据可查：`src/commands/knowledge.rs:2939` 用
+/// 存在的理由有据可查：`src/commands/knowledge.rs:2944` 用
 /// `format!("employ_{position}")` 生成 id —— 职位有多少个，词表就有多少项，
 /// 逐条登记不可行，只能登记**族**。
 #[derive(Debug, Clone, Copy)]
@@ -530,7 +530,7 @@ pub struct RelationFamilyDecl {
 pub const RELATION_FAMILIES: &[RelationFamilyDecl] = &[RelationFamilyDecl {
     prefix: "employ_",
     meaning: "高管任职：公司 → 人物，id 形如 `employ_ceo` / `employ_cfo`",
-    evidence: "src/commands/knowledge.rs:2939（`format!(\"employ_{position}\")`）",
+    evidence: "src/commands/knowledge.rs:2944（`format!(\"employ_{position}\")`）",
     observed: true,
 }];
 
@@ -1129,7 +1129,7 @@ mod type_vocabulary_tests {
     }
 
     /// CSV 导入路径写入的关系必须已登记（2026-09-14 修正：`in_industry` **不是**悬空，
-    /// 它在 `src/commands/knowledge.rs:2923` 有写入方）。
+    /// 它在 `src/commands/knowledge.rs:2928` 有写入方）。
     ///
     /// ⚠ **本表对 `knowledge.rs` 的行号引用已漂移六次**：`1725 → 1738 → 1745 → 1749 → 1748`
     /// → 2026-09-25 前段 IPC 事件名枚举化致 4 处硬拦（空行/`continue;`），借机把 8 处引用
@@ -1401,7 +1401,7 @@ mod type_vocabulary_tests {
     /// 悬空契约清单必须与文档一致。
     ///
     /// 2026-09-14 修正：`in_industry` 曾被我误登记为悬空 —— 实际在
-    /// `src/commands/knowledge.rs:2923` 有写入方（CSV 导入）。教训：
+    /// `src/commands/knowledge.rs:2928` 有写入方（CSV 导入）。教训：
     /// **grep 字面量 `"in_industry"` 找不到写入方，不代表没有** ——
     /// 那条路径的值是 `format!` / `.into()` 构造出来的。悬空判定必须沿
     /// **数据来源**追，不能只 grep 常量。

@@ -3634,7 +3634,7 @@ mod pptx_compat {
         let mut parts: HashSet<String> = HashSet::new();
         for i in 0..archive.len() {
             let f = archive.by_index(i).expect("测试：by_index 应成功");
-            parts.insert(f.name().to_string());
+            parts.insert(f.name().expect("测试：name() 应成功").to_string());
         }
 
         // 必需部件清单（PowerPoint 兼容性硬要求）
@@ -3931,7 +3931,8 @@ mod word_image_test {
         let mut has_png = false;
         for i in 0..archive.len() {
             let f = archive.by_index(i).expect("测试：by_index 应成功");
-            if f.name().starts_with("word/media/") && f.name().ends_with(".png") {
+            let name = f.name().expect("测试：name() 应成功");
+            if name.starts_with("word/media/") && name.ends_with(".png") {
                 has_png = true;
                 break;
             }
@@ -4204,7 +4205,7 @@ mod xlsx_chart_test {
         let mut has_chart_rels = false;
         for i in 0..archive.len() {
             let f = archive.by_index(i).expect("测试：by_index 应成功");
-            let name = f.name();
+            let name = f.name().expect("测试：name() 应成功");
             if name.starts_with("xl/charts/chart") && name.ends_with(".xml") {
                 has_chart_xml = true;
             }
@@ -4308,7 +4309,8 @@ mod xlsx_chart_test {
         let mut has_chart = false;
         for i in 0..archive.len() {
             let f = archive.by_index(i).expect("测试应成功");
-            if f.name().starts_with("xl/charts/") && f.name().ends_with(".xml") {
+            let name = f.name().expect("测试：name() 应成功");
+            if name.starts_with("xl/charts/") && name.ends_with(".xml") {
                 has_chart = true;
                 break;
             }
@@ -4339,7 +4341,8 @@ mod xlsx_chart_test {
         let mut has_chart = false;
         for i in 0..archive.len() {
             let f = archive.by_index(i).expect("测试应成功");
-            if f.name().starts_with("xl/charts/") && f.name().ends_with(".xml") {
+            let name = f.name().expect("测试：name() 应成功");
+            if name.starts_with("xl/charts/") && name.ends_with(".xml") {
                 has_chart = true;
                 break;
             }

@@ -216,9 +216,14 @@ fn unpack_zip(
 
         // 路径逃逸防护：enclosed_name 返回 None 表示条目越界（绝对路径 / `..`）
         let Some(out_path) = entry.enclosed_name() else {
+            // zip 9 起 `name()` 返回 `ZipResult<Cow<str>>`；`enclosed_name()` 内部就是
+            // `name().ok()?`，所以名字读不出来同样落到这个拒绝分支 —— 报错内容取不到名字时
+            // 明说「不可读」，不拿空串伪装成一个合法条目名。
+            let shown =
+                entry.name().map_or_else(|_| "<条目名不可读>".to_string(), |n| n.to_string());
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("ZIP 条目路径越界，已拒绝: {}", entry.name()),
+                format!("ZIP 条目路径越界，已拒绝: {shown}"),
             ));
         };
 

@@ -881,7 +881,12 @@ fn extract_epub(file_path: &Path) -> Result<String> {
     use std::io::Read;
     let mut entries: Vec<String> = Vec::new();
     for idx in 0..archive.len() {
-        let name = archive.by_index(idx).map(|e| e.name().to_string()).unwrap_or_default();
+        // zip 9 起 `name()` 返回 `Result<Cow<str>, ZipError>`；取不到名字时留空串，
+        // 下面的后缀匹配自然跳过该条目（与外层 by_index 失败即跳过的口径一致）。
+        let name = archive
+            .by_index(idx)
+            .map(|e| e.name().unwrap_or_default().to_string())
+            .unwrap_or_default();
         if name.ends_with(".xhtml") || name.ends_with(".html") || name.ends_with(".htm") {
             entries.push(name);
         }

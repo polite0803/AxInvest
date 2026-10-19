@@ -1533,10 +1533,30 @@ type AlgoToolRow = (
 ///   ⚠ **不改任何决策数值**（门在荐股链；分析链只加展示性标注）⇒ 历史决策重算不受影响，
 ///     但摘要文案与分支行 schema 变了，换代让「新旧摘要形态」可按代区分。
 ///
+/// **v169 → v170（2026-10-19）**：逐档扇出补 `relative_strength` 恒等键（全量门红反推出来的漏项）
+///   ① `tier_fanout_inputs_are_complete` 抓到：ultra_short / short / mid 三张档子模板都读
+///      `relative_strength.<档>`，而父图那三个 `SubWorkflow` 节点的 `input_mapping` **从来没带这个变量**
+///      —— 子执行侧是严格 `map_inputs` ⇒ 后果不是「那条腿不生效」，而是**该档整段子执行失败**；
+///   ② 同批改 `seed_consistency_tests.rs` 的齐备态值表（`excess_return_pct` 用 002696@09-28 真读数），
+///      否则「齐备态」在那个键上其实还是 `Dynamic::UNIT`。
+///   ⚠ **必须换代**：v169 已被现网播种过一次，不 bump 则这次修好的扇出**永远不会进库**
+///      —— 本条正是「改了图内容却没 bump 版本」这条纪律的自证（当前无门覆盖它，见 PLAN 阶段 5 收口）。
+///
 /// `pub` 而非 `pub(crate)`：`axagent-batch-rerun` 的「版本联查完整性」要读这**同一个**数字
 /// （bin 是独立 crate，`pub(crate)` 读不到）。它不能被抄第二份 —— 本条的用处正是
 /// 对比「代码会用的图版本」与「库里已播种到的版本」，两份数字一旦各写各的就永远对不上。
-pub const TEMPLATE_VERSION: i32 = 169;
+///
+/// **v170 → v172（2026-10-20 两跳）**：荐股反思闭环生效闸 `reco_ic_gate` 由 shadow 转 **on**
+///   （变量默认值变更，图结构不动）。前置条件已具备：IC 代际筛样就绪、写入侧「只降不升 +
+///   样本不足保持先验」棘轮、读取侧把历史 >1.0 的提升夹回 1.0。
+///   ⚠ **换代只是必要条件，不是充分条件**（v171 就是这么错的，当天被现网读数推翻）：
+///   换代后库 `version` 确实是 171，而 `variables` 里仍是 `"reco_ic_gate","value":"shadow"` ——
+///   `merge_variable_values` 的「新定义 + 无条件保留旧值」让 bump 本身什么也改不了。
+///   ⇒ v172 追加第三条一次性覆写门（调用点 v172 段，与 DCF／kline 两个门同型、各自独立判断）。
+///   ⚠ 门值取 **172 而不是 171**：现网已被 171 播种过一次，门读 `previous_version < 门值` ⇒
+///   用 171 时那批库的 `previous_version` 恰为 171，条件不成立、覆写永不发生。
+///   承载覆写的版本号必须**严格大于**已被播种掉的版本号。
+pub const TEMPLATE_VERSION: i32 = 172;
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -7629,6 +7649,35 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             &variables_val,
             "kline_limit",
             serde_json::json!(super::seed_variables::DEFAULT_ANALYST_KLINE_LIMIT),
+        )
+    } else {
+        variables_val
+    };
+
+    // ── v172(2026-10-20)：`reco_ic_gate` 存量覆写（与上面两个门同型的**一次性**门）──
+    // 为什么必须覆写：`merge_variable_values` 无条件保留旧值，而旧值 `shadow` 正是本次
+    // 裁定要改掉的那一个 ⇒ 只改 `seed_variables` 的出厂默认是**假修复**。
+    // 实证（2026-10-20 现网读数）：库 `version` 已换代到 171，`variables` 里仍是
+    // `"reco_ic_gate","value":"shadow"` —— 版本门生效了、值没生效，二者是两条独立水位线。
+    //
+    // ⚠ 本常量刻意写在函数体内、而不是并到模块级那组 `_MIGRATION_VERSION` 旁边：
+    //   那处位于本文件 ~1562 行，而其**下方**有 6 处按行号写的注释引用
+    //   （`seed_stock_analysis.rs:3313/4740/4939/6101/6190/6819`），在它们之前插行
+    //   会让那些引用整体移位、静默失准（`check-single-source-facts.mjs` 的判据面）。
+    const RECO_IC_GATE_MIGRATION_VERSION: i32 = 172;
+    // 与 DCF / kline 两个门同一条不变量：门的水位线不得超前于落库版本号，
+    // 否则 DB 停在「仍低于门」的版本上 ⇒ 门关不上，此后任何无关升版都会把用户在面板
+    // 调过的闸重新打回出厂值。写成编译期断言（同那两个门的安置理由：靠人记得跑不可靠）。
+    const _: () = assert!(
+        TEMPLATE_VERSION >= RECO_IC_GATE_MIGRATION_VERSION,
+        "版本号与荐股闭环闸门水位线倒挂：`TEMPLATE_VERSION` 必须 ≥ 门值。\
+         危害与 DCF／kline 门同型（门关不上 ⇒ 每次无关升版都把 reco_ic_gate 打回默认）。"
+    );
+    let variables_val = if previous_version.is_none_or(|v| v < RECO_IC_GATE_MIGRATION_VERSION) {
+        force_variable_value(
+            &variables_val,
+            "reco_ic_gate",
+            serde_json::json!(super::seed_variables::DEFAULT_RECO_IC_GATE),
         )
     } else {
         variables_val

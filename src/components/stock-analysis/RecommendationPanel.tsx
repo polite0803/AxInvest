@@ -21,13 +21,19 @@ import type {
   StockConsensus,
   StyleKey,
 } from "@/types/stock-analysis";
-import { Alert, App, Button, Card, Checkbox, Collapse, Empty, Modal, Spin, Tabs, Tag, Tooltip } from "antd";
+import { Alert, App, Button, Card, Checkbox, Collapse, Empty, Modal, Select, Spin, Tabs, Tag, Tooltip } from "antd";
 import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { RecoHistoryModal } from "./RecoHistoryModal";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
+
+/**
+ * 扫描板块范围的可选值 —— 与后端 `recommender::boards::VALID_SCOPES` 逐字一致。
+ * `auto` = 按本地日轮动一个板块（默认）；`all` = 四板块都扫（请求量约 138 次，仅用户显式选择）。
+ */
+const RECO_BOARD_SCOPES = ["auto", "sh_main", "sz_main", "chinext", "star", "all"] as const;
 
 interface RecommendationPanelProps {
   /**
@@ -83,6 +89,9 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const anchorMode = useTimeAnchorStore((s) => s.mode);
 
   const [period, setPeriod] = useState<PeriodKey>("short");
+  // 荐股扫描的板块范围（仅实盘生效）：auto=按日轮动一个板块；其余为指定板块。
+  // 由后端设置 `reco_board_scope` 持久化，下一次刷新起生效。
+  const [boardScope, setBoardScope] = useState<string>("auto");
   const [data, setData] = useState<RecoResponse | null>(null);
   // 一次拿四档（R-0）：整批结果含**逐档失败归因**；`data` 是当前档的切片。
   // 整批必须留在状态里，否则切档又要各扫一遍，且「本档失败」与「本档无推荐」会分不清。
@@ -217,10 +226,12 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
    * (避免用户每次打开都触发一次新的后端推荐任务)。
    *
    * 行为:
-   * - live 模式 → 调 get_cached_recommendation(period) 读最新缓存
-   * - replay 模式 → 没有缓存概念,直接回退到 load()(同原行为)
+   * - live 模式 → 调 get_cached_recommendation(period) 读实盘代最新一批
+   * - replay 模式 → 调同一条命令但**带上 asOfDate**，读库里那一代（回放候选自 2026-10-13
+   *   起与实盘同表落库）；该日库里没有批次才回退到 load() 重扫
    *
-   * 缓存命中时 isCached=true,UI 上显示"缓存"灰底小标签;
+   * 缓存命中时 isCached=true,UI 上显示"缓存"灰底小标签（**回放代不打这个标签**，
+   * 它读的是库里那一天的批次，不是「上一次实盘」）；
    * 无缓存(emptyKind=noData)时改用 emptyNoCache 文案,引导用户点"刷新"。
    */
   const loadCache = useCallback(async () => {
@@ -241,8 +252,13 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       setGeneratedAtText(formatGeneratedAtText(inBatch.generatedAt, i18n.language));
       return;
     }
-    // replay 模式没有缓存(缓存永远是 live 产物),回退到实时
-    if (anchorMode !== "live") {
+    // 回放态**也有**可回读的代际：2026-10-13 裁定「回放候选同表落库、靠 as_of_date 分池」，
+    // 而这条命令的谓词当时写死 `as_of_date IS NULL` ⇒ 回放态一行都读不到，只能每切一档
+    // 重跑一次整批扫描（扫描能否出货取决于那一刻 push2his 可不可达）。
+    // 下面按那一代回读；读空（该日从未扫过）才回退到实时扫描 —— 与 live 的「无缓存⇒刷新」同形。
+    // 原注释「replay 模式没有缓存(缓存永远是 live 产物)」在落库裁定之后已不成立。
+    if (anchorMode !== "live" && asOfDate === null) {
+      // 回放态却没选定日期 ⇒ 无从指定读哪一代，只能重扫
       void load();
       return;
     }
@@ -251,9 +267,17 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     setEmptyKind(null);
     setErrorDetail(null);
     try {
-      const r = await invoke<RecoResponse | null>("get_cached_recommendation", { period });
+      const r = await invoke<RecoResponse | null>(
+        "get_cached_recommendation",
+        anchorMode === "live" ? { period } : { period, asOfDate },
+      );
       if (myToken !== reqTokenRef.current) { return; }
       if (!r || !r.picks || Object.keys(r.picks).length === 0) {
+        if (anchorMode !== "live") {
+          // 该日库里没有批次 ⇒ 回退到实时扫描（不静默显示「无候选」）
+          load();
+          return;
+        }
         setData(r ?? null);
         // 缓存为空时区分文案,提示用户点"刷新"重新拉取
         if (r?.errorDetail) {
@@ -265,7 +289,8 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
         return;
       }
       setData(r);
-      setIsCached(true);
+      // 回放态读的是库里那一代，不是「上一次实盘」⇒ 不打缓存标签，只标该批的产生时刻
+      setIsCached(anchorMode === "live");
       setGeneratedAtText(formatGeneratedAtText(r.generatedAt, i18n.language));
     } catch (e: unknown) {
       console.error("[RecommendationPanel] loadCache failed:", e);
@@ -276,13 +301,37 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       setEmptyKind("connectionFailed");
     }
     if (myToken === reqTokenRef.current) { setLoading(false); }
-  }, [period, anchorMode, i18n.language, load, setBatch]);
+  }, [period, anchorMode, asOfDate, i18n.language, load, setBatch]);
 
   // Period 切换时优先读缓存；首次挂载（Tab 切走后 destroyOnHidden 重新渲染）
   // 也走缓存，避免每次切回 Tab 都后台刷新（用户原话："简直就是傻逼逻辑"）。
   // mount 时仍触发一次策略回测统计 (triggerBacktest 内部用 backtestTriggeredRef
   // 去重,不会与 loadCache 内部的调用重复),保证面板 mount 后立即有历史回测数据可见。
   const initialMountRef = useRef(true);
+
+  // 扫描板块范围：读持久化设置（读不到按 auto，不阻断面板）。
+  useEffect(() => {
+    void (async () => {
+      try {
+        const v = await invoke<string>("get_reco_board_scope");
+        if (typeof v === "string" && (RECO_BOARD_SCOPES as readonly string[]).includes(v)) {
+          setBoardScope(v);
+        }
+      } catch (e) {
+        console.error("[RecommendationPanel] get_reco_board_scope failed:", e);
+      }
+    })();
+  }, []);
+
+  const changeBoardScope = useCallback(async (v: string) => {
+    setBoardScope(v);
+    try {
+      await invoke("set_reco_board_scope", { scope: v });
+    } catch (e) {
+      console.error("[RecommendationPanel] set_reco_board_scope failed:", e);
+    }
+  }, []);
+
   useEffect(() => {
     if (initialMountRef.current) {
       initialMountRef.current = false;
@@ -377,7 +426,9 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const poolFallbackOnly = (() => {
     const o = data?.seedPoolOrigin;
     if (!o) { return false; }
-    return o.hot === 0 && o.industry === 0 && o.fallback > 0;
+    // `user` / `mover` 也算「当日的真实候选」之外的用户/系统来源：注入了自选股或涨幅榜时，
+    // 池子不再是「只剩内置样本」，不该再报这条警告（否则警告会变成常亮噪声）。
+    return o.hot === 0 && o.industry === 0 && o.user === 0 && o.mover === 0 && o.fallback > 0;
   })();
 
   // 本次运行里造成「候选池只剩内置样本」的那两条降级归因。
@@ -429,6 +480,20 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
               {t("stockAnalysis.recommendation.cachedBadge")}
             </Tag>
           )}
+          <Tooltip title={t("stockAnalysis.recommendation.boardScopeTip")}>
+            <Select
+              size="small"
+              value={boardScope}
+              onChange={changeBoardScope}
+              data-testid="reco-board-scope"
+              popupMatchSelectWidth={false}
+              style={{ width: 104 }}
+              options={RECO_BOARD_SCOPES.map((s) => ({
+                value: s,
+                label: t(`stockAnalysis.recommendation.boardScope_${s}`),
+              }))}
+            />
+          </Tooltip>
           <Button size="small" loading={loading} onClick={load}>
             {t("stockAnalysis.settings.panels.refresh")}
           </Button>
@@ -558,19 +623,24 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
             后端逐风格的 `degradedReasons` 归因文本此前从未被消费（只列风格名），
             用户读不到「为什么这个风格在这个截止日降级」。 */
         }
-        {data && hasDegraded && asOfDate && (
+        {data && hasDegraded && (
           <Alert
             type="warning"
             showIcon
             className="text-xs! mb-2!"
             title={
               <span className="text-xs">
-                {t("stockAnalysis.recommendation.bannerDegraded", {
-                  styles: Array.from(degradedStyleSet)
+                {
+                  /* 标题只报「哪些风格降级」，不预设原因：旧文案写死「因 as-of {{date}} 截断」，
+                    而实际原因还可能是 bear 硬门、指数取不到、财报预检…… 通用文案会盖过下面
+                    逐条的真实原因（2026-10-20 截图实证：趋势跟踪明明写的是「bear 硬门剔除 29 条」，
+                    标题却在说「截断」）。具体原因只由 degradedReasons 逐条给。 */
+                }
+                {`${t("stockAnalysis.recommendation.degradedStylesTitle")}: ${
+                  Array.from(degradedStyleSet)
                     .map((s) => t(`stockAnalysis.recommendation.style${capitalize(s)}`))
-                    .join(" / "),
-                  date: asOfDate,
-                })}
+                    .join(" / ")
+                }`}
               </span>
             }
             description={Array.from(degradedStyleSet)

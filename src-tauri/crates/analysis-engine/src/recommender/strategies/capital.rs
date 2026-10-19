@@ -219,6 +219,15 @@ impl CapitalStrategy {
             stop_source: None,
             position_source: None,
 
+            // ⚠ 本分支是**降级占位**（无资金流，仅量价代理）⇒ 恒 `synthetic: true`。
+            //   回放（as-of）语义下这不是偶发：`get_money_flow` 的 as-of 通道只放
+            //   NativeDateParam 源（eastmoney/快照），失败即返回 None ⇒ 本函数被调用
+            //   （`scan_one` 的 `mf.as_ref().is_none_or(|m| !mf_is_effective(m))` 分支），
+            //   于是 capital 在回放里产出的每一行都不是 `synthetic=0`。
+            //   2026-10-19 现网读数（as_of=2026-09-28，41 批）：capital×long 真行累计 71 条，
+            //   且集中在资金流 as-of 通道可用的少数批次（14:14–21:46）；22:01 之后各批 0 条 ——
+            //   与 min_confidence（=50）/ regime 硬门 / enough_bars 都无关。
+            //   处置：这是「没有资金流就不冒充资金驱动」的如实标注，**不得**改成 false。
             synthetic: true,
         })
     }

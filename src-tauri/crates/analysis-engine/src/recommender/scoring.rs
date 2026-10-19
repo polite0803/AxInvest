@@ -218,11 +218,20 @@ pub fn calc_position_fallback_mult(base: f64, confidence: u8, period: Period) ->
     (base * c * period.factor() * 100.0).round() / 100.0
 }
 
-/// 同票去重：保留 confidence 最高，标注次选风格
+/// 同票去重：保留 confidence 最高，标注次选风格。
+///
+/// ⚠ **必须保序且确定**（2026-10-20）：下游 top-N 截断在置信度并列时按插入序做稳定排序，
+/// 而 `HashMap::into_values` 的迭代顺序带着**每进程随机的哈希种子** ⇒ 同一 as_of 的同一批
+/// 候选，每次跑都可能换一批出票。实测（09-28 回放 02:49 批）：`mid × watchlist` 28 条候选
+/// 全是 conf=50，三条带分析结论的票（002696 持有 / 300604 持有 / 600406 买入）被随机切掉，
+/// 只留下 600887；同一输入在上一批留下的又是另一只。这不是「评分压出」，是随机丢弃。
+/// 修法：用「首见顺序表 + HashMap 索引」替代 `into_values`，合并逻辑不变。
 pub fn dedup_and_merge(picks: &mut Vec<RecoPick>) {
+    let mut order: Vec<String> = Vec::new();
     let mut by_code: HashMap<String, RecoPick> = HashMap::new();
     for p in picks.drain(..) {
-        if let Some(existing) = by_code.get_mut(&p.stock_code) {
+        let code = p.stock_code.clone();
+        if let Some(existing) = by_code.get_mut(&code) {
             // 同票被多风格命中
             if p.confidence > existing.confidence {
                 // p 取代 existing，existing 的风格 + 两者各自的 secondary 合入
@@ -245,10 +254,11 @@ pub fn dedup_and_merge(picks: &mut Vec<RecoPick>) {
                 existing.secondary_styles = secondaries;
             }
         } else {
-            by_code.insert(p.stock_code.clone(), p);
+            order.push(code.clone());
+            by_code.insert(code, p);
         }
     }
-    picks.extend(by_code.into_values());
+    picks.extend(order.into_iter().filter_map(|code| by_code.remove(&code)));
 }
 
 /// 按风格分组 + 每组 top N + 同组置信度归一化
@@ -291,7 +301,11 @@ pub fn group_by_style_and_trim_with_audit(
             // 旧实现此处把 range 回退成 100.0，于是 normalized 恒等于 0，
             // 再被 clamp 到下限 1 —— 真实 pick 的置信度被整体压成 1，
             // 反而低于 synthetic 兜底（conf=40），真实信号在展示上被假数据反超。
-            v.sort_by_key(|b| std::cmp::Reverse(b.confidence));
+            // 置信度并列时的次序：**真实出票优先于兜底占位**（`false < true`），再按插入序
+            // （`sort_by_key` 是稳定排序）。旧实现只按 confidence，而 watchlist 全组恒 50 ⇒
+            // 谁留谁走取决于去重时的随机哈希序（见 `dedup_and_merge` 的注释）：
+            // 2026-10-20 实测三条带分析结论的票被随机切掉、只留下一条。
+            v.sort_by_key(|b| (b.synthetic, std::cmp::Reverse(b.confidence)));
             trimmed.extend(drain_trimmed(v, style, per_style_limit));
             continue;
         }
@@ -309,7 +323,11 @@ pub fn group_by_style_and_trim_with_audit(
                 original
             ));
         }
-        v.sort_by_key(|b| std::cmp::Reverse(b.confidence));
+        // 置信度并列时的次序：**真实出票优先于兜底占位**（`false < true`），再按插入序
+        // （`sort_by_key` 是稳定排序）。旧实现只按 confidence，而 watchlist 全组恒 50 ⇒
+        // 谁留谁走取决于去重时的随机哈希序（见 `dedup_and_merge` 的注释）：
+        // 2026-10-20 实测三条带分析结论的票被随机切掉、只留下一条。
+        v.sort_by_key(|b| (b.synthetic, std::cmp::Reverse(b.confidence)));
         trimmed.extend(drain_trimmed(v, style, per_style_limit));
     }
     (by_style, trimmed)
@@ -548,6 +566,81 @@ mod tests {
             .collect();
         let grouped = group_by_style_and_trim(&mut picks, 10);
         assert_eq!(grouped.get(&Style::Trend).unwrap().len(), 10);
+    }
+
+    fn pick_of(code: &str, style: Style, confidence: u8, synthetic: bool) -> RecoPick {
+        RecoPick {
+            stock_code: code.into(),
+            stock_name: code.into(),
+            sector: None,
+            style,
+            period: Period::Short,
+            price: 10.0,
+            entry_low: 9.5,
+            entry_high: 10.5,
+            stop_loss: 9.0,
+            target_price: 11.0,
+            position_pct: 3.0,
+            holding_days: 5,
+            confidence,
+            reasons: vec![],
+            risk_notes: vec![],
+            secondary_styles: vec![],
+            confidence_percentile: None,
+            prior_source: None,
+            prior_samples: None,
+            evidence_score: None,
+            stop_source: None,
+            position_source: None,
+            synthetic,
+        }
+    }
+
+    /// 去重必须**保序**：下游截断在置信度并列时依赖插入序，而 `HashMap::into_values`
+    /// 带每进程随机种子 ⇒ 同一输入每次可能出一批不同的票（2026-10-20 实测：
+    /// 09-28 回放的同一批候选里，三条带分析结论的票被随机切掉、只留下一条）。
+    #[test]
+    fn dedup_preserves_first_seen_order() {
+        let mut picks = vec![
+            pick_of("002696", Style::Watchlist, 50, false),
+            pick_of("600887", Style::Watchlist, 50, false),
+            pick_of("002696", Style::Trend, 60, false), // 同票更高分：位置不得改变
+            pick_of("300604", Style::Watchlist, 50, false),
+        ];
+        dedup_and_merge(&mut picks);
+        let codes: Vec<&str> = picks.iter().map(|p| p.stock_code.as_str()).collect();
+        assert_eq!(codes, vec!["002696", "600887", "300604"], "去重后必须保持首见顺序");
+        assert_eq!(picks[0].confidence, 60, "合并逻辑不变：保留更高置信度");
+        assert_eq!(picks[0].style, Style::Trend);
+    }
+
+    /// 截断并列时**真实出票优先于兜底占位**：watchlist 全组恒 conf=50 时，
+    /// 带分析结论的票不得被未定档的初筛票挤出前 10。
+    #[test]
+    fn trim_prefers_real_picks_over_synthetic_placeholders() {
+        let mut picks: Vec<RecoPick> = (0..5)
+            .map(|i| pick_of(&format!("SYN{i}"), Style::Reversion, 50, true))
+            .chain((0..7).map(|i| pick_of(&format!("REAL{i}"), Style::Reversion, 50, false)))
+            .collect();
+        let (grouped, trimmed) = group_by_style_and_trim_with_audit(&mut picks, 10);
+        let kept = grouped.get(&Style::Reversion).unwrap();
+        assert_eq!(kept.len(), 10);
+        assert_eq!(
+            kept.iter().filter(|p| !p.synthetic).count(),
+            7,
+            "7 条真实出票必须全部留在前 10"
+        );
+        assert_eq!(trimmed.len(), 2, "只截掉 2 条");
+        assert!(
+            trimmed.iter().all(|t| t.stock_code.starts_with("SYN")),
+            "被截掉的只能是兜底占位：{:?}",
+            trimmed.iter().map(|t| t.stock_code.as_str()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            trimmed.iter().map(|t| t.rank).collect::<Vec<_>>(),
+            vec![1, 2],
+            "名次从 1 起，按同一次比较排序"
+        );
     }
 
     /// **口径统一回归**（2026-10-01）：荐股胜率 = logit 合成 **∘** 时间折算 ——

@@ -57,6 +57,15 @@ impl ValueStrategy {
         let price = quote.price;
         let pe = quote.pe.unwrap_or(0.0);
         let pb = quote.pb.unwrap_or(0.0);
+        // ⚠ 回放（as-of）语义下的结构性零产出，不是缺陷：
+        //   as-of 的 `get_quote` **不回落 vendor 实时行情**，而是用截止日 K 线合成
+        //   （`astock-data` 的 `quote_from_klines`，`pe/pb` 恒 `None`）；只有
+        //   `get_valuation_snapshot_asof`（eastmoney）成功时才回填 PE/PB。
+        //   该快照源被限流/禁用时，本函数会对**池内每一只**票在此处返回 None ——
+        //   于是 value 整桶为空，`reco_scan_audit` 里连一行 value 都不会有
+        //   （2026-10-19 现网：21:07–23:18 各批 long 的 value `synthetic=0` 恒 0，
+        //   而 14:14–17:49 的批 value×long 真行 30 条、conf 60–66 —— 差异只在快照源是否可用）。
+        //   处置：取不到估值就**不出票**（fail-closed），不得用 PB/PE 猜一个数。
         if pe <= 0.0 && pb <= 0.0 {
             return None;
         }

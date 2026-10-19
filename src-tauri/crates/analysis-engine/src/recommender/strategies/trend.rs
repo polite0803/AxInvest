@@ -9,7 +9,7 @@ use crate::recommender::indicators;
 use crate::recommender::scoring::{calc_confidence, calc_position_with_consistency};
 use crate::recommender::types::{Period, RecoPick, Style};
 use async_trait::async_trait;
-use axagent_harness::market_data::MarketDataProvider;
+use axagent_harness::market_data::{KLine, MarketDataProvider};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -28,19 +28,81 @@ const DEFAULT_POS_ADJ: f64 = 1.0; // 仓位调整（1.0=标准，0.5=半仓）
 /// 均线多头间距 40% + 站上 anchor 幅度 30% + 量比强度 30%。
 /// 归一化刻度（**非过滤阈值**，不拦票只调强度）：间距 >10% 满格、
 /// 站上 >8% 满格、量比 3x 满格。负值/非有限输入按 0 处理（clamp 语义）。
-fn trend_evidence_strength(fast: f64, slow: f64, last: f64, anchor: f64, amount_ratio: f64) -> f64 {
-    if slow <= 0.0
-        || anchor <= 0.0
-        || !amount_ratio.is_finite()
-        || !fast.is_finite()
-        || !last.is_finite()
-    {
+// 纯评分函数：8 个标量就是它全部输入（无状态、无副作用），拆成结构体只会把
+// 调用点写成 `Struct { .. }`，不增加任何可读性。阶段 1 把连续证据从 3 个加到 5 个后触到默认上限。
+#[allow(clippy::too_many_arguments)]
+fn trend_evidence_strength(
+    fast: f64,
+    slow: f64,
+    last: f64,
+    anchor: f64,
+    amount_ratio: f64,
+    atr_pct: f64,
+    vol_percentile: f64,
+    rs: f64,
+) -> f64 {
+    if slow <= 0.0 || anchor <= 0.0 || !fast.is_finite() || !last.is_finite() {
         return 0.0;
     }
     let ma_spread = ((fast - slow) / slow).clamp(0.0, 0.10) / 0.10;
     let anchor_lift = ((last / anchor) - 1.0).clamp(0.0, 0.08) / 0.08;
-    let vol_intensity = (amount_ratio / 3.0).clamp(0.0, 1.0);
-    (0.4 * ma_spread + 0.3 * anchor_lift + 0.3 * vol_intensity).clamp(0.0, 1.0)
+    // 量能证据（2026-10-19，阶段 1）：优先用「今日量在该档窗口内的分位」——
+    // 它不依赖成交额字段（回放里源常不给额），且是连续量而不是「>1.5 就 0.8」的二值。
+    // 分位取不到时退回原量比归一，保持旧行为可复现。
+    let vol_evidence = if vol_percentile.is_finite() {
+        vol_percentile.clamp(0.0, 1.0)
+    } else if amount_ratio.is_finite() {
+        (amount_ratio / 3.0).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    // 波动率归一的斜率（2026-10-19，阶段 1）：同样的均线间距，波动越大越不可靠，
+    // 以「1 个 ATR/bar 的斜率」为满格。这是让分数随个股波动拉开差距的第一处连续量。
+    let slope_per_atr = if atr_pct.is_finite() && atr_pct > 0.0 {
+        (((fast - slow) / slow) / atr_pct).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    // 相对强度（2026-10-19，阶段 1）：调用方已把「个股收益 − 指数同尺度收益」映射到 0~1
+    // （−20% ⇒ 0、0 ⇒ 0.5、+20% ⇒ 1）。NaN ⇒ 中性 0.5——不把「取不到指数」当成「跑输」。
+    let rs_norm = if rs.is_finite() {
+        rs.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
+    (0.25 * ma_spread
+        + 0.15 * anchor_lift
+        + 0.25 * vol_evidence
+        + 0.20 * slope_per_atr
+        + 0.15 * rs_norm)
+        .clamp(0.0, 1.0)
+}
+
+/// 阶段 1 返工：证据（0~1）占 **50%**、原五项公式（u8）占 50%，合成最终置信度。
+/// 同一 base 下 evidence 每 +0.1 ⇒ 置信度约 +5 分；NaN 证据按中性 0.5（不退化成 0 分）。
+fn blend_evidence_confidence(evidence: f64, base: u8) -> u8 {
+    let e = if evidence.is_finite() {
+        evidence.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
+    let blended = 0.5 * e * 100.0 + 0.5 * (base as f64).clamp(0.0, 100.0);
+    blended.round().clamp(1.0, 100.0) as u8
+}
+
+/// 近 `n` 根 bar 的收益率（不足时用可用的全部；<2 根返回 NaN，由调用方给中性值）。
+fn bars_return_pct(klines: &[KLine], n: usize) -> f64 {
+    if klines.len() < 2 {
+        return f64::NAN;
+    }
+    let last = klines[klines.len() - 1].close;
+    let idx = klines.len() - 1 - n.min(klines.len() - 1);
+    let base = klines[idx].close;
+    if base > 0.0 && last.is_finite() {
+        (last - base) / base
+    } else {
+        f64::NAN
+    }
 }
 
 /// 尺度窗口组（单位=**该档尺度的 bar**，不是日历日）。
@@ -234,14 +296,62 @@ impl TrendStrategy {
         // （间距 >10% 满格 / 站上 >8% 满格 / 量比 3x 满格——归一化刻度，非过滤阈值）。
         // signal 槽调制：`signal × (0.6 + 0.4×evidence)` —— 证据满格不变、零证据六折，
         // 满跨度 ≈ w.signal(0.35)×0.7×0.4 ≈ 10 个置信点，足以穿透档位常数。
-        let evidence = trend_evidence_strength(fast, slow, last, anchor, amount_ratio);
-        let conf = calc_confidence(
+        // 阶段 1（2026-10-19）：把两处**连续证据**从 K 线直接算出来——
+        // ① ATR(14)/收盘：波动率归一的斜率基准；② 今日成交量在本档量能窗口内的分位。
+        // 二者都只用 K 线自带的字段（不依赖成交额），回放里同样可得。
+        let atr_pct = {
+            let n = klines.len().min(14);
+            let last_close = klines.last().map(|k| k.close).unwrap_or(0.0);
+            if n == 0 || last_close <= 0.0 {
+                0.0
+            } else {
+                let sum: f64 =
+                    klines[klines.len() - n..].iter().map(|k| (k.high - k.low).abs()).sum();
+                (sum / n as f64) / last_close
+            }
+        };
+        let vol_percentile = {
+            let n = klines.len().min(w.amount_window.max(1));
+            if n == 0 {
+                0.5
+            } else {
+                let today_vol = klines.last().map(|k| k.volume).unwrap_or(0.0);
+                let le =
+                    klines[klines.len() - n..].iter().filter(|k| k.volume <= today_vol).count();
+                le as f64 / n as f64
+            }
+        };
+        // 相对强度：个股 20 bar 收益 − 指数同尺度 20 bar 收益，映射到 0~1（±20% 截断）。
+        let stock_ret = bars_return_pct(&klines, 20);
+        let index_ret = read_f64(vars, "reco_index_ret_20", f64::NAN);
+        let rs = if stock_ret.is_finite() && index_ret.is_finite() {
+            ((stock_ret - index_ret).clamp(-0.2, 0.2) + 0.2) / 0.4
+        } else {
+            0.5
+        };
+        let evidence = trend_evidence_strength(
+            fast,
+            slow,
+            last,
+            anchor,
+            amount_ratio,
+            atr_pct,
+            vol_percentile,
+            rs,
+        );
+        // ── 证据做主项（2026-10-19 用户裁定，阶段 1 返工）──
+        // 原实现让证据只调制 signal 一个槽（`conf_signal×(0.6+0.4×evidence)`），满跨度 ≈10 分，
+        // 被其余三项常数淹没 ⇒ 实测置信度只有 8~9 个取值、与后涨相关性 −0.15。
+        // 现在：证据直接占 **50%**，原五项公式占 50%——后者保留「一致性/流动性/动量」的约束，
+        // 前者决定排序。这样同档票的置信度随证据连续拉开，面板上的 65/66/67 才有意义。
+        let base_conf = calc_confidence(
             conf_consistency,
-            conf_signal * (0.6 + 0.4 * evidence),
+            conf_signal,
             if amount_ratio > 1.5 { 0.8 } else { 0.5 },
             conf_market,
             turnover_anomaly,
         );
+        let conf = blend_evidence_confidence(evidence, base_conf);
         let position = calc_position_with_consistency(base_position, conf, conf_consistency);
 
         Some(RecoPick {
@@ -312,6 +422,15 @@ impl RecommendStrategy for TrendStrategy {
             })
             .unwrap_or_default();
 
+        // 阶段 1（2026-10-19）：相对强度 = 个股 N-bar 收益 − 指数同尺度收益。
+        // 指数与个股同走 `scale::fetch`，保证两边是同一尺度；取不到时记 NaN，
+        // 证据项按中性 0.5 处理（不把「取不到指数」当成「跑输指数」）。
+        let index_ret =
+            match crate::recommender::scale::fetch(ctx.client, "000300", self.period).await {
+                Ok((ks, _)) => bars_return_pct(&ks, 20),
+                Err(_) => f64::NAN,
+            };
+
         let mut picks = Vec::new();
         for (code, name, sector) in ctx.seed {
             let _g = ctx.per_code_locks.lock_for(code).await;
@@ -331,6 +450,7 @@ impl RecommendStrategy for TrendStrategy {
             // 注入行业动量到 vars，scan_one 可通过 "sector_momentum" 读取
             let mut enriched_vars = ctx.vars.clone();
             enriched_vars.insert("sector_momentum".to_string(), serde_json::json!(sector_mom));
+            enriched_vars.insert("reco_index_ret_20".to_string(), serde_json::json!(index_ret));
 
             if let Some(mut p) =
                 self.scan_one(ctx.client, code, name, sector.clone(), &enriched_vars).await
@@ -365,25 +485,79 @@ mod tests {
 
     #[test]
     fn trend_evidence_is_monotonic_in_each_input() {
-        let base = trend_evidence_strength(10.2, 10.0, 10.1, 10.0, 1.0);
+        let base = trend_evidence_strength(10.2, 10.0, 10.1, 10.0, 1.0, 0.02, 0.5, 0.5);
         assert!(base > 0.0 && base < 1.0, "中性输入应落在 (0,1)，实得 {base}");
         // 均线间距 ↑ ⇒ 证据 ↑
-        assert!(trend_evidence_strength(11.0, 10.0, 10.1, 10.0, 1.0) > base);
+        assert!(trend_evidence_strength(11.0, 10.0, 10.1, 10.0, 1.0, 0.02, 0.5, 0.5) > base);
         // 站上 anchor 幅度 ↑ ⇒ 证据 ↑
-        assert!(trend_evidence_strength(10.2, 10.0, 10.5, 10.0, 1.0) > base);
-        // 量比 ↑ ⇒ 证据 ↑
-        assert!(trend_evidence_strength(10.2, 10.0, 10.1, 10.0, 2.0) > base);
+        assert!(trend_evidence_strength(10.2, 10.0, 10.5, 10.0, 1.0, 0.02, 0.5, 0.5) > base);
+        // 量能分位 ↑ ⇒ 证据 ↑（阶段 1 起的连续量）
+        assert!(trend_evidence_strength(10.2, 10.0, 10.1, 10.0, 1.0, 0.02, 0.9, 0.5) > base);
+        // 波动率 ↑（同样的均线间距）⇒ 证据 ↓（波动率归一）
+        assert!(trend_evidence_strength(10.2, 10.0, 10.1, 10.0, 1.0, 0.08, 0.5, 0.5) < base);
+        // 相对强度 ↑（同形态、同波动、同量能）⇒ 证据 ↑（阶段 1 新增项）
+        assert!(
+            trend_evidence_strength(10.2, 10.0, 10.1, 10.0, 1.0, 0.02, 0.5, 0.9)
+                > trend_evidence_strength(10.2, 10.0, 10.1, 10.0, 1.0, 0.02, 0.5, 0.3)
+        );
+    }
+
+    /// 阶段 1 的核心验收：**相同均线形态、不同波动与量能，分数必须拉得开**。
+    /// 旧实现里这两只票的 evidence 完全相同（只看间距/站上/量比），正是「置信度塌成档位常数」的来源。
+    #[test]
+    fn trend_evidence_separates_low_vol_high_volume_from_high_vol_low_volume() {
+        let calm_strong = trend_evidence_strength(10.2, 10.0, 10.1, 10.0, 1.0, 0.015, 0.9, 0.5);
+        let wild_weak = trend_evidence_strength(10.2, 10.0, 10.1, 10.0, 1.0, 0.06, 0.2, 0.5);
+        assert!(
+            calm_strong - wild_weak >= 0.15,
+            "两只票的证据强度必须拉开 ≥0.15，实得 {calm_strong} vs {wild_weak}"
+        );
     }
 
     #[test]
     fn trend_evidence_clamps_and_fails_open_on_degenerate_inputs() {
-        // 满格：间距 ≥10% + 站上 ≥8% + 量比 ≥3 ⇒ 1.0
-        assert!((trend_evidence_strength(11.0, 10.0, 10.9, 10.0, 3.0) - 1.0).abs() < 1e-9);
-        // 零证据：均线死叉形态（fast=slow）+ 贴 anchor + 无量 ⇒ 0
-        assert!((trend_evidence_strength(10.0, 10.0, 10.0, 10.0, 0.0) - 0.0).abs() < 1e-9);
-        // 退化输入：slow/anchor ≤0、NaN 量比 ⇒ 0（fail-open）
-        assert_eq!(trend_evidence_strength(10.2, 0.0, 10.1, 10.0, 1.0), 0.0);
-        assert_eq!(trend_evidence_strength(10.2, 10.0, 10.1, 0.0, 1.0), 0.0);
-        assert_eq!(trend_evidence_strength(10.2, 10.0, 10.1, 10.0, f64::NAN), 0.0);
+        // 满格：间距 ≥10% + 站上 ≥8% + 量能分位 1 + 低波动 ⇒ 1.0
+        assert!(
+            (trend_evidence_strength(11.0, 10.0, 10.9, 10.0, 3.0, 0.01, 1.0, 1.0) - 1.0).abs()
+                < 1e-9
+        );
+        // 零证据：均线死叉 + 贴 anchor + 量能分位 0 + 完全跑输指数（rs=0）⇒ 0
+        assert!(
+            (trend_evidence_strength(10.0, 10.0, 10.0, 10.0, 0.0, 0.02, 0.0, 0.0) - 0.0).abs()
+                < 1e-9
+        );
+        // 中性相对强度（取不到指数 ⇒ 0.5）自带 0.075 的地板：这是刻意的，
+        // 「取不到指数」不能当成「跑输指数」，但也不该被当成满格证据。
+        assert!(
+            (trend_evidence_strength(10.0, 10.0, 10.0, 10.0, 0.0, 0.02, 0.0, 0.5) - 0.075).abs()
+                < 1e-9
+        );
+        // 退化输入：slow/anchor ≤0 ⇒ 0（fail-open）
+        assert_eq!(trend_evidence_strength(10.2, 0.0, 10.1, 10.0, 1.0, 0.02, 0.5, 0.5), 0.0);
+        assert_eq!(trend_evidence_strength(10.2, 10.0, 10.1, 0.0, 1.0, 0.02, 0.5, 0.5), 0.0);
+        // NaN 不得把分数污染成 NaN：分位不可用时退回量比归一，仍是有限值
+        let nan_safe =
+            trend_evidence_strength(10.2, 10.0, 10.1, 10.0, 1.0, f64::NAN, f64::NAN, 0.5);
+        assert!(nan_safe.is_finite(), "NaN 输入必须给出有限分数，实得 {nan_safe}");
+    }
+}
+
+#[cfg(test)]
+mod evidence_blend_tests {
+    use super::*;
+
+    /// 用户裁定「证据做主项」的判据：同一 base 下，证据从 0.2 到 0.8 必须拉开 ≥20 分；
+    /// 证据 NaN 时按中性 0.5（不得退化成 0 分）；结果恒在 1~100。
+    #[test]
+    fn evidence_is_the_dominant_term_of_confidence() {
+        let lo = blend_evidence_confidence(0.2, 50);
+        let hi = blend_evidence_confidence(0.8, 50);
+        assert!(hi - lo >= 20, "证据主项的跨度不足：{lo} vs {hi}");
+        assert!(lo >= 1 && hi <= 100);
+        let nan = blend_evidence_confidence(f64::NAN, 50);
+        assert_eq!(nan, 50, "NaN 证据应按中性 0.5 合成（0.5×50+0.5×50=50），实得 {nan}");
+        assert!(
+            blend_evidence_confidence(1.0, 100) <= 100 && blend_evidence_confidence(0.0, 0) >= 1
+        );
     }
 }

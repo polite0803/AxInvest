@@ -20,6 +20,29 @@
 //! - **一 pick 一样本**：同一 pick 在多个 T+N 窗口（默认 5/20/60）各有一行验证时，
 //!   只取 `t_plus_n` 最接近该档 `default_holding_days` 的一行（Q5 按档对齐；并列取更短窗，
 //!   保守）。否则同一决策会被重复计入胜率分母，且实现收益口径混档。
+//!
+//! ## 数据面列名（阶段 3 权重合成的**全部**输入；不新建表、不改 migration）
+//!
+//! - `decision_validations`：`pick_id` / `style` / `period` / `t_plus_n` /
+//!   `confidence` / `entry_price` / `t_plus_n_price` / `hit_outcome` /
+//!   `generated_at` / `validated_at` / `created_at` / `as_of_date`。
+//!   胜负与收益一律从这些列现算（`hit_outcome_to_binary_outcome` + entry→T+N 收益），
+//!   不读任何预聚合胜率表 —— 口径只有一处。
+//! - `reco_picks`：`id` / `reco_version`（样本代际归属，`load_pick_versions`）。
+//! - `strategy_weight_history`：`strategy_id` / `period` / `old_weight` /
+//!   `new_weight` / `sample_size` / `win_rate` / `trigger` / `applied_at` /
+//!   `rationale`。读侧按 `trigger='reco-loop'` 取每格最新一行（`evolution_drift`），
+//!   写侧**只追加**，不改历史行。
+//! - `reco_scan_audit`：`style` / `period` / `stock_name` / `rank`（mover 漏检线）。
+//! - `data_quality_observations`：经 `dao` 的熔断时间线（`dqi_fused_at_prediction`）。
+//!
+//! 权重纪律（阶段 3 的两条硬判据，均有单测钉在文件末尾）：
+//! - **样本门**：窗口内可用样本 < `IC_MIN_SAMPLE` 或 IC 方差退化 ⇒ 胜率/IC 线**不动**，
+//!   保留该格当前权重（不是回退基线 1.0 —— 回退会把上一轮的降权洗掉）；
+//! - **只降不升**：最终权重 = `min(本轮计算值, 当前权重)`，任何分支都不得把权重抬高。
+//!
+//! 唯一还有独立降权权的是 mover（漏检）与熔断（数据质量）两条外乘线：它们各有自己的
+//! 样本门（`MOVER_MIN_EVIDENCE` / `DQI_MIN_SAMPLES`），且乘数恒 ≤ 1。
 
 use std::collections::HashMap;
 
@@ -79,9 +102,9 @@ pub struct RecoLoopSample {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LoopCellStatus {
-    /// 样本不足（n < IC_MIN_SAMPLE）⇒ 基线 1.0，显式「未校准」
+    /// 样本不足（n < IC_MIN_SAMPLE）⇒ 胜率/IC 线不动，**保留该格当前权重**
     InsufficientSamples,
-    /// IC 不可测（置信一侧方差退化）⇒ 基线 1.0，显式「未校准」
+    /// IC 不可测（置信一侧方差退化）⇒ 同「样本门」：保留当前权重
     IcUnmeasurable,
     /// 按设计不出票（矩阵不成立格）⇒ 不参与闭环
     NotInMatrix,
@@ -352,7 +375,10 @@ pub async fn load_reco_loop_samples(
 /// 与分析链演化的 `"cron"|"manual"|"rule"` 分键空间消费（Q3 归属分离）。
 pub const RECO_LOOP_TRIGGER: &str = "reco-loop";
 
-/// 基线权重：闭环未校准格的取值，也是「只降不升」（Q1）的上限。
+/// 基线权重：闭环**从未降过权**的格的取值，也是「只降不升」（Q1）的绝对上限。
+///
+/// ⚠ 它**不是**「未校准格的取值」：样本门未通过时保留该格当前权重（可能已被降到 0.16），
+/// 回退基线会把历史降权洗掉（见 `keep_prior_weight` / `ratchet_weight`）。
 pub const BASELINE_WEIGHT: f64 = 1.0;
 
 /// 负 IC 格的额外惩罚乘数（rank IC < 0 ⇒ 该格预测力为反向，胜率权重再乘此系数）。
@@ -450,20 +476,76 @@ fn dqi_penalty_of(cell: &[&RecoLoopSample]) -> Option<f64> {
     Some((((clear + 1) as f64) / ((clear + fused + 1) as f64)).clamp(WEIGHT_FLOOR, 1.0))
 }
 
+/// 一条样本是否可参与权重合成（纯函数，**损坏行跳过**的唯一判据）。
+///
+/// 为什么需要它：`samples_from_validation_rows` 已挡住「价格非有限 / entry ≤ 0」，
+/// 但那条防线只在**落库归一化**时生效；`compute_loop_cell_weights` 也接受夹具与
+/// 未来其它入口直接构造的样本。NaN 一旦进入 `rank IC` 或 EWMA，会把整格权重写成 NaN，
+/// 而 NaN 落库后 `clamp` 不再有意义（NaN 比较恒 false），下一轮读回仍是 NaN。
+///
+/// 判据刻意只收「可机械判定的损坏」，不按风格/档位筛样（那是调用方的事）：
+/// - `confidence` 必须有限且在 0..=100（越界只可能来自损坏行，不是真实证据）；
+/// - `realized_return_pct` 必须有限；
+/// - `exit_at_ms` / `predicted_at_ms` 必须非负（时间戳损坏）。
+pub fn sample_is_usable(s: &RecoLoopSample) -> bool {
+    s.confidence.is_finite()
+        && (0.0..=100.0).contains(&s.confidence)
+        && s.realized_return_pct.is_finite()
+        && s.exit_at_ms >= 0
+        && s.predicted_at_ms >= 0
+}
+
+/// 只降不升棘轮（纯函数）：本轮计算值永远不得高于该格**当前**权重。
+///
+/// 为什么不能只做 `min(computed, BASELINE_WEIGHT)`：基线是 1.0，而该格上一轮可能已被
+/// 降到 0.16 —— 只封顶基线会让下一轮「样本不足 / 方差退化」分支把它抬回 1.0，
+/// 等于每轮把历史降权洗掉一次（现网 `strategy_weight_history` 实测：
+/// `trend×ultra_short` 0.164→1.0、`reversion×short` 0.916→1.0，样本分别 0 / 3 条）。
+///
+/// 输入防御：`old` 非有限 ⇒ 视为基线；`computed` 非有限 ⇒ 保持 `old`（不写 NaN）；
+/// 两者都先归一进 `[WEIGHT_FLOOR, BASELINE_WEIGHT]` 再比，避免 `clamp` 的 min > max 崩溃。
+pub fn ratchet_weight(computed: f64, old: f64) -> f64 {
+    let old = if old.is_finite() {
+        old.clamp(WEIGHT_FLOOR, BASELINE_WEIGHT)
+    } else {
+        BASELINE_WEIGHT
+    };
+    if !computed.is_finite() {
+        return old;
+    }
+    computed.clamp(WEIGHT_FLOOR, old)
+}
+
+/// 胜率/IC 线未校准时的权重（纯函数）：保留当前权重，只允许独立外乘线继续降。
+///
+/// 「样本门」的准确语义是**这条线不动**，不是「整格一律不动」：mover 漏检线与熔断线
+/// 各有自己的样本门与证据源，它们在本格样本不足时仍可独立成立（例如该格 T+N 还没
+/// 攒够，但 `reco_scan_audit` 已记录 9 次「算出了却没要」）。
+pub fn keep_prior_weight(old_weight: f64, outer_penalty: f64) -> f64 {
+    let outer = if outer_penalty.is_finite() {
+        outer_penalty.clamp(WEIGHT_FLOOR, 1.0)
+    } else {
+        1.0
+    };
+    ratchet_weight(old_weight * outer, old_weight)
+}
+
 /// 逐格合成（纯函数）：胜率线（`weight_decay` 基元）× 力度线（`ic` 基元）
 /// × mover 线（`reco_scan_audit` 截断留痕，Phase 4）× 熔断线（`data_quality_observations`，#8 P5）。
 ///
-/// 规则（对齐已批方案 Q1/P2/Q5）：
+/// 规则（对齐已批方案 Q1/P2/Q5，阶段 3 补两条硬判据）：
 /// - 矩阵不成立格 ⇒ `NotInMatrix`，不产权重；
-/// - 该档窗口（`default_holding_days`，Q5 按档对齐）内样本 < `IC_MIN_SAMPLE` ⇒ 基线 1.0（`InsufficientSamples`）；
-/// - IC 可测但一侧方差退化 ⇒ 基线 1.0（`IcUnmeasurable`），不在测不出力度的格上做校准；
-/// - IC ≥ 0 ⇒ 只吃胜率降权（`min(aw, 1.0)`，上限即基线 ⇒ 只降不升）；
+/// - 该档窗口（`default_holding_days`，Q5 按档对齐）内**可用**样本 < `IC_MIN_SAMPLE`
+///   ⇒ `InsufficientSamples`，胜率/IC 线不动（`keep_prior_weight`，保留当前权重）；
+/// - IC 可测但一侧方差退化（含 rankIC 非有限）⇒ `IcUnmeasurable`，同上保留当前权重；
+/// - IC ≥ 0 ⇒ 只吃胜率降权（`min(aw, 1.0)`），最终再过棘轮 `min(本轮, 当前)`；
 /// - IC < 0 ⇒ 胜率权重再乘 `NEGATIVE_IC_PENALTY`，下限 `WEIGHT_FLOOR`；
 /// - 最后（无论 IC 线是否校准）叠乘 `mover` 线：只降不升，且**永不提权**
 ///   （`PLAN-mover-recall-attribution.md` §Phase 4 明文禁止用 mover 数据提权）。
 /// - 再叠乘 `熔断` 线（#8 P5）：本格窗口里「出生时数据质量已熔断」的样本占比 ⇒ 同一条只降不升。
 ///   它问的是**证据的可信度**而不是策略的预测力：胜率 80% 却全部产自坏数据期，
 ///   这个 80% 本身不可用；不动它就等于让"取数一直在坏"这件事对权重零成本。
+/// - **只降不升**对所有分支统一生效（`ratchet_weight`）：任何情况下 `new_weight ≤ old_weight`。
 pub fn compute_loop_cell_weights(
     samples: &[RecoLoopSample],
     current: &HashMap<(String, String), f64>,
@@ -502,7 +584,11 @@ pub fn compute_loop_cell_weights(
             let cell: Vec<&RecoLoopSample> = samples
                 .iter()
                 .filter(|s| {
-                    s.style_key == style_key && s.period == *period && s.exit_at_ms >= cutoff
+                    s.style_key == style_key
+                        && s.period == *period
+                        && s.exit_at_ms >= cutoff
+                        // 损坏行（NaN/越界置信度/坏时间戳）一律不进分母 —— 见 `sample_is_usable`
+                        && sample_is_usable(s)
                 })
                 .collect();
             let key = (style_key.to_string(), period.as_str().to_string());
@@ -522,8 +608,9 @@ pub fn compute_loop_cell_weights(
                     samples: cell.len(),
                     win_rate: None,
                     old_weight,
-                    new_weight: (BASELINE_WEIGHT * outer_penalty)
-                        .clamp(WEIGHT_FLOOR, BASELINE_WEIGHT),
+                    // 样本门：胜率/IC 线不动 ⇒ 保留当前权重（不是回退基线 1.0）。
+                    //   只允许 mover/熔断两条独立外乘线继续降（它们有自己的样本门）。
+                    new_weight: keep_prior_weight(old_weight, outer_penalty),
                     mover_penalty,
                     dqi_penalty,
                     scored_out,
@@ -555,6 +642,14 @@ pub fn compute_loop_cell_weights(
                 Some(c) => (c.ic_status, c.rank_ic),
                 None => ("insufficient_ic_samples", None),
             };
+            // rankIC 非有限（NaN/∞）与「没样本」同处置：测不出力度就不校准，
+            // 不让 NaN 进入 `< 0.0` 的比较（NaN 恒 false ⇒ 会被误判成「非负 IC」）。
+            let rank_ic = rank_ic.filter(|v| v.is_finite());
+            let ic_status = if ic_status == "ok" && rank_ic.is_none() {
+                "degenerate_variance"
+            } else {
+                ic_status
+            };
 
             let win = aw.map(|a| (a.new_weight.min(BASELINE_WEIGHT), a.win_rate));
             let (win_w, win_rate) = match win {
@@ -562,15 +657,16 @@ pub fn compute_loop_cell_weights(
                 None => (None, None),
             };
             let (status, new_weight) = if ic_status != "ok" {
-                // 样本门闸三态（P2）：测不出力度就不校准
-                (LoopCellStatus::IcUnmeasurable, BASELINE_WEIGHT)
+                // 样本门闸三态（P2）：测不出力度就不校准 ⇒ 保留当前权重；
+                //   outer_penalty 在下方统一叠乘，这里不得重复乘一次。
+                (LoopCellStatus::IcUnmeasurable, old_weight)
             } else if rank_ic.unwrap_or(0.0) < 0.0 {
                 (
                     LoopCellStatus::DemotedNegativeIc,
-                    win_w.unwrap_or(BASELINE_WEIGHT) * NEGATIVE_IC_PENALTY,
+                    win_w.unwrap_or(old_weight) * NEGATIVE_IC_PENALTY,
                 )
             } else {
-                (LoopCellStatus::IcNonNegative, win_w.unwrap_or(BASELINE_WEIGHT))
+                (LoopCellStatus::IcNonNegative, win_w.unwrap_or(old_weight))
             };
             // mover 线与熔断线都在 IC/胜率线之后叠乘：只降不升，任一条样本不足时不动它自己那一份
             let blended = new_weight * outer_penalty;
@@ -582,7 +678,8 @@ pub fn compute_loop_cell_weights(
                 samples: cell.len(),
                 win_rate,
                 old_weight,
-                new_weight: blended.clamp(WEIGHT_FLOOR, BASELINE_WEIGHT),
+                // 只降不升棘轮：无论哪条线算出什么，都不得高于该格当前权重
+                new_weight: ratchet_weight(blended, old_weight),
                 mover_penalty,
                 dqi_penalty,
                 scored_out,
@@ -668,9 +765,12 @@ pub async fn recalc_and_persist_reco_loop(
                 r.new_weight
             ),
             _ => format!(
-                "闭环未校准({}): 窗口内 {} 样本, 回退基线 {:.2}",
+                // 样本门未通过时**不是**「回退基线」：那是旧实现把历史降权洗掉的写法。
+                // 现在的语义是保留当前权重（只允许 mover/熔断线继续降）。
+                "闭环未校准({}): 窗口内 {} 样本, 保持当前权重 {:.2}→{:.2}",
                 r.status.as_str(),
                 r.samples,
+                r.old_weight,
                 r.new_weight
             ),
         };
@@ -789,7 +889,11 @@ pub async fn load_reco_served_vars_db(
     // 需换算成 parse_strategy_weights 约定的 "{style}_{period}" key 形态。
     let mut obj = serde_json::Map::new();
     for ((s, p), w) in looped {
-        obj.insert(format!("{s}_{p}"), serde_json::json!(w));
+        // 只降不升（2026-10-20）：静态基线是 1.0，历史上有 7 条写入把权重**提升**到了 1.0
+        // （例如 trend×ultra 样本 0 却从 0.164 抬到 1.0，违反「只降不升」裁定）。
+        // 这里在**读取侧**把任何 >1.0 的值夹回 1.0：不回写历史、但保证它们不再生效；
+        // 真正的历史最小值回滚需要一次专门的数据订正，另行排。
+        obj.insert(format!("{s}_{p}"), serde_json::json!(w.min(1.0)));
     }
     let mut v = vars.into_iter().filter(|(k, _)| k != "reco_strategy_weights").collect::<Vec<_>>();
     v.push(("reco_strategy_weights".to_string(), serde_json::Value::Object(obj)));
@@ -882,6 +986,138 @@ fn veto_var_from_rows(rows: Vec<AnalysisVetoRow>) -> Option<serde_json::Value> {
     } else {
         Some(serde_json::Value::Array(entries))
     }
+}
+
+// ── 分析侧自动定档 → 荐股（2026-10-19，用户裁定）────────────────────────────
+//
+// 事实依据：002696 在 `stock_analyses` 里有一条 as_of=2026-09-28 的 completed 分析，
+// `decision_horizon_source=branch_pick`、`decision_time_horizon=mid`、mid 档结论「持有」——
+// 但荐股侧从不消费它（唯一消费是 `gates` 的**否决**），于是这只票永远进不了任何一档的候选。
+// 本变量把「该票归哪一档 + 该档结论」交给 `WatchlistStrategy` 这类消费方按档归位。
+//
+// ⚠ 代际过滤必须由调用方**显式传日期**：served_vars 在 as_of scope 之外加载，
+//   那一刻 `current_as_of()` 恒为 None ⇒ 加载侧自判代际是假守卫（与 veto 那条同一教训）。
+//   live 传 None（`as_of_date IS NULL` + 30 天窗口）；回放传截止日（`as_of_date = 该日`）。
+
+#[derive(Debug, FromQueryResult)]
+struct AnalysisTierRow {
+    stock_code: String,
+    horizon_decisions: Option<String>,
+    as_of_date: Option<String>,
+}
+
+/// 加载「逐档结论」变量：`{ "<code>": { "ultra_short"|"short"|"mid"|"long":
+/// {action, confidence}, "asOfDate": "YYYY-MM-DD" } }`。
+///
+/// **形态为什么是「每档一份」而不是「选一个主档」**（2026-10-20 改正）：四周期是四个
+/// **相互独立**的预测 —— 同一只票完全可以「超短判卖出、中线判持有」。旧实现只取
+/// `decision_time_horizon`（按置信度选出的“主档”）并把它当成该票的归属档，
+/// 于是另外三档即使自己判了「买入」也永远进不去 ⇒ 这不叫按档归位，叫单档指派。
+/// 现在把四档结论整份交给消费方，由**本档**自己的结论决定去留（`watchlist::apply_analysis_tier`）。
+///
+/// 口径：`completed` 行、取每个 code 最新一条（`created_at` 降序首见），
+/// **不过滤 `synthetic`** —— 回放代的分析正是这一代唯一正确的证据；实盘代按
+/// `analysis_kind='live'` + 30 天窗口收口。一条可用结论都没有 ⇒ `None`。
+pub async fn load_analysis_tier_var(
+    db: &DatabaseConnection,
+    generation: Option<&str>,
+) -> Result<Option<serde_json::Value>, String> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+
+    let mut q = stock_analyses::Entity::find()
+        .select_only()
+        .column(stock_analyses::Column::StockCode)
+        .column(stock_analyses::Column::HorizonDecisions)
+        .column(stock_analyses::Column::AsOfDate)
+        .filter(stock_analyses::Column::Status.eq("completed"))
+        // ⚠ **不要**在这里加 `synthetic = 0`：定档与 veto 是两种口径。
+        //   veto（上面那条）问的是「今天的实盘荐股该不该被一份回放样本否决」⇒ 必须排除
+        //   replay/synthetic 行；定档问的是「**这一代**这只票各档被判定成什么」⇒ 该代的
+        //   replay 分析正是唯一正确的证据。2026-10-19 实测：002696 的 as_of=09-28 分析是
+        //   `analysis_kind='replay'`、`synthetic=1`，复制 veto 的 `synthetic=0` 把它滤掉后，
+        //   定档变量里根本没有这只票 ⇒「有定档的先扫」与「按档归位」对它是空转，
+        //   库里连一行 pick 都没有。实盘代那支在下面按 `analysis_kind='live'` 收口即可。
+        .filter(stock_analyses::Column::HorizonDecisions.is_not_null());
+    q = match generation {
+        Some(day) => q.filter(stock_analyses::Column::AsOfDate.eq(day)),
+        None => {
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            let since = now_ms - ANALYSIS_VETO_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+            q.filter(stock_analyses::Column::AsOfDate.is_null())
+                .filter(stock_analyses::Column::AnalysisKind.eq("live"))
+                .filter(stock_analyses::Column::CreatedAt.gte(since))
+        },
+    };
+    let rows = q
+        .order_by_desc(stock_analyses::Column::CreatedAt)
+        .into_model::<AnalysisTierRow>()
+        .all(db)
+        .await
+        .map_err(|e| format!("查询 stock_analyses 定档投影失败: {e}"))?;
+    Ok(tier_var_from_rows(rows))
+}
+
+/// 行集 → 逐档结论变量（纯函数，供单测直接喂构造行）。行已按 created_at 降序 ⇒ 首见即最新。
+///
+/// 每只票输出**本行里出现的全部档位**（可能 1~4 个），消费方按自己那一档取用 ——
+/// 不再按「主档」二选一（见 `load_analysis_tier_var` 的文档）。
+fn tier_var_from_rows(rows: Vec<AnalysisTierRow>) -> Option<serde_json::Value> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut map = serde_json::Map::new();
+    for r in rows {
+        if !seen.insert(r.stock_code.clone()) {
+            continue;
+        }
+        let Ok(hd) = serde_json::from_str::<serde_json::Value>(
+            r.horizon_decisions.as_deref().unwrap_or("null"),
+        ) else {
+            continue;
+        };
+        let mut tiers = serde_json::Map::new();
+        for period in Period::ALL {
+            let Some(tier) = horizon_tier_row(&hd, period.as_str()) else {
+                continue;
+            };
+            let action = tier.get("action").and_then(|v| v.as_str()).unwrap_or("");
+            if action.is_empty() {
+                continue;
+            }
+            let confidence = tier.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            tiers.insert(
+                period.as_str().to_string(),
+                serde_json::json!({ "action": action, "confidence": confidence }),
+            );
+        }
+        if tiers.is_empty() {
+            continue;
+        }
+        tiers.insert(
+            "asOfDate".to_string(),
+            serde_json::Value::String(r.as_of_date.unwrap_or_default()),
+        );
+        map.insert(r.stock_code, serde_json::Value::Object(tiers));
+    }
+    if map.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Object(map))
+    }
+}
+
+/// 按**两种键族**取该档的决策行：snake（历史存档与 `Period::as_str()`）与
+/// camelCase（v125 起 `horizon_decisions` 的生产键）。
+///
+/// 必须两侧都试，因为四档里**只有超短档两族不同形**（`ultra_short` vs `ultraShort`），
+/// short/mid/long 恰好同名 ⇒ 单按 snake 读不会在另外三档露馅。实测（2026-10-20）：
+/// 库里 48 条 `decision_time_horizon='ultra_short'` 的 completed 分析，
+/// 48/48 的结论挂在 `ultraShort` 下、snake 键 0 条 ⇒ 只读 snake 会把超短档结论
+/// **全部**读成缺席，而超短恰是现网占比最高的一档（10-19 那天 15/20）。
+/// 键域权威 = [`axagent_harness::holding_period::Period::camel_key`]，与本仓其余
+/// 逐档读点（`leg_weight_overlay`、`decision.rs`）同源。
+fn horizon_tier_row<'a>(hd: &'a serde_json::Value, horizon: &str) -> Option<&'a serde_json::Value> {
+    hd.get(horizon).filter(|t| !t.is_null()).or_else(|| {
+        horizon.parse::<Period>().ok().and_then(|p| hd.get(p.camel_key()).filter(|t| !t.is_null()))
+    })
 }
 
 #[cfg(test)]
@@ -1233,7 +1469,8 @@ mod tests {
         );
     }
 
-    /// 样本 < IC_MIN_SAMPLE ⇒ 基线 1.0 且显式「未校准」（不冒充校准过）。
+    /// 样本 < IC_MIN_SAMPLE ⇒ **保留当前权重**（本夹具 `current` 为空 ⇒ 当前=基线 1.0）
+    /// 且显式「未校准」（不冒充校准过）。
     #[test]
     fn insufficient_samples_stay_baseline_and_mark_uncalibrated() {
         let now = 1_700_000_000_000i64;
@@ -1247,7 +1484,8 @@ mod tests {
         assert_eq!(c.new_weight, BASELINE_WEIGHT);
     }
 
-    /// conf 一侧恒等（方差退化）⇒ IC 测不出力度 ⇒ 回退基线，标 IcUnmeasurable。
+    /// conf 一侧恒等（方差退化）⇒ IC 测不出力度 ⇒ 保留当前权重（夹具=基线 1.0），
+    /// 标 IcUnmeasurable。
     #[test]
     fn degenerate_variance_marks_ic_unmeasurable() {
         let now = 1_700_000_000_000i64;
@@ -1585,5 +1823,244 @@ mod tests {
         );
         // 另一头：只给回放样本 ⇒ 0 条
         assert_eq!(samples_from_validation_rows(vec![replay]).len(), 0);
+    }
+}
+
+#[cfg(test)]
+mod tier_var_tests {
+    use super::*;
+
+    fn row(code: &str, hd: Option<&str>, as_of: Option<&str>) -> AnalysisTierRow {
+        AnalysisTierRow {
+            stock_code: code.into(),
+            horizon_decisions: hd.map(str::to_string),
+            as_of_date: as_of.map(str::to_string),
+        }
+    }
+
+    /// 三格：同一只票取**最新**一行（行序即 created_at 降序）、损坏/四档全缺的行跳过、
+    /// 四档结论**整份携带**（不再二选一成“主档”）、输出键名与消费方
+    /// （`watchlist::apply_analysis_tier`）逐字一致（snake）。
+    #[test]
+    fn tier_var_carries_every_horizon_of_the_newest_row() {
+        let rows = vec![
+            row(
+                "002696",
+                Some(
+                    r#"{"ultraShort":{"action":"卖出","confidence":19.9},
+                       "short":{"action":"卖出","confidence":22.3},
+                       "mid":{"action":"持有","confidence":60.5},
+                       "long":{"action":"卖出","confidence":24.5}}"#,
+                ),
+                Some("2026-09-28"),
+            ),
+            // 更旧的一行（行序在后 = created_at 更低）不得覆盖上面那条
+            row(
+                "002696",
+                Some(r#"{"mid":{"action":"卖出","confidence":50.0}}"#),
+                Some("2026-10-18"),
+            ),
+            row("600001", Some("{not json"), Some("2026-09-28")),
+            row("600002", Some(r#"{"mid":{"confidence":60.0}}"#), Some("2026-09-28")),
+            row("600003", Some("{}"), None),
+        ];
+        let v = tier_var_from_rows(rows).expect("至少 002696 一条可用");
+        let obj = v.as_object().unwrap();
+        assert_eq!(obj.len(), 1, "损坏/无动作/四档全缺的行不得进变量");
+        let e = &obj["002696"];
+        assert_eq!(e["ultra_short"]["action"], "卖出", "超短档结论必须带上（camel→snake 归一）");
+        assert_eq!(e["short"]["action"], "卖出");
+        assert_eq!(e["mid"]["action"], "持有", "同一只票必须以最新一行为准");
+        assert_eq!(e["long"]["action"], "卖出");
+        assert!((e["mid"]["confidence"].as_f64().unwrap() - 60.5).abs() < 1e-9);
+        assert_eq!(e["asOfDate"], "2026-09-28");
+        assert!(e.get("horizon").is_none(), "不再输出“主档”字段：四档独立，消费方按自己那一档取用");
+
+        // 负控：全不可用 ⇒ None（消费侧据此保持原行为，而不是把所有票当成已有结论）
+        assert!(tier_var_from_rows(vec![row("600001", Some("{not json"), None)]).is_none());
+    }
+
+    /// 生产键族是 **camelCase**（v125 起）：`{"ultraShort":{…}}` 必须读得到。
+    /// 现网实测 48/48 条超短结论就是这个形态、snake 键 0 条 —— 只按 snake 读会让
+    /// 超短档结论整批消失（四档里只有超短两族拼写不同，另外三档从不露馅）。
+    #[test]
+    fn camel_keyed_ultra_short_verdict_is_readable() {
+        let rows = vec![row(
+            "600123",
+            Some(r#"{"ultraShort":{"action":"买入","confidence":71.2}}"#),
+            Some("2026-10-19"),
+        )];
+        let v = tier_var_from_rows(rows).expect("camel 键的超短结论必须被认");
+        let e = &v["600123"];
+        assert_eq!(
+            e["ultra_short"]["action"], "买入",
+            "输出侧用 snake：消费方按 Period::as_str 比对"
+        );
+        assert!((e["ultra_short"]["confidence"].as_f64().unwrap() - 71.2).abs() < 1e-9);
+
+        // 负控：该档两族键下都没有 ⇒ 不得拿别的档的结论凑一格
+        let only_mid = tier_var_from_rows(vec![row(
+            "600124",
+            Some(r#"{"mid":{"action":"买入","confidence":70.0},"long":{"action":"买入"}}"#),
+            None,
+        )])
+        .expect("mid/long 两档仍应进变量");
+        assert!(
+            only_mid["600124"].get("ultra_short").is_none(),
+            "只有 mid/long 结论的行不能凭空补出超短档"
+        );
+    }
+}
+
+/// 阶段 3 的三条硬判据（样本门 / 只降不升 / 损坏行跳过）。
+///
+/// 刻意独立成 mod 而不是塞进上面的 `tests`：那三组测的是样本归一化与 IC 分桶，
+/// 本组只测**权重合成**，判据互不牵连，失败时一眼能归因。
+#[cfg(test)]
+mod weight_ratchet_tests {
+    use super::*;
+    use crate::reflection_stats::IC_MIN_SAMPLE;
+
+    const NOW: i64 = 1_700_000_000_000;
+
+    fn sample(
+        style: &'static str,
+        period: Period,
+        confidence: f64,
+        ret: f64,
+        win: bool,
+        exit_at_ms: i64,
+    ) -> RecoLoopSample {
+        RecoLoopSample {
+            style_key: style,
+            period,
+            exit_at_ms,
+            predicted_at_ms: exit_at_ms - 86_400_000,
+            win,
+            confidence,
+            realized_return_pct: ret,
+            holding_days: period.default_holding_days(),
+            dqi_fused_at_prediction: None,
+            pick_id: format!("p-{style}-{exit_at_ms}-{confidence}"),
+            reco_version: Some(crate::recommender::RECO_GENERATION_FLOOR),
+        }
+    }
+
+    fn cell_of<'a>(res: &'a [LoopCellResult], style: &str, period: &str) -> &'a LoopCellResult {
+        res.iter().find(|r| r.style == style && r.period == period).expect("缺格")
+    }
+
+    /// 样本门：窗口内可用样本 < `IC_MIN_SAMPLE` ⇒ 胜率/IC 线不动。
+    /// 关键断言是 `new == old`（**不是** 1.0）：旧实现回退基线会把历史降权洗掉。
+    #[test]
+    fn insufficient_samples_keep_current_weight_not_baseline() {
+        let samples: Vec<_> = (0..IC_MIN_SAMPLE - 1)
+            .map(|i| sample("trend", Period::Short, 60.0 + i as f64, i as f64, i % 2 == 0, NOW))
+            .collect();
+        let mut current = HashMap::new();
+        current.insert(("trend".to_string(), "short".to_string()), 0.42);
+        let res = compute_loop_cell_weights(&samples, &current, NOW, &MoverCellSignal::default());
+        let c = cell_of(&res, "trend", "short");
+        assert_eq!(c.status, LoopCellStatus::InsufficientSamples, "{c:?}");
+        assert_eq!(c.samples, IC_MIN_SAMPLE - 1);
+        assert_eq!(c.old_weight, 0.42);
+        assert!(
+            (c.new_weight - 0.42).abs() < 1e-12,
+            "样本不足必须保持当前权重 0.42，实际 {}（回退 1.0 即旧缺陷复现）",
+            c.new_weight
+        );
+    }
+
+    /// 零样本 + 当前已被降权 ⇒ 仍保持该权重（不得被抬回基线）。
+    #[test]
+    fn empty_cell_never_lifts_previous_downgrade() {
+        let current = HashMap::from([(("trend".to_string(), "short".to_string()), 0.16_f64)]);
+        let res = compute_loop_cell_weights(&[], &current, NOW, &MoverCellSignal::default());
+        let c = cell_of(&res, "trend", "short");
+        assert_eq!(c.status, LoopCellStatus::InsufficientSamples);
+        assert!((c.new_weight - 0.16).abs() < 1e-12, "实际 {}", c.new_weight);
+    }
+
+    /// IC 方差退化（conf 恒等）⇒ `IcUnmeasurable`，同样保留当前权重。
+    #[test]
+    fn unmeasurable_ic_keeps_current_weight() {
+        let samples: Vec<_> = (0..IC_MIN_SAMPLE)
+            .map(|i| sample("trend", Period::Mid, 60.0, i as f64, true, NOW))
+            .collect();
+        let current = HashMap::from([(("trend".to_string(), "mid".to_string()), 0.31_f64)]);
+        let res = compute_loop_cell_weights(&samples, &current, NOW, &MoverCellSignal::default());
+        let c = cell_of(&res, "trend", "mid");
+        assert_eq!(c.status, LoopCellStatus::IcUnmeasurable, "{c:?}");
+        assert!((c.new_weight - 0.31).abs() < 1e-12, "实际 {}", c.new_weight);
+    }
+
+    /// 只降不升：胜率/IC 线算出的权重高于当前值 ⇒ 棘轮必须压回当前值。
+    ///
+    /// 夹具用「全 win + conf/ret 同向」把 `compute_adjusted_weights` 的 EWMA 结果推到
+    /// 当前值之上（raw ≈ 0.5 > 0.2），否则这条断言测不到棘轮分支。
+    #[test]
+    fn ratchet_never_raises_above_current_weight() {
+        let samples: Vec<_> = (0..IC_MIN_SAMPLE)
+            .map(|i| sample("trend", Period::Short, 10.0 + i as f64 * 10.0, i as f64, true, NOW))
+            .collect();
+        let current = HashMap::from([(("trend".to_string(), "short".to_string()), 0.2_f64)]);
+        let res = compute_loop_cell_weights(&samples, &current, NOW, &MoverCellSignal::default());
+        let c = cell_of(&res, "trend", "short");
+        assert_eq!(c.status, LoopCellStatus::IcNonNegative, "{c:?}");
+        assert!(c.new_weight <= 0.2 + 1e-12, "只降不升：不得从 0.20 抬高到 {}", c.new_weight);
+
+        // 纯函数边界：非有限输入、越界输入都不得产生 NaN / 越过当前值
+        assert_eq!(ratchet_weight(0.99, 0.2), 0.2);
+        assert_eq!(ratchet_weight(0.2, 0.2), 0.2);
+        assert_eq!(ratchet_weight(0.01, 0.2), WEIGHT_FLOOR, "下限钳位");
+        assert_eq!(ratchet_weight(f64::NAN, 0.2), 0.2, "NaN 计算值 ⇒ 保持当前权重");
+        assert_eq!(ratchet_weight(0.3, f64::NAN), 0.3, "NaN 当前值 ⇒ 按基线处理");
+    }
+
+    /// 损坏行跳过：NaN 置信度 / NaN 收益 / 越界置信度 / 负时间戳一律不进分母，
+    /// 且不得把整格权重污染成 NaN。
+    #[test]
+    fn corrupt_samples_are_skipped_not_counted() {
+        let mut samples: Vec<_> = (0..IC_MIN_SAMPLE)
+            .map(|i| sample("trend", Period::Short, 10.0 + i as f64 * 10.0, i as f64, true, NOW))
+            .collect();
+        let mut nan_conf = sample("trend", Period::Short, 50.0, 1.0, true, NOW);
+        nan_conf.confidence = f64::NAN;
+        let mut nan_ret = sample("trend", Period::Short, 50.0, 1.0, true, NOW);
+        nan_ret.realized_return_pct = f64::NAN;
+        let mut out_of_range = sample("trend", Period::Short, 50.0, 1.0, true, NOW);
+        out_of_range.confidence = 150.0;
+        let mut bad_time = sample("trend", Period::Short, 50.0, 1.0, true, NOW);
+        bad_time.exit_at_ms = -1;
+
+        for (i, bad) in [nan_conf, nan_ret, out_of_range, bad_time].into_iter().enumerate() {
+            assert!(!sample_is_usable(&bad), "第 {i} 条损坏样本未被判为不可用");
+            samples.push(bad);
+        }
+
+        let res =
+            compute_loop_cell_weights(&samples, &HashMap::new(), NOW, &MoverCellSignal::default());
+        let c = cell_of(&res, "trend", "short");
+        assert_eq!(c.samples, IC_MIN_SAMPLE, "损坏行不得进分母");
+        assert!(c.new_weight.is_finite(), "权重被污染成 {}", c.new_weight);
+        assert!((0.0..=BASELINE_WEIGHT).contains(&c.new_weight), "越界 {}", c.new_weight);
+    }
+
+    /// 样本不足时，mover 线（有自己的样本门）仍可独立降权；但不得提权。
+    #[test]
+    fn mover_line_still_lowers_an_insufficient_cell() {
+        let samples: Vec<_> = (0..IC_MIN_SAMPLE - 1)
+            .map(|i| sample("trend", Period::Short, 60.0 + i as f64, i as f64, true, NOW))
+            .collect();
+        let current = HashMap::from([(("trend".to_string(), "short".to_string()), 0.9_f64)]);
+        let mut sig = MoverCellSignal::default();
+        sig.cells.insert(("trend".into(), "short".into()), (9, 0));
+        let res = compute_loop_cell_weights(&samples, &current, NOW, &sig);
+        let c = cell_of(&res, "trend", "short");
+        assert_eq!(c.status, LoopCellStatus::InsufficientSamples);
+        assert_eq!(c.mover_penalty, Some(0.1));
+        // 9 次全推出去 ⇒ Laplace 转化率 0.1 ⇒ 0.9×0.1 = 0.09
+        assert!((c.new_weight - 0.09).abs() < 1e-9, "实际 {}", c.new_weight);
+        assert!(c.new_weight < c.old_weight, "独立降权线必须生效");
     }
 }

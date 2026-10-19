@@ -3741,7 +3741,7 @@ async fn load_financial_snapshots(
 /// 重复插入只会累积重复行，使同一交易日被多次计入分位。
 /// 逐条插入而非 `insert_many`：单次回填约 1200 行，本地库开销可接受，
 /// 且规避批量插入的参数上限/分块问题。
-async fn backfill_financial_snapshots(
+pub(crate) async fn backfill_financial_snapshots(
     db: &impl sea_orm::ConnectionTrait,
     client: &axagent_astock_data::AStockClient,
     stock_code: &str,
@@ -4647,6 +4647,8 @@ pub async fn recommend_stocks(
     let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
 
     let served_vars = load_reco_served_vars(&state).await?;
+    let generation = as_of_ctx.as_ref().map(|c| c.as_of_date.format("%Y-%m-%d").to_string());
+    let vars = served_vars_with_analysis_tiers(&state, &served_vars, generation).await;
 
     // state.astock_client 已是 Arc<AStockClient>，直接 clone Arc 即可
     let client: std::sync::Arc<_> = state.astock_client.clone();
@@ -4654,11 +4656,11 @@ pub async fn recommend_stocks(
     let response = if let Some(ctx) = as_of_ctx {
         axagent_astock_data::as_of::AS_OF
             .scope(Some(ctx), async {
-                recommender::recommend_stocks(client, period, &served_vars, None, prior).await
+                recommender::recommend_stocks(client, period, &vars, None, prior).await
             })
             .await
     } else {
-        recommender::recommend_stocks(client, period, &served_vars, None, prior).await
+        recommender::recommend_stocks(client, period, &vars, None, prior).await
     }?;
 
     // ── 持久化荐股结果（实盘与回放都落；代际由每行 `as_of_date` 承载） ──
@@ -4669,6 +4671,260 @@ pub async fn recommend_stocks(
     persist_reco_response_picks(&state, &response, &served_vars, &generated_at).await;
 
     Ok(response)
+}
+
+/// 把**用户自己的标的**注入荐股候选池（自选股 ∪ `origin='local'` 的本机标的）。
+///
+/// 2026-10-19 实测：002696 百洋股份在 09-28 的回放批次 `seed_pool_json` 里零命中、
+/// `reco_scan_audit` 连一行扫描记录都没有 —— 因为建池只读「热榜 ∪ 行业龙头 ∪ 内置兜底」，
+/// 而它既不在截止日热榜、也不是行业龙头。用户手工加入/分析过的票只落在
+/// `market_stock_universe`（origin='local'）与 `watchlist_items`，**荐股侧从不读它们**
+/// ⇒ 四个周期都看不到这只票。这里在每次荐股前覆盖写入（空集合也写，避免上一批的陈旧标的残留）。
+async fn refresh_user_seed(state: &State<'_, AppState>) {
+    use axagent_dao::repo::reco_seed;
+
+    let db = state.harness.db();
+    let mut items: Vec<(String, String, Option<String>)> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    match reco_seed::load_watchlist_items(db).await {
+        Ok(rows) => {
+            for (code, name) in rows {
+                if seen.insert(code.clone()) {
+                    items.push((code, name, None));
+                }
+            }
+        },
+        Err(e) => tracing::warn!("[reco] 读自选股失败，本轮不注入该来源: {e}"),
+    }
+    match reco_seed::load_local_universe_items(db).await {
+        Ok(rows) => {
+            for (code, name) in rows {
+                if seen.insert(code.clone()) {
+                    items.push((code, name, None));
+                }
+            }
+        },
+        Err(e) => tracing::warn!("[reco] 读本机标的失败，本轮不注入该来源: {e}"),
+    }
+
+    axagent_analysis_engine::recommender::set_user_seed(items);
+}
+
+/// 扫描板块范围的设置键（UI 下拉写入，荐股扫描前读取）。
+///
+/// 取值：`auto`（按本地日轮动一个板块，默认）/ `sh_main` / `sz_main` / `chinext` / `star` / `all`。
+/// 与 `recommender::boards::VALID_SCOPES` 逐字一致（后端写入前按它校验）。
+pub const RECO_BOARD_SCOPE_KEY: &str = "reco_board_scope";
+
+/// 读取扫描板块范围（UI 下拉的持久化值）。缺失或非法一律回落 `auto`。
+#[tauri::command]
+pub async fn get_reco_board_scope(state: State<'_, AppState>) -> Result<String, String> {
+    use axagent_analysis_engine::recommender::boards::VALID_SCOPES;
+    let raw = axagent_dao::repo::settings::get_setting(state.harness.db(), RECO_BOARD_SCOPE_KEY)
+        .await
+        .map_err(|e| format!("读取扫描板块设置失败: {e}"))?;
+    Ok(raw.filter(|s| VALID_SCOPES.contains(&s.as_str())).unwrap_or_else(|| "auto".to_string()))
+}
+
+/// 保存扫描板块范围。非法值**不静默放大成 all**（一次手误会把请求量放大 4 倍）：
+/// 回落 `auto` 并留痕。UI 只会发合法值，因此这里不向用户抛业务错误。
+#[tauri::command]
+pub async fn set_reco_board_scope(state: State<'_, AppState>, scope: String) -> Result<(), String> {
+    use axagent_analysis_engine::recommender::boards::VALID_SCOPES;
+    let normalized = if VALID_SCOPES.contains(&scope.as_str()) {
+        scope
+    } else {
+        tracing::warn!("[reco] 非法扫描板块范围 {scope:?}，回落 auto");
+        "auto".to_string()
+    };
+    axagent_dao::repo::settings::set_setting(state.harness.db(), RECO_BOARD_SCOPE_KEY, &normalized)
+        .await
+        .map_err(|e| format!("保存扫描板块设置失败: {e}"))
+}
+
+/// 当日涨幅榜来源（第五来源，2026-10-20）：从 `market_daily_close` 取该交易日涨幅前 N 只。
+///
+/// 为什么需要：候选池原本只有「热股 top50 ∪ 行业龙头 30 ∪ 内置样本 ∪ 用户标的」四源，
+/// 一只两个榜都不在的妖股，除手工加自选外没有任何入池通道。本函数把收盘快照里当日最强的
+/// N 只并进池子，与用户标的同一注入方式、分列计数（`SeedPoolOrigin::mover`），
+/// 让「全市场发现」不再依赖用户先看到它。
+///
+/// 口径边界（必须如实说）：快照枚举域是 `market_stock_universe`（现网 681 只，由
+/// `run_universe_sweep` 分 tick 扩），**不是全市场**；域外个股这条来源也发现不了。
+/// 回放代若该日没有快照（如 09-28），返回 0 —— 不拿今日榜冒充历史。
+async fn refresh_mover_seed(
+    state: &State<'_, AppState>,
+    generation: Option<&str>,
+    client: &axagent_astock_data::AStockClient,
+) -> usize {
+    use axagent_analysis_engine::recommender::boards::pick_movers;
+    use axagent_analysis_engine::recommender::boards::{Board, VALID_SCOPES, boards_for_scope};
+    use axagent_dao::repo::reco_seed;
+
+    let db = state.harness.db();
+
+    /// 取前多少只：与热股榜同量级（50），池子约 +25% 扫描量；再大会把「当日强势」
+    /// 稀释成「当日涨幅前 500」。
+    const MOVER_TOP_N: u64 = 50;
+    /// 板块轮动单次取的强势股数（每个板块 30 只）。
+    const BOARD_TOP_N: usize = 30;
+
+    let day: Option<String> = match generation {
+        Some(d) => Some(d.to_string()),
+        // 实盘：取快照表里**最新交易日**（不假设「今天」——收盘前当日行还不存在）。
+        // 取不到也**不提前返回**：板块轮动不依赖这张表，快照没采到时它仍能给出当日强势股。
+        None => match reco_seed::latest_close_trade_date(db).await {
+            Ok(Some(day)) => Some(day),
+            Ok(None) => {
+                tracing::info!("[reco] 收盘快照：market_daily_close 无数据，本轮只用板块轮动");
+                None
+            },
+            Err(e) => {
+                tracing::warn!("[reco] 收盘快照：读取最新交易日失败（fail-open）: {e}");
+                None
+            },
+        },
+    };
+    // ── 板块轮动扫描（2026-10-20 用户口径：按 A/创业/科创分片，减轻单次荐股压力）──
+    // 只跑 live：`market_snapshot_batch` 在 as-of 下无历史语义（返回空 + 留痕），
+    // 回放的历史涨跌只能由 `market_daily_close` 给。
+    // 扫描范围由 `settings.reco_board_scope` 决定：auto=按日轮动一个板块 / 指定板块 / all。
+    let mut board_items: Vec<(String, String, Option<String>)> = Vec::new();
+    if generation.is_none() {
+        let scope = match axagent_dao::repo::settings::get_setting(db, RECO_BOARD_SCOPE_KEY).await {
+            Ok(v) => v.unwrap_or_else(|| "auto".to_string()),
+            Err(e) => {
+                tracing::warn!("[reco] 读取扫描板块范围失败（按 auto 轮动）: {e}");
+                "auto".to_string()
+            },
+        };
+        let ordinal = chrono::Local::now().date_naive().ordinal() as usize;
+        let boards = match boards_for_scope(&scope, ordinal) {
+            Some(b) => b,
+            None => {
+                tracing::warn!(
+                    "[reco] 未知扫描板块范围 {scope:?}（合法值 {:?}），按 auto 轮动",
+                    VALID_SCOPES
+                );
+                vec![Board::for_ordinal(ordinal)]
+            },
+        };
+        let mut requested_codes = 0usize;
+        let mut failed = 0usize;
+        for board in &boards {
+            let codes = board.codes();
+            requested_codes += codes.len();
+            let mut quotes = Vec::new();
+            for chunk in codes.chunks(80) {
+                match client.market_snapshot_batch(chunk).await {
+                    Ok(qs) => quotes.extend(qs),
+                    Err(_) => failed += 1,
+                }
+                // 批间隔 120ms：收盘快照链（`run_close_sweep`）同样带 interval 参数，
+                // 实测连续 60 页会被连接级封禁 ⇒ 一轮的几十个请求不能一口气打满。
+                tokio::time::sleep(Duration::from_millis(120)).await;
+            }
+            let mut picked = pick_movers(&quotes, 3.0, BOARD_TOP_N);
+            tracing::info!(
+                "[reco] 板块 {}：盲扫 {} 码，当日强势（≥3%）取 {} 只",
+                board.label_zh(),
+                codes.len(),
+                picked.len()
+            );
+            board_items.append(&mut picked);
+        }
+        tracing::info!(
+            "[reco] 扫描板块范围={scope}（{} 个板块）：共 {} 码 / {} 请求 / 失败 {}，强势 {} 只",
+            boards.len(),
+            requested_codes,
+            requested_codes.div_ceil(80),
+            failed,
+            board_items.len()
+        );
+    }
+
+    let archive_items = match day.as_deref() {
+        None => Vec::new(),
+        Some(day) => {
+            // 多取 4 倍：ST 只能在名称上剔（快照表没有 is_st 列），先截断会把名额浪费在 ST 上
+            match reco_seed::top_close_rows_by_change(db, day, MOVER_TOP_N * 4).await {
+                Ok(rows) => rows
+                    .into_iter()
+                    .filter(|(_, name)| !name.contains("ST"))
+                    .take(MOVER_TOP_N as usize)
+                    .map(|(code, name)| (code, name, None))
+                    .collect::<Vec<_>>(),
+                Err(e) => {
+                    tracing::warn!("[reco] 收盘快照查询失败（fail-open）: {e}");
+                    Vec::new()
+                },
+            }
+        },
+    };
+
+    // 合并两个来源：板块轮动（今天扫到的那一块）在前，收盘快照（上一交易日前 50）在后。
+    // 去重按 code；总数封顶 80，避免把池子撑成「涨幅榜大全」。
+    let mut seen = std::collections::HashSet::new();
+    let mut merged: Vec<(String, String, Option<String>)> = Vec::new();
+    for item in board_items.into_iter().chain(archive_items) {
+        if merged.len() >= 80 {
+            break;
+        }
+        if seen.insert(item.0.clone()) {
+            merged.push(item);
+        }
+    }
+    let n = merged.len();
+    let day_label = day.as_deref().unwrap_or("(无收盘快照)");
+    if n == 0 {
+        tracing::info!(
+            "[reco] 涨幅榜 {day_label}：无可用强势股（快照与板块轮动均为空），跳过该来源"
+        );
+        return 0;
+    }
+    axagent_analysis_engine::recommender::set_mover_seed(merged);
+    tracing::info!("[reco] 涨幅榜 {day_label}：注入 {n} 只（板块轮动 + 收盘快照；ST 已剔除）");
+    n
+}
+
+/// 把「分析侧自动定档」变量并入 served_vars（fail-open：读不到就按原行为跑）。
+///
+/// 代际必须由调用方显式给出（`None`=实盘代、`Some(截止日)`=回放代）—— served_vars 是在
+/// as_of scope 之外加载的，那一刻 `current_as_of()` 恒为 None，加载侧自判代际是假守卫。
+async fn served_vars_with_analysis_tiers(
+    state: &State<'_, AppState>,
+    served_vars: &[(String, serde_json::Value)],
+    generation: Option<String>,
+) -> Vec<(String, serde_json::Value)> {
+    let mut vars = served_vars.to_vec();
+    match axagent_analysis_engine::recommender::reco_loop::load_analysis_tier_var(
+        state.harness.db(),
+        generation.as_deref(),
+    )
+    .await
+    {
+        Ok(Some(v)) => {
+            // 留痕：这一代读到了哪些票的定档。没有这行，就无法区分「定档表里没有它」
+            // 与「定档了但没被扫到」——这正是 2026-10-19 连查数轮的盲区。
+            let codes: Vec<&str> =
+                v.as_object().map(|m| m.keys().map(String::as_str).collect()).unwrap_or_default();
+            tracing::info!(
+                "[reco] 分析定档 {generation:?}：{} 只 {}{}",
+                codes.len(),
+                codes.iter().take(12).cloned().collect::<Vec<_>>().join(","),
+                if codes.len() > 12 { " …" } else { "" }
+            );
+            vars.push(("reco_analysis_tiers".to_string(), v));
+        },
+        Ok(None) => {
+            tracing::info!("[reco] 分析定档 {generation:?}：0 只（该代没有 completed 定档）")
+        },
+        Err(e) => {
+            tracing::warn!("[reco] 分析定档表加载失败（fail-open，按档归位不生效）: {e}")
+        },
+    }
+    vars
 }
 
 /// 一次拿**四档**荐股结果（候选池只建一次）。
@@ -4692,20 +4948,32 @@ pub async fn recommend_stocks_all_periods(
 ) -> Result<RecoBatchResponse, String> {
     use axagent_analysis_engine::recommender::Period;
 
+    // 用户自己的标的先入池（自选股 ∪ 本机手工加入/分析过的票）——见 `refresh_user_seed`
+    // 的文档：缺这一路时，一只不在截止日热榜/行业龙头里的票在任何周期都不会出现。
+    refresh_user_seed(&state).await;
+
     let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
     let served_vars = load_reco_served_vars(&state).await?;
     let client: std::sync::Arc<_> = state.astock_client.clone();
+
+    // 代际显式取自本轮 as-of 上下文（回放=截止日；实盘=None）——见 helper 的文档。
+    let generation = as_of_ctx.as_ref().map(|c| c.as_of_date.format("%Y-%m-%d").to_string());
+
+    // 当日涨幅榜入池（第五来源，2026-10-20）：必须先于扫描，且用**本轮的代际**取快照
+    // （回放代没有该日快照时返回 0，不拿今日榜冒充历史）。
+    refresh_mover_seed(&state, generation.as_deref(), client.as_ref()).await;
+
+    let vars = served_vars_with_analysis_tiers(&state, &served_vars, generation).await;
 
     let prior = reco_horizon_prior(state.harness.db(), &served_vars).await;
     let results = if let Some(ctx) = as_of_ctx {
         axagent_astock_data::as_of::AS_OF
             .scope(Some(ctx), async {
-                recommender::recommend_stocks_multi(client, &Period::ALL, &served_vars, None, prior)
-                    .await
+                recommender::recommend_stocks_multi(client, &Period::ALL, &vars, None, prior).await
             })
             .await
     } else {
-        recommender::recommend_stocks_multi(client, &Period::ALL, &served_vars, None, prior).await
+        recommender::recommend_stocks_multi(client, &Period::ALL, &vars, None, prior).await
     };
 
     let mut by_horizon: std::collections::BTreeMap<Period, RecoResponse> =
@@ -4946,15 +5214,25 @@ pub(crate) async fn maybe_recalc_reco_loop(db: &DatabaseConnection) -> String {
     }
 }
 
-/// 读取最近一次 live 荐股结果(缓存) —— 智能荐股页打开时优先调此命令,
+/// 读取**某一代**最近一次荐股结果(缓存) —— 智能荐股页打开时优先调此命令,
 /// 避免每次打开都触发一次新的后端推荐任务。
+///
+/// `as_of_date` 决定读哪一代（同 2026-10-13 的落库裁定：实盘与回放同表，靠本列分池）：
+/// - `None` ⇒ 读**实盘**代（`as_of_date IS NULL`），与历史行为逐字一致；
+/// - `Some("2026-09-28")` ⇒ 读那一天的**回放**代。
+///
+/// ⚠ 这条参数是 2026-10-19 补上的，缺它时本命令把谓词**写死**成 `AsOfDate.is_null()`，
+/// 于是库内明明已经有回放批次（实测 09-28 那批真实样本 170 行 / 45 只、四档齐、
+/// `seed_pool_json` 1059 字符），前端在回放态**一行都读不到**，只能每切一档重跑一次扫描；
+/// 而扫描能否出货取决于那一刻 push2his 可不可达（同轮日志：814 次行情合成里 173 次被掐断）
+/// ⇒ 用户看到的就是「as-of 根本跑不出候选」。落库白落，缺的正是读侧。
 ///
 /// 返回值:
 /// - `Some(RecoResponse)` —— 缓存存在,直接展示
-/// - `None` —— 该 period 还没有历史荐股(可引导用户点"刷新"实时拉取)
+/// - `None` —— 该 period 在该代下还没有历史荐股(前端回退到实时扫描)
 ///
 /// 行为:
-/// 1. 查 reco_picks 表:按 period 过滤,取最新 generated_at 对应的所有行
+/// 1. 查 reco_picks 表:按 period + 代际过滤,取最新 generated_at 对应的所有行
 /// 2. 反序列化每行 pick_data → RecoPick
 /// 3. 按 style 分组,组装 RecoResponse,mode = "cached"
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "读取缓存荐股结果")]
@@ -4962,11 +5240,22 @@ pub(crate) async fn maybe_recalc_reco_loop(db: &DatabaseConnection) -> String {
 pub async fn get_cached_recommendation(
     state: State<'_, AppState>,
     period: axagent_analysis_engine::recommender::Period,
+    as_of_date: Option<String>,
 ) -> Result<Option<RecoResponse>, String> {
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+    use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
     let db = state.harness.db();
     let period_str = period.as_str();
+
+    // 代际判据复用同一个解析权威（`recommend_stocks_all_periods` 也是它），不在这里自己
+    // 判字符串格式；非法日期直接报错，**不静默退化成「读实盘代」**——那会把一次拼错的
+    // 回放日期显示成实盘结果，正是本仓反复要避免的呈现歧义。
+    let replay_day = AsOfContext::parse_optional(as_of_date.as_deref())?
+        .map(|ctx| ctx.as_of_date.format("%Y-%m-%d").to_string());
+    let generation_filter = match &replay_day {
+        Some(day) => Condition::all().add(reco_picks::Column::AsOfDate.eq(day)),
+        None => Condition::all().add(reco_picks::Column::AsOfDate.is_null()),
+    };
 
     // 1) 找该 period 最新的 generated_at
     // 用 ORDER BY + LIMIT 1 拿最新一次,避免聚合复杂 SQL
@@ -4976,9 +5265,8 @@ pub async fn get_cached_recommendation(
         .filter(reco_picks::Column::Period.eq(period_str))
         .filter(reco_picks::Column::Style.ne("serenity"))
         .filter(reco_picks::Column::PickData.is_not_null()) // 跳过 v007 之前的旧行
-        // 代际过滤：缓存回读的是「上一批**实盘**结果」，回放行同表但绝不能被当成
-        // 上次的实盘出票读回前端（2026-10-12 起回放也落库，此谓词是防混码的正门）。
-        .filter(reco_picks::Column::AsOfDate.is_null())
+        // 代际过滤：实盘态读实盘代、回放态读那一天的回放代（判据见上方 `generation_filter`）。
+        .filter(generation_filter.clone())
         .order_by_desc(reco_picks::Column::GeneratedAt)
         .limit(1)
         .one(db)
@@ -4994,7 +5282,7 @@ pub async fn get_cached_recommendation(
         .filter(reco_picks::Column::Period.eq(period_str))
         .filter(reco_picks::Column::GeneratedAt.eq(&latest_row.generated_at))
         .filter(reco_picks::Column::PickData.is_not_null())
-        .filter(reco_picks::Column::AsOfDate.is_null())
+        .filter(generation_filter)
         .all(db)
         .await
         .map_err(|e| {

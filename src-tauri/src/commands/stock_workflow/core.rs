@@ -2428,6 +2428,11 @@ pub(crate) async fn fetch_similar_cases(
     if similar.is_empty() {
         return None;
     }
+    // 要点截断按**字符**计：`decision_reasoning` 是中文句子，按字节切片会让终点落在汉字
+    // 中间 → `byte index N is not a char boundary` panic（2026-10-19 实测崩在 `&reasoning[..60]`，
+    // 60 字节正好切开一个 3 字节汉字）。本模块其余中文语料一律按字符截断
+    // （`cap_reflection_string`、`serenity.rs` 的 `chars().take`），此处对齐同一口径。
+    const REASONING_ABBR_CHARS: usize = 60;
     let mut lines: Vec<String> = Vec::new();
     for s in similar {
         let conf = s
@@ -2439,11 +2444,7 @@ pub(crate) async fn fetch_similar_cases(
             .unwrap_or_else(|| "?".to_string());
         let action = s.decision_action.as_deref().unwrap_or("?");
         let reasoning = s.decision_reasoning.as_deref().unwrap_or("");
-        let abbr = if reasoning.len() > 60 {
-            &reasoning[..60]
-        } else {
-            reasoning
-        };
+        let abbr: String = reasoning.chars().take(REASONING_ABBR_CHARS).collect();
         lines.push(format!(
             "- 日期:{} 决策:{} 置信度:{} → 失败。要点:{}",
             s.analysis_date, action, conf, abbr
@@ -3221,5 +3222,50 @@ mod tests {
             .await
             .expect("读 streak 应成功");
         assert_eq!(s.observations, 2, "坏快照不该产出一行观测");
+    }
+
+    /// 注入语料的中文要点必须按**字符**截断（2026-10-19 实机 panic 回归）。
+    ///
+    /// 旧实现 `&reasoning[..60]` 按字节切：终点落在 3 字节汉字中间即
+    /// `byte index 60 is not a char boundary` panic。它崩在 `pre_exec` 建变量阶段，
+    /// 代价不是「少一句要点」而是整条分析链失败。
+    #[tokio::test]
+    async fn similar_cases_reasoning_abbr_never_splits_a_han_char() {
+        let handle = axagent_dao::db::create_test_pool().await.expect("建临时测试库失败");
+        let db = &handle.conn;
+        // 夹具刻意取「第 60 字节落在汉字中间」的形态 —— 不带这个性质就顶不住旧实现
+        let reasoning = "开盘后放量突破 60 日均线，但 PE 已高于行业中位数，基本面支撑不足，\
+追高风险偏大且缺少回撤保护，建议等待缩量回踩确认支撑后再评估仓位，不宜在此位置直接买入";
+        assert!(
+            !reasoning.is_char_boundary(60),
+            "夹具的第 60 字节必须落在汉字中间，否则本测试测不到回归点"
+        );
+
+        let floor = axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR;
+        let active = stock_analyses::ActiveModel {
+            id: Set("an-abbr-cn".to_string()),
+            stock_code: Set("000001".to_string()),
+            stock_name: Set("测试票".to_string()),
+            // 取数窗口是「距今 90 天」⇒ 固定日期会随时间滚出窗口，这里取当天
+            analysis_date: Set(chrono::Utc::now().format("%Y-%m-%d").to_string()),
+            provider_id: Set("test".to_string()),
+            conversation_id: Set("test-conv".to_string()),
+            status: Set("completed".to_string()),
+            outcome: Set(Some("loss".to_string())),
+            decision_action: Set(Some("买入".to_string())),
+            decision_reasoning: Set(Some(reasoning.to_string())),
+            template_version: Set(Some(floor)),
+            created_at: Set(0),
+            updated_at: Set(0),
+            ..Default::default()
+        };
+        stock_analyses::Entity::insert(active).exec(db).await.expect("插入失败案例应成功");
+
+        let out = fetch_similar_cases("000001", db).await.expect("有 loss 案例时应产出注入语料");
+        let kept: String = reasoning.chars().take(60).collect();
+        let dropped: String = reasoning.chars().skip(60).collect();
+        assert!(out.contains(&kept), "要点应保留前 60 个字符:\n{out}");
+        assert!(!out.contains(&dropped), "超出 60 字的部分不得进注入语料");
+        assert!(out.contains("决策:买入"), "决策动作应原样带出:\n{out}");
     }
 }

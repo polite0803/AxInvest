@@ -322,15 +322,33 @@ fn every_reco_picks_insert_stamps_algorithm_version() {
     assert_eq!(checked, 2, "预期扫到 2 处 reco_picks 建行点，实际 {checked} —— 有新增写入点未入册");
 }
 
+/// 读「出厂变量表里某个变量的字符串值是否等于 `on`」。
+///
+/// 生产锁与下面的负控**共用这一个谓词**：负控若另写一套读法，它就测不到真正决定断言
+/// 的那道守卫（拆错位置＝另一种假绿）。逐字段写的 `Variable` 用 grep 读不出来，
+/// 所以这里读编译后的表。
+fn seeded_value_is_on(name: &str) -> bool {
+    super::seed_variables::build_template_variables()
+        .into_iter()
+        .find(|v| v.name == name)
+        .and_then(|v| v.value.as_str().map(str::to_string))
+        .is_some_and(|v| v == "on")
+}
+
 /// P2 依赖锁：`reco_ic_gate` 要能翻到 `on`，前提是 IC 聚合**已按算法代际筛样**。
 ///
 /// 2026-10-14 状态更新（PLAN-reflection-optimization-closure §五）：筛样已实现
 /// （`RecoIcRow.algorithm_version` + `aggregate_reco_ic` 按 `RECO_GENERATION_FLOOR` 下限筛，
-/// 两类排除分别计数），故本锁现在应判「ready」；库里 seed 仍出厂 `shadow`，翻 `on` 归用户裁定。
+/// 两类排除分别计数），故本锁现在应判「ready」。
 ///
 /// 判据口径也随之收紧：原写法只要 `ic.rs` 里出现 `algorithm_version` 字样就算 ready，
 /// 结构体加个字段（没人筛）也能骗过它 ⇒ 现在要求**同时**出现下限常量与排除计数，
 /// 这两者只在「真的按代际剔样本」的代码里同时存在。
+///
+/// ⚠ 2026-10-20 改了**读种子那一侧的姿势**：原写法是「同一行里同时出现
+/// `reco_ic_gate` 与 `"on"`」，而 `Variable` 是逐字段写的（`name:` 一行、`value:` 另一行），
+/// 出厂值真改成 `on` 时该判据**根本不命中** —— 依赖锁当场退化成恒真。
+/// 现在直接调 `build_template_variables()` 读**编译出来的那个值**，不再 grep 源文本。
 #[test]
 fn ic_gate_can_only_turn_on_after_version_screening_exists() {
     let ic_src = {
@@ -346,13 +364,7 @@ fn ic_gate_can_only_turn_on_after_version_screening_exists() {
         .join("\n");
     let screening_ready = code_only.contains("RECO_GENERATION_FLOOR")
         && code_only.contains("excluded_unknown_generation");
-    let seed_turns_on = {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/commands/stock_analysis_setup/seed_variables.rs");
-        std::fs::read_to_string(&path).expect("读取 seed_variables.rs 失败")
-    };
-    let gate_on_seeded =
-        seed_turns_on.lines().any(|l| l.contains("reco_ic_gate") && l.contains("\"on\""));
+    let gate_on_seeded = seeded_value_is_on("reco_ic_gate");
     assert!(
         !gate_on_seeded || screening_ready,
         "seed 把 reco_ic_gate 设成 on，但 IC 还没有按代际筛样 ⇒ 跨代样本会混成一格后自动降权。先做同代筛样，再翻闸。"
@@ -362,16 +374,114 @@ fn ic_gate_can_only_turn_on_after_version_screening_exists() {
         screening_ready,
         "IC 的代际筛样判据被移除了（缺 RECO_GENERATION_FLOOR 或排除计数）⇒ 上一段锁会退化成恒真"
     );
+    // 正断言 B（2026-10-20 裁定）：出厂闸确实是 on —— 这条同时给上面那把锁供电，
+    // 否则「闸没开」会让依赖锁永远空转（读值而不是 grep，才认得出逐字段写的 Variable）。
+    assert!(
+        gate_on_seeded,
+        "reco_ic_gate 的出厂默认已裁定为 on；现在读到的不是 on ⇒ 要么被回退，要么本锁又读错了地方"
+    );
 }
 
-/// 负控：筛样判据本身要能红 —— 「seed 已 on 且 ic 无版本筛样」的组合必须被识别。
+/// 改出厂默认值**必须**同批带一条按版本号门控的强制覆写，否则等于没改。
+///
+/// 现网实证（2026-10-20）：v171 只把 `seed_variables` 的默认值从 shadow 改成 `on`，
+/// 播种确实换代成功（库 `version`=171），而 `variables` 里读回来的仍是 `shadow` ——
+/// `merge_variable_values` 的语义是「新定义 + **无条件保留旧值**」。DCF（v74）与
+/// `kline_limit`（v115）两个门踩过同一条坑，本锁把它们已经用过的姿势钉住：
+/// 源文件里必须存在一处「`force_variable_value(` 后面紧跟 `reco_ic_gate`」的覆写调用，
+/// 且该调用受 `previous_version` 门控。
+///
+/// 判据锁**实质**不锁字面：只要求两段标记在同一个调用块内相邻出现，
+/// 换行、加参数、调整实参顺序都不该让它红（rustfmt 折行是常态）。
+#[test]
+fn reco_ic_gate_default_change_ships_a_version_gated_override() {
+    let src = {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/commands/stock_analysis_setup/seed_stock_analysis.rs");
+        std::fs::read_to_string(&path).expect("读取 seed_stock_analysis.rs 失败")
+    };
+    assert!(
+        override_force_hits(&src, "reco_ic_gate"),
+        "reco_ic_gate 的出厂值变更没有配套的 force_variable_value 覆写 ⇒ 库里存量 shadow 会原样盖回来（v171 的实际失败形态）"
+    );
+    assert!(
+        override_is_previous_version_gated(&src, "reco_ic_gate"),
+        "覆写没有按 previous_version 门控 ⇒ 它不再是「一次性」迁移，每次无关升版都会抹掉用户在面板里对该闸的调整"
+    );
+
+    // 负控：两条判据都必须**只认代码**。把同一段调用注释掉，两条都要退成 false ——
+    // 否则它们其实是「文件里出现过这个词」这种恒真判据，删掉实现也不会红。
+    let commented = "    // force_variable_value(\n    //     &variables_val,\n    //     \"reco_ic_gate\",\n    //     serde_json::json!(\"on\"),\n    // );\n";
+    assert!(
+        !override_force_hits(commented, "reco_ic_gate"),
+        "负控失效：注释里的 force 被当成了实现"
+    );
+    assert!(
+        !override_is_previous_version_gated(commented, "reco_ic_gate"),
+        "负控失效：注释里的 previous_version 被当成了门控"
+    );
+    // 负控 B：`force_variable_value` 与变量名都在，但 `previous_version` 那句隔在 40 行之外
+    // ⇒ 「有门控」这条不得算命中（否则任何两处不相干的代码都能拼成一条假门）。
+    let far_apart = &format!(
+        "{}\n{}\nforce_variable_value(\n    &v,\n    \"reco_ic_gate\",\n    serde_json::json!(\"on\"),\n);\n",
+        "if previous_version.is_none_or(|v| v < DCF_MIGRATION_VERSION) {",
+        "    let x = 1;\n".repeat(40).as_str()
+    );
+    assert!(
+        override_force_hits(far_apart, "reco_ic_gate"),
+        "前提自证：这段样本里 force 与变量名确实相邻（否则下一条断言是在测别的）"
+    );
+    assert!(
+        !override_is_previous_version_gated(far_apart, "reco_ic_gate"),
+        "负控 B 失效：相隔 40 行的 previous_version 被当成了本次覆写的门"
+    );
+}
+
+/// 剥注释后的源码里，是否存在**一个 `force_variable_value(` 调用块内**出现该变量名。
+/// 判据取「同一个 8 行窗口里两个标记都在」，不锁某一行的字面写法（rustfmt 会折行）。
+fn override_force_hits(src: &str, var: &str) -> bool {
+    let code = strip_comment_lines(src);
+    code.windows(8).any(|w| {
+        w.iter().any(|l| l.contains("force_variable_value(")) && w.iter().any(|l| l.contains(var))
+    })
+}
+
+/// 同上，但要求窗口里还有 `previous_version` —— 一次性门的水位线判据。
+fn override_is_previous_version_gated(src: &str, var: &str) -> bool {
+    let code = strip_comment_lines(src);
+    code.windows(10).any(|w| {
+        w.iter().any(|l| l.contains("previous_version")) && w.iter().any(|l| l.contains(var))
+    })
+}
+
+/// 逐行剥掉 `//` / `///` 开头的整行注释（与本文件其他源码级判据同一口径）。
+fn strip_comment_lines(src: &str) -> Vec<&str> {
+    src.lines()
+        .filter(|l| {
+            let t = l.trim_start();
+            !t.starts_with("//") && !t.starts_with("///")
+        })
+        .collect()
+}
+
+/// 负控：依赖锁的两半都要能红 —— 「seed 已 on 且 ic 无版本筛样」的组合必须被识别。
 #[test]
 fn ic_gate_dependency_lock_detects_the_bad_pairing() {
-    let bad_seed = "    (\"reco_ic_gate\".into(), \"on\".into()),";
-    let hits = bad_seed.lines().any(|l| l.contains("reco_ic_gate") && l.contains("\"on\""));
-    assert!(hits, "负控失效：判据认不出「seed=on」");
-    let good_seed = "    (\"reco_ic_gate\".into(), \"shadow\".into()),";
-    assert!(!good_seed.lines().any(|l| l.contains("reco_ic_gate") && l.contains("\"on\"")));
+    // 负控 A（谓词有电）：`seeded_value_is_on` 必须**只在值等于 "on" 时**为真。
+    // 三条探针各自封死一种退化形态：
+    //   · 表里根本没有这个变量 ⇒ false（封「读不到就当真」）；
+    //   · 变量存在但值是别的字符串（`screening_source` = `""`）⇒ false（封「凡有字符串值就算 on」）；
+    //   · 出厂的 reco_ic_gate 本身 ⇒ true（封「谓词恒假，于是依赖锁永远空转」）。
+    assert!(
+        !seeded_value_is_on("no_such_variable_in_the_table"),
+        "谓词失效：变量缺席不得算成已开闸"
+    );
+    assert!(!seeded_value_is_on("screening_source"), "谓词失效：值为空串的变量不得算成已开闸");
+    assert!(
+        seeded_value_is_on("reco_ic_gate"),
+        "谓词失效：出厂已开的那个闸读不出来 ⇒ 依赖锁退化成恒真"
+    );
+
     // 负控 B：只有字段声明、没有筛样判据的 ic.rs 文本 ⇒ 必须判为未 ready
     let field_only = "pub struct RecoIcRow { pub algorithm_version: Option<i32> }\n\
                       // RECO_GENERATION_FLOOR 出现在注释里不算\n";

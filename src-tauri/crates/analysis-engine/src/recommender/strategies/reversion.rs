@@ -13,6 +13,33 @@ use axagent_harness::market_data::MarketDataProvider;
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// 短档量能门：当日量能不得超过近 `n` 日均量的 `mult` 倍。返回 `(当日, 均量, 是否用成交量)`。
+///
+/// ⚠ **必须带成交量回退**（2026-10-20）：日 K 源（腾讯 `day`）只有 6 个字段、没有成交额
+/// ⇒ `amount = 0`；旧实现读到 `avg_5 <= 0` 就 `return None`，于是**短档超跌反弹在回放里
+/// 结构性死亡** —— 现网读数：回放 `short × reversion` 历史 **0 行**，实盘 63 行。
+/// 判据本身只比较「当日 / 均量」的**比值**，两侧取同一个字段即可，不涉及单位换算；
+/// `amount` 与 `volume` 都不可用（均量 ≤0）或当日超过倍数 ⇒ `None`。
+fn short_energy_gate(
+    klines: &[axagent_harness::market_data::KLine],
+    n: usize,
+    mult: f64,
+) -> Option<(f64, f64, bool)> {
+    let today_amount = klines.last().map(|k| k.amount).unwrap_or(0.0);
+    let avg_amount = indicators::avg_amount_n(klines, n).unwrap_or(0.0);
+    let (today, avg, used_volume) = if today_amount > 0.0 && avg_amount > 0.0 {
+        (today_amount, avg_amount, false)
+    } else {
+        let today_volume = klines.last().map(|k| k.volume).unwrap_or(0.0);
+        let avg_volume = indicators::avg_volume_n(klines, n).unwrap_or(0.0);
+        (today_volume, avg_volume, true)
+    };
+    if !avg.is_finite() || avg <= 0.0 || !today.is_finite() || today > avg * mult {
+        return None;
+    }
+    Some((today, avg, used_volume))
+}
+
 pub struct ReversionStrategy {
     pub period: Period,
 }
@@ -110,14 +137,20 @@ impl ReversionStrategy {
                 }
                 let avg_period = read_f64(vars, "rev_avg_amount_period", 5.0) as usize;
                 let avg_mult = read_f64(vars, "rev_avg_amount_mult", 1.2);
-                let avg_5 = indicators::avg_amount_n(&klines, avg_period).unwrap_or(0.0);
-                let today = klines.last().map(|k| k.amount).unwrap_or(0.0);
-                if avg_5 <= 0.0 || today > avg_5 * avg_mult {
-                    return None;
-                }
+                // 量能门走 `short_energy_gate`：成交额缺失时退回成交量（日 K 无 amount 字段）。
+                let (today, avg, used_volume) = short_energy_gate(&klines, avg_period, avg_mult)?;
                 let mut r = vec![
                     format!("RSI({}) {:.1} 超卖", rsi_period, rsi_value),
-                    format!("量比 {} 日均 {:.0}%", avg_period, today / avg_5 * 100.0),
+                    format!(
+                        "{} {} 日均 {:.0}%",
+                        if used_volume {
+                            "量比"
+                        } else {
+                            "成交额比"
+                        },
+                        avg_period,
+                        today / avg * 100.0
+                    ),
                 ];
                 // 追加背离/形态理由
                 if let Some(d) = &best_divergence {
@@ -282,5 +315,88 @@ mod tests {
         assert_eq!(ReversionStrategy::ultra_short().id(), "rev_ultra_short");
         assert_eq!(ReversionStrategy::short().id(), "rev_short");
         assert_eq!(ReversionStrategy::mid().id(), "rev_mid");
+    }
+}
+
+#[cfg(test)]
+mod energy_gate_tests {
+    use super::*;
+    use axagent_harness::market_data::KLine;
+
+    fn bar(amount: f64, volume: f64) -> KLine {
+        KLine {
+            date: "2026-09-28".into(),
+            open: 10.0,
+            high: 10.0,
+            low: 10.0,
+            close: 10.0,
+            volume,
+            amount,
+            turnover_rate: None,
+            adj_factor: None,
+        }
+    }
+
+    /// 成交额可用时优先用成交额（与旧行为一致）。
+    /// 均量按**含当日**的最近 5 根计算：4×1000 + 500 ⇒ 均 900。
+    #[test]
+    fn amount_wins_when_present() {
+        let ks = vec![
+            bar(1000.0, 5.0),
+            bar(1000.0, 5.0),
+            bar(1000.0, 5.0),
+            bar(1000.0, 5.0),
+            bar(500.0, 999.0),
+        ];
+        assert_eq!(short_energy_gate(&ks, 5, 1.2), Some((500.0, 900.0, false)));
+    }
+
+    /// **回归判据**：日 K 无成交额（腾讯日线 6 字段 ⇒ amount 全 0）时必须退回成交量。
+    /// 旧实现 `avg_5 <= 0 ⇒ return None` 让短档超跌反弹在回放里恒不出票（历史 0 行）。
+    /// 均量同样含当日：4×100 + 60 ⇒ 均 92。
+    #[test]
+    fn falls_back_to_volume_when_amount_is_missing() {
+        let ks = vec![
+            bar(0.0, 100.0),
+            bar(0.0, 100.0),
+            bar(0.0, 100.0),
+            bar(0.0, 100.0),
+            bar(0.0, 60.0),
+        ];
+        assert_eq!(
+            short_energy_gate(&ks, 5, 1.2),
+            Some((60.0, 92.0, true)),
+            "成交额缺失时要用成交量算出同一个比值，而不是直接判死"
+        );
+    }
+
+    /// 负控 A：当日量能超过均量的 mult 倍 ⇒ 放量下跌不接（None）。
+    #[test]
+    fn rejects_volume_spike() {
+        let ks = vec![
+            bar(0.0, 100.0),
+            bar(0.0, 100.0),
+            bar(0.0, 100.0),
+            bar(0.0, 100.0),
+            bar(0.0, 200.0),
+        ];
+        assert_eq!(short_energy_gate(&ks, 5, 1.2), None);
+    }
+
+    /// 负控 B：额与量都取不到（全 0）⇒ None，不得拿 0/0 当成「缩量」。
+    #[test]
+    fn rejects_when_no_energy_field_is_usable() {
+        let ks = vec![bar(0.0, 0.0), bar(0.0, 0.0), bar(0.0, 0.0)];
+        assert_eq!(short_energy_gate(&ks, 3, 1.2), None);
+    }
+
+    /// 负控 C：量能是 NaN ⇒ 必须拒绝 —— `avg <= 0.0` 对 NaN 为假，单靠它兜不住
+    /// （`today > avg*mult` 对 NaN 也恒假 ⇒ 会把 NaN 当「缩量」放过去）。
+    #[test]
+    fn rejects_non_finite_energy() {
+        let ks = vec![bar(0.0, f64::NAN), bar(0.0, f64::NAN), bar(0.0, f64::NAN)];
+        assert_eq!(short_energy_gate(&ks, 3, 1.2), None);
+        let ks_last_nan = vec![bar(0.0, 100.0), bar(0.0, 100.0), bar(0.0, f64::NAN)];
+        assert_eq!(short_energy_gate(&ks_last_nan, 3, 1.2), None);
     }
 }

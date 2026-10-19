@@ -111,6 +111,19 @@ pub(crate) const DEFAULT_DCF_PERPETUAL_RATE_PCT: f64 =
 pub(crate) const DEFAULT_DCF_DISCOUNT_RATE_PCT: f64 =
     axagent_astock_data::mcp_tools::DISCOUNT_RATE * 100.0;
 
+/// 荐股反思闭环生效闸的出厂默认（`off` | `shadow` | `on`）。
+///
+/// 被两处引用，与上面 DCF 三常量同一形态：
+///   1. 下方 `reco_ic_gate` 变量的 `value`（种子默认值）；
+///   2. `seed_stock_analysis.rs` 的 **v172 强制覆写**（`force_variable_value`）。
+///
+/// **第 2 处不是可选项**：`merge_variable_values` 无条件保留 DB 旧值，而旧值 `shadow`
+/// 正是 2026-10-20 那次裁定要改掉的东西 —— 只把第 1 处从 `shadow` 改成 `on` 是假修复。
+/// 实测代价（同一批 v171 已落库、版本号确实换代成功，库里 `reco_ic_gate` 仍是
+/// `"value":"shadow"` ⇒ 逐格权重照旧不进评分）。判据出处见本文件 DCF 段的
+/// 「为什么需要第 2 处引用（v74 的由来）」。
+pub(crate) const DEFAULT_RECO_IC_GATE: &str = "on";
+
 /// 构建股票分析工作流模板的所有可配置变量
 pub(crate) fn build_template_variables() -> Vec<Variable> {
     vec![
@@ -706,9 +719,12 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
         Variable {
             name: "reco_ic_gate".into(),
             var_type: "string".into(),
-            // Q2 裁定「shadow 起步」：闭环照算、照留痕、面板可读，但不覆盖评分消费的权重；
-            // as-of 回放 A/B 过判据后才人工转 on。读不到本变量时消费侧同样按 shadow 处理。
-            value: serde_json::json!("shadow"),
+            // 2026-10-20 裁定（用户「听你的」授权）：由 shadow 转 **on**。
+            // 依据：① IC 代际筛样早已就绪（`ic_gate_can_only_turn_on_after_version_screening_exists` 正断言在）；
+            // ② 权重写入侧已加「只降不升 + 样本不足保持先验」棘轮；③ 读取侧把 >1.0 的提升夹回 1.0
+            //   （历史 7 条被错误提升的格子因此不再生效）。
+            // ⚠ 取值指向 `DEFAULT_RECO_IC_GATE`（同一个数被种子与 v172 覆写门共用）。
+            value: serde_json::json!(DEFAULT_RECO_IC_GATE),
             description: Some(
                 "荐股反思闭环生效闸：off=停用；shadow=只计算不参与评分；on=用 reco-loop 逐格权重\
                  覆盖静态 reco_strategy_weights（样本不足/IC 不可测的格自动回基线 1.0，只降不升；\

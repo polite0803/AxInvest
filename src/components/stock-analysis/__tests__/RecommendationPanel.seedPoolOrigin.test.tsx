@@ -1,6 +1,6 @@
 import i18n from "@/i18n";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -47,17 +47,20 @@ function makePick(code: string, name: string) {
 }
 
 function mockResponse(
-  seedPoolOrigin: { hot: number; industry: number; fallback: number },
+  // `user`/`mover` 是后加的第四、第五来源（自选股 ∪ 本机标的 / 当日涨幅榜）。夹具缺它们
+  // 会造出「undefined === 0 为假 ⇒ 预警不显示」的假失败，所以这里按生产形态补默认 0。
+  seedPoolOrigin: { hot: number; industry: number; fallback: number; user?: number; mover?: number },
   asofDegradations: Array<{ vendor: string; method: string; reason: string; kind: string }> = [],
 ) {
+  const origin = { user: 0, mover: 0, ...seedPoolOrigin };
   invokeMock.mockResolvedValue({
     period: "short",
     picks: { trend: [makePick("600001", "候选甲")] },
     disabledStyles: [],
     degradedStyles: [],
     generatedAt: Date.now(),
-    rawSeedPoolSize: seedPoolOrigin.hot + seedPoolOrigin.industry + seedPoolOrigin.fallback,
-    seedPoolOrigin,
+    rawSeedPoolSize: origin.hot + origin.industry + origin.fallback + origin.user + origin.mover,
+    seedPoolOrigin: origin,
     asofDegradations,
     mode: "replay",
   });
@@ -94,6 +97,34 @@ describe("RecommendationPanel — 候选池来源声明", () => {
 
   it("B. 取到任一真实榜来源时不得报警", async () => {
     mockResponse({ hot: 30, industry: 12, fallback: 80 });
+    renderPanel();
+
+    await waitFor(() => expect(screen.getAllByText("候选甲").length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("reco-pool-fallback-only")).toBeNull();
+  });
+
+  it("D. 扫描板块范围：读到持久化值就显示，切换后写回后端", async () => {
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_reco_board_scope") { return "star"; }
+      return null;
+    });
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId("reco-board-scope").textContent).toContain("科创板"));
+
+    // antd Select 的标准交互：先 mouseDown 选择器，再点弹层里的选项
+    fireEvent.mouseDown(screen.getByTestId("reco-board-scope"));
+    fireEvent.click(await screen.findByTitle("创业板"));
+    await waitFor(() => {
+      const call = invokeMock.mock.calls.find((c) => c[0] === "set_reco_board_scope");
+      expect(call?.[1]).toEqual({ scope: "chinext" });
+    });
+  });
+
+  it("B2. 有用户自己的标的时不得报「只剩内置样本」（第四来源计入判据）", async () => {
+    // 2026-10-19：用户标的（自选股 ∪ 本机标的）并入候选池后，池子不再只由内置样本构成。
+    // 若判据漏掉 user，这条警告会常亮，把「注入了但没被选中」误报成「池子退化」。
+    mockResponse({ hot: 0, industry: 0, fallback: 80, user: 5 });
     renderPanel();
 
     await waitFor(() => expect(screen.getAllByText("候选甲").length).toBeGreaterThan(0));

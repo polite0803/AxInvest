@@ -8,6 +8,7 @@
 //! ## 公开 API
 //! - [`recommend_stocks`] — Tauri command 调用
 
+pub mod boards;
 pub mod gates;
 pub mod ic;
 
@@ -144,6 +145,77 @@ use crate::recommender::strategy::PerCodeLocks;
 /// Serenity 工作流产出的候选股，供 SerenityStrategy 读取
 /// 自带 TTL（1h），避免 workflow 长时间不运行时使用过期候选。
 static SERENITY_SEED: LazyLock<RwLock<Vec<SeedItem>>> = LazyLock::new(|| RwLock::new(Vec::new()));
+
+/// **用户自己的标的**（自选股 ∪ 本机手工加入/分析过的票），由命令层在每次荐股前覆盖写入。
+///
+/// 为什么需要这一路：建池原本只有「热榜 ∪ 行业龙头 ∪ 内置兜底」三源 ⇒ 一只在截止日
+/// 既不在热榜、也不是行业龙头的票，**在任何周期的候选里都不会出现**（2026-10-19 实测：
+/// 002696 百洋股份在 09-28 的回放批次 `seed_pool_json` 里零命中、`reco_scan_audit`
+/// 连一行扫描记录都没有）。用户手工加进来的票本就应该被荐股看见。
+/// 不带 TTL：命令层每次调用前**覆盖**（空列表也要写），陈旧值只可能来自「这次没走命令层」
+/// 的调用（如通知链），而那一路用的仍是用户自己的自选集合，语义上不构成误导。
+static USER_SEED: LazyLock<RwLock<Vec<SeedItem>>> = LazyLock::new(|| RwLock::new(Vec::new()));
+
+/// 设置用户标的（覆盖语义；由 `recommend_stocks_all_periods` 每次调用前写入）。
+pub fn set_user_seed(seed: Vec<SeedItem>) {
+    tracing::info!("[reco] 注入 {} 条用户标的到候选池来源", seed.len());
+    *USER_SEED.write() = seed;
+}
+
+/// 读取用户标的。
+pub fn get_user_seed() -> Vec<SeedItem> {
+    USER_SEED.read().clone()
+}
+
+/// **当日涨幅榜**（第五来源，2026-10-20）。与 `USER_SEED` 同生命周期：命令层每次荐股前覆盖写入。
+///
+/// 为什么单列一个 static 而不并进 `USER_SEED`：① 来源计数必须可分（`SeedPoolOrigin::mover`），
+/// 否则「池子是谁撑起来的」又变成一笔糊涂账；② 两条链的失效原因不同 —— 用户标的是 DB 读出，
+/// 涨幅榜依赖收盘快照是否采到，混在一起会让「快照没采」看起来像「用户没自选」。
+static MOVER_SEED: LazyLock<RwLock<Vec<SeedItem>>> = LazyLock::new(|| RwLock::new(Vec::new()));
+
+/// 设置当日涨幅榜标的（覆盖语义；由荐股命令在扫描前写入，空列表也写）。
+pub fn set_mover_seed(seed: Vec<SeedItem>) {
+    tracing::info!("[reco] 注入 {} 条涨幅榜标的到候选池来源", seed.len());
+    *MOVER_SEED.write() = seed;
+}
+
+/// 读取当日涨幅榜标的。
+pub fn get_mover_seed() -> Vec<SeedItem> {
+    MOVER_SEED.read().clone()
+}
+
+/// 把额外来源并进两级池子，返回**新增**条数（供 `SeedPoolOrigin` 计数）。
+///
+/// 同时写 `seed`（过流动性门，主策略用）与 `raw_seed`（不过门，WatchlistStrategy 用）：
+/// 用户标的若只进 seed，一旦那一刻流动性判据取不到就会被整体丢掉，面板上又变成「看不见」。
+/// 去重只看 code（名字可能随源不同）。
+fn merge_extra_seed(
+    seed: &mut Vec<SeedItem>,
+    raw_seed: &mut Vec<SeedItem>,
+    extra: &[SeedItem],
+) -> usize {
+    // **前插**而不是追加：`WatchlistStrategy::scan` 只看前 30 只（为了少打 quote），
+    // 追加的话用户标的（本机 84 条 local + 自选）永远排在 30 名之外 ⇒ 自选股桶里
+    // 看不到它们（2026-10-19 实测：002696 已在池、仍不出现在任何一档）。
+    let mut prepend_seed: Vec<SeedItem> = Vec::new();
+    let mut prepend_raw: Vec<SeedItem> = Vec::new();
+    let mut added = 0usize;
+    for item in extra.iter().rev() {
+        if !seed.iter().any(|s| s.0 == item.0) && !prepend_seed.iter().any(|s| s.0 == item.0) {
+            prepend_seed.push(item.clone());
+            added += 1;
+        }
+        if !raw_seed.iter().any(|s| s.0 == item.0) && !prepend_raw.iter().any(|s| s.0 == item.0) {
+            prepend_raw.push(item.clone());
+        }
+    }
+    prepend_seed.append(seed);
+    *seed = prepend_seed;
+    prepend_raw.append(raw_seed);
+    *raw_seed = prepend_raw;
+    added
+}
 
 /// Serenity 缓存写入时间戳，用于 TTL 检查
 static SERENITY_CACHE_TIME: LazyLock<RwLock<Option<Instant>>> = LazyLock::new(|| RwLock::new(None));
@@ -529,6 +601,46 @@ pub async fn recommend_stocks_multi(
 /// 于是「一次拿四档」只能调四次 ⇒ 同一个候选池被建 4 次、流动性过滤（每股一次 60 日
 /// K 线）做 4 次。定时任务 `run_recommendation_scan` 并行 spawn 四个 period 时正是
 /// 这个形态（4× 全量取数，纯属重复）。拆出来之后四档共享一份池与一把 per-code 锁。
+/// 阶段 2：市场状态判据（唯一决策点，负控见测试 `regime_multiplier_branches`）。
+///
+/// 用**指数 20 根日线收益**判：≤ −5% ⇒ bear（追涨腿 ×0.7）、≤ −2% ⇒ weak（×0.85）、
+/// 其余 neutral（×1.0）；指数取不到（NaN）记 unknown、不降权。
+/// 依据（2026-10-19 实测）：动量最高 1/3 组后续平均 −10.4%、最低 1/3 组 −3.4%，
+/// 下跌市里追涨是主要亏损来源——这是阶段 2 唯一被实证支持的降权项。
+fn regime_multiplier(index_ret_20: f64) -> (&'static str, f64) {
+    if !index_ret_20.is_finite() {
+        return ("unknown", 1.0);
+    }
+    if index_ret_20 <= -0.05 {
+        ("bear", 0.7)
+    } else if index_ret_20 <= -0.02 {
+        ("weak", 0.85)
+    } else {
+        ("neutral", 1.0)
+    }
+}
+
+/// 指数**20 日**收益 = 最近 21 根收盘的首尾差值；返回 `(收益, 实际用到的根数)`。
+///
+/// ⚠ 不足 21 根 ⇒ **NaN**（判成 unknown），不做「有几根算几根」的缩水计算。
+/// 理由（2026-10-20 实测倒逼出来）：回放侧 `asof_kline_fetch_limit` 对
+/// `NativeDateParam` 通道只放行 5 根，若按比例回退，这里会用**4 根**的涨幅去贴
+/// 「20 日收益 −x%」的标签 —— 一个 +1% 的 4 日反弹会把 bear 误读成 neutral，硬门不开，
+/// 而面板上看不出它测的是几天。宁可「不加门 + 如实声明状态」，也不给一个名字与口径
+/// 不符的数（同族纪律：结构性缺口不得在 UI 造成歧义）。
+fn regime_index_return(closes: &[f64]) -> (f64, usize) {
+    if closes.len() < 21 {
+        return (f64::NAN, closes.len());
+    }
+    let last = closes[closes.len() - 1];
+    let base = closes[closes.len() - 1 - 20];
+    if base > 0.0 && last.is_finite() && base.is_finite() {
+        ((last - base) / base, closes.len())
+    } else {
+        (f64::NAN, closes.len())
+    }
+}
+
 struct PreparedScan {
     client: Arc<AStockClient>,
     /// 流动性过滤 + Serenity 注入后的实际扫描池（非 Watchlist 策略消费它）
@@ -546,6 +658,15 @@ struct PreparedScan {
     use_cache: bool,
     /// 行情 + K 线两源全挂时的归因文本；非 `None` 时逐档直接出降级响应（不静默出空表）
     all_sources_down: Option<String>,
+    /// 阶段 2（2026-10-19）：市场状态（由指数 20 根日线收益判定）与其对追涨型风格的乘数。
+    /// v4 撤除 `detect_market_regime` 之后仓内**没有**任何 regime 生产者，这里补回最小一个。
+    regime_label: &'static str,
+    regime_index_ret: f64,
+    /// 判定实际拿到的指数根数（&lt;21 ⇒ 没算出数，`regime_index_ret` 为 NaN）。
+    /// 它只用于**说清缺席原因**：「一条都没取到」与「取到 5 根、凑不满 20 日窗口」
+    /// 是两句不同的话，对用户而言前者是通道坏了、后者是口径要求没满足。
+    regime_bars: usize,
+    regime_mult: f64,
     /// 逐档先验表（`horizon_prior::horizon_prior_map` 的输出，与分析链**同一份实现**）：
     /// `{档位: {prior, samples, source}}`。
     /// v4（2026-10-18）起**不再进入个股置信度合成**（伪概率链撤除，见 scan_period），
@@ -626,7 +747,7 @@ async fn prepare_scan(
     //    preseed 为 Some 时使用调用方提供的种子（如自动化管道从历史推荐构建），
     //    为 None 时走默认 build_seed_pool（热门股+行业龙头+兜底）。
     //    来源构成随池一起返回：preseed 的来历由调用方决定，本层无法归因 ⇒ 全 0（= 未知）。
-    let (mut seed, seed_pool_origin) = match preseed {
+    let (mut seed, mut seed_pool_origin) = match preseed {
         Some(custom) => {
             tracing::info!("[recommender] using custom preseed size={}", custom.len());
             // 去重（同一 code+name 只保留一条）
@@ -642,7 +763,7 @@ async fn prepare_scan(
     let raw_seed_pool_size = seed.len();
     tracing::info!("[recommender] raw_seed_pool_size={}", raw_seed_pool_size);
     // 保留 raw_seed 给 WatchlistStrategy（它只依赖 quote，不依赖 K 线）
-    let raw_seed = seed.clone();
+    let mut raw_seed = seed.clone();
     // P3-D12: 根据 vendor 健康度动态调节流动性过滤并发数
     // - healthy_ratio >= 0.6 → 8（默认全速）
     // - 0.3 <= healthy_ratio < 0.6 → 4（部分降级，降速避免雪崩）
@@ -700,11 +821,72 @@ async fn prepare_scan(
         }
     }
 
+    // 注入**当日涨幅榜**（第五来源，2026-10-20）：热股榜只覆盖「平台认为的热门」，行业榜
+    // 只给 30 个龙头 ⇒ 一只妖股若两榜都不在、用户又没加自选，就永远没有入池通道。
+    // 放在用户标的**之前**合并（本函数是前插，先合并的会被后来的顶到后面）⇒ 用户标的仍排最前，
+    // 涨幅榜紧随其后，热榜/行业/兜底保持原序。
+    // 口径边界：快照枚举域当前是 `market_stock_universe`（681 只），不是全市场。
+    let mover_seed = get_mover_seed();
+    if !mover_seed.is_empty() {
+        let added = merge_extra_seed(&mut seed, &mut raw_seed, &mover_seed);
+        seed_pool_origin.mover = added;
+        tracing::info!(
+            "[reco] 涨幅榜标的 {} 条已并入候选池（新增 {added} 条，池={}）",
+            mover_seed.len(),
+            seed.len()
+        );
+    }
+
+    // 注入**用户自己的标的**（自选股 ∪ 本机手工加入/分析过的票）。放在流动性过滤之后：
+    // 用户标的必须**无条件**在池里出现一次（否则「那一刻流动性取不到」会把它们又抹掉，
+    // 面板上重新变成「看不到这只票」）；主策略是否会选中它，仍由各自的判据决定。
+    let user_seed = get_user_seed();
+    if !user_seed.is_empty() {
+        let added = merge_extra_seed(&mut seed, &mut raw_seed, &user_seed);
+        seed_pool_origin.user = added;
+        tracing::info!(
+            "[reco] 用户标的 {} 条已并入候选池（新增 {added} 条，池={}）",
+            user_seed.len(),
+            seed.len()
+        );
+    }
+
     // 3. 选定该 period 下的所有子策略（不再做 vendor 禁用检查——
     //    原本要求 "enabled_vendors" 至少覆盖一个 required vendor，但生产环境
     //    workflow template 中往往 vendor_* 变量为空，导致 4 个 style 全 disabled。
     //    现在所有 style 都跑；data 真的取不到时该 style 自然返回空 picks，
     //    前端展示 "no data" 而非误报 "数据源未启用"）
+
+    // 阶段 2：指数 20 日收益 ⇒ 市场状态。指数取不到只记 unknown、不降权（fail-open）。
+    // ⚠ 指数代码对 vendor 的归一与个股不同：`000300` 按「6⇒sh、其余⇒sz」会被拼成
+    // **sz000300**（不存在）⇒ 2026-10-19 实测该调用拿不到数据、状态恒为 unknown、硬门不生效。
+    // 先试裸码、再试带 sh 前缀，取第一个够**21 根**的序列（口径见 `regime_index_return`）；
+    // 并打出实际用的是哪个、各拿到几根。
+    let mut regime_src = "000300";
+    let mut regime_ks = client.get_klines("000300", "daily", 30).await;
+    if !matches!(&regime_ks, Ok(ks) if ks.len() >= 21) {
+        let alt = client.get_klines("sh000300", "daily", 30).await;
+        // 只在换码后**确实更长**时才采纳：裸码取到 12 根、带前缀取到 3 根时，
+        // 无条件覆盖会把一次勉强能看的读数换成更差的（2026-10-19 那次改前缀是照抄式全换）。
+        if matches!(&alt, Ok(ks) if ks.len() > regime_ks.as_ref().map_or(0, |ks| ks.len())) {
+            regime_src = "sh000300";
+            regime_ks = alt;
+        }
+    }
+    let regime_closes: Vec<f64> = match regime_ks {
+        Ok(ks) => ks.iter().map(|k| k.close).collect(),
+        Err(_) => Vec::new(),
+    };
+    let (regime_index_ret, regime_bars) = regime_index_return(&regime_closes);
+    let (regime_label, regime_mult) = regime_multiplier(regime_index_ret);
+    tracing::info!(
+        "[recommender] 市场状态={}（{} 取到 {} 根，20日收益 {:.2}%），追涨型乘数={:.2}",
+        regime_label,
+        regime_src,
+        regime_bars,
+        regime_index_ret * 100.0,
+        regime_mult
+    );
 
     PreparedScan {
         client,
@@ -721,6 +903,10 @@ async fn prepare_scan(
         use_cache,
         all_sources_down,
         horizon_prior,
+        regime_label,
+        regime_index_ret,
+        regime_bars,
+        regime_mult,
     }
 }
 
@@ -860,6 +1046,20 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
                     p.position_pct
                 };
                 p.confidence = new_conf;
+                // 阶段 2（2026-10-19）：市场状态乘数**只作用在追涨型风格（Trend）**上。
+                // 依据：动量最高 1/3 组后续平均 −10.4%（最低组 −3.4%），下跌市里追涨是主要亏损来源。
+                if matches!(s.style(), Style::Trend) && prepared.regime_mult < 1.0 {
+                    p.confidence = ((p.confidence as f64) * prepared.regime_mult)
+                        .round()
+                        .clamp(1.0, 100.0) as u8;
+                    p.position_pct *= prepared.regime_mult;
+                    p.reasons.push(format!(
+                        "市场状态={}（指数20日收益 {:.2}%），追涨型置信度×{:.2}",
+                        prepared.regime_label,
+                        prepared.regime_index_ret * 100.0,
+                        prepared.regime_mult
+                    ));
+                }
 
                 // ── 波动率风控（Phase R-D）──
                 // σ 一律取**日线**口径（`harness::indicators::realized_vol_pct`，全仓唯一实现），
@@ -966,6 +1166,25 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
             all_picks.len(),
             counts
         );
+    }
+
+    // ── 阶段 2 硬门（2026-10-19 用户裁定）──
+    // bear/weak 状态下**停用追涨腿（Trend）**，而不是只降权：乘数版实测组合更差
+    // （22:19 批：平均 −5.26%、动量最高 1/3 后续 −12.5%），压低分数只会把一批亏损票
+    // 换成另一批候选，剔不掉「整批在追高」这件事本身。剔除条数进响应 degradedStyles 说明。
+    let mut regime_gated_trend = 0usize;
+    if prepared.regime_mult < 1.0 {
+        let before = all_picks.len();
+        all_picks.retain(|p| p.style != types::Style::Trend);
+        regime_gated_trend = before - all_picks.len();
+        if regime_gated_trend > 0 {
+            tracing::warn!(
+                "[reco] 硬门：市场状态={}（指数20日收益 {:.2}%）⇒ 追涨腿 Trend 停用，剔除 {} 条",
+                prepared.regime_label,
+                prepared.regime_index_ret * 100.0,
+                regime_gated_trend
+            );
+        }
     }
 
     // 6. 去重
@@ -1075,6 +1294,12 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
             if disabled_styles_set.contains(&style) {
                 continue;
             }
+            // 2026-10-20：占位只补**策略矩阵里存在的格**。此前会给 long×trend/reversion
+            // 这类矩阵外的组合也填 10 条占位（110 行/批），与 `style_matrix` 冲突，
+            // 让人误以为该档真有这两种风格（long 真实 0 条时尤其误导）。
+            if !style_matrix::styles_for(period).contains(&style) {
+                continue;
+            }
             let bucket_empty = by_style.get(&style).is_none_or(|v| v.is_empty());
             if !bucket_empty {
                 continue;
@@ -1102,8 +1327,8 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
     let as_of_ctx = as_of::current_as_of();
     // spec §8: as-of 模式下因数据截断被降级(≠ 缺失)的风格,前端用橙色显示
     // 简化: 若 as-of 激活 + 某风格被 disabled,等同降级;后续 B11 可细化原因
-    let disabled_vec: Vec<Style> = disabled_styles_set.into_iter().collect();
-    let (degraded_styles, degraded_reasons) = if as_of_ctx.is_some() {
+    let mut disabled_vec: Vec<Style> = disabled_styles_set.into_iter().collect();
+    let (mut degraded_styles, mut degraded_reasons) = if as_of_ctx.is_some() {
         let reasons: std::collections::HashMap<Style, String> = disabled_vec
             .iter()
             .map(|s| (*s, "as-of 截断后该风格依赖的历史数据不可用".to_string()))
@@ -1112,6 +1337,51 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
     } else {
         (Vec::new(), std::collections::HashMap::new())
     };
+    // 硬门留痕（阶段 2）：无论 live/回放都要能在响应里读到「这一档为什么空」。
+    if regime_gated_trend > 0 {
+        // Trend 这次是被 **regime 硬门**停用的，不是「数据源被禁用」⇒ 必须从 disabled 列表里摘掉，
+        // 否则前端会用「因 as-of 截断…降级模式输出」那句通用文案盖过真实原因
+        // （2026-10-19 23:18 批实测：面板同时显示两条理由，第一条是误导性的「截断」）。
+        if let Some(pos) = disabled_vec.iter().position(|s| *s == Style::Trend) {
+            disabled_vec.remove(pos);
+        }
+        if !degraded_styles.contains(&Style::Trend) {
+            degraded_styles.push(Style::Trend);
+        }
+        degraded_reasons.insert(
+            Style::Trend,
+            format!(
+                "市场状态={}（指数20日收益 {:.2}%）⇒ 追涨腿停用（硬门），本档剔除 {} 条",
+                prepared.regime_label,
+                prepared.regime_index_ret * 100.0,
+                regime_gated_trend
+            ),
+        );
+    }
+    // 门的**反向**缺席也要声明（2026-10-20）：指数取不到 ⇒ 状态=unknown ⇒ 硬门**根本没跑**。
+    // 这与「门跑过、判定放行」是两件事 —— 不声明的话，面板上这一桶看起来像是经过市场状态
+    // 检验的（同族纪律：输入层的兜底必须显式声明来源）。只在确实出了真实追涨票时声明，
+    // 没出票就没有要解释的对象。
+    let trend_real_after_gate =
+        by_style.get(&Style::Trend).map_or(0, |v| v.iter().filter(|p| !p.synthetic).count());
+    if prepared.regime_label == "unknown" && trend_real_after_gate > 0 {
+        if !degraded_styles.contains(&Style::Trend) {
+            degraded_styles.push(Style::Trend);
+        }
+        // 两句缺席分开写：「通道一条没给」与「给了但不够 21 根」的用户动作不同
+        // （前者查网络/供应商，后者是回放窗口口径的结构性边界）。
+        let why = if prepared.regime_bars == 0 {
+            "指数日线取不到".to_string()
+        } else {
+            format!("指数日线只取到 {} 根，不足 21 根（20 日窗口）", prepared.regime_bars)
+        };
+        degraded_reasons.entry(Style::Trend).or_insert_with(|| {
+            format!(
+                "市场状态=未知（{why}）⇒ 追涨腿未加门，本档 {} 条按**无市场状态**出票",
+                trend_real_after_gate
+            )
+        });
+    }
     let resp = RecoResponse {
         period,
         picks: by_style,
@@ -1553,5 +1823,82 @@ mod strategy_weight_key_tests {
         let m = parse_strategy_weights(&vars);
         assert_eq!(m.get(&(Style::CapitalFlow, Period::Mid)).copied(), Some(0.7));
         assert_eq!(m.get(&(Style::Bottleneck, Period::Short)).copied(), Some(0.9));
+    }
+}
+
+#[cfg(test)]
+mod user_seed_tests {
+    use super::*;
+
+    fn item(code: &str) -> SeedItem {
+        (code.to_string(), format!("名称{code}"), None)
+    }
+
+    /// 用户标的必须**同时**进 seed（主策略）与 raw_seed（WatchlistStrategy），只按 code 去重，
+    /// 新增条数就是 `origin.user` 的计数口径。负控：空集合不得改动池子 —— 否则那两条
+    /// 「必须在池中」的断言会退化成恒真。
+    #[test]
+    fn user_seed_merges_into_both_pools_and_counts_only_new_codes() {
+        let mut seed = vec![item("600000")];
+        let mut raw_seed = vec![item("600000")];
+        let extra = vec![item("002696"), item("600000")];
+        let added = merge_extra_seed(&mut seed, &mut raw_seed, &extra);
+        assert_eq!(added, 1, "600000 已在池中，不得重复计数");
+        assert!(seed.iter().any(|s| s.0 == "002696"), "seed（主策略）必须含用户标的");
+        assert!(raw_seed.iter().any(|s| s.0 == "002696"), "raw_seed（Watchlist）必须含用户标的");
+        assert_eq!(seed.iter().filter(|s| s.0 == "002696").count(), 1, "按 code 去重");
+
+        let mut s2 = vec![item("600000")];
+        let mut r2 = vec![item("600000")];
+        assert_eq!(merge_extra_seed(&mut s2, &mut r2, &[]), 0, "未注入时新增必须为 0");
+        assert!(!s2.iter().any(|s| s.0 == "002696"), "未注入时池子不得出现该票 ⇒ 上面两条不是恒真");
+    }
+}
+
+#[cfg(test)]
+mod regime_tests {
+    use super::*;
+
+    /// 三档 + NaN 各钉一格：≤−5% bear×0.7、≤−2% weak×0.85、其余 neutral×1.0、
+    /// NaN（指数取不到）必须 unknown 且**不降权**（fail-open，不把取数失败当成熊市）。
+    #[test]
+    fn regime_multiplier_branches() {
+        assert_eq!(regime_multiplier(-0.06), ("bear", 0.7));
+        assert_eq!(regime_multiplier(-0.05), ("bear", 0.7));
+        assert_eq!(regime_multiplier(-0.03), ("weak", 0.85));
+        assert_eq!(regime_multiplier(0.01), ("neutral", 1.0));
+        assert_eq!(regime_multiplier(f64::NAN), ("unknown", 1.0));
+    }
+
+    /// 口径锁（2026-10-20）：**不满 21 根就不算**。回放侧 `asof_kline_fetch_limit` 对
+    /// `NativeDateParam` 通道只放行 5 根，若按可用根数缩水计算，「20 日收益」实际测的是
+    /// 4 天反弹 ⇒ 把 bear 读成 neutral、硬门不开、面板上看不出区别（00:32 批与 23:18 批
+    /// 的 trend 真实票从 0 条变 10 条就是这么来的候选解释之一，读数之前不再猜）。
+    #[test]
+    fn regime_index_return_requires_the_full_21_bars() {
+        let short: Vec<f64> = (0..5).map(|i| 100.0 + f64::from(i)).collect();
+        let (ret, bars) = regime_index_return(&short);
+        assert!(ret.is_nan(), "5 根不得算出「20 日收益」");
+        assert_eq!(bars, 5, "根数要带回缺席文案用");
+
+        let exact: Vec<f64> = (0..21).map(|i| 100.0 + f64::from(i)).collect();
+        let (ret, bars) = regime_index_return(&exact);
+        assert_eq!(bars, 21);
+        assert!((ret - 0.2).abs() < 1e-9, "21 根按第 1 根与第 21 根算：{ret}");
+
+        // 负控 A：基期 ≤0（脏数据）⇒ NaN，不得静默当成 0 收益
+        let mut zeroed: Vec<f64> = (0..21).map(|i| 100.0 + f64::from(i)).collect();
+        zeroed[0] = 0.0;
+        assert!(regime_index_return(&zeroed).0.is_nan());
+
+        // 负控 B：末根 NaN ⇒ 不得产出一个「看着有数」的 NaN 读数
+        let mut nan_last: Vec<f64> = (0..21).map(|i| 100.0 + f64::from(i)).collect();
+        nan_last[20] = f64::NAN;
+        assert!(regime_index_return(&nan_last).0.is_nan());
+
+        // 负控 C：空表 ⇒ (NaN, 0)，缺席文案据此分句「取不到」vs「只取到 N 根」
+        let (ret, bars) = regime_index_return(&[]);
+        assert!(ret.is_nan());
+        assert_eq!(bars, 0);
     }
 }

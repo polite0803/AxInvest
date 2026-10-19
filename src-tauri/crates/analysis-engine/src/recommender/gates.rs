@@ -1,21 +1,37 @@
-//! mid/long 档出票门（P0 财报预检 + P1 分析回环否决，2026-10-18）
+//! mid/long 档出票门（P1 分析回环否决 + P0 财报**标注**，2026-10-18 立 / 2026-10-20 改）
 //!
 //! ## 为什么门在出票口而不是建池口
 //!
 //! `build_seed_pool` 的语义是「候选来源」（热门股 ∪ 行业领涨 ∪ 兜底样本），它**跨四档
 //! 共享**：超短/短档按构造不看基本面（兑现周期 > 持有期，`portfolio-mgr-h-ultra-short.rhai`
 //! 同一裁定），在池上拦掉会把超短档的动量票一起杀掉。故门挂在 `scan_period` 的
-//! **mid/long 出票口**：池照建、短档照跑，只有长线语义的档位才要求「活着且没被判卖出」。
+//! **mid/long 出票口**：池照建、短档照跑。
 //!
-//! ## 两条门（`PLAN` 未立先例，判据来自 002696 案例复盘）
+//! ## 一条硬否决 + 一条风险标注
 //!
-//! - **P0 财报门**：最新一期 `net_profit ≤ 0`（首亏）或最新两期 `profit_yoy` 均为负
-//!   （连续两期同比下滑）⇒ 拦。取数走 `client.get_financials`（vendor 路由 + 客户端
-//!   缓存 + as-of 披露日截断都是既有能力，本门不重复实现）。
-//! - **P1 分析回环门**：最近 [`ANALYSIS_VETO_WINDOW_DAYS`] 天内有一条 `completed` 的
-//!   live 分析、其 `horizon_decisions` 对**本档**给出 卖出/减持 ⇒ 拦。数据源是
-//!   `stock_analyses` 表既有列（加载在 `reco_loop::load_reco_served_vars_db`，
-//!   经 `reco_analysis_vetoes` 模板变量传入），不新建表。
+//! - **P1 分析回环门（硬否决）**：最近 [`ANALYSIS_VETO_WINDOW_DAYS`] 天内有一条
+//!   `completed` 的 live 分析、其 `horizon_decisions` 对**本档**给出 卖出/减持 ⇒ 拦。
+//!   这是「分析自己的逐档结论」，与四档独立同一口径。数据源是 `stock_analyses` 既有列
+//!   （加载在 `reco_loop::load_reco_served_vars_db`，经 `reco_analysis_vetoes` 模板变量
+//!   传入），不新建表。
+//! - **P0 财报预检（仅标注，不再拦）**：最新一期 `net_profit ≤ 0`（首亏）或最新两期
+//!   `profit_yoy` 均为负 ⇒ 往该 pick 的 `risk_notes` 写一条「财报预检：…（仅提示）」。
+//!   取数仍走 `client.get_financials`（vendor 路由 + 缓存 + as-of 披露日截断是既有能力）。
+//!
+//! ## P0 为什么从硬否决退成标注（2026-10-20，用户裁定「不要一味迎合」后的自决）
+//!
+//! ① **它的唯一动机案例正是反例**：这道门是 002696 复盘时加的（「亏损股不该做中线」），
+//!    而 002696 在 09-28 之后上涨约 +65% —— 用一个个案立门、而这个个案本身证伪了它；
+//! ② **零后验支持**：门上线至今没有任何一条读数显示「首亏股在中线/长线的前向收益更差」，
+//!    唯一可用的批次读数里，置信度与后验的相关本来就是负的（见 `PLAN-reco-signal-quality`），
+//!    在这种状态下再加一条类别硬否决，只是把「整批都在追高」换成「整批少了亏损股」；
+//! ③ **它想解决的原始缺陷已被更准的机制覆盖**：复盘里真正的毛病是「分析按基本面判了卖出，
+//!    荐股却照推」—— 现在由 P1（本档卖出⇒拦）与 `watchlist::apply_analysis_tier`
+//!    （按**本档**结论留弃）处理，且是逐档而不是按「亏损股」这个类别。
+//!
+//! ⇒ 判据：**类别型硬否决必须有后验读数支撑，否则只能当标注**。这些票现在会作为真实
+//! 推荐进入 picks 并带一条风险提示，后续用同一批次的前向收益对「带标注 vs 不带标注」
+//! 两组做对照；若确有显著劣化，再拿读数把硬拦恢复（届时是读数恢复，不是个案恢复）。
 //!
 //! ## fail-open 纪律
 //!
@@ -30,13 +46,15 @@ use super::types::{GateBlockedPick, Period, RecoPick};
 /// 三个月前的「卖出」不该永久封杀一只票。与 `stock_analyses.created_at`（毫秒）比较。
 pub const ANALYSIS_VETO_WINDOW_DAYS: i64 = 30;
 
-/// 财报门判据（纯函数）。
+/// 财报预检判据（纯函数）。
 ///
-/// 返回 `None` = 通过；`Some(理由码)` = 拦截。判据次序：**首亏优先于连降**
-/// （首亏是更强的事实，理由码留给前端/日志区分两种拦截）。
+/// 返回 `None` = 无风险；`Some(理由码)` = 命中风险。**只用于标注**（写进
+/// `risk_notes`），不再作为否决 —— 为什么见模块文档「P0 为什么从硬否决退成标注」。
+///
+/// 判据次序：**首亏优先于连降**（首亏是更强的事实，理由码留给前端/日志区分两种形态）。
 ///
 /// 口径说明：`net_profit` 是 vendor 给的净利润字段（归母/全口径以 vendor 为准）；
-/// 对「≤0 即拦」这条判据两种口径同向，不构成分歧。`report_date` 按字典序即时间序
+/// 对「≤0 即命中」这条判据两种口径同向，不构成分歧。`report_date` 按字典序即时间序
 /// （`YYYY-MM-DD` 形态）。`net_profit` 缺失（None）⇒ 不作首亏判断，落到连降检查。
 pub fn financial_gate_reason(reports: &[FinancialReport]) -> Option<&'static str> {
     if reports.is_empty() {
@@ -83,11 +101,11 @@ pub fn analysis_veto_reason(
     None
 }
 
-/// 出票口 glue：就地移除被拦的 pick，返回拦截留痕。
+/// 出票口 glue：P0 写风险标注、P1 就地移除被拦的 pick（返回拦截留痕）。
 ///
-/// 只拦**非 synthetic** picks（合成 pick 是「无信号占位」，不是推荐 —— 拦它没有意义，
+/// 只处理**非 synthetic** picks（合成 pick 是「无信号占位」，不是推荐 —— 拦它没有意义，
 /// 且占位消失会让空桶兜底语义失效）。同 code 多风格命中时财报只取一次（调用内去重）。
-/// 财报取数失败 ⇒ warn + fail-open（该票不拦）。
+/// 财报取数失败 ⇒ warn 并跳过标注（不影响出票）。
 ///
 /// ⚠ `veto_var` 的回放守卫在调用方（`scan_period`）：as-of 回放必须传 `None`
 /// （回测语义 =「当时的判定」，不带今天的分析否决）。本函数不感知 as-of 上下文
@@ -106,12 +124,12 @@ pub async fn apply_exit_gates(
         std::collections::HashMap::new();
     let mut blocked = Vec::new();
     let mut kept = Vec::with_capacity(picks.len());
-    for p in picks.drain(..) {
+    for mut p in picks.drain(..) {
         if p.synthetic {
             kept.push(p);
             continue;
         }
-        let mut reasons: Vec<String> = Vec::new();
+        // P0 财报预检：**只标注**，不改变留弃（模块文档：类别型硬否决必须有后验读数支撑）。
         let fin_reason = match fin_cache.get(&p.stock_code) {
             Some(cached) => *cached,
             None => {
@@ -119,7 +137,7 @@ pub async fn apply_exit_gates(
                     Ok(reports) => financial_gate_reason(&reports),
                     Err(e) => {
                         tracing::warn!(
-                            "[reco_gate] {} 财报取数失败（fail-open 不拦）: {e}",
+                            "[reco_gate] {} 财报取数失败（跳过标注，不影响出票）: {e}",
                             p.stock_code
                         );
                         None
@@ -129,31 +147,42 @@ pub async fn apply_exit_gates(
                 reason
             },
         };
-        if let Some(r) = fin_reason {
-            reasons.push(r.to_string());
+        if let Some(code) = fin_reason {
+            let label = match code {
+                "first_loss" => "最新一期首亏",
+                "two_period_decline" => "连续两期同比下滑",
+                other => other,
+            };
+            tracing::debug!(
+                "[reco_gate] 财报预检标注 {} {} ({:?} {}): {}",
+                p.stock_code,
+                p.stock_name,
+                p.style,
+                period.as_str(),
+                code
+            );
+            p.risk_notes.push(format!("财报预检：{label}（仅提示，本门不剔除）"));
         }
+        // P1 分析回环否决：本档判卖出/减持 ⇒ 硬否决。
         if let Some(r) = analysis_veto_reason(veto_var, &p.stock_code, period) {
-            reasons.push(r);
-        }
-        if reasons.is_empty() {
-            kept.push(p);
-        } else {
             tracing::info!(
                 "[reco_gate] 拦截 {} {} ({:?} {}): {:?}",
                 p.stock_code,
                 p.stock_name,
                 p.style,
                 period.as_str(),
-                reasons
+                [r.as_str()]
             );
             blocked.push(GateBlockedPick {
                 stock_code: p.stock_code,
                 stock_name: p.stock_name,
                 style: p.style,
                 confidence: p.confidence as i32,
-                reasons,
+                reasons: vec![r],
             });
+            continue;
         }
+        kept.push(p);
     }
     *picks = kept;
     blocked

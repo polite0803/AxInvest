@@ -120,11 +120,66 @@ describe("RecommendationPanel — as-of propagation", () => {
     expect(findCall("recommend_stocks_all_periods")).toBeUndefined();
   });
 
-  it("replay 模式: 不调用 get_cached_recommendation (缓存永远是 live 产物)", async () => {
+  it("replay 模式: 挂载先按那一代回读（带 asOfDate），读空才回退到整批扫描", async () => {
+    // 2026-10-13 裁定「回放候选同表落库」之后，旧断言「replay 不调用 get_cached_recommendation
+    // （缓存永远是 live 产物）」已经不成立：库里 09-28 那批有真实样本，而面板一行都没读，
+    // 每切一档重扫一次 ⇒ 扫描能不能出货只取决于那一刻 push2his 可不可达（用户看到的「无候选」）。
     useTimeAnchorStore.setState({ asOfDate: "2026-06-01", mode: "replay" });
     renderWithProviders();
-    await waitFor(() => expect(invokeMock).toHaveBeenCalled());
-    expect(findCall("get_cached_recommendation")).toBeUndefined();
+    await waitFor(() => expect(findCall("get_cached_recommendation")).toBeDefined());
+    expect(findCall("get_cached_recommendation")?.[1]).toEqual({
+      period: "short",
+      asOfDate: "2026-06-01",
+    });
+    // 默认夹具对每条命令都回空 picks ⇒ 该日库里没有批次 ⇒ 必须回退到重扫，不能静默显示无候选
+    await waitFor(() => expect(findCall("recommend_stocks_all_periods")).toBeDefined());
+    await settle();
+  });
+
+  it("replay 模式: 库内那一代有批次 ⇒ 直接展示，不再发扫描命令", async () => {
+    useTimeAnchorStore.setState({ asOfDate: "2026-06-01", mode: "replay" });
+    invokeMock.mockReset();
+    invokeMock.mockImplementation((cmd: string) =>
+      Promise.resolve(
+        cmd === "get_cached_recommendation"
+          ? {
+            period: "short",
+            picks: {
+              trend: [{
+                stockCode: "000001",
+                stockName: "平安银行",
+                style: "trend",
+                period: "short",
+                price: 10,
+                entryLow: 9,
+                entryHigh: 11,
+                stopLoss: 8.5,
+                targetPrice: 12,
+                positionPct: 10,
+                holdingDays: 5,
+                confidence: 80,
+                reasons: ["回放批次"],
+                riskNotes: [],
+                secondaryStyles: [],
+                synthetic: false,
+              }],
+            },
+            disabledStyles: [],
+            generatedAt: Date.now(),
+            rawSeedPoolSize: 10,
+            asOfDate: "2026-06-01",
+            mode: "cached",
+          }
+          : { period: "short", picks: {}, disabledStyles: [], generatedAt: Date.now(), rawSeedPoolSize: 0 },
+      )
+    );
+    renderWithProviders();
+    await waitFor(() => {
+      expect(screen.getByText("平安银行")).toBeInTheDocument();
+    });
+    expect(findCall("recommend_stocks_all_periods")).toBeUndefined();
+    // 回放代不打「缓存」标签（它读的是库里那一天的批次，不是上一次实盘）
+    expect(screen.queryByTestId("reco-cached-badge")).toBeNull();
     await settle();
   });
 

@@ -1134,6 +1134,35 @@ impl AStockClient {
         base
     }
 
+    /// 把 K 线的 `date` 归一成 `YYYY-MM-DD` 日 prefix，供 as-of 截止日比较用。
+    ///
+    /// 为什么必须归一而不是直接比字符串：日线/周线/月线的 date 是 `2026-09-28`（带连字符），
+    /// 而**分钟线是 `202609281030`**（腾讯 `kline/mkline` 原样透传，无分隔符）。字典序里
+    /// 第 5 位 `'0'`(0x30) > `'-'`(0x2D) ⇒ 每一根分钟 bar 都被判成「晚于截止日」⇒ 截断后
+    /// 一根不剩 ⇒ 超短档（尺度=60 分钟，见 `recommender::scale::profile_for`）在回放里
+    /// 恒 0 出票，而那句失败只写在 `tracing::debug!` 里 —— 2026-10-19 现网实测：
+    /// 同一批里 mid/long/short 都出了真实候选，只有 ultra_short 全档空。
+    /// 认不出的形态返回 `None`，由调用方退回原始字典序比较（不新增一种静默丢弃）。
+    fn date_prefix(raw: &str) -> Option<String> {
+        let b = raw.as_bytes();
+        if b.len() >= 10 && b[4] == b'-' {
+            // 用 `get` 而不是切片：byte 4 是 ASCII `-` 并不保证 byte 10 落在字符边界上
+            return raw.get(..10).map(str::to_string);
+        }
+        if b.len() >= 8 && b[..8].iter().all(u8::is_ascii_digit) {
+            return Some(format!("{}-{}-{}", &raw[0..4], &raw[4..6], &raw[6..8]));
+        }
+        None
+    }
+
+    /// 「这根 bar 的日期是否 ≤ 截止日」的唯一判据（格式容忍见 [`Self::date_prefix`]）。
+    fn kline_le_cutoff(date: &str, cutoff: &str) -> bool {
+        match Self::date_prefix(date) {
+            Some(prefix) => prefix.as_str() <= cutoff,
+            None => date <= cutoff,
+        }
+    }
+
     /// 按当前 AsOfContext 截断 K 线：保留 date <= as_of_date 的行；live 模式原样返回。
     /// 截断必须在 cache_set 之前执行，确保每个模式各自缓存自己的过滤结果。
     /// **Phase 1 混合 as-of**：仅当 `is_asof_active_for(Structured)` 为真（即 as-of 模式
@@ -1150,7 +1179,7 @@ impl AStockClient {
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         let before = klines.len();
         let filtered: Vec<KLine> =
-            klines.into_iter().filter(|k| k.date.as_str() <= cutoff.as_str()).collect();
+            klines.into_iter().filter(|k| Self::kline_le_cutoff(&k.date, &cutoff)).collect();
         let truncated = before - filtered.len();
         if truncated > 0 {
             // T4：截断是回放的**正常语义**（vendor 回全量窗口，路由裁到截止日），
@@ -1162,6 +1191,26 @@ impl AStockClient {
                 cutoff,
                 before,
                 filtered.len()
+            );
+        }
+        // 「vendor 明明给了 bar，却一根都不剩」不是正常截断，是**判据把整段窗口判死了**
+        // （上面 `date_prefix` 记的那种格式不匹配就是这一格）。这种形态必须响，
+        // 否则它会以「该档尺度取不到 ⇒ 不出票」的形式沉在 debug 级日志里 ——
+        // 2026-10-19 那轮回放里超短档空了整整一下午，没有任何一条可读的原因。
+        if before > 0 && filtered.is_empty() {
+            crate::as_of::record_degradation_kind(
+                "astock-data",
+                "get_klines",
+                &format!(
+                    "as-of 截止日 {cutoff}：vendor 回了 {before} 根 bar，全部被判晚于截止日 ⇒ \
+                     该尺度在本档不可用（形态不匹配或数据确实全在截止日之后）"
+                ),
+                crate::as_of::DegradationKind::Failure,
+            );
+            tracing::warn!(
+                "[asof] K 线截断后为空：vendor 回 {} 根，全部 date > {} ⇒ 该尺度取不到",
+                before,
+                cutoff
             );
         }
         filtered
@@ -1491,6 +1540,66 @@ impl AStockClient {
         Some(item)
     }
 
+    /// 「向 K 线源要多少根」的下限/上限，**两处同用这一条**（`get_klines_with_adj` 拿它当
+    /// 取数下限、`asof_kline_fetch_limit` 拿它推导窗口的上限）：不支持日期参数的源只回
+    /// 「最近 N 根」（push2his 的 `end=20500101`），N 太小就取不到截止日那一根 ⇒ 截断后一根不剩。
+    /// 现网实证（2026-10-19 回放日志）：合成行情那段原本硬写 5 根，于是
+    /// `[asof] browser_eastmoney 600900 K线无法合成quote` 刷了 173 条 —— 一条本来能用的
+    /// 源（它解析第 7 字段成交额，见 `vendors/browser_eastmoney.rs` 的 `amount: p(6)``）被自己的取数窗口堵死，
+    /// as-of 行情链因此只剩「push2 直连」一条路，而它在本机常被掐（同轮 237 条连接被掐断）。
+    const KLINE_FETCH_FLOOR: u32 = 500;
+
+    /// as-of 合成行情时「向这个源要几根日线」的**唯一**决策点（负控拆在这里，见测试
+    /// `fallthrough_source_must_be_asked_for_enough_bars`）：认日期参数的源由服务端把
+    /// 窗口切到截止日，5 根够用；不认的只能靠客户端截断，5 根必然截空。
+    ///
+    /// 非 native 那一支按**截止日距今的天数推导**，不直接给 `KLINE_FETCH_FLOOR`：
+    /// 2026-10-19 第二轮现网读数显示，把窗口从 5 放宽到 500 之后 browser 通道对
+    /// push2his 的 `page.goto` **全数 `net::ERR_EMPTY_RESPONSE`**（同域名、同速率封禁），
+    /// 而回放里同一只票被合成 8~12 次 ⇒ 放大成几百次大包请求。截止日 09-28 实际只需
+    /// 约 18 根（按 5/7 折算交易日 + 3 根缓冲），500 根的字节数是它的 28 倍。
+    /// 上限仍夹在 `KLINE_FETCH_FLOOR`，下限夹在 5，保证推导不会给出比旧实现更少的根。
+    fn asof_kline_fetch_limit(cap: AsOfCapability, gap_calendar_days: i64) -> u32 {
+        match cap {
+            AsOfCapability::NativeDateParam => 5,
+            _ => {
+                let estimated = (gap_calendar_days.max(0) as u64 * 5 / 7) + 3;
+                estimated.clamp(5, u64::from(Self::KLINE_FETCH_FLOOR)) as u32
+            },
+        }
+    }
+
+    /// 截止日距今天有多少天（推导 `asof_kline_fetch_limit` 用）。
+    /// 取不到 as-of 上下文时返回 0（调用方此时本就不在回放分支）。
+    fn asof_gap_days(ctx: &crate::as_of::AsOfContext) -> i64 {
+        (chrono::Local::now().date_naive() - ctx.as_of_date).num_days()
+    }
+
+    /// 「这个 klines 源的合成结果能不能当可用行情」的**唯一**判据：成交额必须为正。
+    ///
+    /// 为什么单列成函数而不是在路由循环里直接写 `q.amount > 0.0`：下游荐股建池的流动性
+    /// 过滤只认成交额（`recommender/pool.rs` 的 `amount < 1e8`），所以「源给不出成交额」
+    /// 必须在这里就判不可用、换下一个源（2026-10-19 定论：腾讯日线只有 6 字段无成交额，
+    /// 而它在 replay 的 klines 路由里排第一，旧实现「合成成功即返回」让它永久赢 ⇒ 回放
+    /// 候选池被过滤成空）。判据抽出后回归测试打的是**同一处**，不会测试一份生产一份。
+    fn asof_quote_is_usable(q: &StockQuote) -> bool {
+        q.amount > 0.0
+    }
+
+    /// 「源给不出成交额」时的**唯一**推定式：收盘价 × 成交量（两者都来自同一根 K 线，
+    /// 成交量已由 vendor 从「手」换算成「股」）。
+    ///
+    /// 只在没有任何源给出成交额字段之后调用（真值优先），且只用于「过 / 不过 1 亿元」这一
+    /// 粗粒度流动性判据 —— 误差取证见 `get_quote` 的兜底分支注释（49 样本 0 次判定翻转）。
+    /// 价或量缺失（≤0）时返回 `None`：此时**不猜**，让调用方按「无法推定」留痕。
+    fn estimated_amount(price: f64, volume: f64) -> Option<f64> {
+        if price > 0.0 && volume > 0.0 && (price * volume).is_finite() {
+            Some(price * volume)
+        } else {
+            None
+        }
+    }
+
     /// As-Of 模式下：用截断后的 K 线最后一条合成实时行情。
     /// 当且仅当当前 AsOf 处于激活状态、且传入的 K 线包含 <= effective_cutoff 的数据时返回 Some；
     /// Live 模式或 K 线为空时返回 None（让调用方走原 vendor 路径）。
@@ -1508,10 +1617,12 @@ impl AStockClient {
             return None;
         }
         let as_of_str = ctx.as_of_date.format("%Y-%m-%d").to_string();
-        // K 线按日期升序（vendor 侧已排序）⇒ 反向找到的第一根即「≤ 截止日的最近一根」
-        let idx = klines.iter().rposition(|k| k.date.as_str() <= as_of_str.as_str())?;
+        // K 线按日期升序（vendor 侧已排序）⇒ 反向找到的第一根即「≤ 截止日的最近一根」。
+        // 比较走 `kline_le_cutoff`（格式容忍）：分钟线的 date 是 `202609281030` 无分隔符，
+        // 直接字典序比会让它恒判「晚于截止日」。
+        let idx = klines.iter().rposition(|k| Self::kline_le_cutoff(&k.date, &as_of_str))?;
         let last = &klines[idx];
-        if last.date != as_of_str {
+        if Self::date_prefix(&last.date).as_deref() != Some(as_of_str.as_str()) {
             crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_quote",
@@ -2210,22 +2321,62 @@ impl AStockClient {
         // As-Of 模式：K线最后一行合成行情。K线合成失败时返回 Error，绝不回退到
         // vendor.get_quote（返回今日实时数据，时间泄露）。
         if crate::as_of::is_asof_active() {
+            // 同一代际内，某只票的合成行情**不会变**（截止日固定），而实测一批回放里
+            // 同一只票被合成 8~12 次（建池 1 次 + 各分析节点各 1 次，`get_quote` 全程无缓存），
+            // 每次都重打同一族被速率封禁的域名 ⇒ 既慢又把封禁放大（2026-10-19 现网：
+            // push2his 直连被掐 237 次、browser 通道 page.goto 全数 ERR_EMPTY_RESPONSE）。
+            // 键含 as-of 后缀（`cache_key_for`）⇒ 不同代际、不同截止日互不串味；
+            // live 分支不读也不写这个键（实时行情不能缓存）。
+            let quote_cache_key = Self::cache_key_for("quote", stock_code);
+            if let Some(cached) = self.cache_get(&quote_cache_key).await {
+                if let Ok(q) = serde_json::from_str::<StockQuote>(&cached) {
+                    return Ok(q);
+                }
+            }
+            let gap_days =
+                crate::as_of::current_as_of().map(|c| Self::asof_gap_days(&c)).unwrap_or(0);
             // 遍历 vendors_for("klines") ，NativeDateParam vendor 调 _with_asof
             let kline_names: Vec<String> =
                 self.routing.vendors_for("klines", &self.routing.klines).clone();
             let mut last_err: Option<DataError> = None;
+            // 「合成成功」与「这个源可用」是两件事：见下面 amount 守卫处的说明。
+            // 这里留下第一个合成成功但缺成交额的产物，作为所有源都不给额时的兜底行情。
+            let mut amountless: Option<StockQuote> = None;
             for name in &kline_names {
                 if let Some(vendor) = self.find_vendor(name) {
                     let cap = self.vendor_asof_capability(name, "get_klines");
+                    let bars = Self::asof_kline_fetch_limit(cap, gap_days);
                     let ks_result = match cap {
                         AsOfCapability::NativeDateParam => {
-                            vendor.get_klines_with_asof(stock_code, "daily", 5, None).await
+                            vendor.get_klines_with_asof(stock_code, "daily", bars, None).await
                         },
-                        _ => vendor.get_klines(stock_code, "daily", 5, None).await,
+                        _ => vendor.get_klines(stock_code, "daily", bars, None).await,
                     };
                     match ks_result {
                         Ok(ks) if !ks.is_empty() => {
                             if let Some(mut q) = Self::quote_from_klines(stock_code, &ks) {
+                                // 2026-10-19 定论：合成成功 ≠ 这个源可用。
+                                // 腾讯日/周/月 K 线只有 6 字段、**不含成交额**
+                                // （`vendors/tencent.rs:310` 与 `:379` 自陈，实测同），
+                                // 于是合成出的 quote `amount == 0`；而荐股建池的流动性过滤
+                                // **唯一**的数值判据就是成交额（`recommender/pool.rs`
+                                // 的 `amount < 1e8`）。旧实现「有 quote 就 return」让缺字段的
+                                // 源永久赢（它在 replay 的 klines 路由里排第一），后果是回放里
+                                // 热榜 50 + 行业龙头 30 + 48 只兜底**全被过滤成空池**
+                                // ⇒ 每批 `seed_pool_json="[]"`、真实荐股样本恒 0。
+                                // 改法：无成交额 ⇒ 记下这份产物当最后兜底，**继续试下一源**
+                                // （eastmoney 日 K 第 7 字段就是成交额，实测
+                                // 002696@2026-09-21 = 189,720,702 元）。
+                                if !Self::asof_quote_is_usable(&q) {
+                                    if amountless.is_none() {
+                                        amountless = Some(q);
+                                    }
+                                    tracing::warn!(
+                                        "[asof] {name} {stock_code} 合成的 quote 无成交额\
+                                         （该源日 K 线不含此字段）⇒ 不作为可用结果，试下一源"
+                                    );
+                                    continue;
+                                }
                                 // S7(2026-09-26)：合成 quote 的 total_mv/pe/pb 恒 None ⇒
                                 // compute_valuation 股本链断（total_shares=总市值/现价）⇒
                                 // 回放里 DCF「估值上行空间」因子恒缺。用截止日估值快照回填
@@ -2302,6 +2453,8 @@ impl AStockClient {
                                         "[asof] PE/PB 填充跳过（get_financials 超时或失败）"
                                     ),
                                 }
+                                // 可用结果按代际缓存（历史日的行情不变 ⇒ 长 TTL 安全）
+                                self.cache_set_serialized(quote_cache_key, &q, 3600).await;
                                 return Ok(q);
                             }
                             tracing::warn!(
@@ -2328,6 +2481,51 @@ impl AStockClient {
                         },
                     }
                 }
+            }
+            // 全部 klines 源都不给成交额时（真值优先级已走完：能给的源已先试过且都没接到），
+            // 不能再交出 `amount=0` —— 荐股建池那道流动性门**唯一**的数值判据就是成交额
+            // （`recommender/pool.rs` 的 `amount < 100_000_000.0`），交出 0 等于对每只票宣布
+            // 「没有流动性」⇒ 整池清空，那正是 2026-10-19 下午连续几批「无候选」的直接机制。
+            // 这里改用**同一根 K 线上本来就有的**收盘价 × 成交量推定成交额，并显式留痕是推定值。
+            // 取证（2026-10-19 收盘后，腾讯批量行情同时给出真成交额与量，49 只样本）：
+            //   98% 的样本相对误差 <10%（典型 1.3~2.9%）；在这 49 只上，推定值与真值对
+            //   「1 亿元」这条门的判定**零翻转** —— 该门只分「过/不过」，阈值粗，故可用。
+            //   唯一大误差样本（sh688019，量字段疑解析错位）两边都远超阈值 ⇒ 仍不翻转。
+            if let Some(mut q) = amountless {
+                match Self::estimated_amount(q.price, q.volume) {
+                    Some(est) => {
+                        q.amount = est;
+                        crate::as_of::record_degradation_kind(
+                            "astock-data",
+                            "get_quote",
+                            &format!(
+                                "{stock_code} 的全部日 K 源都不含成交额字段 ⇒ 成交额按收盘价×成交量推定\
+                                 （推定值 {:.2} 亿；真值未取到，荐股流动性门按此推定判定）",
+                                est / 1e8
+                            ),
+                            crate::as_of::DegradationKind::NoData,
+                        );
+                    },
+                    None => {
+                        // 连价或量都没有 ⇒ 推定也做不了，照实交出无成交额行情并留痕
+                        // （不伪装：这里明确写「推定不可用」，下游判空是可归因的）。
+                        crate::as_of::record_degradation_kind(
+                            "astock-data",
+                            "get_quote",
+                            &format!(
+                                "{stock_code} 的全部日 K 源都不含成交额字段，且价/量缺失无法推定 ⇒ \
+                                 行情按无成交额交出（回放期流动性判据不可用，荐股候选池会因此判空）"
+                            ),
+                            crate::as_of::DegradationKind::NoData,
+                        );
+                    },
+                }
+                // 这条也缓存，但**只 60 秒**：同一批里每只票被合成 8~12 次，不缓存就会把
+                // 同一族被封禁域名的请求放大一个数量级（正是这轮封禁越打越死的成因）；
+                // 而把「此刻取不到成交额」钉死一小时又会让下一批在源恢复后仍读到老结果，
+                // 所以短到能跨不过一批、又长到能压住批内重复。
+                self.cache_set_serialized(quote_cache_key, &q, 60).await;
+                return Ok(q);
             }
             crate::as_of::record_degradation(
                 "astock-data",
@@ -2392,6 +2590,11 @@ impl AStockClient {
         }
         // as-of：国际行情同样是实时快照 ⇒ 用截断后的国际 K 线合成，绝不回退到今日价。
         // （与 A 股 `get_quote` 的 as-of 分支同口径，见 PLAN §2-D6）
+        //
+        // ⚠ 这里刻意**不套** `asof_quote_is_usable`：A 股那条要换源，是因为 klines 路由里
+        // 有多个源、排在最前的腾讯恰好不带成交额字段；国际行情只有这一个源、没有可换的
+        // 下一家，套上去只会把「有价格但无成交额」变成整条失败。价格仍是截止日的，
+        // 不存在时间泄露，故维持原样（别为了「两侧统一」把它改掉）。
         if crate::as_of::is_asof_active() {
             let ks = self.get_international_klines(stock_code, "daily", 5, None).await?;
             return Self::quote_from_klines(stock_code, &ks).ok_or_else(|| {
@@ -2632,7 +2835,7 @@ impl AStockClient {
             return self.get_international_klines(stock_code, period, limit, adj_type).await;
         }
         let cache_key = Self::kline_cache_key(stock_code, period, adj_type);
-        let fetch_limit = limit.max(500);
+        let fetch_limit = limit.max(Self::KLINE_FETCH_FLOOR);
 
         {
             if let Some(cached) = self.cache_get(&cache_key).await {
@@ -6830,6 +7033,209 @@ mod asof_realtime_degrade_tests {
             turnover_rate: Some(0.01),
             adj_factor: None,
         }
+    }
+
+    /// 2026-10-19 现网：超短档（尺度=60 分钟线）在一整下午的回放里恒 0 出票，唯一原因是
+    /// 分钟线 date 形态是 `202609281030`（无分隔符），与截止日 `2026-09-28` 做**字典序**比较时
+    /// 第 5 位 `'0'`(0x30) > `'-'`(0x2D) ⇒ 每根都被判「晚于截止日」⇒ 截断后一根不剩。
+    /// 这条钉三格：分钟形态必须算「≤ 截止日」（正断言）、真的晚于截止日必须仍被拒
+    /// （负控——否则本条只是在放宽判据）、日线形态不得被改动（回归锁）。
+    #[test]
+    fn minute_bar_dates_compare_correctly_against_the_asof_cutoff() {
+        let cutoff = "2026-09-28";
+        assert!(
+            AStockClient::kline_le_cutoff("202609281030", cutoff),
+            "09-28 那根分钟 bar 必须留在窗口内（旧实现把它判成晚于截止日 ⇒ 超短档恒空）"
+        );
+        assert!(AStockClient::kline_le_cutoff("2026-09-28", cutoff), "日线形态不得被改动");
+        assert!(
+            !AStockClient::kline_le_cutoff("202610191500", cutoff),
+            "10-19 的分钟 bar 必须仍判晚于截止日 ⇒ 本条不是把判据放宽成恒真"
+        );
+        assert!(!AStockClient::kline_le_cutoff("2026-10-19", cutoff), "日线未来bar仍被拒");
+        assert_eq!(AStockClient::date_prefix("202609281030").as_deref(), Some("2026-09-28"));
+        assert_eq!(AStockClient::date_prefix("2026-09-28").as_deref(), Some("2026-09-28"));
+        // 认不出的形态返回 None ⇒ 调用方退回原比较，不新增一种静默丢弃
+        assert_eq!(AStockClient::date_prefix("未知"), None);
+        assert_eq!(AStockClient::date_prefix(""), None);
+    }
+
+    /// 2026-10-19 定论的判据面：**无成交额的源不能当可用行情**。
+    /// 否则它在 replay 的 klines 路由里永久赢（它排第一），而荐股建池唯一的数值判据就是
+    /// 成交额 ⇒ 50+30+48 只候选全被过滤掉、每批 `seed_pool_json="[]"`、回放真实荐股样本恒 0。
+    /// 断言打在 `asof_quote_is_usable` 上，与路由循环共用同一处判据（不另抄一份 `> 0.0`）。
+    #[tokio::test]
+    async fn amountless_tencent_shaped_quote_is_not_a_usable_asof_source() {
+        use crate::as_of::AS_OF;
+        // 腾讯 `kline/kline` 实测形态：日/周/月只有 6 字段，解析侧 amount 落 0
+        let no_amount = KLine { amount: 0.0, ..kline("2026-09-28", 6.80) };
+        let ks = vec![kline("2026-09-25", 6.65), no_amount.clone()];
+        let date = NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        let q = AS_OF
+            .scope(Some(ctx), async { AStockClient::quote_from_klines("002696", &ks) })
+            .await
+            .expect("6 字段日线仍可合成价格（缺的只是成交额）");
+        assert_eq!(q.price, 6.80);
+        assert_eq!(q.amount, 0.0, "夹具必须复刻腾讯形态：源不含成交额字段");
+        assert!(
+            !AStockClient::asof_quote_is_usable(&q),
+            "无成交额的合成行情必须被判为不可用源，否则换不到下一个源"
+        );
+        // 东财 push2his 日 K 第 7 字段 f57 = 成交额（实测 002696@09-21 = 189,720,702 元）
+        let with_amount = StockQuote { amount: 189_720_702.0, ..q };
+        assert!(
+            AStockClient::asof_quote_is_usable(&with_amount),
+            "换到给成交额的源就必须接受（B 方案要发生的正是这次换源）"
+        );
+    }
+
+    /// 2026-10-19 现网回放日志的第二条根因：**不认日期参数的源只回「最近 N 根」**，
+    /// 而 as-of 合成行情那段硬写 5 根 ⇒ 截止日（09-28）永远落在窗口外，
+    /// `quote_from_klines` 恒返 `None`（日志为此刷了 173 条
+    /// `[asof] browser_eastmoney … K线无法合成quote`），as-of 行情链只剩 push2 直连一条路，
+    /// 而它本机常被掐（同轮 237 条连接被掐断）⇒ 候选池依旧 `[]`。
+    /// 这条同时锁两侧：5 根窗口**必须**失败（负控，证明判据有电），按下限取的窗口**必须**
+    /// 取到截止日那根并带成交额（正断言，证明换宽就救得回来）。
+    #[tokio::test]
+    async fn fallthrough_source_must_be_asked_for_enough_bars() {
+        use crate::as_of::AS_OF;
+        use crate::AsOfCapability;
+        // 决策点：native 恒 5 根；非 native 随「截止日距今多远」推导，并夹在 5 与
+        // KLINE_FETCH_FLOOR 之间。第二轮现网读数否证了「一律给 500」：窗口放大 28 倍之后
+        // browser 通道对 push2his 的 page.goto 全数 net::ERR_EMPTY_RESPONSE，
+        // 而同一只票在一批里要被合成 8~12 次 ⇒ 请求量与字节量一起把域名打死。
+        assert_eq!(AStockClient::asof_kline_fetch_limit(AsOfCapability::NativeDateParam, 21), 5);
+        assert_eq!(
+            AStockClient::asof_kline_fetch_limit(AsOfCapability::Fallthrough, 21),
+            18,
+            "21 个日历天 ⇒ 约 15 根交易日 + 3 根缓冲，够截到截止日那根又不必背 500 根"
+        );
+        assert_eq!(
+            AStockClient::asof_kline_fetch_limit(AsOfCapability::Fallthrough, 0),
+            5,
+            "截止日就是今天也不能退化成 3 根（合成要用它和前一根）"
+        );
+        assert_eq!(
+            AStockClient::asof_kline_fetch_limit(AsOfCapability::Fallthrough, 100_000),
+            AStockClient::KLINE_FETCH_FLOOR,
+            "推导不得越过上限"
+        );
+        assert!(
+            AStockClient::asof_kline_fetch_limit(AsOfCapability::Fallthrough, 21)
+                != AStockClient::asof_kline_fetch_limit(AsOfCapability::NativeDateParam, 21),
+            "两类源的取数窗口必须真的不同，否则本条只是在自证恒真"
+        );
+
+        let date = NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+
+        // 负控：截止日之后 3 周的「最近 5 根」（非 native 源按 lmt=5 的真实回法）
+        let latest_five: Vec<KLine> =
+            ["2026-10-15", "2026-10-16", "2026-10-17", "2026-10-18", "2026-10-19"]
+                .iter()
+                .map(|d| kline(d, 7.0))
+                .collect();
+        let narrow = AS_OF
+            .scope(Some(ctx), async { AStockClient::quote_from_klines("600900", &latest_five) })
+            .await;
+        assert!(narrow.is_none(), "窗口够窄时合成必须失败——这正是旧实现把可用源堵死的那格");
+
+        // 正断言：同一只票、窗口跨过截止日（东财 browser 通道解析第 7 字段成交额）
+        let mut wide: Vec<KLine> = Vec::new();
+        for (y, m, days) in [(2026i32, 8u32, 31u32), (2026, 9, 30), (2026, 10, 19)] {
+            for d in 1..=days {
+                if let Some(dt) = NaiveDate::from_ymd_opt(y, m, d) {
+                    let s = dt.format("%Y-%m-%d").to_string();
+                    // 截止日那根给真实成交额与可识别收盘价，其余只要求「有一根」
+                    let kl = if s == "2026-09-28" {
+                        KLine { amount: 189_720_702.0, ..kline(&s, 6.80) }
+                    } else {
+                        kline(&s, 6.50)
+                    };
+                    wide.push(kl);
+                }
+            }
+        }
+        assert!(wide.len() > 50, "夹具必须真的宽于下限窗口，否则正断言没有覆盖面");
+        let q = AS_OF
+            .scope(Some(ctx), async { AStockClient::quote_from_klines("600900", &wide) })
+            .await
+            .expect("窗口覆盖截止日后必须合成成功");
+        assert_eq!(q.price, 6.80, "必须取截止日那一根，而不是它之前/之后的某根");
+        assert!(
+            AStockClient::asof_quote_is_usable(&q),
+            "这条源给得出成交额 ⇒ 按 B 的判据它就是可用结果"
+        );
+    }
+
+    /// 兜底推定的判据（2026-10-19 现网：push2his 的两个出口同被 `net::ERR_EMPTY_RESPONSE`
+    /// /连接掐断封住 ⇒ 没有任何源能给出成交额；此时交出 `amount=0` 会让荐股建池把整池判空，
+    /// 因为那道门唯一的数值判据就是成交额）。两侧各钉一格，另加一格「不许覆盖真值」：
+    /// - 有价有量 ⇒ 推定值必须为正**且过 1 亿元门**（那是它唯一的消费点）；
+    /// - 缺价 / 缺量 / NaN ⇒ 必须 `None`（不猜），由调用方按「无法推定」留痕；
+    /// - 源给了成交额时 `asof_quote_is_usable` 为真 ⇒ 根本走不到推定分支（真值优先）。
+    ///
+    /// 正断言用 002696@2026-10-19 收盘后的真实形态：价 8.69、量 93,378,900 股、
+    /// 真成交额 845,883,155 元（腾讯批量行情同时给出量与额，可直接对拍）。
+    #[tokio::test]
+    async fn amount_estimate_falls_back_only_when_no_source_gives_it() {
+        use crate::as_of::AS_OF;
+        const TRUE_AMOUNT: f64 = 845_883_155.0;
+        let est = AStockClient::estimated_amount(8.69, 93_378_900.0).expect("价与量都在时必须推定");
+        assert!(est > 100_000_000.0, "推定值要能喂给那道 1 亿元流动性门，否则本条改动毫无意义");
+        let rel = (est - TRUE_AMOUNT).abs() / TRUE_AMOUNT;
+        assert!(
+            rel < 0.05,
+            "推定值与真值的相对误差必须留在取证口径内（实测 49 样本 98% <10%，本例应 ≈4%）: {rel}"
+        );
+
+        // 不猜的三格
+        assert_eq!(AStockClient::estimated_amount(8.69, 0.0), None, "无量不推定");
+        assert_eq!(AStockClient::estimated_amount(0.0, 93_378_900.0), None, "无价不推定");
+        assert_eq!(
+            AStockClient::estimated_amount(f64::NAN, 93_378_900.0),
+            None,
+            "NaN 价不得推定出一个 NaN 额去喂门"
+        );
+
+        // 真值优先：给了成交额的行情本身就是可用结果，走不到兜底分支
+        let date = NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        let ks =
+            vec![kline("2026-09-25", 6.65), KLine { amount: 0.0, ..kline("2026-09-28", 6.80) }];
+        let q0 = AS_OF
+            .scope(Some(ctx), async { AStockClient::quote_from_klines("002696", &ks) })
+            .await
+            .expect("夹具应能合成行情（腾讯形态：有价有量、无成交额）");
+        assert_eq!(q0.amount, 0.0, "夹具必须真的无成交额，否则这一格没有覆盖面");
+        let q = StockQuote { amount: TRUE_AMOUNT, ..q0 };
+        assert!(
+            AStockClient::asof_quote_is_usable(&q),
+            "有真成交额时判据必须直接接受，换源链不会退化到推定"
+        );
+    }
+
+    /// 端到端手工验证（CI 不跑，`-- --ignored`）：as-of 2026-09-28 的行情必须带成交额。
+    /// 这条是上面那个定论的正证；哪天所有 klines 源又不给额，它红并把数值打出来，
+    /// 而不是让荐股页静默显示「无候选」。
+    #[tokio::test]
+    #[ignore = "live 网络：手工验证 as-of 成交额链路"]
+    async fn live_asof_quote_carries_amount_for_2026_09_28() {
+        use crate::as_of::AS_OF;
+        let client = AStockClient::new();
+        let date = NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        let q = AS_OF
+            .scope(Some(ctx), async { client.get_quote("002696").await })
+            .await
+            .expect("as-of 行情应能合成");
+        assert!(
+            q.amount > 0.0,
+            "成交额仍为 0 ⇒ 流动性过滤会把整个回放候选池清光：amount={} price={}",
+            q.amount,
+            q.price
+        );
     }
 
     #[test]

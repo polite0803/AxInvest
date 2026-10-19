@@ -17059,6 +17059,13 @@
     "recommendation": {
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
+      "boardScopeTip": "Board scope for the scan (live only; replay uses the as-of snapshot)",
+      "boardScope_auto": "Auto rotate",
+      "boardScope_sh_main": "Shanghai main board",
+      "boardScope_sz_main": "Shenzhen main board",
+      "boardScope_chinext": "ChiNext",
+      "boardScope_star": "STAR Market",
+      "boardScope_all": "All boards",
       "bannerVendorDisabled": "Some styles disabled: {styles}",
       "bearish": "Bearish",
       "bearishTooltip": "Sell/Reduce signals matched",

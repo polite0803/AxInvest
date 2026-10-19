@@ -1434,6 +1434,15 @@ export interface SeedPoolOrigin {
   industry: number;
   /** 来自内置 FALLBACK_STOCKS 样本池 */
   fallback: number;
+  /** 来自**用户自己的标的**（自选股 ∪ 本机手工加入/分析过的票） */
+  user: number;
+  /**
+   * 来自**当日涨幅榜**（收盘快照按当日涨幅取前 50）。
+   *
+   * 口径边界：快照枚举域是 `market_stock_universe`（现网约 681 只），不是全市场；
+   * 域外个股这条来源也发现不了 —— 面板不得把它读成「已覆盖全市场」。
+   */
+  mover: number;
 }
 
 /** 荐股接口响应 — 完整字段版 */

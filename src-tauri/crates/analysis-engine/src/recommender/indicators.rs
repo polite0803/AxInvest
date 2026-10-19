@@ -86,6 +86,17 @@ pub fn avg_amount_20d(klines: &[KLine]) -> Option<f64> {
     avg_amount_n(klines, 20)
 }
 
+/// 近 `n` 根均**成交量**。用途：日 K 源不给成交额时（腾讯日线只有 6 字段 ⇒ `amount=0`）
+/// 量能判据的唯一可用字段；只比较「当日 / 均量」的比值，不涉及单位换算。
+pub fn avg_volume_n(klines: &[KLine], n: usize) -> Option<f64> {
+    if klines.is_empty() {
+        return None;
+    }
+    let take = n.min(klines.len());
+    let sum: f64 = klines.iter().rev().take(take).map(|k| k.volume).sum();
+    Some(sum / take as f64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

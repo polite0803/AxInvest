@@ -4665,6 +4665,12 @@ fn spawn_opc_workflows_seeding(state: &AppState) {
     });
 }
 
+/// 估值归档最近一次完成的交易日（`YYYYMMDD`）。进程内每个交易日只跑一次。
+///
+/// 为什么用原子而不是锁：这里只需要「同一天不重复跑」这个幂等标记，读写都不需要临界区；
+/// `clippy.toml` 也禁止 `std::sync::Mutex`（跨 await 持 guard 是 UB 风险）。
+static FUNDAMENTALS_LAST_SWEPT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
 /// 全市场收盘快照采集（`PLAN-mover-recall-attribution.md` Phase 1）。
 ///
 /// 同一个每小时 tick 里做两件有先后依赖的事：
@@ -4674,12 +4680,6 @@ fn spawn_opc_workflows_seeding(state: &AppState) {
 /// 2. **收盘快照**：清单非空且该交易日行数不足 ⇒ 走腾讯批量落 `market_daily_close`。
 ///    「采齐」判据取「行数 ≥ 清单规模的一半」这个宽阈值——宁可重复跑一次（幂等 upsert），
 ///    也不要因为一次网络抖动把整天留成空洞。
-/// 估值归档最近一次完成的交易日（`YYYYMMDD`）。进程内每个交易日只跑一次。
-///
-/// 为什么用原子而不是锁：这里只需要「同一天不重复跑」这个幂等标记，读写都不需要临界区；
-/// `clippy.toml` 也禁止 `std::sync::Mutex`（跨 await 持 guard 是 UB 风险）。
-static FUNDAMENTALS_LAST_SWEPT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
-
 fn start_market_close_sweep(state: &AppState) {
     use std::sync::atomic::{AtomicUsize, Ordering};
 

@@ -33,7 +33,8 @@ tokio = { workspace = true, features = [
   "sync",
   "time",
 ] }
-tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+# 信任锚用系统信任库：webpki-roots 0.26 线已无该判据的修复版（RUSTSEC-2026-0381，0.26.11 是该线最后一版）
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
 tracing = { workspace = true }
 url = "2"
 uuid = { workspace = true }

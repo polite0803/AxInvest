@@ -517,9 +517,14 @@ export function ScheduledJobsTab() {
               title: t("tasksCenter.history.result"),
               key: "result",
               width: 80,
+              // 与「上一次运行」那一列同判据（:343）：success=false 有两种意思——
+              // 真故障与「部分完成」（超墙钟收尾 / 单轮上限截断）。历史行的 partial
+              // 来自 cron_job_history.partial，缺省 false 时退化成「失败」（旧行即如此）。
               render: (_: unknown, r: TaskExecutionRecord) =>
                 r.success
                   ? <Tag color="success">{t("tasksCenter.lastRun.success")}</Tag>
+                  : r.partial
+                  ? <Tag color="warning">{t("tasksCenter.lastRun.partial")}</Tag>
                   : <Tag color="error">{t("tasksCenter.lastRun.failed")}</Tag>,
             },
             {

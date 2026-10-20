@@ -765,6 +765,118 @@ pub struct ValidationReportResponse {
     pub excluded_pre_window_set_rows: usize,
 }
 
+/// 趋势智选后验的**只读**汇总（B1，`PLAN-chain-closure-remediation.md` §3）。
+///
+/// ## 为什么只计数、不重新判定
+/// 智选行的 `hit_outcome` 由 07:00 回测里的智选趟按「T+N 对基准的超额」判完写库
+/// （`excess_outperform` / `outperform` / `underperform` / `excess_underperform`）。
+/// 本命令**只按已存标签聚合**：在这里再判一次命中就是第二套判据，两边一旦漂移会得到
+/// 两个都自称正确的智选命中率 —— 与 `hit_outcome_to_binary_outcome` 必须做唯一判定源同理。
+///
+/// ## 刻意不给的数
+/// 平均超额收益**不落库**（只出现在回测当轮的 tracing 里），所以本结构体没有那个字段，
+/// 由界面按「未落库」如实声明。宁可少一个数，也不摆一个既没算过也没存着的数。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerenityLabelCount {
+    pub label: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerenityValidationSummary {
+    /// `style='serenity'` 的后验行数。同一候选按多个 T+N 窗口各落一行 ⇒ **行数 ≠ 候选数**。
+    pub rows: i64,
+    /// 去重后的 `pick_id` 数（与 `rows` 并排显示时这两个计数域不可互换）。
+    pub candidates: i64,
+    pub judged: i64,
+    pub outperform: i64,
+    /// `judged == 0` 时为 `None` —— 「没有可比样本」不该被显示成一枚 0% 的命中率。
+    pub hit_rate: Option<f64>,
+    pub label_counts: Vec<SerenityLabelCount>,
+    pub latest_validated_at: Option<String>,
+    pub generation: Option<String>,
+    /// 恒 `false`：智选按设计**不**进荐股 IC 闭环（超额标签被 `hit_outcome_to_binary_outcome` 拒收）。
+    /// 面板据此显示一句声明，而不是留一格看起来像漏算。
+    pub in_weight_loop: bool,
+}
+
+#[agent_command(
+    domain = "finance",
+    safety = Safe,
+    call_mode = StateInput,
+    description = "汇总智选后验样本"
+)]
+#[tauri::command]
+pub async fn serenity_validation_summary(
+    state: State<'_, AppState>,
+    generation: Option<String>,
+) -> Result<SerenityValidationSummary, String> {
+    let db = state.harness.db();
+    let generation = axagent_astock_data::as_of::parse_generation_param(generation.as_deref())
+        .map_err(|e| ErrorResponse::new(common::INVALID_INPUT).with_detail(e))?;
+
+    let rows: Vec<(String, Option<String>, String)> = decision_validations::Entity::find()
+        .filter(decision_validations::Column::Style.eq("serenity"))
+        // 代际口径与 `list_decision_validations` / 权重闭环一致：默认只算实盘代，
+        // 要看某次回放的验证结果就传那批的截止日。两套样本不并排比。
+        .filter(match generation.as_deref() {
+            Some(d) => decision_validations::Column::AsOfDate.eq(d),
+            None => decision_validations::Column::AsOfDate.is_null(),
+        })
+        .select_only()
+        .column(decision_validations::Column::PickId)
+        .column(decision_validations::Column::HitOutcome)
+        .column(decision_validations::Column::ValidatedAt)
+        .into_tuple()
+        .all(db)
+        .await
+        .map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("读取智选后验样本失败: {e}"))
+        })?;
+
+    let mut labels: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    let mut candidates: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut judged = 0i64;
+    let mut outperform = 0i64;
+    let mut latest: Option<&String> = None;
+    for (pick_id, outcome, validated_at) in &rows {
+        candidates.insert(pick_id.clone());
+        if let Some(label) = outcome.as_ref() {
+            *labels.entry(label.clone()).or_insert(0) += 1;
+            judged += 1;
+            if label == "excess_outperform" || label == "outperform" {
+                outperform += 1;
+            }
+        }
+        if latest.map(String::as_str) < Some(validated_at.as_str()) {
+            latest = Some(validated_at);
+        }
+    }
+
+    Ok(SerenityValidationSummary {
+        rows: rows.len() as i64,
+        candidates: candidates.len() as i64,
+        judged,
+        outperform,
+        // 分母为 0 不出数（出 0.0 会被读成「一条都没跑赢」，而那是两回事）
+        hit_rate: if judged > 0 {
+            Some(outperform as f64 / judged as f64)
+        } else {
+            None
+        },
+        label_counts: labels
+            .into_iter()
+            .map(|(label, count)| SerenityLabelCount { label, count })
+            .collect(),
+        latest_validated_at: latest.cloned(),
+        generation,
+        in_weight_loop: false,
+    })
+}
+
 /// 聚合报告 —— 基于已写入的 decision_validations 重新计算
 ///
 /// ## #49 代际筛样（读侧，PLAN 七十九 A2）

@@ -1240,7 +1240,7 @@ mod weight_trigger_isolation_tests {
         let analysis = load_current_weights_excluding(db, RECO_LOOP_TRIGGER).await.unwrap();
         assert_eq!(analysis.get(&key), Some(&0.8), "分析链当前权重不得被荐股闭环行顶替");
         assert!(
-            analysis.get(&("value".to_string(), "short".to_string())).is_none(),
+            !analysis.contains_key(&("value".to_string(), "short".to_string())),
             "只有闭环留痕的格不得进入分析链键空间"
         );
     }

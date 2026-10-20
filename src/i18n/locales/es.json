@@ -14946,6 +14946,11 @@
       "deleteSuccess": "{{count}} registros eliminados",
       "selectedCount": "{{count}} seleccionados",
       "exitSelect": "Salir selección múltiple",
+      "generation": "Generación",
+      "genLive": "Generación real",
+      "genReplay": "Generación de rejeu · corte {{date}}",
+      "genReplayNoDate": "Generación de rejeu (sin fecha de corte)",
+      "genReplayUnavailable": "Ni esta ejecución ni el ancla temporal tienen fecha de corte ⇒ no hay generación de rejeu que localizar",
       "detailEmpty": "No hay registros de acciones candidatas en esta ronda",
       "deleteConfirm": "¿Confirmas eliminar los {{count}} registros de minería de cuellos de botella seleccionados?",
       "deleteOneConfirm": "¿Eliminar este registro de selección de tendencias?",
@@ -15056,9 +15061,11 @@
     "entryBandRangeFallback": "Distancia de stop no disponible ⇒ la banda vuelve a la plantilla",
     "candidateTierRowsNote": "{{stocks}} símbolos · una fila por nivel",
     "emptyHistoryWarning": "El historial de Serenity está vacío: list_reco_history devolvió 0 filas (posiblemente no hay historial con estilo serenity/bottleneck en la BD o el error del comando backend se ignoró silenciosamente)",
+    "emptyHistoryReplay": "Ningún lote de rejeu con fecha de corte {{date}}: list_reco_history devolvió 0 filas (filtro de generación)",
     "timeBasis": "Base temporal: {{date}} · ventana sugerida ~{{days}} días (hasta {{until}})",
     "bannerAsOf": "Datos hasta {{date}}",
-    "replayNotPersisted": "Los resultados de la reproducción no se guardan en el historial de tendencias: solo se muestran en esta ejecución"
+    "replayPersisted": "Los candidatos de este rejeu se guardan con su fecha de corte y alimentan la reflexión y la validación de aciertos con exceso",
+    "replayHistoryScope": "El listado del historial de tendencias solo muestra por defecto la generación real: esta ejecución no aparece ahí"
   },
   "trade": {
     "title": "Trading Log",
@@ -18582,6 +18589,31 @@
     "tagsPlaceholder": "Etiqueta1, Etiqueta2"
   },
   "backtest": {
+    "mainlines": {
+      "title": "Líneas del mercado (últimos {{days}} días)",
+      "stateNoRows": "No hay filas de líneas en la biblioteca: el nodo de persistencia determinista de esta cadena es nuevo en este lote; reinicie la app y espere la ejecución de las 18:00 de hoy",
+      "stateFailed": "Falló la consulta: {{error}}",
+      "colDate": "Fecha",
+      "colTheme": "Tema",
+      "colCategory": "Categoría",
+      "colStrength": "Fortaleza",
+      "colSymbols": "Símbolos",
+      "colSource": "Ejecución de origen"
+    },
+    "serenityValidation": {
+      "title": "Validación de Serenity",
+      "rows": "Filas de validación",
+      "candidates": "Candidatos deduplicados",
+      "judged": "Juzgados",
+      "outperform": "Superó la referencia",
+      "hitRate": "Tasa de acierto excesiva",
+      "latest": "Último validado",
+      "stateNoRows": "No hay filas de validación de Serenity en la biblioteca (style=serenity) — los candidatos nunca se validaron en T+N",
+      "stateUnjudged": "Hay filas de validación pero ninguna juzgada — ventana de tenencia no cumplida o fallo al obtener cotizaciones",
+      "stateFetchFailed": "Falló la consulta; este panel no tiene lecturas útiles: {{error}}",
+      "loopNote": "Serenity queda fuera por diseño del bucle de pesos: sus etiquetas juzgan el exceso, no acierto o fallo",
+      "excessNote": "El exceso medio solo aparece en el registro de la ronda del backtest, no se guarda"
+    },
     "title": "Validación por backtest",
     "placeholder": "Validar la estrategia con datos históricos"
   },

@@ -14946,6 +14946,11 @@
       "deleteSuccess": "{{count}}件の推奨記録を削除しました",
       "selectedCount": "{{count}}件選択中",
       "exitSelect": "選択を解除",
+      "generation": "世代",
+      "genLive": "実運用世代",
+      "genReplay": "リプレイ世代 · 締切 {{date}}",
+      "genReplayNoDate": "リプレイ世代（締切日なし）",
+      "genReplayUnavailable": "今回の実行にも時間アンカーにも締切日がないため、参照するリプレイ世代を特定できません",
       "detailEmpty": "该轮暂无候选股记录",
       "deleteConfirm": "确定删除选中的 {{count}} 条瓶颈掘金记录？",
       "deleteOneConfirm": "このトレンド選定記録を削除しますか？",
@@ -15056,9 +15061,11 @@
     "entryBandRangeFallback": "ストップ距離が取れない ⇒ バンドはテンプレ値に退避",
     "candidateTierRowsNote": "{{stocks}} 銘柄 · 档位ごとに1行",
     "emptyHistoryWarning": "セレニティ履歴が空です：list_reco_history が 0 行を返しました（DB に serenity/bottleneck スタイルの履歴がないか、バックエンドコマンドの失敗が静かに無視された可能性があります）",
+    "emptyHistoryReplay": "締切日 {{date}} のリプレイ批次はありません：代際フィルタで list_reco_history が 0 行を返しました",
     "timeBasis": "時間基準: {{date}} · 推奨期間約{{days}}日（〜{{until}}）",
     "bannerAsOf": "データは {{date}} 時点",
-    "replayNotPersisted": "リプレイ結果はトレンド履歴に保存されず、今回の実行のみ表示されます"
+    "replayPersisted": "今回のリプレイ候補は締切日を付記して保存され、振り返りと超過リターン検証に使用できます",
+    "replayHistoryScope": "「トレンド履歴」リストは既定で実運用世代のみ表示するため、今回のバッチはそこには表示されません"
   },
   "trade": {
     "title": "Trading Log",
@@ -18582,6 +18589,31 @@
     "tagsPlaceholder": "标签1, 标签2"
   },
   "backtest": {
+    "mainlines": {
+      "title": "市場主線（直近 {{days}} 日）",
+      "stateNoRows": "ライブラリに主線記録がありません：この鎖の確定的な落庫ノードは本ラウンドで新設、アプリ再起動後に当日 18:00 の実行を待ってください",
+      "stateFailed": "取得に失敗：{{error}}",
+      "colDate": "日付",
+      "colTheme": "主線",
+      "colCategory": "分類",
+      "colStrength": "強度",
+      "colSymbols": "代表銘柄",
+      "colSource": "由来実行"
+    },
+    "serenityValidation": {
+      "title": "セレニティ後検証",
+      "rows": "後検証行数",
+      "candidates": "重複除去候補",
+      "judged": "判定済み",
+      "outperform": "ベンチマーク超え",
+      "hitRate": "超過的中率",
+      "latest": "最終検証日",
+      "stateNoRows": "ライブラリにセレニティの後検証行がありません（style=serenity）——候補は T+N 検証を一度も受けていない",
+      "stateUnjudged": "後検証行はあるが判定完了が 0 件——保有期間未到または相場取得失敗",
+      "stateFetchFailed": "取得に失敗、このパネルには読める値がありません：{{error}}",
+      "loopNote": "セレニティは設計上、薦株の重み閉環に参加しない——ラベルは超過判定で、勝敗判定ではない",
+      "excessNote": "平均超過収益は回測の当ラウンドのログのみで、未保存"
+    },
     "title": "回测验证",
     "placeholder": "用历史资料验证策略"
   },

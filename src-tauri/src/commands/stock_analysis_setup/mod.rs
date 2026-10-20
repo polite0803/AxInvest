@@ -726,9 +726,10 @@ pub(crate) static PROFILE_TOOLS: &[(&str, &[&str])] = &[
     //     · `get_dragon_tiger_list` → `get_market_dragon_tiger`（同物异名，1:1）
     //     · `get_north_flow`        → `get_north_bound_flow`（同物异名，1:1）
     //     · `market_mainline_batch_upsert` 删除 —— 它**不是幽灵**：是 daily-market-events
-    //       模板自己的 `ToolDef`，认字符串 `name: "market_mainline_batch_upsert"`（在
-    //       `seed_daily_market_events.rs` 的 `agent_tools` 列表内）；该模板的 Agent 节点
-    //       用 `tools: agent_tools` 自带它 ⇒ 工作流侧不依赖本表；chat 侧该表无此名。
+    //       模板自己的工具，认字符串 `"market_mainline_batch_upsert"`（v2 起它在
+    //       `seed_daily_market_events.rs` 的 **`ToolNodeConfig.tool_name`** 上，不再是
+    //       `agent_tools` 里的一项 —— 持久化已从「模型自愿调工具」升格为图上的确定性节点，
+    //       Agent 的工具清单因此只剩 4 个采集工具）；工作流侧不依赖本表，chat 侧该表无此名。
     //       （此处不写行号：外部文件一改即失效。）
     //       2026-09-20 更新：命题「工作流侧不依赖本表」成立，但**当时它根本解析不到** ——
     //       工作流的工具解析走 ToolResolver（判据 = `register_all` 注册表 ∪ MCP 工具表），

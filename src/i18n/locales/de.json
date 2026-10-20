@@ -14946,6 +14946,11 @@
       "deleteSuccess": "{{count}} Engpass-Einträge gelöscht",
       "selectedCount": "{{count}} ausgewählt",
       "exitSelect": "Mehrfachauswahl beenden",
+      "generation": "Generation",
+      "genLive": "Live-Generation",
+      "genReplay": "Replay-Generation · Stichtag {{date}}",
+      "genReplayNoDate": "Replay-Generation (ohne Stichtag)",
+      "genReplayUnavailable": "Weder dieser Durchlauf noch der Zeitanker hat einen Stichtag ⇒ keine Replay-Generation lokalisierbar",
       "detailEmpty": "In dieser Runde sind keine Kandidatenaktien erfasst",
       "deleteConfirm": "Ausgewählte {{count}} Engpass-Goldgräber-Einträge löschen?",
       "deleteOneConfirm": "Diesen Trend-Screening-Datensatz löschen?",
@@ -15056,9 +15061,11 @@
     "entryBandRangeFallback": "Stop-Distanz nicht verfügbar ⇒ Band fällt auf die Vorlage zurück",
     "candidateTierRowsNote": "{{stocks}} Titel · eine Zeile je Stufe",
     "emptyHistoryWarning": "Serenity-Verlauf ist leer: list_reco_history hat 0 Zeilen zurückgegeben (möglicherweise keine Historie mit Stil serenity/bottleneck in DB oder Backend-Befehlsfehler wurde stillschweigend ignoriert)",
+    "emptyHistoryReplay": "Kein Replay-Datensatz zum Stichtag {{date}}: list_reco_history lieferte 0 Zeilen (Generationsfilter)",
     "timeBasis": "Zeitbasis: {{date}} · vorgeschlagenes Fenster ~{{days}} Tage (bis {{until}})",
     "bannerAsOf": "Datenstand {{date}}",
-    "replayNotPersisted": "Replay-Ergebnisse werden nicht im Trendverlauf gespeichert - nur für diesen Durchlauf angezeigt"
+    "replayPersisted": "Die Kandidaten dieses Durchlaufs werden mit Stichtag gespeichert und stehen Reflexion wie Überschuss-Trefferprüfung zur Verfügung",
+    "replayHistoryScope": "Die Trend-Historienliste zeigt standardmäßig nur den Live-Datensatz – dieser Durchlauf erscheint dort nicht"
   },
   "trade": {
     "title": "Trading Log",
@@ -18582,6 +18589,31 @@
     "tagsPlaceholder": "Tag1, Tag2"
   },
   "backtest": {
+    "mainlines": {
+      "title": "Markthemen (letzte {{days}} Tage)",
+      "stateNoRows": "Keine Themenzeilen in der Bibliothek: der deterministische Persistenzknoten dieser Kette ist neu in diesem Batch – App neu starten und den 18:00-Lauf heute abwarten",
+      "stateFailed": "Abruf fehlgeschlagen: {{error}}",
+      "colDate": "Datum",
+      "colTheme": "Thema",
+      "colCategory": "Kategorie",
+      "colStrength": "Stärke",
+      "colSymbols": "Symbole",
+      "colSource": "Quelllauf"
+    },
+    "serenityValidation": {
+      "title": "Serenity-Nachprüfung",
+      "rows": "Zeilen der Nachprüfung",
+      "candidates": "Abglichene Kandidaten",
+      "judged": "Beurteilt",
+      "outperform": "Benchmark geschlagen",
+      "hitRate": "Überhit-Rate",
+      "latest": "Zuletzt geprüft",
+      "stateNoRows": "Keine Serenity-Nachprüfung in der Bibliothek (style=serenity) — Kandidaten wurden nie auf T+N geprüft",
+      "stateUnjudged": "Nachprüfungszeilen vorhanden, aber keine beurteilt — Haltefrist nicht erreicht oder Kursabruf fehlgeschlagen",
+      "stateFetchFailed": "Abruf fehlgeschlagen; dieses Panel hat keine verwertbaren Werte: {{error}}",
+      "loopNote": "Serenity ist entwurfsbedingt nicht im Gewichtungsloop: Die Labels beurteilen Überlegenheit, nicht Sieg oder Niederlage",
+      "excessNote": "Die durchschnittliche Überrendite steht nur im Backtest-Log dieser Runde, nicht in der Datenbank"
+    },
     "title": "Backtest-Validierung",
     "placeholder": "Strategie mit historischen Daten validieren"
   },

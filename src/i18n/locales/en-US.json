@@ -14713,6 +14713,31 @@
     }
   },
   "backtest": {
+    "mainlines": {
+      "title": "Market Mainlines (last {{days}} days)",
+      "stateNoRows": "No mainline rows in the library: this chain's deterministic persist node is new in this batch — restart the app and wait for today's 18:00 run",
+      "stateFailed": "Query failed: {{error}}",
+      "colDate": "Date",
+      "colTheme": "Theme",
+      "colCategory": "Category",
+      "colStrength": "Strength",
+      "colSymbols": "Symbols",
+      "colSource": "Source run"
+    },
+    "serenityValidation": {
+      "title": "Serenity Validation",
+      "rows": "Validation rows",
+      "candidates": "Unique candidates",
+      "judged": "Judged",
+      "outperform": "Beat benchmark",
+      "hitRate": "Excess hit rate",
+      "latest": "Latest validated",
+      "stateNoRows": "No Serenity validation rows in the library (style=serenity) — Serenity candidates were never validated at T+N",
+      "stateUnjudged": "Validation rows exist but none finished judging — holding window not matured, or quote fetch failed",
+      "stateFetchFailed": "Query failed; this panel has no usable readings: {{error}}",
+      "loopNote": "Serenity is by design outside the recommendation weight loop: its labels judge excess, not win or loss",
+      "excessNote": "Average excess return appears only in the backtest run log and is not persisted"
+    },
     "placeholder": "Validate strategies with historical data",
     "title": "Backtest"
   },
@@ -15202,6 +15227,11 @@
       "selectedCount": "{{count}} selected",
       "exitSelect": "Exit Multi-select",
       "empty": "No bottleneck hunt history",
+      "generation": "Generation",
+      "genLive": "Live generation",
+      "genReplay": "Replay generation · cutoff {{date}}",
+      "genReplayNoDate": "Replay generation (no cutoff)",
+      "genReplayUnavailable": "Neither this run nor the time anchor carries a cutoff date, so no replay generation can be located",
       "detailEmpty": "No candidate stocks recorded for this round"
     },
     "filterPeUpper": "PE Upper Limit",
@@ -15255,9 +15285,11 @@
     "entryBandRangeFallback": "Stop distance unavailable ⇒ entry band falls back to the template range",
     "candidateTierRowsNote": "{{stocks}} symbols · one row per tier",
     "emptyHistoryWarning": "Serenity history is empty: list_reco_history returned 0 rows (possibly no serenity/bottleneck style history in DB, or backend command failure was silently ignored)",
+    "emptyHistoryReplay": "No replay batch for cutoff {{date}}: list_reco_history returned 0 rows under the generation filter",
     "timeBasis": "Time basis: {{date}} · suggested window ~{{days}} days (until {{until}})",
     "bannerAsOf": "Data as of {{date}}",
-    "replayNotPersisted": "Replay results are not written to the trend history - shown for this run only"
+    "replayPersisted": "This replay's candidates are persisted with their cutoff date, so they can feed reflection and excess-hit validation",
+    "replayHistoryScope": "The trend history list shows live-generation batches only, so this run is not listed there"
   },
   "trade": {
     "agentRole": {

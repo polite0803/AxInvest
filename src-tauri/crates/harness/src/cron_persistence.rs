@@ -44,6 +44,11 @@ pub struct CronHistoryRecord {
     pub output: Option<String>,
     pub error: Option<String>,
     pub duration_ms: i64,
+    /// 本轮「部分完成」——表里是 `integer`（0/1），端口上就是 `bool`。
+    ///
+    /// 必须与 `success` 一起落库：超墙钟收尾时 `success` 记 false，缺了本字段
+    /// 历史行就无法把「没跑完规划量」与「真故障」分开（旧记录读出来缺省 false）。
+    pub partial: bool,
 }
 
 /// 定时任务的持久化端口。

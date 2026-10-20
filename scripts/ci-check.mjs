@@ -417,6 +417,18 @@ if (canRunRust && !quick) {
   // 两种窗口的命中并成一个分母。R1 权威现场推导 / R2 代码无手抄 / R3 三读点同判据 / R4 写侧取权威。
   step("T+N 窗口集权威自检（五条负控 + 剥注释自证）", "node scripts/check-validation-window-authority.mjs --selftest");
   step("T+N 窗口集唯一权威（四档现场推导）", "node scripts/check-validation-window-authority.mjs");
+  // 定时任务权威门（A1，2026-10-20，PLAN-chain-closure-remediation §2）：
+  // 播种语义是「存在即跳过」，所以代码不再播种的行会永远留在库里按天跑；先例 = 手工插库的
+  // batchref-due-daily 与内置 reflection-due-daily 同刻度同类型，同一批到期 pending 被两趟消费。
+  // R1（白名单自证）在 CI 上跑；R2–R4 要本机 PG 读数，取不到时明印「未检查」而非报绿。
+  step("定时任务权威自检（七条负控 + 按域限定扫描面）", "node scripts/check-cron-job-authority.mjs --selftest");
+  step("定时任务权威（播种白名单 ↔ 库里 active 行）", "node scripts/check-cron-job-authority.mjs");
+  // 产出→被消费门（C2，2026-10-20，PLAN-chain-closure-remediation §4）：
+  // 既有门禁全停在定义点（check-orphan-modules 自陈不判「编译了但没人调」），于是「函数在、
+  // 参数恒 null」可以长绿 —— 先例 = 证据共识的 historical_weights 前端硬传 null。
+  // 判据只认代码域；historical_weights 一条按日期显式豁免（键域不相交），接通后不撤即红。
+  step("产出↔消费对账自检（七条负控 + 豁免失效即红）", "node scripts/check-reflection-output-consumers.mjs --selftest");
+  step("产出↔消费对账（反思/闭环/进化产物不得只落库不被读）", "node scripts/check-reflection-output-consumers.mjs");
   // 孤儿模块门（2026-10-15，PLAN-reflection-optimization-closure §四.2）：
   // 文件可以整份存在、自带单测、甚至写着「待裁决」，只要没有 mod/include 指向它就不参与编译，
   // cargo check/clippy/test 全都不抱怨。先例 = serenity_hit_rate_backtest.rs（11 个单测从未跑过）。

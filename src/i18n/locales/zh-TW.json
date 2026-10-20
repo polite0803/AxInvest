@@ -15115,6 +15115,11 @@
       "selectedCount": "已選 {{count}} 項",
       "exitSelect": "退出多選",
       "empty": "暫無瓶頸掘金歷史",
+      "generation": "代際",
+      "genLive": "實盤代",
+      "genReplay": "回放代 · 截至 {{date}}",
+      "genReplayNoDate": "回放代（無截止日）",
+      "genReplayUnavailable": "本輪與時間錨點都沒有截止日 ⇒ 庫裡沒有可定位的回放代",
       "detailEmpty": "該輪暫無候選股記錄"
     },
     "filterPeUpper": "PE 上限",
@@ -15169,9 +15174,11 @@
     "entryBandRangeFallback": "止損距離不可得 ⇒ 建倉帶退回模板固定幅度",
     "candidateTierRowsNote": "{{stocks}} 隻 · 逐檔各一列",
     "emptyHistoryWarning": "趨勢智選歷史為空：list_reco_history 傳回 0 行（可能是 DB 暫無風格為 serenity/bottleneck 的歷史，或後端命令失敗被靜默）",
+    "emptyHistoryReplay": "該截止日（{{date}}）沒有回放批次：list_reco_history 在代際過濾下返回 0 行",
     "timeBasis": "時間基線: {{date}} · 建議窗口約 {{days}} 天（至 {{until}}）",
     "bannerAsOf": "數據截至 {{date}}",
-    "replayNotPersisted": "回放結果不寫入趨勢智選歷史，僅本輪展示"
+    "replayPersisted": "本輪回放候選已按截止日落庫，可供反思與超額命中驗證",
+    "replayHistoryScope": "「趨勢智選歷史」列表預設只列實盤代，本輪批次不在其中"
   },
   "tray": {
     "hide": "隱藏",
@@ -15383,6 +15390,31 @@
     "cancelExecution": "取消執行"
   },
   "backtest": {
+    "mainlines": {
+      "title": "市場主線（近 {{days}} 日）",
+      "stateNoRows": "庫裡沒有主線記錄：這條鏈的確定性落庫節點是本輪新加的，需重啟應用並等當日 18:00 那趟跑過",
+      "stateFailed": "取數失敗：{{error}}",
+      "colDate": "日期",
+      "colTheme": "主線",
+      "colCategory": "歸類",
+      "colStrength": "強度",
+      "colSymbols": "代表標的",
+      "colSource": "來源批次"
+    },
+    "serenityValidation": {
+      "title": "趨勢智選後驗",
+      "rows": "後驗列數",
+      "candidates": "去重候選",
+      "judged": "已判定",
+      "outperform": "跑贏基準",
+      "hitRate": "超額命中率",
+      "latest": "最近驗證日",
+      "stateNoRows": "庫裡沒有智選後驗列（style=serenity）——智選候選從未經 T+N 驗證",
+      "stateUnjudged": "已有後驗列但沒有一條完成判定——持有窗口未滿或行情取數失敗",
+      "stateFetchFailed": "取數失敗，本面板沒有可用讀數：{{error}}",
+      "loopNote": "智選按設計不參與薦股權重閉環：後驗標籤是超額判定，不是勝負判定",
+      "excessNote": "平均超額收益只出現在回測當輪日誌裡，未落庫"
+    },
     "title": "回測驗證",
     "placeholder": "用歷史資料驗證策略"
   },

@@ -102,4 +102,9 @@ export interface TaskExecutionRecord {
   output: string | null;
   error: string | null;
   duration_ms: number;
+  /**
+   * 本轮「部分完成」（超墙钟预算收尾 / 队列被单轮上限截断）。
+   * 加列之前的旧历史行读出来是 false —— 语义按「不是部分完成」，不是「未知」。
+   */
+  partial?: boolean;
 }

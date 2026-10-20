@@ -2019,8 +2019,12 @@ async fn do_refresh_exit_signals(state: &State<'_, AppState>) -> Result<serde_js
     }))
 }
 
-/// 刷新 Serenity 回馈闭环：跟踪推荐表现、验证催化剂、调优权重
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description =  "刷新Serenity回馈闭环")]
+/// 汇总趋势智选候选的当前浮盈（**只读**：不落库、不改权重、不产反思行）。
+///
+/// ⚠ 2026-10-20 更正描述：旧文案写「跟踪推荐表现、验证催化剂、**调优权重**」，但
+/// [`do_feedback_loop`] 全文零写库，只把结果返回给面板显示 —— 顶着「闭环/调优」的名目
+/// 会让 Agent 侧以为调权已生效。真实的自学习入口是 07:00 决策回测（写 `decision_validations`）。
+#[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description =  "汇总智选候选当前浮盈（只读）")]
 #[tauri::command]
 pub async fn refresh_serenity_feedback(
     state: State<'_, AppState>,

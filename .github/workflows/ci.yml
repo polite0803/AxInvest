@@ -307,6 +307,15 @@ jobs:
           # 与 scripts/ci-check.mjs 对应两条 step **逐字同源**。
           node scripts/check-validation-window-authority.mjs --selftest
           node scripts/check-validation-window-authority.mjs
+          # 定时任务权威门（A1，2026-10-20，PLAN-chain-closure-remediation §2）：播种「存在即跳过」
+          # ⇒ 代码不再播种的行会在库里永远按天跑（先例：手工插的 batchref-due-daily 与内置同刻度）。
+          # R1 在 CI 上有效；R2–R4 需本机 PG，取不到读数时明印「未检查」，与 ci-check.mjs 命令行逐字同源。
+          node scripts/check-cron-job-authority.mjs --selftest
+          node scripts/check-cron-job-authority.mjs
+          # 产出↔消费门（C2，2026-10-20，同上 PLAN §4）：既有门全停在定义点，「函数在、参数恒 null」
+          # 可以长绿。豁免条目带日期、每次打印，接通后不撤即红。
+          node scripts/check-reflection-output-consumers.mjs --selftest
+          node scripts/check-reflection-output-consumers.mjs
           # 孤儿模块门（2026-10-15，PLAN-reflection-optimization-closure §四.2）：
           # 未被任何 mod/include 指向的 .rs 不参与编译，cargo 三件套全都看不见（先例：智选胜率线）。
           # 与 scripts/ci-check.mjs 的对应 step **命令行逐字同源**。

@@ -11,6 +11,7 @@ import { PnLHistogram, SectorAllocationDonut } from "./PortfolioCharts";
 import { QuickBacktestPanel } from "./QuickBacktestPanel";
 import { RecoSignalTimeline } from "./RecoSignalTimeline";
 import { RecoStrategyMatrix } from "./RecoStrategyMatrix";
+import { SerenityValidationPanel } from "./SerenityValidationPanel";
 import { WhatIfBacktest } from "./WhatIfBacktest";
 
 /**
@@ -58,6 +59,7 @@ export function BacktestPage() {
                   <div className="space-y-4">
                     <RecoStrategyMatrix onSelectStrategy={setSelectedStrategy} />
                     {selectedStrategy && <RecoSignalTimeline strategyId={selectedStrategy} />}
+                    <SerenityValidationPanel />
                   </div>
                 ),
               },

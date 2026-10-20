@@ -4732,3 +4732,174 @@ fn suggestion_entry_key_shape_is_identical_across_prompt_and_parser() {
         "负控 B 失效：字面量只出现在注释里不应算读到了值"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A3（2026-10-20）：`daily-market-events` 的持久化必须是图上的**确定性节点**
+//
+// 背景（现网实证，不是推断）：v1 的图只有 trigger → synthesize-mainlines → end 三个节点，
+// 写 `market_mainlines` 全靠提示词要求 Agent 自己调 `market_mainline_batch_upsert`。
+// 取现网读数：该模板每天 18:00 都跑完并 `completed`，收尾节点的输出里带着完整契约 JSON，
+// 但 `tool_calls_made` 近 4 次运行**全为 NULL**、`market_mainlines` 恒 0 行。
+// ⇒ 「模型自愿落库」这条路事实上已经停了，而图与门禁都看不见它停了。
+// v2 把落库升格成 ToolNode，本组判据锁的就是这次升格。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 源文里是否存在一条 `source: "<a>" → target: "<b>"` 的边。
+///
+/// 按**边块**判（`source` 之后 6 行内出现同块 `target`），不按全文 `contains` 判：
+/// 后者会让 `source: "x"` 与另一条边的 `target: "y"` 跨块拼成一条不存在的边。
+fn dm_edge_present(src: &str, from: &str, to: &str) -> bool {
+    let want_src = format!("source: \"{from}\".into(),");
+    let want_tgt = format!("target: \"{to}\".into(),");
+    src.lines().enumerate().any(|(i, line)| {
+        line.contains(&want_src) && src.lines().skip(i + 1).take(6).any(|l| l.contains(&want_tgt))
+    })
+}
+
+/// 抽取 `WorkflowNode::Tool(ToolNode { … tool_name: "x" … })` 里的工具名。
+fn dm_tool_node_names(src: &str) -> Vec<String> {
+    src.lines()
+        .filter_map(|l| {
+            let start = l.find("tool_name: \"")?;
+            let rest = &l[start + 12..];
+            let end = rest.find('"')?;
+            Some(rest[..end].to_string())
+        })
+        .collect()
+}
+
+/// 本模板的持久化形状判据（**取源文为入参**，好让负控拆在同一条守卫上）。
+fn dm_persist_shape_violations(src: &str) -> Vec<String> {
+    let mut bad = Vec::new();
+    let tool_names = dm_tool_node_names(src);
+    if tool_names.iter().filter(|n| n.as_str() == "market_mainline_batch_upsert").count() != 1 {
+        bad.push(format!(
+            "持久化 ToolNode 的 tool_name 必须**恰好一个** 指向 market_mainline_batch_upsert，实得 {tool_names:?}"
+        ));
+    }
+    // 写入口唯一：Agent 的工具清单里不得再挂着它（否则同一逻辑两份实现，
+    // 而模型那份没有契约校验 —— 实测它一次都没调过，挂着只是条死路径）。
+    // ⚠ 必须**按行首**判 `name: "…"`：`tool_name: "…"` 的尾巴里就含着 `name: "…"`，
+    //   用全文子串判会把自己刚加的持久化节点当成幽灵（首跑即被这条假阳性打红）。
+    let ghost_tool_def = "name: \"market_mainline_batch_upsert\"";
+    if src.lines().any(|l| l.trim().starts_with(ghost_tool_def)) {
+        bad.push(
+            "Agent 侧 agent_tools 仍声明 market_mainline_batch_upsert（ToolDef 的 name: 形态）"
+                .into(),
+        );
+    }
+    // 三条入参逐字在位：路径写错不会报错，只会组装成 null 后由工具侧显式拒绝。
+    for path in [
+        "synthesize-mainlines.content.mainline_date",
+        "synthesize-mainlines.content.mainlines",
+        "mainline_archive_missing",
+    ] {
+        if !src.contains(&format!("\"{path}\"")) {
+            bad.push(format!("ToolNode 入参路径缺失：{path}"));
+        }
+    }
+    // 四条边的走向：综合 → 落库 → 结束，常量供归档标记。
+    for (from, to) in [
+        ("trigger", "synthesize-mainlines"),
+        ("synthesize-mainlines", "persist-mainlines"),
+        ("const-mainline-archive", "persist-mainlines"),
+        ("persist-mainlines", "end"),
+    ] {
+        if !dm_edge_present(src, from, to) {
+            bad.push(format!("缺边 {from} → {to}"));
+        }
+    }
+    // 旧形态不得复活：Agent 直连 end 就等于「产出 JSON 但没人落库」回来了。
+    if dm_edge_present(src, "synthesize-mainlines", "end") {
+        bad.push("synthesize-mainlines 仍直连 end（绕过持久化节点）".into());
+    }
+    bad
+}
+
+#[test]
+fn daily_market_events_persists_through_deterministic_tool_node() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/commands/stock_analysis_setup/seed_daily_market_events.rs");
+    let src = std::fs::read_to_string(&path).expect("读 seed_daily_market_events.rs 失败");
+    let violations = dm_persist_shape_violations(&src);
+    assert!(
+        violations.is_empty(),
+        "[seed_daily_market_events.rs] 持久化形状不成立：\n  {}",
+        violations.join("\n  ")
+    );
+
+    // 工具名必须落在 **ToolResolver 真解析得到** 的空间里（registry ∪ MCP），
+    // 不许拿 rhai 桶顶数 —— v1 那次就是名字谁都解析不到，调用被 degraded 静默吞掉。
+    let name = dm_tool_node_names(&src)
+        .into_iter()
+        .find(|n| n.as_str() == "market_mainline_batch_upsert")
+        .expect("上面已断言恰有一个");
+    let resolvable = resolvable_tool_names(&[]);
+    assert!(
+        resolvable.contains(&name),
+        "持久化节点指向的工具 {name} 不在 ToolResolver 解析空间 ⇒ 运行时报 TOOL_CALL_FAILED"
+    );
+
+    // 改图必须抬版：播种门是 `existing.version >= TEMPLATE_VERSION` 先 return，
+    // 版本不动 ⇒ 改动只留在代码里，库里仍是 v1 的三节点图。
+    let version: i32 = src
+        .lines()
+        .find_map(|l| {
+            let i = l.find("const TEMPLATE_VERSION: i32 =")?;
+            let tail = &l[i + "const TEMPLATE_VERSION: i32 =".len()..];
+            let digits: String = tail.trim().chars().take_while(|c| c.is_ascii_digit()).collect();
+            digits.parse().ok()
+        })
+        .expect("TEMPLATE_VERSION 常量应可解析");
+    assert!(
+        version >= 2,
+        "图结构变了但版本号仍是 v{version} ⇒ 现网不会被重新播种（本改动要求 >= 2）"
+    );
+}
+
+/// 自负控：把四处守卫逐一拆掉，**每处只应让它自己那一格红**。
+#[test]
+fn persist_shape_gate_fires_on_each_broken_wiring() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/commands/stock_analysis_setup/seed_daily_market_events.rs");
+    let good = std::fs::read_to_string(&path).expect("读 seed_daily_market_events.rs 失败");
+    assert!(
+        dm_persist_shape_violations(&good).is_empty(),
+        "前提不成立：现网源文本身就不满足形状判据"
+    );
+
+    // 破坏 A：持久化节点被绕过（恢复旧的 agent → end 直连）。
+    let bypassed = good.replace(
+        "            id: \"e-persist-end\".into(),\n            source: \"persist-mainlines\".into(),",
+        "            id: \"e-agent-end\".into(),\n            source: \"synthesize-mainlines\".into(),",
+    );
+    assert_ne!(bypassed, good, "破坏 A 未生效：源文本没被改动（锚点腐烂）");
+    let va = dm_persist_shape_violations(&bypassed);
+    assert!(
+        va.iter().any(|v| v.contains("绕过持久化节点"))
+            && va.iter().any(|v| v.contains("缺边 persist-mainlines")),
+        "破坏 A 应同时报「旧直连复活」与「缺 persist → end 边」，实得 {va:?}"
+    );
+
+    // 破坏 B：入参路径写错（拿一个不存在的节点当根）。
+    let typo =
+        good.replace("synthesize-mainlines.content.mainlines", "synthesize.content.mainlines");
+    assert_ne!(typo, good, "破坏 B 未生效（锚点腐烂）");
+    let vb = dm_persist_shape_violations(&typo);
+    assert_eq!(vb.len(), 1, "破坏 B 应只红一条（mainlines 路径缺失），实得 {vb:?}");
+
+    // 破坏 C：版本号回落到 1 —— 图改了但不抬版，现网永远读不到新图。
+    let stale =
+        good.replace("const TEMPLATE_VERSION: i32 = 2;", "const TEMPLATE_VERSION: i32 = 1;");
+    assert_ne!(stale, good, "破坏 C 未生效（锚点腐烂）");
+    let version: i32 = stale
+        .lines()
+        .find_map(|l| {
+            let i = l.find("const TEMPLATE_VERSION: i32 =")?;
+            let tail = &l[i + "const TEMPLATE_VERSION: i32 =".len()..];
+            let digits: String = tail.trim().chars().take_while(|c| c.is_ascii_digit()).collect();
+            digits.parse().ok()
+        })
+        .expect("解析 VERSION");
+    assert!(version < 2, "破坏 C 应把版本压回 1，实得 v{version}");
+}

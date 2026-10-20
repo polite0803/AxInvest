@@ -14946,6 +14946,11 @@
       "deleteSuccess": "{{count}} enregistrements supprimés",
       "selectedCount": "{{count}} sélectionnés",
       "exitSelect": "Quitter la sélection multiple",
+      "generation": "Génération",
+      "genLive": "Génération réelle",
+      "genReplay": "Génération de rejeu · coupure {{date}}",
+      "genReplayNoDate": "Génération de rejeu (sans date de coupure)",
+      "genReplayUnavailable": "Ni cette exécution ni l'ancre temporelle n'ont de date de coupure ⇒ aucune génération de rejeu à localiser",
       "detailEmpty": "Aucun titre candidat enregistré pour cette session",
       "deleteConfirm": "Confirmer la suppression des {{count}} enregistrements de pépites de niche sélectionnés ?",
       "deleteOneConfirm": "Supprimer cet enregistrement de screening de tendances ?",
@@ -15056,9 +15061,11 @@
     "entryBandRangeFallback": "Distance de stop indisponible ⇒ la bande retombe sur le modèle",
     "candidateTierRowsNote": "{{stocks}} titres · une ligne par palier",
     "emptyHistoryWarning": "L'historique Serenity est vide : list_reco_history a renvoyé 0 ligne (peut-être aucun historique de style serenity/bottleneck dans la BD, ou l'échec de la commande backend a été silencieusement ignoré)",
+    "emptyHistoryReplay": "Aucun lot de rejeu pour la date de coupure {{date}} : list_reco_history a renvoyé 0 ligne (filtre de génération)",
     "timeBasis": "Base temporelle : {{date}} · fenêtre suggérée ~{{days}} jours (jusqu'au {{until}})",
     "bannerAsOf": "Données arrêtées au {{date}}",
-    "replayNotPersisted": "Les résultats de rejeu ne sont pas enregistrés dans l'historique des tendances. Affichés pour cette seule exécution"
+    "replayPersisted": "Les candidats de ce rejeu sont enregistrés avec leur date de coupure et alimentent la réflexion et la validation des gains excédentaires",
+    "replayHistoryScope": "La liste de l'historique des tendances n'affiche par défaut que la génération réelle : cette exécution n'y figure pas"
   },
   "trade": {
     "title": "Trading Log",
@@ -18582,6 +18589,31 @@
     "tagsPlaceholder": "Étiquette 1, Étiquette 2"
   },
   "backtest": {
+    "mainlines": {
+      "title": "Lignes de marché ({{days}} derniers jours)",
+      "stateNoRows": "Aucune ligne en base : le nœud de persistance déterministe de cette chaîne est nouveau dans ce lot — relancez l'application et attendez la séance de 18:00 d'aujourd'hui",
+      "stateFailed": "Échec de la requête : {{error}}",
+      "colDate": "Date",
+      "colTheme": "Thème",
+      "colCategory": "Catégorie",
+      "colStrength": "Force",
+      "colSymbols": "Symboles",
+      "colSource": "Exécution source"
+    },
+    "serenityValidation": {
+      "title": "Validation Serenity",
+      "rows": "Lignes de validation",
+      "candidates": "Candidats dédupliqués",
+      "judged": "Jugés",
+      "outperform": "Bat la référence",
+      "hitRate": "Taux de réussite excédentaire",
+      "latest": "Dernière validation",
+      "stateNoRows": "Aucune ligne de validation Serenity en base (style=serenity) — les candidats n'ont jamais été validés à T+N",
+      "stateUnjudged": "Des lignes existent mais aucune jugée — fenêtre de détention non écoulée ou échec du cours",
+      "stateFetchFailed": "Échec de la requête ; ce panneau n'a aucune lecture exploitable : {{error}}",
+      "loopNote": "Serenity reste hors de la boucle de pondération par conception : ses étiquettes jugent l'excès, pas le gain ou la perte",
+      "excessNote": "L'excès moyen n'existe que dans le journal de la séance de backtest, non persisté"
+    },
     "title": "Validation par backtest",
     "placeholder": "Valider la stratégie à l'aide de données historiques"
   },

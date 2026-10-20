@@ -115,6 +115,7 @@ import { EvolutionDriftPanel } from "./EvolutionDriftPanel";
 import { IndustryRankingPanel } from "./IndustryRankingPanel";
 import { InvestDashboard } from "./InvestDashboard";
 import { KLineChart } from "./KLineChart";
+import { MarketMainlinePanel } from "./MarketMainlinePanel";
 import { NorthBoundPanel } from "./NorthBoundPanel";
 import { OptionPcrPanel } from "./OptionPcrPanel";
 import { ReflectionPanel } from "./ReflectionPanel";
@@ -431,6 +432,7 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
     { key: "concepts", label: t("stockAnalysis.conceptBlocks"), element: <ConceptBlocksPanel stockCode={stockCode} /> },
     { key: "optionpcr", label: t("stockAnalysis.optionPcr"), element: <OptionPcrPanel stockCode={stockCode} /> },
     { key: "industry", label: t("stockAnalysis.industryRanking"), element: <IndustryRankingPanel /> },
+    { key: "mainlines", label: t("backtest.mainlines.title", { days: 7 }), element: <MarketMainlinePanel /> },
     { key: "flash", label: t("stockAnalysis.clsFlash"), element: <ClsFlashPanel /> },
   ];
   // 桌面全部显示，移动端只直接显示 3 个核心面板，其余通过"更多"下拉菜单访问

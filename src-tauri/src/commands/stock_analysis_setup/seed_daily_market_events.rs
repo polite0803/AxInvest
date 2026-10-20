@@ -10,26 +10,34 @@
 //!
 //! ```text
 //! trigger (Schedule 18:00)
-//!   → collect-market-data (Code 节点，调 MCP 工具聚合热点股/快讯/北向/涨停板)
 //!   → synthesize-mainlines (Agent 节点，LLM 综合输出主线 JSON)
-//!   → persist-mainlines   (Code 节点，构建 BatchUpsertInput JSON)
-//!   → end
+//!   → persist-mainlines    (Tool 节点，确定性调 market_mainline_batch_upsert 落库)
+//!   → end        ↑ const-mainline-archive (DataTransformer，产出 archive_missing 常量)
 //! ```
 //!
-//! 实际持久化由 Agent 节点直接调用 `market_mainline_batch_upsert` MCP 工具完成，
-//! Code 节点仅做数据聚合与输入预处理，简化 DAG。
+//! ⚠ **v1→v2 的改动就是「落库不再靠模型自愿调工具」**：v1 只有 trigger/agent/end 三个节点，
+//! 持久化全靠提示词要求 Agent 自己调 `market_mainline_batch_upsert`，实测该调用近 8 次运行
+//! 一次都没发生（`tool_calls_made` 全 NULL，表恒 0 行）——「幂等只保证对象存在，不保证行为发生」
+//! 在这里的表现是：LLM 把契约 JSON 写在文本里，却没人把它写进库。
+//! 故本模板把持久化升格为图上的确定性 Tool 节点，并从 Agent 的工具清单里摘掉该工具，
+//! 保证 `market_mainlines` **只有一个写入口**。
 
 use axagent_entities::workflow_template;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
 use axagent_harness::workflow_types::{
-    AgentNode, AgentNodeConfig, EdgeType, EndNode, EndNodeConfig, JsonSchema, JsonSchemaProperty,
-    OutputMode, Position, RetryConfig, ScheduleTriggerConfig, ToolDef, TriggerConfig, TriggerNode,
+    AgentNode, AgentNodeConfig, DataTransformerNode, DataTransformerNodeConfig, EdgeType, EndNode,
+    EndNodeConfig, JsonSchema, JsonSchemaProperty, OutputMode, Position, RetryConfig,
+    ScheduleTriggerConfig, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode,
     TriggerType, Variable, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
 };
 
 const TEMPLATE_ID: &str = "daily-market-events";
-const TEMPLATE_VERSION: i32 = 1;
+/// v2：加确定性持久化节点（见文件头 DAG 说明）。
+///
+/// ⚠ 播种门是 `existing.version >= TEMPLATE_VERSION` 先 return —— **不抬版本就不重播种**，
+/// 改动只留在代码里、库里仍是 v1 的三节点图（与 `debate_rounds` 那次同一个坑）。
+const TEMPLATE_VERSION: i32 = 2;
 
 /// 种子化 daily-market-events 工作流模板
 pub async fn seed_daily_market_events_template(
@@ -50,7 +58,12 @@ pub async fn seed_daily_market_events_template(
     let trigger_config =
         TriggerConfig { trigger_type: TriggerType::Schedule, config: schedule_cfg_value.clone() };
 
-    // ── Agent 可用工具：4 个市场数据采集 MCP 工具 + 1 个 batch_upsert 工具 ──
+    // ── Agent 可用工具：**只有** 4 个市场数据采集 MCP 工具 ──
+    //
+    // v2 起 `market_mainline_batch_upsert` **不在**本清单里：写 `market_mainlines` 的唯一入口
+    // 是下面的 `persist-mainlines` Tool 节点。留着它等于同一逻辑两份实现（模型可手写一份入参
+    // 落库、图上节点又落一份），而模型那一份没有契约校验 —— 实测它的产出是文本里的 JSON，
+    // 工具调用一次都没发生，所以清单里挂着的是一条死路径。
     let agent_tools: Vec<ToolDef> = vec![
         ToolDef {
             name: "get_hot_stocks".into(),
@@ -109,20 +122,6 @@ pub async fn seed_daily_market_events_template(
                 items: None,
             }),
         },
-        ToolDef {
-            name: "market_mainline_batch_upsert".into(),
-            description: Some(
-                "批量 upsert 市场主线（同日同主题更新，archive_missing=true 时归档当日未提及主线）"
-                    .into(),
-            ),
-            parameters: Some(JsonSchema {
-                schema_type: "object".into(),
-                description: None,
-                properties: None,
-                required: None,
-                items: None,
-            }),
-        },
     ];
 
     // ── 节点定义 ──
@@ -162,7 +161,8 @@ pub async fn seed_daily_market_events_template(
             config: AgentNodeConfig {
                 system_prompt: r#"基于今日多源数据（热点股 / 财联社快讯 / 龙虎榜 / 北向资金），提炼 3-8 条市场主线。
 
-请根据市场主线综合分析方法论完成任务，调用 `market_mainline_batch_upsert` 工具持久化结果（archive_missing=true），输出 JSON 结果。"#.into(),
+请根据市场主线综合分析方法论完成任务，**只输出** JSON 结果：顶层字段 `mainline_date`（YYYY-MM-DD，取当日北京时间）与 `mainlines`（数组，每项至少含 `theme` 与 `narrative`）。
+落库由下游的持久化节点负责，**不要**尝试调用工具写库，也不要在输出里夹带解释文字或代码块。"#.into(),
                 context_sources: vec!["trigger".into()],
                 input_mapping: std::collections::HashMap::new(),
                 output_var: "mainlines-output".into(),
@@ -183,13 +183,82 @@ pub async fn seed_daily_market_events_template(
                 stream_chunk_timeout_secs: None,
             },
         }),
-        // 3. 终止节点
+        // 3. 归档标记常量节点：产出 `mainline_archive_missing`
+        //    （ToolNode 的 `input_mapping` 只认**变量路径**，不认字面量 —— 常量必须由节点产出，
+        //     形态与 `horizon_tier_template.rs` 的 `const-scoring-horizon` 一致）
+        WorkflowNode::DataTransformer(DataTransformerNode {
+            base: WorkflowNodeBase {
+                id: "const-mainline-archive".into(),
+                title: "归档当日未提及主线".into(),
+                description: Some(
+                    "产出 mainline_archive_missing=true，供 persist-mainlines 的 archive_missing 取用".into(),
+                ),
+                position: Position { x: 300.0, y: 340.0 },
+                retry: RetryConfig::default(),
+                timeout: None,
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+                continue_on_fail: false,
+            },
+            config: DataTransformerNodeConfig {
+                input_var: String::new(),
+                expression: "true".into(),
+                output_var: "mainline_archive_missing".into(),
+            },
+        }),
+        // 4. 持久化节点：**本模板唯一的 `market_mainlines` 写入口**
+        //
+        // 入参路径按 `<节点>.content.<字段>` 解析（`resolve_var_path` 会穿透 Agent 输出里
+        // content 这段 JSON 字符串），与 `seed_serenity.rs` 的
+        // `a-candidate-mapper.content.candidates` 同形态。
+        //
+        // ⚠ 三个入参**逐字写**、不用循环或 `format!` 拼：路径写错时 `resolve_var_path` 返回
+        // `None` ⇒ 组装成 `null` ⇒ 工具侧 `BatchUpsertInput` 解析**显式报错**（不是静默写 0 行），
+        // 配合 `continue_on_fail=false` 让整轮失败可见。这条链的失败必须响，不能又变成空表。
+        WorkflowNode::Tool(ToolNode {
+            base: WorkflowNodeBase {
+                id: "persist-mainlines".into(),
+                title: "落库市场主线".into(),
+                description: Some(
+                    "调用 market_mainline_batch_upsert 把 synthesize 的 JSON 写入 market_mainlines".into(),
+                ),
+                position: Position { x: 20.0, y: 340.0 },
+                retry: RetryConfig { enabled: true, max_retries: 1, ..Default::default() },
+                timeout: None,
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+                continue_on_fail: false,
+            },
+            config: ToolNodeConfig {
+                tool_name: "market_mainline_batch_upsert".into(),
+                input_mapping: {
+                    let mut m = std::collections::HashMap::new();
+                    m.insert(
+                        "mainline_date".to_string(),
+                        "synthesize-mainlines.content.mainline_date".to_string(),
+                    );
+                    m.insert(
+                        "mainlines".to_string(),
+                        "synthesize-mainlines.content.mainlines".to_string(),
+                    );
+                    m.insert(
+                        "archive_missing".to_string(),
+                        "mainline_archive_missing".to_string(),
+                    );
+                    m
+                },
+                output_var: "persist-mainlines".into(),
+            },
+        }),
+        // 5. 终止节点
         WorkflowNode::End(EndNode {
             base: WorkflowNodeBase {
                 id: "end".into(),
                 title: "结束".into(),
                 description: None,
-                position: Position { x: 20.0, y: 340.0 },
+                position: Position { x: 20.0, y: 500.0 },
                 retry: RetryConfig::default(),
                 timeout: None,
                 enabled: true,
@@ -212,8 +281,28 @@ pub async fn seed_daily_market_events_template(
             label: None,
         },
         WorkflowEdge {
-            id: "e-agent-end".into(),
+            id: "e-agent-persist".into(),
             source: "synthesize-mainlines".into(),
+            source_handle: None,
+            target: "persist-mainlines".into(),
+            target_handle: None,
+            edge_type: EdgeType::Direct,
+            label: None,
+        },
+        // 常量节点供给归档标记（无此边则 `mainline_archive_missing` 不在变量池，
+        // `archive_missing` 解析成 null ⇒ 工具按 false 处理，「归档当日未提及主线」静默失效）
+        WorkflowEdge {
+            id: "e-const-persist".into(),
+            source: "const-mainline-archive".into(),
+            source_handle: None,
+            target: "persist-mainlines".into(),
+            target_handle: None,
+            edge_type: EdgeType::Direct,
+            label: None,
+        },
+        WorkflowEdge {
+            id: "e-persist-end".into(),
+            source: "persist-mainlines".into(),
             source_handle: None,
             target: "end".into(),
             target_handle: None,

@@ -37,6 +37,7 @@ import {
   Modal,
   Popconfirm,
   Progress,
+  Segmented,
   Select,
   Space,
   Spin,
@@ -49,6 +50,11 @@ import { useTranslation } from "react-i18next";
 import { SerenityCandidateCard } from "./SerenityCandidateCard";
 
 const { Text, Title } = Typography;
+
+/** 历史弹窗代际切换的两个哨兵值：真实口径仍是 `string | null`（null = 实盘代，
+ *  与后端 `generation` 参数同一语义），这里只是给 Segmented 一个不会与日期串撞车的 value。 */
+const GEN_LIVE = "__live__";
+const GEN_REPLAY = "__replay__";
 
 // ── invoke 返回类型 ──
 interface SerenityResult {
@@ -880,6 +886,52 @@ export function SerenityScreeningPanel() {
   const [serenitySelected, setSerenitySelected] = useState<string[]>([]);
   const [serenityDeleting, setSerenityDeleting] = useState(false);
 
+  /* ── 历史弹窗的代际切换 ──
+     2026-10-12 裁定起，回放的候选**照落库**（`reco_picks` 带 `as_of_date`），但
+     `list_reco_history` 不传 `generation` 时只给实盘代 ⇒ 回放批次在界面上无处可看。
+     这里补上那一格：截止日优先取本轮 payload 的 `lastRunAsOfDate`，本轮是实盘时退回
+     全局时间锚点，并把**解析出来的那个日期**写在标签上 —— 用了哪个源不藏进实现。
+     与横幅那条「只读本轮 payload」判据不冲突：横幅声明的是本轮口径，这一格查的是库里
+     已存在的批次。 */
+  const [serenityHistoryGen, setSerenityHistoryGen] = useState<string | null>(null);
+  const anchorMode = useTimeAnchorStore((s) => s.mode);
+  const anchorAsOfDate = useTimeAnchorStore((s) => s.asOfDate);
+  const historyReplayCutoff = useMemo(() => {
+    if (lastRunAsOfDate) { return lastRunAsOfDate; }
+    return anchorMode === "replay" || anchorMode === "backtest_sweep" ? anchorAsOfDate : null;
+  }, [lastRunAsOfDate, anchorMode, anchorAsOfDate]);
+
+  const loadSerenityHistory = useCallback(
+    async (generation: string | null) => {
+      setSerenityHistoryLoading(true);
+      try {
+        // 同时认 'serenity'（serenity-screening 工作流）和 'bottleneck'
+        // （智能荐股内置 SerenityStrategy）——业务上都是"趋势智选"。
+        const list = await invoke<typeof serenityHistory>("list_reco_history", {
+          styleFilter: "serenity,bottleneck",
+          limit: 50,
+          generation,
+        });
+        console.log("[SerenityHistory] list_reco_history returned:", list?.length, list);
+        setSerenityHistory(list ?? []);
+        if (!list || list.length === 0) {
+          // 两种缺席各占一句：实盘代没有历史 ≠ 该截止日没有回放批次
+          messageApi.warning(
+            generation
+              ? t("serenityPanel.emptyHistoryReplay", { date: generation })
+              : t("serenityPanel.emptyHistoryWarning"),
+          );
+        }
+      } catch (e) {
+        console.error("[SerenityHistory] list_reco_history call failed", e);
+        messageApi.error(t("serenityPanel.backendCallFailed", { error: String(e) }));
+      } finally {
+        setSerenityHistoryLoading(false);
+      }
+    },
+    [messageApi, t],
+  );
+
   // 瓶颈掘金历史详情
   const [serenityDetailOpen, setSerenityDetailOpen] = useState(false);
   const [serenityDetailLoading, setSerenityDetailLoading] = useState(false);
@@ -1262,28 +1314,12 @@ export function SerenityScreeningPanel() {
             size="small"
             icon={<HistoryOutlined />}
             onClick={async () => {
+              // 每次打开都从实盘代起（与后端不传 generation 时的默认口径一致），
+              // 并把上一轮的多选清掉 —— 跨代残留的勾选会删错批次
+              setSerenityHistoryGen(null);
+              setSerenitySelected([]);
               setSerenityHistoryOpen(true);
-              setSerenityHistoryLoading(true);
-              try {
-                // 同时认 'serenity'（serenity-screening 工作流）和 'bottleneck'
-                // （智能荐股内置 SerenityStrategy）——业务上都是"趋势智选"。
-                const list = await invoke<typeof serenityHistory>("list_reco_history", {
-                  styleFilter: "serenity,bottleneck",
-                  limit: 50,
-                });
-                console.log("[SerenityHistory] list_reco_history returned:", list?.length, list);
-                setSerenityHistory(list ?? []);
-                if (!list || list.length === 0) {
-                  messageApi.warning(
-                    t("serenityPanel.emptyHistoryWarning"),
-                  );
-                }
-              } catch (e) {
-                console.error("[SerenityHistory] list_reco_history call failed", e);
-                messageApi.error(t("serenityPanel.backendCallFailed", { error: String(e) }));
-              } finally {
-                setSerenityHistoryLoading(false);
-              }
+              await loadSerenityHistory(null);
             }}
           >
             {t("serenityPanel.serenityHistory.viewHistory")}
@@ -1713,9 +1749,12 @@ export function SerenityScreeningPanel() {
       )}
 
       {
-        /* 本轮取数口径：回放的候选按截止日取数、且刻意不进「趋势智选历史」。
-          三件事分开说 —— 口径、落库缺席、降级归因各占一行，不揉成一段（同一屏
-          不得让回放结果看起来与实盘无异）。日期与归因都取**本轮 payload**，不读全局锚点。 */
+        /* 本轮取数口径。三件事分开说 —— 口径、落库与列表归属、降级归因各占一行，
+          不揉成一段（同一屏不得让回放结果看起来与实盘无异）。
+          ⚠ 2026-10-12 裁定退役了「回放跳过写库」⇒ 候选**照落库**（`reco_picks` 带
+          `as_of_date`），只是「趋势智选历史」列表默认只列实盘代。旧文案那句
+          「不写入历史」把「不出在那个列表里」说成了「不落库」，与数据层相反 ⇒ 已拆成两句。
+          日期与归因都取**本轮 payload**，不读全局锚点。 */
       }
       {lastRunAsOfDate !== null && (
         <Alert
@@ -1729,7 +1768,8 @@ export function SerenityScreeningPanel() {
           }
           description={
             <div className="flex flex-col gap-1 text-[10px]">
-              <span>{t("serenityPanel.replayNotPersisted")}</span>
+              <span>{t("serenityPanel.replayPersisted")}</span>
+              <span>{t("serenityPanel.replayHistoryScope")}</span>
               {asofDegradations.map((e, i) => <span key={`${e.vendor}-${e.method}-${i}`}>{e.reason}</span>)}
             </div>
           }
@@ -1988,6 +2028,40 @@ export function SerenityScreeningPanel() {
           : null}
         width={620}
       >
+        {
+          /* 代际切换：回放候选自 10-12 裁定起与实盘同表不同代 ⇒ 一次只看一代，
+          不并排（两代计数并排即被读成可比）。 */
+        }
+        <div className="flex items-center gap-2 mb-2">
+          <Text type="secondary" className="text-xs">
+            {t("serenityPanel.serenityHistory.generation")}
+          </Text>
+          <Segmented
+            size="small"
+            value={serenityHistoryGen === null ? GEN_LIVE : GEN_REPLAY}
+            options={[
+              { label: t("serenityPanel.serenityHistory.genLive"), value: GEN_LIVE },
+              {
+                label: historyReplayCutoff
+                  ? t("serenityPanel.serenityHistory.genReplay", { date: historyReplayCutoff })
+                  : t("serenityPanel.serenityHistory.genReplayNoDate"),
+                value: GEN_REPLAY,
+                disabled: historyReplayCutoff === null,
+              },
+            ]}
+            onChange={(v) => {
+              const gen = v === GEN_REPLAY ? historyReplayCutoff : null;
+              setSerenityHistoryGen(gen);
+              setSerenitySelected([]);
+              void loadSerenityHistory(gen);
+            }}
+          />
+        </div>
+        {historyReplayCutoff === null && (
+          <Text type="secondary" className="text-[10px] block mb-2">
+            {t("serenityPanel.serenityHistory.genReplayUnavailable")}
+          </Text>
+        )}
         <Table
           size="small"
           loading={serenityHistoryLoading}

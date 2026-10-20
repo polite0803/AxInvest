@@ -14946,6 +14946,11 @@
       "deleteSuccess": "{{count}}개 추천 기록이 삭제되었습니다",
       "selectedCount": "{{count}}개 선택됨",
       "exitSelect": "다중 선택 종료",
+      "generation": "세대",
+      "genLive": "실운영 세대",
+      "genReplay": "리플레이 세대 · 기준일 {{date}}",
+      "genReplayNoDate": "리플레이 세대 (기준일 없음)",
+      "genReplayUnavailable": "이번 실행에도 시간 앵커에도 기준일이 없어 조회할 리플레이 세대를 정할 수 없습니다",
       "detailEmpty": "이번 회차에는 후보 종목 기록이 없습니다",
       "deleteConfirm": "선택한 병목 발굴 기록 {{count}}건을 삭제하시겠습니까?",
       "deleteOneConfirm": "이 트렌드 선정 기록을 삭제하시겠습니까?",
@@ -15056,9 +15061,11 @@
     "entryBandRangeFallback": "스톱 거리를 얻지 못해 ⇒ 밴드가 템플릿 값으로 퇴피",
     "candidateTierRowsNote": "{{stocks}} 종목 · 등급별 1행",
     "emptyHistoryWarning": "세레니티 히스토리가 비어 있습니다: list_reco_history가 0개 행을 반환했습니다 (DB에 serenity/bottleneck 스타일 히스토리가 없거나 백엔드 명령 실패가 조용히 무시되었을 수 있습니다)",
+    "emptyHistoryReplay": "기준일 {{date}}의 리플레이 배치가 없습니다: 세대 필터로 list_reco_history가 0행을 반환했습니다",
     "timeBasis": "시간 기준: {{date}} · 권장 기간 약 {{days}}일 (~{{until}})",
     "bannerAsOf": "데이터 기준일 {{date}}",
-    "replayNotPersisted": "리플레이 결과는 추세 내역에 저장되지 않으며 이번 실행에만 표시됩니다"
+    "replayPersisted": "이번 리플레이 후보는 기준 날짜와 함께 저장되어 회고와 초과 수익 검증의 샘플이 됩니다",
+    "replayHistoryScope": "추세 내역 목록은 기본적으로 실운영 세대만 표시하므로 이번 배치는 그 목록에 나타나지 않습니다"
   },
   "trade": {
     "title": "Trading Log",
@@ -18582,6 +18589,31 @@
     "tagsPlaceholder": "태그1, 태그2"
   },
   "backtest": {
+    "mainlines": {
+      "title": "시장 메인라인 (최근 {{days}}일)",
+      "stateNoRows": "라이브러리에 메인라인 행이 없습니다: 이 사슬의 결정적 저장 노드는 이번 라운드에 추가됨 — 앱 재시작 후 당일 18:00 실행을 기다리세요",
+      "stateFailed": "조회 실패: {{error}}",
+      "colDate": "날짜",
+      "colTheme": "메인라인",
+      "colCategory": "분류",
+      "colStrength": "강도",
+      "colSymbols": "대표 종목",
+      "colSource": "출처 실행"
+    },
+    "serenityValidation": {
+      "title": "세레니티 사후 검증",
+      "rows": "사후 검증 행 수",
+      "candidates": "중복 제거 후보",
+      "judged": "판정 완료",
+      "outperform": "벤치마크 상회",
+      "hitRate": "초과 적중률",
+      "latest": "최근 검증일",
+      "stateNoRows": "라이브러리에 세레니티 사후 검증 행이 없습니다(style=serenity) — 후보가 T+N 검증을 한 번도 받지 않음",
+      "stateUnjudged": "사후 검증 행은 있으나 판정 완료가 0건 — 보유 기간 미도달 또는 시세 조회 실패",
+      "stateFetchFailed": "조회 실패, 이 패널에는 사용할 수 있는 값이 없습니다: {{error}}",
+      "loopNote": "세레니티는 설계상 추천 가중치 루프에 참여하지 않음 — 라벨은 초과 판정이지 승패 판정이 아님",
+      "excessNote": "평균 초과 수익은 해당 회차 백테스트 로그에만 있고 저장되지 않음"
+    },
     "title": "백테스트 검증",
     "placeholder": "과거 데이터로 전략 검증"
   },

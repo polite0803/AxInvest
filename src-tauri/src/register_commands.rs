@@ -120,6 +120,7 @@ macro_rules! register_all_commands {
             commands::backtest_validation::list_decision_backtest_crons,
             commands::backtest_validation::list_decision_validations,
             commands::backtest_validation::run_decision_backtest,
+            commands::backtest_validation::serenity_validation_summary,
             commands::backtest_validation::toggle_decision_backtest_cron,
             commands::backup::batch_delete_backups,
             commands::backup::create_backup,

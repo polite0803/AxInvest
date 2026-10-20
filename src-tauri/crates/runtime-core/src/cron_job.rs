@@ -648,6 +648,7 @@ impl CronJobStore {
                 output: Some(result.output.clone().unwrap_or_default()),
                 error: Some(result.error.clone().unwrap_or_default()),
                 duration_ms: result.duration_ms as i64,
+                partial: result.partial,
             };
             if let Err(e) = p.insert_history(record).await {
                 error!("[CronJobStore] 写入任务 {id} 的执行历史失败: {e}");
@@ -688,6 +689,7 @@ impl CronJobStore {
             output: Some(result.output.clone().unwrap_or_default()),
             error: Some(result.error.clone().unwrap_or_default()),
             duration_ms: result.duration_ms as i64,
+            partial: result.partial,
         };
         match p.insert_history(record).await {
             Ok(()) => true,
@@ -794,6 +796,7 @@ impl CronJobStore {
                 output: m.output,
                 error: m.error,
                 duration_ms: m.duration_ms,
+                partial: m.partial,
             })
             .collect()
     }
@@ -810,6 +813,12 @@ pub struct ExecutionRecord {
     pub output: Option<String>,
     pub error: Option<String>,
     pub duration_ms: i64,
+    /// 本轮「部分完成」（超墙钟预算收尾 / 单轮上限截断）。
+    ///
+    /// `#[serde(default)]`：历史表加列前的旧行读出 0，序列化成 false 即可，
+    /// 前端把 false 读作「不是部分完成」而不是「未知」。
+    #[serde(default)]
+    pub partial: bool,
 }
 
 // ── Harness trait 实现 ──

@@ -127,6 +127,7 @@ impl CronJobPersistence for PgCronJobPersistence {
             output: Set(record.output),
             error: Set(record.error),
             duration_ms: Set(record.duration_ms),
+            partial: Set(record.partial as i32),
         };
         cron_job_history::Entity::insert(model)
             .exec(&*self.db)
@@ -158,7 +159,68 @@ impl CronJobPersistence for PgCronJobPersistence {
                 output: m.output,
                 error: m.error,
                 duration_ms: m.duration_ms,
+                partial: m.partial != 0,
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn setup() -> PgCronJobPersistence {
+        let handle = crate::db::create_test_pool().await.expect("测试库应可建立");
+        let p = PgCronJobPersistence::new(handle.conn.clone());
+        // `cron_job_history` 由本端口自举（见文件头「为什么建表也在这里」），
+        // 而 `partial` 列是实体新增 —— 建表链与 `heal_all` 补列链都要能给出它，
+        // 否则这里第一次 insert 就报「列不存在」。
+        p.ensure_tables().await;
+        p
+    }
+
+    fn record(task_id: &str, id: &str, partial: bool, success: bool) -> CronHistoryRecord {
+        CronHistoryRecord {
+            id: id.to_string(),
+            task_id: task_id.to_string(),
+            started_at: 1_792_400_000_000,
+            completed_at: Some(1_792_400_060_000),
+            success: success as i32 != 0,
+            output: Some("候选池扫描完成".to_string()),
+            error: None,
+            duration_ms: 60_000,
+            partial,
+        }
+    }
+
+    /// 「部分完成」必须逐列存活：`success=false` + `partial=true` 落库后回读仍是这组值。
+    ///
+    /// 这条断言存在的意义是区分两种红 —— 只看 `success` 时，墙钟收尾的轮次与真故障
+    /// 在历史表里完全同形，按历史统计的成功率会被系统性压低（池扫描实测 7 轮 3 条 0，
+    /// 其中 2 条其实是部分完成）。
+    #[tokio::test]
+    async fn partial_survives_history_round_trip() {
+        let p = setup().await;
+        let task = format!("t-partial-{}", uuid::Uuid::new_v4());
+        p.insert_history(record(&task, "r1", true, false)).await.expect("部分完成的历史行应可落库");
+
+        let rows = p.load_history(&task, 10).await.expect("读历史应成功");
+        assert_eq!(rows.len(), 1, "应恰好读回一行");
+        assert!(!rows[0].success, "超墙钟收尾那轮 success 记 false（本轮没跑完规划量）");
+        assert!(rows[0].partial, "partial 必须为真 —— 否则该行退化成一枚无法归因的失败");
+    }
+
+    /// 负控侧：真故障轮不得被写成「部分完成」。拆掉写侧的 `partial` 赋值时，
+    /// 本条与上条不会同时红 —— 上条红在「该真的没真」，本条红在「该假的没假」。
+    #[tokio::test]
+    async fn hard_failure_is_not_marked_partial() {
+        let p = setup().await;
+        let task = format!("t-fail-{}", uuid::Uuid::new_v4());
+        p.insert_history(record(&task, "r1", false, false)).await.expect("失败历史行应可落库");
+
+        let rows = p.load_history(&task, 10).await.expect("读历史应成功");
+        assert_eq!(rows.len(), 1);
+        assert!(!rows[0].success);
+        assert!(!rows[0].partial, "真故障不得带部分完成标记（否则界面上会被洗成黄色）");
     }
 }

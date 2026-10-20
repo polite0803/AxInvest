@@ -36,7 +36,8 @@ vi.mock("@/lib/invoke", () => ({
 
 const REPLAY_DATE = "2026-07-21";
 const BANNER_TEXT = `数据截至 ${REPLAY_DATE}`;
-const NOT_PERSISTED_TEXT = "回放结果不写入趋势智选历史，仅本轮展示";
+const PERSISTED_TEXT = "本轮回放候选已按截止日落库，可供反思与超额命中验证";
+const HISTORY_SCOPE_TEXT = "「趋势智选历史」列表默认只列实盘代，本轮批次不在其中";
 const HOT_REASON = "热门股榜无 as-of 通道，且当日快照未命中";
 
 async function renderPanel() {
@@ -83,7 +84,7 @@ beforeEach(() => {
 });
 
 describe("SerenityScreeningPanel · 本轮取数口径（payload 绑定，不读全局锚点）", () => {
-  it("回放轮：payload 带 asOfDate ⇒ 出横幅 + 不落库声明 + 后端归因逐行", async () => {
+  it("回放轮：payload 带 asOfDate ⇒ 出横幅 + 落库声明 + 列表归属声明 + 后端归因逐行", async () => {
     await renderPanel();
     emitCompleted({
       status: "completed",
@@ -95,7 +96,9 @@ describe("SerenityScreeningPanel · 本轮取数口径（payload 绑定，不读
     });
 
     expect(screen.getByText(BANNER_TEXT)).toBeTruthy();
-    expect(screen.getByText(NOT_PERSISTED_TEXT)).toBeTruthy();
+    // 落库与「不出在那个列表里」是两件事，各占一句 —— 合成一句就会把「已落库」说成没落库
+    expect(screen.getByText(PERSISTED_TEXT)).toBeTruthy();
+    expect(screen.getByText(HISTORY_SCOPE_TEXT)).toBeTruthy();
     // 归因用后端原文，前端不另写一套措辞
     expect(screen.getByText(HOT_REASON)).toBeTruthy();
   });
@@ -105,7 +108,8 @@ describe("SerenityScreeningPanel · 本轮取数口径（payload 绑定，不读
     emitCompleted({ status: "completed", candidates: [] });
 
     expect(screen.queryByText(BANNER_TEXT)).toBeNull();
-    expect(screen.queryByText(NOT_PERSISTED_TEXT)).toBeNull();
+    expect(screen.queryByText(PERSISTED_TEXT)).toBeNull();
+    expect(screen.queryByText(HISTORY_SCOPE_TEXT)).toBeNull();
     expect(useSerenityStore.getState().lastRunAsOfDate).toBeNull();
   });
 

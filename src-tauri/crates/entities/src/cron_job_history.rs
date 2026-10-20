@@ -40,6 +40,15 @@ pub struct Model {
     /// 耗时（毫秒）
     #[sea_orm(default_value = 0)]
     pub duration_ms: i64,
+    /// 本轮「部分完成」（达到单轮墙钟预算提前收尾 / 队列被单轮上限截断）。
+    ///
+    /// 与 `success` 同为 0/1 存 `i32`，理由见 `success` 上的注释（SQLite 无原生布尔列）。
+    /// ⚠ 这一列存在的意义：超墙钟收尾时 `success` 刻意记 0（本轮没跑完规划量），
+    /// 没有本列的话历史表里「部分完成」与「真故障」**逐列不可分** —— 只有
+    /// `cron_jobs.data` 里的 `last_result` 带 `partial`，历史行一律退化成失败，
+    /// 按历史表统计的成功率会被系统性压低（池扫描实测 7 轮 3 条 0，其中 2 条是部分完成）。
+    #[sea_orm(default_value = 0)]
+    pub partial: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

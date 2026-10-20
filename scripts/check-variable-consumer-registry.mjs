@@ -161,6 +161,10 @@ const READER_REL = [
 export const READ_KEYS = [
   { key: "trend_ma_tolerance_daily", status: "intentional", cite: "trend.rs:171 注释「消灭每张策略各自手抄一档阈值」⇒ 日基准由 Rust 常量给，各档按 √d 推" },
   { key: "trend_high_tolerance_daily", status: "intentional", cite: "同上（DAILY_HIGH_TOLERANCE + `scale::dev_tolerance`）" },
+  // 相对强度的指数收益是**运行时注入键**，不是面板变量：`TrendStrategy::scan` 每轮把
+  // 000300 的同尺度 20 bar 收益写进 `enriched_vars`，`scan_one` 再读取；生产与消费同在
+  // trend.rs，声明面（seed_variables）不该有这个变量，故登记为 intentional。
+  { key: "reco_index_ret_20", status: "intentional", cite: "trend.rs 的 `scan` 注入 `enriched_vars`（000300 同尺度 20 bar 收益），由 `scan_one` 读取 ⇒ 运行时数据，不是可调变量" },
   ...[
     "trend_short_min_kline_len", "trend_mid_min_kline_len", "trend_long_min_kline_len", "trend_ultra_short_min_kline_len",
     "trend_high_20_period", "trend_high_60_period", "trend_high_ultra_short_period", "trend_high_ultra_short_threshold",

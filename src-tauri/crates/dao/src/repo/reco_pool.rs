@@ -142,6 +142,10 @@ pub async fn insert_scan_audit(
 /// 用途（2026-10-20，P-n 的覆盖前提）：每日估值归档要补的正是**荐股扫描的那批票**，
 /// 而不是全市场 681 只逐个拉估值（收益与请求量不成比例）。此处直接复用已经落库的池快照，
 /// 零额外网络。解析失败按空处理（归档跳过，不影响收盘快照）。
+///
+/// ⚠ 只读实盘代（`as_of_date IS NULL`）：唯一调用方是收盘钩子 `start_market_close_sweep`，
+/// 它归档的是**今天这套池子**的历史估值。回放候选自 2026-10-12 裁定起同表落库，漏掉这一
+/// 谓词时「刚跑完一次回放」就会让实盘归档去按历史池选码 —— 读起来像成功，实际补错了票。
 pub async fn latest_seed_pool_codes(
     db: &DatabaseConnection,
 ) -> Result<Vec<String>, sea_orm::DbErr> {
@@ -149,6 +153,7 @@ pub async fn latest_seed_pool_codes(
 
     let row = reco_picks::Entity::find()
         .filter(reco_picks::Column::SeedPoolJson.ne(""))
+        .filter(reco_picks::Column::AsOfDate.is_null())
         .order_by_desc(reco_picks::Column::GeneratedAt)
         .one(db)
         .await?;
@@ -160,4 +165,62 @@ pub async fn latest_seed_pool_codes(
     };
     let pairs: Vec<(String, String)> = serde_json::from_str(raw).unwrap_or_default();
     Ok(pairs.into_iter().map(|(code, _)| code).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 建库走**与生产同一条**建表链（理由见 `db::create_test_pool` 处的改判说明）。
+    async fn setup() -> DatabaseConnection {
+        let handle = crate::db::create_test_pool().await.expect("测试库应可建立");
+        handle.conn.clone()
+    }
+
+    /// 用生产写入口落一行，池快照按 `[["code","name"], …]` 的生产形态给值。
+    async fn insert_pool_row(
+        db: &DatabaseConnection,
+        generated_at: &str,
+        pool_codes: &[&str],
+        as_of_date: Option<&str>,
+    ) {
+        let pairs: Vec<[String; 2]> =
+            pool_codes.iter().map(|c| [(*c).to_string(), format!("{c} 名")]).collect();
+        let seed = serde_json::to_string(&pairs).expect("池快照应可序列化");
+        let pick = NewRecoPick {
+            period: "mid".to_string(),
+            stock_code: pool_codes.first().copied().unwrap_or("000000").to_string(),
+            stock_name: "测试票".to_string(),
+            style: "trend".to_string(),
+            confidence: 80,
+            synthetic: false,
+            pick_data: None,
+        };
+        let written =
+            insert_picks(db, &[pick], Some(seed), None, generated_at, as_of_date, Some(1)).await;
+        assert_eq!(written, 1, "候选行应写入成功（写失败只 warn，不断言就会让夹具静默空表）");
+    }
+
+    /// 只认实盘代：回放批次即使**更晚入库**，也不得被当成「最近一批」送去归档估值。
+    ///
+    /// 两侧都有电 —— 撤掉 `AsOfDate.is_null()` 则选中回放池（`000001`），
+    /// 谓词写成 `is_not_null()` 则实盘行读不到、返回空。
+    #[tokio::test]
+    async fn latest_seed_pool_codes_skips_replay_generation() {
+        let db = setup().await;
+        insert_pool_row(&db, "2026-09-01T15:00:00Z", &["600000"], None).await;
+        insert_pool_row(&db, "2026-10-05T15:00:00Z", &["000001"], Some("2026-07-21")).await;
+
+        let codes = latest_seed_pool_codes(&db).await.expect("读取应成功");
+        assert_eq!(codes, vec!["600000".to_string()]);
+    }
+
+    /// 库里只剩回放代 ⇒ 返回空（收盘钩子据此走「池快照为空，跳过」，不冒充归档成功）。
+    #[tokio::test]
+    async fn latest_seed_pool_codes_returns_empty_when_only_replay_generation_exists() {
+        let db = setup().await;
+        insert_pool_row(&db, "2026-10-05T15:00:00Z", &["000001"], Some("2026-07-21")).await;
+
+        assert!(latest_seed_pool_codes(&db).await.expect("读取应成功").is_empty());
+    }
 }

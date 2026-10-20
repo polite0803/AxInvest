@@ -163,6 +163,12 @@ function skeleton(src) {
  * ⚠ 顺序不能反：先做空白归一会抹掉行首，行锚判据便恒不命中 ⇒ 段数 0 ⇒
  * 整道门空转而报绿（本门第一版就是这么错的，靠「命中数下限」断言才暴露）。
  * 归一只在**段内**做，用于后面的 token 比对。
+ *
+ * ⚠ 段还必须在**一列起的 `#[cfg(test)]`** 处切断（2026-10-20 实测缺陷）：行首正则认不到缩进
+ * 在 `mod tests { … }` 里的测试函数 ⇒ 文件最后一个生产函数的体会一路吞掉整个测试模块，
+ * 判据于是被测试文本喂饱。触发实例：给 dao `reco_pool.rs` 补了带 `as_of_date` 形参的测试助手后，
+ * 把生产侧那行 `AsOfDate.is_null()` 谓词整行删掉，代际门 R1 仍然报绿。
+ * 这两道门管的是**生产接线**，测试模块里的字面量不算接线 ⇒ 一律排除在段之外。
  */
 export function splitTopLevelFns(stripped) {
   const starts = [];
@@ -172,10 +178,16 @@ export function splitTopLevelFns(stripped) {
   while ((m = re.exec(stripped)) !== null) {
     starts.push({ name: m[1], pos: m.index });
   }
-  return starts.map((s, idx) => ({
-    name: s.name,
-    body: normalize(stripped.slice(s.pos, idx + 1 < starts.length ? starts[idx + 1].pos : stripped.length)),
-  }));
+  const testMods = [...stripped.matchAll(/^#\[cfg\(test\)\]/gm)].map((x) => x.index);
+  return starts.map((s, idx) => {
+    let end = idx + 1 < starts.length ? starts[idx + 1].pos : stripped.length;
+    for (const t of testMods) {
+      if (t > s.pos && t < end) {
+        end = t;
+      }
+    }
+    return { name: s.name, body: normalize(stripped.slice(s.pos, end)) };
+  });
 }
 
 function listRustFiles(dir) {

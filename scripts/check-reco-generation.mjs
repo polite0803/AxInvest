@@ -230,6 +230,10 @@ const POOL_C = new Map([
   ["src-tauri/src/commands/stock_workflow/reco_history.rs|get_reco_detail", "按主键取详情"],
   ["src-tauri/src/commands/stock_workflow/reco_history.rs|batch_delete_reco_history", "按批次键删除"],
   ["src-tauri/src/commands/stock_workflow/reco_history.rs|delete_serenity_pick", "按主键删单行"],
+  [
+    "src-tauri/crates/dao/src/repo/reco_pool.rs|latest_seed_pool_codes",
+    "按批次读 seed_pool_json（扫描阶段的输入池快照），与该行自身是否降级产物无关 ⇒ 排除降级只会让收盘归档多一条「池快照为空，跳过」，不提升选码质量",
+  ],
 ]);
 const POOL_P = new Map([
   [
@@ -370,6 +374,24 @@ pub async fn load_x(db: &DatabaseConnection) -> Result<(), String> {
 }
 `;
   cases.push({ name: "负控·谓词只在注释里", fns: mk(commentOnly), expect: 1 });
+
+  // 负控 11（2026-10-20）：代际字样藏在**尾随的 `#[cfg(test)] mod tests`** 里 ⇒ R1 仍须命中。
+  // 触发实例：给 dao `reco_pool.rs` 补了形参叫 `as_of_date` 的测试助手后，分段器把整个测试模块
+  // 吞进文件最后一个生产函数的体 ⇒ 生产侧那行谓词删掉门照样绿。测试文本不算生产接线。
+  const testModTail = `
+pub async fn load_pool_selection(db: &DatabaseConnection) -> Result<(), String> {
+    let rows = reco_picks::Entity::find().all(db).await;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    async fn insert_row(db: &DatabaseConnection, as_of_date: Option<&str>) {
+        insert_picks(db, &[], None, None, "2026-01-01", as_of_date, None).await;
+    }
+}
+`;
+  cases.push({ name: "负控·尾随测试模块里的代际字样不算接线", fns: mk(testModTail), expect: 1 });
 
   // 负控 3：假改造（读了 as_of_date 字段却没过滤/没写）⇒ R2 仍须命中
   const fakeWrite = `

@@ -71,6 +71,9 @@ pub struct CoverageData {
 }
 
 /// 把批量返回的一行折算成待落库行；**无效输入返回 None（不落行、不补 0）**。
+// 纯行构造器：8 个标量全部来自批量行情的同一行，拆成结构体只会把调用点写成 `Struct { .. }`
+// 而不增加任何可读性 ⇒ 与 `recommender/strategies/trend.rs` 的 `trend_evidence_strength` 同形态。
+#[allow(clippy::too_many_arguments)]
 fn close_row(
     code: &str,
     name: &str,

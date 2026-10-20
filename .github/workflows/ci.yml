@@ -826,7 +826,27 @@ jobs:
             # 影响范围：仅 Linux 平台构建（Tauri WebView 渲染层）。
             # 缓解：Windows 使用 WebView2，不编译 glib；Linux 上 glib 仅用于系统菜单/托盘。
             # Tauri 上游需迁移到 GTK4，本项无法自行修复。
-            cargo audit --ignore RUSTSEC-2026-0235 --ignore RUSTSEC-2024-0429
+            #
+            # RUSTSEC-2026-0367/0368/0369 (zip，2026-10-20 拍板带证据豁免)：
+            # 三条判据**只打在** `ZipArchive::extract()` / `ZipStreamReader::extract()`
+            # 这两个「解包到目录」接口上，两个来源合计 6 条告警：
+            #   · zip 4.6.1 ← tauri-plugin-updater 2.11.0。上游 2.14.0 仍 `^4`；3.0.0-alpha
+            #     只配 Tauri 3.0 且仍 `^4` ⇒ 没有可升级的兼容版本。插件内唯一调用点是
+            #     Windows 更新解包（`updater.rs` 的 `extract`）；当前 updater 未启用
+            #     （`plugins.updater.active=false`、pubkey/endpoints 为空、
+            #     `createUpdaterArtifacts=false`）⇒ 该路径不是活路径；启用时 Tauri 先做
+            #     minisign 验签再解包。
+            #   · zip 8.6.0 ← candle-core 0.11.0 / docx-rs 0.4.22。两者均为最新版且仍锁
+            #     `^8.6`；已逐文件核实它们只用 `ZipArchive::new` 只读 + `ZipWriter` 写入，
+            #     **零 `extract()` 调用** ⇒ 漏洞接口不可达。
+            # 退役条件：任一来源升级到 zip >=9、或 C/D 阶段替换 docx-rs/candle 后，删除
+            # 对应 ignore；若 updater 真正启用且解包前不再验签，本豁免立即失效并重新评估。
+            cargo audit \
+              --ignore RUSTSEC-2026-0235 \
+              --ignore RUSTSEC-2024-0429 \
+              --ignore RUSTSEC-2026-0367 \
+              --ignore RUSTSEC-2026-0368 \
+              --ignore RUSTSEC-2026-0369
           else
             echo "cargo-audit not available, skipping"
           fi

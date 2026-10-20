@@ -15723,7 +15723,8 @@
       "loopGateOn": "Цикл рефлексии активен (on), последний пересчёт {time}",
       "loopGateShadow": "Цикл рефлексии в теневом режиме: только расчёт, без применения, последний пересчёт {time}",
       "loopGateOff": "Цикл рефлексии выключен (off), последний пересчёт {time}",
-      "loopNeverRecalc": "пересчётов не было"
+      "loopNeverRecalc": "пересчётов не было",
+      "loopSamples": "n={{n}}"
     },
     "moverRecall": {
       "title": "Проверка пропусков по росту за окно",
@@ -16879,7 +16880,7 @@
       },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
-      "boardScopeTip": "Board scope for the scan (live only; replay uses the as-of snapshot)",
+      "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",
       "boardScope_auto": "Auto rotate",
       "boardScope_sh_main": "Shanghai main board",
       "boardScope_sz_main": "Shenzhen main board",
@@ -16933,6 +16934,32 @@
       "styleTechnical": "Technical",
       "bannerAsOf": "Данные на {{date}}",
       "degradedStylesTitle": "Стиль стратегии деградации"
+    },
+    "recoLoop": {
+      "title": "Контур рефлексии рекомендаций",
+      "recalcNow": "Пересчитать сейчас",
+      "recalcSuccess": "Пересчёт контура завершён; записано {{written}} корректировок веса",
+      "recalcFailed": "Ошибка пересчёта контура: {{error}}",
+      "loadFailed": "Не удалось загрузить состояние контура: {{error}}",
+      "empty": "Пока нет данных контура для отображения",
+      "scopeHint": "Рефлексия рекомендаций только записывает веса по ячейкам и не создаёт текстового описания. При недостатке выборки или невозможности измерить IC текущие веса сохраняются, а не выдаются за откалиброванные. Пока контур активен, для управляемых им ячеек действуют его веса; ручная калибровка их не переопределяет.",
+      "colPeriod": "Горизонт",
+      "colStatus": "Статус",
+      "colSamples": "Выборка",
+      "colRankIc": "rankIC",
+      "colWeight": "Вес",
+      "colOuter": "Внешние линии",
+      "statusDemoted": "Понижение при отрицательном IC",
+      "statusCalibrated": "Откалибровано",
+      "statusInsufficient": "Недостаточно выборки",
+      "statusIcUnmeasurable": "IC не измеряется",
+      "demotedTip": "rankIC {{ic}} < 0: вес доли побед умножается на штраф за отрицательный IC; веса могут только снижаться",
+      "icUnmeasurableTip": "Дисперсия уверенности в этой ячейке вырождена, поэтому IC вычислить нельзя. Ни линия доли побед, ни линия IC не калибруются; текущие веса сохраняются",
+      "moverPenalty": "Пропущено×{{p}}",
+      "dqiPenalty": "Предохранитель×{{p}}",
+      "summary": "Откалибровано {{calibrated}} ячеек · не откалибровано {{uncalibrated}} · понижений из-за отрицательного IC {{demoted}}",
+      "recalcReplayDisabled": "В режиме повтора пересчёт отключён: он записывает историю реальных весов. Сначала вернитесь в режим реального времени.",
+      "replayScopeNote": "В режиме повтора результаты контура по ячейкам по-прежнему считаются по реальным выборкам и не следуют поколению повтора; не сравнивайте их напрямую с IC повтора."
     },
     "empty": {
       "replayDegradedTitle": "⏪ Degraded in Replay Mode",

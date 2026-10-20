@@ -15723,7 +15723,8 @@
       "loopGateOn": "반성 루프 활성(on), 마지막 재계산 {time}",
       "loopGateShadow": "반성 루프 섀도우 모드: 계산만 하고 채점에는 미사용, 마지막 재계산 {time}",
       "loopGateOff": "반성 루프 비활성(off), 마지막 재계산 {time}",
-      "loopNeverRecalc": "재계산 기록 없음"
+      "loopNeverRecalc": "재계산 기록 없음",
+      "loopSamples": "n={{n}}"
     },
     "moverRecall": {
       "title": "윈도우 상승률 기준 미검출 점검",
@@ -16879,7 +16880,7 @@
       },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
-      "boardScopeTip": "Board scope for the scan (live only; replay uses the as-of snapshot)",
+      "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",
       "boardScope_auto": "Auto rotate",
       "boardScope_sh_main": "Shanghai main board",
       "boardScope_sz_main": "Shenzhen main board",
@@ -16933,6 +16934,32 @@
       "styleTechnical": "Technical",
       "bannerAsOf": "데이터 기준일 {{date}}",
       "degradedStylesTitle": "폴백 전략 스타일"
+    },
+    "recoLoop": {
+      "title": "종목 추천 성찰 루프",
+      "recalcNow": "지금 재계산",
+      "recalcSuccess": "루프 재계산 완료: 가중치 조정 {{written}}건 기록됨",
+      "recalcFailed": "루프 재계산 실패: {{error}}",
+      "loadFailed": "루프 상태를 불러오지 못했습니다: {{error}}",
+      "empty": "표시할 루프 데이터가 아직 없습니다",
+      "scopeHint": "종목 추천 성찰은 셀별 가중치만 기록하며 서술형 설명을 생성하지 않습니다. 표본이 부족하거나 IC를 측정할 수 없으면 현재 가중치를 유지하며, 보정된 것으로 표시하지 않습니다. 루프가 활성화된 동안 루프가 관리하는 셀은 루프 가중치가 우선하며, 수동 보정은 해당 셀에 적용되지 않습니다.",
+      "colPeriod": "기간",
+      "colStatus": "상태",
+      "colSamples": "표본",
+      "colRankIc": "rankIC",
+      "colWeight": "가중치",
+      "colOuter": "외부 승수",
+      "statusDemoted": "음의 IC 감권",
+      "statusCalibrated": "보정됨",
+      "statusInsufficient": "표본 부족",
+      "statusIcUnmeasurable": "IC 측정 불가",
+      "demotedTip": "rankIC {{ic}} < 0: 승률 가중치에 음의 IC 패널티를 곱하며, 가중치는 내려가기만 합니다",
+      "icUnmeasurableTip": "같은 셀의 신뢰도 분산이 퇴화되어 IC를 계산할 수 없습니다. 승률/IC 모두 보정하지 않고 현재 가중치를 유지합니다",
+      "moverPenalty": "누락×{{p}}",
+      "dqiPenalty": "서킷브레이커×{{p}}",
+      "summary": "보정 {{calibrated}}셀 · 미보정 {{uncalibrated}}셀 · 음의 IC 감권 {{demoted}}셀",
+      "recalcReplayDisabled": "리플레이 모드에서는 재계산할 수 없습니다. 실계좌 가중치 이력에 기록되므로 실계좌 모드로 전환한 뒤 실행하세요.",
+      "replayScopeNote": "리플레이 모드에서 루프 셀별 결과는 실계좌 표본으로 계산되며 리플레이 세대를 따르지 않습니다. 리플레이 IC와 직접 비교하지 마세요."
     },
     "empty": {
       "replayDegradedTitle": "⏪ Degraded in Replay Mode",

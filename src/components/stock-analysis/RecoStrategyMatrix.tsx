@@ -395,6 +395,9 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                                 ? "stockAnalysis.backtest.loopUncalibratedSamples"
                                 : "stockAnalysis.backtest.loopUncalibratedIc",
                             )}
+                            <div data-testid="reco-loop-samples">
+                              {t("stockAnalysis.backtest.loopSamples", { n: lc.samples })}
+                            </div>
                           </div>
                         );
                       }
@@ -411,6 +414,9 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                             weight: lc.newWeight.toFixed(2),
                             ic: lc.rankIc != null ? lc.rankIc.toFixed(3) : "—",
                           })}
+                          <div data-testid="reco-loop-samples">
+                            {t("stockAnalysis.backtest.loopSamples", { n: lc.samples })}
+                          </div>
                         </div>
                       );
                     })()}

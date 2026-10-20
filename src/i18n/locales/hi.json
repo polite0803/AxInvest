@@ -15723,7 +15723,8 @@
       "loopGateOn": "रिफ्लेक्शन लूप सक्रिय (on), अंतिम पुनर्गणना {time}",
       "loopGateShadow": "रिफ्लेक्शन लूप शैडो मोड: केवल गणना, स्कोरिंग में शामिल नहीं, अंतिम पुनर्गणना {time}",
       "loopGateOff": "रिफ्लेक्शन लूप निष्क्रिय (off), अंतिम पुनर्गणना {time}",
-      "loopNeverRecalc": "कभी पुनर्गणना नहीं"
+      "loopNeverRecalc": "कभी पुनर्गणना नहीं",
+      "loopSamples": "n={{n}}"
     },
     "moverRecall": {
       "title": "विंडो लाभ मानक हेतु छूट-जाँच",
@@ -16879,7 +16880,7 @@
       },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
-      "boardScopeTip": "Board scope for the scan (live only; replay uses the as-of snapshot)",
+      "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",
       "boardScope_auto": "Auto rotate",
       "boardScope_sh_main": "Shanghai main board",
       "boardScope_sz_main": "Shenzhen main board",
@@ -16933,6 +16934,32 @@
       "styleTechnical": "Technical",
       "bannerAsOf": "डेटा {{date}} तक",
       "degradedStylesTitle": "डाउनग्रेड रणनीति शैली"
+    },
+    "recoLoop": {
+      "title": "स्टॉक-पिक रिफ्लेक्शन लूप",
+      "recalcNow": "अभी पुनर्गणना करें",
+      "recalcSuccess": "लूप पुनर्गणना पूरी; {{written}} वेट समायोजन लिखे गए",
+      "recalcFailed": "लूप पुनर्गणना विफल: {{error}}",
+      "loadFailed": "लूप स्थिति लोड करने में विफल: {{error}}",
+      "empty": "अभी दिखाने के लिए कोई लूप डेटा नहीं",
+      "scopeHint": "स्टॉक-पिक रिफ्लेक्शन केवल प्रति-सेल वेट लिखता है; यह कोई वर्णनात्मक विवरण नहीं बनाता। सैंपल अपर्याप्त होने या IC मापने योग्य न होने पर मौजूदा वेट रखे जाते हैं, उन्हें कैलिब्रेटेड नहीं दिखाया जाता। लूप सक्रिय रहने पर, उसके प्रबंधित सेल लूप के वेट का उपयोग करते हैं; मैन्युअल कैलिब्रेशन उन सेल को ओवरराइड नहीं करता।",
+      "colPeriod": "अवधि",
+      "colStatus": "स्थिति",
+      "colSamples": "सैंपल",
+      "colRankIc": "rankIC",
+      "colWeight": "वेट",
+      "colOuter": "बाहरी गुणक",
+      "statusDemoted": "नकारात्मक IC पर घटाना",
+      "statusCalibrated": "कैलिब्रेटेड",
+      "statusInsufficient": "सैंपल अपर्याप्त",
+      "statusIcUnmeasurable": "IC मापने योग्य नहीं",
+      "demotedTip": "rankIC {{ic}} < 0: जीत दर वेट को नकारात्मक IC दंड से गुणा किया जाता है; वेट केवल घट सकते हैं",
+      "icUnmeasurableTip": "इस सेल में कॉन्फिडेंस का विचरण अपक्षयी है, इसलिए IC की गणना नहीं हो सकती। जीत दर और IC दोनों रेखाएँ कैलिब्रेट नहीं होतीं; मौजूदा वेट रखे जाते हैं",
+      "moverPenalty": "छूटा×{{p}}",
+      "dqiPenalty": "सर्किट ब्रेकर×{{p}}",
+      "summary": "{{calibrated}} सेल कैलिब्रेटेड · {{uncalibrated}} अनकैलिब्रेटेड · {{demoted}} नकारात्मक IC घटाव",
+      "recalcReplayDisabled": "रीप्ले मोड में पुनर्गणना बंद है: यह वास्तविक वेट इतिहास में लिखती है। पहले लाइव मोड में लौटें।",
+      "replayScopeNote": "रीप्ले मोड में लूप के प्रति-सेल परिणाम अभी भी वास्तविक सैंपल से गणना किए जाते हैं और रीप्ले जनरेशन का पालन नहीं करते; उन्हें रीप्ले IC से सीधे न तुलना करें।"
     },
     "empty": {
       "replayDegradedTitle": "⏪ Degraded in Replay Mode",

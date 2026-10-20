@@ -15723,7 +15723,8 @@
       "loopGateOn": "Reflexions-Loop aktiv (on), letzte Neuberechnung {time}",
       "loopGateShadow": "Reflexions-Loop im Schattenmodus: nur berechnet, nicht angewendet, letzte Neuberechnung {time}",
       "loopGateOff": "Reflexions-Loop deaktiviert (off), letzte Neuberechnung {time}",
-      "loopNeverRecalc": "nie neu berechnet"
+      "loopNeverRecalc": "nie neu berechnet",
+      "loopSamples": "n={{n}}"
     },
     "moverRecall": {
       "title": "Recall-Prüfung: Kursgewinn im Fenster",
@@ -16879,7 +16880,7 @@
       },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
-      "boardScopeTip": "Board scope for the scan (live only; replay uses the as-of snapshot)",
+      "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",
       "boardScope_auto": "Auto rotate",
       "boardScope_sh_main": "Shanghai main board",
       "boardScope_sz_main": "Shenzhen main board",
@@ -16933,6 +16934,32 @@
       "styleTechnical": "Technical",
       "bannerAsOf": "Datenstand {{date}}",
       "degradedStylesTitle": "Degradierte Strategie"
+    },
+    "recoLoop": {
+      "title": "Reflexionsschleife für Aktienempfehlungen",
+      "recalcNow": "Jetzt neu berechnen",
+      "recalcSuccess": "Schleife neu berechnet; {{written}} Gewichtsanpassungen geschrieben",
+      "recalcFailed": "Neuberechnung der Schleife fehlgeschlagen: {{error}}",
+      "loadFailed": "Schleifenstatus konnte nicht geladen werden: {{error}}",
+      "empty": "Noch keine Schleifendaten vorhanden",
+      "scopeHint": "Die Empfehlungsreflexion schreibt nur Zellgewichte zurück und erzeugt keine narrative Beschreibung. Bei zu wenigen Stichproben oder nicht messbarem IC bleiben die aktuellen Gewichte erhalten, statt als kalibriert dargestellt zu werden. Solange die Schleife aktiv ist, gelten für von ihr verwaltete Zellen die Schleifengewichte; die manuelle Kalibrierung überschreibt diese Zellen nicht.",
+      "colPeriod": "Horizont",
+      "colStatus": "Status",
+      "colSamples": "Stichproben",
+      "colRankIc": "rankIC",
+      "colWeight": "Gewicht",
+      "colOuter": "Äußere Faktoren",
+      "statusDemoted": "Herabstufung bei negativem IC",
+      "statusCalibrated": "Kalibriert",
+      "statusInsufficient": "Zu wenige Stichproben",
+      "statusIcUnmeasurable": "IC nicht messbar",
+      "demotedTip": "rankIC {{ic}} < 0: Das Gewinnratengewicht wird mit der Negativ-IC-Strafe multipliziert; Gewichte können nur sinken",
+      "icUnmeasurableTip": "Die Konfidenzvarianz ist in dieser Zelle degeneriert, daher kann der IC nicht berechnet werden. Weder Gewinnraten- noch IC-Linie werden kalibriert; die aktuellen Gewichte bleiben erhalten",
+      "moverPenalty": "Verpasst×{{p}}",
+      "dqiPenalty": "Schmelzsicherung×{{p}}",
+      "summary": "{{calibrated}} Zellen kalibriert · {{uncalibrated}} unkalibriert · {{demoted}} Herabstufungen bei negativem IC",
+      "recalcReplayDisabled": "Im Replay-Modus ist die Neuberechnung deaktiviert: Sie schreibt in den Echtzeit-Gewichtsverlauf. Wechseln Sie zuerst zurück in den Live-Modus.",
+      "replayScopeNote": "Im Replay-Modus werden die Zellergebnisse der Schleife weiterhin aus Echtzeit-Stichproben berechnet und folgen nicht der Replay-Generation; vergleichen Sie sie nicht direkt mit dem Replay-IC."
     },
     "empty": {
       "replayDegradedTitle": "⏪ Degraded in Replay Mode",

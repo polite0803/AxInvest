@@ -185,6 +185,22 @@ pub fn get_mover_seed() -> Vec<SeedItem> {
     MOVER_SEED.read().clone()
 }
 
+/// 用户选定的**整池板块过滤**（`auto`/`all` ⇒ `None` 不限制）。
+///
+/// 与 `MOVER_SEED` 同生命周期：命令层每次荐股前覆盖写入；`prepare` 在建池末尾统一
+/// 过滤 `seed` 与 `raw_seed`。为什么放在池出口而不是各来源：选「沪市主板」的语义是
+/// 「只看这个板块」，热榜/行业/兜底/用户/涨幅榜五源都必须按同一判据收口
+/// （2026-10-20 用户实测：只过滤涨幅榜来源时，候选里仍混着深市/创业板票）。
+static BOARD_FILTER: LazyLock<RwLock<Option<boards::Board>>> = LazyLock::new(|| RwLock::new(None));
+
+pub fn set_board_filter(board: Option<boards::Board>) {
+    *BOARD_FILTER.write() = board;
+}
+
+fn get_board_filter() -> Option<boards::Board> {
+    *BOARD_FILTER.read()
+}
+
 /// 把额外来源并进两级池子，返回**新增**条数（供 `SeedPoolOrigin` 计数）。
 ///
 /// 同时写 `seed`（过流动性门，主策略用）与 `raw_seed`（不过门，WatchlistStrategy 用）：
@@ -848,6 +864,23 @@ async fn prepare_scan(
             "[reco] 用户标的 {} 条已并入候选池（新增 {added} 条，池={}）",
             user_seed.len(),
             seed.len()
+        );
+    }
+
+    // 按用户选定的板块范围**整池收口**（auto/all 不过滤）：
+    // 前端选「沪市主板」后，五源里所有非沪市主板代码都必须去掉 —— 否则开关只影响
+    // 涨幅榜来源，候选仍横跨全市场（2026-10-20 用户实测）。
+    if let Some(board) = get_board_filter() {
+        let (seed_before, raw_before) = (seed.len(), raw_seed.len());
+        seed.retain(|(code, _, _)| boards::Board::classify(code) == Some(board));
+        raw_seed.retain(|(code, _, _)| boards::Board::classify(code) == Some(board));
+        tracing::info!(
+            "[reco] 板块过滤={}：主池 {}→{}，原始池 {}→{}",
+            board.label_zh(),
+            seed_before,
+            seed.len(),
+            raw_before,
+            raw_seed.len()
         );
     }
 

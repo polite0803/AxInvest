@@ -33,6 +33,12 @@ pub struct Model {
     pub prev_close: f64,
     /// 当日涨跌幅（%），与东财 `clist` f3 互校过 |Δ|=0
     pub change_pct: f64,
+    /// 当日成交额（元）。2026-10-20 新增：存档侧原先不落这一列 ⇒ 收盘快照路径
+    /// （`pick_movers`）没法按流动性筛强势股，只能按涨幅取前 N。
+    /// 存量行为 0（含义 = 当日未采集该字段，**不等于成交额为 0**）——读侧不得把 0
+    /// 当成「没有流动性」。
+    #[sea_orm(default_value = 0)]
+    pub amount: f64,
     /// 采集时刻（ms）—— 区分「哪天采的」与「哪天的数据」
     pub collected_at: i64,
     /// 来源：`tencent_batch` | `sina_batch` | `kline_backfill`

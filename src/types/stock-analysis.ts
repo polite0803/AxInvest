@@ -1554,6 +1554,12 @@ export interface RecoLoopCell {
   winRate: number | null;
   oldWeight: number;
   newWeight: number;
+  /** mover 漏检线乘数；缺席 = 该格证据不足，本线未参与合成 */
+  moverPenalty?: number;
+  /** 数据质量熔断线乘数；缺席 = 本格可判定样本不足，本线未参与合成 */
+  dqiPenalty?: number;
+  /** 核查窗口内「算出了却被 top-N 淘汰」的事件数（留痕缺失时恒 0） */
+  scoredOut?: number;
 }
 
 /** `reco_ic_stats` 的响应（Phase R-E：只报数，不回写权重）。 */

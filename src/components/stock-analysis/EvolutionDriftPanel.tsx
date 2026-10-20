@@ -469,6 +469,11 @@ export function EvolutionDriftPanel() {
                   <li key={r.id} style={{ marginBottom: 8, fontSize: 13 }}>
                     <Tag color="blue">{r.strategyId}</Tag>
                     <Tag>{r.period}</Tag>
+                    {
+                      /* 分析链 trigger（cron/manual/rule）：与荐股闭环的 reco-loop 分键空间，
+                        dashboard 已按 trigger 过滤；标签保留是为了审计时能直接读出来源。 */
+                    }
+                    <Tag color="purple" data-testid="evolution-change-trigger">{r.trigger}</Tag>
                     <Tag color={r.deltaPct > 0 ? "red" : r.deltaPct < 0 ? "green" : "default"}>
                       {(r.deltaPct > 0 ? "+" : "") + r.deltaPct.toFixed(1) + "%"}
                     </Tag>

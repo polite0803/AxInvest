@@ -38,6 +38,13 @@ use crate::weight_decay::{
 /// 进化历史中「人工已接受」状态（P4 两段式审批的接受态）。
 const EVOLUTION_STATUS_ACCEPTED: &str = "accepted";
 
+/// 荐股反思闭环的留痕 trigger（`PLAN-reco-reflection-closure.md` Q3 归属分离）。
+///
+/// 权威定义放在本模块：分析链的 `recalc_and_persist` / `get_dashboard` /
+/// `evolution_optimizer` 都要把它排除出「当前权重」；`recommender::reco_loop`
+/// 通过 `pub use` 复用，避免两处各写一份字符串。
+pub const RECO_LOOP_TRIGGER: &str = "reco-loop";
+
 /// 读取当前生效的权重衰减配置（P4 受控自动优化）。
 ///
 /// 来源 = `stock_evolution_history` 中**最近一条 accepted 计划行**的
@@ -169,6 +176,31 @@ pub async fn load_current_weights_by_trigger(
     Ok(map)
 }
 
+/// 同 [`load_current_weights`]，但**排除**某个 trigger 的键空间。
+///
+/// 分析链的当前权重不能消费荐股闭环的行：两条链的风格名目同名
+/// （trend/value/capital/reversion × 档位），而 `load_current_weights` 取的是
+/// 「每格最新一行」——现网 `strategy_weight_history` 目前**只有** `reco-loop`
+/// 行，全量读取会让分析链把荐股的降权当成自己的基线（重算与展示都错）。
+pub async fn load_current_weights_excluding(
+    db: &DatabaseConnection,
+    excluded_trigger: &str,
+) -> Result<HashMap<(String, String), f64>, String> {
+    let all = strategy_weight_history::Entity::find()
+        .filter(strategy_weight_history::Column::Trigger.ne(excluded_trigger))
+        .order_by_desc(strategy_weight_history::Column::AppliedAt)
+        .all(db)
+        .await
+        .map_err(|e| format!("读取 weight_history 失败: {e}"))?;
+
+    let mut map: HashMap<(String, String), f64> = HashMap::new();
+    for row in all {
+        let key = (row.strategy_id.clone(), row.period.clone());
+        map.entry(key).or_insert(row.new_weight);
+    }
+    Ok(map)
+}
+
 /// 指定 trigger 最近一次闭环重算的落库时刻（`strategy_weight_history.applied_at`）。
 ///
 /// `reco_loop_view` 的 `last_recalc_at` 唯一来源：无行 ⇒ `Ok(None)`
@@ -270,7 +302,8 @@ pub async fn recalc_and_persist(
 ) -> Result<(usize, HashMap<(String, String), f64>), String> {
     // P4：读最近一次人工接受的进化配置；从未审批接受过则与历史一致用默认值。
     let cfg = load_active_weight_decay_config(db).await;
-    let current = load_current_weights(db).await?;
+    // 分析链的基线不能拿荐股闭环的行（两条链同名键；Q3 归属分离）。
+    let current = load_current_weights_excluding(db, RECO_LOOP_TRIGGER).await?;
     let history = load_performance_window(db, cfg.lookback_days, as_of_date).await?;
     let new_map = compute_adjusted_weights(&history, &cfg, &current);
 
@@ -326,12 +359,16 @@ pub async fn get_dashboard(
     as_of_date: Option<&str>,
 ) -> Result<EvolutionDriftDashboard, String> {
     let cfg = load_active_weight_decay_config(db).await;
-    let current = load_current_weights(db).await?;
+    // 本面板是**分析链**的进化视图：当前权重、调整原因、最近重算时刻都必须排除
+    // 荐股闭环的 trigger，否则会把荐股的降权原因披上「进化」名义展示（现网该表
+    // 目前只有 reco-loop 行，不排除时这里一条分析链留痕都看不到）。
+    let current = load_current_weights_excluding(db, RECO_LOOP_TRIGGER).await?;
     let history = load_performance_window(db, cfg.lookback_days, as_of_date).await?;
     let new_map = compute_adjusted_weights(&history, &cfg, &current);
 
     // 拉取最近 5 次调整原因
     let recent = strategy_weight_history::Entity::find()
+        .filter(strategy_weight_history::Column::Trigger.ne(RECO_LOOP_TRIGGER))
         .order_by_desc(strategy_weight_history::Column::AppliedAt)
         .limit(5)
         .all(db)
@@ -352,8 +389,10 @@ pub async fn get_dashboard(
         })
         .collect();
 
-    // 拉取最近一次 applied_at 作为"最近重算时间"
+    // 拉取最近一次 applied_at 作为"最近重算时间"（同样排除荐股闭环：
+    // 否则荐股每天 07:00 的重算会把分析链面板的"最近重算"一直顶成最新）
     let last_recalc_at = strategy_weight_history::Entity::find()
+        .filter(strategy_weight_history::Column::Trigger.ne(RECO_LOOP_TRIGGER))
         .order_by_desc(strategy_weight_history::Column::AppliedAt)
         .one(db)
         .await
@@ -1125,5 +1164,84 @@ mod tests {
         assert_eq!(row.decision_at, 500, "决策建点时刻保留不变");
         assert_eq!(row.template_version, Some(154));
         assert_eq!(row.strategy_id, "trend");
+    }
+}
+
+/// 分析链 × 荐股闭环的 trigger 隔离（2026-10-20）。
+///
+/// 两条链的风格名目同名（trend/value/... × 档位），而 `load_current_weights` 取
+/// 「每格最新一行」——现网该表只有 reco-loop 行时不排除，分析链会把荐股降权当成
+/// 自己的基线（重算与展示都错）。
+#[cfg(test)]
+mod weight_trigger_isolation_tests {
+    use super::*;
+
+    fn row(
+        strategy_id: &str,
+        period: &str,
+        trigger: &str,
+        weight: f64,
+        at: i64,
+    ) -> strategy_weight_history::ActiveModel {
+        strategy_weight_history::ActiveModel {
+            id: Set(Uuid::new_v4().to_string()),
+            strategy_id: Set(strategy_id.to_string()),
+            period: Set(period.to_string()),
+            old_weight: Set(1.0),
+            new_weight: Set(weight),
+            delta_pct: Set((weight - 1.0) * 100.0),
+            trigger: Set(trigger.to_string()),
+            source_reflection_id: Set(None),
+            sample_size: Set(10),
+            win_rate: Set(0.6),
+            rationale: Set(Some("test".to_string())),
+            applied_at: Set(at),
+        }
+    }
+
+    #[tokio::test]
+    async fn excluding_reco_loop_keeps_analysis_chain_weights() {
+        let h = axagent_dao::db::create_test_pool().await.unwrap();
+        let db = &h.conn;
+        let base = 1_700_000_000_000i64;
+        let key = ("trend".to_string(), "short".to_string());
+
+        // 同一格：分析链 manual 0.8（较早），荐股闭环 0.2（较新）。
+        strategy_weight_history::Entity::insert(row("trend", "short", "manual", 0.8, base))
+            .exec(db)
+            .await
+            .unwrap();
+        strategy_weight_history::Entity::insert(row(
+            "trend",
+            "short",
+            RECO_LOOP_TRIGGER,
+            0.2,
+            base + 1,
+        ))
+        .exec(db)
+        .await
+        .unwrap();
+        // 只有荐股闭环留痕的格：排除后必须缺席，不得凭空成为分析链的当前权重。
+        strategy_weight_history::Entity::insert(row(
+            "value",
+            "short",
+            RECO_LOOP_TRIGGER,
+            0.3,
+            base + 2,
+        ))
+        .exec(db)
+        .await
+        .unwrap();
+
+        // 负控：全量读取确实会读到闭环的 0.2（证「排除」不是恒真判据）。
+        let all = load_current_weights(db).await.unwrap();
+        assert_eq!(all.get(&key), Some(&0.2), "全量读取应取最新一行");
+
+        let analysis = load_current_weights_excluding(db, RECO_LOOP_TRIGGER).await.unwrap();
+        assert_eq!(analysis.get(&key), Some(&0.8), "分析链当前权重不得被荐股闭环行顶替");
+        assert!(
+            analysis.get(&("value".to_string(), "short".to_string())).is_none(),
+            "只有闭环留痕的格不得进入分析链键空间"
+        );
     }
 }

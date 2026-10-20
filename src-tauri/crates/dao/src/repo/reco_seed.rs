@@ -8,7 +8,8 @@
 
 use axagent_entities::{market_daily_close, market_stock_universe, watchlist_items};
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    ColumnTrait, Condition, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect,
 };
 
 /// 自选股 `(code, name)`。
@@ -38,6 +39,10 @@ pub async fn latest_close_trade_date(db: &DatabaseConnection) -> Result<Option<S
 }
 
 /// 某交易日按涨幅降序的收盘快照 `(code, name)`；ST 过滤留给调用方（按名称判定）。
+///
+/// 流动性门（2026-10-20，存档带上 `amount` 之后）：与建池 `amount < 1 亿 ⇒ 丢` 同口径，
+/// 但 `amount = 0` 是**存量行未采集**（该列 2026-10-20 才加）⇒ 放行 —— 把老数据判成
+/// 「没有流动性」会让涨幅榜来源在列新增后的第一天整批消失。
 pub async fn top_close_rows_by_change(
     db: &DatabaseConnection,
     day: &str,
@@ -45,6 +50,11 @@ pub async fn top_close_rows_by_change(
 ) -> Result<Vec<(String, String)>, DbErr> {
     let rows = market_daily_close::Entity::find()
         .filter(market_daily_close::Column::TradeDate.eq(day))
+        .filter(
+            Condition::any()
+                .add(market_daily_close::Column::Amount.eq(0.0))
+                .add(market_daily_close::Column::Amount.gte(100_000_000.0)),
+        )
         .order_by_desc(market_daily_close::Column::ChangePct)
         .limit(limit)
         .all(db)

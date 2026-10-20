@@ -5073,7 +5073,7 @@ impl AStockClient {
     pub async fn market_list_page(
         &self,
         page: u32,
-    ) -> Result<(Vec<(String, String)>, i64), DataError> {
+    ) -> Result<(Vec<(String, String, Option<String>)>, i64), DataError> {
         if crate::as_of::is_asof_active() {
             crate::as_of::record_degradation_kind(
                 "astock-data",
@@ -5085,7 +5085,7 @@ impl AStockClient {
         }
         let url = format!(
             "https://push2.eastmoney.com/api/qt/clist/get?pn={page}&pz=100&po=0&np=1&fltt=2\
-             &invt=2&fid=f12&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048&fields=f12,f14"
+             &invt=2&fid=f12&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048&fields=f12,f14,f100"
         );
         let resp = self
             .http
@@ -5105,7 +5105,11 @@ impl AStockClient {
             .filter_map(|d| {
                 let code = d["f12"].as_str()?.to_string();
                 let name = d["f14"].as_str().unwrap_or("").to_string();
-                Some((code, name))
+                // f100 = 东财行业名；"-" / 空 = 未分类 ⇒ None（不得把占位符当行业名存库，
+                // 否则 P-l 的映射会把一堆票归到名为 "-" 的行业上）
+                let industry =
+                    d["f100"].as_str().filter(|s| !s.is_empty() && *s != "-").map(str::to_string);
+                Some((code, name, industry))
             })
             .collect();
         Ok((entries, total))

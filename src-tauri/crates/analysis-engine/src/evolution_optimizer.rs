@@ -26,7 +26,9 @@ use axagent_trajectory::numeric_evolution::{
 };
 use axagent_trajectory::skill_evolution::EvolutionConfig;
 
-use crate::evolution_drift::{load_current_weights, load_performance_window};
+use crate::evolution_drift::{
+    load_current_weights_excluding, load_performance_window, RECO_LOOP_TRIGGER,
+};
 use crate::weight_decay::{compute_adjusted_weights, WeightDecayConfig};
 
 /// 参数进化读取策略表现样本的回看窗口（天）。
@@ -144,7 +146,8 @@ pub async fn run_evolution(
     db: &DatabaseConnection,
     as_of_date: Option<&str>,
 ) -> Result<EvolutionResult, String> {
-    let current_weights = load_current_weights(db).await?;
+    // 分析链参数进化的适应度基线：排除荐股闭环行（Q3 归属分离）。
+    let current_weights = load_current_weights_excluding(db, RECO_LOOP_TRIGGER).await?;
     let history = load_performance_window(db, PARAM_EVOLUTION_LOOKBACK_DAYS, as_of_date).await?;
 
     if history.is_empty() {

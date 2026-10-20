@@ -373,7 +373,10 @@ pub async fn load_reco_loop_samples(
 
 /// 闭环留痕的 trigger 标记（`strategy_weight_history.trigger`）。
 /// 与分析链演化的 `"cron"|"manual"|"rule"` 分键空间消费（Q3 归属分离）。
-pub const RECO_LOOP_TRIGGER: &str = "reco-loop";
+///
+/// 权威定义在 `evolution_drift`（分析链的当前权重/仪表盘也要用它做排除），
+/// 这里 `pub use` 保持既有调用路径不变。
+pub use crate::evolution_drift::RECO_LOOP_TRIGGER;
 
 /// 基线权重：闭环**从未降过权**的格的取值，也是「只降不升」（Q1）的绝对上限。
 ///
@@ -809,7 +812,55 @@ pub async fn recalc_and_persist_reco_loop(
             .map_err(|e| format!("写入闭环权重留痕失败: {e}"))?;
         written += 1;
     }
+    // 心跳与写库解耦：|Δ|<1% 的轮次不写权重行，但「确实算过」也要留证据 ——
+    // 否则面板的「最近重算」会停在几天前，被误读成反思已停。
+    persist_last_recalc_at(db, applied_at).await;
     Ok((written, results))
+}
+
+/// 「最近一次计算时刻」的 settings 键（KV 表，`settings`）。
+///
+/// 与 `strategy_weight_history.applied_at` 的区别：后者只在**有权重变化**时推进。
+/// 面板要回答的是「反思还在不在跑」，所以必须按计算落点记录。
+pub const LAST_RECALC_SETTING_KEY: &str = "reco_loop_last_recalc_at";
+
+/// 记录一次闭环计算（成功写完/跳过权重行都算）。失败只 warn：心跳丢一次不该让
+/// 整轮重算失败，面板退化为读权重留痕时刻（`reco_loop_view` 的回退分支）。
+async fn persist_last_recalc_at(db: &DatabaseConnection, at_ms: i64) {
+    use axagent_entities::settings;
+    use sea_orm::{ActiveModelTrait, Set};
+
+    let value = at_ms.to_string();
+    match settings::Entity::find_by_id(LAST_RECALC_SETTING_KEY).one(db).await {
+        Ok(Some(row)) => {
+            let mut active: settings::ActiveModel = row.into();
+            active.value = Set(value);
+            if let Err(e) = active.update(db).await {
+                tracing::warn!("[reco_loop] 记录最近计算时刻失败: {e}");
+            }
+        },
+        Ok(None) => {
+            let active = settings::ActiveModel {
+                key: Set(LAST_RECALC_SETTING_KEY.to_string()),
+                value: Set(value),
+            };
+            if let Err(e) = active.insert(db).await {
+                tracing::warn!("[reco_loop] 记录最近计算时刻失败: {e}");
+            }
+        },
+        Err(e) => tracing::warn!("[reco_loop] 读取最近计算时刻失败: {e}"),
+    }
+}
+
+/// 读「最近一次计算时刻」（ms）。`None` = 心跳从未写过（首次/旧库）。
+pub async fn load_last_recalc_at(db: &DatabaseConnection) -> Option<i64> {
+    use axagent_entities::settings;
+    settings::Entity::find_by_id(LAST_RECALC_SETTING_KEY)
+        .one(db)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|r| r.value.parse::<i64>().ok())
 }
 
 /// 从 `workflow_template.variables` JSON 解析出 `(name, value)` 对。
@@ -887,17 +938,43 @@ pub async fn load_reco_served_vars_db(
     }
     // load_current_weights_by_trigger 返回 ((strategy, period), weight)，
     // 需换算成 parse_strategy_weights 约定的 "{style}_{period}" key 形态。
-    let mut obj = serde_json::Map::new();
-    for ((s, p), w) in looped {
-        // 只降不升（2026-10-20）：静态基线是 1.0，历史上有 7 条写入把权重**提升**到了 1.0
-        // （例如 trend×ultra 样本 0 却从 0.164 抬到 1.0，违反「只降不升」裁定）。
-        // 这里在**读取侧**把任何 >1.0 的值夹回 1.0：不回写历史、但保证它们不再生效；
-        // 真正的历史最小值回滚需要一次专门的数据订正，另行排。
-        obj.insert(format!("{s}_{p}"), serde_json::json!(w.min(1.0)));
-    }
+    //
+    // **逐格覆盖、不是整表替换**：闭环只在 |Δ|≥1% 时写行，所以 `looped` 只含「被闭环
+    // 降过的格」。若整表替换，用户在「⚡ 校准」里写入、但闭环从未管的格会整条键消失，
+    // 静默回落到策略默认值 —— 校准按钮看起来成功、实际配置丢了。
+    let static_weights = static_strategy_weights(&vars);
+    let merged = merge_static_and_loop_weights(static_weights, &looped);
     let mut v = vars.into_iter().filter(|(k, _)| k != "reco_strategy_weights").collect::<Vec<_>>();
-    v.push(("reco_strategy_weights".to_string(), serde_json::Value::Object(obj)));
+    v.push(("reco_strategy_weights".to_string(), serde_json::Value::Object(merged)));
     Ok(v)
+}
+
+/// 模板静态权重（`reco_strategy_weights`）的 object 形态；缺失/损坏 ⇒ 空表。
+fn static_strategy_weights(
+    vars: &[(String, serde_json::Value)],
+) -> serde_json::Map<String, serde_json::Value> {
+    vars.iter()
+        .find(|(k, _)| k == "reco_strategy_weights")
+        .and_then(|(_, v)| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+/// 静态权重表与闭环权重的合并（纯函数，供单测直接喂表）。
+///
+/// 合并规则：
+/// - 静态表里的格**全部保留**（闭环没管过的格不能丢）；
+/// - 闭环算过的格覆盖同名键；
+/// - 闭环值在读取侧夹到 `≤ 1.0`：历史上被旧实现抬高到 >1 的行不再生效（不回写历史，
+///   真正的历史最小值回滚是单独的数据订正）。
+pub fn merge_static_and_loop_weights(
+    static_weights: serde_json::Map<String, serde_json::Value>,
+    looped: &HashMap<(String, String), f64>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut merged = static_weights;
+    for ((s, p), w) in looped {
+        merged.insert(format!("{s}_{p}"), serde_json::json!(w.min(1.0)));
+    }
+    merged
 }
 
 // ── P1 分析回环否决表（2026-10-18）────────────────────────────────────────
@@ -2062,5 +2139,49 @@ mod weight_ratchet_tests {
         // 9 次全推出去 ⇒ Laplace 转化率 0.1 ⇒ 0.9×0.1 = 0.09
         assert!((c.new_weight - 0.09).abs() < 1e-9, "实际 {}", c.new_weight);
         assert!(c.new_weight < c.old_weight, "独立降权线必须生效");
+    }
+}
+
+/// 静态权重表 × 闭环权重的合并判据（2026-10-20：整表替换会静默删掉用户校准格）。
+#[cfg(test)]
+mod merge_weights_tests {
+    use super::*;
+
+    fn static_map(pairs: &[(&str, f64)]) -> serde_json::Map<String, serde_json::Value> {
+        pairs.iter().map(|(k, v)| ((*k).to_string(), serde_json::json!(v))).collect()
+    }
+
+    /// 闭环只管它算过的格：静态表里其余格必须原样保留。
+    /// 负控：如果实现退回「整表替换」，`value_mid` 会消失 —— 本测试当场红。
+    #[test]
+    fn loop_overlay_keeps_static_cells_it_never_touched() {
+        let statics = static_map(&[("trend_short", 0.7), ("value_mid", 0.8)]);
+        let looped = HashMap::from([(("trend".to_string(), "short".to_string()), 0.4_f64)]);
+        let merged = merge_static_and_loop_weights(statics, &looped);
+
+        assert_eq!(merged["trend_short"], serde_json::json!(0.4), "闭环写过的格必须覆盖");
+        assert_eq!(
+            merged["value_mid"],
+            serde_json::json!(0.8),
+            "闭环没写过的静态格被删掉了（整表替换缺陷）"
+        );
+        assert_eq!(merged.len(), 2, "不得新增/丢失键: {merged:?}");
+    }
+
+    /// 闭环值读取侧夹到 ≤1.0；静态值本身不做夹取（模板里原有的 >1 值不在本判据的管辖内）。
+    #[test]
+    fn loop_overlay_clamps_values_above_baseline() {
+        let statics = static_map(&[("capital_long", 0.3)]);
+        let looped = HashMap::from([(("capital".to_string(), "long".to_string()), 1.2_f64)]);
+        let merged = merge_static_and_loop_weights(statics, &looped);
+        assert_eq!(merged["capital_long"], serde_json::json!(1.0), ">1.0 的闭环行必须在读取侧夹回");
+    }
+
+    /// 闭环为空 ⇒ 静态表逐字保留（调用方虽然会早返回，纯函数自身也必须正确）。
+    #[test]
+    fn empty_loop_leaves_static_weights_untouched() {
+        let statics = static_map(&[("trend_short", 0.7)]);
+        let merged = merge_static_and_loop_weights(statics.clone(), &HashMap::new());
+        assert_eq!(merged, statics);
     }
 }

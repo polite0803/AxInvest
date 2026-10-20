@@ -27,6 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { RecoHistoryModal } from "./RecoHistoryModal";
+import { RecoLoopPanel } from "./RecoLoopPanel";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
 
 /**
@@ -509,6 +510,11 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
         items={periodItems}
         style={{ marginBottom: 8 }}
       />
+
+      {/* 荐股反思闭环：数值回写权重的唯一入口（之前只在「回测 → 策略」矩阵底部）。 */}
+      <div style={{ marginBottom: 8 }}>
+        <RecoLoopPanel asOfDate={asOfDate} />
+      </div>
 
       {isReplay && asOfDate && (
         <Alert

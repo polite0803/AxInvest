@@ -15723,7 +15723,8 @@
       "loopGateOn": "Bucle de reflexión activo (on), último recálculo {time}",
       "loopGateShadow": "Bucle de reflexión en modo sombra: solo calculado, sin aplicar, último recálculo {time}",
       "loopGateOff": "Bucle de reflexión desactivado (off), último recálculo {time}",
-      "loopNeverRecalc": "nunca recalculado"
+      "loopNeverRecalc": "nunca recalculado",
+      "loopSamples": "n={{n}}"
     },
     "moverRecall": {
       "title": "Verificación de recall por ganancia en ventana",
@@ -16879,7 +16880,7 @@
       },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
-      "boardScopeTip": "Board scope for the scan (live only; replay uses the as-of snapshot)",
+      "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",
       "boardScope_auto": "Auto rotate",
       "boardScope_sh_main": "Shanghai main board",
       "boardScope_sz_main": "Shenzhen main board",
@@ -16933,6 +16934,32 @@
       "styleTechnical": "Technical",
       "bannerAsOf": "Datos hasta {{date}}",
       "degradedStylesTitle": "Estilo de estrategia degradada"
+    },
+    "recoLoop": {
+      "title": "Bucle de reflexión de recomendaciones",
+      "recalcNow": "Recalcular ahora",
+      "recalcSuccess": "Recalculación del bucle completada; {{written}} ajustes de peso escritos",
+      "recalcFailed": "Error al recalcular el bucle: {{error}}",
+      "loadFailed": "Error al cargar el estado del bucle: {{error}}",
+      "empty": "Aún no hay datos del bucle para mostrar",
+      "scopeHint": "La reflexión de recomendaciones solo reescribe los pesos por celda; no genera narrativa. Cuando las muestras son insuficientes o el IC no se puede medir, se conservan los pesos actuales en lugar de presentarlos como calibrados. Mientras el bucle está activo, las celdas que gestiona usan sus pesos; la calibración manual no las sobrescribe.",
+      "colPeriod": "Horizonte",
+      "colStatus": "Estado",
+      "colSamples": "Muestras",
+      "colRankIc": "rankIC",
+      "colWeight": "Peso",
+      "colOuter": "Líneas externas",
+      "statusDemoted": "Degradación por IC negativo",
+      "statusCalibrated": "Calibrado",
+      "statusInsufficient": "Muestras insuficientes",
+      "statusIcUnmeasurable": "IC no medible",
+      "demotedTip": "rankIC {{ic}} < 0: el peso de la tasa de acierto se multiplica por la penalización de IC negativo; los pesos solo pueden bajar",
+      "icUnmeasurableTip": "La varianza de confianza es degenerada en esta celda, por lo que el IC no se puede calcular. Ni la línea de tasa de acierto ni la de IC se calibran; se conservan los pesos actuales",
+      "moverPenalty": "Perdido×{{p}}",
+      "dqiPenalty": "Fusible×{{p}}",
+      "summary": "{{calibrated}} celdas calibradas · {{uncalibrated}} sin calibrar · {{demoted}} degradaciones por IC negativo",
+      "recalcReplayDisabled": "El recálculo está desactivado en modo repetición: escribe en el historial de pesos reales. Vuelva primero al modo real.",
+      "replayScopeNote": "En modo repetición, los resultados de lazo por celda siguen calculándose con muestras reales y no siguen la generación de repetición; no los compare directamente con el IC de repetición."
     },
     "empty": {
       "replayDegradedTitle": "⏪ Degraded in Replay Mode",

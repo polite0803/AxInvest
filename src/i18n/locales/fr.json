@@ -15723,7 +15723,8 @@
       "loopGateOn": "Boucle de réflexion active (on), dernier recalcul {time}",
       "loopGateShadow": "Boucle de réflexion en mode fantôme : calculée sans application, dernier recalcul {time}",
       "loopGateOff": "Boucle de réflexion désactivée (off), dernier recalcul {time}",
-      "loopNeverRecalc": "jamais recalculate"
+      "loopNeverRecalc": "jamais recalculate",
+      "loopSamples": "n={{n}}"
     },
     "moverRecall": {
       "title": "Contrôle de rappel sur gain de fenêtre",
@@ -16879,7 +16880,7 @@
       },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
-      "boardScopeTip": "Board scope for the scan (live only; replay uses the as-of snapshot)",
+      "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",
       "boardScope_auto": "Auto rotate",
       "boardScope_sh_main": "Shanghai main board",
       "boardScope_sz_main": "Shenzhen main board",
@@ -16933,6 +16934,32 @@
       "styleTechnical": "Technical",
       "bannerAsOf": "Données arrêtées au {{date}}",
       "degradedStylesTitle": "Style de stratégie dégradé"
+    },
+    "recoLoop": {
+      "title": "Boucle de réflexion des recommandations",
+      "recalcNow": "Recalculer maintenant",
+      "recalcSuccess": "Recalcul de la boucle terminé ; {{written}} ajustements de poids écrits",
+      "recalcFailed": "Échec du recalcul de la boucle : {{error}}",
+      "loadFailed": "Impossible de charger l'état de la boucle : {{error}}",
+      "empty": "Aucune donnée de boucle à afficher pour l'instant",
+      "scopeHint": "La réflexion des recommandations ne réécrit que les poids par cellule ; elle ne produit aucun récit. Lorsque les échantillons sont insuffisants ou que l'IC n'est pas mesurable, les poids actuels sont conservés au lieu d'être présentés comme calibrés. Lorsque la boucle est active, les cellules qu'elle gère utilisent ses poids ; la calibration manuelle ne les remplace pas.",
+      "colPeriod": "Horizon",
+      "colStatus": "Statut",
+      "colSamples": "Échantillons",
+      "colRankIc": "rankIC",
+      "colWeight": "Poids",
+      "colOuter": "Lignes externes",
+      "statusDemoted": "Rétrogradation IC négatif",
+      "statusCalibrated": "Calibré",
+      "statusInsufficient": "Échantillons insuffisants",
+      "statusIcUnmeasurable": "IC non mesurable",
+      "demotedTip": "rankIC {{ic}} < 0 : le poids du taux de réussite est multiplié par la pénalité IC négatif ; les poids ne peuvent que baisser",
+      "icUnmeasurableTip": "La variance de confiance est dégénérée dans cette cellule ; l'IC ne peut pas être calculé. Ni la ligne du taux de réussite ni celle de l'IC ne sont calibrées ; les poids actuels sont conservés",
+      "moverPenalty": "Manqué×{{p}}",
+      "dqiPenalty": "Disjoncteur×{{p}}",
+      "summary": "{{calibrated}} cellules calibrées · {{uncalibrated}} non calibrées · {{demoted}} rétrogradations IC négatif",
+      "recalcReplayDisabled": "Le recalcul est désactivé en mode rejeu : il écrit dans l'historique des poids réels. Revenez d'abord en mode réel.",
+      "replayScopeNote": "En mode rejeu, les résultats de boucle par cellule restent calculés sur les échantillons réels et ne suivent pas la génération de rejeu ; ne les comparez pas directement à l'IC de rejeu."
     },
     "empty": {
       "replayDegradedTitle": "⏪ Degraded in Replay Mode",

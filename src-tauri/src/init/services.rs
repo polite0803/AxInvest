@@ -4674,6 +4674,12 @@ fn spawn_opc_workflows_seeding(state: &AppState) {
 /// 2. **收盘快照**：清单非空且该交易日行数不足 ⇒ 走腾讯批量落 `market_daily_close`。
 ///    「采齐」判据取「行数 ≥ 清单规模的一半」这个宽阈值——宁可重复跑一次（幂等 upsert），
 ///    也不要因为一次网络抖动把整天留成空洞。
+/// 估值归档最近一次完成的交易日（`YYYYMMDD`）。进程内每个交易日只跑一次。
+///
+/// 为什么用原子而不是锁：这里只需要「同一天不重复跑」这个幂等标记，读写都不需要临界区；
+/// `clippy.toml` 也禁止 `std::sync::Mutex`（跨 await 持 guard 是 UB 风险）。
+static FUNDAMENTALS_LAST_SWEPT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
 fn start_market_close_sweep(state: &AppState) {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -4733,32 +4739,90 @@ fn start_market_close_sweep(state: &AppState) {
             let have = axagent_analysis_engine::market_close_store::rows_for_date(&db, &date)
                 .await
                 .unwrap_or(0);
-            if size == 0 || have * 2 >= size {
-                continue;
+            if size > 0 && have * 2 < size {
+                match axagent_analysis_engine::market_close_store::run_close_sweep(
+                    &db,
+                    &client,
+                    &date,
+                    axagent_analysis_engine::market_close_store::DEFAULT_BATCH_SIZE,
+                    axagent_analysis_engine::market_close_store::DEFAULT_BATCH_INTERVAL_MS,
+                )
+                .await
+                {
+                    Ok(r) => tracing::info!(
+                        "[market-close] {date} 快照: 落库 {}/{}, 无有效值 {}, 失败批次 {}/{}{}",
+                        r.written,
+                        r.universe_size,
+                        r.skipped_no_data,
+                        r.failed_batches,
+                        r.batches,
+                        if r.failed_batches > 0 {
+                            "（本轮数据不完整）"
+                        } else {
+                            ""
+                        }
+                    ),
+                    Err(e) => tracing::warn!("[market-close] 快照采集失败: {e}"),
+                }
             }
-            match axagent_analysis_engine::market_close_store::run_close_sweep(
-                &db,
-                &client,
-                &date,
-                axagent_analysis_engine::market_close_store::DEFAULT_BATCH_SIZE,
-                axagent_analysis_engine::market_close_store::DEFAULT_BATCH_INTERVAL_MS,
-            )
-            .await
+
+            // 3) **估值归档**（2026-10-20，P-n 的覆盖前提）：把候选池的 PE/PB 历史补进
+            //    `financial_snapshots`。为什么补在这条链上：它是每天收盘后**必然**跑一次的
+            //    钩子，且候选池快照（`reco_picks.seed_pool_json`）已经落库 ⇒ 零额外网络选码。
+            //    为什么只补池子而不是全市场：681 只逐个拉估值（≈681 请求/日）与收益不成比例；
+            //    池子是荐股实际会看的 190 只，先把长档回放的覆盖从 37 只抬到池子的量级。
+            //    幂等：原子记日期，每个交易日最多跑一次；单只失败 fail-open（不阻塞其它票）。
+            let day_key: i64 = date.replace('-', "").parse().unwrap_or(0);
+            if day_key > 0
+                && FUNDAMENTALS_LAST_SWEPT.swap(day_key, std::sync::atomic::Ordering::Relaxed)
+                    != day_key
             {
-                Ok(r) => tracing::info!(
-                    "[market-close] {date} 快照: 落库 {}/{}, 无有效值 {}, 失败批次 {}/{}{}",
-                    r.written,
-                    r.universe_size,
-                    r.skipped_no_data,
-                    r.failed_batches,
-                    r.batches,
-                    if r.failed_batches > 0 {
-                        "（本轮数据不完整）"
-                    } else {
-                        ""
+                let codes = axagent_dao::repo::reco_pool::latest_seed_pool_codes(&db)
+                    .await
+                    .unwrap_or_default();
+                if codes.is_empty() {
+                    tracing::info!("[market-close] 估值归档：候选池快照为空，跳过");
+                } else {
+                    let since =
+                        (target - chrono::Duration::days(730)).format("%Y-%m-%d").to_string();
+                    // 近 7 天已归档过的代码直接跳过：`backfill_financial_snapshots` 是
+                    // 「删窗口 + 重写」语义，每天对 190 只全量重跑会反复删写十万级行。
+                    let recent_since =
+                        (target - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
+                    let recent = axagent_dao::repo::financial_snapshot::codes_with_snapshot_since(
+                        &db,
+                        &recent_since,
+                    )
+                    .await
+                    .unwrap_or_default();
+                    let mut ok = 0usize;
+                    let mut failed = 0usize;
+                    let mut skipped = 0usize;
+                    for code in &codes {
+                        if recent.contains(code) {
+                            skipped += 1;
+                            continue;
+                        }
+                        match crate::commands::stock_analysis::backfill_financial_snapshots(
+                            &db, &client, code, 2, &since,
+                        )
+                        .await
+                        {
+                            Ok(_) => ok += 1,
+                            Err(e) => {
+                                failed += 1;
+                                if failed <= 3 {
+                                    tracing::warn!("[market-close] 估值归档 {code} 失败: {e}");
+                                }
+                            },
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
                     }
-                ),
-                Err(e) => tracing::warn!("[market-close] 快照采集失败: {e}"),
+                    tracing::info!(
+                        "[market-close] 估值归档 {date}: 候选池 {} 只, 近 7 天已有 {skipped}, 成功 {ok}, 失败 {failed}（P-n 覆盖）",
+                        codes.len()
+                    );
+                }
             }
         }
     });

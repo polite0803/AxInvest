@@ -15891,7 +15891,8 @@
       "loopGateOn": "反思闭环已生效（on），最近重算 {time}",
       "loopGateShadow": "反思闭环影子模式（shadow）：只计算不参与评分，最近重算 {time}",
       "loopGateOff": "反思闭环未启用（off），最近重算 {time}",
-      "loopNeverRecalc": "从未重算"
+      "loopNeverRecalc": "从未重算",
+      "loopSamples": "n={{n}}"
     },
     "moverRecall": {
       "title": "窗口涨幅达标漏检核查",
@@ -17153,7 +17154,7 @@
       },
       "backtestWinrate": "胜率",
       "bannerDegraded": "资料风格 {{styles}} 因 as-of {{date}} 截断,已以降级模式输出,请低于非降级风格的可信度处理。",
-      "boardScopeTip": "荐股扫描的板块范围（仅实盘生效；回放按截止日快照）",
+      "boardScopeTip": "扫描板块范围：选具体板块（沪/深/创业/科创）时，候选池只保留该板块的股票；自动=按日轮动扫描一个板块、不限制候选池；全部=一次扫描四个板块（约 138 个请求）",
       "boardScope_auto": "自动轮动",
       "boardScope_sh_main": "沪市主板",
       "boardScope_sz_main": "深市主板",
@@ -17207,6 +17208,32 @@
       },
       "bannerAsOf": "数据截至 {{date}}",
       "degradedStylesTitle": "降级策略风格"
+    },
+    "recoLoop": {
+      "title": "荐股反思闭环",
+      "recalcNow": "立即重算",
+      "recalcSuccess": "闭环重算完成，写入 {{written}} 条权重调整",
+      "recalcFailed": "闭环重算失败：{{error}}",
+      "loadFailed": "读取闭环状态失败：{{error}}",
+      "empty": "还没有可显示的闭环数据",
+      "scopeHint": "荐股反思只回写逐格权重，不产出文字叙述；样本不足或 IC 测不出时保留当前权重，不冒充已校准。闭环生效时，闭环管过的格以闭环权重为准，手动校准对这些格不生效。",
+      "colPeriod": "档位",
+      "colStatus": "状态",
+      "colSamples": "样本",
+      "colRankIc": "rankIC",
+      "colWeight": "权重",
+      "colOuter": "外乘线",
+      "statusDemoted": "负 IC 降权",
+      "statusCalibrated": "已校准",
+      "statusInsufficient": "样本不足",
+      "statusIcUnmeasurable": "IC 测不出",
+      "demotedTip": "rankIC {{ic}} < 0：胜率权重再乘负 IC 惩罚，只降不升",
+      "icUnmeasurableTip": "同格置信度方差退化，IC 无法计算；胜率/IC 线均不校准，保留当前权重",
+      "moverPenalty": "漏检×{{p}}",
+      "dqiPenalty": "熔断×{{p}}",
+      "summary": "已校准 {{calibrated}} 格 · 未校准 {{uncalibrated}} 格 · 其中负 IC 降权 {{demoted}} 格",
+      "recalcReplayDisabled": "回放模式下不提供重算：该命令会写入实盘权重留痕，请切回实盘后再操作。",
+      "replayScopeNote": "回放模式下，闭环逐格结果仍按实盘样本计算，不随回放代际切换；请勿与回放 IC 直接对比。"
     },
     "empty": {
       "replayDegradedTitle": "回放模式降级",

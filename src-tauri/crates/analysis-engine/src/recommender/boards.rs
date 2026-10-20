@@ -126,6 +126,18 @@ pub fn boards_for_scope(scope: &str, ordinal: usize) -> Option<Vec<Board>> {
     }
 }
 
+/// 用户选中某个**具体板块**时需要做的整池过滤。
+///
+/// `auto` / `all` / 非法值 ⇒ `None`（不限制候选池，只影响涨幅榜来源的扫描范围）；
+/// 具体板块 ⇒ `Some(board)`：热榜/行业/兜底/用户/涨幅榜**五源全部**只保留该板块代码。
+///
+/// 为什么必须在池出口统一收口（2026-10-20 用户实测）：前端选「沪市主板」后，候选里
+/// 仍出现深市/创业板票 —— 因为另外四个来源不受扫描范围影响。开关的语义是「只看这个
+/// 板块」，就必须拦在池出口，而不是各来源各管一段。
+pub fn pool_filter_for_scope(scope: &str) -> Option<Board> {
+    Board::ALL.iter().copied().find(|b| b.as_str() == scope)
+}
+
 /// 从批量行情里挑「当日强势股」：剔除 ST、要求涨幅 ≥ `min_change_pct`，按涨幅降序取前 N。
 ///
 /// 纯函数（唯一的筛选点），负控见测试：ST 不得入池、低于门槛不得凑数、NaN 不得排序。
@@ -202,6 +214,19 @@ mod tests {
         assert_eq!(boards_for_scope("ALL", 0), None);
         assert_eq!(boards_for_scope("", 0), None);
         assert_eq!(boards_for_scope("bse", 0), None, "北交所不在可选项内");
+    }
+
+    /// 整池过滤只对**具体板块**生效；auto/all 不得限制候选池（否则「自动轮动」
+    /// 会悄悄把池子裁成当天轮到的那个板块）。
+    #[test]
+    fn pool_filter_only_applies_to_explicit_boards() {
+        assert_eq!(pool_filter_for_scope("sh_main"), Some(Board::ShMain));
+        assert_eq!(pool_filter_for_scope("sz_main"), Some(Board::SzMain));
+        assert_eq!(pool_filter_for_scope("chinext"), Some(Board::ChiNext));
+        assert_eq!(pool_filter_for_scope("star"), Some(Board::Star));
+        assert_eq!(pool_filter_for_scope("auto"), None);
+        assert_eq!(pool_filter_for_scope("all"), None);
+        assert_eq!(pool_filter_for_scope("bse"), None);
     }
 
     fn quote(code: &str, name: &str, chg: f64) -> axagent_harness::market_data::StockQuote {

@@ -15723,7 +15723,8 @@
       "loopGateOn": "振り返りループ有効（on）、最終再計算 {time}",
       "loopGateShadow": "振り返りループはシャドウモード：計算のみで採点には不使用、最終再計算 {time}",
       "loopGateOff": "振り返りループ無効（off）、最終再計算 {time}",
-      "loopNeverRecalc": "再計算されたことはありません"
+      "loopNeverRecalc": "再計算されたことはありません",
+      "loopSamples": "n={{n}}"
     },
     "moverRecall": {
       "title": "ウィンドウ上昇率達成の未検出チェック",
@@ -16879,7 +16880,7 @@
       },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
-      "boardScopeTip": "Board scope for the scan (live only; replay uses the as-of snapshot)",
+      "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",
       "boardScope_auto": "Auto rotate",
       "boardScope_sh_main": "Shanghai main board",
       "boardScope_sz_main": "Shenzhen main board",
@@ -16933,6 +16934,32 @@
       "styleTechnical": "Technical",
       "bannerAsOf": "数据截至 {{date}}",
       "degradedStylesTitle": "降级策略风格"
+    },
+    "recoLoop": {
+      "title": "銘柄推奨リフレクションループ",
+      "recalcNow": "今すぐ再計算",
+      "recalcSuccess": "ループ再計算が完了しました。重み調整を {{written}} 件書き込みました",
+      "recalcFailed": "ループ再計算に失敗しました：{{error}}",
+      "loadFailed": "ループ状態の読み込みに失敗しました：{{error}}",
+      "empty": "表示できるループデータがまだありません",
+      "scopeHint": "推奨リフレクションはセルごとの重みを書き戻すだけで、文章による説明は生成しません。サンプル不足や IC が測定できない場合は、現在の重みを維持し、キャリブレーション済みとして扱いません。ループが有効な間、ループが管理しているセルはループの重みが優先され、手動キャリブレーションはこれらのセルには反映されません。",
+      "colPeriod": "期間",
+      "colStatus": "状態",
+      "colSamples": "サンプル",
+      "colRankIc": "rankIC",
+      "colWeight": "重み",
+      "colOuter": "外部乗数",
+      "statusDemoted": "負の IC による減権",
+      "statusCalibrated": "キャリブレーション済み",
+      "statusInsufficient": "サンプル不足",
+      "statusIcUnmeasurable": "IC 測定不能",
+      "demotedTip": "rankIC {{ic}} < 0：勝率の重みに負の IC ペナルティを乗算します（下方修正のみ）",
+      "icUnmeasurableTip": "同一セル内で信頼度の分散が退化しているため IC を計算できません。勝率・IC のいずれもキャリブレーションせず、現在の重みを維持します",
+      "moverPenalty": "見逃し×{{p}}",
+      "dqiPenalty": "サーキットブレーカー×{{p}}",
+      "summary": "キャリブレーション済み {{calibrated}} セル · 未実施 {{uncalibrated}} セル · 負の IC による減権 {{demoted}} セル",
+      "recalcReplayDisabled": "リプレイモードでは再計算できません。実盤の重み履歴に書き込まれるため、実盤モードに戻してから操作してください。",
+      "replayScopeNote": "リプレイモードでは、ループのセル別結果は実盤サンプルから計算され、リプレイ世代には追従しません。リプレイ IC と直接比較しないでください。"
     },
     "empty": {
       "replayDegradedTitle": "回放模式降级",

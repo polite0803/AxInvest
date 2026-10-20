@@ -79,6 +79,7 @@ fn close_row(
     price: f64,
     pre_close: f64,
     change_pct: f64,
+    amount: f64,
 ) -> Option<market_daily_close::ActiveModel> {
     if code.is_empty() || trade_date.is_empty() {
         return None;
@@ -98,6 +99,12 @@ fn close_row(
         close: Set(price),
         prev_close: Set(pre_close),
         change_pct: Set(change_pct),
+        // 成交额：源不给时落 0（含义=未采集，不是「没有成交」；读侧按 0 跳过流动性判据）
+        amount: Set(if amount.is_finite() && amount > 0.0 {
+            amount
+        } else {
+            0.0
+        }),
         collected_at: Set(now_ms),
         source: Set("tencent_batch".to_string()),
     })
@@ -105,13 +112,13 @@ fn close_row(
 
 async fn upsert_universe(
     db: &sea_orm::DatabaseConnection,
-    entries: &[(String, String)],
+    entries: &[(String, String, Option<String>)],
     origin: &str,
     now_ms: i64,
     confirm: bool,
 ) -> usize {
     let mut written = 0usize;
-    for (code, name) in entries {
+    for (code, name, industry) in entries {
         if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
@@ -123,14 +130,21 @@ async fn upsert_universe(
             first_seen_at: Set(now_ms),
             last_confirmed_at: Set(if confirm { now_ms } else { 0 }),
             origin: Set(origin.to_string()),
+            industry: Set(industry.clone()),
         };
+        // 只由 clist 全量刷新（confirm=true）覆写行业列：本机 bootstrap 传的是 None，
+        // 若也进 update 列表，会把已采集到的行业擦成 NULL。
+        let mut cols = vec![
+            market_stock_universe::Column::StockName,
+            market_stock_universe::Column::MarketType,
+        ];
+        if confirm {
+            cols.push(market_stock_universe::Column::Industry);
+        }
         let res = market_stock_universe::Entity::insert(am)
             .on_conflict(
                 OnConflict::column(market_stock_universe::Column::StockCode)
-                    .update_columns([
-                        market_stock_universe::Column::StockName,
-                        market_stock_universe::Column::MarketType,
-                    ])
+                    .update_columns(cols)
                     .to_owned(),
             )
             .exec(db)
@@ -152,13 +166,13 @@ pub async fn bootstrap_universe_from_local(
 ) -> Result<usize, String> {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut entries: Vec<(String, String)> = Vec::new();
+    let mut entries: Vec<(String, String, Option<String>)> = Vec::new();
 
     let watch =
         watchlist_items::Entity::find().all(db).await.map_err(|e| format!("读自选股失败: {e}"))?;
     for w in watch {
         if seen.insert(w.stock_code.clone()) {
-            entries.push((w.stock_code, w.stock_name));
+            entries.push((w.stock_code, w.stock_name, None));
         }
     }
 
@@ -169,7 +183,7 @@ pub async fn bootstrap_universe_from_local(
         .map_err(|e| format!("读已分析股失败: {e}"))?;
     for a in analysed {
         if seen.insert(a.stock_code.clone()) {
-            entries.push((a.stock_code, a.stock_name));
+            entries.push((a.stock_code, a.stock_name, None));
         }
     }
 
@@ -294,6 +308,7 @@ pub async fn run_close_sweep(
                         q.price,
                         q.pre_close,
                         q.change_pct,
+                        q.amount,
                     ) else {
                         skipped_no_data += 1;
                         continue;
@@ -306,6 +321,7 @@ pub async fn run_close_sweep(
                                     market_daily_close::Column::Close,
                                     market_daily_close::Column::PrevClose,
                                     market_daily_close::Column::ChangePct,
+                                    market_daily_close::Column::Amount,
                                     market_daily_close::Column::CollectedAt,
                                     market_daily_close::Column::Source,
                                 ])
@@ -403,18 +419,21 @@ mod tests {
 
     #[test]
     fn valid_row_is_written_with_date_scoped_id() {
-        let am = close_row("600059", "古越龙山", "2026-09-30", 1, 12.27, 11.15, 10.04)
+        let am = close_row("600059", "古越龙山", "2026-09-30", 1, 12.27, 11.15, 10.04, 1.23e8)
             .expect("有效行情应落行");
         assert_eq!(am.id.unwrap(), "600059@2026-09-30");
         assert_eq!(am.change_pct.unwrap(), 10.04);
+        assert_eq!(am.amount.unwrap(), 1.23e8, "成交额必须落库（P-m ① 的数据源）");
     }
 
     #[test]
     fn suspended_or_zero_prev_close_is_skipped_not_zeroed() {
         // 停牌/缺昨收 ⇒ None（不落行），绝不能写成 change_pct=0 的"没涨"
-        assert!(close_row("600059", "古越龙山", "2026-09-30", 1, 12.27, 0.0, 0.0).is_none());
-        assert!(close_row("600059", "古越龙山", "2026-09-30", 1, 0.0, 11.15, 10.04).is_none());
-        assert!(close_row("600059", "古越龙山", "2026-09-30", 1, f64::NAN, 11.15, 10.04).is_none());
-        assert!(close_row("", "x", "2026-09-30", 1, 1.0, 1.0, 1.0).is_none());
+        assert!(close_row("600059", "古越龙山", "2026-09-30", 1, 12.27, 0.0, 0.0, 0.0).is_none());
+        assert!(close_row("600059", "古越龙山", "2026-09-30", 1, 0.0, 11.15, 10.04, 0.0).is_none());
+        assert!(
+            close_row("600059", "古越龙山", "2026-09-30", 1, f64::NAN, 11.15, 10.04, 0.0).is_none()
+        );
+        assert!(close_row("", "x", "2026-09-30", 1, 1.0, 1.0, 1.0, 0.0).is_none());
     }
 }

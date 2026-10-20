@@ -4759,7 +4759,9 @@ async fn refresh_mover_seed(
     client: &axagent_astock_data::AStockClient,
 ) -> usize {
     use axagent_analysis_engine::recommender::boards::pick_movers;
-    use axagent_analysis_engine::recommender::boards::{Board, VALID_SCOPES, boards_for_scope};
+    use axagent_analysis_engine::recommender::boards::{
+        Board, VALID_SCOPES, boards_for_scope, pool_filter_for_scope,
+    };
     use axagent_dao::repo::reco_seed;
 
     let db = state.harness.db();
@@ -4790,15 +4792,19 @@ async fn refresh_mover_seed(
     // 只跑 live：`market_snapshot_batch` 在 as-of 下无历史语义（返回空 + 留痕），
     // 回放的历史涨跌只能由 `market_daily_close` 给。
     // 扫描范围由 `settings.reco_board_scope` 决定：auto=按日轮动一个板块 / 指定板块 / all。
+    // 扫描范围读一次：live 用它决定扫哪些板块；**两种模式都**用它做整池过滤
+    // （回放也尊重用户选择 —— 选「沪市主板」时回放候选同样只留沪市主板）。
+    let scope = match axagent_dao::repo::settings::get_setting(db, RECO_BOARD_SCOPE_KEY).await {
+        Ok(v) => v.unwrap_or_else(|| "auto".to_string()),
+        Err(e) => {
+            tracing::warn!("[reco] 读取扫描板块范围失败（按 auto 轮动）: {e}");
+            "auto".to_string()
+        },
+    };
+    axagent_analysis_engine::recommender::set_board_filter(pool_filter_for_scope(&scope));
+
     let mut board_items: Vec<(String, String, Option<String>)> = Vec::new();
     if generation.is_none() {
-        let scope = match axagent_dao::repo::settings::get_setting(db, RECO_BOARD_SCOPE_KEY).await {
-            Ok(v) => v.unwrap_or_else(|| "auto".to_string()),
-            Err(e) => {
-                tracing::warn!("[reco] 读取扫描板块范围失败（按 auto 轮动）: {e}");
-                "auto".to_string()
-            },
-        };
         let ordinal = chrono::Local::now().date_naive().ordinal() as usize;
         let boards = match boards_for_scope(&scope, ordinal) {
             Some(b) => b,
@@ -5122,12 +5128,19 @@ pub(crate) async fn reco_loop_view(
             },
         };
     let cells = compute_loop_cell_weights(&samples, &current, now_ms, &mover);
-    let last_recalc_at =
-        axagent_analysis_engine::evolution_drift::latest_recalc_applied_at(db, RECO_LOOP_TRIGGER)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or(0);
+    // 「最近计算时刻」优先读心跳（每轮都写），旧库/心跳缺失时回退到权重留痕时刻
+    // （后者只在 |Δ|≥1% 时推进，会把「小抖动轮次」显示成「没跑」）。
+    let last_recalc_at = match load_last_recalc_at(db).await {
+        Some(at) => at,
+        None => axagent_analysis_engine::evolution_drift::latest_recalc_applied_at(
+            db,
+            RECO_LOOP_TRIGGER,
+        )
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(0),
+    };
     RecoLoopView { gate, cells, last_recalc_at }
 }
 

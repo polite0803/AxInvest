@@ -27,6 +27,12 @@ pub struct Model {
     pub last_confirmed_at: i64,
     /// 进入清单的来源：`clist` | `watchlist` | `analyses` | `seed_pool`
     pub origin: String,
+    /// 东财行业名（clist `f100`）；`None` = 未采集（本机手工标的、或旧行）。
+    ///
+    /// 2026-10-20 新增，用途是让 `sectorRotation` 腿能拿到「个股所属行业」并把该行业
+    /// 映射到 `get_industry_ranking` 的**同一命名空间**（两边都是东财行业名）。
+    /// 与 `stock_sector`（申万一级）不是一套词表 —— 不得混用（见 PLAN 的 P-l）。
+    pub industry: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

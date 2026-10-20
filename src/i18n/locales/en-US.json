@@ -15942,7 +15942,8 @@
       "loopGateOn": "Reflection loop active (on), last recalculated {time}",
       "loopGateShadow": "Reflection loop in shadow mode: computed but not applied, last recalculated {time}",
       "loopGateOff": "Reflection loop disabled (off), last recalculated {time}",
-      "loopNeverRecalc": "never recalculated"
+      "loopNeverRecalc": "never recalculated",
+      "loopSamples": "n={{n}}"
     },
     "moverRecall": {
       "title": "Window Gain Recall Check",
@@ -17059,7 +17060,7 @@
     "recommendation": {
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
-      "boardScopeTip": "Board scope for the scan (live only; replay uses the as-of snapshot)",
+      "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",
       "boardScope_auto": "Auto rotate",
       "boardScope_sh_main": "Shanghai main board",
       "boardScope_sz_main": "Shenzhen main board",
@@ -17167,6 +17168,32 @@
       },
       "bannerAsOf": "Data as of {{date}}",
       "degradedStylesTitle": "Degraded Strategy Styles"
+    },
+    "recoLoop": {
+      "title": "Stock-pick reflection loop",
+      "recalcNow": "Recalculate now",
+      "recalcSuccess": "Loop recalculated; {{written}} weight adjustments written",
+      "recalcFailed": "Loop recalculation failed: {{error}}",
+      "loadFailed": "Failed to load loop status: {{error}}",
+      "empty": "No loop data to display yet",
+      "scopeHint": "The stock-pick reflection loop only writes back per-cell weights and produces no narrative. When samples are insufficient or IC cannot be measured, current weights are kept instead of being presented as calibrated. While the loop is active, cells it has managed use loop weights; manual calibration does not override those cells.",
+      "colPeriod": "Horizon",
+      "colStatus": "Status",
+      "colSamples": "Samples",
+      "colRankIc": "rankIC",
+      "colWeight": "Weight",
+      "colOuter": "Outer lines",
+      "statusDemoted": "Negative IC demotion",
+      "statusCalibrated": "Calibrated",
+      "statusInsufficient": "Insufficient samples",
+      "statusIcUnmeasurable": "IC unmeasurable",
+      "demotedTip": "rankIC {{ic}} < 0: the win-rate weight is multiplied by the negative-IC penalty; weights only go down",
+      "icUnmeasurableTip": "Confidence variance is degenerate in this cell, so IC cannot be computed; neither the win-rate nor the IC line is calibrated, and current weights are kept",
+      "moverPenalty": "Mover ×{{p}}",
+      "dqiPenalty": "DQI fuse ×{{p}}",
+      "summary": "{{calibrated}} calibrated · {{uncalibrated}} uncalibrated · {{demoted}} negative-IC demotions",
+      "recalcReplayDisabled": "Recalculation is disabled in replay mode: it writes live weight history. Switch back to live mode first.",
+      "replayScopeNote": "In replay mode, per-cell loop results are still computed from live samples and do not follow the replay generation; do not compare them directly with replay IC."
     },
     "reflection": {
       "asOfLabel": "as-of: {{asOf}} → hindsight: {{hindsight}}",

@@ -136,3 +136,28 @@ pub async fn insert_scan_audit(
     }
     written
 }
+
+/// 最近一批荐股的候选池代码（`reco_picks.seed_pool_json` 的 `[["code","name"], …]`）。
+///
+/// 用途（2026-10-20，P-n 的覆盖前提）：每日估值归档要补的正是**荐股扫描的那批票**，
+/// 而不是全市场 681 只逐个拉估值（收益与请求量不成比例）。此处直接复用已经落库的池快照，
+/// 零额外网络。解析失败按空处理（归档跳过，不影响收盘快照）。
+pub async fn latest_seed_pool_codes(
+    db: &DatabaseConnection,
+) -> Result<Vec<String>, sea_orm::DbErr> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+    let row = reco_picks::Entity::find()
+        .filter(reco_picks::Column::SeedPoolJson.ne(""))
+        .order_by_desc(reco_picks::Column::GeneratedAt)
+        .one(db)
+        .await?;
+    let Some(r) = row else {
+        return Ok(Vec::new());
+    };
+    let Some(raw) = r.seed_pool_json.as_deref().filter(|s| !s.is_empty()) else {
+        return Ok(Vec::new());
+    };
+    let pairs: Vec<(String, String)> = serde_json::from_str(raw).unwrap_or_default();
+    Ok(pairs.into_iter().map(|(code, _)| code).collect())
+}

@@ -15817,7 +15817,8 @@
       "loopGateOn": "反思迴圈已生效（on），最近重算 {time}",
       "loopGateShadow": "反思迴圈影子模式（shadow）：僅計算不參與評分，最近重算 {time}",
       "loopGateOff": "反思迴圈未啟用（off），最近重算 {time}",
-      "loopNeverRecalc": "從未重算"
+      "loopNeverRecalc": "從未重算",
+      "loopSamples": "n={{n}}"
     },
     "moverRecall": {
       "title": "視窗漲幅達標漏檢核查",
@@ -17103,7 +17104,7 @@
       },
       "backtestWinrate": "胜率",
       "bannerDegraded": "资料风格 {{styles}} 因 as-of {{date}} 截断,已以降级模式输出,请低于非降级风格的可信度处理。",
-      "boardScopeTip": "荐股扫描的板块范围（仅实盘生效；回放按截止日快照）",
+      "boardScopeTip": "扫描板块范围：选具体板块（沪/深/创业/科创）时，候选池只保留该板块的股票；自动=按日轮动扫描一个板块、不限制候选池；全部=一次扫描四个板块（约 138 个请求）",
       "boardScope_auto": "自动轮动",
       "boardScope_sh_main": "沪市主板",
       "boardScope_sz_main": "深市主板",
@@ -17157,6 +17158,32 @@
       "styleTechnical": "技術面",
       "bannerAsOf": "数据截至 {{date}}",
       "degradedStylesTitle": "降级策略风格"
+    },
+    "recoLoop": {
+      "title": "薦股反思閉環",
+      "recalcNow": "立即重算",
+      "recalcSuccess": "閉環重算完成，寫入 {{written}} 條權重調整",
+      "recalcFailed": "閉環重算失敗：{{error}}",
+      "loadFailed": "讀取閉環狀態失敗：{{error}}",
+      "empty": "還沒有可顯示的閉環資料",
+      "scopeHint": "薦股反思只回寫逐格權重，不產出文字敘述；樣本不足或 IC 測不出時保留當前權重，不冒充已校準。閉環生效時，閉環管過的格以閉環權重為準，手動校準對這些格不生效。",
+      "colPeriod": "檔位",
+      "colStatus": "狀態",
+      "colSamples": "樣本",
+      "colRankIc": "rankIC",
+      "colWeight": "權重",
+      "colOuter": "外乘線",
+      "statusDemoted": "負 IC 降權",
+      "statusCalibrated": "已校準",
+      "statusInsufficient": "樣本不足",
+      "statusIcUnmeasurable": "IC 測不出",
+      "demotedTip": "rankIC {{ic}} < 0：勝率權重再乘負 IC 懲罰，只降不升",
+      "icUnmeasurableTip": "同格置信度變異數退化，IC 無法計算；勝率/IC 線均不校準，保留當前權重",
+      "moverPenalty": "漏檢×{{p}}",
+      "dqiPenalty": "熔斷×{{p}}",
+      "summary": "已校準 {{calibrated}} 格 · 未校準 {{uncalibrated}} 格 · 其中負 IC 降權 {{demoted}} 格",
+      "recalcReplayDisabled": "回放模式下不提供重算：該命令會寫入實盤權重留痕，請切回實盤後再操作。",
+      "replayScopeNote": "回放模式下，閉環逐格結果仍按實盤樣本計算，不隨回放代際切換；請勿與回放 IC 直接對比。"
     },
     "empty": {
       "replayDegradedTitle": "⏪ Degraded in Replay Mode",

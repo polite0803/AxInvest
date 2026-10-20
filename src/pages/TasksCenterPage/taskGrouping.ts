@@ -17,6 +17,9 @@ const INVEST_TASK_TYPES = new Set([
   "validate-decisions",
   "decision-backtest",
   "mover-recall",
+  // 漏检事件补分析（2026-10-20 A-1）：把核查落的 pending 事件按窗口起点做 as-of 补分析。
+  "mover-recall-analysis",
+  "universe-code-scan",
   "evolution-proposal",
   "lesson-validation",
   "portfolio-metrics",
@@ -49,8 +52,11 @@ const BUILTIN_EXECUTABLE_TYPES = new Set([
   "opc_demand_scan",
   "decision-backtest",
   "mover-recall",
+  // 与后端 `mover_recall_analysis::MOVER_RECALL_ANALYSIS_TASK_TYPE` 同名（A-1 起有定时触发方）。
+  "mover-recall-analysis",
+  "universe-code-scan",
   "evolution-proposal",
-  // 与后端 `scheduled_task.rs::BUILTIN_TASK_TYPES` 逐字对齐的三条（漏一条就是「立即执行」
+  // 与后端 `scheduled_task.rs::BUILTIN_TASK_TYPES` 逐字对齐的其余几条（漏一条就是「立即执行」
   // 报 MANUAL_RUN_NOT_SUPPORTED，而到点自动执行照常 ⇒ 缺陷只在手动触发时露头）
   "lesson-validation",
   "portfolio-metrics",

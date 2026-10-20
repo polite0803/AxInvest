@@ -7417,7 +7417,8 @@
       "duration": "Durée",
       "result": "Résultat",
       "detail": "Détails",
-      "empty": "Aucun historique d'exécution"
+      "empty": "Aucun historique d'exécution",
+      "openMoverRun": "Voir ce passage dans le panneau"
     },
     "create": {
       "button": "Nouvelle tâche",
@@ -15747,6 +15748,16 @@
       "empty": "Aucun événement qualifié sur cette plage (critère : gain cumulé de la fenêtre)",
       "emptyNotYet": "Fenêtre incomplète : paliers incomplets non encore évaluables, paliers complets sans événement qualifié ({{have}} jours de bourse collectés ; voir notes de palier ci-dessous)",
       "windowOpen": "Fenêtre incomplète ({{have}}/{{need}} jours de bourse collectés)",
+      "emptyNotYetTiers": "Fenêtre incomplète : {{tiers}} non encore évaluables ; les paliers complets n'ont eu aucun événement qualifiant ({{have}} jours de bourse collectés)",
+      "tierNoEvents": "Aucun événement qualifiant dans ce palier",
+      "tierCountMissing": "Cette exécution n'a pas enregistré de décompte par palier",
+      "tierEvents": "{{count}} événements qualifiants dans ce palier",
+      "batchesNever": "Lots de rattrapage : jamais lancés (0) — les manques ne sont pas rattrapés, les réflexions n'ont pas d'échantillons",
+      "batchesLatest": "Lots de rattrapage : dernier {{status}} (résultats par titre dans le centre des tâches)",
+      "batchesUnknown": "Lots de rattrapage : état illisible (cela ne signifie PAS qu'aucun n'a été lancé)",
+      "reflowNone": "Candidats de retour : aucun (aucune réflexion « aurait dû être dans le pool »)",
+      "reflowPending": "Candidats de retour {{count}} · encore {{need}} échantillons réglés avant promotion (shadow, non fusionné au seed)",
+      "reflowReady": "Candidats de retour {{count}} · critères remplis (fusion après confirmation manuelle)",
       "rulesTitle": "Critères à quatre paliers (seuils = variables de modèle ; jours = source unique des paliers)",
       "rule": "{{tier}} : gain cumulé de la fenêtre ≥ {{gain}} % ({{days}} jours de bourse ; variable {{var}})",
       "rulesMissing": "{{count}} critères de palier non établis (variable de seuil non positive) ; exclus de ce contrôle",
@@ -15816,7 +15827,20 @@
         "rfPending": "Réflexion en file d'attente",
         "rfRunning": "Génération de la réflexion",
         "rfFailed": "Réflexion échouée : {{detail}}"
-      }
+      },
+      "runSelector": "Passage de contrôle",
+      "runOption": "{{from}} ~ {{to}} · {{chain}} · événements {{events}} · manqués {{misses}}",
+      "runOptionLive": "Recalculer maintenant (non enregistré)",
+      "sourceStored": "Source : passage de contrôle enregistré {{id}} (enregistré le {{at}}), période {{from}} ~ {{to}}, {{events}} événements, {{misses}} manqués. Le panneau lit l'état enregistré et ne recalcule pas.",
+      "sourceLive": "Source : recalcul en direct. Ce n'est pas un passage enregistré (rien n'est écrit ; la ligne déroulée lit la dernière ligne d'événement).",
+      "runsEmpty": "Aucun passage enregistré pour l'instant (la tâche planifiée de contrôle des manqués n'a pas tourné). Affichage ci-dessous : recalcul en direct.",
+      "runGone": "Le passage {{id}} n'est pas dans la liste enregistrée (base changée ou tronquée). Repli sur le recalcul en direct.",
+      "chainSelector": "Chaîne",
+      "chainLabel": "Ces chiffres appartiennent à la chaîne",
+      "chain_reco": "Recommandation intelligente",
+      "chain_serenity": "Sélection de tendances",
+      "chain_unlabeled": "Sans chaîne (passage ancien)",
+      "chainUnlabeledNote": "Ce passage est antérieur à la scission par chaîne : recommandation et sélection sont comptées ensemble, ce n'est le compte d'aucune chaîne en particulier."
     },
     "export": {
       "analystReports": "Analyst Reports",

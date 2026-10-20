@@ -1637,6 +1637,12 @@ export interface MoverLayerRow {
 
 /** `analyze_mover_recall` 响应（字段与 Rust DTO 一一对应，禁区 13）。 */
 export interface MoverRecallView {
+  /**
+   * 本视图属于哪条链：`reco` | `serenity` | `unlabeled`。
+   * 值域唯一权威在后端 `RecoChain` / `CHAIN_UNLABELED`（门 `check-reco-horizon-parity` o 段
+   * 逐值核对 11 语言的 `chain_*` 键），前端不得自己再列一份链名目。
+   */
+  chain: string;
   from: string;
   to: string;
   /** 数据起点声明：早于此没有快照 ⇒ 面板必须原文显示这句，不得留白 */
@@ -1648,10 +1654,45 @@ export interface MoverRecallView {
   rules: MoverTierRule[];
   rates: MoverRecallRates;
   layers: MoverLayerRow[];
+  /**
+   * 逐档达标事件数（`period -> events`）。三态依据：本档已满 + 0 = 「本档真无达标票」，
+   * 必须与「本档有达标」分开说；`null` = 本轮未记录（旧轮次）⇒ 面板第三态，不得显示成 0。
+   */
+  eventsByTier: Record<string, number> | null;
   misses: MoverMissRow[];
 }
 
 // ── 妖股漏检 → as-of 历史补分析批次（P2，`run_mover_recall_analysis`）──────────
+
+/**
+ * 一轮**已落库**核查的元信息（`list_mover_recall_runs`）。
+ * 目前只有 `success` 会落轮次行 ⇒ 「库里没有这一轮」与「那一轮没有达标事件」是两种缺席，
+ * 面板不得把前者渲染成后者。
+ */
+export interface MoverRecallRunMeta {
+  id: string;
+  /** 本轮所属链；null = A-2 之前的混池轮次（面板单独成句，不冒充某一链的读数） */
+  chain: string | null;
+  dateFrom: string;
+  dateTo: string;
+  dataSince: string;
+  collectedDays: number;
+  universeSize: number;
+  universeConfirmed: number;
+  eventsTotal: number;
+  missCount: number;
+  status: string;
+  triggerSource: string;
+  createdAtMs: number;
+}
+
+/**
+ * `get_mover_recall_run_view` 响应：轮次元信息 + 与实时核查**同形**的载荷。
+ * 后端把 `MoverRecallView` 摊平在同一层，故此处直接继承 —— 面板复用同一套渲染与形状守卫。
+ */
+export interface MoverRecallRunView extends MoverRecallView {
+  run: MoverRecallRunMeta;
+}
 
 /** 发起补分析批次请求（字段与 Rust RunMoverRecallAnalysisRequest 一一对应）。 */
 export interface MoverRecallAnalysisRequest {

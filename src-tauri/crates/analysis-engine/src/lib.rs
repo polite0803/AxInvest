@@ -55,6 +55,7 @@ pub mod cross_stock_aggregator;
 pub mod market_close_store;
 pub mod market_mainline;
 pub mod market_regime;
+pub mod universe_scan;
 // G3 产业链 MCP 工具集（P2-8 从 astock-data 迁回）
 pub mod mcp_tools;
 pub mod monitor;

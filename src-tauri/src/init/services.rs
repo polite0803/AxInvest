@@ -2134,6 +2134,8 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
     let cron_store = state.cron_job_store.clone();
     let sync_db = state.harness.db().clone();
     let astock_client = state.astock_client.clone();
+    // 漏检补分析与时间旅行批次共用这一把全局 as-of 锁（try_lock，不排队）
+    let asof_lock = state.time_travel_batch_lock.clone();
     // [2026-09-13] 批量反思/决策校验分支需要这三个依赖（此前它们只在
     // `start_batch_reflection` 的硬编码服务里被捕获，cron 分支无从取得）
     let cron_vector_store = state.vector_store.clone();
@@ -3300,43 +3302,50 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 let result =
                     match crate::commands::mover_recall::analyze_mover_recall_inner(&db, None).await
                     {
-                        Ok(view) => {
-                            let events = view.rates.events;
-                            let misses = view.rates.misses;
-                            has_miss = misses > 0;
-                            // 快照落库失败不把整轮核查判失败（结果已算出），仅留痕
-                            let persist_msg =
-                                match crate::commands::mover_recall::persist_mover_recall_run(
-                                    &db, &view, "scheduler",
-                                )
-                                .await
-                                {
-                                    Ok(run_id) => format!("run_id={run_id}"),
-                                    Err(e) => {
-                                        tracing::error!(
-                                            "[CronScheduler] 妖股核查 '{}' 快照落库失败: {e}",
-                                            job_name
-                                        );
-                                        // 摘要会整行显示在任务中心，前端只对「整串是 JSON」的
-                                        // 错误做码翻译 ⇒ 拼进散文前先把 detail 取出来，
-                                        // 否则这一行出现 {"code":…,"detail":…} 字面量。
-                                        format!(
-                                            "快照落库失败: {}",
-                                            crate::commands::error::error_text_for_prose(&e)
-                                        )
-                                    },
-                                };
-                            let summary = format!(
-                                "区间 {}~{} 达标事件={} 漏检={} 召回率 reachability={:.3} \
-                                 coverage={:.3} unexplained_share={:.3} | {persist_msg}",
-                                view.from,
-                                view.to,
-                                events,
-                                misses,
-                                view.rates.reachability,
-                                view.rates.coverage,
-                                view.rates.unexplained_share
-                            );
+                        Ok(views) => {
+                            // A-2 起每链各一份视图、各落一行 run 快照：混成一条「漏检数」就是
+                            // 让智选的命中顶掉荐股的漏检（反之亦然）的那笔账。
+                            // 摘要逐链各一行；任一链有漏检才投递通知（零漏检不轰炸）。
+                            let mut lines: Vec<String> = Vec::new();
+                            for view in &views {
+                                has_miss |= view.rates.misses > 0;
+                                // 快照落库失败不把整轮核查判失败（结果已算出），仅在该链那行留痕
+                                let persist_msg =
+                                    match crate::commands::mover_recall::persist_mover_recall_run(
+                                        &db, view, "scheduler",
+                                    )
+                                    .await
+                                    {
+                                        Ok(run_id) => format!("run_id={run_id}"),
+                                        Err(e) => {
+                                            tracing::error!(
+                                                "[CronScheduler] 妖股核查 '{}' [{}] 快照落库失败: {e}",
+                                                job_name,
+                                                view.chain
+                                            );
+                                            // 摘要会整行显示在任务中心，前端只对「整串是 JSON」的
+                                            // 错误做码翻译 ⇒ 拼进散文前先把 detail 取出来，
+                                            // 否则这一行出现 {"code":…,"detail":…} 字面量。
+                                            format!(
+                                                "快照落库失败: {}",
+                                                crate::commands::error::error_text_for_prose(&e)
+                                            )
+                                        },
+                                    };
+                                lines.push(format!(
+                                    "[{}] 区间 {}~{} 达标事件={} 漏检={} 召回率 reachability={:.3}                                      coverage={:.3} unexplained_share={:.3} | {persist_msg}",
+                                    view.chain,
+                                    view.from,
+                                    view.to,
+                                    view.rates.events,
+                                    view.rates.misses,
+                                    view.rates.reachability,
+                                    view.rates.coverage,
+                                    view.rates.unexplained_share
+                                ));
+                            }
+                            let summary = lines.join("
+");
                             tracing::info!("[CronScheduler] 妖股核查 '{}' 完成: {summary}", job_name);
                             axagent_runtime_core::TaskRunResult {
                                 success: true,
@@ -3713,6 +3722,175 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     tracing::warn!(
                         "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
                          （未找到该任务或持久化失败，下次到点会重复跑）",
+                        job_id
+                    );
+                }
+            }));
+            return;
+        }
+        // 编码段盲扫：task_type = universe-code-scan（C-1，每日 05:00）
+        //
+        // 只登记代码到 market_stock_universe（origin=code_scan，不冒充东财全量确认），
+        // **不写收盘快照、不产漏检事件** —— 把「建清单」与「出涨幅榜」解耦。
+        // 每天只扫 1/3 段（按日轮转）⇒ 请求量摊平；**不进**交易日闸门（清单扩充与开不开市无关），
+        // live 时间窗判据在 `run_universe_scan_inner` 里（手动与 cron 共用同一处）。
+        if job.task_type.as_deref()
+            == Some(crate::commands::universe_scan::UNIVERSE_SCAN_TASK_TYPE)
+        {
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let client = astock_client.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            tokio::task::spawn(cron_live(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
+                let result =
+                    match crate::commands::universe_scan::run_universe_scan_inner(&db, &client, None, None)
+                        .await
+                    {
+                        Ok(s) => {
+                            let summary = format!(
+                                "请求={} 代码={} 有报价={} 登记={}（只登记、不出事件）",
+                                s.requests, s.codes_tried, s.quotes, s.registered
+                            );
+                            tracing::info!("[CronScheduler] 编码段盲扫 '{job_name}' 完成: {summary}");
+                            axagent_runtime_core::TaskRunResult {
+                                success: true,
+                                output: Some(summary),
+                                error: None,
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                                skipped: false,
+                                partial: false,
+                            }
+                        },
+                        Err(e) => {
+                            tracing::error!("[CronScheduler] 编码段盲扫 '{job_name}' 失败: {e}");
+                            axagent_runtime_core::TaskRunResult {
+                                success: false,
+                                output: None,
+                                error: Some(e),
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                                skipped: false,
+                                partial: false,
+                            }
+                        },
+                    };
+                store.record_run(&job_id, result).await;
+            }));
+            return;
+        }
+        // 漏检事件补分析：task_type = mover-recall-analysis（A-1，每日 06:00）
+        //
+        // 消费 `mover_recall_events` 里 pending/failed 的事件，按各自**窗口起点**做 as-of
+        // 重放完整分析链，产出 `source='mover_recall'` 的分析行与反思待办 ——
+        // 「漏检 → 补分析 → 反思」这条出口此前只有任务中心一个手动按钮，
+        // 现网因此恒 0 批次、归因列全 NULL。
+        // **不进**交易日闸门：重放锚定的是历史窗口起点，与今天是不是交易日无关
+        // （同 04:00 中断补跑那条的理由，别顺手加进闸门白名单）。
+        // 与手动「立即执行」共用 `launch`：配额校验、live 时间窗拒绝、抢锁判据只有一份。
+        // 任务历史只记「已发起 + batchId」—— 批次跑在独立多线程 runtime，这里等不到终态；
+        // 把「已发起」写成「已完成」就是伪装，逐票成败看任务中心「漏检补分析」来源。
+        if job.task_type.as_deref()
+            == Some(crate::commands::mover_recall_analysis::MOVER_RECALL_ANALYSIS_TASK_TYPE)
+        {
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let client = astock_client.clone();
+            let engine = work_engine.clone();
+            let asof_lock = asof_lock.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            let prompt = job.prompt.clone();
+            tokio::task::spawn(cron_live(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
+
+                // 空 prompt 走缺省（种子任务写的是显式配置，用户也可以清空回缺省）；
+                // 非空却解不出来 ⇒ 按失败记录，不静默换成 10 —— 否则面板显示的原文与实跑配额两套。
+                let request =
+                    match crate::commands::mover_recall_analysis::RunMoverRecallAnalysisRequest::from_json(
+                        &prompt,
+                    ) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            tracing::error!(
+                                "[CronScheduler] 漏检补分析 '{}' 配置解析失败: {e}",
+                                job_name
+                            );
+                            store
+                                .record_run(&job_id, axagent_runtime_core::TaskRunResult {
+                                    success: false,
+                                    output: None,
+                                    error: Some(e),
+                                    duration_ms: elapsed(),
+                                    executed_at: started,
+                                    skipped: false,
+                                    partial: false,
+                                })
+                                .await;
+                            return;
+                        },
+                    };
+
+                let result =
+                    match crate::commands::mover_recall_analysis::start_for_scheduler(
+                        &asof_lock,
+                        db,
+                        client,
+                        engine,
+                        request.clone(),
+                    )
+                    .await
+                    {
+                        Ok(batch_id) => {
+                            tracing::info!(
+                                "[CronScheduler] 漏检补分析 '{}' 已发起批次 {batch_id}",
+                                job_name
+                            );
+                            axagent_runtime_core::TaskRunResult {
+                                success: true,
+                                output: Some(format!(
+                                    "已发起补分析批次 batch_id={batch_id} 单轮上限={} 只 ⇒ 逐票进度见任务中心「漏检补分析」",
+                                    request.batch_limit
+                                )),
+                                error: None,
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                                skipped: false,
+                                partial: false,
+                            }
+                        },
+                        Err(e) => {
+                            // 抢不到 as-of 锁 / 处于 live 时间窗 ⇒ 本轮确实没跑，如实记失败并带原因。
+                            // 连续几天这一行都在，就是「补分析被长期挤掉」的真信号，不能记成 skip 抹平。
+                            tracing::warn!(
+                                "[CronScheduler] 漏检补分析 '{}' 未发起: {e}",
+                                job_name
+                            );
+                            axagent_runtime_core::TaskRunResult {
+                                success: false,
+                                output: None,
+                                error: Some(crate::commands::error::error_text_for_prose(&e)),
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                                skipped: false,
+                                partial: false,
+                            }
+                        },
+                    };
+
+                store.record_run(&job_id, result).await;
+                if !recurring
+                    && !store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await
+                {
+                    tracing::warn!(
+                        "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败                         （未找到该任务或持久化失败，下次到点会重复跑）",
                         job_id
                     );
                 }

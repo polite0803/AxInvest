@@ -26,6 +26,9 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
+// 复用 as-of 接线门的剥注释与分段实现（禁区 12：不另造一份状态机）
+import { splitTopLevelFns, stripRustComments } from "./check-asof-node-scope.mjs";
+
 const ROOT = path.resolve(import.meta.dirname, "..");
 const STRATEGIES_DIR = "src-tauri/crates/analysis-engine/src/recommender/strategies";
 const SCORING = "src-tauri/crates/analysis-engine/src/recommender/scoring.rs";
@@ -633,6 +636,270 @@ function readStrategyFiles() {
 }
 
 /** --selftest：把每门的「修复前真实形态」当夹具喂进判据，必须红。 */
+/**
+ * o 段：链值域单源（A-2 分链，2026-10-20）。
+ *
+ * 唯一权威是引擎里的 `RecoChain::as_str` 两个值 + `CHAIN_UNLABELED`（分链改造前落库的混池轮次）。
+ * 三件事在这里核对：
+ *  ① 那三个值仍能在引擎源码里逐字定位 —— 由 `RecoChain::as_str` 这一处产生；
+ *     定位不到 ⇒ 判据没电，报红而不是静默通过（改名/搬走时门必须响）。
+ *  ② 每个值都在 11 语言的 `moverRecall` 段有 `chain_<值>` 键 ⇒ 换链不会在界面上露出原始码串。
+ *  ③ 面板不得再自己列一份链清单（那是第二套真相，键名/顺序都会与引擎漂移）。
+ */
+function checkChainVocabulary(engineSrc, panelSrc, localeJsons) {
+  const violations = [];
+  let scanned = 0;
+  const values = [];
+
+  for (const literal of [
+    'RecoChain::Reco => "reco"',
+    'RecoChain::Serenity => "serenity"',
+  ]) {
+    scanned += 1;
+    if (!engineSrc.includes(literal)) {
+      violations.push(`链值域字面量 ${literal} 不在引擎里 ⇒ RecoChain 被改名或搬走，本段失去比较对象`);
+    }
+  }
+  values.push("reco", "serenity");
+
+  scanned += 1;
+  const unlabeled = /pub const CHAIN_UNLABELED: &str = "([a-z_]+)";/.exec(engineSrc);
+  if (!unlabeled) {
+    violations.push("CHAIN_UNLABELED 常量不在引擎里 ⇒ 「未分链（旧轮次）」这一态没有权威值");
+  } else {
+    values.push(unlabeled[1]);
+  }
+
+  for (const value of values) {
+    const key = `chain_${value}`;
+    for (const [lang, json] of Object.entries(localeJsons)) {
+      scanned += 1;
+      const section = ((json || {}).stockAnalysis || {}).moverRecall || {};
+      const text = section[key];
+      if (typeof text !== "string" || text.trim().length === 0) {
+        violations.push(`${lang} 的 moverRecall.${key} 缺失或为空 ⇒ 链「${value}」在该语言下会显示原始码串`);
+      }
+    }
+  }
+
+  scanned += 1;
+  if (/\["']reco["']\s*,\s*["']serenity["']/.test(panelSrc) || /const CHAIN_[A-Z_]*\s*=\s*\[/.test(panelSrc)) {
+    violations.push("面板自己列了一份链值域清单 ⇒ 与引擎 RecoChain 成两套真相（改名时只会红在一边）");
+  }
+  return { violations, scanned };
+}
+
+/** 读 11 语言 locale JSON；任一解析失败 ⇒ 返回 null 并由调用方报「判据没电」。 */
+function readChainLocales() {
+  const out = {};
+  for (const lang of LOCALE_LANGS) {
+    const p = path.join(ROOT, `${LOCALES_DIR}/${lang}.json`);
+    if (!fs.existsSync(p)) {
+      return { jsons: null, error: `语言文件缺失：${lang}.json` };
+    }
+    try {
+      out[lang] = JSON.parse(fs.readFileSync(p, "utf8"));
+    } catch (e) {
+      return { jsons: null, error: `${lang}.json 解析失败：${e.message}` };
+    }
+  }
+  return { jsons: out, error: null };
+}
+
+/**
+ * 门 p：漏检归因层（`MissLayer`）的词汇与「生产可达」面单源（PLAN-missed-mover-reflection-closure A-3）。
+ *
+ * 三族事实全部**从引擎源码现场取**，不抄清单（抄来的清单不会在加层时变红）：
+ *  ① `pub enum MissLayer` 的变体集合；
+ *  ② `as_str` 的 `MissLayer::X => "y"` 映射（落库值域 = 面板/i18n `moverRecall.layer.<y>` 的键）；
+ *  ③ `pub fn attribute(` 函数体里出现过的 `MissLayer::X` —— **某层在这里没有出现，就等于生产路径
+ *     永远不会产出它**，面板那一格与 i18n 那条译文都是死料（`LateTiming` 就这么躺了几个月）。
+ * 另加 `pub const ALL: [MissLayer; N]` 的条数锚：Rust 侧的逐层可达性测试是遍历 `ALL` 的，
+ * 加了枚举值却忘进 `ALL` ⇒ 那条测试会安静地少判一层。
+ *
+ * ⚠ 本段只能证「attribute 里写了这一层」（必要条件）；「写了且真能被造出来」（充分条件）由
+ *   `mover_recall.rs` 的 `every_miss_layer_is_reachable_from_attribute` 逐层夹具负责。两句分开写，
+ *   不许用本段的绿去声称充分性。
+ */
+function extractMissLayerFacts(engineSrc) {
+  const block = (startMark) => {
+    const i = engineSrc.indexOf(startMark);
+    if (i < 0) { return null; }
+    const end = engineSrc.indexOf("\n}", i);
+    return end < 0 ? null : engineSrc.slice(i, end);
+  };
+  const enumBody = block("pub enum MissLayer {");
+  const variants = enumBody
+    ? enumBody
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => /^[A-Z][A-Za-z0-9]*,$/.test(l))
+        .map((l) => l.slice(0, -1))
+    : [];
+  const asStrBody = block("impl MissLayer {");
+  const asStr = {};
+  if (asStrBody) {
+    for (const m of asStrBody.matchAll(/MissLayer::([A-Za-z0-9]+)\s*=>\s*"([a-z0-9_]+)"/g)) {
+      asStr[m[1]] = m[2];
+    }
+  }
+  const attrBody = block("pub fn attribute(");
+  const attrUses = new Set();
+  if (attrBody) {
+    // 剥注释行再取用：注释里提一层名字不算「生产可达」（否则文档改动能把门喂饱）
+    const code = attrBody
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("///"))
+      .join("\n");
+    for (const m of code.matchAll(/MissLayer::([A-Za-z0-9]+)/g)) { attrUses.add(m[1]); }
+  }
+  const allM = /pub const ALL: \[MissLayer; (\d+)\] = \[([\s\S]*?)\];/.exec(engineSrc);
+  const allList = allM ? [...allM[2].matchAll(/MissLayer::([A-Za-z0-9]+)/g)].map((m) => m[1]) : null;
+  return { variants, asStr, attrUses, allList, allDeclCount: allM ? Number(allM[1]) : null };
+}
+
+function checkMissLayerVocabulary(engineSrc, panelSrc, localeJsons) {
+  const violations = [];
+  let scanned = 0;
+  const f = extractMissLayerFacts(engineSrc);
+
+  scanned += 1;
+  if (f.variants.length < 8) {
+    return {
+      violations: [
+        `漏检层枚举只解析到 ${f.variants.length} 个变体（下限 8）⇒ 判据没电，本段所有比较都是空的（实得 ${f.variants.join(", ") || "无"}）`,
+      ],
+      scanned,
+    };
+  }
+
+  scanned += 1;
+  if (!f.allList) {
+    violations.push(
+      "未解析到 pub const ALL: [MissLayer; N] ⇒ Rust 侧逐层可达性测试没有遍历面（本段只余词汇核对）",
+    );
+  }
+
+  for (const v of f.variants) {
+    scanned += 1;
+    if (!f.asStr[v]) {
+      violations.push(`MissLayer::${v} 没有 as_str 臂 ⇒ 落库/面板拿不到它的值域写法`);
+    }
+    scanned += 1;
+    if (!f.attrUses.has(v)) {
+      violations.push(
+        `MissLayer::${v} 在 attribute() 里从未出现 ⇒ 该层在生产路径不可达，` +
+          `面板那一格与译文是死料（要么接进判据，要么整层退役：枚举 + as_str + ALL + i18n 一起删）`,
+      );
+    }
+    if (f.allList && !f.allList.includes(v)) {
+      scanned += 1;
+      violations.push(`MissLayer::${v} 不在 MissLayer::ALL ⇒ 逐层可达性测试少判一层（测试恒绿的成因）`);
+    }
+  }
+
+  if (f.allList && f.allDeclCount !== f.allList.length) {
+    scanned += 1;
+    violations.push(
+      `MissLayer::ALL 声明 ${f.allDeclCount} 条、实列 ${f.allList.length} 条 ⇒ 条数与内容打架`,
+    );
+  }
+
+  const values = Object.values(f.asStr);
+  for (const [lang, json] of Object.entries(localeJsons)) {
+    const section = ((json || {}).stockAnalysis || {}).moverRecall || {};
+    const layerMap = section.layer || {};
+    const keys = Object.keys(layerMap);
+    for (const value of values) {
+      scanned += 1;
+      const text = layerMap[value];
+      if (typeof text !== "string" || text.trim().length === 0) {
+        violations.push(`${lang} 的 moverRecall.layer.${value} 缺失或为空 ⇒ 该层在界面上露出原始码串`);
+      }
+    }
+    for (const k of keys) {
+      scanned += 1;
+      if (!values.includes(k)) {
+        violations.push(`${lang} 有 moverRecall.layer.${k}，但引擎 as_str 里没有这个值 ⇒ 退役一层没删干净`);
+      }
+    }
+  }
+
+  scanned += 1;
+  if (/const LAYER_[A-Z_]*\s*=\s*\[/.test(panelSrc) ||
+      /["']l3_scored_out["']\s*,\s*["']other_period["']/.test(panelSrc)) {
+    violations.push("面板自己列了一份漏检层清单 ⇒ 与引擎 MissLayer 成两套真相（加层时只会红在一边）");
+  }
+  return { violations, scanned };
+}
+
+/**
+ * 门 q：链切片的消费点单源（D-2，防 F-2「归因混池」复活）。
+ *
+ * 判据是**按函数段**的：漏检链里凡是读 `reco_picks` 的函数，必须给出 style 域之一 ——
+ *   ① SQL 侧 `Column::Style` 过滤；② 内存侧 `RecoChain::of_style` 切片；
+ *   ③ 共享取数 `load_picks_in_range`（它刻意读两链、由调用方切片，同文件必须真有 of_style）。
+ * 另外钉两个已知消费点：`build_chain_view` 必须按链切、`load_mover_cell_signal` 必须只吃荐股链
+ * （权重闭环被智选票顶替时，两条链的账会互相抵消且两边都「有数」）。
+ * 前端不得自己判链：面板只认后端给的 `chain` 值域。
+ */
+function checkChainSlicing(recoCmdSrc, engineSrc, panelSrc) {
+  const violations = [];
+  let scanned = 0;
+  const files = [
+    { name: "commands/mover_recall.rs", src: recoCmdSrc },
+    { name: "analysis-engine/mover_recall.rs", src: engineSrc },
+  ];
+  const fns = [];
+  for (const f of files) {
+    for (const fn of splitTopLevelFns(stripRustComments(f.src))) {
+      fns.push({ file: f.name, name: fn.name, body: fn.body });
+    }
+  }
+  for (const fn of fns) {
+    // 只对**取数**函数判（`Entity`/`Column`）；纯类型引用（如 `&reco_picks::Model`）不算读库
+    if (!(fn.body.includes("reco_picks::Entity") || fn.body.includes("reco_picks::Column"))) {
+      continue;
+    }
+    scanned += 1;
+    const hasSqlDomain = fn.body.includes("Column::Style");
+    const hasMemorySlice = fn.body.includes("of_style") || fn.body.includes("RecoChain::ALL");
+    const isSharedLoader = fn.name === "load_picks_in_range";
+    const fileHasSlice = fns.some((x) => x.file === fn.file && x.body.includes("of_style"));
+    if (!(hasSqlDomain || hasMemorySlice || (isSharedLoader && fileHasSlice))) {
+      violations.push(
+        `${fn.file}:${fn.name} 读 reco_picks 却没有 style 域（Column::Style / RecoChain::of_style）` +
+          ` ⇒ 两条链的候选会被混成一个分母（F-2 形态）`,
+      );
+    }
+  }
+
+  const view = fns.find((x) => x.name === "build_chain_view");
+  scanned += 1;
+  if (!view) {
+    violations.push("未找到 build_chain_view ⇒ 链切片的消费点被改名/搬走，本段失去比较对象");
+  } else if (!view.body.includes("of_style")) {
+    violations.push("build_chain_view 不再按 RecoChain::of_style 切片 ⇒ 智选命中会顶替荐股漏检");
+  }
+
+  const signal = fns.find((x) => x.name === "load_mover_cell_signal");
+  scanned += 1;
+  if (!signal) {
+    violations.push("未找到 load_mover_cell_signal ⇒ 权重闭环的链域无法核对");
+  } else if (!(signal.body.includes("of_style") && signal.body.includes("RecoChain::Reco"))) {
+    violations.push(
+      "load_mover_cell_signal 必须只吃 RecoChain::Reco（of_style + RecoChain::Reco 同现）" +
+        " ⇒ 否则智选票会进荐股矩阵的降权分母",
+    );
+  }
+
+  scanned += 1;
+  if (/style\s*===\s*["']serenity["']|["']serenity["']\s*===\s*style/.test(panelSrc)) {
+    violations.push("面板自己按 style 判链 ⇒ 与后端 RecoChain 成两套真相（前端只认 chain 字段）");
+  }
+  return { violations, scanned };
+}
+
 function selftest() {
   /** 门 k/l 的种子夹具：默认四档与引擎出厂一致；`vals` / `descs` 覆盖单档。 */
   const seedFixture = (vals = {}, descs = {}) =>
@@ -645,7 +912,150 @@ function selftest() {
         + `            description: Some("${descs[t] ?? `第 ${t} 档窗口累计涨幅达标阈值（%）`}"),\n`
         + `        },`;
     }).join("\n");
+  /** o 段夹具：引擎侧三个值 + 11 语言的 chain_* 三键（值随意，键必须齐）。 */
+  const O_ENGINE_FIXTURE =
+    'RecoChain::Reco => "reco",\nRecoChain::Serenity => "serenity",\npub const CHAIN_UNLABELED: &str = "unlabeled";';
+  const O_LOCALES = () =>
+    Object.fromEntries(
+      LOCALE_LANGS.map((l) => [
+        l,
+        { stockAnalysis: { moverRecall: { chain_reco: "x", chain_serenity: "y", chain_unlabeled: "z" } } },
+      ]),
+    );
+  // 门 p 的引擎夹具：八层在枚举 / ALL / as_str / attribute 四处各有对应一支。
+  const P_ENGINE_FIXTURE = `pub enum MissLayer {
+    Recommended,
+    LateTiming,
+    NotInPool,
+    PoolDegraded,
+    ByDesign,
+    L3ScoredOut,
+    OtherPeriod,
+    Unexplained,
+}
+
+impl MissLayer {
+    pub const ALL: [MissLayer; 8] = [
+        MissLayer::Recommended,
+        MissLayer::LateTiming,
+        MissLayer::NotInPool,
+        MissLayer::PoolDegraded,
+        MissLayer::ByDesign,
+        MissLayer::L3ScoredOut,
+        MissLayer::OtherPeriod,
+        MissLayer::Unexplained,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MissLayer::Recommended => "recommended",
+            MissLayer::LateTiming => "late_timing",
+            MissLayer::NotInPool => "not_in_pool",
+            MissLayer::PoolDegraded => "pool_degraded",
+            MissLayer::ByDesign => "by_design",
+            MissLayer::L3ScoredOut => "l3_scored_out",
+            MissLayer::OtherPeriod => "other_period",
+            MissLayer::Unexplained => "unexplained",
+        }
+    }
+}
+
+pub fn attribute(tier_active: bool, ev: &Evidence) -> MissLayer {
+    if !ev.picks_for_period.is_empty() {
+        return MissLayer::Recommended;
+    }
+    if ev.picked_before_window {
+        return MissLayer::LateTiming;
+    }
+    if !tier_active {
+        return MissLayer::ByDesign;
+    }
+    if ev.pool_degraded {
+        return MissLayer::PoolDegraded;
+    }
+    match ev.in_pool {
+        None => return MissLayer::Unexplained,
+        Some(false) => return MissLayer::NotInPool,
+        Some(true) => {}
+    }
+    if ev.picked_in_other_period {
+        return MissLayer::OtherPeriod;
+    }
+    if !ev.l3_scored_out_styles.is_empty() {
+        return MissLayer::L3ScoredOut;
+    }
+    MissLayer::Unexplained
+}
+`;
+  const P_LAYER_VALUES = [
+    "recommended",
+    "late_timing",
+    "not_in_pool",
+    "pool_degraded",
+    "by_design",
+    "l3_scored_out",
+    "other_period",
+    "unexplained",
+  ];
+  const P_LOCALES = () =>
+    Object.fromEntries(
+      LOCALE_LANGS.map((l) => [
+        l,
+        {
+          stockAnalysis: {
+            moverRecall: { layer: Object.fromEntries(P_LAYER_VALUES.map((v) => [v, "x-" + v])) },
+          },
+        },
+      ]),
+    );
+  // 门 q 夹具：命令侧一个按链切的视图构造 + 一个共享取数；引擎侧一个只吃荐股的信号。
+  const Q_RECO_CMD = [
+    "fn build_chain_view(chain: RecoChain) -> View {",
+    "    let picks = f.picks.iter().filter(|p| RecoChain::of_style(&p.style) == chain);",
+    "    view",
+    "}",
+    "fn load_picks_in_range() -> Vec<Pick> {",
+    "    reco_picks::Entity::find().all(db).await",
+    "}",
+  ].join("\n");
+  const Q_ENGINE = [
+    "fn load_mover_cell_signal() -> Signal {",
+    "    let picks = picks.into_iter().filter(|p| RecoChain::of_style(&p.style) == RecoChain::Reco);",
+    "    signal",
+    "}",
+  ].join("\n");
   const cases = [
+    {
+      name: "o 正控（引擎三值 + 11 语言 chain_* 齐备）应绿",
+      got: checkChainVocabulary(O_ENGINE_FIXTURE, "", O_LOCALES()).violations.length,
+      want: 0,
+    },
+    {
+      name: "o 负控（某语言缺 chain_unlabeled）应红且点名该语言",
+      got: (() => {
+        const jsons = O_LOCALES();
+        jsons.de.stockAnalysis.moverRecall.chain_unlabeled = "";
+        const r = checkChainVocabulary(O_ENGINE_FIXTURE, "", jsons);
+        return r.violations.length === 1 && r.violations[0].includes("de") && r.violations[0].includes("chain_unlabeled") ? 1 : 0;
+      })(),
+      want: 1,
+    },
+    {
+      name: "o 负控（值域被改名 ⇒ 三条都定位不到）应红",
+      got: (() => {
+        const r = checkChainVocabulary("pub enum Chain { A, B }", "", O_LOCALES());
+        return r.violations.length >= 3 ? 1 : 0;
+      })(),
+      want: 1,
+    },
+    {
+      name: "o 负控（面板自列一份链清单）应红且只红那一格",
+      got: (() => {
+        const r = checkChainVocabulary(O_ENGINE_FIXTURE, 'const CHAIN_VALUES = ["reco", "serenity"];', O_LOCALES());
+        return r.violations.length === 1 && r.violations[0].includes("两套真相") ? 1 : 0;
+      })(),
+      want: 1,
+    },
     {
       name: "a 正控（默认天数）应绿",
       got: checkHoldingDaysSingleSource([
@@ -982,6 +1392,136 @@ function selftest() {
         .violations.filter((v) => v.includes("price_change_pct")).length,
       want: 1,
     },
+    {
+      name: "p 正控（八层齐备：枚举 + as_str + ALL + attribute 各有一支）应绿",
+      got: checkMissLayerVocabulary(P_ENGINE_FIXTURE, "", P_LOCALES()).violations.length,
+      want: 0,
+    },
+    {
+      name: "p 负控（attribute 里删掉 LateTiming 那一支）必须红且点名「生产路径不可达」",
+      got: (() => {
+        const mutated = P_ENGINE_FIXTURE.replace(
+          "    if ev.picked_before_window {\n        return MissLayer::LateTiming;\n    }\n",
+          "",
+        );
+        const r = checkMissLayerVocabulary(mutated, "", P_LOCALES());
+        return r.violations.length === 1 && r.violations[0].includes("MissLayer::LateTiming") &&
+            r.violations[0].includes("生产路径不可达")
+          ? 1
+          : 0;
+      })(),
+      want: 1,
+    },
+    {
+      name: "p 负控（de 删掉 layer.late_timing 译文）必须只红那一格并点名 de",
+      got: (() => {
+        const jsons = P_LOCALES();
+        delete jsons.de.stockAnalysis.moverRecall.layer.late_timing;
+        const r = checkMissLayerVocabulary(P_ENGINE_FIXTURE, "", jsons);
+        return r.violations.length === 1 && r.violations[0].includes("de") &&
+            r.violations[0].includes("late_timing")
+          ? 1
+          : 0;
+      })(),
+      want: 1,
+    },
+    {
+      name: "p 负控（枚举加一层却没进 ALL / as_str / attribute）必须三处各红",
+      got: checkMissLayerVocabulary(
+        P_ENGINE_FIXTURE.replace("    Recommended,\n", "    Recommended,\n    FakeLayer,\n"),
+        "",
+        P_LOCALES(),
+      ).violations.filter((v) => v.includes("FakeLayer")).length,
+      want: 3,
+    },
+    {
+      name: "p 负控（ALL 声明条数与实列不符）必须红",
+      got: checkMissLayerVocabulary(
+        P_ENGINE_FIXTURE.replace("[MissLayer; 8]", "[MissLayer; 7]"),
+        "",
+        P_LOCALES(),
+      ).violations.filter((v) => v.includes("条数与内容打架")).length,
+      want: 1,
+    },
+    {
+      name: "p 负控（i18n 多出已退役的层键）必须红并点名该键",
+      got: (() => {
+        const jsons = P_LOCALES();
+        jsons["zh-CN"].stockAnalysis.moverRecall.layer.retired_layer = "已退役层";
+        const r = checkMissLayerVocabulary(P_ENGINE_FIXTURE, "", jsons);
+        return r.violations.length === 1 && r.violations[0].includes("retired_layer") ? 1 : 0;
+      })(),
+      want: 1,
+    },
+    {
+      name: "p 负控（面板自列层清单）必须红且只红那一格",
+      got: (() => {
+        const r = checkMissLayerVocabulary(
+          P_ENGINE_FIXTURE,
+          'const LAYER_ORDER = ["l3_scored_out", "other_period", "unexplained"];',
+          P_LOCALES(),
+        );
+        return r.violations.length === 1 && r.violations[0].includes("两套真相") ? 1 : 0;
+      })(),
+      want: 1,
+    },
+    {
+      name: "q 正控（视图按链切 + 信号只吃荐股 + 共享取数有同文件切片）应绿",
+      got: checkChainSlicing(Q_RECO_CMD, Q_ENGINE, "").violations.length,
+      want: 0,
+    },
+    {
+      name: "q 负控（build_chain_view 不再按链切）必须红且点名",
+      got: (() => {
+        const r = checkChainSlicing(
+          Q_RECO_CMD.replace("filter(|p| RecoChain::of_style(&p.style) == chain)", ""),
+          Q_ENGINE,
+          "",
+        );
+        return r.violations.filter((v) => v.includes("build_chain_view")).length;
+      })(),
+      want: 1,
+    },
+    {
+      name: "q 负控（权重信号吃了智选链）必须红且点名 load_mover_cell_signal",
+      got: (() => {
+        const r = checkChainSlicing(
+          Q_RECO_CMD,
+          Q_ENGINE.replace("== RecoChain::Reco", "== RecoChain::Serenity"),
+          "",
+        );
+        return r.violations.filter((v) => v.includes("load_mover_cell_signal")).length;
+      })(),
+      want: 1,
+    },
+    {
+      name: "q 负控（新增裸读 reco_picks 的函数）必须红且点名该函数",
+      got: (() => {
+        const r = checkChainSlicing(
+          Q_RECO_CMD + "\nfn load_all_picks() -> Vec<Pick> {\n    reco_picks::Entity::find().all(db).await\n}",
+          Q_ENGINE,
+          "",
+        );
+        return r.violations.filter((v) => v.includes("load_all_picks")).length;
+      })(),
+      want: 1,
+    },
+    {
+      name: "q 负控（前端自己按 style 判链）必须红且只红那一格",
+      got: (() => {
+        const r = checkChainSlicing(Q_RECO_CMD, Q_ENGINE, 'const x = style === "serenity";');
+        return r.violations.length === 1 && r.violations[0].includes("两套真相") ? 1 : 0;
+      })(),
+      want: 1,
+    },
+    {
+      name: "p 负控（枚举解析退化 ⇒ 报「判据没电」而不是静默全绿）",
+      got: (() => {
+        const r = checkMissLayerVocabulary("pub enum MissLayer {\n}", "", P_LOCALES());
+        return r.violations.length === 1 && r.violations[0].includes("判据没电") ? 1 : 0;
+      })(),
+      want: 1,
+    },
   ];
   let bad = 0;
   for (const c of cases) {
@@ -1099,6 +1639,45 @@ function main() {
         readStrategyFiles(),
         fs.existsSync(path.join(ROOT, RECO_SCALE)) ? read(RECO_SCALE) : null,
       ),
+    ],
+    [
+      "o 链值域单源（A-2 分链，11 语言 chain_* 齐备）",
+      (() => {
+        const { jsons, error } = readChainLocales();
+        if (error) { return { violations: [error], scanned: 0 }; }
+        if (!fs.existsSync(path.join(ROOT, MOVER_ENGINE))) {
+          return { violations: [`${MOVER_ENGINE} 不存在 ⇒ 链值域无从核对`], scanned: 0 };
+        }
+        return checkChainVocabulary(
+          read(MOVER_ENGINE),
+          fs.existsSync(path.join(ROOT, MOVER_PANEL)) ? read(MOVER_PANEL) : "",
+          jsons,
+        );
+      })(),
+    ],
+    [
+      "p 漏检层词汇与生产可达面（A-3，11 语言 layer_* 齐备）",
+      (() => {
+        const { jsons, error } = readChainLocales();
+        if (error) { return { violations: [error], scanned: 0 }; }
+        if (!fs.existsSync(path.join(ROOT, MOVER_ENGINE))) {
+          return { violations: [`${MOVER_ENGINE} 不存在 ⇒ 漏检层词汇无从核对`], scanned: 0 };
+        }
+        return checkMissLayerVocabulary(
+          read(MOVER_ENGINE),
+          fs.existsSync(path.join(ROOT, MOVER_PANEL)) ? read(MOVER_PANEL) : "",
+          jsons,
+        );
+      })(),
+    ],
+    [
+      "q 链切片消费点单源（D-2：读 reco_picks 必带 style 域）",
+      (() => {
+        if (!fs.existsSync(path.join(ROOT, MOVER_ENGINE))) {
+          return { violations: [`${MOVER_ENGINE} 不存在 ⇒ 链切片无从核对`], scanned: 0 };
+        }
+        return checkChainSlicing(read(MOVER_CMD), read(MOVER_ENGINE), fs.existsSync(path.join(ROOT, MOVER_PANEL)) ? read(MOVER_PANEL) : "");
+      })(),
     ],
   ];
 

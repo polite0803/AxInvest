@@ -7417,7 +7417,8 @@
       "duration": "耗时",
       "result": "结果",
       "detail": "详情",
-      "empty": "暂无运行记录"
+      "empty": "暂无运行记录",
+      "openMoverRun": "在漏检面板查看该轮"
     },
     "create": {
       "button": "新建任务",
@@ -15940,6 +15941,16 @@
       "empty": "本区间无达标事件（判据为窗口累计涨幅）",
       "emptyNotYet": "窗口未满：未满档位尚不可判定，已满档位无达标事件（已采 {{have}} 个交易日，见下方档位标注）",
       "windowOpen": "窗口未满（已采 {{have}} 个 / 需 {{need}} 个交易日）",
+      "emptyNotYetTiers": "窗口未满：{{tiers}} 尚不可判定；已满档位已无达标事件（已采 {{have}} 个交易日）",
+      "tierNoEvents": "本档无达标事件",
+      "tierCountMissing": "本轮未记录逐档计数",
+      "tierEvents": "本档 {{count}} 个达标事件",
+      "batchesNever": "补分析批次：从未发起（0 批）—— 漏检行不会被补分析，反思也就拿不到样本",
+      "batchesLatest": "补分析批次：最近一批 {{status}}（逐票结果见任务中心「漏检补分析」）",
+      "batchesUnknown": "补分析批次：状态读取失败（不表示从未发起）",
+      "reflowNone": "回灌候选：暂无（没有反思判定「本应入池」的事件）",
+      "reflowPending": "回灌候选 {{count}} 只 · 距转正还需 {{need}} 个已结算样本（当前 shadow，不并入种子）",
+      "reflowReady": "回灌候选 {{count}} 只 · 判据已满足（仍需人工确认后才并入种子）",
       "rulesTitle": "四档判据（阈值走模板变量，窗口天数取档位唯一来源）",
       "rule": "{{tier}}档：窗口累计涨幅 ≥ {{gain}}%（{{days}} 个交易日；变量 {{var}}）",
       "rulesMissing": "{{count}} 档判据不成立（阈值变量非正数），本档未参与核查",
@@ -16009,7 +16020,20 @@
         "rfPending": "反思排队中",
         "rfRunning": "反思生成中",
         "rfFailed": "反思失败：{{detail}}"
-      }
+      },
+      "runSelector": "核查轮次",
+      "runOption": "{{from}} ~ {{to}} · {{chain}} · 事件 {{events}} · 漏检 {{misses}}",
+      "runOptionLive": "现场重算（不落库）",
+      "sourceStored": "本轮来源：已落库核查轮次 {{id}}（落库于 {{at}}），区间 {{from}} ~ {{to}}，达标事件 {{events}}、漏检 {{misses}}。面板不重算，读的就是那一次落库的结果。",
+      "sourceLive": "本轮来源：现场重算，不是任何一次已落库的核查轮次（不写库；展开行的补分析复盘按最新事件行查询）。",
+      "runsEmpty": "还没有任何已落库的核查轮次（定时任务「妖股漏检核查」尚未执行）⇒ 下面显示的是现场重算结果。",
+      "runGone": "指定的核查轮次 {{id}} 不在已落库列表内（可能换过库或清单被截断）⇒ 已退回现场重算。",
+      "chainSelector": "链",
+      "chainLabel": "本份账所属链",
+      "chain_reco": "智能荐股",
+      "chain_serenity": "趋势智选",
+      "chain_unlabeled": "未分链（旧轮次）",
+      "chainUnlabeledNote": "这一轮落在分链改造之前，是智能荐股与趋势智选的混池口径 ⇒ 不能当成任何一条链单独的账。"
     },
     "export": {
       "analystReports": "分析师报告",

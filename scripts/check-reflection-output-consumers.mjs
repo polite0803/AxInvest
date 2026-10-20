@@ -25,6 +25,7 @@
  * M3 权重消费面字面量消失 / M4 豁免条目被接通 ⇒ 改口要求撤豁免 /
  * M5 键名只出现在注释里 **不得**算消费 / M6 登记表为空 ⇒ R1 红 /
  * M7 消费面整份文件消失 ⇒ R1 红（不是 R2，定位与语义要分得开）。
+ * M9 面板撤掉按轮次读回 ⇒ 只红 mover_recall_runs / M10 进化聚合撤掉轮次表读取 ⇒ 红在另一面。
  *
  * 用法：node scripts/check-reflection-output-consumers.mjs [--selftest] [--dump]
  * 退出码：0 = 通过（豁免条目按登记如实豁免并打印）；1 = 有违规；2 = 参数错误。
@@ -92,6 +93,36 @@ const ENTRIES = [
     ],
   },
   {
+    key: "mover_recall_runs",
+    why: "核查轮次落库后必须被按轮次读回 —— 只写不读就是「任务中心点了立即执行，界面看不到那一次的结果」（2026-10-20 实机反馈）",
+    producer: {
+      file: "src-tauri/src/commands/mover_recall.rs",
+      literal: "persist_mover_recall_run",
+    },
+    consumers: [
+      {
+        file: "src/components/stock-analysis/MoverRecallPanel.tsx",
+        literal: "get_mover_recall_run_view",
+        note: "面板按 runId 读回那一轮的载荷（D-5，不是现场重算）",
+      },
+      {
+        file: "src/components/stock-analysis/MoverRecallPanel.tsx",
+        literal: "list_mover_recall_runs",
+        note: "轮次下拉的真取数点（列表为空时面板另有成句，不会假称「本轮无事件」）",
+      },
+      {
+        file: "src/pages/TasksCenterPage/ScheduledJobsTab.tsx",
+        literal: "MOVER_RUN_ID_PATTERN",
+        note: "执行历史把 run_id 提成深链，跳回面板并锁定该轮",
+      },
+      {
+        file: "src-tauri/src/commands/evolution_proposal.rs",
+        literal: "list_runs_since",
+        note: "20:00 进化聚合读同一张轮次表（第二个消费者，与面板互不顶替）",
+      },
+    ],
+  },
+  {
     key: "historical_weights",
     why: "进化/闭环学到的权重必须进个股证据共识",
     producer: {
@@ -115,6 +146,61 @@ const ENTRIES = [
       since: "2026-10-20",
       reason: "键域不相交（analyst_id vs style×period），本仓无分析师级历史权重权威源",
     },
+  },
+  {
+    key: "mover_recall_events.miss_layer",
+    why: "漏检归因层是三条链优化的唯一定位依据 —— 只落库不读，反思与面板都只会说「有漏检」而说不出「为什么漏」",
+    producer: {
+      file: "src-tauri/src/commands/mover_recall.rs",
+      literal: "miss_layer",
+    },
+    consumers: [
+      {
+        file: "src-tauri/src/commands/stock_workflow/reflection.rs",
+        literal: "miss_layer",
+        note: "漏检专项反思把层名与三问一起注入提示词（attr 层不可判时如实写「无法归因」）",
+      },
+      {
+        file: "src/components/stock-analysis/MoverRecallPanel.tsx",
+        literal: "missLayer",
+        note: "面板逐行显示层，并按层计数分组（A-2 后每链各自成表）",
+      },
+    ],
+  },
+  {
+    key: "stock_reflections.mover_label",
+    why: "妖股标签是「命中/漏检/按时/未达标」四态的唯一落点；只写不读等于反思里最贵的一段结论没人用",
+    producer: {
+      file: "src-tauri/src/commands/stock_workflow/reflection.rs",
+      literal: "mover_label",
+    },
+    consumers: [
+      {
+        file: "src/components/stock-analysis/ReflectionPanel.tsx",
+        literal: "moverLabel",
+        note: "反思列表把四态渲染成标签（值域由 `mover_label_for` 单源，前端不再自判）",
+      },
+      {
+        file: "src-tauri/src/commands/evolution_proposal.rs",
+        literal: "mover_label",
+        note: "20:00 进化聚合按标签分池统计（漏检/命中不能混成一个成功率）",
+      },
+    ],
+  },
+  {
+    key: "MoverCellSignal",
+    why: "漏检降权信号是荐股闭环「只降不升」的输入；不消费则 `l3_scored_out` 的账永远不落到权重上",
+    producer: {
+      file: "src-tauri/crates/analysis-engine/src/mover_recall.rs",
+      literal: "pub async fn load_mover_cell_signal",
+    },
+    consumers: [
+      {
+        file: "src-tauri/crates/analysis-engine/src/recommender/reco_loop.rs",
+        literal: "MoverCellSignal",
+        note: "compute_loop_cell_weights 逐格取 penalty（按 (style, period) 累加分子分母）",
+      },
+    ],
   },
 ];
 
@@ -281,6 +367,9 @@ const STORE = "src/stores/feature/stockAnalysisStore.ts";
 const MOD = "src-tauri/crates/analysis-engine/src/recommender/mod.rs";
 const SEEDVARS = "src-tauri/src/commands/stock_analysis_setup/seed_variables.rs";
 const TRADER = "src-tauri/agency_experts/stock-analysis/trader.md";
+const MR_PANEL = "src/components/stock-analysis/MoverRecallPanel.tsx";
+const SCHED = "src/pages/TasksCenterPage/ScheduledJobsTab.tsx";
+const EVO = "src-tauri/src/commands/evolution_proposal.rs";
 
 function selftest() {
   const cases = [
@@ -331,6 +420,16 @@ function selftest() {
       name: "M8 智选后验面板不再调用该命令 ⇒ 只红这一条（B1 的接线不许被悄悄拆掉）",
       read: synthetic((f) => f.set(PANEL, f.get(PANEL).replaceAll("serenity_validation_summary", "some_other_command"))),
       want: (r) => r.violations.length === 1 && r.violations[0].includes("serenity_validation_summary"),
+    },
+    {
+      name: "M9 面板不再按轮次读回 ⇒ 只红 mover_recall_runs（且点名轮次读回那条消费面）",
+      read: synthetic((f) => f.set(MR_PANEL, f.get(MR_PANEL).replaceAll("get_mover_recall_run_view", "zzz_gone"))),
+      want: (r) => r.violations.length === 1 && r.violations[0].includes("mover_recall_runs") && r.violations[0].includes("get_mover_recall_run_view"),
+    },
+    {
+      name: "M10 进化聚合撤掉轮次表读取 ⇒ 同一条目红在另一面（两个消费者各须独立成立）",
+      read: synthetic((f) => f.set(EVO, f.get(EVO).replaceAll("list_runs_since", "zzz_gone"))),
+      want: (r) => r.violations.length === 1 && r.violations[0].includes("mover_recall_runs") && r.violations[0].includes("list_runs_since"),
     },
   ];
 

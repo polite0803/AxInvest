@@ -45,6 +45,12 @@ pub struct Model {
     pub threshold_pct: f64,
     /// 板块归属（仅分组用）
     pub market_type: String,
+    /// 本行归因所属**链**（reco | serenity），值域同 `mover_recall_runs.chain`；NULL = 旧行未分链。
+    ///
+    /// ⚠ 同一条达标事件在两条链上**各有一行**（两行的窗口数字相同、归因层可以不同）。
+    /// 因此补分析的工作单元是「票 × 窗口右端日 × 档」三键而不是行 id：
+    /// 认领 / 回写 / 盖章都必须按三键扩散到姊妹行，否则一只票被补分析两遍、另一行永远 pending。
+    pub chain: Option<String>,
     /// 归因层：not_in_pool / pool_degraded / l3_scored_out / other_period / unexplained
     pub miss_layer: String,
     /// 窗口内是否有过任一档推荐（1=true 档位错配，0=false）
@@ -64,6 +70,9 @@ pub struct Model {
     pub status: String,
     /// 失败原因（failed 时）
     pub error_detail: Option<String>,
+    /// 回灌结论备注（`status='reflow_pending'` 时非空）：反思判定「本应入池」的理由。
+    /// 与 `error_detail` 分开存：一个是失败原因，一个是对票的看法依据，混用两者都读不准。
+    pub reflow_note: Option<String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
 }

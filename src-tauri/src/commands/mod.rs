@@ -139,6 +139,7 @@ pub mod screen_vision;
 pub mod search;
 pub mod session_share;
 pub mod skill_workflow;
+pub mod universe_scan;
 // G18: 会话多格式导出（messages.jsonl / openai_dataset_jsonl / markdown / manifest_json）
 pub mod sessions_export;
 pub mod settings;

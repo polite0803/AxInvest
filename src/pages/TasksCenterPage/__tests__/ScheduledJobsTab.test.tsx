@@ -17,7 +17,12 @@ vi.mock("@/lib/invoke", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/invoke")>();
   return { ...actual, invoke: invokeMock };
 });
-vi.mock("@/lib/errorI18n", () => ({ showBackendError: showBackendErrorMock }));
+vi.mock("@/lib/errorI18n", () => ({
+  showBackendError: showBackendErrorMock,
+  // 历史详情列对非 null 的 output 会走翻译；这个导出缺失会让「有 output 的历史行」整棵树崩
+  // （D-5 加轮次跳转时才第一次把这条路径跑到）。
+  translateBackendError: (s: string) => s,
+}));
 vi.mock("react-router-dom", () => ({ useNavigate: () => navigateMock }));
 
 // t 直接回键（插值参数不影响断言目标键）
@@ -166,6 +171,40 @@ describe("ScheduledJobsTab 列表与行操作（TR-6.2）", () => {
     fireEvent.click(within(poolRow).getByLabelText("tasksCenter.action.history"));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("get_task_execution_history", { taskId: "t-pool" }));
     expect(await screen.findByText("tasksCenter.history.title")).toBeTruthy();
+    // 负控：这条历史行的 output 是 null（没有 run_id）⇒ 不该长出轮次跳转
+    expect(screen.queryByTestId("open-mover-run")).toBeNull();
+  });
+
+  it("妖股漏检历史行带 run_id ⇒ 出跳转链接，点击深链到漏检面板并锁定该轮", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "list_scheduled_tasks") {
+        return Promise.resolve([makeTask({ id: "mrr-job", name: "mover-check", taskType: "mover-recall" })]);
+      }
+      if (cmd === "get_task_execution_history") {
+        return Promise.resolve([
+          {
+            id: "r9",
+            task_id: "mrr-job",
+            started_at: Date.now(),
+            completed_at: Date.now() + 1900,
+            success: true,
+            output: "区间 2026-09-30~2026-10-20 达标事件=77 漏检=65 | run_id=mrr-6eaaeed5-1",
+            error: null,
+            duration_ms: 1900,
+            partial: false,
+          },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+    renderTab();
+    const row = await rowNamed("mover-check");
+    fireEvent.click(within(row).getByLabelText("tasksCenter.action.history"));
+    const link = await screen.findByTestId("open-mover-run");
+    fireEvent.click(link);
+    await waitFor(() =>
+      expect(navigateMock).toHaveBeenCalledWith("/invest?tab=workspace&view=backtest&moverRun=mrr-6eaaeed5-1")
+    );
   });
 
   it("删除：Popconfirm 确认后调 delete_scheduled_task（camelCase 载荷）", async () => {

@@ -1,30 +1,65 @@
 import { invoke } from "@/lib/invoke";
 import { horizonSuffix } from "@/lib/stock-analysis-utils";
-import type { MoverRecallEventReview, MoverRecallReviewReflection, MoverRecallView } from "@/types/stock-analysis";
-import { Button, Card, Spin, Tag } from "antd";
-import { Fragment, useEffect, useState } from "react";
+import type {
+  MoverRecallEventReview,
+  MoverRecallReviewReflection,
+  MoverRecallRunMeta,
+  MoverRecallRunView,
+  MoverRecallView,
+} from "@/types/stock-analysis";
+import { Button, Card, Select, Space, Spin, Tag } from "antd";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
+
+/** 轮次下拉里「现场重算」的取值（走 `analyze_mover_recall`，不落库）。 */
+const LIVE_SOURCE = "";
+/** 一次取回多少轮（核查是周频 ⇒ 20 轮约 5 个月）。 */
+const RUN_LIST_LIMIT = 20;
 
 /**
- * 窗口涨幅达标漏检核查面板（`PLAN-mover-recall-attribution.md` Phase 5）。
+ * 窗口涨幅达标漏检核查面板（`PLAN-mover-recall-attribution.md` Phase 5 + D-5 轮次读回）。
+ *
+ * 两种来源必须各自成句、不得互相冒充（D-5，2026-10-20 实机反馈「点了立即执行看不到结果」）：
+ * - **已落库轮次**：读 `get_mover_recall_run_view`，是调度器（含任务中心「立即执行」）那一次的
+ *   落库快照，面板不重算；
+ * - **现场重算**：读 `analyze_mover_recall`，只出当前视图、不落库，因此它的明细行没有轮次归属。
  *
  * 四件事在 UI 上必须各自成句、不得互相冒充（「结构性缺口不得在 UI 造成歧义」）：
  * ① 不可运行（`market_daily_close` 未采集/取数失败）—— `failed` 支；
  * ② 某档判据不成立（阈值变量非正数）—— `rulesMissing` 支；
  * ③ 区间内无达标事件 —— `empty` 支；**仅当全部档位窗口已满**时才算结论，
  *    未满时以 `emptyNotYet` 说明「尚不可判定」并逐档标注（`windowOpen`）。
- *    四种「空」的原因不同，合并成一句就是歧义。
  * ④ 返回值形状不符（IPC 契约漂移 / mock 兜底返回 `{}`）—— 同走 `failed` 支：
  *    既不静默空白，也不让 `data.rates` 这类取值把整棵调用树带崩。
+ * 另有两种「库里没有」：还没有任何已落库轮次（`runsEmpty` 支）与深链指定的轮次不在列表内
+ * （`runGone` 支）—— 都不是「没有达标事件」。
  *
  * 口径边界：判据是**绝对涨幅**，不含板块涨停语义 ⇒ 本组件与 i18n 一律不得出现「涨停」字样。
  */
 export function MoverRecallPanel() {
   const { t } = useTranslation();
+  const [params, setSearchParams] = useSearchParams();
   const [data, setData] = useState<MoverRecallView | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [nonce, setNonce] = useState(0);
+  const [listNonce, setListNonce] = useState(0);
+  const [payloadNonce, setPayloadNonce] = useState(0);
+  // D-5：来源。`selectedId === null` = 轮次列表还没取回来；`""` = 现场重算；其余 = 该轮已落库结果。
+  const [runs, setRuns] = useState<MoverRecallRunMeta[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [currentRun, setCurrentRun] = useState<MoverRecallRunMeta | null>(null);
+  // A-2：现场重算一次拿回**两份**视图（荐股 / 智选各一），当前展示哪一条由 chain 决定。
+  const [chains, setChains] = useState<MoverRecallView[]>([]);
+  const [chain, setChain] = useState<string>("");
+  // 深链指定的轮次不在已落库列表里 ⇒ 单独成句，不能悄悄退回重算
+  const [runGone, setRunGone] = useState<string | null>(null);
+  /** D-3：补分析批次的三态 —— 从未发起 / 最近一批 / 读不到（第三态不得冒充前两者）。 */
+  const [batchInfo, setBatchInfo] = useState<
+    { kind: "never" } | { kind: "latest"; status: string } | { kind: "unknown" } | null
+  >(null);
+  // 每次「刷新」只真取一次列表，避免 selectedId 变化把列表重复拉一遍
+  const listFetchedFor = useRef(-1);
   // P3：漏检明细行展开 → 懒加载补分析报告 + 逐档反思。key = 三键（票×右端日×档）。
   const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<string>>(new Set());
   const [reviews, setReviews] = useState<
@@ -50,12 +85,15 @@ export function MoverRecallPanel() {
     }
     setReviews((prev) => ({ ...prev, [key]: { loading: true, error: null, data: null } }));
     try {
-      const data = await invoke<MoverRecallEventReview | null>("get_mover_recall_event_review", {
+      // 局部变量别再叫 data：它会遮住同名状态，初始化里引用自己即 TDZ 报错
+      const review = await invoke<MoverRecallEventReview | null>("get_mover_recall_event_review", {
         stockCode,
         anchorDate,
         period,
+        // 当前视图所属链；未分链的旧轮次由后端自行回退，前端不抄一份值域判断
+        chain: data?.chain ?? null,
       });
-      setReviews((prev) => ({ ...prev, [key]: { loading: false, error: null, data: data ?? null } }));
+      setReviews((prev) => ({ ...prev, [key]: { loading: false, error: null, data: review ?? null } }));
     } catch (e) {
       setReviews((prev) => ({
         ...prev,
@@ -64,26 +102,144 @@ export function MoverRecallPanel() {
     }
   };
 
+  /** 形状守卫 + 落状态：两种来源共用同一条判据（缺一半载荷即走 failed 支，不猜空集）。 */
+  const applyPayload = (raw: unknown, run: MoverRecallRunMeta | null) => {
+    const missing = missingFields(raw);
+    if (missing.length > 0) {
+      setData(null);
+      setCurrentRun(null);
+      setFailed(t("stockAnalysis.moverRecall.malformed", { fields: missing.join(", ") }));
+      return;
+    }
+    setData(raw as MoverRecallView);
+    setCurrentRun(run);
+  };
+
+  useEffect(() => {
+    if (listFetchedFor.current === listNonce) {
+      return;
+    }
+    listFetchedFor.current = listNonce;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const listed = await invoke<MoverRecallRunMeta[]>("list_mover_recall_runs", {
+          limit: RUN_LIST_LIMIT,
+        });
+        if (cancelled) { return; }
+        // mock 兜底 / 契约漂移时可能是 undefined 或 {} ⇒ 归一成空列表走现场重算支，
+        // 而不是让 `runs.map` 把整棵调用树带崩（同形状守卫的动机）。
+        const list = Array.isArray(listed) ? listed.filter((r) => typeof r?.id === "string") : [];
+        setRuns(list);
+        const urlRun = params.get("moverRun");
+        if (urlRun) {
+          // 深链只消费一次：用完就从 URL 摘掉。留着会让用户之后改选「现场重算」、
+          // 离开再回到本页时被重新钉回那一轮（URL 是入口提示，不是状态权威）。
+          const next = new URLSearchParams(params);
+          next.delete("moverRun");
+          setSearchParams(next, { replace: true });
+        }
+        if (selectedId === null) {
+          // 缺省来源：深链指定的轮次 > 最近一轮已落库 > 现场重算
+          if (urlRun && !list.some((r) => r.id === urlRun)) {
+            setRunGone(urlRun);
+            setSelectedId(LIVE_SOURCE);
+          } else {
+            setRunGone(null);
+            setSelectedId(urlRun ?? list[0]?.id ?? LIVE_SOURCE);
+          }
+        } else if (selectedId !== LIVE_SOURCE && !list.some((r) => r.id === selectedId)) {
+          // 已选轮次从库里消失（换库/截断）⇒ 成句说明并退回现场重算，不得静默继续显示旧载荷
+          setRunGone(selectedId);
+          setSelectedId(LIVE_SOURCE);
+        }
+      } catch {
+        if (!cancelled && selectedId === null) {
+          setSelectedId(LIVE_SOURCE);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [listNonce, selectedId, params, setSearchParams]);
+
+  // D-3：补分析批次摘要与核查轮次分开取 —— 批次不按链/轮次分区，读失败也只影响这一行。
   useEffect(() => {
     let cancelled = false;
-    // async IIFE 而非 .then：invoke 被 mock 成同步返回 undefined 时不至于把整棵树带崩
+    void (async () => {
+      try {
+        const rows = await invoke<unknown[]>("list_mover_recall_analysis_batches", { limit: 1 });
+        if (cancelled) { return; }
+        const ok = Array.isArray(rows)
+          && rows.every((r) => typeof (r as { batchId?: unknown } | null)?.batchId === "string");
+        if (!ok) {
+          setBatchInfo({ kind: "unknown" });
+          return;
+        }
+        setBatchInfo(
+          rows.length === 0
+            ? { kind: "never" }
+            : { kind: "latest", status: String((rows[0] as { status?: unknown }).status ?? "") },
+        );
+      } catch {
+        if (!cancelled) { setBatchInfo({ kind: "unknown" }); }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [listNonce]);
+
+  useEffect(() => {
+    if (selectedId === null) {
+      return;
+    }
+    let cancelled = false;
     void (async () => {
       setLoading(true);
       setFailed(null);
       try {
-        const r = await invoke<MoverRecallView>("analyze_mover_recall", {});
-        if (!cancelled) {
-          const missing = missingFields(r);
-          if (missing.length === 0) {
-            setData(r);
-          } else {
+        if (selectedId === LIVE_SOURCE) {
+          const raw = await invoke<MoverRecallView[]>("analyze_mover_recall", {});
+          if (cancelled) { return; }
+          // A-2：每链一份视图。数组本身就是契约的一部分 —— 拿到 undefined / {}（mock 兜底）
+          // 或空数组都不许读成「核查过但没有漏检」，交给形状守卫点名缺什么。
+          if (!Array.isArray(raw) || raw.length === 0) {
+            // 一份旧形状（单对象）或空列表都不能被当成「核查过但没有漏检」—— 那份账连属于
+            // 哪条链都判不出来。点名 `chain[]` 走同一条 malformed 句，不静默按单份渲染。
+            setChains([]);
+            setChain("");
             setData(null);
-            setFailed(t("stockAnalysis.moverRecall.malformed", { fields: missing.join(", ") }));
+            setCurrentRun(null);
+            setFailed(t("stockAnalysis.moverRecall.malformed", { fields: "chain[]" }));
+            return;
           }
+          setChains(raw);
+          const keep = raw.find((v) => v?.chain === chain) ?? raw[0];
+          setChain(keep.chain ?? "");
+          applyPayload(keep, null);
+          return;
+        } else {
+          const r = await invoke<MoverRecallRunView | null>("get_mover_recall_run_view", {
+            runId: selectedId,
+          });
+          if (cancelled) { return; }
+          if (r == null) {
+            // 「轮次不在库内」不是执行失败 ⇒ 与「列表里没有它」同处理：单独成句 + 退回现场重算，
+            // 不占用 failed 支（把缺席说成故障，与把缺席说成没有事件是同一类歧义）。
+            setRunGone(selectedId);
+            setData(null);
+            setCurrentRun(null);
+            setSelectedId(LIVE_SOURCE);
+            return;
+          }
+          applyPayload(r, r.run ?? null);
         }
       } catch (e) {
         if (!cancelled) {
           setData(null);
+          setCurrentRun(null);
           setFailed(detailOf(e));
         }
       } finally {
@@ -93,7 +249,8 @@ export function MoverRecallPanel() {
     return () => {
       cancelled = true;
     };
-  }, [nonce]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, payloadNonce]);
 
   const tierName = (period: string): string => {
     const suffix = horizonSuffix(period);
@@ -105,17 +262,161 @@ export function MoverRecallPanel() {
   const marketName = (type: string): string =>
     t(`stockAnalysis.moverRecall.marketType.${type}`, { defaultValue: type });
 
+  /** 换链只换内存里那一份视图，不重发命令 —— 同一次核查的两链视图是同一次算出来的。 */
+  const switchChain = (next: string) => {
+    const hit = chains.find((v) => v.chain === next);
+    if (hit) {
+      setChain(hit.chain);
+      applyPayload(hit, null);
+    }
+  };
+
+  /** 链名目一律走 `chain_<值>` 键；后端 `CHAIN_UNLABELED` 那一档另有说明句。 */
+  const chainName = (value?: string | null): string =>
+    value ? t(`stockAnalysis.moverRecall.chain_${value}`, { defaultValue: value }) : "-";
+
+  const runOptions = [
+    ...runs.map((r) => ({
+      value: r.id,
+      label: t("stockAnalysis.moverRecall.runOption", {
+        from: r.dateFrom,
+        to: r.dateTo,
+        chain: chainName(r.chain ?? "unlabeled"),
+        events: r.eventsTotal,
+        misses: r.missCount,
+      }),
+    })),
+    { value: LIVE_SOURCE, label: t("stockAnalysis.moverRecall.runOptionLive") },
+  ];
+
   return (
     <Card
       size="small"
       title={t("stockAnalysis.moverRecall.title")}
       extra={
-        <Button size="small" loading={loading} onClick={() => setNonce((n) => n + 1)}>
-          {t("stockAnalysis.moverRecall.refresh")}
-        </Button>
+        <Space size={6}>
+          {chains.length > 1
+            ? (
+              <Select
+                size="small"
+                style={{ minWidth: 120 }}
+                aria-label={t("stockAnalysis.moverRecall.chainSelector")}
+                data-testid="mover-recall-chain-select"
+                value={chain}
+                options={chains.map((v) => ({ value: v.chain, label: chainName(v.chain) }))}
+                onChange={(v: string) => switchChain(v)}
+              />
+            )
+            : null}
+          <Select
+            size="small"
+            style={{ minWidth: 220 }}
+            aria-label={t("stockAnalysis.moverRecall.runSelector")}
+            data-testid="mover-recall-run-select"
+            value={selectedId ?? LIVE_SOURCE}
+            options={runOptions}
+            onChange={(v: string) => {
+              setRunGone(null);
+              setSelectedId(v);
+            }}
+          />
+          <Button
+            size="small"
+            loading={loading}
+            onClick={() => {
+              setListNonce((n) => n + 1);
+              setPayloadNonce((n) => n + 1);
+            }}
+          >
+            {t("stockAnalysis.moverRecall.refresh")}
+          </Button>
+        </Space>
       }
       styles={{ body: { padding: "8px 10px", fontSize: 12 } }}
     >
+      {/* D-5：还没有任何已落库轮次 ≠ 核查过但没有漏检，两句必须分开 */}
+      {runs.length === 0
+        ? (
+          <div
+            style={{ color: "var(--color-text-tertiary)", marginBottom: 6 }}
+            data-testid="mover-recall-runs-empty"
+          >
+            {t("stockAnalysis.moverRecall.runsEmpty")}
+          </div>
+        )
+        : null}
+
+      {/* 指定的轮次不在库内（换库 / 截断 / 深链过期）⇒ 单独成句，不混进 failed */}
+      {runGone
+        ? (
+          <div
+            style={{ color: "var(--sa-warning, #faad14)", marginBottom: 6 }}
+            data-testid="mover-recall-run-gone"
+          >
+            {t("stockAnalysis.moverRecall.runGone", { id: runGone })}
+          </div>
+        )
+        : null}
+
+      {/* D-3：0 批补分析不得显示成「没有待补」—— 那是「从没跑过」，不是「都补过了」 */}
+      {batchInfo
+        ? (
+          <div
+            style={{ color: "var(--color-text-tertiary)", marginBottom: 6 }}
+            data-testid={`mover-batches-${batchInfo.kind}`}
+          >
+            {batchInfo.kind === "never"
+              ? t("stockAnalysis.moverRecall.batchesNever")
+              : batchInfo.kind === "latest"
+              ? t("stockAnalysis.moverRecall.batchesLatest", { status: batchInfo.status })
+              : t("stockAnalysis.moverRecall.batchesUnknown")}
+          </div>
+        )
+        : null}
+
+      {/* A-2：本轮账属于哪条链。混池轮次（分链改造之前落的）单独成句，不冒充某一链。 */}
+      {data
+        ? (
+          <div style={{ marginBottom: 6 }} data-testid="mover-recall-chain">
+            <span style={{ color: "var(--color-text-secondary)" }}>
+              {t("stockAnalysis.moverRecall.chainLabel")}
+              {": "}
+              <strong>{chainName(data.chain)}</strong>
+            </span>
+            {data.chain === "unlabeled"
+              ? (
+                <span
+                  style={{ color: "var(--sa-warning, #faad14)", marginLeft: 6 }}
+                  data-testid="mover-recall-chain-unlabeled"
+                >
+                  {t("stockAnalysis.moverRecall.chainUnlabeledNote")}
+                </span>
+              )
+              : null}
+          </div>
+        )
+        : null}
+
+      {/* 本轮来源自报：已落库轮次（含落库时刻）还是现场重算 */}
+      {data
+        ? (
+          <div
+            style={{ color: "var(--color-text-secondary)", marginBottom: 6 }}
+            data-testid="mover-recall-source"
+          >
+            {currentRun
+              ? t("stockAnalysis.moverRecall.sourceStored", {
+                id: currentRun.id,
+                at: new Date(currentRun.createdAtMs).toLocaleString(),
+                from: currentRun.dateFrom,
+                to: currentRun.dateTo,
+                events: currentRun.eventsTotal,
+                misses: currentRun.missCount,
+              })
+              : t("stockAnalysis.moverRecall.sourceLive")}
+          </div>
+        )
+        : null}
       {loading && !data
         ? <Spin size="small" style={{ display: "block", margin: "16px auto" }} />
         : null}
@@ -190,9 +491,18 @@ export function MoverRecallPanel() {
                   style={{ color: "var(--color-text-tertiary)" }}
                   data-testid="mover-recall-empty"
                 >
+                  {/* C-2 三态：全满 ⇒ 结论；全未满 ⇒ 尚不可判定；部分满 ⇒ 点名未满档 */}
                   {data.rules.every((r) => data.collectedDays >= r.windowDays)
                     ? t("stockAnalysis.moverRecall.empty")
-                    : t("stockAnalysis.moverRecall.emptyNotYet", { have: data.collectedDays })}
+                    : data.rules.every((r) => data.collectedDays < r.windowDays)
+                    ? t("stockAnalysis.moverRecall.emptyNotYet", { have: data.collectedDays })
+                    : t("stockAnalysis.moverRecall.emptyNotYetTiers", {
+                      have: data.collectedDays,
+                      tiers: data.rules
+                        .filter((r) => data.collectedDays < r.windowDays)
+                        .map((r) => tierName(r.period))
+                        .join(" / "),
+                    })}
                 </div>
               )
               : null}
@@ -222,7 +532,34 @@ export function MoverRecallPanel() {
                         })}
                       </span>
                     )
-                    : null}
+                    : data.eventsByTier == null
+                    ? (
+                      <span
+                        style={{ color: "var(--color-text-tertiary)", marginLeft: 6 }}
+                        data-testid={`mover-tier-count-missing-${r.period}`}
+                      >
+                        {t("stockAnalysis.moverRecall.tierCountMissing")}
+                      </span>
+                    )
+                    : (data.eventsByTier[r.period] ?? 0) === 0
+                    ? (
+                      <span
+                        style={{ color: "var(--color-text-tertiary)", marginLeft: 6 }}
+                        data-testid={`mover-tier-no-events-${r.period}`}
+                      >
+                        {t("stockAnalysis.moverRecall.tierNoEvents")}
+                      </span>
+                    )
+                    : (
+                      <span
+                        style={{ color: "var(--color-text-tertiary)", marginLeft: 6 }}
+                        data-testid={`mover-tier-events-${r.period}`}
+                      >
+                        {t("stockAnalysis.moverRecall.tierEvents", {
+                          count: data.eventsByTier[r.period],
+                        })}
+                      </span>
+                    )}
                 </li>
               ))}
             </ul>

@@ -40,14 +40,27 @@ use tauri::State;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use super::error::ErrorResponse;
+use super::error_code::common as common_err;
 use super::error_code::mover_recall_analysis as ec;
 use super::pool_scan::{PoolCandidate, run_analysis_for_candidates};
 use super::time_travel_batch::in_live_window;
 use crate::app_state::AppState;
 
-/// 任务类型常量（P3+ 挂调度时与种子 / 前端白名单对齐；P2 仅手动发起，暂无消费者）。
-#[allow(dead_code)]
-pub const MOVER_RECALL_ANALYSIS_TASK_TYPE: &str = "mover-recall-analysis";
+/// 任务类型常量。
+///
+/// 2026-10-20 起有**两个**触发方：内置定时任务 `mover-recall-analysis-daily`（播种见
+/// `init/stock_automation_cron_seed.rs`）与任务中心「立即执行」。值同时登记在
+/// `scheduled_task::BUILTIN_TASK_TYPES` 与前端 `taskGrouping.ts` 的两处白名单，
+/// 三者由 `scripts/check-task-type-whitelist.mjs` 逐值对表 —— 漏一处不是报错，
+/// 而是「到点自动跑、手动点它说不支持」这种只在手动时露头的缺陷。
+pub use crate::commands::constants::MOVER_RECALL_ANALYSIS_TASK_TYPE;
+
+/// 内置定时任务单轮补分析的事件数上限。
+///
+/// 为什么是 10 而不是手动面板的 20：cron 每天跑，配额×频次才是真实日消耗；
+/// 且它打的是 as-of 历史行情链（push2 族在本机是速率触发 RST），一轮 10 只已经把
+/// 请求量摊开在不同天，而不是把通道打死。面板手动发起仍是 20（`default_batch_limit`）。
+pub const CRON_BATCH_LIMIT: usize = 10;
 
 static BATCH_RUNS: LazyLock<Arc<Mutex<HashMap<String, MoverBatchState>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
@@ -84,6 +97,43 @@ fn default_batch_limit() -> usize {
 }
 fn default_max_unexplained_share() -> f64 {
     0.5
+}
+
+impl RunMoverRecallAnalysisRequest {
+    /// 内置定时任务的批次参数：配额取 [`CRON_BATCH_LIMIT`]，轮次不限（跨全部已落库轮次选样）。
+    pub fn cron_default() -> Self {
+        Self {
+            batch_limit: CRON_BATCH_LIMIT,
+            max_unexplained_share: default_max_unexplained_share(),
+            run_id: None,
+        }
+    }
+
+    /// 写进 `cron_jobs.prompt`（与 `PoolScanConfig::to_json` 同族形态）。
+    pub fn to_json(&self) -> Result<String, String> {
+        serde_json::to_string(self).map_err(|e| {
+            ErrorResponse::err_with_detail(
+                common_err::INTERNAL,
+                format!("序列化 {MOVER_RECALL_ANALYSIS_TASK_TYPE} 配置失败: {e}"),
+            )
+        })
+    }
+
+    /// 读回 `cron_jobs.prompt`。
+    ///
+    /// 空串是**正常形态**（种子任务也会写空 = 全用缺省）；非空却解不出来一律 `Err` ——
+    /// 静默回退缺省会把用户设在任务面板里的配额悄悄换成 10，而列表里显示的仍是原文。
+    pub fn from_json(raw: &str) -> Result<Self, String> {
+        if raw.trim().is_empty() {
+            return Ok(Self::cron_default());
+        }
+        serde_json::from_str(raw).map_err(|e| {
+            ErrorResponse::err_with_detail(
+                common_err::INVALID_INPUT,
+                format!("漏检补分析配置解析失败: {e}"),
+            )
+        })
+    }
 }
 
 /// 批次内逐票状态（序列化给前端明细抽屉；从 events 表反查重建）。
@@ -277,6 +327,40 @@ pub async fn run_mover_recall_analysis(
     state: State<'_, AppState>,
     request: RunMoverRecallAnalysisRequest,
 ) -> Result<String, String> {
+    launch(
+        &state.time_travel_batch_lock,
+        state.harness.db().clone(),
+        state.astock_client.clone(),
+        state.work_engine.clone(),
+        request,
+    )
+    .await
+}
+
+/// 供调度器分支发起一轮补分析：cron 拿不到 `tauri::State`，只能拿调度器已持有的零件
+/// （同 `analyze_mover_recall_inner` 的既有理由）。校验与抢锁判据与手动命令**共用** [`launch`]。
+///
+/// 返回的 `Ok(batch_id)` 只表示**已发起**：批次跑在独立多线程 runtime（as-of 链要 32MB 栈），
+/// 调用方不等它。因此 cron 的任务历史写「已发起 + batchId」，逐票成败看任务中心
+/// 「漏检补分析」来源 —— 两侧都不假装知道终态。
+pub(crate) async fn start_for_scheduler(
+    asof_lock: &Arc<Mutex<()>>,
+    db: axagent_harness::DatabaseConnection,
+    client: Arc<AStockClient>,
+    engine: Arc<axagent_rt_workflow::work_engine::WorkEngine>,
+    request: RunMoverRecallAnalysisRequest,
+) -> Result<String, String> {
+    launch(asof_lock, db, client, engine, request).await
+}
+
+/// 校验 → live 时间窗拒绝 → 抢全局 as-of 批次锁 → 落批次起点 → 后台发起。
+async fn launch(
+    asof_lock: &Arc<Mutex<()>>,
+    db: axagent_harness::DatabaseConnection,
+    client: Arc<AStockClient>,
+    engine: Arc<axagent_rt_workflow::work_engine::WorkEngine>,
+    request: RunMoverRecallAnalysisRequest,
+) -> Result<String, String> {
     if request.batch_limit == 0 || request.batch_limit > 100 {
         return Err(ErrorResponse::err_with_detail(
             ec::INVALID_PARAMS,
@@ -299,21 +383,14 @@ pub async fn run_mover_recall_analysis(
     }
 
     // 全局 as-of 批次互斥（与时间旅行批次共用同一把锁）
-    let permit = state
-        .time_travel_batch_lock
-        .clone()
-        .try_lock_owned()
-        .map_err(|_| ErrorResponse::err(ec::ALREADY_RUNNING))?;
+    let permit =
+        asof_lock.clone().try_lock_owned().map_err(|_| ErrorResponse::err(ec::ALREADY_RUNNING))?;
 
-    let db = state.harness.db().clone();
     ensure_stale_reaped(&db).await;
 
     let batch_id = uuid::Uuid::new_v4().to_string();
     save_state(&db, MoverBatchState::new(batch_id.clone(), request.clone())).await;
     let batch_id_to_return = batch_id.clone();
-
-    let client = state.astock_client.clone();
-    let engine = state.work_engine.clone();
 
     // 同时间旅行批次：独立多线程 runtime + 32MB 栈（Tauri 默认 2MB worker 栈会溢出，
     // 且引擎链路含 block_in_place，current-thread runtime 会 panic）。
@@ -777,5 +854,53 @@ async fn finish_item_failed(
 fn update_item(s: &mut MoverBatchState, event_id: &str, f: impl FnOnce(&mut EventItem)) {
     if let Some(it) = s.items.iter_mut().find(|it| it.event_id == event_id) {
         f(it);
+    }
+}
+
+#[cfg(test)]
+mod cron_config_tests {
+    use super::*;
+
+    /// 内置任务的配额来自 [`CRON_BATCH_LIMIT`]，并且**写进 prompt 看得见**：
+    /// 任务行是用户能改的对象，把配额只留在代码里会让面板显示与实跑两套。
+    #[test]
+    fn cron_request_roundtrips_through_job_prompt() {
+        let raw = RunMoverRecallAnalysisRequest::cron_default().to_json().unwrap();
+        assert!(raw.contains(&CRON_BATCH_LIMIT.to_string()), "prompt 应带上配额，实得 {raw}");
+        let back = RunMoverRecallAnalysisRequest::from_json(&raw).unwrap();
+        assert_eq!(back.batch_limit, CRON_BATCH_LIMIT);
+        assert_eq!(back.max_unexplained_share, 0.5);
+        assert_eq!(back.run_id, None);
+    }
+
+    /// 空 prompt = 正常形态（用缺省）；非空却解不出来 = 显式 `Err`，不静默兜底。
+    #[test]
+    fn cron_prompt_empty_is_default_but_garbage_is_error() {
+        assert_eq!(
+            RunMoverRecallAnalysisRequest::from_json("").unwrap().batch_limit,
+            CRON_BATCH_LIMIT
+        );
+        assert!(RunMoverRecallAnalysisRequest::from_json("   ").unwrap().run_id.is_none());
+        assert!(RunMoverRecallAnalysisRequest::from_json("not json").is_err());
+    }
+
+    /// 字段名只认 camelCase（与手动命令同一套 serde 契约）。
+    /// 这条是防「种子写 batchLimit、读侧认 batch_limit」——snake 拼写会被当成缺字段，
+    /// 配额静默落回缺省且不报错，正是本轮要消灭的形态。
+    #[test]
+    fn cron_prompt_requires_camel_case_keys() {
+        let ok = RunMoverRecallAnalysisRequest::from_json(
+            r#"{"batchLimit":3,"maxUnexplainedShare":0.25}"#,
+        )
+        .unwrap();
+        assert_eq!(ok.batch_limit, 3);
+        assert_eq!(ok.max_unexplained_share, 0.25);
+
+        let snake = RunMoverRecallAnalysisRequest::from_json(r#"{"batch_limit":3}"#).unwrap();
+        assert_eq!(
+            snake.batch_limit,
+            default_batch_limit(),
+            "snake 拼写必须落回缺省（证明读侧只认 camelCase，也证明拼错的后果是静默而非报错）"
+        );
     }
 }

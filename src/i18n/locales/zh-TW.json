@@ -7417,7 +7417,8 @@
       "duration": "耗時",
       "result": "結果",
       "detail": "明細",
-      "empty": "尚無執行紀錄"
+      "empty": "尚無執行紀錄",
+      "openMoverRun": "在漏檢面板檢視該輪"
     },
     "create": {
       "button": "新任務",
@@ -15866,6 +15867,16 @@
       "empty": "本區間無達標事件（判據為視窗累計漲幅）",
       "emptyNotYet": "視窗未滿：未滿檔位尚無法判定，已滿檔位無達標事件（已採 {{have}} 個交易日，見下方檔位標註）",
       "windowOpen": "視窗未滿（已採 {{have}} 個 / 需 {{need}} 個交易日）",
+      "emptyNotYetTiers": "視窗未滿：{{tiers}} 尚不可判定；已滿檔位已無達標事件（已採 {{have}} 個交易日）",
+      "tierNoEvents": "本檔無達標事件",
+      "tierCountMissing": "本輪未記錄逐檔計數",
+      "tierEvents": "本檔 {{count}} 個達標事件",
+      "batchesNever": "補分析批次：從未發起（0 批）—— 漏檢列不會被補分析，反思也就拿不到樣本",
+      "batchesLatest": "補分析批次：最近一批 {{status}}（逐票結果見任務中心「漏檢補分析」）",
+      "batchesUnknown": "補分析批次：狀態讀取失敗（不表示從未發起）",
+      "reflowNone": "回灌候選：暫無（沒有反思判定「本應入池」的事件）",
+      "reflowPending": "回灌候選 {{count}} 隻 · 距轉正還需 {{need}} 個已結算樣本（目前 shadow，不併入種子）",
+      "reflowReady": "回灌候選 {{count}} 隻 · 判據已滿足（仍需人工確認後才併入種子）",
       "rulesTitle": "四檔判據（閾值走範本變數，視窗天數取檔位唯一來源）",
       "rule": "{{tier}}檔：視窗累計漲幅 ≥ {{gain}}%（{{days}} 個交易日；變數 {{var}}）",
       "rulesMissing": "{{count}} 檔判據不成立（閾值變數非正數），本檔未參與核查",
@@ -15935,7 +15946,20 @@
         "rfPending": "反思排隊中",
         "rfRunning": "反思生成中",
         "rfFailed": "反思失敗：{{detail}}"
-      }
+      },
+      "runSelector": "核查輪次",
+      "runOption": "{{from}} ~ {{to}} · {{chain}} · 事件 {{events}} · 漏檢 {{misses}}",
+      "runOptionLive": "現場重算（不落庫）",
+      "sourceStored": "本輪來源：已落庫核查輪次 {{id}}（落庫於 {{at}}），區間 {{from}} ~ {{to}}，達標事件 {{events}}、漏檢 {{misses}}。面板不重算，讀的就是那一次落庫的結果。",
+      "sourceLive": "本輪來源：現場重算，不是任何一次已落庫的核查輪次（不寫庫；展開列的補分析復盤按最新事件列查詢）。",
+      "runsEmpty": "還沒有任何已落庫的核查輪次（排程任務「妖股漏檢核查」尚未執行）⇒ 下面顯示的是現場重算結果。",
+      "runGone": "指定的核查輪次 {{id}} 不在已落庫清單內（可能換過庫或清單被截斷）⇒ 已退回現場重算。",
+      "chainSelector": "鏈",
+      "chainLabel": "本份帳所屬鏈",
+      "chain_reco": "智能薦股",
+      "chain_serenity": "趨勢智選",
+      "chain_unlabeled": "未分鏈（舊輪次）",
+      "chainUnlabeledNote": "這一輪落在分鏈改造之前，是智能薦股與趨勢智選的混池口徑 ⇒ 不能當成任何一條鏈單獨的帳。"
     },
     "export": {
       "analystReports": "分析师报告",

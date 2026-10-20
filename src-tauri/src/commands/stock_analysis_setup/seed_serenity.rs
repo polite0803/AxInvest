@@ -106,7 +106,7 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     //        补齐，DB 里它是漏绑的那一个）；② 19 个节点 position 对齐 DB 现值。
     //      抬到 60 = DB 现值 + 1，是让「代码重新成为权威」的必要条件；在此之前 version(59) >
     //      常量(53) 恒走「跳过重建」，代码侧任何图改动都落不了库。
-    const TEMPLATE_VERSION: i32 = 60;
+    const TEMPLATE_VERSION: i32 = 61;
 
     let now = chrono::Utc::now().timestamp_millis();
 
@@ -202,6 +202,9 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
          **优先围绕用户主题**展开：直接基于该主题识别产业趋势并完成结构化输出（trend_name 需包含主题关键词、strategy_type、\
          bottleneck_candidate、demand_evidence 必须给可验证硬证据或如实标注证据缺口）。此时行业排名/快讯/北向数据仅作辅助验证，\
          不因数据缺失而拒绝输出。若 `user_themes` 为空，按原逻辑从市场数据自由扫描。\
+         **窗口涨幅达标清单（输入面素材，不是入选理由）**：若 `mover_watchlist` 非空，它按窗口累计涨幅\
+         列出最近一个收盘日的达标票（判据与面板同源）。你必须**优先核对**其中是否有能与产业链趋势对上的标的，\
+         但入选门槛不降——仍须给出产业链位置与瓶颈证据，禁止仅因「在清单里」就把该票列为候选。\
          \n\n\
          **数据可用性检查（重要——违反将产生无效趋势）**：\
          \n\
@@ -254,6 +257,7 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     ts_input_mapping.insert("industry_ranking".to_string(), "t-industry-rank.result".to_string());
     ts_input_mapping.insert("policy_news".to_string(), "t-policy-news.result".to_string());
     ts_input_mapping.insert("user_themes".to_string(), "user_themes".to_string());
+    ts_input_mapping.insert("mover_watchlist".to_string(), "mover_watchlist".to_string());
     nodes.push(agent_node(
         "a-trend-scanner",
         "产业趋势扫描",
@@ -1652,6 +1656,17 @@ pub(crate) fn build_serenity_variables() -> Vec<axagent_harness::workflow_types:
             ),
             is_secret: false,
         },
+        // ── B-1 新增：窗口涨幅达标清单（运行期由 mover_recall 注入；as-of 回放显式声明本代无清单）──
+        Variable {
+            name: "mover_watchlist".into(),
+            var_type: "string".into(),
+            value: serde_json::json!(""),
+            description: Some(
+                "系统注入：最新收盘日窗口涨幅达标清单（输入面素材，不构成入选理由；as-of 回放为空并声明原因）"
+                    .into(),
+            ),
+            is_secret: false,
+        },
     ];
     serenity_vars
 }
@@ -1673,7 +1688,7 @@ mod serenity_version_gate_tests {
     /// ⚠ 它是**副本**：改源码里那个常量时必须一起改。不同步**不会静默失效** ——
     /// 状态①的 `assert_eq!(version, Some(TEMPLATE_VERSION))` 会当场失败（写成本测试的
     /// 第一道断言就是为了这个）。宁可响亮地红，也不要一条「看着在跑、其实没在测」的测试。
-    const TEMPLATE_VERSION: i32 = 60;
+    const TEMPLATE_VERSION: i32 = 61;
 
     async fn fresh_db() -> axagent_dao::db::DbHandle {
         axagent_dao::db::create_test_pool().await.expect("建临时测试库失败")

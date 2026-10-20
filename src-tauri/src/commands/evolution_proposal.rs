@@ -287,7 +287,17 @@ pub async fn run_evolution_proposal_inner(
     let mut mover_blocked_total = 0u64;
     let mut mover_run_ids = Vec::new();
     let mut blocked_mover_run_ids = Vec::new();
+    // A-2 起一次核查每链各落一行。本函数产的是**荐股链**的参数计划 ⇒ 智选链轮次在此跳过；
+    // 未标链的旧轮次（混池口径）按现状继续计入 —— 把它们排掉会静默丢掉全部历史样本，
+    // 比口径不纯更坏。跳过条数走日志留痕，不悄悄消失。
+    let mut serenity_runs_skipped = 0usize;
     for run in &mover_runs {
+        if run.chain.as_deref()
+            == Some(axagent_analysis_engine::mover_recall::RecoChain::Serenity.as_str())
+        {
+            serenity_runs_skipped += 1;
+            continue;
+        }
         let (business, blocked) = classify_mover_misses(run.misses_json.as_deref());
         if business > 0 {
             mover_run_ids.push(run.id.clone());
@@ -297,6 +307,13 @@ pub async fn run_evolution_proposal_inner(
         }
         mover_business_total += business;
         mover_blocked_total += blocked;
+    }
+
+    if serenity_runs_skipped > 0 {
+        tracing::info!(
+            "[evolution-proposal] 跳过 {} 个趋势智选链核查轮次（本计划只产荐股链参数，A-2 分链）",
+            serenity_runs_skipped
+        );
     }
 
     let counts = ProposalSampleCounts {

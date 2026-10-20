@@ -124,6 +124,9 @@ const BUILTIN_TASK_TYPES: &[&str] = &[
     crate::commands::opc_demand_subscription::SCAN_JOB_TASK_TYPE,
     crate::commands::backtest_validation::DECISION_BACKTEST_TASK_TYPE,
     crate::commands::constants::MOVER_RECALL_TASK_TYPE,
+    // 漏检事件补分析（2026-10-20 A-1）：与种子、services.rs 分支、前端 taskGrouping.ts 同步。
+    crate::commands::constants::MOVER_RECALL_ANALYSIS_TASK_TYPE,
+    crate::commands::constants::UNIVERSE_SCAN_TASK_TYPE,
     crate::commands::constants::EVOLUTION_PROPOSAL_TASK_TYPE,
     crate::commands::constants::LESSON_VALIDATION_TASK_TYPE,
     crate::commands::constants::PORTFOLIO_METRICS_TASK_TYPE,

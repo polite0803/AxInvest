@@ -83,6 +83,7 @@ fn close_row(
     pre_close: f64,
     change_pct: f64,
     amount: f64,
+    volume: f64,
 ) -> Option<market_daily_close::ActiveModel> {
     if code.is_empty() || trade_date.is_empty() {
         return None;
@@ -94,6 +95,16 @@ fn close_row(
     if price <= 0.0 || pre_close <= 0.0 {
         return None;
     }
+    // 成交额：源不给（0/非有限）时用 close × volume 推定 —— 解析层已把「手」换成「股」、
+    // 「万」换成「元」⇒ 乘积单位就是元，与阈值的 1 亿同单位。
+    // 两者都拿不到 ⇒ 保留 0 = 「未采集」（读侧按 0 跳过流动性判据），绝不写一个假的 0 成交。
+    let (amount_value, source_tag) = if amount.is_finite() && amount > 0.0 {
+        (amount, "tencent_batch")
+    } else if volume.is_finite() && volume > 0.0 {
+        (price * volume, "tencent_batch+amount_est")
+    } else {
+        (0.0, "tencent_batch")
+    };
     Some(market_daily_close::ActiveModel {
         id: Set(format!("{code}@{trade_date}")),
         stock_code: Set(code.to_string()),
@@ -102,15 +113,22 @@ fn close_row(
         close: Set(price),
         prev_close: Set(pre_close),
         change_pct: Set(change_pct),
-        // 成交额：源不给时落 0（含义=未采集，不是「没有成交」；读侧按 0 跳过流动性判据）
-        amount: Set(if amount.is_finite() && amount > 0.0 {
-            amount
-        } else {
-            0.0
-        }),
+        amount: Set(amount_value),
         collected_at: Set(now_ms),
-        source: Set("tencent_batch".to_string()),
+        // 推定值与真值必须可分辨：读侧判据（amount=0 OR ≥1亿）不变，但审计能看出这一行是推的
+        source: Set(source_tag.to_string()),
     })
+}
+
+/// 段扫专用入口：只登记代码 —— `confirm = false` ⇒ `last_confirmed_at` 保持 0（不算东财全量确认）、
+/// 行业列不覆写。清单计数不会被段扫灌成「已确认」。
+pub(crate) async fn upsert_universe_registered(
+    db: &sea_orm::DatabaseConnection,
+    entries: &[(String, String, Option<String>)],
+    origin: &str,
+    now_ms: i64,
+) -> Result<u32, String> {
+    Ok(upsert_universe(db, entries, origin, now_ms, false).await as u32)
 }
 
 async fn upsert_universe(
@@ -312,6 +330,7 @@ pub async fn run_close_sweep(
                         q.pre_close,
                         q.change_pct,
                         q.amount,
+                        q.volume,
                     ) else {
                         skipped_no_data += 1;
                         continue;
@@ -422,21 +441,62 @@ mod tests {
 
     #[test]
     fn valid_row_is_written_with_date_scoped_id() {
-        let am = close_row("600059", "古越龙山", "2026-09-30", 1, 12.27, 11.15, 10.04, 1.23e8)
-            .expect("有效行情应落行");
+        let am =
+            close_row("600059", "古越龙山", "2026-09-30", 1, 12.27, 11.15, 10.04, 1.23e8, 1.0e7)
+                .expect("有效行情应落行");
         assert_eq!(am.id.unwrap(), "600059@2026-09-30");
         assert_eq!(am.change_pct.unwrap(), 10.04);
         assert_eq!(am.amount.unwrap(), 1.23e8, "成交额必须落库（P-m ① 的数据源）");
+        assert_eq!(am.source.unwrap(), "tencent_batch", "真值行不得带推定后缀");
     }
 
     #[test]
     fn suspended_or_zero_prev_close_is_skipped_not_zeroed() {
         // 停牌/缺昨收 ⇒ None（不落行），绝不能写成 change_pct=0 的"没涨"
-        assert!(close_row("600059", "古越龙山", "2026-09-30", 1, 12.27, 0.0, 0.0, 0.0).is_none());
-        assert!(close_row("600059", "古越龙山", "2026-09-30", 1, 0.0, 11.15, 10.04, 0.0).is_none());
         assert!(
-            close_row("600059", "古越龙山", "2026-09-30", 1, f64::NAN, 11.15, 10.04, 0.0).is_none()
+            close_row("600059", "古越龙山", "2026-09-30", 1, 12.27, 0.0, 0.0, 0.0, 0.0).is_none()
         );
-        assert!(close_row("", "x", "2026-09-30", 1, 1.0, 1.0, 1.0, 0.0).is_none());
+        assert!(
+            close_row("600059", "古越龙山", "2026-09-30", 1, 0.0, 11.15, 10.04, 0.0, 0.0).is_none()
+        );
+        assert!(close_row("600059", "古越龙山", "2026-09-30", 1, f64::NAN, 11.15, 10.04, 0.0, 0.0)
+            .is_none());
+        assert!(close_row("", "x", "2026-09-30", 1, 1.0, 1.0, 1.0, 0.0, 0.0).is_none());
+    }
+
+    /// C-3：源不给成交额时用 close × volume 推定（单位同为元），并打 `+amount_est` 后缀。
+    /// 没有这条，`amount=0` 的股票在流动门上恒走「未采集」分支 ⇒ 流动性维度长期空转。
+    #[test]
+    fn missing_amount_is_estimated_from_close_times_volume() {
+        let am = close_row("600059", "古越龙山", "2026-09-30", 1, 12.0, 11.0, 9.09, 0.0, 1.0e7)
+            .expect("有价格与成交量就应落行");
+        assert_eq!(am.amount.unwrap(), 1.2e8, "12.0 元 × 1e7 股 = 1.2e8 元");
+        assert_eq!(am.source.unwrap(), "tencent_batch+amount_est", "推定值必须可与真值分辨");
+    }
+
+    /// 负控：真值在 ⇒ 绝不改成推定值（即便 volume 也在）。
+    #[test]
+    fn source_amount_wins_over_estimate() {
+        let am = close_row("600059", "古越龙山", "2026-09-30", 1, 12.0, 11.0, 9.09, 5.0e7, 1.0e7)
+            .expect("应落行");
+        assert_eq!(am.amount.unwrap(), 5.0e7, "真值优先");
+        assert_eq!(am.source.unwrap(), "tencent_batch");
+    }
+
+    /// 「两样都没有」仍是 0 = 未采集（读侧跳过流动性判据），不得用别的数假装有值。
+    #[test]
+    fn missing_both_keeps_zero_amount_and_base_source() {
+        let am = close_row("600059", "古越龙山", "2026-09-30", 1, 12.0, 11.0, 9.09, 0.0, 0.0)
+            .expect("价格有效仍应落行");
+        assert_eq!(am.amount.unwrap(), 0.0);
+        assert_eq!(am.source.unwrap(), "tencent_batch");
+    }
+
+    /// 负控：NaN 成交量不得被当成「有量」算出 NaN 成交额（NaN 会让 ≥1亿 判据恒假且无告警）。
+    #[test]
+    fn nan_volume_falls_back_to_uncollected() {
+        let am = close_row("600059", "古越龙山", "2026-09-30", 1, 12.0, 11.0, 9.09, 0.0, f64::NAN)
+            .expect("价格有效仍应落行");
+        assert_eq!(am.amount.unwrap(), 0.0);
     }
 }

@@ -2,6 +2,7 @@ import i18n from "@/i18n";
 import type { MoverRecallEventReview, MoverRecallView } from "@/types/stock-analysis";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MoverRecallPanel } from "../MoverRecallPanel";
 
@@ -24,10 +25,12 @@ const ROW_KEY = `${STOCK}-${ANCHOR}-${PERIOD}`;
 /** 带 1 条漏检行的核查视图（展开入口所在）。 */
 function makeViewWithMiss(): MoverRecallView {
   return {
+    chain: "reco",
     from: "2026-09-01",
     to: "2026-09-30",
     dataSince: "2026-01-01",
     collectedDays: 200,
+    eventsByTier: null,
     universeSize: 46,
     universeConfirmed: 46,
     rules: [
@@ -142,7 +145,9 @@ function makeReview(over: Partial<MoverRecallEventReview> = {}): MoverRecallEven
 function renderWithProviders() {
   return render(
     <I18nextProvider i18n={i18n}>
-      <MoverRecallPanel />
+      <MemoryRouter>
+        <MoverRecallPanel />
+      </MemoryRouter>
     </I18nextProvider>,
   );
 }
@@ -150,7 +155,7 @@ function renderWithProviders() {
 /** 核查视图渲染后点开漏检行；review 为 null/对象/throw 三选一。 */
 async function expandRow(review: MoverRecallEventReview | null | Error) {
   invokeMock.mockImplementation((cmd: string) => {
-    if (cmd === "analyze_mover_recall") { return Promise.resolve(makeViewWithMiss()); }
+    if (cmd === "analyze_mover_recall") { return Promise.resolve([makeViewWithMiss()]); }
     if (cmd === "get_mover_recall_event_review") {
       return review instanceof Error ? Promise.reject(review) : Promise.resolve(review);
     }

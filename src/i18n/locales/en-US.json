@@ -7417,7 +7417,8 @@
       "duration": "Duration",
       "result": "Result",
       "detail": "Details",
-      "empty": "No run history"
+      "empty": "No run history",
+      "openMoverRun": "View this run in the recall panel"
     },
     "create": {
       "button": "New Task",
@@ -15991,6 +15992,16 @@
       "empty": "No qualifying events in this range (criterion: cumulative window gain)",
       "emptyNotYet": "Window not yet filled: unfilled tiers are not yet decidable; filled tiers have no qualifying events ({{have}} trading days collected; see tier notes below)",
       "windowOpen": "Window not yet filled ({{have}}/{{need}} trading days collected)",
+      "emptyNotYetTiers": "Window incomplete: {{tiers}} not yet judgeable; the completed tiers had no qualifying events ({{have}} trading days collected)",
+      "tierNoEvents": "No qualifying events in this tier",
+      "tierCountMissing": "This run did not record per-tier counts",
+      "tierEvents": "{{count}} qualifying events in this tier",
+      "batchesNever": "Backfill batches: never started (0) — misses are not backfilled, so reflections get no samples",
+      "batchesLatest": "Backfill batches: latest {{status}} (per-stock results in Task Center)",
+      "batchesUnknown": "Backfill batches: status unavailable (this does NOT mean none were started)",
+      "reflowNone": "Reflow candidates: none (no reflection judged \"should have been in pool\")",
+      "reflowPending": "Reflow candidates {{count}} · {{need}} more settled samples before promotion (shadow; not merged into seed)",
+      "reflowReady": "Reflow candidates {{count}} · criteria met (merge still requires manual confirmation)",
       "rulesTitle": "Four-tier criteria (thresholds are template variables; window days come from the single tier source)",
       "rule": "{{tier}}: cumulative window gain ≥ {{gain}}% ({{days}} trading days; variable {{var}})",
       "rulesMissing": "{{count}} tier criteria not established (threshold variable not positive); excluded from this check",
@@ -16060,7 +16071,20 @@
         "rfPending": "Reflection queued",
         "rfRunning": "Generating reflection",
         "rfFailed": "Reflection failed: {{detail}}"
-      }
+      },
+      "runSelector": "Recall run",
+      "runOption": "{{from}} ~ {{to}} · {{chain}} · {{events}} events · {{misses}} missed",
+      "runOptionLive": "Recompute now (not stored)",
+      "sourceStored": "Source: stored recall run {{id}} (saved {{at}}), window {{from}} ~ {{to}}, {{events}} qualifying events, {{misses}} missed. The panel reads what that run saved; it does not recompute.",
+      "sourceLive": "Source: live recomputation. This is not one of the stored recall runs (nothing is written; an expanded row reads the latest event row).",
+      "runsEmpty": "No stored recall runs yet (the scheduled missed-mover check has not run). Shown below is a live recomputation.",
+      "runGone": "Recall run {{id}} is not in the stored list (database changed or trimmed). Fell back to live recomputation.",
+      "chainSelector": "Chain",
+      "chainLabel": "This set of numbers belongs to",
+      "chain_reco": "Smart recommendation",
+      "chain_serenity": "Trend screening",
+      "chain_unlabeled": "No chain (older run)",
+      "chainUnlabeledNote": "This run predates the per-chain split: its numbers pool smart recommendation and trend screening together, so they are not either chain's account."
     },
     "export": {
       "analystReports": "Analyst Reports",

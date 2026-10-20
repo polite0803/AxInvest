@@ -14,12 +14,18 @@ use axagent_entities::mover_recall_runs::{
     ActiveModel as RunActiveModel, Column as RunColumn, Entity as RunEntity,
 };
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, TransactionTrait};
+use sea_orm::{
+    ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    TransactionTrait,
+};
 
 /// 一轮核查的汇总快照（命令层组装的纯数据，不泄漏 `ActiveModel`）。
 #[derive(Debug, Clone)]
 pub struct RunSnapshotRecord {
     pub id: String,
+    /// 本轮归因所属链（`reco` | `serenity`），值域权威在 `analysis_engine::mover_recall::RecoChain`。
+    /// `None` 只应出现在历史数据读取路径 —— 新落库的轮次必须带链。
+    pub chain: Option<String>,
     pub date_from: String,
     pub date_to: String,
     pub data_since: String,
@@ -32,6 +38,8 @@ pub struct RunSnapshotRecord {
     pub events_total: i32,
     pub miss_count: i32,
     pub misses_json: Option<String>,
+    /// 逐档达标事件数 JSON；`None` 仅用于「这条记录本来就没算过」（面板第三态）。
+    pub events_by_tier_json: Option<String>,
     pub status: String,
     pub trigger_source: String,
     pub created_at_ms: i64,
@@ -42,6 +50,8 @@ pub struct RunSnapshotRecord {
 pub struct RunEventRecord {
     pub id: String,
     pub run_id: String,
+    /// 本行归因所属链（与所属 run 行的 `chain` 同值；冗余落库让补分析读侧不必回看 run）
+    pub chain: Option<String>,
     pub stock_code: String,
     pub stock_name: String,
     pub period: String,
@@ -70,6 +80,7 @@ pub async fn insert_run_snapshot(
 ) -> Result<(), DbErr> {
     let run_row = RunActiveModel {
         id: Set(run.id.clone()),
+        chain: Set(run.chain.clone()),
         date_from: Set(run.date_from.clone()),
         date_to: Set(run.date_to.clone()),
         data_since: Set(run.data_since.clone()),
@@ -82,6 +93,7 @@ pub async fn insert_run_snapshot(
         events_total: Set(run.events_total),
         miss_count: Set(run.miss_count),
         misses_json: Set(run.misses_json.clone()),
+        events_by_tier_json: Set(run.events_by_tier_json.clone()),
         status: Set(run.status.clone()),
         trigger_source: Set(run.trigger_source.clone()),
         created_at_ms: Set(run.created_at_ms),
@@ -92,6 +104,7 @@ pub async fn insert_run_snapshot(
         .map(|e| EventActiveModel {
             id: Set(e.id.clone()),
             run_id: Set(e.run_id.clone()),
+            chain: Set(e.chain.clone()),
             stock_code: Set(e.stock_code.clone()),
             stock_name: Set(e.stock_name.clone()),
             period: Set(e.period.clone()),
@@ -110,6 +123,8 @@ pub async fn insert_run_snapshot(
             analysis_id: Set(None),
             reflection_id: Set(None),
             status: Set(e.status.clone()),
+            // 新落库的事件一律无回灌备注（D-4 的盖章只发生在反思侧）
+            reflow_note: Set(None),
             error_detail: Set(None),
             created_at_ms: Set(e.created_at_ms),
             updated_at_ms: Set(e.created_at_ms),
@@ -140,4 +155,17 @@ pub async fn list_runs_since(
     since_ms: i64,
 ) -> Result<Vec<RunModel>, DbErr> {
     RunEntity::find().filter(RunColumn::CreatedAtMs.gte(since_ms)).all(db).await
+}
+
+/// 最近 `limit` 轮核查，按落库时刻倒序（面板轮次选择器用）。
+///
+/// 刻意**不**在这里做截断/投影：载荷字段（四份 JSON）由命令层按需解析，
+/// dao 只负责「按时间倒序把轮次取出来」，避免同一条排序判据在两处各写一遍。
+pub async fn list_recent_runs(db: &DatabaseConnection, limit: u64) -> Result<Vec<RunModel>, DbErr> {
+    RunEntity::find().order_by_desc(RunColumn::CreatedAtMs).limit(limit).all(db).await
+}
+
+/// 按主键取一轮核查（读回那一轮的载荷用）；查无返回 `Ok(None)`。
+pub async fn fetch_run(db: &DatabaseConnection, run_id: &str) -> Result<Option<RunModel>, DbErr> {
+    RunEntity::find_by_id(run_id.to_owned()).one(db).await
 }

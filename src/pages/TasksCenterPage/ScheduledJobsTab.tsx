@@ -30,6 +30,9 @@ import { canExecuteNow, classifyScheduledTask, isBuiltinTask, type ScheduledTask
 
 const AUTO_REFRESH_INTERVAL_MS = 15_000;
 
+/** 妖股漏检核查的调度输出末尾带 `run_id=<mrr-…>`；据此把「这一次执行」接回面板轮次（D-5）。 */
+const MOVER_RUN_ID_PATTERN = /run_id=([0-9a-zA-Z-]+)/;
+
 /** 分组筛选值 */
 type GroupFilter = "all" | ScheduledTaskGroup;
 
@@ -533,20 +536,37 @@ export function ScheduledJobsTab() {
               // 运行记录这两个字段可能带的是后端 ErrorResponse 的 **JSON 串**（命令层按
               // 错误码规范返回），不译会让界面出现 `{"code":"...","detail":"..."}` 字面量；
               // 非 JSON 的自由文本原样透传（translateBackendError 的零回归路径）。
-              render: (_: unknown, r: TaskExecutionRecord) =>
-                r.error
-                  ? (
-                    <Typography.Text type="danger" style={{ fontSize: 12 }}>
-                      {translateBackendError(r.error)}
-                    </Typography.Text>
-                  )
-                  : r.output
-                  ? (
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      {translateBackendError(r.output)}
-                    </Typography.Text>
-                  )
-                  : "-",
+              render: (_: unknown, r: TaskExecutionRecord) => {
+                const moverRun = MOVER_RUN_ID_PATTERN.exec(r.output ?? "")?.[1] ?? null;
+                return (
+                  <>
+                    {r.error
+                      ? (
+                        <Typography.Text type="danger" style={{ fontSize: 12 }}>
+                          {translateBackendError(r.error)}
+                        </Typography.Text>
+                      )
+                      : r.output
+                      ? (
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          {translateBackendError(r.output)}
+                        </Typography.Text>
+                      )
+                      : "-"}
+                    {moverRun
+                      ? (
+                        <Typography.Link
+                          style={{ fontSize: 12, marginLeft: 8 }}
+                          data-testid="open-mover-run"
+                          onClick={() => navigate(`/invest?tab=workspace&view=backtest&moverRun=${moverRun}`)}
+                        >
+                          {t("tasksCenter.history.openMoverRun")}
+                        </Typography.Link>
+                      )
+                      : null}
+                  </>
+                );
+              },
             },
           ]}
           locale={{

@@ -3,6 +3,7 @@ import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { Tabs } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "./_shared/PageHeader";
 import { BacktestChart } from "./BacktestChart";
 import { BacktestPanel } from "./BacktestPanel";
@@ -28,12 +29,18 @@ export function BacktestPage() {
   const { t } = useTranslation();
   const analysisId = useStockAnalysisStore((s) => s.analysisId);
   const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null);
+  const [params] = useSearchParams();
+  // D-5：任务中心「妖股漏检核查」历史行带 `?moverRun=<runId>` 过来 ⇒ 必须直接落在策略页签，
+  // 否则落地页是「快速回测」，用户还得自己找 —— 那正是这次反馈要消除的找不到。
+  const [tab, setTab] = useState<string>(params.get("moverRun") ? "strategy" : "quick");
   return (
     <PageErrorBoundary title={t("stockAnalysis.page.backtest")}>
       <div className="flex h-full flex-col">
         <PageHeader titleKey="stockAnalysis.backtest.title" backTo="/stock-analysis" />
         <div className="flex-1 overflow-auto p-4">
           <Tabs
+            activeKey={tab}
+            onChange={setTab}
             size="small"
             items={[
               {

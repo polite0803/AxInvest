@@ -7417,7 +7417,8 @@
       "duration": "Dauer",
       "result": "Ergebnis",
       "detail": "Details",
-      "empty": "Kein Ausführungsverlauf"
+      "empty": "Kein Ausführungsverlauf",
+      "openMoverRun": "Diesen Lauf im Panel öffnen"
     },
     "create": {
       "button": "Neue Aufgabe",
@@ -15747,6 +15748,16 @@
       "empty": "Keine qualifizierten Ereignisse in diesem Zeitraum (Kriterium: kumulierter Fenstergewinn)",
       "emptyNotYet": "Fenster unvollständig: unvollständige Stufen noch nicht entscheidbar, vollständige Stufen ohne qualifizierte Ereignisse ({{have}} Handelstage erfasst; siehe Stufenhinweise unten)",
       "windowOpen": "Fenster unvollständig ({{have}}/{{need}} Handelstage erfasst)",
+      "emptyNotYetTiers": "Fenster unvollständig: {{tiers}} noch nicht beurteilbar; die vollständigen Stufen hatten keine qualifizierenden Ereignisse ({{have}} Handelstage erfasst)",
+      "tierNoEvents": "Keine qualifizierenden Ereignisse in dieser Stufe",
+      "tierCountMissing": "Dieser Lauf hat keine Zählung je Stufe gespeichert",
+      "tierEvents": "{{count}} qualifizierende Ereignisse in dieser Stufe",
+      "batchesNever": "Nachanalyse-Batches: nie gestartet (0) — Fehlstellen werden nicht nachgeholt, Reflexionen erhalten keine Stichproben",
+      "batchesLatest": "Nachanalyse-Batches: zuletzt {{status}} (Ergebnisse je Aktie im Task-Center)",
+      "batchesUnknown": "Nachanalyse-Batches: Status nicht lesbar (bedeutet NICHT, dass keine gestartet wurden)",
+      "reflowNone": "Rückfluss-Kandidaten: keine (keine Reflexion mit „hätte im Pool sein sollen“)",
+      "reflowPending": "Rückfluss-Kandidaten {{count}} · noch {{need}} abgerechnete Stichproben bis zur Übernahme (Shadow, nicht in den Seed übernommen)",
+      "reflowReady": "Rückfluss-Kandidaten {{count}} · Kriterien erfüllt (Übernahme erst nach manueller Bestätigung)",
       "rulesTitle": "Vier-Stufen-Kriterien (Schwellen sind Template-Variablen; Tage aus der einzigen Stufenquelle)",
       "rule": "{{tier}}: kumulierter Fenstergewinn ≥ {{gain}} % ({{days}} Handelstage; Variable {{var}})",
       "rulesMissing": "{{count}} Stufenkriterien nicht erfüllt (Schwellenvariable nicht positiv); von dieser Prüfung ausgeschlossen",
@@ -15816,7 +15827,20 @@
         "rfPending": "Reflexion in Warteschlange",
         "rfRunning": "Reflexion wird erstellt",
         "rfFailed": "Reflexion fehlgeschlagen: {{detail}}"
-      }
+      },
+      "runSelector": "Prüflauf",
+      "runOption": "{{from}} ~ {{to}} · {{chain}} · Ereignisse {{events}} · übersehen {{misses}}",
+      "runOptionLive": "Jetzt neu berechnen (nicht gespeichert)",
+      "sourceStored": "Quelle: gespeicherter Prüflauf {{id}} (gespeichert am {{at}}), Zeitraum {{from}} ~ {{to}}, {{events}} Ereignisse, {{misses}} übersehen. Das Panel liest den gespeicherten Stand und rechnet nicht neu.",
+      "sourceLive": "Quelle: Live-Neuberechnung. Dies ist kein gespeicherter Prüflauf (es wird nichts geschrieben; die aufgeklappte Zeile liest die neueste Ereigniszeile).",
+      "runsEmpty": "Noch keine gespeicherten Prüfläufe (der geplante Task zur Übersehenprüfung lief nicht). Unten steht ein Ergebnis einer Live-Neuberechnung.",
+      "runGone": "Der angegebene Prüflauf {{id}} ist nicht in der gespeicherten Liste (Datenbank gewechselt oder gekürzt). Zurück auf Live-Neuberechnung.",
+      "chainSelector": "Kette",
+      "chainLabel": "Diese Zahlen gehören zur Kette",
+      "chain_reco": "Intelligente Empfehlung",
+      "chain_serenity": "Trendprüfung",
+      "chain_unlabeled": "Ohne Kette (älterer Lauf)",
+      "chainUnlabeledNote": "Dieser Lauf entstand vor der Aufteilung nach Ketten: Empfehlung und Trendprüfung sind gemeinsam gezählt, die Zahlen sind also keiner Kette allein zuzuordnen."
     },
     "export": {
       "analystReports": "Analyst Reports",

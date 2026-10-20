@@ -36,10 +36,23 @@ pub struct Model {
     pub miss_count: i32,
     /// 漏检明细 JSON（Vec<MissRow>，后端已按累计涨幅降序截断 200 条）
     pub misses_json: Option<String>,
+    /// 逐档达标事件数 JSON（`{"ultra_short":3,...}`）。
+    ///
+    /// 为什么单存一列：只有它能把「本档已满但零达标」与「本档有达标」区分开 ——
+    /// `layers_json` 是跨档聚合、`misses_json` 只有漏检行，两者都答不了这个问题。
+    /// NULL = 本行早于该列（面板必须成句声明「本轮未记录逐档计数」，不得显示成 0）。
+    pub events_by_tier_json: Option<String>,
     /// 执行状态："success"（核查本身成功，不代表零漏检）
     pub status: String,
     /// 触发来源：调度器执行（含定时到点与任务中心「立即执行」，两者共用同一 dispatch）
     pub trigger_source: String,
+    /// 本轮归因针对的**链**：`reco` = 智能荐股，`serenity` = 趋势智选。
+    /// 值域唯一权威在 `analysis_engine::mover_recall::RecoChain`（面板与门都读它，不各抄一份）。
+    ///
+    /// 2026-10-20 A-2 起，一次核查**每链落一行**（同刻两行）：混池读数会把「智选推荐过」
+    /// 算成荐股也命中，反之亦然 ⇒ 分不出该由哪条链去优化。
+    /// NULL = 本行早于分链改造 ⇒ 那是**混池口径**，读侧必须单独成句，不得冒充某一链的读数。
+    pub chain: Option<String>,
     /// 执行时间戳（ms）
     pub created_at_ms: i64,
 }

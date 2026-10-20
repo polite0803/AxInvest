@@ -50,8 +50,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const SEED = "src-tauri/src/init/stock_automation_cron_seed.rs";
 
-/** 内置 id 条数下限：实测 11 条（2026-10-20），少一条就是解析退化或播种被删。 */
-const MIN_SEED_IDS = 11;
+/** 内置 id 条数下限：实测 12 条（2026-10-20 A-1 加「漏检补分析」前为 11），少一条就是解析退化或播种被删。 */
+const MIN_SEED_IDS = 13;
 /** 见头部「扫描面按域限定」：这些 task_type 无播种但属股票域，必须纳入检查。 */
 const EXTRA_STOCK_TASK_TYPES = ["validate-decisions"];
 

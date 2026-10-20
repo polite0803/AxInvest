@@ -49,3 +49,11 @@ pub const LESSON_VALIDATION_TASK_TYPE: &str = "lesson-validation";
 /// 它被任务中心白名单 / cron seed / 执行分支三方横向共享，留在业务模块会逼出
 /// `crate::commands::stock_analysis_rerun::` 互调，撞分层护栏规则 2。
 pub const STOCK_ANALYSIS_RERUN_TASK_TYPE: &str = "stock-analysis-rerun";
+
+/// 漏检事件补分析（`mover_recall_analysis`）的 task_type。业务模块 `pub use` 本常量，
+/// 权威值只在这里一份 —— 留在业务模块会逼出 `crate::commands::mover_recall_analysis::`
+/// 互调，撞分层护栏规则 2（与本模块头部 ⚠ 同源）。
+pub const MOVER_RECALL_ANALYSIS_TASK_TYPE: &str = "mover-recall-analysis";
+
+/// 全市场代码空间分片扫描（`universe_scan`）的 task_type。归属理由同上一条。
+pub const UNIVERSE_SCAN_TASK_TYPE: &str = "universe-code-scan";

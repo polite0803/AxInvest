@@ -6865,6 +6865,22 @@ async function executeCommand<T>(
           "active",
         ),
         mkTask(
+          "mover-recall-analysis-daily",
+          "漏检补分析（内置）",
+          "mover-recall-analysis",
+          "0 6 * * *",
+          null,
+          "active",
+        ),
+        mkTask(
+          "universe-code-scan-daily",
+          "编码段盲扫（内置）",
+          "universe-code-scan",
+          "0 5 * * *",
+          null,
+          "active",
+        ),
+        mkTask(
           "evolution-proposal-daily",
           "进化计划聚合（内置）",
           "evolution-proposal",

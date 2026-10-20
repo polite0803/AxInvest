@@ -7417,7 +7417,8 @@
       "duration": "Duración",
       "result": "Resultado",
       "detail": "Detalles",
-      "empty": "Sin historial de ejecución"
+      "empty": "Sin historial de ejecución",
+      "openMoverRun": "Ver esta ejecución en el panel"
     },
     "create": {
       "button": "Nueva tarea",
@@ -15747,6 +15748,16 @@
       "empty": "Sin eventos calificados en este rango (criterio: ganancia acumulada de la ventana)",
       "emptyNotYet": "Ventana incompleta: niveles incompletos aún no evaluables; niveles completos sin eventos calificados ({{have}} días de negociación recopilados; ver notas de nivel abajo)",
       "windowOpen": "Ventana incompleta ({{have}}/{{need}} días de negociación recopilados)",
+      "emptyNotYetTiers": "Ventana incompleta: {{tiers}} aún no evaluables; los tramos completos no tuvieron eventos que cumplan el umbral ({{have}} días de mercado recopilados)",
+      "tierNoEvents": "Sin eventos que cumplan el umbral en este tramo",
+      "tierCountMissing": "Esta ejecución no registró el recuento por tramo",
+      "tierEvents": "{{count}} eventos que cumplen el umbral en este tramo",
+      "batchesNever": "Lotes de análisis retrospectivo: nunca iniciados (0) — los fallos no se completan y las reflexiones no obtienen muestras",
+      "batchesLatest": "Lotes de análisis retrospectivo: último {{status}} (resultados por valor en el centro de tareas)",
+      "batchesUnknown": "Lotes de análisis retrospectivo: estado ilegible (esto NO significa que no se iniciara ninguno)",
+      "reflowNone": "Candidatos de retorno: ninguno (ninguna reflexión indicó «debía estar en el pool»)",
+      "reflowPending": "Candidatos de retorno {{count}} · faltan {{need}} muestras liquidadas para promover (shadow, sin fusionar en la semilla)",
+      "reflowReady": "Candidatos de retorno {{count}} · criterios cumplidos (la fusión requiere confirmación manual)",
       "rulesTitle": "Criterios de cuatro niveles (umbrales como variables de plantilla; días desde la única fuente de niveles)",
       "rule": "{{tier}}: ganancia acumulada de la ventana ≥ {{gain}}% ({{days}} días de negociación; variable {{var}})",
       "rulesMissing": "{{count}} criterios de nivel no establecidos (variable de umbral no positiva); excluidos de esta verificación",
@@ -15816,7 +15827,20 @@
         "rfPending": "Reflexión en cola",
         "rfRunning": "Generando reflexión",
         "rfFailed": "Reflexión fallida: {{detail}}"
-      }
+      },
+      "runSelector": "Ejecución de control",
+      "runOption": "{{from}} ~ {{to}} · {{chain}} · eventos {{events}} · omitidos {{misses}}",
+      "runOptionLive": "Recalcular ahora (sin guardar)",
+      "sourceStored": "Origen: ejecución guardada {{id}} (guardada el {{at}}), periodo {{from}} ~ {{to}}, {{events}} eventos, {{misses}} omitidos. El panel lee lo guardado y no recalcula.",
+      "sourceLive": "Origen: recálculo en vivo. No es una ejecución guardada (no se escribe nada; la fila desplegada lee la última fila de evento).",
+      "runsEmpty": "Aún no hay ejecuciones guardadas (la tarea programada de control de omitidos no se ha ejecutado). Abajo se muestra un recálculo en vivo.",
+      "runGone": "La ejecución {{id}} no está en la lista guardada (base cambiada o recortada). Se volvió al recálculo en vivo.",
+      "chainSelector": "Cadena",
+      "chainLabel": "Estos números pertenecen a la cadena",
+      "chain_reco": "Recomendación inteligente",
+      "chain_serenity": "Selección de tendencia",
+      "chain_unlabeled": "Sin cadena (ejecución antigua)",
+      "chainUnlabeledNote": "Esta ejecución es anterior a la separación por cadenas: recomendación y selección se cuentan juntas, no es la cuenta de una sola cadena."
     },
     "export": {
       "analystReports": "Analyst Reports",

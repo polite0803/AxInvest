@@ -987,6 +987,9 @@ pub(crate) struct SerenityScreeningArgs<'a> {
 
 /// 趋势智选工作流执行体（[`run_serenity_screening`] 命令与时间旅行批次共用，
 /// 保证手动运行 / 每日 cron 同模板 / as-of 批次三条入口口径一致）。
+/// 注入智选的达标清单最多列多少只（清单是提示词素材，不是全量导出）。
+const MOVER_WATCHLIST_LIMIT: usize = 20;
+
 pub(crate) async fn run_serenity_screening_inner(
     args: SerenityScreeningArgs<'_>,
 ) -> Result<serde_json::Value, String> {
@@ -1036,6 +1039,46 @@ pub(crate) async fn run_serenity_screening_inner(
                 }]);
             }
         }
+    }
+
+    // ── B-1：窗口涨幅达标清单作为 a-trend-scanner 的第 4 个输入（输入面，不改权重口径）──
+    // live：取最新收盘日的窗口达标票（判据与漏检面板同源）；as-of：显式声明本代无清单，
+    // **不开 Fallthrough** —— 回放若读 live 的清单，就是把未来摆到 LLM 眼前。
+    let watchlist_text = if as_of_ctx.is_some() {
+        axagent_analysis_engine::mover_recall::MOVER_WATCHLIST_ASOF_DECLARATION.to_string()
+    } else {
+        axagent_analysis_engine::mover_recall::mover_watchlist_digest(db, MOVER_WATCHLIST_LIMIT)
+            .await
+            .unwrap_or_else(|e| {
+                // 取数失败不得静默成空串：空串在提示词里与「无达标票」不可区分 ⇒ 显式声明原因
+                tracing::warn!("[serenity] 达标清单取数失败，按「本代无清单」注入: {e}");
+                format!("（本代无达标清单：取数失败 —— {e}）")
+            })
+    };
+    let watchlist_value = serde_json::json!(watchlist_text);
+    let mut pushed = false;
+    if let Some(ref mut vars) = variables {
+        if let Some(var) = vars.iter_mut().find(|v| v.name == "mover_watchlist") {
+            var.value = watchlist_value.clone();
+        } else {
+            vars.push(axagent_harness::workflow_types::Variable {
+                name: "mover_watchlist".into(),
+                var_type: "string".into(),
+                value: watchlist_value.clone(),
+                description: Some("系统注入：最新收盘日窗口涨幅达标清单".into()),
+                is_secret: false,
+            });
+        }
+        pushed = true;
+    }
+    if !pushed {
+        variables = Some(vec![axagent_harness::workflow_types::Variable {
+            name: "mover_watchlist".into(),
+            var_type: "string".into(),
+            value: watchlist_value,
+            description: Some("系统注入：最新收盘日窗口涨幅达标清单".into()),
+            is_secret: false,
+        }]);
     }
 
     let (max_concurrent, step_timeout, _total_timeout) =

@@ -22,9 +22,13 @@
 use std::collections::{HashMap, HashSet};
 
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use axagent_entities::{market_daily_close, market_stock_universe, reco_picks};
+/// 池留痕行的类型由本模块**产出**（`load_picks_in_range` 的返回元素），故在此 re-export 给
+/// 命令层：权威定义仍在 `axagent_entities::reco_picks`（禁区 12 只允许一份定义），而命令层
+/// 不得直连 entities（分层棘轮 `commands-no-direct-db`，新文件基线 0）。
+pub use axagent_entities::reco_picks;
+use axagent_entities::{market_daily_close, market_stock_universe};
 
 use crate::recommender::style_matrix;
 use crate::recommender::types::Period;
@@ -43,6 +47,88 @@ pub const DEFAULT_GAIN_THRESHOLDS: [(&str, f64); 4] = [
     ("mover_gain_mid", 30.0),
     ("mover_gain_long", 40.0),
 ];
+
+/// 按变量名回查登记表（读回**已落库核查轮次**的 `rules_json` 用）。
+///
+/// 为什么需要它而不是直接 `Deserialize` [`TierRule`]：`var_name` 是 `&'static str`，
+/// 不满足 `DeserializeOwned`。读回时把名字当字符串取出、再用本函数指回这张表 ——
+/// 名字不在表内返回 `None`，调用方必须显式失败，**不得**静默丢掉一档或另编一个变量名
+/// （那等于把「登记表里没有这档」演成「这档没有判据」）。
+pub fn gain_var_by_name(name: &str) -> Option<&'static str> {
+    DEFAULT_GAIN_THRESHOLDS.iter().find(|(registered, _)| *registered == name).map(|(n, _)| *n)
+}
+
+/// 漏检归因的**链**维度：一条达标事件要对两条链各问一次「你当时为什么没选它」。
+///
+/// 判据只有一条，且刻意**不用** [`normalize_style_key`]：`style == "serenity"` 的行由
+/// 趋势智选工作流写（`stock_workflow/serenity.rs` 把策略子类型放进 `pick_data.strategy_type`，
+/// `style` 恒为 `serenity`）；其余 style —— **包括荐股矩阵里的 `bottleneck` 智选格** ——
+/// 都是智能荐股链的产出。别名归一（bottleneck→serenity）是给矩阵取格用的，
+/// 拿它判链会把荐股的智选格算进工作流链，两条链的账就此互相顶替。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoChain {
+    /// 智能荐股（四档共享池 + 策略矩阵）
+    Reco,
+    /// 趋势智选（serenity-screening 工作流）
+    Serenity,
+}
+
+impl RecoChain {
+    /// 固定顺序 = 面板与落库的枚举顺序（荐股在前）。
+    pub const ALL: [RecoChain; 2] = [RecoChain::Reco, RecoChain::Serenity];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RecoChain::Reco => "reco",
+            RecoChain::Serenity => "serenity",
+        }
+    }
+
+    /// 一条 pick 的 style 属于哪条链。
+    pub fn of_style(style: &str) -> Self {
+        if style == Self::Serenity.as_str() {
+            Self::Serenity
+        } else {
+            Self::Reco
+        }
+    }
+}
+
+/// 分链改造（2026-10-20 A-2）之前落库的轮次/事件没有链标记 ⇒ 第三态，读侧单独成句。
+/// 把它当成 `reco` 就是拿混池数字冒充荐股，当成 `serenity` 同理。
+pub const CHAIN_UNLABELED: &str = "unlabeled";
+
+/// 已落库 `rules_json` 的投影。
+///
+/// 只用于**呈现**当轮事实（面板按轮次读回时显示那一代用到的阈值与窗口），
+/// 不参与任何达标判定 ⇒ 不构成第二套判据。`var_name` 在这里是 `String`，
+/// 转回 [`TierRule`] 必须经 [`gain_var_by_name`] 指认登记表。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredTierRule {
+    pub period: Period,
+    pub var_name: String,
+    pub gain_pct: f64,
+    pub window_days: u32,
+}
+
+/// 把已落库的判据投影转回 [`TierRule`]；任一 `varName` 不在登记表 ⇒ `Err`。
+pub fn rules_from_stored(stored: &[StoredTierRule]) -> Result<Vec<TierRule>, String> {
+    stored
+        .iter()
+        .map(|r| {
+            let var_name = gain_var_by_name(&r.var_name)
+                .ok_or_else(|| format!("已落库判据的变量名不在登记表内: {}", r.var_name))?;
+            Ok(TierRule {
+                period: r.period,
+                var_name,
+                gain_pct: r.gain_pct,
+                window_days: r.window_days,
+            })
+        })
+        .collect()
+}
 
 /// 一档的判据参数。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -135,7 +221,7 @@ pub fn mover_label_for(
 }
 
 /// 一条达标事件。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MoverEvent {
     pub stock_code: String,
@@ -160,7 +246,7 @@ pub struct MoverEvent {
 }
 
 /// 漏检归因层（每层都必须机械可判，判不出的进 `Unexplained`）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MissLayer {
     /// 该票该档已被推荐 ⇒ 命中，不入漏检分母
@@ -183,6 +269,21 @@ pub enum MissLayer {
 }
 
 impl MissLayer {
+    /// 全部归因层 —— 逐层可达性测试（`every_miss_layer_is_reachable_from_attribute`）的遍历面。
+    ///
+    /// 条数必须与枚举变体数一致：`scripts/check-reco-horizon-parity.mjs` 的门 p 拿枚举现场
+    /// 对这张表，加了变体忘了进这里 ⇒ 门红（否则那条 Rust 测试会安静地少判一层）。
+    pub const ALL: [MissLayer; 8] = [
+        MissLayer::Recommended,
+        MissLayer::LateTiming,
+        MissLayer::NotInPool,
+        MissLayer::PoolDegraded,
+        MissLayer::ByDesign,
+        MissLayer::L3ScoredOut,
+        MissLayer::OtherPeriod,
+        MissLayer::Unexplained,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             MissLayer::Recommended => "recommended",
@@ -227,8 +328,18 @@ pub struct Evidence {
     pub in_pool: Option<bool>,
     /// 本轮候选池是否降级（空/取数失败）
     pub pool_degraded: bool,
-    /// 该 (风格, 档位) 是否成立（`style_matrix::is_active` 口径）
-    pub matrix_active: bool,
+    /// **本链**在该档是否按设计出票（`chain_period_has_active_style` 口径，A-3）。
+    ///
+    /// 名字刻意不叫 `matrix_active`：荐股链问的是「矩阵里除智选行外任一风格出票」，
+    /// 智选链只看 `serenity` 那一行 ⇒ 同一个布尔值在两条链上是两个问题，
+    /// 沿用旧名会让读代码的人以为两链同口径。
+    pub chain_tier_active: bool,
+    /// 窗口起点**之前**该链已在同档出过票（A-3 的 `LateTiming` 判据）。
+    ///
+    /// 存在的理由：`in_window` 只认 `generated_at` 落在窗口内，早于起点的那次推荐会被
+    /// 当成「从没推荐过」⇒ 事件落进 `not_in_pool`/`unexplained`，优化方向被带去「扩池」，
+    /// 而真相是链看见过它，只是时点不落在本窗。
+    pub picked_before_window: bool,
     /// 窗口内**有截断留痕**的风格键（`reco_scan_audit` 命中，矩阵名目归一后的写法）——
     /// 非空即「该格算出过它却被 top-N 淘汰」，可归因、可降权
     pub l3_scored_out_styles: Vec<String>,
@@ -236,13 +347,18 @@ pub struct Evidence {
 
 /// 纯函数归因：顺序即优先级，先排掉「其实不是漏检」，再定位到可判的层。
 ///
+/// `LateTiming` 紧跟 `Recommended`：同档在窗口之前就出过票时，「池子里没有它」「按设计不做这档」
+/// 都已不成立 —— 链看见过它，只是时点不落在本窗（A-3 接的就是这一层，此前恒不可达）。
 /// `L3ScoredOut` 排在 `OtherPeriod` 之后：别的档位已经出过票时，「本档漏」的
 /// 结论会被系统性高估（同一只票本就不必四档齐发）。
-pub fn attribute(layer_period_ok: bool, ev: &Evidence) -> MissLayer {
+pub fn attribute(ev: &Evidence) -> MissLayer {
     if !ev.picks_for_period.is_empty() {
         return MissLayer::Recommended;
     }
-    if !layer_period_ok || !ev.matrix_active {
+    if ev.picked_before_window {
+        return MissLayer::LateTiming;
+    }
+    if !ev.chain_tier_active {
         return MissLayer::ByDesign;
     }
     if ev.pool_degraded {
@@ -283,6 +399,34 @@ pub struct RecallRates {
     pub unexplained_share: f64,
     pub events: usize,
     pub misses: usize,
+}
+
+/// 已落库 `rates_json` 的投影（读回**那一轮**的三个率用）。
+///
+/// `RecallRates` 本身不能 `Deserialize`：它的 NaN 在序列化时已被 [`nan_to_null`] 折成
+/// `null`，而 `null` 解不回 `f64`。这里用 `Option<f64>` 接住，`into_rates` 再把
+/// 「算不出来」还原成 NaN ⇒ 面板仍走同一条呈现判据（显示「样本不足」，**不是** 0%）。
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredRates {
+    pub reachability: Option<f64>,
+    pub coverage: Option<f64>,
+    pub unexplained_share: Option<f64>,
+    pub events: usize,
+    pub misses: usize,
+}
+
+impl StoredRates {
+    pub fn into_rates(self) -> RecallRates {
+        RecallRates {
+            // `null` 与「字段缺失」都归到 NaN（= 算不出来），不得折成 0.0
+            reachability: self.reachability.unwrap_or(f64::NAN),
+            coverage: self.coverage.unwrap_or(f64::NAN),
+            unexplained_share: self.unexplained_share.unwrap_or(f64::NAN),
+            events: self.events,
+            misses: self.misses,
+        }
+    }
 }
 
 fn nan_to_null<S: serde::Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
@@ -356,7 +500,7 @@ pub struct TierRuleView {
     pub window_days: u32,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LayerRow {
     pub layer: MissLayer,
@@ -460,6 +604,11 @@ pub async fn load_mover_cell_signal(
     // 是两件事）。回放的核查要按代际取留痕，走显式入口，不与实盘分子/分母并池。
     let trims = load_trim_evidence(db, &from, &to, None).await?;
     let picks = load_picks_in_range(db, &from, &to, None).await?;
+    // A-2：本信号喂的是**荐股链**的格子权重 ⇒ 趋势智选工作流的出票（style = `serenity`）
+    // 不能算成荐股矩阵里 serenity/bottleneck 格的「命中」。混进去的后果不是报错而是
+    // penalty = (hits+1)/(hits+scored_out+1) 的分子被外链抬高 ⇒ 该降的格降不下来。
+    let picks: Vec<reco_picks::Model> =
+        picks.into_iter().filter(|p| RecoChain::of_style(&p.style) == RecoChain::Reco).collect();
 
     // 候选票集合 = 留痕涉及的 ∪ 该窗口内出过票的（其余票不可能进入任何一格的分子/分母）
     let mut codes: Vec<String> = trims.keys().map(|(_, c)| c.clone()).collect();
@@ -667,6 +816,12 @@ pub fn normalize_style_key(style: &str) -> &str {
 /// 该票是否出现在任一候选池快照里（`seed_pool_json` 是 `[code, name]` 数组的 JSON）。
 pub fn code_in_pool_snapshot(pool_json: Option<&str>, code: &str) -> bool {
     let Some(raw) = pool_json else { return false };
+    // 顶层对象：趋势智选把**单个候选**整体写进 seed_pool_json（荐股链写的是数组）。
+    // 少了这一支，智选链的 in_pool 永远判 false ⇒ 「工作流明明扫到它」被报成「不在候选池」。
+    if let Ok(serde_json::Value::Object(o)) = serde_json::from_str::<serde_json::Value>(raw) {
+        return o.get("stockCode").and_then(|v| v.as_str()) == Some(code)
+            || o.get("code").and_then(|v| v.as_str()) == Some(code);
+    }
     let Ok(parsed) = serde_json::from_str::<Vec<serde_json::Value>>(raw) else {
         return false;
     };
@@ -713,6 +868,86 @@ pub fn matrix_active(style_key: &str, period: Period) -> bool {
     // 走 reason_code_by_key（字符串名目 + serenity/bottleneck 别名归一）：
     // 落库两名同格，不经别名合并永远判错。
     style_matrix::reason_code_by_key(style_key, period) == "cell_is_active"
+}
+
+/// 智选家族在矩阵里那一行的名目（`style_keys()` 里的写法，非落库别名 `bottleneck`）。
+const SERENITY_MATRIX_KEY: &str = "serenity";
+
+/// 某**链**在某档是否按设计出票（A-3 的 `ByDesign` 唯一判据入口）。
+///
+/// - 智选链只看 `serenity` 那一行：趋势智选按设计不做超短/短档（矩阵声明
+///   `serenity_needs_week_or_longer_realization`）。那些达标事件不是「漏检」而是「按设计」，
+///   混进漏检分母会把优化方向带去补一个本就不该出的格。
+/// - 荐股链沿用档位级判据（矩阵任一风格出票）⇒ 行为与 A-3 之前逐字一致，
+///   不因拆链而改口径；「整档无任何风格」这种真告警也仍由这一支给出。
+pub fn chain_period_has_active_style(chain: RecoChain, period: Period) -> bool {
+    match chain {
+        RecoChain::Serenity => matrix_active(SERENITY_MATRIX_KEY, period),
+        RecoChain::Reco => period_has_active_style(period),
+    }
+}
+
+/// as-of 回放时注入智选的显式声明（**不**取 live 的达标清单，开了就是前视）。
+pub const MOVER_WATCHLIST_ASOF_DECLARATION: &str =
+    "本代无达标清单（as-of 回放不取 live 的窗口涨幅清单，避免前视）";
+
+/// 纯函数：把「最新收盘日的窗口达标事件」拼成注入智选提示词的清单文本。
+///
+/// 这是**输入面**素材，不是新判据：达标判据仍是 `mover_gain_*` + `default_holding_days()`，
+/// 这里只做「把同一判据的结果摆到 LLM 眼前」——清单不构成入选理由，证据门槛不因此下降。
+/// 同票多档只留累计涨幅最大的那条（清单是「票」的集合，不是「票×档」）。
+pub fn format_mover_watchlist(events: &[MoverEvent], to: &str, limit: usize) -> String {
+    let mut rows: Vec<&MoverEvent> = events.iter().filter(|e| e.anchor_date == to).collect();
+    rows.sort_by(|a, b| b.cum_gain_pct.total_cmp(&a.cum_gain_pct));
+    let mut seen = std::collections::HashSet::new();
+    rows.retain(|e| seen.insert(e.stock_code.clone()));
+    rows.truncate(limit);
+    if rows.is_empty() {
+        return format!(
+            "（{to} 收盘窗口：无达标票 —— 判据为窗口累计涨幅，四档阈值见模板变量 mover_gain_*）"
+        );
+    }
+    let mut out = format!(
+        "{to} 收盘窗口达标 {} 只（判据=窗口累计涨幅；清单只供优先核对，不构成入选理由）：\n",
+        rows.len()
+    );
+    for e in rows {
+        out.push_str(&format!(
+            "- {} {} [{}] 累计{:+.1}%（窗口 {} 日）\n",
+            e.stock_code, e.stock_name, e.period, e.cum_gain_pct, e.window_days
+        ));
+    }
+    out
+}
+
+/// 取最新收盘日的窗口达标清单（B-1：智选 `a-trend-scanner` 的第 4 个输入）。
+///
+/// 只回看最长窗口那么多天 ⇒ 代价与一次核查的取数同阶，不随采集历史增长。
+pub async fn mover_watchlist_digest(
+    db: &sea_orm::DatabaseConnection,
+    limit: usize,
+) -> Result<String, String> {
+    let served = crate::recommender::reco_loop::load_reco_served_vars_db(db).await?;
+    let rules = tier_rules_from_vars(&served);
+    let close_dates = load_close_dates(db).await?;
+    let Some(to) = close_dates.last().cloned() else {
+        return Ok("（尚无收盘快照：无达标清单）".to_string());
+    };
+    // 窗口天数只从规则来（规则本身取 default_holding_days）；没有规则 ⇒ 显式声明，不写死下限
+    let Some(max_days) = rules.iter().map(|r| r.window_days).max() else {
+        return Ok("（本代无达标清单：四档阈值变量全部无效）".to_string());
+    };
+    let max_days = max_days as usize;
+    let from = close_dates
+        .get(close_dates.len().saturating_sub(max_days))
+        .cloned()
+        .unwrap_or_else(|| close_dates[0].clone());
+    let by_stock = load_closes_by_stock(db, &from, &to).await?;
+    let mut events = Vec::new();
+    for rule in &rules {
+        events.extend(events_for_tier(&by_stock, rule, &from, &to));
+    }
+    Ok(format_mover_watchlist(&events, &to, limit))
 }
 
 #[cfg(test)]
@@ -820,7 +1055,7 @@ mod tests {
     /// 断言现在落 `Unexplained` 而不是 `NotInPool`** —— 这正是阶段 5 / G1 的修复点：
     /// 「没扫描过」以前被压成「不在池里」，把留痕问题报成了候选宇宙问题。
     fn ev(mutate: impl FnOnce(&mut Evidence)) -> Evidence {
-        let mut e = Evidence { matrix_active: true, ..Default::default() };
+        let mut e = Evidence { chain_tier_active: true, ..Default::default() };
         mutate(&mut e);
         e
     }
@@ -828,42 +1063,141 @@ mod tests {
     #[test]
     fn attribution_priority_is_mechanical() {
         assert_eq!(
-            attribute(true, &ev(|e| e.picks_for_period.push("2026-09-20T15:00:00".into()))),
+            attribute(&ev(|e| e.picks_for_period.push("2026-09-20T15:00:00".into()))),
             MissLayer::Recommended
         );
-        // 按设计不出票 ⇒ 优先于池层（严禁进待优化清单）
-        assert_eq!(attribute(true, &ev(|e| e.matrix_active = false)), MissLayer::ByDesign);
-        assert_eq!(attribute(true, &ev(|e| e.pool_degraded = true)), MissLayer::PoolDegraded);
+        // 同档在窗口起点之前就出过票 ⇒ 晚推荐（A-3 接的就是这一层），排在池层之前
+        assert_eq!(attribute(&ev(|e| e.picked_before_window = true)), MissLayer::LateTiming);
+        // 本链按设计不出这一档 ⇒ 优先于池层（严禁进待优化清单）
+        assert_eq!(attribute(&ev(|e| e.chain_tier_active = false)), MissLayer::ByDesign);
+        assert_eq!(attribute(&ev(|e| e.pool_degraded = true)), MissLayer::PoolDegraded);
         // 确有批次、快照里查无此票 ⇒ 这才是「不在候选宇宙」
-        assert_eq!(attribute(true, &ev(|e| e.in_pool = Some(false))), MissLayer::NotInPool);
+        assert_eq!(attribute(&ev(|e| e.in_pool = Some(false))), MissLayer::NotInPool);
         // G1 负控：无批次（None）与「不在池里」必须落在不同的桶
-        assert_eq!(attribute(true, &ev(|_| {})), MissLayer::Unexplained);
+        assert_eq!(attribute(&ev(|_| {})), MissLayer::Unexplained);
         assert_eq!(
-            attribute(
-                true,
-                &ev(|e| {
-                    e.in_pool = Some(true);
-                    e.picked_in_other_period = true;
-                })
-            ),
+            attribute(&ev(|e| {
+                e.in_pool = Some(true);
+                e.picked_in_other_period = true;
+            })),
             MissLayer::OtherPeriod
         );
         // 入池但无截断留痕 ⇒ 判不出（策略内部否决不落痕），进兜底桶
-        assert_eq!(attribute(true, &ev(|e| e.in_pool = Some(true))), MissLayer::Unexplained);
+        assert_eq!(attribute(&ev(|e| e.in_pool = Some(true))), MissLayer::Unexplained);
         // 入池 + 截断留痕 ⇒ 唯一可归因到具体风格、可据此降权的一层
         assert_eq!(
-            attribute(
-                true,
-                &ev(|e| {
-                    e.in_pool = Some(true);
-                    e.l3_scored_out_styles.push("trend".into());
-                })
-            ),
+            attribute(&ev(|e| {
+                e.in_pool = Some(true);
+                e.l3_scored_out_styles.push("trend".into());
+            })),
             MissLayer::L3ScoredOut
         );
         assert!(!MissLayer::ByDesign.counts_as_miss());
+        assert!(
+            !MissLayer::LateTiming.counts_as_miss(),
+            "晚推荐不是漏检：它的优化方向是时机，不是候选宇宙"
+        );
         assert!(MissLayer::L3ScoredOut.counts_as_miss());
         assert!(MissLayer::Unexplained.counts_as_miss());
+    }
+
+    /// 逐层可达性（**充分条件**）：每一层都必须能用一组真实形态的证据造出来。
+    ///
+    /// 门 p（`check-reco-horizon-parity.mjs`）只证必要条件「`attribute()` 里写了这一层」；
+    /// 写了但条件永远凑不齐，照样是死料 —— `LateTiming` 与 `ByDesign` 两层在 2026-10-21 之前
+    /// 就是这么躺着的：枚举、`as_str`、面板格、11 语言全齐备，看着像八层归因，实际只产五层。
+    /// 遍历面是 `MissLayer::ALL`，门 p 拿枚举对这张表 ⇒ 加一层不写夹具就红。
+    #[test]
+    fn every_miss_layer_is_reachable_from_attribute() {
+        type Fixture = (MissLayer, fn(&mut Evidence));
+        let fixtures: [Fixture; 8] = [
+            (MissLayer::Recommended, |e| e.picks_for_period.push("2026-10-09T15:00:00".into())),
+            (MissLayer::LateTiming, |e| e.picked_before_window = true),
+            (MissLayer::ByDesign, |e| e.chain_tier_active = false),
+            (MissLayer::PoolDegraded, |e| e.pool_degraded = true),
+            (MissLayer::NotInPool, |e| e.in_pool = Some(false)),
+            (MissLayer::OtherPeriod, |e| {
+                e.in_pool = Some(true);
+                e.picked_in_other_period = true;
+            }),
+            (MissLayer::L3ScoredOut, |e| {
+                e.in_pool = Some(true);
+                e.l3_scored_out_styles.push("trend".into());
+            }),
+            // 兜底桶的证据就是「齐备但判不出」：入池、无留痕、无别档出票
+            (MissLayer::Unexplained, |e| e.in_pool = Some(true)),
+        ];
+        let mut produced: Vec<&'static str> = Vec::new();
+        for (want, mutate) in fixtures {
+            let got = attribute(&ev(mutate));
+            assert_eq!(
+                got, want,
+                "层 {} 造不出来 ⇒ 判据不可达（要么接进生产路径，要么整层退役：枚举 + as_str + ALL + i18n 一起删）",
+                want.as_str()
+            );
+            produced.push(want.as_str());
+        }
+        assert_eq!(MissLayer::ALL.len(), produced.len(), "ALL 与逐层夹具必须同数");
+        for layer in MissLayer::ALL {
+            assert!(produced.contains(&layer.as_str()), "ALL 里的 {} 没有对应夹具", layer.as_str());
+        }
+
+        // 负控拆在优先级本身：同一份证据同时满足两支时，必须落在前一支上，
+        // 否则「写了这一层」可以靠任意顺序蒙过上面的逐层断言。
+        let both = attribute(&ev(|e| {
+            e.chain_tier_active = false;
+            e.picked_before_window = true;
+        }));
+        assert_eq!(both, MissLayer::LateTiming, "LateTiming 必须排在 ByDesign 之前");
+        let hit_wins = attribute(&ev(|e| {
+            e.picks_for_period.push("2026-10-09T15:00:00".into());
+            e.picked_before_window = true;
+        }));
+        assert_eq!(hit_wins, MissLayer::Recommended, "窗口内命中必须排在晚推荐之前");
+    }
+
+    /// B-1：达标清单是**输入面**素材 ⇒ 只影响 LLM 看到什么，不新增判据。
+    /// 三条形状锁：声明层（空清单必须成句且带判据来源）、排序与截断、同票多档只留一条。
+    #[test]
+    fn watchlist_digest_is_a_sorted_deduped_declaration() {
+        let mk = |code: &str, period: &str, gain: f64| MoverEvent {
+            stock_code: code.to_string(),
+            stock_name: format!("股{code}"),
+            period: period.to_string(),
+            anchor_date: "2026-10-20".to_string(),
+            window_start: "2026-10-19".to_string(),
+            // 天数必须来自唯一权威（门 k 的判据就是「窗口天数不得出现第二份字面量」）
+            window_days: Period::UltraShort.default_holding_days(),
+            cum_gain_pct: gain,
+            max_daily_pct: 10.0,
+            threshold_pct: 10.0,
+            market_type: "main_sz".to_string(),
+            recommended: false,
+        };
+        let empty = format_mover_watchlist(&[], "2026-10-20", 20);
+        assert!(empty.contains("无达标票"), "空清单必须成句：{empty}");
+        assert!(empty.contains("mover_gain_*"), "必须写明判据来源，别让人以为是新判据：{empty}");
+
+        // 同一只票在超短与短档各一条 ⇒ 只留累计涨幅大的那条；排序按降序；limit 生效
+        let events = vec![
+            mk("002696", "ultra_short", 21.0),
+            mk("600519", "short", 35.0),
+            mk("002696", "short", 24.0),
+            mk("000001", "ultra_short", 12.0),
+        ];
+        let text = format_mover_watchlist(&events, "2026-10-20", 2);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 3, "标题 + 两行（limit=2）：{text}");
+        assert!(lines[1].contains("600519"), "第一行应是涨幅最大的：{text}");
+        assert!(lines[2].contains("002696"), "第二行应是同票里较高的那条：{text}");
+        // 按行首匹配：夹具的名字里也含代码（股002696），数裸子串会把一行数成两次
+        let code_lines = text.lines().filter(|l| l.starts_with("- 002696 ")).count();
+        assert_eq!(code_lines, 1, "同票多档只能留一条：{text}");
+        assert!(!text.contains("000001"), "limit 之外的票不得出现：{text}");
+
+        // 只认 anchor == to 的事件（清单是「最新收盘日窗口达标」，不是历史全集）
+        let stale = format_mover_watchlist(&[mk("000001", "ultra_short", 99.0)], "2026-10-21", 5);
+        assert!(stale.contains("无达标票"), "非当日锚点必须不算：{stale}");
     }
 
     #[test]
@@ -921,6 +1255,28 @@ mod tests {
         // 矩阵里没有的名目 ⇒ 判不成立（实现漏格不能被当成按设计不做）
         assert!(!matrix_active("no_such_style", Period::Mid));
     }
+    /// A-3 的链级档位判据：矩阵里 `serenity` 那一行按设计不做超短/短，mid/long 才出票；
+    /// 荐股链那一支与档位级判据**逐字同义** ⇒ 拆链不改动荐股已有口径（只把智选的账分开算）。
+    /// 名目存在性也钉住：`SERENITY_MATRIX_KEY` 若不是 `style_keys()` 真有的写法，
+    /// 智选链那一支会恒假 —— 于是每条智选事件都被判成「按设计」，门与面板全都看不出来。
+    #[test]
+    fn chain_tier_activity_is_scoped_per_chain() {
+        assert!(
+            style_matrix::style_keys().contains(&SERENITY_MATRIX_KEY),
+            "判据依赖的名目必须真的是矩阵行，否则智选链那一支恒假"
+        );
+        assert!(!chain_period_has_active_style(RecoChain::Serenity, Period::UltraShort));
+        assert!(!chain_period_has_active_style(RecoChain::Serenity, Period::Short));
+        assert!(chain_period_has_active_style(RecoChain::Serenity, Period::Mid));
+        assert!(chain_period_has_active_style(RecoChain::Serenity, Period::Long));
+        for p in Period::ALL {
+            assert_eq!(
+                chain_period_has_active_style(RecoChain::Reco, p),
+                period_has_active_style(p),
+                "荐股链那一支必须与档位级判据同义（{p:?}）"
+            );
+        }
+    }
 
     /// #10 P7：妖股标签四态必须各归其位，**两种「拿不到」都不许冒充 `normal`**。
     /// 阈值取 20.0（短线档出厂值）只作夹具，不代表本函数读表 —— 读表由调用方负责。
@@ -966,5 +1322,82 @@ mod tests {
         let want: Vec<String> =
             Period::ALL.iter().map(|p| format!("mover_gain_{}", p.as_str())).collect();
         assert_eq!(keys, want, "四档各一条、键名必须是 mover_gain_ + 档位 snake 名");
+    }
+
+    /// 读回已落库轮次：`rules_json` → `StoredTierRule` → `TierRule` 必须逐字段回到当轮原值，
+    /// 且 `var_name` 仍指回登记表（面板显示的「阈值来源变量名」不能换人）。
+    #[test]
+    fn stored_rules_round_trip_returns_the_same_tier_rules() {
+        let live = tier_rules_from_vars(&[("mover_gain_mid".to_string(), serde_json::json!(35.0))]);
+        assert_eq!(live.len(), 4, "四档都产出（未配的档吃出厂缺省，不是缺席）");
+        let mid = live.iter().find(|r| r.period == Period::Mid).unwrap();
+        assert_eq!(mid.gain_pct, 35.0, "配过服务值的档必须吃服务值，不能被出厂缺省顶替");
+
+        let json = serde_json::to_string(&live).unwrap();
+        let stored: Vec<StoredTierRule> = serde_json::from_str(&json).unwrap();
+        let back = rules_from_stored(&stored).unwrap();
+        assert_eq!(back, live, "读回与当轮逐字段相同 => 面板显示的仍是那一代阈值");
+        assert_eq!(back[0].var_name, "mover_gain_ultra_short");
+    }
+
+    /// 坏样本：登记表里没有的变量名 => 显式 `Err`，不得静默丢一档或另编名字。
+    #[test]
+    fn rules_from_stored_rejects_unregistered_var_name() {
+        let stored: Vec<StoredTierRule> = serde_json::from_str(
+            r#"[{"period":"mid","varName":"mover_gain_quarter","gainPct":30.0,"windowDays":28}]"#,
+        )
+        .unwrap();
+        let err = rules_from_stored(&stored).unwrap_err();
+        assert!(err.contains("mover_gain_quarter"), "错误消息要点名被拒的变量名，实得: {err}");
+    }
+
+    /// 坏样本：NaN 落库已是 `null` => 读回必须是 NaN（「算不出来」），不得折成 0%。
+    #[test]
+    fn stored_rates_null_restores_nan_not_zero() {
+        let live = compute_rates(&HashMap::new(), 0);
+        assert!(live.reachability.is_nan() && live.coverage.is_nan());
+        let json = serde_json::to_string(&live).unwrap();
+        assert!(json.contains("null"), "序列化侧 NaN 已折成 null，实得: {json}");
+        let stored: StoredRates = serde_json::from_str(&json).unwrap();
+        let back = stored.into_rates();
+        assert!(
+            back.reachability.is_nan() && back.coverage.is_nan() && back.unexplained_share.is_nan(),
+            "三率都必须还原成 NaN"
+        );
+        assert_eq!(back.events, 0);
+    }
+
+    /// A-2 链归属：`bottleneck` 是**荐股矩阵**里的智选格，不是趋势智选工作流的产出 ⇒ 归荐股链。
+    /// 这条断言专门与 `normalize_style_key`（bottleneck→serenity，为矩阵取格服务）对撞：
+    /// 判链若误用别名归一，两条链的账会互相顶替，而两边看起来都「有数」。
+    #[test]
+    fn chain_of_style_is_not_alias_normalized() {
+        assert_eq!(RecoChain::of_style("serenity"), RecoChain::Serenity);
+        assert_eq!(RecoChain::of_style("bottleneck"), RecoChain::Reco);
+        assert_eq!(RecoChain::of_style("capital_flow"), RecoChain::Reco);
+        assert_eq!(RecoChain::ALL, [RecoChain::Reco, RecoChain::Serenity]);
+        assert_eq!(RecoChain::Reco.as_str(), "reco");
+        assert_eq!(RecoChain::Serenity.as_str(), "serenity");
+    }
+
+    /// A-2 池快照：趋势智选写的是**顶层单对象**，旧实现只吃顶层数组 ⇒ 智选链永远判「不在池」。
+    #[test]
+    fn pool_snapshot_accepts_top_level_object_shape() {
+        assert!(
+            code_in_pool_snapshot(Some(r#"{"stockCode":"002696"}"#), "002696"),
+            "单对象形态必须认出来"
+        );
+        assert!(
+            !code_in_pool_snapshot(Some(r#"{"stockCode":"002696"}"#), "000001"),
+            "同形态换码必须仍判不在池"
+        );
+        assert!(
+            code_in_pool_snapshot(Some(r#"{"code":"001231"}"#), "001231"),
+            "键名 code 同样要认"
+        );
+        assert!(
+            !code_in_pool_snapshot(Some(r#"{"name":"只有名字"}"#), "001231"),
+            "无码对象不得算命中"
+        );
     }
 }

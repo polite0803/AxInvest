@@ -5021,6 +5021,9 @@ mod mover_recall_context_tests {
         MreModel {
             id: "mre-1".into(),
             run_id: "run-1".into(),
+            // A-2 分链后新增列；本夹具只盖上下文函数读的字段 ⇒ 留未标链（旧行形态）
+            chain: None,
+            reflow_note: None,
             stock_code: "600519".into(),
             stock_name: "贵州茅台".into(),
             period: "short".into(),

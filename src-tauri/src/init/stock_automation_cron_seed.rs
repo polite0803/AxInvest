@@ -5,7 +5,7 @@
 //!
 //! 前五条为**交易日**流水线（休市由 executor 的交易日闸门拦截，见
 //! `init/services.rs`）；第 9 条（组合指标日更）同样进闸门 —— 它的产物就是当日收盘快照，
-//! 休市日跑只会把同一份旧价再落一行。其余三条（妖股核查 / 进化聚合 / 教训验证）
+//! 休市日跑只会把同一份旧价再落一行。其余四条（妖股核查 / 漏检补分析 / 进化聚合 / 教训验证）
 //! 与第 10 条（意图过期）、第 11 条（中断分析补跑）**刻意不进闸门**，
 //! 各自的执行分支注释里说明了原因：补跑锚定的是各行的原 `analysis_date`（as-of 补历史），
 //! 与「今天是不是交易日」无关。
@@ -21,6 +21,8 @@
 //! | 16:00 | 组合指标日更（收盘后） | `portfolio_metrics_daily` + `portfolio_correlation_snapshot` |
 //! | 18:00 | 四周期到期反思（due_only，覆盖超短/短/中/长） | `stock_reflections` resolved |
 //! | 周六 09:00 | 妖股（窗口涨幅达标）漏检核查 | `mover_recall_runs` 周度快照 |
+//! | 05:00 | 编码段盲扫（只登记清单） | `market_stock_universe`（origin=code_scan） |
+//! | 每日 06:00 | 漏检事件 as-of 补分析（每轮上限 10 只） | `stock_analyses`(source=mover_recall) + 反思 pending |
 //! | 工作日 20:00 | 进化计划聚合（反思+验证+漏检） | `stock_evolution_history` pending_approval |
 //! | 工作日 21:00 | 教训有效性验证与退役 | `reflection_lessons` 的 success_count/confidence/退役态 |
 //!
@@ -40,6 +42,9 @@ use crate::commands::constants::{
 };
 use crate::commands::evolution_proposal::EVOLUTION_PROPOSAL_TASK_TYPE;
 use crate::commands::mover_recall::MOVER_RECALL_TASK_TYPE;
+use crate::commands::mover_recall_analysis::{
+    MOVER_RECALL_ANALYSIS_TASK_TYPE, RunMoverRecallAnalysisRequest,
+};
 use crate::commands::pool_scan::{POOL_SCAN_TASK_TYPE, PoolScanConfig};
 use crate::commands::recommendation_cron::{
     RecoCronConfig, TREND_SCREENING_TASK_TYPE, TREND_SCREENING_WORKFLOW_ID,
@@ -53,6 +58,17 @@ pub const POOL_SCAN_JOB_ID: &str = "pool-scan-daily";
 pub const REFLECTION_JOB_ID: &str = "reflection-due-daily";
 pub const DECISION_BACKTEST_JOB_ID: &str = "decision-backtest-daily";
 pub const MOVER_RECALL_JOB_ID: &str = "mover-recall-weekly";
+/// 漏检事件补分析（2026-10-20，PLAN-missed-mover-reflection-closure A-1）。
+/// task_type = `mover-recall-analysis`。
+///
+/// 这条链此前**只有任务中心手动入口** ⇒ 现网 `mover_recall_analysis_batches` 恒 0 行、
+/// 46 条漏检事件全停在 pending，`stock_reflections.miss_layer` 也永远没人盖章。
+/// 播种它在库里没有行时，`scripts/check-cron-job-authority.mjs` 的 R2 会红 ⇒
+/// 那是「还没重启播种」的真实状态，不是判据坏。
+pub const MOVER_RECALL_ANALYSIS_JOB_ID: &str = "mover-recall-analysis-daily";
+
+/// 编码段盲扫（C-1）：只登记清单、不出事件。
+pub const UNIVERSE_SCAN_JOB_ID: &str = "universe-code-scan-daily";
 pub const EVOLUTION_PROPOSAL_JOB_ID: &str = "evolution-proposal-daily";
 pub const LESSON_JOB_ID: &str = "lesson-validation-daily";
 pub const PORTFOLIO_METRICS_JOB_ID: &str = "portfolio-metrics-daily";
@@ -63,7 +79,7 @@ pub const INTENT_EXPIRY_JOB_ID: &str = "intent-expiry-daily";
 /// 本任务是漏网兜底（例如应用整夜未启动、或上一轮重跑失败）。
 pub const STOCK_ANALYSIS_RERUN_JOB_ID: &str = "stock-analysis-rerun-daily";
 
-/// 种子化十一条内置定时任务（启动时调用，失败不阻塞）。
+/// 种子化十二条内置定时任务（启动时调用，失败不阻塞）。
 ///
 /// `overwrite = false`（生产）：已存在即跳过；
 /// `overwrite = true`（测试重置用）：先删同名再建。
@@ -87,7 +103,7 @@ pub async fn seed_stock_automation_crons(
     Ok(())
 }
 
-/// 构造十一条内置任务（时刻均为**本地时区**口径，与调度器的 Local 匹配对齐）
+/// 构造十二条内置任务（时刻均为**本地时区**口径，与调度器的 Local 匹配对齐）
 ///
 /// ⚠ `CronJob::new` 的首参是 **name**，`id` 由 uuid 现生成（crates/runtime-core/src/cron_job.rs:196-199）⇒
 /// 幂等键必须显式赋 `job.id`（同 `seed_opc_cron.rs` 的形态），否则每次启动长出新的任务。
@@ -216,6 +232,32 @@ fn build_builtin_jobs() -> Result<Vec<CronJob>, String> {
     mover.id = MOVER_RECALL_JOB_ID.to_string();
     jobs.push(mover);
 
+    // 6.5) 每日 06:00 漏检事件补分析（A-1，2026-10-20）
+    //
+    // 消费上一轮核查落的 pending 事件：以每条事件的**窗口起点**做 as-of 重放完整分析链，
+    // 再建 `source='mover_recall'` 的反思 pending ⇒ 「漏检 → 补分析 → 反思」这条出口
+    // 从手动按钮变成每天自己走。
+    //
+    // 时刻取 06:00：在 04:00 中断补跑之后、07:00 决策回测之前 —— 当日新产出的补分析行
+    // 还能赶上 18:00 的到期反思。**刻意不进交易日闸门**：它重放的是历史窗口起点，
+    // 与「今天是不是交易日」无关（同 04:00 补跑那条的理由，别顺手加进 matches! 白名单）。
+    //
+    // 配额显式写进 prompt（不靠 from_json 的缺省）：任务行里看得见数字，
+    // 用户改过之后重启也不被回滚（种子语义是「存在即跳过」）。
+    let analysis_config = RunMoverRecallAnalysisRequest::cron_default();
+    let mut analysis = CronJob::new(
+        "漏检补分析（内置）",
+        "0 6 * * *",
+        &analysis_config.to_json()?,
+        &format!(
+            "把已落库的窗口涨幅达标漏检事件按其窗口起点做 as-of 补分析并建反思待办，单轮上限 {} 只",
+            analysis_config.batch_limit
+        ),
+    )
+    .with_task_type(MOVER_RECALL_ANALYSIS_TASK_TYPE);
+    analysis.id = MOVER_RECALL_ANALYSIS_JOB_ID.to_string();
+    jobs.push(analysis);
+
     // 7) 工作日 20:00 进化计划聚合：在 18:00 到期反思之后，聚合近 24h 的
     //    反思 / 决策验证 / 妖股漏检样本，有样本才产出 pending_approval 计划，
     //    **不执行任何变异**（审批接受在 P4）。prompt 留空 = 默认 24h 窗口。
@@ -281,6 +323,19 @@ fn build_builtin_jobs() -> Result<Vec<CronJob>, String> {
     expiry.id = INTENT_EXPIRY_JOB_ID.to_string();
     jobs.push(expiry);
 
+    // 13) 05:00 编码段盲扫：只登记代码到 market_stock_universe，不产事件（C-1 / 妖-3）。
+    //     每天只扫 1/3 段（按日轮转，三天覆盖全表）；**不进**交易日闸门（清单扩充与开不开市无关），
+    //     live 时间窗约束在 `run_universe_scan_inner` 里（手动与 cron 同一处）。
+    let mut universe_scan = CronJob::new(
+        "编码段盲扫（内置）",
+        "0 5 * * *",
+        "",
+        "按日轮转扫 1/3 段，把报价有效的 A 股代码登记进市场清单（只登记、不出事件），逐步抬高候选宇宙覆盖率",
+    )
+    .with_task_type(crate::commands::universe_scan::UNIVERSE_SCAN_TASK_TYPE);
+    universe_scan.id = UNIVERSE_SCAN_JOB_ID.to_string();
+    jobs.push(universe_scan);
+
     Ok(jobs)
 }
 
@@ -295,12 +350,12 @@ mod tests {
     async fn seed_creates_all_builtin_jobs_and_is_idempotent() {
         let store = Arc::new(CronJobStore::new_ephemeral());
         seed_stock_automation_crons(&store, false).await.unwrap();
-        assert_eq!(store.list().await.len(), 11);
+        assert_eq!(store.list().await.len(), 13);
 
         // 再跑两次：不重复建、不改写
         seed_stock_automation_crons(&store, false).await.unwrap();
         seed_stock_automation_crons(&store, false).await.unwrap();
-        assert_eq!(store.list().await.len(), 11);
+        assert_eq!(store.list().await.len(), 13);
     }
 
     /// 齐备性判据（PLAN §三.5）：**种出来的每个 task_type 都必须在 executor 源码里被显式处理**。
@@ -359,11 +414,11 @@ mod tests {
         let seed_code = strip_comments(&seed_src);
         let seed_prose = seed_code.split("#[cfg(test)]").next().unwrap_or_default();
         let args = with_task_type_args(seed_prose);
-        // 2026-10-17：新增「中断分析补跑」⇒ 10 → 11。
+        // 2026-10-17：新增「中断分析补跑」⇒ 10 → 11；2026-10-20 A-1 新增「漏检补分析」⇒ 11 → 12。
         // 这个数字是**门禁的锚**：加了种子任务却没改它，会在这里红；而忘了在
         // `services.rs` 加执行分支，会在下面逐条 `contains` 检查里红。
         // 两条各管一半 —— 只修一处会让另一半静默通过。
-        assert_eq!(args.len(), 11, "内置任务应各有 1 个 with_task_type 实参，实得 {}", args.len());
+        assert_eq!(args.len(), 13, "内置任务应各有 1 个 with_task_type 实参，实得 {}", args.len());
         for arg in &args {
             let forms = expected_forms(arg);
             let handled = forms.iter().any(|f| code_lines.contains(f));
@@ -480,6 +535,20 @@ mod tests {
         assert_eq!(mover.task_type.as_deref(), Some(MOVER_RECALL_TASK_TYPE));
         assert_eq!(mover.schedule, "0 9 * * 6");
         assert!(mover.prompt.is_empty(), "妖股核查无参数，prompt 应留空");
+
+        // 漏检补分析：每日 06:00、配置可读回且配额是命令面那个常量（不在这里另抄一个数）
+        let analysis = find(MOVER_RECALL_ANALYSIS_JOB_ID);
+        assert_eq!(analysis.task_type.as_deref(), Some(MOVER_RECALL_ANALYSIS_TASK_TYPE));
+        assert_eq!(analysis.schedule, "0 6 * * *", "必须排在 04:00 补跑之后、07:00 回测之前");
+        let cfg = RunMoverRecallAnalysisRequest::from_json(&analysis.prompt).unwrap();
+        assert_eq!(cfg.batch_limit, crate::commands::mover_recall_analysis::CRON_BATCH_LIMIT);
+        assert_eq!(cfg.max_unexplained_share, 0.5);
+        assert!(cfg.run_id.is_none(), "内置任务跨全部已落库轮次选样，不锁某一轮");
+        assert!(
+            analysis.description.contains(&cfg.batch_limit.to_string()),
+            "描述里的配额必须与配置同一个数，实得 {:?}",
+            analysis.description
+        );
 
         // 进化聚合：工作日 20:00、空配置可被解析器读成默认 24h 窗口
         let proposal = find(EVOLUTION_PROPOSAL_JOB_ID);

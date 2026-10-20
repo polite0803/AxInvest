@@ -22,7 +22,6 @@ pub mod data_quality_fuse;
 pub mod decision_validations;
 pub mod evolution_execution_stats;
 pub mod feedback_data_lake;
-pub mod financial_snapshot;
 pub mod gateway;
 pub mod gateway_diagnostic;
 pub mod gateway_key;

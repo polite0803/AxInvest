@@ -185,7 +185,49 @@ describe("stockAnalysisStore", () => {
       expect(state.status).toBe("completed");
       expect(state.analystReports["market-analyst"]).toBe("技术面看好");
       expect(state.debateRounds).toHaveLength(1);
-      expect(state.debateRounds[0]).toEqual({ round: 1, bull: "多方看涨", bear: "空方谨慎" });
+      expect(state.debateRounds[0]).toEqual({ tier: null, round: 1, bull: "多方看涨", bear: "空方谨慎" });
+    });
+
+    it("workflow-step-done：四档辩论按 (tier, round) 各自落库，不互相覆盖", async () => {
+      let stepDoneHandler: (event: { payload: Record<string, unknown> }) => void = () => {};
+      listenMock.mockImplementation((event: string, handler) => {
+        if (event === "workflow-step-done") { stepDoneHandler = handler; }
+        return Promise.resolve(unlistenMock);
+      });
+
+      await useStockAnalysisStore.getState().setupEventListener();
+
+      const tiers = ["ultra_short", "short", "mid", "long"];
+      for (const tier of tiers) {
+        stepDoneHandler({
+          payload: {
+            nodeId: `bull-r1--${tier}`,
+            status: "completed",
+            output: `多方-${tier}`,
+            totalNodes: 100,
+            completedNodes: 1,
+          },
+        });
+        stepDoneHandler({
+          payload: {
+            nodeId: `bear-r1--${tier}`,
+            status: "completed",
+            output: `空方-${tier}`,
+            totalNodes: 100,
+            completedNodes: 1,
+          },
+        });
+      }
+
+      const rounds = useStockAnalysisStore.getState().debateRounds;
+      // 修复前：四档的 id 都被 parseInt 成 round=1，findIndex(round===1) 让后完成的档
+      // 覆盖先完成的档 ⇒ 这里只会剩 1 条（而且是最后一次写入的那档）。
+      expect(rounds.map((r) => [r.tier, r.round, r.bull, r.bear])).toEqual([
+        ["ultra_short", 1, "多方-ultra_short", "空方-ultra_short"],
+        ["short", 1, "多方-short", "空方-short"],
+        ["mid", 1, "多方-mid", "空方-mid"],
+        ["long", 1, "多方-long", "空方-long"],
+      ]);
     });
 
     it("handles workflow-error event", async () => {
@@ -216,6 +258,112 @@ describe("stockAnalysisStore", () => {
 
       expect(invokeMock).toHaveBeenCalledWith("cancel_stock_workflow", { workflowId: "wf-1" });
       expect(useStockAnalysisStore.getState().status).toBe("cancelled");
+    });
+
+    it("后端取消失败也必须本地收口，否则「停止」对卡住的一轮永久失效", async () => {
+      useStockAnalysisStore.setState({ workflowId: "wf-1", status: "running" });
+      invokeMock.mockRejectedValue(new Error("WorkflowNotFound"));
+
+      await expect(useStockAnalysisStore.getState().cancelAnalysis()).resolves.toBeUndefined();
+
+      expect(useStockAnalysisStore.getState().status).toBe("cancelled");
+      expect(useStockAnalysisStore.getState().workflowId).toBeNull();
+    });
+  });
+
+  describe("错误退出后的状态收口（不得停在「分析中」）", () => {
+    /** 捕获指定事件的处理器；同时让其它 invoke 走正常返回。 */
+    function captureHandler(eventName: string) {
+      const ref: { handler: (event: { payload: Record<string, unknown> }) => void } = {
+        handler: () => {},
+      };
+      listenMock.mockImplementation((event: string, handler) => {
+        if (event === eventName) { ref.handler = handler; }
+        return Promise.resolve(unlistenMock);
+      });
+      return ref;
+    }
+
+    it("workflow-error 先于 run_stock_workflow 响应到达时，不被回写成 running", async () => {
+      const captured = captureHandler("workflow-error");
+      let resolveRun: (value: unknown) => void = () => {};
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "run_stock_workflow") {
+          return new Promise((resolve) => {
+            resolveRun = resolve;
+          });
+        }
+        if (cmd === "get_workflow_template") { return Promise.resolve({ variables: [] }); }
+        return Promise.resolve(undefined);
+      });
+
+      const started = useStockAnalysisStore.getState().startAnalysis("600519");
+      await vi.waitFor(() => {
+        expect(invokeMock).toHaveBeenCalledWith("run_stock_workflow", expect.anything());
+      });
+
+      captured.handler({
+        payload: {
+          workflowId: "wf-1",
+          code: "STOCK_WORKFLOW_EXEC_FAILED",
+          category: "unrecoverable",
+          detail: "启动即失败",
+        },
+      });
+      expect(useStockAnalysisStore.getState().status).toBe("error");
+
+      // 后端在 spawn 之后才返回：响应晚于终态事件是真实时序
+      resolveRun({ analysisId: "a-1", workflowId: "wf-1", stockCode: "600519", stockName: "茅台" });
+      await started;
+
+      const state = useStockAnalysisStore.getState();
+      expect(state.status).toBe("error");
+      expect(state.error).toBeTruthy();
+    });
+
+    it("workflow-error 的部分产物解析抛异常时，终态仍收口为 error", async () => {
+      const captured = captureHandler("workflow-error");
+      await useStockAnalysisStore.getState().setupEventListener();
+
+      const poisoned: Record<string, unknown> = {};
+      Object.defineProperty(poisoned, "content", {
+        enumerable: true,
+        get() {
+          throw new Error("malformed node output");
+        },
+      });
+
+      expect(() =>
+        captured.handler({
+          payload: {
+            workflowId: "wf-1",
+            code: "STOCK_WORKFLOW_EXEC_FAILED",
+            category: "unrecoverable",
+            results: { "a-market-analyst": poisoned },
+          },
+        })
+      ).not.toThrow();
+      expect(useStockAnalysisStore.getState().status).toBe("error");
+    });
+
+    it("workflow-completed 的部分产物解析抛异常时，终态仍收口为 completed", async () => {
+      const captured = captureHandler("workflow-completed");
+      await useStockAnalysisStore.getState().setupEventListener();
+
+      const poisoned: Record<string, unknown> = {};
+      Object.defineProperty(poisoned, "content", {
+        enumerable: true,
+        get() {
+          throw new Error("malformed node output");
+        },
+      });
+
+      expect(() =>
+        captured.handler({
+          payload: { workflowId: "wf-1", results: { "a-market-analyst": poisoned } },
+        })
+      ).not.toThrow();
+      expect(useStockAnalysisStore.getState().status).toBe("completed");
     });
   });
 });

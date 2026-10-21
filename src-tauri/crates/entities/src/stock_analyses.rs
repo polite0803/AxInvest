@@ -169,6 +169,12 @@ pub struct Model {
     pub trade_intent_actual_trade_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// 分析**完成时刻**（epoch ms）。
+    ///
+    /// 与 `updated_at` 分家：后者会被交易意图审核 / 结果回写等后续写库顶掉
+    /// （现网 167 条 completed 根记录里 109 条漂移 ≥ 24 小时），**不能**用来算耗时。
+    /// `None` = 未知（本列引入前的历史行，或 `interrupted`：进程退出时没有真实结束时刻）。
+    pub completed_at: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

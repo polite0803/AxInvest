@@ -4518,6 +4518,8 @@ mod market_snapshot_tests {
             trade_intent_actual_trade_id: None,
             created_at: 0,
             updated_at: 0,
+            // 夹具不关心完成时刻（本用例只测目标价提取）
+            completed_at: None,
         };
 
         assert_eq!(extract_target_price(&model), Some(133.0), "应优先取 decision_json");

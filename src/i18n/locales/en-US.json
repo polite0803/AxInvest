@@ -7512,6 +7512,7 @@
     },
     "source": {
       "scheduledCron": "Scheduled Jobs",
+      "stockAnalysis": "Single-stock Analysis",
       "stockPipeline": "Stock Analysis Pipeline",
       "timeTravelBatch": "Time-Travel Batch",
       "moverRecallAnalysis": "Mover-Recall Backfill"
@@ -7541,7 +7542,8 @@
       "schedule": "Scheduled",
       "manual": "Manual",
       "system": "System",
-      "external": "External"
+      "external": "External",
+      "unknown": "Unknown"
     },
     "health": {
       "running": "Running",
@@ -15516,8 +15518,8 @@
     "actionConfidenceBasisLabel": "Action basis",
     "valuationConflictRichNonbearish": "⚠️ Valuation basis mismatch: the algorithmic valuation concludes \"{{valuationAction}}\", while the {{horizon}} decision direction is \"{{decisionAction}}\" — short-term reads direction, long-term reads value; judge together with the valuation range",
     "valuationConflictCheapBearish": "⚠️ Valuation basis mismatch: the algorithmic valuation concludes \"{{valuationAction}}\" (bullish from a long-term value view), while the {{horizon}} decision direction is \"{{decisionAction}}\"; judge together with the valuation range",
-    "horizonScopeAnalyst": "Analyst reports: expanded per horizon — each tier runs the analyst subset that applies to it (tiers and subsets derived from the authoritative matrix) and emits its own VERDICT under that tier's contract; only the debate is still shared.",
-    "horizonScopeDebate": "Debate: only one cross-perspective debate round runs this cycle; the four horizons share the same debate record.",
+    "horizonScopeAnalyst": "Analyst reports: expanded per horizon — each tier runs the analyst subset that applies to it (tiers and subsets derived from the authoritative matrix) and emits its own VERDICT under that tier's contract",
+    "horizonScopeDebate": "Debate: each horizon runs its own bull/bear debate; switch tiers in this card to compare.",
     "horizonScopeRisk": "Risk classification: now horizon-scoped. Each tier is graded on the drawdown depth of its own holding window (ultra-short 2 / short 5 / mid 28 / long 90 trading days); volatility, Sharpe ratio and the four fundamentals remain 60-day global figures. Since v129 the main chain's f4 risk evidence, risk bias, position cap and risk veto all read the selected tier's grade (tightening only).",
     "llmHorizonOverview": "LLM decisions per horizon",
     "llmHorizonNotGiven": "The LLM gave no decision for this horizon",
@@ -16926,7 +16928,9 @@
       "verdictOnlyLabel": "The debater only provided a conclusion, without detailed analysis.",
       "title": "Debate Summary",
       "loading": "Debate analysis in progress...",
-      "evidence": "Evidence"
+      "evidence": "Evidence",
+      "tierNoOutput": "No debate output for {{tier}} this round (the node did not finish or returned empty).",
+      "roundHeading": "Round {{round}}"
     },
     "debugLabel": {
       "analyst": "Analyst",
@@ -17983,7 +17987,8 @@
       "neutral": "Neutral",
       "moat": "Moat",
       "idealBuy": "Ideal buy",
-      "rounds": " rounds"
+      "rounds": " rounds",
+      "tiers": " tiers"
     },
     "whatIf": {
       "valuationParams": "Valuation Params",
@@ -18008,7 +18013,41 @@
       "itemScore": "{{label}}（{{score}} / 100）",
       "overview": "Risk score overview",
       "scoreLabel": "Risk score",
-      "loading": "Risk assessment in progress..."
+      "loading": "Risk assessment in progress...",
+      "verdictStance": "Stance",
+      "verdictPosition": "Suggested position",
+      "verdictConfidence": "Confidence",
+      "noVote": "No output from this view",
+      "convergenceTitle": "Three-view convergence",
+      "viewsTitle": "Three-view assessment",
+      "riskLevelTitle": "Rule-based risk level",
+      "matchedRules": "Matched rules",
+      "axisGaps": "Data scope",
+      "metricsTitle": "Key metrics",
+      "researchManagerTitle": "Research manager summary",
+      "otherAssessments": "Other risk outputs",
+      "expand": "Expand",
+      "collapse": "Collapse",
+      "degraded": "Degraded",
+      "axisAbsent": "Absent",
+      "noRiskLevel": "Rule-based risk level not produced",
+      "noConvergence": "Three-view convergence not produced",
+      "noResearchManager": "Research manager summary not produced",
+      "axisDrawdownDepth": "Drawdown depth",
+      "axisFundamentals": "Fundamentals",
+      "axisSharpe": "Sharpe",
+      "axisVolatility": "Volatility",
+      "axisValueLatestReport": "Latest report",
+      "axisValueGlobal60": "60-day global",
+      "metricVolatility": "Annualized volatility",
+      "metricSharpe": "Sharpe ratio",
+      "metricMaxDrawdown": "Max drawdown",
+      "metricDrawdownDepth": "Drawdown depth",
+      "metricDebtRatio": "Debt ratio",
+      "metricGrossMargin": "Gross margin",
+      "metricRevenueGrowth": "Revenue growth YoY",
+      "metricRoe": "ROE (TTM)",
+      "metricWindowDays": "Window days"
     },
     "quantSim": {
       "title": "Strategy simulation",

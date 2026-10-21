@@ -49,6 +49,9 @@ pub struct Model {
     /// 按历史表统计的成功率会被系统性压低（池扫描实测 7 轮 3 条 0，其中 2 条是部分完成）。
     #[sea_orm(default_value = 0)]
     pub partial: i32,
+    /// 触发来源：`manual` / `schedule` / `system`。
+    /// NULL = 本列引入前的旧行（未知），前端显示「未知」而不是猜成某一类。
+    pub trigger: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

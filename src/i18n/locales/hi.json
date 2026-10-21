@@ -7512,6 +7512,7 @@
     },
     "source": {
       "scheduledCron": "अनुसूचित कार्य",
+      "stockAnalysis": "एकल स्टॉक विश्लेषण",
       "stockPipeline": "स्टॉक विश्लेषण पाइपलाइन",
       "timeTravelBatch": "टाइम-ट्रैवल बैच",
       "moverRecallAnalysis": "छूटे रैली बैकफ़िल विश्लेषण"
@@ -7541,7 +7542,8 @@
       "schedule": "अनुसूचित",
       "manual": "मैनुअल",
       "system": "सिस्टम",
-      "external": "बाहरी"
+      "external": "बाहरी",
+      "unknown": "अज्ञात"
     },
     "health": {
       "running": "चल रहा है",
@@ -15541,8 +15543,8 @@
     "actionConfidenceBasisLabel": "क्रिया मानदंड",
     "valuationConflictRichNonbearish": "⚠️ मूल्यांकन मानदंड में अंतर: एल्गोरिदम मूल्यांकन का निष्कर्ष \"{{valuationAction}}\" है, जबकि {{horizon}} निर्णय की दिशा \"{{decisionAction}}\" है — अल्पकाल दिशा देखता है, दीर्घकाल मूल्य; मूल्यांकन रेंज के साथ निर्णय लें",
     "valuationConflictCheapBearish": "⚠️ मूल्यांकन मानदंड में अंतर: एल्गोरिदम मूल्यांकन का निष्कर्ष \"{{valuationAction}}\" (दीर्घकालिक मूल्य दृष्टि से तेजी) है, जबकि {{horizon}} निर्णय की दिशा \"{{decisionAction}}\" है; मूल्यांकन रेंज के साथ निर्णय लें",
-    "horizonScopeAnalyst": "विश्लेषक रिपोर्ट: क्षितिज-वार अलग—हर क्षितिज अपने लिए लागू विश्लेषक उपसमुच्चय चलाता है (क्षितिज और उपसमुच्चय प्राधिक मैट्रिक्स से व्युत्पन्न) और उस क्षितिज के अनुबंध के अनुसार अपना VERDICT देता है; अब भी साझा केवल वाद-विवाद है।",
-    "horizonScopeDebate": "बहस: इस चक्र में दृष्टिकोणों के बीच की बहस का केवल एक दौर चलता है, चारों क्षितिज वही रिकॉर्ड साझा करते हैं।",
+    "horizonScopeAnalyst": "विश्लेषक रिपोर्ट: क्षितिज-वार अलग—हर क्षितिज अपने लिए लागू विश्लेषक उपसमुच्चय चलाता है (क्षितिज और उपसमुच्चय प्राधिक मैट्रिक्स से व्युत्पन्न) और उस क्षितिज के अनुबंध के अनुसार अपना VERDICT देता है",
+    "horizonScopeDebate": "वाद-विवाद: प्रत्येक क्षितिज अपना स्वतंत्र तेज़ी/मंदी (bull/bear) बहस चलाता है; तुलना के लिए इस कार्ड में क्षितिज बदलें।",
     "horizonScopeRisk": "जोखिम वर्गीकरण: अब क्षितिज-आधारित। प्रत्येक स्तर को अपनी धारण विंडो (अति-लघु 2 / लघु 5 / मध्य 28 / दीर्घ 90 कारोबारी दिन) की गिरावट-गहराई से अलग श्रेणी दी जाती है; चंचलता, शार्प अनुपात और चार मौलिक आँकड़े अब भी 60-कारोबारी-दिन के वैश्विक मान हैं। v129 से मुख्य श्रृंखला का f4 जोखिम प्रमाण, जोखिम झुकाव, स्थिति सीमा और जोखिम वीटो भी चुनी हुई अवधि की श्रेणी ही अपनाते हैं (केवल सख़्ती)।",
     "llmHorizonOverview": "LLM के क्षितिज-वार निर्णय",
     "llmHorizonNotGiven": "इस क्षितिज के लिए LLM ने निर्णय नहीं दिया",
@@ -16001,7 +16003,7 @@
       "partialFailed": "आंशिक विफलता",
       "positionPct": "पोजीशन",
       "riskAggregation": "जोखिम एकत्रीकरण",
-      "riskAggressive": "Aggressive Risk Assessment",
+      "riskAggressive": "आक्रामक जोखिम मूल्यांकन",
       "riskClassification": "Risk Classification",
       "auxNodes": "सहायक नोड्स",
       "riskConservative": "रूढ़िवादी जोखिम मूल्यांकन",
@@ -16608,7 +16610,9 @@
       "verdictOnlyLabel": "इस वाद-विवादकर्ता ने केवल निष्कर्ष दिया, विस्तृत विश्लेषण नहीं दिया।",
       "title": "Debate Summary",
       "loading": "बहस विश्लेषण जारी है...",
-      "evidence": "प्रमाण"
+      "evidence": "प्रमाण",
+      "tierNoOutput": "{{tier}} के लिए इस दौर में कोई बहस आउटपुट नहीं है (नोड पूरा नहीं हुआ या खाली लौटा)।",
+      "roundHeading": "राउंड {{round}}"
     },
     "decision": {
       "action": "कार्रवाई सुझाव",
@@ -17729,7 +17733,8 @@
       "neutral": "Neutral",
       "moat": "Moat",
       "idealBuy": "Ideal buy",
-      "rounds": " rounds"
+      "rounds": " rounds",
+      "tiers": " क्षितिज"
     },
     "whatIf": {
       "valuationParams": "Valuation Params",
@@ -17754,7 +17759,41 @@
       "itemScore": "{{label}}（{{score}} / 100）",
       "overview": "जोखिम स्कोर अवलोकन",
       "scoreLabel": "जोखिम स्कोर",
-      "loading": "जोखिम मूल्यांकन जारी है..."
+      "loading": "जोखिम मूल्यांकन जारी है...",
+      "verdictStance": "रुख",
+      "verdictPosition": "सुझाया गया पोज़िशन",
+      "verdictConfidence": "विश्वास",
+      "noVote": "इस दृष्टि का कोई आउटपुट नहीं",
+      "convergenceTitle": "तीन-दृष्टि अभिसरण",
+      "viewsTitle": "तीन-दृष्टि मूल्यांकन",
+      "riskLevelTitle": "नियम-आधारित जोखिम स्तर",
+      "matchedRules": "मेल खाने वाले नियम",
+      "axisGaps": "डेटा दायरा",
+      "metricsTitle": "प्रमुख मेट्रिक्स",
+      "researchManagerTitle": "रिसर्च मैनेजर सारांश",
+      "otherAssessments": "अन्य जोखिम आउटपुट",
+      "expand": "विस्तार करें",
+      "collapse": "संक्षिप्त करें",
+      "degraded": "अवनत",
+      "axisAbsent": "अनुपस्थित",
+      "noRiskLevel": "नियम-आधारित जोखिम स्तर उत्पन्न नहीं हुआ",
+      "noConvergence": "तीन-दृष्टि अभिसरण उत्पन्न नहीं हुआ",
+      "noResearchManager": "रिसर्च मैनेजर सारांश उत्पन्न नहीं हुआ",
+      "axisDrawdownDepth": "ड्रॉडाउन गहराई",
+      "axisFundamentals": "मूलभूत तथ्य",
+      "axisSharpe": "शार्प",
+      "axisVolatility": "अस्थिरता",
+      "axisValueLatestReport": "नवीनतम रिपोर्ट",
+      "axisValueGlobal60": "60-दिन वैश्विक",
+      "metricVolatility": "वार्षिक अस्थिरता",
+      "metricSharpe": "शार्प अनुपात",
+      "metricMaxDrawdown": "अधिकतम ड्रॉडाउन",
+      "metricDrawdownDepth": "ड्रॉडाउन गहराई",
+      "metricDebtRatio": "ऋण अनुपात",
+      "metricGrossMargin": "सकल मार्जिन",
+      "metricRevenueGrowth": "राजस्व वृद्धि YoY",
+      "metricRoe": "ROE (TTM)",
+      "metricWindowDays": "विंडो दिन"
     },
     "quantSim": {
       "title": "रणनीति सिमुलेशन",

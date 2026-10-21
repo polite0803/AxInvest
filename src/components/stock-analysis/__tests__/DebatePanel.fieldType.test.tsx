@@ -74,7 +74,7 @@ beforeEach(() => {
 
 describe("DebatePanel — LLM 输出字段类型不受控时的健壮性", () => {
   it("final_position 是对象时不崩，并提取出 stance 展示（修复前 ⇒ TypeError 整页崩）", () => {
-    useStockAnalysisStore.setState({ debateRounds: [{ round: 3, bull: REAL_BULL_R3, bear: "" }] });
+    useStockAnalysisStore.setState({ debateRounds: [{ tier: null, round: 3, bull: REAL_BULL_R3, bear: "" }] });
 
     // 修复前：R3View:555 r3PosLabel(对象) → key.toLowerCase() 抛 TypeError ⇒ render 直接抛
     expect(() => renderPanel()).not.toThrow();
@@ -86,7 +86,7 @@ describe("DebatePanel — LLM 输出字段类型不受控时的健壮性", () =>
   });
 
   it("strengthened_arguments 用 argument/evidence 也能显示（别名映射，防「不崩但全空」）", () => {
-    useStockAnalysisStore.setState({ debateRounds: [{ round: 3, bull: REAL_BULL_R3, bear: "" }] });
+    useStockAnalysisStore.setState({ debateRounds: [{ tier: null, round: 3, bull: REAL_BULL_R3, bear: "" }] });
 
     renderPanel();
 
@@ -95,7 +95,7 @@ describe("DebatePanel — LLM 输出字段类型不受控时的健壮性", () =>
   });
 
   it("r2 质询的 questions 是字符串（而非数组）时 R2View 不崩", () => {
-    useStockAnalysisStore.setState({ debateRounds: [{ round: 2, bull: STRING_QUESTIONS_R2, bear: "" }] });
+    useStockAnalysisStore.setState({ debateRounds: [{ tier: null, round: 2, bull: STRING_QUESTIONS_R2, bear: "" }] });
 
     // 修复前：R2View:487 ce.questions.map ⇒ questions.map is not a function
     expect(() => renderPanel()).not.toThrow();
@@ -110,7 +110,7 @@ describe("DebatePanel — LLM 输出字段类型不受控时的健壮性", () =>
       final_position: "weak_bull",
       strengthened_arguments: [{ claim_ref: "财务底线", additional_evidence: "现金流为正", final_strength: 60 }],
     });
-    useStockAnalysisStore.setState({ debateRounds: [{ round: 3, bull: normalR3, bear: "" }] });
+    useStockAnalysisStore.setState({ debateRounds: [{ tier: null, round: 3, bull: normalR3, bear: "" }] });
 
     renderPanel();
 

@@ -35,6 +35,9 @@ pub struct Model {
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub finished_at_ms: Option<i64>,
+    /// 触发来源：`manual` / `schedule`。
+    /// NULL = 本列引入前的旧行（未知），前端显示「未知」而不是猜成手动。
+    pub trigger: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

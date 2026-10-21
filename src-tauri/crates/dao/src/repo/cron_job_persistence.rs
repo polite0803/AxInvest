@@ -128,6 +128,7 @@ impl CronJobPersistence for PgCronJobPersistence {
             error: Set(record.error),
             duration_ms: Set(record.duration_ms),
             partial: Set(record.partial as i32),
+            trigger: Set(record.trigger),
         };
         cron_job_history::Entity::insert(model)
             .exec(&*self.db)
@@ -160,6 +161,7 @@ impl CronJobPersistence for PgCronJobPersistence {
                 error: m.error,
                 duration_ms: m.duration_ms,
                 partial: m.partial != 0,
+                trigger: m.trigger,
             })
             .collect())
     }
@@ -190,6 +192,7 @@ mod tests {
             error: None,
             duration_ms: 60_000,
             partial,
+            trigger: Some("schedule".to_string()),
         }
     }
 
@@ -208,6 +211,11 @@ mod tests {
         assert_eq!(rows.len(), 1, "应恰好读回一行");
         assert!(!rows[0].success, "超墙钟收尾那轮 success 记 false（本轮没跑完规划量）");
         assert!(rows[0].partial, "partial 必须为真 —— 否则该行退化成一枚无法归因的失败");
+        assert_eq!(
+            rows[0].trigger.as_deref(),
+            Some("schedule"),
+            "触发来源必须逐列存活（旧行为 NULL 时界面显示未知）"
+        );
     }
 
     /// 负控侧：真故障轮不得被写成「部分完成」。拆掉写侧的 `partial` 赋值时，

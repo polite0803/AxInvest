@@ -391,6 +391,21 @@ export interface DecisionsByHorizon {
 }
 
 /**
+ * 一份辩论产物（多空两侧正文 + 档位 + 轮次）。
+ *
+ * `tier === null` 表示分档之前的历史记录（≤v160：四档共用一份，节点 id 无档位后缀）。
+ * v161 起辩论按四档展开（`bull-r1--mid` / `bear-r1--mid`），**同档同轮才是一对**；
+ * 呈现层不得把不同 tier 的行按 `round` 合并 —— 那会让后完成的档覆盖先完成的档。
+ */
+export interface DebateRound {
+  /** 档位 snake_case（`ultra_short` / `short` / `mid` / `long`）；null = 历史单份记录 */
+  tier: string | null;
+  round: number;
+  bull: string;
+  bear: string;
+}
+
+/**
  * LLM（trader 节点）自报的**逐档决策**一行。
  *
  * 字段集 = `src-tauri/config/llm-output-schemas.json` 里 `trader_output.decisions.*` 的 7 个
@@ -1227,6 +1242,11 @@ export interface AnalysisSummary {
   decisionJson: string | null;
   createdAt: number;
   updatedAt: number;
+  /**
+   * 分析完成时刻（ms）；null = 未知（本列引入前的历史行 / interrupted）。
+   * 与 updatedAt 分家：后者会被交易意图审核、结果回写等后续写库顶掉。
+   */
+  completedAt: number | null;
   /** "live" | "replay" */
   analysisKind: string;
   /** as_of_date YYYY-MM-DD（仅 replay 模式非空） */
@@ -1806,6 +1826,8 @@ export interface MoverRecallBatchState {
   createdAtMs: number;
   updatedAtMs: number;
   finishedAtMs: number | null;
+  /** 触发来源：manual / schedule；null = 本列引入前的旧批次（未知） */
+  trigger?: string | null;
 }
 
 // ── 决策时间线类型 ──

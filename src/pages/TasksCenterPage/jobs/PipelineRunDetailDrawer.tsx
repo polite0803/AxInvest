@@ -7,7 +7,9 @@ import { Alert, Descriptions, Drawer, Empty, Space, Spin, Table, Tag, Typography
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { mapPipelineState } from "../adapters/pipeline.adapter";
 import { formatDateTime, formatDuration } from "../formatUtils";
+import { RunStatusTag } from "../RunStatusTag";
 
 interface PipelineRunDetailDrawerProps {
   /** 为空时 Drawer 关闭；切换 run 时按 runId 拉 get_pipeline_run_detail 明细 */
@@ -154,7 +156,14 @@ export function PipelineRunDetailDrawer({ run, onClose }: PipelineRunDetailDrawe
                 {
                   key: "status",
                   label: t("pipeline.status"),
-                  children: <Tag color={STATUS_TAG_COLOR[run.status?.toLowerCase()] ?? "default"}>{run.status}</Tag>,
+                  children: (
+                    <RunStatusTag
+                      state={mapPipelineState(run.status)}
+                      badges={run.status?.toLowerCase() === "interrupted"
+                        ? ["interrupted"]
+                        : undefined}
+                    />
+                  ),
                 },
                 { key: "runId", label: "ID", children: <Typography.Text code>{run.id}</Typography.Text> },
                 {
@@ -177,17 +186,19 @@ export function PipelineRunDetailDrawer({ run, onClose }: PipelineRunDetailDrawe
                 {
                   key: "candidates",
                   label: t("pipeline.candidates"),
-                  children: summary?.discovery.candidatesFound ?? 0,
+                  // summary 为 null（运行中 / 中断 / 从未回写）⇒ 一律「-」：
+                  // 显示 0 会把「没有汇总」伪装成「跑完了但一只都没发现」
+                  children: summary?.discovery.candidatesFound ?? "-",
                 },
                 {
                   key: "newAnalyzed",
                   label: t("tasksCenter.pipelineDetail.newAnalyzed"),
-                  children: summary?.analysis.newAnalyzed ?? 0,
+                  children: summary?.analysis.newAnalyzed ?? "-",
                 },
                 {
                   key: "reassessed",
                   label: t("tasksCenter.pipelineDetail.reassessed"),
-                  children: summary?.analysis.reassessed ?? 0,
+                  children: summary?.analysis.reassessed ?? "-",
                 },
                 {
                   key: "decisions",
@@ -206,7 +217,7 @@ export function PipelineRunDetailDrawer({ run, onClose }: PipelineRunDetailDrawe
                 {
                   key: "reflection",
                   label: t("pipeline.reflectionScheduled"),
-                  children: summary?.reflectionScheduled ?? 0,
+                  children: summary?.reflectionScheduled ?? "-",
                 },
                 {
                   key: "note",

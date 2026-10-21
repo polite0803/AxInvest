@@ -67,8 +67,8 @@ describe("HorizonScopeNotice", () => {
    * `seeded_template_carries_horizon_scoped_risk_nodes` 锁）；本测试把那份轴表与文案逐字对上，
    * 改判据不同批改文案就会红（反手抄门）。
    *
-   * 反向锁 **debate** 一格**仍然**是共用 —— 逐档辩论（A4）尚未落地，
-   * 若有人顺手把它改成「已按档」，本条当场红。
+   * **debate 一格已于 v161（A4）反向收口**：辩论按四档展开后，旧声明「四档共用同一份」
+   * 必须撤下 —— 与 analyst 同款：旧句降级为负控，11 语言以语言中立标记 `bull` 锁漏改。
    *
    * **analyst 一格已于 2026-10-16 反向收口**：v133（B2-2）起分析师实例由
    * `Period::analyst_subset()` 逐档展开，而本格文案长期仍写「四档共用同一批分析师输出」——
@@ -76,7 +76,7 @@ describe("HorizonScopeNotice", () => {
    * 现改为：analyst 必须声明按档，且**与被声明的事实同源核对**（读种子现场确认逐档展开仍在发生），
    * 被锁的旧文案降级成负控样本。
    */
-  it("v129 的 risk 声明与 axisScope 事实一致，analyst 已按档，debate 未被顺手改宽", () => {
+  it("v129 的 risk 声明与 axisScope 事实一致，analyst / debate 均已按档", () => {
     // 谓词只写一次，正样本与变异样本走同一条判据（否则「负控」只是把字符串再说一遍）
     const riskClaimIsHorizonScoped = (text: string) =>
       text.includes("回撤深度")
@@ -98,11 +98,12 @@ describe("HorizonScopeNotice", () => {
     expect(rhai).toContain('"latestReport"');
 
     // analyst：声明必须与数据层事实同向（v133 B2-2 起逐档展开）。谓词同样只写一次，正负样本共用。
+    // v161 起辩论也按档 ⇒ 旧尾部那句「仍然共用一份的是辩论」不得回流。
     const analystClaimIsHorizonScoped = (text: string) =>
       text.includes("已按档展开")
       && text.includes("分析师子集")
-      && text.includes("仍然共用一份的是辩论")
-      && !text.includes("四档共用");
+      && !text.includes("四档共用")
+      && !text.includes("共用一份的是辩论");
     expect(analystClaimIsHorizonScoped(zh.horizonScopeAnalyst)).toBe(true);
     // 负控：被本轮撤下的那句谎（v133 之前的现网文案）必须被同一谓词拒掉
     expect(
@@ -119,19 +120,30 @@ describe("HorizonScopeNotice", () => {
     );
     expect(seed).toContain("p.analyst_subset().contains(id)");
 
-    // 11 语言同批改口：新句每种语言都带 `VERDICT` 这个语言中立标记，旧句没有 ⇒ 漏改即红。
-    // （清单由目录现场列出，不手抄 11 个文件名 —— 第 12 种语言落地时本条自动覆盖它。）
+    // debate：v161 起逐档辩论已落地（每档一组 `bull-rN--<档>` / `bear-rN--<档>` 节点）
+    const debateClaimIsHorizonScoped = (text: string) =>
+      text.includes("bull")
+      && text.includes("按档")
+      && !text.includes("四档共用")
+      && !text.includes("同一份");
+    expect(debateClaimIsHorizonScoped(zh.horizonScopeDebate)).toBe(true);
+    // 负控：v161 之前那句现网文案必须被同一谓词拒掉
+    expect(
+      debateClaimIsHorizonScoped("辩论：本轮只进行一轮跨视角辩论，四档共用同一份辩论记录。"),
+    ).toBe(false);
+
+    // 11 语言同批改口：新句每种语言都带语言中立标记（analyst=`VERDICT`，debate=`bull`），
+    // 旧句没有 ⇒ 漏改即红。（清单由目录现场列出，不手抄 11 个文件名。）
     const localeFiles = readdirSync(path.join(ROOT, "src/i18n/locales"))
       .filter((f) => f.endsWith(".json"));
     expect(localeFiles.length).toBeGreaterThanOrEqual(11);
     for (const f of localeFiles) {
-      const v = JSON.parse(
+      const data = JSON.parse(
         readFileSync(path.join(ROOT, "src/i18n/locales", f), "utf8"),
-      ).stockAnalysis.horizonScopeAnalyst as string;
-      expect(v, `${f} 未随本轮改口`).toContain("VERDICT");
+      ).stockAnalysis;
+      expect(data.horizonScopeAnalyst, `${f} 未随本轮改口`).toContain("VERDICT");
+      expect(data.horizonScopeDebate, `${f} 未随逐档辩论改口`).toContain("bull");
     }
-
-    expect(zh.horizonScopeDebate).toContain("四档共用");
 
     // 负控：改回 v127 那句「四档共用」的文案必须被同一谓词拒掉
     expect(

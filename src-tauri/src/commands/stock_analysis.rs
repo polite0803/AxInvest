@@ -1238,6 +1238,9 @@ pub struct StockAnalysisListItem {
     pub template_version: Option<i32>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// 分析完成时刻（ms）；`NULL` = 未知（本列引入前的历史行 / `interrupted`）。
+    /// **不得**回退到 `updated_at`：后者会被后续写库顶掉。
+    pub completed_at: Option<i64>,
 }
 
 /// `list_stock_analyses` 的查询实现（与命令体拆开，只为让**返回体形状**能被单测直接验）。
@@ -1272,6 +1275,7 @@ pub(crate) async fn query_stock_analysis_items(
         .column(stock_analyses::Column::DecisionHorizonSource)
         .column(stock_analyses::Column::CreatedAt)
         .column(stock_analyses::Column::UpdatedAt)
+        .column(stock_analyses::Column::CompletedAt)
         .order_by_desc(stock_analyses::Column::CreatedAt)
         .limit(Some(limit as u64))
         .offset(Some(offset as u64))

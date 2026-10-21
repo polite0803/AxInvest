@@ -3,7 +3,7 @@
 import i18n from "@/i18n";
 import { invoke } from "@/lib/invoke";
 import type { MoverRecallBatchState } from "@/types";
-import { runIdOf, type RunState, type UnifiedRun } from "../model";
+import { mapRunTrigger, runIdOf, type RunState, type UnifiedRun } from "../model";
 import type { TaskSourceAdapter } from "./types";
 
 /**
@@ -40,7 +40,8 @@ export function mapBatchSummary(batch: MoverRecallBatchState): UnifiedRun {
     source: "mover-recall-analysis",
     nativeId: batch.batchId,
     name: `${i18n.t("tasksCenter.source.moverRecallAnalysis")} · ${batch.ok}/${batch.total}`,
-    trigger: "manual",
+    // cron 每天 06:00 也会建批次 ⇒ 不能一律标手动；旧批次没有来源 ⇒ unknown
+    trigger: mapRunTrigger(batch.trigger),
     state,
     stage: undefined,
     progress,

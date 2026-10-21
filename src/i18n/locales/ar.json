@@ -7512,6 +7512,7 @@
     },
     "source": {
       "scheduledCron": "المهام المجدولة",
+      "stockAnalysis": "تحليل سهم فردي",
       "stockPipeline": "خط أنابيب تحليل الأسهم",
       "timeTravelBatch": "دفعة السفر الزمني",
       "moverRecallAnalysis": "تحليل تكميلي لصفقات الارتفاع الفائتة"
@@ -7541,7 +7542,8 @@
       "schedule": "مجدول",
       "manual": "يدوي",
       "system": "النظام",
-      "external": "خارجي"
+      "external": "خارجي",
+      "unknown": "غير معروف"
     },
     "health": {
       "running": "قيد التشغيل",
@@ -15541,8 +15543,8 @@
     "actionConfidenceBasisLabel": "معيار الإجراء",
     "valuationConflictRichNonbearish": "⚠️ تباين في معيار التقييم: خلص التقييم الخوارزمي إلى \"{{valuationAction}}\"، بينما اتجاه قرار {{horizon}} هو \"{{decisionAction}}\" — الأمد القصير يقرأ الاتجاه والأمد الطويل يقرأ القيمة؛ يُرجى الحكم في ضوء نطاق التقييم",
     "valuationConflictCheapBearish": "⚠️ تباين في معيار التقييم: خلص التقييم الخوارزمي إلى \"{{valuationAction}}\" (نظرة تفاؤلية من منظور القيمة طويلة الأمد)، بينما اتجاه قرار {{horizon}} هو \"{{decisionAction}}\"؛ يُرجى الحكم في ضوء نطاق التقييم",
-    "horizonScopeAnalyst": "تقارير المحللين: مفصولة لكل أفق — ينفّذ كل أفق المجموعة الفرعية من المحللين الخاصة به (تُشتق الآفاق والمجموعات من المصفوفة المعتمدة) ويُصدر VERDICT وفق عقد ذلك الأفق؛ وما يبقى مشتركًا حتى الآن هو النقاش.",
-    "horizonScopeDebate": "النقاش: يجري هذا الدورة جولة واحدة من النقاش بين وجهات النظر، وتتشارك الآفاق الأربعة السجل نفسه.",
+    "horizonScopeAnalyst": "تقارير المحللين: مفصولة لكل أفق — ينفّذ كل أفق المجموعة الفرعية من المحللين الخاصة به (تُشتق الآفاق والمجموعات من المصفوفة المعتمدة) ويُصدر VERDICT وفق عقد ذلك الأفق",
+    "horizonScopeDebate": "النقاش: يجري كل أفق نقاشه المستقل بين وجهات النظر الصاعدة/الهابطة (bull/bear)؛ يمكن تبديل الأفق في هذه البطاقة للمقارنة.",
     "horizonScopeRisk": "تصنيف المخاطر: بحسب الأفق الآن. يُقيَّم كل مستوى وفق عمق التراجع في نافذة الاحتفاظ الخاصة به (فائق القصر 2 / قصير 5 / متوسط 28 / طويل 90 يوم تداول)؛ أما التقلب ونسبة شارب والقيم الأساسية الأربع فتظل قيمًا عامة لنافذة 60 يومًا. منذ الإصدار v129، دليلُ المخاطر f4 والانحيازُ المخاطر وسقفُ المركز ورفضُ المخاطر في السلسلة الرئيسية كلها تتبع تصنيف الأفق المختار (تشدّد فقط).",
     "llmHorizonOverview": "قرارات النموذج لكل أفق",
     "llmHorizonNotGiven": "لم يُصدر النموذج أي قرار لهذا الأفق",
@@ -16001,7 +16003,7 @@
       "partialFailed": "فشل جزئي",
       "positionPct": "المركز",
       "riskAggregation": "تجميع المخاطر",
-      "riskAggressive": "Aggressive Risk Assessment",
+      "riskAggressive": "تقييم المخاطر العدواني",
       "riskClassification": "Risk Classification",
       "auxNodes": "العقد المساعدة",
       "riskConservative": "تقييم المخاطر المتحفظ",
@@ -16608,7 +16610,9 @@
       "verdictOnlyLabel": "قدم هذا المُناظر استنتاجًا فقط، بدون تحليل مفصل.",
       "title": "Debate Summary",
       "loading": "جارٍ تحليل المناظرة...",
-      "evidence": "الأدلة"
+      "evidence": "الأدلة",
+      "tierNoOutput": "لا يوجد ناتج نقاش لـ {{tier}} في هذه الجولة (لم تكتمل العقدة أو كان الناتج فارغًا).",
+      "roundHeading": "الجولة {{round}}"
     },
     "decision": {
       "action": "Suggested Action",
@@ -17729,7 +17733,8 @@
       "neutral": "Neutral",
       "moat": "Moat",
       "idealBuy": "Ideal buy",
-      "rounds": " rounds"
+      "rounds": " rounds",
+      "tiers": " آفاق"
     },
     "whatIf": {
       "valuationParams": "Valuation Params",
@@ -17754,7 +17759,41 @@
       "itemScore": "{{label}}（{{score}} / 100）",
       "overview": "نظرة عامة على تقييم المخاطر",
       "scoreLabel": "درجة المخاطر",
-      "loading": "جاري تقييم المخاطر..."
+      "loading": "جاري تقييم المخاطر...",
+      "verdictStance": "الموقف",
+      "verdictPosition": "المركز المقترح",
+      "verdictConfidence": "الثقة",
+      "noVote": "لا ناتج لهذا الرأي",
+      "convergenceTitle": "تقارب الآراء الثلاثة",
+      "viewsTitle": "تقييم الآراء الثلاثة",
+      "riskLevelTitle": "مستوى المخاطر وفق القواعد",
+      "matchedRules": "القواعد المطابقة",
+      "axisGaps": "نطاق البيانات",
+      "metricsTitle": "المؤشرات الرئيسية",
+      "researchManagerTitle": "ملخص مدير البحث",
+      "otherAssessments": "مخرجات مخاطر أخرى",
+      "expand": "توسيع",
+      "collapse": "طي",
+      "degraded": "متدهور",
+      "axisAbsent": "غائب",
+      "noRiskLevel": "لم يتم إنتاج مستوى المخاطر وفق القواعد",
+      "noConvergence": "لم يتم إنتاج تقارب الآراء الثلاثة",
+      "noResearchManager": "لم يتم إنتاج ملخص مدير البحث",
+      "axisDrawdownDepth": "عمق التراجع",
+      "axisFundamentals": "الأساسيات",
+      "axisSharpe": "شارب",
+      "axisVolatility": "التقلب",
+      "axisValueLatestReport": "آخر تقرير",
+      "axisValueGlobal60": "عالمي 60 يومًا",
+      "metricVolatility": "التقلب السنوي",
+      "metricSharpe": "نسبة شارب",
+      "metricMaxDrawdown": "أقصى تراجع",
+      "metricDrawdownDepth": "عمق التراجع",
+      "metricDebtRatio": "نسبة الدين",
+      "metricGrossMargin": "الهامش الإجمالي",
+      "metricRevenueGrowth": "نمو الإيرادات سنويًا",
+      "metricRoe": "ROE (TTM)",
+      "metricWindowDays": "أيام النافذة"
     },
     "quantSim": {
       "title": "محاكاة الاستراتيجية",

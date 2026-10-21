@@ -29,6 +29,8 @@ vi.mock("@/lib/invoke", () => ({
 /** 造 N 轮辩论产物（正文只要非空，判定只看 round 集合）。 */
 function rounds(n: number) {
   return Array.from({ length: n }, (_, i) => ({
+    // 历史单份记录：分档之前的夹具保持原形状，验证回放兼容
+    tier: null,
     round: i + 1,
     bull: JSON.stringify({ core_arguments: [{ claim: `多方论点 ${i + 1}` }], stance: "bullish" }),
     bear: JSON.stringify({ core_arguments: [{ claim: `空方论点 ${i + 1}` }], stance: "bearish" }),

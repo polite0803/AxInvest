@@ -90,6 +90,18 @@ pub struct ScheduledTaskDto {
     /// 结构化业务参数（参数化任务使用，如时间旅行批次的 asOf/档位勾选）
     #[serde(default)]
     pub params: Option<serde_json::Value>,
+    /// 本进程内该任务**正在执行**的开始时刻（ms）；null = 没在跑。
+    ///
+    /// 来自 `CronJobStore` 的纯内存登记，不是 DB 状态 ⇒ 进程重启自然清空，
+    /// 不会留下假的「运行中」。
+    #[serde(default)]
+    pub running_since: Option<i64>,
+    /// 在跑的触发来源（`manual` / `schedule`）；null = 没在跑。
+    #[serde(default)]
+    pub running_trigger: Option<String>,
+    /// 最近一次执行的触发来源；null = 本列引入前的旧记录（未知）。
+    #[serde(default)]
+    pub last_trigger: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,6 +238,10 @@ pub(crate) fn cron_to_dto(job: &CronJob) -> ScheduledTaskDto {
             .unwrap_or_default(),
         workflow_id: job.workflow_id.clone(),
         params: job.params.clone(),
+        // 在跑字段由 list/get 命令叠加（cron_to_dto 只有任务定义，看不到进程内登记）。
+        running_since: None,
+        running_trigger: None,
+        last_trigger: job.last_trigger.clone(),
     }
 }
 
@@ -245,6 +261,18 @@ pub struct CreateTaskInput {
     pub params: Option<serde_json::Value>,
 }
 
+/// 把进程内「在跑」登记叠加到 DTO（`cron_to_dto` 只看得见任务定义）。
+fn overlay_running(
+    mut dto: ScheduledTaskDto,
+    running: &std::collections::HashMap<String, axagent_runtime_core::cron_job::RunningJob>,
+) -> ScheduledTaskDto {
+    if let Some(r) = running.get(&dto.id) {
+        dto.running_since = Some(r.started_at_ms);
+        dto.running_trigger = Some(r.trigger.to_string());
+    }
+    dto
+}
+
 #[agent_command(domain = scheduled_task, safety = Safe, call_mode = StateOnly, description = "列出定时任务")]
 #[tauri::command]
 pub async fn list_scheduled_tasks(
@@ -252,7 +280,8 @@ pub async fn list_scheduled_tasks(
 ) -> Result<Vec<ScheduledTaskDto>, String> {
     require_operator(&state)?;
     let jobs = state.cron_job_store.list().await;
-    Ok(jobs.iter().map(cron_to_dto).collect())
+    let running = state.cron_job_store.list_running().await;
+    Ok(jobs.iter().map(|job| overlay_running(cron_to_dto(job), &running)).collect())
 }
 
 #[agent_command(domain = scheduled_task, safety = Safe, call_mode = StateInput, description = "获取定时任务详情")]
@@ -263,7 +292,8 @@ pub async fn get_scheduled_task(
 ) -> Result<Option<ScheduledTaskDto>, String> {
     require_operator(&state)?;
     let job = state.cron_job_store.get(&task_id).await;
-    Ok(job.as_ref().map(cron_to_dto))
+    let running = state.cron_job_store.list_running().await;
+    Ok(job.as_ref().map(|j| overlay_running(cron_to_dto(j), &running)))
 }
 
 #[agent_command(domain = scheduled_task, safety = Caution, call_mode = StateInput, description = "创建定时任务")]
@@ -394,6 +424,8 @@ pub async fn execute_scheduled_task(
 
     // 分支 1：关联了工作流 → 真正执行工作流并等待完成
     if let Some(ref wf_id) = job.workflow_id {
+        // 手动执行同样登记「在跑」：长工作流期间任务中心能显示运行中，record_run 时摘除。
+        state.cron_job_store.mark_running(&task_id, started, "manual").await;
         let opts = axagent_runtime::work_engine::RunOptions::default();
         let result = match state.work_engine.run_workflow(wf_id, opts).await {
             Ok(workflow) => {
@@ -447,6 +479,8 @@ pub async fn execute_scheduled_task(
     // （2026-10-21 实机反馈：计划任务页只弹一个 toast）。
     // 这里直接复用 cron 的同一实现体，并以 `manual` 落 trigger_source（F-15 的区分）。
     if job.task_type.as_deref() == Some(crate::commands::mover_recall::MOVER_RECALL_TASK_TYPE) {
+        // 手动快路径同样登记「在跑」，让任务中心看到「手动」而不是干等。
+        state.cron_job_store.mark_running(&task_id, started, "manual").await;
         let result = match crate::commands::mover_recall::run_mover_recall_check(
             state.harness.db(),
             &state.astock_client,

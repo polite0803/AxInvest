@@ -2,6 +2,7 @@
 
 import { showBackendError, translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
+import { useTaskCenterStore } from "@/stores";
 import type { ScheduledTask, TaskExecutionRecord } from "@/types";
 import {
   App,
@@ -25,7 +26,7 @@ import { useNavigate } from "react-router-dom";
 import { type FieldState, parseCronFields } from "./CronScheduleBuilder";
 import { formatDateTime, formatDuration, formatRelativeOrAbsolute } from "./formatUtils";
 import { TaskCreateModal } from "./forms/TaskCreateModal";
-import { isNextRunStale } from "./model";
+import { isNextRunStale, mapRunTrigger } from "./model";
 import { canExecuteNow, classifyScheduledTask, isBuiltinTask, type ScheduledTaskGroup } from "./taskGrouping";
 
 const AUTO_REFRESH_INTERVAL_MS = 15_000;
@@ -216,6 +217,9 @@ export function ScheduledJobsTab() {
           error?: string | null;
           awaited?: boolean;
         }>("execute_scheduled_task", { taskId: task.id });
+        // 内置长任务在后台跑：立刻刷新「全部运行」，让后端在跑登记变成一条 running 行；
+        // 之后的 2 秒轮询会把它推进到完成态。短任务此时可能已经结束，下面延迟重拉一次。
+        void useTaskCenterStore.getState().loadRuns(true);
         // 等到了终态（如漏检核查：一次库内扫描）⇒ 直接把这一轮的结论摊开给用户；
         // 长任务只回「已触发」，不能把 ack 当结果（2026-10-21 实机反馈）。
         if (res?.awaited && (res.output ?? "").trim() !== "") {
@@ -238,6 +242,7 @@ export function ScheduledJobsTab() {
         refreshTimer.current = window.setTimeout(() => {
           refreshTimer.current = null;
           void loadTasks(true);
+          void useTaskCenterStore.getState().loadRuns(true);
         }, 800);
       } catch (e) {
         showBackendError(message, e);
@@ -551,6 +556,14 @@ export function ScheduledJobsTab() {
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   {formatDuration(v, locale)}
                 </Typography.Text>
+              ),
+            },
+            {
+              title: t("tasksCenter.column.trigger"),
+              key: "trigger",
+              width: 80,
+              render: (_: unknown, r: TaskExecutionRecord) => (
+                <Tag>{t(`tasksCenter.trigger.${mapRunTrigger(r.trigger)}`)}</Tag>
               ),
             },
             {

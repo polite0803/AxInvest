@@ -7512,6 +7512,7 @@
     },
     "source": {
       "scheduledCron": "Tareas programadas",
+      "stockAnalysis": "Análisis de acción individual",
       "stockPipeline": "Pipeline de análisis de acciones",
       "timeTravelBatch": "Lote de viaje en el tiempo",
       "moverRecallAnalysis": "Cobertura de subidas perdidas"
@@ -7541,7 +7542,8 @@
       "schedule": "Programado",
       "manual": "Manual",
       "system": "Sistema",
-      "external": "Externo"
+      "external": "Externo",
+      "unknown": "Desconocido"
     },
     "health": {
       "running": "En ejecución",
@@ -15541,8 +15543,8 @@
     "actionConfidenceBasisLabel": "Base de la acción",
     "valuationConflictRichNonbearish": "⚠️ Discrepancia de criterio de valoración: la valoración algorítmica concluye \"{{valuationAction}}\", mientras que la dirección de la decisión {{horizon}} es \"{{decisionAction}}\" — el corto plazo lee dirección, el largo plazo lee valor; juzgue junto con el rango de valoración",
     "valuationConflictCheapBearish": "⚠️ Discrepancia de criterio de valoración: la valoración algorítmica concluye \"{{valuationAction}}\" (alcista a largo plazo), mientras que la dirección de la decisión {{horizon}} es \"{{decisionAction}}\"; juzgue junto con el rango de valoración",
-    "horizonScopeAnalyst": "Informes de analistas: desglosados por horizontal — cada horizontal ejecuta la subselección de analistas que le corresponde (horizontales y subselecciones derivados de la matriz autorizada) y emite su VERDICT según el contrato de ese horizontal; lo único que sigue compartido es el debate.",
-    "horizonScopeDebate": "Debate: este ciclo ejecuta una sola ronda de debate entre perspectivas; los cuatro horizontales comparten el mismo registro.",
+    "horizonScopeAnalyst": "Informes de analistas: desglosados por horizontal — cada horizontal ejecuta la subselección de analistas que le corresponde (horizontales y subselecciones derivados de la matriz autorizada) y emite su VERDICT según el contrato de ese horizontal",
+    "horizonScopeDebate": "Debate: cada horizonte ejecuta su propio debate alcista/bajista (bull/bear); cambia de horizonte en esta tarjeta para comparar.",
     "horizonScopeRisk": "Clasificación de riesgo: ahora por horizonte. Cada nivel se califica por la profundidad de retroceso de su propia ventana de tenencia (ultracorto 2 / corto 5 / medio 28 / largo 90 días hábiles); la volatilidad, el ratio de Sharpe y los cuatro fundamentales siguen siendo cifras globales a 60 días. Desde la v129, la evidencia de riesgo f4, el sesgo de riesgo, el límite de posición y el veto de riesgo de la cadena principal siguen también la calificación del horizonte elegido (solo endurecimiento).",
     "llmHorizonOverview": "Decisiones del LLM por horizontal",
     "llmHorizonNotGiven": "El LLM no dio ninguna decisión para este horizontal",
@@ -16001,7 +16003,7 @@
       "partialFailed": "Fallo parcial",
       "positionPct": "Posición",
       "riskAggregation": "Agregación de riesgos",
-      "riskAggressive": "Aggressive Risk Assessment",
+      "riskAggressive": "Evaluación de riesgo agresiva",
       "riskClassification": "Risk Classification",
       "auxNodes": "Nodos auxiliares",
       "riskConservative": "Evaluación de riesgo conservadora",
@@ -16608,7 +16610,9 @@
       "verdictOnlyLabel": "Este debatiente solo proporcionó una conclusión, sin un análisis detallado.",
       "title": "Debate Summary",
       "loading": "Análisis de debate en curso...",
-      "evidence": "Evidencia"
+      "evidence": "Evidencia",
+      "tierNoOutput": "No hay salida de debate para {{tier}} en esta ronda (el nodo no terminó o devolvió vacío).",
+      "roundHeading": "Ronda {{round}}"
     },
     "decision": {
       "action": "Sugerencia de operación",
@@ -17729,7 +17733,8 @@
       "neutral": "Neutral",
       "moat": "Moat",
       "idealBuy": "Ideal buy",
-      "rounds": " rounds"
+      "rounds": " rounds",
+      "tiers": " horizontes"
     },
     "whatIf": {
       "valuationParams": "Valuation Params",
@@ -17754,7 +17759,41 @@
       "itemScore": "{{label}}（{{score}} / 100）",
       "overview": "Resumen de puntuación de riesgo",
       "scoreLabel": "Puntuación de riesgo",
-      "loading": "Evaluación de riesgos en curso..."
+      "loading": "Evaluación de riesgos en curso...",
+      "verdictStance": "Postura",
+      "verdictPosition": "Posición sugerida",
+      "verdictConfidence": "Confianza",
+      "noVote": "Sin salida de esta vista",
+      "convergenceTitle": "Convergencia de las tres vistas",
+      "viewsTitle": "Evaluación de las tres vistas",
+      "riskLevelTitle": "Nivel de riesgo por reglas",
+      "matchedRules": "Reglas activadas",
+      "axisGaps": "Alcance de datos",
+      "metricsTitle": "Métricas clave",
+      "researchManagerTitle": "Resumen del gestor de investigación",
+      "otherAssessments": "Otras salidas de riesgo",
+      "expand": "Expandir",
+      "collapse": "Contraer",
+      "degraded": "Degradado",
+      "axisAbsent": "Ausente",
+      "noRiskLevel": "Nivel de riesgo por reglas no producido",
+      "noConvergence": "Convergencia de las tres vistas no producida",
+      "noResearchManager": "Resumen del gestor de investigación no producido",
+      "axisDrawdownDepth": "Profundidad de drawdown",
+      "axisFundamentals": "Fundamentales",
+      "axisSharpe": "Sharpe",
+      "axisVolatility": "Volatilidad",
+      "axisValueLatestReport": "Último informe",
+      "axisValueGlobal60": "Global de 60 días",
+      "metricVolatility": "Volatilidad anualizada",
+      "metricSharpe": "Ratio de Sharpe",
+      "metricMaxDrawdown": "Drawdown máximo",
+      "metricDrawdownDepth": "Profundidad de drawdown",
+      "metricDebtRatio": "Ratio de deuda",
+      "metricGrossMargin": "Margen bruto",
+      "metricRevenueGrowth": "Crecimiento de ingresos interanual",
+      "metricRoe": "ROE (TTM)",
+      "metricWindowDays": "Días de ventana"
     },
     "quantSim": {
       "title": "Simulación de estrategia",

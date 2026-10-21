@@ -7512,6 +7512,7 @@
     },
     "source": {
       "scheduledCron": "예약 작업",
+      "stockAnalysis": "개별 종목 분석",
       "stockPipeline": "주식 분석 파이프라인",
       "timeTravelBatch": "타임트래블 배치",
       "moverRecallAnalysis": "급등주 누락 보완 분석"
@@ -7541,7 +7542,8 @@
       "schedule": "예약",
       "manual": "수동",
       "system": "시스템",
-      "external": "외부"
+      "external": "외부",
+      "unknown": "알 수 없음"
     },
     "health": {
       "running": "실행 중",
@@ -15541,8 +15543,8 @@
     "actionConfidenceBasisLabel": "판단 기준",
     "valuationConflictRichNonbearish": "⚠️ 밸류에이션 기준 불일치: 알고리즘 평가 결론은 \"{{valuationAction}}\"인 반면 {{horizon}} 판단 방향은 \"{{decisionAction}}\"입니다 — 단기는 방향, 장기는 가치를 봅니다. 평가 범위를 참고해 판단하세요",
     "valuationConflictCheapBearish": "⚠️ 밸류에이션 기준 불일치: 알고리즘 평가 결론은 \"{{valuationAction}}\"(장기 가치 관점 강세)인 반면 {{horizon}} 판단 방향은 \"{{decisionAction}}\"입니다. 평가 범위를 참고해 판단하세요",
-    "horizonScopeAnalyst": "애널리스트 리포트: 구간별로 전개됨 — 각 구간은 자신에 해당하는 애널리스트 부분 집합(권위 매트릭스에서 도출)을 실행하고 해당 구간의 계약에 따라 VERDICT를 각각 산출합니다. 여전히 공유되는 것은 토론뿐입니다.",
-    "horizonScopeDebate": "토론: 이번 사이클은 관점 간 토론을 1라운드만 진행하며 4개 구간이 같은 기록을 공유합니다.",
+    "horizonScopeAnalyst": "애널리스트 리포트: 구간별로 전개됨 — 각 구간은 자신에 해당하는 애널리스트 부분 집합(권위 매트릭스에서 도출)을 실행하고 해당 구간의 계약에 따라 VERDICT를 각각 산출합니다.",
+    "horizonScopeDebate": "토론: 4개 구간이 각각 강세/약세(bull/bear) 토론을 진행합니다. 이 카드에서 구간을 전환해 확인할 수 있습니다.",
     "horizonScopeRisk": "리스크 분류: 등급별로 판정합니다. 각 등급은 자체 보유 기간(초단타 2 / 단타 5 / 중기 28 / 장기 90 영업일)의 낙폭 깊이로 개별 등급을 매깁니다. 변동성·샤프 지수·펀더멘털 4개 항목은 여전히 60일 기준의 공용 값입니다.v129부터 본체 체인의 f4 리스크 근거·리스크 편향·포지션 상한·리스크 거부도 선택된 구간의 등급을 따릅니다(엄격화만).",
     "llmHorizonOverview": "LLM 구간별 판단",
     "llmHorizonNotGiven": "이 구간의 LLM 판단이 없습니다",
@@ -16001,7 +16003,7 @@
       "partialFailed": "부분 실패",
       "positionPct": "포지션",
       "riskAggregation": "리스크 집계",
-      "riskAggressive": "Aggressive Risk Assessment",
+      "riskAggressive": "공격적 리스크 평가",
       "riskClassification": "Risk Classification",
       "auxNodes": "보조 노드",
       "riskConservative": "보수적 리스크 평가",
@@ -16608,7 +16610,9 @@
       "verdictOnlyLabel": "이 토론자는 결론만 제시했으며, 상세한 분석 내용을 제공하지 않았습니다.",
       "title": "Debate Summary",
       "loading": "토론 분석 진행 중...",
-      "evidence": "근거"
+      "evidence": "근거",
+      "tierNoOutput": "{{tier}}은(는) 이번 라운드에 토론 산출물이 없습니다(노드 미완료 또는 빈 출력).",
+      "roundHeading": "{{round}}라운드"
     },
     "decision": {
       "action": "운영 제안",
@@ -17729,7 +17733,8 @@
       "neutral": "Neutral",
       "moat": "Moat",
       "idealBuy": "Ideal buy",
-      "rounds": " rounds"
+      "rounds": " rounds",
+      "tiers": "구간"
     },
     "whatIf": {
       "valuationParams": "Valuation Params",
@@ -17754,7 +17759,41 @@
       "itemScore": "{{label}}（{{score}} / 100）",
       "overview": "리스크 점수 개요",
       "scoreLabel": "리스크 점수",
-      "loading": "위험 평가 진행 중..."
+      "loading": "위험 평가 진행 중...",
+      "verdictStance": "입장",
+      "verdictPosition": "권장 포지션",
+      "verdictConfidence": "신뢰도",
+      "noVote": "이 관점 산출물 없음",
+      "convergenceTitle": "3관점 수렴 결론",
+      "viewsTitle": "3관점 평가",
+      "riskLevelTitle": "규칙 기반 리스크 등급",
+      "matchedRules": "일치 규칙",
+      "axisGaps": "데이터 범위",
+      "metricsTitle": "핵심 지표",
+      "researchManagerTitle": "리서치 매니저 종합 의견",
+      "otherAssessments": "기타 리스크 산출물",
+      "expand": "펼치기",
+      "collapse": "접기",
+      "degraded": "저하됨",
+      "axisAbsent": "결측",
+      "noRiskLevel": "규칙 기반 리스크 등급 미산출",
+      "noConvergence": "3관점 수렴 결론 미산출",
+      "noResearchManager": "리서치 매니저 종합 의견 미산출",
+      "axisDrawdownDepth": "낙폭 깊이",
+      "axisFundamentals": "펀더멘털",
+      "axisSharpe": "샤프",
+      "axisVolatility": "변동성",
+      "axisValueLatestReport": "최신 보고서",
+      "axisValueGlobal60": "60일 글로벌",
+      "metricVolatility": "연환산 변동성",
+      "metricSharpe": "샤프 비율",
+      "metricMaxDrawdown": "최대 낙폭",
+      "metricDrawdownDepth": "낙폭 깊이",
+      "metricDebtRatio": "부채비율",
+      "metricGrossMargin": "매출총이익률",
+      "metricRevenueGrowth": "매출 전년비",
+      "metricRoe": "ROE(TTM)",
+      "metricWindowDays": "윈도우 일수"
     },
     "quantSim": {
       "title": "전략 시뮬레이션",

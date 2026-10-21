@@ -2,6 +2,12 @@ import { makeWorkflowContent, type WorkflowCardData } from "@/components/chat/Wo
 import { extractContent, extractDecision } from "@/lib/agentOutput";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
+import {
+  compareDebateRounds,
+  debatePeerNodeId,
+  horizonLabelKey,
+  parseDebateRoundRef,
+} from "@/lib/stock-analysis-utils";
 import { useConversationStore } from "@/stores/domain/conversationStore";
 import type { Message } from "@/types";
 import type { StockDecision } from "@/types/stock-analysis";
@@ -206,31 +212,36 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     ]),
   );
 
-  const DEBATE_ROUNDS = 3;
-  const debatesMap = new Map<
-    string,
-    {
-      key: string;
-      label: string;
-      status: "pending" | "running" | "done" | "failed";
-      rounds: string[];
-      preview?: string;
-    }
-  >();
-  for (let r = 1; r <= DEBATE_ROUNDS; r++) {
-    debatesMap.set(`bull-r${r}`, {
-      key: `bull-r${r}`,
-      label: `${i18next.t("stockAnalysis.workflow.bullAnalyst")}·${r}`,
+  type DebateEntry = {
+    key: string;
+    label: string;
+    status: "pending" | "running" | "done" | "failed";
+    rounds: string[];
+    preview?: string;
+  };
+  // 辩论自 v161 起按四档展开（`bull-r1--mid` 等），轮数由模板变量决定 ⇒ 不写死 3 轮，
+  // 条目按首次出现的节点 id 动态注册（历史单份节点仍归一到 `bull-r1` / `bear-r1`）。
+  const debatesMap = new Map<string, DebateEntry>();
+  const ensureDebateEntry = (nodeId: string): DebateEntry | null => {
+    const ref = parseDebateRoundRef(nodeId);
+    if (!ref) { return null; }
+    const existing = debatesMap.get(nodeId);
+    if (existing) { return existing; }
+    const isBear = nodeId.startsWith("bear-");
+    const tierLabel = ref.tier ? i18next.t(horizonLabelKey(ref.tier) ?? ref.tier) : "";
+    const entry: DebateEntry = {
+      key: nodeId,
+      label: `${
+        i18next.t(
+          isBear ? "stockAnalysis.workflow.bearAnalyst" : "stockAnalysis.workflow.bullAnalyst",
+        )
+      }${tierLabel ? `·${tierLabel}` : ""}·${ref.round}`,
       status: "pending",
       rounds: [],
-    });
-    debatesMap.set(`bear-r${r}`, {
-      key: `bear-r${r}`,
-      label: `${i18next.t("stockAnalysis.workflow.bearAnalyst")}·${r}`,
-      status: "pending",
-      rounds: [],
-    });
-  }
+    };
+    debatesMap.set(nodeId, entry);
+    return entry;
+  };
 
   const risksMap = new Map([
     ["risk-agg", {
@@ -295,13 +306,31 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     error?: string,
   ) => {
     const analysts = Array.from(analystsMap.values());
-    // 转换 debatesMap 为 WorkflowCardData 期望的 round/bull/bear/status 格式
-    const debates: { round: number; bull?: string; bear?: string; status: "running" | "done" | "pending" }[] = [];
-    for (let r = 1; r <= DEBATE_ROUNDS; r++) {
-      const bullEntry = debatesMap.get(`bull-r${r}`);
-      const bearEntry = debatesMap.get(`bear-r${r}`);
+    // 转换 debatesMap 为 WorkflowCardData 期望的 tier/round/bull/bear/status 格式。
+    // 以 bull 侧为行锚，bear 按**同档同轮**配对（不再按 round 全局配对）。
+    const debates: Array<{
+      tier?: string | null;
+      round: number;
+      bull?: string;
+      bear?: string;
+      status: "running" | "done" | "pending";
+    }> = [];
+    const bullKeys = Array.from(debatesMap.keys())
+      .filter((key) => key.startsWith("bull-"))
+      .sort((a, b) => {
+        const ra = parseDebateRoundRef(a);
+        const rb = parseDebateRoundRef(b);
+        return ra && rb ? compareDebateRounds(ra, rb) : 0;
+      });
+    for (const bullKey of bullKeys) {
+      const ref = parseDebateRoundRef(bullKey);
+      if (!ref) { continue; }
+      const bullEntry = debatesMap.get(bullKey);
+      const bearKey = debatePeerNodeId(bullKey, "bear");
+      const bearEntry = bearKey ? debatesMap.get(bearKey) : undefined;
       debates.push({
-        round: r,
+        tier: ref.tier,
+        round: ref.round,
         // 生成中优先显示流式预览（rounds 仅在 completed 后有值）
         bull: bullEntry?.rounds[0] ?? bullEntry?.preview,
         bear: bearEntry?.rounds[0] ?? bearEntry?.preview,
@@ -438,15 +467,15 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
       }
     }
 
-    // ── 辩论节点 (DebateNode 子节点: bull-researcher / bear-researcher / bull-r* / bear-r*) ──
+    // ── 辩论节点 (DebateNode 子节点: bull-researcher / bear-researcher / bull-r*[--档]) ──
     const debateNodeId = nodeId === "bull-researcher"
       ? "bull-r1"
       : nodeId === "bear-researcher"
       ? "bear-r1"
       : nodeId;
 
-    if (debatesMap.has(debateNodeId)) {
-      const debater = debatesMap.get(debateNodeId)!;
+    const debater = ensureDebateEntry(debateNodeId);
+    if (debater) {
       if (status === "running") {
         debater.status = "running";
       } else if (status === "streaming") {
@@ -552,6 +581,10 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     // 导致 analystsMap / debatesMap / risksMap 等部分节点停留在 "pending"。
     // 这里在停止监听前，用 results（后端权威快照）补全所有未收到 completed 事件的节点。
     // 覆盖范围：分析师 / 辩论 / 风险评估 / 额外节点。
+    // 辩论条目可能一个 step-done 都没收到 ⇒ 先从权威 results 的键注册，再由 reconcile 写正文。
+    for (const key of Object.keys(results)) {
+      if (key.startsWith("bull-") || key.startsWith("bear-")) { ensureDebateEntry(key); }
+    }
     const reconcileFromResults = (
       map: Map<string, {
         status: "pending" | "running" | "done" | "failed";
@@ -593,10 +626,15 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
       analystsMap,
       (id) => id,
     );
-    // 辩论：bull-r1 ← bull-researcher，其余 ← bull-r2/bull-r3/bear-r2/bear-r3
+    // 辩论：带档条目 key 即节点 id；历史单份节点归一到 bull-r1 / bear-r1
     reconcileFromResults(
       debatesMap,
-      (id) => id === "bull-r1" ? ["bull-researcher", "bull-r1"] : [id],
+      (id) =>
+        id === "bull-r1"
+          ? ["bull-researcher", "bull-r1"]
+          : id === "bear-r1"
+          ? ["bear-researcher", "bear-r1"]
+          : [id],
       true,
     );
     // 风险评估：key === nodeId

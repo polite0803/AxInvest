@@ -16,6 +16,8 @@ import { getWorkflowNodeLabel } from "../workflowNodeLabel";
 // 那样全局节点这一格会假绿，因为它本来就靠 defaultValue 兜底）
 const KNOWN_KEYS = new Set([
   "stockAnalysis.workflow.riskLevel",
+  "stockAnalysis.workflow.riskAggressive",
+  "stockAnalysis.workflow.riskAggregation",
   ...Object.values(HORIZON_T_SUFFIX).map((s) => `stockAnalysis.timeHorizon${s}`),
 ]);
 const fakeT =
@@ -41,6 +43,12 @@ describe("getWorkflowNodeLabel（逐档风险节点）", () => {
     expect(getWorkflowNodeLabel("cls-risk-level", fakeT)).toBe(
       "t:stockAnalysis.workflow.riskLevel",
     );
+  });
+
+  it("risk-agg 是激进视角、agg-risk 才是聚合容器（此前两格标签对调）", () => {
+    expect(getWorkflowNodeLabel("risk-agg", fakeT)).toBe("t:stockAnalysis.workflow.riskAggressive");
+    expect(getWorkflowNodeLabel("agg-risk", fakeT)).toBe("t:stockAnalysis.workflow.riskAggregation");
+    expect(getWorkflowNodeLabel("risk-aggregated", fakeT)).toBe("t:stockAnalysis.workflow.riskAggregation");
   });
 
   it("负控：未知后缀不得凭空拼出一个档位名，必须落回裸 id", () => {

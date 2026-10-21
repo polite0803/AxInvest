@@ -5,6 +5,7 @@ import { filterRuns, sortRuns } from "../model";
 import { cronAdapter } from "./cron.adapter";
 import { moverRecallAnalysisAdapter } from "./moverRecallAnalysis.adapter";
 import { pipelineAdapter } from "./pipeline.adapter";
+import { stockAnalysisAdapter } from "./stockAnalysis.adapter";
 import { timeTravelAdapter } from "./timeTravel.adapter";
 import type { TaskSourceAdapter } from "./types";
 
@@ -15,6 +16,7 @@ import type { TaskSourceAdapter } from "./types";
 const REGISTRY: TaskSourceAdapter[] = [
   cronAdapter,
   pipelineAdapter,
+  stockAnalysisAdapter,
   timeTravelAdapter,
   moverRecallAnalysisAdapter,
 ];

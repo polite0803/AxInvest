@@ -1,5 +1,5 @@
 // i18n-exempt: 业务逻辑/格式化/日志字符串，非 UI 展示文本
-import { classifySentiment } from "@/lib/stock-analysis-utils";
+import { classifySentiment, HORIZON_T_SUFFIX, horizonLabelKey } from "@/lib/stock-analysis-utils";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { ExpandOutlined, ReloadOutlined, WarningOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Empty, Modal, Segmented, Spin, Tag, Typography } from "antd";
@@ -16,6 +16,14 @@ interface DebateContent {
   text: string; // 清理后的原始文本（JSON 或 Markdown）
   parsed: DebateJson | null; // 结构化解析结果
   empty: boolean; // 是否为空
+}
+
+/** 一行辩论产物 + 已解析的多空内容（档位用于分组，轮次用于档内切换） */
+interface ProcessedDebateRound {
+  tier: string | null;
+  round: number;
+  bull: DebateContent;
+  bear: DebateContent;
 }
 
 /** R1 辩手输出格式 */
@@ -1035,29 +1043,73 @@ export function DebatePanel() {
   const expectedDebateRounds = useStockAnalysisStore((s) => s.expectedDebateRounds);
   const streamingPreviews = useStockAnalysisStore((s) => s.streamingPreviews);
   const workflowStatus = useStockAnalysisStore((s) => s.status);
-  // 辩论本身**不分档**（`bull-rN`/`bear-rN` 无档后缀，v133 起四档共用同一份记录）
-  // ⇒ 卡片上的四周期信息只能取「各档最终决策」（`decisionsByHorizon`），且必须与
-  //   旁边的 `HorizonScopeNotice scope="debate"` 同屏，避免把决策读成辩论产物。
+  // 辩论自 v161 起按四档展开（节点 id 带 `--<档>` 后缀），每档一份独立记录。
+  // 卡片上方的四周期条读的仍是「各档最终决策」（`decisionsByHorizon`），不是辩论产物。
   const decision = useStockAnalysisStore((s) => s.decision);
   // 阶段 6: 重跑辩论:在 early-return 之前声明 hook,保持 hooks 调用顺序一致
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const [expanded, setExpanded] = useState(false);
 
+  // 预处理所有辩论行（正文解析较重，debateRounds 不变就不重算）
+  const processedRounds = useMemo<ProcessedDebateRound[]>(
+    () =>
+      debateRounds.map((r) => ({
+        tier: r.tier,
+        round: r.round,
+        bull: processDebateInput(r.bull),
+        bear: processDebateInput(r.bear),
+      })),
+    [debateRounds],
+  );
+
+  // 按档分组：历史记录（tier === null）保持原「轮次」模式；v161+ 记录走「档位 × 轮次」。
+  const roundsByTier = useMemo(() => {
+    const map = new Map<string | null, ProcessedDebateRound[]>();
+    for (const r of processedRounds) {
+      const list = map.get(r.tier) ?? [];
+      list.push(r);
+      map.set(r.tier, list);
+    }
+    for (const list of map.values()) { list.sort((a, b) => a.round - b.round); }
+    return map;
+  }, [processedRounds]);
+  const tieredMode = processedRounds.some((r) => r.tier !== null);
+  const tierKeys = Object.keys(HORIZON_T_SUFFIX);
+  const firstTierWithData = tierKeys.find((tier) => (roundsByTier.get(tier)?.length ?? 0) > 0) ?? tierKeys[0];
+  const legacyRounds = roundsByTier.get(null) ?? [];
+
+  // 档位是**唯一一级**切换；同一档的多轮纵向排列，不再叠第二组「第 N 轮」tab。
+  // 数据异步到达，activeTier 未选时跟随第一个有数据的档。
+  const [activeTier, setActiveTier] = useState<string | null>(null);
+  const currentTier = tieredMode
+    ? (activeTier && tierKeys.includes(activeTier) ? activeTier : firstTierWithData)
+    : null;
+  const tierRounds = tieredMode ? (currentTier ? roundsByTier.get(currentTier) ?? [] : []) : legacyRounds;
+  // 整档缺席时 rounds 为空 —— 这本身就是一种结论，不能回退到别的档顶替
+  const tierAbsent = tieredMode && tierRounds.length === 0;
+  const showRoundHeadings = tierRounds.length > 1;
+
+  const tierLabel = (tier: string | null): string => {
+    if (tier === null) { return ""; }
+    const key = horizonLabelKey(tier);
+    return key ? t(key) : tier;
+  };
+
   const [sentimentRatio, bullCount, bearCount] = useMemo(() => {
-    if (debateRounds.length === 0) { return [0.5, 0, 0]; }
+    // 情绪比只统计当前档：四档混算会把「超短看多、长线看空」抹成中性
     let bullish = 0;
     let bearish = 0;
-    for (const r of debateRounds) {
-      if (classifySentiment(r.bull) === "bullish") { bullish++; }
-      if (classifySentiment(r.bear) === "bearish") { bearish++; }
+    for (const r of tierRounds) {
+      if (classifySentiment(r.bull.text) === "bullish") { bullish++; }
+      if (classifySentiment(r.bear.text) === "bearish") { bearish++; }
     }
     const total = bullish + bearish;
     return [
       total > 0 ? bullish / total : 0.5,
       bullish,
       bearish,
-    ];
-  }, [debateRounds]);
+    ] as const;
+  }, [tierRounds]);
 
   const sentimentText = sentimentRatio > 0.55
     ? t("stockAnalysis.sentimentBullish")
@@ -1066,13 +1118,6 @@ export function DebatePanel() {
     : t("stockAnalysis.sentimentNeutral");
   const pct = Math.round(sentimentRatio * 100);
   const pointerLeft = `${sentimentRatio * 100}%`;
-
-  // 预处理所有轮次数据
-  const processedRounds = debateRounds.map((r) => ({
-    round: r.round,
-    bull: processDebateInput(r.bull),
-    bear: processDebateInput(r.bear),
-  }));
 
   // 阶段 7: 检测失败轮次 + 降级轮次
   // 期望轮数 = 模板变量 `debate_rounds`（后端建图时与 DAG 展开强制同源），**不写死 3**。
@@ -1083,21 +1128,20 @@ export function DebatePanel() {
   const expectedRounds = expectedDebateRounds === null
     ? []
     : Array.from({ length: expectedDebateRounds }, (_, i) => i + 1);
-  const presentRounds = new Set(processedRounds.map((r) => r.round));
-  const failedRounds = expectedRounds.filter((r) => !presentRounds.has(r));
-  const degradedRounds = processedRounds.filter(
+  // 分母是「每档应有轮数」⇒ 只在当前档内比；整档缺席单独说，不伪装成「第 1 轮失败」
+  const presentRounds = new Set(tierRounds.map((r) => r.round));
+  const failedRounds = tierAbsent ? [] : expectedRounds.filter((r) => !presentRounds.has(r));
+  const degradedRounds = tierRounds.filter(
     (r) => r.bull.text.includes("[DEGRADED]") || r.bear.text.includes("[DEGRADED]"),
   );
-  const showWarning = failedRounds.length > 0 || degradedRounds.length > 0;
+  const showRoundWarning = failedRounds.length > 0 || degradedRounds.length > 0;
+  // 整档缺席也要露出重跑入口（它不是「轮次跑坏」，所以不套轮次告警那条文案）
+  const showRerun = tierAbsent || showRoundWarning;
 
-  // P1.5-5: Round 切换状态
-  const [activeRoundIdx, setActiveRoundIdx] = useState(0);
-  const activeRound = processedRounds[activeRoundIdx];
-
-  // 找 R3 裁决卡片: 从所有轮次中提取最终立场
-  // processedRounds 在本组件内创建且不突变，使用 useMemo 的唯一目的是传稳定引用
+  // 找 R3 裁决卡片: 当前档**最后一轮**的最终立场（不同档不合并）
   const finalVerdict = useMemo(() => {
-    for (const r of processedRounds) {
+    for (let i = tierRounds.length - 1; i >= 0; i--) {
+      const r = tierRounds[i];
       if (r.bull.parsed?.final_position || r.bull.parsed?.claim) {
         return r.bull.parsed;
       }
@@ -1107,7 +1151,7 @@ export function DebatePanel() {
     }
     return null;
     // eslint-disable-next-line react-hooks/preserve-manual-memoization
-  }, [processedRounds]);
+  }, [tierRounds]);
 
   // 阶段 6: 重跑辩论 — 直接触发一次 stock-analysis workflow
   // (用 stockAnalysisStore 的 startAnalysis;不引入新后端命令)
@@ -1186,10 +1230,10 @@ export function DebatePanel() {
     return decision?.decisionsByHorizon ? horizonHeader : null;
   }
 
-  // Round 标签
-  const roundOptions = processedRounds.map((r, i) => ({
-    label: `${t("stockAnalysis.round")}${r.round}`,
-    value: i,
+  // 档位标签（四档固定列出：缺哪一档由内容区明说，而不是不显示那一格）
+  const tierOptions = tierKeys.map((tier) => ({
+    label: tierLabel(tier),
+    value: tier,
   }));
 
   return (
@@ -1214,7 +1258,7 @@ export function DebatePanel() {
         }
         extra={
           <div className="flex items-center gap-1">
-            {showWarning && (
+            {showRerun && (
               <Button
                 type="text"
                 size="small"
@@ -1232,7 +1276,7 @@ export function DebatePanel() {
           </div>
         }
       >
-        {showWarning && (
+        {showRoundWarning && (
           <Alert
             type="warning"
             showIcon
@@ -1290,56 +1334,74 @@ export function DebatePanel() {
           </div>
         </div>
 
-        {/* P1.5-5: Round 标签切换代替原有的 Collapse */}
+        {/* 档位是唯一一级切换；同一档的多轮纵向排列（不再叠第二组「第 N 轮」tab） */}
         {processedRounds.length > 0 && (
           <div className="mb-2">
-            <Segmented
-              size="small"
-              value={activeRoundIdx}
-              options={roundOptions}
-              onChange={(val) => setActiveRoundIdx(val as number)}
-              className="mb-2"
-            />
-            {/* 裁决卡片高亮 */}
-            {finalVerdict && roundOptions[activeRoundIdx]?.label?.includes("3") && (
-              <div
-                className="p-2 rounded text-xs mb-2 font-medium"
-                style={{
-                  background: "linear-gradient(135deg, rgba(124,58,237,0.12), rgba(124,58,237,0.04))",
-                  border: "1px solid rgba(124,58,237,0.3)",
-                  borderRadius: 8,
-                }}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <span aria-hidden="true">⚖️</span>
-                  <span className="font-semibold" style={{ color: "#7c3aed" }}>
-                    {t("stockAnalysis.verdictReason")}
-                  </span>
-                </div>
-                <Typography.Paragraph
-                  ellipsis={{ rows: 3, expandable: true, symbol: t("stockAnalysis.expand") }}
-                  className="mb-0"
-                  style={{ fontSize: 11, color: "var(--color-text-secondary)" }}
-                >
-                  {safeLabelText(finalVerdict.claim) || t("stockAnalysis.debate.noVerdict")}
-                </Typography.Paragraph>
+            {tieredMode && (
+              <Segmented
+                size="small"
+                value={currentTier ?? undefined}
+                options={tierOptions}
+                onChange={(val) => setActiveTier(val as string)}
+                className="mb-2"
+              />
+            )}
+            {/* 整档缺席：四档各占一格，缺的那格明说，不拿别的档顶替 */}
+            {tierAbsent && (
+              <div className="py-6 text-center text-xs" style={{ color: "var(--muted)" }}>
+                {t("stockAnalysis.debate.tierNoOutput", { tier: tierLabel(currentTier) })}
               </div>
             )}
-            {/* 当前轮次的辩论内容 */}
-            {activeRound && (
-              <div className="flex flex-col sm:flex-row gap-2" style={{ maxHeight: 360, overflow: "auto" }}>
-                <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-red)" }}>
-                  <Tag color="red">{t("stockAnalysis.bull")}</Tag>
-                  <div className="mt-1">
-                    <DebateContentView content={activeRound.bull} isDark={isDark} />
+            {tierRounds.length > 0 && (
+              <div className="space-y-3" style={{ maxHeight: 480, overflow: "auto" }}>
+                {tierRounds.map((round) => (
+                  <div key={`${round.tier ?? "legacy"}-${round.round}`}>
+                    {showRoundHeadings && (
+                      <div className="text-xs font-semibold mb-1" style={{ color: "var(--muted)" }}>
+                        {t("stockAnalysis.debate.roundHeading", { round: round.round })}
+                      </div>
+                    )}
+                    {/* 裁决卡片高亮（第 3 轮是该档的裁决轮） */}
+                    {finalVerdict && round.round === 3 && (
+                      <div
+                        className="p-2 rounded text-xs mb-2 font-medium"
+                        style={{
+                          background: "linear-gradient(135deg, rgba(124,58,237,0.12), rgba(124,58,237,0.04))",
+                          border: "1px solid rgba(124,58,237,0.3)",
+                          borderRadius: 8,
+                        }}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <span aria-hidden="true">⚖️</span>
+                          <span className="font-semibold" style={{ color: "#7c3aed" }}>
+                            {t("stockAnalysis.verdictReason")}
+                          </span>
+                        </div>
+                        <Typography.Paragraph
+                          ellipsis={{ rows: 3, expandable: true, symbol: t("stockAnalysis.expand") }}
+                          className="mb-0"
+                          style={{ fontSize: 11, color: "var(--color-text-secondary)" }}
+                        >
+                          {safeLabelText(finalVerdict.claim) || t("stockAnalysis.debate.noVerdict")}
+                        </Typography.Paragraph>
+                      </div>
+                    )}
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-red)" }}>
+                        <Tag color="red">{t("stockAnalysis.bull")}</Tag>
+                        <div className="mt-1">
+                          <DebateContentView content={round.bull} isDark={isDark} />
+                        </div>
+                      </div>
+                      <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-green)" }}>
+                        <Tag color="green">{t("stockAnalysis.bear")}</Tag>
+                        <div className="mt-1">
+                          <DebateContentView content={round.bear} isDark={isDark} />
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-green)" }}>
-                  <Tag color="green">{t("stockAnalysis.bear")}</Tag>
-                  <div className="mt-1">
-                    <DebateContentView content={activeRound.bear} isDark={isDark} />
-                  </div>
-                </div>
+                ))}
               </div>
             )}
           </div>
@@ -1385,66 +1447,83 @@ export function DebatePanel() {
             />
           </div>
         </div>
-        {/* P1.5-5: Modal 内的 Round 切换 */}
+        {/* Modal 内：档位一级切换，档内轮次纵向排列 */}
         {processedRounds.length > 0 && (
           <div className="mb-3">
-            <Segmented
-              size="small"
-              value={activeRoundIdx}
-              options={roundOptions}
-              onChange={(val) => setActiveRoundIdx(val as number)}
-              className="mb-3"
-            />
-            {/* 裁决卡片高亮（全屏模式） */}
-            {finalVerdict && roundOptions[activeRoundIdx]?.label?.includes("3") && (
-              <div
-                className="p-3 rounded mb-3"
-                style={{
-                  background: "linear-gradient(135deg, rgba(124,58,237,0.12), rgba(124,58,237,0.04))",
-                  border: "1px solid rgba(124,58,237,0.3)",
-                  borderRadius: 8,
-                }}
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <span style={{ fontSize: 20 }} aria-hidden="true">⚖️</span>
-                  <span className="font-semibold" style={{ color: "#7c3aed" }}>
-                    {t("stockAnalysis.debate.finalVerdict")}
-                  </span>
-                </div>
-                <Typography.Paragraph
-                  ellipsis={{ rows: 5, expandable: true, symbol: t("stockAnalysis.expandFull") }}
-                  className="mb-1"
-                  style={{ fontSize: 12, color: "var(--color-text-secondary)" }}
-                >
-                  {safeLabelText(finalVerdict.claim) || t("stockAnalysis.debate.noVerdict")}
-                </Typography.Paragraph>
-                {finalVerdict.final_position && (
-                  <Tag color={safeLabelText(finalVerdict.final_position).includes("bear") ? "green" : "red"}>
-                    {t("stockAnalysis.debate.position")}: {safeLabelText(finalVerdict.final_position)}
-                  </Tag>
-                )}
-                {typeof finalVerdict.confidence === "number" && (
-                  <Tag color="blue">
-                    {t("stockAnalysis.confidence")}: {finalVerdict.confidence}
-                  </Tag>
-                )}
+            {tieredMode && (
+              <Segmented
+                size="small"
+                value={currentTier ?? undefined}
+                options={tierOptions}
+                onChange={(val) => setActiveTier(val as string)}
+                className="mb-3"
+              />
+            )}
+            {tierAbsent && (
+              <div className="py-8 text-center text-sm" style={{ color: "var(--muted)" }}>
+                {t("stockAnalysis.debate.tierNoOutput", { tier: tierLabel(currentTier) })}
               </div>
             )}
-            {/* 当前轮次 */}
-            {activeRound && (
-              <div className="flex flex-col sm:flex-row gap-3">
-                <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-red)" }}>
-                  <Tag color="red">{t("stockAnalysis.bull")}</Tag>
-                  <div className="mt-2">
-                    <DebateContentView content={activeRound.bull} isDark={isDark} />
+            {tierRounds.length > 0 && (
+              <div className="space-y-4">
+                {tierRounds.map((round) => (
+                  <div key={`${round.tier ?? "legacy"}-${round.round}`}>
+                    {showRoundHeadings && (
+                      <div className="text-sm font-semibold mb-1" style={{ color: "var(--muted)" }}>
+                        {t("stockAnalysis.debate.roundHeading", { round: round.round })}
+                      </div>
+                    )}
+                    {/* 裁决卡片高亮（全屏模式，第 3 轮是该档的裁决轮） */}
+                    {finalVerdict && round.round === 3 && (
+                      <div
+                        className="p-3 rounded mb-3"
+                        style={{
+                          background: "linear-gradient(135deg, rgba(124,58,237,0.12), rgba(124,58,237,0.04))",
+                          border: "1px solid rgba(124,58,237,0.3)",
+                          borderRadius: 8,
+                        }}
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <span style={{ fontSize: 20 }} aria-hidden="true">⚖️</span>
+                          <span className="font-semibold" style={{ color: "#7c3aed" }}>
+                            {t("stockAnalysis.debate.finalVerdict")}
+                          </span>
+                        </div>
+                        <Typography.Paragraph
+                          ellipsis={{ rows: 5, expandable: true, symbol: t("stockAnalysis.expandFull") }}
+                          className="mb-1"
+                          style={{ fontSize: 12, color: "var(--color-text-secondary)" }}
+                        >
+                          {safeLabelText(finalVerdict.claim) || t("stockAnalysis.debate.noVerdict")}
+                        </Typography.Paragraph>
+                        {finalVerdict.final_position && (
+                          <Tag color={safeLabelText(finalVerdict.final_position).includes("bear") ? "green" : "red"}>
+                            {t("stockAnalysis.debate.position")}: {safeLabelText(finalVerdict.final_position)}
+                          </Tag>
+                        )}
+                        {typeof finalVerdict.confidence === "number" && (
+                          <Tag color="blue">
+                            {t("stockAnalysis.confidence")}: {finalVerdict.confidence}
+                          </Tag>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-red)" }}>
+                        <Tag color="red">{t("stockAnalysis.bull")}</Tag>
+                        <div className="mt-2">
+                          <DebateContentView content={round.bull} isDark={isDark} />
+                        </div>
+                      </div>
+                      <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-green)" }}>
+                        <Tag color="green">{t("stockAnalysis.bear")}</Tag>
+                        <div className="mt-2">
+                          <DebateContentView content={round.bear} isDark={isDark} />
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-green)" }}>
-                  <Tag color="green">{t("stockAnalysis.bear")}</Tag>
-                  <div className="mt-2">
-                    <DebateContentView content={activeRound.bear} isDark={isDark} />
-                  </div>
-                </div>
+                ))}
               </div>
             )}
           </div>

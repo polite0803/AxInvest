@@ -17,6 +17,7 @@
 use axagent_harness::cron_persistence::{CronHistoryRecord, CronJobPersistence};
 use chrono::{Datelike, Timelike};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
@@ -73,6 +74,12 @@ pub struct CronJob {
     pub last_run_at: Option<i64>,
     /// 上次执行结果
     pub last_result: Option<TaskRunResult>,
+    /// 最近一次执行的触发来源（`manual` / `schedule` / `system`）。
+    ///
+    /// 随 `cron_jobs.data` 一起持久化；旧记录无此字段 ⇒ `None`（未知），
+    /// 前端显示「未知」而不是猜成「定时」。写点只有 `record_run`（从在跑登记里取）。
+    #[serde(default)]
+    pub last_trigger: Option<String>,
     /// 下次执行时间 (epoch millis)
     pub next_run_at: Option<i64>,
     /// 重试/超时配置
@@ -217,6 +224,7 @@ impl CronJob {
             run_count: 0,
             last_run_at: None,
             last_result: None,
+            last_trigger: None,
             next_run_at: None,
             config: TaskConfig::default(),
             delivery: None,
@@ -389,10 +397,28 @@ fn resumed_next_run(
 
 // ── CronJobStore ──────────────────────────────────────────────
 
+/// 进程内一条「正在执行」的任务登记。
+#[derive(Debug, Clone)]
+pub struct RunningJob {
+    pub started_at_ms: i64,
+    /// `manual` / `schedule`
+    pub trigger: &'static str,
+}
+
+/// 在跑登记的兜底寿命：超过它视为登记泄漏（handler 内 panic，没走到 `record_run`）。
+/// 进程退出时本表整体清空，所以它只防「同进程内泄漏」，不承担跨进程收敛。
+const RUNNING_STALE_MS: i64 = 6 * 3600 * 1000;
+
 /// CronJobStore 的调度语义集中在本文件（`calculate_next_run` / `resumed_next_run`），
 /// 调度循环在 `runtime/src/cron/scheduler.rs`。
 pub struct CronJobStore {
     jobs: Arc<RwLock<Vec<CronJob>>>,
+    /// 本进程内正在执行的任务：id → 开始时刻 + 触发来源。
+    ///
+    /// 纯内存：进程退出即清空 ⇒ 重启后不会留下「假 running」（与 DB 行不同，
+    /// 不需要启动收敛）。标记点在调度器（定时 tick 与手动 `trigger_now`），
+    /// 摘除点在 `record_run`（所有 handler 分支最终都会走到那里）。
+    running: Arc<RwLock<HashMap<String, RunningJob>>>,
     /// `None`（`new_ephemeral`）时是**跳过一切 DB 读写的纯内存模式**。
     ///
     /// 用 `Option` 而不是「持有一个连接 + 一个 bool 开关」：后者允许
@@ -405,7 +431,11 @@ pub struct CronJobStore {
 impl CronJobStore {
     /// 纯内存模式（测试/降级用），不含 DB 持久化。
     pub fn new_ephemeral() -> Self {
-        Self { jobs: Arc::new(RwLock::new(Vec::new())), persistence: None }
+        Self {
+            jobs: Arc::new(RwLock::new(Vec::new())),
+            running: Arc::new(RwLock::new(HashMap::new())),
+            persistence: None,
+        }
     }
 
     /// 构造 CronJobStore 并自动从 DB 恢复已持久化的任务。
@@ -427,7 +457,11 @@ impl CronJobStore {
             info!("[CronJobStore] 从 DB 恢复了 {count} 个定时任务");
         }
 
-        Self { jobs: Arc::new(RwLock::new(jobs)), persistence: Some(persistence) }
+        Self {
+            jobs: Arc::new(RwLock::new(jobs)),
+            running: Arc::new(RwLock::new(HashMap::new())),
+            persistence: Some(persistence),
+        }
     }
 
     /// 持久化端口；`None` 表示纯内存模式（一切 DB 调用都必须跳过）。
@@ -625,13 +659,35 @@ impl CronJobStore {
         .await
     }
 
+    /// 登记「本进程正在执行」：调度器在定时派发与手动 `trigger_now` 两处调用。
+    pub async fn mark_running(&self, id: &str, started_at_ms: i64, trigger: &'static str) {
+        self.running.write().await.insert(id.to_string(), RunningJob { started_at_ms, trigger });
+    }
+
+    /// 摘除在跑登记（`record_run` 开头调用；handler 各分支最终都会走到那里）。
+    pub async fn clear_running(&self, id: &str) {
+        self.running.write().await.remove(id);
+    }
+
+    /// 当前在跑任务快照（带兜底寿命，防同进程内的登记泄漏）。
+    pub async fn list_running(&self) -> HashMap<String, RunningJob> {
+        let now = now_millis();
+        let mut running = self.running.write().await;
+        running.retain(|_, r| now - r.started_at_ms < RUNNING_STALE_MS);
+        running.clone()
+    }
+
     pub async fn record_run(&self, id: &str, result: TaskRunResult) -> bool {
+        // 在跑登记是触发来源的权威：取出即摘除（与 last_result / history 同一份）。
+        // 没有登记的调用（外部直接调 record_run 的路径）落 None ⇒ 未知。
+        let trigger = self.running.write().await.remove(id).map(|r| r.trigger.to_string());
         let now = now_millis();
         let updated = self
             .update(id, |job| {
                 job.last_run_at = Some(now);
                 job.run_count += 1;
                 job.last_result = Some(result.clone());
+                job.last_trigger = trigger.clone();
                 job.next_run_at = calculate_next_run(&job.schedule, now);
             })
             .await;
@@ -649,6 +705,7 @@ impl CronJobStore {
                 error: Some(result.error.clone().unwrap_or_default()),
                 duration_ms: result.duration_ms as i64,
                 partial: result.partial,
+                trigger: trigger.clone(),
             };
             if let Err(e) = p.insert_history(record).await {
                 error!("[CronJobStore] 写入任务 {id} 的执行历史失败: {e}");
@@ -690,6 +747,8 @@ impl CronJobStore {
             error: Some(result.error.clone().unwrap_or_default()),
             duration_ms: result.duration_ms as i64,
             partial: result.partial,
+            // 兜底轮由进程内独立 interval 驱动，既非档期也非用户点击。
+            trigger: Some("system".to_string()),
         };
         match p.insert_history(record).await {
             Ok(()) => true,
@@ -797,6 +856,7 @@ impl CronJobStore {
                 error: m.error,
                 duration_ms: m.duration_ms,
                 partial: m.partial,
+                trigger: m.trigger,
             })
             .collect()
     }
@@ -819,6 +879,9 @@ pub struct ExecutionRecord {
     /// 前端把 false 读作「不是部分完成」而不是「未知」。
     #[serde(default)]
     pub partial: bool,
+    /// 触发来源：`manual` / `schedule` / `system`；`None` = 本列引入前的旧行（未知）。
+    #[serde(default)]
+    pub trigger: Option<String>,
 }
 
 // ── Harness trait 实现 ──
@@ -845,6 +908,7 @@ impl From<axagent_harness::tool_service::CronJobData> for CronJob {
             run_count: data.run_count,
             last_run_at: None,
             last_result: None,
+            last_trigger: None,
             next_run_at: None,
             config: TaskConfig::default(),
             delivery: None,
@@ -1107,5 +1171,42 @@ mod calculate_next_run_tests {
         let expired = local_ms(2026, 10, 10, 2, 0, 0);
         assert_eq!(resumed_next_run(Some(expired), "0 2 * * *", false, now), Some(expired));
         assert_eq!(resumed_next_run(None, "0 9 * * *", false, now), None);
+    }
+}
+
+#[cfg(test)]
+mod running_registry_tests {
+    use super::{CronJob, CronJobStore, TaskRunResult, now_millis};
+
+    /// 在跑登记 → `record_run` 摘除，且触发来源随结果落进 `last_trigger`。
+    /// 这条锁住三件事：① 登记可读回；② 任务结束不会留下假 running；
+    /// ③ 触发来源不是前端猜的，而是从登记一路带到持久化。
+    #[tokio::test]
+    async fn running_registry_persists_trigger_and_clears_on_record_run() {
+        let store = CronJobStore::new_ephemeral();
+        let job = CronJob::new("t-run", "0 9 * * *", "p", "d");
+        let id = job.id.clone();
+        store.add(job).await;
+
+        let started = now_millis();
+        store.mark_running(&id, started, "manual").await;
+        let running = store.list_running().await;
+        let entry = running.get(&id).expect("登记应可读回");
+        assert_eq!(entry.started_at_ms, started);
+        assert_eq!(entry.trigger, "manual");
+
+        let result = TaskRunResult {
+            success: true,
+            output: Some("ok".into()),
+            error: None,
+            duration_ms: 5,
+            executed_at: started,
+            skipped: false,
+            partial: false,
+        };
+        assert!(store.record_run(&id, result).await);
+        assert!(store.list_running().await.is_empty(), "record_run 必须摘除在跑登记");
+        let job = store.get(&id).await.expect("任务应仍在");
+        assert_eq!(job.last_trigger.as_deref(), Some("manual"), "触发来源随结果落盘");
     }
 }

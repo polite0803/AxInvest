@@ -671,6 +671,8 @@ pub async fn run_stock_workflow_inner(
             trade_intent_actual_trade_id: Set(None),
             created_at: Set(now_ms),
             updated_at: Set(now_ms),
+            // 运行中占位行：完成时刻尚未产生（NULL = 未知，不得拿 updated_at 顶替）
+            completed_at: Set(None),
         }
         .insert(state.harness.db())
         .await
@@ -713,6 +715,8 @@ pub async fn run_stock_workflow_inner(
                     .to_string(),
                 )),
                 updated_at: Set(chrono::Utc::now().timestamp_millis()),
+                // 预检失败同样是终态：落完成时刻，避免耗时列永远空着
+                completed_at: Set(Some(chrono::Utc::now().timestamp_millis())),
                 ..Default::default()
             })
             .exec(state.harness.db())
@@ -1084,6 +1088,11 @@ pub async fn run_stock_workflow_inner(
                         stock_analyses::Column::UpdatedAt,
                         Expr::value(chrono::Utc::now().timestamp_millis()),
                     )
+                    // 完成时刻与 updated_at 分家：后者会被后续写库顶掉，不能用来算耗时
+                    .col_expr(
+                        stock_analyses::Column::CompletedAt,
+                        Expr::value(chrono::Utc::now().timestamp_millis()),
+                    )
                     .filter(stock_analyses::Column::Id.eq(&aid))
                     .exec(&db)
                     .await
@@ -1113,6 +1122,11 @@ pub async fn run_stock_workflow_inner(
                             .col_expr(stock_analyses::Column::Status, Expr::value("cancelled"))
                             .col_expr(
                                 stock_analyses::Column::UpdatedAt,
+                                Expr::value(chrono::Utc::now().timestamp_millis()),
+                            )
+                            // 用户取消也是终态，落完成时刻（与 updated_at 分家）
+                            .col_expr(
+                                stock_analyses::Column::CompletedAt,
                                 Expr::value(chrono::Utc::now().timestamp_millis()),
                             )
                             .filter(stock_analyses::Column::Id.eq(&aid))
@@ -1237,6 +1251,11 @@ pub async fn run_stock_workflow_inner(
                             )
                             .col_expr(
                                 stock_analyses::Column::UpdatedAt,
+                                Expr::value(chrono::Utc::now().timestamp_millis()),
+                            )
+                            // 完成时刻与 updated_at 分家：后者会被后续写库顶掉
+                            .col_expr(
+                                stock_analyses::Column::CompletedAt,
                                 Expr::value(chrono::Utc::now().timestamp_millis()),
                             )
                             .filter(stock_analyses::Column::Id.eq(&aid))
@@ -1679,6 +1698,11 @@ pub async fn run_stock_workflow_inner(
                                 stock_analyses::Column::UpdatedAt,
                                 Expr::value(chrono::Utc::now().timestamp_millis()),
                             )
+                            // 完成时刻与 updated_at 分家：后者会被后续写库顶掉
+                            .col_expr(
+                                stock_analyses::Column::CompletedAt,
+                                Expr::value(chrono::Utc::now().timestamp_millis()),
+                            )
                             .filter(stock_analyses::Column::Id.eq(&aid))
                             .exec(&db)
                             .await
@@ -1934,6 +1958,11 @@ pub async fn run_stock_workflow_inner(
                         stock_analyses::Column::UpdatedAt,
                         Expr::value(chrono::Utc::now().timestamp_millis()),
                     )
+                    // 失败也是终态：落完成时刻（与 updated_at 分家）
+                    .col_expr(
+                        stock_analyses::Column::CompletedAt,
+                        Expr::value(chrono::Utc::now().timestamp_millis()),
+                    )
                     .filter(stock_analyses::Column::Id.eq(&aid))
                     .exec(&db)
                     .await
@@ -2069,6 +2098,8 @@ pub async fn run_single_stock_analysis(
         trade_intent_actual_trade_id: Set(None),
         created_at: Set(now_ms),
         updated_at: Set(now_ms),
+        // 运行中占位行：完成时刻尚未产生
+        completed_at: Set(None),
     }
     .insert(db)
     .await
@@ -2104,6 +2135,8 @@ pub async fn run_single_stock_analysis(
                     .to_string(),
                 )),
                 updated_at: Set(chrono::Utc::now().timestamp_millis()),
+                // 预检失败同样是终态
+                completed_at: Set(Some(chrono::Utc::now().timestamp_millis())),
                 ..Default::default()
             })
             .exec(db)
@@ -2272,6 +2305,8 @@ pub async fn run_single_stock_analysis(
                 //   那时决策尚未产生；代际必须在**结论落地这一刻**写。
                 template_version: Set(Some(loaded.version)),
                 updated_at: Set(chrono::Utc::now().timestamp_millis()),
+                // 结论落地这一刻就是完成时刻（本通道是候选池/批量的唯一落库点）
+                completed_at: Set(Some(chrono::Utc::now().timestamp_millis())),
                 ..Default::default()
             })
             .exec(db)
@@ -2377,6 +2412,8 @@ pub async fn run_single_stock_analysis(
                     .to_string(),
                 )),
                 updated_at: Set(chrono::Utc::now().timestamp_millis()),
+                // 执行失败也是终态：落完成时刻
+                completed_at: Set(Some(chrono::Utc::now().timestamp_millis())),
                 ..Default::default()
             })
             .exec(db)

@@ -23,9 +23,12 @@ import {
   ANALYST_TIER_SEP,
   analystBaseOf,
   analystNodeId,
+  compareDebateRounds,
   computeStockConsensus,
+  debatePeerNodeId,
   deriveActionFromLlmDecision,
   fetchExpectedDebateRounds,
+  parseDebateRoundRef,
   StockAction,
 } from "@/lib/stock-analysis-utils";
 import { detectFutureReferencesForNode } from "@/lib/timeTravel/futureReferenceDetector";
@@ -34,6 +37,7 @@ import type {
   AnalysisStatus,
   AnalysisSummary,
   DashboardReport,
+  DebateRound,
   EarningsEvent,
   KLine,
   StockConsensus,
@@ -148,7 +152,7 @@ function valueSlotKeyOf(name: string): string {
  */
 function parseWorkflowResults(results: Record<string, unknown>) {
   const analystReports: Record<string, string> = {};
-  const debateRounds: Array<{ round: number; bull: string; bear: string }> = [];
+  const debateRounds: DebateRound[] = [];
   const riskAssessments: Record<string, string> = {};
   // 修复 Bug #2: 补充 value-investor / rule-check / data-quality / raw-data
   // 四个节点的解析分支。这四个节点类型在前端 store 已有对应字段
@@ -190,20 +194,21 @@ function parseWorkflowResults(results: Record<string, unknown>) {
       if (judgment) { jevJudgments[stepId] = judgment; }
     } else if (stepId.startsWith("a-") && !stepId.includes("bull") && !stepId.includes("bear")) {
       analystReports[stepId.slice(2)] = reconstructVerdictTag(output);
-    } else if (stepId === "bull-researcher" || (stepId.startsWith("bull-r") && stepId !== "bull-researcher")) {
-      // 辩论子节点: 实际 nodeId 为 "bull-researcher" (DAG 引擎单次执行)
-      // 兼容未来多轮模式: bull-r1, bull-r2...
-      const round = stepId === "bull-researcher" ? 1 : parseInt(stepId.slice(6), 10);
-      const bearKey = stepId === "bull-researcher" ? "bear-researcher" : `bear-r${round}`;
-      const bullContent = output;
-      const bearContent = extractContent(results[bearKey] ?? "");
-      // 允许单边数据:单边空可能是 LLM 失败/超时,仍展示已有数据而非静默丢弃。
-      debateRounds.push({
-        round,
-        bull: bullContent,
-        bear: bearContent,
-      });
-    } else if (stepId === "bear-researcher" || (stepId.startsWith("bear-r") && stepId !== "bear-researcher")) {
+    } else if (stepId === "bull-researcher" || stepId.startsWith("bull-r")) {
+      // 辩论子节点三种形态并存：bull-researcher（历史单份）/ bull-rN（≤v160 多轮）/
+      // bull-rN--<档>（v161 起逐档）。必须按 (档位, 轮次) 归并 —— 只看 round 会把四档
+      // 全认成第 1 轮，后完成的档覆盖先完成的档。
+      const ref = parseDebateRoundRef(stepId);
+      if (ref) {
+        const bearKey = debatePeerNodeId(stepId, "bear");
+        // 允许单边数据:单边空可能是 LLM 失败/超时,仍展示已有数据而非静默丢弃。
+        debateRounds.push({
+          ...ref,
+          bull: output,
+          bear: bearKey ? extractContent(results[bearKey] ?? "") : "",
+        });
+      }
+    } else if (stepId === "bear-researcher" || stepId.startsWith("bear-r")) {
       continue;
     } else if ((stepId.startsWith("risk-") && stepId !== "risk-aggregated") || stepId === "research-mgr") {
       riskAssessments[stepId] = output;
@@ -307,7 +312,7 @@ function parseWorkflowResults(results: Record<string, unknown>) {
     }
   }
 
-  debateRounds.sort((a, b) => a.round - b.round);
+  debateRounds.sort(compareDebateRounds);
   return {
     analystReports,
     jevJudgments,
@@ -579,13 +584,15 @@ interface StockAnalysisState {
    * 原链不产 `j-*` 节点 ⇒ 本字段恒空，原链行为零影响。
    */
   jevJudgments: Record<string, JevJudgment>;
-  debateRounds: Array<{ round: number; bull: string; bear: string }>;
+  debateRounds: DebateRound[];
   /**
    * **应有**的辩论轮数（分母），取自模板变量 `debate_rounds`，与后端 DAG 展开严格同源。
    * `null` = 尚未取到或取失败。
    *
    * 与 `debateRounds`（分子：实际产出的轮次）**并列而非合并**：两者一个是配置事实、
-   * 一个是运行产物。前端此前用写死的 3 当分母（`TOTAL_DEBATE_ROUNDS` / `EXPECTED_ROUNDS`），
+   * 一个是运行产物。v161 起辩论按四档展开 ⇒ 本值是**每档**应有的轮数，
+   * `debateRounds` 的分子按档计算（同一轮的四档互不覆盖）。
+   * 前端此前用写死的 3 当分母（`TOTAL_DEBATE_ROUNDS` / `EXPECTED_ROUNDS`），
    * 于是轮数一改就出现「显示 2/3」与「第 3 轮失败」两处假话。
    * ⚠ `null` 不得当 0 或默认值用 —— 拿不到分母时不得断言任何轮次失败（见 fetchExpectedDebateRounds）。
    */
@@ -1303,10 +1310,19 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         workflowId: wfId,
         stockCode: sc,
         stockName: sn,
-        status: "running",
-        progressMessage: i18n.t("stockAnalysis.progress.started"),
-        progressPct: 5,
       });
+      // 后端在建行/spawn 后立刻返回，而执行体可能**先于本响应的到达**就发出终态事件
+      // （启动即失败：engine 拒绝启动、pre_exec 失败等都是毫秒级）。若无条件写 running，
+      // 会把已到达的 `workflow-error` 覆盖回 running ⇒ 按钮永久「分析中」，且防重入
+      // 让下一轮请求根本发不出去（错误面板与重试按钮也不会出现）。
+      // 只有仍停在 loading（没有终态事件先到）时才推进到 running。
+      if (get().status === "loading") {
+        set({
+          status: "running",
+          progressMessage: i18n.t("stockAnalysis.progress.started"),
+          progressPct: 5,
+        });
+      }
 
       // 异步拉取报价和 K 线
       // 如果用户已通过 StockSearchBar 选中了同一股票，数据已就绪，跳过重复请求
@@ -1336,7 +1352,13 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   cancelAnalysis: async () => {
     const { workflowId, _unlisten } = get();
     if (workflowId) {
-      await invoke("cancel_stock_workflow", { workflowId });
+      // 后端取消失败（工作流已结束/已从引擎移除）不得挡住本地收口：
+      // 否则「停止」按钮对这一格彻底失效，用户被永久锁在「分析中」。
+      try {
+        await invoke("cancel_stock_workflow", { workflowId });
+      } catch (e) {
+        console.warn("[StockAnalysis] cancel_stock_workflow 失败，仍按本地取消收口:", e);
+      }
     }
     if (_unlisten) { _unlisten(); }
     // 使用 "cancelled" 状态保留已收集的部分数据（面板仍显示，带"已取消"标记）
@@ -1608,7 +1630,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         // 这里用本地解析把 snapshot 还原成结构化字段。
         const snap: Record<string, string> = JSON.parse(record.blackboardSnapshot);
         const reports: Record<string, string> = {};
-        const debates: Array<{ round: number; bull: string; bear: string }> = [];
+        const debates: DebateRound[] = [];
         const risks: Record<string, string> = {};
         const values: Record<string, string> = {};
         const ruleChecks: Record<string, string> = {};
@@ -1634,9 +1656,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
               ? reconstructVerdictTag(String(value))
               : String(value);
           } else if (key.startsWith("debate.bull.round_")) {
+            // ≤v160 的旧快照键（不分档）
             const round = parseInt(key.slice("debate.bull.round_".length));
             const bearKey = `debate.bear.round_${round}`;
             debates.push({
+              tier: null,
               round,
               bull: extractContent(value),
               bear: extractContent(snap[bearKey]),
@@ -1689,21 +1713,21 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           } else if (key.startsWith("raw.")) {
             raws[key.slice(4)] = String(value);
           }
-          // ── 辩论子节点：bull-r1/bear-r1 等 → 构建 debate rounds ──
-          if (/^bull-r\d+$/.test(key)) {
-            const round = parseInt(key.slice("bull-r".length));
-            const bearKey = `bear-r${round}`;
-            if (!debates.find((d) => d.round === round)) {
+          // ── 辩论子节点：bull-r1/bear-r1（≤v160）/ bull-r1--<档>（v161+）→ 构建 debate rounds ──
+          if (key.startsWith("bull-r")) {
+            const ref = parseDebateRoundRef(key);
+            // 按 (档位, 轮次) 去重：带档后缀的键此前被 `/^bull-r\d+$/` 整批漏掉，
+            // 历史回放时辩论卡片因此一块都渲染不出来。
+            if (ref && !debates.some((d) => d.round === ref.round && d.tier === ref.tier)) {
+              const bearKey = debatePeerNodeId(key, "bear");
               // 后端 blackboard.rs 对 bull-r* 走 is_structured 分支,
               // value 是 AgentResult 包装,extractContent 取 content 字段。
-              const bullContent = extractContent(value);
-              const bearContent = extractContent(snap[bearKey]);
               // 允许单边数据:如果一方为空可能是 LLM 失败/超时/存储异常,
               // 仍展示已有内容而非静默丢弃(同 live 模式 parseWorkflowResults 行为)
               debates.push({
-                round,
-                bull: bullContent,
-                bear: bearContent,
+                ...ref,
+                bull: extractContent(value),
+                bear: bearKey ? extractContent(snap[bearKey]) : "",
               });
             }
           }
@@ -1748,7 +1772,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         }
         // Debug: 输出 snapshot 中辩论/风险键及其内容长度，帮助诊断回放数据缺失
         if (import.meta.env.DEV) {
-          const debateKeys = Object.keys(snap).filter(k => /^bull-r\d+$/.test(k) || /^bear-r\d+$/.test(k));
+          const debateKeys = Object.keys(snap).filter(k => parseDebateRoundRef(k) !== null);
           const riskKeys = Object.keys(snap).filter(k => k.startsWith("risk-") || k === "research-mgr");
           console.debug(
             `[StockAnalysis] loadAnalysis debateKeys=${JSON.stringify(debateKeys)} riskKeys=${
@@ -1759,7 +1783,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         // 后端 snapshot 由 HashMap 序列化,键的迭代顺序是 hash 顺序而非插入顺序,
         // bull-r1/bull-r2/bull-r3 三个键在 JSON 字符串里可能是 3/1/2 这种乱序。
         // 这里强制按 round 数字升序排序,保证前端 DebatePanel 按 1→2→3 顺序渲染。
-        debates.sort((a, b) => a.round - b.round);
+        debates.sort(compareDebateRounds);
         // 决策输入诊断：把 snap 的 blackboard 键名归一化为 nodeId,
         // 再传给 buildDecisionInputsReport 提取 16 个 portfolio-mgr 上游节点的数据符合度
         const normalizedSnap: Record<string, unknown> = {};
@@ -2340,23 +2364,25 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
     // ── 共享辅助函数（在 workflow-step-done 内使用） ──
 
-    /** 合并辩论轮次（去重 bull/bear 重复逻辑） */
+    /** 合并辩论行：按 (档位, 轮次) 去重，同档同轮才合并 bull/bear 两侧 */
     function updateDebateRound(
       nodeId: string,
       side: "bull" | "bear",
       text: string,
     ) {
-      const round = nodeId === `${side}-researcher` ? 1 : parseInt(nodeId.slice(`${side}-r`.length), 10);
+      const ref = parseDebateRoundRef(nodeId);
+      // 认不出的 id（接线接错了对象）不落库，不得默认成第 1 轮去覆盖别的档
+      if (!ref) { return; }
       const debates = [...get().debateRounds];
-      const idx = debates.findIndex((d) => d.round === round);
+      const idx = debates.findIndex((d) => d.round === ref.round && d.tier === ref.tier);
       if (idx >= 0) {
         debates[idx] = { ...debates[idx], [side]: text };
       } else {
-        const entry: { round: number; bull: string; bear: string } = { round, bull: "", bear: "" };
+        const entry: DebateRound = { ...ref, bull: "", bear: "" };
         entry[side] = text;
         debates.push(entry);
       }
-      debates.sort((a, b) => a.round - b.round);
+      debates.sort(compareDebateRounds);
       set({ debateRounds: debates });
     }
 
@@ -2699,6 +2725,17 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       }>("workflow-completed", (event) => {
         const { results, output, dashboardReport: wfDashboardReport, dashboardMd: wfDashboardMd } = event.payload;
 
+        // 终态先落：本处理器随后要合并辩论轮次、提取决策、构建诊断报告等，任何一处
+        // 面对畸形产物抛异常都会中断整个回调 ⇒ store 停在 running，按钮永久「分析中」
+        // 且 startAnalysis 的防重入挡住下一轮。解析失败的代价只允许是部分面板缺数据。
+        set({
+          status: "completed",
+          progressMessage: i18n.t("stockAnalysis.progress.completed"),
+          progressPct: 100,
+          currentNodeId: null,
+          nodeStartedAt: null,
+        });
+
         // 优先从 portfolio-mgr 节点结果中提取决策（与分析页一致）
         let decision: StockDecision | null = null;
         const pmRaw = results["portfolio-mgr"];
@@ -2754,7 +2791,15 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         }
 
         // 回退：从 parseWorkflowResults 中获取
-        const parsed = parseWorkflowResults(results);
+        // 解析失败（畸形结果）不得让回调中断：终态已在上方收口，这里降级为「无批量产物」。
+        // 兜底用 `parseWorkflowResults({})` 而不是手写字面量 —— 后者会在解析器新增字段时腐烂。
+        let parsed: ReturnType<typeof parseWorkflowResults>;
+        try {
+          parsed = parseWorkflowResults(results);
+        } catch (e) {
+          console.error("[StockAnalysis] workflow-completed 批量产物解析失败（终态已收口）:", e);
+          parsed = parseWorkflowResults({});
+        }
         if (!decision) {
           decision = parsed.decision;
         }
@@ -2796,7 +2841,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         // 可能因事件到达顺序不一致而不同步。merge: 保留两边的数据,解析轮次补充流轮次的空缺。
         const mergedDebateRounds = [...s.debateRounds];
         for (const pr of parsed.debateRounds) {
-          const existing = mergedDebateRounds.find((mr) => mr.round === pr.round);
+          const existing = mergedDebateRounds.find((mr) => mr.round === pr.round && mr.tier === pr.tier);
           if (existing) {
             // 不覆盖已有的流式数据(更完整),仅补充空隙
             if (!existing.bull && pr.bull) { existing.bull = pr.bull; }
@@ -2994,30 +3039,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           ? translateBackendError({ code, category, detail })
           : (event.payload.error ?? detail ?? "");
 
-        // 即使失败也尝试解析已有的部分结果
-        if (results) {
-          const parsed = parseWorkflowResults(results);
-          set({
-            analystReports: parsed.analystReports,
-            jevJudgments: parsed.jevJudgments,
-            debateRounds: parsed.debateRounds,
-            riskAssessments: parsed.riskAssessments,
-            valueAssessments: parsed.valueAssessments,
-            valuationApplicability: parsed.valuationApplicability,
-            ruleCheckResults: parsed.ruleCheckResults,
-            dataQualitySummary: parsed.dataQualitySummary,
-            rawData: parsed.rawData,
-            simulation: parsed.simulation,
-            decision: parsed.decision,
-            // V55: 即使工作流失败也要保留 strict_mode 兜底标记
-            untrustedNodes: { ...get().untrustedNodes, ...parsed.untrustedNodes },
-          });
-        } else if (output) {
-          // 兜底：从 output 中解析决策（少数异常路径无 results 但含 output）
-          const parsed = extractDecision(output);
-          if (parsed) { set({ decision: parsed }); }
-        }
-
         // LLM 降级判定：**按码**，不嗅探文本（理由见 LLM_DEGRADED_CODES 声明处）。
         // 兜底码也换成后端**真实存在**的一个码：历史上这里写的是前端自造的
         // `GENERIC_ERROR` / `LLM_FALLBACK`，后端均不产出（幽灵码，且会让
@@ -3025,6 +3046,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         const effectiveErrorCode = code ?? "STOCK_WORKFLOW_EXEC_FAILED";
         const isLlmError = code !== undefined && LLM_DEGRADED_CODES.has(code);
         const cur = get();
+        // 终态必须**先落**：下方部分产物解析（parseWorkflowResults / extractDecision）
+        // 面对畸形产物可能抛异常，而事件回调里的异常会中断整个 handler ⇒ store 永远
+        // 停在 running/loading，按钮「分析中」与 startAnalysis 的防重入一起锁死，
+        // 用户连下一轮都发不出去。解析失败只允许损失部分展示数据，不允许损失终态。
         set({
           error: displayText,
           errorCode: effectiveErrorCode,
@@ -3037,7 +3062,38 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             : displayText,
           progressPct: cur.progressPct,
           currentStage: cur.currentStage,
+          // 运行已终止：清掉当前节点标记，否则进度区会一直挂着最后一个节点名
+          currentNodeId: null,
+          nodeStartedAt: null,
         });
+
+        // 即使失败也尝试解析已有的部分结果
+        try {
+          if (results) {
+            const parsed = parseWorkflowResults(results);
+            set({
+              analystReports: parsed.analystReports,
+              jevJudgments: parsed.jevJudgments,
+              debateRounds: parsed.debateRounds,
+              riskAssessments: parsed.riskAssessments,
+              valueAssessments: parsed.valueAssessments,
+              valuationApplicability: parsed.valuationApplicability,
+              ruleCheckResults: parsed.ruleCheckResults,
+              dataQualitySummary: parsed.dataQualitySummary,
+              rawData: parsed.rawData,
+              simulation: parsed.simulation,
+              decision: parsed.decision,
+              // V55: 即使工作流失败也要保留 strict_mode 兜底标记
+              untrustedNodes: { ...get().untrustedNodes, ...parsed.untrustedNodes },
+            });
+          } else if (output) {
+            // 兜底：从 output 中解析决策（少数异常路径无 results 但含 output）
+            const parsed = extractDecision(output);
+            if (parsed) { set({ decision: parsed }); }
+          }
+        } catch (e) {
+          console.error("[StockAnalysis] workflow-error 部分产物解析失败（终态已收口）:", e);
+        }
 
         // #21 自动重试：仅瞬态错误（后端 category="retryable"）且未超过上限时，
         // 延迟重跑同一股票的工作流一次。LLM 降级错误不重试(已走 placeholder 降级)。

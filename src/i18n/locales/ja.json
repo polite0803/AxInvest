@@ -7512,6 +7512,7 @@
     },
     "source": {
       "scheduledCron": "定期タスク",
+      "stockAnalysis": "個別銘柄分析",
       "stockPipeline": "株式分析パイプライン",
       "timeTravelBatch": "タイムトラベルバッチ",
       "moverRecallAnalysis": "大化け株捕捉漏れバックフィル"
@@ -7541,7 +7542,8 @@
       "schedule": "定期",
       "manual": "手動",
       "system": "システム",
-      "external": "外部"
+      "external": "外部",
+      "unknown": "不明"
     },
     "health": {
       "running": "実行中",
@@ -15541,8 +15543,8 @@
     "actionConfidenceBasisLabel": "判断基準",
     "valuationConflictRichNonbearish": "⚠️ バリュエーション基準の相違：アルゴリズム評価は「{{valuationAction}}」、一方{{horizon}}の判断方向は「{{decisionAction}}」——短期は方向、長期は価値を見るため、評価レンジを踏まえてご判断ください",
     "valuationConflictCheapBearish": "⚠️ バリュエーション基準の相違：アルゴリズム評価は「{{valuationAction}}」（長期価値では強気）、一方{{horizon}}の判断方向は「{{decisionAction}}」。評価レンジを踏まえてご判断ください",
-    "horizonScopeAnalyst": "アナリストレポート：期間ごとに展開済み——各期間は自分に該当するアナリスト部分集合（権威マトリクスから導出）を実行し、その期間の契約に基づいて VERDICT を個別に出力します。引き続き共用なのは討論のみです。",
-    "horizonScopeDebate": "ディスカッション：本サイクルは視点横断の議論を 1 ラウンドのみ実行し、4 期間で同一の記録を共用します。",
+    "horizonScopeAnalyst": "アナリストレポート：期間ごとに展開済み——各期間は自分に該当するアナリスト部分集合（権威マトリクスから導出）を実行し、その期間の契約に基づいて VERDICT を個別に出力します",
+    "horizonScopeDebate": "ディスカッション：4 期間がそれぞれ強気・弱気（bull/bear）の議論を実行します。このカードで期間を切り替えて確認できます。",
     "horizonScopeRisk": "リスク分類：档ごとに判定しています。各档は自身の保有期間（超短期 2 / 短期 5 / 中期 28 / 長期 90 営業日）の回撤深度で個別に格付けします。ボラティリティ・シャープレシオ・ファンダメンタルズ 4 項目は引き続き 60 日ベースの共通値です。v129 以降は本体チェーンの f4 リスク根拠・リスクバイアス・ポジション上限・リスク拒否も選択した期間の格付けを用います（厳格化のみ）。",
     "llmHorizonOverview": "LLM の期間別判断",
     "llmHorizonNotGiven": "この期間の LLM 判断はありません",
@@ -16001,12 +16003,12 @@
       "partialFailed": "部分失败",
       "positionPct": "仓位",
       "riskAggregation": "风险聚合",
-      "riskAggressive": "激进风险评估",
+      "riskAggressive": "積極的リスク評価",
       "riskClassification": "Risk Classification",
       "auxNodes": "補助ノード",
-      "riskConservative": "保守风险评估",
+      "riskConservative": "保守的リスク評価",
       "riskLevel": "风险",
-      "riskNeutral": "中性风险评估",
+      "riskNeutral": "中立的リスク評価",
       "startFailed": "起動失敗",
       "stopLoss": "ストップロス",
       "targetPrice": "目標価格",
@@ -16608,7 +16610,9 @@
       "verdictOnlyLabel": "この討論者は結論のみを提示し、詳細な分析は提供されていません。",
       "title": "Debate Summary",
       "loading": "辩论分析进行中...",
-      "evidence": "证据"
+      "evidence": "证据",
+      "tierNoOutput": "{{tier}}は今回のラウンドで討論の出力がありません（ノード未完了または空）。",
+      "roundHeading": "第 {{round}} ラウンド"
     },
     "decision": {
       "action": "操作建议",
@@ -17729,7 +17733,8 @@
       "neutral": "Neutral",
       "moat": "Moat",
       "idealBuy": "Ideal buy",
-      "rounds": " rounds"
+      "rounds": " rounds",
+      "tiers": "期間"
     },
     "whatIf": {
       "valuationParams": "Valuation Params",
@@ -17754,7 +17759,41 @@
       "itemScore": "{{label}}（{{score}} / 100）",
       "overview": "风险评分总览",
       "scoreLabel": "风险评分",
-      "loading": "リスク評価中..."
+      "loading": "リスク評価中...",
+      "verdictStance": "立場",
+      "verdictPosition": "推奨ポジション",
+      "verdictConfidence": "確信度",
+      "noVote": "本視点は未出力",
+      "convergenceTitle": "三視点の収束結論",
+      "viewsTitle": "三視点評価",
+      "riskLevelTitle": "ルールベースのリスク区分",
+      "matchedRules": "一致ルール",
+      "axisGaps": "データ範囲",
+      "metricsTitle": "主要指標",
+      "researchManagerTitle": "研究マネージャーの総合意見",
+      "otherAssessments": "その他のリスク出力",
+      "expand": "展開",
+      "collapse": "折りたたむ",
+      "degraded": "デグレード",
+      "axisAbsent": "欠落",
+      "noRiskLevel": "ルールベースのリスク区分が未出力",
+      "noConvergence": "三視点の収束結論が未出力",
+      "noResearchManager": "研究マネージャーの総合意見が未出力",
+      "axisDrawdownDepth": "ドローダウン深度",
+      "axisFundamentals": "ファンダメンタルズ",
+      "axisSharpe": "シャープ",
+      "axisVolatility": "ボラティリティ",
+      "axisValueLatestReport": "最新決算",
+      "axisValueGlobal60": "60日グローバル",
+      "metricVolatility": "年率ボラティリティ",
+      "metricSharpe": "シャープレシオ",
+      "metricMaxDrawdown": "最大ドローダウン",
+      "metricDrawdownDepth": "ドローダウン深度",
+      "metricDebtRatio": "負債比率",
+      "metricGrossMargin": "粗利率",
+      "metricRevenueGrowth": "売上高前年比",
+      "metricRoe": "ROE(TTM)",
+      "metricWindowDays": "対象日数"
     },
     "quantSim": {
       "title": "策略模拟",

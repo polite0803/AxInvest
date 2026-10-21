@@ -7512,6 +7512,7 @@
     },
     "source": {
       "scheduledCron": "定時任務",
+      "stockAnalysis": "單股分析",
       "stockPipeline": "股票分析管道",
       "timeTravelBatch": "時間旅行批次",
       "moverRecallAnalysis": "漏檢補分析批次"
@@ -7541,7 +7542,8 @@
       "schedule": "定時",
       "manual": "手動",
       "system": "系統",
-      "external": "外部"
+      "external": "外部",
+      "unknown": "未知"
     },
     "health": {
       "running": "執行中",
@@ -16120,12 +16122,12 @@
       "partialFailed": "部分失敗",
       "positionPct": "倉位",
       "riskAggregation": "风险聚合",
-      "riskAggressive": "Aggressive Risk Assessment",
+      "riskAggressive": "激進風險評估",
       "riskClassification": "Risk Classification",
       "auxNodes": "輔助節點",
-      "riskConservative": "保守风险评估",
+      "riskConservative": "保守風險評估",
       "riskLevel": "风险",
-      "riskNeutral": "中性风险评估",
+      "riskNeutral": "中性風險評估",
       "startFailed": "啟動失敗",
       "stopLoss": "止損價",
       "targetPrice": "目標价",
@@ -16603,8 +16605,8 @@
     "actionConfidenceBasisLabel": "動作口徑",
     "valuationConflictRichNonbearish": "⚠️ 估值口徑分歧：演算法估值結論為「{{valuationAction}}」，而{{horizon}}決策方向為「{{decisionAction}}」——短線判方向、長線判價值，請結合估值區間自行判斷",
     "valuationConflictCheapBearish": "⚠️ 估值口徑分歧：演算法估值結論為「{{valuationAction}}」（長線價值視角偏多），而{{horizon}}決策方向為「{{decisionAction}}」，請結合估值區間自行判斷",
-    "horizonScopeAnalyst": "分析師報告：已按檔展開——每檔各跑該檔適用的分析師子集（子集與檔位由權威矩陣推導），並依該檔契約各自產出 VERDICT；仍然共用一份的是辯論。",
-    "horizonScopeDebate": "辯論：本輪僅進行一輪跨視角辯論，四檔共用同一份辯論記錄。",
+    "horizonScopeAnalyst": "分析師報告：已按檔展開——每檔各跑該檔適用的分析師子集（子集與檔位由權威矩陣推導），並依該檔契約各自產出 VERDICT",
+    "horizonScopeDebate": "辯論：四檔各自進行一組多空（bull/bear）辯論，可在本卡片按檔切換查看。",
     "horizonScopeRisk": "風險分類：已按檔判據 —— 每檔用本檔持倉窗口（超短 2 / 短 5 / 中 28 / 長 90 個交易日）的回撤深度單獨分級；波動率、夏普比率與基本面四項仍是 60 日全域口徑。 自 v129 起，主鏈的 f4 風險證據、風險偏置、倉位上限與風控否決也一律依所選檔取該檔風險檔（只升不降）。",
     "llmHorizonOverview": "LLM 逐檔決策",
     "llmHorizonNotGiven": "LLM 未給出該檔決策",
@@ -16857,7 +16859,9 @@
       "verdictOnlyLabel": "該辯手僅給出了結論，未提供詳細分析文字",
       "title": "辯論總結",
       "loading": "辩论分析进行中...",
-      "evidence": "证据"
+      "evidence": "证据",
+      "tierNoOutput": "{{tier}}本輪沒有辯論產出（節點未完成或輸出為空）。",
+      "roundHeading": "第 {{round}} 輪"
     },
     "decision": {
       "action": "操作建议",
@@ -17734,7 +17738,41 @@
       "itemScore": "{{label}}（{{score}} / 100）",
       "overview": "风险评分总览",
       "scoreLabel": "风险评分",
-      "loading": "風險評估進行中..."
+      "loading": "風險評估進行中...",
+      "verdictStance": "立場",
+      "verdictPosition": "建議倉位",
+      "verdictConfidence": "置信度",
+      "noVote": "本視角未產出",
+      "convergenceTitle": "三視角收斂結論",
+      "viewsTitle": "三視角評估",
+      "riskLevelTitle": "規則風險檔",
+      "matchedRules": "命中規則",
+      "axisGaps": "資料口徑",
+      "metricsTitle": "關鍵指標",
+      "researchManagerTitle": "研究經理綜合意見",
+      "otherAssessments": "其他風險產物",
+      "expand": "展開",
+      "collapse": "收起",
+      "degraded": "降級",
+      "axisAbsent": "缺席",
+      "noRiskLevel": "規則風險檔未產出",
+      "noConvergence": "三視角收斂結論未產出",
+      "noResearchManager": "研究經理綜合意見未產出",
+      "axisDrawdownDepth": "回撤深度",
+      "axisFundamentals": "基本面",
+      "axisSharpe": "夏普",
+      "axisVolatility": "波動率",
+      "axisValueLatestReport": "最新財報",
+      "axisValueGlobal60": "60日全局",
+      "metricVolatility": "年化波動率",
+      "metricSharpe": "夏普比率",
+      "metricMaxDrawdown": "最大回撤",
+      "metricDrawdownDepth": "回撤深度",
+      "metricDebtRatio": "資產負債率",
+      "metricGrossMargin": "毛利率",
+      "metricRevenueGrowth": "營收同比",
+      "metricRoe": "ROE(TTM)",
+      "metricWindowDays": "視窗天數"
     },
     "quantSim": {
       "title": "策略模拟",
@@ -18026,7 +18064,8 @@
       "neutral": "中性",
       "moat": "护城河",
       "idealBuy": "理想买入",
-      "rounds": " 轮"
+      "rounds": " 轮",
+      "tiers": " 檔辯論"
     },
     "whatIf": {
       "valuationParams": "估值参数",

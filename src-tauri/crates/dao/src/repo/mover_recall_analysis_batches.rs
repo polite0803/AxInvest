@@ -29,6 +29,7 @@ pub struct BatchRunRecord {
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub finished_at_ms: Option<i64>,
+    pub trigger: Option<String>,
 }
 
 /// 全量 upsert 一行批次历史。主键冲突时覆盖除 id / 创建时间 / 原始请求外的列
@@ -46,6 +47,7 @@ pub async fn upsert_batch_run(db: &DatabaseConnection, r: &BatchRunRecord) -> Re
         created_at_ms: Set(r.created_at_ms),
         updated_at_ms: Set(r.updated_at_ms),
         finished_at_ms: Set(r.finished_at_ms),
+        trigger: Set(r.trigger.clone()),
     };
 
     Entity::insert(am)

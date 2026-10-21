@@ -2280,13 +2280,13 @@ pub async fn opc_execute_analysis(
 /// **解析失败只 `warn` 后按「无钩子」处理，绝不上抛**：钩子是可选旁路
 /// （`post_exec` 语义 = 结果已产生、不可回滚），一个 JSON 拼写错误不该让
 /// 整条工作流执行失败。与 `src/commands/stock_workflow/decision.rs:565-575` 同形态（**同样 warn 留痕**）；
-/// 与 `src/commands/stock_pipeline/core.rs:318` 的唯一差异才是**保留 warn 留痕**（那处用 `.ok()` 静默吞错）。
+/// 与 `src/commands/stock_pipeline/core.rs:398` 的唯一差异才是**保留 warn 留痕**（那处用 `.ok()` 静默吞错）。
 ///
 /// 独立成函数的三个理由：
 /// 1. **调用点短到不触及 rustfmt 链式断行**：原内联写法
 ///    `let hooks_config: Option<...> = template.hooks_config.as_ref().and_then(...)`
 ///    在 `src-tauri/rustfmt.toml`（`edition = "2024"`）下 `rustfmt --check` 报 diff。
-///    合规形态见 `stock_pipeline/core.rs:317-318`（`=` 后断行、链保持一行、indent 8）；
+///    合规形态见 `stock_pipeline/core.rs:397-398`（`=` 后断行、链保持一行、indent 8）；
 /// 2. **纯函数可单测**（不需要 DB / 引擎），直接钉住「解析失败 ⇒ None，不 panic、不上抛」；
 /// 3. `run_template_via_engine` 里「钩子来自模板声明」这一意图一行可见。
 fn parse_hooks_config(
@@ -2355,7 +2355,7 @@ pub(crate) async fn run_template_via_engine(
 
     // 创建工作流
     let wf_name = format!("opc-{domain_pack_id_normalized}-{template_id}");
-    // 必须用 with_hooks 变体携带模板 hooks_config（形态同 src/commands/stock_workflow/core.rs:828-831）：
+    // 必须用 with_hooks 变体携带模板 hooks_config（形态同 src/commands/stock_workflow/core.rs:833-836）：
     // `create_workflow` 内部转调 `create_workflow_with_hooks(..., None)`，
     // 模板声明的 post_exec 会被静默丢弃 —— 引擎只在内存 Workflow 对象上读声明
     // （rt-workflow engine/mod.rs:1064-1069），为 None 时直接 return，连日志都不打。

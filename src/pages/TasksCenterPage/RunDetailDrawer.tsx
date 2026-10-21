@@ -12,11 +12,14 @@ import { formatDateTime, formatDuration } from "./formatUtils";
 import { BatchRunDetailDrawer } from "./jobs/BatchRunDetailDrawer";
 import { MoverRecallBatchDrawer } from "./jobs/MoverRecallBatchDrawer";
 import { PipelineRunDetailDrawer } from "./jobs/PipelineRunDetailDrawer";
+import { StockAnalysisRunDrawer } from "./jobs/StockAnalysisRunDrawer";
+import { mapRunTrigger } from "./model";
 
 /**
  * 统一运行详情入口：Runs 表/概览点击任意 run → 按源分发到该源的详情形态。
  *
  * - stock-pipeline → PipelineRunDetailDrawer（逐股明细）
+ * - stock-analysis → StockAnalysisRunDrawer（单股分析摘要 + 跳工作台）
  * - time-travel-batch → BatchRunDetailDrawer（analyses/horizons/反思）
  * - mover-recall-analysis → MoverRecallBatchDrawer（逐票 as-of 补分析明细）
  * - scheduled-cron → 该任务的执行历史 Drawer（get_task_execution_history）
@@ -37,6 +40,10 @@ export function RunDetailDrawer() {
         onClose={close}
       />
     );
+  }
+
+  if (selected?.source === "stock-analysis") {
+    return <StockAnalysisRunDrawer run={selected} onClose={close} />;
   }
 
   if (selected?.source === "time-travel-batch") {
@@ -138,12 +145,21 @@ function CronHistoryDrawer({
       ),
     },
     {
+      title: t("tasksCenter.column.trigger"),
+      key: "trigger",
+      width: 80,
+      render: (_: unknown, r: TaskExecutionRecord) => <Tag>{t(`tasksCenter.trigger.${mapRunTrigger(r.trigger)}`)}</Tag>,
+    },
+    {
       title: t("tasksCenter.history.result"),
       key: "result",
       width: 80,
+      // 与计划任务页那套抽屉同判据：success=false 里混着「部分完成」，不能一律显示失败
       render: (_: unknown, r: TaskExecutionRecord) =>
         r.success
           ? <Tag color="success">{t("tasksCenter.lastRun.success")}</Tag>
+          : r.partial
+          ? <Tag color="warning">{t("tasksCenter.lastRun.partial")}</Tag>
           : <Tag color="error">{t("tasksCenter.lastRun.failed")}</Tag>,
     },
     {

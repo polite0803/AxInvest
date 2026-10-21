@@ -382,7 +382,34 @@ describe("stockAnalysisStore - feature coverage", () => {
       await useStockAnalysisStore.getState().loadAnalysis("an-1");
       const rounds = useStockAnalysisStore.getState().debateRounds;
       expect(rounds).toHaveLength(1);
-      expect(rounds[0]).toEqual({ round: 1, bull: "多方看涨", bear: "空方谨慎" });
+      expect(rounds[0]).toEqual({ tier: null, round: 1, bull: "多方看涨", bear: "空方谨慎" });
+    });
+
+    it("v161+ 快照的带档辩论键按 (tier, round) 各自恢复（此前正则整批漏掉）", async () => {
+      invokeMock.mockResolvedValueOnce({
+        id: "an-1",
+        stockCode: "600519",
+        stockName: "茅台",
+        decisionJson: null,
+        blackboardSnapshot: JSON.stringify({
+          "bull-r1--ultra_short": { content: "多方-超短" },
+          "bear-r1--ultra_short": { content: "空方-超短" },
+          "bull-r1--short": { content: "多方-短线" },
+          "bear-r1--short": { content: "空方-短线" },
+          "bull-r1--mid": { content: "多方-中线" },
+          "bear-r1--mid": { content: "空方-中线" },
+          "bull-r1--long": { content: "多方-长线" },
+          "bear-r1--long": { content: "空方-长线" },
+        }),
+      });
+      await useStockAnalysisStore.getState().loadAnalysis("an-1");
+      const rounds = useStockAnalysisStore.getState().debateRounds;
+      expect(rounds.map((r) => [r.tier, r.round, r.bull, r.bear])).toEqual([
+        ["ultra_short", 1, "多方-超短", "空方-超短"],
+        ["short", 1, "多方-短线", "空方-短线"],
+        ["mid", 1, "多方-中线", "空方-中线"],
+        ["long", 1, "多方-长线", "空方-长线"],
+      ]);
     });
 
     it("risk.agg / risk.con 键填充到 riskAssessments", async () => {

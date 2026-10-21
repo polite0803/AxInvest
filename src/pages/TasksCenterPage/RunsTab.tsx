@@ -40,7 +40,7 @@ const STATE_KEYS: RunState[] = [
   "canceled",
 ];
 
-const TRIGGER_KEYS: RunTrigger[] = ["schedule", "manual", "system", "external"];
+const TRIGGER_KEYS: RunTrigger[] = ["schedule", "manual", "system", "external", "unknown"];
 
 /**
  * 全部运行：跨所有任务源的统一执行表（Temporal / Windmill Runs 范式）。

@@ -262,6 +262,8 @@ impl TradeIntentService {
             trade_intent_actual_trade_id: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
+            // 条件单补记行创建即终态 ⇒ 完成时刻就是 now
+            completed_at: Set(Some(now)),
         };
 
         model.insert(db).await.map_err(|e| format!("创建条件单交易意图失败: {e}"))?;
@@ -620,6 +622,8 @@ mod tests {
             trade_intent_actual_trade_id: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
+            // 条件单补记行创建即终态 ⇒ 完成时刻就是 now
+            completed_at: Set(Some(now)),
         };
         model.insert(&db).await.unwrap();
 
@@ -694,6 +698,8 @@ mod tests {
             trade_intent_actual_trade_id: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
+            // 条件单补记行创建即终态 ⇒ 完成时刻就是 now
+            completed_at: Set(Some(now)),
         };
         model.insert(&db).await.unwrap();
 
@@ -765,6 +771,8 @@ mod tests {
             trade_intent_actual_trade_id: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
+            // 条件单补记行创建即终态 ⇒ 完成时刻就是 now
+            completed_at: Set(Some(now)),
         };
         model.insert(&db).await.unwrap();
 
@@ -851,6 +859,8 @@ mod tests {
             trade_intent_actual_trade_id: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
+            // 条件单补记行创建即终态 ⇒ 完成时刻就是 now
+            completed_at: Set(Some(now)),
         };
         model.insert(&db).await.unwrap();
 

@@ -82,6 +82,15 @@ export interface ScheduledTask {
   workflowId?: string | null;
   /** 结构化业务参数（参数化任务使用，如时间旅行批次的 asOf/档位勾选） */
   params?: unknown;
+  /**
+   * 本进程内该任务**正在执行**的开始时刻（ms）；null/undefined = 没在跑。
+   * 纯内存登记（进程重启即清空），不是 DB 状态。
+   */
+  runningSince?: number | null;
+  /** 在跑的触发来源（manual / schedule）；null = 没在跑 */
+  runningTrigger?: string | null;
+  /** 最近一次执行的触发来源；null/undefined = 旧记录（未知） */
+  lastTrigger?: string | null;
 }
 
 /**
@@ -107,4 +116,6 @@ export interface TaskExecutionRecord {
    * 加列之前的旧历史行读出来是 false —— 语义按「不是部分完成」，不是「未知」。
    */
   partial?: boolean;
+  /** 触发来源：manual / schedule / system；null/undefined = 本列引入前的旧行（未知） */
+  trigger?: string | null;
 }

@@ -1243,6 +1243,8 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
             trade_intent_actual_trade_id: Set(None),
             created_at: Set(now_ms),
             updated_at: Set(now_ms),
+            // chat 通道落库即终态（决策已产生）⇒ 完成时刻就是 now
+            completed_at: Set(Some(now_ms)),
         }
         .insert(&self.db)
         .await;

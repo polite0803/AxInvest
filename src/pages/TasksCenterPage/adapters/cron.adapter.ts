@@ -3,7 +3,7 @@
 import { invoke } from "@/lib/invoke";
 import type { ScheduledTask, TaskExecutionRecord } from "@/types";
 import { toEpochMs } from "../formatUtils";
-import { type RunBadge, runIdOf, type RunState, type UnifiedRun } from "../model";
+import { mapRunTrigger, type RunBadge, runIdOf, type RunState, type UnifiedRun } from "../model";
 import { canExecuteNow } from "../taskGrouping";
 import type { TaskSourceAdapter } from "./types";
 
@@ -35,8 +35,8 @@ export const cronAdapter: TaskSourceAdapter = {
       return [];
     }
     return rows
-      .filter((task) => task.lastResult !== null && task.lastRunAt !== null)
-      .map((task) => mapLastRun(task));
+      .filter((task) => task.runningSince != null || (task.lastResult !== null && task.lastRunAt !== null))
+      .map((task) => (task.runningSince != null ? mapRunningTask(task) : mapLastRun(task)));
   },
 
   async retry(nativeId: string): Promise<void> {
@@ -53,6 +53,27 @@ export const cronAdapter: TaskSourceAdapter = {
     return rows.map((rec) => mapExecutionRecord(nativeId, rec, undefined));
   },
 };
+
+/** 进程内在跑的任务 → running 行（此时 lastResult 还是上一次的旧结果）。 */
+export function mapRunningTask(task: ScheduledTask): UnifiedRun {
+  return {
+    id: runIdOf("scheduled-cron", task.id),
+    source: "scheduled-cron",
+    nativeId: task.id,
+    name: task.name,
+    trigger: mapRunTrigger(task.runningTrigger),
+    state: "running",
+    attempts: 0,
+    startedAt: task.runningSince ?? undefined,
+    deepLink: "/tasks?tab=schedules",
+    capabilities: {
+      retry: canExecuteNow(task),
+      viewHistory: true,
+      openSource: true,
+    },
+    raw: task,
+  };
+}
 
 /** 任务定义 + 最近一次结果 → UnifiedRun。 */
 export function mapLastRun(task: ScheduledTask): UnifiedRun {
@@ -79,7 +100,8 @@ export function mapLastRun(task: ScheduledTask): UnifiedRun {
     source: "scheduled-cron",
     nativeId: task.id,
     name: task.name,
-    trigger: "schedule",
+    // 旧记录没有触发来源 ⇒ unknown（不再一律猜成「定时」）
+    trigger: mapRunTrigger(task.lastTrigger),
     state,
     badges: badges.length > 0 ? badges : undefined,
     attempts: 0,
@@ -109,7 +131,12 @@ export function mapExecutionRecord(
     nativeId: rec.task_id || taskId,
     name: task?.name ?? taskId,
     // P1-10：兜底轮（非档期触发）与档期记录显式区分，见文件头前缀约定。
-    trigger: rec.output?.startsWith(AUXILIARY_OUTPUT_PREFIX) ? "system" : "schedule",
+    // 触发来源优先用历史行自己的 trigger；旧行没有 ⇒ unknown。
+    trigger: rec.trigger != null
+      ? mapRunTrigger(rec.trigger)
+      : rec.output?.startsWith(AUXILIARY_OUTPUT_PREFIX)
+      ? "system"
+      : "unknown",
     state: rec.success ? "succeeded" : "failed",
     attempts: 0,
     startedAt: rec.started_at,

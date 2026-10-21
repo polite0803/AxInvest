@@ -27,6 +27,7 @@ export const pipelineAdapter: TaskSourceAdapter = {
 
 export function mapPipelineRun(run: PipelineRun): UnifiedRun {
   const state = mapPipelineState(run.status);
+  const normalizedStatus = run.status?.toLowerCase();
   const failedCount = run.summary
     ? run.summary.analysis.newFailed + run.summary.analysis.reassessFailed
     : 0;
@@ -38,7 +39,9 @@ export function mapPipelineRun(run: PipelineRun): UnifiedRun {
     trigger: "manual",
     state,
     attempts: 0,
-    badges: run.status?.toLowerCase() === "completed" && failedCount > 0
+    badges: normalizedStatus === "interrupted"
+      ? ["interrupted"]
+      : normalizedStatus === "completed" && failedCount > 0
       ? ["partial"]
       : undefined,
     startedAt: run.startedAt,
@@ -52,7 +55,7 @@ export function mapPipelineRun(run: PipelineRun): UnifiedRun {
   };
 }
 
-function mapPipelineState(status: string): RunState {
+export function mapPipelineState(status: string): RunState {
   switch (status?.toLowerCase()) {
     case "running":
       return "running";
@@ -62,6 +65,8 @@ function mapPipelineState(status: string): RunState {
     case "failed":
     case "error":
       return "failed";
+    case "interrupted":
+      return "canceled";
     case "canceled":
     case "cancelled":
       return "canceled";
@@ -71,6 +76,7 @@ function mapPipelineState(status: string): RunState {
     case "pending":
       return "queued";
     default:
-      return "running";
+      // 未知状态不得默认成 running：那会让僵尸行继续显示「运行中」并触发轮询
+      return "failed";
   }
 }

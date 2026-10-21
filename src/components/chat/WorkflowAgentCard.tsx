@@ -3,6 +3,7 @@ import { cleanToolCallTags, extractReadableFromRiskReport } from "@/components/s
 import {
   getActionTKey,
   getRiskTKey,
+  horizonLabelKey,
   parseAction,
   parseRiskLevel,
   StockAction,
@@ -176,7 +177,14 @@ export interface WorkflowCardData {
   analysts?: Array<
     { nodeId: string; name: string; report?: string; status: "pending" | "running" | "done" | "failed" }
   >;
-  debates?: Array<{ round: number; bull?: string; bear?: string; status: "pending" | "running" | "done" | "failed" }>;
+  debates?: Array<{
+    /** 档位 snake_case；null/缺省 = 分档之前的历史单份记录 */
+    tier?: string | null;
+    round: number;
+    bull?: string;
+    bear?: string;
+    status: "pending" | "running" | "done" | "failed";
+  }>;
   risks?: Array<{ key: string; content?: string; status: "pending" | "running" | "done" | "failed" }>;
   extraNodes?: Array<{ key: string; label: string; status: "pending" | "running" | "done" | "failed" }>;
   dataSources?: Array<{
@@ -578,7 +586,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {data.debates.map((d) => (
                   <div
-                    key={`debate-${d.round}`}
+                    key={`debate-${d.tier ?? "legacy"}-${d.round}`}
                     style={{
                       padding: "8px 10px",
                       background: d.status === "done" ? "var(--accent-glass)" : "var(--bg-glass)",
@@ -588,6 +596,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                   >
                     <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
                       {d.status === "done" ? "✅" : d.status === "running" ? "⚙️" : "⏳"}{" "}
+                      {d.tier ? `${t(horizonLabelKey(d.tier) ?? d.tier)} · ` : ""}
                       {t("stockAnalysis.workflow.debateRound")} {d.round}
                     </div>
                     {(d.bull || d.bear) && (

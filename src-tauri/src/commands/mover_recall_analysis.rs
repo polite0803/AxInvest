@@ -194,13 +194,19 @@ pub struct MoverBatchState {
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub finished_at_ms: Option<i64>,
+    /// 触发来源：`manual` / `schedule`；`None` = 旧批次（未知）。
+    pub trigger: Option<String>,
     /// 请求快照仅落库 request_json，不向前端输出、从库还原为 None
     #[serde(skip)]
     pub request: Option<RunMoverRecallAnalysisRequest>,
 }
 
 impl MoverBatchState {
-    fn new(batch_id: String, request: RunMoverRecallAnalysisRequest) -> Self {
+    fn new(
+        batch_id: String,
+        request: RunMoverRecallAnalysisRequest,
+        trigger: &'static str,
+    ) -> Self {
         let now = now_ms();
         Self {
             batch_id,
@@ -214,6 +220,7 @@ impl MoverBatchState {
             created_at_ms: now,
             updated_at_ms: now,
             finished_at_ms: None,
+            trigger: Some(trigger.to_string()),
             request: Some(request),
         }
     }
@@ -232,6 +239,7 @@ fn record_from_state(s: &MoverBatchState) -> BatchRunRecord {
         created_at_ms: s.created_at_ms,
         updated_at_ms: s.updated_at_ms,
         finished_at_ms: s.finished_at_ms,
+        trigger: s.trigger.clone(),
     }
 }
 
@@ -312,6 +320,7 @@ fn state_from_model(m: BatchRunModel, items: Vec<EventItem>) -> MoverBatchState 
         created_at_ms: m.created_at_ms,
         updated_at_ms: m.updated_at_ms,
         finished_at_ms: m.finished_at_ms,
+        trigger: m.trigger,
         request: None,
     }
 }
@@ -337,6 +346,7 @@ pub async fn run_mover_recall_analysis(
         state.astock_client.clone(),
         state.work_engine.clone(),
         request,
+        "manual",
     )
     .await
 }
@@ -354,7 +364,7 @@ pub(crate) async fn start_for_scheduler(
     engine: Arc<axagent_rt_workflow::work_engine::WorkEngine>,
     request: RunMoverRecallAnalysisRequest,
 ) -> Result<String, String> {
-    launch(asof_lock, db, client, engine, request).await
+    launch(asof_lock, db, client, engine, request, "schedule").await
 }
 
 /// 校验 → live 时间窗拒绝 → 抢全局 as-of 批次锁 → 落批次起点 → 后台发起。
@@ -364,6 +374,7 @@ async fn launch(
     client: Arc<AStockClient>,
     engine: Arc<axagent_rt_workflow::work_engine::WorkEngine>,
     request: RunMoverRecallAnalysisRequest,
+    trigger: &'static str,
 ) -> Result<String, String> {
     if request.batch_limit == 0 || request.batch_limit > 100 {
         return Err(ErrorResponse::err_with_detail(
@@ -393,7 +404,7 @@ async fn launch(
     ensure_stale_reaped(&db).await;
 
     let batch_id = uuid::Uuid::new_v4().to_string();
-    save_state(&db, MoverBatchState::new(batch_id.clone(), request.clone())).await;
+    save_state(&db, MoverBatchState::new(batch_id.clone(), request.clone(), trigger)).await;
     let batch_id_to_return = batch_id.clone();
 
     // 同时间旅行批次：独立多线程 runtime + 32MB 栈（Tauri 默认 2MB worker 栈会溢出，

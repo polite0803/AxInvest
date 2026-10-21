@@ -9,8 +9,10 @@ import type { TFunction } from "i18next";
 const SPECIAL_MAP: Record<string, string> = {
   "cls-risk-level": "stockAnalysis.workflow.riskLevel",
   "risk-level": "stockAnalysis.workflow.riskLevel",
-  "agg-risk": "stockAnalysis.workflow.aggRisk",
-  "risk-agg": "stockAnalysis.workflow.riskAggregation",
+  // 聚合容器与激进视角是两个节点，标签此前对调：`agg-risk` 是 AggregatorNode，
+  // `risk-agg` 是激进风险评估师（失败节点列表里曾把激进失败说成「风险聚合失败」）。
+  "agg-risk": "stockAnalysis.workflow.riskAggregation",
+  "risk-agg": "stockAnalysis.workflow.riskAggressive",
   "risk-con": "stockAnalysis.workflow.riskConservative",
   "risk-neu": "stockAnalysis.workflow.riskNeutral",
   "risk-aggregated": "stockAnalysis.workflow.riskAggregation",

@@ -7512,6 +7512,7 @@
     },
     "source": {
       "scheduledCron": "定时任务",
+      "stockAnalysis": "单股分析",
       "stockPipeline": "股票分析管道",
       "timeTravelBatch": "时间旅行批次",
       "moverRecallAnalysis": "漏检补分析批次"
@@ -7541,7 +7542,8 @@
       "schedule": "定时",
       "manual": "手动",
       "system": "系统",
-      "external": "外部"
+      "external": "外部",
+      "unknown": "未知"
     },
     "health": {
       "running": "运行中",
@@ -15746,8 +15748,8 @@
     "actionConfidenceBasisLabel": "动作口径",
     "valuationConflictRichNonbearish": "⚠️ 估值口径分歧：算法估值结论为「{{valuationAction}}」，而{{horizon}}决策方向为「{{decisionAction}}」——短线判方向、长线判价值，请结合估值区间自行判断",
     "valuationConflictCheapBearish": "⚠️ 估值口径分歧：算法估值结论为「{{valuationAction}}」（长线价值视角偏多），而{{horizon}}决策方向为「{{decisionAction}}」，请结合估值区间自行判断",
-    "horizonScopeAnalyst": "分析师报告：已按档展开——每档各跑该档适用的分析师子集（子集与档位由权威矩阵推导），并按该档契约各自产出 VERDICT；仍然共用一份的是辩论。",
-    "horizonScopeDebate": "辩论：本轮只进行一轮跨视角辩论，四档共用同一份辩论记录。",
+    "horizonScopeAnalyst": "分析师报告：已按档展开——每档各跑该档适用的分析师子集（子集与档位由权威矩阵推导），并按该档契约各自产出 VERDICT",
+    "horizonScopeDebate": "辩论：四档各自进行一组多空（bull/bear）辩论，可在本卡片按档切换查看。",
     "horizonScopeRisk": "风险分类：已按档判据 —— 每档用本档持仓窗口（超短 2 / 短 5 / 中 28 / 长 90 个交易日）的回撤深度单独分级；波动率、夏普比率与基本面四项仍是 60 日全局口径。 自 v129 起，主链的 f4 风险证据、风险偏置、仓位上限与风控否决也一律按所选档取该档风险档（只升不降）。",
     "llmHorizonOverview": "LLM 逐档决策",
     "llmHorizonNotGiven": "LLM 未给出该档决策",
@@ -16785,7 +16787,9 @@
       "verdictOnlyLabel": "该辩手仅给出了结论，未提供详细分析文字",
       "title": "辩论总结",
       "loading": "辩论分析进行中...",
-      "evidence": "证据"
+      "evidence": "证据",
+      "tierNoOutput": "{{tier}}本轮没有辩论产出（节点未完成或输出为空）。",
+      "roundHeading": "第 {{round}} 轮"
     },
     "debugLabel": {
       "analyst": "分析师",
@@ -16896,7 +16900,41 @@
       "itemScore": "{{label}}（{{score}} / 100）",
       "overview": "风险评分总览",
       "scoreLabel": "风险评分",
-      "loading": "风险评估进行中..."
+      "loading": "风险评估进行中...",
+      "verdictStance": "立场",
+      "verdictPosition": "建议仓位",
+      "verdictConfidence": "置信度",
+      "noVote": "本视角未产出",
+      "convergenceTitle": "三视角收敛结论",
+      "viewsTitle": "三视角评估",
+      "riskLevelTitle": "规则风险档",
+      "matchedRules": "命中规则",
+      "axisGaps": "数据口径",
+      "metricsTitle": "关键指标",
+      "researchManagerTitle": "研究经理综合意见",
+      "otherAssessments": "其他风险产物",
+      "expand": "展开",
+      "collapse": "收起",
+      "degraded": "降级",
+      "axisAbsent": "缺席",
+      "noRiskLevel": "规则风险档未产出",
+      "noConvergence": "三视角收敛结论未产出",
+      "noResearchManager": "研究经理综合意见未产出",
+      "axisDrawdownDepth": "回撤深度",
+      "axisFundamentals": "基本面",
+      "axisSharpe": "夏普",
+      "axisVolatility": "波动率",
+      "axisValueLatestReport": "最新财报",
+      "axisValueGlobal60": "60日全局",
+      "metricVolatility": "年化波动率",
+      "metricSharpe": "夏普比率",
+      "metricMaxDrawdown": "最大回撤",
+      "metricDrawdownDepth": "回撤深度",
+      "metricDebtRatio": "资产负债率",
+      "metricGrossMargin": "毛利率",
+      "metricRevenueGrowth": "营收同比",
+      "metricRoe": "ROE(TTM)",
+      "metricWindowDays": "窗口天数"
     },
     "alert": {
       "code": "代码",
@@ -18033,7 +18071,8 @@
       "neutral": "中性",
       "moat": "护城河",
       "idealBuy": "理想买入",
-      "rounds": " 轮"
+      "rounds": " 轮",
+      "tiers": " 档辩论"
     },
     "whatIf": {
       "valuationParams": "估值参数",

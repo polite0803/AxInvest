@@ -75,6 +75,14 @@ impl CronScheduler {
                 if let Some(job) = next_dispatch(&due, &dispatched) {
                     let job = job.clone();
                     dispatched.insert(job.id.clone(), job.next_run_at);
+                    // 在跑登记：任务中心据此显示「运行中」；record_run 时摘除。
+                    store
+                        .mark_running(
+                            &job.id,
+                            axagent_runtime_core::cron_job::now_millis(),
+                            "schedule",
+                        )
+                        .await;
                     tracing::info!("Cron: running job '{}' ({})", job.name, job.id);
                     // 异步执行，结果由 executor handler 的 record_run 写回 store
                     executor.execute(job).await;
@@ -113,6 +121,11 @@ impl CronScheduler {
     /// 注意：handler 内各分支自行 `tokio::spawn` 并 `record_run`，本方法在入队后
     /// 即返回，不等执行完成（长任务可达数分钟）。
     pub async fn trigger_now(&self, job: super::job_store::CronJob) {
+        // 手动触发与定时派发共用 handler，但来源不同：在跑登记里如实记 manual，
+        // 任务中心据此显示「触发方式=手动」，record_run 再把它写进 last_trigger/历史。
+        self.store
+            .mark_running(&job.id, axagent_runtime_core::cron_job::now_millis(), "manual")
+            .await;
         self.executor.execute(job).await;
     }
 }

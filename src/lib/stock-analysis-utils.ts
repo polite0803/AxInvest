@@ -1428,6 +1428,61 @@ export function analystBaseOf(nodeId: string): string | null {
   return nodeId.slice(0, i);
 }
 
+/** 辩论节点 id / 黑板快照键的分解结果。`tier === null` = 分档之前的历史记录。 */
+export interface DebateRoundRef {
+  tier: string | null;
+  round: number;
+}
+
+/**
+ * 解析辩论节点 id（或同形的黑板快照键）的档位与轮次。
+ *
+ * 认三种并存形态：
+ *   · `bull-researcher` —— ≤v160 的单份历史记录 ⇒ `{ tier: null, round: 1 }`
+ *   · `bull-r2` —— v161 前的多轮（不分档）⇒ `{ tier: null, round: 2 }`
+ *   · `bull-r1--mid` —— v161 起逐档辩论 ⇒ `{ tier: "mid", round: 1 }`
+ *
+ * 后缀不是四档之一 ⇒ 返回 `null`（接线接错对象，不得猜成某一档）；
+ * 调用方据此跳过该节点，而不是把它塞进第 1 轮去覆盖别人。
+ */
+export function parseDebateRoundRef(nodeId: string): DebateRoundRef | null {
+  const m = /^(?:bull|bear)-(researcher|r(\d+))(?:--(.+))?$/.exec(nodeId.trim());
+  if (!m) { return null; }
+  if (m[1] === "researcher") {
+    // 历史单份节点没有档位后缀；带后缀说明接线接错了对象
+    return m[3] === undefined ? { tier: null, round: 1 } : null;
+  }
+  const round = Number(m[2]);
+  if (!Number.isInteger(round) || round < 1) { return null; }
+  if (m[3] === undefined) { return { tier: null, round }; }
+  if (!Object.prototype.hasOwnProperty.call(HORIZON_T_SUFFIX, m[3])) { return null; }
+  return { tier: m[3], round };
+}
+
+/** 同档同轮的对侧节点 id（从 bull 键取 bear 正文用）；认不出返回 null。 */
+export function debatePeerNodeId(nodeId: string, peer: "bull" | "bear"): string | null {
+  const ref = parseDebateRoundRef(nodeId);
+  if (!ref) { return null; }
+  if (/^(?:bull|bear)-researcher$/.test(nodeId.trim())) { return `${peer}-researcher`; }
+  return ref.tier === null
+    ? `${peer}-r${ref.round}`
+    : `${peer}-r${ref.round}${ANALYST_TIER_SEP}${ref.tier}`;
+}
+
+const DEBATE_TIER_ORDER = Object.keys(HORIZON_T_SUFFIX);
+
+/** 档位排序权重：四档按权威顺序，历史单份排最后。 */
+export function debateTierOrder(tier: string | null): number {
+  if (tier === null) { return DEBATE_TIER_ORDER.length; }
+  const i = DEBATE_TIER_ORDER.indexOf(tier);
+  return i === -1 ? DEBATE_TIER_ORDER.length : i;
+}
+
+/** 辩论行稳定排序：先四档顺序、再轮次（历史单份排最后）。 */
+export function compareDebateRounds(a: DebateRoundRef, b: DebateRoundRef): number {
+  return debateTierOrder(a.tier) - debateTierOrder(b.tier) || a.round - b.round;
+}
+
 /**
  * `decisionsByHorizon` 的键是 camelCase，而 i18n 后缀表按 snake_case 建模
  * （`stock_reflections.horizon_results_json`、命中率的 `byHorizon` 都用 snake）⇒

@@ -17,6 +17,7 @@ import type { ScheduledTask } from "@/types";
 export type SourceId =
   | "scheduled-cron"
   | "stock-pipeline"
+  | "stock-analysis"
   | "time-travel-batch"
   | "mover-recall-analysis"
   // P2-2 起接入：
@@ -42,7 +43,28 @@ export type RunState =
   | "failed"
   | "canceled";
 
-export type RunTrigger = "schedule" | "manual" | "system" | "external";
+export type RunTrigger = "schedule" | "manual" | "system" | "external" | "unknown";
+
+/**
+ * 后端触发来源 → 统一口径。
+ *
+ * 缺失/未登记一律 `unknown`：**不得**猜成 schedule 或 manual —— 旧数据没有这个信息，
+ * 猜一类就是把「不知道」伪装成可信读数（与状态映射里「未知不得默认 running」同一条纪律）。
+ */
+export function mapRunTrigger(value: string | null | undefined): RunTrigger {
+  switch (value) {
+    case "schedule":
+      return "schedule";
+    case "manual":
+      return "manual";
+    case "system":
+      return "system";
+    case "external":
+      return "external";
+    default:
+      return "unknown";
+  }
+}
 
 /** 不改变主状态的修饰标记（部分成功/重试中/中断/僵死/跳过）。 */
 export type RunBadge =

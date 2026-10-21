@@ -7,7 +7,8 @@
 
 import { invoke } from "@/lib/invoke";
 import { isTauri } from "@/lib/invoke";
-import type { StockDecision } from "@/types/stock-analysis";
+import { compareDebateRounds } from "@/lib/stock-analysis-utils";
+import type { DebateRound, StockDecision } from "@/types/stock-analysis";
 import type { TFunction } from "i18next";
 
 // ── 数据契约 ──
@@ -20,7 +21,7 @@ export interface ExportData {
     | { price: number; change: number; changePct: number; high: number; low: number; volume: number; amount: number }
     | null;
   analystReports: Record<string, string>;
-  debateRounds: Array<{ round: number; bull: string; bear: string }>;
+  debateRounds: DebateRound[];
   riskAssessments: Record<string, string>;
   valueAssessments: Record<string, string>;
   decision: StockDecision | null;
@@ -33,6 +34,21 @@ export interface ExportData {
 }
 
 // ── 分析师名称映射 ──
+
+/** 四档的导出用中文名（报告是中文固定内容，不走 i18n 运行时） */
+const HORIZON_TIER_CN: Record<string, string> = {
+  ultra_short: "超短线",
+  short: "短线",
+  mid: "中线",
+  long: "长线",
+};
+
+const SIGNAL_KEY_TO_TIER = {
+  ultraShortTermSignal: "ultra_short",
+  shortTermSignal: "short",
+  midTermSignal: "mid",
+  longTermSignal: "long",
+} as const;
 
 const ANALYST_LABELS: Record<string, string> = {
   "market-analyst": "📊 技术面分析师",
@@ -161,16 +177,13 @@ export function buildMarkdownReport(data: ExportData): string {
     }
     if (Object.keys(signals).length > 0) {
       h(3, "多时间维度信号");
-      const labelMap: Record<string, string> = {
-        ultraShortTermSignal: "超短线",
-        shortTermSignal: "短线",
-        midTermSignal: "中线",
-        longTermSignal: "长线",
-      };
       lines.push(`| 维度 | 操作 | 置信度 |`);
       lines.push(`|------|------|--------|`);
       for (const [k, v] of Object.entries(signals)) {
-        lines.push(`| ${labelMap[k] || k} | ${v.action} | ${Math.round(v.confidence)}% |`);
+        const tier = SIGNAL_KEY_TO_TIER[k as keyof typeof SIGNAL_KEY_TO_TIER];
+        lines.push(
+          `| ${(tier ? HORIZON_TIER_CN[tier] : undefined) || k} | ${v.action} | ${Math.round(v.confidence)}% |`,
+        );
       }
       lines.push("");
     }
@@ -228,11 +241,28 @@ export function buildMarkdownReport(data: ExportData): string {
   }
   lines.push(sep);
 
-  // ── 4. 辩论记录 ──
+  // ── 4. 辩论记录（v161+ 四档各一份；历史记录只有一份、无档位）──
   if (data.debateRounds.length > 0) {
-    h(2, `⚖️ 多空辩论（共 ${data.debateRounds.length} 轮）\n`);
-    for (const round of data.debateRounds) {
-      h(3, `第 ${round.round} 轮`);
+    const sorted = [...data.debateRounds].sort(compareDebateRounds);
+    const tiered = sorted.some((r) => r.tier !== null);
+    const tierCount = new Set(sorted.map((r) => r.tier ?? "legacy")).size;
+    h(
+      2,
+      tiered
+        ? `⚖️ 多空辩论（${tierCount} 档 / ${sorted.length} 条）\n`
+        : `⚖️ 多空辩论（共 ${sorted.length} 轮）\n`,
+    );
+    let lastTier: string | null | undefined;
+    for (const round of sorted) {
+      if (tiered) {
+        if (round.tier !== lastTier) {
+          h(3, round.tier ? HORIZON_TIER_CN[round.tier] ?? round.tier : "历史单份");
+          lastTier = round.tier;
+        }
+        h(4, `第 ${round.round} 轮`);
+      } else {
+        h(3, `第 ${round.round} 轮`);
+      }
       if (round.bull) {
         lines.push(`**多方（看涨）**：\n\n${truncateLong(extractSummary(round.bull), 1500)}\n`);
       }
@@ -330,7 +360,13 @@ export function buildMarkdownReport(data: ExportData): string {
       missingAnalystIds.length > 0 ? ` / 缺失 ${missingAnalystIds.length} 份（${missingAnalystIds.join("、")}）` : ""
     }`,
   );
-  lines.push(`- **辩论轮次**：${data.debateRounds.length}`);
+  const debateTierCount = new Set(data.debateRounds.map((r) => r.tier ?? "legacy")).size;
+  const debateTiered = data.debateRounds.some((r) => r.tier !== null);
+  lines.push(
+    `- **辩论记录**：${
+      debateTiered ? `${debateTierCount} 档 / ${data.debateRounds.length} 条` : `${data.debateRounds.length} 轮`
+    }`,
+  );
   lines.push(`- **风险评估项**：${Object.keys(data.riskAssessments).length}`);
   lines.push(`- **估值分析项**：${valKeys.length}`);
   lines.push(`- **规则校验项**：${ruleKeys.length}`);

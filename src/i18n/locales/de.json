@@ -7512,6 +7512,7 @@
     },
     "source": {
       "scheduledCron": "Geplante Aufgaben",
+      "stockAnalysis": "Einzelaktien-Analyse",
       "stockPipeline": "Aktienanalyse-Pipeline",
       "timeTravelBatch": "Zeitreise-Batch",
       "moverRecallAnalysis": "Rally-Lücken-Nachanalyse"
@@ -7541,7 +7542,8 @@
       "schedule": "Geplant",
       "manual": "Manuell",
       "system": "System",
-      "external": "Extern"
+      "external": "Extern",
+      "unknown": "Unbekannt"
     },
     "health": {
       "running": "Läuft",
@@ -15541,8 +15543,8 @@
     "actionConfidenceBasisLabel": "Aktionsbasis",
     "valuationConflictRichNonbearish": "⚠️ Konflikt der Bewertungsbasis: Die algorithmische Bewertung lautet \"{{valuationAction}}\", die {{horizon}}-Entscheidungsrichtung ist jedoch \"{{decisionAction}}\" – Kurzfrist liest Richtung, Langfrist liest Wert; bitte mit der Bewertungsspanne abwägen",
     "valuationConflictCheapBearish": "⚠️ Konflikt der Bewertungsbasis: Die algorithmische Bewertung lautet \"{{valuationAction}}\" (langfristig bullisch), die {{horizon}}-Entscheidungsrichtung ist jedoch \"{{decisionAction}}\"; bitte mit der Bewertungsspanne abwägen",
-    "horizonScopeAnalyst": "Analystenberichte: je Horizont aufgefächert — jeder Horizont führt die für ihn zuständige Analysten-Teilmenge aus (Horizonte und Teilmengen aus der maßgeblichen Matrix abgeleitet) und gibt sein VERDICT nach dem Vertrag dieses Horizonts aus; geteilt bleibt weiterhin nur die Debatte.",
-    "horizonScopeDebate": "Debatte: In diesem Durchlauf gibt es nur eine übergreifende Debatte; die vier Horizonte teilen dieselbe Debatte.",
+    "horizonScopeAnalyst": "Analystenberichte: je Horizont aufgefächert — jeder Horizont führt die für ihn zuständige Analysten-Teilmenge aus (Horizonte und Teilmengen aus der maßgeblichen Matrix abgeleitet) und gibt sein VERDICT nach dem Vertrag dieses Horizonts aus",
+    "horizonScopeDebate": "Debatte: Jeder Horizont führt seine eigene Bull-/Bären-Debatte (bull/bear); in dieser Karte lässt sich der Horizont wechseln.",
     "horizonScopeRisk": "Risikoklassifizierung: jetzt nach Horizont. Jede Stufe wird anhand der Rückzugstiefe ihres eigenen Haltefensters bewertet (ultrakurz 2 / kurz 5 / mittel 28 / lang 90 Handelstage); Volatilität, Sharpe-Ratio und die vier Fundamentaldaten bleiben 60-Tage-Gesamtwerte. Seit v129 nutzen auch f4-Risikobeleg, Risikoneigung, Positions-Obergrenze und Risiko-Veto der Hauptkette die Einstufung des gewählten Horizonts (nur Verschärfung).",
     "llmHorizonOverview": "LLM-Entscheidungen je Horizont",
     "llmHorizonNotGiven": "Für diesen Horizont liegt keine LLM-Entscheidung vor",
@@ -16001,7 +16003,7 @@
       "partialFailed": "Teilweise fehlgeschlagen",
       "positionPct": "Position",
       "riskAggregation": "Risikoaggregation",
-      "riskAggressive": "Aggressive Risk Assessment",
+      "riskAggressive": "Aggressive Risikobewertung",
       "riskClassification": "Risk Classification",
       "auxNodes": "Hilfsknoten",
       "riskConservative": "Konservative Risikobewertung",
@@ -16608,7 +16610,9 @@
       "verdictOnlyLabel": "Der Debattenteilnehmer hat nur eine Schlussfolgerung ohne detaillierte Analyse geliefert.",
       "title": "Debate Summary",
       "loading": "Debattenanalyse läuft...",
-      "evidence": "Belege"
+      "evidence": "Belege",
+      "tierNoOutput": "Für {{tier}} liegt in dieser Runde keine Debattenausgabe vor (Knoten nicht abgeschlossen oder leer).",
+      "roundHeading": "Runde {{round}}"
     },
     "decision": {
       "action": "Handlungsempfehlung",
@@ -17729,7 +17733,8 @@
       "neutral": "Neutral",
       "moat": "Moat",
       "idealBuy": "Ideal buy",
-      "rounds": " rounds"
+      "rounds": " rounds",
+      "tiers": " Horizonte"
     },
     "whatIf": {
       "valuationParams": "Valuation Params",
@@ -17754,7 +17759,41 @@
       "itemScore": "{{label}}（{{score}} / 100）",
       "overview": "Übersicht der Risikobewertung",
       "scoreLabel": "Risikobewertung",
-      "loading": "Risikobewertung läuft..."
+      "loading": "Risikobewertung läuft...",
+      "verdictStance": "Haltung",
+      "verdictPosition": "Empfohlene Position",
+      "verdictConfidence": "Konfidenz",
+      "noVote": "Keine Ausgabe dieser Sicht",
+      "convergenceTitle": "Konvergenz der drei Sichten",
+      "viewsTitle": "Bewertung der drei Sichten",
+      "riskLevelTitle": "Regelbasierte Risikoklasse",
+      "matchedRules": "Erfüllte Regeln",
+      "axisGaps": "Datenumfang",
+      "metricsTitle": "Kennzahlen",
+      "researchManagerTitle": "Zusammenfassung des Research-Managers",
+      "otherAssessments": "Weitere Risikoausgaben",
+      "expand": "Ausklappen",
+      "collapse": "Einklappen",
+      "degraded": "Degradiert",
+      "axisAbsent": "Fehlend",
+      "noRiskLevel": "Regelbasierte Risikoklasse nicht erzeugt",
+      "noConvergence": "Konvergenz der drei Sichten nicht erzeugt",
+      "noResearchManager": "Zusammenfassung des Research-Managers nicht erzeugt",
+      "axisDrawdownDepth": "Drawdown-Tiefe",
+      "axisFundamentals": "Fundamentaldaten",
+      "axisSharpe": "Sharpe",
+      "axisVolatility": "Volatilität",
+      "axisValueLatestReport": "Neuester Bericht",
+      "axisValueGlobal60": "60-Tage-global",
+      "metricVolatility": "Annualisierte Volatilität",
+      "metricSharpe": "Sharpe-Ratio",
+      "metricMaxDrawdown": "Max. Drawdown",
+      "metricDrawdownDepth": "Drawdown-Tiefe",
+      "metricDebtRatio": "Verschuldungsgrad",
+      "metricGrossMargin": "Bruttomarge",
+      "metricRevenueGrowth": "Umsatzwachstum YoY",
+      "metricRoe": "ROE (TTM)",
+      "metricWindowDays": "Fenstertage"
     },
     "quantSim": {
       "title": "Strategiesimulation",

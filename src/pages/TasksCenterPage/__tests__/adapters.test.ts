@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { PipelineRun, ScheduledTask, TimeTravelBatchSummary } from "@/types";
+import type {
+  AnalysisSummary,
+  MoverRecallBatchState,
+  PipelineRun,
+  ScheduledTask,
+  TimeTravelBatchSummary,
+} from "@/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cronAdapter, mapExecutionRecord, mapLastRun } from "../adapters/cron.adapter";
+import { cronAdapter, mapExecutionRecord, mapLastRun, mapRunningTask } from "../adapters/cron.adapter";
+import { mapBatchSummary as mapMoverBatchSummary } from "../adapters/moverRecallAnalysis.adapter";
 import { mapPipelineRun } from "../adapters/pipeline.adapter";
 import { aggregateRuns } from "../adapters/registry";
+import { mapStockAnalysisRun, stockAnalysisAdapter } from "../adapters/stockAnalysis.adapter";
 import { mapBatchSummary } from "../adapters/timeTravel.adapter";
 import { isNextRunStale } from "../model";
 
@@ -49,6 +57,22 @@ function makeTask(over: Partial<ScheduledTask>): ScheduledTask {
 beforeEach(() => invokeMock.mockReset());
 
 describe("cron.mapLastRun", () => {
+  it("lastTrigger 如实映射；缺失（旧记录）→ unknown", () => {
+    expect(mapLastRun(makeTask({ lastTrigger: "manual" })).trigger).toBe("manual");
+    expect(mapLastRun(makeTask({ lastTrigger: "schedule" })).trigger).toBe("schedule");
+    expect(mapLastRun(makeTask({})).trigger).toBe("unknown");
+  });
+
+  it("runningSince → running 行（不再只看 lastResult）", () => {
+    const run = mapRunningTask(
+      makeTask({ runningSince: 1_700_000_000_000, runningTrigger: "manual" }),
+    );
+    expect(run.state).toBe("running");
+    expect(run.startedAt).toBe(1_700_000_000_000);
+    expect(run.trigger).toBe("manual");
+    expect(run.finishedAt).toBeUndefined();
+  });
+
   it("成功映射 succeeded + 耗时回推开始时间", () => {
     const run = mapLastRun(makeTask({}));
     expect(run.state).toBe("succeeded");
@@ -146,13 +170,22 @@ describe("cron.mapExecutionRecord（兜底轮区分）", () => {
     expect(run.trigger).toBe("system");
   });
 
-  it("档期触发记录保持 trigger=schedule", () => {
+  it("历史行自带 trigger=schedule → schedule", () => {
+    const run = mapExecutionRecord(
+      "t1",
+      rec({ output: "候选池扫描完成: 3 只入队", trigger: "schedule" }),
+      makeTask({}),
+    );
+    expect(run.trigger).toBe("schedule");
+  });
+
+  it("旧行缺 trigger → unknown（不再一律猜成定时）", () => {
     const run = mapExecutionRecord(
       "t1",
       rec({ output: "候选池扫描完成: 3 只入队" }),
       makeTask({}),
     );
-    expect(run.trigger).toBe("schedule");
+    expect(run.trigger).toBe("unknown");
   });
 });
 
@@ -279,6 +312,97 @@ describe("pipeline.mapPipelineRun", () => {
     expect(run.state).toBe("failed");
     expect(run.error?.message).toBe("炸了");
   });
+
+  it("interrupted → canceled + interrupted badge（进程退出遗留行）", () => {
+    const run = mapPipelineRun({
+      ...base,
+      status: "interrupted",
+      errorMessage: "应用重启：管道运行中进程退出",
+    });
+    expect(run.state).toBe("canceled");
+    expect(run.badges).toEqual(["interrupted"]);
+    expect(run.error?.message).toContain("应用重启");
+  });
+
+  it("未知状态不再默认成 running", () => {
+    const run = mapPipelineRun({ ...base, status: "weird" });
+    expect(run.state).toBe("failed");
+  });
+});
+
+describe("stockAnalysis.mapStockAnalysisRun", () => {
+  const base: AnalysisSummary = {
+    id: "a1",
+    stockCode: "300308",
+    stockName: "中际旭创",
+    analysisDate: "2026-10-21",
+    status: "running",
+    decisionAction: null,
+    decisionPositionPct: null,
+    decisionPositionState: null,
+    decisionJson: null,
+    createdAt: 1_000,
+    updatedAt: 1_000,
+    completedAt: null,
+    analysisKind: "live",
+    asOfDate: null,
+    parentAnalysisId: null,
+    templateId: "stock-analysis",
+  };
+
+  it("running：有开始时间、无结束时刻", () => {
+    const run = mapStockAnalysisRun(base);
+    expect(run.state).toBe("running");
+    expect(run.source).toBe("stock-analysis");
+    expect(run.startedAt).toBe(1_000);
+    expect(run.finishedAt).toBeUndefined();
+    expect(run.durationMs).toBeUndefined();
+    expect(run.deepLink).toBe("/stock-analysis/a1");
+  });
+
+  it("completed：用 completedAt 作为结束时刻", () => {
+    const run = mapStockAnalysisRun({
+      ...base,
+      status: "completed",
+      updatedAt: 4_000,
+      completedAt: 4_000,
+    });
+    expect(run.state).toBe("succeeded");
+    expect(run.durationMs).toBe(3_000);
+  });
+
+  it("completed 但 completedAt 为空：不拿 updatedAt 冒充完成时刻", () => {
+    // 现网 65% 的 completed 行 updated_at 被后续写库顶掉（可达数天）；
+    // 没有 completedAt 时必须显示「-」，不能把编辑时刻算成耗时。
+    const run = mapStockAnalysisRun({
+      ...base,
+      status: "completed",
+      updatedAt: 9_999_999,
+      completedAt: null,
+    });
+    expect(run.finishedAt).toBeUndefined();
+    expect(run.durationMs).toBeUndefined();
+  });
+
+  it("interrupted：已取消 + 徽章，但不拿回收时刻伪造耗时", () => {
+    const run = mapStockAnalysisRun({ ...base, status: "interrupted", updatedAt: 9_999_999 });
+    expect(run.state).toBe("canceled");
+    expect(run.badges).toEqual(["interrupted"]);
+    expect(run.durationMs).toBeUndefined();
+  });
+
+  it("未知状态不默认成 running", () => {
+    expect(mapStockAnalysisRun({ ...base, status: "weird" }).state).toBe("failed");
+  });
+
+  it("list 只取根记录（replay 子行由 time-travel-batch 代表）", async () => {
+    invokeMock.mockResolvedValue([
+      { ...base, id: "root" },
+      { ...base, id: "child", parentAnalysisId: "root", analysisKind: "replay" },
+    ]);
+    const rows = await stockAnalysisAdapter.list();
+    expect(rows.map((r) => r.nativeId)).toEqual(["root"]);
+  });
 });
 
 describe("timeTravel.mapBatchSummary", () => {
@@ -339,6 +463,32 @@ describe("timeTravel.mapBatchSummary", () => {
     expect(run.state).toBe("failed");
     expect(run.error).toMatchObject({ code: "E1", message: "批次失败" });
     expect(run.durationMs).toBe(2000);
+  });
+});
+
+describe("moverRecall.mapBatchSummary", () => {
+  function batch(over: Partial<MoverRecallBatchState>): MoverRecallBatchState {
+    return {
+      batchId: "b1",
+      status: "running",
+      message: null,
+      total: 10,
+      ok: 4,
+      fail: 0,
+      items: [],
+      errorDetail: null,
+      createdAtMs: 1_000,
+      updatedAtMs: 1_000,
+      finishedAtMs: null,
+      trigger: null,
+      ...over,
+    };
+  }
+
+  it("trigger 如实映射；旧批次缺失 → unknown", () => {
+    expect(mapMoverBatchSummary(batch({ trigger: "schedule" })).trigger).toBe("schedule");
+    expect(mapMoverBatchSummary(batch({ trigger: "manual" })).trigger).toBe("manual");
+    expect(mapMoverBatchSummary(batch({})).trigger).toBe("unknown");
   });
 });
 

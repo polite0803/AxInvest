@@ -11,21 +11,44 @@
 
 use axagent_agent_macro::agent_command;
 use axagent_harness::IpcEventName;
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock};
 
 use axagent_entities::stock_pipeline_runs;
 use axagent_harness::workflow_types::{Variable, WorkflowEdge, WorkflowNode};
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
+    sea_query::Expr,
 };
 use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
+use tokio::sync::Mutex;
 
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::stock_workflow as wf_err;
+
+/// `stock_pipeline_runs.status` 的取值。
+const STATUS_RUNNING: &str = "running";
+const STATUS_COMPLETED: &str = "completed";
+const STATUS_FAILED: &str = "failed";
+const STATUS_INTERRUPTED: &str = "interrupted";
+
+/// 遗留 running 行的收敛说明：写进 `error_message`，列表行与详情抽屉都会显示。
+const INTERRUPTED_MESSAGE: &str =
+    "应用重启：管道运行中进程退出，本次运行无法跨进程续跑（已按中断收敛，结果未写入）";
+
+/// 本进程内正在执行的管道 run id。
+///
+/// 收敛判据是「库里 running 且**不在**这里」，不是时间阈值 —— 管道跑几小时也正常，
+/// 按时间判会把活着的运行误杀；进程内登记才是精确真值。
+static ACTIVE_RUNS: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// 遗留 running 行每进程只收敛一次。失败不置位（下次读取再试）。
+static STALE_REAP_DONE: AtomicBool = AtomicBool::new(false);
 
 /// 管道执行结果
 #[derive(Debug, Clone, Serialize)]
@@ -139,6 +162,56 @@ pub struct PipelineStepInfo {
     pub status: String,
 }
 
+/// 把「库里 running 且不在 `active` 中」的行收敛为 interrupted。
+/// 返回实际收敛行数（幂等：再跑一次命中 0）。
+async fn reap_running_runs(
+    db: &sea_orm::DatabaseConnection,
+    active: &HashSet<String>,
+) -> Result<usize, DbErr> {
+    let rows = stock_pipeline_runs::Entity::find()
+        .filter(stock_pipeline_runs::Column::Status.eq(STATUS_RUNNING))
+        .all(db)
+        .await?;
+    let mut reaped = 0usize;
+    for row in rows {
+        if active.contains(&row.id) {
+            continue;
+        }
+        let res = stock_pipeline_runs::Entity::update_many()
+            .col_expr(stock_pipeline_runs::Column::Status, Expr::value(STATUS_INTERRUPTED))
+            .col_expr(stock_pipeline_runs::Column::ErrorMessage, Expr::value(INTERRUPTED_MESSAGE))
+            // 不写 completed_at：真实结束时刻未知，写收敛时刻会伪造一个「耗时数周」的读数
+            .filter(stock_pipeline_runs::Column::Id.eq(row.id.clone()))
+            .filter(stock_pipeline_runs::Column::Status.eq(STATUS_RUNNING))
+            .exec(db)
+            .await?;
+        if res.rows_affected > 0 {
+            reaped += 1;
+        }
+    }
+    Ok(reaped)
+}
+
+/// 每进程一次：收敛上次进程退出遗留的 running 行。
+async fn ensure_stale_reaped(db: &sea_orm::DatabaseConnection) {
+    if STALE_REAP_DONE.load(Ordering::SeqCst) {
+        return;
+    }
+    let active = ACTIVE_RUNS.lock().await.clone();
+    match reap_running_runs(db, &active).await {
+        Ok(0) => {},
+        Ok(n) => {
+            tracing::info!("[stock_pipeline] 启动收敛：{n} 个遗留 running 运行标记为 interrupted")
+        },
+        Err(e) => {
+            // 不置位：下次读列表/发起运行再试（一次性标志位不能把失败也吃掉）
+            tracing::warn!("[stock_pipeline] 遗留 running 行收敛失败: {e}");
+            return;
+        },
+    }
+    STALE_REAP_DONE.store(true, Ordering::SeqCst);
+}
+
 /// 管道执行内部函数（供 Tauri 命令调用）
 ///
 /// 使用 WorkEngine 加载工作流模板并执行，与股票分析工作流保持一致。
@@ -154,13 +227,22 @@ pub async fn run_stock_pipeline_inner(
     let run_id = uuid::Uuid::new_v4().to_string();
     let run_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let started_at = chrono::Utc::now().timestamp_millis();
+    // 执行体暂不直接用 client（模板里的取数走节点自己的通道），保留参数以稳定调用契约。
+    let _ = client;
+
+    // 上次进程退出遗留的 running 行先收敛（本进程存活的 run 由 ACTIVE_RUNS 保护）。
+    ensure_stale_reaped(db).await;
+
+    // 先登记活跃再落库：反过来的话，落库与登记之间若正好有列表查询触发收敛，
+    // 这条刚插入的 running 行会被当成遗留行误杀。
+    ACTIVE_RUNS.lock().await.insert(run_id.clone());
 
     // 创建 pipeline_run 记录（status=running）
-    let _ = stock_pipeline_runs::ActiveModel {
+    let insert_result = stock_pipeline_runs::ActiveModel {
         id: Set(run_id.clone()),
         run_date: Set(run_date.clone()),
         as_of_date: Set(as_of_date.map(String::from)),
-        status: Set("running".to_string()),
+        status: Set(STATUS_RUNNING.to_string()),
         candidates_json: Set(None),
         new_analyses_json: Set(None),
         reassessed_json: Set(None),
@@ -172,7 +254,51 @@ pub async fn run_stock_pipeline_inner(
     }
     .insert(db)
     .await;
+    if let Err(e) = insert_result {
+        // 不阻断分析本身，但必须留痕：落库失败时这次运行不进历史列表，
+        // 静默吞掉会让「刚跑完却看不到」无从排查。
+        tracing::warn!("[stock_pipeline] 运行记录 {run_id} 落库失败（本次运行将不进历史）: {e}");
+    }
 
+    // 模板加载 / 建图 / 执行：任何一步提前返回（`?`）也必须在下面写终态，
+    // 否则该行会永远停在 running（2026-08-26 两条僵尸行的成因）。
+    let outcome =
+        execute_pipeline(db, engine, config, as_of_date, &run_id, &run_date, progress_callback)
+            .await;
+
+    let completed_at = chrono::Utc::now().timestamp_millis();
+    match &outcome {
+        Ok(pr) => update_pipeline_run_success(db, &run_id, pr, completed_at).await,
+        Err(e) => {
+            if let Err(db_err) = stock_pipeline_runs::Entity::update_many()
+                .col_expr(stock_pipeline_runs::Column::Status, Expr::value(STATUS_FAILED))
+                .col_expr(stock_pipeline_runs::Column::ErrorMessage, Expr::value(e.clone()))
+                .col_expr(stock_pipeline_runs::Column::CompletedAt, Expr::value(completed_at))
+                .filter(stock_pipeline_runs::Column::Id.eq(run_id.clone()))
+                .exec(db)
+                .await
+            {
+                tracing::warn!("[stock_pipeline] 运行记录 {run_id} 失败态回写失败: {db_err}");
+            }
+        },
+    }
+    ACTIVE_RUNS.lock().await.remove(&run_id);
+
+    outcome
+}
+
+/// 执行体：模板加载 → 建图 → 跑工作流 → 从 results 取摘要。
+/// **不写运行记录**：起点与终态都由 [`run_stock_pipeline_inner`] 统一收口，
+/// 这样 `?` 提前返回也不会漏掉终态。
+async fn execute_pipeline(
+    db: &sea_orm::DatabaseConnection,
+    engine: &Arc<axagent_rt_workflow::work_engine::WorkEngine>,
+    config: &PipelineConfig,
+    as_of_date: Option<&str>,
+    run_id: &str,
+    run_date: &str,
+    progress_callback: Option<Arc<dyn Fn(&str, PipelineStepInfo) + Send + Sync>>,
+) -> Result<PipelineResult, String> {
     // 加载工作流模板
     let loaded = load_pipeline_template(db).await?;
 
@@ -193,7 +319,7 @@ pub async fn run_stock_pipeline_inner(
     // （D8 同族：同一参数在不同路径上取不同来源）。详见
     // `AUDIT-300642-run-variance-2026-09-22.md` §13。
     let mut variables = loaded.variables.clone().unwrap_or_default();
-    for pv in build_pipeline_variables(config, as_of_date, &run_date, &run_id) {
+    for pv in build_pipeline_variables(config, as_of_date, run_date, run_id) {
         if let Some(pos) = variables.iter().position(|v| v.name == pv.name) {
             variables[pos] = pv;
         } else {
@@ -224,59 +350,13 @@ pub async fn run_stock_pipeline_inner(
     opts.output_schema = loaded.output_schema;
 
     // 执行工作流
-    let result = engine.run_workflow(&wf_id, opts).await;
-
-    // 更新 pipeline_run 记录（成功/失败都更新）
-    let completed_at = chrono::Utc::now().timestamp_millis();
-    let pipeline_result = match result {
-        Ok(ref wf) if wf.status == axagent_rt_workflow::workflow_engine::WorkflowStatus::Failed => {
-            let _ = stock_pipeline_runs::Entity::update_many()
-                .col_expr(
-                    stock_pipeline_runs::Column::Status,
-                    sea_orm::sea_query::Expr::value("failed"),
-                )
-                .col_expr(
-                    stock_pipeline_runs::Column::ErrorMessage,
-                    sea_orm::sea_query::Expr::value("工作流执行失败"),
-                )
-                .col_expr(
-                    stock_pipeline_runs::Column::CompletedAt,
-                    sea_orm::sea_query::Expr::value(completed_at),
-                )
-                .filter(stock_pipeline_runs::Column::Id.eq(run_id.clone()))
-                .exec(db)
-                .await;
+    match engine.run_workflow(&wf_id, opts).await {
+        Ok(wf) if wf.status == axagent_rt_workflow::workflow_engine::WorkflowStatus::Failed => {
             Err("工作流执行失败".to_string())
         },
-        Ok(_wf) => {
-            // 从工作流结果构建 PipelineResult
-            let pr = build_pipeline_result_from_workflow(&_wf, &run_id, &run_date);
-            update_pipeline_run_success(db, &run_id, &pr, completed_at).await;
-            Ok(pr)
-        },
-        Err(e) => {
-            let _ = stock_pipeline_runs::Entity::update_many()
-                .col_expr(
-                    stock_pipeline_runs::Column::Status,
-                    sea_orm::sea_query::Expr::value("failed"),
-                )
-                .col_expr(
-                    stock_pipeline_runs::Column::ErrorMessage,
-                    sea_orm::sea_query::Expr::value(e.to_string()),
-                )
-                .col_expr(
-                    stock_pipeline_runs::Column::CompletedAt,
-                    sea_orm::sea_query::Expr::value(completed_at),
-                )
-                .filter(stock_pipeline_runs::Column::Id.eq(run_id.clone()))
-                .exec(db)
-                .await;
-            Err(e.to_string())
-        },
-    };
-
-    let _ = client; // client 保留供未来扩展
-    pipeline_result
+        Ok(wf) => Ok(build_pipeline_result_from_workflow(&wf, run_id, run_date)),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// 加载股票管道工作流模板
@@ -439,33 +519,26 @@ async fn update_pipeline_run_success(
     completed_at: i64,
 ) {
     let _ = stock_pipeline_runs::Entity::update_many()
-        .col_expr(stock_pipeline_runs::Column::Status, sea_orm::sea_query::Expr::value("completed"))
+        .col_expr(stock_pipeline_runs::Column::Status, Expr::value(STATUS_COMPLETED))
         .col_expr(
             stock_pipeline_runs::Column::CandidatesJson,
-            sea_orm::sea_query::Expr::value(
-                serde_json::to_string(&pr.candidates).unwrap_or_default(),
-            ),
+            Expr::value(serde_json::to_string(&pr.candidates).unwrap_or_default()),
         )
         .col_expr(
             stock_pipeline_runs::Column::NewAnalysesJson,
-            sea_orm::sea_query::Expr::value(
-                serde_json::to_string(&pr.new_analyses).unwrap_or_default(),
-            ),
+            Expr::value(serde_json::to_string(&pr.new_analyses).unwrap_or_default()),
         )
         .col_expr(
             stock_pipeline_runs::Column::ReassessedJson,
-            sea_orm::sea_query::Expr::value(
-                serde_json::to_string(&pr.reassessed).unwrap_or_default(),
-            ),
+            Expr::value(serde_json::to_string(&pr.reassessed).unwrap_or_default()),
         )
         .col_expr(
             stock_pipeline_runs::Column::SummaryJson,
-            sea_orm::sea_query::Expr::value(serde_json::to_string(&pr.summary).unwrap_or_default()),
+            Expr::value(serde_json::to_string(&pr.summary).unwrap_or_default()),
         )
-        .col_expr(
-            stock_pipeline_runs::Column::CompletedAt,
-            sea_orm::sea_query::Expr::value(completed_at),
-        )
+        // 成功态必须清掉错误列：否则被误判过一次中断的 run 会带着旧说明停在 completed
+        .col_expr(stock_pipeline_runs::Column::ErrorMessage, Expr::value(None::<String>))
+        .col_expr(stock_pipeline_runs::Column::CompletedAt, Expr::value(completed_at))
         .filter(stock_pipeline_runs::Column::Id.eq(run_id.to_string()))
         .exec(db)
         .await;
@@ -523,6 +596,10 @@ pub async fn get_pipeline_history(
     let db = state.harness.db();
     let limit = limit.unwrap_or(20);
 
+    // 读列表前先收敛遗留 running 行：否则进程退出过一次，任务中心就永久显示
+    // 「运行中」（2026-08-26 起四条僵尸行的实际形态）。
+    ensure_stale_reaped(db).await;
+
     let runs = stock_pipeline_runs::Entity::find()
         .order_by_desc(stock_pipeline_runs::Column::CreatedAt)
         .limit(limit)
@@ -557,6 +634,8 @@ pub async fn get_pipeline_run_detail(
     run_id: String,
 ) -> Result<serde_json::Value, String> {
     let db = state.harness.db();
+
+    ensure_stale_reaped(db).await;
 
     let run = stock_pipeline_runs::Entity::find_by_id(&run_id)
         .one(db)
@@ -738,5 +817,51 @@ mod tests {
         let (new_c, reassess_c, _) = cfg.resolve_concurrency_with_vendor_health(&health);
         assert_eq!(new_c, 1, "base=1, ratio=0.25 < 0.3 应强制 1");
         assert_eq!(reassess_c, 1);
+    }
+
+    /// 遗留 running 行收敛（2026-08-26 四条僵尸行的回归）：
+    /// 只有「库里 running 且不在本进程活跃集」的行被改成 interrupted；
+    /// 终态行与活跃行不动；不伪造完成时刻；幂等。
+    #[tokio::test]
+    async fn stale_running_rows_converge_to_interrupted() {
+        let db = axagent_dao::db::create_test_pool().await.expect("测试库应创建成功").conn;
+        for (id, status) in
+            [("zombie", STATUS_RUNNING), ("alive", STATUS_RUNNING), ("done", STATUS_COMPLETED)]
+        {
+            stock_pipeline_runs::ActiveModel {
+                id: Set(id.to_string()),
+                run_date: Set("2026-08-26".to_string()),
+                as_of_date: Set(None),
+                status: Set(status.to_string()),
+                candidates_json: Set(None),
+                new_analyses_json: Set(None),
+                reassessed_json: Set(None),
+                summary_json: Set(None),
+                error_message: Set(None),
+                started_at: Set(1_000),
+                completed_at: Set(None),
+                created_at: Set(1_000),
+            }
+            .insert(&db)
+            .await
+            .expect("插入运行记录应成功");
+        }
+
+        let active: HashSet<String> = ["alive".to_string()].into_iter().collect();
+        assert_eq!(reap_running_runs(&db, &active).await.unwrap(), 1, "只收敛非活跃 running 行");
+
+        let zombie =
+            stock_pipeline_runs::Entity::find_by_id("zombie").one(&db).await.unwrap().unwrap();
+        assert_eq!(zombie.status, STATUS_INTERRUPTED);
+        assert!(zombie.error_message.as_deref().unwrap_or_default().contains("重启"));
+        assert!(zombie.completed_at.is_none(), "结束时刻未知时不得伪造耗时");
+
+        let alive =
+            stock_pipeline_runs::Entity::find_by_id("alive").one(&db).await.unwrap().unwrap();
+        assert_eq!(alive.status, STATUS_RUNNING, "本进程活跃行不得被误杀");
+        let done = stock_pipeline_runs::Entity::find_by_id("done").one(&db).await.unwrap().unwrap();
+        assert_eq!(done.status, STATUS_COMPLETED, "终态行不受影响");
+
+        assert_eq!(reap_running_runs(&db, &active).await.unwrap(), 0, "幂等");
     }
 }

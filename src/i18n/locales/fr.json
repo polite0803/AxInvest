@@ -7512,6 +7512,7 @@
     },
     "source": {
       "scheduledCron": "Tâches planifiées",
+      "stockAnalysis": "Analyse d'une action",
       "stockPipeline": "Pipeline d'analyse d'actions",
       "timeTravelBatch": "Lot Time-Travel",
       "moverRecallAnalysis": "Rattrapage des hausses manquées"
@@ -7541,7 +7542,8 @@
       "schedule": "Planifié",
       "manual": "Manuel",
       "system": "Système",
-      "external": "Externe"
+      "external": "Externe",
+      "unknown": "Inconnu"
     },
     "health": {
       "running": "En cours",
@@ -15541,8 +15543,8 @@
     "actionConfidenceBasisLabel": "Référentiel d'action",
     "valuationConflictRichNonbearish": "⚠️ Divergence de référentiel de valorisation : la valorisation algorithmique conclut « {{valuationAction}} », alors que la direction de décision {{horizon}} est « {{decisionAction}} » — le court terme lit la direction, le long terme lit la valeur ; à juger avec la fourchette de valorisation",
     "valuationConflictCheapBearish": "⚠️ Divergence de référentiel de valorisation : la valorisation algorithmique conclut « {{valuationAction}} » (haussier à long terme), alors que la direction de décision {{horizon}} est « {{decisionAction}} » ; à juger avec la fourchette de valorisation",
-    "horizonScopeAnalyst": "Rapports d'analystes : déclinés par horizon — chaque horizon exécute la sous-sélection d'analystes qui le concerne (horizons et sous-sélections dérivés de la matrice de référence) et émet son VERDICT selon le contrat de cet horizon ; seuls les débats restent partagés.",
-    "horizonScopeDebate": "Débat : une seule passe de débat croisé est exécutée ce cycle ; les quatre horizons partagent le même compte rendu.",
+    "horizonScopeAnalyst": "Rapports d'analystes : déclinés par horizon — chaque horizon exécute la sous-sélection d'analystes qui le concerne (horizons et sous-sélections dérivés de la matrice de référence) et émet son VERDICT selon le contrat de cet horizon",
+    "horizonScopeDebate": "Débat : chaque horizon exécute son propre débat haussier/baissier (bull/bear) ; changez d'horizon dans cette carte pour comparer.",
     "horizonScopeRisk": "Classification du risque : désormais par horizon. Chaque palier est noté selon la profondeur de repli de sa propre fenêtre de détention (ultra-court 2 / court 5 / moyen 28 / long 90 jours de bourse) ; la volatilité, le ratio de Sharpe et les quatre fondamentaux restent des valeurs globales sur 60 jours. Depuis la v129, la preuve de risque f4, le biais de risque, le plafond de position et le véto de risque de la chaîne principale suivent eux aussi la note de l'horizon retenu (durcissement uniquement).",
     "llmHorizonOverview": "Décisions LLM par horizon",
     "llmHorizonNotGiven": "Le LLM n'a donné aucune décision pour cet horizon",
@@ -16001,7 +16003,7 @@
       "partialFailed": "Échec partiel",
       "positionPct": "Position",
       "riskAggregation": "Agrégation des risques",
-      "riskAggressive": "Aggressive Risk Assessment",
+      "riskAggressive": "Évaluation du risque agressif",
       "riskClassification": "Risk Classification",
       "auxNodes": "Nœuds auxiliaires",
       "riskConservative": "Évaluation du risque prudent",
@@ -16608,7 +16610,9 @@
       "verdictOnlyLabel": "Ce débatteur n'a fourni qu'une conclusion, sans analyse détaillée.",
       "title": "Debate Summary",
       "loading": "Analyse contradictoire en cours...",
-      "evidence": "Preuves"
+      "evidence": "Preuves",
+      "tierNoOutput": "Aucune sortie de débat pour {{tier}} cette passe (nœud non terminé ou sortie vide).",
+      "roundHeading": "Tour {{round}}"
     },
     "decision": {
       "action": "Recommandation d'action",
@@ -17729,7 +17733,8 @@
       "neutral": "Neutral",
       "moat": "Moat",
       "idealBuy": "Ideal buy",
-      "rounds": " rounds"
+      "rounds": " rounds",
+      "tiers": " horizons"
     },
     "whatIf": {
       "valuationParams": "Valuation Params",
@@ -17754,7 +17759,41 @@
       "itemScore": "{{label}}（{{score}} / 100）",
       "overview": "Aperçu du score de risque",
       "scoreLabel": "Score de risque",
-      "loading": "Évaluation des risques en cours..."
+      "loading": "Évaluation des risques en cours...",
+      "verdictStance": "Orientation",
+      "verdictPosition": "Position suggérée",
+      "verdictConfidence": "Confiance",
+      "noVote": "Aucune sortie pour cette vue",
+      "convergenceTitle": "Convergence des trois vues",
+      "viewsTitle": "Évaluation des trois vues",
+      "riskLevelTitle": "Niveau de risque par règles",
+      "matchedRules": "Règles déclenchées",
+      "axisGaps": "Périmètre des données",
+      "metricsTitle": "Indicateurs clés",
+      "researchManagerTitle": "Synthèse du responsable de recherche",
+      "otherAssessments": "Autres sorties de risque",
+      "expand": "Développer",
+      "collapse": "Réduire",
+      "degraded": "Dégradé",
+      "axisAbsent": "Absent",
+      "noRiskLevel": "Niveau de risque par règles non produit",
+      "noConvergence": "Convergence des trois vues non produite",
+      "noResearchManager": "Synthèse du responsable de recherche non produite",
+      "axisDrawdownDepth": "Profondeur de drawdown",
+      "axisFundamentals": "Fondamentaux",
+      "axisSharpe": "Sharpe",
+      "axisVolatility": "Volatilité",
+      "axisValueLatestReport": "Dernier rapport",
+      "axisValueGlobal60": "Global 60 jours",
+      "metricVolatility": "Volatilité annualisée",
+      "metricSharpe": "Ratio de Sharpe",
+      "metricMaxDrawdown": "Drawdown maximal",
+      "metricDrawdownDepth": "Profondeur de drawdown",
+      "metricDebtRatio": "Ratio d'endettement",
+      "metricGrossMargin": "Marge brute",
+      "metricRevenueGrowth": "Croissance du chiffre d'affaires YoY",
+      "metricRoe": "ROE (TTM)",
+      "metricWindowDays": "Jours de fenêtre"
     },
     "quantSim": {
       "title": "Simulation de stratégie",

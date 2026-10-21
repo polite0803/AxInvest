@@ -49,6 +49,9 @@ pub struct CronHistoryRecord {
     /// 必须与 `success` 一起落库：超墙钟收尾时 `success` 记 false，缺了本字段
     /// 历史行就无法把「没跑完规划量」与「真故障」分开（旧记录读出来缺省 false）。
     pub partial: bool,
+    /// 触发来源：`manual` / `schedule` / `system`。
+    /// `None` = 本列引入前的旧行（未知），**不得**猜成某一类。
+    pub trigger: Option<String>,
 }
 
 /// 定时任务的持久化端口。

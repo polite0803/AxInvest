@@ -123,11 +123,12 @@ beforeEach(() => invokeMock.mockReset());
 
 describe("不适用原因码 → 文案键（纯映射，不走渲染）", () => {
   it("每个码有专属文案，未知码走兜底而不是猜原因", () => {
-    // 后端现役四个码（`evidence_audit.rs` 的 UpstreamState::NotChecked）
+    // 后端现役五个码（`evidence_audit.rs` 的 UpstreamState::NotChecked）
     expect(notCheckedReasonKey("TIER_SCORE_NOT_IN_SNAPSHOT")).toBe("tierScoreNotInSnapshot");
     expect(notCheckedReasonKey("NO_CHANNEL_MAPPING")).toBe("noChannelMapping");
     expect(notCheckedReasonKey("NO_OWNER")).toBe("noOwner");
     expect(notCheckedReasonKey("UNREGISTERED_FACTOR")).toBe("unregisteredFactor");
+    expect(notCheckedReasonKey("INJECTED_VAR_HAS_NO_KEY_TABLE")).toBe("injectedVarNoKeyTable");
     // 负控：退役码与编造码都必须落到兜底，不许复用某一具体原因（那会把未知说成已知）
     expect(notCheckedReasonKey("NO_SNAPSHOT_KEY")).toBe("unknownReason");
     expect(notCheckedReasonKey("")).toBe("unknownReason");
@@ -292,6 +293,29 @@ describe("判据分档：同源副本 / 覆盖率 / 应参与未计入（2026-10
     const full: Closure = { ...low, unverifiedWeightRatio: 0 };
     expect(closureCoverage(full)).toBe(1);
 
+    // 后端真实 IPC 形状（camelCase 键）⇒ 17%，不是 NaN%。
+    const ipc = {
+      state: "closed",
+      recomputed: 0.0839,
+      stored: 0.08,
+      tolerance: 0.0057,
+      unverifiedWeightRatio: 0.83,
+    } as const;
+    expect(closureLabel(ipc, tk)).toContain("17%");
+
+    // 负控：字段名错配（snake_case / 旧后端）时不得把 `1 - undefined` 渲染成 NaN%，
+    // 只能退成「只报闭合、不报覆盖率」。
+    const snake = {
+      state: "closed",
+      recomputed: 0.0839,
+      stored: 0.08,
+      tolerance: 0.0057,
+      unverified_weight_ratio: 0.83,
+    } as unknown as Closure;
+    const brokenLabel = closureLabel(snake, tk);
+    expect(brokenLabel).not.toContain("NaN");
+    expect(brokenLabel).not.toContain("closure.coverage");
+
     expect(closureCoverage({ state: "broken", recomputed: 0, stored: 0, tolerance: 0 })).toBeNull();
     expect(closureLabel({ state: "notComputable", reason: "NO_WEIGHT_SUM_OR_FACTORS" }, tk)).toBe(
       "stockAnalysis.evidenceCitation.closure.notComputable",
@@ -338,6 +362,105 @@ describe("判据分档：同源副本 / 覆盖率 / 应参与未计入（2026-10
     render(<EvidenceCitationPanel analysisId="a-7" />);
     expect(await screen.findByText("stockAnalysis.evidenceCitation.expectedButIdle")).toBeTruthy();
     expect(screen.getAllByText("stockAnalysis.evidenceCitation.expectedButIdle").length).toBe(1);
+  });
+});
+
+describe("裁决置零与真实 IPC 形状（2026-10-21）", () => {
+  it("icZeroed 的腿显示置零标，且不得再挂「未交代缺席」", async () => {
+    invokeMock.mockResolvedValue({
+      ...BASE,
+      branchLegs: [
+        leg({
+          factor: "trendStrength",
+          ownerName: "技术面分析师",
+          weight: 0,
+          participates: false,
+          expectedToParticipate: true,
+          absenceDeclared: false,
+          icStatus: "ci_spans_zero",
+          icZeroed: true,
+          upstream: { state: "present" },
+        }),
+        // 对照：同样未参与、无缺席声明，但没有被置零 ⇒ 仍须报「未交代」
+        leg({
+          factor: "flowPersistence",
+          ownerName: "热钱追踪",
+          weight: 0,
+          participates: false,
+          expectedToParticipate: true,
+          absenceDeclared: false,
+          icStatus: "insufficient_sample",
+          icZeroed: false,
+          upstream: { state: "present" },
+        }),
+      ],
+      factorLegs: FACTOR_LEGS,
+    });
+    render(<EvidenceCitationPanel analysisId="a-8" />);
+
+    expect(await screen.findByText("stockAnalysis.evidenceCitation.icZeroed")).toBeTruthy();
+    expect(screen.getAllByText("stockAnalysis.evidenceCitation.absenceUndeclared").length).toBe(1);
+    expect(screen.getAllByText("stockAnalysis.evidenceCitation.expectedButIdle").length).toBe(1);
+  });
+
+  it("按后端真实 IPC 形状解析：camelCase 覆盖率与 icZeroed 都能消费", async () => {
+    // 这段 JSON 逐键对应后端 serde 输出（`Closure` 的字段名必须 camelCase，
+    // 否则 `1 - undefined` 会渲染成 NaN%）。
+    const ipc = JSON.parse(`{
+      "stockCode": "688498",
+      "stockName": "测试",
+      "analysisDate": "2026-10-21",
+      "decisionAction": "持有",
+      "decisionConfidence": 51.7,
+      "decisionDegraded": false,
+      "tier": "mid",
+      "branchLegs": [{
+        "factor": "flowPersistence",
+        "owner": "a-hot-money",
+        "ownerName": "热钱追踪",
+        "role": "direction",
+        "signal": 0.3,
+        "weight": 0,
+        "participates": false,
+        "expectedToParticipate": true,
+        "upstream": { "state": "present" },
+        "absenceDeclared": false,
+        "icStatus": "ci_spans_zero",
+        "icZeroed": true
+      }],
+      "factorLegs": [{
+        "legId": "f1",
+        "name": "trend",
+        "sigma": -0.14,
+        "weight": 0.15,
+        "owner": "a-market-analyst",
+        "participates": true,
+        "reconcile": { "state": "noBasis", "reason": "NO_PERSISTED_BASIS" }
+      }],
+      "closure": {
+        "state": "closed",
+        "recomputed": 0.0839,
+        "stored": -0.08,
+        "tolerance": 0.0057,
+        "unverifiedWeightRatio": 0.83
+      },
+      "expectedBranchLegs": 5,
+      "participatingBranchLegs": 1,
+      "upstreamPresentLegs": 4,
+      "upstreamNotCheckedLegs": 1,
+      "sigmaReconciledLegs": 1,
+      "participatingFactorLegs": 7,
+      "factorLegsTotal": 12
+    }`);
+    invokeMock.mockResolvedValue(ipc);
+    render(<EvidenceCitationPanel analysisId="a-9" />);
+
+    expect(
+      await screen.findByText(/evidenceCitation\.closure\.closed.*closure\.coverage 17%/),
+    ).toBeTruthy();
+    expect(screen.getByText("stockAnalysis.evidenceCitation.icZeroed")).toBeTruthy();
+    expect(screen.queryByText("stockAnalysis.evidenceCitation.absenceUndeclared")).toBeNull();
+    expect(screen.queryByText(/NaN/)).toBeNull();
   });
 });
 

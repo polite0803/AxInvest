@@ -384,7 +384,7 @@ pub const CONCEPTS: &[ConceptDecl] = &[
         min: 0.0,
         max: 100.0,
         meaning: "经风控闸门压缩后的最终仓位百分比（单票业务上限 30）",
-        evidence: "src-tauri/crates/analysis-engine/src/evidence_weight.rs:1072",
+        evidence: "src-tauri/crates/analysis-engine/src/evidence_weight.rs:1131",
     },
     ConceptDecl {
         id: "axinvest.router.min_confidence",
@@ -394,7 +394,7 @@ pub const CONCEPTS: &[ConceptDecl] = &[
         min: 0.0,
         max: 100.0,
         meaning: "荐股筛选的最小置信阈值（对比对象是 0–100 的 RecommenderPick.confidence）",
-        evidence: "src-tauri/crates/analysis-engine/src/recommender/mod.rs:291 | src-tauri/crates/analysis-engine/src/recommender/mod.rs:355",
+        evidence: "src-tauri/crates/analysis-engine/src/recommender/mod.rs:407 | src-tauri/crates/analysis-engine/src/recommender/mod.rs:1318",
     },
     ConceptDecl {
         id: "axinvest.opc.min_confidence",

@@ -60,7 +60,11 @@ pub use crate::commands::constants::MOVER_RECALL_ANALYSIS_TASK_TYPE;
 /// 为什么是 10 而不是手动面板的 20：cron 每天跑，配额×频次才是真实日消耗；
 /// 且它打的是 as-of 历史行情链（push2 族在本机是速率触发 RST），一轮 10 只已经把
 /// 请求量摊开在不同天，而不是把通道打死。面板手动发起仍是 20（`default_batch_limit`）。
-pub const CRON_BATCH_LIMIT: usize = 10;
+pub const CRON_BATCH_LIMIT: usize = 60;
+
+/// 旧版内置任务的配额（10）。只服务**一次性升级**：库里仍是它的任务行会被抬到
+/// [`CRON_BATCH_LIMIT`]；用户改过配额的行一律不动（种子的「存在即跳过」不能被绕过）。
+pub const LEGACY_CRON_BATCH_LIMIT: usize = 10;
 
 static BATCH_RUNS: LazyLock<Arc<Mutex<HashMap<String, MoverBatchState>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));

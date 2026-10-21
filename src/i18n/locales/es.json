@@ -7389,6 +7389,7 @@
       "refresh": "Actualizar",
       "empty": "No hay tareas programadas. Haga clic en «Nueva tarea» arriba a la derecha para crear una.",
       "executedOk": "Ejecución activada: {{name}}",
+      "resultTitle": "Resultado",
       "deletedOk": "Tarea eliminada: {{name}}"
     },
     "execute": {
@@ -18143,6 +18144,8 @@
       "signal": "señal",
       "absenceUndeclared": "Ausencia sin declarar",
       "expectedButIdle": "Esperado pero excluido",
+      "icZeroed": "Anulado tras medición",
+      "icZeroedHint": "Esta pierna se midió sin poder predictivo (el intervalo IC cruza cero), por lo que su peso se anuló. Su upstream sigue presente; no es un fallo de cableado.",
       "metaLeg": "meta",
       "upstream": {
         "present": "Presente",
@@ -18153,6 +18156,7 @@
       "notChecked": {
         "noOwner": "No hay analista titular registrado para este factor",
         "unregisteredFactor": "Este factor no está en el registro de fuentes (criterio no aplicable)",
+        "injectedVarNoKeyTable": "Esta pierna la inyecta directamente la capa de cableado; la instantánea no tiene una clave registrada con la que conciliar, así que el criterio no aplica.",
         "tierScoreNotInSnapshot": "La salida del nodo de puntuación por horizonte no está en la instantánea de este registro; el criterio no aplica",
         "noChannelMapping": "No hay clave de instantánea registrada para este canal de origen (falta en el registro)",
         "unknownReason": "El backend devolvió un código de motivo no registrado"

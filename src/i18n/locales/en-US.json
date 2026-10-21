@@ -7389,6 +7389,7 @@
       "refresh": "Refresh",
       "empty": "No scheduled tasks yet. Click \"New Task\" in the top right to create one.",
       "executedOk": "Execution triggered: {{name}}",
+      "resultTitle": "Result",
       "deletedOk": "Task deleted: {{name}}"
     },
     "execute": {
@@ -18386,6 +18387,8 @@
       "signal": "signal value",
       "absenceUndeclared": "Absence undeclared",
       "expectedButIdle": "Expected but excluded",
+      "icZeroed": "Zeroed after measurement",
+      "icZeroedHint": "This leg was measured to have no predictive power (IC interval spans zero), so its weight was zeroed. Its upstream is still present; this is not a wiring failure.",
       "metaLeg": "meta",
       "upstream": {
         "present": "Present",
@@ -18396,6 +18399,7 @@
       "notChecked": {
         "noOwner": "No owner analyst is registered for this factor",
         "unregisteredFactor": "This factor is not in the source registry (check not applicable)",
+        "injectedVarNoKeyTable": "This leg is injected directly by the wiring layer; the snapshot has no registered key to reconcile against, so the check does not apply.",
         "tierScoreNotInSnapshot": "The per-horizon scoring node's output is not captured in this record's snapshot, so the check does not apply",
         "noChannelMapping": "No snapshot key is registered for this source channel (registry gap)",
         "unknownReason": "The backend returned an unregistered reason code"

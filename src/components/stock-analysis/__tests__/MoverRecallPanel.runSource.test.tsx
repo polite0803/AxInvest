@@ -121,6 +121,37 @@ describe("MoverRecallPanel 轮次来源", () => {
     expect(cmd("get_mover_recall_run_view").length).toBe(0);
   });
 
+  it("G. 回灌清单三态：样本不足只说 shadow，达下限才说可转正", async () => {
+    invokeMock.mockImplementation(async (name: string) => {
+      if (name === "list_mover_recall_runs") { return [makeRun()]; }
+      if (name === "get_mover_recall_run_view") { return makeRunView(); }
+      if (name === "list_mover_reflow_candidates") {
+        return { items: [{ stockCode: "002696" }], settled: 3, required: 30, ready: false };
+      }
+      return null;
+    });
+    renderAt();
+    await waitFor(() => expect(screen.getByTestId("mover-reflow-pending")).toBeTruthy());
+    const pendingText = screen.getByTestId("mover-reflow-pending").textContent ?? "";
+    expect(pendingText).toContain("shadow");
+    expect(pendingText).toContain("002696");
+    expect(screen.queryByTestId("mover-reflow-ready")).toBeNull();
+  });
+
+  it("H. 回灌清单：达样本下限才出现 ready 态；无候选则是另一种缺席", async () => {
+    invokeMock.mockImplementation(async (name: string) => {
+      if (name === "list_mover_recall_runs") { return [makeRun()]; }
+      if (name === "get_mover_recall_run_view") { return makeRunView(); }
+      if (name === "list_mover_reflow_candidates") {
+        return { items: [{ stockCode: "600519" }], settled: 30, required: 30, ready: true };
+      }
+      return null;
+    });
+    renderAt();
+    await waitFor(() => expect(screen.getByTestId("mover-reflow-ready")).toBeTruthy());
+    expect(screen.getByTestId("mover-reflow-ready").textContent ?? "").toContain("600519");
+  });
+
   it("E. 补分析批次从未发起：单独成句（0 批不得说成「没有待补」）", async () => {
     invokeMock.mockImplementation(async (name: string) => {
       if (name === "list_mover_recall_runs") { return [makeRun()]; }

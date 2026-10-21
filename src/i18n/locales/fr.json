@@ -7389,6 +7389,7 @@
       "refresh": "Actualiser",
       "empty": "Aucune tâche planifiée. Cliquez sur « Nouvelle tâche » en haut à droite pour en créer une.",
       "executedOk": "Exécution déclenchée : {{name}}",
+      "resultTitle": "Résultat",
       "deletedOk": "Tâche supprimée : {{name}}"
     },
     "execute": {
@@ -18143,6 +18144,8 @@
       "signal": "valeur du signal",
       "absenceUndeclared": "Absence non déclarée",
       "expectedButIdle": "Attendu mais exclu",
+      "icZeroed": "Mis à zéro après mesure",
+      "icZeroedHint": "Cette jambe a été jugée sans pouvoir prédictif après mesure (l'intervalle IC chevauche zéro) ; son poids a été mis à zéro. Son amont est toujours présent : ce n'est pas une panne de câblage.",
       "metaLeg": "méta",
       "upstream": {
         "present": "Présent",
@@ -18153,6 +18156,7 @@
       "notChecked": {
         "noOwner": "Aucun analyste titulaire n'est enregistré pour ce facteur",
         "unregisteredFactor": "Ce facteur n'est pas dans le registre des sources (contrôle non applicable)",
+        "injectedVarNoKeyTable": "Cette jambe est injectée directement par la couche de câblage ; l'instantané n'a aucune clé enregistrée à réconcilier, donc le contrôle ne s'applique pas.",
         "tierScoreNotInSnapshot": "La sortie du nœud de notation propre à l'horizon n'est pas capturée dans l'instantané de cet enregistrement ; le contrôle ne s'applique pas",
         "noChannelMapping": "Aucune clé d'instantané n'est enregistrée pour ce canal source (lacune du registre)",
         "unknownReason": "Le backend a renvoyé un code de raison non enregistré"

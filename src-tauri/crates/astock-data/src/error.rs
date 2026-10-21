@@ -34,6 +34,28 @@ pub enum DataError {
     Internal(String),
 }
 
+impl DataError {
+    /// 是否属于「源明确回答没有这份数据」而非故障。
+    ///
+    /// 判据与 `try_vendors_retry` 的降级/重试分档同源：`VendorError` 的消息含
+    /// 「为空 / 返回空 / empty / no data / 无数据」即视为空数据。调用方用它与
+    /// 真故障分开处理（例如分红为空表示没有除权事件，可安全走恒等复权；
+    /// 接口失效则不能静默）。
+    pub fn is_empty_data(&self) -> bool {
+        match self {
+            Self::VendorError { message, .. } => {
+                let m = message.to_lowercase();
+                m.contains("为空")
+                    || m.contains("返回空")
+                    || m.contains("empty")
+                    || m.contains("no data")
+                    || m.contains("无数据")
+            },
+            _ => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -51,5 +73,22 @@ mod tests {
         assert!(s.contains("get_hot_stocks"));
         assert!(s.contains("2026-06-01"));
         assert!(s.contains("降级"));
+    }
+
+    /// 空数据与真故障必须可分：分红主流程依赖这条判据决定「返回未复权」还是「报错」。
+    #[test]
+    fn empty_data_is_distinct_from_vendor_failure() {
+        let empty = DataError::VendorError {
+            vendor: "eastmoney".into(),
+            message: "分红数据为空".into(),
+        };
+        assert!(empty.is_empty_data());
+
+        let failure = DataError::VendorError {
+            vendor: "eastmoney".into(),
+            message: "报表不可用: 报表配置不存在".into(),
+        };
+        assert!(!failure.is_empty_data(), "接口失效不得被当成无分红");
+        assert!(!DataError::ParseError("bad json".into()).is_empty_data());
     }
 }

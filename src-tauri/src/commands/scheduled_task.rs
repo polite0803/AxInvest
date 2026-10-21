@@ -106,6 +106,11 @@ pub struct TaskRunResultDto {
     /// 前端据此显示「部分完成」徽章而非「失败」（旧记录缺省 false）。
     #[serde(default)]
     pub partial: bool,
+    /// 本次结果是否**等到了终态**。true ⇒ `output` 是这一轮的结论，前端应直接展示；
+    /// false ⇒ 只是「已触发」（长任务异步落库），前端只能提示稍后刷新。
+    /// 没有这个字段时，前端无法区分两种 output，只能一律弹 toast（2026-10-21 实机反馈）。
+    #[serde(default)]
+    pub awaited: bool,
 }
 
 /// 拥有内置执行 handler、但**没有**关联工作流的 task_type 集合。
@@ -194,12 +199,15 @@ pub(crate) fn cron_to_dto(job: &CronJob) -> ScheduledTaskDto {
                 .unwrap_or_default()
         }),
         last_result: job.last_result.as_ref().map(|r| TaskRunResultDto {
+            // 已落库的 last_result 是**跑完的结果** ⇒ output 就是结论（awaited=true）。
+            // 这个字段只服务「手动执行刚返回时」的区分，列表回读不受影响。
             success: r.success,
             output: r.output.clone(),
             error: r.error.clone(),
             duration_ms: r.duration_ms,
             skipped: r.skipped,
             partial: r.partial,
+            awaited: true,
         }),
         status: status.to_string(),
         config: TaskConfigDto {
@@ -430,6 +438,50 @@ pub async fn execute_scheduled_task(
             duration_ms: result.duration_ms,
             skipped: false,
             partial: result.partial,
+            awaited: true,
+        });
+    }
+
+    // 分支 1.5：漏检核查是**快**任务（一次库内扫描），手动执行必须等结果。
+    // 走分支 2 的 `scheduler.trigger_now` 只会返回「已触发」，用户点完什么都看不到
+    // （2026-10-21 实机反馈：计划任务页只弹一个 toast）。
+    // 这里直接复用 cron 的同一实现体，并以 `manual` 落 trigger_source（F-15 的区分）。
+    if job.task_type.as_deref() == Some(crate::commands::mover_recall::MOVER_RECALL_TASK_TYPE) {
+        let result = match crate::commands::mover_recall::run_mover_recall_check(
+            state.harness.db(),
+            &state.astock_client,
+            "manual",
+        )
+        .await
+        {
+            Ok(o) => axagent_runtime_core::TaskRunResult {
+                success: true,
+                output: Some(o.summary),
+                error: None,
+                duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
+                executed_at: started,
+                skipped: false,
+                partial: false,
+            },
+            Err(e) => axagent_runtime_core::TaskRunResult {
+                success: false,
+                output: None,
+                error: Some(e),
+                duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
+                executed_at: started,
+                skipped: false,
+                partial: false,
+            },
+        };
+        state.cron_job_store.record_run(&task_id, result.clone()).await;
+        return Ok(TaskRunResultDto {
+            success: result.success,
+            output: result.output,
+            error: result.error,
+            duration_ms: result.duration_ms,
+            skipped: false,
+            partial: result.partial,
+            awaited: true,
         });
     }
 
@@ -454,6 +506,7 @@ pub async fn execute_scheduled_task(
                 duration_ms: 0,
                 skipped: false,
                 partial: false,
+                awaited: false,
             });
         }
         // 调度器未启动（启动流程异常）：无法安全执行内置 handler

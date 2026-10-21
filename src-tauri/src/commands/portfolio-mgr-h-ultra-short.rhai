@@ -165,7 +165,12 @@ for row in legs {
     if type_of(s) == "()" {
         absent_legs.push(row["factor"]);
     } else {
-        present_legs.push(#{ factor: row["factor"], role: row["role"], weight: row["weight"], signal: s, constraint: row["constraint"] });
+        // 裁决层（leg_weight_overlay）的标记必须随腿落库：否则审计分不清
+        // 「测出无预测力、主动置零」与「没接线/没数」。
+        let out = #{ factor: row["factor"], role: row["role"], weight: row["weight"], signal: s, constraint: row["constraint"] };
+        if type_of(row["icStatus"]) != "()" { out.icStatus = row["icStatus"]; }
+        if row["icZeroed"] == true { out.icZeroed = true; }
+        present_legs.push(out);
     }
 }
 

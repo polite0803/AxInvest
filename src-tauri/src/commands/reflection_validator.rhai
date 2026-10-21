@@ -81,6 +81,21 @@ fn main() {
     let params_raw = reflection["params_suggestion"];
     let rule_codes_raw = reflection["rule_codes"];
 
+    // D-4：回灌结论。缺省 = 不表态 = should_include=false（只有漏检专项会给出 true）；
+    // reason 截到 200 字符：它是给人复核的一句话，不是第二份复盘正文。
+    let pool_reflow_raw = reflection["pool_reflow"];
+    let reflow_include = false;
+    let reflow_reason = "";
+    if !is_unit(pool_reflow_raw) && type_of(pool_reflow_raw) == "map" {
+        if pool_reflow_raw["should_include"] == true {
+            reflow_include = true;
+        }
+        if !is_unit(pool_reflow_raw["reason"]) && type_of(pool_reflow_raw["reason"]) == "string" {
+            let r = pool_reflow_raw["reason"].to_string();
+            reflow_reason = if r.len() > 200 { r.sub_string(0, 200) } else { r };
+        }
+    }
+
     // R-302: verdict 必须是 correct/partial/wrong 三选一
     let verdict = if !is_unit(verdict_raw) && type_of(verdict_raw) == "string" {
         let v = verdict_raw.to_string();
@@ -183,6 +198,7 @@ fn main() {
         "missed_signals": missed_signals,
         "fix_for_future": fix_for_future,
         "params_suggestion": params_suggestion,
-        "rule_codes": final_rule_codes
+        "rule_codes": final_rule_codes,
+        "pool_reflow": #{ "should_include": reflow_include, "reason": reflow_reason }
     }
 }

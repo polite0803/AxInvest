@@ -79,6 +79,10 @@ interface BranchLegAudit {
   expectedToParticipate: boolean;
   upstream: UpstreamState;
   absenceDeclared: boolean;
+  /** 裁决层的腿预测力状态；`null/缺省` = 本记录未携带（旧脚本/旧代） */
+  icStatus?: string | null;
+  /** 该腿是否因「测出无预测力」被裁决层置零 —— 与「没接线/没数」严格区分 */
+  icZeroed?: boolean;
 }
 
 interface FactorLegAudit {
@@ -125,6 +129,7 @@ const NOT_CHECKED_REASON: Record<string, string> = {
   NO_CHANNEL_MAPPING: "noChannelMapping",
   NO_OWNER: "noOwner",
   UNREGISTERED_FACTOR: "unregisteredFactor",
+  INJECTED_VAR_HAS_NO_KEY_TABLE: "injectedVarNoKeyTable",
 };
 
 /** 原因码不在上表时的兜底 —— 不许猜原因，只如实说「后端给了个未登记的原因码」。 */
@@ -215,7 +220,10 @@ export function sigmaTooltip(r: Reconcile, t: (key: string) => string): string {
 
 /** 闭合覆盖率：参与权重里「经过独立核对」的比例；`notComputable` / `broken` 无覆盖率可言。 */
 export function closureCoverage(c: Closure): number | null {
-  return c.state === "closed" ? 1 - c.unverifiedWeightRatio : null;
+  if (c.state !== "closed") { return null; }
+  // 字段缺失（旧后端 / 键名错配）时 `1 - undefined` 是 NaN，绝不能渲染成 `NaN%`；
+  // 拿不到覆盖率就只报「闭合」，不伪造任何比例。
+  return Number.isFinite(c.unverifiedWeightRatio) ? 1 - c.unverifiedWeightRatio : null;
 }
 
 /**
@@ -378,15 +386,30 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
                     : ""}
                 </span>
                 {
-                  /* 应参与却未计入 —— 后端 `expectedToParticipate` 早已算好，旧前端零消费，
-                    「应参与 3 / 实际参与 2」的差值因此在 UI 上无法归因（2026-10-18 修）。 */
+                  /* 应参与却未计入有两种完全不同的原因：裁决层测出「无预测力」后主动
+                    置零（有交代），与其它未计入（没接线/没数）。前者必须单独成标，
+                    否则「测过了被裁掉」会被读成链路故障。 */
                 }
                 {leg.expectedToParticipate && !leg.participates && (
-                  <Tag color="gold" className="text-[10px] leading-none px-1 py-0 shrink-0">
-                    {t("stockAnalysis.evidenceCitation.expectedButIdle")}
-                  </Tag>
+                  leg.icZeroed
+                    ? (
+                      <Tooltip
+                        title={leg.icStatus
+                          ? `${t("stockAnalysis.evidenceCitation.icZeroedHint")} · ${leg.icStatus}`
+                          : t("stockAnalysis.evidenceCitation.icZeroedHint")}
+                      >
+                        <Tag color="default" className="text-[10px] leading-none px-1 py-0 shrink-0">
+                          {t("stockAnalysis.evidenceCitation.icZeroed")}
+                        </Tag>
+                      </Tooltip>
+                    )
+                    : (
+                      <Tag color="gold" className="text-[10px] leading-none px-1 py-0 shrink-0">
+                        {t("stockAnalysis.evidenceCitation.expectedButIdle")}
+                      </Tag>
+                    )
                 )}
-                {!leg.participates && !leg.absenceDeclared && (
+                {!leg.participates && !leg.absenceDeclared && !leg.icZeroed && (
                   <Tag color="orange" className="text-[10px] leading-none px-1 py-0 shrink-0">
                     {t("stockAnalysis.evidenceCitation.absenceUndeclared")}
                   </Tag>

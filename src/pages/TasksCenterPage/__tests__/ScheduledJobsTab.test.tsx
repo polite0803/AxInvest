@@ -165,6 +165,39 @@ describe("ScheduledJobsTab 列表与行操作（TR-6.2）", () => {
     expect(within(customRow).getByLabelText("tasksCenter.action.execute")).toBeDisabled();
   });
 
+  it("立即执行等到终态 ⇒ 直接展示这一轮结论（含 run_id），不再只弹「已触发」", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_scheduled_tasks") { return [TASK_POOL, TASK_CUSTOM, TASK_OPC]; }
+      if (cmd === "execute_scheduled_task") {
+        return {
+          success: true,
+          output: "[reco] 区间 09-30~10-20 漏检=62 | run_id=mrr-1",
+          awaited: true,
+        };
+      }
+      return undefined;
+    });
+    renderTab();
+    const poolRow = await rowNamed("股票池扫描");
+    fireEvent.click(within(poolRow).getByLabelText("tasksCenter.action.execute"));
+    await waitFor(() => expect(screen.getByText(/run_id=mrr-1/)).toBeTruthy());
+  });
+
+  it("只回「已触发」（长任务）⇒ ack 不得被当成结果弹出来", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_scheduled_tasks") { return [TASK_POOL, TASK_CUSTOM, TASK_OPC]; }
+      if (cmd === "execute_scheduled_task") {
+        return { success: true, output: "任务 '股票池扫描' 已触发，请稍后刷新查看执行结果", awaited: false };
+      }
+      return undefined;
+    });
+    renderTab();
+    const poolRow = await rowNamed("股票池扫描");
+    fireEvent.click(within(poolRow).getByLabelText("tasksCenter.action.execute"));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("execute_scheduled_task", { taskId: "t-pool" }));
+    expect(screen.queryByText(/请稍后刷新查看执行结果/)).toBeNull();
+  });
+
   it("历史按钮拉取执行历史并打开 Drawer", async () => {
     renderTab();
     const poolRow = await rowNamed("股票池扫描");

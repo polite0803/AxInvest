@@ -1814,6 +1814,17 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                     若背景含【漏检专项三问】，missed_signals / what_went_wrong / fix_for_future\n\
                     必须按三问逐条回答并与权威归因层对照；若为「常规到期反思」占位句则忽略，\n\
                     按常规单档复盘即可，禁止编造漏检事件。\n\n\
+                    ——回灌结论（仅漏检专项）——
+\
+                    若判断是「窗口起步时这只票该进候选池却没进」，必须在 pool_reflow 里给
+\
+                    {\"should_include\": true, \"reason\": \"一句话，指到具体入池条件\"}；
+\
+                    若问题在评分/档位/时机（池子收对了），给 {\"should_include\": false, \"reason\": \"\"}。
+\
+                    该结论会落成可复核清单，禁止为了「看起来有产出」填 true。
+
+\
                     ——失败模式受控词表（P2-b）——\n\
                     本次误判属于哪一类，只能从下列值里选（可多选；都不是时须给新问题命名）：\n\
                     {{failure_mode_catalog}}\n\n\
@@ -2133,7 +2144,11 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     //   ③ 收尾把 implementation_tier 过白名单后落 stock_reflections.implementation_tier 列
     //      （非法值与缺席都落 NULL，不替模型兜底成 L1），code_diff_proposal 同步落列；
     //   ④ 消费侧：WFO 参数校准与定时进化聚合按 may_enter_param_grid 把 L2/L3 挡在网格外。
-    const REFLECTION_TEMPLATE_VERSION: i32 = 6;
+    // v7 (2026-10-21)：回灌清单（PLAN D-4）——
+    //   ① 内联 prompt 与 reflection.md 双处新增 pool_reflow（仅漏检专项要求输出）；
+    //   ② 反思落库按 anchor_event_id 把判定「应入池」的事件盖成 reflow_pending
+    //      （dao 只从 analyzed/reflected 盖章）；清单供人复核，并入种子另有 fail-closed 判据。
+    const REFLECTION_TEMPLATE_VERSION: i32 = 7;
 
     // 版本检查：已有同版本或更新的记录则跳过
     if let Some(ref existing) =

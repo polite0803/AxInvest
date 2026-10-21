@@ -887,6 +887,17 @@ pub fn chain_period_has_active_style(chain: RecoChain, period: Period) -> bool {
     }
 }
 
+/// 回灌清单转正所需的**已结算样本**下限（事前注册；D-4 第二段的 fail-closed 判据）。
+///
+/// 判据语义：样本不足 ⇒ 保持 shadow（**不是**自动放行）。三项质量指标（命中率不降 / 池内覆盖率不降 /
+/// 逐档 rank IC 不劣化）在打开人工开关前由人核对；代码只守这道下限，防止「没数据就转正」。
+pub const REFLOW_MIN_SETTLED: usize = 30;
+
+/// 是否已达转正样本下限（供面板成句与 `refresh_mover_seed` 的 shadow 判据共用）。
+pub fn reflow_ready(settled: usize) -> bool {
+    settled >= REFLOW_MIN_SETTLED
+}
+
 /// as-of 回放时注入智选的显式声明（**不**取 live 的达标清单，开了就是前视）。
 pub const MOVER_WATCHLIST_ASOF_DECLARATION: &str =
     "本代无达标清单（as-of 回放不取 live 的窗口涨幅清单，避免前视）";
@@ -1154,6 +1165,15 @@ mod tests {
             e.picked_before_window = true;
         }));
         assert_eq!(hit_wins, MissLayer::Recommended, "窗口内命中必须排在晚推荐之前");
+    }
+
+    /// D-4：转正样本门槛是**下限**语义 —— 少一个都只能留在 shadow，边界两侧逐一钉住。
+    #[test]
+    fn reflow_ready_is_a_hard_floor() {
+        assert!(!reflow_ready(0));
+        assert!(!reflow_ready(REFLOW_MIN_SETTLED - 1));
+        assert!(reflow_ready(REFLOW_MIN_SETTLED));
+        assert!(reflow_ready(REFLOW_MIN_SETTLED + 1));
     }
 
     /// B-1：达标清单是**输入面**素材 ⇒ 只影响 LLM 看到什么，不新增判据。

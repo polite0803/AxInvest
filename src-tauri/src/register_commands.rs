@@ -728,6 +728,7 @@ macro_rules! register_all_commands {
             commands::mover_recall::get_mover_recall_event_review,
             commands::mover_recall::get_mover_recall_run_view,
             commands::mover_recall::list_mover_recall_runs,
+            commands::mover_recall::list_mover_reflow_candidates,
             commands::mover_recall_analysis::get_mover_recall_analysis_batch,
             commands::mover_recall_analysis::list_mover_recall_analysis_batches,
             commands::mover_recall_analysis::run_mover_recall_analysis,

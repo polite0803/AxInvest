@@ -7389,6 +7389,7 @@
       "refresh": "Aktualisieren",
       "empty": "Keine geplanten Aufgaben. Klicken Sie oben rechts auf „Neue Aufgabe“, um eine zu erstellen.",
       "executedOk": "Ausführung gestartet: {{name}}",
+      "resultTitle": "Ergebnis",
       "deletedOk": "Aufgabe gelöscht: {{name}}"
     },
     "execute": {
@@ -18143,6 +18144,8 @@
       "signal": "Signal",
       "absenceUndeclared": "Fehlen nicht erklärt",
       "expectedButIdle": "Erwartet, nicht gewichtet",
+      "icZeroed": "Nach Messung genullt",
+      "icZeroedHint": "Dieses Bein wurde nach der Messung als ohne Vorhersagekraft bewertet (IC-Intervall überspannt null); sein Gewicht wurde genullt. Der Upstream ist weiterhin vorhanden – dies ist kein Verdrahtungsfehler.",
       "metaLeg": "Meta",
       "upstream": {
         "present": "Vorhanden",
@@ -18153,6 +18156,7 @@
       "notChecked": {
         "noOwner": "Für diesen Faktor ist kein zuständiger Analyst registriert",
         "unregisteredFactor": "Dieser Faktor steht nicht im Quellenregister (Prüfung entfällt)",
+        "injectedVarNoKeyTable": "Dieses Bein wird direkt von der Verdrahtungsschicht injiziert; der Snapshot hat keinen registrierten Schlüssel zum Abgleich, daher ist die Prüfung nicht anwendbar.",
         "tierScoreNotInSnapshot": "Die Ausgabe des horizontspezifischen Bewertungsknotens liegt nicht im Snapshot dieses Datensatzes; die Prüfung entfällt",
         "noChannelMapping": "Für diesen Quellenkanal ist kein Snapshot-Schlüssel registriert (Lücke im Register)",
         "unknownReason": "Das Backend hat einen nicht registrierten Ursachencode zurückgegeben"

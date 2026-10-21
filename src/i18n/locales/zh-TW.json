@@ -7389,6 +7389,7 @@
       "refresh": "重新整理",
       "empty": "目前沒有定時任務，點擊右上角「新任務」建立",
       "executedOk": "已觸發執行：{{name}}",
+      "resultTitle": "執行結果",
       "deletedOk": "已刪除任務：{{name}}"
     },
     "execute": {
@@ -18392,6 +18393,8 @@
       "signal": "訊號",
       "absenceUndeclared": "未交代缺席",
       "expectedButIdle": "應參與未計入",
+      "icZeroed": "測後置零",
+      "icZeroedHint": "該腿經後驗測量判為無預測力（IC 區間跨 0），權重已置零；它仍在上游在場，不是接線故障",
       "metaLeg": "元約束",
       "upstream": {
         "present": "在場",
@@ -18402,6 +18405,7 @@
       "notChecked": {
         "noOwner": "該因子沒有登記的屬主分析師",
         "unregisteredFactor": "該因子不在來源登記表內，判據不適用",
+        "injectedVarNoKeyTable": "該腿由接線層直接注入，快照沒有登記可核對的鍵 ⇒ 判據不適用",
         "tierScoreNotInSnapshot": "逐檔評分節點的產出不落本記錄快照，該判據對本腿不適用",
         "noChannelMapping": "該通道未登記落庫鍵（映射表缺項）",
         "unknownReason": "後端回傳了未登記的原因碼"

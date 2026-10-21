@@ -19,7 +19,7 @@ import {
   Typography,
 } from "antd";
 import { History, Pencil, Plus, RefreshCw, Rocket, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { type FieldState, parseCronFields } from "./CronScheduleBuilder";
@@ -110,7 +110,19 @@ function describeCron(cron: string, t: (k: string, opts?: Record<string, unknown
 
 export function ScheduledJobsTab() {
   const { t, i18n } = useTranslation();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
+  // 立即执行后的延迟刷新：必须可取消 —— 否则卸载后 800ms 的回调仍会发 IPC，
+  // 在测试里会串到下一条用例（实测把「15s 自动刷新」那条的调用计数从 2 顶成 3）。
+  const refreshTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (refreshTimer.current !== null) {
+        window.clearTimeout(refreshTimer.current);
+        refreshTimer.current = null;
+      }
+    },
+    [],
+  );
   const navigate = useNavigate();
   const locale = i18n.language;
 
@@ -198,10 +210,35 @@ export function ScheduledJobsTab() {
       }
       setExecuting((prev) => ({ ...prev, [task.id]: true }));
       try {
-        await invoke("execute_scheduled_task", { taskId: task.id });
-        message.success(t("tasksCenter.scheduled.executedOk", { name: task.name }));
-        // 内置任务结果异步落库，延迟再拉列表
-        window.setTimeout(() => void loadTasks(true), 800);
+        const res = await invoke<{
+          success?: boolean;
+          output?: string | null;
+          error?: string | null;
+          awaited?: boolean;
+        }>("execute_scheduled_task", { taskId: task.id });
+        // 等到了终态（如漏检核查：一次库内扫描）⇒ 直接把这一轮的结论摊开给用户；
+        // 长任务只回「已触发」，不能把 ack 当结果（2026-10-21 实机反馈）。
+        if (res?.awaited && (res.output ?? "").trim() !== "") {
+          modal.info({
+            title: `${t("tasksCenter.scheduled.resultTitle")} · ${task.name}`,
+            content: (
+              <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, margin: 0 }}>
+                {res.output}
+              </pre>
+            ),
+            width: 640,
+          });
+        } else if (res && res.success === false && res.error) {
+          showBackendError(message, res.error);
+        } else {
+          message.success(t("tasksCenter.scheduled.executedOk", { name: task.name }));
+        }
+        // 内置任务结果异步落库，延迟再拉列表（同一时刻只保留一个，且卸载时清理）
+        if (refreshTimer.current !== null) { window.clearTimeout(refreshTimer.current); }
+        refreshTimer.current = window.setTimeout(() => {
+          refreshTimer.current = null;
+          void loadTasks(true);
+        }, 800);
       } catch (e) {
         showBackendError(message, e);
       } finally {

@@ -122,6 +122,108 @@ fn close_row(
 
 /// 段扫专用入口：只登记代码 —— `confirm = false` ⇒ `last_confirmed_at` 保持 0（不算东财全量确认）、
 /// 行业列不覆写。清单计数不会被段扫灌成「已确认」。
+/// 收盘历史回补：用日线把 `market_daily_close` 补到 `target_days` 个交易日。
+///
+/// 为什么需要：四档窗口是 2/5/28/90 个**交易日**，而本地快照是逐日攒的（现网只有 9 天）
+/// ⇒ 中/长档永远「窗口未满」，用户看到的自动窗口等于没生效。这里从日线一次性补齐，
+/// 之后每天由 16:00 的快照只追加当天。
+///
+/// 口径：
+/// - **只补缺失行**（`on_conflict do_nothing`）—— 既有行来自当日快照，amount 真值/推定与
+///   `source` 更权威，回补不得覆盖；
+/// - `prev_close` 由相邻两根日线推出，首根没有前值 ⇒ 跳过（不猜）；
+/// - `source='tencent_kline'`，与 `tencent_batch` / `+amount_est` 可分辨。
+pub async fn backfill_close_history(
+    db: &sea_orm::DatabaseConnection,
+    client: &axagent_astock_data::AStockClient,
+    target_days: u32,
+    interval_ms: u64,
+) -> Result<BackfillStats, String> {
+    use axagent_entities::{market_daily_close, market_stock_universe};
+    let codes: Vec<String> = market_stock_universe::Entity::find()
+        .all(db)
+        .await
+        .map_err(|e| format!("读市场清单失败: {e}"))?
+        .into_iter()
+        .map(|m| m.stock_code)
+        .collect();
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let mut stats = BackfillStats::default();
+    for code in &codes {
+        stats.codes += 1;
+        let mut klines = match client.get_klines(code, "daily", target_days).await {
+            Ok(v) => v,
+            Err(_) => {
+                stats.failed += 1;
+                continue;
+            },
+        };
+        klines.sort_by(|a, b| a.date.cmp(&b.date));
+        // 只保留最近 target_days 根：K 线接口的 limit 实测未生效（返回了 1996 年起的全历史，
+        // 55k 行），写入侧自行截断，避免把「数据起点」和核查取数区间拖成十年。
+        if klines.len() > target_days as usize {
+            let keep_from = klines.len() - target_days as usize;
+            klines.drain(..keep_from);
+        }
+        let mut rows = Vec::new();
+        let mut prev: Option<f64> = None;
+        for k in klines {
+            // 用 Option::filter 表达「有前值且两者都为正」，避免 let-chain（本 crate 是 2021 edition）
+            if let Some(p) = prev.filter(|p| *p > 0.0 && k.close > 0.0) {
+                rows.push(market_daily_close::ActiveModel {
+                    id: Set(format!("{}@{}", code, k.date)),
+                    stock_code: Set(code.clone()),
+                    stock_name: Set(String::new()),
+                    trade_date: Set(k.date.clone()),
+                    close: Set(k.close),
+                    prev_close: Set(p),
+                    change_pct: Set((k.close / p - 1.0) * 100.0),
+                    amount: Set(if k.amount.is_finite() && k.amount > 0.0 {
+                        k.amount
+                    } else {
+                        0.0
+                    }),
+                    collected_at: Set(now_ms),
+                    source: Set("tencent_kline".to_string()),
+                });
+            }
+            prev = Some(k.close);
+        }
+        for chunk in rows.chunks(500) {
+            let res = market_daily_close::Entity::insert_many(chunk.to_vec())
+                .on_conflict(
+                    OnConflict::column(market_daily_close::Column::Id).do_nothing().to_owned(),
+                )
+                .exec(db)
+                .await;
+            match res {
+                Ok(_) => stats.rows += chunk.len() as u32,
+                Err(e) => {
+                    stats.failed += 1;
+                    tracing::warn!("[close] {code} 历史回补失败: {e}");
+                },
+            }
+        }
+        if interval_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
+        }
+    }
+    tracing::info!(
+        "[close] 历史回补完成：代码 {} 只 / 尝试写入 {} 行 / 失败 {} 次",
+        stats.codes,
+        stats.rows,
+        stats.failed
+    );
+    Ok(stats)
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct BackfillStats {
+    pub codes: u32,
+    pub rows: u32,
+    pub failed: u32,
+}
+
 pub(crate) async fn upsert_universe_registered(
     db: &sea_orm::DatabaseConnection,
     entries: &[(String, String, Option<String>)],

@@ -4894,6 +4894,92 @@ async fn refresh_mover_seed(
     n
 }
 
+/// 漏检核查 → 荐股种子：把「窗口达标但上一轮荐股没推荐」的票直接并入下一轮候选池。
+///
+/// 为什么直供而不等反思：这类票是**已被市场验证该涨、而池子没看见**的反证样本，
+/// 对荐股策略最值钱；反思链是慢通路（补分析有每日配额），不该成为它们唯一的出口。
+/// 只取 `not_in_pool` / `unexplained`（池子没看见 / 无留痕），不取 `l3_scored_out`（评分算过并主动淘汰）。
+/// 上限 30 只：一轮漏检通常 10~40 只，全量并入会把「当日强势」稀释掉。
+async fn refresh_miss_seed(state: &State<'_, AppState>) -> usize {
+    const MISS_SEED_LIMIT: usize = 30;
+    let db = state.harness.db();
+    match axagent_dao::repo::mover_recall_events::latest_reco_miss_codes(db, MISS_SEED_LIMIT).await
+    {
+        Ok(items) => {
+            let n = items.len();
+            axagent_analysis_engine::recommender::set_miss_seed(
+                items.into_iter().map(|(code, name)| (code, name, None)).collect(),
+            );
+            n
+        },
+        Err(e) => {
+            tracing::warn!("[reco] 漏检样本读取失败（本轮不注入该来源）: {e}");
+            axagent_analysis_engine::recommender::set_miss_seed(Vec::new());
+            0
+        },
+    }
+}
+
+/// 回灌清单 → 种子（D-4 第二段）。**默认 shadow**：只统计、不并入。
+///
+/// 转正要同时满足两条，缺一不并：
+///   ① 人工开关 `settings.mover_reflow_merge = "on"`（默认 off）；
+///   ② 样本下限 `reflow_ready(settled)`（fail-closed：样本不足**拒绝**并入，不是放行）。
+/// 未满足时写空列表（覆盖语义），并在日志里如实写出候选数与拒绝原因。
+async fn refresh_reflow_seed(state: &State<'_, AppState>) -> usize {
+    use axagent_dao::repo::{mover_recall_events, settings};
+    let db = state.harness.db();
+    let rows = match mover_recall_events::list_reflow_candidates(db, 100).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("[reco] 回灌清单读取失败（本轮按 shadow）: {e}");
+            axagent_analysis_engine::recommender::set_reflow_seed(Vec::new());
+            return 0;
+        },
+    };
+    if rows.is_empty() {
+        axagent_analysis_engine::recommender::set_reflow_seed(Vec::new());
+        return 0;
+    }
+    let flag = settings::get_setting(db, "mover_reflow_merge")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "off".to_string());
+    let codes: Vec<String> = rows.iter().map(|r| r.stock_code.clone()).collect();
+    let settled = match mover_recall_events::count_settled_reflow(db, &codes).await {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::warn!("[reco] 回灌样本数统计失败（本轮按 shadow）: {e}");
+            0
+        },
+    };
+    let ready = axagent_analysis_engine::mover_recall::reflow_ready(settled);
+    if flag != "on" {
+        axagent_analysis_engine::recommender::set_reflow_seed(Vec::new());
+        tracing::info!(
+            "[reco] 回灌清单 shadow：候选 {} 只 / 已结算 {settled}/{}（开关 off ⇒ 不并入）",
+            rows.len(),
+            axagent_analysis_engine::mover_recall::REFLOW_MIN_SETTLED
+        );
+        return 0;
+    }
+    if !ready {
+        axagent_analysis_engine::recommender::set_reflow_seed(Vec::new());
+        tracing::warn!(
+            "[reco] 回灌转正被拒（fail-closed）：已结算 {settled}/{} < 下限 ⇒ 保持 shadow",
+            axagent_analysis_engine::mover_recall::REFLOW_MIN_SETTLED
+        );
+        return 0;
+    }
+    let items: Vec<(String, String, Option<String>)> =
+        rows.into_iter().map(|r| (r.stock_code, r.stock_name, None)).collect();
+    let n = items.len();
+    axagent_analysis_engine::recommender::set_reflow_seed(items);
+    tracing::info!("[reco] 回灌清单已并入候选池：{n} 只（开关 on + 样本 {settled} 达标）");
+    n
+}
+
 /// 把「分析侧自动定档」变量并入 served_vars（fail-open：读不到就按原行为跑）。
 ///
 /// 代际必须由调用方显式给出（`None`=实盘代、`Some(截止日)`=回放代）—— served_vars 是在
@@ -4968,6 +5054,8 @@ pub async fn recommend_stocks_all_periods(
     // 当日涨幅榜入池（第五来源，2026-10-20）：必须先于扫描，且用**本轮的代际**取快照
     // （回放代没有该日快照时返回 0，不拿今日榜冒充历史）。
     refresh_mover_seed(&state, generation.as_deref(), client.as_ref()).await;
+    refresh_reflow_seed(&state).await;
+    refresh_miss_seed(&state).await;
 
     let vars = served_vars_with_analysis_tiers(&state, &served_vars, generation).await;
 

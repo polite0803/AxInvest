@@ -7389,6 +7389,7 @@
       "refresh": "새로고침",
       "empty": "예약된 작업이 없습니다. 오른쪽 위의 '작업 만들기'로 만드세요.",
       "executedOk": "실행이 트리거되었습니다: {{name}}",
+      "resultTitle": "실행 결과",
       "deletedOk": "작업이 삭제되었습니다: {{name}}"
     },
     "execute": {
@@ -18143,6 +18144,8 @@
       "signal": "신호",
       "absenceUndeclared": "결손 미신고",
       "expectedButIdle": "참여 대상이나 제외됨",
+      "icZeroed": "측정 후 0 처리",
+      "icZeroedHint": "이 레그는 사후 측정에서 예측력이 없는 것으로 판정되어(IC 구간이 0을 가로지름) 가중치가 0으로 설정되었습니다. 상류는 여전히 존재하며 배선 오류가 아닙니다.",
       "metaLeg": "메타 제약",
       "upstream": {
         "present": "상류 존재",
@@ -18153,6 +18156,7 @@
       "notChecked": {
         "noOwner": "이 팩터에 등록된 담당 분석가가 없습니다",
         "unregisteredFactor": "이 팩터는 소스 등록표에 없어 판정 대상이 아닙니다",
+        "injectedVarNoKeyTable": "이 레그는 배선 계층에서 직접 주입되며 스냅샷에 대조할 키가 등록되어 있지 않습니다 ⇒ 판정을 적용할 수 없습니다.",
         "tierScoreNotInSnapshot": "기간별 평가 노드의 산출물이 이 기록의 스냅샷에 없어 이 판정은 적용 대상이 아닙니다",
         "noChannelMapping": "이 소스 채널에 저장 키가 등록되어 있지 않습니다(등록표 누락)",
         "unknownReason": "백엔드가 등록되지 않은 사유 코드를 반환했습니다"

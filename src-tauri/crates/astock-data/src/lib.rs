@@ -1118,14 +1118,17 @@ impl AStockClient {
         period: &str,
         adj: Option<crate::types::AdjType>,
     ) -> String {
-        // P1-3: adj 维度 — None/Forward 共用 "fwd"(多数 vendor 默认前复权),
-        // Backward 独立 "bwd", AdjType::None 独立 "raw"。
+        // adj 维度必须与真实语义一致：`None` 在本库就是不复权（Tencent 固定走不复权端点，
+        // Eastmoney 映射 fqt=0），不能与 Forward 共用键 —— 否则先读不复权的请求会把
+        // 原始价留给后到的前复权请求（缓存命中路径不会再走本地复权 fallback）。
+        // `v2` 让旧版 `fwd` 键（可能混入不复权值）整体失效。
         let adj_tag = match adj {
-            None | Some(crate::types::AdjType::Forward) => "fwd",
+            None | Some(crate::types::AdjType::None) => "raw",
+            Some(crate::types::AdjType::Forward) => "fwd",
             Some(crate::types::AdjType::Backward) => "bwd",
-            Some(crate::types::AdjType::None) => "raw",
         };
-        let base = Self::cache_key_for("klines", &format!("{stock_code}:{period}:adj={adj_tag}"));
+        let base =
+            Self::cache_key_for("klines", &format!("v2:{stock_code}:{period}:adj={adj_tag}"));
         // as-of 不再往 key 里塞 `eff=` 派生值：缓存内容本来就是「date <= 截止日」的 K 线，
         // 而截止日已经由 `cache_key_for` 的 `asof-YYYYMMDD` 后缀区分。原先这里用
         // `previous_trading_day()` 折算"有效截止日"，等于把**交易日历的正确性**接进了
@@ -1816,18 +1819,9 @@ impl AStockClient {
                             // 并非 vendor 本身故障。如果将其计入降级计数,会导致
                             // eastmoney 因 cls_flash 空数据被全局降级,进而影响
                             // news/money_flow/peers 等所有依赖 eastmoney 的工具。
-                            let is_empty_data = matches!(
-                                &e,
-                                DataError::VendorError { message, .. }
-                                    if {
-                                        let m = message.to_lowercase();
-                                        m.contains("为空")
-                                            || m.contains("返回空")
-                                            || m.contains("empty")
-                                            || m.contains("no data")
-                                            || m.contains("无数据")
-                                    }
-                            );
+                            // 判据收口到 `DataError::is_empty_data`：分红链路也用同一条，
+                            // 避免「重试时算空数据、调用方却算故障」两套口径。
+                            let is_empty_data = e.is_empty_data();
                             // 只要有任意一次失败不是「空数据」，本轮就不是纯空数据结果，
                             // 保留重试资格（网络抖动、限流等仍值得退避重试）
                             if !is_empty_data {
@@ -2900,7 +2894,27 @@ impl AStockClient {
         // 且用户请求了复权（adj_type 为 Some 且非 None），则本地应用复权因子
         let result = self.apply_local_adjustment_if_needed(result, adj_type, stock_code).await;
 
-        self.cache_set_serialized(cache_key, &result, 300).await;
+        // 复权请求的结果必须带 adj_factor 标记才允许进 "fwd"/"bwd" 缓存。
+        // 否则一次分红取数失败就会把原始价写进复权键，后续同键请求在命中路径
+        // 直接返回，连 fallback 都不会再跑（等于静默降级被缓存固化 5 分钟）。
+        let requires_adj_marker = matches!(
+            adj_type,
+            Some(crate::types::AdjType::Forward) | Some(crate::types::AdjType::Backward)
+        ) && !is_benchmark_code(stock_code);
+        if requires_adj_marker && !result.iter().all(|k| k.adj_factor.is_some()) {
+            // 数据本身是原始价 ⇒ 只允许写 raw 键给不复权请求复用；
+            // 复权键必须留空，让下一次 Forward 重新尝试获取分红/复权。
+            let raw_key =
+                Self::kline_cache_key(stock_code, period, Some(crate::types::AdjType::None));
+            self.cache_set_serialized(raw_key, &result, 300).await;
+            tracing::warn!(
+                stock = %stock_code,
+                adj_type = ?adj_type,
+                "复权结果缺少 adj_factor 标记，仅写入 raw 缓存（避免原始价污染复权键）"
+            );
+        } else {
+            self.cache_set_serialized(cache_key, &result, 300).await;
+        }
         let start = result.len().saturating_sub(limit as usize);
         Ok(result[start..].to_vec())
     }
@@ -2938,32 +2952,47 @@ impl AStockClient {
             return klines;
         }
 
+        // 本地复权只消费分红/送转事件；东财分红报表没有配股字段。
+        // 这是结构性缺口，必须留痕：不能让「已本地复权」被读成「已覆盖全部除权事件」。
+        // 同一 reason 在全局降级日志里会去重，因此这里不会按股票刷屏。
+        crate::as_of::record_degradation_kind(
+            "astock-data",
+            "get_klines::local_adjustment",
+            "本地复权仅覆盖分红/送转；分红源无配股字段，含配股的标的仍可能有价格跳空",
+            crate::as_of::DegradationKind::StructuralGap,
+        );
+
         // 所有 K 线 adj_factor 都为 None → vendor 未应用复权，本地 fallback
         // 获取除权除息事件
         let dividends = match self.get_dividend_records(stock_code).await {
             Ok(records) => records,
             Err(e) => {
+                // 「源明确无分红」是 Ok(empty)，会走下面的恒等复权；
+                // 到这里的是真故障（接口失效/解析失败）。不能伪装成已复权：
+                // 返回未复权 K 线，但同时在降级面板留 Failure，且上方缓存守卫会拒绝
+                // 把它写进 "fwd" 键（只允许落到 "raw" 键）。
                 tracing::warn!(
                     stock = %stock_code,
                     error = %e,
-                    "获取除权事件失败，跳过本地复权 fallback"
+                    "获取除权事件失败，返回未复权 K 线（前复权不可用）"
+                );
+                // 面板只留一条方法级红档（同一 reason 会去重）；具体股票与错误
+                // 由上一条 warn 日志携带，避免全市场分红源故障时按股票刷满 256 条。
+                crate::as_of::record_degradation_kind(
+                    "astock-data",
+                    "get_klines::local_adjustment",
+                    "除权事件不可用，已返回未复权 K 线（前复权不可用）",
+                    crate::as_of::DegradationKind::Failure,
                 );
                 return klines;
             },
         };
 
-        if dividends.is_empty() {
-            tracing::debug!(
-                stock = %stock_code,
-                "无除权事件，本地复权 fallback 无需应用（K 线原样返回）"
-            );
-            return klines;
-        }
-
         // DividendRecord → AdjustmentEvent 转换
         // 注：DividendRecord 不含 rights_ratio/rights_price，配股调整暂缺
         let events: Vec<crate::types::AdjustmentEvent> = dividends
             .iter()
+            .filter(|d| d.dividend_per_share > 0.0 || d.bonus_share_ratio > 0.0)
             .map(|d| crate::types::AdjustmentEvent {
                 stock_code: d.stock_code.clone(),
                 ex_date: d.ex_date.clone(),
@@ -2973,6 +3002,25 @@ impl AStockClient {
                 rights_price: 0.0,
             })
             .collect();
+
+        // 无有效除权事件 ⇒ 恒等复权：价格与 amount 原样保留，只补 adj_factor 标记。
+        // 不能直接返回 adj_factor=None：那会让上层「复权结果必须有标记」的缓存守卫
+        // 放弃缓存，也让下游无法区分「已确认无除权」与「复权根本没做」。
+        // 配股是唯一未覆盖的除权类型；上面的 StructuralGap 已把这条边界显式标出。
+        if events.is_empty() {
+            tracing::debug!(
+                stock = %stock_code,
+                dividends_count = dividends.len(),
+                "无有效除权事件，本地复权为恒等变换（价格不变，补 adj_factor 标记）"
+            );
+            return klines
+                .into_iter()
+                .map(|mut k| {
+                    k.adj_factor = Some(1.0);
+                    k
+                })
+                .collect();
+        }
 
         let factors = crate::adjustment::compute_adj_factors(&klines, &events, adj);
         let adjusted = crate::adjustment::apply_adjustment(&klines, &factors, adj);
@@ -4622,6 +4670,16 @@ impl AStockClient {
         &self,
         stock_code: &str,
     ) -> Result<Vec<DividendRecord>, DataError> {
+        let cache_key = Self::cache_key_for("dividend", stock_code);
+        if let Some(cached) = self.cache_get(&cache_key).await {
+            if let Ok(records) = serde_json::from_str::<Vec<DividendRecord>>(&cached) {
+                // 缓存存**截断前**的全量，读时按当前 data_scope 再截：
+                // 键只含 as_of 日期、不含 data_scope，若把截断结果直接复用，
+                // 结构化回放写下的短列表会漏给非结构化 scope（反之则会泄漏未来事件）。
+                return Ok(Self::truncate_dividend_by_asof(records));
+            }
+        }
+
         let vendor_names: Vec<String> =
             self.routing.dividend.iter().map(|n| n.to_string()).collect();
         let sc = stock_code.to_string();
@@ -4643,8 +4701,23 @@ impl AStockClient {
         {
             // as-of 必须截断：截止日之后的除权/送转是未来信息。
             // `truncate_dividend_by_asof` 早就写好了，但一直没被调用（事件型数据泄露）。
-            Ok(result) => Ok(Self::truncate_dividend_by_asof(result)),
-            Err(_) => Ok(vec![]),
+            Ok(result) => {
+                // 与 K 线 300s TTL 对齐：新除权事件最多滞后 5 分钟进入本地复权，
+                // 同时避免同一只票在多个周期/K 线 miss 时重复打分红接口。
+                // 缓存全量、读时截断（见上方 cache hit 分支的 data_scope 说明）。
+                self.cache_set_serialized(cache_key, &result, 300).await;
+                Ok(Self::truncate_dividend_by_asof(result))
+            },
+            // 源明确回答「没有分红」是答案，不是故障：返空并缓存，
+            // 否则全市场里大量无分红票会把同一接口反复问一遍。
+            Err(e) if e.is_empty_data() => {
+                let empty: Vec<DividendRecord> = Vec::new();
+                self.cache_set_serialized(cache_key, &empty, 300).await;
+                Ok(empty)
+            },
+            // 真故障必须上抛：调用方（尤其本地复权 fallback）要能显式降级，
+            // 不能把它和「确实无分红」压成同一个空数组。
+            Err(e) => Err(e),
         }
     }
 
@@ -9473,5 +9546,45 @@ mod asof_channel_alignment_tests {
                 "{m} 源报错必须留红档: {entries:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod kline_adj_cache_tests {
+    use super::*;
+    use crate::as_of::AS_OF;
+    use serial_test::serial;
+
+    /// 回归：不复权与前复权共用 `"fwd"` 键时，先到的原始价会被后到的复权请求
+    /// 从缓存直接返回（命中路径不跑本地复权）。`None` 在本库就是不复权，
+    /// 必须与 `Some(AdjType::None)` 同键、与 Forward 分键；v2 让旧键整体失效。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn raw_and_forward_never_share_a_kline_cache_key() {
+        AS_OF
+            .scope(None, async {
+                let raw = AStockClient::kline_cache_key("600519", "daily", None);
+                let explicit_raw = AStockClient::kline_cache_key(
+                    "600519",
+                    "daily",
+                    Some(crate::types::AdjType::None),
+                );
+                let fwd = AStockClient::kline_cache_key(
+                    "600519",
+                    "daily",
+                    Some(crate::types::AdjType::Forward),
+                );
+                let bwd = AStockClient::kline_cache_key(
+                    "600519",
+                    "daily",
+                    Some(crate::types::AdjType::Backward),
+                );
+
+                assert_eq!(raw, explicit_raw, "None 与 Some(None) 都是不复权，可共用 raw 键");
+                assert_ne!(raw, fwd, "不复权与前复权绝不能共用缓存键");
+                assert_ne!(fwd, bwd, "前复权与后复权必须分开");
+                assert!(raw.contains("v2:"), "K 线键升 v2 让旧 fwd 缓存整体失效: {raw}");
+            })
+            .await;
     }
 }

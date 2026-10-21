@@ -1556,7 +1556,7 @@ type AlgoToolRow = (
 ///   ⚠ 门值取 **172 而不是 171**：现网已被 171 播种过一次，门读 `previous_version < 门值` ⇒
 ///   用 171 时那批库的 `previous_version` 恰为 171，条件不成立、覆写永不发生。
 ///   承载覆写的版本号必须**严格大于**已被播种掉的版本号。
-pub const TEMPLATE_VERSION: i32 = 172;
+pub const TEMPLATE_VERSION: i32 = 173; // v173: 四份档模板 rhai 透传 icStatus/icZeroed
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///

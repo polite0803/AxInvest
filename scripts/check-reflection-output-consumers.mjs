@@ -188,6 +188,26 @@ const ENTRIES = [
     ],
   },
   {
+    key: "mover_recall_events.reflow_pending",
+    why: "反思判定「本应入池」的结论必须既可复核又被消费 —— 只写清单不消费＝又一条只写不读的链",
+    producer: {
+      file: "src-tauri/src/commands/stock_workflow/reflection.rs",
+      literal: "mark_reflow_pending",
+    },
+    consumers: [
+      {
+        file: "src-tauri/src/commands/stock_analysis.rs",
+        literal: "refresh_reflow_seed",
+        note: "荐股扫描前读清单，按「人工开关 + 样本下限」决定是否并入种子（默认 shadow）",
+      },
+      {
+        file: "src/components/stock-analysis/MoverRecallPanel.tsx",
+        literal: "list_mover_reflow_candidates",
+        note: "面板三态展示候选与转正就绪度（可复核）",
+      },
+    ],
+  },
+  {
     key: "MoverCellSignal",
     why: "漏检降权信号是荐股闭环「只降不升」的输入；不消费则 `l3_scored_out` 的账永远不落到权重上",
     producer: {

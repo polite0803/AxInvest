@@ -55,6 +55,10 @@ export function MoverRecallPanel() {
   // 深链指定的轮次不在已落库列表里 ⇒ 单独成句，不能悄悄退回重算
   const [runGone, setRunGone] = useState<string | null>(null);
   /** D-3：补分析批次的三态 —— 从未发起 / 最近一批 / 读不到（第三态不得冒充前两者）。 */
+  /** D-4：回灌清单三态（无候选 / 样本不足保持 shadow / 可转正）。 */
+  const [reflow, setReflow] = useState<
+    { items: number; codes: string[]; settled: number; required: number; ready: boolean } | null
+  >(null);
   const [batchInfo, setBatchInfo] = useState<
     { kind: "never" } | { kind: "latest"; status: string } | { kind: "unknown" } | null
   >(null);
@@ -184,6 +188,40 @@ export function MoverRecallPanel() {
         );
       } catch {
         if (!cancelled) { setBatchInfo({ kind: "unknown" }); }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [listNonce]);
+
+  // D-4：回灌清单与核查轮次独立取 —— 它是跨轮次的，且读失败只影响这一行。
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const v = await invoke<
+          {
+            items?: { stockCode?: string }[];
+            settled?: number;
+            required?: number;
+            ready?: boolean;
+          } | null
+        >("list_mover_reflow_candidates", {});
+        if (cancelled) { return; }
+        if (!v || !Array.isArray(v.items) || typeof v.settled !== "number") {
+          setReflow(null);
+          return;
+        }
+        setReflow({
+          items: v.items.length,
+          codes: v.items.slice(0, 5).map((i) => String(i?.stockCode ?? "")).filter(Boolean),
+          settled: v.settled,
+          required: v.required ?? 0,
+          ready: v.ready === true,
+        });
+      } catch {
+        if (!cancelled) { setReflow(null); }
       }
     })();
     return () => {
@@ -354,6 +392,26 @@ export function MoverRecallPanel() {
             data-testid="mover-recall-run-gone"
           >
             {t("stockAnalysis.moverRecall.runGone", { id: runGone })}
+          </div>
+        )
+        : null}
+
+      {/* D-4：回灌清单三态 —— 样本不足只能说 shadow，不能说「可转正」 */}
+      {reflow
+        ? (
+          <div
+            style={{ color: "var(--color-text-tertiary)", marginBottom: 6 }}
+            data-testid={`mover-reflow-${reflow.items === 0 ? "none" : reflow.ready ? "ready" : "pending"}`}
+          >
+            {reflow.items === 0
+              ? t("stockAnalysis.moverRecall.reflowNone")
+              : reflow.ready
+              ? t("stockAnalysis.moverRecall.reflowReady", { count: reflow.items })
+              : t("stockAnalysis.moverRecall.reflowPending", {
+                count: reflow.items,
+                need: Math.max(0, reflow.required - reflow.settled),
+              })}
+            {reflow.items > 0 && reflow.codes.length > 0 ? ` · ${reflow.codes.join(", ")}` : ""}
           </div>
         )
         : null}

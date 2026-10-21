@@ -89,6 +89,7 @@ pub async fn analyze_mover_recall(
     state: tauri::State<'_, AppState>,
     to: Option<String>,
 ) -> Result<Vec<MoverRecallView>, String> {
+    ensure_close_history(state.harness.db(), &state.astock_client).await;
     let mut views = analyze_mover_recall_inner(state.harness.db(), to).await?;
     // 面板每链只展示 top 200（inner 保留全集供调度侧落 mover_recall_events）
     for v in views.iter_mut() {
@@ -109,6 +110,8 @@ struct SharedFacts {
     universe_confirmed: i64,
     rules: Vec<mover_recall::TierRule>,
     by_stock: mover_recall::CloseSeriesByCode,
+    /// 全局收盘日期序列（升序）—— 逐档窗口起点按它反推，避免每档各算一套日期。
+    close_dates: Vec<String>,
     picks: Vec<reco_picks::Model>,
     trim_evidence: HashMap<(String, String), Vec<String>>,
 }
@@ -136,7 +139,6 @@ pub async fn analyze_mover_recall_inner(
             )
             .to_string());
     }
-    let from = close_dates.first().cloned().unwrap_or_default();
     let to = to.unwrap_or_else(|| close_dates.last().cloned().unwrap_or_default());
     let upper = if to.as_str() > close_dates.last().map(String::as_str).unwrap_or("") {
         close_dates.last().cloned().unwrap_or_default()
@@ -146,20 +148,27 @@ pub async fn analyze_mover_recall_inner(
     // 采集日数只数到 `upper`（事件锚点不可能晚于它）——某档可判定 ⇔ 本值 ≥ window_days
     let collected_days = close_dates.iter().take_while(|d| d.as_str() <= upper.as_str()).count();
 
+    // 取数与「数据起点」都只回看到最长档窗口起点：库里有十年历史也不该把核查拖成十年。
+    let max_window = rules.iter().map(|r| r.window_days).max().unwrap_or(1) as usize;
+    let from = close_dates
+        .get(collected_days.saturating_sub(max_window))
+        .cloned()
+        .unwrap_or_else(|| close_dates.first().cloned().unwrap_or_default());
     let by_stock = mover_recall::load_closes_by_stock(db, &from, &upper).await?;
     let picks = mover_recall::load_picks_in_range(db, &from, &upper, None).await?;
     let trim_evidence = mover_recall::load_trim_evidence(db, &from, &upper, None).await?;
     let (universe_size, universe_confirmed) = mover_recall::load_universe_counts(db).await?;
 
     let facts = SharedFacts {
+        data_since: from.clone(),
         from,
         to: upper,
-        data_since: close_dates.first().cloned().unwrap_or_default(),
         collected_days,
         universe_size,
         universe_confirmed,
         rules,
         by_stock,
+        close_dates,
         picks,
         trim_evidence,
     };
@@ -180,9 +189,24 @@ fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
     let mut events_total = 0usize;
     let mut events_by_tier: BTreeMap<String, usize> = BTreeMap::new();
 
+    let mut judgeable_starts: Vec<String> = Vec::new();
     for rule in &f.rules {
         let tier_active = mover_recall::chain_period_has_active_style(chain, rule.period);
-        let evs = mover_recall::events_for_tier(&f.by_stock, rule, &f.from, &f.to);
+        // 逐档只看**最近一个窗口**：窗口长度 = 本档 holding days，右端 = 最新收盘日。
+        // 旧实现从最早采集日滚到最新 ⇒ 同一只票在每个滚动窗口各算一次（62 条「超短漏检」
+        // 里有 38 只票反复出现），而且把「历史所有窗口」当成「本次漏检」。
+        let tier_start = f
+            .collected_days
+            .checked_sub(rule.window_days as usize)
+            .and_then(|i| f.close_dates.get(i))
+            .cloned();
+        if let Some(start) = &tier_start {
+            judgeable_starts.push(start.clone());
+        }
+        let evs: Vec<_> = mover_recall::events_for_tier(&f.by_stock, rule, &f.from, &f.to)
+            .into_iter()
+            .filter(|ev| ev.anchor_date == f.to)
+            .collect();
         for mut ev in evs {
             events_total += 1;
             *events_by_tier.entry(rule.period.as_str().to_string()).or_default() += 1;
@@ -289,9 +313,12 @@ fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
     // 注意：inner 返回**全集**（P2 落 mover_recall_events 需要），200 条截断是面板表现层
     // 关注点，由薄命令 analyze_mover_recall 在返回前做；persist 走全集。
 
+    // 区间 = 本轮**可判档**里最早的窗口起点（不是最早采集日）：长档未满时不该把
+    // 「一个月前」写成本轮口径。没有可判档 ⇒ 退化成 to 本身。
+    let view_from = judgeable_starts.into_iter().min().unwrap_or_else(|| f.to.clone());
     MoverRecallView {
         chain: chain.as_str().to_string(),
-        from: f.from.clone(),
+        from: view_from,
         to: f.to.clone(),
         data_since: f.data_since.clone(),
         collected_days: f.collected_days,
@@ -749,6 +776,356 @@ pub async fn get_mover_recall_run_view(
     Ok(Some(MoverRecallRunView { run: run_meta_of(&run), view }))
 }
 
+/// 回灌清单条目（D-4）：一条「反思判定本应入池」的漏检票。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoverReflowCandidate {
+    pub event_id: String,
+    pub stock_code: String,
+    pub stock_name: String,
+    pub period: String,
+    pub anchor_date: String,
+    /// 反思给出的理由（`reflow_note`；旧行可能为空）
+    pub note: Option<String>,
+}
+
+/// 回灌清单 + 转正就绪度。
+///
+/// `ready = settled >= required`（fail-closed 的下限）；**三态由面板成句**：
+/// 无候选 / 有候选但样本不足（shadow）/ 可转正（仍需人工确认才并入种子）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoverReflowView {
+    pub items: Vec<MoverReflowCandidate>,
+    pub settled: usize,
+    pub required: usize,
+    pub ready: bool,
+}
+
+/// 读回灌清单（只读；不改状态）。
+#[agent_command(
+    domain = "finance",
+    safety = Safe,
+    call_mode = StateInput,
+    description = "读取漏检回灌清单与转正就绪度"
+)]
+#[tauri::command]
+pub async fn list_mover_reflow_candidates(
+    state: tauri::State<'_, AppState>,
+) -> Result<MoverReflowView, String> {
+    let db = state.harness.db();
+    let rows = axagent_dao::repo::mover_recall_events::list_reflow_candidates(db, 100)
+        .await
+        .map_err(|e| run_read_err(format!("读回灌清单失败: {e}")))?;
+    let codes: Vec<String> = rows.iter().map(|r| r.stock_code.clone()).collect();
+    let settled = axagent_dao::repo::mover_recall_events::count_settled_reflow(db, &codes)
+        .await
+        .map_err(|e| run_read_err(format!("统计已结算样本失败: {e}")))?;
+    Ok(MoverReflowView {
+        items: rows
+            .into_iter()
+            .map(|r| MoverReflowCandidate {
+                event_id: r.id,
+                stock_code: r.stock_code,
+                stock_name: r.stock_name,
+                period: r.period,
+                anchor_date: r.anchor_date,
+                note: r.reflow_note,
+            })
+            .collect(),
+        settled,
+        required: axagent_analysis_engine::mover_recall::REFLOW_MIN_SETTLED,
+        ready: axagent_analysis_engine::mover_recall::reflow_ready(settled),
+    })
+}
+/// 自动窗口的数据前提：本地收盘历史不足最长档（90 个交易日）时，用日线补齐一次。
+///
+/// 只在**不足**时跑（首轮约 680 次日线请求，之后每天有快照就不再触发）；失败不阻断核查 ——
+/// 达不到的长档会如实显示「窗口未满」，不伪装成「无漏检」。
+pub(crate) async fn ensure_close_history(
+    db: &DatabaseConnection,
+    client: &axagent_astock_data::AStockClient,
+) {
+    const LONGEST_WINDOW: u32 = 90;
+    let have = mover_recall::load_close_dates(db).await.map(|d| d.len()).unwrap_or(0);
+    if have as u32 >= LONGEST_WINDOW {
+        return;
+    }
+    tracing::info!(
+        "[mover-recall] 本地收盘历史 {have} 天 < {LONGEST_WINDOW} ⇒ 用日线补齐（自动窗口）"
+    );
+    if let Err(e) = axagent_analysis_engine::market_close_store::backfill_close_history(
+        db,
+        client,
+        LONGEST_WINDOW,
+        120,
+    )
+    .await
+    {
+        tracing::warn!("[mover-recall] 历史回补失败（长档将如实显示窗口未满）: {e}");
+    }
+}
+
+/// 一轮核查的结果（供调用方决定「有没有漏检要不要通知」+ 任务摘要）。
+pub(crate) struct MoverCheckOutcome {
+    pub summary: String,
+    pub misses: usize,
+}
+
+/// 手动与 cron 共用的核查入口：算两链视图 → 逐链落库 → 拼任务摘要。
+///
+/// 抽出来的理由（2026-10-21 实机反馈）：此前「立即执行」只调用调度器的 `trigger_now`
+/// 并立刻返回「已触发」，用户点完看不到任何结果。核查本身是**快**任务（一次库内扫描），
+/// 手动路径应当直接等它跑完并把摘要返回。
+/// `trigger_source` 由调用方给：手动 `manual` / 定时 `scheduler`（F-15 的区分）。
+/// 四档的展示名目（顺序固定；判据本身来自 `view.rules`，这里只管称呼）。
+const TIER_LABELS: [(&str, &str); 4] =
+    [("ultra_short", "超短期"), ("short", "短期"), ("mid", "中期"), ("long", "长期")];
+
+/// 每档最多列多少只（任务摘要不是导出表；剩下的用「等 N 只」交代）。
+const SUMMARY_PER_TIER: usize = 8;
+
+/// 单链摘要（纯函数）：**先列票，再说处置**。
+///
+/// 用户口径（2026-10-21）：「超短期：某某股上涨** / … / 以上股票被漏检，开始对它们进行反思」。
+/// 因此这里不做率的陈述，而是逐档给出**被漏检的票 + 累计涨幅**；三类别混淆必须分开：
+///   ① 窗口未满 ⇒ 「尚不可判定」；
+///   ② 本链该档按设计不做 ⇒ 「不适用，不是漏检」；
+///   ③ 有可判事件且确实没有漏检 ⇒ 「无漏检」。
+/// 率算不出来不进摘要（分母 0 时印 `NaN` 只会制造第二个歧义）。
+fn chain_summary_lines(view: &MoverRecallView) -> Vec<String> {
+    let chain = if view.chain == "serenity" {
+        RecoChain::Serenity
+    } else {
+        RecoChain::Reco
+    };
+    let mut body: Vec<String> = Vec::new();
+    let mut judgeable_tiers = 0usize;
+    for (key, label) in TIER_LABELS {
+        let Some(rule) = view.rules.iter().find(|r| r.period.as_str() == key) else {
+            body.push(format!("{label}：本档判据缺失（阈值变量无效）"));
+            continue;
+        };
+        if view.collected_days < rule.window_days as usize {
+            body.push(format!(
+                "{label}：窗口未满（已采 {}/需 {} 个交易日）⇒ 尚不可判定",
+                view.collected_days, rule.window_days
+            ));
+            continue;
+        }
+        if !mover_recall::chain_period_has_active_style(chain, rule.period) {
+            body.push(format!("{label}：按设计不做此档 ⇒ 不适用，不是漏检"));
+            continue;
+        }
+        judgeable_tiers += 1;
+        let mut rows: Vec<&MissRow> =
+            view.misses.iter().filter(|m| m.event.period == key).collect();
+        rows.sort_by(|a, b| b.event.cum_gain_pct.total_cmp(&a.event.cum_gain_pct));
+        // 同一只票在同一档可能有多条窗口事件（不同 anchor）⇒ 清单按票去重，保留涨幅最大的那条；
+        // 否则同一行里会出现「某某 +21.0%；某某 +20.3%」这种看起来像两只票的重复。
+        let mut seen_codes = std::collections::HashSet::new();
+        rows.retain(|m| seen_codes.insert(m.event.stock_code.clone()));
+        if rows.is_empty() {
+            body.push(format!("{label}：无漏检"));
+            continue;
+        }
+        let listed: Vec<String> = rows
+            .iter()
+            .take(SUMMARY_PER_TIER)
+            .map(|m| {
+                format!(
+                    "{} {} {:+.1}%",
+                    m.event.stock_code, m.event.stock_name, m.event.cum_gain_pct
+                )
+            })
+            .collect();
+        let more = if rows.len() > SUMMARY_PER_TIER {
+            format!("（等共 {} 只）", rows.len())
+        } else {
+            String::new()
+        };
+        body.push(format!("{label}：{}{more}", listed.join("；")));
+    }
+    if view.rates.misses > 0 {
+        let mut codes = std::collections::HashSet::new();
+        for m in &view.misses {
+            codes.insert(m.event.stock_code.as_str());
+        }
+        body.push(format!(
+            "以上 {} 条漏检事件（涉及 {} 只票）：已写入待补分析队列（每日 06:00 补分析后进入反思），             下一轮智能荐股会把它们作为候选重新评估",
+            view.rates.misses,
+            codes.len()
+        ));
+    } else if judgeable_tiers == 0 {
+        body.push("本链本窗没有可判定档位 ⇒ 不适用，不是「零漏检」".to_string());
+    }
+    // 表头也不许印误导性的 0：没有可判档 / 没有达标事件时，漏检数用「—」并注明原因。
+    let miss_cell = if judgeable_tiers == 0 {
+        "—（无可判定档）".to_string()
+    } else if view.rates.events == 0 {
+        "—（本窗无达标事件）".to_string()
+    } else {
+        view.rates.misses.to_string()
+    };
+    let mut out = vec![format!(
+        "[{}] 区间 {}~{} 达标={} 漏检={miss_cell}",
+        view.chain, view.from, view.to, view.rates.events
+    )];
+    out.extend(body);
+    out
+}
+
+pub(crate) async fn run_mover_recall_check(
+    db: &DatabaseConnection,
+    client: &axagent_astock_data::AStockClient,
+    trigger_source: &str,
+) -> Result<MoverCheckOutcome, String> {
+    ensure_close_history(db, client).await;
+    let views = analyze_mover_recall_inner(db, None).await?;
+    let mut lines: Vec<String> = Vec::new();
+    let mut misses = 0usize;
+    for view in &views {
+        misses += view.rates.misses;
+        // 快照落库失败不把整轮判失败（结果已算出），只在那一行留痕
+        let persist_msg = match persist_mover_recall_run(db, view, trigger_source).await {
+            Ok(run_id) => format!("run_id={run_id}"),
+            Err(e) => format!("快照落库失败: {}", crate::commands::error::error_text_for_prose(&e)),
+        };
+        for line in chain_summary_lines(view) {
+            lines.push(line);
+        }
+        if let Some(last) = lines.last_mut() {
+            last.push_str(&format!(" | {persist_msg}"));
+        }
+    }
+    Ok(MoverCheckOutcome {
+        summary: lines.join(
+            "
+",
+        ),
+        misses,
+    })
+}
+#[cfg(test)]
+mod summary_line_tests {
+    use super::*;
+    use axagent_analysis_engine::mover_recall::{LayerRow, MissLayer, MoverEvent, TierRule};
+    use axagent_harness::holding_period::Period;
+
+    fn rule(period: Period, gain: f64, days: u32) -> TierRule {
+        TierRule { period, var_name: "mover_gain_x", gain_pct: gain, window_days: days }
+    }
+
+    fn view(
+        chain: &str,
+        collected_days: usize,
+        by_design: usize,
+        misses: Vec<(&str, &str, f64, Period)>,
+    ) -> MoverRecallView {
+        let miss_rows: Vec<MissRow> = misses
+            .into_iter()
+            .map(|(code, name, gain, period)| MissRow {
+                event: MoverEvent {
+                    stock_code: code.to_string(),
+                    stock_name: name.to_string(),
+                    period: period.as_str().to_string(),
+                    anchor_date: "2026-10-20".to_string(),
+                    window_start: "2026-10-19".to_string(),
+                    window_days: period.default_holding_days(),
+                    cum_gain_pct: gain,
+                    max_daily_pct: 10.0,
+                    threshold_pct: 10.0,
+                    market_type: "main_sz".to_string(),
+                    recommended: false,
+                },
+                layer: MissLayer::NotInPool,
+                picked_any_period: false,
+                scored_out_styles: vec![],
+            })
+            .collect();
+        MoverRecallView {
+            chain: chain.to_string(),
+            from: "2026-09-30".to_string(),
+            to: "2026-10-20".to_string(),
+            data_since: "2026-09-30".to_string(),
+            collected_days,
+            universe_size: 681,
+            universe_confirmed: 595,
+            rules: vec![
+                rule(Period::UltraShort, 10.0, 2),
+                rule(Period::Short, 20.0, 5),
+                rule(Period::Mid, 30.0, 28),
+                rule(Period::Long, 40.0, 90),
+            ],
+            rates: axagent_analysis_engine::mover_recall::RecallRates {
+                reachability: f64::NAN,
+                coverage: f64::NAN,
+                unexplained_share: f64::NAN,
+                events: 77,
+                misses: miss_rows.len(),
+            },
+            layers: if by_design == 0 {
+                vec![]
+            } else {
+                vec![LayerRow {
+                    layer: MissLayer::ByDesign,
+                    count: by_design,
+                    by_market_type: vec![],
+                }]
+            },
+            events_by_tier: None,
+            misses: miss_rows,
+        }
+    }
+
+    /// 用户口径：逐档列票 + 涨幅；智选「整链按设计不做」必须说「不适用」而不是「漏检=0」。
+    #[test]
+    fn summary_lists_missed_stocks_per_tier() {
+        let lines = chain_summary_lines(&view(
+            "reco",
+            9,
+            0,
+            vec![
+                ("002696", "百洋股份", 21.3, Period::UltraShort),
+                ("300750", "宁德时代", 12.5, Period::UltraShort),
+            ],
+        ));
+        let text = lines.join(
+            "
+",
+        );
+        assert!(text.contains("超短期：002696 百洋股份 +21.3%；300750 宁德时代 +12.5%"), "{text}");
+        assert!(text.contains("以上 2 条漏检事件（涉及 2 只票）"), "{text}");
+        // 未满档必须说「尚不可判定」，不能混成「无漏检」
+        assert!(text.contains("中期：窗口未满"), "{text}");
+        assert!(!text.contains("NaN"), "摘要里不得出现 NaN：{text}");
+
+        // 智选：短/超短按设计不做，中/长窗口未满 ⇒ 不得出现「漏检=0」或「无漏检」
+        let ser = chain_summary_lines(&view("serenity", 9, 77, vec![])).join(
+            "
+",
+        );
+        assert!(ser.contains("超短期：按设计不做此档"), "{ser}");
+        assert!(ser.contains("短期：按设计不做此档"), "{ser}");
+        assert!(ser.contains("没有可判定档位"), "{ser}");
+        assert!(!ser.contains("漏检=0"), "{ser}");
+        assert!(!ser.contains("无漏检"), "{ser}");
+    }
+
+    /// 真·零漏检（有可判事件、判据成立、没有漏检）才允许写「无漏检」。
+    #[test]
+    fn real_zero_miss_says_no_miss() {
+        let mut v = view("reco", 9, 0, vec![]);
+        v.rules = vec![rule(Period::UltraShort, 10.0, 2)];
+        let text = chain_summary_lines(&v).join(
+            "
+",
+        );
+        assert!(text.contains("超短期：无漏检"), "{text}");
+        assert!(!text.contains("不适用"), "{text}");
+    }
+}
+
 #[cfg(test)]
 mod stored_run_tests {
     use super::*;
@@ -878,6 +1255,9 @@ mod chain_attribution_tests {
                 styles.iter().map(|s| s.to_string()).collect(),
             );
         }
+        // 夹具的日期序列：够 `collected_days` 个即可（只用于反推逐档窗口起点）
+        let close_dates: Vec<String> =
+            (0..collected_days).map(|i| format!("2026-09-{:02}", 1 + i % 28)).collect();
         SharedFacts {
             from: from.to_string(),
             to: to.to_string(),
@@ -887,6 +1267,7 @@ mod chain_attribution_tests {
             universe_confirmed: 2,
             rules: mover_recall::tier_rules_from_vars(&[]),
             by_stock,
+            close_dates,
             picks,
             trim_evidence,
         }

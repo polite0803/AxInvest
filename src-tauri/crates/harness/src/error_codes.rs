@@ -425,6 +425,24 @@ pub fn error_json(code: &str, detail: impl Into<String>) -> String {
     .to_string()
 }
 
+/// 把错误串渲染为**日志形态**：折叠仅服务前端插值的重复字段，保留错误全文。
+///
+/// `error_json` 的产物形如 `{code, category, detail, params}`，其中
+/// `params.detail` 与顶层 `detail` **逐字相同** —— 那是给前端
+/// `t("error.${code}", params)` 做插值用的；日志不插值，把整个 JSON 摊进
+/// 日志会让同一段文本在单行里出现两次（2026-10-21 实测单行 ≈850 字符，
+/// 且同一次网关超时有两条 WARN 各展开一遍）。
+/// 本函数把该形态折叠为 `{code}: {detail}`；非该形态（普通错误串）原样返回。
+pub fn error_for_log(raw: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw)
+        && let Some(code) = v.get("code").and_then(|c| c.as_str())
+        && let Some(detail) = v.get("detail").and_then(|d| d.as_str())
+    {
+        return format!("{code}: {detail}");
+    }
+    raw.to_string()
+}
+
 /// 论文/文献相关错误码
 pub mod paper {
     /// 论文概览未找到
@@ -478,4 +496,35 @@ pub mod unity {
 pub mod ontology {
     /// 请求的能力域未在 `domain_ontology::ONTOLOGY_DOMAINS` 注册本体
     pub const DOMAIN_UNREGISTERED: &str = "DOMAIN_UNREGISTERED";
+}
+
+#[cfg(test)]
+mod error_for_log_tests {
+    use super::*;
+
+    /// 生产形态（2026-10-21 实测日志）：error_json 产物内 `params.detail` 与顶层
+    /// `detail` 逐字重复，日志渲染必须只留一份并保留 code 前缀。
+    #[test]
+    fn renders_error_json_without_param_duplication() {
+        let raw = error_json(llm::CALL_FAILED, "LLM 流式调用失败: 上游网关响应头超时");
+        let rendered = error_for_log(&raw);
+        assert_eq!(rendered, "LLM_CALL_FAILED: LLM 流式调用失败: 上游网关响应头超时");
+        assert!(!rendered.contains("params"), "前端插值专用的 params 不得进日志：{rendered}");
+    }
+
+    /// 普通错误串（非 error_json 形态）必须原样返回 —— 真实 provider 错误
+    /// 不能被折叠改写，保证其余日志点的行为零漂移。
+    #[test]
+    fn passes_through_plain_strings() {
+        let raw = "OpenAI API error 401: invalid api key";
+        assert_eq!(error_for_log(raw), raw);
+        assert_eq!(error_for_log(""), "");
+    }
+
+    /// 形似 JSON 但缺 code/detail 时不得渲染 —— 宁可原样，不可丢信息。
+    #[test]
+    fn leaves_partial_shapes_untouched() {
+        let partial = r#"{"category":"retryable"}"#;
+        assert_eq!(error_for_log(partial), partial);
+    }
 }

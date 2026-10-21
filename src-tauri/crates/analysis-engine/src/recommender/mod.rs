@@ -174,6 +174,12 @@ pub fn get_user_seed() -> Vec<SeedItem> {
 /// 涨幅榜依赖收盘快照是否采到，混在一起会让「快照没采」看起来像「用户没自选」。
 static MOVER_SEED: LazyLock<RwLock<Vec<SeedItem>>> = LazyLock::new(|| RwLock::new(Vec::new()));
 
+/// 漏检核查直供的进程内快照（同 MOVER_SEED：命令在扫描前覆盖写入，空列表也写）。
+static MISS_SEED: LazyLock<RwLock<Vec<SeedItem>>> = LazyLock::new(|| RwLock::new(Vec::new()));
+
+/// 回灌清单的进程内快照（同 MOVER_SEED：由命令在扫描前覆盖写入，空列表也写）。
+static REFLOW_SEED: LazyLock<RwLock<Vec<SeedItem>>> = LazyLock::new(|| RwLock::new(Vec::new()));
+
 /// 设置当日涨幅榜标的（覆盖语义；由荐股命令在扫描前写入，空列表也写）。
 pub fn set_mover_seed(seed: Vec<SeedItem>) {
     tracing::info!("[reco] 注入 {} 条涨幅榜标的到候选池来源", seed.len());
@@ -183,6 +189,28 @@ pub fn set_mover_seed(seed: Vec<SeedItem>) {
 /// 读取当日涨幅榜标的。
 pub fn get_mover_seed() -> Vec<SeedItem> {
     MOVER_SEED.read().clone()
+}
+
+/// 回灌清单标的（D-4）：反思判定「本应入池」的漏检票；由荐股命令在扫描前**覆盖**写入。
+pub fn set_reflow_seed(seed: Vec<SeedItem>) {
+    tracing::info!("[reco] 注入 {} 条回灌标的到候选池来源", seed.len());
+    *REFLOW_SEED.write() = seed;
+}
+
+/// 读取回灌清单标的。
+pub fn get_reflow_seed() -> Vec<SeedItem> {
+    REFLOW_SEED.read().clone()
+}
+
+/// 漏检核查直供的标的（窗口达标但荐股没推荐）；由荐股命令在扫描前**覆盖**写入。
+pub fn set_miss_seed(seed: Vec<SeedItem>) {
+    tracing::info!("[reco] 注入 {} 条漏检样本到候选池来源", seed.len());
+    *MISS_SEED.write() = seed;
+}
+
+/// 读取漏检样本标的。
+pub fn get_miss_seed() -> Vec<SeedItem> {
+    MISS_SEED.read().clone()
 }
 
 /// 用户选定的**整池板块过滤**（`auto`/`all` ⇒ `None` 不限制）。
@@ -849,6 +877,31 @@ async fn prepare_scan(
         tracing::info!(
             "[reco] 涨幅榜标的 {} 条已并入候选池（新增 {added} 条，池={}）",
             mover_seed.len(),
+            seed.len()
+        );
+    }
+
+    // 注入**漏检核查直供**（第七来源）：窗口达标但荐股没推荐，是本链最贵的反证样本。
+    // 放在回灌清单之前合并 ⇒ 它的票排在「反思判断」的票之前（事实优先于判断）。
+    let miss_seed = get_miss_seed();
+    if !miss_seed.is_empty() {
+        let added = merge_extra_seed(&mut seed, &mut raw_seed, &miss_seed);
+        seed_pool_origin.mover_miss = added;
+        tracing::info!(
+            "[reco] 漏检样本 {} 条已并入候选池（新增 {added} 条，池={}）",
+            miss_seed.len(),
+            seed.len()
+        );
+    }
+
+    // 注入**回灌清单**（D-4，第六来源）：与涨幅榜分列计数；放在它之后合并 ⇒ 回灌票排在涨幅榜之前。
+    let reflow_seed = get_reflow_seed();
+    if !reflow_seed.is_empty() {
+        let added = merge_extra_seed(&mut seed, &mut raw_seed, &reflow_seed);
+        seed_pool_origin.reflow = added;
+        tracing::info!(
+            "[reco] 回灌标的 {} 条已并入候选池（新增 {added} 条，池={}）",
+            reflow_seed.len(),
             seed.len()
         );
     }

@@ -158,6 +158,62 @@ pub async fn mark_reflow_pending(
     Ok(result.rows_affected)
 }
 
+/// 最近一轮**荐股链**核查里「池子没收」的票（`not_in_pool` / `unexplained`）。
+///
+/// 这两层才是「已被市场验证该涨、而候选池没看见」的反证样本；`l3_scored_out` 是评分算过并主动淘汰的，
+/// 再回灌只会与评分口径打架；`other_period` / `by_design` / `pool_degraded` 都不属于「池子漏了它」。
+/// 按涨幅降序、按票去重，供荐股扫描前并入候选池。
+pub async fn latest_reco_miss_codes(
+    db: &DatabaseConnection,
+    limit: usize,
+) -> Result<Vec<(String, String)>, DbErr> {
+    use axagent_entities::mover_recall_runs;
+    let Some(run) = mover_recall_runs::Entity::find()
+        .filter(mover_recall_runs::Column::Chain.eq("reco"))
+        .order_by_desc(mover_recall_runs::Column::CreatedAtMs)
+        .one(db)
+        .await?
+    else {
+        return Ok(Vec::new());
+    };
+    let rows = Entity::find()
+        .filter(Column::RunId.eq(run.id))
+        .filter(Column::MissLayer.is_in(["not_in_pool", "unexplained"]))
+        .order_by_desc(Column::CumGainPct)
+        .all(db)
+        .await?;
+    let mut seen = std::collections::HashSet::new();
+    Ok(rows
+        .into_iter()
+        .filter(|r| seen.insert(r.stock_code.clone()))
+        .take(limit)
+        .map(|r| (r.stock_code, r.stock_name))
+        .collect())
+}
+
+/// 回灌候选里**已有结算样本**的只数（`decision_validations` 里出现过该票）。
+///
+/// 这是转正判据的「样本量」输入：没有结算就没有后验，任何转正都只是偏好。
+/// ⚠ 只数**实盘代**（`as_of_date IS NULL`）：回放批次的结算行带截止日，混进来会让
+/// 「样本够了」被一次回放的量凑出来，而转正后跑的是实盘 —— 与权重闭环、
+/// `list_decision_validations` 同一代际口径。
+pub async fn count_settled_reflow(
+    db: &DatabaseConnection,
+    codes: &[String],
+) -> Result<usize, DbErr> {
+    if codes.is_empty() {
+        return Ok(0);
+    }
+    let rows = axagent_entities::decision_validations::Entity::find()
+        .filter(axagent_entities::decision_validations::Column::AsOfDate.is_null())
+        .filter(axagent_entities::decision_validations::Column::StockCode.is_in(codes.to_vec()))
+        .all(db)
+        .await?;
+    let settled: std::collections::HashSet<&str> =
+        rows.iter().map(|r| r.stock_code.as_str()).collect();
+    Ok(settled.len())
+}
+
 /// 回灌清单（跨轮次，最新在前）：尚未被消费的 `reflow_pending` 事件。
 /// 只读、不改状态 —— 消费在 `refresh_mover_seed`，且必须过 fail-closed 判据。
 pub async fn list_reflow_candidates(

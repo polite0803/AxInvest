@@ -285,6 +285,12 @@ pub struct BranchLegAudit {
     pub upstream: UpstreamState,
     /// L4：不参与时是否有交代
     pub absence_declared: bool,
+    /// 裁决层的腿预测力状态（`untested` / `insufficient_sample` / `ok` / `ci_spans_zero`）。
+    /// `None` = 本记录的分支产出未携带该键（旧脚本 / 旧代）。
+    pub ic_status: Option<String>,
+    /// 该腿是否因「测出无预测力」被裁决层置零。
+    /// 与「没接线 / 没数」严格区分：它仍在上游在场、有信号，只是权重被主动裁掉。
+    pub ic_zeroed: bool,
 }
 
 /// 主档全局闭合：`Σ(σ·w)/weightSum` 是否等于落库的 `avgSignal`。
@@ -302,6 +308,11 @@ pub enum Closure {
         tolerance: f64,
         /// 参与腿里「σ 未经独立上游核对」的权重占比 ∈ [0, 1]。
         /// `0.0` = 全部权重都有独立基准；`1.0` = 一条都没有。
+        ///
+        /// ⚠ 枚举上的 `rename_all` 只改 variant 名，**不改 variant 内字段**；漏掉这行
+        /// 时 IPC 出的是 `unverified_weight_ratio`，前端读 `unverifiedWeightRatio` 得
+        /// `undefined` ⇒ 覆盖率被算成 `NaN%`（2026-10-21 截图实证）。
+        #[serde(rename = "unverifiedWeightRatio")]
         unverified_weight_ratio: f64,
     },
     Broken {
@@ -364,6 +375,25 @@ fn as_s(v: Option<&Value>) -> Option<&str> {
     v.and_then(Value::as_str)
 }
 
+/// 无属主因子（`injectedVar` 通道）的显示名。
+///
+/// `analyst_display_name` 的键域是分析师 id；把因子塞进去等于宣称「这条证据由某个
+/// 分析师判断」，与 `injectedVar` 的语义相反。因此单独给因子名，不冒充分析师。
+fn factor_display_name(factor: &str) -> Option<&'static str> {
+    match factor {
+        "relativeStrength" => Some("相对强度"),
+        _ => None,
+    }
+}
+
+/// 面板「属主」列的唯一取数口：有属主用分析师名，无属主用因子名，都没有才回退键名。
+fn display_name_for(owner: Option<&str>, factor: &str) -> String {
+    owner
+        .map(crate::evidence_citation::analyst_display_name)
+        .or_else(|| factor_display_name(factor).map(str::to_string))
+        .unwrap_or_else(|| factor.to_string())
+}
+
 /// 按 JSON 指针取值（只按 `/` 分层；快照的键名含 `.` 但那是键的一部分，不是层级）。
 fn pointer<'a>(doc: &'a Value, path: &str) -> Option<&'a Value> {
     path.trim_start_matches('/').split('/').try_fold(doc, |acc, seg| acc.get(seg))
@@ -393,14 +423,37 @@ fn report_presence(blackboard: &Value) -> Vec<(String, bool)> {
     out
 }
 
-/// `dataGaps` 是给人读的句子，按**分支因子名**字面命中来回收「哪条腿已被声明缺席」。
+/// `dataGaps` 里**真的在声明缺席**的句子所用词表。
+///
+/// 不能只看「句子包含因子名」：分支脚本也会把**设计说明**写进 `dataGaps`
+/// （mid 档「supplyShock 只作风险提示、不进方向」就是一条无条件的说明句）。
+/// 只按因子名回收会把一条在场、有信号的风险提示腿标成「显式缺席」
+/// （现网 688498 · 2026-10-21 实证）。
+const ABSENCE_MARKERS: &[&str] = &[
+    "缺",
+    "无数据",
+    "无数",
+    "拿不到",
+    "不可得",
+    "不可评估",
+    "未产出",
+    "没有产出",
+    "按缺席处理",
+    "不适用",
+    "尚未接",
+];
+
+/// `dataGaps` 是给人读的句子，按**分支因子名 + 缺席语义**回收「哪条腿已被声明缺席」。
 ///
 /// 因子名清单取 `VERDICT_FACTOR_SOURCES` 的定义域（分支词汇表），不另列一份。
+/// 回收结果只用于给**不在 `legs` 里**的腿合成缺席行；已在 `legs` 里的腿以
+/// `absentLegs` 为准（见 `audit_decision_evidence` 里的注释）。
 fn gap_declared_factors(branch: &Value) -> Vec<String> {
     let Some(lines) = branch.get("dataGaps").and_then(Value::as_array) else { return Vec::new() };
     lines
         .iter()
         .filter_map(Value::as_str)
+        .filter(|line| ABSENCE_MARKERS.iter().any(|marker| line.contains(marker)))
         .flat_map(|line| {
             VERDICT_FACTOR_SOURCES
                 .iter()
@@ -478,9 +531,10 @@ pub fn audit_decision_evidence(
         .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
         .unwrap_or_default();
     let gap_factors = gap_declared_factors(&branch);
-    // 两条登记路径合并成**同一份**缺席清单：`absentLegs`（结构化）∪ `dataGaps`（散文句里
-    // 回收到的因子名）。合并的理由是实测出来的：只把 `dataGaps` 用于「给已有腿置标」时，
-    // 仅出现在句子里、不在 `absentLegs` 里的腿**压根不会成行** ⇒ 「有交代的缺席」被漏掉。
+    // 两条登记路径合并成同一份清单，但**用途分层**：`gap_factors` 只给不在 `legs`
+    // 里的腿合成缺席行；已在 `legs` 里的腿以结构化的 `absentLegs` 为准 —— 脚本自己
+    // 就把「有信号」的腿放进 `legs`，此时 `dataGaps` 里的设计说明不得反过来把它判缺席
+    // （现网 supplyShock 的「只作风险提示」句就是这种假阳性来源）。
     let mut declared_absent_factors: Vec<String> = absent.clone();
     for f in &gap_factors {
         if !declared_absent_factors.contains(f) {
@@ -500,7 +554,9 @@ pub fn audit_decision_evidence(
             let owner = period
                 .and_then(|_| axagent_harness::holding_period::Period::factor_owner(factor))
                 .map(str::to_string);
-            let declared_absent = declared_absent_factors.iter().any(|a| a == factor);
+            // 已有腿的缺席判定**只认结构化登记**：它在 `legs` 里就说明脚本拿到了信号，
+            // 此时 `dataGaps` 的散文只能作解释，不能把上游状态改判成缺席。
+            let declared_absent = absent.iter().any(|a| a == factor);
             let constraint = as_s(leg.get("constraint")).is_some();
 
             let upstream = if declared_absent {
@@ -549,9 +605,7 @@ pub fn audit_decision_evidence(
             };
 
             branch_legs.push(BranchLegAudit {
-                owner_name: crate::evidence_citation::analyst_display_name(
-                    owner.as_deref().unwrap_or(factor),
-                ),
+                owner_name: display_name_for(owner.as_deref(), factor),
                 factor: factor.to_string(),
                 participates: role == "direction" && weight.is_some_and(|w| w > 0.0),
                 expected_to_participate: participating_set.contains(factor),
@@ -561,6 +615,8 @@ pub fn audit_decision_evidence(
                 signal,
                 weight,
                 upstream,
+                ic_status: as_s(leg.get("icStatus")).map(str::to_string),
+                ic_zeroed: leg.get("icZeroed").and_then(Value::as_bool).unwrap_or(false),
             });
         }
     }
@@ -578,9 +634,7 @@ pub fn audit_decision_evidence(
             let owner =
                 axagent_harness::holding_period::Period::factor_owner(f).map(str::to_string);
             branch_legs.push(BranchLegAudit {
-                owner_name: crate::evidence_citation::analyst_display_name(
-                    owner.as_deref().unwrap_or(f),
-                ),
+                owner_name: display_name_for(owner.as_deref(), f),
                 factor: f.clone(),
                 owner,
                 role: "absent".to_string(),
@@ -592,6 +646,8 @@ pub fn audit_decision_evidence(
                 expected_to_participate: participating_set.contains(f.as_str()),
                 upstream: UpstreamState::DeclaredAbsent,
                 absence_declared: true,
+                ic_status: None,
+                ic_zeroed: false,
             });
         }
 
@@ -603,9 +659,7 @@ pub fn audit_decision_evidence(
             let owner =
                 axagent_harness::holding_period::Period::factor_owner(f).map(str::to_string);
             branch_legs.push(BranchLegAudit {
-                owner_name: crate::evidence_citation::analyst_display_name(
-                    owner.as_deref().unwrap_or(f),
-                ),
+                owner_name: display_name_for(owner.as_deref(), f),
                 factor: (*f).to_string(),
                 owner,
                 role: "absent".to_string(),
@@ -617,6 +671,8 @@ pub fn audit_decision_evidence(
                 expected_to_participate: true,
                 upstream: UpstreamState::SilentAbsent,
                 absence_declared: false,
+                ic_status: None,
+                ic_zeroed: false,
             });
         }
     }
@@ -956,6 +1012,96 @@ mod tests {
 
     /// L4 的核心信号：本档**应参与**的腿既不在 `legs` 也不在缺席登记 ⇒ 静默缺席
     /// （这才是「结构缺口不得在 UI 造成歧义」要抓的那一格）。
+    /// 2026-10-21：`dataGaps` 里的**设计说明**不是缺席声明。
+    ///
+    /// 现网 688498 的 mid 档把 supplyShock 放进 `legs`（signal=0、role=riskNote、
+    /// constraint=supplyAsRiskNoteOnly），同一份 `h_mid.dataGaps` 里还有「只作风险提示、
+    /// 不进方向」与「共 1 条」两句。按因子名回收会把一条**在场**的腿标成「显式缺席」。
+    #[test]
+    fn design_note_in_data_gaps_does_not_mask_a_present_leg() {
+        let (dj, bb) = fixture();
+        let mut bb2 = bb.clone();
+        bb2["result.h_ultra_short"]["legs"].as_array_mut().unwrap().push(json!({
+            "factor": "supplyShock", "role": "riskNote", "signal": 0.0, "weight": 0.0,
+            "constraint": "supplyAsRiskNoteOnly"
+        }));
+        bb2["result.h_ultra_short"]["dataGaps"] =
+            json!(["超短档 supplyShock 只作风险提示（role=riskNote、权重恒 0），不进方向"]);
+        bb2["result.t-lockup-data"] = json!({ "content": "{}" });
+
+        let r = run(&dj, &bb2, false);
+        let s = r.branch_legs.iter().find(|l| l.factor == "supplyShock").unwrap();
+        assert_eq!(s.upstream, UpstreamState::Present, "在场且有信号的设计说明不得被判缺席");
+        assert!(s.absence_declared, "constraint 本身就是交代");
+
+        // 负控①：同一因子从 `legs` 撤掉、句子换成真缺席声明 ⇒ 必须合成「显式缺席」行
+        let mut bb3 = bb2.clone();
+        bb3["result.h_ultra_short"]["legs"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|l| l["factor"] != "supplyShock");
+        bb3["result.h_ultra_short"]["dataGaps"] =
+            json!(["超短档 supplyShock 无数据：t-lockup-data 没有产出 supply_shock 块"]);
+        let r3 = run(&dj, &bb3, false);
+        let s3 = r3.branch_legs.iter().find(|l| l.factor == "supplyShock").unwrap();
+        assert_eq!(s3.upstream, UpstreamState::DeclaredAbsent);
+        assert!(s3.absence_declared);
+
+        // 负控②：不在 `legs`、但只有设计说明 ⇒ 不得无中生有一条缺席行
+        let mut bb4 = bb3.clone();
+        bb4["result.h_ultra_short"]["dataGaps"] =
+            json!(["超短档 supplyShock 只作风险提示（role=riskNote、权重恒 0），不进方向"]);
+        let r4 = run(&dj, &bb4, false);
+        assert!(
+            r4.branch_legs.iter().all(|l| l.factor != "supplyShock"),
+            "只有设计说明时不得合成缺席行"
+        );
+    }
+
+    /// 裁决层置零必须随腿透传：它和「没接线 / 没数」是两种完全不同的原因。
+    #[test]
+    fn measured_zeroing_is_distinct_from_missing_input() {
+        let (dj, bb) = fixture();
+        let mut bb2 = bb.clone();
+        bb2["result.h_ultra_short"]["legs"][0]["weight"] = json!(0.0);
+        bb2["result.h_ultra_short"]["legs"][0]["icStatus"] = json!("ci_spans_zero");
+        bb2["result.h_ultra_short"]["legs"][0]["icZeroed"] = json!(true);
+        let r = run(&dj, &bb2, false);
+        let zeroed = r.branch_legs.iter().find(|l| l.factor == "momentumSignal").unwrap();
+        assert_eq!(zeroed.ic_status.as_deref(), Some("ci_spans_zero"));
+        assert!(zeroed.ic_zeroed, "裁决置零必须透传，面板据此不再报「未交代」");
+        assert!(!zeroed.participates, "权重已置零 ⇒ 不得算参与");
+        assert!(zeroed.expected_to_participate, "它本该参与 —— 这正是要归因的那一格");
+
+        // 负控：没有该键的腿不得被当成置零（旧记录 = 没携带，不是「测过了」）
+        let untouched = r.branch_legs.iter().find(|l| l.factor == "eventCatalyst").unwrap();
+        assert_eq!(untouched.ic_status, None);
+        assert!(!untouched.ic_zeroed);
+    }
+
+    /// `injectedVar` 腿在面板上必须显示因子中文名，不得回退成英文键；
+    /// 上游判定如实报「无法核查」（快照没有登记可核对的键），而不是「静默缺席」。
+    #[test]
+    fn injected_var_leg_uses_factor_display_name_and_not_checked() {
+        let (dj, bb) = fixture();
+        let mut bb2 = bb.clone();
+        bb2["result.h_ultra_short"]["legs"].as_array_mut().unwrap().push(json!({
+            "factor": "relativeStrength", "role": "direction", "signal": 0.2,
+            "weight": 0.1, "constraint": null
+        }));
+        let r = run(&dj, &bb2, false);
+        let l = r.branch_legs.iter().find(|x| x.factor == "relativeStrength").unwrap();
+        assert_eq!(l.owner, None, "injectedVar 没有分析师属主");
+        assert_eq!(l.owner_name, "相对强度", "无属主因子不得回退成英文键名");
+        match &l.upstream {
+            UpstreamState::NotChecked { reason } => {
+                assert_eq!(reason, "INJECTED_VAR_HAS_NO_KEY_TABLE");
+            },
+            other => panic!("injectedVar 应报无法核查，实际 {other:?}"),
+        }
+        assert_eq!(r.upstream_not_checked_legs, 2, "tierScore + injectedVar 两条不可判");
+    }
+
     #[test]
     fn participating_leg_missing_from_both_registries_is_silent_absence() {
         let (dj, bb) = fixture();
@@ -1123,6 +1269,26 @@ mod tests {
 
     /// 总数与分母取自**权威 spec**，不是写死的条数：说「本档应参与 N 条腿」时
     /// N 必须等于 `verdict_spec().participating.len()`。
+    /// IPC 键名：`Closure` 是枚举，`rename_all` 只作用于 variant 名，**不作用于
+    /// variant 内字段**。漏了字段级 rename 时前端读 `unverifiedWeightRatio` 得
+    /// `undefined`，覆盖率被算成 `NaN%`（2026-10-21 截图实证）。
+    #[test]
+    fn closure_serialises_coverage_as_camel_case() {
+        let v = serde_json::to_value(Closure::Closed {
+            recomputed: 0.0839,
+            stored: 0.08,
+            tolerance: 0.0057,
+            unverified_weight_ratio: 0.83,
+        })
+        .expect("Closure 必须可序列化");
+        assert_eq!(v["state"], "closed");
+        assert!(v.get("unverifiedWeightRatio").is_some(), "IPC 键必须是 camelCase，实际 {v}");
+        assert!(
+            v.get("unverified_weight_ratio").is_none(),
+            "snake_case 键会让前端读成 undefined ⇒ 覆盖率 NaN%，实际 {v}"
+        );
+    }
+
     #[test]
     fn expected_leg_count_comes_from_the_authority() {
         let (dj, bb) = fixture();

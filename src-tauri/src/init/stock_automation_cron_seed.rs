@@ -89,8 +89,30 @@ pub async fn seed_stock_automation_crons(
 ) -> Result<(), String> {
     let jobs = build_builtin_jobs()?;
     for job in jobs {
-        if store.get(&job.id).await.is_some() {
+        if let Some(existing) = store.get(&job.id).await {
             if !overwrite {
+                // 一次性升级：补分析任务若仍停在旧出厂配额（10），把它抬到新出厂值；
+                // **用户改过配额的行不动**（「存在即跳过」是种子语义，不能被升级绕过）。
+                if job.id == MOVER_RECALL_ANALYSIS_JOB_ID {
+                    let still_legacy = crate::commands::mover_recall_analysis::RunMoverRecallAnalysisRequest::from_json(
+                        &existing.prompt,
+                    )
+                    .map(|c| {
+                        c.batch_limit
+                            == crate::commands::mover_recall_analysis::LEGACY_CRON_BATCH_LIMIT
+                    })
+                    .unwrap_or(false);
+                    if still_legacy {
+                        let new_prompt = job.prompt.clone();
+                        store.update(&job.id, move |j| j.prompt = new_prompt).await;
+                        tracing::info!(
+                            "[stock-automation-cron] 补分析配额由旧出厂值升级为 {}: {}",
+                            crate::commands::mover_recall_analysis::CRON_BATCH_LIMIT,
+                            job.id
+                        );
+                        continue;
+                    }
+                }
                 tracing::info!("[stock-automation-cron] 任务已存在，保留用户配置: {}", job.id);
                 continue;
             }
@@ -585,5 +607,39 @@ mod tests {
             "描述里的时长必须与命令面常量一致，实得 {:?}",
             expiry.description
         );
+    }
+    /// 配额升级只抬「仍是旧出厂值」的行；**用户改过的配额必须原样保留**（种子语义：存在即跳过）。
+    #[tokio::test]
+    async fn legacy_batch_quota_is_upgraded_but_user_edits_survive() {
+        use crate::commands::mover_recall_analysis::{
+            CRON_BATCH_LIMIT, LEGACY_CRON_BATCH_LIMIT, RunMoverRecallAnalysisRequest,
+        };
+        let store = Arc::new(CronJobStore::new_ephemeral());
+        seed_stock_automation_crons(&store, false).await.unwrap();
+        let job_id = MOVER_RECALL_ANALYSIS_JOB_ID.to_string();
+
+        // 旧出厂值 ⇒ 下次播种抬到新出厂值
+        let mut legacy = RunMoverRecallAnalysisRequest::cron_default();
+        legacy.batch_limit = LEGACY_CRON_BATCH_LIMIT;
+        let legacy_json = legacy.to_json().unwrap();
+        store.update(&job_id, move |j| j.prompt = legacy_json).await;
+        seed_stock_automation_crons(&store, false).await.unwrap();
+        let cfg = RunMoverRecallAnalysisRequest::from_json(
+            &store.get(&job_id).await.expect("任务存在").prompt,
+        )
+        .unwrap();
+        assert_eq!(cfg.batch_limit, CRON_BATCH_LIMIT, "旧出厂配额应被一次性升级");
+
+        // 用户改过的值 ⇒ 不得被播种回滚
+        let mut user = RunMoverRecallAnalysisRequest::cron_default();
+        user.batch_limit = 30;
+        let user_json = user.to_json().unwrap();
+        store.update(&job_id, move |j| j.prompt = user_json).await;
+        seed_stock_automation_crons(&store, false).await.unwrap();
+        let cfg = RunMoverRecallAnalysisRequest::from_json(
+            &store.get(&job_id).await.expect("任务存在").prompt,
+        )
+        .unwrap();
+        assert_eq!(cfg.batch_limit, 30, "用户改过的配额被种子升级覆盖了");
     }
 }

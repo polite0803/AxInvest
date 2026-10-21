@@ -120,6 +120,19 @@ fn build_tunable_params_catalog() -> String {
     format!("共 {} 项，按决策相关性排序（决策链上游优先）：\n{}", lines.len(), lines.join("\n"))
 }
 
+/// D-4：从反思输出里取回灌结论 `{should_include, reason}`。
+///
+/// 容错与其它字段一致（顶层 / 一层嵌套）；缺省或类型不符一律 `None` = **不表态**，
+/// 绝不默认 true。`reason` 截到 200 字符（它是给人复核的一句话，不是第二份复盘正文）。
+fn pool_reflow_of(json: &serde_json::Value) -> Option<(bool, String)> {
+    let obj = json
+        .get("pool_reflow")
+        .or_else(|| json.get("reflection").and_then(|r| r.get("pool_reflow")))?;
+    let include = obj.get("should_include").and_then(|v| v.as_bool())?;
+    let reason = obj.get("reason").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let reason: String = reason.chars().take(200).collect();
+    Some((include, reason))
+}
 /// P3：构造注入反思模板的妖股漏检专项上下文（`{{mover_recall_context}}`）。
 ///
 /// `None`（常规到期反思）⇒ 占位句：reflection.md 用自然语言声明忽略专项三问。
@@ -911,6 +924,39 @@ pub async fn run_reflection_workflow(
             // #10 P7：本行妖股标签 —— 用**本行自己的档与快照**（primary_snapshot 与 raw_return
             // 同源），不引第二套窗口天数表；判据单源见 compute_mover_label。
             let mover_label = compute_mover_label(db, primary_horizon, primary_snapshot).await;
+
+            // D-4 清单半段：反思判定「本应入池」⇒ 把该事件盖成 reflow_pending。
+            // 只写清单（可复核），**不在这里并入种子** —— 并入要过 fail-closed 判据。
+            // 失败只记日志：清单写不进去不该让反思行落不了库。
+            if let Some((true, reason)) = pool_reflow_of(&reflection_json) {
+                match mover_event.as_ref() {
+                    Some(ev) => {
+                        match axagent_dao::repo::mover_recall_events::mark_reflow_pending(
+                            db,
+                            &ev.id,
+                            &reason,
+                            chrono::Utc::now().timestamp_millis(),
+                        )
+                        .await
+                        {
+                            Ok(0) => tracing::warn!(
+                                "[reflection] 回灌结论未落清单：事件状态不是 analyzed/reflected（event_id={}）",
+                                ev.id
+                            ),
+                            Ok(n) => tracing::info!(
+                                "[reflection] 已列入回灌清单 event_id={} rows={n} reason={reason}",
+                                ev.id
+                            ),
+                            Err(e) => tracing::warn!(
+                                "[reflection] 回灌清单写入失败（不影响反思落库）: {e}"
+                            ),
+                        }
+                    },
+                    None => tracing::warn!(
+                        "[reflection] 模型给了 pool_reflow=true 但本行没有 anchor_event_id ⇒ 不落清单"
+                    ),
+                }
+            }
 
             let _ = stock_reflections::Entity::update_many()
                 .col_expr(stock_reflections::Column::Status, Expr::value(&status_text))
@@ -5301,5 +5347,33 @@ mod failure_modes_column_tests {
             "落库顺序按词表序，非法值不得进列"
         );
         assert_eq!(rejected, vec!["invented_mode".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod pool_reflow_tests {
+    use super::pool_reflow_of;
+
+    /// 三种输入形态：顶层对象、一层嵌套、缺省/类型不符。缺省必须是 `None`（不表态），不是 false。
+    #[test]
+    fn pool_reflow_is_parsed_leniently_and_defaults_to_no_opinion() {
+        let top = serde_json::json!({"pool_reflow": {"should_include": true, "reason": " 窗口起点就该进池 "}});
+        assert_eq!(pool_reflow_of(&top), Some((true, "窗口起点就该进池".to_string())));
+
+        let nested = serde_json::json!({"reflection": {"pool_reflow": {"should_include": false, "reason": ""}}});
+        assert_eq!(pool_reflow_of(&nested), Some((false, String::new())));
+
+        assert_eq!(pool_reflow_of(&serde_json::json!({})), None, "缺省 = 不表态");
+        assert_eq!(
+            pool_reflow_of(&serde_json::json!({"pool_reflow": {"reason": "无布尔"}})),
+            None,
+            "没有 should_include 不得当成 true"
+        );
+
+        let long = "x".repeat(500);
+        let clipped = pool_reflow_of(
+            &serde_json::json!({"pool_reflow": {"should_include": true, "reason": long}}),
+        );
+        assert_eq!(clipped.unwrap().1.chars().count(), 200, "reason 截到 200 字符");
     }
 }

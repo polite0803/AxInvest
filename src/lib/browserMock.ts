@@ -7004,6 +7004,68 @@ async function executeCommand<T>(
       } as unknown as T;
 
     // P2：妖股漏检 → as-of 历史补分析批次（任务中心「全部运行」）
+    // 策略回测（浏览器预览用）：此前没有 handler ⇒ 返回 undefined，
+    // BacktestPanel 读 data.strategies 直接崩（Cannot read properties of undefined）。
+    case "backtest_reco_strategies":
+      return {
+        positive: {
+          label: "正向样本",
+          stockCount: 2,
+          strategies: {
+            trend: {
+              strategyId: "trend",
+              style: "trend",
+              period: "short",
+              totalSignals: 24,
+              winCount: 15,
+              lossCount: 9,
+              winRatePct: 62.5,
+              avgReturnPct: 3.1,
+              totalReturnPct: 74.4,
+              avgMaxDrawdownPct: -6.2,
+              maxConsecutiveLosses: 3,
+              sharpeRatio: 1.12,
+            },
+            value: {
+              strategyId: "value",
+              style: "value",
+              period: "mid",
+              totalSignals: 12,
+              winCount: 7,
+              lossCount: 5,
+              winRatePct: 58.3,
+              avgReturnPct: 2.4,
+              totalReturnPct: 28.8,
+              avgMaxDrawdownPct: -5.1,
+              maxConsecutiveLosses: 2,
+              sharpeRatio: 0.86,
+            },
+          },
+        },
+        negative: {
+          label: "负向样本",
+          stockCount: 1,
+          strategies: {
+            capital: {
+              strategyId: "capital",
+              style: "capital",
+              period: "short",
+              totalSignals: 9,
+              winCount: 3,
+              lossCount: 6,
+              winRatePct: 33.3,
+              avgReturnPct: -1.8,
+              totalReturnPct: -16.2,
+              avgMaxDrawdownPct: -9.4,
+              maxConsecutiveLosses: 4,
+              sharpeRatio: -0.42,
+            },
+          },
+        },
+        positiveStocks: ["600519", "002696"],
+        negativeStocks: ["000001"],
+        skipped: [],
+      } as unknown as T;
     case "list_mover_recall_analysis_batches":
       // 新批次排前面（与后端 ORDER BY created_at DESC 同序）
       return mockMoverRecallBatches()

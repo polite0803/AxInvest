@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use axagent_harness::error_codes::error_for_log;
 use axagent_harness::types::provider_model::request_delay_ms_for_model;
 use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest, RagContextResult};
 use axagent_harness::workflow_types::{StepProgressEvent, WorkflowNode};
@@ -1200,7 +1201,7 @@ impl NodeExecutorTrait for AgentExecutor {
                                 node_id = %an.base.id,
                                 primary_model = %model,
                                 fallback_model = %fb_model,
-                                primary_error = %e,
+                                primary_error = %error_for_log(&e),
                                 "Agent LLM stream 初始化失败，已切换 fallback 流继续"
                             );
                             fb_stream
@@ -1335,7 +1336,7 @@ impl NodeExecutorTrait for AgentExecutor {
                                     node_id = %an.base.id,
                                     primary_model = %model,
                                     fallback_model = %fb_model,
-                                    primary_error = %e,
+                                    primary_error = %error_for_log(&e),
                                     "Agent LLM stream chunk 错误，已切换 fallback 流继续"
                                 );
                                 chunk_err_fallback_used = true;

@@ -7389,6 +7389,7 @@
       "refresh": "刷新",
       "empty": "暂无定时任务，点击右上角「新建任务」创建",
       "executedOk": "已触发执行：{{name}}",
+      "resultTitle": "执行结果",
       "deletedOk": "已删除任务：{{name}}"
     },
     "execute": {
@@ -18388,6 +18389,8 @@
       "signal": "信号",
       "absenceUndeclared": "未交代缺席",
       "expectedButIdle": "应参与未计入",
+      "icZeroed": "测后置零",
+      "icZeroedHint": "该腿经后验测量判为无预测力（IC 区间跨 0），权重已置零；它仍在上游在场，不是接线故障",
       "metaLeg": "元约束",
       "upstream": {
         "present": "在场",
@@ -18398,6 +18401,7 @@
       "notChecked": {
         "noOwner": "该因子没有登记的属主分析师",
         "unregisteredFactor": "该因子不在来源登记表内，判据不适用",
+        "injectedVarNoKeyTable": "该腿由接线层直接注入，快照没有登记可核对的键 ⇒ 判据不适用",
         "tierScoreNotInSnapshot": "逐档评分节点的产出不落本记录快照，该判据对本腿不适用",
         "noChannelMapping": "该通道未登记落库键（映射表缺项）",
         "unknownReason": "后端返回了未登记的原因码"

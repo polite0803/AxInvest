@@ -131,12 +131,14 @@ impl DiskCache {
         if total <= max_bytes {
             return 0;
         }
-        let mut by_age: Vec<(String, i64)> =
-            entries.iter().map(|(k, e)| (k.clone(), e.last_access)).collect();
-        // 同 last_access 时按 key 定序，保证淘汰顺序可复现（测试依赖）
+        // 主键必须是 last_access：写成 (key, last_access) 时 sort 会先比 key，
+        // 实际淘汰的是字典序最小的条目（低代码段会被反复清掉），而不是最久未访问的。
+        // 同 last_access 时仍按 key 定序，保证淘汰顺序可复现（测试依赖）。
+        let mut by_age: Vec<(i64, String)> =
+            entries.iter().map(|(k, e)| (e.last_access, k.clone())).collect();
         by_age.sort();
         let mut evicted = 0usize;
-        for (k, _) in by_age {
+        for (_, k) in by_age {
             if total <= max_bytes {
                 break;
             }
@@ -145,7 +147,9 @@ impl DiskCache {
                 evicted += 1;
             }
         }
-        tracing::info!("[l2] 超字节预算 {max_bytes}，按 LRU 淘汰 {evicted} 条（余 {total} 字节）");
+        // 64 MB 预算在全市场扫描时必然长期打满：每个新 K 线都会触发一次淘汰。
+        // 这是稳态行为，不是告警；保留 debug 供排查，避免刷掉真正的 warn。
+        tracing::debug!("[l2] 超字节预算 {max_bytes}，按 LRU 淘汰 {evicted} 条（余 {total} 字节）");
         evicted
     }
 
@@ -534,5 +538,28 @@ mod tests {
         c.set("stale".into(), "x".into(), -1);
         assert!(c.get_with_expiry("stale").is_none(), "已过期的条目不得交回");
         assert!(c.get("stale").is_none(), "同上，get 侧判据要一致");
+    }
+
+    /// 反例锁：淘汰顺序必须由 `last_access` 决定，不能由 key 字典序决定。
+    ///
+    /// 旧实现 `(key, last_access)` 直接 sort ⇒ 先比 key，`a-fresh` 会被先淘汰；
+    /// 这与方法注释「按 last_access 从最旧开始」相悖，也是线上「低代码段反复被清」的根因。
+    #[test]
+    fn byte_budget_evicts_by_last_access_not_key_order() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "a-fresh".to_string(),
+            CacheEntry { value: "x".repeat(100), expires_at: 0, last_access: 20 },
+        );
+        entries.insert(
+            "z-stale".to_string(),
+            CacheEntry { value: "y".repeat(100), expires_at: 0, last_access: 10 },
+        );
+
+        let evicted = DiskCache::trim_to_budget(&mut entries, 150);
+
+        assert_eq!(evicted, 1);
+        assert!(entries.contains_key("a-fresh"), "key 字典序靠前但最近访问过的条目不得被淘汰");
+        assert!(!entries.contains_key("z-stale"), "应淘汰 last_access 最旧的条目");
     }
 }

@@ -3290,6 +3290,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
         {
             let store = cron_store.clone();
             let db = sync_db.clone();
+            let client = astock_client.clone();
             let sink = delivery_sink.clone();
             let job_id = job.id.clone();
             let job_name = job.name.clone();
@@ -3298,67 +3299,33 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 let started = axagent_runtime_core::cron_job::now_millis();
                 let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
 
-                let mut has_miss = false;
-                let result =
-                    match crate::commands::mover_recall::analyze_mover_recall_inner(&db, None).await
-                    {
-                        Ok(views) => {
-                            // A-2 起每链各一份视图、各落一行 run 快照：混成一条「漏检数」就是
-                            // 让智选的命中顶掉荐股的漏检（反之亦然）的那笔账。
-                            // 摘要逐链各一行；任一链有漏检才投递通知（零漏检不轰炸）。
-                            let mut lines: Vec<String> = Vec::new();
-                            for view in &views {
-                                has_miss |= view.rates.misses > 0;
-                                // 快照落库失败不把整轮核查判失败（结果已算出），仅在该链那行留痕
-                                let persist_msg =
-                                    match crate::commands::mover_recall::persist_mover_recall_run(
-                                        &db, view, "scheduler",
-                                    )
-                                    .await
-                                    {
-                                        Ok(run_id) => format!("run_id={run_id}"),
-                                        Err(e) => {
-                                            tracing::error!(
-                                                "[CronScheduler] 妖股核查 '{}' [{}] 快照落库失败: {e}",
-                                                job_name,
-                                                view.chain
-                                            );
-                                            // 摘要会整行显示在任务中心，前端只对「整串是 JSON」的
-                                            // 错误做码翻译 ⇒ 拼进散文前先把 detail 取出来，
-                                            // 否则这一行出现 {"code":…,"detail":…} 字面量。
-                                            format!(
-                                                "快照落库失败: {}",
-                                                crate::commands::error::error_text_for_prose(&e)
-                                            )
-                                        },
-                                    };
-                                lines.push(format!(
-                                    "[{}] 区间 {}~{} 达标事件={} 漏检={} 召回率 reachability={:.3}                                      coverage={:.3} unexplained_share={:.3} | {persist_msg}",
-                                    view.chain,
-                                    view.from,
-                                    view.to,
-                                    view.rates.events,
-                                    view.rates.misses,
-                                    view.rates.reachability,
-                                    view.rates.coverage,
-                                    view.rates.unexplained_share
-                                ));
-                            }
-                            let summary = lines.join("
-");
-                            tracing::info!("[CronScheduler] 妖股核查 '{}' 完成: {summary}", job_name);
+                let result_or_err =
+                    crate::commands::mover_recall::run_mover_recall_check(&db, &client, "scheduler")
+                        .await;
+                let (has_miss, result) = match result_or_err {
+                    Ok(o) => {
+                        tracing::info!(
+                            "[CronScheduler] 妖股核查 '{}' 完成: {}",
+                            job_name,
+                            o.summary
+                        );
+                        (
+                            o.misses > 0,
                             axagent_runtime_core::TaskRunResult {
                                 success: true,
-                                output: Some(summary),
+                                output: Some(o.summary),
                                 error: None,
                                 duration_ms: elapsed(),
                                 executed_at: started,
                                 skipped: false,
                                 partial: false,
-                            }
-                        },
-                        Err(e) => {
-                            tracing::error!("[CronScheduler] 妖股核查 '{}' 失败: {e}", job_name);
+                            },
+                        )
+                    },
+                    Err(e) => {
+                        tracing::error!("[CronScheduler] 妖股核查 '{}' 失败: {e}", job_name);
+                        (
+                            false,
                             axagent_runtime_core::TaskRunResult {
                                 success: false,
                                 output: None,
@@ -3367,9 +3334,10 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 executed_at: started,
                                 skipped: false,
                                 partial: false,
-                            }
-                        },
-                    };
+                            },
+                        )
+                    },
+                };
 
                 // 有漏检才投递通知；零漏检/失败静默（失败已有 tracing + 任务列表红标）
                 let sink_ref = if result.success && has_miss {

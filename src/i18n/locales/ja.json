@@ -7389,6 +7389,7 @@
       "refresh": "更新",
       "empty": "定時タスクがありません。右上の「新規タスク」で作成してください。",
       "executedOk": "実行をトリガーしました：{{name}}",
+      "resultTitle": "実行結果",
       "deletedOk": "タスクを削除しました：{{name}}"
     },
     "execute": {
@@ -18143,6 +18144,8 @@
       "signal": "シグナル",
       "absenceUndeclared": "欠落の申告なし",
       "expectedButIdle": "参加対象だが除外",
+      "icZeroed": "測定後ゼロ化",
+      "icZeroedHint": "この脚は事後測定で予測力なし（IC 区間が 0 を跨ぐ）と判定され、重みがゼロ化されました。上流は依然として存在しており、配線故障ではありません。",
       "metaLeg": "メタ制約",
       "upstream": {
         "present": "上流あり",
@@ -18153,6 +18156,7 @@
       "notChecked": {
         "noOwner": "このファクターには担当アナリストが登録されていません",
         "unregisteredFactor": "このファクターはソース登録表に無いため、判定は適用外です",
+        "injectedVarNoKeyTable": "この脚は配線層から直接注入されるため、スナップショットに照合可能なキーが登録されていません ⇒ 判定は適用外です。",
         "tierScoreNotInSnapshot": "逐档評点ノードの出力はこの記録のスナップショットに含まれないため、この判定は適用外です",
         "noChannelMapping": "このソース経路には保存キーが登録されていません（登録表の欠落）",
         "unknownReason": "バックエンドが未登録の理由コードを返しました"

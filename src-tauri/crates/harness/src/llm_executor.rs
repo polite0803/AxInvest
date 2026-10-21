@@ -627,6 +627,12 @@ impl Stream for ExecuteLlmStream {
                         // 其余真实运行期错误维持 ERROR。
                         Poll::Ready(Some(Err(e))) => {
                             let detail = format!("LLM 流式运行期错误: {e}");
+                            // 日志渲染折叠前端插值专用的 params 重复字段（见 error_for_log）；
+                            // is_header_timeout 判定与 record_failure_audit 仍用完整原文。
+                            let detail_for_log = format!(
+                                "LLM 流式运行期错误: {}",
+                                crate::error_codes::error_for_log(&e)
+                            );
                             let is_header_timeout =
                                 detail.contains("response headers not received within");
                             if is_header_timeout {
@@ -637,7 +643,7 @@ impl Stream for ExecuteLlmStream {
                                     content_bytes = this.content.len(),
                                     thinking_bytes = this.thinking.len(),
                                     "[execute_llm_stream] {}（设计的快速失败，重试/回退预期路径）",
-                                    &detail
+                                    &detail_for_log
                                 );
                             } else {
                                 tracing::error!(
@@ -647,7 +653,7 @@ impl Stream for ExecuteLlmStream {
                                     content_bytes = this.content.len(),
                                     thinking_bytes = this.thinking.len(),
                                     "[execute_llm_stream] {}",
-                                    &detail
+                                    &detail_for_log
                                 );
                             }
                             record_failure_audit(&this.config, &detail, this.start);

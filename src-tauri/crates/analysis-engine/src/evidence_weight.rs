@@ -528,6 +528,14 @@ fn entry_gate(p: Period) -> &'static str {
     }
 }
 
+/// 无分析师属主的腿（当前只有 `injectedVar` 通道）参与配比时的中性偏置。
+///
+/// 不能从 [`get_horizon_base_weights`] 取：那张表的键域是**分析师 id**，而 injectedVar
+/// 的值由 wiring 层直接算出、不经任何模型转述（给它安一个分析师属主就是假归因，
+/// 见 `VERDICT_FACTOR_SOURCES` 的注释）。取 1.0 与本表「值为 1.0 = 本档不偏置该证据」
+/// 的既有语义一致；它照常参与该档归一，不额外放大或缩小其它腿的相对配比。
+pub const INJECTED_VAR_NEUTRAL_BIAS: f64 = 1.0;
+
 /// 注入 Rhai 的**逐档分支表**：`{ultra_short: {legs:[…], analysts:[…], …}, …}`。
 ///
 /// 与已删除的乘数表（`leg_mult` / 「同一批腿 × 四个标量」）的区别就是 R-11 的区别：
@@ -562,22 +570,34 @@ pub fn horizon_branch_specs() -> serde_json::Value {
         {
             let owner = Period::factor_owner(f);
             let source = VERDICT_FACTOR_SOURCES.iter().find(|(cf, _, _)| *cf == f);
-            let (Some(owner), Some((_, kind, channel))) = (owner, source) else {
+            let Some((_, kind, channel)) = source else {
                 tracing::warn!(
-                    "[evidence_weight] 分支表：因子 {f} 缺属主或缺来源登记 ⇒ 该腿不进融合（档 {}）",
+                    "[evidence_weight] 分支表：因子 {f} 缺来源登记 ⇒ 该腿不进融合（档 {}）",
                     p.as_str()
                 );
                 continue;
             };
-            let b = match bias.get(owner) {
-                Some(v) => *v,
-                None => {
-                    tracing::warn!(
-                        "[evidence_weight] 档 {} 权重表缺分析师 '{owner}'（因子 {f}）⇒ 配比按 1.0",
-                        p.as_str()
-                    );
-                    1.0
+            // injectedVar **没有分析师属主是设计使然**（值由 wiring 层直接注入）；
+            // 其它通道缺属主仍视为登记缺口，不得借这条豁免蒙混过关。
+            if *kind != "injectedVar" && owner.is_none() {
+                tracing::warn!(
+                    "[evidence_weight] 分支表：因子 {f} 缺属主 ⇒ 该腿不进融合（档 {}）",
+                    p.as_str()
+                );
+                continue;
+            }
+            let b = match owner {
+                Some(o) => match bias.get(o) {
+                    Some(v) => *v,
+                    None => {
+                        tracing::warn!(
+                            "[evidence_weight] 档 {} 权重表缺分析师 '{o}'（因子 {f}）⇒ 配比按 1.0",
+                            p.as_str()
+                        );
+                        1.0
+                    },
                 },
+                None => INJECTED_VAR_NEUTRAL_BIAS,
             };
             let constraint = constraint_of(f);
             legs.push(serde_json::json!({
@@ -1239,7 +1259,13 @@ mod tests {
                 );
             }
             for l in legs {
-                assert!(l["owner"].is_string(), "{p} 有腿无属主: {l}");
+                // injectedVar 的值由 wiring 层直接注入，**没有分析师属主是设计使然**；
+                // 其它通道缺属主仍是登记缺口（防止借这条豁免把所有腿都放过）。
+                if l["source"]["kind"] == "injectedVar" {
+                    assert!(l["owner"].is_null(), "{p} injectedVar 腿不得假归因: {l}");
+                } else {
+                    assert!(l["owner"].is_string(), "{p} 有腿无属主: {l}");
+                }
                 assert!(l["source"]["kind"].is_string(), "{p} 有腿无来源: {l}");
             }
             let expected =
@@ -1319,8 +1345,14 @@ mod tests {
             .collect();
         assert_eq!(
             short_dir,
-            vec!["momentumSignal", "flowPersistence", "trendStrength", "supplyShock"],
-            "短档方向腿不得含 breadthState"
+            vec![
+                "momentumSignal",
+                "flowPersistence",
+                "trendStrength",
+                "supplyShock",
+                "relativeStrength"
+            ],
+            "短档方向腿不得含 breadthState；relativeStrength 是 injectedVar 方向腿"
         );
 
         // P0-3：长档估值腿必须输出但只作高估否决（role=filter、权重恒 0），
@@ -1354,7 +1386,8 @@ mod tests {
         assert_eq!(mid_val["role"], "direction");
         let mid_val_w = mid_val["weight"].as_f64().unwrap();
         assert!(mid_val_w <= 0.10, "中档估值腿归一化占比必须 ≤10%（P0-3），实得 {mid_val_w}");
-        assert!(mid_val_w > 0.08, "占比应在 ~9.9% 附近，实得 {mid_val_w} —— 偏置又漂移了");
+        // 下限只防「被挤到接近 0」；具体配比由权重表现算，不在测试里手抄第二份。
+        assert!(mid_val_w > 0.05, "估值腿被挤到接近 0，实得 {mid_val_w}");
         // 方向腿权重合计仍归一
         let mid_dir_sum: f64 = mid_legs
             .iter()
@@ -1362,6 +1395,36 @@ mod tests {
             .map(|l| l["weight"].as_f64().unwrap())
             .sum();
         assert!((mid_dir_sum - 1.0).abs() < 1e-6, "中档方向腿权重必须归一，实得 {mid_dir_sum}");
+    }
+
+    /// 阶段 1 接进来的 `relativeStrength` 是 `injectedVar` 通道：值由 wiring 层直接注入、
+    /// 没有分析师属主。它必须**照常进分支表** —— 否则 `verdict_spec().participating`
+    /// 说「应参与」而分支表永远没有这条腿，审计只能把架构缺口报成「静默缺席」。
+    /// owner 必须保持 null，不得为了凑齐分支表而假归因。
+    #[test]
+    fn injected_var_leg_enters_branch_table_without_analyst_owner() {
+        let all = horizon_branch_specs();
+        for tier in ["short", "mid"] {
+            let legs = all[tier]["legs"].as_array().unwrap();
+            let leg = legs
+                .iter()
+                .find(|l| l["factor"] == "relativeStrength")
+                .unwrap_or_else(|| panic!("{tier} 档的 relativeStrength 必须进分支表"));
+            assert_eq!(leg["role"], "direction");
+            assert!(leg["owner"].is_null(), "injectedVar 没有分析师属主，不得假归因：{leg}");
+            assert!(
+                leg["weight"].as_f64().unwrap() > 0.0,
+                "{tier} 档的 relativeStrength 参与方向加权，权重必须为正"
+            );
+        }
+        // 对照：豁免只作用于 injectedVar —— 同档其它方向腿仍必须带分析师属主。
+        for tier in ["short", "mid"] {
+            for leg in all[tier]["legs"].as_array().unwrap() {
+                if leg["role"] == "direction" && leg["factor"] != "relativeStrength" {
+                    assert!(leg["owner"].is_string(), "非 injectedVar 腿缺属主：{leg}");
+                }
+            }
+        }
     }
 
     /// 三张表（因子集 / 属主 / 来源）必须互相覆盖 —— 分处两 crate 的三处清单，

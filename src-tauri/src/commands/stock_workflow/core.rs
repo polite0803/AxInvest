@@ -2110,6 +2110,25 @@ pub async fn run_single_stock_analysis(
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("行情获取失败: {e}"))
     })?;
 
+    // 批量入口（漏检补分析等）的候选名来自回溯数据时可能为空 ⇒ 建行即带空名，
+    // 历史列表按代码分组会整组只剩代码（组名取组内最新一条的名称）。
+    // 行情名是同一来源的权威值，此处回填；判据与 run_stock_workflow_inner 的覆盖重跑一致。
+    let effective_stock_name = if (stock_name.is_empty() || stock_name == stock_code)
+        && !quote.name.is_empty()
+        && quote.name != stock_code
+    {
+        let _ = stock_analyses::Entity::update(stock_analyses::ActiveModel {
+            id: Set(analysis_id.clone()),
+            stock_name: Set(quote.name.clone()),
+            ..Default::default()
+        })
+        .exec(db)
+        .await;
+        quote.name.clone()
+    } else {
+        stock_name.to_string()
+    };
+
     // 3. 数据质量预检
     match data_quality_precheck(client, stock_code, &quote).await {
         QualityPrecheckResult::Insufficient { summary, missing_sources } => {
@@ -2149,7 +2168,8 @@ pub async fn run_single_stock_analysis(
     }
 
     // 4. 加载模板并注入 stock_code
-    let loaded = load_and_inject_template(db, stock_code, stock_name, template_id).await?;
+    let loaded =
+        load_and_inject_template(db, stock_code, &effective_stock_name, template_id).await?;
 
     // 5. 解析运行时参数
     let (max_concurrent, step_timeout, _total_timeout) =

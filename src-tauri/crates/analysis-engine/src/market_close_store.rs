@@ -140,16 +140,15 @@ pub async fn backfill_close_history(
     interval_ms: u64,
 ) -> Result<BackfillStats, String> {
     use axagent_entities::{market_daily_close, market_stock_universe};
-    let codes: Vec<String> = market_stock_universe::Entity::find()
+    // 回补行后落名的唯一来源：清单表（K 线接口不带名称）。
+    let universe = market_stock_universe::Entity::find()
         .all(db)
         .await
-        .map_err(|e| format!("读市场清单失败: {e}"))?
-        .into_iter()
-        .map(|m| m.stock_code)
-        .collect();
+        .map_err(|e| format!("读市场清单失败: {e}"))?;
     let now_ms = chrono::Utc::now().timestamp_millis();
     let mut stats = BackfillStats::default();
-    for code in &codes {
+    for member in &universe {
+        let code = &member.stock_code;
         stats.codes += 1;
         let mut klines = match client.get_klines(code, "daily", target_days).await {
             Ok(v) => v,
@@ -173,7 +172,7 @@ pub async fn backfill_close_history(
                 rows.push(market_daily_close::ActiveModel {
                     id: Set(format!("{}@{}", code, k.date)),
                     stock_code: Set(code.clone()),
-                    stock_name: Set(String::new()),
+                    stock_name: Set(member.stock_name.clone()),
                     trade_date: Set(k.date.clone()),
                     close: Set(k.close),
                     prev_close: Set(p),

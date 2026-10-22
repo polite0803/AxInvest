@@ -509,6 +509,35 @@ pub struct LayerRow {
     pub by_market_type: Vec<(String, usize)>,
 }
 
+/// 历史回补行（`source='tencent_kline'`）不带名称 ⇒ `stock_name` 为空串。
+/// 事件名/组标题都读这一格，故用清单表（名称唯一权威）补齐**空名**，已有名不覆盖。
+async fn fill_missing_names_from_universe(
+    db: &sea_orm::DatabaseConnection,
+    series: &mut CloseSeriesByCode,
+) -> Result<(), String> {
+    let missing: Vec<String> = series
+        .iter()
+        .filter(|(_, (name, _))| name.is_empty())
+        .map(|(code, _)| code.clone())
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let rows = market_stock_universe::Entity::find()
+        .filter(market_stock_universe::Column::StockCode.is_in(missing))
+        .all(db)
+        .await
+        .map_err(|e| format!("读市场清单(补名称)失败: {e}"))?;
+    for r in rows {
+        if let Some((name, _)) = series.get_mut(&r.stock_code) {
+            if name.is_empty() {
+                *name = r.stock_name;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// 收盘数据按票分组：`code -> (name, [(date, change_pct)])`，日期升序。
 pub async fn load_closes_by_stock(
     db: &sea_orm::DatabaseConnection,
@@ -529,6 +558,7 @@ pub async fn load_closes_by_stock(
             .1
             .push((r.trade_date, r.change_pct));
     }
+    fill_missing_names_from_universe(db, &mut out).await?;
     Ok(out)
 }
 
@@ -558,6 +588,7 @@ pub async fn load_closes_for_codes(
             .1
             .push((r.trade_date, r.change_pct));
     }
+    fill_missing_names_from_universe(db, &mut out).await?;
     Ok(out)
 }
 

@@ -21,6 +21,43 @@ import type { CSSProperties } from "react";
  */
 export const FAST_TEMPLATE_ID = "stock-analysis-fast";
 
+/** 历史分析列表的一个代码分组（名称缺席时 `stockName` 为空串，UI 只显示代码）。 */
+export interface AnalysisHistoryGroup<T> {
+  stockCode: string;
+  stockName: string;
+  items: T[];
+}
+
+/**
+ * 历史分析列表按股票代码分组（历史弹窗与详情页列表共用同一口径）。
+ *
+ * 组名取组内第一条**非空**名称：最新记录可能是补分析（mover_recall）等空名行，
+ * 若按「组内第一条的名称」直接定名，一条空名行就会把整组标题抹成只剩代码。
+ * 组内按 `createdAt` 倒序（最新分析在前）。
+ */
+export function groupAnalysisHistory<
+  T extends {
+    stockCode: string;
+    stockName: string;
+    createdAt: number;
+  },
+>(records: readonly T[]): AnalysisHistoryGroup<T>[] {
+  const map = new Map<string, AnalysisHistoryGroup<T>>();
+  for (const r of records) {
+    const group = map.get(r.stockCode);
+    if (!group) {
+      map.set(r.stockCode, { stockName: r.stockName, stockCode: r.stockCode, items: [r] });
+      continue;
+    }
+    if (!group.stockName && r.stockName) { group.stockName = r.stockName; }
+    group.items.push(r);
+  }
+  for (const g of map.values()) {
+    g.items.sort((a, b) => b.createdAt - a.createdAt);
+  }
+  return Array.from(map.values());
+}
+
 /** 市场环境信息（与后端 EvidenceWeightRequest 对应） */
 export interface MarketRegimeInfo {
   regime: string;

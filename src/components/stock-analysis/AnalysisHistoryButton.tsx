@@ -5,6 +5,7 @@ import {
   FAST_TEMPLATE_ID,
   getActionTagStyle,
   getActionTKey,
+  groupAnalysisHistory,
   HORIZON_T_SUFFIX,
   horizonSourceLabelKey,
   readDecisionProvenance,
@@ -184,20 +185,9 @@ export function AnalysisHistoryButton() {
     setEditingId(null);
   }, []);
 
-  // 按 stockCode 分组：组名 "股票名称(股票代码)"，组内按时间倒序
-  const grouped = useMemo(() => {
-    const map = new Map<string, { stockName: string; stockCode: string; items: AnalysisRecord[] }>();
-    for (const r of records) {
-      if (!map.has(r.stockCode)) {
-        map.set(r.stockCode, { stockName: r.stockName, stockCode: r.stockCode, items: [] });
-      }
-      map.get(r.stockCode)!.items.push(r);
-    }
-    for (const g of map.values()) {
-      g.items.sort((a, b) => b.createdAt - a.createdAt);
-    }
-    return Array.from(map.values());
-  }, [records]);
+  // 按 stockCode 分组（与详情页历史列表共用 groupAnalysisHistory）：
+  // 组名取组内第一条非空名称，一条空名新记录不会把整组标题抹成只剩代码。
+  const grouped = useMemo(() => groupAnalysisHistory(records), [records]);
 
   // 记录名：日期（精确到日期），重跑版本加 ↻ 标记
   const dateLabel = (r: AnalysisRecord) => {
@@ -320,10 +310,16 @@ export function AnalysisHistoryButton() {
                     gap: 6,
                   }}
                 >
-                  <span style={{ color: "var(--accent, #7c3aed)" }}>{g.stockName}</span>
-                  <span style={{ color: "var(--muted, #888)", fontSize: 10 }}>
-                    ({g.stockCode})
-                  </span>
+                  {g.stockName
+                    ? (
+                      <>
+                        <span style={{ color: "var(--accent, #7c3aed)" }}>{g.stockName}</span>
+                        <span style={{ color: "var(--muted, #888)", fontSize: 10 }}>
+                          ({g.stockCode})
+                        </span>
+                      </>
+                    )
+                    : <span style={{ color: "var(--accent, #7c3aed)" }}>{g.stockCode}</span>}
                 </div>
                 {/* 组内记录：日期为记录名 */}
                 {g.items.map((r) => (

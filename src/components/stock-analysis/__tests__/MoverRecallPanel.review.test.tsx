@@ -39,7 +39,17 @@ function makeViewWithMiss(): MoverRecallView {
       { period: "mid", gainPct: 30, windowDays: 28, varName: "mover_gain_mid" },
       { period: "long", gainPct: 40, windowDays: 90, varName: "mover_gain_long" },
     ],
-    rates: { reachability: 50, coverage: 50, unexplainedShare: 0, events: 1, misses: 1 },
+    rates: {
+      reachability: 50,
+      coverage: 50,
+      unexplainedShare: 0,
+      events: 1,
+      misses: 1,
+      judgeableEvents: 1,
+    },
+    codesWithClose: 684,
+    judgeableCodesByTier: { ultra_short: 680 },
+    gateVersion: "mover-layers-v2",
     layers: [{ layer: "not_in_pool", count: 1, byMarketType: [["main_sh", 1]] }],
     misses: [
       {

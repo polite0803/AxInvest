@@ -1542,7 +1542,8 @@ pub async fn run_batch_reflection(
 
     let mut resolved = 0u32;
     let mut failed = 0u32;
-    let mut skipped_young = 0u32; // 持仓期未到
+    let mut skipped_young = 0u32; // 分析日之后还没有完整交易日的新行情
+    let mut skipped_immature = 0u32; // 有新行情但未到持有期终点（到期任务保持 pending）
     let mut orphans = 0u32; // 原始分析已不存在 ⇒ 本轮落成终局，退出队列
     let mut errors: Vec<String> = Vec::new();
     let today_ms = chrono::Utc::now().timestamp_millis();
@@ -1666,12 +1667,18 @@ pub async fn run_batch_reflection(
             today_nd,
             days_held,
             p.reflection_depth.as_str(),
+            // 手动入口允许期中观察（与 due_only 的到期任务分开）。
+            false,
         )
         .await;
 
         match r {
             Ok(ReflectionOutcome::SkippedYoung) => {
                 skipped_young += 1;
+                continue;
+            },
+            Ok(ReflectionOutcome::SkippedImmature) => {
+                skipped_immature += 1;
                 continue;
             },
             Ok(ReflectionOutcome::Completed) => {
@@ -1741,11 +1748,12 @@ pub async fn run_batch_reflection(
 
     tracing::info!(
         "[D1 batch_reflection] 完成: total={} resolved={} failed={} skipped_young={} \
-         orphans={} cleaned={}",
+         skipped_immature={} orphans={} cleaned={}",
         pendings.len(),
         resolved,
         failed,
         skipped_young,
+        skipped_immature,
         orphans,
         cleaned_up
     );
@@ -1756,6 +1764,7 @@ pub async fn run_batch_reflection(
         "resolved": resolved,
         "failed": failed,
         "skippedYoung": skipped_young,
+        "skippedImmature": skipped_immature,
         "orphans": orphans,
         // 本轮开头由 dao 自愈落成终局的孤儿行数（与上面的"本轮撞到但没写库"分两件报）
         "orphansRetired": orphans_retired,
@@ -2439,15 +2448,21 @@ pub fn build_pending_reflection_rows_for(
         });
 
     // P1-9（`PLAN-stock-decision-reliability.md`，2026-10-16）：四档 hindsight **统一**
-    // 按交易日外推（T+2/T+5/T+28/T+90 交易日）—— 旧实现 live 走自然日、仅 as_of 批次走
-    // 交易日；自然日口径让长档样本成熟额外推迟约 40%（90 自然日 ≈ 63 交易日），长假后失真。
+    // 按交易日外推（持有 N 个交易日 ⇒ 分析日后第 N+1 个交易日到期）—— 旧实现 live 走
+    // 自然日、仅 as_of 批次走交易日；自然日口径让长档样本成熟额外推迟约 40%
+    // （90 自然日 ≈ 63 交易日），长假后失真。
     // 未来交易日历缺口由 is_trading_day「工作日默认开市」兜底，名义到期日误差仅限未公告假期，
     // 实际反思取数另有「≤ hindsight 最后一根真实 K 线」自证。
     horizons
         .into_iter()
         .map(|(horizon, days)| {
-            let hindsight_nd =
-                axagent_astock_data::calendar::nth_trading_day(analysis_nd, days as i32);
+            // 到期日 = 分析日后第 N+1 个交易日：entry 是分析日后第 1 个交易日，
+            // 持有 N 个交易日的窗口终点是 entry + N。旧实现取第 N 个交易日 ⇒
+            // 到期日当天 18:00 执行时 K 线只到第 N 天，快照恒判期中观察。
+            let hindsight_nd = axagent_astock_data::calendar::nth_trading_day(
+                analysis_nd,
+                days.saturating_add(1) as i32,
+            );
             let hindsight_date = hindsight_nd.format("%Y-%m-%d").to_string();
             stock_reflections::ActiveModel {
                 id: Set(uuid::Uuid::new_v4().to_string()),
@@ -2532,7 +2547,18 @@ impl ValidateDecisionsConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReflectionOutcome {
     SkippedYoung,
+    /// 行情已有一根以上，但还没走到持有期终点。到期任务不消费这种行（保持 pending
+    /// 等下一轮），否则终评名额会被一次「期中观察」永久用掉。
+    SkippedImmature,
     Completed,
+}
+
+/// 到期任务遇到「快照未成熟」是否应跳过并保持 pending。
+///
+/// `require_mature = true`（due_only 的到期任务 / 兜底轮 / 回放批次）⇒ 只做终评；
+/// false（手动立即反思 / validate-decisions）⇒ 保留期中观察能力。
+fn should_skip_immature(require_mature: bool, snap: Option<&MarketSnapshot>) -> bool {
+    require_mature && snap.is_some_and(|s| s.within_expected_horizon)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2550,6 +2576,8 @@ async fn perform_single_reflection(
     today_nd: chrono::NaiveDate,
     days_held: i64,
     effective_depth: &str,
+    // due_only 通道只做终评：快照未成熟时保持 pending，不写「期中观察」。
+    require_mature: bool,
 ) -> Result<ReflectionOutcome, String> {
     let target_price = extract_target_price(analysis);
 
@@ -2616,6 +2644,20 @@ async fn perform_single_reflection(
             None
         },
     };
+
+    // 到期任务只做终评：快照还没走到持有期终点时保持 pending，不写「期中观察」
+    // 把终评名额永久消耗掉。存量 hindsight 少一天、停牌、数据源滞后都会落到这一支。
+    // 提前观察仍由 due_only=false 的手动 / 决策校验通道承担。
+    if should_skip_immature(require_mature, primary_snap_opt.as_ref()) {
+        tracing::info!(
+            "[{log_prefix}] {} ({}) {primary_horizon} 尚未到持有期终点（{} / {} 交易日），保持 pending",
+            pending_row.id,
+            pending_row.stock_code,
+            primary_snap_opt.as_ref().map(|s| s.trading_days).unwrap_or_default(),
+            primary_snap_opt.as_ref().and_then(|s| s.expected_holding_days).unwrap_or_default(),
+        );
+        return Ok(ReflectionOutcome::SkippedImmature);
+    }
 
     let horizon_snapshots: std::collections::BTreeMap<String, Option<MarketSnapshot>> =
         snapshots_raw.into_iter().map(|(k, v)| (k, v.ok())).collect();
@@ -2801,6 +2843,7 @@ pub async fn run_batch_reflection_inner(
     let mut resolved = 0u32;
     let mut failed = 0u32;
     let mut skipped_young = 0u32;
+    let mut skipped_immature = 0u32;
     let mut orphans = 0u32;
     let mut skipped_by_filter = 0u32;
     let mut errors: Vec<String> = Vec::new();
@@ -2910,12 +2953,19 @@ pub async fn run_batch_reflection_inner(
             today_nd,
             days_held,
             depth,
+            // due_only（18:00 到期任务 / 6h 兜底 / 回放批次）只做终评；
+            // validate-decisions 等 due_only=false 的通道保留期中观察。
+            filter.is_some_and(|f| f.due_only),
         )
         .await;
 
         match r {
             Ok(ReflectionOutcome::SkippedYoung) => {
                 skipped_young += 1;
+                continue;
+            },
+            Ok(ReflectionOutcome::SkippedImmature) => {
+                skipped_immature += 1;
                 continue;
             },
             Ok(ReflectionOutcome::Completed) => {
@@ -2968,11 +3018,12 @@ pub async fn run_batch_reflection_inner(
 
     tracing::info!(
         "[batch_reflection_inner] 完成: total={} resolved={} failed={} skipped_young={} \
-         orphans={} skipped_by_filter={} reclaimed={} cleaned={}",
+         skipped_immature={} orphans={} skipped_by_filter={} reclaimed={} cleaned={}",
         pendings.len(),
         resolved,
         failed,
         skipped_young,
+        skipped_immature,
         orphans,
         skipped_by_filter,
         reclaimed,
@@ -2985,6 +3036,7 @@ pub async fn run_batch_reflection_inner(
         "resolved": resolved,
         "failed": failed,
         "skippedYoung": skipped_young,
+        "skippedImmature": skipped_immature,
         "orphans": orphans,
         // 本轮开头由 dao 自愈落成终局的孤儿行数
         "orphansRetired": orphans_retired,
@@ -3193,6 +3245,26 @@ pub fn take_primary_snapshot(
     }
 }
 
+/// 丢弃「今天且尚未收盘」的最后一根日 K。
+///
+/// 数据源在盘中会返回当日实时聚合的日 K；把它当完成 bar 会让收益 / 回撤 / 目标价
+/// 在盘中定价并随行落成 completed（2026-10-22 现网 09:34 兜底轮 resolved=7，
+/// exit 即当日盘中）。A 股 15:00 收盘（左闭右开，与 `calendar::trading_session_of`
+/// 同一边界）。
+fn drop_unclosed_today_bar(
+    mut klines: Vec<axagent_harness::market_data::KLine>,
+    today: chrono::NaiveDate,
+    hour: u32,
+    minute: u32,
+) -> Vec<axagent_harness::market_data::KLine> {
+    let closed = hour * 60 + minute >= 15 * 60;
+    let today_str = today.format("%Y-%m-%d").to_string();
+    if !closed && klines.last().is_some_and(|k| k.date == today_str) {
+        klines.pop();
+    }
+    klines
+}
+
 /// ── 四周期行情快照（PLAN-stock-reflection-four-horizon 批次 3）──
 ///
 /// 一次 K 线读取，按四个目标交易日索引分别生成窗口快照，避免每周期重复请求。
@@ -3242,6 +3314,17 @@ pub async fn compute_market_snapshots(
             return results;
         },
     };
+
+    // 盘中数据源会返回当日实时聚合的日 K；未到 15:00 它不是完成 bar。
+    let (bj_hour, bj_minute, bj_today) = axagent_astock_data::calendar::beijing_now();
+    let klines = drop_unclosed_today_bar(klines, bj_today, bj_hour, bj_minute);
+    if klines.is_empty() {
+        // 唯一一根是今日未收盘 bar ⇒ 样本不足（等收盘后再评），不是取数故障。
+        for key in horizon_expected_days.keys() {
+            results.insert(key.clone(), Err(SnapshotGap::Young));
+        }
+        return results;
+    }
 
     let entry_idx = match klines.iter().position(|k| k.date.as_str() > analysis_date) {
         Some(i) => i,
@@ -4410,6 +4493,50 @@ mod market_snapshot_tests {
         }
     }
 
+    fn bar(date: &str, close: f64) -> axagent_harness::market_data::KLine {
+        axagent_harness::market_data::KLine {
+            date: date.to_string(),
+            open: close,
+            high: close,
+            low: close,
+            close,
+            volume: 0.0,
+            amount: 0.0,
+            turnover_rate: None,
+            adj_factor: None,
+        }
+    }
+
+    /// 未收盘的当日 bar 不能当 exit：盘中(14:59)丢弃，15:00 收盘后保留。
+    #[test]
+    fn unclosed_today_bar_is_dropped() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 22).unwrap();
+        let bars = vec![bar("2026-10-21", 10.0), bar("2026-10-22", 11.0)];
+        let intraday = drop_unclosed_today_bar(bars.clone(), today, 14, 59);
+        assert_eq!(intraday.len(), 1, "盘中今日 bar 必须丢弃");
+        assert_eq!(intraday.last().unwrap().date, "2026-10-21");
+        let closed = drop_unclosed_today_bar(bars, today, 15, 0);
+        assert_eq!(closed.len(), 2, "15:00 后今日 bar 是完成 bar");
+        // 数据源滞后（最后一根不是今天）⇒ 不动
+        let stale = vec![bar("2026-10-21", 10.0)];
+        assert_eq!(drop_unclosed_today_bar(stale, today, 10, 0).len(), 1);
+        // 只有今日未收盘一根 ⇒ 过滤后为空，调用方应转 Young
+        let only_today = vec![bar("2026-10-22", 11.0)];
+        assert!(drop_unclosed_today_bar(only_today, today, 9, 40).is_empty());
+    }
+
+    /// 到期任务不能把未成熟快照消费成「期中观察」；手动/校验通道仍允许提前观察。
+    #[test]
+    fn due_reflection_skips_immature_snapshot() {
+        let mut s = sample();
+        s.within_expected_horizon = true;
+        assert!(should_skip_immature(true, Some(&s)), "到期任务必须跳过未成熟快照");
+        assert!(!should_skip_immature(false, Some(&s)), "手动/校验通道仍可做期中观察");
+        s.within_expected_horizon = false;
+        assert!(!should_skip_immature(true, Some(&s)));
+        assert!(!should_skip_immature(true, None), "无快照走 Failed 降级，不按 immature 处理");
+    }
+
     /// 摘要必须是**事实陈述**，不能出现 correct/wrong 这类结论词。
     ///
     /// 回归背景：旧实现把 actual_outcome 直接写成 "correct"/"wrong"，等于后端替
@@ -4972,6 +5099,23 @@ mod pending_rows_per_horizon_tests {
         assert!(
             by["ultra_short"] < by["short"] && by["short"] < by["mid"] && by["mid"] < by["long"],
             "hindsight 必须随档位天数单调后移：{by:?}"
+        );
+    }
+
+    /// 到期日必须与快照终评终点同一刻度：entry = 分析日后第 1 个交易日，
+    /// 持有 N 个交易日的窗口终点 = entry + N = 分析日后第 N+1 个交易日。
+    /// 旧实现取第 N 个交易日 ⇒ 到期日当天执行时 K 线少一根，快照恒判「期中观察」。
+    #[test]
+    fn hindsight_matches_entry_plus_expected_holding_days() {
+        use axagent_astock_data::calendar::nth_trading_day;
+        let as_of = chrono::NaiveDate::from_ymd_opt(2026, 8, 3).unwrap(); // 周一
+        let rows = build_pending_reflection_rows(&seed(None, Some("mid"), Some(28)));
+        let entry = nth_trading_day(as_of, 1);
+        let expected = nth_trading_day(entry, 28).format("%Y-%m-%d").to_string();
+        assert_eq!(
+            hindsight_of(&rows[0]),
+            expected,
+            "到期日必须等于 entry + 持有天数；差一天就会在到期当天判成期中观察"
         );
     }
 

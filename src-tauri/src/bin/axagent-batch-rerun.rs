@@ -414,7 +414,9 @@ async fn ensure_pending_reflection(
     // P1-9：重置分支的 hindsight 与建点（`build_pending_reflection_rows_for`）
     // 必须同口径（交易日）—— 旧实现此处是自然日，会与建点的交易日算法分叉出两种到期日。
     let hindsight = chrono::NaiveDate::parse_from_str(&anchor, "%Y-%m-%d")
-        .map(|d| axagent_astock_data::calendar::nth_trading_day(d, hold_days as i32))
+        .map(|d| {
+            axagent_astock_data::calendar::nth_trading_day(d, hold_days.saturating_add(1) as i32)
+        })
         .map_err(|e| format!("锚点 {anchor} 解析失败: {e}"))?
         .format("%Y-%m-%d")
         .to_string();
@@ -643,8 +645,9 @@ async fn backfill_reflections_only(
 
 /// P1-9：把存量 pending 反思行的 `hindsight_date` 重算到**交易日口径**。
 ///
-/// 公式 = `as_of_date + N 个交易日`，N 取该档决策声明的期望持有天数、缺回 `Period`
-/// 默认表 —— 与 `build_pending_reflection_rows_for` 的建点公式**同一把尺**。
+/// 公式 = `as_of_date` 之后第 **N+1** 个交易日（entry 为第 1 个交易日，持有 N 天的窗口
+/// 终点是 entry + N），N 取该档决策声明的期望持有天数、缺回 `Period` 默认表 ——
+/// 与 `build_pending_reflection_rows_for` 的建点公式**同一把尺**。
 /// 幂等：已是交易日口径的行重算结果与现值相同，不会重复改写。
 /// `horizon` 为 NULL 的老行**跳过**（无档可定天数；其待反思时机由消费端旧兜底口径负责）。
 async fn recompute_pending_hindsight(
@@ -706,9 +709,10 @@ async fn recompute_pending_hindsight(
             decision_cache.get(&r.original_analysis_id).and_then(|v| v.as_deref()),
             &horizon,
         );
-        let new_hd = axagent_astock_data::calendar::nth_trading_day(as_of_nd, days as i32)
-            .format("%Y-%m-%d")
-            .to_string();
+        let new_hd =
+            axagent_astock_data::calendar::nth_trading_day(as_of_nd, days.saturating_add(1) as i32)
+                .format("%Y-%m-%d")
+                .to_string();
         if new_hd == r.hindsight_date {
             unchanged += 1;
             continue;

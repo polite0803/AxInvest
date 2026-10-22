@@ -50,14 +50,25 @@ pub(crate) async fn run_universe_scan_inner(
             shards,
         )
     });
-    axagent_analysis_engine::universe_scan::scan_segment_shard(
+    let stats = axagent_analysis_engine::universe_scan::scan_segment_shard(
         db,
         client,
         shard,
         shards,
         UNIVERSE_SCAN_BATCH,
     )
+    .await?;
+    // 段扫后更新覆盖率读数：否则市场清单已扩到数千只，面板/门仍读到上一次 clist 的旧值。
+    if let Err(e) = axagent_analysis_engine::market_close_store::record_universe_stats_for_scan(
+        db,
+        stats.registered,
+        stats.failed_batches,
+    )
     .await
+    {
+        tracing::warn!("[universe-scan] 覆盖率读数落库失败（不影响扫描结果）: {e}");
+    }
+    Ok(stats)
 }
 
 /// 手动发起一次编码段盲扫（`shard` 缺省按日轮转；`shards` 缺省 3）。

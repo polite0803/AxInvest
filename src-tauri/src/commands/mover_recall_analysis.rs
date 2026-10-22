@@ -33,7 +33,7 @@ use axagent_agent_macro::agent_command;
 use axagent_astock_data::AStockClient;
 use axagent_astock_data::as_of::{self, AsOfContext, AsOfSource};
 use axagent_dao::repo::mover_recall_analysis_batches::{self, BatchRunModel, BatchRunRecord};
-use axagent_dao::repo::mover_recall_events::{self, EventModel};
+use axagent_dao::repo::mover_recall_events::{self, CHAIN_ROWS_PER_EVENT, EventModel};
 use axagent_harness::holding_period::Period;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -88,7 +88,8 @@ pub struct RunMoverRecallAnalysisRequest {
     /// 单批最多补分析的事件数（1-100，默认 20）
     #[serde(default = "default_batch_limit")]
     pub batch_limit: usize,
-    /// 所属核查轮次 unexplained 占比 ≥ 该阈值的事件整批不取（0-1，默认 0.5）
+    /// 所属核查轮次 unexplained 占比 ≥ 该阈值的事件整批不取。
+    /// **单位是 0-1 归一化占比**（0.5 = 50%）；`rates_json` 里的百分数由 dao 读取时归一。
     #[serde(default = "default_max_unexplained_share")]
     pub max_unexplained_share: f64,
     /// 仅处理指定核查轮次（mover_recall_runs.id）；None = 跨全部轮次选样
@@ -99,6 +100,7 @@ pub struct RunMoverRecallAnalysisRequest {
 fn default_batch_limit() -> usize {
     20
 }
+/// 默认阈值 0.5 = 50%（归一化占比，不是百分数）。
 fn default_max_unexplained_share() -> f64 {
     0.5
 }
@@ -527,7 +529,7 @@ async fn execute_batch(
     };
 
     // ── 阶段 1：选样（pending/failed，剔除高 unexplained 轮次，配额截断）────────
-    let selected: Vec<PendingEvent> = match select_events(&db, &request).await {
+    let (selected, selection) = match select_events(&db, &request).await {
         Ok(v) => v,
         Err(e) => {
             s.status = STATUS_FAILED.to_string();
@@ -541,27 +543,19 @@ async fn execute_batch(
     let total = selected.len();
 
     if total == 0 {
-        // 区分两种空态（UI 不得把「没资格进样本」读成「没有漏检」）
-        let pool = mover_recall_events::list_candidate_events(
-            &db,
-            request.run_id.as_deref(),
-            SELECT_SCAN_LIMIT,
-        )
-        .await;
-        let msg = match pool {
-            Ok(rows) if rows.is_empty() => {
-                "当前没有待补分析的漏检事件（pending / failed 均为空）".to_string()
-            },
-            Ok(rows) => {
-                let skipped = rows.len();
-                format!(
-                    "候选 {skipped} 个事件全部因所属轮次 unexplained 占比 ≥ {:.0}% 被跳过（\
-                     留痕不足批次不进补分析样本）",
-                    request.max_unexplained_share * 100.0
-                )
-            },
-            Err(e) => format!("选样复核查询失败: {e}"),
-        };
+        // 空态必须按实际跳过原因分桶：旧实现把「档位解析失败」等也写成
+        // 「全部因 unexplained 占比超阈值」，还因单位错配把 0.5% 显示成 50%。
+        let msg = empty_selection_message(selection, request.max_unexplained_share);
+        if selection.scanned > 0 {
+            tracing::warn!(
+                "[mover-recall-analysis] {batch_id} 选样为空：scanned={} skipped_by_share={} \
+                 skipped_by_period={} threshold={}",
+                selection.scanned,
+                selection.skipped_by_share,
+                selection.skipped_by_period,
+                request.max_unexplained_share
+            );
+        }
         s.status = STATUS_COMPLETED.to_string();
         s.message = Some(msg);
         s.finished_at_ms = Some(now_ms());
@@ -737,31 +731,84 @@ async fn execute_batch(
     save_state(&db, s).await;
 }
 
-/// 选样：候选事件 → 剔除高 unexplained 轮次 → 配额截断 → Period 可解析者。
+/// 选样统计：空态消息只按这里的分桶成句，不再猜唯一原因。
+#[derive(Debug, Default, Clone, Copy)]
+struct SelectionStats {
+    scanned: usize,
+    skipped_by_share: usize,
+    skipped_by_period: usize,
+}
+
+/// 阈值与 share 必须同为 0-1 归一化占比。缺占比信息（null/无字段）不拦截。
+fn share_blocks(share: Option<f64>, threshold: f64) -> bool {
+    share.is_some_and(|s| s >= threshold)
+}
+
+fn empty_selection_message(stats: SelectionStats, threshold: f64) -> String {
+    if stats.scanned == 0 {
+        return "当前没有待补分析的漏检事件（pending / failed 均为空）".to_string();
+    }
+    let mut reasons = Vec::new();
+    if stats.skipped_by_share > 0 {
+        reasons.push(format!(
+            "{} 个所属轮次 unexplained 占比 ≥ {:.0}%（阈值按 0-1 归一化占比计）",
+            stats.skipped_by_share,
+            threshold * 100.0
+        ));
+    }
+    if stats.skipped_by_period > 0 {
+        reasons.push(format!("{} 个事件的档位无法解析", stats.skipped_by_period));
+    }
+    let classified = stats.skipped_by_share + stats.skipped_by_period;
+    if classified < stats.scanned {
+        reasons.push(format!("{} 个原因未记录", stats.scanned - classified));
+    }
+    format!("候选 {} 个事件全部被跳过：{}", stats.scanned, reasons.join("；"))
+}
+
+/// 选样：候选事件 → 剔除高 unexplained 轮次 → 配额截断 → 可解析档位。
 async fn select_events(
     db: &axagent_harness::DatabaseConnection,
     request: &RunMoverRecallAnalysisRequest,
-) -> Result<Vec<PendingEvent>, String> {
+) -> Result<(Vec<PendingEvent>, SelectionStats), String> {
     let shares = mover_recall_events::load_run_unexplained_shares(db)
         .await
         .map_err(|e| format!("读核查轮次 unexplained 占比失败: {e}"))?;
-    let rows = mover_recall_events::list_candidate_events(
+    let rows = mover_recall_events::list_candidate_event_rows(
         db,
         request.run_id.as_deref(),
-        SELECT_SCAN_LIMIT,
+        SELECT_SCAN_LIMIT.saturating_mul(CHAIN_ROWS_PER_EVENT),
     )
     .await
     .map_err(|e| format!("读待补事件失败: {e}"))?;
 
-    let mut out = Vec::new();
+    // 按三键分组：同一事件两链各一行。只要有一条链的轮次通过阈值就选它 ——
+    // 不能先 dedupe 再看保留行，保留哪条链由同毫秒写入顺序决定，会让
+    // 「同一只票能否被补分析」带随机性。
+    let mut groups: Vec<Vec<EventModel>> = Vec::new();
+    let mut index: HashMap<(String, String, String), usize> = HashMap::new();
     for m in rows {
-        // 批次级过滤：该轮 unexplained_share ≥ 阈值 ⇒ 整轮不进样本（留痕不足不算算法账）。
-        // 缺占比信息（NaN/无字段）不拦截。
-        if let Some(share) = shares.get(&m.run_id)
-            && *share >= request.max_unexplained_share
-        {
+        let key = (m.stock_code.clone(), m.anchor_date.clone(), m.period.clone());
+        if let Some(&i) = index.get(&key) {
+            groups[i].push(m);
+        } else {
+            index.insert(key, groups.len());
+            groups.push(vec![m]);
+        }
+    }
+
+    let mut stats = SelectionStats { scanned: groups.len(), ..Default::default() };
+    let mut out = Vec::new();
+    for group in groups {
+        // 整组都超阈值才跳过；任一条链通过（或占比缺失）都保留该事件。
+        let all_blocked = group
+            .iter()
+            .all(|m| share_blocks(shares.get(&m.run_id).copied(), request.max_unexplained_share));
+        if all_blocked {
+            stats.skipped_by_share += 1;
             continue;
         }
+        let m = group.into_iter().next().expect("group 非空");
         let period = match m.period.parse::<Period>() {
             Ok(p) => p,
             Err(e) => {
@@ -770,6 +817,7 @@ async fn select_events(
                     m.id,
                     m.period
                 );
+                stats.skipped_by_period += 1;
                 continue;
             },
         };
@@ -778,7 +826,7 @@ async fn select_events(
             break;
         }
     }
-    Ok(out)
+    Ok((out, stats))
 }
 
 /// guard 内执行一个 as-of 日分组的逐只分析（首趟 + 失败重试一趟）。
@@ -917,5 +965,32 @@ mod cron_config_tests {
             default_batch_limit(),
             "snake 拼写必须落回缺省（证明读侧只认 camelCase，也证明拼错的后果是静默而非报错）"
         );
+    }
+
+    /// 阈值是 0-1 归一化占比：45.45% 不得被 0.5 拦，50.5% 必须被拦。
+    /// 旧实现直接拿百分数 45.45 与 0.5 比 ⇒ 45% 被当 4500%。
+    #[test]
+    fn share_threshold_is_unit_interval() {
+        assert!(!share_blocks(Some(0.4545), 0.5), "45.45% 不应被 50% 阈值拦");
+        assert!(share_blocks(Some(0.505), 0.5), "50.5% 必须被 50% 阈值拦");
+        assert!(!share_blocks(None, 0.5), "缺占比信息不拦截");
+        assert!(!share_blocks(Some(0.0), 0.5), "0% 不拦截");
+    }
+
+    /// 空态不得把所有跳过原因都写成「unexplained 占比超阈值」：
+    /// 两种原因分开计数，未分类的显式写「原因未记录」。
+    #[test]
+    fn empty_selection_message_names_each_skip_reason() {
+        let msg = empty_selection_message(
+            SelectionStats { scanned: 4, skipped_by_share: 2, skipped_by_period: 1 },
+            0.5,
+        );
+        assert!(msg.contains("2 个所属轮次 unexplained 占比 ≥ 50%"), "实得 {msg}");
+        assert!(msg.contains("1 个事件的档位无法解析"), "实得 {msg}");
+        assert!(msg.contains("1 个原因未记录"), "实得 {msg}");
+        assert!(!msg.contains("全部因"), "不得再把唯一原因写成全部");
+
+        let none = empty_selection_message(SelectionStats::default(), 0.5);
+        assert!(none.contains("没有待补分析"), "实得 {none}");
     }
 }

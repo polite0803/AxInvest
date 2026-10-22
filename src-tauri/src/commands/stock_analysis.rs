@@ -4604,6 +4604,8 @@ async fn persist_reco_response_picks(
     // 代际标记直接取自响应本身（由 recommender 内部按 as_of_ctx 回填）⇒ 实盘为 None、
     // 回放为该截止日，本函数不再按「是不是 live」决定要不要落库。
     let as_of_date = response.as_of_date.as_deref();
+    // 批次级池快照：即使 0 票也要留痕，供漏检归因判「池子空/没扫过」（0 票批次在 reco_picks 里没有行）。
+    let pool_batch_json = seed_pool_json.clone();
     let written = crate::commands::_shared_reco_pool::persist_reco_picks(
         state.harness.db(),
         &flat,
@@ -4618,6 +4620,15 @@ async fn persist_reco_response_picks(
         flat.len(),
         response.period.as_str()
     );
+    crate::commands::_shared_reco_pool::persist_reco_pool_batch(
+        state.harness.db(),
+        "reco",
+        response.period.as_str(),
+        pool_batch_json.as_deref(),
+        generated_at,
+        as_of_date,
+    )
+    .await;
     // L3 截断留痕：与同一批 picks 共 generated_at，便于按批对齐
     if !response.scan_audit.is_empty() {
         let audit = crate::commands::_shared_reco_pool::persist_reco_scan_audit(

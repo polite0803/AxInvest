@@ -313,6 +313,12 @@ export function MoverRecallPanel() {
   const chainName = (value?: string | null): string =>
     value ? t(`stockAnalysis.moverRecall.chain_${value}`, { defaultValue: value }) : "-";
 
+  /** 逐档「有可判票」：旧轮次没有逐档可判数（null）⇒ 不阻断旧口径的「真无达标」结论。 */
+  const judgeableAllPositive = data?.judgeableCodesByTier == null
+    || (data?.rules.every((r) => (data?.judgeableCodesByTier?.[r.period] ?? 0) > 0) ?? false);
+  const allWindowsFull = data?.rules.every((r) => (data?.collectedDays ?? 0) >= r.windowDays)
+    ?? false;
+
   const runOptions = [
     ...runs.map((r) => ({
       value: r.id,
@@ -515,6 +521,30 @@ export function MoverRecallPanel() {
                 })}
             </div>
 
+            {/* 事件域 ≠ 清单域：清单里没采到收盘的票不可能产生事件；逐档再按历史长度判可判票 */}
+            <div
+              style={{ marginBottom: 6, fontSize: 12, color: "var(--color-text-secondary)" }}
+              data-testid="mover-recall-event-domain"
+            >
+              {data.codesWithClose == null || data.judgeableCodesByTier == null
+                ? t("stockAnalysis.moverRecall.eventDomainUnknown")
+                : t("stockAnalysis.moverRecall.eventDomain", {
+                  close: data.codesWithClose,
+                  tiers: data.rules
+                    .map((r) => `${tierName(r.period)} ${data.judgeableCodesByTier?.[r.period] ?? 0}`)
+                    .join(" / "),
+                })}
+            </div>
+
+            <div
+              style={{ marginBottom: 6, fontSize: 11, color: "var(--color-text-tertiary)" }}
+              data-testid="mover-recall-gate-version"
+            >
+              {data.gateVersion
+                ? t("stockAnalysis.moverRecall.gateVersion", { version: data.gateVersion })
+                : t("stockAnalysis.moverRecall.gateVersionUnknown")}
+            </div>
+
             {/* 三个率：null 显示「样本不足，算不出」，绝不显示成 0% */}
             <div style={{ display: "flex", gap: 24, flexWrap: "wrap", margin: "10px 0" }}>
               <RateStat
@@ -536,10 +566,16 @@ export function MoverRecallPanel() {
                   alignSelf: "flex-end",
                 }}
               >
-                {t("stockAnalysis.moverRecall.events", {
-                  events: data.rates.events,
-                  misses: data.rates.misses,
-                })}
+                {data.rates.judgeableEvents == null
+                  ? t("stockAnalysis.moverRecall.events", {
+                    events: data.rates.events,
+                    misses: data.rates.misses,
+                  })
+                  : t("stockAnalysis.moverRecall.eventsWithJudgeable", {
+                    events: data.rates.events,
+                    misses: data.rates.misses,
+                    judgeable: data.rates.judgeableEvents,
+                  })}
               </div>
             </div>
 
@@ -550,7 +586,9 @@ export function MoverRecallPanel() {
                   data-testid="mover-recall-empty"
                 >
                   {/* C-2 三态：全满 ⇒ 结论；全未满 ⇒ 尚不可判定；部分满 ⇒ 点名未满档 */}
-                  {data.rules.every((r) => data.collectedDays >= r.windowDays)
+                  {allWindowsFull && !judgeableAllPositive
+                    ? t("stockAnalysis.moverRecall.emptyNoJudgeable")
+                    : allWindowsFull
                     ? t("stockAnalysis.moverRecall.empty")
                     : data.rules.every((r) => data.collectedDays < r.windowDays)
                     ? t("stockAnalysis.moverRecall.emptyNotYet", { have: data.collectedDays })
@@ -618,6 +656,21 @@ export function MoverRecallPanel() {
                         })}
                       </span>
                     )}
+                  {data.codesWithClose != null
+                      && data.judgeableCodesByTier != null
+                      && (data.judgeableCodesByTier[r.period] ?? 0) < data.codesWithClose
+                    ? (
+                      <span
+                        style={{ color: "var(--sa-warning, #faad14)", marginLeft: 6 }}
+                        data-testid={`mover-tier-judgeable-${r.period}`}
+                      >
+                        {t("stockAnalysis.moverRecall.tierJudgeable", {
+                          judgeable: data.judgeableCodesByTier[r.period] ?? 0,
+                          close: data.codesWithClose,
+                        })}
+                      </span>
+                    )
+                    : null}
                 </li>
               ))}
             </ul>

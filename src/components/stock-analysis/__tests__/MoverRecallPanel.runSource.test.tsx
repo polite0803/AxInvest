@@ -47,7 +47,17 @@ function makeView() {
       { period: "mid", gainPct: 30, windowDays: 28, varName: "mover_gain_mid" },
       { period: "long", gainPct: 40, windowDays: 90, varName: "mover_gain_long" },
     ],
-    rates: { reachability: 50.6, coverage: 30.7, unexplainedShare: 3.07, events: 77, misses: 65 },
+    rates: {
+      reachability: 50.6,
+      coverage: 30.7,
+      unexplainedShare: 3.07,
+      events: 77,
+      misses: 65,
+      judgeableEvents: 77,
+    },
+    codesWithClose: 684,
+    judgeableCodesByTier: { ultra_short: 680 },
+    gateVersion: "mover-layers-v2",
     layers: [{ layer: "not_in_pool", count: 38, byMarketType: [["main_sz", 33]] }],
     misses: [],
   };

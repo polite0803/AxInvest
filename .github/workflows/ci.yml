@@ -218,6 +218,8 @@ jobs:
         run: |
           node scripts/check-reco-horizon-parity.mjs --selftest
           node scripts/check-reco-horizon-parity.mjs
+          node scripts/check-mover-recall-units.mjs --selftest
+          node scripts/check-mover-recall-units.mjs
 
       # P6 收口（2026-10-03）：这两道门此前只存在于 scripts/ 下、**不在 CI**，
       # 而「可调参数五点对账」缺任一处时 `cargo check` 与 `typecheck` 全绿也照样存在

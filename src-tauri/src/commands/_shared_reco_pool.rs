@@ -19,7 +19,7 @@
 //! 带 `as_of_date IS NULL`，漏加由 `scripts/check-reco-generation.mjs` 拦。
 
 use axagent_analysis_engine::recommender::{self, Period, RecoPick, TrimmedPick};
-use axagent_dao::repo::reco_pool::{self as pool_dao, NewRecoPick, NewScanAuditTrim};
+use axagent_dao::repo::reco_pool::{self as pool_dao, NewPoolBatch, NewRecoPick, NewScanAuditTrim};
 use axagent_harness::DatabaseConnection;
 
 /// 落 `reco_picks`，返回写入行数。
@@ -60,6 +60,54 @@ pub async fn persist_reco_picks(
         Some(recommender::RECO_ALGORITHM_VERSION),
     )
     .await
+}
+
+/// 落一个候选池批次快照（每批一行，**0 票也写**）。
+///
+/// 漏检归因需要「这批扫过、池子是什么」；只在出票行上带 `seed_pool_json` 时，
+/// 0 票批次在库里完全不可见 ⇒ `in_pool` 只能判「不知道」，还会连带整轮被
+/// `unexplained_share` 过滤出补分析样本。写失败只 warn（不阻塞荐股主链）。
+pub async fn persist_reco_pool_batch(
+    db: &DatabaseConnection,
+    chain: &str,
+    period: &str,
+    seed_pool_json: Option<&str>,
+    generated_at: &str,
+    as_of_date: Option<&str>,
+) -> bool {
+    let stock_count = seed_pool_json
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .map(|v| match v {
+            serde_json::Value::Array(a) => a.len(),
+            serde_json::Value::Object(_) => 1,
+            _ => 0,
+        })
+        .unwrap_or(0);
+    let degraded = match seed_pool_json {
+        None => true,
+        Some(raw) => {
+            let trimmed = raw.trim();
+            trimmed.is_empty() || trimmed == "[]"
+        },
+    };
+    let batch = NewPoolBatch {
+        id: format!("rpb-{}", uuid::Uuid::new_v4()),
+        chain: chain.to_string(),
+        period: period.to_string(),
+        generated_at: generated_at.to_string(),
+        as_of_date: as_of_date.map(str::to_string),
+        seed_pool_json: seed_pool_json.map(str::to_string),
+        stock_count: stock_count as i32,
+        degraded,
+        created_at_ms: chrono::Utc::now().timestamp_millis(),
+    };
+    match pool_dao::insert_pool_batch(db, &batch).await {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!("[reco] 候选池批次快照落库失败（不影响荐股）: {e}");
+            false
+        },
+    }
 }
 
 /// 落 L3 截断留痕（`reco_scan_audit`）。

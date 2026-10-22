@@ -3,7 +3,7 @@
 use crate::AppState;
 use crate::index_queue::IndexJobService;
 use axagent_harness::IpcEventName;
-use chrono;
+use chrono::{self, Datelike};
 use notify::{Event, RecursiveMode, Watcher};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -2479,9 +2479,9 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 //     「候选池→逐只分析」（pool-scan）任务永远取不到候选。
                 //     与命令层共用 `persist_reco_picks`，保证两条入口写入同一张表、
                 //     同一套字段。
+                let generated_at =
+                    chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
                 if !picks.is_empty() {
-                    let generated_at =
-                        chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
                     let strategy_weights_json = vars
                         .iter()
                         .find(|(k, _)| k == "reco_strategy_weights")
@@ -2525,6 +2525,18 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         );
                     }
                 }
+
+                // 批次级池快照：0 票也要留痕。池在整次扫描里只有一份（多周期共用），
+                // 所以批次行的 period 记 "all"；漏检归因只按时间窗取池，不按档拆。
+                crate::commands::_shared_reco_pool::persist_reco_pool_batch(
+                    &db,
+                    "reco",
+                    "all",
+                    scan.seed_pool_snapshot.as_deref(),
+                    &generated_at,
+                    axagent_astock_data::as_of::LIVE_GENERATION,
+                )
+                .await;
 
                 // 4. 无 pick 时静默（不推空通知），但有 pick 必须推 —— 这是本任务的存在意义
                 let (title, body) = axagent_analysis_engine::recommender::build_notification(
@@ -3281,7 +3293,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
         }
         // 妖股漏检核查：task_type = mover-recall（PLAN-batch-automation-mover-recall P1）
         //
-        // 周六 09:00 跑（cron `0 9 * * 6`）：消费的是已落库的周五收盘快照，
+        // 周二~周六 09:00 跑（cron `0 9 * * 2-6`）：消费的是前一交易日已落库的收盘快照，
         // **刻意不进交易日闸门**——闸门按"今天是否交易日"拦，周六必拦，与设计意图相反。
         // 任意时点从任务中心「立即执行」也走这里，无最新快照时 inner 自行报错失败。
         // 无漏检静默（不投递通知）；有漏检才投递，与荐股分支"无 pick 不轰炸"同口径。
@@ -4613,12 +4625,20 @@ fn start_realtime_quote_watcher(app: &tauri::AppHandle, state: &AppState) {
     }
 }
 
-/// 启动批量反思 cron（每 6 小时）：扫 pending 反思队列 → LLM 反思 → 回测验证
+/// 兜底轮的反思筛选：只消费**已到期**的 pending 行。
 ///
-/// 这是 cron 任务 `reflection-due-daily` 之外的**系统兜底轮**（不限定周期档位、
-/// 处理全部 pending）。它不经过调度器派发，故不推进 `next_run_at`，但每轮成败
-/// 通过 `record_auxiliary_run` 落 `cron_job_history`（output 带「系统兜底轮」
-/// 前缀），避免只进 tracing 日志、前端历史面板零可见性。
+/// 与 18:00 到期任务同一把尺（`due_only`）。旧实现传 `None` ⇒ 不看到期，分析次日
+/// 就把 mid/long 行写成「期中观察」completed，到期任务再也拿不到终评样本。
+fn reflection_fallback_filter() -> crate::commands::stock_workflow::ReflectionFilter {
+    crate::commands::stock_workflow::ReflectionFilter { due_only: true, ..Default::default() }
+}
+
+/// 启动批量反思 cron（每 6 小时）：扫**已到期**的 pending 反思队列 → LLM 反思。
+///
+/// 这是 cron 任务 `reflection-due-daily` 之外的**系统兜底轮**（不限定周期档位，
+/// 但只处理 `hindsight_date <= 今天` 的行）。它不经过调度器派发，故不推进
+/// `next_run_at`，但每轮成败通过 `record_auxiliary_run` 落 `cron_job_history`
+/// （output 带「系统兜底轮」前缀），避免只进 tracing 日志、前端历史面板零可见性。
 fn start_batch_reflection(state: &AppState) {
     let db = state.harness.db().clone();
     let client = state.astock_client.clone();
@@ -4629,9 +4649,12 @@ fn start_batch_reflection(state: &AppState) {
     let cron_store = state.cron_job_store.clone();
 
     tauri::async_runtime::spawn(async move {
-        // 启动延迟 5 分钟，避开启动高峰
-        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(6 * 3600));
+        // 首轮等满一个周期：`tokio::time::interval` 的第一次 tick 立即返回，
+        // 旧写法让每次应用启动 300 秒后就抢先跑一轮（重启几次就抢跑几轮，
+        // 现网 02:12 / 03:22 / 03:44 三条连续记录即三次启动）。
+        let period = std::time::Duration::from_secs(6 * 3600);
+        let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+        let due_filter = reflection_fallback_filter();
         loop {
             interval.tick().await;
             let started = axagent_runtime_core::cron_job::now_millis();
@@ -4643,9 +4666,8 @@ fn start_batch_reflection(state: &AppState) {
                 &master_key,
                 None,
                 Some(&trajectory_storage),
-                // 兜底服务不限定周期档位：处理全部 pending。
-                // 「按 4 周期分档」由 cron 的 batch-reflection 任务各自指定 filter。
-                None,
+                // 只消费已到期行（与 18:00 到期任务同口径）；未到期行留给到期任务。
+                Some(&due_filter),
                 None,
             )
             .await;
@@ -4827,7 +4849,7 @@ static FUNDAMENTALS_LAST_SWEPT: std::sync::atomic::AtomicI64 = std::sync::atomic
 ///    「采齐」判据取「行数 ≥ 清单规模的一半」这个宽阈值——宁可重复跑一次（幂等 upsert），
 ///    也不要因为一次网络抖动把整天留成空洞。
 fn start_market_close_sweep(state: &AppState) {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicI64, Ordering};
 
     let db = state.harness.db().clone();
     let client = state.astock_client.clone();
@@ -4843,7 +4865,7 @@ fn start_market_close_sweep(state: &AppState) {
             Err(e) => tracing::warn!("[market-close] 清单 bootstrap 失败: {e}"),
         }
 
-        let tick = AtomicUsize::new(0);
+        let last_clist_day = AtomicI64::new(0);
         tokio::time::sleep(std::time::Duration::from_secs(420)).await;
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
         loop {
@@ -4859,24 +4881,28 @@ fn start_market_close_sweep(state: &AppState) {
             };
             let date = target.format("%Y-%m-%d").to_string();
 
-            // 1) 扩清单：每 tick 6 页，10 个 tick 走完 60 页
-            let round = tick.fetch_add(1, Ordering::Relaxed) % 10;
-            let base = (round * 6 + 1) as u32;
-            let pages: Vec<u32> = (base..base + 6).collect();
-            match axagent_analysis_engine::market_close_store::refresh_universe_pages(
-                &db, &client, &pages,
-            )
-            .await
-            {
-                Ok(r) => tracing::info!(
-                    "[market-close] 清单第 {:?} 页: 落库 {} 只, 失败页 {}, 全市场申报 {} 只, 清单现有 {}",
-                    pages,
-                    r.rows_upserted,
-                    r.pages_failed,
-                    r.reported_total,
-                    r.universe_size
-                ),
-                Err(e) => tracing::warn!("[market-close] 清单扩页失败: {e}"),
+            // 1) 扩清单：每天只扩一轮 6 页。旧实现每小时一轮、tick 是进程内 AtomicUsize
+            //    （重启归零）⇒ 长期反复扫前 6 页；现网 confirmed 595/2563 即由此而来。
+            let day_index = chrono::Local::now().date_naive().num_days_from_ce() as i64;
+            let round = day_index.rem_euclid(10) as usize;
+            if last_clist_day.swap(day_index, Ordering::Relaxed) != day_index {
+                let base = (round * 6 + 1) as u32;
+                let pages: Vec<u32> = (base..base + 6).collect();
+                match axagent_analysis_engine::market_close_store::refresh_universe_pages(
+                    &db, &client, &pages,
+                )
+                .await
+                {
+                    Ok(r) => tracing::info!(
+                        "[market-close] 清单第 {:?} 页: 落库 {} 只, 失败页 {}, 全市场申报 {} 只, 清单现有 {}",
+                        pages,
+                        r.rows_upserted,
+                        r.pages_failed,
+                        r.reported_total,
+                        r.universe_size
+                    ),
+                    Err(e) => tracing::warn!("[market-close] 清单扩页失败: {e}"),
+                }
             }
 
             // 2) 收盘快照
@@ -4885,7 +4911,9 @@ fn start_market_close_sweep(state: &AppState) {
             let have = axagent_analysis_engine::market_close_store::rows_for_date(&db, &date)
                 .await
                 .unwrap_or(0);
-            if size > 0 && have * 2 < size {
+            // 97% 覆盖率即视为「本轮已采齐」：严格 <size 会被停牌/无值票卡成每小时重跑。
+            // 旧判据「不足一半才重跑」会让缺 49% 也静默通过。
+            if size > 0 && have * 100 < size * 97 {
                 match axagent_analysis_engine::market_close_store::run_close_sweep(
                     &db,
                     &client,
@@ -4896,13 +4924,14 @@ fn start_market_close_sweep(state: &AppState) {
                 .await
                 {
                     Ok(r) => tracing::info!(
-                        "[market-close] {date} 快照: 落库 {}/{}, 无有效值 {}, 失败批次 {}/{}{}",
+                        "[market-close] {date} 快照: 落库 {}/{}, 无有效值 {}, 停牌 {}, 失败批次 {}/{}{}",
                         r.written,
                         r.universe_size,
                         r.skipped_no_data,
+                        r.skipped_suspended,
                         r.failed_batches,
                         r.batches,
-                        if r.failed_batches > 0 {
+                        if r.failed_batches > 0 || r.written < r.universe_size {
                             "（本轮数据不完整）"
                         } else {
                             ""
@@ -4911,6 +4940,11 @@ fn start_market_close_sweep(state: &AppState) {
                     Err(e) => tracing::warn!("[market-close] 快照采集失败: {e}"),
                 }
             }
+
+            // 2.5) **逐票历史补齐**（阶段 3）：段扫新登记的票在 `market_daily_close` 里是
+            //      0 行，旧实现用全局日期数判断（≥90 就 return）⇒ 永远不补它们。
+            //      每天只补一批 200 只（函数内有日期闩），不阻塞核查与面板。
+            crate::commands::mover_recall::ensure_close_history(&db, &client).await;
 
             // 3) **估值归档**（2026-10-20，P-n 的覆盖前提）：把候选池的 PE/PB 历史补进
             //    `financial_snapshots`。为什么补在这条链上：它是每天收盘后**必然**跑一次的
@@ -5021,6 +5055,17 @@ mod tests {
     use super::asof_builtin_vars;
     use axagent_astock_data::as_of::{AS_OF, AsOfContext, AsOfDataScope, AsOfSource};
     use chrono::NaiveDate;
+
+    /// 兜底轮必须只消费已到期行：未到期行被提前反思后行就 completed，
+    /// 到期任务再也拿不到终评（2026-10-22 现网 mid/long mature=0 的成因之一）。
+    #[test]
+    fn fallback_reflection_filter_is_due_only() {
+        let f = super::reflection_fallback_filter();
+        assert!(f.due_only, "兜底轮必须 due_only");
+        assert!(f.period.is_none(), "兜底轮不限定档位");
+        assert!(f.matches(Some("mid"), Some(28), true, 70), "已到期行应通过");
+        assert!(!f.matches(Some("mid"), Some(28), false, 70), "未到期行必须被拒");
+    }
 
     /// 三种模式各取一次读数。
     ///

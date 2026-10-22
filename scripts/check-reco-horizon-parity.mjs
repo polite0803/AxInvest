@@ -713,7 +713,7 @@ function readChainLocales() {
  *  ① `pub enum MissLayer` 的变体集合；
  *  ② `as_str` 的 `MissLayer::X => "y"` 映射（落库值域 = 面板/i18n `moverRecall.layer.<y>` 的键）；
  *  ③ `pub fn attribute(` 函数体里出现过的 `MissLayer::X` —— **某层在这里没有出现，就等于生产路径
- *     永远不会产出它**，面板那一格与 i18n 那条译文都是死料（`LateTiming` 就这么躺了几个月）。
+ *     永远不会产出它**，面板那一格与 i18n 那条译文都是死料（`PriorCovered` 就这么躺了几个月）。
  * 另加 `pub const ALL: [MissLayer; N]` 的条数锚：Rust 侧的逐层可达性测试是遍历 `ALL` 的，
  * 加了枚举值却忘进 `ALL` ⇒ 那条测试会安静地少判一层。
  *
@@ -925,7 +925,7 @@ function selftest() {
   // 门 p 的引擎夹具：八层在枚举 / ALL / as_str / attribute 四处各有对应一支。
   const P_ENGINE_FIXTURE = `pub enum MissLayer {
     Recommended,
-    LateTiming,
+    PriorCovered,
     NotInPool,
     PoolDegraded,
     ByDesign,
@@ -937,7 +937,7 @@ function selftest() {
 impl MissLayer {
     pub const ALL: [MissLayer; 8] = [
         MissLayer::Recommended,
-        MissLayer::LateTiming,
+        MissLayer::PriorCovered,
         MissLayer::NotInPool,
         MissLayer::PoolDegraded,
         MissLayer::ByDesign,
@@ -949,7 +949,7 @@ impl MissLayer {
     pub fn as_str(self) -> &'static str {
         match self {
             MissLayer::Recommended => "recommended",
-            MissLayer::LateTiming => "late_timing",
+            MissLayer::PriorCovered => "prior_covered",
             MissLayer::NotInPool => "not_in_pool",
             MissLayer::PoolDegraded => "pool_degraded",
             MissLayer::ByDesign => "by_design",
@@ -965,7 +965,7 @@ pub fn attribute(tier_active: bool, ev: &Evidence) -> MissLayer {
         return MissLayer::Recommended;
     }
     if ev.picked_before_window {
-        return MissLayer::LateTiming;
+        return MissLayer::PriorCovered;
     }
     if !tier_active {
         return MissLayer::ByDesign;
@@ -989,7 +989,7 @@ pub fn attribute(tier_active: bool, ev: &Evidence) -> MissLayer {
 `;
   const P_LAYER_VALUES = [
     "recommended",
-    "late_timing",
+    "prior_covered",
     "not_in_pool",
     "pool_degraded",
     "by_design",
@@ -1398,14 +1398,14 @@ pub fn attribute(tier_active: bool, ev: &Evidence) -> MissLayer {
       want: 0,
     },
     {
-      name: "p 负控（attribute 里删掉 LateTiming 那一支）必须红且点名「生产路径不可达」",
+      name: "p 负控（attribute 里删掉 PriorCovered 那一支）必须红且点名「生产路径不可达」",
       got: (() => {
         const mutated = P_ENGINE_FIXTURE.replace(
-          "    if ev.picked_before_window {\n        return MissLayer::LateTiming;\n    }\n",
+          "    if ev.picked_before_window {\n        return MissLayer::PriorCovered;\n    }\n",
           "",
         );
         const r = checkMissLayerVocabulary(mutated, "", P_LOCALES());
-        return r.violations.length === 1 && r.violations[0].includes("MissLayer::LateTiming") &&
+        return r.violations.length === 1 && r.violations[0].includes("MissLayer::PriorCovered") &&
             r.violations[0].includes("生产路径不可达")
           ? 1
           : 0;
@@ -1413,13 +1413,13 @@ pub fn attribute(tier_active: bool, ev: &Evidence) -> MissLayer {
       want: 1,
     },
     {
-      name: "p 负控（de 删掉 layer.late_timing 译文）必须只红那一格并点名 de",
+      name: "p 负控（de 删掉 layer.prior_covered 译文）必须只红那一格并点名 de",
       got: (() => {
         const jsons = P_LOCALES();
-        delete jsons.de.stockAnalysis.moverRecall.layer.late_timing;
+        delete jsons.de.stockAnalysis.moverRecall.layer.prior_covered;
         const r = checkMissLayerVocabulary(P_ENGINE_FIXTURE, "", jsons);
         return r.violations.length === 1 && r.violations[0].includes("de") &&
-            r.violations[0].includes("late_timing")
+            r.violations[0].includes("prior_covered")
           ? 1
           : 0;
       })(),

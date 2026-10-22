@@ -217,6 +217,8 @@ if (canRunFrontend) {
   //   与 `.github/workflows/ci.yml` 的「Check reco horizon parity」**命令行逐字同源**。
   step("荐股四周期口径一致自检（正负对照）", "node scripts/check-reco-horizon-parity.mjs --selftest");
   step("荐股四周期口径一致（a–l 十二门）", "node scripts/check-reco-horizon-parity.mjs");
+  step("漏检补分析阈值单位自检（正负对照）", "node scripts/check-mover-recall-units.mjs --selftest");
+  step("漏检补分析阈值单位（U1–U4）", "node scripts/check-mover-recall-units.mjs");
   // P6 收口（2026-10-03）：这两道门此前**不在 CI** —— 前者是「纸面可调」的正面防线
   // （可调参数五点对账：seed 变量 / input_mapping / 面板 b() / 面板分组 / rhai effective_params，
   //  漏任一处 `cargo check` 与 `typecheck` 全绿也照样存在，实证见 PLAN §四 需求⑤），

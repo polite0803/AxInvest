@@ -25,7 +25,17 @@ function makeView(chain: string) {
     rules: [
       { period: "ultra_short", gainPct: 10, windowDays: 2, varName: "mover_gain_ultra_short" },
     ],
-    rates: { reachability: 50, coverage: 30, unexplainedShare: 3, events: 77, misses: 65 },
+    rates: {
+      reachability: 50,
+      coverage: 30,
+      unexplainedShare: 3,
+      events: 77,
+      misses: 65,
+      judgeableEvents: 77,
+    },
+    codesWithClose: 684,
+    judgeableCodesByTier: { ultra_short: 680 },
+    gateVersion: "mover-layers-v2",
     layers: [{ layer: "not_in_pool", count: 38, byMarketType: [["main_sz", 33]] }],
     misses: chain === "reco"
       ? []
@@ -128,5 +138,56 @@ describe("MoverRecallPanel 链维度", () => {
     expect(screen.getByTestId("mover-recall-chain").textContent).toContain("未分链");
     // 混池轮次只有一份视图 ⇒ 不该长出链选择器（没有可换的另一份）
     expect(screen.queryByTestId("mover-recall-chain-select")).toBeNull();
+  });
+});
+
+/**
+ * 事件域与口径呈现（阶段 3/5）：清单数不等于事件域；只核右端日必须写明；
+ * 逐档可判票为 0 时不得把「零达标」当成「真无达标」。
+ */
+describe("MoverRecallPanel 事件域呈现", () => {
+  it("显示有收盘票数、逐档可判数与口径版本，并写明只核右端日", async () => {
+    const view = {
+      ...makeView("reco"),
+      codesWithClose: 684,
+      judgeableCodesByTier: { ultra_short: 680 },
+      gateVersion: "mover-layers-v2",
+    };
+    invokeMock.mockImplementation(async (name: string) => {
+      if (name === "list_mover_recall_runs") { return []; }
+      if (name === "analyze_mover_recall") { return [view]; }
+      return null;
+    });
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId("mover-recall-event-domain")).toBeTruthy());
+    expect(screen.getByTestId("mover-recall-event-domain").textContent).toContain("684");
+    expect(screen.getByTestId("mover-recall-event-domain").textContent).toContain("680");
+    expect(screen.getByTestId("mover-recall-gate-version").textContent).toContain("mover-layers-v2");
+    expect(screen.getByTestId("mover-recall-boundary").textContent).toContain("只核查 2026-10-20");
+  });
+
+  it("本档无历史可判票时，零事件不得说成「真无达标」", async () => {
+    const view = {
+      ...makeView("reco"),
+      codesWithClose: 684,
+      judgeableCodesByTier: { ultra_short: 0 },
+      rates: {
+        reachability: null,
+        coverage: null,
+        unexplainedShare: null,
+        events: 0,
+        misses: 0,
+        judgeableEvents: 0,
+      },
+    };
+    invokeMock.mockImplementation(async (name: string) => {
+      if (name === "list_mover_recall_runs") { return []; }
+      if (name === "analyze_mover_recall") { return [view]; }
+      return null;
+    });
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId("mover-recall-empty")).toBeTruthy());
+    expect(screen.getByTestId("mover-recall-empty").textContent).toContain("足够历史");
+    expect(screen.getByTestId("mover-tier-judgeable-ultra_short")).toBeTruthy();
   });
 });

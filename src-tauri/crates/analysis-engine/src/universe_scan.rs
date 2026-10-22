@@ -21,7 +21,8 @@ use crate::market_close_store::upsert_universe_registered;
 /// 扫描段：`(起始码, 结束码)`，两端含，数值形式（输出时补足 6 位）。
 ///
 /// 只收 A 股正股所在段：深主板 / 创业板 / 沪主板（含 605）/ 科创板 / 北交所。
-/// 刻意**不含** 430xxx（新三板，非上市股票段）与 399xxx（指数段）。
+/// 北交所含 83x（旧代码）与 87x/92x（新代码段）；刻意**不含** 430xxx（新三板，
+/// 非上市股票段）与 399xxx（指数段）。
 pub const CODE_SEGMENTS: &[(u32, u32)] = &[
     (1, 3_999),
     (300_000, 301_999),
@@ -29,6 +30,8 @@ pub const CODE_SEGMENTS: &[(u32, u32)] = &[
     (605_000, 605_999),
     (688_000, 688_999),
     (830_000, 839_999),
+    (870_000, 879_999),
+    (920_000, 920_999),
 ];
 
 /// 允许登记的板块（`detect_market_type` 的取值域）—— 其余一律不登记。
@@ -55,6 +58,8 @@ pub struct ScanStats {
     pub quotes: u32,
     /// 实际登记/更新的清单行数
     pub registered: u32,
+    /// 批量行情失败的批次数（失败批不中断整片，下一批继续；下轮会重扫该段）
+    pub failed_batches: u32,
 }
 
 /// 段内全部代码，补足 6 位（`1` → `000001`）。
@@ -119,10 +124,19 @@ pub async fn scan_segment_shard(
         for chunk in codes.chunks(batch_size) {
             stats.requests += 1;
             stats.codes_tried += chunk.len() as u32;
-            let quotes = client
-                .market_snapshot_batch(chunk)
-                .await
-                .map_err(|e| format!("批量行情失败（段 {start:06}-{end:06}）: {e}"))?;
+            let quotes = match client.market_snapshot_batch(chunk).await {
+                Ok(q) => q,
+                Err(e) => {
+                    // 单批失败不中断整片：旧实现用 `?` 会把这一批之后的代码全部丢掉，
+                    // 而段扫是每天轮转，下一次要等一整轮才回来。
+                    stats.failed_batches += 1;
+                    tracing::warn!(
+                        "[universe-scan] 批量行情失败（段 {start:06}-{end:06}，{} 只）: {e}",
+                        chunk.len()
+                    );
+                    continue;
+                },
+            };
             stats.quotes += quotes.len() as u32;
             let entries: Vec<(String, String, Option<String>)> = quotes
                 .iter()
@@ -185,6 +199,9 @@ mod tests {
         assert!(is_plausible_stock_quote("300750", "宁德时代", 200.0, 198.0));
         assert!(is_plausible_stock_quote("688981", "中芯国际", 50.0, 49.0));
         assert!(is_plausible_stock_quote("830799", "艾融软件", 10.0, 9.9));
+        // 北交所 87x/92x 新代码段：detect_market_type 必须归 bj，不能被 9 开头误判成 B 股
+        assert!(is_plausible_stock_quote("870001", "北交样本", 10.0, 9.9));
+        assert!(is_plausible_stock_quote("920001", "北交样本", 10.0, 9.9));
     }
 
     /// 负控：指数 / 基金 / 债 / 零价 / 空名 / 非 6 位一律不得登记（否则清单被非股票灌水）。

@@ -113,6 +113,21 @@ pub async fn seed_stock_automation_crons(
                         continue;
                     }
                 }
+                // 一次性升级：核查由周频（周六 09:00）改日频（周二~周六 09:00）。
+                // ID 保留历史名 `mover-recall-weekly`（幂等键，改了会多出一份任务）；
+                // 只在 schedule 仍是旧出厂值时升级，用户改过的不动。
+                if job.id == MOVER_RECALL_JOB_ID && existing.schedule == "0 9 * * 6" {
+                    let schedule = job.schedule.clone();
+                    let description = job.description.clone();
+                    store
+                        .update(&job.id, move |j| {
+                            j.schedule = schedule;
+                            j.description = description;
+                        })
+                        .await;
+                    tracing::info!("[stock-automation-cron] 漏检核查升级为每日: {}", job.id);
+                    continue;
+                }
                 tracing::info!("[stock-automation-cron] 任务已存在，保留用户配置: {}", job.id);
                 continue;
             }
@@ -241,14 +256,16 @@ fn build_builtin_jobs() -> Result<Vec<CronJob>, String> {
     backtest.id = DECISION_BACKTEST_JOB_ID.to_string();
     jobs.push(backtest);
 
-    // 6) 周六 09:00 妖股漏检核查：消费周五已落库的收盘快照，不依赖当日行情。
+    // 6) 周二~周六 09:00 妖股漏检核查：每次只看最新收盘日，日频才能覆盖每个交易日
+    //    （旧实现周六每周只核周五，周一~周四达标且回落的事件永不落库）。
     //    **不走交易日闸门**（周六非交易日，进闸门必被拦，见 services.rs 分支注释）。
+    //    ID 保留历史名 `mover-recall-weekly`（幂等键，改了会多出一份任务）。
     //    prompt 留空：核查无参数（终点取最新快照日，全档位全窗口）。
     let mut mover = CronJob::new(
         "妖股漏检核查（内置）",
-        "0 9 * * 6",
+        "0 9 * * 2-6",
         "",
-        "核查窗口涨幅达标事件被各档荐股漏检的比例，落 mover_recall_runs 周度快照",
+        "每日核查窗口涨幅达标事件被各档荐股漏检的比例，落 mover_recall_runs 快照",
     )
     .with_task_type(MOVER_RECALL_TASK_TYPE);
     mover.id = MOVER_RECALL_JOB_ID.to_string();
@@ -552,10 +569,10 @@ mod tests {
             "内置任务用出厂默认，播种处不该夹带口径覆写"
         );
 
-        // 妖股核查：周六 09:00、无配置、task_type 与 executor 分支对齐
+        // 妖股核查：周二~周六 09:00（每次核前一交易日）、无配置、task_type 与 executor 分支对齐
         let mover = find(MOVER_RECALL_JOB_ID);
         assert_eq!(mover.task_type.as_deref(), Some(MOVER_RECALL_TASK_TYPE));
-        assert_eq!(mover.schedule, "0 9 * * 6");
+        assert_eq!(mover.schedule, "0 9 * * 2-6");
         assert!(mover.prompt.is_empty(), "妖股核查无参数，prompt 应留空");
 
         // 漏检补分析：每日 06:00、配置可读回且配额是命令面那个常量（不在这里另抄一个数）
@@ -641,5 +658,29 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cfg.batch_limit, 30, "用户改过的配额被种子升级覆盖了");
+    }
+
+    /// 周核查升级为日频：只改旧出厂表达式，用户改过的调度不得被回滚。
+    #[tokio::test]
+    async fn legacy_weekly_mover_schedule_is_upgraded_but_user_edits_survive() {
+        let store = Arc::new(CronJobStore::new_ephemeral());
+        seed_stock_automation_crons(&store, false).await.unwrap();
+        let job_id = MOVER_RECALL_JOB_ID.to_string();
+
+        store.update(&job_id, |j| j.schedule = "0 9 * * 6".to_string()).await;
+        seed_stock_automation_crons(&store, false).await.unwrap();
+        assert_eq!(
+            store.get(&job_id).await.expect("任务存在").schedule,
+            "0 9 * * 2-6",
+            "旧出厂周频应被一次性升级为日频"
+        );
+
+        store.update(&job_id, |j| j.schedule = "30 8 * * 1".to_string()).await;
+        seed_stock_automation_crons(&store, false).await.unwrap();
+        assert_eq!(
+            store.get(&job_id).await.expect("任务存在").schedule,
+            "30 8 * * 1",
+            "用户改过的调度被种子升级覆盖了"
+        );
     }
 }

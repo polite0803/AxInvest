@@ -671,6 +671,16 @@ async fn execute_batch(
             （as_of_date={as_of_str}）",
             scan.picks.len()
         );
+        // 批次级池快照（含 0 票回放批次）：与 picks 同代际，供漏检归因判「池子空/没扫过」。
+        crate::commands::_shared_reco_pool::persist_reco_pool_batch(
+            &db,
+            "reco",
+            "all",
+            scan.seed_pool_snapshot.as_deref(),
+            &reco_generated_at,
+            Some(&as_of_str),
+        )
+        .await;
         // L3 截断留痕逐档落库（同样带代际）。缺这一段会让回放的漏检归因整批落
         // `Unexplained`——与实盘不同口径，正是 `reco_scan_audit` 文档要求避免的形态。
         for (audit_period, trimmed) in &scan.period_audit {

@@ -6,7 +6,7 @@
 //! 故连同两个实体的 `ActiveModel` 构造一并收口到这里；命令层只组装纯数据记录。
 
 use axagent_entities::mover_recall_events::{
-    ActiveModel as EventActiveModel, Entity as EventEntity,
+    ActiveModel as EventActiveModel, Column as EventColumn, Entity as EventEntity,
 };
 /// 轮次行类型重导出（命令侧分类 `misses_json` 走 dao 合规出口）。
 pub use axagent_entities::mover_recall_runs::Model as RunModel;
@@ -14,10 +14,15 @@ use axagent_entities::mover_recall_runs::{
     ActiveModel as RunActiveModel, Column as RunColumn, Entity as RunEntity,
 };
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
     TransactionTrait,
 };
+
+/// 同一 `(chain, date_to)` 的新轮次取代旧轮次时，旧轮 pending/failed 事件的落库原因。
+/// 已 analyzed/reflected 的事件不动：它们挂着补分析/反思关联，不能因重跑被抹掉。
+pub const SUPERSEDED_REASON: &str = "superseded: same (chain,date_to) run replaced by newer check";
 
 /// 一轮核查的汇总快照（命令层组装的纯数据，不泄漏 `ActiveModel`）。
 #[derive(Debug, Clone)]
@@ -40,6 +45,12 @@ pub struct RunSnapshotRecord {
     pub misses_json: Option<String>,
     /// 逐档达标事件数 JSON；`None` 仅用于「这条记录本来就没算过」（面板第三态）。
     pub events_by_tier_json: Option<String>,
+    /// 有收盘行的票数（事件域的票数，不是清单规模）。
+    pub codes_with_close: Option<i32>,
+    /// 逐档可判票数 JSON。
+    pub judgeable_codes_by_tier_json: Option<String>,
+    /// 归因层口径版本。
+    pub gate_version: Option<String>,
     pub status: String,
     pub trigger_source: String,
     pub created_at_ms: i64,
@@ -94,6 +105,9 @@ pub async fn insert_run_snapshot(
         miss_count: Set(run.miss_count),
         misses_json: Set(run.misses_json.clone()),
         events_by_tier_json: Set(run.events_by_tier_json.clone()),
+        codes_with_close: Set(run.codes_with_close),
+        judgeable_codes_by_tier_json: Set(run.judgeable_codes_by_tier_json.clone()),
+        gate_version: Set(run.gate_version.clone()),
         status: Set(run.status.clone()),
         trigger_source: Set(run.trigger_source.clone()),
         created_at_ms: Set(run.created_at_ms),
@@ -131,8 +145,41 @@ pub async fn insert_run_snapshot(
         })
         .collect();
 
+    // 事务闭包必须是 'static：把 supersede 需要的字段先取成 owned，别在 async 块里借用 `run`。
+    let supersede_chain = run.chain.clone();
+    let supersede_date_to = run.date_to.clone();
+    let new_run_id = run.id.clone();
     db.transaction::<_, _, DbErr>(|txn| {
         Box::pin(async move {
+            // 同一 (chain, date_to) 只保留最新一轮：旧轮标 superseded，其 pending/failed
+            // 事件标 excluded（已 analyzed/reflected 的不动，保留补分析/反思关联）。
+            // 这解决「同一收盘日手动点多次 ⇒ 事件表按轮次重复、补分析选样被旧轮抢占」。
+            if let Some(chain) = supersede_chain.as_deref() {
+                let previous = RunEntity::find()
+                    .filter(RunColumn::Chain.eq(chain.to_owned()))
+                    .filter(RunColumn::DateTo.eq(supersede_date_to.clone()))
+                    .filter(RunColumn::Id.ne(new_run_id.clone()))
+                    .all(txn)
+                    .await?;
+                if !previous.is_empty() {
+                    let ids: Vec<String> = previous.iter().map(|r| r.id.clone()).collect();
+                    RunEntity::update_many()
+                        .col_expr(RunColumn::Status, Expr::value("superseded"))
+                        .filter(RunColumn::Id.is_in(ids.clone()))
+                        .exec(txn)
+                        .await?;
+                    EventEntity::update_many()
+                        .col_expr(EventColumn::Status, Expr::value("excluded"))
+                        .col_expr(
+                            EventColumn::ErrorDetail,
+                            Expr::value(Some(SUPERSEDED_REASON.to_string())),
+                        )
+                        .filter(EventColumn::RunId.is_in(ids))
+                        .filter(EventColumn::Status.is_in(["pending", "failed"]))
+                        .exec(txn)
+                        .await?;
+                }
+            }
             RunEntity::insert(run_row).exec(txn).await?;
             if !event_rows.is_empty() {
                 EventEntity::insert_many(event_rows).exec(txn).await?;

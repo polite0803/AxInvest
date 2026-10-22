@@ -75,6 +75,26 @@ pub async fn list_candidate_events(
     run_id: Option<&str>,
     limit: u64,
 ) -> Result<Vec<mover_recall_events::Model>, DbErr> {
+    // 每事件 `CHAIN_ROWS_PER_EVENT` 行 ⇒ 先按行数放大取，再按三键去重、截回配额，
+    // 否则配额会在两链之间对半砍（10 只变 5 只）而面板仍显示 10。
+    let rows =
+        list_candidate_event_rows(db, run_id, limit.saturating_mul(CHAIN_ROWS_PER_EVENT)).await?;
+    let mut picked = dedupe_by_event_key(rows);
+    // 行数上限已被 `limit × 链数` 约束，这里的收窄不会截到 usize 边界以外
+    picked.truncate(limit as usize);
+    Ok(picked)
+}
+
+/// 取补分析候选事件**未去重**的原始行（两链同键各一行）。
+///
+/// 调用方按三键分组后判「两条链是否都超阈值」：只要有一条链的轮次通过，
+/// 整个事件就应入选。不能先 dedupe 再看保留行 —— 保留哪条链取决于写入同毫秒的
+/// 数据库返回顺序，会让同一只票能否被补分析带有随机性。
+pub async fn list_candidate_event_rows(
+    db: &DatabaseConnection,
+    run_id: Option<&str>,
+    limit: u64,
+) -> Result<Vec<mover_recall_events::Model>, DbErr> {
     let mut query = Entity::find()
         .filter(Column::Status.is_in(CANDIDATE_STATUSES))
         .order_by_desc(Column::CumGainPct)
@@ -82,13 +102,7 @@ pub async fn list_candidate_events(
     if let Some(run_id) = run_id.filter(|s| !s.is_empty()) {
         query = query.filter(Column::RunId.eq(run_id.to_owned()));
     }
-    // 每事件 `CHAIN_ROWS_PER_EVENT` 行 ⇒ 先按行数放大取，再按三键去重、截回配额，
-    // 否则配额会在两链之间对半砍（10 只变 5 只）而面板仍显示 10。
-    let rows = query.limit(limit.saturating_mul(CHAIN_ROWS_PER_EVENT)).all(db).await?;
-    let mut picked = dedupe_by_event_key(rows);
-    // 行数上限已被 `limit × 链数` 约束，这里的收窄不会截到 usize 边界以外
-    picked.truncate(limit as usize);
-    Ok(picked)
+    query.limit(limit).all(db).await
 }
 
 /// 从各轮核查的 `rates_json` 提取 unexplained 占比：run_id → 占比。
@@ -102,14 +116,20 @@ pub async fn load_run_unexplained_shares(
     let rows = axagent_entities::mover_recall_runs::Entity::find().all(db).await?;
     let mut out = HashMap::new();
     for r in rows {
-        // rates_json 为非空 String 列（空率时存 null 字面量的 JSON）
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&r.rates_json)
-            && let Some(share) = v.get("unexplainedShare").and_then(|x| x.as_f64())
-        {
+        if let Some(share) = normalize_unexplained_share(&r.rates_json) {
             out.insert(r.id, share);
         }
     }
     Ok(out)
+}
+
+/// `rates_json` 里的 `unexplainedShare` 是 [`compute_rates`] 输出的**百分数**（0-100），
+/// 而请求侧阈值 `max_unexplained_share` 是 0-1。这里统一归一成 0-1；
+/// 调用方不得再乘除一次。直接拿 45.45 与 0.5 比会把 45% 当成 4500% 拦掉。
+fn normalize_unexplained_share(rates_json: &str) -> Option<f64> {
+    let v: serde_json::Value = serde_json::from_str(rates_json).ok()?;
+    let pct = v.get("unexplainedShare").and_then(|x| x.as_f64())?;
+    Some(pct / 100.0)
 }
 
 /// 认领事件：pending/failed → running 并打批次标。仅认领仍处于候选态的行
@@ -462,5 +482,19 @@ mod event_key_tests {
             .join("\n");
         assert_eq!(declared_statuses(&shrunk).len(), 5, "负控失效：少一行声明必须少一个状态");
         assert!(!declared_statuses(&shrunk).iter().any(|d| d.as_str() == "reflected"));
+    }
+
+    /// 单位门：`rates_json.unexplainedShare` 是百分数，读取函数必须归一成 0-1。
+    /// 45.45 必须低于 0.5 阈值（45% 不拦），50.5 必须高于（50.5% 拦）。
+    #[test]
+    fn unexplained_share_is_normalized_to_unit_interval() {
+        let pct = |s: &str| normalize_unexplained_share(s).unwrap();
+        assert!((pct(r#"{"unexplainedShare":45.45}"#) - 0.4545).abs() < 1e-9);
+        assert!(pct(r#"{"unexplainedShare":0.0}"#).abs() < 1e-9);
+        assert!((pct(r#"{"unexplainedShare":50.5}"#) - 0.505).abs() < 1e-9);
+        assert!(normalize_unexplained_share(r#"{"unexplainedShare":null}"#).is_none());
+        assert!(normalize_unexplained_share("not json").is_none());
+        assert!(pct(r#"{"unexplainedShare":45.45}"#) < 0.5);
+        assert!(pct(r#"{"unexplainedShare":50.5}"#) > 0.5);
     }
 }

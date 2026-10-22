@@ -216,6 +216,7 @@ pub mod quant_runs;
 pub mod quant_signals;
 pub mod quant_strategies;
 pub mod reco_picks;
+pub mod reco_pool_batches;
 pub mod reco_scan_audit;
 pub mod reflection_lessons;
 pub mod screenshot_diagnoses;

@@ -281,6 +281,8 @@ pub fn detect_market_type(code: &str) -> &str {
         Some('3') => "chinext",
         Some('8') => "bj",
         Some('4') => "neeq",
+        // 北交所 2025 起启用 920 代码段；其余 9 开头仍是沪市 B 股。
+        Some('9') if code.starts_with("920") => "bj",
         Some('9') => "b_share",
         _ => "unknown",
     }

@@ -27,9 +27,9 @@
 //! 分代 ⇒ 只读实盘的下游必须显式带 `as_of_date IS NULL`。
 //! 读侧漏加谓词由 `scripts/check-reco-generation.mjs` 拦。
 
-use sea_orm::{ActiveModelTrait, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, QueryFilter, QueryOrder, Set};
 
-use axagent_entities::{reco_picks, reco_scan_audit};
+use axagent_entities::{reco_picks, reco_pool_batches, reco_scan_audit};
 use axagent_harness::DatabaseConnection;
 
 /// 一条待落库的候选出票（`reco_picks` 的一行）。
@@ -167,6 +167,60 @@ pub async fn latest_seed_pool_codes(
     Ok(pairs.into_iter().map(|(code, _)| code).collect())
 }
 
+/// 一个候选池批次快照（0 票批次也写）。
+pub struct NewPoolBatch {
+    pub id: String,
+    pub chain: String,
+    pub period: String,
+    pub generated_at: String,
+    pub as_of_date: Option<String>,
+    pub seed_pool_json: Option<String>,
+    pub stock_count: i32,
+    pub degraded: bool,
+    pub created_at_ms: i64,
+}
+
+/// 落一行候选池批次快照。
+pub async fn insert_pool_batch(db: &DatabaseConnection, batch: &NewPoolBatch) -> Result<(), DbErr> {
+    let am = reco_pool_batches::ActiveModel {
+        id: Set(batch.id.clone()),
+        chain: Set(batch.chain.clone()),
+        period: Set(batch.period.clone()),
+        generated_at: Set(batch.generated_at.clone()),
+        as_of_date: Set(batch.as_of_date.clone()),
+        seed_pool_json: Set(batch.seed_pool_json.clone()),
+        stock_count: Set(batch.stock_count),
+        degraded: Set(batch.degraded),
+        created_at_ms: Set(batch.created_at_ms),
+    };
+    reco_pool_batches::Entity::insert(am).exec(db).await?;
+    Ok(())
+}
+
+/// 读某链在 `[from, to]` 内的候选池批次快照（代际显式）。
+///
+/// `None` 只读实盘代；`Some(YYYY-MM-DD)` 只读该次回放的批次 —— 与
+/// `mover_recall::load_picks_in_range` 同一条代际谓词。
+pub async fn load_pool_batches(
+    db: &DatabaseConnection,
+    chain: &str,
+    from: &str,
+    to: &str,
+    as_of_date: Option<&str>,
+) -> Result<Vec<reco_pool_batches::Model>, DbErr> {
+    reco_pool_batches::Entity::find()
+        .filter(reco_pool_batches::Column::Chain.eq(chain.to_string()))
+        .filter(reco_pool_batches::Column::GeneratedAt.gte(from.to_string()))
+        .filter(reco_pool_batches::Column::GeneratedAt.lte(format!("{to}T23:59:59.999")))
+        .filter(match as_of_date {
+            Some(d) => reco_pool_batches::Column::AsOfDate.eq(d.to_string()),
+            None => reco_pool_batches::Column::AsOfDate.is_null(),
+        })
+        .order_by_asc(reco_pool_batches::Column::GeneratedAt)
+        .all(db)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,5 +276,51 @@ mod tests {
         insert_pool_row(&db, "2026-10-05T15:00:00Z", &["000001"], Some("2026-07-21")).await;
 
         assert!(latest_seed_pool_codes(&db).await.expect("读取应成功").is_empty());
+    }
+
+    /// 0 票批次也要留痕；读侧按代际隔离（实盘查询不得读到回放批次）。
+    #[tokio::test]
+    async fn pool_batches_keep_empty_batches_and_respect_generation() {
+        let db = setup().await;
+        let live_empty = NewPoolBatch {
+            id: "rpb-live-empty".to_string(),
+            chain: "reco".to_string(),
+            period: "mid".to_string(),
+            generated_at: "2026-10-05T15:00:00Z".to_string(),
+            as_of_date: None,
+            seed_pool_json: Some("[]".to_string()),
+            stock_count: 0,
+            degraded: true,
+            created_at_ms: 1,
+        };
+        insert_pool_batch(&db, &live_empty).await.expect("0 票批次应可写入");
+        let replay = NewPoolBatch {
+            id: "rpb-replay".to_string(),
+            chain: "reco".to_string(),
+            period: "mid".to_string(),
+            generated_at: "2026-10-05T15:00:01Z".to_string(),
+            as_of_date: Some("2026-07-21".to_string()),
+            seed_pool_json: Some(r#"[["600000","n"]]"#.to_string()),
+            stock_count: 1,
+            degraded: false,
+            created_at_ms: 2,
+        };
+        insert_pool_batch(&db, &replay).await.expect("回放批次应可写入");
+
+        let live = load_pool_batches(&db, "reco", "2026-10-01", "2026-10-31", None)
+            .await
+            .expect("读实盘批次应成功");
+        assert_eq!(live.len(), 1, "实盘查询不得读到回放批次");
+        assert_eq!(live[0].id, "rpb-live-empty");
+        assert!(live[0].degraded, "空池批次必须标降级");
+        assert_eq!(live[0].stock_count, 0);
+
+        let replay_rows =
+            load_pool_batches(&db, "reco", "2026-10-01", "2026-10-31", Some("2026-07-21"))
+                .await
+                .expect("读回放批次应成功");
+        assert_eq!(replay_rows.len(), 1);
+        assert_eq!(replay_rows[0].id, "rpb-replay");
+        assert!(!replay_rows[0].degraded);
     }
 }

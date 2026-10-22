@@ -15,9 +15,11 @@
 //! ⚠ 停牌/缺值**不落行**，也绝不写 `change_pct = 0.0`：写 0 会把「拿不到」伪装成
 //! 「没涨」，直接污染漏检率的分母。缺值票数必须计进 `skipped_no_data` 并上报。
 
+use std::collections::HashMap;
+
 use sea_orm::{
     sea_query::OnConflict, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QuerySelect,
+    QueryOrder, QuerySelect,
 };
 use serde::Serialize;
 
@@ -42,8 +44,11 @@ pub struct CloseSweepReport {
     pub rows_returned: usize,
     /// 实际落库行数
     pub written: usize,
-    /// 返回了但取不到有效收盘/涨幅（停牌、缺昨收、非有限值）的票数
+    /// 返回了但取不到有效收盘/涨幅（缺昨收、非有限值）的票数
     pub skipped_no_data: usize,
+    /// 涨幅为 0 且成交额/成交量都为 0 的票数 —— 停牌/无成交，不落行。
+    /// 与「平盘有量」区分：后者成交量为正，照常落 0% 行。
+    pub skipped_suspended: usize,
     /// 整批失败（网络/429）的批次数；非空 ⇒ 本轮数据不完整，不得当全量用
     pub failed_batches: usize,
 }
@@ -139,16 +144,29 @@ pub async fn backfill_close_history(
     target_days: u32,
     interval_ms: u64,
 ) -> Result<BackfillStats, String> {
-    use axagent_entities::{market_daily_close, market_stock_universe};
-    // 回补行后落名的唯一来源：清单表（K 线接口不带名称）。
     let universe = market_stock_universe::Entity::find()
         .all(db)
         .await
         .map_err(|e| format!("读市场清单失败: {e}"))?;
+    let entries: Vec<(String, String)> =
+        universe.into_iter().map(|m| (m.stock_code, m.stock_name)).collect();
+    backfill_close_history_for_codes(db, client, &entries, target_days, interval_ms).await
+}
+
+/// 只补指定代码的历史（逐票覆盖判据的入口）。
+///
+/// 全清单逐票回补在清单扩到 2500+ 后会把行情通道打爆，且已补过的票被反复请求；
+/// 调用方先用 [`codes_needing_history`] 选「行数不足」的票，再按批调用本函数。
+pub async fn backfill_close_history_for_codes(
+    db: &sea_orm::DatabaseConnection,
+    client: &axagent_astock_data::AStockClient,
+    entries: &[(String, String)],
+    target_days: u32,
+    interval_ms: u64,
+) -> Result<BackfillStats, String> {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let mut stats = BackfillStats::default();
-    for member in &universe {
-        let code = &member.stock_code;
+    for (code, stock_name) in entries {
         stats.codes += 1;
         let mut klines = match client.get_klines(code, "daily", target_days).await {
             Ok(v) => v,
@@ -172,7 +190,7 @@ pub async fn backfill_close_history(
                 rows.push(market_daily_close::ActiveModel {
                     id: Set(format!("{}@{}", code, k.date)),
                     stock_code: Set(code.clone()),
-                    stock_name: Set(member.stock_name.clone()),
+                    stock_name: Set(stock_name.clone()),
                     trade_date: Set(k.date.clone()),
                     close: Set(k.close),
                     prev_close: Set(p),
@@ -221,6 +239,38 @@ pub struct BackfillStats {
     pub codes: u32,
     pub rows: u32,
     pub failed: u32,
+}
+
+/// 选「历史行数不足 `target_days`」的票。
+///
+/// 判据是**逐票行数**，不是全局日期数：段扫新登记的票在 `market_daily_close` 里
+/// 可能是 0 行，而全局日期数早已 ≥90 ⇒ 旧实现永远不补它们。
+/// 排序：已有部分历史的优先（0 行票可能是误登记），再按代码稳定排序，便于分批追进度。
+pub async fn codes_needing_history(
+    db: &sea_orm::DatabaseConnection,
+    target_days: u32,
+    limit: usize,
+) -> Result<Vec<(String, String)>, String> {
+    let universe = market_stock_universe::Entity::find()
+        .all(db)
+        .await
+        .map_err(|e| format!("读市场清单失败: {e}"))?;
+    let rows = market_daily_close::Entity::find()
+        .all(db)
+        .await
+        .map_err(|e| format!("读收盘历史失败: {e}"))?;
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for r in rows {
+        *counts.entry(r.stock_code).or_default() += 1;
+    }
+    let mut need: Vec<(usize, String, String)> = universe
+        .into_iter()
+        .map(|m| (counts.get(&m.stock_code).copied().unwrap_or(0), m.stock_code, m.stock_name))
+        .filter(|(n, _, _)| *n < target_days as usize)
+        .collect();
+    need.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    need.truncate(limit);
+    Ok(need.into_iter().map(|(_, code, name)| (code, name)).collect())
 }
 
 pub(crate) async fn upsert_universe_registered(
@@ -388,6 +438,49 @@ pub async fn refresh_universe_pages(
     })
 }
 
+/// 段扫后落一行覆盖率读数：分母沿用最近一次 clist 自报的全市场总数。
+///
+/// 段扫不申报 `reported_total`（它只按段问行情），所以不能自己编一个分母；
+/// 没有历史分母时**不落行**（0 分母会被读成「全市场 0 只」）。
+/// 不落这一行的话，清单已扩到 2563，面板/门仍会读到 10-21 的 universe=684。
+pub async fn record_universe_stats_for_scan(
+    db: &sea_orm::DatabaseConnection,
+    registered: u32,
+    failed_batches: u32,
+) -> Result<(), String> {
+    use axagent_entities::market_universe_stats;
+    let last = market_universe_stats::Entity::find()
+        .order_by_desc(market_universe_stats::Column::ObservedAt)
+        .one(db)
+        .await
+        .map_err(|e| format!("读覆盖率读数失败: {e}"))?;
+    let Some(last) = last.filter(|r| r.reported_total > 0) else {
+        return Ok(());
+    };
+    let universe_size = market_stock_universe::Entity::find()
+        .count(db)
+        .await
+        .map_err(|e| format!("统计清单失败: {e}"))? as i64;
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let am = market_universe_stats::ActiveModel {
+        observed_at: Set(now_ms),
+        universe_size: Set(universe_size as i32),
+        reported_total: Set(last.reported_total),
+        coverage_pct: Set(
+            ((universe_size as f64 / last.reported_total as f64) * 10000.0).round() / 100.0
+        ),
+        pages_requested: Set(0),
+        pages_failed: Set(failed_batches as i32),
+        rows_upserted: Set(registered as i32),
+        created_at: Set(now_ms),
+    };
+    market_universe_stats::Entity::insert(am)
+        .exec(db)
+        .await
+        .map_err(|e| format!("覆盖率读数落库失败: {e}"))?;
+    Ok(())
+}
+
 /// 采集指定交易日的收盘快照。
 pub async fn run_close_sweep(
     db: &sea_orm::DatabaseConnection,
@@ -414,6 +507,7 @@ pub async fn run_close_sweep(
     let mut rows_returned = 0usize;
     let mut written = 0usize;
     let mut skipped_no_data = 0usize;
+    let mut skipped_suspended = 0usize;
 
     for chunk in codes.chunks(batch_size) {
         batches += 1;
@@ -422,6 +516,17 @@ pub async fn run_close_sweep(
                 rows_returned += quotes.len();
                 for q in quotes {
                     let row_id = format!("{}@{trade_date}", q.code);
+                    // 停牌/无成交：涨幅 0 且量、额都拿不到。不能落 0% 行 —— 那会把
+                    // 「拿不到」伪装成「没涨」，还会把停牌日当作交易日填进窗口。
+                    // 显式写有限性，别用 `!(x > 0.0)`：NaN/INF 都要归到「拿不到」，
+                    // 而 `x > 0.0` 对 +INF 为 true、对 NaN 为 false，取反后语义分裂。
+                    let amount_missing = !q.amount.is_finite() || q.amount <= 0.0;
+                    let volume_missing = !q.volume.is_finite() || q.volume <= 0.0;
+                    let no_trade = amount_missing && volume_missing;
+                    if q.change_pct == 0.0 && no_trade {
+                        skipped_suspended += 1;
+                        continue;
+                    }
                     let Some(am) = close_row(
                         &q.code,
                         &q.name,
@@ -473,6 +578,7 @@ pub async fn run_close_sweep(
         rows_returned,
         written,
         skipped_no_data,
+        skipped_suspended,
         failed_batches,
     })
 }

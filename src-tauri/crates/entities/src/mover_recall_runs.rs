@@ -42,6 +42,17 @@ pub struct Model {
     /// `layers_json` 是跨档聚合、`misses_json` 只有漏检行，两者都答不了这个问题。
     /// NULL = 本行早于该列（面板必须成句声明「本轮未记录逐档计数」，不得显示成 0）。
     pub events_by_tier_json: Option<String>,
+    /// 有收盘行（至少一行）的票数 —— 事件实际可来自的票数。
+    ///
+    /// 与 `universe_size`（清单规模）是两个域：清单里没采到收盘的票不会产生任何事件。
+    /// NULL = 本行早于该列（面板显示「未记录」，不得拿清单数冒充）。
+    pub codes_with_close: Option<i32>,
+    /// 逐档「该票历史长度 ≥ 该档窗口天数」的可判票数 JSON。
+    /// NULL = 本行早于该列（面板显示「未记录」）。
+    pub judgeable_codes_by_tier_json: Option<String>,
+    /// 归因层口径版本（如 `mover-layers-v2`）。
+    /// NULL = 本行早于该列；跨版本轮次的漏检数不可直接比较（面板需标注）。
+    pub gate_version: Option<String>,
     /// 执行状态："success"（核查本身成功，不代表零漏检）
     pub status: String,
     /// 触发来源：调度器执行（含定时到点与任务中心「立即执行」，两者共用同一 dispatch）

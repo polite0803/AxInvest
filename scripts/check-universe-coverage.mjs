@@ -19,6 +19,8 @@
 // C3 表里一行都没有 ⇒ 红（不是「跳过」）。0-D 写侧没生效与「本机没跑过 cron」这两种情况
 //    都必须出声，静默通过等于把「没采到」演成「没问题」。
 // C4 失败页占比：`pages_failed / pages_requested > FAIL_CAP` ⇒ 追加一条红（分母有了但爬不动）。
+// C5 读数新鲜度：`observed_at` 距今 > FRESH_HOURS ⇒ 红。0-D 的写侧原先只在 clist 刷新时落行，
+//    而 clist 页轮转曾按进程内 tick 归零 ⇒ 清单已扩到 2500+、读数还停在 684/11.5%。
 //
 // ⚠ **本门不注册进 CI**：CI 里没有本机 PG，`reported_total`/清单构成只能从实库取。
 //   它是**本地诊断门**，跑法 `node scripts/check-universe-coverage.mjs`；
@@ -39,9 +41,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FLOOR_PCT = 50;
 const MIX_CAP_PCT = 60;
 const FAIL_CAP = 0.5;
+const FRESH_HOURS = 36;
 
 /** 纯判据：喂数字出红条。`stats` = 最近一次 tick 行，`mix` = 分市场计数。 */
-export function judge(stats, mix) {
+export function judge(stats, mix, nowMs = Date.now()) {
   const reds = [];
   // C2 独立于 C1/C3：它算的是另一张表（`market_stock_universe`）的现场构成，
   // 与「有没有分母行」无关。早退会把「清单 91% 是深市主板」这条真实缺陷一起藏掉。
@@ -73,6 +76,14 @@ export function judge(stats, mix) {
   }
   if (pagesRequested > 0 && pagesFailed / pagesRequested > FAIL_CAP) {
     reds.push(`C4 本次 tick 失败页 ${pagesFailed}/${pagesRequested} > ${FAIL_CAP * 100}% ⇒ 覆盖率修不动的直接原因`);
+  }
+  if (stats.observedAt != null) {
+    const ageHours = (nowMs - Number(stats.observedAt)) / 3_600_000;
+    if (!(ageHours <= FRESH_HOURS)) {
+      reds.push(
+        `C5 覆盖率读数已 ${ageHours.toFixed(1)} 小时未更新（>${FRESH_HOURS}h）⇒ 旧读数不能当现状`,
+      );
+    }
   }
   return reds;
 }
@@ -106,6 +117,20 @@ function selfTest() {
       mix,
       min: 1,
       want: (r) => r.length === 1 && r[0].startsWith("C2"),
+    },
+    {
+      name: "读数过期 ⇒ C5 红（旧覆盖率不能当现状）",
+      stats: {
+        coveragePct: 95,
+        universeSize: 5130,
+        reportedTotal: 5400,
+        pagesRequested: 6,
+        pagesFailed: 0,
+        observedAt: Date.now() - 48 * 3_600_000,
+      },
+      mix: { main_sz: 5130 },
+      min: 1,
+      want: (r) => r.some((x) => x.startsWith("C5")),
     },
   ];
   let bad = 0;

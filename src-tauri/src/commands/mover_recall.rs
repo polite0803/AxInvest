@@ -53,9 +53,19 @@ pub struct MoverRecallView {
     /// 逐档达标事件数（`period -> events`）：C-2 的三态依据 —— 本档已满 + 0 事件 =「真无达标票」，
     /// 必须能与「本档有达标」分开说。`None` = 这条载荷没记录过（旧轮次）⇒ 面板第三态，不显示 0。
     pub events_by_tier: Option<BTreeMap<String, usize>>,
+    /// 有收盘行的票数 —— 事件实际可来自的票数。`None` = 旧轮次未记录。
+    /// 与 `universe_size`（清单规模）是两个域，面板必须分开显示。
+    pub codes_with_close: Option<usize>,
+    /// 逐档可判票数（该票历史长度 ≥ 该档窗口天数）。`None` = 旧轮次未记录。
+    pub judgeable_codes_by_tier: Option<BTreeMap<String, usize>>,
+    /// 归因层口径版本。`None` = 旧轮次未记录（跨版本漏检数不可直接比较）。
+    pub gate_version: Option<String>,
     /// 漏检事件明细（按 |累计涨幅| 降序，上限 200 条，完整集在 layers 计数里）
     pub misses: Vec<MissRow>,
 }
+
+/// 归因层口径版本：层枚举/阈值语义变化时递增，落进轮次快照供面板标注可比性。
+pub const MOVER_GATE_VERSION: &str = "mover-layers-v2";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,6 +81,25 @@ pub struct MissRow {
 
 fn date_of(iso: &str) -> &str {
     iso.get(..10).unwrap_or(iso)
+}
+
+/// 窗口起点前的「已覆盖」回看范围（日历日）：交易日的 7/5 折算 + 3 天缓冲。
+fn prior_cover_calendar_days(window_days: u32) -> i64 {
+    (window_days as i64 * 7 + 4) / 5 + 3
+}
+
+/// 该推荐是否落在「窗口起点前一个窗口长度内」。
+///
+/// 旧实现只看 `< window_start`、没有下界：一年前推荐过也永久豁免本窗漏检。
+/// 日期解析失败返回 false（不豁免）——「读不出日期」不能静默变成「已覆盖」。
+fn prior_cover_within(pick_date: &str, window_start: &str, window_days: u32) -> bool {
+    let Ok(start) = chrono::NaiveDate::parse_from_str(window_start, "%Y-%m-%d") else {
+        return false;
+    };
+    let Ok(pick) = chrono::NaiveDate::parse_from_str(pick_date, "%Y-%m-%d") else {
+        return false;
+    };
+    pick < start && pick >= start - chrono::Duration::days(prior_cover_calendar_days(window_days))
 }
 
 /// 主入口：跑一次核查（手动面板用，**不落库**）。
@@ -89,7 +118,6 @@ pub async fn analyze_mover_recall(
     state: tauri::State<'_, AppState>,
     to: Option<String>,
 ) -> Result<Vec<MoverRecallView>, String> {
-    ensure_close_history(state.harness.db(), &state.astock_client).await;
     let mut views = analyze_mover_recall_inner(state.harness.db(), to).await?;
     // 面板每链只展示 top 200（inner 保留全集供调度侧落 mover_recall_events）
     for v in views.iter_mut() {
@@ -114,6 +142,16 @@ struct SharedFacts {
     close_dates: Vec<String>,
     picks: Vec<reco_picks::Model>,
     trim_evidence: HashMap<(String, String), Vec<String>>,
+    /// 批次级候选池快照（含 0 票批次）；旧数据为空时回退到 pick 行上的 `seed_pool_json`。
+    pool_batches: Vec<PoolBatchView>,
+}
+
+#[derive(Debug, Clone)]
+struct PoolBatchView {
+    chain: String,
+    generated_at: String,
+    seed_pool_json: Option<String>,
+    degraded: bool,
 }
 
 /// 核查实现：命令与 `mover-recall` cron 共用同一套逻辑
@@ -157,6 +195,28 @@ pub async fn analyze_mover_recall_inner(
     let by_stock = mover_recall::load_closes_by_stock(db, &from, &upper).await?;
     let picks = mover_recall::load_picks_in_range(db, &from, &upper, None).await?;
     let trim_evidence = mover_recall::load_trim_evidence(db, &from, &upper, None).await?;
+    let mut pool_batches = Vec::new();
+    for chain in RecoChain::ALL {
+        let rows = axagent_dao::repo::reco_pool::load_pool_batches(
+            db,
+            chain.as_str(),
+            &from,
+            &upper,
+            None,
+        )
+        .await
+        .map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("读候选池批次失败: {e}"))
+                .to_string()
+        })?;
+        pool_batches.extend(rows.into_iter().map(|b| PoolBatchView {
+            chain: b.chain,
+            generated_at: b.generated_at,
+            seed_pool_json: b.seed_pool_json,
+            degraded: b.degraded,
+        }));
+    }
     let (universe_size, universe_confirmed) = mover_recall::load_universe_counts(db).await?;
 
     let facts = SharedFacts {
@@ -171,6 +231,7 @@ pub async fn analyze_mover_recall_inner(
         close_dates,
         picks,
         trim_evidence,
+        pool_batches,
     };
     Ok(RecoChain::ALL.iter().map(|c| build_chain_view(*c, &facts)).collect())
 }
@@ -182,6 +243,11 @@ pub async fn analyze_mover_recall_inner(
 fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
     let chain_picks: Vec<&reco_picks::Model> =
         f.picks.iter().filter(|p| RecoChain::of_style(&p.style) == chain).collect();
+    // synthetic=1 是降级占位行（watchlist 初筛、capital K 线代理等），不是策略主张：
+    // 只用于「池覆盖」证据，不能算「已推荐」——否则漏检被系统性低估。
+    // 与 `load_mover_cell_signal` 的 hit 口径（只认 synthetic==0）保持一致。
+    let hit_picks: Vec<&reco_picks::Model> =
+        chain_picks.iter().copied().filter(|p| p.synthetic == 0).collect();
 
     let mut layers: BTreeMap<&'static str, (MissLayer, usize, BTreeMap<String, usize>)> =
         BTreeMap::new();
@@ -214,7 +280,14 @@ fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
             // 此处不得再按 close_dates 重算一份 —— 两份日期序列同源但各算一遍会制造
             // 「pick 过滤窗口」与「事件窗口」漂移的可能（单一来源，见禁区 12）。
             let window_start = ev.window_start.clone();
-            let in_window: Vec<_> = chain_picks
+            let in_window_hits: Vec<_> = hit_picks
+                .iter()
+                .filter(|p| {
+                    let d = date_of(&p.generated_at);
+                    d >= window_start.as_str() && d <= ev.anchor_date.as_str()
+                })
+                .collect();
+            let in_window_pool: Vec<_> = chain_picks
                 .iter()
                 .filter(|p| {
                     let d = date_of(&p.generated_at);
@@ -222,39 +295,59 @@ fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
                 })
                 .collect();
 
-            let picks_same_period: Vec<String> = in_window
+            let picks_same_period: Vec<String> = in_window_hits
                 .iter()
                 .filter(|p| p.stock_code == ev.stock_code && p.period == ev.period)
                 .map(|p| p.generated_at.clone())
                 .collect();
             ev.recommended = !picks_same_period.is_empty();
             // 同链内「该链在这只票的任一档出过票」——不再重复 `period` 相等那一支（被本条件包含）
-            let picked_any_period = in_window.iter().any(|p| p.stock_code == ev.stock_code);
+            let picked_any_period = in_window_hits.iter().any(|p| p.stock_code == ev.stock_code);
             // 阶段 5 / G1：本窗没有**该链**的批次 ⇒ 是「不知道」，不是「不在池里」。
             // 这一格直接决定事件落 `not_in_pool` 还是 `unexplained`，也就是把优化方向
             // 带去「扩候选宇宙」还是「补留痕」。
-            let in_pool = if in_window.is_empty() {
+            // 批次级池快照优先；旧轮次没有批次行时回退到 pick 行上的快照。
+            let window_batches: Vec<&PoolBatchView> = f
+                .pool_batches
+                .iter()
+                .filter(|b| {
+                    b.chain == chain.as_str() && {
+                        let d = date_of(&b.generated_at);
+                        d >= window_start.as_str() && d <= ev.anchor_date.as_str()
+                    }
+                })
+                .collect();
+            let in_pool = if !window_batches.is_empty() {
+                Some(window_batches.iter().any(|b| {
+                    mover_recall::code_in_pool_snapshot(b.seed_pool_json.as_deref(), &ev.stock_code)
+                }))
+            } else if in_window_pool.is_empty() {
                 None
             } else {
-                Some(in_window.iter().any(|p| {
+                Some(in_window_pool.iter().any(|p| {
                     mover_recall::code_in_pool_snapshot(p.seed_pool_json.as_deref(), &ev.stock_code)
                 }))
             };
-            // A-3 `LateTiming` 的证据：本链在同档、**窗口起点之前**出过票 ⇒ 链看见过这只票，
-            // 只是时点不落在本窗。不算漏检（`counts_as_miss` 已排除），但必须单独成层，
-            // 否则它会被并进 `not_in_pool`，把「推荐时机」的问题报成「候选宇宙」的问题。
-            let picked_before_window = chain_picks.iter().any(|p| {
+            // A-3 `PriorCovered` 的证据：本链在同档、**窗口起点之前一个窗口长度内**出过票
+            // ⇒ 链看见过这只票，只是时点不落在本窗。不算漏检（`counts_as_miss` 已排除），
+            // 但必须单独成层，否则会被并进 `not_in_pool`，把「推荐时机」报成「候选宇宙」。
+            let picked_before_window = hit_picks.iter().any(|p| {
                 p.stock_code == ev.stock_code
                     && p.period == ev.period
-                    && date_of(&p.generated_at) < window_start.as_str()
+                    && prior_cover_within(date_of(&p.generated_at), &window_start, ev.window_days)
             });
 
-            // 本轮池快照为空 ⇒ 降级（判据绑定本轮，不用别轮的值兜）
-            let pool_degraded = !in_window.is_empty()
-                && in_window.iter().any(|p| match p.seed_pool_json.as_deref() {
-                    None => true,
-                    Some(s) => s.trim() == "[]" || s.trim().is_empty(),
-                });
+            // 本窗该链**所有**池快照都为空才判降级；只有一个空批次时，
+            // 正常批次里的池证据仍然有效（旧的 any 会把整个事件误判成 excluded）。
+            let pool_degraded = if !window_batches.is_empty() {
+                window_batches.iter().all(|b| b.degraded)
+            } else {
+                !in_window_pool.is_empty()
+                    && in_window_pool.iter().all(|p| match p.seed_pool_json.as_deref() {
+                        None => true,
+                        Some(s) => s.trim() == "[]" || s.trim().is_empty(),
+                    })
+            };
 
             // 截断留痕只由**荐股链**的 top-N 截断写（`dao::repo::reco_pool`）；趋势智选工作流
             // 不写 `reco_scan_audit` ⇒ 智选链这一格必须留空，不能借荐股的留痕凑一个
@@ -271,7 +364,7 @@ fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
             let evidence = Evidence {
                 picks_for_period: picks_same_period,
                 picked_in_other_period: picked_any_period
-                    && in_window
+                    && in_window_hits
                         .iter()
                         .any(|p| p.stock_code == ev.stock_code && p.period != ev.period),
                 in_pool,
@@ -300,6 +393,21 @@ fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
         counts.insert(*layer, *n);
     }
     let rates = mover_recall::compute_rates(&counts, events_total);
+    // 事件域的票数 = 有收盘行的票；逐档可判票数按该票自己的历史长度算，
+    // 不能用全局 collected_days 冒充（停牌/新上市会让部分票在「本档已满」下仍算不出窗口）。
+    let codes_with_close = f.by_stock.len();
+    let judgeable_codes_by_tier: BTreeMap<String, usize> = f
+        .rules
+        .iter()
+        .map(|rule| {
+            let n = f
+                .by_stock
+                .values()
+                .filter(|(_, series)| series.len() >= rule.window_days as usize)
+                .count();
+            (rule.period.as_str().to_string(), n)
+        })
+        .collect();
     let layer_rows: Vec<mover_recall::LayerRow> = layers
         .values()
         .map(|(layer, n, by_m)| mover_recall::LayerRow {
@@ -328,6 +436,9 @@ fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
         rates,
         layers: layer_rows,
         events_by_tier: Some(events_by_tier),
+        codes_with_close: Some(codes_with_close),
+        judgeable_codes_by_tier: Some(judgeable_codes_by_tier),
+        gate_version: Some(MOVER_GATE_VERSION.to_string()),
         misses,
     }
 }
@@ -389,6 +500,18 @@ pub async fn persist_mover_recall_run(
             )
         })?)
     };
+    let judgeable_codes_by_tier_json = view
+        .judgeable_codes_by_tier
+        .as_ref()
+        .map(|m| {
+            serde_json::to_string(m).map_err(|e| {
+                ErrorResponse::err_with_detail(
+                    wf_err::SERIALIZE_FAILED,
+                    format!("mover_recall_runs.judgeable_codes_by_tier_json 序列化失败: {e}"),
+                )
+            })
+        })
+        .transpose()?;
 
     let run_row = RunSnapshotRecord {
         id: id.clone(),
@@ -406,6 +529,9 @@ pub async fn persist_mover_recall_run(
         miss_count: view.rates.misses as i32,
         misses_json,
         events_by_tier_json,
+        codes_with_close: view.codes_with_close.map(|n| n as i32),
+        judgeable_codes_by_tier_json,
+        gate_version: view.gate_version.clone(),
         status: "success".to_string(),
         trigger_source: trigger_source.to_string(),
         created_at_ms: now_ms,
@@ -604,6 +730,10 @@ pub struct MoverRecallRunMeta {
     pub universe_confirmed: i64,
     pub events_total: i32,
     pub miss_count: i32,
+    /// 有收盘行的票数；`None` = 旧轮次未记录
+    pub codes_with_close: Option<i32>,
+    /// 归因层口径版本；`None` = 旧轮次未记录
+    pub gate_version: Option<String>,
     /// 当前只有 `success` 会落轮次行（失败不落库）⇒ 面板不得把「库里没有这一轮」读成
     /// 「那一轮没有达标事件」，两者是不同的缺席。
     pub status: String,
@@ -650,6 +780,8 @@ fn run_meta_of(run: &RunModel) -> MoverRecallRunMeta {
         universe_confirmed: run.universe_confirmed,
         events_total: run.events_total,
         miss_count: run.miss_count,
+        codes_with_close: run.codes_with_close,
+        gate_version: run.gate_version.clone(),
         status: run.status.clone(),
         trigger_source: run.trigger_source.clone(),
         created_at_ms: run.created_at_ms,
@@ -726,6 +858,14 @@ fn run_payload_of(run: &RunModel) -> Result<MoverRecallView, String> {
                     .map_err(|e| run_read_err(format!("events_by_tier_json 解析失败: {e}")))?,
             ),
         },
+        codes_with_close: run.codes_with_close.map(|n| n.max(0) as usize),
+        judgeable_codes_by_tier: match run.judgeable_codes_by_tier_json.as_deref() {
+            None => None,
+            Some(raw) => Some(serde_json::from_str(raw).map_err(|e| {
+                run_read_err(format!("judgeable_codes_by_tier_json 解析失败: {e}"))
+            })?),
+        },
+        gate_version: run.gate_version.clone(),
         misses: p.misses,
     })
 }
@@ -846,23 +986,46 @@ pub(crate) async fn ensure_close_history(
     db: &DatabaseConnection,
     client: &axagent_astock_data::AStockClient,
 ) {
+    use std::sync::atomic::{AtomicI64, Ordering};
     const LONGEST_WINDOW: u32 = 90;
-    let have = mover_recall::load_close_dates(db).await.map(|d| d.len()).unwrap_or(0);
-    if have as u32 >= LONGEST_WINDOW {
+    const DAILY_BACKFILL_LIMIT: usize = 200;
+    // 每天只补一批（进程内闩；重启会再补一批，幂等）。不放核查前同步跑：
+    // 2500+ 只逐票请求会把行情通道打爆，也会把面板刷新拖成分钟级。
+    static LAST_DAY: AtomicI64 = AtomicI64::new(0);
+    let day: i64 = chrono::Local::now().format("%Y%m%d").to_string().parse().unwrap_or(0);
+    if day > 0 && LAST_DAY.swap(day, Ordering::Relaxed) == day {
+        return;
+    }
+    let codes = match axagent_analysis_engine::market_close_store::codes_needing_history(
+        db,
+        LONGEST_WINDOW,
+        DAILY_BACKFILL_LIMIT,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("[mover-recall] 逐票历史缺口查询失败: {e}");
+            return;
+        },
+    };
+    if codes.is_empty() {
         return;
     }
     tracing::info!(
-        "[mover-recall] 本地收盘历史 {have} 天 < {LONGEST_WINDOW} ⇒ 用日线补齐（自动窗口）"
+        "[mover-recall] 逐票历史回补：本批 {} 只（目标 {LONGEST_WINDOW} 根）",
+        codes.len()
     );
-    if let Err(e) = axagent_analysis_engine::market_close_store::backfill_close_history(
+    if let Err(e) = axagent_analysis_engine::market_close_store::backfill_close_history_for_codes(
         db,
         client,
+        &codes,
         LONGEST_WINDOW,
         120,
     )
     .await
     {
-        tracing::warn!("[mover-recall] 历史回补失败（长档将如实显示窗口未满）: {e}");
+        tracing::warn!("[mover-recall] 逐票历史回补失败（下一批继续）: {e}");
     }
 }
 
@@ -977,10 +1140,9 @@ fn chain_summary_lines(view: &MoverRecallView) -> Vec<String> {
 
 pub(crate) async fn run_mover_recall_check(
     db: &DatabaseConnection,
-    client: &axagent_astock_data::AStockClient,
+    _client: &axagent_astock_data::AStockClient,
     trigger_source: &str,
 ) -> Result<MoverCheckOutcome, String> {
-    ensure_close_history(db, client).await;
     let views = analyze_mover_recall_inner(db, None).await?;
     let mut lines: Vec<String> = Vec::new();
     let mut misses = 0usize;
@@ -997,6 +1159,12 @@ pub(crate) async fn run_mover_recall_check(
         if let Some(last) = lines.last_mut() {
             last.push_str(&format!(" | {persist_msg}"));
         }
+    }
+    if views.len() > 1 {
+        lines.push(
+            "注：同一达标事件在智能荐股/趋势智选两条链各计一次；唯一事件数见面板（不是两段相加）"
+                .to_string(),
+        );
     }
     Ok(MoverCheckOutcome {
         summary: lines.join(
@@ -1063,6 +1231,7 @@ mod summary_line_tests {
                 unexplained_share: f64::NAN,
                 events: 77,
                 misses: miss_rows.len(),
+                judgeable_events: Some(77),
             },
             layers: if by_design == 0 {
                 vec![]
@@ -1074,6 +1243,9 @@ mod summary_line_tests {
                 }]
             },
             events_by_tier: None,
+            codes_with_close: None,
+            judgeable_codes_by_tier: None,
+            gate_version: None,
             misses: miss_rows,
         }
     }
@@ -1270,6 +1442,7 @@ mod chain_attribution_tests {
             close_dates,
             picks,
             trim_evidence,
+            pool_batches: Vec::new(),
         }
     }
 
@@ -1392,11 +1565,11 @@ mod chain_attribution_tests {
         );
     }
 
-    /// A-3 ①：同档在**窗口起点之前**出过票 ⇒ 判 `late_timing`、不进漏检清单也不进补分析队列。
+    /// A-3 ①：同档在**窗口起点之前**出过票 ⇒ 判 `prior_covered`、不进漏检清单也不进补分析队列。
     /// 它此前恒不可达：`in_window` 只认窗口内的票，早先那次推荐被当成「从没推荐过」，
     /// 于是「推荐时机」的问题被报成了「候选宇宙」的问题（优化方向会去扩池）。
     #[test]
-    fn pick_before_window_is_late_timing_not_a_miss() {
+    fn pick_before_window_is_prior_covered_not_a_miss() {
         let f = facts(
             vec![pick_on(
                 "p0",
@@ -1410,12 +1583,12 @@ mod chain_attribution_tests {
         );
         let reco = build_chain_view(RecoChain::Reco, &f);
         assert_eq!(reco.rates.events, 1, "达标事件照旧计数（分母不因层而变）");
-        assert!(reco.misses.is_empty(), "晚推荐不是漏检");
+        assert!(reco.misses.is_empty(), "窗口前已覆盖不是漏检");
         assert_eq!(reco.rates.misses, 0);
-        let late = reco.layers.iter().find(|l| l.layer == MissLayer::LateTiming);
+        let late = reco.layers.iter().find(|l| l.layer == MissLayer::PriorCovered);
         assert!(
             late.is_some_and(|l| l.count == 1),
-            "layers 必须留下 late_timing：{:#?}",
+            "layers 必须留下 prior_covered：{:#?}",
             reco.layers
         );
 
@@ -1452,6 +1625,70 @@ mod chain_attribution_tests {
 
         let reco = build_chain_view(RecoChain::Reco, &f);
         assert_eq!(reco.misses.len(), 1, "同一事件在荐股链仍是漏检（该链超短档照常出票）");
+        assert_eq!(reco.misses[0].layer, MissLayer::NotInPool);
+    }
+
+    /// synthetic=1 是降级占位行：只能当池覆盖证据，不能算「已推荐」。
+    #[test]
+    fn synthetic_pick_is_pool_evidence_not_hit() {
+        let mut p = pick("p1", "trend", "002696", "ultra_short", Some(r#"[["002696","n"]]"#));
+        p.synthetic = 1;
+        let f = facts(vec![p], vec![]);
+        let reco = build_chain_view(RecoChain::Reco, &f);
+        assert_eq!(reco.misses.len(), 1, "降级占位行不能把漏检洗成命中");
+        assert_eq!(reco.misses[0].layer, MissLayer::Unexplained);
+    }
+
+    /// 窗口前「已覆盖」必须有回看下界：一年前推荐过不能永久豁免本窗漏检。
+    #[test]
+    fn prior_covered_has_a_lookback_bound() {
+        let f = facts(
+            vec![pick_on(
+                "p1",
+                "trend",
+                "002696",
+                "ultra_short",
+                Some(r#"[["002696","n"]]"#),
+                "2026-08-01T09:00:00",
+            )],
+            vec![],
+        );
+        let reco = build_chain_view(RecoChain::Reco, &f);
+        assert!(
+            reco.layers.iter().all(|l| l.layer != MissLayer::PriorCovered),
+            "窗口前很久的推荐不得判成已覆盖：{:#?}",
+            reco.layers
+        );
+        assert_eq!(reco.misses.len(), 1);
+    }
+
+    /// 0 票批次也要留痕：没有 pick 行时，空池批次必须能判成 `pool_degraded`。
+    #[test]
+    fn empty_pool_batch_is_degraded_without_pick_rows() {
+        let mut f = facts(vec![], vec![]);
+        f.pool_batches.push(PoolBatchView {
+            chain: "reco".to_string(),
+            generated_at: "2026-10-08T09:00:00".to_string(),
+            seed_pool_json: Some("[]".to_string()),
+            degraded: true,
+        });
+        let reco = build_chain_view(RecoChain::Reco, &f);
+        assert_eq!(reco.misses.len(), 1);
+        assert_eq!(reco.misses[0].layer, MissLayer::PoolDegraded);
+    }
+
+    /// 有批次行、池里没有该票 ⇒ 可归因到 `not_in_pool`（不再因「无 pick 行」落 unexplained）。
+    #[test]
+    fn normal_pool_batch_marks_not_in_pool_without_pick_rows() {
+        let mut f = facts(vec![], vec![]);
+        f.pool_batches.push(PoolBatchView {
+            chain: "reco".to_string(),
+            generated_at: "2026-10-08T09:00:00".to_string(),
+            seed_pool_json: Some(r#"[["600519","n"]]"#.to_string()),
+            degraded: false,
+        });
+        let reco = build_chain_view(RecoChain::Reco, &f);
+        assert_eq!(reco.misses.len(), 1);
         assert_eq!(reco.misses[0].layer, MissLayer::NotInPool);
     }
 }

@@ -251,8 +251,12 @@ pub struct MoverEvent {
 pub enum MissLayer {
     /// 该票该档已被推荐 ⇒ 命中，不入漏检分母
     Recommended,
-    /// 推荐时点晚于窗口起点 ⇒「晚推荐」，不计漏检
-    LateTiming,
+    /// 窗口起点前一个窗口长度内已同档推荐过 ⇒「已覆盖」，不计漏检。
+    ///
+    /// 旧值 `late_timing` 保留为反序列化别名：历史轮次的 `layers_json` 里可能存过它，
+    /// 改名后仍要能读回（新写只写 `prior_covered`）。
+    #[serde(alias = "late_timing")]
+    PriorCovered,
     /// 完全不在任何一次候选池快照里
     NotInPool,
     /// 候选池本轮降级（取数失败/为空）⇒ 数据可达性问题，不记算法账
@@ -275,7 +279,7 @@ impl MissLayer {
     /// 对这张表，加了变体忘了进这里 ⇒ 门红（否则那条 Rust 测试会安静地少判一层）。
     pub const ALL: [MissLayer; 8] = [
         MissLayer::Recommended,
-        MissLayer::LateTiming,
+        MissLayer::PriorCovered,
         MissLayer::NotInPool,
         MissLayer::PoolDegraded,
         MissLayer::ByDesign,
@@ -287,7 +291,7 @@ impl MissLayer {
     pub fn as_str(self) -> &'static str {
         match self {
             MissLayer::Recommended => "recommended",
-            MissLayer::LateTiming => "late_timing",
+            MissLayer::PriorCovered => "prior_covered",
             MissLayer::NotInPool => "not_in_pool",
             MissLayer::PoolDegraded => "pool_degraded",
             MissLayer::ByDesign => "by_design",
@@ -334,7 +338,7 @@ pub struct Evidence {
     /// 智选链只看 `serenity` 那一行 ⇒ 同一个布尔值在两条链上是两个问题，
     /// 沿用旧名会让读代码的人以为两链同口径。
     pub chain_tier_active: bool,
-    /// 窗口起点**之前**该链已在同档出过票（A-3 的 `LateTiming` 判据）。
+    /// 窗口起点**之前一个窗口长度内**该链已在同档出过票（`PriorCovered` 判据）。
     ///
     /// 存在的理由：`in_window` 只认 `generated_at` 落在窗口内，早于起点的那次推荐会被
     /// 当成「从没推荐过」⇒ 事件落进 `not_in_pool`/`unexplained`，优化方向被带去「扩池」，
@@ -347,8 +351,8 @@ pub struct Evidence {
 
 /// 纯函数归因：顺序即优先级，先排掉「其实不是漏检」，再定位到可判的层。
 ///
-/// `LateTiming` 紧跟 `Recommended`：同档在窗口之前就出过票时，「池子里没有它」「按设计不做这档」
-/// 都已不成立 —— 链看见过它，只是时点不落在本窗（A-3 接的就是这一层，此前恒不可达）。
+/// `PriorCovered` 紧跟 `Recommended`：同档在窗口之前一个窗口长度内出过票时，
+/// 「池子里没有它」「按设计不做这档」都已不成立 —— 链看见过它，只是时点不落在本窗。
 /// `L3ScoredOut` 排在 `OtherPeriod` 之后：别的档位已经出过票时，「本档漏」的
 /// 结论会被系统性高估（同一只票本就不必四档齐发）。
 pub fn attribute(ev: &Evidence) -> MissLayer {
@@ -356,7 +360,7 @@ pub fn attribute(ev: &Evidence) -> MissLayer {
         return MissLayer::Recommended;
     }
     if ev.picked_before_window {
-        return MissLayer::LateTiming;
+        return MissLayer::PriorCovered;
     }
     if !ev.chain_tier_active {
         return MissLayer::ByDesign;
@@ -399,6 +403,9 @@ pub struct RecallRates {
     pub unexplained_share: f64,
     pub events: usize,
     pub misses: usize,
+    /// 可判事件数（排除 `ByDesign` / `PriorCovered`）—— reachability 的分母。
+    /// `None` = 旧轮次未记录（面板显示「未记录」，不拿 events 冒充）。
+    pub judgeable_events: Option<usize>,
 }
 
 /// 已落库 `rates_json` 的投影（读回**那一轮**的三个率用）。
@@ -414,6 +421,7 @@ pub struct StoredRates {
     pub unexplained_share: Option<f64>,
     pub events: usize,
     pub misses: usize,
+    pub judgeable_events: Option<usize>,
 }
 
 impl StoredRates {
@@ -425,6 +433,7 @@ impl StoredRates {
             unexplained_share: self.unexplained_share.unwrap_or(f64::NAN),
             events: self.events,
             misses: self.misses,
+            judgeable_events: self.judgeable_events,
         }
     }
 }
@@ -442,39 +451,49 @@ fn nan_to_null<S: serde::Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
 pub fn compute_rates(counts: &HashMap<MissLayer, usize>, events: usize) -> RecallRates {
     let get = |l: MissLayer| *counts.get(&l).unwrap_or(&0);
     let recommended = get(MissLayer::Recommended);
-    let in_pool = get(MissLayer::L3ScoredOut)
-        + get(MissLayer::PoolDegraded)
+    // 「可判」= 排除按设计不做与窗口前已覆盖；它们不是漏检，也不该稀释 reachability。
+    let judgeable_events =
+        events.saturating_sub(get(MissLayer::ByDesign) + get(MissLayer::PriorCovered));
+    // reachability 的分子是「入池或已推荐」；PoolDegraded 是「池不可用」，不是「可达」，
+    // 旧实现把它算进分子，会把降级轮次的到达率抬高。
+    let reachable = get(MissLayer::L3ScoredOut)
         + get(MissLayer::OtherPeriod)
         + get(MissLayer::Unexplained)
         + recommended;
-    let not_in_pool = get(MissLayer::NotInPool);
     let misses = get(MissLayer::NotInPool)
         + get(MissLayer::PoolDegraded)
         + get(MissLayer::L3ScoredOut)
         + get(MissLayer::OtherPeriod)
         + get(MissLayer::Unexplained);
-    let reachability = if events == 0 {
+    let reachability = if judgeable_events == 0 {
         f64::NAN
     } else {
-        in_pool as f64 * 100.0 / events as f64
+        reachable as f64 * 100.0 / judgeable_events as f64
     };
-    // 覆盖率分母 = 入池事件（含降级桶）：与 `in_pool` 同口径，不另立一套
-    let coverage = if in_pool == 0 {
+    // 覆盖率分母 = 入池且可判的事件（不含降级桶）：降级是数据可达性问题，
+    // 既不能当命中，也不能当算法淘汰 —— 单列在 reachability 之外。
+    let coverage_den = recommended
+        + get(MissLayer::L3ScoredOut)
+        + get(MissLayer::OtherPeriod)
+        + get(MissLayer::Unexplained);
+    let coverage = if coverage_den == 0 {
         f64::NAN
     } else {
-        recommended as f64 * 100.0
-            / (recommended
-                + get(MissLayer::L3ScoredOut)
-                + get(MissLayer::OtherPeriod)
-                + get(MissLayer::Unexplained)) as f64
+        recommended as f64 * 100.0 / coverage_den as f64
     };
     let unexplained_share = if misses == 0 {
         f64::NAN
     } else {
         get(MissLayer::Unexplained) as f64 * 100.0 / misses as f64
     };
-    let _ = not_in_pool;
-    RecallRates { reachability, coverage, unexplained_share, events, misses }
+    RecallRates {
+        reachability,
+        coverage,
+        unexplained_share,
+        events,
+        misses,
+        judgeable_events: Some(judgeable_events),
+    }
 }
 
 /// 一次核查的完整产出。
@@ -657,7 +676,12 @@ pub async fn load_mover_cell_signal(
             continue;
         }
         let anchor_from = dates[end_idx + 1 - window].clone();
-        for ev in events_for_tier(&by_stock, rule, &anchor_from, &to) {
+        // 与核查同口径：只看最新收盘日的事件。旧实现会把窗口内每个 anchor 都算一遍，
+        // 同一票连续多日达标会在 `scored_out`/`hits` 里重复计数，penalty 被放大。
+        for ev in events_for_tier(&by_stock, rule, &anchor_from, &to)
+            .into_iter()
+            .filter(|ev| ev.anchor_date == to)
+        {
             let Some(anchor_idx) = dates.iter().position(|d| *d == ev.anchor_date) else {
                 continue;
             };
@@ -1109,7 +1133,7 @@ mod tests {
             MissLayer::Recommended
         );
         // 同档在窗口起点之前就出过票 ⇒ 晚推荐（A-3 接的就是这一层），排在池层之前
-        assert_eq!(attribute(&ev(|e| e.picked_before_window = true)), MissLayer::LateTiming);
+        assert_eq!(attribute(&ev(|e| e.picked_before_window = true)), MissLayer::PriorCovered);
         // 本链按设计不出这一档 ⇒ 优先于池层（严禁进待优化清单）
         assert_eq!(attribute(&ev(|e| e.chain_tier_active = false)), MissLayer::ByDesign);
         assert_eq!(attribute(&ev(|e| e.pool_degraded = true)), MissLayer::PoolDegraded);
@@ -1136,7 +1160,7 @@ mod tests {
         );
         assert!(!MissLayer::ByDesign.counts_as_miss());
         assert!(
-            !MissLayer::LateTiming.counts_as_miss(),
+            !MissLayer::PriorCovered.counts_as_miss(),
             "晚推荐不是漏检：它的优化方向是时机，不是候选宇宙"
         );
         assert!(MissLayer::L3ScoredOut.counts_as_miss());
@@ -1146,7 +1170,7 @@ mod tests {
     /// 逐层可达性（**充分条件**）：每一层都必须能用一组真实形态的证据造出来。
     ///
     /// 门 p（`check-reco-horizon-parity.mjs`）只证必要条件「`attribute()` 里写了这一层」；
-    /// 写了但条件永远凑不齐，照样是死料 —— `LateTiming` 与 `ByDesign` 两层在 2026-10-21 之前
+    /// 写了但条件永远凑不齐，照样是死料 —— `PriorCovered` 与 `ByDesign` 两层在 2026-10-21 之前
     /// 就是这么躺着的：枚举、`as_str`、面板格、11 语言全齐备，看着像八层归因，实际只产五层。
     /// 遍历面是 `MissLayer::ALL`，门 p 拿枚举对这张表 ⇒ 加一层不写夹具就红。
     #[test]
@@ -1154,7 +1178,7 @@ mod tests {
         type Fixture = (MissLayer, fn(&mut Evidence));
         let fixtures: [Fixture; 8] = [
             (MissLayer::Recommended, |e| e.picks_for_period.push("2026-10-09T15:00:00".into())),
-            (MissLayer::LateTiming, |e| e.picked_before_window = true),
+            (MissLayer::PriorCovered, |e| e.picked_before_window = true),
             (MissLayer::ByDesign, |e| e.chain_tier_active = false),
             (MissLayer::PoolDegraded, |e| e.pool_degraded = true),
             (MissLayer::NotInPool, |e| e.in_pool = Some(false)),
@@ -1190,7 +1214,7 @@ mod tests {
             e.chain_tier_active = false;
             e.picked_before_window = true;
         }));
-        assert_eq!(both, MissLayer::LateTiming, "LateTiming 必须排在 ByDesign 之前");
+        assert_eq!(both, MissLayer::PriorCovered, "PriorCovered 必须排在 ByDesign 之前");
         let hit_wins = attribute(&ev(|e| {
             e.picks_for_period.push("2026-10-09T15:00:00".into());
             e.picked_before_window = true;
@@ -1282,6 +1306,27 @@ mod tests {
         assert!((r.reachability - 50.0).abs() < 1e-6, "得 {}", r.reachability);
         assert!((r.coverage - 30.0).abs() < 1e-6, "得 {}", r.coverage);
         assert_eq!(r.misses, 17);
+        assert_eq!(r.judgeable_events, Some(20));
+    }
+
+    /// 可判分母排除 `ByDesign` / `PriorCovered`；`PoolDegraded` 不算「可达」。
+    #[test]
+    fn judgeable_events_exclude_non_judgeable_layers() {
+        let mut counts = HashMap::new();
+        counts.insert(MissLayer::Recommended, 3);
+        counts.insert(MissLayer::NotInPool, 3);
+        counts.insert(MissLayer::ByDesign, 2);
+        counts.insert(MissLayer::PriorCovered, 1);
+        counts.insert(MissLayer::PoolDegraded, 1);
+        let r = compute_rates(&counts, 10);
+        assert_eq!(r.judgeable_events, Some(7), "10 - 2 - 1 = 7");
+        assert!(
+            (r.reachability - 42.857_142_857).abs() < 1e-5,
+            "PoolDegraded 不算可达，得 {}",
+            r.reachability
+        );
+        assert!((r.coverage - 100.0).abs() < 1e-6, "3 命中 / 3 可判池内，得 {}", r.coverage);
+        assert_eq!(r.misses, 4, "NotInPool 3 + PoolDegraded 1");
     }
 
     #[test]

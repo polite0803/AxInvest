@@ -1620,6 +1620,8 @@ export interface MoverRecallRates {
   unexplainedShare: number | null;
   events: number;
   misses: number;
+  /** 可判事件数（排除按设计不做/窗口前已覆盖）；`null` = 旧轮次未记录 */
+  judgeableEvents: number | null;
 }
 
 /** 一条窗口涨幅达标事件（口径：绝对涨幅，不含板块涨停语义）。 */
@@ -1679,6 +1681,12 @@ export interface MoverRecallView {
    * 必须与「本档有达标」分开说；`null` = 本轮未记录（旧轮次）⇒ 面板第三态，不得显示成 0。
    */
   eventsByTier: Record<string, number> | null;
+  /** 有收盘行的票数（事件域）；`null` = 旧轮次未记录 */
+  codesWithClose: number | null;
+  /** 逐档可判票数（该票历史长度 ≥ windowDays）；`null` = 旧轮次未记录 */
+  judgeableCodesByTier: Record<string, number> | null;
+  /** 归因层口径版本；`null` = 旧轮次未记录（跨版本漏检数不可直接比较） */
+  gateVersion: string | null;
   misses: MoverMissRow[];
 }
 
@@ -1701,6 +1709,10 @@ export interface MoverRecallRunMeta {
   universeConfirmed: number;
   eventsTotal: number;
   missCount: number;
+  /** 有收盘行的票数；null = 旧轮次未记录 */
+  codesWithClose: number | null;
+  /** 归因层口径版本；null = 旧轮次未记录 */
+  gateVersion: string | null;
   status: string;
   triggerSource: string;
   createdAtMs: number;

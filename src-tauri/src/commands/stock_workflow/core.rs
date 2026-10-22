@@ -2117,13 +2117,18 @@ pub async fn run_single_stock_analysis(
         && !quote.name.is_empty()
         && quote.name != stock_code
     {
-        let _ = stock_analyses::Entity::update(stock_analyses::ActiveModel {
+        if let Err(e) = stock_analyses::Entity::update(stock_analyses::ActiveModel {
             id: Set(analysis_id.clone()),
             stock_name: Set(quote.name.clone()),
             ..Default::default()
         })
         .exec(db)
-        .await;
+        .await
+        {
+            // 回填失败不阻断本次分析（名字只影响历史列表标题），但**不得静默**：
+            // 空名正是这一条要修的缺陷，写库丢了必须留痕，否则下一轮又查不到来源。
+            tracing::warn!("[workflow] 名称回填写库失败 analysis_id={analysis_id}: {e}");
+        }
         quote.name.clone()
     } else {
         stock_name.to_string()

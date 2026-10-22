@@ -537,7 +537,8 @@ mod tests {
                 trade_intent_review_notes TEXT,
                 trade_intent_actual_trade_id TEXT,
                 created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
+                updated_at INTEGER NOT NULL,
+                completed_at INTEGER
             )",
         )
         .await

@@ -30,6 +30,11 @@ pub struct BatchRunRecord {
     pub updated_at_ms: i64,
     pub finished_at_ms: Option<i64>,
     pub trigger: Option<String>,
+    /// 阶段 E-4 选样留痕四数（`None` = 选样未跑／这几列引入前的旧行）
+    pub scanned: Option<i32>,
+    pub skipped_by_share: Option<i32>,
+    pub skipped_by_period: Option<i32>,
+    pub skipped_by_window: Option<i32>,
 }
 
 /// 全量 upsert 一行批次历史。主键冲突时覆盖除 id / 创建时间 / 原始请求外的列
@@ -48,6 +53,10 @@ pub async fn upsert_batch_run(db: &DatabaseConnection, r: &BatchRunRecord) -> Re
         updated_at_ms: Set(r.updated_at_ms),
         finished_at_ms: Set(r.finished_at_ms),
         trigger: Set(r.trigger.clone()),
+        scanned: Set(r.scanned),
+        skipped_by_share: Set(r.skipped_by_share),
+        skipped_by_period: Set(r.skipped_by_period),
+        skipped_by_window: Set(r.skipped_by_window),
     };
 
     Entity::insert(am)
@@ -62,6 +71,12 @@ pub async fn upsert_batch_run(db: &DatabaseConnection, r: &BatchRunRecord) -> Re
                     Column::ErrorDetail,
                     Column::UpdatedAtMs,
                     Column::FinishedAtMs,
+                    // 选样四数在建批时还是 NULL（选样没跑），必须在后续 upsert 里补写，
+                    // 否则「空批到底被什么跳过」永远落不进库。
+                    Column::Scanned,
+                    Column::SkippedByShare,
+                    Column::SkippedByPeriod,
+                    Column::SkippedByWindow,
                 ])
                 .to_owned(),
         )

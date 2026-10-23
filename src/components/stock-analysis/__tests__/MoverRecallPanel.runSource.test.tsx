@@ -187,6 +187,36 @@ describe("MoverRecallPanel 轮次来源", () => {
     await waitFor(() => expect(screen.getByTestId("mover-batches-latest")).toBeTruthy());
     expect(screen.getByTestId("mover-batches-latest").textContent ?? "").toContain("success");
     expect(screen.queryByTestId("mover-batches-never")).toBeNull();
+    // E-4：这几行是列引入前的旧批次 ⇒ 只能说「未记录」，不能显示成扫了 0 个
+    expect(screen.getByTestId("mover-batches-selection").textContent ?? "").toContain("未记录");
+  });
+
+  it("E-4. 批次带选样计数 ⇒ 逐跳过原因成句（四数都要出现在界面上）", async () => {
+    invokeMock.mockImplementation(async (name: string) => {
+      if (name === "list_mover_recall_runs") { return [makeRun()]; }
+      if (name === "get_mover_recall_run_view") { return makeRunView(); }
+      if (name === "list_mover_recall_analysis_batches") {
+        return [
+          {
+            batchId: "mrb-2",
+            status: "completed",
+            message: null,
+            scanned: 120,
+            skippedByShare: 40,
+            skippedByPeriod: 3,
+            skippedByWindow: 22,
+          },
+        ];
+      }
+      return null;
+    });
+    renderAt();
+    await waitFor(() => expect(screen.getByTestId("mover-batches-selection")).toBeTruthy());
+    const sel = screen.getByTestId("mover-batches-selection").textContent ?? "";
+    for (const n of ["120", "40", "3", "22"]) {
+      expect(sel).toContain(n);
+    }
+    expect(sel).not.toContain("未记录");
   });
 
   it("D. 轮次载荷缺字段：走 failed 支，不把半份载荷当视图（既不崩也不静默空白）", async () => {

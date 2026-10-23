@@ -16022,6 +16022,8 @@
       "batchesNever": "Backfill batches: never started (0) — misses are not backfilled, so reflections get no samples",
       "batchesLatest": "Backfill batches: latest {{status}} (per-stock results in Task Center)",
       "batchesUnknown": "Backfill batches: status unavailable (this does NOT mean none were started)",
+      "batchesSelection": "selection scanned {{scanned}} groups; skipped: {{share}} over unexplained share, {{period}} unparsable tier, {{window}} pseudo window",
+      "batchesSelectionUnknown": "selection counts not recorded for this batch",
       "reflowNone": "Reflow candidates: none (no reflection judged \"should have been in pool\")",
       "reflowPending": "Reflow candidates {{count}} · {{need}} more settled samples before promotion (shadow; not merged into seed)",
       "reflowReady": "Reflow candidates {{count}} · criteria met (merge still requires manual confirmation)",
@@ -16118,8 +16120,8 @@
       "sweepCloseHint": "Only the latest completed trading day (after 15:00) is collected; intraday requests are rejected; use window-history backfill for past dates",
       "sweepDone": "Close rows written {{written}} / universe {{total}}; no quote {{missing}}",
       "backfillHistory": "Backfill window history",
-      "backfillHistoryHint": "Up to 500 codes × 90 trading days per batch; a full market needs ~12 batches — repeat until requested=0",
-      "backfillDone": "History backfilled: {{codes}} codes / {{rows}} rows / {{failed}} failed",
+      "backfillHistoryHint": "Up to 500 codes x 90 trading days per batch; click again until 0 new rows; \"unchanged\" means fewer than 90 bars available (recent IPO or long suspension)",
+      "backfillDone": "History backfilled: {{codes}} codes / {{rows}} new rows / {{noNew}} unchanged / {{failed}} failed",
       "backfillNone": "History already complete for this batch (no codes to backfill)"
     },
     "export": {

@@ -234,15 +234,20 @@ pub async fn backfill_close_history_for_codes(
             }
             prev = Some(k.close);
         }
+        let rows_before = stats.rows;
         for chunk in rows.chunks(500) {
+            // `exec_without_returning` 而不是 `exec`：PG 上 `INSERT ... ON CONFLICT DO NOTHING`
+            // 命中全部已存在行时返回 0 行，`exec` 会把它当 `RecordNotInserted` 报错
+            // （2026-10-23 实测「001367: 落库失败: None of the records are inserted」），
+            // 而"这些日期早就有"是正常无操作，不是失败，否则重复点补历史永远 0 行/全失败。
             let res = market_daily_close::Entity::insert_many(chunk.to_vec())
                 .on_conflict(
                     OnConflict::column(market_daily_close::Column::Id).do_nothing().to_owned(),
                 )
-                .exec(db)
+                .exec_without_returning(db)
                 .await;
             match res {
-                Ok(_) => stats.rows += chunk.len() as u32,
+                Ok(n) => stats.rows += n as u32,
                 Err(e) => {
                     stats.failed += 1;
                     if stats.first_error.is_none() {
@@ -252,14 +257,21 @@ pub async fn backfill_close_history_for_codes(
                 },
             }
         }
+        // 「取到了日线、但一行没新增」的票单独计数：它们的可用日线本就少于 target_days
+        // （次新股、长停牌），重复调用对它们没有进展。不报出来的话，
+        // 「500 只 / 0 行 / 失败 0」会被读成「这批都补过了」。
+        if stats.rows == rows_before {
+            stats.no_new += 1;
+        }
         if interval_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
         }
     }
     tracing::info!(
-        "[close] 历史回补完成：代码 {} 只 / 尝试写入 {} 行 / 失败 {} 次",
+        "[close] 历史回补完成：代码 {} 只 / 新写入 {} 行 / 无新增 {} 只 / 失败 {} 次",
         stats.codes,
         stats.rows,
+        stats.no_new,
         stats.failed
     );
     Ok(stats)
@@ -269,6 +281,8 @@ pub async fn backfill_close_history_for_codes(
 pub struct BackfillStats {
     pub codes: u32,
     pub rows: u32,
+    /// 本轮取到了日线、但一行没新增的票数（可用日线不足 target_days，或本来就齐了）
+    pub no_new: u32,
     pub failed: u32,
     /// 首条失败原因（500 只全失败时用来诊断；后续同类只计数不刷屏）
     pub first_error: Option<String>,
@@ -278,7 +292,11 @@ pub struct BackfillStats {
 ///
 /// 判据是**逐票行数**，不是全局日期数：段扫新登记的票在 `market_daily_close` 里
 /// 可能是 0 行，而全局日期数早已 ≥90 ⇒ 旧实现永远不补它们。
-/// 排序：已有部分历史的优先（0 行票可能是误登记），再按代码稳定排序，便于分批追进度。
+/// 排序：**缺口最大的先补**（0 行票排最前）。旧实现反过来「已有部分历史的优先」，
+/// 理由是怕 0 行票是误登记 —— 但段扫的登记判据（`is_plausible_stock_quote`）要求
+/// 拿到真实报价（价与前收盘 > 0、名称像正股），所以 0 行票是「采过价、还没补历史」，
+/// 不是幽灵代码。反过来排还有个硬伤：可用日线永远不足 90 根的票（次新股、长停牌）
+/// 补不到 `target_days`，会永远钉在队首，把每批 500 个名额全部吃掉 ⇒ 后面的票永远轮不到。
 pub async fn codes_needing_history(
     db: &sea_orm::DatabaseConnection,
     target_days: u32,
@@ -301,7 +319,7 @@ pub async fn codes_needing_history(
         .map(|m| (counts.get(&m.stock_code).copied().unwrap_or(0), m.stock_code, m.stock_name))
         .filter(|(n, _, _)| *n < target_days as usize)
         .collect();
-    need.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    need.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
     need.truncate(limit);
     Ok(need.into_iter().map(|(_, code, name)| (code, name)).collect())
 }
@@ -762,5 +780,59 @@ mod tests {
         let am = close_row("600059", "古越龙山", "2026-09-30", 1, 12.0, 11.0, 9.09, 0.0, f64::NAN)
             .expect("价格有效仍应落行");
         assert_eq!(am.amount.unwrap(), 0.0);
+    }
+
+    /// 阶段 0 选样：缺口最大的先补，已满的不得出现在批次里。
+    ///
+    /// 负控：旧实现按「已有行数降序」排（当时的顾虑是 0 行票可能是误登记），
+    /// 会让「可用日线永远不足 target_days」的稀疏票永远钉在队首、每批名额全被吃掉 ⇒
+    /// 有人改回去，这条顺序断言当场红。
+    #[tokio::test]
+    async fn codes_needing_history_prefers_the_largest_gap() {
+        let db = axagent_dao::db::create_test_pool().await.expect("测试库应可创建").conn;
+        let seed_u = |code: &str| market_stock_universe::ActiveModel {
+            stock_code: Set(code.to_string()),
+            stock_name: Set(format!("票{code}")),
+            market_type: Set("sh".to_string()),
+            first_seen_at: Set(1),
+            last_confirmed_at: Set(0),
+            origin: Set("code_scan".to_string()),
+            industry: Set(None),
+        };
+        for code in ["099801", "099802", "099803", "099804"] {
+            market_stock_universe::Entity::insert(seed_u(code))
+                .exec(&db)
+                .await
+                .expect("播种清单行");
+        }
+        // 099801=0 行 / 099802=1 行 / 099804=3 行 / 099803=5 行（target_days=5 ⇒ 已满）
+        let mut seq = 0usize;
+        for (code, n) in [("099802", 1usize), ("099804", 3), ("099803", 5)] {
+            for _ in 0..n {
+                seq += 1;
+                market_daily_close::Entity::insert(market_daily_close::ActiveModel {
+                    id: Set(format!("{code}@{seq:04}")),
+                    stock_code: Set(code.to_string()),
+                    stock_name: Set(format!("票{code}")),
+                    trade_date: Set(format!("2026-01-{}", seq % 28 + 1)),
+                    close: Set(10.0),
+                    prev_close: Set(9.0),
+                    change_pct: Set(11.1),
+                    amount: Set(1.0e7),
+                    collected_at: Set(1),
+                    source: Set("tencent_batch".to_string()),
+                })
+                .exec(&db)
+                .await
+                .expect("播种收盘行");
+            }
+        }
+        let got = codes_needing_history(&db, 5, 10).await.expect("选样应成功");
+        let codes: Vec<&str> = got.iter().map(|(c, _)| c.as_str()).collect();
+        assert_eq!(
+            codes,
+            vec!["099801", "099802", "099804"],
+            "0 行的必须排最前，已满的不得出现: {codes:?}"
+        );
     }
 }

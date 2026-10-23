@@ -15778,6 +15778,8 @@
       "batchesNever": "Nachanalyse-Batches: nie gestartet (0) — Fehlstellen werden nicht nachgeholt, Reflexionen erhalten keine Stichproben",
       "batchesLatest": "Nachanalyse-Batches: zuletzt {{status}} (Ergebnisse je Aktie im Task-Center)",
       "batchesUnknown": "Nachanalyse-Batches: Status nicht lesbar (bedeutet NICHT, dass keine gestartet wurden)",
+      "batchesSelection": "Auswahl: {{scanned}} Gruppen geprüft; übersprungen: {{share}} wegen Unexplained-Anteil, {{period}} unlesbare Stufe, {{window}} Pseudo-Fenster",
+      "batchesSelectionUnknown": "Auswahlzählungen für diesen Durchlauf nicht erfasst",
       "reflowNone": "Rückfluss-Kandidaten: keine (keine Reflexion mit „hätte im Pool sein sollen“)",
       "reflowPending": "Rückfluss-Kandidaten {{count}} · noch {{need}} abgerechnete Stichproben bis zur Übernahme (Shadow, nicht in den Seed übernommen)",
       "reflowReady": "Rückfluss-Kandidaten {{count}} · Kriterien erfüllt (Übernahme erst nach manueller Bestätigung)",
@@ -15874,8 +15876,8 @@
       "sweepCloseHint": "Nur der letzte abgeschlossene Handelstag (nach 15:00) wird erfasst; Intraday-Anfragen werden abgelehnt; für historische Tage die Fensterhistorie nutzen",
       "sweepDone": "Schlusszeilen {{written}} / Universum {{total}}; ohne Kurs {{missing}}",
       "backfillHistory": "Fensterhistorie nachfüllen",
-      "backfillHistoryHint": "Bis zu 500 Codes × 90 Handelstage pro Charge; Gesamtmarkt ≈12 Chargen — wiederholen bis requested=0",
-      "backfillDone": "Historie ergänzt: {{codes}} Codes / {{rows}} Zeilen / {{failed}} fehlgeschlagen",
+      "backfillHistoryHint": "Bis zu 500 Codes x 90 Handelstage pro Durchlauf; bis 0 neue Zeilen wiederholen; \"ohne Änderung\" = weniger als 90 verfügbare Tagesdaten (Neulistung oder langer Handelsstopp)",
+      "backfillDone": "Historie ergänzt: {{codes}} Codes / {{rows}} neue Zeilen / {{noNew}} ohne Änderung / {{failed}} fehlgeschlagen",
       "backfillNone": "Historie dieser Charge vollständig (keine Codes offen)"
     },
     "export": {

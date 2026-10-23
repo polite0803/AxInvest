@@ -15778,6 +15778,8 @@
       "batchesNever": "Lots de rattrapage : jamais lancés (0) — les manques ne sont pas rattrapés, les réflexions n'ont pas d'échantillons",
       "batchesLatest": "Lots de rattrapage : dernier {{status}} (résultats par titre dans le centre des tâches)",
       "batchesUnknown": "Lots de rattrapage : état illisible (cela ne signifie PAS qu'aucun n'a été lancé)",
+      "batchesSelection": "sélection : {{scanned}} groupes examinés ; ignorés : {{share}} pour part inexpliquée, {{period}} palier non analysable, {{window}} fenêtre pseudo",
+      "batchesSelectionUnknown": "comptages de sélection non enregistrés pour ce lot",
       "reflowNone": "Candidats de retour : aucun (aucune réflexion « aurait dû être dans le pool »)",
       "reflowPending": "Candidats de retour {{count}} · encore {{need}} échantillons réglés avant promotion (shadow, non fusionné au seed)",
       "reflowReady": "Candidats de retour {{count}} · critères remplis (fusion après confirmation manuelle)",
@@ -15874,8 +15876,8 @@
       "sweepCloseHint": "Seul le dernier jour de bourse clôturé (après 15:00) est collecté ; les demandes intraday sont refusées ; utiliser le complément d'historique pour les dates passées",
       "sweepDone": "Lignes de clôture {{written}} / univers {{total}} ; sans cotation {{missing}}",
       "backfillHistory": "Compléter l'historique de fenêtre",
-      "backfillHistoryHint": "Jusqu'à 500 codes × 90 jours de bourse par lot ; marché complet ≈12 lots — répéter jusqu'à requested=0",
-      "backfillDone": "Historique complété : {{codes}} codes / {{rows}} lignes / {{failed}} échecs",
+      "backfillHistoryHint": "Jusqu'à 500 codes x 90 séances par lot ; répétez jusqu'à 0 nouvelle ligne ; \"inchangés\" = moins de 90 cotations disponibles (introduction récente ou suspension longue)",
+      "backfillDone": "Historique complété : {{codes}} codes / {{rows}} nouvelles lignes / {{noNew}} inchangés / {{failed}} échecs",
       "backfillNone": "Historique de ce lot déjà complet (aucun code à compléter)"
     },
     "export": {

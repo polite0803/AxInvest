@@ -64,7 +64,15 @@ export function MoverRecallPanel() {
     { items: number; codes: string[]; settled: number; required: number; ready: boolean } | null
   >(null);
   const [batchInfo, setBatchInfo] = useState<
-    { kind: "never" } | { kind: "latest"; status: string } | { kind: "unknown" } | null
+    | { kind: "never" }
+    | {
+      kind: "latest";
+      status: string;
+      /** E-4 选样留痕四数；`null` = 该批落库时还没有这几列 ⇒ 说「未记录」，不能说 0 */
+      selection: { scanned: number; share: number; period: number; window: number } | null;
+    }
+    | { kind: "unknown" }
+    | null
   >(null);
   // 每次「刷新」只真取一次列表，避免 selectedId 变化把列表重复拉一遍
   const listFetchedFor = useRef(-1);
@@ -108,6 +116,7 @@ export function MoverRecallPanel() {
   const fullMarketScan = () =>
     runSampleAction("scan", async () => {
       const r = await invoke<UniverseScanStats>("run_universe_code_scan", { shards: 1 });
+      assertReport(r, "run_universe_code_scan", "registered");
       return t("stockAnalysis.moverRecall.fullScanDone", {
         registered: r?.registered ?? 0,
         codes: r?.codesTried ?? 0,
@@ -117,6 +126,7 @@ export function MoverRecallPanel() {
   const sweepLatestClose = () =>
     runSampleAction("sweep", async () => {
       const r = await invoke<CloseSweepReport>("sweep_market_close", {});
+      assertReport(r, "sweep_market_close", "written");
       return t("stockAnalysis.moverRecall.sweepDone", {
         written: r?.written ?? 0,
         total: r?.universeSize ?? 0,
@@ -129,6 +139,7 @@ export function MoverRecallPanel() {
       const r = await invoke<HistoryBackfillReport>("backfill_market_close_history", {
         limit: 500,
       });
+      assertReport(r, "backfill_market_close_history", "requested");
       // 全失败不能伪装成「补齐」：把首条原因带回给用户（500/0/500 那次就是被这里吞掉的）
       if ((r?.failed ?? 0) > 0) {
         throw new Error(r?.error ?? `backfill failed: ${r?.failed ?? 0}`);
@@ -138,6 +149,7 @@ export function MoverRecallPanel() {
         : t("stockAnalysis.moverRecall.backfillDone", {
           codes: r?.codes ?? 0,
           rows: r?.rows ?? 0,
+          noNew: r?.noNew ?? 0,
           failed: r?.failed ?? 0,
         });
     });
@@ -253,11 +265,24 @@ export function MoverRecallPanel() {
           setBatchInfo({ kind: "unknown" });
           return;
         }
-        setBatchInfo(
-          rows.length === 0
-            ? { kind: "never" }
-            : { kind: "latest", status: String((rows[0] as { status?: unknown }).status ?? "") },
-        );
+        if (rows.length === 0) {
+          setBatchInfo({ kind: "never" });
+          return;
+        }
+        const b = rows[0] as Record<string, unknown>;
+        // 后端这几列是 nullable：缺字段/NULL 一律留 null，不能 `?? 0` 把「没记录」说成「扫了 0 个」
+        const num = (v: unknown): number | null => (typeof v === "number" ? v : null);
+        const scanned = num(b.scanned);
+        const share = num(b.skippedByShare);
+        const period = num(b.skippedByPeriod);
+        const winSkip = num(b.skippedByWindow);
+        setBatchInfo({
+          kind: "latest",
+          status: String(b.status ?? ""),
+          selection: scanned !== null && share !== null && period !== null && winSkip !== null
+            ? { scanned, share, period, window: winSkip }
+            : null,
+        });
       } catch {
         if (!cancelled) { setBatchInfo({ kind: "unknown" }); }
       }
@@ -521,9 +546,19 @@ export function MoverRecallPanel() {
           >
             {batchInfo.kind === "never"
               ? t("stockAnalysis.moverRecall.batchesNever")
-              : batchInfo.kind === "latest"
-              ? t("stockAnalysis.moverRecall.batchesLatest", { status: batchInfo.status })
-              : t("stockAnalysis.moverRecall.batchesUnknown")}
+              : batchInfo.kind === "unknown"
+              ? t("stockAnalysis.moverRecall.batchesUnknown")
+              : (
+                <>
+                  {t("stockAnalysis.moverRecall.batchesLatest", { status: batchInfo.status })}
+                  {" · "}
+                  <span data-testid="mover-batches-selection">
+                    {batchInfo.selection === null
+                      ? t("stockAnalysis.moverRecall.batchesSelectionUnknown")
+                      : t("stockAnalysis.moverRecall.batchesSelection", batchInfo.selection)}
+                  </span>
+                </>
+              )}
           </div>
         )
         : null}
@@ -1044,6 +1079,17 @@ function missingFields(r: unknown): string[] {
 }
 
 /** `get_market_coverage` 的形状守卫：缺计数/closeDates 即视为「取不到」，不渲染成 0。 */
+/**
+ * 采集命令必须返回一份带计数的报告。`undefined`／缺字段（浏览器模式的 mock 对这些
+ * 行情命令只回 `undefined`）不得读成「0 条 ⇒ 都做完了」——那是把「命令不存在」演成成功。
+ */
+function assertReport(r: unknown, cmd: string, field: string): void {
+  const o = r as Record<string, unknown> | null;
+  if (o === null || typeof o !== "object" || typeof o[field] !== "number") {
+    throw new Error(`${cmd} returned no numeric "${field}" (market-data commands need the desktop app)`);
+  }
+}
+
 function isCoverage(c: unknown): c is MarketCoverage {
   if (c == null || typeof c !== "object") {
     return false;

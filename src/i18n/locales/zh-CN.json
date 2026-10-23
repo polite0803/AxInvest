@@ -15974,6 +15974,8 @@
       "batchesNever": "补分析批次：从未发起（0 批）—— 漏检行不会被补分析，反思也就拿不到样本",
       "batchesLatest": "补分析批次：最近一批 {{status}}（逐票结果见任务中心「漏检补分析」）",
       "batchesUnknown": "补分析批次：状态读取失败（不表示从未发起）",
+      "batchesSelection": "选样 {{scanned}} 组，跳过：占比超限 {{share}} / 档位不可解析 {{period}} / 伪窗口 {{window}}",
+      "batchesSelectionUnknown": "该批未记录选样计数",
       "reflowNone": "回灌候选：暂无（没有反思判定「本应入池」的事件）",
       "reflowPending": "回灌候选 {{count}} 只 · 距转正还需 {{need}} 个已结算样本（当前 shadow，不并入种子）",
       "reflowReady": "回灌候选 {{count}} 只 · 判据已满足（仍需人工确认后才并入种子）",
@@ -16070,8 +16072,8 @@
       "sweepCloseHint": "只采最近一个已收盘交易日（15:00 后）；盘中会被拒绝；历史日期用「补窗口历史」",
       "sweepDone": "收盘落库 {{written}} / 清单 {{total}}；无报价 {{missing}}",
       "backfillHistory": "补窗口历史",
-      "backfillHistoryHint": "每批最多 500 只 × 90 个交易日；全市场约 12 批，重复点击直到 requested=0",
-      "backfillDone": "历史补齐：{{codes}} 只 / {{rows}} 行 / 失败 {{failed}}",
+      "backfillHistoryHint": "每批最多 500 只 × 90 个交易日；重复点击直到新增 0 行；「无新增」= 可用日线不足 90 根（次新、长停牌）",
+      "backfillDone": "历史补齐：{{codes}} 只 / 新增 {{rows}} 行 / 无新增 {{noNew}} 只 / 失败 {{failed}}",
       "backfillNone": "本批历史已齐（无可补代码）"
     },
     "export": {

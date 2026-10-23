@@ -1763,6 +1763,8 @@ export interface HistoryBackfillReport {
   requested: number;
   codes: number;
   rows: number;
+  /** 取到了日线但没有新增行的票数（可用日线不足 targetDays，重复点不会再涨） */
+  noNew?: number;
   failed: number;
   targetDays: number;
   /** 首条失败原因；全失败时面板直接显示这句，成功为 null */
@@ -1891,6 +1893,14 @@ export interface MoverRecallBatchState {
   finishedAtMs: number | null;
   /** 触发来源：manual / schedule；null = 本列引入前的旧批次（未知） */
   trigger?: string | null;
+  /**
+   * E-4 选样留痕四数（后端 nullable：这几列引入前的旧批次为 null）。
+   * `null` 与 0 是两句话 —— 「这批没记录」≠「扫了 0 个事件组」。
+   */
+  scanned?: number | null;
+  skippedByShare?: number | null;
+  skippedByPeriod?: number | null;
+  skippedByWindow?: number | null;
 }
 
 // ── 决策时间线类型 ──

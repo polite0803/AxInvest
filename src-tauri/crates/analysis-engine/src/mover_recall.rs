@@ -834,7 +834,8 @@ pub fn events_for_tier(
 
 /// 该票在全局日历上是否存在**至少一个**可判窗口（用于 `judgeable_codes_by_tier`）。
 ///
-/// 与 [`events_for_tier`] 同一覆盖率判据：只看「该票自己的行数」会把稀疏历史算成可判。
+/// 与 [`events_for_tier`] 逐字同判据（两道门都要过）：该票历史行数 ≥ 窗口天数，
+/// 且窗口内真实行覆盖 ≥ `NUM/DEN`。只看「该票自己的行数」会把稀疏历史算成可判。
 pub fn has_judgeable_window(
     series: &[(String, f64)],
     calendar: &[String],

@@ -15778,6 +15778,8 @@
       "batchesNever": "보완 분석 배치: 시작된 적 없음(0건) — 누락 행은 보완되지 않아 회고 표본이 생기지 않습니다",
       "batchesLatest": "보완 분석 배치: 최근 {{status}} (종목별 결과는 작업 센터)",
       "batchesUnknown": "보완 분석 배치: 상태를 읽지 못했습니다(미실행을 뜻하지 않음)",
+      "batchesSelection": "선별 {{scanned}} 그룹 검사, 건너뜀: 비중 초과 {{share}} / 등급 해석 실패 {{period}} / 의사 윈도우 {{window}}",
+      "batchesSelectionUnknown": "이 배치의 선별 집계는 기록되지 않음",
       "reflowNone": "되돌림 후보: 없음(\"원래 풀에 있어야 했다\"고 판단한 회고 없음)",
       "reflowPending": "되돌림 후보 {{count}}건 · 승격까지 {{need}}건의 확정 표본 필요(현재 shadow, 시드 미반영)",
       "reflowReady": "되돌림 후보 {{count}}건 · 기준 충족(시드 반영은 수동 확인 후)",
@@ -15874,8 +15876,8 @@
       "sweepCloseHint": "최근 마감된 거래일(15:00 이후)만 수집합니다. 장중 요청은 거부됩니다. 과거 날짜는 윈도우 이력 보충을 사용",
       "sweepDone": "종가 저장 {{written}} / 목록 {{total}}; 시세 없음 {{missing}}",
       "backfillHistory": "윈도우 이력 보충",
-      "backfillHistoryHint": "배치당 최대 500코드 × 90거래일; 전체 시장 약 12배치 — requested=0까지 반복",
-      "backfillDone": "이력 보충: {{codes}} 코드 / {{rows}} 행 / 실패 {{failed}}",
+      "backfillHistoryHint": "배치당 최대 500종목 x 90거래일; 새 행 0이 될 때까지 다시 실행; \"변경 없음\"은 사용 가능 일봉이 90개 미만(신규 상장·장기 거래 정지)",
+      "backfillDone": "이력 보충: {{codes}} 코드 / 새 행 {{rows}} / 변경 없음 {{noNew}} / 실패 {{failed}}",
       "backfillNone": "이 배치의 이력은 이미 완료 (보충할 코드 없음)"
     },
     "export": {

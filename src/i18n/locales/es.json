@@ -15778,6 +15778,8 @@
       "batchesNever": "Lotes de análisis retrospectivo: nunca iniciados (0) — los fallos no se completan y las reflexiones no obtienen muestras",
       "batchesLatest": "Lotes de análisis retrospectivo: último {{status}} (resultados por valor en el centro de tareas)",
       "batchesUnknown": "Lotes de análisis retrospectivo: estado ilegible (esto NO significa que no se iniciara ninguno)",
+      "batchesSelection": "selección: {{scanned}} grupos revisados; omitidos: {{share}} por cuota sin explicar, {{period}} nivel no analizable, {{window}} pseudo ventana",
+      "batchesSelectionUnknown": "recuentos de selección no registrados para este lote",
       "reflowNone": "Candidatos de retorno: ninguno (ninguna reflexión indicó «debía estar en el pool»)",
       "reflowPending": "Candidatos de retorno {{count}} · faltan {{need}} muestras liquidadas para promover (shadow, sin fusionar en la semilla)",
       "reflowReady": "Candidatos de retorno {{count}} · criterios cumplidos (la fusión requiere confirmación manual)",
@@ -15874,8 +15876,8 @@
       "sweepCloseHint": "Solo se recoge el último día de bolsa cerrado (después de las 15:00); las solicitudes intradía se rechazan; para fechas pasadas use el historial de ventana",
       "sweepDone": "Filas de cierre {{written}} / universo {{total}}; sin cotización {{missing}}",
       "backfillHistory": "Completar historial de ventana",
-      "backfillHistoryHint": "Hasta 500 códigos × 90 días de bolsa por lote; mercado completo ≈12 lotes — repetir hasta requested=0",
-      "backfillDone": "Historial completado: {{codes}} códigos / {{rows}} filas / {{failed}} fallos",
+      "backfillHistoryHint": "Hasta 500 códigos x 90 sesiones por lote; repite hasta 0 filas nuevas; \"sin cambios\" = menos de 90 sesiones disponibles (salida reciente o suspensión larga)",
+      "backfillDone": "Historial completado: {{codes}} códigos / {{rows}} filas nuevas / {{noNew}} sin cambios / {{failed}} fallos",
       "backfillNone": "El historial de este lote ya está completo (sin códigos pendientes)"
     },
     "export": {

@@ -15778,6 +15778,8 @@
       "batchesNever": "補完分析バッチ：未実行（0 件）— 漏検行は補完されず、振り返りのサンプルが作られません",
       "batchesLatest": "補完分析バッチ：直近 {{status}}（銘柄別の結果はタスクセンター）",
       "batchesUnknown": "補完分析バッチ：状態を取得できません（未実行という意味ではありません）",
+      "batchesSelection": "選定 {{scanned}} 組を走査、スキップ：比率超限 {{share}} / 段位解析不可 {{period}} / 偽ウィンドウ {{window}}",
+      "batchesSelectionUnknown": "このバッチの選定カウントは未記録",
       "reflowNone": "還流候補：なし（「本来なら池に入れるべき」と判定した振り返りはありません）",
       "reflowPending": "還流候補 {{count}} 件 · 昇格まであと {{need}} 件の確定サンプル（現在 shadow、種子には未反映）",
       "reflowReady": "還流候補 {{count}} 件 · 基準を満たしました（種子への反映は手動確認後）",
@@ -15874,8 +15876,8 @@
       "sweepCloseHint": "直近の取引終了済み営業日（15:00 以降）のみ取得します。場中は拒否されます。過去日はウィンドウ履歴の補完を使用",
       "sweepDone": "終値の保存 {{written}} / リスト {{total}}、気配なし {{missing}}",
       "backfillHistory": "ウィンドウ履歴を補完",
-      "backfillHistoryHint": "1バッチ最大500コード×90取引日。全市場は約12バッチ — requested=0 まで繰り返す",
-      "backfillDone": "履歴補完：{{codes}} コード / {{rows}} 行 / 失敗 {{failed}}",
+      "backfillHistoryHint": "1 回あたり最大 500 銘柄 x 90 営業日。新規 0 行になるまで再実行。「追加なし」は利用可能な日線が 90 本未満（新規上場・長期売買停止）",
+      "backfillDone": "履歴補完：{{codes}} コード / 新規 {{rows}} 行 / 追加なし {{noNew}} / 失敗 {{failed}}",
       "backfillNone": "このバッチの履歴は既に完了（補完対象なし）"
     },
     "export": {

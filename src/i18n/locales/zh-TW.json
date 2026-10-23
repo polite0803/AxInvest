@@ -15897,6 +15897,8 @@
       "batchesNever": "補分析批次：從未發起（0 批）—— 漏檢列不會被補分析，反思也就拿不到樣本",
       "batchesLatest": "補分析批次：最近一批 {{status}}（逐票結果見任務中心「漏檢補分析」）",
       "batchesUnknown": "補分析批次：狀態讀取失敗（不表示從未發起）",
+      "batchesSelection": "選樣 {{scanned}} 組，跳過：佔比超限 {{share}} / 檔位不可解析 {{period}} / 偽窗口 {{window}}",
+      "batchesSelectionUnknown": "該批未記錄選樣計數",
       "reflowNone": "回灌候選：暫無（沒有反思判定「本應入池」的事件）",
       "reflowPending": "回灌候選 {{count}} 隻 · 距轉正還需 {{need}} 個已結算樣本（目前 shadow，不併入種子）",
       "reflowReady": "回灌候選 {{count}} 隻 · 判據已滿足（仍需人工確認後才併入種子）",
@@ -15993,8 +15995,8 @@
       "sweepCloseHint": "只採最近一個已收盤交易日（15:00 後）；盤中會被拒絕；歷史日期用「補視窗歷史」",
       "sweepDone": "收盤落庫 {{written}} / 清單 {{total}}；無報價 {{missing}}",
       "backfillHistory": "補視窗歷史",
-      "backfillHistoryHint": "每批最多 500 檔 × 90 個交易日；全市場約 12 批，重複點擊直到 requested=0",
-      "backfillDone": "歷史補齊：{{codes}} 檔 / {{rows}} 列 / 失敗 {{failed}}",
+      "backfillHistoryHint": "每批最多 500 檔 × 90 個交易日；重複點擊直到新增 0 列；「無新增」= 可用日線不足 90 根（次新、長停牌）",
+      "backfillDone": "歷史補齊：{{codes}} 檔 / 新增 {{rows}} 列 / 無新增 {{noNew}} 檔 / 失敗 {{failed}}",
       "backfillNone": "本批歷史已齊（無可補代碼）"
     },
     "export": {

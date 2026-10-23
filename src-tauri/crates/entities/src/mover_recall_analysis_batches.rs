@@ -38,6 +38,15 @@ pub struct Model {
     /// 触发来源：`manual` / `schedule`。
     /// NULL = 本列引入前的旧行（未知），前端显示「未知」而不是猜成手动。
     pub trigger: Option<String>,
+    /// 阶段 E-4：本批**选样阶段扫了多少个事件组**（`SelectionStats.scanned`）。
+    /// NULL = 选样还没跑（旧行 / 刚建批）⇒ 与 0 是两句不同的话。
+    pub scanned: Option<i32>,
+    /// 因所属轮次 `unexplained` 占比超阈值被跳过的组数
+    pub skipped_by_share: Option<i32>,
+    /// 因档位无法解析被跳过的组数
+    pub skipped_by_period: Option<i32>,
+    /// 因窗口起点早于轮次 `date_from`（伪窗口）被跳过的组数
+    pub skipped_by_window: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

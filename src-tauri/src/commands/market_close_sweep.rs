@@ -125,6 +125,8 @@ pub struct HistoryBackfillReport {
     pub requested: usize,
     pub codes: u32,
     pub rows: u32,
+    /// 取到了日线但没有新增行的票数（可用日线不足 `target_days`，重复点也不会再涨）
+    pub no_new: u32,
     pub failed: u32,
     pub target_days: u32,
     /// 首条失败原因（全失败时给面板成句；成功时为 None）
@@ -157,6 +159,7 @@ pub async fn backfill_market_close_history(
             requested: 0,
             codes: 0,
             rows: 0,
+            no_new: 0,
             failed: 0,
             target_days: TARGET_DAYS,
             error: None,
@@ -175,6 +178,7 @@ pub async fn backfill_market_close_history(
         requested,
         codes: stats.codes,
         rows: stats.rows,
+        no_new: stats.no_new,
         failed: stats.failed,
         target_days: TARGET_DAYS,
         error: stats.first_error,

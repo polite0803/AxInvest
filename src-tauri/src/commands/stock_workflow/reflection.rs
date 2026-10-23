@@ -640,7 +640,7 @@ pub async fn run_reflection_workflow(
     //   不会出现行上标 A 档、prompt 里写 B 档。
     // 本次复盘档的期望持有天数：该档快照自带，行情不可用时退回 Period 默认天数表。
     //   ⚠ comparator 的 `horizon_mismatch` 用 (original_time_horizon, original_holding_days)
-    //   与 `holding_days` 三者对比（`reflection-comparator.rhai:192`）⇒ 复盘档既已收窄成
+    //   与 `holding_days` 三者对比（`reflection-comparator.rhai:194`）⇒ 复盘档既已收窄成
     //   单一档位，这一对就必须**同档**，否则复盘 long 时拿主档 5 天去比 90 天窗口。
     let review_days = primary_snapshot
         .and_then(|s| s.expected_holding_days)

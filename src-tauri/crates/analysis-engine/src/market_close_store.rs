@@ -471,6 +471,19 @@ pub async fn refresh_universe_pages(
     })
 }
 
+/// 最近一次行情源申报的全市场总数（0 = 还没取到）。
+///
+/// 命令层不得直连 `axagent_entities`（分层门 `commands-no-direct-db`），读侧统一走这里。
+pub async fn latest_reported_total(db: &sea_orm::DatabaseConnection) -> Result<i64, String> {
+    use axagent_entities::market_universe_stats;
+    market_universe_stats::Entity::find()
+        .order_by_desc(market_universe_stats::Column::ObservedAt)
+        .one(db)
+        .await
+        .map(|r| r.map_or(0, |m| m.reported_total))
+        .map_err(|e| format!("读覆盖率读数失败: {e}"))
+}
+
 /// 段扫后落一行覆盖率读数：分母沿用最近一次 clist 自报的全市场总数。
 ///
 /// 段扫不申报 `reported_total`（它只按段问行情），所以不能自己编一个分母；

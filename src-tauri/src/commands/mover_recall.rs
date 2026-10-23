@@ -224,18 +224,8 @@ pub async fn analyze_mover_recall_inner(
     }
     let (universe_size, universe_confirmed) = mover_recall::load_universe_counts(db).await?;
     // 全 A 股分母：行情源申报总数（`market_universe_stats`）。取不到 ⇒ 0（面板显示未取到）。
-    let reported_total = {
-        use axagent_entities::market_universe_stats;
-        use sea_orm::{EntityTrait, QueryOrder};
-        market_universe_stats::Entity::find()
-            .order_by_desc(market_universe_stats::Column::ObservedAt)
-            .one(db)
-            .await
-            .ok()
-            .flatten()
-            .map(|r| r.reported_total)
-            .unwrap_or(0)
-    };
+    let reported_total =
+        axagent_analysis_engine::market_close_store::latest_reported_total(db).await.unwrap_or(0);
 
     let facts = SharedFacts {
         data_since: from.clone(),

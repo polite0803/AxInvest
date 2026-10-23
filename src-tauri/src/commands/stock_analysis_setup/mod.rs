@@ -3468,6 +3468,13 @@ mod version_gate_tests {
         let mut violations: Vec<String> = Vec::new();
         for n in &nodes {
             let Some(id) = n.get("id").and_then(|v| v.as_str()) else { continue };
+            // 「仅图示」节点（`enabled=false` + 刻意无边，如 `sim-verify`）不参与调度 ⇒ 结构可达性
+            // 判据对它不适用：它的 `input_mapping` 是「需要哪些输入」的留档，实际取值由
+            // `stock_workflow/core.rs` 的决策后挂钩完成（enabled=false 与无边成对的理由见
+            // 种子处 sim-verify 段）。`enabled` 缺席按 true 处理 —— 读不出开关不许静默免检。
+            if !n.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true) {
+                continue;
+            }
             let Some(mapping) =
                 n.get("config").and_then(|c| c.get("input_mapping")).and_then(|m| m.as_object())
             else {

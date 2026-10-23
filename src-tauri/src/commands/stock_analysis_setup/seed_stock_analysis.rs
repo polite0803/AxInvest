@@ -1589,7 +1589,15 @@ type AlgoToolRow = (
 ///      否则即便补上 `exists` 断言分支仍恒 false，属"改了个永不生效的判据"式假修复）。
 ///   ⚠ **会改变运行期行为**（risk 现在真的会等 value-verify；v-validate 从恒 Skipped 变为可 pass），
 ///     且图内容变了 ⇒ **必须换代**。
-pub const TEMPLATE_VERSION: i32 = 176; // v176: A 类补边（value-verify→risk 六条）+ debate 排除 value 档键 + v-validate 断言路径订正
+///
+/// **v176 → v177（2026-10-23）**：`data-quality` 的等待边由「只代表档」扩到 value-investor 的
+///   **全部实例档**。触发点是新门 `input_mapping_sources_are_ancestors`（同一批 CI 首跑）抓到
+///   `data-quality ← value-investor--long.{result.verdict,result.report,__untrusted,tool_calls_made}`
+///   四路 —— v148 的逐档并列键 `val_*__{档}` 每档都要读，而 v146 只补了 mid 一条边
+///   ⇒ long 档那四路恒解析为 Null（面板「分析师数据缺口详情」的 long 行永远空白）。
+///   关键路径不变：`research-mgr` 本就逐档等 `value-verify--{档}`，trader / portfolio-mgr 在其后。
+///   ⚠ 图内容（边集）变更 ⇒ **必须换代**，否则存量库不重播种、四路仍是静默失效。
+pub const TEMPLATE_VERSION: i32 = 177; // v177: data-quality 补齐全档 value-verify 等待边（逐档并列键 long 档四路恒 Null）
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -5726,14 +5734,15 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         //   故只有本行缺席。
         //   环安全：value-verify 的后代只有 `research-mgr → trader → portfolio-mgr`，不在
         //   data-quality 的祖先集；每次播种由 `mod.rs` 的 Kahn 环检测门复核。
-        //   代表实例口径与上方 input_mapping 同源（mid 优先，无 mid 取逐档序首个）。
+        // v177(2026-10-23)：补边由「只代表档」扩到 value-investor 的**全部实例档**。
+        //   v148 给 data-quality 加了逐档并列键 `val_{verdict,report,untrusted,tool_calls}__{档}`，
+        //   每档都引用 `value-investor--{档}.result.*` ⇒ 只补 mid 一条边时，long 档那 4 路
+        //   映射恒解析为 Null（面板「分析师数据缺口详情」的 long 行永远空白）。
+        //   关键路径不受影响：`research-mgr` 本就等全部 value-verify 档
+        //   （`e-{vv_id}-research-mgr` 逐档都补），trader / portfolio-mgr 在两者之后
+        //   ⇒ data-quality 多等一档不推迟任何下游。
         {
-            use axagent_harness::holding_period::Period as P;
-            if let Some(rep) = tiered
-                .iter()
-                .find(|(b, p, ..)| *b == VALUE_INVESTOR_ID && matches!(p, P::Mid))
-                .or_else(|| tiered.iter().find(|(b, ..)| *b == VALUE_INVESTOR_ID))
-            {
+            for rep in tiered.iter().filter(|(b, ..)| *b == VALUE_INVESTOR_ID) {
                 let vv_id = format!("value-verify--{}", rep.1.as_str());
                 edges.push(edge(&format!("e-{vv_id}-data-quality"), &vv_id, dq_id));
             }

@@ -198,6 +198,11 @@ pub struct MoverBatchState {
     pub finished_at_ms: Option<i64>,
     /// 触发来源：`manual` / `schedule`；`None` = 旧批次（未知）。
     pub trigger: Option<String>,
+    /// 阶段 E-4：选样留痕四数。`None` = 选样还没跑 ⇒ 与「扫了 0 个」是两句不同的话。
+    pub scanned: Option<i32>,
+    pub skipped_by_share: Option<i32>,
+    pub skipped_by_period: Option<i32>,
+    pub skipped_by_window: Option<i32>,
     /// 请求快照仅落库 request_json，不向前端输出、从库还原为 None
     #[serde(skip)]
     pub request: Option<RunMoverRecallAnalysisRequest>,
@@ -223,6 +228,10 @@ impl MoverBatchState {
             updated_at_ms: now,
             finished_at_ms: None,
             trigger: Some(trigger.to_string()),
+            scanned: None,
+            skipped_by_share: None,
+            skipped_by_period: None,
+            skipped_by_window: None,
             request: Some(request),
         }
     }
@@ -242,6 +251,10 @@ fn record_from_state(s: &MoverBatchState) -> BatchRunRecord {
         updated_at_ms: s.updated_at_ms,
         finished_at_ms: s.finished_at_ms,
         trigger: s.trigger.clone(),
+        scanned: s.scanned,
+        skipped_by_share: s.skipped_by_share,
+        skipped_by_period: s.skipped_by_period,
+        skipped_by_window: s.skipped_by_window,
     }
 }
 
@@ -323,6 +336,10 @@ fn state_from_model(m: BatchRunModel, items: Vec<EventItem>) -> MoverBatchState 
         updated_at_ms: m.updated_at_ms,
         finished_at_ms: m.finished_at_ms,
         trigger: m.trigger,
+        scanned: m.scanned,
+        skipped_by_share: m.skipped_by_share,
+        skipped_by_period: m.skipped_by_period,
+        skipped_by_window: m.skipped_by_window,
         request: None,
     }
 }
@@ -782,9 +799,10 @@ async fn select_events(
     let shares = mover_recall_events::load_run_unexplained_shares(db)
         .await
         .map_err(|e| format!("读核查轮次 unexplained 占比失败: {e}"))?;
-    let date_froms = mover_recall_events::load_run_date_froms(db)
-        .await
-        .map_err(|e| format!("读核查轮次 date_from 失败: {e}"))?;
+    let date_froms = mover_recall_events::load_run_date_froms(db).await.map_err(|e| {
+        ErrorResponse::err_with_detail(ec::QUERY_FAILED, format!("读核查轮次 date_from 失败: {e}"))
+            .to_string()
+    })?;
     let rows = mover_recall_events::list_candidate_event_rows(
         db,
         request.run_id.as_deref(),

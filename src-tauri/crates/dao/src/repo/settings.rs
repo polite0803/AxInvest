@@ -143,23 +143,6 @@ pub async fn save_settings(db: &DatabaseConnection, settings: &AppSettings) -> R
             dm_id
         );
 
-        // 保存前：先删除所有旧记录（彻底清理，避免残留）
-        let existing_rows = settings::Entity::find().all(db).await?;
-        tracing::info!("[save_settings] 保存前数据库中有 {} 条旧记录", existing_rows.len());
-        for row in &existing_rows {
-            tracing::debug!("[save_settings] 删除旧记录 key={} value={}", row.key, row.value);
-            settings::Entity::delete_by_id(row.key.clone()).exec(db).await?;
-        }
-
-        // 也清理所有可能的 snake_case 旧键（防极端情况）
-        let all_camel_keys: Vec<String> = map.keys().cloned().collect();
-        for camel_key in &all_camel_keys {
-            let snake_key = camel_to_snake(camel_key);
-            if snake_key != *camel_key {
-                settings::Entity::delete_by_id(snake_key).exec(db).await?;
-            }
-        }
-
         // 收集需要保存的键值对（在事务外完成，避免所有权问题）
         let entries_to_save: Vec<(String, String)> = map
             .iter()
@@ -193,15 +176,39 @@ pub async fn save_settings(db: &DatabaseConnection, settings: &AppSettings) -> R
 
         tracing::info!("[save_settings] 准备保存 {} 个键值对", entries_to_save.len());
 
-        // 在事务中保存所有非 null、非空字符串的值
-        db.transaction::<_, _, sea_orm::DbErr>(|txn| {
+        // snake_case 旧键清理清单（与删除同事务执行，防极端情况）
+        let snake_cleanup_keys: Vec<String> = map
+            .keys()
+            .filter_map(|camel_key| {
+                let snake_key = camel_to_snake(camel_key);
+                (snake_key != *camel_key).then_some(snake_key)
+            })
+            .collect();
+
+        // 删除旧记录与写入必须在**同一个事务**内完成，且 insert 带 on_conflict upsert：
+        // 此前删除在事务外、insert 为纯插入，与另一路 save_settings 并发交错时会对
+        // 同一主键重复 insert，报 settings_pkey 唯一约束冲突（6 处调用方可并发进入）。
+        db.transaction::<_, _, sea_orm::DbErr>(move |txn| {
             Box::pin(async move {
+                // 清掉不在新集合中的旧键（全删；含 snake_case 旧格式键）
+                let existing_rows = settings::Entity::find().all(txn).await?;
+                for row in existing_rows {
+                    settings::Entity::delete_by_id(row.key).exec(txn).await?;
+                }
+                for snake_key in snake_cleanup_keys {
+                    settings::Entity::delete_by_id(snake_key).exec(txn).await?;
+                }
                 for (key, val_str) in &entries_to_save {
                     tracing::debug!("[save_settings] 保存键值对 key={} value={}", key, val_str);
                     settings::Entity::insert(settings::ActiveModel {
                         key: Set(key.clone()),
                         value: Set(val_str.clone()),
                     })
+                    .on_conflict(
+                        OnConflict::column(settings::Column::Key)
+                            .update_column(settings::Column::Value)
+                            .to_owned(),
+                    )
                     .exec(txn)
                     .await?;
                 }

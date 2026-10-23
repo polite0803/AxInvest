@@ -306,6 +306,11 @@ jobs:
           # 本机 PG 取 `market_universe_stats` 与清单构成，CI 无库，正式跑只会得到与覆盖率无关的
           # 「取数失败」红。合成读数负控不依赖库，故进 CI；与 scripts/ci-check.mjs 逐字同源。
           node scripts/check-universe-coverage.mjs --selftest
+          # 漏检伪窗口漂移门（阶段 G-5，2026-10-23）：同样只跑 selftest —— P1/P2/P3 要数本机 PG 的
+          # mover_recall_events，CI 无库。写侧判据在 events_for_tier（全局日历反推 + 4/5 覆盖），这道门
+          # 管「库里现在还不干净」：换库、旧轮次重算、实现回退都会让伪窗口行重新长出来。
+          # 与 scripts/ci-check.mjs 对应 step 逐字同源。
+          node scripts/check-mover-pseudo-window.mjs --selftest
           # 反思词表与落地层级三处同域门（2026-10-19，PLAN-mover-coverage 阶段 3 / 决-3）：
           # 词表(Rust)⇄面板映射⇄11 份 locale 三份手抄，漂移不报错只让数字变难看；
           # 现网实证 23/32 条标注单独是 other、层级轴 1/80 有值而面板缺省写死 "L1"。

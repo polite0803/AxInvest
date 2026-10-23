@@ -412,6 +412,10 @@ if (canRunRust && !quick) {
   // 实库取 `market_universe_stats` 与清单构成，CI 没有本机 PG ⇒ 把正式跑挂进 CI 只会得到
   // 「取数失败」这种与覆盖率无关的红。合成读数的负控不依赖库，所以进 CI。
   step("清单覆盖率门自检（合成读数四条负控）", "node scripts/check-universe-coverage.mjs --selftest");
+  // 漏检伪窗口漂移门（阶段 G-5，2026-10-23）：同样**只跑 `--selftest`** —— P1/P2/P3 要数本机 PG 的
+  // `mover_recall_events`，CI 无库。写侧判据住在 `events_for_tier`（全局日历反推窗口起点 + 4/5 覆盖），
+  // 这道门管的是「库里现在还不干净」：换库、旧轮次重算、实现回退都会让那种 22 条形态重新长出来。
+  step("漏检伪窗口门自检（三条判据各管一种缺席，含同场负控）", "node scripts/check-mover-pseudo-window.mjs --selftest");
   // 反思词表与落地层级三处同域门（2026-10-19，PLAN-mover-coverage 阶段 3 / 决-3）：
   // 建门实证——32 条有标注反思里 23 条单独就是 other（兜底成主值）；模板早就要求
   // implementation_tier，但 JSON 路径实测 1/80 有值，而面板把缺省写死 "L1" ⇒ 79 条「没判」

@@ -1574,6 +1574,10 @@ export interface RecoLoopCell {
   winRate: number | null;
   oldWeight: number;
   newWeight: number;
+  /** 外乘线之前的基准权重（下一轮 EWMA 的输入；防复利衰减） */
+  baseWeight?: number;
+  /** 本轮外乘惩罚（mover × 熔断）；1.0 = 本格没有外乘线 */
+  outerPenalty?: number;
   /** mover 漏检线乘数；缺席 = 该格证据不足，本线未参与合成 */
   moverPenalty?: number;
   /** 数据质量熔断线乘数；缺席 = 本格可判定样本不足，本线未参与合成 */
@@ -1673,6 +1677,8 @@ export interface MoverRecallView {
   collectedDays: number;
   universeSize: number;
   universeConfirmed: number;
+  /** 行情源申报的全市场总数；0/缺省 = 未取到或旧轮次（不拿枚举数冒充全 A 股） */
+  reportedTotal?: number;
   rules: MoverTierRule[];
   rates: MoverRecallRates;
   layers: MoverLayerRow[];
@@ -1707,6 +1713,8 @@ export interface MoverRecallRunMeta {
   collectedDays: number;
   universeSize: number;
   universeConfirmed: number;
+  /** 行情源申报的全市场总数；0/缺省 = 未取到或旧轮次 */
+  reportedTotal?: number;
   eventsTotal: number;
   missCount: number;
   /** 有收盘行的票数；null = 旧轮次未记录 */
@@ -1716,6 +1724,49 @@ export interface MoverRecallRunMeta {
   status: string;
   triggerSource: string;
   createdAtMs: number;
+}
+
+/** `get_market_coverage`：全 A 股样本的四个计数域（申报总数 / 已枚举 / 确认 / 最新收盘）。 */
+export interface MarketCoverage {
+  universeSize: number;
+  confirmedByClist: number;
+  reportedTotal: number;
+  latestCloseCodes: number;
+  closeDates: string[];
+  rowsPerDate: number[];
+}
+
+/** `run_universe_code_scan`（阶段 0.1：全量段扫）。 */
+export interface UniverseScanStats {
+  requests: number;
+  codesTried: number;
+  quotes: number;
+  registered: number;
+  failedBatches: number;
+}
+
+/** `sweep_market_close`（阶段 0.2：全市场收盘）。 */
+export interface CloseSweepReport {
+  tradeDate: string;
+  universeSize: number;
+  batches: number;
+  rowsReturned: number;
+  written: number;
+  skippedNoData: number;
+  skippedSuspended: number;
+  failedBatches: number;
+  missingQuotes: number;
+}
+
+/** `backfill_market_close_history`（阶段 0.3：窗口历史补齐）。 */
+export interface HistoryBackfillReport {
+  requested: number;
+  codes: number;
+  rows: number;
+  failed: number;
+  targetDays: number;
+  /** 首条失败原因；全失败时面板直接显示这句，成功为 null */
+  error?: string | null;
 }
 
 /**

@@ -238,9 +238,11 @@ export function ConditionalOrderPanel() {
                 size="small"
                 options={[
                   { value: "notify", label: t("stockAnalysis.conditional.actionNotify") },
-                  { value: "sell", label: t("stockAnalysis.conditional.actionSell") },
-                  { value: "buy", label: t("stockAnalysis.conditional.actionBuy") },
-                  { value: "reduce", label: t("stockAnalysis.conditional.actionReduce") },
+                  // 档位标签只有顶层一套（`stockAnalysis.action*`）：条件单此前自带
+                  // actionSell/actionBuy/actionReduce 三个副本，同一动作在一屏里出现「减仓 / 减持」两种说法
+                  { value: "sell", label: t("stockAnalysis.actionSell") },
+                  { value: "buy", label: t("stockAnalysis.actionBuy") },
+                  { value: "reduce", label: t("stockAnalysis.actionReduce") },
                 ]}
               />
             </Form.Item>

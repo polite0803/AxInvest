@@ -14,7 +14,12 @@ pub struct Model {
     pub period: String,
     /// 旧权重（1.0 为基准）
     pub old_weight: f64,
-    /// 新权重
+    /// 外乘线（mover/熔断）之前的基准权重；NULL = 该列引入前的旧行（按 new_weight 兼容）。
+    /// 下一轮 EWMA 以它为输入 ⇒ 同一批证据重复重算不会复利衰减。
+    pub base_weight: Option<f64>,
+    /// 本轮外乘惩罚（mover × 熔断）；NULL = 旧行/无外乘线。
+    pub outer_penalty: Option<f64>,
+    /// 新权重（生效值 = base_weight × outer_penalty）
     pub new_weight: f64,
     /// 变化百分比
     pub delta_pct: f64,

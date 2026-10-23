@@ -15183,11 +15183,11 @@
       "confidenceNoteLabel": "Nota de confianza",
       "sourceHint": "Generado por el nodo explicador a partir del veredicto final del filtro de riesgo. Solo como referencia."
     },
-    "actionBuy": "Buy",
-    "actionSell": "Sell",
-    "actionIncrease": "Increase",
-    "actionHold": "Hold",
-    "actionReduce": "Reduce",
+    "actionBuy": "Comprar",
+    "actionSell": "Vender",
+    "actionIncrease": "Aumentar",
+    "actionHold": "Mantener",
+    "actionReduce": "Reducir",
     "actionWait": "Esperar",
     "recentAnalysis": "Recent Analysis",
     "targetPriceNote": "Target ¥{{price}}",
@@ -15209,6 +15209,9 @@
     "finalStrength": "Fuerza final",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "Análisis rápido",
+    "provenanceReplay": "Reproducción",
+    "provenanceReplayWithDate": "Reproducción · {{date}}",
+    "provenanceUnknown": "Origen desconocido",
     "interrupted": {
       "title": "Este análisis no produjo ninguna conclusión",
       "hint": "El registro se interrumpió antes de terminar el análisis (la aplicación se cerró o el proceso finalizó de forma anormal), por lo que no se generó ninguna decisión. Use el botón de abajo para volver a ejecutarlo."
@@ -15219,6 +15222,19 @@
       "failed": "Fallido",
       "timeout": "Tiempo agotado",
       "cancelled": "Cancelado"
+    },
+    "historyFilter": {
+      "keywordPlaceholder": "Buscar nombre o código",
+      "statusLabel": "Estado",
+      "actionLabel": "Decisión",
+      "all": "Todos",
+      "loadedTotal": "{{total}} registros",
+      "loadedPartial": "{{count}} registros cargados…",
+      "capped": "{{count}} registros cargados (límite por ronda); puede haber registros más antiguos",
+      "loadMore": "Cargar más",
+      "loadFailed": "Error al cargar los registros",
+      "showingTotal": "Mostrando {{shown}} de {{total}} registros",
+      "noMatch": "Ningún registro coincide con los filtros ({{total}} cargados)"
     },
     "templateVersion": {
       "matched": "Versión del grafo: BD v{{db}} igual al código v{{code}}",
@@ -15391,9 +15407,6 @@
       "confirmDelete": "¿Eliminar esta orden condicional?",
       "thresholdPct": "Umbral (%)",
       "actionNotify": "Solo notificar",
-      "actionSell": "Vender",
-      "actionBuy": "Comprar",
-      "actionReduce": "Reducir",
       "actionValueQty": "Cantidad",
       "actionValueRatio": "Proporción",
       "coolDown": "Espera (min)",
@@ -15850,7 +15863,20 @@
       "chain_reco": "Recomendación inteligente",
       "chain_serenity": "Selección de tendencia",
       "chain_unlabeled": "Sin cadena (ejecución antigua)",
-      "chainUnlabeledNote": "Esta ejecución es anterior a la separación por cadenas: recomendación y selección se cuentan juntas, no es la cuenta de una sola cadena."
+      "chainUnlabeledNote": "Esta ejecución es anterior a la separación por cadenas: recomendación y selección se cuentan juntas, no es la cuenta de una sola cadena.",
+      "sampleTitle": "Muestra completa de A-shares",
+      "sampleCounts": "Mercado {{total}} · enumerados {{enumerated}} · confirmados {{confirmed}} · último cierre {{close}} ({{date}})",
+      "sampleCoverageUnknown": "Cobertura no disponible: total del mercado/último cierre desconocidos (no 0)",
+      "fullScan": "Escaneo completo de códigos",
+      "fullScanHint": "Escanear todos los segmentos de códigos A-share y registrar el universo (≈800+ solicitudes); evitar ventanas live",
+      "fullScanDone": "Escaneo hecho: {{registered}} registrados / {{codes}} códigos probados",
+      "sweepClose": "Actualizar último cierre",
+      "sweepCloseHint": "Solo se recoge el último día de bolsa cerrado (después de las 15:00); las solicitudes intradía se rechazan; para fechas pasadas use el historial de ventana",
+      "sweepDone": "Filas de cierre {{written}} / universo {{total}}; sin cotización {{missing}}",
+      "backfillHistory": "Completar historial de ventana",
+      "backfillHistoryHint": "Hasta 500 códigos × 90 días de bolsa por lote; mercado completo ≈12 lotes — repetir hasta requested=0",
+      "backfillDone": "Historial completado: {{codes}} códigos / {{rows}} filas / {{failed}} fallos",
+      "backfillNone": "El historial de este lote ya está completo (sin códigos pendientes)"
     },
     "export": {
       "analystReports": "Analyst Reports",

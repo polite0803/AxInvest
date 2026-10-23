@@ -268,6 +268,11 @@ if (canRunFrontend) {
   // 本仓已删过 `confidenceRiskAdjusted` 与读侧的 `conf_lower_bound` 各一次）。
   step("HorizonDecision 键集自检（四条负控 + 正控）", "node scripts/check-horizon-decision-keys.mjs --selftest");
   step("HorizonDecision 键集一致（产端↔TS↔装配追加）", "node scripts/check-horizon-decision-keys.mjs");
+  // 决策结论档单一权威（2026-10-22 裁定：全局只能一处定义、分档不得重叠模糊）。
+  //   权威 = harness::decision_action::ActionKind；被对账四面 = 前端 StockAction/别名表/Tag 键、
+  //   LLM 输出 schema 的 enum、Rhai 与提示词的产出、11 份 locale 的标签。
+  step("决策结论档对账自检（二十一条负控）", "node scripts/check-decision-action-single-source.mjs --selftest");
+  step("决策结论档八面对账一致", "node scripts/check-decision-action-single-source.mjs");
   // B2-1 前置：分析师 id 形态门（base 域唯一 / 带档后缀只能由 helper 产出 / 裸匹配只许降）。
   //   基线 27 是**未修的树**上的首读快照，清零后该规则自动变硬拦。见 scripts/check-analyst-id-shape.mjs 头。
   step("分析师 id 形态自检（六条负控 + 权威集推导）", "node scripts/check-analyst-id-shape.mjs --selftest");
@@ -509,6 +514,16 @@ if (canRunRust && !quick) {
   step(
     "cargo test 单元测试 (quant + analysis-engine + harness + tools)",
     "cargo test -p axagent-quant -p axagent-analysis-engine -p axagent-harness -p axagent-tools --lib 2>&1 || cargo test -p axagent-quant -p axagent-analysis-engine --lib",
+    { cwd: srcTauri, timeout: 10 * 60 * 1000, env: { ...process.env } },
+  );
+
+  // 生成物漂移门（与 ci.yml 的对应 step 逐字同源）：`src/types/generated/ipc.ts` /
+  // `events.ts` 由 schema-gen 生成，但 `run_check` 此前从不非零退出 —— 只打印，等于没有门。
+  // 现在注册表 18 个 DTO 缺一个、事件名联合不对齐、产物与重新生成结果**字节级**不一致，
+  // 三者任一都红。
+  step(
+    "生成 IPC 类型与权威一致 (schema-gen check)",
+    "cargo run -q -p schema-gen -- check",
     { cwd: srcTauri, timeout: 10 * 60 * 1000, env: { ...process.env } },
   );
 

@@ -198,7 +198,9 @@ export function aggregateVotes(
 //      同一个「买入」在投票面板显示绿色、在决策卡显示红色；
 //   ② 值域已漂移：缺 `WAIT`（观望）/ `UNAVAILABLE`（数据缺失）档，
 //      且 `HOLD` 用 `gold` 而权威用 `blue`。
-// 返回值仍是 antd 预设色名（下方 `token[\`color${...}\`]` 依赖该形态）。
+// 返回值是权威强度表的 hex（2026-10-22）。本文件旧写法曾把它当 antd 预设色名去拼
+// `token[`color${Name}`]` ⇒ 换成 hex 后每一档都会查不到键、静默退成 `colorPrimary`（蓝），
+// 又回到「结论不同、颜色相同」。现在两处消费点都直接吃 hex（antd Tag/Statistic 接受任意 CSS 色）。
 function actionColor(action: string): string {
   return getActionColor(action);
 }
@@ -313,10 +315,7 @@ export const MultiLlmVotePanel = React.memo(function MultiLlmVotePanel({
           styles={{
             content: {
               color: result.finalAction
-                ? token[
-                  `color${actionColor(result.finalAction).replace(/^./, (c) => c.toUpperCase())}` as "colorPrimary"
-                ]
-                  ?? token.colorPrimary
+                ? actionColor(result.finalAction)
                 : token.colorTextSecondary,
               fontSize: 20,
             },

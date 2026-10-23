@@ -57,7 +57,12 @@ export function ReplayWorkbench() {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader titleKey="replayWorkbench.title" backTo="/stock-analysis" backLabelKey="nav.chat" />
+      <PageHeader
+        titleKey="replayWorkbench.title"
+        backTo="/stock-analysis"
+        backLabelKey="nav.chat"
+        showTimeAnchor
+      />
       <div style={{ padding: "24px 16px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
           {isLocked && <ReplayBadge />}

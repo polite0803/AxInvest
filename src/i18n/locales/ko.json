@@ -15183,11 +15183,11 @@
       "confidenceNoteLabel": "신뢰도 해설",
       "sourceHint": "의사결정 해설 노드가 리스크 게이트의 최종 판정을 바탕으로 생성했습니다. 연구 참고용입니다."
     },
-    "actionBuy": "Buy",
-    "actionSell": "Sell",
-    "actionIncrease": "Increase",
-    "actionHold": "Hold",
-    "actionReduce": "Reduce",
+    "actionBuy": "매수",
+    "actionSell": "매도",
+    "actionIncrease": "추가 매수",
+    "actionHold": "보유",
+    "actionReduce": "축소",
     "actionWait": "관망",
     "recentAnalysis": "Recent Analysis",
     "targetPriceNote": "Target ¥{{price}}",
@@ -15209,6 +15209,9 @@
     "finalStrength": "최종 강도",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "빠른 분석",
+    "provenanceReplay": "리플레이",
+    "provenanceReplayWithDate": "리플레이 · {{date}}",
+    "provenanceUnknown": "출처 불명",
     "interrupted": {
       "title": "이 분석은 결론을 생성하지 못했습니다",
       "hint": "분석이 끝나기 전에 중단되었습니다(앱 종료 또는 프로세스 비정상 종료). 생성된 결정이 없습니다. 아래 버튼으로 다시 실행할 수 있습니다."
@@ -15219,6 +15222,19 @@
       "failed": "실패",
       "timeout": "시간 초과",
       "cancelled": "취소됨"
+    },
+    "historyFilter": {
+      "keywordPlaceholder": "종목명 또는 코드 검색",
+      "statusLabel": "상태",
+      "actionLabel": "결론",
+      "all": "전체",
+      "loadedTotal": "총 {{total}}건",
+      "loadedPartial": "{{count}}건 불러오는 중…",
+      "capped": "이번에 {{count}}건 불러옴(단회 한도 도달). 더 오래된 기록이 있을 수 있음",
+      "loadMore": "더 불러오기",
+      "loadFailed": "기록 불러오기 실패",
+      "showingTotal": "{{total}}건 중 {{shown}}건 표시",
+      "noMatch": "조건에 맞는 기록이 없습니다({{total}}건 불러옴)"
     },
     "templateVersion": {
       "matched": "그래프 버전: DB v{{db}} = 코드 v{{code}}",
@@ -15391,9 +15407,6 @@
       "confirmDelete": "이 조건 주문을 삭제하시나요?",
       "thresholdPct": "임계값(%)",
       "actionNotify": "알림만",
-      "actionSell": "매도",
-      "actionBuy": "매수",
-      "actionReduce": "포지션 축소",
       "actionValueQty": "수량",
       "actionValueRatio": "비율",
       "coolDown": "쿨다운(분)",
@@ -15850,7 +15863,20 @@
       "chain_reco": "스마트 추천",
       "chain_serenity": "트렌드 선정",
       "chain_unlabeled": "체인 미분리 (이전 회차)",
-      "chainUnlabeledNote": "이 회차는 체인 분리 이전이라 두 체인의 값이 합쳐 집계되었습니다. 어느 한 체인의 장부로 보면 안 됩니다."
+      "chainUnlabeledNote": "이 회차는 체인 분리 이전이라 두 체인의 값이 합쳐 집계되었습니다. 어느 한 체인의 장부로 보면 안 됩니다.",
+      "sampleTitle": "A주 전체 샘플",
+      "sampleCounts": "시장 {{total}} · 열거 {{enumerated}} · 확인 {{confirmed}} · 최근 종가 {{close}} ({{date}})",
+      "sampleCoverageUnknown": "커버리지 조회 불가: 전체 시장/최근 종가 수를 알 수 없음 (0이 아님)",
+      "fullScan": "전체 코드 스캔",
+      "fullScanHint": "모든 A주 코드 구간을 스캔해 목록에 등록 (약 800+ 요청); live 시간대 회피",
+      "fullScanDone": "스캔 완료: 등록 {{registered}} / 시도 {{codes}} 코드",
+      "sweepClose": "최근 종가 보충",
+      "sweepCloseHint": "최근 마감된 거래일(15:00 이후)만 수집합니다. 장중 요청은 거부됩니다. 과거 날짜는 윈도우 이력 보충을 사용",
+      "sweepDone": "종가 저장 {{written}} / 목록 {{total}}; 시세 없음 {{missing}}",
+      "backfillHistory": "윈도우 이력 보충",
+      "backfillHistoryHint": "배치당 최대 500코드 × 90거래일; 전체 시장 약 12배치 — requested=0까지 반복",
+      "backfillDone": "이력 보충: {{codes}} 코드 / {{rows}} 행 / 실패 {{failed}}",
+      "backfillNone": "이 배치의 이력은 이미 완료 (보충할 코드 없음)"
     },
     "export": {
       "analystReports": "Analyst Reports",

@@ -1719,8 +1719,11 @@ mod tests {
         );
 
         // 行为面（仅当基线 action 落在极高风险否决的处理档时可观测）
+        // 处理档取自权威谓词 `implies_long`（生产侧 `apply_risk_veto` 判的就是它）；
+        // 这里再抄一遍中文字面量，权威集合一变本断言就静默跳过 —— 同一个 fail-open 形态。
+        use axagent_analysis_engine::decision_action::{ActionKind, normalize_action};
         let base_action = baseline["action"].as_str().unwrap_or_default();
-        if matches!(base_action, "买入" | "增持" | "持有") {
+        if normalize_action(base_action).is_some_and(ActionKind::implies_long) {
             assert_ne!(
                 strict["action"], baseline["action"],
                 "基线 action={base_action} 属极高风险否决的处理档，却未被降级 ⇒ `pm_risk_veto` 仍在读全局档"

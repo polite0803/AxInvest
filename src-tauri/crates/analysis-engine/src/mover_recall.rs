@@ -678,7 +678,7 @@ pub async fn load_mover_cell_signal(
         let anchor_from = dates[end_idx + 1 - window].clone();
         // 与核查同口径：只看最新收盘日的事件。旧实现会把窗口内每个 anchor 都算一遍，
         // 同一票连续多日达标会在 `scored_out`/`hits` 里重复计数，penalty 被放大。
-        for ev in events_for_tier(&by_stock, rule, &anchor_from, &to)
+        for ev in events_for_tier(&by_stock, rule, &anchor_from, &to, &dates)
             .into_iter()
             .filter(|ev| ev.anchor_date == to)
         {
@@ -759,42 +759,67 @@ pub async fn load_close_dates(db: &sea_orm::DatabaseConnection) -> Result<Vec<St
     Ok(seen)
 }
 
-/// 某档在 `[start, end]` 内的达标事件（纯函数，便于单测直接喂构造数据）。
+/// 窗口必须覆盖的真实交易日比例（分子/分母）：28 个交易日的窗口里至少 23 行。
+/// 停牌可以缺几天，但不能用「28 行横跨十几年」的历史回补行凑窗口（现网 22 条伪窗口）。
+pub const WINDOW_COVERAGE_NUM: usize = 4;
+pub const WINDOW_COVERAGE_DEN: usize = 5;
+
+/// 某票在 `[anchor_from, anchor_to]` 内、某档的达标事件（纯函数，便于单测直接喂构造数据）。
 ///
-/// `closes` 必须是**日期升序**的连续交易日序列；窗口取「anchor 当日及其前 window_days−1 天」。
+/// 窗口起点取**全局交易日历**（`calendar`，升序；`market_daily_close` 的 distinct 日期），
+/// 不再取「该票自己的第 N 行」：停牌/稀疏历史会让后者把一个 28 日窗口拼成十几年。
+/// 该票在全局窗口内必须有 `WINDOW_COVERAGE_NUM/WINDOW_COVERAGE_DEN` 以上的真实行，
+/// 否则显式跳过（不产事件、不计入可判票数）。
 pub fn events_for_tier(
     closes: &CloseSeriesByCode,
     rule: &TierRule,
     anchor_from: &str,
     anchor_to: &str,
+    calendar: &[String],
 ) -> Vec<MoverEvent> {
     let mut out = Vec::new();
+    let window = rule.window_days as usize;
+    if window == 0 || calendar.len() < window {
+        return out;
+    }
     for (code, (name, series)) in closes {
-        if series.len() < rule.window_days as usize {
-            // 该票历史长度不足 ⇒ 窗口算不出来，显式跳过（不当 0 处理）
+        if series.len() < window {
+            // 该票历史行数不足 ⇒ 窗口算不出来，显式跳过（不当 0 处理）
             continue;
         }
         for (pos, (date, _)) in series.iter().enumerate() {
             if date.as_str() < anchor_from || date.as_str() > anchor_to {
                 continue;
             }
-            if pos + 1 < rule.window_days as usize {
+            let Ok(anchor_idx) = calendar.binary_search_by(|d| d.as_str().cmp(date.as_str()))
+            else {
+                // 锚点不在全局交易日历里 ⇒ 数据域不一致，跳过并留待后续告警
+                continue;
+            };
+            if anchor_idx + 1 < window {
                 continue;
             }
-            let win: Vec<f64> =
-                series[pos + 1 - rule.window_days as usize..=pos].iter().map(|(_, r)| *r).collect();
+            let window_start = &calendar[anchor_idx + 1 - window];
+            // 该票在全局窗口内的行（停牌日可以缺；start_pos 取第一根 >= window_start 的行）
+            let start_pos = series.partition_point(|(d, _)| d.as_str() < window_start.as_str());
+            if start_pos > pos {
+                continue;
+            }
+            let win: Vec<f64> = series[start_pos..=pos].iter().map(|(_, r)| *r).collect();
+            if win.len() * WINDOW_COVERAGE_DEN < window * WINDOW_COVERAGE_NUM {
+                continue;
+            }
             let Some(cum) = window_cum_gain_pct(&win) else { continue };
             if cum < rule.gain_pct {
                 continue;
             }
             let max_daily = win.iter().cloned().fold(f64::MIN, f64::max);
-            let window_start = series[pos + 1 - rule.window_days as usize].0.clone();
             out.push(MoverEvent {
                 stock_code: code.clone(),
                 stock_name: name.clone(),
                 period: rule.period.as_str().to_string(),
                 anchor_date: date.clone(),
-                window_start,
+                window_start: window_start.clone(),
                 window_days: rule.window_days,
                 cum_gain_pct: cum,
                 max_daily_pct: max_daily,
@@ -805,6 +830,34 @@ pub fn events_for_tier(
         }
     }
     out
+}
+
+/// 该票在全局日历上是否存在**至少一个**可判窗口（用于 `judgeable_codes_by_tier`）。
+///
+/// 与 [`events_for_tier`] 同一覆盖率判据：只看「该票自己的行数」会把稀疏历史算成可判。
+pub fn has_judgeable_window(
+    series: &[(String, f64)],
+    calendar: &[String],
+    window_days: u32,
+) -> bool {
+    let window = window_days as usize;
+    if window == 0 || series.len() < window || calendar.len() < window {
+        return false;
+    }
+    series.iter().enumerate().any(|(pos, (date, _))| {
+        let Ok(anchor_idx) = calendar.binary_search_by(|d| d.as_str().cmp(date.as_str())) else {
+            return false;
+        };
+        if anchor_idx + 1 < window {
+            return false;
+        }
+        let window_start = &calendar[anchor_idx + 1 - window];
+        let start_pos = series.partition_point(|(d, _)| d.as_str() < window_start.as_str());
+        if start_pos > pos {
+            return false;
+        }
+        (pos + 1 - start_pos) * WINDOW_COVERAGE_DEN >= window * WINDOW_COVERAGE_NUM
+    })
 }
 
 /// 某票在某档窗口起点之前是否已被推荐（`generated_at` 落在 `[window_start, anchor]` 内 ⇒ 命中）。
@@ -1011,7 +1064,7 @@ pub async fn mover_watchlist_digest(
     let by_stock = load_closes_by_stock(db, &from, &to).await?;
     let mut events = Vec::new();
     for rule in &rules {
-        events.extend(events_for_tier(&by_stock, rule, &from, &to));
+        events.extend(events_for_tier(&by_stock, rule, &from, &to, &close_dates));
     }
     Ok(format_mover_watchlist(&events, &to, limit))
 }
@@ -1052,16 +1105,31 @@ mod tests {
         assert_eq!(window_cum_gain_pct(&[f64::NAN]), None);
     }
 
+    fn calendar_of(entries: &[&str]) -> Vec<String> {
+        entries.iter().map(|d| d.to_string()).collect()
+    }
+
     #[test]
     fn event_requires_full_window_length() {
         let closes =
             closes_map(vec![("600059".into(), vec![("2026-09-28", 6.0), ("2026-09-29", 6.0)])]);
-        // 窗口 3 天但只有 2 行 ⇒ 算不出，必须显式跳过（不得按 2 天判达标）
-        let ev =
-            events_for_tier(&closes, &rule(Period::Short, 10.0, 3), "2026-09-01", "2026-12-31");
+        let calendar = calendar_of(&["2026-09-28", "2026-09-29"]);
+        // 窗口 3 天但全局窗口只有 2 行 ⇒ 算不出，必须显式跳过（不得按 2 天判达标）
+        let ev = events_for_tier(
+            &closes,
+            &rule(Period::Short, 10.0, 3),
+            "2026-09-01",
+            "2026-12-31",
+            &calendar,
+        );
         assert!(ev.is_empty());
-        let ev2 =
-            events_for_tier(&closes, &rule(Period::Short, 10.0, 2), "2026-09-01", "2026-12-31");
+        let ev2 = events_for_tier(
+            &closes,
+            &rule(Period::Short, 10.0, 2),
+            "2026-09-01",
+            "2026-12-31",
+            &calendar,
+        );
         assert_eq!(ev2.len(), 1, "窗口 2 天时应在 09-29 出事件");
         assert!((ev2[0].cum_gain_pct - 12.36).abs() < 1e-6);
         assert!((ev2[0].max_daily_pct - 6.0).abs() < 1e-6);
@@ -1084,12 +1152,39 @@ mod tests {
                 ("2026-10-09", 6.0),
             ],
         )]);
-        let ev = events_for_tier(&closes, &rule(Period::Short, 1.0, 3), "2026-09-01", "2026-12-31");
+        let calendar = calendar_of(&["2026-09-28", "2026-09-29", "2026-09-30", "2026-10-09"]);
+        let ev = events_for_tier(
+            &closes,
+            &rule(Period::Short, 1.0, 3),
+            "2026-09-01",
+            "2026-12-31",
+            &calendar,
+        );
         assert_eq!(ev.len(), 2, "09-30 与 10-09 各满 3 日窗口");
         assert_eq!(ev[0].anchor_date, "2026-09-30");
         assert_eq!(ev[0].window_start, "2026-09-28");
         assert_eq!(ev[1].anchor_date, "2026-10-09");
         assert_eq!(ev[1].window_start, "2026-09-29");
+    }
+
+    /// 回归：稀疏历史行（2005 与 2026）不得拼成一个 28 行窗口。
+    /// 旧实现按该票自己的行数取窗口 ⇒ window_start 落到 2005，累计涨幅是旧价对新价的伪值。
+    #[test]
+    fn sparse_history_rows_do_not_form_a_window() {
+        let closes = closes_map(vec![(
+            "000562".into(),
+            vec![("2005-04-06", 1.0), ("2026-09-28", 2.0), ("2026-09-30", 6.0)],
+        )]);
+        let calendar = calendar_of(&["2005-04-06", "2026-09-28", "2026-09-29", "2026-09-30"]);
+        let ev = events_for_tier(
+            &closes,
+            &rule(Period::Mid, 30.0, 3),
+            "2026-09-01",
+            "2026-12-31",
+            &calendar,
+        );
+        assert!(ev.is_empty(), "2026 窗口内只有 2 行（覆盖不足 80%）⇒ 不得产事件: {ev:?}");
+        assert!(!has_judgeable_window(&closes["000562"].1, &calendar, 3), "稀疏行不得计入可判票数");
     }
 
     #[test]

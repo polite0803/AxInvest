@@ -122,7 +122,10 @@ impl InternationalVendor {
                         retry_count: 0,
                     };
                     executor.post_request(&ctx, &api_result).await;
-                    return Err(DataError::RateLimited { vendor: "international".to_string() });
+                    return Err(DataError::RateLimited {
+                        vendor: "international".to_string(),
+                        reason: "HTTP 429".into(),
+                    });
                 }
                 if !success {
                     let text = resp.text().await.unwrap_or_default();

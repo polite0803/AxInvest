@@ -15183,11 +15183,11 @@
       "confidenceNoteLabel": "Konfidenzhinweis",
       "sourceHint": "Vom Entscheidungs-Erklärungsknoten aus dem endgültigen Risiko-Gate-Urteil erzeugt. Nur zur Information."
     },
-    "actionBuy": "Buy",
-    "actionSell": "Sell",
-    "actionIncrease": "Increase",
-    "actionHold": "Hold",
-    "actionReduce": "Reduce",
+    "actionBuy": "Kaufen",
+    "actionSell": "Verkaufen",
+    "actionIncrease": "Zukaufen",
+    "actionHold": "Halten",
+    "actionReduce": "Reduzieren",
     "actionWait": "Warten",
     "recentAnalysis": "Recent Analysis",
     "targetPriceNote": "Target ¥{{price}}",
@@ -15209,6 +15209,9 @@
     "finalStrength": "Endgültige Stärke",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "Schnellanalyse",
+    "provenanceReplay": "Replay",
+    "provenanceReplayWithDate": "Replay · {{date}}",
+    "provenanceUnknown": "Unbekannte Herkunft",
     "interrupted": {
       "title": "Diese Analyse hat kein Ergebnis erzeugt",
       "hint": "Der Datensatz wurde vor Abschluss der Analyse unterbrochen (App beendet oder Prozess abgestürzt); es wurde keine Entscheidung erzeugt. Über die Schaltfläche unten kann die Analyse erneut gestartet werden."
@@ -15219,6 +15222,19 @@
       "failed": "Fehlgeschlagen",
       "timeout": "Zeitüberschreitung",
       "cancelled": "Abgebrochen"
+    },
+    "historyFilter": {
+      "keywordPlaceholder": "Name oder Code suchen",
+      "statusLabel": "Status",
+      "actionLabel": "Entscheidung",
+      "all": "Alle",
+      "loadedTotal": "{{total}} Einträge",
+      "loadedPartial": "{{count}} Einträge geladen…",
+      "capped": "{{count}} Einträge geladen (Rundenlimit erreicht); ältere Einträge möglich",
+      "loadMore": "Mehr laden",
+      "loadFailed": "Einträge konnten nicht geladen werden",
+      "showingTotal": "{{shown}} von {{total}} Einträgen angezeigt",
+      "noMatch": "Kein Eintrag entspricht den Filtern ({{total}} geladen)"
     },
     "templateVersion": {
       "matched": "Graphversion: DB v{{db}} entspricht Code v{{code}}",
@@ -15391,9 +15407,6 @@
       "confirmDelete": "Diesen bedingten Auftrag löschen?",
       "thresholdPct": "Schwelle (%)",
       "actionNotify": "Nur benachrichtigen",
-      "actionSell": "Verkaufen",
-      "actionBuy": "Kaufen",
-      "actionReduce": "Reduzieren",
       "actionValueQty": "Stück",
       "actionValueRatio": "Anteil",
       "coolDown": "Abkühlung (Min.)",
@@ -15850,7 +15863,20 @@
       "chain_reco": "Intelligente Empfehlung",
       "chain_serenity": "Trendprüfung",
       "chain_unlabeled": "Ohne Kette (älterer Lauf)",
-      "chainUnlabeledNote": "Dieser Lauf entstand vor der Aufteilung nach Ketten: Empfehlung und Trendprüfung sind gemeinsam gezählt, die Zahlen sind also keiner Kette allein zuzuordnen."
+      "chainUnlabeledNote": "Dieser Lauf entstand vor der Aufteilung nach Ketten: Empfehlung und Trendprüfung sind gemeinsam gezählt, die Zahlen sind also keiner Kette allein zuzuordnen.",
+      "sampleTitle": "Gesamtes A-Aktien-Sample",
+      "sampleCounts": "Markt {{total}} · erfasst {{enumerated}} · bestätigt {{confirmed}} · letzter Schluss {{close}} ({{date}})",
+      "sampleCoverageUnknown": "Abdeckung nicht verfügbar: Gesamtmarkt/letzter Schluss unbekannt (nicht 0)",
+      "fullScan": "Vollständiger Code-Scan",
+      "fullScanHint": "Alle A-Aktien-Codesegmente scannen und das Universum registrieren (≈800+ Anfragen); Live-Fenster meiden",
+      "fullScanDone": "Scan fertig: {{registered}} registriert / {{codes}} Codes geprüft",
+      "sweepClose": "Letzten Schluss nachziehen",
+      "sweepCloseHint": "Nur der letzte abgeschlossene Handelstag (nach 15:00) wird erfasst; Intraday-Anfragen werden abgelehnt; für historische Tage die Fensterhistorie nutzen",
+      "sweepDone": "Schlusszeilen {{written}} / Universum {{total}}; ohne Kurs {{missing}}",
+      "backfillHistory": "Fensterhistorie nachfüllen",
+      "backfillHistoryHint": "Bis zu 500 Codes × 90 Handelstage pro Charge; Gesamtmarkt ≈12 Chargen — wiederholen bis requested=0",
+      "backfillDone": "Historie ergänzt: {{codes}} Codes / {{rows}} Zeilen / {{failed}} fehlgeschlagen",
+      "backfillNone": "Historie dieser Charge vollständig (keine Codes offen)"
     },
     "export": {
       "analystReports": "Analyst Reports",

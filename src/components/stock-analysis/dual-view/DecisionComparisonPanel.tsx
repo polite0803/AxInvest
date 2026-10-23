@@ -9,9 +9,10 @@
  *   - 分歧诊断用 Tooltip 内联（不另占卡片空间）
  */
 import {
-  actionToDirection,
   agreementTier,
+  getActionColor,
   getActionTKey,
+  isAbsentDecisionAction,
   parseAction,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
@@ -58,15 +59,14 @@ function displayActionOf(
   );
 }
 
-// P1-6(2026-09-14): 原判据用 `norm.includes("买")` —— **只认中文**。
-//   后端 DTO 文档写明 decisionAction 可能直返 `BUY/SELL/HOLD/WAIT/UNCERTAIN`（英文 token），
-//   这一类输入会全部落到 `default`（灰）⇒ 双视角对比里「公式」侧永远没有红/绿配色。
-//   改走统一的 `actionToDirection`（已覆盖中英文两套值域）。
+/**
+ * 档位配色走权威 `ACTION_PALETTE`（2026-10-22 收编）。
+ * 旧表 buy → `green` / sell → `red` 与 A 股涨跌色（红=利好）相反，且把六档压成三色 ⇒
+ * 同一个「买入」在本面板是绿、在历史弹窗是红，同屏互相打脸。
+ * ⚠ 有意的行为变化：买 / 卖两向的色翻转，且 持有 与 观望、不确定 与 数据缺失 不再同色。
+ */
 function actionTagColor(action?: string | null): string {
-  const dir = actionToDirection(action);
-  if (dir === "buy") { return "green"; }
-  if (dir === "sell") { return "red"; }
-  return "default";
+  return action ? getActionColor(action) : "default";
 }
 
 // 2026-09-21: 本地档位表已删除，改走 `agreementTier`（单一真相源）。
@@ -109,14 +109,13 @@ export function DecisionComparisonPanel({ data }: DecisionComparisonPanelProps) 
   const [expandedReasoning, setExpandedReasoning] = useState(false);
   const view = useMemo(() => normalize(data), [data]);
 
-  const hasLlm = view.llmDecisionAction != null
-    && view.llmDecisionAction !== ""
-    && view.llmDecisionAction !== "null";
+  // 「有没有结论」走共用判据（含权威缺失哨兵），不再手写三段字面量比较
+  const hasLlm = !isAbsentDecisionAction(view.llmDecisionAction);
   const agreement = typeof view.decisionAgreementScore === "number" ? view.decisionAgreementScore : null;
 
   // LLM 不可用 → 紧凑回退
   if (!hasLlm && agreement === null) {
-    const hasFormula = view.decisionAction != null && view.decisionAction !== "" && view.decisionAction !== "null";
+    const hasFormula = !isAbsentDecisionAction(view.decisionAction);
     if (!hasFormula) {
       return (
         <div className="decision-comparison-panel p-2">

@@ -226,7 +226,8 @@ describe("DecisionTrustNotice", () => {
   // 生产侧条目由 `decision.rs::tolerated_failure_notes` 生成（形态 `…(节点id)：原因`），
   // 这里钉的是「该形态真能被渲染出来」，不是只钉生产侧写了字符串。
   it("节点执行失败条目（后端 v163 起写入 data_gaps）展开后可见", async () => {
-    const note = "节点本轮执行失败(t-sentiment-data)：Vendor error from guba: 股吧 HTML 中未找到 article_list 数据";
+    const note =
+      "节点本轮执行失败(t-sentiment-data)：Vendor error from guba: 股吧页面不可用: 页面不含 article_list（拿到的不是股吧列表页，疑似风控/登录壳页）, stock_code=003029";
     render(
       <DecisionTrustNotice
         decision={mkDecision({ action: "WAIT", positionPct: 0, dataGaps: [note] })}

@@ -1016,9 +1016,12 @@ mod tests {
         assert_eq!(result["report"], "模型前提不成立，估值仅供参考", "report 正文必须保留");
 
         let audit = result["valuation_audit"].as_array().expect("审计数组必须存在");
-        // 3 个数值字段 + 1 条结论注入（2026-09-28）
-        assert_eq!(audit.len(), 4, "三个数值字段 + 结论注入各留一条审计：{result}");
-        for entry in audit.iter().filter(|e| e["field"] != "valuation_conclusion") {
+        // 3 个数值字段 + 1 条结论注入（2026-09-28）+ 1 条 verdict 形态归一（v175）
+        assert_eq!(audit.len(), 5, "三个数值字段 + 结论注入 + 形态归一各留一条审计：{result}");
+        for entry in audit
+            .iter()
+            .filter(|e| !matches!(e["field"].as_str(), Some("valuation_conclusion" | "verdict")))
+        {
             assert_eq!(entry["action"], "overwritten", "硬不可用下三个字段都应被覆写：{entry}");
         }
         // 正向 DCF 硬不可用时，算法结论**仍必须存在**（改走反向 DCF / 相对估值口径）——
@@ -1071,9 +1074,12 @@ mod tests {
         assert_eq!(v["ideal_buy_price"], "9.87元以下", "合规时不得改写：{result}");
 
         let audit = result["valuation_audit"].as_array().expect("审计数组必须存在");
-        // 3 个数值字段 + 1 条结论注入（2026-09-28）
-        assert_eq!(audit.len(), 4, "三个数值字段 + 结论注入各留一条审计：{result}");
-        for entry in audit.iter().filter(|e| e["field"] != "valuation_conclusion") {
+        // 3 个数值字段 + 1 条结论注入（2026-09-28）+ 1 条 verdict 形态归一（v175）
+        assert_eq!(audit.len(), 5, "三个数值字段 + 结论注入 + 形态归一各留一条审计：{result}");
+        for entry in audit
+            .iter()
+            .filter(|e| !matches!(e["field"].as_str(), Some("valuation_conclusion" | "verdict")))
+        {
             assert_eq!(entry["action"], "ok", "合规时不应有覆写记录：{entry}");
         }
         // LLM 未写 valuation_conclusion ⇒ 本节点**主动注入**（action = injected）
@@ -1106,6 +1112,71 @@ mod tests {
         assert_eq!(result["verdict"], serde_json::json!({}), "解析失败时 verdict 为空对象");
         let audit = result["valuation_audit"].as_array().expect("审计数组必须存在");
         assert_eq!(audit[0]["action"], "skipped", "解析失败必须留 skipped 痕迹：{result}");
+    }
+
+    /// v175 回归：**扁平输出**（`value-investor.md`「输出格式」的契约形态 ——
+    /// `verdict` 是方向枚举**字符串**、`bull_score`/`bear_score` 在**顶层**）
+    /// ⇒ `verdict` 归一为 map，九个业务字段镜像进去，**顶层一个不删**。
+    ///
+    /// 这是 `risk-agg` / `risk-con` / `risk-neu` 三个节点各 4 条
+    /// `input_mapping`（`{node}.result.verdict.{bull,bear}_score`）能取到值的唯一前提：
+    /// 归一前实测日志为 `Agent 节点 input_mapping 取不到值` × 12，风险三视角对
+    /// 价值维度**零信息**（它们的 `context_sources` 故意不含 value-investor）。
+    #[tokio::test]
+    async fn value_verify_normalizes_flat_verdict_shape_for_downstream_mapping() {
+        let vi_content = serde_json::json!({
+            "report": "护城河稳固，DCF 上行空间 18%",
+            // ⚠ 契约形态：verdict 是**方向枚举字符串**，不是对象
+            "verdict": "看多",
+            "buffett_verdict": "【看多】DCF上行空间18%，护城河稳固",
+            "bull_score": 70,
+            "bear_score": 30,
+            "confidence": 65,
+            "bull_points": ["护城河宽", "现金流稳"],
+            "bear_points": ["估值偏高"],
+            "moat_rating": "宽护城河",
+            "intrinsic_value_range": "11.23-15.67元",
+            "margin_of_safety": "24.5%",
+            "ideal_buy_price": "9.87元以下",
+        })
+        .to_string();
+        let dcf = serde_json::json!({
+            "available": true,
+            "low": 11.23,
+            "high": 15.67,
+            "upsidePct": 24.5,
+            "idealBuyPrice": 9.87,
+            "assumptions": { "applicable": true },
+        });
+        let ctx = ctx_with_value_verify(&vi_content, dcf);
+        let code = include_str!("../../../../../src/commands/value-verify.rhai");
+
+        let (result, _params) =
+            execute_rhai_directly("value-verify", code, &value_verify_mapping(), &ctx)
+                .await
+                .expect("扁平形态应正常归一而非失败");
+
+        let v = &result["verdict"];
+        assert!(v.is_object(), "verdict 必须归一成对象：{result}");
+        assert_eq!(v["verdict"], "看多", "方向串必须搬进 verdict.verdict：{result}");
+        assert_eq!(v["bull_score"], 70, "bull_score 必须从顶层镜像：{result}");
+        assert_eq!(v["bear_score"], 30, "bear_score 必须从顶层镜像：{result}");
+        assert_eq!(v["confidence"], 65, "confidence 必须从顶层镜像：{result}");
+        assert_eq!(v["bull_points"], serde_json::json!(["护城河宽", "现金流稳"]));
+        // 本节点覆写的估算三字段也要进 map（扁平形态下 verify 写的是顶层）
+        assert_eq!(v["intrinsic_value_range"], "11.23-15.67元");
+        assert_eq!(result["verdict_shape"], "flat->nested");
+
+        // 顶层一个不删：ValueAssessmentPanel / stock-analysis-export 仍按顶层读
+        assert_eq!(result["bull_score"], 70, "顶层 bull_score 不得被抹掉：{result}");
+        assert_eq!(result["buffett_verdict"], "【看多】DCF上行空间18%，护城河稳固");
+        assert_eq!(result["report"], "护城河稳固，DCF 上行空间 18%");
+
+        let audit = result["valuation_audit"].as_array().expect("审计数组必须存在");
+        let shape_entry = audit.iter().find(|e| e["field"] == "verdict").expect("形态归一必须留痕");
+        assert_eq!(shape_entry["action"], "normalized");
+        assert_eq!(shape_entry["algorithmic"], "flat->nested");
+        assert_eq!(shape_entry["llm"], "看多", "归一前的原值必须留痕：{shape_entry}");
     }
 
     /// 契约：输出经 `execute()` 包装后，`output_var` 必须与 value-investor **同名**

@@ -35,16 +35,21 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-// P-e：方向性下限。取 50% 而不是拍一个更高位数，是因为 50% 以下**无论实测分布如何都一定是坏的**
-// （一半以上的票看不见，谈不上选股覆盖面）；真正的数值下限要等本表积累 3–5 个交易日的
-// 真实分布后再抬 —— 抬的那一次必须带着分布读数，不能凭感觉。
-const FLOOR_PCT = 50;
+// P-e：方向性下限。2026-10-23 用户口径：漏检样本必须是**全 A 股**（现网 reported_total≈5925）。
+// 旧值 50% 是「积累 3–5 个交易日再抬」前的临时值 —— 53% 已经意味着近一半票看不见，
+// 不能再算达标；现按「全 A 股样本」抬到 95%（停牌/缺值由采集侧显式声明，不并入分母凑数）。
+const FLOOR_PCT = 95;
+/** 最新收盘覆盖（`market_daily_close` 最新交易日 distinct 代码 / reported_total）的下限。 */
+const CLOSE_FLOOR_PCT = 95;
 const MIX_CAP_PCT = 60;
+/** 任一 A 股板块在清单里占比低于该值 ⇒ 判定「缺段」（创业板/科创板/北交所 不应接近 0）。 */
+const SEGMENT_MIN_PCT = 1;
+const SEGMENTS = ["main_sh", "main_sz", "chinext", "star", "bj"];
 const FAIL_CAP = 0.5;
 const FRESH_HOURS = 36;
 
-/** 纯判据：喂数字出红条。`stats` = 最近一次 tick 行，`mix` = 分市场计数。 */
-export function judge(stats, mix, nowMs = Date.now()) {
+/** 纯判据：喂数字出红条。`stats` = 最近一次 tick 行，`mix` = 分市场计数，`close` = 最新收盘读数。 */
+export function judge(stats, mix, nowMs = Date.now(), close = null) {
   const reds = [];
   // C2 独立于 C1/C3：它算的是另一张表（`market_stock_universe`）的现场构成，
   // 与「有没有分母行」无关。早退会把「清单 91% 是深市主板」这条真实缺陷一起藏掉。
@@ -56,8 +61,30 @@ export function judge(stats, mix, nowMs = Date.now()) {
         reds.push(`C2 枚举域偏斜：${k} 占 ${pct.toFixed(1)}% > 配比上限 ${MIX_CAP_PCT}%（清单 ${total} 只）`);
       }
     }
+    // C7：全 A 股必须覆盖五个板块；创业板/科创板/北交所接近 0 同样是「样本残缺」。
+    for (const m of SEGMENTS) {
+      const n = Number(mix[m]) || 0;
+      const pct = (n / total) * 100;
+      if (pct < SEGMENT_MIN_PCT) {
+        reds.push(
+          `C7 分市场缺段：${m} 占 ${pct.toFixed(2)}%（${n} 只）< ${SEGMENT_MIN_PCT}% ⇒ 全 A 股样本不完整`,
+        );
+      }
+    }
   } else {
     reds.push("C2 清单为空或计数解析不出，无从计算分市场配比");
+  }
+
+  // C6：最新收盘覆盖必须同样按全市场分母量；无读数与低覆盖分开说。
+  if (close == null || !(Number(close.codes) > 0)) {
+    reds.push("C6 market_daily_close 无最新收盘读数 ⇒ 全 A 股样本的收盘覆盖无法量");
+  } else if (stats && Number(stats.reportedTotal) > 0) {
+    const pct = (Number(close.codes) / Number(stats.reportedTotal)) * 100;
+    if (pct < CLOSE_FLOOR_PCT) {
+      reds.push(
+        `C6 最新收盘 ${close.codes} 只（${close.date ?? "?"}）/ 全市场 ${stats.reportedTotal} = ${pct.toFixed(1)}% < ${CLOSE_FLOOR_PCT}% ⇒ 漏检样本缺一大半`,
+      );
+    }
   }
 
   if (!stats) {
@@ -93,15 +120,17 @@ function selfTest() {
   const mix = { main_sz: 618, main_sh: 37, chinext: 16, star: 8 };
   const cases = [
     {
-      name: "现网形态（679/约5400、深市 91%）⇒ 至少两条红",
+      name: "现网形态（679/约5400、深市 91%、收盘 1300）⇒ 至少三条红",
       stats: { coveragePct: 12.6, universeSize: 679, reportedTotal: 5400, pagesRequested: 6, pagesFailed: 5 },
       mix,
+      close: { date: "2026-10-22", codes: 1300 },
       min: 3,
     },
     {
       name: "无行 + 配比偏斜 ⇒ C3 与 C2 必须同时红（早退会藏掉 C2）",
       stats: null,
       mix,
+      close: null,
       min: 2,
       want: (r) => r.some((x) => x.startsWith("C3")) && r.some((x) => x.startsWith("C2")),
     },
@@ -109,12 +138,22 @@ function selfTest() {
       name: "0 分母落库 ⇒ C1 红（拿不到被写成 0 只）",
       stats: { coveragePct: 0, universeSize: 679, reportedTotal: 0, pagesRequested: 6, pagesFailed: 6 },
       mix,
+      close: { date: "2026-10-22", codes: 1300 },
       min: 1,
+    },
+    {
+      name: "53% 清单 + 45% 收盘（2026-10-23 现网）⇒ C1/C6 必须红",
+      stats: { coveragePct: 53.15, universeSize: 3149, reportedTotal: 5925, pagesRequested: 6, pagesFailed: 0 },
+      mix: { main_sh: 1737, main_sz: 1206, chinext: 17, star: 8, bj: 181 },
+      close: { date: "2026-10-22", codes: 2690 },
+      min: 3,
+      want: (r) => r.some((x) => x.startsWith("C1")) && r.some((x) => x.startsWith("C6")),
     },
     {
       name: "覆盖率达标但配比仍偏斜 ⇒ 只剩 C2",
       stats: { coveragePct: 95, universeSize: 5130, reportedTotal: 5400, pagesRequested: 6, pagesFailed: 0 },
-      mix,
+      mix: { main_sz: 900, main_sh: 37, chinext: 16, star: 80, bj: 300 },
+      close: { date: "2026-10-22", codes: 5130 },
       min: 1,
       want: (r) => r.length === 1 && r[0].startsWith("C2"),
     },
@@ -128,14 +167,15 @@ function selfTest() {
         pagesFailed: 0,
         observedAt: Date.now() - 48 * 3_600_000,
       },
-      mix: { main_sz: 5130 },
+      mix: { main_sz: 5130, main_sh: 300, chinext: 200, star: 100, bj: 100 },
+      close: { date: "2026-10-22", codes: 5130 },
       min: 1,
       want: (r) => r.some((x) => x.startsWith("C5")),
     },
   ];
   let bad = 0;
   for (const c of cases) {
-    const reds = judge(c.stats, c.mix);
+    const reds = judge(c.stats, c.mix, Date.now(), c.close);
     const ok = reds.length >= c.min && (!c.want || c.want(reds));
     if (!ok) bad += 1;
     console.log(`  ${ok ? "✅" : "❌"} ${c.name}（实得 ${reds.length} 条）`);
@@ -211,21 +251,39 @@ function main() {
     console.error(`❌ 清单构成取数失败：${e.message}`);
     process.exit(1);
   }
-  const reds = judge(stats, mix);
+  let close = null;
+  try {
+    const rows = sql(
+      "SELECT trade_date, count(*) AS codes FROM market_daily_close GROUP BY trade_date ORDER BY trade_date DESC LIMIT 1",
+    );
+    if (rows[0]) {
+      close = { date: rows[0].trade_date, codes: Number(rows[0].codes) };
+    }
+  } catch (e) {
+    if (!/does not exist|不存在/.test(e.message)) {
+      console.error(`❌ 最新收盘覆盖取数失败：${e.message}`);
+      process.exit(1);
+    }
+  }
+  const reds = judge(stats, mix, Date.now(), close);
   if (tableMissing) {
     for (let i = 0; i < reds.length; i++) {
       if (reds[i].startsWith("C3")) reds[i] += "（本例具体形态：`market_universe_stats` 表还不存在 ⇒ 需重启应用让启动期对账建表）";
     }
   }
   if (process.argv.includes("--json")) {
-    console.log(JSON.stringify({ stats, mix, reds }, null, 2));
+    console.log(JSON.stringify({ stats, mix, close, reds }, null, 2));
   } else if (reds.length > 0) {
     console.error(`❌ 清单覆盖率门红 ${reds.length} 条：`);
     for (const r of reds) console.error("  - " + r);
-    console.error(`  读数现场：${JSON.stringify(stats)} 分市场构成：${JSON.stringify(mix)}`);
+    console.error(
+      `  读数现场：${JSON.stringify(stats)} 分市场构成：${JSON.stringify(mix)} 最新收盘：${JSON.stringify(close)}`,
+    );
     process.exit(1);
   } else {
-    console.log(`✅ 清单覆盖率 ${stats.coveragePct}% ≥ 下限 ${FLOOR_PCT}%，分市场配比未越界`);
+    console.log(
+      `✅ 清单覆盖率 ${stats.coveragePct}% ≥ 下限 ${FLOOR_PCT}%，最新收盘 ${close.codes}/${stats.reportedTotal}（${close.date}），分市场配比未越界`,
+    );
   }
 }
 

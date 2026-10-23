@@ -57,6 +57,12 @@ describe("WatchlistPage", () => {
     await settle();
   });
 
+  it("does not render its own live/as-of anchor (Hub title bar is the single mode layer)", async () => {
+    const { container } = renderWithRouter();
+    expect(container.querySelector('[data-testid="page-time-anchor"]')).toBeNull();
+    await settle();
+  });
+
   it("renders 3 panel sections in a 2-column grid below watchlist", async () => {
     const { container } = renderWithRouter();
     const grid = container.querySelector(".grid");

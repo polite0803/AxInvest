@@ -12,7 +12,12 @@ use crate::error::DataError;
 
 /// 支持的供应商及其并发上限
 const CAPACITIES: &[(&str, usize)] = &[
-    ("eastmoney", 3),   // 东方财富：最核心，但限流最严
+    ("eastmoney", 3), // 东方财富：最核心，但限流最严
+    // 股吧与 eastmoney 同属东方财富域名、同一风控主体，此前**未登记** ⇒ 蹭 default 5，
+    // 等于拿到一个从没人替它选过的值。现网佐证：10-17 09:07 一分钟内 43 条分析同时起跑、
+    // 其中 34 条股吧失败（09:05/09:06 那 60 条零失败）。取 3 是**对齐同域名既有实证值**，
+    // 不是已证明能降失败率的调参 —— 失败率是否真降要等下轮批量读数。
+    ("guba", 3),
     ("tencent", 5),     // 腾讯财经：稳定，可宽松
     ("baidu_stock", 3), // 百度股市通：有隐性限流
     ("ths", 4),         // 同花顺：适中
@@ -109,5 +114,21 @@ mod tests {
     fn test_default_vendor() {
         let gate = DomainGate::new();
         assert!(gate.try_acquire("unknown_vendor").is_some());
+    }
+
+    /// 股吧必须拿到**自己的**档位，而不是 default。
+    ///
+    /// 它此前不在 `CAPACITIES` 里 ⇒ 静默蹭 default 5，而同域名的 eastmoney 被显式压到 3。
+    /// 这条按真闸门行为断言（不是去读那张表）：若有人删掉表里那行，`try_acquire` 会拿到
+    /// 第 4 个许可 ⇒ 当场红。
+    #[tokio::test]
+    async fn guba_has_its_own_capacity_not_the_default() {
+        let gate = DomainGate::new();
+        let g1 = gate.acquire("guba").await.unwrap();
+        let _g2 = gate.acquire("guba").await.unwrap();
+        let _g3 = gate.acquire("guba").await.unwrap();
+        assert!(gate.try_acquire("guba").is_none(), "股吧应是 3 档；拿到第 4 个许可=在蹭默认值");
+        drop(g1);
+        assert!(gate.try_acquire("guba").is_some(), "释放后应能再取，否则测的是空壳闸门");
     }
 }

@@ -3593,7 +3593,20 @@ fn build_sub_analysis_from_snapshot(
                 // content 是 JSON 字符串 → 解析为对象，确保路径下钻可用
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) {
                     if parsed.is_object() {
-                        node_obj.insert("content".into(), parsed);
+                        // 2026-10-23（审计 F-2）：`_raw.<node>` 存的是**引擎后处理之后**的产物
+                        // ——`trader` 等已是 `{report, verdict:{…}}` 嵌套形态（见
+                        // `agent_executor` 的扁平归一分支），而反思模板有三条映射按**顶层**读
+                        // （`sub-analysis.trader.content.{action,targetPrice,confidence}`，
+                        // `stock_analysis_setup/mod.rs:1670-1672`）⇒ 三条恒 miss，
+                        // `reflection-comparator.rhai:141-175` 静默走兜底（`trader_conf=0.0`）。
+                        // 处置 = 镜像回顶层（verdict 保留、顶层已有值不覆盖）；
+                        // 判据与实现集中在 `axagent_harness::verdict_shape`，与引擎侧同源。
+                        // ⚠ 体积影响：镜像会让每个节点多一份 verdict 内容，由
+                        // `enforce_reflection_memory_budget` 的 36k 字符预算统一裁剪兜住。
+                        let content_value =
+                            axagent_harness::verdict_shape::mirror_verdict_fields_to_top(&parsed)
+                                .unwrap_or(parsed);
+                        node_obj.insert("content".into(), content_value);
                     }
                 }
             }
@@ -4467,6 +4480,7 @@ fn build_horizon_results_json(
 #[cfg(test)]
 mod market_snapshot_tests {
     use super::*;
+    use axagent_harness::AnalysisKind;
 
     fn sample() -> MarketSnapshot {
         MarketSnapshot {
@@ -4620,7 +4634,7 @@ mod market_snapshot_tests {
                 r#"{"_raw":{"trader":{"content":{"targetPrice": 120.0}}}}"#.to_string(),
             ),
             config_id: None,
-            analysis_kind: "live".to_string(),
+            analysis_kind: AnalysisKind::Live.as_storage().to_string(),
             as_of_date: Some("2026-08-01".to_string()),
             decision_time_horizon: Some("mid".to_string()),
             decision_horizon_source: None,

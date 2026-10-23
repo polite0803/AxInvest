@@ -602,6 +602,8 @@ describe("reconstructVerdictTag - __verdict_only 占位陈述不进呈现流", (
     const out = reconstructVerdictTag(
       JSON.stringify({ report: "占位", verdict: "看空", __verdict_only: true }),
     );
-    expect(out).toBe("<!-- VERDICT: 看空 -->");
+    // 2026-10-23（审计 F-3）：标量必须包成对象 —— 裸 `看空` 是非法 JSON，
+    // 前端 tryParseVerdictFormat 会整段解析失败并回落到关键词扫描。
+    expect(out).toBe('<!-- VERDICT: {"verdict":"看空"} -->');
   });
 });

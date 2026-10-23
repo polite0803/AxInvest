@@ -27,6 +27,7 @@
 
 use crate::decision_action::{normalize_action, ActionKind};
 use axagent_entities::stock_analyses;
+use axagent_harness::AnalysisKind;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
@@ -230,7 +231,7 @@ impl TradeIntentService {
             horizon_decisions: Set(None),
             blackboard_snapshot: Set(None),
             config_id: Set(None),
-            analysis_kind: Set("live".to_string()),
+            analysis_kind: Set(AnalysisKind::Live.as_storage().to_string()),
             as_of_date: Set(None),
             decision_time_horizon: Set(None),
             // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致
@@ -595,7 +596,7 @@ mod tests {
             horizon_decisions: Set(None),
             blackboard_snapshot: Set(None),
             config_id: Set(None),
-            analysis_kind: Set("live".to_string()),
+            analysis_kind: Set(AnalysisKind::Live.as_storage().to_string()),
             as_of_date: Set(None),
             decision_time_horizon: Set(None),
             // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致
@@ -671,7 +672,7 @@ mod tests {
             horizon_decisions: Set(None),
             blackboard_snapshot: Set(None),
             config_id: Set(None),
-            analysis_kind: Set("live".to_string()),
+            analysis_kind: Set(AnalysisKind::Live.as_storage().to_string()),
             as_of_date: Set(None),
             decision_time_horizon: Set(None),
             // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致
@@ -744,7 +745,7 @@ mod tests {
             horizon_decisions: Set(None),
             blackboard_snapshot: Set(None),
             config_id: Set(None),
-            analysis_kind: Set("live".to_string()),
+            analysis_kind: Set(AnalysisKind::Live.as_storage().to_string()),
             as_of_date: Set(None),
             decision_time_horizon: Set(None),
             // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致
@@ -832,7 +833,7 @@ mod tests {
             horizon_decisions: Set(None),
             blackboard_snapshot: Set(None),
             config_id: Set(None),
-            analysis_kind: Set("live".to_string()),
+            analysis_kind: Set(AnalysisKind::Live.as_storage().to_string()),
             as_of_date: Set(None),
             decision_time_horizon: Set(None),
             // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致

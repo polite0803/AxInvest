@@ -316,8 +316,8 @@ pub async fn load_pool_selection(
     };
     let analyzed_rows = stock_analyses::Entity::find()
         .filter(stock_analyses::Column::CreatedAt.gte(day_start_ms))
-        // 历史回放（replay / ab_test）的分析不算「当日已分析」
-        .filter(stock_analyses::Column::AnalysisKind.eq("live"))
+        // 历史回放（replay）的分析不算「当日已分析」
+        .filter(stock_analyses::Column::AnalysisKind.eq(axagent_harness::AnalysisKind::Live.as_storage()))
         .select_only()
         .column(stock_analyses::Column::StockCode)
         .group_by(stock_analyses::Column::StockCode)

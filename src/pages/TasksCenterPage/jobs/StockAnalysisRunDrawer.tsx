@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { actionKeyOfRecord } from "@/lib/stock-analysis-utils";
 import type { AnalysisSummary } from "@/types";
 import { Button, Descriptions, Drawer, Space } from "antd";
 import { useTranslation } from "react-i18next";
@@ -24,6 +25,8 @@ export function StockAnalysisRunDrawer({
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const raw = run?.raw as AnalysisSummary | undefined;
+  // 后端把空结论下发成 UNAVAILABLE 哨兵，直渲染原值会把内部 token 给用户看 ⇒ 与列表 Tag 同一判据
+  const actionKey = raw ? actionKeyOfRecord(raw) : null;
 
   return (
     <Drawer
@@ -69,7 +72,7 @@ export function StockAnalysisRunDrawer({
                 {
                   key: "action",
                   label: t("tasksCenter.pipelineDetail.action"),
-                  children: raw.decisionAction ?? "-",
+                  children: actionKey ? t(actionKey) : "-",
                 },
               ]}
             />

@@ -24,6 +24,10 @@ pub use decision_action::{
     normalize_to_cn, verdict_to_action,
 };
 
+// 记录来历（live / replay）。与上一行的 action 是**两个值域**，勿合并 —— 见该模块头。
+pub mod analysis_kind;
+pub use analysis_kind::{ANALYSIS_KIND_VALUES, AnalysisKind};
+
 // ── 定时任务持久化端口（cron_job.rs 的 DB 层下沉目标；见该模块头）──
 pub mod cron_persistence;
 
@@ -88,6 +92,7 @@ pub mod template_patch;
 pub mod types;
 pub mod url_utils;
 pub mod util_fns;
+pub mod verdict_shape;
 pub mod workflow_lifecycle;
 pub mod workflow_node_deserializer;
 pub mod workflow_types;

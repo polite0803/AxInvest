@@ -1,13 +1,17 @@
 import { invoke } from "@/lib/invoke";
 import { horizonSuffix } from "@/lib/stock-analysis-utils";
 import type {
+  CloseSweepReport,
+  HistoryBackfillReport,
+  MarketCoverage,
   MoverRecallEventReview,
   MoverRecallReviewReflection,
   MoverRecallRunMeta,
   MoverRecallRunView,
   MoverRecallView,
+  UniverseScanStats,
 } from "@/types/stock-analysis";
-import { Button, Card, Select, Space, Spin, Tag } from "antd";
+import { Button, Card, message, Select, Space, Spin, Tag } from "antd";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
@@ -69,6 +73,74 @@ export function MoverRecallPanel() {
   const [reviews, setReviews] = useState<
     Record<string, { loading: boolean; error: string | null; data: MoverRecallEventReview | null }>
   >({});
+  /** 阶段 0：全 A 股样本覆盖（申报总数 / 已枚举 / 最新收盘）。`null` = 取不到（不是 0）。 */
+  const [coverage, setCoverage] = useState<MarketCoverage | null>(null);
+  const [sampleAction, setSampleAction] = useState<"scan" | "sweep" | "history" | null>(null);
+
+  const loadCoverage = async () => {
+    try {
+      const c = await invoke<unknown>("get_market_coverage", {});
+      // 形状守卫：mock 兜底/契约漂移时不能让「拿不到」被读成 0 只，也不能让缺 closeDates 崩渲染
+      setCoverage(isCoverage(c) ? c : null);
+    } catch {
+      setCoverage(null);
+    }
+  };
+
+  const runSampleAction = async (
+    kind: "scan" | "sweep" | "history",
+    run: () => Promise<string>,
+  ) => {
+    setSampleAction(kind);
+    try {
+      message.success(await run());
+      await loadCoverage();
+      // 清单/收盘变了 ⇒ 轮次列表与现场视图都要重取
+      setListNonce((n) => n + 1);
+      setPayloadNonce((n) => n + 1);
+    } catch (e) {
+      message.error(detailOf(e));
+    } finally {
+      setSampleAction(null);
+    }
+  };
+
+  const fullMarketScan = () =>
+    runSampleAction("scan", async () => {
+      const r = await invoke<UniverseScanStats>("run_universe_code_scan", { shards: 1 });
+      return t("stockAnalysis.moverRecall.fullScanDone", {
+        registered: r?.registered ?? 0,
+        codes: r?.codesTried ?? 0,
+      });
+    });
+
+  const sweepLatestClose = () =>
+    runSampleAction("sweep", async () => {
+      const r = await invoke<CloseSweepReport>("sweep_market_close", {});
+      return t("stockAnalysis.moverRecall.sweepDone", {
+        written: r?.written ?? 0,
+        total: r?.universeSize ?? 0,
+        missing: r?.missingQuotes ?? 0,
+      });
+    });
+
+  const backfillHistory = () =>
+    runSampleAction("history", async () => {
+      const r = await invoke<HistoryBackfillReport>("backfill_market_close_history", {
+        limit: 500,
+      });
+      // 全失败不能伪装成「补齐」：把首条原因带回给用户（500/0/500 那次就是被这里吞掉的）
+      if ((r?.failed ?? 0) > 0) {
+        throw new Error(r?.error ?? `backfill failed: ${r?.failed ?? 0}`);
+      }
+      return (r?.requested ?? 0) === 0
+        ? t("stockAnalysis.moverRecall.backfillNone")
+        : t("stockAnalysis.moverRecall.backfillDone", {
+          codes: r?.codes ?? 0,
+          rows: r?.rows ?? 0,
+          failed: r?.failed ?? 0,
+        });
+    });
 
   const missKey = (stockCode: string, anchorDate: string, period: string): string =>
     `${stockCode}-${anchorDate}-${period}`;
@@ -222,6 +294,24 @@ export function MoverRecallPanel() {
         });
       } catch {
         if (!cancelled) { setReflow(null); }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [listNonce]);
+
+  // 阶段 0：全 A 股样本覆盖（申报总数/已枚举/最新收盘）——独立取，读失败只影响这一行。
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const c = await invoke<unknown>("get_market_coverage", {});
+        if (!cancelled) {
+          setCoverage(isCoverage(c) ? c : null);
+        }
+      } catch {
+        if (!cancelled) { setCoverage(null); }
       }
     })();
     return () => {
@@ -437,6 +527,64 @@ export function MoverRecallPanel() {
           </div>
         )
         : null}
+
+      {/* 阶段 0：全 A 股样本与采集动作。四个计数域分开写，不并排成可比。 */}
+      <div style={{ marginBottom: 8 }} data-testid="mover-sample">
+        <div style={{ color: "var(--color-text-secondary)" }}>
+          <strong>{t("stockAnalysis.moverRecall.sampleTitle")}</strong>
+          {" · "}
+          {coverage
+            ? t("stockAnalysis.moverRecall.sampleCounts", {
+              total: coverage.reportedTotal > 0 ? coverage.reportedTotal : "-",
+              enumerated: coverage.universeSize,
+              confirmed: coverage.confirmedByClist,
+              close: coverage.latestCloseCodes,
+              date: coverage.closeDates.length > 0
+                ? coverage.closeDates[coverage.closeDates.length - 1]
+                : "-",
+            })
+            : t("stockAnalysis.moverRecall.sampleCoverageUnknown")}
+        </div>
+        <Space size={6} wrap style={{ marginTop: 4 }}>
+          <Button
+            size="small"
+            loading={sampleAction === "scan"}
+            disabled={sampleAction !== null && sampleAction !== "scan"}
+            onClick={() => void fullMarketScan()}
+            title={t("stockAnalysis.moverRecall.fullScanHint")}
+          >
+            {t("stockAnalysis.moverRecall.fullScan")}
+          </Button>
+          <Button
+            size="small"
+            loading={sampleAction === "sweep"}
+            disabled={sampleAction !== null && sampleAction !== "sweep"}
+            onClick={() => void sweepLatestClose()}
+            title={t("stockAnalysis.moverRecall.sweepCloseHint")}
+          >
+            {t("stockAnalysis.moverRecall.sweepClose")}
+          </Button>
+          <Button
+            size="small"
+            loading={sampleAction === "history"}
+            disabled={sampleAction !== null && sampleAction !== "history"}
+            onClick={() => void backfillHistory()}
+            title={t("stockAnalysis.moverRecall.backfillHistoryHint")}
+          >
+            {t("stockAnalysis.moverRecall.backfillHistory")}
+          </Button>
+        </Space>
+        <div
+          style={{ color: "var(--color-text-tertiary)", fontSize: 11, marginTop: 2 }}
+          data-testid="mover-sample-hints"
+        >
+          {t("stockAnalysis.moverRecall.fullScanHint")}
+          {" · "}
+          {t("stockAnalysis.moverRecall.sweepCloseHint")}
+          {" · "}
+          {t("stockAnalysis.moverRecall.backfillHistoryHint")}
+        </div>
+      </div>
 
       {/* A-2：本轮账属于哪条链。混池轮次（分链改造之前落的）单独成句，不冒充某一链。 */}
       {data
@@ -893,6 +1041,19 @@ function missingFields(r: unknown): string[] {
     if (!Array.isArray(o[k])) { missing.push(k); }
   }
   return missing;
+}
+
+/** `get_market_coverage` 的形状守卫：缺计数/closeDates 即视为「取不到」，不渲染成 0。 */
+function isCoverage(c: unknown): c is MarketCoverage {
+  if (c == null || typeof c !== "object") {
+    return false;
+  }
+  const o = c as Record<string, unknown>;
+  return typeof o.universeSize === "number"
+    && typeof o.confirmedByClist === "number"
+    && typeof o.reportedTotal === "number"
+    && typeof o.latestCloseCodes === "number"
+    && Array.isArray(o.closeDates);
 }
 
 /** 后端错误按 `detail` 成句呈现（已是完整说明），非 JSON 时退回消息原文。 */

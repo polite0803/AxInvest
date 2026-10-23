@@ -1293,12 +1293,37 @@ pub(crate) fn role_id_to_display(id: &str) -> String {
 /// `value-investor` 的产出被 `value-verify` **原地覆写**（output_var 同名，v91 起的机制）
 /// ⇒ 其权威形态是 CodeNode 的 `{status, result: {report, verdict, ...}}`（`.result` 段），
 /// 与其他分析师的 `.content` 段不同 —— 路径按 base 分流（写错就是整段静默 Null）。
+///
+/// ⚠ **`.verdict.` 段对 value-investor 成立有前置条件**：v175（2026-10-23）起
+/// `value-verify.rhai` 的 `normalize_verdict_shape()` 把扁平的 `bull_score`/`bear_score`
+/// **镜像**进 `verdict` map。此前 value-investor 按 `value-investor.md`「输出格式」输出
+/// **扁平** JSON（`verdict` 是方向枚举**字符串**、打分在顶层）⇒ 本函数为它生成的
+/// `.verdict.{bull,bear}_score` 恒 `None`，`risk-agg` / `risk-con` / `risk-neu` 各 4 条
+/// 映射**全部静默失效**（2026-10-23 实测：日志 `Agent 节点 input_mapping 取不到值` × 12，
+/// 而这三个节点的 `context_sources` 故意不含 value-investor ⇒ 价值维度零信息）。
+/// ⇒ 改任一侧（归一函数 / 本函数路径）必须同时看另一侧，缺一即回到「静默 Null」。
+///
+/// ⚠ **第二重前置条件：边**（v176，2026-10-23）。形态对了也只有「上游**已完成**」才取得到
+/// （`context.variables` 是全量快照，见 `agent_executor` 的 `resolve_var_path` 用法）。
+/// 实测同一 execution 内 risk 三节点 10:25:15 求值、value-investor--mid 10:26:18 才完成
+/// ⇒ 即便 v175 归一就位，这次照样 12 条全 miss。修法在 seed：`value-verify--{mid,long}
+/// → risk-{agg,con,neu}` 六条显式边。**映射的「有路径」与「有边」是两件事，缺一不可。**
+///
+/// `exclude_bases`：按 base 排除**整族**实例的 bull/bear 键。目前只有一处传非空 ——
+/// `debate-convergence--{tier}` 必须排除 `value-investor`：后者在本图是辩论的**下游**
+/// （`seed:3933-3941` 的 `e-convergence-{vi_id}` 入边），给它补反向依赖必成环
+/// （v143 现网实测「Cycle detected」）。那两个档键在拓扑上**永远不可能**满足，
+/// 留着只会每次运行刷 4 条 `input_mapping 取不到值`。
 pub(crate) fn build_analyst_input_mapping(
     tiered: &[(&str, axagent_harness::holding_period::Period, &str, &str)],
+    exclude_bases: &[&str],
 ) -> std::collections::HashMap<String, String> {
     use std::collections::HashMap;
     let mut map = HashMap::new();
     for (base, p, ..) in tiered {
+        if exclude_bases.contains(base) {
+            continue;
+        }
         let node_id = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
         let root = if *base == "value-investor" {
             format!("{node_id}.result")
@@ -3399,6 +3424,93 @@ mod version_gate_tests {
                 .filter(|i| indeg[*i] > 0)
                 .map(|i| node_ids[i].as_str())
                 .collect::<Vec<_>>()
+        );
+    }
+
+    /// v176（2026-10-23）门禁：`input_mapping` 的源路径首段若引用**节点 id**，
+    /// 该节点必须是本节点的**祖先**，或出现在本节点 `context_sources` 里。
+    ///
+    /// 为什么需要这道门：`edges_of` 的文档已经写明「`input_mapping` 只声明『读谁』，
+    /// 不保证『它已跑完』—— 边的缺失是**独立**的一格失效面，必须由门单独看」，
+    /// 但此前**没有**这道门。2026-10-23 单次运行 39 条 `Agent 节点 input_mapping 取不到值`，
+    /// 其中 12 条正是「引用了一个永不等待的节点」（`risk-*` → `value-investor--*`，
+    /// 两条链之间零边；实测 risk 求值时 value 还没开始跑）。
+    ///
+    /// 判据是**必要**条件，不是充分条件：祖先关系成立也可能因上游慢而偶发取不到
+    /// （那属调度时序，`agent_executor` 已把这类降级为 info）；本门只抓「结构上永远不可能」。
+    #[tokio::test]
+    async fn input_mapping_sources_are_ancestors() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed(db).await.expect("种子化应成功");
+
+        let nodes = nodes_of(db).await;
+        let edges = edges_of(db).await;
+
+        let ids: std::collections::HashSet<String> = nodes
+            .iter()
+            .filter_map(|n| n.get("id").and_then(|v| v.as_str()).map(str::to_string))
+            .collect();
+
+        // target → sources（反向邻接，用于上溯祖先）
+        let mut parents: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for e in &edges {
+            let (Some(s), Some(t)) = (
+                e.get("source").and_then(|v| v.as_str()),
+                e.get("target").and_then(|v| v.as_str()),
+            ) else {
+                continue;
+            };
+            parents.entry(t.to_string()).or_default().push(s.to_string());
+        }
+
+        let mut violations: Vec<String> = Vec::new();
+        for n in &nodes {
+            let Some(id) = n.get("id").and_then(|v| v.as_str()) else { continue };
+            let Some(mapping) =
+                n.get("config").and_then(|c| c.get("input_mapping")).and_then(|m| m.as_object())
+            else {
+                continue;
+            };
+            let ctx: std::collections::HashSet<String> = n
+                .get("config")
+                .and_then(|c| c.get("context_sources"))
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+
+            // 祖先闭包（含传递，逐节点现算：图不大，代价可忽略）
+            let mut ancestors: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut stack = vec![id.to_string()];
+            while let Some(cur) = stack.pop() {
+                for p in parents.get(&cur).into_iter().flatten() {
+                    if ancestors.insert(p.clone()) {
+                        stack.push(p.clone());
+                    }
+                }
+            }
+
+            for source in mapping.values() {
+                let Some(source) = source.as_str() else { continue };
+                let root = source.split('.').next().unwrap_or("");
+                // 只看「首段确实是某个节点 id」的情形；模板变量（stock_code 等）不在此门职责内
+                if !ids.contains(root) || root == id {
+                    continue;
+                }
+                if ancestors.contains(root) || ctx.contains(root) {
+                    continue;
+                }
+                violations.push(format!("{id}  ←  {source}"));
+            }
+        }
+        violations.sort();
+        violations.dedup();
+        assert!(
+            violations.is_empty(),
+            "以下 input_mapping 引用的节点既不是祖先、也不在 context_sources ⇒ 运行时恒取不到\
+             （要么补边，要么删键）：\n{}",
+            violations.join("\n")
         );
     }
 

@@ -36,6 +36,7 @@
 use std::collections::HashSet;
 
 use axagent_entities::stock_analyses;
+use axagent_harness::AnalysisKind;
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter, QuerySelect,
 };
@@ -191,7 +192,7 @@ async fn resolved_replay_keys(
         .select_only()
         .column(stock_analyses::Column::StockCode)
         .column(stock_analyses::Column::AsOfDate)
-        .filter(stock_analyses::Column::AnalysisKind.eq("replay"))
+        .filter(stock_analyses::Column::AnalysisKind.eq(AnalysisKind::Replay.as_storage()))
         .filter(stock_analyses::Column::AsOfDate.is_not_null())
         .filter(stock_analyses::Column::Status.is_not_in(statuses.to_vec()))
         .into_model::<ReplayLite>()
@@ -395,7 +396,7 @@ mod tests {
             conversation_id: Set("test-conv".to_string()),
             status: Set(status.to_string()),
             parent_analysis_id: Set(parent.map(str::to_string)),
-            analysis_kind: Set("replay".to_string()),
+            analysis_kind: Set(AnalysisKind::Replay.as_storage().to_string()),
             as_of_date: Set(Some(as_of.to_string())),
             created_at: Set(now),
             updated_at: Set(now),

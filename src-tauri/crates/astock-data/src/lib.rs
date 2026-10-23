@@ -138,7 +138,7 @@ type VendorRef = (String, Box<dyn StockVendor>);
 /// 检查 HTTP 响应状态码，429 → DataError::RateLimited
 pub fn check_response_429(resp: &reqwest::Response, vendor: &str) -> Result<(), DataError> {
     if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        Err(DataError::RateLimited { vendor: vendor.to_string() })
+        Err(DataError::RateLimited { vendor: vendor.to_string(), reason: "HTTP 429".into() })
     } else {
         Ok(())
     }
@@ -802,7 +802,7 @@ impl AStockClient {
             Box::new(XueqiuVendor { http: http.clone(), token: xq_token }),
         );
         // 东方财富股吧（社交舆情数据源，无需认证）
-        self.register_vendor("guba", Box::new(GubaVendor::new(http.clone())));
+        self.register_vendor("guba", Box::new(GubaVendor::new()));
     }
 
     /// 修复 P0-A4: 返回 Result 的构造函数，调用方可自行处理 TLS 失败
@@ -1880,7 +1880,15 @@ impl AStockClient {
                 //   dragon_tiger 仅 eastmoney/baidu_stock 2 家 vendor，
                 //   eastmoney 返回 "HTTP request failed: error decoding response body"，
                 //   这是 eastmoney 接口变动或反爬升级的持续故障，重试无意义。
-                if names_to_try.len() <= 2 {
+                //
+                // 2026-10-22 给瞬态错误让路：`get_social_sentiment` 传了 max_retries=1，
+                // 但舆情路由只有 guba 一个源 ⇒ 这条短路让**声明过的那次重试从未执行**。
+                // 「源少 ⇒ 必为持续故障」这个代理对 HTML 抓页型通道不成立——实测现网 8/8
+                // 全成功，而库里 50 条股吧失败分散在 20+ 只不同股票、10-17 09:07 单分钟内
+                // 十几只同时失败，是批量并发下的站点拒绝。现在只有错误自带明确瞬态语义
+                // （429／reqwest 传输层，判据 `DataError::is_transient`）时才不短路，
+                // 接口改版那类持续故障仍按 V54 原行为立即上抛。
+                if names_to_try.len() <= 2 && !last_err.as_ref().is_some_and(|e| e.is_transient()) {
                     tracing::warn!(
                         "[retry-skip] {} {} 仅有 {} 个 vendor 且全部首次失败，跳过重试（预期为持续故障）",
                         route_key,
@@ -9586,5 +9594,67 @@ mod kline_adj_cache_tests {
                 assert!(raw.contains("v2:"), "K 线键升 v2 让旧 fwd 缓存整体失效: {raw}");
             })
             .await;
+    }
+}
+
+/// 单源路由的重试窗口（2026-10-22）。
+///
+/// `get_social_sentiment` 传了 `max_retries=1`，但舆情路由只有 guba 一个源
+/// （`social_sentiment: vec!["guba"]`，xueqiu 未实现舆情、默认实现返回 `Ok(vec![])`，
+/// 加进路由只会把「取不到」伪装成「零帖」）⇒ V54 的「vendor 数 ≤2 就跳过重试」
+/// 让那次**声明过的重试从未执行**。该代理对 HTML 抓页型通道不成立：现网 8/8 全成功，
+/// 而库里 50 条股吧失败分散在 20+ 只不同股票、10-17 09:07 单分钟内十几只同时失败。
+///
+/// 现在按错误性质分格，两格各钉一条断言：瞬态（429／传输层）放行重试，
+/// 结构类仍立即上抛。若把让路写成「对所有错误都放开」，第二格当场红。
+#[cfg(test)]
+mod single_source_retry_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    #[tokio::test]
+    async fn only_transient_errors_reach_the_declared_retry() {
+        for (kind, expected_calls) in [("transient", 2u32), ("structural", 1u32)] {
+            // 注册真 guba 实例但永不使用它 —— fetch_fn 忽略 vendor 实体，
+            // 本测试只钉路由层的重试窗口，零网络。
+            let mut client = AStockClient::new();
+            client.register_vendor("probe", Box::new(crate::vendors::guba::GubaVendor::new()));
+            let names = vec!["probe".to_string()];
+            let counter = Arc::new(AtomicU32::new(0));
+            let transient = kind == "transient";
+            let got: Result<Vec<u8>, DataError> = client
+                .try_vendors_retry("003029", "social_sentiment", &names, 1, |_name, _vendor| {
+                    let counter = counter.clone();
+                    Box::pin(async move {
+                        let n = counter.fetch_add(1, Ordering::SeqCst) + 1;
+                        if n == 1 {
+                            Err(if transient {
+                                DataError::RateLimited {
+                                    vendor: "probe".into(),
+                                    reason: "HTTP 429".into(),
+                                }
+                            } else {
+                                DataError::VendorError {
+                                    vendor: "probe".into(),
+                                    message: "页面结构变更".into(),
+                                }
+                            })
+                        } else {
+                            Ok(vec![7u8])
+                        }
+                    })
+                })
+                .await;
+            assert_eq!(
+                counter.load(Ordering::SeqCst),
+                expected_calls,
+                "{kind} 类的调用次数不符 ⇒ 重试窗口口径变了"
+            );
+            if transient {
+                assert!(got.is_ok(), "瞬态错误应靠声明过的那次重试拿到数据: {got:?}");
+            } else {
+                assert!(got.is_err(), "结构类故障不得重试（V54 原行为必须保住）");
+            }
+        }
     }
 }

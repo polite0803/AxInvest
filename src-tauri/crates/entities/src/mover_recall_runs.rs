@@ -24,6 +24,9 @@ pub struct Model {
     pub collected_days: i32,
     pub universe_size: i64,
     pub universe_confirmed: i64,
+    /// 行情源申报的全市场总数（`reported_total`）—— 面板的全 A 股分母。
+    /// NULL = 该列引入前的旧轮次（面板显示「未记录」，不拿 universe_size 冒充）。
+    pub reported_total: Option<i64>,
     /// 四档判据（Vec<TierRule> JSON）
     pub rules_json: String,
     /// 召回率（RecallRates JSON）

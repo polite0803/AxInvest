@@ -62,6 +62,12 @@ describe("ReplayWorkbench", () => {
     expect(screen.getByText(i18n.t("replayWorkbench.title"))).toBeInTheDocument();
   });
 
+  it("keeps the live/as-of anchor on the standalone page header", () => {
+    renderWithProviders();
+    // 回放工作台是独立整页（不在 InvestHub 内），仍需自带世界观切换
+    expect(document.querySelector('[data-testid="page-time-anchor"]')).toBeInTheDocument();
+  });
+
   it("does NOT pre-fill the date picker (forces re-selection)", async () => {
     useTimeAnchorStore.setState({ asOfDate: "2026-05-01", mode: "replay" });
     renderWithProviders();

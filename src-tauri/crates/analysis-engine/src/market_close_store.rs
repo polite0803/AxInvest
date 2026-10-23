@@ -25,7 +25,8 @@ use serde::Serialize;
 
 use axagent_astock_data::AStockClient;
 use axagent_entities::{
-    market_daily_close, market_stock_universe, stock_analyses, watchlist_items,
+    market_daily_close, market_stock_universe, market_universe_stats, stock_analyses,
+    watchlist_items,
 };
 
 /// 腾讯批量端点实测可完整兑现的批量（80 码/请求）；调用方可下调，不得凭经验上调。
@@ -51,6 +52,9 @@ pub struct CloseSweepReport {
     pub skipped_suspended: usize,
     /// 整批失败（网络/429）的批次数；非空 ⇒ 本轮数据不完整，不得当全量用
     pub failed_batches: usize,
+    /// 清单里有、但行情源**一个报价都没回**的代码数（≠ 停牌/无有效值）。
+    /// 让「全 A 股样本」的缺口显式可见，而不是只看 written < universe_size 猜原因。
+    pub missing_quotes: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,8 +75,12 @@ pub struct CoverageData {
     pub universe_size: i64,
     /// 清单里被 clist 全量确认过的票数（低于 universe_size ⇒ 枚举域由本地票拼出，不完整）
     pub confirmed_by_clist: i64,
+    /// 行情源申报的全市场总数（`market_universe_stats.reported_total`；0 = 还没拿到）
+    pub reported_total: i64,
     pub close_dates: Vec<String>,
     pub rows_per_date: Vec<i64>,
+    /// 最新收盘日的代码数（= 当日 `market_daily_close` 行数；行与 (code,date) 一对一）
+    pub latest_close_codes: i64,
 }
 
 /// 把批量返回的一行折算成待落库行；**无效输入返回 None（不落行、不补 0）**。
@@ -165,17 +173,37 @@ pub async fn backfill_close_history_for_codes(
     interval_ms: u64,
 ) -> Result<BackfillStats, String> {
     let now_ms = chrono::Utc::now().timestamp_millis();
+    // 只认**已收盘**交易日：盘中今天那根 K 线是半日数据，写进来会被当收盘价用
+    // （2026-10-23 12:19 实测：一次回补把 10-23 盘中价写成收盘，90 日窗口还多算一根）。
+    let now_local = chrono::Local::now();
+    let latest_completed = axagent_astock_data::daily_snapshot::snapshot_target_date(&now_local)
+        .unwrap_or_else(|| {
+            axagent_astock_data::calendar::previous_trading_day(
+                now_local.date_naive() - chrono::Duration::days(1),
+            )
+        });
+    let cutoff = latest_completed.format("%Y-%m-%d").to_string();
+    // 多取一根：接口返回包含今天（未收盘）那根时，剔除后仍能凑满 target_days 根已完成日线。
+    let fetch_days = target_days.saturating_add(1);
     let mut stats = BackfillStats::default();
     for (code, stock_name) in entries {
         stats.codes += 1;
-        let mut klines = match client.get_klines(code, "daily", target_days).await {
+        let mut klines = match client.get_klines(code, "daily", fetch_days).await {
             Ok(v) => v,
-            Err(_) => {
+            Err(e) => {
                 stats.failed += 1;
+                if stats.first_error.is_none() {
+                    stats.first_error = Some(format!("{code}: {e}"));
+                    // 只对首条打 warn：500 只全失败时逐条刷屏会把日志淹掉
+                    tracing::warn!("[close] 历史回补 {code} 失败（后续同类只计数）: {e}");
+                }
                 continue;
             },
         };
         klines.sort_by(|a, b| a.date.cmp(&b.date));
+        // 先剔除未收盘/未来的 bar，再截最近 target_days 根（顺序不能反：
+        // 先截会把已完成的最老一根挤掉，结果永远差一天、反复选中同一批）。
+        klines.retain(|k| k.date.as_str() <= cutoff.as_str());
         // 只保留最近 target_days 根：K 线接口的 limit 实测未生效（返回了 1996 年起的全历史，
         // 55k 行），写入侧自行截断，避免把「数据起点」和核查取数区间拖成十年。
         if klines.len() > target_days as usize {
@@ -217,6 +245,9 @@ pub async fn backfill_close_history_for_codes(
                 Ok(_) => stats.rows += chunk.len() as u32,
                 Err(e) => {
                     stats.failed += 1;
+                    if stats.first_error.is_none() {
+                        stats.first_error = Some(format!("{code}: 落库失败: {e}"));
+                    }
                     tracing::warn!("[close] {code} 历史回补失败: {e}");
                 },
             }
@@ -234,11 +265,13 @@ pub async fn backfill_close_history_for_codes(
     Ok(stats)
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct BackfillStats {
     pub codes: u32,
     pub rows: u32,
     pub failed: u32,
+    /// 首条失败原因（500 只全失败时用来诊断；后续同类只计数不刷屏）
+    pub first_error: Option<String>,
 }
 
 /// 选「历史行数不足 `target_days`」的票。
@@ -580,6 +613,7 @@ pub async fn run_close_sweep(
         skipped_no_data,
         skipped_suspended,
         failed_batches,
+        missing_quotes: universe_size.saturating_sub(rows_returned),
     })
 }
 
@@ -611,12 +645,22 @@ pub async fn load_market_coverage(
         *by_date.entry(r.trade_date).or_default() += 1;
     }
     let (close_dates, rows_per_date): (Vec<String>, Vec<i64>) = by_date.into_iter().unzip();
+    let latest_close_codes = rows_per_date.last().copied().unwrap_or(0);
+    let reported_total = market_universe_stats::Entity::find()
+        .order_by_desc(market_universe_stats::Column::ObservedAt)
+        .one(db)
+        .await
+        .map_err(|e| format!("读全市场申报总数失败: {e}"))?
+        .map(|r| r.reported_total)
+        .unwrap_or(0);
 
     Ok(CoverageData {
         universe_size: universe_size as i64,
         confirmed_by_clist: confirmed_by_clist as i64,
+        reported_total,
         close_dates,
         rows_per_date,
+        latest_close_codes,
     })
 }
 

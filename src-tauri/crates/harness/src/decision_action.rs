@@ -33,6 +33,31 @@
 //! 本模块提供**唯一**归一化入口。新增或修改值域必须在此登记；消费端只允许匹配
 //! `ActionKind`，不得再各自 `match` 字符串字面量（铁律：同名语义散成多套值域 ⇒
 //! 必有一处 fail-open）。
+//!
+//! ## 分档判据（2026-10-22 裁定：全局只能一处权威定义，且分档不得重叠、不得语义模糊）
+//!
+//! 八档按「变动意图 × 当前持仓」两轴定义，**互斥且穷尽** —— 任一记录只能落进一档：
+//!
+//! | 档 | 判据 | token | 中文 |
+//! |---|---|---|---|
+//! | [`ActionKind::Buy`] | 有变动意图 ∧ 目标仓位变动幅度 ≥ +T_hi | BUY | 买入 |
+//! | [`ActionKind::Increase`] | 有变动意图 ∧ 0 < 变动幅度 < +T_hi | INCREASE | 增持 |
+//! | [`ActionKind::Reduce`] | 有变动意图 ∧ -T_lo < 变动幅度 < 0 | REDUCE | 减持 |
+//! | [`ActionKind::Sell`] | 有变动意图 ∧ 变动幅度 ≤ -T_lo | SELL | 卖出 |
+//! | [`ActionKind::Hold`] | 无变动意图 ∧ **当前有仓位** | HOLD | 持有 |
+//! | [`ActionKind::Wait`] | 无变动意图 ∧ **当前无仓位** | WAIT | 观望 |
+//! | [`ActionKind::Uncertain`] | **有**决策数据但方向判不出 | UNCERTAIN | 不确定 |
+//! | [`ActionKind::Unavailable`] | **无**决策数据（DB 空 / 取数链路失败） | UNAVAILABLE | 数据缺失 |
+//!
+//! 三条硬规矩（`scripts/check-decision-action-single-source.mjs` 按此对账五面载体）：
+//!
+//! 1. 兜底不得占用业务档名：「判不出」一律 `Uncertain`、「没数据」一律 `Unavailable`，
+//!    不得写 `Wait` / `Hold` —— 那正是历史上「观望」一词同时表示「无仓位不加仓」与
+//!    「先验不可得」两义的成因，也是 6 行 `持有+EMPTY` / `观望+HOLDING` 矛盾记录的成因。
+//! 2. 后置规则（风控否决 / 封顶 / 降级）只允许改变「变动意图与幅度」，档名仍按上表两轴
+//!    产出；改写来历走 `actionSource` 字段，由呈现层成句说明，不靠档名表达。
+//! 3. 别名（加仓 / 减仓 / 清仓 / 强烈买入 / 英文 token…）是**解析入口**不是档位，
+//!    只允许登记在本模块的 [`ACTION_ALIASES`] 与 [`normalize_action`] 里。
 
 use serde::{Deserialize, Serialize};
 
@@ -120,6 +145,15 @@ impl ActionKind {
     /// 是否隐含「建仓 / 加仓」意图。
     pub fn implies_buy(self) -> bool {
         matches!(self, Self::Buy | Self::Increase)
+    }
+    /// 是否隐含「降低多头敞口」意图（减持 / 卖出）。
+    ///
+    /// 与 [`Self::implies_buy`] 对称且互斥（同一档不可能两者皆真）。此前消费端各自写
+    /// `matches!(action, "卖出" | "减持")`，只认中文 —— 链路上 action 一旦是英文 token
+    /// 或别名（`SELL` / `clear` / `强烈卖出`），回环否决与丢档判定**静默不触发**
+    /// （与模块头记的 `apply_risk_veto` fail-open 同一失效机制）。
+    pub fn implies_reduce(self) -> bool {
+        matches!(self, Self::Reduce | Self::Sell)
     }
 
     /// 是否为「没有操作意图」的档位（观望 / 不确定 / 缺失）。
@@ -295,5 +329,97 @@ mod tests {
         assert!(ActionKind::Increase.implies_buy());
         assert!(!ActionKind::Hold.implies_buy());
         assert!(ActionKind::Unavailable.is_no_action());
+    }
+
+    /// 「建仓」与「降敞口」两谓词必须互斥，且英文 token / 别名经归一后同样命中 ——
+    /// 消费端因此只需调谓词，不必再各自 `matches!(action, "卖出" | "减持")` 比字面量。
+    #[test]
+    fn 买卖谓词互斥且别名同样命中() {
+        let all = [
+            ActionKind::Buy,
+            ActionKind::Increase,
+            ActionKind::Hold,
+            ActionKind::Wait,
+            ActionKind::Reduce,
+            ActionKind::Sell,
+            ActionKind::Uncertain,
+            ActionKind::Unavailable,
+        ];
+        for k in all {
+            assert!(!(k.implies_buy() && k.implies_reduce()), "{:?} 同时命中建仓与降敞口", k);
+        }
+        assert!(ActionKind::Sell.implies_reduce());
+        assert!(ActionKind::Reduce.implies_reduce());
+        assert!(!ActionKind::Hold.implies_reduce());
+        assert!(!ActionKind::Wait.implies_reduce());
+        for raw in ["SELL", "clear", "强烈卖出", "TRIM", "减仓"] {
+            assert_eq!(normalize_action(raw).map(ActionKind::implies_reduce), Some(true), "{raw}");
+        }
+        for raw in ["BUY", "加仓", "strong_buy"] {
+            assert_eq!(normalize_action(raw).map(ActionKind::implies_buy), Some(true), "{raw}");
+        }
+    }
+
+    /// 裁定「分档不得重叠」的机器化形式：八档的 token 与中文标签都必须**一一对应**，
+    /// 任何两档共用同一个 token 或同一个中文，界面与库就会出现「同一个词两义」。
+    #[test]
+    fn 八档的token与中文标签一一对应无重复() {
+        let all = [
+            ActionKind::Buy,
+            ActionKind::Increase,
+            ActionKind::Hold,
+            ActionKind::Wait,
+            ActionKind::Reduce,
+            ActionKind::Sell,
+            ActionKind::Uncertain,
+            ActionKind::Unavailable,
+        ];
+        let tokens: Vec<&str> = all.iter().map(|k| k.as_token()).collect();
+        let cn: Vec<&str> = all.iter().map(|k| k.as_storage_cn()).collect();
+        assert_eq!(
+            tokens.iter().collect::<std::collections::HashSet<_>>().len(),
+            8,
+            "token 有重复档"
+        );
+        assert_eq!(
+            cn.iter().collect::<std::collections::HashSet<_>>().len(),
+            8,
+            "中文标签有重复档"
+        );
+        // 六档「操作建议」的 as_cn 必须与 as_storage_cn 同字；两哨兵档必须无 as_cn
+        // （as_cn 有值 = 会被当成一条可执行建议下发）
+        for k in all {
+            match k.as_cn() {
+                Some(label) => assert_eq!(label, k.as_storage_cn(), "{:?} 两套中文不一致", k),
+                None => assert!(
+                    matches!(k, ActionKind::Uncertain | ActionKind::Unavailable),
+                    "{:?} 是操作档却没有中文，值域清单会漏它",
+                    k
+                ),
+            }
+        }
+    }
+
+    /// 裁定「兜底不得占用业务档名」：判不出与没数据各有自己的档，且都不隐含持仓方向。
+    #[test]
+    fn 兜底两档不占业务档名() {
+        assert_eq!(normalize_action("无法判断"), Some(ActionKind::Uncertain));
+        assert_eq!(normalize_action("数据缺失"), Some(ActionKind::Unavailable));
+        for k in [ActionKind::Uncertain, ActionKind::Unavailable] {
+            assert!(k.is_no_action(), "{:?} 不得被当成有操作意图", k);
+            assert!(!k.implies_long(), "{:?} 不得隐含持有多头", k);
+            assert!(!k.implies_buy(), "{:?} 不得隐含建仓意图", k);
+        }
+        // 无法识别的值必须返回 None 由调用方显式处置，不得默认落到「观望」
+        assert_eq!(normalize_action("待明日观察"), None);
+    }
+
+    /// 两轴定义的可判性：持有隐含有多头、观望不隐含 —— 这正是「无变动意图」两档的分流依据。
+    #[test]
+    fn 持有与观望按持仓状态分流() {
+        assert!(ActionKind::Hold.implies_long());
+        assert!(!ActionKind::Wait.implies_long());
+        assert!(!ActionKind::Hold.implies_buy());
+        assert!(!ActionKind::Wait.implies_buy());
     }
 }

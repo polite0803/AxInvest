@@ -41,6 +41,7 @@
 use axagent_astock_data::FinancialReport;
 
 use super::types::{GateBlockedPick, Period, RecoPick};
+use crate::decision_action::{normalize_action, ActionKind};
 
 /// P1 回环否决的有效窗口（天）：更早的分析视为过期 —— 财报/行情会变，
 /// 三个月前的「卖出」不该永久封杀一只票。与 `stock_analyses.created_at`（毫秒）比较。
@@ -93,7 +94,8 @@ pub fn analysis_veto_reason(
             continue;
         }
         let action = entry.get(period.as_str()).and_then(|v| v.as_str())?;
-        if action == "卖出" || action == "减持" {
+        // 权威谓词判方向（旧写法只认中文，`SELL` / `clear` / `强烈卖出` 一律漏过）
+        if normalize_action(action).is_some_and(ActionKind::implies_reduce) {
             return Some(format!("analysis_veto_{}:{}", period.as_str(), action));
         }
         return None;

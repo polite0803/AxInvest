@@ -416,7 +416,10 @@ function flattenVerdictReport(data: ValueReportData): ValueReportData {
   if (keys.length > 0) {
     const merged: ValueReportData = { ...data };
     for (const k of keys) {
-      if (k !== "report" && !(k in data) || data[k as keyof ValueReportData] === undefined) {
+      // 2026-10-23（审计 F-4）：补括号锁住意图。原式 `A && B || C` 因 `&&` 优先级高于 `||`
+      // 实际算作 `(A && B) || C` —— `report` 例外会被 `C` 旁路（`data.report === undefined`
+      // 时仍写入），与上方注释「只提升顶层没有的键」不符。
+      if (k !== "report" && (!(k in data) || data[k as keyof ValueReportData] === undefined)) {
         (merged as Record<string, unknown>)[k] = verdict[k];
       }
     }

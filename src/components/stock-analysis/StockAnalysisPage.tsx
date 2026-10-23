@@ -1,5 +1,6 @@
 import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettings";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { useShowAdvancedPanels } from "@/components/stock-workspace/_shared/useSimpleMode";
 import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
 import { cleanToolCallTags, extractLlmField } from "@/lib/agentOutput";
 import { invoke } from "@/lib/invoke";
@@ -177,6 +178,9 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
   //   - 跳过  InvestDashboard idle 态（外层控制何时开始分析）
   //   - 保留  sa-tabs、搜索栏、进度条、内容面板
   const isInWorkspace = embeddedInWorkspace ?? useLocation().pathname.startsWith("/workspace");
+  // 次级信息（共识 / 实验轨迹 / 证据审计 / 调试）跟随工作区的简洁↔专业密度；
+  // 判据（含「没有开关就恒展开」）单一收在 useShowAdvancedPanels。
+  const showAdvancedPanels = useShowAdvancedPanels(isInWorkspace);
   const [activeTab, setActiveTab] = useState("market");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetTab, setSheetTab] = useState("trade");
@@ -540,33 +544,37 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
                     )}
                 </button>
               )}
-              {/* Debug 面板切换按钮 — 始终可见 */}
-              <button
-                className="text-xs px-2 py-0.5 rounded cursor-pointer hover:opacity-80 transition-opacity"
-                style={{
-                  background: showDebug ? "#7c3aed" : "rgba(124,58,237,0.12)",
-                  color: showDebug ? "#fff" : "#a78bfa",
-                  border: "1px solid rgba(124,58,237,0.3)",
-                  fontWeight: 500,
-                }}
-                onClick={() => setShowDebug(!showDebug)}
-                title={t("stockAnalysis.debugPanel.toggleTitle")}
-              >
-                🔍 {showDebug ? t("stockAnalysis.debugPanel.hide") : t("stockAnalysis.debugPanel.show")}
-              </button>
+              {/* Debug 面板属于专业工具 —— 简洁密度下不占位 */}
+              {showAdvancedPanels && (
+                <button
+                  data-testid="sa-debug-toggle"
+                  className="text-xs px-2 py-0.5 rounded cursor-pointer hover:opacity-80 transition-opacity"
+                  style={{
+                    background: showDebug ? "#7c3aed" : "rgba(124,58,237,0.12)",
+                    color: showDebug ? "#fff" : "#a78bfa",
+                    border: "1px solid rgba(124,58,237,0.3)",
+                    fontWeight: 500,
+                  }}
+                  onClick={() => setShowDebug(!showDebug)}
+                  title={t("stockAnalysis.debugPanel.toggleTitle")}
+                >
+                  🔍 {showDebug ? t("stockAnalysis.debugPanel.hide") : t("stockAnalysis.debugPanel.show")}
+                </button>
+              )}
             </div>
 
             {/* Decision hero (full width, at top) — outside flex row to avoid layout shift */}
             {status === "completed" && (
               <div style={{ margin: "0 16px 12px 16px" }}>
                 <DecisionBanner embeddedInWorkspace={isInWorkspace} />
-                {/* Analyst consensus summary */}
-                <AnalystConsensusBar />
-                {/* Experiment trail */}
-                <ExperimentTrail />
-                <EvidenceCitationPanel
-                  analysisId={analysisId ?? ""}
-                />
+                {/* 次级信息（共识 / 实验轨迹 / 证据审计）—— 专业密度才展开 */}
+                {showAdvancedPanels && (
+                  <div data-testid="sa-advanced-summary">
+                    <AnalystConsensusBar />
+                    <ExperimentTrail />
+                    <EvidenceCitationPanel analysisId={analysisId ?? ""} />
+                  </div>
+                )}
               </div>
             )}
 
@@ -823,10 +831,9 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
               )}
 
               {
-                /* 数据源健康仪表盘 — 所有模式下未选股时可见（2026-08-01 去掉 isInWorkspace 限制，
-                  工作区模式下此前完全看不到健康面板） */
+                /* 数据源健康仪表盘 — 诊断向内容，专业密度才显示（未选股时仍可见） */
               }
-              {!stockCode && (
+              {!stockCode && showAdvancedPanels && (
                 <div className="p-2">
                   <VendorHealthDashboard />
                 </div>

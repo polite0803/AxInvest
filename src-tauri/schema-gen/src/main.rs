@@ -29,7 +29,6 @@ use axagent_harness::workflow_types::{
 use schemars::schema_for;
 use std::fs;
 use std::path::Path;
-use std::time::SystemTime;
 use ts_rs::TS;
 
 fn main() {
@@ -129,7 +128,14 @@ fn generate_workflow_schema(out_dir: &Path) {
     md.push_str("\n## 关键字段说明\n\n");
     let schema_val: serde_json::Value =
         serde_json::from_str(&schema_str).expect("Schema 生成：反序列化 schema JSON 失败");
-    let defs = schema_val["definitions"].as_object().expect("Schema 生成：definitions 应为 object");
+    // `definitions` 在「没有共享子 schema」时整个键缺席（schemars 的行为），旧写法直接
+    // `.expect("definitions 应为 object")` ⇒ mode "all" 每次当场 panic、后面的 ipc-types
+    // 永远跑不到（本工具接不进 CI 的直接原因）。缺席就如实写一行，不 panic。
+    let empty_defs = serde_json::Map::new();
+    let defs = schema_val.get("definitions").and_then(|v| v.as_object()).unwrap_or(&empty_defs);
+    if defs.is_empty() {
+        md.push_str("（本 schema 无共享 definitions）\n\n");
+    }
     for (name, def) in defs {
         let title = def["title"].as_str().unwrap_or(name);
         let desc = def["description"].as_str().unwrap_or("");
@@ -236,6 +242,19 @@ fn generate_ipc_types(out_dir: &Path) {
     output.push_str("// 不在前端运行时直接引用，故禁用 no-unused-vars 规则。\n");
     output.push_str("// oxlint-disable no-unused-vars\n\n");
 
+    // 基础类型必须**由生成器输出**：下面的 DTO 引用 `MessageRole` / `JsonValue`，而这两条
+    // 此前只存在于已提交的 ipc.ts 里（= 手改生成物）。一旦谁重新生成，产物就编译不过
+    // —— 本次接字节级漂移门时正是这样现形的（`tsc` 报 Cannot find name 'MessageRole'）。
+    output.push_str(
+        "// ============================================================================\n",
+    );
+    output.push_str("// 基础类型（补充定义）\n");
+    output.push_str(
+        "// ============================================================================\n\n",
+    );
+    output.push_str("type MessageRole = \"system\" | \"user\" | \"assistant\" | \"tool\";\n\n");
+    output.push_str("type JsonValue =\n  | string\n  | number\n  | boolean\n  | null\n  | JsonValue[]\n  | { [key: string]: JsonValue };\n\n");
+
     output.push_str(
         "// ============================================================================\n",
     );
@@ -285,7 +304,9 @@ fn generate_ipc_types(out_dir: &Path) {
     output.push_str(
         "// ============================================================================\n\n",
     );
-    output.push_str(&format!("// Generated at: {:?}\n", SystemTime::now()));
+    // ⚠ 这里**不放生成时间戳**（旧实现写过 `// Generated at: SystemTime{…}`）：
+    //   一行每次都变的内容会让「在库生成物 == 重新生成结果」这类字节比对永远红，
+    //   于是 CI 接不进生成通路（每次跑都脏一个文件）—— 这正是它长期不被检查的成因。
     output.push_str(&format!("// Total DTO types: {}\n", IPC_DTO_TYPES.len()));
 
     let output_path = out_dir.join("ipc.ts");
@@ -345,39 +366,90 @@ fn generate_event_names(out_dir: &Path) {
 }
 
 /// 检查前端类型定义与后端 DTO 的同步状态
+/// 生成物漂移检查 —— **失败必须让进程非零退出**。
+///
+/// 旧实现只 `eprintln!` 警告、永不返回非零，且判据仅是「类型名有没有出现在生成文件里」
+/// ⇒ 接进 CI 只会得到一道恒绿门（少一个字段、类型改名、生成器改行为，它全看不见）。
+/// 现在除了名字在不在，还做**字节级比对**：把两个生成物重跑到临时目录，与在库版本逐字节比。
+///
+/// 字节比对成立的前提是**生成过程确定性**（头部注释是常量、无时间戳，ts-rs 按声明序输出）。
+/// 将来谁给生成器加了时间戳，这条门会当场红，而不是静默失去覆盖面。
 fn run_check(ts_types_dir: &Path) {
     eprintln!("Checking Tauri IPC type synchronization...");
+    let mut failures: Vec<String> = Vec::new();
 
+    // 1) 注册表里的每个 DTO 都必须出现在生成的 ipc.ts 中（漏登记 ⇒ 该类型前端拿不到）
     let generated_path = ts_types_dir.join("ipc.ts");
-    if !generated_path.exists() {
-        eprintln!("⚠️  生成的 IPC 类型文件不存在: {}", generated_path.display());
-        eprintln!("   请先运行: cargo run -p schema-gen -- ipc-types");
-    } else {
-        let generated_content = fs::read_to_string(&generated_path)
-            .unwrap_or_else(|e| format!("读取生成文件失败: {}", e));
-
-        let mut missing_types = Vec::new();
-
-        for (dto_name, _module) in IPC_DTO_TYPES {
-            if !generated_content.contains(&dto_name.to_string()) {
-                missing_types.push(format!("{}: 未在生成的 ipc.ts 中找到类型定义", dto_name));
+    match fs::read_to_string(&generated_path) {
+        Ok(content) => {
+            for (dto_name, _module) in IPC_DTO_TYPES {
+                if !content.contains(&dto_name.to_string()) {
+                    failures.push(format!(
+                        "ipc.ts 里没有类型 `{dto_name}`（注册表 IPC_DTO_TYPES 有它）"
+                    ));
+                }
             }
-        }
-
-        if missing_types.is_empty() {
-            eprintln!("✅ Tauri IPC 类型同步检查通过");
-            eprintln!("   共检查 {} 个 DTO 类型", IPC_DTO_TYPES.len());
-        } else {
-            eprintln!("⚠️  发现 {} 个类型同步问题:", missing_types.len());
-            for issue in &missing_types {
-                eprintln!("   - {}", issue);
-            }
-            eprintln!();
-            eprintln!("   建议: 运行 'cargo run -p schema-gen -- ipc-types' 重新生成类型定义");
-        }
+        },
+        Err(e) => failures.push(format!("读不到在库生成物 {}: {e}", generated_path.display())),
     }
 
-    check_event_names_sync(ts_types_dir);
+    // 2) 事件名契约
+    check_event_names_sync(ts_types_dir, &mut failures);
+
+    // 3) 字节级：在库版本 == 现在重跑一遍的版本
+    check_generated_drift(ts_types_dir, &mut failures);
+
+    if failures.is_empty() {
+        eprintln!(
+            "✅ 生成物与权威一致（注册表 {} 个 DTO + 事件名 + 字节级比对）",
+            IPC_DTO_TYPES.len()
+        );
+        return;
+    }
+    eprintln!(
+        "❌ 生成物漂移 {} 项 —— 跑 `cargo run -p schema-gen -- all` 重新生成：",
+        failures.len()
+    );
+    for f in &failures {
+        eprintln!("   - {f}");
+    }
+    std::process::exit(1);
+}
+
+/// 把两个前端消费的生成物重跑到临时目录，与在库版本逐字节比对。
+fn check_generated_drift(ts_types_dir: &Path, failures: &mut Vec<String>) {
+    let tmp = std::env::temp_dir().join(format!("schema-gen-check-{}", std::process::id()));
+    if let Err(e) = fs::create_dir_all(&tmp) {
+        failures.push(format!("无法创建临时比对目录 {}: {e}", tmp.display()));
+        return;
+    }
+    generate_ipc_types(&tmp);
+    generate_event_names(&tmp);
+    for name in ["ipc.ts", "events.ts"] {
+        let committed = ts_types_dir.join(name);
+        let fresh = tmp.join(name);
+        let (Ok(old), Ok(new)) = (fs::read_to_string(&committed), fs::read_to_string(&fresh))
+        else {
+            failures.push(format!("{name}: 在库版本或重生成版本读不到"));
+            continue;
+        };
+        if old != new {
+            let line = old
+                .lines()
+                .zip(new.lines())
+                .position(|(a, b)| a != b)
+                .map(|i| i + 1)
+                .unwrap_or_else(|| old.lines().count().max(new.lines().count()));
+            failures.push(format!(
+                "{name} 与生成器输出不一致（首个差异在第 {line} 行；在库 {} 字节 vs 重跑 {} 字节）",
+                old.len(),
+                new.len()
+            ));
+        }
+    }
+    if let Err(e) = fs::remove_dir_all(&tmp) {
+        eprintln!("⚠️  临时比对目录未清理（不影响判定）: {} — {e}", tmp.display());
+    }
 }
 
 /// 校验 `src/types/generated/events.ts` 与 `IpcEventName` 逐项一致
@@ -385,15 +457,15 @@ fn run_check(ts_types_dir: &Path) {
 /// 判据用「枚举成员的 `"name",` 行是否都出现在生成物中」而不是整文件字节比对：
 /// 前者对生成器的注释措辞改动容忍，后者一旦改注释就报「脏」，
 /// 会让维护者习惯性重跑而不看差异（门禁的出口不严比没有更糟）。
-fn check_event_names_sync(ts_types_dir: &Path) {
+fn check_event_names_sync(ts_types_dir: &Path, failures: &mut Vec<String>) {
     let events_path = ts_types_dir.join("events.ts");
-    if !events_path.exists() {
-        eprintln!("⚠️  生成的事件名文件不存在: {}", events_path.display());
-        eprintln!("   请先运行: cargo run -p schema-gen -- event-names");
-        return;
-    }
-
-    let actual = fs::read_to_string(&events_path).unwrap_or_default();
+    let actual = match fs::read_to_string(&events_path) {
+        Ok(s) => s,
+        Err(e) => {
+            failures.push(format!("读不到在库生成物 {}: {e}", events_path.display()));
+            return;
+        },
+    };
     let missing: Vec<&str> = axagent_harness::IpcEventName::ALL
         .iter()
         .map(|e| e.as_str())
@@ -406,11 +478,8 @@ fn check_event_names_sync(ts_types_dir: &Path) {
             axagent_harness::IpcEventName::ALL.len()
         );
     } else {
-        eprintln!("⚠️  events.ts 落后于 IpcEventName，缺失 {} 个成员:", missing.len());
         for name in &missing {
-            eprintln!("   - {name}");
+            failures.push(format!("events.ts 落后于 IpcEventName，缺成员 `{name}`"));
         }
-        eprintln!();
-        eprintln!("   建议: 运行 'cargo run -p schema-gen -- event-names' 重新生成");
     }
 }

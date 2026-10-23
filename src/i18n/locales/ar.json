@@ -15183,11 +15183,11 @@
       "confidenceNoteLabel": "ملاحظة الثقة",
       "sourceHint": "أُنشئ بواسطة عقدة تفسير القرار بناءً على الحكم النهائي لبوابة المخاطر. للاطلاع البحثي فقط."
     },
-    "actionBuy": "Buy",
-    "actionSell": "Sell",
-    "actionIncrease": "Increase",
-    "actionHold": "Hold",
-    "actionReduce": "Reduce",
+    "actionBuy": "شراء",
+    "actionSell": "بيع",
+    "actionIncrease": "زيادة الشراء",
+    "actionHold": "الاحتفاظ",
+    "actionReduce": "تقليل",
     "actionWait": "انتظار",
     "recentAnalysis": "Recent Analysis",
     "targetPriceNote": "Target ¥{{price}}",
@@ -15209,6 +15209,9 @@
     "finalStrength": "القوة النهائية",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "تحليل سريع",
+    "provenanceReplay": "إعادة",
+    "provenanceReplayWithDate": "إعادة · {{date}}",
+    "provenanceUnknown": "مصدر غير معروف",
     "interrupted": {
       "title": "لم يُنتج هذا التحليل أي نتيجة",
       "hint": "تمت مقاطعة السجل قبل اكتمال التحليل (إغلاق التطبيق أو انتهاء العملية بشكل غير طبيعي)، ولم يتم إنشاء أي قرار. استخدم الزر أدناه لإعادة التشغيل."
@@ -15219,6 +15222,19 @@
       "failed": "فشل",
       "timeout": "انتهت المهلة",
       "cancelled": "ملغى"
+    },
+    "historyFilter": {
+      "keywordPlaceholder": "ابحث بالاسم أو الرمز",
+      "statusLabel": "الحالة",
+      "actionLabel": "القرار",
+      "all": "الكل",
+      "loadedTotal": "{{total}} سجلًا",
+      "loadedPartial": "تم تحميل {{count}} سجلًا…",
+      "capped": "تم تحميل {{count}} سجلًا (بلغ الحد الأقصى لكل جولة)؛ قد توجد سجلات أقدم",
+      "loadMore": "تحميل المزيد",
+      "loadFailed": "تعذّر تحميل السجلات",
+      "showingTotal": "عرض {{shown}} من {{total}} سجلًا",
+      "noMatch": "لا توجد سجلات مطابقة للمرشحات (تم تحميل {{total}})"
     },
     "templateVersion": {
       "matched": "إصدار المخطط: قاعدة البيانات v{{db}} يطابق الكود v{{code}}",
@@ -15391,9 +15407,6 @@
       "confirmDelete": "هل تريد حذف هذا الأمر المشروط؟",
       "thresholdPct": "العتبة (%)",
       "actionNotify": "إشعار فقط",
-      "actionSell": "بيع",
-      "actionBuy": "شراء",
-      "actionReduce": "تقليل",
       "actionValueQty": "الكمية",
       "actionValueRatio": "النسبة",
       "coolDown": "فتور (دقيقة)",
@@ -15850,7 +15863,20 @@
       "chain_reco": "التوصية الذكية",
       "chain_serenity": "اختيار الاتجاه",
       "chain_unlabeled": "بلا سلسلة (جولة قديمة)",
-      "chainUnlabeledNote": "هذه الجولة سابقة لفصل السلاسل، لذا حُسبت التوصية والاختيار معًا؛ لا تُقرأ كسجل لإحدى السلسلتين."
+      "chainUnlabeledNote": "هذه الجولة سابقة لفصل السلاسل، لذا حُسبت التوصية والاختيار معًا؛ لا تُقرأ كسجل لإحدى السلسلتين.",
+      "sampleTitle": "عينة A-shares كاملة",
+      "sampleCounts": "السوق {{total}} · المُعدَّد {{enumerated}} · المؤكد {{confirmed}} · آخر إغلاق {{close}} ({{date}})",
+      "sampleCoverageUnknown": "قراءة التغطية غير متاحة: إجمالي السوق/أحدث إغلاق غير معروف (ليس 0)",
+      "fullScan": "مسح كامل للرموز",
+      "fullScanHint": "امسح جميع مقاطع رموز A-shares وسجّل القائمة (≈800+ طلب)؛ تجنّب نوافذ live",
+      "fullScanDone": "اكتمل المسح: مسجّل {{registered}} / مفحوص {{codes}} رمزًا",
+      "sweepClose": "تحديث آخر إغلاق",
+      "sweepCloseHint": "يُجمع آخر يوم تداول مغلق فقط (بعد 15:00)؛ تُرفض الطلبات أثناء الجلسة؛ استخدم استكمال تاريخ النافذة للتواريخ السابقة",
+      "sweepDone": "صفوف الإغلاق المكتوبة {{written}} / القائمة {{total}}؛ بلا تسعير {{missing}}",
+      "backfillHistory": "استكمال تاريخ النافذة",
+      "backfillHistoryHint": "حتى 500 رمز × 90 يوم تداول لكل دفعة؛ السوق الكامل نحو 12 دفعة — أعد حتى requested=0",
+      "backfillDone": "اكتمل التاريخ: {{codes}} رمزًا / {{rows}} صفًا / {{failed}} فشل",
+      "backfillNone": "تاريخ هذه الدفعة مكتمل (لا رموز للاستكمال)"
     },
     "export": {
       "analystReports": "Analyst Reports",

@@ -737,6 +737,8 @@ struct SelectionStats {
     scanned: usize,
     skipped_by_share: usize,
     skipped_by_period: usize,
+    /// 窗口起点早于所属核查轮次 `date_from` ⇒ 伪窗口（历史回补稀疏行），不进补分析。
+    skipped_by_window: usize,
 }
 
 /// 阈值与 share 必须同为 0-1 归一化占比。缺占比信息（null/无字段）不拦截。
@@ -759,7 +761,13 @@ fn empty_selection_message(stats: SelectionStats, threshold: f64) -> String {
     if stats.skipped_by_period > 0 {
         reasons.push(format!("{} 个事件的档位无法解析", stats.skipped_by_period));
     }
-    let classified = stats.skipped_by_share + stats.skipped_by_period;
+    if stats.skipped_by_window > 0 {
+        reasons.push(format!(
+            "{} 个事件的窗口起点早于所属轮次 date_from（历史回补稀疏行，伪窗口）",
+            stats.skipped_by_window
+        ));
+    }
+    let classified = stats.skipped_by_share + stats.skipped_by_period + stats.skipped_by_window;
     if classified < stats.scanned {
         reasons.push(format!("{} 个原因未记录", stats.scanned - classified));
     }
@@ -774,6 +782,9 @@ async fn select_events(
     let shares = mover_recall_events::load_run_unexplained_shares(db)
         .await
         .map_err(|e| format!("读核查轮次 unexplained 占比失败: {e}"))?;
+    let date_froms = mover_recall_events::load_run_date_froms(db)
+        .await
+        .map_err(|e| format!("读核查轮次 date_from 失败: {e}"))?;
     let rows = mover_recall_events::list_candidate_event_rows(
         db,
         request.run_id.as_deref(),
@@ -809,6 +820,13 @@ async fn select_events(
             continue;
         }
         let m = group.into_iter().next().expect("group 非空");
+        // 伪窗口：窗口起点早于该轮核查的数据起点 ⇒ 历史回补稀疏行拼出来的事件，不补分析。
+        if let Some(from) = date_froms.get(&m.run_id) {
+            if m.window_start.as_str() < from.as_str() {
+                stats.skipped_by_window += 1;
+                continue;
+            }
+        }
         let period = match m.period.parse::<Period>() {
             Ok(p) => p,
             Err(e) => {
@@ -982,7 +1000,12 @@ mod cron_config_tests {
     #[test]
     fn empty_selection_message_names_each_skip_reason() {
         let msg = empty_selection_message(
-            SelectionStats { scanned: 4, skipped_by_share: 2, skipped_by_period: 1 },
+            SelectionStats {
+                scanned: 4,
+                skipped_by_share: 2,
+                skipped_by_period: 1,
+                skipped_by_window: 0,
+            },
             0.5,
         );
         assert!(msg.contains("2 个所属轮次 unexplained 占比 ≥ 50%"), "实得 {msg}");

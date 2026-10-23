@@ -55,6 +55,12 @@ describe("ComparePage", () => {
     await settle();
   });
 
+  it("does not render its own live/as-of anchor (Hub title bar is the single mode layer)", async () => {
+    const { container } = renderWithRouter();
+    expect(container.querySelector('[data-testid="page-time-anchor"]')).toBeNull();
+    await settle();
+  });
+
   it("renders CompareView and PeersPanel in vertical stack", async () => {
     const { container } = renderWithRouter();
     const body = container.querySelector(".space-y-4");

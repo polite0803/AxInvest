@@ -15659,6 +15659,9 @@
     "sentimentNeutral": "Neutral",
     "sharesUnit": "shares",
     "fastAnalysis": "Fast Analysis",
+    "provenanceReplay": "Replay",
+    "provenanceReplayWithDate": "Replay · {{date}}",
+    "provenanceUnknown": "Unknown source",
     "interrupted": {
       "title": "This analysis produced no conclusion",
       "hint": "This record was interrupted before the analysis finished (the app exited or the process ended abnormally), so no decision was produced. Use the button below to run it again."
@@ -15669,6 +15672,19 @@
       "failed": "Failed",
       "timeout": "Timed out",
       "cancelled": "Cancelled"
+    },
+    "historyFilter": {
+      "keywordPlaceholder": "Search stock name or code",
+      "statusLabel": "Status",
+      "actionLabel": "Decision",
+      "all": "All",
+      "loadedTotal": "{{total}} records",
+      "loadedPartial": "Loaded {{count}} records…",
+      "capped": "Loaded {{count}} records (per-round cap reached); older records may remain",
+      "loadMore": "Load more",
+      "loadFailed": "Failed to load records",
+      "showingTotal": "Showing {{shown}} of {{total}} records",
+      "noMatch": "No records match the filters ({{total}} loaded)"
     },
     "templateVersion": {
       "matched": "Graph version: DB v{{db}} matches code v{{code}}",
@@ -15808,9 +15824,6 @@
       "confirmDelete": "Delete this conditional order?",
       "thresholdPct": "Threshold (%)",
       "actionNotify": "Notify only",
-      "actionSell": "Sell",
-      "actionBuy": "Buy",
-      "actionReduce": "Reduce",
       "actionValueQty": "Quantity",
       "actionValueRatio": "Ratio",
       "coolDown": "Cooldown (min)",
@@ -16094,7 +16107,20 @@
       "chain_reco": "Smart recommendation",
       "chain_serenity": "Trend screening",
       "chain_unlabeled": "No chain (older run)",
-      "chainUnlabeledNote": "This run predates the per-chain split: its numbers pool smart recommendation and trend screening together, so they are not either chain's account."
+      "chainUnlabeledNote": "This run predates the per-chain split: its numbers pool smart recommendation and trend screening together, so they are not either chain's account.",
+      "sampleTitle": "Full A-share sample",
+      "sampleCounts": "Market {{total}} · enumerated {{enumerated}} · confirmed {{confirmed}} · latest close {{close}} ({{date}})",
+      "sampleCoverageUnknown": "Coverage unavailable: full-market/latest-close counts unknown (not 0)",
+      "fullScan": "Full code scan",
+      "fullScanHint": "Scan every A-share code segment and register the universe (≈800+ requests); avoid live windows",
+      "fullScanDone": "Scan done: registered {{registered}} / tried {{codes}} codes",
+      "sweepClose": "Sweep latest close",
+      "sweepCloseHint": "Only the latest completed trading day (after 15:00) is collected; intraday requests are rejected; use window-history backfill for past dates",
+      "sweepDone": "Close rows written {{written}} / universe {{total}}; no quote {{missing}}",
+      "backfillHistory": "Backfill window history",
+      "backfillHistoryHint": "Up to 500 codes × 90 trading days per batch; a full market needs ~12 batches — repeat until requested=0",
+      "backfillDone": "History backfilled: {{codes}} codes / {{rows}} rows / {{failed}} failed",
+      "backfillNone": "History already complete for this batch (no codes to backfill)"
     },
     "export": {
       "analystReports": "Analyst Reports",

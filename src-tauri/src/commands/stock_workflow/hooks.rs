@@ -17,7 +17,8 @@
 //!   （工作区路径原 spawn 内增强块已迁移至此）。
 //! - `stock-analysis-persist`（post_exec）：结果持久化。业务封装路径已
 //!   自行持久化（input 带 `analysis_id` 标记），钩子跳过；对话直执行路径
-//!   由钩子创建 `stock_analyses` 记录（analysis_kind="chat"）+ 反思 pending 占位。
+//!   由钩子创建 `stock_analyses` 记录（`source="chat"`、`analysis_kind="live"` ——
+//!   该列只分「带不带 as-of」，通道归 source）+ 反思 pending 占位。
 //!
 //! 注册：启动期 `register_stock_analysis_hooks`（init/state.rs）。
 
@@ -32,7 +33,7 @@ use crate::commands::stock_workflow::decision::{
 use axagent_astock_data::AStockClient;
 use axagent_entities::stock_analyses;
 use axagent_harness::workflow_types::Variable;
-use axagent_harness::{HookExecContext, HookOutcome, Period, WorkflowLifecycleHook};
+use axagent_harness::{AnalysisKind, HookExecContext, HookOutcome, Period, WorkflowLifecycleHook};
 use axagent_rt_workflow::work_engine::WorkEngine;
 use sea_orm::DatabaseConnection;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
@@ -1212,7 +1213,10 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
                 serde_json::to_string(&outcome.results).unwrap_or_else(|_| "{}".to_string()),
             )),
             config_id: Set(None),
-            analysis_kind: Set("chat".into()),
+            // 2026-10-23 归位：本通道**不写** `analysis_kind="chat"` —— 该列只答「带不带 as-of」，
+            // 通道是谁由下面 `source = "chat"` 唯一承担（同一行两处记同一件事 = 重叠定义，
+            // 且实体注释本来就写明这个分工）。本行的 as_of_date 恒为今日 ⇒ 实况。
+            analysis_kind: Set(AnalysisKind::Live.as_storage().into()),
             as_of_date: Set(Some(chrono::Utc::now().format("%Y-%m-%d").to_string())),
             // A4：chat 通道（cognitive）决策落库 —— 不经过 `workflow_templates`，
             // 故无「公式版本」可言。⚠ 注意本行**是**有 blackboard_snapshot 的（见上），
@@ -1258,7 +1262,7 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
 
         // ── [B1 借鉴] 两阶段协议：决策成功时写 stock_reflections pending row ──
         // ⚠ 锚点用 `Utc::now()` 在本路径是**正确的**，不要照抄 `core.rs` 的 as-of 修法：
-        // 本 hook 是**对话直执行通道**（`analysis_kind = "chat"`，见上方 `:828`），
+        // 本 hook 是**对话直执行通道**（`source = "chat"`，见上方 `:828`），
         // 由用户当下提问触发，**不存在重放/as-of 语义** ⇒ today 就是分析锚点。
         // 而 `core.rs` 的 `run_stock_workflow_inner` 支持 `as_of_date` 重跑，
         // 那里若用 `now()` 会让 `hindsight_date` 落到未来、令反思以未来为 AS_OF 锚点

@@ -56,7 +56,10 @@ pub struct Model {
     pub horizon_decisions: Option<String>,
     pub blackboard_snapshot: Option<String>,
     pub config_id: Option<String>,
-    /// Time-travel mode: 'live' | 'replay' | 'ab_test'
+    /// 记录来历：`live` / `replay` —— 值域权威在 `harness::analysis_kind`
+    /// （`ANALYSIS_KIND_VALUES` / DB CHECK / 前端徽标三处都以它为准）。
+    /// 本列**只分「带不带 as-of」**；「谁触发的」走下面的 `source` 列，两列不得互串
+    /// （曾有的 `ab_test` 无生产者、`chat` 写在本列属重叠，均已退役 —— 见该模块头）。
     #[sea_orm(default_value = "live")]
     pub analysis_kind: String,
     /// Time-travel mode: replay 模式的数据截止日 (YYYY-MM-DD)

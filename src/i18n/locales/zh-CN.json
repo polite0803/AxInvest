@@ -15455,6 +15455,9 @@
     "searchPlaceholder": "输入股票代码或名称",
     "parsedAs": "识别为",
     "fastAnalysis": "快速分析",
+    "provenanceReplay": "历史回放",
+    "provenanceReplayWithDate": "历史回放 · {{date}}",
+    "provenanceUnknown": "来源未知",
     "interrupted": {
       "title": "本次分析未产出结论",
       "hint": "该记录在分析跑完前被中断（应用退出或进程异常结束），没有生成任何决策。可点击下方按钮重新发起分析。"
@@ -15465,6 +15468,19 @@
       "failed": "失败",
       "timeout": "超时",
       "cancelled": "已取消"
+    },
+    "historyFilter": {
+      "keywordPlaceholder": "搜索股票名称或代码",
+      "statusLabel": "状态",
+      "actionLabel": "结论",
+      "all": "全部",
+      "loadedTotal": "共 {{total}} 条",
+      "loadedPartial": "已加载 {{count}} 条…",
+      "capped": "本次已加载 {{count}} 条，已达单次上限，可能还有更早的记录",
+      "loadMore": "继续加载",
+      "loadFailed": "记录加载失败",
+      "showingTotal": "显示 {{shown}} / 共 {{total}} 条",
+      "noMatch": "没有符合筛选条件的记录（已加载 {{total}} 条）"
     },
     "templateVersion": {
       "matched": "图版本：库内 v{{db}} 与代码 v{{code}} 一致",
@@ -16043,7 +16059,20 @@
       "chain_reco": "智能荐股",
       "chain_serenity": "趋势智选",
       "chain_unlabeled": "未分链（旧轮次）",
-      "chainUnlabeledNote": "这一轮落在分链改造之前，是智能荐股与趋势智选的混池口径 ⇒ 不能当成任何一条链单独的账。"
+      "chainUnlabeledNote": "这一轮落在分链改造之前，是智能荐股与趋势智选的混池口径 ⇒ 不能当成任何一条链单独的账。",
+      "sampleTitle": "全 A 股样本",
+      "sampleCounts": "全市场 {{total}} 只 · 已枚举 {{enumerated}} · 确认 {{confirmed}} · 最新收盘 {{close}}（{{date}}）",
+      "sampleCoverageUnknown": "覆盖读数取不到：全市场/最新收盘数暂不可知（不是 0）",
+      "fullScan": "全量段扫",
+      "fullScanHint": "按全部 A 股代码段扫描并登记清单（约 800+ 请求）；避开 live 时间窗",
+      "fullScanDone": "段扫完成：登记 {{registered}} / 扫描 {{codes}} 码",
+      "sweepClose": "补最新收盘",
+      "sweepCloseHint": "只采最近一个已收盘交易日（15:00 后）；盘中会被拒绝；历史日期用「补窗口历史」",
+      "sweepDone": "收盘落库 {{written}} / 清单 {{total}}；无报价 {{missing}}",
+      "backfillHistory": "补窗口历史",
+      "backfillHistoryHint": "每批最多 500 只 × 90 个交易日；全市场约 12 批，重复点击直到 requested=0",
+      "backfillDone": "历史补齐：{{codes}} 只 / {{rows}} 行 / 失败 {{failed}}",
+      "backfillNone": "本批历史已齐（无可补代码）"
     },
     "export": {
       "analystReports": "分析师报告",
@@ -17001,9 +17030,6 @@
       "confirmDelete": "删除这条条件单？",
       "thresholdPct": "阈值(%)",
       "actionNotify": "仅通知",
-      "actionSell": "卖出",
-      "actionBuy": "买入",
-      "actionReduce": "减仓",
       "actionValueQty": "股数",
       "actionValueRatio": "比例",
       "coolDown": "冷却(分)",

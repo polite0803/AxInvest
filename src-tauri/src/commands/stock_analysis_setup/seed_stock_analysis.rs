@@ -1556,7 +1556,40 @@ type AlgoToolRow = (
 ///   ⚠ 门值取 **172 而不是 171**：现网已被 171 播种过一次，门读 `previous_version < 门值` ⇒
 ///   用 171 时那批库的 `previous_version` 恰为 171，条件不成立、覆写永不发生。
 ///   承载覆写的版本号必须**严格大于**已被播种掉的版本号。
-pub const TEMPLATE_VERSION: i32 = 173; // v173: 四份档模板 rhai 透传 icStatus/icZeroed
+/// **v173 → v174**：反思对比脚本对「不确定」与「观望」同等豁免（`opposite_direction`
+///   冲突兜底由「观望」改判「不确定」，见 PLAN-decision-action-single-source.md R-DA-2）。
+///
+/// **v174 → v175（2026-10-23）**：`value-verify.rhai` 增加 verdict **形态归一**
+///   背景：`value-investor.md`「输出格式」的契约是**扁平 JSON**（`verdict` 是方向枚举
+///   **字符串**、`bull_score`/`bear_score` 在**顶层**），而全仓消费端都按**嵌套**取
+///   （`build_analyst_input_mapping` 的 `{node}.result.verdict.{bull,bear}_score`、
+///   前端 `AnalystReportCard` / `AnalystReportGrid` / `stock-analysis/utils.ts` 的提升读法）
+///   ⇒ 实证后果①：`risk-agg` / `risk-con` / `risk-neu` 各 4 条 `input_mapping` 全部
+///   静默失效（日志 `Agent 节点 input_mapping 取不到值` × 12），而这三个节点的
+///   `context_sources` **故意不含** value-investor ⇒ 价值维度对风险评估**零信息**；
+///   后果②：`reconstruct_verdict_text`（Rust）/ `reconstructVerdictTag`（TS）把字符串
+///   verdict 直接拼进 `<!-- VERDICT: … -->` ⇒ 前端 `tryParseVerdictFormat` 解析失败，
+///   计票退化到关键词扫描（同一份报告两种结论）。
+///   处置：`value-verify` 是估值链唯一确定性出口，把九个业务字段**镜像**进 `verdict` map；
+///   顶层字段**一个不删**（`ValueAssessmentPanel.flattenVerdictReport` / 导出仍按顶层读）；
+///   map 内已有值不覆盖（LLM 若本就嵌套，尊重其口径）；留 `verdict_shape` + 审计痕迹。
+///   ⚠ **不改任何数值与措辞**（纯形态改动）；但 `.rhai` 经 `include_str!` 嵌入节点 `code`
+///   ⇒ 属模板内容，**必须换代**，否则存量库版本门 `existing.version >= 175 ⇒ skip`
+///   让归一永不生效（与 v170 那条「改了图内容却没 bump」同型）。
+/// **v175 → v176（2026-10-23）**：A 类「`input_mapping` 声明了依赖但图里没有等待边」修复
+///   （审计 `AUDIT-run-warnings-2026-10-23.md`）。实证：单次运行 39 条
+///   `Agent 节点 input_mapping 取不到值`，其中 12 条 value-investor 档键的成因**不是形态**
+///   （v175 已修），而是**时序** —— 同一 execution 内 risk 三节点 10:25:15 求值，
+///   `value-investor--mid` 10:26:18 才 completed。`context.variables` 是全量快照
+///   ⇒ 上游跑完就取得到，取不到就是没等到；而 `grep 'e-value'` 零命中 ⇒ 两链之间没有边。
+///   ① `value-verify--{mid,long} → risk-{agg,con,neu}` 补六条显式等待边（保留映射）；
+///   ② `debate-convergence--{tier}` 的映射**排除** value-investor 两档键 —— 它是辩论的
+///      **下游**，补边必成环（v143 现网「Cycle detected」），那两个键拓扑上永不可满足；
+///   ③ `v-validate` 断言路径 `t-risk.output` → `t-risk.result`（ToolNode 无 `output` 字段，
+///      否则即便补上 `exists` 断言分支仍恒 false，属"改了个永不生效的判据"式假修复）。
+///   ⚠ **会改变运行期行为**（risk 现在真的会等 value-verify；v-validate 从恒 Skipped 变为可 pass），
+///     且图内容变了 ⇒ **必须换代**。
+pub const TEMPLATE_VERSION: i32 = 176; // v176: A 类补边（value-verify→risk 六条）+ debate 排除 value 档键 + v-validate 断言路径订正
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -4392,7 +4425,12 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             // 纯决策节点：tools 默认为空（agent 闭包），无需工具调用轮次
             a.config.max_tool_rounds = Some(0);
             a.config.output_mode = OutputMode::Json; // 输出结构化 JSON，确保 consensus_score / aggregate_prediction 被 input_mapping 解析
-            a.config.input_mapping = build_analyst_input_mapping(&tier_instances_for(&tiered, *p));
+            // ⚠ v176（2026-10-23）：**排除 value-investor** —— 它是本档辩论的**下游**
+            //   （`e-convergence-{vi_id}` 入边），给它补反向依赖必成环（见 3933-3941 的 v143 事故）。
+            //   ⇒ 本档两个档键在拓扑上永远不可能满足，留着每次运行必刷
+            //   `input_mapping 取不到值`（2026-10-23 实测 debate-convergence--{mid,long} 各 2 条）。
+            a.config.input_mapping =
+                build_analyst_input_mapping(&tier_instances_for(&tiered, *p), &[VALUE_INVESTOR_ID]);
             // #1 修复(2026-07-22): debate-convergence 上下文极大
             // (6 轮辩手 + 30 个 input_mapping 结构化字段, ~15k-20k input tokens),
             // LLM 处理大上下文 TTFB 偶发 >120s 触发 stream chunk timeout。
@@ -4707,6 +4745,21 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         //   仅保留 `e-{vi_id}-research-mgr` 会让两者竞态（value-verify 与 research-mgr
         //   同为 value-investor 的下游，可并行调度）⇒ research-mgr 可能读到未覆写的 LLM 原值。
         edges.push(edge(&format!("e-{vv_id}-research-mgr"), &vv_id, "research-mgr"));
+        // ── v176（2026-10-23）：三个风险视角 ← 本档 value-verify 的**显式等待边** ──
+        // 背景：`build_analyst_input_mapping(&tiered)` 给 risk-agg/con/neu 生成了全档键，
+        //   其中 `value-investor--{mid,long}.result.verdict.{bull,bear}_score` 此前**没有任何边**
+        //   ⇒ 引擎并行调度时 risk 早于 value 完成就求值，12 条映射静默失效。
+        //   实证（2026-10-23 运行，同 execution `edf041e7`）：risk 三节点 10:25:15 求值，
+        //   而 value-investor--mid 10:26:18 才 completed（--long 10:27:51）。
+        // 为什么不成环：risk 与 value 同属 `debate-convergence` 的**下游兄弟**
+        //   （risk 经 `e-convergence-p-risk-assess`，value 经 `e-convergence-{vi_id}`），
+        //   两条链在 portfolio-mgr 汇合而非互相指向；`seeded_main_graph_is_acyclic` 按 Kahn 现算复核。
+        // ⚠ 等的是 **value-verify**（CodeNode 覆写后才有 `.result` 包装），不是 value-investor。
+        // ⚠ 不把 value 报告正文加进 risk 的 `context_sources`：风险视角的价值维度本就由
+        //   `t-valuation`（算法结论）承担，加全文会让 prompt 多 2~3k 字且与算法口径重复。
+        for rid in ["risk-agg", "risk-con", "risk-neu"] {
+            edges.push(edge(&format!("e-{vv_id}-{rid}"), &vv_id, rid));
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -4906,7 +4959,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 // v161：收敛节点已逐档实例化（`debate-convergence--{档}`）⇒ 单值消费点取**代表档（mid）**，
                 // 与文件内既有代表实例规则（`a-*` 的 mid 优先、value-verify 的代表实例）同口径。
                 // 「逐档四注 + 按所选档 switch」是后续裁定，本轮不引入第五套参数。
-                let mut m = build_analyst_input_mapping(&tiered);
+                // v176（2026-10-23）：risk 三视角**保留** value-investor 两档键 ——
+                //   已由 `value-verify--{mid,long} → risk-*` 六条边保证可达（见 value-verify 构造段），
+                //   与 debate-convergence 的处置相反（那里必须排除，成环）。
+                let mut m = build_analyst_input_mapping(&tiered, &[]);
                 // 注入辩论收敛的 consensus_score 供 Kelly 公式使用
                 // 路径规则（V29 修复）：AgentNode 输出包裹在 {role, content: <json_string>, ...} 中，
                 // resolve_var_path 遇到 Value::String 会自动 from_str 解析后再继续下钻，
@@ -5389,7 +5445,13 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             assertions: vec![ValidationAssertion {
                 assertion_type: "exists".into(),
                 expected: None,
-                actual: Some("t-risk.output".into()),
+                // v176（2026-10-23）：原为 `t-risk.output` —— ToolNode 的输出形态是
+                // `{tool_name, result, node_id}`（`tool_executor.rs:142-155`），**没有**
+                // `output` 字段 ⇒ 即使补上 `exists` 分支（同日修的 C 类）该路径仍恒不可解析，
+                // v-validate 依旧恒 Skipped（"改了个永不生效的判据"式假修复）。
+                // `.result` 才是工具返回体；t-risk 失败时该键缺失 ⇒ exists=false ⇒ on_fail=skip，
+                // 与节点注释（`continue_on_fail` 那段）声明的语义一致。
+                actual: Some("t-risk.result".into()),
                 expression: None,
             }],
             on_fail: "skip".into(),

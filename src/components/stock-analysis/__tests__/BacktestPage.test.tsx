@@ -39,6 +39,11 @@ describe("BacktestPage", () => {
     expect(title?.textContent).toBe("stockAnalysis.backtest.title");
   });
 
+  it("does not render its own live/as-of anchor (Hub title bar is the single mode layer)", () => {
+    const { container } = renderWithRouter();
+    expect(container.querySelector('[data-testid="page-time-anchor"]')).toBeNull();
+  });
+
   it("renders BacktestPanel and HistoricalAnalysisPanel in vertical stack", () => {
     const { container } = renderWithRouter();
     // 页面使用 Tabs，analysis 标签下的内容被 lazy-render，

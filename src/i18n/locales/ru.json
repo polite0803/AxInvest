@@ -15183,11 +15183,11 @@
       "confidenceNoteLabel": "Пояснение уверенности",
       "sourceHint": "Сформировано узлом-объяснителем на основе итогового вердикта риск-контроля. Только для справки."
     },
-    "actionBuy": "Buy",
-    "actionSell": "Sell",
-    "actionIncrease": "Increase",
-    "actionHold": "Hold",
-    "actionReduce": "Reduce",
+    "actionBuy": "Купить",
+    "actionSell": "Продать",
+    "actionIncrease": "Докупить",
+    "actionHold": "Держать",
+    "actionReduce": "Сократить",
     "actionWait": "Подождать",
     "recentAnalysis": "Recent Analysis",
     "targetPriceNote": "Target ¥{{price}}",
@@ -15209,6 +15209,9 @@
     "finalStrength": "Итоговая сила",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "Быстрый анализ",
+    "provenanceReplay": "Воспроизведение",
+    "provenanceReplayWithDate": "Воспроизведение · {{date}}",
+    "provenanceUnknown": "Источник неизвестен",
     "interrupted": {
       "title": "Этот анализ не дал заключения",
       "hint": "Запись была прервана до завершения анализа (приложение закрыто или процесс завершился аварийно), решение не сформировано. Нажмите кнопку ниже, чтобы запустить анализ снова."
@@ -15219,6 +15222,19 @@
       "failed": "Ошибка",
       "timeout": "Тайм-аут",
       "cancelled": "Отменено"
+    },
+    "historyFilter": {
+      "keywordPlaceholder": "Поиск по названию или коду",
+      "statusLabel": "Статус",
+      "actionLabel": "Решение",
+      "all": "Все",
+      "loadedTotal": "Всего записей: {{total}}",
+      "loadedPartial": "Загружено записей: {{count}}…",
+      "capped": "Загружено {{count}} записей (достигнут лимит); возможны более старые",
+      "loadMore": "Загрузить ещё",
+      "loadFailed": "Не удалось загрузить записи",
+      "showingTotal": "Показано {{shown}} из {{total}} записей",
+      "noMatch": "Нет записей по фильтрам (загружено {{total}})"
     },
     "templateVersion": {
       "matched": "Версия графа: в БД v{{db}} совпадает с кодом v{{code}}",
@@ -15391,9 +15407,6 @@
       "confirmDelete": "Удалить эту условную заявку?",
       "thresholdPct": "Порог (%)",
       "actionNotify": "Только уведомить",
-      "actionSell": "Продать",
-      "actionBuy": "Купить",
-      "actionReduce": "Сократить",
       "actionValueQty": "Кол-во",
       "actionValueRatio": "Доля",
       "coolDown": "Пауза (мин)",
@@ -15850,7 +15863,20 @@
       "chain_reco": "Умная рекомендация",
       "chain_serenity": "Отбор по тренду",
       "chain_unlabeled": "Без цепочки (старый прогон)",
-      "chainUnlabeledNote": "Этот прогон сделан до разделения по цепочкам: рекомендация и отбор посчитаны вместе, поэтому это не счёт какой-то одной цепочки."
+      "chainUnlabeledNote": "Этот прогон сделан до разделения по цепочкам: рекомендация и отбор посчитаны вместе, поэтому это не счёт какой-то одной цепочки.",
+      "sampleTitle": "Полная выборка A-shares",
+      "sampleCounts": "Рынок {{total}} · перечислено {{enumerated}} · подтверждено {{confirmed}} · последнее закрытие {{close}} ({{date}})",
+      "sampleCoverageUnknown": "Покрытие недоступно: общее число рынка/последнее закрытие неизвестны (не 0)",
+      "fullScan": "Полное сканирование кодов",
+      "fullScanHint": "Сканировать все сегменты кодов A-share и зарегистрировать список (≈800+ запросов); избегать live-окон",
+      "fullScanDone": "Сканирование завершено: зарегистрировано {{registered}} / проверено {{codes}} кодов",
+      "sweepClose": "Добрать последнее закрытие",
+      "sweepCloseHint": "Собирается только последний завершённый торговый день (после 15:00); внутридневные запросы отклоняются; для прошлых дат используйте добор истории окна",
+      "sweepDone": "Строк закрытия записано {{written}} / список {{total}}; без котировки {{missing}}",
+      "backfillHistory": "Дополнить историю окна",
+      "backfillHistoryHint": "До 500 кодов × 90 торговых дней за пакет; весь рынок ≈12 пакетов — повторять до requested=0",
+      "backfillDone": "История дополнена: {{codes}} кодов / {{rows}} строк / {{failed}} ошибок",
+      "backfillNone": "История этого пакета уже полная (нет кодов для добора)"
     },
     "export": {
       "analystReports": "Analyst Reports",

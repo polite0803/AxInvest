@@ -33,7 +33,11 @@ pub struct DashboardReport {
     // ── 1. 核心结论 ──
     /// 核心结论：一句话总结（如 "AI 服务器 HDI 核心供应商，业绩高增长，短期获利盘压力"）
     pub core_conclusion: String,
-    /// 决策动作（6 档中文）：强烈买入 / 买入 / 增持 / 持有 / 减持 / 卖出
+    /// 决策动作（中文，取自 `ActionKind::as_storage_cn`）。
+    ///
+    /// ⚠ 本值域**不是**独立的一套：报告生成期出现过「强烈买入」的六档阶梯，
+    /// 现经 `as_storage_cn` 折入「买入 / 卖出」（`ActionKind::Buy` 的文档即写明含强烈买入），
+    /// 落库与前端拿到的只有权威八档中文。
     pub action: String,
     /// 综合评分（0-100）
     pub score: u32,
@@ -300,7 +304,10 @@ pub fn fill_missing_with_placeholders(report: &mut DashboardReport) {
         report.core_conclusion = "—".to_string();
     }
     if report.action.is_empty() {
-        report.action = "持有".to_string();
+        // 缺失不得伪装成结论：此前补「持有」，与同文件 `check_report_completeness`
+        // 把空 action 报成缺失字段自相矛盾，且让「没有决策」的记录在界面上显示成一条
+        // 可执行建议。改判权威哨兵（裁定：分档不得重叠、不得语义模糊）。
+        report.action = ActionKind::Unavailable.as_storage_cn().to_string();
     }
     if report.trend.is_empty() {
         report.trend = "震荡".to_string();
@@ -449,7 +456,9 @@ mod tests {
         report.trend = String::new();
         fill_missing_with_placeholders(&mut report);
         assert!(report.integrity_passed);
-        assert_eq!(report.action, "持有");
+        // 期望随裁定改：空 action 补「持有」= 把「没有决策」伪装成可执行建议，
+        // 现补权威哨兵的中文形态（缺失不是结论）
+        assert_eq!(report.action, "数据缺失");
         assert_eq!(report.trend, "震荡");
         assert_eq!(report.core_conclusion, "—");
     }

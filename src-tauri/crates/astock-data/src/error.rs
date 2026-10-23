@@ -8,8 +8,13 @@ pub enum DataError {
     #[error("JSON parse error: {0}")]
     ParseError(String),
 
-    #[error("Rate limit exceeded from {vendor}")]
-    RateLimited { vendor: String },
+    /// 限流／频控。
+    ///
+    /// `reason` 保留**具体形态**：429 状态码只是限流的一种表现，股吧这类 HTML 抓页通道
+    /// 的限流表现为「HTTP 200 但站点不给列表页」。归成限流之后如果只剩一句
+    /// "Rate limit exceeded from guba"，上游条目反而比归因前更不可诊断。
+    #[error("Rate limit exceeded from {vendor}: {reason}")]
+    RateLimited { vendor: String, reason: String },
 
     #[error("Vendor error from {vendor}: {message}")]
     VendorError { vendor: String, message: String },
@@ -54,6 +59,25 @@ impl DataError {
             _ => false,
         }
     }
+
+    /// 是否属于「同一批源再问一次可能就好了」的瞬态故障。
+    ///
+    /// 与 `is_empty_data` 同住这里：`try_vendors_retry` 的「降级／重试」分档只能有一个
+    /// 权威，否则会出现「重试时算故障、调用方算瞬态」两套口径。
+    ///
+    /// 只认三类有明确语义信号的：429（站点自陈「请求过多」）、连接失败与超时。
+    /// `HttpError` 变体内部还要再分 —— 它同时装着「连不上」（换一次可能就好）和
+    /// 「URL 非法／响应解码失败」（每次都一样），整族算瞬态会让接口改版白付退避。
+    /// `VendorError` 不在内 —— 这条是靠 vendor 侧**先分道**才成立的：股吧那种「HTTP 200
+    /// 但站点没给列表页」的频控形态，上报时就已经归成 `RateLimited`（见
+    /// `vendors/guba.rs::to_live_error`），留在 `VendorError` 里的都是改版那类持续故障。
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::RateLimited { .. } => true,
+            Self::HttpError(e) => e.is_connect() || e.is_timeout(),
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -90,5 +114,38 @@ mod tests {
         };
         assert!(!failure.is_empty_data(), "接口失效不得被当成无分红");
         assert!(!DataError::ParseError("bad json".into()).is_empty_data());
+    }
+
+    /// 瞬态只认三个有明确语义信号的情形。`VendorError` 不得算瞬态 —— 否则
+    /// `try_vendors_retry` 的「单源不重试」短路对所有失败失效，接口改版也白付退避。
+    ///
+    /// 两条都走本机回环与非法 URL，不出本机、不依赖外网。
+    #[tokio::test]
+    async fn transient_is_limited_to_rate_limit_connect_and_timeout() {
+        assert!(DataError::RateLimited { vendor: "guba".into(), reason: "HTTP 429".into() }
+            .is_transient());
+
+        // 127.0.0.1:1 无人监听 ⇒ 立即被拒（is_connect），属「再问一次可能就好」
+        let refused = reqwest::Client::new()
+            .get("http://127.0.0.1:1/x")
+            .timeout(std::time::Duration::from_secs(3))
+            .send()
+            .await
+            .unwrap_err();
+        let refused = DataError::from(refused);
+        assert!(refused.is_transient(), "连接被拒不属瞬态的话，路由层退避就永远不会触发");
+        assert!(!refused.is_empty_data(), "连接失败不得被当成空数据");
+
+        // 同一个 HttpError 变体里的持续故障不得算瞬态：端口越界 ⇒ URL 解析失败
+        let bad_url = reqwest::Client::new().get("http://127.0.0.1:99999/").build().unwrap_err();
+        assert!(!DataError::from(bad_url).is_transient(), "URL 非法每次都得到同一个结果，不是瞬态");
+
+        assert!(!DataError::ParseError("bad json".into()).is_transient());
+        assert!(!DataError::NotFound("003029".into()).is_transient());
+        assert!(
+            !DataError::VendorError { vendor: "guba".into(), message: "结构变更".into() }
+                .is_transient(),
+            "结构类持续故障不得算瞬态；壳页那类已在 vendor 侧归成 RateLimited"
+        );
     }
 }

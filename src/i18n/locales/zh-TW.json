@@ -15458,6 +15458,9 @@
     "finalStrength": "最終強度",
     "searchPlaceholder": "输入股票代碼或名稱",
     "fastAnalysis": "快速分析",
+    "provenanceReplay": "歷史回放",
+    "provenanceReplayWithDate": "歷史回放 · {{date}}",
+    "provenanceUnknown": "來源未知",
     "interrupted": {
       "title": "本次分析未產出結論",
       "hint": "該記錄在分析跑完前被中斷（應用退出或進程異常結束），沒有產生任何決策。可點擊下方按鈕重新發起分析。"
@@ -15468,6 +15471,19 @@
       "failed": "失敗",
       "timeout": "逾時",
       "cancelled": "已取消"
+    },
+    "historyFilter": {
+      "keywordPlaceholder": "搜尋股票名稱或代碼",
+      "statusLabel": "狀態",
+      "actionLabel": "結論",
+      "all": "全部",
+      "loadedTotal": "共 {{total}} 條",
+      "loadedPartial": "已載入 {{count}} 條…",
+      "capped": "本次已載入 {{count}} 條，已達單次上限，可能還有更早的紀錄",
+      "loadMore": "繼續載入",
+      "loadFailed": "紀錄載入失敗",
+      "showingTotal": "顯示 {{shown}} / 共 {{total}} 條",
+      "noMatch": "沒有符合篩選條件的紀錄（已載入 {{total}} 條）"
     },
     "templateVersion": {
       "matched": "圖版本：庫內 v{{db}} 與程式碼 v{{code}} 一致",
@@ -15640,9 +15656,6 @@
       "confirmDelete": "刪除這條條件單？",
       "thresholdPct": "閾值(%)",
       "actionNotify": "僅通知",
-      "actionSell": "賣出",
-      "actionBuy": "買入",
-      "actionReduce": "減倉",
       "actionValueQty": "股數",
       "actionValueRatio": "比例",
       "coolDown": "冷卻(分)",
@@ -15969,7 +15982,20 @@
       "chain_reco": "智能薦股",
       "chain_serenity": "趨勢智選",
       "chain_unlabeled": "未分鏈（舊輪次）",
-      "chainUnlabeledNote": "這一輪落在分鏈改造之前，是智能薦股與趨勢智選的混池口徑 ⇒ 不能當成任何一條鏈單獨的帳。"
+      "chainUnlabeledNote": "這一輪落在分鏈改造之前，是智能薦股與趨勢智選的混池口徑 ⇒ 不能當成任何一條鏈單獨的帳。",
+      "sampleTitle": "全 A 股樣本",
+      "sampleCounts": "全市場 {{total}} 檔 · 已列舉 {{enumerated}} · 確認 {{confirmed}} · 最新收盤 {{close}}（{{date}}）",
+      "sampleCoverageUnknown": "覆蓋讀數取不到：全市場/最新收盤數暫不可知（不是 0）",
+      "fullScan": "全量段掃",
+      "fullScanHint": "依全部 A 股代碼段掃描並登記清單（約 800+ 請求）；避開 live 時間窗",
+      "fullScanDone": "段掃完成：登記 {{registered}} / 掃描 {{codes}} 碼",
+      "sweepClose": "補最新收盤",
+      "sweepCloseHint": "只採最近一個已收盤交易日（15:00 後）；盤中會被拒絕；歷史日期用「補視窗歷史」",
+      "sweepDone": "收盤落庫 {{written}} / 清單 {{total}}；無報價 {{missing}}",
+      "backfillHistory": "補視窗歷史",
+      "backfillHistoryHint": "每批最多 500 檔 × 90 個交易日；全市場約 12 批，重複點擊直到 requested=0",
+      "backfillDone": "歷史補齊：{{codes}} 檔 / {{rows}} 列 / 失敗 {{failed}}",
+      "backfillNone": "本批歷史已齊（無可補代碼）"
     },
     "export": {
       "analystReports": "分析师报告",

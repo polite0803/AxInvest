@@ -2560,18 +2560,28 @@ pub(crate) fn compute_decision_agreement(
 ///
 /// [`compute_decision_agreement`] 把「买方对卖方」（action_score=0）标为
 /// `opposite_direction`；此时两个独立视角在**方向**上互否，跟随任一侧都等于掷硬币，
-/// 故落库前把最终动作压为「观望」（不新开仓），原动作由调用方写入 `preConflictAction`。
+/// 故落库前把最终动作压为「判不出」。
 ///
-/// 返回 `Some("观望")` 表示应改写；`None` 表示维持原动作
-/// （冲突类型不是 opposite_direction，或本来就是观望 —— 幂等，回放不重复改）。
+/// 2026-10-22 裁定（分档不得重叠模糊）：压制的目标从「观望」改成「不确定」。
+/// 「观望」按权威定义是「无变动意图 ∧ 当前无仓位」，是一个**有依据的中性结论**；
+/// 而方向互否的真实含义是「判不出方向」。此前压成观望让同一个词兼任两义，
+/// 也替系统下了一个它没有依据的结论（与 `verdict_to_action` 注释里
+/// 「不确定 / 无法判断 映射为 Uncertain **而非**观望」是同一条原则的另一半）。
+///
+/// 返回 `Some(不确定)` 表示应改写；`None` 表示维持原动作
+/// （冲突类型不是 opposite_direction，或本来就是「判不出 / 没数据」—— 幂等，回放不重复改）。
 pub(crate) fn opposite_direction_gated_action(
     conflict_type: &str,
     action: &str,
 ) -> Option<&'static str> {
-    if conflict_type == "opposite_direction" && action != "观望" {
-        Some("观望")
-    } else {
-        None
+    if conflict_type != "opposite_direction" {
+        return None;
+    }
+    // 幂等判据走 `normalize_action`（中英同值域），不再比字面量
+    use axagent_analysis_engine::decision_action::{ActionKind, normalize_action};
+    match normalize_action(action) {
+        Some(ActionKind::Uncertain) | Some(ActionKind::Unavailable) => None,
+        _ => Some(ActionKind::Uncertain.as_storage_cn()),
     }
 }
 
@@ -2918,7 +2928,10 @@ mod tests {
             (
                 "t-sentiment-data",
                 NodeStatus::Failed,
-                Some("Vendor error from guba: 股吧 HTML 中未找到 article_list 数据"),
+                // 与后端 `vendors/guba.rs` 的实际产出同形态（2026-10-22 起带具体失败原因）
+                Some(
+                    "Vendor error from guba: 股吧页面不可用: 页面不含 article_list（拿到的不是股吧列表页，疑似风控/登录壳页）, stock_code=301302",
+                ),
             ),
             ("t-market-data", NodeStatus::Completed, None),
             ("sim-verify", NodeStatus::Skipped, Some("disabled")),
@@ -3933,24 +3946,31 @@ mod tests {
         assert_eq!(ab3.action_score, 6.0);
     }
 
-    /// P0-2（`PLAN-stock-decision-reliability.md`）：双视角方向真对立时，
-    /// 落库动作必须被硬压为「观望」，且幂等；非对立冲突不动作。
+    /// P0-2（`PLAN-stock-decision-reliability.md`）：双视角方向真对立时，落库动作必须被硬压为
+    /// 「判不出」，且幂等；非对立冲突不动作。
+    /// 2026-10-22 裁定：压制目标从「观望」改「不确定」——方向互否的真实含义是判不出方向，
+    /// 而「观望」按权威定义是「无变动意图 ∧ 无仓位」，是一个有依据的中性结论。
     #[test]
-    fn opposite_direction_gate_forces_wait_before_persist() {
+    fn opposite_direction_gate_forces_uncertain_before_persist() {
         // 纯函数契约
-        assert_eq!(opposite_direction_gated_action("opposite_direction", "买入"), Some("观望"));
-        assert_eq!(opposite_direction_gated_action("opposite_direction", "增持"), Some("观望"));
-        // 公式侧本就是卖方（卖出/减持）同样压观望 —— LLM 是买方，方向互否不跟随任一侧
-        assert_eq!(opposite_direction_gated_action("opposite_direction", "卖出"), Some("观望"));
-        // 幂等：已经是观望不再改写（回放/重复注入不产生伪 preConflictAction）
-        assert_eq!(opposite_direction_gated_action("opposite_direction", "观望"), None);
+        assert_eq!(opposite_direction_gated_action("opposite_direction", "买入"), Some("不确定"));
+        assert_eq!(opposite_direction_gated_action("opposite_direction", "增持"), Some("不确定"));
+        // 公式侧本就是卖方（卖出/减持）同样压判不出 —— LLM 是买方，方向互否不跟随任一侧
+        assert_eq!(opposite_direction_gated_action("opposite_direction", "卖出"), Some("不确定"));
+        // 英文值域同样命中（幂等与改写都按归一后的档判，不比字面量）
+        assert_eq!(opposite_direction_gated_action("opposite_direction", "SELL"), Some("不确定"));
+        // 幂等：已经是「判不出」不再改写（回放/重复注入不产生伪 preConflictAction）
+        assert_eq!(opposite_direction_gated_action("opposite_direction", "观望"), Some("不确定"));
+        assert_eq!(opposite_direction_gated_action("opposite_direction", "不确定"), None);
+        // 「没数据」也不是可被改写的方向档：不得被压成「判不出」（两档不互串）
+        assert_eq!(opposite_direction_gated_action("opposite_direction", "数据缺失"), None);
         // 非对立冲突类型一律放行
         assert_eq!(opposite_direction_gated_action("action_divergence", "买入"), None);
         assert_eq!(opposite_direction_gated_action("lean_vs_wait", "增持"), None);
         assert_eq!(opposite_direction_gated_action("", "买入"), None);
 
         // 端到端：公式买入 vs LLM 卖出（action_score=0）⇒ conflict_type=opposite_direction
-        // ⇒ 门禁必然给出 Some(观望)；这正是 core.rs 落库前调用点的输入形态
+        // ⇒ 门禁必然给出 Some(不确定)；这正是 core.rs 落库前调用点的输入形态
         let formula_buy = json!({
             "action": "买入", "positionPct": 15.3, "confidence": 77.8, "riskLevel": "中"
         })
@@ -3965,8 +3985,8 @@ mod tests {
         assert_eq!(ab.action_score, 0.0);
         assert_eq!(
             opposite_direction_gated_action(&ab.conflict_type, &ab.formula_action),
-            Some("观望"),
-            "PLAN 验收：10-12 类买方对卖方快照回放，结论必须变观望"
+            Some("不确定"),
+            "PLAN 验收：10-12 类买方对卖方快照回放，判不出就明说判不出"
         );
 
         // 反向对称：公式卖出 vs LLM 买入同样拦
@@ -3975,7 +3995,7 @@ mod tests {
         assert_eq!(ab2.conflict_type, "opposite_direction");
         assert_eq!(
             opposite_direction_gated_action(&ab2.conflict_type, &ab2.formula_action),
-            Some("观望")
+            Some("不确定")
         );
     }
 

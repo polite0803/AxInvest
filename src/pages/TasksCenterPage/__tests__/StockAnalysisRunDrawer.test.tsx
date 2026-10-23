@@ -59,9 +59,22 @@ describe("StockAnalysisRunDrawer", () => {
   it("渲染标的、操作建议与「打开」按钮", async () => {
     renderDrawer(makeRun());
     expect(await screen.findByText("300308 中际旭创")).toBeInTheDocument();
-    expect(screen.getByText("BUY")).toBeInTheDocument();
+    // 操作建议必须是权威档位文案，不是后端 token（原断言 `getByText("BUY")` 钉的是缺陷）
+    expect(screen.getByText("买入")).toBeInTheDocument();
+    expect(screen.queryByText("BUY")).not.toBeInTheDocument();
     // antd 会在两个汉字之间自动插空格（"打开" → "打 开"）
     expect(screen.getByRole("button", { name: /打\s*开/ })).toBeInTheDocument();
+  });
+
+  it("后端下发 UNAVAILABLE 哨兵 ⇒ 渲染「数据缺失」，不把内部 token 给用户", async () => {
+    renderDrawer(makeRun({}, { decisionAction: "UNAVAILABLE" }));
+    expect(await screen.findByText("数据缺失")).toBeInTheDocument();
+    expect(screen.queryByText("UNAVAILABLE")).not.toBeInTheDocument();
+  });
+
+  it("库里档位存的是中文 ⇒ 与英文 token 渲染同一个档名", async () => {
+    renderDrawer(makeRun({}, { decisionAction: "减持" }));
+    expect(await screen.findByText("减持")).toBeInTheDocument();
   });
 
   it("interrupted 渲染「已中断」徽章，且不显示伪造耗时", async () => {

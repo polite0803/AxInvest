@@ -262,6 +262,13 @@ jobs:
           node scripts/check-horizon-decision-keys.mjs --selftest
           node scripts/check-horizon-decision-keys.mjs
 
+      # 决策结论档单一权威（2026-10-22 裁定）：ActionKind ↔ 前端 ↔ LLM schema ↔ 产端 ↔ i18n
+      # 五面对账，与 scripts/ci-check.mjs 对应两条 step。见该门头部注释。
+      - name: Check decision action single source
+        run: |
+          node scripts/check-decision-action-single-source.mjs --selftest
+          node scripts/check-decision-action-single-source.mjs
+
       # #20①（2026-10-05）：每日快照白名单一致性 —— 「申报 NoHistoricalSemantic 的方法必须
       # 在 SNAPSHOT_METHODS 里」。抓到过的活断链：eastmoney 已申报一致预期为 NHS，白名单却漏了它
       # ⇒ 读侧 `contains` 挡掉、恒 miss，as-of 一致预期必然降级而降级文案还说「等每日归档」。
@@ -521,6 +528,18 @@ jobs:
 
       - name: Check build
         run: cargo check --workspace --manifest-path src-tauri/Cargo.toml
+
+      # 生成物漂移门：`src/types/generated/ipc.ts` / `events.ts` 由 schema-gen 生成，
+      # 但 `run_check` 此前**从不非零退出** —— 「检查」只是打印，CI 里等于没有这道门。
+      # 现在它把三件事都当失败条件：注册表 18 个 DTO 逐个出现在产物里、事件名联合与
+      # Rust 侧对齐、**字节级比对**（重新生成到临时目录再 diff）。实测负控：把已提交的
+      # 旧 `ipc.ts` 喂进去 ⇒ `EXIT=1`，报「ipc.ts 与生成器输出不一致（首个差异在第 12 行；
+      # 在库 4090 字节 vs 重跑 3805 字节）」。
+      # 工作目录取 `src-tauri`（与本地读数逐字同口径，且吃到 `rust-toolchain.toml` 的 1.97 钉版）；
+      # 产物路径由 `CARGO_MANIFEST_DIR` 编译期推出，与 CWD 无关。
+      - name: Check generated IPC types drift
+        run: cargo run -q -p schema-gen -- check
+        working-directory: src-tauri
 
       - name: Setup Node.js (for Rust lint scripts)
         uses: actions/setup-node@v5

@@ -53,9 +53,6 @@ pub struct StockDecision {
 ///   - p < 0.30 → 卖出
 ///
 /// 2026-10：持有线 0.48→0.50（与贝叶斯中性锚点 0.50 对齐，利好偏置 A 档根治）。
-/// 同时提供与 astock-data/scoring.rs map_signal（100 分制 6 档）的桥接：
-///   strong_buy / buy / hold / watch / sell / strong_sell
-///   ↘ 强烈买入 / 买入 / 增持 / 持有 / 减持 / 卖出
 pub fn map_posterior_to_action(posterior: f64) -> &'static str {
     if posterior >= 0.63 {
         "强烈买入"
@@ -69,31 +66,6 @@ pub fn map_posterior_to_action(posterior: f64) -> &'static str {
         "减持"
     } else {
         "卖出"
-    }
-}
-
-/// 将 astock-data/scoring.rs 的 signal_code 统一映射到 6 档中文 action
-pub fn map_signal_code_to_action(signal_code: &str) -> &'static str {
-    match signal_code {
-        "strong_buy" => "强烈买入",
-        "buy" => "买入",
-        // hold/watch 在 6 档中分别对应 增持/持有，
-        // 但 scoring.rs 的 hold 是"分数中性偏多"，watch 是"分数中性偏空"
-        "hold" => "增持",
-        "watch" => "持有",
-        "sell" => "减持",
-        "strong_sell" => "卖出",
-        _ => "持有",
-    }
-}
-
-/// 将 evidence_weight.rs 的 BUY/SELL/HOLD 映射到 6 档中文 action
-pub fn map_evidence_action(evidence_action: &str) -> &'static str {
-    match evidence_action {
-        "BUY" => "买入",
-        "SELL" => "卖出",
-        "HOLD" => "持有",
-        _ => "持有",
     }
 }
 

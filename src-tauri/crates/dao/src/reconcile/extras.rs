@@ -28,7 +28,7 @@
 //! | tsvector 列 / GIN | 6 / 6 | **9 / 9** | `v227` 用 `format!` 动态生成（`memory_items` + 每张 `vec_*_meta`），静态扫描扫不到 |
 //! | 多列索引 | 35 | **36** | 静态扫描只解析 `CREATE INDEX`，漏掉**表级内联 `UNIQUE(...)`** 产生的 2 条；另 1 条已被 `v138` 显式 DROP |
 //! | partial 索引 | 4 | **5** | `idx_retrieval_hits_feedback` 的 `ON {}(...)` 模板让静态解析失败 |
-//! | CHECK 约束 | 8（DDL 条数） | **3（约束个数）** | 8 条 DDL 实为**同一对约束的历代替换**（v100 内联 → v200 替换 → mod.rs 替换） |
+//! | CHECK 约束 | 8（DDL 条数） | **3（库里约束个数）→ 本清单 5** | 8 条 DDL 实为**同一对约束的历代替换**（v100 内联 → v200 替换 → mod.rs 替换）；2026-10-23 另加**两条声明式值域 CHECK**（`stock_analyses.analysis_kind` / `decision_action`，无迁移出处，库里现网取值实测全满足） |
 //! | 自定义函数 | 0 | **1** | 静态扫描的 8 个类别里根本没有「函数」这一类 |
 //!
 //! ⇒ **迁移源码会撒谎（漏、重、废），库里真实存在的结构才是引擎要对齐的目标。**
@@ -759,6 +759,27 @@ pub const CHECK_CONSTRAINTS: &[CheckDecl] = &[
         expr: "period ~ '^\\d{4}-\\d{2}$'",
         dialect: Some(Dialect::Postgres),
     },
+    // ── 2026-10-23 声明式新增两条「值域 CHECK」（无迁移；库里现网取值实测全部满足）──
+    //
+    // ⚠ 这两条把值域**又写了一遍**（第三处表达）。本仓不造运行期拼接 const 的机制，
+    //   所以按既有纪律「同一逻辑的两份实现要逐条 gate」：门
+    //   `scripts/check-decision-action-single-source.mjs` 的 R13/R14 会把这里的字面量清单
+    //   与两个权威（`harness::analysis_kind::ANALYSIS_KIND_VALUES`、
+    //   `ActionKind::as_storage_cn`）逐档对账 —— 改权威而忘改这条，门当场红。
+    CheckDecl {
+        table: "stock_analyses",
+        name: "ck_stock_analyses_kind",
+        expr: "analysis_kind = ANY (ARRAY['live','replay'])",
+        dialect: Some(Dialect::Postgres),
+    },
+    CheckDecl {
+        table: "stock_analyses",
+        name: "ck_stock_analyses_decision_action",
+        // `IS NULL` 必须留：198 + 6 + 6 行的实态是「有值或 NULL」，NULL 的语义是
+        // 「采集时点没有这个信息」（见实体注释），当成违规会让启动期对账直接失败。
+        expr: "decision_action IS NULL OR decision_action = ANY (ARRAY['买入','增持','持有','观望','减持','卖出','不确定','数据缺失'])",
+        dialect: Some(Dialect::Postgres),
+    },
 ];
 
 // ═══════════════ GIN 索引（tsvector 全文检索，实体无访问方法开关） ═══════════════
@@ -1318,7 +1339,7 @@ mod counts {
     /// 表达式默认值覆盖的列数（8 = artifacts.updated_at 等，全部是 `*_at` 文本时间列）。
     const EXPECT_EXPR_DEFAULT_COLS: usize = 8;
     const EXPECT_FUNCTIONS: usize = 1;
-    const EXPECT_CHECKS: usize = 3;
+    const EXPECT_CHECKS: usize = 5;
     const EXPECT_GIN: usize = 6;
     const EXPECT_MULTI: usize = 36;
     /// partial 索引条目数。
@@ -1366,7 +1387,7 @@ mod counts {
     }
 
     #[test]
-    fn l2_total_is_seventy_one() {
+    fn l2_total_is_seventy_three() {
         let expect = EXPECT_VIRTUAL_TABLES
             + EXPECT_TRIGGERS
             + EXPECT_GENERATED_COLUMNS
@@ -1376,7 +1397,7 @@ mod counts {
             + EXPECT_GIN
             + EXPECT_MULTI
             + EXPECT_PARTIAL;
-        assert_eq!(expect, 71, "冻结总数常量自相矛盾");
+        assert_eq!(expect, 73, "冻结总数常量自相矛盾");
         assert_eq!(total_declarations(), expect, "total_declarations() 与各类求和不符");
     }
 

@@ -11,6 +11,7 @@
 //! 分析定档命中且动作允许的那几条会升级为真实票 —— 见 [`apply_analysis_tier`]。
 
 use super::super::strategy::{read_f64, PerCodeLocks, RecoContext, RecommendStrategy};
+use crate::decision_action::{normalize_action, ActionKind};
 use crate::recommender::pool::SeedItem;
 use crate::recommender::scoring::{calc_confidence, calc_position};
 use crate::recommender::types::{Period, RecoPick, Style};
@@ -288,7 +289,7 @@ fn apply_analysis_tier(
             if action.is_empty() {
                 return Some(p);
             }
-            if matches!(action, "卖出" | "减持") {
+            if normalize_action(action).is_some_and(ActionKind::implies_reduce) {
                 return None;
             }
             let conf = verdict.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);

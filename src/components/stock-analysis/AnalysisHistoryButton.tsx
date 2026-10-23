@@ -3,14 +3,19 @@ import {
   actionSourceLabelKey,
   confidenceSourceLabelKey,
   FAST_TEMPLATE_ID,
+  filterAnalysisHistory,
   getActionTagStyle,
   getActionTKey,
   groupAnalysisHistory,
   HORIZON_T_SUFFIX,
   horizonSourceLabelKey,
+  mergeAnalysisHistoryPages,
+  provenanceOfRecord,
   readDecisionProvenance,
   readHorizonActions,
-  resolveDisplayAction,
+  resolveRecordDisplayAction,
+  StockAction,
+  UNKNOWN_HORIZON,
 } from "@/lib/stock-analysis-utils";
 import { App, Button, Dropdown, Input, Tag } from "antd";
 import { Check, History, Pencil, Trash2, X } from "lucide-react";
@@ -56,6 +61,19 @@ interface AnalysisRecord {
    * **不得**回退成 0 或当代（那会把「不知道」伪装成「就是最新判据」）。
    */
   templateVersion?: number | null;
+  /**
+   * 记录来历（后端 `stock_analyses.analysis_kind`，NOT NULL）：`"live"` = 实况分析，
+   * `"replay"` = as-of 回放（写侧判据是 `asof_ctx.is_some()`，见 `stock_workflow/core.rs`）。
+   * ⚠ 与 `useTimeAnchorStore.anchorMode === "replay"` **不是一回事** —— 后者是「查看者当前的
+   * 时间锚」，前者是「这条记录当时怎么跑出来的」；同词不同源，混用会把「我在看哪天」当成「这条是回放」。
+   */
+  analysisKind?: string | null;
+  /**
+   * 回放样本的**决策日**（代际裁定 2026-10-13：同表 + `as_of_date` 列）。
+   * 现网实测 283 行**全部非空** ⇒ 它不能用来区分 live / 回放（那是 `analysisKind` 的活），
+   * 但它与 `analysisDate` 可以不同（87 条回放行里 37 条不同），不同才是有信息量的那部分。
+   */
+  asOfDate?: string | null;
 }
 
 /** `get_stock_template_version_status` 的返回形状（后端 `StockTemplateVersionStatus`，camelCase）。 */
@@ -89,6 +107,87 @@ const COMPACT_TAG_STYLE = {
 } as const;
 
 /**
+ * 单页取数量。后端 `list_stock_analyses` 的 `MAX_LIMIT` 是 1000（超出会被截断并 warn），
+ * 取 500 留一半余量；现网读数 360 条 ⇒ 通常一次就取完。
+ */
+const PAGE_SIZE = 500;
+
+/**
+ * 一次「加载全部」最多翻多少页（500 × 20 = 1 万条）。
+ *
+ * 有这个封顶就必须让它**可见**：撞到上限时界面要说「可能还有更早的记录」并给「继续加载」，
+ * 否则就是拿一个新的静默截断顶掉旧的 `limit: 30`（那条正是本次要消除的缺陷）。
+ */
+const MAX_PAGES_PER_ROUND = 20;
+
+/**
+ * 状态筛选的选项值域 = 后端 `stock_analyses.status` 的全部取值
+ * （`completed` + `recordStatusKey` 认得的另外五个）。
+ * 值域权威在 `crates/entities/src/stock_analyses.rs` 的列注释，新增态时这里要同步加。
+ */
+const STATUS_OPTIONS: readonly string[] = [
+  "completed",
+  "running",
+  "interrupted",
+  "failed",
+  "timeout",
+  "cancelled",
+];
+
+/** 档位筛选的选项值域：四档取自 `HORIZON_T_SUFFIX`（不复制第二份档位清单）+ 「未知周期」。 */
+const HORIZON_OPTIONS: readonly string[] = [...Object.keys(HORIZON_T_SUFFIX), UNKNOWN_HORIZON];
+
+/**
+ * 结论筛选的选项值域：八档全部取自 `StockAction`（值域权威 = 后端 `ActionKind`，
+ * 由 `scripts/check-decision-action-single-source.mjs` 五面对账），不另加自造档位。
+ *
+ * 2026-10-22 裁定后撤掉了此前追加的「无结论」哨兵格 —— 它与权威档「数据缺失」重叠：
+ * 后端对空 `decision_action` 的既定口径是下发 `UNAVAILABLE` 哨兵（列表路径本轮已补齐），
+ * 「还没有决策」的只剩 `running` 行，那一格由状态维度表达。
+ */
+const ACTION_OPTIONS: readonly string[] = Object.values(StockAction);
+
+/** 结论选项的展示键：八档复用 Tag 那批 `stockAnalysis.action*` 键。 */
+export function actionOptionLabelKey(option: string): string {
+  return getActionTKey(option);
+}
+
+/** 状态值的展示键：`completed` 用既有独立键，其余走 `recordStatus.*`；不认识的态退回原始串。 */
+export function statusLabelKey(status: string): string | null {
+  return status === "completed" ? "stockAnalysis.completed" : recordStatusKey(status);
+}
+
+/**
+ * 筛选 chip —— 刻意用普通 button 而不是 antd Select：Select 的下拉面板是 portal，
+ * 点选项会被外层 Dropdown 判成「点击外部」而把整个历史弹窗关掉。
+ */
+function FilterChip({ label, active, onClick }: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      style={{
+        cursor: "pointer",
+        fontSize: 10,
+        lineHeight: "16px",
+        padding: "1px 6px",
+        borderRadius: 8,
+        border: `1px solid ${active ? "var(--accent, #7c3aed)" : "var(--muted, #888)"}`,
+        background: active ? "var(--accent-bg, rgba(124,58,237,0.18))" : "transparent",
+        color: active ? "var(--accent, #7c3aed)" : "var(--muted, #888)",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+/**
  * 记录状态 → i18n key。返回 `null` = 该值不在已知值域内（调用方退回显示原始字符串，
  * **不吞信息**）。
  *
@@ -113,6 +212,19 @@ export function AnalysisHistoryButton() {
   const navigate = useNavigate();
   const [records, setRecords] = useState<AnalysisRecord[]>([]);
   const [open, setOpen] = useState(false);
+  // 全量加载的三种未完成状态各自独立，且**都必须被界面说出来**（缺料不得伪装成「就这么多了」）：
+  // `loading` 还在翻页 / `capped` 撞到单次上限 / `loadFailed` 取数失败。三者皆假 = 已取全。
+  const [loading, setLoading] = useState(false);
+  const [capped, setCapped] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [keyword, setKeyword] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
+  const [horizonFilter, setHorizonFilter] = useState<string | undefined>(undefined);
+  const [actionFilter, setActionFilter] = useState<string | undefined>(undefined);
+  // 位置式翻页游标：与「已到手条数」分家，避免并发插入造成的重复页把游标顶歪。
+  const offsetRef = useRef(0);
+  // 每轮加载自增；回调回来时不等于当前轮次即丢弃（弹窗已重开，这一轮的结果属于上一轮）。
+  const roundRef = useRef(0);
   // 代码版本 vs 库里已播种版本的对照（弹窗顶部一行）。`null` = 还没取到 / 取失败 ⇒ 不显示该行，
   // 但**不得**显示「一致」—— 没取到就是没取到（结构性缺口不得在 UI 造成歧义）。
   const [versionStatus, setVersionStatus] = useState<TemplateVersionStatus | null>(null);
@@ -121,13 +233,58 @@ export function AnalysisHistoryButton() {
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
+  /**
+   * 从当前游标起连续翻页，直到某页不满（取完）或撞到单次上限。
+   *
+   * @param restart `true` = 重新打开弹窗，游标归零从头取（已到手的数据先留着显示，不闪空）。
+   */
+  const loadPages = useCallback(async (restart: boolean) => {
+    const round = ++roundRef.current;
+    if (restart) { offsetRef.current = 0; }
+    setLoading(true);
+    setLoadFailed(false);
+    setCapped(false);
+    let reachedEnd = false;
+    // 只有本轮**第一页**做整体替换（重开弹窗时把上一轮的陈旧数据换掉），后续页一律追加。
+    let replaces = restart;
+    for (let page = 0; page < MAX_PAGES_PER_ROUND; page++) {
+      let rows: AnalysisRecord[];
+      try {
+        rows = await invoke<AnalysisRecord[]>("list_stock_analyses", {
+          limit: PAGE_SIZE,
+          offset: offsetRef.current,
+        });
+      } catch {
+        if (round === roundRef.current) {
+          setLoadFailed(true);
+          setLoading(false);
+        }
+        return;
+      }
+      // 等待期间弹窗被重开 ⇒ 这一轮不再属于当前视图，整轮丢弃
+      if (round !== roundRef.current) { return; }
+      const list = Array.isArray(rows) ? rows : [];
+      offsetRef.current += list.length;
+      setRecords((prev) =>
+        replaces
+          ? mergeAnalysisHistoryPages([], list)
+          : mergeAnalysisHistoryPages(prev, list)
+      );
+      replaces = false;
+      if (list.length < PAGE_SIZE) {
+        reachedEnd = true;
+        break;
+      }
+    }
+    if (round !== roundRef.current) { return; }
+    setLoading(false);
+    setCapped(!reachedEnd);
+  }, []);
+
   useEffect(() => {
     if (!open) { return; }
     let cancelled = false;
-    invoke<AnalysisRecord[]>("list_stock_analyses", { limit: 30, offset: 0 }).then((list) => {
-      if (cancelled || !Array.isArray(list)) { return; }
-      setRecords(list);
-    }).catch(() => {});
+    void loadPages(true);
     invoke<TemplateVersionStatus>("get_stock_template_version_status")
       .then((v) => {
         if (!cancelled) { setVersionStatus(v); }
@@ -138,7 +295,7 @@ export function AnalysisHistoryButton() {
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, loadPages]);
 
   useEffect(() => {
     if (editingId && inputRef.current) {
@@ -187,7 +344,18 @@ export function AnalysisHistoryButton() {
 
   // 按 stockCode 分组（与详情页历史列表共用 groupAnalysisHistory）：
   // 组名取组内第一条非空名称，一条空名新记录不会把整组标题抹成只剩代码。
-  const grouped = useMemo(() => groupAnalysisHistory(records), [records]);
+  const filtered = useMemo(
+    () =>
+      filterAnalysisHistory(records, {
+        keyword,
+        status: statusFilter,
+        horizon: horizonFilter,
+        action: actionFilter,
+      }),
+    [records, keyword, statusFilter, horizonFilter, actionFilter],
+  );
+  const grouped = useMemo(() => groupAnalysisHistory(filtered), [filtered]);
+  const filterActive = Boolean(keyword.trim() || statusFilter || horizonFilter || actionFilter);
 
   // 记录名：日期（精确到日期），重跑版本加 ↻ 标记
   const dateLabel = (r: AnalysisRecord) => {
@@ -201,53 +369,31 @@ export function AnalysisHistoryButton() {
     return new Date(r.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
-  // 解析决策信息：优先用后端直返字段（decisionAction / decisionPositionPct），
-  // decisionJson 仅用于提取 confidence 等额外字段（兼容旧数据）。
-  // 这样即使 decisionJson 为 null，只要 decisionAction 有值就能显示 Tag。
+  // 解析决策信息：结论档走共用判据 `resolveRecordDisplayAction`（与「结论」筛选同一个权威 ⇒
+  // 筛出来的必然等于 Tag 上那枚），decisionJson 只用来补 confidence / positionPct（兼容旧数据）。
+  // 2026-09-22: 展示档 = 方向档（`resolveDisplayAction` 已恒等，**不再按仓位派生**）——
+  //   历史上 P1-2(2026-09-14)/V76 曾按 positionState/positionPct 派生，因「用本次决策算出的
+  //   建议仓位反推本次展示名」属循环判据而被废除（LLM 措辞抖动能经「试探仓 → positionPct →
+  //   positionState」把「观望」翻成「持有」）—— 见 `AUDIT-300642-run-variance-2026-09-22.md`。
   const decisionInfo = (r: AnalysisRecord): {
     action: string;
     positionPct?: number;
     confidence?: number;
   } | null => {
-    // 2026-09-22: 展示档 = 方向档（`resolveDisplayAction` 已恒等，**不再按仓位派生**）。
-    //   历史上 P1-2(2026-09-14)/V76 曾按 positionState/positionPct 派生，因「用本次决策
-    //   算出的建议仓位反推本次展示名」属循环判据而被废除（LLM 措辞抖动能经
-    //   「试探仓 → positionPct → positionState」把「观望」翻成「持有」）——
-    //   见 `AUDIT-300642-run-variance-2026-09-22.md`。
-    //   ⚠️ 下方仍传 state/pct 仅为兼容函数签名，**不参与**判定。
-    const displayOf = (a: string, state?: string | null, pct?: number | null) =>
-      resolveDisplayAction(a, state ?? undefined, pct == null ? null : pct);
-    // 优先使用后端直返字段
-    const action = r.decisionAction
-      ? displayOf(r.decisionAction, r.decisionPositionState, r.decisionPositionPct)
-      : null;
-    if (!action) {
-      // 旧数据：从 decisionJson 解析
-      if (!r.decisionJson) { return null; }
-      try {
-        const d = JSON.parse(r.decisionJson) as Record<string, unknown>;
-        const positionPct = typeof d.positionPct === "number" ? d.positionPct : undefined;
-        const state = typeof d.positionState === "string" ? d.positionState : null;
-        const a = displayOf(d.action as string, state, positionPct);
-        const confidence = typeof d.confidence === "number" ? d.confidence : undefined;
-        return { action: a, positionPct, confidence };
-      } catch {
-        return null;
-      }
-    }
-    // 新数据：直返字段 + decisionJson 补充 confidence
+    const action = resolveRecordDisplayAction(r);
+    if (!action) { return null; }
+    let positionPct = r.decisionPositionPct ?? undefined;
     let confidence: number | undefined;
     if (r.decisionJson) {
       try {
         const d = JSON.parse(r.decisionJson) as Record<string, unknown>;
-        if (typeof d.confidence === "number") { confidence = d.confidence; }
-      } catch { /* */ }
+        if (d && typeof d === "object") {
+          if (positionPct == null && typeof d.positionPct === "number") { positionPct = d.positionPct; }
+          if (typeof d.confidence === "number") { confidence = d.confidence; }
+        }
+      } catch { /* 坏 JSON ⇒ 只有 Tag，不编造仓位与置信度 */ }
     }
-    return {
-      action,
-      positionPct: r.decisionPositionPct ?? undefined,
-      confidence,
-    };
+    return { action, positionPct, confidence };
   };
 
   return (
@@ -258,8 +404,8 @@ export function AnalysisHistoryButton() {
       popupRender={() => (
         <div
           style={{
-            width: 440,
-            maxHeight: 400,
+            width: 520,
+            maxHeight: 520,
             overflowY: "auto",
             background: "var(--surface, #1a1a2e)",
             border: "1px solid var(--color-border, #333)",
@@ -285,10 +431,140 @@ export function AnalysisHistoryButton() {
               })}
             </div>
           )}
-          {records.length === 0
+          {
+            /* 筛选条 + 完整性那一行：sticky 让「筛了什么 / 取全了没有」在滚动时始终可见，
+              组标题（zIndex 1）滚到它下面即被盖住，不会两行叠成一行看不清。 */
+          }
+          <div
+            style={{
+              position: "sticky",
+              top: -4,
+              zIndex: 3,
+              background: "var(--surface, #1a1a2e)",
+              padding: "4px 10px 6px",
+              borderBottom: "1px solid var(--color-border, #333)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}
+          >
+            <Input
+              size="small"
+              allowClear
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              placeholder={t("stockAnalysis.historyFilter.keywordPlaceholder")}
+            />
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+              <span style={{ fontSize: 10, color: "var(--muted, #888)", marginRight: 2 }}>
+                {t("stockAnalysis.historyFilter.statusLabel")}
+              </span>
+              <FilterChip
+                label={t("stockAnalysis.historyFilter.all")}
+                active={!statusFilter}
+                onClick={() => setStatusFilter(undefined)}
+              />
+              {STATUS_OPTIONS.map((s) => {
+                const key = statusLabelKey(s);
+                return (
+                  <FilterChip
+                    key={s}
+                    label={key ? t(key) : s}
+                    active={statusFilter === s}
+                    onClick={() => setStatusFilter(s)}
+                  />
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+              <span style={{ fontSize: 10, color: "var(--muted, #888)", marginRight: 2 }}>
+                {t("stockAnalysis.timeHorizon")}
+              </span>
+              <FilterChip
+                label={t("stockAnalysis.historyFilter.all")}
+                active={!horizonFilter}
+                onClick={() => setHorizonFilter(undefined)}
+              />
+              {HORIZON_OPTIONS.map((h) => (
+                <FilterChip
+                  key={h}
+                  label={h === UNKNOWN_HORIZON
+                    ? t("stockAnalysis.reflection.horizonUnknown")
+                    : t(`stockAnalysis.timeHorizon${HORIZON_T_SUFFIX[h]}`)}
+                  active={horizonFilter === h}
+                  onClick={() => setHorizonFilter(h)}
+                />
+              ))}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+              <span style={{ fontSize: 10, color: "var(--muted, #888)", marginRight: 2 }}>
+                {t("stockAnalysis.historyFilter.actionLabel")}
+              </span>
+              <FilterChip
+                label={t("stockAnalysis.historyFilter.all")}
+                active={!actionFilter}
+                onClick={() => setActionFilter(undefined)}
+              />
+              {ACTION_OPTIONS.map((a) => (
+                <FilterChip
+                  key={a}
+                  label={t(actionOptionLabelKey(a))}
+                  active={actionFilter === a}
+                  onClick={() => setActionFilter(a)}
+                />
+              ))}
+            </div>
+            {
+              /* 完整性那一行：取数失败 / 还在翻页 / 撞到单次上限 / 已取全（筛选态另给分子），
+                四种各占一句，缺料绝不显示成「共 N 条」这种齐备态读数。 */
+            }
+            {!loading && !loadFailed && !capped && records.length === 0
+              ? null
+              : (
+                <div
+                  data-testid="history-completeness"
+                  style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "var(--muted, #888)" }}
+                >
+                  <span>
+                    {loadFailed
+                      ? t("stockAnalysis.historyFilter.loadFailed")
+                      : loading
+                      ? t("stockAnalysis.historyFilter.loadedPartial", { count: records.length })
+                      : capped
+                      ? t("stockAnalysis.historyFilter.capped", { count: records.length })
+                      : filterActive
+                      ? t("stockAnalysis.historyFilter.showingTotal", {
+                        shown: filtered.length,
+                        total: records.length,
+                      })
+                      : t("stockAnalysis.historyFilter.loadedTotal", { total: records.length })}
+                  </span>
+                  {(loadFailed || capped) && (
+                    <Button
+                      size="small"
+                      type="link"
+                      style={{ fontSize: 10, padding: 0, height: "auto" }}
+                      onClick={() => void loadPages(loadFailed)}
+                    >
+                      {loadFailed ? t("stockAnalysis.retry") : t("stockAnalysis.historyFilter.loadMore")}
+                    </Button>
+                  )}
+                </div>
+              )}
+          </div>
+          {loadFailed && records.length === 0
+            ? null
+            : records.length === 0
             ? (
               <div style={{ padding: "12px 8px", color: "var(--muted, #888)", textAlign: "center", fontSize: 12 }}>
                 {t("stockAnalysis.noHistory")}
+              </div>
+            )
+            : filtered.length === 0
+            ? (
+              // 一条都不剩时要把「库里有多少」一起说，否则「筛空了」和「库里没记录」在界面上同形
+              <div style={{ padding: "12px 8px", color: "var(--muted, #888)", textAlign: "center", fontSize: 12 }}>
+                {t("stockAnalysis.historyFilter.noMatch", { total: records.length })}
               </div>
             )
             : grouped.map((g) => (
@@ -428,6 +704,31 @@ export function AnalysisHistoryButton() {
                                   : `v${r.templateVersion}`}
                               </Tag>
                             )}
+                            {
+                              /* 来历标识（2026-10-22）：实况**不打标** —— `analysis_kind` 是 NOT NULL 且
+                                只有 live / replay 两态，第三种值另打「来源未知」⇒「无标」可被证明就是实况。
+                                回放打「回放」，决策日与列表日期不同时带上决策日（现网 87 条回放里 37 条不同）。
+                                ⚠ 别拿 `asOfDate` 是否为空来分来历：库里 283 行**全部非空**。 */
+                            }
+                            {(() => {
+                              const provenance = provenanceOfRecord(r);
+                              if (provenance === "live") { return null; }
+                              if (provenance === "unknown") {
+                                return (
+                                  <Tag style={COMPACT_TAG_STYLE} data-testid="provenance-tag">
+                                    {t("stockAnalysis.provenanceUnknown")}
+                                  </Tag>
+                                );
+                              }
+                              const diffDay = !!r.asOfDate && r.asOfDate !== r.analysisDate;
+                              return (
+                                <Tag style={COMPACT_TAG_STYLE} data-testid="provenance-tag">
+                                  {diffDay
+                                    ? t("stockAnalysis.provenanceReplayWithDate", { date: r.asOfDate })
+                                    : t("stockAnalysis.provenanceReplay")}
+                                </Tag>
+                              );
+                            })()}
                             {/* 决策结论 Tag */}
                             {(() => {
                               const info = decisionInfo(r);
@@ -435,6 +736,7 @@ export function AnalysisHistoryButton() {
                               return (
                                 <Tag
                                   style={getActionTagStyle(info.action)}
+                                  data-testid="action-tag"
                                 >
                                   {t(getActionTKey(info.action))}
                                 </Tag>

@@ -58,6 +58,148 @@ export function groupAnalysisHistory<
   return Array.from(map.values());
 }
 
+/**
+ * 历史分析记录的筛选条件。三个维度**各自独立**，缺席的那一格不参与判定。
+ *
+ * ⚠ 与呈现层同一判据（`UNKNOWN_HORIZON` 那一格尤其重要）：行上显示的档位标签来自
+ * `HORIZON_T_SUFFIX[r.decisionTimeHorizon]`，命中不到就退回「未知周期」。筛选必须按
+ * **同一个查表**判定，不能直接比原始值 —— 现网有 34 行 `decision_time_horizon` 存的是
+ * 模型吐出的中文「短期」，它们在界面上显示为「未知周期」；若筛选按原始值等值比较，
+ * 选「未知周期」会漏掉这 34 行、选「短线」也不会命中它们，即「筛出来的和看见的不是一回事」。
+ */
+export interface AnalysisHistoryFilter {
+  /** 代码或名称关键词（trim + 大小写不敏感）；空串 = 该维度不筛 */
+  keyword: string;
+  /** 记录状态（值域同后端 `stock_analyses.status`）；`undefined` = 全部 */
+  status?: string;
+  /** 主结论档位，取 `HORIZON_T_SUFFIX` 的键或 `UNKNOWN_HORIZON`；`undefined` = 全部 */
+  horizon?: string;
+  /** 结论档，取 `StockAction` 的值；`undefined` = 全部 */
+  action?: string;
+}
+
+/** `AnalysisHistoryFilter.horizon` 的「未知周期」档位哨兵值（不能与后端任何档位字符串撞名）。 */
+export const UNKNOWN_HORIZON = "__unknown__";
+
+/** 该记录在列表上**实际渲染**为哪一档：四档之一，或 `UNKNOWN_HORIZON`（含空值与无法识别的脏值）。 */
+export function horizonOfRecord(decisionTimeHorizon?: string | null): string {
+  return decisionTimeHorizon && HORIZON_T_SUFFIX[decisionTimeHorizon]
+    ? decisionTimeHorizon
+    : UNKNOWN_HORIZON;
+}
+
+/**
+ * 按筛选条件裁剪历史分析记录（保持入参顺序）。
+ *
+ * 与 `groupAnalysisHistory` 同属「历史列表」这一套判据的单一权威，弹窗与详情页列表共用，
+ * 不得各写一份过滤（否则两处「筛出来的条数」会互相矛盾）。
+ */
+export function filterAnalysisHistory<
+  T extends {
+    stockCode: string;
+    stockName: string;
+    status: string;
+    decisionTimeHorizon?: string | null;
+  } & RecordActionFields,
+>(records: readonly T[], filter: AnalysisHistoryFilter): T[] {
+  const keyword = filter.keyword.trim().toLowerCase();
+  const actionKey = filter.action ? getActionTKey(filter.action) : null;
+  return records.filter((r) => {
+    if (
+      keyword
+      && !r.stockCode.toLowerCase().includes(keyword)
+      && !r.stockName.toLowerCase().includes(keyword)
+    ) {
+      return false;
+    }
+    if (filter.status && r.status !== filter.status) { return false; }
+    if (filter.horizon && horizonOfRecord(r.decisionTimeHorizon) !== filter.horizon) { return false; }
+    if (filter.action) {
+      // 按 i18n 键比对（与 Tag 同一个函数产出）：无法识别的原始值才会与界面上的「不确定」对上。
+      // 没有任何结论的行（如仍在跑、还没落决策）key = null ⇒ 不属于任何一档，由状态维度筛它
+      if (actionKeyOfRecord(r) !== actionKey) { return false; }
+    }
+    return true;
+  });
+}
+
+/**
+ * 把一页记录并入已加载集合（按 `id` 去重，保持「先到的在前」= 后端 `created_at` 倒序）。
+ *
+ * 分页循环期间后端可能插入新记录（分析落库），位置式 offset 会让某一页重复覆盖已到手的行；
+ * 去重后条数仍等于库内真实条数，不会把「重复」显示成「更多记录」。
+ */
+export function mergeAnalysisHistoryPages<T extends { id: string }>(
+  loaded: readonly T[],
+  page: readonly T[],
+): T[] {
+  const seen = new Set(loaded.map((r) => r.id));
+  const merged = loaded.slice();
+  for (const r of page) {
+    if (seen.has(r.id)) { continue; }
+    seen.add(r.id);
+    merged.push(r);
+  }
+  return merged;
+}
+
+/** 一条历史分析记录里与「结论档」有关的字段（两个面板的列表 DTO 都满足）。 */
+export interface RecordActionFields {
+  decisionAction?: string | null;
+  decisionPositionState?: string | null;
+  decisionPositionPct?: number | null;
+  decisionJson?: string | null;
+}
+
+/**
+ * 该记录在列表上**实际渲染**的结论档（与 Action Tag 同一判据，单一权威）。
+ *
+ * 返回 `null` = 这行还没有结论（如仍在跑、后端未下发哨兵）；否则是 `StockAction` 值。
+ * ⚠ 「有 decisionJson 但里面没有 action」返回 `UNCERTAIN` 而不是 null —— 这是既有口径
+ * （`UNCERTAIN` 的定义就是「有决策数据但判不出方向」），本轮刻意不改，改了会把
+ * 一批旧记录从「不确定」挪进「数据缺失」，那是另一件事。
+ * 现网实测：`decision_json` 为字面量 `"null"` 的行 parse 出 `null` ⇒ 归 `null`（该行不出 Tag），
+ * 不得在 `null.action` 上抛错（2026-10-22 整页崩的根因）。
+ */
+export function resolveRecordDisplayAction(r: RecordActionFields): string | null {
+  if (r.decisionAction) {
+    return resolveDisplayAction(r.decisionAction, r.decisionPositionState, r.decisionPositionPct);
+  }
+  if (!r.decisionJson) { return null; }
+  try {
+    const d = JSON.parse(r.decisionJson) as Record<string, unknown>;
+    if (!d || typeof d !== "object") { return null; }
+    return resolveDisplayAction(
+      d.action,
+      typeof d.positionState === "string" ? d.positionState : null,
+      typeof d.positionPct === "number" ? d.positionPct : null,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 结论档的 i18n 键（与 Tag 同一函数产出）；还没有结论 ⇒ `null`。
+ *
+ * 筛选按**这个键**比对，而不是按原始值：`getActionTKey` 会把无法识别的原始值统一落到
+ * 「不确定」，按原始值等值比较就会出现在「不确定」这一档筛不到、界面上却写着「不确定」的错位。
+ */
+export function actionKeyOfRecord(r: RecordActionFields): string | null {
+  const action = resolveRecordDisplayAction(r);
+  return action ? getActionTKey(action) : null;
+}
+
+/** 记录来历三态：实况 / as-of 回放 / 未知（`analysis_kind` 只有前两态，其余一律按未知，不得猜）。 */
+export type AnalysisProvenance = "live" | "replay" | "unknown";
+
+export function provenanceOfRecord(r: { analysisKind?: string | null }): AnalysisProvenance {
+  const kind = typeof r.analysisKind === "string" ? r.analysisKind.trim().toLowerCase() : "";
+  if (kind === "replay") { return "replay"; }
+  if (kind === "live") { return "live"; }
+  return "unknown";
+}
+
 /** 市场环境信息（与后端 EvidenceWeightRequest 对应） */
 export interface MarketRegimeInfo {
   regime: string;
@@ -180,12 +322,22 @@ export const STOCK_ACTION_LABELS: Record<string, StockActionType> = {
   "不确定": StockAction.UNCERTAIN,
   "无法判断": StockAction.UNCERTAIN,
   "数据缺失": StockAction.UNAVAILABLE,
-  // ── 兼容 dashboard_report 的「6 档中文」值域（强烈买入…卖出）──
-  // 该值域由 `harness/dashboard_report.rs` 产出（`report.action = "强烈买入"`），
-  // 与 portfolio-mgr 的 6 档是**两套不同定义**（前者无「观望」档、有「强烈买入」）。
-  // 收敛前先把这两个值纳入权威表，否则严格解析会把它们降级为 UNCERTAIN。
+  // ── 「强烈买入 / 强烈卖出」──
+  // 值域权威是 `harness::decision_action::ActionKind`；报告链路（`analysis-engine/dashboard_report.rs`
+  // 的 `as_storage_cn`）已把这两枚折进「买入 / 卖出」，库里实测也**只有**权威中文八档。
+  // 保留这两个键只为兜住旧记录与 LLM 自由文本 —— 别名是**解析入口**，不是档位
+  // （同后端 `ACTION_ALIASES` 的定位；两侧集合由 scripts/check-decision-action-single-source.mjs 对账）。
   "强烈买入": StockAction.BUY,
   "强烈卖出": StockAction.SELL,
+  // ── ASCII 别名（小写登记，与后端 `ACTION_ALIASES` 同集合）──
+  // 后端 `normalize_action` 比较前 to_lowercase，这些值它认得；此前前端缺 ⇒ 同一条记录
+  // 后端有档、界面显示「不确定」。新增别名只允许加在权威表，这里跟着补齐、不得自造。
+  "strong_buy": StockAction.BUY,
+  "add": StockAction.INCREASE,
+  "watch": StockAction.WAIT,
+  "trim": StockAction.REDUCE,
+  "strong_sell": StockAction.SELL,
+  "clear": StockAction.SELL,
 };
 
 /** 股票风险等级枚举 */
@@ -230,7 +382,9 @@ export function parseActionStrict(raw: unknown): StockActionType | null {
   if (clean === "") { return null; }
   const upper = clean.toUpperCase();
   if (upper in StockAction) { return upper as StockActionType; }
-  return STOCK_ACTION_LABELS[clean] ?? null;
+  // ASCII 别名按小写再查一次 —— 与后端 `normalize_action` 的 to_lowercase 同口径，
+  // 否则 `watch` / `clear` 这类后端认得的值在前端静默降级成「不确定」（同一记录两处不同档）
+  return STOCK_ACTION_LABELS[clean] ?? STOCK_ACTION_LABELS[clean.toLowerCase()] ?? null;
 }
 
 /**
@@ -247,6 +401,21 @@ export function parseActionStrict(raw: unknown): StockActionType | null {
  */
 export function parseAction(raw: unknown): StockActionType {
   return parseActionStrict(raw) ?? StockAction.UNCERTAIN;
+}
+
+/**
+ * 「这一格没有结论」的判定 —— 与后端 `decision_action::is_unavailable` 同语义，
+ * 并覆盖字段本身的缺席（`null` / 空串 / 旧数据实测的字面量 `"null"`）。
+ *
+ * 为什么要收成一处：双视角面板此前各自手写 `!= null && !== "" && !== "null"` 三段判据，
+ * 而列表与详情对空决策下发的是权威哨兵 `UNAVAILABLE`（2026-10-22 裁定后列表也补齐）——
+ * 那份旧判据会把「数据缺失」当成「有公式结论」渲染出来，等于把没有结论显示成一条结论。
+ */
+export function isAbsentDecisionAction(raw: unknown): boolean {
+  if (typeof raw !== "string") { return true; }
+  const v = raw.trim();
+  if (v === "" || v === "null") { return true; }
+  return parseActionStrict(v) === StockAction.UNAVAILABLE;
 }
 
 /** 方向结论（verdict 空间三值） */
@@ -515,30 +684,33 @@ export function parseRiskLevel(raw: unknown): StockRiskLevelType {
 // ── 颜色 & i18n 键 ──
 
 /**
- * 返回 Ant Design Tag 预设色名（red/green/blue/orange 等）。
- * 用于详情页等 Ant Design 主题环境下的 Tag color 属性。
- * 列表/下拉面板请使用 getActionTagStyle（CSS 变量样式）。
+ * 决策档位的**强度配色**（全站唯一一张按档上色的表）。
+ *
+ * 六档操作建议按「利空 → 利好」连续渐变；两档兜底**不在该轴上**（`rank: null`）——
+ * 缺席不是结论，不给方向色。八档必须互不同色（2026-10-22 用户要求「结果不同不得同色」）：
+ * 旧表把 买入/增持 并成 `--color-danger`、卖出/减持 并成 `--color-success`、
+ * 不确定/数据缺失 并成灰 ⇒ 同一屏两档颜色相同，强度差完全看不见，只能靠读文字区分。
+ *
+ * 按 A 股涨跌习惯取色（红 = 利好、绿 = 利空）。主题 token 只有
+ * danger / success / info / warning 四枚，装不下八档互异 ⇒ 落 hex 单表；
+ * 底色与描边用 `color-mix` 从同一 hex 派生，深/浅主题都成立。
  */
+export const ACTION_PALETTE: Record<StockActionType, { readonly hex: string; readonly rank: number | null }> = {
+  [StockAction.SELL]: { hex: "#13c2c2", rank: 0 },
+  [StockAction.REDUCE]: { hex: "#52c41a", rank: 1 },
+  [StockAction.WAIT]: { hex: "#a0d911", rank: 2 },
+  [StockAction.HOLD]: { hex: "#faad14", rank: 3 },
+  [StockAction.INCREASE]: { hex: "#fa541c", rank: 4 },
+  [StockAction.BUY]: { hex: "#f5222d", rank: 5 },
+  [StockAction.UNCERTAIN]: { hex: "#9254de", rank: null },
+  [StockAction.UNAVAILABLE]: { hex: "#8c8c8c", rank: null },
+};
+
 export function getActionColor(action: string): string {
   // P1-6(2026-09-14): 原先直接 `switch (action)` **不解析** —— 传入中文「买入」或小写
   // `buy` 全部落到 `default`（无配色）。同文件的 getActionTKey 一直是解析后再查表的，
   // 三者判据不一致，导致「标签显示了颜色却没有」。现统一走 parseAction。
-  switch (parseAction(action)) {
-    case StockAction.BUY:
-    case StockAction.INCREASE:
-      return "red";
-    case StockAction.SELL:
-    case StockAction.REDUCE:
-      return "green";
-    case StockAction.HOLD:
-      return "blue";
-    case StockAction.WAIT:
-      return "orange";
-    case StockAction.UNCERTAIN:
-    case StockAction.UNAVAILABLE:
-    default:
-      return "default";
-  }
+  return ACTION_PALETTE[parseAction(action)].hex;
 }
 
 /**
@@ -548,50 +720,19 @@ export function getActionColor(action: string): string {
  * 适用于自定义面板/下拉列表等非标准 Ant Design 容器。
  */
 export function getActionTagStyle(action: string): CSSProperties {
-  const base: CSSProperties = {
+  // P1-6(2026-09-14): 同 getActionColor —— 原 switch 不解析原串，中文/小写值无配色。
+  const hex = ACTION_PALETTE[parseAction(action)].hex;
+  return {
     margin: 0,
     fontSize: 10,
     lineHeight: "16px",
     padding: "0 5px",
     borderRadius: 3,
     border: "1px solid",
+    color: hex,
+    background: `color-mix(in oklch, ${hex} 14%, transparent)`,
+    borderColor: `color-mix(in oklch, ${hex} 30%, transparent)`,
   };
-  let fg: string;
-  let bg: string;
-  let bd: string;
-  // P1-6(2026-09-14): 同 getActionColor —— 原 switch 不解析原串，中文/小写值无配色。
-  switch (parseAction(action)) {
-    case StockAction.BUY:
-    case StockAction.INCREASE:
-      fg = "var(--color-danger)";
-      bg = "color-mix(in oklch, var(--color-danger) 14%, transparent)";
-      bd = "color-mix(in oklch, var(--color-danger) 30%, transparent)";
-      break;
-    case StockAction.SELL:
-    case StockAction.REDUCE:
-      fg = "var(--color-success)";
-      bg = "color-mix(in oklch, var(--color-success) 14%, transparent)";
-      bd = "color-mix(in oklch, var(--color-success) 30%, transparent)";
-      break;
-    case StockAction.HOLD:
-      fg = "var(--color-info)";
-      bg = "color-mix(in oklch, var(--color-info) 14%, transparent)";
-      bd = "color-mix(in oklch, var(--color-info) 30%, transparent)";
-      break;
-    case StockAction.WAIT:
-      fg = "var(--color-warning)";
-      bg = "color-mix(in oklch, var(--color-warning) 14%, transparent)";
-      bd = "color-mix(in oklch, var(--color-warning) 30%, transparent)";
-      break;
-    case StockAction.UNCERTAIN:
-    case StockAction.UNAVAILABLE:
-    default:
-      fg = "var(--color-t-tertiary)";
-      bg = "color-mix(in oklch, var(--color-t-tertiary) 12%, transparent)";
-      bd = "color-mix(in oklch, var(--color-t-tertiary) 25%, transparent)";
-      break;
-  }
-  return { ...base, color: fg, background: bg, borderColor: bd };
 }
 
 export function getActionTKey(action: string): string {
@@ -611,6 +752,8 @@ export function getActionTKey(action: string): string {
       return "stockAnalysis.actionWait";
     case StockAction.UNAVAILABLE:
       return "stockAnalysis.actionUnavailable";
+    case StockAction.UNCERTAIN:
+      return "stockAnalysis.actionUncertain";
     default:
       return "stockAnalysis.actionUncertain";
   }
@@ -838,33 +981,26 @@ export function getCatalystTimelineTKey(raw: unknown): string | null {
 }
 
 // ── 上述 dashboard 值域的**配色**（同样收敛到单点，组件内不得再写值域 switch）──
-//
-// ⚠️ 这两个 `action` 表**键集不同**（tKey 表只有 2 个强度档，其余档复用
-// `getActionTKey`；配色表覆盖全部 6 档）⇒ 后端增删档位时**两张表都要看**。
 
 /**
- * `dashboard_report.action` 的**强度渐变**配色。
+ * `dashboard_report.action` 的配色 —— **不再养第二张表**（2026-10-22 收编）。
  *
- * ⚠️ 与 `getActionColor()` 的分工：后者按「涨跌方向」二值着色（买入/增持 → red，
- * 卖出/减持 → green），同一方向内不再分强度；本表保留 dashboard 的**强度渐变**
- * （深红 → 橙红 → 橙 → 灰 → 绿 → 青），表达档位的连续强弱。
- * **不要把两者合并** —— 合并即丢失强度信息（视觉降级）。
+ * 退役的旧表按「强烈买入 #f5222d / 买入 #fa541c / 增持 #fa8c16 …」给了六枚渐变色。
+ * 但权威已把「强烈买入 / 强烈卖出」折进 `BUY` / `SELL`（`as_storage_cn` 同字），
+ * 所以它们与「买入 / 卖出」**同色是裁定的结果而非漏配** —— 文字那一侧仍由
+ * `DASHBOARD_ACTION_TKEY_OVERRIDES` 显示「强烈买入」，强度词没丢。
+ * 留着两张表才是真代价：同一档在弹窗与看板报告里两种色。
+ *
+ * 兜底与后端 `apply_risk_veto` 同一判据：空 = 数据缺失（灰），非空但不识别 = 不确定（紫）。
  */
-const DASHBOARD_ACTION_COLORS: Record<string, string> = {
-  "强烈买入": "#f5222d",
-  "买入": "#fa541c",
-  "增持": "#fa8c16",
-  "持有": "#8c8c8c",
-  "减持": "#52c41a",
-  "卖出": "#13c2c2",
-};
-
-const DASHBOARD_NEUTRAL_COLOR = "#8c8c8c";
-
-/** `dashboard_report.action` 的配色；未知值取中性灰（不臆造方向色） */
 export function getDashboardActionColor(raw: unknown): string {
-  return lookupTKey(DASHBOARD_ACTION_COLORS, raw) ?? DASHBOARD_NEUTRAL_COLOR;
+  if (typeof raw !== "string" || isAbsentDecisionAction(raw)) { return ACTION_PALETTE[StockAction.UNAVAILABLE].hex; }
+  const bucket = parseActionStrict(raw);
+  return ACTION_PALETTE[bucket ?? StockAction.UNCERTAIN].hex;
 }
+
+/** 非档位值域（trend 等）的未知值兜底色：中性灰，不臆造方向 */
+const DASHBOARD_NEUTRAL_COLOR = "#8c8c8c";
 
 /** `dashboard_report.trend` 配色：看多红 / 看空绿（A 股涨跌色习惯），其余中性灰 */
 const DASHBOARD_TREND_COLORS: Record<string, string> = {
@@ -899,7 +1035,7 @@ export function getCatalystDirectionColor(raw: unknown): string {
 }
 
 /**
- * 自由文本「信号/方向」关键词 → Ant Design 色名。
+ * 自由文本「信号/方向」关键词 → 强度表端点的 hex（`ACTION_PALETTE`）。
  *
  * ⚠️ 配色约定（A 股）：**红=看多/买入，绿=看空/卖出** —— 与
  * [`getActionColor`] / [`getActionTagStyle`] 同源。
@@ -913,11 +1049,17 @@ export function getCatalystDirectionColor(raw: unknown): string {
  * 关键词表本身不可直接复用时序枚举（入参是「买入信号 / 上涨趋势」这类自由文本，
  * 不是 action 值域），故此处保留关键词匹配，只把配色约定对齐权威函数。
  */
-export function getSignalColor(signal: string): "green" | "red" | "blue" {
+export function getSignalColor(signal: string): string {
   const s = String(signal ?? "").trim().toLowerCase();
-  if (s.includes("买") || s.includes("多") || s.includes("涨") || s.includes("牛")) { return "red"; }
-  if (s.includes("卖") || s.includes("空") || s.includes("跌") || s.includes("熊")) { return "green"; }
-  return "blue";
+  // 端点直取强度表的端点（看多↔买入、看空↔卖出、关注↔持有），不再各自写 antd 色名 ——
+  // 写死色名就是「同一套约定两处表达」，一处改色另一处不会跟着改（2026-09-21 那次相反配色即此成因）。
+  if (s.includes("买") || s.includes("多") || s.includes("涨") || s.includes("牛")) {
+    return ACTION_PALETTE[StockAction.BUY].hex;
+  }
+  if (s.includes("卖") || s.includes("空") || s.includes("跌") || s.includes("熊")) {
+    return ACTION_PALETTE[StockAction.SELL].hex;
+  }
+  return ACTION_PALETTE[StockAction.HOLD].hex;
 }
 
 /** 尝试解析报告字符串为 JSON 对象 */
@@ -1711,6 +1853,9 @@ export function readHorizonActions(decisionJson?: string | null): Array<{ key: s
   } catch {
     return [];
   }
+  // 现网有行的 decision_json 存的是字面量 `"null"`（JSON.parse 不抛、给 null）⇒ 必须先验形状，
+  // 否则下一行就是 `null.decisionsByHorizon` 整页崩（2026-10-22 历史弹窗全量渲染后首次暴露）。
+  if (!parsed || typeof parsed !== "object") { return []; }
   const raw = parsed.decisionsByHorizon ?? parsed.decisions_by_horizon;
   if (raw == null || typeof raw !== "object") { return []; }
   const map = raw as Record<string, { action?: unknown } | null>;
@@ -1773,6 +1918,9 @@ export function readDecisionProvenance(
   } else {
     parsed = source;
   }
+  // 同 `readHorizonActions`：`decision_json` 为字面量 `"null"` 的行（现网实测 1 行，600036 /
+  // 2026-07-25）parse 出来是 `null` 而不是抛错，不验形状就会在 `pick` 里整页崩。
+  if (!parsed || typeof parsed !== "object") { return null; }
   const pick = (camel: string, snake: string): string | undefined => {
     const v = parsed[camel] ?? parsed[snake];
     return typeof v === "string" && v ? v : undefined;

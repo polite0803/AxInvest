@@ -12,6 +12,9 @@ pub use axagent_analysis_engine::market_close_store::{
     CloseSweepReport, DEFAULT_BATCH_INTERVAL_MS, DEFAULT_BATCH_SIZE, UniverseReport,
 };
 
+use super::error::ErrorResponse;
+use super::error_code::common as common_err;
+
 /// 手动触发一轮收盘采集（cron 走同一 engine 实现）。
 #[agent_command(
     domain = "finance",
@@ -24,11 +27,32 @@ pub async fn sweep_market_close(
     state: tauri::State<'_, crate::AppState>,
     trade_date: Option<String>,
 ) -> Result<CloseSweepReport, String> {
-    let date = trade_date.unwrap_or_else(|| {
-        axagent_astock_data::calendar::previous_trading_day(chrono::Local::now().date_naive())
-            .format("%Y-%m-%d")
-            .to_string()
-    });
+    // 只允许最近一个**已收盘**交易日：盘中点一次会把半日价写成收盘价
+    // （2026-10-23 12:19 实测：10-23 盘中价被写成 5,215 行"收盘"）。
+    let now_local = chrono::Local::now();
+    let target = axagent_astock_data::daily_snapshot::snapshot_target_date(&now_local);
+    let date = match (trade_date, target) {
+        (Some(d), Some(t)) => {
+            let t = t.format("%Y-%m-%d").to_string();
+            if d != t {
+                return Err(ErrorResponse::new(common_err::INVALID_INPUT)
+                    .with_detail(format!(
+                        "收盘采集只支持最近一个已收盘交易日（{t}）；历史日期请用「补窗口历史」"
+                    ))
+                    .to_string());
+            }
+            d
+        },
+        (None, Some(t)) => t.format("%Y-%m-%d").to_string(),
+        (Some(_), None) | (None, None) => {
+            return Err(ErrorResponse::new(common_err::INVALID_INPUT)
+                .with_detail(
+                    "盘中不采集收盘：请 15:00 收盘后再点「补最新收盘」；历史日期请用「补窗口历史」"
+                        .to_string(),
+                )
+                .to_string());
+        },
+    };
     let db = state.harness.db();
     axagent_analysis_engine::market_close_store::run_close_sweep(
         db,
@@ -68,6 +92,10 @@ pub struct CoverageView {
     pub universe_size: i64,
     /// 清单里被 clist 全量确认过的票数（低于 universe_size ⇒ 枚举域由本地票拼出，不完整）
     pub confirmed_by_clist: i64,
+    /// 行情源申报的全市场总数（0 = 还没拿到）
+    pub reported_total: i64,
+    /// 最新收盘日的代码数（全 A 股样本的实际收盘覆盖）
+    pub latest_close_codes: i64,
     pub close_dates: Vec<String>,
     pub rows_per_date: Vec<i64>,
 }
@@ -83,7 +111,72 @@ pub async fn get_market_coverage(
     Ok(CoverageView {
         universe_size: data.universe_size,
         confirmed_by_clist: data.confirmed_by_clist,
+        reported_total: data.reported_total,
+        latest_close_codes: data.latest_close_codes,
         close_dates: data.close_dates,
         rows_per_date: data.rows_per_date,
+    })
+}
+
+/// 逐票历史补齐报告（阶段 0.3：全 A 股窗口数据）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryBackfillReport {
+    pub requested: usize,
+    pub codes: u32,
+    pub rows: u32,
+    pub failed: u32,
+    pub target_days: u32,
+    /// 首条失败原因（全失败时给面板成句；成功时为 None）
+    pub error: Option<String>,
+}
+
+/// 分批补齐清单里历史行数不足的票（默认 90 个交易日）。
+///
+/// 每次最多 `limit` 只（默认 500，上限 6000）；全市场 5,925 只约 12 批。
+/// 幂等：已够 `target_days` 的票由 `codes_needing_history` 排除，重复调用只补缺口。
+#[agent_command(
+    domain = "finance",
+    safety = Caution,
+    call_mode = StateInput,
+    description = "分批补齐全市场收盘历史"
+)]
+#[tauri::command]
+pub async fn backfill_market_close_history(
+    state: tauri::State<'_, crate::AppState>,
+    limit: Option<usize>,
+) -> Result<HistoryBackfillReport, String> {
+    const TARGET_DAYS: u32 = 90;
+    let limit = limit.unwrap_or(500).clamp(1, 6000);
+    let db = state.harness.db();
+    let entries =
+        axagent_analysis_engine::market_close_store::codes_needing_history(db, TARGET_DAYS, limit)
+            .await?;
+    if entries.is_empty() {
+        return Ok(HistoryBackfillReport {
+            requested: 0,
+            codes: 0,
+            rows: 0,
+            failed: 0,
+            target_days: TARGET_DAYS,
+            error: None,
+        });
+    }
+    let requested = entries.len();
+    let stats = axagent_analysis_engine::market_close_store::backfill_close_history_for_codes(
+        db,
+        &state.astock_client,
+        &entries,
+        TARGET_DAYS,
+        120,
+    )
+    .await?;
+    Ok(HistoryBackfillReport {
+        requested,
+        codes: stats.codes,
+        rows: stats.rows,
+        failed: stats.failed,
+        target_days: TARGET_DAYS,
+        error: stats.first_error,
     })
 }

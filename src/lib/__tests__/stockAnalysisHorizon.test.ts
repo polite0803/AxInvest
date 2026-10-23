@@ -50,6 +50,15 @@ describe("readHorizonActions", () => {
     expect(readHorizonActions(JSON.stringify({ action: "买入" }))).toEqual([]);
     expect(readHorizonActions(JSON.stringify({ decisionsByHorizon: { mid: {} } }))).toEqual([]);
   });
+
+  // 2026-10-22：库里实测有行 `decision_json` 存的是**字面量 "null"**（600036 / 2026-07-25，
+  // status=completed）。`JSON.parse("null")` 不抛而是给 `null` ⇒ 旧实现在 `parsed.x` 上
+  // 直接 TypeError，把整个历史弹窗崩成页面错误（全量渲染后第一次暴露）。
+  it("parse 出非对象（字面量 null / 数字 / 字符串 / 数组）⇒ 空数组而不是抛错", () => {
+    for (const raw of ["null", "0", '"abc"', "[]", "true"]) {
+      expect(readHorizonActions(raw), `decision_json=${raw}`).toEqual([]);
+    }
+  });
 });
 
 describe("档位标签与来源", () => {
@@ -358,6 +367,14 @@ describe("readDecisionProvenance", () => {
     expect(readDecisionProvenance("")).toBeNull();
     expect(readDecisionProvenance(wrap({ timeHorizon: "ultra_short" }))).toBeNull();
     expect(readDecisionProvenance("{坏 JSON")).toBeNull();
+  });
+
+  // 用户可见的那次崩：`decision_json` 为字面量 `"null"` 的行 ⇒ 旧实现在 `pick("actionSource")`
+  // 上抛 `Cannot read properties of null (reading 'actionSource')`，历史弹窗整页崩。
+  it("parse 出非对象（字面量 null / 数字 / 字符串 / 数组）⇒ null 而不是抛错", () => {
+    for (const raw of ["null", "0", '"abc"', "[]", "true"]) {
+      expect(readDecisionProvenance(raw), `decision_json=${raw}`).toBeNull();
+    }
   });
 
   it("降级格但四档明细里找不到该档 ⇒ 退成 label，不编造分支原 action", () => {

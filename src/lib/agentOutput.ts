@@ -802,9 +802,13 @@ export function reconstructVerdictTag(text: string): string {
   const verdictSrc = verdictOnly && parsed.verdict && typeof parsed.verdict === "object"
     ? { ...(parsed.verdict as Record<string, unknown>), __verdict_only: true }
     : parsed.verdict;
-  const verdict = typeof verdictSrc === "object"
+  // 2026-10-23（审计 F-3）：标量 verdict 直接拼标签会产出**非法 JSON**
+  // （`<!-- VERDICT: 看空 -->`），前端 `tryParseVerdictFormat` 必然解析失败 ⇒
+  // 计票退化成关键词扫描（与卡片徽标口径可能相反）。与 Rust 侧
+  // `reconstruct_verdict_text` 对齐：标量一律包成 `{"verdict": <标量>}`。
+  const verdict = typeof verdictSrc === "object" && verdictSrc !== null
     ? JSON.stringify(verdictSrc)
-    : String(verdictSrc);
+    : JSON.stringify({ verdict: verdictSrc });
 
   if (report.trim().length > 0) {
     return `${report}\n\n<!-- VERDICT: ${verdict} -->`;

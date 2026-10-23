@@ -2,6 +2,7 @@
 
 import { DecisionTrustNotice } from "@/components/stock-analysis/DecisionTrustNotice";
 import { useIsMobile } from "@/components/stock-analysis/MobileResponsive";
+import { useSimpleMode } from "@/components/stock-workspace/_shared/useSimpleMode";
 import { DecisionConsensusMeter } from "@/components/stock-workspace/DecisionConsensusMeter";
 import { extractLlmField } from "@/lib/agentOutput";
 import {
@@ -11,7 +12,7 @@ import {
   getRiskTKey,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
-import { useStockAnalysisStore, useWorkspaceStore } from "@/stores";
+import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { StockDecision } from "@/types";
 import { Button, Drawer, Tag } from "antd";
@@ -28,9 +29,8 @@ import { useTranslation } from "react-i18next";
  */
 export function DecisionHeroBar() {
   const { t } = useTranslation();
-  const userMode = useWorkspaceStore((s) => s.userMode);
   const isMobile = useIsMobile();
-  const isSimple = userMode === "simple" || isMobile;
+  const isSimple = useSimpleMode();
 
   const decision = useStockAnalysisStore((s) => s.decision);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
@@ -68,20 +68,42 @@ export function DecisionHeroBar() {
   }, [decision, quote]);
 
   // ── 无决策占位 ──
+  // 两种密度都要有可感知差异：简洁合并成一行，专业拆成「标题行 + 提示行」，
+  // 否则在没有决策时切换模式会完全没有视觉变化（2026-10-22 实测反馈）。
   if (!decision) {
+    const hint = stockCode
+      ? t("workspace.decisionHero.noDecisionHint")
+      : t("workspace.decisionHero.noDecisionNoStock");
+    if (isSimple) {
+      return (
+        <div
+          className="flex items-center gap-2 px-3 py-2 rounded"
+          style={{ background: "var(--surface)", borderLeft: "3px solid var(--muted)" }}
+          data-testid="decision-hero-empty-simple"
+        >
+          <span className="text-sm" style={{ color: "var(--muted)" }}>
+            {t("workspace.decisionHero.noDecision")}
+          </span>
+          <span className="text-sm" style={{ color: "var(--muted)" }}>
+            {hint}
+          </span>
+        </div>
+      );
+    }
     return (
       <div
-        className="flex items-center gap-2 px-3 py-2 rounded"
+        className="rounded px-3 py-2 space-y-1"
         style={{ background: "var(--surface)", borderLeft: "3px solid var(--muted)" }}
+        data-testid="decision-hero-empty-professional"
       >
-        <span className="text-sm" style={{ color: "var(--muted)" }}>
-          {t("workspace.decisionHero.noDecision")}
-        </span>
-        <span className="text-sm" style={{ color: "var(--muted)" }}>
-          {stockCode
-            ? t("workspace.decisionHero.noDecisionHint")
-            : t("workspace.decisionHero.noDecisionNoStock")}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
+            {t("workspace.decisionHero.noDecision")}
+          </span>
+        </div>
+        <div className="text-sm" style={{ color: "var(--muted)" }}>
+          {hint}
+        </div>
       </div>
     );
   }

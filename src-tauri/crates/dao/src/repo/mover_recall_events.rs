@@ -123,6 +123,36 @@ pub async fn load_run_unexplained_shares(
     Ok(out)
 }
 
+/// 各核查轮次的 `date_from`：选样用它拒绝**窗口早于数据起点**的伪事件
+/// （历史回补的稀疏行会把 28 行窗口拼到十几年前；最新 v2 轮已把 from 收到 90 个交易日内）。
+pub async fn load_run_date_froms(
+    db: &DatabaseConnection,
+) -> Result<HashMap<String, String>, DbErr> {
+    use axagent_entities::mover_recall_runs;
+    let rows = mover_recall_runs::Entity::find().all(db).await?;
+    Ok(rows.into_iter().map(|r| (r.id, r.date_from)).collect())
+}
+
+/// 把指定状态的漏检事件置 `excluded` 并写原因（伪窗口存量清理；保留行不删除）。
+pub async fn exclude_events_with_reason(
+    db: &DatabaseConnection,
+    ids: &[String],
+    reason: &str,
+    now_ms: i64,
+) -> Result<u64, DbErr> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let result = Entity::update_many()
+        .col_expr(Column::Status, Expr::value("excluded"))
+        .col_expr(Column::ErrorDetail, Expr::value(reason.to_owned()))
+        .col_expr(Column::UpdatedAtMs, Expr::value(now_ms))
+        .filter(Column::Id.is_in(ids.to_vec()))
+        .exec(db)
+        .await?;
+    Ok(result.rows_affected)
+}
+
 /// `rates_json` 里的 `unexplainedShare` 是 [`compute_rates`] 输出的**百分数**（0-100），
 /// 而请求侧阈值 `max_unexplained_share` 是 0-1。这里统一归一成 0-1；
 /// 调用方不得再乘除一次。直接拿 45.45 与 0.5 比会把 45% 当成 4500% 拦掉。

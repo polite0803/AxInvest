@@ -12,10 +12,11 @@
  * - LLM 不可用时:一行占位 + 灰条"LLM 视角不可用"
  */
 import {
-  actionToDirection,
   agreementBgColor,
   agreementColor,
+  getActionColor,
   getActionTKey,
+  isAbsentDecisionAction,
   parseAction,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
@@ -98,26 +99,23 @@ function normalize(data: CompactDecisionComparisonProps["data"]): CompactDecisio
 }
 
 /**
- * 把 action 字符串映射成"行动风格"色标（买 → 蓝绿；卖 → 红；中性/未知 → 灰）。
+ * 档位配色**只有权威一张表**（`ACTION_PALETTE`）。
  *
- * P1-6(2026-09-14): 原判据用 `norm.includes("买")` —— **只认中文**，英文 token
- * （`BUY`/`SELL`，后端 DTO 明确可能直返）一律落到灰色，双视角对比里换值域即掉配色。
- * 改走统一的 `actionToDirection`（已覆盖中英文两套值域）。
+ * 2026-10-22 收编：本文件旧表按「买 → `#10b981` 绿 / 卖 → `#ef4444` 红」上色，
+ * 方向与 A 股涨跌习惯（红=利好）**相反** ⇒ 同一条「买入」在历史弹窗里是红的、
+ * 在这张紧凑对比卡里是绿的 —— 那不是「两种风格」，是同一结论两个颜色互相打脸。
+ * ⚠ 有意的行为变化：本卡的买入/增持由绿转红、卖出/减持由红转绿。
  */
 function actionColor(action?: string | null): string {
-  const dir = actionToDirection(action);
-  if (dir === "buy") { return "#10b981"; }
-  if (dir === "sell") { return "#ef4444"; }
-  return "#94a3b8";
+  return action ? getActionColor(action) : "var(--muted)";
 }
 
 export function CompactDecisionComparison({ data }: CompactDecisionComparisonProps) {
   const { t } = useTranslation();
   const view = useMemo(() => normalize(data), [data]);
 
-  const hasLlm = view.llmDecisionAction != null
-    && view.llmDecisionAction !== ""
-    && view.llmDecisionAction !== "null";
+  // 「有没有结论」走共用判据（含权威缺失哨兵），不再手写三段字面量比较
+  const hasLlm = !isAbsentDecisionAction(view.llmDecisionAction);
   const agreement = typeof view.decisionAgreementScore === "number" ? view.decisionAgreementScore : null;
   const actionsMatch = hasLlm
     // P1-6(2026-09-14): 原按字符串 trim/lower 后直接比字面量 ⇒ 「公式=BUY vs LLM=买入」

@@ -100,6 +100,19 @@ impl NodeExecutorTrait for ValidationExecutor {
                     };
                     actual_value.as_ref().is_some_and(|v| !v.is_null())
                 },
+                // 2026-10-23（审计 AUDIT-run-warnings-2026-10-23.md C 类）：
+                // 模板 `v-validate` 用的正是 `exists`（`seed_stock_analysis.rs:5410`），
+                // 而本 match 此前**没有**这个分支 ⇒ 落到下面的 `_` 记 false ⇒
+                // 该验收节点自 v10 起**恒 Skipped**，"结果完整性校验"从未真正生效。
+                // 语义与 `not_null` 的区别：`exists` 只要求路径能解析出值（含 null），
+                // `not_null` 还要求值非 null —— 两者不可互相替代。
+                "exists" => {
+                    let actual_value = match &assertion.actual {
+                        Some(path) => resolve_var_path(path, context),
+                        None => None,
+                    };
+                    actual_value.is_some()
+                },
                 "non_empty" => {
                     let actual_value = match &assertion.actual {
                         Some(path) => resolve_var_path(path, context),

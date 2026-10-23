@@ -481,11 +481,22 @@ pub fn apply_risk_veto(action: &str, risk_level: &str) -> (String, bool, String)
             risk_level = %risk_level,
             "[apply_risk_veto] 未识别的 action 值域，跳过结论式放行"
         );
+        // 裁定（2026-10-22）：兜底不得占用业务档名，且两档不得互串 ——
+        // 空值 = **没有决策数据**（`Unavailable` / 数据缺失），非空但不识别 = **有数据判不出方向**
+        // （`Uncertain` / 不确定）。此前两者都降级成「观望」，等于替调用方下了一个结论。
+        let fallback = if action.trim().is_empty() {
+            ActionKind::Unavailable
+        } else {
+            ActionKind::Uncertain
+        };
         if extreme || high {
             return (
-                "观望".into(),
+                fallback.as_storage_cn().into(),
                 true,
-                format!("未识别 action 值域「{action}」，风控按保守档降级为观望"),
+                format!(
+                    "action 值域不可用「{action}」，按「{}」处置而非任何操作建议",
+                    fallback.as_storage_cn()
+                ),
             );
         }
         return (
@@ -739,7 +750,10 @@ pub fn portfolio_risk_gate(
     let mut adjusted = false;
     let mut reasons: Vec<String> = Vec::new();
 
-    if matches!(pm_action, "买入" | "增持") && final_pct > 0.0 && current_price > 0.0 {
+    if normalize_action(pm_action).is_some_and(ActionKind::implies_buy)
+        && final_pct > 0.0
+        && current_price > 0.0
+    {
         // 新增仓位市值 = position_pct% × portfolio_total_value
         // 注意：position_pct 是相对组合总价值的百分比
         if portfolio_total_value <= 0.0 {
@@ -1603,9 +1617,10 @@ mod tests {
 
     #[test]
     fn risk_veto_unrecognized_value_no_longer_fails_open() {
-        // 高风险 + 未识别值域：不得静默返回原值（旧实现会直接放行）
+        // 高风险 + 未识别值域：不得静默返回原值（旧实现会直接放行）。
+        // 期望随 2026-10-22 裁定改：兜底不占业务档名 ⇒ 「观望」改「不确定」。
         let (action, was_down, note) = apply_risk_veto("待明日观察", "极高风险");
-        assert_eq!(action, "观望");
+        assert_eq!(action, "不确定");
         assert!(was_down);
         assert!(!note.is_empty(), "未识别值域必须留归因");
 
@@ -1615,10 +1630,11 @@ mod tests {
         assert!(!was_down);
         assert!(note.contains("未识别"));
 
-        // 空串（历史缺失哨兵形态）同样不得被当成「无需否决」
+        // 空串 = **没有决策数据**，与「有数据但判不出」分属两档，不得共用一个兜底值
         let (action, was_down, _) = apply_risk_veto("", "高风险");
-        assert_eq!(action, "观望");
+        assert_eq!(action, "数据缺失");
         assert!(was_down);
+        assert_ne!(action, "不确定", "「没数据」与「判不出」必须是两个档");
     }
 
     // ── Path 2: try_parse_param_suggestion ──

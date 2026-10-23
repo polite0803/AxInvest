@@ -347,7 +347,7 @@ async fn wait_until_settled(
 /// `hooks.rs` 的 `stock-analysis-persist` 有守卫
 /// `if input_has_analysis_id(&ctx.input) { return Ok(()) }`（`stock_workflow/hooks.rs:1102-1104`），
 /// 而业务封装路径的 input 恒带 `analysis_id` ⇒ 该 hook 被跳过；它只服务
-/// **对话直执行通道**（`analysis_kind = "chat"`，见 `stock_workflow/hooks.rs:18-20` 模块注释）。
+/// **对话直执行通道**（`source = "chat"`，见 `stock_workflow/hooks.rs:18-20` 模块注释）。
 ///
 /// DB 证据（2026-09-23）：现存 11 条 completed 反思**全部**来自
 /// `workflow / live`（单股即时分析通道 `run_single_stock_analysis`），

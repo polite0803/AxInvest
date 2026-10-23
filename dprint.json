@@ -18,6 +18,7 @@
     "**/CHANGELOG.md",
     "src-tauri/schema-gen/**/*",
     "src-tauri/crates/**/bindings/**/*",
+    "src/types/generated/**/*",
     "scripts/**/*",
     "src-tauri/scripts/**/*",
     "knowledge-sources/**/*"

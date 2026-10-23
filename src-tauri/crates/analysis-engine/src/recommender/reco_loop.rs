@@ -46,6 +46,7 @@
 
 use std::collections::HashMap;
 
+use crate::decision_action::{normalize_action, ActionKind};
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
     QuerySelect, Set,
@@ -56,6 +57,7 @@ use axagent_entities::decision_validations;
 use axagent_entities::stock_analyses;
 use axagent_entities::workflow_template;
 use axagent_harness::workflow_types::Variable;
+use axagent_harness::AnalysisKind;
 
 use crate::hit_rate_backtest::hit_outcome_to_binary_outcome;
 use crate::recommender::style_matrix::{db_style_aliases, style_keys};
@@ -404,7 +406,14 @@ pub struct LoopCellResult {
     /// 该档验证窗口 lookback 内的成对样本数
     pub samples: usize,
     pub win_rate: Option<f64>,
+    /// 该格**上一轮的生效权重**（= 上一行 `new_weight`），用于面板的旧→新与 delta。
     pub old_weight: f64,
+    /// 本轮 EWMA/IC 线算出的**基准权重**（未叠外乘线）。下一轮以它为输入，
+    /// 外乘线只在本轮乘一次 ⇒ 同一批证据重复重算不会复利下坠。
+    pub base_weight: f64,
+    /// 本轮外乘惩罚（mover × 熔断），取值域 `[WEIGHT_FLOOR, 1]`；1.0 = 本格没有外乘线。
+    pub outer_penalty: f64,
+    /// 生效权重 = `base_weight × outer_penalty`（clamp 到 `[WEIGHT_FLOOR, 1]`）。
     pub new_weight: f64,
     /// mover 漏检线（Phase 4）的降权乘数（`None` = 该格证据不足，未参与合成）。
     /// 只降不升：取值域 `(WEIGHT_FLOOR, 1]`。
@@ -416,6 +425,23 @@ pub struct LoopCellResult {
     pub dqi_penalty: Option<f64>,
     /// 该格在核查窗口内「算出了它却被 top-N 淘汰」的事件数（留痕缺失时恒 0）
     pub scored_out: usize,
+}
+
+/// 闭环计算的一格输入：**外乘线之前的基准权重** + 上一轮的生效权重。
+///
+/// 为什么必须分开：旧实现把「上一轮已含惩罚的生效权重」直接当下一轮 EWMA 的输入，
+/// 同一批证据每天重算一次就把 mover/熔断/负 IC 再乘一次 ⇒ 权重几何衰减到 0.05。
+/// 旧行没有 `base_weight` 列时按 `base = 上一轮 new_weight` 兼容。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CellPrior {
+    pub base: f64,
+    pub effective: f64,
+}
+
+impl CellPrior {
+    fn baseline() -> Self {
+        Self { base: BASELINE_WEIGHT, effective: BASELINE_WEIGHT }
+    }
 }
 
 /// 逐格 mover 证据（Phase 4）：该格在核查窗口里「看到了却没要」与「要了」的事件数。
@@ -498,14 +524,13 @@ pub fn sample_is_usable(s: &RecoLoopSample) -> bool {
         && s.predicted_at_ms >= 0
 }
 
-/// 只降不升棘轮（纯函数）：本轮计算值永远不得高于该格**当前**权重。
+/// 权重上限（纯函数）：把 `computed` 压进 `[WEIGHT_FLOOR, cap]`。
 ///
-/// 为什么不能只做 `min(computed, BASELINE_WEIGHT)`：基线是 1.0，而该格上一轮可能已被
-/// 降到 0.16 —— 只封顶基线会让下一轮「样本不足 / 方差退化」分支把它抬回 1.0，
-/// 等于每轮把历史降权洗掉一次（现网 `strategy_weight_history` 实测：
-/// `trend×ultra_short` 0.164→1.0、`reversion×short` 0.916→1.0，样本分别 0 / 3 条）。
+/// `cap` 由调用方决定：闭环写库传 `BASELINE_WEIGHT`（外乘线只降不升 + IC 线允许在
+/// 基线内回升）；旧实现传「上一轮生效权重」，已退役 —— 那会把一次坏批次永久钉死，
+/// 且与「base/outer 分离」叠在一起会造成复利（现网 capital long 0.45→0.17）。
 ///
-/// 输入防御：`old` 非有限 ⇒ 视为基线；`computed` 非有限 ⇒ 保持 `old`（不写 NaN）；
+/// 输入防御：`cap` 非有限 ⇒ 视为基线；`computed` 非有限 ⇒ 返回 `cap`（不写 NaN）；
 /// 两者都先归一进 `[WEIGHT_FLOOR, BASELINE_WEIGHT]` 再比，避免 `clamp` 的 min > max 崩溃。
 pub fn ratchet_weight(computed: f64, old: f64) -> f64 {
     let old = if old.is_finite() {
@@ -519,18 +544,21 @@ pub fn ratchet_weight(computed: f64, old: f64) -> f64 {
     computed.clamp(WEIGHT_FLOOR, old)
 }
 
-/// 胜率/IC 线未校准时的权重（纯函数）：保留当前权重，只允许独立外乘线继续降。
+/// 胜率/IC 线未校准时的权重（纯函数）：base 不动，只允许独立外乘线在本轮降一次。
 ///
 /// 「样本门」的准确语义是**这条线不动**，不是「整格一律不动」：mover 漏检线与熔断线
 /// 各有自己的样本门与证据源，它们在本格样本不足时仍可独立成立（例如该格 T+N 还没
 /// 攒够，但 `reco_scan_audit` 已记录 9 次「算出了却没要」）。
-pub fn keep_prior_weight(old_weight: f64, outer_penalty: f64) -> f64 {
+///
+/// **不做「不得高于上一轮生效权重」的棘轮**：那会把一次坏批次永久钉死（旧实现实测
+/// capital long 0.45→0.26→0.19→0.17，样本/胜率完全不变）。上限只到基线 1.0。
+pub fn keep_prior_weight(old_base: f64, outer_penalty: f64) -> f64 {
     let outer = if outer_penalty.is_finite() {
         outer_penalty.clamp(WEIGHT_FLOOR, 1.0)
     } else {
         1.0
     };
-    ratchet_weight(old_weight * outer, old_weight)
+    ratchet_weight(old_base * outer, BASELINE_WEIGHT)
 }
 
 /// 逐格合成（纯函数）：胜率线（`weight_decay` 基元）× 力度线（`ic` 基元）
@@ -548,10 +576,13 @@ pub fn keep_prior_weight(old_weight: f64, outer_penalty: f64) -> f64 {
 /// - 再叠乘 `熔断` 线（#8 P5）：本格窗口里「出生时数据质量已熔断」的样本占比 ⇒ 同一条只降不升。
 ///   它问的是**证据的可信度**而不是策略的预测力：胜率 80% 却全部产自坏数据期，
 ///   这个 80% 本身不可用；不动它就等于让"取数一直在坏"这件事对权重零成本。
-/// - **只降不升**对所有分支统一生效（`ratchet_weight`）：任何情况下 `new_weight ≤ old_weight`。
-pub fn compute_loop_cell_weights(
+/// - **外乘线只降不升**（mover/熔断 ≤ 1，`outer_penalty`）；IC/胜率线允许在基线 1.0
+///   以内回升（Q1 的 EWMA 回升），但**永不超过基线**。
+/// - **不复利**：EWMA/IC 只对上一轮的 `base_weight` 计算，外乘线只在本轮乘一次；
+///   同一批证据重复重算不会把惩罚再收一次（旧实现实测 0.45→0.26→0.19→0.17）。
+pub fn compute_loop_cell_weights_with_priors(
     samples: &[RecoLoopSample],
-    current: &HashMap<(String, String), f64>,
+    current: &HashMap<(String, String), CellPrior>,
     now_ms: i64,
     mover: &MoverCellSignal,
 ) -> Vec<LoopCellResult> {
@@ -573,6 +604,8 @@ pub fn compute_loop_cell_weights(
                     samples: 0,
                     win_rate: None,
                     old_weight: BASELINE_WEIGHT,
+                    base_weight: BASELINE_WEIGHT,
+                    outer_penalty: 1.0,
                     new_weight: BASELINE_WEIGHT,
                     // 按设计不出票的格不适用 mover 线（也就不该出现在降权清单里）
                     mover_penalty: None,
@@ -595,7 +628,18 @@ pub fn compute_loop_cell_weights(
                 })
                 .collect();
             let key = (style_key.to_string(), period.as_str().to_string());
-            let old_weight = current.get(&key).copied().unwrap_or(BASELINE_WEIGHT);
+            // 上一行的 base（外乘线之前）才是 EWMA 的输入；旧行没有 base 列 ⇒ 用生效权重兼容。
+            let prior = current.get(&key).copied().unwrap_or_else(CellPrior::baseline);
+            let old_base = if prior.base.is_finite() {
+                prior.base.clamp(WEIGHT_FLOOR, BASELINE_WEIGHT)
+            } else {
+                BASELINE_WEIGHT
+            };
+            let old_weight = if prior.effective.is_finite() {
+                prior.effective.clamp(WEIGHT_FLOOR, BASELINE_WEIGHT)
+            } else {
+                old_base
+            };
             // 两条只降不升的外乘线合成一个乘数（都缺席 ⇒ 1.0 = 不动）。
             //   刻意不在这里比较阈值：判据分别是 `MOVER_MIN_EVIDENCE` 与 `DQI_MIN_SAMPLES`，
             //   各自的 `None` 已经表达「证据不足」。
@@ -611,9 +655,10 @@ pub fn compute_loop_cell_weights(
                     samples: cell.len(),
                     win_rate: None,
                     old_weight,
-                    // 样本门：胜率/IC 线不动 ⇒ 保留当前权重（不是回退基线 1.0）。
-                    //   只允许 mover/熔断两条独立外乘线继续降（它们有自己的样本门）。
-                    new_weight: keep_prior_weight(old_weight, outer_penalty),
+                    base_weight: old_base,
+                    outer_penalty,
+                    // 样本门：胜率/IC 线不动 ⇒ base 不动；只允许 mover/熔断两条独立外乘线继续降。
+                    new_weight: keep_prior_weight(old_base, outer_penalty),
                     mover_penalty,
                     dqi_penalty,
                     scored_out,
@@ -628,7 +673,7 @@ pub fn compute_loop_cell_weights(
                 ..Default::default()
             };
             let mut cur1 = HashMap::new();
-            cur1.insert(key.clone(), old_weight);
+            cur1.insert(key.clone(), old_base);
             let aw =
                 crate::weight_decay::compute_adjusted_weights_at(&perf_rows, &cfg, &cur1, now_ms)
                     .remove(&key);
@@ -659,20 +704,18 @@ pub fn compute_loop_cell_weights(
                 Some((w, wr)) => (Some(w), Some(wr)),
                 None => (None, None),
             };
-            let (status, new_weight) = if ic_status != "ok" {
-                // 样本门闸三态（P2）：测不出力度就不校准 ⇒ 保留当前权重；
+            let (status, new_base) = if ic_status != "ok" {
+                // 样本门闸三态（P2）：测不出力度就不校准 ⇒ base 不动；
                 //   outer_penalty 在下方统一叠乘，这里不得重复乘一次。
-                (LoopCellStatus::IcUnmeasurable, old_weight)
+                (LoopCellStatus::IcUnmeasurable, old_base)
             } else if rank_ic.unwrap_or(0.0) < 0.0 {
-                (
-                    LoopCellStatus::DemotedNegativeIc,
-                    win_w.unwrap_or(old_weight) * NEGATIVE_IC_PENALTY,
-                )
+                (LoopCellStatus::DemotedNegativeIc, win_w.unwrap_or(old_base) * NEGATIVE_IC_PENALTY)
             } else {
-                (LoopCellStatus::IcNonNegative, win_w.unwrap_or(old_weight))
+                (LoopCellStatus::IcNonNegative, win_w.unwrap_or(old_base))
             };
-            // mover 线与熔断线都在 IC/胜率线之后叠乘：只降不升，任一条样本不足时不动它自己那一份
-            let blended = new_weight * outer_penalty;
+            // mover 线与熔断线都在 IC/胜率线之后叠乘：只降不升，任一条样本不足时不动它自己那一份。
+            // 关键：叠乘的是**本轮 base**，不是上一轮已含惩罚的生效权重 ⇒ 同一批证据重复重算不复合。
+            let blended = new_base * outer_penalty;
             out.push(LoopCellResult {
                 style: style_key,
                 period: period.as_str(),
@@ -681,8 +724,10 @@ pub fn compute_loop_cell_weights(
                 samples: cell.len(),
                 win_rate,
                 old_weight,
-                // 只降不升棘轮：无论哪条线算出什么，都不得高于该格当前权重
-                new_weight: ratchet_weight(blended, old_weight),
+                base_weight: new_base,
+                outer_penalty,
+                // 上限=基线 1.0：外乘线仍只降不升；IC/胜率线允许在基线内回升（Q1 的 EWMA 回升）。
+                new_weight: ratchet_weight(blended, BASELINE_WEIGHT),
                 mover_penalty,
                 dqi_penalty,
                 scored_out,
@@ -690,6 +735,22 @@ pub fn compute_loop_cell_weights(
         }
     }
     out
+}
+
+/// 兼容入口：调用方只有生效权重（没有 base 列）时使用，等价于 `base = effective`。
+///
+/// 生产写入路径一律走 [`compute_loop_cell_weights_with_priors`]（读 `base_weight` 列）；
+/// 本入口只给既有单测与只读视图留兼容，不得在写库路径使用 —— 否则又会把上一轮的
+/// 外乘惩罚当成下一轮的 base。
+pub fn compute_loop_cell_weights(
+    samples: &[RecoLoopSample],
+    current: &HashMap<(String, String), f64>,
+    now_ms: i64,
+    mover: &MoverCellSignal,
+) -> Vec<LoopCellResult> {
+    let priors: HashMap<(String, String), CellPrior> =
+        current.iter().map(|(k, v)| (k.clone(), CellPrior { base: *v, effective: *v })).collect();
+    compute_loop_cell_weights_with_priors(samples, &priors, now_ms, mover)
 }
 
 /// 闭环整体视图（随 `reco_ic_stats` 一起出，Phase D 呈现层的表头来源）。
@@ -707,6 +768,38 @@ impl Default for RecoLoopView {
     fn default() -> Self {
         Self { gate: "shadow".to_string(), cells: Vec::new(), last_recalc_at: 0 }
     }
+}
+
+/// 读每格的最新「基准 + 生效」两值（闭环写库的唯一输入）。
+///
+/// 与 `evolution_drift::load_current_weights_by_trigger` 的区别：后者只返回生效权重，
+/// 给评分读取侧用；本函数返回 base，给闭环内部做 EWMA 用。旧行没有 `base_weight` 列
+/// ⇒ `base = new_weight`，首次转换不会把历史生效值洗成 1.0。
+pub async fn load_current_cell_priors_by_trigger(
+    db: &DatabaseConnection,
+    trigger: Option<&str>,
+) -> Result<HashMap<(String, String), CellPrior>, String> {
+    use axagent_entities::strategy_weight_history;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+    let query = strategy_weight_history::Entity::find();
+    let query = match trigger {
+        Some(t) => query.filter(strategy_weight_history::Column::Trigger.eq(t)),
+        None => query,
+    };
+    let all = query
+        .order_by_desc(strategy_weight_history::Column::AppliedAt)
+        .all(db)
+        .await
+        .map_err(|e| format!("读取 weight_history base 失败: {e}"))?;
+    let mut map: HashMap<(String, String), CellPrior> = HashMap::new();
+    for row in all {
+        map.entry((row.strategy_id.clone(), row.period.clone())).or_insert(CellPrior {
+            base: row.base_weight.unwrap_or(row.new_weight),
+            effective: row.new_weight,
+        });
+    }
+    Ok(map)
 }
 
 /// 重算荐股闭环权重并留痕（写入键空间 = 矩阵名目，trigger = `reco-loop`）。
@@ -733,10 +826,8 @@ pub async fn recalc_and_persist_reco_loop(
 
     let mut samples = load_reco_loop_samples(db).await?;
     samples.retain(|s| s.exit_at_ms <= now_ms);
-    let current =
-        crate::evolution_drift::load_current_weights_by_trigger(db, Some(RECO_LOOP_TRIGGER))
-            .await?;
-    let results = compute_loop_cell_weights(&samples, &current, now_ms, mover);
+    let current = load_current_cell_priors_by_trigger(db, Some(RECO_LOOP_TRIGGER)).await?;
+    let results = compute_loop_cell_weights_with_priors(&samples, &current, now_ms, mover);
 
     let applied_at = chrono::Utc::now().timestamp_millis();
     let mut written = 0usize;
@@ -797,6 +888,8 @@ pub async fn recalc_and_persist_reco_loop(
             strategy_id: Set(r.style.to_string()),
             period: Set(r.period.to_string()),
             old_weight: Set(r.old_weight),
+            base_weight: Set(Some(r.base_weight)),
+            outer_penalty: Set(Some(r.outer_penalty)),
             new_weight: Set(r.new_weight),
             delta_pct: Set(delta_pct),
             trigger: Set(RECO_LOOP_TRIGGER.to_string()),
@@ -1015,7 +1108,7 @@ pub async fn load_analysis_veto_var(
         .column(stock_analyses::Column::HorizonDecisions)
         .column(stock_analyses::Column::CreatedAt)
         .filter(stock_analyses::Column::Status.eq("completed"))
-        .filter(stock_analyses::Column::AnalysisKind.eq("live"))
+        .filter(stock_analyses::Column::AnalysisKind.eq(AnalysisKind::Live.as_storage()))
         .filter(stock_analyses::Column::Synthetic.eq(0))
         .filter(stock_analyses::Column::HorizonDecisions.is_not_null())
         .filter(stock_analyses::Column::CreatedAt.gte(since))
@@ -1050,7 +1143,7 @@ fn veto_var_from_rows(rows: Vec<AnalysisVetoRow>) -> Option<serde_json::Value> {
             else {
                 continue;
             };
-            if action == "卖出" || action == "减持" {
+            if normalize_action(action).is_some_and(ActionKind::implies_reduce) {
                 entry.insert(tier.to_string(), serde_json::Value::String(action.to_string()));
             }
         }
@@ -1075,6 +1168,12 @@ fn veto_var_from_rows(rows: Vec<AnalysisVetoRow>) -> Option<serde_json::Value> {
 // ⚠ 代际过滤必须由调用方**显式传日期**：served_vars 在 as_of scope 之外加载，
 //   那一刻 `current_as_of()` 恒为 None ⇒ 加载侧自判代际是假守卫（与 veto 那条同一教训）。
 //   live 传 None（`as_of_date IS NULL` + 30 天窗口）；回放传截止日（`as_of_date = 该日`）。
+//   ⚠ **这条写在 `stock_analyses` 上不成立**（2026-10-23 实测：198 条 live 行的
+//   `as_of_date` 全部非空且等于 `analysis_date` ⇒ `as_of_date IS NULL AND analysis_kind='live'`
+//   命中 **0 行**，本回环否决窗口今天一条都读不到）。`as_of_date IS NULL` 只在
+//   `reco_picks` / `decision_validations` / `reco_scan_audit` 上是「实盘代」谓词 ——
+//   同形态写法在另一张表上语义不同。修法（删掉该谓词只留 kind）会**重新启用一条从未生效的否决**，
+//   改变荐股输出 ⇒ 记为待裁 R-DA-9，须配一次真跑对账，不在本批夹带。
 
 #[derive(Debug, FromQueryResult)]
 struct AnalysisTierRow {
@@ -1121,7 +1220,7 @@ pub async fn load_analysis_tier_var(
             let now_ms = chrono::Utc::now().timestamp_millis();
             let since = now_ms - ANALYSIS_VETO_WINDOW_DAYS * 24 * 60 * 60 * 1000;
             q.filter(stock_analyses::Column::AsOfDate.is_null())
-                .filter(stock_analyses::Column::AnalysisKind.eq("live"))
+                .filter(stock_analyses::Column::AnalysisKind.eq(AnalysisKind::Live.as_storage()))
                 .filter(stock_analyses::Column::CreatedAt.gte(since))
         },
     };
@@ -2071,12 +2170,13 @@ mod weight_ratchet_tests {
         assert!((c.new_weight - 0.31).abs() < 1e-12, "实际 {}", c.new_weight);
     }
 
-    /// 只降不升：胜率/IC 线算出的权重高于当前值 ⇒ 棘轮必须压回当前值。
+    /// EWMA 允许在基线内回升（Q1 原文「回升允许、超基线提权禁止」）；
+    /// 旧实现用「不得高于上一轮生效权重」的棘轮把回升也挡掉，坏批次会被永久钉死。
     ///
     /// 夹具用「全 win + conf/ret 同向」把 `compute_adjusted_weights` 的 EWMA 结果推到
-    /// 当前值之上（raw ≈ 0.5 > 0.2），否则这条断言测不到棘轮分支。
+    /// 当前值之上（raw ≈ 0.5 > 0.2）。
     #[test]
-    fn ratchet_never_raises_above_current_weight() {
+    fn ewma_recovers_but_never_above_baseline() {
         let samples: Vec<_> = (0..IC_MIN_SAMPLE)
             .map(|i| sample("trend", Period::Short, 10.0 + i as f64 * 10.0, i as f64, true, NOW))
             .collect();
@@ -2084,14 +2184,53 @@ mod weight_ratchet_tests {
         let res = compute_loop_cell_weights(&samples, &current, NOW, &MoverCellSignal::default());
         let c = cell_of(&res, "trend", "short");
         assert_eq!(c.status, LoopCellStatus::IcNonNegative, "{c:?}");
-        assert!(c.new_weight <= 0.2 + 1e-12, "只降不升：不得从 0.20 抬高到 {}", c.new_weight);
+        assert!(c.new_weight > 0.2, "EWMA 回升被挡掉：0.20 → {}", c.new_weight);
+        assert!(c.new_weight <= BASELINE_WEIGHT, "超基线提权：{}", c.new_weight);
 
-        // 纯函数边界：非有限输入、越界输入都不得产生 NaN / 越过当前值
+        // 纯函数边界：非有限输入、越界输入都不得产生 NaN
         assert_eq!(ratchet_weight(0.99, 0.2), 0.2);
         assert_eq!(ratchet_weight(0.2, 0.2), 0.2);
         assert_eq!(ratchet_weight(0.01, 0.2), WEIGHT_FLOOR, "下限钳位");
         assert_eq!(ratchet_weight(f64::NAN, 0.2), 0.2, "NaN 计算值 ⇒ 保持当前权重");
         assert_eq!(ratchet_weight(0.3, f64::NAN), 0.3, "NaN 当前值 ⇒ 按基线处理");
+    }
+
+    /// 同一批证据连算两次：外乘线只乘在 base 上，第二次的生效权重不得再降一次。
+    /// 旧实现会 1.0→0.1→0.01→钳到 0.05（复利）。
+    #[test]
+    fn repeated_recompute_with_same_evidence_does_not_compound() {
+        let mut sig = MoverCellSignal::default();
+        // 9 次「算出了却没要」 ⇒ Laplace = 1/10 = 0.1，且过 MOVER_MIN_EVIDENCE。
+        sig.cells.insert(("trend".into(), "short".into()), (9, 0));
+        let first = compute_loop_cell_weights_with_priors(
+            &[],
+            &HashMap::from([(
+                ("trend".to_string(), "short".to_string()),
+                CellPrior { base: 1.0, effective: 1.0 },
+            )]),
+            NOW,
+            &sig,
+        );
+        let c1 = cell_of(&first, "trend", "short");
+        assert_eq!(c1.status, LoopCellStatus::InsufficientSamples);
+        assert!((c1.new_weight - 0.1).abs() < 1e-12, "第一轮 {}", c1.new_weight);
+
+        let second = compute_loop_cell_weights_with_priors(
+            &[],
+            &HashMap::from([(
+                ("trend".to_string(), "short".to_string()),
+                CellPrior { base: c1.base_weight, effective: c1.new_weight },
+            )]),
+            NOW,
+            &sig,
+        );
+        let c2 = cell_of(&second, "trend", "short");
+        assert!(
+            (c2.new_weight - c1.new_weight).abs() < 1e-12,
+            "同一证据重复重算发生复利：{} → {}",
+            c1.new_weight,
+            c2.new_weight
+        );
     }
 
     /// 损坏行跳过：NaN 置信度 / NaN 收益 / 越界置信度 / 负时间戳一律不进分母，

@@ -805,15 +805,35 @@ impl NodeExecutorTrait for AgentExecutor {
                 } else {
                     // 声明的输入取不到值 ⇒ 该变量不会进入 system_prompt，模板里对应段落
                     // 会静默变空。这类「悬空 input_mapping」在本仓反复出现过（如
-                    // `{remaining_chapters}` 之类无产出点的映射），必须 warn 级可见：
+                    // `{remaining_chapters}` 之类无产出点的映射），必须可见：
                     // debug 级在默认日志配置下等于没有痕迹，事后无法定位是哪个节点、
                     // 哪个键取不到。行为不变——此处仍是跳过该键、继续组装 prompt。
-                    tracing::warn!(
-                        node_id = %an.base.id,
-                        target_key = %target_key,
-                        source_key = %source_key,
-                        "Agent 节点 input_mapping 取不到值：源变量路径解析为 None，该输入不会注入 system_prompt（模板中对应段落将为空）"
-                    );
+                    //
+                    // ── 2026-10-23（A 类降噪，审计 AUDIT-run-warnings-2026-10-23.md）──
+                    // 两种「取不到」必须分开，否则真缺陷会被时序噪音淹掉
+                    // （实测单次运行 39 条，其中绝大多数是并行调度的正常时序）：
+                    //   · 源节点 id **不在** `context.variables` ⇒ 上游尚未产出（时序）
+                    //     ⇒ info。它不代表配置错误，等上游跑完自然就有；
+                    //   · 源节点**在** variables 但路径下钻失败 ⇒ 字段名/形态写错（真配置缺陷）
+                    //     ⇒ 仍 warn。
+                    // 判据用 `source_key` 首段（节点 id 或模板变量名），与 `resolve_var_path`
+                    // 的根查找同口径 —— 若两者口径分叉，这行会开始撒谎。
+                    let root = source_key.split('.').next().unwrap_or("");
+                    if context.variables.contains_key(root) {
+                        tracing::warn!(
+                            node_id = %an.base.id,
+                            target_key = %target_key,
+                            source_key = %source_key,
+                            "Agent 节点 input_mapping 取不到值：源变量路径解析为 None，该输入不会注入 system_prompt（模板中对应段落将为空）"
+                        );
+                    } else {
+                        tracing::info!(
+                            node_id = %an.base.id,
+                            target_key = %target_key,
+                            source_key = %source_key,
+                            "Agent 节点 input_mapping 的上游节点尚未产出（时序），本次跳过该输入"
+                        );
+                    }
                 }
             }
             if !injected_lines.is_empty() {
@@ -2458,6 +2478,17 @@ impl NodeExecutorTrait for AgentExecutor {
             let needs_flat_reconstruct = parsed_opt.as_ref().is_some_and(|v| {
                 v.is_object() && v.get("verdict").is_some_and(|vd| !vd.is_object())
             });
+            // ── 分支 C 判据（2026-10-23）：`verdict` 是**空对象**而业务字段仍在顶层 ──
+            // 上面两条都漏这一格：`verdict` 存在 ⇒ 不走 A；它**是**对象 ⇒ 不走 B。
+            // 实证（value-investor，2026-10-23 运行）：LLM 产出
+            // `{report, verdict: {}, bull_score, bear_score}` ⇒ `.verdict.bull_score` 恒 None，
+            // `risk-agg` / `risk-con` / `risk-neu` 各 4 条 `input_mapping` 全部静默失效
+            // （三个风险节点的 `context_sources` 故意不含 value-investor ⇒ 价值维度零信息）。
+            // 判据与改写集中在 `axagent_harness::verdict_shape`（反思链共用同一份实现，
+            // 避免「两处判据各写一份、改一处忘另一处」）。
+            let needs_empty_verdict_merge = parsed_opt
+                .as_ref()
+                .is_some_and(axagent_harness::verdict_shape::needs_merge_flat_into_verdict);
 
             if needs_verdict_tag_reconstruct {
                 // 分支 A: 非合法 JSON → 从 VERDICT 标签提取并重构
@@ -2570,6 +2601,20 @@ impl NodeExecutorTrait for AgentExecutor {
                     "通用后处理: 扁平 JSON verdict(字符串) 重构为嵌套 verdict(map)"
                 );
                 final_content = combined.to_string();
+            } else if needs_empty_verdict_merge {
+                // 分支 C（2026-10-23）: `verdict` 空壳 + 业务字段在顶层 ⇒ 合并进 verdict。
+                // 顶层字段**不删**：`ValueAssessmentPanel.flattenVerdictReport` /
+                // `stock-analysis-export` 仍按顶层读，删了就是拆东墙补西墙。
+                if let Some(merged) = parsed_opt
+                    .as_ref()
+                    .and_then(axagent_harness::verdict_shape::merge_flat_into_verdict)
+                {
+                    tracing::info!(
+                        node_id = %node.base_id(),
+                        "通用后处理: verdict 为空对象而业务字段在顶层 ⇒ 归一为嵌套 verdict(map)"
+                    );
+                    final_content = merged.to_string();
+                }
             }
         }
 

@@ -615,6 +615,7 @@ macro_rules! register_all_commands {
             commands::local_tool::list_local_tools,
             commands::local_tool::toggle_local_tool_group,
             commands::local_tool::toggle_single_tool,
+            commands::market_close_sweep::backfill_market_close_history,
             commands::market_close_sweep::get_market_coverage,
             commands::market_close_sweep::refresh_stock_universe,
             commands::market_close_sweep::sweep_market_close,

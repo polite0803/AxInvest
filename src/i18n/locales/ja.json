@@ -15183,11 +15183,11 @@
       "confidenceNoteLabel": "信頼度の解説",
       "sourceHint": "意思決定解説ノードがリスクゲートの最終判定から生成したものです。研究参考用。"
     },
-    "actionBuy": "Buy",
-    "actionSell": "Sell",
-    "actionIncrease": "Increase",
-    "actionHold": "Hold",
-    "actionReduce": "Reduce",
+    "actionBuy": "買い",
+    "actionSell": "売り",
+    "actionIncrease": "買い増し",
+    "actionHold": "保有",
+    "actionReduce": "削減",
     "actionWait": "様子見",
     "recentAnalysis": "Recent Analysis",
     "targetPriceNote": "Target ¥{{price}}",
@@ -15209,6 +15209,9 @@
     "finalStrength": "最終強度",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "高速分析",
+    "provenanceReplay": "リプレイ",
+    "provenanceReplayWithDate": "リプレイ · {{date}}",
+    "provenanceUnknown": "出所不明",
     "interrupted": {
       "title": "この分析は結論を生成していません",
       "hint": "分析の完了前に中断されました（アプリの終了またはプロセスの異常終了）。意思決定は生成されていません。下のボタンから再実行できます。"
@@ -15219,6 +15222,19 @@
       "failed": "失敗",
       "timeout": "タイムアウト",
       "cancelled": "キャンセル済み"
+    },
+    "historyFilter": {
+      "keywordPlaceholder": "銘柄名またはコードを検索",
+      "statusLabel": "ステータス",
+      "actionLabel": "結論",
+      "all": "すべて",
+      "loadedTotal": "全 {{total}} 件",
+      "loadedPartial": "{{count}} 件を読み込み中…",
+      "capped": "今回 {{count}} 件を読み込み（上限に到達）。より古い記録が残っている可能性",
+      "loadMore": "続きを読む",
+      "loadFailed": "記録の読み込みに失敗しました",
+      "showingTotal": "{{total}} 件中 {{shown}} 件を表示",
+      "noMatch": "条件に合う記録がありません（{{total}} 件読み込み済み）"
     },
     "templateVersion": {
       "matched": "グラフバージョン：DB v{{db}} はコード v{{code}} と一致",
@@ -15391,9 +15407,6 @@
       "confirmDelete": "この条件注文を削除しますか？",
       "thresholdPct": "閾値(%)",
       "actionNotify": "通知のみ",
-      "actionSell": "売却",
-      "actionBuy": "买入",
-      "actionReduce": "減倉",
       "actionValueQty": "株数",
       "actionValueRatio": "比率",
       "coolDown": "クールダウン(分)",
@@ -15850,7 +15863,20 @@
       "chain_reco": "スマート推薦",
       "chain_serenity": "トレンド選定",
       "chain_unlabeled": "未分離（旧ラウンド）",
-      "chainUnlabeledNote": "このラウンドはチェーン分離より前で、スマート推薦とトレンド選定を混ぜた集計です。どちらか一方の数字として読まないでください。"
+      "chainUnlabeledNote": "このラウンドはチェーン分離より前で、スマート推薦とトレンド選定を混ぜた集計です。どちらか一方の数字として読まないでください。",
+      "sampleTitle": "A株全サンプル",
+      "sampleCounts": "市場 {{total}} · 列挙 {{enumerated}} · 確認 {{confirmed}} · 最新終値 {{close}}（{{date}}）",
+      "sampleCoverageUnknown": "カバレッジ取得不可：全市場/最新終値の数は不明（0ではありません）",
+      "fullScan": "全コードスキャン",
+      "fullScanHint": "A株の全コード区間をスキャンしてリストに登録（約800+リクエスト）。live時間帯を避ける",
+      "fullScanDone": "スキャン完了：登録 {{registered}} / 試行 {{codes}} コード",
+      "sweepClose": "最新終値を補完",
+      "sweepCloseHint": "直近の取引終了済み営業日（15:00 以降）のみ取得します。場中は拒否されます。過去日はウィンドウ履歴の補完を使用",
+      "sweepDone": "終値の保存 {{written}} / リスト {{total}}、気配なし {{missing}}",
+      "backfillHistory": "ウィンドウ履歴を補完",
+      "backfillHistoryHint": "1バッチ最大500コード×90取引日。全市場は約12バッチ — requested=0 まで繰り返す",
+      "backfillDone": "履歴補完：{{codes}} コード / {{rows}} 行 / 失敗 {{failed}}",
+      "backfillNone": "このバッチの履歴は既に完了（補完対象なし）"
     },
     "export": {
       "analystReports": "分析师报告",

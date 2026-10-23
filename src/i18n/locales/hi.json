@@ -15183,11 +15183,11 @@
       "confidenceNoteLabel": "विश्वास नोट",
       "sourceHint": "निर्णय-व्याख्या नोड द्वारा जोखिम गेट के अंतिम निर्णय से निर्मित। केवल शोध संदर्भ हेतु।"
     },
-    "actionBuy": "Buy",
-    "actionSell": "Sell",
-    "actionIncrease": "Increase",
-    "actionHold": "Hold",
-    "actionReduce": "Reduce",
+    "actionBuy": "खरीदें",
+    "actionSell": "बेचें",
+    "actionIncrease": "और खरीदें",
+    "actionHold": "रखें",
+    "actionReduce": "घटाएँ",
     "actionWait": "प्रतीक्षा",
     "recentAnalysis": "Recent Analysis",
     "targetPriceNote": "Target ¥{{price}}",
@@ -15209,6 +15209,9 @@
     "finalStrength": "अंतिम ताकत",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "तेज़ विश्लेषण",
+    "provenanceReplay": "रीप्ले",
+    "provenanceReplayWithDate": "रीप्ले · {{date}}",
+    "provenanceUnknown": "अज्ञात स्रोत",
     "interrupted": {
       "title": "इस विश्लेषण से कोई निष्कर्ष नहीं निकला",
       "hint": "विश्लेषण पूरा होने से पहले यह रिकॉर्ड बाधित हो गया (ऐप बंद हो गया या प्रक्रिया असामान्य रूप से समाप्त हुई), इसलिए कोई निर्णय उत्पन्न नहीं हुआ। दोबारा चलाने के लिए नीचे दिए बटन का उपयोग करें।"
@@ -15219,6 +15222,19 @@
       "failed": "विफल",
       "timeout": "समय समाप्त",
       "cancelled": "रद्द"
+    },
+    "historyFilter": {
+      "keywordPlaceholder": "नाम या कोड खोजें",
+      "statusLabel": "स्थिति",
+      "actionLabel": "निर्णय",
+      "all": "सभी",
+      "loadedTotal": "कुल {{total}} रिकॉर्ड",
+      "loadedPartial": "{{count}} रिकॉर्ड लोड हुए…",
+      "capped": "इस बार {{count}} रिकॉर्ड लोड हुए (सीमा पहुँची); पुराने रिकॉर्ड संभव",
+      "loadMore": "और लोड करें",
+      "loadFailed": "रिकॉर्ड लोड नहीं हो सके",
+      "showingTotal": "{{total}} में से {{shown}} रिकॉर्ड दिख रहे हैं",
+      "noMatch": "फ़िल्टर से मेल खाता कोई रिकॉर्ड नहीं ({{total}} लोड हुए)"
     },
     "templateVersion": {
       "matched": "ग्राफ संस्करण: DB v{{db}} कोड v{{code}} से मेल खाता है",
@@ -15391,9 +15407,6 @@
       "confirmDelete": "यह सशर्त आदेश हटाएँ?",
       "thresholdPct": "सीमा (%)",
       "actionNotify": "केवल सूचित करें",
-      "actionSell": "बेचें",
-      "actionBuy": "खरीदें",
-      "actionReduce": "घटाएँ",
       "actionValueQty": "मात्रा",
       "actionValueRatio": "अनुपात",
       "coolDown": "ठहराव (मिनट)",
@@ -15850,7 +15863,20 @@
       "chain_reco": "स्मार्ट सिफारिश",
       "chain_serenity": "ट्रेंड चयन",
       "chain_unlabeled": "श्रृंखला-रहित (पुराना रन)",
-      "chainUnlabeledNote": "यह रन श्रृंखला-विभाजन से पहले का है, इसलिए दोनों के आँकड़े मिलाकर गिने गए हैं — इसे किसी एक श्रृंखला का खाता न मानें।"
+      "chainUnlabeledNote": "यह रन श्रृंखला-विभाजन से पहले का है, इसलिए दोनों के आँकड़े मिलाकर गिने गए हैं — इसे किसी एक श्रृंखला का खाता न मानें।",
+      "sampleTitle": "पूरा A-share नमूना",
+      "sampleCounts": "बाज़ार {{total}} · सूचीबद्ध {{enumerated}} · पुष्ट {{confirmed}} · नवीनतम क्लोज़ {{close}} ({{date}})",
+      "sampleCoverageUnknown": "कवरेज उपलब्ध नहीं: पूरे बाज़ार/नवीनतम क्लोज़ की संख्या अज्ञात (0 नहीं)",
+      "fullScan": "पूर्ण कोड स्कैन",
+      "fullScanHint": "सभी A-share कोड खंड स्कैन कर सूची में दर्ज करें (≈800+ अनुरोध); live विंडो से बचें",
+      "fullScanDone": "स्कैन पूर्ण: {{registered}} दर्ज / {{codes}} कोड जाँचे",
+      "sweepClose": "नवीनतम क्लोज़ भरें",
+      "sweepCloseHint": "केवल नवीनतम बंद कारोबारी दिन (15:00 के बाद) एकत्र होता है; इंट्राडे अनुरोध अस्वीकार; पिछली तारीखों के लिए विंडो इतिहास भरें",
+      "sweepDone": "क्लोज़ पंक्तियाँ {{written}} / सूची {{total}}; बिना कोट {{missing}}",
+      "backfillHistory": "विंडो इतिहास भरें",
+      "backfillHistoryHint": "प्रति बैच 500 कोड × 90 कारोबारी दिन; पूरे बाज़ार में ~12 बैच — requested=0 तक दोहराएँ",
+      "backfillDone": "इतिहास पूर्ण: {{codes}} कोड / {{rows}} पंक्तियाँ / {{failed}} विफल",
+      "backfillNone": "इस बैच का इतिहास पहले से पूर्ण (कोई कोड नहीं)"
     },
     "export": {
       "analystReports": "Analyst Reports",

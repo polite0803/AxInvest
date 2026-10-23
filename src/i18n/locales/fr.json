@@ -15183,11 +15183,11 @@
       "confidenceNoteLabel": "Note de confiance",
       "sourceHint": "Généré par le nœud d'explication à partir du verdict final du filtre de risque. À titre indicatif uniquement."
     },
-    "actionBuy": "Buy",
-    "actionSell": "Sell",
-    "actionIncrease": "Increase",
-    "actionHold": "Hold",
-    "actionReduce": "Reduce",
+    "actionBuy": "Acheter",
+    "actionSell": "Vendre",
+    "actionIncrease": "Augmenter",
+    "actionHold": "Conserver",
+    "actionReduce": "Réduire",
     "actionWait": "Attendre",
     "recentAnalysis": "Recent Analysis",
     "targetPriceNote": "Target ¥{{price}}",
@@ -15209,6 +15209,9 @@
     "finalStrength": "Force finale",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "Analyse rapide",
+    "provenanceReplay": "Relecture",
+    "provenanceReplayWithDate": "Relecture · {{date}}",
+    "provenanceUnknown": "Origine inconnue",
     "interrupted": {
       "title": "Cette analyse n'a produit aucune conclusion",
       "hint": "L'enregistrement a été interrompu avant la fin de l'analyse (fermeture de l'application ou fin anormale du processus) ; aucune décision n'a été produite. Utilisez le bouton ci-dessous pour relancer."
@@ -15219,6 +15222,19 @@
       "failed": "Échec",
       "timeout": "Délai dépassé",
       "cancelled": "Annulé"
+    },
+    "historyFilter": {
+      "keywordPlaceholder": "Rechercher un nom ou un code",
+      "statusLabel": "Statut",
+      "actionLabel": "Décision",
+      "all": "Tous",
+      "loadedTotal": "{{total}} enregistrements",
+      "loadedPartial": "{{count}} enregistrements chargés…",
+      "capped": "{{count}} enregistrements chargés (limite atteinte) ; des plus anciens sont possibles",
+      "loadMore": "Charger plus",
+      "loadFailed": "Échec du chargement des enregistrements",
+      "showingTotal": "{{shown}} enregistrements sur {{total}} affichés",
+      "noMatch": "Aucun enregistrement ne correspond aux filtres ({{total}} chargés)"
     },
     "templateVersion": {
       "matched": "Version du graphe : DB v{{db}} identique au code v{{code}}",
@@ -15391,9 +15407,6 @@
       "confirmDelete": "Supprimer cet ordre conditionnel ?",
       "thresholdPct": "Seuil (%)",
       "actionNotify": "Notification seule",
-      "actionSell": "Vendre",
-      "actionBuy": "Acheter",
-      "actionReduce": "Réduire",
       "actionValueQty": "Quantité",
       "actionValueRatio": "Proportion",
       "coolDown": "Pause (min)",
@@ -15850,7 +15863,20 @@
       "chain_reco": "Recommandation intelligente",
       "chain_serenity": "Sélection de tendances",
       "chain_unlabeled": "Sans chaîne (passage ancien)",
-      "chainUnlabeledNote": "Ce passage est antérieur à la scission par chaîne : recommandation et sélection sont comptées ensemble, ce n'est le compte d'aucune chaîne en particulier."
+      "chainUnlabeledNote": "Ce passage est antérieur à la scission par chaîne : recommandation et sélection sont comptées ensemble, ce n'est le compte d'aucune chaîne en particulier.",
+      "sampleTitle": "Échantillon complet A-shares",
+      "sampleCounts": "Marché {{total}} · recensés {{enumerated}} · confirmés {{confirmed}} · dernière clôture {{close}} ({{date}})",
+      "sampleCoverageUnknown": "Couverture indisponible : total du marché/dernière clôture inconnus (pas 0)",
+      "fullScan": "Scan complet des codes",
+      "fullScanHint": "Scanner tous les segments de codes A-shares et enregistrer l'univers (≈800+ requêtes) ; éviter les fenêtres live",
+      "fullScanDone": "Scan terminé : {{registered}} enregistrés / {{codes}} codes testés",
+      "sweepClose": "Rattraper la dernière clôture",
+      "sweepCloseHint": "Seul le dernier jour de bourse clôturé (après 15:00) est collecté ; les demandes intraday sont refusées ; utiliser le complément d'historique pour les dates passées",
+      "sweepDone": "Lignes de clôture {{written}} / univers {{total}} ; sans cotation {{missing}}",
+      "backfillHistory": "Compléter l'historique de fenêtre",
+      "backfillHistoryHint": "Jusqu'à 500 codes × 90 jours de bourse par lot ; marché complet ≈12 lots — répéter jusqu'à requested=0",
+      "backfillDone": "Historique complété : {{codes}} codes / {{rows}} lignes / {{failed}} échecs",
+      "backfillNone": "Historique de ce lot déjà complet (aucun code à compléter)"
     },
     "export": {
       "analystReports": "Analyst Reports",

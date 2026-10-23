@@ -37,6 +37,8 @@ pub struct RunSnapshotRecord {
     pub collected_days: i32,
     pub universe_size: i64,
     pub universe_confirmed: i64,
+    /// 行情源申报的全市场总数；`None` = 旧轮次/未取到。
+    pub reported_total: Option<i64>,
     pub rules_json: String,
     pub rates_json: String,
     pub layers_json: String,
@@ -98,6 +100,7 @@ pub async fn insert_run_snapshot(
         collected_days: Set(run.collected_days),
         universe_size: Set(run.universe_size),
         universe_confirmed: Set(run.universe_confirmed),
+        reported_total: Set(run.reported_total),
         rules_json: Set(run.rules_json.clone()),
         rates_json: Set(run.rates_json.clone()),
         layers_json: Set(run.layers_json.clone()),

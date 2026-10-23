@@ -182,8 +182,10 @@ fn main() {
         } else {
             `方向正确(conf=${conf_level}, return=${raw_return}%)`
         }
-    } else if predicted_direction == "观望" {
-        `保持观望,实际${actual_direction}(${raw_return}%)`
+    // 2026-10-22 裁定：方向冲突被压成「不确定」后，后验评价必须与「观望」同样豁免 ——
+    // 否则「判不出方向」会被记成「方向误判」，污染胜率与反思归因（两档语义不同）。
+    } else if predicted_direction == "观望" || predicted_direction == "不确定" {
+        `未定方向(预测${predicted_direction}),实际${actual_direction}(${raw_return}%)`
     } else {
         `方向错误(预测${predicted_direction}→实际${actual_direction}, conf=${conf_level})`
     };
@@ -292,8 +294,8 @@ fn main() {
         } else {
             `预测方向正确，实际收益${raw_return}%。后验=${post}，评分=${sc}`
         }
-    } else if predicted_direction == "观望" {
-        `实际${actual_direction}(${raw_return}%)但预测观望。评分=${sc}，共识=${consensus}`
+    } else if predicted_direction == "观望" || predicted_direction == "不确定" {
+        `实际${actual_direction}(${raw_return}%)但预测${predicted_direction}。评分=${sc}，共识=${consensus}`
     } else {
         `方向误判：预测${predicted_direction}但实际${actual_direction}(${raw_return}%)。后验=${post}，评分=${sc}`
     };

@@ -20,7 +20,7 @@ use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_entities::reflection_lessons;
 use axagent_entities::stock_analyses;
 use axagent_entities::stock_reflections;
-use axagent_harness::IpcEventName;
+use axagent_harness::{AnalysisKind, IpcEventName};
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use sea_orm::DatabaseConnection;
 use sea_orm::sea_query::Expr;
@@ -503,7 +503,10 @@ pub async fn run_stock_workflow_inner(
                         let replay_target = stock_analyses::Entity::find()
                             .filter(stock_analyses::Column::StockCode.eq(stock_code.as_str()))
                             .filter(stock_analyses::Column::AsOfDate.eq(current_as_of.as_str()))
-                            .filter(stock_analyses::Column::AnalysisKind.eq("replay"))
+                            .filter(
+                                stock_analyses::Column::AnalysisKind
+                                    .eq(AnalysisKind::Replay.as_storage()),
+                            )
                             .order_by_desc(stock_analyses::Column::CreatedAt)
                             .one(state.harness.db())
                             .await
@@ -633,11 +636,7 @@ pub async fn run_stock_workflow_inner(
             llm_decision_json: Set(None),
             blackboard_snapshot: Set(None),
             config_id: Set(None),
-            analysis_kind: Set(if as_of_date.is_some() {
-                "replay".into()
-            } else {
-                "live".into()
-            }),
+            analysis_kind: Set(AnalysisKind::from_asof(as_of_date.is_some()).as_storage().into()),
             as_of_date: Set(Some(current_as_of.clone())),
             // A4：本行是 "running" 占位行（决策尚未产生）⇒ NULL；模板在下方才加载，
             // 真实版本号由 `run_stock_workflow_inner` 的主路径 / 降级分支用 col_expr 写回。
@@ -2037,7 +2036,7 @@ pub async fn run_single_stock_analysis(
     // - 未激活 ⇒ 与改造前逐字相同（UTC 今日 + live）。
     // 注意：只读不改 as_of 栈；guard 的进入/退出由批次编排负责。
     let asof_ctx = axagent_astock_data::as_of::current_as_of();
-    let analysis_kind = if asof_ctx.is_some() { "replay" } else { "live" };
+    let analysis_kind = AnalysisKind::from_asof(asof_ctx.is_some()).as_storage();
     let anchor_date = match &asof_ctx {
         Some(ctx) => ctx.as_string(),
         None => chrono::Utc::now().format("%Y-%m-%d").to_string(),
@@ -2361,7 +2360,7 @@ pub async fn run_single_stock_analysis(
             //
             // 与 as-of 通道的区别（别把两处判据混用）：
             // - **本函数**（单股即时分析，live-only）⇒ 锚点 = now ✅
-            // - **`hooks.rs` 的 `stock-analysis-persist`**（对话直执行，`analysis_kind="chat"`）
+            // - **`hooks.rs` 的 `stock-analysis-persist`**（对话直执行，`source="chat"`）
             //   ⇒ 锚点 = now ✅（`input_has_analysis_id` 守卫使业务封装路径直接跳过该 hook）
             // - **业务封装路径**（`run_stock_workflow_inner`，支持 `as_of_date` 重跑）
             //   ⇒ 凡写「分析锚点」必须走 `as_of::current_as_of()` 回退 `now()`，

@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use crate::decision_action::normalize_action;
 use axagent_entities::{stock_analyses, stock_reflections, strategy_performance};
 use axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR;
 use axagent_harness::Period;
@@ -162,10 +163,15 @@ pub fn deterministic_horizon_was_correct(
     if within_expected_horizon || !return_pct.is_finite() {
         return None;
     }
-    match action {
-        "买入" | "增持" | "BUY" | "INCREASE" => Some(i32::from(return_pct > 0.0)),
-        "卖出" | "减持" | "SELL" | "REDUCE" => Some(i32::from(return_pct < 0.0)),
-        _ => None,
+    // 方向命中判定走权威谓词。旧写法自写四值表（中英各二），漏 `加仓` / `减仓` /
+    // `clear` / `强烈卖出` 等别名 ⇒ 那些记录的 was_correct 恒 None，样本被静默丢弃
+    let kind = normalize_action(action)?;
+    if kind.implies_buy() {
+        Some(i32::from(return_pct > 0.0))
+    } else if kind.implies_reduce() {
+        Some(i32::from(return_pct < 0.0))
+    } else {
+        None
     }
 }
 

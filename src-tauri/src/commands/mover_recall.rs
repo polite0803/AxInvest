@@ -47,6 +47,9 @@ pub struct MoverRecallView {
     pub universe_size: i64,
     /// 清单里被东财全量确认过的比例（<1 ⇒ 枚举域由本地票拼成，池外大涨票可能不在样本内）
     pub universe_confirmed: i64,
+    /// 行情源申报的全市场总数（0 = 未取到）—— 全 A 股样本的分母。
+    /// 与 `universe_size`（已枚举）和 `codes_with_close`（有收盘）是三个计数域，面板分别标注。
+    pub reported_total: i64,
     pub rules: Vec<mover_recall::TierRule>,
     pub rates: mover_recall::RecallRates,
     pub layers: Vec<mover_recall::LayerRow>,
@@ -136,6 +139,8 @@ struct SharedFacts {
     collected_days: usize,
     universe_size: i64,
     universe_confirmed: i64,
+    /// 行情源申报的全市场总数（0 = 未取到）
+    reported_total: i64,
     rules: Vec<mover_recall::TierRule>,
     by_stock: mover_recall::CloseSeriesByCode,
     /// 全局收盘日期序列（升序）—— 逐档窗口起点按它反推，避免每档各算一套日期。
@@ -218,6 +223,19 @@ pub async fn analyze_mover_recall_inner(
         }));
     }
     let (universe_size, universe_confirmed) = mover_recall::load_universe_counts(db).await?;
+    // 全 A 股分母：行情源申报总数（`market_universe_stats`）。取不到 ⇒ 0（面板显示未取到）。
+    let reported_total = {
+        use axagent_entities::market_universe_stats;
+        use sea_orm::{EntityTrait, QueryOrder};
+        market_universe_stats::Entity::find()
+            .order_by_desc(market_universe_stats::Column::ObservedAt)
+            .one(db)
+            .await
+            .ok()
+            .flatten()
+            .map(|r| r.reported_total)
+            .unwrap_or(0)
+    };
 
     let facts = SharedFacts {
         data_since: from.clone(),
@@ -226,6 +244,7 @@ pub async fn analyze_mover_recall_inner(
         collected_days,
         universe_size,
         universe_confirmed,
+        reported_total,
         rules,
         by_stock,
         close_dates,
@@ -269,10 +288,11 @@ fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
         if let Some(start) = &tier_start {
             judgeable_starts.push(start.clone());
         }
-        let evs: Vec<_> = mover_recall::events_for_tier(&f.by_stock, rule, &f.from, &f.to)
-            .into_iter()
-            .filter(|ev| ev.anchor_date == f.to)
-            .collect();
+        let evs: Vec<_> =
+            mover_recall::events_for_tier(&f.by_stock, rule, &f.from, &f.to, &f.close_dates)
+                .into_iter()
+                .filter(|ev| ev.anchor_date == f.to)
+                .collect();
         for mut ev in evs {
             events_total += 1;
             *events_by_tier.entry(rule.period.as_str().to_string()).or_default() += 1;
@@ -393,8 +413,8 @@ fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
         counts.insert(*layer, *n);
     }
     let rates = mover_recall::compute_rates(&counts, events_total);
-    // 事件域的票数 = 有收盘行的票；逐档可判票数按该票自己的历史长度算，
-    // 不能用全局 collected_days 冒充（停牌/新上市会让部分票在「本档已满」下仍算不出窗口）。
+    // 事件域的票数 = 有收盘行的票；逐档可判票数按**全局日历上的覆盖率**算，
+    // 不能只数「该票自己的行数」（稀疏历史会把 28 行横跨十几年的票算成可判）。
     let codes_with_close = f.by_stock.len();
     let judgeable_codes_by_tier: BTreeMap<String, usize> = f
         .rules
@@ -403,7 +423,9 @@ fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
             let n = f
                 .by_stock
                 .values()
-                .filter(|(_, series)| series.len() >= rule.window_days as usize)
+                .filter(|(_, series)| {
+                    mover_recall::has_judgeable_window(series, &f.close_dates, rule.window_days)
+                })
                 .count();
             (rule.period.as_str().to_string(), n)
         })
@@ -432,6 +454,7 @@ fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
         collected_days: f.collected_days,
         universe_size: f.universe_size,
         universe_confirmed: f.universe_confirmed,
+        reported_total: f.reported_total,
         rules: f.rules.clone(),
         rates,
         layers: layer_rows,
@@ -522,6 +545,7 @@ pub async fn persist_mover_recall_run(
         collected_days: view.collected_days as i32,
         universe_size: view.universe_size,
         universe_confirmed: view.universe_confirmed,
+        reported_total: Some(view.reported_total),
         rules_json,
         rates_json,
         layers_json,
@@ -728,6 +752,8 @@ pub struct MoverRecallRunMeta {
     pub collected_days: i32,
     pub universe_size: i64,
     pub universe_confirmed: i64,
+    /// 行情源申报的全市场总数；0 = 旧轮次未记录（面板显示未记录，不拿枚举数冒充）
+    pub reported_total: i64,
     pub events_total: i32,
     pub miss_count: i32,
     /// 有收盘行的票数；`None` = 旧轮次未记录
@@ -778,6 +804,7 @@ fn run_meta_of(run: &RunModel) -> MoverRecallRunMeta {
         collected_days: run.collected_days,
         universe_size: run.universe_size,
         universe_confirmed: run.universe_confirmed,
+        reported_total: run.reported_total.unwrap_or(0),
         events_total: run.events_total,
         miss_count: run.miss_count,
         codes_with_close: run.codes_with_close,
@@ -847,6 +874,7 @@ fn run_payload_of(run: &RunModel) -> Result<MoverRecallView, String> {
         collected_days: run.collected_days as usize,
         universe_size: run.universe_size,
         universe_confirmed: run.universe_confirmed,
+        reported_total: run.reported_total.unwrap_or(0),
         rules: p.rules,
         rates: p.rates,
         layers: p.layers,
@@ -1219,6 +1247,7 @@ mod summary_line_tests {
             collected_days,
             universe_size: 681,
             universe_confirmed: 595,
+            reported_total: 5925,
             rules: vec![
                 rule(Period::UltraShort, 10.0, 2),
                 rule(Period::Short, 20.0, 5),
@@ -1411,7 +1440,7 @@ mod chain_attribution_tests {
         trim: Vec<(&str, &str, &[&str])>,
         from: &str,
         to: &str,
-        collected_days: usize,
+        _collected_days: usize,
     ) -> SharedFacts {
         let mut by_stock: CloseSeriesByCode = HashMap::new();
         for (code, name, series) in closes {
@@ -1427,9 +1456,15 @@ mod chain_attribution_tests {
                 styles.iter().map(|s| s.to_string()).collect(),
             );
         }
-        // 夹具的日期序列：够 `collected_days` 个即可（只用于反推逐档窗口起点）
-        let close_dates: Vec<String> =
-            (0..collected_days).map(|i| format!("2026-09-{:02}", 1 + i % 28)).collect();
+        // 全局交易日历 = 夹具收盘序列的日期并集（`events_for_tier` 用它反推窗口起点；
+        // 旧的「凑够 collected_days 个假日期」会让锚点不在日历里 ⇒ 事件恒空）。
+        let mut close_dates: Vec<String> = by_stock
+            .values()
+            .flat_map(|(_, series)| series.iter().map(|(d, _)| d.clone()))
+            .collect();
+        close_dates.sort();
+        close_dates.dedup();
+        let collected_days = close_dates.len();
         SharedFacts {
             from: from.to_string(),
             to: to.to_string(),
@@ -1437,6 +1472,7 @@ mod chain_attribution_tests {
             collected_days,
             universe_size: 2,
             universe_confirmed: 2,
+            reported_total: 0,
             rules: mover_recall::tier_rules_from_vars(&[]),
             by_stock,
             close_dates,

@@ -38,6 +38,7 @@ use axagent_entities::{
     decision_validations, financial_snapshots, portfolio_holdings, price_alerts, reco_picks,
     stock_analyses, trades, watchlist_items,
 };
+use axagent_harness::AnalysisKind;
 use axagent_harness::market_data::KLine;
 use chrono::Datelike;
 use serde::{Deserialize, Serialize};
@@ -1287,6 +1288,21 @@ pub(crate) async fn query_stock_analysis_items(
                 .with_detail(format!("查询历史分析列表失败: {e}"))
                 .to_string()
         })?;
+    // 裁定（2026-10-22）：`decision_action` 为空时**列表也下发权威哨兵**，与详情路径、反思路径同一
+    // 口径 —— 缺失不是结论，由展示层渲染「数据缺失」。此前列表原样返回 null，同一条记录在详情页
+    // 是「数据缺失」、在历史弹窗却另成一格（两档重叠）。
+    // `running` 行例外：它还没有决策，状态列已经写明「进行中」，不该被标成任何一个档位。
+    let rows = rows
+        .into_iter()
+        .map(|mut r| {
+            let empty = r.decision_action.as_deref().is_none_or(|s| s.trim().is_empty());
+            if empty && r.status != "running" {
+                r.decision_action =
+                    Some(axagent_harness::decision_action::ACTION_UNAVAILABLE.to_string());
+            }
+            r
+        })
+        .collect();
     Ok(rows)
 }
 
@@ -2015,10 +2031,12 @@ pub async fn backtest_all_history(
             stock_analyses::Column::TemplateVersion
                 .gte(axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR),
         );
-    query = match scope.as_str() {
-        "live" => query.filter(stock_analyses::Column::AnalysisKind.eq("live")),
-        "replay" => query.filter(stock_analyses::Column::AnalysisKind.eq("replay")),
-        _ => query, // "all" 或未知值 = 不过滤
+    // `scope` 的取值域就是 `AnalysisKind` ⇒ 解析后再筛。旧写法是两个 `"live"` / `"replay"`
+    // match 臂：权威改名或加一档时这里静默落到 `_`（= 不过滤），症状是「筛了但没筛」。
+    query = match AnalysisKind::from_storage(&scope) {
+        Some(kind) => query.filter(stock_analyses::Column::AnalysisKind.eq(kind.as_storage())),
+        // "all"、未识别值 = 不过滤（与旧 `_` 分支同语义）
+        None => query,
     };
     let analyses = query.all(state.harness.db()).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询历史分析失败: {e}"))
@@ -5213,12 +5231,8 @@ pub(crate) async fn reco_loop_view(
             return RecoLoopView { gate, cells: Vec::new(), last_recalc_at: 0 };
         },
     };
-    let current = axagent_analysis_engine::evolution_drift::load_current_weights_by_trigger(
-        db,
-        Some(RECO_LOOP_TRIGGER),
-    )
-    .await
-    .unwrap_or_default();
+    let current =
+        load_current_cell_priors_by_trigger(db, Some(RECO_LOOP_TRIGGER)).await.unwrap_or_default();
     // Phase 4：mover 线必须在**同一份**装配下算，否则面板显示与落库权重不同源
     let mover =
         match axagent_analysis_engine::mover_recall::load_mover_cell_signal(db, served_vars, None)
@@ -5230,7 +5244,7 @@ pub(crate) async fn reco_loop_view(
                 Default::default()
             },
         };
-    let cells = compute_loop_cell_weights(&samples, &current, now_ms, &mover);
+    let cells = compute_loop_cell_weights_with_priors(&samples, &current, now_ms, &mover);
     // 「最近计算时刻」优先读心跳（每轮都写），旧库/心跳缺失时回退到权重留痕时刻
     // （后者只在 |Δ|≥1% 时推进，会把「小抖动轮次」显示成「没跑」）。
     let last_recalc_at = match load_last_recalc_at(db).await {

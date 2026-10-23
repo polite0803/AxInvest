@@ -226,18 +226,32 @@ fn build_meta(as_of_ctx: Option<&AsOfContext>) -> Value {
 /// 丢弃该句、只留标签，并把标记并进 verdict JSON，让卡片按标记渲染本地化的「只有结论」提示。
 /// （不能反过来让前端比对那句中文 —— 展示文案当协议值，非中文界面会恒判不命中。）
 fn reconstruct_verdict_text(verdict_only: Option<&Value>, report: &str, verdict: &Value) -> String {
+    // 2026-10-23（审计 F-3）：标量 verdict（`"看多"`）原样拼进标签会产出**JSON 标量**，
+    // 前端 `tryParseVerdictFormat` 拿到的对象里没有 `verdict` 键 ⇒ 结构化通道整体失效，
+    // 退化成对整篇文本做关键词扫描（快照路径与实时路径结论可能相反）。
+    // 统一包成 `{"verdict": <标量>}`，与 TS 侧 `reconstructVerdictTag` 同形。
+    let payload = verdict_tag_payload(verdict);
     if verdict_only != Some(&Value::Bool(true)) {
-        return format!("{report}<!-- VERDICT: {verdict} -->");
+        return format!("{report}<!-- VERDICT: {payload} -->");
     }
-    let tagged = match verdict {
-        Value::Object(map) => {
-            let mut m = map.clone();
-            m.insert("__verdict_only".into(), Value::Bool(true));
-            Value::Object(m)
-        },
-        other => other.clone(),
-    };
+    let mut tagged = payload;
+    if let Some(map) = tagged.as_object_mut() {
+        map.insert("__verdict_only".into(), Value::Bool(true));
+    }
     format!("<!-- VERDICT: {tagged} -->")
+}
+
+/// `<!-- VERDICT: … -->` 的载荷：对象原样；标量包成 `{"verdict": <标量>}`。
+///
+/// 为什么不放行裸标量：`<!-- VERDICT: 看多 -->` 不是合法 JSON；
+/// `<!-- VERDICT: "看多" -->` 虽是合法 JSON，但**没有对象字段** —— 前端两条结构化通道
+/// 都取不到方向，只能回落到关键词扫描（`classifySentiment` 的显式 verdict 被正文措辞覆盖）。
+fn verdict_tag_payload(verdict: &Value) -> Value {
+    if verdict.is_object() {
+        verdict.clone()
+    } else {
+        serde_json::json!({ "verdict": verdict })
+    }
 }
 
 fn extract_node_text(v: &Value) -> String {
@@ -415,6 +429,21 @@ mod tests {
         assert_eq!(meta["__verdict_only"], json!(true));
         assert_eq!(meta["verdict"], json!("偏空"));
         assert_eq!(meta["bull_score"], json!(30));
+    }
+
+    /// 2026-10-23（审计 F-3）：标量 verdict（`"看多"`）必须被包成对象再进标签。
+    ///
+    /// 病态：原实现产出 `<!-- VERDICT: "看多" -->`（合法 JSON 但无对象字段）；TS 侧同场景
+    /// 产出 `<!-- VERDICT: 看多 -->`（**非法 JSON**）⇒ 快照路径与实时路径的解析结果不一致。
+    #[test]
+    fn scalar_verdict_is_wrapped_into_object_payload() {
+        let text = reconstruct_verdict_text(None, "正文", &json!("看多"));
+        assert_eq!(text, r#"正文<!-- VERDICT: {"verdict":"看多"} -->"#);
+        let meta: serde_json::Value = serde_json::from_str(
+            text.trim_start_matches("正文<!-- VERDICT: ").trim_end_matches(" -->"),
+        )
+        .expect("标签内必须是合法 JSON 对象");
+        assert_eq!(meta["verdict"], json!("看多"), "方向必须落在 verdict 键上: {text}");
     }
 
     /// 反向对照：正常有正文的分析师产物必须原样带出报告，且不被打上标记。

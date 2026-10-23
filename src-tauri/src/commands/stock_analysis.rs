@@ -2965,7 +2965,22 @@ pub async fn backtest_reco_strategies(
 ) -> Result<axagent_analysis_engine::backtest_strategy::BacktestComparisonResponse, String> {
     let ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
     axagent_astock_data::as_of::with_optional_asof(ctx, async {
-        backtest_reco_strategies_inner(&state).await
+        crate::commands::background_tasks::run_tracked(
+            state.harness.db(),
+            "荐股策略历史回测对比",
+            "reco-strategy-backtest",
+            "最近一次荐股的正负样本两组策略信号历史回溯对比",
+            backtest_reco_strategies_inner(&state),
+            |r| {
+                format!(
+                    "正样本 {} 只 / 负样本 {} 只 / 跳过策略 {} 项",
+                    r.positive_stocks.len(),
+                    r.negative_stocks.len(),
+                    r.skipped.len()
+                )
+            },
+        )
+        .await
     })
     .await
 }

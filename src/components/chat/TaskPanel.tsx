@@ -2,40 +2,13 @@
 
 import { invoke, listen, logIpcError } from "@/lib/invoke";
 import { message } from "@/lib/toast";
+import type { BackgroundTaskInfo } from "@/types";
 import { Badge, Button, Empty, Popconfirm, Spin, Tag, Typography } from "antd";
 import { AlertCircle, Circle, LoaderCircle, StopCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const { Text, Paragraph } = Typography;
-
-/**
- * 后端 `BackgroundTaskInfo` 的前端投影。
- *
- * 字段名必须是 camelCase：后端结构体带 `#[serde(rename_all = "camelCase")]`
- * （AGENTS.md 禁区 13），IPC 层的键名就是 `taskType` / `exitCode` 这一套。
- * 此前这里写的是 snake_case（`task_type` / `exit_code`），而 `@/lib/invoke`
- * 不做任何键名转换 —— 于是这两个字段在前端**恒为 undefined**：
- * 类型标签渲染成空 Tag、退出码永不显示，而类型检查与单测全部通过。
- */
-interface BackgroundTask {
-  id: string;
-  title: string;
-  description: string;
-  taskType: string;
-  command?: string;
-  prompt?: string;
-  status: string;
-  output: string;
-  exitCode?: number;
-  conversationId?: string;
-  idempotencyKey?: string;
-  attempt: number;
-  resumeFrom?: string;
-  createdAt: number;
-  updatedAt: number;
-  finishedAt?: number;
-}
 
 /**
  * 一条状态迁移记录（`task_events` 的前端投影）。
@@ -62,7 +35,7 @@ function formatEventTime(ms: number): string {
 
 export function TaskPanel() {
   const { t } = useTranslation();
-  const [tasks, setTasks] = useState<BackgroundTask[]>([]);
+  const [tasks, setTasks] = useState<BackgroundTaskInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [events, setEvents] = useState<TaskEvent[]>([]);
@@ -148,7 +121,7 @@ export function TaskPanel() {
 
   const fetchTasks = useCallback(async () => {
     try {
-      const result = await invoke<BackgroundTask[]>("list_background_tasks");
+      const result = await invoke<BackgroundTaskInfo[]>("list_background_tasks");
       setTasks(result);
     } catch (e) {
       logIpcError("Failed to fetch tasks")(e);

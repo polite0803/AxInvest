@@ -54,12 +54,24 @@ pub async fn sweep_market_close(
         },
     };
     let db = state.harness.db();
-    axagent_analysis_engine::market_close_store::run_close_sweep(
+    crate::commands::background_tasks::run_tracked(
         db,
-        &state.astock_client,
-        &date,
-        DEFAULT_BATCH_SIZE,
-        DEFAULT_BATCH_INTERVAL_MS,
+        &format!("采集收盘快照 {date}"),
+        "market-close-sweep",
+        "手动触发全市场日收盘快照采集（cron 走同一 engine 实现）",
+        axagent_analysis_engine::market_close_store::run_close_sweep(
+            db,
+            &state.astock_client,
+            &date,
+            DEFAULT_BATCH_SIZE,
+            DEFAULT_BATCH_INTERVAL_MS,
+        ),
+        |r| {
+            format!(
+                "落库 {} 行 / 停牌跳过 {} / 缺报价 {} / 失败批次 {}",
+                r.written, r.skipped_suspended, r.missing_quotes, r.failed_batches
+            )
+        },
     )
     .await
 }
@@ -151,36 +163,59 @@ pub async fn backfill_market_close_history(
     const TARGET_DAYS: u32 = 90;
     let limit = limit.unwrap_or(500).clamp(1, 6000);
     let db = state.harness.db();
-    let entries =
-        axagent_analysis_engine::market_close_store::codes_needing_history(db, TARGET_DAYS, limit)
-            .await?;
-    if entries.is_empty() {
-        return Ok(HistoryBackfillReport {
-            requested: 0,
-            codes: 0,
-            rows: 0,
-            no_new: 0,
-            failed: 0,
-            target_days: TARGET_DAYS,
-            error: None,
-        });
-    }
-    let requested = entries.len();
-    let stats = axagent_analysis_engine::market_close_store::backfill_close_history_for_codes(
+    crate::commands::background_tasks::run_tracked(
         db,
-        &state.astock_client,
-        &entries,
-        TARGET_DAYS,
-        120,
+        "补齐全市场收盘历史",
+        "market-close-backfill",
+        "分批补齐清单中历史行数不足的票（幂等，重复点只补缺口）",
+        async {
+            let entries = axagent_analysis_engine::market_close_store::codes_needing_history(
+                db,
+                TARGET_DAYS,
+                limit,
+            )
+            .await?;
+            if entries.is_empty() {
+                return Ok(HistoryBackfillReport {
+                    requested: 0,
+                    codes: 0,
+                    rows: 0,
+                    no_new: 0,
+                    failed: 0,
+                    target_days: TARGET_DAYS,
+                    error: None,
+                });
+            }
+            let requested = entries.len();
+            let stats =
+                axagent_analysis_engine::market_close_store::backfill_close_history_for_codes(
+                    db,
+                    &state.astock_client,
+                    &entries,
+                    TARGET_DAYS,
+                    120,
+                )
+                .await?;
+            Ok(HistoryBackfillReport {
+                requested,
+                codes: stats.codes,
+                rows: stats.rows,
+                no_new: stats.no_new,
+                failed: stats.failed,
+                target_days: TARGET_DAYS,
+                error: stats.first_error,
+            })
+        },
+        |r| {
+            if r.requested == 0 {
+                "无需补齐（全部票已达目标天数）".to_string()
+            } else {
+                format!(
+                    "请求 {} 只 / 取到 {} 只 / 落 {} 行 / 无新增 {} / 失败 {}",
+                    r.requested, r.codes, r.rows, r.no_new, r.failed
+                )
+            }
+        },
     )
-    .await?;
-    Ok(HistoryBackfillReport {
-        requested,
-        codes: stats.codes,
-        rows: stats.rows,
-        no_new: stats.no_new,
-        failed: stats.failed,
-        target_days: TARGET_DAYS,
-        error: stats.first_error,
-    })
+    .await
 }

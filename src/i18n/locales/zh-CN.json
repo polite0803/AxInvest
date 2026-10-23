@@ -7515,7 +7515,8 @@
       "stockAnalysis": "单股分析",
       "stockPipeline": "股票分析管道",
       "timeTravelBatch": "时间旅行批次",
-      "moverRecallAnalysis": "漏检补分析批次"
+      "moverRecallAnalysis": "漏检补分析批次",
+      "backgroundTasks": "后台任务"
     },
     "state": {
       "queued": "排队中",

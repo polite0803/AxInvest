@@ -7515,7 +7515,8 @@
       "stockAnalysis": "تحليل سهم فردي",
       "stockPipeline": "خط أنابيب تحليل الأسهم",
       "timeTravelBatch": "دفعة السفر الزمني",
-      "moverRecallAnalysis": "تحليل تكميلي لصفقات الارتفاع الفائتة"
+      "moverRecallAnalysis": "تحليل تكميلي لصفقات الارتفاع الفائتة",
+      "backgroundTasks": "المهام الخلفية"
     },
     "state": {
       "queued": "في الانتظار",

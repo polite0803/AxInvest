@@ -2328,6 +2328,7 @@ export type {
 export * from "./quant";
 // BacktestResult 与 stock-analysis.ts 同名但语义不同（quant=完整量化回测 vs 单股决策记录）；
 // barrel 权威=quant 版，stock-analysis 版消费方走深路径 "@/types/stock-analysis"
+export * from "./backgroundTask";
 export * from "./pipeline";
 export type { BacktestResult } from "./quant";
 export * from "./stock-analysis";

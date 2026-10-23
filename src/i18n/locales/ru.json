@@ -7515,7 +7515,8 @@
       "stockAnalysis": "Анализ отдельной акции",
       "stockPipeline": "Пайплайн анализа акций",
       "timeTravelBatch": "Батч Time-Travel",
-      "moverRecallAnalysis": "Дореанализ пропущенных ралли"
+      "moverRecallAnalysis": "Дореанализ пропущенных ралли",
+      "backgroundTasks": "Фоновые задачи"
     },
     "state": {
       "queued": "В очереди",

@@ -7515,7 +7515,8 @@
       "stockAnalysis": "Analyse d'une action",
       "stockPipeline": "Pipeline d'analyse d'actions",
       "timeTravelBatch": "Lot Time-Travel",
-      "moverRecallAnalysis": "Rattrapage des hausses manquées"
+      "moverRecallAnalysis": "Rattrapage des hausses manquées",
+      "backgroundTasks": "Tâches d'arrière-plan"
     },
     "state": {
       "queued": "En file",

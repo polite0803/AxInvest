@@ -5,7 +5,7 @@ use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::task as task_err;
 use crate::commands::spawn_guard::panic_message;
 use axagent_agent_macro::agent_command;
-use axagent_dao::task_ledger::TransitionRequest;
+use axagent_dao::task_ledger::{TransitionRequest, record_task_created, transition_task};
 use axagent_entities::background_tasks;
 use axagent_harness::IpcEventName;
 use axagent_harness::task_state::{TaskSource, TaskStatus};
@@ -177,6 +177,127 @@ async fn update_status(
         warn!(task_id = %task_id, to = %to, "[background_tasks] 状态迁移失败: {}", e);
         e.to_string()
     })
+}
+
+/// 同步命令的内嵌台账：把一次命令执行记录为 `background_tasks` 行
+/// （pending → running → 终态），让手动触发的慢命令在任务中心可见、有终态与耗时。
+///
+/// 与 [`spawn_background_task`] 的差异：`work` 在当前调用栈**内联**执行，结果仍
+/// 同步返回给前端消费方（如回测对比表），不改变调用形态；panic 经 catch_unwind
+/// 落 failed 终态，不留 running 僵尸（管道僵尸行的教训）。
+///
+/// 台账写入失败只记日志**不阻断业务**：台账是辅助证据面，让「跑成了但没记录」
+/// 比「因记录失败而业务失败」便宜得多。
+pub async fn run_tracked<T, S>(
+    db: &DatabaseConnection,
+    title: &str,
+    task_type: &str,
+    description: &str,
+    work: impl std::future::Future<Output = Result<T, String>>,
+    summarize: S,
+) -> Result<T, String>
+where
+    S: FnOnce(&T) -> String,
+{
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = Utc::now().timestamp_millis();
+    let model = background_tasks::ActiveModel {
+        id: Set(id.clone()),
+        title: Set(title.to_string()),
+        description: Set(description.to_string()),
+        task_type: Set(task_type.to_string()),
+        command: Set(None),
+        prompt: Set(None),
+        status: Set(TaskStatus::Pending.as_db_str().to_string()),
+        output: Set(String::new()),
+        exit_code: Set(None),
+        conversation_id: Set(None),
+        created_by: Set(None),
+        idempotency_key: Set(None),
+        attempt: Set(0),
+        resume_from: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+        finished_at: Set(None),
+    };
+    background_tasks::Entity::insert(model).exec(db).await.map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            e,
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })?;
+    if let Err(e) = record_task_created(db, &id, TaskSource::Command, "user").await {
+        tracing::error!(task_id = %id, "[run_tracked] 写入创建事件失败（审计脊将缺少起源）: {e}");
+    }
+
+    let running = transition_task(
+        db,
+        TransitionRequest::new(&id, TaskStatus::Running, TaskSource::Command, "user"),
+    )
+    .await;
+    if let Err(e) = running {
+        warn!(task_id = %id, "[run_tracked] 置 running 失败（继续执行）: {e}");
+    }
+
+    let write_output = |value: String| {
+        let am = background_tasks::ActiveModel {
+            id: Set(id.clone()),
+            output: Set(value),
+            ..Default::default()
+        };
+        am.update(db)
+    };
+
+    match AssertUnwindSafe(work).catch_unwind().await {
+        Ok(Ok(value)) => {
+            if let Err(e) = write_output(summarize(&value)).await {
+                tracing::error!(task_id = %id, "[run_tracked] 写入成功输出失败: {e}");
+            }
+            if let Err(e) = transition_task(
+                db,
+                TransitionRequest::new(&id, TaskStatus::Completed, TaskSource::Command, "user")
+                    .exit_code(0),
+            )
+            .await
+            {
+                tracing::error!(task_id = %id, "[run_tracked] 置 completed 失败: {e}");
+            }
+            Ok(value)
+        },
+        Ok(Err(err)) => {
+            if let Err(e) = write_output(err.clone()).await {
+                tracing::error!(task_id = %id, "[run_tracked] 写入失败输出失败: {e}");
+            }
+            if let Err(e) = transition_task(
+                db,
+                TransitionRequest::new(&id, TaskStatus::Failed, TaskSource::Command, "user")
+                    .exit_code(1)
+                    .reason("命令执行返回错误"),
+            )
+            .await
+            {
+                tracing::error!(task_id = %id, "[run_tracked] 置 failed 失败: {e}");
+            }
+            Err(err)
+        },
+        Err(panic) => {
+            let msg = panic_message(&panic);
+            if let Err(e) = write_output(msg.clone()).await {
+                tracing::error!(task_id = %id, "[run_tracked] 写入 panic 输出失败: {e}");
+            }
+            if let Err(e) = transition_task(
+                db,
+                TransitionRequest::new(&id, TaskStatus::Failed, TaskSource::Command, "user")
+                    .exit_code(1)
+                    .reason("执行体 panic"),
+            )
+            .await
+            {
+                tracing::error!(task_id = %id, "[run_tracked] 置 failed 失败: {e}");
+            }
+            Err(msg)
+        },
+    }
 }
 
 #[agent_command(domain = system, safety = Caution, call_mode = StateInput, description = "创建后台任务")]
@@ -577,4 +698,91 @@ pub async fn list_task_events(
             e.to_string()
         })?;
     Ok(rows.into_iter().map(Into::into).collect())
+}
+
+#[cfg(test)]
+mod run_tracked_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn success_records_completed_with_summary() {
+        let h = axagent_dao::db::create_test_pool().await.expect("测试库应创建成功");
+        let db = &h.conn;
+        let value = run_tracked(
+            &db,
+            "测试任务",
+            "test-type",
+            "成功路径",
+            async { Ok::<_, String>(7_i32) },
+            |v| format!("结果 {v}"),
+        )
+        .await
+        .expect("应成功");
+        assert_eq!(value, 7);
+
+        let rows = background_tasks::Entity::find().all(&db).await.expect("查询应成功");
+        assert_eq!(rows.len(), 1, "只应有一行");
+        let r = &rows[0];
+        assert_eq!(r.status, TaskStatus::Completed.as_db_str());
+        assert_eq!(r.exit_code, Some(0));
+        assert_eq!(r.output, "结果 7");
+        assert!(r.finished_at.is_some(), "终态必须带结束时间");
+    }
+
+    #[tokio::test]
+    async fn business_error_records_failed_with_output() {
+        let h = axagent_dao::db::create_test_pool().await.expect("测试库应创建成功");
+        let db = &h.conn;
+        let err = run_tracked(
+            &db,
+            "测试任务",
+            "test-type",
+            "业务失败路径",
+            async { Err::<i32, _>("引擎报错了".to_string()) },
+            |v| format!("结果 {v}"),
+        )
+        .await
+        .expect_err("应失败");
+        assert_eq!(err, "引擎报错了");
+
+        let rows = background_tasks::Entity::find().all(&db).await.expect("查询应成功");
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(r.status, TaskStatus::Failed.as_db_str());
+        assert_eq!(r.exit_code, Some(1));
+        assert_eq!(r.output, "引擎报错了", "失败原因要落在 output，前端才有得显示");
+        assert!(r.finished_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn panic_records_failed_not_running_zombie() {
+        let h = axagent_dao::db::create_test_pool().await.expect("测试库应创建成功");
+        let db = &h.conn;
+        let err = run_tracked(
+            &db,
+            "测试任务",
+            "test-type",
+            "panic 路径",
+            async {
+                panic!("执行体炸了");
+                #[allow(unreachable_code)]
+                Ok::<i32, String>(0)
+            },
+            |v| format!("结果 {v}"),
+        )
+        .await
+        .expect_err("panic 应转成 Err");
+        assert!(err.contains("执行体炸了"), "panic 消息应透出，实际: {err}");
+
+        let rows = background_tasks::Entity::find().all(&db).await.expect("查询应成功");
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(
+            r.status,
+            TaskStatus::Failed.as_db_str(),
+            "panic 不得留 running 僵尸（管道僵尸行教训）"
+        );
+        assert_eq!(r.exit_code, Some(1));
+        assert!(r.finished_at.is_some());
+    }
 }

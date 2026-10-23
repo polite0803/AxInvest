@@ -2,12 +2,14 @@
 
 import type {
   AnalysisSummary,
+  BackgroundTaskInfo,
   MoverRecallBatchState,
   PipelineRun,
   ScheduledTask,
   TimeTravelBatchSummary,
 } from "@/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { backgroundTasksAdapter, mapBackgroundTask } from "../adapters/backgroundTasks.adapter";
 import { cronAdapter, mapExecutionRecord, mapLastRun, mapRunningTask } from "../adapters/cron.adapter";
 import { mapBatchSummary as mapMoverBatchSummary } from "../adapters/moverRecallAnalysis.adapter";
 import { mapPipelineRun } from "../adapters/pipeline.adapter";
@@ -505,5 +507,72 @@ describe("aggregateRuns 源失败隔离", () => {
     expect(agg.errors).toEqual([
       { source: "stock-pipeline", message: "backend down" },
     ]);
+  });
+});
+
+describe("backgroundTasks.mapBackgroundTask", () => {
+  function task(over: Partial<BackgroundTaskInfo>): BackgroundTaskInfo {
+    return {
+      id: "t-1",
+      title: "采集收盘快照 2026-10-23",
+      description: "",
+      taskType: "market-close-sweep",
+      status: "running",
+      output: "",
+      attempt: 0,
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      ...over,
+    };
+  }
+
+  it("running：开始=创建时刻，无结束、无耗时", () => {
+    const run = mapBackgroundTask(task({}));
+    expect(run.state).toBe("running");
+    expect(run.source).toBe("background-tasks");
+    expect(run.startedAt).toBe(1_000);
+    expect(run.finishedAt).toBeUndefined();
+    expect(run.durationMs).toBeUndefined();
+  });
+
+  it("completed：终态带结束时刻与耗时", () => {
+    const run = mapBackgroundTask(
+      task({ status: "completed", exitCode: 0, output: "落库 5,215 行", finishedAt: 4_000 }),
+    );
+    expect(run.state).toBe("succeeded");
+    expect(run.durationMs).toBe(3_000);
+    expect(run.error).toBeUndefined();
+  });
+
+  it("failed：output 落 error.message（失败原因要能看见）", () => {
+    const run = mapBackgroundTask(
+      task({ status: "failed", exitCode: 1, output: "引擎报错了", finishedAt: 2_000 }),
+    );
+    expect(run.state).toBe("failed");
+    expect(run.error?.message).toBe("引擎报错了");
+  });
+
+  it("pending → queued；stopped → canceled", () => {
+    expect(mapBackgroundTask(task({ status: "pending" })).state).toBe("queued");
+    expect(mapBackgroundTask(task({ status: "stopped" })).state).toBe("canceled");
+  });
+
+  it("未知状态不默认成 running", () => {
+    expect(mapBackgroundTask(task({ status: "weird" })).state).toBe("failed");
+  });
+
+  it("行上无触发来源 ⇒ trigger=unknown（不猜成 manual）", () => {
+    expect(mapBackgroundTask(task({})).trigger).toBe("unknown");
+  });
+
+  it("list 非数组（后端异常形态）⇒ 空列表而非炸页", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    expect(await backgroundTasksAdapter.list()).toEqual([]);
+  });
+
+  it("list 正常透传映射", async () => {
+    invokeMock.mockResolvedValue([task({ id: "t-9" })]);
+    const runs = await backgroundTasksAdapter.list();
+    expect(runs.map((r) => r.nativeId)).toEqual(["t-9"]);
   });
 });

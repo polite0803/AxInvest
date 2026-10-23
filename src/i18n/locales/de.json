@@ -7515,7 +7515,8 @@
       "stockAnalysis": "Einzelaktien-Analyse",
       "stockPipeline": "Aktienanalyse-Pipeline",
       "timeTravelBatch": "Zeitreise-Batch",
-      "moverRecallAnalysis": "Rally-Lücken-Nachanalyse"
+      "moverRecallAnalysis": "Rally-Lücken-Nachanalyse",
+      "backgroundTasks": "Hintergrundtasks"
     },
     "state": {
       "queued": "In Wartestellung",

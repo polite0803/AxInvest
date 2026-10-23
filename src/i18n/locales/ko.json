@@ -7515,7 +7515,8 @@
       "stockAnalysis": "개별 종목 분석",
       "stockPipeline": "주식 분석 파이프라인",
       "timeTravelBatch": "타임트래블 배치",
-      "moverRecallAnalysis": "급등주 누락 보완 분석"
+      "moverRecallAnalysis": "급등주 누락 보완 분석",
+      "backgroundTasks": "백그라운드 작업"
     },
     "state": {
       "queued": "대기 중",

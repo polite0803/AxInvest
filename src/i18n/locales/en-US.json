@@ -7515,7 +7515,8 @@
       "stockAnalysis": "Single-stock Analysis",
       "stockPipeline": "Stock Analysis Pipeline",
       "timeTravelBatch": "Time-Travel Batch",
-      "moverRecallAnalysis": "Mover-Recall Backfill"
+      "moverRecallAnalysis": "Mover-Recall Backfill",
+      "backgroundTasks": "Background Tasks"
     },
     "state": {
       "queued": "Queued",

@@ -7515,7 +7515,8 @@
       "stockAnalysis": "एकल स्टॉक विश्लेषण",
       "stockPipeline": "स्टॉक विश्लेषण पाइपलाइन",
       "timeTravelBatch": "टाइम-ट्रैवल बैच",
-      "moverRecallAnalysis": "छूटे रैली बैकफ़िल विश्लेषण"
+      "moverRecallAnalysis": "छूटे रैली बैकफ़िल विश्लेषण",
+      "backgroundTasks": "बैकग्राउंड कार्य"
     },
     "state": {
       "queued": "कतार में",

@@ -132,7 +132,8 @@ impl NodeExecutorTrait for LlmExecutor {
                              4. **如果无法完成任务**，输出 `{\"error\": \"详细原因\"}`，不要自由发挥、猜测或填充缺失信息\n\
                              5. **不要做额外假设** — 只基于给定的输入数据执行操作",
                         );
-                tracing::warn!("[LlmExecutor] node {} strict_mode enabled", node.base_id());
+                // 常规属性，每次执行都命中 ⇒ debug（同 agent_executor 的同类改造）
+                tracing::debug!("[LlmExecutor] node {} strict_mode enabled", node.base_id());
             }
         }
 

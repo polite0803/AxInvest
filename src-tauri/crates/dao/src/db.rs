@@ -19,6 +19,31 @@ use axagent_harness::util_fns::now_ts;
 // 无需在自己的 Cargo.toml 中直接依赖 sea-orm。
 pub use sea_orm::DatabaseConnection;
 
+/// 日志脱敏：把连接串里 `user:password@host` 的密码段替换成 `***`。
+///
+/// **为什么必须脱敏**：PostgreSQL 场景下 `db_path` 就是完整连接串（含明文密码），
+/// 直接 `info!` 会把密码写进日志文件与控制台。2026-10-23 运行日志实证：
+/// `Database initialized at postgres://postgres:<明文>@localhost:5432/axinvest?sslmode=disable`
+/// —— 一条 `INFO` 就把生产库口令落盘了。
+///
+/// 只处理「`scheme://` 之后、最后一个 `@` 之前」的 userinfo 段：
+/// - SQLite 本地路径（`C:\...\axagent.db`）/ `sqlite:` 串不含 `://`，原样返回；
+/// - userinfo 不含 `:`（无密码）时原样返回，不做无意义的改写；
+/// - 用最后一个 `@` 分隔（密码可能被 URL 编码，但 `@` 若出现在密码里未经编码，
+///   `split_once('@')` 会把 host 截错 ⇒ 取 `rsplit_once`）。
+fn redact_db_url(raw: &str) -> String {
+    let Some((scheme, rest)) = raw.split_once("://") else {
+        return raw.to_string();
+    };
+    let Some((userinfo, host)) = rest.rsplit_once('@') else {
+        return raw.to_string();
+    };
+    let Some((user, _)) = userinfo.split_once(':') else {
+        return raw.to_string();
+    };
+    format!("{scheme}://{user}:***@{host}")
+}
+
 pub struct DbHandle {
     pub conn: DatabaseConnection,
     pub path: String,
@@ -265,7 +290,8 @@ pub async fn create_pool(db_path: &str) -> Result<DbHandle> {
     // 注意：预设模板不再在启动时自动播种。
     // 工作流模板按需导入，通过前端工作流管理页面的"从预设导入"按钮触发 seed_preset_templates Tauri 命令。
 
-    info!("Database initialized at {}", db_path);
+    // 脱敏后打印：`db_path` 在 PG 场景下是含明文密码的连接串，见 `redact_db_url` 文档。
+    info!("Database initialized at {}", redact_db_url(db_path));
     Ok(DbHandle { conn, path: db_path.to_string() })
 }
 

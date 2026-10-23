@@ -225,8 +225,13 @@ async fn execute_rhai_directly(
         };
         scope_vars.insert(target_key.clone(), dyn_val);
     }
-    // V29 诊断：记录所有 input_mapping resolve 结果，精确定位哪个变量解析失败
-    tracing::warn!(
+    // V29 诊断：记录所有 input_mapping resolve 结果，精确定位哪个变量解析失败。
+    //
+    // 级别 = debug：快照是**整份** input_mapping 的 JSON（含上游 agent 全文，
+    // 实测单条可达数千字符），每执行一个 code 节点就序列化并 WARN 一次。
+    // 2026-10-23 运行日志里这类快照刷了 20+ 次，全部混在 WARN 流里；
+    // 排查变量解析问题时用 `RUST_LOG=...code_executor=debug` 打开即可。
+    tracing::debug!(
         "[code_executor] input_mapping snapshot: {}",
         serde_json::to_string(&input_params_snapshot).unwrap_or_default()
     );
@@ -570,7 +575,11 @@ impl NodeExecutorTrait for CodeExecutor {
         // ── 直接执行模式（execute_directly=true）──
         // Rhai 脚本在 DAG 中直接执行，通过 input_mapping 消费上游结构化参数。
         if code_node.config.execute_directly && code_node.config.language == "rhai" {
-            tracing::warn!(
+            // 诊断明细走 debug：这是**每次** code 节点执行都触发的常规路径，
+            // 用 warn 会在一次 batch 反思（几十个 code 节点）里刷出上百条，
+            // 把真正的降级/失败告警淹掉（2026-10-23 运行日志：792 条 WARN 里
+            // 这类诊断占大头，`[降级]`/`[retry]` 等真告警反而要靠人翻）。
+            tracing::debug!(
                 "[code_executor] Rhai execution: node_id={}, input_mapping keys={:?}, variables keys count={}, has_t_scoring={}, has_debate_convergence={}, has_a_catalyst={}, has_raw_data={}, sample_keys={:?}, totalScore resolve={:?}, consensusScore resolve={:?}, catalyst_level resolve={:?}",
                 code_node.base.id,
                 code_node.config.input_mapping.keys().collect::<Vec<_>>(),

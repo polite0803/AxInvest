@@ -709,7 +709,7 @@ mod run_tracked_tests {
         let h = axagent_dao::db::create_test_pool().await.expect("测试库应创建成功");
         let db = &h.conn;
         let value = run_tracked(
-            &db,
+            db,
             "测试任务",
             "test-type",
             "成功路径",
@@ -720,7 +720,7 @@ mod run_tracked_tests {
         .expect("应成功");
         assert_eq!(value, 7);
 
-        let rows = background_tasks::Entity::find().all(&db).await.expect("查询应成功");
+        let rows = background_tasks::Entity::find().all(db).await.expect("查询应成功");
         assert_eq!(rows.len(), 1, "只应有一行");
         let r = &rows[0];
         assert_eq!(r.status, TaskStatus::Completed.as_db_str());
@@ -734,7 +734,7 @@ mod run_tracked_tests {
         let h = axagent_dao::db::create_test_pool().await.expect("测试库应创建成功");
         let db = &h.conn;
         let err = run_tracked(
-            &db,
+            db,
             "测试任务",
             "test-type",
             "业务失败路径",
@@ -745,7 +745,7 @@ mod run_tracked_tests {
         .expect_err("应失败");
         assert_eq!(err, "引擎报错了");
 
-        let rows = background_tasks::Entity::find().all(&db).await.expect("查询应成功");
+        let rows = background_tasks::Entity::find().all(db).await.expect("查询应成功");
         assert_eq!(rows.len(), 1);
         let r = &rows[0];
         assert_eq!(r.status, TaskStatus::Failed.as_db_str());
@@ -759,7 +759,7 @@ mod run_tracked_tests {
         let h = axagent_dao::db::create_test_pool().await.expect("测试库应创建成功");
         let db = &h.conn;
         let err = run_tracked(
-            &db,
+            db,
             "测试任务",
             "test-type",
             "panic 路径",
@@ -774,7 +774,7 @@ mod run_tracked_tests {
         .expect_err("panic 应转成 Err");
         assert!(err.contains("执行体炸了"), "panic 消息应透出，实际: {err}");
 
-        let rows = background_tasks::Entity::find().all(&db).await.expect("查询应成功");
+        let rows = background_tasks::Entity::find().all(db).await.expect("查询应成功");
         assert_eq!(rows.len(), 1);
         let r = &rows[0];
         assert_eq!(

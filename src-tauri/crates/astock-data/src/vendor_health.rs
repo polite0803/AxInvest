@@ -216,15 +216,24 @@ impl VendorHealthTracker {
         // 一次成功证明链路恢复，清除持续故障标记
         entry.sustained_failure = false;
 
-        // 窗口失败数回落后自动恢复
+        // 窗口失败数**彻底清空**才自动恢复。
+        //
+        // 判据必须是 `== 0` 而不是 `< degraded_threshold`：后者等价于「只要没继续
+        // 失败到阈值就恢复」，而降级瞬间窗口里正好是 threshold 次 ⇒ 窗口每滑动掉
+        // 一条老的（8→7）就立刻满足条件，降级实际只维持一次滑动的时长。
+        //
+        // 2026-10-23 运行日志实证的振荡：
+        //   18:40:49 sina 30s 窗口内失败 8 次（共 8 次），已降级
+        //   18:41:03 sina 自动恢复（窗口失败数 7 < 阈值 8）   ← 14 秒后
+        //   18:42:28 sina 30s 窗口内失败 8 次（共 16 次），已降级
+        // 根因与模块文档「窗口老化后自然恢复（无需固定恢复间隔）」一致：
+        // 恢复的充分条件是**窗口里一条失败都不剩**，不是「比阈值少一条」。
         let window_count = entry.prune_window(now);
-        if entry.status == VendorStatus::Degraded
-            && (window_count as u32) < self.config.degraded_threshold
-        {
+        if entry.status == VendorStatus::Degraded && window_count == 0 {
             entry.status = VendorStatus::Healthy;
             warn!(
-                "[VendorHealth] {} 自动恢复（窗口失败数 {} < 阈值 {}）",
-                name, window_count, self.config.degraded_threshold
+                "[VendorHealth] {} 自动恢复（{}s 窗口内失败已全部老化，剩 {} 条）",
+                name, FAILURE_WINDOW_SECS, window_count
             );
             // D5 指标：Degraded → Healthy 自动恢复事件（不计入 calls，否则成功率被抬高）
             axagent_harness::dependency_metrics::record_vendor_recovered(name);
@@ -307,9 +316,12 @@ impl VendorHealthTracker {
                                 }
                                 return false;
                             }
-                            // 窗口方案：检查窗口失败数是否已回落
+                            // 窗口方案：窗口内失败**全部老化**才重新视为可用。
+                            // 与 `record_success` 同一判据（`== 0`），理由见该处注释：
+                            // `< threshold` 会让降级只存活一次窗口滑动（8→7 即复可用），
+                            // 日志实测 14 秒内降级→恢复→再降级。
                             let window_count = health.window_failure_count(now);
-                            if (window_count as u32) < self.config.degraded_threshold {
+                            if window_count == 0 {
                                 return true;
                             }
                             // 兜底：仍检查恢复间隔（给上游缓存留的硬超时）
@@ -508,6 +520,49 @@ mod tests {
         let log = tracker.get_fallback_log().await;
         assert_eq!(log.len(), 1);
         assert_eq!(log[0].primary_vendor, "tencent");
+    }
+
+    /// 2026-10-23 运行日志实证的降级振荡：降级瞬间窗口内正好 `threshold` 条失败，
+    /// 窗口每滑动掉一条（8→7）就满足旧判据 `< threshold` ⇒ 14 秒内降级→恢复→再降级。
+    /// 恢复必须等窗口**彻底**老化，与 `record_success` / `get_healthy_vendors` 同一判据。
+    #[tokio::test]
+    async fn degraded_vendor_stays_degraded_until_window_fully_ages_out() {
+        let config = VendorHealthConfig {
+            degraded_threshold: 8,
+            recovery_interval_secs: 3600, // 长硬超时，隔离窗口判据
+            probe_interval_secs: 3600,
+            track_fallback_path: true,
+        };
+        let tracker = VendorHealthTracker::new(config);
+        for _ in 0..8 {
+            tracker.record_failure("sina", "新浪K线返回非数组").await;
+        }
+        let h = tracker.get_all_health().await.into_iter().find(|h| h.name == "sina").unwrap();
+        assert_eq!(h.status, VendorStatus::Degraded);
+
+        // 模拟窗口滑动掉最老的一条（8 → 7）：正是旧判据误判为「已恢复」的时刻
+        {
+            let mut vendors = tracker.vendors.write().await;
+            if let Some(h) = vendors.get_mut("sina") {
+                h.window_failures.pop_front();
+            }
+        }
+        tracker.record_success("sina").await;
+        let h = tracker.get_all_health().await.into_iter().find(|h| h.name == "sina").unwrap();
+        assert_eq!(h.status, VendorStatus::Degraded, "窗口仍有失败条目时不得恢复");
+        let healthy = tracker.get_healthy_vendors(&["sina".to_string()]).await;
+        assert!(healthy.is_empty(), "降级 vendor 不得因窗口少一条就重新入选");
+
+        // 窗口彻底老化后才恢复
+        {
+            let mut vendors = tracker.vendors.write().await;
+            if let Some(h) = vendors.get_mut("sina") {
+                h.window_failures.clear();
+            }
+        }
+        tracker.record_success("sina").await;
+        let h = tracker.get_all_health().await.into_iter().find(|h| h.name == "sina").unwrap();
+        assert_eq!(h.status, VendorStatus::Healthy, "窗口清空后应恢复");
     }
 
     #[tokio::test]

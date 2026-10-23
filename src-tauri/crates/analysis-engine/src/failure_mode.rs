@@ -111,7 +111,9 @@ impl FailureMode {
             Self::CandidatePoolCoverageMissed => {
                 "标的未进候选宇宙（荐股/扫描候选池来源退化或覆盖不足，连被判定一次的机会都没有）"
             },
-            Self::Other => "以上八类都不是 —— 选它必须同时在 what_went_wrong 里给新问题命名（词表按该名字扩类）；只写 other 等于没有归因",
+            Self::Other => {
+                "以上八类都不是 —— 选它必须同时在 what_went_wrong 里给新问题命名（词表按该名字扩类）；只写 other 等于没有归因"
+            },
         }
     }
 
@@ -141,6 +143,34 @@ impl ParsedFailureModes {
     }
 }
 
+/// 容错：模型把数组写成「带引号的逗号分隔串」而不是 JSON 数组。
+///
+/// 2026-10-23 运行日志实证（9 次反思全部命中）：
+/// `已丢弃：["theme_rotation_missed\", \"candidate_pool_coverage_missed\", \"reverse_dcf_ignored"]`
+/// —— `{:?}` 打出来的**是单个元素**，也就是说 `raw` 实际是
+/// `theme_rotation_missed", "candidate_pool_coverage_missed", "reverse_dcf_ignored`
+/// （外层 `[` `]` 与首尾引号在模型输出时已被吞掉，元素间的 `","` 留着）。
+/// 于是三层容错全落空 ⇒ 整串被当成一个 token 记进 `rejected`，
+/// **三个词表内合法值一个都没进库**，看板的失败模式格因此恒缺这几条。
+///
+/// 补外层引号 + 方括号后一般即为合法数组；仍失败返回 `None` 交给「整串」兜底。
+fn split_quoted_tokens(raw: &str) -> Option<Vec<String>> {
+    let trimmed = raw.trim();
+    // 只在「含引号且本身不是数组」时尝试：合法数组已被上一层吃掉，
+    // 无引号的裸 token（单个合法值）不该被本函数改写。
+    if !trimmed.contains('"') || trimmed.starts_with('[') {
+        return None;
+    }
+    let wrapped = format!("[\"{trimmed}\"]");
+    let arr = serde_json::from_str::<Vec<serde_json::Value>>(&wrapped).ok()?;
+    let tokens: Vec<String> = arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+    if tokens.is_empty() {
+        None
+    } else {
+        Some(tokens)
+    }
+}
+
 /// 把反思输出里的 `failure_modes` 字段白名单化。
 ///
 /// 输入取自 `deep_get_reflection_text`，实测有三种形态（数组 / 裸串 / 双重编码的 JSON 字符串），
@@ -151,6 +181,9 @@ pub fn parse_failure_modes(raw: &str) -> ParsedFailureModes {
             arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()
         } else if let Ok(one) = serde_json::from_str::<String>(raw) {
             vec![one]
+        } else if let Some(tokens) = split_quoted_tokens(raw) {
+            // 第四层：「a\", \"b\"」形态（缺方括号与首尾引号），见 `split_quoted_tokens`
+            tokens
         } else {
             vec![raw.trim().to_string()]
         };
@@ -308,6 +341,38 @@ mod failure_mode_tests {
             parse_failure_modes("\"market_regime_endorsement\"").modes,
             vec![FailureMode::MarketRegimeEndorsement]
         );
+    }
+
+    /// 2026-10-23 运行日志实证形态：模型吐出「引号包裹 + 逗号分隔」而非 JSON 数组，
+    /// 且外层 `[` `]` 与首尾引号已丢失 ⇒ 旧实现把整串当一个 token，三个合法值全丢。
+    #[test]
+    fn parses_quoted_comma_separated_form_without_brackets() {
+        let p = parse_failure_modes(
+            r#"theme_rotation_missed", "candidate_pool_coverage_missed", "reverse_dcf_ignored"#,
+        );
+        assert_eq!(
+            p.modes,
+            vec![
+                FailureMode::ReverseDcfIgnored,
+                FailureMode::ThemeRotationMissed,
+                FailureMode::CandidatePoolCoverageMissed,
+            ],
+            "词表内三个值必须全部命中，且按词表顺序（不是模型吐字顺序）"
+        );
+        assert!(p.rejected.is_empty(), "不应再有被丢弃的 token: {:?}", p.rejected);
+
+        // 无空格的同族形态（同一次运行的另一种输出）
+        let p2 = parse_failure_modes(
+            r#"counter_trend_strength_ignored","candidate_pool_coverage_missed"#,
+        );
+        assert_eq!(
+            p2.modes,
+            vec![
+                FailureMode::CounterTrendStrengthIgnored,
+                FailureMode::CandidatePoolCoverageMissed
+            ]
+        );
+        assert!(p2.rejected.is_empty(), "{:?}", p2.rejected);
     }
 
     #[test]

@@ -781,7 +781,9 @@ impl NodeExecutorTrait for AgentExecutor {
 "#
             };
             all_segments.push(TemplateSegment::Static(strict_instructions.to_string()));
-            tracing::warn!(
+            // 节点配置的常规属性，每次执行都会命中 ⇒ debug（用 warn 会让每个 agent 节点
+            // 都刷一条无信息量的告警，2026-10-23 运行日志里刷了 20+ 次）。
+            tracing::debug!(
                 "Agent node {} strict_mode enabled (output_mode={:?})",
                 an.base.id,
                 an.config.output_mode

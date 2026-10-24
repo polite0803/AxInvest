@@ -209,7 +209,7 @@ mod tests {
     fn resolve_var_path_array_index_through_json_string() {
         let mut vars = HashMap::new();
         vars.insert(
-            "a-trend-scanner".into(),
+            "trend-scanner".into(),
             json!({
                 "content": serde_json::to_string(&json!({
                     "trends": [
@@ -221,17 +221,17 @@ mod tests {
             }),
         );
         assert_eq!(
-            resolve_var_path("a-trend-scanner.content.trends[0].strategy_type", &vars),
+            resolve_var_path("trend-scanner.content.trends[0].strategy_type", &vars),
             Some(json!("policy"))
         );
         assert_eq!(
-            resolve_var_path("a-trend-scanner.content.trends[1].trend_name", &vars),
+            resolve_var_path("trend-scanner.content.trends[1].trend_name", &vars),
             Some(json!("供给瓶颈"))
         );
         // 越界必须 None，不得回绕或退化成首元素
-        assert_eq!(resolve_var_path("a-trend-scanner.content.trends[2].trend_name", &vars), None);
+        assert_eq!(resolve_var_path("trend-scanner.content.trends[2].trend_name", &vars), None);
         // 目标字段缺失同样是 None（调用方据此回落默认值）
-        assert_eq!(resolve_var_path("a-trend-scanner.content.trends[0].missing", &vars), None);
+        assert_eq!(resolve_var_path("trend-scanner.content.trends[0].missing", &vars), None);
     }
 
     /// 键名本身含方括号时，精确键优先于下标解释（不让新语法改写既有键的语义）。

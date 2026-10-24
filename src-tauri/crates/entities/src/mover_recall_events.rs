@@ -70,9 +70,42 @@ pub struct Model {
     pub status: String,
     /// 失败原因（failed 时）
     pub error_detail: Option<String>,
-    /// 回灌结论备注（`status='reflow_pending'` 时非空）：反思判定「本应入池」的理由。
+    /// 回灌结论备注（反思判定「本应入池」时非空）：反思判定「本应入池」的理由。
     /// 与 `error_detail` 分开存：一个是失败原因，一个是对票的看法依据，混用两者都读不准。
     pub reflow_note: Option<String>,
+    /// 是否列入**回灌清单**（D-1，2026-10-24）。
+    ///
+    /// 为什么单开布尔列而不复用 `status='reflow_pending'`：`status` 是补分析状态机
+    /// （pending/running/analyzed/failed/reflected）的一个取值，而回灌是**正交**属性 ——
+    /// 旧实现把状态改成 `reflow_pending` 后，`stamp_reflected` 又把它改回 `reflected`
+    /// ⇒ `list_reflow_candidates` 恒空（现网 0 行实证）。布尔列与状态机互不覆盖。
+    /// `NULL` = 本列引入前的行（等价 false）。
+    pub reflow_pending: Option<bool>,
+    /// 本行 `in_pool` 判定所用的候选池批次时刻（ISO 8601）。
+    ///
+    /// F-2（2026-10-24）：池证据优先取「窗口起点及之前最近一批」，窗口内首批只作备用。
+    /// 记下实际用的那一批，才能事后复核「当时拿哪一池判的」—— 不记就等于只留结论。
+    /// `NULL` = 本列引入前的行，或该事件没有任何池证据（`in_pool=None`）。
+    pub pool_evidence_at: Option<String>,
+    /// 补分析完成后回写的**事件档决策摘要**（JSON：`{action, confidence, horizon}`）。
+    ///
+    /// F-4（2026-10-24）：面板要能分「池没覆盖 / 池覆盖但决策观望 / 决策买入却被截断」——
+    /// 后两者只能靠这一列，八层归因枚举不变。`NULL` = 尚未补分析或本列引入前的行。
+    pub analysis_signal_at_start: Option<String>,
+    /// 本事件所属窗口起点的 **as-of 荐股回放批次键**（= 那次回放的 `reco_picks.generated_at`）。
+    ///
+    /// `NULL` = 还没跑过 as-of 回放（或该事件属于 serenity 链行 —— 智选由 LLM 输出，
+    /// 不做同款回放）。差异查询必须按这一列取证据，不能拿窗口内 live 推荐冒充。
+    pub asof_reco_generated_at: Option<String>,
+    /// as-of 回放得到的归因层（`MissLayer::as_str`，八层语义与 `miss_layer` 相同）。
+    ///
+    /// 与 `miss_layer`（live 层）**分列**：两者分歧本身就是诊断信息。读侧不得把
+    /// `asof_layer` 当成 `miss_layer` 的替代 —— 反思用 as-of 层，面板两列并示。
+    pub asof_layer: Option<String>,
+    /// as-of 差异明细 JSON：池来源计数、命中的 style/档、被截断的 style/档、
+    /// 停用风格、`degradations`、池判据（`inPool` / `poolSnapshot`）、以及
+    /// 「本轮未含分析定档来源」的显式声明。形状见 `mover_recall_analysis` 模块文档。
+    pub asof_diff_json: Option<String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
 }

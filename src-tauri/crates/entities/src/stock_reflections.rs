@@ -119,6 +119,18 @@ pub struct Model {
     /// （留痕不足无法归因）。由系统在反思收尾时从事件**盖章**写入，LLM 不得自报；
     /// 反思 prompt 用它与 `what_went_wrong` 做对照。NULL = 非漏检反思。
     pub miss_layer: Option<String>,
+    /// **as-of 荐股回放**批次键（= 那次回放的 `reco_picks.generated_at`）。
+    ///
+    /// 与 [`Self::miss_layer`] 配套：该列写的是 as-of 层，这一列回答「证据来自哪次回放」。
+    /// NULL = 本行没有 as-of 证据（非漏检反思，或回放尚未跑到该事件）。
+    pub asof_reco_generated_at: Option<String>,
+    /// as-of 归因层的**逐行副本**（与 [`Self::miss_layer`] 同值，独立列供面板按列过滤）。
+    ///
+    /// 为什么重复一列：`miss_layer` 是历史列（旧行是 live 层），按它过滤会把两种口径
+    /// 混在一起；本列自本版本起只写 as-of 层，NULL = 本列引入前的行。
+    pub asof_layer: Option<String>,
+    /// as-of 差异明细 JSON（反思时喂给模型的同一份证据，落库便于复核「模型看到了什么」）。
+    pub reco_diff_json: Option<String>,
     /// 失败模式标注（PLAN P2-b）：反思模板从受控词表里选出的**本条误判属于哪一类**。
     ///
     /// 落库形态 = JSON 数组文本（与 `missed_signals` 同族），值域权威是

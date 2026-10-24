@@ -7621,6 +7621,11 @@
     "nextRun": {
       "stale": "Planificación estancada",
       "staleHint": "La planificación lleva más de 24 horas vencida (o pendiente de recuperación) sin avanzar: puede que la tarea se interrumpiera por apagado o esté bloqueada. Usa «Ejecutar ahora» para verificarla."
+    },
+    "tracked": {
+      "rowMissing": "Registro de tarea no encontrado (puede haber sido limpiado)",
+      "failedNoDetail": "La tarea falló (el backend no dio motivo)",
+      "resultParseFailed": "No se pudo analizar el informe de la tarea"
     }
   },
   "teammatePanel": {
@@ -15749,7 +15754,19 @@
       "loopGateShadow": "Bucle de reflexión en modo sombra: solo calculado, sin aplicar, último recálculo {time}",
       "loopGateOff": "Bucle de reflexión desactivado (off), último recálculo {time}",
       "loopNeverRecalc": "nunca recalculado",
-      "loopSamples": "n={{n}}"
+      "loopSamples": "n={{n}}",
+      "cancelled": "Cancelada: solo la parte completada",
+      "sectionData": "Base de datos",
+      "sectionDataDesc": "Universo completo de acciones A y ventana de precios: registro por segmentos de códigos, último cierre e historial de ventana. Todas las conclusiones siguientes dependen de esta cobertura.",
+      "sectionMatrix": "Rendimiento de estrategias",
+      "sectionMatrixDesc": "Matriz estilo × horizonte: tasa de acierto, Sharpe/muestra, IC y peso del bucle; selecciona una celda para ver el historial de señales.",
+      "sectionSignals": "Trazado de señales",
+      "sectionSignalsDesc": "Señales históricas y resultados de la estrategia seleccionada; vacío hasta seleccionar una celda.",
+      "sectionMisses": "Auditoría de omisiones",
+      "sectionMissesDesc": "Acciones que superaron el umbral sin ser seleccionadas, separadas por capa de atribución: fuera del pool, en el pool sin selección, o descartadas por estilo/horizonte.",
+      "sectionSerenity": "Validación Serenity",
+      "sectionSerenityDesc": "Tasa de acierto y validación del bucle de la otra cadena (candidatos LLM); leer por separado de la matriz de recomendación.",
+      "matrixLegend": "Cómo leer: filas = estilo de estrategia, columnas = horizonte de tenencia; cada celda muestra tasa de acierto (color), Sharpe/muestra, IC (con motivo si faltan muestras) y peso del bucle."
     },
     "moverRecall": {
       "title": "Verificación de recall por ganancia en ventana",
@@ -15852,7 +15869,20 @@
         "fixForFuture": "Corrección del criterio en el futuro",
         "rfPending": "Reflexión en cola",
         "rfRunning": "Generando reflexión",
-        "rfFailed": "Reflexión fallida: {{detail}}"
+        "rfFailed": "Reflexión fallida: {{detail}}",
+        "asofHeading": "Repetición de recomendación as-of",
+        "asofMissing": "Aún no hay evidencia de repetición as-of (solo se atribuye por la capa live)",
+        "asofLayerHint": "Capa as-of: {{layer}}",
+        "asofPoolPresent": "La cartera de candidatos no está vacía",
+        "asofPoolEmpty": "La cartera de candidatos está vacía (repetición degradada)",
+        "asofPoolAbsent": "Falta la instantánea de la cartera (no se puede saber si estaba incluida)",
+        "asofStylesLine": "Selecciones del mismo horizonte: {{picked}}; truncadas: {{trimmed}}; otros horizontes: {{other}}",
+        "asofDiverged": "Los veredictos live y de repetición difieren",
+        "asofConsistent": "Los veredictos live y de repetición coinciden",
+        "asofFailureLine": "Repetición fallida: {{detail}}",
+        "asofNone": "ninguna",
+        "analysisSignal": "Decisión de análisis as-of: {{action}} (confianza {{confidence}})",
+        "analysisSignalMissing": "Decisión de análisis as-of: no registrada (aún sin analizar o sin decisión por horizonte)"
       },
       "runSelector": "Ejecución de control",
       "runOption": "{{from}} ~ {{to}} · {{chain}} · eventos {{events}} · omitidos {{misses}}",
@@ -15877,9 +15907,22 @@
       "sweepCloseHint": "Solo se recoge el último día de bolsa cerrado (después de las 15:00); las solicitudes intradía se rechazan; para fechas pasadas use el historial de ventana",
       "sweepDone": "Filas de cierre {{written}} / universo {{total}}; sin cotización {{missing}}",
       "backfillHistory": "Completar historial de ventana",
-      "backfillHistoryHint": "Hasta 500 códigos x 90 sesiones por lote; repite hasta 0 filas nuevas; \"sin cambios\" = menos de 90 sesiones disponibles (salida reciente o suspensión larga)",
-      "backfillDone": "Historial completado: {{codes}} códigos / {{rows}} filas nuevas / {{noNew}} sin cambios / {{failed}} fallos",
-      "backfillNone": "El historial de este lote ya está completo (sin códigos pendientes)"
+      "backfillHistoryHint": "Máx. 500 códigos x 90 días de bolsa por lote; haz clic repetidamente hasta 0 filas nuevas; \"sin cambios\" = menos de 90 velas diarias disponibles (OPV recientes, suspensiones largas); \"sin cotizaciones\" = no listada / excluida de cotización, hacer clic no cambia nada",
+      "backfillDone": "Historial completado: {{codes}} códigos / {{rows}} filas nuevas / {{noNew}} sin cambios / {{noData}} sin cotizaciones / {{failed}} fallos",
+      "backfillNone": "El historial de este lote ya está completo (sin códigos pendientes)",
+      "taskRunning": "Tarea en ejecución",
+      "taskCancel": "Cancelar tarea",
+      "taskCancelled": "Cancelada (se conserva la parte completada)",
+      "scopeTitle": "Alcance de la auditoría",
+      "readingsTitle": "Lecturas clave",
+      "asofSummaryTitle": "Resumen de repetición de recomendación as-of",
+      "asofSummaryMissing": "Aún no hay repetición as-of para esta ronda (el lote de análisis no ha cubierto ningún evento)",
+      "asofSummaryLine": "Eventos {{events}}; fuera de la cartera {{notInPool}}; en cartera sin selección {{inPoolNotPicked}}; truncados {{trimmed}}; otros horizontes {{other}}; cartera degradada {{degraded}}; no atribuible {{unavailable}}",
+      "reflowMergeLabel": "Fusionar la lista de reinyección en la cartera",
+      "reflowMergeHint": "Desactivado por defecto; solo fusiona si está activo y hay ≥ 30 muestras liquidadas",
+      "historyDays": "Días bursátiles históricos (distintos): {{days}}",
+      "tierJudgeableOfUniverse": "Juzgables en este horizonte: {{judgeable}} / todas las acciones A {{total}}",
+      "asofWeights": "Últimos pesos del bucle: {{cells}}"
     },
     "export": {
       "analystReports": "Analyst Reports",

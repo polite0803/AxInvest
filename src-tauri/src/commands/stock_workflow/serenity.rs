@@ -717,6 +717,20 @@ fn try_extract_candidates_from_text(text: &str) -> Option<Vec<serde_json::Value>
     if found.is_empty() { None } else { Some(found) }
 }
 
+/// 候选评分输入的**唯一优先级实现**。
+///
+/// `serenity_score` = 确定性评分链的产物（快速链由 `strategy-scorer` 算出
+/// `bottleneck_composite`，候选组装端取最高分并按可靠度折价）；`confidence` 是 LLM
+/// 自报置信度。落库胜率必须由前者驱动，否则确定性评分全部白算。旧模板/旧记录没有
+/// `serenity_score` 时才回落后者，再缺省中性 50。值统一 clamp 到 0..100。
+fn candidate_score_input(c: &serde_json::Value) -> i32 {
+    c["serenity_score"]
+        .as_f64()
+        .or_else(|| c["confidence"].as_f64())
+        .map(|v| v.clamp(0.0, 100.0))
+        .unwrap_or(50.0) as i32
+}
+
 /// 从节点原始输出中直接提取 candidates 数组
 /// 与通用 extract_agent_output 不同，此函数直接导航已知 JSON 路径：
 ///   {"content": "...```json\n{\"name\": \"...\", \"arguments\": {\"candidates\": [...]}\n```..."}
@@ -960,6 +974,7 @@ pub async fn run_serenity_screening(
         as_of_ctx,
         themes,
         run_id,
+        replay_purpose: crate::commands::_shared_reco_pool::purpose::MANUAL_REPLAY,
         template_id,
     })
     .await
@@ -981,6 +996,10 @@ pub(crate) struct SerenityScreeningArgs<'a> {
     pub as_of_ctx: Option<as_of::AsOfContext>,
     pub themes: Option<Vec<String>>,
     pub run_id: Option<String>,
+    /// 回放行落库时的 `purpose`：手动入口传 `manual_replay`，时间旅行批次传
+    /// `time_travel_replay`（live 行恒为 `live`）。两条入口共用同一执行体，
+    /// 不显式传就只能靠猜，历史面板会把时间旅行记成手动回放。
+    pub replay_purpose: &'static str,
     /// 已过白名单校验的模板 id（`serenity-screening` / `-fast`）
     pub template_id: String,
 }
@@ -993,8 +1012,17 @@ const MOVER_WATCHLIST_LIMIT: usize = 20;
 pub(crate) async fn run_serenity_screening_inner(
     args: SerenityScreeningArgs<'_>,
 ) -> Result<serde_json::Value, String> {
-    let SerenityScreeningArgs { db, client, engine, app, as_of_ctx, themes, run_id, template_id } =
-        args;
+    let SerenityScreeningArgs {
+        db,
+        client,
+        engine,
+        app,
+        as_of_ctx,
+        themes,
+        run_id,
+        replay_purpose,
+        template_id,
+    } = args;
 
     // 运行前确保模板为最新版（幂等：版本已是最新则跳过）。
     // 历史上启动阶段 seed 在 fire-and-forget 异步任务中执行，失败仅 log 不阻塞，
@@ -1534,6 +1562,32 @@ pub(crate) async fn run_serenity_screening_inner(
                     } else {
                         Vec::new()
                     };
+                // F-1（2026-10-24）：**候选输入池**按批次落库（`chain='serenity'`）。
+                // 此前智选不写 `reco_pool_batches`，归因只能读 pick 行上的**单对象**
+                // `seed_pool_json` ⇒ 对别的票恒「不在池」（现网实测 21/21 not_in_pool 是伪证据）。
+                // 0 候选也写（`None`），让「真的一个候选都没有」与「没跑过」可分。
+                {
+                    let pool_json = if candidate_list.is_empty() {
+                        None
+                    } else {
+                        serde_json::to_string(&candidate_list).ok()
+                    };
+                    let purpose = if run_as_of_date.is_some() {
+                        crate::commands::_shared_reco_pool::purpose::MANUAL_REPLAY
+                    } else {
+                        crate::commands::_shared_reco_pool::purpose::LIVE
+                    };
+                    crate::commands::_shared_reco_pool::persist_reco_pool_batch(
+                        db,
+                        "serenity",
+                        "all",
+                        pool_json.as_deref(),
+                        &now_str,
+                        run_as_of_date.as_deref(),
+                        purpose,
+                    )
+                    .await;
+                }
                 let mut detail_cache: std::collections::HashMap<String, serde_json::Value> =
                     std::collections::HashMap::new();
                 let mut serenity_seed: Vec<(String, String, Option<String>)> = Vec::new();
@@ -1583,9 +1637,7 @@ pub(crate) async fn run_serenity_screening_inner(
                 for (i, c) in candidate_list.iter().enumerate() {
                     let code = c["stock_code"].as_str().unwrap_or("");
                     let name = c["stock_name"].as_str().unwrap_or("");
-                    // 工作流候选评分（0-100）—— 是「符合瓶颈策略的程度」，**不是概率**；
-                    // 落库前在下面按该档折算成上涨胜率（口径统一）。
-                    let conf_input = c["confidence"].as_i64().unwrap_or(50) as i32;
+                    let conf_input = candidate_score_input(c);
                     if code.is_empty() {
                         continue;
                     }
@@ -1802,6 +1854,16 @@ pub(crate) async fn run_serenity_screening_inner(
                             // 代际标记：实盘 = None，回放 = 本批 as-of 截止日。与荐股链
                             // `persist_reco_picks` 同一列口径（两链同名目、同一张 reco_picks）。
                             as_of_date: Set(as_of_ctx.as_ref().map(|c| c.as_string())),
+                            // 用途与代际分开：智选工作流不是「荐股矩阵回放」，也没有
+                            // 漏检回放的同款语义 ⇒ 回放记 `manual_replay`，实盘记 `live`。
+                            purpose: Set(Some(
+                                if as_of_ctx.is_some() {
+                                    replay_purpose
+                                } else {
+                                    axagent_dao::repo::reco_pool::purpose::LIVE
+                                }
+                                .to_string(),
+                            )),
                             // 智选链与工作流链共用同一版本常量：两链同名目、同一张 reco_picks，
                             // 分版就会造出「同一批 pick 两种归属」。
                             created_at: Set(now_str.clone()),
@@ -2307,6 +2369,31 @@ mod serenity_extract_tests {
     use super::*;
     use axagent_harness::types::{ChatResponse, ContentBlock};
     use axagent_runtime_core::DefaultResponseNormalizer;
+
+    // ── 0) 评分输入优先级：确定性 serenity_score 必须压过 LLM 自报 confidence ──
+    #[test]
+    fn candidate_score_input_prefers_deterministic_score_then_falls_back() {
+        // 两者都在 ⇒ 用确定性评分
+        assert_eq!(
+            candidate_score_input(&serde_json::json!({
+                "serenity_score": 77.0, "confidence": 66.0
+            })),
+            77
+        );
+        // 旧模板/旧记录没有 serenity_score ⇒ 回落 confidence
+        assert_eq!(candidate_score_input(&serde_json::json!({"confidence": 66.0})), 66);
+        // 两者都缺 ⇒ 中性 50（不是 0）
+        assert_eq!(candidate_score_input(&serde_json::json!({})), 50);
+        // 越界钳制；非数值 serenity_score 不得冒充 0，回落 confidence
+        assert_eq!(candidate_score_input(&serde_json::json!({"serenity_score": 150.0})), 100);
+        assert_eq!(candidate_score_input(&serde_json::json!({"serenity_score": -5.0})), 0);
+        assert_eq!(
+            candidate_score_input(&serde_json::json!({
+                "serenity_score": "77", "confidence": 61.0
+            })),
+            61
+        );
+    }
 
     // ── helper：把字符串送进 IR Normalizer 拿到 ContentBlock 列表 ──
     async fn normalize(content: &str) -> Vec<ContentBlock> {

@@ -7621,6 +7621,11 @@
     "nextRun": {
       "stale": "Stalled",
       "staleHint": "The schedule has been overdue (or awaiting catch-up) for over 24 hours without progress: the task may have been interrupted by shutdown or is stuck. Use “Run now” to verify it is alive."
+    },
+    "tracked": {
+      "rowMissing": "Task record not found (it may have been cleaned up)",
+      "failedNoDetail": "Task failed without a reason from the backend",
+      "resultParseFailed": "Failed to parse the task report"
     }
   },
   "teammatePanel": {
@@ -15993,7 +15998,19 @@
       "loopGateShadow": "Reflection loop in shadow mode: computed but not applied, last recalculated {time}",
       "loopGateOff": "Reflection loop disabled (off), last recalculated {time}",
       "loopNeverRecalc": "never recalculated",
-      "loopSamples": "n={{n}}"
+      "loopSamples": "n={{n}}",
+      "cancelled": "Cancelled: completed part only",
+      "sectionData": "Data foundation",
+      "sectionDataDesc": "Full A-share universe and price window: register the list by code segments, fill the latest close, backfill window history. Every conclusion below depends on this coverage.",
+      "sectionMatrix": "Strategy performance",
+      "sectionMatrixDesc": "Style × horizon matrix: win rate, Sharpe/sample size, IC and loop weight; select a cell to see its signal history in the next section.",
+      "sectionSignals": "Signal trace",
+      "sectionSignalsDesc": "Historical signals and outcomes for the selected strategy; empty until a matrix cell is selected.",
+      "sectionMisses": "Miss audit",
+      "sectionMissesDesc": "Stocks that rose past the tier threshold without being picked, split by attribution layer: not in pool, in pool but not picked, or cut by style/horizon.",
+      "sectionSerenity": "Serenity validation",
+      "sectionSerenityDesc": "Win rate and loop validation for the other chain (LLM candidates); read separately from the recommendation matrix.",
+      "matrixLegend": "How to read: rows = strategy style, columns = holding horizon; each cell shows win rate (color-coded), Sharpe/sample size, IC (with reason when samples are insufficient) and loop weight."
     },
     "moverRecall": {
       "title": "Window Gain Recall Check",
@@ -16096,7 +16113,20 @@
         "fixForFuture": "Criterion fix for the future",
         "rfPending": "Reflection queued",
         "rfRunning": "Generating reflection",
-        "rfFailed": "Reflection failed: {{detail}}"
+        "rfFailed": "Reflection failed: {{detail}}",
+        "asofHeading": "As-of recommendation replay",
+        "asofMissing": "No as-of replay evidence yet (attributing from the live layer only)",
+        "asofLayerHint": "As-of layer: {{layer}}",
+        "asofPoolPresent": "Candidate pool is non-empty",
+        "asofPoolEmpty": "Candidate pool is empty (replay degraded)",
+        "asofPoolAbsent": "Pool snapshot missing (cannot tell whether it was in the pool)",
+        "asofStylesLine": "Same-tier picks: {{picked}}; trimmed: {{trimmed}}; other tiers: {{other}}",
+        "asofDiverged": "Live and replay verdicts differ",
+        "asofConsistent": "Live and replay verdicts agree",
+        "asofFailureLine": "Replay failed: {{detail}}",
+        "asofNone": "none",
+        "analysisSignal": "As-of analysis decision: {{action}} (confidence {{confidence}})",
+        "analysisSignalMissing": "As-of analysis decision: not recorded (not analysed yet or no per-tier decision)"
       },
       "runSelector": "Recall run",
       "runOption": "{{from}} ~ {{to}} · {{chain}} · {{events}} events · {{misses}} missed",
@@ -16121,9 +16151,22 @@
       "sweepCloseHint": "Only the latest completed trading day (after 15:00) is collected; intraday requests are rejected; use window-history backfill for past dates",
       "sweepDone": "Close rows written {{written}} / universe {{total}}; no quote {{missing}}",
       "backfillHistory": "Backfill window history",
-      "backfillHistoryHint": "Up to 500 codes x 90 trading days per batch; click again until 0 new rows; \"unchanged\" means fewer than 90 bars available (recent IPO or long suspension)",
-      "backfillDone": "History backfilled: {{codes}} codes / {{rows}} new rows / {{noNew}} unchanged / {{failed}} failed",
-      "backfillNone": "History already complete for this batch (no codes to backfill)"
+      "backfillHistoryHint": "Up to 500 codes x 90 trading days per batch; click repeatedly until 0 new rows; \"unchanged\" = fewer than 90 daily bars available (recent IPOs, long suspensions); \"no quotes\" = not listed / delisted, no amount of clicking will change it",
+      "backfillDone": "History backfilled: {{codes}} codes / {{rows}} new rows / {{noNew}} unchanged / {{noData}} no quotes / {{failed}} failed",
+      "backfillNone": "History already complete for this batch (no codes to backfill)",
+      "taskRunning": "Task running",
+      "taskCancel": "Cancel task",
+      "taskCancelled": "Cancelled (completed part is preserved)",
+      "scopeTitle": "How this audit is scoped",
+      "readingsTitle": "Key readings",
+      "asofSummaryTitle": "As-of recommendation replay summary",
+      "asofSummaryMissing": "No as-of replay for this run yet (the analysis batch has not covered any event)",
+      "asofSummaryLine": "Events {{events}}; not in pool {{notInPool}}; in pool but not picked {{inPoolNotPicked}}; trimmed {{trimmed}}; other tiers {{other}}; pool degraded {{degraded}}; not attributable {{unavailable}}",
+      "reflowMergeLabel": "Merge reflow list into candidate pool",
+      "reflowMergeHint": "Off by default; merging happens only when enabled and settled samples ≥ 30",
+      "historyDays": "Historical trading days (distinct): {{days}}",
+      "tierJudgeableOfUniverse": "Judgeable this tier: {{judgeable}} / all A-shares {{total}}",
+      "asofWeights": "Latest loop weights: {{cells}}"
     },
     "export": {
       "analystReports": "Analyst Reports",

@@ -180,6 +180,37 @@ pub async fn load_current_weights_by_trigger(
 ///
 /// 分析链的当前权重不能消费荐股闭环的行：两条链的风格名目同名
 /// （trend/value/capital/reversion × 档位），而 `load_current_weights` 取的是
+/// 最近一次闭环重算的**逐格变化**（面板「最新权重变化」用）。
+///
+/// 只取 `applied_at` 最大的那一批（同一轮写入的多格共用同一时刻），按 Δ 绝对值降序、
+/// 只保留 |Δ| ≥ `min_delta` 的格 —— 面板要回答「这一轮动了哪几格」，不是把整张表铺开。
+/// 返回 `(style, period, old_weight, new_weight)`。
+pub async fn load_recent_weight_changes(
+    db: &DatabaseConnection,
+    trigger: &str,
+    min_delta: f64,
+    limit: usize,
+) -> Result<Vec<(String, String, f64, f64)>, sea_orm::DbErr> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+    let rows = strategy_weight_history::Entity::find()
+        .filter(strategy_weight_history::Column::Trigger.eq(trigger.to_owned()))
+        .order_by_desc(strategy_weight_history::Column::AppliedAt)
+        .all(db)
+        .await?;
+    let Some(batch_at) = rows.first().map(|r| r.applied_at) else {
+        return Ok(Vec::new());
+    };
+    let mut out: Vec<(String, String, f64, f64)> = rows
+        .into_iter()
+        .filter(|r| r.applied_at == batch_at)
+        .filter(|r| (r.new_weight - r.old_weight).abs() >= min_delta)
+        .map(|r| (r.strategy_id, r.period, r.old_weight, r.new_weight))
+        .collect();
+    out.sort_by(|a, b| (b.3 - b.2).abs().total_cmp(&(a.3 - a.2).abs()));
+    out.truncate(limit);
+    Ok(out)
+}
+
 /// 「每格最新一行」——现网 `strategy_weight_history` 目前**只有** `reco-loop`
 /// 行，全量读取会让分析链把荐股的降权当成自己的基线（重算与展示都错）。
 pub async fn load_current_weights_excluding(

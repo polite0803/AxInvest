@@ -39,10 +39,11 @@
 //!    原因：`condition_executor` 会把 `context.variables` **全量**拼进 prompt
 //!    （4 个 Tool 的原始 JSON 约 20–35KB）⇒ 直接引爆 Jev 的 32k 上下文预算。
 //!    LlmClassifier 只取 `input_var` 指向的那一个值（这里是 `brief`），可控。
-//! 2. 新增 `c-trend-split` 节点 + `trend-split.rhai`：引擎的 `resolve_var_path`
-//!    不支持数组下标，PLAN 原文的 `a-trend-scanner.content.trends[{i}]` 恒 resolve 为
-//!    unit。改为确定性脚本把 `trends[]` 切成 `trend1..trend5` 五个**恒存在**的具名键，
-//!    下游一律走纯对象导航。（详细论证见 `trend-split.rhai` 头部注释。）
+//! 2. 新增 `c-trend-split` 节点 + `trend-split.rhai`：历史上 `resolve_var_path`
+//!    不支持数组下标（2026-10-24 已支持 `name[idx]`），但本节点仍保留 —— 它提供
+//!    **恒存在**的 `trend1..trend5` 具名槽位（趋势数 <5 时补空槽），避免部分评分节点
+//!    拿到 unit；同时把槽位路径只定义一次。下游一律走纯对象导航。
+//!    （详细论证见 `trend-split.rhai` 头部注释。）
 //!
 //! ## 复用（禁止重复定义）
 //!
@@ -114,7 +115,9 @@ const TEMPLATE_ID: &str = "serenity-screening-fast";
 /// ```sql
 /// SELECT version FROM workflow_templates WHERE id='serenity-screening-fast';
 /// ```
-const TEMPLATE_VERSION: i32 = 1;
+// v2 (2026-10-24): 5 个评分节点的 `trend_strategy` 改取各自趋势的 strategy_type
+// （修「一个全局分类喂 5 个策略槽 ⇒ 非瓶颈趋势评分 no_data、候选只能拿 LLM 自报 confidence 冒充分数」）。
+const TEMPLATE_VERSION: i32 = 2;
 
 pub(crate) async fn seed_serenity_fast_workflow_template(
     db: &sea_orm::DatabaseConnection,
@@ -548,7 +551,17 @@ pub(crate) async fn seed_serenity_fast_workflow_template(
         let mut m = HashMap::new();
         m.insert("chain_analysis".to_string(), format!("c-trend-split.result.trend{}", i + 1));
         m.insert("industry_ranking".to_string(), "t-industry-rank.result".to_string());
-        m.insert("trend_strategy".to_string(), "j-strategy-type.category".to_string());
+        // 策略类型必须取**本趋势自己的** `strategy_type`，不能用一个全局分类喂 5 个评分器：
+        // 合并腿的 trends[] 可能同时含瓶颈/政策/业绩/资金/事件/技术六类（scanner prompt 逐条要求
+        // 标注），全局 `j-strategy-type.category` 只会把其中一类套到全部槽位 ⇒ 其余槽位的
+        // `chain_analysis` 与该策略的入参 schema 不匹配，`strategy-scorer.rhai` 返回 no_data，
+        // 候选组装端拿不到确定评分（只能退回 LLM 自报的 confidence 当分数）。
+        // `c-trend-split` 是直接上游，`trend{i}.strategy_type` 取不到时注入 unit，脚本按既有
+        // 语义回落到 "bottleneck" —— 与旧行为一致，不会更差。
+        m.insert(
+            "trend_strategy".to_string(),
+            format!("c-trend-split.result.trend{}.strategy_type", i + 1),
+        );
         m.insert("w_supply".to_string(), "w_supply".to_string());
         m.insert("w_demand".to_string(), "w_demand".to_string());
         m.insert("w_irreplace".to_string(), "w_irreplace".to_string());

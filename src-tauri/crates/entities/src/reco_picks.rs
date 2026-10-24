@@ -53,6 +53,15 @@ pub struct Model {
     /// 现在改用代际列满足两边：既持久化，又不混码。
     #[serde(default)]
     pub as_of_date: Option<String>,
+    /// **用途**：`live` / `mover_replay`（漏检窗口起点的 as-of 回放）/ `time_travel_replay`
+    /// （时间旅行批次）/ `legacy_replay`（本列引入前的 `as_of_date` 非空行，启动期一次性回填）。
+    ///
+    /// 与 `as_of_date` 分开的理由：代际回答「截止哪一天」，用途回答「谁、为什么跑这次回放」。
+    /// 历史面板要区分「手动回放 / 时间旅行 / 漏检回放」，而三者都是非空 `as_of_date`。
+    /// `NULL` = 本列引入前的实盘行（等价 `live`，但不回填 —— live 是多数行，
+    /// 一次性把两万多行 live 写一遍没有信息增量）。
+    #[serde(default)]
+    pub purpose: Option<String>,
     /// 记录创建时间
     pub created_at: String,
 }

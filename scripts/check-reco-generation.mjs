@@ -94,6 +94,65 @@ function evidenceAtCallSite(body, form) {
 const VALIDATION_READ_FORMS = ["decision_validations::Entity::find()"];
 
 /**
+ * R10（2026-10-24，PLAN G-7）：`purpose` 是「谁跑的这次回放」的登记值域。
+ *
+ * 判据两条，都是机械可判的恒空/串批形态：
+ * - **live 谓词 + 回放用途**（`AsOfDate.is_null()` 与 `purpose::MOVER_REPLAY` 同段）⇒ 恒空；
+ * - **按回放用途读候选池却不带 `generated_at`** ⇒ 同一天多次回放会串批（差异证据必须
+ *   钉到某一次回放，而不是「那天所有回放」）。
+ *
+ * 值域本身的唯一权威在 `crates/dao/src/repo/reco_pool.rs` 的 `pub mod purpose`；
+ * 本表只是**登记**（新增值必须先来这里），运行时会与源码逐值对表（见 main）。
+ */
+const PURPOSE_REGISTRY = [
+  "legacy_replay",
+  "live",
+  "manual_replay",
+  "mover_replay",
+  "time_travel_replay",
+];
+const PURPOSE_REPLAY_FORMS = [
+  "purpose::MOVER_REPLAY",
+  "purpose::LEGACY_REPLAY",
+  "purpose::TIME_TRAVEL_REPLAY",
+  "purpose::MANUAL_REPLAY",
+];
+
+/** R10 的段级判据（无 `Column::Purpose` 的段不参与）。 */
+function purposeCheck(body) {
+  // 只判**读侧**：`update_many` 的用途回填（`backfill_legacy_replay_purpose`）是写操作，
+  // 要求它带 generated_at 是无对象的（它按 `purpose IS NULL AND as_of_date IS NOT NULL` 收敛）。
+  if (!body.includes("Column::Purpose") || !body.includes("Entity::find")) return null;
+  const replay = PURPOSE_REPLAY_FORMS.find((c) => body.includes(c));
+  if (!replay) return null;
+  if (body.includes("Column::AsOfDate.is_null()")) {
+    return {
+      rule: "R10",
+      msg: `live 谓词（AsOfDate.is_null）与回放用途（${replay}）同段 ⇒ 查询恒空`,
+    };
+  }
+  if (!body.includes("Column::GeneratedAt")) {
+    return {
+      rule: "R10",
+      msg: `按回放用途读候选池（${replay}）未带 generated_at ⇒ 同日多次回放会串批`,
+    };
+  }
+  return null;
+}
+
+/** 从 dao 源码取 purpose 值域（登记表必须与它逐值相等）。 */
+function readPurposeDomain() {
+  const file = path.join(ROOT, "src-tauri/crates/dao/src/repo/reco_pool.rs");
+  if (!fs.existsSync(file)) return [];
+  const src = fs.readFileSync(file, "utf8");
+  const block = src.match(/pub mod purpose \{([\s\S]*?)\n\}/);
+  if (!block) return [];
+  return [...block[1].matchAll(/pub const \w+: &str = "([^"]+)";/g)]
+    .map((m) => m[1])
+    .sort();
+}
+
+/**
  * 显式豁免（键 = 仓库相对路径 + 函数名）。每条都必须带理由；门每次运行打印全表。
  * 加一条豁免 = 承认一处未收口的债务，不是让它消失。
  */
@@ -195,6 +254,8 @@ function evaluateBody(body) {
   }
   const vread = anyIn(body, VALIDATION_READ_FORMS);
   if (vread) out.push({ rule: "R3", form: vread, ok: !!anyIn(body, R3_PREDICATES) });
+  const pc = purposeCheck(body);
+  if (pc) out.push({ rule: "R10", form: pc.msg, ok: false });
   return out;
 }
 
@@ -286,7 +347,7 @@ export function poolClassCheck(key, body) {
 export function checkSources(files, dump) {
   const violations = [];
   const rows = [];
-  const hits = { R1: 0, R2: 0, R3: 0, R5: 0, R6: 0, R7: 0, R8: 0, R9: 0 };
+  const hits = { R1: 0, R2: 0, R3: 0, R5: 0, R6: 0, R7: 0, R8: 0, R9: 0, R10: 0 };
   const exemptHits = [];
   let examined = 0;
   const poolSeen = new Set();
@@ -508,6 +569,61 @@ async fn start_cron_scheduler_big(db: &Db) -> usize {
   }
   // R9 的负控已经在真跑里自证过一轮：登记两个不存在的键时它报出 2 条假登记
   //（2026-10-18 实测 R9 15 → 摘掉过期键后 0），这里只锁它的记账依据还在。
+  // ── R10（2026-10-24，PLAN G-7）：用途与代际的矛盾形态 ──
+  const r10Cases = [
+    {
+      name: "R10 live 谓词 + 回放用途 ⇒ 红",
+      src: `
+pub async fn live_reader(db: &DatabaseConnection) -> usize {
+    let q = reco_picks::Entity::find()
+        .filter(reco_picks::Column::AsOfDate.is_null())
+        .filter(reco_picks::Column::Purpose.eq(purpose::MOVER_REPLAY))
+        .filter(reco_picks::Column::GeneratedAt.eq("x"));
+    let n = q.count(db).await;
+    n as usize
+}`,
+      want: 1,
+    },
+    {
+      name: "R10 回放用途缺 generated_at ⇒ 红",
+      src: `
+pub async fn diff_reader(db: &DatabaseConnection) -> usize {
+    let q = reco_picks::Entity::find()
+        .filter(reco_picks::Column::AsOfDate.eq("2026-09-04"))
+        .filter(reco_picks::Column::Purpose.eq(purpose::MOVER_REPLAY));
+    let n = q.count(db).await;
+    n as usize
+}`,
+      want: 1,
+    },
+    {
+      name: "R10 回放用途 + 代际 + generated_at ⇒ 绿",
+      src: `
+pub async fn diff_reader_ok(db: &DatabaseConnection) -> usize {
+    let q = reco_picks::Entity::find()
+        .filter(reco_picks::Column::AsOfDate.eq("2026-09-04"))
+        .filter(reco_picks::Column::Purpose.eq(purpose::MOVER_REPLAY))
+        .filter(reco_picks::Column::GeneratedAt.eq("x"));
+    let n = q.count(db).await;
+    n as usize
+}`,
+      want: 0,
+    },
+  ];
+  for (const c of r10Cases) {
+    const got = mk(c.src).reduce(
+      (acc, fn) => acc + evaluateBody(fn.body).filter((row) => row.rule === "R10").length,
+      0,
+    );
+    const ok = got === c.want;
+    if (!ok) failed += 1;
+    console.log(`  ${ok ? "✅" : "❌"} ${c.name}（实得 ${got}）`);
+  }
+  if (readPurposeDomain().length === 0) {
+    console.log("  ❌ R10 取不到 purpose 值域 ⇒ 登记对表恒绿");
+    failed += 1;
+  }
+
   if (!poolReadForm(FIND)) {
     console.log("  ❌ poolReadForm 认不出标准读形态 ⇒ R8/R9 的记账依据已失效");
     failed += 1;
@@ -533,7 +649,7 @@ function main() {
   }
   console.log(
     `扫描：${files.length} 个文件 / ${r.examined} 个顶层函数段；` +
-      `R1 ${r.hits.R1} 处读侧、R2 ${r.hits.R2} 处写侧、R3 ${r.hits.R3} 处闭环读侧、R5 ${r.hits.R5} 处折空、R6 ${r.hits.R6} 处漏排除、R7 ${r.hits.R7} 处误排除、R8 ${r.hits.R8} 处未登记、R9 ${r.hits.R9} 处名单过期`,
+      `R1 ${r.hits.R1} 处读侧、R2 ${r.hits.R2} 处写侧、R3 ${r.hits.R3} 处闭环读侧、R5 ${r.hits.R5} 处折空、R6 ${r.hits.R6} 处漏排除、R7 ${r.hits.R7} 处误排除、R8 ${r.hits.R8} 处未登记、R9 ${r.hits.R9} 处名单过期、R10 ${r.hits.R10} 处用途/代际矛盾`,
   );
   if (r.exemptHits.length > 0) {
     console.log(`显式豁免 ${r.exemptHits.length} 条（债务，不是清零）：`);
@@ -545,6 +661,15 @@ function main() {
     if (r.hits[rule] < min) thin.push(`${rule} 命中 ${r.hits[rule]} < 下限 ${min}（扫描面或判据被削弱）`);
   }
   const violations = [...r.violations, ...thin];
+  // G-7：purpose 值域登记对表（新增用途却忘了登记 ⇒ 红；删了用途但登记表没跟 ⇒ 也红）。
+  const domain = readPurposeDomain();
+  if (domain.length === 0) {
+    violations.push("R10 取不到 purpose 值域（dao 的 `pub mod purpose` 未找到）⇒ 登记对表失效");
+  } else if (JSON.stringify(domain) !== JSON.stringify(PURPOSE_REGISTRY)) {
+    violations.push(
+      `R10 purpose 值域与登记表不一致：源码 ${JSON.stringify(domain)} / 登记 ${JSON.stringify(PURPOSE_REGISTRY)}`,
+    );
+  }
   if (violations.length > 0) {
     console.error(`❌ 代际一致违规 ${violations.length} 条：`);
     for (const v of violations) console.error("  - " + v);

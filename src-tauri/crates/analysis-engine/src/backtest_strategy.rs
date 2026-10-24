@@ -85,6 +85,10 @@ pub struct BacktestComparisonResponse {
     pub negative_stocks: Vec<String>,
     /// 被跳过的策略及原因
     pub skipped: Vec<String>,
+    /// 用户中途取消 ⇒ 后续票/组没跑。`positive`/`negative` 只反映已执行部分。
+    /// `serde(default)`：结果 JSON 会落库并被读侧反序列化，旧报告没有该键时按 false 读。
+    #[serde(default)]
+    pub cancelled: bool,
 }
 
 // ── 信号检测 ──
@@ -922,6 +926,7 @@ pub async fn backtest_two_groups(
         positive_stocks: positive_stocks.iter().map(|(c, _)| c.clone()).collect(),
         negative_stocks: negative_stocks.iter().map(|(c, _)| c.clone()).collect(),
         skipped: SKIPPED.iter().map(|s| s.to_string()).collect(),
+        cancelled: axagent_astock_data::task_cancel::is_cancelled(),
     })
 }
 
@@ -940,6 +945,10 @@ async fn run_group(
     }
     let mut loaded = Vec::new();
     for (code, name) in stocks {
+        // 逐票取消检查（K 线取数是这条链唯一的慢点，也是唯一的外部 await）
+        if axagent_astock_data::task_cancel::is_cancelled() {
+            break;
+        }
         // 修复 P1: 与 scan_strategy 一致，使用前复权
         match client.get_klines(code, "daily", kline_limit, Some(AdjType::Forward)).await {
             Ok(k) if k.len() >= 60 => {

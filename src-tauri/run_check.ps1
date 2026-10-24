@@ -1,1 +1,0 @@
-cargo check --package axagent 2>&1; exit $LASTEXITCODE

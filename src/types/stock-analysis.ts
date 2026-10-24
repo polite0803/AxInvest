@@ -1349,6 +1349,8 @@ export interface BacktestComparisonResponse {
   positiveStocks: string[];
   negativeStocks: string[];
   skipped: string[];
+  /** 用户中途取消 ⇒ 两组只反映已执行部分（旧报告无此键 ⇒ 视为 false） */
+  cancelled?: boolean;
 }
 
 // ── 荐股信号 ──
@@ -1568,7 +1570,13 @@ export interface RecoLoopCell {
   /** 矩阵名目（`serenity`，非落库写法） */
   style: string;
   period: string;
-  status: "insufficient_samples" | "ic_unmeasurable" | "not_in_matrix" | "ic_non_negative" | "demoted_negative_ic";
+  status:
+    | "insufficient_samples"
+    | "ic_unmeasurable"
+    | "not_in_matrix"
+    | "ic_non_negative"
+    | "demoted_negative_ic"
+    | "disabled_negative_expectancy";
   rankIc: number | null;
   samples: number;
   winRate: number | null;
@@ -1756,6 +1764,8 @@ export interface CloseSweepReport {
   skippedSuspended: number;
   failedBatches: number;
   missingQuotes: number;
+  /** 用户中途取消 ⇒ 后续批次没跑；上面的计数只统计已执行部分 */
+  cancelled?: boolean;
 }
 
 /** `backfill_market_close_history`（阶段 0.3：窗口历史补齐）。 */
@@ -1765,10 +1775,14 @@ export interface HistoryBackfillReport {
   rows: number;
   /** 取到了日线但没有新增行的票数（可用日线不足 targetDays，重复点不会再涨） */
   noNew?: number;
+  /** 整条数据源链都回答「无此代码行情数据」的票数（未上市/已退市，重复点也一样） */
+  noData?: number;
   failed: number;
   targetDays: number;
   /** 首条失败原因；全失败时面板直接显示这句，成功为 null */
   error?: string | null;
+  /** 用户中途取消 ⇒ 剩余票没取；上面的计数只统计已执行部分 */
+  cancelled?: boolean;
 }
 
 /**
@@ -1839,8 +1853,14 @@ export interface MoverRecallReviewReflection {
   alphaReturn: number | null;
   /** 来源桶：`mover_recall` = 漏检回放；其余（含空串）= 常规到期 due */
   source: string;
-  /** 系统机械盖章的权威归因层（仅 mover_recall 行非空） */
+  /** 系统机械盖章的权威归因层（自 B-5 起写 as-of 层；旧行为 live 层） */
   missLayer: string | null;
+  /** as-of 归因层（与 missLayer 同值；NULL = 本列引入前的行） */
+  asofLayer?: string | null;
+  /** as-of 回放批次键；NULL = 无 as-of 证据 */
+  asofRecoGeneratedAt?: string | null;
+  /** as-of 差异明细 JSON 原文（复核「模型看到了什么」） */
+  recoDiffJson?: string | null;
   moverLabel: string | null;
   /** pending / running / completed / failed: ... */
   status: string;
@@ -1856,7 +1876,16 @@ export interface MoverRecallEventReview {
   runId: string;
   /** pending / excluded / running / analyzed / failed / reflected */
   status: string;
+  /** live 层归因（窗口内实盘推荐证据） */
   missLayer: string;
+  /** as-of 回放归因层；null = 该事件还没跑过 as-of 回放（或属智选链行） */
+  asofLayer: string | null;
+  /** as-of 回放批次键（= 那次回放的 reco_picks.generatedAt） */
+  asofRecoGeneratedAt: string | null;
+  /** as-of 差异明细 JSON 原文（池状态 / 出票/截断风格 / 降级 / 失败原因） */
+  asofDiffJson: string | null;
+  /** 补分析产出的**事件档决策摘要** JSON（{horizon, action, confidence}）；null = 未记录 */
+  analysisSignalAtStart: string | null;
   period: string;
   stockCode: string;
   stockName: string;

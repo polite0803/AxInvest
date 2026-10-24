@@ -1,6 +1,7 @@
 import { List } from "@/components/common/AntdList";
 import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBadge";
 import { useStockJump } from "@/hooks/useStockJump";
+import { useTrackedTask } from "@/hooks/useTrackedTask";
 import { invoke } from "@/lib/invoke";
 import {
   actionToDirection,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import type { TaskAccepted } from "@/types";
 import type {
   BacktestComparisonResponse,
   LatestAnalysisSummary,
@@ -117,7 +119,13 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const [strategyStats, setStrategyStats] = useState<
     Record<string, Record<string, { winRate: number; sharpe: number | null; signalCount: number }>> | null
   >(null);
-  const [strategyStatsLoading, setStrategyStatsLoading] = useState(false);
+  // 回测已改为异步任务：受理即返回，报告在终态后从 result_json 取回
+  const {
+    start: startBacktestTask,
+    running: backtestTaskRunning,
+    result: backtestTaskResult,
+    error: backtestTaskError,
+  } = useTrackedTask<BacktestComparisonResponse>();
 
   const reqTokenRef = useRef(0);
 
@@ -127,33 +135,35 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const triggerBacktest = useCallback(async () => {
     if (backtestTriggeredRef.current) { return; }
     backtestTriggeredRef.current = true;
-    try {
-      setStrategyStatsLoading(true);
-      const result = await invoke<BacktestComparisonResponse>("backtest_reco_strategies");
-      if (!result) { return; }
-      // 逐 (style, period) 原样保留。旧实现把四档胜率做**算术平均**、信号数直接相加，
-      // 而后端 `StrategyStats` 本就带 period ⇒ 平均出来的数既不是任何一档、也不是按
-      // 信号数加权的可信总体，等于主动抹掉周期维度。
-      const byStylePeriod: Record<
-        string,
-        Record<string, { winRate: number; sharpe: number | null; signalCount: number }>
-      > = {};
-      for (const [, s] of Object.entries(result.positive.strategies)) {
-        if (!byStylePeriod[s.style]) { byStylePeriod[s.style] = {}; }
-        byStylePeriod[s.style][s.period] = {
-          winRate: Math.round(s.winRatePct * 10) / 10,
-          sharpe: s.sharpeRatio != null ? Math.round(s.sharpeRatio * 100) / 100 : null,
-          signalCount: s.totalSignals,
-        };
-      }
-      setStrategyStats(byStylePeriod);
-    } catch {
-      // 回测失败时静默，不打扰用户
-      backtestTriggeredRef.current = false;
-    } finally {
-      setStrategyStatsLoading(false);
+    await startBacktestTask(() => invoke<TaskAccepted>("backtest_reco_strategies"));
+  }, [startBacktestTask]);
+
+  useEffect(() => {
+    if (!backtestTaskResult) { return; }
+    // 逐 (style, period) 原样保留。旧实现把四档胜率做**算术平均**、信号数直接相加，
+    // 而后端 `StrategyStats` 本就带 period ⇒ 平均出来的数既不是任何一档、也不是按
+    // 信号数加权的可信总体，等于主动抹掉周期维度。
+    const byStylePeriod: Record<
+      string,
+      Record<string, { winRate: number; sharpe: number | null; signalCount: number }>
+    > = {};
+    for (const [, s] of Object.entries(backtestTaskResult.positive.strategies)) {
+      if (!byStylePeriod[s.style]) { byStylePeriod[s.style] = {}; }
+      byStylePeriod[s.style][s.period] = {
+        winRate: Math.round(s.winRatePct * 10) / 10,
+        sharpe: s.sharpeRatio != null ? Math.round(s.sharpeRatio * 100) / 100 : null,
+        signalCount: s.totalSignals,
+      };
     }
-  }, []);
+    setStrategyStats(byStylePeriod);
+  }, [backtestTaskResult]);
+
+  useEffect(() => {
+    // 回测失败时静默，不打扰用户；但允许下次再触发
+    if (backtestTaskError) {
+      backtestTriggeredRef.current = false;
+    }
+  }, [backtestTaskError]);
 
   /**
    * 统一数据加载入口。所有数据拉取都走这里,避免 useEffect 与 onClick
@@ -760,7 +770,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
                         {t(`stockAnalysis.recommendation.style${capitalize(style)}`)}
                       </Tag>
                       {/* P0-2: 策略回测徽章 */}
-                      {!strategyStatsLoading && styleStats && (
+                      {!backtestTaskRunning && styleStats && (
                         <>
                           <Tooltip
                             title={

@@ -127,6 +127,10 @@ let strat_vars = [
     strategy_trend1, strategy_trend2, strategy_trend3,
     strategy_trend4, strategy_trend5,
 ];
+// 索引值存 `{score, strategy_type, reliability}`：
+// ① 同一只票可能被多个趋势/策略各算一次 —— 取**最高分**，不能首见即定（首见可能来自
+//    证据最弱的那个槽位，会把强证据票压到弱分）；
+// ② 策略类型跟着**得分来源**走，供下游 data-verifier 选对分支。
 let score_by_code = #{};
 let score_by_name = #{};
 for sv in strat_vars {
@@ -134,12 +138,21 @@ for sv in strat_vars {
     for nd in nodes {
         let comp = field_f64(nd, "bottleneck_composite", -1.0);
         if comp < 0.0 { continue; }
+        let st = field_str(nd, "strategy_type");
+        let rel = field_str(nd, "data_reliability");
+        let entry = #{ "score": comp, "strategy_type": st, "reliability": rel };
         let code = field_str(nd, "stock_code");
-        if code != "" && !(code in score_by_code) { score_by_code[code] = comp; }
+        if code != "" && (!(code in score_by_code) || comp > score_by_code[code]["score"]) {
+            score_by_code[code] = entry;
+        }
         let nm = field_str(nd, "node_name");
-        if nm != "" && !(nm in score_by_name) { score_by_name[nm] = comp; }
+        if nm != "" && (!(nm in score_by_name) || comp > score_by_name[nm]["score"]) {
+            score_by_name[nm] = entry;
+        }
         let snm = field_str(nd, "stock_name");
-        if snm != "" && !(snm in score_by_name) { score_by_name[snm] = comp; }
+        if snm != "" && (!(snm in score_by_name) || comp > score_by_name[snm]["score"]) {
+            score_by_name[snm] = entry;
+        }
     }
 }
 
@@ -166,21 +179,46 @@ for t in trends {
         seen.push(code);
 
         let name = field_str(c, "stock_name");
-        // serenity_score：优先取确定评分（按代码 → 按名称），其次候选自带，最后 50
-        let score = if code in score_by_code {
+        // 确定评分优先（按代码 → 按名称）；都没有时**封顶 54** 使用 LLM 自报分/趋势 confidence。
+        // 为什么封顶：LLM 自报 90 与确定性评分 80 不可比，前者没有可复核的计算过程；
+        // 不封顶会让“没算过的票”凭自我评分排到“算过且分数高”的票前面。
+        // 54 落在 READINESS_BANDS 的 weak_signal（35–54），不会被静默排除，也不会冒充潜在信号。
+        let picked = if code in score_by_code {
             score_by_code[code]
         } else if name != "" && (name in score_by_name) {
             score_by_name[name]
-        } else {
+        } else { #{} };
+        let has_det = picked["score"] != ();
+        let strategy_type = if has_det && field_str(picked, "strategy_type") != "" {
+            field_str(picked, "strategy_type")
+        } else if ttype != "" {
+            ttype
+        } else { "bottleneck" };
+        let reliability = if has_det && field_str(picked, "reliability") != "" {
+            field_str(picked, "reliability")
+        } else { "llm_estimated" };
+        let llm_score = if c["serenity_score"] != () {
             to_f64(c["serenity_score"], 50.0)
-        };
-        // 没有确定评分时，用趋势自身 confidence 作为弱代理（不覆盖真实评分）
-        if !(code in score_by_code) && !(name != "" && (name in score_by_name)) && tconf > 0.0 {
-            score = tconf;
-        }
+        } else if tconf > 0.0 { tconf } else { 50.0 };
+        let base_score = if has_det {
+            to_f64(picked["score"], 50.0)
+        } else if llm_score > 54.0 { 54.0 } else { llm_score };
+        // 可靠度折价（2026-10-24）：确定性评分本身对缺失字段给的是**中性值**，
+        // 于是「数据最不全」的环节可能以中性分排到「数据齐全但偏差」的前面。
+        // 这里不改子分（中性值取多少是政策），只在最终排序上体现不确定性代价：
+        //   insufficient（连行业都没匹配上）−10；llm_estimated（纯 LLM 估算）−5。
+        // 已验证（partially_verified）与行业推断（industry_inferred）不折价。
+        let adjusted = if has_det && reliability == "insufficient" {
+            base_score - 10.0
+        } else if has_det && reliability == "llm_estimated" {
+            base_score - 5.0
+        } else { base_score };
+        let score = clamp100(adjusted);
 
         let conf = field_f64(c, "confidence", 50.0);
-        if consistency_score > 0.0 && consistency_score < 100.0 && consistency_score < conf {
+        // `-1` = 一致性检查未产出（不是“最差”）；`0` 是**有效的最差分**，必须照样封顶。
+        // 旧写法 `> 0.0` 把 0 当成“未检查”⇒ 数据自相矛盾时置信度完全不降。
+        if consistency_score >= 0.0 && consistency_score < 100.0 && consistency_score < conf {
             conf = consistency_score;
         }
 
@@ -189,6 +227,8 @@ for t in trends {
         candidates.push(#{
             "stock_code": code,
             "stock_name": name,
+            "strategy_type": strategy_type,
+            "data_reliability": reliability,
             "relevance": if field_str(c, "relevance") != "" { field_str(c, "relevance") } else { "core" },
             "serenity_score": clamp100(score),
             "confidence": clamp100(conf),

@@ -142,6 +142,7 @@ fn pool_reflow_of(json: &serde_json::Value) -> Option<(bool, String)> {
 /// 启动前可见信号 / 卡在哪一层（与权威层对照）/ 未来判据如何修（可执行）。
 fn mover_recall_context_text(
     event: Option<&axagent_dao::repo::mover_recall_events::EventModel>,
+    analysis_verdict: Option<&str>,
 ) -> String {
     let Some(ev) = event else {
         return "（本次为常规到期反思，无妖股漏检事件背景：忽略漏检专项三问，按常规单档复盘即可。）"
@@ -159,7 +160,7 @@ fn mover_recall_context_text(
         other => other,
     };
 
-    format!(
+    let mut out = format!(
         "【妖股漏检回放背景】\n\
          本次复盘的不是一笔实盘推荐，而是一笔「窗口内涨幅达标、但系统当时漏掉」的历史**回放补分析**。\n\
          - 权威归因层（系统机械判定，不是你的自评）：{layer} —— {semantic}\n\
@@ -181,6 +182,95 @@ fn mover_recall_context_text(
         cum = ev.cum_gain_pct,
         daily = ev.max_daily_pct,
         period = ev.period,
+    );
+    out.push_str(&asof_evidence_block(ev));
+    if let Some(v) = analysis_verdict.filter(|s| !s.trim().is_empty()) {
+        out.push_str(&format!(
+            "\n- 本次逐票 as-of 分析的档位结论（analysis_verdict）：{v}\n  \
+             （上面三问必须与这条结论对照：是结论本身错、还是候选链没把这只票送到决策面前。）"
+        ));
+    }
+    out
+}
+
+/// as-of 荐股回放的证据块（阶段 B-4 的变量清单）。
+///
+/// 与 live 层**分列**呈现：两者分歧本身就是诊断信息（「实盘与回放判定不同」）。
+/// 所有字段来自 `mover_recall_events.asof_diff_json`；缺失时逐类成句，不折成 0/空表。
+fn asof_evidence_block(ev: &axagent_dao::repo::mover_recall_events::EventModel) -> String {
+    let Some(layer) = ev.asof_layer.as_deref() else {
+        return "\n【as-of 荐股回放证据】本事件**尚未跑过** as-of 回放（或属趋势智选链行）⇒ \
+                只能按 live 层归因。请在结论中明确写出「缺 as-of 证据」以及还缺哪类留痕，\
+                不得把 live 的 not_in_pool 当成「窗口起点那一刻系统也看不到它」。"
+            .to_string();
+    };
+    let diff: serde_json::Value =
+        ev.asof_diff_json.as_deref().and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
+
+    let list = |key: &str| -> String {
+        match diff.get(key) {
+            None => "未记录".to_string(),
+            Some(serde_json::Value::Array(a)) if a.is_empty() => "无".to_string(),
+            Some(serde_json::Value::Array(a)) => {
+                a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("、")
+            },
+            Some(_) => "未记录".to_string(),
+        }
+    };
+    let pool_state = match diff.get("poolState").and_then(|v| v.as_str()) {
+        Some("present") => "该档池快照非空（判据可机械执行）",
+        Some("empty") => "该档池为**空池**（取数降级，不记算法账）",
+        Some("absent") => "池快照**缺失**（取数缺痕 ⇒ 无从判定是否进池）",
+        _ => "未记录",
+    };
+    let origin = diff.get("poolOrigin").cloned().unwrap_or(serde_json::Value::Null);
+    let origin_text = |k: &str| {
+        origin.get(k).and_then(|v| v.as_u64()).map(|n| n.to_string()).unwrap_or_else(|| "-".into())
+    };
+    let diverged = diff.get("divergedFromLive").and_then(|v| v.as_bool());
+    let degradation = list("degradedStyles");
+    let failure = diff.get("replayFailure").and_then(|v| v.as_str());
+
+    format!(
+        "\n【as-of 荐股回放证据（与上面 live 层**分列**，分歧本身是诊断信息）】\n\
+         - as-of 层（系统机械判定）：{layer}\n\
+         - live 层（窗口内实盘推荐证据）：{live}\n\
+         - 池来源（as-of 回放）：hot={hot} / industry={industry} / fallback={fallback} / \
+         user={user} / mover={mover} / reflow={reflow} / moverMiss={miss}；\
+         其中 user/reflow/moverMiss 与智选注入恒为 0 是**刻意未喂**（防前视），不代表实盘也空。\n\
+         - 该票是否进池：{pool}\n\
+         - 同档 as-of 出票风格：{picked}\n\
+         - 被截断风格（算出但组内 top-N 淘汰）：{trimmed}\n\
+         - 停用/降级风格：{degraded}\n\
+         - 别档 as-of 出票：{other}\n\
+         - 回放失败/降级：{failure}\n\
+         - live 层 vs as-of 层：{divergence}\n\
+         - 本轮 as-of 回放**未含「分析定档」来源**（防把已知漏检清单喂回候选池）⇒ \
+         not_in_pool 只能读作「该池没收」，不得读作「live 系统也没有」。",
+        layer = layer,
+        live = ev.miss_layer,
+        hot = origin_text("hot"),
+        industry = origin_text("industry"),
+        fallback = origin_text("fallback"),
+        user = origin_text("user"),
+        mover = origin_text("mover"),
+        reflow = origin_text("reflow"),
+        miss = origin_text("moverMiss"),
+        pool = pool_state,
+        picked = list("pickedStyles"),
+        trimmed = list("trimmedStyles"),
+        degraded = if degradation == "未记录" {
+            "未记录".to_string()
+        } else {
+            degradation
+        },
+        other = list("pickedOtherPeriods"),
+        failure = failure.unwrap_or("无"),
+        divergence = match diverged {
+            Some(true) => "**分歧**（实盘与回放判定不同 —— 这本身是诊断信息，不是矛盾）",
+            Some(false) => "一致",
+            None => "未记录",
+        },
     )
 }
 
@@ -351,6 +441,9 @@ pub async fn run_reflection_workflow(
             // pending 行 UPDATE 路径产生（建点在 `build_pending_reflection_rows_for`）。
             source: Set("due".to_string()),
             miss_layer: Set(None),
+            asof_reco_generated_at: Set(None),
+            asof_layer: Set(None),
+            reco_diff_json: Set(None),
             failure_modes: Set(None),
             // 阶段 3：手动反思 INSERT 路径此刻还没有反思产出 ⇒ 两列留 NULL（不是「判成 L1」）
             implementation_tier: Set(None),
@@ -450,7 +543,26 @@ pub async fn run_reflection_workflow(
         },
         _ => None,
     };
-    let mover_recall_context = mover_recall_context_text(mover_event.as_ref());
+    let mover_recall_context = mover_recall_context_text(
+        mover_event.as_ref(),
+        mover_event
+            .as_ref()
+            .and_then(|ev| {
+                let raw = original_analysis.as_ref()?.horizon_decisions.as_deref()?;
+                let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+                let obj = v.as_object()?;
+                // 双键：逐档决策的键是 camelCase（ultraShort），snake 只对前三档同形。
+                let camel = ev
+                    .period
+                    .parse::<Period>()
+                    .ok()
+                    .map(|p| p.camel_key())
+                    .unwrap_or(ev.period.as_str());
+                let d = obj.get(ev.period.as_str()).or_else(|| obj.get(camel))?;
+                d.get("action").and_then(|x| x.as_str()).map(str::to_string)
+            })
+            .as_deref(),
+    );
 
     // 派生主周期快照：用于 comparator 顶层变量注入 + strategy_performance 单条写入
     let primary_horizon = review_horizon.unwrap_or_else(|| {
@@ -924,11 +1036,32 @@ pub async fn run_reflection_workflow(
             // #10 P7：本行妖股标签 —— 用**本行自己的档与快照**（primary_snapshot 与 raw_return
             // 同源），不引第二套窗口天数表；判据单源见 compute_mover_label。
             let mover_label = compute_mover_label(db, primary_horizon, primary_snapshot).await;
+            // 阶段 B-3：标签为 window_incomplete ⇒ 窗口还没走完，**不得盖章** reflected
+            // （盖章后事件永不再评，而那条「终评」其实是期中观察）。事件保持 analyzed 等成熟。
+            let label_matured = mover_label.as_deref() != Some("window_incomplete");
 
             // D-4 清单半段：反思判定「本应入池」⇒ 把该事件盖成 reflow_pending。
             // 只写清单（可复核），**不在这里并入种子** —— 并入要过 fail-closed 判据。
             // 失败只记日志：清单写不进去不该让反思行落不了库。
-            if let Some((true, reason)) = pool_reflow_of(&reflection_json) {
+            //
+            // 阶段 B-6：入清单的判据看 **as-of 层**（`not_in_pool` / `unexplained` 才是
+            // 「池子没收」的证据）；`l3_scored_out`（评分算过并主动淘汰）与 `other_period`
+            // 都不该回灌。as-of 层缺席时退回 live 层（旧事件仍有历史行为，但日志写明）。
+            let reflow_layer = mover_event
+                .as_ref()
+                .and_then(|e| e.asof_layer.as_deref().or(Some(e.miss_layer.as_str())));
+            let reflow_allowed = matches!(reflow_layer, Some("not_in_pool" | "unexplained"));
+            if let Some((true, _)) = pool_reflow_of(&reflection_json)
+                && !reflow_allowed
+            {
+                tracing::info!(
+                    "[reflection] 模型建议回灌，但事件层为 {:?}（非 not_in_pool/unexplained）⇒ 不进清单",
+                    reflow_layer
+                );
+            }
+            if let Some((true, reason)) = pool_reflow_of(&reflection_json)
+                && reflow_allowed
+            {
                 match mover_event.as_ref() {
                     Some(ev) => {
                         match axagent_dao::repo::mover_recall_events::mark_reflow_pending(
@@ -1012,12 +1145,27 @@ pub async fn run_reflection_workflow(
                 .col_expr(stock_reflections::Column::AlphaReturn, Expr::value(alpha_return))
                 .col_expr(stock_reflections::Column::HoldingDays, Expr::value(holding_days))
                 // #10 P7：四态标签；NULL=尚未走到收尾（pending/running/failed 或本列引入前的存量行）
-                .col_expr(stock_reflections::Column::MoverLabel, Expr::value(mover_label))
+                .col_expr(stock_reflections::Column::MoverLabel, Expr::value(mover_label.clone()))
                 // P3：权威归因层盖章。仅 mover_recall 反思（mover_event=Some）写层码，
                 // 这是**系统机械判定**不是 LLM 自报；常规到期反思恒 NULL。
+                // 阶段 B-5：本列写 **as-of 层**（反思的权威归因）；live 层留在
+                // `mover_recall_events.miss_layer` 上，面板两列并示。as-of 回放尚未
+                // 覆盖该事件时留 NULL（不得拿 live 层冒充）。
                 .col_expr(
                     stock_reflections::Column::MissLayer,
-                    Expr::value(mover_event.as_ref().map(|e| e.miss_layer.clone())),
+                    Expr::value(mover_event.as_ref().and_then(|e| e.asof_layer.clone())),
+                )
+                .col_expr(
+                    stock_reflections::Column::AsofRecoGeneratedAt,
+                    Expr::value(mover_event.as_ref().and_then(|e| e.asof_reco_generated_at.clone())),
+                )
+                .col_expr(
+                    stock_reflections::Column::AsofLayer,
+                    Expr::value(mover_event.as_ref().and_then(|e| e.asof_layer.clone())),
+                )
+                .col_expr(
+                    stock_reflections::Column::RecoDiffJson,
+                    Expr::value(mover_event.as_ref().and_then(|e| e.asof_diff_json.clone())),
                 )
                 // P2-b：失败模式受控标注（值域权威 = analysis_engine::failure_mode::FailureMode，
                 // 白名单外的自造 token 不落本列，只记日志）。NULL = 模板未产出该字段。
@@ -1319,33 +1467,70 @@ pub async fn run_reflection_workflow(
             // 一个事件对应多档反思行（四档各一行），只让**首个 completed 的档**盖章：
             // UPDATE 带 `status != 'reflected'` 守卫形成行级竞争，rows_affected=0 即
             // 「已被更早完成的档盖章」，这是正常幂等不是冲突。reflection_id 记盖章档的行 id。
-            if status_text == "completed" {
+            if status_text == "completed" && label_matured {
                 if let Some(ev) = mover_event.as_ref() {
-                    // UPDATE 守卫 `status != 'reflected'` 在 dao::stamp_reflected 内：
-                    // rows=0 即「已被更早完成的档盖章」，正常幂等不是冲突。
-                    match axagent_dao::repo::mover_recall_events::stamp_reflected(
-                        db,
-                        &ev.id,
-                        Some(&analysis_id),
-                        now_ms,
-                    )
-                    .await
-                    {
-                        Ok(rows) if rows > 0 => tracing::info!(
-                            "[reflection] 漏检事件 {} 已由本档（{}）反思完成，盖章 reflected",
+                    let is_event_tier = primary_horizon == ev.period;
+                    // 非事件档：查这条分析下是否已有事件档行。查询失败按「已有」处理（不因
+                    // 一次查询故障卡死盖章），并留 warn 便于复查。
+                    let event_tier_row_exists = if is_event_tier {
+                        true
+                    } else {
+                        match axagent_dao::repo::stock_lesson_queries::fetch_by_analysis_id(
+                            db,
+                            &analysis_id,
+                        )
+                        .await
+                        {
+                            Ok(rows) => rows
+                                .iter()
+                                .any(|r| r.horizon.as_deref() == Some(ev.period.as_str())),
+                            Err(e) => {
+                                tracing::warn!(
+                                    "[reflection] 查事件档反思行失败（按旧行为放行盖章）: {e}"
+                                );
+                                true
+                            },
+                        }
+                    };
+                    if !may_stamp_event(is_event_tier, event_tier_row_exists) {
+                        tracing::info!(
+                            "[reflection] 漏检事件 {} 本次完成的是非事件档（{} ≠ {}）⇒ 不盖章，等事件档终评",
                             ev.id,
-                            primary_horizon
-                        ),
-                        Ok(_) => tracing::info!(
-                            "[reflection] 漏检事件 {} 已由更早 completed 的档盖章，本行不重复回填",
-                            ev.id
-                        ),
-                        Err(e) => tracing::warn!(
-                            "[reflection] 漏检事件 {} 盖章 reflected 失败（反思结论已落库，不影响）: {e}",
-                            ev.id
-                        ),
+                            primary_horizon,
+                            ev.period
+                        );
+                    } else {
+                        // UPDATE 守卫 `status != 'reflected'` 在 dao::stamp_reflected 内：
+                        // rows=0 即「已被更早完成的档盖章」，正常幂等不是冲突。
+                        match axagent_dao::repo::mover_recall_events::stamp_reflected(
+                            db,
+                            &ev.id,
+                            Some(&analysis_id),
+                            now_ms,
+                        )
+                        .await
+                        {
+                            Ok(rows) if rows > 0 => tracing::info!(
+                                "[reflection] 漏检事件 {} 已由本档（{}）反思完成，盖章 reflected",
+                                ev.id,
+                                primary_horizon
+                            ),
+                            Ok(_) => tracing::info!(
+                                "[reflection] 漏检事件 {} 已由更早 completed 的档盖章，本行不重复回填",
+                                ev.id
+                            ),
+                            Err(e) => tracing::warn!(
+                                "[reflection] 漏检事件 {} 盖章 reflected 失败（反思结论已落库，不影响）: {e}",
+                                ev.id
+                            ),
+                        }
                     }
                 }
+            } else if status_text == "completed" && mover_event.is_some() {
+                tracing::info!(
+                    "[reflection] 漏检事件 {} 本轮标签为 window_incomplete ⇒ 保持 analyzed，待窗口成熟后终评",
+                    mover_event.as_ref().map(|e| e.id.as_str()).unwrap_or("?")
+                );
             }
 
             // ── [方向2] 接入 ExperiencePipeline，把反思转为 Experience 喂给 RLOptimizer ──
@@ -1668,7 +1853,9 @@ pub async fn run_batch_reflection(
             days_held,
             p.reflection_depth.as_str(),
             // 手动入口允许期中观察（与 due_only 的到期任务分开）。
-            false,
+            // 例外：**漏检回放行必须成熟**（PLAN 阶段 B-2）—— 手动/validate 通道提前
+            // 写下的「期中观察」会把终评名额永久消耗掉（002696 mid 27/28 被盖章实锤）。
+            p.source == REFLECTION_SOURCE_MOVER_RECALL,
         )
         .await;
 
@@ -2288,7 +2475,23 @@ pub struct PendingReflectionSeed<'a> {
     /// `run_single_stock_analysis` 的 source 参数；chat / 回放补建两通道固定 `"due"`。
     /// 建点即盖章，此后 UPDATE 不改写。
     pub source: &'a str,
+    /// **额外强制建点的档**（档名, 窗口交易日）。漏检回放用它保证「事件档必有反思行」：
+    /// 四档全 Hold/Wait 时 `reviewable_horizons` 会因中性抽样落空 ⇒ 事件永远停在
+    /// `analyzed`（现网 000993 / 002343 的零反思行就是这么来的）。
+    ///
+    /// 只补**缺失**的档（已由方向决策覆盖的档不重复、不改天数）—— 事件档是权威窗口，
+    /// 但方向决策声明的期望天数更细，冲突时保留后者。
+    pub extra_horizons: &'a [(String, i64)],
     pub now_ms: i64,
+}
+
+/// 把额外档并入档集：只补缺失，不重复、不改已有天数。
+fn merge_extra_horizons(horizons: &mut Vec<(String, i64)>, extra: &[(String, i64)]) {
+    for (name, days) in extra {
+        if !horizons.iter().any(|(h, _)| h == name) {
+            horizons.push((name.clone(), *days));
+        }
+    }
 }
 
 /// 持有/观望档的反思建点抽样率（百分比）。方向动作全量建点；中性档没有多空可判，
@@ -2418,15 +2621,14 @@ pub fn expected_holding_days_for(horizon_decisions: Option<&str>, horizon: &str)
 pub fn build_pending_reflection_rows(
     seed: &PendingReflectionSeed<'_>,
 ) -> Vec<stock_reflections::ActiveModel> {
-    build_pending_reflection_rows_for(
-        seed,
-        reviewable_horizons(
-            seed.horizon_decisions,
-            seed.primary_horizon,
-            seed.primary_holding_days,
-            seed.analysis_id,
-        ),
-    )
+    let mut horizons = reviewable_horizons(
+        seed.horizon_decisions,
+        seed.primary_horizon,
+        seed.primary_holding_days,
+        seed.analysis_id,
+    );
+    merge_extra_horizons(&mut horizons, seed.extra_horizons);
+    build_pending_reflection_rows_for(seed, horizons)
 }
 
 /// 按**给定档集**建 pending 行。
@@ -2438,6 +2640,11 @@ pub fn build_pending_reflection_rows_for(
     seed: &PendingReflectionSeed<'_>,
     horizons: Vec<(String, i64)>,
 ) -> Vec<stock_reflections::ActiveModel> {
+    // 额外档在**两条**入口都合并：`build_pending_reflection_rows` 已合并过一次
+    // （幂等），这里是给「调用方自备档集」的补建通道兜底 —— 漏检回放不得因为
+    // 走了另一条路就丢掉事件档。
+    let mut horizons = horizons;
+    merge_extra_horizons(&mut horizons, seed.extra_horizons);
     let analysis_nd = chrono::NaiveDate::parse_from_str(seed.analysis_date, "%Y-%m-%d")
         .unwrap_or_else(|_| {
             tracing::warn!(
@@ -2499,6 +2706,9 @@ pub fn build_pending_reflection_rows_for(
                 // 从 mover_recall_events 回查盖章，建点时拿不到，先留 NULL。
                 source: Set(seed.source.to_string()),
                 miss_layer: Set(None),
+                asof_reco_generated_at: Set(None),
+                asof_layer: Set(None),
+                reco_diff_json: Set(None),
                 failure_modes: Set(None),
                 // 阶段 3：pending 行还没复盘 ⇒ 层级轴留 NULL（读侧不得当成 L1，见列文档）
                 implementation_tier: Set(None),
@@ -2559,6 +2769,16 @@ enum ReflectionOutcome {
 /// false（手动立即反思 / validate-decisions）⇒ 保留期中观察能力。
 fn should_skip_immature(require_mature: bool, snap: Option<&MarketSnapshot>) -> bool {
     require_mature && snap.is_some_and(|s| s.within_expected_horizon)
+}
+
+/// 阶段 B-3：一个成熟的反思行能否给事件盖章。
+///
+/// 只有**事件档**那一行能盖章 —— 短档先成熟就给中/长档事件盖章，会把事件提前
+/// 终结（终评再也不会发生），与「事件必须成熟」相反。
+/// 例外：本次改动前建的存量分析**没有事件档行**，此时保留旧的「任一成熟档盖章」，
+/// 否则那些事件会永远停在 analyzed（比提前盖章更坏：静默不动）。
+fn may_stamp_event(is_event_tier: bool, event_tier_row_exists: bool) -> bool {
+    is_event_tier || !event_tier_row_exists
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2955,7 +3175,8 @@ pub async fn run_batch_reflection_inner(
             depth,
             // due_only（18:00 到期任务 / 6h 兜底 / 回放批次）只做终评；
             // validate-decisions 等 due_only=false 的通道保留期中观察。
-            filter.is_some_and(|f| f.due_only),
+            // 漏检回放行例外：**任何入口都必须成熟**（见 PLAN 阶段 B-2）。
+            filter.is_some_and(|f| f.due_only) || p.source == REFLECTION_SOURCE_MOVER_RECALL,
         )
         .await;
 
@@ -5052,6 +5273,7 @@ mod pending_rows_per_horizon_tests {
             reflection_depth: DEFAULT_REFLECTION_DEPTH,
             analysis_template_version: None,
             source: REFLECTION_SOURCE_DUE,
+            extra_horizons: &[],
             now_ms: 1_754_200_000_000,
         }
     }
@@ -5230,6 +5452,9 @@ mod mover_recall_context_tests {
             // A-2 分链后新增列；本夹具只盖上下文函数读的字段 ⇒ 留未标链（旧行形态）
             chain: None,
             reflow_note: None,
+            reflow_pending: None,
+            pool_evidence_at: None,
+            analysis_signal_at_start: None,
             stock_code: "600519".into(),
             stock_name: "贵州茅台".into(),
             period: "short".into(),
@@ -5249,6 +5474,9 @@ mod mover_recall_context_tests {
             reflection_id: None,
             status: "analyzed".into(),
             error_detail: None,
+            asof_reco_generated_at: None,
+            asof_layer: None,
+            asof_diff_json: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }
@@ -5256,14 +5484,14 @@ mod mover_recall_context_tests {
 
     #[test]
     fn none_event_yields_placeholder_that_says_skip() {
-        let text = mover_recall_context_text(None);
+        let text = mover_recall_context_text(None, None);
         assert!(text.contains("常规到期反思"), "占位句须自报常规反思: {text}");
         assert!(text.contains("忽略漏检专项三问"), "占位句须指示忽略三问: {text}");
     }
 
     #[test]
     fn event_block_carries_facts_layer_and_three_questions() {
-        let text = mover_recall_context_text(Some(&mk_event("l3_scored_out")));
+        let text = mover_recall_context_text(Some(&mk_event("l3_scored_out")), None);
         // 窗口硬数字
         assert!(text.contains("2026-08-22"), "窗口起点: {text}");
         assert!(text.contains("2026-08-29"), "窗口右端: {text}");
@@ -5285,11 +5513,63 @@ mod mover_recall_context_tests {
     #[test]
     fn every_known_layer_has_chinese_semantic() {
         for layer in ["not_in_pool", "l3_scored_out", "other_period", "unexplained"] {
-            let text = mover_recall_context_text(Some(&mk_event(layer)));
+            let text = mover_recall_context_text(Some(&mk_event(layer)), None);
             assert!(text.contains(&format!("{layer} ——")), "{layer} 层码行缺失: {text}");
             // 不得对已知层码退化为裸码（other 分支只会对未知码触发）
             assert!(!text.contains(&format!("：{layer}\n")), "层码缺中文语义: {text}");
         }
+    }
+
+    /// 阶段 B-4：有 as-of 证据时，模板必须同时看到两层与差异细节；
+    /// 没有 as-of 证据时必须**显式说缺**，不得让模型把 live 层当成回放结论。
+    #[test]
+    fn asof_evidence_is_rendered_separately_or_declared_missing() {
+        let mut ev = mk_event("not_in_pool");
+        ev.asof_layer = Some("l3_scored_out".to_string());
+        ev.asof_diff_json = Some(
+            serde_json::json!({
+                "poolState": "present",
+                "inPool": true,
+                "poolOrigin": {"hot": 0, "industry": 0, "fallback": 12, "user": 0, "mover": 50, "reflow": 0, "moverMiss": 0},
+                "pickedStyles": ["capital"],
+                "pickedOtherPeriods": ["short"],
+                "trimmedStyles": ["trend", "reversion"],
+                "degradedStyles": ["value"],
+                "divergedFromLive": true,
+                "replayFailure": null,
+            })
+            .to_string(),
+        );
+        ev.miss_layer = "not_in_pool".to_string();
+        let text = mover_recall_context_text(Some(&ev), Some("观望"));
+        // 两层分列
+        assert!(text.contains("as-of 层（系统机械判定）：l3_scored_out"), "{text}");
+        assert!(text.contains("live 层（窗口内实盘推荐证据）：not_in_pool"), "{text}");
+        // 差异变量逐项可见
+        assert!(text.contains("mover=50"), "池来源计数: {text}");
+        assert!(text.contains("trend、reversion"), "截断风格: {text}");
+        assert!(text.contains("short"), "别档出票: {text}");
+        assert!(text.contains("value"), "降级风格: {text}");
+        assert!(text.contains("**分歧**"), "分歧须点明: {text}");
+        assert!(text.contains("未含「分析定档」来源"), "防前视声明: {text}");
+        assert!(text.contains("analysis_verdict）：观望"), "逐票档位结论: {text}");
+
+        // 无 as-of 证据 ⇒ 显式句，不得留白或冒充
+        let plain = mover_recall_context_text(Some(&mk_event("not_in_pool")), None);
+        assert!(plain.contains("尚未跑过"), "缺 as-of 证据须成句: {plain}");
+        assert!(plain.contains("不得把 live 的 not_in_pool"), "{plain}");
+    }
+
+    /// 阶段 B-1：额外档只补缺失，不重复、不改已有天数（事件档是权威窗口）。
+    #[test]
+    fn extra_horizons_only_fill_the_missing_tier() {
+        let mut horizons = vec![("short".to_string(), 5i64)];
+        merge_extra_horizons(&mut horizons, &[("short".to_string(), 99), ("mid".to_string(), 28)]);
+        assert_eq!(
+            horizons,
+            vec![("short".to_string(), 5i64), ("mid".to_string(), 28i64)],
+            "已有档不得被覆盖；缺失档必须补上"
+        );
     }
 }
 
@@ -5535,5 +5815,19 @@ mod pool_reflow_tests {
             &serde_json::json!({"pool_reflow": {"should_include": true, "reason": long}}),
         );
         assert_eq!(clipped.unwrap().1.chars().count(), 200, "reason 截到 200 字符");
+    }
+}
+
+/// 阶段 B-3 的盖章判据（纯函数）：事件档优先，存量分析保留旧行为。
+#[cfg(test)]
+mod stamp_tier_tests {
+    use super::*;
+
+    #[test]
+    fn only_event_tier_may_stamp_unless_legacy() {
+        assert!(may_stamp_event(true, true), "事件档必须可盖章");
+        assert!(may_stamp_event(true, false), "事件档行就是本行，必然存在");
+        assert!(!may_stamp_event(false, true), "非事件档不得给事件盖章");
+        assert!(may_stamp_event(false, false), "存量分析没有事件档行 ⇒ 保留旧行为");
     }
 }

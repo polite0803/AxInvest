@@ -19,7 +19,7 @@ vi.mock("@/stores/feature/timeAnchorStore", () => ({
 const invokeMock = vi.fn();
 vi.mock("@/lib/invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
-  listen: vi.fn(),
+  listen: vi.fn().mockResolvedValue(() => {}),
   isTauri: () => false,
 }));
 
@@ -47,23 +47,38 @@ afterEach(() => {
   timeAnchorState.mode = "live";
 });
 
-describe("BacktestPanel — R2-Bug-I: 策略回测请求级 token 取消", () => {
-  it("快速双击策略回测按钮时,只展示最后一次调用的结果(忽略乱序的早期响应)", async () => {
-    // 准备两个可控的 promise
-    let resolveFirst!: (v: unknown) => void;
-    let resolveSecond!: (v: unknown) => void;
-    const firstCall = new Promise<unknown>((r) => {
-      resolveFirst = r;
-    });
-    const secondCall = new Promise<unknown>((r) => {
-      resolveSecond = r;
-    });
+/** 构造一条终态任务行（hook 只读 status / output / resultJson）。 */
+function taskRow(report: unknown) {
+  return {
+    id: "x",
+    title: "t",
+    description: "",
+    taskType: "reco-strategy-backtest",
+    status: "completed",
+    output: "done",
+    resultJson: JSON.stringify(report),
+    attempt: 0,
+    createdAt: 1,
+    updatedAt: 2,
+    finishedAt: 2,
+  };
+}
 
+describe("BacktestPanel — 异步任务归属：旧任务的报告不得覆盖新任务", () => {
+  it("快速双击后,即使先发的任务报告后到,UI 仍只展示后发任务的结果", async () => {
+    // 每次任务受理回执给一个新 taskId；报告经 get_background_task_output 由测试控制何时返回
     let strategyCallIndex = 0;
-    invokeMock.mockImplementation(async (cmd: string) => {
+    const rowResolvers: Record<string, (row: unknown) => void> = {};
+    invokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "backtest_reco_strategies") {
         strategyCallIndex += 1;
-        return strategyCallIndex === 1 ? firstCall : secondCall;
+        return { taskId: `task-${strategyCallIndex}` };
+      }
+      if (cmd === "get_background_task_output") {
+        const id = String(args?.taskId ?? "");
+        return new Promise((resolve) => {
+          rowResolvers[id] = resolve;
+        });
       }
       return null;
     });
@@ -75,9 +90,7 @@ describe("BacktestPanel — R2-Bug-I: 策略回测请求级 token 取消", () =>
     invokeMock.mockClear();
     strategyCallIndex = 0;
 
-    // 找到策略回测按钮并双击
-    // 说明: antd Button 在 loading=true 时把点击事件透传到同一个 onClick,
-    // 但内部 DOM 会被替换(spinner),所以每次点击前重新查询。
+    // 找到策略回测按钮并双击（antd loading 会替换内部 DOM,每次点击前重新查询）
     const findRunBtn = () => {
       const btns = Array.from(container.querySelectorAll("button"));
       const btn = btns.find((b) => {
@@ -88,10 +101,7 @@ describe("BacktestPanel — R2-Bug-I: 策略回测请求级 token 取消", () =>
       if (!btn) { throw new Error("策略回测按钮未找到"); }
       return btn as HTMLElement;
     };
-    // 先在 React 状态更新之间点击两次(dispatchEvent 同步触发,不等待 React 提交)
-    // 为什么包在 act 里: raw .click() 的两个 setState 会在离散事件 flushSync 中于 act 外
-    // 提交,每次点击刷 3 条 "not wrapped in act";act 同步作用域让两次点击都不提交、
-    // 结束时统一 flush —— 与上方注释的语义(两次点击之间不等待 React 提交)一致。
+    // 两次点击在同一个 act 同步作用域里：不等待 React 提交，模拟用户快速双击
     const btn1 = findRunBtn();
     const btn2 = findRunBtn();
     act(() => {
@@ -99,36 +109,40 @@ describe("BacktestPanel — R2-Bug-I: 策略回测请求级 token 取消", () =>
       btn2.click();
     });
 
-    // 确认 2 次 invoke("backtest_reco_strategies") 都触发了
+    // 两次都发起了任务（第二次受理会重置轨道，但请求本身照发）
     await waitFor(() => {
       const strategyCalls = invokeMock.mock.calls.filter((c) => c[0] === "backtest_reco_strategies");
       expect(strategyCalls.length).toBe(2);
     });
 
-    // 第二个 promise 先 resolve(模拟"后来的先回来")
-    resolveSecond({
-      positive: { label: "正向(2nd)", stockCount: 99, strategies: {} },
-      negative: { label: "负向(2nd)", stockCount: 88, strategies: {} },
-      skipped: [],
+    // 后发任务（task-2）先到终态 ⇒ UI 展示 2nd
+    await act(async () => {
+      rowResolvers["task-2"]?.(
+        taskRow({
+          positive: { label: "正向(2nd)", stockCount: 99, strategies: {} },
+          negative: { label: "负向(2nd)", stockCount: 88, strategies: {} },
+          skipped: [],
+        }),
+      );
     });
     await waitFor(() => {
       expect(container.textContent).toContain("正向(2nd)");
     });
 
-    // 然后第一个 promise 再 resolve(此时应被 token 取消,UI 不应回退)
-    resolveFirst({
-      positive: { label: "正向(1st)", stockCount: 1, strategies: {} },
-      negative: { label: "负向(1st)", stockCount: 2, strategies: {} },
-      skipped: [],
+    // 先发任务（task-1）的报告后到 ⇒ 必须被归属判断丢弃（taskId 已不是它）
+    await act(async () => {
+      rowResolvers["task-1"]?.(
+        taskRow({
+          positive: { label: "正向(1st)", stockCount: 1, strategies: {} },
+          negative: { label: "负向(1st)", stockCount: 2, strategies: {} },
+          skipped: [],
+        }),
+      );
     });
-    // 等一帧让 React 有机会错误地应用第一个的结果
-    // 为什么包在 act 里: 这段真实等待期间 CSSMotion 的动画帧会持续 setState,
-    // 在 act 外 flush 会刷出成批 "not wrapped in act";时长与语义不变。
     await act(async () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
-    // 关键断言:UI 仍展示第二个调用的结果,没有回退到第一个
     expect(container.textContent).toContain("正向(2nd)");
     expect(container.textContent).not.toContain("正向(1st)");
     await settle();

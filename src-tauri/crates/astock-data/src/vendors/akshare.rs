@@ -39,13 +39,7 @@ impl StockVendor for AkshareVendor {
         // 作为 eastmoney 主源同接口的第二通道。
         let code =
             stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
-        let em_code = if code.starts_with('6') || code.starts_with('9') {
-            format!("SH{code}")
-        } else if code.starts_with('8') || code.starts_with('4') {
-            format!("BJ{code}")
-        } else {
-            format!("SZ{code}")
-        };
+        let em_code = format!("{}{code}", crate::code_form::infer_market_bare(code).xueqiu_tag());
 
         let url = format!(
             "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/ZYZBAjaxNew?type=0&code={}",

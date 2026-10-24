@@ -60,7 +60,15 @@ pub async fn run_recommendation_scan(
     }
 
     // 1. 一次拿所有 period（共享同一个候选池）
-    let results = recommend_stocks_multi(client, periods, template_vars, None, horizon_prior).await;
+    let results = recommend_stocks_multi(
+        client,
+        periods,
+        template_vars,
+        None,
+        horizon_prior,
+        super::SeedOverrides::default(),
+    )
+    .await;
 
     let mut all_picks: Vec<RecoPick> = Vec::new();
     let mut seed_pool_snapshot: Option<String> = None;

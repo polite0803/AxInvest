@@ -70,25 +70,8 @@ let first_candidate = if effective_candidates.len() > 0 { effective_candidates[0
 let strategy_type = if present(first_candidate) && first_candidate["strategy_type"] != () {
     first_candidate["strategy_type"].to_string()
 } else { "bottleneck" };
-if strategy_type != "bottleneck" {
-    // 非 bottleneck 策略只做基本的数据存在性验证
-    // 注意：Rhai 无 map.get() 方法（v44 修复，原 c.get("code") 会 Function not found），
-    // 键存在性用 in 操作符，取值用 [] 索引
-    for c in effective_candidates {
-        verified_candidates.push(#{
-            "stock_code": if c["stock_code"] != () { c["stock_code"] }
-                          else if "code" in c { c["code"] } else { () },
-            "stock_name": if c["stock_name"] != () { c["stock_name"] }
-                          else if "name" in c { c["name"] } else { () },
-            "data_verification": #{
-                "strategy_type": strategy_type,
-                "verified": true,
-                "note": "非 bottleneck 策略，跳过财务数据交叉验证"
-            }
-        });
-    }
-    return verified_candidates;
-};
+// 非 bottleneck 策略只做基本的数据存在性验证；分支在**逐候选**处判断（见下方循环），
+// 因为快速链一次组装可能同时含多种策略的候选，不能拿首条的 strategy_type 代表整批。
 
 // 防御: candidates 可能为空、非数组
 if type_of(effective_candidates) != "array" { return verified_candidates; }
@@ -156,6 +139,41 @@ fn cross_check(llm_val, real_val, field_name, tolerance_pct) {
 }
 
 for candidate in effective_candidates {
+    // 逐候选判定策略类型（快速链一批可能混合六种策略，不能拿首条代表整批）。
+    let cand_strategy = if candidate.strategy_type != () {
+        candidate.strategy_type.to_string()
+    } else { strategy_type };
+
+    if cand_strategy != "bottleneck" {
+        // 「跳过财务交叉验证」不等于「丢弃候选内容」：必须透传原始字段。
+        // 旧实现只输出 stock_code / stock_name / data_verification 三个键 ⇒
+        // 政策/业绩/资金/事件/技术候选的 serenity_score、confidence、catalysts 等
+        // 全部在这一步被丢掉，下游只能按缺失处理（评分归零/候选被当无依据）。
+        verified_candidates.push(#{
+            "stock_code": if candidate.stock_code != () { candidate.stock_code }
+                          else if "code" in candidate { candidate["code"] } else { () },
+            "stock_name": if candidate.stock_name != () { candidate.stock_name }
+                          else if "name" in candidate { candidate["name"] } else { () },
+            "strategy_type": cand_strategy,
+            "data_reliability": candidate.data_reliability,
+            "relevance": candidate.relevance,
+            "serenity_score": candidate.serenity_score,
+            "confidence": candidate.confidence,
+            "bottleneck_product": candidate.bottleneck_product,
+            "primary_risk": candidate.primary_risk,
+            "catalysts": candidate.catalysts,
+            "exit_signals": candidate.exit_signals,
+            "attention_metrics": candidate.attention_metrics,
+            "financial_snapshot": candidate.financial_snapshot,
+            "data_verification": #{
+                "strategy_type": cand_strategy,
+                "verified": true,
+                "note": "非 bottleneck 策略，跳过财务数据交叉验证"
+            }
+        });
+        continue;
+    }
+
     let verification = #{
         "status": "not_checked",
         "issues": [],
@@ -396,6 +414,8 @@ for candidate in effective_candidates {
         // 从原始候选复制字段（按已知 schema 逐个复制，保留扩展字段）
         "stock_code": candidate.stock_code,
         "stock_name": candidate.stock_name,
+        "strategy_type": if candidate.strategy_type != () { candidate.strategy_type } else { "bottleneck" },
+        "data_reliability": candidate.data_reliability,
         "relevance": candidate.relevance,
         "serenity_score": candidate.serenity_score,
         "confidence": candidate.confidence,

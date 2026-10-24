@@ -61,3 +61,26 @@ pub async fn top_close_rows_by_change(
         .await?;
     Ok(rows.into_iter().map(|r| (r.stock_code, r.stock_name)).collect())
 }
+
+/// **as-of 版涨幅榜**：截至 `day`（含）最近一个有收盘快照的交易日，按涨幅降序取前 N。
+///
+/// 与 [`top_close_rows_by_change`] 的差别只有一处：调用方给的是窗口起点，那个日期
+/// 可能不是交易日（或当天快照尚未落入），直接精确匹配会返回空表并把 as-of 回放的
+/// 涨幅榜来源静默清零。这里先反查「≤ day 的最近交易日」，复用同一套流动性谓词，
+/// **不引入第二套取数口径**。
+pub async fn top_close_rows_by_change_on_or_before(
+    db: &DatabaseConnection,
+    day: &str,
+    limit: u64,
+) -> Result<Vec<(String, String)>, DbErr> {
+    let latest = market_daily_close::Entity::find()
+        .filter(market_daily_close::Column::TradeDate.lte(day.to_string()))
+        .order_by_desc(market_daily_close::Column::TradeDate)
+        .one(db)
+        .await?
+        .map(|r| r.trade_date);
+    match latest {
+        Some(d) => top_close_rows_by_change(db, &d, limit).await,
+        None => Ok(Vec::new()),
+    }
+}

@@ -354,16 +354,23 @@ pub fn bottleneck_node_score(
     };
     let demand_elasticity_score = adjusted_evidence * 0.60 + certainty_score * 0.40;
 
-    let supplier_score = if (0.0..=2.0).contains(&raw_supplier) {
+    // 缺失优先判（2026-10-24 修复）：`map_num` 取不到 `global_supplier_count` 时返回
+    // 哨兵 `-1.0`，而 `-1.0 <= 5.0` **恒真** ⇒ 缺数据一路落到 `raw_supplier <= 5.0`
+    // 分支，拿到 70 分的「供应商稀缺溢价」；本该兜住的 `else { 50.0 }` 成为死分支。
+    // 后果（趋势智选挑错股的直接成因之一）：**没有数据的环节反而比「查到有 8 家
+    // 供应商」（50 分）更"稀缺"**，在不可替代性里白得 +20 分，并抬高 composite。
+    // 取值口径与同函数 `concentration_score` / `cycle_score` 的缺失分支对齐（50 = 中性）。
+    // 注意 50 是中性的同时也略高于"真实但很差"（40/30）—— 那是既有取值政策，未改。
+    let supplier_score = if raw_supplier < 0.0 {
+        50.0
+    } else if raw_supplier <= 2.0 {
         90.0
     } else if raw_supplier <= 5.0 {
         70.0
     } else if raw_supplier <= 10.0 {
         50.0
-    } else if raw_supplier > 10.0 {
-        30.0
     } else {
-        50.0
+        30.0
     };
     let financial_rnd_score = if has_financial {
         map_num(&comps, "rnd_score").unwrap_or(-1.0)
@@ -410,4 +417,80 @@ pub fn bottleneck_node_score(
     out.insert("financial_comps".into(), Dynamic::from_map(comps));
     out.insert("industry_momentum_score".into(), Dynamic::from(industry_momentum_score));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn num(out: &Map, key: &str) -> f64 {
+        out.get(key).and_then(dyn_f64).unwrap_or(f64::NAN)
+    }
+
+    /// 构造只含 `global_supplier_count` 的节点（其余全部缺失 ⇒ 只观察该项的边际）。
+    fn node_with_supplier(supplier: Option<f64>) -> Dynamic {
+        let mut m = Map::new();
+        if let Some(v) = supplier {
+            m.insert("global_supplier_count".into(), Dynamic::from(v));
+        }
+        Dynamic::from_map(m)
+    }
+
+    fn score(node: &Dynamic) -> Map {
+        bottleneck_node_score(
+            node,
+            0.0,
+            0.0,
+            Dynamic::from(0.35),
+            Dynamic::from(0.35),
+            Dynamic::from(0.30),
+            "",
+        )
+    }
+
+    /// 回归防守：**缺供应商数不得拿到稀缺溢价**。
+    /// 修复前 `-1.0` 落 `<= 5.0` ⇒ 70 分（比"查到 8 家供应商"高 20 分），
+    /// 而作者写的 `else { 50.0 }` 中性兜底永远不可达。
+    #[test]
+    fn missing_supplier_count_must_not_earn_scarcity_premium() {
+        let missing = score(&node_with_supplier(None));
+        let eleven = score(&node_with_supplier(Some(11.0))); // >10 ⇒ 30 分（供应充分）
+        let eight = score(&node_with_supplier(Some(8.0))); // ≤10 ⇒ 50 分（中性）
+
+        // 缺失 = 中性 50，必须与"已知凑合（8 家）"同分
+        assert_eq!(
+            num(&missing, "irreplaceability_score"),
+            num(&eight, "irreplaceability_score"),
+            "缺供应商数应与已知 8 家同分（同为中性 50），不应获得稀缺溢价"
+        );
+        // 且必须严格低于真稀缺档（≤2 家 ⇒ 90 分）
+        let scarce = score(&node_with_supplier(Some(1.0)));
+        assert!(
+            num(&missing, "irreplaceability_score") < num(&scarce, "irreplaceability_score"),
+            "缺数据必须严格劣于真实稀缺（<=2 家），否则等于用「没查到」冒充「稀缺」"
+        );
+        // 同时必须高于供应充分（>10 家 ⇒ 30 分）
+        assert!(num(&missing, "irreplaceability_score") > num(&eleven, "irreplaceability_score"));
+    }
+
+    /// 显式哨兵 `-1`（脚本侧透传缺失）与字段缺席必须同分。
+    #[test]
+    fn negative_one_sentinel_equals_absent() {
+        let absent = score(&node_with_supplier(None));
+        let sentinel = score(&node_with_supplier(Some(-1.0)));
+        assert_eq!(
+            num(&absent, "irreplaceability_score"),
+            num(&sentinel, "irreplaceability_score")
+        );
+        assert_eq!(num(&absent, "bottleneck_composite"), num(&sentinel, "bottleneck_composite"));
+    }
+
+    /// 合规堆放序：供应商越少 ⇒ 不可替代性越高（0/3/8/20 覆盖四个分档）。
+    #[test]
+    fn supplier_score_is_monotonic_by_scarcity() {
+        let s = |n: f64| num(&score(&node_with_supplier(Some(n))), "irreplaceability_score");
+        assert!(s(1.0) > s(3.0));
+        assert!(s(3.0) > s(8.0));
+        assert!(s(8.0) > s(20.0));
+    }
 }

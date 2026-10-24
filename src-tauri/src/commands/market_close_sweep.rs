@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use axagent_agent_macro::agent_command;
 pub use axagent_analysis_engine::market_close_store::{
-    CloseSweepReport, DEFAULT_BATCH_INTERVAL_MS, DEFAULT_BATCH_SIZE, UniverseReport,
+    DEFAULT_BATCH_INTERVAL_MS, DEFAULT_BATCH_SIZE, UniverseReport,
 };
 
 use super::error::ErrorResponse;
@@ -25,8 +25,9 @@ use super::error_code::common as common_err;
 #[tauri::command]
 pub async fn sweep_market_close(
     state: tauri::State<'_, crate::AppState>,
+    app_handle: tauri::AppHandle,
     trade_date: Option<String>,
-) -> Result<CloseSweepReport, String> {
+) -> Result<crate::commands::background_tasks::TaskAccepted, String> {
     // 只允许最近一个**已收盘**交易日：盘中点一次会把半日价写成收盘价
     // （2026-10-23 12:19 实测：10-23 盘中价被写成 5,215 行"收盘"）。
     let now_local = chrono::Local::now();
@@ -53,19 +54,27 @@ pub async fn sweep_market_close(
                 .to_string());
         },
     };
-    let db = state.harness.db();
-    crate::commands::background_tasks::run_tracked(
-        db,
-        &format!("采集收盘快照 {date}"),
+    // 命令本身只做登记与起任务；执行体在 spawn 里跑（130s 不冻 IPC，
+    // 报告终态后落在 result_json，重载可回取）
+    let db = state.harness.db().clone();
+    let client = state.astock_client.clone();
+    let title = format!("采集收盘快照 {date}");
+    crate::commands::background_tasks::spawn_tracked(
+        &app_handle,
+        state.harness.db(),
+        &title,
         "market-close-sweep",
         "手动触发全市场日收盘快照采集（cron 走同一 engine 实现）",
-        axagent_analysis_engine::market_close_store::run_close_sweep(
-            db,
-            &state.astock_client,
-            &date,
-            DEFAULT_BATCH_SIZE,
-            DEFAULT_BATCH_INTERVAL_MS,
-        ),
+        async move {
+            axagent_analysis_engine::market_close_store::run_close_sweep(
+                &db,
+                &client,
+                &date,
+                DEFAULT_BATCH_SIZE,
+                DEFAULT_BATCH_INTERVAL_MS,
+            )
+            .await
+        },
         |r| {
             format!(
                 "落库 {} 行 / 停牌跳过 {} / 缺报价 {} / 失败批次 {}",
@@ -139,10 +148,14 @@ pub struct HistoryBackfillReport {
     pub rows: u32,
     /// 取到了日线但没有新增行的票数（可用日线不足 `target_days`，重复点也不会再涨）
     pub no_new: u32,
+    /// 整条 vendor 链都回答「无此代码行情数据」的票数（未上市/已退市，重复点也一样）
+    pub no_data: u32,
     pub failed: u32,
     pub target_days: u32,
     /// 首条失败原因（全失败时给面板成句；成功时为 None）
     pub error: Option<String>,
+    /// 用户中途取消 ⇒ 剩余票没取；`codes`/`rows` 只统计已执行部分
+    pub cancelled: bool,
 }
 
 /// 分批补齐清单里历史行数不足的票（默认 90 个交易日）。
@@ -158,19 +171,23 @@ pub struct HistoryBackfillReport {
 #[tauri::command]
 pub async fn backfill_market_close_history(
     state: tauri::State<'_, crate::AppState>,
+    app_handle: tauri::AppHandle,
     limit: Option<usize>,
-) -> Result<HistoryBackfillReport, String> {
+) -> Result<crate::commands::background_tasks::TaskAccepted, String> {
     const TARGET_DAYS: u32 = 90;
     let limit = limit.unwrap_or(500).clamp(1, 6000);
-    let db = state.harness.db();
-    crate::commands::background_tasks::run_tracked(
-        db,
+    // 命令本身只做登记与起任务；12 批 × 限速间隔的 2 分钟执行体在 spawn 里跑
+    let db = state.harness.db().clone();
+    let client = state.astock_client.clone();
+    crate::commands::background_tasks::spawn_tracked(
+        &app_handle,
+        state.harness.db(),
         "补齐全市场收盘历史",
         "market-close-backfill",
         "分批补齐清单中历史行数不足的票（幂等，重复点只补缺口）",
-        async {
+        async move {
             let entries = axagent_analysis_engine::market_close_store::codes_needing_history(
-                db,
+                &db,
                 TARGET_DAYS,
                 limit,
             )
@@ -181,16 +198,18 @@ pub async fn backfill_market_close_history(
                     codes: 0,
                     rows: 0,
                     no_new: 0,
+                    no_data: 0,
                     failed: 0,
                     target_days: TARGET_DAYS,
                     error: None,
+                    cancelled: false,
                 });
             }
             let requested = entries.len();
             let stats =
                 axagent_analysis_engine::market_close_store::backfill_close_history_for_codes(
-                    db,
-                    &state.astock_client,
+                    &db,
+                    &client,
                     &entries,
                     TARGET_DAYS,
                     120,
@@ -201,9 +220,11 @@ pub async fn backfill_market_close_history(
                 codes: stats.codes,
                 rows: stats.rows,
                 no_new: stats.no_new,
+                no_data: stats.no_data,
                 failed: stats.failed,
                 target_days: TARGET_DAYS,
                 error: stats.first_error,
+                cancelled: stats.cancelled,
             })
         },
         |r| {
@@ -211,8 +232,8 @@ pub async fn backfill_market_close_history(
                 "无需补齐（全部票已达目标天数）".to_string()
             } else {
                 format!(
-                    "请求 {} 只 / 取到 {} 只 / 落 {} 行 / 无新增 {} / 失败 {}",
-                    r.requested, r.codes, r.rows, r.no_new, r.failed
+                    "请求 {} 只 / 取到 {} 只 / 落 {} 行 / 无新增 {} / 无行情 {} / 失败 {}",
+                    r.requested, r.codes, r.rows, r.no_new, r.no_data, r.failed
                 )
             }
         },

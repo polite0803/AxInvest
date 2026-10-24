@@ -52,6 +52,10 @@ pub struct Model {
     /// 与 `reco_picks.as_of_date` 同口径，同一次扫描的两侧行共用同一个值。
     #[serde(default)]
     pub as_of_date: Option<String>,
+    /// 用途：`live` / `mover_replay` / `time_travel_replay` / `legacy_replay`
+    /// （值域与 `reco_picks.purpose` 同源）。`NULL` = 本列引入前的行。
+    #[serde(default)]
+    pub purpose: Option<String>,
     pub created_at: String,
 }
 

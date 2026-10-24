@@ -292,9 +292,20 @@ fn main() {
     let output_path = Path::new(&out_dir).join("register_commands.rs");
     fs::write(&output_path, &generated).unwrap();
 
-    // 同时生成 src/register_commands.rs 供契约检查脚本使用
+    // 同时生成 src/register_commands.rs 供契约检查脚本使用。
+    //
+    // 仅当内容确实变化时才写：该文件是构建产物，但契约脚本（`check-contracts.mjs`）要读
+    // 仓库内这一份，所以必须留在 `src/`。无条件 `fs::write` 会让每次构建都改 mtime，
+    // 在只读/受限的工作区里还会因无写权限而整体失败 —— 而内容未变时那次写没有任何意义。
+    // 先读后比：读失败（首次生成）或内容不同才写，写失败仍是硬错误（不静默吞掉）。
     let src_register_path = PathBuf::from(&manifest_dir).join("src").join("register_commands.rs");
-    fs::write(&src_register_path, &generated).unwrap();
+    let need_write = match fs::read_to_string(&src_register_path) {
+        Ok(existing) => existing != generated,
+        Err(_) => true,
+    };
+    if need_write {
+        fs::write(&src_register_path, &generated).unwrap();
+    }
 
     println!("cargo:rerun-if-changed=src/commands");
     println!("cargo:rerun-if-changed=src/scheduler");

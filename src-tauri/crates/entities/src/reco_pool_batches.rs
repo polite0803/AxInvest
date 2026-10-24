@@ -24,6 +24,9 @@ pub struct Model {
     pub generated_at: String,
     /// `None` = 实盘批；`Some(YYYY-MM-DD)` = 该次回放的截止日
     pub as_of_date: Option<String>,
+    /// 用途：`live` / `mover_replay` / `time_travel_replay` / `legacy_replay`（值域与
+    /// `reco_picks.purpose` 同源，见该列文档）。`NULL` = 本列引入前的行。
+    pub purpose: Option<String>,
     /// 实际用于扫描的候选池快照（`[[code,name]]` 或智选单对象）；NULL = 取数侧没给
     pub seed_pool_json: Option<String>,
     /// 池内候选数（解析失败按 0，不猜）

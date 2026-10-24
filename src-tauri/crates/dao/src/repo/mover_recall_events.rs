@@ -187,9 +187,13 @@ pub async fn claim_events(
     Ok(result.rows_affected)
 }
 
-/// 反思判定「本应入池」⇒ 把那条事件盖成 `reflow_pending`（D-4 清单半段）。
+/// 反思判定「本应入池」⇒ 把那条事件列入**回灌清单**（D-4 清单半段；D-1 改布尔列）。
 ///
-/// 只在 `analyzed` / `reflected` 上盖章：`pending`/`running` 还没被分析，拿它当回灌依据
+/// ⚠ **不改 `status`**：旧实现写 `status='reflow_pending'`，随后收尾的
+/// `stamp_reflected`（只排除 `reflected`）把它改回 `reflected` ⇒ 清单恒空。
+/// 回灌是正交属性，必须落在独立布尔列上。
+///
+/// 只在 `analyzed` / `reflected` 上盖：`pending`/`running` 还没被分析，拿它当回灌依据
 /// 等于用「还没看过的票」喂池子。返回受影响行数（0 = 状态不符，调用方据此留日志）。
 pub async fn mark_reflow_pending(
     db: &DatabaseConnection,
@@ -198,7 +202,7 @@ pub async fn mark_reflow_pending(
     now_ms: i64,
 ) -> Result<u64, DbErr> {
     let result = Entity::update_many()
-        .col_expr(Column::Status, Expr::value("reflow_pending"))
+        .col_expr(Column::ReflowPending, Expr::value(Some(true)))
         .col_expr(Column::ReflowNote, Expr::value(note.to_owned()))
         .col_expr(Column::UpdatedAtMs, Expr::value(now_ms))
         .filter(Column::Id.eq(event_id.to_owned()))
@@ -226,9 +230,12 @@ pub async fn latest_reco_miss_codes(
     else {
         return Ok(Vec::new());
     };
+    // C3（2026-10-24）：改吃 **as-of 层** —— 荐股反射要补的是「窗口起点那一刻系统
+    // 会不会选它」的缺口，不是窗口内实盘推荐的缺口。`asof_layer IS NULL` 的行
+    // （回放尚未覆盖）不得拿 live 层顶替：那会把「没跑回放」写成「池子漏了它」。
     let rows = Entity::find()
         .filter(Column::RunId.eq(run.id))
-        .filter(Column::MissLayer.is_in(["not_in_pool", "unexplained"]))
+        .filter(Column::AsofLayer.is_in(["not_in_pool", "unexplained"]))
         .order_by_desc(Column::CumGainPct)
         .all(db)
         .await?;
@@ -264,14 +271,18 @@ pub async fn count_settled_reflow(
     Ok(settled.len())
 }
 
-/// 回灌清单（跨轮次，最新在前）：尚未被消费的 `reflow_pending` 事件。
-/// 只读、不改状态 —— 消费在 `refresh_mover_seed`，且必须过 fail-closed 判据。
+/// 回灌清单（跨轮次，最新在前）：`reflow_pending = true` 且**荐股链**的事件。
+///
+/// 只读、不改状态 —— 消费在 `refresh_reflow_seed_db`（统一入口
+/// `refresh_all_reco_seeds_db`），且必须过 fail-closed 判据。
+/// `chain='reco'`：智选链的漏检由工作流链自己消化，混进荐股候选池会把两套口径叠一起。
 pub async fn list_reflow_candidates(
     db: &DatabaseConnection,
     limit: u64,
 ) -> Result<Vec<EventModel>, DbErr> {
     Entity::find()
-        .filter(Column::Status.eq("reflow_pending"))
+        .filter(Column::ReflowPending.eq(true))
+        .filter(Column::Chain.eq("reco"))
         .order_by_desc(Column::UpdatedAtMs)
         .limit(limit)
         .all(db)
@@ -331,6 +342,110 @@ pub async fn fetch_by_id(
     event_id: &str,
 ) -> Result<Option<mover_recall_events::Model>, DbErr> {
     Entity::find_by_id(event_id.to_owned()).one(db).await
+}
+
+/// 回填一条事件的 as-of 回放证据（批次键 + 归因层 + 差异 JSON）。
+///
+/// **不做姊妹扩散**：as-of 回放只跑荐股链（`chain='reco'`），同一三键的 serenity 行
+/// 没有这份证据 —— 扩散过去等于把荐股的回放结论冒充成智选的。调用方按行 id 传。
+pub async fn update_event_asof(
+    db: &DatabaseConnection,
+    event_id: &str,
+    generated_at: &str,
+    layer: &str,
+    diff_json: &str,
+    now_ms: i64,
+) -> Result<u64, DbErr> {
+    let result = Entity::update_many()
+        .col_expr(Column::AsofRecoGeneratedAt, Expr::value(Some(generated_at.to_owned())))
+        .col_expr(Column::AsofLayer, Expr::value(Some(layer.to_owned())))
+        .col_expr(Column::AsofDiffJson, Expr::value(Some(diff_json.to_owned())))
+        .col_expr(Column::UpdatedAtMs, Expr::value(now_ms))
+        .filter(Column::Id.eq(event_id.to_owned()))
+        .exec(db)
+        .await?;
+    Ok(result.rows_affected)
+}
+
+/// 回写补分析产出的**事件档决策摘要**（F-4；只按事件行 id，不扩散姊妹行 ——
+/// 两链的事件档决策不同源）。
+pub async fn update_analysis_signal(
+    db: &DatabaseConnection,
+    event_id: &str,
+    signal_json: &str,
+    now_ms: i64,
+) -> Result<u64, DbErr> {
+    let result = Entity::update_many()
+        .col_expr(Column::AnalysisSignalAtStart, Expr::value(Some(signal_json.to_owned())))
+        .col_expr(Column::UpdatedAtMs, Expr::value(now_ms))
+        .filter(Column::Id.eq(event_id.to_owned()))
+        .exec(db)
+        .await?;
+    Ok(result.rows_affected)
+}
+
+/// 某轮里已跑过 as-of 回放的事件行（轮级摘要的聚合输入）。
+///
+/// 只按 `asof_reco_generated_at IS NOT NULL` 筛：`asof_layer` 为空但批次键在，
+/// 说明差异落库半途失败 —— 这类行必须出现在摘要的「口径不可用」桶里，不能被静默丢掉。
+pub async fn list_asof_rows_for_run(
+    db: &DatabaseConnection,
+    run_id: &str,
+) -> Result<Vec<mover_recall_events::Model>, DbErr> {
+    Entity::find()
+        .filter(Column::RunId.eq(run_id.to_owned()))
+        .filter(Column::AsofRecoGeneratedAt.is_not_null())
+        .all(db)
+        .await
+}
+
+/// 按**三键 + 轮次**回填 as-of 证据，只命中的 `chain='reco'`（及未分链的旧行）。
+///
+/// 为什么按三键而不是行 id：选样按三键去重后保留的是先出现的那一行，可能是 serenity 行；
+/// 而 as-of 回放只跑荐股链 ⇒ 证据必须落到同键的 reco 行上，落到选中的行会把荐股的
+/// 回放结论写到智选账上。同键的旧轮行由 `run_id` 限定，不会跨轮污染。
+pub struct AsOfEvidence<'a> {
+    /// 本次回放的批次键（= `reco_picks.generated_at`）
+    pub generated_at: &'a str,
+    /// as-of 归因层（`MissLayer::as_str`）
+    pub layer: &'a str,
+    /// 差异明细 JSON
+    pub diff_json: &'a str,
+}
+
+pub async fn update_asof_for_key_in_run(
+    db: &DatabaseConnection,
+    run_id: &str,
+    stock_code: &str,
+    anchor_date: &str,
+    period: &str,
+    evidence: &AsOfEvidence<'_>,
+    now_ms: i64,
+) -> Result<u64, DbErr> {
+    let rows = Entity::find()
+        .filter(Column::RunId.eq(run_id.to_owned()))
+        .filter(Column::StockCode.eq(stock_code.to_owned()))
+        .filter(Column::AnchorDate.eq(anchor_date.to_owned()))
+        .filter(Column::Period.eq(period.to_owned()))
+        .all(db)
+        .await?;
+    let ids: Vec<String> = rows
+        .into_iter()
+        .filter(|r| r.chain.as_deref().is_none_or(|c| c == "reco"))
+        .map(|r| r.id)
+        .collect();
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let result = Entity::update_many()
+        .col_expr(Column::AsofRecoGeneratedAt, Expr::value(Some(evidence.generated_at.to_owned())))
+        .col_expr(Column::AsofLayer, Expr::value(Some(evidence.layer.to_owned())))
+        .col_expr(Column::AsofDiffJson, Expr::value(Some(evidence.diff_json.to_owned())))
+        .col_expr(Column::UpdatedAtMs, Expr::value(now_ms))
+        .filter(Column::Id.is_in(ids))
+        .exec(db)
+        .await?;
+    Ok(result.rows_affected)
 }
 
 /// 三键（stock_code + anchor_date + period）定位事件，同三键跨多轮核查时
@@ -444,6 +559,12 @@ mod event_key_tests {
             status: status.to_string(),
             error_detail: None,
             reflow_note: None,
+            reflow_pending: None,
+            pool_evidence_at: None,
+            analysis_signal_at_start: None,
+            asof_reco_generated_at: None,
+            asof_layer: None,
+            asof_diff_json: None,
             created_at_ms: 1,
             updated_at_ms: 1,
         }

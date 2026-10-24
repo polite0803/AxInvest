@@ -69,6 +69,14 @@ pub struct Model {
     pub chain: Option<String>,
     /// 执行时间戳（ms）
     pub created_at_ms: i64,
+    /// 本轮事件 **as-of 回放**的逐层计数 JSON（`{层: {period: count}}` 形态）。
+    /// `NULL` = 本列引入前的轮次，或本轮还没有任何事件跑过 as-of 回放
+    /// （面板必须成句声明「该轮无 as-of 回放」，不得显示成 0 漏检）。
+    pub asof_layers_json: Option<String>,
+    /// 本轮 **as-of 差异摘要** JSON：按 style×档 聚合的
+    /// 「进池未出票 / 被截断 / 别档出票 / 未进池 / 池降级 / 口径不可用」计数，
+    /// 外加回放失败清单与 live↔as-of 分歧条数。形状见 `mover_recall_analysis` 模块文档。
+    pub asof_diff_summary_json: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

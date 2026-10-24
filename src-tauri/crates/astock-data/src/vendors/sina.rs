@@ -240,16 +240,9 @@ fn sina_daima(stock_code: &str) -> String {
     if let Some((bare, ex)) = crate::code_form::split_explicit_market(code) {
         return format!("{}{bare}", ex.tencent_prefix());
     }
-    let market = if code.starts_with('6') || code.starts_with('9') {
-        "sh"
-    } else if code.starts_with('4') || code.starts_with('8') {
-        // 北交所（4/8 开头）实测 `bj430047` 可用；此前一律落进 `sz` ⇒ 请求恒空 ——
-        // 而且新浪对不存在的 symbol 返回的是**空数组**而非错误，静默无声。
-        "bj"
-    } else {
-        "sz"
-    };
-    format!("{market}{code}")
+    // 市场归 `code_form::infer_market_bare` 单一权威（920 新号段归 bj）。新浪对不存在的
+    // symbol 返回的是**空数组**而非错误 —— 市场判错就是静默无声，920 段曾因此整段取空。
+    format!("{}{code}", crate::code_form::infer_market_bare(code).tencent_prefix())
 }
 
 /// 新浪 K 线 URL（`CN_MarketData.getKLineData`）—— **分钟级通道**。

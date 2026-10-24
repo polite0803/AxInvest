@@ -466,6 +466,9 @@ async fn ensure_pending_reflection(
                 } else {
                     axagent_lib::REFLECTION_SOURCE_DUE
                 }),
+                // 离线补建无法在同步签名里回查事件表 ⇒ 不带额外档；漏检事件档由
+                // `run_single_stock_analysis` 建点时的 `extra_horizons` 负责。
+                extra_horizons: &[],
                 now_ms: now,
             },
             missing_horizons,

@@ -123,6 +123,66 @@ const ENTRIES = [
     ],
   },
   {
+    key: "mover_recall_events.asof_diff",
+    why: "as-of 荐股回放的差异证据必须既进反思提示词、又在面板可见 —— 只落库不读等于「回放跑完没人看」",
+    producer: {
+      file: "src-tauri/src/commands/mover_recall_analysis.rs",
+      literal: "asof_diff_json",
+    },
+    consumers: [
+      {
+        file: "src-tauri/src/commands/stock_workflow/reflection.rs",
+        literal: "asof_evidence_block",
+        note: "反思提示词把 as-of 层/池/截断/分歧逐项喂给模型（与 live 层分列）",
+      },
+      {
+        file: "src/components/stock-analysis/MoverRecallPanel.tsx",
+        literal: "asofDiffJson",
+        note: "事件详情展示 as-of 层与池/出票/截断（与 live 层并列）",
+      },
+    ],
+  },
+  {
+    key: "mover_recall_runs.asof_diff_summary",
+    why: "轮级差异摘要是荐股闭环的数值信号来源（C-1/C-5），必须被命令与面板同时读到",
+    producer: {
+      file: "src-tauri/crates/dao/src/repo/mover_recall_runs.rs",
+      literal: "asof_diff_summary_json",
+    },
+    consumers: [
+      {
+        file: "src-tauri/src/commands/stock_analysis.rs",
+        literal: "get_mover_asof_summary",
+        note: "命令读最新一轮的六桶摘要（错误/缺失各自成句）",
+      },
+      {
+        file: "src/components/stock-analysis/MoverRecallPanel.tsx",
+        literal: "get_mover_asof_summary",
+        note: "面板首屏渲染 as-of 摘要行",
+      },
+    ],
+  },
+  {
+    key: "stock_reflections.asof_layer",
+    why: "逐档反思行的 as-of 归因是面板过滤与复核的权威列（miss_layer 历史列混有两种口径）",
+    producer: {
+      file: "src-tauri/src/commands/stock_workflow/reflection.rs",
+      literal: "Column::AsofLayer",
+    },
+    consumers: [
+      {
+        file: "src-tauri/crates/dao/src/repo/stock_lesson_queries.rs",
+        literal: "asofLayer",
+        note: "反思行投影带上 as-of 层与批次键",
+      },
+      {
+        file: "src/components/stock-analysis/MoverRecallPanel.tsx",
+        literal: "asofLayer",
+        note: "面板把 as-of 层与 live 层分列显示（缺证据时另有成句）",
+      },
+    ],
+  },
+  {
     key: "historical_weights",
     why: "进化/闭环学到的权重必须进个股证据共识",
     producer: {
@@ -288,6 +348,37 @@ function splitArgs(block) {
 
 // ── 判据（纯函数；读文件动作由调用方注入，负控因此不必碰工作树）──────────────
 /** @returns {{violations: string[], exemptions: string[]}} */
+/**
+ * R5 语义断言（2026-10-24，PLAN G-6）：登记表管「谁读它」，这里管「读法对不对」的三条
+ * 曾被实际踩到过的形态 —— 它们都不是「少一个调用」而是「接上了但语义被覆盖」。
+ */
+const EVENTS_DAO = "src-tauri/crates/dao/src/repo/mover_recall_events.rs";
+const REFLECTION = "src-tauri/src/commands/stock_workflow/reflection.rs";
+const SEMANTIC_CHECKS = [
+  {
+    name: "盖章不覆盖回灌清单",
+    file: EVENTS_DAO,
+    fnAnchor: "pub async fn stamp_reflected",
+    forbidden: ["ReflowPending"],
+  },
+  {
+    name: "事件档反思行必须真被合并",
+    file: REFLECTION,
+    need: ["merge_extra_horizons"],
+  },
+  {
+    name: "差异证据必须进反思提示词",
+    file: REFLECTION,
+    need: ["asof_evidence_block"],
+  },
+];
+
+/** 取代码域里某个锚点之后的窗口（函数体足够短时等价于「该函数内」）。 */
+function codeWindow(code, anchor, len = 1200) {
+  const at = code.indexOf(anchor);
+  return at === -1 ? null : code.slice(at, at + len);
+}
+
 function judge(entries, readFile) {
   const violations = [];
   const exemptions = [];
@@ -353,6 +444,33 @@ function judge(entries, readFile) {
     }
     violations.push(...local);
   }
+  for (const c of SEMANTIC_CHECKS) {
+    const src = readFile(c.file);
+    if (src === null) {
+      violations.push(`R5 ${c.name}：文件定位不到 ${c.file}`);
+      continue;
+    }
+    const code = codeOnly(src);
+    if (c.fnAnchor) {
+      const win = codeWindow(code, c.fnAnchor);
+      if (win === null) {
+        violations.push(`R5 ${c.name}：${c.file} 里找不到 ${c.fnAnchor}`);
+        continue;
+      }
+      for (const bad of c.forbidden ?? []) {
+        if (win.includes(bad)) {
+          violations.push(
+            `R5 ${c.name}：${c.fnAnchor} 内出现 ${bad} ⇒ 盖章会把回灌清单覆盖掉（清单恒空）`,
+          );
+        }
+      }
+    }
+    for (const need of c.need ?? []) {
+      if (!code.includes(need)) {
+        violations.push(`R5 ${c.name}：${c.file} 代码域缺 ${need}`);
+      }
+    }
+  }
   return { violations, exemptions };
 }
 
@@ -363,6 +481,9 @@ function collectFiles() {
     set.add(e.producer.file);
     for (const c of e.consumers) set.add(c.file);
   }
+  // R5 语义断言单独读的文件也要进合成集，否则任何一条破坏样本都会额外红一条
+  // 「文件定位不到」，把「只红这一格」的负控变成噪声。
+  for (const c of SEMANTIC_CHECKS) set.add(c.file);
   return set;
 }
 
@@ -445,6 +566,14 @@ function selftest() {
       name: "M9 面板不再按轮次读回 ⇒ 只红 mover_recall_runs（且点名轮次读回那条消费面）",
       read: synthetic((f) => f.set(MR_PANEL, f.get(MR_PANEL).replaceAll("get_mover_recall_run_view", "zzz_gone"))),
       want: (r) => r.violations.length === 1 && r.violations[0].includes("mover_recall_runs") && r.violations[0].includes("get_mover_recall_run_view"),
+    },
+    {
+      name: "M11 事件档反思合并被撤 ⇒ 只红 R5 的那一条语义断言",
+      read: synthetic((f) => f.set(REFLECTION, f.get(REFLECTION).replaceAll("merge_extra_horizons", "zzz_gone"))),
+      want: (r) =>
+        r.violations.length === 1 &&
+        r.violations[0].startsWith("R5") &&
+        r.violations[0].includes("事件档反思行"),
     },
     {
       name: "M10 进化聚合撤掉轮次表读取 ⇒ 同一条目红在另一面（两个消费者各须独立成立）",

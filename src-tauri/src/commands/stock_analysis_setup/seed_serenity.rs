@@ -106,7 +106,7 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     //        补齐，DB 里它是漏绑的那一个）；② 19 个节点 position 对齐 DB 现值。
     //      抬到 60 = DB 现值 + 1，是让「代码重新成为权威」的必要条件；在此之前 version(59) >
     //      常量(53) 恒走「跳过重建」，代码侧任何图改动都落不了库。
-    const TEMPLATE_VERSION: i32 = 61;
+    const TEMPLATE_VERSION: i32 = 62; // v62: 新增 c-trend-split，5 个评分器按各自趋势的 strategy_type 评分
 
     let now = chrono::Utc::now().timestamp_millis();
 
@@ -294,6 +294,32 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     // 评分节点在 DB 里已不等于「拆解节点 x + 20」（trend1 的评分甚至在它左侧），故独立成数组。
     let scorer_x_positions = [157.5, 475.0, 695.0, 1040.0, 1290.0];
 
+    // ── 趋势分槽（确定性）────────────────────────────────────────────
+    // 为什么需要它：scanner 的 content 有四种历史形态（裸 trends / ```tool_json 围栏 /
+    // {"report": ...} / {"arguments": ...}），而 `input_mapping` 的路径无法表达
+    // 「哪个形态」；`trend-split.rhai` 已在快速链里把这四种形态统一成 trend1..5。
+    // 原链此前直接把 `a-trend-scanner.content.trends[i].strategy_type` 写进 5 个节点，
+    // 既受数组下标限制（2026-10-24 前恒 None），也受包装形态限制 ⇒ 5 个评分器的
+    // strategy_type 全部回落 bottleneck。分槽后路径恒为纯对象导航，且槽位恒存在。
+    let splitter_code = include_str!("../trend-split.rhai").to_string();
+    let mut splitter_input = HashMap::new();
+    splitter_input.insert("scanner_raw".to_string(), "a-trend-scanner.content".to_string());
+    nodes.push(serenity_code_node(
+        "c-trend-split",
+        "趋势分槽",
+        "把 trends[] 切成 trend1..trend5 具名槽位（统一四种包装形态）",
+        &splitter_code,
+        splitter_input,
+        180.0,
+        560.0,
+        15,
+    ));
+    edges.push(serenity_edge(
+        "e-a-trend-scanner-c-trend-split",
+        "a-trend-scanner",
+        "c-trend-split",
+    ));
+
     for (i, tn) in trend_names.iter().enumerate() {
         let decomposer_id = format!("a-chain-{tn}");
         let code_node_id = format!("c-scorer-{tn}");
@@ -379,10 +405,11 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
         );
         // v17: 移除 7 个硬编码行业基线注入（baseline_*）——行业信息改由知识库 RAG 提供
         let mut cd_input_mapping = std::collections::HashMap::new();
-        // 注入策略类型，Agent 根据 strategy_type 选择分析模式
+        // 注入策略类型，Agent 根据 strategy_type 选择分析模式。
+        // 走分槽后的纯对象导航：分槽脚本已统一四种包装形态，且槽位恒存在。
         cd_input_mapping.insert(
             "trend_strategy".to_string(),
-            format!("a-trend-scanner.content.trends[{i}].strategy_type"),
+            format!("c-trend-split.result.trend{}.strategy_type", i + 1),
         );
         nodes.push(agent_node(
             &decomposer_id,
@@ -400,6 +427,12 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
             "a-trend-scanner",
             &decomposer_id,
         ));
+        // 分槽是 decomposer 的 trend_strategy 来源 ⇒ 必须排在它之前完成。
+        edges.push(edge(
+            &format!("e-c-trend-split-{decomposer_id}"),
+            "c-trend-split",
+            &decomposer_id,
+        ));
 
         // ── c-scorer: 统一多策略评分 CodeNode ──
         // 根据 trend_strategy 路由到 bottleneck/policy/earnings/capital/event/technical 评分逻辑
@@ -410,7 +443,7 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
             .insert("industry_ranking".to_string(), "t-industry-rank.result".to_string());
         sc_input_mapping.insert(
             "trend_strategy".to_string(),
-            format!("a-trend-scanner.content.trends[{i}].strategy_type"),
+            format!("c-trend-split.result.trend{}.strategy_type", i + 1),
         );
         // 评分权重（来自模板变量，兜底 0.35/0.35/0.30）
         sc_input_mapping.insert("w_supply".to_string(), "w_supply".to_string());
@@ -446,11 +479,12 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
             &code_node_id,
         ));
         // v42 修复：input_mapping 引用的非直接上游手动补边（MEMORY.md 纪律）。
-        // code_executor 只注入 edges 直接上游输出（get_node_dependency_results），
-        // c-scorer 是 Code 节点吃不到 V57 context_sources（仅 Agent 节点）→
-        // industry_ranking（t-industry-rank.result）与 trend_strategy
-        // （a-trend-scanner.content.trends[i].strategy_type）resolve 为 null。
-        // 补边后这两个节点输出进入 deps 注入，评分可用真实行业数据。
+        // code_executor 的 input_mapping 从**全量 variables** 解析，但仍要求上游节点
+        // 已完成（否则键尚未写入）⇒ 补边保证执行顺序。
+        // 2026-10-24：`resolve_var_path` 已支持 `name[idx]` 数组下标，因此
+        // `trend_strategy`（a-trend-scanner.content.trends[i].strategy_type）现在真能
+        // 解析到**各自趋势**的类型；此前 5 个评分器全部回落到默认 bottleneck，
+        // 政策/业绩/资金/事件/技术趋势被按瓶颈 schema 评分（产出 no_data）。
         // 调度无环：t-industry-rank / a-trend-scanner 本就先于 a-chain-* 完成。
         edges.push(edge(
             &format!("e-t-industry-rank-{code_node_id}"),
@@ -460,6 +494,13 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
         edges.push(edge(
             &format!("e-a-trend-scanner-{code_node_id}"),
             "a-trend-scanner",
+            &code_node_id,
+        ));
+        // 分槽 → 评分：strategy_type 需要分槽结果，补边保证顺序（input_mapping 从全量
+        // variables 解析，但上游未完成时键还不存在）。
+        edges.push(edge(
+            &format!("e-c-trend-split-{code_node_id}"),
+            "c-trend-split",
             &code_node_id,
         ));
     }
@@ -556,6 +597,9 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
          `irreplaceability_score` 和 `data_reliability` 标签在 `result.computed_nodes` 中。\
          你的候选认定必须以这些客观评分为基准，而非从零编造。\
          评分低于 55 的环节标记为 \"weak_signal\"，候选优先级降低。\n\
+         **注意**：`computed_nodes` 可能来自六种策略（bottleneck/policy/earnings/capital/event/technical）。\
+         非 bottleneck 节点同样带 `bottleneck_composite`（该策略的 0-100 综合分）、`stock_code`、`stock_name`；\
+         不得因为它没有 `chain_nodes` 就丢弃，也不得把它的分数当成缺失。\n\
          9. **策略评分数据**：`bottleneck_trend1~5.bottleneck_signals` 中包含 7 个代表股的瓶颈信号：\
          存货周转天数变化（`inventory_turnover` — 存货堆积=供给过剩风险）、\
          毛利率同比趋势（`gross_margin_trend` — 扩张=议价权提升）、\
@@ -1688,7 +1732,7 @@ mod serenity_version_gate_tests {
     /// ⚠ 它是**副本**：改源码里那个常量时必须一起改。不同步**不会静默失效** ——
     /// 状态①的 `assert_eq!(version, Some(TEMPLATE_VERSION))` 会当场失败（写成本测试的
     /// 第一道断言就是为了这个）。宁可响亮地红，也不要一条「看着在跑、其实没在测」的测试。
-    const TEMPLATE_VERSION: i32 = 61;
+    const TEMPLATE_VERSION: i32 = 62; // v62: 新增 c-trend-split，5 个评分器按各自趋势的 strategy_type 评分
 
     async fn fresh_db() -> axagent_dao::db::DbHandle {
         axagent_dao::db::create_test_pool().await.expect("建临时测试库失败")

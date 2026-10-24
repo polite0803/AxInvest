@@ -298,6 +298,7 @@ mod tests {
                  prompt TEXT,\
                  status TEXT NOT NULL,\
                  output TEXT NOT NULL,\
+                 result_json TEXT,\
                  exit_code INTEGER,\
                  conversation_id TEXT,\
                  created_by TEXT,\

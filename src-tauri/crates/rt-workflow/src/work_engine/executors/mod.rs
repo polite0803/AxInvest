@@ -107,6 +107,51 @@ pub(crate) use llm_resolve::{ensure_generation_model, resolve_provider_and_adapt
 // 注意：与 prompt_template::resolve_dot_path 不同——后者在模板渲染阶段对
 // `{{path}}` 占位符做类型转换，本函数返回 `Option<Value>` 供代码逻辑使用。
 
+/// 解析一段路径：先按对象键直查，再支持 `name[idx]` / `[idx]` 数组下标。
+///
+/// 为什么需要下标（2026-10-24）：`resolve_var_path` 原先只做 `.get(part)`，而
+/// `.get("trends[0]")` 对数组恒 `None`。趋势智选原链的 5 个评分节点因此**全部拿不到**
+/// 各自趋势的 `strategy_type`（`a-trend-scanner.content.trends[i].strategy_type`），
+/// `strategy-scorer.rhai` 只能回落到默认 `bottleneck` —— 非瓶颈趋势（政策/业绩/资金/
+/// 事件/技术）被按瓶颈 schema 评分，产出 `no_data`，趋势智选只剩瓶颈一条腿。
+///
+/// 语义边界：
+/// - 先做**精确键**直查（键名本身可能真的含 `[`，保持既有行为优先）；
+/// - 仅在直查失败后才解释下标，且只接受 `[非负十进制整数]`；
+/// - 越界 / 非数组 / 段格式不合法 ⇒ `None`，由调用方按「解析失败」处理（fail-closed）。
+fn get_path_segment(current: &serde_json::Value, part: &str) -> Option<serde_json::Value> {
+    if let Some(v) = current.get(part) {
+        return Some(v.clone());
+    }
+    let (key, index) = parse_indexed_segment(part)?;
+    let base = if key.is_empty() {
+        current
+    } else {
+        current.get(key)?
+    };
+    base.as_array()?.get(index).cloned()
+}
+
+/// 把 `trends[0]` 拆成 `("trends", 0)`；`[2]` 拆成 `("", 2)`。
+///
+/// 只认最后一个 `[` 且必须以 `]` 收尾，括号内必须是非负十进制整数；
+/// `a[b]` / `a[-1]` / `a[1` / `a[[1]]` 一律返回 `None`（不猜测、不截断）。
+fn parse_indexed_segment(part: &str) -> Option<(&str, usize)> {
+    let close = part.strip_suffix(']')?;
+    let open = close.rfind('[')?;
+    let digits = &close[open + 1..];
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let index = digits.parse::<usize>().ok()?;
+    // `key` 里若还有 `[`，说明形如 `a[b][0]`，本实现不支持多级/嵌套下标，交给调用方失败。
+    let key = &close[..open];
+    if key.contains('[') {
+        return None;
+    }
+    Some((key, index))
+}
+
 /// 从 variables HashMap 中按点号分隔路径解析嵌套值。
 ///
 /// 首段为节点 ID（variables 顶层 key），后续段递归进入 JSON 嵌套值。
@@ -145,7 +190,7 @@ pub(crate) fn resolve_var_path(
                     },
                 }
             }
-            match current.get(part) {
+            match get_path_segment(&current, part) {
                 Some(v) => current = v.clone(),
                 None => {
                     navigated = false;

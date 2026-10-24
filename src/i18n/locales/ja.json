@@ -7621,6 +7621,11 @@
     "nextRun": {
       "stale": "スケジュール停滞",
       "staleHint": "スケジュールが 24 時間以上進んでいません（期限超過または再送待ち）。シャットダウンによる中断や停止の可能性があります。「今すぐ実行」で生存確認できます。"
+    },
+    "tracked": {
+      "rowMissing": "タスク記録が見つかりません（整理された可能性があります）",
+      "failedNoDetail": "タスクは失敗しました（バックエンドから理由がありません）",
+      "resultParseFailed": "タスクレポートの解析に失敗しました"
     }
   },
   "teammatePanel": {
@@ -15749,7 +15754,19 @@
       "loopGateShadow": "振り返りループはシャドウモード：計算のみで採点には不使用、最終再計算 {time}",
       "loopGateOff": "振り返りループ無効（off）、最終再計算 {time}",
       "loopNeverRecalc": "再計算されたことはありません",
-      "loopSamples": "n={{n}}"
+      "loopSamples": "n={{n}}",
+      "cancelled": "キャンセル済み：完了した部分のみ",
+      "sectionData": "データ基盤",
+      "sectionDataDesc": "全 A 株の銘柄リストと株価ウィンドウ：コード区分スキャンで登録、直近終値を取得、過去履歴を補完。以下の結論はすべてこのカバレッジを前提とする。",
+      "sectionMatrix": "戦略パフォーマンス",
+      "sectionMatrixDesc": "スタイル × 期間のマトリクス：勝率、Sharpe/サンプル数、IC、ループ重みを表示。セルを選ぶと次のセクションでシグナル明細を表示。",
+      "sectionSignals": "シグナル追跡",
+      "sectionSignalsDesc": "選択した戦略の過去シグナルと勝敗。マトリクス未選択時は空。",
+      "sectionMisses": "漏れ検証",
+      "sectionMissesDesc": "期間内に上昇基準を満たしたが選ばれなかった銘柄を、プール外・プール内未選出・スタイル/期間による除外に分類。",
+      "sectionSerenity": "セレニティ検証",
+      "sectionSerenityDesc": "もう一方のチェーン（LLM 候補）の勝率とループ検証。上のレコメンド行列とは分けて読む。",
+      "matrixLegend": "読み方：行 = 戦略スタイル、列 = 保有期間。セルには勝率（色分け）、Sharpe/サンプル数、IC（不足時は理由）、ループ重みを表示。"
     },
     "moverRecall": {
       "title": "ウィンドウ上昇率達成の未検出チェック",
@@ -15852,7 +15869,20 @@
         "fixForFuture": "今後の判断基準の修正",
         "rfPending": "反省キュー待ち",
         "rfRunning": "反省を生成中",
-        "rfFailed": "反省失敗：{{detail}}"
+        "rfFailed": "反省失敗：{{detail}}",
+        "asofHeading": "as-of 銘柄推薦リプレイ",
+        "asofMissing": "このイベントには as-of リプレイの証拠がありません（live 層のみで帰属）",
+        "asofLayerHint": "as-of 層：{{layer}}",
+        "asofPoolPresent": "候補プールは空ではありません",
+        "asofPoolEmpty": "候補プールが空です（リプレイ縮退）",
+        "asofPoolAbsent": "プールスナップショットがありません（入池の判定不可）",
+        "asofStylesLine": "同档の出票：{{picked}}／切捨て：{{trimmed}}／他档：{{other}}",
+        "asofDiverged": "実運用とリプレイの判定が異なります",
+        "asofConsistent": "実運用とリプレイの判定は一致しています",
+        "asofFailureLine": "リプレイ失敗：{{detail}}",
+        "asofNone": "なし",
+        "analysisSignal": "as-of 分析の判断：{{action}}（信頼度 {{confidence}}）",
+        "analysisSignalMissing": "as-of 分析の判断：未記録（未分析、または当档の逐档判断なし）"
       },
       "runSelector": "検証ラウンド",
       "runOption": "{{from}} ~ {{to}} · {{chain}} · 該当 {{events}} · 見逃し {{misses}}",
@@ -15877,9 +15907,22 @@
       "sweepCloseHint": "直近の取引終了済み営業日（15:00 以降）のみ取得します。場中は拒否されます。過去日はウィンドウ履歴の補完を使用",
       "sweepDone": "終値の保存 {{written}} / リスト {{total}}、気配なし {{missing}}",
       "backfillHistory": "ウィンドウ履歴を補完",
-      "backfillHistoryHint": "1 回あたり最大 500 銘柄 x 90 営業日。新規 0 行になるまで再実行。「追加なし」は利用可能な日線が 90 本未満（新規上場・長期売買停止）",
-      "backfillDone": "履歴補完：{{codes}} コード / 新規 {{rows}} 行 / 追加なし {{noNew}} / 失敗 {{failed}}",
-      "backfillNone": "このバッチの履歴は既に完了（補完対象なし）"
+      "backfillHistoryHint": "1バッチ最大500コード×90営業日；新規0行になるまで繰り返しクリック；「追加なし」= 利用可能な日足が90本未満（新興・長期停止）；「行情なし」= 未上場/上場廃止で何度押しても同じ",
+      "backfillDone": "履歴補完：{{codes}} コード / 新規 {{rows}} 行 / 追加なし {{noNew}} / 行情なし {{noData}} / 失敗 {{failed}}",
+      "backfillNone": "このバッチの履歴は既に完了（補完対象なし）",
+      "taskRunning": "タスク実行中",
+      "taskCancel": "タスクをキャンセル",
+      "taskCancelled": "キャンセルしました（完了した部分は保持されます）",
+      "scopeTitle": "検証スコープ",
+      "readingsTitle": "主要指標",
+      "asofSummaryTitle": "as-of 銘柄推薦リプレイ概要",
+      "asofSummaryMissing": "このラウンドにはまだ as-of リプレイがありません（補分析バッチが未カバー）",
+      "asofSummaryLine": "イベント {{events}}／未入池 {{notInPool}}／入池未出票 {{inPoolNotPicked}}／切捨て {{trimmed}}／他档 {{other}}／プール縮退 {{degraded}}／判定不可 {{unavailable}}",
+      "reflowMergeLabel": "リフロー一覧を候補プールへ統合",
+      "reflowMergeHint": "既定はオフ。有効かつ決済済みサンプル ≥ 30 のときのみ統合します",
+      "historyDays": "履歴取引日数（distinct）：{{days}} 日",
+      "tierJudgeableOfUniverse": "当档の判定可能：{{judgeable}} / 全 A 株 {{total}}",
+      "asofWeights": "直近のループ重み：{{cells}}"
     },
     "export": {
       "analystReports": "分析师报告",

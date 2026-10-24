@@ -94,6 +94,24 @@ function comparisonResponse(strategies: StrategyStats[]): BacktestComparisonResp
   };
 }
 
+describe("取消后的部分报告必须显式标注", () => {
+  it("cancelled=true 的矩阵显示「已取消」徽标，不冒充完整回测", () => {
+    renderWithI18n(
+      <RecoStrategyMatrix
+        data={{ ...comparisonResponse([stats("trend", "short", 55, 8)]), cancelled: true }}
+      />,
+    );
+    expect(screen.getAllByText("已取消：仅含已完成部分").length).toBeGreaterThan(0);
+  });
+
+  it("正常完成的矩阵不出现该徽标（负控）", () => {
+    renderWithI18n(
+      <RecoStrategyMatrix data={comparisonResponse([stats("trend", "short", 55, 8)])} />,
+    );
+    expect(screen.queryByText("已取消：仅含已完成部分")).toBeNull();
+  });
+});
+
 function renderWithI18n(node: React.ReactNode) {
   return render(
     <MemoryRouter>
@@ -257,12 +275,28 @@ describe("回测徽章按当前档取值，不跨档平均（F3）", () => {
         return Promise.resolve(recoResponse({ trend: [makePick()] }));
       }
       if (cmd === "backtest_reco_strategies") {
-        return Promise.resolve(comparisonResponse([
-          stats("trend", "ultra_short", 30, 5),
-          stats("trend", "short", 60, 9),
-          stats("trend", "mid", 40, 7),
-          stats("trend", "long", 80, 3),
-        ]));
+        return Promise.resolve({ taskId: "bt-f3" });
+      }
+      if (cmd === "get_background_task_output") {
+        // 异步任务形态：报告在终态行的 resultJson 里
+        return Promise.resolve({
+          id: "bt-f3",
+          title: "荐股策略历史回测对比",
+          description: "",
+          taskType: "reco-strategy-backtest",
+          status: "completed",
+          output: "done",
+          resultJson: JSON.stringify(comparisonResponse([
+            stats("trend", "ultra_short", 30, 5),
+            stats("trend", "short", 60, 9),
+            stats("trend", "mid", 40, 7),
+            stats("trend", "long", 80, 3),
+          ])),
+          attempt: 0,
+          createdAt: 1,
+          updatedAt: 2,
+          finishedAt: 2,
+        });
       }
       return Promise.resolve({});
     });

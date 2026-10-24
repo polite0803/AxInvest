@@ -5,14 +5,17 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "./_shared/PageHeader";
+import { SectionHeading } from "./_shared/SectionHeading";
 import { BacktestChart } from "./BacktestChart";
 import { BacktestPanel } from "./BacktestPanel";
 import { HistoricalAnalysisPanel } from "./HistoricalAnalysisPanel";
+import { MoverRecallPanel } from "./MoverRecallPanel";
 import { PnLHistogram, SectorAllocationDonut } from "./PortfolioCharts";
 import { QuickBacktestPanel } from "./QuickBacktestPanel";
 import { RecoSignalTimeline } from "./RecoSignalTimeline";
 import { RecoStrategyMatrix } from "./RecoStrategyMatrix";
 import { SerenityValidationPanel } from "./SerenityValidationPanel";
+import { UniverseSamplePanel } from "./UniverseSamplePanel";
 import { WhatIfBacktest } from "./WhatIfBacktest";
 
 /**
@@ -63,9 +66,39 @@ export function BacktestPage() {
                 key: "strategy",
                 label: t("stockAnalysis.backtest.tabStrategy"),
                 children: (
+                  /* 五段业务串成一条阅读线：数据基础 → 策略表现 → 信号追踪 →
+                     漏检核查 → 趋势智选验证。每段一个编号标题 + 自己的卡，
+                     不再把采集按钮与漏检明细塞进矩阵卡内部（2026-10-24 重排）。 */
                   <div className="space-y-4">
+                    <SectionHeading
+                      step={1}
+                      title={t("stockAnalysis.backtest.sectionData")}
+                      description={t("stockAnalysis.backtest.sectionDataDesc")}
+                    />
+                    <UniverseSamplePanel />
+                    <SectionHeading
+                      step={2}
+                      title={t("stockAnalysis.backtest.sectionMatrix")}
+                      description={t("stockAnalysis.backtest.sectionMatrixDesc")}
+                    />
                     <RecoStrategyMatrix onSelectStrategy={setSelectedStrategy} />
-                    {selectedStrategy && <RecoSignalTimeline strategyId={selectedStrategy} />}
+                    <SectionHeading
+                      step={3}
+                      title={t("stockAnalysis.backtest.sectionSignals")}
+                      description={t("stockAnalysis.backtest.sectionSignalsDesc")}
+                    />
+                    <RecoSignalTimeline strategyId={selectedStrategy ?? ""} />
+                    <SectionHeading
+                      step={4}
+                      title={t("stockAnalysis.backtest.sectionMisses")}
+                      description={t("stockAnalysis.backtest.sectionMissesDesc")}
+                    />
+                    <MoverRecallPanel />
+                    <SectionHeading
+                      step={5}
+                      title={t("stockAnalysis.backtest.sectionSerenity")}
+                      description={t("stockAnalysis.backtest.sectionSerenityDesc")}
+                    />
                     <SerenityValidationPanel />
                   </div>
                 ),

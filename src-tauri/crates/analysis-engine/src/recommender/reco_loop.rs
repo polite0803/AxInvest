@@ -11,9 +11,14 @@
 //!
 //! ## 口径（全部复用唯一判定源，禁区 12）
 //!
-//! - 胜负判定：[`crate::hit_rate_backtest::hit_outcome_to_binary_outcome`]
-//!   （hit/partial ⇒ win；miss/false_hit ⇒ loss；insufficient/None ⇒ 剔除）——
-//!   与命中率统计分母同口径，不另写一份「partial 算不算对」。
+//! - 样本资格：[`crate::hit_rate_backtest::hit_outcome_to_binary_outcome`]
+//!   （hit/partial/miss/false_hit 有效；insufficient/None 剔除）。
+//! - **胜负口径（2026-10-24 修正）**：只认 `hit` ⇒ win；`partial` 是「没止损但最终
+//!   没赚」（buy 的 partial 收益按定义 ≤0），**计 loss 不计 win**。旧口径把 partial
+//!   计 win，生产实证把 `reversion_short`（22 单全 partial、期窗均收益 -0.83%）的权重
+//!   留在 0.906，却把正期望的 `capital_short`（+3.41%）压到 0.068 —— 闭环方向被反转。
+//!   决策记录回填仍用 `hit_outcome_to_binary_outcome` 的 partial→win，那是另一个语义；
+//!   本层衡量**策略期望**，不复用那个映射。
 //! - 风格名目：[`crate::recommender::style_matrix`]（serenity ⇔ bottleneck 等别名经
 //!   `db_style_aliases` 合并，一名两写不得各算一套）。
 //! - 档位：`Period::from_str` 同时读 `ultra_short` 与历史存档 `ultrashort`。
@@ -26,7 +31,7 @@
 //! - `decision_validations`：`pick_id` / `style` / `period` / `t_plus_n` /
 //!   `confidence` / `entry_price` / `t_plus_n_price` / `hit_outcome` /
 //!   `generated_at` / `validated_at` / `created_at` / `as_of_date`。
-//!   胜负与收益一律从这些列现算（`hit_outcome_to_binary_outcome` + entry→T+N 收益），
+//!   胜负与收益一律从这些列现算（`hit` 判 win + entry→T+N 收益），
 //!   不读任何预聚合胜率表 —— 口径只有一处。
 //! - `reco_picks`：`id` / `reco_version`（样本代际归属，`load_pick_versions`）。
 //! - `strategy_weight_history`：`strategy_id` / `period` / `old_weight` /
@@ -74,7 +79,7 @@ pub struct RecoLoopSample {
     pub exit_at_ms: i64,
     /// 该荐股**产出**时刻（ms）——熔断降权线的归因轴（不是验证时刻）
     pub predicted_at_ms: i64,
-    /// 胜负（hit/partial ⇒ true）
+    /// 胜负（只认 `hit` ⇒ true；`partial` 是「没止损但没赚」⇒ false）
     pub win: bool,
     /// 预测时的置信度 0-100（IC 的 x 轴）
     pub confidence: f64,
@@ -114,6 +119,13 @@ pub enum LoopCellStatus {
     IcNonNegative,
     /// IC < 0 ⇒ 胜率权重再乘负 IC 惩罚（只降不升）
     DemotedNegativeIc,
+    /// **负期望硬停**：本格期窗均收益 ≤ 阈值且样本 ≥ 下限 ⇒ 权重置 0（不再出票）。
+    ///
+    /// 2026-10-24 生产实证：capital_mid（12 单，-4.04%）、reversion_mid（17 单，-2.69%）、
+    /// capital_long（16 单，-2.56%）即使降到 0.05 仍会出票（0.05×base≈3 分，足以绕过
+    /// 默认 `reco_min_confidence=0`）。胜率线对「胜率 50% 但平均亏 4%」不敏感，
+    /// 必须用**期望**单独一刀。只停负期望格，不碰正期望格（capital_short +3.41% 仍保留）。
+    DisabledNegativeExpectancy,
 }
 
 impl LoopCellStatus {
@@ -124,6 +136,7 @@ impl LoopCellStatus {
             LoopCellStatus::NotInMatrix => "not_in_matrix",
             LoopCellStatus::IcNonNegative => "ic_non_negative",
             LoopCellStatus::DemotedNegativeIc => "demoted_negative_ic",
+            LoopCellStatus::DisabledNegativeExpectancy => "disabled_negative_expectancy",
         }
     }
 }
@@ -154,9 +167,10 @@ pub fn samples_from_validation_rows(rows: Vec<decision_validations::Model>) -> V
             continue;
         };
         let Ok(period) = r.period.parse::<Period>() else { continue };
-        let Some(binary) = hit_outcome_to_binary_outcome(r.hit_outcome.as_deref()) else {
+        // 仍复用同一判定源筛掉 insufficient/未知；但**胜负**只认 `hit`（见下方长注释）。
+        if hit_outcome_to_binary_outcome(r.hit_outcome.as_deref()).is_none() {
             continue;
-        };
+        }
         let Some(after) = r.t_plus_n_price else { continue };
         if !after.is_finite() || !r.entry_price.is_finite() || r.entry_price <= 0.0 {
             continue;
@@ -168,13 +182,25 @@ pub fn samples_from_validation_rows(rows: Vec<decision_validations::Model>) -> V
         // 产出时刻：荐股**生成**那一刻（不是验证时刻）—— 熔断降权问的是
         // 「这条样本出生时证据面好不好」，用 exit 时刻会把「持有期内才坏」算到它头上。
         let predicted_at_ms = parse_ms(&r.generated_at).unwrap_or(exit_at_ms);
+        let realized_return_pct = (after / r.entry_price - 1.0) * 100.0;
+        // 胜负只认 `hit`（最终收益 > 0 或触及目标），**不再把 `partial` 计 win**。
+        //
+        // 2026-10-24 生产实证：`hit_outcome_to_binary_outcome` 的 partial→win 是给
+        // 「决策结果回填」用的（没止损就算没输），但拿来衡量**策略期望**会把胜率抬成
+        // 100%：`reversion_short` 22 单里 6 hit + 16 partial、0 miss，闭环据此把权重
+        // 留在 0.906，而其期窗匹配后的平均收益是 **-0.83%**；相反 `capital_short`
+        // 平均 +3.41%、命中 19/40，权重却被压到 0.068。partial 的最终收益按定义 ≤0，
+        // 计 win 等于用「没输」奖励「没赚」——闭环方向被反转。
+        // 胜负判定只认 `hit`；`partial` 由上面的判定源保留为**有效样本**（不是
+        // insufficient），但不计 win —— 它按定义是「没止损但最终没赚」。
+        let win = r.hit_outcome.as_deref() == Some("hit");
         let sample = RecoLoopSample {
             style_key,
             period,
             exit_at_ms,
-            win: binary == "win",
+            win,
             confidence: r.confidence as f64,
-            realized_return_pct: (after / r.entry_price - 1.0) * 100.0,
+            realized_return_pct,
             holding_days: t_plus_n,
             predicted_at_ms,
             // 标注在 `load_reco_loop_samples` 里按时间线做（本纯函数不碰库）
@@ -380,6 +406,38 @@ pub async fn load_reco_loop_samples(
 /// 这里 `pub use` 保持既有调用路径不变。
 pub use crate::evolution_drift::RECO_LOOP_TRIGGER;
 
+/// 闭环**语义版本**：权重公式/胜负口径发生不兼容变更时 +1。
+///
+/// 为什么要它：历史权重是用旧语义算出来的，EWMA（α=0.3）会把这些**反向**先验
+/// 保留很多轮。2026-10-24 修正 partial→win 后，生产库仍是
+/// `reversion_short=0.906 / capital_short=0.068`（前者期窗 -0.83%、后者 +3.41%）；
+/// 若只按正常 EWMA 重算，需要 10+ 轮才把顺序翻过来。版本不匹配时**一次性清空先验**
+/// （reset_prior）直接按当前样本重算，之后回到正常棘轮。
+///
+/// v2 = 胜负只认 `hit`（partial 不再计 win）。
+pub const RECO_LOOP_LOGIC_VERSION: i32 = 2;
+/// 存 `reco_loop_logic_version` 的设置键（settings 表；与 `reco_ic_gate` 同域）。
+pub const RECO_LOOP_LOGIC_VERSION_KEY: &str = "reco_loop_logic_version";
+
+/// 读已落库的闭环语义版本（0 = 从未记录过，按需要重置处理）。
+pub async fn stored_reco_loop_logic_version(db: &DatabaseConnection) -> Result<i32, String> {
+    let raw = axagent_dao::repo::settings::get_setting(db, RECO_LOOP_LOGIC_VERSION_KEY)
+        .await
+        .map_err(|e| format!("读 {RECO_LOOP_LOGIC_VERSION_KEY} 失败: {e}"))?;
+    Ok(raw.and_then(|v| v.trim().parse::<i32>().ok()).unwrap_or(0))
+}
+
+/// 记录当前闭环语义版本（幂等；只在成功重算后调用，避免「版本已抬、权重没算」）。
+pub async fn mark_reco_loop_logic_version(db: &DatabaseConnection) -> Result<(), String> {
+    axagent_dao::repo::settings::set_setting(
+        db,
+        RECO_LOOP_LOGIC_VERSION_KEY,
+        &RECO_LOOP_LOGIC_VERSION.to_string(),
+    )
+    .await
+    .map_err(|e| format!("写 {RECO_LOOP_LOGIC_VERSION_KEY} 失败: {e}"))
+}
+
 /// 基线权重：闭环**从未降过权**的格的取值，也是「只降不升」（Q1）的绝对上限。
 ///
 /// ⚠ 它**不是**「未校准格的取值」：样本门未通过时保留该格当前权重（可能已被降到 0.16），
@@ -393,6 +451,10 @@ pub const NEGATIVE_IC_PENALTY: f64 = 0.5;
 
 /// 权重下限（与 `weight_decay` 的 clamp 下限同值，不另造常量）。
 const WEIGHT_FLOOR: f64 = 0.05;
+/// 负期望硬停的最小样本数（与 `MIN_SAMPLE` 同量纲；10 单以下不拍板，避免把噪声当结论）。
+pub const NEGATIVE_EXPECTANCY_MIN_SAMPLES: usize = 10;
+/// 负期望硬停的期窗均收益阈值（%）。低于它才停，-1% 以内仍交给胜率线慢慢降。
+pub const NEGATIVE_EXPECTANCY_MAX_MEAN_RETURN_PCT: f64 = -1.0;
 
 /// 一个 (风格, 档位) 格的闭环计算结果（Phase D 呈现层的行来源）。
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -713,9 +775,31 @@ pub fn compute_loop_cell_weights_with_priors(
             } else {
                 (LoopCellStatus::IcNonNegative, win_w.unwrap_or(old_base))
             };
+            // 负期望硬停（2026-10-24）：胜率线对「胜率 50%、平均亏 4%」不敏感，且 0.05 权重
+            // 仍会出票（0.05×base≈3 分，默认 min_confidence=0 不过滤）。这里按**期窗均收益**
+            // 单独一刀：样本 ≥10 且均值 ≤-1% ⇒ 本轮直接置 0，消费侧跳过该格。
+            // 只停负期望，不碰正期望（capital_short 期窗 +3.41% 保留）。
+            let mean_return = if cell.is_empty() {
+                0.0
+            } else {
+                cell.iter().map(|s| s.realized_return_pct).sum::<f64>() / cell.len() as f64
+            };
+            let (status, new_base) = if cell.len() >= NEGATIVE_EXPECTANCY_MIN_SAMPLES
+                && mean_return <= NEGATIVE_EXPECTANCY_MAX_MEAN_RETURN_PCT
+            {
+                (LoopCellStatus::DisabledNegativeExpectancy, 0.0)
+            } else {
+                (status, new_base)
+            };
             // mover 线与熔断线都在 IC/胜率线之后叠乘：只降不升，任一条样本不足时不动它自己那一份。
             // 关键：叠乘的是**本轮 base**，不是上一轮已含惩罚的生效权重 ⇒ 同一批证据重复重算不复合。
             let blended = new_base * outer_penalty;
+            // 负期望硬停必须真的到 0：通用的 `ratchet_weight` 会把 0 夹到 WEIGHT_FLOOR。
+            let new_weight = if status == LoopCellStatus::DisabledNegativeExpectancy {
+                0.0
+            } else {
+                ratchet_weight(blended, BASELINE_WEIGHT)
+            };
             out.push(LoopCellResult {
                 style: style_key,
                 period: period.as_str(),
@@ -727,7 +811,7 @@ pub fn compute_loop_cell_weights_with_priors(
                 base_weight: new_base,
                 outer_penalty,
                 // 上限=基线 1.0：外乘线仍只降不升；IC/胜率线允许在基线内回升（Q1 的 EWMA 回升）。
-                new_weight: ratchet_weight(blended, BASELINE_WEIGHT),
+                new_weight,
                 mover_penalty,
                 dqi_penalty,
                 scored_out,
@@ -811,6 +895,7 @@ pub async fn recalc_and_persist_reco_loop(
     db: &DatabaseConnection,
     as_of_date: Option<&str>,
     mover: &MoverCellSignal,
+    reset_prior: bool,
 ) -> Result<(usize, Vec<LoopCellResult>), String> {
     use axagent_entities::strategy_weight_history;
 
@@ -826,7 +911,15 @@ pub async fn recalc_and_persist_reco_loop(
 
     let mut samples = load_reco_loop_samples(db).await?;
     samples.retain(|s| s.exit_at_ms <= now_ms);
-    let current = load_current_cell_priors_by_trigger(db, Some(RECO_LOOP_TRIGGER)).await?;
+    let current = if reset_prior {
+        // 语义版本变更：旧先验是另一套胜负口径算出来的，继续 EWMA 会把反向排序保留很多轮。
+        tracing::warn!(
+            "[reco_loop] 闭环语义版本升级 ⇒ 本轮清空历史先验，按当前样本重算（reset_prior=true）"
+        );
+        HashMap::new()
+    } else {
+        load_current_cell_priors_by_trigger(db, Some(RECO_LOOP_TRIGGER)).await?
+    };
     let results = compute_loop_cell_weights_with_priors(&samples, &current, now_ms, mover);
 
     let applied_at = chrono::Utc::now().timestamp_millis();
@@ -857,6 +950,12 @@ pub async fn recalc_and_persist_reco_loop(
                 r.win_rate.unwrap_or(0.0) * 100.0,
                 r.old_weight,
                 r.new_weight
+            ),
+            LoopCellStatus::DisabledNegativeExpectancy => format!(
+                "负期望硬停: 窗口内 {} 样本, 期窗均收益 ≤{:.1}% ⇒ 权重 {:.2}→0（本格不再出票）",
+                r.samples,
+                NEGATIVE_EXPECTANCY_MAX_MEAN_RETURN_PCT,
+                r.old_weight
             ),
             _ => format!(
                 // 样本门未通过时**不是**「回退基线」：那是旧实现把历史降权洗掉的写法。
@@ -1497,16 +1596,26 @@ mod tests {
         assert_eq!(samples[0].period, Period::UltraShort);
     }
 
-    /// partial 计 win（与命中率分母同口径）；insufficient 整行剔除。
+    /// partial 是有效样本但**不计 win**（2026-10-24 修正）；insufficient 整行剔除。
+    ///
+    /// 生产实证：`reversion_short` 22 单里 6 hit + 16 partial、0 miss，旧口径胜率 100%
+    /// ⇒ 权重留 0.906，而期窗均收益 -0.83%；同口径下正期望的 capital_short 反被压到 0.068。
     #[test]
     fn outcome_uses_single_binary_source() {
+        let mut partial = dv_row("p1", "trend", "short", 5, "partial");
+        // partial 的真实形态：最终没亏到止损，但也没赚（收益 ≤0）。
+        partial.t_plus_n_price = Some(98.0);
+        partial.final_return_pct = Some(-2.0);
         let samples = samples_from_validation_rows(vec![
-            dv_row("p1", "trend", "short", 5, "partial"),
+            partial,
             dv_row("p2", "trend", "short", 5, "insufficient"),
             dv_row("p3", "value", "short", 5, "false_hit"),
         ]);
         assert_eq!(samples.len(), 2, "insufficient 整行剔除: {samples:?}");
-        assert!(samples.iter().any(|s| s.style_key == "trend" && s.win), "partial 必须计 win");
+        assert!(
+            samples.iter().any(|s| s.style_key == "trend" && !s.win),
+            "partial 必须计 loss 而不是 win（它按定义没赚）"
+        );
         assert!(samples.iter().any(|s| s.style_key == "value" && !s.win), "false_hit 必须计 loss");
     }
 
@@ -1608,6 +1717,96 @@ mod tests {
 
     fn cell<'a>(res: &'a [LoopCellResult], style: &str, period: &str) -> &'a LoopCellResult {
         res.iter().find(|r| r.style == style && r.period == period).expect("缺格")
+    }
+
+    /// 负期望硬停：≥10 单且期窗均收益 ≤-1% ⇒ 权重 0；9 单不拍板（噪声）。
+    #[test]
+    fn negative_expectancy_cell_is_disabled_only_after_enough_samples() {
+        let now = chrono::Utc::now().timestamp_millis();
+        let mover = MoverCellSignal::default();
+        let mk_cell = |n: usize| -> Vec<RecoLoopSample> {
+            (0..n)
+                .map(|i| {
+                    mk("capital", Period::Mid, 60.0, -4.0, i % 2 == 0, now - (i as i64 + 1) * 1000)
+                })
+                .collect()
+        };
+        let ten = compute_loop_cell_weights_with_priors(
+            &mk_cell(NEGATIVE_EXPECTANCY_MIN_SAMPLES),
+            &HashMap::new(),
+            now,
+            &mover,
+        );
+        let c = cell(&ten, "capital", "mid");
+        assert_eq!(c.status, LoopCellStatus::DisabledNegativeExpectancy);
+        assert_eq!(c.new_weight, 0.0, "硬停必须真的到 0（不能被 WEIGHT_FLOOR 夹回 0.05）");
+
+        let nine = compute_loop_cell_weights_with_priors(
+            &mk_cell(NEGATIVE_EXPECTANCY_MIN_SAMPLES - 1),
+            &HashMap::new(),
+            now,
+            &mover,
+        );
+        assert_ne!(
+            cell(&nine, "capital", "mid").status,
+            LoopCellStatus::DisabledNegativeExpectancy,
+            "样本不足 10 单不得硬停"
+        );
+    }
+
+    /// 语义版本升级必须**清空旧先验**：否则部分修正后的胜率仍被反向的 EWMA 先验压住。
+    ///
+    /// 数据来自 2026-10-24 生产库（期窗匹配、strict hit）：
+    /// - reversion_short 22 单：6 hit / 16 partial，均收益 -0.83%，旧权重 0.906；
+    /// - capital_short 40 单：19 hit / 21 其他，均收益 +3.41%，旧权重 0.068。
+    ///   旧先验下重算一轮，资本仍低于反转；清空先验后顺序翻正。
+    #[test]
+    fn logic_version_reset_reverses_the_partial_win_inversion() {
+        let now = chrono::Utc::now().timestamp_millis();
+        let mut samples = Vec::new();
+        // reversion_short：6 win + 16 loss（收益随胜负变化，保证 IC 可测；均值≈-0.83）
+        for i in 0..22 {
+            let win = i < 6;
+            let conf = if win { 80.0 } else { 40.0 };
+            let ret = if win { 2.0 } else { -1.9 };
+            samples.push(mk(
+                "reversion",
+                Period::Short,
+                conf,
+                ret,
+                win,
+                now - (i as i64 + 1) * 1000,
+            ));
+        }
+        // capital_short：19 win + 21 loss（均值≈+3.33）
+        for i in 0..40 {
+            let win = i < 19;
+            let conf = if win { 80.0 } else { 40.0 };
+            let ret = if win { 8.0 } else { -0.9 };
+            samples.push(mk("capital", Period::Short, conf, ret, win, now - (i as i64 + 1) * 1000));
+        }
+        let mut old_priors = HashMap::new();
+        old_priors.insert(
+            ("reversion".to_string(), "short".to_string()),
+            CellPrior { base: 0.906, effective: 0.906 },
+        );
+        old_priors.insert(
+            ("capital".to_string(), "short".to_string()),
+            CellPrior { base: 0.068, effective: 0.068 },
+        );
+        let mover = MoverCellSignal::default();
+        let with_old = compute_loop_cell_weights_with_priors(&samples, &old_priors, now, &mover);
+        assert!(
+            cell(&with_old, "capital", "short").new_weight
+                < cell(&with_old, "reversion", "short").new_weight,
+            "旧先验会把反向排序保留下来（这正是一次性 reset 的理由）"
+        );
+        let reset = compute_loop_cell_weights_with_priors(&samples, &HashMap::new(), now, &mover);
+        assert!(
+            cell(&reset, "capital", "short").new_weight
+                > cell(&reset, "reversion", "short").new_weight,
+            "清空先验后，正期望的 capital_short 必须高于负期望的 reversion_short"
+        );
     }
 
     /// 负 IC（conf 与收益反向）⇒ 触发惩罚降权，且低于同规模的无 IC 校准基线。
@@ -1803,9 +2002,9 @@ mod tests {
     fn dqi_batch(fused_n: usize, clear_n: usize) -> Vec<RecoLoopSample> {
         let now = 1_700_000_000_000i64;
         (0..fused_n)
-            .map(|i| mk_dqi("trend", Period::Short, 20.0 + i as f64, -1.0, true, now, Some(true)))
+            .map(|i| mk_dqi("trend", Period::Short, 20.0 + i as f64, 1.0, true, now, Some(true)))
             .chain((0..clear_n).map(|i| {
-                mk_dqi("trend", Period::Short, 20.0 + i as f64, -1.0, true, now, Some(false))
+                mk_dqi("trend", Period::Short, 20.0 + i as f64, 1.0, true, now, Some(false))
             }))
             .collect()
     }

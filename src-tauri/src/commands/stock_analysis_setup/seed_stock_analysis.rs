@@ -1597,7 +1597,17 @@ type AlgoToolRow = (
 ///   ⇒ long 档那四路恒解析为 Null（面板「分析师数据缺口详情」的 long 行永远空白）。
 ///   关键路径不变：`research-mgr` 本就逐档等 `value-verify--{档}`，trader / portfolio-mgr 在其后。
 ///   ⚠ 图内容（边集）变更 ⇒ **必须换代**，否则存量库不重播种、四路仍是静默失效。
-pub const TEMPLATE_VERSION: i32 = 177; // v177: data-quality 补齐全档 value-verify 等待边（逐档并列键 long 档四路恒 Null）
+/// 2026-10-24 升版 177 → **178**：`portfolio-mgr.rhai` 的**低风险判据**加入参存在性门槛
+///   （`low_risk_inputs_present`）。此前缺数据哨兵（roe→100 / growth→100 / debt→0 /
+///   dd→0）在为**处罚类**判据设计的语义下，被同一个 `is_low` 判据拿去当「基本面稳健」的
+///   证据 ⇒ **没有基本面数据的标的恒被判低风险** ⇒ 仓位上限放宽、f4 风险惩罚减轻、
+///   决策系统性偏乐观。图结构没动，但**嵌入节点 `code` 变了 ⇒ 必须换代**，
+///   否则存量库不重播种，这道护栏对用户而言等于不存在。
+///   ⚠ 落库前请真库核对（只读）：
+///     `SELECT id, version FROM workflow_templates WHERE id='stock-analysis';`
+///     —— 版本门是 `>=`；若 DB 现值已 ≥ 179（并发会话 / 更高常量的构建写过），
+///     本批会被**静默挡住**，须把常量再抬高到 DB 现值之上。
+pub const TEMPLATE_VERSION: i32 = 179; // v179: 输出 schema 显式 required（R-4）；决策详情附 schema 缺口
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -7586,7 +7596,15 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         schema_type: "object".to_string(),
         description: Some("股票分析最终决策输出".to_string()),
         properties: Some(output_props),
-        required: None,
+        // R-4：把「决策必须可读」写成 schema 契约（与 `decision_schema_gaps` 同一组字段）。
+        // targetPrice / stopLoss 对持有/观望本就可空，不列必填。
+        required: Some(vec![
+            "action".to_string(),
+            "confidence".to_string(),
+            "positionPct".to_string(),
+            "riskLevel".to_string(),
+            "reasoning".to_string(),
+        ]),
         items: None,
     })
     .unwrap();

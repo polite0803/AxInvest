@@ -30,10 +30,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use axagent_agent_macro::agent_command;
+use axagent_analysis_engine::horizon_prior;
+use axagent_analysis_engine::mover_recall as mover_core;
+use axagent_analysis_engine::recommender::{self, RecoPick, SeedItem, SeedOverrides};
 use axagent_astock_data::AStockClient;
 use axagent_astock_data::as_of::{self, AsOfContext, AsOfSource};
 use axagent_dao::repo::mover_recall_analysis_batches::{self, BatchRunModel, BatchRunRecord};
 use axagent_dao::repo::mover_recall_events::{self, CHAIN_ROWS_PER_EVENT, EventModel};
+use axagent_dao::repo::reco_seed;
 use axagent_harness::holding_period::Period;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -521,7 +525,28 @@ async fn load_items(
 
 // ── 后台执行体 ────────────────────────────────────────────────────────────────
 
+/// 组内三步的**顺序契约**：回放 → 差异 → 逐票分析。
+///
+/// 为什么单成函数：顺序本身是 PLAN A-7 的一条可测要求（先分析会让漏检票自己的
+/// as-of 分析进入定档池）。用「注入三个 future」的形式把「谁先被 await」变成可断言；
+/// 生产调用点必须走这里，否则改回手写顺序就测不出来。
+///
+/// `diff` 只借用回放结果、不消费它：差异落库失败不影响后续分析。
+async fn replay_then_analyze<R, A, DFut>(
+    replay: impl std::future::Future<Output = Result<R, String>>,
+    diff: impl FnOnce(Result<R, String>) -> DFut,
+    analyze: impl std::future::Future<Output = A>,
+) -> A
+where
+    DFut: std::future::Future<Output = ()>,
+{
+    let replay_result = replay.await;
+    diff(replay_result).await;
+    analyze.await
+}
+
 /// 一只待补事件与其 as-of 分组内的候选构造输入。
+#[derive(Clone)]
 struct PendingEvent {
     model: EventModel,
     period: Period,
@@ -616,6 +641,9 @@ async fn execute_batch(
     let selected: Vec<PendingEvent> =
         selected.into_iter().filter(|p| claimed_ids.contains(&p.model.id)).collect();
     let total = selected.len();
+    // 本批会改动哪些轮次的 as-of 摘要（批次结束时按轮重算一次）。
+    let touched_runs: std::collections::HashSet<String> =
+        selected.iter().map(|p| p.model.run_id.clone()).collect();
     s.total = total;
     s.items = selected.iter().map(|p| EventItem::from(&p.model)).collect();
     save_state(&db, s.clone()).await;
@@ -670,24 +698,66 @@ async fn execute_batch(
         let engine_ref = engine.clone();
         let batch_id_ref = batch_id.clone();
         let window_ref = window_start.clone();
-        // guard 内：首趟逐只分析 + 失败子集立即重试一趟（共两趟，重试仅一次）。
-        let pair = as_of::with_optional_asof(
-            Some(ctx),
-            run_group_with_retry(
-                &db_ref,
-                &client_ref,
-                &engine_ref,
-                &batch_id_ref,
-                &window_ref,
-                group,
-            ),
-        )
+        let period_by_event: std::collections::HashMap<String, String> =
+            group.iter().map(|p| (p.model.id.clone(), p.model.period.clone())).collect();
+        // 一次回放的批次键（写 picks / 池批次 / 留痕三表 + 事件差异），必须在 guard 外
+        // 先定值 —— 回放整体失败时事件仍要记「哪一次尝试失败」。
+        let asof_generated_at = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
+        // guard 内：**先** as-of 荐股回放，**再**逐只分析（顺序不可换：先分析会让漏检票
+        // 自己的 as-of 分析进入定档池，等于把已知清单喂回候选池）。回放失败不阻塞分析。
+        // 顺序走 `replay_then_analyze`（A-7 的可测契约），不在这里手写三段 await。
+        // 差异闭包与逐票分析都要用 group：先克隆一份给差异，避免「借用 + 移动」撞车。
+        let group_for_diff = group.clone();
+        let pair = as_of::with_optional_asof(Some(ctx), async {
+            replay_then_analyze(
+                run_asof_reco_replay(&db_ref, &client_ref, &window_ref, &asof_generated_at),
+                |res| {
+                    let diff_group = group_for_diff.clone();
+                    let db = db_ref.clone();
+                    let ws = window_ref.clone();
+                    let at = asof_generated_at.clone();
+                    async move {
+                        match res {
+                            Ok(r) => {
+                                apply_asof_diff(&db, &ws, &at, &diff_group, Some(&r), None).await;
+                            },
+                            Err(e) => {
+                                tracing::warn!(
+                                    "[mover-recall-analysis] as_of={ws} 荐股回放失败（逐票分析照跑）: {e}"
+                                );
+                                apply_asof_diff(
+                                    &db,
+                                    &ws,
+                                    &at,
+                                    &diff_group,
+                                    None,
+                                    Some(e.as_str()),
+                                )
+                                .await;
+                            },
+                        }
+                    }
+                },
+                run_group_with_retry(
+                    &db_ref,
+                    &client_ref,
+                    &engine_ref,
+                    &batch_id_ref,
+                    &window_ref,
+                    group,
+                ),
+            )
+            .await
+        })
         .await;
 
         // guard 外回写事件状态（无 as_of 取数依赖，只是状态落库）
         for (event_id, result) in pair {
             match result {
                 Ok(analysis_id) => {
+                    if let Some(period) = period_by_event.get(&event_id) {
+                        write_analysis_signal(&db, &event_id, &analysis_id, period).await;
+                    }
                     if let Err(e) = mover_recall_events::finish_event(
                         &db,
                         &event_id,
@@ -736,6 +806,9 @@ async fn execute_batch(
         s.fail = fail_count;
         save_state(&db, s.clone()).await;
     }
+
+    // 轮级 as-of 摘要：本批覆盖过的每一轮都按「该轮全部已回填事件」重算一次。
+    persist_run_asof_summaries(&db, &touched_runs).await;
 
     // ── 终态 ─────────────────────────────────────────────────────────────────
     s.ok = ok_count;
@@ -844,7 +917,19 @@ async fn select_events(
             stats.skipped_by_share += 1;
             continue;
         }
-        let m = group.into_iter().next().expect("group 非空");
+        // 三键去重后**优先保留荐股链那一行**：as-of 回放证据只写在 reco 行上，
+        // 补分析的 anchor_event_id 又直接取这一行的 id ⇒ 若留下的是 serenity 行，
+        // 反思侧 `mover_event.asof_layer` 永远为空，「吃差异」会静默退化成「吃 live」。
+        let m = group
+            .into_iter()
+            .min_by_key(|m| {
+                if m.chain.as_deref() == Some("reco") {
+                    0
+                } else {
+                    1
+                }
+            })
+            .expect("group 非空");
         // 伪窗口：窗口起点早于该轮核查的数据起点 ⇒ 历史回补稀疏行拼出来的事件，不补分析。
         if let Some(from) = date_froms.get(&m.run_id) {
             if m.window_start.as_str() < from.as_str() {
@@ -963,6 +1048,526 @@ fn update_item(s: &mut MoverBatchState, event_id: &str, f: impl FnOnce(&mut Even
     }
 }
 
+// ── as-of 荐股回放与差异对账（阶段 A）────────────────────────────────────────
+//
+// ## 为什么两步、且回放在前
+//
+// `served_vars_with_analysis_tiers`（live 四档入口）会把 `stock_analyses.as_of_date =
+// window_start` 的定档变量并进 `reco_analysis_tiers`。若先跑逐票分析，漏检票自己的
+// as-of 分析会进入定档池 —— 等于把「我们已知的漏检清单」喂回候选池，回放不再独立。
+// 因此回放只吃 `load_reco_served_vars_db`（当前模板 + 当前闭环权重），并**刻意不喂**
+// 分析定档来源；差异 JSON 的 `analysisTierSourceIncluded=false` 是对这条的显式声明。
+//
+// ## 语义边界（不得混读）
+//
+// - 回放回答的是「**当前系统**在历史数据上会怎么选」，不是「当时的系统怎么选」
+//   （后者要历史权重，与逐票 as-of 分析口径不一致 —— PLAN 待拍板 #1 的推荐项）。
+// - `asof_layer` 与 `miss_layer` 分列：前者是反思的权威归因，后者是 live 事实；
+//   两者分歧本身是诊断信息，任何一侧都不得顶替另一侧。
+// - 池 `None`（取数缺痕）⇒ `unexplained`；池 `"[]"`（真空池）⇒ `pool_degraded`。
+//   把前者写成后者等于把「拿不到」演成「池子漏了它」。
+// - `picked_before_window` 在 as-of 侧**恒 false**：回放只有窗口起点一天，
+//   「此前覆盖」无从判定，不伪造。
+
+/// 涨幅榜取数上限（与 `refresh_mover_seed_db` 的 `MOVER_TOP_N` 同口径）。
+const ASOF_MOVER_TOP_N: u64 = 50;
+
+/// as-of 回放里的一条出票（只保留归因需要的四列）。
+#[derive(Debug, Clone)]
+struct AsOfPick {
+    code: String,
+    period: String,
+    style: String,
+    synthetic: bool,
+}
+
+/// 一次 `window_start` 的 as-of 回放证据包。
+#[derive(Debug, Default)]
+struct AsOfReplay {
+    /// 档位 → 实际池快照（`None` = 引擎没给；空串/`"[]"` = 真空池）
+    pools: std::collections::HashMap<String, Option<String>>,
+    picks: Vec<AsOfPick>,
+    /// (档位, 代码) → 截断风格（矩阵名目归一后）
+    trimmed: std::collections::HashMap<(String, String), Vec<String>>,
+    /// 档位 → 降级风格
+    degraded: std::collections::HashMap<String, Vec<String>>,
+    /// 档位 → 回放失败原因
+    failures: std::collections::HashMap<String, String>,
+    /// 档位 → 池来源构成（`SeedPoolOrigin` 序列化）
+    pool_origin: std::collections::HashMap<String, serde_json::Value>,
+    mover_seed_count: usize,
+}
+
+/// 跑一次 `window_start` 的 as-of 荐股回放，并在**同一 `generated_at`** 下落三张表。
+///
+/// 调用方必须先进入 `AsOfContext::new(window_start, ScheduledReplay)` 作用域 ——
+/// 本函数自身不建 scope（批次里同一次 guard 还要跑逐票分析）。
+async fn run_asof_reco_replay(
+    db: &axagent_harness::DatabaseConnection,
+    client: &Arc<AStockClient>,
+    window_start: &str,
+    generated_at: &str,
+) -> Result<AsOfReplay, String> {
+    let started = std::time::Instant::now();
+    let vars = recommender::reco_loop::load_reco_served_vars_db(db).await?;
+    // 先验按窗口起点截断（PLAN 待拍板 #7 的推荐项）：沿用全量样本会把
+    // window_start 之后才结算的样本算进历史决策。
+    let prior = horizon_prior::horizon_prior_from_vars_db(db, &vars, Some(window_start)).await;
+
+    // 涨幅榜：全市场、截至窗口起点最近交易日的收盘快照（ST 只能按名称剔）。
+    let mover_raw =
+        reco_seed::top_close_rows_by_change_on_or_before(db, window_start, ASOF_MOVER_TOP_N * 4)
+            .await
+            .map_err(|e| format!("读收盘快照失败: {e}"))?;
+    let mover: Vec<SeedItem> = mover_raw
+        .into_iter()
+        .filter(|(_, name)| !name.contains("ST"))
+        .take(ASOF_MOVER_TOP_N as usize)
+        .map(|(code, name)| (code, name, None))
+        .collect();
+
+    let weights_json = vars
+        .iter()
+        .find(|(k, _)| k == "reco_strategy_weights")
+        .and_then(|(_, v)| v.is_object().then(|| v.to_string()));
+
+    let results = recommender::recommend_stocks_multi(
+        client.clone(),
+        &Period::ALL,
+        &vars,
+        None,
+        prior,
+        SeedOverrides::asof_replay(mover.clone()),
+    )
+    .await;
+
+    let mut replay = AsOfReplay { mover_seed_count: mover.len(), ..Default::default() };
+    for (period, res) in results {
+        let p = period.as_str().to_string();
+        match res {
+            Err(e) => {
+                replay.failures.insert(p, e);
+            },
+            Ok(resp) => {
+                let snapshot = resp.seed_pool_snapshot.clone();
+                replay.pool_origin.insert(
+                    p.clone(),
+                    serde_json::to_value(resp.seed_pool_origin).unwrap_or(serde_json::Value::Null),
+                );
+                replay.degraded.insert(
+                    p.clone(),
+                    resp.degraded_styles.iter().map(|s| s.as_str().to_string()).collect(),
+                );
+                if let Some(detail) = resp.error_detail.as_deref() {
+                    // 两源全挂时引擎返回 `Ok` + `error_detail`（不静默出空表）——
+                    // 这同样是「本次回放失败」，池 `None` 只能落 `unexplained`。
+                    replay.failures.insert(p.clone(), detail.to_string());
+                }
+                let flat: Vec<RecoPick> =
+                    resp.picks.values().flat_map(|v| v.iter().cloned()).collect();
+                for pick in &flat {
+                    replay.picks.push(AsOfPick {
+                        code: pick.stock_code.clone(),
+                        period: p.clone(),
+                        // 与 trimmedStyles 同一写法（矩阵名目）：否则面板两列一名两形。
+                        style: mover_core::normalize_style_key(pick.style.as_str()).to_string(),
+                        synthetic: pick.synthetic,
+                    });
+                }
+                for t in &resp.scan_audit {
+                    let entry =
+                        replay.trimmed.entry((p.clone(), t.stock_code.clone())).or_default();
+                    let key = mover_core::normalize_style_key(t.style.as_str()).to_string();
+                    if !entry.contains(&key) {
+                        entry.push(key);
+                    }
+                }
+
+                // 逐档落库（与 live 同形态：picks / 池批次 / L3 留痕共用 generated_at）。
+                // 代际与用途显式具名：`as_of_date` = 窗口起点，`generated_at` = 本次运行时刻
+                // （差异查询按后者取，避免同一天多次回放串批 —— 代际门 R10）。
+                let as_of_date = Some(window_start);
+                let written = crate::commands::_shared_reco_pool::persist_reco_picks(
+                    db,
+                    &flat,
+                    snapshot.clone(),
+                    weights_json.clone(),
+                    generated_at,
+                    as_of_date,
+                    crate::commands::_shared_reco_pool::purpose::MOVER_REPLAY,
+                )
+                .await;
+                crate::commands::_shared_reco_pool::persist_reco_pool_batch(
+                    db,
+                    "reco",
+                    &p,
+                    snapshot.as_deref(),
+                    generated_at,
+                    as_of_date,
+                    crate::commands::_shared_reco_pool::purpose::MOVER_REPLAY,
+                )
+                .await;
+                if !resp.scan_audit.is_empty() {
+                    crate::commands::_shared_reco_pool::persist_reco_scan_audit(
+                        db,
+                        &resp.scan_audit,
+                        period,
+                        generated_at,
+                        as_of_date,
+                        crate::commands::_shared_reco_pool::purpose::MOVER_REPLAY,
+                    )
+                    .await;
+                }
+                tracing::info!(
+                    "[mover-recall-analysis] as_of={window_start} 档 {p}：出票 {} / 池 {} / 截断 {} / 落库 {written}",
+                    flat.len(),
+                    snapshot.as_deref().map(|s| s.len()).unwrap_or(0),
+                    resp.scan_audit.len()
+                );
+                replay.pools.insert(p, snapshot);
+            },
+        }
+    }
+    tracing::info!(
+        "[mover-recall-analysis] as_of={window_start} as-of 荐股回放完成：{} 档成功 / {} 档失败，\
+         涨幅榜种子 {} 只，耗时 {}ms",
+        replay.pools.len(),
+        replay.failures.len(),
+        replay.mover_seed_count,
+        started.elapsed().as_millis()
+    );
+    Ok(replay)
+}
+
+/// 差异对账的纯输入（只含判据需要的字段，便于不连库逐层断言）。
+struct AsOfDiffInput<'a> {
+    code: &'a str,
+    period: &'a str,
+    window_start: &'a str,
+    generated_at: &'a str,
+    live_layer: &'a str,
+    /// 该档实际池快照：`None` = 引擎没给；`Some("[]")` = 真空池。
+    pool_snapshot: Option<&'a str>,
+    same_period_styles: &'a [String],
+    other_periods: &'a [String],
+    trimmed_styles: &'a [String],
+    degraded_styles: &'a [String],
+    pool_origin: serde_json::Value,
+    mover_seed_count: usize,
+    failure: Option<&'a str>,
+}
+
+/// 纯函数：按 as-of 证据算归因层，并组装落库用的差异 JSON。
+///
+/// 复用 [`mover_core::attribute`]（八层语义不变），只替换证据来源。
+fn build_asof_diff(input: &AsOfDiffInput<'_>) -> (mover_core::MissLayer, serde_json::Value) {
+    let (in_pool, pool_state) = match input.pool_snapshot {
+        None => (None, "absent"),
+        Some(raw) if raw.trim().is_empty() || raw.trim() == "[]" => (Some(false), "empty"),
+        // 非空但形状不可解析 ⇒ `None`（无从判定），不得折成「不在池」。
+        Some(raw) => (mover_core::code_in_pool_snapshot_opt(Some(raw), input.code), "present"),
+    };
+    let period = input.period.parse::<Period>().ok();
+    let layer = if input.failure.is_some() {
+        // 回放整体失败/该档失败 ⇒ 没有证据可判，落兜底桶并写明原因。
+        mover_core::MissLayer::Unexplained
+    } else {
+        mover_core::attribute(&mover_core::Evidence {
+            picks_for_period: input.same_period_styles.to_vec(),
+            picked_in_other_period: !input.other_periods.is_empty(),
+            in_pool,
+            pool_degraded: pool_state == "empty",
+            chain_tier_active: period.map(mover_core::period_has_active_style).unwrap_or(false),
+            // as-of 回放只有窗口起点一天：不伪造「此前覆盖」（该层只在 live 归因保留）。
+            picked_before_window: false,
+            l3_scored_out_styles: input.trimmed_styles.to_vec(),
+        })
+    };
+    let json = serde_json::json!({
+        "asOfDate": input.window_start,
+        "generatedAt": input.generated_at,
+        "period": input.period,
+        "code": input.code,
+        "replayFailure": input.failure,
+        "poolState": pool_state,
+        "inPool": in_pool,
+        "poolOrigin": input.pool_origin,
+        "moverSeedCount": input.mover_seed_count,
+        "pickedStyles": input.same_period_styles,
+        "pickedOtherPeriods": input.other_periods,
+        "trimmedStyles": input.trimmed_styles,
+        "degradedStyles": input.degraded_styles,
+        // 显式声明：本轮 as-of 回放刻意未含「分析定档」来源（防把已知漏检清单喂回池）。
+        "analysisTierSourceIncluded": false,
+        "liveLayer": input.live_layer,
+        "divergedFromLive": layer.as_str() != input.live_layer,
+    });
+    (layer, json)
+}
+
+/// 把一次回放的差异逐事件落库（只写**荐股链**行；智选链不做同款回放）。
+async fn apply_asof_diff(
+    db: &axagent_harness::DatabaseConnection,
+    window_start: &str,
+    generated_at: &str,
+    group: &[PendingEvent],
+    replay: Option<&AsOfReplay>,
+    whole_failure: Option<&str>,
+) {
+    for p in group {
+        let code = p.model.stock_code.as_str();
+        let period = p.period.as_str();
+        let mut same_styles: Vec<String> = Vec::new();
+        let mut other_periods: Vec<String> = Vec::new();
+        if let Some(r) = replay {
+            for pick in &r.picks {
+                if pick.synthetic || pick.code != code {
+                    continue;
+                }
+                if pick.period == period {
+                    if !same_styles.contains(&pick.style) {
+                        same_styles.push(pick.style.clone());
+                    }
+                } else if !other_periods.contains(&pick.period) {
+                    other_periods.push(pick.period.clone());
+                }
+            }
+        }
+        let empty: Vec<String> = Vec::new();
+        let trimmed = replay
+            .and_then(|r| r.trimmed.get(&(period.to_string(), code.to_string())))
+            .unwrap_or(&empty);
+        let degraded = replay.and_then(|r| r.degraded.get(period)).unwrap_or(&empty);
+        let origin = replay
+            .and_then(|r| r.pool_origin.get(period))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let snapshot = replay.and_then(|r| r.pools.get(period)).and_then(|o| o.as_deref());
+        let failure = whole_failure
+            .map(str::to_string)
+            .or_else(|| replay.and_then(|r| r.failures.get(period)).cloned());
+
+        let input = AsOfDiffInput {
+            code,
+            period,
+            window_start,
+            generated_at,
+            live_layer: p.model.miss_layer.as_str(),
+            pool_snapshot: snapshot,
+            same_period_styles: &same_styles,
+            other_periods: &other_periods,
+            trimmed_styles: trimmed,
+            degraded_styles: degraded,
+            pool_origin: origin,
+            mover_seed_count: replay.map(|r| r.mover_seed_count).unwrap_or(0),
+            failure: failure.as_deref(),
+        };
+        let (layer, diff) = build_asof_diff(&input);
+        let diff_json = diff.to_string();
+        if let Err(e) = mover_recall_events::update_asof_for_key_in_run(
+            db,
+            &p.model.run_id,
+            code,
+            &p.model.anchor_date,
+            &p.model.period,
+            &mover_recall_events::AsOfEvidence {
+                generated_at,
+                layer: layer.as_str(),
+                diff_json: &diff_json,
+            },
+            now_ms(),
+        )
+        .await
+        {
+            tracing::warn!(
+                "[mover-recall-analysis] as_of={window_start} 事件 {} 差异回填失败: {e}",
+                p.model.id
+            );
+        }
+    }
+}
+
+/// 事件档决策摘要（纯函数，F-4）：从 `stock_analyses.horizon_decisions` 取**事件档**的
+/// 动作与置信度。双键取（snake / camel）与 `reviewable_horizons` 同一口径。
+///
+/// 无逐档决策 / 该档缺席 ⇒ `None`（面板显示「未记录」，不得折成 hold）。
+fn event_decision_signal_json(
+    horizon_decisions: Option<&str>,
+    period: &str,
+) -> Option<serde_json::Value> {
+    let v: serde_json::Value = serde_json::from_str(horizon_decisions?).ok()?;
+    let obj = v.as_object()?;
+    let camel = period.parse::<Period>().ok().map(|p| p.camel_key()).unwrap_or(period);
+    let d = obj.get(period).or_else(|| obj.get(camel))?;
+    Some(serde_json::json!({
+        "horizon": period,
+        "action": d.get("action").and_then(|x| x.as_str()),
+        "confidence": d.get("confidence").and_then(|x| x.as_f64()),
+    }))
+}
+
+/// 补分析成功后回写事件档决策摘要（F-4）。失败只 warn：补分析本身已成功，
+/// 面板少一行摘要不该把事件降级成 failed。
+async fn write_analysis_signal(
+    db: &axagent_harness::DatabaseConnection,
+    event_id: &str,
+    analysis_id: &str,
+    period: &str,
+) {
+    let model = match axagent_dao::repo::stock_analysis_snapshot::fetch_analysis_by_id(
+        db,
+        analysis_id,
+    )
+    .await
+    {
+        Ok(Some(m)) => m,
+        Ok(None) => {
+            tracing::warn!(
+                "[mover-recall-analysis] 事件 {event_id} 的补分析行 {analysis_id} 查不到 ⇒ 决策摘要不写"
+            );
+            return;
+        },
+        Err(e) => {
+            tracing::warn!("[mover-recall-analysis] 事件 {event_id} 读补分析行失败: {e}");
+            return;
+        },
+    };
+    let Some(signal) = event_decision_signal_json(model.horizon_decisions.as_deref(), period)
+    else {
+        return;
+    };
+    if let Err(e) =
+        mover_recall_events::update_analysis_signal(db, event_id, &signal.to_string(), now_ms())
+            .await
+    {
+        tracing::warn!("[mover-recall-analysis] 事件 {event_id} 决策摘要回写失败: {e}");
+    }
+}
+
+/// 轮级 as-of 摘要（纯函数）：输入该轮已回填 as-of 的事件行。
+///
+/// 返回 `(asof_layers_json, asof_diff_summary_json)`。两层口径：
+/// - `byLayer`：机械归因层 × 档（八层语义不变）；
+/// - `byPeriod`：面板要的六桶（进池未出票 / 进池被截断 / 别档出票 / 未进池 /
+///   池降级 / 口径不可用）。`unavailable` 桶专门收「池为 None 或回放失败」——
+///   把它并进 `notInPool` 就是把取数缺痕写成「池子漏了它」。
+fn aggregate_asof_summary(rows: &[EventModel]) -> (String, String) {
+    let mut layers: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+    let mut by_period: BTreeMap<String, BTreeMap<&'static str, usize>> = BTreeMap::new();
+    let mut by_style: BTreeMap<String, BTreeMap<String, (usize, usize)>> = BTreeMap::new();
+    let mut failures: Vec<String> = Vec::new();
+    let mut diverged = 0usize;
+
+    for row in rows {
+        let layer = row.asof_layer.clone().unwrap_or_else(|| "unavailable".to_string());
+        *layers.entry(layer.clone()).or_default().entry(row.period.clone()).or_default() += 1;
+
+        let diff: serde_json::Value = row
+            .asof_diff_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or(serde_json::Value::Null);
+        let in_pool = diff.get("inPool").and_then(|v| v.as_bool());
+        let bucket: &'static str = match layer.as_str() {
+            "recommended" => "picked",
+            "prior_covered" => "priorCovered",
+            "by_design" => "byDesign",
+            "l3_scored_out" => "inPoolTrimmed",
+            "other_period" => "otherPeriod",
+            "not_in_pool" => "notInPool",
+            "pool_degraded" => "poolDegraded",
+            _ => {
+                if in_pool == Some(true) {
+                    "inPoolNotPicked"
+                } else {
+                    "unavailable"
+                }
+            },
+        };
+        *by_period.entry(row.period.clone()).or_default().entry(bucket).or_default() += 1;
+
+        if let Some(arr) = diff.get("pickedStyles").and_then(|v| v.as_array()) {
+            for st in arr.iter().filter_map(|v| v.as_str()) {
+                by_style
+                    .entry(row.period.clone())
+                    .or_default()
+                    .entry(st.to_string())
+                    .or_default()
+                    .0 += 1;
+            }
+        }
+        if let Some(arr) = diff.get("trimmedStyles").and_then(|v| v.as_array()) {
+            for st in arr.iter().filter_map(|v| v.as_str()) {
+                by_style
+                    .entry(row.period.clone())
+                    .or_default()
+                    .entry(st.to_string())
+                    .or_default()
+                    .1 += 1;
+            }
+        }
+        if let Some(f) = diff.get("replayFailure").and_then(|v| v.as_str()) {
+            failures.push(format!("{} {}: {f}", row.period, row.stock_code));
+        }
+        if diff.get("divergedFromLive").and_then(|v| v.as_bool()) == Some(true) {
+            diverged += 1;
+        }
+    }
+
+    let style_json: BTreeMap<String, BTreeMap<String, serde_json::Value>> = by_style
+        .into_iter()
+        .map(|(p, styles)| {
+            (
+                p,
+                styles
+                    .into_iter()
+                    .map(|(s, (picked, trimmed))| {
+                        (s, serde_json::json!({"picked": picked, "trimmed": trimmed}))
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+
+    let layers_json = serde_json::to_string(&layers).unwrap_or_else(|_| "{}".to_string());
+    let summary_json = serde_json::json!({
+        "events": rows.len(),
+        "byLayer": layers,
+        "byPeriod": by_period,
+        "byStyle": style_json,
+        "divergedFromLive": diverged,
+        "failures": failures,
+        "analysisTierSourceIncluded": false,
+    })
+    .to_string();
+    (layers_json, summary_json)
+}
+
+/// 批次结束时按轮重算 as-of 摘要并回填 `mover_recall_runs`。
+async fn persist_run_asof_summaries(
+    db: &axagent_harness::DatabaseConnection,
+    run_ids: &std::collections::HashSet<String>,
+) {
+    for run_id in run_ids {
+        match mover_recall_events::list_asof_rows_for_run(db, run_id).await {
+            Ok(rows) if !rows.is_empty() => {
+                let (layers, summary) = aggregate_asof_summary(&rows);
+                if let Err(e) = axagent_dao::repo::mover_recall_runs::update_asof_summary(
+                    db, run_id, &layers, &summary,
+                )
+                .await
+                {
+                    tracing::warn!("[mover-recall-analysis] 轮次 {run_id} as-of 摘要回填失败: {e}");
+                }
+            },
+            Ok(_) => {},
+            Err(e) => {
+                tracing::warn!("[mover-recall-analysis] 轮次 {run_id} as-of 事件读取失败: {e}")
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod cron_config_tests {
     use super::*;
@@ -1040,5 +1645,282 @@ mod cron_config_tests {
 
         let none = empty_selection_message(SelectionStats::default(), 0.5);
         assert!(none.contains("没有待补分析"), "实得 {none}");
+    }
+}
+
+#[cfg(test)]
+mod asof_diff_tests {
+    use super::*;
+
+    /// 纯函数夹具：只有「池快照 / 同档出票 / 别档出票 / 截断 / 失败」五组证据会变，
+    /// 其余字段固定，让每条断言只对着一层。
+    struct Case<'a> {
+        pool: Option<&'a str>,
+        same: &'a [String],
+        other: &'a [String],
+        trimmed: &'a [String],
+        failure: Option<&'a str>,
+    }
+
+    fn diff(case: Case<'_>) -> (mover_core::MissLayer, serde_json::Value) {
+        let degraded: Vec<String> = Vec::new();
+        let input = AsOfDiffInput {
+            code: "002696",
+            period: "mid",
+            window_start: "2026-09-04",
+            generated_at: "2026-10-24T10:00:00.000",
+            live_layer: "not_in_pool",
+            pool_snapshot: case.pool,
+            same_period_styles: case.same,
+            other_periods: case.other,
+            trimmed_styles: case.trimmed,
+            degraded_styles: &degraded,
+            pool_origin: serde_json::json!({"hot": 1, "industry": 2, "fallback": 3, "mover": 4}),
+            mover_seed_count: 50,
+            failure: case.failure,
+        };
+        build_asof_diff(&input)
+    }
+
+    fn none() -> Vec<String> {
+        Vec::new()
+    }
+
+    /// 1) 进池、无出票、无截断留痕 ⇒ 兜底桶（策略内部否决不落痕，不可归因）。
+    #[test]
+    fn in_pool_without_evidence_is_unexplained_and_keeps_pool_facts() {
+        let (layer, json) = diff(Case {
+            pool: Some(r#"[["002696","百洋股份"]]"#),
+            same: &none(),
+            other: &none(),
+            trimmed: &none(),
+            failure: None,
+        });
+        assert_eq!(layer, mover_core::MissLayer::Unexplained);
+        assert_eq!(json["inPool"], serde_json::Value::Bool(true));
+        assert_eq!(json["poolState"], "present");
+        // 显式声明：本轮回放未含分析定档来源（防止把 not_in_pool 读成 live 也没有）
+        assert_eq!(json["analysisTierSourceIncluded"], serde_json::Value::Bool(false));
+        assert_eq!(json["moverSeedCount"], 50);
+        // live 层是 not_in_pool、as-of 层是 unexplained（入池但无留痕）⇒ **必须标成分歧**：
+        // 「池里没有它」与「池里有它但没法归因」是两个不同的诊断。
+        assert_eq!(json["divergedFromLive"], serde_json::Value::Bool(true));
+    }
+
+    /// 2) 进池 + 有截断留痕 ⇒ l3_scored_out，且 styles 原样落进差异 JSON。
+    #[test]
+    fn trimmed_style_is_l3_scored_out_with_styles_recorded() {
+        let trimmed = vec!["trend".to_string()];
+        let (layer, json) = diff(Case {
+            pool: Some(r#"[["002696","百洋股份"]]"#),
+            same: &none(),
+            other: &none(),
+            trimmed: &trimmed,
+            failure: None,
+        });
+        assert_eq!(layer, mover_core::MissLayer::L3ScoredOut);
+        assert_eq!(json["trimmedStyles"][0], "trend");
+        assert_eq!(json["inPool"], serde_json::Value::Bool(true));
+    }
+
+    /// 3) 不在池 ⇒ not_in_pool（池快照真实非空）。
+    #[test]
+    fn absent_from_real_pool_is_not_in_pool() {
+        let (layer, json) = diff(Case {
+            pool: Some(r#"[["600000","浦发银行"]]"#),
+            same: &none(),
+            other: &none(),
+            trimmed: &none(),
+            failure: None,
+        });
+        assert_eq!(layer, mover_core::MissLayer::NotInPool);
+        assert_eq!(json["inPool"], serde_json::Value::Bool(false));
+        assert_eq!(json["poolState"], "present");
+    }
+
+    /// 4) 池为 `None`（取数缺痕）⇒ unexplained，**不得**落 not_in_pool。
+    #[test]
+    fn missing_pool_snapshot_is_unexplained_not_not_in_pool() {
+        let (layer, json) = diff(Case {
+            pool: None,
+            same: &none(),
+            other: &none(),
+            trimmed: &none(),
+            failure: None,
+        });
+        assert_eq!(layer, mover_core::MissLayer::Unexplained);
+        assert_eq!(json["inPool"], serde_json::Value::Null);
+        assert_eq!(json["poolState"], "absent");
+    }
+
+    /// 5) 池为 `"[]"`（真空池）⇒ pool_degraded，与 `None` 严格分列。
+    #[test]
+    fn empty_pool_is_pool_degraded() {
+        for raw in ["[]", "  [] ", ""] {
+            let (layer, json) = diff(Case {
+                pool: Some(raw),
+                same: &none(),
+                other: &none(),
+                trimmed: &none(),
+                failure: None,
+            });
+            assert_eq!(layer, mover_core::MissLayer::PoolDegraded, "池 {raw:?} 应判降级");
+            assert_eq!(json["poolState"], "empty", "池 {raw:?} 状态");
+        }
+    }
+
+    /// 6) 同档有 as-of 出票 ⇒ recommended（即使池里查不到，也以出票为准）。
+    #[test]
+    fn same_period_pick_is_recommended() {
+        let same = vec!["capital".to_string()];
+        let (layer, json) =
+            diff(Case { pool: None, same: &same, other: &none(), trimmed: &none(), failure: None });
+        assert_eq!(layer, mover_core::MissLayer::Recommended);
+        assert_eq!(json["pickedStyles"][0], "capital");
+        // live 是 not_in_pool、as-of 是 recommended ⇒ 必须标成分歧（诊断信息）
+        assert_eq!(json["divergedFromLive"], serde_json::Value::Bool(true));
+    }
+
+    /// 7) 只在别的档出票 ⇒ other_period，并记下是哪些档。
+    #[test]
+    fn pick_in_other_period_is_other_period() {
+        let other = vec!["short".to_string()];
+        let (layer, json) = diff(Case {
+            pool: Some(r#"[["002696","百洋股份"]]"#),
+            same: &none(),
+            other: &other,
+            trimmed: &none(),
+            failure: None,
+        });
+        assert_eq!(layer, mover_core::MissLayer::OtherPeriod);
+        assert_eq!(json["pickedOtherPeriods"][0], "short");
+    }
+
+    /// 8) 回放整体失败 ⇒ unexplained + 失败原因落 JSON；池事实仍如实记录。
+    #[test]
+    fn replay_failure_is_unexplained_with_reason() {
+        let (layer, json) = diff(Case {
+            pool: None,
+            same: &none(),
+            other: &none(),
+            trimmed: &none(),
+            failure: Some("行情与K线数据源均不可用"),
+        });
+        assert_eq!(layer, mover_core::MissLayer::Unexplained);
+        assert_eq!(json["replayFailure"], "行情与K线数据源均不可用");
+        assert_eq!(json["poolState"], "absent");
+    }
+
+    /// A-7 顺序契约：回放先于分析，差异夹在中间；三步都执行一次。
+    #[tokio::test]
+    async fn replay_runs_before_diff_and_analysis() {
+        use std::sync::Arc;
+        let order = Arc::new(tokio::sync::Mutex::new(Vec::<&'static str>::new()));
+
+        let o1 = order.clone();
+        let o2 = order.clone();
+        let o3 = order.clone();
+        let analysis = replay_then_analyze(
+            async move {
+                o1.lock().await.push("replay");
+                Ok::<u8, String>(7)
+            },
+            move |res| async move {
+                assert_eq!(res, Ok(7), "差异必须看到回放结果");
+                o2.lock().await.push("diff");
+            },
+            async move {
+                o3.lock().await.push("analyze");
+                9u8
+            },
+        )
+        .await;
+
+        assert_eq!(analysis, 9);
+        assert_eq!(
+            *order.lock().await,
+            vec!["replay", "diff", "analyze"],
+            "顺序不可换：先分析会把漏检票自己的定档变量喂回候选池"
+        );
+    }
+
+    /// 汇总纯函数：六桶互斥、`unavailable` 不收「进池未出票」，失败清单与分歧计数可读。
+    #[test]
+    fn summary_buckets_are_exclusive_and_keep_unavailable_separate() {
+        fn row(period: &str, layer: &str, in_pool: Option<bool>) -> EventModel {
+            EventModel {
+                id: format!("e-{period}-{layer}"),
+                run_id: "mrr-t".to_string(),
+                stock_code: "002696".to_string(),
+                stock_name: "百洋股份".to_string(),
+                period: period.to_string(),
+                anchor_date: "2026-09-30".to_string(),
+                window_start: "2026-09-04".to_string(),
+                window_end: "2026-09-30".to_string(),
+                window_days: 28,
+                cum_gain_pct: 30.0,
+                max_daily_pct: 10.0,
+                threshold_pct: 30.0,
+                market_type: "main_sz".to_string(),
+                chain: Some("reco".to_string()),
+                miss_layer: "not_in_pool".to_string(),
+                picked_any_period: 0,
+                scored_out_styles_json: None,
+                batch_id: None,
+                analysis_id: None,
+                reflection_id: None,
+                status: "analyzed".to_string(),
+                error_detail: None,
+                reflow_note: None,
+                reflow_pending: None,
+                pool_evidence_at: None,
+                analysis_signal_at_start: None,
+                asof_reco_generated_at: Some("2026-10-24T10:00:00.000".to_string()),
+                asof_layer: Some(layer.to_string()),
+                asof_diff_json: Some(
+                    serde_json::json!({
+                        "inPool": in_pool,
+                        // 只有「进池未出票」那行带出票风格；其余行不得凭空给 capital 记一次命中。
+                        "pickedStyles": if in_pool == Some(true) && layer == "unexplained" {
+                            serde_json::json!(["capital"])
+                        } else {
+                            serde_json::json!([])
+                        },
+                        // 截断风格只属于 l3_scored_out 行。
+                        "trimmedStyles": if layer == "l3_scored_out" {
+                            serde_json::json!(["trend"])
+                        } else {
+                            serde_json::json!([])
+                        },
+                        "divergedFromLive": true,
+                        "replayFailure": null,
+                    })
+                    .to_string(),
+                ),
+                created_at_ms: 1,
+                updated_at_ms: 1,
+            }
+        }
+        let rows = vec![
+            row("mid", "unexplained", Some(true)),
+            row("mid", "not_in_pool", Some(false)),
+            row("short", "l3_scored_out", Some(true)),
+            row("long", "unexplained", None),
+        ];
+        let (layers_json, summary_json) = aggregate_asof_summary(&rows);
+        let layers: serde_json::Value = serde_json::from_str(&layers_json).unwrap();
+        assert_eq!(layers["unexplained"]["mid"], 1);
+        assert_eq!(layers["unexplained"]["long"], 1);
+
+        let summary: serde_json::Value = serde_json::from_str(&summary_json).unwrap();
+        assert_eq!(summary["byPeriod"]["mid"]["inPoolNotPicked"], 1);
+        assert_eq!(summary["byPeriod"]["mid"]["notInPool"], 1);
+        assert_eq!(summary["byPeriod"]["short"]["inPoolTrimmed"], 1);
+        // 池 None 的行落 unavailable，不得被并进 notInPool
+        assert_eq!(summary["byPeriod"]["long"]["unavailable"], 1);
+        assert_eq!(summary["byPeriod"]["long"]["notInPool"], serde_json::Value::Null);
+        assert_eq!(summary["divergedFromLive"], 4);
+        assert_eq!(summary["byStyle"]["mid"]["capital"]["picked"], 1);
+        assert_eq!(summary["byStyle"]["short"]["trend"]["trimmed"], 1);
     }
 }

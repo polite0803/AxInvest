@@ -89,6 +89,10 @@ impl ValueStrategy {
             Period::UltraShort => {
                 let pe_max = read_f64(vars, "val_ultra_short_pe_max", 60.0);
                 if pe > 0.0 && pe > pe_max {
+                    tracing::debug!(
+                        "[value] {code} 档位 {:?} 被 PE 门拦下: PE {pe:.1} > 上限 {pe_max:.1}",
+                        self.period
+                    );
                     return None;
                 }
                 // 均线窗口 = 日历 10 日换算到当前尺度的 bar 数（下限 5 根）
@@ -115,6 +119,10 @@ impl ValueStrategy {
             Period::Short => {
                 let pe_max = read_f64(vars, "val_short_pe_max", 50.0);
                 if pe > 0.0 && pe > pe_max {
+                    tracing::debug!(
+                        "[value] {code} 档位 {:?} 被 PE 门拦下: PE {pe:.1} > 上限 {pe_max:.1}",
+                        self.period
+                    );
                     return None;
                 }
                 let ma_period = (crate::recommender::scale::bars_for_daily_span(
@@ -140,10 +148,18 @@ impl ValueStrategy {
             Period::Mid => {
                 let pe_max = read_f64(vars, "val_mid_pe_max", 40.0);
                 if pe > 0.0 && pe > pe_max {
+                    tracing::debug!(
+                        "[value] {code} 档位 {:?} 被 PE 门拦下: PE {pe:.1} > 上限 {pe_max:.1}",
+                        self.period
+                    );
                     return None;
                 }
                 let pb_max = read_f64(vars, "val_mid_pb_max", 8.0);
                 if pb > 0.0 && pb > pb_max {
+                    tracing::debug!(
+                        "[value] {code} 档位 {:?} 被 PB 门拦下: PB {pb:.2} > 上限 {pb_max:.2}",
+                        self.period
+                    );
                     return None;
                 }
                 let mut r = Vec::new();
@@ -158,10 +174,18 @@ impl ValueStrategy {
             Period::Long => {
                 let pe_max = read_f64(vars, "val_long_pe_max", 35.0);
                 if pe > 0.0 && pe > pe_max {
+                    tracing::debug!(
+                        "[value] {code} 档位 {:?} 被 PE 门拦下: PE {pe:.1} > 上限 {pe_max:.1}",
+                        self.period
+                    );
                     return None;
                 }
                 let pb_max = read_f64(vars, "val_long_pb_max", 6.0);
                 if pb > 0.0 && pb > pb_max {
+                    tracing::debug!(
+                        "[value] {code} 档位 {:?} 被 PB 门拦下: PB {pb:.2} > 上限 {pb_max:.2}",
+                        self.period
+                    );
                     return None;
                 }
                 let mut r = Vec::new();

@@ -21,6 +21,7 @@ pub mod error;
 pub mod fundamentals_report;
 pub mod gate;
 pub mod indicators;
+pub mod task_cancel;
 // G3 industry_chain 已于 P2-8 阶段迁回 axagent-stock-analysis crate（架构归属：
 // 产业链定义/传导算法/新闻映射均为分析逻辑而非数据获取）。
 // 调用方应使用 `axagent_analysis_engine::industry_chain::*`。
@@ -1685,6 +1686,35 @@ impl AStockClient {
     ///
     /// fetch_fn 内部应完成：vendor 方法调用 → 质量检查 → 缓存写入（如有）。
     /// 通过闭包捕获额外参数（如 period/limit/adj_type）。
+    /// 链放弃时的最终错误组装：**两种缺席各占一句**。
+    ///
+    /// 有源明确回答过「无此代码数据」时以它为主句——那是**答案**（未上市/已退市，
+    /// 重试永远不会好转）；传输/接口失败降为附注（换时段可能好转）。没有任何源
+    /// 回答过（纯故障）时原样上抛 `fallback`/`last_err`，不虚构「无数据」结论。
+    fn compose_chain_give_up(
+        route_key: &str,
+        stock_code: &str,
+        empty_sources: &[String],
+        fail_sources: &[String],
+        fallback: impl Into<Option<DataError>>,
+    ) -> DataError {
+        if empty_sources.is_empty() {
+            return fallback.into().unwrap_or_else(|| DataError::VendorError {
+                vendor: "all".into(),
+                message: format!("{route_key} {stock_code} 所有数据源均不可用"),
+            });
+        }
+        let mut message = format!(
+            "{route_key} {stock_code} {}（{}）",
+            crate::error::NO_DATA_FOR_CODE_MARK,
+            empty_sources.join("、"),
+        );
+        if !fail_sources.is_empty() {
+            message.push_str(&format!("；另有 {} 请求失败", fail_sources.join("、")));
+        }
+        DataError::VendorError { vendor: "all".into(), message }
+    }
+
     async fn try_vendors_retry<T, F>(
         &self,
         stock_code: &str,
@@ -1715,6 +1745,13 @@ impl AStockClient {
             }
         }
         let mut retry_count = 0u32;
+        // 跨轮累计「哪些源明确回答过无数据（NotFound / 空数据都是**答案**）/
+        // 哪些源是传输或接口故障」。放弃时按 compose_chain_give_up 组装：
+        // 答案在前、故障附注在后——否则链尾一家传输失败的错误会把
+        // 「tencent/sina 都说没这代码」盖掉（2026-10-23 实测 001235 未上市新股
+        // 被报成 browser_eastmoney 网络错误，永远修不好却看着像坏了）。
+        let mut empty_sources: Vec<String> = Vec::new();
+        let mut fail_sources: Vec<String> = Vec::new();
 
         loop {
             let mut last_err = None;
@@ -1762,12 +1799,18 @@ impl AStockClient {
                         stock_code,
                         retry_count
                     );
-                    return Err(last_err.unwrap_or_else(|| DataError::VendorError {
-                        vendor: "all".into(),
-                        message: format!(
-                            "{route_key} {stock_code} 所有数据源均不可用（全部 vendor 已降级）"
-                        ),
-                    }));
+                    return Err(Self::compose_chain_give_up(
+                        route_key,
+                        stock_code,
+                        &empty_sources,
+                        &fail_sources,
+                        Some(DataError::VendorError {
+                            vendor: "all".into(),
+                            message: format!(
+                                "{route_key} {stock_code} 所有数据源均不可用（全部 vendor 已降级）"
+                            ),
+                        }),
+                    ));
                 }
                 // 首次尝试: 允许完整列表兜底（健康状态可能过时）
                 tracing::warn!(
@@ -1822,8 +1865,20 @@ impl AStockClient {
                             // 判据收口到 `DataError::is_empty_data`：分红链路也用同一条，
                             // 避免「重试时算空数据、调用方却算故障」两套口径。
                             let is_empty_data = e.is_empty_data();
+                            // 「源给出的答案」= 空数据或 NotFound（判据先例见 P1-3：
+                            // NotFound 是源对「没有这份数据」的正式回答）。
                             // 只要有任意一次失败不是「空数据」，本轮就不是纯空数据结果，
                             // 保留重试资格（网络抖动、限流等仍值得退避重试）
+                            let answered_no_data =
+                                is_empty_data || matches!(e, DataError::NotFound(_));
+                            let bucket = if answered_no_data {
+                                &mut empty_sources
+                            } else {
+                                &mut fail_sources
+                            };
+                            if !bucket.iter().any(|s| s == name) {
+                                bucket.push(name.to_string());
+                            }
                             if !is_empty_data {
                                 round_all_empty = false;
                             }
@@ -1839,6 +1894,20 @@ impl AStockClient {
                                 DataError::VendorError { .. } if is_empty_data => {
                                     tracing::info!(
                                         "[降级] {} {} {} 返回空数据(非故障)，不触发 vendor 降级",
+                                        route_key,
+                                        stock_code,
+                                        name
+                                    );
+                                },
+                                // vendor 级「能力缺口」（如腾讯 K 线端点不支持 920 号段）：
+                                // 确定性的接口边界，不进健康窗口 —— 批量扫一段不被支持的代码
+                                // （353 只 920 码）每只记一次失败会立刻把 vendor 全局降级，
+                                // 连坐报价/财务等其它路由；也不算「无数据回答」（它没有回答，
+                                // 写进 empty_sources 会伪造「该源都说没这代码」），按 fail_sources
+                                // 附注处理（上方 bucket 分桶已覆盖）。
+                                DataError::VendorError { .. } if e.is_capability_gap() => {
+                                    tracing::info!(
+                                        "[capability] {} {} {} 能力缺口，换下一源: {e}",
                                         route_key,
                                         stock_code,
                                         name
@@ -1867,10 +1936,16 @@ impl AStockClient {
                         route_key,
                         stock_code
                     );
-                    return Err(last_err.unwrap_or_else(|| DataError::VendorError {
-                        vendor: "all".into(),
-                        message: format!("{route_key} {stock_code} 所有数据源均无数据"),
-                    }));
+                    return Err(Self::compose_chain_give_up(
+                        route_key,
+                        stock_code,
+                        &empty_sources,
+                        &fail_sources,
+                        Some(DataError::VendorError {
+                            vendor: "all".into(),
+                            message: format!("{route_key} {stock_code} 所有数据源均无数据"),
+                        }),
+                    ));
                 }
                 // V54: 若可用的 vendor 数量 ≤ 2（即数据源单一或大部分已降级），
                 // 跳过重试。因为：1-2 个 vendor 全部首次尝试失败几乎不可能是瞬态问题
@@ -1895,10 +1970,16 @@ impl AStockClient {
                         stock_code,
                         names_to_try.len()
                     );
-                    return Err(last_err.unwrap_or_else(|| DataError::VendorError {
-                        vendor: "all".into(),
-                        message: format!("{route_key} {stock_code} 所有数据源均不可用"),
-                    }));
+                    return Err(Self::compose_chain_give_up(
+                        route_key,
+                        stock_code,
+                        &empty_sources,
+                        &fail_sources,
+                        Some(DataError::VendorError {
+                            vendor: "all".into(),
+                            message: format!("{route_key} {stock_code} 所有数据源均不可用"),
+                        }),
+                    ));
                 }
                 retry_count += 1;
                 let delay = (1u64 << retry_count) - 1; // 指数退避: 1s, 3s
@@ -1913,10 +1994,13 @@ impl AStockClient {
                 continue;
             }
 
-            return Err(last_err.unwrap_or_else(|| DataError::VendorError {
-                vendor: "all".into(),
-                message: format!("{route_key} {stock_code} 所有数据源均不可用"),
-            }));
+            return Err(Self::compose_chain_give_up(
+                route_key,
+                stock_code,
+                &empty_sources,
+                &fail_sources,
+                last_err,
+            ));
         }
     }
 
@@ -9656,5 +9740,67 @@ mod single_source_retry_tests {
                 assert!(got.is_err(), "结构类故障不得重试（V54 原行为必须保住）");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod chain_give_up_composition_tests {
+    use super::*;
+    use crate::error::NO_DATA_FOR_CODE_MARK;
+
+    /// 幽灵代码（未上市/已退市）：答案源与故障源都在场 ⇒ 主句必须是「无此代码行情数据」，
+    /// 传输失败只配附注。链尾 browser_eastmoney 的网络错误不得盖掉「腾讯/新浪都说没有」。
+    #[test]
+    fn mixed_answer_and_failure_leads_with_no_data() {
+        let err = AStockClient::compose_chain_give_up(
+            "klines",
+            "001235",
+            &["tencent".to_string(), "sina".to_string()],
+            &["eastmoney_push2".to_string(), "browser_eastmoney".to_string()],
+            Some(DataError::VendorError {
+                vendor: "browser_eastmoney".into(),
+                message: "page.goto failed: ERR_EMPTY_RESPONSE".into(),
+            }),
+        );
+        let msg = match &err {
+            DataError::VendorError { message, .. } => message.clone(),
+            other => panic!("expect VendorError, got {other:?}"),
+        };
+        assert!(msg.contains(NO_DATA_FOR_CODE_MARK), "主句必须带链级标记: {msg}");
+        assert!(msg.contains("tencent、sina"), "答案源要逐个点名: {msg}");
+        assert!(msg.contains("eastmoney_push2、browser_eastmoney"), "故障源附注在后: {msg}");
+        assert!(err.no_data_for_code(), "调用方据此把「无行情」从「失败」里分出来");
+    }
+
+    /// 纯故障（没有任何源回答过）⇒ 原样上抛 fallback，不得虚构「无数据」结论。
+    #[test]
+    fn pure_failure_passes_fallback_through() {
+        let fallback = DataError::VendorError {
+            vendor: "all".into(),
+            message: "klines 001235 所有数据源均不可用（全部 vendor 已降级）".into(),
+        };
+        let err = AStockClient::compose_chain_give_up(
+            "klines",
+            "001235",
+            &[],
+            &["browser_eastmoney".to_string()],
+            Some(fallback),
+        );
+        assert!(!err.no_data_for_code(), "没有源回答过 ⇒ 不得冒充链级无数据");
+        assert!(err.to_string().contains("全部 vendor 已降级"), "fallback 原样保留");
+    }
+
+    /// 全部源都回答「没有」⇒ 也是链级无数据（V55 既有语义，只是现在带点名与标记）。
+    #[test]
+    fn all_sources_answered_no_data() {
+        let err = AStockClient::compose_chain_give_up(
+            "klines",
+            "300060",
+            &["tencent".to_string(), "sina".to_string(), "xueqiu".to_string()],
+            &[],
+            None::<DataError>,
+        );
+        assert!(err.no_data_for_code());
+        assert!(err.is_empty_data(), "对分红/复权等既有消费方仍是「空数据」语义");
     }
 }

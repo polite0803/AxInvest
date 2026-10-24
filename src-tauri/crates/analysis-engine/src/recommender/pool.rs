@@ -10,6 +10,57 @@ use super::FALLBACK_STOCKS;
 /// 候选池条目：(code, name, sector)
 pub type SeedItem = (String, String, Option<String>);
 
+/// **种子来源覆盖**：五个「进程静态 / 当日刷新」来源的可选替换值。
+///
+/// `None` = 沿用现有静态（live 行为不变）；`Some(v)` = 用 `v` 替换该来源，
+/// **包括 `Some(vec![])`（明确置空，不回落到静态）** —— 这一点是关键：
+/// as-of 回放要求「用户标的 / 漏检直供 / 回灌清单 / 智选注入」四源全部为空
+/// （它们来自今天或未来，会把已知名单带进历史），而 `None` 表示「没管这一源」，
+/// 两者混同就等于把静态残留悄悄放回池子。
+///
+/// 热股 / 行业 / 内置兜底不在覆盖表内：它们由 `build_seed_pool` 在 as-of scope 内
+/// 走真实取数（拿不到就是结构性缺口，如实记 `degradations`），与 live 同源。
+#[derive(Debug, Clone, Default)]
+pub struct SeedOverrides {
+    /// 当日涨幅榜（`market_daily_close` 收盘快照）
+    pub mover: Option<Vec<SeedItem>>,
+    /// 漏检核查直供
+    pub miss: Option<Vec<SeedItem>>,
+    /// 回灌清单
+    pub reflow: Option<Vec<SeedItem>>,
+    /// 用户标的（自选 ∪ 本机手工）
+    pub user: Option<Vec<SeedItem>>,
+    /// 趋势智选注入
+    pub serenity: Option<Vec<SeedItem>>,
+}
+
+impl SeedOverrides {
+    /// 是否真的替换了某个来源。`false` = 缺省（等同旧行为，可用结果缓存）。
+    ///
+    /// 回放必须跳过缓存：缓存键只有档位、没有截止日 —— 命中一次实盘结果就会把
+    /// 「今天的池」当成「窗口起点那一刻的池」返回，而响应里 `as_of_date` 仍是本轮
+    /// 回放的截止日，看起来完全正常（最坏的一种前视）。
+    pub fn is_active(&self) -> bool {
+        self.mover.is_some()
+            || self.miss.is_some()
+            || self.reflow.is_some()
+            || self.user.is_some()
+            || self.serenity.is_some()
+    }
+
+    /// **as-of 回放**的唯一构造入口：涨幅榜用调用方按截止日取好的快照，
+    /// 其余四源显式置空（不是 `None` —— 见结构体文档的「防回落」理由）。
+    pub fn asof_replay(mover: Vec<SeedItem>) -> Self {
+        Self {
+            mover: Some(mover),
+            miss: Some(Vec::new()),
+            reflow: Some(Vec::new()),
+            user: Some(Vec::new()),
+            serenity: Some(Vec::new()),
+        }
+    }
+}
+
 /// 建池真实依赖的两个 vendor 方法名（也是 `astock_daily_snapshot.method` 的取值写法）。
 ///
 /// 为什么导出：时间旅行批次要在进 guard 之前判断"所选日期到底有没有建池输入"，

@@ -4,6 +4,7 @@
 
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
+use crate::commands::error_code::common as common_err;
 use crate::commands::error_code::stock_workflow as wf_err;
 use crate::commands::error_code::trading as trading_err;
 // `SOURCE_TEMPLATE_ID` / `TEMPLATE_VERSION`：图版本代际对照命令取用（权威定义在种子文件，
@@ -1414,6 +1415,18 @@ pub async fn get_stock_analysis(
                 obj.insert("dashboardReport".to_string(), report_val);
             }
             obj.insert("dashboardMd".to_string(), serde_json::Value::String(md));
+        }
+    }
+    // R-4：把最终决策 JSON 的必填形状缺口显式附在详情上（只读、非破坏）。
+    // 空缺口不写键，保持既有响应形状不变。
+    if let Some(obj) = value.as_object_mut() {
+        let gaps =
+            axagent_analysis_engine::decision_quality::schema_gaps(model.decision_json.as_deref());
+        if !gaps.is_empty() {
+            obj.insert(
+                "decisionSchemaGaps".to_string(),
+                serde_json::to_value(gaps).unwrap_or(serde_json::Value::Null),
+            );
         }
     }
 
@@ -2961,32 +2974,44 @@ pub async fn optimize_scoring_weights(
 #[tauri::command]
 pub async fn backtest_reco_strategies(
     state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
     as_of_date: Option<String>,
-) -> Result<axagent_analysis_engine::backtest_strategy::BacktestComparisonResponse, String> {
+) -> Result<crate::commands::background_tasks::TaskAccepted, String> {
+    // as-of 解析留在命令入口：非法日期同步报错，不进任务台账
     let ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
-    axagent_astock_data::as_of::with_optional_asof(ctx, async {
-        crate::commands::background_tasks::run_tracked(
-            state.harness.db(),
-            "荐股策略历史回测对比",
-            "reco-strategy-backtest",
-            "最近一次荐股的正负样本两组策略信号历史回溯对比",
-            backtest_reco_strategies_inner(&state),
-            |r| {
-                format!(
-                    "正样本 {} 只 / 负样本 {} 只 / 跳过策略 {} 项",
-                    r.positive_stocks.len(),
-                    r.negative_stocks.len(),
-                    r.skipped.len()
-                )
-            },
-        )
-        .await
-    })
+    let db = state.harness.db().clone();
+    let client = state.astock_client.clone();
+    crate::commands::background_tasks::spawn_tracked(
+        &app_handle,
+        state.harness.db(),
+        "荐股策略历史回测对比",
+        "reco-strategy-backtest",
+        "最近一次荐股的正负样本两组策略信号历史回溯对比",
+        async move {
+            // as-of 作用域建在 spawn 出去的任务**内部**：task_local 与进程级栈都随
+            // 这个任务走、退出即清。ctx 以值显式传入，不依赖调用方 task 的可见性
+            // （task_local 不跨 spawn，这是 as_of 模块文档里的已知边界）。
+            axagent_astock_data::as_of::with_optional_asof(
+                ctx,
+                backtest_reco_strategies_inner(&db, &client),
+            )
+            .await
+        },
+        |r| {
+            format!(
+                "正样本 {} 只 / 负样本 {} 只 / 跳过策略 {} 项",
+                r.positive_stocks.len(),
+                r.negative_stocks.len(),
+                r.skipped.len()
+            )
+        },
+    )
     .await
 }
 
 async fn backtest_reco_strategies_inner(
-    state: &State<'_, AppState>,
+    db: &axagent_harness::DatabaseConnection,
+    client: &std::sync::Arc<axagent_astock_data::AStockClient>,
 ) -> Result<axagent_analysis_engine::backtest_strategy::BacktestComparisonResponse, String> {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
@@ -3009,7 +3034,7 @@ async fn backtest_reco_strategies_inner(
         // 「找得到批次、批内过滤后为空」的假「荐股记录为空」。
         .filter(reco_picks::Column::Synthetic.eq(0))
         .order_by_desc(reco_picks::Column::GeneratedAt)
-        .one(state.harness.db())
+        .one(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询荐股记录失败: {e}"))
@@ -3032,7 +3057,7 @@ async fn backtest_reco_strategies_inner(
         .filter(reco_picks::Column::GeneratedAt.eq(&run_ts))
         .filter(reco_picks::Column::AsOfDate.is_null())
         .filter(reco_picks::Column::Synthetic.eq(0))
-        .all(state.harness.db())
+        .all(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询荐股记录失败: {e}"))
@@ -3074,7 +3099,7 @@ async fn backtest_reco_strategies_inner(
 
     // 5. 跑回测
     let bt_result = axagent_analysis_engine::backtest_strategy::backtest_two_groups(
-        state.astock_client.clone(),
+        client.clone(),
         &positive_stocks,
         &negative_stocks,
     )
@@ -3144,7 +3169,7 @@ pub async fn preview_adjust_reco_weights(
     // 2. 跑回测
     let ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
     let bt_result = axagent_astock_data::as_of::with_optional_asof(ctx, async {
-        backtest_reco_strategies_inner(&state).await
+        backtest_reco_strategies_inner(state.harness.db(), &state.astock_client).await
     })
     .await?;
 
@@ -4581,15 +4606,9 @@ pub(crate) async fn reco_horizon_prior(
     db: &DatabaseConnection,
     served_vars: &[(String, serde_json::Value)],
 ) -> Option<serde_json::Value> {
-    // 取数与收缩的唯一实现在 `horizon_prior_from_db`（下沉到 engine 层，见其注释：
-    // 趋势智选链也要同一份先验，若留在此处就会诱发 commands 跨模块调用）。
-    // 本函数只剩「从变量表读出 κ」这一件与模板变量相关的事。
-    let kappa = served_vars
-        .iter()
-        .find(|(k, _)| k == "horizon_prior_kappa")
-        .and_then(|(_, v)| v.as_f64())
-        .unwrap_or(axagent_analysis_engine::horizon_prior::DEFAULT_KAPPA);
-    axagent_analysis_engine::horizon_prior::horizon_prior_from_db(db, kappa).await
+    // 取数、收缩与「κ 从哪个变量读」三件事的唯一实现在 engine 层
+    // （`horizon_prior_from_vars_db`；趋势智选链与漏检 as-of 回放共用同一入口）。
+    axagent_analysis_engine::horizon_prior::horizon_prior_from_vars_db(db, served_vars, None).await
 }
 
 async fn load_reco_served_vars(
@@ -4637,6 +4656,13 @@ async fn persist_reco_response_picks(
     // 代际标记直接取自响应本身（由 recommender 内部按 as_of_ctx 回填）⇒ 实盘为 None、
     // 回放为该截止日，本函数不再按「是不是 live」决定要不要落库。
     let as_of_date = response.as_of_date.as_deref();
+    // 用途随代际派生：本函数只服务**手动入口**（面板刷新 / 带 asOfDate 的手动回放），
+    // 时间旅行批次与漏检回放各有自己的落库路径并显式传各自用途 ⇒ 这里两条分支足够。
+    let purpose = if as_of_date.is_some() {
+        crate::commands::_shared_reco_pool::purpose::MANUAL_REPLAY
+    } else {
+        crate::commands::_shared_reco_pool::purpose::LIVE
+    };
     // 批次级池快照：即使 0 票也要留痕，供漏检归因判「池子空/没扫过」（0 票批次在 reco_picks 里没有行）。
     let pool_batch_json = seed_pool_json.clone();
     let written = crate::commands::_shared_reco_pool::persist_reco_picks(
@@ -4646,6 +4672,7 @@ async fn persist_reco_response_picks(
         reco_strategy_weights_snapshot(served_vars),
         generated_at,
         as_of_date,
+        purpose,
     )
     .await;
     tracing::info!(
@@ -4660,6 +4687,7 @@ async fn persist_reco_response_picks(
         pool_batch_json.as_deref(),
         generated_at,
         as_of_date,
+        purpose,
     )
     .await;
     // L3 截断留痕：与同一批 picks 共 generated_at，便于按批对齐
@@ -4670,6 +4698,7 @@ async fn persist_reco_response_picks(
             response.period,
             generated_at,
             as_of_date,
+            purpose,
         )
         .await;
         tracing::info!(
@@ -4728,10 +4757,13 @@ pub async fn recommend_stocks(
 /// 而它既不在截止日热榜、也不是行业龙头。用户手工加入/分析过的票只落在
 /// `market_stock_universe`（origin='local'）与 `watchlist_items`，**荐股侧从不读它们**
 /// ⇒ 四个周期都看不到这只票。这里在每次荐股前覆盖写入（空集合也写，避免上一批的陈旧标的残留）。
-async fn refresh_user_seed(state: &State<'_, AppState>) {
+/// 用户标的 → 种子的**共享实现**（手动四档入口与 00:00 荐股 cron 共用）。
+///
+/// 抽离理由与 `refresh_reflow_seed_db` 同：cron 拿不到 `tauri::State`。
+/// 覆盖语义不变（空集合也写）。
+pub(crate) async fn refresh_user_seed_db(db: &DatabaseConnection) -> usize {
     use axagent_dao::repo::reco_seed;
 
-    let db = state.harness.db();
     let mut items: Vec<(String, String, Option<String>)> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -4756,7 +4788,8 @@ async fn refresh_user_seed(state: &State<'_, AppState>) {
         Err(e) => tracing::warn!("[reco] 读本机标的失败，本轮不注入该来源: {e}"),
     }
 
-    axagent_analysis_engine::recommender::set_user_seed(items);
+    axagent_analysis_engine::recommender::set_user_seed(items.clone());
+    items.len()
 }
 
 /// 扫描板块范围的设置键（UI 下拉写入，荐股扫描前读取）。
@@ -4801,8 +4834,12 @@ pub async fn set_reco_board_scope(state: State<'_, AppState>, scope: String) -> 
 /// 口径边界（必须如实说）：快照枚举域是 `market_stock_universe`（现网 681 只，由
 /// `run_universe_sweep` 分 tick 扩），**不是全市场**；域外个股这条来源也发现不了。
 /// 回放代若该日没有快照（如 09-28），返回 0 —— 不拿今日榜冒充历史。
-async fn refresh_mover_seed(
-    state: &State<'_, AppState>,
+/// 涨幅榜 → 种子的**共享实现**（手动四档入口与 00:00 荐股 cron 共用）。
+///
+/// 抽离理由同上：cron 拿不到 `tauri::State`，此前这条来源在定时链上从未注入，
+/// 而 00:00 批次正是 `reco_picks` 的主生产者。
+pub(crate) async fn refresh_mover_seed_db(
+    db: &DatabaseConnection,
     generation: Option<&str>,
     client: &axagent_astock_data::AStockClient,
 ) -> usize {
@@ -4811,8 +4848,6 @@ async fn refresh_mover_seed(
         Board, VALID_SCOPES, boards_for_scope, pool_filter_for_scope,
     };
     use axagent_dao::repo::reco_seed;
-
-    let db = state.harness.db();
 
     /// 取前多少只：与热股榜同量级（50），池子约 +25% 扫描量；再大会把「当日强势」
     /// 稀释成「当日涨幅前 500」。
@@ -4935,6 +4970,10 @@ async fn refresh_mover_seed(
         tracing::info!(
             "[reco] 涨幅榜 {day_label}：无可用强势股（快照与板块轮动均为空），跳过该来源"
         );
+        // 必须**清空**而不是早退 —— 否则上一轮注入的标的会一直留在全局种子里，
+        // 快照停采 / 板块盲扫全失败时荐股仍在扫一批陈旧（且已被验证不再强势）的票，
+        // 与 user/miss/reflow 三路的「空集合也写」覆盖语义不一致（2026-10-24）。
+        axagent_analysis_engine::recommender::set_mover_seed(Vec::new());
         return 0;
     }
     axagent_analysis_engine::recommender::set_mover_seed(merged);
@@ -4948,9 +4987,13 @@ async fn refresh_mover_seed(
 /// 对荐股策略最值钱；反思链是慢通路（补分析有每日配额），不该成为它们唯一的出口。
 /// 只取 `not_in_pool` / `unexplained`（池子没看见 / 无留痕），不取 `l3_scored_out`（评分算过并主动淘汰）。
 /// 上限 30 只：一轮漏检通常 10~40 只，全量并入会把「当日强势」稀释掉。
-async fn refresh_miss_seed(state: &State<'_, AppState>) -> usize {
+/// 漏检样本 → 种子的**共享实现**（手动四档入口与 00:00 荐股 cron 共用）。
+///
+/// 这是「不遗漏」最关键的一路：进入本列表的票是**已被市场验证该涨、而上一轮池子没
+/// 看见**的反证样本。此前 cron 从不刷新它 ⇒ 只有用户手动点刷新的那一次才并得进去，
+/// 00:00 主生产者批次（下一所有下游的数据源）永远看不到 —— 漏了就白漏一次。
+pub(crate) async fn refresh_miss_seed_db(db: &DatabaseConnection) -> usize {
     const MISS_SEED_LIMIT: usize = 30;
-    let db = state.harness.db();
     match axagent_dao::repo::mover_recall_events::latest_reco_miss_codes(db, MISS_SEED_LIMIT).await
     {
         Ok(items) => {
@@ -4974,9 +5017,13 @@ async fn refresh_miss_seed(state: &State<'_, AppState>) -> usize {
 ///   ① 人工开关 `settings.mover_reflow_merge = "on"`（默认 off）；
 ///   ② 样本下限 `reflow_ready(settled)`（fail-closed：样本不足**拒绝**并入，不是放行）。
 /// 未满足时写空列表（覆盖语义），并在日志里如实写出候选数与拒绝原因。
-async fn refresh_reflow_seed(state: &State<'_, AppState>) -> usize {
+/// 回灌清单 → 种子的**共享实现**（手动四档入口与 00:00 荐股 cron 共用）。
+///
+/// 为什么必须抽出来：cron 拿不到 `tauri::State`，此前只能靠人工点刷新 —— 重启后
+/// 种子清零、cron 又从不刷新，回灌清单等于没有消费者（PLAN 缺陷 6 / D-3）。
+/// 失败语义与手动入口逐字一致：任一环节取不到都写空表（覆盖语义），不保留上一轮残留。
+pub(crate) async fn refresh_reflow_seed_db(db: &DatabaseConnection) -> usize {
     use axagent_dao::repo::{mover_recall_events, settings};
-    let db = state.harness.db();
     let rows = match mover_recall_events::list_reflow_candidates(db, 100).await {
         Ok(r) => r,
         Err(e) => {
@@ -4989,11 +5036,11 @@ async fn refresh_reflow_seed(state: &State<'_, AppState>) -> usize {
         axagent_analysis_engine::recommender::set_reflow_seed(Vec::new());
         return 0;
     }
-    let flag = settings::get_setting(db, "mover_reflow_merge")
+    let flag = settings::get_setting(db, MOVER_REFLOW_MERGE_KEY)
         .await
         .ok()
         .flatten()
-        .unwrap_or_else(|| "off".to_string());
+        .unwrap_or_else(|| MOVER_REFLOW_MERGE_OFF.to_string());
     let codes: Vec<String> = rows.iter().map(|r| r.stock_code.clone()).collect();
     let settled = match mover_recall_events::count_settled_reflow(db, &codes).await {
         Ok(n) => n,
@@ -5026,6 +5073,144 @@ async fn refresh_reflow_seed(state: &State<'_, AppState>) -> usize {
     axagent_analysis_engine::recommender::set_reflow_seed(items);
     tracing::info!("[reco] 回灌清单已并入候选池：{n} 只（开关 on + 样本 {settled} 达标）");
     n
+}
+
+/// 一次扫描注入的**四类来源条数**。
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RecoSeedCounts {
+    /// 自选股 ∪ 本机标的。
+    pub user: usize,
+    /// 当日涨幅榜（板块轮动 + 收盘快照）。
+    pub mover: usize,
+    /// 上一轮漏检核查判定「池子没看见」的样本。
+    pub miss: usize,
+    /// 回灌清单（默认 shadow，开关 on 且样本达标才并入）。
+    pub reflow: usize,
+}
+
+impl RecoSeedCounts {
+    pub fn total(&self) -> usize {
+        self.user + self.mover + self.miss + self.reflow
+    }
+}
+
+/// 荐股候选种子的**唯一注入点**（2026-10-24）。
+///
+/// 为什么必须收敛成这一个函数：此前四类种子只在命令层（前端点刷新）刷新，而
+/// 00:00 定时荐股才是 `reco_picks` 的**主生产者** —— pool-scan / 漏检核查 /
+///  idea 回测吃的都是它的产物。cron 侧只补了 reflow 一路（D-3），user/mover/miss
+/// 三路依旧分裂（遗留缺陷 D-1），于是这个链条是断的：
+///   漏检核查给出「池子没看见妖股」→ 种子只喂给手动入口 → 00:00 批次还是那只池子
+///   ⇒ **同一只票可以天天被判漏，天天又漏一次**。
+/// 两条入口现在共用本函数，**结构性地不可能再分裂**（漏一路 ⇒ 两条都漏）。
+///
+/// 失败语义：任一来源取不到时该来源计 0（各自内部已做过空集合覆盖），不影响其余来源。
+pub(crate) async fn refresh_all_reco_seeds_db(
+    db: &axagent_harness::DatabaseConnection,
+    generation: Option<&str>,
+    client: &axagent_astock_data::AStockClient,
+) -> RecoSeedCounts {
+    let user = refresh_user_seed_db(db).await;
+    let mover = refresh_mover_seed_db(db, generation, client).await;
+    let reflow = refresh_reflow_seed_db(db).await;
+    let miss = refresh_miss_seed_db(db).await;
+    let counts = RecoSeedCounts { user, mover, miss, reflow };
+    tracing::info!(
+        "[reco] 候选种子已刷新：用户 {user} / 涨幅榜 {mover} / 漏检 {miss} / 回灌 {reflow} \
+         （合计 {}）",
+        counts.total()
+    );
+    counts
+}
+
+/// 回灌并入开关的设置键（唯一权威；前端面板、命令、cron 消费同一字符串）。
+pub const MOVER_REFLOW_MERGE_KEY: &str = "mover_reflow_merge";
+/// 关闭值。缺省也是关（fail-closed：没配置过 = 不并入）。
+pub const MOVER_REFLOW_MERGE_OFF: &str = "off";
+/// 打开值。
+pub const MOVER_REFLOW_MERGE_ON: &str = "on";
+
+/// 读回灌并入开关（缺省/读不到 ⇒ `off`）。
+#[tauri::command]
+pub async fn get_mover_reflow_merge(state: State<'_, AppState>) -> Result<String, String> {
+    let v = axagent_dao::repo::settings::get_setting(state.harness.db(), MOVER_REFLOW_MERGE_KEY)
+        .await
+        .map_err(|e| format!("读回灌开关失败: {e}"))?
+        .unwrap_or_else(|| MOVER_REFLOW_MERGE_OFF.to_string());
+    Ok(if v == MOVER_REFLOW_MERGE_ON {
+        MOVER_REFLOW_MERGE_ON
+    } else {
+        MOVER_REFLOW_MERGE_OFF
+    }
+    .to_string())
+}
+
+/// 写回灌并入开关（只接受 `on` / `off`，其它值显式拒绝 —— 不静默折成 off）。
+#[tauri::command]
+pub async fn set_mover_reflow_merge(
+    state: State<'_, AppState>,
+    value: String,
+) -> Result<String, String> {
+    let v = value.trim().to_ascii_lowercase();
+    if v != MOVER_REFLOW_MERGE_ON && v != MOVER_REFLOW_MERGE_OFF {
+        return Err(ErrorResponse::err_with_detail(
+            common_err::INVALID_INPUT,
+            format!("回灌开关只接受 on/off，收到 {value:?}"),
+        ));
+    }
+    axagent_dao::repo::settings::set_setting(state.harness.db(), MOVER_REFLOW_MERGE_KEY, &v)
+        .await
+        .map_err(|e| format!("写回灌开关失败: {e}"))?;
+    Ok(v)
+}
+
+/// 最新一轮**荐股链**核查的 as-of 回放摘要（阶段 C-5 面板用）。
+///
+/// 三层各自缺席成句，不收敛成一个数：
+/// - `runId/generatedAt` =「哪一轮、哪次回放」；
+/// - `layers` = 机械归因层计数；
+/// - `summary` = 面板六桶 + byStyle + 失败清单；
+/// - 三者全空 ⇒ 返回 `None`（该轮还没跑过 as-of 回放），而不是空对象。
+#[tauri::command]
+pub async fn get_mover_asof_summary(
+    state: State<'_, AppState>,
+) -> Result<Option<serde_json::Value>, String> {
+    let row = axagent_dao::repo::mover_recall_runs::latest_reco_run_asof(state.harness.db())
+        .await
+        .map_err(|e| format!("读最新漏检轮次失败: {e}"))?;
+    let Some((run_id, date_to, layers_raw, summary_raw)) = row else { return Ok(None) };
+    if layers_raw.is_none() && summary_raw.is_none() {
+        return Ok(None);
+    }
+    let parse = |raw: &Option<String>| {
+        raw.as_deref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .unwrap_or(serde_json::Value::Null)
+    };
+    // C-5 后半：最近一次闭环重算的逐格权重变化（只带 |Δ|≥1% 的格，最多 6 条）。
+    let weight_changes = axagent_analysis_engine::evolution_drift::load_recent_weight_changes(
+        state.harness.db(),
+        axagent_analysis_engine::recommender::reco_loop::RECO_LOOP_TRIGGER,
+        0.01,
+        6,
+    )
+    .await
+    .unwrap_or_default();
+    Ok(Some(serde_json::json!({
+        "runId": run_id,
+        "dateTo": date_to,
+        "layers": parse(&layers_raw),
+        "summary": parse(&summary_raw),
+        "weightChanges": weight_changes
+            .into_iter()
+            .map(|(style, period, old, new)| serde_json::json!({
+                "style": style,
+                "period": period,
+                "old": old,
+                "new": new,
+            }))
+            .collect::<Vec<_>>(),
+    })))
 }
 
 /// 把「分析侧自动定档」变量并入 served_vars（fail-open：读不到就按原行为跑）。
@@ -5088,10 +5273,6 @@ pub async fn recommend_stocks_all_periods(
 ) -> Result<RecoBatchResponse, String> {
     use axagent_analysis_engine::recommender::Period;
 
-    // 用户自己的标的先入池（自选股 ∪ 本机手工加入/分析过的票）——见 `refresh_user_seed`
-    // 的文档：缺这一路时，一只不在截止日热榜/行业龙头里的票在任何周期都不会出现。
-    refresh_user_seed(&state).await;
-
     let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
     let served_vars = load_reco_served_vars(&state).await?;
     let client: std::sync::Arc<_> = state.astock_client.clone();
@@ -5099,11 +5280,16 @@ pub async fn recommend_stocks_all_periods(
     // 代际显式取自本轮 as-of 上下文（回放=截止日；实盘=None）——见 helper 的文档。
     let generation = as_of_ctx.as_ref().map(|c| c.as_of_date.format("%Y-%m-%d").to_string());
 
-    // 当日涨幅榜入池（第五来源，2026-10-20）：必须先于扫描，且用**本轮的代际**取快照
-    // （回放代没有该日快照时返回 0，不拿今日榜冒充历史）。
-    refresh_mover_seed(&state, generation.as_deref(), client.as_ref()).await;
-    refresh_reflow_seed(&state).await;
-    refresh_miss_seed(&state).await;
+    // 四类候选来源**一次性**注入 —— 与 00:00 定时荐股共用同一个函数
+    // （见 `refresh_all_reco_seeds_db` 的文档：两条入口此前各自刷新，漏股样本长期
+    //  只在手动刷新那一次补得回来）。
+    //   · 用户标的：缺这一路时，一只不在截止日热榜/行业龙头里的票在任何周期都不会出现；
+    //   · 涨幅榜（第五来源，2026-10-20）：必须先于扫描，且用**本轮的代际**取快照
+    //     （回放代没有该日快照时返回 0，不拿今日榜冒充历史）；
+    //   · 回灌 / 漏检：见各自 helper 文档。
+    let seed_counts =
+        refresh_all_reco_seeds_db(state.harness.db(), generation.as_deref(), client.as_ref()).await;
+    tracing::info!("[reco] 手动四档荐股：候选种子合计 {} 只", seed_counts.total());
 
     let vars = served_vars_with_analysis_tiers(&state, &served_vars, generation).await;
 
@@ -5111,11 +5297,27 @@ pub async fn recommend_stocks_all_periods(
     let results = if let Some(ctx) = as_of_ctx {
         axagent_astock_data::as_of::AS_OF
             .scope(Some(ctx), async {
-                recommender::recommend_stocks_multi(client, &Period::ALL, &vars, None, prior).await
+                recommender::recommend_stocks_multi(
+                    client,
+                    &Period::ALL,
+                    &vars,
+                    None,
+                    prior,
+                    recommender::SeedOverrides::default(),
+                )
+                .await
             })
             .await
     } else {
-        recommender::recommend_stocks_multi(client, &Period::ALL, &vars, None, prior).await
+        recommender::recommend_stocks_multi(
+            client,
+            &Period::ALL,
+            &vars,
+            None,
+            prior,
+            recommender::SeedOverrides::default(),
+        )
+        .await
     };
 
     let mut by_horizon: std::collections::BTreeMap<Period, RecoResponse> =
@@ -5249,16 +5451,20 @@ pub(crate) async fn reco_loop_view(
     let current =
         load_current_cell_priors_by_trigger(db, Some(RECO_LOOP_TRIGGER)).await.unwrap_or_default();
     // Phase 4：mover 线必须在**同一份**装配下算，否则面板显示与落库权重不同源
-    let mover =
-        match axagent_analysis_engine::mover_recall::load_mover_cell_signal(db, served_vars, None)
-            .await
-        {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!("[reco_loop_view] mover 证据装配失败，本视图按无证据出: {e}");
-                Default::default()
-            },
-        };
+    // C-2：权重环只消费**一条** mover 线（as-of 优先、缺席才回退 live），绝不相加。
+    let mover = match axagent_analysis_engine::mover_recall::load_mover_cell_signal_preferring_asof(
+        db,
+        served_vars,
+        None,
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!("[reco_loop_view] mover 证据装配失败，本视图按无证据出: {e}");
+            Default::default()
+        },
+    };
     let cells = compute_loop_cell_weights_with_priors(&samples, &current, now_ms, &mover);
     // 「最近计算时刻」优先读心跳（每轮都写），旧库/心跳缺失时回退到权重留痕时刻
     // （后者只在 |Δ|≥1% 时推进，会把「小抖动轮次」显示成「没跑」）。
@@ -5291,7 +5497,8 @@ pub async fn recalc_reco_loop_weights(
     let db = state.harness.db();
     let served_vars =
         axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(db).await?;
-    let mover = axagent_analysis_engine::mover_recall::load_mover_cell_signal(
+    // C-2：as-of 线优先（缺席时该函数内部回退 live）；两条线不得相加。
+    let mover = axagent_analysis_engine::mover_recall::load_mover_cell_signal_preferring_asof(
         db,
         &served_vars,
         as_of_date.as_deref(),
@@ -5302,6 +5509,7 @@ pub async fn recalc_reco_loop_weights(
             db,
             as_of_date.as_deref(),
             &mover,
+            false,
         )
         .await?;
     Ok(serde_json::json!({ "written": written, "cells": cells }))
@@ -5331,23 +5539,49 @@ pub(crate) async fn maybe_recalc_reco_loop(db: &DatabaseConnection) -> String {
     if gate == "off" {
         return "闭环停用（gate=off），未重算".to_string();
     }
-    let mover =
-        match axagent_analysis_engine::mover_recall::load_mover_cell_signal(db, &served_vars, None)
+    let mover = match axagent_analysis_engine::mover_recall::load_mover_cell_signal_preferring_asof(
+        db,
+        &served_vars,
+        None,
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!("[reco_loop] mover 证据装配失败，本轮按无证据重算: {e}");
+            Default::default()
+        },
+    };
+    // 语义版本升级（v2：partial 不再计 win）⇒ 清空旧先验重算，避免把反向权重
+    // 用 EWMA 再保留十几轮。读设置失败按「从未记录」处理（reset=true），宁可重算。
+    let stored_version =
+        axagent_analysis_engine::recommender::reco_loop::stored_reco_loop_logic_version(db)
             .await
-        {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!("[reco_loop] mover 证据装配失败，本轮按无证据重算: {e}");
-                Default::default()
-            },
-        };
+            .unwrap_or(0);
+    let reset_prior =
+        stored_version < axagent_analysis_engine::recommender::reco_loop::RECO_LOOP_LOGIC_VERSION;
     match axagent_analysis_engine::recommender::reco_loop::recalc_and_persist_reco_loop(
-        db, None, &mover,
+        db,
+        None,
+        &mover,
+        reset_prior,
     )
     .await
     {
         Ok((written, _)) => {
-            let msg = format!("闭环重算完成（gate={gate}），留痕 {written} 条");
+            if reset_prior {
+                if let Err(e) =
+                    axagent_analysis_engine::recommender::reco_loop::mark_reco_loop_logic_version(
+                        db,
+                    )
+                    .await
+                {
+                    tracing::warn!("[reco_loop] 记录语义版本失败（下轮会再重置一次）: {e}");
+                }
+            }
+            let msg = format!(
+                "闭环重算完成（gate={gate}，reset_prior={reset_prior}），留痕 {written} 条"
+            );
             tracing::info!("[reco_loop] {msg}");
             msg
         },

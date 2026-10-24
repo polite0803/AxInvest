@@ -1,18 +1,15 @@
 import { invoke } from "@/lib/invoke";
 import { horizonSuffix } from "@/lib/stock-analysis-utils";
 import type {
-  CloseSweepReport,
-  HistoryBackfillReport,
-  MarketCoverage,
   MoverRecallEventReview,
   MoverRecallReviewReflection,
   MoverRecallRunMeta,
   MoverRecallRunView,
   MoverRecallView,
-  UniverseScanStats,
 } from "@/types/stock-analysis";
-import { Button, Card, message, Select, Space, Spin, Tag } from "antd";
+import { Button, Card, Select, Space, Spin, Switch, Tag } from "antd";
 import { Fragment, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 
@@ -63,6 +60,22 @@ export function MoverRecallPanel() {
   const [reflow, setReflow] = useState<
     { items: number; codes: string[]; settled: number; required: number; ready: boolean } | null
   >(null);
+  /** C-5：最新一轮的 as-of 回放摘要（null = 该轮还没跑过回放）。 */
+  const [asofSummary, setAsofSummary] = useState<
+    {
+      runId: string;
+      dateTo: string;
+      summary: {
+        events?: number;
+        byPeriod?: Record<string, Record<string, number>>;
+        divergedFromLive?: number;
+        failures?: string[];
+      } | null;
+      weightChanges?: { style: string; period: string; old: number; new: number }[];
+    } | null
+  >(null);
+  /** D-2：回灌并入开关（默认 off；写失败回滚 UI）。 */
+  const [reflowMerge, setReflowMerge] = useState<"on" | "off">("off");
   const [batchInfo, setBatchInfo] = useState<
     | { kind: "never" }
     | {
@@ -81,79 +94,10 @@ export function MoverRecallPanel() {
   const [reviews, setReviews] = useState<
     Record<string, { loading: boolean; error: string | null; data: MoverRecallEventReview | null }>
   >({});
-  /** 阶段 0：全 A 股样本覆盖（申报总数 / 已枚举 / 最新收盘）。`null` = 取不到（不是 0）。 */
-  const [coverage, setCoverage] = useState<MarketCoverage | null>(null);
-  const [sampleAction, setSampleAction] = useState<"scan" | "sweep" | "history" | null>(null);
-
-  const loadCoverage = async () => {
-    try {
-      const c = await invoke<unknown>("get_market_coverage", {});
-      // 形状守卫：mock 兜底/契约漂移时不能让「拿不到」被读成 0 只，也不能让缺 closeDates 崩渲染
-      setCoverage(isCoverage(c) ? c : null);
-    } catch {
-      setCoverage(null);
-    }
-  };
-
-  const runSampleAction = async (
-    kind: "scan" | "sweep" | "history",
-    run: () => Promise<string>,
-  ) => {
-    setSampleAction(kind);
-    try {
-      message.success(await run());
-      await loadCoverage();
-      // 清单/收盘变了 ⇒ 轮次列表与现场视图都要重取
-      setListNonce((n) => n + 1);
-      setPayloadNonce((n) => n + 1);
-    } catch (e) {
-      message.error(detailOf(e));
-    } finally {
-      setSampleAction(null);
-    }
-  };
-
-  const fullMarketScan = () =>
-    runSampleAction("scan", async () => {
-      const r = await invoke<UniverseScanStats>("run_universe_code_scan", { shards: 1 });
-      assertReport(r, "run_universe_code_scan", "registered");
-      return t("stockAnalysis.moverRecall.fullScanDone", {
-        registered: r?.registered ?? 0,
-        codes: r?.codesTried ?? 0,
-      });
-    });
-
-  const sweepLatestClose = () =>
-    runSampleAction("sweep", async () => {
-      const r = await invoke<CloseSweepReport>("sweep_market_close", {});
-      assertReport(r, "sweep_market_close", "written");
-      return t("stockAnalysis.moverRecall.sweepDone", {
-        written: r?.written ?? 0,
-        total: r?.universeSize ?? 0,
-        missing: r?.missingQuotes ?? 0,
-      });
-    });
-
-  const backfillHistory = () =>
-    runSampleAction("history", async () => {
-      const r = await invoke<HistoryBackfillReport>("backfill_market_close_history", {
-        limit: 500,
-      });
-      assertReport(r, "backfill_market_close_history", "requested");
-      // 全失败不能伪装成「补齐」：把首条原因带回给用户（500/0/500 那次就是被这里吞掉的）
-      if ((r?.failed ?? 0) > 0) {
-        throw new Error(r?.error ?? `backfill failed: ${r?.failed ?? 0}`);
-      }
-      return (r?.requested ?? 0) === 0
-        ? t("stockAnalysis.moverRecall.backfillNone")
-        : t("stockAnalysis.moverRecall.backfillDone", {
-          codes: r?.codes ?? 0,
-          rows: r?.rows ?? 0,
-          noNew: r?.noNew ?? 0,
-          failed: r?.failed ?? 0,
-        });
-    });
-
+  /**
+   * 阶段 0 的全 A 股样本采集（四个计数域 + 段扫/补收盘/补历史）已抽到
+   * `UniverseSamplePanel`，挂在策略页签顶部 —— 埋在这里时用户找不到按钮。
+   */
   const missKey = (stockCode: string, anchorDate: string, period: string): string =>
     `${stockCode}-${anchorDate}-${period}`;
 
@@ -326,17 +270,33 @@ export function MoverRecallPanel() {
     };
   }, [listNonce]);
 
-  // 阶段 0：全 A 股样本覆盖（申报总数/已枚举/最新收盘）——独立取，读失败只影响这一行。
+  // C-5 / D-2：as-of 摘要与回灌开关独立取（读失败只影响各自那一段）。
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const c = await invoke<unknown>("get_market_coverage", {});
-        if (!cancelled) {
-          setCoverage(isCoverage(c) ? c : null);
-        }
+        const v = await invoke<
+          {
+            runId: string;
+            dateTo: string;
+            summary: {
+              events?: number;
+              byPeriod?: Record<string, Record<string, number>>;
+              divergedFromLive?: number;
+              failures?: string[];
+            } | null;
+            weightChanges?: { style: string; period: string; old: number; new: number }[];
+          } | null
+        >("get_mover_asof_summary", {});
+        if (!cancelled) { setAsofSummary(v ?? null); }
       } catch {
-        if (!cancelled) { setCoverage(null); }
+        if (!cancelled) { setAsofSummary(null); }
+      }
+      try {
+        const v = await invoke<string>("get_mover_reflow_merge", {});
+        if (!cancelled) { setReflowMerge(v === "on" ? "on" : "off"); }
+      } catch {
+        if (!cancelled) { setReflowMerge("off"); }
       }
     })();
     return () => {
@@ -431,8 +391,11 @@ export function MoverRecallPanel() {
   /** 逐档「有可判票」：旧轮次没有逐档可判数（null）⇒ 不阻断旧口径的「真无达标」结论。 */
   const judgeableAllPositive = data?.judgeableCodesByTier == null
     || (data?.rules.every((r) => (data?.judgeableCodesByTier?.[r.period] ?? 0) > 0) ?? false);
-  const allWindowsFull = data?.rules.every((r) => (data?.collectedDays ?? 0) >= r.windowDays)
+  /** 日历窗口是否已满（历史 distinct 交易日够长）——只说明「时间够」。 */
+  const windowsFull = data?.rules.every((r) => (data?.collectedDays ?? 0) >= r.windowDays)
     ?? false;
+  /** 结论是否可下：窗口满 **且** 逐档都有可判票（F-3：不得拿历史长度冒充覆盖率）。 */
+  const allWindowsFull = windowsFull && judgeableAllPositive;
 
   const runOptions = [
     ...runs.map((r) => ({
@@ -537,6 +500,69 @@ export function MoverRecallPanel() {
         )
         : null}
 
+      {/* C-5：as-of 回放摘要（六桶各自成句；null = 该轮还没跑过回放，不是 0） */}
+      <div
+        style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 6 }}
+        data-testid={asofSummary ? "mover-asof-summary" : "mover-asof-summary-none"}
+      >
+        <strong>{t("stockAnalysis.moverRecall.asofSummaryTitle")}</strong>
+        {asofSummary == null
+          ? <span>· {t("stockAnalysis.moverRecall.asofSummaryMissing")}</span>
+          : (() => {
+            const bp = asofSummary.summary?.byPeriod ?? {};
+            const sum = (k: string): number => Object.values(bp).reduce((acc, cell) => acc + (cell?.[k] ?? 0), 0);
+            return (
+              <span>
+                {` · ${asofSummary.dateTo} · `}
+                {t("stockAnalysis.moverRecall.asofSummaryLine", {
+                  events: asofSummary.summary?.events ?? 0,
+                  notInPool: sum("notInPool"),
+                  inPoolNotPicked: sum("inPoolNotPicked"),
+                  trimmed: sum("inPoolTrimmed"),
+                  other: sum("otherPeriod"),
+                  degraded: sum("poolDegraded"),
+                  unavailable: sum("unavailable"),
+                })}
+              </span>
+            );
+          })()}
+        {asofSummary?.weightChanges && asofSummary.weightChanges.length > 0
+          ? (
+            <div style={{ marginTop: 2 }} data-testid="mover-asof-weights">
+              {t("stockAnalysis.moverRecall.asofWeights", {
+                cells: asofSummary.weightChanges
+                  .map((c) => `${c.style}/${tierName(c.period)} ${c.old.toFixed(2)}→${c.new.toFixed(2)}`)
+                  .join("；"),
+              })}
+            </div>
+          )
+          : null}
+      </div>
+
+      {/* D-2：回灌并入开关（默认关；开而样本不足仍不并入，判据在写侧 fail-closed） */}
+      <div
+        style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6, fontSize: 12 }}
+        data-testid="mover-reflow-merge"
+      >
+        <Switch
+          size="small"
+          checked={reflowMerge === "on"}
+          onChange={(checked) => {
+            const next = checked ? "on" : "off";
+            const prev = reflowMerge;
+            setReflowMerge(next);
+            void invoke<string>("set_mover_reflow_merge", { value: next }).catch(() => {
+              // 写失败回滚：UI 不得显示一个没生效的开关状态
+              setReflowMerge(prev);
+            });
+          }}
+        />
+        <span>{t("stockAnalysis.moverRecall.reflowMergeLabel")}</span>
+        <span style={{ color: "var(--color-text-tertiary)" }}>
+          {t("stockAnalysis.moverRecall.reflowMergeHint")}
+        </span>
+      </div>
+
       {/* D-3：0 批补分析不得显示成「没有待补」—— 那是「从没跑过」，不是「都补过了」 */}
       {batchInfo
         ? (
@@ -562,64 +588,6 @@ export function MoverRecallPanel() {
           </div>
         )
         : null}
-
-      {/* 阶段 0：全 A 股样本与采集动作。四个计数域分开写，不并排成可比。 */}
-      <div style={{ marginBottom: 8 }} data-testid="mover-sample">
-        <div style={{ color: "var(--color-text-secondary)" }}>
-          <strong>{t("stockAnalysis.moverRecall.sampleTitle")}</strong>
-          {" · "}
-          {coverage
-            ? t("stockAnalysis.moverRecall.sampleCounts", {
-              total: coverage.reportedTotal > 0 ? coverage.reportedTotal : "-",
-              enumerated: coverage.universeSize,
-              confirmed: coverage.confirmedByClist,
-              close: coverage.latestCloseCodes,
-              date: coverage.closeDates.length > 0
-                ? coverage.closeDates[coverage.closeDates.length - 1]
-                : "-",
-            })
-            : t("stockAnalysis.moverRecall.sampleCoverageUnknown")}
-        </div>
-        <Space size={6} wrap style={{ marginTop: 4 }}>
-          <Button
-            size="small"
-            loading={sampleAction === "scan"}
-            disabled={sampleAction !== null && sampleAction !== "scan"}
-            onClick={() => void fullMarketScan()}
-            title={t("stockAnalysis.moverRecall.fullScanHint")}
-          >
-            {t("stockAnalysis.moverRecall.fullScan")}
-          </Button>
-          <Button
-            size="small"
-            loading={sampleAction === "sweep"}
-            disabled={sampleAction !== null && sampleAction !== "sweep"}
-            onClick={() => void sweepLatestClose()}
-            title={t("stockAnalysis.moverRecall.sweepCloseHint")}
-          >
-            {t("stockAnalysis.moverRecall.sweepClose")}
-          </Button>
-          <Button
-            size="small"
-            loading={sampleAction === "history"}
-            disabled={sampleAction !== null && sampleAction !== "history"}
-            onClick={() => void backfillHistory()}
-            title={t("stockAnalysis.moverRecall.backfillHistoryHint")}
-          >
-            {t("stockAnalysis.moverRecall.backfillHistory")}
-          </Button>
-        </Space>
-        <div
-          style={{ color: "var(--color-text-tertiary)", fontSize: 11, marginTop: 2 }}
-          data-testid="mover-sample-hints"
-        >
-          {t("stockAnalysis.moverRecall.fullScanHint")}
-          {" · "}
-          {t("stockAnalysis.moverRecall.sweepCloseHint")}
-          {" · "}
-          {t("stockAnalysis.moverRecall.backfillHistoryHint")}
-        </div>
-      </div>
 
       {/* A-2：本轮账属于哪条链。混池轮次（分链改造之前落的）单独成句，不冒充某一链。 */}
       {data
@@ -679,56 +647,80 @@ export function MoverRecallPanel() {
       {data
         ? (
           <>
-            {/* ① 数据边界显式声明：起点之前未采集，不做回填推断 */}
+            {
+              /* 核查口径：样本边界、枚举域、事件域与判据版本 —— 放在一起读，
+                免得把它们误当成「漏检结果」 */
+            }
+            <BlockTitle>{t("stockAnalysis.moverRecall.scopeTitle")}</BlockTitle>
             <div
-              style={{ color: "var(--color-text-secondary)", marginBottom: 4 }}
-              data-testid="mover-recall-boundary"
+              style={{
+                background: "var(--color-bg-secondary, rgba(127,127,127,0.06))",
+                borderRadius: 4,
+                padding: "6px 8px",
+                marginBottom: 10,
+              }}
+              data-testid="mover-scope"
             >
-              {t("stockAnalysis.moverRecall.boundary", {
-                from: data.from,
-                to: data.to,
-                since: data.dataSince,
-              })}
-            </div>
-
-            {/* 枚举域：确认度不足时显式声明「池外大涨股可能不在样本内」 */}
-            <div style={{ marginBottom: 6 }} data-testid="mover-recall-universe">
-              {data.universeConfirmed < data.universeSize
-                ? t("stockAnalysis.moverRecall.universeDegraded", {
-                  size: data.universeSize,
-                  confirmed: data.universeConfirmed,
-                })
-                : t("stockAnalysis.moverRecall.universe", {
-                  size: data.universeSize,
-                  confirmed: data.universeConfirmed,
+              {/* ① 数据边界显式声明：起点之前未采集，不做回填推断 */}
+              <div
+                style={{ color: "var(--color-text-secondary)", marginBottom: 4 }}
+                data-testid="mover-recall-boundary"
+              >
+                {t("stockAnalysis.moverRecall.boundary", {
+                  from: data.from,
+                  to: data.to,
+                  since: data.dataSince,
                 })}
-            </div>
+              </div>
 
-            {/* 事件域 ≠ 清单域：清单里没采到收盘的票不可能产生事件；逐档再按历史长度判可判票 */}
-            <div
-              style={{ marginBottom: 6, fontSize: 12, color: "var(--color-text-secondary)" }}
-              data-testid="mover-recall-event-domain"
-            >
-              {data.codesWithClose == null || data.judgeableCodesByTier == null
-                ? t("stockAnalysis.moverRecall.eventDomainUnknown")
-                : t("stockAnalysis.moverRecall.eventDomain", {
-                  close: data.codesWithClose,
-                  tiers: data.rules
-                    .map((r) => `${tierName(r.period)} ${data.judgeableCodesByTier?.[r.period] ?? 0}`)
-                    .join(" / "),
-                })}
-            </div>
+              {/* 枚举域：确认度不足时显式声明「池外大涨股可能不在样本内」 */}
+              <div style={{ marginBottom: 6 }} data-testid="mover-recall-universe">
+                {data.universeConfirmed < data.universeSize
+                  ? t("stockAnalysis.moverRecall.universeDegraded", {
+                    size: data.universeSize,
+                    confirmed: data.universeConfirmed,
+                  })
+                  : t("stockAnalysis.moverRecall.universe", {
+                    size: data.universeSize,
+                    confirmed: data.universeConfirmed,
+                  })}
+              </div>
 
-            <div
-              style={{ marginBottom: 6, fontSize: 11, color: "var(--color-text-tertiary)" }}
-              data-testid="mover-recall-gate-version"
-            >
-              {data.gateVersion
-                ? t("stockAnalysis.moverRecall.gateVersion", { version: data.gateVersion })
-                : t("stockAnalysis.moverRecall.gateVersionUnknown")}
+              {/* 事件域 ≠ 清单域：清单里没采到收盘的票不可能产生事件；逐档再按历史长度判可判票 */}
+              <div
+                style={{ marginBottom: 6, fontSize: 12, color: "var(--color-text-secondary)" }}
+                data-testid="mover-recall-event-domain"
+              >
+                {data.codesWithClose == null || data.judgeableCodesByTier == null
+                  ? t("stockAnalysis.moverRecall.eventDomainUnknown")
+                  : t("stockAnalysis.moverRecall.eventDomain", {
+                    close: data.codesWithClose,
+                    tiers: data.rules
+                      .map((r) => `${tierName(r.period)} ${data.judgeableCodesByTier?.[r.period] ?? 0}`)
+                      .join(" / "),
+                  })}
+              </div>
+
+              {/* F-3：collectedDays 只说明「历史有多长」，不再被读成「全市场窗口都满」 */}
+              <div
+                style={{ fontSize: 12, color: "var(--color-text-tertiary)", marginBottom: 6 }}
+                data-testid="mover-recall-history-days"
+              >
+                {t("stockAnalysis.moverRecall.historyDays", { days: data.collectedDays })}
+              </div>
+
+              <div
+                style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}
+                data-testid="mover-recall-gate-version"
+              >
+                {data.gateVersion
+                  ? t("stockAnalysis.moverRecall.gateVersion", { version: data.gateVersion })
+                  : t("stockAnalysis.moverRecall.gateVersionUnknown")}
+              </div>
             </div>
 
             {/* 三个率：null 显示「样本不足，算不出」，绝不显示成 0% */}
+            <BlockTitle>{t("stockAnalysis.moverRecall.readingsTitle")}</BlockTitle>
             <div style={{ display: "flex", gap: 24, flexWrap: "wrap", margin: "10px 0" }}>
               <RateStat
                 label={t("stockAnalysis.moverRecall.rateReachability")}
@@ -769,7 +761,7 @@ export function MoverRecallPanel() {
                   data-testid="mover-recall-empty"
                 >
                   {/* C-2 三态：全满 ⇒ 结论；全未满 ⇒ 尚不可判定；部分满 ⇒ 点名未满档 */}
-                  {allWindowsFull && !judgeableAllPositive
+                  {windowsFull && !judgeableAllPositive
                     ? t("stockAnalysis.moverRecall.emptyNoJudgeable")
                     : allWindowsFull
                     ? t("stockAnalysis.moverRecall.empty")
@@ -787,9 +779,7 @@ export function MoverRecallPanel() {
               : null}
 
             {/* ② 四档判据：阈值来源（模板变量名）逐档点名 */}
-            <div style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>
-              {t("stockAnalysis.moverRecall.rulesTitle")}
-            </div>
+            <BlockTitle>{t("stockAnalysis.moverRecall.rulesTitle")}</BlockTitle>
             <ul style={{ margin: "2px 0 8px", paddingLeft: 18 }}>
               {data.rules.map((r) => (
                 <li key={r.period} data-testid={`mover-rule-${r.period}`}>
@@ -839,10 +829,26 @@ export function MoverRecallPanel() {
                         })}
                       </span>
                     )}
-                  {data.codesWithClose != null
-                      && data.judgeableCodesByTier != null
-                      && (data.judgeableCodesByTier[r.period] ?? 0) < data.codesWithClose
+                  {data.judgeableCodesByTier != null
+                      && data.reportedTotal != null
+                      && (data.judgeableCodesByTier[r.period] ?? 0) < data.reportedTotal
                     ? (
+                      <span
+                        style={{ color: "var(--sa-warning, #faad14)", marginLeft: 6 }}
+                        data-testid={`mover-tier-judgeable-${r.period}`}
+                      >
+                        {t("stockAnalysis.moverRecall.tierJudgeableOfUniverse", {
+                          judgeable: data.judgeableCodesByTier[r.period] ?? 0,
+                          total: data.reportedTotal,
+                        })}
+                      </span>
+                    )
+                    : data.judgeableCodesByTier != null
+                        && data.codesWithClose != null
+                        && (data.judgeableCodesByTier[r.period] ?? 0) < data.codesWithClose
+                    ? (
+                      // 旧轮次没有 `reportedTotal`（分母未记录）：只说「可判 / 已采到收盘」，
+                      // 不拿收盘数冒充全 A 股分母。
                       <span
                         style={{ color: "var(--sa-warning, #faad14)", marginLeft: 6 }}
                         data-testid={`mover-tier-judgeable-${r.period}`}
@@ -869,9 +875,7 @@ export function MoverRecallPanel() {
               : null}
 
             {/* 归因分层：每层计数 + 按板块分组（避免混池假象） */}
-            <div style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>
-              {t("stockAnalysis.moverRecall.layersTitle")}
-            </div>
+            <BlockTitle>{t("stockAnalysis.moverRecall.layersTitle")}</BlockTitle>
             <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 8 }}>
               <tbody>
                 {data.layers.map((row) => (
@@ -903,9 +907,7 @@ export function MoverRecallPanel() {
             {data.misses.length > 0
               ? (
                 <>
-                  <div style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>
-                    {t("stockAnalysis.moverRecall.missesTitle")}
-                  </div>
+                  <BlockTitle>{t("stockAnalysis.moverRecall.missesTitle")}</BlockTitle>
                   <div style={{ maxHeight: 260, overflowY: "auto" }}>
                     <table
                       style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}
@@ -1033,6 +1035,22 @@ export function MoverRecallPanel() {
   );
 }
 
+/** 块标题：把「口径 / 读数 / 判据 / 分层 / 明细」分成可扫读的段落。 */
+function BlockTitle({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 11,
+        fontWeight: 600,
+        color: "var(--color-text-secondary)",
+        margin: "2px 0 4px",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 /** 一块率读数：`null` = 分母为 0（算不出）≠ 0%。 */
 function RateStat({ label, value }: { label: string; value: number | null }) {
   const { t } = useTranslation();
@@ -1078,30 +1096,6 @@ function missingFields(r: unknown): string[] {
   return missing;
 }
 
-/** `get_market_coverage` 的形状守卫：缺计数/closeDates 即视为「取不到」，不渲染成 0。 */
-/**
- * 采集命令必须返回一份带计数的报告。`undefined`／缺字段（浏览器模式的 mock 对这些
- * 行情命令只回 `undefined`）不得读成「0 条 ⇒ 都做完了」——那是把「命令不存在」演成成功。
- */
-function assertReport(r: unknown, cmd: string, field: string): void {
-  const o = r as Record<string, unknown> | null;
-  if (o === null || typeof o !== "object" || typeof o[field] !== "number") {
-    throw new Error(`${cmd} returned no numeric "${field}" (market-data commands need the desktop app)`);
-  }
-}
-
-function isCoverage(c: unknown): c is MarketCoverage {
-  if (c == null || typeof c !== "object") {
-    return false;
-  }
-  const o = c as Record<string, unknown>;
-  return typeof o.universeSize === "number"
-    && typeof o.confirmedByClist === "number"
-    && typeof o.reportedTotal === "number"
-    && typeof o.latestCloseCodes === "number"
-    && Array.isArray(o.closeDates);
-}
-
 /** 后端错误按 `detail` 成句呈现（已是完整说明），非 JSON 时退回消息原文。 */
 function detailOf(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
@@ -1138,6 +1132,33 @@ const VERDICT_COLOR: Record<string, string> = {
   partial: "gold",
   wrong: "red",
 };
+
+/** as-of 差异 JSON 的展示投影（后端形状见 `mover_recall_analysis` 模块文档）。 */
+type AsOfDiff = {
+  poolState?: string;
+  pickedStyles?: string[];
+  trimmedStyles?: string[];
+  pickedOtherPeriods?: string[];
+  replayFailure?: string | null;
+  divergedFromLive?: boolean | null;
+};
+
+/** 解析 as-of 差异原文；缺失/损坏返回 null（渲染侧据此说「无 as-of 证据」）。 */
+function parseAsOfDiff(raw: string | null | undefined): AsOfDiff | null {
+  if (raw == null || raw.length === 0) { return null; }
+  try {
+    const v: unknown = JSON.parse(raw);
+    return v != null && typeof v === "object" ? v as AsOfDiff : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 空表/缺字段在呈现层各自成句：空 = 「无」，缺 = 不渲染该行。 */
+function stylesText(list: string[] | undefined): string | null {
+  if (!Array.isArray(list)) { return null; }
+  return list.length === 0 ? "" : list.join(" / ");
+}
 
 /** 展开区：加载/错误/未落库/事件四态 + 分析摘要与逐档反思卡。 */
 function MoverReviewDetail({
@@ -1178,6 +1199,10 @@ function MoverReviewDetail({
 
   const statusColor = EVENT_STATUS_COLOR[r.status] ?? "default";
   const sortedReflections = [...r.reflections].sort((a, b) => {
+    // B-7：事件档永远排在最前（它才是这次漏检对应的那一档）；其余按固定档序。
+    const ea = a.horizon === r.period ? 0 : 1;
+    const eb = b.horizon === r.period ? 0 : 1;
+    if (ea !== eb) { return ea - eb; }
     const ia = REVIEW_HORIZON_ORDER.indexOf(a.horizon ?? "");
     const ib = REVIEW_HORIZON_ORDER.indexOf(b.horizon ?? "");
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
@@ -1225,6 +1250,87 @@ function MoverReviewDetail({
             max: r.maxDailyPct.toFixed(1),
           })}
         </span>
+      </div>
+
+      {/* as-of 层与 live 层分列：分歧本身是诊断信息，不得折成一行 */}
+      <div style={{ marginTop: 6 }} data-testid="mover-review-asof">
+        <div style={{ fontWeight: 600 }}>
+          {t("stockAnalysis.moverRecall.review.asofHeading")}
+        </div>
+        {r.asofLayer
+          ? (() => {
+            const diff = parseAsOfDiff(r.asofDiffJson);
+            const picked = stylesText(diff?.pickedStyles);
+            const trimmed = stylesText(diff?.trimmedStyles);
+            const other = stylesText(diff?.pickedOtherPeriods);
+            const poolKey = diff?.poolState === "present"
+              ? "asofPoolPresent"
+              : diff?.poolState === "empty"
+              ? "asofPoolEmpty"
+              : diff?.poolState === "absent"
+              ? "asofPoolAbsent"
+              : null;
+            return (
+              <>
+                <div>{t("stockAnalysis.moverRecall.review.asofLayerHint", { layer: layerName(r.asofLayer) })}</div>
+                {poolKey ? <div>{t(`stockAnalysis.moverRecall.review.${poolKey}`)}</div> : null}
+                {picked != null || trimmed != null || other != null
+                  ? (
+                    <div>
+                      {t("stockAnalysis.moverRecall.review.asofStylesLine", {
+                        picked: picked === "" ? t("stockAnalysis.moverRecall.review.asofNone") : picked ?? "-",
+                        trimmed: trimmed === "" ? t("stockAnalysis.moverRecall.review.asofNone") : trimmed ?? "-",
+                        other: other === "" ? t("stockAnalysis.moverRecall.review.asofNone") : other ?? "-",
+                      })}
+                    </div>
+                  )
+                  : null}
+                {diff?.divergedFromLive === true
+                  ? <div>{t("stockAnalysis.moverRecall.review.asofDiverged")}</div>
+                  : diff?.divergedFromLive === false
+                  ? <div>{t("stockAnalysis.moverRecall.review.asofConsistent")}</div>
+                  : null}
+                {diff?.replayFailure
+                  ? (
+                    <div className="sa-failed">
+                      {t("stockAnalysis.moverRecall.review.asofFailureLine", { detail: diff.replayFailure })}
+                    </div>
+                  )
+                  : null}
+              </>
+            );
+          })()
+          : (
+            <div style={{ color: "var(--color-text-tertiary)" }}>
+              {t("stockAnalysis.moverRecall.review.asofMissing")}
+            </div>
+          )}
+      </div>
+
+      {/* F-4：事件档决策摘要 —— 「未记录」与「观望」是两件事，不得合并 */}
+      <div
+        style={{ marginTop: 6, color: "var(--color-text-secondary)" }}
+        data-testid="mover-review-analysis-signal"
+      >
+        {(() => {
+          let sig: { action?: string | null; confidence?: number | null } | null = null;
+          if (r.analysisSignalAtStart) {
+            try {
+              sig = JSON.parse(r.analysisSignalAtStart) as {
+                action?: string | null;
+                confidence?: number | null;
+              };
+            } catch {
+              sig = null;
+            }
+          }
+          return sig?.action
+            ? t("stockAnalysis.moverRecall.review.analysisSignal", {
+              action: sig.action,
+              confidence: sig.confidence ?? "-",
+            })
+            : t("stockAnalysis.moverRecall.review.analysisSignalMissing");
+        })()}
       </div>
 
       {r.status === "failed"

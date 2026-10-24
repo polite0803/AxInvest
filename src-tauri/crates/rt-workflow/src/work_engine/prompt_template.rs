@@ -210,7 +210,11 @@ pub fn render_prompt(
 /// 按点号路径从变量表中查找值。
 ///
 /// 首段是 `variables` 的顶层 key，后续段递归 `get(segment)` 进入 JSON 嵌套。
-fn resolve_dot_path<'a>(
+///
+/// `pub(crate)`：`expression_engine::template` 的 `{{path}}` 走**同一份**实现 ——
+/// 两处各写一份路径解析迟早漂移（一边支持连字符 / 中文 key、另一边不支持），
+/// 而它们读的是同一个变量表。
+pub(crate) fn resolve_dot_path<'a>(
     path: &str,
     variables: &'a HashMap<String, Value>,
 ) -> Result<&'a Value, TemplateRenderError> {

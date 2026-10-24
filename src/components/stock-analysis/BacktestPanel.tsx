@@ -1,6 +1,8 @@
 import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBadge";
+import { useTrackedTask } from "@/hooks/useTrackedTask";
 import { invoke } from "@/lib/invoke";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import type { TaskAccepted } from "@/types";
 import type { BacktestComparisonResponse, BacktestStats, GroupBacktestResult } from "@/types/stock-analysis";
 import { Alert, Button, Card, Empty, InputNumber, Segmented, Spin, Statistic, Table, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -21,14 +23,21 @@ export function BacktestPanel() {
   const isReplay = anchorMode === "replay" && asOfDate !== null;
 
   // ── 策略回测状态 ──
+  // 回测已改为异步任务：受理即返回，报告在终态后从 result_json 取回。
+  // 旧实现靠 `strategyTokenRef` 丢弃乱序响应；异步化后由 hook 的 taskId 归属判断接管
+  // （旧任务的结果不会覆盖新任务）。
+  const strategyTask = useTrackedTask<BacktestComparisonResponse>();
+  const {
+    start: startStrategyTask,
+    running: strategyRunning,
+    result: strategyTaskResult,
+    error: strategyTaskError,
+  } = strategyTask;
   const [strategyResult, setStrategyResult] = useState<BacktestComparisonResponse | null>(null);
-  const [strategyLoading, setStrategyLoading] = useState(false);
   const [strategyError, setStrategyError] = useState<string | null>(null);
 
   // Bug 4 修复: 统一请求级取消令牌
   const reqTokenRef = useRef(0);
-  // R2-Bug-I 修复: 策略回测独立 token,避免和 load 互相取消
-  const strategyTokenRef = useRef(0);
 
   /**
    * 统一加载入口(useEffect 与"重试"按钮共用)。
@@ -64,24 +73,23 @@ export function BacktestPanel() {
   }, [load]);
 
   const runStrategyBacktest = useCallback(async () => {
-    // R2-Bug-I 修复: 快速双击"策略回测"按钮会产生并发请求,
-    // 此处用独立 token 让后返回的慢请求无法覆盖较新的快请求结果。
-    const myToken = ++strategyTokenRef.current;
-    setStrategyLoading(true);
     setStrategyResult(null);
     setStrategyError(null);
-    try {
-      const result = await invoke<BacktestComparisonResponse>("backtest_reco_strategies");
-      if (myToken !== strategyTokenRef.current) { return; }
-      setStrategyResult(result);
-    } catch (e: unknown) {
-      if (myToken !== strategyTokenRef.current) { return; }
-      setStrategyError(
-        typeof e === "string" ? e : e instanceof Error ? e.message : t("stockAnalysis.backtest.strategyFailed"),
-      );
+    await startStrategyTask(() => invoke<TaskAccepted>("backtest_reco_strategies"));
+  }, [startStrategyTask]);
+
+  // 报告取回（或失败）后落到渲染用的本地 state
+  useEffect(() => {
+    if (strategyTaskResult) {
+      setStrategyResult(strategyTaskResult);
     }
-    if (myToken === strategyTokenRef.current) { setStrategyLoading(false); }
-  }, [t]);
+  }, [strategyTaskResult]);
+
+  useEffect(() => {
+    if (strategyTaskError) {
+      setStrategyError(strategyTaskError);
+    }
+  }, [strategyTaskError]);
 
   const accuracyColor = stats ? stats.accuracyPct >= 60 ? "var(--sa-red)" : "var(--sa-green)" : undefined;
   const returnColor = stats && stats.avgReturnPct >= 0 ? "var(--sa-red)" : "var(--sa-green)";
@@ -188,14 +196,16 @@ export function BacktestPanel() {
       <div className="mt-4 pt-3 border-t border-gray-700/30">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium">📈 {t("stockAnalysis.backtest.strategyTitle")}</span>
+          {/* 取消后只剩部分样本：显式标注，不得让部分结果冒充完整回测 */}
+          {strategyResult?.cancelled && <Tag color="warning">{t("stockAnalysis.backtest.cancelled")}</Tag>}
           <Button
             size="small"
             type="primary"
             ghost
-            loading={strategyLoading}
+            loading={strategyRunning}
             onClick={runStrategyBacktest}
           >
-            {strategyLoading ? t("stockAnalysis.backtest.strategyRunning") : t("stockAnalysis.backtest.strategyRun")}
+            {strategyRunning ? t("stockAnalysis.backtest.strategyRunning") : t("stockAnalysis.backtest.strategyRun")}
           </Button>
         </div>
 

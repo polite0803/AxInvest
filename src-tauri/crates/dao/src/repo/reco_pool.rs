@@ -32,6 +32,38 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, QueryFilter, Qu
 use axagent_entities::{reco_picks, reco_pool_batches, reco_scan_audit};
 use axagent_harness::DatabaseConnection;
 
+/// 荐股落库的**用途**值域（`reco_picks` / `reco_pool_batches` / `reco_scan_audit` 三表共用）。
+///
+/// 与代际（`as_of_date`）是两个问题：代际回答「截止哪一天」，用途回答「谁跑的回放」。
+/// 三张表各自的列注释都指向这里，值域只此一处 —— 新增用途必须同时
+/// 登记进 `scripts/check-reco-generation.mjs`（G7），否则 live 消费者会误读回放行。
+pub mod purpose {
+    /// 实盘批次（手动刷新 / cron / 面板）。
+    pub const LIVE: &str = "live";
+    /// 漏检窗口起点的 as-of 回放（`mover_recall_analysis` 批次内）。
+    pub const MOVER_REPLAY: &str = "mover_replay";
+    /// 时间旅行批次（用户指定日的回放）。
+    pub const TIME_TRAVEL_REPLAY: &str = "time_travel_replay";
+    /// 面板手动回放（荐股面板带 `asOfDate` 的那一次）。
+    pub const MANUAL_REPLAY: &str = "manual_replay";
+    /// 本列引入前的 `as_of_date` 非空行（启动期一次性回填，见
+    /// [`backfill_legacy_replay_purpose`]）。
+    pub const LEGACY_REPLAY: &str = "legacy_replay";
+}
+
+/// 一次落库的**批次键**（`generated_at` / `as_of_date` / `purpose` 三列同源同批）。
+///
+/// 收成一个结构而不是三个平铺参数：三列必须同进同出（跨代拼证据就是「实盘票 + 回放池」），
+/// 平铺时调用方漏传一列只会在库里留下不可读的组合，而编译器不会说话。
+pub struct BatchKey<'a> {
+    /// 本次运行时刻（差异查询按它取，避免同日多次回放串批）
+    pub generated_at: &'a str,
+    /// `None` = 实盘；`Some(YYYY-MM-DD)` = 回放截止日
+    pub as_of_date: Option<&'a str>,
+    /// 用途值域见 [`purpose`]
+    pub purpose: &'a str,
+}
+
 /// 一条待落库的候选出票（`reco_picks` 的一行）。
 pub struct NewRecoPick {
     pub period: String,
@@ -54,15 +86,14 @@ pub async fn insert_picks(
     picks: &[NewRecoPick],
     seed_pool_json: Option<String>,
     strategy_weights_json: Option<String>,
-    generated_at: &str,
-    as_of_date: Option<&str>,
+    batch: &BatchKey<'_>,
     reco_version: Option<i32>,
 ) -> usize {
     let mut written = 0usize;
     for pick in picks {
         let am = reco_picks::ActiveModel {
             id: Set(uuid::Uuid::new_v4().to_string()),
-            generated_at: Set(generated_at.to_string()),
+            generated_at: Set(batch.generated_at.to_string()),
             period: Set(pick.period.clone()),
             stock_code: Set(pick.stock_code.clone()),
             stock_name: Set(pick.stock_name.clone()),
@@ -73,8 +104,9 @@ pub async fn insert_picks(
             strategy_weights_json: Set(strategy_weights_json.clone()),
             pick_data: Set(pick.pick_data.clone()),
             reco_version: Set(reco_version),
-            as_of_date: Set(as_of_date.map(|s| s.to_string())),
-            created_at: Set(generated_at.to_string()),
+            as_of_date: Set(batch.as_of_date.map(|s| s.to_string())),
+            purpose: Set(Some(batch.purpose.to_string())),
+            created_at: Set(batch.generated_at.to_string()),
         };
         match am.insert(db).await {
             Ok(_) => written += 1,
@@ -107,22 +139,22 @@ pub async fn insert_scan_audit(
     db: &DatabaseConnection,
     trimmed: &[NewScanAuditTrim],
     period: &str,
-    generated_at: &str,
-    as_of_date: Option<&str>,
+    batch: &BatchKey<'_>,
 ) -> usize {
     let mut written = 0usize;
     for t in trimmed {
         let am = reco_scan_audit::ActiveModel {
             id: Set(uuid::Uuid::new_v4().to_string()),
-            generated_at: Set(generated_at.to_string()),
+            generated_at: Set(batch.generated_at.to_string()),
             period: Set(period.to_string()),
             stock_code: Set(t.stock_code.clone()),
             stock_name: Set(t.stock_name.clone()),
             style: Set(t.style.clone()),
             confidence: Set(t.confidence),
             rank: Set(t.rank),
-            as_of_date: Set(as_of_date.map(|s| s.to_string())),
-            created_at: Set(generated_at.to_string()),
+            as_of_date: Set(batch.as_of_date.map(|s| s.to_string())),
+            purpose: Set(Some(batch.purpose.to_string())),
+            created_at: Set(batch.generated_at.to_string()),
         };
         match am.insert(db).await {
             Ok(_) => written += 1,
@@ -167,6 +199,43 @@ pub async fn latest_seed_pool_codes(
     Ok(pairs.into_iter().map(|(code, _)| code).collect())
 }
 
+/// 存量回填：把 `purpose` 列引入前、`as_of_date` 非空的行标成 `legacy_replay`。
+///
+/// 为什么必须回填而不能按「缺省 live」读：这些行是 2026-10-12 裁定之前/之后用手动回放
+/// 与时间旅行写下的**回放**候选，当成实盘会让历史面板与 live 消费者把历史池当今天的票。
+/// 反过来，`purpose IS NULL AND as_of_date IS NULL` 的行才是真正的旧实盘行 —— 它们
+/// 不回填（live 是多数行，写一遍没有信息增量，`NULL` 在读取侧等价 `live`）。
+///
+/// 幂等：`WHERE purpose IS NULL AND as_of_date IS NOT NULL`，二次执行为 0 行。
+/// 返回三表各自受影响行数 `(picks, pool_batches, scan_audit)`。
+pub async fn backfill_legacy_replay_purpose(
+    db: &DatabaseConnection,
+) -> Result<(u64, u64, u64), DbErr> {
+    use sea_orm::sea_query::Expr;
+    let picks = reco_picks::Entity::update_many()
+        .col_expr(reco_picks::Column::Purpose, Expr::value(purpose::LEGACY_REPLAY))
+        .filter(reco_picks::Column::Purpose.is_null())
+        .filter(reco_picks::Column::AsOfDate.is_not_null())
+        .exec(db)
+        .await?
+        .rows_affected;
+    let pool = reco_pool_batches::Entity::update_many()
+        .col_expr(reco_pool_batches::Column::Purpose, Expr::value(purpose::LEGACY_REPLAY))
+        .filter(reco_pool_batches::Column::Purpose.is_null())
+        .filter(reco_pool_batches::Column::AsOfDate.is_not_null())
+        .exec(db)
+        .await?
+        .rows_affected;
+    let audit = reco_scan_audit::Entity::update_many()
+        .col_expr(reco_scan_audit::Column::Purpose, Expr::value(purpose::LEGACY_REPLAY))
+        .filter(reco_scan_audit::Column::Purpose.is_null())
+        .filter(reco_scan_audit::Column::AsOfDate.is_not_null())
+        .exec(db)
+        .await?
+        .rows_affected;
+    Ok((picks, pool, audit))
+}
+
 /// 一个候选池批次快照（0 票批次也写）。
 pub struct NewPoolBatch {
     pub id: String,
@@ -174,6 +243,8 @@ pub struct NewPoolBatch {
     pub period: String,
     pub generated_at: String,
     pub as_of_date: Option<String>,
+    /// 用途值域见 [`purpose`]（`live` / `mover_replay` / `time_travel_replay`）。
+    pub purpose: String,
     pub seed_pool_json: Option<String>,
     pub stock_count: i32,
     pub degraded: bool,
@@ -188,6 +259,7 @@ pub async fn insert_pool_batch(db: &DatabaseConnection, batch: &NewPoolBatch) ->
         period: Set(batch.period.clone()),
         generated_at: Set(batch.generated_at.clone()),
         as_of_date: Set(batch.as_of_date.clone()),
+        purpose: Set(Some(batch.purpose.clone())),
         seed_pool_json: Set(batch.seed_pool_json.clone()),
         stock_count: Set(batch.stock_count),
         degraded: Set(batch.degraded),
@@ -250,8 +322,8 @@ mod tests {
             synthetic: false,
             pick_data: None,
         };
-        let written =
-            insert_picks(db, &[pick], Some(seed), None, generated_at, as_of_date, Some(1)).await;
+        let batch = BatchKey { generated_at, as_of_date, purpose: purpose::LIVE };
+        let written = insert_picks(db, &[pick], Some(seed), None, &batch, Some(1)).await;
         assert_eq!(written, 1, "候选行应写入成功（写失败只 warn，不断言就会让夹具静默空表）");
     }
 
@@ -288,6 +360,7 @@ mod tests {
             period: "mid".to_string(),
             generated_at: "2026-10-05T15:00:00Z".to_string(),
             as_of_date: None,
+            purpose: purpose::LIVE.to_string(),
             seed_pool_json: Some("[]".to_string()),
             stock_count: 0,
             degraded: true,
@@ -300,6 +373,7 @@ mod tests {
             period: "mid".to_string(),
             generated_at: "2026-10-05T15:00:01Z".to_string(),
             as_of_date: Some("2026-07-21".to_string()),
+            purpose: purpose::MOVER_REPLAY.to_string(),
             seed_pool_json: Some(r#"[["600000","n"]]"#.to_string()),
             stock_count: 1,
             degraded: false,

@@ -177,10 +177,40 @@ pub async fn horizon_prior_from_db(
     db: &sea_orm::DatabaseConnection,
     kappa: f64,
 ) -> Option<serde_json::Value> {
+    horizon_prior_from_db_as_of(db, kappa, None).await
+}
+
+/// as-of 版先验：只用**截至 `as_of` 已知**的结算样本（`None` = 实盘口径）。
+///
+/// 为什么必须给回放单独一个入口而不是「沿用当前先验」：`decision_validations` /
+/// 反思行里含 window_start 之后才结算的样本，拿全量先验去回放等于让未来信息参与历史
+/// 决策（PLAN 待拍板 #7 的推荐项）。截断判据在 [`crate::reflection_stats::build_hitrate_stats`]。
+pub async fn horizon_prior_from_db_as_of(
+    db: &sea_orm::DatabaseConnection,
+    kappa: f64,
+    as_of: Option<&str>,
+) -> Option<serde_json::Value> {
     // 按代筛样（起算代 = `HORIZON_BRANCH_GENERATION_FLOOR`，§五十一-②）已收在
-    // `build_hitrate_stats` 内部 —— 它是判据常量、不读库，故本层无需任何代际参数。
-    let stats = crate::reflection_stats::build_hitrate_stats(db).await.ok()?;
+    // `build_hitrate_stats` 内部 —— 它是判据常量、不读库。
+    let stats = crate::reflection_stats::build_hitrate_stats(db, as_of).await.ok()?;
     Some(horizon_prior_map(&stats, kappa))
+}
+
+/// 从变量表读 κ 再取先验 —— 「κ 从哪个模板变量来」这件事的唯一实现。
+///
+/// live 入口传 `as_of=None`；as-of 回放传窗口起点（截断口径见
+/// [`horizon_prior_from_db_as_of`]）。
+pub async fn horizon_prior_from_vars_db(
+    db: &sea_orm::DatabaseConnection,
+    served_vars: &[(String, serde_json::Value)],
+    as_of: Option<&str>,
+) -> Option<serde_json::Value> {
+    let kappa = served_vars
+        .iter()
+        .find(|(k, _)| k == "horizon_prior_kappa")
+        .and_then(|(_, v)| v.as_f64())
+        .unwrap_or(DEFAULT_KAPPA);
+    horizon_prior_from_db_as_of(db, kappa, as_of).await
 }
 
 #[cfg(test)]

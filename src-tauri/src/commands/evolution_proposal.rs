@@ -507,6 +507,9 @@ mod tests {
             template_version: None,
             source: "due".to_string(),
             miss_layer: None,
+            asof_reco_generated_at: None,
+            asof_layer: None,
+            reco_diff_json: None,
             failure_modes: None,
             // 阶段 3：反思产出的层级轴（测试夹具 = 未标注，读侧不得当成 L1）
             implementation_tier: None,

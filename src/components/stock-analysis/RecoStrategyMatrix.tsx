@@ -1,5 +1,7 @@
+import { useTrackedTask } from "@/hooks/useTrackedTask";
 import { invoke } from "@/lib/invoke";
 import { horizonIcAbsenceKey, horizonSuffix } from "@/lib/stock-analysis-utils";
+import type { TaskAccepted } from "@/types";
 import type {
   BacktestComparisonResponse,
   RecoIcCell,
@@ -7,10 +9,9 @@ import type {
   RecoMatrixCell,
   StrategyStats,
 } from "@/types/stock-analysis";
-import { Card, Empty, Segmented, Spin, Tag, Tooltip } from "antd";
+import { Card, Empty, Segmented, Space, Spin, Tag, Tooltip } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MoverRecallPanel } from "./MoverRecallPanel";
 
 /** 观测面（`reco_ic_stats`）取不到时的**兜底行集合**。
  *  正常渲染必须由后端契约 `matrix` 驱动（6 行，含 watchlist / serenity）——
@@ -46,10 +47,14 @@ interface RecoStrategyMatrixProps {
 
 export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: RecoStrategyMatrixProps) {
   const { t } = useTranslation();
-  const [internalData, setInternalData] = useState<BacktestComparisonResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [error, _setError] = useState<string | null>(null);
+  // 回测已改为异步任务：受理即返回，报告在终态后从 result_json 取回。
+  // 正/负组切换只是对同一份报告的本地重排（后端一次返回两组），不再重新发任务。
+  const {
+    start: startMatrixTask,
+    running: matrixRunning,
+    result: internalData,
+    error,
+  } = useTrackedTask<BacktestComparisonResponse>();
   const [selected, setSelected] = useState<string | null>(null);
   // Phase R-E：逐 (风格, 档位) rank IC —— 只报数，不回写任何权重
   const [ic, setIc] = useState<RecoIcStats | null>(null);
@@ -57,25 +62,10 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
 
   useEffect(() => {
     if (externalData) { return; }
-    let cancelled = false;
-    Promise.resolve().then(() => {
-      if (cancelled) { return; }
-      setLoading(true);
-      return invoke<BacktestComparisonResponse>("backtest_reco_strategies", { group });
-    })
-      .then((data) => {
-        if (!cancelled) { setInternalData(data ?? null); }
-      })
-      .catch((e) => {
-        if (!cancelled) { console.error("[RecoStrategyMatrix]", e); }
-      })
-      .finally(() => {
-        if (!cancelled) { setLoading(false); }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [group, externalData]);
+    // 组别变化不进依赖：切组是本地重排，不是新任务（旧代码把被命令忽略的 `group`
+    // 参数传进 invoke，等于每次切换都白跑一次回测）
+    void startMatrixTask(() => invoke<TaskAccepted>("backtest_reco_strategies"));
+  }, [externalData, startMatrixTask]);
 
   // IC 与回测同源不同表：单独取，失败静默（面板退化成「只有胜率」而不报错）
   useEffect(() => {
@@ -167,7 +157,7 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
   /** 理由码 → 文案；**缺译时退回理由码原文**，让「没翻译」在 UI 上是可见的缺陷而不是空白。 */
   const reasonText = (prefix: string, code: string): string => t(`${prefix}.${code}`, { defaultValue: code });
 
-  if (loading) {
+  if (matrixRunning) {
     return <Spin size="small" style={{ display: "block", margin: "24px auto" }} />;
   }
 
@@ -193,22 +183,62 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
       size="small"
       title={t("stockAnalysis.backtest.matrixTitle")}
       extra={
-        <Segmented
-          size="small"
-          value={group}
-          onChange={(v) => {
-            setGroup(v as "positive" | "negative");
-            setSelected(null);
-            onSelectStrategy?.(null);
-          }}
-          options={[
-            { label: t("stockAnalysis.backtest.groupPositive"), value: "positive" },
-            { label: t("stockAnalysis.backtest.groupNegative"), value: "negative" },
-          ]}
-        />
+        <Space size={6}>
+          {/* 取消后只剩部分样本：必须显式标注，不得让部分矩阵冒充完整结果 */}
+          {data?.cancelled && <Tag color="warning">{t("stockAnalysis.backtest.cancelled")}</Tag>}
+          <Segmented
+            size="small"
+            value={group}
+            onChange={(v) => {
+              setGroup(v as "positive" | "negative");
+              setSelected(null);
+              onSelectStrategy?.(null);
+            }}
+            options={[
+              { label: t("stockAnalysis.backtest.groupPositive"), value: "positive" },
+              { label: t("stockAnalysis.backtest.groupNegative"), value: "negative" },
+            ]}
+          />
+        </Space>
       }
       styles={{ body: { padding: "8px 10px" } }}
     >
+      {/* 读法：把「一格里的四行」一次讲清，免得把 IC 样本数读成胜率样本 */}
+      <div
+        style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 6 }}
+        data-testid="reco-matrix-legend"
+      >
+        {t("stockAnalysis.backtest.matrixLegend")}
+      </div>
+      {/* 闭环生效闸（Q2 shadow 起步）：shadow=只算分不进评分；on=覆盖静态权重；off=完全停用 */}
+      {ic?.loop
+        ? (
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--color-text-secondary)",
+              background: "var(--color-bg-secondary, rgba(127,127,127,0.06))",
+              borderRadius: 4,
+              padding: "4px 8px",
+              marginBottom: 8,
+            }}
+            data-testid="reco-loop-gate"
+          >
+            {t(
+              ic.loop.gate === "on"
+                ? "stockAnalysis.backtest.loopGateOn"
+                : ic.loop.gate === "shadow"
+                ? "stockAnalysis.backtest.loopGateShadow"
+                : "stockAnalysis.backtest.loopGateOff",
+              {
+                time: ic.loop.lastRecalcAt > 0
+                  ? new Date(ic.loop.lastRecalcAt).toLocaleString()
+                  : t("stockAnalysis.backtest.loopNeverRecalc"),
+              },
+            )}
+          </div>
+        )
+        : null}
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
         <thead>
           <tr style={{ borderBottom: "0.5px solid var(--color-border-tertiary)" }}>
@@ -428,26 +458,6 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
         </tbody>
       </table>
 
-      {/* 闭环生效闸（Q2 shadow 起步）：shadow=只算分不进评分；on=覆盖静态权重；off=完全停用 */}
-      {ic?.loop
-        ? (
-          <div style={{ marginTop: 8, fontSize: 10, color: "var(--color-text-tertiary)" }} data-testid="reco-loop-gate">
-            {t(
-              ic.loop.gate === "on"
-                ? "stockAnalysis.backtest.loopGateOn"
-                : ic.loop.gate === "shadow"
-                ? "stockAnalysis.backtest.loopGateShadow"
-                : "stockAnalysis.backtest.loopGateOff",
-              {
-                time: ic.loop.lastRecalcAt > 0
-                  ? new Date(ic.loop.lastRecalcAt).toLocaleString()
-                  : t("stockAnalysis.backtest.loopNeverRecalc"),
-              },
-            )}
-          </div>
-        )
-        : null}
-
       {data?.skipped && data.skipped.length > 0 && (
         <div style={{ marginTop: 8, display: "flex", gap: 4, flexWrap: "wrap" }}>
           {data.skipped.map((reason, i) => (
@@ -457,14 +467,6 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
           ))}
         </div>
       )}
-
-      {
-        /* 窗口涨幅达标漏检核查（PLAN-mover-recall-attribution Phase 5）：
-          与闭环视图同区呈现 —— 「降权为什么发生」的证据链就在旁边 */
-      }
-      <div style={{ marginTop: 10 }}>
-        <MoverRecallPanel />
-      </div>
     </Card>
   );
 }

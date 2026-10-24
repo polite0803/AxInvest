@@ -565,6 +565,11 @@ pub fn reflection_review_json(r: &stock_reflections::Model) -> serde_json::Value
         "rawReturn": r.raw_return,
         "source": r.source,
         "missLayer": r.miss_layer,
+        // 阶段 B-5：as-of 层与 live 层分列（`missLayer` 自本版本起写 as-of 层；
+        // 本列引入前的行 `asofLayer` 为 NULL，面板据此声明「旧行无 as-of 证据」）。
+        "asofLayer": r.asof_layer,
+        "asofRecoGeneratedAt": r.asof_reco_generated_at,
+        "recoDiffJson": r.reco_diff_json,
         // P2-b：本行的失败模式标注（JSON 数组文本，值域见 analysis_engine::failure_mode）。
         // NULL = 模板未产出该字段，与「产出但全被白名单丢弃」的空数组是两件事。
         "failureModes": r.failure_modes,
@@ -732,6 +737,9 @@ mod tests {
             template_version: None,
             source: "due".to_string(),
             miss_layer: None,
+            asof_reco_generated_at: None,
+            asof_layer: None,
+            reco_diff_json: None,
             failure_modes: None,
             // 阶段 3：反思产出的层级轴（测试夹具 = 未标注，读侧不得当成 L1）
             implementation_tier: None,

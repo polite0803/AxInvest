@@ -17,6 +17,11 @@ export interface BackgroundTaskInfo {
   prompt?: string;
   status: string;
   output: string;
+  /**
+   * 结构化报告（JSON 字符串）。`output` 只是给人看的摘要；慢命令的消费方
+   * （回测/收盘面板）解析这一列。仅成功/取消的任务有值。
+   */
+  resultJson?: string;
   exitCode?: number;
   conversationId?: string;
   idempotencyKey?: string;
@@ -25,4 +30,12 @@ export interface BackgroundTaskInfo {
   createdAt: number;
   updatedAt: number;
   finishedAt?: number;
+}
+
+/**
+ * 慢命令的受理回执（后端 `TaskAccepted`）。命令不再 wait 到执行结束，
+ * 只回任务 id；报告经 `get_background_task_output` 的 `resultJson` 取回。
+ */
+export interface TaskAccepted {
+  taskId: string;
 }

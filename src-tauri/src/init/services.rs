@@ -2459,7 +2459,27 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     );
                 }
 
-                // 3. 扫描（多周期并行，内部已过滤 synthetic 与低于阈值的 pick）
+                // D-1（2026-10-24 闭合）：四类种子**全部**要在 cron 入口刷新，且与手动
+                // 四档入口走**同一个函数**。此前本分支只刷了回灌一路（那是 D-3 的修法），
+                // user/mover/miss 三路仍只在命令层刷新 ⇒ 00:00 主生产者批次（下游 pool-scan /
+                // 漏检核查 / 回测吃的就是它）的候选池里没有漏检票、没有自选股、没有当日强势榜
+                // ⇒ 一只「已被漏检核查点名的票」天天被判漏、天天又漏一次。
+                // 现在两条入口共用 `refresh_all_reco_seeds_db`，漏一路则两条都漏 ——
+                // 结构上不可能再分裂。
+                let seed_counts = crate::commands::stock_analysis::refresh_all_reco_seeds_db(
+                    &db,
+                    None, // cron 恒定实盘代际；回放行走显式 as_of_date 入口，不经本分支
+                    client.as_ref(),
+                )
+                .await;
+                tracing::info!(
+                    "[CronScheduler] 荐股任务 '{}' 候选种子已刷新：用户 {} / 涨幅榜 {} / 漏检 {} / 回灌 {}",
+                    job_name,
+                    seed_counts.user,
+                    seed_counts.mover,
+                    seed_counts.miss,
+                    seed_counts.reflow
+                );
                 let prior =
                     crate::commands::stock_analysis::reco_horizon_prior(&db, &vars).await;
                 let scan = axagent_analysis_engine::recommender::run_recommendation_scan(
@@ -2496,6 +2516,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         // None），不可能产出回放行。用具名常量而非裸 None，让代际门读得出
                         // 这里是**想过**代际的，而不是漏传。
                         axagent_astock_data::as_of::LIVE_GENERATION,
+                        crate::commands::_shared_reco_pool::purpose::LIVE,
                     )
                     .await;
                     tracing::info!(
@@ -2503,27 +2524,36 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         job_name,
                         picks.len()
                     );
-                    // L3 截断留痕：与 picks 共用同一个 generated_at（批次键）。
-                    // 此前定时链从不写这张表（`run_recommendation_scan` 没透出留痕），
-                    // 于是漏检核查读到的窗口大面积为空 ⇒ 归因整批落 `Unexplained`。
-                    for (audit_period, trimmed) in &scan.period_audit {
-                        let audit_written =
-                            crate::commands::_shared_reco_pool::persist_reco_scan_audit(
-                                &db,
-                                trimmed,
-                                *audit_period,
-                                &generated_at,
-                                None,
-                            )
-                            .await;
-                        tracing::info!(
-                            "[CronScheduler] 荐股任务 '{}' 落库 scan_audit: \
-                             {audit_written}/{} 行（档 {}）",
-                            job_name,
-                            trimmed.len(),
-                            audit_period.as_str()
-                        );
-                    }
+                }
+
+                // L3 截断留痕：**必须与 picks 解耦**（2026-10-24）。
+                //   此前整段被包在 `if !picks.is_empty()` 里 ⇒ 一轮「扫过、但因硬门/阈值
+                //   被整批淘汰」的批次在 `reco_scan_audit` 里查不到任何痕迹。漏检归因
+                //   （`mover_recall::attribute`）拿不到「这一轮确实扫过、票是在哪一档被
+                //   淘汰的」证据，只能把票打成 `NotInPool` / `Unexplained`；而真相往往
+                //   是**票在池里、是在 L3 被主动淘汰**（`L3ScoredOut`）。两者修复动作
+                //   截然相反：前者要扩池，后者要改评分判据 —— 归因错 ⇒ 改错地方。
+                //   尤其 `regime_mult < 1.0` 的追涨腿硬门会把 Trend 整档清空，这种批次
+                //   以前是「跑完了但一片空白」。
+                for (audit_period, trimmed) in &scan.period_audit {
+                    let audit_written =
+                        crate::commands::_shared_reco_pool::persist_reco_scan_audit(
+                            &db,
+                            trimmed,
+                            *audit_period,
+                            &generated_at,
+                            None,
+                            crate::commands::_shared_reco_pool::purpose::LIVE,
+                        )
+                        .await;
+                    tracing::info!(
+                        "[CronScheduler] 荐股任务 '{}' 落库 scan_audit: \
+                         {audit_written}/{} 行（档 {}；本批出票 {}）",
+                        job_name,
+                        trimmed.len(),
+                        audit_period.as_str(),
+                        picks.len()
+                    );
                 }
 
                 // 批次级池快照：0 票也要留痕。池在整次扫描里只有一份（多周期共用），
@@ -2535,6 +2565,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     scan.seed_pool_snapshot.as_deref(),
                     &generated_at,
                     axagent_astock_data::as_of::LIVE_GENERATION,
+                    crate::commands::_shared_reco_pool::purpose::LIVE,
                 )
                 .await;
 

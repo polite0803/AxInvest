@@ -55,6 +55,9 @@ pub struct CloseSweepReport {
     /// 清单里有、但行情源**一个报价都没回**的代码数（≠ 停牌/无有效值）。
     /// 让「全 A 股样本」的缺口显式可见，而不是只看 written < universe_size 猜原因。
     pub missing_quotes: usize,
+    /// 用户中途取消 ⇒ 后面的批次没跑。`batches`/`written` 等只统计**已执行**部分，
+    /// 读侧必须按本字段区分「跑完了只有这么点」与「被叫停了」。
+    pub cancelled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -187,15 +190,26 @@ pub async fn backfill_close_history_for_codes(
     let fetch_days = target_days.saturating_add(1);
     let mut stats = BackfillStats::default();
     for (code, stock_name) in entries {
+        // 批间（票间）取消检查：已写入的行保持有效，报告按「部分完成」返回
+        if axagent_astock_data::task_cancel::is_cancelled() {
+            stats.cancelled = true;
+            break;
+        }
         stats.codes += 1;
         let mut klines = match client.get_klines(code, "daily", fetch_days).await {
             Ok(v) => v,
             Err(e) => {
-                stats.failed += 1;
-                if stats.first_error.is_none() {
-                    stats.first_error = Some(format!("{code}: {e}"));
-                    // 只对首条打 warn：500 只全失败时逐条刷屏会把日志淹掉
-                    tracing::warn!("[close] 历史回补 {code} 失败（后续同类只计数）: {e}");
+                if e.no_data_for_code() {
+                    stats.no_data += 1;
+                    // 答案不是故障：不进 first_error（否则 toast 弹错、像坏了），只计数
+                    tracing::info!("[close] 历史回补 {code} 无行情（未上市/已退市）: {e}");
+                } else {
+                    stats.failed += 1;
+                    if stats.first_error.is_none() {
+                        stats.first_error = Some(format!("{code}: {e}"));
+                        // 只对首条打 warn：500 只全失败时逐条刷屏会把日志淹掉
+                        tracing::warn!("[close] 历史回补 {code} 失败（后续同类只计数）: {e}");
+                    }
                 }
                 continue;
             },
@@ -268,11 +282,13 @@ pub async fn backfill_close_history_for_codes(
         }
     }
     tracing::info!(
-        "[close] 历史回补完成：代码 {} 只 / 新写入 {} 行 / 无新增 {} 只 / 失败 {} 次",
+        "[close] 历史回补完成：代码 {} 只 / 新写入 {} 行 / 无新增 {} 只 / 无行情 {} 只 / 失败 {} 次{}",
         stats.codes,
         stats.rows,
         stats.no_new,
-        stats.failed
+        stats.no_data,
+        stats.failed,
+        if stats.cancelled { "（用户取消，剩余未取）" } else { "" }
     );
     Ok(stats)
 }
@@ -283,9 +299,15 @@ pub struct BackfillStats {
     pub rows: u32,
     /// 本轮取到了日线、但一行没新增的票数（可用日线不足 target_days，或本来就齐了）
     pub no_new: u32,
+    /// 整条 vendor 链都回答「无此代码行情数据」的票数（未上市新股、已退市/已合并）。
+    /// 这是**答案**不是故障：点多少次都一样，单独成句，不得混进 `failed`
+    /// （2026-10-23 实测 001235 里得电科未上市，被报成 browser_eastmoney 网络错误）。
+    pub no_data: u32,
     pub failed: u32,
     /// 首条失败原因（500 只全失败时用来诊断；后续同类只计数不刷屏）
     pub first_error: Option<String>,
+    /// 用户中途取消 ⇒ 剩余票没取。`codes`/`rows` 只统计已执行部分。
+    pub cancelled: bool,
 }
 
 /// 选「历史行数不足 `target_days`」的票。
@@ -293,9 +315,12 @@ pub struct BackfillStats {
 /// 判据是**逐票行数**，不是全局日期数：段扫新登记的票在 `market_daily_close` 里
 /// 可能是 0 行，而全局日期数早已 ≥90 ⇒ 旧实现永远不补它们。
 /// 排序：**缺口最大的先补**（0 行票排最前）。旧实现反过来「已有部分历史的优先」，
-/// 理由是怕 0 行票是误登记 —— 但段扫的登记判据（`is_plausible_stock_quote`）要求
-/// 拿到真实报价（价与前收盘 > 0、名称像正股），所以 0 行票是「采过价、还没补历史」，
-/// 不是幽灵代码。反过来排还有个硬伤：可用日线永远不足 90 根的票（次新股、长停牌）
+/// 理由是怕 0 行票是误登记 —— 段扫的登记判据（`is_plausible_stock_quote`）要求
+/// 拿到真实报价（价与前收盘 > 0、名称像正股），但**挡不住幽灵代码**：未上市新股
+/// 的报价是发行价（001235 里得电科，价 25.48 / 量 0），腾讯对退市码回「无效×」名称
+/// 也像正股（300060）。两者 2026-10-23 实测都在清单里 ⇒ 0 行票混着「还没补历史」
+/// 与「永远补不到」两种，靠本轮的「无行情」分档呈现，不靠排序修。
+/// 反过来排还有个硬伤：可用日线永远不足 90 根的票（次新股、长停牌）
 /// 补不到 `target_days`，会永远钉在队首，把每批 500 个名额全部吃掉 ⇒ 后面的票永远轮不到。
 pub async fn codes_needing_history(
     db: &sea_orm::DatabaseConnection,
@@ -467,9 +492,7 @@ pub async fn refresh_universe_pages(
             reported_total: Set(reported_total),
             // 存两位小数的比值：读侧现算也行，但那样「当初按哪条公式算的」会留给
             // 下一个改公式的人 —— 落库的那个数就是本次 tick 的口径快照。
-            coverage_pct: Set(
-                ((universe_size as f64 / reported_total as f64) * 10000.0).round() / 100.0
-            ),
+            coverage_pct: Set(coverage_pct_of(universe_size as i64, reported_total)),
             pages_requested: Set(pages.len() as i32),
             pages_failed: Set(pages_failed as i32),
             rows_upserted: Set(rows_upserted as i32),
@@ -487,6 +510,20 @@ pub async fn refresh_universe_pages(
         reported_total,
         universe_size: universe_size as usize,
     })
+}
+
+/// 清单覆盖率（0–100，两位小数）。
+///
+/// **上界必须是 100**：`universe_size` 是本地枚举域，盲扫会把已退市/已迁 920 的老码
+/// 也登记进来，于是出现「6,159 / 申报 5,925 = 103.95%」这种读数（2026-10-24 生产实测）。
+/// 覆盖率 >100 不是「覆盖得更好」，而是分母与枚举域不是同一个集合；把它夹到 100
+/// 至少不会在面板/门禁里输出一个不可能的比例。真实缺口由 `latest_close_codes` /
+/// 分市场构成另行回答。
+fn coverage_pct_of(universe_size: i64, reported_total: i64) -> f64 {
+    if reported_total <= 0 || universe_size <= 0 {
+        return 0.0;
+    }
+    (((universe_size as f64 / reported_total as f64) * 10000.0).round() / 100.0).min(100.0)
 }
 
 /// 最近一次行情源申报的全市场总数（0 = 还没取到）。
@@ -530,9 +567,7 @@ pub async fn record_universe_stats_for_scan(
         observed_at: Set(now_ms),
         universe_size: Set(universe_size as i32),
         reported_total: Set(last.reported_total),
-        coverage_pct: Set(
-            ((universe_size as f64 / last.reported_total as f64) * 10000.0).round() / 100.0
-        ),
+        coverage_pct: Set(coverage_pct_of(universe_size, last.reported_total)),
         pages_requested: Set(0),
         pages_failed: Set(failed_batches as i32),
         rows_upserted: Set(registered as i32),
@@ -572,8 +607,14 @@ pub async fn run_close_sweep(
     let mut written = 0usize;
     let mut skipped_no_data = 0usize;
     let mut skipped_suspended = 0usize;
+    let mut cancelled = false;
 
     for chunk in codes.chunks(batch_size) {
+        // 批间取消检查：已落库的行保持有效，报告按「部分完成」返回
+        if axagent_astock_data::task_cancel::is_cancelled() {
+            cancelled = true;
+            break;
+        }
         batches += 1;
         match client.market_snapshot_batch(chunk).await {
             Ok(quotes) => {
@@ -645,6 +686,7 @@ pub async fn run_close_sweep(
         skipped_suspended,
         failed_batches,
         missing_quotes: universe_size.saturating_sub(rows_returned),
+        cancelled,
     })
 }
 
@@ -720,6 +762,16 @@ pub async fn universe_size(db: &sea_orm::DatabaseConnection) -> Result<u64, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn coverage_pct_never_exceeds_100_and_handles_zero_denominator() {
+        // 2026-10-24 生产读数：盲扫清单 6,159 > 申报 5,925 ⇒ 旧公式输出 103.95%。
+        assert_eq!(coverage_pct_of(6159, 5925), 100.0);
+        assert_eq!(coverage_pct_of(3149, 5925), 53.15);
+        assert_eq!(coverage_pct_of(0, 5925), 0.0);
+        assert_eq!(coverage_pct_of(6159, 0), 0.0);
+        assert_eq!(coverage_pct_of(-1, 5925), 0.0);
+    }
 
     #[test]
     fn valid_row_is_written_with_date_scoped_id() {

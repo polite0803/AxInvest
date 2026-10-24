@@ -93,6 +93,25 @@ fn dynamic_to_value(d: Dynamic) -> Value {
     }
 }
 
+/// 把历史上写成 `$vars` / `$node` / `$input` / `$now` / `$env` 的 scope 前缀归一成**不带 `$`**
+/// 的标识符。
+///
+/// **为什么必须归一**：Rhai 1.x 把 `$` 当保留符号，`$vars.x` 在**编译阶段**就失败
+/// （`Variable not found` / 编译错误），所以这批占位符**从未真正生效** ——
+/// 2026-10-23 实测：全仓 14 处 `{{ $… }}` 全部是本文档与测试里的示例，生产模板零使用；
+/// 任何写进模板的 `{{ $vars.x }}` 都会在 dispatcher 层静默回退。
+///
+/// 只替换这 5 个已知 scope 名（不做通用 `$` 剥离）：`$` 出现在其它语境
+/// （字符串字面量里、未来 Rhai 语法扩展）时不受影响。
+fn normalize_scope_prefix(expr: &str) -> String {
+    const SCOPES: [&str; 5] = ["vars", "node", "input", "now", "env"];
+    let mut out = expr.to_string();
+    for name in SCOPES {
+        out = out.replace(&format!("${name}"), name);
+    }
+    out
+}
+
 /// 解析单个表达式（非模板，纯表达式）
 /// 例如: "$vars.price * $vars.qty" → 数字
 ///       "$node[\"http1\"].status" → 字符串
@@ -100,9 +119,11 @@ pub fn resolve_expression(expr: &str, ctx: &ExpressionContext) -> Result<Value, 
     let engine = Engine::new();
     let mut scope = Scope::new();
 
-    // 注入 $vars：全局变量
+    // 注入 $vars：全局变量（同时注入不带 `$` 的别名 —— Rhai 1.x 里 `$` 是保留符号，
+    // 表达式实际求值前会被 `normalize_scope_prefix` 剥掉前缀，两套名都可用）
     let vars_map =
         ctx.variables.iter().map(|(k, v)| (k.clone().into(), value_to_dynamic(v))).collect::<Map>();
+    scope.push_dynamic("vars", Dynamic::from_map(vars_map.clone()));
     scope.push_dynamic("$vars", Dynamic::from_map(vars_map));
 
     // 注入 $node：节点输出（按名称索引）
@@ -111,10 +132,13 @@ pub fn resolve_expression(expr: &str, ctx: &ExpressionContext) -> Result<Value, 
         .iter()
         .map(|(k, v)| (k.clone().into(), value_to_dynamic(v)))
         .collect::<Map>();
+    scope.push_dynamic("node", Dynamic::from_map(node_map.clone()));
     scope.push_dynamic("$node", Dynamic::from_map(node_map));
 
     // 注入 $input：当前节点输入
-    scope.push_dynamic("$input", value_to_dynamic(&ctx.input_params));
+    let input_dyn = value_to_dynamic(&ctx.input_params);
+    scope.push_dynamic("input", input_dyn.clone());
+    scope.push_dynamic("$input", input_dyn);
 
     // 注入 $now：当前时间
     let now = Utc::now();
@@ -126,16 +150,21 @@ pub fn resolve_expression(expr: &str, ctx: &ExpressionContext) -> Result<Value, 
     now_map.insert("day".into(), Dynamic::from_int(now.day() as i64));
     now_map.insert("hour".into(), Dynamic::from_int(now.hour() as i64));
     now_map.insert("minute".into(), Dynamic::from_int(now.minute() as i64));
+    scope.push_dynamic("now", Dynamic::from_map(now_map.clone()));
     scope.push_dynamic("$now", Dynamic::from_map(now_map));
 
     // 注入 $env
     let env_map =
         ctx.env.iter().map(|(k, v)| (k.clone().into(), Dynamic::from(v.clone()))).collect::<Map>();
+    scope.push_dynamic("env", Dynamic::from_map(env_map.clone()));
     scope.push_dynamic("$env", Dynamic::from_map(env_map));
 
     // 编译并执行
-    let ast =
-        engine.compile_expression(expr).map_err(|e| RhaiEvalError::CompileError(e.to_string()))?;
+    // ⚠ 必须先归一 `$` 前缀：Rhai 1.x 里 `$` 是保留符号，`$vars.x` 连编译都过不去。
+    let normalized = normalize_scope_prefix(expr);
+    let ast = engine
+        .compile_expression(&normalized)
+        .map_err(|e| RhaiEvalError::CompileError(e.to_string()))?;
 
     let result = engine
         .eval_ast_with_scope::<Dynamic>(&mut scope, &ast)

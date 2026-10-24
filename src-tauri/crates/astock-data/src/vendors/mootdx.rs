@@ -155,13 +155,7 @@ impl MootdxVendor {
     }
 
     fn market_code(stock_code: &str) -> u8 {
-        if stock_code.starts_with('6') || stock_code.starts_with('9') {
-            1
-        } else if stock_code.starts_with('8') || stock_code.starts_with('4') {
-            2
-        } else {
-            0
-        }
+        crate::code_form::infer_market_bare(stock_code).tdx_market()
     }
 
     /// 通达信查询目标 `(市场号, 裸码)`。

@@ -19,7 +19,9 @@
 //! 带 `as_of_date IS NULL`，漏加由 `scripts/check-reco-generation.mjs` 拦。
 
 use axagent_analysis_engine::recommender::{self, Period, RecoPick, TrimmedPick};
-use axagent_dao::repo::reco_pool::{self as pool_dao, NewPoolBatch, NewRecoPick, NewScanAuditTrim};
+use axagent_dao::repo::reco_pool::{
+    self as pool_dao, BatchKey, NewPoolBatch, NewRecoPick, NewScanAuditTrim,
+};
 use axagent_harness::DatabaseConnection;
 
 /// 落 `reco_picks`，返回写入行数。
@@ -34,6 +36,7 @@ pub async fn persist_reco_picks(
     strategy_weights_json: Option<String>,
     generated_at: &str,
     as_of_date: Option<&str>,
+    purpose: &str,
 ) -> usize {
     let rows: Vec<NewRecoPick> = picks
         .iter()
@@ -54,8 +57,7 @@ pub async fn persist_reco_picks(
         &rows,
         seed_pool_json,
         strategy_weights_json,
-        generated_at,
-        as_of_date,
+        &BatchKey { generated_at, as_of_date, purpose },
         // 算法代际随样本一起落库，否则闭环 IC 会把跨代样本混成一格
         Some(recommender::RECO_ALGORITHM_VERSION),
     )
@@ -74,6 +76,7 @@ pub async fn persist_reco_pool_batch(
     seed_pool_json: Option<&str>,
     generated_at: &str,
     as_of_date: Option<&str>,
+    purpose: &str,
 ) -> bool {
     let stock_count = seed_pool_json
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
@@ -96,6 +99,7 @@ pub async fn persist_reco_pool_batch(
         period: period.to_string(),
         generated_at: generated_at.to_string(),
         as_of_date: as_of_date.map(str::to_string),
+        purpose: purpose.to_string(),
         seed_pool_json: seed_pool_json.map(str::to_string),
         stock_count: stock_count as i32,
         degraded,
@@ -120,6 +124,7 @@ pub async fn persist_reco_scan_audit(
     period: Period,
     generated_at: &str,
     as_of_date: Option<&str>,
+    purpose: &str,
 ) -> usize {
     let rows: Vec<NewScanAuditTrim> = trimmed
         .iter()
@@ -131,5 +136,14 @@ pub async fn persist_reco_scan_audit(
             rank: t.rank,
         })
         .collect();
-    pool_dao::insert_scan_audit(db, &rows, period.as_str(), generated_at, as_of_date).await
+    pool_dao::insert_scan_audit(
+        db,
+        &rows,
+        period.as_str(),
+        &BatchKey { generated_at, as_of_date, purpose },
+    )
+    .await
 }
+
+/// 用途值域的唯一权威（dao 侧定义，命令层转出给引擎/批次复用）。
+pub use axagent_dao::repo::reco_pool::purpose;

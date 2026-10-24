@@ -80,6 +80,8 @@ pub struct RunEventRecord {
     /// 1 = 窗口内有过任一档推荐（档位错配），0 = 无
     pub picked_any_period: i32,
     pub scored_out_styles_json: Option<String>,
+    /// `in_pool` 判定实际使用的池批次时刻（None = 无池证据）
+    pub pool_evidence_at: Option<String>,
     /// pending / excluded（批次认领 / 分析 / 反思回写由事件仓库的其它原语负责）
     pub status: String,
     pub created_at_ms: i64,
@@ -114,6 +116,10 @@ pub async fn insert_run_snapshot(
         status: Set(run.status.clone()),
         trigger_source: Set(run.trigger_source.clone()),
         created_at_ms: Set(run.created_at_ms),
+        // as-of 回放发生在核查之后的补分析批次里 ⇒ 新轮次落库时两列为 NULL
+        // （面板据此显示「该轮还没有 as-of 回放」，不是 0）。
+        asof_layers_json: Set(None),
+        asof_diff_summary_json: Set(None),
     };
 
     let event_rows: Vec<EventActiveModel> = events
@@ -136,6 +142,9 @@ pub async fn insert_run_snapshot(
             miss_layer: Set(e.miss_layer.clone()),
             picked_any_period: Set(e.picked_any_period),
             scored_out_styles_json: Set(e.scored_out_styles_json.clone()),
+            pool_evidence_at: Set(e.pool_evidence_at.clone()),
+            analysis_signal_at_start: Set(None),
+            reflow_pending: Set(None),
             batch_id: Set(None),
             analysis_id: Set(None),
             reflection_id: Set(None),
@@ -145,6 +154,11 @@ pub async fn insert_run_snapshot(
             error_detail: Set(None),
             created_at_ms: Set(e.created_at_ms),
             updated_at_ms: Set(e.created_at_ms),
+            // as-of 回放晚于核查 ⇒ 新事件三列皆空（回放完成后由
+            // `update_event_asof` 逐行回填）。
+            asof_reco_generated_at: Set(None),
+            asof_layer: Set(None),
+            asof_diff_json: Set(None),
         })
         .collect();
 
@@ -205,6 +219,41 @@ pub async fn list_runs_since(
     since_ms: i64,
 ) -> Result<Vec<RunModel>, DbErr> {
     RunEntity::find().filter(RunColumn::CreatedAtMs.gte(since_ms)).all(db).await
+}
+
+/// 最新一轮**荐股链**核查的 as-of 原始载荷（`id / date_to / layers / summary`）。
+///
+/// 命令层只做「有没有 / 解 JSON」，实体与 SQL 留在 dao（分层护栏规则 1：
+/// `commands-no-direct-db`）。
+pub async fn latest_reco_run_asof(
+    db: &DatabaseConnection,
+) -> Result<Option<(String, String, Option<String>, Option<String>)>, DbErr> {
+    let row = RunEntity::find()
+        .filter(RunColumn::Chain.eq("reco"))
+        .order_by_desc(RunColumn::CreatedAtMs)
+        .one(db)
+        .await?;
+    Ok(row.map(|r| (r.id, r.date_to, r.asof_layers_json, r.asof_diff_summary_json)))
+}
+
+/// 回填一轮的 as-of 回放汇总（逐层计数 + 差异摘要）。
+///
+/// 为什么是「回填」而不是插入时就有：as-of 回放发生在**补分析批次**里（每个窗口起点
+/// 一次），晚于核查落库；一轮可能被多个批次分批覆盖，故每次批次结束按该轮全部
+/// 已回填事件重算一遍再写。`None` 入参不写（保持 NULL = 「该轮没有 as-of 回放」）。
+pub async fn update_asof_summary(
+    db: &DatabaseConnection,
+    run_id: &str,
+    asof_layers_json: &str,
+    asof_diff_summary_json: &str,
+) -> Result<u64, DbErr> {
+    let result = RunEntity::update_many()
+        .col_expr(RunColumn::AsofLayersJson, Expr::value(asof_layers_json.to_owned()))
+        .col_expr(RunColumn::AsofDiffSummaryJson, Expr::value(asof_diff_summary_json.to_owned()))
+        .filter(RunColumn::Id.eq(run_id.to_owned()))
+        .exec(db)
+        .await?;
+    Ok(result.rows_affected)
 }
 
 /// 最近 `limit` 轮核查，按落库时刻倒序（面板轮次选择器用）。

@@ -129,6 +129,9 @@ const SCHEMA: &[(&str, &[(&str, &str)])] = &[
             ("prompt", "TEXT"),
             ("status", "TEXT"),
             ("output", "TEXT"),
+            // 2026-10-24：结构化结果列（`output` 只放摘要，机器可读报告在 result_json）。
+            // 并行批次加了实体列但未登记本手写清单 ⇒ 本测试按「DB 多余列」判红；补登记。
+            ("result_json", "TEXT"),
             ("exit_code", "INTEGER"),
             ("conversation_id", "TEXT"),
             ("created_by", "TEXT"),

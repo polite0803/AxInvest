@@ -31,7 +31,7 @@
 
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -287,4 +287,6 @@ function main() {
   }
 }
 
-main();
+// 仅在被直接执行时跑 CLI；被 `import { judge }` 用作纯判据时不得触发取数。
+// 2026-10-24：原先无条件 main() ⇒ 单测/离线复算一 import 就去连库，判据无法脱离 PG 复用。
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

@@ -109,6 +109,43 @@ if type_of(ca) == "string" {
     }
 }
 
+// submit 协议包装归一（2026-10-24）：Agent 的 content 也可能是
+// {"name":"submit_chain","arguments":{...}}（未走到 report 分支时）。
+// 不归一的话 policy/earnings/capital/event/technical 的 `analysis["beneficiaries"]`
+// 等顶层字段全部取不到 ⇒ 非瓶颈策略整批 no_data。bottleneck 分支原本自己兼容了
+// arguments，这里提到公共层，六种策略同一口径。
+if type_of(ca) == "map" && ca["arguments"] != () && type_of(ca["arguments"]) == "map" {
+    ca = ca["arguments"];
+}
+
+// 行业排名索引（所有策略共用）
+// v5（2026-10-24）：原先只在 score_bottleneck 闭包内构建，政策/业绩/资金等策略拿不到
+// 行业动量，只能写死常数（policy 的 sector_match 恒 70）⇒ 同策略内所有票同分、
+// 跨策略又不可比。现提到顶层，所有评分分支共享同一份口径。
+let ind_map = #{};
+if industry_ranking != () {
+    let ir = to_array(industry_ranking);
+    if ir.len() > 0 {
+        for ind in ir {
+            let name = if ind["industryName"] != () { ind["industryName"].to_string() } else { "" };
+            if name != "" {
+                let lc = if ind["leaderCode"] != () { ind["leaderCode"].to_string() }
+                         else if ind["leader_code"] != () { ind["leader_code"].to_string() }
+                         else { "" };
+                let ln = if ind["leaderName"] != () { ind["leaderName"].to_string() }
+                         else if ind["leader_name"] != () { ind["leader_name"].to_string() }
+                         else { "" };
+                ind_map[name] = #{
+                    "changePct": if ind["changePct"] != () { ind["changePct"] } else { 0.0 },
+                    "mainInflow": if ind["mainInflow"] != () { ind["mainInflow"] } else { 0.0 },
+                    "leaderCode": lc,
+                    "leaderName": ln,
+                };
+            }
+        }
+    }
+}
+
 // ═══════════════════════════════════════════════
 // bottleneck 策略评分（复用 bottleneck-calc 精简版）
 // ═══════════════════════════════════════════════
@@ -134,25 +171,7 @@ let score_bottleneck = || {
         return #{"status": "no_data", "computed_nodes": [], "summary": "无产业链数据"};
     }
 
-    // 行业排名数据处理
-    // v4 修复（2026-07-31 22:30）：industry_ranking 是 ToolNode 输出，
-    // 注入 scope 后可能是 字符串/数组/map（含 content 包装层）。
-    // 统一用 to_array 解析，彻底覆盖所有形态。
-    let ind_map = #{};
-    if industry_ranking != () {
-        let ir = to_array(industry_ranking);
-        if ir.len() > 0 {
-            for ind in ir {
-                let name = if ind["industryName"] != () { ind["industryName"].to_string() } else { "" };
-                if name != "" {
-                    ind_map[name] = #{
-                        "changePct": if ind["changePct"] != () { ind["changePct"] } else { 0.0 },
-                        "mainInflow": if ind["mainInflow"] != () { ind["mainInflow"] } else { 0.0 },
-                    };
-                }
-            }
-        }
-    }
+    // 行业排名数据（ind_map 已在顶层构建，见上）
 
     let computed = [];
     let max_score = 0.0; let top_name = "";
@@ -229,18 +248,56 @@ let score_policy = || {
     if beneficiaries.len() == 0 {
         return #{"status": "no_data", "computed_nodes": [], "summary": "无政策受益数据"};
     }
-    let policy_impact = if analysis["policy_impact_score"] != () { analysis["policy_impact_score"] } else { 50.0 };
+    let policy_impact = if analysis["policy_impact_score"] != () { to_f64(analysis["policy_impact_score"], 50.0) } else { 50.0 };
     let computed = [];
     for sector in beneficiaries {
         let sector_name = if sector["sector"] != () { sector["sector"].to_string() } else { "未知行业" };
         let stocks = to_array(sector["stocks"]);
+
+        // 行业动量（与 bottleneck 同一份 ind_map）：名称包含匹配，取不到则中性 50。
+        // 修复前这里写死 `sector_match = 70` ⇒ 同策略内所有票同分，且 composite
+        // 上限只有 75（权重 0.40+0.35 少了 25%）⇒ 政策候选永远压在“弱信号”。
+        let matched = ""; let ind_change = 0.0; let ind_inflow = 0.0;
+        let leader_code = ""; let leader_name = "";
+        for ik in ind_map.keys() {
+            let kw = ik.to_string();
+            if sector_name != "" && (sector_name.contains(kw) || kw.contains(sector_name)) {
+                matched = kw;
+                if ind_map[kw] != () {
+                    ind_change = to_f64(ind_map[kw]["changePct"], 0.0);
+                    ind_inflow = to_f64(ind_map[kw]["mainInflow"], 0.0);
+                    leader_code = if ind_map[kw]["leaderCode"] != () { ind_map[kw]["leaderCode"].to_string() } else { "" };
+                    leader_name = if ind_map[kw]["leaderName"] != () { ind_map[kw]["leaderName"].to_string() } else { "" };
+                }
+                break;
+            }
+        }
+        let sector_score = if matched == "" { 50.0 }
+            else if ind_change > 5.0 && ind_inflow > 0.0 { 85.0 }
+            else if ind_change > 2.0 && ind_inflow > 0.0 { 70.0 }
+            else if ind_change > 0.0 { 55.0 }
+            else if ind_change < -2.0 { 30.0 }
+            else { 40.0 };
+
         for stk in stocks {
             let code = if stk["code"] != () { stk["code"].to_string() } else { "" };
             let name = if stk["name"] != () { stk["name"].to_string() } else { "" };
             let rationale = if stk["rationale"] != () { stk["rationale"].to_string() } else { "" };
-            // policy 评分：政策力度 × 行业匹配度 × 龙头溢价
-            let sector_match = 70.0; // 默认中高匹配
-            let composite = clamp_score(policy_impact * 0.40 + sector_match * 0.35);
+            // 个股证据强度：有具体订单/合同/产能/政策字样 > 泛泛理由 > 无理由。
+            // 这是**个股级**连续证据，避免同行业所有票拿同一个分数。
+            let e1 = rationale.contains("订单") || rationale.contains("合同");
+            let e2 = rationale.contains("产能") || rationale.contains("政策");
+            let e3 = rationale.contains("补贴") || rationale.contains("采购");
+            let has_hard_evidence = e1 || e2 || e3;
+            let evidence_score = if rationale == "" { 45.0 }
+                else if has_hard_evidence { 75.0 }
+                else { 60.0 };
+            // 龙头溢价：只有真命中行业领涨股才加，不再假设“默认中高匹配”。
+            let code_is_leader = leader_code != "" && code == leader_code;
+            let name_is_leader = leader_name != "" && name == leader_name;
+            let leader_bonus = if code_is_leader || name_is_leader { 8.0 } else { 0.0 };
+            // 政策力度 40% + 行业动量 35% + 个股证据 25%（三项合计 1.0），龙头溢价另加。
+            let composite = clamp_score(policy_impact * 0.40 + sector_score * 0.35 + evidence_score * 0.25 + leader_bonus);
             computed.push(#{
                 "node_name": name,
                 "strategy_type": "policy",
@@ -249,6 +306,10 @@ let score_policy = || {
                 "sector": sector_name,
                 "bottleneck_composite": composite,
                 "policy_impact": policy_impact,
+                "sector_momentum_score": sector_score,
+                "policy_evidence_score": evidence_score,
+                "leader_bonus": leader_bonus,
+                "matched_industry": matched,
                 "rationale": rationale,
                 "data_reliability": "llm_estimated",
                 "readiness_signal": readiness_signal(composite),
@@ -274,12 +335,19 @@ let score_earnings = || {
     for c in candidates {
         let code = if c["code"] != () { c["code"].to_string() } else { "" };
         let name = if c["name"] != () { c["name"].to_string() } else { "" };
-        let beat = if c["expected_beat_pct"] != () { c["expected_beat_pct"] } else { 0.0 };
+        let beat_present = c["expected_beat_pct"] != ();
+        let beat = if beat_present { to_f64(c["expected_beat_pct"], 0.0) } else { 0.0 };
         let reason = if c["reason"] != () { c["reason"].to_string() } else { "" };
         // earnings 评分：预期差幅度(40%) + 过往准确性(30%) + 催化剂时效(30%)
-        let beat_score = if beat >= 30.0 { 90.0 } else if beat >= 15.0 { 70.0 } else if beat >= 5.0 { 50.0 } else { 25.0 };
-        // 过往准确性：基于 reason 中的明确度估算（Agent 不输出时默认 50）
-        let track_record = if reason.contains("数据") || reason.contains("调研") || reason.contains("动销") { 70.0 } else { 50.0 };
+        // 缺预期差 ⇒ 中性 45，不得按“0% 超预期”的 25 分惩罚（缺席不是坏消息）。
+        let beat_score = if !beat_present { 45.0 }
+            else if beat >= 30.0 { 90.0 }
+            else if beat >= 15.0 { 70.0 }
+            else if beat >= 5.0 { 50.0 }
+            else { 25.0 };
+        // 过往准确性：只采信显式字段；理由文本只说明“有依据”，不冒充历史准确率。
+        // 修复前只要理由里出现“数据/调研/动销”就给 70 —— 与方向无关，负面理由同样加分。
+        let track_record = if c["track_record_score"] != () { clamp_score(to_f64(c["track_record_score"], 50.0)) } else { 50.0 };
         // 催化剂时效：短中期利好加分
         let timeliness = if c["timeframe"] != () {
             let tf = c["timeframe"].to_string();
@@ -293,6 +361,7 @@ let score_earnings = || {
             "stock_name": name,
             "bottleneck_composite": composite,
             "expected_beat_pct": beat,
+            "expected_beat_present": beat_present,
             "track_record_score": track_record,
             "timeliness_score": timeliness,
             "rationale": reason,
@@ -318,17 +387,27 @@ let score_capital = || {
     let computed = [];
     for sec in sectors_analysis {
         let sec_name = if sec["name"] != () { sec["name"].to_string() } else { "未知板块" };
-        let inflow = if sec["net_inflow"] != () { sec["net_inflow"] } else { 0.0 };
-        let sustainability = if sec["days"] != () { sec["days"] } else { 1.0 };
+        let inflow_present = sec["net_inflow"] != ();
+        let inflow = if inflow_present { to_f64(sec["net_inflow"], 0.0) } else { 0.0 };
+        let sustain_present = sec["days"] != ();
+        let sustainability = if sustain_present { to_f64(sec["days"], 1.0) } else { 1.0 };
         let stocks = to_array(sec["stocks"]);
         for stk in stocks {
             let code = if stk["code"] != () { stk["code"].to_string() } else { "" };
             let name = if stk["name"] != () { stk["name"].to_string() } else { "" };
             // capital 评分：流入强度(40%) + 持续性(35%) + 成交量配合(25%)
-            let inflow_score = if inflow > 20.0 { 85.0 } else if inflow > 10.0 { 65.0 } else if inflow > 5.0 { 45.0 } else { 25.0 };
-            let sustain_score = if sustainability >= 5.0 { 85.0 } else if sustainability >= 3.0 { 65.0 } else { 40.0 };
+            // 缺资金/天数 ⇒ 中性 45，不得按“净流入 0”的 25 分惩罚（缺席不是流出）。
+            let inflow_score = if !inflow_present { 45.0 }
+                else if inflow > 20.0 { 85.0 }
+                else if inflow > 10.0 { 65.0 }
+                else if inflow > 5.0 { 45.0 }
+                else { 25.0 };
+            let sustain_score = if !sustain_present { 45.0 }
+                else if sustainability >= 5.0 { 85.0 }
+                else if sustainability >= 3.0 { 65.0 }
+                else { 40.0 };
             let volume_score = if sec["volume_surge"] != () {
-                let vs = sec["volume_surge"];
+                let vs = to_f64(sec["volume_surge"], 1.0);
                 if vs > 1.5 { 80.0 } else if vs > 1.2 { 60.0 } else { 40.0 }
             } else { 50.0 };
             let composite = clamp_score(inflow_score * 0.40 + sustain_score * 0.35 + volume_score * 0.25);
@@ -432,10 +511,14 @@ let score_technical = || {
             else if pattern.contains("支撑") || pattern.contains("反弹") { 55.0 }
             else { 45.0 };
         let volume_confirm = if sig["volume_surge"] != () {
-            let vs = sig["volume_surge"];
+            let vs = to_f64(sig["volume_surge"], 1.0);
             if vs > 1.5 { 85.0 } else if vs > 1.2 { 65.0 } else { 45.0 }
         } else { 50.0 };
-        let sector_alignment = if sig["sector_aligned"] != () && sig["sector_aligned"] { 80.0 } else { 50.0 };
+        // 板块共振：显式 false 是**负证据**（30），不能与“没给字段”的中性 50 同分。
+        // 修复前 `false` 落到 else 直接给 50，等于把明确的不共振当成未观测。
+        let sector_alignment = if sig["sector_aligned"] != () {
+            if sig["sector_aligned"] { 80.0 } else { 30.0 }
+        } else { 50.0 };
         let composite = clamp_score(pattern_score * 0.35 + volume_confirm * 0.35 + sector_alignment * 0.30);
         computed.push(#{
             "node_name": name,

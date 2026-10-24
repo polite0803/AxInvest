@@ -31,6 +31,7 @@
 
 use axagent_analysis_engine::hit_rate_backtest::{
     HitRateReport, PickValidation, build_pick_validation, compute_hit_rate_report,
+    compute_period_matched_report,
 };
 use axagent_analysis_engine::recommender::RECO_GENERATION_FLOOR;
 use axagent_analysis_engine::recommender::types::RecoPick;
@@ -988,9 +989,10 @@ pub async fn compute_validation_report(
     }
 
     // B3 窗口换代（拍板 6 + 7）：旧窗口集 [5,20,60] 产出的 20/60 行**不进本轮分母**。
-    // 为什么不并进来：`compute_hit_rate_report` 的 by_action / by_style 是**跨窗口池化**的，
-    // 20 天的命中与 28 天的命中并成一格就成了两种尺子的平均（本表没有窗口集列，也不回填，
-    // 所以按 T+N 是否属于当前窗口集筛 —— N=5 两代同义，留在分母是对的，不是漏筛）。
+    // 先按窗口集筛掉旧窗口；随后 `compute_period_matched_report` 再把每档限定到
+    // **自己的**持有窗口（ultra_short=2 / short=5 / mid=28 / long=90），避免 2/5/28/90
+    // 混成一个 by_style 分母（2026-10-24 生产实证：池化会把 capital_short 的 +3.41%
+    // 与 T+28/T+90 的负收益平均成负值）。
     let excluded_pre_window_set_rows = rows
         .iter()
         .filter(|(_, v)| !axagent_harness::holding_period::Period::is_validation_window(v.t_plus_n))
@@ -1029,7 +1031,7 @@ pub async fn compute_validation_report(
     let report = if validations.is_empty() {
         empty_report()
     } else {
-        compute_hit_rate_report(&validations)
+        compute_period_matched_report(&validations)
     };
 
     Ok(ValidationReportResponse {

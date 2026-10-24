@@ -62,6 +62,8 @@ function installInvokeStub() {
       case "recommend_stocks":
         return Promise.resolve(makeReco());
       case "backtest_reco_strategies":
+        return Promise.resolve({ taskId: "bt-integration" });
+      case "get_background_task_output":
         return Promise.resolve(null);
       case "get_latest_analyses_for_stocks":
       case "get_reco_strategy_weights":

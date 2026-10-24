@@ -359,6 +359,49 @@ pub fn compute_hit_rate_report(validations: &[PickValidation]) -> HitRateReport 
     report
 }
 
+/// 档位 → 该档的**验证窗口**（交易日）。
+///
+/// 与 `Period::default_holding_days()` 同口径，但本模块只拿得到落库的 period 字符串，
+/// 不把 harness 的枚举拖进纯聚合层；未知写法返回 `None`（该行不参与期窗匹配）。
+pub fn period_expected_window(period: &str) -> Option<i32> {
+    match period {
+        "ultra_short" | "ultrashort" => Some(2),
+        "short" => Some(5),
+        "mid" => Some(28),
+        "long" => Some(90),
+        _ => None,
+    }
+}
+
+/// **期窗匹配**的命中率报告：每档只计它自己的持有窗口，不把 2/5/28/90 天混成一个分母。
+///
+/// 为什么需要它（2026-10-24 生产实证）：`compute_hit_rate_report` 的 by_action /
+/// by_style 是跨窗口池化的；同一批 short 票既有 T+2 也有 T+28/T+90 的验证行，
+/// 池化后 `capital_short` 的 +3.41%（T+5）被 T+28 的 -3.59%、T+90 的 -8.18% 拉成
+/// 负值，面板看起来「策略全面亏损」，而按档位自己的窗口看它是正期望。
+/// 反过来，`reversion_short` 的 T+2/T+5 全 partial（≈0 收益）也会被短窗掩盖。
+///
+/// 口径：
+/// - `by_action` / `by_style` / `total` / best / worst 只含 `t_plus_n == 本档窗口` 的行；
+/// - `by_t_plus_n` 仍按窗口分组（保留跨窗口原始读数）；
+/// - period 无法识别的行**不猜窗口**，原样保留（否则会把未知档直接丢掉）；
+/// - 匹配后为空时回退到原报告（不把「没有可匹配窗口」演成「没有样本」）。
+pub fn compute_period_matched_report(validations: &[PickValidation]) -> HitRateReport {
+    let matched: Vec<PickValidation> = validations
+        .iter()
+        .filter(|v| match period_expected_window(&v.period) {
+            Some(window) => v.t_plus_n == window,
+            None => true,
+        })
+        .cloned()
+        .collect();
+    if matched.is_empty() {
+        compute_hit_rate_report(validations)
+    } else {
+        compute_hit_rate_report(&matched)
+    }
+}
+
 /// 计算每个因子 vs 实际收益的 Spearman 等级相关系数（IC）
 ///
 /// IC 越接近 0 → 该因子对未来收益无预测力
@@ -702,6 +745,83 @@ mod tests {
         assert_eq!(buy_stats.false_hit, 1);
         // hit_rate = 2 / (2+1+1) = 0.5
         assert!((buy_stats.hit_rate - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn period_matched_report_excludes_other_windows() {
+        let make = |period: &str, t_plus_n: i32, outcome: &str, ret: f64| PickValidation {
+            pick_id: format!("p-{period}-{t_plus_n}"),
+            stock_code: "x".into(),
+            stock_name: "x".into(),
+            style: format!("{period}_style"),
+            period: period.into(),
+            generated_at: "t".into(),
+            t_plus_n,
+            entry_price: 10.0,
+            target_price: 12.0,
+            stop_loss: 9.0,
+            position_pct: 10.0,
+            confidence: 50,
+            inferred_action: "buy".into(),
+            t_plus_n_price: Some(10.0 + ret / 10.0),
+            max_price: None,
+            min_price: None,
+            max_return_pct: None,
+            max_drawdown_pct: None,
+            final_return_pct: Some(ret),
+            hit_stop_loss: None,
+            hit_target: None,
+            hit_outcome: Some(outcome.into()),
+            factor_snapshot: None,
+            data_source: "test".into(),
+            as_of_date: None,
+        };
+        let validations = vec![
+            make("short", 5, "hit", 3.0),
+            // 同一批 short 的 T+28：不是本档窗口，必须被期窗匹配挡在分母外
+            make("short", 28, "miss", -10.0),
+            make("mid", 28, "hit", 5.0),
+            make("long", 90, "miss", -6.0),
+        ];
+        let report = compute_period_matched_report(&validations);
+        assert_eq!(report.total, 3, "只保留 short@5 / mid@28 / long@90: {report:?}");
+        assert_eq!(report.by_style.get("short_style").unwrap().total, 1);
+        assert!(!report.by_t_plus_n.contains_key("5") || report.by_t_plus_n["5"].total == 1);
+        // 匹配后 short 的均值只含 +3%，不应被 T+28 的 -10% 拉负。
+        assert!(report.by_style["short_style"].avg_return_pct > 0.0);
+    }
+
+    #[test]
+    fn period_matched_report_falls_back_when_no_window_matches() {
+        let v = PickValidation {
+            pick_id: "p".into(),
+            stock_code: "x".into(),
+            stock_name: "x".into(),
+            style: "trend".into(),
+            period: "short".into(),
+            generated_at: "t".into(),
+            t_plus_n: 20, // 旧窗口，不匹配 short=5
+            entry_price: 10.0,
+            target_price: 12.0,
+            stop_loss: 9.0,
+            position_pct: 10.0,
+            confidence: 50,
+            inferred_action: "buy".into(),
+            t_plus_n_price: Some(10.5),
+            max_price: None,
+            min_price: None,
+            max_return_pct: None,
+            max_drawdown_pct: None,
+            final_return_pct: Some(5.0),
+            hit_stop_loss: None,
+            hit_target: None,
+            hit_outcome: Some("hit".into()),
+            factor_snapshot: None,
+            data_source: "test".into(),
+            as_of_date: None,
+        };
+        let report = compute_period_matched_report(&[v]);
+        assert_eq!(report.total, 1, "没有可匹配窗口时回退原样本，不得变 0 分母");
     }
 
     #[test]

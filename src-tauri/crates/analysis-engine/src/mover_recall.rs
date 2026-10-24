@@ -924,24 +924,35 @@ pub fn normalize_style_key(style: &str) -> &str {
 
 /// 该票是否出现在任一候选池快照里（`seed_pool_json` 是 `[code, name]` 数组的 JSON）。
 pub fn code_in_pool_snapshot(pool_json: Option<&str>, code: &str) -> bool {
-    let Some(raw) = pool_json else { return false };
+    code_in_pool_snapshot_opt(pool_json, code).unwrap_or(false)
+}
+
+/// 三态版：`Some(true)` 在池 / `Some(false)` 不在池 / `None` **无从判定**。
+///
+/// `None` 的两种来源都必须与「不在池」分开：
+/// - 快照缺失（`pool_json=None`）；
+/// - **顶层对象形态**（趋势智选把单个候选写进 `seed_pool_json`）且对象不是该 code ——
+///   那只能说明「这一只是当时那个候选」，**不能**说明「池里没有别的票」。
+///   旧实现对此恒返回 `false`，现网 21/21 智选事件的 `not_in_pool` 正是这么来的伪证据。
+pub fn code_in_pool_snapshot_opt(pool_json: Option<&str>, code: &str) -> Option<bool> {
+    let raw = pool_json?;
     // 顶层对象：趋势智选把**单个候选**整体写进 seed_pool_json（荐股链写的是数组）。
-    // 少了这一支，智选链的 in_pool 永远判 false ⇒ 「工作流明明扫到它」被报成「不在候选池」。
     if let Ok(serde_json::Value::Object(o)) = serde_json::from_str::<serde_json::Value>(raw) {
-        return o.get("stockCode").and_then(|v| v.as_str()) == Some(code)
+        let same = o.get("stockCode").and_then(|v| v.as_str()) == Some(code)
             || o.get("code").and_then(|v| v.as_str()) == Some(code);
+        return if same { Some(true) } else { None };
     }
     let Ok(parsed) = serde_json::from_str::<Vec<serde_json::Value>>(raw) else {
-        return false;
+        return None;
     };
-    parsed.iter().any(|item| match item {
+    Some(parsed.iter().any(|item| match item {
         serde_json::Value::Array(a) => a.first().and_then(|v| v.as_str()) == Some(code),
         serde_json::Value::Object(o) => {
             o.get("stockCode").and_then(|v| v.as_str()) == Some(code)
                 || o.get("code").and_then(|v| v.as_str()) == Some(code)
         },
         _ => false,
-    })
+    }))
 }
 
 /// 读某档在时间区间内的全部推荐（含候选池快照），供归因用。
@@ -1002,7 +1013,7 @@ pub fn chain_period_has_active_style(chain: RecoChain, period: Period) -> bool {
 /// 逐档 rank IC 不劣化）在打开人工开关前由人核对；代码只守这道下限，防止「没数据就转正」。
 pub const REFLOW_MIN_SETTLED: usize = 30;
 
-/// 是否已达转正样本下限（供面板成句与 `refresh_mover_seed` 的 shadow 判据共用）。
+/// 是否已达转正样本下限（供面板成句与 `refresh_reflow_seed_db` 的 shadow 判据共用）。
 pub fn reflow_ready(settled: usize) -> bool {
     settled >= REFLOW_MIN_SETTLED
 }
@@ -1591,5 +1602,260 @@ mod tests {
             !code_in_pool_snapshot(Some(r#"{"name":"只有名字"}"#), "001231"),
             "无码对象不得算命中"
         );
+    }
+}
+
+#[cfg(test)]
+mod asof_generation_tests {
+    use super::*;
+    use axagent_dao::repo::reco_pool::{
+        self as pool_dao, purpose, NewPoolBatch, NewRecoPick, NewScanAuditTrim,
+    };
+    use axagent_entities::reco_scan_audit;
+    use sea_orm::EntityTrait;
+
+    /// 生产写入口落三表（picks / 池批次 / L3 留痕），共用同一 `generated_at` 与代际。
+    async fn insert_batch(
+        db: &sea_orm::DatabaseConnection,
+        generated_at: &str,
+        as_of: Option<&str>,
+        purpose: &str,
+        code: &str,
+    ) {
+        let pick = NewRecoPick {
+            period: "mid".to_string(),
+            stock_code: code.to_string(),
+            stock_name: format!("股{code}"),
+            style: "trend".to_string(),
+            confidence: 80,
+            synthetic: false,
+            pick_data: None,
+        };
+        let batch = pool_dao::BatchKey { generated_at, as_of_date: as_of, purpose };
+        let written = pool_dao::insert_picks(
+            db,
+            &[pick],
+            Some(format!(r#"[["{code}","股{code}"]]"#)),
+            None,
+            &batch,
+            Some(1),
+        )
+        .await;
+        assert_eq!(written, 1, "候选行应写入成功（写失败只 warn，不断言会让夹具静默空表）");
+        pool_dao::insert_pool_batch(
+            db,
+            &NewPoolBatch {
+                id: format!("rpb-{generated_at}"),
+                chain: "reco".to_string(),
+                period: "mid".to_string(),
+                generated_at: generated_at.to_string(),
+                as_of_date: as_of.map(str::to_string),
+                purpose: purpose.to_string(),
+                seed_pool_json: Some(format!(r#"[["{code}","股{code}"]]"#)),
+                stock_count: 1,
+                degraded: false,
+                created_at_ms: 1,
+            },
+        )
+        .await
+        .expect("池批次应可写入");
+        let audit = pool_dao::insert_scan_audit(
+            db,
+            &[NewScanAuditTrim {
+                stock_code: code.to_string(),
+                stock_name: format!("股{code}"),
+                style: "capital".to_string(),
+                confidence: 55,
+                rank: 3,
+            }],
+            "mid",
+            &batch,
+        )
+        .await;
+        assert_eq!(audit, 1, "截断留痕应写入成功");
+    }
+
+    /// 三张表共用同一批次键 / 代际 / 用途 —— 跨代拼证据（实盘票 + 回放池）在库里就不可读。
+    #[tokio::test]
+    async fn asof_replay_rows_share_batch_key_generation_and_purpose() {
+        let db = axagent_dao::db::create_test_pool().await.expect("测试库应可建立").conn;
+        let at = "2026-10-24T10:00:00.000";
+        insert_batch(&db, at, Some("2026-09-04"), purpose::MOVER_REPLAY, "002696").await;
+
+        let picks = reco_picks::Entity::find().all(&db).await.unwrap();
+        assert_eq!(picks.len(), 1);
+        assert_eq!(picks[0].generated_at, at);
+        assert_eq!(picks[0].as_of_date.as_deref(), Some("2026-09-04"));
+        assert_eq!(picks[0].purpose.as_deref(), Some(purpose::MOVER_REPLAY));
+
+        let batches = pool_dao::load_pool_batches(
+            &db,
+            "reco",
+            "2026-01-01",
+            "2026-12-31",
+            Some("2026-09-04"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].generated_at, at);
+        assert_eq!(batches[0].purpose.as_deref(), Some(purpose::MOVER_REPLAY));
+
+        let audits = reco_scan_audit::Entity::find().all(&db).await.unwrap();
+        assert_eq!(audits.len(), 1);
+        assert_eq!(audits[0].generated_at, at);
+        assert_eq!(audits[0].as_of_date.as_deref(), Some("2026-09-04"));
+        assert_eq!(audits[0].purpose.as_deref(), Some(purpose::MOVER_REPLAY));
+    }
+
+    /// 前视门（A7 第四条）：as-of 回放的 picks / 留痕**不得**进入 live 归因。
+    ///
+    /// 两侧都有电：把 `None` 谓词去掉，live 查询会读到回放行（命中 2 条）；
+    /// 把 `Some(day)` 谓词去掉，回放查询会读到实盘行。`load_picks_in_range` 与
+    /// `load_trim_evidence` 共用同一条代际谓词，两处都要查。
+    #[tokio::test]
+    async fn asof_rows_are_invisible_to_live_attribution() {
+        let db = axagent_dao::db::create_test_pool().await.expect("测试库应可建立").conn;
+        insert_batch(&db, "2026-10-24T10:00:00.000", None, purpose::LIVE, "600000").await;
+        insert_batch(
+            &db,
+            "2026-10-24T10:00:01.000",
+            Some("2026-09-04"),
+            purpose::MOVER_REPLAY,
+            "002696",
+        )
+        .await;
+
+        let live = load_picks_in_range(&db, "2026-01-01", "2026-12-31", None).await.unwrap();
+        assert_eq!(live.len(), 1, "live 归因只许看到实盘行");
+        assert_eq!(live[0].stock_code, "600000");
+
+        let replay =
+            load_picks_in_range(&db, "2026-01-01", "2026-12-31", Some("2026-09-04")).await.unwrap();
+        assert_eq!(replay.len(), 1, "回放归因只许看到同代行");
+        assert_eq!(replay[0].stock_code, "002696");
+
+        let live_trim = load_trim_evidence(&db, "2026-01-01", "2026-12-31", None).await.unwrap();
+        assert!(live_trim.contains_key(&("mid".to_string(), "600000".to_string())));
+        assert!(
+            !live_trim.contains_key(&("mid".to_string(), "002696".to_string())),
+            "回放留痕混进 live 归因 ⇒ 会把回放的截断算成实盘证据"
+        );
+    }
+}
+
+/// **as-of 漏检信号**（阶段 C-1，2026-10-24）：从最新一轮荐股链核查的 as-of 差异
+/// 装配逐格证据，供闭环权重消费。
+///
+/// 与 live 版 [`load_mover_cell_signal`] 的差别只有证据来源：
+/// - `hits` = 该事件档的 as-of 出票风格（差异 JSON 的 `pickedStyles`，写侧已在回放时
+///   过滤 `synthetic`）；
+/// - `scored_out` = as-of 截断风格（`trimmedStyles`，源头是 as-of `reco_scan_audit`）。
+///
+/// 口径：只读**最新一轮 `chain='reco'` 核查**里已回填 as-of 的事件（`asof_layer` 非空）；
+/// 旧轮的 as-of 证据不参与 —— 否则同一批证据每轮重复收费（与 C4 复利修复同族的坑）。
+pub async fn load_mover_cell_signal_asof(
+    db: &sea_orm::DatabaseConnection,
+) -> Result<crate::recommender::reco_loop::MoverCellSignal, String> {
+    use crate::recommender::reco_loop::MoverCellSignal;
+    use axagent_entities::{mover_recall_events, mover_recall_runs};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+    let mut signal = MoverCellSignal::default();
+    let Some(run) = mover_recall_runs::Entity::find()
+        .filter(mover_recall_runs::Column::Chain.eq("reco"))
+        .order_by_desc(mover_recall_runs::Column::CreatedAtMs)
+        .one(db)
+        .await
+        .map_err(|e| format!("读最新漏检轮次失败: {e}"))?
+    else {
+        return Ok(signal);
+    };
+    let rows = mover_recall_events::Entity::find()
+        .filter(mover_recall_events::Column::RunId.eq(run.id))
+        .filter(mover_recall_events::Column::Chain.eq("reco"))
+        .filter(mover_recall_events::Column::AsofLayer.is_not_null())
+        .all(db)
+        .await
+        .map_err(|e| format!("读 as-of 事件失败: {e}"))?;
+
+    for row in &rows {
+        let Some(diff) = row
+            .asof_diff_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        else {
+            continue;
+        };
+        let period = row.period.clone();
+        if let Some(arr) = diff.get("pickedStyles").and_then(|v| v.as_array()) {
+            let mut styles: Vec<String> = arr
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| normalize_style_key(s).to_string())
+                .collect();
+            styles.sort();
+            styles.dedup();
+            for style in styles {
+                signal.cells.entry((style, period.clone())).or_default().1 += 1;
+            }
+        }
+        if let Some(arr) = diff.get("trimmedStyles").and_then(|v| v.as_array()) {
+            let mut styles: Vec<String> = arr
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| normalize_style_key(s).to_string())
+                .collect();
+            styles.sort();
+            styles.dedup();
+            for style in styles {
+                signal.cells.entry((style, period.clone())).or_default().0 += 1;
+            }
+        }
+    }
+    Ok(signal)
+}
+
+/// 闭环权重实际消费的 mover 线（阶段 C-2「不双罚」的唯一入口）。
+///
+/// 优先 as-of 线；as-of 线缺席（还没有任何事件跑过回放）时才回退 live 线。
+/// **绝不相加**：同一笔漏检在两条线上各计一次 = 同一证据罚两遍。
+pub async fn load_mover_cell_signal_preferring_asof(
+    db: &sea_orm::DatabaseConnection,
+    vars: &[(String, serde_json::Value)],
+    as_of_date: Option<&str>,
+) -> Result<crate::recommender::reco_loop::MoverCellSignal, String> {
+    let asof = load_mover_cell_signal_asof(db).await?;
+    if !asof.cells.is_empty() {
+        return Ok(asof);
+    }
+    tracing::info!("[mover_recall] as-of 信号缺席（尚无事件跑过回放）⇒ 权重环回退 live mover 线");
+    load_mover_cell_signal(db, vars, as_of_date).await
+}
+
+#[cfg(test)]
+mod pool_membership_tristate_tests {
+    use super::*;
+
+    /// F-1：单对象池快照只证明它自己那只票；别的票是**无从判定**，不是「不在池」。
+    /// 现网 21/21 智选事件的 not_in_pool 就是这条判错出来的伪证据。
+    #[test]
+    fn single_object_snapshot_only_proves_its_own_code() {
+        let obj = r#"{"stockCode":"002696","stockName":"百洋股份"}"#;
+        assert_eq!(code_in_pool_snapshot_opt(Some(obj), "002696"), Some(true));
+        assert_eq!(
+            code_in_pool_snapshot_opt(Some(obj), "600000"),
+            None,
+            "单对象对别的票只能是未知"
+        );
+        // 数组是真正的池快照：查不到 = 确定的 false
+        assert_eq!(
+            code_in_pool_snapshot_opt(Some(r#"[["600000","浦发银行"]]"#), "002696"),
+            Some(false)
+        );
+        assert_eq!(code_in_pool_snapshot_opt(None, "002696"), None);
+        assert_eq!(code_in_pool_snapshot_opt(Some("not json"), "002696"), None);
+        // bool 包装保持旧行为（其余调用方不因本次改造改变语义）
+        assert!(!code_in_pool_snapshot(Some(obj), "600000"));
     }
 }

@@ -216,6 +216,11 @@ const SHARED_INFRA_MODULES = new Set([
   // stock_workflow::core 三个写入点必须共用同一套「同股同类型未触发行复用」upsert，
   // 留在任一命令模块里都会被另外两处跨模块调用命中规则 2，故按 _shared_reco_pool 先例登记。
   "price_alert_upsert",
+  // 慢命令后台任务台账的唯一入口（`TaskAccepted` / `run_tracked` / `spawn_tracked`）：
+  // 它不是业务模块，而是命令层共用的任务生命周期基础设施（与 `_shared_state` 同族）。
+  // 2026-10-24 的「慢命令接入后台任务台账」让多个命令模块调用它；不登记会把每一处
+  // 接入都判成跨模块互调，而它们本来就应该走同一个台账入口。
+  "background_tasks",
 ]);
 
 /**

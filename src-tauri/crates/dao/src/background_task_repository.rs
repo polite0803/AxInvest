@@ -78,6 +78,7 @@ impl BackgroundTaskRepository for DaoBackgroundTaskRepository {
             prompt: Set(input.prompt),
             status: Set(TaskStatus::Pending.as_db_str().to_string()),
             output: Set(String::new()),
+            result_json: Set(None),
             exit_code: Set(None),
             conversation_id: Set(None),
             created_by: Set(input.created_by),

@@ -1,5 +1,20 @@
 use thiserror::Error;
 
+/// 链级「整条链都答不出这份数据」的**结构化标记**：`try_vendors_retry` 放弃时若
+/// 有源明确回答过「无数据」，用本标记组装最终错误（哪些源答了无数据、哪些源是
+/// 传输失败，两种缺席各占一句）。调用方（如补历史的「无行情」分档）据此把
+/// 「这个代码本来就没有行情（未上市/已退市）」从「vendor 故障」里分出来——
+/// 后者重试可能好转，前者点多少次都一样。
+pub const NO_DATA_FOR_CODE_MARK: &str = "无此代码行情数据";
+
+/// vendor 级「能力缺口」标记：vendor 对**某类代码/某个端点**明确不支持（如腾讯
+/// K 线端点对北交所 920 号段只回当日 1 根）。它与两种缺席都不同——不是故障
+/// （确定性的接口边界，重试无意义，不该进健康窗口把 vendor 全局降级连坐其它
+/// 路由），也不是「该代码无数据」的回答（vendor 没有回答，只是不接单；写进
+/// 链级放弃错误的「答案」句会伪造「该源都说没这代码」）。`try_vendors_retry`
+/// 据此跳过 `record_failure`，把它降为链级附注。
+pub const CAPABILITY_GAP_MARK: &str = "能力缺口";
+
 #[derive(Debug, Error)]
 pub enum DataError {
     #[error("HTTP request failed: {0}")]
@@ -55,6 +70,29 @@ impl DataError {
                     || m.contains("empty")
                     || m.contains("no data")
                     || m.contains("无数据")
+                    || m.contains(NO_DATA_FOR_CODE_MARK)
+            },
+            _ => false,
+        }
+    }
+
+    /// 是否属于 vendor 级「能力缺口」（见 [`CAPABILITY_GAP_MARK`]）。
+    pub fn is_capability_gap(&self) -> bool {
+        match self {
+            Self::VendorError { message, .. } => message.contains(CAPABILITY_GAP_MARK),
+            _ => false,
+        }
+    }
+
+    /// 是否属于「整条链都没有这份数据」（区别于个别源传输失败）。
+    ///
+    /// 判据：`try_vendors_retry` 组装放弃错误时，只要存在明确回答过「无数据」的源
+    /// 就带上 [`NO_DATA_FOR_CODE_MARK`]，且 vendor 收口为 `"all"`。据此调用方可把
+    /// 「未上市/已退市这类永远取不到」从「vendor 故障（重试可能好转）」里分出来。
+    pub fn no_data_for_code(&self) -> bool {
+        match self {
+            Self::VendorError { vendor, message } => {
+                vendor == "all" && message.contains(NO_DATA_FOR_CODE_MARK)
             },
             _ => false,
         }
@@ -114,6 +152,60 @@ mod tests {
         };
         assert!(!failure.is_empty_data(), "接口失效不得被当成无分红");
         assert!(!DataError::ParseError("bad json".into()).is_empty_data());
+    }
+
+    /// 「无此代码行情数据」标记：只有 vendor=="all" 且带标记的链级错误才算；
+    /// 个别 vendor 的空数据错误（重试/换源可能好转）不得冒充「整条链都没有」。
+    #[test]
+    fn no_data_for_code_is_chain_level_only() {
+        let chain_mixed = DataError::VendorError {
+            vendor: "all".into(),
+            message: format!(
+                "klines 001235 {}（腾讯、新浪）；另有 eastmoney_push2、browser_eastmoney 请求失败",
+                NO_DATA_FOR_CODE_MARK
+            ),
+        };
+        assert!(chain_mixed.no_data_for_code());
+        // 标记在消息里，链级放弃错误对分红/复权等既有消费方仍是「空数据」语义
+        assert!(chain_mixed.is_empty_data());
+
+        // 个别 vendor 的空数据：带标记字样也不是链级结论
+        let single = DataError::VendorError {
+            vendor: "tencent".into(),
+            message: format!("K线返回空（{}）", NO_DATA_FOR_CODE_MARK),
+        };
+        assert!(!single.no_data_for_code(), "vendor!='all' 不得算链级无数据");
+
+        // 只有传输失败、没有任何源回答过：既不是链级无数据，也不是空数据
+        let transport = DataError::VendorError {
+            vendor: "all".into(),
+            message: "klines 001235 所有数据源均不可用".into(),
+        };
+        assert!(!transport.no_data_for_code());
+        assert!(!transport.is_empty_data());
+    }
+
+    /// 「能力缺口」与两种缺席都必须可分：路由层靠它决定「进不进健康窗口」，
+    /// 链级组装靠它决定「进不进答案句」。
+    #[test]
+    fn capability_gap_is_neither_failure_nor_answer() {
+        let gap = DataError::VendorError {
+            vendor: "tencent".into(),
+            message: format!("{CAPABILITY_GAP_MARK}:K线端点不支持北交所920号段历史"),
+        };
+        assert!(gap.is_capability_gap());
+        // 不是「无数据回答」：腾讯对 920 实际回了当日 1 根，把它当答案会伪造结论
+        assert!(!gap.is_empty_data());
+        // 也不是故障：确定性接口边界不该进健康窗口（否则批量扫 920 段会把
+        // tencent 全局降级，连坐报价/财务等其它路由）
+        assert!(!gap.is_transient());
+
+        // 不带标记的 VendorError 不得冒充能力缺口
+        assert!(!DataError::VendorError {
+            vendor: "tencent".into(), message: "K线返回空".into()
+        }
+        .is_capability_gap());
+        assert!(!DataError::NotFound("001235".into()).is_capability_gap());
     }
 
     /// 瞬态只认三个有明确语义信号的情形。`VendorError` 不得算瞬态 —— 否则

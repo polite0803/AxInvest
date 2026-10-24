@@ -203,6 +203,55 @@ mod tests {
         assert_eq!(resolve_var_path("nonexistent", &vars), None);
     }
 
+    /// 趋势智选原链的真实形态：`content` 是 JSON **字符串**，里面才是 `trends[]`。
+    /// 修复前 `current.get("trends[0]")` 恒 None ⇒ 5 个评分节点全部回落 bottleneck。
+    #[test]
+    fn resolve_var_path_array_index_through_json_string() {
+        let mut vars = HashMap::new();
+        vars.insert(
+            "a-trend-scanner".into(),
+            json!({
+                "content": serde_json::to_string(&json!({
+                    "trends": [
+                        {"trend_name": "政策驱动", "strategy_type": "policy"},
+                        {"trend_name": "供给瓶颈", "strategy_type": "bottleneck"},
+                    ]
+                }))
+                .unwrap(),
+            }),
+        );
+        assert_eq!(
+            resolve_var_path("a-trend-scanner.content.trends[0].strategy_type", &vars),
+            Some(json!("policy"))
+        );
+        assert_eq!(
+            resolve_var_path("a-trend-scanner.content.trends[1].trend_name", &vars),
+            Some(json!("供给瓶颈"))
+        );
+        // 越界必须 None，不得回绕或退化成首元素
+        assert_eq!(resolve_var_path("a-trend-scanner.content.trends[2].trend_name", &vars), None);
+        // 目标字段缺失同样是 None（调用方据此回落默认值）
+        assert_eq!(resolve_var_path("a-trend-scanner.content.trends[0].missing", &vars), None);
+    }
+
+    /// 键名本身含方括号时，精确键优先于下标解释（不让新语法改写既有键的语义）。
+    #[test]
+    fn resolve_var_path_exact_key_wins_over_index_syntax() {
+        let mut vars = HashMap::new();
+        vars.insert("m".into(), json!({"trends[0]": "exact", "trends": ["indexed"]}));
+        assert_eq!(resolve_var_path("m.trends[0]", &vars), Some(json!("exact")));
+    }
+
+    /// 非法下标形态一律失败，不做猜测。
+    #[test]
+    fn resolve_var_path_rejects_malformed_index() {
+        let mut vars = HashMap::new();
+        vars.insert("m".into(), json!({"trends": ["a", "b"]}));
+        for path in ["m.trends[a]", "m.trends[-1]", "m.trends[1", "m.trends[]", "m.trends[[0]]"] {
+            assert_eq!(resolve_var_path(path, &vars), None, "非法路径不得命中: {path}");
+        }
+    }
+
     #[test]
     fn resolve_var_path_empty() {
         let vars = HashMap::new();

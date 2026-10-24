@@ -2379,6 +2379,34 @@ pub async fn run_single_stock_analysis(
             // guard 外的批次反思才能 resolve。
             // 〇-B v2 第 4 条 / `PLAN-reflection-per-horizon-row`：**一行 pending = 一个复盘档**。
             //   建点统一走 `build_pending_reflection_rows`（三处通道共用），不再各抄一份默认值。
+            // 漏检回放（source == mover_recall）：锚定事件的档必须**无条件**有反思行 ——
+            // 四档全 Hold/Wait 时方向判据会因中性抽样落空，事件永远停在 analyzed。
+            let extra_horizons: Vec<(String, i64)> = if source == "mover_recall" {
+                match anchor_event_id {
+                    Some(eid) => {
+                        match axagent_dao::repo::mover_recall_events::fetch_by_id(db, eid).await {
+                            Ok(Some(ev)) => {
+                                vec![(ev.period.clone(), i64::from(ev.window_days))]
+                            },
+                            Ok(None) => {
+                                tracing::warn!(
+                                    "[B1 batch_analysis] {stock_code} 锚定事件 {eid} 不存在 ⇒ 不补事件档（该行退化为常规档集）"
+                                );
+                                Vec::new()
+                            },
+                            Err(e) => {
+                                tracing::warn!(
+                                    "[B1 batch_analysis] {stock_code} 读锚定事件 {eid} 失败 ⇒ 不补事件档: {e}"
+                                );
+                                Vec::new()
+                            },
+                        }
+                    },
+                    None => Vec::new(),
+                }
+            } else {
+                Vec::new()
+            };
             let pending_rows = super::reflection::build_pending_reflection_rows(
                 &super::reflection::PendingReflectionSeed {
                     analysis_id: &analysis_id,
@@ -2403,6 +2431,7 @@ pub async fn run_single_stock_analysis(
                     } else {
                         super::reflection::REFLECTION_SOURCE_DUE
                     },
+                    extra_horizons: &extra_horizons,
                     now_ms: chrono::Utc::now().timestamp_millis(),
                 },
             );

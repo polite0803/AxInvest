@@ -80,6 +80,46 @@ pub struct MissRow {
     /// 有截断留痕的风格键（矩阵名目）—— 仅 `l3ScoredOut` 非空；
     /// 空表示**无留痕**，不代表没有风格淘汰过它（见 `reco_scan_audit` 语义边界）
     pub scored_out_styles: Vec<String>,
+    /// `in_pool` 判定实际使用的池批次时刻（None = 无池证据）
+    pub pool_evidence_at: Option<String>,
+}
+
+/// F-2：池证据的选择规则（纯函数）。
+///
+/// 优先「**窗口起点及之前**最近一批」—— 漏检要回答的是「窗口起步那一刻池子里有没有它」；
+/// 窗口内后段的批次会把事后涨起来的票带进池，等于用未来证据自证。
+/// 没有早于起点的批次时，用窗口内**最早**一批作备用（并如实记为兜底）。
+fn select_pool_batch<'a>(
+    batches: &[&'a PoolBatchView],
+    window_start: &str,
+) -> Option<&'a PoolBatchView> {
+    let mut pre: Option<&PoolBatchView> = None;
+    for b in batches {
+        // 比**完整时间戳**而不是日期：`window_start` 是日期串，同日 15:00 的批次
+        // 字典序大于它 ⇒ 属于「窗口起点之后」，不能当前视证据（PLAN F-2 的 `<=` 原义）。
+        if b.generated_at.as_str() <= window_start
+            && pre.is_none_or(|p| b.generated_at > p.generated_at)
+        {
+            pre = Some(b);
+        }
+    }
+    pre.or_else(|| batches.iter().copied().min_by(|a, b| a.generated_at.cmp(&b.generated_at)))
+}
+
+/// 多条池快照的三态合并：任一为真 ⇒ 进池；全为假 ⇒ 假；有未知 ⇒ 未知。
+///
+/// `None`（对象快照对别的票 / 快照损坏）不是「不在池」—— F-1 的单对象
+/// `seed_pool_json` 正是靠这一支才不再把 21/21 判成 not_in_pool。
+fn merge_pool_membership(items: impl Iterator<Item = Option<bool>>) -> Option<bool> {
+    let mut unknown = false;
+    for v in items {
+        match v {
+            Some(true) => return Some(true),
+            Some(false) => {},
+            None => unknown = true,
+        }
+    }
+    if unknown { None } else { Some(false) }
 }
 
 fn date_of(iso: &str) -> &str {
@@ -327,16 +367,26 @@ fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
                     }
                 })
                 .collect();
-            let in_pool = if !window_batches.is_empty() {
-                Some(window_batches.iter().any(|b| {
-                    mover_recall::code_in_pool_snapshot(b.seed_pool_json.as_deref(), &ev.stock_code)
-                }))
-            } else if in_window_pool.is_empty() {
-                None
-            } else {
-                Some(in_window_pool.iter().any(|p| {
-                    mover_recall::code_in_pool_snapshot(p.seed_pool_json.as_deref(), &ev.stock_code)
-                }))
+            // F-2：池证据优先「窗口起点及之前最近一批」，窗口内首批备用；记录实际用的那批。
+            let pool_batch = select_pool_batch(&window_batches, &window_start);
+            let (in_pool, pool_evidence_at) = match pool_batch {
+                Some(b) => (
+                    mover_recall::code_in_pool_snapshot_opt(
+                        b.seed_pool_json.as_deref(),
+                        &ev.stock_code,
+                    ),
+                    Some(b.generated_at.clone()),
+                ),
+                None if in_window_pool.is_empty() => (None, None),
+                None => (
+                    merge_pool_membership(in_window_pool.iter().map(|p| {
+                        mover_recall::code_in_pool_snapshot_opt(
+                            p.seed_pool_json.as_deref(),
+                            &ev.stock_code,
+                        )
+                    })),
+                    in_window_pool.iter().map(|p| p.generated_at.clone()).min(),
+                ),
             };
             // A-3 `PriorCovered` 的证据：本链在同档、**窗口起点之前一个窗口长度内**出过票
             // ⇒ 链看见过这只票，只是时点不落在本窗。不算漏检（`counts_as_miss` 已排除），
@@ -349,14 +399,15 @@ fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
 
             // 本窗该链**所有**池快照都为空才判降级；只有一个空批次时，
             // 正常批次里的池证据仍然有效（旧的 any 会把整个事件误判成 excluded）。
-            let pool_degraded = if !window_batches.is_empty() {
-                window_batches.iter().all(|b| b.degraded)
-            } else {
-                !in_window_pool.is_empty()
-                    && in_window_pool.iter().all(|p| match p.seed_pool_json.as_deref() {
-                        None => true,
-                        Some(s) => s.trim() == "[]" || s.trim().is_empty(),
-                    })
+            let pool_degraded = match pool_batch {
+                Some(b) => b.degraded,
+                None => {
+                    !in_window_pool.is_empty()
+                        && in_window_pool.iter().all(|p| match p.seed_pool_json.as_deref() {
+                            None => true,
+                            Some(s) => s.trim() == "[]" || s.trim().is_empty(),
+                        })
+                },
             };
 
             // 截断留痕只由**荐股链**的 top-N 截断写（`dao::repo::reco_pool`）；趋势智选工作流
@@ -393,6 +444,7 @@ fn build_chain_view(chain: RecoChain, f: &SharedFacts) -> MoverRecallView {
                     layer,
                     picked_any_period,
                     scored_out_styles: scored_out,
+                    pool_evidence_at,
                 });
             }
         }
@@ -577,6 +629,7 @@ pub async fn persist_mover_recall_run(
             } else {
                 serde_json::to_string(&m.scored_out_styles).ok()
             },
+            pool_evidence_at: m.pool_evidence_at.clone(),
             // pool_degraded（数据可达性问题，方案明确不进样本）落库即 excluded；
             // 其余四层为 pending。unexplained 的整轮过滤在补分析选 run 时做。
             status: if m.layer == MissLayer::PoolDegraded {
@@ -607,8 +660,18 @@ pub struct MoverRecallEventReview {
     pub run_id: String,
     /// pending / excluded / running / analyzed / failed / reflected
     pub status: String,
-    /// 权威归因层码（系统机械判定）
+    /// 权威归因层码（live 层：窗口内的实盘推荐证据）
     pub miss_layer: String,
+    /// as-of 回放归因层码。`None` = 该事件还没跑过 as-of 回放（或属智选链行）。
+    /// **与 `miss_layer` 分列**：两者分歧是诊断信息，任一列都不得顶替另一列。
+    pub asof_layer: Option<String>,
+    /// as-of 回放批次键（= 那次回放的 `reco_picks.generated_at`）
+    pub asof_reco_generated_at: Option<String>,
+    /// as-of 差异明细 JSON 原文（池状态 / 出票风格 / 截断风格 / 降级 / 失败原因）
+    pub asof_diff_json: Option<String>,
+    /// 补分析产出的**事件档决策摘要** JSON（`{horizon, action, confidence}`）。
+    /// `None` = 尚未补分析或该档无逐档决策（面板第三态）。
+    pub analysis_signal_at_start: Option<String>,
     pub period: String,
     pub stock_code: String,
     pub stock_name: String,
@@ -705,6 +768,10 @@ pub async fn get_mover_recall_event_review(
         run_id: ev.run_id,
         status: ev.status,
         miss_layer: ev.miss_layer,
+        asof_layer: ev.asof_layer,
+        asof_reco_generated_at: ev.asof_reco_generated_at,
+        asof_diff_json: ev.asof_diff_json,
+        analysis_signal_at_start: ev.analysis_signal_at_start,
         period: ev.period,
         stock_code: ev.stock_code,
         stock_name: ev.stock_name,
@@ -1227,6 +1294,7 @@ mod summary_line_tests {
                 layer: MissLayer::NotInPool,
                 picked_any_period: false,
                 scored_out_styles: vec![],
+                pool_evidence_at: None,
             })
             .collect();
         MoverRecallView {
@@ -1405,6 +1473,7 @@ mod chain_attribution_tests {
             pick_data: None,
             reco_version: None,
             as_of_date: None,
+            purpose: None,
             created_at: generated_at.to_string(),
         }
     }
@@ -1565,7 +1634,9 @@ mod chain_attribution_tests {
             serenity.misses[0].scored_out_styles.is_empty(),
             "智选链不得借荐股的留痕把自己判成 l3_scored_out（那是第二套真相）"
         );
-        assert_eq!(serenity.misses[0].layer, MissLayer::NotInPool);
+        // F-1（2026-10-24）：智选的池快照是**单对象**（只写了 600519），对 002696 只能
+        // 判「无从判定」，不是「不在池」——旧实现恒 false 正是现网 21/21 伪 not_in_pool 的来源。
+        assert_eq!(serenity.misses[0].layer, MissLayer::Unexplained);
     }
 
     /// 负控：链值域写错（既不是 reco 也不是 serenity 的 style）必须归荐股链而不是静默丢弃。
@@ -1716,5 +1787,50 @@ mod chain_attribution_tests {
         let reco = build_chain_view(RecoChain::Reco, &f);
         assert_eq!(reco.misses.len(), 1);
         assert_eq!(reco.misses[0].layer, MissLayer::NotInPool);
+    }
+}
+
+#[cfg(test)]
+mod pool_batch_selection_tests {
+    use super::*;
+
+    fn b(at: &str, degraded: bool) -> PoolBatchView {
+        PoolBatchView {
+            chain: "reco".to_string(),
+            generated_at: at.to_string(),
+            seed_pool_json: Some("[[\"600000\",\"n\"]]".to_string()),
+            degraded,
+        }
+    }
+
+    /// F-2：优先「窗口起点及之前最近一批」——后段批次会把事后涨起来的票带进池。
+    #[test]
+    fn prefers_latest_batch_at_or_before_window_start() {
+        let batches = [
+            b("2026-09-01T15:00:00", false),
+            b("2026-09-10T15:00:00", true),
+            b("2026-09-18T15:00:00", false),
+        ];
+        let refs: Vec<&PoolBatchView> = batches.iter().collect();
+        let picked = select_pool_batch(&refs, "2026-09-18").expect("应有批次");
+        assert_eq!(picked.generated_at, "2026-09-10T15:00:00", "起点当天之后的批次不得入选");
+        assert!(picked.degraded);
+    }
+
+    /// 没有早于起点的批次 ⇒ 用窗口内**最早**一批作备用（不是最早写入顺序）。
+    #[test]
+    fn falls_back_to_earliest_batch_when_none_precede_the_window() {
+        let batches = [b("2026-09-20T15:00:00", false), b("2026-09-19T15:00:00", false)];
+        let refs: Vec<&PoolBatchView> = batches.iter().collect();
+        let picked = select_pool_batch(&refs, "2026-09-18").expect("应有备用批次");
+        assert_eq!(picked.generated_at, "2026-09-19T15:00:00");
+    }
+
+    /// 三态合并：任一为真即进池；全假才假；有未知则未知。
+    #[test]
+    fn membership_merge_is_tristate() {
+        assert_eq!(merge_pool_membership([Some(false), Some(true)].into_iter()), Some(true));
+        assert_eq!(merge_pool_membership([Some(false), Some(false)].into_iter()), Some(false));
+        assert_eq!(merge_pool_membership([Some(false), None].into_iter()), None);
     }
 }

@@ -664,6 +664,7 @@ async fn execute_batch(
             reco_strategy_weights_json,
             &reco_generated_at,
             Some(&as_of_str),
+            crate::commands::_shared_reco_pool::purpose::TIME_TRAVEL_REPLAY,
         )
         .await;
         tracing::info!(
@@ -679,6 +680,7 @@ async fn execute_batch(
             scan.seed_pool_snapshot.as_deref(),
             &reco_generated_at,
             Some(&as_of_str),
+            crate::commands::_shared_reco_pool::purpose::TIME_TRAVEL_REPLAY,
         )
         .await;
         // L3 截断留痕逐档落库（同样带代际）。缺这一段会让回放的漏检归因整批落
@@ -690,6 +692,7 @@ async fn execute_batch(
                 *audit_period,
                 &reco_generated_at,
                 Some(&as_of_str),
+                crate::commands::_shared_reco_pool::purpose::TIME_TRAVEL_REPLAY,
             )
             .await;
             tracing::info!(
@@ -890,6 +893,7 @@ async fn serenity_replay(
         as_of_ctx: Some(ctx),
         themes: None,
         run_id: None,
+        replay_purpose: crate::commands::_shared_reco_pool::purpose::TIME_TRAVEL_REPLAY,
         template_id: SERENITY_TEMPLATE_IDS[0].to_string(),
     })
     .await?;

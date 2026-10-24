@@ -568,6 +568,43 @@ function mockMoverRecallBatches(): Array<Record<string, unknown>> {
 const MOCK_MOVER_RECALL_BATCHES = new Map<string, Record<string, unknown>>();
 let mockMoverRecallBatchesSeeded = false;
 
+// ── 慢命令任务台账（浏览器模式）──────────────────────────────────
+// 慢命令已改为「受理回执 + result_json」形态：这里把结果登记成一条已完成的
+// background_tasks 行（snake_case，handleCommand 出口统一转 camelCase），
+// 供 get_background_task_output / list_background_tasks 读到。
+const MOCK_TRACKED_TASKS = new Map<string, Record<string, unknown>>();
+let mockTrackedSeq = 0;
+
+function mockAcceptTrackedTask(
+  title: string,
+  summary: string,
+  result: Record<string, unknown>,
+): { task_id: string } {
+  const id = `mock-tracked-${++mockTrackedSeq}`;
+  const now = Date.now();
+  MOCK_TRACKED_TASKS.set(id, {
+    id,
+    title,
+    description: "",
+    task_type: "mock",
+    command: null,
+    prompt: null,
+    status: "completed",
+    output: summary,
+    result_json: JSON.stringify(result),
+    exit_code: 0,
+    conversation_id: null,
+    created_by: null,
+    idempotency_key: null,
+    attempt: 0,
+    resume_from: null,
+    created_at: now,
+    updated_at: now,
+    finished_at: now,
+  });
+  return { task_id: id };
+}
+
 /** 与后端 `CapabilityDomainEntryDto` 的 snake_case 源同形（命令出口会转 camelCase） */
 interface MockCapabilityDomainRow {
   id: string;
@@ -6588,8 +6625,17 @@ async function executeCommand<T>(
     // 一旦命令改名或启发式调整，浏览器模式会静默变成 `undefined`，
     // 而 TaskPanel 会把它当成「没有任务」。显式 case 是一份契约。
     case "list_background_tasks":
+      return Array.from(MOCK_TRACKED_TASKS.values()).sort(
+        (a, b) => (b.created_at as number) - (a.created_at as number),
+      ) as unknown as T;
     case "list_task_events":
       return [] as unknown as T;
+    case "get_background_task_output": {
+      const { task_id: taskId } = (args as { task_id?: string }) ?? {};
+      return (MOCK_TRACKED_TASKS.get(taskId ?? "") ?? null) as unknown as T;
+    }
+    case "stop_background_task":
+      return undefined as unknown as T;
 
     // ── 股票管道（stock_pipeline）──────────────────────────────────────
     // 浏览器模式没有真实管道执行。必须显式声明，否则会落到 default 分支的
@@ -7006,8 +7052,9 @@ async function executeCommand<T>(
     // P2：妖股漏检 → as-of 历史补分析批次（任务中心「全部运行」）
     // 策略回测（浏览器预览用）：此前没有 handler ⇒ 返回 undefined，
     // BacktestPanel 读 data.strategies 直接崩（Cannot read properties of undefined）。
-    case "backtest_reco_strategies":
-      return {
+    case "backtest_reco_strategies": {
+      // 慢命令 = 异步任务：回执 + 终态行的 result_json（面板经 useTrackedTask 取回）
+      const backtestResult = {
         positive: {
           label: "正向样本",
           stockCount: 2,
@@ -7065,7 +7112,40 @@ async function executeCommand<T>(
         positiveStocks: ["600519", "002696"],
         negativeStocks: ["000001"],
         skipped: [],
-      } as unknown as T;
+        cancelled: false,
+      };
+      return mockAcceptTrackedTask(
+        "荐股策略历史回测对比",
+        "正样本 2 只 / 负样本 1 只 / 跳过策略 0 项",
+        backtestResult,
+      ) as unknown as T;
+    }
+    // 收盘采集 / 历史回补：浏览器预览同样走任务形态（否则面板拿不到受理回执）
+    case "sweep_market_close":
+      return mockAcceptTrackedTask("采集收盘快照", "mock 收盘快照完成", {
+        tradeDate: new Date().toISOString().slice(0, 10),
+        universeSize: 3,
+        batches: 1,
+        rowsReturned: 3,
+        written: 3,
+        skippedNoData: 0,
+        skippedSuspended: 0,
+        failedBatches: 0,
+        missingQuotes: 0,
+        cancelled: false,
+      }) as unknown as T;
+    case "backfill_market_close_history":
+      return mockAcceptTrackedTask("补齐全市场收盘历史", "mock 历史回补完成", {
+        requested: 3,
+        codes: 3,
+        rows: 270,
+        noNew: 0,
+        noData: 0,
+        failed: 0,
+        targetDays: 90,
+        error: null,
+        cancelled: false,
+      }) as unknown as T;
     case "list_mover_recall_analysis_batches":
       // 新批次排前面（与后端 ORDER BY created_at DESC 同序）
       return mockMoverRecallBatches()

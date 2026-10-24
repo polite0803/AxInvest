@@ -102,7 +102,12 @@ fn intl_to_tencent(code: &str) -> Option<String> {
 }
 
 /// 将 AxInvest 股票代码转为腾讯财经格式
-/// 600519 → sh600519, 000001 → sz000001, 300750 → sz300750
+/// 600519 → sh600519, 000001 → sz000001, 300750 → sz300750, 920402 → bj920402
+///
+/// 920 开头必须归 bj（北交所 2025 年把老码 83/87 批量切换到 920 号段，东财把老码
+/// 标「已切换」⇒ 清单里长出的 920 码若按「9 开头=沪」推断会拼成 `sz920402`，得
+/// `pv_none_match`，批量通道按解析失败静默丢行）。裸码推断统一走
+/// `code_form::infer_market_bare` 单一权威；沪市 B 股 900xxx 不在清单枚举域内。
 ///
 /// 已带市场标记的输入（`sh000001` 前缀、`000001.SH` 后缀）**按标记取市场**：上证综指与
 /// 平安银行同为 `000001`，靠首位数字重判必错（`sh000001` → `szsh000001`，`000001.SH` →
@@ -117,12 +122,7 @@ fn to_tencent_code(stock_code: &str) -> String {
     if let Some((bare, ex)) = crate::code_form::split_explicit_market(stock_code) {
         return format!("{}{bare}", ex.tencent_prefix());
     }
-    let prefix = match stock_code.chars().next() {
-        Some('6') => "sh",
-        Some('0') | Some('3') | Some('2') => "sz",
-        Some('8') | Some('4') => "bj",
-        _ => "sz",
-    };
+    let prefix = crate::code_form::infer_market_bare(stock_code).tencent_prefix();
     format!("{prefix}{stock_code}")
 }
 
@@ -464,6 +464,20 @@ impl StockVendor for TencentVendor {
         adj: Option<AdjType>,
     ) -> Result<Vec<KLine>, DataError> {
         let tc_code = to_tencent_code(stock_code);
+        // 北交所 920 新号段：腾讯 K 线端点对它只回**当日 1 根**（实测 bj920002/920098/
+        // 920402 三码在 ifzq 与 web.ifzq 两端点、带不带起止日期均如此）。那是一次
+        // **成功应答** ⇒ 链在第一源就收工，历史补齐永远轮不到雪球/浏览器臂（2026-10-24
+        // 实测：补历史两轮 0 新增，353 只 920 码各只有 1 行）。这里显式报能力缺口让链继续；
+        // 实时报价通道（qt.gtimg.cn）对 920 正常，不走本拦截。
+        if tc_code.starts_with("bj920") {
+            return Err(DataError::VendorError {
+                vendor: "tencent".into(),
+                message: format!(
+                    "{}:K线端点不支持北交所920号段历史（实测只回当日1根），交由链上后续源",
+                    crate::error::CAPABILITY_GAP_MARK
+                ),
+            });
+        }
         // 周期映射：支持分钟线和日/周/月线
         let (period_key, is_minute) = match period {
             "5" | "Min5" => ("m5", true),
@@ -778,6 +792,36 @@ mod capability_tests {
     fn tencent_code_keeps_plain_stock_codes_prefixed() {
         assert_eq!(to_tencent_code("600519"), "sh600519");
         assert_eq!(to_tencent_code("000001"), "sz000001");
+    }
+
+    /// 北交所 920 新号段必须归 bj。缺陷实证（2026-10-23）：清单扩容后长出的
+    /// 920 码此前落 `_ => "sz"` ⇒ `sz920402` 回 `pv_none_match`，批量报价通道
+    /// 按解析失败静默丢行（无任何错误计数），当日收盘整段缺席。
+    #[test]
+    fn tencent_code_maps_bj_920_segment() {
+        assert_eq!(to_tencent_code("920402"), "bj920402");
+        assert_eq!(to_tencent_code("920002"), "bj920002");
+        // 沪市 B 股 900xxx 不在清单枚举域内，归沪（裸码推断单一权威的既有语义）
+        assert_eq!(to_tencent_code("900939"), "sh900939");
+    }
+
+    /// 北交所 920 号段的 K 线必须在发任何 HTTP 前被拦：腾讯端点对它只回当日 1 根，
+    /// 那是一次**成功应答** ⇒ 链在第一源收工、永远轮不到后续源（2026-10-24 实测
+    /// 补历史两轮 0 新增）。显式报错让 `try_vendors_retry` 换源。
+    #[tokio::test]
+    async fn bj920_klines_fail_fast_before_http() {
+        let v = make_vendor();
+        let err = v.get_klines("920402", "daily", 90, None).await.unwrap_err();
+        assert!(
+            matches!(&err, DataError::VendorError { vendor, .. } if vendor == "tencent"),
+            "应为 tencent 能力缺口错误，实际: {err:?}"
+        );
+        // 分类判据：能力缺口不得被当成「无数据回答」（腾讯实际回了当日 1 根），
+        // 也不得进健康窗口（否则批量扫 920 段会把 tencent 全局降级连坐其它路由）
+        assert!(err.is_capability_gap(), "必须带能力缺口标记: {err}");
+        assert!(!err.is_empty_data());
+        // 老码（83/87）不拦——腾讯对它们的历史 K 线是好的（尽管 2025-09-30 后冻结）
+        assert_eq!(to_tencent_code("833171"), "bj833171");
     }
 
     /// 后缀形态（`000001.SH`）必须换成市场前缀。

@@ -560,6 +560,27 @@ if present(risk_volatility) && risk_volatility > 0.0 {
     let debt = if present(risk_debt_ratio) { risk_debt_ratio } else { 0.0 };
     let growth = if present(risk_revenue_growth) { risk_revenue_growth } else { 100.0 };
 
+    // ── 缺数据哨兵与**正面判定**的边界（2026-10-24 修复）──────────────────────
+    // 上面四个哨兵（roe→100 / growth→100 / debt→0 / dd→0）的原意写在了 roe 那行的
+    // 注释里：「无数据时不触发 ROE 惩罚」。这个语义只对**处罚类**判据成立（下方
+    // 588 极高 / 611-612 高风险三处：哨兵让 `roe < 0` / `growth < 0` /
+    // `debt > RISK_DEBT_*` 恒假 ⇒ 拿不到数据就不会背上罚分）。
+    //
+    // 但 597 行的**低风险**判据是相反方向的：它用同一批哨兵去**证明**「基本面稳健」。
+    // 于是缺数据时四条同时自动成立（roe>8 ✓ growth>3 ✓ debt<55 ✓ dd<30 ✓），
+    // 只要波动率与夏普也落在阈值内 ⇒ 直接判定低风险。效果是双重的：
+    //   ① 高风险判据被哨兵哑掉；② 低风险判据被哨兵点亮 ⇒ **没有基本面数据的标的
+    //   被系统性判成低风险** ⇒ 仓位上限放宽（POS_CAP_*）、f4 风险惩罚减轻、决策偏乐观。
+    // 这与本脚本 617-619 行自己的兜底语义冲突 —— 那里明确写着「无数据 ⇒ 中风险」。
+    //
+    // 修法：**处罚侧哨兵一个字不改**（保留「缺数据不触发惩罚」的既定语义），
+    // 只给「低风险」这个**正面判定**加一道入参存在性门槛：缺任一 ⇒ 不得判低风险，
+    // 自然回落到 599-607 的中风险分支 —— 即本脚本为「无数据」既定的取值。
+    // 分两行写：本脚本既有风格是**单行布尔**，全仓 `.rhai` 无多行 `&&` 续行先例，不引入新语法风险。
+    let quant_inputs_ok = present(risk_sharpe) && present(risk_drawdown);
+    let fin_inputs_ok = present(risk_roe) && present(risk_debt_ratio) && present(risk_revenue_growth);
+    let low_risk_inputs_present = quant_inputs_ok && fin_inputs_ok;
+
     // v40(2026-09-13) 极高风险判据改造（**只按数据形态，不看行业标签**）：
     //   C 「真困境」第三条件：该硬规则（负债率超高 且 营收负增长）须附加**真实的
     //     困境证据**（ROE<0 亏损，或营收增速 <−10%），防单一指标顶格。
@@ -593,8 +614,10 @@ if present(risk_volatility) && risk_volatility > 0.0 {
     if vol > 35.0 && sharpe < 0.3 && roe < 8.0 && growth < 5.0 { is_high = true; }
 
     // 低风险: 量化健康 + 基本面稳健
+    //        **正面判定 ⇒ 必须由实测数据支撑**（缺数据哨兵不得反过来证明"稳健"，
+    //         见上方 `low_risk_inputs_present` 的修复说明）
     let is_low = false;
-    if vol < RISK_VOL_LOW && sharpe > RISK_SHARPE_LOW && dd < RISK_DD_LOW && roe > RISK_ROE_LOW && debt < RISK_DEBT_LOW && growth > RISK_GROWTH_LOW { is_low = true; }
+    if low_risk_inputs_present && vol < RISK_VOL_LOW && sharpe > RISK_SHARPE_LOW && dd < RISK_DD_LOW && roe > RISK_ROE_LOW && debt < RISK_DEBT_LOW && growth > RISK_GROWTH_LOW { is_low = true; }
 
     if is_extreme {
         overall_risk = "极高风险";

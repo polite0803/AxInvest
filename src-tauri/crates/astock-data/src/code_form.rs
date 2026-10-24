@@ -69,6 +69,27 @@ fn exchange_from_tag(tag: &str) -> Option<Exchange> {
     }
 }
 
+/// 裸码市场推断 —— 各 vendor「按首位数字推断」的**单一权威**。
+///
+/// 北交所 2025 年起把存量老码（83/87 段）批量切换到 920 号段 ⇒ 「9 开头=沪」的
+/// 既有假设对 920 段失效：实测 `sz920402`（腾讯）/`SH920402`（雪球）/`1.920402`
+/// （东财 secid）全部查空，唯一正确市场是 BJ（东财 `0.920402`）。沪 B（900xxx）
+/// 不在 A 股清单枚举域内，维持「9 开头=沪」。
+///
+/// 与 `axagent_harness::market_data::detect_market_type` 的 A 股分档必须一致
+/// （一致性由单测钉住）；返回 `Exchange` 便于调用方按各自 vendor 的记法取前缀。
+pub(crate) fn infer_market_bare(code: &str) -> Exchange {
+    if code.starts_with("920") {
+        Exchange::Beijing
+    } else if code.starts_with('6') || code.starts_with('9') {
+        Exchange::Shanghai
+    } else if code.starts_with('8') || code.starts_with('4') {
+        Exchange::Beijing
+    } else {
+        Exchange::Shenzhen
+    }
+}
+
 /// 国际指数别名（**不是**美股个股）：取数通道与个股不同，不可当个股处理。
 ///
 /// 与 `vendors/tencent.rs` 的 `TC_INTL_INDEX` / `vendors/international.rs` 的
@@ -188,5 +209,20 @@ mod tests {
         assert_eq!(us_stock_symbol("usr/CNY"), None);
         assert_eq!(us_stock_symbol("TOOLONG"), None);
         assert_eq!(us_stock_symbol(""), None);
+    }
+
+    /// 裸码推断与 harness 的 A 股分档逐格对齐（漂移即红）。
+    /// 430 段两边口径本就不同（harness 记 neeq / vendor 记 bj），不入这组对照。
+    #[test]
+    fn bare_inference_agrees_with_harness_market_type() {
+        assert_eq!(infer_market_bare("600519"), Exchange::Shanghai);
+        assert_eq!(infer_market_bare("000001"), Exchange::Shenzhen);
+        assert_eq!(infer_market_bare("300750"), Exchange::Shenzhen);
+        assert_eq!(infer_market_bare("830799"), Exchange::Beijing);
+        // 920 新号段必须归 BJ（否则 9 开头按沪 B 推断会整段查空）
+        assert_eq!(infer_market_bare("920402"), Exchange::Beijing);
+        assert_eq!(infer_market_bare("900939"), Exchange::Shanghai);
+        assert_eq!(axagent_harness::market_data::detect_market_type("920402"), "bj");
+        assert_eq!(axagent_harness::market_data::detect_market_type("900939"), "b_share");
     }
 }

@@ -5,6 +5,7 @@ use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::task as task_err;
 use crate::commands::spawn_guard::panic_message;
 use axagent_agent_macro::agent_command;
+use axagent_astock_data::task_cancel::CancelToken;
 use axagent_dao::task_ledger::{TransitionRequest, record_task_created, transition_task};
 use axagent_entities::background_tasks;
 use axagent_harness::IpcEventName;
@@ -48,6 +49,8 @@ pub struct BackgroundTaskInfo {
     pub prompt: Option<String>,
     pub status: String,
     pub output: String,
+    /// 结构化报告（JSON 字符串）；慢命令的消费方读这里，`output` 只是摘要
+    pub result_json: Option<String>,
     pub exit_code: Option<i32>,
     pub conversation_id: Option<String>,
     pub idempotency_key: Option<String>,
@@ -69,6 +72,7 @@ impl From<background_tasks::Model> for BackgroundTaskInfo {
             prompt: m.prompt,
             status: m.status,
             output: m.output,
+            result_json: m.result_json,
             exit_code: m.exit_code,
             conversation_id: m.conversation_id,
             idempotency_key: m.idempotency_key,
@@ -179,25 +183,120 @@ async fn update_status(
     })
 }
 
-/// 同步命令的内嵌台账：把一次命令执行记录为 `background_tasks` 行
-/// （pending → running → 终态），让手动触发的慢命令在任务中心可见、有终态与耗时。
+/// 慢命令的受理回执：只回任务 id，报告经 `result_json` 读侧取回。
 ///
-/// 与 [`spawn_background_task`] 的差异：`work` 在当前调用栈**内联**执行，结果仍
-/// 同步返回给前端消费方（如回测对比表），不改变调用形态；panic 经 catch_unwind
-/// 落 failed 终态，不留 running 僵尸（管道僵尸行的教训）。
+/// 命令不再 await 到执行结束 —— 130s 的回补期间面板可以切走 / 重载，
+/// 报告在任务终态后从库里取（重载也不丢）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskAccepted {
+    pub task_id: String,
+}
+
+/// task_id → 取消旗标。`stop_background_task` 据它置位；spawn 体在终态时摘除。
+///
+/// 用 tokio 异步锁（禁区 8）且只在极短临界区内持有，不跨 await 等待业务。
+type CancelRegistry = tokio::sync::RwLock<std::collections::HashMap<String, CancelToken>>;
+
+fn cancel_tokens() -> &'static CancelRegistry {
+    static TOKENS: std::sync::OnceLock<CancelRegistry> = std::sync::OnceLock::new();
+    TOKENS.get_or_init(|| tokio::sync::RwLock::new(std::collections::HashMap::new()))
+}
+
+async fn register_cancel_token(task_id: &str) -> CancelToken {
+    let token = CancelToken::new();
+    cancel_tokens().write().await.insert(task_id.to_string(), token.clone());
+    token
+}
+
+async fn unregister_cancel_token(task_id: &str) {
+    cancel_tokens().write().await.remove(task_id);
+}
+
+/// 请求取消（stop 命令的接线点）。返回是否命中一个在跑的受管任务。
+async fn request_cancel(task_id: &str) -> bool {
+    let token = cancel_tokens().read().await.get(task_id).cloned();
+    match token {
+        Some(t) => {
+            t.cancel();
+            true
+        },
+        None => false,
+    }
+}
+
+fn emit_task_event(app: Option<&tauri::AppHandle>, event: IpcEventName, task_id: &str) {
+    if let Some(app) = app {
+        let _ = app.emit(event.as_str(), task_id);
+    }
+}
+
+/// 写终态行：output 存摘要（给人看），result_json 存结构化报告（给消费方）。
+///
+/// `ActiveValue::Set` 包 Option：Option 字段的 `Set(None)` 是「置空」，
+/// 而裸 `None` 是「不写」。
+async fn write_terminal_row(
+    db: &DatabaseConnection,
+    task_id: &str,
+    output: String,
+    result_json: Option<String>,
+) -> Result<(), String> {
+    let am = background_tasks::ActiveModel {
+        id: Set(task_id.to_string()),
+        output: Set(output),
+        result_json: Set(result_json),
+        updated_at: Set(Utc::now().timestamp_millis()),
+        ..Default::default()
+    };
+    am.update(db).await.map(|_| ()).map_err(|e| {
+        String::from(ErrorResponse::from_error(
+            e,
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })
+}
+
+/// 慢命令的异步台账入口：登记任务 → `tokio::spawn` 执行 → 立即返回任务 id。
+///
+/// 执行体在内嵌台账里同步跑会冻住 IPC（回补 130s）；这里把它挪进 spawn，
+/// 命令本身只做「建行 + 起任务」。终态（completed / failed / stopped）与
+/// `result_json` 都由 spawn 体写，panic 经 catch_unwind 落 failed，不留 running 僵尸。
+///
+/// 取消是**协作式**：`stop_background_task` 置旗标，执行体里的 engine 循环
+/// 在批间经 `axagent_astock_data::task_cancel::is_cancelled()` 读到后带部分结果
+/// 提前返回；随后 spawn 体按「旗标已置位」写 `stopped` 终态（取消≠失败）。
 ///
 /// 台账写入失败只记日志**不阻断业务**：台账是辅助证据面，让「跑成了但没记录」
 /// 比「因记录失败而业务失败」便宜得多。
-pub async fn run_tracked<T, S>(
+pub async fn spawn_tracked<T, S>(
+    app: &tauri::AppHandle,
     db: &DatabaseConnection,
     title: &str,
     task_type: &str,
     description: &str,
-    work: impl std::future::Future<Output = Result<T, String>>,
+    work: impl std::future::Future<Output = Result<T, String>> + Send + 'static,
     summarize: S,
-) -> Result<T, String>
+) -> Result<TaskAccepted, String>
 where
-    S: FnOnce(&T) -> String,
+    T: Serialize + Send + 'static,
+    S: FnOnce(&T) -> String + Send + 'static,
+{
+    spawn_tracked_impl(Some(app.clone()), db, title, task_type, description, work, summarize).await
+}
+
+/// 测试可调的核心实现：`app = None` 时不发事件（lib 测试没有 Tauri AppHandle）。
+async fn spawn_tracked_impl<T, S>(
+    app: Option<tauri::AppHandle>,
+    db: &DatabaseConnection,
+    title: &str,
+    task_type: &str,
+    description: &str,
+    work: impl std::future::Future<Output = Result<T, String>> + Send + 'static,
+    summarize: S,
+) -> Result<TaskAccepted, String>
+where
+    T: Serialize + Send + 'static,
+    S: FnOnce(&T) -> String + Send + 'static,
 {
     let id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now().timestamp_millis();
@@ -210,6 +309,7 @@ where
         prompt: Set(None),
         status: Set(TaskStatus::Pending.as_db_str().to_string()),
         output: Set(String::new()),
+        result_json: Set(None),
         exit_code: Set(None),
         conversation_id: Set(None),
         created_by: Set(None),
@@ -227,77 +327,80 @@ where
         ))
     })?;
     if let Err(e) = record_task_created(db, &id, TaskSource::Command, "user").await {
-        tracing::error!(task_id = %id, "[run_tracked] 写入创建事件失败（审计脊将缺少起源）: {e}");
+        tracing::error!(task_id = %id, "[spawn_tracked] 写入创建事件失败（审计脊将缺少起源）: {e}");
     }
+    // 先注册再 spawn：stop 必须能命中「已受理、还没进 running」的窗口
+    let token = register_cancel_token(&id).await;
+    emit_task_event(app.as_ref(), IpcEventName::BackgroundTaskCreated, &id);
 
-    let running = transition_task(
-        db,
-        TransitionRequest::new(&id, TaskStatus::Running, TaskSource::Command, "user"),
-    )
-    .await;
-    if let Err(e) = running {
-        warn!(task_id = %id, "[run_tracked] 置 running 失败（继续执行）: {e}");
-    }
+    let task_id = id.clone();
+    let db = db.clone();
+    // 与 spawn_background_task 同形态：命令本身跑在 tokio 上
+    tokio::spawn(async move {
+        if let Err(e) = transition_task(
+            &db,
+            TransitionRequest::new(&task_id, TaskStatus::Running, TaskSource::Command, "user"),
+        )
+        .await
+        {
+            warn!(task_id = %task_id, "[spawn_tracked] 置 running 失败（继续执行）: {e}");
+        }
+        emit_task_event(app.as_ref(), IpcEventName::BackgroundTaskUpdated, &task_id);
 
-    let write_output = |value: String| {
-        let am = background_tasks::ActiveModel {
-            id: Set(id.clone()),
-            output: Set(value),
-            ..Default::default()
+        let outcome = axagent_astock_data::task_cancel::with_cancel(
+            token.clone(),
+            AssertUnwindSafe(work).catch_unwind(),
+        )
+        .await;
+
+        let (to, exit_code, reason): (TaskStatus, i32, &str) = match &outcome {
+            Ok(Ok(_)) if token.is_cancelled() => {
+                (TaskStatus::Stopped, 1, "用户取消：已完成部分保留")
+            },
+            Ok(Ok(_)) => (TaskStatus::Completed, 0, "命令执行完成"),
+            Ok(Err(_)) => (TaskStatus::Failed, 1, "命令执行返回错误"),
+            Err(_) => (TaskStatus::Failed, 1, "执行体 panic"),
         };
-        am.update(db)
-    };
 
-    match AssertUnwindSafe(work).catch_unwind().await {
-        Ok(Ok(value)) => {
-            if let Err(e) = write_output(summarize(&value)).await {
-                tracing::error!(task_id = %id, "[run_tracked] 写入成功输出失败: {e}");
-            }
-            if let Err(e) = transition_task(
-                db,
-                TransitionRequest::new(&id, TaskStatus::Completed, TaskSource::Command, "user")
-                    .exit_code(0),
-            )
-            .await
-            {
-                tracing::error!(task_id = %id, "[run_tracked] 置 completed 失败: {e}");
-            }
-            Ok(value)
-        },
-        Ok(Err(err)) => {
-            if let Err(e) = write_output(err.clone()).await {
-                tracing::error!(task_id = %id, "[run_tracked] 写入失败输出失败: {e}");
-            }
-            if let Err(e) = transition_task(
-                db,
-                TransitionRequest::new(&id, TaskStatus::Failed, TaskSource::Command, "user")
-                    .exit_code(1)
-                    .reason("命令执行返回错误"),
-            )
-            .await
-            {
-                tracing::error!(task_id = %id, "[run_tracked] 置 failed 失败: {e}");
-            }
-            Err(err)
-        },
-        Err(panic) => {
-            let msg = panic_message(&panic);
-            if let Err(e) = write_output(msg.clone()).await {
-                tracing::error!(task_id = %id, "[run_tracked] 写入 panic 输出失败: {e}");
-            }
-            if let Err(e) = transition_task(
-                db,
-                TransitionRequest::new(&id, TaskStatus::Failed, TaskSource::Command, "user")
-                    .exit_code(1)
-                    .reason("执行体 panic"),
-            )
-            .await
-            {
-                tracing::error!(task_id = %id, "[run_tracked] 置 failed 失败: {e}");
-            }
-            Err(msg)
-        },
-    }
+        let (output, result_json) = match outcome {
+            Ok(Ok(value)) => {
+                let summary = summarize(&value);
+                let json = match serde_json::to_string(&value) {
+                    Ok(j) => Some(j),
+                    Err(e) => {
+                        tracing::error!(task_id = %task_id, "[spawn_tracked] 报告序列化失败: {e}");
+                        None
+                    },
+                };
+                let output = if token.is_cancelled() {
+                    format!("用户取消（已完成部分）：{summary}")
+                } else {
+                    summary
+                };
+                (output, json)
+            },
+            Ok(Err(err)) => (err, None),
+            Err(panic) => (panic_message(&panic), None),
+        };
+
+        if let Err(e) = write_terminal_row(&db, &task_id, output, result_json).await {
+            tracing::error!(task_id = %task_id, "[spawn_tracked] 写入终态行失败: {e}");
+        }
+        if let Err(e) = transition_task(
+            &db,
+            TransitionRequest::new(&task_id, to, TaskSource::Command, "user")
+                .exit_code(exit_code)
+                .reason(reason),
+        )
+        .await
+        {
+            tracing::error!(task_id = %task_id, "[spawn_tracked] 置终态 {:?} 失败: {e}", to);
+        }
+        unregister_cancel_token(&task_id).await;
+        emit_task_event(app.as_ref(), IpcEventName::BackgroundTaskUpdated, &task_id);
+    });
+
+    Ok(TaskAccepted { task_id: id })
 }
 
 #[agent_command(domain = system, safety = Caution, call_mode = StateInput, description = "创建后台任务")]
@@ -348,6 +451,7 @@ pub async fn spawn_background_task(
         prompt: Set(prompt.clone()),
         status: Set(TaskStatus::Pending.as_db_str().to_string()),
         output: Set(String::new()),
+        result_json: Set(None),
         exit_code: Set(None),
         conversation_id: Set(None),
         created_by: Set(None),
@@ -654,6 +758,11 @@ pub async fn stop_background_task(
             serde_json::to_string(&ErrorResponse::new(task_err::NOT_FOUND))
                 .unwrap_or_else(|e| format!("{{\"error\":\"serialization failed: {}\"}}", e))
         })?;
+    // 受管慢任务（spawn_tracked）：置旗标即可，终态与部分报告由 spawn 体写 ——
+    // 这里直接改库会和它的终态写相撞（状态迁移被拒 + 两处写终态）。
+    if request_cancel(&task_id).await {
+        return Ok(());
+    }
     // 可停止态用枚举判定（原来是裸字符串比较，`"runing"` 之类拼写错误会静默
     // 变成「不可停止」而不是报错）。未知状态不假装可停止。
     let current = TaskStatus::from_db_str(&task.status);
@@ -701,14 +810,34 @@ pub async fn list_task_events(
 }
 
 #[cfg(test)]
-mod run_tracked_tests {
+mod spawn_tracked_tests {
     use super::*;
 
+    const TERMINAL: [TaskStatus; 3] =
+        [TaskStatus::Completed, TaskStatus::Failed, TaskStatus::Stopped];
+
+    /// 轮询到终态（spawn 体与测试不共享 JoinHandle）。
+    async fn wait_terminal(db: &DatabaseConnection, id: &str) -> background_tasks::Model {
+        for _ in 0..500 {
+            let row = background_tasks::Entity::find_by_id(id)
+                .one(db)
+                .await
+                .expect("查询应成功")
+                .expect("受理后行应立即存在");
+            if TERMINAL.contains(&TaskStatus::from_db_str(&row.status)) {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("任务在 5s 内未进入终态（spawn 体可能没跑起来）");
+    }
+
     #[tokio::test]
-    async fn success_records_completed_with_summary() {
+    async fn success_records_completed_with_summary_and_result_json() {
         let h = axagent_dao::db::create_test_pool().await.expect("测试库应创建成功");
         let db = &h.conn;
-        let value = run_tracked(
+        let accepted = spawn_tracked_impl(
+            None,
             db,
             "测试任务",
             "test-type",
@@ -717,23 +846,22 @@ mod run_tracked_tests {
             |v| format!("结果 {v}"),
         )
         .await
-        .expect("应成功");
-        assert_eq!(value, 7);
+        .expect("应受理");
 
-        let rows = background_tasks::Entity::find().all(db).await.expect("查询应成功");
-        assert_eq!(rows.len(), 1, "只应有一行");
-        let r = &rows[0];
+        let r = wait_terminal(db, &accepted.task_id).await;
         assert_eq!(r.status, TaskStatus::Completed.as_db_str());
         assert_eq!(r.exit_code, Some(0));
-        assert_eq!(r.output, "结果 7");
+        assert_eq!(r.output, "结果 7", "output 只放摘要");
+        assert_eq!(r.result_json.as_deref(), Some("7"), "结构化报告落在 result_json");
         assert!(r.finished_at.is_some(), "终态必须带结束时间");
     }
 
     #[tokio::test]
-    async fn business_error_records_failed_with_output() {
+    async fn business_error_records_failed_without_result_json() {
         let h = axagent_dao::db::create_test_pool().await.expect("测试库应创建成功");
         let db = &h.conn;
-        let err = run_tracked(
+        let accepted = spawn_tracked_impl(
+            None,
             db,
             "测试任务",
             "test-type",
@@ -742,15 +870,13 @@ mod run_tracked_tests {
             |v| format!("结果 {v}"),
         )
         .await
-        .expect_err("应失败");
-        assert_eq!(err, "引擎报错了");
+        .expect("受理本身不应失败");
 
-        let rows = background_tasks::Entity::find().all(db).await.expect("查询应成功");
-        assert_eq!(rows.len(), 1);
-        let r = &rows[0];
+        let r = wait_terminal(db, &accepted.task_id).await;
         assert_eq!(r.status, TaskStatus::Failed.as_db_str());
         assert_eq!(r.exit_code, Some(1));
         assert_eq!(r.output, "引擎报错了", "失败原因要落在 output，前端才有得显示");
+        assert!(r.result_json.is_none(), "失败时不得留下半份报告");
         assert!(r.finished_at.is_some());
     }
 
@@ -758,7 +884,8 @@ mod run_tracked_tests {
     async fn panic_records_failed_not_running_zombie() {
         let h = axagent_dao::db::create_test_pool().await.expect("测试库应创建成功");
         let db = &h.conn;
-        let err = run_tracked(
+        let accepted = spawn_tracked_impl(
+            None,
             db,
             "测试任务",
             "test-type",
@@ -771,18 +898,69 @@ mod run_tracked_tests {
             |v| format!("结果 {v}"),
         )
         .await
-        .expect_err("panic 应转成 Err");
-        assert!(err.contains("执行体炸了"), "panic 消息应透出，实际: {err}");
+        .expect("受理本身不应失败");
 
-        let rows = background_tasks::Entity::find().all(db).await.expect("查询应成功");
-        assert_eq!(rows.len(), 1);
-        let r = &rows[0];
+        let r = wait_terminal(db, &accepted.task_id).await;
         assert_eq!(
             r.status,
             TaskStatus::Failed.as_db_str(),
             "panic 不得留 running 僵尸（管道僵尸行教训）"
         );
         assert_eq!(r.exit_code, Some(1));
+        assert!(r.output.contains("执行体炸了"), "panic 消息应透出，实际: {}", r.output);
         assert!(r.finished_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn cancel_records_stopped_with_partial_report() {
+        use axagent_astock_data::task_cancel::is_cancelled;
+
+        let h = axagent_dao::db::create_test_pool().await.expect("测试库应创建成功");
+        let db = &h.conn;
+        let accepted = spawn_tracked_impl(
+            None,
+            db,
+            "测试任务",
+            "test-type",
+            "取消路径",
+            async {
+                // 模拟 engine 批间循环：每步检查一次旗标，命中就带部分结果返回
+                let mut steps = 0;
+                while steps < 1000 {
+                    if is_cancelled() {
+                        break;
+                    }
+                    steps += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+                Ok::<_, String>(serde_json::json!({
+                    "steps": steps,
+                    "cancelled": is_cancelled(),
+                }))
+            },
+            |v| format!("完成 {} 步", v["steps"]),
+        )
+        .await
+        .expect("应受理");
+
+        assert!(request_cancel(&accepted.task_id).await, "受理后旗标必须已注册");
+
+        let r = wait_terminal(db, &accepted.task_id).await;
+        assert_eq!(
+            r.status,
+            TaskStatus::Stopped.as_db_str(),
+            "取消是 stopped 不是 failed（取消≠失败）"
+        );
+        assert!(r.output.starts_with("用户取消"), "摘要要显式说明被取消，实际: {}", r.output);
+        let json: serde_json::Value =
+            serde_json::from_str(r.result_json.as_deref().expect("部分报告应落库"))
+                .expect("result_json 应是合法 JSON");
+        assert_eq!(json["cancelled"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn cancel_without_registration_is_noop() {
+        // 老任务 / 非受管任务的 stop 走原状态迁移路径，不能因注册表未命中而报错
+        assert!(!request_cancel("no-such-task").await);
     }
 }

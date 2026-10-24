@@ -27,6 +27,11 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     #[sea_orm(default_value = "")]
     pub output: String,
+    /// 结构化结果（JSON 字符串）。`output` 只放**给人看的摘要**；消费方
+    /// （回测面板等）读的是这一列。与 output 分开是为了让「摘要文案」和
+    /// 「机器可读报告」各自演进、互不篡改。
+    #[sea_orm(column_type = "Text", nullable)]
+    pub result_json: Option<String>,
     /// 退出码（bash 类型完成时）
     pub exit_code: Option<i32>,
     /// 关联的会话 ID（agent 类型）

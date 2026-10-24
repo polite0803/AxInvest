@@ -14,13 +14,7 @@ fn to_baidu_code(stock_code: &str) -> String {
     // 误把 "sh600887" 当作深圳市场股票,生成 "szsh600887" 导致所有 API 调用返回空数据。
     let code =
         stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
-    let prefix = if code.starts_with('6') || code.starts_with('9') {
-        "sh"
-    } else if code.starts_with('8') || code.starts_with('4') {
-        "bj"
-    } else {
-        "sz"
-    };
+    let prefix = crate::code_form::infer_market_bare(code).tencent_prefix();
     format!("{prefix}{code}")
 }
 

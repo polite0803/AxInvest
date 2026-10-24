@@ -1521,15 +1521,9 @@ fn to_em_secid(stock_code: &str) -> String {
     if let Some(us) = code.strip_suffix(".US").or_else(|| code.strip_suffix(".us")) {
         return format!("105.{us}");
     }
-    // A 股
-    let market = if code.starts_with('6') || code.starts_with('9') {
-        "1"
-    } else if code.starts_with('8') || code.starts_with('4') {
-        "0"
-    } else {
-        "0"
-    };
-    format!("{market}.{code}")
+    // A 股：市场位归 `code_form::infer_market_bare` 单一权威（920 新号段=北交所=0，
+    // 按「9 开头=沪」推成 1 会整段查空——实测 `1.920402` 无数据、`0.920402` 正常）。
+    format!("{}.{code}", crate::code_form::infer_market_bare(code).em_market())
 }
 
 /// 大盘指数清单：`(东财 secid, 展示代码, 中文名)`。
@@ -1558,14 +1552,8 @@ fn to_em_secucode(stock_code: &str) -> String {
     {
         return code.to_string();
     }
-    // A 股
-    let suffix = if code.starts_with('6') || code.starts_with('9') {
-        "SH"
-    } else if code.starts_with('8') || code.starts_with('4') {
-        "BJ"
-    } else {
-        "SZ"
-    };
+    // A 股：后缀归 `code_form::infer_market_bare` 单一权威（920 新号段=BJ）
+    let suffix = crate::code_form::infer_market_bare(code).xueqiu_tag();
     format!("{code}.{suffix}")
 }
 
@@ -1941,13 +1929,7 @@ impl StockVendor for EastMoneyVendor {
         // 修复(2026-07-22): 先去除 sh/sz/bj 前缀,否则 starts_with 判断失效
         let code =
             stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
-        let em_code = if code.starts_with('6') || code.starts_with('9') {
-            format!("SH{code}")
-        } else if code.starts_with('8') || code.starts_with('4') {
-            format!("BJ{code}")
-        } else {
-            format!("SZ{code}")
-        };
+        let em_code = format!("{}{code}", crate::code_form::infer_market_bare(code).xueqiu_tag());
 
         let base_url = |t: u8| {
             format!(

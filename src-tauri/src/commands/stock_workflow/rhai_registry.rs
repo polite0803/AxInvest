@@ -109,9 +109,14 @@ mod tests {
     ///
     /// 孤儿脚本（无 seed / 无 DB 节点，如 `bottleneck-calc.rhai`）同样纳入：
     /// 它们仍会被测试或手工路径加载，函数集必须同样完整。
-    const PRODUCTION_SCRIPTS: [(&str, &str); 22] = [
+    const PRODUCTION_SCRIPTS: [(&str, &str); 24] = [
         ("analyst-brief", include_str!("../analyst-brief.rhai")),
         ("bottleneck-calc", include_str!("../bottleneck-calc.rhai")),
+        // 快速趋势智选的两条确定性脚本（2026-10-24 纳入本清单）：
+        // candidate-assembler 调 `bottleneck_node_score` 的产物、trend-split 是它的上游；
+        // 漏登记会让「脚本调了没注册的函数」在这两条上回到运行期才报错的原点。
+        ("candidate-assembler", include_str!("../candidate-assembler.rhai")),
+        ("trend-split", include_str!("../trend-split.rhai")),
         ("consistency-check", include_str!("../consistency-check.rhai")),
         ("data-quality", include_str!("../data-quality.rhai")),
         ("data-verifier", include_str!("../data-verifier.rhai")),
@@ -1746,6 +1751,48 @@ mod tests {
         //   —— 门的存放位置由可用基础设施决定，判据只有一位主人。
     }
 
+    /// 2026-10-24 回归：**缺财务数据不得被判低风险**。
+    ///
+    /// 修复前四个哨兵（roe→100 / growth→100 / debt→0 / dd→0）同时服务两个相反方向：
+    /// 处罚侧「缺数据不罚」是对的，但低风险侧拿同一批哨兵**证明**基本面稳健 ⇒
+    /// 只要波动率/夏普过得去，没有任何财务数据的票反而被判最安全的一类。
+    /// 本门锁两组：六项齐全的健康票必须是低风险（正控），缺三项财务的同一只票必须是
+    /// 中风险（负控）—— 缺了负控，把阈值改坏也能让正控通过。
+    #[test]
+    fn low_risk_requires_observed_fundamentals_not_missing_sentinels() {
+        let src = PRODUCTION_SCRIPTS
+            .iter()
+            .find(|(l, _)| *l == "portfolio-mgr")
+            .expect("脚本清单缺 portfolio-mgr")
+            .1;
+
+        let quant = [
+            ("risk_volatility", serde_json::json!(15.0)),
+            ("risk_drawdown", serde_json::json!(10.0)),
+            ("risk_sharpe", serde_json::json!(1.5)),
+        ];
+        let mut healthy: Vec<(&str, serde_json::Value)> = quant.to_vec();
+        healthy.extend([
+            ("risk_roe", serde_json::json!(12.0)),
+            ("risk_debt_ratio", serde_json::json!(40.0)),
+            ("risk_revenue_growth", serde_json::json!(10.0)),
+        ]);
+
+        let healthy_out = run_portfolio_mgr_fully(src, &[], &healthy);
+        assert_eq!(
+            healthy_out["riskLevel"], "低风险",
+            "六项实测都健康的票必须是低风险（正控失败 ⇒ 本门没有区分力）: {healthy_out:?}"
+        );
+
+        // 同一只票抽掉三项财务输入：量化项仍健康，但基本面是「不知道」。
+        let missing_out = run_portfolio_mgr_fully(src, &[], &quant);
+        assert_eq!(
+            missing_out["riskLevel"], "中风险",
+            "缺财务数据不得被哨兵反向证明为低风险（应与脚本 617-619 的「无数据」兜底同档）: {missing_out:?}"
+        );
+        assert_eq!(missing_out["riskSource"], "算法", "波动率存在时仍走算法分类，不是无数据兜底");
+    }
+
     /// P1-3（R3/R7）：本档未达校准门槛 ⇒ 置信封顶压到 `cap_floor`，并由 P0-1 同一条阶梯
     /// 联动**动作**（不得重蹈 R5「只降展示数字，不降动作」）。
     ///
@@ -1896,6 +1943,268 @@ mod tests {
             "追涨门应当把开仓压回保守档，实际 action = {:?}",
             out["action"]
         );
+    }
+
+    /// 通用：用生产同配置 Engine 执行指定脚本，并返回 JSON 输出。
+    ///
+    /// 只注入调用方给的变量 —— 缺失的变量会以 `Variable not found` 红出来（而不是
+    /// 静默当 unit），这正是我们要的：脚本新增裸引用时测试立即失败。
+    fn run_production_script(name: &str, vars: &[(&str, serde_json::Value)]) -> serde_json::Value {
+        let src = PRODUCTION_SCRIPTS
+            .iter()
+            .find(|(l, _)| *l == name)
+            .unwrap_or_else(|| panic!("脚本清单缺 {name}"))
+            .1;
+        let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
+        let ast = engine
+            .compile(src)
+            .unwrap_or_else(|e| panic!("{name}.rhai 编译失败（生产同配置）: {e}"));
+        let mut scope = rhai::Scope::new();
+        for (key, value) in vars {
+            scope.push_constant(*key, axagent_harness::json_value_to_dynamic(value));
+        }
+        let out: rhai::Dynamic = engine
+            .eval_ast_with_scope(&mut scope, &ast)
+            .unwrap_or_else(|e| panic!("{name}.rhai 执行失败: {e}"));
+        axagent_harness::dynamic_to_json_value(&out)
+    }
+
+    fn scorer_vars(
+        strategy: &str,
+        chain_analysis: serde_json::Value,
+        industry_ranking: serde_json::Value,
+    ) -> Vec<(&'static str, serde_json::Value)> {
+        vec![
+            ("chain_analysis", chain_analysis),
+            ("industry_ranking", industry_ranking),
+            ("trend_strategy", serde_json::json!(strategy)),
+            ("w_supply", serde_json::json!(0.35)),
+            ("w_demand", serde_json::json!(0.35)),
+            ("w_irreplace", serde_json::json!(0.30)),
+        ]
+    }
+
+    /// 2026-10-24：政策策略不得再拿「写死 70 的行业匹配 + 上限 75 的权重」评分。
+    ///
+    /// 修复前 `composite = policy_impact*0.40 + 70*0.35`，同策略内所有票同分、上限 75；
+    /// 现在行业动量取自真实行业排名、个股证据取自 rationale、龙头另有溢价。
+    #[test]
+    fn policy_scorer_uses_sector_momentum_and_stock_evidence() {
+        let out = run_production_script(
+            "strategy-scorer",
+            &scorer_vars(
+                "policy",
+                serde_json::json!({
+                    "policy_impact_score": 60.0,
+                    "beneficiaries": [{
+                        "sector": "半导体",
+                        "stocks": [
+                            {"code": "688981", "name": "中芯国际", "rationale": "获大额订单"},
+                            {"code": "600001", "name": "某公司"}
+                        ]
+                    }]
+                }),
+                serde_json::json!([{
+                    "industryName": "半导体",
+                    "changePct": 6.0,
+                    "mainInflow": 10.0,
+                    "leaderCode": "688981",
+                    "leaderName": "中芯国际"
+                }]),
+            ),
+        );
+        let nodes = out["computed_nodes"].as_array().expect("computed_nodes 必须是数组");
+        assert_eq!(nodes.len(), 2, "两只受益股都要出分: {out}");
+        let leader = &nodes[0];
+        let follower = &nodes[1];
+        assert_eq!(leader["strategy_type"], "policy");
+        assert_eq!(leader["sector_momentum_score"].as_f64(), Some(85.0));
+        assert_eq!(leader["leader_bonus"].as_f64(), Some(8.0));
+        assert_eq!(follower["leader_bonus"].as_f64(), Some(0.0));
+        let leader_score = leader["bottleneck_composite"].as_f64().unwrap();
+        let follower_score = follower["bottleneck_composite"].as_f64().unwrap();
+        assert!(
+            leader_score > follower_score + 10.0,
+            "龙头 + 订单证据必须拉开 ≥10 分（实得 {leader_score} vs {follower_score}）"
+        );
+        assert!(leader_score > 75.0, "修复前上限只有 75，真实强势政策票必须能过 75");
+    }
+
+    /// 2026-10-24：缺预期差不按「0% 超预期」惩罚；无显式历史准确率时不得靠
+    /// 理由文本里的“数据/调研”白拿 70 分。
+    #[test]
+    fn earnings_missing_beat_is_neutral_and_track_record_needs_explicit_input() {
+        let out = run_production_script(
+            "strategy-scorer",
+            &scorer_vars(
+                "earnings",
+                serde_json::json!({
+                    "candidates": [
+                        {"code": "A", "name": "A", "reason": "数据待补"},
+                        {"code": "B", "name": "B", "expected_beat_pct": 30.0,
+                         "track_record_score": 70.0, "timeframe": "short_term", "reason": "订单落地"}
+                    ]
+                }),
+                serde_json::json!([]),
+            ),
+        );
+        let nodes = out["computed_nodes"].as_array().expect("computed_nodes 必须是数组");
+        let a = nodes[0]["bottleneck_composite"].as_f64().unwrap();
+        let b = nodes[1]["bottleneck_composite"].as_f64().unwrap();
+        assert!(
+            (a - 49.5).abs() < 1e-9,
+            "缺预期差应是中性 49.5（45*0.4 + 50*0.3 + 55*0.3），实得 {a}"
+        );
+        assert!((b - 81.0).abs() < 1e-9, "90*0.4 + 70*0.3 + 80*0.3 应为 81，实得 {b}");
+        assert!(b > a + 25.0);
+    }
+
+    /// 2026-10-24：候选组装端三件事必须同时成立 ——
+    /// ① 同一只票被多个策略算过 ⇒ 取**最高分**，不是首见分；
+    /// ② 没有确定性评分时，LLM 自报分/趋势 confidence **封顶 54**；
+    /// ③ 策略类型跟着得分来源走（供下游选对校验分支）。
+    #[test]
+    fn candidate_assembler_takes_max_score_and_caps_unverified_llm_scores() {
+        let empty = serde_json::json!({"computed_nodes": []});
+        let out = run_production_script(
+            "candidate-assembler",
+            &[
+                (
+                    "scanner_raw",
+                    serde_json::json!({"trends": [
+                        {"trend_name": "t1", "strategy_type": "bottleneck", "confidence": 90.0,
+                         "candidates": [
+                            {"stock_code": "A", "stock_name": "A", "serenity_score": 95},
+                            {"stock_code": "C", "stock_name": "C"}
+                         ]},
+                        {"trend_name": "t2", "strategy_type": "policy", "confidence": 80.0,
+                         "candidates": [
+                            {"stock_code": "B", "stock_name": "B"},
+                            {"stock_code": "C", "stock_name": "C"}
+                         ]}
+                    ]}),
+                ),
+                (
+                    "strategy_trend1",
+                    serde_json::json!({"computed_nodes": [
+                        {"stock_code": "C", "stock_name": "C", "node_name": "C",
+                         "bottleneck_composite": 60.0, "strategy_type": "bottleneck",
+                         "data_reliability": "llm_estimated"}
+                    ]}),
+                ),
+                (
+                    "strategy_trend2",
+                    serde_json::json!({"computed_nodes": [
+                        {"stock_code": "B", "stock_name": "B", "node_name": "B",
+                         "bottleneck_composite": 80.0, "strategy_type": "policy",
+                         "data_reliability": "partially_verified"},
+                        {"stock_code": "C", "stock_name": "C", "node_name": "C",
+                         "bottleneck_composite": 85.0, "strategy_type": "policy",
+                         "data_reliability": "partially_verified"}
+                    ]}),
+                ),
+                ("strategy_trend3", empty.clone()),
+                ("strategy_trend4", empty.clone()),
+                ("strategy_trend5", empty.clone()),
+                ("consistency", serde_json::json!({"consistency_score": 100.0})),
+                ("strategy_type", serde_json::json!("bottleneck")),
+            ],
+        );
+        let candidates = out["candidates"].as_array().expect("candidates 必须是数组");
+        let by_code = |code: &str| -> serde_json::Value {
+            candidates
+                .iter()
+                .find(|c| c["stock_code"].as_str() == Some(code))
+                .cloned()
+                .unwrap_or_else(|| panic!("缺候选 {code}: {out}"))
+        };
+        assert_eq!(
+            by_code("A")["serenity_score"].as_f64(),
+            Some(54.0),
+            "LLM 自报 95 必须封顶 54（无确定性评分）"
+        );
+        assert_eq!(by_code("B")["serenity_score"].as_f64(), Some(80.0));
+        assert_eq!(
+            by_code("C")["serenity_score"].as_f64(),
+            Some(85.0),
+            "同一票被 60/85 各算一次 ⇒ 必须取最高 85"
+        );
+        assert_eq!(by_code("C")["strategy_type"], "policy", "类型必须跟着最高分来源");
+    }
+
+    /// 2026-10-24：一致性分 `0` 是**有效的最差分**，不是「未检查」——必须把置信封顶到 0。
+    /// 旧写法 `consistency_score > 0.0` 让数据自相矛盾的批次完全不被降置信。
+    #[test]
+    fn candidate_assembler_zero_consistency_caps_confidence() {
+        let empty = serde_json::json!({"computed_nodes": []});
+        let out = run_production_script(
+            "candidate-assembler",
+            &[
+                (
+                    "scanner_raw",
+                    serde_json::json!({"trends": [{
+                        "trend_name": "t", "strategy_type": "bottleneck", "confidence": 90.0,
+                        "candidates": [{"stock_code": "A", "stock_name": "A", "confidence": 88.0}]
+                    }]}),
+                ),
+                (
+                    "strategy_trend1",
+                    serde_json::json!({"computed_nodes": [{
+                        "stock_code": "A", "stock_name": "A", "node_name": "A",
+                        "bottleneck_composite": 80.0, "strategy_type": "bottleneck",
+                        "data_reliability": "partially_verified"
+                    }]}),
+                ),
+                ("strategy_trend2", empty.clone()),
+                ("strategy_trend3", empty.clone()),
+                ("strategy_trend4", empty.clone()),
+                ("strategy_trend5", empty.clone()),
+                ("consistency", serde_json::json!({"consistency_score": 0.0})),
+                ("strategy_type", serde_json::json!("bottleneck")),
+            ],
+        );
+        assert_eq!(
+            out["candidates"][0]["confidence"].as_f64(),
+            Some(0.0),
+            "一致性 0 必须把置信封顶到 0，实得: {out}"
+        );
+    }
+
+    /// 2026-10-24：`data-verifier` 的非 bottleneck 分支不得丢候选内容。
+    /// 修复前只回 stock_code/stock_name/data_verification ⇒ 政策候选的评分与催化剂全被丢弃。
+    #[test]
+    fn data_verifier_preserves_non_bottleneck_candidate_fields() {
+        let out = run_production_script(
+            "data-verifier",
+            &[
+                (
+                    "candidates",
+                    serde_json::json!([
+                        {"stock_code": "X", "stock_name": "X", "strategy_type": "policy",
+                         "serenity_score": 77.0, "confidence": 66.0,
+                         "catalysts": [{"type": "policy", "description": "补贴"}],
+                         "data_reliability": "llm_estimated"},
+                        {"stock_code": "Y", "stock_name": "Y", "strategy_type": "bottleneck",
+                         "serenity_score": 70.0, "confidence": 60.0}
+                    ]),
+                ),
+                ("candidates_direct", serde_json::json!(null)),
+                ("candidates_raw", serde_json::json!(null)),
+                ("tool_calls_made", serde_json::json!(null)),
+                ("industry_pe_mean", serde_json::json!(null)),
+                ("industry_pe_std", serde_json::json!(null)),
+            ],
+        );
+        let arr = out.as_array().expect("data-verifier 必须返回数组");
+        let x = arr.iter().find(|c| c["stock_code"] == "X").expect("缺 X");
+        assert_eq!(x["strategy_type"], "policy");
+        assert_eq!(x["serenity_score"].as_f64(), Some(77.0));
+        assert_eq!(x["confidence"].as_f64(), Some(66.0));
+        assert_eq!(x["catalysts"].as_array().map(|a| a.len()), Some(1));
+        assert_eq!(x["data_verification"]["verified"], true);
+        let y = arr.iter().find(|c| c["stock_code"] == "Y").expect("缺 Y");
+        assert_eq!(y["serenity_score"].as_f64(), Some(70.0), "bottleneck 分支同样不得丢分");
+        assert_eq!(y["data_verification"]["status"], "no_data");
     }
 
     /// P1-4③：RSI>75 且动量腿为负 ⇒ f12 有效权重升为 0.15（下限），并留 R-F12-OVERBOUGHT 痕。

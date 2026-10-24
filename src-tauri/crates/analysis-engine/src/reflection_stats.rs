@@ -897,7 +897,10 @@ pub fn match_sp_rows_to_reflections<'a>(
 /// （`hooks.rs` 据此注入 `horizon_prior_json` 逐档先验）。若留在命令体里，hooks 只能
 /// 再抄一遍取数，且 `stock_analysis.rs` 的荐股先验也要调 —— 两处跨模块调命令 =
 /// 分层门禁规则 2 违规。落到 engine 后三处都只是调本函数。
-pub async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<HitrateStats, String> {
+pub async fn build_hitrate_stats(
+    db: &DatabaseConnection,
+    as_of: Option<&str>,
+) -> Result<HitrateStats, String> {
     let sp_rows = strategy_performance::Entity::find()
         .all(db)
         .await
@@ -906,6 +909,26 @@ pub async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<HitrateStats
         .all(db)
         .await
         .map_err(|e| format!("读取 stock_reflections 失败: {e}"))?;
+    // as-of 截断（PLAN 待拍板 #7 的推荐项）：回放只能用**截至 window_start 已知**的样本。
+    // - strategy_performance 以 `exit_at` 为准：没退出就没有后验，决策日早但结算晚的行
+    //   在截止日那一刻尚不存在；
+    // - stock_reflections 以 `hindsight_date`（后见信息日）为准：反思结论是那天产生的。
+    // `None` = 实盘口径，一条不筛（既有行为逐字节不变）。
+    let (sp_rows, ref_rows) = match as_of {
+        None => (sp_rows, ref_rows),
+        Some(cutoff) => {
+            let end_ms = chrono::NaiveDate::parse_from_str(cutoff, "%Y-%m-%d")
+                .map_err(|e| format!("as-of 截止日非法 {cutoff}: {e}"))?
+                .and_hms_opt(23, 59, 59)
+                .ok_or_else(|| format!("as-of 截止日无法落到当日末尾: {cutoff}"))?
+                .and_utc()
+                .timestamp_millis();
+            (
+                sp_rows.into_iter().filter(|r| r.exit_at <= end_ms).collect(),
+                ref_rows.into_iter().filter(|r| r.hindsight_date.as_str() <= cutoff).collect(),
+            )
+        },
+    };
     // P2-b：失败模式看板复用同一批反思行（零额外 IO）—— 只统计 completed 行，
     // pending/failed 行还没判定，计入会把「未产出」虚报成「未标注」。
     let fm_rows: Vec<Option<String>> = ref_rows

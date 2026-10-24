@@ -7621,6 +7621,11 @@
     "nextRun": {
       "stale": "Planification bloquée",
       "staleHint": "La planification est en retard (ou en attente de rattrapage) depuis plus de 24 h sans progression : la tâche a peut-être été interrompue par un arrêt ou est bloquée. Utilisez « Exécuter maintenant » pour vérifier."
+    },
+    "tracked": {
+      "rowMissing": "Enregistrement de tâche introuvable (peut avoir été purgé)",
+      "failedNoDetail": "Tâche échouée (aucune raison fournie par le backend)",
+      "resultParseFailed": "Impossible d'analyser le rapport de la tâche"
     }
   },
   "teammatePanel": {
@@ -15749,7 +15754,19 @@
       "loopGateShadow": "Boucle de réflexion en mode fantôme : calculée sans application, dernier recalcul {time}",
       "loopGateOff": "Boucle de réflexion désactivée (off), dernier recalcul {time}",
       "loopNeverRecalc": "jamais recalculate",
-      "loopSamples": "n={{n}}"
+      "loopSamples": "n={{n}}",
+      "cancelled": "Annulé : seule la partie terminée est incluse",
+      "sectionData": "Socle de données",
+      "sectionDataDesc": "Univers complet des actions A et fenêtre de cours : enregistrement par segments de codes, dernier cours de clôture, historique de fenêtre. Toutes les conclusions ci-dessous en dépendent.",
+      "sectionMatrix": "Performance des stratégies",
+      "sectionMatrixDesc": "Matrice style × horizon : taux de réussite, Sharpe/échantillon, IC et poids de boucle ; sélectionnez une cellule pour voir l'historique des signaux.",
+      "sectionSignals": "Traçage des signaux",
+      "sectionSignalsDesc": "Signaux historiques et résultats de la stratégie sélectionnée ; vide tant qu'aucune cellule n'est sélectionnée.",
+      "sectionMisses": "Audit des omissions",
+      "sectionMissesDesc": "Actions ayant dépassé le seuil sans être sélectionnées, réparties par couche d'attribution : hors pool, dans le pool sans sélection, ou écartées par style/horizon.",
+      "sectionSerenity": "Validation Serenity",
+      "sectionSerenityDesc": "Taux de réussite et validation de boucle de l'autre chaîne (candidats LLM) ; à lire séparément de la matrice de recommandation.",
+      "matrixLegend": "Lecture : lignes = style de stratégie, colonnes = horizon de détention ; chaque cellule affiche le taux de réussite (code couleur), Sharpe/échantillon, IC (avec motif si échantillon insuffisant) et le poids de boucle."
     },
     "moverRecall": {
       "title": "Contrôle de rappel sur gain de fenêtre",
@@ -15852,7 +15869,20 @@
         "fixForFuture": "Correction du critère à l'avenir",
         "rfPending": "Réflexion en file d'attente",
         "rfRunning": "Génération de la réflexion",
-        "rfFailed": "Réflexion échouée : {{detail}}"
+        "rfFailed": "Réflexion échouée : {{detail}}",
+        "asofHeading": "Rejeu de recommandation as-of",
+        "asofMissing": "Aucune preuve de rejeu as-of pour cet événement (attribution sur la couche live uniquement)",
+        "asofLayerHint": "Couche as-of : {{layer}}",
+        "asofPoolPresent": "Le vivier de candidats n'est pas vide",
+        "asofPoolEmpty": "Le vivier de candidats est vide (rejeu dégradé)",
+        "asofPoolAbsent": "Instantané du vivier absent (impossible de savoir s'il y était)",
+        "asofStylesLine": "Sélections même échéance : {{picked}} ; tronquées : {{trimmed}} ; autres échéances : {{other}}",
+        "asofDiverged": "Les verdicts live et rejeu diffèrent",
+        "asofConsistent": "Les verdicts live et rejeu concordent",
+        "asofFailureLine": "Échec du rejeu : {{detail}}",
+        "asofNone": "aucun",
+        "analysisSignal": "Décision d'analyse as-of : {{action}} (confiance {{confidence}})",
+        "analysisSignalMissing": "Décision d'analyse as-of : non enregistrée (pas encore analysé ou pas de décision par échéance)"
       },
       "runSelector": "Passage de contrôle",
       "runOption": "{{from}} ~ {{to}} · {{chain}} · événements {{events}} · manqués {{misses}}",
@@ -15877,9 +15907,22 @@
       "sweepCloseHint": "Seul le dernier jour de bourse clôturé (après 15:00) est collecté ; les demandes intraday sont refusées ; utiliser le complément d'historique pour les dates passées",
       "sweepDone": "Lignes de clôture {{written}} / univers {{total}} ; sans cotation {{missing}}",
       "backfillHistory": "Compléter l'historique de fenêtre",
-      "backfillHistoryHint": "Jusqu'à 500 codes x 90 séances par lot ; répétez jusqu'à 0 nouvelle ligne ; \"inchangés\" = moins de 90 cotations disponibles (introduction récente ou suspension longue)",
-      "backfillDone": "Historique complété : {{codes}} codes / {{rows}} nouvelles lignes / {{noNew}} inchangés / {{failed}} échecs",
-      "backfillNone": "Historique de ce lot déjà complet (aucun code à compléter)"
+      "backfillHistoryHint": "Jusqu'à 500 codes x 90 jours de bourse par lot ; cliquez répétitivement jusqu'à 0 nouvelle ligne ; « inchangés » = moins de 90 bougies journalières disponibles (jeunes valeurs, suspensions longues) ; « sans cotations » = non cotée / retirée de la cote, cliquer n'y changera rien",
+      "backfillDone": "Historique complété : {{codes}} codes / {{rows}} nouvelles lignes / {{noNew}} inchangés / {{noData}} sans cotations / {{failed}} échecs",
+      "backfillNone": "Historique de ce lot déjà complet (aucun code à compléter)",
+      "taskRunning": "Tâche en cours",
+      "taskCancel": "Annuler la tâche",
+      "taskCancelled": "Annulée (la partie terminée est conservée)",
+      "scopeTitle": "Périmètre de l'audit",
+      "readingsTitle": "Indicateurs clés",
+      "asofSummaryTitle": "Résumé du rejeu de recommandation as-of",
+      "asofSummaryMissing": "Aucun rejeu as-of pour ce tour (le lot d'analyse n'a encore couvert aucun événement)",
+      "asofSummaryLine": "Événements {{events}} ; absents du vivier {{notInPool}} ; dans le vivier sans sélection {{inPoolNotPicked}} ; tronqués {{trimmed}} ; autres échéances {{other}} ; vivier dégradé {{degraded}} ; non attribuable {{unavailable}}",
+      "reflowMergeLabel": "Fusionner la liste de réinjection dans le vivier",
+      "reflowMergeHint": "Désactivé par défaut ; fusion seulement si activé et échantillons réglés ≥ 30",
+      "historyDays": "Jours de bourse historiques (distincts) : {{days}}",
+      "tierJudgeableOfUniverse": "Jugeables sur cette échéance : {{judgeable}} / toutes actions A {{total}}",
+      "asofWeights": "Derniers poids de la boucle : {{cells}}"
     },
     "export": {
       "analystReports": "Analyst Reports",

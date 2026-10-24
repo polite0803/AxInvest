@@ -7621,6 +7621,11 @@
     "nextRun": {
       "stale": "일정 정체",
       "staleHint": "일정이 24시간 넘게 진척되지 않았습니다(기한 초과 또는 재발송 대기). 종료로 인한 중단이나 정체 가능성이 있으니 “지금 실행”으로 확인하세요."
+    },
+    "tracked": {
+      "rowMissing": "작업 기록을 찾을 수 없습니다(정리되었을 수 있음)",
+      "failedNoDetail": "작업이 실패했습니다(백엔드가 사유를 제공하지 않음)",
+      "resultParseFailed": "작업 보고서를 해석하지 못했습니다"
     }
   },
   "teammatePanel": {
@@ -15749,7 +15754,19 @@
       "loopGateShadow": "반성 루프 섀도우 모드: 계산만 하고 채점에는 미사용, 마지막 재계산 {time}",
       "loopGateOff": "반성 루프 비활성(off), 마지막 재계산 {time}",
       "loopNeverRecalc": "재계산 기록 없음",
-      "loopSamples": "n={{n}}"
+      "loopSamples": "n={{n}}",
+      "cancelled": "취소됨: 완료된 부분만 포함",
+      "sectionData": "데이터 기반",
+      "sectionDataDesc": "전체 A주 종목 목록과 시세 구간: 코드 구간 스캔으로 등록, 최신 종가 수집, 과거 이력 보충. 아래의 모든 결론은 이 커버리지를 전제로 한다.",
+      "sectionMatrix": "전략 성과",
+      "sectionMatrixDesc": "스타일 × 기간 매트릭스: 승률, Sharpe/샘플 수, IC, 루프 가중치를 표시. 셀을 선택하면 다음 섹션에서 신호 내역을 본다.",
+      "sectionSignals": "신호 추적",
+      "sectionSignalsDesc": "선택한 전략의 과거 신호와 승패. 매트릭스에서 선택하기 전에는 비어 있다.",
+      "sectionMisses": "누락 점검",
+      "sectionMissesDesc": "기간 내 상승 기준을 충족했지만 선택되지 않은 종목을 풀 밖, 풀 안 미선정, 스타일/기간 제외로 구분.",
+      "sectionSerenity": "세레니티 검증",
+      "sectionSerenityDesc": "다른 체인(LLM 후보)의 승률과 루프 검증. 위의 추천 매트릭스와 분리해서 읽는다.",
+      "matrixLegend": "읽는 법: 행 = 전략 스타일, 열 = 보유 기간. 셀에는 승률(색상), Sharpe/샘플 수, IC(샘플 부족 시 사유), 루프 가중치가 표시된다."
     },
     "moverRecall": {
       "title": "윈도우 상승률 기준 미검출 점검",
@@ -15852,7 +15869,20 @@
         "fixForFuture": "향후 판단 기준 수정",
         "rfPending": "반성 대기 중",
         "rfRunning": "반성 생성 중",
-        "rfFailed": "반성 실패: {{detail}}"
+        "rfFailed": "반성 실패: {{detail}}",
+        "asofHeading": "as-of 추천 리플레이",
+        "asofMissing": "이 이벤트에는 아직 as-of 리플레이 증거가 없습니다(live 계층으로만 귀인)",
+        "asofLayerHint": "as-of 계층: {{layer}}",
+        "asofPoolPresent": "후보 풀이 비어 있지 않습니다",
+        "asofPoolEmpty": "후보 풀이 비어 있습니다(리플레이 성능 저하)",
+        "asofPoolAbsent": "풀 스냅샷이 없습니다(풀 포함 여부 판단 불가)",
+        "asofStylesLine": "동일 티어 출표: {{picked}}; 잘림: {{trimmed}}; 다른 티어: {{other}}",
+        "asofDiverged": "실거래와 리플레이 판정이 다릅니다",
+        "asofConsistent": "실거래와 리플레이 판정이 일치합니다",
+        "asofFailureLine": "리플레이 실패: {{detail}}",
+        "asofNone": "없음",
+        "analysisSignal": "as-of 분석 판단: {{action}}(신뢰도 {{confidence}})",
+        "analysisSignalMissing": "as-of 분석 판단: 미기록(아직 분석 전이거나 해당 티어 판단 없음)"
       },
       "runSelector": "검사 회차",
       "runOption": "{{from}} ~ {{to}} · {{chain}} · 이벤트 {{events}} · 미포착 {{misses}}",
@@ -15877,9 +15907,22 @@
       "sweepCloseHint": "최근 마감된 거래일(15:00 이후)만 수집합니다. 장중 요청은 거부됩니다. 과거 날짜는 윈도우 이력 보충을 사용",
       "sweepDone": "종가 저장 {{written}} / 목록 {{total}}; 시세 없음 {{missing}}",
       "backfillHistory": "윈도우 이력 보충",
-      "backfillHistoryHint": "배치당 최대 500종목 x 90거래일; 새 행 0이 될 때까지 다시 실행; \"변경 없음\"은 사용 가능 일봉이 90개 미만(신규 상장·장기 거래 정지)",
-      "backfillDone": "이력 보충: {{codes}} 코드 / 새 행 {{rows}} / 변경 없음 {{noNew}} / 실패 {{failed}}",
-      "backfillNone": "이 배치의 이력은 이미 완료 (보충할 코드 없음)"
+      "backfillHistoryHint": "배치당 최대 500코드 × 90거래일; 신규 0행이 될 때까지 반복 클릭; \"변경 없음\" = 사용 가능한 일봉이 90개 미만(신규 상장·장기 거래정지); \"시세 없음\" = 미상장/상장폐지로 몇 번을 눌러도 같음",
+      "backfillDone": "이력 보충: {{codes}} 코드 / 새 행 {{rows}} / 변경 없음 {{noNew}} / 시세 없음 {{noData}} / 실패 {{failed}}",
+      "backfillNone": "이 배치의 이력은 이미 완료 (보충할 코드 없음)",
+      "taskRunning": "작업 실행 중",
+      "taskCancel": "작업 취소",
+      "taskCancelled": "취소되었습니다(완료된 부분은 유지됨)",
+      "scopeTitle": "점검 범위",
+      "readingsTitle": "핵심 지표",
+      "asofSummaryTitle": "as-of 추천 리플레이 요약",
+      "asofSummaryMissing": "이 라운드에는 아직 as-of 리플레이가 없습니다(보완 분석 배치가 아직 미포함)",
+      "asofSummaryLine": "이벤트 {{events}}; 풀 미포함 {{notInPool}}; 풀 포함·미출표 {{inPoolNotPicked}}; 잘림 {{trimmed}}; 다른 티어 {{other}}; 풀 성능 저하 {{degraded}}; 판정 불가 {{unavailable}}",
+      "reflowMergeLabel": "리플로 목록을 후보 풀에 병합",
+      "reflowMergeHint": "기본 꺼짐; 켜져 있고 정산 표본 ≥ 30 일 때만 병합합니다",
+      "historyDays": "과거 거래일(distinct): {{days}}일",
+      "tierJudgeableOfUniverse": "해당 티어 판정 가능: {{judgeable}} / 전체 A주 {{total}}",
+      "asofWeights": "최근 루프 가중치: {{cells}}"
     },
     "export": {
       "analystReports": "Analyst Reports",

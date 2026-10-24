@@ -60,6 +60,7 @@ pub mod style_matrix;
 pub mod types;
 
 pub use notify::{build_notification, run_recommendation_scan, RecommendationScan};
+pub use pool::{SeedItem, SeedOverrides};
 pub use strategy::{RecoContext, RecommendStrategy};
 pub use types::{
     Period, RecoDegradation, RecoPick, RecoResponse, SeedPoolOrigin, Style, TrimmedPick,
@@ -129,7 +130,6 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 // `HashSet` 在 Rust 2024 edition 已加入 prelude
 
-use crate::recommender::pool::SeedItem;
 use crate::recommender::pool::{
     build_seed_pool, clear_cached_vendors, get_cached_vendors,
     liquidity_filter_and_truncate_with_concurrency, load_enabled_vendors_from_template,
@@ -587,11 +587,13 @@ pub async fn recommend_stocks_multi(
     template_vars: &[(String, serde_json::Value)],
     preseed: Option<Vec<SeedItem>>,
     horizon_prior: Option<serde_json::Value>,
+    seed_overrides: SeedOverrides,
 ) -> Vec<(Period, Result<RecoResponse, String>)> {
     if periods.is_empty() {
         return Vec::new();
     }
-    let use_cache = preseed.is_none();
+    // 种子覆盖生效时（as-of 回放）必须绕过结果缓存 —— 缓存键只有档位，没有截止日。
+    let use_cache = preseed.is_none() && !seed_overrides.is_active();
     as_of::with_degradation_log(async {
         let deg_watermark = as_of::global_degradation_seq_watermark();
         let mut hits: std::collections::HashMap<Period, Result<RecoResponse, String>> =
@@ -606,7 +608,10 @@ pub async fn recommend_stocks_multi(
             }
         }
         if !misses.is_empty() {
-            let prepared = prepare_scan(client, template_vars, preseed, horizon_prior).await;
+            let mut prepared =
+                prepare_scan(client, template_vars, preseed, horizon_prior, seed_overrides).await;
+            // `prepare_scan` 内部按 preseed 判缓存；覆盖生效时同样必须关掉（见上方注释）。
+            prepared.use_cache = use_cache;
             let as_of_active = as_of::current_as_of().is_some();
             let slice: Vec<RecoDegradation> = if as_of_active {
                 as_of::take_global_degradations_since(deg_watermark)
@@ -737,8 +742,56 @@ async fn recommend_stocks_inner(
             return Ok(cached);
         }
     }
-    let prepared = prepare_scan(client, template_vars, preseed, horizon_prior).await;
+    let prepared =
+        prepare_scan(client, template_vars, preseed, horizon_prior, SeedOverrides::default()).await;
     scan_period(&prepared, period).await
+}
+
+/// 板块范围收口（纯函数，便于不连网络验证「as-of 不吃 live 板块偏好」）。
+///
+/// - `board=None`（auto/all）或 `is_asof=true` ⇒ **不动**池子，返回 `false`；
+/// - 否则按 `Board::classify` 同时收口主池与原始池，返回 `true`。
+///
+/// 之所以是纯函数：板块过滤是进程级静态（`set_board_filter` 只在手动四档入口写），
+/// 而回放与手动入口同进程 —— 这条泄漏只能靠把判定抽出来测，否则要连一整套取数。
+fn apply_board_scope(
+    seed: &mut Vec<SeedItem>,
+    raw_seed: &mut Vec<SeedItem>,
+    board: Option<boards::Board>,
+    is_asof: bool,
+) -> bool {
+    if is_asof {
+        if board.is_some() {
+            tracing::info!(
+                "[reco] as-of 回放忽略 live 板块范围（历史候选不得按今天面板的板块偏好收窄）"
+            );
+        }
+        return false;
+    }
+    let Some(board) = board else { return false };
+    let (seed_before, raw_before) = (seed.len(), raw_seed.len());
+    seed.retain(|(code, _, _)| boards::Board::classify(code) == Some(board));
+    raw_seed.retain(|(code, _, _)| boards::Board::classify(code) == Some(board));
+    tracing::info!(
+        "[reco] 板块过滤={}：主池 {}→{}，原始池 {}→{}",
+        board.label_zh(),
+        seed_before,
+        seed.len(),
+        raw_before,
+        raw_seed.len()
+    );
+    true
+}
+
+/// 一个种子来源的有效取值：覆盖优先，`None` 才读进程静态。
+///
+/// 单独成函数是为了让「`Some(vec![])` 不回落」这条契约能被纯函数测试钉住 ——
+/// as-of 回放的四源隔离全靠它，写在 `prepare_scan` 里就只能连网络一起测。
+fn seed_source(
+    override_seed: Option<Vec<SeedItem>>,
+    static_seed: impl FnOnce() -> Vec<SeedItem>,
+) -> Vec<SeedItem> {
+    override_seed.unwrap_or_else(static_seed)
 }
 
 /// 一次「多档」荐股的共享准备（候选池只建一次）。
@@ -747,6 +800,7 @@ async fn prepare_scan(
     template_vars: &[(String, serde_json::Value)],
     preseed: Option<Vec<SeedItem>>,
     horizon_prior: Option<serde_json::Value>,
+    seed_overrides: SeedOverrides,
 ) -> PreparedScan {
     let use_cache = preseed.is_none();
 
@@ -854,9 +908,20 @@ async fn prepare_scan(
         );
     }
 
+    // 五源的有效取值：**覆盖优先**（`Some(vec![])` = 明确置空，不回落到静态）。
+    // as-of 回放正是靠这一点把「用户标的 / 漏检直供 / 回灌 / 智选」四源置空，
+    // 只留按截止日取好的涨幅榜快照 —— 静态残留一律不得进历史池。
+    let SeedOverrides {
+        mover: mover_override,
+        miss: miss_override,
+        reflow: reflow_override,
+        user: user_override,
+        serenity: serenity_override,
+    } = seed_overrides;
+
     // 注入 Serenity 候选（由 serenity-screening workflow 发现，写入 reco_picks，
     // 并通过 set_serenity_seed 同步到全局静态）
-    let serenity_seed = get_serenity_seed();
+    let serenity_seed = seed_source(serenity_override, get_serenity_seed);
     if !serenity_seed.is_empty() {
         for item in &serenity_seed {
             if !seed.contains(item) {
@@ -870,7 +935,7 @@ async fn prepare_scan(
     // 放在用户标的**之前**合并（本函数是前插，先合并的会被后来的顶到后面）⇒ 用户标的仍排最前，
     // 涨幅榜紧随其后，热榜/行业/兜底保持原序。
     // 口径边界：快照枚举域当前是 `market_stock_universe`（681 只），不是全市场。
-    let mover_seed = get_mover_seed();
+    let mover_seed = seed_source(mover_override, get_mover_seed);
     if !mover_seed.is_empty() {
         let added = merge_extra_seed(&mut seed, &mut raw_seed, &mover_seed);
         seed_pool_origin.mover = added;
@@ -883,7 +948,7 @@ async fn prepare_scan(
 
     // 注入**漏检核查直供**（第七来源）：窗口达标但荐股没推荐，是本链最贵的反证样本。
     // 放在回灌清单之前合并 ⇒ 它的票排在「反思判断」的票之前（事实优先于判断）。
-    let miss_seed = get_miss_seed();
+    let miss_seed = seed_source(miss_override, get_miss_seed);
     if !miss_seed.is_empty() {
         let added = merge_extra_seed(&mut seed, &mut raw_seed, &miss_seed);
         seed_pool_origin.mover_miss = added;
@@ -895,7 +960,7 @@ async fn prepare_scan(
     }
 
     // 注入**回灌清单**（D-4，第六来源）：与涨幅榜分列计数；放在它之后合并 ⇒ 回灌票排在涨幅榜之前。
-    let reflow_seed = get_reflow_seed();
+    let reflow_seed = seed_source(reflow_override, get_reflow_seed);
     if !reflow_seed.is_empty() {
         let added = merge_extra_seed(&mut seed, &mut raw_seed, &reflow_seed);
         seed_pool_origin.reflow = added;
@@ -909,7 +974,7 @@ async fn prepare_scan(
     // 注入**用户自己的标的**（自选股 ∪ 本机手工加入/分析过的票）。放在流动性过滤之后：
     // 用户标的必须**无条件**在池里出现一次（否则「那一刻流动性取不到」会把它们又抹掉，
     // 面板上重新变成「看不到这只票」）；主策略是否会选中它，仍由各自的判据决定。
-    let user_seed = get_user_seed();
+    let user_seed = seed_source(user_override, get_user_seed);
     if !user_seed.is_empty() {
         let added = merge_extra_seed(&mut seed, &mut raw_seed, &user_seed);
         seed_pool_origin.user = added;
@@ -923,19 +988,14 @@ async fn prepare_scan(
     // 按用户选定的板块范围**整池收口**（auto/all 不过滤）：
     // 前端选「沪市主板」后，五源里所有非沪市主板代码都必须去掉 —— 否则开关只影响
     // 涨幅榜来源，候选仍横跨全市场（2026-10-20 用户实测）。
-    if let Some(board) = get_board_filter() {
-        let (seed_before, raw_before) = (seed.len(), raw_seed.len());
-        seed.retain(|(code, _, _)| boards::Board::classify(code) == Some(board));
-        raw_seed.retain(|(code, _, _)| boards::Board::classify(code) == Some(board));
-        tracing::info!(
-            "[reco] 板块过滤={}：主池 {}→{}，原始池 {}→{}",
-            board.label_zh(),
-            seed_before,
-            seed.len(),
-            raw_before,
-            raw_seed.len()
-        );
-    }
+    // ⚠ as-of 回放**不消费**这个进程级开关：它是「今天面板选中的板块」，属于实盘偏好；
+    //   带进历史回放会把候选池按今天的范围收窄（与 A-2 的种子隔离同一条纪律）。
+    apply_board_scope(
+        &mut seed,
+        &mut raw_seed,
+        get_board_filter(),
+        as_of::current_as_of().is_some(),
+    );
 
     // 3. 选定该 period 下的所有子策略（不再做 vendor 禁用检查——
     //    原本要求 "enabled_vendors" 至少覆盖一个 required vendor，但生产环境
@@ -1072,6 +1132,18 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
     let raw_ctx_pool = raw_seed.clone();
     let mut futures = Vec::new();
     for s in enabled.iter() {
+        // 闭环负期望硬停（2026-10-24）：权重 0 = 本格不再出票。
+        // 0.05 的旧下限仍会产出 0.05×base≈3 分的票，默认 min_confidence=0 不过滤；
+        // 只有 0 才能真正停掉一个期窗均收益 ≤-1% 的格子。
+        let style_weight = strategy_weights.get(&(s.style(), period)).copied().unwrap_or(1.0);
+        if style_weight <= 0.0 {
+            tracing::info!(
+                "[reco] {}_{} 权重=0（负期望硬停）⇒ 本档跳过该策略",
+                s.style().as_str(),
+                period.as_str()
+            );
+            continue;
+        }
         // WatchlistStrategy 用 raw_seed（不过流动性过滤），
         // 这样 K 线全部拿不到时它仍能基于 raw pool 出 picks
         let use_raw = matches!(s.style(), Style::Watchlist);
@@ -1086,8 +1158,6 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
         let period_val = period;
         let vars_for_future = vars_map.clone();
         let horizon_prior = horizon_prior.clone();
-        // 复盘→进化：该 (style, period) 当前的权重
-        let style_weight = strategy_weights.get(&(s.style(), period)).copied().unwrap_or(1.0);
         let fut = async move {
             let ctx = RecoContext {
                 client: &client_ref,
@@ -1986,5 +2056,86 @@ mod regime_tests {
         let (ret, bars) = regime_index_return(&[]);
         assert!(ret.is_nan());
         assert_eq!(bars, 0);
+    }
+}
+
+#[cfg(test)]
+mod seed_override_tests {
+    use super::*;
+
+    fn static_four() -> Vec<SeedItem> {
+        vec![
+            ("002696".to_string(), "静态票".to_string(), None),
+            ("600000".to_string(), "另一只".to_string(), None),
+        ]
+    }
+
+    /// as-of 构造器：mover 用传入值，其余四源**显式置空**。
+    #[test]
+    fn asof_replay_clears_the_four_forward_looking_sources() {
+        let overrides =
+            SeedOverrides::asof_replay(vec![("300001".to_string(), "特锐德".to_string(), None)]);
+        assert!(overrides.is_active(), "回放覆盖必须被判为生效（否则会命中 live 结果缓存）");
+        for (name, seed) in [
+            ("user", overrides.user.clone()),
+            ("miss", overrides.miss.clone()),
+            ("reflow", overrides.reflow.clone()),
+            ("serenity", overrides.serenity.clone()),
+        ] {
+            assert_eq!(seed, Some(Vec::new()), "{name} 源必须显式置空");
+        }
+        assert_eq!(overrides.mover.as_ref().map(Vec::len), Some(1));
+    }
+
+    /// 核心契约：`Some(vec![])` **不回落**静态；只有 `None` 才回落。
+    /// 这条是 as-of 四源隔离的唯一执行点（写在 prepare_scan 里就只能连网络一起测）。
+    #[test]
+    fn explicit_empty_override_does_not_fall_back_to_static() {
+        let overrides = SeedOverrides::asof_replay(Vec::new());
+        assert!(
+            seed_source(overrides.user.clone(), static_four).is_empty(),
+            "显式置空却回落到进程静态 ⇒ 用户自选会被带进历史回放"
+        );
+        assert!(seed_source(overrides.miss.clone(), static_four).is_empty());
+        assert!(seed_source(overrides.reflow.clone(), static_four).is_empty());
+        assert!(seed_source(overrides.serenity.clone(), static_four).is_empty());
+
+        // None ⇒ 回落（live 行为不变）
+        assert_eq!(seed_source(None, static_four).len(), 2);
+        assert!(!SeedOverrides::default().is_active(), "缺省覆盖不得判为生效");
+    }
+
+    /// as-of 回放不得消费 live 的板块范围（进程级静态，手动入口写过就一直留着）。
+    /// 两侧都有电：as_of=true 不动池子；as_of=false 必须收口到指定板块。
+    #[test]
+    fn asof_replay_ignores_live_board_scope() {
+        let mk = || {
+            vec![
+                ("600000".to_string(), "浦发银行".to_string(), None),
+                ("300001".to_string(), "特锐德".to_string(), None),
+            ]
+        };
+
+        let (mut seed, mut raw) = (mk(), mk());
+        assert!(
+            !apply_board_scope(&mut seed, &mut raw, Some(boards::Board::ShMain), true),
+            "as-of 回放不得执行板块过滤"
+        );
+        assert_eq!(seed.len(), 2, "as-of 回放两条候选都必须留下");
+        assert_eq!(raw.len(), 2);
+
+        let (mut live_seed, mut live_raw) = (mk(), mk());
+        assert!(
+            apply_board_scope(&mut live_seed, &mut live_raw, Some(boards::Board::ShMain), false),
+            "live 必须执行板块过滤"
+        );
+        assert_eq!(live_seed.len(), 1);
+        assert_eq!(live_seed[0].0, "600000");
+        assert_eq!(live_raw.len(), 1);
+
+        // auto/all（None）无论 live 还是回放都不动
+        let (mut s2, mut r2) = (mk(), mk());
+        assert!(!apply_board_scope(&mut s2, &mut r2, None, false));
+        assert_eq!((s2.len(), r2.len()), (2, 2));
     }
 }

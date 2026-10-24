@@ -234,6 +234,17 @@ async fn initialize_schema(conn: &DatabaseConnection) -> Result<()> {
     // 也走这里），把它挂在链上才能保证「凡是库建出来过，哨兵就在」。
     // 具体是谁、为什么缺了会静默返空，见 `crate::seed` 的模块文档。
     crate::seed::ensure_sentinels(conn).await?;
+
+    // 一次性数据搬迁（幂等）：`purpose` 列引入前写入的回放行（`as_of_date` 非空）
+    // 必须标成 `legacy_replay`，否则读侧按「缺省 live」会把历史池当成今天的票。
+    // 失败只告警：这是历史标注，不阻断启动（列本身已由上面的收敛建好）。
+    match crate::repo::reco_pool::backfill_legacy_replay_purpose(conn).await {
+        Ok((0, 0, 0)) => {},
+        Ok((p, b, a)) => info!(
+            "荐股回放用途回填：reco_picks {p} 行 / reco_pool_batches {b} 行 / reco_scan_audit {a} 行标为 legacy_replay"
+        ),
+        Err(e) => warn!("荐股回放用途回填失败（不影响启动，读取侧按 NULL=live 处理）: {e}"),
+    }
     Ok(())
 }
 

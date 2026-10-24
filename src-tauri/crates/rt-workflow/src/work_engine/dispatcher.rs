@@ -309,9 +309,15 @@ impl NodeDispatcher {
             "dispatch"
         );
         // ── 表达式模板解析 ──
-        // 对节点配置 JSON 递归扫描 {{ expression }} 模板并求值，
-        // 注入 $vars / $node / $input / $now / $env 到求值上下文。
-        // 任何环节失败均优雅降级回原始节点。
+        // 对节点配置 JSON 递归扫描 {{ ... }} 占位符并求值。**单一语法、两条查值通道**
+        // （2026-10-23 合并两套模板引擎，详见 `expression_engine::template::resolve_slot`）：
+        // - `{{ $vars.x }}` / `{{ $node["id"].y }}` / `{{ $vars.a * 2 }}` → Rhai 表达式；
+        // - `{{stock_code}}` / `{{a-catalyst.content.action}}` → 点路径查变量表
+        //   （与 agent prompt 渲染同一实现，含连字符 / 中文 key）。
+        //
+        // 这解决了此前「dispatcher 只认 `$` 前缀、而 prompt 里写的是裸路径」的冲突：
+        // 裸路径在 Rhai 里必然抛错 ⇒ 整个节点回退 ⇒ 同节点里合法的 `$vars` 也一起失效。
+        // 现在取不到值的占位符**原样保留**，不再连坐整份节点配置。
         let resolved_node = {
             let expr_ctx = ExpressionContext {
                 variables: context.variables.clone(),

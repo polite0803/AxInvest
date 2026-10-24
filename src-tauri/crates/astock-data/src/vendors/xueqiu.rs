@@ -53,14 +53,8 @@ fn to_xq_symbol(code: &str) -> String {
         return format!("{}{bare}", ex.xueqiu_tag());
     }
     // 到这里输入必然不带市场标记（上一步已把 sh/sz/bj 前缀与 .SH/.SZ/.BJ 后缀都收走），
-    // 按首位数字推断即股票的老规矩。
-    if code.starts_with('6') || code.starts_with('9') {
-        format!("SH{code}")
-    } else if code.starts_with('8') || code.starts_with('4') {
-        format!("BJ{code}")
-    } else {
-        format!("SZ{code}")
-    }
+    // 按裸码推断市场；920 新号段必须归 BJ（北交所批量换码后 9 开头不再只是沪 B）。
+    format!("{}{code}", crate::code_form::infer_market_bare(code).xueqiu_tag())
 }
 
 #[async_trait]

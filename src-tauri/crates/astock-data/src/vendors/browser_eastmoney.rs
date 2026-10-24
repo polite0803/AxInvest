@@ -82,8 +82,7 @@ fn to_em_secid(stock_code: &str) -> String {
     };
     let market = match explicit {
         Some(m) => m,
-        None if code.starts_with('6') || code.starts_with('9') => "1",
-        None => "0",
+        None => crate::code_form::infer_market_bare(code).em_market(),
     };
     format!("{market}.{code}")
 }
@@ -606,7 +605,10 @@ impl StockVendor for BrowserEastMoneyVendor {
                 Some(StockSearchResult {
                     code: code.to_string(),
                     name: name.to_string(),
-                    market: if code.starts_with('6') || code.starts_with('9') {
+                    market: if code.starts_with("920") {
+                        // 北交所 920 新号段：按「9 开头=沪」会错标 SH（雪球/东财记法均为 BJ）
+                        "BJ".to_string()
+                    } else if code.starts_with('6') || code.starts_with('9') {
                         "SH".to_string()
                     } else {
                         "SZ".to_string()

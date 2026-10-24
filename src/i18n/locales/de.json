@@ -7621,6 +7621,11 @@
     "nextRun": {
       "stale": "Zeitplan stockt",
       "staleHint": "Der Zeitplan ist seit über 24 Stunden überfällig (oder wartet auf Nachholung) ohne Fortschritt: Die Aufgabe wurde möglicherweise durch Herunterfahren unterbrochen oder hängt. Mit „Jetzt ausführen“ prüfen."
+    },
+    "tracked": {
+      "rowMissing": "Aufgabeneintrag nicht gefunden (möglicherweise bereinigt)",
+      "failedNoDetail": "Aufgabe fehlgeschlagen (kein Grund vom Backend)",
+      "resultParseFailed": "Aufgabenbericht konnte nicht gelesen werden"
     }
   },
   "teammatePanel": {
@@ -15749,7 +15754,19 @@
       "loopGateShadow": "Reflexions-Loop im Schattenmodus: nur berechnet, nicht angewendet, letzte Neuberechnung {time}",
       "loopGateOff": "Reflexions-Loop deaktiviert (off), letzte Neuberechnung {time}",
       "loopNeverRecalc": "nie neu berechnet",
-      "loopSamples": "n={{n}}"
+      "loopSamples": "n={{n}}",
+      "cancelled": "Abgebrochen: nur erledigter Teil enthalten",
+      "sectionData": "Datenbasis",
+      "sectionDataDesc": "Gesamtes A-Aktien-Universum und Kursfenster: Liste per Codesegment-Scan registrieren, letzten Schlusskurs erfassen, Fensterhistorie nachfüllen. Alle folgenden Ergebnisse hängen von dieser Abdeckung ab.",
+      "sectionMatrix": "Strategie-Performance",
+      "sectionMatrixDesc": "Stil × Horizont-Matrix: Trefferquote, Sharpe/Stichprobe, IC und Loop-Gewicht; Zelle wählen, um die Signalhistorie im nächsten Abschnitt zu sehen.",
+      "sectionSignals": "Signalverlauf",
+      "sectionSignalsDesc": "Historische Signale und Ergebnisse der gewählten Strategie; leer, solange keine Matrixzelle gewählt ist.",
+      "sectionMisses": "Verpasste Chancen",
+      "sectionMissesDesc": "Aktien, die den Schwellenwert überschritten, aber nicht ausgewählt wurden – nach Attributionsschicht getrennt: nicht im Pool, im Pool nicht gewählt oder durch Stil/Horizont ausgeschlossen.",
+      "sectionSerenity": "Serenity-Validierung",
+      "sectionSerenityDesc": "Trefferquote und Loop-Validierung der anderen Kette (LLM-Kandidaten); getrennt von der Empfehlungsmatrix lesen.",
+      "matrixLegend": "Lesart: Zeilen = Strategiestil, Spalten = Haltehorizont; jede Zelle zeigt Trefferquote (farbcodiert), Sharpe/Stichprobe, IC (mit Grund bei zu wenigen Stichproben) und Loop-Gewicht."
     },
     "moverRecall": {
       "title": "Recall-Prüfung: Kursgewinn im Fenster",
@@ -15852,7 +15869,20 @@
         "fixForFuture": "Korrektur des Kriteriums für die Zukunft",
         "rfPending": "Reflexion in Warteschlange",
         "rfRunning": "Reflexion wird erstellt",
-        "rfFailed": "Reflexion fehlgeschlagen: {{detail}}"
+        "rfFailed": "Reflexion fehlgeschlagen: {{detail}}",
+        "asofHeading": "As-of-Empfehlungs-Replay",
+        "asofMissing": "Noch keine As-of-Replay-Evidenz (nur Live-Ebene zur Zuordnung)",
+        "asofLayerHint": "As-of-Ebene: {{layer}}",
+        "asofPoolPresent": "Kandidatenpool ist nicht leer",
+        "asofPoolEmpty": "Kandidatenpool ist leer (Replay eingeschränkt)",
+        "asofPoolAbsent": "Pool-Snapshot fehlt (Pool-Zugehörigkeit nicht bestimmbar)",
+        "asofStylesLine": "Picks gleicher Stufe: {{picked}}; abgeschnitten: {{trimmed}}; andere Stufen: {{other}}",
+        "asofDiverged": "Live- und Replay-Urteil weichen voneinander ab",
+        "asofConsistent": "Live- und Replay-Urteil stimmen überein",
+        "asofFailureLine": "Replay fehlgeschlagen: {{detail}}",
+        "asofNone": "keine",
+        "analysisSignal": "As-of-Analyseentscheidung: {{action}} (Konfidenz {{confidence}})",
+        "analysisSignalMissing": "As-of-Analyseentscheidung: nicht erfasst (noch nicht analysiert oder keine Stufenentscheidung)"
       },
       "runSelector": "Prüflauf",
       "runOption": "{{from}} ~ {{to}} · {{chain}} · Ereignisse {{events}} · übersehen {{misses}}",
@@ -15877,9 +15907,22 @@
       "sweepCloseHint": "Nur der letzte abgeschlossene Handelstag (nach 15:00) wird erfasst; Intraday-Anfragen werden abgelehnt; für historische Tage die Fensterhistorie nutzen",
       "sweepDone": "Schlusszeilen {{written}} / Universum {{total}}; ohne Kurs {{missing}}",
       "backfillHistory": "Fensterhistorie nachfüllen",
-      "backfillHistoryHint": "Bis zu 500 Codes x 90 Handelstage pro Durchlauf; bis 0 neue Zeilen wiederholen; \"ohne Änderung\" = weniger als 90 verfügbare Tagesdaten (Neulistung oder langer Handelsstopp)",
-      "backfillDone": "Historie ergänzt: {{codes}} Codes / {{rows}} neue Zeilen / {{noNew}} ohne Änderung / {{failed}} fehlgeschlagen",
-      "backfillNone": "Historie dieser Charge vollständig (keine Codes offen)"
+      "backfillHistoryHint": "Max. 500 Codes x 90 Handelstage pro Durchlauf; wiederholt klicken, bis 0 neue Zeilen; \"ohne Änderung\" = weniger als 90 Tageskerzen verfügbar (junge Aktien, lange Aussetzungen); \"ohne Kurse\" = nicht gelistet / delistet, Klicken ändert nichts",
+      "backfillDone": "Historie ergänzt: {{codes}} Codes / {{rows}} neue Zeilen / {{noNew}} ohne Änderung / {{noData}} ohne Kurse / {{failed}} fehlgeschlagen",
+      "backfillNone": "Historie dieser Charge vollständig (keine Codes offen)",
+      "taskRunning": "Aufgabe läuft",
+      "taskCancel": "Aufgabe abbrechen",
+      "taskCancelled": "Abgebrochen (erledigter Teil bleibt erhalten)",
+      "scopeTitle": "Prüfumfang",
+      "readingsTitle": "Kennzahlen",
+      "asofSummaryTitle": "As-of-Empfehlungs-Replay-Zusammenfassung",
+      "asofSummaryMissing": "Für diesen Lauf gibt es noch kein As-of-Replay (Analyse-Batch hat noch kein Ereignis abgedeckt)",
+      "asofSummaryLine": "Ereignisse {{events}}; nicht im Pool {{notInPool}}; im Pool, nicht gewählt {{inPoolNotPicked}}; abgeschnitten {{trimmed}}; andere Stufen {{other}}; Pool eingeschränkt {{degraded}}; nicht zuordenbar {{unavailable}}",
+      "reflowMergeLabel": "Reflow-Liste in den Kandidatenpool übernehmen",
+      "reflowMergeHint": "Standardmäßig aus; Übernahme nur bei aktivierter Option und ≥ 30 abgerechneten Stichproben",
+      "historyDays": "Historische Handelstage (distinct): {{days}}",
+      "tierJudgeableOfUniverse": "Beurteilbar in dieser Stufe: {{judgeable}} / alle A-Aktien {{total}}",
+      "asofWeights": "Letzte Loop-Gewichte: {{cells}}"
     },
     "export": {
       "analystReports": "Analyst Reports",

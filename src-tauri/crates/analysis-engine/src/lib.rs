@@ -17,6 +17,7 @@ pub mod decision;
 // 权威定义已上移至 harness（共享契约层）。此处 re-export 保留 `crate::decision_action::*`
 // 与 `axagent_analysis_engine::decision_action::*` 两个旧路径，消费端零改动。
 pub use axagent_harness::decision_action;
+pub mod decision_quality;
 pub mod decision_tracker;
 pub mod evidence_audit;
 pub mod evidence_citation;

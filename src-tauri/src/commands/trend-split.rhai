@@ -2,17 +2,13 @@
 //
 // 归属：`serenity-screening-fast` 模板新增资产（原链无对应节点）。
 //
-// 存在理由（引擎限制，非设计偏好）—— rt-workflow 的 resolve_var_path
-// （crates/rt-workflow/src/work_engine/executors/mod.rs:113-171）按点号导航、
-// 中间段只穿透 JSON 字符串，**不支持数组下标**：`a-trend-scanner.content.trends[0]`
-// 恒 resolve 为 None（`current.get("trends[0]")` 对 Map/Array 必然失败，
-// 回落整条路径直查同样为 None）⇒ input_mapping 注入 unit。
-// 原链未暴露该缺陷是因为它的 chain_analysis 走 `a-chain-{tn}.content`（Agent 输出
-// 的字符串，脚本侧自己剥围栏解析）；而若照抄 PLAN 的 `trends[{i}]` 形态，
-// c-scorer 会拿到 unit，strategy-scorer.rhai:120 的 `ca["chain_nodes"]`
-// 对 unit 索引将抛 Rhai 运行时错误（节点失败 → 工作流 PartiallyCompleted）。
-// ⇒ 用确定性脚本（非 LLM）把 trends[] 切成 trend1..trend5 五个**恒存在**的具名键，
-// 下游一律走纯对象导航 `c-trend-split.result.trend{i}`，必然 resolve。
+// 存在理由（引擎限制的**历史**背景，2026-10-24 起已部分解除）—— rt-workflow 的
+// resolve_var_path 自 2026-10-24 起支持 `name[idx]` 数组下标（见 executors/mod.rs 的
+// get_path_segment），因此 `a-trend-scanner.content.trends[0].strategy_type` 现在能解析。
+// 本节点仍保留，原因不再是“完全取不到”，而是：
+//   ① 下游需要**恒存在**的具名槽位（缺失槽位填 {trend_name:"", chain_nodes:[]}），
+//      直接用下标会在趋势数 <5 时让部分评分节点拿到 unit（策略类型回落 bottleneck）；
+//   ② 五个槽位的路径只在此处定义一次，不在 5 个 input_mapping 里各抄一遍。
 //
 // 输入：scanner_raw — a-trend-scanner.content（合并生成腿的 tool_json 文本）
 // 输出：#{trend1..trend5}

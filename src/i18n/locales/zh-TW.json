@@ -7621,6 +7621,11 @@
     "nextRun": {
       "stale": "排程停滯",
       "staleHint": "檔期已過（或待補發）超過 24 小時未推進：任務可能被關機打斷或執行卡死，點擊「立即執行」可驗證存活。"
+    },
+    "tracked": {
+      "rowMissing": "任務記錄不存在（可能已被清理）",
+      "failedNoDetail": "任務失敗（後端未提供原因）",
+      "resultParseFailed": "任務報告解析失敗"
     }
   },
   "teammatePanel": {
@@ -15868,7 +15873,19 @@
       "loopGateShadow": "反思迴圈影子模式（shadow）：僅計算不參與評分，最近重算 {time}",
       "loopGateOff": "反思迴圈未啟用（off），最近重算 {time}",
       "loopNeverRecalc": "從未重算",
-      "loopSamples": "n={{n}}"
+      "loopSamples": "n={{n}}",
+      "cancelled": "已取消：僅含已完成部分",
+      "sectionData": "資料基礎",
+      "sectionDataDesc": "全 A 股樣本與行情視窗：段掃登記清單、補當日收盤、補視窗歷史；下面所有結論都以這裡的覆蓋為前提。",
+      "sectionMatrix": "策略表現",
+      "sectionMatrixDesc": "風格 × 檔位矩陣：讀勝率、Sharpe/樣本、IC 與閉環權重；點選任一格在下一段看訊號明細。",
+      "sectionSignals": "訊號追蹤",
+      "sectionSignalsDesc": "所選策略的逐筆歷史訊號與勝負；未點選矩陣時為空。",
+      "sectionMisses": "漏檢核查",
+      "sectionMissesDesc": "區間內漲幅達標卻未被選中的票：按歸因層拆開——沒進池、進池沒出票、還是被風格/檔位截斷。",
+      "sectionSerenity": "趨勢智選驗證",
+      "sectionSerenityDesc": "另一條鏈（LLM 候選）的勝率與閉環校驗；與上面的薦股矩陣分開讀，不混池。",
+      "matrixLegend": "讀法：列 = 策略風格，欄 = 持有檔位；格內依次為勝率（色標）、Sharpe/樣本數、IC（樣本不足時說明原因）、閉環權重。"
     },
     "moverRecall": {
       "title": "視窗漲幅達標漏檢核查",
@@ -15971,7 +15988,20 @@
         "fixForFuture": "未來判據修正",
         "rfPending": "反思排隊中",
         "rfRunning": "反思生成中",
-        "rfFailed": "反思失敗：{{detail}}"
+        "rfFailed": "反思失敗：{{detail}}",
+        "asofHeading": "as-of 薦股回放",
+        "asofMissing": "此事件尚無 as-of 回放證據（僅依 live 層歸因）",
+        "asofLayerHint": "as-of 層：{{layer}}",
+        "asofPoolPresent": "候選池非空",
+        "asofPoolEmpty": "候選池為空（回放降級）",
+        "asofPoolAbsent": "池快照缺失（無從判定是否入池）",
+        "asofStylesLine": "同檔出票：{{picked}}；被截斷：{{trimmed}}；他檔：{{other}}",
+        "asofDiverged": "實盤與回放判定不同",
+        "asofConsistent": "實盤與回放判定一致",
+        "asofFailureLine": "回放失敗：{{detail}}",
+        "asofNone": "無",
+        "analysisSignal": "as-of 分析決策：{{action}}（信心度 {{confidence}}）",
+        "analysisSignalMissing": "as-of 分析決策：未記錄（尚未補分析或該檔無逐檔決策）"
       },
       "runSelector": "核查輪次",
       "runOption": "{{from}} ~ {{to}} · {{chain}} · 事件 {{events}} · 漏檢 {{misses}}",
@@ -15996,9 +16026,22 @@
       "sweepCloseHint": "只採最近一個已收盤交易日（15:00 後）；盤中會被拒絕；歷史日期用「補視窗歷史」",
       "sweepDone": "收盤落庫 {{written}} / 清單 {{total}}；無報價 {{missing}}",
       "backfillHistory": "補視窗歷史",
-      "backfillHistoryHint": "每批最多 500 檔 × 90 個交易日；重複點擊直到新增 0 列；「無新增」= 可用日線不足 90 根（次新、長停牌）",
-      "backfillDone": "歷史補齊：{{codes}} 檔 / 新增 {{rows}} 列 / 無新增 {{noNew}} 檔 / 失敗 {{failed}}",
-      "backfillNone": "本批歷史已齊（無可補代碼）"
+      "backfillHistoryHint": "每批最多 500 檔 × 90 個交易日；重複點擊直到新增 0 列；「無新增」= 可用日線不足 90 根（次新、長停牌）；「無行情」= 未上市/已退市，點多少次都一樣",
+      "backfillDone": "歷史補齊：{{codes}} 檔 / 新增 {{rows}} 列 / 無新增 {{noNew}} 檔 / 無行情 {{noData}} 檔 / 失敗 {{failed}}",
+      "backfillNone": "本批歷史已齊（無可補代碼）",
+      "taskRunning": "任務執行中",
+      "taskCancel": "取消任務",
+      "taskCancelled": "已取消（已完成的部分已保留）",
+      "scopeTitle": "核查口徑",
+      "readingsTitle": "關鍵讀數",
+      "asofSummaryTitle": "as-of 薦股回放摘要",
+      "asofSummaryMissing": "此輪尚無 as-of 回放（補分析批次尚未涵蓋任何事件）",
+      "asofSummaryLine": "事件 {{events}}；未入池 {{notInPool}}；入池未出票 {{inPoolNotPicked}}；被截斷 {{trimmed}}；他檔 {{other}}；池降級 {{degraded}}；口徑不可用 {{unavailable}}",
+      "reflowMergeLabel": "回灌併入候選池",
+      "reflowMergeHint": "預設關；開啟且已結算樣本 ≥ 30 才會真正併入",
+      "historyDays": "歷史交易日（distinct）：{{days}} 天",
+      "tierJudgeableOfUniverse": "該檔可判 {{judgeable}} / 全 A 股 {{total}}",
+      "asofWeights": "最近閉環權重：{{cells}}"
     },
     "export": {
       "analystReports": "分析师报告",

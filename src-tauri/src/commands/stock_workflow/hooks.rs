@@ -468,15 +468,18 @@ pub(crate) async fn build_stock_analysis_variables(
             .find(|v| v.name == "horizon_prior_kappa")
             .and_then(|v| v.value.as_f64())
             .unwrap_or(DEFAULT_KAPPA);
-        let prior_map = match axagent_analysis_engine::reflection_stats::build_hitrate_stats(db)
-            .await
-        {
-            Ok(stats) => axagent_analysis_engine::horizon_prior::horizon_prior_map(&stats, kappa),
-            Err(e) => {
-                tracing::warn!("[stock_workflow] 逐档先验统计取数失败 ⇒ 四档退回共用 prior: {e}");
-                serde_json::Value::Null
-            },
-        };
+        let prior_map =
+            match axagent_analysis_engine::reflection_stats::build_hitrate_stats(db, None).await {
+                Ok(stats) => {
+                    axagent_analysis_engine::horizon_prior::horizon_prior_map(&stats, kappa)
+                },
+                Err(e) => {
+                    tracing::warn!(
+                        "[stock_workflow] 逐档先验统计取数失败 ⇒ 四档退回共用 prior: {e}"
+                    );
+                    serde_json::Value::Null
+                },
+            };
         if let Some(existing) = merged_vars.iter_mut().find(|v| v.name == "horizon_prior_json") {
             existing.value = prior_map;
         } else {
@@ -1290,6 +1293,8 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
                     analysis_template_version: None,
                     // P3：对话直执行通道恒为常规到期反思
                     source: super::reflection::REFLECTION_SOURCE_DUE,
+                    // 对话通道没有漏检事件锚点 ⇒ 无额外档可补
+                    extra_horizons: &[],
                     now_ms,
                 },
             );

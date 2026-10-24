@@ -3387,7 +3387,7 @@ impl ValuationConfig {
     /// 从**扁平参数**构造估值配置（C2 路径 Z，2026-09-12）。
     ///
     /// 背景：`ToolNodeConfig.input_mapping` 是 `HashMap<String, String>`，dispatcher 把
-    /// value 当**变量名**查（`crates/rt-workflow/src/work_engine/dispatcher.rs:463-466` 的 `context.variables.get(v)`），
+    /// value 当**变量名**查（`crates/rt-workflow/src/work_engine/dispatcher.rs:469-472` 的 `context.variables.get(v)`），
     /// **无法构造嵌套 object**。因此模板侧拼不出 `valuation_config` object，
     /// 设置面板的 `value_dcf_*` 变量只能改用扁平参数承接。
     ///

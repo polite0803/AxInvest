@@ -1965,7 +1965,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //        （`tool_node` 闭包新增 `extra` 参数支持多映射）。
     //     ③ `td_val` 的 ToolDef schema 补齐这 3 个参数声明。
     //   为什么必须扁平化：`ToolNodeConfig.input_mapping` 是 `HashMap<String, String>`，
-    //   dispatcher 把 value 当**变量名**查（`crates/rt-workflow/src/work_engine/dispatcher.rs:463-466`），**构造不出嵌套
+    //   dispatcher 把 value 当**变量名**查（`crates/rt-workflow/src/work_engine/dispatcher.rs:469-472`），**构造不出嵌套
     //   object** → `valuation_config` 路线在模板侧不可达；即便强行传标量，
     //   `from_value::<ValuationConfig>` 失败也会被 `.ok()` 吞掉，症状是「改了设置但估值
     //   毫无变化」这类最难查的静默失效。
@@ -2660,7 +2660,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         //
         // 为什么不用 `valuation_config` object：`ToolNodeConfig.input_mapping` 是
         // `HashMap<String, String>`，dispatcher 把 value 当**变量名**查
-        // （`crates/rt-workflow/src/work_engine/dispatcher.rs:463-466`），**无法构造嵌套 object** —— 而嵌套 object
+        // （`crates/rt-workflow/src/work_engine/dispatcher.rs:469-472`），**无法构造嵌套 object** —— 而嵌套 object
         // 会在 `serde_json::from_value::<ValuationConfig>` 失败后被 `.ok()` 静默吞掉，
         // 表现为「改了设置但毫无效果」。这是本函数存在的全部理由。
         for (arg_name, var_name) in extra {

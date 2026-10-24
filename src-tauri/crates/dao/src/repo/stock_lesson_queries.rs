@@ -702,6 +702,34 @@ pub async fn insert_reflection_m1_sample(
     row.insert(db).await.map(|_| ())
 }
 
+/// 反思样本的「三态命中率」`(correct, total)`，供参数变更到期评估使用。
+///
+/// 只数 `verdict ∈ {correct, partial, wrong}`：`insufficient` / 空值没有方向可判，
+/// 计进分母会稀释命中率（与 hitrate 的「样本不足算不出」同一条纪律）。
+pub async fn reflection_cohort_rate(
+    db: &DatabaseConnection,
+    min_version: Option<i32>,
+    max_version_exclusive: Option<i32>,
+    created_after_ms: Option<i64>,
+) -> Result<(i32, i32), sea_orm::DbErr> {
+    let mut q = stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::Status.like("completed%"))
+        .filter(stock_reflections::Column::Verdict.is_in(["correct", "partial", "wrong"]));
+    if let Some(v) = max_version_exclusive {
+        q = q.filter(stock_reflections::Column::TemplateVersion.lt(v));
+    }
+    if let Some(v) = min_version {
+        q = q.filter(stock_reflections::Column::TemplateVersion.gte(v));
+    }
+    if let Some(ms) = created_after_ms {
+        q = q.filter(stock_reflections::Column::CreatedAt.gte(ms));
+    }
+    let rows = q.all(db).await?;
+    let total = rows.len() as i32;
+    let correct = rows.iter().filter(|r| r.verdict.as_deref() == Some("correct")).count() as i32;
+    Ok((correct, total))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

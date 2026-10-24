@@ -6863,25 +6863,14 @@ async fn reflection_cohort_rate(
     max_version_exclusive: Option<i32>,
     created_after_ms: Option<i64>,
 ) -> Result<(i32, i32), String> {
-    use axagent_entities::stock_reflections;
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-
-    let mut q = stock_reflections::Entity::find()
-        .filter(stock_reflections::Column::Status.like("completed%"))
-        .filter(stock_reflections::Column::Verdict.is_in(["correct", "partial", "wrong"]));
-    if let Some(v) = max_version_exclusive {
-        q = q.filter(stock_reflections::Column::TemplateVersion.lt(v));
-    }
-    if let Some(v) = min_version {
-        q = q.filter(stock_reflections::Column::TemplateVersion.gte(v));
-    }
-    if let Some(ms) = created_after_ms {
-        q = q.filter(stock_reflections::Column::CreatedAt.gte(ms));
-    }
-    let rows = q.all(db).await.map_err(|e| format!("查询反思样本失败: {e}"))?;
-    let total = rows.len() as i32;
-    let correct = rows.iter().filter(|r| r.verdict.as_deref() == Some("correct")).count() as i32;
-    Ok((correct, total))
+    axagent_dao::repo::stock_lesson_queries::reflection_cohort_rate(
+        db,
+        min_version,
+        max_version_exclusive,
+        created_after_ms,
+    )
+    .await
+    .map_err(|e| format!("查询反思样本失败: {e}"))
 }
 
 /// 到期评估：只比较**变更前 / 变更后**两代样本，不自动回滚模板。
@@ -6981,9 +6970,6 @@ pub async fn rollback_param_change(
     state: State<'_, AppState>,
     change_id: String,
 ) -> Result<serde_json::Value, String> {
-    use axagent_entities::workflow_template;
-    use sea_orm::EntityTrait;
-
     let db = state.harness.db();
     let change = axagent_dao::repo::workflow_param_changes::fetch_by_id(db, &change_id)
         .await
@@ -6999,8 +6985,7 @@ pub async fn rollback_param_change(
             .to_string());
     }
 
-    let tmpl = workflow_template::Entity::find_by_id(change.template_id.clone())
-        .one(db)
+    let tmpl = axagent_dao::repo::workflow_template::get_workflow_template(db, &change.template_id)
         .await
         .map_err(|e| format!("读取模板失败: {e}"))?
         .ok_or_else(|| {

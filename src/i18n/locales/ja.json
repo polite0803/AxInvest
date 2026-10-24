@@ -15766,7 +15766,8 @@
       "sectionMissesDesc": "期間内に上昇基準を満たしたが選ばれなかった銘柄を、プール外・プール内未選出・スタイル/期間による除外に分類。",
       "sectionSerenity": "セレニティ検証",
       "sectionSerenityDesc": "もう一方のチェーン（LLM 候補）の勝率とループ検証。上のレコメンド行列とは分けて読む。",
-      "matrixLegend": "読み方：行 = 戦略スタイル、列 = 保有期間。セルには勝率（色分け）、Sharpe/サンプル数、IC（不足時は理由）、ループ重みを表示。"
+      "matrixLegend": "読み方：行 = 戦略スタイル、列 = 保有期間。セルには勝率（色分け）、Sharpe/サンプル数、IC（不足時は理由）、ループ重みを表示。",
+      "executionQuality": "実行品質 {{score}}/10"
     },
     "moverRecall": {
       "title": "ウィンドウ上昇率達成の未検出チェック",
@@ -16887,7 +16888,23 @@
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
       },
-      "generationScope": "重み口径：第 {{floor}} 世代以降（それ以前 {{preFloor}} 件・世代不明 {{unknown}} 件を除外）"
+      "generationScope": "重み口径：第 {{floor}} 世代以降（それ以前 {{preFloor}} 件・世代不明 {{unknown}} 件を除外）",
+      "paramChangesTitle": "パラメータ変更台帳",
+      "paramChangesHint": "適用すると世代を進めて記録します。観察期間後に変更前/後の2世代の命中率のみを比較し、ロールバックは提案のみ（自動では戻しません）。",
+      "paramChangesEvaluate": "期限到来分を評価",
+      "paramChangesEvaluated": "{{count}} 件を評価しました",
+      "paramChangesEmpty": "パラメータ変更はありません",
+      "paramChangesRollback": "ロールバック",
+      "paramChangesRolledBack": "ロールバックして世代を進めました",
+      "paramChangesFailed": "操作に失敗しました：{{msg}}",
+      "paramChangesRates": "変更前 {{before}} · 変更後 {{after}}",
+      "paramChangesStatus": {
+        "pending": "観察中",
+        "insufficient": "サンプル不足（期限到来）",
+        "kept": "維持",
+        "rollbackSuggested": "ロールバック推奨",
+        "rolledBack": "ロールバック済み"
+      }
     },
     "toolLabel": {
       "get_stock_quote": "实时行情",
@@ -17320,7 +17337,7 @@
       "hitrateByAction": "判断方向別",
       "hitrateByHorizon": "時間軸別",
       "hitrateGroupRate": "グループ内命中率",
-      "insufficientSamples": "サンプル不足",
+      "insufficientSamples": "成熟サンプルなし",
       "horizonAuto": "主档に従う",
       "horizonUnknown": "不明な期間",
       "colHorizon": "復盤期間",
@@ -17404,7 +17421,8 @@
       "tierUnlabelledHint": "{{count}} 件の振り返りは層が宣言されていません — テンプレートが当該項目を出力しなかっただけで、パラメータ層という意味ではありません。",
       "tierGridNote": "L2/L3 と判定された原因はパラメータ層の外です。補正グリッドから除外済みで、明細を1件ずつ処理する必要があります。",
       "tierEmpty": "構造系の未処置項目はありません（L2/L3 の振り返りなし）",
-      "failureModeOther": "その他"
+      "failureModeOther": "その他",
+      "hitrateScope": "口径：本カードは**全データベース**の成熟した振り返りを action×档で集計したものです。いま見ている1件の振り返りの判定ではありません（1件の振り返りは、その予測とその後の実際の値動きを比べるだけです）。分母 0 のグループは「成熟サンプルなし」と表示され、今回の振り返りにサンプルが足りないという意味ではありません。"
     },
     "portfolioMonitor": {
       "title": "株式分析",

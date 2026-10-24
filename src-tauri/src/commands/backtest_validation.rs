@@ -16,7 +16,7 @@
 //!     ↓
 //! 写 decision_validations 表
 //!     ↓
-//! compute_hit_rate_report() 聚合 hit_rate + 9 因子 IC
+//! compute_period_matched_report() 聚合 hit_rate + 9 因子 IC（每档只计自己的窗口）
 //!     ↓
 //! 返回 HitRateReport 给前端 / 反馈到 portfolio-mgr.rhai
 //! ```
@@ -30,8 +30,7 @@
 //! - **K 线拉取**：复用 astock_client.get_klines，自动 vendor failover + 缓存
 
 use axagent_analysis_engine::hit_rate_backtest::{
-    HitRateReport, PickValidation, build_pick_validation, compute_hit_rate_report,
-    compute_period_matched_report,
+    HitRateReport, PickValidation, build_pick_validation, compute_period_matched_report,
 };
 use axagent_analysis_engine::recommender::RECO_GENERATION_FLOOR;
 use axagent_analysis_engine::recommender::types::RecoPick;
@@ -312,7 +311,10 @@ pub(crate) async fn run_decision_backtest_inner(
     let report = if screened.is_empty() {
         empty_report()
     } else {
-        compute_hit_rate_report(&screened)
+        // 回测命令的**对外报告**同样必须按档匹配窗口；此前这里仍走
+        // `compute_hit_rate_report`（跨 2/5/28/90 池化），于是「回测页显示 50%、
+        // 验证报告显示 42%」两套口径并存 —— 2026-10-24 修。
+        compute_period_matched_report(&screened)
     };
 
     // ── 6. 智选（serenity）超额命中通道 ──
@@ -397,7 +399,16 @@ async fn fetch_window_series(
         .position(|k| k.date.as_str() > decision_date)
         .ok_or_else(|| format!("决策日 {decision_date} 之后无 K 线数据"))?;
     let valid_klines = &klines[start_idx..];
-    let n = (t_plus_n as usize).min(valid_klines.len());
+    // 修复 2026-10-24：窗口不足时旧实现 `min(t_plus_n, len)` 会把「只有 30 根」的
+    // T+90 当成 T+90 写进 decision_validations（final_return 实际是 30 日收益），
+    // 这是回测里最隐蔽的错标。宁可不写，也不把不同持有期混进同一列。
+    if valid_klines.len() < t_plus_n as usize {
+        return Err(format!(
+            "T+{t_plus_n} 窗口不足：决策日 {decision_date} 之后只有 {} 根 K 线",
+            valid_klines.len()
+        ));
+    }
+    let n = t_plus_n as usize;
     let closes: Vec<f64> = valid_klines[..n].iter().map(|k| k.close).collect();
     let highs: Vec<f64> = valid_klines[..n].iter().map(|k| k.high).collect();
     let lows: Vec<f64> = valid_klines[..n].iter().map(|k| k.low).collect();
@@ -425,6 +436,11 @@ async fn fetch_and_validate(
     let data_source = "astock_client".to_string();
     let mut validation =
         build_pick_validation(reco_pick, pick_id, t_plus_n, &closes, &highs, &lows, &data_source);
+    // build_pick_validation 只拿到 pick 的**价格**，没有生成时刻；它默认写 `now()`
+    // ⇒ 每条验证行的 generated_at 都变成「回测跑批时刻」。闭环的 `predicted_at_ms`
+    // （DQI 熔断按「出生时证据面」标注）与按日期匹配的分析回写都会因此错位。
+    // 调用方本来就有真实 generated_at，这里必须覆盖回它。
+    validation.generated_at = generated_at.to_string();
     validation.as_of_date = as_of_date.map(str::to_string);
     Ok((validation, data_source))
 }

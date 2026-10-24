@@ -723,6 +723,9 @@ export function EvolutionDriftPanel() {
           )}
       </div>
 
+      {/* 参数变更台账：每次应用换代 + 留痕 + 到期两代命中率评估 */}
+      <ParamChangeLedger />
+
       {/* P4：进化计划审批抽屉（双入口之一：本面板待办卡 + 历史查看） */}
       <EvolutionApprovalDrawer
         open={approvalOpen}
@@ -819,6 +822,167 @@ function AgreementSparkline({
           {t("stockAnalysis.evolutionDrift.agreementRange")}: {minS}-{maxS}
         </span>
       </div>
+    </div>
+  );
+}
+
+/** 一条参数变更台账（后端 `workflow_param_changes` 的 camelCase 投影）。 */
+type ParamChangeRow = {
+  id: string;
+  param: string;
+  fromVersion: number;
+  toVersion: number;
+  oldValueJson: string;
+  newValueJson: string;
+  reflectionId: string | null;
+  reason: string | null;
+  status: string;
+  reviewAfterMs: number;
+  baselineRate: number | null;
+  baselineSamples: number | null;
+  afterRate: number | null;
+  afterSamples: number | null;
+  verdictNote: string | null;
+  rollbackVersion: number | null;
+  appliedAtMs: number;
+};
+
+/**
+ * 参数变更台账：应用即换代（旧版本先快照），到期后只比较**变更前/后两代**样本。
+ * 「样本不足」在这里只表示评估窗口内样本不够（两侧各需 10 条），不是对反思本身的判定。
+ */
+function ParamChangeLedger() {
+  const { message } = App.useApp();
+  const { t } = useTranslation();
+  const [rows, setRows] = useState<ParamChangeRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [evaluating, setEvaluating] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await invoke<ParamChangeRow[]>("list_param_changes", { limit: 30 });
+      setRows(Array.isArray(r) ? r : []);
+    } catch {
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const evaluate = useCallback(async () => {
+    setEvaluating(true);
+    try {
+      const r = await invoke<{ evaluated: number }>("evaluate_param_changes");
+      message.success(
+        t("stockAnalysis.evolutionDrift.paramChangesEvaluated", { count: r.evaluated }),
+      );
+      await load();
+    } catch (e) {
+      message.error(
+        t("stockAnalysis.evolutionDrift.paramChangesFailed", { msg: String(e) }),
+      );
+    } finally {
+      setEvaluating(false);
+    }
+  }, [load, message, t]);
+
+  const rollback = useCallback(
+    async (id: string) => {
+      try {
+        await invoke("rollback_param_change", { changeId: id });
+        message.success(t("stockAnalysis.evolutionDrift.paramChangesRolledBack"));
+        await load();
+      } catch (e) {
+        message.error(
+          t("stockAnalysis.evolutionDrift.paramChangesFailed", { msg: String(e) }),
+        );
+      }
+    },
+    [load, message, t],
+  );
+
+  const statusMeta = (status: string): { color: string; label: string } => {
+    switch (status) {
+      case "pending":
+        return { color: "default", label: t("stockAnalysis.evolutionDrift.paramChangesStatus.pending") };
+      case "insufficient":
+        return {
+          color: "gold",
+          label: t("stockAnalysis.evolutionDrift.paramChangesStatus.insufficient"),
+        };
+      case "kept":
+        return { color: "green", label: t("stockAnalysis.evolutionDrift.paramChangesStatus.kept") };
+      case "rollback_suggested":
+        return {
+          color: "orange",
+          label: t("stockAnalysis.evolutionDrift.paramChangesStatus.rollbackSuggested"),
+        };
+      case "rolled_back":
+        return {
+          color: "red",
+          label: t("stockAnalysis.evolutionDrift.paramChangesStatus.rolledBack"),
+        };
+      default:
+        return { color: "default", label: status };
+    }
+  };
+
+  const rateText = (correct: number | null, samples: number | null): string =>
+    correct == null || samples == null || samples === 0
+      ? "—"
+      : `${(correct * 100).toFixed(1)}% (n=${samples})`;
+
+  return (
+    <div style={{ marginTop: 24 }} data-testid="param-change-ledger">
+      <Space style={{ marginBottom: 4 }}>
+        <h4 style={{ margin: 0 }}>{t("stockAnalysis.evolutionDrift.paramChangesTitle")}</h4>
+        <Button size="small" icon={<ReloadOutlined />} loading={evaluating} onClick={() => void evaluate()}>
+          {t("stockAnalysis.evolutionDrift.paramChangesEvaluate")}
+        </Button>
+      </Space>
+      <div style={{ fontSize: 12, color: "var(--muted, #8c8c8c)", margin: "4px 0 8px" }}>
+        {t("stockAnalysis.evolutionDrift.paramChangesHint")}
+      </div>
+      {loading
+        ? <Spin size="small" />
+        : rows.length === 0
+        ? <Empty description={t("stockAnalysis.evolutionDrift.paramChangesEmpty")} />
+        : (
+          <ul style={{ paddingLeft: 16, margin: 0 }}>
+            {rows.map((r) => {
+              const meta = statusMeta(r.status);
+              return (
+                <li key={r.id} style={{ marginBottom: 10, fontSize: 12 }}>
+                  <Tag color={meta.color}>{meta.label}</Tag>
+                  <strong>{r.param}</strong>
+                  <span style={{ marginLeft: 6, color: "var(--muted, #8c8c8c)" }}>
+                    v{r.fromVersion}→v{r.toVersion}
+                  </span>
+                  <span style={{ marginLeft: 8 }}>
+                    {r.oldValueJson} → {r.newValueJson}
+                  </span>
+                  <div style={{ color: "var(--muted, #8c8c8c)", marginTop: 2 }}>
+                    {t("stockAnalysis.evolutionDrift.paramChangesRates", {
+                      before: rateText(r.baselineRate, r.baselineSamples),
+                      after: rateText(r.afterRate, r.afterSamples),
+                    })}
+                    {r.verdictNote ? ` · ${r.verdictNote}` : ""}
+                  </div>
+                  {r.status !== "rolled_back" && (
+                    <Button size="small" type="link" onClick={() => void rollback(r.id)}>
+                      {t("stockAnalysis.evolutionDrift.paramChangesRollback")}
+                    </Button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
     </div>
   );
 }

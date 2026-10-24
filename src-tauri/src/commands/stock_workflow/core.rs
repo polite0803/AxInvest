@@ -1266,6 +1266,7 @@ pub async fn run_stock_workflow_inner(
                         // 触发自适应闭环（降级模式，异步执行）
                         {
                             let engine = Arc::clone(&adaptive_engine_for_spawn);
+                            let db_for_adaptive = db.clone();
                             let stock_code_clone = stock_code.clone();
                             let aid_clone = aid.clone();
                             let wf_id_clone = wf_id.clone();
@@ -1273,6 +1274,7 @@ pub async fn run_stock_workflow_inner(
                             tokio::spawn(async move {
                                 trigger_adaptive_cycle(
                                     &engine,
+                                    &db_for_adaptive,
                                     &stock_code_clone,
                                     &aid_clone,
                                     &wf_id_clone,
@@ -1885,6 +1887,7 @@ pub async fn run_stock_workflow_inner(
                                 .unwrap_or(0.7) as f32;
                             let rationale_text = mem_reasoning.as_deref().unwrap_or("").to_string();
                             let engine = Arc::clone(&adaptive_engine_for_spawn);
+                            let db_for_adaptive = db.clone();
                             let stock_code_clone = stock_code.clone();
                             let aid_clone = aid.clone();
                             let wf_id_clone = wf_id.clone();
@@ -1892,6 +1895,7 @@ pub async fn run_stock_workflow_inner(
                             tokio::spawn(async move {
                                 trigger_adaptive_cycle(
                                     &engine,
+                                    &db_for_adaptive,
                                     &stock_code_clone,
                                     &aid_clone,
                                     &wf_id_clone,
@@ -3193,6 +3197,7 @@ fn build_outcome_from_workflow(
 /// 不阻塞主流程，失败仅记录日志
 pub(crate) async fn trigger_adaptive_cycle(
     adaptive_engine: &Arc<axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine>,
+    db: &axagent_harness::DatabaseConnection,
     stock_code: &str,
     analysis_id: &str,
     execution_id: &str,
@@ -3217,6 +3222,42 @@ pub(crate) async fn trigger_adaptive_cycle(
 
     // 异步执行自适应闭环，不阻塞主流程
     let result = engine.run_adaptive_cycle(&outcome).await;
+
+    // 执行层反思报告落库（与市场结果反思分表，用 analysis_id 关联）。
+    // 失败只 warn：闭环本身已完成，少一条执行质量记录不该让分析回滚。
+    if let Some(report) = result.reflection_report.as_ref() {
+        let json_or = |s: Result<String, serde_json::Error>, fallback: &str| {
+            s.unwrap_or_else(|e| {
+                tracing::warn!("[adaptive] 执行反思字段序列化失败，落 {fallback}: {e}");
+                fallback.to_string()
+            })
+        };
+        let row = axagent_dao::repo::stock_execution_reflections::NewExecutionReflection {
+            analysis_id: Some(analysis_id.to_string()),
+            stock_code: stock_code.to_string(),
+            execution_id: if report.execution_id.is_empty() {
+                execution_id.to_string()
+            } else {
+                report.execution_id.clone()
+            },
+            workflow_id: report.workflow_id.clone(),
+            overall_score: i32::from(report.overall_score),
+            dimension_scores_json: json_or(serde_json::to_string(&report.dimension_scores), "null"),
+            bottleneck_nodes_json: json_or(serde_json::to_string(&report.bottleneck_nodes), "[]"),
+            error_patterns_json: json_or(serde_json::to_string(&report.error_patterns), "[]"),
+            reusable_patterns_json: json_or(serde_json::to_string(&report.reusable_patterns), "[]"),
+            improvement_suggestions_json: json_or(
+                serde_json::to_string(&report.improvement_suggestions),
+                "[]",
+            ),
+            should_trigger_evolution: report.should_trigger_evolution,
+            evolution_trigger_reason: report.evolution_trigger_reason.clone(),
+            created_at_ms: chrono::Utc::now().timestamp_millis(),
+        };
+        if let Err(e) = axagent_dao::repo::stock_execution_reflections::insert(db, &row).await {
+            tracing::warn!("[adaptive] 执行层反思落库失败（分析不受影响）: {e}");
+        }
+    }
 
     // 根据自适应状态记录日志
     let status_str = format!("{:?}", result.adaptation_status);

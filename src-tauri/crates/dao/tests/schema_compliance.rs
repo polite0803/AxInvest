@@ -1562,6 +1562,51 @@ const SCHEMA: &[(&str, &[(&str, &str)])] = &[
             ("created_at", "BIGINT"),
         ],
     ),
+    (
+        // 2026-10-24：反思参数应用台账（换代 + 旧/新值 + 来源反思 + 到期两代命中率）。
+        "workflow_param_changes",
+        &[
+            ("id", "TEXT"),
+            ("template_id", "TEXT"),
+            ("param", "TEXT"),
+            ("from_version", "INTEGER"),
+            ("to_version", "INTEGER"),
+            ("old_value_json", "TEXT"),
+            ("new_value_json", "TEXT"),
+            ("reflection_id", "TEXT"),
+            ("reason", "TEXT"),
+            ("status", "TEXT"),
+            ("review_after_ms", "BIGINT"),
+            ("baseline_rate", "REAL"),
+            ("baseline_samples", "INTEGER"),
+            ("after_rate", "REAL"),
+            ("after_samples", "INTEGER"),
+            ("verdict_note", "TEXT"),
+            ("rollback_version", "INTEGER"),
+            ("applied_at_ms", "BIGINT"),
+            ("evaluated_at_ms", "BIGINT"),
+        ],
+    ),
+    (
+        // 2026-10-24：执行层反思（工作流质量），与市场结果反思分表、用 analysis_id 关联。
+        "stock_execution_reflections",
+        &[
+            ("id", "TEXT"),
+            ("analysis_id", "TEXT"),
+            ("stock_code", "TEXT"),
+            ("execution_id", "TEXT"),
+            ("workflow_id", "TEXT"),
+            ("overall_score", "INTEGER"),
+            ("dimension_scores_json", "TEXT"),
+            ("bottleneck_nodes_json", "TEXT"),
+            ("error_patterns_json", "TEXT"),
+            ("reusable_patterns_json", "TEXT"),
+            ("improvement_suggestions_json", "TEXT"),
+            ("should_trigger_evolution", "BOOLEAN"),
+            ("evolution_trigger_reason", "TEXT"),
+            ("created_at_ms", "BIGINT"),
+        ],
+    ),
 ];
 
 #[tokio::test]

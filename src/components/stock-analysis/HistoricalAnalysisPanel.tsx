@@ -30,6 +30,11 @@ interface AnalysisRecord {
   decisionPositionPct: number | null;
   /** 决策持仓状态轴（后端直返，v228）；null = 记录早于 v228，非 EMPTY */
   decisionPositionState: string | null;
+  /**
+   * 执行层反思质量分（1-10，工作流口径）；null = 尚无执行层反思。
+   * 与决策动作（市场结果）分栏，不换算成胜率、不参与任何阈值比较。
+   */
+  executionQuality?: number | null;
   /** 完整决策 JSON（含 confidence 等，部分旧数据可能为 null） */
   decisionJson: string | null;
   /** 列表场景不返回，详情页通过 get_stock_analysis 单独获取 */
@@ -656,6 +661,21 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
                             </div>
                           );
                         })()}
+                        {
+                          /* 执行层质量（工作流口径）：与决策/市场结果分栏，不参与换算。
+                            没有执行层反思的记录不渲染（缺席不伪造 0 分）。 */
+                        }
+                        {r.executionQuality != null && (
+                          <Tag
+                            color="purple"
+                            className="m-0"
+                            data-testid={`analysis-exec-quality-${r.id}`}
+                          >
+                            {t("stockAnalysis.backtest.executionQuality", {
+                              score: r.executionQuality,
+                            })}
+                          </Tag>
+                        )}
                       </div>
                     </List.Item>
                   );

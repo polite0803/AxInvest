@@ -947,10 +947,22 @@ pub async fn run_reflection_workflow(
     // 6. 处理结果
     match result {
         Ok(wf) => {
-            // 通过 extract_agent_output 管线提取规范化 JSON（兼容多模型输出格式）
-            let reflection_raw =
-                wf.results.get("reflection").cloned().unwrap_or(serde_json::Value::Null);
+            // 通过 extract_agent_output 管线提取规范化 JSON（兼容多模型输出格式）。
+            // ⚠ 优先取 **reflection-validator** 的输出，而不是 raw `reflection`：
+            //   DAG 是 reflection-agent → reflection-validator → store-ref，validator 负责
+            //   拆 `{"report":"..."}`、修正枚举/截断字段；旧实现读 raw，等于把校验层
+            //   白做了（222/230 条 completed 反思 verdict 缺失即由此暴露）。
+            let reflection_raw = wf
+                .results
+                .get("reflection-validated")
+                .or_else(|| wf.results.get("reflection"))
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
             let reflection_json = extract_agent_output(reflection_raw).await;
+            // 没有 verdict 就不是一次有效反思：不得盖 completed（旧实现把
+            // 「节点 completed 但输出为空」也写成 completed，导致 222 条 completed/verdict NULL）。
+            let has_verdict =
+                deep_get_reflection_str(&reflection_json, "verdict").is_some_and(|v| !v.is_empty());
             // 兜底与字段提取统一走 `deep_get_reflection_*`：它们自带
             // 「顶层 / 一层嵌套 / 双重编码字符串」三形态容错。因此原先此处手写的
             // 「as_object() 失败则二次 parse」与「reflection 子对象 lookup」两段特殊处理
@@ -1008,7 +1020,13 @@ pub async fn run_reflection_workflow(
             use axagent_rt_workflow::workflow_engine::NodeStatus;
             let reflection_node_state = wf.node_states.get("reflection-agent");
             let status_text = match reflection_node_state {
-                Some(s) if s.status == NodeStatus::Completed => "completed".to_string(),
+                Some(s) if s.status == NodeStatus::Completed => {
+                    if has_verdict {
+                        "completed".to_string()
+                    } else {
+                        "failed: REFLECTION_OUTPUT_INCOMPLETE".to_string()
+                    }
+                },
                 Some(s) if s.status == NodeStatus::Failed => {
                     let err = s.error.clone().unwrap_or_else(|| "未知错误".to_string());
                     format!("failed: reflection-agent: {err}")
@@ -1016,7 +1034,13 @@ pub async fn run_reflection_workflow(
                 Some(s) if s.status == NodeStatus::Skipped => {
                     "skipped: reflection-agent".to_string()
                 },
-                _ => "completed: reflection-agent 未在 node_states 中".to_string(),
+                _ => {
+                    if has_verdict {
+                        "completed".to_string()
+                    } else {
+                        "failed: REFLECTION_OUTPUT_MISSING".to_string()
+                    }
+                },
             };
 
             let bb_text = serde_json::to_string(&wf.results).unwrap_or_default();
@@ -1141,6 +1165,13 @@ pub async fn run_reflection_workflow(
                 // （下方写入时取自同一个 raw_return）却有真值（-23.90% ~ +5.32%）
                 // —— 这组「同源不同落库」就是缺口存在的直接证据。
                 // 回归判据：本次反思后，三列应与 strategy_performance 对应行一致。
+                // 2026-10-24：本列此前只在**手动 INSERT** 路径写入；pending→running→completed
+                // 的 UPDATE 路径从未回写 ⇒ 生产 228/230 条 completed 反思 actual_outcome=''。
+                // 这是「反思拿不到实际走势」的直接原因，必须与状态同一次 UPDATE 落库。
+                .col_expr(
+                    stock_reflections::Column::ActualOutcome,
+                    Expr::value(actual_outcome),
+                )
                 .col_expr(stock_reflections::Column::RawReturn, Expr::value(raw_return))
                 .col_expr(stock_reflections::Column::AlphaReturn, Expr::value(alpha_return))
                 .col_expr(stock_reflections::Column::HoldingDays, Expr::value(holding_days))
@@ -1865,6 +1896,10 @@ pub async fn run_batch_reflection(
                 continue;
             },
             Ok(ReflectionOutcome::SkippedImmature) => {
+                skipped_immature += 1;
+                continue;
+            },
+            Ok(ReflectionOutcome::SkippedNoMarketData) => {
                 skipped_immature += 1;
                 continue;
             },
@@ -2760,6 +2795,8 @@ enum ReflectionOutcome {
     /// 行情已有一根以上，但还没走到持有期终点。到期任务不消费这种行（保持 pending
     /// 等下一轮），否则终评名额会被一次「期中观察」永久用掉。
     SkippedImmature,
+    /// 行情快照不可用且没有人工填写的实际结果 ⇒ 不盲反思，保持 pending 等数据恢复。
+    SkippedNoMarketData,
     Completed,
 }
 
@@ -2886,6 +2923,16 @@ async fn perform_single_reflection(
         .as_ref()
         .map(|s| s.render_outcome_short())
         .unwrap_or_else(|| pending_row.actual_outcome.clone());
+    // 行情失败且无人工实际结果 ⇒ 不盲反思：旧实现会带着空 actual_outcome 跑完并落
+    // completed，LLM 只能编「看起来合理」的复盘。保持 pending，等数据源恢复/人工补录。
+    if primary_snap_opt.is_none() && actual_outcome.trim().is_empty() {
+        tracing::warn!(
+            "[{log_prefix}] {} ({}) {primary_horizon} 行情不可用且无人工 actual_outcome ⇒ 不盲反思，保持 pending",
+            pending_row.id,
+            pending_row.stock_code
+        );
+        return Ok(ReflectionOutcome::SkippedNoMarketData);
+    }
     let today_str = today_nd.format("%Y-%m-%d").to_string();
 
     run_reflection_workflow(
@@ -3186,6 +3233,10 @@ pub async fn run_batch_reflection_inner(
                 continue;
             },
             Ok(ReflectionOutcome::SkippedImmature) => {
+                skipped_immature += 1;
+                continue;
+            },
+            Ok(ReflectionOutcome::SkippedNoMarketData) => {
                 skipped_immature += 1;
                 continue;
             },
@@ -5829,5 +5880,68 @@ mod stamp_tier_tests {
         assert!(may_stamp_event(true, false), "事件档行就是本行，必然存在");
         assert!(!may_stamp_event(false, true), "非事件档不得给事件盖章");
         assert!(may_stamp_event(false, false), "存量分析没有事件档行 ⇒ 保留旧行为");
+    }
+}
+
+#[cfg(test)]
+mod reflection_output_shape_tests {
+    use super::*;
+
+    /// 生产实测最常见形态：`{"report":"{\"verdict\":\"wrong\"}"}`。
+    /// 旧解析链在 validator 里不拆 report，导致 verdict 取不到并默认成 partial；
+    /// 这里锁住「拆一层 report 后 verdict/lesson 可读」。
+    #[test]
+    fn report_wrapper_is_unwrapped_for_verdict_and_lesson() {
+        let v = serde_json::json!({
+            "report": "{\"verdict\":\"wrong\",\"lesson_summary\":\"追高\"}"
+        });
+        assert_eq!(deep_get_reflection_str(&v, "verdict").as_deref(), Some("wrong"));
+        assert_eq!(deep_get_reflection_str(&v, "lesson_summary").as_deref(), Some("追高"));
+    }
+
+    #[test]
+    fn direct_and_one_level_nested_shapes_still_work() {
+        let direct = serde_json::json!({"verdict": "correct", "lesson_summary": "OK"});
+        assert_eq!(deep_get_reflection_str(&direct, "verdict").as_deref(), Some("correct"));
+        let nested = serde_json::json!({"reflection": {"verdict": "partial"}});
+        assert_eq!(deep_get_reflection_str(&nested, "verdict").as_deref(), Some("partial"));
+    }
+
+    /// 校验脚本必须在生产同配置下编译，并且能从 `{"report":"..."}` 解出 verdict/status。
+    /// 旧脚本不拆 report ⇒ verdict 缺失时默认 partial ⇒ 「反思没跑」被记成一次有效反思。
+    #[test]
+    fn reflection_validator_unwraps_report_and_marks_missing_verdict_incomplete() {
+        use axagent_rt_workflow::expression_engine::rhai_eval::value_to_dynamic;
+        let engine = crate::commands::stock_workflow::rhai_registry::build_stock_rhai_engine(
+            crate::commands::stock_workflow::rhai_registry::RhaiSandboxLimits::PORTFOLIO,
+        );
+        let code = include_str!("../reflection_validator.rhai");
+        let ast =
+            axagent_harness::get_or_compile_ast("reflection-validator-syntax-gate", code, &engine)
+                .expect("reflection_validator.rhai 必须在生产同配置下编译通过");
+
+        // ① report 包装 + verdict → status=ok，verdict 原样保留
+        let mut scope = rhai::Scope::new();
+        scope.push(
+            "reflection_input",
+            value_to_dynamic(&serde_json::json!({
+                "report": "{\"verdict\":\"wrong\",\"lesson_summary\":\"追高\"}"
+            })),
+        );
+        let ok: rhai::Map =
+            engine.call_fn(&mut scope, &ast, "main", ()).expect("validator main 必须可执行");
+        assert_eq!(ok["status"].clone().into_string().unwrap(), "ok");
+        assert_eq!(ok["verdict"].clone().into_string().unwrap(), "wrong");
+
+        // ② 缺 verdict → status=incomplete，且不得再默认成 partial
+        let mut scope = rhai::Scope::new();
+        scope.push(
+            "reflection_input",
+            value_to_dynamic(&serde_json::json!({"report": "{\"lesson_summary\":\"空\"}"})),
+        );
+        let bad: rhai::Map =
+            engine.call_fn(&mut scope, &ast, "main", ()).expect("validator main 必须可执行");
+        assert_eq!(bad["status"].clone().into_string().unwrap(), "incomplete");
+        assert_eq!(bad["verdict"].clone().into_string().unwrap(), "");
     }
 }

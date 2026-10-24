@@ -15766,7 +15766,8 @@
       "sectionMissesDesc": "الأسهم التي تجاوزت العتبة دون اختيار، مقسمة حسب طبقة الإسناد: خارج المجموعة، داخل المجموعة دون اختيار، أو مستبعدة بالنمط/الأفق.",
       "sectionSerenity": "التحقق من Serenity",
       "sectionSerenityDesc": "نسبة النجاح والتحقق من الحلقة للسلسلة الأخرى (مرشحات LLM)؛ تُقرأ منفصلة عن مصفوفة التوصيات.",
-      "matrixLegend": "طريقة القراءة: الصفوف = نمط الاستراتيجية، الأعمدة = أفق الاحتفاظ؛ تعرض كل خلية نسبة النجاح (بلون)، Sharpe/العينة، IC (مع السبب عند نقص العينات) ووزن الحلقة."
+      "matrixLegend": "طريقة القراءة: الصفوف = نمط الاستراتيجية، الأعمدة = أفق الاحتفاظ؛ تعرض كل خلية نسبة النجاح (بلون)، Sharpe/العينة، IC (مع السبب عند نقص العينات) ووزن الحلقة.",
+      "executionQuality": "جودة التنفيذ {{score}}/10"
     },
     "moverRecall": {
       "title": "فحص تفويت مكاسب النافذة",
@@ -16887,7 +16888,23 @@
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
       },
-      "generationScope": "نطاق الأوزان: من الجيل {{floor}} (تم استبعاد {{preFloor}} من أجيال أقدم و{{unknown}} مجهولة)"
+      "generationScope": "نطاق الأوزان: من الجيل {{floor}} (تم استبعاد {{preFloor}} من أجيال أقدم و{{unknown}} مجهولة)",
+      "paramChangesTitle": "سجل تغييرات المعاملات",
+      "paramChangesHint": "التطبيق يرفع إصدار القالب ويسجل التغيير. بعد فترة المراقبة تتم مقارنة جيلَي ما قبل/بعد فقط؛ التراجع يُقترح ولا يُنفَّذ تلقائيًا.",
+      "paramChangesEvaluate": "تقييم التغييرات المستحقة",
+      "paramChangesEvaluated": "تم تقييم {{count}} تغييرًا",
+      "paramChangesEmpty": "لا توجد تغييرات معاملات",
+      "paramChangesRollback": "تراجع",
+      "paramChangesRolledBack": "تم التراجع ورفع الإصدار",
+      "paramChangesFailed": "فشل الإجراء: {{msg}}",
+      "paramChangesRates": "قبل {{before}} · بعد {{after}}",
+      "paramChangesStatus": {
+        "pending": "قيد المراقبة",
+        "insufficient": "عينات غير كافية (مستحق)",
+        "kept": "مُبقى",
+        "rollbackSuggested": "يُقترح التراجع",
+        "rolledBack": "تم التراجع"
+      }
     },
     "toolLabel": {
       "get_stock_quote": "Stock Quote",
@@ -17320,7 +17337,7 @@
       "hitrateByAction": "حسب القرار",
       "hitrateByHorizon": "حسب الأفق",
       "hitrateGroupRate": "نسبة إصابة المجموعة",
-      "insufficientSamples": "عينات غير كافية",
+      "insufficientSamples": "لا توجد عينات ناضجة بعد",
       "horizonAuto": "حسب الفئة الرئيسية",
       "horizonUnknown": "أفق غير معروف",
       "colHorizon": "أفق المراجعة",
@@ -17404,7 +17421,8 @@
       "tierUnlabelledHint": "{{count}} مراجعة بلا مستوى معلن — الحقل لم يُنتَج، وهذا لا يعني أنها من مستوى المعلمات.",
       "tierGridNote": "أسباب L2/L3 ليست في طبقة المعلمات: هي مستبعدة من شبكة المعايرة وتحتاج معالجة بندًا بندًا.",
       "tierEmpty": "لا بنود هيكلية معلّقة (لا مراجعة حُكمت L2/L3)",
-      "failureModeOther": "أخرى"
+      "failureModeOther": "أخرى",
+      "hitrateScope": "النطاق: تجمع هذه البطاقة التأملات التاريخية الناضجة **لكل قاعدة البيانات** حسب الإجراء × المدى. وهي ليست حكماً على التأمل المعروض — فالتأمل الواحد يقارن ذلك التوقع بحركة السعر اللاحقة فقط. المجموعات ذات المقام صفر تعرض «لا توجد عينات ناضجة بعد»."
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

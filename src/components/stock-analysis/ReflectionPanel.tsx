@@ -831,6 +831,17 @@ export function ReflectionPanel() {
         size="small"
         style={{ marginBottom: 16 }}
       >
+        {
+          /* 口径声明：这是全库聚合率，不是「本次反思样本够不够」的判定。
+            单条反思只比对本次预测与之后实际走势，不需要样本量。 */
+        }
+        <Text
+          type="secondary"
+          style={{ display: "block", marginBottom: 8, fontSize: 12 }}
+          data-testid="reflection-hitrate-scope"
+        >
+          {t("stockAnalysis.reflection.hitrateScope")}
+        </Text>
         <Descriptions size="small" bordered column={4}>
           <Descriptions.Item label={t("stockAnalysis.reflection.hitrateSamples")}>
             {hitrate?.totalSamples ?? 0}
@@ -1464,7 +1475,13 @@ export function ExpandedReflectionRow(
     setApplying(true);
     try {
       await invoke("apply_param_suggestions", {
-        updates: selected.map((s) => ({ param: s.param, value: s.suggested_value })),
+        updates: selected.map((s) => ({
+          param: s.param,
+          value: s.suggested_value,
+          // 台账要能回答「依据哪条反思改的」：来源行 id + 模型的理由
+          reflectionId: row.id,
+          reason: s.reason,
+        })),
       });
       message.success(t("stockAnalysis.reflection.applySuccess"));
       setCheckedParams([]);

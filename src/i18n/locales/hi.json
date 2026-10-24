@@ -15766,7 +15766,8 @@
       "sectionMissesDesc": "वे शेयर जो सीमा पार कर गए पर चुने नहीं गए — एट्रिब्यूशन परत के अनुसार: पूल में नहीं, पूल में पर चयनित नहीं, या स्टाइल/अवधि से कटे।",
       "sectionSerenity": "Serenity सत्यापन",
       "sectionSerenityDesc": "दूसरी श्रृंखला (LLM उम्मीदवार) की जीत दर और लूप सत्यापन; सिफ़ारिश मैट्रिक्स से अलग पढ़ें।",
-      "matrixLegend": "पढ़ने का तरीका: पंक्तियाँ = रणनीति स्टाइल, स्तंभ = होल्डिंग अवधि; प्रत्येक सेल में जीत दर (रंग), Sharpe/नमूना, IC (नमूने कम होने पर कारण) और लूप भार।"
+      "matrixLegend": "पढ़ने का तरीका: पंक्तियाँ = रणनीति स्टाइल, स्तंभ = होल्डिंग अवधि; प्रत्येक सेल में जीत दर (रंग), Sharpe/नमूना, IC (नमूने कम होने पर कारण) और लूप भार।",
+      "executionQuality": "निष्पादन गुणवत्ता {{score}}/10"
     },
     "moverRecall": {
       "title": "विंडो लाभ मानक हेतु छूट-जाँच",
@@ -16887,7 +16888,23 @@
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
       },
-      "generationScope": "वज़न दायरा: जनरेशन {{floor}} से (पुराने {{preFloor}} और अज्ञात {{unknown}} हटाए गए)"
+      "generationScope": "वज़न दायरा: जनरेशन {{floor}} से (पुराने {{preFloor}} और अज्ञात {{unknown}} हटाए गए)",
+      "paramChangesTitle": "पैरामीटर परिवर्तन बही",
+      "paramChangesHint": "लागू करने पर टेम्पलेट संस्करण बढ़ता है और रिकॉर्ड रहता है। अवलोकन अवधि के बाद केवल पहले/बाद की दो पीढ़ियों की हिट दर तुलना होती है; रोलबैक केवल सुझाया जाता है, स्वतः नहीं।",
+      "paramChangesEvaluate": "देय परिवर्तनों का मूल्यांकन",
+      "paramChangesEvaluated": "{{count}} परिवर्तन मूल्यांकित",
+      "paramChangesEmpty": "कोई पैरामीटर परिवर्तन नहीं",
+      "paramChangesRollback": "रोलबैक",
+      "paramChangesRolledBack": "रोलबैक और संस्करण बढ़ा",
+      "paramChangesFailed": "क्रिया विफल: {{msg}}",
+      "paramChangesRates": "पहले {{before}} · बाद {{after}}",
+      "paramChangesStatus": {
+        "pending": "अवलोकन में",
+        "insufficient": "नमूने अपर्याप्त (देय)",
+        "kept": "रखा गया",
+        "rollbackSuggested": "रोलबैक सुझाया",
+        "rolledBack": "रोलबैक हुआ"
+      }
     },
     "toolLabel": {
       "get_stock_quote": "Stock Quote",
@@ -17320,7 +17337,7 @@
       "hitrateByAction": "निर्णय के अनुसार",
       "hitrateByHorizon": "समय क्षितिज के अनुसार",
       "hitrateGroupRate": "समूह हिट दर",
-      "insufficientSamples": "अपर्याप्त नमूने",
+      "insufficientSamples": "अभी कोई परिपक्व नमूना नहीं",
       "horizonAuto": "मुख्य स्तर अनुसार",
       "horizonUnknown": "अज्ञात अवधि",
       "colHorizon": "समीक्षा क्षितिज",
@@ -17404,7 +17421,8 @@
       "tierUnlabelledHint": "{{count}} रिफ्लेक्शन में स्तर नहीं है — फ़ील्ड नहीं बना, इसका मतलब पैरामीटर स्तर होना नहीं।",
       "tierGridNote": "L2/L3 कारण पैरामीटर परत के नहीं हैं: वे कैलिब्रेशन ग्रिड से बाहर हैं और एक-एक कर निपटाने होंगे।",
       "tierEmpty": "कोई संरचनात्मक प्रतीक्षा नहीं (कोई रिफ्लेक्शन L2/L3 नहीं)",
-      "failureModeOther": "अन्य"
+      "failureModeOther": "अन्य",
+      "hitrateScope": "दायरा: यह कार्ड **पूरे डेटाबेस** के परिपक्व ऐतिहासिक चिंतनों को action × श्रेणी से जोड़ता है। यह आपके देखे जा रहे चिंतन पर निर्णय नहीं है — एकल चिंतन केवल उस पूर्वानुमान की बाद की वास्तविक कीमत चाल से तुलना करता है। शून्य हर वाले समूह «अभी कोई परिपक्व नमूना नहीं» दिखाते हैं।"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

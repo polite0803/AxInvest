@@ -15766,7 +15766,8 @@
       "sectionMissesDesc": "Aktien, die den Schwellenwert überschritten, aber nicht ausgewählt wurden – nach Attributionsschicht getrennt: nicht im Pool, im Pool nicht gewählt oder durch Stil/Horizont ausgeschlossen.",
       "sectionSerenity": "Serenity-Validierung",
       "sectionSerenityDesc": "Trefferquote und Loop-Validierung der anderen Kette (LLM-Kandidaten); getrennt von der Empfehlungsmatrix lesen.",
-      "matrixLegend": "Lesart: Zeilen = Strategiestil, Spalten = Haltehorizont; jede Zelle zeigt Trefferquote (farbcodiert), Sharpe/Stichprobe, IC (mit Grund bei zu wenigen Stichproben) und Loop-Gewicht."
+      "matrixLegend": "Lesart: Zeilen = Strategiestil, Spalten = Haltehorizont; jede Zelle zeigt Trefferquote (farbcodiert), Sharpe/Stichprobe, IC (mit Grund bei zu wenigen Stichproben) und Loop-Gewicht.",
+      "executionQuality": "Ausführungsqualität {{score}}/10"
     },
     "moverRecall": {
       "title": "Recall-Prüfung: Kursgewinn im Fenster",
@@ -16887,7 +16888,23 @@
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
       },
-      "generationScope": "Gewichtungsumfang: ab Generation {{floor}} ({{preFloor}} frühere und {{unknown}} unbekannte Generationen ausgeschlossen)"
+      "generationScope": "Gewichtungsumfang: ab Generation {{floor}} ({{preFloor}} frühere und {{unknown}} unbekannte Generationen ausgeschlossen)",
+      "paramChangesTitle": "Parameter-Änderungsjournal",
+      "paramChangesHint": "Anwenden erhöht die Vorlagenversion und protokolliert die Änderung. Nach dem Beobachtungsfenster werden nur die Generationen vor/nach verglichen; Rollback wird nur vorgeschlagen, nie automatisch ausgeführt.",
+      "paramChangesEvaluate": "Fällige Änderungen bewerten",
+      "paramChangesEvaluated": "{{count}} Änderung(en) bewertet",
+      "paramChangesEmpty": "Noch keine Parameteränderungen",
+      "paramChangesRollback": "Zurückrollen",
+      "paramChangesRolledBack": "Zurückgerollt und Version erhöht",
+      "paramChangesFailed": "Aktion fehlgeschlagen: {{msg}}",
+      "paramChangesRates": "Vorher {{before}} · Nachher {{after}}",
+      "paramChangesStatus": {
+        "pending": "Beobachtung läuft",
+        "insufficient": "Zu wenige Stichproben (fällig)",
+        "kept": "Behalten",
+        "rollbackSuggested": "Rollback empfohlen",
+        "rolledBack": "Zurückgerollt"
+      }
     },
     "toolLabel": {
       "get_stock_quote": "Stock Quote",
@@ -17320,7 +17337,7 @@
       "hitrateByAction": "Nach Entscheidung",
       "hitrateByHorizon": "Nach Zeithorizont",
       "hitrateGroupRate": "Gruppen-Trefferquote",
-      "insufficientSamples": "Stichproben unzureichend",
+      "insufficientSamples": "noch keine ausgereiften Stichproben",
       "horizonAuto": "Nach Hauptstufe",
       "horizonUnknown": "Unbekannter Horizont",
       "colHorizon": "Review-Horizont",
@@ -17404,7 +17421,8 @@
       "tierUnlabelledHint": "{{count}} Reflektionen nennen keine Ebene — das Feld fehlt, das heißt nicht: Parameter-Ebene.",
       "tierGridNote": "Als L2/L3 eingestufte Ursachen sind keine Parameterprobleme: sie bleiben außerhalb des Kalibrierungsrasters und sind einzeln zu behandeln.",
       "tierEmpty": "Keine Struktureinträge (keine Reflektion als L2/L3 eingestuft)",
-      "failureModeOther": "Sonstige"
+      "failureModeOther": "Sonstige",
+      "hitrateScope": "Umfang: Diese Karte aggregiert ausgereifte historische Reflexionen der **gesamten Datenbank** nach Aktion × Stufe. Sie ist kein Urteil über die gerade betrachtete Reflexion — eine einzelne Reflexion vergleicht nur diese Prognose mit dem späteren Kursverlauf. Gruppen mit Nenner 0 zeigen „noch keine ausgereiften Stichproben“."
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

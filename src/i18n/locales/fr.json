@@ -15766,7 +15766,8 @@
       "sectionMissesDesc": "Actions ayant dépassé le seuil sans être sélectionnées, réparties par couche d'attribution : hors pool, dans le pool sans sélection, ou écartées par style/horizon.",
       "sectionSerenity": "Validation Serenity",
       "sectionSerenityDesc": "Taux de réussite et validation de boucle de l'autre chaîne (candidats LLM) ; à lire séparément de la matrice de recommandation.",
-      "matrixLegend": "Lecture : lignes = style de stratégie, colonnes = horizon de détention ; chaque cellule affiche le taux de réussite (code couleur), Sharpe/échantillon, IC (avec motif si échantillon insuffisant) et le poids de boucle."
+      "matrixLegend": "Lecture : lignes = style de stratégie, colonnes = horizon de détention ; chaque cellule affiche le taux de réussite (code couleur), Sharpe/échantillon, IC (avec motif si échantillon insuffisant) et le poids de boucle.",
+      "executionQuality": "Qualité d'exécution {{score}}/10"
     },
     "moverRecall": {
       "title": "Contrôle de rappel sur gain de fenêtre",
@@ -16887,7 +16888,23 @@
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
       },
-      "generationScope": "Portée des poids : à partir de la gén. {{floor}} ({{preFloor}} antérieures et {{unknown}} inconnues exclues)"
+      "generationScope": "Portée des poids : à partir de la gén. {{floor}} ({{preFloor}} antérieures et {{unknown}} inconnues exclues)",
+      "paramChangesTitle": "Journal des changements de paramètres",
+      "paramChangesHint": "Appliquer incrémente la version du modèle et journalise le changement. Après la fenêtre d'observation, seules les générations avant/après sont comparées ; le retour arrière est seulement suggéré, jamais automatique.",
+      "paramChangesEvaluate": "Évaluer les changements échus",
+      "paramChangesEvaluated": "{{count}} changement(s) évalué(s)",
+      "paramChangesEmpty": "Aucun changement de paramètre",
+      "paramChangesRollback": "Annuler",
+      "paramChangesRolledBack": "Annulé et version incrémentée",
+      "paramChangesFailed": "Échec de l'action : {{msg}}",
+      "paramChangesRates": "Avant {{before}} · Après {{after}}",
+      "paramChangesStatus": {
+        "pending": "En observation",
+        "insufficient": "Échantillons insuffisants (échu)",
+        "kept": "Conservé",
+        "rollbackSuggested": "Annulation suggérée",
+        "rolledBack": "Annulé"
+      }
     },
     "toolLabel": {
       "get_stock_quote": "Stock Quote",
@@ -17320,7 +17337,7 @@
       "hitrateByAction": "Par décision",
       "hitrateByHorizon": "Par horizon",
       "hitrateGroupRate": "Taux de réussite du groupe",
-      "insufficientSamples": "Échantillons insuffisants",
+      "insufficientSamples": "aucune observation mature",
       "horizonAuto": "Selon le palier principal",
       "horizonUnknown": "Horizon inconnu",
       "colHorizon": "Horizon analysé",
@@ -17404,7 +17421,8 @@
       "tierUnlabelledHint": "{{count}} réflexion(s) n'indiquent pas de niveau — le champ est absent, ce ne sont pas forcément des paramètres.",
       "tierGridNote": "Les causes L2/L3 ne relèvent pas des paramètres : elles restent hors de la grille de calibration et demandent un traitement unitaire.",
       "tierEmpty": "Aucun élément structurel en attente (aucune réflexion en L2/L3)",
-      "failureModeOther": "Autre"
+      "failureModeOther": "Autre",
+      "hitrateScope": "Portée : cette carte agrège les réflexions historiques matures de **toute la base** par action × échéance. Ce n'est pas un verdict sur la réflexion affichée — une réflexion isolée compare uniquement cette prédiction au cours réel qui a suivi. Les groupes dont le dénominateur est nul affichent « aucune observation mature »."
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

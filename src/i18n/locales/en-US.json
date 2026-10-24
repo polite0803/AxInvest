@@ -16010,7 +16010,8 @@
       "sectionMissesDesc": "Stocks that rose past the tier threshold without being picked, split by attribution layer: not in pool, in pool but not picked, or cut by style/horizon.",
       "sectionSerenity": "Serenity validation",
       "sectionSerenityDesc": "Win rate and loop validation for the other chain (LLM candidates); read separately from the recommendation matrix.",
-      "matrixLegend": "How to read: rows = strategy style, columns = holding horizon; each cell shows win rate (color-coded), Sharpe/sample size, IC (with reason when samples are insufficient) and loop weight."
+      "matrixLegend": "How to read: rows = strategy style, columns = holding horizon; each cell shows win rate (color-coded), Sharpe/sample size, IC (with reason when samples are insufficient) and loop weight.",
+      "executionQuality": "Execution quality {{score}}/10"
     },
     "moverRecall": {
       "title": "Window Gain Recall Check",
@@ -17155,7 +17156,23 @@
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
       },
-      "generationScope": "Weight scope: from generation {{floor}} (excluded {{preFloor}} earlier and {{unknown}} unknown-generation samples)"
+      "generationScope": "Weight scope: from generation {{floor}} (excluded {{preFloor}} earlier and {{unknown}} unknown-generation samples)",
+      "paramChangesTitle": "Parameter change ledger",
+      "paramChangesHint": "Applying a change bumps the template version and records an audit row. After the review window, only the pre/post generations are compared; rollback is suggested, never automatic.",
+      "paramChangesEvaluate": "Evaluate due changes",
+      "paramChangesEvaluated": "Evaluated {{count}} change(s)",
+      "paramChangesEmpty": "No parameter changes yet",
+      "paramChangesRollback": "Roll back",
+      "paramChangesRolledBack": "Rolled back and bumped version",
+      "paramChangesFailed": "Action failed: {{msg}}",
+      "paramChangesRates": "Before {{before}} · After {{after}}",
+      "paramChangesStatus": {
+        "pending": "Awaiting review",
+        "insufficient": "Insufficient samples (due)",
+        "kept": "Kept",
+        "rollbackSuggested": "Rollback suggested",
+        "rolledBack": "Rolled back"
+      }
     },
     "experimentTrail": {
       "acceptOrSkip": "Accept or Skip",
@@ -17466,7 +17483,7 @@
       "hitrateByAction": "By Action",
       "hitrateByHorizon": "By Horizon",
       "hitrateGroupRate": "Group Hit Rate",
-      "insufficientSamples": "Insufficient samples",
+      "insufficientSamples": "no mature samples yet",
       "horizonAuto": "By primary tier",
       "horizonUnknown": "Unknown horizon",
       "colHorizon": "Review horizon",
@@ -17550,7 +17567,8 @@
       "tierUnlabelledHint": "{{count}} reflection(s) declare no remediation tier — the template omitted the field, which does not mean they are parameter-tier.",
       "tierGridNote": "Root causes judged L2/L3 are not parameter-tier: they are excluded from the calibration grid and need item-by-item handling.",
       "tierEmpty": "No structural backlog items (no reflection judged L2/L3)",
-      "failureModeOther": "Other"
+      "failureModeOther": "Other",
+      "hitrateScope": "Scope: this card aggregates mature historical reflections across the whole database by action × tier. It is not a verdict on the reflection you are viewing — a single reflection only compares that prediction with the price action after it. Groups with zero denominator show \"no mature samples yet\"."
     },
     "row": {
       "confidence": "Confidence",

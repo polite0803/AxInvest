@@ -206,6 +206,70 @@ pub async fn upsert_workflow_template(
     Ok(())
 }
 
+/// 把当前模板落一份历史快照（主键 `{id}_v{version}`，幂等）。
+///
+/// 抽成函数是因为「保存整模板」与「只改变量」两条写路径**都必须先快照再换代**；
+/// 各写一遍字段清单，早晚会出现只更新一半的版本行。
+async fn snapshot_version(txn: &DatabaseTransaction, t: &workflow_template::Model) -> Result<()> {
+    workflow_template_version::Entity::insert(workflow_template_version::ActiveModel {
+        id: Set(format!("{}_v{}", t.id, t.version)),
+        template_id: Set(t.id.clone()),
+        name: Set(t.name.clone()),
+        description: Set(t.description.clone()),
+        icon: Set(t.icon.clone()),
+        tags: Set(t.tags.clone()),
+        version: Set(t.version),
+        is_preset: Set(t.is_preset),
+        is_editable: Set(t.is_editable),
+        is_public: Set(t.is_public),
+        trigger_config: Set(t.trigger_config.clone()),
+        nodes: Set(t.nodes.clone()),
+        edges: Set(t.edges.clone()),
+        input_schema: Set(t.input_schema.clone()),
+        output_schema: Set(t.output_schema.clone()),
+        variables: Set(t.variables.clone()),
+        error_config: Set(t.error_config.clone()),
+        created_at: Set(chrono::Utc::now().timestamp_millis()),
+    })
+    .on_conflict_do_nothing()
+    .exec_without_returning(txn)
+    .await?;
+    Ok(())
+}
+
+/// 只替换模板变量并**换代**（反思参数应用/回滚的专用写路径）。
+///
+/// 返回 `(旧版本, 新版本)`。与整模板保存共用 [`snapshot_version`]：
+/// 改前值先进 `workflow_template_versions`，主表 `version + 1`。
+/// 这样后续分析行会盖新代际，参数变更前后的样本可以按代分开评估；
+/// 旧实现只更新 `variables`/`updated_at`，改前样本与改后样本同代，无法归因也无法回滚。
+pub async fn update_workflow_template_variables_json(
+    db: &DatabaseConnection,
+    template_id: &str,
+    variables_json: String,
+) -> Result<(i32, i32)> {
+    let template = workflow_template::Entity::find_by_id(template_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| AxAgentError::NotFound(format!("workflow template '{template_id}'")))?;
+
+    let txn = db.begin().await?;
+    snapshot_version(&txn, &template).await?;
+    let next_version = template.version + 1;
+    workflow_template::Entity::update_many()
+        .col_expr(workflow_template::Column::Variables, Expr::value(variables_json))
+        .col_expr(workflow_template::Column::Version, Expr::value(next_version))
+        .col_expr(
+            workflow_template::Column::UpdatedAt,
+            Expr::value(chrono::Utc::now().timestamp_millis()),
+        )
+        .filter(workflow_template::Column::Id.eq(template_id.to_owned()))
+        .exec(&txn)
+        .await?;
+    txn.commit().await?;
+    Ok((template.version, next_version))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn update_workflow_template(
     db: &DatabaseConnection,
@@ -239,29 +303,7 @@ pub async fn update_workflow_template(
         // D9: save old version as a snapshot before updating。
         // 幂等写入：同主键快照已存在（历史重置/并发双保存/上次半提交）时跳过，
         // 保留既有历史快照，不阻塞本次保存。
-        workflow_template_version::Entity::insert(workflow_template_version::ActiveModel {
-            id: Set(format!("{}_v{}", t.id, t.version)),
-            template_id: Set(t.id.clone()),
-            name: Set(t.name.clone()),
-            description: Set(t.description.clone()),
-            icon: Set(t.icon.clone()),
-            tags: Set(t.tags.clone()),
-            version: Set(t.version),
-            is_preset: Set(t.is_preset),
-            is_editable: Set(t.is_editable),
-            is_public: Set(t.is_public),
-            trigger_config: Set(t.trigger_config.clone()),
-            nodes: Set(t.nodes.clone()),
-            edges: Set(t.edges.clone()),
-            input_schema: Set(t.input_schema.clone()),
-            output_schema: Set(t.output_schema.clone()),
-            variables: Set(t.variables.clone()),
-            error_config: Set(t.error_config.clone()),
-            created_at: Set(chrono::Utc::now().timestamp_millis()),
-        })
-        .on_conflict_do_nothing()
-        .exec_without_returning(&txn)
-        .await?;
+        snapshot_version(&txn, &t).await?;
 
         let mut active_model: workflow_template::ActiveModel = t.clone().into();
         active_model.name = Set(name);
@@ -535,5 +577,72 @@ pub fn template_version_model_to_data(
             .unwrap_or_default(),
         error_config: model.error_config.as_ref().and_then(|s| serde_json::from_str(s).ok()),
         created_at: model.created_at,
+    }
+}
+
+#[cfg(test)]
+mod variables_only_update_tests {
+    use super::*;
+    use sea_orm::ActiveValue::Set;
+
+    fn template_row(id: &str, version: i32, variables: &str) -> workflow_template::ActiveModel {
+        workflow_template::ActiveModel {
+            id: Set(id.to_string()),
+            name: Set("参数变更测试".to_string()),
+            description: Set(None),
+            icon: Set(String::new()),
+            tags: Set(None),
+            version: Set(version),
+            is_preset: Set(false),
+            is_editable: Set(true),
+            is_public: Set(false),
+            trigger_config: Set(None),
+            nodes: Set("[]".to_string()),
+            edges: Set("[]".to_string()),
+            input_schema: Set(None),
+            output_schema: Set(None),
+            variables: Set(Some(variables.to_string())),
+            error_config: Set(None),
+            composite_source: Set(None),
+            tool_defs: Set(None),
+            mission_hash: Set(None),
+            cluster_id: Set(None),
+            route_path: Set(None),
+            hooks_config: Set(None),
+            created_at: Set(1),
+            updated_at: Set(1),
+        }
+    }
+
+    /// 只改变量也必须「先快照旧版、再 version+1」：否则改前样本与改后样本同代，
+    /// 既无法归因、也无法回滚（这正是本次修的问题）。
+    #[tokio::test]
+    async fn variables_update_snapshots_old_version_and_bumps() {
+        let db = crate::db::create_test_pool().await.expect("测试库应可建立").conn;
+        let old_vars = r#"[{"name":"buy_threshold","value":0.5}]"#;
+        template_row("t-param", 7, old_vars).insert(&db).await.expect("模板应可插入");
+
+        let new_vars = r#"[{"name":"buy_threshold","value":0.6}]"#;
+        let (from, to) =
+            update_workflow_template_variables_json(&db, "t-param", new_vars.to_string())
+                .await
+                .expect("改变量应成功");
+        assert_eq!((from, to), (7, 8));
+
+        let current = workflow_template::Entity::find_by_id("t-param")
+            .one(&db)
+            .await
+            .expect("应可读取")
+            .expect("模板应存在");
+        assert_eq!(current.version, 8);
+        assert_eq!(current.variables.as_deref(), Some(new_vars));
+
+        let snapshot = workflow_template_version::Entity::find_by_id("t-param_v7")
+            .one(&db)
+            .await
+            .expect("应可读取")
+            .expect("旧版本快照必须存在");
+        assert_eq!(snapshot.version, 7);
+        assert_eq!(snapshot.variables.as_deref(), Some(old_vars));
     }
 }

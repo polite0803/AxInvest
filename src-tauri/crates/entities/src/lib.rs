@@ -60,6 +60,7 @@ pub mod workflow_snapshots;
 
 pub mod workflow_template;
 
+pub mod workflow_param_changes;
 pub mod workflow_template_version;
 
 pub mod workflow_tools;
@@ -222,6 +223,7 @@ pub mod reflection_lessons;
 pub mod screenshot_diagnoses;
 pub mod stock_analyses;
 pub mod stock_evolution_history;
+pub mod stock_execution_reflections;
 pub mod stock_pipeline_runs;
 pub mod stock_reflections;
 pub mod strategy_performance;

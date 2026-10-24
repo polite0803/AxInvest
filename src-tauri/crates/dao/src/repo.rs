@@ -70,6 +70,7 @@ pub mod skill;
 pub mod stock_analysis_rerun_queue;
 pub mod stock_analysis_snapshot;
 pub mod stock_evolution_history;
+pub mod stock_execution_reflections;
 pub mod stock_lesson_queries;
 pub mod stored_file;
 pub mod sync_audit_log;
@@ -84,6 +85,7 @@ pub mod vec_collection;
 pub mod workflow_approval;
 pub mod workflow_execution;
 pub mod workflow_execution_stats;
+pub mod workflow_param_changes;
 pub mod workflow_template;
 pub mod workflow_tool;
 

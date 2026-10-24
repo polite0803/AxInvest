@@ -31,6 +31,16 @@ fn extract_reflection(raw) {
 
     // 直接是 map
     if type_of(raw) == "map" {
+        // 实测最常见的落库形态：{"report":"{\"verdict\":...}"}。
+        // 不先拆 report 的话，下面所有字段都取不到，最终被默认成 partial —— 等于
+        // 「反思没跑」也记成一次 partial 反思。必须先解这一层。
+        let report = raw["report"];
+        if !is_unit(report) && type_of(report) == "string" {
+            let parsed_report = safe_parse(report);
+            if !is_unit(parsed_report) && type_of(parsed_report) == "map" {
+                return parsed_report;
+            }
+        }
         // 检查是否有 params 字段（agent_executor 包装格式）
         let params = raw["params"];
         if !is_unit(params) && type_of(params) == "map" {
@@ -96,16 +106,21 @@ fn main() {
         }
     }
 
-    // R-302: verdict 必须是 correct/partial/wrong 三选一
+    // R-302: verdict 必须是 correct/partial/wrong 三选一。
+    // 关键：**缺失不得默认 partial**。旧实现把「模型没产出 verdict」也写成 partial，
+    // 于是 222/230 条 completed 反思 verdict=NULL/缺失却被当作「部分正确」。
+    // 缺失时输出空串 + status=incomplete，由调用方拒绝盖 completed。
+    let verdict_present = false;
     let verdict = if !is_unit(verdict_raw) && type_of(verdict_raw) == "string" {
         let v = verdict_raw.to_string();
         if v == "correct" || v == "partial" || v == "wrong" {
+            verdict_present = true;
             v
         } else {
-            "partial"
+            ""
         }
     } else {
-        "partial"
+        ""
     };
 
     // alpha_cited: 字符串兜底
@@ -121,12 +136,11 @@ fn main() {
     } else {
         ""
     };
-    let lesson_chars = lesson_full.chars();
-    let lesson = if lesson_chars.len() > 200 {
+    let lesson = if lesson_full.len() > 200 {
         // 取前 200 字符
         let truncated = "";
         let count = 0;
-        for ch in lesson_chars {
+        for ch in lesson_full.chars() {
             if count >= 200 { break; }
             truncated = truncated + ch.to_string();
             count = count + 1;
@@ -172,7 +186,7 @@ fn main() {
     };
 
     // 检查是否触发 R-303 截断
-    let final_rule_codes = if lesson_chars.len() > 200 {
+    let final_rule_codes = if lesson_full.len() > 200 {
         let has_r303 = false;
         for rc in rule_codes {
             if rc.to_string() == "R-303" {
@@ -189,8 +203,9 @@ fn main() {
     };
 
     // 构建验证后的反思对象
+    let validation_status = if verdict_present { "ok" } else { "incomplete" };
     #{
-        "status": "ok",
+        "status": validation_status,
         "verdict": verdict,
         "alpha_cited": alpha_cited,
         "lesson_summary": lesson,

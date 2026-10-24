@@ -15766,7 +15766,8 @@
       "sectionMissesDesc": "Acciones que superaron el umbral sin ser seleccionadas, separadas por capa de atribución: fuera del pool, en el pool sin selección, o descartadas por estilo/horizonte.",
       "sectionSerenity": "Validación Serenity",
       "sectionSerenityDesc": "Tasa de acierto y validación del bucle de la otra cadena (candidatos LLM); leer por separado de la matriz de recomendación.",
-      "matrixLegend": "Cómo leer: filas = estilo de estrategia, columnas = horizonte de tenencia; cada celda muestra tasa de acierto (color), Sharpe/muestra, IC (con motivo si faltan muestras) y peso del bucle."
+      "matrixLegend": "Cómo leer: filas = estilo de estrategia, columnas = horizonte de tenencia; cada celda muestra tasa de acierto (color), Sharpe/muestra, IC (con motivo si faltan muestras) y peso del bucle.",
+      "executionQuality": "Calidad de ejecución {{score}}/10"
     },
     "moverRecall": {
       "title": "Verificación de recall por ganancia en ventana",
@@ -16887,7 +16888,23 @@
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
       },
-      "generationScope": "Ámbito de pesos: desde la gen. {{floor}} (excluidas {{preFloor}} anteriores y {{unknown}} desconocidas)"
+      "generationScope": "Ámbito de pesos: desde la gen. {{floor}} (excluidas {{preFloor}} anteriores y {{unknown}} desconocidas)",
+      "paramChangesTitle": "Registro de cambios de parámetros",
+      "paramChangesHint": "Aplicar incrementa la versión de la plantilla y deja registro. Tras la ventana de observación solo se comparan las generaciones antes/después; la reversión se sugiere, nunca es automática.",
+      "paramChangesEvaluate": "Evaluar cambios vencidos",
+      "paramChangesEvaluated": "{{count}} cambio(s) evaluado(s)",
+      "paramChangesEmpty": "Sin cambios de parámetros",
+      "paramChangesRollback": "Revertir",
+      "paramChangesRolledBack": "Revertido y versión incrementada",
+      "paramChangesFailed": "Acción fallida: {{msg}}",
+      "paramChangesRates": "Antes {{before}} · Después {{after}}",
+      "paramChangesStatus": {
+        "pending": "En observación",
+        "insufficient": "Muestras insuficientes (vencido)",
+        "kept": "Conservado",
+        "rollbackSuggested": "Reversión sugerida",
+        "rolledBack": "Revertido"
+      }
     },
     "toolLabel": {
       "get_stock_quote": "Stock Quote",
@@ -17320,7 +17337,7 @@
       "hitrateByAction": "Por decisión",
       "hitrateByHorizon": "Por horizonte",
       "hitrateGroupRate": "Tasa de acierto del grupo",
-      "insufficientSamples": "Muestras insuficientes",
+      "insufficientSamples": "aún no hay muestras maduras",
       "horizonAuto": "Según el nivel principal",
       "horizonUnknown": "Horizonte desconocido",
       "colHorizon": "Horizonte revisado",
@@ -17404,7 +17421,8 @@
       "tierUnlabelledHint": "{{count}} reflexiones no declaran nivel — la plantilla no emitió el campo, eso no significa que sean de parámetros.",
       "tierGridNote": "Las causas L2/L3 no son de capa de parámetros: quedan fuera de la rejilla de calibración y exigen tratamiento individual.",
       "tierEmpty": "Sin elementos estructurales pendientes (ninguna reflexión clasificada L2/L3)",
-      "failureModeOther": "Otro"
+      "failureModeOther": "Otro",
+      "hitrateScope": "Alcance: esta tarjeta agrega reflexiones históricas maduras de **toda la base** por acción × horizonte. No es un veredicto sobre la reflexión que estás viendo — una reflexión individual solo compara esa predicción con el precio posterior. Los grupos con denominador cero muestran «aún no hay muestras maduras»."
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

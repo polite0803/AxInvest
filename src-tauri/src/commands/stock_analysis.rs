@@ -1243,6 +1243,11 @@ pub struct StockAnalysisListItem {
     /// 分析完成时刻（ms）；`NULL` = 未知（本列引入前的历史行 / `interrupted`）。
     /// **不得**回退到 `updated_at`：后者会被后续写库顶掉。
     pub completed_at: Option<i64>,
+    /// **执行层**反思的总体质量分（1-10，工作流口径，来自 `stock_execution_reflections`）。
+    /// `None` = 该次分析尚无执行层反思（闭环未跑/失败），**不是 0 分**。
+    /// 与 `decisionAction` / 市场结果反思分栏展示，**不得**换算成胜率。
+    #[sea_orm(ignore)]
+    pub execution_quality: Option<i32>,
 }
 
 /// `list_stock_analyses` 的查询实现（与命令体拆开，只为让**返回体形状**能被单测直接验）。
@@ -1293,7 +1298,7 @@ pub(crate) async fn query_stock_analysis_items(
     // 口径 —— 缺失不是结论，由展示层渲染「数据缺失」。此前列表原样返回 null，同一条记录在详情页
     // 是「数据缺失」、在历史弹窗却另成一格（两档重叠）。
     // `running` 行例外：它还没有决策，状态列已经写明「进行中」，不该被标成任何一个档位。
-    let rows = rows
+    let rows: Vec<StockAnalysisListItem> = rows
         .into_iter()
         .map(|mut r| {
             let empty = r.decision_action.as_deref().is_none_or(|s| s.trim().is_empty());
@@ -1304,6 +1309,16 @@ pub(crate) async fn query_stock_analysis_items(
             r
         })
         .collect();
+    // 执行层反思质量分（另表一次批量取，缺失不出键 ⇒ 保持 None，不写 0）。
+    let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
+    let scores =
+        axagent_dao::repo::stock_execution_reflections::latest_scores_for_analyses(db, &ids)
+            .await
+            .unwrap_or_default();
+    let mut rows = rows;
+    for r in &mut rows {
+        r.execution_quality = scores.get(&r.id).copied();
+    }
     Ok(rows)
 }
 
@@ -1417,6 +1432,19 @@ pub async fn get_stock_analysis(
             obj.insert("dashboardMd".to_string(), serde_json::Value::String(md));
         }
     }
+    // 执行层反思（工作流质量）：与市场结果反思分栏，不参与任何决策换算。
+    // 查不到就不写键（前端按「未记录」渲染），不伪造 0 分。
+    if let Ok(Some(exec)) = axagent_dao::repo::stock_execution_reflections::latest_by_analysis(
+        state.harness.db(),
+        &analysis_id,
+    )
+    .await
+    {
+        if let (Some(obj), Ok(exec_val)) = (value.as_object_mut(), serde_json::to_value(&exec)) {
+            obj.insert("executionReflection".to_string(), exec_val);
+        }
+    }
+
     // R-4：把最终决策 JSON 的必填形状缺口显式附在详情上（只读、非破坏）。
     // 空缺口不写键，保持既有响应形状不变。
     if let Some(obj) = value.as_object_mut() {
@@ -6583,6 +6611,14 @@ pub async fn list_param_suggestions(
 // 同一张表；此前读侧另认一套拼写（`key`/`value` + 短名），两侧不同代 ⇒ 现网九条真建议
 // 全被读成出厂默认。本处只保留调用方。
 
+/// 参数变更后的观察期（日历日）。
+///
+/// 取 45 天：至少跨过一个 mid 档（28 交易日 ≈ 40 日历日）的完整窗口；long 档（90 交易日）
+/// 到期时仍可能样本不足，评估命令会如实写「样本不足」而**不**伪造结论。
+const PARAM_REVIEW_WINDOW_DAYS: i64 = 45;
+/// 到期评估的最小样本：变更前/后**各**至少这么多条 completed 反思（只数 verdict 三态）。
+const PARAM_EVAL_MIN_SAMPLES: i32 = 10;
+
 /// 应用用户选中的参数调整建议到 stock-analysis 模板变量
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "应用参数调整建议")]
 #[tauri::command]
@@ -6592,8 +6628,7 @@ pub async fn apply_param_suggestions(
 ) -> Result<serde_json::Value, String> {
     use axagent_analysis_engine::portfolio_formula::resolve_param_name;
     use axagent_entities::workflow_template;
-    use sea_orm::sea_query::Expr;
-    use sea_orm::{EntityTrait, QueryFilter};
+    use sea_orm::EntityTrait;
 
     let db = state.harness.db();
 
@@ -6620,6 +6655,8 @@ pub async fn apply_param_suggestions(
     // 2. 逐个更新（结果分 applied / skipped 两类，便于前端与反思侧观测）
     let mut applied: Vec<serde_json::Value> = Vec::new();
     let mut skipped: Vec<serde_json::Value> = Vec::new();
+    // (param, old_json, new_json, reflection_id, reason)
+    let mut audit_rows: Vec<(String, String, String, Option<String>, Option<String>)> = Vec::new();
 
     for update in &updates {
         let raw_name = update
@@ -6658,7 +6695,29 @@ pub async fn apply_param_suggestions(
                     if is_number && !is_secret {
                         let finite = new_value.as_f64().map(f64::is_finite).unwrap_or(false);
                         if finite {
+                            let old_json = val_field
+                                .get("value")
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null)
+                                .to_string();
+                            let new_json = new_value.to_string();
+                            let reflection_id = update
+                                .get("reflectionId")
+                                .or_else(|| update.get("reflection_id"))
+                                .and_then(|v| v.as_str())
+                                .map(str::to_string);
+                            let reason = update
+                                .get("reason")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.chars().take(300).collect::<String>());
                             val_field.insert("value".into(), new_value.clone());
+                            audit_rows.push((
+                                param_name.clone(),
+                                old_json,
+                                new_json,
+                                reflection_id,
+                                reason,
+                            ));
                             outcome = Some("ok");
                         } else {
                             outcome = Some("not_finite_number");
@@ -6714,18 +6773,48 @@ pub async fn apply_param_suggestions(
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("序列化失败: {e}"))
     })?;
     let now = chrono::Utc::now().timestamp_millis();
-    workflow_template::Entity::update_many()
-        .col_expr(workflow_template::Column::Variables, Expr::value(vars_json))
-        .col_expr(workflow_template::Column::UpdatedAt, Expr::value(now))
-        .filter(workflow_template::Column::Id.eq("stock-analysis"))
-        .exec(db)
+    // 换代写出：先快照旧版本，再 version+1（见 dao 的 `update_workflow_template_variables_json`）。
+    let (from_version, to_version) =
+        axagent_dao::repo::workflow_template::update_workflow_template_variables_json(
+            db,
+            "stock-analysis",
+            vars_json,
+        )
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("更新模板变量失败: {e}"))
         })?;
 
+    // 台账：一行 = 一个参数。审计写失败不回滚已生效的配置（配置已换代），但必须显式报告。
+    let review_after_ms = now + PARAM_REVIEW_WINDOW_DAYS * 86_400_000;
+    let audit_rows: Vec<axagent_dao::repo::workflow_param_changes::NewParamChange> = audit_rows
+        .into_iter()
+        .map(|(param, old_json, new_json, reflection_id, reason)| {
+            axagent_dao::repo::workflow_param_changes::NewParamChange {
+                template_id: "stock-analysis".to_string(),
+                param,
+                from_version,
+                to_version,
+                old_value_json: old_json,
+                new_value_json: new_json,
+                reflection_id,
+                reason,
+                review_after_ms,
+                applied_at_ms: now,
+            }
+        })
+        .collect();
+    let audit_persisted =
+        match axagent_dao::repo::workflow_param_changes::insert_many(db, &audit_rows).await {
+            Ok(_) => true,
+            Err(e) => {
+                tracing::warn!("[param_suggestions] 参数变更台账写入失败（配置已生效）: {e}");
+                false
+            },
+        };
+
     tracing::info!(
-        "[param_suggestions] 已应用 {} 项参数调整到 stock-analysis 模板（跳过 {} 项）",
+        "[param_suggestions] 已应用 {} 项参数调整到 stock-analysis 模板（v{from_version}→v{to_version}，跳过 {} 项，台账={audit_persisted}）",
         applied.len(),
         skipped.len()
     );
@@ -6743,6 +6832,228 @@ pub async fn apply_param_suggestions(
         "skipped": skipped,
         "appliedCount": applied.len(),
         "persisted": true,
+        "fromVersion": from_version,
+        "toVersion": to_version,
+        "auditPersisted": audit_persisted,
+    }))
+}
+
+/// 参数变更台账（最近 N 条，含状态与到期评估读数）。
+#[tauri::command]
+pub async fn list_param_changes(
+    state: State<'_, AppState>,
+    limit: Option<u64>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let rows = axagent_dao::repo::workflow_param_changes::list_recent(
+        state.harness.db(),
+        limit.unwrap_or(50).min(200),
+    )
+    .await
+    .map_err(|e| format!("查询参数变更台账失败: {e}"))?;
+    Ok(rows.into_iter().filter_map(|m| serde_json::to_value(m).ok()).collect())
+}
+
+/// 一段模板代际的 completed 反思三态命中率 `(correct, total)`。
+///
+/// 只数 `verdict ∈ {correct, partial, wrong}`：`insufficient`/空值没有方向可判，
+/// 计进分母会稀释命中率（与 hitrate 的「样本不足算不出」同一条纪律）。
+async fn reflection_cohort_rate(
+    db: &axagent_harness::DatabaseConnection,
+    min_version: Option<i32>,
+    max_version_exclusive: Option<i32>,
+    created_after_ms: Option<i64>,
+) -> Result<(i32, i32), String> {
+    use axagent_entities::stock_reflections;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let mut q = stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::Status.like("completed%"))
+        .filter(stock_reflections::Column::Verdict.is_in(["correct", "partial", "wrong"]));
+    if let Some(v) = max_version_exclusive {
+        q = q.filter(stock_reflections::Column::TemplateVersion.lt(v));
+    }
+    if let Some(v) = min_version {
+        q = q.filter(stock_reflections::Column::TemplateVersion.gte(v));
+    }
+    if let Some(ms) = created_after_ms {
+        q = q.filter(stock_reflections::Column::CreatedAt.gte(ms));
+    }
+    let rows = q.all(db).await.map_err(|e| format!("查询反思样本失败: {e}"))?;
+    let total = rows.len() as i32;
+    let correct = rows.iter().filter(|r| r.verdict.as_deref() == Some("correct")).count() as i32;
+    Ok((correct, total))
+}
+
+/// 到期评估：只比较**变更前 / 变更后**两代样本，不自动回滚模板。
+///
+/// - 变更前 = `template_version < to_version`（该次变更之前的全部代）；
+/// - 变更后 = `template_version >= to_version` 且建点晚于应用时刻（防止旧行补写到新代）；
+/// - 任一侧样本不足 `PARAM_EVAL_MIN_SAMPLES` ⇒ `insufficient`（写明两侧条数，不伪造结论）；
+/// - 否则变更后命中率 ≥ 变更前 ⇒ `kept`，更低 ⇒ `rollback_suggested`（等人决定回滚）。
+/// 纯判据：到期后给「保留 / 建议回滚」结论。样本不足优先于方向比较。
+///
+/// 入参是两侧 `(correct, total)`；返回 `(status, note)`。`total` 只含 verdict 三态。
+fn decide_param_change_status(before: (i32, i32), after: (i32, i32)) -> (&'static str, String) {
+    let (bc, bn) = before;
+    let (ac, an) = after;
+    if bn < PARAM_EVAL_MIN_SAMPLES || an < PARAM_EVAL_MIN_SAMPLES {
+        return (
+            "insufficient",
+            format!("need>={PARAM_EVAL_MIN_SAMPLES} per side: before={bn} after={an}"),
+        );
+    }
+    let br = bc as f64 / bn as f64;
+    let ar = ac as f64 / an as f64;
+    let note = format!("before={bc}/{bn}({:.1}%) after={ac}/{an}({:.1}%)", br * 100.0, ar * 100.0);
+    if ar + 1e-9 >= br {
+        ("kept", note)
+    } else {
+        ("rollback_suggested", note)
+    }
+}
+
+#[tauri::command]
+pub async fn evaluate_param_changes(
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.harness.db();
+    let now = chrono::Utc::now().timestamp_millis();
+    let due = axagent_dao::repo::workflow_param_changes::list_due(db, now, 50)
+        .await
+        .map_err(|e| format!("查询到期待评估的参数变更失败: {e}"))?;
+
+    let mut items: Vec<serde_json::Value> = Vec::new();
+    for c in due {
+        let (before_correct, before_n) =
+            reflection_cohort_rate(db, None, Some(c.to_version), None).await?;
+        let (after_correct, after_n) =
+            reflection_cohort_rate(db, Some(c.to_version), None, Some(c.applied_at_ms)).await?;
+        let rate = |correct: i32, n: i32| {
+            if n > 0 {
+                Some(correct as f64 / n as f64)
+            } else {
+                None
+            }
+        };
+        let before_rate = rate(before_correct, before_n);
+        let after_rate = rate(after_correct, after_n);
+
+        let (status, note) =
+            decide_param_change_status((before_correct, before_n), (after_correct, after_n));
+
+        if let Err(e) = axagent_dao::repo::workflow_param_changes::mark_evaluated(
+            db,
+            &c.id,
+            status,
+            before_rate,
+            before_n,
+            after_rate,
+            after_n,
+            &note,
+            now,
+        )
+        .await
+        {
+            tracing::warn!("[param_changes] 变更 {} 评估落账失败: {e}", c.id);
+        }
+        items.push(serde_json::json!({
+            "id": c.id,
+            "param": c.param,
+            "fromVersion": c.from_version,
+            "toVersion": c.to_version,
+            "status": status,
+            "baselineRate": before_rate,
+            "baselineSamples": before_n,
+            "afterRate": after_rate,
+            "afterSamples": after_n,
+            "note": note,
+        }));
+    }
+    Ok(serde_json::json!({ "evaluated": items.len(), "items": items }))
+}
+
+/// 执行回滚：把变量写回旧值并**再换代**，台账记 `rolled_back`。
+///
+/// 只在人确认后调用（`rollback_suggested` 不是自动动作）：模板是共享配置，
+/// 自动回滚会让「谁改了、为什么改」再次失去落点。
+#[tauri::command]
+pub async fn rollback_param_change(
+    state: State<'_, AppState>,
+    change_id: String,
+) -> Result<serde_json::Value, String> {
+    use axagent_entities::workflow_template;
+    use sea_orm::EntityTrait;
+
+    let db = state.harness.db();
+    let change = axagent_dao::repo::workflow_param_changes::fetch_by_id(db, &change_id)
+        .await
+        .map_err(|e| format!("查询参数变更失败: {e}"))?
+        .ok_or_else(|| {
+            ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("参数变更不存在: {change_id}"))
+                .to_string()
+        })?;
+    if change.status == "rolled_back" {
+        return Err(ErrorResponse::new(common_err::INVALID_INPUT)
+            .with_detail("该变更已回滚过，不能重复回滚")
+            .to_string());
+    }
+
+    let tmpl = workflow_template::Entity::find_by_id(change.template_id.clone())
+        .one(db)
+        .await
+        .map_err(|e| format!("读取模板失败: {e}"))?
+        .ok_or_else(|| {
+            ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("模板不存在: {}", change.template_id))
+                .to_string()
+        })?;
+    let mut vars: Vec<serde_json::Value> =
+        tmpl.variables.as_deref().and_then(|v| serde_json::from_str(v).ok()).unwrap_or_default();
+    let old_value: serde_json::Value = serde_json::from_str(&change.old_value_json)
+        .map_err(|e| format!("旧值解析失败（台账损坏）: {e}"))?;
+    let mut found = false;
+    for v in &mut vars {
+        if v.get("name").and_then(|n| n.as_str()) == Some(change.param.as_str()) {
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("value".into(), old_value.clone());
+                found = true;
+            }
+            break;
+        }
+    }
+    if !found {
+        return Err(ErrorResponse::new(wf_err::INTERNAL)
+            .with_detail(format!("模板里已找不到参数 {}", change.param))
+            .to_string());
+    }
+    let vars_json = serde_json::to_string(&vars).map_err(|e| format!("序列化模板变量失败: {e}"))?;
+    let (from_version, to_version) =
+        axagent_dao::repo::workflow_template::update_workflow_template_variables_json(
+            db,
+            &change.template_id,
+            vars_json,
+        )
+        .await
+        .map_err(|e| format!("回滚写模板失败: {e}"))?;
+    let note = format!(
+        "rolled back: v{from_version}→v{to_version}（变更 v{}→v{}）",
+        change.from_version, change.to_version
+    );
+    axagent_dao::repo::workflow_param_changes::mark_rolled_back(
+        db,
+        &change.id,
+        to_version,
+        &note,
+        chrono::Utc::now().timestamp_millis(),
+    )
+    .await
+    .map_err(|e| format!("回滚落账失败: {e}"))?;
+    Ok(serde_json::json!({
+        "changeId": change.id,
+        "param": change.param,
+        "fromVersion": from_version,
+        "toVersion": to_version,
     }))
 }
 
@@ -7949,5 +8260,31 @@ mod reco_batch_contract_tests {
             vec!["long", "mid", "short", "ultra_short"],
             "JSON 键序必须是可复现的字典序；若变成乱序或档位序，说明序列化层（preserve_order）被动过"
         );
+    }
+}
+
+/// 参数变更到期判据（纯函数）：样本门优先、方向比较其次；不自动回滚。
+#[cfg(test)]
+mod param_change_decision_tests {
+    use super::*;
+
+    #[test]
+    fn insufficient_samples_outrank_direction_comparison() {
+        let (status, note) = decide_param_change_status((2, 5), (8, 10));
+        assert_eq!(status, "insufficient");
+        assert!(note.contains("before=5") && note.contains("after=10"), "实得 {note}");
+
+        let (status, _) = decide_param_change_status((9, 10), (0, 3));
+        assert_eq!(status, "insufficient", "变更后只有 3 条也必须判样本不足");
+    }
+
+    #[test]
+    fn kept_when_after_is_not_worse_and_rollback_when_lower() {
+        // 相等 ⇒ 保留（不因持平就建议回滚）
+        assert_eq!(decide_param_change_status((6, 10), (6, 10)).0, "kept");
+        assert_eq!(decide_param_change_status((5, 10), (7, 10)).0, "kept");
+        let (status, note) = decide_param_change_status((6, 10), (4, 10));
+        assert_eq!(status, "rollback_suggested");
+        assert!(note.contains("60.0%") && note.contains("40.0%"), "两代读数必须写明: {note}");
     }
 }

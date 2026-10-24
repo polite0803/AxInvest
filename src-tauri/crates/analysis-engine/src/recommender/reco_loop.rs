@@ -419,6 +419,14 @@ pub const RECO_LOOP_LOGIC_VERSION: i32 = 2;
 /// 存 `reco_loop_logic_version` 的设置键（settings 表；与 `reco_ic_gate` 同域）。
 pub const RECO_LOOP_LOGIC_VERSION_KEY: &str = "reco_loop_logic_version";
 
+/// 语义版本升级时所有格子的**中性先验**。
+///
+/// 不能清空成「无 prior」：`compute_loop_cell_weights_with_priors` 对缺失键默认
+/// `BASELINE_WEIGHT=1.0`，那会把没有成熟样本的格（生产实测 `reversion_short` 0 条
+/// 成熟样本、`trend_mid` 0 条）直接抬到满权重 —— 比旧的反向权重更糟。
+/// 0.5 = 「没有证据，先给一半」，有成熟样本的格再由胜率/IC 线校准。
+pub const RECO_LOOP_RESET_NEUTRAL_WEIGHT: f64 = 0.5;
+
 /// 读已落库的闭环语义版本（0 = 从未记录过，按需要重置处理）。
 pub async fn stored_reco_loop_logic_version(db: &DatabaseConnection) -> Result<i32, String> {
     let raw = axagent_dao::repo::settings::get_setting(db, RECO_LOOP_LOGIC_VERSION_KEY)
@@ -913,10 +921,25 @@ pub async fn recalc_and_persist_reco_loop(
     samples.retain(|s| s.exit_at_ms <= now_ms);
     let current = if reset_prior {
         // 语义版本变更：旧先验是另一套胜负口径算出来的，继续 EWMA 会把反向排序保留很多轮。
+        // 但**不能清空成缺失键**（缺失会被当成 BASELINE=1.0）；给全部矩阵格一个中性 0.5，
+        // 让有成熟样本的格按胜率/IC 重新校准，没样本的格不再拿满权重。
         tracing::warn!(
-            "[reco_loop] 闭环语义版本升级 ⇒ 本轮清空历史先验，按当前样本重算（reset_prior=true）"
+            "[reco_loop] 闭环语义版本升级 ⇒ 本轮把全部格子重置为中性先验 {} 后重算",
+            RECO_LOOP_RESET_NEUTRAL_WEIGHT
         );
-        HashMap::new()
+        let mut neutral = HashMap::new();
+        for style in style_keys() {
+            for period in Period::ALL.iter() {
+                neutral.insert(
+                    (style.to_string(), period.as_str().to_string()),
+                    CellPrior {
+                        base: RECO_LOOP_RESET_NEUTRAL_WEIGHT,
+                        effective: RECO_LOOP_RESET_NEUTRAL_WEIGHT,
+                    },
+                );
+            }
+        }
+        neutral
     } else {
         load_current_cell_priors_by_trigger(db, Some(RECO_LOOP_TRIGGER)).await?
     };
@@ -1806,6 +1829,27 @@ mod tests {
             cell(&reset, "capital", "short").new_weight
                 > cell(&reset, "reversion", "short").new_weight,
             "清空先验后，正期望的 capital_short 必须高于负期望的 reversion_short"
+        );
+
+        // 重置必须是「中性 0.5」，不能是「缺失键」：缺失会落回 BASELINE=1.0，
+        // 让没有成熟样本的格反而拿满权重。
+        let mut neutral = HashMap::new();
+        for style in style_keys() {
+            for period in Period::ALL.iter() {
+                neutral.insert(
+                    (style.to_string(), period.as_str().to_string()),
+                    CellPrior {
+                        base: RECO_LOOP_RESET_NEUTRAL_WEIGHT,
+                        effective: RECO_LOOP_RESET_NEUTRAL_WEIGHT,
+                    },
+                );
+            }
+        }
+        let neutral_res = compute_loop_cell_weights_with_priors(&samples, &neutral, now, &mover);
+        let trend_mid = cell(&neutral_res, "trend", "mid").new_weight;
+        assert!(
+            (trend_mid - RECO_LOOP_RESET_NEUTRAL_WEIGHT).abs() < 1e-9,
+            "无成熟样本的 trend_mid 必须停在中性先验，实际 {trend_mid}"
         );
     }
 

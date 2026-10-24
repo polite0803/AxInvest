@@ -15885,7 +15885,8 @@
       "sectionMissesDesc": "區間內漲幅達標卻未被選中的票：按歸因層拆開——沒進池、進池沒出票、還是被風格/檔位截斷。",
       "sectionSerenity": "趨勢智選驗證",
       "sectionSerenityDesc": "另一條鏈（LLM 候選）的勝率與閉環校驗；與上面的薦股矩陣分開讀，不混池。",
-      "matrixLegend": "讀法：列 = 策略風格，欄 = 持有檔位；格內依次為勝率（色標）、Sharpe/樣本數、IC（樣本不足時說明原因）、閉環權重。"
+      "matrixLegend": "讀法：列 = 策略風格，欄 = 持有檔位；格內依次為勝率（色標）、Sharpe/樣本數、IC（樣本不足時說明原因）、閉環權重。",
+      "executionQuality": "執行品質 {{score}}/10"
     },
     "moverRecall": {
       "title": "視窗漲幅達標漏檢核查",
@@ -17136,7 +17137,23 @@
         "high_error_rate": "錯誤模式 {{count}} 個，減少錯誤",
         "manual_trigger": "手動觸發：{{reason}}"
       },
-      "generationScope": "權重口徑：起算第 {{floor}} 代（已排除更早代的 {{preFloor}} 條、代際未知的 {{unknown}} 條）"
+      "generationScope": "權重口徑：起算第 {{floor}} 代（已排除更早代的 {{preFloor}} 條、代際未知的 {{unknown}} 條）",
+      "paramChangesTitle": "參數變更台帳",
+      "paramChangesHint": "套用即換代並留痕；到期後只比較變更前/後兩代命中率，只建議回滾，不自動改模板。",
+      "paramChangesEvaluate": "評估到期項",
+      "paramChangesEvaluated": "已評估 {{count}} 條",
+      "paramChangesEmpty": "暫無參數變更",
+      "paramChangesRollback": "回滾",
+      "paramChangesRolledBack": "已回滾並換代",
+      "paramChangesFailed": "操作失敗：{{msg}}",
+      "paramChangesRates": "變更前 {{before}} · 變更後 {{after}}",
+      "paramChangesStatus": {
+        "pending": "待觀察",
+        "insufficient": "樣本不足（已到期）",
+        "kept": "保留",
+        "rollbackSuggested": "建議回滾",
+        "rolledBack": "已回滾"
+      }
     },
     "toolLabel": {
       "get_stock_quote": "实时行情",
@@ -17569,7 +17586,7 @@
       "hitrateByAction": "按決策方向",
       "hitrateByHorizon": "按時間維度",
       "hitrateGroupRate": "組內命中率",
-      "insufficientSamples": "樣本不足",
+      "insufficientSamples": "暫無成熟樣本",
       "horizonAuto": "按主檔",
       "horizonUnknown": "未知週期",
       "colHorizon": "復盤檔",
@@ -17653,7 +17670,8 @@
       "tierUnlabelledHint": "{{count}} 條反思未聲明落地層級 —— 模板未產出該欄位，不代表它們屬於參數層。",
       "tierGridNote": "判為 L2/L3 的根因不在參數層，已排除在參數校準網格之外，需依明細逐條處置。",
       "tierEmpty": "暫無結構層待裁項（沒有反思判為 L2/L3）",
-      "failureModeOther": "其它"
+      "failureModeOther": "其它",
+      "hitrateScope": "口徑：本卡是**全庫**歷史反思的成熟樣本按 action×檔聚合，不是對當前這條反思的判定；單條反思只比對本次預測與之後實際走勢。分母為 0 的組顯示「暫無成熟樣本」，不代表本次反思缺樣本。"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

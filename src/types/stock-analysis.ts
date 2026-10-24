@@ -1247,6 +1247,12 @@ export interface AnalysisSummary {
    * 与 updatedAt 分家：后者会被交易意图审核、结果回写等后续写库顶掉。
    */
   completedAt: number | null;
+  /**
+   * 执行层反思的总体质量分（1-10，工作流口径，来自 `stock_execution_reflections`）。
+   * `null` = 该次分析尚无执行层反思（闭环未跑/失败），**不是 0 分**；
+   * 与决策动作（市场结果）分栏展示，不得换算成胜率。
+   */
+  executionQuality?: number | null;
   /** "live" | "replay" */
   analysisKind: string;
   /** as_of_date YYYY-MM-DD（仅 replay 模式非空） */

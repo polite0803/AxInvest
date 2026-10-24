@@ -17,7 +17,7 @@
 //! 中断的行原本是**当天实时分析**，结论只对那天有意义。用 live（今天）重跑，
 //! 等于把「当时的判断」换成「今天的判断」，与库内其它同日记录不可比，
 //! 也无法作为那天的反思样本。而 as-of 重跑恰好命中 `run_stock_workflow_inner`
-//! 的「replay 同日覆盖」分支（`stock_workflow/core.rs:450-458`）⇒ **原地 UPDATE
+//! 的「replay 同日覆盖」分支（`stock_workflow/core.rs:451-459`）⇒ **原地 UPDATE
 //! 同一 `analysis_id`**，不新建版本行、不污染历史。
 //!
 //! 附带收益（与 `axagent-batch-rerun` 同）：重跑后的分析其 `hindsight_date`

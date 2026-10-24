@@ -35,6 +35,12 @@ export interface UseTrackedTaskResult<T> {
  */
 export function useTrackedTask<T>(): UseTrackedTaskResult<T> {
   const { t } = useTranslation();
+  // `t` 不进回调依赖：i18next 的 `t` 在语言切换时会换身份（测试替身则每次渲染都换）。
+  // 一旦它进了 useCallback 依赖，消费方（如 RecommendationPanel 的 triggerBacktest →
+  // 挂载 effect）就会每次渲染拿到新回调 ⇒ effect 重跑 ⇒ setState ⇒ 再渲染，恒不收敛。
+  // 这里只在需要时读最新值，回调身份保持稳定。
+  const tRef = useRef(t);
+  tRef.current = t;
   const [taskId, setTaskId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [cancelled, setCancelled] = useState(false);
@@ -64,7 +70,7 @@ export function useTrackedTask<T>(): UseTrackedTaskResult<T> {
       if (!row) {
         settledRef.current = true;
         setRunning(false);
-        setError(t("tasksCenter.tracked.rowMissing"));
+        setError(tRef.current("tasksCenter.tracked.rowMissing"));
         return;
       }
       if (!TERMINAL_STATUSES.has(row.status)) {
@@ -74,23 +80,23 @@ export function useTrackedTask<T>(): UseTrackedTaskResult<T> {
       settledRef.current = true;
       setRunning(false);
       if (row.status === "failed") {
-        setError(row.output || t("tasksCenter.tracked.failedNoDetail"));
+        setError(row.output || tRef.current("tasksCenter.tracked.failedNoDetail"));
         return;
       }
       setCancelled(row.status === "stopped");
       if (!row.resultJson) {
         // 成功/取消却没有报告：这是缺陷，不能渲染成「完成但没有数据」
-        setError(t("tasksCenter.tracked.resultParseFailed"));
+        setError(tRef.current("tasksCenter.tracked.resultParseFailed"));
         return;
       }
       try {
         setResult(JSON.parse(row.resultJson) as T);
       } catch (e) {
         console.error("[useTrackedTask] resultJson 解析失败", e);
-        setError(t("tasksCenter.tracked.resultParseFailed"));
+        setError(tRef.current("tasksCenter.tracked.resultParseFailed"));
       }
     },
-    [t],
+    [],
   );
 
   const refresh = useCallback(

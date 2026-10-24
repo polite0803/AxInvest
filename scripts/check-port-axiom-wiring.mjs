@@ -264,6 +264,24 @@ function enclosingFunction(lines, hitIdx) {
   return { name: "<top-level>", start: hitIdx, end: hitIdx, text: "" };
 }
 
+/**
+ * `#[cfg(test)]` 模块的行区间。测试夹具构造 `ActiveModel` 不是生产写路径 ——
+ * 它只在 `cargo test` 的临时库里落行，没有用户数据可污染；把它当写入点报红
+ * 只会逼人往测试里塞门禁标记（假接线）。生产写路径全部在 test 模块之外。
+ */
+function testModuleRanges(lines) {
+  const ranges = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*#\[cfg\(test\)\]/.test(lines[i])) continue;
+    let j = i;
+    while (j < lines.length && !/\bmod\s+[A-Za-z0-9_]+\s*\{/.test(lines[j])) j++;
+    if (j >= lines.length) break;
+    ranges.push([i, matchBraceEnd(lines, j)]);
+    i = j;
+  }
+  return ranges;
+}
+
 /** 从 `startLine` 起按花括号配平，返回闭合行；找不到则返回最后一行。 */
 function matchBraceEnd(lines, startLine) {
   let depth = 0;
@@ -335,6 +353,23 @@ if (process.argv.includes("--selftest")) {
   check("嵌套 fn：命中行归外层", enclosingFunction(nested, 5).name, "outer");
   check("嵌套 fn：命中行归内层", enclosingFunction(nested, 3).name, "inner");
 
+  // ②b 测试模块区间：`#[cfg(test)]` 到模块闭合；其后的生产代码不得被误圈
+  const withTest = [
+    "fn prod() {}",
+    "#[cfg(test)]",
+    "mod tests {",
+    "    fn fixture() {",
+    "        let _ = workflow_template::ActiveModel { id: 1 };",
+    "    }",
+    "}",
+    "fn prod_after() {}",
+  ];
+  const ranges = testModuleRanges(withTest);
+  check("测试模块：恰一段区间", ranges.length, 1);
+  check("测试模块：起点是 cfg(test)", ranges[0][0], 1);
+  check("测试模块：终点是闭合括号", ranges[0][1], 6);
+  check("测试模块：区间不含其后的生产函数", ranges[0][1] < 7, true);
+
   // ③ 判定：三条路径都要能区分（防「恒绿」与「恒红」两种退化）
   check("无门禁 ⇒ 未接", isGated("f", "let a = 1;"), null);
   check("enforce ⇒ 自身门禁", isGated("f", "enforce_port_axioms(&n, &e)?;"), "自身门禁");
@@ -391,11 +426,18 @@ for (const f of files) {
   }
   const lines = clean.split("\n");
   const rawLines = raw.split("\n");
+  const testRanges = testModuleRanges(lines);
   const cleanHitLines = new Set();
   for (let i = 0; i < lines.length; i++) {
+    const inTestModule = testRanges.some(([a, b]) => i >= a && i <= b);
     for (const p of WRITE_PATTERNS) {
       if (!p.re.test(lines[i])) continue;
       if (p.needsFileContent && !p.needsFileContent.test(clean)) continue;
+      // 测试夹具不是生产写路径；仍标记为「净化后命中」，免得交叉复现把它报成净化器吞代码。
+      if (inTestModule) {
+        cleanHitLines.add(i);
+        continue;
+      }
       // 版本快照表（workflow_template_version）不是主表，且**必须**允许存旧形态 ⇒ 排除
       const ctx = lines[i] + (lines[i - 1] || "");
       if (/workflow_template_version/.test(ctx)) continue;

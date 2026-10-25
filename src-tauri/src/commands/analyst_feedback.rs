@@ -22,7 +22,6 @@ use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::blackboard::data_quality_report;
 use axagent_entities::analyst_feedback;
 use axagent_entities::analyst_feedback::Entity as AnalystFeedback;
-use axagent_entities::stock_analyses;
 use axagent_harness::DatabaseConnection;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
@@ -611,7 +610,7 @@ pub(crate) async fn record_analyst_feedbacks(
 ) -> AnalystFeedbackOutcome {
     // 快速链没有那 10 个分析师节点（`record_dqi_observation` 同一判据、同一理由：
     // 把结构性缺产物记成质量异常，三轮之后就永久熔断在假理由上）。
-    if template_id == crate::commands::stock_analysis_setup::seed_stock_analysis::FAST_TEMPLATE_ID {
+    if template_id == axagent_harness::constants::FAST_TEMPLATE_ID {
         return AnalystFeedbackOutcome::not_written("fast_chain");
     }
 
@@ -625,8 +624,15 @@ pub(crate) async fn record_analyst_feedbacks(
         },
     };
 
-    let row = stock_analyses::Entity::find_by_id(analysis_id).one(db).await.ok().flatten();
-    let Some(row) = row else {
+    // 代际标签只从本行取（窄 DTO，不拉整行 —— 同 dao::repo::stock_analysis_rerun_queue 的纪律）
+    let meta = axagent_dao::repo::stock_analysis_rerun_queue::fetch_analysis_generation_meta(
+        db,
+        analysis_id,
+    )
+    .await
+    .ok()
+    .flatten();
+    let Some(meta) = meta else {
         tracing::warn!(
             "[analyst_feedback] 查不到分析记录，本轮不写反馈: analysis_id={analysis_id}"
         );
@@ -641,10 +647,10 @@ pub(crate) async fn record_analyst_feedbacks(
     };
 
     let generation = FeedbackGeneration {
-        analysis_kind: row.analysis_kind.clone(),
-        analysis_source: row.source.clone(),
-        analysis_synthetic: row.synthetic,
-        analysis_as_of_date: row.as_of_date.clone(),
+        analysis_kind: meta.analysis_kind,
+        analysis_source: meta.source,
+        analysis_synthetic: meta.synthetic,
+        analysis_as_of_date: meta.as_of_date,
     };
 
     let drafts = build_analyst_feedback_rows(&report, &generation);
@@ -662,7 +668,7 @@ pub(crate) async fn record_analyst_feedbacks(
         // 标识在这一步补齐：行是本次分析的行，与 draft 里的载荷字段同源。
         let payload = SaveNodeFeedbackRequest {
             report_id: analysis_id.to_string(),
-            stock_code: row.stock_code.clone(),
+            stock_code: meta.stock_code.clone(),
             execution_id: execution_id.to_string(),
             ..draft
         };
@@ -865,11 +871,12 @@ mod analyst_feedback_ipc_tests {
 #[cfg(test)]
 mod analyst_feedback_row_tests {
     use super::*;
+    use axagent_harness::AnalysisKind;
     use serde_json::json;
 
     fn generation() -> FeedbackGeneration {
         FeedbackGeneration {
-            analysis_kind: "live".to_string(),
+            analysis_kind: AnalysisKind::Live.as_storage().to_string(),
             analysis_source: "live".to_string(),
             analysis_synthetic: 0,
             analysis_as_of_date: Some("2026-10-25".to_string()),
@@ -1034,7 +1041,7 @@ mod analyst_feedback_row_tests {
         assert_eq!(rows.len(), 3);
         for row in &rows {
             let m = metrics_of(row);
-            assert_eq!(m["analysis_kind"], json!("live"));
+            assert_eq!(m["analysis_kind"], json!(AnalysisKind::Live.as_storage()));
             assert_eq!(m["analysis_source"], json!("live"));
             assert_eq!(m["analysis_synthetic"], json!(0));
             assert_eq!(m["analysis_as_of_date"], json!("2026-10-25"));

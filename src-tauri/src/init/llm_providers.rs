@@ -15,7 +15,7 @@
 //! 避免重复 DB 查询逻辑（AGENTS.md 第 12 条：禁止重复定义）。
 //!
 //! **此处不提供 `LlmJudge` 工厂**（2026-09-12 删除 `build_llm_judge_from_db`）：
-//! `LlmJudge` 的消费者 `RLEngine::set_llm_judge()` 由 `src/init/services.rs:975` 用
+//! `LlmJudge` 的消费者 `RLEngine::set_llm_judge()` 由 `src/init/services.rs:1033` 用
 //! `axagent_runtime::llm_bridge::build_llm_bridge_from_db()` 的返回值直接注入 ——
 //! 该工厂全仓 **17 个调用者**，是本项目 bridge 的权威来源。被删的那个函数只是
 //! 它的**平行副本**（返回同一个 `ProviderLlmBridge`），零调用 ⇒ 按 AGENTS.md

@@ -328,6 +328,14 @@ pub mod llm_defaults {
     pub const COMPRESSION_MAX_TOKENS: u32 = 1024;
 }
 
+/// 快速链（无 10 个分析师节点）的模板 id —— 全仓唯一权威。
+///
+/// 写反馈/观测的判据（`commands/analyst_feedback` 与 `record_dqi_observation`）与
+/// 种子化模块必须同名。留在 `commands/stock_analysis_setup` 里会让
+/// `commands/stock_workflow` 与 `commands/analyst_feedback` 都要跨命令模块 import
+/// （命中 `commands-no-sibling-call`）。纯标识符、不承载业务 ⇒ 按 [`capability_pack`] 先例收进 harness。
+pub const FAST_TEMPLATE_ID: &str = "stock-analysis-fast";
+
 /// OPC 域包（Domain Pack）协议 / 钩子的共享标识符。
 ///
 /// 此前这两个值分别定义在 `commands/opc_workflow_kpi_hook.rs` 与

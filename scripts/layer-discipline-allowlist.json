@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-10-16",
+  "generatedAt": "2026-10-25",
   "note": "分层护栏棘轮基线：**只减不增**。修复违规后必须用 --update-baseline 下调，否则基线虚高会让棘轮失效。",
   "rules": {
     "commands-no-direct-db": {
-      "total": 629,
+      "total": 628,
       "files": {
         "src-tauri/src/commands/agency_expert.rs": 4,
         "src-tauri/src/commands/agent/command_bridge.rs": 1,
@@ -99,7 +99,7 @@
         "src-tauri/src/commands/skills/analysis.rs": 2,
         "src-tauri/src/commands/skills_hub.rs": 2,
         "src-tauri/src/commands/sources.rs": 1,
-        "src-tauri/src/commands/stock_analysis.rs": 67,
+        "src-tauri/src/commands/stock_analysis.rs": 66,
         "src-tauri/src/commands/stock_analysis_bridge.rs": 19,
         "src-tauri/src/commands/stock_analysis_bridge_tests.rs": 6,
         "src-tauri/src/commands/stock_analysis_setup/seed_concept_index.rs": 1,

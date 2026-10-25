@@ -221,6 +221,11 @@ const SHARED_INFRA_MODULES = new Set([
   // 2026-10-24 的「慢命令接入后台任务台账」让多个命令模块调用它；不登记会把每一处
   // 接入都判成跨模块互调，而它们本来就应该走同一个台账入口。
   "background_tasks",
+  // 分析师质量反馈的唯一写入入口（`record_analyst_feedbacks`）：`stock_workflow::core`
+  // 的三条通道（对话直执行 / 每日自动化批次 / T+0 重跑）必须共用同一套行构造与
+  // 代际标签，否则实盘与回放样本事后无法分桶。留在任一命令模块里都会被另外三处
+  // 跨模块调用命中规则 2，故按 `price_alert_upsert` 先例登记为写入侧基础设施。
+  "analyst_feedback",
 ]);
 
 /**

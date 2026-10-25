@@ -8468,7 +8468,10 @@ pub(crate) const VALUE_INVESTOR_ID: &str = "value-investor";
 
 /// 快速链模板 id（前端 `src/components/stock-analysis/StockSearchBar.tsx` 的
 /// `FAST_TEMPLATE_ID` 与此同值；两处都是模板的入口契约）。
-pub(crate) const FAST_TEMPLATE_ID: &str = "stock-analysis-fast";
+///
+/// 权威源在 `axagent_harness::constants::FAST_TEMPLATE_ID` —— 本模块与
+/// `commands/analyst_feedback` 等消费方共用一份，不再各写字面量。
+pub(crate) const FAST_TEMPLATE_ID: &str = axagent_harness::constants::FAST_TEMPLATE_ID;
 
 /// 快速链模板写在 `workflow_templates.version` 上的版本号。
 ///

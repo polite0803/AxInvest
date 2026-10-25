@@ -327,6 +327,40 @@ pub async fn fetch_analysis_status(
     Ok(stock_analyses::Entity::find_by_id(analysis_id.to_string()).one(db).await?.map(|m| m.status))
 }
 
+/// 写分析师反馈行所需的「本代」元数据 —— 只取五列窄投影。
+///
+/// 反馈表没有代际列 ⇒ 每行必须自带 `analysis_kind` / `source` / `synthetic` /
+/// `as_of_date` 才能事后分桶；`stock_code` 同属写入载荷。命令层此前直接
+/// `axagent_entities::stock_analyses::Entity::find_by_id` 取整行（违反规则 1，
+/// 且会连带拉出 `blackboard_snapshot` 这类大列），本函数把读取收回 dao。
+pub async fn fetch_analysis_generation_meta(
+    db: &DatabaseConnection,
+    analysis_id: &str,
+) -> Result<Option<AnalysisGenerationMeta>, sea_orm::DbErr> {
+    stock_analyses::Entity::find_by_id(analysis_id.to_string())
+        .select_only()
+        .columns([
+            stock_analyses::Column::StockCode,
+            stock_analyses::Column::AnalysisKind,
+            stock_analyses::Column::Source,
+            stock_analyses::Column::Synthetic,
+            stock_analyses::Column::AsOfDate,
+        ])
+        .into_model::<AnalysisGenerationMeta>()
+        .one(db)
+        .await
+}
+
+/// [`fetch_analysis_generation_meta`] 的窄 DTO —— 字段集就是「写反馈行」的完整输入面。
+#[derive(Debug, Clone, PartialEq, FromQueryResult)]
+pub struct AnalysisGenerationMeta {
+    pub stock_code: String,
+    pub analysis_kind: String,
+    pub source: String,
+    pub synthetic: i32,
+    pub as_of_date: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

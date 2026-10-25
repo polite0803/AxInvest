@@ -81,9 +81,6 @@ fn profile_from_entity(m: agent_profiles::Model) -> AgentProfile {
         source: m.source,
         tags: parse_json_arr(&m.tags),
         suggested_provider_id: m.suggested_provider_id,
-        suggested_model_id: m.suggested_model_id,
-        suggested_temperature: m.suggested_temperature,
-        suggested_max_tokens: m.suggested_max_tokens.map(|v| v as u32),
         search_enabled: m.search_enabled,
         recommend_permission_mode: m.recommend_permission_mode,
         recommended_tools: parse_json_arr(&m.recommended_tools),
@@ -182,9 +179,6 @@ pub async fn upsert_agent_profile(
     source: &str,
     tags: &[String],
     suggested_provider_id: Option<&str>,
-    suggested_model_id: Option<&str>,
-    suggested_temperature: Option<f64>,
-    suggested_max_tokens: Option<i64>,
     search_enabled: Option<bool>,
     recommend_permission_mode: Option<&str>,
     recommended_tools: &[String],
@@ -213,9 +207,6 @@ pub async fn upsert_agent_profile(
             Some(stringify_json_arr(tags))
         }),
         suggested_provider_id: Set(suggested_provider_id.map(|s| s.to_string())),
-        suggested_model_id: Set(suggested_model_id.map(|s| s.to_string())),
-        suggested_temperature: Set(suggested_temperature),
-        suggested_max_tokens: Set(suggested_max_tokens),
         search_enabled: Set(search_enabled),
         recommend_permission_mode: Set(recommend_permission_mode.map(|s| s.to_string())),
         recommended_tools: Set(if recommended_tools.is_empty() {
@@ -250,9 +241,6 @@ pub async fn upsert_agent_profile(
                 .update_column(agent_profiles::Column::AgentRole)
                 .update_column(agent_profiles::Column::Tags)
                 .update_column(agent_profiles::Column::SuggestedProviderId)
-                .update_column(agent_profiles::Column::SuggestedModelId)
-                .update_column(agent_profiles::Column::SuggestedTemperature)
-                .update_column(agent_profiles::Column::SuggestedMaxTokens)
                 .update_column(agent_profiles::Column::SearchEnabled)
                 .update_column(agent_profiles::Column::RecommendPermissionMode)
                 .update_column(agent_profiles::Column::RecommendedTools)

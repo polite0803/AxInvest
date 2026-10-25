@@ -49,7 +49,9 @@ export function getDefaultVariables(): Variable[] {
   //  250→上限 380，量程小于真实值时用户一拖就把取数根数改小）。
   b("kline_limit", 250, "stockAnalysis.configDescriptions.klineLimit", "number");
   b("news_limit", 30, "stockAnalysis.configDescriptions.newsLimit", "number");
-  // Agent 节点 LLM 参数
+  // Agent 节点 LLM 参数 —— 主模板 Agent 节点的**唯一**采样参数权威。
+  // 种子里 Agent 节点的同名字段已置空（v181），节点级 UI 入口已移除；
+  // 不要在别处再补一份默认值，否则又会变成「面板改了不生效」。
   b("agent_temperature", 0.3, "stockAnalysis.configDescriptions.agentTemperature", "number");
   b("agent_max_tokens", 32768, "stockAnalysis.configDescriptions.agentMaxTokens", "number");
   b("agent_timeout_secs", 600, "stockAnalysis.configDescriptions.agentTimeoutSecs", "number");
@@ -70,10 +72,13 @@ export function getDefaultVariables(): Variable[] {
   b("pos_max_single_pct", 20, "stockAnalysis.configDescriptions.posMaxSinglePct", "number");
   b("pos_max_total", 10, "stockAnalysis.configDescriptions.posMaxTotal", "number");
   b("pos_max_sector_pct", 40, "stockAnalysis.configDescriptions.posMaxSectorPct", "number");
-  // 估值参数（A股校准：growth=12 / perpetual=4 / discount=8.5）
+  // 估值参数（唯一权威是 `mcp_tools.rs` 的三个常量，种子按 ×100 派生，此处等值抄种子。
+  // ⚠ 2026-10-25 实测此处曾停在**上一代校准**（perpetual 4 / discount 8.5，而权威是 1.3 / 7.7）
+  //   ⇒ 「模板 variables 为空」那条初始化路径会把旧值写回库里。逐字段等式由
+  //   `scripts/check-stock-var-defaults-parity.mjs` 守，改权威值必须同批改这三行。）
   b("value_dcf_growth_rate", 12, "stockAnalysis.configDescriptions.valueDcfGrowthRate", "number");
-  b("value_dcf_perpetual_rate", 4, "stockAnalysis.configDescriptions.valueDcfPerpetualRate", "number");
-  b("value_dcf_discount_rate", 8.5, "stockAnalysis.configDescriptions.valueDcfDiscountRate", "number");
+  b("value_dcf_perpetual_rate", 1.3, "stockAnalysis.configDescriptions.valueDcfPerpetualRate", "number");
+  b("value_dcf_discount_rate", 7.7, "stockAnalysis.configDescriptions.valueDcfDiscountRate", "number");
   b("value_moat_threshold", 60, "stockAnalysis.configDescriptions.valueMoatThreshold", "number");
   b("value_fscore_buy", 7, "stockAnalysis.configDescriptions.valueFscoreBuy", "number");
   b("value_safety_margin", 20, "stockAnalysis.configDescriptions.valueSafetyMargin", "number");
@@ -160,13 +165,17 @@ export function getDefaultVariables(): Variable[] {
   b("reco_value_enabled", true, "stockAnalysis.configDescriptions.recoValueEnabled", "boolean");
   b("reco_capital_enabled", true, "stockAnalysis.configDescriptions.recoCapitalEnabled", "boolean");
   b("reco_watchlist_enabled", true, "stockAnalysis.configDescriptions.recoWatchlistEnabled", "boolean");
-  b("reco_min_confidence", 60, "stockAnalysis.configDescriptions.recoMinConfidence", "number");
+  // 权威是种子 `reco_min_confidence = 50`（60 会滤掉 value/reversion/watchlist 的超短线产出，
+  // 见 seed_variables.rs 该块的注释）；此处曾停在 60 ⇒ 空模板路径会把门槛改回 60。
+  b("reco_min_confidence", 50, "stockAnalysis.configDescriptions.recoMinConfidence", "number");
   b("reco_stop_vol_mult", 1.2, "stockAnalysis.configDescriptions.recoStopVolMult", "number");
   b("reco_target_vol_mult", 2.0, "stockAnalysis.configDescriptions.recoTargetVolMult", "number");
   b("reco_risk_budget_pct", 1.5, "stockAnalysis.configDescriptions.recoRiskBudgetPct", "number");
   b("reco_round_trip_cost_pct", 0.6, "stockAnalysis.configDescriptions.recoRoundTripCostPct", "number");
   b("reco_conf_sensitivity", 1.0, "stockAnalysis.configDescriptions.recoConfSensitivity", "number");
-  b("reco_ic_gate", "shadow", "stockAnalysis.configDescriptions.recoIcGate", "string");
+  // 权威是种子 `DEFAULT_RECO_IC_GATE = "on"`（v172 起闭环生效，且同批 `force_variable_value`
+  // 覆写过存量库的 "shadow"）；此处曾停在 "shadow" ⇒ 空模板路径会把闸退回影子模式。
+  b("reco_ic_gate", "on", "stockAnalysis.configDescriptions.recoIcGate", "string");
   // 决策回溯（decision_tracker.rs）
   b("decision_max_history_per_stock", 50, "stockAnalysis.configDescriptions.decisionMaxHistoryPerStock", "number");
   // 技术指标周期（indicators.rs IndicatorConfig）

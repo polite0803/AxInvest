@@ -2384,7 +2384,6 @@ async function executeCommand<T>(
         temperature: null,
         max_tokens: null,
         top_p: null,
-        frequency_penalty: null,
         search_enabled: false,
         search_provider_id: null,
         thinking_budget: null,
@@ -2430,9 +2429,6 @@ async function executeCommand<T>(
         }
         if (input.topP !== undefined) {
           convs[idx].topP = input.topP;
-        }
-        if (input.frequencyPenalty !== undefined) {
-          convs[idx].frequencyPenalty = input.frequencyPenalty;
         }
         convs[idx].updatedAt = nowTs();
         setStore("conversations", convs);
@@ -2498,10 +2494,6 @@ async function executeCommand<T>(
         iconValue: input.iconValue ?? null,
         systemPrompt: input.systemPrompt ?? null,
         defaultModel: input.defaultModel ?? null,
-        defaultTemperature: input.defaultTemperature ?? null,
-        defaultMaxTokens: input.defaultMaxTokens ?? null,
-        defaultTopP: input.defaultTopP ?? null,
-        defaultFrequencyPenalty: input.defaultFrequencyPenalty ?? null,
         sortOrder: maxOrder + 1,
         isCollapsed: false,
         createdAt: nowTs(),
@@ -2536,18 +2528,6 @@ async function executeCommand<T>(
         }
         if (input.defaultModel !== undefined) {
           cats[idx].defaultModel = input.defaultModel;
-        }
-        if (input.defaultTemperature !== undefined) {
-          cats[idx].defaultTemperature = input.defaultTemperature;
-        }
-        if (input.defaultMaxTokens !== undefined) {
-          cats[idx].defaultMaxTokens = input.defaultMaxTokens;
-        }
-        if (input.defaultTopP !== undefined) {
-          cats[idx].defaultTopP = input.defaultTopP;
-        }
-        if (input.defaultFrequencyPenalty !== undefined) {
-          cats[idx].defaultFrequencyPenalty = input.defaultFrequencyPenalty;
         }
         cats[idx].updatedAt = nowTs();
         setStore("conversation_categories", cats);

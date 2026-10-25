@@ -214,7 +214,10 @@ pub(crate) struct StreamTaskParams {
     pub mcp_server_ids: Vec<String>,
     pub override_created_at: Option<i64>,
     pub use_max_completion_tokens: Option<bool>,
-    pub force_max_tokens: Option<bool>,
+    /// 模型级默认采样参数：会话未显式设置时作为回退值（唯一来源见 MODEL_PARAM_OVERRIDES）。
+    pub model_temperature: Option<f32>,
+    pub model_top_p: Option<f32>,
+    pub model_max_tokens: Option<u32>,
     pub thinking_param_style: Option<String>,
     pub request_delay_ms: Option<u64>,
     pub settings: AppSettings,
@@ -744,12 +747,21 @@ pub async fn create_conversation(
     provider_id: String,
     system_prompt: Option<String>,
 ) -> Result<Conversation, String> {
-    axagent_dao::repo::conversation::create_conversation(
+    // 全局默认值是新建会话的**唯一**初始化来源；落库后运行时只读会话自身的值。
+    let settings =
+        axagent_dao::repo::settings::get_settings(state.harness.db()).await.unwrap_or_default();
+    let defaults = axagent_dao::repo::conversation::ConversationParamDefaults {
+        temperature: settings.default_temperature.map(|v| v as f64),
+        max_tokens: settings.default_max_tokens.map(|v| v as i64),
+        top_p: settings.default_top_p.map(|v| v as f64),
+    };
+    axagent_dao::repo::conversation::create_conversation_with_defaults(
         state.harness.db(),
         &title,
         &model_id,
         &provider_id,
         system_prompt.as_deref(),
+        defaults,
     )
     .await
     .map_err(|e| {
@@ -2239,7 +2251,9 @@ pub(crate) async fn generate_ai_title_with(
         stream: false,
         temperature: settings.title_summary_temperature.map(|v| v as f64).or(Some(0.3)),
         top_p: settings.title_summary_top_p.map(|v| v as f64),
-        max_tokens: settings.title_summary_max_tokens.or(Some(50)),
+        max_tokens: settings
+            .title_summary_max_tokens
+            .or(Some(axagent_harness::constants::llm_defaults::TITLE_SUMMARY_MAX_TOKENS)),
         tools: None,
         thinking_budget: None,
         use_max_completion_tokens,

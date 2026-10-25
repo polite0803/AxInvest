@@ -594,12 +594,19 @@ pub struct PortfolioRiskGateOutput {
 /// 5. 空头目标价强制卖出（BEARISH_TARGET_PRICE_RATIO=0.85）
 /// 6. 组合总仓位归一化（normalize_position_weights，total > 100% 时缩放）
 ///
+/// ⚠️ v183：本函数**不删规则**，改的是 `target_price` 的来源。
+/// 原实参是 trader（LLM 决策节点）报的目标价 ⇒ 公式的最终动作会被对方的报价直接翻成「卖出」，
+/// 这就是「假独立」。现由 `portfolio-risk-gate.rhai` 用**分析师族价值投资者的安全边际**
+/// （`value-investor--档.result.margin_of_safety.pct`）折算目标价后传入：
+/// `target = current × (1 + margin_pct / 100)`。比值判据、0.85 阈值、返回结构全部不变，
+/// 变的只是「谁的价格在说话」。
+///
 /// # 参数
 /// - `pm_action`: portfolio-mgr 输出的原始 action
 /// - `pm_position_pct`: portfolio-mgr 输出的原始仓位
 /// - `pm_risk_level`: portfolio-mgr 输出的风险等级
 /// - `current_price`: 当前价（用于计算新增仓位市值）
-/// - `target_price`: 目标价（用于空头检测）
+/// - `target_price`: **目标价**——v183 起由价值投资者的安全边际折算（不再是 trader 报价）
 /// - `stock_code`: 待交易股票代码
 /// - `stock_sector`: 待交易股票行业（可选）
 /// - `holdings_json`: 当前持仓 JSON 数组（`Vec<PositionSummary>` 序列化）
@@ -717,6 +724,8 @@ pub fn portfolio_risk_gate(
     let portfolio_total_value = total_mv + portfolio_cash;
 
     // 2. 检查空头目标价强制卖出（BEARISH_TARGET_PRICE_RATIO=0.85）
+    //    v183：`target_price` 的来源由 trader 报价换成「现价 ×(1+分析师安全边际)」，
+    //    判据、阈值、返回结构一字未动（见 `portfolio-risk-gate.rhai` 的折算段）。
     if let Ok(force_sell) = PositionLimits::check_bearish_force_sell(current_price, target_price) {
         if force_sell {
             return serde_json::to_string(&PortfolioRiskGateOutput {

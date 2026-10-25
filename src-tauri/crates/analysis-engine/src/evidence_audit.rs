@@ -1494,12 +1494,24 @@ mod tests {
         );
         for call in [
             "pm_score_to_signal(totalScore)",
-            "pm_score_to_signal(consensusScore)",
             "pm_score_to_signal(dqi_score)",
             "pm_score_to_signal(ss_f)",
         ] {
             assert!(PM.contains(call), "主链缺这条归一化调用：{call}");
         }
+        // f2 不在上述清单里（v182 起）：`consensus_score` 按契约是**收敛程度**、无方向含义，
+        // 「减中点除以中点」那套「评分→信号」的归一化对它**语义就不成立** —— 现网一条
+        // direction=neutral、consensus_score=55 的记录被它投成了看多。f2 现在读
+        // `aggregate_prediction.direction` 的符号 × 收敛度，见主链 f2 段注释。
+        // 这条断言是**反向锁**：谁把旧口径抄回来，这里当场红。
+        assert!(
+            !PM.contains("pm_score_to_signal(consensusScore)"),
+            "主链又把「收敛程度」按评分→信号当方向用了 ⇒ 违反 f2 的方向契约（v182）"
+        );
+        assert!(
+            PM.contains("consensusDirection"),
+            "主链 f2 必须消费辩论聚合方向 `consensusDirection`，否则方向又落回 consensus_score"
+        );
 
         // 逐档腿那一份也必须走同一实现（原先它自带一份内联的 `(ts - 50.0) / 50.0`）
         const LEG: &str = include_str!("leg_signal.rs");

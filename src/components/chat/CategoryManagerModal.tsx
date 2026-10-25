@@ -58,10 +58,6 @@ export function CategoryManagerModal({
           defaultModel: data.defaultProviderId && data.defaultModelId
             ? ModelRef.from(data.defaultProviderId, data.defaultModelId)
             : null,
-          defaultTemperature: data.defaultTemperature,
-          defaultMaxTokens: data.defaultMaxTokens,
-          defaultTopP: data.defaultTopP,
-          defaultFrequencyPenalty: data.defaultFrequencyPenalty,
         });
         setCreateModalOpen(false);
         message.success(t("chat.createCategory") + " " + t("common.success"));
@@ -89,10 +85,6 @@ export function CategoryManagerModal({
           defaultModel: data.defaultProviderId && data.defaultModelId
             ? ModelRef.from(data.defaultProviderId, data.defaultModelId)
             : null,
-          defaultTemperature: data.defaultTemperature,
-          defaultMaxTokens: data.defaultMaxTokens,
-          defaultTopP: data.defaultTopP,
-          defaultFrequencyPenalty: data.defaultFrequencyPenalty,
         });
         setEditingCategory(null);
         message.success(t("chat.editCategory") + " " + t("common.success"));
@@ -123,10 +115,6 @@ export function CategoryManagerModal({
       iconValue: category.iconValue,
       systemPrompt: category.systemPrompt,
       defaultModel: category.defaultModel,
-      defaultTemperature: category.defaultTemperature,
-      defaultMaxTokens: category.defaultMaxTokens,
-      defaultTopP: category.defaultTopP,
-      defaultFrequencyPenalty: category.defaultFrequencyPenalty,
     });
   }, []);
 
@@ -273,10 +261,6 @@ export function CategoryManagerModal({
           initialSystemPrompt={editingCategory.systemPrompt}
           initialDefaultProviderId={editingCategory.defaultModel?.a ?? null}
           initialDefaultModelId={editingCategory.defaultModel?.b ?? null}
-          initialDefaultTemperature={editingCategory.defaultTemperature}
-          initialDefaultMaxTokens={editingCategory.defaultMaxTokens}
-          initialDefaultTopP={editingCategory.defaultTopP}
-          initialDefaultFrequencyPenalty={editingCategory.defaultFrequencyPenalty}
           confirmLoading={saving}
         />
       )}

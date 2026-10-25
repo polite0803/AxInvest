@@ -359,6 +359,39 @@ impl axagent_harness::HasProviderRegistry for AgentExecutor {
     }
 }
 
+/// 节点输出模式 → 原生结构化输出请求参数（**结构性**，v187 起无开关）。
+///
+/// ## 为什么是 Json 节点恒开，而不是可配
+///
+/// 本仓的「结构化」此前完全靠 prompt 里的 VERDICT 契约 + 事后校验：模型少一个引号、
+/// 多一句前言，就要走 `strict_mode` 降级或 fallback 重试（一次 30 s 级）。原生
+/// `response_format` 把这件事前移到解码端 —— 各家等价物：OpenAI `json_object`、
+/// Gemini `responseMimeType`、llama.cpp / Ollama 的 JSON grammar 约束
+/// （见 `providers/src/openai.rs` 的映射与 `structured_output.rs` 的能力判定）。
+///
+/// P0-C 首版把它做成模板变量 `structured_output_mode`（默认 `off`）⇒ 要求「开启原生
+/// 结构化输出」实际得到一条**默认关闭**的通路。v187 改为由节点输出模式直接决定：
+/// `OutputMode::Json` 恒下发，不给「忘了打开」留位置。
+///
+/// ## 为什么不给 Text / Artifact 下发
+///
+/// - `Text`（分析师等）：一次响应**同时**产出正文 + `<!-- VERDICT: {...} -->` 标签。
+///   下发 `json_object` 会把整段正文逼成 JSON ⇒ 报告正文与解析契约同时改，收益为负。
+/// - `Artifact`：产出的是文件内容，不是本次调用的结构化结论。
+///
+/// ## 风险（明示）
+///
+/// 少数 OpenAI 兼容端点可能对 `response_format` 直接 400。这里不做按域名白名单的
+/// 能力探测 —— 八个内置兼容 provider 与官方 OpenAI 均支持 `json_object`，而未知端点
+/// 一旦 400 会以节点错误**显形**（不是静默降级）；届时按实际报错补一条判定，
+/// 比现在凭猜测列白名单更可靠。
+fn json_response_format(
+    mode: &axagent_harness::workflow_types::OutputMode,
+) -> Option<axagent_harness::types::ResponseFormat> {
+    matches!(mode, axagent_harness::workflow_types::OutputMode::Json)
+        .then_some(axagent_harness::types::ResponseFormat::JsonObject)
+}
+
 #[async_trait]
 impl NodeExecutorTrait for AgentExecutor {
     fn node_type(&self) -> &'static str {
@@ -645,12 +678,21 @@ impl NodeExecutorTrait for AgentExecutor {
         }
 
         // 4d. 上下文数据（自然语言格式化，替代 raw JSON dump）
+        let debate_context_mode =
+            context.variables.get("debate_context_mode").and_then(|v| v.as_str()).unwrap_or("full");
+        let mut context_source_stats: Vec<(String, usize)> = Vec::new();
         if !an.config.context_sources.is_empty() {
             let mut missing_sources: Vec<&String> = Vec::new();
             all_segments.push(TemplateSegment::Static("\n\n--- 上游节点输出 ---\n".to_string()));
             for source in &an.config.context_sources {
                 if let Some(value) = context.variables.get(source) {
-                    let formatted = format_context_source(source, value);
+                    let formatted = format_debate_context_source(
+                        source,
+                        value,
+                        node.base_id(),
+                        debate_context_mode,
+                    );
+                    context_source_stats.push((source.clone(), formatted.chars().count()));
                     all_segments.push(TemplateSegment::Static(formatted));
                 } else {
                     missing_sources.push(source);
@@ -973,6 +1015,7 @@ impl NodeExecutorTrait for AgentExecutor {
                 format!("Prompt rendering failed: {e}"),
             )
         })?;
+        let system_prompt_chars = system_prompt.chars().count();
 
         // 5. 构建 user_prompt：始终包含用户原始消息 + context_sources 变量
         let user_message =
@@ -985,17 +1028,22 @@ impl NodeExecutorTrait for AgentExecutor {
             user_prompt_parts.push(format!("用户消息: {user_message}"));
         }
 
+        // 2026-10-25（P0-A）：上下文注入去重。默认 legacy 保持历史行为；
+        // `context_prompt_mode=system_only` 时，system 段（4d）已注入同一批
+        // context_sources 的格式化正文，user 段不再重复整份 raw JSON（含 usage/thinking）。
+        let context_prompt_mode = context
+            .variables
+            .get("context_prompt_mode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("legacy");
+
         // 注入 context_sources 指定的变量（若有）
         if !an.config.context_sources.is_empty() {
-            for source in &an.config.context_sources {
-                if let Some(value) = context.variables.get(source) {
-                    // 跳过 input / user_message（已在上方注入，避免重复）
-                    if source == super::USER_INPUT_VAR || source == super::USER_MESSAGE_VAR {
-                        continue;
-                    }
-                    user_prompt_parts.push(format!("{source}: {value}"));
-                }
-            }
+            user_prompt_parts.extend(context_sources_user_prompt_parts(
+                &an.config.context_sources,
+                &context.variables,
+                context_prompt_mode,
+            ));
         } else {
             // 向后兼容：无 context_sources 时只注入"数据变量"（节点输出 + 已知用户输入），
             // 通过 var_filter::collect_data_vars 过滤掉 100+ 模板变量（scoring_trend /
@@ -1009,7 +1057,11 @@ impl NodeExecutorTrait for AgentExecutor {
             }
         }
 
+        if user_prompt_parts.is_empty() {
+            user_prompt_parts.push("请基于系统提示中的上游节点输出完成本次分析任务。".to_string());
+        }
         let user_prompt = user_prompt_parts.join("\n");
+        let user_prompt_chars = user_prompt.chars().count();
 
         let mut messages: Vec<ChatMessage> = vec![
             ChatMessage {
@@ -1097,8 +1149,61 @@ impl NodeExecutorTrait for AgentExecutor {
             )
         };
 
+        // 2026-10-25（P0-B）：分析师工具固定序列预取。
+        // 只在 `analyst_tool_mode=fixed_prefetch` 时启用；默认 auto 保持历史行为。
+        // 预取结果注入 system prompt，并把成功预取的工具从本轮 tools 列表中摘除，
+        // 让模型一次响应直接产出结论；失败的工具保留给模型自行重试。
+        let analyst_tool_mode =
+            context.variables.get("analyst_tool_mode").and_then(|v| v.as_str()).unwrap_or("auto");
+        let mut tools_for_llm = tools.clone();
+        let mut prefetch_chars = 0usize;
+        let mut prefetched_tools: Vec<String> = Vec::new();
+        check_cancellation_or_pause(context).await?;
+        if should_prefetch_tools(analyst_tool_mode) {
+            let stock_code = context
+                .variables
+                .get("stock_code")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if !stock_code.is_empty() {
+                if let Some(ref tool_list) = tools {
+                    let kline_limit = context
+                        .variables
+                        .get("kline_limit")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(120);
+                    let (note, succeeded) =
+                        prefetch_tool_results(context, tool_list, &stock_code, kline_limit).await;
+                    if !note.is_empty() {
+                        prefetch_chars = note.chars().count();
+                        if let ChatContent::Text(ref mut system) = messages[0].content {
+                            system.push_str(&note);
+                        }
+                        if let Some(ref mut list) = tools_for_llm {
+                            list.retain(|t| !succeeded.contains(&t.function.name));
+                        }
+                        prefetched_tools = succeeded;
+                    }
+                }
+            }
+        }
+
+        // 预取是一次新的外部 I/O 窗口：前后各查一次取消/暂停，避免用户取消后仍等满 20s。
+        check_cancellation_or_pause(context).await?;
+
+        // v187：Json 节点**恒**下发 response_format（原生结构化输出，结构性无开关）。
+        //   模板变量 `structured_output_mode`（默认 off，P0-C 首版引入）已退役 —— 它把本项要求
+        //   做成了一条默认关闭的通路（理由见 `json_response_format` 的文档）。
+        let response_format = json_response_format(&an.config.output_mode);
+
         // 最大工具调用轮数：配置值或默认 5
         let max_rounds = an.config.max_tool_rounds.unwrap_or(5).max(1);
+        // 2026-10-25（P0-D）：单节点工具调用总上限（0=不限，默认 8）。
+        let max_tool_calls =
+            context.variables.get("max_tool_calls_per_node").and_then(|v| v.as_u64()).unwrap_or(8)
+                as usize;
+        let mut tool_calls_executed_total = 0usize;
         let mut total_usage = (0u32, 0u32);
         let mut final_content = String::new();
         // 2026-09-14：**流完整性**标记（粘性，跨轮次累积）。
@@ -1176,7 +1281,11 @@ impl NodeExecutorTrait for AgentExecutor {
                 max_tokens: runtime_max_tokens,
                 top_p: None,
                 // 首轮传 tools，后续轮次若 tools 为空则不传
-                tools: if round == 0 { tools.clone() } else { None },
+                tools: if round == 0 {
+                    tools_for_llm.as_ref().filter(|v| !v.is_empty()).cloned()
+                } else {
+                    None
+                },
                 thinking_budget: None,
                 use_max_completion_tokens: None,
                 thinking_param_style: None,
@@ -1185,7 +1294,7 @@ impl NodeExecutorTrait for AgentExecutor {
                 conversation: None,
                 previous_response_id: None,
                 store: None,
-                response_format: None,
+                response_format: response_format.clone(),
             };
 
             // 流式调用 LLM（经统一入口 execute_llm_stream，获得 PromptGuard/截断/缓存/审计）
@@ -1215,6 +1324,7 @@ impl NodeExecutorTrait for AgentExecutor {
                             &messages,
                             runtime_temp,
                             runtime_max_tokens,
+                            response_format.clone(),
                         )
                         .await
                     {
@@ -1301,6 +1411,7 @@ impl NodeExecutorTrait for AgentExecutor {
                                     &messages,
                                     runtime_temp,
                                     runtime_max_tokens,
+                                    response_format.clone(),
                                 )
                                 .await
                             {
@@ -1351,6 +1462,7 @@ impl NodeExecutorTrait for AgentExecutor {
                                     &messages,
                                     runtime_temp,
                                     runtime_max_tokens,
+                                    response_format.clone(),
                                 )
                                 .await
                             {
@@ -1561,7 +1673,24 @@ impl NodeExecutorTrait for AgentExecutor {
             messages.push(assistant_msg);
 
             // 执行每个工具调用
+            let mut tool_cap_hit = false;
             for tc in tc_list {
+                // 2026-10-25（P0-D）：单节点工具调用总上限。
+                // 超限的 tool_call 必须也回一条 tool 消息 —— OpenAI 协议要求每个
+                // assistant.tool_calls 都有对应响应，否则下一轮请求会被 provider 拒绝。
+                if tool_call_budget_exhausted(tool_calls_executed_total, max_tool_calls) {
+                    messages.push(ChatMessage {
+                        role: "tool".to_string(),
+                        content: ChatContent::Text(
+                            "Error: 已达到本节点工具调用上限，未执行".to_string(),
+                        ),
+                        tool_calls: None,
+                        tool_call_id: Some(tc.id.clone()),
+                        thinking: None,
+                    });
+                    tool_cap_hit = true;
+                    continue;
+                }
                 let args: serde_json::Value =
                     serde_json::from_str(&tc.function.arguments).unwrap_or_else(|e| {
                         // P0 修复(2026-07-22): 记录反序列化失败的原始值，
@@ -1616,6 +1745,19 @@ impl NodeExecutorTrait for AgentExecutor {
                     content: ChatContent::Text(limited_result),
                     tool_calls: None,
                     tool_call_id: Some(tc.id.clone()),
+                    thinking: None,
+                });
+                tool_calls_executed_total += 1;
+            }
+            if tool_cap_hit {
+                messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: ChatContent::Text(format!(
+                        "已达到本节点工具调用上限（{max_tool_calls}）。\
+                         请基于现有信息立即输出最终分析结果与 JSON/VERDICT，不要再调用任何工具。"
+                    )),
+                    tool_calls: None,
+                    tool_call_id: None,
                     thinking: None,
                 });
             }
@@ -1866,7 +2008,7 @@ impl NodeExecutorTrait for AgentExecutor {
                     conversation: None,
                     previous_response_id: None,
                     store: None,
-                    response_format: None,
+                    response_format: response_format.clone(),
                 };
                 let llm_config =
                     axagent_harness::LlmCallConfig { request_delay_ms, ..Default::default() };
@@ -2267,7 +2409,7 @@ impl NodeExecutorTrait for AgentExecutor {
                                             conversation: None,
                                             previous_response_id: None,
                                             store: None,
-                                            response_format: None,
+                                            response_format: response_format.clone(),
                                         };
                                         let llm_config = axagent_harness::LlmCallConfig {
                                             request_delay_ms: request_delay_ms_for_model(
@@ -2812,7 +2954,9 @@ impl NodeExecutorTrait for AgentExecutor {
                         conversation: None,
                         previous_response_id: None,
                         store: None,
-                        response_format: None,
+                        // v187：失败重试同样要带结构化约束 —— 只给主通路带、
+                        //   重试丢掉，等于「越需要约束的时候越没有约束」。
+                        response_format: response_format.clone(),
                     };
                     let llm_config = axagent_harness::LlmCallConfig {
                         request_delay_ms: request_delay_ms_for_model(&fb_prov, &fb_model),
@@ -2933,12 +3077,33 @@ impl NodeExecutorTrait for AgentExecutor {
             }
         }
 
+        // 2026-10-25（P1-A 观测）：prompt 体积统计，供基准脚本读取；默认关闭。
+        let emit_prompt_stats =
+            context.variables.get("emit_prompt_stats").and_then(|v| v.as_bool()).unwrap_or(false);
+
         Ok(NodeOutput {
             output: serde_json::json!({
                 "role": role_desc, "model": model_for_output,
                 "content": final_content, "thinking": final_thinking,
                 "usage": { "input_tokens": total_usage.0, "output_tokens": total_usage.1 },
                 "tool_calls_made": tool_calls_made,
+                "prefetchedTools": prefetched_tools,
+                "promptStats": if emit_prompt_stats {
+                    serde_json::json!({
+                        "systemChars": system_prompt_chars,
+                        "userChars": user_prompt_chars,
+                        "prefetchChars": prefetch_chars,
+                        "contextSources": context_source_stats
+                            .iter()
+                            .map(|(name, chars)| serde_json::json!({
+                                "name": name,
+                                "chars": chars,
+                            }))
+                            .collect::<Vec<_>>(),
+                    })
+                } else {
+                    serde_json::Value::Null
+                },
                 "node_id": node.base_id(),
                 // 2026-09-14：**流完整性**（见函数上方 `stream_truncated` 的长注释）。
                 // 存在的理由：`a-news`/`a-hot-money` 的输出在半截 JSON 处断掉却标 `completed`，
@@ -3512,6 +3677,9 @@ impl AgentExecutor {
         messages: &[ChatMessage],
         temperature: Option<f64>,
         max_tokens: Option<u32>,
+        // v187：结构化约束随调用方传入 —— 本函数是「主通路失败/静默无输出」的兜底，
+        //   恰恰是最需要约束的那一次调用，不能在这里丢掉。
+        response_format: Option<axagent_harness::types::ResponseFormat>,
     ) -> Option<(
         Pin<
             Box<
@@ -3551,7 +3719,7 @@ impl AgentExecutor {
             conversation: None,
             previous_response_id: None,
             store: None,
-            response_format: None,
+            response_format,
         };
         let llm_config = axagent_harness::LlmCallConfig {
             request_delay_ms: request_delay_ms_for_model(&fb_prov, &fb_model),
@@ -3640,7 +3808,7 @@ async fn resolve_effective_fallback(
 /// - 有 `content` 字段 → 取其文本内容
 /// - 有 `summary` 字段 → 取其摘要
 /// - 否则 → 紧凑 JSON 字符串
-fn format_context_source(name: &str, value: &Value) -> String {
+fn context_source_body(value: &Value) -> String {
     // 提取嵌套字段（如 node_id.output.content）
     let inner = if value.is_object() {
         value.get("output").or_else(|| value.get("result"))
@@ -3649,7 +3817,7 @@ fn format_context_source(name: &str, value: &Value) -> String {
     };
     let target = inner.unwrap_or(value);
 
-    let body = match target {
+    match target {
         Value::String(s) => s.clone(),
         Value::Object(_) => {
             // 优先提取常见语义字段
@@ -3662,20 +3830,314 @@ fn format_context_source(name: &str, value: &Value) -> String {
             }
         },
         other => other.to_string(),
-    };
+    }
+}
+
+fn format_context_source(name: &str, value: &Value) -> String {
+    let body = context_source_body(value);
 
     // 检测空结果并注入警告（空数组/空对象/空字符串）
     let is_empty = body.trim().is_empty()
         || body.trim() == "[]"
         || body.trim() == "{}"
-        || body.trim() == "null"
-        || (target.is_array() && target.as_array().is_some_and(|a| a.is_empty()))
-        || (target.is_string() && target.as_str().is_some_and(|s| s.trim().is_empty()));
+        || body.trim() == "null";
     if is_empty {
         return format!("⚠️ [{name}] 输出为空：该数据源无可用记录，请基于已有数据生成保守分析\n\n");
     }
 
     format!("[{name}] 输出:\n{body}\n\n")
+}
+
+/// 辩手节点 id → 轮次：`bull-r2--mid` / `bear-r3--ultra_short` ⇒ `Some(2/3)`。
+fn debate_round_of(id: &str) -> Option<u32> {
+    let (head, _tier) = id.split_once("--")?;
+    let rest = head.strip_prefix("bull-r").or_else(|| head.strip_prefix("bear-r"))?;
+    rest.parse::<u32>().ok()
+}
+
+/// 把**较早轮次**的辩手输出压成结构化状态摘要。
+///
+/// 不新增 LLM 调用：从辩手正文里确定性提取「核心论点 / 已让步 / 剩余分歧 /
+/// 量化证据 / 立场」。识别不到的分组写明确的“未识别到”句，不拿原文冒充摘要。
+/// 紧邻上一轮仍传全文（由调用方判断），因此反驳细节不丢。
+fn format_debate_state(name: &str, value: &Value) -> String {
+    let body = context_source_body(value);
+    let trimmed = body.trim();
+    let unfenced =
+        trimmed.strip_prefix("```json").or_else(|| trimmed.strip_prefix("```")).unwrap_or(trimmed);
+    let unfenced = unfenced.strip_suffix("```").unwrap_or(unfenced).trim();
+    let parsed: Value = serde_json::from_str(unfenced).unwrap_or(Value::Null);
+    let report = parsed.get("report").and_then(|v| v.as_str()).unwrap_or(unfenced);
+    let verdict = parsed.get("verdict");
+
+    let mut core: Vec<String> = Vec::new();
+    let mut consensus: Vec<String> = Vec::new();
+    let mut concessions: Vec<String> = Vec::new();
+    let mut disputes: Vec<String> = Vec::new();
+    let mut evidence: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for line in report.lines() {
+        let raw = line.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let cleaned = raw.trim_start_matches('#').trim();
+        if cleaned.chars().count() < 8 {
+            continue;
+        }
+        let item: String = if cleaned.chars().count() > 120 {
+            cleaned.chars().take(120).collect()
+        } else {
+            cleaned.to_string()
+        };
+        let is_heading = raw.starts_with('#')
+            || raw.starts_with("一、")
+            || raw.starts_with("二、")
+            || raw.starts_with("三、")
+            || raw.starts_with("四、")
+            || raw.starts_with("五、");
+        let has_digit = item.chars().any(|c| c.is_ascii_digit());
+        if core.len() < 3 && is_heading && seen.insert(item.clone()) {
+            core.push(item.clone());
+        }
+        if consensus.len() < 3
+            && (item.contains("共识")
+                || item.contains("一致")
+                || item.contains("都认为")
+                || item.contains("均认为"))
+            && seen.insert(item.clone())
+        {
+            consensus.push(item.clone());
+        }
+        if concessions.len() < 3
+            && (item.contains("承认")
+                || item.contains("让步")
+                || item.contains("接受")
+                || item.contains("退让"))
+            && seen.insert(item.clone())
+        {
+            concessions.push(item.clone());
+        }
+        if disputes.len() < 3
+            && (item.contains("分歧")
+                || item.contains("质询")
+                || item.contains("反驳")
+                || item.contains("未回答")
+                || item.contains("争议"))
+            && seen.insert(item.clone())
+        {
+            disputes.push(item.clone());
+        }
+        if evidence.len() < 3
+            && has_digit
+            && (item.contains('%')
+                || item.contains("元")
+                || item.contains("倍")
+                || item.contains("亿"))
+            && seen.insert(item.clone())
+        {
+            evidence.push(item.clone());
+        }
+    }
+    if core.is_empty() {
+        for line in report.lines().map(str::trim).filter(|l| l.chars().count() >= 8).take(3) {
+            core.push(line.chars().take(120).collect());
+        }
+    }
+
+    let verdict_text = verdict
+        .map(|v| {
+            let stance = v.get("stance").and_then(|x| x.as_str()).unwrap_or("?");
+            let strength = v.get("strength_score").and_then(|x| x.as_f64()).unwrap_or(0.0);
+            let confidence = v.get("confidence").and_then(|x| x.as_f64()).unwrap_or(0.0);
+            format!("{stance} / 强度{strength:.0} / 置信{confidence:.0}")
+        })
+        .unwrap_or_else(|| "?".to_string());
+    let list = |items: &[String], empty: &str| {
+        if items.is_empty() {
+            empty.to_string()
+        } else {
+            items.join("；")
+        }
+    };
+    let mut out = format!(
+        "[{name}] 辩论状态摘要（较早轮次，已压缩）:\n\
+         - 核心论点: {}\n\
+         - 已达成共识: {}\n\
+         - 已让步: {}\n\
+         - 剩余分歧: {}\n\
+         - 证据引用: {}\n\
+         - 立场: {verdict_text}\n\n",
+        list(&core, "（未识别到明确标题）"),
+        list(&consensus, "（未识别到明确共识）"),
+        list(&concessions, "（本轮未显式让步）"),
+        list(&disputes, "（未识别到明确分歧）"),
+        list(&evidence, "（未识别到量化证据）"),
+    );
+    if out.chars().count() > 1600 {
+        let truncated: String = out.chars().take(1600).collect();
+        out = format!("{truncated}…[已压缩]");
+    }
+    out
+}
+
+/// `debate_context_mode=state` 时：只压缩**更早轮次**（`source_round + 1 < current_round`）；
+/// 紧邻上一轮仍走全文，保证反驳不丢细节。默认 `full` 完全保持历史行为。
+fn format_debate_context_source(
+    source: &str,
+    value: &Value,
+    current_node: &str,
+    mode: &str,
+) -> String {
+    if mode == "state" {
+        if let (Some(source_round), Some(current_round)) =
+            (debate_round_of(source), debate_round_of(current_node))
+        {
+            if source_round + 1 < current_round {
+                return format_debate_state(source, value);
+            }
+        }
+    }
+    format_context_source(source, value)
+}
+
+/// 工具固定序列预取的白名单：只收录参数可由 `stock_code`/无参确定的工具。
+/// `search_stock` / `search_news` / `get_cls_flash` 依赖模型临时构造查询，不预取。
+/// P0-B 开关：只有显式 `fixed_prefetch` 才走程序化预取；`auto` 保持旧行为。
+fn should_prefetch_tools(mode: &str) -> bool {
+    mode == "fixed_prefetch"
+}
+
+/// P0-A 开关：`system_only` 时 user 段不再重复 raw JSON；其余（含 legacy）保持旧行为。
+fn include_raw_context_sources_in_user_prompt(mode: &str) -> bool {
+    mode != "system_only"
+}
+
+/// P0-A：按模式生成 user 段里的 context_sources raw 片段。
+/// `system_only` ⇒ 空；否则逐源格式化为 `source: value`，并跳过用户输入类变量。
+fn context_sources_user_prompt_parts(
+    context_sources: &[String],
+    variables: &std::collections::HashMap<String, Value>,
+    mode: &str,
+) -> Vec<String> {
+    if !include_raw_context_sources_in_user_prompt(mode) {
+        return Vec::new();
+    }
+    context_sources
+        .iter()
+        .filter_map(|source| {
+            if source == super::USER_INPUT_VAR || source == super::USER_MESSAGE_VAR {
+                return None;
+            }
+            variables.get(source).map(|value| format!("{source}: {value}"))
+        })
+        .collect()
+}
+
+/// P0-D：`max=0` 表示不限制；否则达到上限即停止执行新工具。
+fn tool_call_budget_exhausted(executed: usize, max: usize) -> bool {
+    max > 0 && executed >= max
+}
+
+/// P0-B：从节点工具集里挑出可被程序化预取的子集（白名单 + 参数可由 stock_code 确定）。
+fn split_prefetch_targets(
+    tools: &[axagent_harness::types::ChatTool],
+) -> Vec<axagent_harness::types::ChatTool> {
+    tools
+        .iter()
+        .filter(|t| PREFETCHABLE_TOOLS.contains(&t.function.name.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// P0-B：真正执行预取（并行 + 单条 3000 字符截断），返回注入文本与成功清单。
+///
+/// 失败的工具不进入成功清单 ⇒ 仍留在 `tools_for_llm` 里给模型自行重试。
+async fn prefetch_tool_results(
+    context: &ExecutionState,
+    tool_list: &[axagent_harness::types::ChatTool],
+    stock_code: &str,
+    kline_limit: u64,
+) -> (String, Vec<String>) {
+    let targets = split_prefetch_targets(tool_list);
+    if targets.is_empty() {
+        return (String::new(), Vec::new());
+    }
+    let futures = targets.iter().map(|t| {
+        let name = t.function.name.clone();
+        let args = build_prefetch_args(&name, stock_code, kline_limit);
+        async move {
+            let result =
+                tokio::time::timeout(Duration::from_secs(20), execute_tool(context, &name, args))
+                    .await;
+            (name, result)
+        }
+    });
+    let results = futures::future::join_all(futures).await;
+    let mut note = String::from("\n\n--- 系统预取工具结果（无需再次调用同名工具）---\n");
+    let mut succeeded: Vec<String> = Vec::new();
+    for (name, result) in results {
+        let text = match result {
+            Ok(Ok(v)) => {
+                succeeded.push(name.clone());
+                serde_json::to_string(&v).unwrap_or_else(|_| format!("{v}"))
+            },
+            Ok(Err(e)) => format!("Error: {e}"),
+            Err(_) => "Error: 预取超时".to_string(),
+        };
+        note.push_str(&format!("\n[{name}] {}\n", truncate_tool_result(&text)));
+    }
+    (note, succeeded)
+}
+
+const PREFETCHABLE_TOOLS: &[&str] = &[
+    "get_stock_quote",
+    "get_stock_kline",
+    "get_stock_news",
+    "get_stock_money_flow",
+    "get_stock_dragon_tiger",
+    "get_north_bound_flow",
+    "get_stock_margin_data",
+    "get_stock_pledge_data",
+    "get_stock_announcements",
+    "get_stock_consensus_eps",
+    "get_stock_institutional_visits",
+    "get_stock_peers",
+    "get_stock_concept_blocks",
+    "get_stock_option_pcr",
+    "get_limit_up_pool",
+    "macro_data_snapshot",
+    "get_hot_stocks",
+    "compute_scoring",
+    "compute_kdj",
+    "compute_obv",
+    "compute_valuation",
+    "detect_earnings_surprise",
+];
+
+fn build_prefetch_args(name: &str, stock_code: &str, kline_limit: u64) -> Value {
+    match name {
+        "macro_data_snapshot"
+        | "get_limit_up_pool"
+        | "get_hot_stocks"
+        | "get_stock_option_pcr"
+        | "get_north_bound_flow" => serde_json::json!({}),
+        "get_stock_kline" => {
+            serde_json::json!({"stock_code": stock_code, "limit": kline_limit})
+        },
+        _ => serde_json::json!({"stock_code": stock_code}),
+    }
+}
+
+fn truncate_tool_result(s: &str) -> String {
+    const TOOL_RESULT_MAX_CHARS: usize = 3000;
+    if s.len() > TOOL_RESULT_MAX_CHARS {
+        let end = s.floor_char_boundary(TOOL_RESULT_MAX_CHARS);
+        format!("{}……\n[数据过长，已截断至 {} 字符]", &s[..end], TOOL_RESULT_MAX_CHARS)
+    } else {
+        s.to_string()
+    }
 }
 
 fn parse_rag_source_ids(ids: &[String]) -> (Vec<String>, Vec<String>, Vec<String>) {
@@ -5927,5 +6389,261 @@ mod repair_malformed_json_output_tests {
     fn rejects_repair_without_long_text() {
         let raw = r#"{ "a": 1, }"#;
         assert!(repair_malformed_json_output(raw).is_none());
+    }
+}
+
+/// 2026-10-25：P0/P1 的纯函数门（不依赖 LLM / DB）。
+#[cfg(test)]
+mod context_optimization_tests {
+    use super::{
+        build_prefetch_args, context_sources_user_prompt_parts, format_debate_context_source,
+        format_debate_state, include_raw_context_sources_in_user_prompt, json_response_format,
+        should_prefetch_tools, split_prefetch_targets, tool_call_budget_exhausted,
+        truncate_tool_result,
+    };
+    use axagent_harness::types::{ChatTool, ChatToolFunction};
+    use serde_json::json;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use super::prefetch_tool_results;
+    use crate::work_engine::execution_state::{ExecutionContextCallbacks, ExecutionState};
+    use crate::work_engine::executors::ToolCallback;
+
+    fn debater_value() -> serde_json::Value {
+        let content = json!({
+            "report": "## 一、核心论点\n多方认为资金惯性仍在。\n## 二、剩余分歧\n空方质疑 2808 万元流出。\n## 三、证据引用\n主力净流出 2808 万元，占比 12%。\n## 四、共识\n双方都认为 PE 101 倍偏高。",
+            "verdict": {"stance": "bearish", "strength_score": 55, "confidence": 68}
+        })
+        .to_string();
+        json!({"role": "debater", "content": content})
+    }
+
+    #[test]
+    fn switch_predicates_match_the_documented_semantics() {
+        assert!(include_raw_context_sources_in_user_prompt("legacy"));
+        assert!(!include_raw_context_sources_in_user_prompt("system_only"));
+        assert!(should_prefetch_tools("fixed_prefetch"));
+        assert!(!should_prefetch_tools("auto"));
+        assert!(!tool_call_budget_exhausted(7, 8));
+        assert!(tool_call_budget_exhausted(8, 8));
+        assert!(!tool_call_budget_exhausted(1, 0)); // 0 = 不限
+    }
+
+    /// v187：Json 节点**恒**下发原生结构化输出（无开关）；Text / Artifact 不下发。
+    ///
+    /// 为什么这条要单独立：v185 把它挂在模板变量 `structured_output_mode` 上且默认 `off`
+    /// ⇒「开启了原生结构化输出」只证明有这段代码，不证明任何一次真实调用带上它。
+    /// 改为按输出模式派生后，本判据钉住的正是每一次构造请求都会走到的那个纯函数。
+    #[test]
+    fn json_output_mode_always_requests_native_structured_output() {
+        use axagent_harness::types::ResponseFormat;
+        use axagent_harness::workflow_types::OutputMode;
+
+        assert!(
+            matches!(json_response_format(&OutputMode::Json), Some(ResponseFormat::JsonObject)),
+            "Json 节点必须下发 response_format=json_object（原生结构化输出）"
+        );
+        // 分析师等 Text 节点：一次响应同时产出正文 + `<!-- VERDICT -->` 标签。
+        // 下发 json_object 会把整段正文逼成 JSON ⇒ 正文与解析契约同时改，收益为负。
+        assert!(
+            json_response_format(&OutputMode::Text).is_none(),
+            "Text 节点不得下发结构化约束（会把分析正文逼成 JSON）"
+        );
+        assert!(
+            json_response_format(&OutputMode::Artifact).is_none(),
+            "Artifact 节点产出文件内容，不是本次调用的结构化结论"
+        );
+    }
+
+    /// 接线门：产出**节点结论**的每一处 `ChatRequest` 都必须带上结构化约束。
+    ///
+    /// 背景（P0-C 首版实测）：那一版只给主通路那两处接了 `response_format`，而
+    /// `fallback` 重试、`fallback` 无工具重试、`try_fallback_stream` 三处仍是 `None`
+    /// ⇒ 「主通路失败 → 换模型重试」时恰好把约束丢掉，越需要约束的那一次越没有。
+    /// 同一逻辑的多份实现必须逐条点名，只改其中一条等于没改。
+    ///
+    /// 判据形态：源码扫描 + 排除区间（`execute_plan_mode` 生成的是**计划文本**，
+    /// 不是节点结论 ⇒ 允许 `None`）。若将来确有新的非结论请求需要 `None`，
+    /// 像 plan-mode 一样把它的函数区间显式登记进来，而不是放宽判据。
+    #[test]
+    fn node_output_requests_never_drop_structured_output() {
+        // 运行时读源码（与本仓 `read_seed_source_file` 同法）：不用 `include_str!`，
+        // 免得把这份 6500 行的文件再塞一份进测试二进制。
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/work_engine/executors/agent_executor.rs");
+        let src = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("读取 {} 失败: {e}", path.display()));
+        // 拆开拼，避免本函数自身成为被扫描到的「构造点」
+        let needle = concat!("response_format", ": ", "None");
+
+        let plan_at =
+            src.find("async fn execute_plan_mode(").expect("execute_plan_mode 不在源码里");
+        let plan_end =
+            src[plan_at + 1..].find("\n    async fn ").map_or(src.len(), |p| plan_at + 1 + p);
+
+        let mut offenders: Vec<usize> = Vec::new();
+        let mut from = 0usize;
+        while let Some(rel) = src[from..].find(needle) {
+            let at = from + rel;
+            from = at + 1;
+            if at < plan_at || at >= plan_end {
+                offenders.push(src[..at].matches('\n').count() + 1);
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "以下构造点把结构化输出写死成 None —— Json 节点会在这些路径上丢掉 \
+             response_format（行号）：{offenders:?}"
+        );
+        // 判据有区分力（正控）：被排除的 plan-mode 那一处必须真的存在。
+        // 否则「零命中」可能只是抽取面坏了（例如函数改名后 plan_at 兜到文件尾，
+        // 把本该报错的构造点一起排除掉）。
+        assert!(
+            src[plan_at..plan_end].contains(needle),
+            "排除区间里没有捕获到 plan-mode 的那处 None ⇒ 本判据的抽取面已失效，上面的零命中不是结论"
+        );
+    }
+
+    #[test]
+    fn debate_state_compresses_older_rounds_only() {
+        let value = debater_value();
+        let older = format_debate_context_source("bull-r1--mid", &value, "bull-r3--mid", "state");
+        assert!(older.contains("辩论状态摘要"), "较早轮次应压缩: {older}");
+        let previous =
+            format_debate_context_source("bull-r2--mid", &value, "bull-r3--mid", "state");
+        assert!(previous.contains("输出:"), "紧邻上一轮必须保留全文: {previous}");
+        let full = format_debate_context_source("bull-r1--mid", &value, "bull-r3--mid", "full");
+        assert!(full.contains("输出:"), "full 模式必须完全保持旧行为: {full}");
+    }
+
+    #[test]
+    fn debate_state_extracts_required_groups_and_verdict() {
+        let summary = format_debate_state("bull-r1--mid", &debater_value());
+        for needle in ["核心论点", "已达成共识", "剩余分歧", "证据引用", "bearish"]
+        {
+            assert!(summary.contains(needle), "缺少 {needle}: {summary}");
+        }
+    }
+
+    #[test]
+    fn prefetch_args_are_whitelisted_and_bounded() {
+        assert_eq!(
+            build_prefetch_args("get_stock_kline", "003006", 250),
+            json!({"stock_code": "003006", "limit": 250})
+        );
+        assert_eq!(build_prefetch_args("macro_data_snapshot", "003006", 250), json!({}));
+        assert_eq!(
+            build_prefetch_args("compute_scoring", "003006", 250),
+            json!({"stock_code": "003006"})
+        );
+    }
+
+    #[test]
+    fn tool_result_truncation_is_utf8_safe() {
+        let text = "中".repeat(1500);
+        let truncated = truncate_tool_result(&text);
+        assert!(truncated.contains("已截断"));
+        assert!(truncated.chars().count() < 1500);
+    }
+
+    #[test]
+    fn user_prompt_context_parts_respect_dedupe_mode() {
+        let mut variables = std::collections::HashMap::new();
+        variables.insert("a-source".to_string(), json!({"x": 1}));
+        let sources = vec!["a-source".to_string()];
+        let legacy = context_sources_user_prompt_parts(&sources, &variables, "legacy");
+        assert_eq!(legacy.len(), 1);
+        assert!(legacy[0].contains("a-source"));
+        let dedup = context_sources_user_prompt_parts(&sources, &variables, "system_only");
+        assert!(dedup.is_empty(), "system_only 不得在 user 段重复 raw context");
+        assert!(context_sources_user_prompt_parts(&[], &variables, "legacy").is_empty());
+    }
+
+    fn chat_tool(name: &str) -> ChatTool {
+        ChatTool {
+            r#type: "function".to_string(),
+            function: ChatToolFunction {
+                name: name.to_string(),
+                description: None,
+                parameters: None,
+            },
+        }
+    }
+
+    #[test]
+    fn prefetch_targets_keep_non_whitelisted_tool_available() {
+        let tools = vec![
+            chat_tool("get_stock_quote"),
+            chat_tool("compute_scoring"),
+            chat_tool("get_stock_news"),
+            chat_tool("search_stock"), // 不在白名单
+        ];
+        let targets = split_prefetch_targets(&tools);
+        assert_eq!(targets.len(), 3);
+        let mut tools_for_llm = tools.clone();
+        tools_for_llm.retain(|t| !targets.iter().any(|p| p.function.name == t.function.name));
+        assert_eq!(tools_for_llm.len(), 1);
+        assert_eq!(tools_for_llm[0].function.name, "search_stock");
+    }
+
+    #[tokio::test]
+    async fn prefetch_executes_in_parallel_with_real_tool_callback() {
+        let cb: ToolCallback = Arc::new(|name, _args| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_millis(60)).await;
+                Ok(json!({ "tool": name }))
+            })
+        });
+        let mut state = ExecutionState::new("e".into(), "w".into(), json!({}));
+        state.callbacks = Some(ExecutionContextCallbacks {
+            trigger_manager: None,
+            tool_handlers: std::collections::HashMap::new(),
+            tool_fallback: Some(cb),
+            subworkflow: None,
+            system_capability: None,
+            loop_body_dispatch: None,
+            loop_checkpoint: None,
+            debate_body_dispatch: None,
+            stream_progress: None,
+        });
+        let tools = vec![
+            chat_tool("get_stock_quote"),
+            chat_tool("compute_scoring"),
+            chat_tool("get_stock_news"),
+            chat_tool("search_stock"),
+        ];
+        let started = Instant::now();
+        let (note, succeeded) = prefetch_tool_results(&state, &tools, "003006", 120).await;
+        let elapsed = started.elapsed();
+        assert_eq!(succeeded.len(), 3);
+        assert!(note.contains("get_stock_quote"));
+        assert!(!note.contains("search_stock"));
+        // 3 × 60ms 串行 = 180ms；并发应明显低于该值（留 CI 余量）。
+        assert!(elapsed < Duration::from_millis(170), "预取应并发执行，实际 {elapsed:?}");
+    }
+
+    #[test]
+    fn twelve_tool_calls_stop_at_cap() {
+        let mut executed = 0usize;
+        let mut skipped = 0usize;
+        for _ in 0..12 {
+            if tool_call_budget_exhausted(executed, 8) {
+                skipped += 1;
+            } else {
+                executed += 1;
+            }
+        }
+        assert_eq!((executed, skipped), (8, 4));
+    }
+
+    #[test]
+    fn debate_state_falls_back_when_state_missing() {
+        let value = json!({
+            "content": "第一段没有标题的分析。\n第二段提到 12% 的涨幅。"
+        });
+        let summary = format_debate_state("bull-r1--mid", &value);
+        assert!(summary.contains("未识别到明确共识"));
+        assert!(summary.contains("立场: ?"));
     }
 }

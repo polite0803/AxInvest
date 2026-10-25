@@ -130,11 +130,36 @@ export function GeneralSettings() {
 
       {/* Tray & Window */}
       <SettingsGroup title={t("settings.groupTray")}>
+        <div style={rowStyle} className="flex items-center justify-between" data-search-key="general:trayEnabled">
+          <span>{t("settings.trayEnabled")}</span>
+          <Switch
+            id="general-settings-switch-tray"
+            checked={settings.trayEnabled ?? true}
+            onChange={(checked) => {
+              // 关托盘时同批关掉「最小化到托盘」：托盘不存在时那行为会把窗口 hide() 掉
+              // 且没有恢复入口（Windows 上 hide 后任务栏也没有）。二者是同一承载物的上下级。
+              saveSettings(checked ? { trayEnabled: checked } : { trayEnabled: checked, minimizeToTray: false });
+              if (inTauri) {
+                // 运行时创建/销毁托盘；此前该设置没有 UI、也没有消费方。
+                invoke("set_tray_enabled", { enabled: checked }).catch(
+                  logIpcError("set_tray_enabled"),
+                );
+                if (!checked) {
+                  invoke("set_close_to_tray", { enabled: false }).catch(
+                    logIpcError("set_close_to_tray"),
+                  );
+                }
+              }
+            }}
+          />
+        </div>
+        <Divider style={{ margin: "4px 0" }} />
         <div style={rowStyle} className="flex items-center justify-between" data-search-key="general:minimizeToTray">
           <span>{t("settings.minimizeToTray")}</span>
           <Switch
             id="general-settings-switch-64"
             checked={settings.minimizeToTray}
+            disabled={!(settings.trayEnabled ?? true)}
             onChange={(checked) => {
               saveSettings({ minimizeToTray: checked });
               if (inTauri) {

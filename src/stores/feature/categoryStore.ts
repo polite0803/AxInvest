@@ -14,10 +14,6 @@ interface CategoryState {
     iconValue?: string | null;
     systemPrompt?: string | null;
     defaultModel?: NullableModelRef;
-    defaultTemperature?: number | null;
-    defaultMaxTokens?: number | null;
-    defaultTopP?: number | null;
-    defaultFrequencyPenalty?: number | null;
   }) => Promise<ConversationCategory>;
   updateCategory: (
     id: string,
@@ -27,10 +23,6 @@ interface CategoryState {
       iconValue?: string | null;
       systemPrompt?: string | null;
       defaultModel?: NullableModelRef;
-      defaultTemperature?: number | null;
-      defaultMaxTokens?: number | null;
-      defaultTopP?: number | null;
-      defaultFrequencyPenalty?: number | null;
     },
   ) => Promise<void>;
   deleteCategory: (id: string) => Promise<void>;
@@ -65,10 +57,6 @@ export const useCategoryStore = create<CategoryState>((set) => ({
           system_prompt: input.systemPrompt,
           default_provider_id: input.defaultModel?.a,
           default_model_id: input.defaultModel?.b,
-          default_temperature: input.defaultTemperature,
-          default_max_tokens: input.defaultMaxTokens,
-          default_top_p: input.defaultTopP,
-          default_frequency_penalty: input.defaultFrequencyPenalty,
         },
       },
     );
@@ -88,10 +76,6 @@ export const useCategoryStore = create<CategoryState>((set) => ({
           system_prompt: input.systemPrompt,
           default_provider_id: input.defaultModel?.a,
           default_model_id: input.defaultModel?.b,
-          default_temperature: input.defaultTemperature,
-          default_max_tokens: input.defaultMaxTokens,
-          default_top_p: input.defaultTopP,
-          default_frequency_penalty: input.defaultFrequencyPenalty,
         },
       },
     );

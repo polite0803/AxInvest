@@ -3,7 +3,7 @@
 
 use super::{
     PROFILE_TOOLS, build_analyst_input_mapping, debate_rounds_graph_drift, force_variable_value,
-    merge_variable_values, resolve_debate_rounds, tiered_debate_graph_drift,
+    merge_variable_values, resolve_bool_flag, resolve_debate_rounds, tiered_debate_graph_drift,
 };
 use crate::commands::error_code::stock_setup;
 
@@ -1605,9 +1605,27 @@ type AlgoToolRow = (
 ///   否则存量库不重播种，这道护栏对用户而言等于不存在。
 ///   ⚠ 落库前请真库核对（只读）：
 ///     `SELECT id, version FROM workflow_templates WHERE id='stock-analysis';`
-///     —— 版本门是 `>=`；若 DB 现值已 ≥ 179（并发会话 / 更高常量的构建写过），
+///     —— 版本门是 `>=`；若 DB 现值已 ≥ 180（并发会话 / 更高常量的构建写过），
 ///     本批会被**静默挡住**，须把常量再抬高到 DB 现值之上。
-pub const TEMPLATE_VERSION: i32 = 179; // v179: 输出 schema 显式 required（R-4）；决策详情附 schema 缺口
+/// **v185 → v186（2026-10-25）**：`rule-check` 的 `context_sources` 移除 `trader`，交易方案改读
+///   `portfolio-risk-gate`（`targetPrice` / `stopLoss` / `stopLossPct` / `takeProfitPct`）。
+///   成因（2026-10-25 现网实证）：rule-check 的唯一入边是 `portfolio-risk-gate → rule-check`，
+///   而 `trader` 没有等待边 ⇒ rule-check 先于 trader 启动（同一次执行里 rule-check 23:51:12
+///   开始、trader 23:51:37 才启动），`context.variables` 里没有 `trader` ⇒ 每次运行都报
+///   `context_sources 变量未在 context.variables 中找到`。
+///   ⚠ **不能**改成「补 `trader → rule-check` 边」：`rule-check → quality-gate →` 决策尾链
+///   会重新等 LLM 决策完成，直接推翻 v183「公式决策与 LLM 决策互不消费、并行」的结构保证。
+///   节点配置（`context_sources` + prompt）变更 ⇒ **必须换代**。
+/// **v186 → v187（2026-10-26）**：退役模板变量 `structured_output_mode`，Json 输出节点**恒**下发
+///   `response_format=json_object`（原生结构化输出）。P0-C 首版把它做成默认 `off` 的开关 ⇒
+///   「开启原生结构化输出」实际得到一条**默认关闭**的通路；且当时只给主通路两处接了
+///   该参数，`fallback` 重试 / `fallback` 无工具重试 / `try_fallback_stream` 三处仍为空
+///   ⇒ 越需要约束的那一次越没有约束。
+///   消费点：`rt-workflow/src/work_engine/executors/agent_executor.rs` 的 `json_response_format`。
+///   分析师等 `Text` 节点**不下发**（一次响应同时产出正文 + VERDICT 标签，逼成 JSON 会
+///   同时改坏正文与解析契约）；`Artifact` 节点同理。
+///   变量表变更（删一个变量）⇒ **必须换代**，否则存量库仍留着那个已无人读的键。
+pub const TEMPLATE_VERSION: i32 = 187; // v187: Json 输出节点恒下发 response_format（原生结构化输出；退役 structured_output_mode 开关）；v186: rule-check 交易方案改读 portfolio-risk-gate（移除对 trader 的无边软依赖）；v185: 退役 `formula_independent_f7` 回滚位 —— f7 两侧形态恒定（生产恒不吃 trader / 参照侧恒吃），「主档不得依赖 LLM 决策」由开关语义改为结构保证；v184: data-quality 逐节点诊断新增可选键 `score_sum_reason`（三态：自洽/偏离/不知道），`analyst_feedbacks` 的 `score_consistent` 从此有真值可读；v183: 生产 f7 切分析师结构票（公式决策与 LLM 决策互不消费、并行；trader 口径改由参照节点 `portfolio-mgr-f7-ref` 承接）；v182: f2 改吃辩论聚合方向（consensusDirection）——`consensus_score` 按契约是收敛程度、无方向含义；v181: Agent 节点采样参数置空（唯一权威=模板变量）；v180: 引入独立公式节点（公式决策不吃 LLM 决策输入；节点名与 f7 口径以 v183 条为准）
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -3410,8 +3428,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 .collect(),
                 output_var: id.into(),
                 model: None,
-                temperature: Some(0.3),
-                max_tokens: Some(32768),
+                // 本模板的采样参数唯一权威是模板变量 `agent_temperature` /
+                // `agent_max_tokens`（`seed_variables` 定义、设置面板可调）。
+                // 节点级同名值会被变量无条件覆盖，写在这里只会变成永久的死值 —— 故置空。
+                temperature: None,
+                max_tokens: None,
                 tools: vec![],
                 exposed_tools: vec![],
                 output_mode: OutputMode::Text,
@@ -4133,6 +4154,18 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         } else {
             resolve_debate_rounds(old_variables.as_deref())
         };
+
+    // 建图期开关（P2-A）：默认 false = 旧图。改值后需重新播种才生效。
+    let trader_context_slim =
+        resolve_bool_flag(old_variables.as_deref(), "trader_context_slim", false);
+    let risk_context_slim = resolve_bool_flag(old_variables.as_deref(), "risk_context_slim", false);
+
+    // ⚠ v185：`formula_independent_f7` 开关**已退役**，此处不再读它。
+    //   它唯一的作用是把含 LLM 交易观点的 f7 口径接回生产公式 ⇒ 与「主档不得依赖 LLM 决策」
+    //   直接冲突；且它与建图断言（mod.rs 的 f7 口径断言）本就冲突（断言跑在 fresh_db 上，
+    //   测不到回滚位 ⇒ 开关能改形态、门禁只认一种形态 = 两套真相）。详见 PLAN §十四 D2。
+    //   旧库 `workflow_template.variables` 里若残留该键，随本次播种被丢弃
+    //   （`merge_variable_values` 只保留「新表里存在的名字」）。
 
     // ═══════════════════════════════════════════════════════════════════════
     // 【装饰节点 / Decorative Container】debate-bull-bear--{档}（**每档一个容器**）
@@ -4862,6 +4895,14 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     let mid_last_bull = tier_id(&format!("bull-r{debate_max_rounds}"), mid_period);
     let mid_convergence = tier_id("debate-convergence", mid_period);
     edges.push(edge("e-debate-p-risk-assess", &mid_last_bear, "p-risk-assess"));
+    if risk_context_slim {
+        // P2-A：风险视角改读 analyst-brief--mid ⇒ 必须显式加边，否则变量不到账。
+        edges.push(edge(
+            "e-analyst-brief-mid-p-risk-assess",
+            &tier_id("analyst-brief", mid_period),
+            "p-risk-assess",
+        ));
+    }
     // risk 节点的 context_sources 中 bull-rN/t-scoring/t-valuation/debate-convergence
     // 需要显式边等待；否则 bear-rN 完成后就调度，但缺少边连接的节点输出
     // 不会进入 deps_results/exec_ctx.variables，导致 context_sources 报 ERROR。
@@ -4947,24 +4988,33 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             // 逐档 23 份会淹没 prompt（与分析师的「四档各自结论」场景不同）。
             // 这里**不含 value-investor**：它是有独立消费链的估值 agent（保持原面）。
             a.config.context_sources = {
-                let mut cs: Vec<String> = analysts
-                    .iter()
-                    .map(|(id, ..)| {
-                        by_base
-                            .get(*id)
-                            .and_then(|v| {
-                                v.iter()
-                                    .find(|(_, p)| {
-                                        matches!(p, axagent_harness::holding_period::Period::Mid)
-                                    })
-                                    .or_else(|| v.first())
-                            })
-                            .map(|(b, p)| {
-                                axagent_harness::holding_period::analyst_node_id(b, p.as_str())
-                            })
-                            .unwrap_or_else(|| (*id).to_string())
-                    })
-                    .collect();
+                let mut cs: Vec<String> = if risk_context_slim {
+                    // P2-A（低损）：用本档 analyst-brief 替代 9 份分析师全文。
+                    // verdict 字段仍由 input_mapping 注入；这里去掉的是重复的叙事全文。
+                    vec![tier_id("analyst-brief", mid_period)]
+                } else {
+                    analysts
+                        .iter()
+                        .map(|(id, ..)| {
+                            by_base
+                                .get(*id)
+                                .and_then(|v| {
+                                    v.iter()
+                                        .find(|(_, p)| {
+                                            matches!(
+                                                p,
+                                                axagent_harness::holding_period::Period::Mid
+                                            )
+                                        })
+                                        .or_else(|| v.first())
+                                })
+                                .map(|(b, p)| {
+                                    axagent_harness::holding_period::analyst_node_id(b, p.as_str())
+                                })
+                                .unwrap_or_else(|| (*id).to_string())
+                        })
+                        .collect()
+                };
                 let rep_mid = axagent_harness::holding_period::Period::Mid;
                 cs.push(tier_id(&format!("bull-r{debate_max_rounds}"), rep_mid));
                 cs.push(tier_id(&format!("bear-r{debate_max_rounds}"), rep_mid));
@@ -5538,18 +5588,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     {
                         use axagent_harness::holding_period::Period as P;
                         let mut dq_input: Vec<(String, String)> = Vec::new();
-                        for (abbr, base) in [
-                            ("mk", "a-market-analyst"),
-                            ("sent", "a-sentiment"),
-                            ("fund", "a-fundamentals"),
-                            ("pol", "a-policy"),
-                            ("hm", "a-hot-money"),
-                            ("lk", "a-lockup"),
-                            ("res", "a-research"),
-                            ("sec", "a-sector"),
-                            ("cat", "a-catalyst"),
-                            ("val", "value-investor"),
-                        ] {
+                        // v184：槽位缩写表上收到 `harness::holding_period::DQ_ABBR_TO_BASE`
+                        //   （唯一登记处）。此前这张表只长在本闭包里 ⇒ `analyst_feedbacks` 的
+                        //   写侧要用时只能再抄一份，两份迟早漂移（漂移的症状不是报错，是
+                        //   「查表恒落空、那一行反馈静默不写」—— 2026-10-25 已为此修过一轮）。
+                        for &(abbr, base) in axagent_harness::holding_period::DQ_ABBR_TO_BASE {
                             let rep = tiered
                                 .iter()
                                 .find(|(b, p, ..)| *b == base && matches!(p, P::Mid))
@@ -5909,6 +5952,17 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             "risk-convergence".into(),
             "data-quality".into(),
         ];
+        if trader_context_slim {
+            // P2-A（低损）：这四项的结构化字段已由 input_mapping 注入
+            // （reference_price/technical_indicators/valuation_*/catalyst_*/money_flow_*），
+            // 全文再注入一遍是重复上下文；去掉不改变 trader 可读字段。
+            a.config.context_sources.retain(|s| {
+                s.as_str() != "t-scoring"
+                    && s.as_str() != "t-valuation"
+                    && s.as_str() != trader_cat_mid.as_str()
+                    && s.as_str() != trader_hm_mid.as_str()
+            });
+        }
         a.config.output_mode = OutputMode::Json;
         // P0 根因修复(2026-07-22): trader 改为纯决策节点，移除所有数据获取工具。
         // 原设计问题：
@@ -6149,6 +6203,15 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     ("catalyst_level_mid", "a-catalyst--mid.content.verdict.catalyst_level"),
                     ("catalyst_level_long", "a-catalyst--long.content.verdict.catalyst_level"),
                     ("consensusScore", "debate-convergence--mid.content.consensus_score"),
+                    // f2 的方向来源（2026-10-25）：`consensus_score` 按契约是**收敛程度**、
+                    // 无方向含义（见 `debate-convergence.md` 工作流程第 5 步），主链此前把
+                    // 「收敛度高」直接读成看多。方向取同份产物的 `aggregate_prediction.direction`。
+                    // ⚠ 与 `consensusScore` 同取 **mid 代表档**：逐档取数仍是既存缺口，
+                    //   与 f2 的语义修正分属两次改动，不在同一批混改。
+                    (
+                        "consensusDirection",
+                        "debate-convergence--mid.content.aggregate_prediction.direction",
+                    ),
                     // V65: trader 输出完整 6 维度字段（与 portfolio-mgr 同维度对齐用于双视角对比）
                     // 旧字段保留: trader_direction/trader_target_price/trader_stop_loss 供 f7 兼容路径
                     // 2026-09-09: trader content parse 后为 {report, verdict:{action, confidence, ...}}，
@@ -6182,6 +6245,17 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // V50 修复: 接入 risk-convergence 的三方风险分歧度
                     // 避免该 LLM 节点（约5-10s）的输出被浪费
                     ("risk_disagreement", "risk-convergence.content.verdict.disagreement_score"),
+                    // v183: f7 的唯一生产口径输入 —— data-quality 逐档聚合的分析师结构票
+                    // （bull_score/bear_score/confidence）。聚合放在 data-quality 是因为它是全图
+                    // 唯一已按「档 × base」持有各 verdict 的节点；公式侧只需这一条映射 + 已有的
+                    // `e-data-quality-portfolio-mgr` 边。少这条边/键 ⇒ 票为空 ⇒ f7 σ=0 退出权重，
+                    // 表现为「公式没有交易信号腿」而不是报错（与本文件上方那族静默失效同型）。
+                    // ⚠ 前缀必须是 `.result.` 而不是 `.content.`：`data-quality` 是 **CodeNode**
+                    //   （同表 `dqi_score ← data-quality.result.score`），AgentNode 才走 `.content.verdict`。
+                    //   写错前缀不会报错——路径解析为 None ⇒ 注入 Null ⇒ 票恒空 ⇒ **又是一次假独立**。
+                    //   `audit-inject-coverage.mjs` 只对照键名，抓不到前缀错；由
+                    //   `rhai_producer_paths_exist_in_node_scripts` 这条路径存在性门兜住。
+                    ("analyst_votes_by_tier", "data-quality.result.analyst_votes_by_tier"),
                     // V51 新增: 估值因子数据源
                     // t-valuation 输出 DCF/格雷厄姆上行空间，用于 f5_signal 估值因子
                     // 2026-09-09: 穿透 .content（工具端已补 dcf/graham/fScore camelCase 别名块）
@@ -6226,6 +6300,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                         "t-valuation.result.content.dcf.assumptions.growth_band_all_negative",
                     ),
                     ("valuation_dcf_upside", "t-valuation.result.content.dcf.upsidePct"),
+                    // v183: 凯利赔率的上行侧 —— 同一个估值量在这里作**尺度**（不作第二条加权腿）。
+                    // 缺它 ⇒ 脚本里 `odds_from_valuation` 恒假 ⇒ 赔率退回 effective_posterior 分档表，
+                    // 而 `odds_source` 会如实标出退到了哪一档（不留静默）。
+                    ("valuation_margin_pct", "t-valuation.result.content.margin_of_safety.pct"),
                     ("valuation_graham_upside", "t-valuation.result.content.graham.upsidePct"),
                     // 2026-09-21: 格雷厄姆腿的**增长率封顶**标记 —— `true` 表示
                     //   `revenue_yoy` 超过 `MAX_GROWTH(30%)` 被封顶，即代入公式的增长率
@@ -6442,9 +6520,70 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             },
         },
     });
+    // ── v185：f7 口径的两侧**恒定形态**，不再有回滚开关 ──
+    //
+    // v183 引入的 `formula_independent_f7` 开关在此**退役**。退役理由（PLAN §十四 D2）：
+    //   ① 它的唯一作用就是把 LLM 决策接回生产公式 —— 与「主档不得依赖 LLM 决策」直接冲突；
+    //   ② 它与建图断言（`mod.rs` 的 f7 口径断言）本就冲突：断言无条件钉住「生产侧零 trader 键」，
+    //      而断言跑在 fresh_db 上 ⇒ 回滚位在测试里测不到、在现网里却能改形态（两套真相）；
+    //   ③ 不需要它兜底：f7 缺席时 `f7_source = "absent"` ⇒ σ=0 ⇒ 该腿退出权重，公式结论仍成立
+    //      （拿 trader 补 f7 等于用「有观点」冒充「有证据」）。
+    // ⇒ 生产 `portfolio-mgr` **恒**不吃 trader；`portfolio-mgr-f7-ref` **恒**吃（它是唯一的对照侧）。
+    //
+    // ⚠ 副作用（有意）：生产主链与 trader 之间不再有依赖边 ⇒ trader 失败/超时不再连坐主链；
+    //   `untrusted_trader` / `untrusted_research_mgr` 两个哨兵也不再进生产主链
+    //   ⇒ 主链的 `weights_collapsed` 不再被 trader 的 strict_mode 降级触发
+    //   （主链不消费 trader，trader 降级就不该压塌主链的权重）。
+    //
+    // 用闭包而不是嵌套 `fn`：嵌套 item 看不见本函数体里的 `const`，会直接编译失败。
+    const TRADER_F7_KEYS: [&str; 8] = [
+        "trader_direction",
+        "trader_confidence",
+        "trader_target_price",
+        "trader_stop_loss",
+        "trader_risk_level",
+        "trader_evidence_count",
+        "untrusted_trader",
+        "untrusted_research_mgr",
+    ];
+    // 用闭包而不是嵌套 `fn`：嵌套 item 看不见本函数体里的 `const`，会直接编译失败。
+    // 摘掉 f7 的「含交易观点」输入面 ⇒ 脚本改走分析师结构票（v183 的 C 分支）。
+    // 风险收益比那条 B 分支已删除：`margin_of_safety ≡ dcf.upsidePct`（`value-verify.rhai` 写死
+    // 这条等式），而 f5 估值腿已经在吃 `dcf.upsidePct` ⇒ 同一份证据加权两次，不是独立第三条腿。
+    let drop_trader_view = |c: &mut CodeNodeConfig| {
+        for key in TRADER_F7_KEYS {
+            c.input_mapping.remove(key);
+        }
+    };
+
+    // 两侧永远互为口径对照，**形态恒定**（v185 起无开关）：
+    //   · 生产 `portfolio-mgr`：不吃 trader_*（改吃分析师结构票 `analyst_votes_by_tier`）⇒
+    //     f7 = 分析师票口径，与 LLM 决策并行；
+    //   · 参照 `portfolio-mgr-f7-ref`：吃 trader_* ⇒ f7 = LLM 交易观点口径，只作对照。
+    // 两侧 leg_bases 同为 0.10 ⇒ 分母一致，差值就是该腿的口径位移。
+
+    // 参照侧：克隆生产节点、换成参照侧的 id/标题/输出变量，**恒定保留 trader 输入**
+    // （克隆必须在生产侧摘键**之前**做，否则参照侧也变成不吃 trader ⇒ 两侧同口径 ⇒ 对照恒等）。
+    let mut pm_f7_ref = pm.clone();
+    if let WorkflowNode::Code(ref mut c) = pm_f7_ref {
+        c.base.id = "portfolio-mgr-f7-ref".into();
+        c.base.title = "投资组合经理（f7 口径参照）".into();
+        c.base.description =
+            Some("与生产公式同脚本、只换 f7 输入口径的参照侧；只读对比，不参与终审".into());
+        c.base.position = Position { x: 480.0, y: 4200.0 };
+        c.config.output_var = "portfolio-mgr-f7-ref".into();
+    }
+    // 生产侧：恒定不吃 trader（结构性保证，不是开关给的）。
+    let mut pm = pm;
+    if let WorkflowNode::Code(ref mut c) = pm {
+        drop_trader_view(&mut c.config);
+    }
     nodes.push(pm);
-    edges.push(edge("e-trader-portfolio-mgr", "trader", "portfolio-mgr"));
-    edges.push(edge("e-research-mgr-portfolio-mgr", "research-mgr", "portfolio-mgr"));
+    // 参照侧：恒定吃 trader + 恒定接 trader/research-mgr 两条供给边。
+    nodes.push(pm_f7_ref);
+    // ⚠ 少一条边 = 该变量不进 context.variables ⇒ present() 恒假 ⇒ f7 静默退出（不是「该腿看空」）。
+    edges.push(edge("e-trader-portfolio-mgr-f7-ref", "trader", "portfolio-mgr-f7-ref"));
+    edges.push(edge("e-research-mgr-portfolio-mgr-f7-ref", "research-mgr", "portfolio-mgr-f7-ref"));
 
     // ── P1-E13: portfolio-risk-gate 组合风控门（CodeNode + Rhai）──
     // 在 portfolio-mgr 之后、rule-check 之前运行。
@@ -6478,9 +6617,19 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 // 当前价（用于计算新增仓位市值 + 空头检测）
                 // 2026-09-09: ToolNode result 为 {content: <json_string>, tool_name}，穿透 .content
                 ("current_price", "t-scoring.result.content.currentPrice"),
-                // 目标价（用于空头检测：target < current × 0.85 → 强制卖出）
-                // trader content parse 后为 {report, verdict}，targetPrice 在 verdict 层
-                ("target_price", "trader.content.verdict.targetPrice"),
+                // v183: 原 `("target_price", "trader.content.verdict.targetPrice")` 换源。
+                //   门第 5 条规则（空头强制卖出）保留，但报价不再出自 trader（LLM 决策节点），
+                //   改出自**分析师族价值投资者**的安全边际：脚本折算
+                //   `target = current × (1 + margin_of_safety_pct / 100)` 后喂给同一个判据。
+                //   0.85 阈值、返回结构、R-201 语义一字未动 ⇒ 换的是「谁的价格在说话」。
+                //   为什么用工具侧而不是价值投资者节点：三族（分析师/辩论/风险）的产出契约里
+                //   **没有任何价格量**，空头否决的「幅度」只能落在确定性估值上；价值投资者给出的
+                //   `margin_of_safety` 与该值被 `value-verify.rhai` 写死为同一条等式
+                //   （`margin_of_safety ≡ dcf.upsidePct`），而工具形态 `{level, pct}` 有实测记录
+                //   （DB 现网 `pct: -86.9`）⇒ 取有验证的那一条通路，避免又造一条「映射写了、路径不存在」
+                //   的假独立。方向侧的三族约束由 f7 的分析师票承担。
+                //   ⚠ DCF 不可用时该项为 null ⇒ 本轮不做空头否决（由脚本 `bearishRuleCoverage` 显式声明）。
+                ("margin_of_safety_pct", "t-valuation.result.content.margin_of_safety.pct"),
                 // 工作流变量（core.rs 注入）
                 ("stock_code", "stock_code"),
                 ("stock_sector", "stock_sector"),
@@ -6497,8 +6646,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-portfolio-mgr-risk-gate", "portfolio-mgr", "portfolio-risk-gate"));
     // t-scoring → portfolio-risk-gate（current_price 输入）
     edges.push(edge("e-t-scoring-risk-gate", "t-scoring", "portfolio-risk-gate"));
-    // trader → portfolio-risk-gate（target_price 输入）
-    edges.push(edge("e-trader-risk-gate", "trader", "portfolio-risk-gate"));
+    // v183: `e-trader-risk-gate` 换成价值投资者 → 门（空头否决的报价来源，见上方映射注释）。
+    edges.push(edge("e-t-valuation-risk-gate", "t-valuation", "portfolio-risk-gate"));
 
     // ── P1-1: regime-weights 市场状态权重调节（CodeNode + Rhai）──
     // 在 portfolio-mgr 之前运行，输出调节后的因子权重。
@@ -6930,6 +7079,40 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-t-valuation-band-portfolio-mgr", "t-valuation-band", "portfolio-mgr"));
     edges.push(edge("e-pace-calc-portfolio-mgr", "pace-calc", "portfolio-mgr"));
     edges.push(edge("e-cls-risk-level-portfolio-mgr", "cls-risk-level", "portfolio-mgr"));
+
+    // ── v180 建、v183 改名：f7 口径参照节点的供给边 ──
+    // 少一条边 = 该变量不进 context.variables ⇒ Rhai 的 present() 为假 ⇒ 因子静默退出。
+    // 这批与主节点上方那批一一对应；trader / research-mgr **不在这里**，由上方
+    // `f7_view_target` 单独决定接到哪一侧（含交易观点的那侧才需要它们）。
+    for (eid, src) in [
+        ("e-raw-data-portfolio-mgr-f7-ref", "raw-data"),
+        ("e-data-quality-portfolio-mgr-f7-ref", "data-quality"),
+        ("e-risk-convergence-portfolio-mgr-f7-ref", "risk-convergence"),
+        ("e-t-risk-portfolio-mgr-f7-ref", "t-risk"),
+        ("e-t-hotmoney-data-portfolio-mgr-f7-ref", "t-hotmoney-data"),
+        ("e-t-lockup-data-portfolio-mgr-f7-ref", "t-lockup-data"),
+        ("e-t-dragon-tiger-data-portfolio-mgr-f7-ref", "t-dragon-tiger-data"),
+        ("e-t-catalyst-data-portfolio-mgr-f7-ref", "t-catalyst-data"),
+        ("e-t-scoring-portfolio-mgr-f7-ref", "t-scoring"),
+        ("e-t-valuation-portfolio-mgr-f7-ref", "t-valuation"),
+        ("e-t-valuation-band-portfolio-mgr-f7-ref", "t-valuation-band"),
+        ("e-pace-calc-portfolio-mgr-f7-ref", "pace-calc"),
+        ("e-cls-risk-level-portfolio-mgr-f7-ref", "cls-risk-level"),
+        ("e-regime-weights-portfolio-mgr-f7-ref", "regime-weights"),
+    ] {
+        edges.push(edge(eid, src, "portfolio-mgr-f7-ref"));
+    }
+    for p in axagent_harness::holding_period::Period::ALL {
+        let conv = tier_id("debate-convergence", p);
+        edges.push(edge(&format!("e-{conv}-portfolio-mgr-f7-ref"), &conv, "portfolio-mgr-f7-ref"));
+    }
+    for src in ["pm-h-ultra-short", "pm-h-short", "pm-h-mid", "pm-h-long"] {
+        edges.push(edge(&format!("e-{src}-portfolio-mgr-f7-ref"), src, "portfolio-mgr-f7-ref"));
+    }
+    for (base, p, ..) in by_base.get("a-catalyst").into_iter().flatten() {
+        let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+        edges.push(edge(&format!("e-{tid}-portfolio-mgr-f7-ref"), &tid, "portfolio-mgr-f7-ref"));
+    }
     // v140：四个逐档风险节点已搬进子模板 ⇒ 它们**不再是父图节点**，这里的四条供给边随之删除。
     // 主链读它们产出的路径现在是 `pm-h-<档>.result.riskCategory`，而
     // `pm-h-<档> → portfolio-mgr` 四条边上面已经推过（同一段上方的 R-11 供给边），
@@ -7019,7 +7202,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     }
 
     // ── P3 (real-nodes): rule-check 规则检查 Agent ──
-    // 在 portfolio-mgr 完成后启动，对照硬性规则阈值（RSI/乖离率/止损/放量下跌/空头排列）
+    // 在 portfolio-risk-gate 完成后启动，对照硬性规则阈值（RSI/乖离率/止损/放量下跌/空头排列）
     // 检查交易方案是否违规，输出 violations / corrections / force_signals
     {
         let rc_id = "rule-check";
@@ -7027,12 +7210,16 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         let rc_y = 4200.0;
         let mut rc = agent(rc_id, rc_title, "rule-checker", None, 700.0, rc_y);
         if let WorkflowNode::Agent(ref mut a) = rc {
+            // ⚠ v186 起**不含 `trader`**：rule-check 的唯一入边是 `portfolio-risk-gate`，
+            //   `trader` 在 DAG 里没有等待边（v183 起它是并行的 LLM 参照腿）⇒ 列进
+            //   `context_sources` 只会读到「尚未执行」的空变量（2026-10-25 现网每次运行都报
+            //   `context_sources 变量未在 context.variables 中找到`，实测 rule-check 23:51:12
+            //   启动时 trader 23:51:37 才启动）。交易方案本身已由风控门给出，见下方 prompt。
             a.config.context_sources = vec![
                 "portfolio-risk-gate".into(),
                 "t-scoring".into(),
                 "t-valuation".into(),
                 "t-risk".into(),
-                "trader".into(),
             ];
             // P0 修复(2026-07-22): rule-check 改为纯决策节点，移除全部工具。
             // 原问题与 trader 同款：context_sources 已包含 t-scoring/t-valuation/t-risk，
@@ -7051,8 +7238,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                  - 技术指标(RSI/MACD/乖离率等): 参考 t-scoring 的 indicators\n\
                  - 估值数据(DCF/格雷厄姆/F-Score): 参考 t-valuation\n\
                  - 风险指标(波动率/最大回撤/夏普比率): 参考 t-risk\n\
-                 - 交易方案(入场价/目标价/止损价): 参考 trader\n\
-                 - 组合决策(action/positionPct): 参考 portfolio-risk-gate\n\
+                 - 交易方案(目标价/止损价/止盈止损档): 参考 portfolio-risk-gate 的 targetPrice / stopLoss / takeProfitPct / stopLossPct（现价参考 t-scoring 的 currentPrice）\n\
+                 - 组合决策(action/positionPct/riskLevel): 参考 portfolio-risk-gate\n\
                  基于上述数据直接检查交易方案是否违反硬性规则（RSI超买/乖离率追高/缺失止损/放量下跌/空头排列），\n\
                  输出 violations / corrections / force_signals。",
                 a.config.system_prompt
@@ -8353,7 +8540,13 @@ const FAST_REQUIRED_NODE_IDS: &[&str] = &[
 /// `continue_on_fail = true`，故快速链缺它们不会断链 —— 但也正因为如此，
 /// 它们的缺失会静默发生 ⇒ 归入本清单而不是 `FAST_REQUIRED_NODE_IDS`，
 /// 由 `validate_fast_workflow_graph` 保证「保留了就必须接上边」。
-const FAST_OPTIONAL_NODE_IDS: &[&str] = &["regime-weights", "pace-calc"];
+/// 快速链的「可选保留集」：源图有就带进派生图，没有也不报错。
+///
+/// `portfolio-mgr-f7-ref`（v183 的 f7 口径参照）必须在列内 —— 生产 `portfolio-mgr` 已不再读
+/// `trader.content.verdict.*`，全图唯一还吃这套前缀的就是本节点。漏了它，`apply_fast_chain_overrides`
+/// 的「一条 trader 映射都没改写」守卫就会红（那是它该红：proxy 的产出将无人消费），
+/// 而快速链也会失去与主链同形的口径对照。
+const FAST_OPTIONAL_NODE_IDS: &[&str] = &["regime-weights", "pace-calc", "portfolio-mgr-f7-ref"];
 
 /// 快速链的「交易结论」组装节点 id（`output_var` 是 `trader`，与原链同名变量对齐）。
 ///
@@ -9601,27 +9794,26 @@ fn apply_fast_chain_overrides(
             .collect(),
         },
     }));
-    // 边：`data-quality → trader-proxy → portfolio-mgr`。
-    // ⚠ `j-*` / `jev_verdicts` 的入边**不在此处补** —— 那些节点由本函数的 ⑤ 步创建，
-    //   接线也放在 ⑤ 步（创建与接线同处，避免两份清单各自漂移）。
-    // `portfolio-risk-gate` 不必单独接线：它已有 `portfolio-mgr → 它` 的边，
-    // 而 `portfolio-mgr` 等 `trader-proxy` ⇒ 传递保证 target_price 就绪。
+    // 边：`data-quality → trader-proxy`，再由 proxy 接到**真正消费 trader 前缀的那些节点**。
+    // v183 起生产 `portfolio-mgr` 不再吃 trader（f7 换成分析师结构票）⇒ 硬编码「proxy → pm」
+    // 会把一条已不存在的依赖重新接上，等于在快速链里推翻独立性裁定。改为按派生图的**实际映射**
+    // 求消费方集合：含交易观点的参照节点 + `portfolio-risk-gate`（它的 `target_price` 也走该前缀）。
     edges.push(direct_edge(
         &format!("e-data-quality-{FAST_TRADER_PROXY_NODE_ID}"),
         "data-quality",
         FAST_TRADER_PROXY_NODE_ID,
     ));
-    edges.push(direct_edge(
-        &format!("e-{FAST_TRADER_PROXY_NODE_ID}-portfolio-mgr"),
-        FAST_TRADER_PROXY_NODE_ID,
-        "portfolio-mgr",
-    ));
 
     // ── ② + ③ 逐节点改写 ──
     let mut rewritten = 0usize;
     let mut dropped_dqi: Vec<String> = Vec::new();
+    // 真正消费 trader 前缀的节点 —— v183 起生产 `portfolio-mgr` 已不在其中（f7 换成分析师
+    // 结构票），含交易观点的那一侧（参照节点）与 `portfolio-risk-gate` 的 `target_price` 在。
+    // 按**派生图的实际映射**求集合，而不是再抄一份节点名清单：抄来的清单会随生产侧改口径而漂移。
+    let mut trader_view_consumers: Vec<String> = Vec::new();
     for node in nodes.iter_mut() {
         let WorkflowNode::Code(code) = node else { continue };
+        let node_id = code.base.id.clone();
         let is_portfolio_mgr = code.base.id == "portfolio-mgr";
         code.config.input_mapping.retain(|key, value| {
             // ③ 只摘 `portfolio-mgr` 的 dqi 映射：`quality-gate` 走的是自己的 input_var，
@@ -9634,6 +9826,9 @@ fn apply_fast_chain_overrides(
             if let Some(rest) = value.strip_prefix(TRADER_AGENT_PREFIX) {
                 *value = format!("{TRADER_FAST_PREFIX}{rest}");
                 rewritten += 1;
+                if !trader_view_consumers.contains(&node_id) {
+                    trader_view_consumers.push(node_id.clone());
+                }
             }
             true
         });
@@ -9645,9 +9840,15 @@ fn apply_fast_chain_overrides(
     }
     if rewritten == 0 {
         return Err("派生图内没有任何 `trader.content.verdict.*` 映射被改写 —— \
-             源图已改（`portfolio-mgr` / `portfolio-risk-gate` 应各有一条以上），\
-             快速链的 trader 通路会整体失效"
+             源图已改（应有 `portfolio-mgr-f7-ref`（含交易观点侧）与 `portfolio-risk-gate` \
+             各一条以上），快速链的 trader 通路会整体失效"
             .to_string());
+    }
+    // proxy 的出边：接到上面算出的每一个消费方。漏一个 = 该节点读到全 Null 且**全程零报错**
+    // （与本函数文档开头描述的「只改映射不补边」同族缺陷，v143 实测过一次）。
+    for consumer in &trader_view_consumers {
+        let eid = format!("e-{FAST_TRADER_PROXY_NODE_ID}-{consumer}");
+        edges.push(direct_edge(&eid, FAST_TRADER_PROXY_NODE_ID, consumer));
     }
 
     // ── ③ quality-gate 判据 ──
@@ -10753,23 +10954,24 @@ mod fast_workflow_derivation_tests {
             "缺少 data-quality → 组装节点的边"
         );
         assert!(
-            has_edge(FAST_TRADER_PROXY_NODE_ID, "portfolio-mgr"),
-            "缺少 组装节点 → portfolio-mgr 的边"
+            has_edge(FAST_TRADER_PROXY_NODE_ID, "portfolio-mgr-f7-ref"),
+            "缺少 组装节点 → 参照侧的边（v183：生产公式已不吃 trader，proxy 的出边由「谁还带              trader 前缀映射」动态求得；接错目标 = 参照侧读到全 Null，对照恒等）"
         );
 
-        // ③ 前缀改写：全图无旧前缀残留，且 9 条 trader 路径逐条指向新前缀
-        //    （6 条在 `portfolio-mgr` + 1 条在 `portfolio-risk-gate`）。
+        // ③ 前缀改写：全图无旧前缀残留，且 6 条 trader 路径逐条指向新前缀。
+        //    v183：这 6 条全部在**参照侧** `portfolio-mgr-f7-ref`（生产公式的 trader 映射已在
+        //    建图期摘除）；`portfolio-risk-gate` 的第 7 条 `target_price` 已换成估值安全边际，
+        //    不再走 trader 前缀 ⇒ 表里少一格，而不是「漏断言」。
         //    ⚠ 判据**不能**是「key 以 `trader_` 开头」—— `portfolio-mgr` 另有
         //    `trader_cap_min_weight` 这类**面板变量自映射**（值就是变量名本身，
         //    走「参数四道门」的变量通路，与 trader 节点输出无关）。
-        let expected_trader_paths: [(&str, &str, &str); 7] = [
-            ("portfolio-mgr", "trader_direction", "verdict"),
-            ("portfolio-mgr", "trader_confidence", "confidence"),
-            ("portfolio-mgr", "trader_target_price", "targetPrice"),
-            ("portfolio-mgr", "trader_stop_loss", "stopLoss"),
-            ("portfolio-mgr", "trader_risk_level", "riskLevel"),
-            ("portfolio-mgr", "trader_evidence_count", "evidence_cited"),
-            ("portfolio-risk-gate", "target_price", "targetPrice"),
+        let expected_trader_paths: [(&str, &str, &str); 6] = [
+            ("portfolio-mgr-f7-ref", "trader_direction", "verdict"),
+            ("portfolio-mgr-f7-ref", "trader_confidence", "confidence"),
+            ("portfolio-mgr-f7-ref", "trader_target_price", "targetPrice"),
+            ("portfolio-mgr-f7-ref", "trader_stop_loss", "stopLoss"),
+            ("portfolio-mgr-f7-ref", "trader_risk_level", "riskLevel"),
+            ("portfolio-mgr-f7-ref", "trader_evidence_count", "evidence_cited"),
         ];
 
         for node in &nodes {

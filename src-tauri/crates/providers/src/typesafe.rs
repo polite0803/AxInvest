@@ -140,8 +140,6 @@ impl TypeSafeAdapter {
             // 类型同样返回空集）。
             capabilities: vec![],
             max_tokens: Some(CONTEXT_WINDOW),
-            // 输出只有类型化判定，token 量极小且免费。
-            max_output_tokens: Some(1_024),
             enabled: true,
             param_overrides: None,
             input_price_per_mtok: Some(0.042),

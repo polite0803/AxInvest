@@ -204,7 +204,9 @@ pub(crate) async fn do_compress(
         stream: false,
         temperature: settings.compression_temperature.map(|v| v as f64).or(Some(0.3)),
         top_p: settings.compression_top_p.map(|v| v as f64),
-        max_tokens: settings.compression_max_tokens.or(Some(1024)),
+        max_tokens: settings
+            .compression_max_tokens
+            .or(Some(axagent_harness::constants::llm_defaults::COMPRESSION_MAX_TOKENS)),
         tools: None,
         thinking_budget: None,
         use_max_completion_tokens: comp_use_max,

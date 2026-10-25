@@ -26,6 +26,7 @@ import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { DataQualityReport, HorizonPriceGroup } from "@/types";
 import { ExpandOutlined, FilePptOutlined, FileTextOutlined, FileWordOutlined, ReloadOutlined } from "@ant-design/icons";
 import { App, Button, Card, Collapse, Dropdown, Modal, Tag, Tooltip } from "antd";
+import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -34,6 +35,35 @@ import { DecisionTrustNotice } from "./DecisionTrustNotice";
 import { LlmHorizonDecisionStrip } from "./LlmHorizonDecisionStrip";
 import { ReportMarkdown } from "./ReportMarkdown";
 import { cleanToolCallTags } from "./utils";
+
+/**
+ * 后端给的「一行都没写」成因 → 呈现层句子。
+ *
+ * 四种成因各占一句，**不合并**：成因由后端给出（`analyst_feedback.rs` 的
+ * `AnalystFeedbackOutcome.skipped`），界面不得从「written === 0」反推 ——
+ * 反推会把两种语义相反的缺席并成一句：
+ *   · `fast_chain`      = 快速分析链本来就没有那 10 个分析师节点（**设计如此**）
+ *   · `bad_snapshot`    = 黑板快照不可解析（**缺陷**）
+ *   · `no_analysis_row` = 查不到本次分析记录（**缺陷**）
+ *   · `no_diagnosis`    = 本轮没有数据质量诊断（**缺陷**：节点没跑成 / 快照无该键）
+ * 未登记的成因码走兜底句（不把机器码端到界面上），并把原码打进 console。
+ */
+function feedbackSkippedText(t: TFunction, skipped: string): string {
+  if (skipped === "fast_chain") {
+    return t("stockAnalysis.dataQuality.feedbackSkippedFastChain");
+  }
+  if (skipped === "bad_snapshot") {
+    return t("stockAnalysis.dataQuality.feedbackSkippedBadSnapshot");
+  }
+  if (skipped === "no_analysis_row") {
+    return t("stockAnalysis.dataQuality.feedbackSkippedNoAnalysisRow");
+  }
+  if (skipped === "no_diagnosis") {
+    return t("stockAnalysis.dataQuality.feedbackSkippedNoDiagnosis");
+  }
+  console.warn("[DecisionBanner] 未登记的分析师反馈缺席成因码:", skipped);
+  return t("stockAnalysis.dataQuality.feedbackSkippedUnknown");
+}
 
 // 四周期固定键列表（PROPOSAL-stock-decision-four-horizon.md 阶段 1/2）：
 // 价位映射 / 独立决策面板 / 标签页多处共用，必须是模块级常量 ——
@@ -79,6 +109,10 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
   const dataQualitySummary = useStockAnalysisStore((s) => s.dataQualitySummary) ?? "";
   // 决策输入诊断：portfolio-mgr 16 个上游节点的数据符合度（纯前端，不持久化）
   const decisionInputsReport = useStockAnalysisStore((s) => s.decisionInputsReport) ?? [];
+  // 分析师质量反馈（`analyst_feedbacks`）本轮落库的计数，由后端在 workflow-completed
+  // 载荷里回传（写侧已在后端落库旁路，前端不再自己拼载荷上报）。
+  // `null` = 本轮没拿到该字段 ⇒ 不出话（不知道 ≠ 失败）。
+  const analystFeedback = useStockAnalysisStore((s) => s.analystFeedback);
   const failedNodes = useStockAnalysisStore((s) => s.failedNodes);
   const dataWarnings = useStockAnalysisStore((s) => s.dataWarnings);
   const ruleCheckResults = useStockAnalysisStore((s) => s.ruleCheckResults);
@@ -649,7 +683,11 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
   const isBackendContradictory = !!decision?.isContradictory;
   const isConsensusContradictory = (() => {
     if (!analystReports || Object.keys(analystReports).length < 3 || !decision) { return false; }
-    const consensus = computeStockConsensus(analystReports, undefined, decision.timeHorizon);
+    const consensus = computeStockConsensus(
+      Object.fromEntries(Object.entries(analystReports).map(([k, v]) => [k, cleanToolCallTags(v)])),
+      undefined,
+      decision.timeHorizon,
+    );
     // P1-6(2026-09-14): 判定改走统一归一化。原为英文字面量比较，而 portfolio-mgr
     // 产出的是中文「买入/增持/卖出/减持」⇒ 中文值域下两者恒 false，矛盾检测静默失效。
     const consensusDirection = actionToDirection(decision.action);
@@ -2882,6 +2920,39 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               </div>
             </div>
           )}
+
+        {
+          /* 分析师质量反馈（`analyst_feedbacks`）本轮落库情况。计数由**后端**回传
+            （写侧已在后端落库旁路，前端不再自己拼载荷上报）。
+            · 部分写库失败 = 红句（自我进化本轮少了这些输入）；
+            · 一行都没写 = 后端给出的**成因**，四种成因各占一句（不得合并，也不得
+              从「written === 0」反推 —— 「快速链本来就没有分析师节点」是设计如此，
+              「诊断没跑出来」是缺陷，修法完全不同）。
+            成功（written>0 且 failed=0）不出话：这里不是功劳簿。 */
+        }
+        {analystFeedback && analystFeedback.failed > 0 && (
+          <div
+            className="mb-4 p-2 rounded text-xs"
+            style={{ background: "var(--surface)", borderLeft: "3px solid #f5222d" }}
+          >
+            <div className="font-semibold" style={{ color: "#f5222d" }}>
+              {t("stockAnalysis.dataQuality.feedbackWriteFailed", {
+                failed: analystFeedback.failed,
+                written: analystFeedback.written,
+              })}
+            </div>
+          </div>
+        )}
+        {analystFeedback && analystFeedback.failed === 0 && analystFeedback.skipped && (
+          <div
+            className="mb-4 p-2 rounded text-xs"
+            style={{ background: "var(--surface)", borderLeft: "3px solid var(--sa-amber, #f59e0b)" }}
+          >
+            <div style={{ color: "var(--color-text-secondary)" }}>
+              {feedbackSkippedText(t, analystFeedback.skipped)}
+            </div>
+          </div>
+        )}
 
         {/* 决策输入诊断面板：展示 portfolio-mgr 实际消费的 16 个上游节点的数据符合度 */}
         {

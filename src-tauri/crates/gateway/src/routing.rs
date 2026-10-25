@@ -303,7 +303,6 @@ mod tests {
             model_type: ModelType::Chat,
             capabilities: Vec::new(),
             max_tokens: None,
-            max_output_tokens: None,
             enabled: true,
             param_overrides: None,
             input_price_per_mtok: input,

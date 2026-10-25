@@ -984,7 +984,6 @@ pub fn scan_gguf_models(provider_id: &str, dir: &Path) -> Vec<axagent_harness::t
                 model_type,
                 capabilities,
                 max_tokens: axagent_kit::model_knowledge::get_model_context_window(&f.filename),
-                max_output_tokens: None,
                 enabled: true,
                 param_overrides: None,
                 input_price_per_mtok: None,

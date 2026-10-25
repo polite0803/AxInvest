@@ -176,20 +176,8 @@ export function categoryTemplateUpdateFromCategory(
   category?: {
     id: string;
     systemPrompt?: string | null;
-    defaultTemperature?: number | null;
-    defaultMaxTokens?: number | null;
-    defaultTopP?: number | null;
-    defaultFrequencyPenalty?: number | null;
   } | null,
-): Pick<
-  UpdateConversationInput,
-  | "categoryId"
-  | "systemPrompt"
-  | "temperature"
-  | "maxTokens"
-  | "topP"
-  | "frequencyPenalty"
-> {
+): Pick<UpdateConversationInput, "categoryId" | "systemPrompt"> {
   if (!category) {
     return {};
   }
@@ -197,9 +185,5 @@ export function categoryTemplateUpdateFromCategory(
   return {
     categoryId: category.id,
     systemPrompt: category.systemPrompt ?? undefined,
-    temperature: category.defaultTemperature,
-    maxTokens: category.defaultMaxTokens,
-    topP: category.defaultTopP,
-    frequencyPenalty: category.defaultFrequencyPenalty,
   };
 }

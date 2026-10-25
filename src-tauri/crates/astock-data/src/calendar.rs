@@ -415,22 +415,122 @@ pub async fn init_holiday_calendar() -> Result<usize, String> {
 /// ⚠ 权衡：vendor 数据若滞后一日，会把最近一个工作日误标休市 —— 代价只影响
 /// 休市提示 / 快照采集跳过（K 线缓存新鲜性已由 C2 改为 TTL 全权，不再依赖本表），
 /// 远小于漏标节假日的代价（漏标正是本次缓存风暴的源头）。`today` 本身永不标记。
+///
+/// ## 🔴 R-2 修复（2026-10-25）：尾部空洞**必须有上限**
+///
+/// 原实现把「序列最后一个日期之后、今天之前的每个工作日」一律标成休市。
+/// 当 vendor 返回**残缺序列**时（限流 / WAF / 字段解析失败 / 只返回部分日期），
+/// 这条规则会凭空造出**一整片假休市日** —— 实测：指数 K 线止于 2026-09-28 时，
+/// 09-30 ~ 10-22 共 **18 个真实交易日**被误判为休市，
+/// 于是时间旅行批次拒绝全部 2026-10 的锚点日（`不是 A 股交易日`）。
+///
+/// 现在分两段处理：
+/// - **内部空洞**（`首根 < d ≤ 末根`）：序列覆盖了这段区间，缺失即真休市 —— 保留；
+/// - **尾部空洞**（`末根 < d < today`）：只有当 `today − 末根 ≤ MAX_TAIL_GAP_DAYS`
+///   时才推导；超出即视为「序列滞后」，**整段不推导**。
+///
+/// 另加两道防护：
+/// - 序列根数 < [`MIN_BARS_FOR_DERIVATION`] ⇒ 样本太少，不推导；
+/// - 内部空洞密度 > [`MAX_INTERNAL_HOLE_RATIO`] ⇒ 序列稀疏，整段放弃推导。
+///
+/// 依据（2026-10-25 实测）：腾讯 `fqkline` 对 `sh000001` 返回 60 根完整序列
+/// （2026-07-24 ~ 2026-10-23），东财 `push2his` 被 RST 拦截 ⇒ 应用侧拿到的是残缺序列。
+/// **「用尽可得数据」的前提是数据本身可信 —— 这里补上的就是那层校验。**
 pub fn derive_holidays_from_kline_dates(dates: &[String], today: NaiveDate) -> Vec<String> {
     let parsed: std::collections::BTreeSet<NaiveDate> =
         dates.iter().filter_map(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).collect();
     let Some(&first) = parsed.iter().next() else {
         return vec![];
     };
+    let Some(&last) = parsed.iter().next_back() else {
+        return vec![];
+    };
+
+    // 防护①：根数太少 ⇒ 样本不足以判断「缺失 = 休市」
+    if parsed.len() < MIN_BARS_FOR_DERIVATION {
+        return vec![];
+    }
+
+    // 防护②：内部空洞密度过高 ⇒ 序列稀疏（不是「密集休市」），整段放弃推导。
+    // 判据用「缺失工作日 / 区间工作日总数」，阈值 30%：正常年份的休市占比 < 5%，
+    // 春节+国庆连休的极端月份也 < 20%；超过 30% 只能解释为数据源残缺。
+    let span_weekdays = count_weekdays(first, last);
+    if span_weekdays > 0 {
+        let present = count_dates_in(first, last, &parsed);
+        let holes = span_weekdays - present;
+        if (holes as f64) > (span_weekdays as f64) * MAX_INTERNAL_HOLE_RATIO {
+            return vec![];
+        }
+    }
+
     let mut out = Vec::new();
+    // 尾部可信性以「今天 − 末根」的**整体间距**判定：序列滞后 ⇒ 末根之后的整段
+    // 都不可信（逐日判断会漏掉「离末根近但离今天远」的那些日子 —— 那正是
+    // 10-09 这种：距末根 11 天、距今天 16 天，逐日判会把它算成「离今天够近」而误标）。
+    let tail_gap_days = (today - last).num_days();
+    let tail_trusted = tail_gap_days <= MAX_TAIL_GAP_DAYS;
     let mut d = first + Duration::days(1);
     while d < today {
         let w = d.weekday();
         if w != Weekday::Sat && w != Weekday::Sun && !parsed.contains(&d) {
-            out.push(d.format("%Y-%m-%d").to_string());
+            // 内部空洞（d ≤ last）始终可信；尾部空洞仅在序列足够新时才可信。
+            if d <= last || tail_trusted {
+                out.push(d.format("%Y-%m-%d").to_string());
+            }
         }
         d += Duration::days(1);
     }
     out
+}
+
+/// 尾部空洞的最大可信跨度（自然日）。
+///
+/// 取 12 天：需覆盖「春节连休」这种最长休市（2026 年春节 02-16 ~ 02-24 共 9 天），
+/// 同时把「序列滞后 18 天以上」的残缺序列挡在外面（实测残缺形态滞后 27 天）。
+const MAX_TAIL_GAP_DAYS: i64 = 12;
+
+/// 参与推导所需的最少 K 线根数。
+///
+/// 取 5：既能挡住「只有 1~2 根 ⇒ 区间极窄、几乎所有工作日都像空洞」这种退化输入，
+/// 又不破坏 C3 回归（内部空洞 + 尾部空洞）用 5 根序列的既有判据。
+///
+/// ⚠ **拦住实测故障（2026-10-25）的是尾部空洞上限，不是本项** ——
+/// 那次残缺序列有 ~45 根，根数完全正常，是「末根落后今天 27 天」触发了上限。
+/// 两道护栏分工不同，别只留一道。
+const MIN_BARS_FOR_DERIVATION: usize = 5;
+
+/// 内部空洞密度上限（占区间工作日比例）。
+const MAX_INTERNAL_HOLE_RATIO: f64 = 0.30;
+
+/// `[from, to]` 区间内的工作日数量（含端点）。
+fn count_weekdays(from: NaiveDate, to: NaiveDate) -> i64 {
+    let mut n = 0i64;
+    let mut d = from;
+    while d <= to {
+        let w = d.weekday();
+        if w != Weekday::Sat && w != Weekday::Sun {
+            n += 1;
+        }
+        d += Duration::days(1);
+    }
+    n
+}
+
+/// `[from, to]` 区间内落在给定集合中的日期数量。
+fn count_dates_in(
+    from: NaiveDate,
+    to: NaiveDate,
+    set: &std::collections::BTreeSet<NaiveDate>,
+) -> i64 {
+    let mut n = 0i64;
+    let mut d = from;
+    while d <= to {
+        if set.contains(&d) {
+            n += 1;
+        }
+        d += Duration::days(1);
+    }
+    n
 }
 
 /// 把 K 线自证出的休市日**合并**进全局远程缓存（不清空——与其它来源共存），
@@ -765,5 +865,90 @@ mod tests {
         }
         let uniq: std::collections::HashSet<&str> = codes.iter().map(|(_, c)| *c).collect();
         assert_eq!(uniq.len(), 6, "两档共用一个码 ⇒ 前端那句缺席文案会把两档说成同一件事");
+    }
+
+    // ── R-2 回归：残缺指数 K 线不得凭空造出假休市日（2026-10-25）──
+
+    /// 构造一段「完整」的指数日 K 日期序列：区间内的工作日全部出现，
+    /// 只剔除给定的休市日。
+    fn synth_index_dates(from: NaiveDate, to: NaiveDate, holidays: &[&str]) -> Vec<String> {
+        let hs: std::collections::BTreeSet<String> =
+            holidays.iter().map(|s| s.to_string()).collect();
+        let mut out = Vec::new();
+        let mut d = from;
+        while d <= to {
+            let w = d.weekday();
+            let s = d.format("%Y-%m-%d").to_string();
+            if w != Weekday::Sat && w != Weekday::Sun && !hs.contains(&s) {
+                out.push(s);
+            }
+            d += Duration::days(1);
+        }
+        out
+    }
+
+    /// **核心正控**：完整序列仍要能推出真休市（否则这次修复把功能改没了）。
+    #[test]
+    fn complete_series_still_derives_real_holidays() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
+        let dates = synth_index_dates(
+            NaiveDate::from_ymd_opt(2026, 7, 24).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
+            &["2026-09-25", "2026-10-01", "2026-10-02"],
+        );
+        assert!(dates.len() >= 55, "序列长度应足够，{}", dates.len());
+        let derived = derive_holidays_from_kline_dates(&dates, today);
+        for h in ["2026-09-25", "2026-10-01", "2026-10-02"] {
+            assert!(derived.iter().any(|d| d == h), "真休市 {h} 必须被推出：{derived:?}");
+        }
+        assert!(
+            !derived.iter().any(|d| d == "2026-10-09"),
+            "10-09 有 K 线 ⇒ 绝不能被标成休市：{derived:?}"
+        );
+    }
+
+    /// **核心回归（本次实测形态）**：序列残缺（止于 09-28）时，
+    /// 绝不能把 09-30 ~ 10-22 这些**真实交易日**标成休市。
+    ///
+    /// 实测：指数 K 线止于 2026-09-28 时，原实现造出 18 个假休市日，
+    /// 导致时间旅行批次拒绝全部 2026-10 的锚点日。
+    #[test]
+    fn stale_series_does_not_fabricate_holidays() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
+        let full = synth_index_dates(
+            NaiveDate::from_ymd_opt(2026, 7, 24).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
+            &["2026-09-25", "2026-10-01", "2026-10-02"],
+        );
+        // 模拟「vendor 只返回到 09-28」
+        let stale: Vec<String> =
+            full.iter().filter(|d| d.as_str() <= "2026-09-28").cloned().collect();
+        assert!(stale.len() >= 40, "截断后仍应足够长，{}", stale.len());
+        let derived = derive_holidays_from_kline_dates(&stale, today);
+        for d in ["2026-09-30", "2026-10-09", "2026-10-12", "2026-10-22"] {
+            assert!(
+                !derived.iter().any(|x| x == d),
+                "{d} 是真实交易日，不得被标成休市：{derived:?}"
+            );
+        }
+        // 但序列**内部**的真休市仍要保留（09-25 在截断点之前）
+        assert!(
+            derived.iter().any(|x| x == "2026-09-25"),
+            "内部真休市 09-25 必须保留：{derived:?}"
+        );
+    }
+
+    /// 稀疏序列（根数少 / 缺失率过高）⇒ 整段放弃推导，而不是推出一堆假休市。
+    #[test]
+    fn sparse_series_is_rejected_entirely() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
+        // 只有 3 根 ⇒ 低于 MIN_BARS_FOR_DERIVATION（区间极窄时几乎每个工作日都像空洞）
+        let few = synth_index_dates(
+            NaiveDate::from_ymd_opt(2026, 10, 13).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
+            &[],
+        );
+        let few: Vec<String> = few.into_iter().take(3).collect();
+        assert!(derive_holidays_from_kline_dates(&few, today).is_empty());
     }
 }

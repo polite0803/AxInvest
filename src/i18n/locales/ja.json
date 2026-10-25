@@ -5556,7 +5556,7 @@
       "empty": "ローカルツールがありません",
       "title": "ローカルツール"
     },
-    "maxTokens": "最大トークン数",
+    "maxTokens": "最大出力トークン",
     "maxTokensTooltip": "モデルが生成できる最大トークン数",
     "mcpServers": {
       "add": "MCP サーバーを追加",
@@ -5733,6 +5733,7 @@
       "workingMemoryEntries": "{{count}} 項目"
     },
     "messageChannels": "メッセージチャネル",
+    "trayEnabled": "システムトレイを表示",
     "minimizeToTray": "閉じたときにトレイに最小化",
     "minutes": "分",
     "modelAbilities": "モデル機能",
@@ -15531,6 +15532,8 @@
     "actionUnavailable": "データなし",
     "amplitude": "Amplitude",
     "analystConsensus": "Analyst Consensus",
+    "analystConsensusExcluded": "{count} 人のアナリストの結論が自身の強弱スコアと矛盾しているため、本合意の集計から除外しました",
+    "analystConfidenceSelfReported": "アナリスト自身が申告した確信度（0-100）で、その結論への手応えを示すにすぎません。その後の実際の騰落と突き合わせた値でも、勝率でもありません。主档の「決定確信度」（数式事後確率）とは別スケールであり、両者を比較できません。",
     "bearish": "Bearish",
     "bullish": "Bullish",
     "cancelled": "分析がキャンセルされました — 部分データを表示",
@@ -16736,7 +16739,8 @@
         "chip": "保有構造",
         "pace": "ペース",
         "momentum": "モメンタム",
-        "bottleneck": "ボトルネック"
+        "bottleneck": "ボトルネック",
+        "analyst_vote": "アナリスト投票"
       },
       "attributionLabel": "拒否要因（本決定が計算済みのフィールドから）:",
       "legContribution": "{{leg}} 寄与 {{sigma}}（重み {{weight}}）",
@@ -17680,7 +17684,6 @@
       "evolutionCollectingData": "{{nodeName}}のデータを収集中...",
       "evolutionNoData": "{{nodeName}}にはフィードバックデータがありません",
       "evolutionFailed": "{{nodeName}}の進化に失敗しました",
-      "feedbackUploadFailed": "{nodeName}：品質フィードバックの送信に失敗しました。自己進化はこの入力なしで進みます",
       "evolutionTrigger": "{{nodeName}}の自己進化をトリガー",
       "evolutionSuggestion": "🧬 {{nodeName}}自己進化提案",
       "close": "閉じる",
@@ -18377,7 +18380,13 @@
       "snapshotAbsentNotPersisted": "分析は完了しましたが、生成チャネルがノード別の結果を保存していないため、データ品質診断・分析師別の根拠・ダッシュボード再構築はいずれも利用できません。",
       "snapshotAbsentIncomplete": "分析がまだ完了していないため、ブラックボードスナップショットはありません。",
       "snapshotAbsentRerunHint": "分析チェーンを再実行すると、このチャネルはスナップショットを保存します。",
-      "summaryLength": "摘要长度"
+      "summaryLength": "摘要长度",
+      "feedbackWriteFailed": "アナリスト品質フィードバックの保存に失敗しました：{{written}} 件中 {{failed}} 件が未保存で、自己進化は今回の入力を受け取っていません",
+      "feedbackSkippedFastChain": "本回は高速チェーンで実行されたため、保存できるアナリスト別の診断がありません（自己進化は今回の分析のフィードバックを受け取っていません）",
+      "feedbackSkippedBadSnapshot": "本回のブラックボードスナップショットを解析できなかったため、アナリスト別の診断は保存されていません（自己進化は今回の分析のフィードバックを受け取っていません）",
+      "feedbackSkippedNoAnalysisRow": "本回に対応する分析レコードが見つからず、アナリスト別の診断は保存されていません（自己進化は今回の分析のフィードバックを受け取っていません）",
+      "feedbackSkippedNoDiagnosis": "保存できるアナリスト別の診断がなく、自己進化は今回の分析のフィードバックを受け取っていません",
+      "feedbackSkippedUnknown": "不明な理由でアナリストのフィードバックは保存されていません（自己進化は今回の分析のフィードバックを受け取っていません）"
     },
     "dataWarning": {
       "announcement": "公告",
@@ -18558,7 +18567,35 @@
       "sessionAfternoon": "午後場",
       "sessionPostClose": "引け後"
     },
-    "horizonPriorHitRate": "的中率 {{rate}}%"
+    "horizonPriorHitRate": "的中率 {{rate}}%",
+    "f7Reference": {
+      "weightsCollapsed": "この側で因子重みが崩壊 ⇒ 結論は比較に使えず、記録のみ残します。",
+      "actionAbsent": "この側は方向の結論を出していません（弱気判断ではありません）",
+      "actionSame": "本番フォミュラと同じ段階",
+      "actionNotComparable": "両側の方向が揃わない ⇒ 今回の方向差は算出しません",
+      "valueNotComparable": "どちらか側の数値が欠落 ⇒ 数値差は算出しません",
+      "posterior": "事後確率",
+      "riskLevel": "リスク段階",
+      "f7Weight": "f7 重み割合",
+      "f7WeightValue": "{{pct}}%",
+      "gapsPresent": "この側は上流データを {{n}} 項目欠いています：{{gaps}}",
+      "gapsNone": "この側の上流データは揃っています",
+      "title": "f7 基準の対照（生産=アナリスト構造票、参照=トレーダー見通し込み）",
+      "notProduced": "この記録には f7 基準の対照がありません（分析がこの基準の実装前、または参照ノードが未実行）",
+      "productionLabel": "生産側：",
+      "referenceLabel": "参照側：",
+      "sameBasis": "両側の f7 基準が同じ ⇒ この対照は成立しません（差は同じ入力二重計上の結果にすぎません）。",
+      "actionDiffer": "両側で段階が異なります：生産 {{production}} vs 参照 {{reference}}",
+      "confDelta": "信頼度 {{delta}}（生産 {{production}} vs 参照 {{reference}}）",
+      "posDelta": "ポジション {{delta}}%（生産 {{production}}% vs 参照 {{reference}}%）",
+      "scaleNote": "両側は同一尺度（同一 rhai の産出）で直接比較できます。段階別比較の三次元スコアは別の尺度です。",
+      "f7": {
+        "analystVotes": "f7 はアナリスト構造票（各アナリストの純票と分散度）を使い、LLM の取引見通しは読みません。",
+        "trader": "f7 は LLM トレーダーの方向・信頼度・見積価格換算を使います（v183 以前生産基準）。",
+        "absent": "f7 に入力がまったくありません ⇒ その脚は 0 として重みから外れ、この側に取引信号はありません。",
+        "unknown": "この側は f7 の入力の由来を宣言していません ⇒ LLM 決定から独立か判断できません。"
+      }
+    }
   },
   "pipeline": {
     "title": "株式パイプライン",

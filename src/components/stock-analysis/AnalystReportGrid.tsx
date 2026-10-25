@@ -1,5 +1,6 @@
 // i18n-exempt: 业务逻辑判断字符串，非 UI 展示文本
 import type { JevJudgment } from "@/lib/agentOutput";
+import { parseDataQualityReport } from "@/lib/dataQualityDiagnosis";
 import {
   analystBaseOf,
   classifyDirectionText,
@@ -9,15 +10,15 @@ import {
   extractBullBearScores,
   horizonLabelKey,
   normalizeVerdictScore,
-  tallyAnalystSentiment,
 } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
-import { Button, Card, Table, Tag, Tooltip } from "antd";
+import { Button, Card, Segmented, Table, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnalystReportCard } from "./AnalystReportCard";
 import { HorizonScopeNotice } from "./HorizonScopeNotice";
+import { useAnalystConsensusByTier } from "./useAnalystConsensusByTier";
 import { cleanToolCallTags } from "./utils";
 
 // ── 分析师 **base** 清单（store `analystReports` 的键域，去 `a-` 前缀） ──
@@ -180,9 +181,11 @@ function JevJudgmentCard({ expertId, judgment }: { expertId: string; judgment: J
             此处是**按产物契约**渲染（段 E `j-confidence` 就会输出），不是为将来预留。 */
         }
         {judgment.confidence !== null && (
-          <span className="text-xs" style={{ color: "var(--muted)" }}>
-            {t("stockAnalysis.workflow.confidence")} {Math.round(judgment.confidence * 100)}%
-          </span>
+          <Tooltip title={t("stockAnalysis.analystConfidenceSelfReported")}>
+            <span className="text-xs" style={{ color: "var(--muted)" }}>
+              {t("stockAnalysis.workflow.confidence")} {Math.round(judgment.confidence * 100)}%
+            </span>
+          </Tooltip>
         )}
       </div>
       {/* LLM 失败会降级为 `fallback_label`（多为「中性」）—— 不标出来就是把失败伪装成判定 */}
@@ -291,6 +294,13 @@ function AnalystPlaceholderCard({
 export function AnalystReportGrid() {
   const { t } = useTranslation();
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
+  const decisionTimeHorizon = useStockAnalysisStore((s) => s.decision?.timeHorizon);
+  const dataQualitySummary = useStockAnalysisStore((s) => s.dataQualitySummary);
+  // 「结论方向与多空评分矛盾」的资格判据住在后端 data-quality，这里只读它的产出。
+  const dataQualityReport = useMemo(
+    () => parseDataQualityReport(dataQualitySummary),
+    [dataQualitySummary],
+  );
   const jevJudgments = useStockAnalysisStore((s) => s.jevJudgments);
   const streamingPreviews = useStockAnalysisStore((s) => s.streamingPreviews);
   const failedNodes = useStockAnalysisStore((s) => s.failedNodes);
@@ -303,32 +313,34 @@ export function AnalystReportGrid() {
   const isJevMode = Object.keys(jevJudgments).length > 0;
   const isRunning = workflowStatus === "running" || workflowStatus === "loading";
 
-  // Aggregate sentiment from reports — 计票口径走 `tallyAnalystSentiment` 单一真相源
-  // （结构化 bull_score/bear_score 1.2 倍阈值 → 关键词兜底），与页面顶部共识条、chat
-  // 紧凑摘要完全同源。
-  const sentiment = useMemo(() => {
-    if (isJevMode) {
-      // 快速链：维度判定档位直接映射多空（与 `JEV_BULL/BEAR_CATEGORIES` 同一份词表）。
-      // 口径与原链一致（都是「每个维度记一票」）⇒ 共识条与色彩条无需任何改动。
-      // 未产出判定的维度**不计票**（既不算多也不算空）—— 否则失败的维度会被记成中性，
-      // 让「10 项里 7 项没跑出来」看起来像「10 项都判了中性」。
-      let bullish = 0;
-      let bearish = 0;
-      let neutral = 0;
-      for (const nodeId of JEV_DIMENSION_NODE_IDS) {
-        const category = jevJudgments[nodeId]?.category;
-        if (category === undefined) { continue; }
-        if (JEV_BULL_CATEGORIES.has(category)) { bullish++; }
-        else if (JEV_BEAR_CATEGORIES.has(category)) { bearish++; }
-        else { neutral++; }
-      }
-      return { bullish, bearish, neutral, total: bullish + bearish + neutral };
-    }
-    const cleanedReports = Object.values(analystReports).map((raw) => cleanToolCallTags(raw));
-    return tallyAnalystSentiment(cleanedReports);
-  }, [analystReports, jevJudgments, isJevMode]);
+  // 逐档共识：每档一组分析师、各自计票（4/5/7/7），默认跟随本次决策档。
+  // 合计成一个池会让 `market-analyst` 计四票、`policy` 计一票；跨档去重又会抹掉三档观点。
+  const tierConsensus = useAnalystConsensusByTier(
+    analystReports,
+    decisionTimeHorizon,
+    dataQualityReport,
+  );
 
-  const consensus = useMemo(() => deriveAnalystConsensus(sentiment), [sentiment]);
+  // 快速链：维度判定档位直接映射多空（与 `JEV_BULL/BEAR_CATEGORIES` 同一份词表）。
+  // 未产出判定的维度**不计票**（既不算多也不算空）—— 否则失败的维度会被记成中性，
+  // 让「10 项里 7 项没跑出来」看起来像「10 项都判了中性」。
+  const jevSentiment = useMemo(() => {
+    let bullish = 0;
+    let bearish = 0;
+    let neutral = 0;
+    if (!isJevMode) { return { bullish, bearish, neutral, total: 0 }; }
+    for (const nodeId of JEV_DIMENSION_NODE_IDS) {
+      const category = jevJudgments[nodeId]?.category;
+      if (category === undefined) { continue; }
+      if (JEV_BULL_CATEGORIES.has(category)) { bullish++; }
+      else if (JEV_BEAR_CATEGORIES.has(category)) { bearish++; }
+      else { neutral++; }
+    }
+    return { bullish, bearish, neutral, total: bullish + bearish + neutral };
+  }, [jevJudgments, isJevMode]);
+
+  const sentiment = isJevMode ? jevSentiment : tierConsensus.tally;
+  const consensus = isJevMode ? deriveAnalystConsensus(jevSentiment) : tierConsensus.consensus;
 
   // ── 统一构造显示列表：done / pending / failed（v133：按逐档实例展开） ──
   // store `analystReports` 的键现在是**逐档实例**（`market-analyst--mid`）或裸 base
@@ -651,7 +663,13 @@ export function AnalystReportGrid() {
       },
     },
     {
-      title: t("stockAnalysis.experiment.conf"),
+      // 列头挂口径说明：这一列是分析师**自报**的把握度，与主档「决策置信度」（公式后验）
+      // 同名不同口径；未经后续涨跌对账，不得被读成胜率。
+      title: (
+        <Tooltip title={t("stockAnalysis.analystConfidenceSelfReported")}>
+          <span>{t("stockAnalysis.experiment.conf")}</span>
+        </Tooltip>
+      ),
       dataIndex: "confidence",
       key: "confidence",
       width: 44,
@@ -694,8 +712,9 @@ export function AnalystReportGrid() {
   return (
     <div>
       {
-        /* 分析师是 10 个单份节点（无档位后缀），四档共用同一批报告
-          ⇒ 显式声明「按档的是评分与决策」，不装作按档。见 PLAN §五十三 ⑤ 甲。 */
+        /* v133 起分析师按持有期各跑自己的子集（4/5/7/7），本 tab 的共识条按档分组、
+          默认跟随本次决策档；范围声明与 `HorizonScopeNotice` 的 analyst 一格同判据。
+          见 PLAN §五十三 ⑤ 甲。 */
       }
       <HorizonScopeNotice scope="analyst" />
       {/* 舆情摘要 bar — 醒目的共识卡片 + 大号数字 + 百分比 + 色彩条 */}
@@ -717,9 +736,33 @@ export function AnalystReportGrid() {
               <span className="text-xs" style={{ color: "var(--muted)" }}>
                 {t("stockAnalysis.tab.analysts")} · {total}
                 {t("stockAnalysis.recommendation.reportCountSuffix")}
+                {!isJevMode && tierConsensus.activeTier
+                  ? ` · ${t(horizonLabelKey(tierConsensus.activeTier) ?? tierConsensus.activeTier)}`
+                  : ""}
               </span>
             </div>
+            {!isJevMode && tierConsensus.options.length > 1 && (
+              /* 逐档切换：四档各有自己的分析师子集与共识，不合计成一个池 */
+              <Segmented
+                size="small"
+                value={tierConsensus.activeTier ?? undefined}
+                onChange={(v) => tierConsensus.setActiveTier(String(v))}
+                options={tierConsensus.options.map((o) => ({
+                  value: o.tier,
+                  label: `${t(horizonLabelKey(o.tier) ?? o.tier)} ${o.tally.total}`,
+                }))}
+              />
+            )}
           </div>
+          {
+            /* 扣了票必须说出来：否则「7 票里有 1 位自相矛盾」会被读成「只有 7 位分析师有意见」。
+              判据与扣除都住在后端 data-quality + hook，这里只呈现原因，不重算。 */
+          }
+          {!isJevMode && tierConsensus.excludedCount > 0 && (
+            <div className="text-xs mb-2" style={{ color: "var(--ant-warning, #b45309)" }}>
+              {t("stockAnalysis.analystConsensusExcluded", { count: tierConsensus.excludedCount })}
+            </div>
+          )}
 
           {/* 大号三色数字 */}
           <div className="grid grid-cols-3 gap-2 mb-2">
@@ -887,6 +930,7 @@ export function AnalystReportGrid() {
                   key={entry.key}
                   expertId={entry.base}
                   tierLabel={tierLabel}
+                  tier={entry.tier}
                   report={entry.report}
                 />
               );

@@ -83,7 +83,83 @@ export const RETIRED = [
 
 /** 剥 Rust/Rhai 注释：注释里的名字不算引用面（否则「写一行注释」就能骗过门）。 */
 export function stripComments(src) {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'\\])\/\/[^\n]*/g, "$1");
+  // 单趟扫描，顺序即优先级：行注释 → 块注释（Rust 可嵌套）→ 字符串字面量 → 普通字符。
+  //
+  // 旧实现是「先全局删 /* … */，再删 // …」两条正则 ⇒ `//` 行注释里出现的 `/*` 会被当成
+  // 块注释开头，一路吞到下一个 `*/`。实测现网 `seed_stock_analysis.rs` 里
+  // `// 「极高风险①ST/*ST/退市股」` 这一行就把该文件从 559 KB 剥到 180 KB，
+  // 于是文件后半部分的引用面**整体消失** ⇒ `trader_context_slim` / `risk_context_slim`
+  // 被误报成「零引用面」（假红；判据只会因剥离过度而漏检，不会虚增命中）。
+  // 字符串里的 `//`（如 `"http://"`）也不该开行注释，故字符串分支必须一起补上。
+  let out = "";
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i];
+    const d = src[i + 1] ?? "";
+    if (c === "/" && d === "/") {
+      while (i < n && src[i] !== "\n") {
+        i++;
+      }
+      continue;
+    }
+    if (c === "/" && d === "*") {
+      let depth = 1;
+      i += 2;
+      while (i < n && depth > 0) {
+        if (src[i] === "/" && src[i + 1] === "*") {
+          depth++;
+          i += 2;
+        } else if (src[i] === "*" && src[i + 1] === "/") {
+          depth--;
+          i += 2;
+        } else {
+          i++;
+        }
+      }
+      out += "\n"; // 保行号结构，便于按行比对的消费方
+      continue;
+    }
+    if (c === "r" && (d === '"' || d === "#") && !/[A-Za-z0-9_]/.test(src[i - 1] ?? "")) {
+      // 原始字符串 r"…" / r#"…"# / r##"…"##：内部不是注释，整段原样带走。
+      let hashes = 0;
+      let j = i + 1;
+      while (src[j] === "#") {
+        hashes++;
+        j++;
+      }
+      if (src[j] === '"') {
+        const closer = `"${"#".repeat(hashes)}`;
+        const end = src.indexOf(closer, j + 1);
+        if (end > 0) {
+          out += src.slice(i, end + closer.length);
+          i = end + closer.length;
+          continue;
+        }
+      }
+    }
+    if (c === '"') {
+      out += c;
+      i++;
+      while (i < n) {
+        if (src[i] === "\\") {
+          out += src[i] + (src[i + 1] ?? "");
+          i += 2;
+          continue;
+        }
+        out += src[i];
+        if (src[i] === '"') {
+          i++;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
 }
 
 /** mod.rs 的 `const RENAME_MAP` 块＝旧名→新名别名表，属声明面而不是消费面。 */

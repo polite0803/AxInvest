@@ -2,7 +2,7 @@
 import { classifyDirectionText, getSignalColor, normalizeVerdictScore } from "@/lib/stock-analysis-utils";
 import { useSettingsStore } from "@/stores";
 import { ExpandOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { Button, Card, Collapse, Empty, Modal, Tag } from "antd";
+import { Button, Card, Collapse, Empty, Modal, Tag, Tooltip } from "antd";
 import { setCustomComponents } from "markstream-react";
 import type { RenderContext, RenderNodeFn } from "markstream-react";
 import { useState } from "react";
@@ -51,6 +51,12 @@ interface Props {
   report: string;
   /** v133：逐档实例的档位标签（如「中线」）；裸 base 卡不传。 */
   tierLabel?: string;
+  /**
+   * v133：本卡对应的持有期 snake id（`mid` / `long` / …）。
+   * 只用于把数据质量弹窗指向 `diagnostics_by_tier` 的**本档那一行**；
+   * `tierLabel` 是人话、本字段是键，两者不可互换（译文变了查表就落空）。
+   */
+  tier?: string | null;
 }
 
 /** 宽松解析：支持多种后端 JSON 格式 */
@@ -679,7 +685,7 @@ function StancePointsBlock(
   );
 }
 
-export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
+export function AnalystReportCard({ expertId, report, tierLabel, tier = null }: Props) {
   const { t } = useTranslation();
   const themeMode = useSettingsStore((s) => s.settings.themeMode);
   const isDark = themeMode === "dark"
@@ -858,9 +864,13 @@ export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
                 </span>
               )}
               {confidence != null && (
-                <span className="text-xs" style={{ color: "var(--muted)" }}>
-                  {t("stockAnalysis.confidence")} {confidence.toFixed(0)}%
-                </span>
+                /* 自报口径必须标明：它是分析师给自己结论的把握度，没跟后续涨跌对过账，
+                   也不是胜率；同屏的「决策置信度」是公式后验，两者不同口径不可互比。 */
+                <Tooltip title={t("stockAnalysis.analystConfidenceSelfReported")}>
+                  <span className="text-xs" style={{ color: "var(--muted)" }}>
+                    {t("stockAnalysis.confidence")} {confidence.toFixed(0)}%
+                  </span>
+                </Tooltip>
               )}
             </div>
           )}
@@ -1026,6 +1036,7 @@ export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
           expertId={expertId}
           open={dqOpen}
           onClose={() => setDqOpen(false)}
+          tier={tier}
         />
       </>
     );
@@ -1257,6 +1268,7 @@ export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
         expertId={expertId}
         open={dqOpen}
         onClose={() => setDqOpen(false)}
+        tier={tier}
       />
     </>
   );

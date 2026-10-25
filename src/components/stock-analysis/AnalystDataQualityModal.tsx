@@ -1,6 +1,7 @@
 // i18n-exempt: 业务逻辑判断字符串（节点类型/状态枚举键名），非 UI 展示文本
 import {
   diagStatusToSeverity,
+  dqAbbrOf,
   parseDataQualityReport,
   reportQualitySeverity,
   resolveAnalystDiagnosis,
@@ -17,7 +18,7 @@ import {
 } from "@ant-design/icons";
 import { Button, Col, Modal, Progress, Row, Table, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const { Text } = Typography;
@@ -38,6 +39,10 @@ type NodeType = "analyst" | "debate" | "decision" | "tool" | "valuation" | "risk
 
 /** 根据 expertId/nodeId 推断节点类型 */
 function detectNodeType(nodeId: string): NodeType {
+  // 先按**权威槽位表**认分析师，再看前缀。此前只靠 `startsWith("a-")`，而 Grid 传进来的是
+  // 去前缀的 base（`market-analyst`）⇒ 分析师被判成 `other`，「触发进化」按钮于是按
+  // `node_type="other"` 去查表，与写侧的 `"analyst"` 永远对不上（0 行的第五处，读侧）。
+  if (dqAbbrOf(nodeId)) { return "analyst"; }
   if (nodeId.startsWith("a-")) { return "analyst"; }
   if (nodeId.startsWith("bull-") || nodeId.startsWith("bear-")) { return "debate"; }
   if (nodeId.includes("decision") || nodeId.includes("manager")) { return "decision"; }
@@ -100,10 +105,12 @@ interface Props {
   expertId: string;
   open: boolean;
   onClose: () => void;
-  /** 可选：股票代码，用于关联分析 */
-  stockCode?: string;
-  /** 可选：执行 ID，用于关联工作流执行 */
-  executionId?: string;
+  /**
+   * 本卡对应的持有期（snake，如 `mid`）。逐档实例化后同一分析师在 `diagnostics_by_tier`
+   * 里各档各有一行；不指明档位就会显示**代表实例**（mid）的结论 —— 超短卡点开弹窗
+   * 却写着中线那行的置信度，同屏两个数字对不上。缺省时才回落代表实例。
+   */
+  tier?: string | null;
 }
 
 /**
@@ -114,21 +121,31 @@ interface Props {
  * 口径完全不同 —— 同一份报告在弹窗里是 A、在决策链里被记为该节点降级并把
  * 全局拉到 C。现改为纯展示：等级、分数、逐节点诊断全部取自 data-quality 节点
  * 的权威输出（store.dataQualitySummary），前端不再自行计算任何等级。
+ *
+ * 2026-10-25 退役「面板打开时上报反馈」的 useEffect：`analyst_feedbacks` 全库 0 行
+ * 的根因之一是**写入口只挂在这个弹窗上**（自我进化的输入取决于有没有人点面板），
+ * 且那条载荷五处失效（编造的 `reportId`、空 `stockCode`/`executionId`、`checks[].status`
+ * 用后端状态串而读侧只认 `"issue"`、`node_type` 被 `detectNodeType` 判成 `other` 而
+ * 读侧按 `analyst` 查）。写入路径收口到**后端**落库旁路
+ * （`src-tauri/src/commands/analyst_feedback.rs`，与 `record_dqi_observation` 同点），
+ * 前端不再有任何写路径；本组件保持纯展示；下方「触发进化」按钮仍是**读**侧。
  */
 export function AnalystDataQualityModal({
   name,
   expertId,
   open,
   onClose,
-  stockCode = "",
-  executionId = "",
+  tier = null,
 }: Props) {
   const { t } = useTranslation();
 
   // data-quality 节点输出（JSON 字符串），由 store 从 workflow results / blackboard 快照提取
   const dataQualitySummary = useStockAnalysisStore((s) => s.dataQualitySummary) ?? "";
   const report = useMemo(() => parseDataQualityReport(dataQualitySummary), [dataQualitySummary]);
-  const diag = useMemo(() => resolveAnalystDiagnosis(expertId, report, name), [expertId, report, name]);
+  const diag = useMemo(
+    () => resolveAnalystDiagnosis(expertId, report, name, tier),
+    [expertId, report, name, tier],
+  );
 
   // 检测节点类型
   const nodeType = detectNodeType(expertId);
@@ -183,61 +200,6 @@ export function AnalystDataQualityModal({
       },
     ];
   }, [diag, t]);
-
-  // 上报失败必须可见：自我进化的输入是否送达，不能只有 console 知道。
-  const [feedbackSaveError, setFeedbackSaveError] = useState<string | null>(null);
-
-  // 面板打开时上报诊断结果给后端，供节点自我进化消费。
-  // 2026-09-14: 上报内容由「前端自算的 grade/score」改为「data-quality 节点的权威输出 +
-  //   本节点诊断」—— 前者会让自我进化基于第二套口径学习，与决策链实际消费的等级不一致。
-  // ⚠ 2026-09-29：这条调用此前**从未成功**（命令参数名 `req` vs 前端键 `request`、
-  //   且 DTO 缺 camelCase 注解），而 `.catch` 只 console.warn ⇒ 真库 analyst_feedbacks 恒 0 行。
-  //   现在失败要落到界面上：缺输入是「拿不到」，静默是「伪装成正常」。
-  useEffect(() => {
-    if (!open || !report || !diag) { return; }
-
-    const issueCount = diag.status === "missing" || diag.status === "untrusted" ? 1 : 0;
-    const warningCount = diag.status === "low" ? 1 : 0;
-    const goodCount = diag.status === "normal" ? 1 : 0;
-
-    const qualityMetrics = {
-      dqi_grade: report.grade,
-      dqi_score: report.score,
-      report_quality_score: report.report_quality_score ?? null,
-      tool_credibility_score: report.tool_credibility_score ?? null,
-      factor_completeness_pct: report.factor_completeness_pct ?? null,
-      node_status: diag.status,
-      node_confidence: diag.confidence,
-      node_placeholder_hits: diag.placeholder_hits ?? 0,
-    };
-
-    setFeedbackSaveError(null);
-    invoke("save_node_feedback", {
-      request: {
-        nodeType,
-        nodeId: expertId,
-        reportId: `report-${Date.now()}`,
-        stockCode,
-        executionId,
-        qualityScore: Math.round(report.score),
-        grade: report.grade,
-        issueCount,
-        warningCount,
-        goodCount,
-        checksJson: JSON.stringify([{
-          field: "node_status",
-          status: diag.status,
-          confidence: diag.confidence,
-          placeholder_hits: diag.placeholder_hits ?? 0,
-          gap_reason: diag.gap_reason,
-        }]),
-        qualityMetricsJson: JSON.stringify(qualityMetrics),
-      },
-    }).catch((err) => {
-      console.error(`Failed to save ${nodeTypeName} feedback for self-evolution:`, err);
-      setFeedbackSaveError(String(err instanceof Error ? err.message : err));
-    });
-  }, [open, report, diag, nodeType, expertId, stockCode, executionId, nodeTypeName]);
 
   // 节点自我进化状态
   const [evolving, setEvolving] = useState(false);
@@ -330,15 +292,6 @@ export function AnalystDataQualityModal({
             )}
             {evolutionStatus === "error" && (
               <Tag color="error">{t("stockAnalysis.analystReport.evolutionFailed", { nodeName: nodeTypeUiName })}</Tag>
-            )}
-            {
-              /* 上报失败的独立声明：与「进化状态」分列——两者是不同的断点
-                （进化状态取决于后端统计，本条取决于这次 IPC 是否送达）。 */
-            }
-            {feedbackSaveError !== null && (
-              <Tag color="error">
-                {t("stockAnalysis.analystReport.feedbackUploadFailed", { nodeName: nodeTypeUiName })}
-              </Tag>
             )}
           </div>
           {/* 右侧：操作按钮 */}

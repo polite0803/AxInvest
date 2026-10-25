@@ -50,6 +50,13 @@ pub use theme_resolver::{
 };
 pub mod conditional_order;
 pub mod conditional_order_bridge;
+// 交易成本口径的**唯一来源**（佣金/印花税/滑点）—— 命中率链与回测链共用，
+// 禁止在别处再手抄成本常数（2026-10-25 G4 修复，见 `costs` 模块文档）。
+pub mod costs;
+// 决策时刻因子计算的**唯一来源**（`chg1` / `dist_lo20` / `rev20` / `posshare20`）。
+// 纯函数、不做截断 —— 调用方必须传入已截止到决策日的序列（见模块文档的「前视偏差防线」）。
+// 2026-10-25 B-3/F-1：此前 `factor_snapshot` 恒为 None，1,149 行判定样本零因子。
+pub mod factors;
 // P3-1: 跨股票信号聚合器 — 在 signals.rs（单股）和 portfolio_monitor.rs（持仓指标）之间填补信号聚合层
 pub mod cross_stock_aggregator;
 // P3-2: 板块联动分析 — 基于 ConceptIndex 识别同板块龙头-从属传导模式

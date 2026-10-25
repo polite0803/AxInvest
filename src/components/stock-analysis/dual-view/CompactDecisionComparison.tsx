@@ -20,7 +20,7 @@ import {
   parseAction,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
-import type { DecisionsByHorizon, HorizonAgreement, HorizonDivergence } from "@/types";
+import type { DecisionsByHorizon, F7ReferenceSnapshot, HorizonAgreement, HorizonDivergence } from "@/types";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { HorizonDecisionStrip } from "../HorizonDecisionStrip";
@@ -85,6 +85,13 @@ export interface CompactDecisionShape {
   agreementByHorizon?: HorizonAgreement[] | null;
   /** B2：逐档分歧归因（渲染随 i18n 码表那一批一起上，见 PLAN §19） */
   divergenceByHorizon?: HorizonDivergence[] | null;
+  /**
+   * v183：f7 口径参照的对照快照（两侧同一个 rhai，只差 f7 输入）。
+   * `undefined` = 该记录产自本口径之前、参照侧没跑 ⇒ 面板说「未产出」，**不得**渲染成空卡或 0。
+   */
+  f7ReferenceFormula?: F7ReferenceSnapshot | null;
+  /** 生产侧（主决策）的 f7 口径：`analyst_votes` | `trader` | `absent`（v183 起随决策下发） */
+  f7Source?: string | null;
 }
 
 interface CompactDecisionComparisonProps {

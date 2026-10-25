@@ -5556,7 +5556,7 @@
       "empty": "No local tools",
       "title": "Local Tools"
     },
-    "maxTokens": "Max Tokens",
+    "maxTokens": "Max output tokens",
     "maxTokensTooltip": "Maximum number of tokens the model can generate",
     "mcpServers": {
       "add": "Add MCP Server",
@@ -5733,6 +5733,7 @@
       "workingMemoryEntries": "{{count}} entries"
     },
     "messageChannels": "Message Channels",
+    "trayEnabled": "Show system tray",
     "minimizeToTray": "Minimize to Tray on Close",
     "minutes": "min",
     "modelAbilities": "Model Capabilities",
@@ -15445,6 +15446,8 @@
     "addedToWatchlist": "Added",
     "amplitude": "Amplitude",
     "analystConsensus": "Analyst Consensus",
+    "analystConsensusExcluded": "{count} analyst(s) contradict their own bull/bear scores and are excluded from this consensus",
+    "analystConfidenceSelfReported": "The analyst's own self-reported confidence (0-100): how sure it is of its own call. It has not been reconciled against what the price did afterwards and is not a win rate — a different scale from the horizon-level decision confidence (formula posterior), so the two are not comparable.",
     "analystCount": "{{current}}/{{total}} analysts",
     "analyzing": "Analyzing...",
     "announcements": "Announcements",
@@ -17065,7 +17068,8 @@
         "chip": "Chip distribution",
         "pace": "Pace",
         "momentum": "Momentum",
-        "bottleneck": "Bottleneck"
+        "bottleneck": "Bottleneck",
+        "analyst_vote": "Analyst vote"
       },
       "attributionLabel": "Rejection drivers (from fields this decision already computed):",
       "legContribution": "{{leg}} contributed {{sigma}} (weight {{weight}})",
@@ -17916,7 +17920,6 @@
       "evolutionCollectingData": "Collecting {{nodeName}} data...",
       "evolutionNoData": "{{nodeName}} has no feedback data",
       "evolutionFailed": "{{nodeName}} evolution failed",
-      "feedbackUploadFailed": "{nodeName}: this quality feedback failed to upload — self-evolution will be missing this input",
       "evolutionTrigger": "Trigger {{nodeName}} self-evolution",
       "evolutionSuggestion": "🧬 {{nodeName}} self-evolution suggestion",
       "close": "Close",
@@ -18641,7 +18644,13 @@
       "snapshotAbsentNotPersisted": "The analysis completed, but its producing channel did not persist per-node results, so data-quality diagnosis, per-analyst evidence and dashboard rebuild are all unavailable.",
       "snapshotAbsentIncomplete": "The analysis has not finished yet, so no blackboard snapshot exists.",
       "snapshotAbsentRerunHint": "Re-run the full analysis chain; this channel now persists the blackboard snapshot.",
-      "summaryLength": "Summary length"
+      "summaryLength": "Summary length",
+      "feedbackWriteFailed": "Analyst quality feedback was not written: {{failed}} of {{written}} rows failed, so self-evolution is missing this run's input",
+      "feedbackSkippedFastChain": "This run used the fast chain, so there was no per-analyst diagnosis to write (self-evolution received no feedback from this analysis)",
+      "feedbackSkippedBadSnapshot": "This run's blackboard snapshot could not be parsed, so the per-analyst diagnosis was not written (self-evolution received no feedback from this analysis)",
+      "feedbackSkippedNoAnalysisRow": "No matching analysis row was found for this run, so the per-analyst diagnosis was not written (self-evolution received no feedback from this analysis)",
+      "feedbackSkippedNoDiagnosis": "There was no per-analyst diagnosis to write for this run, so self-evolution received no feedback from this analysis",
+      "feedbackSkippedUnknown": "Analyst feedback was not written for an unrecognized reason (self-evolution received no feedback from this analysis)"
     },
     "dataWarning": {
       "announcement": "Announcement",
@@ -18801,7 +18810,35 @@
       "sessionAfternoon": "Afternoon session",
       "sessionPostClose": "After close"
     },
-    "horizonPriorHitRate": "hit rate {{rate}}%"
+    "horizonPriorHitRate": "hit rate {{rate}}%",
+    "f7Reference": {
+      "weightsCollapsed": "Factor weights collapsed on this side ⇒ the conclusion is not comparable, kept for trace only.",
+      "actionAbsent": "This side gave no directional conclusion (this is not a bearish call)",
+      "actionSame": "Same tier as the production formula",
+      "actionNotComparable": "Direction missing on one side ⇒ no directional delta",
+      "valueNotComparable": "Values missing on one side ⇒ no numeric delta",
+      "posterior": "Posterior",
+      "riskLevel": "Risk tier",
+      "f7Weight": "f7 weight share",
+      "f7WeightValue": "{{pct}}%",
+      "gapsPresent": "This side is missing {{n}} upstream datasets: {{gaps}}",
+      "gapsNone": "All upstream datasets present on this side",
+      "title": "f7 basis comparison (production = analyst votes, reference = trader view)",
+      "notProduced": "This record has no f7 basis comparison (analysis predates this basis, or the reference node did not run)",
+      "productionLabel": "Production side: ",
+      "referenceLabel": "Reference side: ",
+      "sameBasis": "Both sides use the same f7 basis ⇒ this comparison is void (the delta only shows the same input counted twice).",
+      "actionDiffer": "Different tiers: production {{production}} vs reference {{reference}}",
+      "confDelta": "confidence {{delta}} (production {{production}} vs reference {{reference}})",
+      "posDelta": "position {{delta}}% (production {{production}}% vs reference {{reference}}%)",
+      "scaleNote": "Both sides share one scale (same rhai output) and are directly comparable; the per-horizon three-dimension scores use a different scale.",
+      "f7": {
+        "analystVotes": "f7 uses structured analyst votes (net vote and dispersion across analysts), with no LLM trading view.",
+        "trader": "f7 uses the LLM trader's direction, confidence and quoted prices (the production basis before v183).",
+        "absent": "f7 has no input ⇒ that leg counts as 0 and leaves the weighting; this side carries no trading signal.",
+        "unknown": "This side did not declare where f7's input came from ⇒ cannot tell whether it is independent of the LLM decision."
+      }
+    }
   },
   "pipeline": {
     "title": "Stock Pipeline",

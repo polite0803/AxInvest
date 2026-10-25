@@ -17,7 +17,9 @@
 // 输入映射（input_mapping）：
 //   pm_result       ← portfolio-mgr.result           （整个 portfolio-mgr 输出对象）
 //   current_price   ← t-scoring.result.currentPrice   （当前价）
-//   target_price    ← trader.content.targetPrice       （目标价，用于空头检测）
+//   （v183: `target_price` 不再由 input_mapping 注入 —— 现由下方 `margin_of_safety_pct` 折算，
+//     该键 ← `t-valuation.result.content.margin_of_safety.pct`（估值算法，非 trader））
+//   margin_of_safety_pct ← t-valuation...margin_of_safety.pct （空头否决的报价来源）
 //   stock_code      ← stock_code                       （工作流变量，core.rs 注入）
 //   stock_sector    ← stock_sector                     （工作流变量，core.rs 注入）
 //   holdings_json   ← holdings_json                    （工作流变量，core.rs 注入）
@@ -142,6 +144,9 @@ if !present(pm_result) || type_of(pm_result) != "map" {
         "confidence": 50.0,
         "riskLevel": "中风险",
         "reasoning": "portfolio-risk-gate: portfolio-mgr 无输出，保守降级",
+        // v185：降级路径也要自述 f7 口径（本路径没有任何公式结论 ⇒ 不是 trader 口径）。
+        //   缺键会让展示期 `merge_price_fields_from_llm` 的合并门把它当成「老记录」处理。
+        "f7_source": "absent",
         "risk_gate": #{
             "adjusted": true,
             "originalAction": "",
@@ -159,12 +164,25 @@ let orig_position_pct = safe_f64(pm_result["positionPct"], 0.0);
 let orig_risk_level = safe_str(pm_result["riskLevel"]);
 
 // 2. 调用 pm_portfolio_risk_gate 纯函数（注册在共享 Rhai Engine 中）
+// ── v183：R-201 的报价**换源**（规则与阈值一字未动）──
+// 原实参是 `trader.content.verdict.targetPrice` —— LLM 决策节点的报价直接把公式结论翻成「卖出」，
+// 那就是假独立。现由估值安全边际折算同一形态：`target = current × (1 + margin_of_safety_pct/100)`。
+// 判据、0.85 阈值、返回结构全部沿用 `portfolio_formula::portfolio_risk_gate` ⇒ 变的只有数据来源。
+// `margin_of_safety_pct` 为 null（DCF 不可用/未接入）⇒ 折算不出目标价 ⇒ 本轮**不做**空头否决，
+// 由下方 `bearishRuleCoverage` 显式声明，不留静默。
+let cp_for_target = safe_f64(current_price, 0.0);
+let mos_pct = safe_opt_f64(margin_of_safety_pct);
+let target_price = if type_of(mos_pct) == "()" || cp_for_target <= 0.0 {
+    ()
+} else {
+    cp_for_target * (1.0 + mos_pct / 100.0)
+};
 let gate_json = pm_portfolio_risk_gate(
     orig_action,
     orig_position_pct,
     orig_risk_level,
-    safe_f64(current_price, 0.0),
-    safe_opt_f64(target_price),
+    cp_for_target,
+    target_price,
     safe_str(stock_code),
     safe_opt_str(stock_sector),
     safe_str(holdings_json),
@@ -266,6 +284,14 @@ if type_of(gate) != "map" {
         "concentrationWarning": concentration_warning,
         "topHoldingPct": top_holding_pct,
         "maxSectorPct": max_sector_pct,
+        // v183：空头否决的**报价来源与适用性**必须可见 —— 换源后取不到值时，
+        // 「没做否决」与「做了但没触发」是两件事（与 `portfolio-mgr.rhai` 的
+        // R-201-SUPPRESSED 同一纪律：机制状态不得静默）。
+        "bearishRuleCoverage": if type_of(mos_pct) == "()" || cp_for_target <= 0.0 {
+            "not_evaluated（估值安全边际不可用 ⇒ 本轮无目标价，空头否决未评估）"
+        } else {
+            `evaluated（目标价=${target_price}，由 margin_of_safety=${mos_pct}% 折算；来源=估值算法，非 trader）`
+        },
     };
 }
 
@@ -292,6 +318,8 @@ catch (err) {
             "confidence": 50.0,
             "riskLevel": "中风险",
             "reasoning": "portfolio-risk-gate 异常且 portfolio-mgr 无输出: " + err,
+            // v185：同上一处降级路径 —— 异常记录也要自述 f7 口径（"absent" = 非 trader 口径）。
+            "f7_source": "absent",
             "risk_gate": #{
                 "adjusted": false,
                 "originalAction": "",

@@ -80,6 +80,59 @@ impl RhaiSandboxLimits {
         Self { max_operations: 200_000, max_call_levels: 32, max_expr_depths: 256 };
 }
 
+/// 把 AxInvest 宿主函数注册到**共享 Engine**（幂等，可重复调用）。
+///
+/// ## 为什么必须有这个入口（R-3c，2026-10-25）
+///
+/// 共享 Engine 的宿主函数注册此前只写在 `src/init/services.rs` 的
+/// `start_background_services` 里 —— 那是 **Tauri 应用启动路径**。
+/// 于是所有**不经该路径**的入口都拿到一个**没有 `pm_*` 宿主函数**的共享 Engine：
+///
+/// | 入口 | 构造 AppState 的方式 | 是否注册宿主函数 |
+/// |---|---|---|
+/// | Tauri 应用 | `create_app_state` → `start_background_services` | ✅ |
+/// | `axagent-validate-backfill`（CLI） | `create_app_state` | ❌ **缺** |
+/// | `axagent-batch-rerun`（CLI） | `create_app_state` | ❌ **缺** |
+/// | `server_main`（无头服务） | `create_app_state` | ❌ **缺** |
+///
+/// 实测症状（CLI 跑时间旅行批次，`tt3.log`）：
+/// ```text
+/// ERROR code_executor: Rhai 执行失败 error=Function not found: pm_asof_degraded_methods () (line 863, position 24)
+/// WARN  engine: Node failed node_id=data-quality error=VALIDATION_FAILED: …
+/// ```
+/// `pm_asof_degraded_methods` 是**零参数**闭包 ⇒ 与签名无关 ⇒ 只有一种解释：
+/// **整个宿主函数集没进 Engine**。
+///
+/// ⇒ 后果不是报错而是**静默降级**：脚本里的 `pm_*` 调用被 `try/catch` 吞掉后
+/// 走保守兜底 ⇒ 回放分析链产出的是**降级版系统**的决策。
+///
+/// ## 幂等性
+///
+/// `register_shared_engine_initializer` 是**队列**语义（可增长），但重复入队会让
+/// 同一批函数被注册两次（`register_fn` 同名覆盖，行为无害但多余）。
+/// 本函数用 `Once` 保证**每个进程只入队一次**。
+///
+/// ## 调用时机
+///
+/// 必须在**任何工作流执行之前**调用 —— `shared_rhai_engine()` 首次创建时
+/// 取走队列并冻结，之后注册一律返回 `Err(AlreadyFrozen)`。
+/// 共享 Engine 是进程级 `OnceLock`，而 `create_app_state` 是所有路径的共同入口，
+/// 在那里注册即可覆盖全部路径。
+pub fn ensure_shared_engine_has_axinvest_functions() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if let Err(e) =
+            axagent_rt_workflow::work_engine::executors::register_shared_engine_initializer(
+                Box::new(register_axinvest_rhai_functions),
+            )
+        {
+            // 走到这里说明共享 Engine 在本函数之前就被使用过（已冻结）⇒
+            // 函数缺失已成既成事实。不 panic：让进程起来并打 error 级日志更易定位。
+            tracing::error!("[init] 共享 Rhai Engine 宿主函数注册失败（Engine 已冻结）：{e}");
+        }
+    });
+}
+
 /// 构造一个「函数集与共享 Engine 一致」的独立 Rhai Engine。
 ///
 /// 用于无法走共享 Engine 的入口（What-If 回测、rerun 决策）。这些入口历史上
@@ -635,6 +688,53 @@ mod tests {
             });
             // 80.0 落在 `READINESS_BANDS` 首档 strong_bottleneck（min = 75.0）。
             assert_eq!(band, "strong_bottleneck", "{label} 路径的分档结果与本体不一致");
+        }
+    }
+
+    /// 回归（R-3c，2026-10-25）：`pm_leg_signal` 在**运行期**签名不匹配 ⇒
+    /// `Function not found: pm_leg_signal (&str | ImmutableString | String, map)`。
+    ///
+    /// 现象：回放分析链（`analysis_kind='replay'`）在 template_version=184 上
+    /// 仍出现 `portfolio-mgr Rhai 执行异常：ErrorFunctionNotFound pm_leg_signal`，
+    /// 该行被降级为「数据缺失」⇒ 分析链少一条决策。
+    ///
+    /// **为什么静态判据漏掉它**：`scripts_only_call_registered_fns` 只查**函数名**
+    /// 是否出现在注册点源码里 —— `pm_leg_signal` 确实注册了 ⇒ 假绿。
+    /// 运行期是否可解析**取决于实参类型**，静态判据看不到这一层。
+    ///
+    /// 判据用**真调用**（与 `band_for_score_resolves_on_every_axinvest_engine` 同形）：
+    /// 两条 Engine 构造路径（裸 Engine + 本地工厂）都必须能真调用成功。
+    #[test]
+    fn pm_leg_signal_resolves_on_every_axinvest_engine() {
+        let mut bare = Engine::new();
+        register_axinvest_rhai_functions(&mut bare);
+        let sandboxed = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
+
+        // 调用形态**照抄** `portfolio-mgr.rhai:1714` 的真实形态：
+        // 第一个实参是字符串字面量，第二个是 `#{...}` map 字面量。
+        // ⚠ 不能用 `rhai::Dynamic` 之类简化写法 —— 那测的是另一个形态。
+        const CALL: &str =
+            r#"pm_leg_signal("momentumSignal", #{ macdDif: 1.2, macdDea: 0.6, rsi: 60.0 })"#;
+
+        for (label, engine) in [("bare", &bare), ("sandboxed", &sandboxed)] {
+            let out: rhai::Dynamic = engine.eval(CALL).unwrap_or_else(|e| {
+                panic!(
+                    "{label} 路径的 Engine 上 pm_leg_signal 真调用失败：{e}\n\
+                     （宿主函数已注册但签名不匹配 ⇒ 运行期 Function not found）"
+                )
+            });
+            // 形态断言：按 `analysis-engine::leg_signal` 的**真实阶梯**算 ——
+            //   macdDif(1.2) > macdDea(0.6) ⇒ base = +0.7（零上多头）
+            //   rsi(60.0) ∈ (50, 75] ⇒ **健康调制 +0.2** ⇒ 合计 **+0.9**
+            // ⚠ 漏掉 RSI 调制就会写出一个「看着合理但错」的期望值（区间断言更隐蔽：
+            //   写成 `0.5 < v <= 0.8` 时 0.9 会被判失败，而 0.7 能过 ⇒ 假绿）。
+            assert!(out.is::<f64>(), "{label} 路径返回值应为 f64，实际 {:?}", out.type_name());
+            let v = out.cast::<f64>();
+            // 0.7 + 0.2 在 f64 下是 0.8999999999999999 ⇒ 用容差，不写等值断言
+            assert!(
+                (v - 0.9).abs() < 1e-9,
+                "{label} 路径的 momentumSignal 应为 +0.9（+0.7 多头 +0.2 RSI 健康），实际 {v}"
+            );
         }
     }
 

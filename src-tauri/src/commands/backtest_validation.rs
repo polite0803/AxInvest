@@ -30,7 +30,8 @@
 //! - **K 线拉取**：复用 astock_client.get_klines，自动 vendor failover + 缓存
 
 use axagent_analysis_engine::hit_rate_backtest::{
-    HitRateReport, PickValidation, build_pick_validation, compute_period_matched_report,
+    HitRateReport, PRICE_DIVERGENCE_TOLERANCE_PCT, PickValidation, build_pick_validation,
+    compute_period_matched_report, price_divergence_pct, price_is_divergent,
 };
 use axagent_analysis_engine::recommender::RECO_GENERATION_FLOOR;
 use axagent_analysis_engine::recommender::types::RecoPick;
@@ -41,7 +42,7 @@ use axagent_analysis_engine::serenity_hit_rate_backtest::{
 use axagent_entities::decision_validations;
 use axagent_entities::reco_picks;
 use chrono::Utc;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect, Set};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::State;
@@ -79,6 +80,22 @@ pub struct RunDecisionBacktestRequest {
     pub dry_run: Option<bool>,
     /// 仅回测指定周期（"short" | "mid" | "long" | None=全部）
     pub period_filter: Option<String>,
+    /// 是否把**回放代**（`reco_picks.as_of_date IS NOT NULL`）一并验证（默认 false）。
+    ///
+    /// ## 为什么默认 false
+    ///
+    /// 默认路径是**实盘业绩**的分母：回放样本混进来会把净值虚高
+    /// （2026-10-25 实测：混入回放后 T+2 净均值 +3.76% → 仅实盘 −2.55%，差 6.3pp）。
+    ///
+    /// ## 为什么需要 true
+    ///
+    /// 回放代目前**没有任何验证入口**：全库 974 条回放 pick 对应
+    /// `decision_validations` 只有 12 行、且 0 行判定过。
+    /// 要回答「回放能不能替代等成熟期」就必须能单独验证它。
+    ///
+    /// ⇒ 打开后写入的行仍带 `as_of_date`，与实盘行**始终可分**，
+    /// 消费侧（`list_decision_validations` / `reco_loop`）默认仍只看实盘。
+    pub include_replay: Option<bool>,
 }
 
 /// 跑决策回测响应
@@ -167,7 +184,14 @@ pub async fn run_decision_backtest(
 ///
 /// 抽的是**实现**，不是把命令当普通函数调 —— 后者要求随手能拿到 `AppState`，
 /// 会把「cron handler 需要什么」与「命令需要什么」耦死。
-pub(crate) async fn run_decision_backtest_inner(
+///
+/// # 为什么是 `pub` 而不是 `pub(crate)`（2026-10-25，A-2 回补验证）
+///
+/// `src/bin/axagent-validate-backfill.rs` 要用它：前端没有触发入口、
+/// cron 分支又强制 `dryRun=false`，带 `dryRun` 的探测只能从 CLI 驱动。
+/// 同形先例：`run_batch_reflection_inner` 也是 `pub` + 在 `lib.rs` re-export，
+/// 供 `axagent-batch-rerun` 调用 —— 这里沿用同一形态，**不新增第二份实现**。
+pub async fn run_decision_backtest_inner(
     db: &sea_orm::DatabaseConnection,
     client: &std::sync::Arc<axagent_astock_data::AStockClient>,
     request: RunDecisionBacktestRequest,
@@ -191,18 +215,69 @@ pub(crate) async fn run_decision_backtest_inner(
     if let Some(ref period) = request.period_filter {
         query = query.filter(reco_picks::Column::Period.eq(period.as_str()));
     }
-    // 按 generated_at 倒序，优先回测最近的数据
-    let picks = query.all(db).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("读取 reco_picks 失败: {e}"))
-    })?;
+    // **只验证实盘代**（2026-10-25 S0 实测发现，缺这一行会让分母混代）：
+    //
+    // 生产库实测：`synthetic=0 AND style<>'serenity'` 共 1,706 行，其中 **968 行
+    // （56.8%）是回放代**（`as_of_date` 非空）。不过滤就会把「实盘出票」与
+    // 「历史回放出票」混进同一个命中率分母 —— 两者市场环境不同、可执行性不同，
+    // 混算得出的胜率既不代表实盘，也不代表回放。
+    //
+    // 与同表其他读点同口径：`reco_loop.rs:358`（权重闭环）、
+    // `list_decision_validations` 的 `generation` 分支、`_shared_reco_pool.rs` 文档
+    // 「只读实盘的下游必须显式带 `as_of_date IS NULL`，漏加由 check-reco-generation.mjs 拦」。
+    // 回放样本的验证走各自的 as-of 入口（如 `mover_recall_analysis` 批次），不经本函数。
+    //
+    // 2026-10-25 R-1 修正：上面那条「回放走各自入口」在**荐股层并不成立** ——
+    // 实测 974 条回放 pick 只对应 12 行 `decision_validations`、0 行判定过。
+    // ⇒ 加 `include_replay` 开关（默认 false，行为与上面完全一致），
+    //   让「回放代能不能替代等成熟期」这个问题第一次可以单独验证。
+    //   打开后写入行仍带 `as_of_date`，实盘/回放始终可分。
+    let include_replay = request.include_replay.unwrap_or(false);
+    if !include_replay {
+        query = query.filter(reco_picks::Column::AsOfDate.is_null());
+    }
+    // ⚠ `order_by_desc` **必须有**（2026-10-25 A-1 修复）：
+    //   原注释就写着「按 generated_at 倒序，优先回测最近的数据」，但**代码里没有 order_by**
+    //   —— 直接在数据库的返回顺序上 `take(max_picks)`。两个可观测后果（生产库实测）：
+    //   ① 127 单成熟样本只覆盖 **7 个交易日**（拿到的总是同一批偶然靠前的行）；
+    //   ② 同一「股票×风格×周期×日」出现 6 行重复（同一逻辑批次的多个副本都被选中）。
+    //   下面的去重依赖「先见即最新」，所以排序是去重的前置条件，缺一不可。
+    let picks =
+        query.order_by_desc(reco_picks::Column::GeneratedAt).all(db).await.map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("读取 reco_picks 失败: {e}"))
+        })?;
 
     if picks.is_empty() {
         // 不早退：智选（serenity）行走独立一趟（见下方 §6），这里只是通用通道无候选。
         tracing::info!("[backtest] 通用通道无候选 pick（style≠serenity），本轮只跑智选超额验证");
     }
 
-    // 限制条数：取最近 max_picks 条
-    let picks: Vec<_> = picks.into_iter().take(max_picks as usize).collect();
+    // **业务键去重**（2026-10-25 A-1）：同一「股票 × 风格 × 周期 × 日 × 代际」只验证一次，
+    // 保留 `generated_at` 最新的一份（依赖上面的倒序）。
+    //
+    // 为什么必须有：`reco_picks` 没有业务唯一约束，同一逻辑批次会被重复执行数十次
+    // （生产库实测 2026-10-19 一天 32 个批次、每批 440 行且 `pick_data` 逐字节相同，
+    // 单格最多 30 份副本）。不去重则补跑验证会把同一张票验证几十遍，
+    // 既浪费 K 线请求，又会把重复样本灌进胜率分母 —— 这正是 127 单里那 6 行重复的来源。
+    //
+    // 键里的 `day` 取 `generated_at` 的日期段：同一天内的多次刷新视为同一批（保留最新），
+    // 跨天则各自成样本（不同市场环境，本来就是不同证据）。
+    let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let picks: Vec<_> = picks
+        .into_iter()
+        .filter(|p| {
+            let day = p.generated_at.split('T').next().unwrap_or(p.generated_at.as_str());
+            seen_keys.insert(format!(
+                "{}|{}|{}|{}|{}",
+                p.stock_code,
+                p.style,
+                p.period,
+                day,
+                p.as_of_date.as_deref().unwrap_or("live"),
+            ))
+        })
+        .take(max_picks as usize)
+        .collect();
 
     // ── 2-3. 拉 K 线 + 构建 PickValidation ──
     let mut validations: Vec<PickValidation> = Vec::new();
@@ -374,13 +449,19 @@ fn decision_date_of<'a>(generated_at: &'a str, as_of_date: Option<&'a str>) -> &
 /// 取「决策日之后 N 个交易日」的窗口序列 —— 通用通道与智选通道**共用**，
 /// 不各写一遍取数与日期定位（两份实现曾经只在其中一侧修过下标口径的 P0）。
 ///
-/// K 线按日期升序（各 vendor 均 sort_by date）。返回 `(closes, highs, lows, 窗口末日)`。
+/// K 线按日期升序（各 vendor 均 sort_by date）。
+/// 返回 `(closes, highs, lows, 窗口末日, 锚定收盘价)`。
+///
+/// **锚定收盘价** = 决策日（或决策日之前最近一个交易日）的收盘价，取自**同一份 K 线序列**。
+/// 它是 `RecoPick.price` 的唯一可比基准：两者不同源，正是「进错出对」的成因
+/// （出场价取自 K 线 ⇒ 100% 正确；入场价取自 as-of 报价通道 ⇒ 实测会串代码）。
+/// 决策日早于全部 K 线时返回 `None`（无法判定，不等于一致）。
 async fn fetch_window_series(
     client: &std::sync::Arc<axagent_astock_data::AStockClient>,
     stock_code: &str,
     decision_date: &str,
     t_plus_n: i32,
-) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, String), String> {
+) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>, String, Option<f64>), String> {
     // 拉取窗口：取 T+N 后 10 个交易日（防止节假日窗口不足）。
     // 修复 P0: 原 fetch_limit 太小（t_plus_n + 10），当 pick 距今较远时
     // 不包含决策日之后的足够数据。改为 500（约 2 个交易年）确保覆盖。
@@ -413,7 +494,14 @@ async fn fetch_window_series(
     let highs: Vec<f64> = valid_klines[..n].iter().map(|k| k.high).collect();
     let lows: Vec<f64> = valid_klines[..n].iter().map(|k| k.low).collect();
     let end_date = valid_klines[n - 1].date.to_string();
-    Ok((closes, highs, lows, end_date))
+    // 锚定收盘价：决策日（或之前最近交易日）的收盘价。`start_idx == 0` 表示决策日
+    // 早于全部 K 线 ⇒ 没有可比基准，如实返回 `None`（不拿首根收盘价冒充）。
+    let anchor_close = if start_idx > 0 {
+        Some(klines[start_idx - 1].close)
+    } else {
+        None
+    };
+    Ok((closes, highs, lows, end_date, anchor_close))
 }
 
 /// 拉取 T+N 窗口日 K 线并构建 PickValidation
@@ -430,8 +518,44 @@ async fn fetch_and_validate(
     as_of_date: Option<&str>,
 ) -> Result<(PickValidation, String), String> {
     let decision_date = decision_date_of(generated_at, as_of_date);
-    let (closes, highs, lows, _end_date) =
+    let (closes, highs, lows, _end_date, anchor_close) =
         fetch_window_series(client, &reco_pick.stock_code, decision_date, t_plus_n).await?;
+
+    // ── R-3a 价源平价校验（2026-10-25）──
+    // `RecoPick.price` 走 as-of 报价通道，与库内真实收盘可能不符（实测 000779 记 1.63 /
+    // 真实 10.60，且 1.63 恰是 000980 当日收盘 ⇒ 批量取价行错位）。而 `targetPrice` /
+    // `stopLoss` 都是按那个错价算的 ⇒ **一行价格体系错了，整行不可用**，不能靠替换入场价修补。
+    // 剔除而非修补的理由见 `PRICE_DIVERGENCE_TOLERANCE_PCT` 的文档。
+    if let Some(anchor) = anchor_close {
+        if price_is_divergent(reco_pick.price, anchor) {
+            let dev = price_divergence_pct(reco_pick.price, anchor).unwrap_or(f64::NAN);
+            // 回放侧历史上有 3/173 条属此形态；实盘 311 条实测最大偏离仅 4.4%（0 条命中）
+            // ⇒ 这条分支命中即意味着该条 pick 的价格来源有问题，必须留痕而非静默丢弃。
+            tracing::warn!(
+                pick_id = %pick_id,
+                stock = %reco_pick.stock_code,
+                t_plus_n = t_plus_n,
+                decision_date = %decision_date,
+                pick_price = reco_pick.price,
+                anchor_close = anchor,
+                dev_pct = dev,
+                tolerance_pct = PRICE_DIVERGENCE_TOLERANCE_PCT,
+                "入场价与决策日真实收盘偏离超阈值 ⇒ 整行价格体系不可信，跳过（不修补）"
+            );
+            return Err(format!(
+                "入场价偏离真实收盘 {dev:.1}%（>{PRICE_DIVERGENCE_TOLERANCE_PCT}%）：\
+                 pick={} 真实={anchor}，目标价/止损价同源污染，整行不可用",
+                reco_pick.price
+            ));
+        }
+    } else {
+        // 决策日早于全部 K 线 ⇒ 没有可比基准。如实告警，不静默视为「校验通过」。
+        tracing::debug!(
+            pick_id = %pick_id, stock = %reco_pick.stock_code,
+            decision_date = %decision_date,
+            "无锚定收盘价（决策日早于全部 K 线），本条跳过价源校验"
+        );
+    }
     // 数据源标识：AStockClient 内部已做 vendor failover，统一标记
     let data_source = "astock_client".to_string();
     let mut validation =
@@ -488,13 +612,27 @@ async fn run_serenity_backtest_pass(
     if exclude_synthetic {
         query = query.filter(reco_picks::Column::Synthetic.eq(0));
     }
+    // 与通用通道同因同修（2026-10-25 A-1）：必须显式排序，去重才能「先见即最新」；
+    // 否则 `take(max_picks)` 取到哪批由数据库返回顺序决定，既重复又只覆盖少数日期。
+    let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
     let picks: Vec<_> = query
+        .order_by_desc(reco_picks::Column::GeneratedAt)
         .all(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("读取智选候选失败: {e}"))
         })?
         .into_iter()
+        .filter(|p| {
+            let day = p.generated_at.split('T').next().unwrap_or(p.generated_at.as_str());
+            seen_keys.insert(format!(
+                "{}|{}|{}|{}",
+                p.stock_code,
+                p.period,
+                day,
+                p.as_of_date.as_deref().unwrap_or("live"),
+            ))
+        })
         .take(max_picks as usize)
         .collect();
 
@@ -527,7 +665,7 @@ async fn run_serenity_backtest_pass(
         for &t_plus_n in t_plus_n_list {
             let window =
                 fetch_window_series(client, &reco_pick.stock_code, decision_date, t_plus_n).await;
-            let (closes, _highs, _lows, end_date) = match window {
+            let (closes, _highs, _lows, end_date, anchor_close) = match window {
                 Ok(v) => v,
                 Err(e) => {
                     tracing::warn!(pick_id = %pick_model.id, t_plus_n, error = %e, "智选窗口行情不可得");
@@ -535,6 +673,18 @@ async fn run_serenity_backtest_pass(
                     continue;
                 },
             };
+            // 与通用通道同一条平价校验：智选也吃同一份 `pick_data.price`，
+            // 价源串代码时它的「超额」同样无意义。这里只判不修，命中即跳过。
+            if anchor_close.is_some_and(|a| price_is_divergent(reco_pick.price, a)) {
+                let dev = price_divergence_pct(reco_pick.price, anchor_close.unwrap_or(0.0))
+                    .unwrap_or(f64::NAN);
+                tracing::warn!(
+                    pick_id = %pick_model.id, t_plus_n, dev_pct = dev,
+                    "智选入场价与决策日真实收盘偏离超阈值 ⇒ 跳过（超额无意义）"
+                );
+                skipped += 1;
+                continue;
+            }
             let benchmark = crate::commands::stock_workflow::reflection::compute_benchmark_change(
                 client,
                 decision_date,
@@ -1269,6 +1419,9 @@ pub async fn create_decision_backtest_cron(
         max_picks,
         dry_run: Some(false),
         period_filter: period_filter.clone(),
+        // cron 路径**恒 false**：定时任务是实盘业绩的分母，混回放会把净值虚高。
+        // 回放验证只在显式命令行场景（`--include-replay`）打开。
+        include_replay: None,
     };
     let prompt = serde_json::to_string(&request).map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("序列化决策回测配置失败: {e}"))

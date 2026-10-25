@@ -60,12 +60,6 @@ export interface ExpertRole {
   // 环境预设（选中时可选应用）
   /** 推荐模型供应商 */
   suggestedProviderId?: string;
-  /** 推荐模型 */
-  suggestedModelId?: string;
-  /** 推荐温度 */
-  suggestedTemperature?: number;
-  /** 推荐最大 token */
-  suggestedMaxTokens?: number;
   /** 是否建议开启搜索 */
   searchEnabled?: boolean;
 

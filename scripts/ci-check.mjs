@@ -229,6 +229,12 @@ if (canRunFrontend) {
   //   「本门通过」不具区分力（本文件上方 reco 门同纪律）。与 ci.yml 的对应 step **逐字同源**。
   step("前后端档位权重门自检（判据①—⑧正负对照）", "node scripts/check-horizon-weight-parity.mjs --selftest");
   step("前后端档位权重逐字段一致（含档名不手抄天数）", "node scripts/check-horizon-weight-parity.mjs");
+  // 2026-10-25：data-quality 槽位缩写表此前**三处各抄一份**（rhai 脚本体 /
+  //   harness::DQ_ABBR_TO_BASE / 前端 EXPERT_ID_TO_DQ_ABBR），任一处漂移都不报错，
+  //   只让那一格静默失效（`analyst_feedbacks` 全库 0 行即此族）。本门逐槽位对拍，
+  //   并锁写侧 `node_id` 形态与唯一读侧（`evolve_node` 精确相等过滤）闭环。
+  step("数据质量槽位缩写三处对拍自检（判据①—④正负对照）", "node scripts/check-dq-abbr-parity.mjs --selftest");
+  step("数据质量槽位缩写三处对拍（rhai / Rust 登记表 / 前端镜像表）", "node scripts/check-dq-abbr-parity.mjs");
   // 2026-10-16（`AUDIT-horizon-naming-2026-10-16.md`）：档名这条链此前**整体没有门** ——
   //   判据 ④ 只读 `stockAnalysis.reflection` 段（当时 8 套键族里只覆盖 1 套），于是
   //   「第 4 档 = 季度」这类漂移在 `cargo check` / `typecheck` / 既有门全绿下存活，
@@ -482,6 +488,22 @@ if (canRunRust && !quick) {
     "node scripts/check-panel-var-landing.mjs --selftest",
   );
   step("面板 9 条变量落地（A 批接线：默认值对账 + 生产调用处数 + 单一权威）", "node scripts/check-panel-var-landing.mjs");
+
+  // 出厂默认值的**全表**等式（2026-10-25，PLAN-llm-param-single-source P1）。
+  // 上面两道门都是定向的：面积门只判「有没有消费者」（不比值），落地门只管已接线那 15 条 +
+  // 技术指标那 8 条。其余 100+ 条 `b()` 兜底值没有任何门比过值 ⇒ 「面板改了、种子没改」
+  // 只能靠人记。本门首跑即抓出 4 条真实分叉：`value_dcf_perpetual_rate`（面板 4 / 权威 1.3）、
+  // `value_dcf_discount_rate`（8.5 / 7.7）、`reco_min_confidence`（60 / 50）、
+  // `reco_ic_gate`（"shadow" / "on"）—— 前两条正是估值校准只改到一部分载体留下的另一半。
+  // 与 ci.yml 的对应 step 逐字同源。
+  step(
+    "面板兜底值 ↔ 种子声明值全表对账自检（九类正负对照）",
+    "node scripts/check-stock-var-defaults-parity.mjs --selftest",
+  );
+  step(
+    "面板兜底值 ↔ 种子声明值全表对账（值 / 键 / 类型三面，出厂默认只允许一处权威）",
+    "node scripts/check-stock-var-defaults-parity.mjs",
+  );
 
   // 阶段 A（2026-10-14，PLAN-monitor-chain-closure）：告警的事件名与 payload 各抄一遍 ⇒
   // 发射点发 `stock-monitor-alert`、前端听 `price-alert-triggered`、那份完整实现的发射器零构造点，

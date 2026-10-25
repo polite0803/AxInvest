@@ -2,12 +2,13 @@ import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettin
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { useShowAdvancedPanels } from "@/components/stock-workspace/_shared/useSimpleMode";
 import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
-import { cleanToolCallTags, extractLlmField } from "@/lib/agentOutput";
+import { extractLlmField } from "@/lib/agentOutput";
+import { parseDataQualityReport } from "@/lib/dataQualityDiagnosis";
 import { invoke } from "@/lib/invoke";
-import { tallyAnalystSentiment } from "@/lib/stock-analysis-utils";
+import { horizonLabelKey } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
-import { Button, Collapse, Dropdown } from "antd";
+import { Button, Collapse, Dropdown, Segmented } from "antd";
 import {
   ArrowLeftRight,
   Coins,
@@ -38,6 +39,7 @@ import { DecisionBanner } from "./DecisionBanner";
 import { ExperimentSidebar } from "./ExperimentSidebar";
 import { ExperimentTrail } from "./ExperimentTrail";
 import { resolveTimelineJump } from "./timelineJump";
+import { useAnalystConsensusByTier } from "./useAnalystConsensusByTier";
 import "./dual-view";
 import "./stock-analysis.css";
 import { AnalysisHistoryButton } from "./AnalysisHistoryButton";
@@ -78,6 +80,9 @@ function DecisionComparisonTabContent() {
     agreementBreakdown: store.decision?.agreementBreakdown ?? null,
     // 阶段2：四周期独立决策 —— 决策 Tab 按档并列展示（`DecisionComparisonPanel` 渲染）
     decisionsByHorizon: store.decision?.decisionsByHorizon ?? null,
+    // v180：独立公式对照（f7 不读 trader）—— 只读展示，不参与任何生产动作
+    f7ReferenceFormula: store.decision?.f7ReferenceFormula ?? null,
+    f7Source: store.decision?.f7Source ?? null,
   };
   return <DualViewRenderer id="decision-comparison" data={dualViewData} defaultMode="panel" />;
 }
@@ -910,20 +915,29 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
   );
 }
 
-/** 分析师共识条 — 在 Decision Hero 下方显示分析师的 bull/bear/neutral 投票分布 */
+/** 分析师共识条 — 在 Decision Hero 下方显示**当前持有期**的 bull/bear/neutral 分布 */
 function AnalystConsensusBar() {
   const { t } = useTranslation();
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
-
-  // 计票口径与分析师 tab 分歧卡、chat 紧凑摘要共用 `tallyAnalystSentiment` 单一真相源
-  // （2026-10-10 修复：此处旧副本缺 VERDICT 分数归一化 / stance-only 回退 / 裸分数正则，
-  // 且只剥 tool_call 标签不删内容，曾与分歧卡算出 10/10 vs 9/11 两套结果）。
-  // 取数形态与分歧卡逐字一致 —— 空产出不计票的裁定住在 `tallyAnalystSentiment` 单点，
-  // 此处不再各自 filter（两边各自处理过一次票就还会分叉）。
-  const { bullish: bull, bearish: bear, neutral, total } = tallyAnalystSentiment(
-    Object.values(analystReports).map((raw) => cleanToolCallTags(raw)),
+  const decisionTimeHorizon = useStockAnalysisStore((s) => s.decision?.timeHorizon);
+  const dataQualitySummary = useStockAnalysisStore((s) => s.dataQualitySummary);
+  const dataQualityReport = useMemo(
+    () => parseDataQualityReport(dataQualitySummary),
+    [dataQualitySummary],
   );
-  if (total === 0) { return null; }
+
+  // 逐档共识：每档有自己的一组分析师（4/5/7/7），不合计成一个池。
+  // 计票与分析师 tab 分歧卡共用 `tallyAnalystSentiment`（空产出不计票的裁定住在那里）；
+  // 「结论方向与多空评分矛盾」的票由后端 data-quality 判、这里只读它扣除谁。
+  const tierConsensus = useAnalystConsensusByTier(
+    analystReports,
+    decisionTimeHorizon,
+    dataQualityReport,
+  );
+  const { bullish: bull, bearish: bear, neutral, total } = tierConsensus.tally;
+  // 一票不剩**且不是被扣光的**才隐藏整条：全被扣光时必须留下那句原因，
+  // 否则「7 位分析师结论全部自相矛盾」会显示成「这里没有共识条」。
+  if (total === 0 && tierConsensus.excludedCount === 0) { return null; }
 
   return (
     <div
@@ -941,6 +955,17 @@ function AnalystConsensusBar() {
       <span style={{ fontWeight: 500, color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>
         {t("stockAnalysis.analystConsensus")}
       </span>
+      {tierConsensus.options.length > 1 && (
+        <Segmented
+          size="small"
+          value={tierConsensus.activeTier ?? undefined}
+          onChange={(v) => tierConsensus.setActiveTier(String(v))}
+          options={tierConsensus.options.map((o) => ({
+            value: o.tier,
+            label: `${t(horizonLabelKey(o.tier) ?? o.tier)} ${o.tally.total}`,
+          }))}
+        />
+      )}
       {bull > 0 && (
         <span style={{ color: "var(--sa-red)" }}>
           {bull} {t("stockAnalysis.bullish")}
@@ -954,6 +979,12 @@ function AnalystConsensusBar() {
       {neutral > 0 && (
         <span style={{ color: "var(--color-text-tertiary)" }}>
           {neutral} {t("stockAnalysis.neutral")}
+        </span>
+      )}
+      {tierConsensus.excludedCount > 0 && (
+        /* 扣票必须可见：少了的原因不写出来，剩下的票数就会被读成「分析师总数」。 */
+        <span style={{ color: "var(--ant-warning, #b45309)" }}>
+          {t("stockAnalysis.analystConsensusExcluded", { count: tierConsensus.excludedCount })}
         </span>
       )}
     </div>

@@ -1,5 +1,5 @@
 use super::core::fetch_stock_lessons;
-use super::decision::{load_and_inject_template, resolve_runtime_options};
+use super::decision::{ExecutionParams, load_and_inject_template};
 use super::serenity::extract_agent_output;
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
@@ -465,8 +465,9 @@ pub async fn run_reflection_workflow(
     // 注入 vendor 启用状态过滤器（与 stock-analysis 主工作流一致）
     super::decision::inject_vendor_state(client, loaded.variables.as_ref());
 
-    let (max_concurrent, step_timeout, _total_timeout) =
-        resolve_runtime_options(loaded.variables.as_deref());
+    // 与主分析链同一个唯一解析点。⚠ 本链此前把两格外的字段全交给 `..Default::default()`
+    //   ⇒ crate 默认的 `llm=agent=3` 压掉面板值（P2 收口，2026-10-25 修）。
+    let exec = ExecutionParams::from_template_vars(loaded.variables.as_deref());
 
     // 3. 创建嵌套工作流
     let wf_name = format!("stock-reflection-{stock_code}");
@@ -914,9 +915,7 @@ pub async fn run_reflection_workflow(
         is_secret: false,
     });
 
-    let opts = axagent_rt_workflow::work_engine::RunOptions {
-        max_concurrent,
-        step_timeout,
+    let mut opts = axagent_rt_workflow::work_engine::RunOptions {
         progress_callback: None,
         // [v2] 不再有 sub-analysis SubWorkflowNode，无需为子工作流传 input。
         // stock_code / stock_name / as_of_date 已通过 variables 顶层注入。
@@ -929,6 +928,7 @@ pub async fn run_reflection_workflow(
         tool_permissions: Some(super::strict_tool_permissions()),
         ..Default::default()
     };
+    exec.apply_to(&mut opts);
 
     // [时间旅行模式] 用 hindsight_date 作为 AS_OF 锚点包装工作流执行。
     // reflection-agent 调用的 K 线/公告工具会以 hindsight_date 为时间锚点，

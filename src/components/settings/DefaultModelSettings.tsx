@@ -211,7 +211,6 @@ function ModelParamsModal({
           maxTokens: (maxTokensKey
             ? (settings[maxTokensKey] as number | null)
             : null) ?? defaultMaxTokens ?? 4096,
-          frequencyPenalty: null,
         }}
         onChange={(v) => {
           const patch: Record<string, unknown> = {};
@@ -438,6 +437,8 @@ export function DefaultModelSettings() {
         maxTokensKey="titleSummaryMaxTokens"
         defaultTemperature={0.3}
         defaultTopP={1.0}
+        // 与 Rust `constants::llm_defaults::TITLE_SUMMARY_MAX_TOKENS` 同值，
+        // 由 `llmParamDefaults.test.ts` 锁定；改一处必须同改另一处。
         defaultMaxTokens={256}
       />
 
@@ -455,6 +456,7 @@ export function DefaultModelSettings() {
         maxTokensKey="compressionMaxTokens"
         defaultTemperature={0.3}
         defaultTopP={1.0}
+        // 与 Rust `constants::llm_defaults::COMPRESSION_MAX_TOKENS` 同值（同上被测试锁定）。
         defaultMaxTokens={1024}
         defaultPrompt={t("settings.compressionPromptDefault")}
         promptPlaceholder={t("settings.compressionPromptPlaceholder")}
@@ -476,26 +478,6 @@ export function DefaultModelSettings() {
         modelKey="imageModel"
         placeholder={placeholderText}
         modalTitle={t("settings.imageModel")}
-        showPrompt={false}
-        showContextCount={false}
-      />
-
-      <ModelCard
-        title={t("settings.videoModel")}
-        description={t("settings.videoModelDesc")}
-        modelKey="videoModel"
-        placeholder={placeholderText}
-        modalTitle={t("settings.videoModel")}
-        showPrompt={false}
-        showContextCount={false}
-      />
-
-      <ModelCard
-        title={t("settings.voiceModel")}
-        description={t("settings.voiceModelDesc")}
-        modelKey="voiceModel"
-        placeholder={placeholderText}
-        modalTitle={t("settings.voiceModel")}
         showPrompt={false}
         showContextCount={false}
       />

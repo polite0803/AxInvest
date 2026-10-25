@@ -149,7 +149,9 @@ struct FallbackRetryContext {
     ctx: ProviderRequestContext,
     model_id: String,
     use_max_completion_tokens: Option<bool>,
-    force_max_tokens: Option<bool>,
+    model_temperature: Option<f32>,
+    model_top_p: Option<f32>,
+    model_max_tokens: Option<u32>,
     thinking_param_style: Option<String>,
     request_delay_ms: Option<u64>,
 }
@@ -211,7 +213,9 @@ async fn resolve_fallback_retry(
         ctx,
         model_id: fb_model_id,
         use_max_completion_tokens: overrides.as_ref().and_then(|p| p.use_max_completion_tokens),
-        force_max_tokens: overrides.as_ref().and_then(|p| p.force_max_tokens),
+        model_temperature: overrides.as_ref().and_then(|p| p.temperature),
+        model_top_p: overrides.as_ref().and_then(|p| p.top_p),
+        model_max_tokens: overrides.as_ref().and_then(|p| p.max_tokens),
         thinking_param_style: overrides.as_ref().and_then(|p| p.thinking_param_style.clone()),
         request_delay_ms: overrides.as_ref().and_then(|p| p.request_delay_ms),
     })
@@ -239,7 +243,9 @@ fn spawn_stream_task(
         mcp_server_ids,
         override_created_at,
         mut use_max_completion_tokens,
-        mut force_max_tokens,
+        mut model_temperature,
+        mut model_top_p,
+        mut model_max_tokens,
         mut thinking_param_style,
         mut request_delay_ms,
         settings,
@@ -371,7 +377,9 @@ fn spawn_stream_task(
                             ctx = fb.ctx;
                             model_id = fb.model_id;
                             use_max_completion_tokens = fb.use_max_completion_tokens;
-                            force_max_tokens = fb.force_max_tokens;
+                            model_temperature = fb.model_temperature;
+                            model_top_p = fb.model_top_p;
+                            model_max_tokens = fb.model_max_tokens;
                             thinking_param_style = fb.thinking_param_style;
                             request_delay_ms = fb.request_delay_ms;
                             chat_messages = initial_chat_messages.clone();
@@ -409,13 +417,11 @@ fn spawn_stream_task(
                     model: model_id.clone(),
                     messages: chat_messages.clone(),
                     stream: true,
-                    temperature: conversation.temperature.map(|v| v as f64),
-                    top_p: conversation.top_p.map(|v| v as f64),
-                    max_tokens: if force_max_tokens == Some(true) {
-                        conversation.max_tokens.or(Some(4096))
-                    } else {
-                        conversation.max_tokens
-                    },
+                    // 会话值是唯一运行时权威；未设置时回退到模型级默认（设置页
+                    // 「模型参数」那一组），不再使用任何硬编码哨兵值。
+                    temperature: conversation.temperature.or(model_temperature).map(|v| v as f64),
+                    top_p: conversation.top_p.or(model_top_p).map(|v| v as f64),
+                    max_tokens: conversation.max_tokens.or(model_max_tokens),
                     tools: tools.clone(),
                     thinking_budget,
                     use_max_completion_tokens,
@@ -1076,7 +1082,9 @@ pub async fn send_message(
         model_param_overrides.as_ref().and_then(|p| p.no_system_role).unwrap_or(false);
     let use_max_completion_tokens =
         model_param_overrides.as_ref().and_then(|p| p.use_max_completion_tokens);
-    let force_max_tokens = model_param_overrides.as_ref().and_then(|p| p.force_max_tokens);
+    let model_temperature = model_param_overrides.as_ref().and_then(|p| p.temperature);
+    let model_top_p = model_param_overrides.as_ref().and_then(|p| p.top_p);
+    let model_max_tokens = model_param_overrides.as_ref().and_then(|p| p.max_tokens);
     let thinking_param_style =
         model_param_overrides.as_ref().and_then(|p| p.thinking_param_style.clone());
     let request_delay_ms = model_param_overrides.as_ref().and_then(|p| p.request_delay_ms);
@@ -1586,7 +1594,9 @@ pub async fn send_message(
             mcp_server_ids: mcp_ids,
             override_created_at: Some(user_message.created_at + 1),
             use_max_completion_tokens,
-            force_max_tokens,
+            model_temperature,
+            model_top_p,
+            model_max_tokens,
             thinking_param_style,
             request_delay_ms,
             settings: global_settings,
@@ -1943,7 +1953,9 @@ pub async fn regenerate_message(
     .and_then(|m| m.param_overrides);
     let use_max_completion_tokens =
         regen_model_overrides.as_ref().and_then(|p| p.use_max_completion_tokens);
-    let force_max_tokens = regen_model_overrides.as_ref().and_then(|p| p.force_max_tokens);
+    let model_temperature = regen_model_overrides.as_ref().and_then(|p| p.temperature);
+    let model_top_p = regen_model_overrides.as_ref().and_then(|p| p.top_p);
+    let model_max_tokens = regen_model_overrides.as_ref().and_then(|p| p.max_tokens);
     let no_system_role =
         regen_model_overrides.as_ref().and_then(|p| p.no_system_role).unwrap_or(false);
     let thinking_param_style =
@@ -1984,7 +1996,9 @@ pub async fn regenerate_message(
             mcp_server_ids: mcp_ids,
             override_created_at: original_created_at,
             use_max_completion_tokens,
-            force_max_tokens,
+            model_temperature,
+            model_top_p,
+            model_max_tokens,
             thinking_param_style,
             request_delay_ms: regen_request_delay_ms,
             settings: global_settings,
@@ -2316,7 +2330,9 @@ pub async fn regenerate_with_model(
     .and_then(|m| m.param_overrides);
     let use_max_completion_tokens =
         rwm_overrides.as_ref().and_then(|p| p.use_max_completion_tokens);
-    let force_max_tokens = rwm_overrides.as_ref().and_then(|p| p.force_max_tokens);
+    let model_temperature = rwm_overrides.as_ref().and_then(|p| p.temperature);
+    let model_top_p = rwm_overrides.as_ref().and_then(|p| p.top_p);
+    let model_max_tokens = rwm_overrides.as_ref().and_then(|p| p.max_tokens);
     let no_system_role = rwm_overrides.as_ref().and_then(|p| p.no_system_role).unwrap_or(false);
     let thinking_param_style = rwm_overrides.as_ref().and_then(|p| p.thinking_param_style.clone());
     let rwm_request_delay_ms = rwm_overrides.as_ref().and_then(|p| p.request_delay_ms);
@@ -2398,7 +2414,9 @@ pub async fn regenerate_with_model(
             mcp_server_ids: mcp_ids,
             override_created_at: original_created_at,
             use_max_completion_tokens,
-            force_max_tokens,
+            model_temperature,
+            model_top_p,
+            model_max_tokens,
             thinking_param_style,
             request_delay_ms: rwm_request_delay_ms,
             settings: global_settings,

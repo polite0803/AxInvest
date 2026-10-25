@@ -29,8 +29,6 @@ interface AgentNodeRow {
   tools: string[];
   fixedTools: string[];
   systemPrompt: string;
-  temperature: number;
-  maxTokens: number;
   maxToolRounds: number;
 }
 
@@ -114,8 +112,6 @@ export function AgentProfileList() {
               tools: exposed,
               fixedTools: FIXED_TOOL_MAP[nodeId] ?? FIXED_ALGO_TOOLS[nodeId] ?? [],
               systemPrompt: config?.system_prompt as string ?? "",
-              temperature: config?.temperature as number ?? 0.3,
-              maxTokens: config?.max_tokens as number ?? 4096,
               maxToolRounds: config?.max_tool_rounds as number ?? 2,
             } as AgentNodeRow;
           })
@@ -149,8 +145,6 @@ export function AgentProfileList() {
           tools: [],
           fixedTools: FIXED_TOOL_MAP[nid] ?? FIXED_ALGO_TOOLS[nid] ?? [],
           systemPrompt: "",
-          temperature: 0.3,
-          maxTokens: 4096,
           maxToolRounds: 2,
         };
       });
@@ -210,8 +204,6 @@ export function AgentProfileList() {
                 tools: exposed,
                 fixedTools: FIXED_TOOL_MAP[nodeId] ?? FIXED_ALGO_TOOLS[nodeId] ?? [],
                 systemPrompt: config?.system_prompt as string ?? "",
-                temperature: config?.temperature as number ?? 0.3,
-                maxTokens: config?.max_tokens as number ?? 4096,
                 maxToolRounds: config?.max_tool_rounds as number ?? 2,
               } as AgentNodeRow;
             })
@@ -246,8 +238,6 @@ export function AgentProfileList() {
             tools: [],
             fixedTools: FIXED_TOOL_MAP[nid] ?? FIXED_ALGO_TOOLS[nid] ?? [],
             systemPrompt: "",
-            temperature: 0.3,
-            maxTokens: 4096,
             maxToolRounds: 2,
           };
         });
@@ -293,8 +283,6 @@ export function AgentProfileList() {
         nodeId: editRow.id,
         input: {
           systemPrompt: editRow.systemPrompt || undefined,
-          temperature: editRow.temperature,
-          maxTokens: editRow.maxTokens,
           maxToolRounds: editRow.maxToolRounds,
         },
       });
@@ -569,24 +557,6 @@ export function AgentProfileList() {
                       onChange={(e) => setEditRow({ ...editRow, systemPrompt: e.target.value })}
                     />
                     <div className="flex flex-wrap gap-3">
-                      <span className="flex items-center gap-1 text-xs">
-                        <span className="text-gray-400">{t("stockAnalysis.settings.profile.temperature")}</span>
-                        <Input
-                          size="small"
-                          style={{ width: 70 }}
-                          value={editRow.temperature}
-                          onChange={(e) => setEditRow({ ...editRow, temperature: Number(e.target.value) || 0 })}
-                        />
-                      </span>
-                      <span className="flex items-center gap-1 text-xs">
-                        <span className="text-gray-400">Max Tokens</span>
-                        <Input
-                          size="small"
-                          style={{ width: 80 }}
-                          value={editRow.maxTokens}
-                          onChange={(e) => setEditRow({ ...editRow, maxTokens: Number(e.target.value) || 0 })}
-                        />
-                      </span>
                       <span className="flex items-center gap-1 text-xs">
                         <span className="text-gray-400">{t("stockAnalysis.settings.profile.maxToolRounds")}</span>
                         <Input

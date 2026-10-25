@@ -5556,7 +5556,7 @@
       "empty": "Aucun outil local",
       "title": "Outils Locaux"
     },
-    "maxTokens": "Tokens maximum",
+    "maxTokens": "Tokens de sortie max.",
     "maxTokensTooltip": "Nombre maximum de tokens que le modèle peut générer",
     "mcpServers": {
       "add": "Ajouter un serveur MCP",
@@ -5733,6 +5733,7 @@
       "workingMemoryEntries": "{{count}} entrées"
     },
     "messageChannels": "Canaux de messages",
+    "trayEnabled": "Afficher la barre d'état système",
     "minimizeToTray": "Réduire dans la zone de notification à la fermeture",
     "minutes": "min",
     "modelAbilities": "Capacités du modèle",
@@ -15531,6 +15532,8 @@
     "actionUnavailable": "Indisponible",
     "amplitude": "Amplitude",
     "analystConsensus": "Consensus des analystes",
+    "analystConsensusExcluded": "{count} analyste(s) se contredisent avec leurs propres scores haussier/baissier et sont exclus de ce consensus",
+    "analystConfidenceSelfReported": "Confiance auto-déclarée par l'analyste (0-100) : mesure seulement l'assurance qu'il met dans son propre avis. Elle n'a pas été confrontée à l'évolution réelle du cours et n'est pas un taux de réussite ; ce n'est pas la même échelle que la confiance de décision du palier (posterior de formule), les deux ne sont pas comparables.",
     "bearish": "Baissier",
     "bullish": "Haussier",
     "cancelled": "Analyse annulée — données partielles affichées",
@@ -16736,7 +16739,8 @@
         "chip": "Structure du flottant",
         "pace": "Rythme",
         "momentum": "Momentum",
-        "bottleneck": "Goulot d'étranglement"
+        "bottleneck": "Goulot d'étranglement",
+        "analyst_vote": "Vote des analystes"
       },
       "attributionLabel": "Motifs du refus (issus des champs déjà calculés de cette décision) :",
       "legContribution": "{{leg}} contribution {{sigma}} (poids {{weight}})",
@@ -17680,7 +17684,6 @@
       "evolutionCollectingData": "Collecte des données de {{nodeName}}...",
       "evolutionNoData": "{{nodeName}} n'a pas de données de retour",
       "evolutionFailed": "Échec de l'évolution de {{nodeName}}",
-      "feedbackUploadFailed": "{nodeName} : cet envoi de retour qualité a échoué — l'auto-évolution sera privée de cette entrée",
       "evolutionTrigger": "Déclencher l'auto-évolution de {{nodeName}}",
       "evolutionSuggestion": "🧬 Suggestion d'auto-évolution de {{nodeName}}",
       "close": "Fermer",
@@ -18377,7 +18380,13 @@
       "snapshotAbsentNotPersisted": "L'analyse est terminée, mais le canal producteur n'a pas persisté les résultats par nœud ; le diagnostic de qualité des données, les justificatifs par analyste et la reconstruction du tableau sont indisponibles.",
       "snapshotAbsentIncomplete": "L'analyse n'est pas encore terminée, il n'y a donc pas d'instantané de tableau.",
       "snapshotAbsentRerunHint": "Relancez la chaîne d'analyse ; ce canal persiste désormais l'instantané.",
-      "summaryLength": "Longueur du résumé"
+      "summaryLength": "Longueur du résumé",
+      "feedbackWriteFailed": "Échec de l'enregistrement du retour qualité des analystes : {{failed}} entrées en échec sur {{written}} ; l'auto-évolution ne reçoit pas ces données",
+      "feedbackSkippedFastChain": "Cette exécution a utilisé la chaîne rapide ; aucun diagnostic par analyste n'était à enregistrer (l'auto-évolution n'a reçu aucun retour sur cette analyse)",
+      "feedbackSkippedBadSnapshot": "L'instantané du tableau de bord de cette exécution n'a pas pu être analysé ; le diagnostic par analyste n'a pas été enregistré (l'auto-évolution n'a reçu aucun retour sur cette analyse)",
+      "feedbackSkippedNoAnalysisRow": "Aucune ligne d'analyse correspondante n'a été trouvée pour cette exécution ; le diagnostic par analyste n'a pas été enregistré (l'auto-évolution n'a reçu aucun retour sur cette analyse)",
+      "feedbackSkippedNoDiagnosis": "Aucun diagnostic par analyste n'était à enregistrer dans cette exécution ; l'auto-évolution n'a reçu aucun retour pour cette analyse",
+      "feedbackSkippedUnknown": "Le retour des analystes n'a pas été enregistré pour une raison inconnue (l'auto-évolution n'a reçu aucun retour sur cette analyse)"
     },
     "dataWarning": {
       "announcement": "Annonce",
@@ -18558,7 +18567,35 @@
       "sessionAfternoon": "Séance de l'après-midi",
       "sessionPostClose": "Après clôture"
     },
-    "horizonPriorHitRate": "taux de réussite {{rate}} %"
+    "horizonPriorHitRate": "taux de réussite {{rate}} %",
+    "f7Reference": {
+      "weightsCollapsed": "Effondrement des poids des facteurs sur ce côté ⇒ conclusion inutilisable pour la comparaison, conservée comme trace.",
+      "actionAbsent": "Ce côté n'a donné aucune conclusion directionnelle (ce n'est pas un avis baissier)",
+      "actionSame": "Même palier que la formule de production",
+      "actionNotComparable": "Direction manquante d'un côté ⇒ aucun écart directionnel pour cette fois",
+      "valueNotComparable": "Valeurs manquantes d'un côté ⇒ aucun écart numérique",
+      "posterior": "Posterior",
+      "riskLevel": "Palier de risque",
+      "f7Weight": "Part du poids de f7",
+      "f7WeightValue": "{{pct}} %",
+      "gapsPresent": "Il manque {{n}} jeux de données amont à ce côté : {{gaps}}",
+      "gapsNone": "Données amont complètes sur ce côté",
+      "title": "Comparaison de base f7 (production = votes des analystes, référence = avis du trader)",
+      "notProduced": "Cet enregistrement n'a pas de comparaison de base f7 (analyse antérieure à cette base, ou nœud de référence non exécuté)",
+      "productionLabel": "Côté production : ",
+      "referenceLabel": "Côté référence : ",
+      "sameBasis": "Les deux côtés utilisent la même base f7 ⇒ cette comparaison est nulle (l'écart ne montre qu'une même entrée comptée deux fois).",
+      "actionDiffer": "Paliers différents : production {{production}} vs référence {{reference}}",
+      "confDelta": "confiance {{delta}} (production {{production}} vs référence {{reference}})",
+      "posDelta": "position {{delta}} % (production {{production}} % vs référence {{reference}} %)",
+      "scaleNote": "Les deux côtés partagent la même échelle (même sortie rhai) et sont directement comparables ; les scores tridimensionnels par horizon relèvent d'une autre échelle.",
+      "f7": {
+        "analystVotes": "f7 utilise les votes structurés des analystes (vote net et dispersion), sans avis de trading du LLM.",
+        "trader": "f7 utilise la direction, la confiance et les cours du trader LLM (base de production avant v183).",
+        "absent": "f7 n'a aucune entrée ⇒ cette branche compte pour 0 et sort de la pondération ; ce côté ne porte aucun signal de trading.",
+        "unknown": "Ce côté n'a pas déclaré l'origine de l'entrée de f7 ⇒ indépendance vis-à-vis de la décision LLM indeterminée."
+      }
+    }
   },
   "pipeline": {
     "title": "Pipeline d'Actions",

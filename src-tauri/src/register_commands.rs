@@ -295,6 +295,8 @@ macro_rules! register_all_commands {
             #[cfg(not(mobile))]
             commands::desktop::set_close_to_tray,
             #[cfg(not(mobile))]
+            commands::desktop::set_tray_enabled,
+            #[cfg(not(mobile))]
             commands::desktop::test_proxy,
             #[cfg(not(mobile))]
             commands::desktop::toggle_maximize_window,

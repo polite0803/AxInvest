@@ -26,7 +26,9 @@ vi.mock("react-i18next", () => ({
   initReactI18next: { type: "3rdParty", init: () => {} },
 }));
 
-// 组件在打开时会 invoke("save_node_feedback") 上报自我进化数据，测试中无需真实后端。
+// 2026-10-25：本组件的「打开即上报」已退役（写入路径收口到后端落库旁路
+// src-tauri/src/commands/analyst_feedback.rs），前端已无写路径。
+// 这里仍 mock invoke：「触发进化」按钮会读后端统计。
 vi.mock("@/lib/invoke", () => ({ invoke: vi.fn().mockResolvedValue(undefined) }));
 
 const storeState = { dataQualitySummary: "" };
@@ -63,6 +65,13 @@ function summary(withRq: boolean): string {
       mk: item("技术面分析师", 72, withRq ? 88 : undefined),
       hm: item("资金面分析师", 55, withRq ? 42.5 : undefined),
     },
+    // v148 起后端另发逐档诊断：同一分析师各档一行（本 fixture 用真实档名 snake）
+    diagnostics_by_tier: {
+      mk: {
+        ultra_short: item("技术面分析师", 31, withRq ? 40 : undefined),
+        mid: item("技术面分析师", 72, withRq ? 88 : undefined),
+      },
+    },
   });
 }
 
@@ -74,9 +83,9 @@ function summary(withRq: boolean): string {
  *   `not.toContain(...)` 这类反向断言就会假红（首次实测即踩：技术面的 score=88
  *   出现在资金面的断言文本里，看起来像「取错诊断条目」，实为上一个弹窗未清理）。
  */
-function bodyTextOf(expertId: string, name: string): string {
+function bodyTextOf(expertId: string, name: string, tier?: string | null): string {
   cleanup();
-  render(<AnalystDataQualityModal name={name} expertId={expertId} open onClose={() => {}} />);
+  render(<AnalystDataQualityModal name={name} expertId={expertId} open onClose={() => {}} tier={tier} />);
   return document.body.textContent ?? "";
 }
 
@@ -136,5 +145,38 @@ describe("AnalystDataQualityModal — 全局值 vs 本节点值（2026-09-21）"
   it("有值时不得出现灰点（unknown 只属于「缺字段」，不能扩散成通用兜底）", () => {
     bodyTextOf("a-hot-money", "资金面分析师");
     expect(document.body.querySelectorAll(".anticon-minus-circle").length).toBe(0);
+  });
+});
+
+/**
+ * 逐档作用域（2026-10-25）。
+ *
+ * v133 分析师按持有期实例化后，`diagnostics` 只是**代表实例**（mid 优先那一档），
+ * 而卡片可能来自超短/长档 ⇒ 弹窗不指代档位就会显示别的档那一行，同屏两个数字对不上。
+ * Grid 已把 `entry.tier` 透到卡片再到弹窗，本组用例钉住「传了档 ⇒ 读那档的行」。
+ */
+describe("AnalystDataQualityModal — 逐档诊断作用域（2026-10-25）", () => {
+  beforeEach(() => {
+    storeState.dataQualitySummary = summary(true);
+  });
+
+  it("指代 ultra_short ⇒ 显示超短那一行（confidence=31 / 质量分 40）", () => {
+    const text = bodyTextOf("market-analyst", "技术面分析师", "ultra_short");
+    expect(text).toContain("confidence=31");
+    expect(text).toContain("dqNodeReportQualityValue|score=40");
+    // 反向：代表实例（mid）的读数不得串进来
+    expect(text).not.toContain("confidence=72");
+    expect(text).not.toContain("dqNodeReportQualityValue|score=88");
+  });
+
+  it("不指代档位 ⇒ 回落代表实例（confidence=72），不是报错也不是空白", () => {
+    const text = bodyTextOf("market-analyst", "技术面分析师");
+    expect(text).toContain("confidence=72");
+  });
+
+  it("该分析师没有本档行 ⇒ 回落代表实例，不冒充别的档", () => {
+    // hm 在 diagnostics_by_tier 里整族缺席
+    const text = bodyTextOf("a-hot-money", "资金面分析师", "long");
+    expect(text).toContain("confidence=55");
   });
 });

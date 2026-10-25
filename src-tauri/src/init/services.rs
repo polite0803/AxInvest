@@ -17,7 +17,8 @@ pub async fn start_background_services(
     app_dir: std::path::PathBuf,
     _tray_language: String,
 ) {
-    // [2026-09-09 修复 / 2026-09-22 收敛] 共享 Rhai Engine 的 AxInvest 宿主函数集注册。
+    // [2026-09-09 修复 / 2026-09-22 收敛 / 2026-10-25 下沉] 共享 Rhai Engine 的
+    // AxInvest 宿主函数集注册。
     //
     // 历史：此处曾先后两次调用 register_shared_engine_initializer（pm_* 一次、
     // bottleneck_* 一次），而该通道当时是**单槽** OnceLock（容量 1）
@@ -32,14 +33,18 @@ pub async fn start_background_services(
     // 缺失后果实证：pm_* 缺失曾使 data-quality.rhai / portfolio-mgr.rhai /
     // portfolio-risk-gate.rhai 全部报 Function not found（2026-09-09 data-quality
     // 节点 VALIDATION_FAILED）。必须在任何工作流执行前调用 —— Engine 首次使用即冻结。
-    if let Err(e) = axagent_rt_workflow::work_engine::executors::register_shared_engine_initializer(
-        Box::new(crate::commands::stock_workflow::rhai_registry::register_axinvest_rhai_functions),
-    ) {
-        // 走到这里说明启动顺序已被破坏（Engine 在本函数之前就被使用过）。
-        // 不 panic：函数缺失已是既成事实，让应用起来并打 error 级日志更易定位
-        //（原实现只在 warn 级记一句，且文案把根因指向了错误的「初始化时序」）。
-        tracing::error!("[init] 共享 Rhai Engine 宿主函数注册失败：{e}");
-    }
+    //
+    // ⚠ **2026-10-25（R-3c）**：注册已**下沉到 `create_app_state`**（本文件所在
+    // 函数的调用前置）。原因：这里的 `start_background_services` 只在 **Tauri 应用
+    // 启动路径**上跑 ⇒ CLI（`axagent-validate-backfill` / `axagent-batch-rerun`）
+    // 与无头服务（`server_main`）拿到的共享 Engine **完全没有 `pm_*` 宿主函数**
+    // ⇒ 实测 `pm_asof_degraded_methods`（**零参数**闭包）也报
+    // `Function not found` ⇒ 整个函数集缺失 ⇒ 回放分析链跑的是**降级版系统**。
+    //
+    // 此处保留调用是**幂等**的（`ensure_shared_engine_has_axinvest_functions` 用
+    // `Once` 保证每进程只入队一次），保留它是为了「即使将来 `create_app_state`
+    // 的调用顺序被改动，本函数仍是兜底」—— 单点防御不如双点幂等。
+    crate::commands::stock_workflow::rhai_registry::ensure_shared_engine_has_axinvest_functions();
     // [2026-09-20 收敛项已并入上方单一入口] bottleneck_node_score 的注册
     //（权威语义 = bottleneck-calc.rhai 原行为）由 rhai_registry 统一承载，
     // 此处不再单独注册 —— 历史上正是「两处独立注册 + 单槽通道」构成本次缺陷。
@@ -50,7 +55,17 @@ pub async fn start_background_services(
     start_auto_backup(app, state, app_dir.clone());
     start_webdav_sync(app, state, app_dir.clone());
     #[cfg(not(mobile))]
-    start_tray(app, &_tray_language);
+    {
+        // 托盘开关的唯一权威是 settings.tray_enabled；此前这里无条件创建，
+        // 导致设置项存了也关不掉（2026-10-25 接通）。
+        let tray_enabled = axagent_dao::repo::settings::get_settings(state.harness.db())
+            .await
+            .map(|s| s.tray_enabled)
+            .unwrap_or(true);
+        if tray_enabled {
+            start_tray(app, &_tray_language);
+        }
+    }
     start_closed_loop_service(app, state);
     start_insight_generation(state);
     start_pattern_learning(state);
@@ -1966,8 +1981,40 @@ fn start_text_grad_analysis(state: &AppState) {
 /// 该块本身**不依赖 `app`**，故可安全抽出；抽出的另一个收益是：
 /// bin 与 Tauri 从此走**同一条装配路径**，不会再出现「bin 能跑而应用不能」的路径偏差。
 pub async fn inject_work_engine_tool_resolver(state: &AppState) {
-    let registry = state.local_tool_registry.clone();
-    let work_engine = state.work_engine.clone();
+    inject_tool_resolver_into(state.local_tool_registry.clone(), state.work_engine.clone()).await;
+}
+
+/// 把工具 resolver 装进指定 WorkEngine（**组件版**，不依赖 `AppState`）。
+///
+/// ## 为什么要有组件版（R-3d，2026-10-26）
+///
+/// `inject_work_engine_tool_resolver(state)` 只在 `src/init/services.rs:2072`
+/// （**Tauri 应用路径**）与 `axagent-batch-rerun.rs:784` 被调用 ⇒
+/// **另两个入口拿不到 resolver**：
+/// - `axagent-validate-backfill`（CLI，本轮用它跑回放批次）
+/// - `server_main`（无头服务）
+///
+/// 实测后果（2026-10-26，CLI 跑时间旅行批次）：
+/// ```text
+/// WARN engine: Node failed node_id=t-industry-rank
+///   error=TOOL_CALL_FAILED: 工具 'get_industry_ranking' 未注册
+/// ```
+/// ⇒ **所有数据节点 Failed** ⇒ 种子池空 ⇒ **候选 0 行**。
+///
+/// ⚠ 症状极具误导性：批次状态是 `completed`、`荐股 0 行`、
+/// 「荐股与趋势智选均无候选（可能当日数据缺失或阈值过高）」——
+/// **长得像「那天没数据」**，实际是**装配缺一步**。
+///
+/// ⇒ 组件版让 `create_app_state`（**所有构造 AppState 的路径的共同入口**）能就地注入，
+/// 于是三个入口一次全修，不再有下一个漏。
+/// 与 R-3c 的「宿主函数注册下沉」**同族同法**（CLI 路径要用的装配，必须在 CLI 路径装齐）。
+pub async fn inject_tool_resolver_into(
+    registry: Arc<tokio::sync::Mutex<axagent_tools::registry::UnifiedToolRegistry>>,
+    work_engine: Arc<axagent_runtime::work_engine::WorkEngine>,
+) {
+    // 闭包是 `move` 的，会把 `work_engine` 带走；但末尾还要用它注册 resolver
+    // ⇒ 先留一份 clone（Arc clone 是廉价的引用计数 +1）。
+    let engine_for_set = work_engine.clone();
     let resolver: axagent_runtime::work_engine::ToolResolver =
         std::sync::Arc::new(move |tool_name: String| {
             let registry = registry.clone();
@@ -2033,7 +2080,7 @@ pub async fn inject_work_engine_tool_resolver(state: &AppState) {
             })
         });
     // 复用 Tauri 全局 runtime，避免一次性创建/销毁 runtime 的开销。
-    state.work_engine.set_tool_resolver(resolver).await;
+    engine_for_set.set_tool_resolver(resolver).await;
 }
 
 async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
@@ -2054,6 +2101,15 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
     axagent_tools::tools::cron::init_cron_store(store.clone());
 
     // 设置工具解析器（从全局 registry 按需自动注册工作流中引用的工具）
+    //
+    // ⚠ **R-3d（2026-10-26）**：该注入已**下沉到 `create_app_state`**
+    // （所有构造 AppState 的路径的共同入口）⇒ 此处调用是**幂等兜底**
+    // （`set_tool_resolver` 已有防呆：已有 resolver 时新注入被忽略）。
+    //
+    // 下沉的起因：原先只在**本函数（Tauri 应用路径）**与 `axagent-batch-rerun` 里有
+    // ⇒ CLI（`axagent-validate-backfill`）与 `server_main` 两个入口都缺
+    // ⇒ 实测「工具 'get_industry_ranking' 未注册」⇒ 数据节点全 Failed
+    // ⇒ **候选 0 行**（症状长得像「那天没数据」）。
     inject_work_engine_tool_resolver(state).await;
 
     // 设置 RAG 知识源检索回调（供工作流 Agent 节点从知识库/记忆/Wiki 检索上下文）
@@ -2250,6 +2306,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     | Some("validate-decisions")
                     | Some(crate::commands::recommendation_cron::TREND_SCREENING_TASK_TYPE)
                     | Some(crate::commands::constants::PORTFOLIO_METRICS_TASK_TYPE)
+                    | Some(crate::commands::time_travel_batch::TIME_TRAVEL_BATCH_TASK_TYPE)
             );
             if gated {
                 let today = chrono::Local::now().date_naive();
@@ -3318,6 +3375,251 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             job_id
                         );
                     }
+                }
+            }));
+            return;
+        }
+        // 时间旅行回放批次：task_type = time-travel-batch（R-2，2026-10-25）
+        //
+        // 目的：把「回放日」从当前的 3 个推向 30+ 个，让回放样本按天累积。
+        //
+        // 为什么**必须每天跑**：回放日有一条硬约束 —— 判定 T+N 需要
+        // **as_of + N 个交易日 ≤ 今天**。因此「今天能回放哪些日」逐日变化；
+        // 一次跑完只能拿到当下这一批，之后每天会新增一天可判定的 as_of。
+        //
+        // 与其它回测分支的差别：
+        // - 决策回测消费**当日** pick；本分支在 as-of 封闭世界里**重跑选股链**，
+        //   产出的是「当时的决策」；
+        // - 批次有**全局互斥锁**（`asof_lock`）与 **live 时间窗拒绝**，
+        //   与 live 流水线撞车时**当场拒绝**而不是排队 —— 这是生产侧既有护栏，不绕开。
+        //
+        // 配置 JSON 存 `CronJob.prompt`（同其它内置任务）：
+        //   { minConfidence?, topN?, minHoldingDays? }
+        // 空串 ⇒ 全默认。`minHoldingDays` 默认 2（T+2 是最短可判档）。
+        if job.task_type.as_deref()
+            == Some(crate::commands::time_travel_batch::TIME_TRAVEL_BATCH_TASK_TYPE)
+        {
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let client = astock_client.clone();
+            let engine = work_engine.clone();
+            let vector_store = cron_vector_store.clone();
+            let master_key = cron_master_key;
+            let trajectory_storage = cron_trajectory_storage.clone();
+            let asof_lock = asof_lock.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            let prompt = job.prompt.clone();
+            tokio::task::spawn(cron_live(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
+
+                // 1. 解析配置
+                let cfg: serde_json::Value = if prompt.trim().is_empty() {
+                    serde_json::json!({})
+                } else {
+                    match serde_json::from_str(&prompt) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::error!(
+                                "[CronScheduler] 时间旅行批次任务 '{}' 配置解析失败: {e}",
+                                job_name
+                            );
+                            store
+                                .record_run(
+                                    &job_id,
+                                    axagent_runtime_core::TaskRunResult {
+                                        success: false,
+                                        output: None,
+                                        error: Some(format!("配置解析失败: {e}")),
+                                        duration_ms: elapsed(),
+                                        executed_at: started,
+                                        skipped: false,
+                                        partial: false,
+                                    },
+                                )
+                                .await;
+                            return;
+                        },
+                    }
+                };
+                let min_confidence = cfg
+                    .get("minConfidence")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(50)
+                    .min(100) as u8;
+                let top_n = cfg.get("topN").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+                let min_holding_days = cfg
+                    .get("minHoldingDays")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(2)
+                    .max(1) as i32;
+                // 逐只分析默认**关闭**：它要跑 LLM 工作流，免费档限速下实测单日 30~60 分钟，
+                // 而盈利能力样本走 `reco_picks → decision_validations`，不依赖该阶段。
+                // 需要决策质量口径（`stock_analyses.outcome`）时再显式打开。
+                let analyze = cfg.get("analyze").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                // 2. 今天可回放的 as_of 日（快照齐全 + 持有期已到期）
+                let dates = match crate::commands::time_travel_batch::list_replayable_as_of_dates(
+                    &db,
+                    min_holding_days,
+                )
+                .await
+                {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::error!(
+                            "[CronScheduler] 时间旅行批次任务 '{}' 列举可回放日失败: {e}",
+                            job_name
+                        );
+                        store
+                            .record_run(
+                                &job_id,
+                                axagent_runtime_core::TaskRunResult {
+                                    success: false,
+                                    output: None,
+                                    error: Some(e),
+                                    duration_ms: elapsed(),
+                                    executed_at: started,
+                                    skipped: false,
+                                    partial: false,
+                                },
+                            )
+                            .await;
+                        return;
+                    },
+                };
+
+                if dates.is_empty() {
+                    tracing::info!(
+                        "[CronScheduler] 时间旅行批次任务 '{}'：今天没有可回放的 as_of 日（快照未齐或持有期未到期）",
+                        job_name
+                    );
+                    store
+                        .record_run(
+                            &job_id,
+                            axagent_runtime_core::TaskRunResult {
+                                success: true,
+                                output: Some("今天没有可回放的 as_of 日（快照未齐或持有期未到期）".to_string()),
+                                error: None,
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                                skipped: true,
+                                partial: false,
+                            },
+                        )
+                        .await;
+                    return;
+                }
+
+                // 3. 逐日发起批次。批次是**后台执行**的（命令只返回 batch_id），
+                //    这里轮询到终态再记录 —— 否则任务中心会显示「成功」而批次还在跑。
+                let mut ok_days = 0usize;
+                let mut fail_days = 0usize;
+                let mut picks_total = 0i64;
+                for (as_of, ago) in &dates {
+                    let request = crate::commands::time_travel_batch::TimeTravelBatchRequest {
+                        date: Some(as_of.clone()),
+                        trading_days_ago: None,
+                        periods: Vec::new(),
+                        min_confidence,
+                        top_n,
+                        reflect: true,
+                        analyze,
+                    };
+                    let batch_id =
+                        match crate::commands::time_travel_batch::run_time_travel_batch_inner(
+                            &db,
+                            &client,
+                            &engine,
+                            &vector_store,
+                            &master_key,
+                            &trajectory_storage,
+                            &asof_lock,
+                            request,
+                        )
+                        .await
+                        {
+                            Ok(id) => id,
+                            Err(e) => {
+                                // live 时间窗 / 快照覆盖 / 批次互斥 都在这里被拒绝 ——
+                                // **如实计入失败**而不是静默跳过。
+                                tracing::warn!(
+                                    "[CronScheduler] 时间旅行批次 {} 发起失败: {e}", as_of
+                                );
+                                fail_days += 1;
+                                continue;
+                            },
+                        };
+
+                    // 轮询到终态（批次内部耗时不可预估 ⇒ 给足上限）
+                    let mut status = "timeout".to_string();
+                    let mut total = 0i64;
+                    let mut picks = 0i64;
+                    for _ in 0..180 {
+                        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                        if let Ok(Some(m)) =
+                            axagent_dao::repo::time_travel_batch_runs::fetch_batch_by_id(
+                                &db, &batch_id,
+                            )
+                            .await
+                        {
+                            total = m.total as i64;
+                            picks = m.reco_picks as i64;
+                            if matches!(
+                                m.status.as_str(),
+                                "completed" | "partial" | "failed" | "interrupted"
+                            ) {
+                                status = m.status;
+                                break;
+                            }
+                        }
+                    }
+                    if status == "completed" || status == "partial" {
+                        ok_days += 1;
+                    } else {
+                        fail_days += 1;
+                    }
+                    picks_total += picks;
+                    tracing::info!(
+                        "[CronScheduler] 时间旅行批次 {} 完成: status={} 距今{}交易日 候选={} 荐股={}行",
+                        as_of, status, ago, total, picks
+                    );
+                }
+
+                let summary = format!(
+                    "回放日 {} 个（成功 {} / 失败 {}）｜荐股总行数 {}",
+                    dates.len(),
+                    ok_days,
+                    fail_days,
+                    picks_total
+                );
+                tracing::info!(
+                    "[CronScheduler] 时间旅行批次任务 '{}' 完成: {}",
+                    job_name,
+                    summary
+                );
+                let result = axagent_runtime_core::TaskRunResult {
+                    success: fail_days == 0,
+                    output: Some(summary),
+                    error: (fail_days > 0).then(|| format!("{fail_days} 个回放日失败")),
+                    duration_ms: elapsed(),
+                    executed_at: started,
+                    skipped: false,
+                    partial: fail_days > 0,
+                };
+                store.record_run(&job_id, result).await;
+                if !recurring
+                    && !store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await
+                {
+                    tracing::warn!(
+                        "[CronScheduler] 时间旅行批次任务 '{}' 置为 Disabled 失败\
+                         （未找到该任务或持久化失败，下次到点会重复跑）",
+                        job_id
+                    );
                 }
             }));
             return;

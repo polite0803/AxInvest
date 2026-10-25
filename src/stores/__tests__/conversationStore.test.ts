@@ -61,7 +61,6 @@ function makeConversation(id: string, overrides: Record<string, unknown> = {}) {
     temperature: null,
     maxTokens: null,
     topP: null,
-    frequencyPenalty: null,
     searchEnabled: false,
     searchProviderId: null,
     thinkingBudget: null,
@@ -450,7 +449,7 @@ describe("conversationStore pagination", () => {
     vi.useRealTimers();
   });
 
-  it("creates a new conversation from a category template when a category id is supplied", async () => {
+  it("only inherits the category default model, never its sampling params", async () => {
     invokeMock.mockImplementation(
       (cmd: string, args?: Record<string, unknown>) => {
         if (cmd === "create_conversation") {
@@ -475,10 +474,6 @@ describe("conversationStore pagination", () => {
             input: {
               categoryId: "cat-template",
               systemPrompt: "Category prompt",
-              temperature: 0.2,
-              maxTokens: 8192,
-              topP: 0.95,
-              frequencyPenalty: 0.4,
               searchEnabled: false,
               searchProviderId: null,
               thinkingBudget: null,
@@ -495,10 +490,6 @@ describe("conversationStore pagination", () => {
               modelId: "template-model",
               categoryId: "cat-template",
               systemPrompt: "Category prompt",
-              temperature: 0.2,
-              maxTokens: 8192,
-              topP: 0.95,
-              frequencyPenalty: 0.4,
             }),
           );
         }
@@ -523,10 +514,6 @@ describe("conversationStore pagination", () => {
           iconValue: null,
           systemPrompt: "Category prompt",
           defaultModel: { a: "template-provider", b: "template-model" },
-          defaultTemperature: 0.2,
-          defaultMaxTokens: 8192,
-          defaultTopP: 0.95,
-          defaultFrequencyPenalty: 0.4,
           sortOrder: 0,
           isCollapsed: false,
           createdAt: 1,
@@ -548,7 +535,7 @@ describe("conversationStore pagination", () => {
     expect(conversation.categoryId).toBe("cat-template");
     expect(conversation.providerId).toBe("template-provider");
     expect(conversation.modelId).toBe("template-model");
-    expect(conversation.temperature).toBe(0.2);
-    expect(conversation.maxTokens).toBe(8192);
+    expect(conversation.temperature).toBeNull();
+    expect(conversation.maxTokens).toBeNull();
   });
 });

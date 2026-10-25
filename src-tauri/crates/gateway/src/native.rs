@@ -1425,7 +1425,6 @@ mod tests {
                 model_type: ModelType::Chat,
                 capabilities: vec![ModelCapability::TextChat],
                 max_tokens: Some(4096),
-                max_output_tokens: None,
                 enabled: true,
                 param_overrides: None,
                 input_price_per_mtok: None,

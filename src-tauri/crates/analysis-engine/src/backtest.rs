@@ -165,10 +165,14 @@ impl BacktestEngine {
         // 计算收益率（扣除交易成本）
         // R1-修复: A股双边交易成本约 0.18%（佣金双边 0.08% + 卖出印花税 0.1%），
         //   不扣成本会导致短线策略胜率虚高（如真实 +0.1% 扣成本后为 -0.08%）。
+        // 2026-10-25（G4）：常数改由 `crate::costs` 单点提供 —— 此前是本文件手抄的
+        //   `const COST_RATE: f64 = 0.0018`，与命中率链互不相干。
+        //   ⚠ **刻意保持「无滑点」口径**：换成含滑点的 `DEFAULT_ROUND_TRIP_COST_PCT`
+        //   会让已落库的 accuracy 全部漂移，属另一次换版本的改动，不并入本次。
         let return_pct = match entry_price {
             Some(entry) if entry > 0.0 => {
-                const COST_RATE: f64 = 0.0018; // 0.18% 双边成本
-                ((exit_price - entry) / entry - COST_RATE) * 100.0
+                let cost_rate = crate::costs::ROUND_TRIP_COST_NO_SLIPPAGE_PCT / 100.0;
+                ((exit_price - entry) / entry - cost_rate) * 100.0
             },
             _ => 0.0,
         };

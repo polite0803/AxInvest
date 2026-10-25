@@ -66,6 +66,12 @@ pub const MOVER_RECALL_JOB_ID: &str = "mover-recall-weekly";
 /// 播种它在库里没有行时，`scripts/check-cron-job-authority.mjs` 的 R2 会红 ⇒
 /// 那是「还没重启播种」的真实状态，不是判据坏。
 pub const MOVER_RECALL_ANALYSIS_JOB_ID: &str = "mover-recall-analysis-daily";
+/// 时间旅行回放批次（R-2，2026-10-25）。task_type = `time-travel-batch`。
+///
+/// 存在的理由：回放样本此前**只靠人工跑**（库里 3 个回放日、20 个回放日有票但零判定）。
+/// 而回放日的可判定性逐日推进（判定 T+N 需要 as_of + N 个交易日 ≤ 今天），
+/// **不每天跑就攒不出样本**。本任务把这条链变成自动的。
+pub const TIME_TRAVEL_BATCH_JOB_ID: &str = "time-travel-batch-daily";
 
 /// 编码段盲扫（C-1）：只登记清单、不出事件。
 pub const UNIVERSE_SCAN_JOB_ID: &str = "universe-code-scan-daily";
@@ -245,6 +251,8 @@ fn build_builtin_jobs() -> Result<Vec<CronJob>, String> {
         // dry_run 恒 false（与 create 命令同口径）：定时任务算完不落库 = 零产物
         dry_run: Some(false),
         period_filter: None,
+        // 出厂默认 false：定时任务是实盘业绩分母，回放样本不得混入
+        include_replay: None,
     };
     let mut backtest = CronJob::new(
         "决策回测（内置）",
@@ -255,6 +263,32 @@ fn build_builtin_jobs() -> Result<Vec<CronJob>, String> {
     .with_task_type(DECISION_BACKTEST_TASK_TYPE);
     backtest.id = DECISION_BACKTEST_JOB_ID.to_string();
     jobs.push(backtest);
+
+    // 5.5) 每日 08:30 时间旅行回放批次（R-2，2026-10-25）
+    //
+    // 回放日的可判定性逐日推进（判定 T+N 需 as_of + N 个交易日 ≤ 今天），
+    // 所以**必须每天跑**：一次跑完只能拿到当下这批，之后每天新增一天可判定的 as_of。
+    //
+    // 时刻取 08:30：避开 live 流水线时间窗（23:50-02:10 / 17:50-18:10），
+    // 且早于盘中 —— 回放在 as-of 封闭世界里跑，不受盘中行情影响，
+    // 但退出 guard 后的反思阶段要用「昨天收盘」的行情，早上跑最完整。
+    //
+    // 进交易日闸门（见 services.rs 的闸门分支）：休市日「可判定的 as_of 集合」与
+    // 上一交易日完全相同 ⇒ 休市日跑是纯浪费。
+    let tt_config = serde_json::json!({
+        "minConfidence": 50,
+        "topN": 20,
+        "minHoldingDays": 2,
+    });
+    let mut time_travel = CronJob::new(
+        "时间旅行回放（内置）",
+        "30 8 * * *",
+        &serde_json::to_string(&tt_config).map_err(|e| e.to_string())?,
+        "在 as-of 封闭世界里重跑选股链，为回放样本按天累积可判定的历史日（T+2/T+5）",
+    )
+    .with_task_type(crate::commands::time_travel_batch::TIME_TRAVEL_BATCH_TASK_TYPE);
+    time_travel.id = TIME_TRAVEL_BATCH_JOB_ID.to_string();
+    jobs.push(time_travel);
 
     // 6) 周二~周六 09:00 妖股漏检核查：每次只看最新收盘日，日频才能覆盖每个交易日
     //    （旧实现周六每周只核周五，周一~周四达标且回落的事件永不落库）。

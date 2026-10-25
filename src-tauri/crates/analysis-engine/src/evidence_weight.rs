@@ -25,6 +25,13 @@ use tracing::debug;
 // ── 常量定义 ──
 
 /// 共识方向判定阈值：净得分占总权重比例超过该值才判定为明确方向（bullish/bearish）
+///
+/// ⚠ **它不是「分析师共识」标签的判据**（2026-10-25 收口）：面板与荐股交叉验证显示的
+/// 那个「看多/看空/分歧/分歧」标签，唯一出口是前端票数口径
+/// （`src/lib/stock-analysis-utils.ts` 的 `deriveAnalystConsensus`，65% 占比）。
+/// 本常量产出的 [`EvidenceConsensus::consensus`] 前端只取 `bullish_score` /
+/// `bear_score` / `net_score` 三个加权和当「证据评分」展示，**不消费本标签** ——
+/// 再引一个消费者，就会出现「同一屏两个同名不同值的共识」。
 pub const CONSENSUS_DIRECTION_THRESHOLD: f64 = 0.15;
 /// 置信度映射基准（中性/分歧场景的基础置信度）
 pub const CONSENSUS_CONFIDENCE_BASE: f64 = 30.0;
@@ -177,9 +184,9 @@ pub struct AnalystInput {
     pub report_text: Option<String>,
     /// 结构化输出的立场（如果有）
     pub stance: Option<String>,
-    /// 该分析师的 bull_score (0-10)
+    /// 该分析师的 bull_score (0-100，与 VERDICT 契约一致)
     pub bull_score: Option<f64>,
-    /// 该分析师的 bear_score (0-10)
+    /// 该分析师的 bear_score (0-100，与 VERDICT 契约一致)
     pub bear_score: Option<f64>,
     /// 建议仓位 (0-100)
     pub position_pct: Option<f64>,
@@ -766,12 +773,17 @@ fn extract_stance(analyst: &AnalystInput) -> (String, f64, bool) {
     }
 
     // 使用 bull_score / bear_score
+    //
+    // 口径：`bull_score` / `bear_score` 是 **0-100**（`agent_executor` 四处 VERDICT 提醒语
+    // 逐字声明），差值的百分比即置信 —— 早先这里按 0-10 除以 10，导致任何真实差值
+    // （如 60/40）都被 `.min(0.9)` 饱和成 0.9，等于把所有「有立场」的分析师都当成
+    // 90% 确信。除以 100 后置信才是「分歧幅度」的单调映射。
     if let (Some(bs), Some(bs2)) = (analyst.bull_score, analyst.bear_score) {
         if bs > bs2 {
-            return ("bullish".into(), ((bs - bs2) / 10.0).min(0.9), false);
+            return ("bullish".into(), ((bs - bs2) / 100.0).min(0.9), false);
         }
         if bs2 > bs {
-            return ("bearish".into(), ((bs2 - bs) / 10.0).min(0.9), false);
+            return ("bearish".into(), ((bs2 - bs) / 100.0).min(0.9), false);
         }
         return ("neutral".into(), 0.5, false);
     }
@@ -1715,6 +1727,37 @@ mod tests {
             expected,
             tech.final_weight
         );
+    }
+
+    /// P0-3（2026-10-25）：`bull_score` / `bear_score` 的权威标度是 **0-100**。
+    ///
+    /// 旧实现按 0-10 除以 10 ⇒ 任何真实差值（60/40 → 2.0）都被 `.min(0.9)` 饱和成 0.9，
+    /// 等于把所有有立场的分析师都当成 90% 确信：`90/10` 与 `60/40` 得到同一个置信。
+    /// 本条同时锁「不饱和」与「不同分歧幅度必须区分」。
+    #[test]
+    fn analyst_score_confidence_uses_zero_to_hundred_scale() {
+        let stance_of = |bull: f64, bear: f64| {
+            let a = AnalystInput {
+                analyst_id: "a-market-analyst".into(),
+                report_text: None,
+                stance: None,
+                bull_score: Some(bull),
+                bear_score: Some(bear),
+                position_pct: None,
+                untrusted: None,
+            };
+            extract_stance(&a)
+        };
+        let (dir, conf, untrusted) = stance_of(70.0, 30.0);
+        assert_eq!(dir, "bullish");
+        assert!((conf - 0.4).abs() < 1e-9, "0-100 口径下 70/30 的置信应为 0.4，实得 {conf}");
+        assert!(!untrusted);
+        let (_, wide, _) = stance_of(90.0, 10.0);
+        assert!((wide - 0.8).abs() < 1e-9, "90/10 的置信应为 0.8，实得 {wide}");
+        // 负控：仍按 0-10 除以 10 时两者都饱和到 0.9 ⇒ 这条会红
+        assert!(wide > conf, "不同分歧幅度必须给出不同置信（饱和会让两者相等）");
+        assert_eq!(stance_of(20.0, 80.0).0, "bearish");
+        assert_eq!(stance_of(50.0, 50.0).0, "neutral");
     }
 
     #[test]

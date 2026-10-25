@@ -89,7 +89,6 @@ openai_compat_local_adapter!(
                         model_type,
                         capabilities: caps,
                         max_tokens,
-                        max_output_tokens: None,
                         enabled: true,
                         param_overrides: None,
                         input_price_per_mtok: None,

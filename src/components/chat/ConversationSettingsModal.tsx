@@ -44,7 +44,6 @@ export function ConversationSettingsModal({
   const [temperature, setTemperature] = useState<number | null>(null);
   const [topP, setTopP] = useState<number | null>(null);
   const [maxTokens, setMaxTokens] = useState<number | null>(null);
-  const [frequencyPenalty, setFrequencyPenalty] = useState<number | null>(null);
   const [disabledTools, setDisabledTools] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -61,7 +60,6 @@ export function ConversationSettingsModal({
       setTemperature(conversation.temperature ?? null);
       setTopP(conversation.topP ?? null);
       setMaxTokens(conversation.maxTokens ?? null);
-      setFrequencyPenalty(conversation.frequencyPenalty ?? null);
       setDisabledTools(getConversationDisabledTools(conversation.id));
 
       try {
@@ -102,7 +100,6 @@ export function ConversationSettingsModal({
     setTemperature(null);
     setTopP(null);
     setMaxTokens(null);
-    setFrequencyPenalty(null);
   };
 
   const handleSave = async () => {
@@ -114,7 +111,6 @@ export function ConversationSettingsModal({
         temperature,
         maxTokens,
         topP,
-        frequencyPenalty,
       });
       try {
         localStorage.setItem(
@@ -326,13 +322,12 @@ export function ConversationSettingsModal({
             </div>
           </div>
 
-          {/* Temperature / Top P / Max Tokens / Frequency Penalty */}
+          {/* Temperature / Top P / Max Tokens */}
           <ModelParamSliders
             values={{
               temperature,
               topP,
               maxTokens,
-              frequencyPenalty,
             }}
             onChange={(v) => {
               if ("temperature" in v) {
@@ -344,15 +339,11 @@ export function ConversationSettingsModal({
               if ("maxTokens" in v) {
                 setMaxTokens(v.maxTokens!);
               }
-              if ("frequencyPenalty" in v) {
-                setFrequencyPenalty(v.frequencyPenalty!);
-              }
             }}
             defaults={{
               temperature: settings.defaultTemperature ?? 0.7,
               topP: settings.defaultTopP ?? 1.0,
               maxTokens: settings.defaultMaxTokens ?? 4096,
-              frequencyPenalty: settings.defaultFrequencyPenalty ?? 0,
             }}
           />
         </Card>

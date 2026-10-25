@@ -2805,8 +2805,14 @@ fn data_quality_rhai_diag_for_arity_matches_all_call_sites() {
         .collect();
     // v133（B2-2）：分析师侧 40 键改为生成式（`{abbr}_{kind}`）——字面量只剩 abbr 表
     // （`("mk", "a-market-analyst")` 行的第一段）与四类后缀，补全笛卡尔积。
-    // abbr 表从块内抽取（不另抄第二份）；下限自证防抽取面失效。
-    let abbrs: std::collections::HashSet<String> = map_block
+    // v184：abbr 表进一步上收到 `harness::holding_period::DQ_ABBR_TO_BASE`（唯一登记处），
+    //   seed 改由 `for &(abbr, base) in …DQ_ABBR_TO_BASE` 逐项 `format!` 生成键名
+    //   ⇒ **文本抽取天然看不见那批键**（本门只拿到 0 个 abbr ⇒ 恒红，2026-10-25 实测）。
+    //   修法：abbr 集改从**同一个权威常量**取（不另抄一份，否则两份迟早漂移），
+    //   并要求 seed 区间里确实引用了该常量 —— 若 seed 又换了生成方式而本门没跟上，
+    //   下面的锚点断言会先红，而不是静默少抽一半键。
+    //   （与 `crates/rt-workflow/tests/data_quality_placeholder_gate.rs` 同族、同修法。）
+    let inline_abbrs: std::collections::HashSet<String> = map_block
         .lines()
         .filter_map(|l| {
             let strs: Vec<&str> =
@@ -2819,6 +2825,18 @@ fn data_quality_rhai_diag_for_arity_matches_all_call_sites() {
             }
         })
         .collect();
+    let abbrs: std::collections::HashSet<String> = if map_block.contains("DQ_ABBR_TO_BASE") {
+        axagent_harness::holding_period::DQ_ABBR_TO_BASE
+            .iter()
+            .map(|(abbr, _)| (*abbr).to_string())
+            .collect()
+    } else if !inline_abbrs.is_empty() {
+        inline_abbrs
+    } else {
+        panic!(
+            "abbr 抽取面失效：data-quality 的 input_mapping 区间既未见 `DQ_ABBR_TO_BASE` 引用，也未见内联缩写表"
+        )
+    };
     assert_eq!(
         abbrs.len(),
         10,

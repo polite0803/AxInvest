@@ -93,13 +93,45 @@ describe("形态门：计票判据不得再出现第二份副本", () => {
   };
   const src = (p: string) => readFileSync(path.resolve(__dirname, p), "utf8");
 
-  it("三处 UI 都必须走单点判据（tally 或逐份 classifyAnalystReport）", () => {
+  /**
+   * 单点计票入口三个都算：直接 `tallyAnalystSentiment`、逐份 `classifyAnalystReport`
+   * （紧凑摘要要出明细），以及 `useAnalystConsensusByTier`（逐档共识，内部就是 tally）。
+   * 判据锁的是「不在 UI 里再写一份数票循环」，不是锁某一个函数名。
+   */
+  const SINGLE_SOURCE_MARKERS = [
+    "tallyAnalystSentiment(",
+    "classifyAnalystReport(",
+    "useAnalystConsensusByTier(",
+  ];
+  const usesSingleSource = (text: string) => SINGLE_SOURCE_MARKERS.some((m) => text.includes(m));
+
+  it("三处 UI 都必须走单点判据（tally / 逐份 classify / 逐档共识 hook）", () => {
     for (const [name, p] of Object.entries(uiFiles)) {
       const text = src(p);
       expect(text.length, `${name} 源码应可读`).toBeGreaterThan(500);
-      const singleSource = text.includes("tallyAnalystSentiment(") || text.includes("classifyAnalystReport(");
-      expect(singleSource, `${name} 不得自带计票副本`).toBe(true);
+      expect(usesSingleSource(text), `${name} 不得自带计票副本`).toBe(true);
     }
+  });
+
+  it("负控：自带数票循环、且不引用任何单点入口的源码必须判为副本", () => {
+    const fakeCopy = 'let bullish = 0; for (const r of reports) { if (r.includes("看多")) { bullish++; } }';
+    expect(usesSingleSource(fakeCopy)).toBe(false);
+  });
+
+  it("逐档共识 hook 必须透传 tally，自己不得成为第四份计票实现", () => {
+    const text = src("../../components/stock-analysis/useAnalystConsensusByTier.ts");
+    expect(text.length, "hook 源码应可读").toBeGreaterThan(500);
+    expect(text).toContain("tallyAnalystSentiment(");
+    expect(text).not.toMatch(/bullish\+\+/);
+  });
+
+  it("交叉验证徽章显示票数，不得把加权和渲染成 N/M", () => {
+    // 两个计数域：`consensus.votes.*` 是票数，`consensus.neutral/total` 是按持有期加权的分数和。
+    // 后者一度被写成 `${neutral}/${total}` 显示 ⇒ 用户看到的是「3.3/11.6 中性」这种假票数，
+    // 与同屏顶部条的真票数长得一样却不可比。
+    const text = src("../../components/stock-analysis/RecommendationPanel.tsx");
+    expect(text).toContain("consensus.votes.neutral");
+    expect(text).not.toMatch(/\$\{consensus\.neutral\}\/\$\{consensus\.total\}/);
   });
 
   it("自己循环计票的调用侧必须处理「空产出＝无票」的 null 契约", () => {

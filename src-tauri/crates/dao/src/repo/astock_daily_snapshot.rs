@@ -48,3 +48,36 @@ pub async fn earliest_snapshot_date(
         .await?
         .map(|r| r.snapshot_date))
 }
+
+/// 列出**所查各源齐备**的快照日期（升序）。
+///
+/// 为什么要有这个查询：`missing_snapshot_sources` 只能逐日判断，
+/// 而「今天能回放哪些日」需要**一次列出全部候选日**（R-2 每日批次用）。
+/// 逐日循环在快照积累到几百天后会退化成 N 次查询。
+///
+/// 返回 `(snapshot_date, 该日齐备的源数)`；`methods` 为空时返回空 Vec
+/// （空清单 ⇒ 「齐备」无定义，不返回「全部日期都齐备」）。
+pub async fn list_snapshot_dates_with_all_methods(
+    db: &DatabaseConnection,
+    methods: &[&str],
+) -> Result<Vec<(String, usize)>, sea_orm::DbErr> {
+    if methods.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = astock_daily_snapshot::Entity::find()
+        .filter(astock_daily_snapshot::Column::Method.is_in(methods.to_vec()))
+        .all(db)
+        .await?;
+    // 内存聚合：方法数只有个位数、行数在快照积累期内可控（每天 2~13 行）。
+    let mut per_day: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
+        std::collections::BTreeMap::new();
+    for r in rows {
+        per_day.entry(r.snapshot_date.clone()).or_default().insert(r.method.clone());
+    }
+    let need = methods.len();
+    Ok(per_day
+        .into_iter()
+        .filter(|(_, ms)| ms.len() >= need)
+        .map(|(d, ms)| (d, ms.len()))
+        .collect())
+}

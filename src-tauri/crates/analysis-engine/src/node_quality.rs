@@ -668,7 +668,33 @@ pub fn check_node_quality(
     }
 }
 
-/// 计算节点类型的一致性指标（用于进化引擎）
+/// 键存在且为 bool 时才产出一项率（true⇒1.0 / false⇒0.0）；缺键或类型不符 ⇒ **不产该指标**。
+fn push_rate(
+    out: &mut HashMap<String, f64>,
+    m: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    rate_key: &str,
+) {
+    if let Some(v) = m.get(key).and_then(|x| x.as_bool()) {
+        out.insert(rate_key.to_string(), if v { 1.0 } else { 0.0 });
+    }
+}
+
+/// 计算节点类型的一致性指标（用于进化引擎与统计接口）。
+///
+/// 2026-10-25 口径修正：**只有载荷真带这个键才产指标**。旧写法对缺键
+/// `unwrap_or(true)`（Analyst / Debate / Tool）或 `unwrap_or(false)`（Decision），于是
+///   · `true` 兜底把「不知道」当成「本轮自洽」⇒ `score_consistency_rate` 恒判健康，
+///     「评分自洽性过低」这条进化建议物理上不可能触发；
+///   · `false` 兜底把「不知道」当成「未评估」⇒ 凭空往 prompt 注入强制约束。
+/// 两个方向都是拿默认值冒充读数，故一律改成：缺键 ⇒ 该指标**不出现在结果里**，
+/// 聚合侧再按「贡献该指标的行数」求均值（见 [`aggregate_consistency_rates`]）。
+///
+/// ⚠ 现网 `quality_metrics_json` 只带 `score_consistent` / `direction_consistent`
+/// （由 `analyst_feedbacks` 的写侧从 data-quality 诊断映射）；`logic_consistent` /
+/// `criteria_met` / `risk_assessed` / `completeness` 全仓**零写入者**（已 grep 枚举）
+/// ⇒ 那几项今天恒不参与统计。这是如实的「不知道」，不是判据失效 —— 要它们生效，
+/// 得先有写侧产出，而不是把默认值调成某个方向。
 pub fn calc_consistency_metrics(
     node_type: &NodeType,
     metrics: &serde_json::Value,
@@ -678,47 +704,133 @@ pub fn calc_consistency_metrics(
     match node_type {
         NodeType::Analyst => {
             if let Some(m) = metrics.as_object() {
-                let score_consistent =
-                    m.get("score_consistent").and_then(|v| v.as_bool()).unwrap_or(true);
-                let direction_consistent =
-                    m.get("direction_consistent").and_then(|v| v.as_bool()).unwrap_or(true);
-                result.insert(
-                    "score_consistency_rate".into(),
-                    if score_consistent { 1.0 } else { 0.0 },
-                );
-                result.insert(
-                    "direction_consistency_rate".into(),
-                    if direction_consistent { 1.0 } else { 0.0 },
-                );
+                push_rate(&mut result, m, "score_consistent", "score_consistency_rate");
+                push_rate(&mut result, m, "direction_consistent", "direction_consistency_rate");
             }
         },
         NodeType::Debate => {
             if let Some(m) = metrics.as_object() {
-                let logic_consistent =
-                    m.get("logic_consistent").and_then(|v| v.as_bool()).unwrap_or(true);
-                result.insert(
-                    "logic_consistency_rate".into(),
-                    if logic_consistent { 1.0 } else { 0.0 },
-                );
+                push_rate(&mut result, m, "logic_consistent", "logic_consistency_rate");
             }
         },
         NodeType::Decision => {
             if let Some(m) = metrics.as_object() {
-                let criteria_met = m.get("criteria_met").and_then(|v| v.as_bool()).unwrap_or(true);
-                let risk_assessed =
-                    m.get("risk_assessed").and_then(|v| v.as_bool()).unwrap_or(false);
-                result.insert("criteria_met_rate".into(), if criteria_met { 1.0 } else { 0.0 });
-                result.insert("risk_assessment_rate".into(), if risk_assessed { 1.0 } else { 0.0 });
+                push_rate(&mut result, m, "criteria_met", "criteria_met_rate");
+                push_rate(&mut result, m, "risk_assessed", "risk_assessment_rate");
             }
         },
         NodeType::Tool | NodeType::Valuation | NodeType::Risk => {
             if let Some(m) = metrics.as_object() {
-                let completeness = m.get("completeness").and_then(|v| v.as_bool()).unwrap_or(true);
-                result.insert("completeness_rate".into(), if completeness { 1.0 } else { 0.0 });
+                push_rate(&mut result, m, "completeness", "completeness_rate");
             }
         },
         _ => {},
     }
 
     result
+}
+
+/// 一致性率的**唯一**聚合实现（进化判定 `node_evolution` 与统计命令
+/// `get_node_feedback_stats` 共用一份，2026-10-25 收口 —— 此前两处各写一份同样的
+/// 「累加后除以总行数」，改一处必然与另一处漂移）。
+///
+/// 分母是「带上该指标的行数」，**不是总行数**：否则缺键的行被算成 0 分，把「没有读数」
+/// 稀释成「一致率低」，与刚修掉的 `unwrap_or(true)` 是同一类错、只是方向相反。
+///
+/// 入参是每行的 `quality_metrics_json` 原文；不是合法 JSON 的行跳过（与两处旧实现的
+/// `if let Ok(...)` 一致 —— 坏行不该把整张表判成不可统计，也不该进分母）。
+pub fn aggregate_consistency_rates<'a>(
+    node_type: &NodeType,
+    rows: impl IntoIterator<Item = &'a str>,
+) -> HashMap<String, f64> {
+    let mut sums: HashMap<String, f64> = HashMap::new();
+    let mut counts: HashMap<String, u64> = HashMap::new();
+
+    for raw in rows {
+        let Ok(metrics) = serde_json::from_str::<serde_json::Value>(raw) else {
+            continue;
+        };
+        for (key, value) in calc_consistency_metrics(node_type, &metrics) {
+            *sums.entry(key.clone()).or_insert(0.0) += value;
+            *counts.entry(key).or_insert(0_u64) += 1;
+        }
+    }
+
+    for (key, sum) in sums.iter_mut() {
+        if let Some(n) = counts.get(key) {
+            if *n > 0 {
+                *sum /= *n as f64;
+            }
+        }
+    }
+
+    sums
+}
+
+#[cfg(test)]
+mod consistency_tests {
+    use super::{aggregate_consistency_rates, calc_consistency_metrics, NodeType};
+    use serde_json::json;
+
+    // 2026-10-25 判据：一致性指标**只有载荷真带那个键才算**。
+    //
+    // 旧实现对缺键 `unwrap_or(true)`（Analyst/Debate/Tool）或 `unwrap_or(false)`（Decision）：
+    // 前者让 `score_consistency_rate` 恒判健康、"评分自洽性过低"这条进化建议物理上不可能
+    // 触发；后者让「没有读数」凭空变成「未评估」并往 prompt 注入强制约束。两处都是拿默认值
+    // 冒充读数，方向相反、错得同样彻底。以下用例逐条钉住新口径。
+
+    #[test]
+    fn 缺键不产该指标_而不是冒充成某一种结论() {
+        let m = json!({ "direction_consistent": true });
+        let got = calc_consistency_metrics(&NodeType::Analyst, &m);
+        assert!(got.contains_key("direction_consistency_rate"));
+        assert!(
+            !got.contains_key("score_consistency_rate"),
+            "score_consistent 缺键却产出了指标 ⇒ 又回到默认值冒充"
+        );
+    }
+
+    #[test]
+    fn decision_缺_risk_assessed_不再被算成未评估() {
+        // 旧口径：`unwrap_or(false)` ⇒ 空 metrics 也会产出 risk_assessment_rate = 0.0，
+        // 于是「不知道」被当成「没评估」，还会触发一条强制约束建议。
+        let m = json!({});
+        let got = calc_consistency_metrics(&NodeType::Decision, &m);
+        assert!(got.is_empty(), "空 metrics 不该产出任何 Decision 指标，实得 {got:?}");
+    }
+
+    #[test]
+    fn 聚合分母是贡献该指标的行数_不是总行数() {
+        let rows = [
+            r#"{"score_consistent": true}"#,
+            r#"{"score_consistent": false}"#,
+            r#"{"score_consistent": true}"#,
+        ];
+        let got = aggregate_consistency_rates(&NodeType::Analyst, rows);
+        assert!((got["score_consistency_rate"] - 2.0 / 3.0).abs() < 1e-9, "{got:?}");
+    }
+
+    #[test]
+    fn 缺键的行不稀释_带_false_的行不被平均掉() {
+        // 一行显式 false、一行完全不带这个键：按总行数除会得到 0.5（把「不知道」掺进分母），
+        // 新口径应为 0.0（只有那一行参与）。
+        let rows = [r#"{"score_consistent": false}"#, r#"{"node_status": "low"}"#];
+        let got = aggregate_consistency_rates(&NodeType::Analyst, rows);
+        assert!((got["score_consistency_rate"] - 0.0).abs() < 1e-9, "{got:?}");
+        assert!(!got.contains_key("direction_consistency_rate"));
+    }
+
+    #[test]
+    fn 非法_json_行跳过且不进分母() {
+        let rows = ["不是 JSON", r#"{"score_consistent": false}"#];
+        let got = aggregate_consistency_rates(&NodeType::Analyst, rows);
+        assert!((got["score_consistency_rate"] - 0.0).abs() < 1e-9, "{got:?}");
+    }
+
+    #[test]
+    fn 全表都缺键_结果为空而不是某个方向的默认值() {
+        let rows = [r#"{"node_status": "low"}"#, r#"{"node_status": "missing"}"#];
+        let got = aggregate_consistency_rates(&NodeType::Analyst, rows);
+        assert!(got.is_empty(), "没有任何读数的表不应产出一贯性率，实得 {got:?}");
+    }
 }

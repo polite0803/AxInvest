@@ -515,6 +515,59 @@ fn extract_verdict_str(v) {
     ""
 }
 
+// verdict_direction_contradiction: 「结论方向」与「多空评分大小关系」是否互相打脸。
+// 返回 `""` = 不矛盾；否则返回可直接拼进诊断的描述。
+//
+// 判据的**唯一实现**放在这里：`validate_verdict_schema` 的第 2 项、`diagnostics` 的
+// 代表实例、`diagnostics_by_tier` 的逐档行三处都调它 —— 原先词表只长在 validate 里，
+// 想再加一处消费端就得抄一遍 `contains("看多")`，那正是本仓「同一逻辑两份实现迟早漂移」
+// 的登记形态。
+//
+// ⚠ **只判这一条**。`bull_score + bear_score` 偏离 100（同函数第 1 项）属**产出形态**
+// 问题：它不改变「这位分析师说多还是说空」的含义，所以按 2026-10-25 的裁定只提示、
+// **不剥夺投票资格**；而方向与分数打脸时，这份结论的两个字段互相否定，任何取用其中
+// 一个的下游都会拿到与另一个相反的读数 ⇒ 才升级为不可信。
+fn verdict_direction_contradiction(v) {
+    if type_of(v) != "map" { return ""; }
+    let bs = extract_bull_score(v);
+    let bes = extract_bear_score(v);
+    if !present(bs) || !present(bes) { return ""; }
+    let s = extract_verdict_str(v);
+    if s == "" { return ""; }
+    let is_bull = s.contains("看多") || s.contains("看涨") || s.contains("偏多");
+    let is_bear = s.contains("看空") || s.contains("看跌") || s.contains("偏空");
+    if is_bull && bs <= bes {
+        return `verdict='${s}' 但 bull_score(${bs}) <= bear_score(${bes})`;
+    }
+    if is_bear && bes <= bs {
+        return `verdict='${s}' 但 bear_score(${bes}) <= bull_score(${bs})`;
+    }
+    ""
+}
+
+// verdict_score_sum_reason: 这位分析师本轮的 bull_score + bear_score 是否≈100（评分自洽）。
+//
+// 返回 `()`（Unit）= **不知道** —— 两个分至少缺一个，诊断里干脆不写这个键；
+// 返回 `""` = 自洽；返回非空 = 偏离描述。三态必须分开：2026-10-25 之前这一判据**只**长在
+// `validate_verdict_schema` 的 issues 文案里，逐节点诊断拿不到 ⇒ 反馈表的 `score_consistent`
+// 没有真值可读，而读侧对缺键 `unwrap_or(true)`，于是「评分自洽性」恒被判健康。
+//
+// 阈值与搬出前逐字一致（偏离 >10 判不自洽、5..10 判轻微偏离），本函数只挪**位置**、不改**口径**。
+fn verdict_score_sum_reason(v) {
+    if type_of(v) != "map" { return (); }
+    let bs = extract_bull_score(v);
+    let bes = extract_bear_score(v);
+    if !present(bs) || !present(bes) { return (); }
+    let sum = bs + bes;
+    if sum < 90.0 || sum > 110.0 {
+        return `评分不自洽: bull_score + bear_score = ${sum} (应约为 100)`;
+    }
+    if sum < 95.0 || sum > 105.0 {
+        return `评分轻微偏离: bull_score + bear_score = ${sum} (建议约为 100)`;
+    }
+    ""
+}
+
 // validate_verdict_schema: 深度字段校验（纯检测，不改写上游数据）
 // 检查：1) bull_score + bear_score 自洽性 2) verdict 与评分方向一致性 3) confidence 范围
 // 返回问题列表（String 数组）
@@ -532,33 +585,16 @@ fn validate_verdict_schema(verdict_data, analyst_name) {
         return issues;
     }
 
-    // 1. bull_score + bear_score 自洽性检查
-    let bs = extract_bull_score(verdict_data);
-    let bes = extract_bear_score(verdict_data);
-    
-    if present(bs) && present(bes) {
-        let sum = bs + bes;
-        // 如果总和偏离 100 超过 10，触发告警
-        if sum < 90.0 || sum > 110.0 {
-            issues.push(`[${analyst_name}] 评分不自洽: bull_score + bear_score = ${sum} (应约为 100)`);
-        } else if sum < 95.0 || sum > 105.0 {
-            // 轻微偏离（5-10 之间），仅告警
-            issues.push(`[${analyst_name}] 评分轻微偏离: bull_score + bear_score = ${sum} (建议约为 100)`);
-        }
+    // 1. bull_score + bear_score 自洽性检查（判据见 `verdict_score_sum_reason`，唯一实现）
+    let sum_reason = verdict_score_sum_reason(verdict_data);
+    if present(sum_reason) && sum_reason != "" {
+        issues.push(`[${analyst_name}] ${sum_reason}`);
     }
 
-    // 2. verdict 与评分方向一致性检查
-    let v = extract_verdict_str(verdict_data);
-    if v != "" && present(bs) && present(bes) {
-        let is_bull = v.contains("看多") || v.contains("看涨") || v.contains("偏多");
-        let is_bear = v.contains("看空") || v.contains("看跌") || v.contains("偏空");
-
-        if is_bull && bs <= bes {
-            issues.push(`[${analyst_name}] 逻辑矛盾: verdict='${v}' 但 bull_score(${bs}) <= bear_score(${bes})`);
-        }
-        if is_bear && bes <= bs {
-            issues.push(`[${analyst_name}] 逻辑矛盾: verdict='${v}' 但 bear_score(${bes}) <= bull_score(${bs})`);
-        }
+    // 2. verdict 与评分方向一致性检查（判据见 `verdict_direction_contradiction`，唯一实现）
+    let contradiction = verdict_direction_contradiction(verdict_data);
+    if contradiction != "" {
+        issues.push(`[${analyst_name}] 逻辑矛盾: ${contradiction}`);
     }
 
     // 3. confidence 范围检查 (0-100)
@@ -1619,7 +1655,7 @@ let grade = if final_score >= 85.0 { "A" }
 //   截断/未遵守模板）；两者皆无 ⇒ 节点真无产物（超时/被跳过）。
 //   ⚠ 实参个数不匹配是**运行期**错误（`cargo check`/`clippy` 看不见）⇒ 11 个调用点
 //     （10 个 diagnostics map + 1 个 diagnostics_by_tier 循环）必须同步。
-fn diag_for(cls, c, name, expected, ph_n, po_n, rq, attr_note, raw_ph_n, v_present, report_present) {
+fn diag_for(cls, c, name, expected, ph_n, po_n, rq, attr_note, raw_ph_n, v_present, report_present, incons, sum_r) {
     // 2026-09-12: status 判定从「只看 LLM 自评 confidence」升级为 **A ∪ B**
     //   A = 报告文本失败标记（客观，placeholder_hits）
     //   B = analyst 自评 confidence（主观）
@@ -1683,7 +1719,7 @@ fn diag_for(cls, c, name, expected, ph_n, po_n, rq, attr_note, raw_ph_n, v_prese
     let reason_final = if !attr_ok { reason }
         else if reason == "" { attr_note }
         else { `${reason} ｜ ${attr_note}` };
-    #{
+    let d = #{
         "name": name,
         "expected_data": expected,
         "confidence": c,
@@ -1697,8 +1733,23 @@ fn diag_for(cls, c, name, expected, ph_n, po_n, rq, attr_note, raw_ph_n, v_prese
         // 本节点报告质量分（0-100，与全局 report_quality_avg 同源同口径）。
         // 2026-09-21 新增：使面板能显示「这个分析师自己的报告写得好不好」，
         //   与顶部的全局 grade/score 区分开（此前两者都是全局值，无法区分）。
-        "report_quality": rq
+        "report_quality": rq,
+        // 2026-10-25：这位分析师本轮**有没有「结论方向与多空评分互相打脸」**。
+        //   `""` = 没有。非空时呈现层不得把它计入共识票（判据见
+        //   `verdict_direction_contradiction`），并要**说明为什么少了一票** ——
+        //   悄悄把票减掉会让「24 份报告里 3 份自相矛盾」被读成「只有 21 位分析师有意见」。
+        "inconsistent_reason": incons
+    };
+    // 2026-10-25 新增：本轮**评分自洽性**（bull+bear 是否≈100）作为**可选键**附加。
+    //   `""` = 自洽；非空 = 偏离描述；**键不存在 = 不知道**（多空分至少缺一个，见
+    //   `verdict_score_sum_reason` 的 Unit 返回）。刻意不写 `null` 或空串顶数 ——
+    //   反馈表与面板都必须能分辨这一格是三态里的哪一种。旧快照没有这个键 ⇒ 消费端按
+    //   「不知道」处理（与 `inconsistent_reason` 同一套三态纪律）。
+    //   用「函数尾部追加键」而不是写进字面量：字面量里那一项要么恒存在、要么留尾逗号。
+    if present(sum_r) {
+        d["score_sum_reason"] = sum_r;
     }
+    d
 }
 
 fn join_arr(arr, sep) {
@@ -1803,24 +1854,24 @@ fn attribution_note(report, tool_calls) {
 //   正控：`output/tmp-151-rhai-arity.mjs` 逐点核对本块的实参个数。
 let diagnostics = #{
     "mk": diag_for(mk_cls, mk_c, "技术面分析师", "K线形态、MACD/RSI、支撑阻力位、成交量（t-market-data）", mk_ph_e.len(), mk_po_e, mk_q,
-        merge_two_notes(attribution_note(mk_report, mk_tool_calls), mk_word_note), mk_ph.len(), present(mk_verdict), nonempty_str(mk_r)),
+        merge_two_notes(attribution_note(mk_report, mk_tool_calls), mk_word_note), mk_ph.len(), present(mk_verdict), nonempty_str(mk_r), verdict_direction_contradiction(mk_verdict), verdict_score_sum_reason(mk_verdict)),
     // 2026-09-21 修正归因（原值把用户引向 t-sentiment-data，而真实缺口在
     // t-dragon-tiger-data ⇒ 归因指向错误会误导排查方向，实证见
     // AUDIT-analyst-low-confidence-2026-09-21.md §八.1）：
     //   情绪面「席位数据缺失」与资金面「龙虎榜席位与北向数据缺失」同源于
     //   t-dragon-tiger-data（龙虎榜营业部明细，独立于 t-sentiment-data 的节点）。
     "sent": diag_for(sent_cls, sent_c, "情绪面分析师", "市场情绪、散户/机构态度（t-sentiment-data）；龙虎榜席位明细（t-dragon-tiger-data）", sent_ph_e.len(), sent_po_e, sent_q,
-        merge_two_notes(attribution_note(sent_report, sent_tool_calls), sent_word_note), sent_ph.len(), present(sent_verdict), nonempty_str(sent_r)),
+        merge_two_notes(attribution_note(sent_report, sent_tool_calls), sent_word_note), sent_ph.len(), present(sent_verdict), nonempty_str(sent_r), verdict_direction_contradiction(sent_verdict), verdict_score_sum_reason(sent_verdict)),
     "val": diag_for(val_cls, val_c, "价值评估官", "内在价值评估（value-investor；数值经 value-verify 覆写链校准）", val_ph_e.len(), val_po_e, val_q,
-        merge_two_notes(attribution_note(val_report, val_tool_calls), val_word_note), val_ph.len(), present(val_verdict), nonempty_str(val_r)),
+        merge_two_notes(attribution_note(val_report, val_tool_calls), val_word_note), val_ph.len(), present(val_verdict), nonempty_str(val_r), verdict_direction_contradiction(val_verdict), verdict_score_sum_reason(val_verdict)),
     // 基本面/催化剂/行业的「同侪 PE/PB 全为 null」同源于 t-fundamentals-data 的
     // get_stock_peers（2026-09-21 已补 PE_TTM/PB_MRQ/市值/涨跌幅；ROE 仍未接入）。
     "fund": diag_for(fund_cls, fund_c, "基本面分析师", "PE/PB/ROE、营收利润、资产负债（t-fundamentals-data）；同侪估值（t-fundamentals-data: get_stock_peers）", fund_ph_e.len(), fund_po_e, fund_q,
-        merge_two_notes(attribution_note(fund_report, fund_tool_calls), fund_word_note), fund_ph.len(), present(fund_verdict), nonempty_str(fund_r)),
+        merge_two_notes(attribution_note(fund_report, fund_tool_calls), fund_word_note), fund_ph.len(), present(fund_verdict), nonempty_str(fund_r), verdict_direction_contradiction(fund_verdict), verdict_score_sum_reason(fund_verdict)),
     "pol": diag_for(pol_cls, pol_c, "政策面分析师", "宏观政策与行业政策影响（t-policy-data）", pol_ph_e.len(), pol_po_e, pol_q,
-        merge_two_notes(attribution_note(pol_report, pol_tool_calls), pol_word_note), pol_ph.len(), present(pol_verdict), nonempty_str(pol_r)),
+        merge_two_notes(attribution_note(pol_report, pol_tool_calls), pol_word_note), pol_ph.len(), present(pol_verdict), nonempty_str(pol_r), verdict_direction_contradiction(pol_verdict), verdict_score_sum_reason(pol_verdict)),
     "hm": diag_for(hm_cls, hm_c, "资金面分析师", "游资动向、主力资金净流入（t-hotmoney-data: get_stock_money_flow）；龙虎榜席位明细（t-dragon-tiger-data）与北向字段", hm_ph_e.len(), hm_po_e, hm_q,
-        merge_two_notes(attribution_note(hm_report, hm_tool_calls), hm_word_note), hm_ph.len(), present(hm_verdict), nonempty_str(hm_r)),
+        merge_two_notes(attribution_note(hm_report, hm_tool_calls), hm_word_note), hm_ph.len(), present(hm_verdict), nonempty_str(hm_r), verdict_direction_contradiction(hm_verdict), verdict_score_sum_reason(hm_verdict)),
     // 2026-09-21(v72) 修正：质押此前**从未接线**（无节点、无白名单授权），
     //   面板却在 expected_data 里写着「质押风险（t-lockup-data）」——**指明了错误的
     //   取数入口**，把使用者的排查方向一起带偏（该工具是解禁+增减持+大宗交易**三方**，
@@ -1828,13 +1879,13 @@ let diagnostics = #{
     //   此处同步为**真实来源**，避免「期望值自证」（拿声明当事实）继续误导。
     // P2-1：本节点正是伪归因的**实证现场**（报告写「工具调用被拒绝」而归因错维度）。
     "lk": diag_for(lk_cls, lk_c, "解禁观察员", "解禁减持、大宗交易（t-lockup-data）；股权质押（t-pledge-data）", lk_ph_e.len(), lk_po_e, lk_q,
-        merge_two_notes(attribution_note(lk_report, lk_tool_calls), lk_word_note), lk_ph.len(), present(lk_verdict), nonempty_str(lk_r)),
+        merge_two_notes(attribution_note(lk_report, lk_tool_calls), lk_word_note), lk_ph.len(), present(lk_verdict), nonempty_str(lk_r), verdict_direction_contradiction(lk_verdict), verdict_score_sum_reason(lk_verdict)),
     "res": diag_for(res_cls, res_c, "研报分析师", "券商研报观点汇总、目标价（t-research-data）", res_ph_e.len(), res_po_e, res_q,
-        merge_two_notes(attribution_note(res_report, res_tool_calls), res_word_note), res_ph.len(), present(res_verdict), nonempty_str(res_r)),
+        merge_two_notes(attribution_note(res_report, res_tool_calls), res_word_note), res_ph.len(), present(res_verdict), nonempty_str(res_r), verdict_direction_contradiction(res_verdict), verdict_score_sum_reason(res_verdict)),
     "sec": diag_for(sec_cls, sec_c, "行业分析师", "行业景气度、轮动分析（t-sector-data）；同侪估值（t-fundamentals-data: get_stock_peers）", sec_ph_e.len(), sec_po_e, sec_q,
-        merge_two_notes(attribution_note(sec_report, sec_tool_calls), sec_word_note), sec_ph.len(), present(sec_verdict), nonempty_str(sec_r)),
+        merge_two_notes(attribution_note(sec_report, sec_tool_calls), sec_word_note), sec_ph.len(), present(sec_verdict), nonempty_str(sec_r), verdict_direction_contradiction(sec_verdict), verdict_score_sum_reason(sec_verdict)),
     "cat": diag_for(cat_cls, cat_c, "催化剂分析师", "催化剂与叙事完整度、公告关键词（t-catalyst-data）；同侪估值锚（t-fundamentals-data: get_stock_peers）", cat_ph_e.len(), cat_po_e, cat_q,
-        merge_two_notes(attribution_note(cat_report, cat_tool_calls), cat_word_note), cat_ph.len(), present(cat_verdict), nonempty_str(cat_r))
+        merge_two_notes(attribution_note(cat_report, cat_tool_calls), cat_word_note), cat_ph.len(), present(cat_verdict), nonempty_str(cat_r), verdict_direction_contradiction(cat_verdict), verdict_score_sum_reason(cat_verdict))
 };
 
 // ── 2026-10-09(v148)：逐档诊断 —— 把面板「代表实例」那一行摊成四档 ──
@@ -1937,11 +1988,57 @@ for abbr in tier_src.keys() {
         let po_e = if asof || ws { 0 } else { po };
         let q = report_quality(rr, c, asof, mc);
         let cls = conf_class(c, u, ph_e_n, asof, ph.len(), ws);
-        let d = diag_for(cls, c, diagnostics[abbr]["name"], diagnostics[abbr]["expected_data"], ph_e_n, po_e, q, merge_two_notes(attribution_note(rp, tc), wording_absence_note(ph, tc)), ph.len(), present(v), nonempty_str(rr));
+        let d = diag_for(cls, c, diagnostics[abbr]["name"], diagnostics[abbr]["expected_data"], ph_e_n, po_e, q, merge_two_notes(attribution_note(rp, tc), wording_absence_note(ph, tc)), ph.len(), present(v), nonempty_str(rr), verdict_direction_contradiction(v), verdict_score_sum_reason(v));
         d["tier"] = t;
         rows[t] = d;
     }
     if rows.len() > 0 { diagnostics_by_tier[abbr] = rows; }
+}
+
+// ── v183：逐档「分析师结构票」聚合（唯一消费者 = portfolio-mgr 的 f7 腿）──
+//
+// 为什么聚合放在本脚本而不是 portfolio-mgr 里：本脚本已经**逐档 × 逐 base** 持有每位分析师的
+// 完整 verdict 对象（`tier_src` 每行的 row[1]），是全图唯一已有这份视野的节点。搬到公式侧要
+// 新增 69 条 input_mapping 与 19 条边，且每加减一位分析师都得同时改两处（权威矩阵在 harness 的
+// `Period::analyst_subset()`，不在脚本里）⇒ 放这里，公式只读一个键。
+//
+// 为什么这是 f7 的合法载体（而非重复计分）：f2 吃的是**辩论收敛后**的叙事方向，f3 吃催化剂等级，
+// f4 吃风险收敛档 —— 而「各位分析师自报的 bull_score/bear_score/confidence」这组结构化票
+// **决策链从未消费**（2026-10-25 审计实证）。净票（方向×强度）与票间离散度（共识质量）都是
+// 上述三条腿里没有的新信息。
+//
+// ⚠ 只收 `bull_score` 与 `bear_score` **同时在场**的实例：`industry-chain-analyzer` 与
+// `candidate-mapper` 的输出契约里没有这两项 ⇒ 如实跳过并计入 coverage，**不得按 0 票代入**
+// （0 会被读成「该分析师中性」，把「没这个度量」伪装成「投了中性票」）。
+fn vote_num(m, key) {
+    let raw = m[key];
+    if type_of(raw) == "f64" { return raw; }
+    if type_of(raw) == "i64" || type_of(raw) == "int" { return raw.to_float(); }
+    return ();
+}
+
+let analyst_votes_by_tier = #{};
+for abbr in tier_src.keys() {
+    for row in tier_src[abbr] {
+        let t = row[0];
+        let v = row[1];
+        let mv = if type_of(v) == "string" { safe_parse(v) } else { v };
+        if type_of(mv) != "map" { continue; }
+        // verdict 可能直接是判定 map，也可能裹一层 `verdict`（与 extract_conf 同一兼容面）
+        let body = if type_of(mv["verdict"]) == "map" { mv["verdict"] } else { mv };
+        let bull = vote_num(body, "bull_score");
+        let bear = vote_num(body, "bear_score");
+        if bull == () || bear == () { continue; }
+        if !present(analyst_votes_by_tier[t]) { analyst_votes_by_tier[t] = []; }
+        analyst_votes_by_tier[t].push(#{
+            "base": abbr,
+            "name": diagnostics[abbr]["name"],
+            "bullScore": bull,
+            "bearScore": bear,
+            "confidence": extract_conf(mv),
+            "untrusted": is_untrusted(v) || (present(row[3]) && row[3] == true),
+        });
+    }
 }
 
 // ── 2026-10-02: 状态三分类计数 —— 逐项数 `diagnostics.status`，与逐节点表同源 ──
@@ -2163,6 +2260,8 @@ let summary_text = if grade == "F" || grade == "D" {
     //   形态：`{ abbr: { tier: <diag 同 `diagnostics` 单行结构> + "tier": tier } }`。
     //   某 abbr 的逐档键全部未注入时**整个 abbr 缺席** ⇒ 前端回落 10 行旧视图。
     "diagnostics_by_tier": diagnostics_by_tier,
+    // v183：逐档分析师结构票（f7 的唯一输入源；缺席档不产键，消费端按 present() 判）
+    "analyst_votes_by_tier": analyst_votes_by_tier,
     "missing_analysts": missing_analysts,
     "low_confidence_analysts": low_confidence_analysts,
     "warnings": warnings,

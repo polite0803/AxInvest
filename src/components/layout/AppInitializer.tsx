@@ -6,6 +6,7 @@ import { preloadChatRenderers, preloadCommonPages } from "@/lib/preloadChatRende
 import {
   useAppConfigStore,
   useConversationStore,
+  useGatewayStore,
   useOnboardingStore,
   useSettingsStore,
   useSkillExtensionStore,
@@ -35,12 +36,18 @@ interface AppInitializerProps {
   children: React.ReactNode;
 }
 
-async function showWindow() {
+async function showWindow(minimized = false) {
   try {
     const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
     const win = getCurrentWebviewWindow();
+    // 先 minimize 再 show：直接 show 后再最小化会闪一帧完整窗口。
+    if (minimized) {
+      await win.minimize();
+    }
     await win.show();
-    await win.setFocus();
+    if (!minimized) {
+      await win.setFocus();
+    }
   } catch (e) {
     logIpcError("showWindow")(e);
   }
@@ -104,6 +111,16 @@ export function AppInitializer({ children }: AppInitializerProps) {
             })(),
           );
         }
+
+        // 网关自启：此前 `gateway_auto_start` 只有开关没有执行方（2026-10-25 接通）。
+        // 端口占用 / 已在运行属可恢复失败，不阻塞首屏。
+        if (settings.gatewayAutoStart) {
+          parallelTasks.push(
+            useGatewayStore.getState().startGateway().catch((e) => {
+              logIpcError("gateway auto start")(e);
+            }),
+          );
+        }
       }
 
       if (settings.language && i18n.language !== settings.language) {
@@ -145,7 +162,7 @@ export function AppInitializer({ children }: AppInitializerProps) {
       // 首屏就绪后再显示窗口：窗口以 visible=false 启动，
       // 避免用户在 setup 阻塞白窗 / Spin 加载圈中间态上等待。
       if (isTauri()) {
-        await showWindow();
+        await showWindow(settings.startMinimized ?? false);
       }
       setPhase("ready");
     } catch (e) {

@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { ModelParamSliders, type ModelParamValues } from "@/components/common/ModelParamSliders";
 import { IconEditor } from "@/components/shared/IconEditor";
 import { ModelSelect, parseModelValue } from "@/components/shared/ModelSelect";
 import { safeJoinIds } from "@/lib/validators";
-import { useSettingsStore } from "@/stores";
 import { Avatar, Divider, Input, Modal, theme, Typography } from "antd";
 import { FolderOpen } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -17,10 +15,6 @@ export interface CategoryEditFormData {
   systemPrompt: string | null;
   defaultProviderId: string | null;
   defaultModelId: string | null;
-  defaultTemperature: number | null;
-  defaultMaxTokens: number | null;
-  defaultTopP: number | null;
-  defaultFrequencyPenalty: number | null;
 }
 
 interface CategoryEditModalProps {
@@ -33,10 +27,6 @@ interface CategoryEditModalProps {
   initialSystemPrompt?: string | null;
   initialDefaultProviderId?: string | null;
   initialDefaultModelId?: string | null;
-  initialDefaultTemperature?: number | null;
-  initialDefaultMaxTokens?: number | null;
-  initialDefaultTopP?: number | null;
-  initialDefaultFrequencyPenalty?: number | null;
   title?: string;
   confirmLoading?: boolean;
 }
@@ -51,16 +41,11 @@ export function CategoryEditModal({
   initialSystemPrompt = null,
   initialDefaultProviderId = null,
   initialDefaultModelId = null,
-  initialDefaultTemperature = null,
-  initialDefaultMaxTokens = null,
-  initialDefaultTopP = null,
-  initialDefaultFrequencyPenalty = null,
   title,
   confirmLoading = false,
 }: CategoryEditModalProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
-  const settings = useSettingsStore((s) => s.settings);
 
   const [name, setName] = useState("");
   const [iconType, setIconType] = useState<string | null>(null);
@@ -70,14 +55,6 @@ export function CategoryEditModal({
     null,
   );
   const [defaultModelId, setDefaultModelId] = useState<string | null>(null);
-  const [defaultTemperature, setDefaultTemperature] = useState<number | null>(
-    null,
-  );
-  const [defaultMaxTokens, setDefaultMaxTokens] = useState<number | null>(null);
-  const [defaultTopP, setDefaultTopP] = useState<number | null>(null);
-  const [defaultFrequencyPenalty, setDefaultFrequencyPenalty] = useState<
-    number | null
-  >(null);
 
   useEffect(() => {
     if (!open) {
@@ -90,10 +67,6 @@ export function CategoryEditModal({
     setSystemPrompt(initialSystemPrompt ?? "");
     setDefaultProviderId(initialDefaultProviderId);
     setDefaultModelId(initialDefaultModelId);
-    setDefaultTemperature(initialDefaultTemperature);
-    setDefaultMaxTokens(initialDefaultMaxTokens);
-    setDefaultTopP(initialDefaultTopP);
-    setDefaultFrequencyPenalty(initialDefaultFrequencyPenalty);
   }, [
     open,
     initialName,
@@ -102,10 +75,6 @@ export function CategoryEditModal({
     initialSystemPrompt,
     initialDefaultProviderId,
     initialDefaultModelId,
-    initialDefaultTemperature,
-    initialDefaultMaxTokens,
-    initialDefaultTopP,
-    initialDefaultFrequencyPenalty,
   ]);
 
   const selectedModelValue = defaultProviderId && defaultModelId
@@ -118,25 +87,6 @@ export function CategoryEditModal({
     setDefaultModelId(parsed?.modelId ?? null);
   }, []);
 
-  const handleParamsChange = useCallback(
-    (values: Partial<ModelParamValues>) => {
-      const { temperature, topP, maxTokens, frequencyPenalty } = values;
-      if (temperature !== undefined) {
-        setDefaultTemperature(temperature ?? null);
-      }
-      if (topP !== undefined) {
-        setDefaultTopP(topP ?? null);
-      }
-      if (maxTokens !== undefined) {
-        setDefaultMaxTokens(maxTokens ?? null);
-      }
-      if (frequencyPenalty !== undefined) {
-        setDefaultFrequencyPenalty(frequencyPenalty ?? null);
-      }
-    },
-    [],
-  );
-
   const handleOk = useCallback(() => {
     onOk({
       name: name.trim(),
@@ -145,10 +95,6 @@ export function CategoryEditModal({
       systemPrompt: systemPrompt.trim() || null,
       defaultProviderId: defaultProviderId,
       defaultModelId: defaultModelId,
-      defaultTemperature: defaultTemperature,
-      defaultMaxTokens: defaultMaxTokens,
-      defaultTopP: defaultTopP,
-      defaultFrequencyPenalty: defaultFrequencyPenalty,
     });
   }, [
     name,
@@ -157,10 +103,6 @@ export function CategoryEditModal({
     systemPrompt,
     defaultProviderId,
     defaultModelId,
-    defaultTemperature,
-    defaultMaxTokens,
-    defaultTopP,
-    defaultFrequencyPenalty,
     onOk,
   ]);
 
@@ -227,27 +169,6 @@ export function CategoryEditModal({
             placeholder={t("settings.useActiveModel")}
             modelTypes={["Chat"]}
             style={{ width: "100%" }}
-          />
-        </div>
-
-        <div style={{ width: "100%", maxWidth: 420 }}>
-          <Typography.Text strong style={{ display: "block", marginBottom: 8 }}>
-            {t("settings.modelParams")}
-          </Typography.Text>
-          <ModelParamSliders
-            values={{
-              temperature: defaultTemperature,
-              topP: defaultTopP,
-              maxTokens: defaultMaxTokens,
-              frequencyPenalty: defaultFrequencyPenalty,
-            }}
-            onChange={handleParamsChange}
-            defaults={{
-              temperature: settings.defaultTemperature ?? 0.7,
-              topP: settings.defaultTopP ?? 1,
-              maxTokens: settings.defaultMaxTokens ?? 4096,
-              frequencyPenalty: settings.defaultFrequencyPenalty ?? 0,
-            }}
           />
         </div>
       </div>

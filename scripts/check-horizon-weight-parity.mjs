@@ -208,6 +208,45 @@ function checkLegClosure(backend, authority, unbridged) {
   return errs;
 }
 
+/**
+ * 判据⑨：表值一致 ≠ 查表生效。
+ *
+ * 判据①②⑦ 只比对**表里的数字与键集合**，不看运行时传进查表函数的是什么形态。
+ * 实测缺陷（2026-10-25）：store 落 `analystReports` 键时去掉 `a-` 前缀、保留 `--<档>`
+ * 后缀（`market-analyst--mid`），而本表按**节点 id**（`a-market-analyst`）索引
+ * ⇒ 精确匹配与后缀匹配都不命中，每个分析师恒退 `default 1.0`；同时四档的分析师若被
+ * 合计进同一个池，`market-analyst` 会按档各计一票（四票）、`policy` 只一票。
+ * 两者都是「表看着对、运行时全错」。
+ */
+function checkFrontendKeyNormalization(src) {
+  const errs = [];
+  if (!src) { return ["⑨ 读不到前端源码 ⇒ 判据失效"]; }
+  const fnBody = (name) => {
+    const start = src.indexOf(`function ${name}`);
+    if (start < 0) { return null; }
+    const end = src.indexOf("\n}", start);
+    return end > start ? src.slice(start, end) : "";
+  };
+  const weight = fnBody("getAnalystWeight");
+  if (weight === null) {
+    errs.push("⑨ 未见 getAnalystWeight（改名请同步本门）⇒ 无法确认查表是否还原键形态");
+  } else {
+    if (!weight.includes("analystBaseOf(")) {
+      errs.push("⑨ getAnalystWeight 未剥 `--<档>` 后缀 ⇒ 逐档实例全部退 default 1.0（逐档权重静默失效）");
+    }
+    if (!weight.includes("a-${base}")) {
+      errs.push("⑨ getAnalystWeight 未补 `a-` 前缀 ⇒ store 落键（去 a-）与表键（节点 id）恒不命中");
+    }
+  }
+  const consensus = fnBody("computeStockConsensus");
+  if (consensus === null) {
+    errs.push("⑨ 未见 computeStockConsensus ⇒ 无法确认计票已按档取数");
+  } else if (!consensus.includes("scopeAnalystReports(")) {
+    errs.push("⑨ computeStockConsensus 未按档取数 ⇒ 四档的分析师会被合计进同一个池（同一分析师计四票）");
+  }
+  return errs;
+}
+
 /** 主比对：返回问题清单（空 = 绿）。 */
 function compare(backend, frontend) {
   const problems = [];
@@ -353,7 +392,8 @@ function run() {
   const beSrc = fs.readFileSync(path.join(ROOT, BACKEND), "utf8");
   const be = parseBackend(beSrc);
   if (!be.ok) { console.log(`❌ 后端解析失败: ${be.reason}`); return 2; }
-  const fe = parseFrontend(fs.readFileSync(path.join(ROOT, FRONTEND), "utf8"));
+  const feSrc = fs.readFileSync(path.join(ROOT, FRONTEND), "utf8");
+  const fe = parseFrontend(feSrc);
   if (!fe.ok) { console.log(`❌ 前端解析失败: ${fe.reason}`); return 2; }
   const surface = surfaceCheck(be, fe);
   if (surface.length) {
@@ -365,6 +405,8 @@ function run() {
   const authority = parseAuthority(beSrc);
   problems.push(...checkAuthority(be, fe, authority, readRel(SEED)));
   problems.push(...checkLegClosure(be, authority, parseUnbridged(beSrc)));
+  // ⑨ 表值一致 ≠ 查表生效：前端必须还原 store 的键形态，且共识按 base 归并。
+  problems.push(...checkFrontendKeyNormalization(feSrc));
   // ④ 天数唯一来源 = Rust 权威表；标签里出现数字即红
   const auth = parseAuthorityDays(fs.readFileSync(path.join(ROOT, HOLDING), "utf8"));
   if (!auth.ok) {
@@ -388,7 +430,7 @@ function run() {
     `比对面：4 档 × 后端合计 ${keys} 键 | 桥表 ${be.bridge.length} 腿 | 权威分析师清单 ${(authority.ids ?? []).length} 个 | 无腿登记 ${(parseUnbridged(beSrc).ids ?? []).length} 个 | 档名 ${Object.keys(labels).length} 语言 × ${LABEL_KEYS.length} 键（权威天数 ${auth.days.ultrashort}/${auth.days.short}/${auth.days.mid}/${auth.days.long} 交易日）`,
   );
   if (problems.length === 0 && labelErrs.length === 0) {
-    console.log("✅ 通过：前后端逐字段一致、桥表分析师四档均有权重、两侧键集合等于权威清单且清单可落地 seed、有腿∪无腿闭合、档名标签未手抄天数");
+    console.log("✅ 通过：前后端逐字段一致、桥表分析师四档均有权重、两侧键集合等于权威清单且清单可落地 seed、有腿∪无腿闭合、前端查表已还原键形态且共识按持有期分别计票、档名标签未手抄天数");
     return 0;
   }
   problems.forEach((p) => console.log(`✖ ${p}`));
@@ -509,6 +551,32 @@ function selftest() {
     name: "⑧护栏 常量失踪 ⇒ 必须报判据失效",
     got: checkLegClosure(be, authority, parseUnbridged("pub const RENAMED_AWAY: &[&str] = &[];")).length,
     want: 1,
+  });
+
+  // ── 判据 ⑨：表值一致 ≠ 查表生效（键形态还原 + 按 base 归并）──
+  const feSrcDisk = fs.readFileSync(path.join(ROOT, FRONTEND), "utf8");
+  cases.push({
+    name: "⑨负控 磁盘现状（剥档后缀 + 补节点前缀 + 按 base 归并）⇒ 应无问题",
+    got: checkFrontendKeyNormalization(feSrcDisk).length,
+    want: 0,
+  });
+  const oldShape = `function getAnalystWeight(rawId) {
+  const analystId = rawId.replace(/^report\\./, "");
+  return analystId ? 1.0 : 1.0;
+}
+export function computeStockConsensus(reports) {
+  for (const [id, text] of Object.entries(reports)) { void id; void text; }
+  return {};
+}`;
+  cases.push({
+    name: "⑨正控 查表退回旧形态（不剥档、不补前缀）且计票不按档取数 ⇒ 必须报 3 处",
+    got: checkFrontendKeyNormalization(oldShape).length,
+    want: 3,
+  });
+  cases.push({
+    name: "⑨护栏 两个函数都改名/失踪 ⇒ 必须报 2 处判据失效（不能静默放行）",
+    got: checkFrontendKeyNormalization("export const x = 1;").length,
+    want: 2,
   });
 
   const emptyParse = { tiers: {}, bridge: [] };

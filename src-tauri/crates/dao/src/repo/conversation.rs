@@ -25,7 +25,6 @@ pub fn conversation_from_entity(m: conversations::Model) -> Conversation {
         temperature: m.temperature.map(|v| v as f32),
         max_tokens: m.max_tokens.map(|v| v as u32),
         top_p: m.top_p.map(|v| v as f32),
-        frequency_penalty: m.frequency_penalty.map(|v| v as f32),
         search_enabled: m.search_enabled != 0,
         search_provider_id: m.search_provider_id,
         thinking_budget: m.thinking_budget,
@@ -162,12 +161,42 @@ pub async fn get_conversation(db: &DatabaseConnection, id: &str) -> Result<Conve
     Ok(conversation_from_entity(row))
 }
 
+/// 新建会话时的采样参数初始值。
+///
+/// 唯一来源是 `AppSettings.default_*`（设置页「默认模型」）。落库后运行时只读
+/// `Conversation.*`，不再回读全局设置 —— 默认值只做一次性初始化，不参与运行时竞争。
+#[derive(Debug, Clone, Default)]
+pub struct ConversationParamDefaults {
+    pub temperature: Option<f64>,
+    pub max_tokens: Option<i64>,
+    pub top_p: Option<f64>,
+}
+
 pub async fn create_conversation(
     db: &DatabaseConnection,
     title: &str,
     model_id: &str,
     provider_id: &str,
     system_prompt: Option<&str>,
+) -> Result<Conversation> {
+    create_conversation_with_defaults(
+        db,
+        title,
+        model_id,
+        provider_id,
+        system_prompt,
+        ConversationParamDefaults::default(),
+    )
+    .await
+}
+
+pub async fn create_conversation_with_defaults(
+    db: &DatabaseConnection,
+    title: &str,
+    model_id: &str,
+    provider_id: &str,
+    system_prompt: Option<&str>,
+    defaults: ConversationParamDefaults,
 ) -> Result<Conversation> {
     let id = gen_id();
     let now = now_ts();
@@ -178,6 +207,9 @@ pub async fn create_conversation(
         model_id: Set(model_id.to_string()),
         provider_id: Set(provider_id.to_string()),
         system_prompt: Set(system_prompt.map(|s| s.to_string())),
+        temperature: Set(defaults.temperature),
+        max_tokens: Set(defaults.max_tokens),
+        top_p: Set(defaults.top_p),
         message_count: Set(0),
         is_pinned: Set(0),
         enabled_mcp_server_ids: Set("[]".to_string()),
@@ -238,9 +270,6 @@ pub async fn update_conversation(
     }
     if let Some(top_p) = input.top_p {
         am.top_p = Set(top_p);
-    }
-    if let Some(frequency_penalty) = input.frequency_penalty {
-        am.frequency_penalty = Set(frequency_penalty);
     }
     if let Some(search_enabled) = input.search_enabled {
         am.search_enabled = Set(if search_enabled { 1 } else { 0 });
@@ -920,7 +949,6 @@ pub async fn branch_conversation(
         temperature: Set(source.temperature),
         max_tokens: Set(source.max_tokens),
         top_p: Set(source.top_p),
-        frequency_penalty: Set(source.frequency_penalty),
         search_enabled: Set(source.search_enabled),
         search_provider_id: Set(source.search_provider_id.clone()),
         thinking_budget: Set(source.thinking_budget),
@@ -1330,4 +1358,50 @@ pub async fn delete_summary(db: &DatabaseConnection, conversation_id: &str) -> R
         .exec(db)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod conversation_defaults_tests {
+    use super::*;
+
+    /// 正控：全局默认值（设置页「默认模型」）必须真的落进新会话。
+    /// 这条锁住的是 2026-10-25 之前的缺陷：`default_max_tokens` 只在弹窗里当占位，
+    /// 新建会话从不落库 ⇒ 用户改了默认值，实际请求永远读不到。
+    #[tokio::test]
+    async fn new_conversation_persists_global_sampling_defaults() {
+        let handle = crate::db::create_test_pool().await.expect("测试库应可建立");
+        let created = create_conversation_with_defaults(
+            &handle.conn,
+            "默认值会话",
+            "model-1",
+            "provider-1",
+            None,
+            ConversationParamDefaults {
+                temperature: Some(0.4),
+                max_tokens: Some(2048),
+                top_p: Some(0.9),
+            },
+        )
+        .await
+        .expect("创建会话应成功");
+
+        assert_eq!(created.temperature, Some(0.4));
+        assert_eq!(created.max_tokens, Some(2048));
+        assert_eq!(created.top_p, Some(0.9));
+    }
+
+    /// 负控：全局默认未设置时保持 `None`，不得在这里补任何硬编码哨兵值 ——
+    /// 运行时会回退模型级 `param_overrides`，那才是第二层（也是最后一层）来源。
+    #[tokio::test]
+    async fn new_conversation_without_defaults_stays_null() {
+        let handle = crate::db::create_test_pool().await.expect("测试库应可建立");
+        let created =
+            create_conversation(&handle.conn, "空默认会话", "model-1", "provider-1", None)
+                .await
+                .expect("创建会话应成功");
+
+        assert_eq!(created.temperature, None);
+        assert_eq!(created.max_tokens, None);
+        assert_eq!(created.top_p, None);
+    }
 }

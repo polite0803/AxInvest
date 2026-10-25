@@ -2,8 +2,11 @@
 import { cleanToolCallTags } from "@/lib/agentOutput";
 import {
   classifyAnalystReport,
+  computeStockConsensus,
   deriveAnalystConsensus,
   extractBullBearScores,
+  groupAnalystReportsByTier,
+  scopeAnalystReports,
   tallyAnalystSentiment,
 } from "@/lib/stock-analysis-utils";
 import { describe, expect, it } from "vitest";
@@ -33,6 +36,14 @@ describe("extractBullBearScores", () => {
 
   it("没有任何结构化分数返回 null（调用方走关键词兜底）", () => {
     expect(extractBullBearScores("纯文字报告，建议观望。")).toBeNull();
+  });
+
+  it("不得把辩手的 strength_score 当成 bull_score（否则看空辩手被判成看多）", () => {
+    // 辩手的 `strength_score` 是「立场强度」，不分多空。旧实现 `bull_score ?? strength_score`
+    // 会把一个 bearish、strength=70 的辩手读成「看多 70 / 看空 0」，方向直接反转。
+    const report = '<!-- VERDICT: {"stance":"bearish","strength_score":70} -->';
+    expect(extractBullBearScores(report)).toEqual({ bull: 0, bear: 60 });
+    expect(classifyAnalystReport(report)).toBe("bearish");
   });
 });
 
@@ -145,5 +156,114 @@ describe("deriveAnalystConsensus", () => {
       .toBe("neutral");
     expect(deriveAnalystConsensus({ bullish: 0, bearish: 0, neutral: 0, total: 0 }))
       .toBe("neutral");
+  });
+});
+
+describe("groupAnalystReportsByTier", () => {
+  const bullish = '<!-- VERDICT: {"bull_score":80,"bear_score":20} -->';
+  const bearish = '<!-- VERDICT: {"bull_score":20,"bear_score":80} -->';
+
+  it("逐档实例按档分组（每档自己的分析师子集）", () => {
+    const reports = {
+      "market-analyst--ultra_short": bearish,
+      "market-analyst--mid": bullish,
+      "policy--long": bullish,
+    };
+    expect(groupAnalystReportsByTier(reports)).toEqual({
+      tiers: {
+        ultra_short: { "market-analyst": bearish },
+        mid: { "market-analyst": bullish },
+        long: { policy: bullish },
+      },
+      untiered: {},
+    });
+  });
+
+  it("裸键单独成组，不并入任何一档（分档前的历史快照）", () => {
+    const reports = { "market-analyst": bearish, "investment-plan": bullish };
+    expect(groupAnalystReportsByTier(reports)).toEqual({ tiers: {}, untiered: reports });
+  });
+});
+
+describe("scopeAnalystReports", () => {
+  const bullish = '<!-- VERDICT: {"bull_score":80,"bear_score":20} -->';
+  const bearish = '<!-- VERDICT: {"bull_score":20,"bear_score":80} -->';
+  const reports = {
+    "market-analyst--ultra_short": bearish,
+    "market-analyst--mid": bullish,
+    "policy--long": bullish,
+    "investment-plan": bullish,
+  };
+
+  it("该档不存在时回退 mid，不退回裸键", () => {
+    // 请求 `short`，本次只跑出 ultra_short/mid/long ⇒ 回退 mid；
+    // untiered 里的 investment-plan 不得被当成「short 档的分析师」。
+    expect(scopeAnalystReports(reports, "short")).toEqual({ "market-analyst": bullish });
+    expect(scopeAnalystReports(reports, "mid")).toEqual({ "market-analyst": bullish });
+  });
+
+  it("完全没有分档数据时才用裸键（历史快照）", () => {
+    const legacy = { "market-analyst": bearish, "investment-plan": bullish };
+    expect(scopeAnalystReports(legacy, "mid")).toEqual(legacy);
+  });
+
+  it("未指定档位时 mid 优先，其次唯一档", () => {
+    expect(scopeAnalystReports(reports)).toEqual({ "market-analyst": bullish });
+    expect(scopeAnalystReports({ "market-analyst--short": bearish })).toEqual({
+      "market-analyst": bearish,
+    });
+  });
+});
+
+describe("computeStockConsensus", () => {
+  const bullish = '<!-- VERDICT: {"bull_score":80,"bear_score":20} -->';
+  const bearish = '<!-- VERDICT: {"bull_score":20,"bear_score":80} -->';
+
+  it("逐档实例不重复计票：同一位分析师四档只算一票", () => {
+    const reports = {
+      "market-analyst--ultra_short": bullish,
+      "market-analyst--short": bullish,
+      "market-analyst--mid": bullish,
+      "market-analyst--long": bullish,
+    };
+    const c = computeStockConsensus(reports, undefined, "mid");
+    expect(c.votes.total).toBe(1);
+    expect(c.votes.bullish).toBe(1);
+    expect(c.bullish).toBe(1);
+    expect(c.consensus).toBe("bullish");
+  });
+
+  it("逐档权重真的生效：超短档 hot-money(2.0)+market-analyst(1.3) ⇒ 加权和 3.3、票数 2", () => {
+    // 负控：若查表仍按未剥档 / 未补 `a-` 的键名匹配，两者都会退 default 1.0，加权和会是 2。
+    const reports = {
+      "market-analyst--ultra_short": bullish,
+      "hot-money--ultra_short": bullish,
+    };
+    const c = computeStockConsensus(reports, undefined, "ultra_short");
+    expect(c.total).toBeCloseTo(3.3, 5);
+    expect(c.bullish).toBeCloseTo(3.3, 5);
+    // 两个计数域各自独立：加权和 3.3 不是票数，票数恒为整数 2
+    expect(c.votes).toEqual({ bullish: 2, bearish: 0, neutral: 0, total: 2 });
+  });
+
+  it("共识标签只由票数决定，不再存在第二条加权判据", () => {
+    // 长档权重：value-investor 2.0 + fundamentals 1.5 = 看多 3.5；
+    //           market-analyst 0.6 + sentiment 0.7 = 看空 1.3。
+    // 旧的第二条判据「净差 > 总权重 × 0.3」⇒ 2.2 > 1.44 ⇒ 标签=看多；
+    // 票数口径（2 对 2，均未过 65%）⇒ 标签=分歧。
+    // 两者曾在同一屏并存（顶部条走票数、交叉验证走加权），这就是那条同名不同值。
+    const reports = {
+      "value-investor--long": bullish,
+      "fundamentals--long": bullish,
+      "market-analyst--long": bearish,
+      "sentiment--long": bearish,
+    };
+    const c = computeStockConsensus(reports, undefined, "long");
+    expect(c.consensus).toBe("divided");
+    expect(c.votes).toEqual({ bullish: 2, bearish: 2, neutral: 0, total: 4 });
+    // 加权和仍透出供与后端证据报告对照，但它不再决定标签
+    expect(c.bullish).toBeCloseTo(3.5, 5);
+    expect(c.bearish).toBeCloseTo(1.3, 5);
+    expect(c.total).toBeCloseTo(4.8, 5);
   });
 });

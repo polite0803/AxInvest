@@ -159,6 +159,10 @@ pub fn register_pm_functions(engine: &mut Engine) {
     // P1-E13: 组合风控门（portfolio-risk-gate.rhai 调用）。
     // 同样遵循 Dynamic 万能参数模式：target_price / stock_sector 在 Rhai 侧
     // 可能是 unit（safe_opt_* 兜底），闭包内转 Option。
+    // v183: `target_price` 的**来源**换了（由 `portfolio-risk-gate.rhai` 用估值安全边际折算，
+    // 不再由 input_mapping 注入 trader 报价），但参数个数必须与 rhai 调用、
+    // `portfolio_formula::portfolio_risk_gate` 的签名三处同进退 —— 只改一处是
+    // runtime「函数不存在」而不是编译错误。
     engine.register_fn(
         "pm_portfolio_risk_gate",
         |pm_action: &str,

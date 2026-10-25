@@ -477,6 +477,10 @@ fn low_confidence_list_uses_same_threshold_as_diagnostics() {
 /// 先按行剔除 `//` 注释：映射区里有多条带引号与括号的注释
 /// （如 `resolve_var_path("{id}.content.verdict.confidence")`），
 /// 不剔除会把注释里的字面量当成键，产出**假红**。
+///
+/// v184 补充：分析师槽位键（`{abbr}_{kind}` 与 `{abbr}_{kind}__{tier}`）在 seed 里
+/// 是 `format!` 生成的 ⇒ 文本抽取看不见 ⇒ 缩写集改从权威常量
+/// `axagent_harness::holding_period::DQ_ABBR_TO_BASE` 取（见下方分支）。
 fn declared_input_mapping_keys() -> Vec<String> {
     let seed = include_str!("../../../src/commands/stock_analysis_setup/seed_stock_analysis.rs");
     let start = seed.find(r#"let dq_id = "data-quality";"#).expect("未找到 data-quality 节点区段");
@@ -491,7 +495,7 @@ fn declared_input_mapping_keys() -> Vec<String> {
         .join("\n");
 
     let mut out: Vec<String> = Vec::new();
-    let mut abbrs: Vec<String> = Vec::new();
+    let mut inline_abbrs: Vec<String> = Vec::new();
     for chunk in region.split('(') {
         // 一块里必须有**两个**字符串字面量（键 + 路径）才成对；
         // 只有 1 个引号的残块直接丢弃（与下方自检用的等价实现逐字同源）。
@@ -506,11 +510,27 @@ fn declared_input_mapping_keys() -> Vec<String> {
         // v133：abbr 表行（`("mk", "a-market-analyst")` / `("val", "value-investor")`）——
         // 恰 2 个字面量且第二段是分析师节点 id ⇒ 归 abbrs，不进键集；其余为静态键。
         if parts.len() == 5 && (parts[3].starts_with("a-") || parts[3] == "value-investor") {
-            abbrs.push(k);
+            inline_abbrs.push(k);
             continue;
         }
         out.push(k);
     }
+    // v184（2026-10-25）：槽位缩写表已上收到 `harness::holding_period::DQ_ABBR_TO_BASE`
+    //   （唯一登记处），seed 改由 `for &(abbr, base) in …DQ_ABBR_TO_BASE` 逐项 `format!`
+    //   生成键名 ⇒ **文本抽取天然看不见那 200 个键**（提取器因此只拿到 12 个静态键）。
+    //   修法：缩写集改从**同一个权威常量**取（不另抄一份，否则两份迟早漂移），
+    //   并要求 seed 区间里确实出现该常量引用 —— 若 seed 又换了生成方式而本门没跟上，
+    //   下面的锚点断言会先红，而不是静默少抽一半键。
+    let abbrs: Vec<String> = if region.contains("DQ_ABBR_TO_BASE") {
+        axagent_harness::holding_period::DQ_ABBR_TO_BASE
+            .iter()
+            .map(|(a, _)| (*a).to_string())
+            .collect()
+    } else if !inline_abbrs.is_empty() {
+        inline_abbrs
+    } else {
+        panic!("提取器失效：input_mapping 区间既未见 `DQ_ABBR_TO_BASE` 循环，也未见内联缩写表")
+    };
     for kind in ["verdict", "report", "untrusted", "tool_calls"] {
         for a in &abbrs {
             out.push(format!("{a}_{kind}"));
@@ -548,11 +568,16 @@ fn external_vars_match_node_input_mapping() {
 
     // ① 提取器自检：0 命中 ≠ 没问题。解析失败时会得到一个偏少的集合，
     //    若不先卡下限，它可能恰好与另一侧的错值「对上了」而报绿。
+    //    下限按**生成族**算（代表键 4×N + 逐档键 4×N×4，均由权威缩写表推出），
+    //    **不钉死静态键条数** —— 静态键会随因子增减变动，钉死它迟早误报。
+    let abbr_n = axagent_harness::holding_period::DQ_ABBR_TO_BASE.len();
+    let generated_floor = abbr_n * 4 + abbr_n * 4 * 4;
     assert!(
-        declared.len() >= 39,
-        "解析 input_mapping 只得到 {} 个键（应 ≥39）⇒ 提取器失效（锚点/分隔符已变），\
+        declared.len() >= generated_floor,
+        "解析 input_mapping 只得到 {} 个键（应 ≥{}）⇒ 提取器失效（锚点/分隔符已变），\
          先修提取器再信本次比较。实际解析结果：{declared:?}",
-        declared.len()
+        declared.len(),
+        generated_floor
     );
     // ② 正负对照：确认确实读到了各类已知成员，而不是碰巧凑数
     for probe in [
@@ -567,6 +592,18 @@ fn external_vars_match_node_input_mapping() {
         "cat_tool_calls__mid",
     ] {
         assert!(declared.iter().any(|k| k == probe), "提取器漏了已知键 {probe}：{declared:?}");
+    }
+    // ②′ 生成族**穷举**：每个缩写槽的代表键与逐档键都必须在声明集里
+    //    （抽样式探针只验 8 个 ⇒ 某槽整族漏抽仍可能凑够下限）。
+    for (abbr, _base) in axagent_harness::holding_period::DQ_ABBR_TO_BASE {
+        for kind in ["verdict", "report", "untrusted", "tool_calls"] {
+            let rep = format!("{abbr}_{kind}");
+            assert!(declared.iter().any(|k| k == &rep), "提取器漏了槽位键 {rep}：{declared:?}");
+            for tier in ["ultra_short", "short", "mid", "long"] {
+                let tk = format!("{abbr}_{kind}__{tier}");
+                assert!(declared.iter().any(|k| k == &tk), "提取器漏了逐档键 {tk}：{declared:?}");
+            }
+        }
     }
 
     // ③ 双向差集
@@ -2100,4 +2137,236 @@ fn neutral_catalyst_factor_self_describes_while_true_absence_stays_plain() {
     let cat: Vec<&String> = mf.iter().filter(|s| s.starts_with("催化剂等级")).collect();
     assert_eq!(cat.len(), 1, "催化剂等级仍须恰好计 1 项（长度与分母对齐）：{mf:?}");
     assert!(cat[0].contains("非取数故障"), "中性取值须自我说明「非取数故障」：{}", cat[0]);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// P1-2（2026-10-25）：结论方向与多空评分「互相打脸」的**结构化**判据
+//
+// 立项理由：这条矛盾此前只在 `field_validation_issues` 里以人话字符串存在，v149 起
+// 它**不再扣任何分**（原扣 tool_credibility 属误归因）⇒ 于是「分析师说看多、分数却是
+// 30/60」这种自相矛盾的产出，既不影响 dqi、也不影响它的投票资格，最终被呈现层当成
+// 正常一票。裁定：只有**这一条**（方向与大小关系冲突）剥夺投票资格；
+// `bull_score + bear_score` 偏离 100 只提示 —— 它不改「这位分析师到底说多说空」。
+//
+// 判据住在 `data-quality.rhai::verdict_direction_contradiction`（唯一实现），
+// 人话版（validate）与结构化版（diagnostics / diagnostics_by_tier 的 `inconsistent_reason`）
+// 两个出口必须同源 —— 下面 4 条分别钉：两出口一致 / 只这一条判废 / 键恒存在 / 逐档各判各的。
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// 注入带 `bull_score`/`bear_score` 的 verdict。
+/// `tier = Some(t)` 写逐档键 `{abbr}_verdict__{t}`；`None` 写代表实例键 `{abbr}_verdict`。
+/// 其余外部输入恒 `()`（＝本轮那些节点没有产物），与生产「旧快照缺字段」形态一致。
+fn run_quality_verdict(
+    abbr: &str,
+    conf: f64,
+    bull: f64,
+    bear: f64,
+    verdict: &str,
+    tier: Option<&str>,
+) -> Map {
+    let engine = build_engine();
+    let ast = engine.compile(SCRIPT).expect("data-quality.rhai 编译失败");
+    let mut scope = Scope::new();
+    for v in all_external_vars() {
+        scope.push_dynamic(v, Dynamic::UNIT);
+    }
+    let mut m = Map::new();
+    m.insert("confidence".into(), Dynamic::from(conf));
+    m.insert("bull_score".into(), Dynamic::from(bull));
+    m.insert("bear_score".into(), Dynamic::from(bear));
+    m.insert("verdict".into(), Dynamic::from(verdict.to_string()));
+    let (vk, rk) = match tier {
+        Some(t) => (format!("{abbr}_verdict__{t}"), format!("{abbr}_report__{t}")),
+        None => (format!("{abbr}_verdict"), format!("{abbr}_report")),
+    };
+    scope.push_dynamic(vk, Dynamic::from(m));
+    scope.push_dynamic(rk, Dynamic::from("技术面向上，均线多头排列。".to_string()));
+    engine.eval_ast_with_scope::<Map>(&mut scope, &ast).expect("data-quality.rhai 执行失败")
+}
+
+/// 取代表实例那一行的 `inconsistent_reason`。
+/// **断言它是字符串**：后端漏写这个键 ⇒ 前端只能报「不知道」，扣票机制整体失效。
+fn inconsistent_reason(result: &Map, abbr: &str) -> String {
+    match diag(result, abbr)["inconsistent_reason"].clone().into_string() {
+        Ok(s) => s,
+        Err(_) => panic!("{abbr} 的 diagnostics 行缺 inconsistent_reason 字符串键"),
+    }
+}
+
+fn tier_inconsistent_reason(result: &Map, abbr: &str, tier: &str) -> String {
+    let by_tier = result["diagnostics_by_tier"].clone().try_cast::<Map>().expect("逐档诊断表缺失");
+    let rows = by_tier
+        .get(abbr)
+        .cloned()
+        .and_then(|d| d.try_cast::<Map>())
+        .unwrap_or_else(|| panic!("{abbr} 的逐档诊断整体缺席，本轮未注入吗？"));
+    let row = rows
+        .get(tier)
+        .cloned()
+        .and_then(|d| d.try_cast::<Map>())
+        .unwrap_or_else(|| panic!("{abbr} 的 {tier} 档诊断行缺席"));
+    row["inconsistent_reason"].clone().into_string().unwrap_or_default()
+}
+
+/// 正控①：说看多而 bull_score ≤ bear_score ⇒ 结构化与两出口同时报出。
+#[test]
+fn contradictory_verdict_is_reported_structurally_and_in_prose() {
+    let r = run_quality_verdict("mk", 70.0, 30.0, 60.0, "看多", None);
+    let reason = inconsistent_reason(&r, "mk");
+    // 分数按 f64 渲染 ⇒ 串里是 `bull_score(30.0)`；判据只锁「报了哪两个数 + 哪个方向」，
+    // 不锁字面小数位（脚本改打印格式不该让本判据红）。
+    assert!(
+        reason.contains("看多") && reason.contains("bull_score") && reason.contains("<="),
+        "verdict=看多 而 bull ≤ bear ⇒ 必须结构化报出方向、两个分数与不等关系，实得 {reason:?}"
+    );
+    let issues = names(&r, "field_validation_issues");
+    assert!(
+        issues.iter().any(|s| s.contains("逻辑矛盾")),
+        "同一条矛盾必须同时有人话版（面板 warnings 用）：{issues:?}"
+    );
+}
+
+/// 正控②：**只有**方向与大小冲突才判废；和偏离 100 只提示。
+/// 这条是 2026-10-25 裁定的落点 —— 若有人把「不自洽」也升级成扣票，这里当场红。
+#[test]
+fn score_sum_drift_alone_does_not_revoke_the_vote() {
+    // 70/20：方向一致（看多），但和 = 90。90 恰好落在「轻微偏离」档
+    // （`sum < 90.0 || sum > 110.0` 才叫不自洽）⇒ 本判据只锁「有提示、没判废」，
+    // 不锁提示的严重度用词。
+    let r = run_quality_verdict("mk", 70.0, 70.0, 20.0, "看多", None);
+    assert_eq!(
+        inconsistent_reason(&r, "mk"),
+        "",
+        "方向与大小关系一致时不得判废（bull+bear=90 只是产出形态偏离）"
+    );
+    let issues = names(&r, "field_validation_issues");
+    assert!(
+        issues.iter().any(|s| s.contains("评分") && s.contains("偏离")),
+        "形态偏离仍须提示（只是不扣资格）：{issues:?}"
+    );
+}
+
+/// 正控③：判过且无矛盾 ⇒ 键存在且为**空串**，不能整键缺席。
+/// 缺席与空串在前端是两个结论（`contradictionBasesForTier` 分别返回 null / 空集合）。
+#[test]
+fn consistent_row_carries_the_key_as_empty_string_not_absent() {
+    let r = run_quality_verdict("mk", 70.0, 80.0, 20.0, "看多", None);
+    assert!(diag(&r, "mk").contains_key("inconsistent_reason"), "后端必须恒写这个键");
+    assert_eq!(inconsistent_reason(&r, "mk"), "");
+}
+
+/// 正控④：逐档行按**本档** verdict 判，代表实例不替它背结论。
+/// 反向断言同样关键：本档有矛盾而代表实例（本轮无产物）没矛盾时，只有逐档那一行非空。
+#[test]
+fn per_tier_row_is_judged_on_its_own_verdict() {
+    let r = run_quality_verdict("mk", 70.0, 30.0, 60.0, "看多", Some("short"));
+    let tier_reason = tier_inconsistent_reason(&r, "mk", "short");
+    assert!(tier_reason.contains("看多"), "逐档行必须按本档 verdict 判，实得 {tier_reason:?}");
+    assert_eq!(
+        inconsistent_reason(&r, "mk"),
+        "",
+        "代表实例本轮没产物 ⇒ 不得替本档背结论（也不能反过来：本档矛盾被代表实例的空串盖掉）"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2026-10-25：逐节点「评分自洽性」判据（`score_sum_reason`）
+//
+// 背景：`bull_score + bear_score ≈ 100` 这条判据此前**只**长在 rhai 的
+// `validate_verdict_schema` 里，被拼进全局 `issues` 文案；逐节点诊断拿不到 ⇒
+// 反馈表的 `score_consistent` 没有真值可写，而唯一读侧对缺键 `unwrap_or(true)`
+// ⇒ 「评分自洽性」恒被判健康（缺键被当成「一致」）。
+//
+// 现在这条判据被搬进**逐节点**诊断（`verdict_score_sum_reason`），三态必须分开：
+//   `""`  = 自洽；非空 = 偏离描述；**键缺席 = 不知道**（多空分至少缺一个）。
+// 消费端（反馈写侧 `put_consistent`、面板）靠这个三态区分「一致 / 不一致 / 不知道」，
+// 所以本判据必须钉住**键的有无与取值**，不能只钉「有值时对不对」。
+//
+// ⚠ 为什么要**穷举 10 个分析师**：`diag_for` 加参数后，Rhai **没有编译期参数个数检查**
+//   —— 漏改某个调用点，脚本仍能编译通过，只是那一行永远拿不到新参数。
+//   这与本文件 `diagnostics_expose_per_node_report_quality` 的第 ① 条同纪律。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 给 10 个分析师**全部**注入同一组多空分的 verdict（代表实例档）。
+fn run_quality_all_bull_bear(bull: f64, bear: f64) -> Map {
+    const ALL: [&str; 10] = ["mk", "sent", "val", "fund", "pol", "hm", "lk", "res", "sec", "cat"];
+    let engine = build_engine();
+    let ast = engine.compile(SCRIPT).expect("data-quality.rhai 编译失败");
+    let mut scope = Scope::new();
+    for v in all_external_vars() {
+        scope.push_dynamic(v, Dynamic::UNIT);
+    }
+    for abbr in ALL {
+        let mut m = Map::new();
+        m.insert("confidence".into(), Dynamic::from(60.0));
+        m.insert("bull_score".into(), Dynamic::from(bull));
+        m.insert("bear_score".into(), Dynamic::from(bear));
+        m.insert("verdict".into(), Dynamic::from("看多".to_string()));
+        scope.push_dynamic(format!("{abbr}_verdict"), Dynamic::from(m));
+        scope.push_dynamic(
+            format!("{abbr}_report"),
+            Dynamic::from("技术面向上，均线多头排列。".to_string()),
+        );
+    }
+    engine.eval_ast_with_scope::<Map>(&mut scope, &ast).expect("data-quality.rhai 执行失败")
+}
+
+/// 取某节点的 `score_sum_reason`：**键缺席**与「空串」是两个结论，分开返回。
+///
+/// 返回 `Option<String>`：`None` = 键根本不存在（=「不知道」，不是「一致」）。
+fn score_sum_reason(result: &Map, abbr: &str) -> Option<String> {
+    let d = diag(result, abbr);
+    if !d.contains_key("score_sum_reason") {
+        return None;
+    }
+    Some(d["score_sum_reason"].clone().into_string().expect("score_sum_reason 不是字符串"))
+}
+
+/// 正控①：多空分和 ≈ 100 ⇒ 键存在且为**空串**（一致，不是「不知道」）。
+/// 穷举 10 个分析师 ⇒ 任何一个 `diag_for` 调用点漏改第 13 参即红。
+#[test]
+fn score_sum_reason_present_and_empty_when_consistent() {
+    let r = run_quality_all_bull_bear(60.0, 40.0);
+    const ALL: [&str; 10] = ["mk", "sent", "val", "fund", "pol", "hm", "lk", "res", "sec", "cat"];
+    for abbr in ALL {
+        match score_sum_reason(&r, abbr) {
+            Some(s) => assert_eq!(
+                s, "",
+                "{abbr} 的多空分和 = 100 ⇒ score_sum_reason 应为空串（一致），实得 {s:?}"
+            ),
+            None => {
+                panic!("{abbr} 的 diagnostics 缺 score_sum_reason ⇒ 该 diag_for 调用点漏改第 13 参")
+            },
+        }
+    }
+}
+
+/// 正控②：多空分和偏离 100 ⇒ 键存在且**非空**（不一致必须报出，不能当一致）。
+#[test]
+fn score_sum_reason_non_empty_when_inconsistent() {
+    let r = run_quality_all_bull_bear(80.0, 40.0);
+    const ALL: [&str; 10] = ["mk", "sent", "val", "fund", "pol", "hm", "lk", "res", "sec", "cat"];
+    for abbr in ALL {
+        let s = score_sum_reason(&r, abbr).unwrap_or_else(|| {
+            panic!("{abbr} 缺 score_sum_reason（键缺席 = 不知道，不等于「不一致」）")
+        });
+        assert!(
+            !s.is_empty(),
+            "{abbr} 的多空分和 = 120 ⇒ score_sum_reason 必须非空（不一致不能被写成一致）"
+        );
+    }
+}
+
+/// 正控③：多空分缺一个 ⇒ **键缺席**（「不知道」）。
+///
+/// 缺席与空串在消费端是两个结论：空串 = 「一致」，缺席 = 「没有读数」。
+/// 写 `null` 或空串顶数 ⇒ 读侧会把「没有读数」当成「一致」（本批修掉的正是这个形态）。
+#[test]
+fn score_sum_reason_absent_when_score_unknown() {
+    // `run_quality` 只注入 `{confidence}` 的 verdict（无 bull/bear）⇒ 判据无读数
+    let r = run_quality(&[], &[("mk", 60.0)]);
+    assert!(
+        !diag(&r, "mk").contains_key("score_sum_reason"),
+        "多空分缺位时 score_sum_reason 必须整键缺席（= 不知道），不得写 null 或空串顶数"
+    );
 }

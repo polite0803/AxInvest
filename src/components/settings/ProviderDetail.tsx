@@ -244,10 +244,8 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
     4096,
   );
   const [editTopP, setEditTopP] = useState<number | null>(1.0);
-  const [editFreqPenalty, setEditFreqPenalty] = useState<number | null>(0.0);
   const [editUseMaxCompletionTokens, setEditUseMaxCompletionTokens] = useState(false);
   const [editNoSystemRole, setEditNoSystemRole] = useState(false);
-  const [editForceMaxTokens, setEditForceMaxTokens] = useState(false);
   const [editThinkingParamStyle, setEditThinkingParamStyle] = useState<string>("reasoning_effort");
   const [editRequestDelayMs, setEditRequestDelayMs] = useState<number | null>(
     null,
@@ -317,8 +315,6 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
   const [batchTopPEnabled, setBatchTopPEnabled] = useState(false);
   const [batchMaxTokensParam, setBatchMaxTokensParam] = useState<number>(4096);
   const [batchMaxTokensParamEnabled, setBatchMaxTokensParamEnabled] = useState(false);
-  const [batchFreqPenalty, setBatchFreqPenalty] = useState<number>(0.0);
-  const [batchFreqPenaltyEnabled, setBatchFreqPenaltyEnabled] = useState(false);
   const [batchUseMaxCompletionTokens, setBatchUseMaxCompletionTokens] = useState(false);
   const [
     batchUseMaxCompletionTokensEnabled,
@@ -326,8 +322,6 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
   ] = useState(false);
   const [batchNoSystemRole, setBatchNoSystemRole] = useState(false);
   const [batchNoSystemRoleEnabled, setBatchNoSystemRoleEnabled] = useState(false);
-  const [batchForceMaxTokens, setBatchForceMaxTokens] = useState(false);
-  const [batchForceMaxTokensEnabled, setBatchForceMaxTokensEnabled] = useState(false);
   const [batchThinkingParamStyle, setBatchThinkingParamStyle] = useState<string>("reasoning_effort");
   const [batchThinkingParamStyleEnabled, setBatchThinkingParamStyleEnabled] = useState(false);
 
@@ -769,12 +763,10 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
     setEditTemperature(model.paramOverrides?.temperature ?? 0.7);
     setEditMaxTokensParam(model.paramOverrides?.maxTokens ?? 4096);
     setEditTopP(model.paramOverrides?.topP ?? 1.0);
-    setEditFreqPenalty(model.paramOverrides?.frequencyPenalty ?? 0.0);
     setEditUseMaxCompletionTokens(
       model.paramOverrides?.useMaxCompletionTokens ?? false,
     );
     setEditNoSystemRole(model.paramOverrides?.noSystemRole ?? false);
-    setEditForceMaxTokens(model.paramOverrides?.forceMaxTokens ?? false);
     setEditThinkingParamStyle(
       model.paramOverrides?.thinkingParamStyle ?? "reasoning_effort",
     );
@@ -791,10 +783,8 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
       temperature: editTemperature ?? undefined,
       maxTokens: editMaxTokensParam ?? undefined,
       topP: editTopP ?? undefined,
-      frequencyPenalty: editFreqPenalty ?? undefined,
       useMaxCompletionTokens: editUseMaxCompletionTokens,
       noSystemRole: editNoSystemRole,
-      forceMaxTokens: editForceMaxTokens,
       thinkingParamStyle: editThinkingParamStyle === "reasoning_effort"
         ? undefined
         : editThinkingParamStyle,
@@ -833,10 +823,8 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
     editTemperature,
     editMaxTokensParam,
     editTopP,
-    editFreqPenalty,
     editUseMaxCompletionTokens,
     editNoSystemRole,
-    editForceMaxTokens,
     editThinkingParamStyle,
     editRequestDelayMs,
     editGroupName,
@@ -980,14 +968,10 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
     setBatchTopPEnabled(false);
     setBatchMaxTokensParam(4096);
     setBatchMaxTokensParamEnabled(false);
-    setBatchFreqPenalty(0.0);
-    setBatchFreqPenaltyEnabled(false);
     setBatchUseMaxCompletionTokens(false);
     setBatchUseMaxCompletionTokensEnabled(false);
     setBatchNoSystemRole(false);
     setBatchNoSystemRoleEnabled(false);
-    setBatchForceMaxTokens(false);
-    setBatchForceMaxTokensEnabled(false);
     setBatchThinkingParamStyle("reasoning_effort");
     setBatchThinkingParamStyleEnabled(false);
     setBatchEditModalOpen(true);
@@ -1028,17 +1012,11 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
       if (batchMaxTokensParamEnabled) {
         overrides.maxTokens = batchMaxTokensParam;
       }
-      if (batchFreqPenaltyEnabled) {
-        overrides.frequencyPenalty = batchFreqPenalty;
-      }
       if (batchUseMaxCompletionTokensEnabled) {
         overrides.useMaxCompletionTokens = batchUseMaxCompletionTokens;
       }
       if (batchNoSystemRoleEnabled) {
         overrides.noSystemRole = batchNoSystemRole;
-      }
-      if (batchForceMaxTokensEnabled) {
-        overrides.forceMaxTokens = batchForceMaxTokens;
       }
       if (batchThinkingParamStyleEnabled) {
         overrides.thinkingParamStyle = batchThinkingParamStyle === "reasoning_effort"
@@ -1076,14 +1054,10 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
     batchTopPEnabled,
     batchMaxTokensParam,
     batchMaxTokensParamEnabled,
-    batchFreqPenalty,
-    batchFreqPenaltyEnabled,
     batchUseMaxCompletionTokens,
     batchUseMaxCompletionTokensEnabled,
     batchNoSystemRole,
     batchNoSystemRoleEnabled,
-    batchForceMaxTokens,
-    batchForceMaxTokensEnabled,
     batchThinkingParamStyle,
     batchThinkingParamStyleEnabled,
   ]);
@@ -2595,7 +2569,6 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                       temperature: editTemperature,
                       topP: editTopP,
                       maxTokens: editMaxTokensParam,
-                      frequencyPenalty: editFreqPenalty,
                     }}
                     onChange={(v) => {
                       if ("temperature" in v) {
@@ -2606,9 +2579,6 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                       }
                       if ("maxTokens" in v) {
                         setEditMaxTokensParam(v.maxTokens!);
-                      }
-                      if ("frequencyPenalty" in v) {
-                        setEditFreqPenalty(v.frequencyPenalty!);
                       }
                     }}
                     showDividers={false}
@@ -2643,20 +2613,6 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                       size="small"
                       checked={editNoSystemRole}
                       onChange={setEditNoSystemRole}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span
-                      className="text-sm"
-                      style={{ color: token.colorText }}
-                    >
-                      {t("settings.forceMaxTokens")}
-                    </span>
-                    <Switch
-                      id="provider-detail-switch-131"
-                      size="small"
-                      checked={editForceMaxTokens}
-                      onChange={setEditForceMaxTokens}
                     />
                   </div>
                   <div className="flex items-center justify-between">
@@ -2746,10 +2702,8 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
             batchTemperatureEnabled,
             batchTopPEnabled,
             batchMaxTokensParamEnabled,
-            batchFreqPenaltyEnabled,
             batchUseMaxCompletionTokensEnabled,
             batchNoSystemRoleEnabled,
-            batchForceMaxTokensEnabled,
             batchThinkingParamStyleEnabled,
           ].some(Boolean),
         }}
@@ -2934,9 +2888,6 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                     maxTokens: batchMaxTokensParamEnabled
                       ? batchMaxTokensParam
                       : null,
-                    frequencyPenalty: batchFreqPenaltyEnabled
-                      ? batchFreqPenalty
-                      : null,
                   }}
                   onChange={(v) => {
                     if ("temperature" in v) {
@@ -2961,14 +2912,6 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                       } else {
                         setBatchMaxTokensParamEnabled(true);
                         setBatchMaxTokensParam(v.maxTokens);
-                      }
-                    }
-                    if ("frequencyPenalty" in v) {
-                      if (v.frequencyPenalty == null) {
-                        setBatchFreqPenaltyEnabled(false);
-                      } else {
-                        setBatchFreqPenaltyEnabled(true);
-                        setBatchFreqPenalty(v.frequencyPenalty);
                       }
                     }
                   }}
@@ -3017,27 +2960,6 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                     checked={batchNoSystemRole}
                     onChange={setBatchNoSystemRole}
                     disabled={!batchNoSystemRoleEnabled}
-                  />
-                </div>
-                <div className="flex items-center justify-between">
-                  <Space size="small">
-                    <Checkbox
-                      checked={batchForceMaxTokensEnabled}
-                      onChange={(e) => setBatchForceMaxTokensEnabled(e.target.checked)}
-                    />
-                    <span
-                      className="text-sm"
-                      style={{ color: token.colorText }}
-                    >
-                      {t("settings.forceMaxTokens")}
-                    </span>
-                  </Space>
-                  <Switch
-                    id="provider-detail-switch-140"
-                    size="small"
-                    checked={batchForceMaxTokens}
-                    onChange={setBatchForceMaxTokens}
-                    disabled={!batchForceMaxTokensEnabled}
                   />
                 </div>
                 <div className="flex items-center justify-between">

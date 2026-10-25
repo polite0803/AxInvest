@@ -31,7 +31,6 @@ pub mod cache_guard;
 pub mod event_bus;
 pub use event_bus::{BroadcastEventBus, BroadcastSubscription};
 pub mod compact;
-pub mod compact_thresholds;
 pub mod compact_warning;
 pub mod config;
 pub mod config_validate;
@@ -81,18 +80,10 @@ pub use cron_job::{
 };
 
 pub use compact::{
-    CompactionConfig, CompactionResult, adaptive_compaction_config, cleanup_task_boundary,
-    compact_session, decay_weight, detect_task_boundary, emergency_compaction_config,
-    estimate_message_tokens, estimate_session_tokens, evaluate_compact_threshold,
-    format_compact_summary, get_compact_continuation_message, should_compact, smart_compact,
-    summarize_turn,
-};
-
-pub use compact_thresholds::{
-    AUTOCOMPACT_BUFFER_TOKENS, AutoCompactTracking, CompactThresholdState,
-    ERROR_THRESHOLD_BUFFER_TOKENS, MANUAL_COMPACT_BUFFER_TOKENS,
-    MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES, WARNING_THRESHOLD_BUFFER_TOKENS,
-    recommended_compaction_config, should_auto_compact, should_reactive_compact,
+    CompactionConfig, CompactionResult, cleanup_task_boundary, compact_session, decay_weight,
+    detect_task_boundary, emergency_compaction_config, estimate_message_tokens,
+    estimate_session_tokens, format_compact_summary, get_compact_continuation_message,
+    should_compact, smart_compact, summarize_turn,
 };
 
 pub use compact_warning::{

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
-import { useConversationStore } from "@/stores";
+import { resolveVisionModel } from "@/lib/visionModel";
+import { useConversationStore, useSettingsStore } from "@/stores";
 import { Button, Card, Image, Select, Spin, Typography, Upload } from "antd";
 import { Camera, CheckCircle, FileImage, ImageIcon, UploadCloud, XCircle } from "lucide-react";
 import { useState } from "react";
@@ -56,8 +57,9 @@ export function ImageAnalysisPanel() {
   );
   const conversations = useConversationStore((s) => s.conversations);
   const activeConv = conversations.find((c) => c.id === activeConversationId);
-  const providerId = activeConv?.providerId ?? "";
-  const modelId = activeConv?.modelId ?? "";
+  const imageModel = useSettingsStore((s) => s.settings.imageModel);
+  // 「图片模型」是唯一显式入口；未设置时才回退当前会话模型。
+  const { providerId, modelId } = resolveVisionModel(imageModel, activeConv);
 
   const handleFileRead = (file: File) => {
     const reader = new FileReader();

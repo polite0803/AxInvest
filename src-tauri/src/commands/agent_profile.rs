@@ -63,9 +63,6 @@ pub async fn create_agent_profile(
         input.source.as_deref().unwrap_or("custom"),
         &tags,
         input.suggested_provider_id.as_deref(),
-        input.suggested_model_id.as_deref(),
-        input.suggested_temperature,
-        input.suggested_max_tokens.map(|v| v as i64),
         input.search_enabled,
         input.recommend_permission_mode.as_deref(),
         &input.recommended_tools.unwrap_or_default(),
@@ -160,12 +157,9 @@ pub async fn import_agent_profiles_from_agency(
             Some("executor"), // 修复问题 13：显式赋 "executor" role，避免 profile 永远无 role 提示词
             "agency",
             &tags,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            None, // suggested_provider_id
+            None, // search_enabled
+            None, // recommend_permission_mode
             &rec_tools,
             &[],
             &rec_wf,

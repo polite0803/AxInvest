@@ -1343,8 +1343,35 @@ export function classifySentiment(report: string): "bullish" | "bearish" | "neut
 export type Sentiment = "bullish" | "bearish" | "neutral";
 export type Consensus = Sentiment | "divided";
 
+/**
+ * 计数域①：**票数**（一位分析师一票）。
+ *
+ * 独立成一个类型而不是从 `StockConsensus` `Pick` 出来：`StockConsensus` 现在**同时**带
+ * 票数与加权和两组数，`Pick` 会形成类型循环引用。
+ */
+export interface AnalystVoteTally {
+  bullish: number;
+  bearish: number;
+  neutral: number;
+  total: number;
+}
+
 export interface StockConsensus {
+  /**
+   * 共识标签。**判据只有一个**：`deriveAnalystConsensus(votes)` 的票数占比。
+   * 历史上这里还并存过「加权净差 > 总权重 × 0.3」这条第二判据（v182 前），
+   * 与顶部条的 65% 票数口径同名不同值 —— 同一屏可以出现「顶部条=分歧、
+   * 荐股交叉验证=看多」。现只留票数那一条。
+   */
   consensus: Consensus;
+  /** 计数域①：票数（面板显示与 `consensus` 标签都只读这里） */
+  votes: AnalystVoteTally;
+  /**
+   * 计数域②：按持有期权重累加的**加权和**（`ANALYST_TIME_HORIZON_WEIGHT`）。
+   * ⚠ 不是票数，**不得**渲染成 `N/M` —— 实测 `RecommendationPanel` 曾把这里的
+   *   3.3/11.6 显示成「3.3 票」，与同屏顶部条的票数长得一样却不可比。
+   *   保留只为与后端 `EvidenceWeightReport` 对照与审计。
+   */
   bullish: number;
   bearish: number;
   neutral: number;
@@ -1434,15 +1461,22 @@ const ANALYST_TIME_HORIZON_WEIGHT: Record<string, Record<string, number>> = {
 /** 根据分析师 ID 获取时间维度权重 */
 function getAnalystWeight(rawId: string, timeHorizon?: string | null): number {
   const weights = ANALYST_TIME_HORIZON_WEIGHT[timeHorizon || "mid"] || ANALYST_TIME_HORIZON_WEIGHT.mid;
-  // 黑版键带 `report.` 前缀（blackboard.rs 的 report.{节点 id} 规则），本表按裸节点 id 索引
-  // —— 与后端 `evidence_weight::analyst_key` 同一归一，两侧才不会一个是 1.0 一个是 0.3。
-  const analystId = rawId.replace(/^report\./, "");
-  // 精确匹配
-  if (weights[analystId] != null) { return weights[analystId]; }
-  // 后缀模糊匹配
+  // 黑版键带 `report.` 前缀（blackboard.rs 的 report.{节点 id} 规则）；store 落键还会
+  // **去掉 `a-` 前缀、保留 `--<档>` 后缀**（stockAnalysisStore.ts 的 `stepId.slice(2)`）。
+  // 本表按**节点 id** 索引 ⇒ 查表前两种形态都要还原，否则每个分析师都退 `default 1.0`：
+  // 表值与后端逐字段一致、运行时却恒不命中，正是本仓「两处一致地不同」的典型形态
+  // （`check-horizon-weight-parity.mjs` 只锁表值，锁不到查表函数）。
+  const stripped = rawId.replace(/^report\./, "");
+  const base = analystBaseOf(stripped) ?? stripped;
+  const candidates = base.startsWith("a-") ? [base] : [base, `a-${base}`];
+  for (const id of candidates) {
+    const w = weights[id];
+    if (typeof w === "number") { return w; }
+  }
+  // 后缀模糊匹配（历史幽灵 id 形态的兼容臂；不得抢在精确匹配之前）
   for (const [suffix, w] of Object.entries(weights)) {
     if (suffix === "default") { continue; }
-    if (analystId.includes(suffix)) { return w; }
+    if (base.includes(suffix)) { return w; }
   }
   return weights.default ?? 1.0;
 }
@@ -1451,6 +1485,14 @@ function getAnalystWeight(rawId: string, timeHorizon?: string | null): number {
  * 聚合分析师报告/投票，推最终共识。
  * 支持 timeHorizon 参数：不同时间维度下分析师权重不同
  * （长线重基本面、短线重技术面动量、超短线重资金流）。
+ *
+ * **只看一个持有期**：入参是 store 的原始键域（含逐档实例），本函数先经
+ * `scopeAnalystReports` 取出**该档**的分析师集合再计票。四档是同一批分析师对
+ * 不同持有期的四次作答（子集不同：4/5/7/7），不能合计成一个池、也不能跨档去重 ——
+ * 需要并排看，用 `groupAnalystReportsByTier` 分组展示。
+ *
+ * ⚠ `reports` 的文本**必须先经 `cleanToolCallTags`**（`@/lib/agentOutput`）清洗：
+ * 本模块不能反向依赖 agentOutput（它已依赖本模块），清洗由调用侧统一完成。
  */
 export function computeStockConsensus(
   reports: Record<string, string>,
@@ -1460,28 +1502,34 @@ export function computeStockConsensus(
   let bullish = 0;
   let bearish = 0;
   let neutral = 0;
-  for (const [analystId, text] of Object.entries(reports)) {
-    const s = classifySentiment(text);
+  // 两个计数域各算各的：`votes` 是票数（一位分析师一票），下面三个是加权和。
+  const votes: AnalystVoteTally = { bullish: 0, bearish: 0, neutral: 0, total: 0 };
+  // 分类走 `classifyAnalystReport`（与 `tallyAnalystSentiment` 同一口径），
+  // 不在这里再维护第二套「分数/关键词」阈值。
+  for (const [analystId, text] of Object.entries(scopeAnalystReports(reports, timeHorizon))) {
+    const s = classifyAnalystReport(text);
+    if (s === null) { continue; }
     const w = getAnalystWeight(analystId, timeHorizon);
-    if (s === "bullish") { bullish += w; }
-    else if (s === "bearish") { bearish += w; }
-    else { neutral += w; }
+    if (s === "bullish") {
+      bullish += w;
+      votes.bullish += 1;
+    } else if (s === "bearish") {
+      bearish += w;
+      votes.bearish += 1;
+    } else {
+      neutral += w;
+      votes.neutral += 1;
+    }
   }
+  votes.total = votes.bullish + votes.bearish + votes.neutral;
   const total = bullish + bearish + neutral;
-  let consensus: Consensus;
-  if (total === 0) {
-    consensus = "neutral";
-  } else {
-    const net = bullish - bearish;
-    // 加权后阈值：加权 net > 加权 total × 0.3 → bullish（等效 N/3）
-    const threshold = total * 0.3;
-    if (net > threshold) { consensus = "bullish"; }
-    else if (net < -threshold) { consensus = "bearish"; }
-    else if (bullish > 0 && bearish > 0) { consensus = "divided"; }
-    else { consensus = "neutral"; }
-  }
+  // 标签只由**票数**决定（判据唯一，见 `StockConsensus.consensus` 的注释）：
+  // 原先这里还有一条「加权净差 > 总权重 × 0.3」的第二判据，与顶部条的 65% 票数
+  // 同名不同值 ⇒ 同一屏可以一个说分歧、一个说看多。
+  const consensus: Consensus = deriveAnalystConsensus(votes);
   return {
     consensus,
+    votes,
     bullish: Math.round(bullish * 10) / 10,
     bearish: Math.round(bearish * 10) / 10,
     neutral: Math.round(neutral * 10) / 10,
@@ -1541,22 +1589,20 @@ export async function computeEvidenceDrivenConsensus(
     };
 
     const evidenceReport = await computeEvidenceWeights(request);
-
-    // 将后端结果映射为前端 StockConsensus 格式
-    const consensus = evidenceReport.consensus;
-    const consensusMap: Record<string, Consensus> = {
-      bullish: "bullish",
-      bearish: "bearish",
-      divided: "divided",
-      neutral: "neutral",
-    };
-
+    const weighted = evidenceReport.consensus;
+    // 共识标签走**本地票数**口径（与 `computeStockConsensus`、顶部条同一条判据）。
+    // 后端 `consensus.consensus` 的判据是「净权重 > 总权重 × 0.15」，属第三个计数域；
+    // 让它决定标签，就会出现「证据报告说看多、顶部条说分歧」，且两条阈值互相覆盖
+    // （store 里两条路径都写 `setStockCodeConsensus`，谁后到谁说了算）。
+    // 后端那份加权分数与 holdGate 仍原样透出，只是不再充当标签来源。
+    const votes = tallyAnalystSentiment(Object.values(scopeAnalystReports(reports, timeHorizon)));
     return {
-      consensus: consensusMap[consensus.consensus] ?? "neutral",
-      bullish: consensus.bullishScore,
-      bearish: consensus.bearishScore,
-      neutral: consensus.neutralScore,
-      total: consensus.totalWeight,
+      consensus: deriveAnalystConsensus(votes),
+      votes,
+      bullish: weighted.bullishScore,
+      bearish: weighted.bearishScore,
+      neutral: weighted.neutralScore,
+      total: weighted.totalWeight,
       updatedAt: updatedAt ?? Date.now(),
       evidenceReport,
     };
@@ -1605,6 +1651,67 @@ export function analystBaseOf(nodeId: string): string | null {
   const tier = nodeId.slice(i + ANALYST_TIER_SEP.length);
   if (!Object.prototype.hasOwnProperty.call(HORIZON_T_SUFFIX, tier)) { return null; }
   return nodeId.slice(0, i);
+}
+
+/** 逐档实例的分组结果：`tiers[tier][base] = 报告`；裸键另存，绝不并入某一档。 */
+export interface AnalystReportsByTier {
+  /** 带档实例（`market-analyst--mid` → `tiers.mid["market-analyst"]`） */
+  tiers: Record<string, Record<string, string>>;
+  /** 无档位后缀的裸键（≤v132 历史快照 / 未分档的快速链） */
+  untiered: Record<string, string>;
+}
+
+/**
+ * 把 store 的 `analystReports` 按持有期分组 —— 共识展示的取数口径。
+ *
+ * v133 起分析师按持有期实例化（`market-analyst--mid` / `--ultra_short` …），
+ * **每档是一组不同的分析师子集**（4/5/7/7，由 `Period::analyst_subset()` 推导），
+ * 各自回答「这个持有期怎么看」并各自进本档辩论与决策。所以：
+ *
+ * - 不能合计成一个池：`market-analyst` 在四档各一票、`policy` 只在长档一票，
+ *   混池后天然是 4:1 的权重，且「2 日看多」和「90 日看多」被加进同一个分子；
+ * - 也不能跨档去重：那会把另外三档的观点从面板上抹掉。
+ *
+ * 正确形态是**分组并排**：每组自己的票数与共识。裸键单独成组，因为它是分档前的
+ * 历史形态（当时只有一份），不得被塞进 `mid` 冒充某档。
+ *
+ * 键不是 `base--<四档之一>` 形态时按原样进 `untiered`（不猜），
+ * 非分析师节点（如 `investment-plan`）行为不变。文本清洗仍由调用侧负责。
+ */
+export function groupAnalystReportsByTier(reports: Record<string, string>): AnalystReportsByTier {
+  const tiers: Record<string, Record<string, string>> = {};
+  const untiered: Record<string, string> = {};
+  for (const [key, text] of Object.entries(reports)) {
+    const base = analystBaseOf(key);
+    if (base === null) {
+      untiered[key] = text;
+      continue;
+    }
+    const tier = key.slice(base.length + ANALYST_TIER_SEP.length);
+    const row = tiers[tier] ?? (tiers[tier] = {});
+    row[base] = text;
+  }
+  return { tiers, untiered };
+}
+
+/**
+ * 取**某一档**的分析师集合（base → 报告）；`computeStockConsensus` 与面板计票共用。
+ *
+ * 回退只在「该档确实没有实例」时发生（例如分析仍在进行、高档还没跑到），
+ * 不会把别档的报告冒充成本档；`untiered`（裸键）只在**完全没有分档数据**时使用
+ * —— 它可能是历史快照，也可能混着 `investment-plan` 一类非分析师节点，
+ * 不能因为「请求的那档不存在」就退到它。
+ */
+export function scopeAnalystReports(
+  reports: Record<string, string>,
+  tier?: string | null,
+): Record<string, string> {
+  const { tiers, untiered } = groupAnalystReportsByTier(reports);
+  if (tier && tiers[tier]) { return tiers[tier]; }
+  const available = Object.keys(tiers);
+  if (available.length === 0) { return untiered; }
+  if (tiers.mid) { return tiers.mid; }
+  return tiers[available[0]];
 }
 
 /** 辩论节点 id / 黑板快照键的分解结果。`tier === null` = 分档之前的历史记录。 */
@@ -1974,8 +2081,8 @@ export function readDecisionProvenance(
 //
 // 三值/共识类型复用本文件既有的 `Sentiment` / `Consensus`（见「共识聚合」段），不另造。
 
-/** 多空计票结果（`StockConsensus` 去掉时间戳的计票子集）。 */
-export type AnalystSentimentTally = Pick<StockConsensus, "bullish" | "bearish" | "neutral" | "total">;
+/** 多空计票结果（计数域①：票数）。类型定义在「共识聚合」段，避免与 `StockConsensus` 循环引用。 */
+export type AnalystSentimentTally = AnalystVoteTally;
 
 /**
  * 判决分数归一到百分制 —— 全站唯一的标度还原口径。
@@ -2007,7 +2114,10 @@ export function extractBullBearScores(report: string): { bull: number; bear: num
       const jsonEnd = jsonStr.indexOf("-->");
       if (jsonEnd !== -1) {
         const meta = JSON.parse(jsonStr.slice(0, jsonEnd).trim());
-        const bull = meta.bull_score ?? meta.strength_score ?? null;
+        // 只认 `bull_score`。**不得**回退 `strength_score`：那是辩手的「立场强度」
+        // （不分多空），一个 bearish 且 strength=70 的辩手会被读成「看多 70 / 看空 0」，
+        // 方向直接反转。无 `bull_score` 时走下方 stance/verdict 或关键词兜底。
+        const bull = meta.bull_score ?? null;
         const bear = meta.bear_score ?? null;
         if (typeof bull === "number" || typeof bear === "number") {
           return {

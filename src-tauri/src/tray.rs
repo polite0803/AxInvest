@@ -59,6 +59,20 @@ pub fn create_tray(app: &AppHandle, _language: &str) -> Result<(), Box<dyn std::
     create_tray_inner(app)
 }
 
+/// 按设置创建 / 销毁托盘（运行时切换）。
+///
+/// 启动时由 `start_background_services` 读 `settings.tray_enabled` 决定是否调用
+/// [`create_tray`]；设置页切换时走这里，避免「改了要重启」。
+#[cfg(desktop)]
+pub fn set_tray_enabled(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    if enabled {
+        create_tray(app, "").map_err(|e| e.to_string())
+    } else {
+        let _ = app.remove_tray_by_id(TRAY_ID);
+        Ok(())
+    }
+}
+
 #[cfg(desktop)]
 fn create_tray_inner(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // 双层幂等保护：TrayIconBuilder::build 同 ID 在 Windows 上不会替换，

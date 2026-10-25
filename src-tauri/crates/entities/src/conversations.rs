@@ -15,7 +15,6 @@ pub struct Model {
     pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
     pub top_p: Option<f64>,
-    pub frequency_penalty: Option<f64>,
     #[sea_orm(default_value = 0)]
     pub search_enabled: i32,
     pub search_provider_id: Option<String>,

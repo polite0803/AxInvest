@@ -214,6 +214,8 @@ pub fn compute_what_if(params: WhatIfRequest) -> Result<WhatIfResult, String> {
         crate::commands::stock_workflow::rhai_registry::RhaiSandboxLimits::PORTFOLIO,
     );
     let mut scope = Scope::new();
+    // f2 方向来源（v182）是否由快照提供 —— 见下方兜底处注释。
+    let mut has_consensus_direction = false;
 
     // 1. 注入显式参数（用户在前端调整的 6 个核心值）
     scope.push_constant("totalScore", params.total_score);
@@ -257,6 +259,9 @@ pub fn compute_what_if(params: WhatIfRequest) -> Result<WhatIfResult, String> {
                     if params.param_overrides.contains_key(key) {
                         continue;
                     }
+                    if key == "consensusDirection" {
+                        has_consensus_direction = true;
+                    }
                     // 根据值类型注入 Rhai scope
                     push_json_to_scope(&mut scope, key, val);
                 }
@@ -265,6 +270,15 @@ pub fn compute_what_if(params: WhatIfRequest) -> Result<WhatIfResult, String> {
             // 此时仅 5 个显式参数可用，Rhai 脚本中其他变量 present()=false，走兜底逻辑。
         }
         // 解析失败不报错，静默降级（只有 5 个显式参数可用）
+    }
+
+    // `consensusDirection` 没有显式面板参数，只能从快照的 input_params 取；取不到也必须
+    // 压一个 `()` —— portfolio-mgr.rhai 无条件引用该变量，而 Rhai 对未声明变量在 **eval 时**
+    // 报 `Variable not found`（`compile` 不查，见 portfolio-mgr.rhai 的 present 处注释），
+    // 会被脚本外层 catch 吞成保守兜底决策（症状＝「怎么调参数都不变」）。
+    // 压 `()` 后 f2 走「方向缺席 ⇒ 权重退出 + data_gaps」这条如实降级路径。
+    if !has_consensus_direction {
+        scope.push_constant("consensusDirection", ());
     }
 
     // 3. 应用显式参数覆盖（最高优先级，可覆盖快照中的同名值）
@@ -6619,6 +6633,9 @@ const PARAM_REVIEW_WINDOW_DAYS: i64 = 45;
 /// 到期评估的最小样本：变更前/后**各**至少这么多条 completed 反思（只数 verdict 三态）。
 const PARAM_EVAL_MIN_SAMPLES: i32 = 10;
 
+/// 参数变更台账行：`(param, old_json, new_json, reflection_id, reason)`。
+type ParamAuditRow = (String, String, String, Option<String>, Option<String>);
+
 /// 应用用户选中的参数调整建议到 stock-analysis 模板变量
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "应用参数调整建议")]
 #[tauri::command]
@@ -6656,7 +6673,7 @@ pub async fn apply_param_suggestions(
     let mut applied: Vec<serde_json::Value> = Vec::new();
     let mut skipped: Vec<serde_json::Value> = Vec::new();
     // (param, old_json, new_json, reflection_id, reason)
-    let mut audit_rows: Vec<(String, String, String, Option<String>, Option<String>)> = Vec::new();
+    let mut audit_rows: Vec<ParamAuditRow> = Vec::new();
 
     for update in &updates {
         let raw_name = update
@@ -6879,6 +6896,7 @@ async fn reflection_cohort_rate(
 /// - 变更后 = `template_version >= to_version` 且建点晚于应用时刻（防止旧行补写到新代）；
 /// - 任一侧样本不足 `PARAM_EVAL_MIN_SAMPLES` ⇒ `insufficient`（写明两侧条数，不伪造结论）；
 /// - 否则变更后命中率 ≥ 变更前 ⇒ `kept`，更低 ⇒ `rollback_suggested`（等人决定回滚）。
+///
 /// 纯判据：到期后给「保留 / 建议回滚」结论。样本不足优先于方向比较。
 ///
 /// 入参是两侧 `(correct, total)`；返回 `(status, note)`。`total` 只含 verdict 三态。

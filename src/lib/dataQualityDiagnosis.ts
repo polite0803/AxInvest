@@ -38,6 +38,34 @@ export const EXPERT_ID_TO_DQ_ABBR: Readonly<Record<string, string>> = {
   "value-investor": "val",
 };
 
+/** 反向表：由上表派生，**不是第二份登记**（新增分析师只改 `EXPERT_ID_TO_DQ_ABBR` 一处）。 */
+export const DQ_ABBR_TO_NODE_ID: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(EXPERT_ID_TO_DQ_ABBR).map(([nodeId, abbr]) => [abbr, nodeId]),
+);
+
+/**
+ * 把任意形态的分析师标识归一到 `data-quality` 的槽位缩写。
+ *
+ * 存在理由（2026-10-25 实测）：本表的键域是**节点 id**（`a-market-analyst`），而 store 落
+ * `analystReports` 的键是**去掉 `a-` 前缀**的 base（`market-analyst`）⇒ 原先直接
+ * `EXPERT_ID_TO_DQ_ABBR[base]` 时 10 个分析师**全部精确查表落空**，只能靠「比对界面译文」
+ * 那条兜底救回 4 个（mk / sent / val / pol / res / cat 六个连兜底都不中，因为后端诊断名
+ * 写的是「技术面分析师」而界面译文是「技术分析师」）。查表恒落空、被兜底掩盖成看起来正常，
+ * 与本仓权重表同一个失效形状，故在查表这一步就把两种键形态都认。
+ */
+export function dqAbbrOf(nodeIdOrBase: string): string | undefined {
+  const base = analystBaseOf(nodeIdOrBase) ?? nodeIdOrBase;
+  return EXPERT_ID_TO_DQ_ABBR[base] ?? EXPERT_ID_TO_DQ_ABBR[`a-${base}`];
+}
+
+/**
+ * 节点 id → store 落 `analystReports` 用的键形态（去掉 `a-` 前缀）。
+ * 剥前缀这件事只在这里做一次；两边各写一份 `replace(/^a-/,"")` 迟早一边改一边不改。
+ */
+export function analystStoreKeyOf(nodeId: string): string {
+  return nodeId.replace(/^a-/, "");
+}
+
 /** 后端诊断状态 → 面板展示用的严重度 */
 export type DiagSeverity = "good" | "warning" | "issue";
 
@@ -116,27 +144,79 @@ export function parseDataQualityReport(raw: string | null | undefined): DataQual
 /**
  * 取某分析师节点的后端诊断条目。
  *
- * @param expertId 节点 ID（如 `a-hot-money`）
+ * @param expertId 任意形态的分析师标识（节点 id `a-hot-money`、store 键 `hot-money`、
+ *                 或逐档实例 `a-market-analyst--mid` / `market-analyst--mid` 都认）
  * @param report   已解析的 data-quality 报告
- * @param expertName 可选的中文角色名，用于缩写映射失效时按 name 兜底匹配
+ * @param expertName 仅用作**末级兜底**（见下方注释，不能当主路）
+ * @param tier     本次要看的持有期；给了且该档有行 ⇒ 用该档那一行
  */
 export function resolveAnalystDiagnosis(
   expertId: string,
   report: DataQualityReport | null,
   expertName?: string,
+  tier?: string | null,
 ): DataQualityDiagItem | null {
   const diags = report?.diagnostics;
   if (!diags) { return null; }
 
-  // v133（B2-2）：调用方可能传逐档实例 id（`a-market-analyst--mid`）——先归一再查表。
-  const base = analystBaseOf(expertId) ?? expertId;
-  const abbr = EXPERT_ID_TO_DQ_ABBR[base];
-  if (abbr && diags[abbr]) { return diags[abbr]; }
+  const abbr = dqAbbrOf(expertId);
+  if (abbr) {
+    // 逐档实例化（v133）后，同一缩写在各档各有一行；指明档位时用本档那一行，
+    // 否则 `技术面·超短` 的弹窗会显示 mid 代表实例的结论（同屏两个数字对不上）。
+    const rows = report?.diagnostics_by_tier?.[abbr];
+    const atTier = tier ? rows?.[tier] : undefined;
+    if (atTier) { return atTier; }
+    if (diags[abbr]) { return diags[abbr]; }
+  }
 
+  // 末级兜底：按后端硬编码的中文角色名比对。它只能救「新增分析师还没登记进
+  // `EXPERT_ID_TO_DQ_ABBR`」这一种情况，且**只在中文界面成立**（译文一变就全落空），
+  // 所以不得当作主路 —— 主路是上面那个归一化查表。
   if (expertName) {
     for (const item of Object.values(diags)) {
       if (item?.name === expertName) { return item; }
     }
   }
   return null;
+}
+
+/**
+ * 本轮「结论方向与多空评分互相打脸」的分析师集合，键是 **store 落 `analystReports` 时的那种 base**
+ * （去掉 `a-` 前缀，如 `market-analyst`），便于调用方直接与逐档报告键比对。
+ *
+ * 判据住在后端 `data-quality.rhai::verdict_direction_contradiction`，前端只读结论、不重算
+ * （禁区 12：同一逻辑不许有第二份实现）。
+ *
+ * 三种情况必须分开（「结构性缺口不得在 UI 造成歧义」那条纪律）：
+ *   · `null` = 诊断里**没有** `inconsistent_reason` 这个字段（旧快照 / 未重播种）⇒ 这是**不知道**，
+ *     调用方一律照常计票，绝不能把「不知道」当成「无人矛盾」以外的任何结论；
+ *   · 空集合 = 字段在、本档无人矛盾；
+ *   · 非空 = 这些分析师本档不计票，且呈现层必须说清少了几票、为什么少。
+ *
+ * 取数优先逐档行（`diagnostics_by_tier[abbr][tier]`），该档没行时回落代表实例
+ * （`diagnostics[abbr]`）—— 与后端「grade 只看代表实例」同一取舍，不是新口径。
+ */
+export function contradictionBasesForTier(
+  report: DataQualityReport | null | undefined,
+  tier: string | null | undefined,
+): Set<string> | null {
+  const diags = report?.diagnostics;
+  const byTier = report?.diagnostics_by_tier;
+  if (!diags && !byTier) { return null; }
+
+  // 「知不知道」= 有没有任何一行带上了这个字段。全都缺 ⇒ 旧快照，无从判断。
+  const knows = Object.values(diags ?? {}).some((d) => typeof d?.inconsistent_reason === "string")
+    || Object.values(byTier ?? {}).some(
+      (rows) => Object.values(rows ?? {}).some((d) => typeof d?.inconsistent_reason === "string"),
+    );
+  if (!knows) { return null; }
+
+  const out = new Set<string>();
+  for (const [abbr, nodeId] of Object.entries(DQ_ABBR_TO_NODE_ID)) {
+    const item = byTier?.[abbr]?.[tier ?? ""] ?? diags?.[abbr];
+    if (item && (item.inconsistent_reason ?? "") !== "") {
+      out.add(analystStoreKeyOf(nodeId));
+    }
+  }
+  return out;
 }

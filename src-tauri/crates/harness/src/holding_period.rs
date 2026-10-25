@@ -789,6 +789,71 @@ pub fn analyst_base_of(node_id: &str) -> Option<&str> {
     Some(base)
 }
 
+/// data-quality 诊断的**槽位缩写 ↔ 分析师 base 节点 id** 对照（10 个槽位，Rust 侧唯一登记处）。
+///
+/// 语义与 `commands/data-quality.rhai` 头部那张对照表一致。为什么必须是 const 而不是各调用点
+/// 各抄一遍字面量：这张表同时被三处消费 —— 种子里 data-quality 的 40 键 `input_mapping`、
+/// `analyst_feedbacks` 的写侧（诊断缩写 → 反馈表 node_id）、以及排障时的反查。此前它只长在
+/// 种子的闭包里（一份内联数组），写侧要用的时候只能再抄一份 ⇒ 正是本仓反复登记的
+/// 「读写两端键域不一致 ⇒ 查表恒落空、被兜底掩盖成看起来正常」的形态。
+///
+/// ⚠ 前端另有一份镜像（`src/lib/dataQualityDiagnosis.ts` 的 `EXPERT_ID_TO_DQ_ABBR`），
+///   两侧由 `scripts/check-dq-abbr-parity.mjs` 逐槽位对拍：新增/摘除分析师时漏改任一侧即红。
+pub const DQ_ABBR_TO_BASE: &[(&str, &str)] = &[
+    ("mk", "a-market-analyst"),
+    ("sent", "a-sentiment"),
+    ("fund", "a-fundamentals"),
+    ("pol", "a-policy"),
+    ("hm", "a-hot-money"),
+    ("lk", "a-lockup"),
+    ("res", "a-research"),
+    ("sec", "a-sector"),
+    ("cat", "a-catalyst"),
+    ("val", "value-investor"),
+];
+
+/// 缩写 → base 节点 id。未知缩写返回 `None`（**不猜**：新分析师没登记进来时，
+/// 症状应当是「那一格没有反馈」，而不是被顶到某个既有分析师上）。
+///
+/// ```
+/// use axagent_harness::holding_period::dq_base_of_abbr;
+/// assert_eq!(dq_base_of_abbr("mk"), Some("a-market-analyst"));
+/// assert_eq!(dq_base_of_abbr("zz"), None);
+/// ```
+pub fn dq_base_of_abbr(abbr: &str) -> Option<&'static str> {
+    DQ_ABBR_TO_BASE.iter().find(|(a, _)| *a == abbr).map(|(_, b)| *b)
+}
+
+/// base 节点 id → 缩写（携带逐档后缀的实例 id 会先剥档，再查）。
+///
+/// ```
+/// use axagent_harness::holding_period::dq_abbr_of_base;
+/// assert_eq!(dq_abbr_of_base("a-market-analyst--mid"), Some("mk"));
+/// assert_eq!(dq_abbr_of_base("value-investor"), Some("val"));
+/// ```
+pub fn dq_abbr_of_base(node_id: &str) -> Option<&'static str> {
+    let base = analyst_base_of(node_id).unwrap_or(node_id);
+    DQ_ABBR_TO_BASE.iter().find(|(_, b)| *b == base).map(|(a, _)| *a)
+}
+
+/// 反馈表里某分析师的 `node_id` 取值形态：**去掉 `a-` 前缀的 base**（`market-analyst`），
+/// 且**不带档位后缀**。
+///
+/// 这不是随手选的写法，而是与唯一读侧对齐的结果：`evolve_node_command` / `get_node_feedbacks`
+/// 按 `NodeId.eq(...)` 精确过滤，而调用方传的就是去前缀的 base（分析师卡的 `expertId`）。
+/// 写侧若加 `a-` 或加 `--mid`，新行一条也查不到（症状与前端的缩写表一模一样）。
+/// 档位信息走 `quality_metrics_json.tier`；要按 (分析师, 档) 分桶得先改读侧聚合，
+/// 不能靠给写侧再发明一种键形态 —— 那会是第四种。
+///
+/// ```
+/// use axagent_harness::holding_period::dq_feedback_node_id;
+/// assert_eq!(dq_feedback_node_id("a-market-analyst"), "market-analyst");
+/// assert_eq!(dq_feedback_node_id("value-investor"), "value-investor");
+/// ```
+pub fn dq_feedback_node_id(base: &str) -> &str {
+    base.strip_prefix("a-").unwrap_or(base)
+}
+
 /// 统计 / 先验 / 错题本**按代筛样的起算代际**（PLAN four-horizon §五十一-②，2026-10-04 批准）。
 ///
 /// 语义是**下限**而不是「等于当前代」：125 起（四档分支机制落地那一代）的样本算法口径可比，

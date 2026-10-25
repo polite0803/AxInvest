@@ -120,10 +120,8 @@ export interface ModelParamOverrides {
   temperature?: number;
   maxTokens?: number;
   topP?: number;
-  frequencyPenalty?: number;
   useMaxCompletionTokens?: boolean;
   noSystemRole?: boolean;
-  forceMaxTokens?: boolean;
   thinkingParamStyle?: string;
   requestDelayMs?: number;
 }
@@ -142,10 +140,6 @@ export interface ConversationCategory {
 
   // 使用 NullableModelRef 保证结构一致性
   defaultModel: NullableModelRef;
-  defaultTemperature: number | null;
-  defaultMaxTokens: number | null;
-  defaultTopP: number | null;
-  defaultFrequencyPenalty: number | null;
   sortOrder: number;
   isCollapsed: boolean;
   createdAt: number;
@@ -161,7 +155,6 @@ export interface Conversation {
   temperature: number | null;
   maxTokens: number | null;
   topP: number | null;
-  frequencyPenalty: number | null;
   searchEnabled: boolean;
   searchProviderId: string | null;
   thinkingBudget: number | null;
@@ -357,7 +350,6 @@ export interface UpdateConversationInput {
   temperature?: number | null;
   maxTokens?: number | null;
   topP?: number | null;
-  frequencyPenalty?: number | null;
   searchEnabled?: boolean;
   searchProviderId?: string | null;
   thinkingBudget?: number | null;
@@ -496,23 +488,17 @@ export interface AppSettings {
   defaultTemperature: number | null;
   defaultMaxTokens: number | null;
   defaultTopP: number | null;
-  defaultFrequencyPenalty: number | null;
   defaultContextCount: number | null;
 
   // 回退模型：主模型失败且未产出内容时自动切换重试
   fallbackModel: NullableModelRef;
   // 图片模型：图像理解 / 图片生成默认模型
   imageModel: NullableModelRef;
-  // 视频模型：视频理解默认模型
-  videoModel: NullableModelRef;
-  // 语音模型：语音转写 / 语音合成默认模型
-  voiceModel: NullableModelRef;
 
   titleSummaryModel: NullableModelRef;
   titleSummaryTemperature: number | null;
   titleSummaryMaxTokens: number | null;
   titleSummaryTopP: number | null;
-  titleSummaryFrequencyPenalty: number | null;
   titleSummaryContextCount: number | null;
   titleSummaryPrompt: string | null;
 
@@ -520,7 +506,6 @@ export interface AppSettings {
   compressionTemperature: number | null;
   compressionMaxTokens: number | null;
   compressionTopP: number | null;
-  compressionFrequencyPenalty: number | null;
   compressionPrompt: string | null;
 
   proxyType: string | null;
@@ -555,7 +540,6 @@ export interface AppSettings {
   shortcutRegistrationLogsEnabled?: boolean;
   shortcutTriggerToastEnabled?: boolean;
   notificationsEnabled?: boolean;
-  miniWindowEnabled?: boolean;
   startMinimized?: boolean;
   closeToTray?: boolean;
   notifyBackup?: boolean;
@@ -582,10 +566,6 @@ export interface AppSettings {
   s3AccessKeyId?: string | null;
   s3Root?: string | null;
   s3UsePathStyle?: boolean;
-  s3SyncEnabled?: boolean;
-  s3SyncIntervalMinutes?: number;
-  s3MaxRemoteBackups?: number;
-  s3IncludeDocuments?: boolean;
   /** Closed-loop nudge scheduler enabled */
   closedLoopEnabled?: boolean;
   /** Closed-loop nudge interval in minutes (default 5) */
@@ -1655,10 +1635,6 @@ export type CreateConversationInput = {
   providerId: string;
   modelId: string;
   systemPrompt?: string;
-  temperature?: number;
-  maxTokens?: number;
-  topP?: number;
-  frequencyPenalty?: number;
   workspaceSnapshot?: ConversationWorkspaceSnapshot;
 };
 

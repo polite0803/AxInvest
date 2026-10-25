@@ -327,13 +327,46 @@ let f1_default = 0.15;  // V49 修复: 从 0.25 下调 — 技术面(趋势跟�
 let f1_weight = if present(totalScore) { get_weight(f_weights, "trend", f1_default) } else { 0.0 };
 let f1_signal = if present(totalScore) { pm_score_to_signal(totalScore) } else { 0.0 };
 
-// ── 因子 2: 共识 ──
+// ── 因子 2: 辩论共识（方向 × 收敛强度）──
+// 契约（`agency_experts/stock-analysis/debate-convergence.md` 工作流程第 5 步 + 字段说明）：
+//   `consensus_score` = **双方达成共识的程度**（起点 50；双方 strength 差距 <15 → +20；
+//   差距 >30 → 占优方 −10；remaining_disputes × −5），本身**没有方向含义**。
+// 旧口径 `pm_score_to_signal(consensus_score)` 把「收敛度高」直接读成看多。现网实证
+// （2026-10-25 全库 283 条带聚合预测的记录）：direction 分布是 bearish 165 / divided 46 /
+//   neutral 46 / bullish 20 ⇒ 「双方一致看空」是完全正常的一种收敛形态，而旧口径会给它
+//   **正**信号；实测一条 direction=neutral、consensus_score=55 的记录被投成 +0.1 看多。
+// 真方向住在同一份产物的 `aggregate_prediction.direction`（此前没有任何决策入口消费它，
+//   只被「决策输入诊断」面板读）。
+//
+// 现口径把两件事分开：方向取 `direction` 的符号，强度取 `consensus_score/100` 的收敛度。
+// 三种「本腿不给方向」的处置各不相同：
+//   · 字段没吐 / 值域外 ⇒ 真缺席，进 data_gaps；
+//   · 明确 neutral·divided ⇒ 是结论不是缺口，按既有纪律**不写** data_gaps（同 :821 那段），
+//     只让权重退出，面板从 `factors.f2.weight = 0` 反解；
+//   · `consensusScore` 本身缺席 ⇒ 沿用原 data_gaps 那一句。
+// 任何一种都让 f2 **权重退出**，而不是留 0.25 权重挂一个 0 信号 —— 那是把「拿不到」
+// 冒充「中性」，会虚报证据完整度（与 f5 / f7 的退出纪律同族）。
+// ⚠ 本腿仍只取 **mid 代表档**的收敛节点（与 `consensusScore` 同档，见种子注入处注释）；
+//   逐档取数是既存缺口，不在本批一起动 —— 一次只改一个维度，posterior 才可按条归因。
 let f2_default = 0.25;
-// V29 修复: 共识因子应使用独立的回测权重键 "consensus"，而非复用 "trend"
-// factor_weights 结构为 {trend:{...}, macd:{...}, rsi:{...}, consensus:{...}, ...}
-// 若回测数据无 "consensus" 键，get_weight 会 fallback 到 f2_default
-let f2_weight = if present(consensusScore) { get_weight(f_weights, "consensus", f2_default) } else { 0.0 };
-let f2_signal = if present(consensusScore) { pm_score_to_signal(consensusScore) } else { 0.0 };
+let f2_direction_known = present(consensusDirection)
+    && type_of(consensusDirection) == "string"
+    && (consensusDirection == "bullish" || consensusDirection == "bearish"
+        || consensusDirection == "neutral" || consensusDirection == "divided");
+let f2_dir_sign = if consensusDirection == "bullish" {
+    1.0
+} else if consensusDirection == "bearish" {
+    -1.0
+} else {
+    0.0
+};
+// V29: 共识因子使用独立回测权重键 "consensus"（不复用 "trend"）；无该键时回落 f2_default
+let f2_weight = if present(consensusScore) && f2_direction_known && f2_dir_sign != 0.0 {
+    get_weight(f_weights, "consensus", f2_default)
+} else { 0.0 };
+let f2_signal = if f2_weight > 0.0 {
+    f2_dir_sign * clamp(consensusScore.to_float() / 100.0, 0.0, 1.0)
+} else { 0.0 };
 
 // ── 公告关键词风险检测（P2 新增，f3 催化剂修正）──
 // 数据源: t-catalyst-data → get_stock_announcements
@@ -1259,6 +1292,20 @@ let f6_weight = if f6_signal != 0.0 { f6_default } else { 0.0 };
 // 不消费 trader.positionPct（避免仓位自指）、不消费 trader.action（避免 action 自指）。
 // 2026-09-23 退出语义：`f7_weight` 的定义**下移到 `f7_signal` 之后**（见该处注释）——
 //   由「本因子是否真的产生方向信号」决定，而不是无条件 0.10。
+// v183：f7 只有两条互斥分支 —— 注入了 trader 判定的那一侧走 trader 口径（`f7_source="trader"`），
+// 没注入 trader 判定、且分析师结构票在场的那一侧走分析师票口径（`f7_source="analyst_votes"`）。
+// ⚠ 确定性风险收益比那条分支（B）**已删除**：`margin_of_safety ≡ dcf.upsidePct`，
+// 而 f5 估值腿已在吃同一份 `dcf.upsidePct` ⇒ 同一份证据加权两次，不是独立第三条腿。
+// f7 的第三种口径（v183）：分析师结构票。先在**外边**把行集取出来，
+// 让分支条件与 `f7_source` 复用同一个判据（两处各写一遍 present(...) 就是两份口径）。
+let f7_vote_rows = if present(analyst_votes_by_tier) && type_of(analyst_votes_by_tier) == "map"
+    && type_of(analyst_votes_by_tier[picked_tier]) == "array" {
+    analyst_votes_by_tier[picked_tier]
+} else {
+    []
+};
+let f7_votes_usable = f7_vote_rows.len() > 0;
+
 let f7_signal = if present(trader_direction) && type_of(trader_direction) == "string" {
     // V65 新路径: 定性方向 + 置信度 + 证据密度 + 风险调制
     let dir = trader_direction.to_lower();
@@ -1316,6 +1363,68 @@ let f7_signal = if present(trader_direction) && type_of(trader_direction) == "st
     } else if dir.contains("sell") || dir.contains("bear") || dir.contains("看空") || dir.contains("卖出") || dir.contains("short") {
         clamp(-conf * 0.6 * combined_mod, -0.6, -0.05)
     } else { 0.0 }
+} else if f7_votes_usable {
+    // ── v183 C 路径：分析师结构票 ⇒ 净票方向 × 置信 × 离散度折减 ──
+    //
+    // 与 V65 那条**同形**（方向×置信×调制，clamp 到 ±0.6），四个槽全部换成三族产出，
+    // 且刻意挑的是「决策链从未消费」的那组量，避免把同一要素计两次：
+    //   dir        ← 各分析师 (bull_score − bear_score)/100 的均值（净票；f2 吃的是辩论收敛后的
+    //                叙事方向，不是这组结构化票）
+    //   conf       ← 各分析师 confidence 的均值（>1 视为 0~100 口径，与 V75 同一归一纪律）
+    //   调制①      ← 票间离散度 sd（σ∈[−1,1] ⇒ sd∈[0,1]）折减 `1 − sd`：分歧越大越不可信。
+    //                用连续折减而不是再抄一档阈值表 —— 阈值表是「一个算法 + 四套参数」那族缺陷
+    //                的入口，且这里没有任何新常数可调。
+    //   调制②      ← `risk_llm_eff` 的风险档（极高0.5/高0.7/中1.0/低1.1，与 V65 的 risk_mod 逐字同判据）。
+    //                f4 把同一档作为**加权证据**消费，这里只作**调制** ⇒ 不产生第二条同权重腿。
+    // 不可信实例（`untrusted:true`）直接剔除：被判定为编造/失败的产出不配进证据，与 dqi 同一纪律。
+    let n = 0.0;
+    let net_sum = 0.0;
+    let conf_sum = 0.0;
+    let conf_n = 0.0;
+    let sq_sum = 0.0;
+    for row in f7_vote_rows {
+        if present(row["untrusted"]) && row["untrusted"] == true { continue; }
+        let bull = row["bullScore"];
+        let bear = row["bearScore"];
+        if type_of(bull) != "f64" || type_of(bear) != "f64" { continue; }
+        let one = ((bull - bear) / 100.0).clamp(-1.0, 1.0);
+        net_sum += one;
+        n += 1.0;
+        let c = row["confidence"];
+        let cv = if type_of(c) == "f64" { c } else if type_of(c) == "i64" || type_of(c) == "int" {
+            c.to_float()
+        } else { () };
+        if cv != () {
+            let cn = if cv > 1.0 { cv / 100.0 } else { cv };
+            conf_sum += cn;
+            conf_n += 1.0;
+        }
+    }
+    if n <= 0.0 {
+        0.0
+    } else {
+        let net = net_sum / n;
+        for row in f7_vote_rows {
+            if present(row["untrusted"]) && row["untrusted"] == true { continue; }
+            let bull = row["bullScore"];
+            let bear = row["bearScore"];
+            if type_of(bull) != "f64" || type_of(bear) != "f64" { continue; }
+            let one = ((bull - bear) / 100.0).clamp(-1.0, 1.0);
+            sq_sum += (one - net) * (one - net);
+        }
+        let sd = (sq_sum / n).sqrt();
+        let conf = if conf_n > 0.0 { clamp(conf_sum / conf_n, 0.0, 1.0) } else { 0.5 };
+        let risk_mod = if present(risk_llm_eff) && type_of(risk_llm_eff) == "string" {
+            let rl = risk_llm_eff.to_lower();
+            if rl.contains("极高") { 0.5 }
+            else if rl.contains("高") && !rl.contains("极高") { 0.7 }
+            else if rl.contains("中") { 1.0 }
+            else if rl.contains("低") { 1.1 }
+            else { 1.0 }
+        } else { 1.0 };
+        let combined_mod = clamp((1.0 - clamp(sd, 0.0, 1.0)) * risk_mod, 0.2, 1.3);
+        clamp(net * conf * 0.6 * combined_mod, -0.6, 0.6)
+    }
 } else if present(trader_target_price) && present(trader_stop_loss) && trader_stop_loss > 0.0 {
     // 旧兼容路径: 仍有 targetPrice/stopLoss 但无 verdict（极少见，仅作兜底）
     if present(current_price) && current_price > 0.0 {
@@ -1354,6 +1463,16 @@ let f7_signal = if present(trader_direction) && type_of(trader_direction) == "st
 //       占着 0.10 权重，使 no_f7 版与主版产生**虚假差异**）。
 //   ③ `f7_weight_pct`（落库，供 compute_decision_agreement 的防自指标记）：
 //      σ = 0 时为 0，含义是「本次公式未吸收 trader 观点」—— 比旧值的 0.10/total 更准确。
+// f7 来源（供输出/审计区分）：trader = 含交易观点口径；analyst_votes = 分析师结构票（v183 生产口径）；
+// absent = 两者都没有 ⇒ σ=0 ⇒ 该腿退出权重。
+let f7_source = if present(trader_direction) && type_of(trader_direction) == "string" {
+    "trader"
+} else if f7_votes_usable {
+    "analyst_votes"
+} else {
+    "absent"
+};
+let f7_name = if f7_source == "analyst_votes" { "analyst_vote" } else { "trade_signal" };
 let f7_default = 0.10;
 // ↑ 基线权重此前以裸值同时出现在「权重分支」与下方 `max_weight` 手抄 literal 两处，
 //   抽成具名与其余 11 条腿同形态（值不变，仍 0.10）。
@@ -1651,7 +1770,7 @@ let f12_weight = if f12_signal != 0.0 { get_weight(f_weights, "momentum", f12_de
 //   理由（同一要素不得重复产生决策影响）：
 //     · `DECISION_LEG_ANALYST` 把 f13 映射到 **`a-sector`**；
 //     · `a-sector`（"行业景气度与轮动分析"）**本来就在股票分析链里跑**，其观点经
-//       「多空辩论 → `debate-convergence.consensus_score` → f2（权重 0.25）」进入决策；
+//       「多空辩论 → `debate-convergence.aggregate_prediction.direction` → f2（权重 0.25）」进入决策；
 //     · 趋势智选引以为据的政策 / 消息 / 产业链瓶颈 / 催化剂叙事，在分析链里分别由
 //       `a-policy` / `a-news` / `a-sector` / `a-catalyst` 覆盖。
 //   ⇒ 再接一次就是把同一维度**第二次**计入后验，属本仓 P1-1「因子协方差衰减」要消除的
@@ -1883,6 +2002,19 @@ let trader_price_no_info = trader_data_valid && present(current_price)
     } else {
         current_price - trader_target_price
     }) / current_price < 0.005);
+// ── v183：本侧「没吃 LLM 决策」必须是一条**说出来的话**，不是静默 ──
+// trader 报价的自洽检查族（R-202/R-203/R-204）与空头预测否决（R-201 的本脚本内那份）都只在
+// 有 trader 输入时才运行。生产侧摘掉这些输入后它们**不运行** —— 这既不是「检查通过」也不是
+// 「未发现矛盾」，必须单独成句，否则事后读记录会把「不适用」读成「无问题」。
+if !present(trader_direction) && !present(trader_target_price) {
+    decision_trail.push(#{
+        "rule_id": "R-213",
+        "status": "INFO",
+        "detail": "本侧未注入 trader 决策输入 ⇒ LLM 报价自洽检查(R-202/R-203/R-204)与脚本内空头预测否决(R-201)均不适用；f7 走分析师结构票",
+        "timestamp": 0.0,
+    });
+}
+
 if trader_price_no_info {
     decision_trail.push(#{
         "rule_id": "R-204",
@@ -1989,7 +2121,8 @@ let evidence_scale = pm_evidence_scale(total_weight, max_weight);
 	//   ③ 封顶值上调（0.48→0.50 / 0.53→0.55）：原 0.48 会把整个「持有」区间压掉，
 	//      与「定性参考」的定位不符。
 	let TRADER_CAP_MIN_WEIGHT = if present(trader_cap_min_weight) { trader_cap_min_weight } else { 0.08 };
-	let posterior_cap = if trader_data_valid && f7_weight >= TRADER_CAP_MIN_WEIGHT && present(f7_signal) {
+	// trader 否决权只服务 trader 路径；独立公式的 f7 是分析师结构票，不受这条自指约束。
+	let posterior_cap = if f7_source == "trader" && trader_data_valid && f7_weight >= TRADER_CAP_MIN_WEIGHT && present(f7_signal) {
 	    if f7_signal < -0.6 { 0.50 }
 	    else if f7_signal < -0.35 { 0.55 }
 	    else { 1.0 }
@@ -2077,12 +2210,42 @@ let evidence_scale = pm_evidence_scale(total_weight, max_weight);
 	    else if effective_posterior >= 0.50 { 1.5 }
 	    else if effective_posterior >= 0.42 { 1.5 }
 	    else { 0.0 };
-	let odds = if present(trader_target_price) && present(trader_stop_loss) && present(current_price)
+	// ── v183：赔率的第二口径 —— 上行取估值安全边际、下行取**本档止损%** ──
+	// 原实现只有两档：trader 报价算出的真实赔率，或 `odds_fallback`（按 effective_posterior 分档）。
+	// 生产侧摘掉 trader 输入后若仍只剩那两档，凯利仓位就永远走分档表 —— 那是「按证据强度给一个
+	// 经验赔率」，不是这笔交易的实际盈亏比。本口径用**非 LLM 决策**的两份量重建实际盈亏比：
+	//   上行 = `t-valuation.result.content.margin_of_safety.pct`（与价值投资者那份同值的算法量，
+	//          f5 把它当**加权证据**消费；这里是当**尺度**用 ⇒ 不产生第二条同权重腿，与 R-201 同理）
+	//   下行 = 本档止损%（`sl_pct_ultra_short/short/mid/long`，既有可调参数，不新建表）
+	// 判据两侧都要求正数且现价在场；任一不成立 ⇒ 退回分档表，且来源标签如实写清退到哪一档。
+	let mos_up = if !present(valuation_margin_pct) {
+	    ()
+	} else if type_of(valuation_margin_pct) == "f64" {
+	    valuation_margin_pct
+	} else if type_of(valuation_margin_pct) == "i64" || type_of(valuation_margin_pct) == "int" {
+	    valuation_margin_pct.to_float()
+	} else { () };
+	let sl_raw = if picked_tier == "ultra_short" { sl_pct_ultra_short } else if picked_tier == "short" {
+	    sl_pct_short
+	} else if picked_tier == "mid" { sl_pct_mid } else { sl_pct_long };
+	let sl_up = if !present(sl_raw) {
+	    ()
+	} else if type_of(sl_raw) == "f64" {
+	    sl_raw
+	} else if type_of(sl_raw) == "i64" || type_of(sl_raw) == "int" {
+	    sl_raw.to_float()
+	} else { () };
+	let odds_from_trader = present(trader_target_price) && present(trader_stop_loss) && present(current_price)
 	    && trader_stop_loss > 0.0 && current_price > trader_stop_loss
-	    && trader_target_price > current_price {
+	    && trader_target_price > current_price;
+	let odds_from_valuation = mos_up != () && sl_up != () && present(current_price) && current_price > 0.0
+	    && mos_up > 0.0 && sl_up > 0.0;
+	let odds = if odds_from_trader {
 	    let profit = trader_target_price - current_price;
 	    let loss = current_price - trader_stop_loss;
 	    if loss > 0.0 { clamp(profit / loss, 0.0, 10.0) } else { 0.0 }
+	} else if odds_from_valuation {
+	    clamp(mos_up / sl_up, 0.0, 10.0)
 	} else { odds_fallback };
 	// 记录赔率来源, 用于 decision_trail 追溯
 	// V74 修复(2026-09-12): 来源标签必须与实际生效的 odds 分支**同条件**。
@@ -2091,10 +2254,15 @@ let evidence_scale = pm_evidence_scale(total_weight, max_weight);
 	//   于是看空/异常样本会产出「赔率=0.0(trader)」这类自相矛盾的归因 ——
 	//   那个 0.0 恰恰来自 odds_fallback 的 posterior<0.42 档，与 trader 无关。
 	//   归因字段说谎会同时污染 decision_trail 追溯与用户对赔率来源的判断。
-	let odds_from_trader = present(trader_target_price) && present(trader_stop_loss) && present(current_price)
-	    && trader_stop_loss > 0.0 && current_price > trader_stop_loss
-	    && trader_target_price > current_price;
-	let odds_source = if odds_from_trader { "trader" } else { "波动率fallback" };
+	let odds_source = if odds_from_trader {
+	    "trader"
+	} else if odds_from_valuation {
+	    "估值安全边际÷本档止损"
+	} else {
+	    // 旧标签「波动率fallback」从说谎：自变量是 `effective_posterior`（2026-09-23 起同源），
+	    // 与波动率无关。v183 后它是**退路**而不再是常态，标签必须区分这三态。
+	    "effective_posterior 分档表"
+	};
 	// ── 2026-09-23: 仓位链的概率量由 `posterior` 统一为 **`effective_posterior`** ──
 	//
 	// 病根：同一条决策链上有**两个概率量**在流 —— `action` 阶梯读 `effective_posterior`
@@ -3252,6 +3420,10 @@ let action_source = if valuation_capped { "valuation_cap" }
 let data_gaps = [];
 if !present(totalScore) { data_gaps.push("技术服务评分(t-scoring)"); }
 if !present(consensusScore) { data_gaps.push("辩论共识分数(debate-convergence)"); }
+// f2 的方向来源缺席（字段没吐或值域外）—— 与上面「分数没吐」是两条不同的缺席：
+// 前者是收敛节点没给方向（本腿无法投票），后者是收敛度量化缺失。合成一条就看不出该修哪个。
+// ⚠ 「direction 明确是 neutral/divided」**不写在这里**：那是结论而非缺口（见 f2 段注释）。
+if !f2_direction_known { data_gaps.push("辩论聚合方向(aggregate_prediction.direction 未产出或值域外)"); }
 if !present(catalyst_level) || catalyst_level == "" { data_gaps.push("催化剂评估(a-catalyst)"); }
 // overall_risk 始终存在（算法分类确保兜底）
 if !present(money_flow) { data_gaps.push("资金流向(t-hotmoney-data)"); }
@@ -3717,7 +3889,7 @@ let gap_note = if data_gaps.len() > 0 {
             "f4":  #{ "name": "risk",         "sigma": (f4_adjusted*1000.0).round()/1000.0, "weight": (f4_weight*10000.0).round()/10000.0 },
             "f5":  #{ "name": "valuation",    "sigma": (f5_signal*1000.0).round()/1000.0,   "weight": (f5_weight*10000.0).round()/10000.0 },
             "f6":  #{ "name": "data_quality", "sigma": (f6_signal*1000.0).round()/1000.0,   "weight": (f6_weight*10000.0).round()/10000.0 },
-            "f7":  #{ "name": "trade_signal", "sigma": (f7_signal*1000.0).round()/1000.0,   "weight": (f7_weight*10000.0).round()/10000.0 },
+            "f7":  #{ "name": f7_name, "sigma": (f7_signal*1000.0).round()/1000.0,   "weight": (f7_weight*10000.0).round()/10000.0 },
             "f9":  #{ "name": "money_flow",   "sigma": (f9_signal*1000.0).round()/1000.0,   "weight": (f9_weight*10000.0).round()/10000.0 },
             "f10": #{ "name": "chip",         "sigma": (f10_signal*1000.0).round()/1000.0,  "weight": (f10_weight*10000.0).round()/10000.0 },
             "f11": #{ "name": "pace",         "sigma": (f11_signal*1000.0).round()/1000.0,  "weight": (f11_weight*10000.0).round()/10000.0 },
@@ -3837,6 +4009,7 @@ let gap_note = if data_gaps.len() > 0 {
     //   与同一次输出里的 `evidence.avgSignal`（`*100/100` ⇒ 0.16）**同量不同刻度**（铁律 15）。
     //   决策解释官会读本串，两种刻度会让它误判信号强度。统一为 `/100.0`。
     "computation_logs": `prior=${prior}${prior_src} post=${(posterior*100.0).round()/100.0} sig=${(avg_signal*100.0).round()/100.0} w=${total_weight} odds=${(odds*10.0).round()/10.0} k=${(kelly_raw*1000.0).round()/1000.0} pos=${position_pct} f9=${(f9_signal*100.0).round()/100.0} f10=${(f10_signal*100.0).round()/100.0} f11=${(f11_signal*100.0).round()/100.0} f12=${(f12_signal*100.0).round()/100.0} ann=${(announcement_modifier*100.0).round()/100.0}`,
+    "f7_source": f7_source,
     "f7_free": #{
         "posterior": posterior_no_f7,
         "action": f7_free_action,
@@ -3962,6 +4135,12 @@ catch (err) {
         "decision_trail": [],
         "simulation_gate": #{ "vetoed": false, "rule_id": "", "reason": "" },
         "computation_logs": "ERROR: " + err,
+        // v185：异常路径也要自述 f7 口径（值域同成功路径：trader / analyst_votes / absent）。
+        //   本路径压根没跑到 f7 判定 ⇒ 记 "absent"（= 不是 trader 口径的结论）。
+        //   ⚠ 为什么必须显式写出来而不是缺键：展示期 `merge_price_fields_from_llm`
+        //   的合并门是**白名单**（只有口径确为 trader 才借 LLM 价位），缺键 ⇒ 不借。
+        //   但缺键同时会让 UI 说不出「本条读没读 LLM 决策」⇒ 口径自述与防泄漏两处都要。
+        "f7_source": "absent",
         "f7_free": #{ "posterior": 0.5, "action": "观望", "effective_posterior": 0.5, "f7_weight": 0.15, "total_weight": 0.0, "f7_weight_pct": 0.0 }
     };
 }

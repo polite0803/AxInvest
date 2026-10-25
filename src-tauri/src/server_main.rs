@@ -70,6 +70,12 @@ async fn async_main() {
     axagent_lib::ensure_opc_config_synced(&app_dir);
 
     // ── 创建 AppState（复用 Tauri 版本的全部业务逻辑） ──
+    //
+    // ⚠ R-3d（2026-10-26）：工作流工具 resolver 与共享 Rhai Engine 宿主函数注册
+    // **已在 `create_app_state` 内注入**（所有构造 AppState 的路径的共同入口）
+    // ⇒ 本入口（无头服务）与 CLI **自动获得**，不再需要各自补一行。
+    // 此前这两步只在 Tauri 应用路径与 `axagent-batch-rerun` 里
+    // ⇒ 无头服务与 `axagent-validate-backfill` 都缺 ⇒ 实测「工具未注册」⇒ 候选 0 行。
     let _state = axagent_lib::init::state::create_app_state(db_result)
         .await
         .expect("Fatal: app state initialization failed");

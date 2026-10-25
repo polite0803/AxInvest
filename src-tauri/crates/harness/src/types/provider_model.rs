@@ -186,8 +186,9 @@ pub struct Model {
     pub group_name: Option<String>,
     pub model_type: ModelType,
     pub capabilities: Vec<ModelCapability>,
+    /// 上下文窗口（输入 + 输出），只用于 token 预算，不是单次输出上限。
+    /// 单次输出上限的唯一权威是 [`ModelParamOverrides::max_tokens`]。
     pub max_tokens: Option<u32>,
-    pub max_output_tokens: Option<u32>,
     pub enabled: bool,
     pub param_overrides: Option<ModelParamOverrides>,
     /// Input price per million tokens (USD). When set, used for accurate cost calculation.
@@ -324,16 +325,12 @@ pub struct ModelParamOverrides {
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
     pub top_p: Option<f32>,
-    pub frequency_penalty: Option<f32>,
     /// When true, the provider adapter should send `max_completion_tokens`
     /// instead of `max_tokens` (required by OpenAI o-series models).
     pub use_max_completion_tokens: Option<bool>,
     /// When true, system messages are converted to user messages
     /// (for models that don't support the system role).
     pub no_system_role: Option<bool>,
-    /// When true, always include max_tokens in the request
-    /// (falls back to 4096 if conversation.max_tokens is not set).
-    pub force_max_tokens: Option<bool>,
     /// Thinking parameter format for the provider API.
     /// "reasoning_effort" (default/OpenAI) or "enable_thinking" (SiliconFlow).
     pub thinking_param_style: Option<String>,
@@ -360,7 +357,6 @@ mod request_delay_lookup_tests {
             model_type: crate::types::ModelType::Chat,
             capabilities: vec![],
             max_tokens: None,
-            max_output_tokens: None,
             enabled: true,
             param_overrides,
             input_price_per_mtok: None,

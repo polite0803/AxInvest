@@ -1,11 +1,12 @@
+use super::decision::ExecutionParams;
 use super::decision::QualityPrecheckResult;
 use super::decision::{
     attribute_horizon_divergence, build_dashboard_from_workflow_result, compute_decision_agreement,
     compute_horizon_agreements, data_quality_precheck, extract_decision_fields,
-    extract_decision_json, extract_decisions_by_horizon, extract_formula_decision_json,
-    extract_horizon_price_map, extract_horizon_source, extract_llm_decision_json,
-    extract_position_state, load_and_inject_template, normalize_action_for_storage,
-    opposite_direction_gated_action, parse_asof_param, resolve_runtime_options,
+    extract_decision_json, extract_decisions_by_horizon, extract_f7_reference_formula_json,
+    extract_formula_decision_json, extract_horizon_price_map, extract_horizon_source,
+    extract_llm_decision_json, extract_position_state, load_and_inject_template,
+    normalize_action_for_storage, opposite_direction_gated_action, parse_asof_param,
 };
 use crate::AppState;
 use crate::commands::error::{ErrorCategory, ErrorResponse};
@@ -822,10 +823,11 @@ pub async fn run_stock_workflow_inner(
 
     let engine = Arc::clone(&state.work_engine);
 
-    // ── 从模板变量中解析执行参数 ──
-    // max_concurrent / step_timeout / total_timeout 通过模板变量让用户在设置面板调整。
-    let (max_concurrent, step_timeout, total_timeout) =
-        resolve_runtime_options(loaded.variables.as_deref());
+    // ── 从模板变量中解析执行参数（并发 / 单步超时 / 工具超时 / 总超时的唯一解析点）──
+    // 四面都读模板变量，用户在「股票分析设置 → 参数」改的就是这里生效的那一份；
+    // 落到 RunOptions 由下方 `exec.apply_to(&mut opts)` 完成（P2 收口，2026-10-25）。
+    let exec = ExecutionParams::from_template_vars(loaded.variables.as_deref());
+    let total_timeout = exec.total_timeout;
 
     let wf_name = format!("stock-analysis-{stock_code}");
     // 必须用 with_hooks 变体携带模板 hooks_config：否则 pre_exec 的
@@ -942,14 +944,6 @@ pub async fn run_stock_workflow_inner(
     let input_schema = loaded.input_schema;
     let output_schema = loaded.output_schema;
     let template_vars = loaded.variables;
-    // 修复 E0382: 在 spawn 前（即 loaded.variables 被 move 到 template_vars 之后）从 template_vars 读取 tool_timeout
-    let tool_timeout_secs = template_vars
-        .as_ref()
-        .and_then(|vars| {
-            vars.iter().find(|v| v.name == "tool_timeout_secs").and_then(|v| v.value.as_u64())
-        })
-        .map(|s| std::cmp::max(s, 5))
-        .unwrap_or(30u64);
 
     let sc_for_ret = stock_code.clone();
     let sc_name = quote.name.clone();
@@ -987,20 +981,16 @@ pub async fn run_stock_workflow_inner(
                 // R5(2026-09-26): 同步写运行基线，供 data-quality 节点的
                 // pm_asof_degraded_methods 按「本轮 seq」过滤，挡掉同截止日旧运行的残留
                 as_of::set_global_degradation_baseline(deg_watermark);
-        // 按类型并发上限：tool/file 保持高位，llm/agent 对齐用户设定的 max_concurrent
-        // 修复: 默认按类型上限 llm=3 会覆盖全局 max_concurrent，使设置面板的值失效
-        let mut type_limits = std::collections::HashMap::new();
-        type_limits.insert("tool".into(), 10usize);
-        type_limits.insert("file".into(), 10usize);
-        type_limits.insert("llm".into(), max_concurrent);
-        type_limits.insert("agent".into(), max_concurrent);
-        // 从模板变量读取工具节点超时（已在 spawn 前从 template_vars 算出，避免 move 冲突）
+        // 并发 / step_timeout / tool_timeout / 按类型上限四面都由 `exec.apply_to` 写入
+        // （见本函数末尾），不在这里各抄一份字面量。
+        // 本轮真实执行 id：引擎在 `RunOptions.execution_id` 为空时会自己 mint 一个，
+        // 而那个 id 只活在引擎内部（从 `StepProgressEvent` 才流得出来）⇒ 落库旁路
+        // （analyst_feedbacks 的 execution_id 列）拿不到。这里先生成，**同一份**交给
+        // 引擎与反馈表，两边同源，不另造第二套 id。
+        let exec_id = uuid::Uuid::new_v4().to_string();
         let mut opts = RunOptions {
-            max_concurrent,
-            step_timeout,
-            tool_timeout: std::time::Duration::from_secs(tool_timeout_secs),
-            max_concurrent_by_type: Some(type_limits),
             progress_callback: Some(progress_cb),
+            execution_id: Some(exec_id.clone()),
             // analysis_id 标记：生命周期钩子据此识别业务封装路径并跳过
             // precheck/persist（钩子只服务对话直执行路径）；stock_name/
             // screening_source/as_of_date 供 enhance 钩子免重复计算。
@@ -1029,6 +1019,7 @@ pub async fn run_stock_workflow_inner(
             )),
             ..Default::default()
         };
+        exec.apply_to(&mut opts);
         // 变量增强（market_regime/sim_metrics/holdings/sector/regime 偏向/
         // lessons/similar_cases 等）已迁移至 stock-analysis-enhance 生命周期
         // 钩子（hooks::build_stock_analysis_variables），在 DAG 主循环前由引擎
@@ -1102,6 +1093,8 @@ pub async fn run_stock_workflow_inner(
             },
             Ok(inner_result) => match inner_result {
                 Ok(result) => {
+                // P2-C：运行结束一条阶段耗时汇总（只读日志；bench 脚本仍是主读数入口）。
+                log_stock_analysis_stage_timing(&result, &stock_code);
                 let wf_status = result.status;
                 match wf_status {
                     axagent_rt_workflow::workflow_engine::WorkflowStatus::Cancelled => {
@@ -1192,6 +1185,17 @@ pub async fn run_stock_workflow_inner(
                         ))
                         .unwrap_or_else(|_| "{}".to_string());
                         record_dqi_observation(&db, &aid, &template_id, &bb_snapshot).await;
+                        // 分析师质量反馈落库：与数据质量观测**同位**（黑板快照已成形），
+                        // 所有通道（对话直执行 / 每日批次 / T+0 重跑）共用这一趟 —— 反馈表
+                        // 的写入不再取决于「有没有人点开某个弹窗」。
+                        let fb_outcome = crate::commands::analyst_feedback::record_analyst_feedbacks(
+                            &db,
+                            &aid,
+                            &template_id,
+                            &bb_snapshot,
+                            &exec_id,
+                        )
+                        .await;
                         if let Err(e) = stock_analyses::Entity::update_many()
                             .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
                             .col_expr(stock_analyses::Column::DecisionAction, Expr::value(action))
@@ -1296,6 +1300,7 @@ pub async fn run_stock_workflow_inner(
                                 "degradationReason": "部分分析步骤失败，结果为部分数据",
                                 "dashboardReport": dashboard_report,
                                 "dashboardMd": dashboard_md,
+                                "analystFeedback": fb_outcome,
                             }),
                         ) {
                             tracing::warn!("[emit] workflow-completed 发送失败: {e}");
@@ -1330,6 +1335,8 @@ pub async fn run_stock_workflow_inner(
                         //   真正公式决策是 gate 的 增持/中风险）。铁律 41。
                         let llm_dj_agr = extract_llm_decision_json(&result);
                         let formula_dj_agr = extract_formula_decision_json(&result);
+                        // v180 建、v183 改口径：f7 参照侧（含交易观点）只读产物；不参与生产决策。
+                        let f7_reference = extract_f7_reference_formula_json(&result);
                         let agreement_breakdown = compute_decision_agreement(
                             formula_dj_agr.as_deref(),
                             llm_dj_agr.as_deref(),
@@ -1410,6 +1417,27 @@ pub async fn run_stock_workflow_inner(
                         let decision_json = decision_json.map(|dj| {
                             if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&dj) {
                                 if let Some(obj) = v.as_object_mut() {
+                                    // v180：独立公式只读对比（不改变 decision_action）。
+                                    // f7Source=risk_reward 表示该侧没有吸收 trader 观点；
+                                    // 与主公式的 f7WeightPct（trader 污染占比）是两个计数域。
+                                    if let Some(ref ind) = f7_reference {
+                                        obj.insert(
+                                            "f7ReferenceFormula".into(),
+                                            serde_json::json!({
+                                                "action": ind.get("action"),
+                                                "positionPct": ind.get("positionPct"),
+                                                "confidence": ind.get("confidence"),
+                                                "posterior": ind.get("posterior"),
+                                                "riskLevel": ind.get("riskLevel"),
+                                                "f7Source": ind.get("f7_source"),
+                                                "f7WeightPct": ind
+                                                    .get("f7_free")
+                                                    .and_then(|v| v.get("f7_weight_pct")),
+                                                "weightsCollapsed": ind.get("weightsCollapsed"),
+                                                "dataGaps": ind.get("data_gaps"),
+                                            }),
+                                        );
+                                    }
                                     if !horizon_agreements.is_empty() {
                                         obj.insert(
                                             "agreementByHorizon".into(),
@@ -1639,6 +1667,15 @@ pub async fn run_stock_workflow_inner(
                         ))
                         .unwrap_or_else(|_| "{}".to_string());
                         record_dqi_observation(&db, &aid, &template_id, &bb_snapshot).await;
+                        // 分析师质量反馈落库：与数据质量观测同位，快照成形即写。
+                        let fb_outcome = crate::commands::analyst_feedback::record_analyst_feedbacks(
+                            &db,
+                            &aid,
+                            &template_id,
+                            &bb_snapshot,
+                            &exec_id,
+                        )
+                        .await;
                         let llm_dj = extract_llm_decision_json(&result);
                         if let Err(e) = stock_analyses::Entity::update_many()
                             .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
@@ -1915,6 +1952,7 @@ pub async fn run_stock_workflow_inner(
                                 "output": result.output,
                                 "dashboardReport": dashboard_report,
                                 "dashboardMd": dashboard_md,
+                                "analystFeedback": fb_outcome,
                             }),
                         ) {
                             tracing::warn!("[emit] workflow-completed 发送失败: {e}");
@@ -2179,9 +2217,8 @@ pub async fn run_single_stock_analysis(
     let loaded =
         load_and_inject_template(db, stock_code, &effective_stock_name, template_id).await?;
 
-    // 5. 解析运行时参数
-    let (max_concurrent, step_timeout, _total_timeout) =
-        resolve_runtime_options(loaded.variables.as_deref());
+    // 5. 解析运行时参数（与主分析链同一个唯一解析点；本链不做外层总超时，故不取 total_timeout）
+    let exec = ExecutionParams::from_template_vars(loaded.variables.as_deref());
 
     // 5.5 [A1 借鉴] 历史反思教训注入已迁移至 stock-analysis-enhance 生命周期钩子
     //   （hooks::build_stock_analysis_variables），由引擎在 DAG 主循环前统一注入。
@@ -2199,32 +2236,12 @@ pub async fn run_single_stock_analysis(
         })?;
     let wf_id = workflow.id.clone();
 
-    let opts = RunOptions {
-        max_concurrent,
-        step_timeout,
-        // 按类型并发上限对齐全局 max_concurrent，修复默认 llm=3 覆盖用户设定
-        max_concurrent_by_type: Some({
-            let mut m = std::collections::HashMap::new();
-            m.insert("tool".into(), 10usize);
-            m.insert("file".into(), 10usize);
-            m.insert("llm".into(), max_concurrent);
-            m.insert("agent".into(), max_concurrent);
-            m
-        }),
-        // 从模板变量读取工具节点超时
-        tool_timeout: std::time::Duration::from_secs(
-            loaded
-                .variables
-                .as_ref()
-                .and_then(|vars| {
-                    vars.iter()
-                        .find(|v| v.name == "tool_timeout_secs")
-                        .and_then(|v| v.value.as_u64())
-                })
-                .map(|s| std::cmp::max(s, 5))
-                .unwrap_or(30),
-        ),
+    // 本轮真实执行 id（与对话直执行通道同口径）：引擎在 `RunOptions.execution_id`
+    // 为空时自己 mint，落库旁路拿不到 ⇒ 这里先生成并同时交给引擎与反馈表。
+    let exec_id = uuid::Uuid::new_v4().to_string();
+    let mut opts = RunOptions {
         progress_callback: None,
+        execution_id: Some(exec_id.clone()),
         // analysis_id 标记：生命周期钩子据此跳过 precheck/persist（本函数已同步完成），
         // 但 enhance 钩子仍然生效（写 lesson_applications 需要 analysis_id）
         input: Some(json!({"stock_code": &stock_code, "analysis_id": &analysis_id})),
@@ -2242,6 +2259,8 @@ pub async fn run_single_stock_analysis(
         tool_permissions: Some(super::strict_tool_permissions()),
         ..Default::default()
     };
+    // 四面（并发 / step_timeout / tool_timeout / 按类型上限）统一写入，不在字面量里各抄一份。
+    exec.apply_to(&mut opts);
 
     // 落库前取降级水位：与业务封装路径同一口径（按运行水位取全局切片），否则本轮快照的
     // `degraded` 块会把**上一轮**的 vendor 降级算进来。
@@ -2309,6 +2328,23 @@ pub async fn run_single_stock_analysis(
             .unwrap_or_else(|_| "{}".to_string());
             // 数据质量观测：与业务封装路径同源，快速链由 record_dqi_observation 内部拦下。
             record_dqi_observation(db, &analysis_id, template_id, &bb_snapshot).await;
+            // 分析师质量反馈落库：同位同纪律 —— 这条通道（每日自动化批次 / 候选池扫描）
+            // 不经过界面，前端触发器永远够不着它，只能在这里写。
+            let fb_outcome = crate::commands::analyst_feedback::record_analyst_feedbacks(
+                db,
+                &analysis_id,
+                template_id,
+                &bb_snapshot,
+                &exec_id,
+            )
+            .await;
+            if fb_outcome.failed > 0 {
+                tracing::warn!(
+                    "[stock_workflow] 本轮分析师反馈有 {} 条写库失败（已写 {} 条），analysis_id={analysis_id}",
+                    fb_outcome.failed,
+                    fb_outcome.written
+                );
+            }
 
             let _ = stock_analyses::Entity::update(stock_analyses::ActiveModel {
                 id: Set(analysis_id.clone()),
@@ -3279,6 +3315,70 @@ pub(crate) async fn trigger_adaptive_cycle(
             );
         }
     }
+}
+
+/// 股票分析阶段归类（与 `scripts/stock-analysis-bench.mjs` 同口径）。
+fn stock_analysis_stage_of(node_id: &str) -> &'static str {
+    if node_id.starts_with("a-") {
+        "analyst"
+    } else if node_id.starts_with("analyst-brief--") {
+        "brief"
+    } else if node_id.starts_with("debate-bull-bear--")
+        || node_id.starts_with("bull-r")
+        || node_id.starts_with("bear-r")
+    {
+        "debate"
+    } else if node_id.starts_with("debate-convergence--") {
+        "convergence"
+    } else if node_id.starts_with("value-investor--") || node_id.starts_with("value-verify--") {
+        "value"
+    } else if matches!(node_id, "risk-agg" | "risk-con" | "risk-neu" | "risk-convergence") {
+        "risk"
+    } else if node_id == "research-mgr" {
+        "research"
+    } else if node_id == "trader" {
+        "llm_decision"
+    } else if node_id.starts_with("pm-h-") || node_id == "pm-arbiter" {
+        "horizon"
+    } else if matches!(node_id, "portfolio-mgr" | "portfolio-mgr-f7-ref" | "portfolio-risk-gate") {
+        "formula"
+    } else if matches!(node_id, "rule-check" | "quality-gate" | "decision-explainer")
+        || node_id.starts_with("notify")
+        || node_id.starts_with("store")
+    {
+        "tail"
+    } else {
+        "misc"
+    }
+}
+
+/// P2-C：运行结束一条阶段耗时汇总日志（只读、不落库）。
+fn log_stock_analysis_stage_timing(
+    wf: &axagent_rt_workflow::workflow_engine::Workflow,
+    stock_code: &str,
+) {
+    use std::collections::BTreeMap;
+    let mut stages: BTreeMap<&'static str, (i64, i64, usize)> = BTreeMap::new();
+    for (id, state) in &wf.node_states {
+        let (Some(start), Some(end)) = (state.started_at, state.completed_at) else {
+            continue;
+        };
+        let entry = stages.entry(stock_analysis_stage_of(id)).or_insert((start, end, 0));
+        entry.0 = entry.0.min(start);
+        entry.1 = entry.1.max(end);
+        entry.2 += 1;
+    }
+    let summary: Vec<serde_json::Value> = stages
+        .iter()
+        .map(|(stage, (start, end, nodes))| {
+            serde_json::json!({
+                "stage": stage,
+                "wallMs": (end - start).max(0),
+                "nodes": nodes,
+            })
+        })
+        .collect();
+    tracing::info!(stock_code, stages = ?summary, "stock analysis stage timing summary");
 }
 
 #[cfg(test)]

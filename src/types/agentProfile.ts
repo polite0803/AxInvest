@@ -23,9 +23,6 @@ export interface AgentProfile {
   source: "builtin" | "agency" | "custom";
   tags: string[];
   suggestedProviderId?: string;
-  suggestedModelId?: string;
-  suggestedTemperature?: number;
-  suggestedMaxTokens?: number;
   searchEnabled?: boolean;
   recommendPermissionMode?: AgentBehaviorMode;
   recommendedTools?: string[];
@@ -52,9 +49,6 @@ export interface CreateAgentProfileInput {
   source?: "builtin" | "agency" | "custom";
   tags?: string[];
   suggestedProviderId?: string;
-  suggestedModelId?: string;
-  suggestedTemperature?: number;
-  suggestedMaxTokens?: number;
   searchEnabled?: boolean;
   recommendPermissionMode?: AgentBehaviorMode;
   recommendedTools?: string[];

@@ -19,6 +19,7 @@ import {
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
 import type {
+  F7ReferenceSnapshot,
   HorizonAgreement,
   HorizonDivergence,
   LlmDecisionsByHorizon,
@@ -506,6 +507,10 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
     crossCheck: crossCheckRaw != null && typeof crossCheckRaw === "object"
       ? (crossCheckRaw as unknown as StockDecision["crossCheck"])
       : undefined,
+    // v180 建、v183 改口径的 f7 对照：同白名单重建纪律，漏一行就等于「产端发了、界面从未显示」。
+    f7ReferenceFormula: normalizeF7Reference(source.f7ReferenceFormula),
+    // 生产侧自己的 f7 口径（rhai 顶层 `f7_source`）—— 没有它，面板说不出「本条到底读没读 LLM 决策」
+    f7Source: nonEmptyString(source.f7_source) ?? nonEmptyString(source.f7Source) ?? undefined,
   };
 }
 
@@ -901,6 +906,37 @@ function normalizeValuationReconciliation(raw: unknown): StockDecision["valuatio
     horizon: s("horizon", "horizon"),
   };
   return Object.values(out).every((v) => v === undefined) ? undefined : out;
+}
+
+/**
+ * v180 建、v183 改名：归一「f7 口径参照」快照（产端 `stock_workflow/core.rs` 嵌在 decision_json 顶层）。
+ *
+ * 键不存在 ⇒ `undefined`，**不是**空对象。这两件事在面板上要说两样：
+ *   · `undefined` = 该记录产自本口径之前，参照侧从未跑；
+ *   · 对象在场但内层某字段为 null = 参照侧跑了、那一项没取到值。
+ * 塌成空对象就会把前者显示成后者（2026-09-11 `weightsCollapsed`「字段一直发、界面
+ * 从未显示」是同一族失效的反向版本：这里是「没发却被显示成发了但都是空」）。
+ *
+ * 只读 camelCase：本块是 v180 才新增的输出，不存在 snake_case 存量形态，
+ * 因此不套用 `numberField` 那套双键名兼容（收了也没有数据来源，属死代码）。
+ */
+function normalizeF7Reference(raw: unknown): F7ReferenceSnapshot | undefined {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) { return undefined; }
+  const o = raw as Record<string, unknown>;
+  const n = (key: string): number | null => (o[key] != null && !isNaN(Number(o[key])) ? Number(o[key]) : null);
+  return {
+    action: nonEmptyString(o.action),
+    positionPct: n("positionPct"),
+    confidence: n("confidence"),
+    posterior: n("posterior"),
+    riskLevel: nonEmptyString(o.riskLevel),
+    f7Source: nonEmptyString(o.f7Source),
+    f7WeightPct: n("f7WeightPct"),
+    weightsCollapsed: typeof o.weightsCollapsed === "boolean" ? o.weightsCollapsed : null,
+    dataGaps: Array.isArray(o.dataGaps)
+      ? o.dataGaps.filter((g): g is string => typeof g === "string")
+      : null,
+  };
 }
 
 /**

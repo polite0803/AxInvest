@@ -5556,7 +5556,7 @@
       "empty": "Keine lokalen Werkzeuge",
       "title": "Lokale Werkzeuge"
     },
-    "maxTokens": "Maximale Token",
+    "maxTokens": "Maximale Ausgabe-Tokens",
     "maxTokensTooltip": "Maximale Anzahl von Token, die das Modell generieren kann",
     "mcpServers": {
       "add": "MCP-Server hinzufügen",
@@ -5733,6 +5733,7 @@
       "workingMemoryEntries": "{{count}} Einträge"
     },
     "messageChannels": "Nachrichtenkanäle",
+    "trayEnabled": "Systemtray anzeigen",
     "minimizeToTray": "Beim Schließen in die Taskleiste minimieren",
     "minutes": "Minuten",
     "modelAbilities": "Modellfähigkeiten",
@@ -15531,6 +15532,8 @@
     "actionUnavailable": "Nicht verfügbar",
     "amplitude": "Schwankungsbreite",
     "analystConsensus": "Analysten-Konsens",
+    "analystConsensusExcluded": "{count} Analyst(en) widersprechen ihren eigenen Bull-/Bear-Scores und bleiben bei diesem Konsens unberücksichtigt",
+    "analystConfidenceSelfReported": "Vom Analysten selbst gemeldete Sicherheit (0–100): nur wie überzeugend er sein eigenes Urteil findet. Sie ist weder gegen die spätere Kursentwicklung abgeglichen noch eine Trefferquote und passt nicht zur Skala der entscheidungsseitigen Konfidenz (Formel-Posterior) — beide sind nicht vergleichbar.",
     "bearish": "Bärisch",
     "bullish": "Bullisch",
     "cancelled": "Analyse abgebrochen — Teildaten werden angezeigt",
@@ -16736,7 +16739,8 @@
         "chip": "Chipverteilung",
         "pace": "Tempo",
         "momentum": "Momentum",
-        "bottleneck": "Engpass"
+        "bottleneck": "Engpass",
+        "analyst_vote": "Analystenstimme"
       },
       "attributionLabel": "Gründe der Ablehnung (aus bereits berechneten Feldern dieser Entscheidung):",
       "legContribution": "{{leg}} Beitrag {{sigma}} (Gewicht {{weight}})",
@@ -17680,7 +17684,6 @@
       "evolutionCollectingData": "Sammle {{nodeName}} Daten...",
       "evolutionNoData": "{{nodeName}} hat keine Feedback-Daten",
       "evolutionFailed": "{{nodeName}} Evolution fehlgeschlagen",
-      "feedbackUploadFailed": "{nodeName}: Diese Qualitätsrückmeldung konnte nicht hochgeladen werden — die Selbstentwicklung erhält diese Eingabe nicht",
       "evolutionTrigger": "{{nodeName}} Selbstentwicklung auslösen",
       "evolutionSuggestion": "🧬 {{nodeName}} Selbstentwicklungsvorschlag",
       "close": "Schließen",
@@ -18377,7 +18380,13 @@
       "snapshotAbsentNotPersisted": "Die Analyse wurde abgeschlossen, aber der erzeugende Kanal hat die Knotenergebnisse nicht gespeichert; Datenqualitätsdiagnose, Nachweise je Analyst und Dashboard-Neuaufbau sind daher nicht verfügbar.",
       "snapshotAbsentIncomplete": "Die Analyse ist noch nicht abgeschlossen, daher existiert kein Blackboard-Snapshot.",
       "snapshotAbsentRerunHint": "Analyse-Kette erneut ausführen; dieser Kanal speichert jetzt den Snapshot.",
-      "summaryLength": "Zusammenfassungslänge"
+      "summaryLength": "Zusammenfassungslänge",
+      "feedbackWriteFailed": "Analysten-Qualitätsrückmeldung nicht gespeichert: {{failed}} von {{written}} Einträgen fehlgeschlagen; die Selbstentwicklung erhält diese Eingaben nicht",
+      "feedbackSkippedFastChain": "Dieser Lauf nutzte die Schnellkette, daher gab es keine Diagnose je Analysten zu speichern (die Selbstentwicklung erhielt kein Feedback zu dieser Analyse)",
+      "feedbackSkippedBadSnapshot": "Der Blackboard-Snapshot dieses Laufs konnte nicht gelesen werden, daher wurde die Diagnose je Analysten nicht gespeichert (die Selbstentwicklung erhielt kein Feedback zu dieser Analyse)",
+      "feedbackSkippedNoAnalysisRow": "Für diesen Lauf wurde keine passende Analysezeile gefunden, daher wurde die Diagnose je Analysten nicht gespeichert (die Selbstentwicklung erhielt kein Feedback zu dieser Analyse)",
+      "feedbackSkippedNoDiagnosis": "Es gab keine Diagnose je Analysten zu speichern; die Selbstentwicklung erhielt für diese Analyse kein Feedback",
+      "feedbackSkippedUnknown": "Analysten-Feedback wurde aus unbekanntem Grund nicht gespeichert (die Selbstentwicklung erhielt kein Feedback zu dieser Analyse)"
     },
     "dataWarning": {
       "announcement": "Ankündigung",
@@ -18558,7 +18567,35 @@
       "sessionAfternoon": "Nachmittagssitzung",
       "sessionPostClose": "Nach Börsenschluss"
     },
-    "horizonPriorHitRate": "Trefferquote {{rate}} %"
+    "horizonPriorHitRate": "Trefferquote {{rate}} %",
+    "f7Reference": {
+      "weightsCollapsed": "Faktorgewichte dieser Seite sind kollabiert ⇒ Ergebnis nicht vergleichbar, nur als Nachweis.",
+      "actionAbsent": "Diese Seite gab keine Richtungsauswahl (das ist kein bärisches Urteil)",
+      "actionSame": "Gleiche Stufe wie die Produktionsformel",
+      "actionNotComparable": "Richtung fehlt auf einer Seite ⇒ diesmal keine Differenz der Richtung",
+      "valueNotComparable": "Zahlen fehlen auf einer Seite ⇒ keine numerische Differenz",
+      "posterior": "Posterior",
+      "riskLevel": "Risikostufe",
+      "f7Weight": "f7-Gewichtsanteil",
+      "f7WeightValue": "{{pct}}%",
+      "gapsPresent": "Dieser Seite fehlen {{n}} Upstream-Datensätze: {{gaps}}",
+      "gapsNone": "Upstream-Daten dieser Seite vollständig",
+      "title": "f7-Basisvergleich (Produktion = Analystenstimmen, Referenz = Händlersicht)",
+      "notProduced": "Dieser Datensatz hat keinen f7-Basisvergleich (Analyse vor dieser Basis oder Referenzknoten nicht gelaufen)",
+      "productionLabel": "Produktionsseite: ",
+      "referenceLabel": "Referenzseite: ",
+      "sameBasis": "Beide Seiten nutzen dieselbe f7-Basis ⇒ dieser Vergleich ist nichtig (die Differenz zeigt nur doppelt gezählte Eingabe).",
+      "actionDiffer": "Unterschiedliche Stufen: Produktion {{production}} vs Referenz {{reference}}",
+      "confDelta": "Konfidenz {{delta}} (Produktion {{production}} vs Referenz {{reference}})",
+      "posDelta": "Position {{delta}}% (Produktion {{production}}% vs Referenz {{reference}}%)",
+      "scaleNote": "Beide Seiten teilen dieselbe Skala (dieselbe rhai-Ausgabe) und sind direkt vergleichbar; die dreidimensionalen Stufen-Scores sind eine andere Skala.",
+      "f7": {
+        "analystVotes": "f7 nutzt strukturierte Analystenstimmen (Nettostimme und Streuung), ohne LLM-Händlersicht.",
+        "trader": "f7 nutzt Richtung, Konfidenz und Kursableitung des LLM-Händlers (Produktionsbasis vor v183).",
+        "absent": "f7 hat keine Eingabe ⇒ dieser Faktor zählt 0 und scheidet aus der Gewichtung; diese Seite trägt kein Handelssignal.",
+        "unknown": "Diese Seite hat die Herkunft der f7-Eingabe nicht deklariert ⇒ Unabhängigkeit von der LLM-Entscheidung unklar."
+      }
+    }
   },
   "pipeline": {
     "title": "Aktien-Pipeline",

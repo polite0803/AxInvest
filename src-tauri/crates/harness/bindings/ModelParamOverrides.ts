@@ -3,7 +3,7 @@
 /**
  * 全部字段都是 `Option` ⇒ `Default` 的语义就是「一格 override 都没配」，与「不改动模型参数」等价。
  */
-export type ModelParamOverrides = { temperature: number | null, maxTokens: number | null, topP: number | null, frequencyPenalty: number | null, 
+export type ModelParamOverrides = { temperature: number | null, maxTokens: number | null, topP: number | null, 
 /**
  * When true, the provider adapter should send `max_completion_tokens`
  * instead of `max_tokens` (required by OpenAI o-series models).
@@ -14,11 +14,6 @@ useMaxCompletionTokens: boolean | null,
  * (for models that don't support the system role).
  */
 noSystemRole: boolean | null, 
-/**
- * When true, always include max_tokens in the request
- * (falls back to 4096 if conversation.max_tokens is not set).
- */
-forceMaxTokens: boolean | null, 
 /**
  * Thinking parameter format for the provider API.
  * "reasoning_effort" (default/OpenAI) or "enable_thinking" (SiliconFlow).

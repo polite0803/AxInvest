@@ -224,6 +224,79 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             description: Some("每个 Agent 节点最大重试次数".into()),
             is_secret: false,
         },
+        // ── 2026-10-25：时延/上下文优化开关 ──
+        // 默认值策略：P0-A 去重默认开（无损）；其余默认保持旧行为，A/B 通过后再切。
+        Variable {
+            name: "context_prompt_mode".into(),
+            var_type: "string".into(),
+            value: serde_json::json!("system_only"),
+            description: Some(
+                "上下文注入去重：system_only（system 段只注入一次，推荐）/ legacy（system+user 各一次）"
+                    .into(),
+            ),
+            is_secret: false,
+        },
+        Variable {
+            name: "analyst_tool_mode".into(),
+            var_type: "string".into(),
+            value: serde_json::json!("auto"),
+            description: Some(
+                "分析师工具模式：auto（模型自主调用，旧行为）/ fixed_prefetch（固定序列并行预取，单次响应）"
+                    .into(),
+            ),
+            is_secret: false,
+        },
+        // ⚠ v187 已退役 `structured_output_mode`：结构化输出由节点输出模式直接决定
+        //   （`OutputMode::Json` 恒下发 `response_format`，见
+        //   `rt-workflow/src/work_engine/executors/agent_executor.rs` 的 `json_response_format`）。
+        //   它 v185 时默认 `off`，等于把「开启原生结构化输出」做成一条默认关闭的通路。
+        //   旧库里的同名字值由 `merge_variable_values` 丢弃（只保留新表里存在的名字）。
+        Variable {
+            name: "max_tool_calls_per_node".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(8),
+            description: Some("单节点工具调用总上限（0=不限）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "debate_context_mode".into(),
+            var_type: "string".into(),
+            value: serde_json::json!("full"),
+            description: Some(
+                "辩论跨轮上下文：full（前序轮次全文，旧行为）/ state（较早轮次压缩为状态摘要，上一轮仍全文）"
+                    .into(),
+            ),
+            is_secret: false,
+        },
+        Variable {
+            name: "emit_prompt_stats".into(),
+            var_type: "boolean".into(),
+            value: serde_json::json!(false),
+            description: Some(
+                "Agent 输出 promptStats（system/user/上下文体积），供基准脚本读取".into(),
+            ),
+            is_secret: false,
+        },
+        Variable {
+            name: "trader_context_slim".into(),
+            var_type: "boolean".into(),
+            value: serde_json::json!(false),
+            description: Some(
+                "trader 输入瘦身：去掉与 input_mapping 重复的 t-scoring/t-valuation/催化剂/资金全文（建图时生效）"
+                    .into(),
+            ),
+            is_secret: false,
+        },
+        Variable {
+            name: "risk_context_slim".into(),
+            var_type: "boolean".into(),
+            value: serde_json::json!(false),
+            description: Some(
+                "风险三视角输入瘦身：用 analyst-brief--mid 替代 9 份分析师全文（建图时生效）"
+                    .into(),
+            ),
+            is_secret: false,
+        },
         // ── Tool 节点参数 ──
         Variable {
             name: "tool_timeout_secs".into(),

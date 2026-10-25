@@ -35,10 +35,6 @@ export interface SettingsDto {
   fallbackModelId: string | null;
   imageProviderId: string | null;
   imageModelId: string | null;
-  videoProviderId: string | null;
-  videoModelId: string | null;
-  voiceProviderId: string | null;
-  voiceModelId: string | null;
   // 其他所有字段保持原样
   [key: string]: unknown;
 }
@@ -53,8 +49,6 @@ const MODEL_FIELD_MAP = {
   compressionModel: { providerKey: "compressionProviderId", modelKey: "compressionModelId" },
   fallbackModel: { providerKey: "fallbackProviderId", modelKey: "fallbackModelId" },
   imageModel: { providerKey: "imageProviderId", modelKey: "imageModelId" },
-  videoModel: { providerKey: "videoProviderId", modelKey: "videoModelId" },
-  voiceModel: { providerKey: "voiceProviderId", modelKey: "voiceModelId" },
 } as const;
 
 /**

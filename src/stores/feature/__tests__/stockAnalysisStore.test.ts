@@ -1182,3 +1182,150 @@ describe("loadAnalysis 无黑板快照时的缺席标记", () => {
     expect(JSON.parse(raw).snapshot_absence).toBeUndefined();
   });
 });
+
+/**
+ * 分析师质量反馈落库计数（2026-10-25 查库 `analyst_feedbacks` 全表 0 行的修法）。
+ *
+ * 写侧已收口到**后端**落库旁路（`src-tauri/src/commands/analyst_feedback.rs`）⇒
+ * 前端不再有任何写路径（载荷构造、IPC 上报、`execution_id` 采集全退役）。
+ * 剩下要钉住的是三件事：
+ *   1. 前端**一个** `save_node_feedback` 都不发（写路径确实退役了，不是换了个地方）；
+ *   2. `workflow-completed` 载荷里的 `{written, failed, skipped}` 原样进 store
+ *      （呈现层据此出话，界面不自己算）；
+ *   3. 老后端不带该字段 / 未跑过 ⇒ `analystFeedback` 为 `null`
+ *      （不知道 ≠ 失败，不得凭空造一个「成功」）。
+ */
+describe("分析师质量反馈计数 - 后端落库旁路的回传", () => {
+  const reportJson = JSON.stringify({
+    grade: "B",
+    score: 72,
+    diagnostics: {
+      mk: {
+        name: "技术面分析师",
+        confidence: 60,
+        status: "normal",
+        gap_reason: "",
+        inconsistent_reason: "",
+        placeholder_hits: 0,
+        report_quality: 88,
+      },
+    },
+    diagnostics_by_tier: {
+      mk: {
+        mid: {
+          name: "技术面分析师",
+          confidence: 60,
+          status: "normal",
+          gap_reason: "",
+          inconsistent_reason: "",
+          placeholder_hits: 0,
+          report_quality: 88,
+        },
+      },
+    },
+    missing_analysts: [],
+    low_confidence_analysts: [],
+  });
+
+  const feedbackCalls = () =>
+    invokeMock.mock.calls.filter((c) => c[0] === "save_node_feedback").map((c) =>
+      c[1].request as Record<string, unknown>
+    );
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useStockAnalysisStore.setState({ _unlisten: null } as never);
+  });
+
+  /** 装一个能捕获 `workflow-completed` 处理器的事件监听替身。 */
+  async function captureCompleted(): Promise<(e: { payload: Record<string, unknown> }) => void> {
+    let completed: ((e: { payload: Record<string, unknown> }) => void) | null = null;
+    listenMock.mockImplementation((event: string, h: (e: { payload: Record<string, unknown> }) => void) => {
+      if (event === "workflow-completed") { completed = h; }
+      return Promise.resolve(unlistenMock);
+    });
+    await useStockAnalysisStore.getState().setupEventListener();
+    return completed as unknown as (e: { payload: Record<string, unknown> }) => void;
+  }
+
+  it("写侧已退役：store 不再发任何 save_node_feedback", async () => {
+    const completed = await captureCompleted();
+    invokeMock.mockResolvedValue("row-id");
+    completed({
+      payload: {
+        workflowId: "wf-1",
+        results: { "data-quality": { result: JSON.parse(reportJson) } },
+        analystFeedback: { written: 1, failed: 0, skipped: null },
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(feedbackCalls()).toHaveLength(0);
+  });
+
+  it("workflow-completed 回传的计数原样进 store", async () => {
+    const completed = await captureCompleted();
+    completed({
+      payload: {
+        workflowId: "wf-1",
+        results: { "data-quality": { result: JSON.parse(reportJson) } },
+        analystFeedback: { written: 3, failed: 2, skipped: null },
+      },
+    });
+    expect(useStockAnalysisStore.getState().analystFeedback).toEqual({
+      written: 3,
+      failed: 2,
+      skipped: null,
+    });
+  });
+
+  it("一行都没写时，后端给的成因原样透传（前端不自己反推）", async () => {
+    const completed = await captureCompleted();
+    completed({
+      payload: {
+        workflowId: "wf-1",
+        results: { "data-quality": { result: JSON.parse(reportJson) } },
+        analystFeedback: { written: 0, failed: 0, skipped: "fast_chain" },
+      },
+    });
+    expect(useStockAnalysisStore.getState().analystFeedback).toEqual({
+      written: 0,
+      failed: 0,
+      skipped: "fast_chain",
+    });
+  });
+
+  it("老后端不带该字段 ⇒ 状态为 null（不知道 ≠ 失败，也 ≠ 成功）", async () => {
+    const completed = await captureCompleted();
+    completed({
+      payload: {
+        workflowId: "wf-1",
+        results: { "data-quality": { result: JSON.parse(reportJson) } },
+      },
+    });
+    expect(useStockAnalysisStore.getState().analystFeedback).toBeNull();
+  });
+
+  it("打开历史记录 ⇒ 上轮的计数被清掉（不把上一条记录的状态挂到本条）", async () => {
+    const completed = await captureCompleted();
+    completed({
+      payload: {
+        workflowId: "wf-1",
+        results: { "data-quality": { result: JSON.parse(reportJson) } },
+        analystFeedback: { written: 3, failed: 2, skipped: null },
+      },
+    });
+    expect(useStockAnalysisStore.getState().analystFeedback).not.toBeNull();
+
+    invokeMock.mockResolvedValueOnce({
+      id: "an-2",
+      stockCode: "600519",
+      stockName: "茅台",
+      status: "completed",
+      decisionJson: null,
+      blackboardSnapshot: null,
+    });
+    await useStockAnalysisStore.getState().loadAnalysis("an-2");
+    expect(useStockAnalysisStore.getState().analystFeedback).toBeNull();
+  });
+});

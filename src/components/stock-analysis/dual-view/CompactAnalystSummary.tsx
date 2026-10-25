@@ -3,12 +3,15 @@
  * 输入:分析师报告 { expertId: report }
  * 输出:共识标签 + 多空条 + Top 3 报告摘要
  */
+import { contradictionBasesForTier, parseDataQualityReport } from "@/lib/dataQualityDiagnosis";
 import {
   classifyAnalystReport,
   type Consensus,
   deriveAnalystConsensus,
+  scopeAnalystReports,
   type Sentiment,
 } from "@/lib/stock-analysis-utils";
+import { useStockAnalysisStore } from "@/stores";
 import { Tooltip } from "antd";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -41,11 +44,21 @@ function getAgentShortName(id: string): string {
 
 export function CompactAnalystSummary({ data }: CompactAnalystSummaryProps) {
   const { t } = useTranslation();
-  const reports = useMemo(() => normalizeMap(data), [data]);
+  const dataQualitySummary = useStockAnalysisStore((s) => s.dataQualitySummary);
+  // 只看一组：chat 场景拿不到 `decision.timeHorizon` ⇒ 按 `scopeAnalystReports` 的回退
+  // （裸键 → 唯一档 → mid）取一档。四档各自的完整分布由 `AnalystReportGrid` 的切换器承担。
+  // 扣除口径与页面一致：结论方向与多空评分矛盾的分析师不计票（判据在后端 data-quality）。
+  const counted = useMemo(() => {
+    const scoped = scopeAnalystReports(normalizeMap(data));
+    const excluded = contradictionBasesForTier(parseDataQualityReport(dataQualitySummary), null);
+    if (!excluded) { return { reports: scoped, excludedCount: 0 }; }
+    const kept = Object.fromEntries(Object.entries(scoped).filter(([base]) => !excluded.has(base)));
+    return { reports: kept, excludedCount: Object.keys(scoped).length - Object.keys(kept).length };
+  }, [data, dataQualitySummary]);
 
   const summary = useMemo(() => {
-    const entries = Object.entries(reports);
-    if (entries.length === 0) { return null; }
+    const entries = Object.entries(counted.reports);
+    if (entries.length === 0 && counted.excludedCount === 0) { return null; }
     let bullish = 0;
     let bearish = 0;
     let neutral = 0;
@@ -69,8 +82,8 @@ export function CompactAnalystSummary({ data }: CompactAnalystSummaryProps) {
       });
     }
     const total = bullish + bearish + neutral;
-    return { bullish, bearish, neutral, total, details };
-  }, [reports]);
+    return { bullish, bearish, neutral, total, details, excludedCount: counted.excludedCount };
+  }, [counted]);
 
   if (!summary) {
     return (
@@ -124,6 +137,12 @@ export function CompactAnalystSummary({ data }: CompactAnalystSummaryProps) {
           {summary.total}
           {t("stockAnalysis.recommendation.reportCountSuffix")}
         </span>
+        {summary.excludedCount > 0 && (
+          /* 扣票原因与页面顶部条、分歧卡同一句文案（同一个键，不各写一套） */
+          <span style={{ color: "var(--ant-warning, #b45309)" }}>
+            {t("stockAnalysis.analystConsensusExcluded", { count: summary.excludedCount })}
+          </span>
+        )}
       </div>
 
       {/* 多空条 */}

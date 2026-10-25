@@ -1136,9 +1136,6 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
             source: Set("stock-analysis".into()),
             tags: Set(None),
             suggested_provider_id: Set(None),
-            suggested_model_id: Set(None),
-            suggested_temperature: Set(None),
-            suggested_max_tokens: Set(None),
             search_enabled: Set(None),
             recommend_permission_mode: Set(None),
             recommended_tools: Set(tools_json),
@@ -1504,6 +1501,25 @@ pub(crate) fn resolve_debate_rounds(old_variables_json: Option<&str>) -> usize {
         );
     }
     DEFAULT_DEBATE_ROUNDS as usize
+}
+
+/// 从旧变量表读布尔开关；缺失 / 类型不符 ⇒ 返回默认值。
+///
+/// 只服务**建图期**开关（`trader_context_slim` / `risk_context_slim`）：
+/// 这些值决定 context_sources，运行时改值不会重展图，必须重新播种才生效。
+pub(crate) fn resolve_bool_flag(
+    old_variables_json: Option<&str>,
+    name: &str,
+    default: bool,
+) -> bool {
+    old_variables_json
+        .filter(|v| !v.is_empty())
+        .and_then(|json| serde_json::from_str::<Vec<serde_json::Value>>(json).ok())
+        .and_then(|vars| {
+            vars.into_iter().find(|v| v.get("name").and_then(|n| n.as_str()) == Some(name))
+        })
+        .and_then(|v| v.get("value").and_then(|x| x.as_bool()))
+        .unwrap_or(default)
 }
 
 /// 「库里图实际展开的辩论轮数」与「库里 `debate_rounds` 变量要求的轮数」是否漂移。
@@ -3777,6 +3793,342 @@ mod version_gate_tests {
             "无关升版把用户面板调好的轮数打回了默认值 ⇒ 门没做成一次性"
         );
         assert_eq!(variable_value(db, "debate_rounds").await, Some(serde_json::json!(5)));
+    }
+
+    /// v183：f7 口径的接线契约（生产公式吃分析师结构票，trader 口径只在参照侧）。
+    ///
+    /// 两层判据里的「真播种读落库产物」这一层：摘 trader 输入是在建图期对 `input_mapping`
+    /// 做 `remove` 的，静态审计（`audit-inject-coverage.mjs`）只看字面清单 ⇒ 看不见这次删除。
+    /// CodeNode 产物键的存在性门（2026-10-25 立，起因是本批真实写错的一次前缀）。
+    ///
+    /// `analyst_votes_by_tier` 一度被写成 `data-quality.content.…`，而 `data-quality` 是
+    /// **CodeNode**（产物在 `.result` 下；`.content.verdict` 是 AgentNode 的形态）。错的后果不是报错，
+    /// 而是路径解析为 None ⇒ 注入 Null ⇒ 该腿静默退出 —— 与 `audit-inject-coverage.mjs` 只能对照
+    /// 「键名 ↔ 键名」、看不见路径这一段，合起来就是「映射写了、数据永远到不了」的假独立。
+    ///
+    /// 判据：凡 `input_mapping` 的值形如 `<CodeNode id>.result.<首段>…`，该节点脚本里必须
+    /// 出现这个首段（引号包裹的 map 键，或裸 `ident:` 形态）。只查 CodeNode 产物 ——
+    /// ToolNode 的 JSON 由 Rust 侧构造、AgentNode 由 LLM 契约约束，不在此门面内。
+    #[tokio::test]
+    async fn rhai_producer_paths_exist_in_node_scripts() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed(db).await.expect("种子化应成功");
+        let nodes = nodes_of(db).await;
+
+        // id/output_var → 脚本文本（CodeNode 的 output_var 与 id 同域，映射按 id 引用）
+        let mut scripts: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for n in &nodes {
+            if n.get("type").and_then(|v| v.as_str()) != Some("code") {
+                continue;
+            }
+            let id = match n.get("id").and_then(|v| v.as_str()) {
+                Some(v) => v.to_string(),
+                None => continue,
+            };
+            if let Some(code) = n.get("config").and_then(|c| c.get("code")).and_then(|v| v.as_str())
+            {
+                scripts.insert(id, code.to_string());
+            }
+        }
+
+        let mut violations: Vec<String> = Vec::new();
+        let mut checked = 0usize;
+        for n in &nodes {
+            let mapping = match n.get("config").and_then(|c| c.get("input_mapping")) {
+                Some(serde_json::Value::Object(m)) => m.clone(),
+                _ => continue,
+            };
+            let consumer = n.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            for (key, value) in &mapping {
+                let value = match value.as_str() {
+                    Some(v) => v,
+                    None => continue,
+                };
+                let mut seg = value.split('.');
+                let (src, mid, first) = (seg.next(), seg.next(), seg.next());
+                let code = match (src, mid) {
+                    (Some(s), Some("result")) => match scripts.get(s) {
+                        Some(c) => c.clone(),
+                        None => continue, // 源不是本图 CodeNode ⇒ 不在门面内
+                    },
+                    _ => continue,
+                };
+                let first = match first {
+                    Some(f) => f,
+                    None => continue, // 只引到 `.result`（整包透传）无需查首段
+                };
+                checked += 1;
+                if first.contains('[') {
+                    continue; // 数组下标形态（如 `rows[0]`）本门不判，避免假阳
+                }
+                let quoted = format!("\"{}\"", first);
+                let bare = format!("{}:", first);
+                if !code.contains(&quoted) && !code.contains(bare.as_str()) {
+                    // 句里要的是源节点 id 本体；`src` 是 `Option<&str>`，不实现 Display
+                    let src_id = src.unwrap_or("?");
+                    violations.push(format!(
+                        "`{consumer}`.{key} ← `{value}`：源 CodeNode `{src_id}` 的脚本里找不到产物键 `{first}`\
+                         （路径会解析为 Null ⇒ 该注入静默失效）"
+                    ));
+                }
+            }
+        }
+        // 下限取 10：本仓实测 15 条 `<CodeNode>.result.<首段>` 形态映射（dqi_* / analyst_votes_by_tier /
+        // pm_result …）。写死 15 会把「合法增删一条路径」变成红，写 10 只在扫描面塌掉（前缀判据被改坏、
+        // 或 CodeNode 识别失效导致只剩个位数）时报——判据没电自证要防的是**扫不到**，不是条数变化。
+        assert!(
+            checked >= 10,
+            "判据没电自证：门面只查了 {checked} 条 CodeNode 产物路径，过少说明扫描面失效"
+        );
+        assert!(
+            violations.is_empty(),
+            "CodeNode 产物键不存在共 {} 条：\n{}",
+            violations.len(),
+            violations.join("\n")
+        );
+    }
+
+    /// 所以必须从落库的模板 JSON 里读实际键集与实际边集，否则「生产侧仍吃 LLM 决策」可以全绿通过。
+    #[tokio::test]
+    async fn seeded_template_moves_f7_to_analyst_votes_and_keeps_trader_only_in_reference() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed(db).await.expect("种子化应成功");
+
+        let nodes = nodes_of(db).await;
+        let mapping_of = |id: &str| -> serde_json::Map<String, serde_json::Value> {
+            let n = nodes
+                .iter()
+                .find(|n| n.get("id").and_then(|v| v.as_str()) == Some(id))
+                .unwrap_or_else(|| panic!("模板应含节点 `{id}`"));
+            n.get("config")
+                .and_then(|c| c.get("input_mapping"))
+                .and_then(|v| v.as_object())
+                .cloned()
+                .unwrap_or_default()
+        };
+        let trader_keys = [
+            "trader_direction",
+            "trader_confidence",
+            "trader_target_price",
+            "trader_stop_loss",
+            "trader_risk_level",
+            "trader_evidence_count",
+            "untrusted_trader",
+            "untrusted_research_mgr",
+        ];
+
+        // ── 生产侧：吃分析师票，且八个「含交易观点」输入一个都不许在 ──
+        let pm = mapping_of("portfolio-mgr");
+        assert!(
+            pm.contains_key("analyst_votes_by_tier"),
+            "生产公式必须注入 `analyst_votes_by_tier`（v183 f7 的唯一口径来源）"
+        );
+        assert_eq!(
+            pm.get("analyst_votes_by_tier").and_then(|v| v.as_str()),
+            Some("data-quality.result.analyst_votes_by_tier"),
+            "该键必须指向 data-quality 的逐档票聚合产出（换路径就得重播种）"
+        );
+        for k in trader_keys {
+            assert!(!pm.contains_key(k), "生产公式不得再注入 {k}：那会把 LLM 决策重新接进公式");
+        }
+
+        // ── 参照侧：永远与生产相反，trader 口径留在这里做对照 ──
+        let ref_map = mapping_of("portfolio-mgr-f7-ref");
+        for k in ["trader_direction", "trader_confidence", "trader_risk_level"] {
+            assert!(ref_map.contains_key(k), "参照侧必须保留 {k}（否则两侧同口径，对照恒等）");
+        }
+
+        // ── 边：trader / research-mgr 只喂参照侧；生产侧与它们并行 ──
+        let edges = edges_of(db).await;
+        let has_edge = |from: &str, to: &str| {
+            edges.iter().any(|e| {
+                e.get("source").and_then(|v| v.as_str()) == Some(from)
+                    && e.get("target").and_then(|v| v.as_str()) == Some(to)
+            })
+        };
+        for upstream in ["trader", "research-mgr"] {
+            assert!(
+                !has_edge(upstream, "portfolio-mgr"),
+                "`{upstream}` → 生产公式的边必须已撤（留着就是串行 + 自指）"
+            );
+            assert!(
+                has_edge(upstream, "portfolio-mgr-f7-ref"),
+                "`{upstream}` → 参照侧的边必须在（摘了边又留着映射 = present() 恒假的静默失效）"
+            );
+        }
+        assert!(
+            has_edge("data-quality", "portfolio-mgr"),
+            "生产公式必须等 data-quality 完成（分析师票由它逐档聚合）"
+        );
+
+        // ── 风控门：空头否决换源，且 trader 通路彻底断开 ──
+        let gate = mapping_of("portfolio-risk-gate");
+        assert!(
+            gate.contains_key("margin_of_safety_pct"),
+            "门的空头否决必须改由估值安全边际折算目标价"
+        );
+        assert!(!gate.contains_key("target_price"), "门不得再直接注入 trader 的 targetPrice");
+        assert!(
+            !has_edge("trader", "portfolio-risk-gate"),
+            "trader → 门的边必须撤（否则终审仍等 LLM 决策、且报价仍出自它）"
+        );
+        assert!(
+            has_edge("t-valuation", "portfolio-risk-gate"),
+            "门需要 t-valuation 的供给边（少了它 margin_of_safety_pct 解析为 Null ⇒ 否决静默不发生）"
+        );
+
+        // ── rule-check：v186 起不得再把 `trader` 列为 context_source ──
+        // 它唯一入边是 `portfolio-risk-gate`，`trader` 没有等待边 ⇒ rule-check 先于 trader
+        // 执行、读到「尚未执行」的空变量（2026-10-25 现网每次运行都报
+        // `context_sources 变量未在 context.variables 中找到`）。
+        // 交易方案改由风控门供给；**不能**靠补 `trader → rule-check` 边解决 —— 那会让
+        // `rule-check → quality-gate →` 决策尾链重新等 LLM 决策，推翻 v183 的并行结构。
+        let rc = nodes
+            .iter()
+            .find(|n| n.get("id").and_then(|v| v.as_str()) == Some("rule-check"))
+            .expect("模板应含节点 rule-check");
+        let rc_sources: Vec<&str> = rc
+            .get("config")
+            // ⚠ 形状：`AgentNodeConfig` 带 `#[serde(rename_all = "camelCase")]` ⇒ 落库 JSON 是
+            //   **`contextSources`**（2026-10-26 真库实测：`context_sources` 不存在）。
+            //   读 snake_case 会得到空数组 ⇒ 「不得含 trader」恒真、「必须含 gate」恒红
+            //   —— 一条空转的绿 + 一条假红。Code 节点不同（`CodeNodeConfig` 无 rename_all，
+            //   其 `input_mapping` 就是 snake_case），两类节点不可套用同一拼写。
+            .and_then(|c| c.get("contextSources").or_else(|| c.get("context_sources")))
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        // 抽取面自证：空数组说明键拼写又错了，下面的两条断言都会失去区分力。
+        assert!(
+            !rc_sources.is_empty(),
+            "rule-check 的 contextSources 抽取面失效（空数组）⇒ 本判据恒真/恒假，先修键拼写"
+        );
+        assert!(
+            !rc_sources.contains(&"trader"),
+            "rule-check 不得引用 trader：它没有等待边，早于 trader 执行必然读空"
+        );
+        assert!(
+            rc_sources.contains(&"portfolio-risk-gate"),
+            "rule-check 的交易方案必须由 portfolio-risk-gate 供给（targetPrice/stopLoss/takeProfitPct）"
+        );
+    }
+
+    /// v185：已退役的回滚位**不能**把 trader 重新接进生产公式（负控）。
+    ///
+    /// ## 为什么必须是负控而不是「读代码看有没有分支」
+    ///
+    /// v183 的 `formula_independent_f7` 开关留了一个「手改库就能打开」的口子：
+    /// 开关读 `old_variables`（= 库里 `workflow_template.variables` 原样），而建图断言跑在
+    /// `fresh_db()` 上 ⇒ **回滚位在既有断言里永远测不到**，在现网却能改形态
+    /// ⇒ 「开关能改形态、门禁只认一种形态」的两套真相。
+    ///
+    /// 本判据把现场造出来：变量表里塞一个 `formula_independent_f7=false`、版本号退回 184
+    /// （版本门是 `existing.version >= TEMPLATE_VERSION ⇒ return`，退回即放行重播种），
+    /// 再播种一次 ⇒ 断言**生产侧仍不含任何 trader 键**。
+    ///
+    /// ⚠ 本判据在 v185 改造**之前是红的**（那正是它存在的理由）；改造后必须转绿。
+    /// 同时断言退役的键**不再残留**在变量表里 —— 退役 = 连键一起退役，
+    /// 留着键会让下一个读代码的人以为它还有效。
+    #[tokio::test]
+    async fn retired_f7_rollback_switch_cannot_reconnect_trader_to_production() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed(db).await.expect("首次播种应成功");
+
+        // ── 造现场：旧库里存着「回滚位 = false」，并把版本退回上一版让播种重跑 ──
+        {
+            let model = workflow_template::Entity::find_by_id(TEMPLATE_ID)
+                .one(db)
+                .await
+                .expect("查模板失败")
+                .expect("模板应已存在");
+            let mut vars: Vec<serde_json::Value> = serde_json::from_str(
+                model.variables.as_deref().expect("variables 列不应为 NULL（种子必写）"),
+            )
+            .expect("variables 应是 JSON 数组");
+            vars.push(serde_json::json!({"name": "formula_independent_f7", "value": false}));
+            let mut am: workflow_template::ActiveModel = model.into();
+            am.variables = Set(Some(serde_json::to_string(&vars).expect("序列化变量表失败")));
+            am.version = Set(TEMPLATE_VERSION - 1);
+            am.update(db).await.expect("写入回滚位现场失败");
+        }
+
+        seed(db).await.expect("带回滚位的重播种应成功");
+
+        // ── 判据〇（前置）：重播种**确实发生**了 ──
+        // 否则下面判据一可能是假绿：版本门若把重播种挡掉，生产节点仍是首次播种的产物
+        // （同样零 trader 键）⇒ 门照样绿，但根本没检验到「开关能不能改形态」。
+        let version_now = workflow_template::Entity::find_by_id(TEMPLATE_ID)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .expect("模板应已存在")
+            .version;
+        assert_eq!(
+            version_now, TEMPLATE_VERSION,
+            "重播种未发生（模板版本仍是 {version_now}）⇒ 下面的判据是假绿"
+        );
+
+        // ── 判据一：生产侧零 trader 键（这条在改造前是红的）──
+        let nodes = nodes_of(db).await;
+        let input_mapping_of = |node_id: &str| -> serde_json::Map<String, serde_json::Value> {
+            nodes
+                .iter()
+                .find(|n| n.get("id").and_then(|v| v.as_str()) == Some(node_id))
+                .unwrap_or_else(|| panic!("模板应含节点 `{node_id}`"))
+                .get("config")
+                .and_then(|c| c.get("input_mapping"))
+                .and_then(|v| v.as_object())
+                .cloned()
+                .unwrap_or_default()
+        };
+        let pm = input_mapping_of("portfolio-mgr");
+        let pm_ref = input_mapping_of("portfolio-mgr-f7-ref");
+        for k in [
+            "trader_direction",
+            "trader_confidence",
+            "trader_target_price",
+            "trader_stop_loss",
+            "trader_risk_level",
+            "trader_evidence_count",
+            "untrusted_trader",
+            "untrusted_research_mgr",
+        ] {
+            assert!(
+                !pm.contains_key(k),
+                "退役的回滚位仍把 {k} 接回了生产公式 ⇒ 「主档不得依赖 LLM 决策」只差一层开关"
+            );
+        }
+
+        // ── 判据一之负控（同一守卫上拆）：参照侧**必须**仍有全部 trader 键 ──
+        // 为什么必须：判据一读的是「某节点的 input_mapping 里有没有这 8 个键」。
+        // 若抽取面本身坏了（节点 id 写错 / 字段名变了 / 抽取代码改坏），
+        // 判据一会**恒绿**而毫无区分力。参照侧是同一份抽取面、同一组键的**反向样本**：
+        // 它必须全中 ⇒ 证明抽取面活着，判据一的「零命中」才是真结论。
+        for k in [
+            "trader_direction",
+            "trader_confidence",
+            "trader_target_price",
+            "trader_stop_loss",
+            "trader_risk_level",
+            "trader_evidence_count",
+            "untrusted_trader",
+            "untrusted_research_mgr",
+        ] {
+            assert!(
+                pm_ref.contains_key(k),
+                "参照侧应保留 {k}（它是唯一的 trader 口径对照侧）⇒ 抽取面已失效，判据一是恒真的空判据"
+            );
+        }
+
+        // ── 判据二：退役的键不再残留在变量表里 ──
+        assert!(
+            variable_value(db, "formula_independent_f7").await.is_none(),
+            "退役的开关键不该留在变量表里（留着会让下一个读代码的人以为它还有效）"
+        );
     }
 }
 

@@ -47,7 +47,8 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 use super::error::ErrorResponse;
 use super::error_code::time_travel as ec;
 use super::pool_scan::{
-    PoolCandidate, PoolCandidateResult, dedup_explicit_candidates, run_analysis_for_candidates,
+    PoolCandidate, PoolCandidateResult, PoolScanOutcome, dedup_explicit_candidates,
+    run_analysis_for_candidates,
 };
 use super::stock_workflow::{ReflectionFilter, run_batch_reflection_inner};
 use crate::app_state::AppState;
@@ -92,6 +93,22 @@ pub struct TimeTravelBatchRequest {
     /// 是否在 guard 外立即反思已到期档（false = 只分析，反思全部留给 cron）
     #[serde(default = "default_true")]
     pub reflect: bool,
+    /// 是否执行**逐只 replay 分析**（false = 只跑选股链，把候选落库后即结束）。
+    ///
+    /// ## 为什么需要这个开关（R-2，2026-10-25）
+    ///
+    /// 逐只分析要跑 LLM 工作流，实测单日 30~60 分钟，而**根因不是本地计算慢，
+    /// 是 LLM 供应商限速**（AgnesAI 免费档 429，节点重试 + fallback 全被拒）。
+    /// 与此同时，**盈利能力样本并不依赖分析阶段** ——
+    /// 那条路是 `reco_picks → decision_validations`，只用 K 线算收益；
+    /// 分析阶段喂的是 `stock_analyses.outcome`（决策质量口径）。
+    ///
+    /// ⇒ 「每日 +1 个回放日」在开着分析时**不可行**（限速 + 撞锁），
+    /// 关掉分析后可行（选股阶段实测 < 1 分钟）。
+    ///
+    /// 默认 **true**（保持既有语义不变）；CLI / cron 按需显式传 false。
+    #[serde(default = "default_true")]
+    pub analyze: bool,
 }
 
 fn default_min_confidence() -> u8 {
@@ -386,12 +403,73 @@ async fn require_pool_snapshot_coverage(
 
 // ── Tauri 命令 ────────────────────────────────────────────────────────────────
 
+/// 时间旅行批次定时任务的 `task_type` 标识。
+///
+/// 与 `DECISION_BACKTEST_TASK_TYPE` 同形：调度层按 task_type 分发到实现，
+/// **cron 不调命令**（命令要 `State<'_, AppState>`，cron 拿不到）。
+pub const TIME_TRAVEL_BATCH_TASK_TYPE: &str = "time-travel-batch";
+
+/// 列出「今天可回放」的 as_of 日：建池双源快照齐全 **且** 至少已过 `min_holding_days` 个交易日。
+///
+/// ## 为什么要「至少过 N 个交易日」而不是「快照齐全即可」
+///
+/// 回放的产物要能被判定才有价值，而判定 T+N 的前提是 **as_of + N 个交易日 ≤ 今天**。
+/// 快照齐全但持有期未到期的日子，跑出来只会得到一堆判不出胜负的样本 ——
+/// 那种样本进不了胜率分母，只是白跑一遍选股与分析。
+///
+/// ## 返回
+///
+/// `[(as_of, 距今交易日数)]`，按日期升序。距今交易日数 ≤ 0 的日期（今天本身）
+/// 会被过滤掉（没有任何持有期可判）。
+pub async fn list_replayable_as_of_dates(
+    db: &DatabaseConnection,
+    min_holding_days: i32,
+) -> Result<Vec<(String, i32)>, String> {
+    use axagent_analysis_engine::recommender::pool::POOL_SNAPSHOT_METHODS;
+
+    let today = beijing_today();
+    let covered = axagent_dao::repo::astock_daily_snapshot::list_snapshot_dates_with_all_methods(
+        db,
+        &POOL_SNAPSHOT_METHODS,
+    )
+    .await
+    .map_err(|e| format!("读快照覆盖失败: {e}"))?;
+
+    let mut out = Vec::new();
+    for (d, _srcs) in covered {
+        let Ok(nd) = chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d") else {
+            tracing::warn!("[time-travel-batch] 快照日期 `{d}` 不是 ISO 日期，跳过");
+            continue;
+        };
+        if !calendar::is_trading_day(&nd) {
+            continue;
+        }
+        let ago = calendar::trading_days_between(nd, today);
+        if ago >= min_holding_days {
+            out.push((d, ago));
+        }
+    }
+    Ok(out)
+}
+
 /// 发起一次时间旅行批次复盘；立即返回 batch_id，执行在后台进行，
 /// 用 [`get_time_travel_batch`] 轮询进度与结果。
-#[agent_command(domain = time_travel, safety = Caution, call_mode = StateInput, description = "发起时间旅行批次复盘")]
-#[tauri::command]
-pub async fn run_time_travel_batch(
-    state: State<'_, AppState>,
+/// 发起时间旅行批次的**实现**（命令层是它的薄包装）。
+///
+/// 抽出来的原因与 `run_batch_reflection_inner` / `run_decision_backtest_inner` 同源：
+/// **命令要 `State<'_, AppState>`，而 cron handler 与独立 CLI 都拿不到 `State`**。
+/// 本函数收**各个组件**（而不是整个 `AppState`）⇒ 命令 / cron / CLI 三条调用路径
+/// 共用同一实现，不会出现「命令能跑、cron 走另一份逻辑」的分叉。
+///
+/// 参数逐项对应 `execute_batch` 需要的依赖，外加 `batch_lock`（全局批次互斥锁）。
+pub async fn run_time_travel_batch_inner(
+    db: &DatabaseConnection,
+    client: &Arc<AStockClient>,
+    engine: &Arc<axagent_rt_workflow::work_engine::WorkEngine>,
+    vector_store: &Arc<VectorStore>,
+    master_key: &[u8; 32],
+    trajectory_storage: &Arc<TrajectoryStorage>,
+    batch_lock: &Arc<Mutex<()>>,
     request: TimeTravelBatchRequest,
 ) -> Result<String, String> {
     // 批次恒同时回放「智能荐股 + 趋势智选」两条平级选股链（请求体无开关）。
@@ -454,7 +532,7 @@ pub async fn run_time_travel_batch(
 
     // 建池快照覆盖校验（先于 live 窗判断与抢锁）：不可回放的日期当场拒绝并给出可用日期，
     // 不能放批次进去跑完只留一句含糊的「均无候选（可能当日数据缺失或阈值过高）」。
-    require_pool_snapshot_coverage(state.harness.db(), &as_of)
+    require_pool_snapshot_coverage(db, &as_of)
         .await
         .map_err(|e| ErrorResponse::err_with_detail(ec::ASOF_INVALID, e))?;
 
@@ -467,13 +545,10 @@ pub async fn run_time_travel_batch(
     }
 
     // 4. 全局批次互斥（try_lock：已在跑直接拒绝，不排队）
-    let permit = state
-        .time_travel_batch_lock
-        .clone()
-        .try_lock_owned()
-        .map_err(|_| ErrorResponse::err(ec::ALREADY_RUNNING))?;
+    let permit =
+        batch_lock.clone().try_lock_owned().map_err(|_| ErrorResponse::err(ec::ALREADY_RUNNING))?;
 
-    let db = state.harness.db().clone();
+    let db = db.clone();
     // 新进程首次发起批次前，收敛上次进程异常退出遗留的 running 行
     // （必须在本行 insert 之前，避免把本批次误判为僵尸）。
     ensure_stale_reaped(&db).await;
@@ -493,12 +568,13 @@ pub async fn run_time_travel_batch(
     // spawn 会 move batch_id，返回给调用方的 id 单独留一份
     let batch_id_to_return = batch_id.clone();
 
-    let client = state.astock_client.clone();
-    let engine = state.work_engine.clone();
-    let vector_store = state.vector_store.clone();
-    let master_key = state.harness.master_key_owned();
-    let trajectory_storage = state.trajectory_storage.clone();
+    let client = client.clone();
+    let engine = engine.clone();
+    let vector_store = vector_store.clone();
+    let master_key = *master_key;
+    let trajectory_storage = trajectory_storage.clone();
     let reflect = request.reflect;
+    let analyze = request.analyze;
     let min_confidence = request.min_confidence;
     let top_n = request.top_n;
 
@@ -521,6 +597,7 @@ pub async fn run_time_travel_batch(
                 min_confidence,
                 top_n,
                 reflect,
+                analyze,
                 db,
                 client,
                 engine,
@@ -535,6 +612,28 @@ pub async fn run_time_travel_batch(
     );
 
     Ok(batch_id_to_return)
+}
+
+/// 发起一次时间旅行批次复盘；立即返回 batch_id，执行在后台进行，
+/// 用 [`get_time_travel_batch`] 轮询进度与结果。
+#[agent_command(domain = time_travel, safety = Caution, call_mode = StateInput, description = "发起时间旅行批次复盘")]
+#[tauri::command]
+pub async fn run_time_travel_batch(
+    state: State<'_, AppState>,
+    request: TimeTravelBatchRequest,
+) -> Result<String, String> {
+    let master_key = state.harness.master_key_owned();
+    run_time_travel_batch_inner(
+        state.harness.db(),
+        &state.astock_client,
+        &state.work_engine,
+        &state.vector_store,
+        &master_key,
+        &state.trajectory_storage,
+        &state.time_travel_batch_lock,
+        request,
+    )
+    .await
 }
 
 /// 查询批次运行状态：优先内存运行态；重启后内存已失则从历史表还原完整明细。
@@ -597,6 +696,8 @@ async fn execute_batch(
     min_confidence: u8,
     top_n: usize,
     reflect: bool,
+    // 是否执行逐只 replay 分析（R-2：关闭后只落选股产物，见 `TimeTravelBatchRequest::analyze`）
+    analyze: bool,
     db: DatabaseConnection,
     client: Arc<AStockClient>,
     engine: Arc<axagent_rt_workflow::work_engine::WorkEngine>,
@@ -652,14 +753,28 @@ async fn execute_batch(
         // 写同一张 reco_picks，每行带 `as_of_date` = 本批截止日 ⇒ 与实盘同表但不混码。
         // 命令层那条 `persist_reco_response_picks` 在这里走不到（批次直连引擎的
         // `run_recommendation_scan`），所以按荐股 cron 分支的同形态在这里落一次。
+        //
+        // ⚠ **落库用 `picks_by_period` 而不是 `picks`**（R-3d，2026-10-26）：
+        // `scan.picks` 是**通知口径** —— 四档合并后按 stock_code 去重、再 top-N
+        // ⇒ 同一只票在多档命中时只留 confidence 最高的那一档 ⇒ **档位被压平成一档**。
+        // 实测：回放批次落库 230 行只覆盖 58 只票，`period` **全是 `short`**，
+        // 其余三档的票全被去重吃掉 ⇒ 反思按档分档、命中率按档统计、
+        // `decision_validations` 的 `period ↔ t_plus_n` 匹配**全部失真**。
+        //
+        // 落库口径要的是「各档各自判了什么」⇒ 用按档结果（不跨档去重、不截断）。
+        // ⚠ 通知口径（`scan.picks`）**不受影响** —— 那是给用户看的「这几只票」，
+        // 同一只票推四遍是噪声。
         let reco_generated_at = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
         let reco_strategy_weights_json = vars
             .iter()
             .find(|(k, _)| k == "reco_strategy_weights")
             .and_then(|(_, v)| v.is_object().then(|| v.to_string()));
+        // 按档展平：同一只票在不同档可以各落一行（`period` 列即档位标记）。
+        let reco_picks_by_period: Vec<axagent_analysis_engine::recommender::types::RecoPick> =
+            scan.picks_by_period.iter().flat_map(|(_, ps)| ps.iter().cloned()).collect();
         let reco_written = crate::commands::_shared_reco_pool::persist_reco_picks(
             &db,
-            &scan.picks,
+            &reco_picks_by_period,
             scan.seed_pool_snapshot.clone(),
             reco_strategy_weights_json,
             &reco_generated_at,
@@ -669,8 +784,9 @@ async fn execute_batch(
         .await;
         tracing::info!(
             "[time-travel-batch] {as_of_str} 链 A 落库 reco_picks: {reco_written}/{} 行\
-            （as_of_date={as_of_str}）",
-            scan.picks.len()
+            （按档：{} 档，as_of_date={as_of_str}）",
+            reco_picks_by_period.len(),
+            scan.picks_by_period.len(),
         );
         // 批次级池快照（含 0 票回放批次）：与 picks 同代际，供漏检归因判「池子空/没扫过」。
         crate::commands::_shared_reco_pool::persist_reco_pool_batch(
@@ -747,6 +863,35 @@ async fn execute_batch(
         merged.extend(serenity_candidates);
         let candidates = dedup_explicit_candidates(merged);
         let merged_count = candidates.len();
+
+        // R-2（2026-10-25）：可关闭逐只分析。
+        // 候选**此时已落 `reco_picks`**（上面两链各自 persist），所以关闭分析不会丢选股产物 ——
+        // 而盈利能力样本走的正是 `reco_picks → decision_validations` 那条路。
+        //
+        // 关掉分析的实际意义：逐只分析要跑 LLM 工作流，免费档限速下实测单日 30~60 分钟，
+        // 而选股阶段 < 1 分钟 ⇒ 「每日 +1 个回放日」只有关掉分析才可行。
+        if !analyze {
+            tracing::info!(
+                "[time-travel-batch] {as_of_str} 两链去重后 {merged_count} 只候选已落库，\
+                 按请求**跳过逐只 replay 分析**（盈利能力样本不依赖该阶段）"
+            );
+            let outcome = PoolScanOutcome {
+                candidates: merged_count,
+                ok: 0,
+                fail: 0,
+                skipped_analyzed_today: 0,
+                truncated: false,
+                timed_out: false,
+                pending_remaining: merged_count,
+                first_error: None,
+                details: vec![format!(
+                    "按请求跳过逐只分析（{merged_count} 只候选已落 reco_picks）"
+                )],
+                results: Vec::new(),
+            };
+            return (reco_count, serenity_count, serenity_error, outcome);
+        }
+
         tracing::info!(
             "[time-travel-batch] {as_of_str} 两链去重后 {merged_count} 只进入逐只 replay 分析"
         );
@@ -843,7 +988,17 @@ async fn execute_batch(
 
     // ── 终态汇总 ─────────────────────────────────────────────────────────────
     let any_horizon_failed = s.horizons.iter().any(|h| h.failed > 0);
-    s.status = if s.total > 0 && s.ok == 0 {
+    // ⚠ 「按请求跳过逐只分析」**不是失败**（R-2）。
+    // 跳过时 `s.total = 候选数 > 0` 而 `s.ok = 0`（没有分析成功数）⇒ 若走下面的
+    // 「全部个股分析失败」分支，会把一次**成功**的选股批次标成 `failed`（实测 12 条误判）。
+    // ⇒ 跳过分析时直接判 completed，并在 message 里写明范围。
+    s.status = if !analyze {
+        s.message = Some(match s.message.clone() {
+            Some(m) => format!("{m}（按请求跳过逐只 replay 分析：候选已落 reco_picks）"),
+            None => "按请求跳过逐只 replay 分析：候选已落 reco_picks".to_string(),
+        });
+        STATUS_COMPLETED
+    } else if s.total > 0 && s.ok == 0 {
         // 全部个股分析失败 = 批次硬失败
         s.error_code = Some(ec::EXEC_FAILED.to_string());
         s.error_detail = Some("全部候选分析失败".to_string());
@@ -1060,6 +1215,7 @@ mod tests {
                 min_confidence: 55,
                 top_n: 10,
                 reflect: false,
+                analyze: true,
             },
         );
         s.status = status.to_string();

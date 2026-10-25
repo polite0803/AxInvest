@@ -33,6 +33,12 @@ impl GubaVendor {
     /// 代价是每次请求多一次 TCP+TLS 握手，股吧每股只 1–2 个请求，可接受。
     ///
     /// 也刻意不共享 `cookie_store`：身份核实页会下发 cookie，带着它进池只会加固被核实状态。
+    ///
+    /// ⚠ 2026-10-25 更正：禁复用**不是壳页的全部成因**。现网 23:46 在已带本配置的客户端上
+    /// 仍拿到 2834 字节身份核实页（批量抓取后的 IP 级风控，单次 1s 重试同样命中），
+    /// 而同一时刻 `mguba.eastmoney.com` 仍能返回完整的服务端渲染列表页。故 live 路径在
+    /// 桌面页取不到 `article_list` 时回退移动端 `window.list`（见 `extract_mobile_list`），
+    /// 不再把「换一次连接」当成唯一解法。
     pub fn new() -> Self {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
@@ -146,6 +152,40 @@ impl GubaVendor {
         resp.text().await.map_err(DataError::from)
     }
 
+    /// 桌面列表页被风控拦下时的**兜底取数口**：移动端 `mguba.eastmoney.com`。
+    ///
+    /// 2026-10-25 现网实测：桌面 `list,{code}.html` 回 2834 字节「身份核实」壳页的同一时刻，
+    /// 移动端 `mguba/list/{code}` 仍正常返回服务端渲染页，内嵌 `window.list` 里有完整的
+    /// `re` 帖子数组（`post_id` / `post_title` / `post_publish_time` 与桌面页同形，
+    /// 首页 20 条）。两站只在「取数入口」上不同 ⇒ 解析与情感算法完全复用。
+    ///
+    /// 只用于 **live** 路径：移动端首页只有最近 20 条，不提供桌面页的 `f_N` 翻页，
+    /// 拿它铺 as-of 的「按发帖时间重建」会静默漏掉截止日更早的帖子。
+    async fn guba_mobile_posts(
+        &self,
+        pure_code: &str,
+    ) -> Result<(Vec<Value>, Option<String>), DataError> {
+        let url = format!("https://mguba.eastmoney.com/mguba/list/{pure_code}");
+        let html = self.guba_get_html(&url).await?;
+        let Some((json_str, short_name)) = Self::extract_mobile_list(&html) else {
+            tracing::warn!(
+                "[guba] 移动端 {url} 也没有 window.list（桌面页与移动页同时不可用） | {}",
+                html_forensics(&html)
+            );
+            return Err(DataError::RateLimited {
+                vendor: "guba".into(),
+                reason: format!("桌面页与移动页均取不到帖子列表, stock_code={pure_code}"),
+            });
+        };
+        let posts: Vec<Value> = serde_json::from_str(json_str).map_err(|e| {
+            let preview: String = json_str.chars().take(200).collect();
+            DataError::ParseError(format!(
+                "股吧移动页 window.list 解析失败: {e}, preview={preview}"
+            ))
+        })?;
+        Ok((posts, short_name.map(|s| s.trim_end_matches("吧").to_string())))
+    }
+
     /// 从 HTML 文本中提取 `var article_list={"re":[...]}` 中的 `re` 数组字符串
     /// 以及顶层 `bar_name` 字段值
     ///
@@ -247,7 +287,22 @@ impl GubaVendor {
     /// 输入 `s` 必须以 `[` 开头。返回匹配的 `]` 的位置(从 0 开始)。
     /// 处理字符串内的 `[`/`]`(忽略)、转义字符 `\\`、嵌套数组/对象。
     fn find_balanced_array_end(s: &str) -> Option<usize> {
-        if !s.starts_with('[') {
+        Self::find_balanced_end(s, b']')
+    }
+
+    /// 同 [`Self::find_balanced_array_end`]，只是收口字符是 `}` —— 移动端 `window.list`
+    /// 是对象而非数组。
+    fn find_balanced_object_end(s: &str) -> Option<usize> {
+        Self::find_balanced_end(s, b'}')
+    }
+
+    fn find_balanced_end(s: &str, close: u8) -> Option<usize> {
+        let open = match close {
+            b']' => b'[',
+            b'}' => b'{',
+            _ => return None,
+        };
+        if s.as_bytes().first() != Some(&open) {
             return None;
         }
         let bytes = s.as_bytes();
@@ -265,7 +320,7 @@ impl GubaVendor {
                 b'[' | b'{' if !in_str => depth += 1,
                 b']' | b'}' if !in_str => {
                     depth -= 1;
-                    if depth == 0 && b == b']' {
+                    if depth == 0 && b == close {
                         return Some(i);
                     }
                 },
@@ -273,6 +328,47 @@ impl GubaVendor {
             }
         }
         None
+    }
+
+    /// 从移动端列表页内嵌的 `window.list = {...}` 中提取 `re` 帖子数组与 `bar_info.ShortName`。
+    ///
+    /// 页面形态（2026-10-25 实测，`mguba.eastmoney.com/mguba/list/002343`）：
+    ///   `window.type = 1; window.sort = 1; window.list = {"bar_info":{"ShortName":"慈文传媒",...},`
+    ///   `"re":[{"post_id":...,"post_title":"...","post_publish_time":"2026-10-25 18:52:47",...}],...};`
+    /// 字段与桌面页 `article_list.re` 同形（含嵌套 `reply_list`），故解析器可复用。
+    ///
+    /// 返回 `(re 数组字符串, ShortName)`；找不到 `window.list` 赋值或任一锚点缺失 ⇒ `None`
+    /// （调用方据此把「桌面页 + 移动页都不可用」如实上报）。
+    fn extract_mobile_list(html: &str) -> Option<(&str, Option<&str>)> {
+        let key = "window.list";
+        let mut from = 0usize;
+        while let Some(rel) = html[from..].find(key) {
+            let idx = from + rel;
+            from = idx + key.len();
+            let rest = html[from..].trim_start();
+            let Some(rest) = rest.strip_prefix('=') else { continue };
+            let rest = rest.trim_start();
+            let Some(obj_end) = Self::find_balanced_object_end(rest) else { continue };
+            let obj_str = &rest[..=obj_end];
+            let re_key = "\"re\":[";
+            let Some(re_start_rel) = obj_str.find(re_key) else { continue };
+            let arr_start = re_start_rel + re_key.len() - 1;
+            let arr_rest = &obj_str[arr_start..];
+            let Some(end_rel) = Self::find_balanced_array_end(arr_rest) else { continue };
+            let short_name = Self::extract_short_name(obj_str);
+            return Some((&arr_rest[..=end_rel], short_name));
+        }
+        None
+    }
+
+    /// `bar_info` 里的 `ShortName`（请求股票对应的股吧简称）。
+    fn extract_short_name(obj_str: &str) -> Option<&str> {
+        let key = "\"ShortName\":";
+        let key_idx = obj_str.find(key)?;
+        let rest = obj_str[key_idx + key.len()..].trim_start();
+        let inner = rest.strip_prefix('"')?;
+        let end = inner.find('"')?;
+        Some(&inner[..end])
     }
 }
 
@@ -436,37 +532,47 @@ impl StockVendor for GubaVendor {
             self.guba_hot_rank(pure_code).await
         };
 
-        // 从 HTML 中提取 article_list JSON 数组 + 顶层 bar_name 字段
-        let (json_str, bar_name) = match Self::extract_article_list(&html) {
-            Ok(v) => v,
+        // 从 HTML 中提取 article_list JSON 数组 + 顶层 bar_name 字段。
+        // 桌面页被东财「身份核实」拦下（HTTP 200 + 无 article_list）时改走移动端
+        // `window.list` —— 同一时刻移动端仍正常，两站字段同形（见 `guba_mobile_posts`）。
+        let (posts, stock_name) = match Self::extract_article_list(&html) {
+            Ok((json_str, bar_name)) => {
+                let posts: Vec<Value> = serde_json::from_str(json_str).map_err(|e| {
+                    // 预览按 chars() 切 —— 帖子标题是中文，字节切片会在非 UTF-8 边界 panic。
+                    // 这一处刻意随本批改掉：它是「出错时才走」的路径，留着就等于归因函数自己会崩。
+                    let preview: String = json_str.chars().take(200).collect();
+                    DataError::ParseError(format!(
+                        "股吧 article_list JSON 解析失败: {e}, preview={preview}"
+                    ))
+                })?;
+                (posts, bar_name.map(|s| s.trim_end_matches("吧").to_string()))
+            },
             Err(f) => {
                 tracing::warn!(
-                    "[guba] {url} 帖子数组取不到: {} | {}",
+                    "[guba] {url} 帖子数组取不到: {} | {} ⇒ 改用移动端列表页",
                     f.phrase(),
                     html_forensics(&html)
                 );
-                return Err(f.to_live_error(stock_code));
+                match self.guba_mobile_posts(pure_code).await {
+                    Ok(v) => {
+                        tracing::warn!(
+                            "[guba] {pure_code} 桌面页不可用，已用移动端列表页兜底（{} 条帖子）",
+                            v.0.len()
+                        );
+                        v
+                    },
+                    Err(e) => {
+                        tracing::warn!("[guba] {pure_code} 桌面页与移动端兜底均失败: {e}");
+                        return Err(f.to_live_error(stock_code));
+                    },
+                }
             },
         };
-
-        let posts: Vec<Value> = serde_json::from_str(json_str).map_err(|e| {
-            // 预览按 chars() 切 —— 帖子标题是中文，字节切片会在非 UTF-8 边界 panic。
-            // 这一处刻意随本批改掉：它是「出错时才走」的路径，留着就等于归因函数自己会崩。
-            let preview: String = json_str.chars().take(200).collect();
-            DataError::ParseError(format!(
-                "股吧 article_list JSON 解析失败: {e}, preview={preview}"
-            ))
-        })?;
-
-        // 优先使用 article_list 顶层的 bar_name 字段作为股票名称
-        // (bar_name 对应请求的 stock_code,不会错位)
-        // 兜底:如果 bar_name 缺失,则 stock_name 为空字符串
-        let stock_name = bar_name.map(|s| s.trim_end_matches("吧").to_string()).unwrap_or_default();
 
         // live 与 as-of 共用同一个情感计算（as-of 只是在「取哪些帖子」上不同）
         Ok(vec![social_sentiment_from_posts(
             stock_code,
-            stock_name,
+            stock_name.unwrap_or_default(),
             &posts,
             hot_rank,
             chrono::Utc::now().timestamp(),
@@ -927,6 +1033,33 @@ mod tests {
         assert!(posts.is_empty());
         // bar_name 为 null,返回 None
         assert_eq!(bar_name, None);
+    }
+
+    /// 移动端兜底：`window.list` 的 `re` 数组与 `bar_info.ShortName` 必须能取出，
+    /// 且帖子内嵌套 `reply_list` 的括号不得截断数组。
+    #[test]
+    fn extract_mobile_list_parses_window_list_and_short_name() {
+        let html = r#"<script>
+        window.type = 1;
+        window.sort = 1;
+        window.list = {"bar_info":{"OuterCode":"002343","ShortName":"慈文传媒","Type":[200]},
+        "re":[{"post_id":1,"post_title":"涨","reply_list":[{"reply_text":"含 } 的正文"}],"post_publish_time":"2026-10-25 18:52:47"},
+        {"post_id":2,"post_title":"跌","reply_list":[]}],"count":2};
+    </script>"#;
+        let (json_str, short_name) =
+            GubaVendor::extract_mobile_list(html).expect("应解析出 window.list");
+        let posts: Vec<Value> = serde_json::from_str(json_str).unwrap();
+        assert_eq!(posts.len(), 2);
+        assert_eq!(posts[0]["post_title"].as_str(), Some("涨"));
+        assert_eq!(posts[0]["post_publish_time"].as_str(), Some("2026-10-25 18:52:47"));
+        assert_eq!(short_name, Some("慈文传媒"));
+    }
+
+    /// 身份核实壳页不含 `window.list` ⇒ 兜底解析必须如实返回 None，不能伪造空帖。
+    #[test]
+    fn extract_mobile_list_rejects_verify_shell_page() {
+        let shell = r#"<html lang="en"><head><title>身份核实</title></head><body><div id="root"></div></body></html>"#;
+        assert!(GubaVendor::extract_mobile_list(shell).is_none());
     }
 
     #[test]

@@ -256,9 +256,13 @@ impl std::fmt::Debug for RunOptions {
 
 impl Default for RunOptions {
     fn default() -> Self {
+        // ⚠ 键名必须用 `node_type_name` 给出的那些（`tool` / `fileOperation` / `llm` / `agent`）。
+        //   此前写的是 `"file"` ⇒ 引擎按 `node_type_name` 取到的是 `"fileOperation"`，那一格
+        //   **永不命中**（死项），文件类节点实际吃的是全局值。P2（2026-10-25）按口径改名，
+        //   让「文件/工具类并发 10」这条既有意图真的生效。
         let mut by_type = std::collections::HashMap::new();
         by_type.insert("tool".to_string(), 10);
-        by_type.insert("file".to_string(), 10);
+        by_type.insert("fileOperation".to_string(), 10);
         by_type.insert("llm".to_string(), 3);
         by_type.insert("agent".to_string(), 3);
 
@@ -291,12 +295,54 @@ impl Default for RunOptions {
     }
 }
 
+/// 工具 / 文件类节点的并发上限（它们不调 LLM，可以比 LLM 并发高）。
+/// 唯一来源：`RunOptions::default` 与 `with_max_concurrent` 都取它，不再各写一份 10。
+const IO_NODE_CONCURRENCY: usize = 10;
+
+/// 节点单步超时的**唯一**解析点（P2，2026-10-25）。
+///
+/// 优先级：**① 节点级 `base.timeout`**（建图时显式写的，例如辩手节点 900s、
+/// 分析师节点 600s）→ **② 按节点类型二分的 `RunOptions` 字段**（`tool` 走
+/// `tool_timeout`，其余一律 `step_timeout`）→ ③ 没有第三层：两个字段本身由命令层
+/// 从模板变量解析（`stock_workflow::decision::ExecutionParams`），crate 默认只是兜底。
+///
+/// ⚠ 此前这段 match 在「主批次调度」与「抢先调度」两条路径上**逐字抄了两遍**，
+///   改一处忘另一处 ⇒ 同一节点走哪条路决定它拿到哪个超时。
+/// ⚠ 第三条路径（容器体 Debate / Swarm / Loop 的整轮超时，`DEFAULT_CONTAINER_BODY_TIMEOUT`）
+///   **不并进本函数**：它兜的是「循环体一轮」而不是「单步」，是另一个量；并进会把
+///   体外 300s 的兜底换成步内 600s 的值。
+#[must_use]
+pub(crate) fn resolve_node_timeout(
+    node_type: &str,
+    base_timeout_secs: Option<u64>,
+    options: &RunOptions,
+) -> Duration {
+    let fallback = if node_type == "tool" {
+        options.tool_timeout
+    } else {
+        options.step_timeout
+    };
+    base_timeout_secs.map(Duration::from_secs).unwrap_or(fallback)
+}
+
 impl RunOptions {
     pub fn new() -> Self {
         Self::default()
     }
+    /// 设全局并发上限，并把 `llm` / `agent` 两格**一起对齐**。
+    ///
+    /// 此前只写 `max_concurrent` 而不动 `max_concurrent_by_type` ⇒ 引擎主批次过滤
+    /// （`type_limits.get(nt)`）先按 `llm=agent=3` 卡住，调用方设的 8/16 静默无效。
+    /// `commands/workflows`（通用运行）与 `cognitive` 两条链就是踩在这上面的。
+    /// `tool` / `fileOperation` 保持既有高位（不调 LLM，可以更并发）。
     pub fn with_max_concurrent(mut self, max: usize) -> Self {
         self.max_concurrent = max;
+        let mut by_type = self.max_concurrent_by_type.take().unwrap_or_default();
+        by_type.insert("llm".to_string(), max);
+        by_type.insert("agent".to_string(), max);
+        by_type.entry("tool".to_string()).or_insert(IO_NODE_CONCURRENCY);
+        by_type.entry("fileOperation".to_string()).or_insert(IO_NODE_CONCURRENCY);
+        self.max_concurrent_by_type = Some(by_type);
         self
     }
     pub fn with_step_timeout(mut self, timeout: Duration) -> Self {
@@ -593,44 +639,15 @@ pub struct WorkEngine {
 }
 
 /// P1-14: 提取节点的类型字符串（用于白名单校验）。
-/// 与 `dispatcher.rs::node_type_name` 等价；放这里以让外部 binary 不必
-/// 跨 crate 引入 dispatcher 内部函数。
+///
+/// ⚠ 此前本函数**自带一份 32 臂 match**（旧注释写「与 `dispatcher.rs::node_type_name` 等价」
+///   而不是真的调用它）⇒ 新增节点类型时两处各改各的，一处漏改就把「白名单校验」与
+///   「按类型取并发上限 / 超时」读成两套名字，正是本仓登记的「同一事实两处抄写」族。
+///   现在只留一份权威 [`node_type_name`]（`node_executor_trait.rs`），本函数只为外部调用方
+///   （`commands/workflows`、`commands/work_engine`、`workflow_fanout_audit`、播种期自检）
+///   保留既有导出名。
 pub fn node_type_of(node: &axagent_harness::workflow_types::WorkflowNode) -> &'static str {
-    use axagent_harness::workflow_types::WorkflowNode;
-    match node {
-        WorkflowNode::Trigger(_) => "trigger",
-        WorkflowNode::Agent(_) => "agent",
-        WorkflowNode::Tool(_) => "tool",
-        WorkflowNode::Condition(_) => "condition",
-        WorkflowNode::Switch(_) => "switch",
-        WorkflowNode::Loop(_) => "loop",
-        WorkflowNode::Parallel(_) => "parallel",
-        WorkflowNode::Merge(_) => "merge",
-        WorkflowNode::Delay(_) => "delay",
-        WorkflowNode::SubWorkflow(_) => "subWorkflow",
-        WorkflowNode::End(_) => "end",
-        WorkflowNode::Validation(_) => "validation",
-        WorkflowNode::Code(_) => "code",
-        WorkflowNode::DocumentParser(_) => "documentParser",
-        WorkflowNode::VectorRetrieve(_) => "vectorRetrieve",
-        WorkflowNode::Debate(_) => "debate",
-        WorkflowNode::HttpRequest(_) => "httpRequest",
-        WorkflowNode::DatabaseQuery(_) => "databaseQuery",
-        WorkflowNode::Notification(_) => "notification",
-        WorkflowNode::Approval(_) => "approval",
-        WorkflowNode::FileOperation(_) => "fileOperation",
-        WorkflowNode::DataTransformer(_) => "dataTransformer",
-        WorkflowNode::WebhookSend(_) => "webhookSend",
-        WorkflowNode::Logging(_) => "logging",
-        WorkflowNode::Storage(_) => "storage",
-        WorkflowNode::Llm(_) => "llm",
-        WorkflowNode::LlmClassifier(_) => "llmClassifier",
-        WorkflowNode::Aggregator(_) => "aggregator",
-        WorkflowNode::Email(_) => "email",
-        WorkflowNode::WorkflowRef(_) => "workflowRef",
-        WorkflowNode::Swarm(_) => "swarm",
-        WorkflowNode::MultiAgent(_) => "multiAgent",
-    }
+    node_type_name(node)
 }
 
 const _: fn() = || {
@@ -3364,15 +3381,9 @@ impl WorkEngine {
                     .await;
                 }
 
-                let node_timeout = match node_type_name(&node) {
-                    // 工具节点优先使用 tool_timeout，而非 step_timeout（后者面向 LLM 节点）
-                    "tool" => {
-                        node.base_timeout().map(Duration::from_secs).unwrap_or(options.tool_timeout)
-                    },
-                    _ => {
-                        node.base_timeout().map(Duration::from_secs).unwrap_or(options.step_timeout)
-                    },
-                };
+                // 超时优先级单点解析（节点级 base.timeout > 按类型的 RunOptions 字段）
+                let node_timeout =
+                    resolve_node_timeout(node_type_name(&node), node.base_timeout(), &options);
                 let mut exec_ctx = ExecutionState::new(
                     format!("node_{}", uuid::Uuid::new_v4()),
                     workflow_id.to_string(),
@@ -4671,16 +4682,12 @@ impl WorkEngine {
                         .await
                         .ok();
 
-                        let node_timeout = match node_type_name(&node) {
-                            "tool" => node
-                                .base_timeout()
-                                .map(Duration::from_secs)
-                                .unwrap_or(options.tool_timeout),
-                            _ => node
-                                .base_timeout()
-                                .map(Duration::from_secs)
-                                .unwrap_or(options.step_timeout),
-                        };
+                        // 与主批次路径同一解析点（此前这里逐字抄了第二遍 match）
+                        let node_timeout = resolve_node_timeout(
+                            node_type_name(&node),
+                            node.base_timeout(),
+                            &options,
+                        );
                         let mut exec_ctx = ExecutionState::new(
                             format!("node_{}", uuid::Uuid::new_v4()),
                             workflow_id.to_string(),
@@ -7177,5 +7184,65 @@ mod tests {
         )
         .expect("Running → Completed 应合法");
         assert!(wf2.results.contains_key("debate"), "负控：非空 output_var 必须照写别名键");
+    }
+
+    /// 超时优先级锁（P2，2026-10-25）：节点级 `base.timeout` > 按类型的 `RunOptions` 字段。
+    ///
+    /// 先把两个 fallback 改成**互不相等**（600 vs 45），否则「tool 走 tool_timeout」那条
+    /// 断言会因为两个默认值都是 30/300 而恒真 —— 恒真的自测不算自测。
+    #[test]
+    fn resolve_node_timeout_prefers_node_then_type_fallback() {
+        use super::{RunOptions, resolve_node_timeout};
+        use std::time::Duration;
+        // 负控前提：crate 默认（300s / 30s）与下面两个 fixture 值都不同，
+        // 否则「按类型二分」那条断言会因为两个 fallback 相等而恒真。
+        let defaults = RunOptions::default();
+        assert_eq!(defaults.step_timeout.as_secs(), 300);
+        assert_eq!(defaults.tool_timeout.as_secs(), 30);
+
+        // clippy::field_reassign_with_default：默认值之上改字段要走结构体字面量。
+        let options = RunOptions {
+            step_timeout: Duration::from_secs(600),
+            tool_timeout: Duration::from_secs(45),
+            ..Default::default()
+        };
+
+        // ① 节点级显式超时赢，且不因类型而变（辩手 900s 就是这一格）
+        assert_eq!(resolve_node_timeout("tool", Some(900), &options), Duration::from_secs(900));
+        assert_eq!(resolve_node_timeout("llm", Some(900), &options), Duration::from_secs(900));
+
+        // ② 无节点级值时，只有 `tool` 吃 tool_timeout
+        assert_eq!(resolve_node_timeout("tool", None, &options), Duration::from_secs(45));
+
+        // ③ 其余类型一律 step_timeout。⚠ `fileOperation` / `httpRequest` / `code` 也走这一格
+        //    —— 这是今天的形态（工具超时只认 `tool`），不是笔误，改它要另开一批。
+        for t in ["llm", "agent", "fileOperation", "httpRequest", "code", "condition"] {
+            assert_eq!(
+                resolve_node_timeout(t, None, &options),
+                Duration::from_secs(600),
+                "{t} 应吃 step_timeout"
+            );
+        }
+    }
+
+    /// `with_max_concurrent` 必须把 `llm` / `agent` 两格一起对齐 —— 此前它只改全局值，
+    /// 调用方（通用运行命令、认知编排器）设的并发被 crate 默认的 3 静默卡住。
+    #[test]
+    fn with_max_concurrent_aligns_llm_and_agent_limits() {
+        use super::RunOptions;
+        // 负控前提：默认值确实与 16 不同，否则下面的断言恒真。
+        assert_eq!(RunOptions::default().max_concurrent_by_type.unwrap().get("llm"), Some(&3));
+
+        let opts = RunOptions::default().with_max_concurrent(16);
+        assert_eq!(opts.max_concurrent, 16);
+        let by_type = opts
+            .max_concurrent_by_type
+            .expect("with_max_concurrent 之后按类型表必须存在，否则 llm/agent 回落到 3");
+        assert_eq!(by_type.get("llm"), Some(&16));
+        assert_eq!(by_type.get("agent"), Some(&16));
+        assert_eq!(by_type.get("tool"), Some(&super::IO_NODE_CONCURRENCY));
+        assert_eq!(by_type.get("fileOperation"), Some(&super::IO_NODE_CONCURRENCY));
+        // 死项不得复活：`"file"` 不是 `node_type_name` 给出的名字。
+        assert!(!by_type.contains_key("file"), "按类型表里不得有引擎取不到的键");
     }
 }

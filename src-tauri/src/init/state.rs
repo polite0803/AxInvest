@@ -37,6 +37,23 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
 
     // 命令元数据已通过 inventory 在编译时自动收集，无需手动初始化
 
+    // ── 共享 Rhai Engine 的 AxInvest 宿主函数集注册（R-3c，2026-10-25 移到这里）──
+    //
+    // 此前注册写在 `src/init/services.rs` 的 `start_background_services` 里，
+    // 那是 **Tauri 应用启动路径** ⇒ CLI（`axagent-validate-backfill` /
+    // `axagent-batch-rerun`）与无头服务（`server_main`）拿到的共享 Engine
+    // **完全没有 `pm_*` 宿主函数** ⇒ 脚本里的 `pm_*` 调用报
+    // `Function not found` ⇒ `data-quality` / `portfolio-mgr` / `portfolio-risk-gate`
+    // 节点降级 ⇒ **回放分析链测的是降级版系统**。
+    //
+    // 实测证据（CLI 跑时间旅行批次）：`pm_asof_degraded_methods`（**零参数**闭包）
+    // 也报 not found ⇒ 与签名无关 ⇒ 只能是整个函数集缺失。
+    //
+    // 本函数是**所有路径的共同入口**（Tauri / CLI ×2 / server_main），
+    // 注册放这里才能一处覆盖全部路径；共享 Engine 首次创建时取走注册队列并冻结，
+    // 所以必须早于任何工作流执行 —— 本处满足。
+    crate::commands::stock_workflow::rhai_registry::ensure_shared_engine_has_axinvest_functions();
+
     let DatabaseInitResult { db_handle, master_key, db_path, app_dir, .. } = db_result;
 
     // 初始化 RLOptimizer 共享状态（优先从文件加载，自动持久化）
@@ -946,6 +963,28 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     );
 
     work_engine.set_event_bus(Arc::clone(&event_bus));
+
+    // ── 工作流工具 resolver 注入（R-3d，2026-10-26 下沉到此）──
+    //
+    // ⚠ **必须在这里**（`create_app_state` 内）而不是 `services.rs` 的应用启动路径：
+    // `WorkEngine::run_workflow` 的「按需延迟注册」段（`engine/mod.rs:2478`）依赖
+    // `tool_resolver` 才能把工作流 `tool_defs` 声明的工具接进 Engine；
+    // resolver 为空 ⇒ `工具 'get_industry_ranking' 未注册`（`tool_executor.rs:177`）
+    // ⇒ **所有数据节点 Failed** ⇒ 种子池空 ⇒ **候选 0 行**。
+    //
+    // 实测（2026-10-26）：此前该注入只在 `services.rs:2072`（Tauri 应用路径）与
+    // `axagent-batch-rerun.rs:784` 有 ⇒ **CLI（`axagent-validate-backfill`）与
+    // `server_main` 两个入口都缺** ⇒ 时间旅行批次跑出来「候选 0 行」，
+    // 而症状长得像「那天没数据」。
+    //
+    // 本函数是**所有构造 AppState 的路径的共同入口** ⇒ 一次装齐，不再有下一个漏。
+    // 与 R-3c 的「宿主函数注册下沉」同族同法。
+    crate::init::services::inject_tool_resolver_into(
+        local_tool_registry.clone(),
+        work_engine.clone(),
+    )
+    .await;
+
     let skill_decomposer: Arc<tokio::sync::RwLock<axagent_trajectory::SkillDecomposer>> =
         Arc::new(tokio::sync::RwLock::new(axagent_trajectory::SkillDecomposer::new()));
     let proactive_service: Arc<tokio::sync::RwLock<ProactiveService>> =

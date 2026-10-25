@@ -912,7 +912,7 @@ function CrossCheckBadge({
   recAction: string;
 }) {
   const { t, i18n } = useTranslation();
-  if (consensus.total === 0) { return null; }
+  if (consensus.votes.total === 0) { return null; }
 
   // 推荐与共识的对齐：买入方向时要求共识 bullish 才算"一致"；
   // 其他动作（HOLD/SELL）暂不参与交叉验证，留给后续扩展。
@@ -944,10 +944,13 @@ function CrossCheckBadge({
     // 共识中性，且推荐为 BUY → 直接提示"未印证 BUY 推荐"
     color = "orange";
     icon = "⚠";
-    label = `${consensus.neutral}/${consensus.total} ${t("stockAnalysis.recommendation.neutral")}`;
+    // 显示票数，不显示加权和：`consensus.neutral/total` 是按持有期加权后的分数和
+    // （会出现 3.3/11.6 这种值），渲染成 `N/M` 会被读成「3.3 票」，与同屏顶部条的
+    // 票数口径长得一样却不可比。计数域①`votes` 才是票数。
+    label = `${consensus.votes.neutral}/${consensus.votes.total} ${t("stockAnalysis.recommendation.neutral")}`;
     tooltipBody = t("stockAnalysis.recommendation.crossCheckNeutral", {
-      total: consensus.total,
-      neutral: consensus.neutral,
+      total: consensus.votes.total,
+      neutral: consensus.votes.neutral,
     });
   }
 

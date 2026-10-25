@@ -278,6 +278,31 @@ fn extract_node_text(v: &Value) -> String {
 /// `data-quality` 节点在快照里的键（与 [`build_blackboard_snapshot`] 的 `result.{node_id}` 同族）。
 const DATA_QUALITY_RESULT_KEY: &str = "result.data-quality";
 
+/// 归一两形态后的 `data-quality` 产物对象；不是对象（或解不出来）时返回 `None`。
+///
+/// 本模块内**唯一**接触 `DATA_QUALITY_RESULT_KEY` 的地方 —— grade 读法与反馈写侧共用它，
+/// 于是「两种形态都要吃」这条纪律只有一份实现（写两份迟早一边漏掉字符串形态，
+/// 症状是「有诊断却一行都不写」，与 2026-10-25 查明的那批静默落空同型）。
+fn data_quality_object(snapshot: &HashMap<String, Value>) -> Option<Value> {
+    let raw = snapshot.get(DATA_QUALITY_RESULT_KEY)?;
+    match raw {
+        Value::Object(_) => Some(raw.clone()),
+        Value::String(s) => serde_json::from_str::<Value>(s).ok().filter(Value::is_object),
+        _ => None,
+    }
+}
+
+/// 从快照里取本轮 `data-quality` 的**完整诊断报告**（`analyst_feedbacks` 写侧的唯一读法）。
+///
+/// 与 [`data_quality_grade`] 同款容忍，且同样要求顶层带 `grade` —— 没有 `grade` 就说明
+/// 这个键装的不是 data-quality 的输出（旧快照 / 别的节点串位），此时宁可返回 `None`
+/// 让调用侧记「本轮无诊断」，也不要按半截结构去凑反馈行。
+pub fn data_quality_report(snapshot: &HashMap<String, Value>) -> Option<Value> {
+    let report = data_quality_object(snapshot)?;
+    report.get("grade").and_then(Value::as_str)?;
+    Some(report)
+}
+
 /// 从 blackboard 快照里取本轮 `data-quality` 的**字母等级**（#8 P5 观测落库的唯一读法）。
 ///
 /// 放在本模块而不是 dao/命令层，是为了让「快照的键形状」只有一个知情人 —— 写入形状在这里，
@@ -290,17 +315,8 @@ const DATA_QUALITY_RESULT_KEY: &str = "result.data-quality";
 /// 返回 `None` 的三种成因（节点没跑成 / 快照无该键 / 没有 grade 字段）在本函数里**不区分**，
 /// 因为调用侧的处置相同（记一行异常）。要区分的人应先改这里，而不是在调用侧猜。
 pub fn data_quality_grade(snapshot: &HashMap<String, Value>) -> Option<String> {
-    let raw = snapshot.get(DATA_QUALITY_RESULT_KEY)?;
-    let borrowed;
-    let obj = match raw {
-        Value::Object(_) => raw.as_object(),
-        Value::String(s) => {
-            borrowed = serde_json::from_str::<Value>(s).unwrap_or(Value::Null);
-            borrowed.as_object()
-        },
-        _ => None,
-    };
-    obj?.get("grade")
+    data_quality_report(snapshot)?
+        .get("grade")
         .and_then(|g| g.as_str())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())

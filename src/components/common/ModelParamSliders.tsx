@@ -112,14 +112,12 @@ export interface ModelParamValues {
   temperature: number | null;
   topP: number | null;
   maxTokens: number | null;
-  frequencyPenalty: number | null;
 }
 
 export interface ModelParamDefaults {
   temperature?: number;
   topP?: number;
   maxTokens?: number;
-  frequencyPenalty?: number;
 }
 
 export interface ModelParamSlidersProps {
@@ -131,10 +129,8 @@ export interface ModelParamSlidersProps {
   showSwitch?: boolean;
   /** Show dividers between rows (default: true) */
   showDividers?: boolean;
-  /** Which parameters to render (default: all four) */
-  visibleParams?: Array<
-    "temperature" | "topP" | "maxTokens" | "frequencyPenalty"
-  >;
+  /** Which parameters to render (default: all three) */
+  visibleParams?: Array<"temperature" | "topP" | "maxTokens">;
 }
 
 const MAX_TOKENS_MARKS: Record<string | number, string> = {
@@ -158,24 +154,16 @@ const TOP_P_MARKS: Record<string | number, string> = {
   1: "1",
 };
 
-const FREQ_PENALTY_MARKS: Record<string | number, string> = {
-  "-2": "-2",
-  0: "0",
-  2: "2",
-};
-
 const DEFAULT_DEFAULTS: Required<ModelParamDefaults> = {
   temperature: 0.7,
   topP: 1.0,
   maxTokens: 4096,
-  frequencyPenalty: 0,
 };
 
 const ALL_PARAMS = [
   "temperature",
   "topP",
   "maxTokens",
-  "frequencyPenalty",
 ] as const;
 
 export function ModelParamSliders({
@@ -246,23 +234,6 @@ export function ModelParamSliders({
                 marks={MAX_TOKENS_MARKS}
                 inputWidth={90}
                 onChange={(v) => onChange({ maxTokens: v })}
-                showSwitch={showSwitch}
-                showDivider={showDividers && !isLast}
-              />
-            );
-          case "frequencyPenalty":
-            return (
-              <ParamRow
-                key="frequencyPenalty"
-                label={t("settings.frequencyPenalty")}
-                tooltip={t("settings.frequencyPenaltyTooltip")}
-                value={values.frequencyPenalty}
-                defaultValue={d.frequencyPenalty}
-                min={-2}
-                max={2}
-                step={0.1}
-                marks={FREQ_PENALTY_MARKS}
-                onChange={(v) => onChange({ frequencyPenalty: v })}
                 showSwitch={showSwitch}
                 showDivider={showDividers && !isLast}
               />

@@ -83,6 +83,20 @@ pub async fn apply_startup_settings(
     Ok(())
 }
 
+#[agent_command(domain = desktop, safety = Caution, call_mode = Manual, description = "设置系统托盘开关")]
+#[tauri::command]
+pub async fn set_tray_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    #[cfg(not(mobile))]
+    {
+        crate::tray::set_tray_enabled(&app, enabled)?;
+    }
+    #[cfg(mobile)]
+    {
+        let _ = (app, enabled);
+    }
+    Ok(())
+}
+
 #[agent_command(domain = desktop, safety = Dangerous, call_mode = Manual, description = "强制退出应用")]
 #[tauri::command]
 pub async fn force_quit(app: tauri::AppHandle) -> Result<(), String> {

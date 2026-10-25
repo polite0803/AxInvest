@@ -174,8 +174,6 @@ struct GeminiModel {
     supported_generation_methods: Option<Vec<String>>,
     #[serde(rename = "inputTokenLimit")]
     input_token_limit: Option<u32>,
-    #[serde(rename = "outputTokenLimit")]
-    output_token_limit: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -832,7 +830,6 @@ impl ProviderAdapter for GeminiAdapter {
                     model_type,
                     capabilities: caps,
                     max_tokens: m.input_token_limit,
-                    max_output_tokens: m.output_token_limit,
                     enabled: true,
                     param_overrides: None,
                     input_price_per_mtok: None,

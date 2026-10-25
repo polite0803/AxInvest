@@ -528,6 +528,48 @@ export interface ValuationReconciliation {
   horizon?: string;
 }
 
+/**
+ * v180 建、v183 反转：f7 口径参照（`portfolio-mgr-f7-ref` 节点）的只读对比快照。
+ *
+ * 两侧是**同一个 rhai**，只差 f7 那条腿吃什么：
+ *   · 生产侧（v183 默认）= 分析师结构票（净票 × 离散度折减），不读 LLM 决策；
+ *   · 参照侧（本快照）= trader 的方向/置信/报价折算，即 v183 之前的生产口径。
+ * ⇒ 两侧之差 = 「交易观点进入公式后造成的位移」，是一把判据，不是第二套评分体系。
+ * 两侧形态自 v185 起**恒定**（模板变量 `formula_independent_f7` 已退役：生产侧恒不吃 trader、
+ * 参照侧恒吃）⇒ 消费方仍**必须读 `f7Source` 判断本快照是哪一口**，不能按节点名猜 ——
+ * 「恒定」说的是建图形态，不是「本条记录跑出来是什么口径」。
+ *
+ * ⚠️ 计数域：`confidence` / `positionPct` / `posterior` 与生产侧是**同一把尺子**
+ *   （同一个 rhai 产出；`posterior` 是百分数、一位小数），可以直接并排比。
+ *   但 B1 逐档对照那三套分数（三维 / 满分 65）不是同一计数域，不可并排。
+ *
+ * 缺席语义（呈现层各占一句，**不得**压成 0 或空白）：
+ *   · 键不存在 = 该记录产自本口径之前 ⇒ 参照侧未产出
+ *   · `f7Source="absent"` = 该侧既无票也无 trader 输入 ⇒ f7 记 0 并退出权重
+ *   · `f7Source` 与生产侧相同 = 对照不成立（面板须出「同口径」那句）
+ *   · `weightsCollapsed=true` = 因子权重坍缩 ⇒ 本侧结论不可用于对比
+ */
+export interface F7ReferenceSnapshot {
+  /** 方向档原文（`买入` / `观望` / `数据缺失` …）；缺键 = 本侧未产出结论 */
+  action?: string | null;
+  /** 建议仓位（%，一位小数），与生产侧 `positionPct` 同刻度 */
+  positionPct?: number | null;
+  /** 置信度（0-100），与生产侧 `confidence` 同刻度 */
+  confidence?: number | null;
+  /** 后验（百分数，一位小数），与生产侧 `posterior` 同刻度 */
+  posterior?: number | null;
+  /** 风险档原文（`低风险` / `中风险` / …） */
+  riskLevel?: string | null;
+  /** f7 腿输入的来历：`analyst_votes`（v183 生产口径）| `trader`（含交易观点）| `absent`（无输入） */
+  f7Source?: string | null;
+  /** f7 腿在合并权重里的占比（%，一位小数）；生产侧用同一个数标记自指污染 */
+  f7WeightPct?: number | null;
+  /** 因子权重坍缩（V66）：true 时本侧结论不可用 */
+  weightsCollapsed?: boolean | null;
+  /** 本侧消费不到的上游数据清单（与生产侧 `dataGaps` 同一判据） */
+  dataGaps?: string[] | null;
+}
+
 export interface StockDecision {
   action: StockActionType;
   positionPct: number;
@@ -676,6 +718,17 @@ export interface StockDecision {
   adjustedConfidence?: number;
   /** V50: 双视角一致性分维度诊断 */
   agreementBreakdown?: AgreementBreakdown;
+  /**
+   * v183：f7 口径参照的只读对比产物（两侧同一个 rhai，只差 f7 输入；不参与生产 `action`）。
+   * 本条到底读没读 LLM 决策，看上面 `f7Source`，不是看这个块在不在。
+   */
+  f7ReferenceFormula?: F7ReferenceSnapshot | null;
+  /**
+   * 本条决策自己的 f7 口径（产端 rhai 顶层 `f7_source`）。
+   * v183 起 `analyst_votes` = 生产口径（不读 LLM 决策）；`trader` = 含交易观点；
+   * `absent` = 两条都没喂上 ⇒ f7 σ=0 退出权重。键缺席 = 该记录早于 v183。
+   */
+  f7Source?: string | null;
   /**
    * B1 逐档对照四行（产端 `core.rs` 嵌在 `decision.agreementByHorizon`）。
    * 键缺席 = 该记录产自逐档对照上线前 ⇒ 面板说「未产出」，**不得**渲染成四个 0 分。
@@ -1067,6 +1120,28 @@ export interface DataQualityDiagItem {
   /** 缺失或低置信的具体原因（正常时为空字符串） */
   gap_reason: string;
   /**
+   * 2026-10-25：本轮**结论方向与多空评分互相打脸**的描述（`""` = 没有矛盾）。
+   * 判据住在后端 `data-quality.rhai::verdict_direction_contradiction`，前端只读不重算。
+   * 非空 ⇒ 这位分析师本轮不计入共识票，且呈现层必须说明「为什么少一票」。
+   * ⚠ 旧快照没这个字段 ⇒ 可选。缺字段是**不知道**，不是「无人矛盾」：
+   *   消费端（`contradictionBasesForTier`）据此返回 `null`，一律照常计票。
+   */
+  inconsistent_reason?: string;
+  /**
+   * 2026-10-25 新增：本轮**评分自洽性**（`bull_score + bear_score` 是否≈100）的逐节点读数。
+   *
+   * 三态，不可收敛：`""` = 自洽；非空 = 偏离描述；**键不存在 = 不知道**
+   * （多空两个分至少缺一个，rhai 那侧返回 Unit ⇒ 干脆不写这个键）。旧快照一律无此键。
+   *
+   * 判据住在 `data-quality.rhai::verdict_score_sum_reason`（与全局 `issues` 文案同一份实现），
+   * 消费端（`analyst_feedbacks` 写侧）只读不重算。
+   *
+   * ⚠ 与 `inconsistent_reason` 是两件事，勿并成一格：那条判「结论方向与两分大小互相打脸」
+   *   ⇒ 剥夺投票资格；本条判「两分之和偏离 100」⇒ 产出形态问题，按 2026-10-25 裁定
+   *   **不**剥夺投票资格。
+   */
+  score_sum_reason?: string;
+  /**
    * 2026-09-12 新增：报告文本命中的失败标记**词种数**（如"无法获取"/"为 null"/"返回空"）。
    * > 0 时即便 confidence >= 50 也判 low（置信度虚高）。
    * ⚠ 这是**词种数**不是出现次数：同一标记出现多次只计 1。
@@ -1221,6 +1296,30 @@ export interface DataQualityReport {
   bear_dir_count?: number;
   /** 人类可读的总结文本 */
   summary: string;
+}
+
+/**
+ * 2026-10-25：分析师质量反馈（`analyst_feedbacks`）本轮落库的计数。
+ *
+ * 写在**后端**（`stock_workflow::core.rs` 与数据质量观测同位），前端只读计数 ——
+ * 写侧留在前端时，每日自动化批次 / 时间旅行回放 / T+0 重跑这些不经过界面的通道
+ * 一行都写不出来（自我进化的输入不能取决于有没有人点面板）。
+ *
+ * 三种缺席各占一句，界面**不得**从 `written === 0` 反推原因（反推会把
+ * 「快速链本来就没有分析师节点」与「诊断没跑出来」并成一句）：
+ *   · `skipped === null`  = 写了行（`written` 条）
+ *   · `skipped === "fast_chain"`      = 快速分析链没有那 10 个分析师节点（设计如此）
+ *   · `skipped === "bad_snapshot"`    = 黑板快照不可解析
+ *   · `skipped === "no_analysis_row"` = 查不到本次分析记录
+ *   · `skipped === "no_diagnosis"`    = 本轮没有数据质量诊断（节点未跑 / 快照无该键）
+ */
+export interface AnalystFeedbackOutcome {
+  /** 已落库行数 */
+  written: number;
+  /** 单行写库失败的条数（一行失败不影响其余，但必须计数 —— 静默就是「伪装成正常」） */
+  failed: number;
+  /** 一行都没写时的成因（后端给出）；写过任何一行 ⇒ `null` */
+  skipped: string | null;
 }
 
 export interface AnalysisSummary {

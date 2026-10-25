@@ -94,6 +94,27 @@ pub use commands::stock_workflow::run_batch_reflection_inner;
 // 不能在 bin 里另抄一份（抄了就永远对不上）。`commands` 本身是私有模块，
 // 这里的 `pub use` 只做再导出，不改 `commands/mod.rs` 的解析面（见上方两条 ⚠ 注释）。
 pub use commands::stock_analysis_setup::seed_stock_analysis::TEMPLATE_VERSION;
+// 共享 Rhai Engine 的 AxInvest 宿主函数注册入口（R-3c，2026-10-26）。
+//
+// 用途：`tests/shared_engine_host_functions_registered.rs`（集成测试）需要直接调它，
+// 才能验证「宿主函数真的进了共享 Engine」—— 而 `commands` 是私有模块，
+// 集成测试无法走 `axagent_lib::commands::…` 路径（同上方两条 ⚠ 注释的处置方式：
+// 在 lib 层做**再导出**，不改 `commands/mod.rs` 的解析面）。
+//
+// 生产路径里这一步发生在 `create_app_state`（所有构造 AppState 的路径的共同入口）；
+// 此处导出只是为了让测试能触达同一入口。
+pub use commands::stock_workflow::rhai_registry::ensure_shared_engine_has_axinvest_functions;
+// A-2 回补验证（2026-10-25）：`src/bin/axagent-validate-backfill.rs` 要用带 `dryRun`
+// 的探测入口 —— 前端无触发点、cron 分支又强制 `dryRun=false`，只能从 CLI 驱动。
+// 与上面两条同形：**只在此处再导出**，不改 `commands/mod.rs` 的解析面。
+pub use commands::backtest_validation::{RunDecisionBacktestRequest, run_decision_backtest_inner};
+// 时间旅行批次（R-2，2026-10-25）：`src/bin/axagent-validate-backfill.rs` 的
+// `--time-travel` 模式要驱动批次，而命令层要 `State<'_, AppState>`，CLI 拿不到。
+// 与上一条同形：**只在此处再导出**，命令层保留薄包装。
+pub use commands::time_travel_batch::{
+    TIME_TRAVEL_BATCH_TASK_TYPE, TimeTravelBatchRequest, list_replayable_as_of_dates,
+    run_time_travel_batch_inner,
+};
 // 「一行 pending = 一个复盘档」的建点共享构造器（PLAN-reflection-per-horizon-row §2.4）。
 // bin `axagent-batch-rerun` 的补建路径必须与 `core.rs` / `hooks.rs` 两个应用内建点走同一
 // 构造器，否则三处默认值/档口径再度分叉（该函数注释里记载的「手抄常量」缺陷即由此而来）。

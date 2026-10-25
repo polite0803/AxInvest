@@ -10,7 +10,7 @@
 //! 2. 分析反馈中的共性问题（类型相关的质量指标）
 //! 3. 当问题频率超过阈值时，自动生成并应用优化建议
 
-use crate::node_quality::{calc_consistency_metrics, NodeType};
+use crate::node_quality::{aggregate_consistency_rates, NodeType};
 use axagent_entities::analyst_feedback::{Entity as AnalystFeedback, Model as FeedbackModel};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
@@ -72,20 +72,13 @@ pub async fn evolve_node(
     let avg_quality: f64 =
         feedbacks.iter().map(|f| f.quality_score as f64).sum::<f64>() / total as f64;
 
-    // 3. 计算一致性指标（按节点类型）
-    let mut consistency_metrics: HashMap<String, f64> = HashMap::new();
-    for f in &feedbacks {
-        if let Ok(metrics) = serde_json::from_str::<serde_json::Value>(&f.quality_metrics_json) {
-            let metrics_for_node = calc_consistency_metrics(node_type, &metrics);
-            for (key, value) in metrics_for_node {
-                *consistency_metrics.entry(key).or_insert(0.0) += value;
-            }
-        }
-    }
-    // 计算平均值
-    for value in consistency_metrics.values_mut() {
-        *value /= total as f64;
-    }
+    // 3. 一致性指标：聚合口径的唯一实现在 `node_quality::aggregate_consistency_rates`
+    //    （2026-10-25：分母改为「带上该指标的行数」，缺键既不算一致也不算不一致 ——
+    //    旧写法除以总行数，等于把「没有读数」稀释成「一致率低」）。
+    let consistency_metrics = aggregate_consistency_rates(
+        node_type,
+        feedbacks.iter().map(|f| f.quality_metrics_json.as_str()),
+    );
 
     // 4. 分析问题模式
     let mut problem_types: HashMap<String, u64> = HashMap::new();
@@ -258,17 +251,20 @@ pub fn generate_prompt_corrections(node_type: &NodeType, feedback: &FeedbackMode
         match node_type {
             NodeType::Analyst => {
                 if let Some(m) = metrics.as_object() {
-                    let score_consistent =
-                        m.get("score_consistent").and_then(|v| v.as_bool()).unwrap_or(true);
+                    // 2026-10-25：只有**显式 false** 才注入强制约束。旧写法
+                    // `unwrap_or(true)` 对 Analyst 是「缺键当作自洽 ⇒ 沉默」，
+                    // 而下面 Decision 那支 `unwrap_or(false)` 是「缺键当作未评估 ⇒ 凭空注入」——
+                    // 同一张表里两种冒充方向，现统一成「不知道就什么都不做」。
+                    let score_consistent = m.get("score_consistent").and_then(|v| v.as_bool());
                     let direction_consistent =
-                        m.get("direction_consistent").and_then(|v| v.as_bool()).unwrap_or(true);
+                        m.get("direction_consistent").and_then(|v| v.as_bool());
 
-                    if !score_consistent {
+                    if score_consistent == Some(false) {
                         corrections.push(
                             "【质量强制约束】请确保 bull_score + bear_score 的总和必须严格等于 100。在输出前务必自检。".to_string()
                         );
                     }
-                    if !direction_consistent {
+                    if direction_consistent == Some(false) {
                         corrections.push(
                             "【逻辑强制约束】请确保 verdict（看多/看空）必须与 bull_score/bear_score 的大小关系一致。".to_string()
                         );
@@ -277,10 +273,9 @@ pub fn generate_prompt_corrections(node_type: &NodeType, feedback: &FeedbackMode
             },
             NodeType::Debate => {
                 if let Some(m) = metrics.as_object() {
-                    let logic_consistent =
-                        m.get("logic_consistent").and_then(|v| v.as_bool()).unwrap_or(true);
+                    let logic_consistent = m.get("logic_consistent").and_then(|v| v.as_bool());
 
-                    if !logic_consistent {
+                    if logic_consistent == Some(false) {
                         corrections.push(
                             "【逻辑强制约束】请确保你的立场（stance）与论据链保持逻辑一致性，论据必须支持声明。".to_string()
                         );
@@ -289,17 +284,17 @@ pub fn generate_prompt_corrections(node_type: &NodeType, feedback: &FeedbackMode
             },
             NodeType::Decision => {
                 if let Some(m) = metrics.as_object() {
-                    let risk_assessed =
-                        m.get("risk_assessed").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let criteria_met =
-                        m.get("criteria_met").and_then(|v| v.as_bool()).unwrap_or(false);
+                    // 缺键 ⇒ 不知道 ⇒ 不注入（旧 `unwrap_or(false)` 会把「没有读数」
+                    // 当成「未评估」，凭空往 prompt 加约束）
+                    let risk_assessed = m.get("risk_assessed").and_then(|v| v.as_bool());
+                    let criteria_met = m.get("criteria_met").and_then(|v| v.as_bool());
 
-                    if !risk_assessed {
+                    if risk_assessed == Some(false) {
                         corrections.push(
                             "【风险强制约束】在做出任何决策前，必须完成风险评估并明确列出主要风险因素。".to_string()
                         );
                     }
-                    if !criteria_met {
+                    if criteria_met == Some(false) {
                         corrections.push(
                             "【标准强制约束】决策必须明确说明符合的评估标准和满足的条件。"
                                 .to_string(),
@@ -309,10 +304,9 @@ pub fn generate_prompt_corrections(node_type: &NodeType, feedback: &FeedbackMode
             },
             NodeType::Tool | NodeType::Valuation | NodeType::Risk => {
                 if let Some(m) = metrics.as_object() {
-                    let completeness =
-                        m.get("completeness").and_then(|v| v.as_bool()).unwrap_or(true);
+                    let completeness = m.get("completeness").and_then(|v| v.as_bool());
 
-                    if !completeness {
+                    if completeness == Some(false) {
                         corrections.push(
                             "【完整性强制约束】请确保输出包含所有必需的字段，不允许返回空结果或部分结果。".to_string()
                         );

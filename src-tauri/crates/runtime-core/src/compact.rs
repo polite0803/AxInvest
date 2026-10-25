@@ -25,32 +25,6 @@ pub use axagent_harness::compact_session::{
     format_compact_summary, get_compact_continuation_message,
 };
 
-/// 使用多层阈值系统判断是否需要压缩（增强版）。
-///
-/// 与 `should_compact` 不同，此函数：
-/// - 考虑有效上下文窗口大小
-/// - 使用四层阈值（warning / auto_compact / error / blocking_limit）
-/// - 返回详细的阈值状态而非简单布尔值
-///
-/// # 参数
-/// - `session`: 当前会话
-/// - `effective_window`: 模型的有效上下文窗口 token 数
-#[must_use]
-pub fn evaluate_compact_threshold(
-    session: &Session,
-    effective_window: u64,
-) -> crate::compact_thresholds::CompactThresholdState {
-    crate::compact_thresholds::CompactThresholdState::compute(session, effective_window)
-}
-
-/// 获取建议的压缩配置，根据当前阈值状态自动调整激进程度。
-///
-/// 越接近上下文窗口限制，配置越激进（保留更少的最近消息）。
-#[must_use]
-pub fn adaptive_compaction_config(session: &Session, effective_window: u64) -> CompactionConfig {
-    crate::compact_thresholds::recommended_compaction_config(session, effective_window)
-}
-
 /// 智能压缩：优先尝试会话记忆压缩，失败时回退到传统 LLM 压缩。
 ///
 /// 此函数将 session_memory_compact 和传统的 compact_session 串联起来：

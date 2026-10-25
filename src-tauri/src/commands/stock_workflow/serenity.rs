@@ -1,4 +1,4 @@
-use super::decision::{load_and_inject_template, parse_asof_param, resolve_runtime_options};
+use super::decision::{ExecutionParams, load_and_inject_template, parse_asof_param};
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::stock_workflow as wf_err;
@@ -1109,8 +1109,11 @@ pub(crate) async fn run_serenity_screening_inner(
         }]);
     }
 
-    let (max_concurrent, step_timeout, _total_timeout) =
-        resolve_runtime_options(variables.as_deref());
+    // 执行参数四面（并发 / 单步超时 / 工具超时 / 按类型上限）的唯一解析点。
+    // ⚠ 本链此前只取了 max_concurrent 与 step_timeout 两格、其余交给 `..Default::default()`
+    //   ⇒ crate 默认的 `llm=agent=3` 把面板设定的并发静默压回 3（P2 收口，2026-10-25 修）。
+    //   本链不做外层总超时，`total_timeout` 不取。
+    let exec = ExecutionParams::from_template_vars(variables.as_deref());
 
     // 2. 创建 Workflow（实例名带模板标识：两链实例在 DB/日志中可区分）
     let wf_name = format!("{template_id}-{}", chrono::Utc::now().timestamp_millis());
@@ -1218,9 +1221,7 @@ pub(crate) async fn run_serenity_screening_inner(
     // 更彻底的做法：模板 variables 全部注入（均为可编辑参数，无敏感字段）。
     // v47: 使用已注入用户主题的 variables（而非原始 loaded.variables）
     let serenity_vars: Option<Vec<axagent_harness::workflow_types::Variable>> = variables;
-    let opts = RunOptions {
-        max_concurrent,
-        step_timeout,
+    let mut opts = RunOptions {
         progress_callback: Some(progress_cb),
         input: None,
         input_schema: loaded.input_schema.clone(),
@@ -1237,6 +1238,7 @@ pub(crate) async fn run_serenity_screening_inner(
         )),
         ..Default::default()
     };
+    exec.apply_to(&mut opts);
 
     // 本轮降级留痕绑定到**这次运行**（与荐股链 `recommend_stocks` 的 H3 同一形态）：
     // `with_degradation_log` 给本任务提供容器；进出各取一次水位 ⇒ 切片只含本轮新增，

@@ -5556,7 +5556,7 @@
       "empty": "无本地工具",
       "title": "本地工具"
     },
-    "maxTokens": "最大 Tokens",
+    "maxTokens": "最大输出 Tokens",
     "maxTokensTooltip": "模型生成的最大 Tokens 数量",
     "mcpServers": {
       "add": "添加 MCP 服务器",
@@ -5733,6 +5733,7 @@
       "workingMemoryEntries": "{{count}} 条记忆"
     },
     "messageChannels": "消息渠道",
+    "trayEnabled": "显示系统托盘",
     "minimizeToTray": "关闭时最小化到托盘",
     "minutes": "分钟",
     "modelAbilities": "模型能力",
@@ -15738,6 +15739,8 @@
     "actionUnavailable": "数据缺失",
     "amplitude": "振幅",
     "analystConsensus": "分析师共识",
+    "analystConsensusExcluded": "{count} 位分析师的结论方向与其多空评分自相矛盾，本次共识未计入",
+    "analystConfidenceSelfReported": "分析师自己报的把握度（0-100）：只说明它对自己的结论多有信心，没有跟后续实际涨跌对过账，也不是胜率。与主档「决策置信度」（公式后验）是两套口径，不可互比。",
     "bearish": "看空",
     "bullish": "看多",
     "cancelled": "分析已取消 — 显示部分数据",
@@ -16927,7 +16930,8 @@
         "chip": "筹码",
         "pace": "节奏",
         "momentum": "动量",
-        "bottleneck": "瓶颈"
+        "bottleneck": "瓶颈",
+        "analyst_vote": "分析师投票"
       },
       "attributionLabel": "否决归因（取自本次决策已算出的字段）:",
       "legContribution": "{{leg}} 贡献 {{sigma}}（权重 {{weight}}）",
@@ -18000,7 +18004,6 @@
       "evolutionCollectingData": "收集{{nodeName}}数据中...",
       "evolutionNoData": "{{nodeName}}暂无反馈数据",
       "evolutionFailed": "{{nodeName}}进化失败",
-      "feedbackUploadFailed": "{nodeName}：本次质量反馈上报失败，自我进化将缺少这条输入",
       "evolutionTrigger": "触发{{nodeName}}自我进化",
       "evolutionSuggestion": "🧬 {{nodeName}}自我进化建议",
       "close": "关闭",
@@ -18622,7 +18625,13 @@
       "snapshotAbsentNotPersisted": "分析已完成，但该产出通道未把逐节点结果落库 ⇒ 数据质量诊断、分析师逐条依据与仪表盘重建均不可用。",
       "snapshotAbsentIncomplete": "分析尚未完成，暂无黑板快照。",
       "snapshotAbsentRerunHint": "重新运行完整分析链，本次起该通道会落黑板快照",
-      "summaryLength": "摘要长度"
+      "summaryLength": "摘要长度",
+      "feedbackWriteFailed": "分析师质量反馈落库失败：{{written}} 条中 {{failed}} 条未写入，自我进化本轮缺少这些输入",
+      "feedbackSkippedFastChain": "本轮走快速链，没有逐分析师诊断可落库（自我进化本轮未收到该分析的反馈）",
+      "feedbackSkippedBadSnapshot": "本轮黑板快照无法解析，逐分析师诊断未落库（自我进化本轮未收到该分析的反馈）",
+      "feedbackSkippedNoAnalysisRow": "本轮没有找到对应的分析记录，逐分析师诊断未落库（自我进化本轮未收到该分析的反馈）",
+      "feedbackSkippedNoDiagnosis": "本轮没有逐分析师诊断可落库，自我进化未收到该分析的反馈",
+      "feedbackSkippedUnknown": "分析师反馈未落库，成因未知（自我进化本轮未收到该分析的反馈）"
     },
     "dataWarning": {
       "announcement": "公告",
@@ -18803,7 +18812,35 @@
       "sessionAfternoon": "下午盘中",
       "sessionPostClose": "已收盘"
     },
-    "horizonPriorHitRate": "命中率 {{rate}}%"
+    "horizonPriorHitRate": "命中率 {{rate}}%",
+    "f7Reference": {
+      "weightsCollapsed": "本侧因子权重坍缩 ⇒ 该结论不可用于对比，仅作留痕。",
+      "actionAbsent": "本侧未给出方向结论（这不是看空）",
+      "actionSame": "与生产公式同档",
+      "actionNotComparable": "两侧方向档不全 ⇒ 本轮不做方向差值",
+      "valueNotComparable": "生产侧或本侧数值缺位 ⇒ 不做数值差值",
+      "posterior": "后验",
+      "riskLevel": "风险档",
+      "f7Weight": "f7 权重占比",
+      "f7WeightValue": "{{pct}}%",
+      "gapsPresent": "本侧缺 {{n}} 项上游数据：{{gaps}}",
+      "gapsNone": "本侧上游数据齐备",
+      "title": "f7 口径对照（生产=分析师结构票，参照=含交易员观点）",
+      "notProduced": "本记录未产出 f7 口径对照（该分析产自本口径上线前，或参照节点未跑）",
+      "productionLabel": "生产侧：",
+      "referenceLabel": "参照侧：",
+      "sameBasis": "两侧 f7 口径相同 ⇒ 本对照不成立（差值只反映同一份输入被算了两次）。",
+      "actionDiffer": "两侧不同档：生产 {{production}} vs 参照 {{reference}}",
+      "confDelta": "置信 {{delta}}（生产 {{production}} vs 参照 {{reference}}）",
+      "posDelta": "仓位 {{delta}}%（生产 {{production}}% vs 参照 {{reference}}%）",
+      "scaleNote": "两侧同刻度（同一个 rhai 产出），可直接并排比；与逐档对照那三维分数不是同一把尺子。",
+      "f7": {
+        "analystVotes": "f7 取分析师结构票（各位分析师的净票与离散度），未读 LLM 交易观点。",
+        "trader": "f7 取 LLM 交易员的方向、置信与报价折算（v183 前的生产口径）。",
+        "absent": "f7 没有任何输入 ⇒ 该腿记 0 并退出权重，本侧结论不含交易信号。",
+        "unknown": "未声明 f7 的输入来历 ⇒ 无法判断本侧是否独立于 LLM 决策。"
+      }
+    }
   },
   "pipeline": {
     "title": "股票管道",

@@ -20,10 +20,15 @@
 //! ```
 //!
 //! ## 关键设计
-//! - 推断 action（不依赖显式 action 字段）：target_price > price × 1.03 → "buy"
-//!   target_price < price × 0.97 → "sell"，否则 "hold"
-//! - hit_outcome 判定（buy）：final_return_pct > 0 → "hit"；< -5% → "false_hit"；
-//!   触及 stop_loss → "miss"；触及 target → "hit"；介于 -5%~0 → "partial"
+//! - 推断 action（不依赖显式 action 字段）：target_price > price × 1.01 → "buy"；
+//!   target_price < price × 0.99 → "sell"，否则 "hold"（阈值见 [`infer_action`]）
+//! - hit_outcome 判定（buy）：**净收益** > 0 → "hit"；触及 stop_loss → "miss" 优先；
+//!   触及 target → "hit"；净收益 < -5% → "false_hit"；介于 -5%~0 → "partial"
+//! - **交易成本**：自 2026-10-25（G4）起，判定与统计一律用**净**收益
+//!   （毛收益 − [`crate::costs::DEFAULT_ROUND_TRIP_COST_PCT`]）。此前完全不扣成本、
+//!   且判 `ret > 0` ⇒ `+0.01%` 也算赢，胜率与均值系统性虚高（越短档越严重）。
+//!   落库的 `final_return_pct` 仍是**毛**收益（历史可比），净口径由
+//!   [`PickValidation::net_return_pct`] 恒时现算 ⇒ 历史样本也自动纳入净统计。
 //! - factor IC = Spearman(因子值, 实际收益) — 衡量该因子对未来收益的预测能力
 //! - 9 因子权重若无 IC 标定则全为 0.15/0.20/0.25 等"专家拍脑袋"值，
 //!   这是 portfolio-mgr.rhai 可信度低的根因之一。
@@ -72,6 +77,27 @@ pub struct PickValidation {
     pub as_of_date: Option<String>,
 }
 
+impl PickValidation {
+    /// **净收益（%）** = `final_return_pct` − 默认双边成本。
+    ///
+    /// ## 为什么是方法而不是字段
+    ///
+    /// ① 字段会要求**所有构造点**同步（含本文件与 `serenity_hit_rate_backtest`
+    ///    及大量单测），只要有一处漏填，净口径就**静默退回毛口径** —— 那正是本次
+    ///    要修的病（两套口径并存且无人知道该看哪个）；
+    /// ② `final_return_pct` 是**已落库列**，历史行存的是毛收益；方法是**恒可算**的，
+    ///    历史行读出来也自动获得净口径，不需要 migration、不需要回填。
+    ///
+    /// ## 2026-10-25 (G4) 背景
+    ///
+    /// 此前本模块完全不扣成本，且 `compute_hit_outcome` 判 `ret > 0.0 → "hit"`
+    /// ⇒ **+0.01% 也算赢**。真实读数因此系统性虚高，越短的档位虚高越多。
+    /// 见 `AUDIT-stock-profitability-verdict-2026-10-25.md` §1.3。
+    pub fn net_return_pct(&self) -> Option<f64> {
+        self.final_return_pct.map(crate::costs::net_return_pct)
+    }
+}
+
 /// 按 action / style / t_plus_n 维度的统计
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ActionStats {
@@ -81,10 +107,33 @@ pub struct ActionStats {
     pub false_hit: usize,
     pub partial: usize,
     pub insufficient: usize,
+    /// **毛**平均收益（%）—— 不扣成本，仅作对照，不可据此判断是否赚钱。
     pub avg_return_pct: f64,
     pub median_return_pct: f64,
-    /// hit_rate = hit / (hit + miss + false_hit)，不含 partial/insufficient
+    /// **毛**命中率 = hit / (hit + miss + false_hit)，`partial` 与 `insufficient` 不进分母。
+    ///
+    /// ⚠ **legacy 口径**：`partial`（-5%~0 的微亏）不计入分母 ⇒ 读数系统性偏高。
+    /// 新代码请读 [`Self::strict_win_rate`]（partial 计输）与 [`Self::net_win_rate`]
+    /// （扣成本后为正）。保留本字段只为让既有面板与历史基线可比。
     pub hit_rate: f64,
+    /// **strict 胜率** = hit / (hit + miss + false_hit + partial)，`partial` 计输。
+    ///
+    /// 与 `hit_rate` 的**唯一差别**是 partial 的归属；`insufficient`（无行情）两边都不进
+    /// 分母。这是 `AUDIT-stock-live-data-2026-10-24.md` §4.1 用的 42.5% 那个口径。
+    pub strict_win_rate: f64,
+    /// strict 胜率的分母（有方向判定的样本数）。为 0 时不可展示成 0% 胜率。
+    ///
+    /// ⚠ 与 [`Self::net_win_denom`] **不同源**：本字段吃落库的 `hit_outcome`，
+    /// 后者吃 `final_return_pct`。正常数据下同源（`hit_outcome` 由收益派生），
+    /// 但「有判定标签、缺收益列」的残缺行会让两者分叉 —— 不得假定恒等。
+    pub strict_denom: usize,
+    /// **净**平均收益（%）：逐条扣 [`crate::costs::DEFAULT_ROUND_TRIP_COST_PCT`] 后求均值。
+    /// 这是「能不能赚钱」唯一该看的均值。
+    pub net_avg_return_pct: f64,
+    /// **净**胜率 = 净收益 > 0 的样本 / 有净收益的样本。实盘意义上的「赢」。
+    pub net_win_rate: f64,
+    /// 净胜率的分母。为 0 ⇒ 无样本，`net_win_rate` 不得被读成 0% 胜率。
+    pub net_win_denom: usize,
 }
 
 /// 整体 hit_rate 报告
@@ -140,29 +189,35 @@ pub fn infer_action(price: f64, target_price: f64) -> &'static str {
 
 /// 计算单条决策的 hit_outcome（基于 T+N 实际价格）
 ///
-/// ## 判定规则
+/// ## ⚠ 入参必须是**净**收益（已扣交易成本）
+///
+/// 2026-10-25（G4）：本函数原文档写 `final_return_pct > 0% → "hit"`，而调用方传的是
+/// **毛**收益 ⇒ **+0.01% 也算命中**，实盘却是亏成本。现约定入参为净收益，
+/// 调用方用 [`PriceMetrics::net_return_pct_default`] / [`PickValidation::net_return_pct`]。
+/// 判定阈值本身不变（`> 0` 就是「实盘赚钱」），变的是**零点的基准**。
+///
+/// ## 判定规则（**顺序即优先级**，与函数体逐行一致）
 /// - **buy**:
-///   - final_return_pct > 0% → "hit"
-///   - final_return_pct <= -5% → "false_hit"（"看多却跌" 是最严重的误判）
-///   - 触及 stop_loss → "miss"
-///   - 触及 target → "hit"
-///   - 介于 -5% ~ 0% → "partial"
+///   - 触及 stop_loss → "miss"（止损优先于任何盈利判定）
+///   - 触及 target 或 净收益 > 0% → "hit"
+///   - 净收益 <= -5% → "false_hit"（"看多却跌" 是最严重的误判）
+///   - 其余（-5% ~ 0%）→ "partial"
 /// - **sell**:
-///   - final_return_pct < 0% → "hit"（看空看对了）
-///   - final_return_pct > 5% → "false_hit"
+///   - 净收益 < 0% → "hit"（看空看对了）
+///   - 净收益 > 5% → "false_hit"
 ///   - 其他 → "partial"
 /// - **hold**: 窄幅震荡判断
-///   - |final_return_pct| <= 1% → "hit"（震荡判断正确，价格确实未明显变动）
-///   - |final_return_pct| > 5% → "false_hit"（判断震荡但市场走出趋势）
+///   - |净收益| <= 1% → "hit"（震荡判断正确，价格确实未明显变动）
+///   - |净收益| > 5% → "false_hit"（判断震荡但市场走出趋势）
 ///   - 其他 → "partial"
 /// - **数据不足**: 任意 None → "insufficient"
 pub fn compute_hit_outcome(
     action: &str,
-    final_return_pct: Option<f64>,
+    net_return_pct: Option<f64>,
     hit_stop_loss: Option<i32>,
     hit_target: Option<i32>,
 ) -> Option<String> {
-    let Some(ret) = final_return_pct else {
+    let Some(ret) = net_return_pct else {
         return Some("insufficient".to_string());
     };
     match action {
@@ -225,6 +280,67 @@ pub struct PriceMetrics {
     pub final_return_pct: Option<f64>,
     pub hit_stop_loss: Option<i32>,
     pub hit_target: Option<i32>,
+}
+
+impl PriceMetrics {
+    /// 净收益（%）= 毛收益 − 指定双边成本。
+    ///
+    /// 不 clamp：完全没动的票（毛 0%）实盘是亏成本的，必须为负。
+    pub fn net_return_pct(&self, cost_pct: f64) -> Option<f64> {
+        self.final_return_pct.map(|g| crate::costs::net_of_cost(g, cost_pct))
+    }
+
+    /// 净收益（%）— 用 [`crate::costs::DEFAULT_ROUND_TRIP_COST_PCT`]。
+    pub fn net_return_pct_default(&self) -> Option<f64> {
+        self.net_return_pct(crate::costs::DEFAULT_ROUND_TRIP_COST_PCT)
+    }
+}
+
+/// 入场价相对「决策日真实收盘」的最大容许偏离（%）。
+///
+/// ## 阈值不是拍的（2026-10-25 R-3a 实测）
+///
+/// `RecoPick.price` 来自 as-of 报价通道，可能与库内真实收盘价不符。实测偏离分布：
+///
+/// | 代际 | n | <0.5% | 0.5~5% | **≥5%** | 最大 |
+/// |---|---:|---:|---:|---:|---:|
+/// | 实盘 | 311 | 299 | 12 | **0** | **4.4%** |
+/// | 回放 | 173 | 167 | 3 | **3** | **84.6%** |
+///
+/// ⇒ 5% 是能把「正常噪声」与「价格错配」分开的最小阈值：
+/// **实盘 0 条误杀，回放精确命中那 3 条**（如 `000779` 记 1.63，真实收盘 10.60，
+/// 而 1.63 恰是 `000980` 当日收盘 ⇒ 批量取价的行错位，不是复权、不是缓存）。
+///
+/// ## 为什么错价行必须**剔除**而不是「用真实价替换」
+///
+/// 错价行里 `targetPrice` / `stopLoss` 也是按那个错价算的（实测 `002812` 记 11.17，
+/// 目标 11.5051 = +3%、止损 10.9466 = −2%），而该票真实收盘 48.27。
+/// 只换入场价会让「目标价 < 入场价」⇒ 整行价格体系自相矛盾。
+/// **一行价格体系错了，整行不可用**，只能剔除。
+pub const PRICE_DIVERGENCE_TOLERANCE_PCT: f64 = 5.0;
+
+/// 入场价相对锚定收盘价的偏离百分比（绝对值）。
+///
+/// 任一入参非有限正数时返回 `None`（**不返回 0**：0 会被读成「完全一致」，
+/// 把「无法判定」伪装成「校验通过」）。
+pub fn price_divergence_pct(pick_price: f64, anchor_close: f64) -> Option<f64> {
+    if !pick_price.is_finite()
+        || !anchor_close.is_finite()
+        || pick_price <= 0.0
+        || anchor_close <= 0.0
+    {
+        return None;
+    }
+    Some((pick_price / anchor_close - 1.0).abs() * 100.0)
+}
+
+/// 该 pick 的入场价是否与决策日真实收盘显著不符（即整行价格体系不可信）。
+///
+/// 无法判定（缺锚定价 / 非法价格）时返回 `false` —— 由调用方另行处理
+/// 「拿不到锚定价」的情形，**不在此处把它当成错价**。
+pub fn price_is_divergent(pick_price: f64, anchor_close: f64) -> bool {
+    price_divergence_pct(pick_price, anchor_close)
+        .is_some_and(|d| d > PRICE_DIVERGENCE_TOLERANCE_PCT)
 }
 
 pub fn compute_price_metrics(
@@ -297,6 +413,7 @@ pub fn compute_hit_rate_report(validations: &[PickValidation]) -> HitRateReport 
     let action_stats = |group: &[&PickValidation]| -> ActionStats {
         let mut stats = ActionStats { total: group.len(), ..Default::default() };
         let mut returns: Vec<f64> = Vec::new();
+        let mut net_returns: Vec<f64> = Vec::new();
         for v in group {
             match v.hit_outcome.as_deref() {
                 Some("hit") => stats.hit += 1,
@@ -308,18 +425,44 @@ pub fn compute_hit_rate_report(validations: &[PickValidation]) -> HitRateReport 
             if let Some(ret) = v.final_return_pct {
                 returns.push(ret);
             }
+            // 净口径**不依赖落库的 `hit_outcome`**：历史行的 hit_outcome 是毛口径判的，
+            // 而 `net_return_pct()` 恒可从毛收益现算 ⇒ 历史样本一并进净胜率，新旧同口径。
+            if let Some(net) = v.net_return_pct() {
+                net_returns.push(net);
+            }
         }
+
+        // legacy 口径：partial 不进分母（读数偏高，仅为历史可比而保留）
         let denom = stats.hit + stats.miss + stats.false_hit;
         stats.hit_rate = if denom > 0 {
             stats.hit as f64 / denom as f64
         } else {
             0.0
         };
+
+        // strict 口径：partial 计输 —— 与 `AUDIT-stock-live-data-2026-10-24.md` §4.1
+        // 的 42.5% 同一算法，避免「两套胜率各说各话」。
+        let strict_denom = denom + stats.partial;
+        stats.strict_denom = strict_denom;
+        stats.strict_win_rate = if strict_denom > 0 {
+            stats.hit as f64 / strict_denom as f64
+        } else {
+            0.0
+        };
+
         if !returns.is_empty() {
             stats.avg_return_pct = returns.iter().sum::<f64>() / returns.len() as f64;
             let mut sorted = returns.clone();
             sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             stats.median_return_pct = sorted[sorted.len() / 2];
+        }
+
+        // 净口径：唯一能回答「扣掉摩擦后赚不赚」的两个数
+        if !net_returns.is_empty() {
+            stats.net_avg_return_pct = net_returns.iter().sum::<f64>() / net_returns.len() as f64;
+            let wins = net_returns.iter().filter(|n| **n > 0.0).count();
+            stats.net_win_denom = net_returns.len();
+            stats.net_win_rate = wins as f64 / net_returns.len() as f64;
         }
         stats
     };
@@ -443,7 +586,7 @@ pub fn compute_factor_ic(validations: &[PickValidation]) -> HashMap<String, f64>
 
 /// 把 hit_outcome 归一化为决策级二进制 outcome（"win" / "loss"），供决策记录回填。
 ///
-/// ## 口径（与 compute_hit_rate_report 的统计分母一致）
+/// ## 口径（这是**方向判定**，不是盈利判定）
 /// - `hit` / `partial` → `win`
 /// - `miss` / `false_hit` → `loss`
 /// - `insufficient` / `None` → 数据不足不判定 → `None`（跳过）
@@ -451,6 +594,19 @@ pub fn compute_factor_ic(validations: &[PickValidation]) -> HashMap<String, f64>
 /// B3「决策-结果闭环」要求回填口径与离线回测口径一致：回填决策记录（stock_analyses.outcome）
 /// 与计算命中率必须复用同一套判定，避免两处各自实现导致口径漂移（如一侧把 partial 算 hit、
 /// 另一侧不算）。本函数是二者共用的唯一判定源。
+///
+/// ## ⚠ 与 `ActionStats::strict_win_rate` 的关系（2026-10-25 G4 澄清）
+///
+/// 下面三个出口**刻意不同**，不是口径漂移 —— 它们回答的不是同一个问题：
+///
+/// | 出口 | 回答的问题 | `partial`（-5%~0 微亏）归属 |
+/// |---|---|---|
+/// | **本函数** → `stock_analyses.outcome` | 方向判对了吗 | **win**（微亏但仍看对方向） |
+/// | `ActionStats::strict_win_rate` | 按这个判断会不会亏 | **输**（partial 计输） |
+/// | `ActionStats::net_win_rate` | 扣成本后赚没赚 | 由净收益符号决定 |
+///
+/// 把本函数改成 `partial → loss` 会让「方向对了、只是成本吃掉利润」被记成决策失败，
+/// 污染的是**决策质量**归因；而 strict / net 只关心**钱**。两件事不可合并。
 pub fn hit_outcome_to_binary_outcome(hit_outcome: Option<&str>) -> Option<&'static str> {
     match hit_outcome {
         Some("hit") | Some("partial") => Some("win"),
@@ -472,8 +628,11 @@ pub fn build_pick_validation(
     let action = infer_action(pick.price, pick.target_price).to_string();
     let m =
         compute_price_metrics(pick.price, closes, highs, lows, pick.target_price, pick.stop_loss);
-    let hit_outcome =
-        compute_hit_outcome(&action, m.final_return_pct, m.hit_stop_loss, m.hit_target);
+    // G4（2026-10-25）：判定用**净**收益。毛 +0.10% 的样本实盘是净亏 0.15%，
+    //   不得记命中 —— 此前传 `m.final_return_pct`（毛）导致胜率系统性虚高。
+    //   `hit_stop_loss` / `hit_target` 仍由价格触发，与成本无关，原样保留。
+    let net_return_pct = m.net_return_pct_default();
+    let hit_outcome = compute_hit_outcome(&action, net_return_pct, m.hit_stop_loss, m.hit_target);
 
     PickValidation {
         pick_id: pick_id.to_string(),
@@ -502,7 +661,27 @@ pub fn build_pick_validation(
         hit_target: m.hit_target,
         hit_outcome,
         factor_snapshot: None, // TODO: 从 portfolio-mgr 节点结果中提取
-        data_source: data_source.to_string(),
+        data_source: net_cost_data_source(data_source),
+    }
+}
+
+/// 在 `data_source` 上追加「`hit_outcome` 按净收益判定」的标记（**幂等**）。
+///
+/// ## 为什么必须标
+///
+/// `final_return_pct` 落的是**毛**收益（列语义刻意未改，历史行才可比），
+/// 而 `hit_outcome` 自 2026-10-25（G4）起按**净**收益判定 ⇒ **同一行里两列口径不同**。
+/// 不加标记就无法区分「毛判定的历史行」与「净判定的新行」，
+/// 又会退回本次要修的形态：两套口径混在同一个分母里，且无人知道该看哪个。
+///
+/// 幂等：`refresh_miss_seed` 那类流程会把 `data_source` 传进来再追加，
+/// 重复调用不得产生 `+net_cost+net_cost`。
+fn net_cost_data_source(base: &str) -> String {
+    const MARK: &str = "+net_cost";
+    if base.contains(MARK) {
+        base.to_string()
+    } else {
+        format!("{base}{MARK}")
     }
 }
 
@@ -839,5 +1018,232 @@ mod tests {
         assert_eq!(hit_outcome_to_binary_outcome(Some("insufficient")), None);
         assert_eq!(hit_outcome_to_binary_outcome(None), None);
         assert_eq!(hit_outcome_to_binary_outcome(Some("unknown")), None);
+    }
+
+    // ── G4（2026-10-25）：成本口径 ──────────────────────────────────
+    //
+    // 这一组测试锁的是「尺子」本身。它们故意不依赖 `build_pick_validation`
+    // （要构造 RecoPick），而是直接验证「毛收益 → 净收益 → 判定」的链条，
+    // 因为那正是出过错的地方。
+
+    /// 构造一条最小可用样本（G4 新增测试共用）。
+    fn mk(outcome: &str, gross_ret: f64) -> PickValidation {
+        PickValidation {
+            pick_id: "p".into(),
+            stock_code: "x".into(),
+            stock_name: "x".into(),
+            style: "trend".into(),
+            period: "short".into(),
+            generated_at: "t".into(),
+            t_plus_n: 5,
+            entry_price: 10.0,
+            target_price: 12.0,
+            stop_loss: 9.0,
+            position_pct: 10.0,
+            confidence: 50,
+            inferred_action: "buy".into(),
+            t_plus_n_price: Some(10.0 * (1.0 + gross_ret / 100.0)),
+            max_price: None,
+            min_price: None,
+            max_return_pct: None,
+            max_drawdown_pct: None,
+            final_return_pct: Some(gross_ret),
+            hit_stop_loss: None,
+            hit_target: None,
+            hit_outcome: Some(outcome.into()),
+            factor_snapshot: None,
+            data_source: "test".into(),
+            as_of_date: None,
+        }
+    }
+
+    /// **核心负控**：毛收益 +0.10% 的样本实盘是净亏，不得被判成 `hit`。
+    ///
+    /// 这是本次修复要堵的那个洞 —— 修复前 `compute_hit_outcome` 吃的是毛收益，
+    /// `+0.10% > 0` 直接记命中，而实盘扣 0.25% 后是 −0.15%。
+    #[test]
+    fn tiny_gross_gain_is_not_a_hit_after_cost() {
+        let px = [10.01]; // +0.10%
+        let m = compute_price_metrics(10.0, &px, &px, &px, 99.0, 1.0);
+
+        // 先证明输入有效：毛收益确实是正的、且是微利。
+        // （否则「不是 hit」可能只是因为收益本来就是负的 —— 那是假绿。）
+        let gross = m.final_return_pct.expect("应有毛收益");
+        assert!(gross > 0.0, "毛收益应为正，实际 {gross}");
+        assert!(gross < 0.5, "毛收益应为微利（<0.5%），实际 {gross}");
+
+        // 净收益必须为负：成本 0.25% > 微利 0.10%
+        let net = m.net_return_pct_default().expect("应有净收益");
+        assert!(net < 0.0, "毛 +{gross:.2}% 扣成本后应为负，实际 {net}");
+
+        // 目标价 99 / 止损 1 都不会触发 ⇒ 判定只由收益决定
+        assert_eq!(m.hit_target, Some(0));
+        assert_eq!(m.hit_stop_loss, Some(0));
+
+        // 净口径：不得是 hit
+        assert_ne!(
+            compute_hit_outcome("buy", Some(net), m.hit_stop_loss, m.hit_target),
+            Some("hit".to_string()),
+            "毛 +0.10% 在实盘净亏，不能记命中"
+        );
+
+        // 反向对照：若错误地传毛收益就会被记成 hit —— 证明上一条断言真有区分力
+        assert_eq!(
+            compute_hit_outcome("buy", Some(gross), m.hit_stop_loss, m.hit_target),
+            Some("hit".to_string()),
+            "传毛收益会误判命中（这正是修复前的行为）"
+        );
+    }
+
+    /// `strict_win_rate` 把 `partial` 计输，与 `hit_rate`（不计输）必须明确区分；
+    /// strict 口径与 `AUDIT-stock-live-data-2026-10-24.md` §4.1 的 42.5% 同一算法。
+    #[test]
+    fn strict_win_rate_counts_partial_as_loss() {
+        let validations = vec![
+            mk("hit", 3.0),
+            mk("hit", 5.0),
+            mk("miss", -2.0),
+            mk("false_hit", -8.0),
+            mk("partial", -1.0),
+            mk("partial", -2.0),
+        ];
+        let report = compute_hit_rate_report(&validations);
+        let s = report.by_action.get("buy").unwrap();
+
+        // legacy：2 / (2+1+1) = 0.5
+        assert!((s.hit_rate - 0.5).abs() < 1e-9, "legacy hit_rate={}", s.hit_rate);
+        // strict：2 / (2+1+1+2) = 1/3
+        assert_eq!(s.strict_denom, 6);
+        assert!(
+            (s.strict_win_rate - 2.0 / 6.0).abs() < 1e-9,
+            "strict_win_rate={}",
+            s.strict_win_rate
+        );
+        // 两者必须真的不同 —— 相等说明 partial 没进 strict 分母
+        assert!((s.hit_rate - s.strict_win_rate).abs() > 1e-6);
+    }
+
+    /// 净胜率用「扣成本后 > 0」作分界，比毛口径更严。
+    #[test]
+    fn net_win_rate_uses_cost_adjusted_threshold() {
+        let validations = vec![
+            mk("hit", 0.10), // 毛赚 → 净亏（成本 0.25%）
+            mk("hit", 3.0),  // 净赚
+            mk("partial", -1.0),
+            mk("miss", -0.20), // 毛亏 → 净亏
+        ];
+        let report = compute_hit_rate_report(&validations);
+        let s = report.by_action.get("buy").unwrap();
+
+        assert_eq!(s.net_win_denom, 4, "四条都有收益，全部进净分母");
+        // 只有 +3.0% 扣成本后仍为正
+        assert!((s.net_win_rate - 0.25).abs() < 1e-9, "净胜率应为 1/4，实际 {}", s.net_win_rate);
+
+        // 毛口径下 +0.10% 也算赚 ⇒ 2/4，证明净口径确实更严（非等价改写）
+        let gross_wins = validations
+            .iter()
+            .filter(|v| v.final_return_pct.map(|r| r > 0.0).unwrap_or(false))
+            .count();
+        assert_eq!(gross_wins, 2);
+        assert!(s.net_win_rate < gross_wins as f64 / 4.0);
+    }
+
+    /// 无收益的样本不得被读成「0% 胜率」—— 分母必须为 0，让调用方能区分
+    /// 「一条没赢」与「没有样本」。
+    ///
+    /// ## 构造说明（首版写错在这里）
+    ///
+    /// 首版用 `mk("hit", 1.0)` 再把收益置 None —— 那构造出的是**现实中不可能**的状态：
+    /// `hit` 只可能由"有收益且为正"派生。真实缺行情时 `hit_outcome` 是 `insufficient`。
+    /// 两个分母的口径本来就不同：
+    ///
+    /// - `strict_denom` 吃落库的 `hit_outcome`（方向判定）；
+    /// - `net_win_denom` 吃 `final_return_pct`（有无收益）。
+    ///
+    /// 正常数据下同源（`hit_outcome` 由收益派生），但**残缺行会分叉** ——
+    /// 所以要分别断言，不能假定二者恒等。
+    #[test]
+    fn no_net_samples_yield_zero_denominator_not_zero_win_rate() {
+        let mut v = mk("insufficient", 1.0);
+        v.final_return_pct = None;
+        let report = compute_hit_rate_report(&[v]);
+        let s = report.by_action.get("buy").unwrap();
+
+        // 无收益 ⇒ 净口径无样本
+        assert_eq!(s.net_win_denom, 0);
+        assert_eq!(s.net_win_rate, 0.0);
+        // insufficient 不进方向分母
+        assert_eq!(s.strict_denom, 0);
+        assert_eq!(s.strict_win_rate, 0.0);
+        assert_eq!(s.insufficient, 1);
+    }
+
+    /// 负控：**有** `hit_outcome` 但**无**收益时，两个分母会分叉 ——
+    /// 这条锁住上一条测试注释里声明的差异，防止日后有人把它们当同一个数。
+    #[test]
+    fn strict_and_net_denominators_diverge_on_incomplete_rows() {
+        let mut v = mk("hit", 1.0);
+        v.final_return_pct = None; // 落库 hit 标签在，但收益列缺失
+        let report = compute_hit_rate_report(&[v]);
+        let s = report.by_action.get("buy").unwrap();
+
+        assert_eq!(s.strict_denom, 1, "方向分母看 hit_outcome");
+        assert_eq!(s.net_win_denom, 0, "净分母看 final_return_pct");
+        assert_ne!(s.strict_denom, s.net_win_denom, "两者本就不同源，不得假定恒等");
+    }
+
+    /// `+net_cost` 标记必须幂等 —— 重复追加会让同一行出现 `+net_cost+net_cost`，
+    /// 日后按标记筛样就会漏掉。
+    #[test]
+    fn net_cost_marker_is_idempotent() {
+        assert_eq!(net_cost_data_source("akshare_daily"), "akshare_daily+net_cost");
+        assert_eq!(net_cost_data_source("akshare_daily+net_cost"), "akshare_daily+net_cost");
+        // 与既有 `+premature_window` 这类标记可共存
+        assert_eq!(
+            net_cost_data_source("akshare_daily+premature_window"),
+            "akshare_daily+premature_window+net_cost"
+        );
+    }
+
+    // ── R-3a 价源平价校验（2026-10-25）──
+
+    /// **核心正控**：实录的错价样本必须被判为偏离。
+    /// `000779` 记 1.63，决策日真实收盘 10.60 —— 偏离 84.6%，而这个「1.63」
+    /// 恰好是 `000980` 当日收盘（批量取价行错位的实证）。
+    #[test]
+    fn real_misaligned_price_is_detected() {
+        let dev = price_divergence_pct(1.63, 10.60).expect("两个正价应可算");
+        assert!((dev - 84.62).abs() < 0.05, "实测偏离 {dev}");
+        assert!(price_is_divergent(1.63, 10.60), "84.6% 必须超阈");
+        // 反向同样算偏离（错成高价也是错）
+        assert!(price_is_divergent(48.27, 11.17), "偏高 332% 同样必须被判偏离");
+    }
+
+    /// **核心负控**：实盘实测最大偏离仅 4.4%（311 条里 0 条 ≥5%），
+    /// 阈值不得误杀这类正常噪声，否则会把干净样本剔光。
+    #[test]
+    fn live_noise_level_is_not_flagged() {
+        // 4.4% 是实盘 311 条的实测最大偏离
+        assert!(!price_is_divergent(104.40, 100.0), "4.4% 属正常噪声，不得判偏离");
+        assert!(!price_is_divergent(100.0, 104.40), "反向 4.2% 同样不得判偏离");
+        assert!(!price_is_divergent(102.0, 100.0), "2% 必须放行");
+        // ⚠ 刻意**不**断言「恰等于 5%」：`105.0/100.0` 的浮点结果是
+        // `5.000000000000004`，边界落在哪一侧取决于浮点路径 —— 锁死它等于锁死一个
+        // 偶然实现，日后换写法就会假红。真正要锁的是明确两侧。
+        assert!(!price_is_divergent(104.99, 100.0), "4.99% 低于阈值，不得判偏离");
+        assert!(price_is_divergent(105.01, 100.0), "5.01% 高于阈值，必须判偏离");
+    }
+
+    /// 无法判定的情形必须返回 `None`，**不得返回 `Some(0.0)`** ——
+    /// 0 会被读成「完全一致」，把「没基准」伪装成「校验通过」。
+    #[test]
+    fn undeterminable_divergence_is_none_not_zero() {
+        assert_eq!(price_divergence_pct(0.0, 10.0), None, "入场价 0 不可判定");
+        assert_eq!(price_divergence_pct(10.0, 0.0), None, "缺锚定价不可判定");
+        assert_eq!(price_divergence_pct(f64::NAN, 10.0), None, "NaN 不可判定");
+        assert_eq!(price_divergence_pct(10.0, f64::INFINITY), None, "INF 不可判定");
+        // 无法判定 ⇒ 不判偏离（由调用方另路处理）
+        assert!(!price_is_divergent(0.0, 10.0));
+        assert!(!price_is_divergent(10.0, 0.0));
     }
 }

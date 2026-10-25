@@ -21,9 +21,10 @@
 //! 它们决定**这份 AST 能不能编出来、编成什么样**。缓存键若只含 code hash，
 //! 则同一份脚本被不同深度上限的引擎编译时会**共用一个桶** ⇒ 先跑者的宽松配置
 //! 会静默短路后跑者自己的严格限制，且故障形态**取决于调用顺序**。
-//! `crates/rt-workflow/.../code_executor.rs:55` 用 `(1024, 1024)`，
-//! 而 `src/commands/stock_analysis.rs:199` 与 `stock_workflow/decision.rs:2693`
-//! 用 `(256, 256)` —— 两条路径编译同一份 `portfolio-mgr.rhai`，正是该形态。
+//! 档位现在只有一个权威：`RhaiSandboxLimits`（`src/commands/stock_workflow/rhai_registry.rs`），
+//! 由 `seed_consistency_tests.rs` 反向锁「不得再内联 `set_max_expr_depths`」。
+//! 原注释点名的三处行号已腐烂（其中两处引用在 HEAD 上就已指向无关内容），
+//! 故改为按**权威名**定位、不写行号 —— 本仓任何一次插入都会让行号失效。
 //! - AST 实现 Send + Sync（rhai 开启 sync feature），可安全跨线程共享
 //!
 //! # 线程安全
@@ -73,9 +74,7 @@ fn code_hash(code: &str) -> String {
 /// 该假设对**执行期**配置成立（函数注册、`max_operations` 在 `eval_ast` 时按当时
 /// 的 Engine 查），对**解析期**配置**不成立**。
 ///
-/// 实证：本仓三处生产调用点，两套深度配置
-/// （`stock_analysis.rs:199` / `stock_workflow/decision.rs:2693` = `(256, 256)`；
-/// `rt-workflow/.../code_executor.rs:55` = `(1024, 1024)`）编译**同一份**
+/// 实证：两套深度配置（`RhaiSandboxLimits::PORTFOLIO` 一档 vs 通用引擎一档）编译**同一份**
 /// `portfolio-mgr.rhai`。键不含配置时它们共用一个桶：
 /// **哪条路径先跑，缓存里那份 AST 就带先跑者的上限**，后跑者命中后自己的限制被绕过。
 ///

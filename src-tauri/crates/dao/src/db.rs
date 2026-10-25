@@ -259,12 +259,18 @@ pub async fn create_pool(db_path: &str) -> Result<DbHandle> {
     let (url, is_sqlite) = resolve_db_url_from_path(db_path)?;
 
     let mut opt = ConnectOptions::new(&url);
-    // 8 → 20：主连接池被后台任务（实体提取/索引/RAG 预热等慢操作）与命令共享，
+    // 8 → 20 → 32：主连接池被后台任务（实体提取/索引/RAG 预热等慢操作）与命令共享，
     // 8 连接在实体提取重载时被占满（15s acquire_timeout 后命令失败，见 index_queue WARN）。
-    // PG 默认 max_connections=100，20 安全；SQLite 为单文件读写，不受连接数影响。
-    opt.max_connections(20)
+    //
+    // 20 → 32（R-2，2026-10-25）：**时间旅行批次**在 guard 内跑选股链时，逐只并发取数
+    // （种子池上百只票 × 每只数次查询）会把 20 连接占满 ⇒
+    // 同进程里的轮询者（`fetch_batch_by_id` 等）15s acquire_timeout 后报
+    // `Connection pool timed out`，把**成功的批次**误报成失败（实测 12 个日期全部误报）。
+    //
+    // PG 默认 max_connections=100，单进程 32 安全；SQLite 为单文件读写，不受连接数影响。
+    opt.max_connections(32)
         .min_connections(2)
-        .acquire_timeout(std::time::Duration::from_secs(15))
+        .acquire_timeout(std::time::Duration::from_secs(30))
         .sqlx_logging(false);
 
     let conn = Database::connect(opt).await?;
@@ -783,7 +789,6 @@ async fn seed_builtin_providers(db: &DatabaseConnection) -> Result<()> {
                 model_type: axagent_harness::types::provider_model::detect_model_type(model_id),
                 capabilities: caps,
                 max_tokens,
-                max_output_tokens: None,
                 enabled: true,
                 param_overrides: None,
                 input_price_per_mtok: None,

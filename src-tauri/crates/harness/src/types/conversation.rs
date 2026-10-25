@@ -16,7 +16,6 @@ pub struct Conversation {
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
     pub top_p: Option<f32>,
-    pub frequency_penalty: Option<f32>,
     pub search_enabled: bool,
     pub search_provider_id: Option<String>,
     pub thinking_budget: Option<i64>,
@@ -273,8 +272,6 @@ pub struct UpdateConversationInput {
     pub max_tokens: Option<Option<i64>>,
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub top_p: Option<Option<f64>>,
-    #[serde(default, deserialize_with = "deserialize_double_option")]
-    pub frequency_penalty: Option<Option<f64>>,
     pub search_enabled: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub search_provider_id: Option<Option<String>>,
@@ -422,10 +419,6 @@ pub struct ConversationCategory {
     pub system_prompt: Option<String>,
     pub default_provider_id: Option<String>,
     pub default_model_id: Option<String>,
-    pub default_temperature: Option<f64>,
-    pub default_max_tokens: Option<i64>,
-    pub default_top_p: Option<f64>,
-    pub default_frequency_penalty: Option<f64>,
     pub sort_order: i32,
     pub is_collapsed: bool,
     pub created_at: i64,
@@ -440,10 +433,6 @@ pub struct CreateConversationCategoryInput {
     pub system_prompt: Option<String>,
     pub default_provider_id: Option<String>,
     pub default_model_id: Option<String>,
-    pub default_temperature: Option<f64>,
-    pub default_max_tokens: Option<i64>,
-    pub default_top_p: Option<f64>,
-    pub default_frequency_penalty: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -459,14 +448,6 @@ pub struct UpdateConversationCategoryInput {
     pub default_provider_id: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub default_model_id: Option<Option<String>>,
-    #[serde(default, deserialize_with = "deserialize_double_option")]
-    pub default_temperature: Option<Option<f64>>,
-    #[serde(default, deserialize_with = "deserialize_double_option")]
-    pub default_max_tokens: Option<Option<i64>>,
-    #[serde(default, deserialize_with = "deserialize_double_option")]
-    pub default_top_p: Option<Option<f64>>,
-    #[serde(default, deserialize_with = "deserialize_double_option")]
-    pub default_frequency_penalty: Option<Option<f64>>,
 }
 
 // === Gateway System ===

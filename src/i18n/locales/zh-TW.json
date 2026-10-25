@@ -5556,7 +5556,7 @@
       "empty": "無本地工具",
       "title": "本地工具"
     },
-    "maxTokens": "最大令牌數",
+    "maxTokens": "最大輸出 Tokens",
     "maxTokensTooltip": "模型生成的最大 Tokens 數量",
     "mcpServers": {
       "add": "新增 MCP 伺服器",
@@ -5733,6 +5733,7 @@
       "workingMemoryEntries": "{{count}} 條記憶"
     },
     "messageChannels": "訊息渠道",
+    "trayEnabled": "顯示系統托盤",
     "minimizeToTray": "關閉時最小化至系統匣",
     "minutes": "分鐘",
     "modelAbilities": "模型能力",
@@ -16656,6 +16657,8 @@
     "actionUncertain": "不確定",
     "actionUnavailable": "資料缺失",
     "analystConsensus": "分析師共識",
+    "analystConsensusExcluded": "{count} 位分析師的結論方向與其多空評分自相矛盾，本次共識未計入",
+    "analystConfidenceSelfReported": "分析師自行回報的把握度（0-100）：只說明他對自身結論的信心程度，未與後續實際漲跌對帳，也不是勝率。與主檔「決策置信度」（公式後驗）是兩套口徑，不可互比。",
     "cancelled": "分析已取消 — 顯示部分数据",
     "contradiction": "决策矛盾",
     "debtRatio": "负债率",
@@ -16985,7 +16988,8 @@
         "chip": "籌碼",
         "pace": "節奏",
         "momentum": "動量",
-        "bottleneck": "瓶頸"
+        "bottleneck": "瓶頸",
+        "analyst_vote": "分析師投票"
       },
       "attributionLabel": "否決歸因（取自本次決策已算出的欄位）:",
       "legContribution": "{{leg}} 貢獻 {{sigma}}（權重 {{weight}}）",
@@ -18041,7 +18045,6 @@
       "evolutionCollectingData": "收集{{nodeName}}資料中...",
       "evolutionNoData": "{{nodeName}}暫無回饋資料",
       "evolutionFailed": "{{nodeName}}進化失敗",
-      "feedbackUploadFailed": "{nodeName}：本次品質回饋上報失敗，自我進化將缺少這條輸入",
       "evolutionTrigger": "觸發{{nodeName}}自我進化",
       "evolutionSuggestion": "🧬 {{nodeName}}自我進化建議",
       "close": "關閉",
@@ -18626,7 +18629,13 @@
       "snapshotAbsentNotPersisted": "分析已完成，但該產出通道未把逐節點結果落庫 ⇒ 資料品質診斷、分析師逐條依據與儀表板重建均不可用。",
       "snapshotAbsentIncomplete": "分析尚未完成，暫無黑板快照。",
       "snapshotAbsentRerunHint": "重新執行完整分析鏈，本次起該通道會落黑板快照",
-      "summaryLength": "摘要长度"
+      "summaryLength": "摘要长度",
+      "feedbackWriteFailed": "分析師品質回饋落庫失敗：{{written}} 條中 {{failed}} 條未寫入，自我進化本輪缺少這些輸入",
+      "feedbackSkippedFastChain": "本輪走快速鏈，沒有逐分析師診斷可落庫（自我進化本輪未收到該分析的回饋）",
+      "feedbackSkippedBadSnapshot": "本輪黑板快照無法解析，逐分析師診斷未落庫（自我進化本輪未收到該分析的回饋）",
+      "feedbackSkippedNoAnalysisRow": "本輪沒有找到對應的分析記錄，逐分析師診斷未落庫（自我進化本輪未收到該分析的回饋）",
+      "feedbackSkippedNoDiagnosis": "本輪沒有逐分析師診斷可落庫，自我進化未收到該分析的回饋",
+      "feedbackSkippedUnknown": "分析師回饋未落庫，成因未知（自我進化本輪未收到該分析的回饋）"
     },
     "dataWarning": {
       "announcement": "公告",
@@ -18807,7 +18816,35 @@
       "sessionAfternoon": "下午盤中",
       "sessionPostClose": "已收盤"
     },
-    "horizonPriorHitRate": "命中率 {{rate}}%"
+    "horizonPriorHitRate": "命中率 {{rate}}%",
+    "f7Reference": {
+      "weightsCollapsed": "本側因子權重坍縮 ⇒ 該結論不可用於對比，僅作留痕。",
+      "actionAbsent": "本側未給出方向結論（這不是看空）",
+      "actionSame": "與生產公式同檔",
+      "actionNotComparable": "兩側方向檔不全 ⇒ 本輪不做方向差值",
+      "valueNotComparable": "生產側或本側數值缺位 ⇒ 不做數值差值",
+      "posterior": "後驗",
+      "riskLevel": "風險檔",
+      "f7Weight": "f7 權重佔比",
+      "f7WeightValue": "{{pct}}%",
+      "gapsPresent": "本側缺 {{n}} 項上游資料：{{gaps}}",
+      "gapsNone": "本側上游資料齊備",
+      "title": "f7 口徑對照（生產=分析師結構票，參照=含交易員觀點）",
+      "notProduced": "本記錄未產出 f7 口徑對照（該分析產自本口徑上線前，或參照節點未跑）",
+      "productionLabel": "生產側：",
+      "referenceLabel": "參照側：",
+      "sameBasis": "兩側 f7 口徑相同 ⇒ 本對照不成立（差值只反映同一份輸入被算了兩次）。",
+      "actionDiffer": "兩側不同檔：生產 {{production}} vs 參照 {{reference}}",
+      "confDelta": "置信 {{delta}}（生產 {{production}} vs 參照 {{reference}}）",
+      "posDelta": "倉位 {{delta}}%（生產 {{production}}% vs 參照 {{reference}}%）",
+      "scaleNote": "兩側同刻度（同一個 rhai 產出），可直接並排比；與逐檔對照那三維分數不是同一把尺。",
+      "f7": {
+        "analystVotes": "f7 取分析師結構票（各位分析師的淨票與離散度），未讀 LLM 交易觀點。",
+        "trader": "f7 取 LLM 交易員的方向、置信與報價折算（v183 前的生產口徑）。",
+        "absent": "f7 沒有任何輸入 ⇒ 該腿記 0 並退出權重，本側結論不含交易信號。",
+        "unknown": "未聲明 f7 的輸入來歷 ⇒ 無法判斷本側是否獨立於 LLM 決策。"
+      }
+    }
   },
   "pipeline": {
     "title": "股票管道",

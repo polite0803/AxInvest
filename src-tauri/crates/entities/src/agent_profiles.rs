@@ -21,12 +21,6 @@ pub struct Model {
     pub tags: Option<String>,
     #[sea_orm(column_name = "suggested_provider_id")]
     pub suggested_provider_id: Option<String>,
-    #[sea_orm(column_name = "suggested_model_id")]
-    pub suggested_model_id: Option<String>,
-    #[sea_orm(column_name = "suggested_temperature")]
-    pub suggested_temperature: Option<f64>,
-    #[sea_orm(column_name = "suggested_max_tokens")]
-    pub suggested_max_tokens: Option<i64>,
     #[sea_orm(column_name = "search_enabled")]
     pub search_enabled: Option<bool>,
     #[sea_orm(column_name = "recommend_permission_mode")]

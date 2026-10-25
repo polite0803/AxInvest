@@ -19,6 +19,7 @@ import {
 import { Empty, Tag, Tooltip } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { F7ReferenceComparison } from "../F7ReferenceComparison";
 import { HorizonAgreementList } from "../HorizonAgreementList";
 import { HorizonDecisionStrip } from "../HorizonDecisionStrip";
 import type { CompactDecisionShape } from "./CompactDecisionComparison";
@@ -339,6 +340,19 @@ export function DecisionComparisonPanel({ data }: DecisionComparisonPanelProps) 
           )}
         </div>
       </div>
+
+      {
+        /* v180：独立公式对照 —— 与上面那一对「公式 vs LLM」不是同一种分歧。
+        上面比的是两条链互不认同；这里比的是同一个公式换掉 f7 输入后的位移。 */
+      }
+      <F7ReferenceComparison
+        snapshot={view.f7ReferenceFormula}
+        productionF7Source={view.f7Source ?? null}
+        productionAction={view.decisionAction}
+        productionConfidence={view.confidence}
+        productionPositionPct={view.decisionPositionPct}
+        testId="f7-reference"
+      />
 
       {/* 阶段2：四周期逐档决策 —— 双视角上方是「主档怎么定」，此条补「各档各自怎么定」 */}
       <HorizonDecisionStrip

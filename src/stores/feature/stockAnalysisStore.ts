@@ -1,6 +1,7 @@
 // i18n-exempt: 业务逻辑/API 描述/日志字符串，非 UI 展示文本
 import i18n from "@/i18n";
 import {
+  cleanToolCallTags,
   type DecisionExplanation,
   extractContent,
   extractDecision,
@@ -36,6 +37,7 @@ import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type {
   AnalysisStatus,
   AnalysisSummary,
+  AnalystFeedbackOutcome,
   DashboardReport,
   DebateRound,
   EarningsEvent,
@@ -142,6 +144,16 @@ const LLM_DEGRADED_CODES: ReadonlySet<string> = new Set<string>();
 function valueSlotKeyOf(name: string): string {
   if (analystBaseOf(name) === null) { return "value-investor"; }
   return analystNodeId("value-investor", name.slice(name.indexOf(ANALYST_TIER_SEP) + ANALYST_TIER_SEP.length));
+}
+
+/**
+ * 共识计票要求文本已清洗（`stock-analysis-utils` 不能反向依赖 `agentOutput`）。
+ * `cleanToolCallTags` 幂等，重复清洗无副作用。
+ */
+function cleanReportsForConsensus(reports: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(reports)) { out[k] = cleanToolCallTags(v); }
+  return out;
 }
 
 /**
@@ -649,6 +661,17 @@ interface StockAnalysisState {
    * 和 loadAnalysis 时填充，供 DecisionBanner 展示给用户检查决策数据是否齐全。
    */
   decisionInputsReport: DecisionInputsReport;
+  /**
+   * 分析师质量反馈（`analyst_feedbacks`）本轮落库的计数，由**后端**在
+   * `workflow-completed` 载荷里回传（`analystFeedback` 字段）。
+   *
+   * 写侧在后端（`stock_workflow::core.rs`，与数据质量观测同位）⇒ 每日自动化批次、
+   * 时间旅行回放、T+0 重跑这些不经过界面的通道同样会写；写侧留在前端时它们一行都写不出。
+   *
+   * `null` = 本轮没拿到这个字段（老后端 / 事件未带）⇒ 界面**不出话**（不知道 ≠ 失败）。
+   * 有值时按 `skipped` 的成因各占一句，不得从 `written === 0` 反推原因。
+   */
+  analystFeedback: AnalystFeedbackOutcome | null;
   error: string | null;
   errorCode: string | null;
   failedNodes: string[];
@@ -916,6 +939,7 @@ const initialState = {
   // 用于显示红色"数据异常"警告横幅，避免 50/50 兜底被当成有效信号。
   untrustedNodes: {} as Record<string, true>,
   decisionInputsReport: [] as DecisionInputsReport,
+  analystFeedback: null as AnalystFeedbackOutcome | null,
   error: null,
   errorCode: null,
   failedNodes: [],
@@ -1190,6 +1214,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       untrustedNodes: {},
       _unlisten: null,
       timeline: [],
+      // 本轮的反馈落库计数必须随轮次清零：留着上一轮的计数会让新面板显示上一轮的缺席。
+      analystFeedback: null,
       // 清理跨分析轮次缓存，防止上轮数据污染
       stockCodeConsensus: {},
       decisionInputsReport: [],
@@ -1414,6 +1440,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       dashboardReport: null,
       dashboardMd: null,
       decisionInputsReport: [],
+      // 打开历史记录不是「跑完一轮」⇒ 反馈落库计数置空，上一轮的缺席提示不得跟过来。
+      analystFeedback: null,
     });
 
     const record = await invoke<
@@ -1841,7 +1869,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         if (record.stockCode && Object.keys(reports).length > 0) {
           get().setStockCodeConsensus(
             record.stockCode,
-            computeStockConsensus(reports, Date.now(), get().decision?.timeHorizon),
+            computeStockConsensus(
+              cleanReportsForConsensus(reports),
+              Date.now(),
+              get().decision?.timeHorizon,
+            ),
           );
         }
       } catch (e) {
@@ -2544,7 +2576,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         stepId: string;
         totalNodes?: number;
         completedNodes?: number;
-        executionId?: string;
       }>("workflow-step-start", (event) => {
         const { stepId, totalNodes, completedNodes } = event.payload;
         if (!stepId) { return; }
@@ -2722,8 +2753,20 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         // 让 dashboard tab 在正常完成路径立即填充，不再依赖 rerunDecision。
         dashboardReport?: DashboardReport | null;
         dashboardMd?: string | null;
+        /**
+         * 后端落库旁路的计数（`analyst_feedbacks` 本轮写了多少行 / 失败多少 / 为何一行没写）。
+         * 写侧在后端 ⇒ 每日批次 / 时间旅行回放 / T+0 重跑这些不经过界面的通道同样会写。
+         * 老后端不带这个字段 ⇒ `undefined` ⇒ 界面不出话（不知道 ≠ 失败）。
+         */
+        analystFeedback?: AnalystFeedbackOutcome | null;
       }>("workflow-completed", (event) => {
-        const { results, output, dashboardReport: wfDashboardReport, dashboardMd: wfDashboardMd } = event.payload;
+        const {
+          results,
+          output,
+          dashboardReport: wfDashboardReport,
+          dashboardMd: wfDashboardMd,
+          analystFeedback: wfAnalystFeedback,
+        } = event.payload;
 
         // 终态先落：本处理器随后要合并辩论轮次、提取决策、构建诊断报告等，任何一处
         // 面对畸形产物抛异常都会中断整个回调 ⇒ store 停在 running，按钮永久「分析中」
@@ -2943,6 +2986,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           // 后端为 null（dashboard 构建失败）时回退到 store 现有值，避免覆盖。
           dashboardReport: wfDashboardReport ?? s.dashboardReport,
           dashboardMd: wfDashboardMd ?? s.dashboardMd,
+          // 分析师质量反馈（`analyst_feedbacks`）本轮落库计数：由后端在 emit 时带上。
+          // 老后端不带该字段 ⇒ 置 null（界面不出话，不知道 ≠ 失败）。
+          analystFeedback: wfAnalystFeedback ?? null,
           // #21 工作流成功完成，重置自动重试计数，允许下次失败再次重试
           _workflowErrorRetries: 0,
         });
@@ -2991,15 +3037,16 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         const stockCode = get().stockCode;
         if (stockCode && parsed.analystReports && Object.keys(parsed.analystReports).length > 0) {
           const horizon = get().decision?.timeHorizon;
+          const consensusReports = cleanReportsForConsensus(parsed.analystReports);
           // 先算旧版共识作为 fallback
-          const consensus = computeStockConsensus(parsed.analystReports, undefined, horizon);
+          const consensus = computeStockConsensus(consensusReports, undefined, horizon);
           get().setStockCodeConsensus(stockCode, consensus);
           // 异步尝试证据驱动共识（不阻塞，失败不影响旧版结果）
           (async () => {
             try {
               const { computeEvidenceDrivenConsensus } = await import("@/lib/stock-analysis-utils");
               const evidenceResult = await computeEvidenceDrivenConsensus(
-                parsed.analystReports,
+                consensusReports,
                 undefined as unknown as import("@/lib/stock-analysis-utils").MarketRegimeInfo, // marketRegime will be fetched inside
                 horizon,
                 null,

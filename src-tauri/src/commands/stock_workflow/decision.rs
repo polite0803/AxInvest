@@ -891,6 +891,19 @@ pub(crate) fn extract_formula_decision_json(wf: &Workflow) -> Option<String> {
     None
 }
 
+/// 取 **f7 口径参照**（`portfolio-mgr-f7-ref`，v183 起承载「含交易观点」那一侧）的决策对象。
+///
+/// 只读：生产 `decision_action` 仍由 `portfolio-mgr` + `portfolio-risk-gate` 决定；
+/// 本函数的产物只进 `decision_json.f7ReferenceFormula`，供口径对照与反思消费。
+///
+/// ⚠ 名字从 `independent` 改来是因为语义变了：v183 起**生产侧**才是不吃 LLM 决策的那一侧，
+/// 参照侧保留 trader 口径 ⇒ 继续叫 `independent` 就是让名字说谎（同 f7 腿名那次纠正）。
+pub(crate) fn extract_f7_reference_formula_json(wf: &Workflow) -> Option<serde_json::Value> {
+    let node = wf.results.get("portfolio-mgr-f7-ref")?;
+    let actual = unwrap_node_output(node);
+    has_usable_action(&actual).then_some(actual)
+}
+
 /// 从节点结果中按「**链尾优先**」三级选取本次实际生效的决策 JSON。
 ///
 /// 优先级：`quality-fallback`（D/F 档 LLM 保守决策）> `portfolio-risk-gate`
@@ -2591,55 +2604,122 @@ pub(crate) fn parse_asof_param(s: Option<String>) -> Result<Option<AsOfContext>,
     AsOfContext::parse_optional(s.as_deref())
 }
 
-/// 默认值，与 stock-analysis 模板的 defaults 保持一致；
-/// 改动这里请同步 `StockAnalysisConfigPanel.getDefaultVariables()`。
-/// V39 修复: 从 300s 提升到 600s，适配 max_tool_rounds=3 的多轮工具节点
-/// （trader/research-mgr 等节点 3 轮 LLM+工具调用总耗时约 200-400s）。
-const DEFAULT_MAX_CONCURRENT: usize = 8;
-const DEFAULT_STEP_TIMEOUT_SECS: u64 = 600;
-/// 工作流整体超时（秒）。单步 step_timeout 只限单节点，多步累计可能很久；
-/// 总超时兜底防止 LLM 卡死或 vendor 长时间无响应导致分析永久挂起。
-/// 默认 30 分钟 = 1800s，覆盖典型 10+ 节点工作流（每步 600s × 并发 8 的最坏路径）。
-const DEFAULT_TOTAL_TIMEOUT_SECS: u64 = 1800;
-
-/// 从模板 variables 中解析 RunOptions 关键参数。
+/// 执行参数（并发 / 超时）的**唯一**解析点。
 ///
-/// 用户在「股票分析设置 → 参数」中调整 `max_concurrent` /
-/// `agent_timeout_secs` / `total_timeout_secs` 后，这里读到的就是新值；
-/// 如果模板里没有这些 key（旧版本 / 用户清空）则用默认值。
+/// ## 为什么收成一个结构（P2，2026-10-25 收口）
+///
+/// 此前这四族「并发 / llm-agent 对齐 / 工具超时 / 总超时」分散在四处，且**各自漂移**：
+///   * `resolve_runtime_options` 只算 3 个（`max_concurrent` / `agent_timeout_secs` /
+///     `total_timeout_secs`）；
+///   * `tool_timeout_secs` 在 `core.rs` 主链与批量链里**内联重写两遍**（同一个 map-find-
+///     max(5)-unwrap_or(30) 抄两次）；
+///   * 按类型并发上限的 map 也在 `core.rs` 内联两遍，而**荐股链（serenity）与反思链
+///     （reflection）根本没设这一字段** ⇒ 走 `RunOptions::default()` 的 `llm=agent=3`，
+///     把用户在面板设的 `max_concurrent` **静默压回 3**（同一属性两处支配，且第二条赢）。
+///
+/// 现在四面都只在这里算一次，四条链（主分析 / 批量 / 荐股 / 反思）一律 `apply_to`。
+///
+/// ## 键名口径：与引擎的 `node_type_name` 对齐
+///
+/// 引擎侧 `node_type_name` 给出的名字是 `tool` / `fileOperation` / `llm` / `agent`
+/// （`crates/rt-workflow/src/work_engine/node_executor_trait.rs`），而旧 map 写的是 `"file"`
+/// —— 那一项**永不命中**，`fileOperation` 节点实际吃的是全局值。本表按引擎口径写，
+/// 让「文件/工具类并发 10」这条既有意图真的生效。
+///
+/// ## 默认值与权威源
+///
+/// 默认值与 stock-analysis 模板的出厂值保持一致；改动这里必须同步
+/// `seed_variables.rs` + `StockAnalysisConfigPanel.getDefaultVariables()`（后者由
+/// `scripts/check-stock-var-defaults-parity.mjs` 逐字段钉住）。
 ///
 /// 容错策略：
 ///   * 越界 / 非法类型 → 用默认值；
-///   * max_concurrent ∈ [1, 32]，过小会让并发退化为串行，过大会拖垮 LLM 速率。
-///   * step_timeout ∈ [10, 3600] 秒，避免 0 或极端大值。
-///   * total_timeout ∈ [60, 7200] 秒，下限 1 分钟，上限 2 小时。
-pub(crate) fn resolve_runtime_options(
-    variables: Option<&[axagent_harness::workflow_types::Variable]>,
-) -> (usize, std::time::Duration, std::time::Duration) {
-    let lookup = |name: &str| -> Option<serde_json::Value> {
-        variables.and_then(|vs| vs.iter().find(|v| v.name == name)).map(|v| v.value.clone())
-    };
+///   * `max_concurrent` ∈ [1, 32]，过小会让并发退化为串行，过大会拖垮 LLM 速率。
+///   * `agent_timeout_secs` ∈ [10, 3600] 秒，避免 0 或极端大值。
+///   * `tool_timeout_secs` ≥ 5 秒（下限沿用既有 `max(s, 5)`，不设上限以不改变今天形态）。
+///   * `total_timeout_secs` ∈ [60, 7200] 秒，下限 1 分钟，上限 2 小时。
+pub(crate) struct ExecutionParams {
+    /// 全局并发上限（模板变量 `max_concurrent`）。
+    pub max_concurrent: usize,
+    /// 非工具节点的单步超时（模板变量 `agent_timeout_secs`）。
+    pub step_timeout: std::time::Duration,
+    /// 工具节点的单步超时（模板变量 `tool_timeout_secs`）。
+    pub tool_timeout: std::time::Duration,
+    /// 工作流整体超时（模板变量 `total_timeout_secs`），由调用方做外层兜底。
+    pub total_timeout: std::time::Duration,
+}
 
-    let max_concurrent = lookup("max_concurrent")
-        .and_then(|v| v.as_u64())
-        .map(|n| n.clamp(1, 32) as usize)
-        .unwrap_or(DEFAULT_MAX_CONCURRENT);
+impl ExecutionParams {
+    /// V39 修复: step_timeout 从 300s 提升到 600s，适配 max_tool_rounds=3 的多轮工具节点
+    /// （trader/research-mgr 等节点 3 轮 LLM+工具调用总耗时约 200-400s）。
+    const DEFAULT_MAX_CONCURRENT: usize = 8;
+    const DEFAULT_STEP_TIMEOUT_SECS: u64 = 600;
+    /// 工具节点单步超时下限 5s、出厂 30s（与 `seed_variables.rs` 的 `tool_timeout_secs` 同值）。
+    const DEFAULT_TOOL_TIMEOUT_SECS: u64 = 30;
+    const MIN_TOOL_TIMEOUT_SECS: u64 = 5;
+    /// 工作流整体超时。单步 `step_timeout` 只限单节点，多步累计可能很久；
+    /// 总超时兜底防止 LLM 卡死或 vendor 长时间无响应导致分析永久挂起。
+    /// 默认 30 分钟 = 1800s，覆盖典型 10+ 节点工作流（每步 600s × 并发 8 的最坏路径）。
+    const DEFAULT_TOTAL_TIMEOUT_SECS: u64 = 1800;
+    /// 工具/文件类节点的并发上限（它们不调 LLM，可以比 LLM 并发高）。
+    const IO_NODE_CONCURRENCY: usize = 10;
 
-    let step_timeout_secs = lookup("agent_timeout_secs")
-        .and_then(|v| v.as_u64())
-        .map(|n| n.clamp(10, 3600))
-        .unwrap_or(DEFAULT_STEP_TIMEOUT_SECS);
+    pub(crate) fn from_template_vars(
+        variables: Option<&[axagent_harness::workflow_types::Variable]>,
+    ) -> Self {
+        let lookup = |name: &str| -> Option<serde_json::Value> {
+            variables.and_then(|vs| vs.iter().find(|v| v.name == name)).map(|v| v.value.clone())
+        };
 
-    let total_timeout_secs = lookup("total_timeout_secs")
-        .and_then(|v| v.as_u64())
-        .map(|n| n.clamp(60, 7200))
-        .unwrap_or(DEFAULT_TOTAL_TIMEOUT_SECS);
+        let max_concurrent = lookup("max_concurrent")
+            .and_then(|v| v.as_u64())
+            .map(|n| n.clamp(1, 32) as usize)
+            .unwrap_or(Self::DEFAULT_MAX_CONCURRENT);
 
-    (
-        max_concurrent,
-        std::time::Duration::from_secs(step_timeout_secs),
-        std::time::Duration::from_secs(total_timeout_secs),
-    )
+        let step_timeout_secs = lookup("agent_timeout_secs")
+            .and_then(|v| v.as_u64())
+            .map(|n| n.clamp(10, 3600))
+            .unwrap_or(Self::DEFAULT_STEP_TIMEOUT_SECS);
+
+        let tool_timeout_secs = lookup("tool_timeout_secs")
+            .and_then(|v| v.as_u64())
+            .map(|s| std::cmp::max(s, Self::MIN_TOOL_TIMEOUT_SECS))
+            .unwrap_or(Self::DEFAULT_TOOL_TIMEOUT_SECS);
+
+        let total_timeout_secs = lookup("total_timeout_secs")
+            .and_then(|v| v.as_u64())
+            .map(|n| n.clamp(60, 7200))
+            .unwrap_or(Self::DEFAULT_TOTAL_TIMEOUT_SECS);
+
+        Self {
+            max_concurrent,
+            step_timeout: std::time::Duration::from_secs(step_timeout_secs),
+            tool_timeout: std::time::Duration::from_secs(tool_timeout_secs),
+            total_timeout: std::time::Duration::from_secs(total_timeout_secs),
+        }
+    }
+
+    /// 按类型并发上限：tool/fileOperation 保持高位，llm/agent **对齐用户设定的并发**。
+    /// 修复过的形态（此前 `RunOptions::default()` 的 llm=3 会盖掉面板值）只在这里造一次。
+    pub(crate) fn concurrency_by_type(&self) -> std::collections::HashMap<String, usize> {
+        let mut by_type = std::collections::HashMap::new();
+        by_type.insert("tool".to_string(), Self::IO_NODE_CONCURRENCY);
+        by_type.insert("fileOperation".to_string(), Self::IO_NODE_CONCURRENCY);
+        by_type.insert("llm".to_string(), self.max_concurrent);
+        by_type.insert("agent".to_string(), self.max_concurrent);
+        by_type
+    }
+
+    /// 把四面写到已构造的 `RunOptions` 上。
+    ///
+    /// ⚠ 只覆盖这四字段，其余（input / variables / callbacks / node_task_scope 等）
+    ///   仍由各条链自己设 —— 它们每条链语义都不同，收进来会把差异抹平。
+    pub(crate) fn apply_to(&self, opts: &mut axagent_rt_workflow::work_engine::RunOptions) {
+        opts.max_concurrent = self.max_concurrent;
+        opts.step_timeout = self.step_timeout;
+        opts.tool_timeout = self.tool_timeout;
+        opts.max_concurrent_by_type = Some(self.concurrency_by_type());
+    }
 }
 
 #[cfg(test)]
@@ -2647,6 +2727,47 @@ mod tests {
     use super::*;
     use axagent_harness::workflow_types::Variable;
     use serde_json::json;
+
+    /// v185：只有「口径确为 trader」的记录才可能借 LLM 价位；其余（含**缺键**）一律不借。
+    ///
+    /// 旧期望（v183）：缺 `f7_source` 键 ⇒ 按老数据维持原行为（借）。
+    /// 本裁定推翻该期望 —— 缺键含「新格式漏产键」一类（实测三处降级路径），
+    /// 借即泄漏（一条从未被任何公式产出的价位挂到无公式的记录上）。
+    #[test]
+    fn independent_formula_prices_are_not_borrowed_from_llm() {
+        let llm = r#"{"targetPrice": 31.5, "stopLoss": 27.0}"#;
+        // ① 新口径（分析师票）+ 公式未出价位 ⇒ 保持 null
+        let votes = json!({ "action": "持有", "f7_source": "analyst_votes", "targetPrice": null });
+        let merged = merge_price_fields_from_llm(&votes, Some(llm));
+        assert!(
+            merged.get("targetPrice").map(|v| v.is_null()).unwrap_or(false),
+            "独立口径不得把 LLM 的 targetPrice 补进公式决策，实际: {merged}"
+        );
+        // ② 参照/回滚口径（trader）⇒ 仍按原行为补
+        let trader = json!({ "action": "持有", "f7_source": "trader", "targetPrice": null });
+        let merged = merge_price_fields_from_llm(&trader, Some(llm));
+        assert_eq!(merged["targetPrice"], serde_json::json!(31.5));
+        // ③ 缺键（老记录 / 新格式漏产键）⇒ **不借**（v185 白名单门）
+        let legacy = json!({ "action": "持有", "targetPrice": null });
+        let merged = merge_price_fields_from_llm(&legacy, Some(llm));
+        assert!(
+            merged.get("targetPrice").map(|v| v.is_null()).unwrap_or(false),
+            "缺 f7_source 键 ⇒ 口径未知 ⇒ 不得借 LLM 价位，实际: {merged}"
+        );
+        // ④ 降级记录（rhai 异常 / pm 无输出）即使价位为 null，也不得被嫁接 LLM 价
+        for action in ["数据缺失", "观望"] {
+            let degraded = json!({ "action": action, "targetPrice": null, "stopLoss": null });
+            let merged = merge_price_fields_from_llm(&degraded, Some(llm));
+            assert!(
+                merged.get("targetPrice").map(|v| v.is_null()).unwrap_or(false),
+                "降级记录（action={action}）不得携带 LLM 价位，实际: {merged}"
+            );
+            assert!(
+                merged.get("stopLoss").map(|v| v.is_null()).unwrap_or(false),
+                "降级记录（action={action}）不得携带 LLM 止损价，实际: {merged}"
+            );
+        }
+    }
 
     /// 构造两侧 action 一致、只有风险档不同的最小夹具，返回 risk_level_score。
     fn agreement_risk_score(f_risk: &str, l_risk: &str) -> f64 {
@@ -2742,62 +2863,57 @@ mod tests {
         }
     }
 
-    #[test]
-    fn resolve_runtime_options_uses_defaults_when_missing() {
-        let (mc, to, total_to) = resolve_runtime_options(None);
-        assert_eq!(mc, DEFAULT_MAX_CONCURRENT);
-        assert_eq!(to.as_secs(), DEFAULT_STEP_TIMEOUT_SECS);
-        assert_eq!(total_to.as_secs(), DEFAULT_TOTAL_TIMEOUT_SECS);
+    fn var(name: &str, value: serde_json::Value) -> Variable {
+        Variable {
+            name: name.into(),
+            var_type: "number".into(),
+            value,
+            description: None,
+            is_secret: false,
+        }
     }
 
     #[test]
-    fn resolve_runtime_options_reads_template_vars() {
+    fn execution_params_uses_defaults_when_missing() {
+        let p = ExecutionParams::from_template_vars(None);
+        assert_eq!(p.max_concurrent, ExecutionParams::DEFAULT_MAX_CONCURRENT);
+        assert_eq!(p.step_timeout.as_secs(), ExecutionParams::DEFAULT_STEP_TIMEOUT_SECS);
+        assert_eq!(p.tool_timeout.as_secs(), ExecutionParams::DEFAULT_TOOL_TIMEOUT_SECS);
+        assert_eq!(p.total_timeout.as_secs(), ExecutionParams::DEFAULT_TOTAL_TIMEOUT_SECS);
+    }
+
+    #[test]
+    fn execution_params_reads_template_vars() {
         let vars = vec![
-            Variable {
-                name: "max_concurrent".into(),
-                var_type: "number".into(),
-                value: json!(20),
-                description: None,
-                is_secret: false,
-            },
-            Variable {
-                name: "agent_timeout_secs".into(),
-                var_type: "number".into(),
-                value: json!(120),
-                description: None,
-                is_secret: false,
-            },
+            var("max_concurrent", json!(20)),
+            var("agent_timeout_secs", json!(120)),
+            var("tool_timeout_secs", json!(45)),
+            var("total_timeout_secs", json!(2400)),
         ];
-        let (mc, to, _total_to) = resolve_runtime_options(Some(&vars));
-        assert_eq!(mc, 20);
-        assert_eq!(to.as_secs(), 120);
+        let p = ExecutionParams::from_template_vars(Some(&vars));
+        assert_eq!(p.max_concurrent, 20);
+        assert_eq!(p.step_timeout.as_secs(), 120);
+        assert_eq!(p.tool_timeout.as_secs(), 45);
+        assert_eq!(p.total_timeout.as_secs(), 2400);
     }
 
     #[test]
-    fn resolve_runtime_options_clamps_extremes() {
+    fn execution_params_clamps_extremes() {
         let vars = vec![
-            Variable {
-                name: "max_concurrent".into(),
-                var_type: "number".into(),
-                value: json!(0), // 0 → clamp 到 1
-                description: None,
-                is_secret: false,
-            },
-            Variable {
-                name: "agent_timeout_secs".into(),
-                var_type: "number".into(),
-                value: json!(99999), // 过大 → clamp 到 3600
-                description: None,
-                is_secret: false,
-            },
+            var("max_concurrent", json!(0)),         // 0 → clamp 到 1
+            var("agent_timeout_secs", json!(99999)), // 过大 → clamp 到 3600
+            var("tool_timeout_secs", json!(1)),      // 低于下限 → 抬到 5
+            var("total_timeout_secs", json!(10)),    // 低于下限 → 抬到 60
         ];
-        let (mc, to, _total_to) = resolve_runtime_options(Some(&vars));
-        assert_eq!(mc, 1);
-        assert_eq!(to.as_secs(), 3600);
+        let p = ExecutionParams::from_template_vars(Some(&vars));
+        assert_eq!(p.max_concurrent, 1);
+        assert_eq!(p.step_timeout.as_secs(), 3600);
+        assert_eq!(p.tool_timeout.as_secs(), ExecutionParams::MIN_TOOL_TIMEOUT_SECS);
+        assert_eq!(p.total_timeout.as_secs(), 60);
     }
 
     #[test]
-    fn resolve_runtime_options_falls_back_on_bad_types() {
+    fn execution_params_falls_back_on_bad_types() {
         let vars = vec![Variable {
             name: "max_concurrent".into(),
             var_type: "string".into(),
@@ -2805,8 +2921,103 @@ mod tests {
             description: None,
             is_secret: false,
         }];
-        let (mc, _to, _total_to) = resolve_runtime_options(Some(&vars));
-        assert_eq!(mc, DEFAULT_MAX_CONCURRENT);
+        let p = ExecutionParams::from_template_vars(Some(&vars));
+        assert_eq!(p.max_concurrent, ExecutionParams::DEFAULT_MAX_CONCURRENT);
+    }
+
+    /// 按类型并发上限的**对齐断言**（P2）：`llm` / `agent` 两格必须等于面板设定的
+    /// `max_concurrent`，不能留在 crate 的 3 上 —— 荐股链与反思链此前就是因为没设这一字段
+    /// 而把用户值静默压回 3。键名按引擎口径 `node_type_name`（`fileOperation` 而非 `file`，
+    /// 后者是永不命中的死项）。
+    #[test]
+    fn execution_params_by_type_aligns_llm_and_agent_with_user_concurrency() {
+        let vars = vec![var("max_concurrent", json!(16))];
+        let p = ExecutionParams::from_template_vars(Some(&vars));
+        let by_type = p.concurrency_by_type();
+        assert_eq!(by_type.get("llm"), Some(&16), "llm 并发必须跟随面板值");
+        assert_eq!(by_type.get("agent"), Some(&16), "agent 并发必须跟随面板值");
+        assert_eq!(by_type.get("tool"), Some(&ExecutionParams::IO_NODE_CONCURRENCY));
+        assert_eq!(by_type.get("fileOperation"), Some(&ExecutionParams::IO_NODE_CONCURRENCY));
+        // 死项不得复活：`"file"` 不是 `node_type_name` 给出的名字，写了也不会被读到。
+        assert!(!by_type.contains_key("file"), "按类型表里不得有引擎取不到的键");
+    }
+
+    /// **优先级锁**（P2）：模板变量 > `RunOptions::default()`。
+    ///
+    /// 断言写在「已 default 的 opts」上而不是「构造好的字面量」上，因为这四条链的
+    /// `RunOptions` 都是 `{ …, ..Default::default() }` 形态 —— 一旦某条链忘了 `apply_to`
+    /// （serenity / reflection 此前正是如此），crate 默认的 `llm=agent=3` / `step=300s`
+    /// 就成了第二权威。本条把它必须被覆盖这件事钉住。
+    #[test]
+    fn execution_params_apply_to_overrides_run_options_defaults() {
+        use axagent_rt_workflow::work_engine::RunOptions;
+        let vars = vec![
+            var("max_concurrent", json!(16)),
+            var("agent_timeout_secs", json!(900)),
+            var("tool_timeout_secs", json!(45)),
+        ];
+        let p = ExecutionParams::from_template_vars(Some(&vars));
+        let mut opts = RunOptions::default();
+        // 先证明默认值**确实**与模板值不同，否则这条断言是恒真的。
+        assert_eq!(opts.max_concurrent, 3);
+        assert_eq!(opts.step_timeout.as_secs(), 300);
+        assert_eq!(opts.tool_timeout.as_secs(), 30);
+
+        p.apply_to(&mut opts);
+
+        assert_eq!(opts.max_concurrent, 16);
+        assert_eq!(opts.step_timeout.as_secs(), 900);
+        assert_eq!(opts.tool_timeout.as_secs(), 45);
+        let by_type = opts
+            .max_concurrent_by_type
+            .clone()
+            .expect("apply_to 必须写按类型并发表，否则 llm/agent 回落到 crate 的 3");
+        assert_eq!(by_type.get("llm"), Some(&16));
+        assert_eq!(by_type.get("agent"), Some(&16));
+        // 其余字段不得被 apply_to 顺手改掉（各链自己负责）。
+        assert!(!opts.dry_run);
+        assert!(opts.variables.is_none());
+        assert!(opts.input.is_none());
+    }
+
+    /// 反「第二权威复活」锁（P2，2026-10-25）：执行参数四面只允许本文件一处解析。
+    ///
+    /// 判据按**调用形态**（带引号的模板变量名字面量、`max_concurrent_by_type:` 字段字面量），
+    /// 不按标识符子串 —— 注释里提名 `max_concurrent` 是合法说明文字，按子串判必假阳。
+    /// 新增一条链、或把某面挪回链内本地读，本条即红：那意味着同一参数又有了第二个读取点。
+    #[test]
+    fn stock_chains_do_not_reparse_execution_params_locally() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands/stock_workflow/");
+        let read = |f: &str| {
+            std::fs::read_to_string(dir.to_owned() + f)
+                .unwrap_or_else(|e| panic!("读 {f} 失败：{e}"))
+        };
+        let keys =
+            ["max_concurrent", "agent_timeout_secs", "tool_timeout_secs", "total_timeout_secs"];
+        for f in ["core.rs", "serenity.rs", "reflection.rs"] {
+            let src = read(f);
+            for k in keys {
+                let quoted = format!("\"{k}\"");
+                assert!(
+                    !src.contains(&quoted),
+                    "{f} 又本地读模板变量 {quoted} ⇒ 执行参数出现第二个解析点；四面必须来自 exec.apply_to"
+                );
+            }
+            assert!(
+                !src.contains("max_concurrent_by_type:"),
+                "{f} 又内联写按类型并发上限的 map ⇒ 与 ExecutionParams::concurrency_by_type 分叉"
+            );
+            assert!(
+                src.contains("exec.apply_to(&mut opts)"),
+                "{f} 没走单点解析（缺 exec.apply_to(&mut opts)），它会退回 RunOptions::default 的第二权威"
+            );
+        }
+        // 解析点本身必须仍在读这四个键：删掉某一面而不改本锁 = 门跟着瞎。
+        let decision = read("decision.rs");
+        for k in keys {
+            let quoted = format!("\"{k}\"");
+            assert!(decision.contains(&quoted), "decision.rs 不再读 {quoted}：四面少了一面");
+        }
     }
 
     // ── extract_decision_json(修复"决策信息缺失"误报)──
@@ -5348,9 +5559,12 @@ pub(crate) fn extract_valuation_json(
 /// - **成功路径**：公式两键**存在且非 null** ⇒ 本函数的 `is_none_or(is_null)` 判据不成立
 ///   ⇒ **不覆盖** ⇒ **公式优先**。这是刻意的：公式价确定性、可复算、与 `timeHorizon` 自洽，
 ///   LLM 值不可校验。LLM 值只在公式**确实无交易计划**（`sl_pct <= 0`）时才机会入场。
-/// - **异常路径**（rhai `catch` 块）：两键**存在但为 null** ⇒ 本函数仍会填入 LLM 值。
-///   这是**已知残留**：一条「Rhai 执行异常」的记录不应携带任何交易结论。若要封死，
-///   须在调用点先判 `action == "数据缺失"` 再决定是否合并（本轮未改）。
+/// - **异常路径**（rhai `catch` 块）：两键**存在但为 null** ⇒ 若合并门放行，本函数仍会填入 LLM 值。
+///   v185 已把合并门改成**白名单**（只有 `f7_source == "trader"` 才借），且三处降级路径
+///   （pm 的 catch 块、风控门的「pm 无输出」块、风控门的 catch 块）都补了
+///   `"f7_source": "absent"` ⇒ **异常/降级记录不再携带任何交易结论**。
+///   ⚠ 输出 `null` 本身挡不住这条 —— 本函数把「缺键」与「值为 null」一视同仁；
+///   真正的闸门是合并门，不是键的值。
 ///
 /// 配套修复：① trader prompt 补 `targetPrice` 方向语义并禁等于现价（模板 v39）；
 /// ② `portfolio-mgr.rhai` 新增 R-204 判「价格信号无信息量」并留痕。
@@ -5359,6 +5573,30 @@ pub(crate) fn merge_price_fields_from_llm(
     decision_value: &serde_json::Value,
     llm_json: Option<&str>,
 ) -> serde_json::Value {
+    // ── v185：合并门改**白名单** —— 只有「口径确为 trader」的记录才可能借 LLM 价位 ──
+    // v183 的门是黑名单形状：「`f7_source` 存在且 ≠ `trader` ⇒ 不借」⇒ **缺键 ⇒ 借**。
+    // 缺键有两类来源：
+    //   ① v183 之前的老记录（当时 f7 本来就吃 trader，借价语义正确）；
+    //   ② **新格式里漏产出该键的路径** —— 实测三处：
+    //      · `portfolio-mgr.rhai` 的 rhai `catch` 块（action="数据缺失"）；
+    //      · `portfolio-risk-gate.rhai` 的「pm 无输出」降级块（action="观望"）；
+    //      · `portfolio-risk-gate.rhai` 的「门异常且 pm 无输出」catch 块（action="观望"）。
+    //   ② 那三条记录**本无交易计划**，却被挂上 LLM 的 targetPrice/stopLoss
+    //   ⇒ 一条从未被任何公式产出的价位出现在无公式的记录上
+    //   （`portfolio-mgr.rhai` catch 块自己的注释把这称作「异常路径不得携带任何交易结论」）。
+    //   ⚠ 注意：输出 `null` **挡不住**这条 —— 本函数把「缺键」与「值为 null」一视同仁。
+    //
+    // 改白名单后：缺键 = 「不知道」⇒ **不借**。⇒ 「某个产出点忘补键」的后果从
+    // 「泄漏 LLM 价位」降级为「UI 少一格口径自述」⇒ 不再依赖每个产出点都记得补键。
+    //
+    // **代价（明示）**：v183 之前产出的存量记录重开时，`targetPrice`/`stopLoss` 两格
+    // 不再有 LLM 补值 —— 那两格的值本来就出自 LLM 决策，按「主档不得依赖 LLM 决策」
+    // 挂在公式决策上就是「伪装成本公式的结论」。影响面**只有展示**：落库与反思读的一直是
+    // **未合并**的原值（合并只发生在 dashboard / 复盘三处展示路径）。
+    let f7_src = decision_value.get("f7_source").and_then(|v| v.as_str());
+    if f7_src != Some("trader") {
+        return decision_value.clone();
+    }
     let Some(s) = llm_json else { return decision_value.clone() };
     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) else {
         return decision_value.clone();

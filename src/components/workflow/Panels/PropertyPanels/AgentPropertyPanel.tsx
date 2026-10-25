@@ -388,9 +388,6 @@ export const AgentPropertyPanel: React.FC<AgentPropertyPanelProps> = ({
         tags: expert.tags,
         expertId,
         suggestedProviderId: expert.suggestedProviderId,
-        suggestedModelId: expert.suggestedModelId,
-        suggestedTemperature: expert.suggestedTemperature,
-        suggestedMaxTokens: expert.suggestedMaxTokens,
         searchEnabled: expert.searchEnabled,
         recommendPermissionMode: expert.recommendPermissionMode,
         recommendedTools: expert.recommendedTools,
@@ -697,53 +694,6 @@ export const AgentPropertyPanel: React.FC<AgentPropertyPanelProps> = ({
           modelTypes={["Chat"]}
           style={{ width: "100%" }}
         />
-      </div>
-
-      <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ flex: 1 }}>
-          <label
-            style={{
-              display: "block",
-              color: token.colorTextTertiary,
-              fontSize: 12,
-              marginBottom: 4,
-            }}
-          >
-            {t("workflow.props.temperature")}
-          </label>
-          <InputNumber
-            id="agent-property-panel-inputnumber-77"
-            value={config.temperature ?? 0.7}
-            onChange={(value) => handleConfigChange("temperature", value)}
-            min={0}
-            max={2}
-            step={0.1}
-            size="small"
-            style={{ width: "100%" }}
-          />
-        </div>
-        <div style={{ flex: 1 }}>
-          <label
-            style={{
-              display: "block",
-              color: token.colorTextTertiary,
-              fontSize: 12,
-              marginBottom: 4,
-            }}
-          >
-            {t("workflow.props.maxTokens")}
-          </label>
-          <InputNumber
-            id="agent-property-panel-inputnumber-78"
-            value={config.maxTokens ?? 2048}
-            onChange={(value) => handleConfigChange("maxTokens", value)}
-            min={100}
-            max={128000}
-            step={100}
-            size="small"
-            style={{ width: "100%" }}
-          />
-        </div>
       </div>
 
       <div>

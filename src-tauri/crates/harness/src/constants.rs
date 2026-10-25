@@ -314,6 +314,20 @@ pub mod embed {
 /// 引用此常量以避免三层默认值不一致。coordinator 层可在 AgentConfig 中覆写。
 pub const DEFAULT_MAX_ITERATIONS: usize = 50;
 
+/// LLM 采样参数默认值 —— 全仓唯一权威。
+///
+/// 只允许被「新建会话/新模型参数开关」的初始化路径引用；运行时不得再以这些值兜底
+/// （运行时权威见 `Conversation.*` 与 `ModelParamOverrides.*`）。
+/// 前端 `DefaultModelSettings.tsx` 的同名默认值必须与 `TITLE_SUMMARY_MAX_TOKENS` /
+/// `COMPRESSION_MAX_TOKENS` 保持一致（由 `llm_param_defaults_are_shared` 锁定）。
+pub mod llm_defaults {
+    pub const TEMPERATURE: f64 = 0.7;
+    pub const TOP_P: f64 = 1.0;
+    pub const MAX_TOKENS: u32 = 4096;
+    pub const TITLE_SUMMARY_MAX_TOKENS: u32 = 256;
+    pub const COMPRESSION_MAX_TOKENS: u32 = 1024;
+}
+
 /// OPC 域包（Domain Pack）协议 / 钩子的共享标识符。
 ///
 /// 此前这两个值分别定义在 `commands/opc_workflow_kpi_hook.rs` 与

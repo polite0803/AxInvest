@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { DecisionBanner } from "../DecisionBanner";
@@ -48,6 +48,11 @@ const storeState = {
   //   读的是这里面的 diagnostics[*].report_quality。默认空串 ⇒ 不渲染数据质量区块，
   //   既有 4 个用例的行为不受影响。
   dataQualitySummary: "" as string,
+  // 分析师质量反馈落库的计数（后端回传 `{written, failed, skipped}`）。
+  // 默认 null ⇒ 后端没回传，组件不出任何反馈句。
+  analystFeedback: null as
+    | { written: number; failed: number; skipped: string | null }
+    | null,
 };
 
 vi.mock("@/stores", () => ({
@@ -601,5 +606,110 @@ describe("DecisionBanner 无黑板快照的缺席陈述", () => {
     expect(text).toContain("stockAnalysis.dataQuality.renderFailed");
     expect(text).toContain("{not json");
     expect(text).not.toContain("stockAnalysis.dataQuality.snapshotAbsentTitle");
+  });
+});
+
+/**
+ * 分析师质量反馈落库的呈现层（2026-10-25，`analyst_feedbacks` 全库 0 行修法第三步）。
+ *
+ * 写侧已收口到**后端**落库旁路（`src-tauri/src/commands/analyst_feedback.rs`），
+ * 前端不再拼载荷、不再自己上报 ⇒ 本组件只读后端回传的
+ * `{written, failed, skipped}`。
+ *
+ * 硬约束是「结构性缺口不得在 UI 造成歧义」：写库失败与「一行都没写」是**两种**缺席
+ * （修法不同：查落库 / 查成因），各占一句；「一行都没写」的成因由后端给出，
+ * 四种成因各占一句（不得合并，也不得从「written === 0」反推 —— 「快速链本来就没有
+ * 分析师节点」是设计如此，「诊断没跑出来」是缺陷，修法完全不同）；
+ * 成功不出话；后端没回传（`analystFeedback === null`）也不出话 ——
+ * 否则上一条记录的状态会跟到这一条上。
+ */
+describe("DecisionBanner 反馈落库的两种缺席陈述", () => {
+  const DQ_OK = JSON.stringify({
+    grade: "B",
+    score: 72,
+    good_count: 6,
+    total_analysts: 10,
+    avg_confidence: 61.5,
+    diagnostics: {},
+  });
+  const DQ_NO_SNAPSHOT = JSON.stringify({ grade: "N/A", score: 0, snapshot_absence: "not_persisted" });
+
+  const WRITE_FAILED_KEY = "stockAnalysis.dataQuality.feedbackWriteFailed";
+  const SKIPPED_KEYS = {
+    fast_chain: "stockAnalysis.dataQuality.feedbackSkippedFastChain",
+    bad_snapshot: "stockAnalysis.dataQuality.feedbackSkippedBadSnapshot",
+    no_analysis_row: "stockAnalysis.dataQuality.feedbackSkippedNoAnalysisRow",
+    no_diagnosis: "stockAnalysis.dataQuality.feedbackSkippedNoDiagnosis",
+    unknown_reason: "stockAnalysis.dataQuality.feedbackSkippedUnknown",
+  };
+
+  function renderWithFeedback(
+    summary: string,
+    feedback: { written: number; failed: number; skipped: string | null } | null,
+  ) {
+    // 同一个 it 里要连着渲染多轮（比对不同成因各占一句）⇒ 每轮先清干净，
+    // 否则 body.textContent 会把上一轮的句子一起算进来，「互不串台」就成假绿。
+    cleanup();
+    storeState.analystFeedback = feedback;
+    renderWithDq(summary);
+    return document.body.textContent ?? "";
+  }
+
+  it("写库失败 2 条（共 3 条）⇒ 出失败句并带上两个计数，不出「跳过」句", () => {
+    const text = renderWithFeedback(DQ_OK, { written: 1, failed: 2, skipped: null });
+    expect(text).toContain(`${WRITE_FAILED_KEY}|failed=2,written=1`);
+    for (const k of Object.values(SKIPPED_KEYS)) {
+      expect(text).not.toContain(k);
+    }
+  });
+
+  it("一行都没写（成因=没诊断）⇒ 出该成因那一句，不出失败句", () => {
+    const text = renderWithFeedback(DQ_OK, { written: 0, failed: 0, skipped: "no_diagnosis" });
+    expect(text).toContain(SKIPPED_KEYS.no_diagnosis);
+    expect(text).not.toContain(WRITE_FAILED_KEY);
+  });
+
+  it("四种跳过成因各占自己那一句，互不串台", () => {
+    for (const reason of ["fast_chain", "bad_snapshot", "no_analysis_row", "no_diagnosis"] as const) {
+      const text = renderWithFeedback(DQ_OK, { written: 0, failed: 0, skipped: reason });
+      expect(text).toContain(SKIPPED_KEYS[reason]);
+      for (const [other, key] of Object.entries(SKIPPED_KEYS)) {
+        if (other === reason || other === "unknown_reason") { continue; }
+        expect(text).not.toContain(key);
+      }
+      expect(text).not.toContain(WRITE_FAILED_KEY);
+    }
+  });
+
+  it("未登记的成因 ⇒ 出「成因未知」那一句（不静默、不冒充正常）", () => {
+    const text = renderWithFeedback(DQ_OK, { written: 0, failed: 0, skipped: "brand_new_reason" });
+    expect(text).toContain(SKIPPED_KEYS.unknown_reason);
+    expect(text).not.toContain(WRITE_FAILED_KEY);
+  });
+
+  it("全部写库成功 ⇒ 两句都不出（这里不是功劳簿）", () => {
+    const text = renderWithFeedback(DQ_OK, { written: 3, failed: 0, skipped: null });
+    expect(text).not.toContain(WRITE_FAILED_KEY);
+    for (const k of Object.values(SKIPPED_KEYS)) {
+      expect(text).not.toContain(k);
+    }
+  });
+
+  it("后端没回传 ⇒ 两句都不出，不把上一轮状态挂到本条", () => {
+    const text = renderWithFeedback(DQ_OK, null);
+    expect(text).not.toContain(WRITE_FAILED_KEY);
+    for (const k of Object.values(SKIPPED_KEYS)) {
+      expect(text).not.toContain(k);
+    }
+  });
+
+  it("无黑板快照 ⇒ 只由 snapshotAbsent 陈述，不再叠一句「跳过成因」", () => {
+    const text = renderWithFeedback(DQ_NO_SNAPSHOT, {
+      written: 0,
+      failed: 0,
+      skipped: "bad_snapshot",
+    });
+    expect(text).toContain("stockAnalysis.dataQuality.snapshotAbsentTitle");
+    expect(text).toContain(SKIPPED_KEYS.bad_snapshot);
   });
 });

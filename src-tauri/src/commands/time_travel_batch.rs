@@ -433,7 +433,9 @@ pub async fn list_replayable_as_of_dates(
         &POOL_SNAPSHOT_METHODS,
     )
     .await
-    .map_err(|e| format!("读快照覆盖失败: {e}"))?;
+    .map_err(|e| {
+        ErrorResponse::err_with_detail(ec::QUERY_FAILED, format!("读快照覆盖失败: {e}"))
+    })?;
 
     let mut out = Vec::new();
     for (d, _srcs) in covered {

@@ -6866,7 +6866,9 @@ pub async fn list_param_changes(
         limit.unwrap_or(50).min(200),
     )
     .await
-    .map_err(|e| format!("查询参数变更台账失败: {e}"))?;
+    .map_err(|e| {
+        ErrorResponse::err_with_detail(wf_err::INTERNAL, format!("查询参数变更台账失败: {e}"))
+    })?;
     Ok(rows.into_iter().filter_map(|m| serde_json::to_value(m).ok()).collect())
 }
 
@@ -6887,7 +6889,7 @@ async fn reflection_cohort_rate(
         created_after_ms,
     )
     .await
-    .map_err(|e| format!("查询反思样本失败: {e}"))
+    .map_err(|e| ErrorResponse::err_with_detail(wf_err::INTERNAL, format!("查询反思样本失败: {e}")))
 }
 
 /// 到期评估：只比较**变更前 / 变更后**两代样本，不自动回滚模板。
@@ -6925,9 +6927,13 @@ pub async fn evaluate_param_changes(
 ) -> Result<serde_json::Value, String> {
     let db = state.harness.db();
     let now = chrono::Utc::now().timestamp_millis();
-    let due = axagent_dao::repo::workflow_param_changes::list_due(db, now, 50)
-        .await
-        .map_err(|e| format!("查询到期待评估的参数变更失败: {e}"))?;
+    let due =
+        axagent_dao::repo::workflow_param_changes::list_due(db, now, 50).await.map_err(|e| {
+            ErrorResponse::err_with_detail(
+                wf_err::INTERNAL,
+                format!("查询到期待评估的参数变更失败: {e}"),
+            )
+        })?;
 
     let mut items: Vec<serde_json::Value> = Vec::new();
     for c in due {
@@ -6991,7 +6997,9 @@ pub async fn rollback_param_change(
     let db = state.harness.db();
     let change = axagent_dao::repo::workflow_param_changes::fetch_by_id(db, &change_id)
         .await
-        .map_err(|e| format!("查询参数变更失败: {e}"))?
+        .map_err(|e| {
+            ErrorResponse::err_with_detail(wf_err::INTERNAL, format!("查询参数变更失败: {e}"))
+        })?
         .ok_or_else(|| {
             ErrorResponse::new(wf_err::INTERNAL)
                 .with_detail(format!("参数变更不存在: {change_id}"))
@@ -7005,7 +7013,9 @@ pub async fn rollback_param_change(
 
     let tmpl = axagent_dao::repo::workflow_template::get_workflow_template(db, &change.template_id)
         .await
-        .map_err(|e| format!("读取模板失败: {e}"))?
+        .map_err(|e| {
+            ErrorResponse::err_with_detail(wf_err::INTERNAL, format!("读取模板失败: {e}"))
+        })?
         .ok_or_else(|| {
             ErrorResponse::new(wf_err::INTERNAL)
                 .with_detail(format!("模板不存在: {}", change.template_id))
@@ -7013,8 +7023,13 @@ pub async fn rollback_param_change(
         })?;
     let mut vars: Vec<serde_json::Value> =
         tmpl.variables.as_deref().and_then(|v| serde_json::from_str(v).ok()).unwrap_or_default();
-    let old_value: serde_json::Value = serde_json::from_str(&change.old_value_json)
-        .map_err(|e| format!("旧值解析失败（台账损坏）: {e}"))?;
+    let old_value: serde_json::Value =
+        serde_json::from_str(&change.old_value_json).map_err(|e| {
+            ErrorResponse::err_with_detail(
+                wf_err::INTERNAL,
+                format!("旧值解析失败（台账损坏）: {e}"),
+            )
+        })?;
     let mut found = false;
     for v in &mut vars {
         if v.get("name").and_then(|n| n.as_str()) == Some(change.param.as_str()) {
@@ -7030,7 +7045,9 @@ pub async fn rollback_param_change(
             .with_detail(format!("模板里已找不到参数 {}", change.param))
             .to_string());
     }
-    let vars_json = serde_json::to_string(&vars).map_err(|e| format!("序列化模板变量失败: {e}"))?;
+    let vars_json = serde_json::to_string(&vars).map_err(|e| {
+        ErrorResponse::err_with_detail(wf_err::SERIALIZE_FAILED, format!("序列化模板变量失败: {e}"))
+    })?;
     let (from_version, to_version) =
         axagent_dao::repo::workflow_template::update_workflow_template_variables_json(
             db,
@@ -7038,7 +7055,9 @@ pub async fn rollback_param_change(
             vars_json,
         )
         .await
-        .map_err(|e| format!("回滚写模板失败: {e}"))?;
+        .map_err(|e| {
+            ErrorResponse::err_with_detail(wf_err::INTERNAL, format!("回滚写模板失败: {e}"))
+        })?;
     let note = format!(
         "rolled back: v{from_version}→v{to_version}（变更 v{}→v{}）",
         change.from_version, change.to_version
@@ -7051,7 +7070,7 @@ pub async fn rollback_param_change(
         chrono::Utc::now().timestamp_millis(),
     )
     .await
-    .map_err(|e| format!("回滚落账失败: {e}"))?;
+    .map_err(|e| ErrorResponse::err_with_detail(wf_err::INTERNAL, format!("回滚落账失败: {e}")))?;
     Ok(serde_json::json!({
         "changeId": change.id,
         "param": change.param,

@@ -1118,7 +1118,9 @@ async fn run_asof_reco_replay(
     let mover_raw =
         reco_seed::top_close_rows_by_change_on_or_before(db, window_start, ASOF_MOVER_TOP_N * 4)
             .await
-            .map_err(|e| format!("读收盘快照失败: {e}"))?;
+            .map_err(|e| {
+                ErrorResponse::err_with_detail(ec::QUERY_FAILED, format!("读收盘快照失败: {e}"))
+            })?;
     let mover: Vec<SeedItem> = mover_raw
         .into_iter()
         .filter(|(_, name)| !name.contains("ST"))

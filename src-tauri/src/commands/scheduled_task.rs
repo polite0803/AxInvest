@@ -152,6 +152,9 @@ const BUILTIN_TASK_TYPES: &[&str] = &[
     // 以及前端 `taskGrouping.ts` 的两个白名单必须**同步**，漏一处 =
     // 「立即执行」报 MANUAL_RUN_NOT_SUPPORTED（而到点自动执行照常 ⇒ 只在手动时露头）。
     crate::commands::constants::STOCK_ANALYSIS_RERUN_TASK_TYPE,
+    // 每日时间旅行回放（R-2，2026-10-26）：executor 分支在 `init/services.rs`（且进交易日闸门），
+    // 回放日可判定性逐日推进 ⇒ 手动触发就是「今天补跑一次攒样本」，与到点自动执行同一条路径。
+    crate::commands::time_travel_batch::TIME_TRAVEL_BATCH_TASK_TYPE,
 ];
 
 /// 「立即执行」白名单的只读入口。

@@ -27,6 +27,8 @@ const INVEST_TASK_TYPES = new Set([
   // 中断分析自动重跑（2026-10-17）：把 `status='interrupted'` 的记录按原
   // `analysis_date` 原地重跑，见后端 `commands/stock_analysis_rerun.rs`。
   "stock-analysis-rerun",
+  // 每日时间旅行回放（R-2）：在 as-of 封闭世界重跑选股链，按天攒可判定的回放样本。
+  "time-travel-batch",
 ]);
 
 /** 系统维护内置 taskType 白名单。 */
@@ -64,6 +66,8 @@ const BUILTIN_EXECUTABLE_TYPES = new Set([
   // 中断分析自动重跑（2026-10-17）—— 后端 `BUILTIN_TASK_TYPES` 已同步登记。
   // 漏这条的症状：任务中心「立即执行」报 MANUAL_RUN_NOT_SUPPORTED，而定时到点照跑。
   "stock-analysis-rerun",
+  // 每日时间旅行回放（R-2）—— 后端 `BUILTIN_TASK_TYPES` 与 `services.rs` 的 executor 分支同批登记。
+  "time-travel-batch",
 ]);
 
 type TaskLike = {

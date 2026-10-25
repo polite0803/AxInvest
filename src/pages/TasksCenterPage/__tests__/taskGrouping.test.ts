@@ -19,6 +19,7 @@ const CLASSIFY_CASES: ReadonlyArray<{
   { name: "批次反思", taskType: "batch-reflection", workflowId: null, expected: "invest" },
   { name: "决策校验", taskType: "validate-decisions", workflowId: null, expected: "invest" },
   { name: "决策回测", taskType: "decision-backtest", workflowId: null, expected: "invest" },
+  { name: "时间旅行回放", taskType: "time-travel-batch", workflowId: null, expected: "invest" },
   { name: "妖股漏检核查", taskType: "mover-recall", workflowId: null, expected: "invest" },
   { name: "进化计划聚合", taskType: "evolution-proposal", workflowId: null, expected: "invest" },
   { name: "教训验证与退役", taskType: "lesson-validation", workflowId: null, expected: "invest" },
@@ -102,6 +103,8 @@ describe("canExecuteNow", () => {
     expect(canExecuteNow({ taskType: "lesson-validation", workflowId: null })).toBe(true);
     expect(canExecuteNow({ taskType: "portfolio-metrics", workflowId: null })).toBe(true);
     expect(canExecuteNow({ taskType: "intent-expiry", workflowId: null })).toBe(true);
+    // R-2 每日回放：后端白名单 + 前端可执行表同批登记（漏前端 = 按钮恒灰，漏后端 = 报 MANUAL_RUN_NOT_SUPPORTED）
+    expect(canExecuteNow({ taskType: "time-travel-batch", workflowId: null })).toBe(true);
   });
 
   it("绑定工作流即可执行（含自定义壳）", () => {

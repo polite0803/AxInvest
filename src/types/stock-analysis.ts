@@ -276,6 +276,18 @@ export interface HorizonDecision {
   entryGate?: string;
   /** 入场门判定结果（各档门不同，故不能由展示层反推） */
   entryGatePassed?: boolean;
+  /**
+   * 超短档：市场情绪门是否已被产品决策**放开**（2026-10-26 运行期开关）。
+   * 产端 `portfolio-mgr-h-ultra-short.rhai`；放开时 `entryGatePassed` 恒 true，
+   * 原判据留在 `gateBasis` + `dataGaps` 里 ⇒ 本键只回答「为什么门是通过的」。
+   */
+  sentimentGateOpen?: boolean;
+  /**
+   * 长线档：估值门是否已被产品决策**放开**（2026-10-26 运行期开关）。
+   * 产端 `portfolio-mgr-h-long.rhai`；`unjudged`（数据缺席）不因放开而变成通过 ⇒
+   * 此情形下本键可为 true 而 `entryGatePassed` 仍为 false。
+   */
+  valuationGateOpen?: boolean;
   /** 门的判定依据：`judged` / `unjudged`（算不出 ≠ 通过，也不得算成未通过）；
    *  超短档 P0-5 起为 `breadth_missing` / `breadth_weak` / `stock_unjudged` /
    *  `limit_up_recent` / `strong_momentum` / `stock_not_strong` 六值之一 */

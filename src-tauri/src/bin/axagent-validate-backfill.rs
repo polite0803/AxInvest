@@ -309,7 +309,7 @@ async fn run() -> Result<(), String> {
     // ── 工作流工具 resolver 注入（R-3d，2026-10-26 补）──
     //
     // ⚠ **本 bin 此前漏了这一步**（`axagent-batch-rerun` 早就补上，见其
-    // `axagent-batch-rerun.rs:784` 的注释；`init/services.rs:2149` 的应用路径也有）。
+    // `axagent-batch-rerun.rs:784` 的注释；`init/services.rs:2148` 的应用路径也有）。
     // 漏了的后果（本轮实测，2026-10-26）：
     //   `WorkEngine::run_workflow` 的「按需延迟注册」段（`engine/mod.rs:2478`）
     //   依赖 `tool_resolver` 才能把工作流 `tool_defs` 里声明的工具注册进 Engine；

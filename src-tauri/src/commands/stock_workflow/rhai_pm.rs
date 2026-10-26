@@ -101,6 +101,20 @@ pub fn register_pm_functions(engine: &mut Engine) {
         let (new_action, _, _) = portfolio_formula::apply_risk_veto(action, risk_level);
         new_action
     });
+    // ── 决策否决门开关（2026-10-26 用户裁决）──────────────────────────────
+    //
+    // 三道否决门（风控 / 情绪 / 估值）+「顶层采纳档内买入」做成**运行期可切换**，
+    // 这样产品决策（风控优先 vs 可执行性优先）**不必改图、不必升模板版本**。
+    //
+    // 门名用 `decision_gates::Gate::key()` 的**完整键**（如 `gate.risk_veto_enabled`），
+    // 而**不是**短别名 —— 避免「同名不同义」：短别名（如 `risk`）在脚本与 DB 两处
+    // 长得一样却可能指不同的门（MEMORY-RULES #738）。
+    //
+    // ⚠ 未知门名 ⇒ 返回 `false`（**不放行**）：脚本里若传错门名，
+    // 保守方向必须是「仍按原门否决」而不是「静默放行」。
+    engine.register_fn("pm_gate_enabled", |name: &str| -> bool {
+        axagent_analysis_engine::decision_gates::is_open_by_name(name)
+    });
     engine.register_fn(
         "pm_covariance_decay",
         |f1_w: f64, f3_w: f64, f9_w: f64, f11_w: f64, decay_target: &str| -> f64 {

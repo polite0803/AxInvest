@@ -14356,8 +14356,6 @@
       "deliveryProgressUpdateIntervalSecs": "Delivery progress update interval (seconds)",
       "deliveryAutoStart": "Auto-start delivery",
       "deliveryParallelWorkflows": "Parallel delivery workflows",
-      "agentTemperature": "Agent temperature (0-1)",
-      "agentMaxTokens": "Agent max tokens",
       "agentTimeoutSecs": "Agent timeout (seconds)",
       "agentRetryMax": "Agent max retries",
       "notifyNewLead": "Notify on new lead",
@@ -16207,7 +16205,8 @@
         "profiles": "Profiles",
         "data": "Data",
         "params": "Params",
-        "recommendation": "Recommendations"
+        "recommendation": "Recommendations",
+        "gates": "거부 게이트"
       },
       "check": "Check",
       "loadFailed": "Failed to load config",
@@ -18099,8 +18098,6 @@
       "maxConcurrent": "병렬 분석 에이전트 최대 수 (1-32)",
       "klineLimit": "캔들 개수 (60-500)",
       "newsLimit": "뉴스 개수 (10-100)",
-      "agentTemperature": "LLM 온도 (0-2)",
-      "agentMaxTokens": "LLM 최대 출력 토큰 수",
       "agentTimeoutSecs": "각 Agent 노드 실행 제한 시간 (초)",
       "agentRetryMax": "각 Agent 노드 최대 재시도 횟수",
       "toolTimeoutSecs": "각 Tool 노드 실행 제한 시간 (초)",
@@ -18594,6 +18591,30 @@
         "trader": "f7은 LLM 트레이더의 방향·신뢰도·호가 환산을 사용합니다(v183 이전 생산 기준).",
         "absent": "f7에 입력이 전혀 없습니다 ⇒ 해당 항목이 0으로 가중에서 제외되어 이 쪽에 거래 신호가 없습니다.",
         "unknown": "이 쪽은 f7 입력의 출처를 선언하지 않았습니다 ⇒ LLM 결정으로부터 독립인지 판단할 수 없습니다."
+      }
+    },
+    "decisionGates": {
+      "title": "결정 거부 게이트",
+      "warning": "거부 게이트를 열면 리스크 통제가 약해집니다",
+      "warningDetail": "이 게이트들은 현재 일부 매수 신호를 차단합니다. 열어도 승률은 오르지 않으며, 관측된 초단기 티어의 기대 수익은 음수입니다. 개방은 효과를 '측정 가능'하게 할 뿐, '더 수익성이 높아진다'는 뜻이 아닙니다.",
+      "loadFailed": "게이트 상태를 읽지 못했습니다: {{error}}",
+      "saveFailed": "게이트 상태를 저장하지 못했습니다: {{error}}",
+      "saved": "게이트 상태를 저장했습니다 (다음 분석부터 적용)",
+      "riskVeto": {
+        "label": "리스크 거부 게이트 열기",
+        "desc": "고/극고 위험 종목은 기본적으로 매수·보유가 금지됩니다. 열면 진입이 가능하지만 포지션은 리스크 상한으로 제한됩니다."
+      },
+      "sentiment": {
+        "label": "심층 게이트 열기",
+        "desc": "시장 전체 상승 한도 비율이 부족하면 이 티어에서 매수/증액이 나오지 않습니다. 열면 시장 심층에 의한 거부가 해제됩니다 (초단기 티어는 미세구조 미연결 상한이 별도로 남습니다)."
+      },
+      "valuation": {
+        "label": "밸류에이션 게이트 열기",
+        "desc": "심한 고평가 (DCF 업사이드 ≤ −35% 또는 PE가 자체 5년 80분위 이상)는 매수/증액을 차단합니다. 열면 이 거부가 해제됩니다. 밸류에이션 데이터가 없으면 여전히 '미판정'으로 처리됩니다."
+      },
+      "tierBuy": {
+        "label": "상위 레벨이 티어 내 매수를 채택",
+        "desc": "교정이 기준에 미달하면 신뢰도가 상한으로 묶이고 액션도 함께 강등되어 상위 레벨 매수가 0으로 유지됩니다. 열면 티어 내 결정된 매수를 채택합니다. 신뢰도 상한 자체는 계속 적용됩니다."
       }
     }
   },

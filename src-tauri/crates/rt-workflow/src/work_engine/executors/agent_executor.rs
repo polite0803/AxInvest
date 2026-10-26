@@ -14,7 +14,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use axagent_harness::error_codes::error_for_log;
-use axagent_harness::types::provider_model::request_delay_ms_for_model;
+use axagent_harness::types::provider_model::{
+    ModelParamOverrides, model_param_overrides, request_delay_ms_for_model,
+};
 use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest, RagContextResult};
 use axagent_harness::workflow_types::{StepProgressEvent, WorkflowNode};
 use futures::StreamExt;
@@ -533,6 +535,10 @@ impl NodeExecutorTrait for AgentExecutor {
         // sleep 由统一入口 `execute_llm_stream` 单点执行 —— 工作流路径此前对该格**零消费点**，
         // 面板调了不生效（只有聊天路径读它）。回退模型另取，见下方 `fb_prov` / `fb_model` 两处。
         let request_delay_ms = request_delay_ms_for_model(&prov, &model);
+        // 模型层采样参数整包（设置页「供应商-模型」那一格）。2026-10-26 起成为工作流
+        // 采样参数的唯一权威 —— 此前这一格对工作流零消费点，温度与输出上限另走模板变量。
+        // 取 owned 副本而非借用：下面多处回退路径会另解析 `fb_prov`，借用会在移动处打架。
+        let model_overrides = model_param_overrides(&prov, &model).cloned();
 
         // 根据 provider 类型决定是否需要扫描非标准的文本式工具调用
         // 部分模型/代理不输出 OpenAI 标准 tool_calls delta，而是将工具调用
@@ -682,7 +688,37 @@ impl NodeExecutorTrait for AgentExecutor {
             context.variables.get("debate_context_mode").and_then(|v| v.as_str()).unwrap_or("full");
         let mut context_source_stats: Vec<(String, usize)> = Vec::new();
         if !an.config.context_sources.is_empty() {
-            let mut missing_sources: Vec<&String> = Vec::new();
+            // 2026-10-26：声明了上下文源却**一个都取不到** ⇒ 按输入缺席短路，不调用 LLM。
+            // 原行为继续组装 prompt 并追加「你仍然必须完成分析…绝不允许输出数据缺失」，
+            // 上游断链时那不是降级，而是让 LLM 凭空编造（实测 debate-convergence--{档}
+            // 在四个辩手全无产出时照样吐 consensus_score，并被本档决策消费）。
+            // ⚠ 容错放行（`harden_decision_chain` 置 continue_on_fail=true）解决的是
+            // 「不连坐整条链」，不是「空输入可以当有效输入」。
+            //
+            // 只对**无工具可调**的节点生效：分析师节点的 context_sources 也指向 tool 节点输出，
+            // 但它们还能自己调工具补数据（prompt 明写「上游为空请主动取数」）⇒ 短路会砍掉这条
+            // 补偿路径。裁决型节点（辩手/收敛）tools 为空，全缺时没有任何补救手段，才判缺席。
+            let no_callable_tools =
+                an.config.tools.is_empty() && an.config.exposed_tools.is_empty();
+            if let Some(missing) = absent_context_missing(
+                &an.config.context_sources,
+                &context.variables,
+                !no_callable_tools,
+            ) {
+                tracing::warn!(
+                    node_id = %node.base_id(),
+                    declared = an.config.context_sources.len(),
+                    missing = ?missing,
+                    gaps = %format_context_source_gaps(&context.context_source_gaps, &missing),
+                    "Agent 节点声明的 context_sources 全部未产出 ⇒ 返回输入缺席（不调用 LLM）"
+                );
+                return Ok(NodeOutput {
+                    output: absent_context_output(node.base_id(), &missing),
+                    output_var: Some(an.config.output_var.clone()),
+                    control: None,
+                });
+            }
+            let mut missing_sources: Vec<&str> = Vec::new();
             all_segments.push(TemplateSegment::Static("\n\n--- 上游节点输出 ---\n".to_string()));
             for source in &an.config.context_sources {
                 if let Some(value) = context.variables.get(source) {
@@ -695,22 +731,26 @@ impl NodeExecutorTrait for AgentExecutor {
                     context_source_stats.push((source.clone(), formatted.chars().count()));
                     all_segments.push(TemplateSegment::Static(formatted));
                 } else {
-                    missing_sources.push(source);
-                    tracing::error!(
-                        node_id = %node.base_id(),
-                        context_source = %source,
-                        "context_sources 变量未在 context.variables 中找到（tool 节点可能失败或未执行）"
-                    );
+                    missing_sources.push(source.as_str());
                 }
             }
             if !missing_sources.is_empty() {
+                // 部分缺失仍按既有裁定继续分析；日志从「逐条 error」收成一条 warn
+                // （全缺已在上方短路，走到这里必然只是部分缺）。
+                tracing::warn!(
+                    node_id = %node.base_id(),
+                    declared = an.config.context_sources.len(),
+                    missing = ?missing_sources,
+                    gaps = %format_context_source_gaps(&context.context_source_gaps, &missing_sources),
+                    "Agent 节点上下文源部分未产出（其余照常注入，缺失项在 prompt 中显式声明）"
+                );
                 let msg = format!(
                     "⚠️ 以下上游数据源未获取到数据: {}。\n\
 ——你仍然必须完成指定的分析任务，基于现有数据（行情、K线、财务数据）给出分析结论。\n\
 ——即使部分数据缺失，也要基于可用信息给出明确的看多/看空/中性判断，不要输出占位文本。\n\
 ——该股票的基本面信息（代码、名称、行业）已在上下文中给出，请充分利用。\n\
 ——绝不允许输出'数据缺失'、'无法获取'、'工具失败'、'抱歉'等拒绝句式。\n\n",
-                    missing_sources.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                    missing_sources.join(", ")
                 );
                 all_segments.push(TemplateSegment::Static(msg));
             }
@@ -862,21 +902,35 @@ impl NodeExecutorTrait for AgentExecutor {
                     //     ⇒ 仍 warn。
                     // 判据用 `source_key` 首段（节点 id 或模板变量名），与 `resolve_var_path`
                     // 的根查找同口径 —— 若两者口径分叉，这行会开始撒谎。
-                    let root = source_key.split('.').next().unwrap_or("");
-                    if context.variables.contains_key(root) {
-                        tracing::warn!(
-                            node_id = %an.base.id,
-                            target_key = %target_key,
-                            source_key = %source_key,
-                            "Agent 节点 input_mapping 取不到值：源变量路径解析为 None，该输入不会注入 system_prompt（模板中对应段落将为空）"
-                        );
-                    } else {
-                        tracing::info!(
-                            node_id = %an.base.id,
-                            target_key = %target_key,
-                            source_key = %source_key,
-                            "Agent 节点 input_mapping 的上游节点尚未产出（时序），本次跳过该输入"
-                        );
+                    //
+                    // 2026-10-26：三分。源节点**在** variables 却仍解析失败，除了「字段名写错」，
+                    // 还可能是它自己按输入缺席短路写了 `__absent`（上游断链的如实传递）——
+                    // 后者不是配置缺陷，报 warn 会把人引到错误的排查方向。
+                    match input_mapping_gap(&context.variables, source_key) {
+                        InputMappingGap::ConfigPath => {
+                            tracing::warn!(
+                                node_id = %an.base.id,
+                                target_key = %target_key,
+                                source_key = %source_key,
+                                "Agent 节点 input_mapping 取不到值：源变量路径解析为 None，该输入不会注入 system_prompt（模板中对应段落将为空）"
+                            );
+                        },
+                        InputMappingGap::UpstreamAbsent => {
+                            tracing::info!(
+                                node_id = %an.base.id,
+                                target_key = %target_key,
+                                source_key = %source_key,
+                                "Agent 节点 input_mapping 的上游明确返回输入缺席（__absent），本次跳过该输入"
+                            );
+                        },
+                        InputMappingGap::NotProduced => {
+                            tracing::info!(
+                                node_id = %an.base.id,
+                                target_key = %target_key,
+                                source_key = %source_key,
+                                "Agent 节点 input_mapping 的上游节点尚未产出（时序），本次跳过该输入"
+                            );
+                        },
                     }
                 }
             }
@@ -1087,7 +1141,12 @@ impl NodeExecutorTrait for AgentExecutor {
         }
 
         let req_ctx = axagent_harness::build_provider_request_context(&prov, &key, api_key);
-        let model_for_output = model.clone();
+        // 2026-10-26：产出里记录的模型必须是**实际服务的那一个**。此前它在主通路解析时就
+        // 定死、回退接管后从不更新 ⇒ 节点账单落在回退供应商，DB 却写着主模型。
+        // 现网实证（2026-10-26 DeepSeek 账单 CSV 对账）：DeepSeek 侧 20:00–21:00 记 632 次
+        // 请求 / 6.25M 输入 tokens，而库里同期只有 1 次运行的 `model` 是 deepseek-flash，
+        // 其余 9 次全写 agnes-3.0-flash —— 按这个字段做的成本归因必然错。
+        let mut model_for_output = model.clone();
 
         if context.dry_run {
             return Ok(NodeOutput {
@@ -1205,6 +1264,12 @@ impl NodeExecutorTrait for AgentExecutor {
                 as usize;
         let mut tool_calls_executed_total = 0usize;
         let mut total_usage = (0u32, 0u32);
+        // 2026-10-26：DeepSeek 等 provider 的上下文缓存分档计量（命中 / 未命中）。
+        // 此前在 `openai.rs` 解析出 `prompt_cache_hit_tokens` / `miss` 后，
+        // 本函数只保留 (input, output) 两格 ⇒ 命中率不可见，用户只能凭账单猜。
+        // 命中与未命中单价差 50 倍（deepseek-flash：0.02 vs 1 元/M），
+        // 「缓存有没有生效」必须能读出来，而不是推断。
+        let mut cache_usage = (0u32, 0u32);
         let mut final_content = String::new();
         // 2026-09-14：**流完整性**标记（粘性，跨轮次累积）。
         //
@@ -1262,24 +1327,21 @@ impl NodeExecutorTrait for AgentExecutor {
                 break;
             }
 
-            // 支持从模板变量覆盖 temperature/max_tokens（优先级：模板变量 > 节点配置）
-            let runtime_temp = context
-                .variables
-                .get("agent_temperature")
-                .and_then(|v| v.as_f64())
-                .or_else(|| an.config.temperature.map(|t| t as f64));
-            let runtime_max_tokens = context
-                .variables
-                .get("agent_max_tokens")
-                .and_then(|v| v.as_u64().map(|u| u as u32))
-                .or(an.config.max_tokens);
+            // 采样参数生效值：节点配置 > 模型层「供应商-模型」参数 > 不下发。
+            // 2026-10-26：此处原先读模板变量 `agent_temperature` / `agent_max_tokens`，
+            // 是模型层之外自建的通道，会把模型层设的输出上限盖掉（见 `resolve_sampling`）。
+            let sampling = resolve_sampling(
+                an.config.temperature,
+                an.config.max_tokens,
+                model_overrides.as_ref(),
+            );
             let request = ChatRequest {
                 model: model.clone(),
                 messages: messages.clone(),
                 stream: true,
-                temperature: runtime_temp,
-                max_tokens: runtime_max_tokens,
-                top_p: None,
+                temperature: sampling.temperature,
+                max_tokens: sampling.max_tokens,
+                top_p: sampling.top_p,
                 // 首轮传 tools，后续轮次若 tools 为空则不传
                 tools: if round == 0 {
                     tools_for_llm.as_ref().filter(|v| !v.is_empty()).cloned()
@@ -1287,8 +1349,8 @@ impl NodeExecutorTrait for AgentExecutor {
                     None
                 },
                 thinking_budget: None,
-                use_max_completion_tokens: None,
-                thinking_param_style: None,
+                use_max_completion_tokens: sampling.use_max_completion_tokens,
+                thinking_param_style: sampling.thinking_param_style.clone(),
                 api_mode: None,
                 instructions: None,
                 conversation: None,
@@ -1318,13 +1380,15 @@ impl NodeExecutorTrait for AgentExecutor {
                             an.config.fallback_model.as_deref(),
                             &prov.id,
                             &model,
+                            &an.base.id,
                             session_model,
                             session_provider_id,
                             profile_suggested,
                             &messages,
-                            runtime_temp,
-                            runtime_max_tokens,
+                            an.config.temperature,
+                            an.config.max_tokens,
                             response_format.clone(),
+                            Some(e.as_str()),
                         )
                         .await
                     {
@@ -1336,6 +1400,7 @@ impl NodeExecutorTrait for AgentExecutor {
                                 primary_error = %error_for_log(&e),
                                 "Agent LLM stream 初始化失败，已切换 fallback 流继续"
                             );
+                            model_for_output = fb_model.clone();
                             fb_stream
                         },
                         None => {
@@ -1405,13 +1470,15 @@ impl NodeExecutorTrait for AgentExecutor {
                                     an.config.fallback_model.as_deref(),
                                     &prov.id,
                                     &model,
+                                    &an.base.id,
                                     session_model,
                                     session_provider_id,
                                     profile_suggested,
                                     &messages,
-                                    runtime_temp,
-                                    runtime_max_tokens,
+                                    an.config.temperature,
+                                    an.config.max_tokens,
                                     response_format.clone(),
+                                    None,
                                 )
                                 .await
                             {
@@ -1423,6 +1490,7 @@ impl NodeExecutorTrait for AgentExecutor {
                                     "Agent LLM stream chunk 超时，已切换 fallback 流继续"
                                 );
                                 chunk_timeout_fallback_used = true;
+                                model_for_output = fb_model.clone();
                                 stream = fb_stream;
                                 continue;
                             }
@@ -1456,13 +1524,15 @@ impl NodeExecutorTrait for AgentExecutor {
                                     an.config.fallback_model.as_deref(),
                                     &prov.id,
                                     &model,
+                                    &an.base.id,
                                     session_model,
                                     session_provider_id,
                                     profile_suggested,
                                     &messages,
-                                    runtime_temp,
-                                    runtime_max_tokens,
+                                    an.config.temperature,
+                                    an.config.max_tokens,
                                     response_format.clone(),
+                                    Some(e.as_str()),
                                 )
                                 .await
                             {
@@ -1474,6 +1544,7 @@ impl NodeExecutorTrait for AgentExecutor {
                                     "Agent LLM stream chunk 错误，已切换 fallback 流继续"
                                 );
                                 chunk_err_fallback_used = true;
+                                model_for_output = fb_model.clone();
                                 stream = fb_stream;
                                 continue;
                             }
@@ -1525,6 +1596,8 @@ impl NodeExecutorTrait for AgentExecutor {
                 }
                 if let Some(usage) = chunk.usage {
                     stream_usage = (usage.input_tokens, usage.output_tokens);
+                    cache_usage.0 += usage.cache_read_input_tokens;
+                    cache_usage.1 += usage.cache_miss_input_tokens.unwrap_or(0);
                 }
                 // 2026-09-14：记录终态 chunk（provider 收到 `[DONE]`/`finish_reason` 时置位）。
                 // 缺失即「传输层被掐断」，见上方 `stream_truncated` 注释。
@@ -1984,25 +2057,25 @@ impl NodeExecutorTrait for AgentExecutor {
                     compact_messages
                 };
 
+                // VERDICT 兜底重试用主模型的参数快照（同 provider 同 model），
+                // 不再回读模板变量 —— 否则「重试那一次」的下发值与首试不同，
+                // 输出长度会随机变化，VERDICT 缺失就无法复现。
+                let retry_sampling = resolve_sampling(
+                    an.config.temperature,
+                    an.config.max_tokens,
+                    model_overrides.as_ref(),
+                );
                 let retry_request = ChatRequest {
                     model: model.clone(),
                     messages: retry_messages,
                     stream: true,
-                    temperature: context
-                        .variables
-                        .get("agent_temperature")
-                        .and_then(|v| v.as_f64())
-                        .or_else(|| an.config.temperature.map(|t| t as f64)),
-                    max_tokens: context
-                        .variables
-                        .get("agent_max_tokens")
-                        .and_then(|v| v.as_u64().map(|u| u as u32))
-                        .or(an.config.max_tokens),
-                    top_p: None,
+                    temperature: retry_sampling.temperature,
+                    max_tokens: retry_sampling.max_tokens,
+                    top_p: retry_sampling.top_p,
                     tools: None, // 不传 tools，强制 LLM 只输出文本
                     thinking_budget: None,
-                    use_max_completion_tokens: None,
-                    thinking_param_style: None,
+                    use_max_completion_tokens: retry_sampling.use_max_completion_tokens,
+                    thinking_param_style: retry_sampling.thinking_param_style.clone(),
                     api_mode: None,
                     instructions: None,
                     conversation: None,
@@ -2040,6 +2113,8 @@ impl NodeExecutorTrait for AgentExecutor {
                                     if let Some(usage) = chunk.usage {
                                         total_usage.0 += usage.input_tokens;
                                         total_usage.1 += usage.output_tokens;
+                                        cache_usage.0 += usage.cache_read_input_tokens;
+                                        cache_usage.1 += usage.cache_miss_input_tokens.unwrap_or(0);
                                     }
                                     if chunk.done || chunk.is_final == Some(true) {
                                         retry_saw_done = true;
@@ -2382,28 +2457,30 @@ impl NodeExecutorTrait for AgentExecutor {
                                             axagent_harness::build_provider_request_context(
                                                 &fb_prov, &fb_key, fb_api_key,
                                             );
-                                        // 支持从模板变量覆盖 temperature/max_tokens
-                                        let fb_temp = context
-                                            .variables
-                                            .get("agent_temperature")
-                                            .and_then(|v| v.as_f64())
-                                            .or_else(|| an.config.temperature.map(|t| t as f64));
-                                        let fb_mt = context
-                                            .variables
-                                            .get("agent_max_tokens")
-                                            .and_then(|v| v.as_u64().map(|u| u as u32))
-                                            .or(an.config.max_tokens);
+                                        // H4.1 回退流的采样参数按**回退模型自己**那格算
+                                        // （节点配置 > 回退模型 override > 不下发），
+                                        // 不再回读模板变量，也不沿用主模型的值。
+                                        let fb_overrides =
+                                            model_param_overrides(&fb_prov, &fb_model).cloned();
+                                        let fb_sampling = resolve_sampling(
+                                            an.config.temperature,
+                                            an.config.max_tokens,
+                                            fb_overrides.as_ref(),
+                                        );
                                         let fb_request = ChatRequest {
                                             model: fb_model.clone(),
                                             messages: messages.clone(),
                                             stream: true,
-                                            temperature: fb_temp,
-                                            max_tokens: fb_mt,
-                                            top_p: None,
+                                            temperature: fb_sampling.temperature,
+                                            max_tokens: fb_sampling.max_tokens,
+                                            top_p: fb_sampling.top_p,
                                             tools: None,
                                             thinking_budget: None,
-                                            use_max_completion_tokens: None,
-                                            thinking_param_style: None,
+                                            use_max_completion_tokens: fb_sampling
+                                                .use_max_completion_tokens,
+                                            thinking_param_style: fb_sampling
+                                                .thinking_param_style
+                                                .clone(),
                                             api_mode: None,
                                             instructions: None,
                                             conversation: None,
@@ -2446,6 +2523,20 @@ impl NodeExecutorTrait for AgentExecutor {
                                                             {
                                                                 fb_content.push_str(content);
                                                             }
+                                                            // 2026-10-26：H4.1 回退流的 token 此前
+                                                            // **完全不计入 usage** —— 回退真跑起来时账上
+                                                            // 少一整次调用，是「本地 token 与账单对不上」
+                                                            // 的已知来源之一。
+                                                            if let Some(usage) = chunk.usage {
+                                                                total_usage.0 += usage.input_tokens;
+                                                                total_usage.1 +=
+                                                                    usage.output_tokens;
+                                                                cache_usage.0 +=
+                                                                    usage.cache_read_input_tokens;
+                                                                cache_usage.1 += usage
+                                                                    .cache_miss_input_tokens
+                                                                    .unwrap_or(0);
+                                                            }
                                                         },
                                                         Some(Err(_)) | None => break,
                                                     }
@@ -2458,6 +2549,7 @@ impl NodeExecutorTrait for AgentExecutor {
                                                         "H4.1: fallback_model 重试成功，替换 final_content",
                                                     );
                                                     final_content = fb_content;
+                                                    model_for_output = fb_model.clone();
                                                     fallback_remedied = true;
                                                 } else {
                                                     tracing::warn!(
@@ -2928,27 +3020,24 @@ impl NodeExecutorTrait for AgentExecutor {
                     let fb_req_ctx = axagent_harness::build_provider_request_context(
                         &fb_prov, &fb_key, fb_api_key,
                     );
-                    let fb_temp = context
-                        .variables
-                        .get("agent_temperature")
-                        .and_then(|v| v.as_f64())
-                        .or_else(|| an.config.temperature.map(|t| t as f64));
-                    let fb_mt = context
-                        .variables
-                        .get("agent_max_tokens")
-                        .and_then(|v| v.as_u64().map(|u| u as u32))
-                        .or(an.config.max_tokens);
+                    // H4.2 空内容保护的补救流：同样按回退模型自己那格算，见 H4.1 同位置注释。
+                    let fb_overrides = model_param_overrides(&fb_prov, &fb_model).cloned();
+                    let fb_sampling = resolve_sampling(
+                        an.config.temperature,
+                        an.config.max_tokens,
+                        fb_overrides.as_ref(),
+                    );
                     let fb_request = ChatRequest {
                         model: fb_model.clone(),
                         messages: messages.clone(),
                         stream: true,
-                        temperature: fb_temp,
-                        max_tokens: fb_mt,
-                        top_p: None,
+                        temperature: fb_sampling.temperature,
+                        max_tokens: fb_sampling.max_tokens,
+                        top_p: fb_sampling.top_p,
                         tools: None, // fallback 重试不带 tools，直接要求输出结果
                         thinking_budget: None,
-                        use_max_completion_tokens: None,
-                        thinking_param_style: None,
+                        use_max_completion_tokens: fb_sampling.use_max_completion_tokens,
+                        thinking_param_style: fb_sampling.thinking_param_style.clone(),
                         api_mode: None,
                         instructions: None,
                         conversation: None,
@@ -2984,6 +3073,14 @@ impl NodeExecutorTrait for AgentExecutor {
                                         if let Some(ref content) = chunk.content {
                                             fb_content.push_str(content);
                                         }
+                                        // 2026-10-26：H4.2 回退流同样补记 usage / 缓存分档。
+                                        if let Some(usage) = chunk.usage {
+                                            total_usage.0 += usage.input_tokens;
+                                            total_usage.1 += usage.output_tokens;
+                                            cache_usage.0 += usage.cache_read_input_tokens;
+                                            cache_usage.1 +=
+                                                usage.cache_miss_input_tokens.unwrap_or(0);
+                                        }
                                     },
                                     Some(Err(_)) | None => break,
                                 }
@@ -2996,6 +3093,7 @@ impl NodeExecutorTrait for AgentExecutor {
                                     content_len = fb_trimmed.len(),
                                     "通用空内容保护: fallback_model 重试成功"
                                 );
+                                model_for_output = fb_model.clone();
                                 fallback_remedied = true;
 
                                 // fallback 返回的内容可能也需要 VERDICT 重构
@@ -3086,6 +3184,11 @@ impl NodeExecutorTrait for AgentExecutor {
                 "role": role_desc, "model": model_for_output,
                 "content": final_content, "thinking": final_thinking,
                 "usage": { "input_tokens": total_usage.0, "output_tokens": total_usage.1 },
+                // 2026-10-26：上下文缓存分档。命中与未命中单价差 50 倍（deepseek-flash
+                // 空闲档 0.02 vs 1 元/M），不落这两格就无法回答「缓存到底生效没有」。
+                // 两格都为 0 且 input_tokens > 0 ⇒ 该 provider 不返回缓存统计（如 Agnes），
+                // 与「返回了但零命中」需区分：后者命中率为 0，前者是拿不到。
+                "cache": { "hit_tokens": cache_usage.0, "miss_tokens": cache_usage.1 },
                 "tool_calls_made": tool_calls_made,
                 "prefetchedTools": prefetched_tools,
                 "promptStats": if emit_prompt_stats {
@@ -3671,15 +3774,21 @@ impl AgentExecutor {
         node_fallback: Option<&str>,
         primary_provider_id: &str,
         primary_model: &str,
+        node_id: &str,
         session_model: Option<&str>,
         session_provider_id: Option<&str>,
         profile_suggested: Option<&str>,
         messages: &[ChatMessage],
-        temperature: Option<f64>,
-        max_tokens: Option<u32>,
+        // 传**节点自身配置**而不是主通路的生效值：回退模型的采样参数要按回退模型自己算。
+        // 拿主模型的 `maxTokens` 去发回退模型，与本轮要修的串道是同一类。
+        node_temperature: Option<f32>,
+        node_max_tokens: Option<u32>,
         // v187：结构化约束随调用方传入 —— 本函数是「主通路失败/静默无输出」的兜底，
         //   恰恰是最需要约束的那一次调用，不能在这里丢掉。
         response_format: Option<axagent_harness::types::ResponseFormat>,
+        // 主通路的失败原文（None = 主通路不是传输层报错，如 chunk 超时）。
+        // 用于判断「同 provider 回退」是否有意义：账号级限流下换模型无效。
+        primary_err_detail: Option<&str>,
     ) -> Option<(
         Pin<
             Box<
@@ -3701,19 +3810,37 @@ impl AgentExecutor {
             )
             .await
             .ok()?;
+        // 同 provider 回退闸：账号级限流（429/RPM 配额）下，换模型扛不住 ——
+        // 配额是账号属性。此时发回退请求只会再吃一次配额、且必然同样 429，
+        // 白白让节点多耗一轮。跨 provider 的回退不受此限（那才是 429 的正解）。
+        if fb_prov.id == primary_provider_id
+            && primary_err_detail.is_some_and(is_provider_rate_limited)
+        {
+            tracing::warn!(
+                node_id = %node_id,
+                primary_provider = %primary_provider_id,
+                primary_model = %primary_model,
+                fallback_model = %fb_model,
+                "回退模型与主模型同 provider，主通路为账号级限流，换模型无效，放弃回退"
+            );
+            return None;
+        }
+        let fb_overrides = model_param_overrides(&fb_prov, &fb_model).cloned();
+        let fb_sampling =
+            resolve_sampling(node_temperature, node_max_tokens, fb_overrides.as_ref());
         let fb_req_ctx =
             axagent_harness::build_provider_request_context(&fb_prov, &fb_key, fb_api_key);
         let fb_request = ChatRequest {
             model: fb_model.clone(),
             messages: messages.to_vec(),
             stream: true,
-            temperature,
-            max_tokens,
-            top_p: None,
+            temperature: fb_sampling.temperature,
+            max_tokens: fb_sampling.max_tokens,
+            top_p: fb_sampling.top_p,
             tools: None, // fallback 不带 tools，直接要求输出结果
             thinking_budget: None,
-            use_max_completion_tokens: None,
-            thinking_param_style: None,
+            use_max_completion_tokens: fb_sampling.use_max_completion_tokens,
+            thinking_param_style: fb_sampling.thinking_param_style.clone(),
             api_mode: None,
             instructions: None,
             conversation: None,
@@ -3740,6 +3867,48 @@ impl AgentExecutor {
 
 // ── 自由函数 ──
 
+/// 工作流 Agent 节点一次 LLM 调用的生效采样参数。
+///
+/// 优先级与聊天链逐字一致（`commands/agent/mod.rs`：请求选项 → 模型覆盖 → 默认），
+/// 只是「请求选项」在工作流这一侧对应**节点配置**：
+///
+/// 1. 节点配置（`an.config.*`，本仓现有 Agent 节点全部留空，见 v181 注释）；
+/// 2. 模型层「供应商-模型」参数（`param_overrides`，设置页那一格）；
+/// 3. `None` = 不下发该字段，由供应商按模型自身默认处理。
+///
+/// 为什么单独抽成函数：它原先是四处 `context.variables.get("agent_temperature" /
+/// "agent_max_tokens")` 的复制粘贴（主通路、VERDICT 兜底、H4.1、H4.2），
+/// 是模型层之外自建的通道。现网代价（2026-10-26 实证）：用户已在模型层把
+/// agnes-3.0-flash 的 `maxTokens` 设成 124672，工作流仍按模板变量的 4096 下发，
+/// 10 个决策节点的输出被截断在 4096 且 `streamTruncated=false`、界面报 completed。
+/// 抽出来还让「第 3 档不下发」这一条能被单测钉住 —— 内联在四处里就钉不住。
+#[derive(Debug, Clone, PartialEq)]
+struct EffectiveSampling {
+    temperature: Option<f64>,
+    max_tokens: Option<u32>,
+    top_p: Option<f64>,
+    use_max_completion_tokens: Option<bool>,
+    thinking_param_style: Option<String>,
+}
+
+fn resolve_sampling(
+    node_temperature: Option<f32>,
+    node_max_tokens: Option<u32>,
+    overrides: Option<&ModelParamOverrides>,
+) -> EffectiveSampling {
+    EffectiveSampling {
+        temperature: node_temperature
+            .map(|t| t as f64)
+            .or_else(|| overrides.and_then(|p| p.temperature.map(|t| t as f64))),
+        max_tokens: node_max_tokens.or_else(|| overrides.and_then(|p| p.max_tokens)),
+        top_p: overrides.and_then(|p| p.top_p.map(|t| t as f64)),
+        use_max_completion_tokens: overrides
+            .and_then(|p| p.use_max_completion_tokens)
+            .filter(|b| *b),
+        thinking_param_style: overrides.and_then(|p| p.thinking_param_style.clone()),
+    }
+}
+
 /// 解析角色描述：从 AgentProfile 获取，无 Profile 时默认 "executor"
 ///
 /// 修复问题 11：删除未使用的 `_config` 参数（原为预留扩展点但从未实现）。
@@ -3764,6 +3933,22 @@ fn resolve_role(profile: Option<&axagent_harness::types::AgentProfile>) -> Strin
 fn is_gateway_header_timeout(detail: &str) -> bool {
     detail.contains("response headers not received within")
         || detail.contains("response headers timeout")
+}
+
+/// 判断上游错误是否为「provider 级限流」（平台/账号 RPM 配额耗尽）。
+///
+/// 命中该类错误时，**同一 provider 的另一个模型扛不住**：配额是账号级的，
+/// 换模型照样 429（上游原文即「请登录 platform 进行实名认证以获取更高 rpm」
+/// ——这是账号属性，不是模型属性）。此时只有换 provider 才有意义，
+/// 故 `try_fallback_stream` 据此闸掉「同 provider 回退」。
+fn is_provider_rate_limited(detail: &str) -> bool {
+    let d = detail.to_ascii_lowercase();
+    d.contains("429")
+        || d.contains("rate limit")
+        || d.contains("too many requests")
+        || d.contains("quota")
+        || d.contains("请求过于频繁")
+        || d.contains("实名认证")
 }
 
 /// H4.2: 解析生效的回退模型（两处 fallback 重试点共用）。
@@ -3980,6 +4165,87 @@ fn format_debate_state(name: &str, value: &Value) -> String {
         out = format!("{truncated}…[已压缩]");
     }
     out
+}
+
+/// `input_mapping` 源取不到值时的三种成因（只决定日志级别与文案，不改控制流）。
+#[derive(Debug, PartialEq, Eq)]
+enum InputMappingGap {
+    /// 源节点在 variables 里，但路径下钻失败 ⇒ 字段名/形态写错（配置缺陷）
+    ConfigPath,
+    /// 源节点明确返回「输入缺席」（`__absent`）⇒ 上游断链的如实传递
+    UpstreamAbsent,
+    /// 源节点 id 尚不在 variables ⇒ 上游尚未产出（时序）
+    NotProduced,
+}
+
+/// 判定 `input_mapping` 取不到值的成因。根查找口径与 `resolve_var_path` 一致
+/// （`source_key` 首段 = 节点 id 或模板变量名）—— 两者若分叉，日志会开始撒谎。
+fn input_mapping_gap(
+    variables: &std::collections::HashMap<String, Value>,
+    source_key: &str,
+) -> InputMappingGap {
+    let root = source_key.split('.').next().unwrap_or("");
+    match variables.get(root) {
+        None => InputMappingGap::NotProduced,
+        Some(v) if v.get("__absent").is_some() => InputMappingGap::UpstreamAbsent,
+        Some(_) => InputMappingGap::ConfigPath,
+    }
+}
+
+/// 判定「应短路为输入缺席」：声明了 `context_sources`、**一个都取不到**、且**无工具可调**。
+///
+/// 与 `input_mapping 取不到值` 的两分口径同源：只有「全部源都不存在」才算输入缺席；
+/// 部分缺失仍走原有「注入缺失提示 + 继续分析」路径（既有裁定，不在此扩大）。
+/// `has_callable_tools=true`（分析师这类能自己补数的节点）时一律返回 `None` ——
+/// 上游为空不是它们的死路，短路会砍掉「主动调工具取数」这条补偿路径。
+fn absent_context_missing<'a>(
+    declared: &'a [String],
+    variables: &std::collections::HashMap<String, Value>,
+    has_callable_tools: bool,
+) -> Option<Vec<&'a str>> {
+    if has_callable_tools || declared.is_empty() {
+        return None;
+    }
+    let mut missing = Vec::with_capacity(declared.len());
+    for source in declared {
+        if variables.contains_key(source) {
+            return None;
+        }
+        missing.push(source.as_str());
+    }
+    Some(missing)
+}
+
+/// 输入缺席时写进 `results` 的输出形状。
+///
+/// 必须显式标记而非空对象：下游 `input_mapping`（如 `…content.consensus_score`）
+/// 取不到值时走既有缺席分支，而 `content` 段整段缺席与「LLM 无输出」无法区分。
+fn absent_context_output(node_id: &str, missing: &[&str]) -> Value {
+    serde_json::json!({
+        "content": "",
+        "__absent": true,
+        "absentReason": "all_context_sources_missing",
+        "missing": missing,
+        "node_id": node_id,
+    })
+}
+
+/// 把「缺失的上游源」拼上引擎注入的终态归因（`src=状态:skip=...`），只取被点名的源。
+///
+/// 归因表来自 `ExecutionState::context_source_gaps`（引擎按同一次执行的状态快照填）；
+/// 没有条目 ⇒ `Unknown`，说明该源连运行时状态都没有（不是「跑过但失败」）。
+fn format_context_source_gaps(
+    gaps: &std::collections::HashMap<String, String>,
+    missing: &[&str],
+) -> String {
+    missing
+        .iter()
+        .map(|src| match gaps.get(*src) {
+            Some(g) => format!("{src}={g}"),
+            None => format!("{src}=Unknown"),
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 /// `debate_context_mode=state` 时：只压缩**更早轮次**（`source_round + 1 < current_round`）；
@@ -6396,13 +6662,15 @@ mod repair_malformed_json_output_tests {
 #[cfg(test)]
 mod context_optimization_tests {
     use super::{
-        build_prefetch_args, context_sources_user_prompt_parts, format_debate_context_source,
-        format_debate_state, include_raw_context_sources_in_user_prompt, json_response_format,
+        InputMappingGap, absent_context_missing, absent_context_output, build_prefetch_args,
+        context_sources_user_prompt_parts, format_context_source_gaps,
+        format_debate_context_source, format_debate_state,
+        include_raw_context_sources_in_user_prompt, input_mapping_gap, json_response_format,
         should_prefetch_tools, split_prefetch_targets, tool_call_budget_exhausted,
         truncate_tool_result,
     };
     use axagent_harness::types::{ChatTool, ChatToolFunction};
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
@@ -6645,5 +6913,184 @@ mod context_optimization_tests {
         let summary = format_debate_state("bull-r1--mid", &value);
         assert!(summary.contains("未识别到明确共识"));
         assert!(summary.contains("立场: ?"));
+    }
+
+    // ── 2026-10-26：context_sources 全缺 ⇒ 输入缺席短路（不调用 LLM）──
+    #[test]
+    fn absent_context_detects_total_absence_without_tools() {
+        let declared: Vec<String> =
+            vec!["bull-r1--short", "bear-r1--short", "bull-r2--short", "bear-r2--short"]
+                .into_iter()
+                .map(str::to_string)
+                .collect();
+        let mut vars = std::collections::HashMap::new();
+        let missing = absent_context_missing(&declared, &vars, false).expect("全缺必须判定为缺席");
+        assert_eq!(missing.len(), 4);
+        assert!(missing.contains(&"bull-r1--short"));
+
+        // 负控 1：任一源存在（哪怕值是 null）⇒ 不判缺席（继续走部分缺失提示路径）。
+        vars.insert("bear-r2--short".to_string(), Value::Null);
+        assert!(absent_context_missing(&declared, &vars, false).is_none());
+
+        // 负控 2：空声明不是缺席（无源可缺）。
+        assert!(absent_context_missing(&[], &vars, false).is_none());
+
+        // 负控 3：有工具可调的节点（分析师）不短路 —— 它们能自己补数。
+        let empty = std::collections::HashMap::new();
+        assert!(absent_context_missing(&declared, &empty, true).is_none());
+    }
+
+    #[test]
+    fn absent_output_is_distinguishable_from_empty_llm_output() {
+        let out = absent_context_output("debate-convergence--short", &["bull-r1--short"]);
+        assert_eq!(out["__absent"], Value::Bool(true));
+        assert_eq!(out["absentReason"], "all_context_sources_missing");
+        assert_eq!(out["node_id"], "debate-convergence--short");
+        assert_eq!(out["content"], Value::String(String::new()));
+        assert_eq!(out["missing"][0], "bull-r1--short");
+        // 负控：正常 LLM 输出没有该标记，二者在数据层可区分。
+        let normal = json!({"content": "分析内容", "role": "debater"});
+        assert!(normal.get("__absent").is_none());
+    }
+
+    #[test]
+    fn context_source_gap_line_carries_the_terminal_state() {
+        let mut gaps = std::collections::HashMap::new();
+        gaps.insert("bull-r1--short".to_string(), "Skipped:skip=upstream_failed".to_string());
+        gaps.insert("unrelated--node".to_string(), "Completed".to_string());
+        let line = format_context_source_gaps(&gaps, &["bull-r1--short", "bear-r2--short"]);
+        // 只拼被点名的源，且带上引擎给的终态；无归因条目的源显式写 Unknown。
+        assert_eq!(line, "bull-r1--short=Skipped:skip=upstream_failed | bear-r2--short=Unknown");
+        assert!(!line.contains("unrelated--node"), "把无关节点带进了缺席日志");
+    }
+
+    #[test]
+    fn input_mapping_gap_separates_config_error_from_upstream_absence() {
+        let mut vars = std::collections::HashMap::new();
+        // 源节点在、但声明路径下钻失败 ⇒ 字段名/形态写错。
+        vars.insert("a-market--short".to_string(), json!({"content": {"verdict": {"score": 80}}}));
+        assert_eq!(
+            input_mapping_gap(&vars, "a-market--short.content.score"),
+            InputMappingGap::ConfigPath
+        );
+
+        // 上游按输入缺席短路 ⇒ 不归因成配置缺陷。
+        vars.insert(
+            "debate-convergence--short".to_string(),
+            absent_context_output("debate-convergence--short", &["bull-r1--short"]),
+        );
+        assert_eq!(
+            input_mapping_gap(&vars, "debate-convergence--short.content.consensus_score"),
+            InputMappingGap::UpstreamAbsent
+        );
+
+        // 源节点还没产出 ⇒ 时序。
+        assert_eq!(
+            input_mapping_gap(&vars, "bear-r2--short.content.verdict"),
+            InputMappingGap::NotProduced
+        );
+    }
+}
+
+/// 2026-10-26：账号级限流（429/RPM 配额）下「同 provider 回退无效」的判据。
+///
+/// 现网实证（2026-10-26 18:47 跑批）：Agnes 账号未实名认证 ⇒ 平台 RPM 配额极低，
+/// 分析师节点 100% 命中 429；系统级回退模型当时也是 Agnes（同一账号）⇒ 回退请求
+/// 同样 429，白白再吃一次配额，随后引擎进入 3/6/12/24/48s 指数退避阶梯，
+/// 而该退避 sleep 位于引擎唯一的调度循环内 ⇒ 每次失败都阻塞全局派发，
+/// 12 个分析师节点全失败 ⇒ 墙钟 12 分钟只跑出一半。
+#[cfg(test)]
+mod rate_limit_fallback_tests {
+    use super::is_provider_rate_limited;
+
+    #[test]
+    fn account_level_quota_errors_are_recognized() {
+        // 现网原文：Agnes 账号未实名认证的 429。
+        let agnes = r#"LLM 流式调用失败: Execution error: OpenAI API error 429: {"error":{"code":"","message":"请登录platform进行实名认证以获取更高rpm","type":"AgnesAI_error"}}"#;
+        assert!(is_provider_rate_limited(agnes));
+
+        assert!(is_provider_rate_limited("Rate limit exceeded: too many requests"));
+        assert!(is_provider_rate_limited("HTTP 429 Too Many Requests"));
+        assert!(is_provider_rate_limited("insufficient_quota for this account"));
+    }
+
+    #[test]
+    fn transport_and_model_level_failures_are_not_account_quota() {
+        // 这些失败换模型可能有用（同 provider 换模型是合法回退路径）。
+        assert!(!is_provider_rate_limited(
+            "OpenAI API error 504: response headers not received within 30s"
+        ));
+        assert!(!is_provider_rate_limited("Agent LLM stream chunk timeout after 120s"));
+        assert!(!is_provider_rate_limited("connection reset by peer"));
+        assert!(!is_provider_rate_limited("LLM 流式调用失败: context length exceeded"));
+    }
+}
+
+/// 2026-10-26：工作流采样参数唯一权威 = 模型层参数那一格。
+///
+/// 撤掉模板变量 `agent_temperature` / `agent_max_tokens` 后，优先级三档必须逐档钉住：
+/// 少一档就是「面板调了不生效」或「拿不到时谎称 0」。
+#[cfg(test)]
+mod sampling_source_tests {
+    use super::{EffectiveSampling, resolve_sampling};
+    use axagent_harness::types::provider_model::ModelParamOverrides;
+
+    fn overrides() -> ModelParamOverrides {
+        ModelParamOverrides {
+            temperature: Some(0.7),
+            max_tokens: Some(124672),
+            top_p: Some(1.0),
+            use_max_completion_tokens: Some(true),
+            thinking_param_style: Some("deepseek".to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn node_config_wins_over_model_overrides() {
+        let s = resolve_sampling(Some(0.2), Some(1024), Some(&overrides()));
+        // 模型层那一格是 f32（`ModelParamOverrides::temperature`），节点配置也是 f32，
+        // 而 `ChatRequest::temperature` 是 f64 ⇒ 取值必须走 `as f64` 加宽，与聊天链
+        // （`commands/agent/mod.rs` 同一写法）逐位一致。**不得改成容差比较**：
+        // 断言真实加宽值正是为了钉住「两条链下发的数完全相同」这件事。
+        assert_eq!(s.temperature, Some(0.2f32 as f64));
+        assert_eq!(s.max_tokens, Some(1024));
+        // top_p / thinking 类没有节点级槽位，只能来自模型层。
+        assert_eq!(s.top_p, Some(1.0f32 as f64));
+        assert_eq!(s.thinking_param_style.as_deref(), Some("deepseek"));
+    }
+
+    #[test]
+    fn model_overrides_apply_when_node_leaves_it_blank() {
+        // 现网形态：本仓 Agent 节点的采样参数按 v181 全部置空 ⇒ 生效值来自模型那一格。
+        let s = resolve_sampling(None, None, Some(&overrides()));
+        assert_eq!(s.temperature, Some(0.7f32 as f64));
+        assert_eq!(s.max_tokens, Some(124672));
+    }
+
+    #[test]
+    fn nothing_configured_means_field_is_not_sent_not_zero() {
+        // 缺席 ≠ 0：`max_tokens: Some(0)` 会让供应商直接报错或产出空文本，
+        // 与「这一格没设」是两件事，必须区分。
+        let s = resolve_sampling(None, None, None);
+        assert_eq!(
+            s,
+            EffectiveSampling {
+                temperature: None,
+                max_tokens: None,
+                top_p: None,
+                use_max_completion_tokens: None,
+                thinking_param_style: None,
+            }
+        );
+    }
+
+    #[test]
+    fn false_use_max_completion_tokens_is_collapsed_to_absent() {
+        // `Some(false)` 与「没这回事」对适配器等价；保留 Some(false) 会让下游
+        // 把它当成一次显式声明，与聊天链的 `or_else` 语义分叉。
+        let mut o = overrides();
+        o.use_max_completion_tokens = Some(false);
+        assert_eq!(resolve_sampling(None, None, Some(&o)).use_max_completion_tokens, None);
     }
 }

@@ -731,7 +731,25 @@ async fn run_serenity_backtest_pass(
     Ok((rows, report, skipped))
 }
 
-/// 批量写 decision_validations（按 (pick_id, t_plus_n) 幂等）
+/// 批量写 decision_validations（按 `(pick_id, t_plus_n, generated_at)` 幂等）
+///
+/// ## 幂等键为什么必须含 `generated_at`（2026-10-26 修正）
+///
+/// 原键是 `(pick_id, t_plus_n)`。**过粗**：同一只票、同一窗口、但**不同决策日**的样本
+/// 会被判成「已存在」而跳过 ⇒ 不同决策日的独立样本被吞掉。
+///
+/// 实证（2026-10-26 生产库）：`decision_validations` 里同 `(pick_id, t_plus_n)`
+/// 存在 402 对**决策日不同**的样本（其中 195 对收益完全相同、207 对不同）——
+/// 前者是纯重复，后者是**两个不同决策日的真实样本**，被粗键混为一谈。
+///
+/// 反向的坑也存在：`reco_picks` 的同业务键覆盖会换掉 `pick_id`
+/// （历史上是删旧行插新行 ⇒ 旧 id 消失 ⇒ 引用它的验证行全部悬空，
+/// 实测 448 行 / 20.2%，且孤儿行读数系统性偏乐观）。
+/// 修法在 `dao::repo::reco_pool::insert_picks`（同键覆盖**保留 id**），
+/// 本函数只需保证**同一决策日**不重复写。
+///
+/// ⇒ 键 = `(pick_id, t_plus_n, generated_at)`：
+/// `pick_id` 定位「哪条荐股」·`t_plus_n` 定位「哪个窗口」·`generated_at` 定位「哪次决策」。
 async fn write_decision_validations(
     db: &sea_orm::DatabaseConnection,
     validations: &[PickValidation],
@@ -740,10 +758,13 @@ async fn write_decision_validations(
     let mut count = 0;
 
     for v in validations {
-        // 幂等：先查 (pick_id, t_plus_n) 是否已存在
+        // 幂等：先查 (pick_id, t_plus_n, generated_at) 是否已存在
+        // ⚠ `generated_at` 是**决策日**（live = 批次键；replay = as_of 决策日），
+        //   它才是「哪一次决策」的唯一标识 ⇒ 缺它会把不同决策日的样本判成重复。
         let existing = decision_validations::Entity::find()
             .filter(decision_validations::Column::PickId.eq(&v.pick_id))
             .filter(decision_validations::Column::TPlusN.eq(v.t_plus_n))
+            .filter(decision_validations::Column::GeneratedAt.eq(&v.generated_at))
             .one(db)
             .await
             .map_err(|e| {

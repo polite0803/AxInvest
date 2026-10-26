@@ -129,6 +129,35 @@ pub async fn send_desktop_notification(
     title: String,
     body: String,
 ) -> Result<DesktopNotificationResult, String> {
+    send_desktop_notification_opt(Some(app), title, body).await
+}
+
+/// 桌面通知的**内部可复用版**（`app` 可选）。
+///
+/// ⚠ **C 方案（2026-10-26）**：无头服务端（`server_main`）没有 `AppHandle`
+/// ⇒ 调度器在无头路径下跑荐股任务时**不能推桌面通知**。
+/// 本函数是那个场景的落点：`None` ⇒ **降级为日志**（`method = "log"`），
+/// **不静默丢弃**（结果已落库，用户在应用里能看到荐股结果）。
+///
+/// ⚠ 为什么**不改** `send_desktop_notification` 的签名：它是 `#[tauri::command]`
+/// （前端可调）⇒ 改签名会破坏前端契约（`browserMock.ts` 里也有对应分支）。
+/// ⇒ 命令层保留原样，内部逻辑下沉到本函数。
+pub async fn send_desktop_notification_opt(
+    app: Option<tauri::AppHandle>,
+    title: String,
+    body: String,
+) -> Result<DesktopNotificationResult, String> {
+    let Some(app) = app else {
+        // 无头路径：没有桌面通知通道。**记一条 info**（不是 warn —— 这是预期形态，
+        // 不是故障），并如实回报 `sent=false / method="log"`。
+        tracing::info!(
+            title = %title,
+            body = %body,
+            "Desktop notification skipped (no AppHandle: headless server path) — result is persisted"
+        );
+        return Ok(DesktopNotificationResult { sent: false, method: "log".to_string() });
+    };
+
     // 偏好总闸。内部复用方（init/services.rs 定时荐股、commands/demand_discovery.rs
     // 需求发现）都走这一个入口，故只需在此处判一次。读设置失败时按默认值放行，
     // 与 commands/backup.rs、commands/webdav.rs 的 gated emit 口径一致。

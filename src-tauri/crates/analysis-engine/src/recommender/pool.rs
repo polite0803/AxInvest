@@ -121,7 +121,16 @@ pub async fn build_seed_pool(client: &AStockClient) -> (Vec<SeedItem>, SeedPoolO
                 }
             }
             origin.industry = taken;
-            !industries.is_empty()
+            // ⚠ 判据必须是「**实际取到的股票数 > 0**」，不能是「行业列表非空」
+            //   （2026-10-26 实测）：历史快照里 `leader_code` **全为 null**
+            //   （`astock_daily_snapshot` 的 `get_industry_ranking`：
+            //    06-10/06-11/09-04/09-07/09-28 各 18~31 个行业，`leaderCode` **0 个非空**；
+            //    10-09 起才有 31/31 个非空）。
+            //   旧判据 `!industries.is_empty()` 在那种快照上为 true
+            //   ⇒ 「仅靠 FALLBACK_STOCKS 兜底」的告警**不触发**
+            //   ⇒ 池子实际 100% 是静态兜底名单，却看起来像「正常取到了行业榜」。
+            //   ⇒ 回放日因此「看似可回放」，实际建出的池与当时的候选池不同构。
+            taken > 0
         },
         Err(e) => {
             tracing::warn!("[seed_pool] get_industry_ranking 失败: {e}");

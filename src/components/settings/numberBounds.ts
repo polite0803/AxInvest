@@ -25,8 +25,9 @@
 import type { Variable } from "@/components/workflow/types";
 
 export function inferNumberBounds(v: Variable): { min: number; max: number; step: number } {
-  // 温度类参数需要 0.1 步进，用变量名判断更可靠
-  if (v.name === "agent_temperature") { return { min: 0, max: 2, step: 0.1 }; }
+  // 温度类参数的 0.1 步进特判已于 2026-10-26 随 `agent_temperature` 变量退役删除：
+  // 两个面板都不再渲染它，留着就是一段永不命中的分支。模型层温度设置在
+  // 「供应商-模型 → 参数」那一格，不走本函数。
 
   const raw = Number(v.value ?? 0);
   if (!Number.isFinite(raw)) { return { min: 0, max: 100, step: 1 }; }
@@ -38,8 +39,8 @@ export function inferNumberBounds(v: Variable): { min: number; max: number; step
     return { min: -span, max: span, step: span / 100 };
   }
 
-  // ② 默认值本身已超出 0~100（kline_limit=120、agent_timeout_secs=600、
-  //    agent_max_tokens=32768、budget_high_max=100000）。上限必须 ≥ 现值，否则滑杆一拖
+  // ② 默认值本身已超出 0~100（kline_limit=250、agent_timeout_secs=600、
+  //    budget_high_max=100000）。上限必须 ≥ 现值，否则滑杆一拖
   //    就把参数往下改 —— 比「调不动」更糟。step 取 1：32768 这类 2 的幂对齐值不在
   //    10/100 网格上。
   if (raw > 100) {

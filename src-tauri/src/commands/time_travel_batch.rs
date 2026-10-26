@@ -364,10 +364,56 @@ pub(crate) fn in_live_window() -> bool {
 /// 「阈值太高所以没选出来」挤进了同一句（AGENTS.md「结构性缺口不得在 UI 造成歧义」）。
 ///
 /// 现网实证：历史 5 次批次全取 2026-05-27，而热股榜快照最早只到 2026-09-30。
+///
+/// ## 判据：两源**都缺** ⇒ 拒绝；缺**一**源 ⇒ 放行但标注降级（2026-10-26 改）
+///
+/// 旧实现要求两源都有快照才放行 ⇒ 2026-05-27 / 06-10 / 06-11 / 08-18 / 09-04 / 09-07 /
+/// 09-09 这些日期**只有 `get_industry_ranking` 一源**（实测快照表），全部不可回放。
+///
+/// 而「缺一源」并不等于「池子空」：
+/// ① 缺的那源在 as-of 下**仍会走 vendor 的历史通道**（如同花顺热榜回溯），能取到就取，
+///    取不到返回**空榜**（`Ok(vec![])`，不是失败）；
+/// ② 建池是 `get_hot_stocks(30) ∪ get_industry_ranking 龙头(20) ∪ FALLBACK_STOCKS`，
+///    **FALLBACK 是静态大盘股列表**（茅台/五粮液/宁德时代…，与日期无关 ⇒ **无前视偏差**），
+///    所以少一源时池子仍有真实成分，不是空池。
+///
+/// 为什么必须放宽：**长档（T+90）的成熟判定只看「行情库里决策日之后有没有 90 根 K 线」，
+/// 不看今天**（`compute_market_snapshots` 取最近 500 根，`exit_idx = entry_idx + expected_days`）。
+/// 实测行情库有 6575 个交易日，2026-06-10 之后**恰好 90 根** ⇒ 回放 06-10 立刻能让
+/// long 档成熟并产出校准样本；09-07 之后恰好 28 根 ⇒ mid 档同理。
+/// 不放宽 ⇒ long/mid 档的校准样本只能等 wall-clock（long 需 T+90 ⇒ 2027-01），
+/// 而 `CALIBRATION_MIN_SAMPLES = 30` 的门槛又不允许降 ⇒ 长期档**永远校准不了**
+/// ⇒ 置信被永久封顶 ⇒ 顶层「买入」永远为 0（R-3h 死循环）。
+///
+/// ⚠ 两源**都**缺时仍拒绝：那时池子 100% 是 FALLBACK_STOCKS ⇒ 回放不再是「当时的候选池」，
+/// 而「按固定名单选股」——与系统真实行为不同构，混进来会污染校准样本。
+///
+/// ## ⚠⚠ 代价必须如实说明（2026-10-26 实测，不可当副作用略过）
+///
+/// 实测「快照里有没有**有效成分**」（`get_industry_ranking` 看 `leaderCode`、
+/// `get_hot_stocks` 看 `stockCode`）：
+///
+/// | 快照日 | 源 | 行数 | **有效成分** |
+/// |---|---|---:|---:|
+/// | 05-27 ~ 09-24（8 个日） | industry | 18~31 | **0** |
+/// | **09-28** | hot_stocks | 19 | **19** |
+/// | 09-30 起 | 两个源 | 20~100 | 全量 |
+///
+/// ⇒ **09-28 之前的快照虽存在，但一个股票成分都没有**（只有行业名 + 涨跌）。
+/// ⇒ 所以「放宽一源」**只**让这些日期**能跑**（回放不再被拒），
+/// **不等于**它们的池是「当时的候选池」——那些日期的池 **100% 是静态 FALLBACK_STOCKS**。
+///
+/// **这个取舍是可接受的，因为两件事被刻意分开**：
+/// · **档位成熟判定**（long/mid 能不能有 T+90/T+28 的成熟样本）⇒ **只看 K 线，与池成分无关**
+///   ⇒ 放宽**确实**解锁了 long/mid 的校准样本（这正是 R-3h 要的）；
+/// · **选股能力**（池里的票是否代表当时的候选）⇒ 那部分**仍然不成立**，
+///   所以这些日期的样本**不得**被当作「系统选股能力」的证据，只用于「档位动作 → 胜率」映射。
+///
+/// ⇒ 批次消息里的降级说明必须把这句话说清楚（见下方 `pool_degradation_note`）。
 async fn require_pool_snapshot_coverage(
     db: &DatabaseConnection,
     as_of: &chrono::NaiveDate,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     use axagent_analysis_engine::recommender::pool::POOL_SNAPSHOT_METHODS;
 
     let as_of_str = as_of.format("%Y-%m-%d").to_string();
@@ -380,36 +426,56 @@ async fn require_pool_snapshot_coverage(
     .await
     .map_err(|e| format!("读 astock_daily_snapshot 覆盖失败: {e}"))?;
     if missing.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
 
-    // 给出「最早能回放的那一天」，拒绝才具备可操作性
-    let earliest = axagent_dao::repo::astock_daily_snapshot::earliest_snapshot_date(
-        db,
-        POOL_SNAPSHOT_METHODS[0],
-    )
-    .await
-    .map_err(|e| format!("读最早快照日期失败: {e}"))?;
-    let hint = match earliest.as_deref() {
-        Some(d) => format!("本地热股榜快照最早只到 {d}，请把批次日期改到 {d} 或之后"),
-        None => "本地还没有任何热股榜快照（每日采集尚未跑过），当前无日期可回放".to_string(),
-    };
-    Err(format!(
-        "{as_of_str} 缺建池快照（{}）⇒ 该日候选池不可回放。热股榜/行业榜无历史通道，\
-         {hint}；这不是阈值问题，改阈值不会让候选变出来",
+    // 两源都缺 ⇒ 池子只能是静态 FALLBACK_STOCKS ⇒ 该日不是「当时的候选池」⇒ 拒绝。
+    if missing.len() >= POOL_SNAPSHOT_METHODS.len() {
+        // 给出「最早能回放的那一天」，拒绝才具备可操作性
+        let earliest = axagent_dao::repo::astock_daily_snapshot::earliest_snapshot_date(
+            db,
+            POOL_SNAPSHOT_METHODS[0],
+        )
+        .await
+        .map_err(|e| format!("读最早快照日期失败: {e}"))?;
+        let hint = match earliest.as_deref() {
+            Some(d) => format!("本地热股榜快照最早只到 {d}，请把批次日期改到 {d} 或之后"),
+            None => "本地还没有任何热股榜快照（每日采集尚未跑过），当前无日期可回放".to_string(),
+        };
+        return Err(format!(
+            "{as_of_str} 缺**全部**建池快照（{}）⇒ 该日候选池只能由静态兜底名单构成，\
+             不是当时的候选池，不予回放。热股榜/行业榜无历史通道，{hint}；\
+             这不是阈值问题，改阈值不会让候选变出来",
+            missing.join(", ")
+        ));
+    }
+
+    // 缺一源 ⇒ 放行，但把降级事实**说清楚**（不静默）：该源会走 vendor 历史通道，
+    // 取不到就是空榜；池子由另一源 + 静态兜底名单组成。
+    //
+    // ⚠ 措辞必须写明「**该日样本不得当作选股能力的证据**」——
+    //   实测 09-28 之前的 industry 快照 `leaderCode` **全为 null**（只有行业名+涨跌）
+    //   ⇒ 那些日期的「另一源」也取不到股票 ⇒ 池 100% 是静态兜底名单。
+    //   放宽买到的只是「**能跑**」，不是「池是当时的候选池」。
+    Ok(Some(format!(
+        "{as_of_str} 缺建池快照之一（{}）⇒ 该源在回放中为空榜（会先尝试 vendor 历史通道），\
+         候选池由另一源 + 静态兜底名单构成；⚠ 该日样本只用于「档位动作→胜率」映射，\
+         **不得**当作选股能力的证据（历史快照的成分字段可能为空）",
         missing.join(", ")
-    ))
+    )))
 }
 
 // ── Tauri 命令 ────────────────────────────────────────────────────────────────
 
-/// 时间旅行批次定时任务的 `task_type` 标识。
+/// 时间旅行批次定时任务的 `task_type` 标识 —— 权威值在 `commands::constants`
+/// （`scheduled_task` 的「立即执行」白名单、`services.rs` 的 executor 分支与
+/// 播种三处共读一份，留在这里会逼出横向互调，撞分层护栏规则 2）。
 ///
 /// 与 `DECISION_BACKTEST_TASK_TYPE` 同形：调度层按 task_type 分发到实现，
 /// **cron 不调命令**（命令要 `State<'_, AppState>`，cron 拿不到）。
-pub const TIME_TRAVEL_BATCH_TASK_TYPE: &str = "time-travel-batch";
+pub use crate::commands::constants::TIME_TRAVEL_BATCH_TASK_TYPE;
 
-/// 列出「今天可回放」的 as_of 日：建池双源快照齐全 **且** 至少已过 `min_holding_days` 个交易日。
+/// 列出「今天可回放」的 as_of 日：建池快照**至少一源**齐全 **且** 至少已过 `min_holding_days` 个交易日。
 ///
 /// ## 为什么要「至少过 N 个交易日」而不是「快照齐全即可」
 ///
@@ -428,22 +494,47 @@ pub async fn list_replayable_as_of_dates(
     use axagent_analysis_engine::recommender::pool::POOL_SNAPSHOT_METHODS;
 
     let today = beijing_today();
-    let covered = axagent_dao::repo::astock_daily_snapshot::list_snapshot_dates_with_all_methods(
-        db,
-        &POOL_SNAPSHOT_METHODS,
-    )
-    .await
-    .map_err(|e| {
-        ErrorResponse::err_with_detail(ec::QUERY_FAILED, format!("读快照覆盖失败: {e}"))
-    })?;
+    // ⚠ 用「**至少一**源有快照」而不是「全部源」（2026-10-26，R-3h）。
+    // 实测 `astock_daily_snapshot`：05-27 / 06-10 / 06-11 / 08-18 / 09-04 / 09-07 / 09-09
+    // 这些日期**只有 `get_industry_ranking` 一源**（热股榜快照最早到 09-28），
+    // 用「全部源」判会把它们全部排除 ⇒ 只能从 09-28 起回放。
+    //
+    // 而档位成熟判定只看「行情库里决策日之后有没有 N 根 K 线」，**不看今天**
+    // ⇒ 回放 06-10 立刻能让 long 档（T+90）成熟、09-07 能让 mid 档（T+28）成熟
+    // ⇒ long/mid 的校准样本不必等 wall-clock（详见 `list_snapshot_dates_with_any_method` 文档）。
+    //
+    // ⚠ 零源日（两源都没快照）**仍排除**：那时池子 100% 是静态 FALLBACK_STOCKS，
+    //   不是「当时的候选池」⇒ 回放与系统真实行为不同构，混进来会污染校准样本。
+    let covered_any =
+        axagent_dao::repo::astock_daily_snapshot::list_snapshot_dates_with_any_method(
+            db,
+            &POOL_SNAPSHOT_METHODS,
+        )
+        .await
+        .map_err(|e| {
+            ErrorResponse::err_with_detail(ec::QUERY_FAILED, format!("读快照覆盖失败: {e}"))
+        })?;
 
     let mut out = Vec::new();
-    for (d, _srcs) in covered {
+    for (d, _srcs) in covered_any {
         let Ok(nd) = chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d") else {
             tracing::warn!("[time-travel-batch] 快照日期 `{d}` 不是 ISO 日期，跳过");
             continue;
         };
         if !calendar::is_trading_day(&nd) {
+            continue;
+        }
+        // 零源日排除（两源都没快照 ⇒ 池子只能是静态兜底名单）
+        let missing = axagent_dao::repo::astock_daily_snapshot::missing_snapshot_sources(
+            db,
+            &d,
+            &POOL_SNAPSHOT_METHODS,
+        )
+        .await
+        .map_err(|e| {
+            ErrorResponse::err_with_detail(ec::QUERY_FAILED, format!("读快照覆盖失败: {e}"))
+        })?;
+        if missing.len() >= POOL_SNAPSHOT_METHODS.len() {
             continue;
         }
         let ago = calendar::trading_days_between(nd, today);
@@ -534,9 +625,14 @@ pub async fn run_time_travel_batch_inner(
 
     // 建池快照覆盖校验（先于 live 窗判断与抢锁）：不可回放的日期当场拒绝并给出可用日期，
     // 不能放批次进去跑完只留一句含糊的「均无候选（可能当日数据缺失或阈值过高）」。
-    require_pool_snapshot_coverage(db, &as_of)
+    // ⚠ 返回 `Option<String>` = 降级说明（缺一源时非空）⇒ 必须**往下传**并落进批次消息，
+    //   否则「池子少了一个真实榜源」这件事在界面上完全不可见（结构性缺口不得静默）。
+    let pool_degradation_note = require_pool_snapshot_coverage(db, &as_of)
         .await
         .map_err(|e| ErrorResponse::err_with_detail(ec::ASOF_INVALID, e))?;
+    if let Some(note) = pool_degradation_note.as_deref() {
+        tracing::warn!("[time-travel-batch] {note}");
+    }
 
     // 3. live 时间窗拒绝（先于抢锁，给出可操作的拒绝原因）
     if in_live_window() {
@@ -579,7 +675,6 @@ pub async fn run_time_travel_batch_inner(
     let analyze = request.analyze;
     let min_confidence = request.min_confidence;
     let top_n = request.top_n;
-
     // ⚠ 不能用 tauri::async_runtime::spawn：Tauri 全局 runtime 的 worker 栈只有默认 2MB，
     // debug 构建下本批次 future（荐股扫描 → serenity 回放 → 逐只工作流分析 → 多路
     // agent/LLM 流）轮询到深层时直接栈溢出（STATUS_ACCESS_VIOLATION，
@@ -607,6 +702,7 @@ pub async fn run_time_travel_batch_inner(
                 master_key,
                 trajectory_storage,
                 permit,
+                pool_degradation_note,
             )
             .await;
             tracing::info!("[time-travel-batch] 批次结束");
@@ -708,6 +804,8 @@ async fn execute_batch(
     trajectory_storage: Arc<TrajectoryStorage>,
     // 仅用于把全局批次锁持有到批次结束：drop 即释放。
     _permit: OwnedMutexGuard<()>,
+    // 建池降级说明（缺一源快照时非空）⇒ 落进批次消息，不静默。
+    pool_degradation_note: Option<String>,
 ) {
     let as_of_str = ctx.as_of_date.format("%Y-%m-%d").to_string();
     // run 命令在 spawn 前已把初始态写入内存；缺失说明状态异常，不再兜底构造
@@ -930,6 +1028,11 @@ async fn execute_batch(
         );
         if serenity_error.is_some() {
             msg.push_str("；趋势智选回放失败已降级（仅计荐股链候选）");
+        }
+        // 建池降级必须说清楚：少了一个真实榜源 ⇒ 池子成分与「当时真实候选池」不同构。
+        if let Some(note) = pool_degradation_note.as_deref() {
+            msg.push('；');
+            msg.push_str(note);
         }
         s.message = Some(msg);
     }

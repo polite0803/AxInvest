@@ -191,23 +191,11 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             is_secret: false,
         },
         // ── 行业参照参数（股票分析中 t-baseline-* 节点使用）──
-        // ── Agent 节点 LLM 参数 ──
-        Variable {
-            name: "agent_temperature".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(0.3),
-            description: Some("所有 Agent 节点 LLM 温度 (0-2)".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "agent_max_tokens".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(32768),
-            description: Some(
-                "所有 Agent 节点最大输出 token 数（模板变量覆盖硬编码默认值）".into(),
-            ),
-            is_secret: false,
-        },
+        // 2026-10-26 退役 `agent_temperature` / `agent_max_tokens` 两个变量：它们是模型层
+        // 之外自建的采样参数通道，而「供应商-模型 → 参数」那一格才是权威（聊天链一直在读，
+        // 工作流此前不读）。实测代价：现网 agnes-3.0-flash 的模型层 `maxTokens` 设为 124672，
+        // 工作流仍按模板变量下发，10 个决策节点被截断。消费点与优先级见
+        // `rt-workflow` 的 `resolve_sampling`；存量库删键见 `SAMPLING_VARS_RETIRED_VERSION`。
         Variable {
             name: "agent_timeout_secs".into(),
             var_type: "number".into(),

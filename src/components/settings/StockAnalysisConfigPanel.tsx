@@ -49,11 +49,11 @@ export function getDefaultVariables(): Variable[] {
   //  250→上限 380，量程小于真实值时用户一拖就把取数根数改小）。
   b("kline_limit", 250, "stockAnalysis.configDescriptions.klineLimit", "number");
   b("news_limit", 30, "stockAnalysis.configDescriptions.newsLimit", "number");
-  // Agent 节点 LLM 参数 —— 主模板 Agent 节点的**唯一**采样参数权威。
-  // 种子里 Agent 节点的同名字段已置空（v181），节点级 UI 入口已移除；
-  // 不要在别处再补一份默认值，否则又会变成「面板改了不生效」。
-  b("agent_temperature", 0.3, "stockAnalysis.configDescriptions.agentTemperature", "number");
-  b("agent_max_tokens", 32768, "stockAnalysis.configDescriptions.agentMaxTokens", "number");
+  // Agent 节点 LLM 参数。
+  // 2026-10-26（模板 v189）：`agent_temperature` / `agent_max_tokens` 两格**已撤下** ——
+  // 采样参数的权威在「供应商-模型 → 参数」那一格（聊天链一直读它，工作流此前不读，
+  // 于是面板上设的 124672 被这里的 4096 盖掉，实测 10 个决策节点输出被截断）。
+  // 在这里再放一份默认值就等于再造一个「面板能拨、代码不读」的开关。
   b("agent_timeout_secs", 600, "stockAnalysis.configDescriptions.agentTimeoutSecs", "number");
   b("agent_retry_max", 2, "stockAnalysis.configDescriptions.agentRetryMax", "number");
   // Tool 节点参数
@@ -814,8 +814,6 @@ export function StockAnalysisConfigPanel(_props: Props) {
         tool: "agent_executor",
         label: t("stockAnalysis.settings.group.agentRuntime"),
         vars: resolve([
-          "agent_temperature",
-          "agent_max_tokens",
           "agent_timeout_secs",
           "agent_retry_max",
         ]),

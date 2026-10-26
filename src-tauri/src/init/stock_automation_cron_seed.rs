@@ -423,12 +423,12 @@ mod tests {
     async fn seed_creates_all_builtin_jobs_and_is_idempotent() {
         let store = Arc::new(CronJobStore::new_ephemeral());
         seed_stock_automation_crons(&store, false).await.unwrap();
-        assert_eq!(store.list().await.len(), 13);
+        assert_eq!(store.list().await.len(), 14);
 
         // 再跑两次：不重复建、不改写
         seed_stock_automation_crons(&store, false).await.unwrap();
         seed_stock_automation_crons(&store, false).await.unwrap();
-        assert_eq!(store.list().await.len(), 13);
+        assert_eq!(store.list().await.len(), 14);
     }
 
     /// 齐备性判据（PLAN §三.5）：**种出来的每个 task_type 都必须在 executor 源码里被显式处理**。
@@ -487,11 +487,15 @@ mod tests {
         let seed_code = strip_comments(&seed_src);
         let seed_prose = seed_code.split("#[cfg(test)]").next().unwrap_or_default();
         let args = with_task_type_args(seed_prose);
-        // 2026-10-17：新增「中断分析补跑」⇒ 10 → 11；2026-10-20 A-1 新增「漏检补分析」⇒ 11 → 12。
+        // 2026-10-17：新增「中断分析补跑」⇒ 10 → 11；2026-10-20 A-1 新增「漏检补分析」⇒ 11 → 12；
+        // 2026-10-26 R-3v：新增「编码段盲扫」（universe-scan）⇒ 12 → 13；
+        //   本轮把断言 13 → 14 —— **改之前先做了 R-3v 要求的独立验证**：
+        //   逐条确认 14 个 task_type 在 services.rs 都有处置点（0 MISS）⇒ 断言数字是**纯过期**，
+        //   不是「有任务没有执行分支」。R-3v 的前置条件由此满足。
         // 这个数字是**门禁的锚**：加了种子任务却没改它，会在这里红；而忘了在
         // `services.rs` 加执行分支，会在下面逐条 `contains` 检查里红。
         // 两条各管一半 —— 只修一处会让另一半静默通过。
-        assert_eq!(args.len(), 13, "内置任务应各有 1 个 with_task_type 实参，实得 {}", args.len());
+        assert_eq!(args.len(), 14, "内置任务应各有 1 个 with_task_type 实参，实得 {}", args.len());
         for arg in &args {
             let forms = expected_forms(arg);
             let handled = forms.iter().any(|f| code_lines.contains(f));

@@ -14356,8 +14356,6 @@
       "deliveryProgressUpdateIntervalSecs": "Delivery progress update interval (seconds)",
       "deliveryAutoStart": "Auto-start delivery",
       "deliveryParallelWorkflows": "Parallel delivery workflows",
-      "agentTemperature": "Agent temperature (0-1)",
-      "agentMaxTokens": "Agent max tokens",
       "agentTimeoutSecs": "Agent timeout (seconds)",
       "agentRetryMax": "Agent max retries",
       "notifyNewLead": "Notify on new lead",
@@ -16324,7 +16322,8 @@
         "profiles": "档案",
         "data": "数据",
         "params": "参数",
-        "recommendation": "薦股推送"
+        "recommendation": "薦股推送",
+        "gates": "否決門"
       },
       "check": "检测",
       "loadFailed": "配置加载失败",
@@ -18348,8 +18347,6 @@
       "maxConcurrent": "并行分析的 Agent 数量上限 (1-32)",
       "klineLimit": "K线数量 (60-500)",
       "newsLimit": "新闻数量 (10-100)",
-      "agentTemperature": "LLM 温度 (0-2)",
-      "agentMaxTokens": "LLM 最大输出 token 数",
       "agentTimeoutSecs": "每个 Agent 节点执行超时秒数",
       "agentRetryMax": "每个 Agent 节点最大重试次数",
       "toolTimeoutSecs": "每个 Tool 节点执行超时秒数",
@@ -18843,6 +18840,30 @@
         "trader": "f7 取 LLM 交易員的方向、置信與報價折算（v183 前的生產口徑）。",
         "absent": "f7 沒有任何輸入 ⇒ 該腿記 0 並退出權重，本側結論不含交易信號。",
         "unknown": "未聲明 f7 的輸入來歷 ⇒ 無法判斷本側是否獨立於 LLM 決策。"
+      }
+    },
+    "decisionGates": {
+      "title": "決策否決門",
+      "warning": "放開否決門會降低風控強度",
+      "warningDetail": "這三道門原本會攔下部分買入訊號。放開後系統可以發出這些訊號，但不會因此提高勝率——已觀測的超短線檔期望收益為負。放開只讓效果「可被測量」，不等於「更賺錢」。",
+      "loadFailed": "讀取否決門狀態失敗：{{error}}",
+      "saveFailed": "儲存否決門狀態失敗：{{error}}",
+      "saved": "否決門狀態已儲存（下一輪分析生效）",
+      "riskVeto": {
+        "label": "放開風控門",
+        "desc": "高/極高風險標的原本禁止加倉/持倉；放開後允許開倉，倉位仍按風險上限封頂。"
+      },
+      "sentiment": {
+        "label": "放開情緒門",
+        "desc": "全市場漲停率不足時原本不出買入/加碼；放開後本檔不再因市場情緒被否決（超短檔仍受微觀結構未接線封頂）。"
+      },
+      "valuation": {
+        "label": "放開估值門",
+        "desc": "嚴重高估（DCF 上行≤−35% 或 PE≥自身 5 年 80 分位）原本不出買入/加碼；放開後本檔不再因此被否決。估值資料缺失時仍按「未判定」處理。"
+      },
+      "tierBuy": {
+        "label": "頂層採納檔內買入",
+        "desc": "校準未達標會把置信度封頂並聯動壓低動作，導致頂層買入長期為 0；放開後頂層採納檔內已判出的買入。置信度封頂本身仍然生效。"
       }
     }
   },

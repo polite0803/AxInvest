@@ -247,6 +247,11 @@ let cum_gain_pct = if type_of(stock_strength) == "map" { stock_strength["cumGain
 let gate_pair = pm_ultra_entry_gate(seal_rate, lim_up_count, cum_gain_pct, excess_return_pct);
 let gate_pass = gate_pair[0];
 let gate_basis = gate_pair[1];
+// ── 情绪门开关（2026-10-26 用户裁决）────────────────────────────────
+// 门只**单向否决**（拦买入、不抬信号）；放开 ⇒ 本档不再因市场情绪而不出买入/增持。
+// ⚠ 放开后必须**留痕**（push 一条 gap），否则「未过情绪门」与「情绪门已放开」在
+//   界面上完全同形 ⇒ 事后无法区分「市场情绪不支持」与「用户选择放开该门」。
+let sentiment_gate_open = pm_gate_enabled("gate.sentiment_enabled");
 let gate_note = if gate_basis == "breadth_missing" {
     "breadth_required 未判定：涨停池广度缺失（缺席 ≠ 通过，按不通过处理）"
 } else if gate_basis == "breadth_weak" {
@@ -259,7 +264,13 @@ let gate_note = if gate_basis == "breadth_missing" {
     `breadth_required 通过：封板率 ${seal_rate} >= 0.5 且个股前提=${gate_basis}`
 };
 if !gate_pass {
-    gaps.push(gate_note);
+    if sentiment_gate_open {
+        // 门已放开 ⇒ 记「放开 + 原本会被拦」而不是记「未通过」，
+        // 两者含义不同：前者是用户主动选择，后者是市场事实。
+        gaps.push(`市场情绪门已放开（breadth_required 原判据：${gate_basis}）⇒ 本档不因市场情绪被否决`);
+    } else {
+        gaps.push(gate_note);
+    }
 }
 
 // ── ⑧ 价带与仓位：止损按 k·σ·√days（尾部保护），不设目标价止盈 ──
@@ -293,7 +304,10 @@ let kelly = if confidence >= 0.50 && odds > 0.001 {
 let position = pm_risk_cap(kelly * (if spec_ok { branch_json["positionMultiplier"] } else { 0.6 }), overall_risk);
 
 // ── ⑨ 动作阶梯（本档自己的常量集，门 e：不得由他档常量 ± 偏移派生）──
-let action = if !gate_pass && posterior >= 0.62 { "持有" }
+// ⚠ 情绪门放开 ⇒ `gate_pass` 不再参与动作阶梯的否决（门已放开时它只是「原判据」留痕）。
+//   注意：**P0-5 降杠杆封顶（下一段）是独立的第四道限制**，不受情绪门开关影响 ——
+//   微观结构腿未接线前，超短档开仓动作仍会被压回「持有」。
+let action = if !gate_pass && !sentiment_gate_open && posterior >= 0.62 { "持有" }
     else if confidence >= 0.72 { "买入" }
     else if confidence >= 0.62 { "增持" }
     else if confidence >= 0.52 { "持有" }
@@ -383,9 +397,14 @@ if action != "买入" && action != "增持" && action != "持有" {
     confidenceMethod: if spec_ok { branch_json["confidenceMethod"] } else { "missing_branch_table" },
     exitRule: if spec_ok { branch_json["exitRule"] } else { "missing_branch_table" },
     entryGate: if spec_ok { branch_json["entryGate"] } else { "missing_branch_table" },
-    entryGatePassed: gate_pass,
+    // ⚠ 门放开后 `entryGatePassed` 必须报 true（门已放行 ⇒ 入场门**已通过**），
+    //   否则呈现层会显示「入场门未过」而实际是「用户选择放开该门」⇒ 同屏误导。
+    //   「原判据是什么」由 `gateBasis` + dataGaps 留痕承担，不靠这个布尔反解。
+    entryGatePassed: gate_pass || sentiment_gate_open,
     // P0-5：门判据 basis 与个股强势原始量（审计/面板按字段读，不从 dataGaps 文案反解）
     gateBasis: gate_basis,
+    // 情绪门是否已被产品决策放开（2026-10-26）—— 呈现层据此显示「门已放开」而非「门未过」
+    sentimentGateOpen: sentiment_gate_open,
     stockStrength: stock_strength,
     // P0-5 降杠杆封顶是否触发（true = 原动作是买入/增持、被压成持有）
     p05CapApplied: p05_cap_applied,

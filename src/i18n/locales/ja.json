@@ -14356,8 +14356,6 @@
       "deliveryProgressUpdateIntervalSecs": "Delivery progress update interval (seconds)",
       "deliveryAutoStart": "Auto-start delivery",
       "deliveryParallelWorkflows": "Parallel delivery workflows",
-      "agentTemperature": "Agent temperature (0-1)",
-      "agentMaxTokens": "Agent max tokens",
       "agentTimeoutSecs": "Agent timeout (seconds)",
       "agentRetryMax": "Agent max retries",
       "notifyNewLead": "Notify on new lead",
@@ -16207,7 +16205,8 @@
         "profiles": "Profiles",
         "data": "Data",
         "params": "Params",
-        "recommendation": "Recommendations"
+        "recommendation": "Recommendations",
+        "gates": "拒否ゲート"
       },
       "check": "Check",
       "loadFailed": "Failed to load config",
@@ -18099,8 +18098,6 @@
       "maxConcurrent": "並列分析のエージェント数上限 (1-32)",
       "klineLimit": "Kライン数 (60-500)",
       "newsLimit": "ニュース数 (10-100)",
-      "agentTemperature": "LLM 温度 (0-2)",
-      "agentMaxTokens": "LLM 最大出力トークン数",
       "agentTimeoutSecs": "各エージェントノード実行タイムアウト秒数",
       "agentRetryMax": "各エージェントノード最大リトライ回数",
       "toolTimeoutSecs": "各ツールノード実行タイムアウト秒数",
@@ -18594,6 +18591,30 @@
         "trader": "f7 は LLM トレーダーの方向・信頼度・見積価格換算を使います（v183 以前生産基準）。",
         "absent": "f7 に入力がまったくありません ⇒ その脚は 0 として重みから外れ、この側に取引信号はありません。",
         "unknown": "この側は f7 の入力の由来を宣言していません ⇒ LLM 決定から独立か判断できません。"
+      }
+    },
+    "decisionGates": {
+      "title": "意思決定否决ゲート",
+      "warning": "否决ゲートを開くとリスク統制が弱まります",
+      "warningDetail": "これらのゲートは現在一部の買いシグナルを遮断しています。開放しても勝率は上がらず、観測された超短期ティアの期待収益は負です。開放は効果を「測定可能」にするだけで、「より儲かる」ことにはなりません。",
+      "loadFailed": "ゲート状態を読み込めませんでした: {{error}}",
+      "saveFailed": "ゲート状態を保存できませんでした: {{error}}",
+      "saved": "ゲート状態を保存しました（次の分析から反映）",
+      "riskVeto": {
+        "label": "リスク統制ゲートを開く",
+        "desc": "高/極高リスク銘柄は通常売買・保有が禁止されます。開放後は建倉が可能ですが、ポジションはリスク上限で抑えられます。"
+      },
+      "sentiment": {
+        "label": "センチメントゲートを開く",
+        "desc": "市場全体の-limit-up 幅が足りないと通常は買い・増/USDHeldが THIS ティアで出ません。開放後は市場センチメントによる否决が解除されます（超短期ティアは微观構造未接続による上限が別途残ります）。"
+      },
+      "valuation": {
+        "label": "バリュエーションゲートを開く",
+        "desc": "極端な過大評価（DCF アップサイド ≤ −35% または PE が自己 5 年 80 パーセンタイル以上）は通常買い・増/USDHeldを遮断します。開放後はこの否决が解除されます。バリュエーション情報が欠落している場合は引き続き「未判定」として扱われます。"
+      },
+      "tierBuy": {
+        "label": "上位レイヤでティア内買いを採用",
+        "desc": "較正が基準未達だと信頼度上限が働き、アクションも連動して下げられ、上位レイヤの買いは 0 のままです。開放後はティア内で確定した買いを採用します。信頼度上限自体は引き続き有効です。"
       }
     }
   },

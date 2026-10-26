@@ -14350,8 +14350,6 @@
       "deliveryProgressUpdateIntervalSecs": "Delivery progress update interval (seconds)",
       "deliveryAutoStart": "Auto-start delivery",
       "deliveryParallelWorkflows": "Parallel delivery workflows",
-      "agentTemperature": "Agent temperature (0-1)",
-      "agentMaxTokens": "Agent max tokens",
       "agentTimeoutSecs": "Agent timeout (seconds)",
       "agentRetryMax": "Agent max retries",
       "notifyNewLead": "Notify on new lead",
@@ -16599,7 +16597,8 @@
         "profiles": "Profiles",
         "data": "Data",
         "params": "Params",
-        "recommendation": "Recommendations"
+        "recommendation": "Recommendations",
+        "gates": "Veto Gates"
       },
       "temperature": "Temperature",
       "tencentFinance": "Tencent Finance",
@@ -18342,8 +18341,6 @@
       "maxConcurrent": "Max parallel analysis agents (1-32)",
       "klineLimit": "Number of candlesticks (60-500)",
       "newsLimit": "Number of news items (10-100)",
-      "agentTemperature": "LLM temperature (0-2)",
-      "agentMaxTokens": "LLM max output tokens",
       "agentTimeoutSecs": "Timeout in seconds per agent node execution",
       "agentRetryMax": "Max retries per agent node",
       "toolTimeoutSecs": "Timeout in seconds per tool node execution",
@@ -18837,6 +18834,30 @@
         "trader": "f7 uses the LLM trader's direction, confidence and quoted prices (the production basis before v183).",
         "absent": "f7 has no input ⇒ that leg counts as 0 and leaves the weighting; this side carries no trading signal.",
         "unknown": "This side did not declare where f7's input came from ⇒ cannot tell whether it is independent of the LLM decision."
+      }
+    },
+    "decisionGates": {
+      "title": "Decision veto gates",
+      "warning": "Opening veto gates weakens risk control",
+      "warningDetail": "These gates currently block some buy signals. Opening them lets the system emit those signals, but it does not raise the win rate — the observed expected return of the ultra-short tier is negative. Opening only makes the effect measurable; it does not make it more profitable.",
+      "loadFailed": "Failed to read gate state: {{error}}",
+      "saveFailed": "Failed to save gate state: {{error}}",
+      "saved": "Gate state saved (takes effect on the next analysis run)",
+      "riskVeto": {
+        "label": "Open risk-veto gate",
+        "desc": "High / extreme-risk names are normally barred from adding or holding positions. Opening it allows entries; position size is still capped by the risk limit."
+      },
+      "sentiment": {
+        "label": "Open sentiment gate",
+        "desc": "When the market-wide limit-up breadth is insufficient, this tier normally emits no buy/add. Opening it removes that veto (the ultra-short tier is still capped by the unwired microstructure leg)."
+      },
+      "valuation": {
+        "label": "Open valuation gate",
+        "desc": "Severe overvaluation (DCF upside ≤ −35% or PE ≥ own 5-year 80th percentile) normally blocks buy/add. Opening it removes that veto. Missing valuation data is still treated as undetermined, not as passed."
+      },
+      "tierBuy": {
+        "label": "Let top level adopt tier-level buys",
+        "desc": "When calibration has not met its threshold, confidence is capped and the action is downgraded together, leaving the top-level buy count at zero. Opening this lets the top level adopt tier-level buys. The confidence cap itself still applies."
       }
     }
   },

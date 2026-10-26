@@ -12,8 +12,7 @@ function num(name: string, value: unknown): Variable {
  * 这些值取自 `seed_variables.rs`（stock-analysis 模板），不是编造的数。
  */
 const SAMPLES: { name: string; value: number }[] = [
-  // ① 温度类特例
-  { name: "agent_temperature", value: 0.3 },
+  // 温度类特例（agent_temperature）已于 2026-10-26 随变量退役删除。
   // ② 负值（跨 0 才能表达）
   { name: "cap_kline_mom_5_min", value: -0.02 },
   { name: "earnings_th_strong_neg", value: -20 },
@@ -38,13 +37,12 @@ const SAMPLES: { name: string; value: number }[] = [
   // ② 默认值 > 100
   { name: "kline_limit", value: 120 },
   { name: "agent_timeout_secs", value: 600 },
-  { name: "agent_max_tokens", value: 32768 },
   { name: "budget_high_max", value: 100000 },
 ];
 
 describe("inferNumberBounds", () => {
   it("按默认值量级分层（代表性样本）", () => {
-    expect(inferNumberBounds(num("agent_temperature", 0.3))).toEqual({ min: 0, max: 2, step: 0.1 });
+    // 原此处断言 agent_temperature 的 0~2/0.1 特例，随变量退役删除。
     // 0.003 这类「0.x 量级百分数」必须走 0.001 细步长，不能被当成 0~100 口径
     expect(inferNumberBounds(num("cost_pct", 0.003))).toEqual({ min: 0, max: 2, step: 0.001 });
     expect(inferNumberBounds(num("cap_ultra_short_entry_high", 1.005))).toEqual({

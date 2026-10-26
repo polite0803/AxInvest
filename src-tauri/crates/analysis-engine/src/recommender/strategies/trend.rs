@@ -200,7 +200,7 @@ impl TrendStrategy {
         // 定阶规则 `d ≤ h/3` 见 harness 的该函数文档）。取不到该尺度、或聚合后 bar 数不足
         // ⇒ **该风格在该档不出票**，绝不退回日线冒充（门 f 锁这一点）。
         let (klines, profile) =
-            match crate::recommender::scale::fetch(client, code, self.period).await {
+            match crate::recommender::scale::fetch(client, code, self.period, 0).await {
                 Ok(v) => v,
                 Err(e) => {
                     tracing::debug!("[trend] {code} 档位 {:?} 取数失败: {e}", self.period);
@@ -426,7 +426,7 @@ impl RecommendStrategy for TrendStrategy {
         // 指数与个股同走 `scale::fetch`，保证两边是同一尺度；取不到时记 NaN，
         // 证据项按中性 0.5 处理（不把「取不到指数」当成「跑输指数」）。
         let index_ret =
-            match crate::recommender::scale::fetch(ctx.client, "000300", self.period).await {
+            match crate::recommender::scale::fetch(ctx.client, "000300", self.period, 0).await {
                 Ok((ks, _)) => bars_return_pct(&ks, 20),
                 Err(_) => f64::NAN,
             };

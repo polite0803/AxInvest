@@ -66,8 +66,29 @@ impl ReversionStrategy {
         // 尺度由档位决定；取数根数与出分所需最少 bar 数都来自 `ScaleProfile`
         //（旧形态自带 `rev_kline_limit=250` / `rev_min_kline_len=30` 一份日线口径的数，
         //  周线/季线上毫无对应含义 ⇒ 两个变量随之从种子表与面板摘除）。
+        //
+        // ⚠ R-3e（2026-10-26）：`required_daily_bars` 是**本档指标窗口的日口径需求**，
+        // 换算到当前尺度后与窗口计划的 `fetch_limit` 取大者。
+        //   - Mid 档：`rev_dd_period=250`（天）⇒ weekly 下需 50 根，而 `fetch_limit` 只有 36 根
+        //     ⇒ 旧实现永远在「不够的窗口」上算回撤；
+        //   - Short 档：只需 `rev_divergence_lookback=14`（天）⇒ daily 下换算得 14 根
+        //     < `fetch_limit=30` ⇒ **取数根数逐字不变**（零回归）。
+        // 所以**必须按档位给不同需求** —— 若 Short 也报 250，daily 档会从 30 根变 250 根，
+        // `detect_all_patterns` 会在更多 K 线上跑 ⇒ short 路径的结果会变。
+        let required_daily_bars = match self.period {
+            // 中线：回撤回看 250 天（`rev_dd_period`）+ RSI 30 天，取大者
+            Period::Mid => 250,
+            // 超短线：`reversion` 在该档直接 `return None`（超跌反弹不适用超短档）
+            // ⇒ 不需要任何指标窗口 ⇒ 声明 0（否则 hourly 尺度 14 天 = 56 根 > fetch_limit 48 根，
+            // 会无谓地改取数根数 —— 判据 `strategy_declared_requirements_...` 会拦下）
+            Period::UltraShort => 0,
+            // 其余档：背离 14 天 + RSI 6 天 + 均量 5 天，取大者
+            _ => 14,
+        };
         let (klines, profile) =
-            match crate::recommender::scale::fetch(client, code, self.period).await {
+            match crate::recommender::scale::fetch(client, code, self.period, required_daily_bars)
+                .await
+            {
                 Ok(v) => v,
                 Err(e) => {
                     tracing::debug!("[reversion] {code} 档位 {:?} 取数失败: {e}", self.period);
@@ -91,7 +112,25 @@ impl ReversionStrategy {
         ))
         .max(5);
         let min_divergence_strength = read_f64(vars, "rev_min_divergence_strength", 0.3);
-        let divergence_result = divergence::detect_all_divergences(&klines, 14, lookback);
+        // ── R-3f（2026-10-26）：背离检测的 RSI 平滑窗口也必须走尺度换算 ──
+        // `detect_all_divergences(klines, rsi_period, lookback)` 的两个参数**都在同一
+        // bar 序列上取下标**：`rsi_period` 是 RSI 平滑窗（`compute_rsi_series`），
+        // `lookback` 是价格/RSI 的比较窗长度 ⇒ **两者必须同量纲**。
+        // 原实现把 `rsi_period` 硬编码成 **14 根 bar**（未换算），而 `lookback` 已换算：
+        //   daily 尺度  ⇒ rsi_period=14 根日线、lookback=14 根日线 ⇒ 恰好同量纲（无碍）
+        //   weekly 尺度 ⇒ rsi_period=**14 根周线**（=98 日）、lookback=3 根周线（=14 日）
+        //                  ⇒ **不同量纲**（平滑窗比比较窗长 4.7 倍）
+        //   monthly尺度 ⇒ rsi_period=**14 根月线**（=14 月）、lookback=1→5 根月线
+        //                  ⇒ 更离谱（比较窗被 `.max(5)` 兜到 5，平滑窗 14）
+        // 修法：与 `lookback` 同源换算（输入同为「日历 14 日」）。
+        // **daily 尺度恒等**（`per_bar=1` ⇒ ceil(14/1)=14）⇒ **零回归**；
+        // 粗尺度上从「14 根周线」修正为「3 根周线」，与比较窗同量纲。
+        // ⚠ 下限同样 `.max(5)`：否则粗尺度上平滑窗(3) < 比较窗(5) ⇒
+        //   `detect_rsi_divergence` 的 `rsi_vals.len() < lookback * 2` 判据会误判「数据不足」。
+        let divergence_rsi_period =
+            (crate::recommender::scale::bars_for_daily_span(14, &profile)).max(5);
+        let divergence_result =
+            divergence::detect_all_divergences(&klines, divergence_rsi_period, lookback);
         let has_bullish_divergence = divergence_result.iter().any(|d| {
             d.divergence_type == "regular_bullish" && d.strength >= min_divergence_strength
         });
@@ -135,7 +174,16 @@ impl ReversionStrategy {
                 if rsi_value >= rsi_short_max {
                     return None;
                 }
-                let avg_period = read_f64(vars, "rev_avg_amount_period", 5.0) as usize;
+                // ⚠ R-3e（2026-10-26）：本参数的口径是**天数**（seed 描述「均量计算天数」），
+                // 而此处直接当 **bar 数**用 ⇒ 在 weekly/monthly 尺度下量纲错
+                // （5 天 → 5 周 = 25 天）。daily 尺度恰好等价，所以缺陷被掩盖。
+                // 走 `bars_for_daily_span` 换算：**daily 尺度结果完全不变**（d=1 ⇒ 恒等），
+                // 只修好 weekly/monthly 两档 ⇒ 零回归。
+                let avg_period = crate::recommender::scale::bars_for_daily_span(
+                    read_f64(vars, "rev_avg_amount_period", 5.0) as usize,
+                    &profile,
+                )
+                .max(2);
                 let avg_mult = read_f64(vars, "rev_avg_amount_mult", 1.2);
                 // 量能门走 `short_energy_gate`：成交额缺失时退回成交量（日 K 无 amount 字段）。
                 let (today, avg, used_volume) = short_energy_gate(&klines, avg_period, avg_mult)?;
@@ -166,13 +214,33 @@ impl ReversionStrategy {
                 (true, r)
             },
             Period::Mid => {
-                let dd_period = read_f64(vars, "rev_dd_period", 250.0) as usize;
+                // ⚠ R-3e（2026-10-26）：口径是**天数**（seed 描述「回撤回看天数」/「RSI 计算周期」），
+                // 直接当 bar 数用 ⇒ weekly 尺度下 250 天被读成 250 周（1250 天）、
+                // 30 天被读成 30 周（150 天）。
+                //
+                // ⚠⚠ **实测纠正**：原注释写「该档恒 return None」——**不成立**。
+                // 实盘 mid 档 reversion 有 79 条真票、avg_conf 59.3（高于 short 档的 55.7）
+                // ⇒ 信号不弱，只是**窗口偏短**（`scale::fetch` 原先只给 36 根周线
+                // = 180 天，而 `rev_dd_period` 想要 250 天）。
+                //
+                // 本次修复是**语义正确化**（180 天 → 250 天）+ 取数根数对齐
+                // （见 `scale::fetch` 的 `required_daily_bars`），
+                // **不等于**「mid 档在回放下会出票」——那仍待实跑确认。
+                let dd_period = crate::recommender::scale::bars_for_daily_span(
+                    read_f64(vars, "rev_dd_period", 250.0) as usize,
+                    &profile,
+                )
+                .max(2);
                 let dd_min = read_f64(vars, "rev_dd_min", 20.0);
                 let dd = indicators::drawdown_from_high(&klines, dd_period).unwrap_or(0.0);
                 if dd < dd_min {
                     return None;
                 }
-                let rsi_mid_period = read_f64(vars, "rev_rsi_mid_period", 30.0) as usize;
+                let rsi_mid_period = crate::recommender::scale::bars_for_daily_span(
+                    read_f64(vars, "rev_rsi_mid_period", 30.0) as usize,
+                    &profile,
+                )
+                .max(2);
                 let rsi_mid_max = if has_bullish_divergence {
                     // 底背离放宽月线 RSI 阈值从 50 至 55
                     read_f64(vars, "rev_rsi_mid_max_divergence", 55.0)

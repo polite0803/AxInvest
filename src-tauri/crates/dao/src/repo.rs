@@ -18,6 +18,7 @@ pub mod conversation_branch;
 pub mod conversation_category;
 pub mod credential_repo;
 pub mod cron_job_persistence;
+pub mod cron_leader_lease;
 pub mod data_quality_fuse;
 pub mod decision_validations;
 pub mod evolution_execution_stats;

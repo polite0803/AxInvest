@@ -14,6 +14,7 @@ pub mod data_clean;
 pub mod dimension_catalog;
 pub use dimension_catalog::{DimensionCatalog, StockDimensionDef, StrategyDimensionSet};
 pub mod decision;
+pub mod decision_gates;
 // 权威定义已上移至 harness（共享契约层）。此处 re-export 保留 `crate::decision_action::*`
 // 与 `axagent_analysis_engine::decision_action::*` 两个旧路径，消费端零改动。
 pub use axagent_harness::decision_action;

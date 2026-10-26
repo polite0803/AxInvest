@@ -90,6 +90,15 @@ pub use commands::stock_workflow::core::run_stock_workflow_inner;
 // 是因为它**尚未**被提到父层；而「在 mod.rs 里新加一条 `pub use core::X;`」
 // 会触碰 build.rs 的子模块 re-export 解析面（详见上一行的 ⚠ 注释）。
 pub use commands::stock_workflow::run_batch_reflection_inner;
+// 反思筛选器（`ReflectionFilter`）—— bin 需要它来选反思口径。
+//
+// ⚠ `due_only` **不是**可有可无的开关：`run_batch_reflection_inner` 的
+// `require_mature` 由它决定（`reflection.rs:2908`）⇒ 不带它就**绕过成熟门**，
+// 未成熟的行也会去调 LLM，失败后状态被写成 `failed: REFLECTION_OUTPUT_INCOMPLETE`
+// ⇒ 该行永久失去再处理机会（2026-10-26 实测：误标 15 行）。
+//
+// 与上一行同构：`commands` 是私有模块 ⇒ 这里的 `pub use` 只做再导出。
+pub use commands::stock_workflow::ReflectionFilter;
 // 模板代际号：`axagent-batch-rerun` 的「版本联查完整性」必须读**同一个**数字，
 // 不能在 bin 里另抄一份（抄了就永远对不上）。`commands` 本身是私有模块，
 // 这里的 `pub use` 只做再导出，不改 `commands/mod.rs` 的解析面（见上方两条 ⚠ 注释）。

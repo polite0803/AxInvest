@@ -72,8 +72,19 @@ impl ValueStrategy {
 
         // 尺度由档位决定，且四个分支**共用同一份取数**（旧形态是每个分支各取一次日线）。
         // 取不到该尺度 / bar 数不足 ⇒ 本风格本档不出票，不退回日线冒充。
+        // ⚠ R-3e：需求**按档位**声明（value 三档的均线窗口不同：
+        // ultra_short=10 / short=20 / long=60 天）。统一声明最大值会让
+        // short 档 daily 取数从 30 根变 60 根 ⇒ `detect_all_patterns` 之类
+        // 扫全数组的判定结果会变 ⇒ 逐档给需求才零回归。
+        let required_daily_bars = match self.period {
+            Period::UltraShort => 10,
+            Period::Long => 60,
+            _ => 20,
+        };
         let (klines, profile) =
-            match crate::recommender::scale::fetch(client, code, self.period).await {
+            match crate::recommender::scale::fetch(client, code, self.period, required_daily_bars)
+                .await
+            {
                 Ok(v) => v,
                 Err(e) => {
                     tracing::debug!("[value] {code} 档位 {:?} 取数失败: {e}", self.period);

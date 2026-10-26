@@ -14356,8 +14356,6 @@
       "deliveryProgressUpdateIntervalSecs": "Delivery progress update interval (seconds)",
       "deliveryAutoStart": "Auto-start delivery",
       "deliveryParallelWorkflows": "Parallel delivery workflows",
-      "agentTemperature": "Agent temperature (0-1)",
-      "agentMaxTokens": "Agent max tokens",
       "agentTimeoutSecs": "Agent timeout (seconds)",
       "agentRetryMax": "Agent max retries",
       "notifyNewLead": "Notify on new lead",
@@ -16207,7 +16205,8 @@
         "profiles": "Profiles",
         "data": "Data",
         "params": "Params",
-        "recommendation": "Recommendations"
+        "recommendation": "Recommendations",
+        "gates": "Portes de veto"
       },
       "check": "Check",
       "loadFailed": "Failed to load config",
@@ -18099,8 +18098,6 @@
       "maxConcurrent": "Nombre maximum d'agents en analyse parallèle (1-32)",
       "klineLimit": "Nombre de bougies (60-500)",
       "newsLimit": "Nombre d'actualités (10-100)",
-      "agentTemperature": "Température du LLM (0-2)",
-      "agentMaxTokens": "Nombre maximum de tokens de sortie du LLM",
       "agentTimeoutSecs": "Délai d'exécution en secondes par nœud Agent",
       "agentRetryMax": "Nombre maximum de tentatives par nœud Agent",
       "toolTimeoutSecs": "Délai d'exécution en secondes par nœud Tool",
@@ -18594,6 +18591,30 @@
         "trader": "f7 utilise la direction, la confiance et les cours du trader LLM (base de production avant v183).",
         "absent": "f7 n'a aucune entrée ⇒ cette branche compte pour 0 et sort de la pondération ; ce côté ne porte aucun signal de trading.",
         "unknown": "Ce côté n'a pas déclaré l'origine de l'entrée de f7 ⇒ indépendance vis-à-vis de la décision LLM indeterminée."
+      }
+    },
+    "decisionGates": {
+      "title": "Portes de veto des décisions",
+      "warning": "Ouvrir les portes de veto affaiblit le contrôle du risque",
+      "warningDetail": "Ces portes bloquent actuellement certains signaux d'achat. Les ouvrir n'améliore pas le taux de réussite : le rendement attendu observé de l'horizon très court est négatif. Ouvrir rend l'effet mesurable, pas plus rentable.",
+      "loadFailed": "Échec de lecture de l'état des portes : {{error}}",
+      "saveFailed": "Échec d'enregistrement de l'état des portes : {{error}}",
+      "saved": "État des portes enregistré (prise d'effet à la prochaine analyse)",
+      "riskVeto": {
+        "label": "Ouvrir la porte de risque",
+        "desc": "Les titres à risque élevé ou extrême sont normalement interdits d'achat et de détention. Une fois ouverte, l'entrée est possible ; la taille de position reste plafonnée par la limite de risque."
+      },
+      "sentiment": {
+        "label": "Ouvrir la porte de sentiment",
+        "desc": "Lorsque la breadth de limit-up du marché est insuffisante, cet horizon n'émet normalement ni achat ni renforcement. Ouvrir la porte retire ce veto (l'horizon très court reste plafonné par la microstructure pas encore branchée)."
+      },
+      "valuation": {
+        "label": "Ouvrir la porte de valorisation",
+        "desc": "Une survalorisation forte (upside DCF ≤ −35 % ou PE ≥ 80ᵉ centile sur 5 ans) bloque normalement l'achat. Ouvrir la porte retire ce veto. Des données de valorisation manquantes restent « indéterminées », jamais « validées »."
+      },
+      "tierBuy": {
+        "label": "Adopter les achats de horizon au niveau supérieur",
+        "desc": "Quand la calibration n'atteint pas son seuil, la confiance est plafonnée et l'action déclassée en même temps — le nombre d'achats au niveau supérieur reste nul. Ouvrir permet au niveau supérieur d'adopter les achats décidés par horizon. Le plafond de confiance reste appliqué."
       }
     }
   },

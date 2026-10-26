@@ -255,6 +255,7 @@ pub mod wiki_graph_cache;
 // 读写走实体 API，方言分支整体消失。
 pub mod cron_job;
 pub mod cron_job_history;
+pub mod cron_leader_lease;
 
 // `gateway_message_queue` 原先定义在 `crates/runtime/src/persistent_queue.rs` ——
 // **不在本 crate**，于是不进 `entity_modules!` 注册清单，schema 引擎看不见它。

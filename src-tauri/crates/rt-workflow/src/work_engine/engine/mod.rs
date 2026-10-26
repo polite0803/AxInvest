@@ -299,6 +299,33 @@ impl Default for RunOptions {
 /// 唯一来源：`RunOptions::default` 与 `with_max_concurrent` 都取它，不再各写一份 10。
 const IO_NODE_CONCURRENCY: usize = 10;
 
+/// 收集「本节点声明了、但本次没有产出」的上游终态（详见 `ExecutionState::context_source_gaps`）。
+///
+/// 只读运行时状态，零控制流影响。取值依次看 `skip_reason`（为什么没跑）、再看 `error`
+/// （怎么失败的）、最后退到裸状态 —— 三者回答的是不同问题，压成一个字符串就分不清
+/// 「失败」与「被跳过」了。
+/// 源节点**不在图里** ⇒ `NotInGraph`：配置指向不存在的节点，与「节点没产出」是两件事。
+fn collect_context_source_gaps(
+    wf: &Workflow,
+    declared: &[String],
+) -> std::collections::HashMap<String, String> {
+    declared
+        .iter()
+        .filter(|src| !wf.results.contains_key(src.as_str()))
+        .map(|src| {
+            let gap = match wf.node_states.get(src.as_str()) {
+                Some(s) => match (s.skip_reason.as_deref(), s.error.as_deref()) {
+                    (Some(reason), _) => format!("{:?}:skip={reason}", s.status),
+                    (None, Some(err)) => format!("{:?}:error={err}", s.status),
+                    (None, None) => format!("{:?}", s.status),
+                },
+                None => "NotInGraph".to_string(),
+            };
+            (src.clone(), gap)
+        })
+        .collect()
+}
+
 /// 节点单步超时的**唯一**解析点（P2，2026-10-25）。
 ///
 /// 优先级：**① 节点级 `base.timeout`**（建图时显式写的，例如辩手节点 900s、
@@ -3439,6 +3466,13 @@ impl WorkEngine {
                         for (k, v) in &wf.results {
                             merged_vars.entry(k.clone()).or_insert_with(|| v.clone());
                         }
+                        // 上游缺席归因：Agent 节点声明的 context_sources 里本次没有产出的那些，
+                        // 把它们在本执行里的终态一并交给 executor ⇒ 缺席日志自带来历，不再只说
+                        // 「变量未找到」。见 `ExecutionState::context_source_gaps`。
+                        if let WorkflowNode::Agent(an) = &node {
+                            exec_ctx.context_source_gaps =
+                                collect_context_source_gaps(wf, &an.config.context_sources);
+                        }
                     }
                 }
                 exec_ctx.variables = merged_vars;
@@ -6505,7 +6539,7 @@ pub fn build_debate_body_dispatch(
             let node_id = step_id.clone();
 
             // 从 execution_workflows（运行时状态）获取节点定义和依赖结果
-            let (node, deps_results, context_source_results) = {
+            let (node, deps_results, context_source_results, body_gaps) = {
                 let workflows = engine.execution_workflows.read().await;
                 let wf = match workflows.get(&execution_id) {
                     Some(wf) => wf,
@@ -6532,7 +6566,15 @@ pub fn build_debate_body_dispatch(
                 let node = wf.nodes.iter().find(|n| n.base_id() == step_id).cloned();
                 let deps = WorkEngine::get_node_dependency_results(wf, &step_id);
                 let ctx_sources = WorkEngine::get_context_source_results(wf, &step_id);
-                (node, deps, ctx_sources)
+                // 归因表按**本 body 节点**自己的 context_sources 现算：容器 clone 给它的 ctx 里
+                // 带的是容器自己的表，直接沿用会让辩手日志把容器的缺席说成自己的缺席。
+                let gaps = match &node {
+                    Some(WorkflowNode::Agent(a)) => {
+                        collect_context_source_gaps(wf, &a.config.context_sources)
+                    },
+                    _ => std::collections::HashMap::new(),
+                };
+                (node, deps, ctx_sources, gaps)
             };
 
             let Some(node) = node else {
@@ -6552,6 +6594,7 @@ pub fn build_debate_body_dispatch(
             for (k, v) in context_source_results {
                 ctx.variables.entry(k).or_insert(v);
             }
+            ctx.context_source_gaps = body_gaps;
 
             // 确保关键引擎引用已注入
             ctx.business_rule_engine = seam_business_rule();
@@ -7184,6 +7227,64 @@ mod tests {
         )
         .expect("Running → Completed 应合法");
         assert!(wf2.results.contains_key("debate"), "负控：非空 output_var 必须照写别名键");
+    }
+
+    /// 上游缺席归因（2026-10-26）：`context_sources` 查不到时，日志必须能说清是哪一种没产出。
+    /// 三种各占一格：被跳过（带 `skip_reason`）/ 失败（带 `error`）/ 根本不在图里；
+    /// 负控：已产出的源不得进归因表（否则日志会把正常节点说成缺席）。
+    #[test]
+    fn context_source_gaps_name_the_reason_behind_each_absence() {
+        let mut wf = Workflow {
+            id: "wf_test".into(),
+            name: "test".into(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            status: WorkflowStatus::Running,
+            created_at: 0,
+            completed_at: None,
+            results: Default::default(),
+            node_states: Default::default(),
+            output: None,
+            error_config: None,
+            error_workflow_id: None,
+            hooks_config: None,
+        };
+        wf.node_states.insert(
+            "bull-r1--short".into(),
+            NodeRuntimeState {
+                status: NodeStatus::Skipped,
+                skip_reason: Some("upstream_failed".into()),
+                ..Default::default()
+            },
+        );
+        wf.node_states.insert(
+            "bear-r1--short".into(),
+            NodeRuntimeState {
+                status: NodeStatus::Failed,
+                error: Some("LLM 429".into()),
+                ..Default::default()
+            },
+        );
+        wf.node_states.insert(
+            "bull-r2--short".into(),
+            NodeRuntimeState { status: NodeStatus::Completed, ..Default::default() },
+        );
+        wf.results.insert("bull-r2--short".into(), serde_json::json!({"content": "ok"}));
+
+        let declared: Vec<String> =
+            ["bull-r1--short", "bear-r1--short", "bull-r2--short", "ghost--short"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+        let gaps = super::collect_context_source_gaps(&wf, &declared);
+
+        assert_eq!(
+            gaps.get("bull-r1--short").map(String::as_str),
+            Some("Skipped:skip=upstream_failed")
+        );
+        assert_eq!(gaps.get("bear-r1--short").map(String::as_str), Some("Failed:error=LLM 429"));
+        assert_eq!(gaps.get("ghost--short").map(String::as_str), Some("NotInGraph"));
+        assert!(!gaps.contains_key("bull-r2--short"), "已产出的源不得进归因表");
     }
 
     /// 超时优先级锁（P2，2026-10-25）：节点级 `base.timeout` > 按类型的 `RunOptions` 字段。

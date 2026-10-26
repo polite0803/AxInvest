@@ -161,6 +161,19 @@ fn pm_saturate(r, k) {
 let pm_result = ();
 
 try {
+// ── 产品决策开关（2026-10-26 用户裁决）：三道否决门 + 顶层采纳档内买入 ──
+// 四个开关走**运行期**的 `pm_gate_enabled`（宿主函数读进程内快照，DB 是唯一权威），
+// 刻意**不**走面板变量 / input_mapping：
+//   · 面板变量改一次会触发模板 version+1（换代快照）⇒ 与 G1「冻结换代」冲突；
+//   · input_mapping 改图必须重播种 ⇒ 更重的版本动作。
+// ⇒ 产品决策要能**随时**改开关，不该逼着模板换代。
+//
+// ⚠ 默认全关 ⇒ 与引入前逐位一致（改动不改变既有行为，除非显式打开开关）。
+let risk_gate_open = pm_gate_enabled("gate.risk_veto_enabled");
+let sentiment_gate_open = pm_gate_enabled("gate.sentiment_enabled");
+let valuation_gate_open = pm_gate_enabled("gate.valuation_enabled");
+let tier_buy_open = pm_gate_enabled("gate.tier_buy_enabled");
+
 // ── 可配置参数（修复 D7/D8：通过 input_mapping 覆盖，默认值为 V56 校准 A 股参数）──
 // action 阈值（effective_posterior）
 let ACTION_BUY_THRESHOLD = if present(action_buy_threshold) { action_buy_threshold } else { 0.63 };
@@ -2637,6 +2650,15 @@ let disagreement_mod = if present(risk_disagreement) {
 	let calibration_cap_binds = !tier_calibration_ready && confidence_quality_cap > cap_floor;
 	// 两条封顶取最小：质量 cap 与校准 cap 各自独立生效，谁更严谁定终值（只收紧不放宽）。
 	let confidence_cap = if calibration_cap_binds { cap_floor } else { confidence_quality_cap };
+	// ── 顶层采纳档内买入开关（2026-10-26 用户裁决）──────────────────────
+	// 死循环的最后一环：`R-CALIB-CAP`（校准未达标 ⇒ 置信压到 cap_floor ⇒ **动作联动降级**）
+	//   ⇒ 顶层买入恒 0 ⇒ 无买入样本 ⇒ 校准样本不增长 ⇒ 永远不达标。
+	// 打开本开关 ⇒ 校准 cap **仍压置信**（那是事实：未校准的置信不作面值），
+	//   但**不再联动降级动作** ⇒ 顶层采纳档内已判出的「买入」。
+	// ⚠ 只解除**校准 cap** 的动作联动；DQI 质量 cap / 熊市门禁 / trader 封顶
+	//   等**只降不升**的闸门**一律保留**（它们各有独立判据，不是本次要解的死循环）。
+	// ⚠ 开关关闭时行为与引入前逐位一致。
+	let calibration_cap_binds_action = calibration_cap_binds && !tier_buy_open;
 	let calibration_cap_note = if tier_calibration_ready {
 	    ""
 	} else {
@@ -2914,8 +2936,13 @@ let weights_collapsed = !dqi_a_level && (
 	        ()
 	    };
 	    if present(raw_action_conf) {
-	        let capped_conf = if raw_action_conf > confidence_cap {
-	            confidence_cap
+	        // ⚠ 顶层采纳档内买入开关（2026-10-26）：校准 cap **只压置信**、不压动作
+	        //   ⇒ 动作口径的封顶值改用「排除校准 cap 后」的置信上限
+	        //   （`confidence_cap_without_calib`）。DQI 质量 cap / 熊市门禁 / trader 封顶
+	        //   等只降不升的闸门**一律保留**。
+	        let action_conf_cap = if calibration_cap_binds_action { confidence_cap } else { confidence_quality_cap };
+	        let capped_conf = if raw_action_conf > action_conf_cap {
+	            action_conf_cap
 	        } else {
 	            raw_action_conf
 	        };
@@ -2939,12 +2966,15 @@ let weights_collapsed = !dqi_a_level && (
 	        if ceiling_rank < picked_rank {
 	            // 归因按**实际收紧的那条** cap 分开点名：质量 cap 与校准 cap 是两条独立判据，
 	            // 合成一句就说不清「这次是谁把买入压成持有的」（呈现层不得制造歧义）。
-	            let cap_rule_id = if calibration_cap_binds { "R-CALIB-CAP" } else { "R-DQI-CAP" };
-	            let cap_label = if calibration_cap_binds { "校准未达标cap" } else { "数据质量cap" };
+	            // ⚠ 用 `calibration_cap_binds_action`（而非 `calibration_cap_binds`）判归属：
+	            //   校准 cap 已被 `tier_buy_open` 解除动作联动时，**它没有收紧动作**，
+	            //   此时若仍标成 R-CALIB-CAP 就是**错误归因**（这条 trail 是审计依据）。
+	            let cap_rule_id = if calibration_cap_binds_action { "R-CALIB-CAP" } else { "R-DQI-CAP" };
+	            let cap_label = if calibration_cap_binds_action { "校准未达标cap" } else { "数据质量cap" };
 	            decision_trail.push(#{
 	                "rule_id": cap_rule_id,
 	                "status": "ACTIVATED",
-	                "detail": `${cap_label}=${(confidence_cap*10.0).round()/10.0}联动动作:${base_action}→${pm_rank_to_action(ceiling_rank)}(动作口径置信${(raw_action_conf*10.0).round()/10.0}%被压至${(capped_conf*10.0).round()/10.0}%)`,
+	                "detail": `${cap_label}=${(action_conf_cap*10.0).round()/10.0}联动动作:${base_action}→${pm_rank_to_action(ceiling_rank)}(动作口径置信${(raw_action_conf*10.0).round()/10.0}%被压至${(capped_conf*10.0).round()/10.0}%)`,
 	                "timestamp": 0.0,
 	            });
 	            base_action = pm_rank_to_action(ceiling_rank);

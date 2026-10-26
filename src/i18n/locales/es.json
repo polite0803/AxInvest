@@ -14356,8 +14356,6 @@
       "deliveryProgressUpdateIntervalSecs": "Delivery progress update interval (seconds)",
       "deliveryAutoStart": "Auto-start delivery",
       "deliveryParallelWorkflows": "Parallel delivery workflows",
-      "agentTemperature": "Agent temperature (0-1)",
-      "agentMaxTokens": "Agent max tokens",
       "agentTimeoutSecs": "Agent timeout (seconds)",
       "agentRetryMax": "Agent max retries",
       "notifyNewLead": "Notify on new lead",
@@ -16207,7 +16205,8 @@
         "profiles": "Profiles",
         "data": "Data",
         "params": "Params",
-        "recommendation": "Recommendations"
+        "recommendation": "Recommendations",
+        "gates": "Puertas de veto"
       },
       "check": "Check",
       "loadFailed": "Failed to load config",
@@ -18099,8 +18098,6 @@
       "maxConcurrent": "Límite superior de agentes en análisis paralelo (1-32)",
       "klineLimit": "Número de velas (60-500)",
       "newsLimit": "Número de noticias (10-100)",
-      "agentTemperature": "Temperatura LLM (0-2)",
-      "agentMaxTokens": "Número máximo de tokens de salida del LLM",
       "agentTimeoutSecs": "Tiempo de espera de ejecución por nodo de agente (segundos)",
       "agentRetryMax": "Número máximo de reintentos por nodo de agente",
       "toolTimeoutSecs": "Tiempo de espera de ejecución por nodo de herramienta (segundos)",
@@ -18594,6 +18591,30 @@
         "trader": "f7 usa la dirección, confianza y precios cotizados del trader LLM (base de producción previa a v183).",
         "absent": "f7 no tiene entrada ⇒ esa pata vale 0 y sale de la ponderación; este lado no lleva señal de trading.",
         "unknown": "Este lado no declaró el origen de la entrada de f7 ⇒ no se puede juzgar su independencia de la decisión del LLM."
+      }
+    },
+    "decisionGates": {
+      "title": "Puertas de veto de decisiones",
+      "warning": "Abrir las puertas de veto debilita el control de riesgo",
+      "warningDetail": "Estas puertas bloquean hoy algunas señales de compra. Abrirlas no aumenta la tasa de acierto: el rendimiento esperado observado del horizonte ultracorto es negativo. Abrirlas solo hace el efecto medible, no más rentable.",
+      "loadFailed": "No se pudo leer el estado de las puertas: {{error}}",
+      "saveFailed": "No se pudo guardar el estado de las puertas: {{error}}",
+      "saved": "Estado de las puertas guardado (surte efecto en el siguiente análisis)",
+      "riskVeto": {
+        "label": "Abrir la puerta de riesgo",
+        "desc": "Normalmente no se permite comprar ni mantener valores de riesgo alto o extremo. Al abrirla se puede entrar; el tamaño de la posición sigue limitado por el tope de riesgo."
+      },
+      "sentiment": {
+        "label": "Abrir la puerta de sentimiento",
+        "desc": "Cuando la amplitud de limit-up del mercado es insuficiente, este horizonte no emite compra ni ampliación. Al abrirla se elimina ese veto (el horizonte ultracorto sigue limitado por la microestructura aún no conectada)."
+      },
+      "valuation": {
+        "label": "Abrir la puerta de valoración",
+        "desc": "Una sobrevaloración severa (upside DCF ≤ −35 % o PE ≥ percentil 80 de 5 años) bloquea normalmente la compra. Al abrirla se elimina ese veto. Si faltan datos de valoración, siguen siendo «indeterminados», nunca «aprobados»."
+      },
+      "tierBuy": {
+        "label": "Adoptar las compras de horizonte en el nivel superior",
+        "desc": "Cuando la calibración no alcanza su umbral, la confianza se topa y la acción se degrada en consecuencia, por lo que el número de compras del nivel superior se queda en cero. Al abrirlo, el nivel superior adopta las compras decididas en el horizonte. El tope de confianza sigue vigente."
       }
     }
   },

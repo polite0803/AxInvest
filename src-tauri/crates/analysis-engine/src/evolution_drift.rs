@@ -24,7 +24,9 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use axagent_entities::{stock_evolution_history, strategy_performance, strategy_weight_history};
+use axagent_entities::{
+    stock_analyses, stock_evolution_history, strategy_performance, strategy_weight_history,
+};
 use axagent_harness::Period;
 
 use crate::decision_action::{normalize_action, ActionKind};
@@ -813,6 +815,89 @@ pub async fn upsert_reflection_horizon_performance(
         upserted += 1;
     }
     Ok(upserted)
+}
+
+/// 回填：把**已有四周期 JSON 但从未物化**的反思行补进 `strategy_performance`。
+///
+/// ## 为什么需要这个（2026-10-26 实测）
+///
+/// #31 四档物化通道是**随反思执行内联**跑的（`commands/stock_workflow/reflection.rs`
+/// 的 `upsert_reflection_horizon_performance` 调用）⇒ 只有**该通道上线之后**执行的
+/// 反思才会留下物化行。实测：`strategy_performance` 里 `source_ref LIKE
+/// 'reflection-horizon:%'` 的行**只在 10-16 / 10-19 / 10-23 三天**产生，
+/// 而库里横跨 06-10 ~ 10-15 的成熟反思有 **82 条**，其中 **50 条的决策从未被物化**。
+///
+/// ⇒ 校准样本（`reflection_stats::build_hitrate_stats` 的分母）**只统计有物化行的
+/// 反思** ⇒ 那 50 条成熟的样本白白浪费 ⇒ 逐档样本量长期低于
+/// `CALIBRATION_MIN_SAMPLES` ⇒ `calibrationReady` 恒假 ⇒ 置信被永久封顶
+/// ⇒ 动作联动降级 ⇒ 顶层「买入」为 0（R-3h 死循环的最后一环）。
+///
+/// ## 口径
+///
+/// - **幂等**：物化键 = `reflection-horizon:{决策 id}:{档}`（同一份口径，复用
+///   [`upsert_reflection_horizon_performance`]）⇒ 重跑不重复计票。
+/// - **只补「已成熟且可判定」**：成熟/可判定的判据全在
+///   [`crate::reflection_stats::expand_horizon_samples`] 里（`status ∈ {mature, legacy}`
+///   且 `wasCorrect ∈ {0,1}` 且 `returnPct` 有限）⇒ 本函数不另立判据。
+/// - **代际**：取被复盘决策的 `template_version`（= 真实代际），拿不到则 `None`
+///   （代际未知由读侧按收缩口径处理，不猜代）。
+///
+/// 返回 `(扫到的反思行数, 实际物化的档数)`。
+pub async fn backfill_reflection_horizon_performance(
+    db: &sea_orm::DatabaseConnection,
+) -> Result<(usize, usize), String> {
+    use axagent_entities::stock_reflections;
+
+    let rows = stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::HorizonResultsJson.is_not_null())
+        .all(db)
+        .await
+        .map_err(|e| format!("扫 stock_reflections 失败: {e}"))?;
+
+    let mut scanned = 0usize;
+    let mut materialized = 0usize;
+    for r in &rows {
+        let Some(hz) = r.horizon_results_json.as_deref() else {
+            continue;
+        };
+        if hz.trim().is_empty() {
+            continue;
+        }
+        // 没有决策行 ⇒ 无幂等键（物化键以决策 id 为准）⇒ 无血缘可物化，跳过。
+        let Some(analysis) = stock_analyses::Entity::find_by_id(&r.original_analysis_id)
+            .one(db)
+            .await
+            .map_err(|e| format!("查 stock_analyses {} 失败: {e}", r.original_analysis_id))?
+        else {
+            continue;
+        };
+        scanned += 1;
+        // 判定时刻取反思行的 `updated_at`（= 该行最后一次判定的时刻），缺则用建点时刻。
+        let exit_at = if r.updated_at > 0 {
+            r.updated_at
+        } else {
+            r.created_at
+        };
+        match upsert_reflection_horizon_performance(
+            db,
+            &analysis.id,
+            &analysis.stock_code,
+            &analysis.stock_name,
+            analysis.created_at,
+            exit_at,
+            hz,
+            analysis.template_version,
+        )
+        .await
+        {
+            Ok(n) => materialized += n,
+            Err(e) => {
+                warn!("[backfill] 物化反思 {} 失败: {e}", r.id);
+            },
+        }
+    }
+    info!("[backfill] 扫到 {scanned} 条带四周期 JSON 的反思，物化 {materialized} 条档位样本");
+    Ok((scanned, materialized))
 }
 
 #[cfg(test)]

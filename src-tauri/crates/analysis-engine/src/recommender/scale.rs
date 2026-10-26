@@ -52,16 +52,36 @@ pub fn window_plan(period: Period) -> ScaleWindowPlan {
 /// 按档位取其**应使用的尺度**的 K 线（季线由月线本地聚合；2026-10-18 起无档位落在季线上）。
 ///
 /// 返回空串错误时调用方必须显式失败（该档无输入），不得回退日线再产出一个看起来正常的 pick。
+///
+/// ## `required_daily_bars`（R-3e，2026-10-26）
+///
+/// 窗口计划（`window_plan`）的 `fetch_limit` 是**按持有期**换算的（`2 × long_bars`），
+/// 但策略的**指标窗口**是另一套口径（seed 里的「回撤回看天数」等）——
+/// 两者可能不一致：实测 `reversion` 的 `rev_dd_period=250`（天）在 mid(weekly) 档换算后需
+/// **50 根周线**，而 `fetch_limit` 只有 **36 根** ⇒ 指标永远在「不够的窗口」上计算。
+///
+/// 因此调用方要声明「本策略额外需要多少**日**口径的 bar」，
+/// 本函数把它换算到当前尺度后与 `fetch_limit` 取**较大者**。
+///
+/// ⚠ `client.get_klines` 内部会 `limit.max(KLINE_FETCH_FLOOR)` 去 vendor 取 500 根，
+/// 但**返回时又截到 `limit`** ⇒ 这里传入的 `limit` 就是最终可用根数，**必须算准**。
 pub async fn fetch(
     client: &dyn MarketDataProvider,
     code: &str,
     period: Period,
+    required_daily_bars: usize,
 ) -> Result<(Vec<KLine>, ScaleProfile), String> {
     let profile = profile_for(period)?;
     // 取数根数归窗口计划管：季线要的是**聚合前**的月线根数（`parent_fetch_limit`），
     // 其余尺度就是 `fetch_limit`（= 2 × 长带，留一倍余量给 MA 的前置窗口）。
     let plan = window_plan(period);
-    let limit = plan.parent_fetch_limit.unwrap_or(plan.fetch_limit) as u32;
+    let mut limit = plan.parent_fetch_limit.unwrap_or(plan.fetch_limit);
+    // 策略声明的额外需求（按日口径）换算到当前尺度后，与窗口计划取较大者。
+    let strategy_need = bars_for_daily_span(required_daily_bars, &profile).max(1);
+    if strategy_need > limit {
+        limit = strategy_need;
+    }
+    let limit = limit as u32;
     let raw = client
         .get_klines(code, profile.vendor_period, limit, None)
         .await
@@ -149,6 +169,42 @@ mod tests {
         }
     }
 
+    /// R-3f（2026-10-26）：背离检测的 **RSI 平滑窗与比较窗必须同量纲**。
+    ///
+    /// `detect_all_divergences(klines, rsi_period, lookback)` 的两个参数都在**同一
+    /// bar 序列**上取下标 ⇒ 必须都用「日历日 → 当前尺度 bar 数」换算。
+    /// 原实现 `lookback` 换算了、`rsi_period` 硬编码 14 根 bar ⇒ 粗尺度上两者不同量纲。
+    ///
+    /// 本判据把「同量纲」写成可执行断言（而不是注释论证）：
+    /// ① daily 尺度下换算结果**恒等 14**（零回归的硬保证）；
+    /// ② 任一粗尺度下，换算后的 rsi_period **不得**仍等于 14（那是漏换算的特征值）；
+    /// ③ 换算后两者**同量级**（rsi_period ≤ lookback × 3）—— 否则平滑窗远长于比较窗，
+    ///    背离检测比较的是「两个不同长度窗口里的极值」，不是同一个检测。
+    #[test]
+    fn divergence_rsi_period_and_lookback_share_one_scale() {
+        // ① daily 恒等 ⇒ 零回归
+        let daily = profile_for(Period::Short).unwrap();
+        assert_eq!(bars_for_daily_span(14, &daily), 14, "daily 尺度换算必须恒等（零回归前提）");
+
+        for p in [Period::Short, Period::Mid, Period::Long] {
+            let profile = profile_for(p).unwrap();
+            let lookback = bars_for_daily_span(14, &profile).max(5);
+            let rsi_period = bars_for_daily_span(14, &profile).max(5);
+            // ② 粗尺度不得仍为 14（14 是漏换算的特征值）
+            if profile.trading_days_per_bar > 1.0 {
+                assert_ne!(
+                    rsi_period, 14,
+                    "{p:?} 尺度上 rsi_period 仍是 14 ⇒ 漏了 bars_for_daily_span 换算"
+                );
+            }
+            // ③ 同量级
+            assert!(
+                rsi_period <= lookback * 3,
+                "{p:?} 上 rsi_period={rsi_period} 远长于 lookback={lookback} ⇒ 两个窗口不同量纲"
+            );
+        }
+    }
+
     /// 出分下限**按档**而不是按尺度：长档只要 15 根月线（≈15 个月），
     /// 而 `ScaleProfile::monthly().min_bars = 60`（5 年）是被退役的旧地板。
     ///
@@ -209,5 +265,48 @@ mod tests {
         assert!((dev_tolerance(0.99, &weekly) - expect_weekly).abs() < 1e-9);
         assert!(dev_tolerance(0.99, &hourly) > 0.99, "小时线的容差应收紧（更接近 1）");
         assert!(dev_tolerance(0.99, &weekly) < 0.99, "周线的容差应放宽（更远离 1）");
+    }
+
+    /// **R-3e 回归（2026-10-26）**：各策略声明的 `required_daily_bars` 换算后
+    /// **不得超过该档的 `fetch_limit`**，否则取数根数会变 ⇒ 既有判定结果会变。
+    ///
+    /// 背景：`scale::fetch` 新增 `required_daily_bars` 参数后，
+    /// `limit = max(fetch_limit, 换算后的需求)`。
+    /// 若需求 > `fetch_limit`，该档的取数根数会**变大** ⇒
+    /// `detect_all_patterns` / `divergence` 这类**扫全数组**的判定结果会变
+    /// ⇒ 那就是**自己制造的回归**（R-3e 的修复只允许影响此前恒 `None` 的档位）。
+    ///
+    /// 本测试把「零回归」从注释里的论证变成**可执行的判据**。
+    #[test]
+    fn strategy_declared_requirements_never_exceed_fetch_limit_except_reversion_mid() {
+        // (策略, 档位, 声明的日口径需求)
+        let declared: [(&str, Period, usize); 11] = [
+            ("reversion", Period::Short, 14),
+            ("reversion", Period::Mid, 250),
+            ("reversion", Period::UltraShort, 0),
+            ("value", Period::Short, 20),
+            ("value", Period::Mid, 20),
+            ("value", Period::Long, 60),
+            ("value", Period::UltraShort, 10),
+            ("trend", Period::Short, 0),
+            ("trend", Period::Mid, 0),
+            ("trend", Period::Long, 0),
+            ("capital", Period::Short, 12),
+        ];
+        for (name, period, req) in declared {
+            let profile = profile_for(period).unwrap();
+            let plan = window_plan(period);
+            let base = plan.parent_fetch_limit.unwrap_or(plan.fetch_limit);
+            let need = bars_for_daily_span(req, &profile).max(1);
+            // 唯一允许变化的是 reversion/mid（此前该档因窗口不足而恒 None ⇒ 变更无回归风险）
+            let allowed_to_change = name == "reversion" && period == Period::Mid;
+            if need > base {
+                assert!(
+                    allowed_to_change,
+                    "{name}/{period:?} 的需求 {req} 天换算成 {need} 根 > fetch_limit {base} 根 \
+                     ⇒ 取数根数会变 ⇒ 会造成回归；请下调该档的声明需求"
+                );
+            }
+        }
     }
 }

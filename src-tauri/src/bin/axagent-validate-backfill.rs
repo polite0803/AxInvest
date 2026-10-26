@@ -55,10 +55,14 @@ axagent-validate-backfill —— 回补决策验证（reco_picks → decision_va
   --fill-factors         给已有判定行补 factor_snapshot（不重算收益，不改 hit_outcome）
   --backfill-history     补齐全市场收盘历史（幂等：只补缺失行，不覆盖既有行）
   --fill-replay-outcomes 给回放分析补 outcome 判定（R-1：回放样本 18 → ~91）
+  --backfill-performance  把「已成熟但从未物化」的反思样本回填进 strategy_performance
+                         （R-3r：校准样本的分母；幂等，可重复跑）
+  --run-reflection       只跑批量反思（**不重跑任何分析**；R-3r：反思不产出 ⇒ 校准样本不增长）
+  --reflect-max <N>      --run-reflection 单轮处理上限（默认 20）
   --target-days <N>      回补目标交易日数（默认 250；UI 按钮硬编码为 90，这是历史只有 90 天的原因）
   --limit <N>            本批最多补多少只股票（默认 500，全市场约 12 批）
   --time-travel          发起时间旅行回放批次（R-2：把回放日从 3 个推向 30+）
-  --as-of <D[,D...]>     指定回放锚点日（不给则自动选「快照齐全且 T+2 已到期」的日）
+  --as-of <D[,D...]>     指定回放锚点日（不给则自动选「快照至少一源齐全且 T+2 已到期」的日）
   --tt-min-confidence <N> 回放批次置信度门槛（默认 50）
   --tt-top-n <N>         回放批次每档 top-N（默认 20）
   --tt-timeout <SEC>     单批次等待上限秒数（默认 1800）
@@ -67,8 +71,14 @@ axagent-validate-backfill —— 回补决策验证（reco_picks → decision_va
 
 关于 --time-travel:
   - 回放日的硬约束是 **as_of + N 个交易日 ≤ 今天**（否则 T+N 判不出来）
-  - 只回放「建池双源快照齐全」的日子（热股榜/行业榜无历史通道）
-  - 28/90 档**时间旅行加速不了**（受快照历史长度限制），只有 2/5 档能当场判
+  - 建池快照**至少一源**齐全即可回放（缺的那源在 as-of 下走 vendor 历史通道，
+    取不到即空榜；池子由另一源 + 静态兜底名单组成）。⚠ 两源都缺的日子仍排除。
+    2026-10-26 起放宽：此前要求双源齐全，把 05-27/06-10/06-11/08-18/09-04/09-07/09-09
+    这些「只有 get_industry_ranking 一源」的日子全部排除了 ⇒ long/mid 档的校准样本
+    只能等 wall-clock（long 需 T+90 ⇒ 2027-01）。放宽后 **06-10 之后恰好 90 根 K 线**
+    ⇒ 回放 06-10 立刻能让 long 档成熟、09-07 让 mid 档成熟。
+  - 档位成熟只看「行情库里决策日之后有没有 N 根 K 线」，**不看今天**
+    ⇒ 28/90 档在**足够早的回放日**上能当场判
   - 批次是**两段式**：guard 内选股与分析（此刻的「今天」= as_of），退出 guard 后做四档反思
 
 关于 --fill-factors:
@@ -80,7 +90,8 @@ axagent-validate-backfill —— 回补决策验证（reco_picks → decision_va
 
 说明:
   - 已存在的 (pick_id, t_plus_n) 会被跳过，不会覆盖前次结果
-  - T+90 目前不可成熟（行情库未走到），不要传 90
+  - T+90 的成熟只看「行情库里决策日之后有没有 90 根 K 线」，**不看今天**
+    ⇒ 回放足够早的日子（如 2026-06-10，其后恰好 90 根）时，T+90 能当场判
 ";
 
 /// 命令行参数
@@ -103,7 +114,7 @@ struct Args {
     limit: usize,
     /// 发起时间旅行回放批次（R-2）
     time_travel: bool,
-    /// 显式指定 as_of 日（逗号分隔）；不给则自动选「快照齐全且 T+2 已到期」的日
+    /// 显式指定 as_of 日（逗号分隔）；不给则自动选「快照至少一源齐全且 T+2 已到期」的日
     as_of: Option<Vec<String>>,
     /// 回放批次的最低置信度门槛
     tt_min_confidence: u8,
@@ -114,6 +125,25 @@ struct Args {
     /// 是否执行逐只 replay 分析（默认**关闭**：LLM 免费档限速下实测单日 30~60 分钟，
     /// 而盈利能力样本走 `reco_picks → decision_validations`，不依赖该阶段）
     tt_analyze: bool,
+    /// 回填「已成熟但从未物化」的反思样本进 `strategy_performance`（R-3r）。
+    ///
+    /// #31 四档物化通道是随反思执行内联跑的 ⇒ 只有该通道上线（2026-10-16）之后
+    /// 执行的反思才有物化行；更早的成熟反思（实测 82 条里 50 条）从未进过
+    /// `strategy_performance` ⇒ 校准样本的分母长期偏小 ⇒ `calibrationReady` 恒假
+    /// ⇒ 置信封顶 ⇒ 动作降级 ⇒ 顶层「买入」为 0。
+    ///
+    /// 幂等（键 = `reflection-horizon:{决策 id}:{档}`）⇒ 可重复跑。
+    backfill_performance: bool,
+    /// 只跑一轮/多轮**批量反思**（不重跑任何分析）。
+    ///
+    /// 与 `axagent-batch-rerun --reflect-after` 的区别：后者**先重跑分析**再反思
+    /// （副作用大：覆盖原分析、重置反思行）；本模式只消费**存量 pending 反思行**。
+    ///
+    /// 用途（R-3r）：校准样本的分母来自 `strategy_performance`，而物化是反思执行的
+    /// 内联副产物 ⇒ **反思不产出 ⇒ 校准样本不增长** ⇒ 逐档样本量永远到不了门槛。
+    run_reflection: bool,
+    /// `--run-reflection` 的单轮处理上限（默认 20）
+    reflect_max: u32,
 }
 
 impl Args {
@@ -139,6 +169,9 @@ impl Args {
             // 默认关闭逐只分析：LLM 免费档限速下它会把单日批次拖到 30~60 分钟，
             // 而盈利能力样本不需要它（见 `TimeTravelBatchRequest::analyze`）。
             tt_analyze: false,
+            backfill_performance: false,
+            run_reflection: false,
+            reflect_max: 20,
         };
         let mut it = std::env::args().skip(1);
         while let Some(a) = it.next() {
@@ -204,6 +237,19 @@ impl Args {
                 },
                 "--time-travel" => out.time_travel = true,
                 "--tt-analyze" => out.tt_analyze = true,
+                "--backfill-performance" => out.backfill_performance = true,
+                "--run-reflection" => out.run_reflection = true,
+                "--reflect-max" => {
+                    let raw = it.next().ok_or("--reflect-max 需要一个值（如 20）")?;
+                    let n: u32 = raw
+                        .trim()
+                        .parse()
+                        .map_err(|e| format!("--reflect-max 解析失败 `{raw}`: {e}"))?;
+                    if n == 0 {
+                        return Err("--reflect-max 必须大于 0".to_string());
+                    }
+                    out.reflect_max = n;
+                },
                 "--as-of" => {
                     let raw = it.next().ok_or("--as-of 需要一个值（如 2026-10-16 或 a,b）")?;
                     let v: Vec<String> = raw
@@ -304,6 +350,14 @@ async fn run() -> Result<(), String> {
     // ── 模式分派：补因子快照（B-3/F-2）与回测补算是两条独立路径 ──
     if args.fill_factors {
         return fill_factors_mode(state.harness.db(), args.apply).await;
+    }
+    // ── 模式分派：回填成熟反思样本进 strategy_performance（R-3r）──
+    if args.backfill_performance {
+        return backfill_performance_mode(state.harness.db(), args.apply).await;
+    }
+    // ── 模式分派：只跑批量反思（不重跑分析）（R-3r）──
+    if args.run_reflection {
+        return run_reflection_mode(&state, args.reflect_max).await;
     }
     // ── 模式分派：给回放分析补 outcome（R-1）──
     if args.fill_replay_outcomes {
@@ -432,6 +486,204 @@ async fn run() -> Result<(), String> {
 ///
 /// 只处理 `factor_snapshot IS NULL` 的行；已算过的不会被覆盖，
 /// 因此可以反复跑（例如后来补进了新的判定行）。
+/// 只跑批量反思（**不重跑任何分析**）—— R-3r 的样本供给侧。
+///
+/// ## 为什么必须有这个入口
+///
+/// 校准样本的分母是 `strategy_performance`，而物化是**反思执行的内联副产物**
+/// （`#31` 四档通道在 `perform_single_reflection` 内部调用）⇒
+/// **反思不产出 ⇒ 校准样本不增长** ⇒ 逐档样本量永远到不了
+/// `CALIBRATION_MIN_SAMPLES` ⇒ `calibrationReady` 恒假 ⇒ 置信封顶 ⇒
+/// 动作联动降级 ⇒ 顶层「买入」为 0（R-3h 死循环的最后一环）。
+///
+/// ## 为什么不用 `axagent-batch-rerun --reflect-after`
+///
+/// 那个入口**先重跑分析再反思**：重跑会**原地覆盖**原分析行、**重置**反思 pending 行
+/// （清结论列）⇒ 副作用大且会改变代际。本入口只消费**存量 pending 行**。
+///
+/// ## 终止判据
+///
+/// 用**库内 pending 计数**（不是解析返回 JSON 的字段名）—— 后者一旦字段改名就会
+/// `unwrap_or(0)` 静默变 0 而导致「第一轮就假装跑完」（判据自身撒谎那一类）。
+async fn run_reflection_mode(state: &AppState, per_round: u32) -> Result<(), String> {
+    use axagent_entities::stock_reflections;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let db = state.harness.db();
+    let master_key = state.harness.master_key_owned();
+
+    println!("=== axagent-validate-backfill / --run-reflection ===");
+    println!("模式  : 只跑批量反思（不重跑分析、不动已有分析行）");
+    println!("单轮  : {per_round} 条（--reflect-max 可调）");
+    println!();
+
+    let count_pending = || async {
+        use sea_orm::PaginatorTrait;
+        stock_reflections::Entity::find()
+            .filter(stock_reflections::Column::Status.eq("pending"))
+            .count(db)
+            .await
+            .unwrap_or(0)
+    };
+
+    // 反思**必须**在 live 模式（as-of = None）下跑 —— 它要看的是分析日之后的真实行情，
+    // 被 as-of 截断就什么都看不到（2026-09-23 实测：残留 as-of ⇒ 反思全降级「无行情」）。
+    println!(
+        "[run-reflection] 生效的 as-of = {:?}（期望 None ⇒ live）",
+        axagent_astock_data::as_of::current_as_of().map(|c| c.as_string())
+    );
+
+    let pending_before = count_pending().await;
+    println!("[run-reflection] 当前 pending = {pending_before}");
+    if pending_before == 0 {
+        println!("无 pending 行，跳过。");
+        return Ok(());
+    }
+
+    const MAX_ROUNDS: u32 = 20;
+    for round in 1..=MAX_ROUNDS {
+        let before = count_pending().await;
+        if before == 0 {
+            println!("[run-reflection] pending 已清空，停止。");
+            break;
+        }
+        let r = axagent_lib::run_batch_reflection_inner(
+            db,
+            state.astock_client.as_ref(),
+            &state.work_engine,
+            state.vector_store.as_ref(),
+            &master_key,
+            Some(per_round),
+            Some(&state.trajectory_storage),
+            // ⚠ **必须带 `due_only = true`**（与 `reflection-due-daily` cron 同口径）：
+            // `require_mature` 由 `filter.due_only` 决定（`reflection.rs:2908`），
+            // 而成熟门的作用是「快照没到持有期终点 ⇒ 保持 pending，不写终评」。
+            // 绕过它会让**未成熟的行也去调 LLM**；LLM 无 verdict 时状态被写成
+            // `failed: REFLECTION_OUTPUT_INCOMPLETE` ⇒ 该行**永久失去被再次处理的机会**
+            //（2026-10-26 实测：误标 15 行，恢复后 pending 回到 91）。
+            //
+            // `due_only` 同时把「hindsight_date 未到」的行排除在本轮之外（到期筛选下推到 SQL）。
+            Some(&axagent_lib::ReflectionFilter {
+                period: None,
+                due_only: true,
+                min_confidence: None,
+                depth_override: None,
+            }),
+            None,
+        )
+        .await;
+        match r {
+            Ok(v) => println!("[run-reflection] 第 {round} 轮: {v}"),
+            Err(e) => println!("[run-reflection] 第 {round} 轮失败: {e}"),
+        }
+        let after = count_pending().await;
+        if after >= before {
+            println!("[run-reflection] pending 未减少（{before} → {after}）⇒ 本轮不可推进，停止。");
+            break;
+        }
+    }
+
+    let pending_after = count_pending().await;
+    println!();
+    println!("[run-reflection] 结束：pending {pending_before} → {pending_after}");
+    Ok(())
+}
+
+async fn backfill_performance_mode(
+    db: &sea_orm::DatabaseConnection,
+    apply: bool,
+) -> Result<(), String> {
+    use sea_orm::{ConnectionTrait, Statement};
+
+    let backend = db.get_database_backend();
+
+    println!("=== axagent-validate-backfill / --backfill-performance ===");
+    println!(
+        "模式  : {}",
+        if apply {
+            "APPLY（写库）"
+        } else {
+            "DRY-RUN（不写库）"
+        }
+    );
+    println!("目标  : 已有四周期 JSON 但从未物化进 strategy_performance 的反思行");
+    println!(
+        "口径  : 只补「已成熟且可判定」的档（status ∈ {{mature, legacy}} 且 wasCorrect ∈ {{0,1}}）"
+    );
+    println!("幂等  : 物化键 = reflection-horizon:{{决策 id}}:{{档}} ⇒ 可重复跑");
+    println!();
+
+    // ── 1. 待回填目标（干跑也要先看清要动什么）──
+    let rows = db
+        .query_all_raw(Statement::from_string(
+            backend,
+            r#"SELECT r.id AS reflection_id,
+                      r.original_analysis_id AS analysis_id,
+                      r.stock_code,
+                      r.horizon,
+                      coalesce(a.template_version, -1) AS tv,
+                      length(r.horizon_results_json) AS hz_len
+               FROM stock_reflections r
+               LEFT JOIN stock_analyses a ON a.id = r.original_analysis_id
+               WHERE r.horizon_results_json IS NOT NULL
+                 AND r.horizon_results_json <> ''
+                 AND NOT EXISTS (
+                   SELECT 1 FROM strategy_performance sp
+                   WHERE sp.source_ref = 'reflection-horizon:' || r.original_analysis_id || ':' || coalesce(r.horizon, '')
+                 )
+               ORDER BY r.created_at"#
+                .to_string(),
+        ))
+        .await
+        .map_err(|e| format!("读取待回填反思失败: {e}"))?;
+
+    println!("待回填反思行: {}", rows.len());
+    if !apply {
+        for r in rows.iter().take(20) {
+            let rid: String = r
+                .try_get("", "reflection_id")
+                .map_err(|e| format!("取 reflection_id 失败: {e}"))?;
+            let code: String =
+                r.try_get("", "stock_code").map_err(|e| format!("取 stock_code 失败: {e}"))?;
+            let hz: Option<String> =
+                r.try_get("", "horizon").map_err(|e| format!("取 horizon 失败: {e}"))?;
+            let tv: i32 = r.try_get("", "tv").map_err(|e| format!("取 tv 失败: {e}"))?;
+            println!("  {rid}  {code}  档={hz:?}  代际={tv}");
+        }
+        if rows.len() > 20 {
+            println!("  …（其余 {} 行省略）", rows.len() - 20);
+        }
+        println!();
+        println!("DRY-RUN 结束：加 --apply 执行回填。");
+        return Ok(());
+    }
+
+    // ── 2. 执行回填（幂等）──
+    let (scanned, materialized) =
+        axagent_analysis_engine::evolution_drift::backfill_reflection_horizon_performance(db)
+            .await?;
+    println!("扫描反思行 {scanned} 条，物化档位样本 {materialized} 条");
+
+    // ── 3. 验收：逐档样本量（校准门槛 = 30）──
+    let rows2 = db
+        .query_all_raw(Statement::from_string(
+            backend,
+            r#"SELECT count(*) AS total,
+                      count(*) FILTER (WHERE source_ref LIKE 'reflection-horizon:%') AS ch31
+               FROM strategy_performance"#
+                .to_string(),
+        ))
+        .await
+        .map_err(|e| format!("统计 strategy_performance 失败: {e}"))?;
+    for r in &rows2 {
+        let total: i64 = r.try_get("", "total").unwrap_or(0);
+        let ch31: i64 = r.try_get("", "ch31").unwrap_or(0);
+        println!("strategy_performance 总行 {total}（其中 #31 四档行 {ch31}）");
+    }
+
+    Ok(())
+}
+
 async fn fill_factors_mode(db: &sea_orm::DatabaseConnection, apply: bool) -> Result<(), String> {
     use axagent_analysis_engine::factors::{FACTOR_VERSION, FactorBar, compute_factors};
     use sea_orm::{ConnectionTrait, Statement, Value};
@@ -964,7 +1216,7 @@ async fn backfill_history_mode(
 // 因此「今天能回放哪些日」逐日变化，调度必须**每天跑一次**而不是一次跑完。
 //
 // 本模式做两件事：
-// ① 算出**今天**哪些 as_of 日同时满足「建池双源快照齐全」与「T+2 已到期」；
+// ① 算出**今天**哪些 as_of 日同时满足「建池快照至少一源齐全」与「T+2 已到期」；
 // ② 对这些日各发一个时间旅行批次，并轮询到终态后汇报产出。
 //
 // ⚠ 批次内部是**两段式**：guard 内跑选股与分析（"今天"= as_of），
@@ -1125,7 +1377,7 @@ async fn time_travel_mode(
                             }
                         } else {
                             println!(
-                                "[{d}] 连接池忙（批次并发取数占满 20 连接），{attempt}0s 后重试…"
+                                "[{d}] 连接池忙（批次并发取数占满 20 连接），第 {attempt} 次重试…"
                             );
                             tokio::time::sleep(std::time::Duration::from_secs(30 * attempt as u64))
                                 .await;

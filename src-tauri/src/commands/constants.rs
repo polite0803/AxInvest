@@ -57,3 +57,10 @@ pub const MOVER_RECALL_ANALYSIS_TASK_TYPE: &str = "mover-recall-analysis";
 
 /// 全市场代码空间分片扫描（`universe_scan`）的 task_type。归属理由同上一条。
 pub const UNIVERSE_SCAN_TASK_TYPE: &str = "universe-code-scan";
+
+/// 每日时间旅行回放批次（`time_travel_batch`，R-2）的 task_type。归属理由同
+/// [`MOVER_RECALL_ANALYSIS_TASK_TYPE`]：`scheduled_task`（「立即执行」白名单）、
+/// `init/services.rs`（executor 分支 + 交易日闸门）与 `init/stock_automation_cron_seed`
+/// （播种）三处都要读它，留在业务模块会逼出 `crate::commands::time_travel_batch::`
+/// 横向互调，撞分层护栏规则 2。
+pub const TIME_TRAVEL_BATCH_TASK_TYPE: &str = "time-travel-batch";

@@ -6079,10 +6079,22 @@ pub async fn create_validate_decisions_cron(
     reflection_depth: Option<String>,
     enabled: Option<bool>,
 ) -> Result<CronJobResponse, String> {
-    let id = format!("vldec-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("x"));
+    // ⚠ 幂等（R-3g 顺带修，2026-10-26）：原实现用**随机 uuid** 作 id 且**无条件 `add`**
+    // ⇒ 每调一次 `create` 就多一条 active 任务（实测库里累积到 **7 条**
+    // `validate-decisions@0 6 * * *`，`scripts/check-cron-job-authority.mjs` 的 R3/R4 因此报红）。
+    //
+    // 修法：**id 由「参数指纹」派生** ⇒ 同参数 ⇒ 同 id ⇒ 覆盖（幂等）；
+    // 不同参数（threshold/depth 不同）⇒ 不同 id ⇒ 可并存（用户要建多个不同配置的任务）。
+    // 且 `add` 前先 `remove` 同 id 的旧行 ⇒ 覆盖而非并存。
+    //
+    // ⚠ 库里**已存在的 7 条**历史重复不在本次处理范围 ——
+    // `check-cron-job-authority.mjs` 明写「处置动作是**在任务中心删除**，本门不代删
+    // （那是用户建的任务）」⇒ 本次只修**代码根因**，不代删用户数据。
     let expr = cron_expression.unwrap_or_else(|| "0 6 * * *".to_string());
     let threshold = min_confidence_threshold.unwrap_or(0);
     let depth = reflection_depth.unwrap_or_else(|| "light".to_string());
+    // 参数指纹：只取影响任务行为的两个参数（schedule 变化时同 id 也可覆盖）
+    let id = format!("vldec-{threshold}-{depth}");
     let desc = validate_decisions_desc(threshold, &depth);
     // [2026-09-13] 配置必须序列化进 `prompt`。
     // executor 的 `validate-decisions` 分支从 `prompt` 反序列化
@@ -6098,6 +6110,8 @@ pub async fn create_validate_decisions_cron(
     if !enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
     }
+    // 幂等（R-3g 顺带修）：先移除同 id 的旧行 ⇒ 覆盖而非并存
+    let _ = state.cron_job_store.remove(&id).await;
     state.cron_job_store.add(job.clone()).await;
     Ok(CronJobResponse::from(&job))
 }

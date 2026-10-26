@@ -14356,8 +14356,6 @@
       "deliveryProgressUpdateIntervalSecs": "Delivery progress update interval (seconds)",
       "deliveryAutoStart": "Auto-start delivery",
       "deliveryParallelWorkflows": "Parallel delivery workflows",
-      "agentTemperature": "Agent temperature (0-1)",
-      "agentMaxTokens": "Agent max tokens",
       "agentTimeoutSecs": "Agent timeout (seconds)",
       "agentRetryMax": "Agent max retries",
       "notifyNewLead": "Notify on new lead",
@@ -16207,7 +16205,8 @@
         "profiles": "Profiles",
         "data": "Data",
         "params": "Params",
-        "recommendation": "Recommendations"
+        "recommendation": "Recommendations",
+        "gates": "Veto-Gates"
       },
       "check": "Check",
       "loadFailed": "Failed to load config",
@@ -18099,8 +18098,6 @@
       "maxConcurrent": "Maximale Anzahl parallel analysierender Agenten (1-32)",
       "klineLimit": "Anzahl der Kerzen (60-500)",
       "newsLimit": "Anzahl der Nachrichten (10-100)",
-      "agentTemperature": "LLM-Temperatur (0-2)",
-      "agentMaxTokens": "Maximale Anzahl von LLM-Ausgabe-Token",
       "agentTimeoutSecs": "Timeout pro Agent-Knoten in Sekunden",
       "agentRetryMax": "Maximale Wiederholungen pro Agent-Knoten",
       "toolTimeoutSecs": "Timeout pro Tool-Knoten in Sekunden",
@@ -18594,6 +18591,30 @@
         "trader": "f7 nutzt Richtung, Konfidenz und Kursableitung des LLM-Händlers (Produktionsbasis vor v183).",
         "absent": "f7 hat keine Eingabe ⇒ dieser Faktor zählt 0 und scheidet aus der Gewichtung; diese Seite trägt kein Handelssignal.",
         "unknown": "Diese Seite hat die Herkunft der f7-Eingabe nicht deklariert ⇒ Unabhängigkeit von der LLM-Entscheidung unklar."
+      }
+    },
+    "decisionGates": {
+      "title": "Entscheidungs-Veto-Gates",
+      "warning": "Das Öffnen der Veto-Gates schwächt die Risikosteuerung",
+      "warningDetail": "Diese Gates blockieren derzeit einige Kaufsignale. Durch das Öffnen steigt die Trefferquote nicht — die beobachtete erwartete Rendite der Ultra-Short-Stufe ist negativ. Das Öffnen macht die Wirkung nur messbar, nicht rentabler.",
+      "loadFailed": "Gate-Status konnte nicht gelesen werden: {{error}}",
+      "saveFailed": "Gate-Status konnte nicht gespeichert werden: {{error}}",
+      "saved": "Gate-Status gespeichert (wirkt ab dem nächsten Analyse-Lauf)",
+      "riskVeto": {
+        "label": "Risiko-Veto-Gate öffnen",
+        "desc": "Hoch- und Extremrisiko-Werte dürfen normalerweise weder auf- noch zugekauft werden. Nach dem Öffnen sind Einstiege möglich; die Positionsgröße bleibt durch das Risikolimit begrenzt."
+      },
+      "sentiment": {
+        "label": "Sentiment-Gate öffnen",
+        "desc": "Ist die marktweite Limit-up-Breite zu gering, gibt diese Stufe normalerweise kein Kaufsignal. Nach dem Öffnen entfällt dieses Veto (die Ultra-Short-Stufe bleibt durch die noch nicht angeschlossene Mikrostruktur-Bein-Begrenzung gedeckelt)."
+      },
+      "valuation": {
+        "label": "Bewertungs-Gate öffnen",
+        "desc": "Starke Überbewertung (DCF-Upside ≤ −35% oder PE ≥ eigenes 80. Perzentil der 5 Jahre) blockiert normalerweise den Kauf. Nach dem Öffnen entfällt dieses Veto. Fehlende Bewertungsdaten gelten weiterhin als unbestimmt, nicht als bestanden."
+      },
+      "tierBuy": {
+        "label": "Top-Level übernimmt Stufen-Käufe",
+        "desc": "Ist die Kalibrierung unter dem Schwellenwert, wird die Konfidenz gedeckelt und die Aktion mitabgestuft — die Top-Level-Kaufzahl bleibt damit null. Nach dem Öffnen übernimmt das Top-Level die in der Stufe getroffenen Kaufentscheidungen. Die Konfidenzdeckelung gilt weiterhin."
       }
     }
   },

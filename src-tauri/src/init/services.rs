@@ -2083,17 +2083,53 @@ pub async fn inject_tool_resolver_into(
     engine_for_set.set_tool_resolver(resolver).await;
 }
 
-async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
+/// 启动 cron 调度器（**桌面应用路径**，带 `AppHandle`）。
+///
+/// 见 [`start_cron_scheduler_headless`] 的 `app: Option` 说明与 C 方案背景。
+pub async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
+    start_cron_scheduler_opt(Some(app), state).await
+}
+
+/// 启动 cron 调度器（**无头服务路径**，无 `AppHandle`）。
+///
+/// ⚠ **C 方案（2026-10-26）**：无头服务端（`server_main`）用它启动调度器，
+/// 使定时任务（回放 / 反思 / 荐股 / 决策回测）在**桌面应用未运行**时仍会发生。
+///
+/// ⇒ 这是「应用一关，长任务就腰斩」（实测 `mover_recall_analysis_batches` 连续 3 次
+/// `interrupted`）的**结构性解法**：调度器的宿主不再必须是 GUI 进程。
+///
+/// ⚠ 无头路径的**已知降级**（逐条显式记录，不静默）：
+///   · 荐股**桌面通知**降级为日志（`send_desktop_notification_opt(None, …)`）——结果仍落库；
+///   · **中断分析重跑**跳过（它靠 AppHandle 反查 managed state，见该分支的注释）。
+pub async fn start_cron_scheduler_headless(state: &AppState) {
+    start_cron_scheduler_opt(None, state).await
+}
+
+/// 启动 cron 调度器（`app` 可选 ⇒ 桌面 / 无头共用一份实现）。
+///
+/// ⚠ **C 方案（2026-10-26）**：`app` 改为 `Option<tauri::AppHandle>` ——
+///
+/// **为什么**：调度器原先**必须**有 `AppHandle`，于是它只能活在 Tauri 应用进程里
+/// ⇒ 应用一关，调度器就没了 ⇒ 每日定时任务（回放 / 反思 / 荐股 / 决策回测）不再发生。
+/// 实测代价：`mover_recall_analysis_batches` **连续 3 次 `interrupted`**，
+/// 消息统一是「应用重启：运行中进程退出，as-of 封闭世界无法跨进程续跑」。
+///
+/// ⇒ 无头服务端（`server_main`）也要能跑调度器 ⇒ `AppHandle` 变成**可选**：
+///   · `Some(app)` = 桌面应用路径 ⇒ 荐股推送走桌面通知 + 前端事件；
+///   · `None`      = 无头路径 ⇒ **推送降级为不推送**（记一条日志，不静默丢）。
+///
+/// ⚠ 桌面通知命令（`commands::desktop`）被 `#[cfg(not(mobile))]` 排除，
+/// 移动端下 `app` 无处可用 ⇒ 一并门控，否则 Android 构建报 unused_variables。
+async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppState) {
     use axagent_runtime::cron::{CronExecutor, CronScheduler};
 
-    // 荐股定时任务的推送通道是 OS 桌面通知，需要 AppHandle。
-    // 此前该分支整个不存在，所以没传 app；恢复接线后必须带上。
-    // ⚠ 桌面通知命令（`commands::desktop`）被 `#[cfg(not(mobile))]` 排除，移动端下
-    // `app` / `app_handle` 均无处可用 ⇒ 一并门控，否则 Android 构建报 unused_variables。
     #[cfg(mobile)]
     let _ = app;
     #[cfg(not(mobile))]
-    let app_handle = app.clone();
+    // ⚠ `Option<&AppHandle>::cloned()` 会得到 `Option<&AppHandle>`（复制的是引用）⇒
+    //   必须 `map(|a| a.clone())` 才拿到 owned 的 `Option<AppHandle>`
+    //   （下面两处分支都要把 `AppHandle` move 进 `'static` 闭包 ⇒ 必须 owned）。
+    let app_handle = app.map(|a| a.clone());
 
     let store = state.cron_job_store.clone();
 
@@ -2634,8 +2670,11 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     // ⚠ 桌面通知命令仅存在于非 mobile 构建（`commands::desktop` 被
                     // `#[cfg(not(mobile))]` 排除）；Android(target=mobile) 下整个块剔除，
                     // 通知不具备跨端意义，跳过即可（结果已落库）。
+                    // ⚠ C 方案：无头路径（`server_main`）**没有 AppHandle** ⇒
+                    //   走 `send_desktop_notification_opt(None, …)` ⇒ 降级为日志
+                    //   （结果仍落库，不是静默丢弃）。
                     #[cfg(not(mobile))]
-                    if let Err(e) = crate::commands::desktop::send_desktop_notification(
+                    if let Err(e) = crate::commands::desktop::send_desktop_notification_opt(
                         app,
                         title.clone(),
                         body.clone(),
@@ -3000,7 +3039,28 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 // ⇒ 唯一安全路径是拿 `AppHandle` 反查 managed state。
                 // `use tauri::Manager` 必须就近引入：本文件头只 `use tauri::Emitter`
                 // （`state()` 是 `Manager` trait 的方法，缺它编译不过）。
+                //
+                // ⚠ C 方案（无头服务端路径）：**没有 AppHandle** ⇒ 反查不到 managed state
+                //   ⇒ 本任务在无头路径下**跳过**（记日志，不静默）。
+                //   该任务是「中断分析补跑」，本质依赖 Tauri 的窗口/事件通道；
+                //   无头服务常驻时桌面应用通常也在跑，这条由桌面侧负责即可。
                 use tauri::Manager;
+                let Some(app_for_job) = app_for_job else {
+                    let result = axagent_runtime_core::TaskRunResult {
+                        success: true,
+                        output: Some(
+                            "无头服务路径：中断分析重跑依赖 Tauri AppHandle（反查 managed state），本轮跳过"
+                                .to_string(),
+                        ),
+                        error: None,
+                        duration_ms: elapsed(),
+                        executed_at: started,
+                        skipped: true,
+                        partial: false,
+                    };
+                    store.record_run(&job_id, result).await;
+                    return;
+                };
                 let state_ref = app_for_job.state::<crate::AppState>();
                 let outcome = crate::commands::stock_analysis_rerun::run_rerun(
                     Some(app_for_job.clone()),
@@ -3460,7 +3520,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 // 需要决策质量口径（`stock_analyses.outcome`）时再显式打开。
                 let analyze = cfg.get("analyze").and_then(|v| v.as_bool()).unwrap_or(false);
 
-                // 2. 今天可回放的 as_of 日（快照齐全 + 持有期已到期）
+                // 2. 今天可回放的 as_of 日（快照至少一源齐全 + 持有期已到期）
                 let dates = match crate::commands::time_travel_batch::list_replayable_as_of_dates(
                     &db,
                     min_holding_days,
@@ -3517,6 +3577,8 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 //    这里轮询到终态再记录 —— 否则任务中心会显示「成功」而批次还在跑。
                 let mut ok_days = 0usize;
                 let mut fail_days = 0usize;
+                // R-3y（2026-10-26）：「并发占用」单独计数 —— 本轮没排上 ≠ 跑失败。
+                let mut skip_days = 0usize;
                 let mut picks_total = 0i64;
                 for (as_of, ago) in &dates {
                     let request = crate::commands::time_travel_batch::TimeTravelBatchRequest {
@@ -3543,8 +3605,28 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         {
                             Ok(id) => id,
                             Err(e) => {
-                                // live 时间窗 / 快照覆盖 / 批次互斥 都在这里被拒绝 ——
-                                // **如实计入失败**而不是静默跳过。
+                                // ── R-3y（2026-10-26）：「锁被占」**不是失败** ──
+                                // 实证：15:03 mover-recall 批次持 `time_travel_batch_lock`
+                                //   ⇒ 15:05 回放 cron 的 20 个日**全部** `ALREADY_RUNNING`
+                                //   ⇒ 旧实现把它们全计 fail_days ⇒ 记「20 个回放日失败」
+                                //   且**不落任何批次行** ⇒ 除 `cron_job_history.output`
+                                //   外无处可查（任务中心看不到「今天因为锁被占而没跑」）。
+                                //
+                                // 正确分类：**并发占用 = 本轮没排上**（skip），
+                                //   与「跑失败」是**两个不同事实** —— 混算会让「失败率」
+                                //   把「调度拥挤」误报成「功能坏了」。
+                                //
+                                // ⚠ 只把 `ALREADY_RUNNING` 归为 skip：live 窗 / 快照覆盖
+                                //   等**真失败**仍如实计入 fail_days（它们不会被重试解决）。
+                                if e.contains("ALREADY_RUNNING") {
+                                    tracing::warn!(
+                                        "[CronScheduler] 时间旅行批次 {} 未发起：并发占用（另有 as-of 批次在跑）⇒ 本轮跳过，不计失败",
+                                        as_of
+                                    );
+                                    skip_days += 1;
+                                    continue;
+                                }
+                                // live 时间窗 / 快照覆盖 都在这里被拒绝 —— **如实计入失败**而不是静默跳过。
                                 tracing::warn!(
                                     "[CronScheduler] 时间旅行批次 {} 发起失败: {e}", as_of
                                 );
@@ -3589,10 +3671,11 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 }
 
                 let summary = format!(
-                    "回放日 {} 个（成功 {} / 失败 {}）｜荐股总行数 {}",
+                    "回放日 {} 个（成功 {} / 失败 {} / 并发占用跳过 {}）｜荐股总行数 {}",
                     dates.len(),
                     ok_days,
                     fail_days,
+                    skip_days,
                     picks_total
                 );
                 tracing::info!(
@@ -3601,12 +3684,17 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     summary
                 );
                 let result = axagent_runtime_core::TaskRunResult {
+                    // ⚠ 只有**真失败**才算失败；「并发占用跳过」不是失败
+                    //   （那些日**没有被尝试执行**，把它们算进失败率会把「调度拥挤」
+                    //   误报成「回放功能坏了」—— R-3y 实测 20/20 被误判）。
                     success: fail_days == 0,
                     output: Some(summary),
                     error: (fail_days > 0).then(|| format!("{fail_days} 个回放日失败")),
                     duration_ms: elapsed(),
                     executed_at: started,
-                    skipped: false,
+                    // ⚠ 全被并发占用 ⇒ 本轮**实际没跑任何一天** ⇒ 记 skipped
+                    //   （与「跑了但都失败」是两件事，任务中心要能分开显示）。
+                    skipped: fail_days == 0 && ok_days == 0 && skip_days > 0,
                     partial: fail_days > 0,
                 };
                 store.record_run(&job_id, result).await;
@@ -4281,7 +4369,105 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
         }
     });
 
-    let scheduler = Arc::new(CronScheduler::new(store, Arc::new(executor)));
+    // ── R-3aa（2026-10-26）：跨进程 leader 租约 ─────────────────────────
+    //
+    // 此前调度器**没有任何跨进程互斥** ⇒ 两个进程（桌面应用 + 将来的常驻 daemon，
+    // 或用户开了两个实例）会**各自派发同一批任务** ⇒ 同一 as_of 回放日跑两遍、
+    // 荐股跑两遍 ⇒ 落库冲突 + 样本重复计数。
+    //
+    // 机制：DB 里的**带过期时间的租约行**（`cron_leader_lease`）。
+    //   · 抢到 = 本进程是 leader ⇒ 派发；
+    //   · 抢不到 = 别人是 leader ⇒ **只观察不派发**；
+    //   · 租约过期（进程崩溃）⇒ 自动失效 ⇒ 别的进程接管（无需清理逻辑）。
+    //
+    // ⚠ 租约存储细节在 `dao` 层，判定逻辑在本层 —— `runtime` crate 仍**零 DB 依赖**
+    //   （它靠 `with_leader_check` 注入一个闭包，不感知租约是什么）。
+    let leader = {
+        use axagent_dao::repo::cron_leader_lease as lease_repo;
+        let db = state.harness.db().clone();
+        let holder_id =
+            format!("{}-{}", state.harness.db_path(), chrono::Utc::now().timestamp_millis());
+        match lease_repo::try_acquire(
+            &db,
+            lease_repo::LEASE_SCHEDULER,
+            &holder_id,
+            lease_repo::LEASE_TTL,
+        )
+        .await
+        {
+            Ok(lease_repo::LeaseAcquire::Acquired) => {
+                tracing::info!(
+                    "[CronScheduler] 已取得调度 leader 租约（holder={holder_id}）⇒ 本进程负责派发定时任务"
+                );
+                Some((db, holder_id))
+            },
+            Ok(lease_repo::LeaseAcquire::HeldByOther { holder_id, expires_at }) => {
+                tracing::warn!(
+                    "[CronScheduler] 调度 leader 租约在别处（holder={holder_id}，到期={expires_at}）⇒ 本进程只观察不派发"
+                );
+                None
+            },
+            Ok(lease_repo::LeaseAcquire::StaleTakenByOther { holder_id }) => {
+                tracing::warn!(
+                    "[CronScheduler] 调度 leader 租约已被他人接管（holder={holder_id}）⇒ 本进程只观察不派发"
+                );
+                None
+            },
+            Err(e) => {
+                // ⚠ 抢租约失败（表不存在 / DB 不可达）⇒ **降级为「照常派发」**：
+                //   这是旧行为（单进程部署）。若因抢租约失败而静默不派发，
+                //   等于「租约功能一坏，全站定时任务全停」⇒ 故障放大。
+                //   正确做法是记 ERROR 并照常跑（多进程风险由运维承担）。
+                tracing::error!("[CronScheduler] 抢调度 leader 租约失败（降级为无互斥派发）: {e}");
+                None
+            },
+        }
+    };
+
+    // 心跳任务：续租；续租失败（被接管）⇒ 把本进程标记为非 leader。
+    let leader_flag: Arc<std::sync::atomic::AtomicBool> =
+        Arc::new(std::sync::atomic::AtomicBool::new(leader.is_some()));
+    if let Some((db, holder_id)) = leader {
+        let flag = leader_flag.clone();
+        tauri::async_runtime::spawn(async move {
+            use axagent_dao::repo::cron_leader_lease as lease_repo;
+            loop {
+                tokio::time::sleep(lease_repo::LEASE_HEARTBEAT_INTERVAL).await;
+                match lease_repo::heartbeat(
+                    &db,
+                    lease_repo::LEASE_SCHEDULER,
+                    &holder_id,
+                    lease_repo::LEASE_TTL,
+                )
+                .await
+                {
+                    Ok(true) => {},
+                    Ok(false) => {
+                        tracing::error!(
+                            "[CronScheduler] 续租失败（租约已被他人接管）⇒ 本进程停止派发定时任务"
+                        );
+                        flag.store(false, std::sync::atomic::Ordering::Release);
+                        break;
+                    },
+                    Err(e) => {
+                        // ⚠ 续租**读失败**（DB 抖动）≠ 失去租约：此时不能立刻停派发
+                        //   （一次网络抖动就把全站定时任务停掉是故障放大）。
+                        //   ⇒ 记录并继续；租约本身有 TTL 兜底（到期后别人接管，
+                        //   那一刻本进程会被 leader_check 判定为非 leader）。
+                        tracing::error!("[CronScheduler] 续租出错（保持现状，等待下次心跳）: {e}");
+                    },
+                }
+            }
+        });
+    }
+
+    let leader_check = {
+        let flag = leader_flag.clone();
+        Arc::new(move || flag.load(std::sync::atomic::Ordering::Acquire))
+            as Arc<dyn Fn() -> bool + Send + Sync>
+    };
+    let scheduler =
+        Arc::new(CronScheduler::new(store, Arc::new(executor)).with_leader_check(leader_check));
 
     // 保存到 AppState 以便外部控制（停止/重启）
     {

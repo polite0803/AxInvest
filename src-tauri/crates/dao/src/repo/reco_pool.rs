@@ -81,6 +81,24 @@ pub struct NewRecoPick {
 ///
 /// 写失败**不静默**（逐行 warn 带代码/档位/风格）：此前 `let _ = insert(..)` 失败无感知，
 /// 前端表现为"无缓存"、定时链路表现为"候选池为空"，两头都查不到根因。
+///
+/// ## 幂等（R-3g，2026-10-26）
+///
+/// **同一业务键重复跑批不再累积重复行**：业务键 =
+/// `(as_of_date, period, stock_code, style, purpose)`。
+///
+/// 背景：`reco_picks` 只有主键 `id`（随机 uuid），**无业务唯一约束**
+/// ⇒ 同一 `as_of` 重跑一次就多一份行。实测（2026-10-26）：
+/// `2026-09-28 / short` 累计 **74 行 / 21 只票（53 行重复）**。
+/// 且每日 cron 选的是「最近可用快照日」⇒ **快照未更新的连续多天会反复选到同一个 as_of**
+/// ⇒ 重复不是异常路径，是常态。
+///
+/// 为什么**不**改成「跑批前 DELETE 旧行」：批次中途失败会把旧的可���数据删掉又补不回来。
+/// 为什么**不**加 DB 唯一约束：要改表结构（与「声明式 schema 同步」那条线冲突），
+/// 且现存重复行会让建索引直接失败。
+/// ⇒ 选**应用层同键覆盖**：不动表结构、不删任何行、重复跑批只更新不新增。
+///
+/// 覆盖时**保留原 `id`**（`id` 被 `get_cached_recommendation` 等按 id 引用）。
 pub async fn insert_picks(
     db: &DatabaseConnection,
     picks: &[NewRecoPick],
@@ -91,8 +109,26 @@ pub async fn insert_picks(
 ) -> usize {
     let mut written = 0usize;
     for pick in picks {
-        let am = reco_picks::ActiveModel {
-            id: Set(uuid::Uuid::new_v4().to_string()),
+        // ── 幂等：先查同业务键的既有行（一次 SELECT，不在循环里 N+1）──
+        let existing_id = find_existing_pick_id(
+            db,
+            batch.as_of_date,
+            batch.purpose,
+            &pick.period,
+            &pick.stock_code,
+            &pick.style,
+        )
+        .await;
+
+        // ⚠ `existing_id` 只能消费一次 ⇒ 先取判据再移动（E0382）
+        let is_update = existing_id.is_some();
+        let pick_id = existing_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+        // 用**闭包**构造 ActiveModel，而不是先造一个值 ——
+        // `update`/`insert` 都会**消费** ActiveModel（E0382），
+        // 而「撞唯一约束后重试覆盖」需要**再造一次** ⇒ 值形态做不到，闭包可以。
+        let build_model = || reco_picks::ActiveModel {
+            id: Set(pick_id.clone()),
             generated_at: Set(batch.generated_at.to_string()),
             period: Set(pick.period.clone()),
             stock_code: Set(pick.stock_code.clone()),
@@ -108,17 +144,130 @@ pub async fn insert_picks(
             purpose: Set(Some(batch.purpose.to_string())),
             created_at: Set(batch.generated_at.to_string()),
         };
-        match am.insert(db).await {
+        let outcome = match is_update {
+            // 同键已存在 ⇒ 覆盖（保留 id），不新增行
+            true => build_model().update(db).await.map(|_| ()),
+            false => build_model().insert(db).await.map(|_| ()),
+        };
+        match outcome {
             Ok(_) => written += 1,
-            Err(e) => tracing::warn!(
-                "[reco_pool::insert_picks] 写入 reco_picks 失败 ({} {} {}): {e}",
-                pick.period,
-                pick.stock_code,
-                pick.style
-            ),
+            Err(e) => {
+                // ⚠ 唯一约束冲突（2026-10-26 加 `uq_reco_picks_business_key` 之后）：
+                //   「先查已有行 → 无 ⇒ INSERT」这条路在**并发**下会撞（两个进程同时查到
+                //   无已有行、都去 INSERT）⇒ 第二个撞唯一约束。
+                //   撞了**不能只 warn**：那等于静默丢一行荐股票（= 少一个候选）。
+                //   正确处置 = 当成「同键已被别人写进」⇒ 重查该键的 id 并改成覆盖（保留 id）。
+                //   ⚠ live 荐股 cron **没有全局互斥锁**（只有时间旅行批次有）⇒ 撞约束是现实的。
+                if is_unique_violation(&e) {
+                    match find_existing_pick_id(
+                        db,
+                        batch.as_of_date,
+                        batch.purpose,
+                        &pick.period,
+                        &pick.stock_code,
+                        &pick.style,
+                    )
+                    .await
+                    {
+                        Some(existing_id) => {
+                            // 用**已存在行的 id** 覆盖（保留 id ⇒ 下游引用不悬空）。
+                            // ⚠ 不能用 `..build_model()`（那会把 `id` 字段重复指定 ⇒ 编译错）
+                            //   ⇒ 先造再改 `id`。
+                            let mut retry = build_model();
+                            retry.id = Set(existing_id);
+                            match retry.update(db).await {
+                                Ok(_) => {
+                                    written += 1;
+                                    continue;
+                                },
+                                Err(e2) => {
+                                    tracing::warn!(
+                                        "[reco_pool::insert_picks] 同键冲突后覆盖仍失败 \
+                                         ({} {} {}): {e2}",
+                                        pick.period,
+                                        pick.stock_code,
+                                        pick.style
+                                    );
+                                },
+                            }
+                        },
+                        None => {
+                            tracing::warn!(
+                                "[reco_pool::insert_picks] 同键冲突但重查不到该键 \
+                                 ({} {} {}): {e}",
+                                pick.period,
+                                pick.stock_code,
+                                pick.style
+                            );
+                        },
+                    }
+                } else {
+                    tracing::warn!(
+                        "[reco_pool::insert_picks] 写入 reco_picks 失败 ({} {} {}): {e}",
+                        pick.period,
+                        pick.stock_code,
+                        pick.style
+                    );
+                }
+            },
         }
     }
     written
+}
+
+/// 是不是「唯一约束冲突」（并发写同一业务键）。
+///
+/// 判据：**按错误消息文本**匹配。⚠ 这比「按 SQLSTATE 23505」弱（依赖 driver 的消息格式），
+/// 但本仓的 `sea_orm::DbErr` 不携带结构化的 SQLSTATE 可供匹配，而消息里的
+/// `duplicate key value violates unique constraint` 是 PostgreSQL 的**稳定英文措辞**。
+/// ⇒ 匹配失败时的兜底是**重新按业务键查一次并覆盖**（不是丢行），所以误判成本低。
+fn is_unique_violation(e: &sea_orm::DbErr) -> bool {
+    let msg = e.to_string();
+    msg.contains("duplicate key value violates unique constraint")
+        || msg.contains("duplicate key")
+        || msg.contains("UNIQUE constraint failed")
+}
+
+/// 查同业务键的既有行 id（`reco_picks` 的幂等键）。
+///
+/// 键 = `(as_of_date, period, stock_code, style, purpose)`。
+/// `as_of_date` / `purpose` 可空 ⇒ 用 `IS NOT DISTINCT FROM` 精确匹配 NULL
+/// （`= NULL` 在 SQL 里恒为 NULL，**不能**用来比可空列）。
+async fn find_existing_pick_id(
+    db: &DatabaseConnection,
+    as_of_date: Option<&str>,
+    purpose: &str,
+    period: &str,
+    stock_code: &str,
+    style: &str,
+) -> Option<String> {
+    use sea_orm::ColumnTrait;
+
+    // ⚠ `as_of_date` 可空 ⇒ 必须**二选一**（`is_null()` 或 `eq(X)`），
+    // 绝不能写成 `is_null().or(eq(X))` —— 那会让 as_of 为 NULL 的**实盘行**
+    // 也被回放行匹配上 ⇒ 回放覆盖实盘数据。
+    // （SQL 里 `= NULL` 恒为 NULL，不能用 `eq` 比可空列的空值。）
+    let as_of_filter = match as_of_date {
+        Some(d) => reco_picks::Column::AsOfDate.eq(d),
+        None => reco_picks::Column::AsOfDate.is_null(),
+    };
+    let purpose_filter = match purpose {
+        "" => reco_picks::Column::Purpose.is_null(),
+        p => reco_picks::Column::Purpose.eq(p),
+    };
+
+    reco_picks::Entity::find()
+        .filter(as_of_filter)
+        .filter(purpose_filter)
+        .filter(reco_picks::Column::Period.eq(period))
+        .filter(reco_picks::Column::StockCode.eq(stock_code))
+        .filter(reco_picks::Column::Style.eq(style))
+        .order_by_desc(reco_picks::Column::CreatedAt)
+        .one(db)
+        .await
+        .ok()
+        .flatten()
+        .map(|m| m.id)
 }
 
 /// 一条 L3 截断留痕（算出该票、但在组内 top-N 被截掉）。

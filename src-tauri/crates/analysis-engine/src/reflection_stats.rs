@@ -749,14 +749,41 @@ fn find_bool_recursive(value: &serde_json::Value, key: &str) -> Option<bool> {
 /// - 已成熟周期的 action / 收益 / alpha / 目标价全部取自该周期自身条目，不与其他周期串线。
 ///
 /// 返回 `None` 表示该 JSON 不是四周期对象（无法解析 / 非对象），调用方回退 legacy 单周期字段。
+///
+/// `only_tier`（2026-10-26 新增）：只展开指定档。
+///
+/// 为什么需要这个参数：#31 四档通道在 `strategy_performance` 里是**一行一档**
+/// （`source_ref = reflection-horizon:{决策 id}:{档}`，行内 `period`/`was_correct`/
+/// `return_pct` 就是该档的判定）。若读侧按「每条 sp 行 → 匹配一条反思行 → 展开
+/// 该反思行 JSON 的全部四档」处理，同一决策的 N 条 sp 行会各自展开出同样的 4 档
+/// ⇒ **每档被重复计票 N 次**（命中率被放大、档间差异被抹平）。
+///
+/// ⇒ #31 通道必须「只展开本行对应的那一档」：档位取自 `source_ref` 的第三段
+/// （与写侧幂等键同源），**不另立判据**。
+/// `None` = 展开全部档（Gap1 通道的既有行为：它的一行代表一次反思，四个周期都要计票）。
 pub(crate) fn expand_horizon_samples(
     json: &str,
     template_version: Option<i32>,
+) -> Option<Vec<DecisionPerformanceSample>> {
+    expand_horizon_samples_filtered(json, template_version, None)
+}
+
+/// [`expand_horizon_samples`] 的带档位过滤版本（见该函数的 `only_tier` 说明）。
+pub(crate) fn expand_horizon_samples_filtered(
+    json: &str,
+    template_version: Option<i32>,
+    only_tier: Option<&str>,
 ) -> Option<Vec<DecisionPerformanceSample>> {
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
     let map = value.as_object()?;
     let mut samples = Vec::new();
     for (horizon, entry) in map {
+        // 档位过滤：#31 通道只认本行对应的那一档（其余档由它们自己的 sp 行计票）。
+        if let Some(t) = only_tier {
+            if horizon != t {
+                continue;
+            }
+        }
         let Some(entry) = entry.as_object() else {
             continue; // schemaVersion 等标量键
         };
@@ -843,6 +870,24 @@ fn nearest_analysis_dimensions<'a>(
         .min_by_key(|a| (a.created_at - decision_at).abs())
 }
 
+/// 拆 #31 四档通道的 `source_ref` ⇒ `(被复盘决策 id, 档)`。
+///
+/// 格式 = `reflection-horizon:{决策 id}:{档}`（写侧 `evolution_drift::reflection_horizon_source_ref`）。
+/// 非该格式返回 `None`（调用方据此走其它匹配腿）。
+///
+/// ⚠ 决策 id 是 uuid（含 `-` 但无 `:`），档名不含 `:` ⇒ 按 `:` 切三段是安全的；
+/// 但**必须校验前缀**，否则别的通道（`reflection_verdict` / `reflection:short` /
+/// 无 `source_ref`）会被误解析。
+fn split_ch31_source_ref(source_ref: Option<&str>) -> Option<(&str, &str)> {
+    let raw = source_ref?;
+    let rest = raw.strip_prefix("reflection-horizon:")?;
+    let (aid, tier) = rest.split_once(':')?;
+    if aid.is_empty() || tier.is_empty() {
+        return None;
+    }
+    Some((aid, tier))
+}
+
 /// sp 行 → 反思行的匹配：**首选显式外键**，外键缺失/悬空时退回旧的时间戳批键。
 ///
 /// 返回 `(与 sp_rows 同序的匹配结果, 走旧键回退的行数)`，纯函数（不碰 DB），
@@ -861,14 +906,35 @@ fn nearest_analysis_dimensions<'a>(
 /// 老数据两侧同构：sp.period 无后缀 ⇔ 反思行 horizon NULL ⇒ 仍按 None 相配。
 pub fn match_sp_rows_to_reflections<'a>(
     sp_rows: &'a [strategy_performance::Model],
-    ref_rows: &'a [stock_reflections::Model],
+    refl_rows: &'a [stock_reflections::Model],
 ) -> (Vec<Option<&'a stock_reflections::Model>>, usize) {
     let ref_by_id: HashMap<&str, &'a stock_reflections::Model> =
-        ref_rows.iter().map(|r| (r.id.as_str(), r)).collect();
+        refl_rows.iter().map(|r| (r.id.as_str(), r)).collect();
     let mut ref_by_batch: HashMap<(String, i64, Option<String>), &'a stock_reflections::Model> =
         HashMap::new();
-    for r in ref_rows {
+    for r in refl_rows {
         ref_by_batch.entry((r.stock_code.clone(), r.created_at, r.horizon.clone())).or_insert(r);
+    }
+    // #31 四档通道的匹配索引：**（被复盘决策 id × 档）→ 反思行**。
+    //
+    // 为什么需要这条腿（2026-10-26 实测）：#31 写侧刻意**不带** `reflection_id`
+    // （实体注释论证：同一决策的四档行要由任意一条反思行展开都收敛到同一行），
+    // 且 `created_at` 写的是**判定时刻**（`exit_at`）而非反思行**建点**时刻
+    // ⇒ 旧键 `(stock_code, created_at, 档)` 两侧永不相等 ⇒ 这批行**永远**匹配不到
+    // 反思行 ⇒ `build_hitrate_stats` 的「路径 1：按周期展开」分支从未生效
+    // ⇒ 逐档样本全部塌进 legacy 主档路径（实测 `by_horizon` 只剩 `short` 与 `unknown`）。
+    //
+    // 匹配键直接取 #31 自己的幂等键 `source_ref = reflection-horizon:{决策 id}:{档}`
+    // （同一份口径，不另立判据）：决策 id 对上「被复盘的决策行」，档对上「本行是哪一档」。
+    // 反思行按 `(original_analysis_id, horizon)` 建索引 —— 一行一档 ⇒ 该键至多命中一行。
+    let mut ref_by_decision_tier: HashMap<(&str, &str), &'a stock_reflections::Model> =
+        HashMap::new();
+    for r in refl_rows {
+        // `original_analysis_id` 是非空 String（实体 `stock_reflections.rs:14`），
+        // 不是 Option ⇒ 直接取 `&str` 查索引，没有 Option 链可 `.and_then`。
+        if let Some(h) = r.horizon.as_deref() {
+            ref_by_decision_tier.entry((r.original_analysis_id.as_str(), h)).or_insert(r);
+        }
     }
 
     let mut out = Vec::with_capacity(sp_rows.len());
@@ -876,9 +942,13 @@ pub fn match_sp_rows_to_reflections<'a>(
     for sp in sp_rows {
         let by_fk = sp.reflection_id.as_deref().and_then(|rid| ref_by_id.get(rid).copied());
         let matched = by_fk.or_else(|| {
+            // #31 四档通道：走它自己的幂等键（决策 id × 档）。
+            if let Some((aid, tier)) = split_ch31_source_ref(sp.source_ref.as_deref()) {
+                return ref_by_decision_tier.get(&(aid, tier)).copied();
+            }
             // 只有 Gap1 旧格（写侧字面量 `"reflection_verdict"`，见
             // `commands/stock_workflow/reflection.rs` 的 Gap1 构造）才该有反思行归属。
-            // 其它通道（#31 四档 / 分析回测 / 对话直执行）本来就不参与这个匹配，
+            // 其它通道（分析回测 / 对话直执行）本来就不参与这个匹配，
             // 把它们的 NULL 也计入回退数会让告警常年长亮、失去信号。
             if sp.strategy_id == "reflection_verdict" {
                 legacy_key_rows += 1;
@@ -974,9 +1044,16 @@ pub async fn build_hitrate_stats(
             });
 
         // 路径 1：反思行有四周期结果 JSON → 按周期独立展开（每周期一条样本）
+        //
+        // ⚠ #31 四档通道是**一行一档**（`source_ref = reflection-horizon:{决策 id}:{档}`）
+        // ⇒ 展开时必须**只取本行对应的那一档**：否则同一决策的 N 条 sp 行会各自展开出
+        // 同样的 4 档 ⇒ 每档被重复计票 N 次（命中率被放大、档间差异被抹平）。
+        // 档位取自 `source_ref` 第三段（与写侧幂等键同源，不另立判据）。
+        let ch31_tier: Option<&str> =
+            split_ch31_source_ref(sp.source_ref.as_deref()).map(|(_aid, tier)| tier);
         if let Some(expanded) = matched
             .and_then(|r| r.horizon_results_json.as_deref())
-            .and_then(|j| expand_horizon_samples(j, sp_template_version))
+            .and_then(|j| expand_horizon_samples_filtered(j, sp_template_version, ch31_tier))
         {
             samples.extend(expanded);
             continue;
@@ -1924,6 +2001,59 @@ mod reflection_stats_tests {
         assert_eq!(s.data_source, SampleDataSource::Reflection);
     }
 
+    /// #31 通道「一行一档」⇒ 展开必须**只取本行那一档**（2026-10-26 实证）。
+    ///
+    /// 负控：不加档位过滤时，同一决策的 short/mid 两条 sp 行会各自展开出**同样的** 4 档
+    /// ⇒ 每档被计 2 次 ⇒ 命中率被放大、档间差异被抹平。
+    #[test]
+    fn filtered_expansion_yields_exactly_one_tier_per_row() {
+        let json = serde_json::json!({
+            "schemaVersion": 1,
+            "ultra_short": {
+                "status": "mature",
+                "evaluation": { "wasCorrect": 1 },
+                "market": { "returnPct": 3.1, "alphaPct": 1.4 },
+                "decision": { "action": "买入", "confidence": 62.0 }
+            },
+            "short": {
+                "status": "mature",
+                "evaluation": { "wasCorrect": 0 },
+                "market": { "returnPct": -2.0, "alphaPct": -0.5 },
+                "decision": { "action": "减持", "confidence": 55.0 }
+            },
+            "mid": {
+                "status": "immature",
+                "evaluation": { "wasCorrect": null },
+                "market": { "returnPct": 1.0 },
+                "decision": { "action": "持有", "confidence": 40.0 }
+            }
+        })
+        .to_string();
+
+        // 不带过滤：展开全部成熟档（ultra_short + short = 2 条）
+        let all = expand_horizon_samples(&json, None).unwrap();
+        assert_eq!(all.len(), 2, "不带过滤时应展开全部成熟档");
+
+        // 带过滤：short 行只出 short 一条 —— 这正是 #31 通道要的语义
+        let only_short = expand_horizon_samples_filtered(&json, None, Some("short")).unwrap();
+        assert_eq!(only_short.len(), 1, "#31 通道每行只许出本档一条");
+        assert_eq!(only_short[0].horizon.as_deref(), Some("short"));
+        assert_eq!(only_short[0].action.as_deref(), Some("减持"));
+        assert_eq!(only_short[0].was_correct, 0);
+
+        let only_ultra = expand_horizon_samples_filtered(&json, None, Some("ultra_short")).unwrap();
+        assert_eq!(only_ultra.len(), 1);
+        assert_eq!(only_ultra[0].horizon.as_deref(), Some("ultra_short"));
+
+        // 过滤到未成熟档 ⇒ 空（该档不计票），不得回退去拿别的档
+        let only_mid = expand_horizon_samples_filtered(&json, None, Some("mid")).unwrap();
+        assert!(only_mid.is_empty(), "未成熟档不得产出样本");
+
+        // 过滤到不存在的档 ⇒ 空
+        let only_long = expand_horizon_samples_filtered(&json, None, Some("long")).unwrap();
+        assert!(only_long.is_empty(), "不存在的档不得产出样本");
+    }
+
     /// 旧记录 / 产出方漏写 confidence 时必须是 None ⇒ 该样本进命中率但**不进 IC 分母**，
     /// 由 `ic_status="no_confidence"` 点名。若这里兜底成 0，IC 会被一批假 0 拉成负相关 ——
     /// 把「拿不到」伪装成「测到 0」正是本轮要避免的形态。
@@ -2320,5 +2450,39 @@ mod hitrate_join_tests {
         let (matched, legacy) = match_sp_rows_to_reflections(&sps, &refs);
         assert_eq!(legacy, 1);
         assert_eq!(matched[0].map(|r| r.id.as_str()), Some("r-long"));
+    }
+
+    /// #31 四档通道：**不带外键 + `created_at` 是判定时刻** ⇒ 旧键必然配不上
+    /// （2026-10-26 实测：这批行全部匹配不到反思行 ⇒ 逐档展开从未生效）。
+    /// 必须靠它自己的幂等键 `source_ref = reflection-horizon:{决策 id}:{档}` 配上。
+    #[test]
+    fn ch31_rows_match_by_decision_and_tier_key() {
+        let mut r = reflection_row("r-ch31", "600004", 1_000, Some("mid"));
+        r.original_analysis_id = "ana-42".to_string();
+        let refs = vec![r];
+        // created_at（判定时刻）与反思行建点时刻刻意不同 ⇒ 旧键配不上
+        let mut sp = sp_row("s-ch31", "600004", 9_999, "mid", None);
+        sp.source_ref = Some("reflection-horizon:ana-42:mid".to_string());
+        let sps = vec![sp];
+        let (matched, legacy) = match_sp_rows_to_reflections(&sps, &refs);
+        assert_eq!(
+            matched[0].map(|r| r.id.as_str()),
+            Some("r-ch31"),
+            "#31 行必须按自己的幂等键（决策 id × 档）配上，否则逐档样本全塌进 legacy 主档"
+        );
+        assert_eq!(legacy, 0, "#31 行不是旧键回退，不该计入回退告警");
+    }
+
+    /// #31 负控：档不匹配 ⇒ 不得配到别的档的反思行（否则档间差异被抹平）。
+    #[test]
+    fn ch31_rows_do_not_match_a_different_tier() {
+        let mut r = reflection_row("r-short", "600005", 1_000, Some("short"));
+        r.original_analysis_id = "ana-43".to_string();
+        let refs = vec![r];
+        let mut sp = sp_row("s-ch31-long", "600005", 9_999, "long", None);
+        sp.source_ref = Some("reflection-horizon:ana-43:long".to_string());
+        let sps = vec![sp];
+        let (matched, _legacy) = match_sp_rows_to_reflections(&sps, &refs);
+        assert!(matched[0].is_none(), "档不匹配必须配不上，不得拿别的档的行充数");
     }
 }

@@ -87,8 +87,9 @@ function getDefaultVariables(): Variable[] {
   b("delivery_parallel_workflows", 3, "demandDiscovery.configDescriptions.deliveryParallelWorkflows", "number");
 
   // ── Agent 参数 ──
-  b("agent_temperature", 0.3, "demandDiscovery.configDescriptions.agentTemperature", "number");
-  b("agent_max_tokens", 16384, "demandDiscovery.configDescriptions.agentMaxTokens", "number");
+  // 2026-10-26（股票模板 v189）：`agent_temperature` / `agent_max_tokens` 两格已撤下。
+  // 全仓唯一的采样参数权威是「供应商-模型 → 参数」那一格；`rt-workflow` 的 Agent 执行器
+  // 不再读任何模板变量，这两格留在这里就是「面板能拨、没有代码读」。
   b("agent_timeout_secs", 300, "demandDiscovery.configDescriptions.agentTimeoutSecs", "number");
   b("agent_retry_max", 2, "demandDiscovery.configDescriptions.agentRetryMax", "number");
 
@@ -263,8 +264,6 @@ export function DemandDiscoveryConfigPanel(_props: Props) {
         tool: "agent",
         label: t("demandDiscovery.settings.group.agent"),
         vars: resolve([
-          "agent_temperature",
-          "agent_max_tokens",
           "agent_timeout_secs",
           "agent_retry_max",
         ]),

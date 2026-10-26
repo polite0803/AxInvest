@@ -2,8 +2,9 @@
 //! 使用 include_str! 编译期嵌入 .md 内容，打包后无需文件 I/O。
 
 use super::{
-    PROFILE_TOOLS, build_analyst_input_mapping, debate_rounds_graph_drift, force_variable_value,
-    merge_variable_values, resolve_bool_flag, resolve_debate_rounds, tiered_debate_graph_drift,
+    PROFILE_TOOLS, build_analyst_input_mapping, debate_rounds_graph_drift, drop_variables,
+    force_variable_value, merge_variable_values, resolve_bool_flag, resolve_debate_rounds,
+    tiered_debate_graph_drift,
 };
 use crate::commands::error_code::stock_setup;
 
@@ -1625,7 +1626,19 @@ type AlgoToolRow = (
 ///   分析师等 `Text` 节点**不下发**（一次响应同时产出正文 + VERDICT 标签，逼成 JSON 会
 ///   同时改坏正文与解析契约）；`Artifact` 节点同理。
 ///   变量表变更（删一个变量）⇒ **必须换代**，否则存量库仍留着那个已无人读的键。
-pub const TEMPLATE_VERSION: i32 = 187; // v187: Json 输出节点恒下发 response_format（原生结构化输出；退役 structured_output_mode 开关）；v186: rule-check 交易方案改读 portfolio-risk-gate（移除对 trader 的无边软依赖）；v185: 退役 `formula_independent_f7` 回滚位 —— f7 两侧形态恒定（生产恒不吃 trader / 参照侧恒吃），「主档不得依赖 LLM 决策」由开关语义改为结构保证；v184: data-quality 逐节点诊断新增可选键 `score_sum_reason`（三态：自洽/偏离/不知道），`analyst_feedbacks` 的 `score_consistent` 从此有真值可读；v183: 生产 f7 切分析师结构票（公式决策与 LLM 决策互不消费、并行；trader 口径改由参照节点 `portfolio-mgr-f7-ref` 承接）；v182: f2 改吃辩论聚合方向（consensusDirection）——`consensus_score` 按契约是收敛程度、无方向含义；v181: Agent 节点采样参数置空（唯一权威=模板变量）；v180: 引入独立公式节点（公式决策不吃 LLM 决策输入；节点名与 f7 口径以 v183 条为准）
+/// **v188 → v189（2026-10-26）**：退役模板变量 `agent_temperature` / `agent_max_tokens`，
+///   采样参数的唯一权威改到模型层「供应商-模型 → 参数」那一格 —— **推翻 v181 那句
+///   「唯一权威=模板变量」**。v181 只是把节点配置置空、把权威交给模板变量，但模板变量
+///   本身仍是模型层之外另建的通道：工作流对模型那一格除了 `request_delay_ms` 零消费点，
+///   而聊天链一直在读它（`commands/agent/mod.rs`：请求选项 → 模型覆盖 → 默认）。
+///   现网代价（2026-10-26 实证）：库里 agnes-3.0-flash 模型层 `maxTokens=124672`，
+///   工作流按模板变量 4096 下发 ⇒ 一次分析 10 个决策节点输出截断在 4096，
+///   且 `streamTruncated=false`、界面报 completed；另有 4 处复制粘贴的回退/重试路径
+///   各读各的（主通路、VERDICT 兜底、H4.1、H4.2），一处改漏一处就前后不一致。
+///   消费点收口：`rt-workflow/.../agent_executor.rs` 的 `resolve_sampling`（三档优先级）
+///   与 `harness/types/provider_model.rs` 的 `model_param_overrides`（查找只此一份）。
+///   变量表变更 ⇒ 换代，删键走 `SAMPLING_VARS_RETIRED_VERSION`（一次性门）。
+pub const TEMPLATE_VERSION: i32 = 189; // v189: 退役 agent_temperature / agent_max_tokens 两个模板变量 —— 采样参数唯一权威改到模型层「供应商-模型 → 参数」（推翻 v181 的「唯一权威=模板变量」），四处消费点收口到 resolve_sampling；v188: 决策否决门可配置化（风控/情绪/估值三门 + 顶层采纳档内买入）—— 走运行期 pm_gate_enabled（settings 表），**不改图结构**；同时解除 R-CALIB-CAP 对档内买入的动作联动（置信封顶仍生效）；v187: Json 输出节点恒下发 response_format（原生结构化输出；退役 structured_output_mode 开关）；v186: rule-check 交易方案改读 portfolio-risk-gate（移除对 trader 的无边软依赖）；v185: 退役 `formula_independent_f7` 回滚位 —— f7 两侧形态恒定（生产恒不吃 trader / 参照侧恒吃），「主档不得依赖 LLM 决策」由开关语义改为结构保证；v184: data-quality 逐节点诊断新增可选键 `score_sum_reason`（三态：自洽/偏离/不知道），`analyst_feedbacks` 的 `score_consistent` 从此有真值可读；v183: 生产 f7 切分析师结构票（公式决策与 LLM 决策互不消费、并行；trader 口径改由参照节点 `portfolio-mgr-f7-ref` 承接）；v182: f2 改吃辩论聚合方向（consensusDirection）——`consensus_score` 按契约是收敛程度、无方向含义；v181: Agent 节点采样参数置空（唯一权威=模板变量；**已被 v189 推翻，改指模型层参数**）；v180: 引入独立公式节点（公式决策不吃 LLM 决策输入；节点名与 f7 口径以 v183 条为准）
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -3428,9 +3441,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 .collect(),
                 output_var: id.into(),
                 model: None,
-                // 本模板的采样参数唯一权威是模板变量 `agent_temperature` /
-                // `agent_max_tokens`（`seed_variables` 定义、设置面板可调）。
-                // 节点级同名值会被变量无条件覆盖，写在这里只会变成永久的死值 —— 故置空。
+                // 采样参数不在节点上写值：唯一权威是模型层「供应商-模型 → 参数」那一格
+                // （v189 起；此前是模板变量 agent_temperature / agent_max_tokens，
+                // 沿革与被推翻的理由见 TEMPLATE_VERSION 的 v189 条）。节点再写一份只会成第三份死值。
                 temperature: None,
                 max_tokens: None,
                 tools: vec![],
@@ -7955,6 +7968,31 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             "reco_ic_gate",
             serde_json::json!(super::seed_variables::DEFAULT_RECO_IC_GATE),
         )
+    } else {
+        variables_val
+    };
+
+    // ── v189(2026-10-26)：退役 `agent_temperature` / `agent_max_tokens` 两个变量 ──
+    // 采样参数的唯一权威改成模型层「供应商-模型 → 参数」那一格（工作流此前对该格零消费点，
+    // 只有 `request_delay_ms` 被读；聊天链一直在读，见 `commands/agent/mod.rs` 的优先级）。
+    // 现网代价实证：库里 agnes-3.0-flash 的模型层 `maxTokens` 是 124672，而这两个变量把
+    // 工作流的输出上限压成 4096 —— 一次分析 10 个决策节点的输出被截断在 4096，
+    // 且 `streamTruncated=false`、界面报 completed。
+    //
+    // 为什么必须删键（只删 `seed_variables` 的定义不够）：`merge_variable_values`
+    // 无条件保留 DB 旧值 ⇒ 变量表里会继续留着这两个键，面板照旧渲染成两格能拨、
+    // 有值、但没有任何代码读取的开关（与上一轮查出的「启用缓存断点」同一形态）。
+    //
+    // ⚠ 常量同样写在函数体内、不并到模块级那组 `_MIGRATION_VERSION` 旁边，理由与
+    //   `RECO_IC_GATE_MIGRATION_VERSION` 一致：模块区下方有按行号写的注释引用。
+    const SAMPLING_VARS_RETIRED_VERSION: i32 = 189;
+    const _: () = assert!(
+        TEMPLATE_VERSION >= SAMPLING_VARS_RETIRED_VERSION,
+        "版本号与采样参数退役门水位线倒挂：`TEMPLATE_VERSION` 必须 ≥ 门值。\
+         倒挂时门关不上 ⇒ 每次无关升版都会把已退役的变量键再从存量里带回来。"
+    );
+    let variables_val = if previous_version.is_none_or(|v| v < SAMPLING_VARS_RETIRED_VERSION) {
+        drop_variables(&variables_val, &["agent_temperature", "agent_max_tokens"])
     } else {
         variables_val
     };

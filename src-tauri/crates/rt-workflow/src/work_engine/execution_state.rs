@@ -304,6 +304,14 @@ pub struct ExecutionState {
     /// 最后一次节点失败的错误上下文（供 Error Workflow 引用）。
     #[serde(skip, default)]
     pub last_error: Option<ErrorContext>,
+    /// 上游缺席归因（2026-10-26）：本节点声明的 `context_sources` 里**本次没有产出**的那些源，
+    /// 对应的运行时终态（`状态[: skip_reason | : error]`），由引擎在构造 per-node 执行上下文时注入。
+    ///
+    /// 存在理由：缺席日志原先只能说「变量未找到」，排查必须回去猜是失败、被跳过、还是没轮到
+    /// （实测 `debate-convergence--{档}` 一次刷 4 条同形 error，而真正的答案在另一条链上）。
+    /// executor 只读，**不得**用它替代 `results` 里的缺席标记。
+    #[serde(skip, default)]
+    pub context_source_gaps: HashMap<String, String>,
     /// 错误工作流 ID（模板级配置，引擎在 run_workflow 时注入）。
     #[serde(skip, default)]
     pub error_workflow_id: Option<String>,
@@ -344,6 +352,7 @@ impl ExecutionState {
             created_at: now,
             updated_at: now,
             last_error: None,
+            context_source_gaps: std::collections::HashMap::new(),
             error_workflow_id: None,
         }
     }
@@ -385,6 +394,7 @@ impl ExecutionState {
             created_at: snapshot.created_at,
             updated_at: snapshot.updated_at,
             last_error: None,
+            context_source_gaps: std::collections::HashMap::new(),
             error_workflow_id: None,
         }
     }

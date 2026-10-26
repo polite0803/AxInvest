@@ -440,6 +440,18 @@ if (canRunRust && !quick) {
   // R1（白名单自证）在 CI 上跑；R2–R4 要本机 PG 读数，取不到时明印「未检查」而非报绿。
   step("定时任务权威自检（七条负控 + 按域限定扫描面）", "node scripts/check-cron-job-authority.mjs --selftest");
   step("定时任务权威（播种白名单 ↔ 库里 active 行）", "node scripts/check-cron-job-authority.mjs");
+  // 回放↔实盘一致性门（R-3b，2026-10-26，PLAN-r2-daily-replay §20.4）：
+  // 「时间旅行能否替代实盘」的最后一环 —— 同一天两路跑，同票同档比 style 一致率与入场价偏差。
+  // 判据不认「逐字相等」（实盘同票会被多风格同时命中 ⇒ 逐字比必假低），
+  // 只认「回放的 style 集合 ⊆ 实盘的 style 集合」。
+  // 样本不足时报「样本不足」而非「不一致」；需本机 PG 读数，取不到时明印「未检查」而非报绿。
+  step("回放↔实盘一致性（同天两路：style 集合 ⊆ + 入场价偏差 ≤5%）", "node scripts/check-replay-live-consistency.mjs");
+  // 决策验证表引用完整性 + 窗口口径门（R-3i/R-3j，2026-10-26）：
+  // ① `decision_validations.pick_id` 不得悬空 —— 历史「同键覆盖」先删后插 ⇒ 旧 id 消失
+  //    ⇒ 引用它的验证行全成孤儿（实测 448 行 / 20.2%，且读数系统性偏乐观）。
+  // ② 匹配窗口行数须 > 0 —— `decision_validations` 是多窗口笛卡尔积表（设计行为），
+  //    但按档统计只用 period ↔ t_plus_n 匹配行 ⇒ 匹配行恒空即统计失效。
+  step("决策验证表引用完整性（孤儿=0）+ 匹配窗口非空", "node scripts/check-decision-validation-integrity.mjs");
   // 产出→被消费门（C2，2026-10-20，PLAN-chain-closure-remediation §4）：
   // 既有门禁全停在定义点（check-orphan-modules 自陈不判「编译了但没人调」），于是「函数在、
   // 参数恒 null」可以长绿 —— 先例 = 证据共识的 historical_weights 前端硬传 null。

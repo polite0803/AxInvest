@@ -278,11 +278,26 @@ pub fn resolve_model_type(prov: &ProviderConfig, model_id: &str) -> ModelType {
 ///
 /// 模型未登记（手工填 model id、模板导入等路径）或未配 override ⇒ `None` = 不节流，与改前一致。
 pub fn request_delay_ms_for_model(prov: &ProviderConfig, model_id: &str) -> Option<u64> {
-    prov.models
-        .iter()
-        .find(|m| m.model_id == model_id)
-        .and_then(|m| m.param_overrides.as_ref())
-        .and_then(|p| p.request_delay_ms)
+    model_param_overrides(prov, model_id).and_then(|p| p.request_delay_ms)
+}
+
+/// 取某 provider 下某模型的**采样参数覆盖**整包（设置页「供应商-模型」那一格）。
+///
+/// 与 [`request_delay_ms_for_model`] / [`resolve_model_type`] 同一查找形态，全仓只此一份：
+/// 调用方自己决定优先级（节点配置 > 模型覆盖 > 不下发），本函数只做查找、不做取舍。
+///
+/// 2026-10-26 新增的原因：工作流路径此前对这一格**零消费点**（只有 `request_delay_ms` 被读），
+/// 采样参数另走模板变量 `agent_temperature` / `agent_max_tokens` 这条私通道 ——
+/// 用户在模型层设的 `maxTokens`（现网 agnes-3.0-flash 为 124672）被模板变量的 4096 盖掉，
+/// 实测 10 个决策节点输出截断在 4096 且界面报 completed。聊天路径一直在读这一格
+/// （`commands/agent/mod.rs` 的优先级注释：请求选项 → 模型覆盖 → 默认），两条链现在同一权威。
+///
+/// 模型未登记（手工填 model id、模板导入等路径）或未配 override ⇒ `None`。
+pub fn model_param_overrides<'a>(
+    prov: &'a ProviderConfig,
+    model_id: &str,
+) -> Option<&'a ModelParamOverrides> {
+    prov.models.iter().find(|m| m.model_id == model_id).and_then(|m| m.param_overrides.as_ref())
 }
 
 impl std::fmt::Display for ModelType {

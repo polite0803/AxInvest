@@ -1365,8 +1365,10 @@ pub(crate) fn merge_variable_values(
         ("analysis_klineLimit", "kline_limit"),
         ("analysis_newsLimit", "news_limit"),
         // Agent / Tool
-        ("analysis_temperature", "agent_temperature"),
-        ("analysis_maxTokens", "agent_max_tokens"),
+        // 2026-10-26 删 `analysis_temperature` / `analysis_maxTokens` 两行别名：
+        // 目标变量 `agent_temperature` / `agent_max_tokens` 已退役（采样参数唯一权威
+        // 改到模型层「供应商-模型 → 参数」）。保留别名只会把旧面板值复制进一个
+        // 无人读的键；存量键由 `SAMPLING_VARS_RETIRED_VERSION` 一次性门删除。
         ("analysis_timeoutSecs", "agent_timeout_secs"),
         ("tool_timeoutSecs", "tool_timeout_secs"),
         ("tool_retryMax", "tool_retry_max"),
@@ -1466,6 +1468,39 @@ pub(crate) fn force_variable_value(
         tracing::warn!("force_variable_value: 变量 '{name}' 不在变量表中，未覆写");
     }
     serde_json::to_string(&vars).unwrap_or_else(|_| variables_json.to_string())
+}
+
+/// 从变量表里**删键**（一次性退役门用），与 [`force_variable_value`] 相对。
+///
+/// ## 为什么必须有它，不能只删 `seed_variables` 里的定义
+///
+/// `merge_variable_values` 的语义是「新定义 + **无条件保留旧值**」：种子侧删掉一个变量，
+/// DB 存量里那个键**不会消失**，只是从此无人再读。后果不是"脏数据"这么轻 ——
+/// 设置面板是按变量表渲染的，留着 `agent_max_tokens` 就等于留一个**能拨、有值、
+/// 但没有任何代码读取**的开关，正是本轮要消灭的那一类（上一轮刚处理过同形态的
+/// 「启用缓存断点」）。
+///
+/// 只在换代时删一次（`previous_version < 水位线`），不每次种子都删：
+/// 若用户此后自己在变量表里加回同名键，那是他的选择，不该被启动路径反复抹掉。
+///
+/// ## 失败策略
+///
+/// 与 `force_variable_value` 一致：解析失败原样返回并 warn，不 panic、不阻断种子。
+pub(crate) fn drop_variables(variables_json: &str, names: &[&str]) -> String {
+    let Ok(vars) = serde_json::from_str::<Vec<serde_json::Value>>(variables_json) else {
+        tracing::warn!("drop_variables: 变量表解析失败，保持原样（names={names:?}）");
+        return variables_json.to_string();
+    };
+    let total = vars.len();
+    let kept: Vec<_> = vars
+        .into_iter()
+        .filter(|v| !v.get("name").and_then(|n| n.as_str()).is_some_and(|n| names.contains(&n)))
+        .collect();
+    let dropped = total - kept.len();
+    if dropped > 0 {
+        tracing::info!("drop_variables: 退役删除 {dropped} 个变量键（names={names:?}）");
+    }
+    serde_json::to_string(&kept).unwrap_or_else(|_| variables_json.to_string())
 }
 
 /// 解析「辩论轮数」的当前生效值，作为建图展开节点数与下游锚点的唯一来源。

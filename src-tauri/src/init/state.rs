@@ -1592,6 +1592,36 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // 不涉及 LLM，耗时 <100ms，对首帧几乎无感。
     {
         let db = harness.db();
+        // ── 决策否决门开关加载（2026-10-26 用户裁决）──────────────────────
+        // 四门（风控 / 情绪 / 估值 / 顶层采纳档内买入）从 `settings` 表读进**进程内快照**，
+        // Rhai 侧经 `pm_gate_enabled` 读快照（宿主函数是同步闭包，不能在脚本里 await DB）。
+        //
+        // 放在 `create_app_state`（**所有路径的共同入口**：Tauri / CLI ×2 / server_main）
+        // ⇒ 桌面应用与回放 CLI 读的是同一份开关状态，不会出现「界面显示已放开、
+        // 回放却按原门否决」的双份真相。
+        //
+        // ⚠ 读失败**不阻断启动**：保持默认（全关 = 与引入前逐位一致）。
+        match axagent_analysis_engine::decision_gates::refresh_from_db(db).await {
+            Ok(states) => {
+                let names = ["风控门", "情绪门", "估值门", "顶层采纳档内买入"];
+                let opened: Vec<String> = states
+                    .iter()
+                    .zip(names.iter())
+                    .filter(|(open, _)| **open)
+                    .map(|(_, n)| (*n).to_string())
+                    .collect();
+                if opened.is_empty() {
+                    tracing::info!("[startup] 决策否决门：四门全关（保持原行为）");
+                } else {
+                    tracing::info!("[startup] 决策否决门：已放开 {}", opened.join(" / "));
+                }
+            },
+            Err(e) => {
+                tracing::warn!(
+                    "[startup] 决策否决门开关加载失败（保持默认全关，与引入前行为一致）: {e}"
+                );
+            },
+        }
         if let Err(e) = crate::init::ensure_cognitive_router_templates(db).await {
             tracing::error!("[startup] 认知编排器模板初始化失败: {}", e);
         } else {

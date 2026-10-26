@@ -12,6 +12,22 @@ pub struct CronScheduler {
     executor: Arc<CronExecutor>,
     running: Arc<RwLock<bool>>,
     handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+    /// **跨进程 leader 判定**（可选）。
+    ///
+    /// 返回 `true` = 本进程是调度 leader，可以派发；`false` = 别的进程持有租约，
+    /// 本进程**只观察不派发**。
+    ///
+    /// 为什么是回调而不是在这里直接查 DB：`runtime` crate **零 DB 依赖**
+    /// （这是它能被 `quant` / `market-sim` 等 consumer crate 依赖的前提）⇒
+    /// 租约的存储细节（表 / SQL / 方言）由上层（`src-tauri/src/init/services.rs`）
+    /// 通过闭包注入，**本 crate 不感知租约是什么**。
+    ///
+    /// ⚠ 语义要求：回调**每轮 tick 调用一次**，且必须返回**实时**结果
+    /// （不是启动时的快照）—— 租约可能被别的进程抢走（自己续租失败 / 租约被接管），
+    /// 那时本进程必须**立即停止派发**，否则两个进程会同时跑同一个任务。
+    ///
+    /// `None` = 不做 leader 判定（单进程部署的旧行为；本仓生产路径**总是**注入）。
+    leader_check: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 impl CronScheduler {
@@ -21,7 +37,14 @@ impl CronScheduler {
             executor,
             running: Arc::new(RwLock::new(false)),
             handle: Arc::new(RwLock::new(None)),
+            leader_check: None,
         }
+    }
+
+    /// 注入跨进程 leader 判定回调（见 `leader_check` 字段文档）。
+    pub fn with_leader_check(mut self, check: Arc<dyn Fn() -> bool + Send + Sync>) -> Self {
+        self.leader_check = Some(check);
+        self
     }
 
     pub async fn start(&self) {
@@ -35,6 +58,7 @@ impl CronScheduler {
         let store = self.store.clone();
         let executor = self.executor.clone();
         let running_flag = self.running.clone();
+        let leader_check = self.leader_check.clone();
 
         let handle = tokio::spawn(async move {
             // 在途去重：job.id → 派发时该任务的 next_run_at。
@@ -45,10 +69,36 @@ impl CronScheduler {
             // record_run 推进后值变化，下一档期自然可再次派发。进程重启本表清空 ⇒
             // 重启时仍在跑的任务按 at-least-once 重跑一次（可接受，业务侧行级认领幂等）。
             let mut dispatched: HashMap<String, Option<i64>> = HashMap::new();
+            // leader 丢失的日志只打一次（否则每 30s 刷屏，且真出问题时日志被淹没）。
+            let mut leader_lost_logged = false;
 
             loop {
                 if !*running_flag.read().await {
                     break;
+                }
+
+                // ── 跨进程 leader 门（R-3aa，2026-10-26）────────────────────
+                // 非 leader ⇒ **不派发**（但继续 tick：租约可能回到本进程）。
+                //
+                // ⚠ 必须**每轮实时判定**，不能只在启动时判一次 ——
+                //   租约会被别的进程抢走（本进程续租失败 / 租约过期被别人接管），
+                //   那时若继续派发 ⇒ 两个进程同时跑同一个任务
+                //   （实测后果：同一 as_of 回放日跑两遍、荐股跑两遍 ⇒ 样本重复计数）。
+                if let Some(ref check) = leader_check {
+                    if !check() {
+                        if !leader_lost_logged {
+                            tracing::warn!(
+                                "[CronScheduler] 本进程不是调度 leader（租约在别处）⇒ 本轮不派发任何任务"
+                            );
+                            leader_lost_logged = true;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                        continue;
+                    }
+                    if leader_lost_logged {
+                        tracing::info!("[CronScheduler] 已重新取得调度 leader ⇒ 恢复派发");
+                        leader_lost_logged = false;
+                    }
                 }
 
                 // 兜底编排：next_run_at=None 的活跃任务（老版本遗留 / 外部直写内存）

@@ -261,21 +261,30 @@ let veto = pm_overvalued_veto(
 );
 let gate_pass = veto[0];
 let gate_basis = veto[1];
+// ── 估值门开关（2026-10-26 用户裁决）────────────────────────────────
+// 门只**单向否决**（拦买入/增持、不抬信号）；放开 ⇒ 本档不再因严重高估被否决。
+// ⚠ 放开后必须**留痕**：否则「估值门未过」与「用户选择放开该门」在界面上完全同形。
+// ⚠「unjudged」（DCF 不适用且 PE 分位缺失 ⇒ 缺席 ≠ 通过）**不是高估否决**，
+//   它是**数据缺席**，放开高估门不应把它变成「通过」⇒ 下面只对「已判定为高估」的两档生效。
+let valuation_gate_open = pm_gate_enabled("gate.valuation_enabled");
+let valuation_overvalued_rejected = !gate_pass && gate_basis != "unjudged";
 if gate_basis == "unjudged" && posterior >= 0.62 {
     gaps.push(if dcf_cyclical {
         "周期股估值门未判定：周期中性化 DCF 不适用/缺席 ⇒ 不给出加仓动作（缺席 ≠ 通过）"
     } else {
         "估值否决门未判定：DCF 不适用且 PE 分位缺失 ⇒ 不给出加仓动作（缺席 ≠ 通过）"
     });
-} else if !gate_pass && posterior >= 0.62 {
-    gaps.push(if gate_basis == "dcf_overvalued" {
-        `估值高估否决：DCF 内在价值较现价低 35%+（upside=${(moS_pct*10.0).round()/10.0}%）⇒ 本档不出买入/增持（便宜不是买入理由，严重高估才拦下）`
+} else if valuation_overvalued_rejected && posterior >= 0.62 {
+    if valuation_gate_open {
+        gaps.push(`估值门已放开（原判据：${gate_basis}）⇒ 本档不因严重高估被否决`);
+    } else if gate_basis == "dcf_overvalued" {
+        gaps.push(`估值高估否决：DCF 内在价值较现价低 35%+（upside=${(moS_pct*10.0).round()/10.0}%）⇒ 本档不出买入/增持（便宜不是买入理由，严重高估才拦下）`)
     } else if gate_basis == "pe_overvalued" {
-        `估值高估否决：PE 处自身 5 年 ${overval_pe_pctile()} 分位以上（${(pe_percentile*10.0).round()/10.0}）⇒ 本档不出买入/增持`
+        gaps.push(`估值高估否决：PE 处自身 5 年 ${overval_pe_pctile()} 分位以上（${(pe_percentile*10.0).round()/10.0}）⇒ 本档不出买入/增持`)
     } else {
         // cyclical_margin_insufficient
-        `周期股估值门（P0-4）：近5年FCF中位数中性化 DCF 上行 ${(moS_pct*10.0).round()/10.0}% < 安全边际要求 ${cycle_margin_min_pct()}%（PE 分位已因周期扭曲置空）⇒ 本档不出买入/增持`
-    });
+        gaps.push(`周期股估值门（P0-4）：近5年FCF中位数中性化 DCF 上行 ${(moS_pct*10.0).round()/10.0}% < 安全边际要求 ${cycle_margin_min_pct()}%（PE 分位已因周期扭曲置空）⇒ 本档不出买入/增持`)
+    }
 }
 
 // ── ⑤ 技术腿只作入场时机过滤：带外向上 ⇒ 把「买入/增持」降为「持有」，但**不改方向分**──
@@ -341,7 +350,7 @@ let action = if confidence >= 0.72 { "买入" }
     else if confidence >= 0.42 { "观望" }
     else if confidence >= 0.32 { "减持" }
     else { "卖出" };
-if !gate_pass && (action == "买入" || action == "增持") {
+if !gate_pass && !valuation_gate_open && (action == "买入" || action == "增持") {
     action = "持有";
 }
 if !timing_ok && (action == "买入" || action == "增持") {
@@ -421,8 +430,13 @@ if action != "买入" && action != "增持" && action != "持有" {
     confidenceMethod: if spec_ok { branch_json["confidenceMethod"] } else { "missing_branch_table" },
     exitRule: if spec_ok { branch_json["exitRule"] } else { "missing_branch_table" },
     entryGate: if spec_ok { branch_json["entryGate"] } else { "missing_branch_table" },
-    entryGatePassed: gate_pass,
+    // ⚠ 门放开后 `entryGatePassed` 必须报 true（门已放行 ⇒ 入场门**已通过**），
+    //   否则呈现层显示「入场门未过」而实际是「用户选择放开该门」⇒ 同屏误导。
+    //   ⚠「unjudged」（数据缺席）**不因放开而变成通过** —— 缺席 ≠ 通过是数据契约。
+    entryGatePassed: gate_pass || (valuation_gate_open && gate_basis != "unjudged"),
     gateBasis: gate_basis,
+    // 估值门是否已被产品决策放开（2026-10-26）—— 呈现层据此显示「门已放开」而非「门未过」
+    valuationGateOpen: valuation_gate_open,
     timingFiltered: timing_ok,
     falsifiedBy: falsified,
     filterLegs: filter_legs,

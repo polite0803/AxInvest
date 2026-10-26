@@ -2421,6 +2421,52 @@ fn portfolio_mgr_ultra_entry_gate_requires_stock_level_strength() {
     assert_eq!(cap("卖出"), "卖出");
 }
 
+/// 决策否决门开关（2026-10-26 用户裁决）在**生产同构引擎**上的行为判据。
+///
+/// 这条门锁的是**「开关真的接到了脚本」** —— 不是「函数存在」：
+/// `pm_gate_enabled` 必须在**注册进共享引擎的宿主函数集**里能被脚本调到，
+/// 否则脚本会 `Function not found`（R-3d 的同族缺陷：函数集缺失 ⇒ 整个脚本降级）。
+///
+/// ⚠ 门状态是**进程级全局** ⇒ 本门用 `with_gates_disabled` 隔离（防幽灵红）。
+#[test]
+fn decision_gate_switch_reaches_rhai_scripts() {
+    use axagent_analysis_engine::decision_gates::{self, Gate};
+
+    let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
+    // 「门是否放开」用**宿主函数**读，而不是脚本内的字面量 ⇒ 这条门同时证明
+    // 「宿主函数已注册」+「读的是运行时状态」。
+    //
+    // ⚠ 用 `eval` 直接调宿主函数（不定义脚本 fn）—— 两个原因：
+    //   ① Rhai 的 `fn` 之后**不接受 `_` 开头的名字**（`_` 是丢弃占位符）⇒ 探测函数
+    //      不能叫 `_gate_probe`（实测 ParseError(FnMissingName)）；
+    //   ② 直接 eval 表达式更贴近「脚本里真实调用宿主函数」的形态。
+    let probe = |name: &'static str| -> bool {
+        let expr = format!("pm_gate_enabled(\"{name}\")");
+        engine
+            .eval_with_scope::<bool>(&mut rhai::Scope::new(), &expr)
+            .expect("pm_gate_enabled 必须可调用（宿主函数集已注册）")
+    };
+
+    // ① 门全关（默认 / 冻结态）⇒ 四个门都报「关」。
+    decision_gates::with_gates_disabled(|| {
+        for g in [Gate::RiskVeto, Gate::Sentiment, Gate::Valuation, Gate::TierBuy] {
+            assert!(!probe(g.key()), "门 {:?} 在默认（冻结）态必须报「关」", g.key());
+        }
+    });
+
+    // ② 打开一个门 ⇒ 只有它变 true（其余仍 false ⇒ 四门互相独立）。
+    decision_gates::set_state(true, false, false, false);
+    assert!(probe(Gate::RiskVeto.key()), "风控门打开后必须报 true");
+    assert!(!probe(Gate::Sentiment.key()), "情绪门必须仍为 false（四门独立）");
+    assert!(!probe(Gate::Valuation.key()), "估值门必须仍为 false（四门独立）");
+    assert!(!probe(Gate::TierBuy.key()), "顶层采纳门必须仍为 false（四门独立）");
+
+    // ③ 未知门名 ⇒ false（不放行；判错方向偏保守）。
+    assert!(!probe("gate.not_a_real_gate"), "未知门名必须报「关」（不得放行）");
+
+    decision_gates::set_state(false, false, false, false);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 白名单授权 ↔ ToolDef 登记 —— 「授权了但送不到 LLM」的静默丢弃守护
 //
@@ -3784,6 +3830,18 @@ fn code_only(src: &str) -> String {
 /// （PLAN §三十 30-3），这里不重犯，只掐掉「测试 scope ⊋ 生产 scope」这个假绿来源。
 #[test]
 fn branch_node_scope_is_exactly_the_seed_mapping() {
+    // ⚠ 决策否决门（2026-10-26）是**进程级全局**，而本门**真的跑 Rhai 脚本**
+    //   ⇒ 脚本里的 `pm_gate_enabled` 会读它 ⇒ 若另一个测试此刻把门打开，
+    //   本门里「门把『算不出』当成了『通过』」这类断言会**随机变红**
+    //   （红的原因与被测代码无关 —— 这类幽灵红比红本身更费时间）。
+    // ⇒ 冻结门状态（全关 = 引入前的形态）再跑本门。
+    axagent_analysis_engine::decision_gates::with_gates_disabled(|| {
+        branch_node_scope_is_exactly_the_seed_mapping_inner();
+    });
+}
+
+/// 本门主体（被 `with_gates_disabled` 包裹，见调用点注释）。
+fn branch_node_scope_is_exactly_the_seed_mapping_inner() {
     use axagent_rt_workflow::expression_engine::rhai_eval::value_to_dynamic;
     use rhai::{Dynamic, Map, Scope};
 
@@ -4920,4 +4978,56 @@ fn persist_shape_gate_fires_on_each_broken_wiring() {
         })
         .expect("解析 VERSION");
     assert!(version < 2, "破坏 C 应把版本压回 1，实得 v{version}");
+}
+/// 2026-10-26（模板 v189）：采样参数的唯一权威改成模型层「供应商-模型 → 参数」那一格，
+/// 模板变量 `agent_temperature` / `agent_max_tokens` 必须**三层同时退役**。
+///
+/// 为什么三层各一条：只测纯函数会放过「`drop_variables` 写好了但播种路径没调用」；
+/// 只测源文本会放过「调用了但删错键」。两层都要红才说明接线闭环。
+#[test]
+fn sampling_template_variables_are_retired_across_all_three_layers() {
+    use super::drop_variables;
+    const RETIRED: [&str; 2] = ["agent_temperature", "agent_max_tokens"];
+
+    // ① 种子侧：变量表里不得再定义它们。
+    let names: Vec<String> =
+        super::seed_variables::build_template_variables().into_iter().map(|v| v.name).collect();
+    for n in RETIRED {
+        assert!(!names.iter().any(|x| x == n), "变量表仍定义已退役的 {n}（种子侧没删净）");
+    }
+
+    // ② 纯函数层：逐键删、其余保序、坏输入不得 panic 也不得吞整张表。
+    let json = serde_json::json!([
+        {"name": "agent_temperature", "value": 0.3},
+        {"name": "kline_limit", "value": 250},
+        {"name": "agent_max_tokens", "value": 4096},
+    ])
+    .to_string();
+    let after = drop_variables(&json, &RETIRED);
+    let left: Vec<String> = serde_json::from_str::<Vec<serde_json::Value>>(&after)
+        .expect("删键后仍是合法变量表")
+        .into_iter()
+        .map(|v| v["name"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(left, vec!["kline_limit".to_string()], "只该删这两键，其余必须原序保留");
+    // 负控：解析失败必须原样返回（不 panic、不清空）。
+    assert_eq!(drop_variables("not json", &RETIRED), "not json");
+
+    // ③ 接线层：播种路径真的把这道门接在合并后的变量表上。
+    let src = include_str!("seed_stock_analysis.rs");
+    assert!(
+        src.contains(
+            "drop_variables(&variables_val, &[\"agent_temperature\", \"agent_max_tokens\"])"
+        ),
+        "删键门未接进播种路径（`drop_variables` 成了零调用方的孤儿）"
+    );
+    // 别名表里也不得再指向已退役的键 —— 否则旧面板值会被复制进一个无人读的键。
+    // `RENAME_MAP` 是函数内 const（拿不到符号），故按源文本断言。
+    let mod_src = include_str!("mod.rs");
+    for n in RETIRED {
+        assert!(
+            !mod_src.contains(&format!("\"{n}\")")),
+            "RENAME_MAP 仍可能把别名复制到已退役的 {n}"
+        );
+    }
 }

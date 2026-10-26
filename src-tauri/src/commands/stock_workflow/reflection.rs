@@ -72,6 +72,41 @@ fn deep_get_reflection_text(v: &serde_json::Value, key: &str) -> Option<String> 
     }
 }
 
+/// 从**已规范化**的候选里挑出「真有 verdict」的那一份。
+///
+/// ## 为什么需要这个（2026-10-26 实测根因）
+///
+/// 反思的 DAG 是 `reflection-agent → reflection-validator → store-ref`，读侧要取
+/// **validator 的输出**（它负责拆 `{"report":"..."}`、修正枚举/截断字段）。
+/// 但 `extract_agent_output`（`serenity.rs:43`）的**第 1 步**是
+/// `if let Some(params) = obj.get("params") { return params.clone(); }`
+/// —— 对 **code 节点**（validator 就是 code 节点）`params` 是**入参**，
+/// 于是它返回的是 validator 的入参（实测：空对象 `{}`）⇒ **必然没有 verdict**。
+///
+/// 而旧写法 `get("reflection-validated").or_else(|| get("reflection"))` 是
+/// **短路**的 ⇒ 永远命中前者 ⇒ `has_verdict` 恒 `false`
+/// ⇒ 反思永远落 `failed: REFLECTION_OUTPUT_INCOMPLETE`
+/// ⇒ `strategy_performance` 的 `#31` 四档通道拿不到「有 verdict」的样本
+/// ⇒ **校准样本永不增长** ⇒ 顶层「买入」永远为 0（R-3h 死循环的最后一环）。
+///
+/// ## 口径
+///
+/// - 候选按**优先级顺序**给出（validator → agent）。
+/// - 逐个验「**有非空 verdict**」⇒ 命中即用（**不短路在第一个候选上**）。
+/// - 一个都没有 ⇒ 取**第一个**候选当兜底（让下游照常走「无 verdict ⇒ 不盖 completed」）。
+fn select_reflection_payload(candidates: &[serde_json::Value]) -> serde_json::Value {
+    let mut fallback = serde_json::Value::Null;
+    for c in candidates {
+        if deep_get_reflection_str(c, "verdict").is_some_and(|v| !v.is_empty()) {
+            return c.clone();
+        }
+        if fallback.is_null() {
+            fallback = c.clone();
+        }
+    }
+    fallback
+}
+
 /// 组装反思 prompt 的「可调参数清单」（v31，v72 收窄）。
 ///
 /// 清单来源 = `PORTFOLIO_MGR_TUNABLE_PARAMS`（单一权威源，与 portfolio-mgr 的
@@ -948,17 +983,32 @@ pub async fn run_reflection_workflow(
     match result {
         Ok(wf) => {
             // 通过 extract_agent_output 管线提取规范化 JSON（兼容多模型输出格式）。
-            // ⚠ 优先取 **reflection-validator** 的输出，而不是 raw `reflection`：
-            //   DAG 是 reflection-agent → reflection-validator → store-ref，validator 负责
-            //   拆 `{"report":"..."}`、修正枚举/截断字段；旧实现读 raw，等于把校验层
-            //   白做了（222/230 条 completed 反思 verdict 缺失即由此暴露）。
-            let reflection_raw = wf
-                .results
-                .get("reflection-validated")
-                .or_else(|| wf.results.get("reflection"))
-                .cloned()
-                .unwrap_or(serde_json::Value::Null);
-            let reflection_json = extract_agent_output(reflection_raw).await;
+            //
+            // ⚠ 候选顺序：**reflection-validator → reflection**（validator 负责拆
+            //   `{"report":"..."}`、修正枚举/截断字段；读 raw 等于把校验层白做了）。
+            //   但**必须逐个候选验证「是否真有 verdict」**，不能命中第一个就停 ——
+            //
+            //   实测（2026-10-26）：`reflection-validated` 节点结果是
+            //   `{input_params, language, node_id, params, result:{}, status}`，
+            //   而 `extract_agent_output`（`serenity.rs:43`）**第 1 步就是
+            //   `if let Some(params) = obj.get("params") { return params.clone(); }`**
+            //   ⇒ 对 code 节点返回的是**入参**（不是输出）⇒ 必然无 verdict。
+            //   ⇒ 旧写法 `get("reflection-validated").or_else(|| get("reflection"))`
+            //   **永远命中前者** ⇒ `has_verdict` 恒 false ⇒ 反思永远落
+            //   `failed: REFLECTION_OUTPUT_INCOMPLETE` ⇒ 校准样本永不增长。
+            //
+            //   而 agent 节点的 `reflection` 里内容是**双重编码**的
+            //   （`content = {"report":"{\"verdict\":\"partial\",...}"}`）——
+            //   `extract_agent_output` 的 report 分支与 `deep_get_reflection_field`
+            //   的「子字符串解析」分支都能解掉这层编码（实测已验证）。
+            let mut normalized: Vec<serde_json::Value> = Vec::new();
+            for key in ["reflection-validated", "reflection"] {
+                let Some(raw) = wf.results.get(key).cloned() else {
+                    continue;
+                };
+                normalized.push(extract_agent_output(raw).await);
+            }
+            let reflection_json = select_reflection_payload(&normalized);
             // 没有 verdict 就不是一次有效反思：不得盖 completed（旧实现把
             // 「节点 completed 但输出为空」也写成 completed，导致 222 条 completed/verdict NULL）。
             let has_verdict =
@@ -3500,8 +3550,22 @@ pub enum SnapshotGap {
 /// （11aa58772 起，002371 / 10-14 批次实证），修好前不要再引入第三处口径。
 fn horizon_window(klines_len: usize, entry_idx: usize, expected_days: i64) -> Option<(usize, i64)> {
     let exit_idx = std::cmp::min(klines_len.saturating_sub(1), entry_idx + expected_days as usize);
-    let trading_days = (exit_idx - entry_idx) as i64;
-    (trading_days >= 1).then_some((exit_idx, trading_days))
+    // ⚠ `trading_days` 的口径：**含入场日**（第 1 天 = 入场当天）。
+    //
+    // 为什么必须含入场日（2026-10-26 实测根因）：`hindsight_date` 是按
+    // 「as_of + N 个**交易日**」算的（as_of 本身是**第 0 天**，第 N 天 = as_of+N），
+    // 而本函数旧口径取的是**间隔数**（`exit_idx - entry_idx`）
+    // ⇒ 两者对同一事实给出**差 1** 的答案 ⇒ 成熟判定系统性差一根：
+    // 实测 long 档 89/90、mid 27/28、short 4/5、ultra 1/2 —— **全部恰好差 1**
+    // ⇒ 所有档**永远 immature** ⇒ 反思永不产出 verdict
+    // ⇒ `strategy_performance` 的校准样本永不增长
+    // ⇒ 顶层「买入」永远为 0（R-3h 死循环的最后一环）。
+    //
+    // ⇒ 改为「间隔数 + 1」（含入场日）⇒ 与 `hindsight_date` 同口径。
+    let trading_days = (exit_idx - entry_idx + 1) as i64;
+    // 可用性判据：**入场之后至少还有 1 根**（只有入场那一根 ⇒ 样本不足，不是可用窗口）。
+    // ⚠ 这里不能用 `trading_days >= 1`（含入场日口径下它恒 ≥ 1，会把「只有入场一根」误判为可用）。
+    (exit_idx > entry_idx).then_some((exit_idx, trading_days))
 }
 
 /// 取主档快照并判其处置：`None`（快照表中缺该档键，理论不可达）折成 `Failed` 归因 ——
@@ -3650,7 +3714,14 @@ pub async fn compute_market_snapshots(
             results.insert(horizon_key.clone(), Err(SnapshotGap::Young));
             continue;
         };
-        let within_expected_horizon = exit_idx < entry_idx + expected_days as usize;
+        // 成熟判定 = 「已走的持有交易日数 < 期望持有期」。
+        //
+        // ⚠ `trading_days` 已改为**含入场日**的口径（见 [`horizon_window`]）⇒ 与
+        // `hindsight_date`（「as_of + N 个交易日」，as_of 是第 0 天）**同口径**。
+        // 旧实现 `exit_idx < entry_idx + expected_days`（比较**间隔数**）⇒ 系统性差 1：
+        // 实测 long 89/90、mid 27/28、short 4/5、ultra 1/2 —— 全部恰好差 1
+        // ⇒ 所有档永远 immature ⇒ 反思永不产出 ⇒ 校准样本永不增长。
+        let within_expected_horizon = trading_days < expected_days;
         let exit_bar = &klines[exit_idx];
         let latest_price = exit_bar.close;
 
@@ -4750,6 +4821,57 @@ fn build_horizon_results_json(
 // "缺数据必须显式降级而非用 0 冒充"）全在渲染函数里，是本改造的核心契约，
 // 且完全离线可验。契约破了会让反思 agent 重新对着假数据写结论。
 #[cfg(test)]
+mod reflection_payload_tests {
+    use super::*;
+
+    /// #31 的读侧根因回归（2026-10-26）：validator 候选经 `extract_agent_output`
+    /// 之后**没有 verdict**（它返回 code 节点的 `params` 入参）⇒ 必须能回退到
+    /// agent 候选（其内容在 report 双重编码里，`deep_get_reflection_field` 可解）。
+    #[test]
+    fn payload_selection_falls_back_to_the_candidate_that_has_verdict() {
+        // 候选 0 = validator 规范化结果（只有 params 入参，无 verdict）
+        let validator = serde_json::json!({});
+        // 候选 1 = agent 规范化结果（report 是**双重编码**的字符串）
+        let agent = serde_json::json!({
+            "report": "{\"verdict\":\"partial\",\"alpha_cited\":\"相对强度\"}"
+        });
+
+        let picked = select_reflection_payload(&[validator.clone(), agent.clone()]);
+        assert_eq!(
+            deep_get_reflection_str(&picked, "verdict").as_deref(),
+            Some("partial"),
+            "validator 候选没有 verdict ⇒ 必须回退到 agent 候选"
+        );
+    }
+
+    /// 负控：第一个候选**有** verdict 时必须用它（validator 的输出优先，
+    /// 读 raw 等于把校验层白做了）。
+    #[test]
+    fn payload_selection_prefers_the_first_candidate_with_verdict() {
+        let first = serde_json::json!({ "verdict": "good", "tag": "validator" });
+        let second = serde_json::json!({ "verdict": "partial", "tag": "agent" });
+        let picked = select_reflection_payload(&[first, second]);
+        assert_eq!(deep_get_reflection_str(&picked, "verdict").as_deref(), Some("good"));
+    }
+
+    /// 负控：一个都没有 verdict ⇒ 取第一个当兜底（下游照常「不盖 completed」）。
+    #[test]
+    fn payload_selection_falls_back_to_first_when_no_candidate_has_verdict() {
+        let a = serde_json::json!({ "note": "a" });
+        let b = serde_json::json!({ "note": "b" });
+        let picked = select_reflection_payload(&[a.clone(), b]);
+        assert_eq!(picked, a, "无 verdict 时取第一个候选当兜底");
+        assert!(deep_get_reflection_str(&picked, "verdict").is_none());
+    }
+
+    /// 空候选 ⇒ 空值（不得 panic，也不得凭空造出 verdict）。
+    #[test]
+    fn payload_selection_on_empty_candidates_is_null() {
+        assert!(select_reflection_payload(&[]).is_null());
+    }
+}
+
+#[cfg(test)]
 mod market_snapshot_tests {
     use super::*;
     use axagent_harness::AnalysisKind;
@@ -4957,12 +5079,37 @@ mod market_snapshot_tests {
     fn horizon_window_requires_a_full_day_after_entry() {
         // 002371 形态：2 根 K 线、入场=最后一根
         assert_eq!(horizon_window(2, 1, 2), None, "仅入场一根不得算可用窗口");
-        // 负控（另一头）：入场后又多出一根 ⇒ 可用，天数=1
-        assert_eq!(horizon_window(3, 1, 2), Some((2, 1)));
-        // 出场被期望持有期截断
-        assert_eq!(horizon_window(10, 1, 2), Some((3, 2)));
+        // 负控（另一头）：入场后又多出一根 ⇒ 可用。
+        // ⚠ `trading_days` 是**含入场日**的口径（第 1 天 = 入场当天）⇒
+        // 入场 + 1 根后续 = 走了 2 个交易日。
+        assert_eq!(horizon_window(3, 1, 2), Some((2, 2)));
+        // 出场被期望持有期截断（entry+2 ⇒ 走满 2 天 ⇒ 含入场日 = 3 天）
+        assert_eq!(horizon_window(10, 1, 2), Some((3, 3)));
         // 尚未到期望持有期（期中观察）：出场=最新一根，天数如实
-        assert_eq!(horizon_window(4, 1, 90), Some((3, 2)));
+        assert_eq!(horizon_window(4, 1, 90), Some((3, 3)));
+    }
+
+    /// 🔴 成熟判定的 off-by-one 回归（2026-10-26 实测根因）。
+    ///
+    /// `hindsight_date` 按「as_of + N 个**交易日**」算（as_of 是第 0 天，第 N 天 = as_of+N），
+    /// 而成熟判定旧口径比较**间隔数**（`exit_idx - entry_idx`）⇒ 对同一事实**差 1**。
+    /// 实测后果：long 89/90、mid 27/28、short 4/5、ultra 1/2 —— **全部恰好差 1**
+    /// ⇒ 所有档永远 immature ⇒ 反思永不产出 ⇒ 校准样本永不增长。
+    #[test]
+    fn a_decision_matures_exactly_when_the_expected_trading_days_elapsed() {
+        // as_of 之后**恰好 N 根 bar** ⇒ entry 是第 1 根、末根是第 N 根 ⇒ 含入场日 = N 天。
+        // long 档：as_of=06-10，其后 90 根 ⇒ 窗口 90 根（entry 在 index 0）。
+        let (exit_idx, trading_days) = horizon_window(90, 0, 90).expect("窗口够长");
+        assert_eq!(exit_idx, 89, "出场=第 90 根（entry 之后第 90 根）");
+        assert_eq!(trading_days, 90, "含入场日 ⇒ 走了 90 个交易日");
+        assert!(
+            !(trading_days < 90),
+            "恰好走满期望持有期 ⇒ 必须判成熟（否则系统性差 1 ⇒ 永远 immature）"
+        );
+        // 反向：只有 89 根 ⇒ 只走了 89 个交易日 ⇒ 仍是期中观察
+        let (_, trading_days_89) = horizon_window(89, 0, 90).expect("窗口够长");
+        assert_eq!(trading_days_89, 89);
+        assert!(trading_days_89 < 90, "只走了 89 个交易日 ⇒ 仍是期中观察");
     }
 
     /// 三种缺口必须分道：`Young` 保 `Young`、`Failed` 保因、可用不被截走。

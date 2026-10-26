@@ -460,7 +460,32 @@ pub fn compute_risk_bias(risk_level: &str) -> f64 {
 /// 未识别值域不再静默放行：
 /// - 风险等级为高 / 极高：按最保守处理降级为「观望」（未知值视为可能持仓）；
 /// - 其余等级：保留原值，但 `note` 显式说明该值未参与判定。
+///
+/// ── 产品决策开关（2026-10-26 用户裁决）────────────────────────────
+/// 风控门可被**运行期开关**放开（`decision_gates::Gate::RiskVeto`）。
+/// 放开时本函数**原样返回入参**（不否决），但：
+/// - 仍走 `normalize_action` 的值域归一化与未识别值域的保守降级（**那不是门，是数据契约**）；
+/// - `note` 显式写明「风控门已放开」，让呈现层能显示「本次未过风控」而不是无声通过。
+///
+/// ⚠️ 放开只**停止否决**，**不抬信号**：门从来只单向拦，放开后动作仍由评分/后验决定。
 pub fn apply_risk_veto(action: &str, risk_level: &str) -> (String, bool, String) {
+    apply_risk_veto_with_gate(
+        action,
+        risk_level,
+        crate::decision_gates::is_open(crate::decision_gates::Gate::RiskVeto),
+    )
+}
+
+/// 风控否决的**可配置版本**（`gate_open` = 风控门是否已放开）。
+///
+/// 拆成两个函数的原因：`apply_risk_veto` 是**既有调用面的稳定名**（Rhai 宿主函数、
+/// 单测、语义锁测试都按它断言），不能改签名；而需要显式控制的调用方
+/// （单测、将来的策略回测）要能绕过全局开关 ⇒ 提供带显式参数的版本。
+pub fn apply_risk_veto_with_gate(
+    action: &str,
+    risk_level: &str,
+    gate_open: bool,
+) -> (String, bool, String) {
     // 2026-09-21: 风险档位判据改走 `RiskTier::from_risk_str`，与 `portfolio_risk_gate` 同源。
     //   原实现自写 `matches!(risk_level, "极高风险" | "极高")` / `("高风险" | "高")` ——
     //   这是**同一语义的第二份值域表**，且比 `RiskTier` 窄：它不认英文 `EXTREME` / `HIGH`。
@@ -507,9 +532,27 @@ pub fn apply_risk_veto(action: &str, risk_level: &str) -> (String, bool, String)
     };
 
     if extreme && kind.implies_long() {
+        if gate_open {
+            return (
+                action.to_string(),
+                false,
+                format!(
+                    "风控门已放开：风险档={risk_level}（原判据会否决「{action}」⇒ 禁止持仓），本次未执行风控否决"
+                ),
+            );
+        }
         return ("观望".into(), true, "极高风险风控否决：禁止持仓".into());
     }
     if high && kind.implies_buy() {
+        if gate_open {
+            return (
+                action.to_string(),
+                false,
+                format!(
+                    "风控门已放开：风险档={risk_level}（原判据会否决「{action}」⇒ 禁止加仓），本次未执行风控否决"
+                ),
+            );
+        }
         return ("持有".into(), true, "高风险风控否决：禁止加仓".into());
     }
     (action.to_string(), false, String::new())
@@ -1587,6 +1630,61 @@ mod tests {
         let (action, was_down, _) = apply_risk_veto("买入", "高风险");
         assert_eq!(action, "持有");
         assert!(was_down);
+    }
+
+    // ── 风控门开关（2026-10-26 用户裁决）────────────────────────────────
+    //
+    // ⚠ 这些测试用**显式参数**的 `apply_risk_veto_with_gate`，
+    //   **不读全局开关** ⇒ 与 `decision_gates` 的进程级状态无关 ⇒ 可并行跑、
+    //   不会因别的测试改了全局状态而漂移。
+
+    #[test]
+    fn risk_veto_gate_open_keeps_buy_action() {
+        // 门开 ⇒ 高风险买入**不被否决**（原判据会改成「持有」）。
+        let (action, was_down, note) = apply_risk_veto_with_gate("买入", "高风险", true);
+        assert_eq!(action, "买入", "门开后不应改写动作");
+        assert!(!was_down, "门开后不应标记为已降级");
+        assert!(
+            note.contains("风控门已放开"),
+            "note 必须点名「门已放开」⇒ 呈现层才能与「门未过」区分：{note}"
+        );
+    }
+
+    #[test]
+    fn risk_veto_gate_open_keeps_hold_action_at_extreme_risk() {
+        // 极高风险原本「禁止持仓」（持有→观望）；门开 ⇒ 不改写。
+        let (action, was_down, note) = apply_risk_veto_with_gate("持有", "极高风险", true);
+        assert_eq!(action, "持有");
+        assert!(!was_down);
+        assert!(note.contains("风控门已放开"), "{note}");
+    }
+
+    #[test]
+    fn risk_veto_gate_closed_is_byte_identical_to_legacy_behavior() {
+        // 门关 ⇒ 与引入开关前逐位一致（这是「不改变既有行为」的保证）。
+        //
+        // ⚠ 比对**三元组**（动作 / 是否降级 / note）而不是「note 为空」——
+        //   旧行为在**否决生效**时 note 本就有内容（"高风险风控否决：禁止加仓"），
+        //   「note 为空」只成立于「未触发否决」的分支。
+        let (action, was_down, note) = apply_risk_veto_with_gate("买入", "高风险", false);
+        assert_eq!(action, "持有");
+        assert!(was_down);
+        assert_eq!(note, "高风险风控否决：禁止加仓", "门关时的 note 必须与旧行为逐字一致");
+
+        // 未触发否决的分支：note 恒空（两版一致）。
+        let (action, was_down, note) = apply_risk_veto_with_gate("持有", "低风险", false);
+        assert_eq!(action, "持有");
+        assert!(!was_down);
+        assert!(note.is_empty(), "未触发否决时 note 应为空: {note}");
+    }
+
+    #[test]
+    fn risk_veto_gate_open_still_rejects_unknown_action_value_domain() {
+        // ⚠ 门只停**否决**，「值域不可识别」的保守降级**不是门**，必须照旧生效。
+        let (action, was_down, note) = apply_risk_veto_with_gate("待明日观察", "极高风险", true);
+        assert_ne!(action, "待明日观察", "未识别值域必须被保守降级，不能原样放行");
+        assert!(was_down);
+        assert!(!note.contains("风控门已放开"), "值域降级不得被记成「门已放开」: {note}");
     }
 
     #[test]

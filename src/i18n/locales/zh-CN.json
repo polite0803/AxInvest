@@ -14352,8 +14352,6 @@
       "deliveryProgressUpdateIntervalSecs": "交付进度更新间隔（秒）",
       "deliveryAutoStart": "自动启动交付",
       "deliveryParallelWorkflows": "并行交付工作流数",
-      "agentTemperature": "Agent 温度（0-1）",
-      "agentMaxTokens": "Agent 最大 Token 数",
       "agentTimeoutSecs": "Agent 超时时间（秒）",
       "agentRetryMax": "Agent 最大重试次数",
       "notifyNewLead": "通知新线索",
@@ -16403,7 +16401,8 @@
         "profiles": "档案",
         "data": "数据",
         "params": "参数",
-        "recommendation": "荐股推送"
+        "recommendation": "荐股推送",
+        "gates": "否决门"
       },
       "check": "检测",
       "loadFailed": "配置加载失败",
@@ -18344,8 +18343,6 @@
       "maxConcurrent": "并行分析的 Agent 数量上限 (1-32)",
       "klineLimit": "K线数量 (60-500)",
       "newsLimit": "新闻数量 (10-100)",
-      "agentTemperature": "LLM 温度 (0-2)",
-      "agentMaxTokens": "LLM 最大输出 token 数",
       "agentTimeoutSecs": "每个 Agent 节点执行超时秒数",
       "agentRetryMax": "每个 Agent 节点最大重试次数",
       "toolTimeoutSecs": "每个 Tool 节点执行超时秒数",
@@ -18839,6 +18836,30 @@
         "trader": "f7 取 LLM 交易员的方向、置信与报价折算（v183 前的生产口径）。",
         "absent": "f7 没有任何输入 ⇒ 该腿记 0 并退出权重，本侧结论不含交易信号。",
         "unknown": "未声明 f7 的输入来历 ⇒ 无法判断本侧是否独立于 LLM 决策。"
+      }
+    },
+    "decisionGates": {
+      "title": "决策否决门",
+      "warning": "放开否决门会降低风控强度",
+      "warningDetail": "这三道门原本会拦下部分买入信号。放开后系统可以发出这些信号，但不会因此提高胜率——已观测的超短线档期望收益为负。放开只让效果「可被测量」，不等于「更赚钱」。",
+      "loadFailed": "读取否决门状态失败：{{error}}",
+      "saveFailed": "保存否决门状态失败：{{error}}",
+      "saved": "否决门状态已保存（下一轮分析生效）",
+      "riskVeto": {
+        "label": "放开风控门",
+        "desc": "高/极高风险标的原本禁止加仓/持仓；放开后允许开仓，仓位仍按风险上限封顶。"
+      },
+      "sentiment": {
+        "label": "放开情绪门",
+        "desc": "全市场封板率不足时原本不出买入/增持；放开后本档不再因市场情绪被否决（超短档仍受微观结构未接线封顶）。"
+      },
+      "valuation": {
+        "label": "放开估值门",
+        "desc": "严重高估（DCF 上行≤−35% 或 PE≥自身 5 年 80 分位）原本不出买入/增持；放开后本档不再因此被否决。估值数据缺失时仍按「未判定」处理。"
+      },
+      "tierBuy": {
+        "label": "顶层采纳档内买入",
+        "desc": "校准未达标会把置信度封顶并联动压低动作，导致顶层买入长期为 0；放开后顶层采纳档内已判出的买入。置信度封顶本身仍然生效。"
       }
     }
   },

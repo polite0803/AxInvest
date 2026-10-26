@@ -133,7 +133,11 @@ impl CapitalStrategy {
         // 尺度由档位决定（K线代理回退也须按档取尺度，否则「长档看 20 个交易日」这种
         // 与 90 天持有期脱节的口径会继续留在产出里）。
         let (klines, profile) =
-            match crate::recommender::scale::fetch(client, code, self.period).await {
+            // ⚠ R-3e：声明 12 天而不是 20 —— 12 是**各档 fetch_limit 所覆盖天数的最小值**
+            //   （hourly 48 根 × 0.25 = 12 天；daily 30 天 / weekly 180 天 / monthly 600 天）。
+            //   取该最小值 ⇒ 各档换算后都不超 fetch_limit ⇒ **取数根数逐字不变**（零回归）。
+            //   `w20` 在 hourly 档仍会超（80 根 vs 48 根）⇒ 那是**既有偏差**，不在本次修。
+            match crate::recommender::scale::fetch(client, code, self.period, 12).await {
                 Ok(v) => v,
                 Err(e) => {
                     tracing::debug!("[capital] {code} 档位 {:?} 取数失败: {e}", self.period);

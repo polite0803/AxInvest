@@ -76,7 +76,7 @@ async fn async_main() {
     // ⇒ 本入口（无头服务）与 CLI **自动获得**，不再需要各自补一行。
     // 此前这两步只在 Tauri 应用路径与 `axagent-batch-rerun` 里
     // ⇒ 无头服务与 `axagent-validate-backfill` 都缺 ⇒ 实测「工具未注册」⇒ 候选 0 行。
-    let _state = axagent_lib::init::state::create_app_state(db_result)
+    let state = axagent_lib::init::state::create_app_state(db_result)
         .await
         .expect("Fatal: app state initialization failed");
     tracing::info!("AppState created");
@@ -85,6 +85,26 @@ async fn async_main() {
     // 注：start_tray 因需要 tauri::AppHandle 会被跳过
     // start_background_services 需要适配无 Tauri 模式
     tracing::info!("Server started. Gateway available on configured port.");
+
+    // ── 启动 cron 调度器（C 方案，2026-10-26）────────────────────────────
+    //
+    // **为什么这一段是本次改造的核心**：
+    // 调度器原先**只能**活在 Tauri 应用进程里 ⇒ 桌面应用一关，每日定时任务
+    // （回放 / 反思 / 荐股 / 决策回测）就全部停止。
+    // 实测代价（生产库）：`mover_recall_analysis_batches` **连续 3 次 `interrupted`**，
+    // 消息统一是「应用重启：运行中进程退出，as-of 封闭世界无法跨进程续跑」。
+    //
+    // ⇒ 无头服务端跑调度器 ⇒ 定时任务与桌面应用**解耦**。
+    //
+    // ⚠ **跨进程互斥**：调度器启动时抢 DB 里的 leader 租约
+    //   （`cron_leader_lease`）⇒ 桌面应用与本服务**同时在跑**时只有一个派发，
+    //   另一个只观察（避免同一回放日跑两遍 ⇒ 样本重复计数）。
+    //
+    // ⚠ 无头路径的两处**显式降级**（不静默）：
+    //   · 荐股桌面通知 → 日志（结果仍落库）；
+    //   · 中断分析重跑 → 跳过（依赖 AppHandle 反查 managed state）。
+    axagent_lib::init::services::start_cron_scheduler_headless(&state).await;
+    tracing::info!("Cron scheduler started (headless path).");
 
     // ── 启动 Gateway ──
     // Gateway 已在 AppState 中持有，由 services 中的 api_server 任务管理

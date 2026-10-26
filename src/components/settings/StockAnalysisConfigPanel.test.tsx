@@ -302,8 +302,6 @@ describe("StockAnalysisConfigPanel 默认变量与后端模板 v19 同步", () =
     const names = extractVarNamesFromPanel();
     for (
       const v of [
-        "agent_temperature",
-        "agent_max_tokens",
         "agent_timeout_secs",
         "agent_retry_max",
         "tool_timeout_secs",
@@ -314,6 +312,12 @@ describe("StockAnalysisConfigPanel 默认变量与后端模板 v19 同步", () =
       ]
     ) {
       expect(names, `缺少运行时参数 ${v}`).toContain(v);
+    }
+    // 2026-10-26（模板 v189）：采样参数唯一权威改到「供应商-模型 → 参数」那一格，
+    // 这两个变量必须**不再出现在面板上** —— 面板留着一格而 `rt-workflow` 不读它，
+    // 就是本轮要消灭的「能拨、有值、没有代码读」开关（同「启用缓存断点」形态）。
+    for (const retired of ["agent_temperature", "agent_max_tokens"]) {
+      expect(names, `${retired} 应已随 v189 退役`).not.toContain(retired);
     }
   });
 

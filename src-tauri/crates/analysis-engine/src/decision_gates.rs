@@ -257,6 +257,9 @@ mod tests {
 
     /// 各测试之间共享 static 状态 ⇒ 用一把串行锁把测试整体串起来，
     /// 避免并行测试互相污染（`GATES` 是进程级全局）。
+    // SAFETY: std::sync::Mutex 不跨 await —— `with_reset` 是同步函数，guard 只在其执行期间持有，
+    // 全程无 await 点。依据 `clippy.toml` 的合法例外（形态同 `monitor.rs` 的 Recorder）。
+    #[allow(clippy::disallowed_types)]
     static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn with_reset<F: FnOnce()>(f: F) {

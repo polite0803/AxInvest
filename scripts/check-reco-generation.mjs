@@ -295,6 +295,11 @@ const POOL_C = new Map([
     "src-tauri/crates/dao/src/repo/reco_pool.rs|latest_seed_pool_codes",
     "按批次读 seed_pool_json（扫描阶段的输入池快照），与该行自身是否降级产物无关 ⇒ 排除降级只会让收盘归档多一条「池快照为空，跳过」，不提升选码质量",
   ],
+  [
+    "src-tauri/crates/dao/src/repo/reco_pool.rs|find_existing_pick_id",
+    "幂等键（as_of_date/period/stock_code/style/purpose）查重回查既有行 id，用途是覆盖写而非分母 ⇒" +
+      "与 synthetic 降级无关；加谓词会把既有行判成「不存在」⇒ 覆盖写变新增、id 换新致下游引用悬空",
+  ],
 ]);
 const POOL_P = new Map([
   [

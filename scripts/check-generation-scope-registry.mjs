@@ -129,6 +129,15 @@ const REGISTRY = [
     marker: MARKER_RECO,
     note: "逐条验证记录回写 stock_analyses.outcome —— 按代筛它等于把旧代样本说成「未验证」",
   },
+  {
+    file: "src-tauri/crates/dao/src/repo/reco_pool.rs",
+    fn: "find_existing_pick_id",
+    class: "single_lookup",
+    note:
+      "幂等键 (as_of_date, period, stock_code, style, purpose) 的查重读点（2026-10-26 同键覆盖）——" +
+      "只回答「同键行是否已存在（及其 id）」，服务覆盖写而非聚合分母 ⇒ 按代际筛会把旧代的同键行" +
+      "判成「不存在」⇒ 新增重复行、id 也换新（下游按 id 引用悬空）",
+  },
   // ── 统计（**荐股流域**代际）：该筛，但比的是 `RECO_GENERATION_FLOOR` 而非工作流域的 125 ──
   // 两条链的代际载体不同（`workflow_templates.version` vs `reco_picks.reco_version`），
   // 所以这两条带 `marker`。#49：`decision_validations` 自己没有版本列，代际由它 join 的

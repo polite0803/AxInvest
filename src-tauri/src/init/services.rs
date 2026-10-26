@@ -2126,10 +2126,9 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
     #[cfg(mobile)]
     let _ = app;
     #[cfg(not(mobile))]
-    // ⚠ `Option<&AppHandle>::cloned()` 会得到 `Option<&AppHandle>`（复制的是引用）⇒
-    //   必须 `map(|a| a.clone())` 才拿到 owned 的 `Option<AppHandle>`
-    //   （下面两处分支都要把 `AppHandle` move 进 `'static` 闭包 ⇒ 必须 owned）。
-    let app_handle = app.map(|a| a.clone());
+    // `Option<&AppHandle>::cloned()` = `Option<AppHandle>`（owned）——
+    // 下面两处分支都要把 `AppHandle` move 进 `'static` 闭包 ⇒ 必须 owned 而不能再借引用。
+    let app_handle = app.cloned();
 
     let store = state.cron_job_store.clone();
 

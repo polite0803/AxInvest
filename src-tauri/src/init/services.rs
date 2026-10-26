@@ -2992,6 +2992,12 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
             let job_name = job.name.clone();
             let recurring = job.recurring;
             let prompt = job.prompt.clone();
+            // mobile 构建没有 AppHandle（见本函数开头 `#[cfg(mobile)] let _ = app;`）⇒
+            // 显式给 None，让下面**统一**走「无头路径跳过」分支（记 skipped，不静默漏跑），
+            // 而不是整段任务在移动端被剔除。
+            #[cfg(mobile)]
+            let app_for_job: Option<tauri::AppHandle> = None;
+            #[cfg(not(mobile))]
             let app_for_job = app_handle.clone();
             tokio::task::spawn(cron_live(async move {
                 let started = axagent_runtime_core::cron_job::now_millis();

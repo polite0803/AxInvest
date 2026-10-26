@@ -38,7 +38,9 @@ tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
 tracing = { workspace = true }
 url = "2"
 uuid = { workspace = true }
-zstd = { version = "0.13", features = ["experimental"] }
+# RUSTSEC-2026-0391 / -0398 / -0403 / -0410：zstd 0.13 线（zstd-safe 7.x、zstd-sys 2.0.x）已无修复版，
+# 0.14.3 起带 zstd-safe ≥8.2.0 / zstd-sys ≥2.1.2 ⇒ 必须跨大版本升级（本仓只用 encode_all/decode_all）
+zstd = { version = "0.14.3", features = ["experimental"] }
 
 [lints]
 workspace = true

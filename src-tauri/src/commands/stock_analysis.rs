@@ -6110,8 +6110,13 @@ pub async fn create_validate_decisions_cron(
     if !enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
     }
-    // 幂等（R-3g 顺带修）：先移除同 id 的旧行 ⇒ 覆盖而非并存
-    let _ = state.cron_job_store.remove(&id).await;
+    // 幂等（R-3g 顺带修）：先移除同 id 的旧行 ⇒ 覆盖而非并存。
+    // `remove` 返回是否命中旧行（bool），DB 删除失败已在其内部 `error!` 记录 ⇒
+    // 这里只消费返回值，不因「没删到旧行」阻断后续 add。
+    let replaced = state.cron_job_store.remove(&id).await;
+    if replaced {
+        tracing::debug!("[validate-decisions] 覆盖同 id 的旧任务: {id}");
+    }
     state.cron_job_store.add(job.clone()).await;
     Ok(CronJobResponse::from(&job))
 }

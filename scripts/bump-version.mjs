@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execSync } from "child_process";
-import { readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 
@@ -45,7 +45,15 @@ console.log(`✅ src-tauri/tauri.conf.json: ${tauriOld} → ${version}`);
 const cargoPath = resolve(root, "src-tauri/Cargo.toml");
 let cargoContent = readFileSync(cargoPath, "utf-8");
 
-const workspaceVersionRegex = /^(\[workspace\.package\][\s\S]*?version\s*=\s*)"[^"]*"/;
+// 旧 workspace 版本（lock 同步用）：只有 version 恰好等于它的 path 包才是 workspace 成员，
+// 显式写死自己版本号的本地 crate（如 analysis-engine = 0.1.0）不跟随 workspace，不能改。
+const cargoOldVersion = (
+  cargoContent.match(/\[workspace\.package\][\s\S]*?version\s*=\s*"([^"]*)"/) ??
+    cargoContent.match(/\[package\][\s\S]*?version\s*=\s*"([^"]*)"/)
+)?.[1];
+
+// 必须带 m 标志：`^` 否则只匹配字符串开头，而 [workspace.package] 不在文件首行 ⇒ 永不命中
+const workspaceVersionRegex = /^(\[workspace\.package\][\s\S]*?version\s*=\s*)"[^"]*"/m;
 const workspaceMatch = cargoContent.match(workspaceVersionRegex);
 if (workspaceMatch) {
   const oldVersionMatch = cargoContent.match(/\[workspace\.package\][\s\S]*?version\s*=\s*"([^"]*)"/);
@@ -53,7 +61,7 @@ if (workspaceMatch) {
   cargoContent = cargoContent.replace(workspaceVersionRegex, `$1"${version}"`);
 
   // Also bump [package] version in the root Cargo.toml itself
-  const rootPkgRegex = /^(\[package\][\s\S]*?version\s*=\s*)"[^"]*"/;
+  const rootPkgRegex = /^(\[package\][\s\S]*?version\s*=\s*)"[^"]*"/m;
   cargoContent = cargoContent.replace(rootPkgRegex, `$1"${version}"`);
 
   writeFileSync(cargoPath, cargoContent);
@@ -66,6 +74,30 @@ if (workspaceMatch) {
   cargoContent = cargoContent.replace(rootPkgRegex, `$1"${version}"`);
   writeFileSync(cargoPath, cargoContent);
   console.log(`✅ src-tauri/Cargo.toml (package.version): ${oldVersion} → ${version}`);
+}
+
+// --- 3b. src-tauri/Cargo.lock（workspace 成员版本）---
+// 成员是 path 依赖（[[package]] 块内无 `source` 字段），其 version 必须与 workspace 版本一致，
+// 否则 `cargo --locked` 判定 lock 过期。按块改写，避免误伤版本号恰好相同的第三方包。
+const lockPath = resolve(root, "src-tauri/Cargo.lock");
+if (existsSync(lockPath)) {
+  const lockContent = readFileSync(lockPath, "utf-8");
+  let bumpedBlocks = 0;
+  const nextLock = lockContent
+    .split(/(?=\[\[package\]\]\n)/)
+    .map((block) => {
+      if (!block.startsWith("[[package]]\n") || block.includes("\nsource = ")) return block;
+      if (!cargoOldVersion || !block.includes(`\nversion = "${cargoOldVersion}"`)) return block;
+      return block.replace(/(\nversion = )"[^"]*"/, (_, prefix) => {
+        bumpedBlocks += 1;
+        return `${prefix}"${version}"`;
+      });
+    })
+    .join("");
+  if (nextLock !== lockContent) {
+    writeFileSync(lockPath, nextLock);
+    console.log(`✅ src-tauri/Cargo.lock: ${bumpedBlocks} 个 workspace 成员版本 → ${version}`);
+  }
 }
 
 console.log(`\n版本已更新为 ${version}`);
@@ -102,7 +134,7 @@ if (prevTag) {
   // Compare commits since last tag
   try {
     const count = execSync(
-      `git rev-list --count v${prevTag}..HEAD`,
+      `git rev-list --count ${prevTag}..HEAD`,
       { cwd: root, encoding: "utf-8" },
     ).trim();
     console.log(`📊 自 ${prevTag} 以来共 ${count} 个提交`);

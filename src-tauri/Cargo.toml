@@ -262,10 +262,16 @@ tracing-log = "0.2"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
 
+# 2026-10-26 实测（v3.0.0 Release run）：
+#   fat LTO + codegen-units = 1 在 GitHub 托管 runner 上 codegen 阶段直接爆内存 ——
+#   Windows x64: `rustc-LLVM ERROR: out of memory` / `Allocation failed`；
+#   Linux x64 与 Android 各 ABI: 进程被 OOM Killer 杀掉，表现为
+#   "The runner has received a shutdown signal ... The operation was canceled."
+# 改为 thin LTO + 拆分 codegen-units：内存峰值显著下降（体积略有增加）。
 [profile.release]
 strip = true
-lto = true
-codegen-units = 1
+lto = "thin"
+codegen-units = 16
 opt-level = "s"
 
 # Android CI 专用 profile：降低内存峰值，避免 GitHub Actions 7GB runner OOM

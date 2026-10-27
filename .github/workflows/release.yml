@@ -672,16 +672,25 @@ jobs:
           echo "--- gradle.properties ---"
           cat "$GP"
 
-      # 2026-10-27 run 实测：三个 Android ABI 即便已用 jobs=1 + LTO off，
+      # 2026-10-27 上一轮 run 实测：三个 Android ABI 即便已用 jobs=1 + LTO off，
       # 仍在编译主 crate 阶段被 OOM Killer 杀掉（开跑时 15Gi 内存 / 10Gi 可用，
-      # 说明是单个 rustc 的瞬时峰值顶穿，而不是慢速泄漏）。加 8Gi swap 兜住峰值：
+      # 说明是单个 rustc 的瞬时峰值顶穿，而不是慢速泄漏）。加 10Gi swap 兜住峰值：
       # 超出的部分落盘换页，编译变慢但不会被杀，比整条流水线重跑便宜。
       - name: Add swap (OOM buffer)
         run: |
-          sudo fallocate -l 8G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          # ⚠ 不能用 /swapfile：GitHub runner 镜像已自带并启用该路径的 swap，
+          # 再 fallocate 会直接报 "Text file busy"（2026-10-27 run 40487528740 实证）。
+          # 改用 /mnt 上的大容量临时盘另建一个独立 swapfile。
+          SWAPFILE=/mnt/ci-extra-swapfile
+          if ! sudo fallocate -l 10G "$SWAPFILE"; then
+            SWAPFILE=/var/ci-extra-swapfile
+            sudo fallocate -l 10G "$SWAPFILE" || sudo dd if=/dev/zero of="$SWAPFILE" bs=1M count=10240
+          fi
+          sudo chmod 600 "$SWAPFILE"
+          sudo mkswap "$SWAPFILE"
+          sudo swapon "$SWAPFILE"
+          echo "--- swap ---"
+          swapon --show
           free -h
 
       # 注：APK 与 AAB 在同一次 `tauri android build` 中产出（--apk --aab），

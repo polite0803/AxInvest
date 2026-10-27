@@ -190,6 +190,18 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      # Linux x86_64 用默认 release profile（thin LTO）⇒ 2026-10-27 run 实测在
+      # `Compiling axagent-runtime` 阶段被 OOM Killer 杀掉（日志仅表现为
+      # "The runner has received a shutdown signal"）。ARM64 job 用 4GB 内存也能过，
+      # 差别就在它开了「LTO off + jobs=1 + cgu=16」这套降内存参数。
+      # 这里用 $GITHUB_ENV 只对 x86_64 Linux 生效，避免影响已成功的 Windows / macOS。
+      - name: Lower memory footprint (Linux x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
+          echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=1" >> "$GITHUB_ENV"
+
       - name: Build with Tauri
         uses: tauri-apps/tauri-action@v0.5
         env:
@@ -197,6 +209,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'macos-latest' && '-' || '' }}
+          # macOS x86_64 是 arm64 runner 上的交叉链接：ld64 默认只给宿主架构（arm64）
+          # 产物打 ad-hoc 签名，x86_64 产物没有 ⇒ tauri 给主二进制 codesign 时嵌套校验失败：
+          #   AxInvest: code object is not signed at all
+          #   In subcomponent: .../AxInvest.app/Contents/MacOS/axagent-batch-rerun
+          # 显式让链接器给 x86_64 产物也打 ad-hoc 签名（aarch64 原生构建本来就有，故一直成功）。
+          RUSTFLAGS: ${{ matrix.target == 'x86_64-apple-darwin' && '-C link-arg=-Wl,-adhoc_codesign' || '' }}
         with:
           # NOTE: Do NOT set tagName/releaseDraft here — tauri-action manages
           # releases via softprops/action-gh-release internally, and running
@@ -654,26 +672,37 @@ jobs:
           echo "--- gradle.properties ---"
           cat "$GP"
 
+      # 2026-10-27 run 实测：三个 Android ABI 即便已用 jobs=1 + LTO off，
+      # 仍在编译主 crate 阶段被 OOM Killer 杀掉（开跑时 15Gi 内存 / 10Gi 可用，
+      # 说明是单个 rustc 的瞬时峰值顶穿，而不是慢速泄漏）。加 8Gi swap 兜住峰值：
+      # 超出的部分落盘换页，编译变慢但不会被杀，比整条流水线重跑便宜。
+      - name: Add swap (OOM buffer)
+        run: |
+          sudo fallocate -l 8G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
       # 注：APK 与 AAB 在同一次 `tauri android build` 中产出（--apk --aab），
       # 避免为 AAB 单独再启动一次完整的 gradle 构建。
       # --target 参数接受: aarch64, armv7, i686, x86_64
       # 内存策略：
-      #   1) CARGO_PROFILE env：Cargo 1.78+ 原生支持，覆盖默认 profile，
-      #      release-android 关闭 LTO + codegen-units=16，避免 ARM 交叉编译 OOM。
-      #   2) tauri android build 内部通过 Gradle 调用 cargo，CARGO_PROFILE 会被 cargo 读取。
+      #   真正的降内存手段是 job 级 env 的 CARGO_PROFILE_RELEASE_LTO=off 与
+      #   CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16（Cargo 的 profile 覆盖变量，
+      #   tauri android build → Gradle → cargo 的进程链会继承）。
+      #   注意：Cargo 并没有 `CARGO_PROFILE` 这个「选择 profile」的变量，此前这里
+      #   export 过它，实际是空操作（profile 仍是 release，靠 env 覆盖生效）。
       - name: Build Android APK + AAB
         timeout-minutes: 240
         run: |
           cd src-tauri
           TARGET=${{ matrix.abi == 'arm64-v8a' && 'aarch64' || matrix.abi == 'armeabi-v7a' && 'armv7' || 'x86_64' }}
-          # ARM 交叉编译：收紧 cargo 并发 + 使用 release-android profile 降内存
-          # x86_64 是 native 编译，仍用 release profile（速度/体积优先）
+          # ARM 交叉编译：收紧 cargo 并发；x86_64 是 native 编译，可放宽到 2
           if [ "${{ matrix.abi }}" = "armeabi-v7a" ] || [ "${{ matrix.abi }}" = "arm64-v8a" ]; then
             export CARGO_BUILD_JOBS=1
-            export CARGO_PROFILE=release-android
           else
             export CARGO_BUILD_JOBS=2
-            export CARGO_PROFILE=release
           fi
           echo "=== System Resources Before Build ==="
           echo "Memory:"

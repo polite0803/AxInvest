@@ -28,7 +28,8 @@
 //   R8 不得存在第二套同义 i18n 键（`stockAnalysis.conditional.action*` 是 R6 退役项的计数器）
 //   R9 八档在 `getActionTKey` 里必须各有显式 case，只被 default 兜住的档 = 机器读不到它的键 ⇒ 红
 //   R10 前端 `STOCK_ACTION_CANONICAL_LABELS`（第二份「枚举→中文」表）必须逐档等于权威 `as_storage_cn`
-//   R11 强度配色 `ACTION_PALETTE`：八档齐、**八色互不相同**、六档 rank 恰好 0..5、
+//   R11 强度配色 `ACTION_PALETTE`：八档齐、**八个类目色 hue 互不相同**（真实色值由
+//      `categoricalColors.HUE_COLORS` 单源给出，明/暗两档都随之互异）、六档 rank 恰好 0..5、
 //      兜底两档 rank=null，且「利空→利好」的先后必须与权威谓词 `implies_reduce` / `implies_buy` 同向
 //   R12 按档位分支（`case StockAction.X:`）与第二份 `ACTION_PALETTE` 只允许存在于权威文件里
 //   R13 记录来历值域（`live` / `replay`）另有自己的权威 `harness/src/analysis_kind.rs`：
@@ -194,11 +195,11 @@ export function rustPredicateSet(rsSrc, fnName) {
   return variants.length ? variants : null;
 }
 
-/** TS：`export const ACTION_PALETTE` ⇒ 档成员名 → `{ hex, rank }`（rank 可为 null） */
+/** TS：`export const ACTION_PALETTE` ⇒ 档成员名 → `{ hue, rank }`（rank 可为 null） */
 export function tsPaletteMap(tsSrc) {
   const at = tsSrc.indexOf("export const ACTION_PALETTE");
   if (at < 0) { return null; }
-  // 类型注解里也带花括号（`Record<StockActionType, { readonly hex… }>`) ⇒ 不能取第一个 `{`，
+  // 类型注解里也带花括号（`Record<StockActionType, { readonly hue… }>`) ⇒ 不能取第一个 `{`，
   // 要取行尾 `= {` 那一对 —— 它是对象字面量的起点（首跑就是红在这里，抽取器比判据先错）。
   const eq = tsSrc.indexOf("= {", at);
   if (eq < 0) { return null; }
@@ -207,10 +208,13 @@ export function tsPaletteMap(tsSrc) {
   const body = bodyAfter(tsSrc.slice(eq + 2), "");
   if (!body) { return null; }
   const map = {};
-  const re = /\[StockAction\.([A-Z_]+)\]\s*:\s*\{\s*hex:\s*"([^"]+)"\s*,\s*rank:\s*(null|-?\d+),?\s*\}/g;
+  // 2026-10-28：配色值从硬编码 `hex` 改为类目色名 `hue`（单源在 theme/categoricalColors.ts
+  // 的 HUE_COLORS，随明暗档翻）。抽取器必须跟着改，否则「解析到 0 条」会被当空集假绿。
+  const re =
+    /\[StockAction\.([A-Z_]+)\]\s*:\s*\{\s*hue:\s*"([^"]+)"\s*,\s*rank:\s*(null|-?\d+),?\s*\}/g;
   let m;
   while ((m = re.exec(body)) !== null) {
-    map[m[1]] = { hex: m[2], rank: m[3] === "null" ? null : Number(m[3]) };
+    map[m[1]] = { hue: m[2], rank: m[3] === "null" ? null : Number(m[3]) };
   }
   return Object.keys(map).length ? map : null;
 }
@@ -464,10 +468,12 @@ export function checkAll(parts) {
     if (extraPal.length) { push("R11", `ACTION_PALETTE 多出权威没有的档：${extraPal.join("/")}`); }
 
     // 八色互异 —— 用户 2026-10-22 的原话要求：「不要出现结果不同而颜色相同的情况」
-    const byHex = {};
-    for (const [t, v] of Object.entries(palette)) { (byHex[v.hex] ??= []).push(t); }
-    for (const [hex, list] of Object.entries(byHex)) {
-      if (list.length > 1) { push("R11", `${list.join("/")} 共用 hex ${hex} ⇒ 两档结论同色，强度差完全不可见`); }
+    // 2026-10-28：配色值现为类目色名 `hue`，真实色值由 categoricalColors.HUE_COLORS 单源给出
+    // （同一 hue 在明/暗档各映射一个值，故 hue 互异 = 两档下颜色都互异）。
+    const byHue = {};
+    for (const [t, v] of Object.entries(palette)) { (byHue[v.hue] ??= []).push(t); }
+    for (const [hue, list] of Object.entries(byHue)) {
+      if (list.length > 1) { push("R11", `${list.join("/")} 共用类目色 hue ${hue} ⇒ 两档结论同色，强度差完全不可见`); }
     }
 
     // 六档 rank 恰好 0..5 各一次；两档兜底必须 null（缺席不摆上强度轴）
@@ -764,13 +770,14 @@ function selftest() {
     ["R9", (p) => { p.frontendTs = p.frontendTs.replace('      return "stockAnalysis.actionSell";\n', ""); }],
     ["R10", (p) => { p.frontendTs = p.frontendTs.replace('[StockAction.HOLD]: "持有"', '[StockAction.HOLD]: "坚守"'); }],
     // R11 的四格各拆一个破坏样本：同色 / rank 重复 / 兜底档被摆上强度轴 / 强度方向反了
-    ["R11", (p) => { p.frontendTs = p.frontendTs.replace('[StockAction.HOLD]: { hex: "#faad14", rank: 3 }', '[StockAction.HOLD]: { hex: "#f5222d", rank: 3 }'); }],
-    ["R11", (p) => { p.frontendTs = p.frontendTs.replace('[StockAction.HOLD]: { hex: "#faad14", rank: 3 }', '[StockAction.HOLD]: { hex: "#faad14", rank: 1 }'); }],
-    ["R11", (p) => { p.frontendTs = p.frontendTs.replace('[StockAction.UNCERTAIN]: { hex: "#9254de", rank: null }', '[StockAction.UNCERTAIN]: { hex: "#9254de", rank: 6 }'); }],
+    // 2026-10-28：配色值是类目色名 `hue`（不是 hex），夹具跟随 AUTHORITY 表当前取值。
+    ["R11", (p) => { p.frontendTs = p.frontendTs.replace('[StockAction.HOLD]: { hue: "yellow", rank: 3 }', '[StockAction.HOLD]: { hue: "red", rank: 3 }'); }],
+    ["R11", (p) => { p.frontendTs = p.frontendTs.replace('[StockAction.HOLD]: { hue: "yellow", rank: 3 }', '[StockAction.HOLD]: { hue: "yellow", rank: 1 }'); }],
+    ["R11", (p) => { p.frontendTs = p.frontendTs.replace('[StockAction.UNCERTAIN]: { hue: "purple", rank: null }', '[StockAction.UNCERTAIN]: { hue: "purple", rank: 6 }'); }],
     ["R11", (p) => {
       p.frontendTs = p.frontendTs
-        .replace('[StockAction.SELL]: { hex: "#13c2c2", rank: 0 }', '[StockAction.SELL]: { hex: "#13c2c2", rank: 5 }')
-        .replace('[StockAction.BUY]: { hex: "#f5222d", rank: 5 }', '[StockAction.BUY]: { hex: "#f5222d", rank: 0 }');
+        .replace('[StockAction.SELL]: { hue: "cyan", rank: 0 }', '[StockAction.SELL]: { hue: "cyan", rank: 5 }')
+        .replace('[StockAction.BUY]: { hue: "red", rank: 5 }', '[StockAction.BUY]: { hue: "red", rank: 0 }');
     }],
     // R12：在某个消费组件里另立按档位分支（八色互异仍成立，只有这条该红）
     ["R12", (p) => {

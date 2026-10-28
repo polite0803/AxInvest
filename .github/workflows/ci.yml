@@ -303,6 +303,11 @@ jobs:
           node scripts/check-generation-scope-registry.mjs
           node scripts/check-reco-generation.mjs --selftest
           node scripts/check-reco-generation.mjs
+          # 荐股闭环逐格状态的枚举覆盖门（2026-10-28）：状态词表抄在四个面 + 11 语言文案，
+          # 加状态只改两个面 ⇒ 界面露出原始码、矩阵把硬停格显示成「闭环已校准 0.00」。
+          # 与 scripts/ci-check.mjs 对应两条 step **逐字同源**。
+          node scripts/check-reco-loop-status-coverage.mjs --selftest
+          node scripts/check-reco-loop-status-coverage.mjs
           # 逐档决策腿键级生产者-消费者对账门（2026-10-18，PLAN-mover-coverage-and-reflection-exit §0-A）：
           # 现网两条恒缺席腿（sectorRotation / microstructure 各 80/80）的成因是输入键没人生产，
           # 只有键级对账能查；与 scripts/ci-check.mjs 对应两条 step **逐字同源**。

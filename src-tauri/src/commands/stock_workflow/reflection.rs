@@ -613,6 +613,113 @@ pub async fn run_reflection_workflow(
     });
     let primary_snapshot = horizon_snapshots.get(primary_horizon).and_then(|s| s.as_ref());
 
+    // ── 确定性短路（2026-10-28，④「确定性归因优先」）──
+    // 目标价已实现是**行情事实**（`MarketSnapshot::target_reached`），不需要模型再归因一次。
+    // 只走 UPDATE 路径（必须有 `reflection_id` 可写）：INSERT 路径与 mover 专项仍走完整链路，
+    // 因为那两条还要顺手写 strategy_performance / mover 事件，短路它们会让状态不一致。
+    // 回滚办法：把 `DETERMINISTIC_REFLECTION_SKIP` 置 false（不影响其它逻辑）。
+    const DETERMINISTIC_REFLECTION_SKIP: bool = true;
+    if DETERMINISTIC_REFLECTION_SKIP
+        && let Some(rid) = reflection_id.as_deref()
+        && let Some(snap) = primary_snapshot
+    {
+        use axagent_analysis_engine::reflection_route::{AttributionFacts, Route, attribute};
+        // 止损价只存在于原始决策 JSON（快照只有区间低点）；两种键名都认，允许嵌套。
+        // 找不到 / 非正数 ⇒ None（"拿不到"），不参与判定。
+        fn find_stop_loss(v: &serde_json::Value) -> Option<f64> {
+            match v {
+                serde_json::Value::Object(map) => {
+                    for key in ["stopLoss", "stop_loss", "stopLossPrice"] {
+                        if let Some(raw) = map.get(key) {
+                            if let Some(f) = raw.as_f64().filter(|f| *f > 0.0) {
+                                return Some(f);
+                            }
+                            if let Some(f) = raw
+                                .as_str()
+                                .and_then(|s| s.trim().parse::<f64>().ok())
+                                .filter(|f| *f > 0.0)
+                            {
+                                return Some(f);
+                            }
+                        }
+                    }
+                    map.values().find_map(find_stop_loss)
+                },
+                serde_json::Value::Array(items) => items.iter().find_map(find_stop_loss),
+                _ => None,
+            }
+        }
+        let stop_price = original_analysis
+            .as_ref()
+            .and_then(|a| a.decision_json.as_deref())
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .and_then(|v| find_stop_loss(&v));
+        let stop_loss_hit = stop_price.map(|stop| snap.period_low <= stop);
+        let route = attribute(&AttributionFacts {
+            raw_return_pct: raw_return,
+            alpha_return_pct: alpha_return,
+            target_hit: snap.target_reached,
+            stop_loss_hit,
+        });
+        if let Route::Deterministic(d) = route {
+            let written = stock_reflections::Entity::update_many()
+                .col_expr(stock_reflections::Column::Status, Expr::value("completed"))
+                .col_expr(stock_reflections::Column::Verdict, Expr::value(d.verdict))
+                .col_expr(stock_reflections::Column::LessonSummary, Expr::value(d.lesson))
+                .col_expr(stock_reflections::Column::WhatWentWrong, Expr::value(d.what_went_wrong))
+                .col_expr(stock_reflections::Column::FixForFuture, Expr::value(d.fix_for_future))
+                .col_expr(stock_reflections::Column::ActualOutcome, Expr::value(actual_outcome))
+                .col_expr(stock_reflections::Column::RawReturn, Expr::value(raw_return))
+                .col_expr(stock_reflections::Column::AlphaReturn, Expr::value(alpha_return))
+                .col_expr(stock_reflections::Column::HoldingDays, Expr::value(holding_days))
+                .col_expr(stock_reflections::Column::UpdatedAt, Expr::value(now_ms))
+                .filter(stock_reflections::Column::Id.eq(rid))
+                .exec(db)
+                .await;
+            match written {
+                Ok(_) => {
+                    // 短路省掉的是 LLM，**不能省掉战绩样本**：目标价达成的赢家若不进
+                    // `strategy_performance`，命中率统计会系统性丢正样本。复用主路径同一个
+                    // 幂等写入器，口径与完整链路一致（不一致的话两条路径的样本不可合并）。
+                    match persist_m1_sample_if_absent(
+                        db,
+                        &M1SampleInputs {
+                            reflection_id: rid,
+                            original_analysis: original_analysis.as_ref(),
+                            primary_snapshot,
+                            stock_code,
+                            stock_name,
+                            raw_return,
+                            holding_days,
+                            primary_horizon,
+                            reflected_generation,
+                            now_ms,
+                        },
+                    )
+                    .await
+                    {
+                        Ok(_) => {},
+                        Err(e) => tracing::warn!(
+                            "[reflection] 确定性短路后写 strategy_performance 失败\
+                             （reflection_id={rid}）: {e}"
+                        ),
+                    }
+                    tracing::info!(
+                        "[reflection] {stock_code} {primary_horizon} 行情事实已定性\
+                         （目标/止损）⇒ 确定性归因，跳过 LLM（reflection_id={rid}）"
+                    );
+                    return Ok(rid.to_string());
+                },
+                Err(e) => {
+                    // 落库失败就回退完整链路：宁可多花一次调用，也不能让反思行卡在 running。
+                    tracing::warn!(
+                        "[reflection] 确定性归因落库失败（reflection_id={rid}），回退 LLM 路径: {e}"
+                    );
+                },
+            }
+        }
+    }
+
     // 4a. 从 blackboard_snapshot 构造 sub-analysis 变量（分析工作流记忆）
     let sub_analysis_memory: serde_json::Value = match &original_analysis {
         Some(analysis) => {
@@ -950,6 +1057,25 @@ pub async fn run_reflection_workflow(
         is_secret: false,
     });
 
+    // 2026-10-28：先把**确定性行情事实**摆到模型面前（收益/超额/触发位），
+    // 免得它从黑板里再猜一遍收益数字（模型自报与库内真值不一致是历史高发项）。
+    // 触发位（stop_loss_hit/target_hit）目前只在调用方算得出，未传进来时保持 None ——
+    // 缺失就是缺失，不得当 false 处理（见 `reflection_route` 模块头注）。
+    let attribution_line = axagent_analysis_engine::reflection_route::render_attribution_line(
+        &axagent_analysis_engine::reflection_route::AttributionFacts {
+            raw_return_pct: raw_return,
+            alpha_return_pct: alpha_return,
+            ..Default::default()
+        },
+    );
+    variables.push(axagent_harness::workflow_types::Variable {
+        name: "deterministic_attribution".into(),
+        var_type: "string".into(),
+        value: serde_json::Value::String(attribution_line),
+        description: Some("确定性行情事实（收益/超额/触发位），模型不得另行臆造".into()),
+        is_secret: false,
+    });
+
     let mut opts = axagent_rt_workflow::work_engine::RunOptions {
         progress_callback: None,
         // [v2] 不再有 sub-analysis SubWorkflowNode，无需为子工作流传 input。
@@ -1027,8 +1153,12 @@ pub async fn run_reflection_workflow(
             let what_went_wrong = deep_get_reflection_str(&reflection_json, "what_went_wrong");
             let missed_signals = deep_get_reflection_text(&reflection_json, "missed_signals");
             let fix_for_future = deep_get_reflection_str(&reflection_json, "fix_for_future");
-            let params_suggestion_json =
-                deep_get_reflection_text(&reflection_json, "params_suggestion");
+            // 空建议（`[]` / 无 param 字段）落 NULL，而不是写一个「看起来有建议」的空数组 ——
+            // 现网 177/246 条就是 `[]`，把 WFO 的样本计数和面板都撑虚了。
+            let params_suggestion_json = normalize_params_suggestion(
+                deep_get_reflection_text(&reflection_json, "params_suggestion"),
+                &analysis_id,
+            );
 
             // P2-b：失败模式白名单化。列值与「模板未产出」的区分口径见 `failure_modes_column_of`；
             // 被丢弃的词表外 token 只记日志（含本行 id），面板的「词表外归因」另有来源（见引擎模块注释）。
@@ -4804,6 +4934,41 @@ fn build_horizon_results_json(
     serde_json::to_string(&serde_json::Value::Object(results)).ok()
 }
 
+/// 把反思自报的 `params_suggestion` 规整成「可消费的建议」或「不写」。
+///
+/// 为什么需要（2026-10-28 实测）：现网 246 条写了 `parameter_suggestions_json`，其中
+/// **177 条是空数组 `[]`** —— 它既不是「模型没给建议」（那该是 NULL），也不是可校准
+/// 参数。后果有两个：面板的「有建议」计数虚高；而 `try_parse_param_suggestion` 对
+/// `[]` 一条都读不出来，WFO 却要先把这些行捞出来再逐条丢弃。
+///
+/// 判据：数组里没有任何带非空 `param` 字段的对象 ⇒ 返回 `None`（落 NULL）并记日志。
+/// 非数组 / 非 JSON 的形态保持原样 —— 那是历史数据形态，交给解析器决定认不认。
+fn normalize_params_suggestion(raw: Option<String>, analysis_id: &str) -> Option<String> {
+    let text = raw?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+        return Some(text);
+    };
+    let Some(items) = value.as_array() else {
+        return Some(text);
+    };
+    let usable = items
+        .iter()
+        .any(|it| it.get("param").and_then(|p| p.as_str()).is_some_and(|p| !p.trim().is_empty()));
+    if usable {
+        return Some(text);
+    }
+    tracing::info!(
+        "[reflection] params_suggestion 是空建议（{} 项、无 param 字段）⇒ 落 NULL 而不是空数组\
+         （analysis_id={analysis_id}）",
+        items.len()
+    );
+    None
+}
+
 // ── 单元测试：覆盖 LLM 输出 → IR → JSON 提取的全链路 ──
 //
 // 关键场景：
@@ -4823,6 +4988,24 @@ fn build_horizon_results_json(
 #[cfg(test)]
 mod reflection_payload_tests {
     use super::*;
+
+    /// 空建议不得冒充产出：`[]` 与「没有 param 字段的对象数组」都落 NULL。
+    /// 反向对照：带非空 `param` 的建议必须原样保留（否则真建议会被这条规整吃掉）。
+    #[test]
+    fn params_suggestion_empty_shapes_become_null() {
+        assert_eq!(normalize_params_suggestion(Some("[]".into()), "a"), None);
+        assert_eq!(normalize_params_suggestion(Some("  ".into()), "a"), None);
+        assert_eq!(normalize_params_suggestion(Some("[{\"param\":\"\"}]".into()), "a"), None);
+        assert_eq!(normalize_params_suggestion(Some("[{\"value\":1}]".into()), "a"), None);
+        assert_eq!(normalize_params_suggestion(None, "a"), None);
+
+        let real = r#"[{"param":"sl_pct_short","current_value":5.0}]"#;
+        assert_eq!(normalize_params_suggestion(Some(real.into()), "a").as_deref(), Some(real));
+
+        // 非 JSON / 非数组形态保持原样，交给下游解析器判
+        let raw = "sl_pct_short=5";
+        assert_eq!(normalize_params_suggestion(Some(raw.into()), "a").as_deref(), Some(raw));
+    }
 
     /// #31 的读侧根因回归（2026-10-26）：validator 候选经 `extract_agent_output`
     /// 之后**没有 verdict**（它返回 code 节点的 `params` 入参）⇒ 必须能回退到

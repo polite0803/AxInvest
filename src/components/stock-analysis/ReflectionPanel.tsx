@@ -1648,8 +1648,19 @@ export function ExpandedReflectionRow(
               <Button
                 size="small"
                 type="link"
-                onClick={() =>
-                  navigate(`/stock-analysis/${row.originalAnalysisId}`)}
+                onClick={() => {
+                  // 2026-10-28 起 `/stock-analysis/:id` 已删除，原分析记录并入投资工作区
+                  const qs = new URLSearchParams({
+                    tab: "workspace",
+                    view: "analysis",
+                    stockCode: row.stockCode,
+                    analysisId: row.originalAnalysisId as string,
+                  });
+                  if (row.stockName) {
+                    qs.set("stockName", row.stockName);
+                  }
+                  navigate(`/invest?${qs.toString()}`);
+                }}
                 style={{ padding: 0 }}
               >
                 {t("stockAnalysis.reflection.jumpToAnalysisBtn")}

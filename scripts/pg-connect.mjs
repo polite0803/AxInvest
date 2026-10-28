@@ -136,12 +136,14 @@ async function main() {
   const positional = rest.filter((a) => !a.startsWith("--"));
   const dbArg = rest.find((a) => a.startsWith("--db="));
   const redact = rest.includes("--redact");
+  const fileArg = rest.find((a) => a.startsWith("--file="));
 
   if (!cmd || cmd === "-h" || cmd === "--help") {
     process.stdout.write(
       "用法:\n" +
         "  node scripts/pg-connect.mjs url [--db=<库名>] [--redact]  打印连接串（默认 axinvest）\n" +
-        '  node scripts/pg-connect.mjs sql "<SQL>"                   执行 SQL（pg 包或 psql 择优）\n',
+        '  node scripts/pg-connect.mjs sql "<SQL>"                   执行 SQL（pg 包或 psql 择优）\n' +
+        "  node scripts/pg-connect.mjs sql --file=<path>             同上，SQL 从文件读（推荐：中文/长 SQL）\n",
     );
     return;
   }
@@ -162,8 +164,19 @@ async function main() {
   }
 
   if (cmd === "sql") {
-    const sql = positional[0];
-    if (!sql) fail('sql 子命令需要 SQL 文本，例如: node scripts/pg-connect.mjs sql "SELECT 1"');
+    // `--file=<path>`：SQL 走文件而不是 argv。
+    // 为什么需要它（2026-10-28 实测）：Windows 上命令行参数里的非 ASCII 字符会先被
+    // 控制台代码页转一次，psql 收到的是乱码 ⇒ `invalid byte sequence for encoding
+    // "UTF8": 0xbe`。而 `-f` 由 psql 自己按 `PGCLIENTENCODING` 读文件，是这条路径上
+    // 唯一可靠的方式（同一台机器上 `-f` + `PGCLIENTENCODING=UTF8` 一次通过）。
+    const sqlFile = fileArg ? fileArg.slice("--file=".length) : null;
+    const sql = sqlFile ? fs.readFileSync(sqlFile, "utf8") : positional[0];
+    if (!sql) {
+      fail(
+        'sql 子命令需要 SQL 文本：node scripts/pg-connect.mjs sql "SELECT 1" ' +
+          "或 node scripts/pg-connect.mjs sql --file=path/to.sql",
+      );
+    }
 
     // ── 路径 A：`pg` 包（装了就用，返回结构化 rows）──
     // 刻意用动态 import：`pg` 不是项目依赖，没装也不该让 url 子命令失效。
@@ -195,32 +208,35 @@ async function main() {
       );
     }
     // ⚠ 口令只走 PGPASSWORD 环境变量，**绝不进 argv**。
+    const psqlArgs = [
+      "-h",
+      cfg.pg_host,
+      "-p",
+      String(cfg.pg_port),
+      "-U",
+      cfg.pg_user,
+      "-d",
+      db,
+      "-A",
+      "-F",
+      "\t",
+      // `-P footer=off` 抑制 `(N rows)` 状态行 —— 它会污染 `$(...)` 捕获和管道解析。
+      // ⚠ 不是 `-q`：实测 `-q` 只管 welcome，**不动 footer**（footer 由 `\pset footer`
+      //   控制），而 `-c` 模式本来就没有 welcome ⇒ `-q` 在此处毫无作用。
+      // 表头保留（结果自解释）；错误信息与退出码不受影响。
+      "-P",
+      "footer=off",
+      "-v",
+      "ON_ERROR_STOP=1",
+    ];
+    if (sqlFile) psqlArgs.push("-f", sqlFile);
+    else psqlArgs.push("-c", sql);
     const res = spawnSync(
       psql,
-      [
-        "-h",
-        cfg.pg_host,
-        "-p",
-        String(cfg.pg_port),
-        "-U",
-        cfg.pg_user,
-        "-d",
-        db,
-        "-A",
-        "-F",
-        "\t",
-        // `-P footer=off` 抑制 `(N rows)` 状态行 —— 它会污染 `$(...)` 捕获和管道解析。
-        // ⚠ 不是 `-q`：实测 `-q` 只管 welcome，**不动 footer**（footer 由 `\pset footer`
-        //   控制），而 `-c` 模式本来就没有 welcome ⇒ `-q` 在此处毫无作用。
-        // 表头保留（结果自解释）；错误信息与退出码不受影响。
-        "-P",
-        "footer=off",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-c",
-        sql,
-      ],
-      { env: { ...process.env, PGPASSWORD: password }, encoding: "utf8" },
+      psqlArgs,
+      // PGCLIENTENCODING 必须显式给：中文 SQL（注释/字面量）在 Windows 默认代码页下
+      // 会被 psql 当成本地编码解，落库或报错都不按 UTF-8 走。
+      { env: { ...process.env, PGPASSWORD: password, PGCLIENTENCODING: "UTF8" }, encoding: "utf8" },
     );
     if (res.error) fail(`调用 psql 失败：${res.error.message}`);
     if (res.stdout) process.stdout.write(res.stdout);

@@ -412,6 +412,12 @@ if (canRunRust && !quick) {
   step("跨行聚合按代筛样登记（四类分列）", "node scripts/check-generation-scope-registry.mjs");
   step("候选池代际一致自检（读侧谓词/写侧标记/负控）", "node scripts/check-reco-generation.mjs --selftest");
   step("候选池代际一致（回放行与实盘行同表后不混读混写）", "node scripts/check-reco-generation.mjs");
+  // 荐股闭环逐格状态的枚举覆盖门（2026-10-28）：同一张状态词表抄在四个面（后端 `as_str` /
+  // 前端联合 / 面板 case / 矩阵穷举表）再加 11 语言文案，加状态只改了两个面 ⇒ 界面上直接
+  // 露出原始码 `disabled_negative_expectancy`，矩阵那侧还把硬停格显示成「闭环已校准 0.00」。
+  // `tsc` / `cargo clippy` / vitest 全绿也查不出 —— 兜底分支把「没跟上」洗成了「看着正常」。
+  step("闭环逐格状态覆盖自检（三面+兜底+文案，负控逐条只红对应那条）", "node scripts/check-reco-loop-status-coverage.mjs --selftest");
+  step("闭环逐格状态枚举覆盖（后端词表 == 前端联合 == 面板 == 矩阵 == 11 语言）", "node scripts/check-reco-loop-status-coverage.mjs");
   // 逐档决策腿键级生产者-消费者对账门（2026-10-18，PLAN-mover-coverage-and-reflection-exit §0-A）：
   // 建门起因是现网实测两条恒缺席腿（138 条有效决策行 × 4 档 = 552 格里 sectorRotation 与
   // microstructure 各缺席 80/80）——腿声明在、实现在、数据源也在，**只有输入键没人生产**。

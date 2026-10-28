@@ -102,8 +102,8 @@
   --accent-dim: oklch(62% 0.16 195 / 0.06);
   --green: oklch(62% 0.18 150);
   --green-bg: oklch(62% 0.18 150 / 0.12);
-  // --red-deep：风险四档的第四档（极高）。与 --red 必须肉眼可分，
-  // 否则「高」和「极高」在界面上是同一档（判据见 src/theme/__tests__/riskRampTokens.test.ts）。
+  /* --red-deep：风险四档的第四档（极高）。与 --red 必须肉眼可分，
+     否则「高」和「极高」在界面上是同一档（判据见 src/theme/__tests__/tokenSingleSource.test.ts）。 */
   --red: oklch(60% 0.20 30);
   --red-deep: oklch(58% 0.24 12);
   --red-bg: oklch(60% 0.20 30 / 0.12);

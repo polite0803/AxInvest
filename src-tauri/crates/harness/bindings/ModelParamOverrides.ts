@@ -24,4 +24,12 @@ thinkingParamStyle: string | null,
  * Used to avoid hitting rate limits (e.g. 429 errors) on providers
  * with strict per-model rate quotas.
  */
-requestDelayMs: bigint | null, };
+requestDelayMs: bigint | null, 
+/**
+ * 首字节（HTTP 响应头）等待预算（秒）。
+ *
+ * `None` = 用 provider 适配器默认的软 45s / 硬 90s（见
+ * `axagent_providers::stream_budget`）。非 `None` 时本值即**硬档总上限**
+ * （含同供应商原地重试），软档取其一半。
+ */
+headerTimeoutSecs: bigint | null, };

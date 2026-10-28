@@ -1723,6 +1723,8 @@ export interface RecoLoopCell {
   rankIc: number | null;
   samples: number;
   winRate: number | null;
+  /** 本格期窗样本的实际均收益（%）；`null` = 没有可用样本，不是「不赚不亏」 */
+  meanReturnPct?: number | null;
   oldWeight: number;
   newWeight: number;
   /** 外乘线之前的基准权重（下一轮 EWMA 的输入；防复利衰减） */
@@ -1753,6 +1755,11 @@ export interface RecoIcStats {
 export interface RecoLoopView {
   gate: string;
   cells: RecoLoopCell[];
+  /** 负期望硬停的判据。阈值由后端常量单源带出，界面不得另抄一份数字。 */
+  negativeExpectancy: {
+    minSamples: number;
+    maxMeanReturnPct: number;
+  };
   /** 最近一次闭环重算时刻（ms）；0 = 从未重算 */
   lastRecalcAt: number;
 }

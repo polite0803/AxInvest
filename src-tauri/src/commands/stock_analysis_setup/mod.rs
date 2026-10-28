@@ -2811,7 +2811,7 @@ mod version_gate_tests {
         axagent_dao::db::create_test_pool().await.expect("建临时测试库失败")
     }
 
-    async fn seed(db: &DatabaseConnection) -> Result<(), String> {
+    pub(super) async fn seed(db: &DatabaseConnection) -> Result<(), String> {
         seed_stock_analysis_workflow_template(db).await
     }
 
@@ -2845,7 +2845,7 @@ mod version_gate_tests {
     }
 
     /// 把 version 强改为指定值 —— 模拟「DB 现值被别的路径写高 / 写低」。
-    async fn force_version(db: &DatabaseConnection, v: i32) {
+    pub(super) async fn force_version(db: &DatabaseConnection, v: i32) {
         let model = workflow_template::Entity::find_by_id(TEMPLATE_ID)
             .one(db)
             .await
@@ -4210,13 +4210,20 @@ mod horizon_tier_fanout_tests {
     use super::seed_stock_analysis::{
         SOURCE_TEMPLATE_ID, TEMPLATE_VERSION, seed_stock_analysis_workflow_template,
     };
+    // `seed` / `force_version` 复用 `version_gate_tests` 的那一份，不在本模块抄第二个实现
+    use super::version_gate_tests::{force_version, seed};
     use crate::workflow_fanout_audit::{
         audit_fanouts, external_reads, external_reads_for_kind, graphs_to_audit,
     };
+    use axagent_entities::workflow_template;
     use axagent_harness::holding_period::Period;
     use axagent_harness::workflow_types::WorkflowNode;
     use axagent_rt_workflow::work_engine::node_type_of;
-    use sea_orm::{DatabaseConnection, EntityTrait};
+    use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
+
+    /// 被测模板 id —— 取 `SOURCE_TEMPLATE_ID` 的别名，不另抄字面量
+    /// （同 `seed_stock_analysis.rs` 内 `const TEMPLATE_ID: &str = SOURCE_TEMPLATE_ID;` 的先例）。
+    const TEMPLATE_ID: &str = SOURCE_TEMPLATE_ID;
 
     async fn fresh_db() -> axagent_dao::db::DbHandle {
         axagent_dao::db::create_test_pool().await.expect("建临时测试库失败")

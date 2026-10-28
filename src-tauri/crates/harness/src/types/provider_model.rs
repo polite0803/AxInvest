@@ -349,6 +349,12 @@ pub struct ModelParamOverrides {
     /// Thinking parameter format for the provider API.
     /// "reasoning_effort" (default/OpenAI) or "enable_thinking" (SiliconFlow).
     pub thinking_param_style: Option<String>,
+    /// 思考预算（token）：`Some(0)` = 关闭思考，`None` = 不下发（供应商默认）。
+    ///
+    /// 工作流 Agent 节点经 `resolve_sampling` 读取；聊天链本就按请求下发。
+    /// 实测 002916 一次分析输出 202,369 tokens 中约 60% 是思考 token（≈0.49 元），
+    /// 这是当前唯一还没接通的成本旋钮。
+    pub thinking_budget: Option<u32>,
     /// Delay in milliseconds before each API request to this model.
     /// Used to avoid hitting rate limits (e.g. 429 errors) on providers
     /// with strict per-model rate quotas.

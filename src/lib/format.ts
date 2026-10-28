@@ -37,6 +37,10 @@ export function formatDuration(ms: number | null | undefined): string {
   const rm = Math.round(m % 60);
   return `${h}h ${rm}m`;
 }
+/** 定值 → 定点小数；没读到值出 "—"，与「读到 0」区分开（闭环面板的均收益/阈值用它）。 */
+export function formatFixed(v: number | null | undefined, digits: number): string {
+  return v == null ? "—" : v.toFixed(digits);
+}
 /** 时间戳 / 日期 → "HH:mm"。非法输入返回 "-"。 */
 export function formatTime(ts: number | string | Date | null | undefined): string {
   if (ts == null) {

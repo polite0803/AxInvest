@@ -19,7 +19,7 @@
 //! - [`MissLayer::Unexplained`]：兜底桶，**必须显示占比**；占比高说明留痕不足，
 //!   此时不得据此下优化结论。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
 use serde::{Deserialize, Serialize};
@@ -743,20 +743,23 @@ pub async fn load_universe_counts(db: &sea_orm::DatabaseConnection) -> Result<(i
 }
 
 /// 已落库的交易日（升序，去重）。
+///
+/// **必须由 SQL 做 DISTINCT**：旧实现 `.all(db)` 把整张 `market_daily_close` 逐行装配成
+/// Model 再在内存去重 —— 现网该表 146 万行 / 305 MB，而结果只有 ~6500 个交易日。
+/// 2026-10-28 实测：闭环面板每次刷新都在这一步耗掉 10s 级（`reco_ic_stats` 的
+/// `loop_view=10232ms`），SQL 侧 `DISTINCT + ORDER BY trade_date` 走既有索引仅 ~285ms。
+/// 只回一列字符串，语义与旧实现逐字相同（升序、去重）。
 pub async fn load_close_dates(db: &sea_orm::DatabaseConnection) -> Result<Vec<String>, String> {
-    let rows = market_daily_close::Entity::find()
+    use sea_orm::QuerySelect;
+    market_daily_close::Entity::find()
+        .select_only()
+        .column(market_daily_close::Column::TradeDate)
+        .distinct()
         .order_by_asc(market_daily_close::Column::TradeDate)
+        .into_tuple::<String>()
         .all(db)
         .await
-        .map_err(|e| format!("读快照日期失败: {e}"))?;
-    let mut seen: Vec<String> = Vec::new();
-    let mut set = HashSet::new();
-    for r in rows {
-        if set.insert(r.trade_date.clone()) {
-            seen.push(r.trade_date);
-        }
-    }
-    Ok(seen)
+        .map_err(|e| format!("读快照日期失败: {e}"))
 }
 
 /// 窗口必须覆盖的真实交易日比例（分子/分母）：28 个交易日的窗口里至少 23 行。

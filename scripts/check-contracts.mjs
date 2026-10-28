@@ -27,6 +27,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { sanitize, testModuleRanges } from "./lib/rust-source-scan.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC_TAURI = join(ROOT, "src-tauri");
@@ -487,6 +488,9 @@ function checkEventSymmetry() {
 //   把「出口不严」清单写成 markdown，就是在复制同一个缺陷 ——
 //   没有任何东西会执行它。因此这里把可静态检出的那一类编成检查段。
 //
+// 运行位置：本段随 `npm run contracts` 一起跑，CI 在 `.github/workflows/ci.yml:510`
+//   调 `npm run contracts -- --only=a,c,d,f,g,h` ⇒ 带牙齿（I 段当年移出去的理由不再成立）。
+//
 // 检出形态：`let _ = <expr>.await;`
 //   Rust 里 `bare except` 的等价物：错误通道明明存在（.await 后的 Result），
 //   却被显式丢弃。本轮的真实缺陷全部是这个形态 ——
@@ -533,8 +537,33 @@ function checkEventSymmetry() {
  *   `commands/conditional_order.rs:112` 列表命令里的同名丢弃（改成读新表并 `?` 传播）。
  *   两处都是「装载失败仍然返回成功」的形态：前者让风控拿着上一次的规则继续跑，
  *   后者让列表在表读不通时显示空集 —— 与本轮「拿不到不得伪装成没有」同一条线。
+ *
+ * 2026-10-28 下调 259 → 246（**改的是判据口径，不是被检代码**）：
+ *   CI 报 259 → 262，新增三处全在 `crates/providers/src/stream_budget.rs:321/327/329`
+ *   —— 那是 `#[cfg(test)] mod http_behavior_tests` 里假上游 TCP server 的
+ *   `let _ = socket.read/write_all/flush().await`，测试替身不关心返回值，不是生产出口。
+ *   真缺陷在本段的**取源口径漏了一格**：只按路径排除测试面（`/tests/`、`_test.rs`），
+ *   内联 `#[cfg(test)] mod` 从没被排除过 —— 于是同一份判据里已经躺着 14 处测试丢弃
+ *   被当成生产出口计进了基线（`src-tauri/crates/agent/src/steer_manager.rs` 等），
+ *   再加 2 处**注释里抄写的旧代码形态**（`src-tauri/crates/trajectory/src/storage.rs:1568`
+ *   文档注释、`src-tauri/src/indexing.rs:950` 行注释「此前 `let _ =` 丢掉错误」）。
+ *   259 这个数里 16 处是假的。
+ *   修法：逐文件先 `sanitize`（注释与字符串按**等长空白**剥，行号不变），再用
+ *   `testModuleRanges` 的区间剔除测试模块；两条都在 `scripts/lib/rust-source-scan.mjs`，
+ *   与 `check-port-axiom-wiring.mjs` 共用同一份剥离器（禁区 12）。
+ *   ⚠ 途中踩到一个更狠的坑：`testModuleRanges` 原写法「属性往后找最近的 `mod X {`」，
+ *   会把**贴在 `use` 上的** `#[cfg(test)]`（全仓 1018 处属性里 67 处不紧贴 `mod X {`）
+ *   一路圈到那个模块闭合 —— 实测在 `src-tauri/crates/rt-workflow/src/work_engine/engine/mod.rs`
+ *   圈出 38–7365、在 `src-tauri/src/commands/conversations/mod.rs` 圈出 11–1800。
+ *   照它出数会得到 235，即**静默豁免 11 处生产丢弃**（`resolve_approval_for_timeout` ×2、
+ *   `update_document_status_with_error`、`delete_by_id` ×2 等）、把棘轮一次放松 24 格。
+ *   已改成只认紧邻 `mod X {` 的形态；顺带让 port-axiom 门多认出 2 个此前被误圈的写路径
+ *   （`seed_reflection_workflow_template` / `seed_event_triggered_decision_template`，均已接门禁）。
+ *   负控：`node scripts/check-contracts.mjs --selftest` 8 条全绿；三种变异各红对应的格
+ *   （撤测试剔除→1 红、撤 sanitize→2 红、换回宽松区间→1 红）。
+ *   回滚 = 把本数改回 259 并撤掉 sanitize 两步。
  */
-const SILENT_RESULT_BASELINE = 259;
+const SILENT_RESULT_BASELINE = 246;
 
 /** 已知的合理丢弃（按被调方名），计数时排除，避免基线被噪声撑大。 */
 const SILENT_RESULT_EXEMPT_CALLEES = new Set([
@@ -543,8 +572,52 @@ const SILENT_RESULT_EXEMPT_CALLEES = new Set([
   "cancel",
 ]);
 
-function checkSilentResultDiscard() {
+/**
+ * 逐源文件抽取「静默丢弃」命中。口径 = **只看生产代码**，两条剥除：
+ *
+ * ① 注释与字符串字面量里的同形态不算 —— `sanitize` 按**等长空白**剥（换行原样），
+ *    所以净化文本的行号与原文一一对应。不算数的理由与「注释里的名字不算引用面」同一条：
+ *    写一行注释就能骗过门。实测本仓有两处这样白计 —— `trajectory/src/storage.rs` 的
+ *    文档注释抄了修复前的旧代码形态、`src/indexing.rs` 的行注释写了「此前 `let _ =` 丢掉错误」。
+ * ② `#[cfg(test)] mod …{…}` 整块不算 —— 与「路径含 `/tests/` 的文件不扫」是同一条理由
+ *    （测试里的 `let _ =` 是「不关心返回值」，不是生产出口），但只按**路径**枚举会漏掉
+ *    内联测试模块：`crates/providers/src/stream_budget.rs` 的假上游 TCP server 就是这么
+ *    把棘轮顶红的（2026-10-28，三处 `let _ = socket.*().await`）。
+ *    区间判定复用 `scripts/lib/rust-source-scan.mjs` 的 `testModuleRanges`（禁区 12：
+ *    一份剥离器，两个门共用），其负控在 `check-port-axiom-wiring.mjs --selftest`。
+ *
+ * 返回 `[{ callee, line, exempt }]`，line 是**原文**行号。
+ */
+function silentDiscardHits(src) {
+  const clean = sanitize(src);
+  const rawLineCount = src.split("\n").length;
+  const lines = clean.split("\n");
+  if (lines.length !== rawLineCount) {
+    throw new Error("净化器行数不守恒（行号不可信），拒绝出数");
+  }
+  const ranges = testModuleRanges(lines);
   const re = /let\s+_\s*=\s*([\s\S]*?);/g;
+  const hits = [];
+  let m;
+  while ((m = re.exec(clean)) !== null) {
+    const rhs = m[1];
+    // 防正则跨语句吞并：RHS 过长或内含 `let` 说明匹配到了多条语句
+    if (rhs.length > 300 || /\blet\b/.test(rhs)) { continue; }
+    if (!/\.await\b/.test(rhs)) { continue; }
+    const calls = [...rhs.matchAll(/([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g)];
+    if (!calls.length) { continue; }
+    const callee = calls[0][1];
+    if (["Some", "Ok", "Err", "String", "Vec", "format", "json", "self"].includes(callee)) {
+      continue;
+    }
+    const zeroBasedLine = clean.slice(0, m.index).split("\n").length - 1;
+    if (ranges.some(([a, b]) => zeroBasedLine >= a && zeroBasedLine <= b)) { continue; }
+    hits.push({ callee, line: zeroBasedLine + 1, exempt: SILENT_RESULT_EXEMPT_CALLEES.has(callee) });
+  }
+  return hits;
+}
+
+function checkSilentResultDiscard() {
   const agg = new Map();
   const samples = new Map();
   let total = 0;
@@ -554,27 +627,20 @@ function checkSilentResultDiscard() {
     const norm = f.replace(/\\/g, "/");
     // 测试文件里的 `let _ =` 多为「不关心返回值」，不属生产出口
     if (norm.includes("/tests/") || norm.endsWith("_test.rs")) { continue; }
-    const src = read(f);
-    re.lastIndex = 0;
-    let m;
-    while ((m = re.exec(src)) !== null) {
-      const rhs = m[1];
-      // 防正则跨语句吞并：RHS 过长或内含 `let` 说明匹配到了多条语句
-      if (rhs.length > 300 || /\blet\b/.test(rhs)) { continue; }
-      if (!/\.await\b/.test(rhs)) { continue; }
-      const calls = [...rhs.matchAll(/([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g)];
-      if (!calls.length) { continue; }
-      const callee = calls[0][1];
-      if (["Some", "Ok", "Err", "String", "Vec", "format", "json", "self"].includes(callee)) {
-        continue;
-      }
-      if (SILENT_RESULT_EXEMPT_CALLEES.has(callee)) { excluded++; continue; }
-
-      total++;
-      agg.set(callee, (agg.get(callee) || 0) + 1);
-      if (!samples.has(callee)) {
-        const line = src.slice(0, m.index).split("\n").length;
-        samples.set(callee, `${norm}:${line}`);
+    let hits;
+    try {
+      hits = silentDiscardHits(read(f));
+    } catch (e) {
+      // 净化器行数不守恒 ⇒ 行号与判据都不可信，指名报错而不是静默跳过该文件
+      fail(`[H] ${norm}: ${e.message}`);
+      continue;
+    }
+    for (const h of hits) {
+      if (h.exempt) { excluded += 1; continue; }
+      total += 1;
+      agg.set(h.callee, (agg.get(h.callee) || 0) + 1);
+      if (!samples.has(h.callee)) {
+        samples.set(h.callee, `${norm}:${h.line}`);
       }
     }
   }
@@ -606,12 +672,71 @@ function checkSilentResultDiscard() {
 // ---------- I. （已移出）内置 task_type 白名单跨语言对账 ----------
 //
 // 2026-10-15（裁定 17）先写在这一段，随后**整段移出**到 `scripts/check-task-type-whitelist.mjs`：
-// 本脚本当前不在 CI 的 35 道门里（只 `npm run contracts` 手动跑）⇒ 写在这里等于没牙齿。
+// 移出当时本脚本不在 CI 里（只 `npm run contracts` 手动跑）⇒ 写在这里等于没牙齿。
+// ⚠ 该前提已过半：本脚本现由 `.github/workflows/ci.yml:510` 以
+// `--only=a,c,d,f,g,h` 调用 —— 但 `--only` 不带 i，**I 段依旧没有牙齿**，移出仍是正解。
 // 留下这段占位是为了让「I 段的判据去哪了」有迹可循，**不要在这里重新实现一遍**
 // （两份实现＝两套真相，正是被移出的那条判据要消灭的形态）。
 
+// ---------- 自检（[H] 段取源口径的正负对照）──────────────────────────
+//
+// 判据改了「算什么不算什么」，就必须能被证伪：下面每条只动一个维度，
+// 撤掉对应的剥除步骤时**恰好红那一条**。跑法 `node scripts/check-contracts.mjs --selftest`
+function selftestSilentDiscard() {
+  const cases = [];
+  const add = (name, actual, expected) => {
+    cases.push({ name, pass: JSON.stringify(actual) === JSON.stringify(expected), actual, expected });
+  };
+  const shape = (call) => `let _ = ${call}.await;`;
+  const tally = (src) => silentDiscardHits(src).filter((h) => !h.exempt).length;
+
+  add("生产丢弃计入", tally(`fn a() {\n    ${shape("repo.save()")}\n}`), 1);
+  add(
+    "内联 #[cfg(test)] mod 里的同形态不计入",
+    tally(`fn a() {\n    ${shape("repo.save()")}\n}\n#[cfg(test)]\nmod tests {\n    fn t() {\n        ${shape("repo.save()")}\n    }\n}`),
+    1,
+  );
+  add(
+    // 这条必须用「属性贴 use + 其后还有生产 mod」的形态：只写 `#[cfg(test)] pub use foo;`
+    // 再跟一个裸函数的话，宽松版往后找不到 `mod X {` ⇒ 两种口径同为 1，等于没设防。
+    "属性贴在 use 上 ⇒ 其后的生产 mod 不得被误圈",
+    tally(`#[cfg(test)]\npub use foo;\nmod storage {\n    fn a() {\n        ${shape("repo.save()")}\n    }\n}`),
+    1,
+  );
+  add(
+    "文档注释里抄的旧代码形态不计入",
+    tally(`/// 原实现是 \`${shape("f.delete()")}\`\nfn a() {\n    ${shape("repo.save()")}\n}`),
+    1,
+  );
+  add(
+    "豁免 callee 单独归类（rollback 不进 total）",
+    silentDiscardHits(`fn a() {\n    ${shape("txn.rollback()")}\n}`),
+    [{ callee: "rollback", line: 2, exempt: true }],
+  );
+  add("无 .await 的 `let _ =` 不算丢弃", tally(`fn a() {\n    let _ = repo.save();\n}`), 0);
+  add(
+    "字符串里的分号不再提前截断 RHS",
+    silentDiscardHits(`fn a() {\n    let _ = f(";").await;\n}`).map((h) => h.callee),
+    ["f"],
+  );
+  add("行号指向原文那一行", silentDiscardHits(`fn a() {\n    ${shape("repo.save()")}\n}`)[0]?.line, 2);
+
+  let failed = 0;
+  console.log("=== [H] 段自检（静默丢弃判据的正负对照）===");
+  for (const c of cases) {
+    if (c.pass) console.log(`  ✓ ${c.name}`);
+    else {
+      failed += 1;
+      console.log(`  ✗ ${c.name}\n      期望 ${JSON.stringify(c.expected)}，实得 ${JSON.stringify(c.actual)}`);
+    }
+  }
+  console.log(`\n自检：${cases.length - failed} 通过 / ${failed} 失败`);
+  process.exit(failed > 0 ? 1 : 0);
+}
+
 // ---------- 主流程 ----------
 const argv = process.argv.slice(2);
+if (argv.includes("--selftest")) { selftestSilentDiscard(); }
 let only = null;
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--only") { only = argv[i + 1].split(","); }

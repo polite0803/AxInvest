@@ -613,7 +613,16 @@ export function AnalysisHistoryButton() {
                     onClick={() => {
                       if (editingId) { return; }
                       setOpen(false);
-                      navigate(`/stock-analysis/${r.id}`);
+                      // 2026-10-28 起 `/stock-analysis/:id` 已删除，记录详情并入投资工作区
+                      // （`?tab=workspace&view=analysis`，`analysisId` 由 StockAnalysisPage 消费）。
+                      const qs = new URLSearchParams({
+                        tab: "workspace",
+                        view: "analysis",
+                        stockCode: r.stockCode,
+                        analysisId: r.id,
+                      });
+                      if (r.stockName) { qs.set("stockName", r.stockName); }
+                      navigate(`/invest?${qs.toString()}`);
                     }}
                     onMouseEnter={(e) => {
                       (e.currentTarget as HTMLElement).style.background =

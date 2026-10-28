@@ -4,9 +4,11 @@ import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { formatFixed } from "@/lib/format";
 import { invoke } from "@/lib/invoke";
+import { invalidateRecoIcStats, loadRecoIcStats } from "@/lib/recoIcStats";
 import { horizonSuffix } from "@/lib/stock-analysis-utils";
-import type { RecoIcStats, RecoLoopCell, RecoLoopView } from "@/types";
+import type { RecoLoopCell, RecoLoopView } from "@/types";
 
 /**
  * 荐股反思闭环面板（2026-10-20）。
@@ -14,7 +16,7 @@ import type { RecoIcStats, RecoLoopCell, RecoLoopView } from "@/types";
  * 荐股链的反思形态是**数值回写逐格权重**，不产出叙事 —— 之前唯一的可见位置是
  * 「回测 → 策略」矩阵底部一行闸状态，智能荐股页完全看不到，也没有手动重算入口。
  * 本面板把 `reco_ic_stats.loop` 的逐格结果和 `recalc_reco_loop_weights` 接到这里：
- * - 状态列区分「已校准 / 负 IC 降权 / 样本不足 / IC 测不出」，未校准不得看起来像校准过；
+ * - 状态列区分「已校准 / 负 IC 降权 / 负期望硬停 / 样本不足 / IC 测不出」，未校准不得看起来像校准过；
  * - 样本数列让「n=3 也算了一格」与「n=40 只是 IC 不可测」可区分；
  * - `lastRecalcAt` 是**最近计算时刻**（后端心跳），不是最近写库时刻。
  */
@@ -29,9 +31,7 @@ export function RecoLoopPanel({ asOfDate }: { asOfDate?: string | null }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const stats = await invoke<RecoIcStats>("reco_ic_stats", {
-        generation: asOfDate ?? null,
-      });
+      const stats = await loadRecoIcStats(asOfDate ?? null);
       setLoop(stats.loop ?? null);
       setError(null);
     } catch (e) {
@@ -52,6 +52,8 @@ export function RecoLoopPanel({ asOfDate }: { asOfDate?: string | null }) {
       const result = await invoke<{ written: number }>("recalc_reco_loop_weights", {
         asOfDate: asOfDate ?? null,
       });
+      // 权重已回写：观测面缓存必须失效，否则 TTL 内刷新到的还是旧权重
+      invalidateRecoIcStats();
       await load();
       message.success(t("stockAnalysis.recoLoop.recalcSuccess", { written: result.written }));
     } catch (e) {
@@ -75,8 +77,18 @@ export function RecoLoopPanel({ asOfDate }: { asOfDate?: string | null }) {
       c.status === "ic_non_negative" || c.status === "demoted_negative_ic"
     ).length;
     const demoted = activeCells.filter((c) => c.status === "demoted_negative_ic").length;
-    return { calibrated, demoted, uncalibrated: activeCells.length - calibrated };
+    // 硬停格是**已判定**（判定结果是「本格不再出票」），混进「未校准」会让人以为还等着样本
+    const disabled = activeCells.filter((c) => c.status === "disabled_negative_expectancy").length;
+    return {
+      calibrated,
+      demoted,
+      disabled,
+      uncalibrated: activeCells.length - calibrated - disabled,
+    };
   }, [activeCells]);
+
+  /** 判据阈值由后端常量带出（`negativeExpectancy`）；取不到时显示「—」而不是补一个数。 */
+  const expectancyGate = loop?.negativeExpectancy;
 
   const statusTag = (cell: RecoLoopCell) => {
     switch (cell.status) {
@@ -112,8 +124,29 @@ export function RecoLoopPanel({ asOfDate }: { asOfDate?: string | null }) {
             </Tag>
           </Tooltip>
         );
+      case "disabled_negative_expectancy":
+        return (
+          <Tooltip
+            title={t("stockAnalysis.recoLoop.disabledTip", {
+              mean: formatFixed(cell.meanReturnPct, 2),
+              samples: cell.samples,
+              minSamples: formatFixed(expectancyGate?.minSamples, 0),
+              maxPct: formatFixed(expectancyGate?.maxMeanReturnPct, 1),
+            })}
+          >
+            <Tag color="red" data-testid="reco-loop-status-disabled">
+              {t("stockAnalysis.recoLoop.statusDisabled")}
+            </Tag>
+          </Tooltip>
+        );
       default:
-        return <Tag>{cell.status}</Tag>;
+        // 走到这里 = 后端加了状态而本面板没跟上（`check-reco-loop-status-coverage.mjs` 拦）。
+        // 露出原始码是刻意的：把它谎报成某个已知状态更糟。
+        return (
+          <Tag color="purple" data-testid="reco-loop-status-unknown">
+            {t("stockAnalysis.recoLoop.statusUnknown", { code: cell.status })}
+          </Tag>
+        );
     }
   };
 

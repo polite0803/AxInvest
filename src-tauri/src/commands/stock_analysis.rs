@@ -5421,8 +5421,12 @@ pub async fn reco_ic_stats(
 ) -> Result<axagent_analysis_engine::recommender::ic::RecoIcStats, String> {
     use axagent_analysis_engine::recommender::ic::{RecoIcRow, aggregate_reco_ic};
 
+    // 分阶段计时：前端 devAntdSuppress 的「Slow call」只能看到总时长，
+    // 分不清是「SQL 慢」还是「等连接池」—— 这一行把它拆开（仅慢时打印）。
+    let t_start = std::time::Instant::now();
     let generation = axagent_astock_data::as_of::parse_generation_param(generation.as_deref())?;
     let served_vars = load_reco_served_vars(&state).await?;
+    let t_vars = t_start.elapsed();
     // 代际：默认只算**实盘**样本（既有 IC 口径不变）。传 `generation`=某次回放的截止日，
     // 则只算那一批回放样本，回答「同一批历史数据上算法的预测力如何」。
     // 两批绝不合并成同一个分母 —— 回放的 T+N 与实盘的 T+N 不是同一种命中。
@@ -5434,6 +5438,7 @@ pub async fn reco_ic_stats(
         .all(state.harness.db())
         .await
         .map_err(|e| format!("{e}"))?;
+    let t_rows = t_start.elapsed();
     // B3 窗口换代（拍板 6/7）：T+N 不属于当前四档窗口集的行（旧默认 [5,20,60] 产的 20/60）
     // **不进 IC 分母**。为什么必须筛：IC 配的是「出票时的置信度 ↔ 该 N 日之后的实际收益」，
     // 20 日与 28 日是两个不同的预测任务，混在一格里 ρ 就不再是任何一个任务的预测力。
@@ -5457,6 +5462,7 @@ pub async fn reco_ic_stats(
         &rows.iter().map(|r| r.pick_id.clone()).collect::<Vec<_>>(),
     )
     .await;
+    let t_versions = t_start.elapsed();
     let samples: Vec<RecoIcRow> = rows
         .iter()
         .filter_map(|r| {
@@ -5475,7 +5481,23 @@ pub async fn reco_ic_stats(
         })
         .collect();
     let mut stats = aggregate_reco_ic(&samples);
+    let t_agg = t_start.elapsed();
     stats.loop_view = reco_loop_view(state.harness.db(), &served_vars).await;
+    let t_loop = t_start.elapsed();
+    if t_loop.as_millis() >= 1000 {
+        tracing::warn!(
+            "[reco_ic_stats] slow: total={}ms vars={}ms rows={}ms versions={}ms agg={}ms loop_view={}ms \
+             (rows={}, samples={}；rows/vars 高 ⇒ 等连接池或 SQL 慢，agg 高 ⇒ CPU)",
+            t_loop.as_millis(),
+            t_vars.as_millis(),
+            t_rows.as_millis(),
+            t_versions.as_millis(),
+            t_agg.as_millis(),
+            (t_loop - t_agg).as_millis(),
+            rows.len(),
+            samples.len()
+        );
+    }
     Ok(stats)
 }
 
@@ -5494,15 +5516,25 @@ pub(crate) async fn reco_loop_view(
         .and_then(|(_, v)| v.as_str().map(str::to_string))
         .unwrap_or_else(|| "shadow".to_string());
     let now_ms = chrono::Utc::now().timestamp_millis();
+    // 分阶段计时（仅慢时打印）：上层 `reco_ic_stats` 只把本函数当成一个黑盒报总时长，
+    // 分不清是「样本取数」「mover 证据装配」还是「纯计算」。
+    let t_start = Instant::now();
     let samples = match load_reco_loop_samples(db).await {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!("[reco_loop_view] {e}");
-            return RecoLoopView { gate, cells: Vec::new(), last_recalc_at: 0 };
+            return RecoLoopView {
+                gate,
+                cells: Vec::new(),
+                negative_expectancy: NegativeExpectancyGate::default(),
+                last_recalc_at: 0,
+            };
         },
     };
+    let t_samples = t_start.elapsed();
     let current =
         load_current_cell_priors_by_trigger(db, Some(RECO_LOOP_TRIGGER)).await.unwrap_or_default();
+    let t_priors = t_start.elapsed();
     // Phase 4：mover 线必须在**同一份**装配下算，否则面板显示与落库权重不同源
     // C-2：权重环只消费**一条** mover 线（as-of 优先、缺席才回退 live），绝不相加。
     let mover = match axagent_analysis_engine::mover_recall::load_mover_cell_signal_preferring_asof(
@@ -5518,7 +5550,9 @@ pub(crate) async fn reco_loop_view(
             Default::default()
         },
     };
+    let t_mover = t_start.elapsed();
     let cells = compute_loop_cell_weights_with_priors(&samples, &current, now_ms, &mover);
+    let t_compute = t_start.elapsed();
     // 「最近计算时刻」优先读心跳（每轮都写），旧库/心跳缺失时回退到权重留痕时刻
     // （后者只在 |Δ|≥1% 时推进，会把「小抖动轮次」显示成「没跑」）。
     let last_recalc_at = match load_last_recalc_at(db).await {
@@ -5532,7 +5566,25 @@ pub(crate) async fn reco_loop_view(
         .flatten()
         .unwrap_or(0),
     };
-    RecoLoopView { gate, cells, last_recalc_at }
+    let t_last = t_start.elapsed();
+    if t_last.as_millis() >= 1000 {
+        tracing::warn!(
+            "[reco_loop_view] slow: total={}ms samples={}ms priors={}ms mover={}ms compute={}ms \
+             last_recalc={}ms (samples 高 ⇒ decision_validations/熔断时间线；mover 高 ⇒ 漏检证据装配)",
+            t_last.as_millis(),
+            t_samples.as_millis(),
+            (t_priors - t_samples).as_millis(),
+            (t_mover - t_priors).as_millis(),
+            (t_compute - t_mover).as_millis(),
+            (t_last - t_compute).as_millis(),
+        );
+    }
+    RecoLoopView {
+        gate,
+        cells,
+        negative_expectancy: NegativeExpectancyGate::default(),
+        last_recalc_at,
+    }
 }
 
 /// 手动重算荐股闭环权重（shadow 期观察留痕、转正前 A/B 都走这里）。
@@ -6673,7 +6725,7 @@ pub async fn apply_param_suggestions(
     state: State<'_, AppState>,
     updates: Vec<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    use axagent_analysis_engine::portfolio_formula::resolve_param_name;
+    use axagent_analysis_engine::portfolio_formula::{PortfolioMgrParamSet, resolve_param_name};
     use axagent_entities::workflow_template;
     use sea_orm::EntityTrait;
 
@@ -6816,6 +6868,48 @@ pub async fn apply_param_suggestions(
         }));
     }
 
+    // ── 影子闸（2026-10-28）：应用前必须通过收益回放 ──
+    // **这是有意的语义变化（已确认）**：不通过 ⇒ 拒绝写入，模板变量与台账都不动。
+    // 理由：评分器只看「候选参数与反思建议方向的契合度」，应用动作若不在写入前用
+    // 已结算样本回放一遍，就等于把无证据的改动直接推到生产配置上。
+    // 解析复用 `try_parse_param_suggestion` 的 Object 分支（与网格同一个解析器，口径不分裂）。
+    // `None`（一个参数名都没认出来）**不拒绝**：那种情况下每条 update 都会被判
+    // `unknown_param`，本来就不会改动任何变量。
+    let shadow = {
+        use axagent_analysis_engine::param_replay::{ReplaySample, shadow_compare};
+
+        let mut obj = serde_json::Map::new();
+        for u in &updates {
+            if let (Some(name), Some(value)) =
+                (u.get("param").and_then(|v| v.as_str()), u.get("value").and_then(|v| v.as_f64()))
+            {
+                obj.insert(name.to_string(), serde_json::json!(value));
+            }
+        }
+        let candidate = axagent_analysis_engine::portfolio_formula::try_parse_param_suggestion(
+            &serde_json::Value::Object(obj).to_string(),
+        );
+        let samples: Vec<ReplaySample> =
+            axagent_dao::repo::decision_validations::list_shadow_replay_samples(db, 5000)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(confidence, ret)| ReplaySample {
+                    score: (confidence / 100.0).clamp(0.0, 1.0),
+                    forward_return_pct: ret,
+                })
+                .collect();
+        candidate.map(|c| shadow_compare(&c, &PortfolioMgrParamSet::v56_default(), &samples))
+    };
+    if let Some(v) = &shadow
+        && !v.applicable
+    {
+        tracing::warn!("[param_suggestions] 本次参数调整未通过收益回放，拒绝应用: {}", v.reason);
+        return Err(ErrorResponse::new(wf_err::INTERNAL)
+            .with_detail(format!("影子回测未通过，已拒绝应用：{}", v.reason))
+            .to_string());
+    }
+
     let vars_json = serde_json::to_string(&vars).map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("序列化失败: {e}"))
     })?;
@@ -6882,6 +6976,8 @@ pub async fn apply_param_suggestions(
         "fromVersion": from_version,
         "toVersion": to_version,
         "auditPersisted": audit_persisted,
+        // 影子回放结果（能走到这里说明已通过；null = 参数名一个都没认出来，无从回放）
+        "shadow": shadow,
     }))
 }
 
@@ -7220,8 +7316,44 @@ pub async fn calibrate_portfolio_mgr_params(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    // ── 影子闸（2026-10-28）──
+    // `bestParams` 的分数只是「与反思建议方向最契合」，**不是收益**。这里用已结算的
+    // 历史样本回放一遍：候选参数在收益上不优于默认（或不为正）时，只展示、不标可应用。
+    // 样本口径：`decision_validations.confidence / 100` 当分数代理，见 `param_replay` 模块头注。
+    let shadow = {
+        use axagent_analysis_engine::param_replay::{ReplaySample, shadow_compare};
+        let samples: Vec<ReplaySample> =
+            match axagent_dao::repo::decision_validations::list_shadow_replay_samples(db, 5000)
+                .await
+            {
+                Ok(rows) => rows
+                    .into_iter()
+                    .map(|(confidence, ret)| ReplaySample {
+                        score: (confidence / 100.0).clamp(0.0, 1.0),
+                        forward_return_pct: ret,
+                    })
+                    .collect(),
+                Err(e) => {
+                    tracing::warn!("[wfo] 影子闸读取历史样本失败（本轮一律不可应用）: {e}");
+                    Vec::new()
+                },
+            };
+        let base = PortfolioMgrParamSet::v56_default();
+        let best_typed = grid
+            .iter()
+            .max_by(|a, b| {
+                score_param_set(*a, &suggestions)
+                    .partial_cmp(&score_param_set(*b, &suggestions))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .copied()
+            .unwrap_or(base);
+        shadow_compare(&best_typed, &base, &samples)
+    };
+
     Ok(serde_json::json!({
         "bestParams": results.first(),
+        "shadow": shadow,
         "grid": results,
         "totalReflections": reflections.len(),
         "reflectionsWithSuggestionText": suggestions.len(),

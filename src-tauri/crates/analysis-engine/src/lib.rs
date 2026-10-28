@@ -72,6 +72,7 @@ pub mod monthly_report;
 // OPC 业务模块（融合自 opc-types + opc-dao，对齐股票业务架构）
 pub mod opc;
 pub mod paper_portfolio;
+pub mod param_replay;
 pub mod portfolio_formula;
 pub mod portfolio_monitor;
 pub mod portfolio_risk;
@@ -82,6 +83,7 @@ pub mod prompts;
 // 原为死代码，无任何外部调用）
 pub mod recommender;
 pub mod reflection_lesson_validator;
+pub mod reflection_route;
 // PLAN-stock-decision-hitrate-validation M2：反思命中率聚合（消费 strategy_performance）
 pub mod reflection_stats;
 // PLAN-mover-coverage 阶段 3：反思结论「要改哪一处」的权威层级轴（L1/L2/L3）。

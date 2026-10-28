@@ -17,7 +17,8 @@ use std::collections::HashMap;
 ///   - `data_quality_summary`    数据质量总评
 ///   - `raw.combined`            原始数据聚合
 ///   - `degraded`                时间锚定降级报告（spec §4.1）
-///   - `_meta`                   元数据：mode / as_of_date / source / built_at
+///   - `_meta`                   元数据：mode / as_of_date / source / built_at / cost（本轮
+///     token 与缓存计量汇总，构造见 `build_cost_summary`）
 ///   - `params.<nodeId>`         结构化参数（Agent 节点的 .params + CodeNode 的 .result）
 ///   - `decision-explainer`      决策依据说明书（保留 JSON 结构：summary / explanation /
 ///     rule_trace[] / risk_comment / confidence_note）
@@ -169,7 +170,14 @@ pub fn build_blackboard_snapshot(
             }
         }
     }
-    bb.insert("_meta".into(), build_meta(as_of_ctx));
+    let mut meta = build_meta(as_of_ctx);
+    // 每轮计量事实（tokens / 节点数 / 缓存命中率）。写进 `_meta` 而不是新表：
+    // 快照本来就要落库，加一个对象是零迁移、零前端改动；查询侧
+    // `blackboard_snapshot::jsonb #> '{_meta,cost}'` 一条即可。
+    if let Some(cost) = build_cost_summary(results) {
+        meta["cost"] = cost;
+    }
+    bb.insert("_meta".into(), meta);
     // 降级报告: spec §4.1 统一降级协议
     // 结构: { count, sources: [{ vendor, method, reason, asOf }] }
     let sources: Vec<Value> = degradation
@@ -217,6 +225,50 @@ fn build_meta(as_of_ctx: Option<&AsOfContext>) -> Value {
         meta.insert("source".into(), json!(ctx.source.to_string()));
     }
     Value::Object(meta)
+}
+
+/// 每轮 token / 缓存汇总（落在 `_meta.cost`）。
+///
+/// 只记**计量事实**，不折算金额：单价随模型与峰谷档变化，写死一个价格等于在快照里
+/// 埋一个必然腐烂的数。查询侧按当时单价乘即可。
+///
+/// `cache_reported = false` 表示该供应商根本不返回缓存统计（两格为 0 而输入 > 0），
+/// 与「返回了但零命中」必须分开 —— 后者命中率是 0，前者是拿不到（判据与
+/// `agent_executor` 落 `cache` 两格时的注释同源）。
+fn build_cost_summary(results: &HashMap<String, Value>) -> Option<Value> {
+    let mut nodes: u64 = 0;
+    let mut input: u64 = 0;
+    let mut output: u64 = 0;
+    let mut hit: u64 = 0;
+    let mut miss: u64 = 0;
+    for v in results.values() {
+        let Some(usage) = v.get("usage") else {
+            continue;
+        };
+        nodes += 1;
+        input += usage.get("input_tokens").and_then(Value::as_u64).unwrap_or(0);
+        output += usage.get("output_tokens").and_then(Value::as_u64).unwrap_or(0);
+        hit += v.pointer("/cache/hit_tokens").and_then(Value::as_u64).unwrap_or(0);
+        miss += v.pointer("/cache/miss_tokens").and_then(Value::as_u64).unwrap_or(0);
+    }
+    if nodes == 0 {
+        return None;
+    }
+    let cache_total = hit + miss;
+    let hit_pct = if cache_total > 0 {
+        (1000.0 * hit as f64 / cache_total as f64).round() / 10.0
+    } else {
+        0.0
+    };
+    Some(json!({
+        "nodes": nodes,
+        "input_tokens": input,
+        "output_tokens": output,
+        "cache_hit_tokens": hit,
+        "cache_miss_tokens": miss,
+        "cache_hit_pct": hit_pct,
+        "cache_reported": cache_total > 0,
+    }))
 }
 
 /// 把 `{report, verdict}` 产物重构成前端识别的 `report<!-- VERDICT: {...} -->` 文本。
@@ -499,5 +551,49 @@ mod tests {
         assert_eq!(data_quality_grade(&snap), None, "空白等级不算 A 也不算某个字母");
         let empty: HashMap<String, Value> = HashMap::new();
         assert_eq!(data_quality_grade(&empty), None);
+    }
+
+    /// P3：`_meta.cost` 必须把计量事实原样汇总，并区分「零命中」与「供应商不返回统计」。
+    #[test]
+    fn meta_cost_aggregates_usage_and_cache() {
+        let mut results = HashMap::new();
+        results.insert(
+            "a-sentiment".to_string(),
+            json!({
+                "usage": {"input_tokens": 100, "output_tokens": 10},
+                "cache": {"hit_tokens": 80, "miss_tokens": 20},
+            }),
+        );
+        results.insert(
+            "a-policy".to_string(),
+            json!({
+                "usage": {"input_tokens": 50, "output_tokens": 5},
+                "cache": {"hit_tokens": 0, "miss_tokens": 0},
+            }),
+        );
+        // 无 usage 的节点（Code / 容器）不得计入节点数
+        results.insert("portfolio-mgr".to_string(), json!({"result": {"ok": true}}));
+
+        let bb = build_blackboard_snapshot(&results, None, &[]);
+        let cost = &bb["_meta"]["cost"];
+        assert_eq!(cost["nodes"], json!(2), "只数有 usage 的节点");
+        assert_eq!(cost["input_tokens"], json!(150));
+        assert_eq!(cost["output_tokens"], json!(15));
+        assert_eq!(cost["cache_hit_tokens"], json!(80));
+        assert_eq!(cost["cache_miss_tokens"], json!(20));
+        assert_eq!(cost["cache_hit_pct"], json!(80.0));
+        assert_eq!(cost["cache_reported"], json!(true));
+
+        // 供应商完全不返回缓存统计：input > 0 但两格为 0 ⇒ 必须标「拿不到」而非「零命中」
+        let mut only_usage = HashMap::new();
+        only_usage.insert(
+            "a-research".to_string(),
+            json!({"usage": {"input_tokens": 7, "output_tokens": 1}}),
+        );
+        let bb2 = build_blackboard_snapshot(&only_usage, None, &[]);
+        let c2 = &bb2["_meta"]["cost"];
+        assert_eq!(c2["cache_reported"], json!(false));
+        assert_eq!(c2["cache_hit_pct"], json!(0.0));
+        assert_eq!(c2["input_tokens"], json!(7));
     }
 }

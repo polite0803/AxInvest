@@ -1,11 +1,14 @@
 import { useTrackedTask } from "@/hooks/useTrackedTask";
+import { formatFixed } from "@/lib/format";
 import { invoke } from "@/lib/invoke";
+import { loadRecoIcStats } from "@/lib/recoIcStats";
 import { horizonIcAbsenceKey, horizonSuffix } from "@/lib/stock-analysis-utils";
 import type { TaskAccepted } from "@/types";
 import type {
   BacktestComparisonResponse,
   RecoIcCell,
   RecoIcStats,
+  RecoLoopCell,
   RecoMatrixCell,
   StrategyStats,
 } from "@/types/stock-analysis";
@@ -24,6 +27,57 @@ const STYLE_KEYS = [
   "reversion",
 ] as const; /** 四档全枚举。此前缺 `ultra_short` ⇒ 该档的回测统计在矩阵里静默不存在，用户读不出是「没这档」还是「这档没问题」。 */
 const PERIOD_KEYS = ["ultra_short", "short", "mid", "long"] as const;
+
+/** 闭环逐格的呈现声明。
+ *  键集 = 后端 `LoopCellStatus::as_str` 的全部取值（`RecoLoopCell["status"]` 穷举 ⇒ 后端新增状态而这里没跟上时
+ *  直接编译不过），不再像旧形态那样让新状态静默走进「闭环已校准 权重 0.00」那一支。
+ *  `null` = 该态在矩阵里不出句子（格子里已另有「契约不成立理由」）。 */
+const LOOP_CELL_VIEW: Record<
+  RecoLoopCell["status"],
+  | {
+    key: string;
+    testId: string;
+    color: string;
+    params: (cell: RecoLoopCell) => Record<string, string | number>;
+  }
+  | null
+> = {
+  not_in_matrix: null,
+  insufficient_samples: {
+    key: "stockAnalysis.backtest.loopUncalibratedSamples",
+    testId: "reco-loop-uncalibrated",
+    color: "var(--muted)",
+    params: () => ({}),
+  },
+  ic_unmeasurable: {
+    key: "stockAnalysis.backtest.loopUncalibratedIc",
+    testId: "reco-loop-uncalibrated",
+    color: "var(--muted)",
+    params: () => ({}),
+  },
+  disabled_negative_expectancy: {
+    // 硬停 ≠ 校准过：它是「已判定不再出票」，与「闭环已校准 权重 0.00」不同义
+    key: "stockAnalysis.backtest.loopDisabled",
+    testId: "reco-loop-disabled",
+    color: "var(--red)",
+    params: (cell) => ({
+      mean: formatFixed(cell.meanReturnPct, 2),
+      weight: cell.newWeight.toFixed(2),
+    }),
+  },
+  ic_non_negative: {
+    key: "stockAnalysis.backtest.loopCalibrated",
+    testId: "reco-loop-weight",
+    color: "var(--muted)",
+    params: (cell) => ({ weight: cell.newWeight.toFixed(2), ic: formatFixed(cell.rankIc, 3) }),
+  },
+  demoted_negative_ic: {
+    key: "stockAnalysis.backtest.loopDemoted",
+    testId: "reco-loop-weight",
+    color: "var(--amber)",
+    params: (cell) => ({ weight: cell.newWeight.toFixed(2), ic: formatFixed(cell.rankIc, 3) }),
+  },
+};
 
 /** 色标辅助 */
 function rateColor(rate: number): string {
@@ -74,7 +128,7 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
     // 直接 .then 会抛 TypeError 把整张表带崩（观测面拿不到不该影响主表）。
     void (async () => {
       try {
-        const r = await invoke<RecoIcStats>("reco_ic_stats");
+        const r = await loadRecoIcStats();
         if (!cancelled) { setIc(r ?? null); }
       } catch { /* 观测面不可得时不干扰主表 */ }
     })();
@@ -409,39 +463,16 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                       const lc = (ic?.loop?.cells ?? []).find((x) =>
                         aliasesOf(style).includes(x.style) && x.period === period
                       );
-                      if (!lc || lc.status === "not_in_matrix") {
+                      if (!lc) {
                         return null;
                       }
-                      if (lc.status === "insufficient_samples" || lc.status === "ic_unmeasurable") {
-                        return (
-                          <div
-                            style={{ fontSize: 10, color: "var(--muted)" }}
-                            data-testid="reco-loop-uncalibrated"
-                          >
-                            {t(
-                              lc.status === "insufficient_samples"
-                                ? "stockAnalysis.backtest.loopUncalibratedSamples"
-                                : "stockAnalysis.backtest.loopUncalibratedIc",
-                            )}
-                            <div data-testid="reco-loop-samples">
-                              {t("stockAnalysis.backtest.loopSamples", { n: lc.samples })}
-                            </div>
-                          </div>
-                        );
+                      const view = LOOP_CELL_VIEW[lc.status];
+                      if (!view) {
+                        return null;
                       }
-                      const demoted = lc.status === "demoted_negative_ic";
                       return (
-                        <div
-                          style={{
-                            fontSize: 10,
-                            color: demoted ? "var(--amber)" : "var(--muted)",
-                          }}
-                          data-testid="reco-loop-weight"
-                        >
-                          {t(demoted ? "stockAnalysis.backtest.loopDemoted" : "stockAnalysis.backtest.loopCalibrated", {
-                            weight: lc.newWeight.toFixed(2),
-                            ic: lc.rankIc != null ? lc.rankIc.toFixed(3) : "—",
-                          })}
+                        <div style={{ fontSize: 10, color: view.color }} data-testid={view.testId}>
+                          {t(view.key, view.params(lc))}
                           <div data-testid="reco-loop-samples">
                             {t("stockAnalysis.backtest.loopSamples", { n: lc.samples })}
                           </div>

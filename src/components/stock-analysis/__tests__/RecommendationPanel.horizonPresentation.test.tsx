@@ -1,4 +1,5 @@
 import i18n from "@/i18n";
+import { invalidateRecoIcStats } from "@/lib/recoIcStats";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { BacktestComparisonResponse, StrategyStats } from "@/types/stock-analysis";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -153,6 +154,8 @@ const settle = async () => {
 };
 
 beforeEach(() => {
+  // 观测面取数有进程内缓存，用例之间必须清掉，否则后续用例拿不到新 mock 的响应
+  invalidateRecoIcStats();
   invokeMock.mockReset();
   useTimeAnchorStore.setState({
     asOfDate: null,
@@ -252,6 +255,45 @@ describe("逐档 rank IC 观测面（R-E）", () => {
     await waitFor(() => expect(screen.getByText(/IC 0\.420 · n=12/)).toBeTruthy());
     // 样本不够 ≠ 无数据：必须给「需 ≥8」这类可行动的缺席句
     await waitFor(() => expect(screen.getAllByText(/样本/).length).toBeGreaterThan(0));
+  });
+
+  it("闭环硬停格在矩阵里单列一句，不显示成「闭环已校准」", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "reco_ic_stats") {
+        return Promise.resolve({
+          styles: [],
+          totalCells: 0,
+          usableCells: 0,
+          totalSamples: 0,
+          loop: {
+            gate: "on",
+            lastRecalcAt: 1,
+            negativeExpectancy: { minSamples: 10, maxMeanReturnPct: -1 },
+            cells: [{
+              style: "trend",
+              period: "short",
+              status: "disabled_negative_expectancy",
+              rankIc: 0.02,
+              samples: 17,
+              winRate: 0.47,
+              meanReturnPct: -2.69,
+              oldWeight: 0.05,
+              newWeight: 0,
+            }],
+          },
+        });
+      }
+      return Promise.resolve(comparisonResponse([stats("trend", "ultra_short", 60, 9)]));
+    });
+    renderWithI18n(
+      <RecoStrategyMatrix
+        data={comparisonResponse([stats("trend", "ultra_short", 60, 9), stats("trend", "short", 55, 8)])}
+      />,
+    );
+    await waitFor(() => expect(screen.getByTestId("reco-loop-disabled")).toBeTruthy());
+    expect(screen.getByTestId("reco-loop-disabled").textContent).toContain("期窗均收益 -2.69%");
+    // 负控：权重被置 0 的硬停格不得同时渲染成「闭环已校准 权重 0.00」
+    expect(screen.queryByTestId("reco-loop-weight")).toBeNull();
   });
 
   it("完全没有已验证样本的格也要显式说明，不显示成空白", async () => {

@@ -4,6 +4,7 @@ import { App } from "antd";
 import { I18nextProvider } from "react-i18next";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { invalidateRecoIcStats } from "@/lib/recoIcStats";
 import { RecoLoopPanel } from "../RecoLoopPanel";
 
 const invokeMock = vi.fn();
@@ -26,6 +27,8 @@ function renderPanel(asOfDate?: string | null) {
 const LOOP = {
   gate: "on",
   lastRecalcAt: 1_792_389_861_032,
+  // 判据阈值随视图出（后端 `NegativeExpectancyGate`）；夹具给生产形态的值
+  negativeExpectancy: { minSamples: 10, maxMeanReturnPct: -1 },
   cells: [
     {
       style: "trend",
@@ -34,6 +37,7 @@ const LOOP = {
       rankIc: -0.5,
       samples: 16,
       winRate: 0.72,
+      meanReturnPct: 0.85,
       oldWeight: 1,
       newWeight: 0.45,
       moverPenalty: 0.8,
@@ -46,6 +50,7 @@ const LOOP = {
       rankIc: null,
       samples: 3,
       winRate: null,
+      meanReturnPct: -0.4,
       oldWeight: 0.5,
       newWeight: 0.5,
     },
@@ -56,8 +61,27 @@ const LOOP = {
       rankIc: null,
       samples: 0,
       winRate: null,
+      meanReturnPct: null,
       oldWeight: 1,
       newWeight: 1,
+    },
+  ],
+};
+
+/** 硬停格的齐备态读数：均收益 -4.04%、12 单 ⇒ 与 2026-10-24 的生产实证同形。 */
+const DISABLED_LOOP = {
+  ...LOOP,
+  cells: [
+    {
+      style: "capital",
+      period: "mid",
+      status: "disabled_negative_expectancy",
+      rankIc: 0.01,
+      samples: 12,
+      winRate: 0.5,
+      meanReturnPct: -4.04,
+      oldWeight: 0.05,
+      newWeight: 0,
     },
   ],
 };
@@ -74,6 +98,8 @@ function statsResponse(loop: unknown) {
 
 describe("RecoLoopPanel", () => {
   beforeEach(() => {
+    // 观测面取数有进程内缓存，用例之间必须清掉，否则后续用例拿不到新 mock 的响应
+    invalidateRecoIcStats();
     invokeMock.mockReset();
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "reco_ic_stats") {
@@ -132,7 +158,8 @@ describe("RecoLoopPanel", () => {
       generation: "2026-09-28",
     });
     // 回放代际与闭环样本不是同一分母：必须显式声明，不得让两套数看起来可比
-    expect(screen.getByTestId("reco-loop-replay-note")).toBeTruthy();
+    // （观测面取数经共享 loader 多一层微任务，这里必须等到数据落位再断言）
+    await waitFor(() => expect(screen.getByTestId("reco-loop-replay-note")).toBeTruthy());
   });
 
   it("观测面取不到时显示错误而不是空白", async () => {
@@ -144,5 +171,50 @@ describe("RecoLoopPanel", () => {
     });
     renderPanel();
     await waitFor(() => expect(screen.getByText(/读取闭环状态失败：boom/)).toBeTruthy());
+  });
+
+  it("负期望硬停单列成一句，权重 0 不得渲染成「已校准」", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "reco_ic_stats") {
+        return Promise.resolve(statsResponse(DISABLED_LOOP));
+      }
+      return Promise.resolve({});
+    });
+    renderPanel();
+
+    await waitFor(() => expect(screen.getByTestId("reco-loop-status-disabled")).toBeTruthy());
+    // 状态列单列，且汇总里既不算「已校准」也不算「未校准」
+    expect(screen.getByTestId("reco-loop-status-disabled").textContent).toBe("负期望硬停");
+    expect(screen.queryByTestId("reco-loop-status-calibrated")).toBeNull();
+    expect(screen.queryByTestId("reco-loop-status-insufficient")).toBeNull();
+    expect(screen.getByText(/负期望硬停 1 格/)).toBeTruthy();
+    expect(screen.getByText(/未校准 0 格/)).toBeTruthy();
+
+    // 提示里必须给出「判据用的那个读数」，否则界面只在复述状态名
+    fireEvent.mouseOver(screen.getByTestId("reco-loop-status-disabled"));
+    await waitFor(() => expect(screen.getByText(/期窗均收益 -4\.04%/)).toBeTruthy());
+    expect(screen.getByText(/≥10 单且均收益 ≤-1\.0%/)).toBeTruthy();
+  });
+
+  it("后端新增而本面板未跟上的状态露出原始码，不谎报成已知状态", async () => {
+    const loop = {
+      ...LOOP,
+      cells: [
+        { ...LOOP.cells[0], status: "brand_new_status_from_backend" },
+      ],
+    };
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "reco_ic_stats") {
+        return Promise.resolve(statsResponse(loop));
+      }
+      return Promise.resolve({});
+    });
+    renderPanel();
+
+    await waitFor(() => expect(screen.getByTestId("reco-loop-status-unknown")).toBeTruthy());
+    expect(screen.getByTestId("reco-loop-status-unknown").textContent).toBe(
+      "未识别状态（brand_new_status_from_backend）",
+    );
+    expect(screen.queryByTestId("reco-loop-status-demoted")).toBeNull();
   });
 });

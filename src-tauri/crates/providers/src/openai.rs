@@ -662,7 +662,11 @@ fn build_request(
         None
     };
 
-    let has_thinking = reasoning_effort.is_some() || enable_thinking == Some(true);
+    // `reasoning_effort == "none"` 是**关闭**思考，不能算作「开启思考」：否则会连带
+    // 把 max_tokens 换成 max_completion_tokens、并丢掉 temperature —— 「关思考」
+    // 反而改变了另外两个参数的语义（2026-10-28：thinking_budget=0 的默认路径会踩到）。
+    let has_thinking = matches!(reasoning_effort.as_deref(), Some(e) if e != "none")
+        || enable_thinking == Some(true);
 
     // Use max_completion_tokens when: model config says so, reasoning mode,
     // o-series models, or gpt-5+ (which deprecate max_tokens)

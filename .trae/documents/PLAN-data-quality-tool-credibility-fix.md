@@ -648,3 +648,80 @@ LLM 侧**都真的没有决策**（`llm_decision_json` 为空）。
 - 那条 9 只存在于 `05:47` 那轮的冻结快照里（不回写，沿用补充四裁定）。
 - ⚠ 分析师凭证问题仍在产出新 D 级轮（06:57、07:55 各一条）⇒ 再落一条 D 就会重新触发熔断，
   这是丙与"缺 [LLM-RESOLVE] 读数"那一格要解的事，不是本批的计数口径。
+---
+
+## 补充十：本批入库归属 + 门禁读数台账（2026-10-28 午）
+
+### 入库归属（不是我提交的）
+
+工作树现在只剩 `src-tauri/src/commands/stock_analysis_setup/mod.rs` 带我的改动，其余本批文件
+均已等于 `HEAD` ⇒ **先前取到的门禁读数对入库内容有效**：
+
+| 本批内容 | 落点提交 |
+|---|---|
+| 甲（孤儿观测计入判据）+ 乙（空档上进决策卡标签）+ 丙（key 级 failover）+ 11 语言 + 前端 4 文件 | `c6494fb8b` |
+| 第四处（`src-tauri/src/commands/data-quality.rhai` 的 `low_count` 与摘要归因 + `src-tauri/crates/rt-workflow/tests/data_quality_placeholder_gate.rs` 两条新判据） | `ff9c46f39`（并行会话的大提交，把我当时在工作树里的改动一起带走） |
+| 补充九的文档段 | `c6494fb8b`（+59 行） |
+
+### 门禁读数台账（真实退出码逐条落 `.workbuddy/tmp/`）
+
+| 门 | 读数 | 日志 |
+|---|---|---|
+| `cargo test -p axagent-dao dqi` | 16 passed / 0 failed，`DAO_TEST_R2_EXIT=0` | `dqi-v192-rust2.log` |
+| `cargo test -p axagent-rt-workflow --lib`（llm_resolve 三条） | 3 passed，`LLMRESOLVE_R2_EXIT=0` | 同上 |
+| `cargo test -p axagent-rt-workflow --test data_quality_placeholder_gate` | 51 passed，`DQGATE_R2_EXIT=0` | 同上 |
+| `cargo clippy -p axagent-dao --all-targets` / `-p axagent-rt-workflow --all-targets` | 0 告警 | 同上 |
+| `cargo fmt -p axagent --check` / `cargo fmt --all --check` | 均 0（`FMT_EXIT=0` / `FMT_ALL_R3_EXIT=0`，后者覆盖 36 个 crate） | `fmt-mod.log`、`fmt-all-r3.log` |
+| 前端 | vitest 4 files / 98 passed（含 `DecisionTrustNotice.dqiFuse` 12 条、`agentOutput` 56 条）、`tsc --noEmit` 0、`dprint check` 0 | `v192-*.log` |
+| i18n 三门 | 11 语言 key 集合一致（16257 条）、未翻译 0、占位符干净、错误码 448 ↔ 11 语言对齐 | `v192-parity/untrans/ph.log`、`gate-check-errorcode-alignment.log` |
+| 行号引用门 | `--selftest` 0（两类判据都能红）、`--ci` 0 | `facts-ci.log` |
+| **收口全量** `cargo clippy --workspace --all-targets --all-features -- -D warnings` | `WS_CLIPPY_EXIT=0`（11m 47s） | `ws-gates.log` |
+| **收口全量** `cargo test --workspace` | `WS_TEST_EXIT=1`，但**断言层零红**：109 个测试目标 9049 passed / 0 failed；唯一失败是 `Doc-tests axagent_lib` 编译阶段 5×`E0463` | 同上 |
+| 上述 E0463 的判定实验 `cargo test -p axagent --doc` 单跑 | `DOC_R2_EXIT=0`（11:38:34→11:54:40，4+1 条 doctest 全 ignored）⇒ **并发构建瞬态，不是缺陷** | `doc-r2.log` |
+| 主 crate `cargo test -p axagent --lib dqi` | **5 passed / 0 failed**（794 条被过滤），`MAINDQI_R4_EXIT=0` | `dqi-main-r4.log` |
+
+⚠ 07:00 那次 `check-single-source-facts` 报的两条客观红（`crates/disk-cache/src/lib.rs` 指空行、
+`crates/rt-workflow/src/work_engine/executors/condition_executor.rs` 指空行）**不是本批引入的**，
+已由 `38841b5e5` 修掉；本轮重取即为 0。
+
+### 主 crate lib 测试为什么到现在才取到：HEAD 自身编译不过
+
+`ff9c46f39` 把 v191 的 `context_slim_defaults_on_and_legacy_db_is_forced` 写进了
+`mod horizon_tier_fanout_tests`（`src-tauri/src/commands/stock_analysis_setup/mod.rs:4205` 起），
+但该用例调用的 `seed` / `force_version` 定义在**兄弟**测试模块 `mod version_gate_tests`
+（同一文件 2797 起）里，默认模块私有 ⇒ `lib` 的 **test target 编不过**，6 条 `E0425`
+（4×`seed`、2×`force_version`）。`cargo check` / `cargo clippy`（不带 `--all-targets`）/
+`cargo build` 都看不见它 —— 正是 AGENTS.md「必须 `--all-targets`，test target 不被 lint/编译」那一格的实证。
+
+本地最小修（**复用而非另抄第二份**，按禁区 12）：
+
+- `mod.rs:2814` `async fn seed` → `pub(super) async fn seed`
+- `mod.rs:2848` `async fn force_version` → `pub(super) async fn force_version`
+- `mod.rs:4214` 新增 `use super::version_gate_tests::{force_version, seed};`
+
+两处模板 id 同值已核（`version_gate_tests::TEMPLATE_ID = "stock-analysis"`、
+`SOURCE_TEMPLATE_ID = "stock-analysis"` @ `src-tauri/src/commands/stock_analysis_setup/seed_stock_analysis.rs:8525`）
+⇒ 跨模块复用不改语义。本批裁定是**只改不提交**，回退：
+`git checkout -- src-tauri/src/commands/stock_analysis_setup/mod.rs`。
+
+### 仍待取 / 仍待运行验证
+
+1. ~~主 crate `--lib dqi`~~ **已取**：上面三条修完即 `5 passed / 0 failed`，逐条为
+   `portfolio_mgr_dqi_fuse_note_discloses_orphan_rounds`（乙：熔断句 + `dqiOrphans=4`，负控 `orphans=0` 那半句一个字都不出）、
+   `portfolio_mgr_receives_dqi_fuse_inputs_on_both_chains`、`dqi_fuse_gate_is_wired_on_both_chains`、
+   `dqi_observations_are_written_only_by_the_full_chain`、`portfolio_mgr_dqi_cap_forces_action_ceiling`。
+2. ~~主 crate 定点 clippy~~ **已取**：`cargo clippy -p axagent --all-targets --all-features -- -D warnings`
+   ⇒ `MAINCLIPPY_EXIT=0`（`Finished dev profile in 12m 59s`，无 warning 无 error，日志 `main-clippy.log`）。
+   ⚠ 这一步此前一直被 1 里那 6 条 `E0425` 挡在编译前 —— **不带 `--all-targets` 的 `cargo check` / clippy 看不见 test target**，
+   正是 AGENTS.md 那条铁律的又一次实证。
+3. ~~收口一次全量~~ **已取**（见台账最后三行）：全量 clippy `WS_CLIPPY_EXIT=0`；全量 test 断言层
+   9049/0 全绿，只有 `Doc-tests axagent_lib` 报 5×`E0463 can't find crate`。
+   那 5 条报的行是**函数体/模块顶的普通 `use`**（`src-tauri/src/init/services.rs:499`、
+   `src-tauri/src/init/trigger_recovery.rs:18`、`src-tauri/src/commands/_shared_state.rs:14`、
+   `src-tauri/src/commands/agent/mod.rs:29`、`src-tauri/src/commands/conversations/mod.rs:2621`），
+   不是文档示例 ⇒ 属 rustdoc 依赖解析，而 `--extern` 里那五个 rlib 现在都在、mtime 11:13–11:30
+   正落在那次跑的中间 ⇒ 并行会话在同一 `target/` 重建换文件。**单跑 `--doc` 复验为 0** ⇒ 瞬态定性成立。
+   ⚠ 判据层收获：共享工作树里 `--workspace` 的 doctest 阶段**本身会被并发构建打成假红**，
+   看到 `E0463` 先查 rlib 是否存在 + mtime 落点，再决定要不要动代码。
+3. 运行验证：重启应用 ⇒ v192 重播种 ⇒ 真跑一条分析，看决策卡标签那句空档披露与
+   `[LLM-RESOLVE] 该 key 解密失败 ⇒ 换该供应商的下一把` 是否成句/成行。

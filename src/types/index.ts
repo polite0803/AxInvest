@@ -123,6 +123,8 @@ export interface ModelParamOverrides {
   useMaxCompletionTokens?: boolean;
   noSystemRole?: boolean;
   thinkingParamStyle?: string;
+  /** 思考预算（token）：0 = 关闭思考；不填 = 不下发（供应商默认）。 */
+  thinkingBudget?: number;
   requestDelayMs?: number;
   /**
    * 首字节（HTTP 响应头）等待预算（秒）。这是**硬档总上限**（含同供应商原地重试一次），

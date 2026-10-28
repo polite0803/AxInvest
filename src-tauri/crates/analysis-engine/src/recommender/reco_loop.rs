@@ -476,6 +476,8 @@ pub struct LoopCellResult {
     /// 该档验证窗口 lookback 内的成对样本数
     pub samples: usize,
     pub win_rate: Option<f64>,
+    /// 本格期窗样本的实际均收益（%）。没有可用样本 ⇒ `None`，不用 0.0 冒充「不赚不亏」。
+    pub mean_return_pct: Option<f64>,
     /// 该格**上一轮的生效权重**（= 上一行 `new_weight`），用于面板的旧→新与 delta。
     pub old_weight: f64,
     /// 本轮 EWMA/IC 线算出的**基准权重**（未叠外乘线）。下一轮以它为输入，
@@ -681,6 +683,7 @@ pub fn compute_loop_cell_weights_with_priors(
                     mover_penalty: None,
                     // 同理不适用熔断线
                     dqi_penalty: None,
+                    mean_return_pct: None,
                     scored_out: 0,
                 });
                 continue;
@@ -716,6 +719,14 @@ pub fn compute_loop_cell_weights_with_priors(
             let dqi_penalty = dqi_penalty_of(&cell);
             let outer_penalty = mover_penalty.unwrap_or(1.0) * dqi_penalty.unwrap_or(1.0);
 
+            // 期窗均收益在样本门之前就算：样本不足的格也要能显示它读到过什么。
+            // 没有可用样本给 `None` 而不是 0.0 —— 0.0 会被读成「不赚不亏」。
+            let mean_return_pct = if cell.is_empty() {
+                None
+            } else {
+                Some(cell.iter().map(|s| s.realized_return_pct).sum::<f64>() / cell.len() as f64)
+            };
+
             if cell.len() < crate::reflection_stats::IC_MIN_SAMPLE {
                 out.push(LoopCellResult {
                     style: style_key,
@@ -731,6 +742,7 @@ pub fn compute_loop_cell_weights_with_priors(
                     new_weight: keep_prior_weight(old_base, outer_penalty),
                     mover_penalty,
                     dqi_penalty,
+                    mean_return_pct,
                     scored_out,
                 });
                 continue;
@@ -787,13 +799,9 @@ pub fn compute_loop_cell_weights_with_priors(
             // 仍会出票（0.05×base≈3 分，默认 min_confidence=0 不过滤）。这里按**期窗均收益**
             // 单独一刀：样本 ≥10 且均值 ≤-1% ⇒ 本轮直接置 0，消费侧跳过该格。
             // 只停负期望，不碰正期望（capital_short 期窗 +3.41% 保留）。
-            let mean_return = if cell.is_empty() {
-                0.0
-            } else {
-                cell.iter().map(|s| s.realized_return_pct).sum::<f64>() / cell.len() as f64
-            };
             let (status, new_base) = if cell.len() >= NEGATIVE_EXPECTANCY_MIN_SAMPLES
-                && mean_return <= NEGATIVE_EXPECTANCY_MAX_MEAN_RETURN_PCT
+                && mean_return_pct
+                    .is_some_and(|mean| mean <= NEGATIVE_EXPECTANCY_MAX_MEAN_RETURN_PCT)
             {
                 (LoopCellStatus::DisabledNegativeExpectancy, 0.0)
             } else {
@@ -822,6 +830,7 @@ pub fn compute_loop_cell_weights_with_priors(
                 new_weight,
                 mover_penalty,
                 dqi_penalty,
+                mean_return_pct,
                 scored_out,
             });
         }
@@ -852,13 +861,37 @@ pub struct RecoLoopView {
     /// 生效闸（`reco_ic_gate`）：`off` | `shadow` | `on`
     pub gate: String,
     pub cells: Vec<LoopCellResult>,
+    pub negative_expectancy: NegativeExpectancyGate,
     /// 最近一次闭环重算时刻（ms）；0 = 从未重算
     pub last_recalc_at: i64,
 }
 
 impl Default for RecoLoopView {
     fn default() -> Self {
-        Self { gate: "shadow".to_string(), cells: Vec::new(), last_recalc_at: 0 }
+        Self {
+            gate: "shadow".to_string(),
+            cells: Vec::new(),
+            negative_expectancy: NegativeExpectancyGate::default(),
+            last_recalc_at: 0,
+        }
+    }
+}
+
+/// 负期望硬停的判据。界面要写「≥N 单且均收益 ≤X%」时读这里，
+/// 不在前端另抄一份阈值 —— 阈值一改，抄过去的那份就变成了在陈述一条不存在的判据。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NegativeExpectancyGate {
+    pub min_samples: usize,
+    pub max_mean_return_pct: f64,
+}
+
+impl Default for NegativeExpectancyGate {
+    fn default() -> Self {
+        Self {
+            min_samples: NEGATIVE_EXPECTANCY_MIN_SAMPLES,
+            max_mean_return_pct: NEGATIVE_EXPECTANCY_MAX_MEAN_RETURN_PCT,
+        }
     }
 }
 
@@ -1775,6 +1808,27 @@ mod tests {
             LoopCellStatus::DisabledNegativeExpectancy,
             "样本不足 10 单不得硬停"
         );
+        // 呈现层要能说清「为什么停这一格」⇒ 判据用的那个均收益必须随 DTO 出，
+        // 而不是让界面只报一个状态码。
+        assert_eq!(c.mean_return_pct, Some(-4.0), "硬停格须带出实际均收益");
+        assert_eq!(
+            cell(&nine, "capital", "mid").mean_return_pct,
+            Some(-4.0),
+            "未硬停也如实带出读数"
+        );
+    }
+
+    /// 判据阈值随视图出：界面写「≥N 单且均收益 ≤X%」时读后端，不在前端另抄一份。
+    #[test]
+    fn loop_view_carries_negative_expectancy_thresholds() {
+        let value = serde_json::to_value(RecoLoopView::default()).unwrap();
+        let gate = &value["negativeExpectancy"];
+        assert_eq!(gate["minSamples"].as_u64(), Some(NEGATIVE_EXPECTANCY_MIN_SAMPLES as u64));
+        assert_eq!(
+            gate["maxMeanReturnPct"].as_f64(),
+            Some(NEGATIVE_EXPECTANCY_MAX_MEAN_RETURN_PCT)
+        );
+        assert!(value.get("negative_expectancy").is_none(), "不应有 snake_case 键");
     }
 
     /// 语义版本升级必须**清空旧先验**：否则部分修正后的胜率仍被反向的 EWMA 先验压住。
@@ -1959,9 +2013,17 @@ mod tests {
             compute_loop_cell_weights(&samples, &HashMap::new(), now, &MoverCellSignal::default());
         let value = serde_json::to_value(cell(&res, "trend", "short")).unwrap();
         let obj = value.as_object().unwrap();
-        for key in
-            ["style", "period", "status", "rankIc", "samples", "winRate", "oldWeight", "newWeight"]
-        {
+        for key in [
+            "style",
+            "period",
+            "status",
+            "rankIc",
+            "samples",
+            "winRate",
+            "oldWeight",
+            "newWeight",
+            "meanReturnPct",
+        ] {
             assert!(obj.contains_key(key), "LoopCellResult 缺 camelCase 键 {key}: {obj:?}");
         }
         assert!(!obj.contains_key("rank_ic"));

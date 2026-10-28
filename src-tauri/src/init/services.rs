@@ -3580,12 +3580,65 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
 
                 // 3. 逐日发起批次。批次是**后台执行**的（命令只返回 batch_id），
                 //    这里轮询到终态再记录 —— 否则任务中心会显示「成功」而批次还在跑。
+                //
+                // ── R-4（2026-10-28 成本治理）：单轮「日程上限 + 墙钟预算」──
+                // 实证（2026-10-28）：08:30 这一轮把 20+ 个可回放日**全部**排上，逐日
+                // 跑完整选股链，到 12:48 仍在后台跑；`workflow_executions` 里 27 次执行
+                // ≈ 10.5 元（空闲档，峰时约 21 元），而 `stock_analyses` 一行都没新增
+                // （选股链不写分析表）⇒ 用户只看到 DeepSeek 侧扣费，查不到是谁在烧。
+                //
+                // 两道闸互补，缺一不可：
+                // · `maxDates`   限「今天最多补几天」——控制**总量**；
+                // · `maxMinutes` 限「一天最多让它在后台跑多久」——控制**单日时长**；
+                //   单日耗时不可预估（LLM 限速/重试），只限天数仍可能跑一整天。
+                // 都可在 cron 的 prompt JSON 里覆盖，缺省 3 天 / 90 分钟。
+                const DEFAULT_MAX_DATES: usize = 3;
+                const DEFAULT_MAX_MINUTES: u64 = 90;
+                let max_dates = cfg
+                    .get("maxDates")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize)
+                    .unwrap_or(DEFAULT_MAX_DATES)
+                    .max(1);
+                let max_minutes = cfg
+                    .get("maxMinutes")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(DEFAULT_MAX_MINUTES)
+                    .max(5);
+                let budget = std::time::Duration::from_secs(max_minutes * 60);
+                let budget_started = std::time::Instant::now();
+                let replayable_days = dates.len();
+                let dates: Vec<_> = dates.into_iter().take(max_dates).collect();
+                if replayable_days > dates.len() {
+                    tracing::info!(
+                        "[CronScheduler] 时间旅行批次任务 '{}'：可回放 {replayable_days} 日，\
+                         本轮按上限 maxDates={} 只跑 {} 日，其余顺延到下一轮",
+                        job_name,
+                        max_dates,
+                        dates.len()
+                    );
+                }
                 let mut ok_days = 0usize;
                 let mut fail_days = 0usize;
                 // R-3y（2026-10-26）：「并发占用」单独计数 —— 本轮没排上 ≠ 跑失败。
                 let mut skip_days = 0usize;
+                // R-4：因墙钟预算而顺延的天数（与「并发占用」分开记，两者原因不同）。
+                let mut deferred_days = 0usize;
                 let mut picks_total = 0i64;
                 for (as_of, ago) in &dates {
+                    // 墙钟预算在**每天开始前**检查：正在跑的一天让它跑完（LLM 链不可中途拆），
+                    // 之后的日程整体顺延到下一轮 —— 与 pool-scan 的协作式截止同一形态。
+                    if budget_started.elapsed() >= budget {
+                        deferred_days =
+                            dates.len().saturating_sub(ok_days + fail_days + skip_days);
+                        tracing::warn!(
+                            "[CronScheduler] 时间旅行批次任务 '{}'：已达单轮 maxMinutes={} \
+                             预算，剩余 {deferred_days} 个回放日顺延到下一轮",
+                            job_name,
+                            max_minutes
+                        );
+                        break;
+                    }
                     let request = crate::commands::time_travel_batch::TimeTravelBatchRequest {
                         date: Some(as_of.clone()),
                         trading_days_ago: None,
@@ -3676,11 +3729,17 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
                 }
 
                 let summary = format!(
-                    "回放日 {} 个（成功 {} / 失败 {} / 并发占用跳过 {}）｜荐股总行数 {}",
+                    "回放日 {}/{} 个（成功 {} / 失败 {} / 并发占用跳过 {} / 预算顺延 {}）\
+                     ｜本轮上限 {} 日 {} 分钟｜耗时 {}s｜荐股总行数 {}",
                     dates.len(),
+                    replayable_days,
                     ok_days,
                     fail_days,
                     skip_days,
+                    deferred_days,
+                    max_dates,
+                    max_minutes,
+                    budget_started.elapsed().as_secs(),
                     picks_total
                 );
                 tracing::info!(

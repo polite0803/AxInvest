@@ -1290,7 +1290,7 @@ impl NodeExecutorTrait for AgentExecutor {
         //
         // 根因：`ChatStreamChunk` 带 `done: bool` / `is_final: Option<bool>` 终态标记
         //（provider 侧在收到 `[DONE]` / `finish_reason` 时置 `done: true`，
-        //  见 `providers/src/openai.rs:1127`），而本循环**只读 content/thinking/usage/tool_calls
+        //  见 `providers/src/openai.rs:1120`），而本循环**只读 content/thinking/usage/tool_calls
         //  —— 从不检查终态标记**。于是 `stream.next()` 返回 `None`（传输层被掐断）
         // 与「模型正常写完」在代码里是**同一个分支**（`while let` 自然退出），
         // 半截输出被原样当作成功结果。
@@ -1358,7 +1358,7 @@ impl NodeExecutorTrait for AgentExecutor {
                 } else {
                     None
                 },
-                thinking_budget: None,
+                thinking_budget: sampling.thinking_budget,
                 use_max_completion_tokens: sampling.use_max_completion_tokens,
                 thinking_param_style: sampling.thinking_param_style.clone(),
                 api_mode: None,
@@ -1641,7 +1641,7 @@ impl NodeExecutorTrait for AgentExecutor {
 
             // 2026-09-14：**流完整性判定** —— 有内容、却从未收到终态 chunk ⇒ 输出被截断。
             // 判定依据是可观测的（见 `stream_truncated` 声明处注释），不依赖猜测：
-            // provider 在 `openai.rs:1127` 收到 `[DONE]`/`finish_reason` 时置 `done: true`；
+            // provider 在 `openai.rs:1120` 收到 `[DONE]`/`finish_reason` 时置 `done: true`；
             // 缺它 + `usage` 为零（终态 chunk 才带 usage）两条同时成立 ⇒ 传输层中途断开。
             if !stream_saw_done && !stream_content.trim().is_empty() {
                 stream_truncated = true;
@@ -2083,7 +2083,7 @@ impl NodeExecutorTrait for AgentExecutor {
                     max_tokens: retry_sampling.max_tokens,
                     top_p: retry_sampling.top_p,
                     tools: None, // 不传 tools，强制 LLM 只输出文本
-                    thinking_budget: None,
+                    thinking_budget: retry_sampling.thinking_budget,
                     use_max_completion_tokens: retry_sampling.use_max_completion_tokens,
                     thinking_param_style: retry_sampling.thinking_param_style.clone(),
                     api_mode: None,
@@ -2485,7 +2485,7 @@ impl NodeExecutorTrait for AgentExecutor {
                                             max_tokens: fb_sampling.max_tokens,
                                             top_p: fb_sampling.top_p,
                                             tools: None,
-                                            thinking_budget: None,
+                                            thinking_budget: fb_sampling.thinking_budget,
                                             use_max_completion_tokens: fb_sampling
                                                 .use_max_completion_tokens,
                                             thinking_param_style: fb_sampling
@@ -3048,7 +3048,7 @@ impl NodeExecutorTrait for AgentExecutor {
                         max_tokens: fb_sampling.max_tokens,
                         top_p: fb_sampling.top_p,
                         tools: None, // fallback 重试不带 tools，直接要求输出结果
-                        thinking_budget: None,
+                        thinking_budget: fb_sampling.thinking_budget,
                         use_max_completion_tokens: fb_sampling.use_max_completion_tokens,
                         thinking_param_style: fb_sampling.thinking_param_style.clone(),
                         api_mode: None,
@@ -3856,7 +3856,7 @@ impl AgentExecutor {
             max_tokens: fb_sampling.max_tokens,
             top_p: fb_sampling.top_p,
             tools: None, // fallback 不带 tools，直接要求输出结果
-            thinking_budget: None,
+            thinking_budget: fb_sampling.thinking_budget,
             use_max_completion_tokens: fb_sampling.use_max_completion_tokens,
             thinking_param_style: fb_sampling.thinking_param_style.clone(),
             api_mode: None,
@@ -3907,6 +3907,12 @@ struct EffectiveSampling {
     top_p: Option<f64>,
     use_max_completion_tokens: Option<bool>,
     thinking_param_style: Option<String>,
+    /// 思考预算（token）。`Some(0)` = 关闭思考；`None` = 不下发，由供应商默认。
+    ///
+    /// 为什么放在模型层而不是模板变量：v189 已裁定「采样参数唯一权威 = 供应商-模型」，
+    /// 且实测 002916 一次运行输出 202,369 tokens 中约 60% 是思考 token（≈0.49 元），
+    /// 这是当前最大的单项成本，必须有可关的旋钮。
+    thinking_budget: Option<u32>,
 }
 
 fn resolve_sampling(
@@ -3924,6 +3930,7 @@ fn resolve_sampling(
             .and_then(|p| p.use_max_completion_tokens)
             .filter(|b| *b),
         thinking_param_style: overrides.and_then(|p| p.thinking_param_style.clone()),
+        thinking_budget: overrides.and_then(|p| p.thinking_budget),
     }
 }
 

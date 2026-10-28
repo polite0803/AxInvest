@@ -275,10 +275,17 @@ fn build_builtin_jobs() -> Result<Vec<CronJob>, String> {
     //
     // 进交易日闸门（见 services.rs 的闸门分支）：休市日「可判定的 as_of 集合」与
     // 上一交易日完全相同 ⇒ 休市日跑是纯浪费。
+    // R-4（2026-10-28 成本治理）：单轮日程上限与墙钟预算。
+    // 实证：2026-10-28 08:30 这一轮把 20+ 个回放日全部排上，到 12:48 仍在后台跑，
+    // 27 次完整选股链 ≈ 10.5 元（空闲档），而分析页一行记录都没有 —— 用户只看到
+    // DeepSeek 侧扣费。两道闸在本文件里是**缺省值**，旧库的既有行不带这两个键时
+    // `init/services.rs` 会回落到同一组缺省，不需要改库。
     let tt_config = serde_json::json!({
         "minConfidence": 50,
         "topN": 20,
         "minHoldingDays": 2,
+        "maxDates": 3,
+        "maxMinutes": 90,
     });
     let mut time_travel = CronJob::new(
         "时间旅行回放（内置）",

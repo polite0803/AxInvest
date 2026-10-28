@@ -22,7 +22,7 @@ use crate::cache_interceptor::LlmCacheKey;
 use crate::confidence::{ConfidenceAction, ConfidenceConfig};
 use crate::prompt_guard::PromptGuard;
 use crate::provider::{ProviderAdapter, ProviderRequestContext};
-use crate::types::{ChatContent, ChatRequest, ChatResponse, ChatStreamChunk, TokenUsage};
+use crate::types::{ChatContent, ChatRequest, ChatResponse, ChatStreamChunk, ChatTool, TokenUsage};
 use futures::TryStreamExt;
 use futures::stream::{self, Stream};
 
@@ -420,6 +420,8 @@ fn prepare_llm_call(
     mut request: ChatRequest,
     config: &LlmCallConfig,
 ) -> Result<PreparedCall, String> {
+    // ── 0. 工具名去重 ──
+    dedupe_tool_names(&mut request.tools);
     // ── 1. 前置拦截：PromptGuard 过滤 ──
     if let Some(ref guard) = config.prompt_guard {
         for msg in &mut request.messages {
@@ -555,6 +557,39 @@ fn prepare_llm_call(
     };
 
     Ok(PreparedCall { request, cache_key })
+}
+
+/// 按工具名去重（保留首条，其余顺序不变）。
+///
+/// 供应商硬约束：OpenAI / DeepSeek 等要求 `tools[].function.name` 全局唯一，
+/// 重复即整单 400（`Tool names must be unique`）。上游各装配点虽已各自去重，
+/// 但跨来源合并仍可能撞名（MCP + 内置 + 技能 + Tauri/股票/OPC 桥接 +
+/// 运行时动态工具 + 工作流节点直接展开的 `exposed_tools`）——
+/// 兜底放在中心化入口，一次覆盖全部调用方。
+fn dedupe_tool_names(tools: &mut Option<Vec<ChatTool>>) {
+    let Some(list) = tools.as_mut() else { return };
+    if list.len() < 2 {
+        return;
+    }
+    let total = list.len();
+    let mut seen = std::collections::HashSet::with_capacity(total);
+    let mut duplicates = Vec::new();
+    list.retain(|t| {
+        if seen.insert(t.function.name.clone()) {
+            true
+        } else {
+            duplicates.push(t.function.name.clone());
+            false
+        }
+    });
+    if !duplicates.is_empty() {
+        tracing::warn!(
+            "[execute_llm] tools 存在重名，已按名保留首条: {} -> {}，重复项={:?}",
+            total,
+            list.len(),
+            duplicates
+        );
+    }
 }
 
 /// 简易 token 估算：中文 * 2 + 非中文 / 4 + 10
@@ -1021,5 +1056,77 @@ mod cache_key_tests {
         let none = build_cache_key(&request_with_tools(None));
         let empty = build_cache_key(&request_with_tools(Some(vec![])));
         assert_eq!(none.messages_hash, empty.messages_hash);
+    }
+}
+
+#[cfg(test)]
+mod tool_dedupe_tests {
+    use super::*;
+    use crate::types::{ChatContent, ChatMessage, ChatTool, ChatToolFunction};
+
+    fn tool(name: &str) -> ChatTool {
+        ChatTool {
+            r#type: "function".to_string(),
+            function: ChatToolFunction {
+                name: name.to_string(),
+                description: Some(format!("{name} 的描述")),
+                parameters: None,
+            },
+        }
+    }
+
+    fn request_with_tools(tools: Option<Vec<ChatTool>>) -> ChatRequest {
+        ChatRequest {
+            model: "test-model".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text("看一下行情".to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+                thinking: None,
+            }],
+            stream: true,
+            tools,
+            ..Default::default()
+        }
+    }
+
+    /// 正控：重名工具必须被去掉，且保留**首个**定义、其余顺序不变。
+    ///
+    /// 这一条锁的是供应商硬约束 —— OpenAI / DeepSeek 对重名 tools 直接 400
+    /// （`Tool names must be unique`），请求整单失败。
+    #[test]
+    fn duplicate_tool_names_are_removed_keeping_first() {
+        let request = request_with_tools(Some(vec![
+            tool("stock_get_quote"),
+            tool("Read"),
+            tool("stock_get_quote"),
+            tool("stock_render_ui"),
+            tool("Read"),
+        ]));
+        let prepared =
+            prepare_llm_call(request, &LlmCallConfig::default()).expect("预处理不应失败");
+        let names: Vec<String> = prepared
+            .request
+            .tools
+            .expect("去重后仍应有工具")
+            .iter()
+            .map(|t| t.function.name.clone())
+            .collect();
+        assert_eq!(names, vec!["stock_get_quote", "Read", "stock_render_ui"]);
+    }
+
+    /// 负控：无重名 / 无工具时不得改动，保证这是纯兜底而非常规改写。
+    #[test]
+    fn unique_or_absent_tools_are_unchanged() {
+        let unique = request_with_tools(Some(vec![tool("Read"), tool("Write")]));
+        let prepared = prepare_llm_call(unique, &LlmCallConfig::default()).expect("预处理不应失败");
+        let names: Vec<String> =
+            prepared.request.tools.unwrap().iter().map(|t| t.function.name.clone()).collect();
+        assert_eq!(names, vec!["Read", "Write"]);
+
+        let none = request_with_tools(None);
+        let prepared = prepare_llm_call(none, &LlmCallConfig::default()).expect("预处理不应失败");
+        assert!(prepared.request.tools.is_none());
     }
 }

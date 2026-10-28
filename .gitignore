@@ -132,6 +132,14 @@ axagent-layout-v4.html
 # Temp debug output (Rust)
 /src-tauri/temp/
 
+# 本地临时工作目录与库副本（2026-10-28：一次 `git add -A` 把它们扫进了提交，
+# 其中 .tmp_axagent_copy.db 136 MB 被 GitHub 拒收 —— 这类文件本来就不该进版本库）
+/.tmp/
+/.tmp_axagent_copy.db
+/.tmp_axagent_copy.db-shm
+/.tmp_axagent_copy.db-wal
+/.dsh_watch.sql
+
 # Dprint temp cache (should never have been tracked)
 /temp/
 

@@ -123,6 +123,11 @@ jobs:
             target: x86_64-unknown-linux-gnu
 
     runs-on: ${{ matrix.os }}
+    # 硬上限：2026-10-27 run 40510438483 的 macOS 两个目标在 `Build with Tauri` 里
+    # **没有任何报错**地卡满 GitHub 的 6 小时 job 上限才被取消 —— 等 6 小时才拿到
+    # 「失败」的信息量等于零，还占着 runner。这里主动收紧到 3 小时：超过即明确红，
+    # 而不是把它当成一次「跑完了但结论不明」。
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v5
         with:
@@ -202,6 +207,30 @@ jobs:
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=1" >> "$GITHUB_ENV"
 
+      # macOS runner 只有 3 核 / 7～14 GB，却用 release 默认的 fat LTO：`Compiling` 阶段本身
+      # 就要串行跑一遍全量 LLVM 优化，链接阶段还要合并全部 codegen unit。
+      # 2026-10-27 run 40510438483 实测：两个 macOS 目标在 `Build with Tauri` 里跑满
+      # GitHub 的 6 小时 job 上限、**没有任何报错**就被取消 —— 那不是编译失败，是编不完。
+      # 这里让 macOS 也走「LTO off + cgu=16」，与 Linux x86_64 / Linux ARM64 同一套口径。
+      - name: Lower memory / link cost (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
+          echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16" >> "$GITHUB_ENV"
+
+      # ⚠ 只对 x86_64-apple-darwin 写 RUSTFLAGS，**不要**留在 `Build with Tauri` 的 step 级
+      # env 里：写成 `... && '...' || ''` 会让 arm64 / Windows / Linux 也带上一个空值，
+      # 而 RUSTFLAGS 参与 cargo 指纹与缓存键 ⇒ 历史缓存全部失配、四个目标一起全量重编
+      # （2026-10-27 那次 macOS 双目标冷编就是这么来的）。
+      - name: ad-hoc sign for x86_64 cross-link (macOS Intel)
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: |
+          # macOS x86_64 是 arm64 runner 上的交叉链接：ld64 默认只给宿主架构（arm64）
+          # 产物打 ad-hoc 签名，x86_64 产物没有 ⇒ tauri 给主二进制 codesign 时嵌套校验失败：
+          #   AxInvest: code object is not signed at all
+          #   In subcomponent: .../AxInvest.app/Contents/MacOS/axagent-batch-rerun
+          echo "RUSTFLAGS=-C link-arg=-Wl,-adhoc_codesign" >> "$GITHUB_ENV"
+
       - name: Build with Tauri
         uses: tauri-apps/tauri-action@v0.5
         env:
@@ -209,12 +238,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'macos-latest' && '-' || '' }}
-          # macOS x86_64 是 arm64 runner 上的交叉链接：ld64 默认只给宿主架构（arm64）
-          # 产物打 ad-hoc 签名，x86_64 产物没有 ⇒ tauri 给主二进制 codesign 时嵌套校验失败：
-          #   AxInvest: code object is not signed at all
-          #   In subcomponent: .../AxInvest.app/Contents/MacOS/axagent-batch-rerun
-          # 显式让链接器给 x86_64 产物也打 ad-hoc 签名（aarch64 原生构建本来就有，故一直成功）。
-          RUSTFLAGS: ${{ matrix.target == 'x86_64-apple-darwin' && '-C link-arg=-Wl,-adhoc_codesign' || '' }}
         with:
           # NOTE: Do NOT set tagName/releaseDraft here — tauri-action manages
           # releases via softprops/action-gh-release internally, and running

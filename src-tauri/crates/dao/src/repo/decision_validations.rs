@@ -4,7 +4,9 @@
 /// 验证行类型重导出（命令侧按 `t_plus_n_price` / `final_return_pct` 判数据可达性）。
 pub use axagent_entities::decision_validations::Model as ValidationModel;
 use axagent_entities::decision_validations::{Column, Entity};
-use sea_orm::{ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{
+    ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+};
 
 /// 取 `validated_date >= validated_since`（YYYY-MM-DD 文本比较）的全部验证行。
 ///

@@ -276,14 +276,24 @@ mod tests {
             .collect();
         assert!(!shadow_compare(&params(0.8), &base_p, &mixed).applicable);
 
-        // 正向对照：候选只买高分区，而高分区确实更赚 ⇒ 必须放行
+        // 正向对照：候选只买高分区，而高分区确实更赚 ⇒ 必须放行。
+        // 两处坑都必须避开，否则「候选」与基线在样本上算出来的持仓子集完全相同：
+        // ① 分数要留**三档**：v56 默认买入 0.63、增持 0.53，只造 0.9/0.5 两档时基线也只买 0.9；
+        // ② 候选要**同时抬高买入与增持**：只改 buy_threshold 时，0.7 档仍走「增持」照样算持仓
+        //    （2026-10-28 实测：只调 buy_threshold，正样本两边都是 2.50%，断言失败）。
+        let strict = PortfolioMgrParamSet {
+            buy_threshold: 0.8,
+            increase_threshold: 0.8,
+            ..PortfolioMgrParamSet::v56_default()
+        };
         let good: Vec<ReplaySample> = (0..60)
-            .map(|i| ReplaySample {
-                score: if i % 2 == 0 { 0.9 } else { 0.5 },
-                forward_return_pct: if i % 2 == 0 { 4.0 } else { 0.5 },
+            .map(|i| match i % 3 {
+                0 => ReplaySample { score: 0.9, forward_return_pct: 4.0 },
+                1 => ReplaySample { score: 0.7, forward_return_pct: 1.0 },
+                _ => ReplaySample { score: 0.5, forward_return_pct: 0.2 },
             })
             .collect();
-        let ok = shadow_compare(&params(0.8), &base_p, &good);
+        let ok = shadow_compare(&strict, &base_p, &good);
         assert!(ok.applicable, "{}", ok.reason);
         assert!(
             ok.candidate.long_avg_return_pct.unwrap() > ok.baseline.long_avg_return_pct.unwrap()

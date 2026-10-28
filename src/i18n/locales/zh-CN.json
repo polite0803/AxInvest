@@ -16779,6 +16779,7 @@
       "passiveWatch": "本次「观望」为数据不足导致的被动降级，非看空判断",
       "gapsNotDegraded": "存在数据缺口，但未触发降级：结论方向不受影响",
       "dqiFuse": "数据质量已连续 {{streak}} 轮降档并触发熔断：本轮置信度上限按最保守档收紧",
+      "dqiFuseOrphans": "其中 {{count}} 轮的所属分析已删除（记录不在库里）",
       "collapseLabel": "因子权重坍缩",
       "gapReason": "数据缺口 {{count}} 项",
       "showGaps": "查看缺口",

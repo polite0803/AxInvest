@@ -1980,44 +1980,49 @@ mod tests {
         );
     }
 
-    /// v190：熔断那句话必须①用判据的同一套词表（降档，不是「未达 A 级」），
-    /// ②把「连续 N 轮」跨过的空档说出来（被剔除的孤儿观测条数 + 计入时的轮数）。
+    /// v192：熔断那句话必须 ①用判据的同一套词表（降档，不是「未达 A 级」），
+    /// ②披露「这 N 轮里有几轮的所属分析已删除」，③把同一个数作为 `dqiOrphans` 下发给决策卡。
     ///
-    /// 为什么要单独一条：文案在 Rhai 里拼，`dqi_orphans` 若没接进那句话，dao 与 hooks
-    /// 两侧照样全绿 —— 正是「补了值表 ≠ 锁住参与」那一格。
+    /// 为什么要单独一条：文案在 Rhai 里拼、标签在前端读，`dqi_orphans` 若没接进这两处，
+    /// dao 与 hooks 两侧照样全绿 —— 正是「补了值表 ≠ 锁住参与」那一格。
     #[test]
-    fn portfolio_mgr_dqi_fuse_note_discloses_the_skipped_gap() {
+    fn portfolio_mgr_dqi_fuse_note_discloses_orphan_rounds() {
         let src = PRODUCTION_SCRIPTS
             .iter()
             .find(|(l, _)| *l == "portfolio-mgr")
             .expect("脚本清单缺 portfolio-mgr")
             .1;
 
-        let run = |orphans: i64, incl: i64| -> serde_json::Value {
+        let run = |orphans: i64| -> serde_json::Value {
             let vars: Vec<(&str, serde_json::Value)> = vec![
                 ("dqi_grade", serde_json::json!("A")),
                 ("dqi_observations", serde_json::json!(12)),
                 ("dqi_streak", serde_json::json!(9)),
                 ("dqi_fuse_flag", serde_json::json!(1)),
                 ("dqi_orphans", serde_json::json!(orphans)),
-                ("dqi_streak_incl_orphans", serde_json::json!(incl)),
             ];
             run_portfolio_mgr_fully(src, &[], &vars)
         };
+        // 数字既可能是 i64 也可能是 f64（Rhai 侧 to_int 后仍按 Dynamic 落 JSON）⇒ 两侧都认
+        let orphan_field = |out: &serde_json::Value| -> Option<i64> {
+            let v = &out["dqiOrphans"];
+            v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))
+        };
 
-        // 现网形态：读 9 轮，其中 4 条观测因所属分析已删除被剔除，计入则断在 2 ⇒ 虚高
-        let inflated = run(4, 2);
-        let r = inflated["reasoning"].as_str().unwrap_or_default();
+        let with_orphans = run(4);
+        let r = with_orphans["reasoning"].as_str().unwrap_or_default();
         assert!(r.contains("连续9轮降档"), "熔断句要成句且按判据措辞: {r}");
         assert!(!r.contains("未达A级"), "旧措辞不得复活（A/B 都是正常档）: {r}");
-        assert!(r.contains("其间4轮观测因所属分析已删除未参与"), "空档条数必须点名: {r}");
-        assert!(r.contains("计入则为2轮"), "差值必须端出来，只报条数不足以判断虚高还是低估: {r}");
+        assert!(r.contains("其中4轮的所属分析已删除"), "披露必须成句: {r}");
+        assert_eq!(orphan_field(&with_orphans), Some(4), "dqiOrphans 必须随决策体下发给前端");
 
-        // 负控：没有空档 ⇒ 那半句一个字都不许出现（恒亮的披露等于噪声，也是伪造的缺席）
-        let no_gap = run(0, 9);
-        let r2 = no_gap["reasoning"].as_str().unwrap_or_default();
+        // 负控：没有孤儿轮 ⇒ 那半句一个字都不许出现（恒亮的披露等于噪声，也是伪造的缺席），
+        //   但字段本身必须是 0 而不是缺席 —— 缺席会让前端读成"不知道"。
+        let none = run(0);
+        let r2 = none["reasoning"].as_str().unwrap_or_default();
         assert!(r2.contains("连续9轮降档"), "{r2}");
-        assert!(!r2.contains("其间"), "orphans=0 却凭空造出一句披露: {r2}");
+        assert!(!r2.contains("轮的所属分析已删除"), "orphans=0 却凭空造出一句披露: {r2}");
+        assert_eq!(orphan_field(&none), Some(0), "无孤儿轮要下发 0，不得留空");
     }
 
     /// P1-4（`PLAN-stock-decision-reliability.md` R6）：追涨门 —— 大阳放量的当日

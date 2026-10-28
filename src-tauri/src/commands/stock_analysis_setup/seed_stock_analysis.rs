@@ -1026,8 +1026,8 @@ type AlgoToolRow = (
 ///   表结构正门=实体列属性 + `entities/src/lib.rs` 注册）。本版只动**模板内容**四处：
 ///   ① `portfolio-mgr` 的 `input_mapping` 新增 3 条同名映射（`dqi_streak` / `dqi_fuse_flag` /
 ///      `dqi_observations`）—— 注入的是**已判定结果**，阈值权威在 dao，脚本与 Switch 都不比阈值；
-///      **v190（2026-10-28）再加 2 条**：`dqi_orphans` / `dqi_streak_incl_orphans`，把「连续 N 轮」
-///      跨过的空档（所属分析已删除的观测行）端出来 —— 判据口径不变，只补披露。
+///      **v192（2026-10-28 口径变更）再加 1 条**：`dqi_orphans` —— 孤儿观测行（所属分析
+///      已删除）现在计入判据，该数只披露「连续 N 轮里有几轮记录已不在」。
 ///   ② `portfolio-mgr.rhai` 的置信度上限加一层熔断封顶（压到 grade 阶梯已有的最低一级，
 ///      **不新增常数**），并输出三态 `dqiFuseState`（`fused` / `ok` / `unobserved`）+ 两个佐证数
 ///      + 实际生效上限，reasoning 三态各成一句；
@@ -1640,7 +1640,7 @@ type AlgoToolRow = (
 ///   消费点收口：`rt-workflow/.../agent_executor.rs` 的 `resolve_sampling`（三档优先级）
 ///   与 `harness/types/provider_model.rs` 的 `model_param_overrides`（查找只此一份）。
 ///   变量表变更 ⇒ 换代，删键走 `SAMPLING_VARS_RETIRED_VERSION`（一次性门）。
-pub const TEMPLATE_VERSION: i32 = 191; // v191: 上下文瘦身开关（trader_context_slim / risk_context_slim）默认 false → true，并加一次性门 CONTEXT_SLIM_DEFAULT_VERSION=191（图侧 forced + 变量表 force_variable_value 同步覆写，存量库升版即生效；实测单次运行 75–80% 提示词是上下文数据、其中 36–53% 逐字重复）；v190: 熔断「连续 N 轮」的空档披露 —— portfolio-mgr 加 `dqi_orphans` / `dqi_streak_incl_orphans` 两条同名映射，并把 5 处「拿不到 A 级」措辞订正为「降档（C/D/F 或无等级）」（判据自 2026-10-10 起 A/B 都是正常档，文案把判据说窄了）；v189: 退役 agent_temperature / agent_max_tokens 两个模板变量 —— 采样参数唯一权威改到模型层「供应商-模型 → 参数」（推翻 v181 的「唯一权威=模板变量」），四处消费点收口到 resolve_sampling；v188: 决策否决门可配置化（风控/情绪/估值三门 + 顶层采纳档内买入）—— 走运行期 pm_gate_enabled（settings 表），**不改图结构**；同时解除 R-CALIB-CAP 对档内买入的动作联动（置信封顶仍生效）；v187: Json 输出节点恒下发 response_format（原生结构化输出；退役 structured_output_mode 开关）；v186: rule-check 交易方案改读 portfolio-risk-gate（移除对 trader 的无边软依赖）；v185: 退役 `formula_independent_f7` 回滚位 —— f7 两侧形态恒定（生产恒不吃 trader / 参照侧恒吃），「主档不得依赖 LLM 决策」由开关语义改为结构保证；v184: data-quality 逐节点诊断新增可选键 `score_sum_reason`（三态：自洽/偏离/不知道），`analyst_feedbacks` 的 `score_consistent` 从此有真值可读；v183: 生产 f7 切分析师结构票（公式决策与 LLM 决策互不消费、并行；trader 口径改由参照节点 `portfolio-mgr-f7-ref` 承接）；v182: f2 改吃辩论聚合方向（consensusDirection）——`consensus_score` 按契约是收敛程度、无方向含义；v181: Agent 节点采样参数置空（唯一权威=模板变量；**已被 v189 推翻，改指模型层参数**）；v180: 引入独立公式节点（公式决策不吃 LLM 决策输入；节点名与 f7 口径以 v183 条为准）
+pub const TEMPLATE_VERSION: i32 = 192; // v192: 熔断判据改为**计入**孤儿观测行（所属分析已删除的那一轮确实跑过，摘掉会让「连续 N 轮」跨过空档继续数；实测现网读 9、计入则断在 2）；portfolio-mgr 退役 `dqi_streak_incl_orphans`（新口径下差值恒 0，属第二份载体），新增输出 `dqiOrphans` 供决策卡披露；v191: 上下文瘦身开关（trader_context_slim / risk_context_slim）默认 false → true，并加一次性门 CONTEXT_SLIM_DEFAULT_VERSION=191（图侧 forced + 变量表 force_variable_value 同步覆写，存量库升版即生效；实测单次运行 75–80% 提示词是上下文数据、其中 36–53% 逐字重复）；v190: 熔断「连续 N 轮」的空档披露 —— portfolio-mgr 加 `dqi_orphans` / `dqi_streak_incl_orphans` 两条同名映射，并把 5 处「拿不到 A 级」措辞订正为「降档（C/D/F 或无等级）」（判据自 2026-10-10 起 A/B 都是正常档，文案把判据说窄了）；v189: 退役 agent_temperature / agent_max_tokens 两个模板变量 —— 采样参数唯一权威改到模型层「供应商-模型 → 参数」（推翻 v181 的「唯一权威=模板变量」），四处消费点收口到 resolve_sampling；v188: 决策否决门可配置化（风控/情绪/估值三门 + 顶层采纳档内买入）—— 走运行期 pm_gate_enabled（settings 表），**不改图结构**；同时解除 R-CALIB-CAP 对档内买入的动作联动（置信封顶仍生效）；v187: Json 输出节点恒下发 response_format（原生结构化输出；退役 structured_output_mode 开关）；v186: rule-check 交易方案改读 portfolio-risk-gate（移除对 trader 的无边软依赖）；v185: 退役 `formula_independent_f7` 回滚位 —— f7 两侧形态恒定（生产恒不吃 trader / 参照侧恒吃），「主档不得依赖 LLM 决策」由开关语义改为结构保证；v184: data-quality 逐节点诊断新增可选键 `score_sum_reason`（三态：自洽/偏离/不知道），`analyst_feedbacks` 的 `score_consistent` 从此有真值可读；v183: 生产 f7 切分析师结构票（公式决策与 LLM 决策互不消费、并行；trader 口径改由参照节点 `portfolio-mgr-f7-ref` 承接）；v182: f2 改吃辩论聚合方向（consensusDirection）——`consensus_score` 按契约是收敛程度、无方向含义；v181: Agent 节点采样参数置空（唯一权威=模板变量；**已被 v189 推翻，改指模型层参数**）；v180: 引入独立公式节点（公式决策不吃 LLM 决策输入；节点名与 f7 口径以 v183 条为准）
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -6178,12 +6178,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     ("dqi_streak", "dqi_streak"),
                     ("dqi_fuse_flag", "dqi_fuse_flag"),
                     ("dqi_observations", "dqi_observations"),
-                    // v190：熔断「连续 N 轮」跨过的空档。两个数都是**披露**，不改判据：
-                    //   dqi_orphans = 该区间内被剔除的孤儿观测条数（所属分析已删除）；
-                    //   dqi_streak_incl_orphans = 把它们也计入时的连续降档轮数（差值即虚高/低估幅度）。
-                    //   权威口径在 `dao::repo::data_quality_fuse::streak_from_rows`。
+                    // v192（2026-10-28 口径变更）：熔断「连续 N 轮」里的孤儿观测条数。
+                    //   孤儿行（所属分析已删除）现在**计入判据**，本数只作披露 ⇒ 只留一条变量。
+                    //   原来配对的 `dqi_streak_incl_orphans`（"计入则为 N 轮"）在新口径下差值恒 0，
+                    //   留着就是第二份载体 ⇒ 退役。权威口径在 `dao::repo::data_quality_fuse`。
                     ("dqi_orphans", "dqi_orphans"),
-                    ("dqi_streak_incl_orphans", "dqi_streak_incl_orphans"),
                     // P1/P2: 因子回测数据（compute_scoring 工具附加输出）
                     ("factor_weights", "t-scoring.result.content.factor_backtest.factors"),
                     // P1-1: 市场状态权重调节（regime-weights.rhai）替代纯回测权重
@@ -11870,13 +11869,7 @@ mod fast_workflow_derivation_tests {
             let WorkflowNode::Code(code) = pm else {
                 panic!("`portfolio-mgr` 必须是 Code 节点");
             };
-            for key in [
-                "dqi_streak",
-                "dqi_fuse_flag",
-                "dqi_observations",
-                "dqi_orphans",
-                "dqi_streak_incl_orphans",
-            ] {
+            for key in ["dqi_streak", "dqi_fuse_flag", "dqi_observations", "dqi_orphans"] {
                 assert_eq!(
                     code.config.input_mapping.get(key).map(String::as_str),
                     Some(key),

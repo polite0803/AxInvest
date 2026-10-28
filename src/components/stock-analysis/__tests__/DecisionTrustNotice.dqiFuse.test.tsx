@@ -22,6 +22,7 @@ vi.mock("react-i18next", () => ({
         "stockAnalysis.trustNotice.showGaps": "查看缺口",
         "stockAnalysis.trustNotice.hideGaps": "收起",
         "stockAnalysis.trustNotice.dqiFuse": `跨轮熔断(${opts?.streak ?? "?"})`,
+        "stockAnalysis.trustNotice.dqiFuseOrphans": `其中${opts?.count ?? 0}轮记录已删除`,
         "stockAnalysis.weightCollapseThreshold": `权重占比 ${opts?.ratio}%`,
         "stockAnalysis.weightCollapseConsequence": "后果",
       };
@@ -84,6 +85,34 @@ describe("DecisionTrustNotice 跨轮熔断态（#8 P5）", () => {
     const { container } = render(<DecisionTrustNotice decision={mkDecision({})} />);
     expect(container.textContent).toBe("");
   });
+
+  // ── v192：孤儿轮披露（渲染侧）──
+  // 生产侧（产端下发 dqiOrphans）由下面「三载体反向锁」那组锁住；这里只断「组件出哪句」。
+  // 两条各钉一格：破坏 `orphanRounds > 0` 的判据 ⇒ 只有第一条红；破坏产端字段 ⇒ 只有第二条红。
+  it("fused 且有孤儿轮 ⇒ 标签必须单独成一句「其中 N 轮记录已删除」", () => {
+    render(
+      <DecisionTrustNotice
+        decision={mkDecision({ dqiFuseState: "fused", dqiStreak: 9, dqiOrphans: 4 })}
+      />,
+    );
+    expect(screen.getByText(/跨轮熔断\(9\)/)).toBeTruthy();
+    expect(screen.getByText(/其中4轮记录已删除/)).toBeTruthy();
+  });
+
+  it("fused 但无孤儿轮 ⇒ 那句一个字都不出现（恒亮的披露等于噪声，也是伪造的缺席）", () => {
+    const { container } = render(
+      <DecisionTrustNotice decision={mkDecision({ dqiFuseState: "fused", dqiStreak: 9, dqiOrphans: 0 })} />,
+    );
+    expect(container.textContent).toContain("跨轮熔断(9)");
+    expect(container.textContent).not.toContain("记录已删除");
+  });
+
+  it("未熔断（ok）时即便带孤儿轮数也不披露 —— 那句是轮数的限定语，不独立成事", () => {
+    const { container } = render(
+      <DecisionTrustNotice decision={mkDecision({ dqiFuseState: "ok", dqiStreak: 1, dqiOrphans: 3 })} />,
+    );
+    expect(container.textContent).toBe("");
+  });
 });
 
 // ── 三载体反向锁 ──
@@ -98,13 +127,14 @@ const FUSE_KEY = "dqiFuse";
 const ZH_KEY = ["zh-CN", "zh-TW"];
 
 describe("熔断态三载体一致", () => {
-  it("产端脚本真的输出了 TS 侧读的四个键", () => {
+  it("产端脚本真的输出了 TS 侧读的五个键", () => {
     const body = fs.readFileSync(RHAI, "utf8");
     for (
       const key of [
         "dqiFuseState",
         "dqiStreak",
         "dqiObservations",
+        "dqiOrphans",
         "confidenceQualityCap",
       ]
     ) {
@@ -116,9 +146,17 @@ describe("熔断态三载体一致", () => {
     }
   });
 
-  it("normalizeDecision 是白名单重建 ⇒ 四个键必须显式带上（漏一个就是界面永远读不到）", () => {
+  it("normalizeDecision 是白名单重建 ⇒ 五个键必须显式带上（漏一个就是界面永远读不到）", () => {
     const src = fs.readFileSync(path.join(ROOT, "src/lib/agentOutput.ts"), "utf8");
-    for (const key of [FUSE_KEY + "State", "dqiStreak", "dqiObservations", "confidenceQualityCap"]) {
+    for (
+      const key of [
+        FUSE_KEY + "State",
+        "dqiStreak",
+        "dqiObservations",
+        "dqiOrphans",
+        "confidenceQualityCap",
+      ]
+    ) {
       expect(src.includes(`${key}:`), `agentOutput.ts 未透传 ${key}`).toBe(true);
     }
   });
@@ -147,5 +185,30 @@ describe("熔断态三载体一致", () => {
     ).stockAnalysis.trustNotice[FUSE_KEY] as string;
     expect(tw).not.toBe(zh);
     expect(ZH_KEY.length).toBe(2);
+  });
+
+  it("v192 孤儿轮那句：11 语言全部真译、含 {{count}} 插值、非中文不得抄 zh-CN", () => {
+    const ORPHAN_KEY = "dqiFuseOrphans";
+    const zh = JSON.parse(
+      fs.readFileSync(path.join(ROOT, "src/i18n/locales/zh-CN.json"), "utf8"),
+    ).stockAnalysis.trustNotice[ORPHAN_KEY] as string;
+    expect(zh).toContain("已删除");
+    for (const lang of LANGS) {
+      const value = JSON.parse(
+        fs.readFileSync(path.join(ROOT, `src/i18n/locales/${lang}.json`), "utf8"),
+      ).stockAnalysis.trustNotice[ORPHAN_KEY];
+      expect(typeof value, `${lang} 缺 ${ORPHAN_KEY}`).toBe("string");
+      expect((value as string).trim().length, `${lang} 空文案`).toBeGreaterThan(8);
+      // 单花括号会原样显示而不报错 ⇒ 必须验双花括号插值槽
+      expect(value, `${lang} 缺 {{count}} 插值`).toContain("{{count}}");
+      expect(value, `${lang} 存在未闭合的半截槽`).not.toMatch(/\{\{(?!count\})/);
+      if (!ZH_KEY.includes(lang)) {
+        expect(value, `${lang} 抄了 zh-CN`).not.toBe(zh);
+      }
+    }
+    const tw = JSON.parse(
+      fs.readFileSync(path.join(ROOT, "src/i18n/locales/zh-TW.json"), "utf8"),
+    ).stockAnalysis.trustNotice[ORPHAN_KEY] as string;
+    expect(tw, "zh-TW 不得与 zh-CN 逐字相同").not.toBe(zh);
   });
 });

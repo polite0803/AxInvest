@@ -16842,6 +16842,7 @@
       "passiveWatch": "This “Wait” is a passive downgrade due to insufficient data, not a bearish call",
       "gapsNotDegraded": "Data gaps exist, but no downgrade was triggered: the direction is unaffected",
       "dqiFuse": "Data quality has been degraded for {{streak}} consecutive runs and the fuse tripped: the confidence cap of this run is tightened to the most conservative tier",
+      "dqiFuseOrphans": "{{count}} of those rounds belong to analyses that were deleted (records no longer in the DB)",
       "collapseLabel": "Factor weights collapsed",
       "gapReason": "{{count}} data gap(s)",
       "showGaps": "Show gaps",

@@ -16848,6 +16848,7 @@
       "passiveWatch": "本次「觀望」為資料不足導致的被動降級，非看空判斷",
       "gapsNotDegraded": "存在資料缺口，但未觸發降級：結論方向不受影響",
       "dqiFuse": "資料品質已連續 {{streak}} 輪降檔並觸發熔斷：本輪置信度上限按最保守檔收緊",
+      "dqiFuseOrphans": "其中 {{count}} 輪的所屬分析已刪除（記錄不在庫裡）",
       "collapseLabel": "因子權重坍縮",
       "gapReason": "資料缺口 {{count}} 項",
       "showGaps": "檢視缺口",

@@ -696,6 +696,11 @@ export interface StockDecision {
   dqiFuseState?: string;
   /** #8 P5 最近连续**降档**（C 级及以下 / 缺失）的轮数（含本轮）；`dqiFuseState` 的佐证数字 */
   dqiStreak?: number;
+  /**
+   * v192：`dqiStreak` 里有多少轮的**所属分析已删除**（记录不在库里，但那轮确实跑过、计入判据）。
+   * 纯披露项，不参与熔断判定；0 与缺席都要能区分对待（缺席 = 旧快照没这个字段）。
+   */
+  dqiOrphans?: number;
   /** #8 P5 参与该计数的观测条数；0 = 无观测（不得当成"质量一直好"） */
   dqiObservations?: number;
   /** #8 P5 本轮**实际生效**的置信度上限（grade 阶梯 + 熔断封顶取小值），用于反解置信度是被谁压的 */

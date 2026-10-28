@@ -16599,6 +16599,7 @@
       "passiveWatch": "Dieses „Abwarten“ ist eine passive Herabstufung wegen unzureichender Daten, kein bärisches Urteil",
       "gapsNotDegraded": "Datenlücken vorhanden, aber keine Herabstufung ausgelöst: die Richtung bleibt unberührt",
       "dqiFuse": "Die Datenqualität ist {{streak}} Mal in Folge herabgestuft und die Sicherung hat ausgelöst: die Vertrauens-Obergrenze wurde auf die konservativste Stufe gesenkt",
+      "dqiFuseOrphans": "davon betreffen {{count}} Runden gelöschte Analysen (Einträge nicht mehr in der Datenbank)",
       "collapseLabel": "Faktor-Gewichte kollabiert",
       "gapReason": "{{count}} Datenlücke(n)",
       "showGaps": "Lücken anzeigen",

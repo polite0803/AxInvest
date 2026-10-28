@@ -497,6 +497,7 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
     //   （2026-09-11 `weightsCollapsed` 那次复发的原样）。
     dqiFuseState: nonEmptyString(source.dqiFuseState) ?? nonEmptyString(source.dqi_fuse_state) ?? undefined,
     dqiStreak: numberField(source, "dqiStreak", "dqi_streak"),
+    dqiOrphans: numberField(source, "dqiOrphans", "dqi_orphans"),
     dqiObservations: numberField(source, "dqiObservations", "dqi_observations"),
     confidenceQualityCap: numberField(source, "confidenceQualityCap", "confidence_quality_cap"),
     // ── 数据缺口（portfolio-mgr 消费的上游节点缺失清单）──

@@ -330,6 +330,29 @@ describe("normalizeDecision 决策前提字段透传（防回归）", () => {
     expect(d?.untrustedCount).toBe(3);
   });
 
+  // ── v192 跨轮熔断读数（生产侧：store 实际读到的键）──
+  // 渲染侧（组件出哪句）由 `DecisionTrustNotice.dqiFuse.test.tsx` 锁；这里锁的是
+  // `normalizeDecision` 白名单重建**没把 dqiOrphans 丢掉** —— 漏一行就是"产端发了、界面读不到"。
+  it("透传 dqiOrphans（camelCase 与 snake_case 两种产端形态都认）", () => {
+    const camel = normalizeDecision({
+      action: "观望",
+      confidence: 50,
+      dqiFuseState: "fused",
+      dqiStreak: 9,
+      dqiOrphans: 4,
+    });
+    expect(camel?.dqiFuseState).toBe("fused");
+    expect(camel?.dqiStreak).toBe(9);
+    expect(camel?.dqiOrphans).toBe(4);
+
+    const snake = normalizeDecision({ action: "观望", confidence: 50, dqi_orphans: 2 });
+    expect(snake?.dqiOrphans).toBe(2);
+
+    // 0 与缺席必须可区分：0 = 本轮计数里没有孤儿轮；缺席 = 旧快照没这个字段
+    expect(normalizeDecision({ action: "观望", confidence: 50, dqiOrphans: 0 })?.dqiOrphans).toBe(0);
+    expect(normalizeDecision({ action: "观望", confidence: 50 })?.dqiOrphans).toBeUndefined();
+  });
+
   it("保留 data_gaps（后端 portfolio-mgr 顶层 snake_case 字段名）", () => {
     const gaps = ["资金流向(t-hotmoney-data)", "公告数据(t-catalyst-data)"];
     const d = normalizeDecision({ action: "观望", confidence: 45, data_gaps: gaps });

@@ -16599,6 +16599,7 @@
       "passiveWatch": "Cette « Attente » est une dégradation passive due à un manque de données, non un jugement baissier",
       "gapsNotDegraded": "Des lacunes de données existent, mais aucune dégradation n'a été déclenchée : la direction n'est pas affectée",
       "dqiFuse": "La qualité des données est dégradée depuis {{streak}} cycles consécutifs et le disjoncteur s'est déclenché : le plafond de confiance est serré au niveau le plus conservateur",
+      "dqiFuseOrphans": "dont {{count}} cycles correspondant à des analyses supprimées (enregistrements absents de la base)",
       "collapseLabel": "Effondrement des pondérations de facteurs",
       "gapReason": "{{count}} lacune(s) de données",
       "showGaps": "Voir les lacunes",

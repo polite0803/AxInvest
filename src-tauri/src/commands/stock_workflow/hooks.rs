@@ -522,11 +522,11 @@ pub(crate) async fn build_stock_analysis_variables(
                 axagent_dao::repo::data_quality_fuse::DqiStreak::EMPTY
             },
         };
-        let injected: [(&str, f64, &str); 5] = [
+        let injected: [(&str, f64, &str); 4] = [
             (
                 "dqi_streak",
                 fuse.consecutive_abnormal as f64,
-                "最近连续降档（C/D/F 或无等级）的轮数，只数所属分析仍存在的观测（含本轮）",
+                "最近连续降档（C/D/F 或无等级）的轮数（含本轮）；孤儿观测行也参与，见 dqi_orphans",
             ),
             (
                 "dqi_fuse_flag",
@@ -538,17 +538,13 @@ pub(crate) async fn build_stock_analysis_variables(
                 fuse.observations as f64,
                 "参与该计数的观测条数；0 = 无观测，不等于「质量一直好」",
             ),
-            // 2026-10-28：「连续 N 轮」这句话跳过了多少条「所属分析已删除」的观测行。
-            // 判据口径不变（仍剔除），但空档必须可读出 —— 否则 N 既可虚高也可低估而界面无从分辨。
+            // 2026-10-28 口径变更：孤儿观测行（所属分析已删除）**计入判据**，本数只披露其中几条。
+            // 之前它叫 dqi_orphans = 被剔除的条数、并配一个"计入则为 N 轮"的差值；判据合并后
+            // 差值恒为 0，那一路变量随之退役 —— 不留两份载体。
             (
                 "dqi_orphans",
-                fuse.orphans_skipped as f64,
-                "该连续区间内被剔除的孤儿观测条数（所属分析已删除）；0 = 这句「连续」没有空档",
-            ),
-            (
-                "dqi_streak_incl_orphans",
-                fuse.consecutive_abnormal_incl_orphans as f64,
-                "把上面那些孤儿观测也计入时的连续降档轮数；与 dqi_streak 的差值即虚高/低估幅度",
+                fuse.orphans_counted as f64,
+                "上述连续轮数里所属分析已被删除的条数（披露项，不参与熔断判定）",
             ),
         ];
         for (name, value, desc) in injected {

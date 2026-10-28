@@ -16599,6 +16599,7 @@
       "passiveWatch": "Esta «Espera» es una degradación pasiva por falta de datos, no un juicio bajista",
       "gapsNotDegraded": "Existen lagunas de datos, pero no se activó ninguna degradación: la dirección no se ve afectada",
       "dqiFuse": "La calidad de datos lleva {{streak}} ciclos seguidos degradada y se activó el fusible: el límite de confianza se ajustó al nivel más conservador",
+      "dqiFuseOrphans": "de las cuales {{count}} rondas corresponden a análisis eliminados (registros ya no están en la base de datos)",
       "collapseLabel": "Colapso de pesos de factores",
       "gapReason": "{{count}} laguna(s) de datos",
       "showGaps": "Ver lagunas",

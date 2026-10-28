@@ -91,9 +91,8 @@ const RUNTIME_INJECTED = new Set([
   "dqi_streak",
   "dqi_fuse_flag",
   "dqi_observations",
-  // v190：熔断「连续 N 轮」跨过的空档（同为测量结果，不是可调参数）
+  // v192：熔断「连续 N 轮」里的孤儿观测条数（同为测量结果，不是可调参数）
   "dqi_orphans",
-  "dqi_streak_incl_orphans",
 ]);
 
 /**

@@ -65,10 +65,11 @@ export function DecisionTrustNotice({ decision, variant = "banner", showConseque
   //   本轮 grade 可以是 A、因子权重也没坍缩、缺口清单为空，但近若干轮一直降档
   //   （C/D/F 或无等级 —— 2026-10-10 起 A 与 B 都算正常档，别按「没拿到 A」理解本条）。
   //   这种"证据面一直坏"必须能单独把本警示条点亮，否则它只出现在 reasoning 长文里。
-  // ⚠ 空档披露（v190）只在 reasoning 那句里（`其间 N 轮…计入则为 M 轮`），本条不重复：
-  //   要在标签上并列就得给 `dqiOrphans` 打通 DTO + 11 语言，而那条数与 streak 不同轴
-  //   （一个是轮数、一个是被剔除的行数），并排显示反而 invites 用户相减。
+  // ⚠ 孤儿轮披露（v192）：`dqiOrphans` = 这 N 轮里有几轮的所属分析已删除。判据自 2026-10-28
+  //   起**计入**这些轮（那轮确实跑过），所以这个数字是"记录还在不在"，不是"算不算"——
+  //   紧跟在轮数后面成一句，不留 reasoning 一套、标签一套的分裂。
   const fused = decision.dqiFuseState === "fused";
+  const orphanRounds = decision.dqiOrphans ?? 0;
 
   /** 权重坍缩原因文案（与 DecisionBanner 原有口径一致，避免两处各写一套映射） */
   const collapseText = useMemo(() => {
@@ -136,6 +137,9 @@ export function DecisionTrustNotice({ decision, variant = "banner", showConseque
             {isPassiveDowngrade && <div>{t("stockAnalysis.trustNotice.passiveWatch")}</div>}
             {isGapsOnly && <div>{t("stockAnalysis.trustNotice.gapsNotDegraded")}</div>}
             {fused && <div>{t("stockAnalysis.trustNotice.dqiFuse", { streak: decision.dqiStreak ?? "?" })}</div>}
+            {fused && orphanRounds > 0 && (
+              <div>{t("stockAnalysis.trustNotice.dqiFuseOrphans", { count: orphanRounds })}</div>
+            )}
             {collapsed && <div>{collapseText}</div>}
             {gaps.length > 0 && (
               <div>
@@ -179,9 +183,16 @@ export function DecisionTrustNotice({ decision, variant = "banner", showConseque
           </span>
         )}
         {fused && (
-          <span style={{ color: "var(--amber)" }}>
-            {t("stockAnalysis.trustNotice.dqiFuse", { streak: decision.dqiStreak ?? "?" })}
-          </span>
+          <>
+            <span style={{ color: "var(--amber)" }}>
+              {t("stockAnalysis.trustNotice.dqiFuse", { streak: decision.dqiStreak ?? "?" })}
+            </span>
+            {orphanRounds > 0 && (
+              <span style={{ color: "var(--muted)" }}>
+                {t("stockAnalysis.trustNotice.dqiFuseOrphans", { count: orphanRounds })}
+              </span>
+            )}
+          </>
         )}
         {collapsed && (
           <span style={{ color: "var(--muted)" }}>

@@ -121,7 +121,7 @@ struct DqiObs {
     analysis_id: String,
     observed_at: i64,
     abnormal: bool,
-    /// `false` = 所属分析已删除（孤儿行）⇒ 不参与现行判据，只参与披露。
+    /// `false` = 所属分析已删除（孤儿行）⇒ **参与判据**，也参与披露（见 `orphans_counted`）。
     alive: bool,
 }
 
@@ -137,148 +137,87 @@ pub struct DqiStreak {
     pub observations: usize,
     /// 因同一 analysis_id 重复而被丢掉的行数（重跑/回补的可见痕迹）。
     pub deduped: usize,
-    /// 前缀所覆盖的时间跨度内被剔除的**孤儿**观测行数（所属分析已删除）。
+    /// 参与本次「连续 N 轮」前缀的观测里，所属分析**已被删除**的条数（披露项，不改判据）。
     ///
-    /// `0` = 本轮计数没有跨任何空档；`> 0` = 「连续 N 轮」这句话里的 N 跳过了 N 个缺口，
-    /// 界面必须点名（见 `consecutive_abnormal_incl_orphans`）。
-    pub orphans_skipped: usize,
-    /// 同一前缀**把孤儿观测也算进来**时的连续异常轮数。
-    ///
-    /// 与 `consecutive_abnormal` 的差值才是可决策的事实：
-    ///   · `incl > cur` ⇒ 被跳过的都是降档轮，现行判据**低估**了证据面持续恶化的长度；
-    ///   · `incl < cur` ⇒ 被跳过的里有正常档把前缀断开，现行计数**虚高**（实测 2026-10-28：
-    ///     库里 `14:29:51` 一条 B 级孤儿行本可把前缀断在 2，剔除后读出 9）；
-    ///   · 相等 ⇒ 跳过与否不影响结论。
-    /// 刻意不替判据改口径（剔除仍是判据），只把差值端出来。
-    pub consecutive_abnormal_incl_orphans: usize,
+    /// 2026-10-28 用户裁定：孤儿观测行**计入判据**（那一轮确实跑过，摘掉它只会让「连续 N 轮」
+    /// 跨过空档继续数，N 可高可低而界面无从分辨）。计入之后，"这些轮的分析记录还在不在"
+    /// 就变成一个必须单独说出来的事实 ⇒ 界面那句「其中 M 轮的所属分析已删除」读的就是它。
+    pub orphans_counted: usize,
 }
 
 impl DqiStreak {
     /// 没有任何观测时的取值 —— 刻意不等于「正常」，调用方须按 `observations == 0` 分支。
-    pub const EMPTY: DqiStreak = DqiStreak {
-        consecutive_abnormal: 0,
-        observations: 0,
-        deduped: 0,
-        orphans_skipped: 0,
-        consecutive_abnormal_incl_orphans: 0,
-    };
+    pub const EMPTY: DqiStreak =
+        DqiStreak { consecutive_abnormal: 0, observations: 0, deduped: 0, orphans_counted: 0 };
 
     pub fn fused(&self) -> bool {
         self.observations > 0 && is_fused(self.consecutive_abnormal)
     }
 }
 
-/// 观测行必须仍对应一条现存分析 —— 不参与**判据**。
+/// 现存分析的 id 子查询 —— 用来给观测行**打存活标记**，不再用来过滤判据。
 ///
-/// ## 为什么读侧过滤而不是删除时级联
+/// ## 口径变更（2026-10-28 用户裁定）
 ///
-/// ① **存量即刻失效**：加过滤当轮就排除历史孤儿行，免迁移；删除命令级联只对**将来**的删除生效。
-/// ② **覆盖所有删除路径**（含未来新增的删除入口），级联只能钉住已知两条命令
-///    （`commands/stock_analysis.rs` 的 `delete_stock_analysis` / `batch_delete_stock_analyses`）。
-/// ③ **只改「行是否参与」**，不重算 `abnormal` 归属 —— 与模块头「边界只在写侧判一次」的纪律一致。
+/// 原判据把「所属分析已删除」的观测行从前缀里摘掉，并声称「不会把某条真实轮次算少」——
+/// **不成立**：孤儿行对应的那一轮确实跑过，摘掉它只是让「连续 N 轮」跨过一个空档继续数，
+/// N 既可虚高（被摘的是正常档）也可低估（被摘的都是降档轮），而界面读不出是哪一种
+/// （实测现网：读 9，计入则断在 2）。
 ///
-/// ⚠ 2026-10-28 订正：此前本节声称「剔除孤儿行不会把某条真实轮次算少」，**不成立**。
-/// 孤儿行对应的轮**确实跑过**，只是结论被删了；把它从前缀里摘掉会让「连续 N 轮」跨过
-/// 一个空档继续数下去 ⇒ N 可高可低（实测被剔除的一条 B 级正常档本应打断前缀）。
-/// 判据口径**保持剔除**（③ 的理由仍然成立，且删除的轮不该继续代表任何现存结论），
-/// 但被跳过的条数与「计入时的连续轮数」必须由 [`streak_from_rows`] 一并算出并注入，
-/// 由熔断文案点名 ⇒ 见 `orphans_skipped` / `consecutive_abnormal_incl_orphans`。
+/// 现改为**全部观测行参与判据**（也参与断开），存活与否降为披露项
+/// （[`DqiStreak::orphans_counted`] ⇒ 注入 `dqi_orphans` ⇒ 决策卡那句「其中 M 轮的所属分析已删除」）。
+///
+/// 为什么不改成「删除分析时级联删观测」：那样等于把已经发生过的质量测量抹掉，
+/// 判据读到的反而更不像事实；且级联只能钉住已知两条删除命令（`delete_stock_analysis` /
+/// `batch_delete_stock_analyses`），覆盖不了全部删除入口。
+///
+/// 本函数保留（两条读口都要按存活与否分类），但**只出现在标记查询里**，
+/// 不再出现在过滤条件里。
 fn alive_analysis_ids() -> SelectStatement {
     stock_analyses::Entity::find().select_only().column(stock_analyses::Column::Id).into_query()
 }
 
 /// 由观测行算连续异常前缀（纯函数，不碰库；入参顺序无关，内部自行排序）。
 ///
-/// 抽成纯函数是为了让负控能拆在同一守卫上：判据与披露两条口径各断一次。
+/// 判据口径 = 全部观测行；披露口径 = 前缀之内有几行的所属分析已删除。
+/// 抽成纯函数是为了让负控能拆在同一守卫上：两条口径各断一次。
 fn streak_from_rows(rows: &[DqiObs]) -> DqiStreak {
     let mut ordered = rows.to_vec();
     ordered.sort_by_key(|row| std::cmp::Reverse(row.observed_at));
 
-    // ① 判据口径：只在**存活行**上去重、数前缀（与 `load_recent_streak` 的历史行为逐位一致）
-    let mut alive_distinct: Vec<&DqiObs> = Vec::with_capacity(ordered.len());
+    // 判据口径：全部观测行按 analysis_id 去重（同一条分析重跑只算一轮），再从前缀往回数。
+    // 2026-10-28 起孤儿行**同样参与**，也参与断开：那一轮确实跑过，摘掉它只会让「连续 N 轮」
+    // 跨过一个空档继续数下去（实测被摘掉的一条 B 级正常档本应把前缀断在 2，剔除后界面读 9）。
+    let mut distinct: Vec<&DqiObs> = Vec::with_capacity(ordered.len());
     let mut deduped = 0usize;
     for row in &ordered {
-        if !row.alive {
-            continue;
-        }
-        if alive_distinct.iter().any(|kept| kept.analysis_id == row.analysis_id) {
+        if distinct.iter().any(|kept| kept.analysis_id == row.analysis_id) {
             deduped += 1;
             continue;
         }
-        alive_distinct.push(row);
+        distinct.push(row);
     }
-    let window = alive_distinct.len().min(DQI_STREAK_LOOKBACK);
+    let window = distinct.len().min(DQI_STREAK_LOOKBACK);
     // 前缀连续异常：从最近一轮往回数，遇到第一个正常轮就停
     let mut consecutive_abnormal = 0usize;
-    for row in alive_distinct.iter().take(window) {
+    for row in distinct.iter().take(window) {
         if !row.abnormal {
             break;
         }
         consecutive_abnormal += 1;
     }
+    // 披露口径：这条「连续 N 轮」里有几轮的所属分析已被删除。只数**前缀之内** —— N 之外的行
+    //   本来就不在这句话里，把它们也披露出来会诱导用户以为那也算进了熔断。
+    let orphans_counted =
+        distinct.iter().take(consecutive_abnormal).filter(|row| !row.alive).count();
 
-    // ② 披露口径：判据前缀所覆盖的跨度内，有多少行因「所属分析已删除」被摘掉，
-    //    以及**把它们也算进来**时前缀会数到几。无前缀（streak=0）时两者恒 0 ——
-    //    没有「连续」可谈，也就没有跨空档一说。
-    if consecutive_abnormal == 0 {
-        return DqiStreak {
-            consecutive_abnormal,
-            observations: window,
-            deduped,
-            orphans_skipped: 0,
-            consecutive_abnormal_incl_orphans: 0,
-        };
-    }
-    // 跨度下界 = 这条「连续」声明真正结束的地方：**第一个存活正常档**（判据在此 break），
-    // 而不是最后一条被数的异常轮。取后者会漏报「正常档孤儿行嵌在两条存活异常轮之间」
-    // 那种形态（实测该形态下计入与否会把 1 轮改成 2 轮，却因跨度太窄而一个字都不披露）。
-    // 窗口内一条正常档都没有 ⇒ 下界退化成窗口里最旧那条参与行。
-    let span_from = alive_distinct
-        .iter()
-        .take(window)
-        .copied()
-        .find(|row| !row.abnormal)
-        .or_else(|| alive_distinct.get(window - 1).copied())
-        .expect("window >= 1 时必有元素")
-        .observed_at;
-    let mut seen_orphan_ids: Vec<&str> = Vec::new();
-    let mut orphans_skipped = 0usize;
-    let mut orphans: Vec<&DqiObs> = Vec::new();
-    for row in &ordered {
-        if row.alive || row.observed_at < span_from {
-            continue;
-        }
-        if seen_orphan_ids.contains(&row.analysis_id.as_str()) {
-            continue;
-        }
-        seen_orphan_ids.push(row.analysis_id.as_str());
-        orphans_skipped += 1;
-        orphans.push(row);
-    }
-    // 计入孤儿行的同一条前缀走法（孤儿参与、也参与断开）
-    let mut merged: Vec<&DqiObs> = Vec::with_capacity(alive_distinct.len() + orphans.len());
-    merged.extend(orphans);
-    merged.extend(alive_distinct.iter().copied());
-    merged.sort_by_key(|row| std::cmp::Reverse(row.observed_at));
-    let merged_window = merged.len().min(DQI_STREAK_LOOKBACK);
-    let mut consecutive_abnormal_incl_orphans = 0usize;
-    for row in merged.iter().take(merged_window) {
-        if !row.abnormal {
-            break;
-        }
-        consecutive_abnormal_incl_orphans += 1;
-    }
-
-    DqiStreak {
-        consecutive_abnormal,
-        observations: window,
-        deduped,
-        orphans_skipped,
-        consecutive_abnormal_incl_orphans,
-    }
+    DqiStreak { consecutive_abnormal, observations: window, deduped, orphans_counted }
 }
 
-/// 取最近的观测并数前缀连续异常（判据只认存活行；孤儿行只参与披露，见 [`streak_from_rows`]）。
+/// 取最近的观测并数前缀连续异常。
+///
+/// 两条查询不是两套口径：`in_subquery` / `not_in_subquery` 只是给每行**打上存活标记**，
+/// 判据仍按全部观测行数前缀（见 [`alive_analysis_ids`] 的口径变更段）。
 pub async fn load_recent_streak(db: &DatabaseConnection) -> Result<DqiStreak, DbErr> {
     let alive_rows = data_quality_observations::Entity::find()
         .filter(data_quality_observations::Column::Scope.eq(DQI_SCOPE_GLOBAL))
@@ -374,12 +313,11 @@ pub fn fused_at(intervals: &[FusedInterval], t_ms: i64) -> Option<bool> {
     Some(intervals.iter().any(|iv| iv.covers(t_ms)))
 }
 
-/// 读全量观测并导出熔断时间线（同一 analysis_id 只认最近一行，与 [`load_recent_streak`] 同口径；
-/// 孤儿观测行同样由 [`alive_analysis_ids`] 剔除）。
+/// 读全量观测并导出熔断时间线（同一 analysis_id 只认最近一行，与 [`load_recent_streak`] 同口径：
+/// 孤儿观测行**同样参与**，2026-10-28 起两侧一致，不留第二套「剔除孤儿」的口径）。
 pub async fn load_fused_intervals(db: &DatabaseConnection) -> Result<Vec<FusedInterval>, DbErr> {
     let rows = data_quality_observations::Entity::find()
         .filter(data_quality_observations::Column::Scope.eq(DQI_SCOPE_GLOBAL))
-        .filter(data_quality_observations::Column::AnalysisId.in_subquery(alive_analysis_ids()))
         .order_by_asc(data_quality_observations::Column::ObservedAt)
         .all(db)
         .await?;
@@ -401,8 +339,10 @@ mod tests {
 
     /// 直插一条最简 `stock_analyses` 行（只为让观测行不成为孤儿）。
     ///
-    /// 读侧自 [`alive_analysis_ids`] 起对观测行做存在性过滤 ⇒ 夹具必须先造出对应分析，
-    /// 否则观测行会被整批剔除、断言恒为 0（这正是「孤儿行不参与」的判据本身）。
+    /// 直插一条最简 `stock_analyses` 行，只为让观测行的存活标记为真。
+    ///
+    /// 2026-10-28 口径变更后孤儿行**也参与判据**，所以不建分析行也不会让断言恒为 0；
+    /// 但夹具必须与生产形态一致（生产里这些行都是先有分析再落观测），否则测的是一条不存在的分支。
     async fn insert_analysis(db: &DatabaseConnection, id: &str) {
         let now = chrono::Utc::now().timestamp_millis();
         let active = stock_analyses::ActiveModel {
@@ -448,26 +388,19 @@ mod tests {
         // 空 streak 不等于「已熔断」，也不等于「正常」——由 observations 区分
         assert!(!DqiStreak::EMPTY.fused());
         assert!(
-            !DqiStreak {
-                consecutive_abnormal: 0,
-                observations: 0,
-                deduped: 0,
-                orphans_skipped: 0,
-                consecutive_abnormal_incl_orphans: 0,
-            }
-            .fused()
+            !DqiStreak { consecutive_abnormal: 0, observations: 0, deduped: 0, orphans_counted: 0 }
+                .fused()
         );
-        // 披露字段不得顶替判据：只有 consecutive_abnormal 参与 fused
+        // 披露字段不得参与 fused 判定：只有 consecutive_abnormal 说了算
         assert!(
             DqiStreak {
                 consecutive_abnormal: DQI_FUSE_STREAK,
                 observations: 5,
                 deduped: 0,
-                orphans_skipped: 3,
-                consecutive_abnormal_incl_orphans: 1,
+                orphans_counted: 3,
             }
             .fused(),
-            "孤儿披露条数不得反过来解除熔断（判据口径不变）"
+            "「其中 3 轮所属分析已删除」是披露，不得反过来解除熔断"
         );
     }
 
@@ -631,12 +564,14 @@ mod tests {
         assert_eq!(fused_at(&ivs, base + DQI_FUSE_STREAK as i64 * 10 + 1), Some(false));
     }
 
-    /// 孤儿观测行（`analysis_id` 不在 `stock_analyses`）必须在**两个读口**都被剔除。
+    /// 孤儿观测行（`analysis_id` 不在 `stock_analyses`）现在在**两个读口都参与判据**，并作为披露项报出。
     ///
-    /// 实证来源：生产库 `data_quality_observations` 全表 4 行中有 2 行对应分析已删除，
-    /// 却仍计入连续轮数 —— 界面显示「连续 3 轮」而实际健在的只有 2 行。
+    /// 口径变更（2026-10-28 用户裁定）：本用例原名 `..._is_ignored_by_streak_and_timeline`，
+    /// 钉的是"剔除"。但剔除让「连续 N 轮」跨过空档继续数（实测现网读 9、计入则断在 2），
+    /// N 既可虚高也可低估，而界面读不出是哪一种 ⇒ 改为计入 + 披露。两侧断言都要动：
+    /// streak / observations 变大、熔断段起点提前。
     #[tokio::test]
-    async fn orphan_observation_is_ignored_by_streak_and_timeline() {
+    async fn orphan_observation_counts_in_streak_and_timeline() {
         let handle = create_test_pool().await.expect("测试库应可创建");
         let db = &handle.conn;
 
@@ -650,14 +585,16 @@ mod tests {
                 .await
                 .expect("落行应成功");
         }
-        // 孤儿行：直插（绕过写入口，模拟「分析已删除但观测行残留」）——刻意插在**更早**，
-        // 若不剔除，它会把熔断段起点从 alive-b3 提前到 alive-b1/b2。
+        // 孤儿行：直插（绕过写入口，模拟「分析已删除但观测行残留」）——刻意插在更早（2000/2500），
+        //   计入判据后会把熔断段起点从 alive-b3 提前。
+        // ⚠ 档位写 `D` 而不是原夹具的 `B`：判据只读 `abnormal` 布尔，但 `grade="B" + abnormal=1`
+        //   与 2026-10-10 的「B 是正常档」自相矛盾，留着会教错后来人。
         for (at, id) in [(2_000_i64, "orphan-b1"), (2_500_i64, "orphan-b2")] {
             let active = data_quality_observations::ActiveModel {
                 id: Set(uuid::Uuid::new_v4().to_string()),
                 scope: Set(DQI_SCOPE_GLOBAL.to_string()),
                 horizon: Set(None),
-                grade: Set(Some("B".to_string())),
+                grade: Set(Some("D".to_string())),
                 abnormal: Set(1),
                 analysis_id: Set(id.to_string()),
                 observed_at: Set(at),
@@ -670,16 +607,18 @@ mod tests {
         }
 
         let s = load_recent_streak(db).await.expect("读 streak 应成功");
-        assert_eq!(s.observations, 4, "孤儿行不得计入观测数（实际健在 4 轮）");
-        assert_eq!(s.consecutive_abnormal, 3, "孤儿异常行不得虚增连续轮数");
+        assert_eq!(s.observations, 6, "孤儿行也参与聚合 ⇒ 4 条存活 + 2 条孤儿");
+        assert_eq!(s.consecutive_abnormal, 5, "前缀穿过两条孤儿异常轮，直到 1_000 那条正常档才断");
+        assert_eq!(s.orphans_counted, 2, "前缀里 2 轮的所属分析已删除 ⇒ 界面必须能说出来");
         assert!(s.fused());
         assert_eq!(s.deduped, 0, "孤儿行不算「同一条分析重复」");
 
         let ivs = load_fused_intervals(db).await.expect("读时间线应成功");
         assert_eq!(ivs.len(), 1, "只跨阈一次 ⇒ 一段");
         assert_eq!(
-            ivs[0].from_ms, 5_000,
-            "熔断段起点必须是健在轮 alive-b3；孤儿行若被算进会提前到 3_000"
+            ivs[0].from_ms, 3_000,
+            "孤儿行计入后跨阈提前到 alive-b1 那一轮（剔除口径下是 5_000）；\
+             两个读口必须同口径，否则决策卡与闭环权重各说一套"
         );
     }
 
@@ -687,12 +626,12 @@ mod tests {
         DqiObs { analysis_id: analysis_id.to_string(), observed_at: at, abnormal, alive }
     }
 
-    /// 披露口径①：孤儿行是**正常档**且嵌在前缀中间 ⇒ 现行计数虚高，差值必须报出来。
+    /// 判据①（2026-10-28 口径变更）：孤儿行是**正常档**时，它现在照样打断前缀。
     ///
-    /// 复现的是 2026-10-28 的现网形态：界面读「连续 9 轮」，而库里 `10-27 14:29:51` 那条
-    /// B 级（正常档）观测因其所属分析已删除被剔除，本可把前缀断在 2。
+    /// 复现的是现网那格：库里 `10-27 14:29:51` 一条 B 级（正常档）观测因其所属分析已删除
+    /// 被旧判据摘掉，于是界面读「连续 9 轮」；计入后前缀断在 2 ⇒ 熔断不成立。
     #[test]
-    fn orphan_normal_grade_discloses_an_inflated_streak() {
+    fn orphan_normal_grade_breaks_the_prefix() {
         // 乱序传入，顺带锁住「入参顺序无关」（纯函数自己排序）
         let rows = vec![
             obs("a3", 700, true, true),
@@ -702,57 +641,70 @@ mod tests {
             obs("a2", 900, true, true),
         ];
         let s = streak_from_rows(&rows);
-        assert_eq!(s.consecutive_abnormal, 3, "判据口径不变：只数存活行");
-        assert_eq!(s.orphans_skipped, 1, "跨度内的正常档孤儿行必须被点名");
-        assert_eq!(s.consecutive_abnormal_incl_orphans, 2, "计入孤儿行则前缀断在 2 ⇒ 现行虚高");
-        assert_eq!(s.observations, 4, "存活行参与数不得被孤儿行顶替");
-        assert_eq!(s.deduped, 0, "孤儿行不得算成「同一条分析重复」");
+        assert_eq!(s.consecutive_abnormal, 2, "孤儿正常档也参与断开 ⇒ 1000/900 之后断");
+        assert_eq!(s.orphans_counted, 0, "打断前缀那一行不在「连续 N 轮」之内 ⇒ 不披露");
+        assert_eq!(s.observations, 5, "参与聚合的观测数现在含孤儿行（旧口径 4）");
+        assert_eq!(s.deduped, 0);
     }
 
-    /// 披露口径②：孤儿行是**异常档** ⇒ 现行计数低估。方向与上一条相反，
-    /// 两条各钉一格 —— 只写一条就会放过「只在一个方向上算差值」的实现。
+    /// 判据②：孤儿行是**异常档** ⇒ 它既延长前缀、又要在披露里点名（旧判据在这种形态低估）。
     #[test]
-    fn orphan_abnormal_grade_discloses_a_deflated_streak() {
+    fn orphan_abnormal_grade_extends_the_prefix_and_is_disclosed() {
         let rows = vec![
             obs("b1", 1_000, true, true),
             obs("o1", 900, true, false),
             obs("b2", 800, false, true),
         ];
         let s = streak_from_rows(&rows);
-        assert_eq!(s.consecutive_abnormal, 1);
-        assert_eq!(s.orphans_skipped, 1);
-        assert_eq!(s.consecutive_abnormal_incl_orphans, 2, "被跳过的都是降档轮 ⇒ 低估一轮");
+        assert_eq!(s.consecutive_abnormal, 2, "旧口径只数存活行 ⇒ 漏掉这一轮");
+        assert_eq!(s.orphans_counted, 1, "前缀之内有 1 轮的所属分析已删除 ⇒ 界面必须说明");
     }
 
-    /// 披露口径③：孤儿行落在跨度之外（比真正的断开点更旧）⇒ 一个字都不该披露。
+    /// 披露③：孤儿行落在前缀**之外**（比断开点更旧）⇒ 一个字都不该披露。
+    ///
+    /// 只数前缀之内是有意的：N 之外的行本来就不在「连续 N 轮」这句话里，
+    /// 把它们也报出来会诱导用户以为那也算进了熔断。
     #[test]
-    fn orphan_outside_the_claimed_span_is_not_disclosed() {
+    fn orphan_outside_the_prefix_is_not_disclosed() {
         let rows = vec![
             obs("c1", 1_000, true, true),
             obs("c2", 800, false, true),
             obs("o1", 500, true, false),
         ];
         let s = streak_from_rows(&rows);
-        assert_eq!(s.consecutive_abnormal, 1);
-        assert_eq!(s.orphans_skipped, 0, "前缀在 800 就断了，500 那行不在这句「连续」的跨度内");
-        assert_eq!(
-            s.consecutive_abnormal_incl_orphans, s.consecutive_abnormal,
-            "无跨度空档 ⇒ 差值为 0"
-        );
+        assert_eq!(s.consecutive_abnormal, 1, "前缀在 800 的正常档就断了");
+        assert_eq!(s.orphans_counted, 0, "500 那行不在这一句「连续 1 轮」之内");
     }
 
-    /// 披露口径④：最近一轮就是正常档（无前缀）⇒ 连「跳过多少轮」都不适用。
+    /// 披露④：最近一轮就是正常档（无前缀）⇒ 没有「连续 N 轮」可披露。
     #[test]
     fn no_prefix_means_no_orphan_disclosure() {
         let rows = vec![obs("d1", 1_000, false, true), obs("o1", 900, false, false)];
         let s = streak_from_rows(&rows);
         assert_eq!(s.consecutive_abnormal, 0);
-        assert_eq!(s.orphans_skipped, 0, "没有「连续 N 轮」这句话，就没有跨空档一说");
+        assert_eq!(s.orphans_counted, 0);
+    }
+
+    /// 判据⑤：去重现在**跨存活与孤儿两个集合** —— 同一条分析重跑仍只算一轮。
+    ///
+    /// 旧实现的 `deduped` 只在存活行内部数（孤儿行根本进不到判据）；口径合并后若漏掉这一格，
+    /// 一条已删分析的重跑会被算成两轮异常 ⇒ 熔断提前。
+    #[test]
+    fn dedup_spans_alive_and_orphan_rows() {
+        let rows = vec![
+            obs("a1", 1_000, true, true),
+            obs("o1", 900, true, false),
+            obs("o1", 800, true, false),
+        ];
+        let s = streak_from_rows(&rows);
+        assert_eq!(s.consecutive_abnormal, 2, "o1 两次只算一轮");
+        assert_eq!(s.deduped, 1, "被丢掉的那一行必须计入 deduped（可见痕迹，不是静默）");
+        assert_eq!(s.orphans_counted, 1, "前缀里 o1 那一轮的所属分析已删除");
     }
 
     /// 端到端：同一形态经**真落库**读出（纯函数对上生产查询口径，防「只测纯函数、库照旧」）。
     #[tokio::test]
-    async fn load_recent_streak_discloses_orphans_from_the_database() {
+    async fn load_recent_streak_counts_and_discloses_orphans_from_the_database() {
         let handle = create_test_pool().await.expect("测试库应可创建");
         let db = &handle.conn;
 
@@ -761,24 +713,25 @@ mod tests {
             let grade = if id == "e3" { "A" } else { "D" };
             record_observation(db, id, Some(grade), at).await.expect("落行应成功");
         }
-        // 孤儿行：正常档（B），时刻插在 **两条存活异常轮之间**（4000 与 3000 之间）。
-        // 第一版把它插在 3000 之后（2000），于是计入与不计入都得 2 —— 端到端那条用例
-        // 只是复述了纯函数已经钉过的差值为 0，白跑一趟库。插在中间才真走到「虚高」那一格。
+        // 孤儿行：**异常档**（D），时刻插在两条存活异常轮之间（4000 与 3000 之间）。
+        // 第一版这里插的是正常档 B，配的是旧判据（剔除孤儿）⇒ 只测到"断开"；口径合并后
+        // 改用异常档，才能同时钉住「计入」（旧漏数）与「披露」两格。
         let active = data_quality_observations::ActiveModel {
             id: Set(uuid::Uuid::new_v4().to_string()),
             scope: Set(DQI_SCOPE_GLOBAL.to_string()),
             horizon: Set(None),
-            grade: Set(Some("B".to_string())),
-            abnormal: Set(0),
-            analysis_id: Set("orphan-normal".to_string()),
+            grade: Set(Some("D".to_string())),
+            abnormal: Set(1),
+            analysis_id: Set("orphan-gone".to_string()),
             observed_at: Set(3_500),
             created_at: Set(3_500),
         };
         data_quality_observations::Entity::insert(active).exec(db).await.expect("直插孤儿行应成功");
 
         let s = load_recent_streak(db).await.expect("读 streak 应成功");
-        assert_eq!(s.consecutive_abnormal, 2, "判据仍只数存活行");
-        assert_eq!(s.orphans_skipped, 1);
-        assert_eq!(s.consecutive_abnormal_incl_orphans, 1, "计入那条正常档 ⇒ 前缀断在 1");
+        assert_eq!(s.consecutive_abnormal, 3, "孤儿异常轮参与判据 ⇒ 4000/3500/3000");
+        assert_eq!(s.orphans_counted, 1, "前缀里 1 轮的所属分析已删除 ⇒ 界面上要能说出来");
+        assert_eq!(s.observations, 4, "参与聚合的观测数含孤儿行");
+        assert!(s.fused(), "3 轮 >= 阈值 ⇒ 熔断（披露项不得参与该判定）");
     }
 }

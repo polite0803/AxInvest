@@ -591,3 +591,60 @@ LLM 侧**都真的没有决策**（`llm_decision_json` 为空）。
   `clippy -p axagent-rt-workflow --all-targets` `EXIT=0`（含他人未提交文件，一并干净）。
 - `cargo fmt --all --check`：`EXIT=1`，唯一 diff 在 `crates/astock-data/src/vendors/tencent.rs`
   （他人未提交文件，本批未碰）。
+
+---
+
+## 补充九（2026-10-28 续）三项裁定落地：判据计入孤儿轮 + 披露上决策卡 + key 级 failover
+
+用户在补充七/八的待裁项上一次点完三项，本批全部落地。**模板 `TEMPLATE_VERSION` 191→192**
+（退役一条注入变量 + 新增一条输出字段，都是图内容变更，不升版存量库读不到）。
+
+### 甲：熔断判据改为**计入**孤儿观测轮
+
+- `dao::repo::data_quality_fuse::streak_from_rows`：前缀按**全部观测行**数（孤儿行也参与断开），
+  `observations` / `deduped` 同步跨两个集合；原 `orphans_skipped` +
+  `consecutive_abnormal_incl_orphans` 两个字段合并成一个披露项 `orphans_counted`
+  （"这 N 轮里有几轮的所属分析已删除"），只数**前缀之内** —— N 之外的行不在这句话里。
+- 两个读口必须同口径：`load_fused_intervals`（闭环权重降权线）同步去掉存活过滤，
+  否则决策卡与降权线各说一套。`alive_analysis_ids()` 保留，但只用于**打标记**不再过滤。
+- `dqi_streak_incl_orphans` 退役（新口径下差值恒 0，留着就是第二份载体）：
+  `hooks.rs` 注入数组 5→4、种子 `input_mapping` 与键清单测试、前端白名单同步。
+- 测试：`orphan_observation_is_ignored_by_streak_and_timeline` 改名
+  `..._counts_in_streak_and_timeline` 并翻转期望（observations 4→6、streak 3→5、
+  熔断段起点 5_000→3_000）；四条纯函数用例改为"计入 + 披露"两组方向；
+  端到端落库那条把孤儿行从正常档改成异常档，才真的同时钉住「计入」与「披露」。
+  夹具里 `grade="B" + abnormal=1` 的自相矛盾一并改掉（判据只读布尔，但夹具该与生产同形）。
+
+### 乙：披露上决策卡标签
+
+`portfolio-mgr.rhai` 新增输出 `dqiOrphans`，reasoning 那句改为
+「…(连续N轮降档),置信度上限压至60.0(其中M轮的所属分析已删除,记录不在库里)」；
+前端三处接线：`types/stock-analysis.ts` 加 `dqiOrphans?`、`agentOutput.ts` 白名单透传
+（camelCase 与 snake_case 都认）、`DecisionTrustNotice` 在 `fused` 分支紧跟轮数那句成第二句。
+新增 11 语言键 `stockAnalysis.trustNotice.dqiFuseOrphans`（`{{count}}` 插值，与既有
+`gapReason` 同形、不建复数档）。测试两层：渲染侧三条（有孤儿轮出那句 / 0 不出 / 未熔断不出），
+生产侧一条（normalizeDecision 白名单不漏字段，含 0 与缺席可区分）；
+既有「三载体反向锁」两处的键清单从四个补到五个。
+
+### 丙：多密钥供应商的 key 级 failover
+
+`llm_resolve.rs` 解密失败不再"一行定死"：以 `prov.keys.len()` 为上限，逐把调
+`provider_repository().get_active_key(&prov.id)`（dao 侧轮询游标每次前进一格）再解，
+全部解不开才回 `API_KEY_DECRYPT_FAILED`，错误文本带上"已轮换 N 把 key"。
+依据：一行坏密文是**行级**故障（实测 Agnes 4 把 key、其中一把 `last_error='Validation failed'`
+且从未验证通过），而它配合那个不可重试码，等于一行坏 key 让整条链的分析师节点全部拿不到模型
+（实测 55 个节点全灭、每个重试 6 次）。
+接线用源文判据 `failover_wiring_gaps(src)` 钉三条（上限挂在 key 行数 / 解的是 candidate /
+失败后真的赋回下一把），三个负控各只红对应那一格。
+⚠ **运行证据仍缺**：现网 DeepSeek 只有 1 把 key（触发不了轮换），Agnes 那把坏 key 属用户凭证、
+本批没动；行为级测试要给 `resolve_provider_and_adapter` 注入假 ProviderRepository，
+而它走的是进程级全局（`harness::repositories::set_provider_repository`），并行测试下互污。
+
+### 现网读数（本批改动前后对照）
+
+- 本批改动前的新序列（observed_at 倒序，含存活标记）：07:55 D(t) / 06:57 D(t) / 05:53 A(t) /
+  03:42 D(t) / 23:50 C(t) / **14:29:51 B(f)** / 14:29:39 C(f) / 14:00:53 C(f) / 14:00:21 C(f) …
+- 新判据现读 `consecutive_abnormal = 2`（05:53 那条 A 断开）、`orphans_counted = 0` ⇒ 未熔断。
+- 那条 9 只存在于 `05:47` 那轮的冻结快照里（不回写，沿用补充四裁定）。
+- ⚠ 分析师凭证问题仍在产出新 D 级轮（06:57、07:55 各一条）⇒ 再落一条 D 就会重新触发熔断，
+  这是丙与"缺 [LLM-RESOLVE] 读数"那一格要解的事，不是本批的计数口径。

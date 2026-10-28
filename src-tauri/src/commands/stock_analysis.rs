@@ -7342,8 +7342,8 @@ pub async fn calibrate_portfolio_mgr_params(
         let best_typed = grid
             .iter()
             .max_by(|a, b| {
-                score_param_set(*a, &suggestions)
-                    .partial_cmp(&score_param_set(*b, &suggestions))
+                score_param_set(a, &suggestions)
+                    .partial_cmp(&score_param_set(b, &suggestions))
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .copied()

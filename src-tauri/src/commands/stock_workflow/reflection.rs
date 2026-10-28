@@ -2092,10 +2092,13 @@ pub async fn run_batch_reflection(
                     REFLECTION_ROW_TIMEOUT_SECS
                 );
                 let _ = stock_reflections::Entity::update_many()
-                    .col_expr(stock_reflections::Column::Status, Expr::value("pending"))
+                    .col_expr(
+                        stock_reflections::Column::Status,
+                        sea_orm::sea_query::Expr::value("pending"),
+                    )
                     .col_expr(
                         stock_reflections::Column::UpdatedAt,
-                        Expr::value(chrono::Utc::now().timestamp_millis()),
+                        sea_orm::sea_query::Expr::value(chrono::Utc::now().timestamp_millis()),
                     )
                     .filter(stock_reflections::Column::Id.eq(&p.id))
                     .exec(db)

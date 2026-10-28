@@ -156,24 +156,25 @@ fn compute_factor_series(
 
     // 前复权归一化: 末端 factor → 1
     if adj_type == AdjType::Forward {
-        if let Some(last_factor) = result.last().map(|p| p.factor) {
-            if last_factor > 0.0 && (last_factor - 1.0).abs() > 1e-9 {
-                let norm = 1.0 / last_factor;
-                for p in result.iter_mut() {
-                    p.factor *= norm;
-                }
+        if let Some(last_factor) = result.last().map(|p| p.factor)
+            && last_factor > 0.0
+            && (last_factor - 1.0).abs() > 1e-9
+        {
+            let norm = 1.0 / last_factor;
+            for p in result.iter_mut() {
+                p.factor *= norm;
             }
         }
     }
     // 后复权: 始端归一化 (最早一日 factor = 1)
-    else if adj_type == AdjType::Backward {
-        if let Some(first_factor) = result.first().map(|p| p.factor) {
-            if first_factor > 0.0 && (first_factor - 1.0).abs() > 1e-9 {
-                let norm = 1.0 / first_factor;
-                for p in result.iter_mut() {
-                    p.factor *= norm;
-                }
-            }
+    else if adj_type == AdjType::Backward
+        && let Some(first_factor) = result.first().map(|p| p.factor)
+        && first_factor > 0.0
+        && (first_factor - 1.0).abs() > 1e-9
+    {
+        let norm = 1.0 / first_factor;
+        for p in result.iter_mut() {
+            p.factor *= norm;
         }
     }
 

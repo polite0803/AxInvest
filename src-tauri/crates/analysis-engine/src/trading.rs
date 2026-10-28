@@ -205,33 +205,29 @@ impl TradingEngine {
                 .ok()
                 .flatten();
 
-            if let Some(analysis) = last_analysis {
-                if let Some(ref decision_json) = analysis.decision_json {
-                    if let Ok(decision) = serde_json::from_str::<serde_json::Value>(decision_json) {
-                        let suggested_action = decision["action"].as_str().unwrap_or("");
-                        let suggested_target = decision["targetPrice"].as_f64();
+            if let Some(analysis) = last_analysis
+                && let Some(ref decision_json) = analysis.decision_json
+                && let Ok(decision) = serde_json::from_str::<serde_json::Value>(decision_json)
+            {
+                let suggested_action = decision["action"].as_str().unwrap_or("");
+                let suggested_target = decision["targetPrice"].as_f64();
 
-                        // P1-6(2026-09-14): 原先只认 2 个中文字面量 —— 英文 SELL
-                        // 不触发「分析建议卖出而非买入」二次确认（漏报）。
-                        if matches!(
-                            normalize_action(suggested_action),
-                            Some(ActionKind::Reduce | ActionKind::Sell)
-                        ) {
-                            warnings.push(format!(
-                                "分析建议「{}」而非买入，请二次确认",
-                                suggested_action
-                            ));
-                        }
+                // P1-6(2026-09-14): 原先只认 2 个中文字面量 —— 英文 SELL
+                // 不触发「分析建议卖出而非买入」二次确认（漏报）。
+                if matches!(
+                    normalize_action(suggested_action),
+                    Some(ActionKind::Reduce | ActionKind::Sell)
+                ) {
+                    warnings.push(format!("分析建议「{}」而非买入，请二次确认", suggested_action));
+                }
 
-                        if let Some(target) = suggested_target {
-                            let deviation = ((price - target) / target).abs() * 100.0;
-                            if deviation > price_deviation_limit {
-                                warnings.push(format!(
-                                    "入场价 {:.2} 偏离分析目标价 {:.2} ({:.1}%)",
-                                    price, target, deviation
-                                ));
-                            }
-                        }
+                if let Some(target) = suggested_target {
+                    let deviation = ((price - target) / target).abs() * 100.0;
+                    if deviation > price_deviation_limit {
+                        warnings.push(format!(
+                            "入场价 {:.2} 偏离分析目标价 {:.2} ({:.1}%)",
+                            price, target, deviation
+                        ));
                     }
                 }
             }
@@ -485,17 +481,17 @@ impl TradingEngine {
             .map_err(|e| e.to_string())?
             .ok_or("没有找到在交易前的分析记录".to_string())?;
 
-        if let Some(ref decision_json) = last_analysis.decision_json {
-            if let Ok(decision) = serde_json::from_str::<serde_json::Value>(decision_json) {
-                comparison.analysis_action = decision["action"].as_str().unwrap_or("").to_string();
-                comparison.analysis_target = decision["targetPrice"].as_f64();
-                comparison.analysis_stop = decision["stopLoss"].as_f64();
+        if let Some(ref decision_json) = last_analysis.decision_json
+            && let Ok(decision) = serde_json::from_str::<serde_json::Value>(decision_json)
+        {
+            comparison.analysis_action = decision["action"].as_str().unwrap_or("").to_string();
+            comparison.analysis_target = decision["targetPrice"].as_f64();
+            comparison.analysis_stop = decision["stopLoss"].as_f64();
 
-                if let Some(target) = comparison.analysis_target {
-                    if target != 0.0 {
-                        comparison.target_deviation_pct = ((trade.price - target) / target) * 100.0;
-                    }
-                }
+            if let Some(target) = comparison.analysis_target
+                && target != 0.0
+            {
+                comparison.target_deviation_pct = ((trade.price - target) / target) * 100.0;
             }
         }
 

@@ -161,12 +161,11 @@ fn extract_json_array(text: &str) -> Option<String> {
     }
 
     // 尝试找第一个 [ 和最后一个 ]
-    if let Some(start) = trimmed.find('[') {
-        if let Some(end) = trimmed.rfind(']') {
-            if end > start {
-                return Some(trimmed[start..=end].to_string());
-            }
-        }
+    if let Some(start) = trimmed.find('[')
+        && let Some(end) = trimmed.rfind(']')
+        && end > start
+    {
+        return Some(trimmed[start..=end].to_string());
     }
 
     None

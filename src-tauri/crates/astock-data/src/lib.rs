@@ -991,15 +991,15 @@ impl AStockClient {
     /// - 返回前检查 per-entry 过期(expires_at), 过期则移除并返回 None
     async fn cache_get(&self, key: &str) -> Option<String> {
         // 1) L1 moka
-        if let Some((expires_at, val)) = self.cache.get(key).await {
-            if expires_at > chrono::Utc::now().timestamp() {
-                // P0-2 修复(2026-07-22): 缓存命中添加 debug 日志,
-                // 区分"缓存命中快速返回"和"vendor 静默降级返回空"
-                tracing::debug!("[astock-data] 缓存命中(L1): key={key}");
-                return Some(val);
-            }
-            // 已过期: moka 自动 tidle 会清理, 这里直接忽略
+        if let Some((expires_at, val)) = self.cache.get(key).await
+            && expires_at > chrono::Utc::now().timestamp()
+        {
+            // P0-2 修复(2026-07-22): 缓存命中添加 debug 日志,
+            // 区分"缓存命中快速返回"和"vendor 静默降级返回空"
+            tracing::debug!("[astock-data] 缓存命中(L1): key={key}");
+            return Some(val);
         }
+        // 已过期: moka 自动 tidle 会清理, 这里直接忽略
         // 2) L2 磁盘
         if let Some(l2) = &self.l2 {
             // 取「值 + 该条自己的到期点」而不是只取值：回填 L1 时必须沿用原始到期点。
@@ -1020,10 +1020,10 @@ impl AStockClient {
         if let Some((_, val)) = self.cache.get(key).await {
             return Some(val);
         }
-        if let Some(l2) = &self.l2 {
-            if let Some(val) = l2.get(key) {
-                return Some(val);
-            }
+        if let Some(l2) = &self.l2
+            && let Some(val) = l2.get(key)
+        {
+            return Some(val);
         }
         None
     }
@@ -2417,10 +2417,10 @@ impl AStockClient {
             // 键含 as-of 后缀（`cache_key_for`）⇒ 不同代际、不同截止日互不串味；
             // live 分支不读也不写这个键（实时行情不能缓存）。
             let quote_cache_key = Self::cache_key_for("quote", stock_code);
-            if let Some(cached) = self.cache_get(&quote_cache_key).await {
-                if let Ok(q) = serde_json::from_str::<StockQuote>(&cached) {
-                    return Ok(q);
-                }
+            if let Some(cached) = self.cache_get(&quote_cache_key).await
+                && let Ok(q) = serde_json::from_str::<StockQuote>(&cached)
+            {
+                return Ok(q);
             }
             let gap_days =
                 crate::as_of::current_as_of().map(|c| Self::asof_gap_days(&c)).unwrap_or(0);
@@ -2471,28 +2471,27 @@ impl AStockClient {
                                 // 回放里 DCF「估值上行空间」因子恒缺。用截止日估值快照回填
                                 // （RPT_VALUEANALYSIS_DET 单行，权威值优先于财务推导值）。
                                 for vname in self.routing.financials.iter() {
-                                    if let Some(vendor) = self.find_vendor(vname) {
-                                        if let Some(snap) =
+                                    if let Some(vendor) = self.find_vendor(vname)
+                                        && let Some(snap) =
                                             vendor.get_valuation_snapshot_asof(stock_code).await
+                                    {
+                                        // R8(2026-09-26)：合成 quote 的 name 恒为代码
+                                        // （quote_from_klines 无名称来源）⇒ 历史分析记录
+                                        // 分组名显示成代码。快照行顺带带回 SECURITY_NAME_ABBR，
+                                        // 零额外请求回填真实简称。
+                                        if (q.name.is_empty() || q.name == q.code)
+                                            && snap
+                                                .security_name
+                                                .as_deref()
+                                                .is_some_and(|n| !n.is_empty())
                                         {
-                                            // R8(2026-09-26)：合成 quote 的 name 恒为代码
-                                            // （quote_from_klines 无名称来源）⇒ 历史分析记录
-                                            // 分组名显示成代码。快照行顺带带回 SECURITY_NAME_ABBR，
-                                            // 零额外请求回填真实简称。
-                                            if (q.name.is_empty() || q.name == q.code)
-                                                && snap
-                                                    .security_name
-                                                    .as_deref()
-                                                    .is_some_and(|n| !n.is_empty())
-                                            {
-                                                q.name = snap.security_name.clone().unwrap();
-                                            }
-                                            if snap.total_market_cap.is_some() {
-                                                q.total_mv = snap.total_market_cap;
-                                                q.pe = snap.pe_ttm;
-                                                q.pb = snap.pb;
-                                                break;
-                                            }
+                                            q.name = snap.security_name.clone().unwrap();
+                                        }
+                                        if snap.total_market_cap.is_some() {
+                                            q.total_mv = snap.total_market_cap;
+                                            q.pe = snap.pe_ttm;
+                                            q.pb = snap.pb;
+                                            break;
                                         }
                                     }
                                 }
@@ -2506,14 +2505,14 @@ impl AStockClient {
                                         self.search_stock(stock_code),
                                     )
                                     .await;
-                                    if let Ok(Ok(hits)) = searched {
-                                        if let Some(hit) = hits.iter().find(|h| {
+                                    if let Ok(Ok(hits)) = searched
+                                        && let Some(hit) = hits.iter().find(|h| {
                                             h.code == stock_code
                                                 && !h.name.is_empty()
                                                 && h.name != h.code
-                                        }) {
-                                            q.name = hit.name.clone();
-                                        }
+                                        })
+                                    {
+                                        q.name = hit.name.clone();
                                     }
                                 }
                                 // 非阻塞填充 PE/PB — 超时或失败不影响行情立即返回
@@ -2526,15 +2525,15 @@ impl AStockClient {
                                     Ok(Ok(fins)) => {
                                         if let Some(latest) = fins.into_iter().next() {
                                             // 快照已给的不再推导（截止日权威值优先）
-                                            if q.pe.is_none() {
-                                                if let Some(eps) = latest.eps.filter(|&v| v > 0.0) {
-                                                    q.pe = Some(q.price / eps);
-                                                }
+                                            if q.pe.is_none()
+                                                && let Some(eps) = latest.eps.filter(|&v| v > 0.0)
+                                            {
+                                                q.pe = Some(q.price / eps);
                                             }
-                                            if q.pb.is_none() {
-                                                if let Some(bps) = latest.bps.filter(|&v| v > 0.0) {
-                                                    q.pb = Some(q.price / bps);
-                                                }
+                                            if q.pb.is_none()
+                                                && let Some(bps) = latest.bps.filter(|&v| v > 0.0)
+                                            {
+                                                q.pb = Some(q.price / bps);
                                             }
                                         }
                                     },
@@ -2628,10 +2627,10 @@ impl AStockClient {
         }
 
         let cache_key = Self::cache_key_for("quote", stock_code);
-        if let Some(cached) = self.cache_get(&cache_key).await {
-            if let Ok(quote) = serde_json::from_str::<StockQuote>(&cached) {
-                return Ok(quote);
-            }
+        if let Some(cached) = self.cache_get(&cache_key).await
+            && let Ok(quote) = serde_json::from_str::<StockQuote>(&cached)
+        {
+            return Ok(quote);
         }
 
         // 使用通用 try_vendors_retry 完成 vendor 遍历 + 健康追踪 + 指数退避重试
@@ -2672,10 +2671,10 @@ impl AStockClient {
     /// 缓存 30s（与 A 股 get_quote 一致）。
     pub async fn get_international_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
         let cache_key = Self::cache_key_for("intl_quote", stock_code);
-        if let Some(cached) = self.cache_get(&cache_key).await {
-            if let Ok(q) = serde_json::from_str::<StockQuote>(&cached) {
-                return Ok(q);
-            }
+        if let Some(cached) = self.cache_get(&cache_key).await
+            && let Ok(q) = serde_json::from_str::<StockQuote>(&cached)
+        {
+            return Ok(q);
         }
         // as-of：国际行情同样是实时快照 ⇒ 用截断后的国际 K 线合成，绝不回退到今日价。
         // （与 A 股 `get_quote` 的 as-of 分支同口径，见 PLAN §2-D6）
@@ -2777,13 +2776,12 @@ impl AStockClient {
             "intl_klines",
             &format!("{stock_code}:{period}:{limit}:{adj_type:?}"),
         );
-        if let Some(cached) = self.cache_get(&cache_key).await {
-            if let Ok(ks) = serde_json::from_str::<Vec<KLine>>(&cached) {
-                if ks.len() >= limit as usize {
-                    let start = ks.len().saturating_sub(limit as usize);
-                    return Ok(ks[start..].to_vec());
-                }
-            }
+        if let Some(cached) = self.cache_get(&cache_key).await
+            && let Ok(ks) = serde_json::from_str::<Vec<KLine>>(&cached)
+            && ks.len() >= limit as usize
+        {
+            let start = ks.len().saturating_sub(limit as usize);
+            return Ok(ks[start..].to_vec());
         }
         let vendor = self.find_vendor("international").ok_or_else(|| DataError::VendorError {
             vendor: "international".into(),
@@ -2815,13 +2813,12 @@ impl AStockClient {
     ) -> Result<Vec<KLine>, DataError> {
         let cache_key =
             Self::cache_key_for("benchmark_klines", &format!("{benchmark_code}:{period}:{limit}"));
-        if let Some(cached) = self.cache_get(&cache_key).await {
-            if let Ok(ks) = serde_json::from_str::<Vec<KLine>>(&cached) {
-                if ks.len() >= limit as usize {
-                    let start = ks.len().saturating_sub(limit as usize);
-                    return Ok(ks[start..].to_vec());
-                }
-            }
+        if let Some(cached) = self.cache_get(&cache_key).await
+            && let Ok(ks) = serde_json::from_str::<Vec<KLine>>(&cached)
+            && ks.len() >= limit as usize
+        {
+            let start = ks.len().saturating_sub(limit as usize);
+            return Ok(ks[start..].to_vec());
         }
         // 国际指数走 international vendor；A 股指数走默认 routing
         let result = if is_international_code(benchmark_code)
@@ -2867,13 +2864,12 @@ impl AStockClient {
         limit: u32,
     ) -> Result<Vec<KLine>, DataError> {
         let cache_key = Self::cache_key_for("forex_klines", &format!("{pair}:{period}:{limit}"));
-        if let Some(cached) = self.cache_get(&cache_key).await {
-            if let Ok(ks) = serde_json::from_str::<Vec<KLine>>(&cached) {
-                if ks.len() >= limit as usize {
-                    let start = ks.len().saturating_sub(limit as usize);
-                    return Ok(ks[start..].to_vec());
-                }
-            }
+        if let Some(cached) = self.cache_get(&cache_key).await
+            && let Ok(ks) = serde_json::from_str::<Vec<KLine>>(&cached)
+            && ks.len() >= limit as usize
+        {
+            let start = ks.len().saturating_sub(limit as usize);
+            return Ok(ks[start..].to_vec());
         }
         let vendor = self.find_vendor("international").ok_or_else(|| DataError::VendorError {
             vendor: "international".into(),
@@ -2927,22 +2923,21 @@ impl AStockClient {
         let fetch_limit = limit.max(Self::KLINE_FETCH_FLOOR);
 
         {
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(klines) = serde_json::from_str::<Vec<KLine>>(&cached) {
-                    if klines.len() >= limit as usize {
-                        // C2（2026-09-27，301302 t-risk 超时根因）：删除 M-DS-1 的
-                        // 「last_date ≥ latest_trading_day()」日期判据，新鲜性由 TTL 全权。
-                        // 理由：K 线缓存 TTL=300s，`cache_get` 双侧（L1 expires_at / L2
-                        // get 移除）都真实执行过期。300s 窗口内 `last_date < 最新交易日`
-                        // 的唯一解释是 vendor 本来就没有那天的数据（日历错或数据滞后），
-                        // 重拉必然拿回同样结果 —— 判据只剩害处：日历表缺 2026-09-25（中秋）
-                        // 时它把 live K 线缓存 100% 判过期，每次读都重打 vendor，
-                        // 前复权链又双断（腾讯 fqkline WAF + push2his RST）⇒ t-risk 30s 预算必破。
-                        // 原「周末/节假日拉取后过了夜」的场景本就由 300s TTL 覆盖，判据是冗余。
-                        let start = klines.len().saturating_sub(limit as usize);
-                        return Ok(klines[start..].to_vec());
-                    }
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(klines) = serde_json::from_str::<Vec<KLine>>(&cached)
+                && klines.len() >= limit as usize
+            {
+                // C2（2026-09-27，301302 t-risk 超时根因）：删除 M-DS-1 的
+                // 「last_date ≥ latest_trading_day()」日期判据，新鲜性由 TTL 全权。
+                // 理由：K 线缓存 TTL=300s，`cache_get` 双侧（L1 expires_at / L2
+                // get 移除）都真实执行过期。300s 窗口内 `last_date < 最新交易日`
+                // 的唯一解释是 vendor 本来就没有那天的数据（日历错或数据滞后），
+                // 重拉必然拿回同样结果 —— 判据只剩害处：日历表缺 2026-09-25（中秋）
+                // 时它把 live K 线缓存 100% 判过期，每次读都重打 vendor，
+                // 前复权链又双断（腾讯 fqkline WAF + push2his RST）⇒ t-risk 30s 预算必破。
+                // 原「周末/节假日拉取后过了夜」的场景本就由 300s TTL 覆盖，判据是冗余。
+                let start = klines.len().saturating_sub(limit as usize);
+                return Ok(klines[start..].to_vec());
             }
         }
 
@@ -3169,12 +3164,10 @@ impl AStockClient {
             let date = crate::as_of::current_date_or_now();
             if let Some(cached) =
                 self.try_stock_daily_snapshot("get_social_sentiment", stock_code, &date).await
+                && let Ok(v) = serde_json::from_str::<Vec<crate::types::SocialSentiment>>(&cached)
+                && !v.is_empty()
             {
-                if let Ok(v) = serde_json::from_str::<Vec<crate::types::SocialSentiment>>(&cached) {
-                    if !v.is_empty() {
-                        return Ok(v);
-                    }
-                }
+                return Ok(v);
             }
             // 快照 miss → guba 的按发帖时间翻页重建（与 live 共用同一套情感计算）
             let names =
@@ -3239,10 +3232,10 @@ impl AStockClient {
     ) -> Result<Vec<FinancialReport>, DataError> {
         {
             let cache_key = Self::cache_key_for("financials", stock_code);
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(data) = serde_json::from_str::<Vec<FinancialReport>>(&cached) {
-                    return Ok(data);
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(data) = serde_json::from_str::<Vec<FinancialReport>>(&cached)
+            {
+                return Ok(data);
             }
         }
         // 使用通用 try_vendors_retry 完成 vendor 遍历 + 健康追踪 + 指数退避重试
@@ -3288,16 +3281,15 @@ impl AStockClient {
                 // 估算数据不应被 Ok 包装，否则下游无法区分真实财报和估算值；
                 // 但「上次真实拉取的缓存」不是估算，可安全兜底。
                 let cache_key = Self::cache_key_for("financials", stock_code);
-                if let Some(stale) = self.cache_get_stale(&cache_key).await {
-                    if let Ok(data) = serde_json::from_str::<Vec<FinancialReport>>(&stale) {
-                        if !data.is_empty() {
-                            tracing::warn!(
-                                "[C-fallback] {stock_code} 所有财务数据源失败，回退陈旧缓存({}条): {e}",
-                                data.len()
-                            );
-                            return Ok(data);
-                        }
-                    }
+                if let Some(stale) = self.cache_get_stale(&cache_key).await
+                    && let Ok(data) = serde_json::from_str::<Vec<FinancialReport>>(&stale)
+                    && !data.is_empty()
+                {
+                    tracing::warn!(
+                        "[C-fallback] {stock_code} 所有财务数据源失败，回退陈旧缓存({}条): {e}",
+                        data.len()
+                    );
+                    return Ok(data);
                 }
                 tracing::warn!("[C-fallback] {stock_code} 所有财务数据源失败: {e}");
                 // ── as-of 回放：财务维度不可得时**按空返回**，不抛 Err（2026-09-23）──
@@ -3345,10 +3337,10 @@ impl AStockClient {
     ) -> Result<Vec<ValuationSnapshot>, DataError> {
         let cache_key = Self::cache_key_for("valuation_history", &format!("{stock_code}:{years}"));
         {
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(data) = serde_json::from_str::<Vec<ValuationSnapshot>>(&cached) {
-                    return Ok(data);
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(data) = serde_json::from_str::<Vec<ValuationSnapshot>>(&cached)
+            {
+                return Ok(data);
             }
         }
         let vendor_names: Vec<String> =
@@ -3510,13 +3502,13 @@ impl AStockClient {
 
         {
             let cache_key = Self::cache_key_for("news", &format!("{stock_code}:{limit}"));
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(data) = serde_json::from_str::<Vec<NewsItem>>(&cached) {
-                    // 缓存命中同样入库:否则 300s 内的重复请求会让这批新闻
-                    // 永远只在缓存里(与下方 upsert 处的注释语义保持一致)。
-                    self.persist_news_to_archive("news", Some(stock_code), None, &data).await;
-                    return Ok(data);
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(data) = serde_json::from_str::<Vec<NewsItem>>(&cached)
+            {
+                // 缓存命中同样入库:否则 300s 内的重复请求会让这批新闻
+                // 永远只在缓存里(与下方 upsert 处的注释语义保持一致)。
+                self.persist_news_to_archive("news", Some(stock_code), None, &data).await;
+                return Ok(data);
             }
         }
         // 使用通用 try_vendors_retry 完成 vendor 遍历 + 健康追踪 + 指数退避重试
@@ -3653,12 +3645,11 @@ impl AStockClient {
         // live 模式:走 vendor + 缓存
         {
             let cache_key = Self::cache_key_for("policy_news", &format!("{stock_code}:{limit}"));
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(data) = serde_json::from_str::<Vec<NewsItem>>(&cached) {
-                    self.persist_news_to_archive("policy_news", Some(stock_code), None, &data)
-                        .await;
-                    return Ok(data);
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(data) = serde_json::from_str::<Vec<NewsItem>>(&cached)
+            {
+                self.persist_news_to_archive("policy_news", Some(stock_code), None, &data).await;
+                return Ok(data);
             }
         }
 
@@ -3725,10 +3716,9 @@ impl AStockClient {
             let date = crate::as_of::current_date_or_now();
             if let Some(cached) =
                 self.try_stock_daily_snapshot("get_money_flow", stock_code, &date).await
+                && let Ok(Some(r)) = serde_json::from_str::<Option<MoneyFlow>>(&cached)
             {
-                if let Ok(Some(r)) = serde_json::from_str::<Option<MoneyFlow>>(&cached) {
-                    return Ok(Some(r));
-                }
+                return Ok(Some(r));
             }
             // ② vendor 的 as-of 通道（T13：改走统一的 asof_probe）
             // ⚠ 白名单**只放** NativeDateParam：资金流的 live 值就是「今日主力净流入」，
@@ -3765,10 +3755,10 @@ impl AStockClient {
         }
         {
             let cache_key = Self::cache_key_for("money_flow", stock_code);
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(data) = serde_json::from_str::<Option<MoneyFlow>>(&cached) {
-                    return Ok(data);
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(data) = serde_json::from_str::<Option<MoneyFlow>>(&cached)
+            {
+                return Ok(data);
             }
         }
         // 使用通用 try_vendors_retry 完成 vendor 遍历 + 健康追踪 + 指数退避重试
@@ -3818,10 +3808,10 @@ impl AStockClient {
     ) -> Result<Vec<DragonTigerEntry>, DataError> {
         {
             let cache_key = Self::cache_key_for("dragon_tiger", stock_code);
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(data) = serde_json::from_str::<Vec<DragonTigerEntry>>(&cached) {
-                    return Ok(data);
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(data) = serde_json::from_str::<Vec<DragonTigerEntry>>(&cached)
+            {
+                return Ok(data);
             }
         }
         // 使用通用 try_vendors_retry 完成 vendor 遍历 + 健康追踪 + 指数退避重试
@@ -3893,10 +3883,10 @@ impl AStockClient {
     ) -> Result<Vec<LockupSchedule>, DataError> {
         {
             let cache_key = Self::cache_key_for("lockup", stock_code);
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(data) = serde_json::from_str::<Vec<LockupSchedule>>(&cached) {
-                    return Ok(data);
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(data) = serde_json::from_str::<Vec<LockupSchedule>>(&cached)
+            {
+                return Ok(data);
             }
         }
         let vendor_names: Vec<String> = self.routing.lockup.iter().map(|n| n.to_string()).collect();
@@ -3979,12 +3969,10 @@ impl AStockClient {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
                 if let Some(cached) =
                     self.try_daily_keyword_snapshot("search_stock", trimmed, &date).await
+                    && let Ok(r) = serde_json::from_str::<Vec<StockSearchResult>>(&cached)
+                    && !r.is_empty()
                 {
-                    if let Ok(r) = serde_json::from_str::<Vec<StockSearchResult>>(&cached) {
-                        if !r.is_empty() {
-                            return Ok(r);
-                        }
-                    }
+                    return Ok(r);
                 }
             }
         }
@@ -4034,10 +4022,10 @@ impl AStockClient {
         //                    新增负缓存(失败关键词 30s 内不重打全 vendor 链,避免 4-13s 串行延迟放大)。
         {
             let cache_key = Self::cache_key_for("search_stock", keyword);
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(data) = serde_json::from_str::<Vec<StockSearchResult>>(&cached) {
-                    return Ok(data);
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(data) = serde_json::from_str::<Vec<StockSearchResult>>(&cached)
+            {
+                return Ok(data);
             }
             // 负缓存:30s 内相同关键词失败过 → 直接返回空 vec,不重打 vendor 链
             let neg_key = format!("search_stock:neg::{}", keyword);
@@ -4166,11 +4154,11 @@ impl AStockClient {
         // H1.2 修复:live 模式添加 L1 缓存(60s TTL,新闻搜索结果短期内变化不大)
         {
             let cache_key = Self::cache_key_for("search_news", &format!("{keyword}:{limit}"));
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(data) = serde_json::from_str::<Vec<NewsItem>>(&cached) {
-                    self.persist_news_to_archive("search_news", None, Some(keyword), &data).await;
-                    return Ok(data);
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(data) = serde_json::from_str::<Vec<NewsItem>>(&cached)
+            {
+                self.persist_news_to_archive("search_news", None, Some(keyword), &data).await;
+                return Ok(data);
             }
         }
         let vendor_names: Vec<String> =
@@ -4230,12 +4218,11 @@ impl AStockClient {
         // 回放是一次性批处理，放弃这点缓存收益换正确性。
         let as_of_active = crate::as_of::is_asof_active();
         let cache_key = Self::cache_key_for("margin_trend", stock_code);
-        if !as_of_active {
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(v) = serde_json::from_str::<Vec<MarginData>>(&cached) {
-                    return Ok(v);
-                }
-            }
+        if !as_of_active
+            && let Some(cached) = self.cache_get(&cache_key).await
+            && let Ok(v) = serde_json::from_str::<Vec<MarginData>>(&cached)
+        {
+            return Ok(v);
         }
         let vendor_names: Vec<String> = self.routing.margin.iter().map(|n| n.to_string()).collect();
         let sc = stock_code.to_string();
@@ -4265,19 +4252,18 @@ impl AStockClient {
         // eastmoney 已申报 NativeDateParam,as-of 模式调 with_asof 可拿到当日数据
         if crate::as_of::is_asof_active() {
             let cache_key = Self::cache_key_for("margin", stock_code);
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(data) = serde_json::from_str::<Option<MarginData>>(&cached) {
-                    return Ok(data);
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(data) = serde_json::from_str::<Option<MarginData>>(&cached)
+            {
+                return Ok(data);
             }
             // ① 每日快照（个股级，key 含 code）
             let date = crate::as_of::current_date_or_now();
             if let Some(cached) =
                 self.try_stock_daily_snapshot("get_margin_data", stock_code, &date).await
+                && let Ok(Some(r)) = serde_json::from_str::<Option<MarginData>>(&cached)
             {
-                if let Ok(Some(r)) = serde_json::from_str::<Option<MarginData>>(&cached) {
-                    return Ok(Some(r));
-                }
+                return Ok(Some(r));
             }
             // ② vendor 的 as-of 通道。
             //    「该源本就无 as-of 能力」不再逐源记降级（那种条目对决策没有信息量，
@@ -4343,10 +4329,10 @@ impl AStockClient {
         }
         {
             let cache_key = Self::cache_key_for("margin", stock_code);
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(data) = serde_json::from_str::<Option<MarginData>>(&cached) {
-                    return Ok(data);
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(data) = serde_json::from_str::<Option<MarginData>>(&cached)
+            {
+                return Ok(data);
             }
         }
         let vendor_names: Vec<String> = self.routing.margin.iter().map(|n| n.to_string()).collect();
@@ -4440,10 +4426,9 @@ impl AStockClient {
             let date = crate::as_of::current_date_or_now();
             if let Some(cached) =
                 self.try_stock_daily_snapshot("get_pledge_data", stock_code, &date).await
+                && let Ok(Some(r)) = serde_json::from_str::<Option<PledgeData>>(&cached)
             {
-                if let Ok(Some(r)) = serde_json::from_str::<Option<PledgeData>>(&cached) {
-                    return Ok(Some(r));
-                }
+                return Ok(Some(r));
             }
             let (hit, probe) = self
                 .asof_probe(
@@ -4471,10 +4456,10 @@ impl AStockClient {
         }
         {
             let cache_key = Self::cache_key_for("pledge", stock_code);
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(data) = serde_json::from_str::<Option<PledgeData>>(&cached) {
-                    return Ok(data);
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(data) = serde_json::from_str::<Option<PledgeData>>(&cached)
+            {
+                return Ok(data);
             }
         }
         let vendor_names: Vec<String> = self.routing.pledge.iter().map(|n| n.to_string()).collect();
@@ -4554,10 +4539,9 @@ impl AStockClient {
             let date = crate::as_of::current_date_or_now();
             if let Some(cached) =
                 self.try_stock_daily_snapshot("get_north_bound_holding", stock_code, &date).await
+                && let Ok(Some(r)) = serde_json::from_str::<Option<NorthBoundHolding>>(&cached)
             {
-                if let Ok(Some(r)) = serde_json::from_str::<Option<NorthBoundHolding>>(&cached) {
-                    return Ok(Some(r));
-                }
+                return Ok(Some(r));
             }
             // ② vendor 的 as-of 通道（T13：与 get_money_flow 一起收口到手写循环 +
             // 写死文案的第 2 处；Err 此前同样被 `if let Ok(Some(..))` 吞掉）
@@ -4596,10 +4580,10 @@ impl AStockClient {
         }
         {
             let cache_key = Self::cache_key_for("north_bound", stock_code);
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(data) = serde_json::from_str::<Option<NorthBoundHolding>>(&cached) {
-                    return Ok(data);
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(data) = serde_json::from_str::<Option<NorthBoundHolding>>(&cached)
+            {
+                return Ok(data);
             }
         }
         let vendor_names: Vec<String> =
@@ -4646,12 +4630,10 @@ impl AStockClient {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
                 if let Some(cached) =
                     self.try_stock_daily_snapshot("get_sector_info", stock_code, &date).await
+                    && let Ok(r) = serde_json::from_str::<Option<SectorInfo>>(&cached)
+                    && r.is_some()
                 {
-                    if let Ok(r) = serde_json::from_str::<Option<SectorInfo>>(&cached) {
-                        if r.is_some() {
-                            return Ok(r);
-                        }
-                    }
+                    return Ok(r);
                 }
             }
             // T10：`Fallthrough` 也放行 —— 行业归属与概念板块同类（`RPT_F10_CORETHEME_BOARDTYPE`
@@ -4762,13 +4744,13 @@ impl AStockClient {
         stock_code: &str,
     ) -> Result<Vec<DividendRecord>, DataError> {
         let cache_key = Self::cache_key_for("dividend", stock_code);
-        if let Some(cached) = self.cache_get(&cache_key).await {
-            if let Ok(records) = serde_json::from_str::<Vec<DividendRecord>>(&cached) {
-                // 缓存存**截断前**的全量，读时按当前 data_scope 再截：
-                // 键只含 as_of 日期、不含 data_scope，若把截断结果直接复用，
-                // 结构化回放写下的短列表会漏给非结构化 scope（反之则会泄漏未来事件）。
-                return Ok(Self::truncate_dividend_by_asof(records));
-            }
+        if let Some(cached) = self.cache_get(&cache_key).await
+            && let Ok(records) = serde_json::from_str::<Vec<DividendRecord>>(&cached)
+        {
+            // 缓存存**截断前**的全量，读时按当前 data_scope 再截：
+            // 键只含 as_of 日期、不含 data_scope，若把截断结果直接复用，
+            // 结构化回放写下的短列表会漏给非结构化 scope（反之则会泄漏未来事件）。
+            return Ok(Self::truncate_dividend_by_asof(records));
         }
 
         let vendor_names: Vec<String> =
@@ -4905,10 +4887,9 @@ impl AStockClient {
             let date = crate::as_of::current_date_or_now();
             if let Some(cached) =
                 self.try_stock_daily_snapshot("get_consensus_eps", stock_code, &date).await
+                && let Ok(Some(r)) = serde_json::from_str::<Option<ConsensusEPS>>(&cached)
             {
-                if let Ok(Some(r)) = serde_json::from_str::<Option<ConsensusEPS>>(&cached) {
-                    return Ok(Some(r));
-                }
+                return Ok(Some(r));
             }
             let names = self.routing.vendors_for("consensus_eps", &self.routing.consensus_eps);
             let (hit, probe) = self
@@ -5010,10 +4991,10 @@ impl AStockClient {
                     self.try_stock_daily_snapshot("get_concept_blocks", stock_code, &date).await
                 {
                     // 概念板块按个股有差异,快照按 code 维度存取
-                    if let Ok(r) = serde_json::from_str::<Option<ConceptBlocks>>(&cached) {
-                        if r.is_some() {
-                            return Ok(r);
-                        }
+                    if let Ok(r) = serde_json::from_str::<Option<ConceptBlocks>>(&cached)
+                        && r.is_some()
+                    {
+                        return Ok(r);
                     }
                 }
             }
@@ -5087,10 +5068,10 @@ impl AStockClient {
         // 缓存检查
         {
             let cache_key = Self::cache_key_for("announcements", stock_code);
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(data) = serde_json::from_str::<Vec<Announcement>>(&cached) {
-                    return Ok(data);
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(data) = serde_json::from_str::<Vec<Announcement>>(&cached)
+            {
+                return Ok(data);
             }
         }
         let sc = stock_code.to_string();
@@ -5290,14 +5271,12 @@ impl AStockClient {
                 .as_ref()
                 .map(|c| c.as_of_date.format("%Y-%m-%d").to_string())
                 .unwrap_or_default();
-            if !snap_date.is_empty() {
-                if let Some(cached) = self.try_daily_snapshot("get_hot_stocks", &snap_date).await {
-                    if let Ok(r) = serde_json::from_str::<Vec<HotStock>>(&cached) {
-                        if !r.is_empty() {
-                            return Ok(r);
-                        }
-                    }
-                }
+            if !snap_date.is_empty()
+                && let Some(cached) = self.try_daily_snapshot("get_hot_stocks", &snap_date).await
+                && let Ok(r) = serde_json::from_str::<Vec<HotStock>>(&cached)
+                && !r.is_empty()
+            {
+                return Ok(r);
             }
             let (hit, probe) = self
                 .asof_probe(
@@ -5321,10 +5300,10 @@ impl AStockClient {
                 // 后续同截止日不再打接口（也让 0/20 那类归档缺口不再扩大）。
                 // snap_date 为空只发生在 `is_asof_active` 与 context 的 race 分支，
                 // 此时不写（空日期会造一条谁也读不到的孤儿行）。
-                if !snap_date.is_empty() {
-                    if let Ok(json) = serde_json::to_string(&r) {
-                        self.set_daily_snapshot("get_hot_stocks", &snap_date, &json).await;
-                    }
+                if !snap_date.is_empty()
+                    && let Ok(json) = serde_json::to_string(&r)
+                {
+                    self.set_daily_snapshot("get_hot_stocks", &snap_date, &json).await;
                 }
                 return Ok(r);
             }
@@ -5453,12 +5432,11 @@ impl AStockClient {
             let as_of = crate::as_of::current_as_of();
             if let Some(ref ctx) = as_of {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
-                if let Some(cached) = self.try_daily_snapshot("get_industry_ranking", &date).await {
-                    if let Ok(r) = serde_json::from_str::<Vec<IndustryRank>>(&cached) {
-                        if !r.is_empty() {
-                            return Ok(r);
-                        }
-                    }
+                if let Some(cached) = self.try_daily_snapshot("get_industry_ranking", &date).await
+                    && let Ok(r) = serde_json::from_str::<Vec<IndustryRank>>(&cached)
+                    && !r.is_empty()
+                {
+                    return Ok(r);
                 }
             }
             let (hit, probe) = self
@@ -5660,12 +5638,11 @@ impl AStockClient {
             let as_of = crate::as_of::current_as_of();
             if let Some(ref ctx) = as_of {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
-                if let Some(cached) = self.try_daily_snapshot("get_cls_flash", &date).await {
-                    if let Ok(r) = serde_json::from_str::<Vec<ClsFlashItem>>(&cached) {
-                        if !r.is_empty() {
-                            return Ok(r);
-                        }
-                    }
+                if let Some(cached) = self.try_daily_snapshot("get_cls_flash", &date).await
+                    && let Ok(r) = serde_json::from_str::<Vec<ClsFlashItem>>(&cached)
+                    && !r.is_empty()
+                {
+                    return Ok(r);
                 }
             }
             let (hit, probe) = self
@@ -6125,10 +6102,10 @@ impl AStockClient {
             // （2026-09-25 修）。报告「大盘指数」板块在回放模式下恒空，而 eastmoney 早已
             // 申报 `SynthesizeFromKline` 并注明「应由路由层用 K 线合成」。
             let cache_key = Self::cache_key_for("index_quotes", "market");
-            if let Some(cached) = self.cache_get(&cache_key).await {
-                if let Ok(v) = serde_json::from_str::<Vec<IndexQuote>>(&cached) {
-                    return DataOutcome::ok(v).with_detail("as-of 内存缓存命中");
-                }
+            if let Some(cached) = self.cache_get(&cache_key).await
+                && let Ok(v) = serde_json::from_str::<Vec<IndexQuote>>(&cached)
+            {
+                return DataOutcome::ok(v).with_detail("as-of 内存缓存命中");
             }
             // ① 每日快照：live 模式当日收盘后采集过，回放即可直接复用
             let date = crate::as_of::current_date_or_now();

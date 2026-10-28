@@ -1362,10 +1362,10 @@ pub(crate) fn build_block_pct_map(lists: &[Value]) -> HashMap<String, f64> {
     for json in lists {
         if let Some(rows) = json["data"]["diff"].as_array() {
             for r in rows {
-                if let (Some(name), Some(f3)) = (r["f14"].as_str(), r["f3"].as_f64()) {
-                    if !name.is_empty() {
-                        m.insert(name.to_string(), f3 / 100.0);
-                    }
+                if let (Some(name), Some(f3)) = (r["f14"].as_str(), r["f3"].as_f64())
+                    && !name.is_empty()
+                {
+                    m.insert(name.to_string(), f3 / 100.0);
                 }
             }
         }
@@ -1491,14 +1491,13 @@ fn to_em_secid(stock_code: &str) -> String {
     // secid 直通：形如 `1.000001` 的输入已经是东财 secid（指数 K 线走这条路，见
     // `get_index_quotes_with_asof`），不能再按「首位数字」推断市场 —— 上证指数的代码
     // 000001 按股票规则会被推断成深圳，静默取回平安银行的历史。
-    if let Some((market, code)) = stock_code.split_once('.') {
-        if !market.is_empty()
-            && market.chars().all(|c| c.is_ascii_digit())
-            && !code.is_empty()
-            && code.chars().all(|c| c.is_ascii_digit())
-        {
-            return stock_code.to_string();
-        }
+    if let Some((market, code)) = stock_code.split_once('.')
+        && !market.is_empty()
+        && market.chars().all(|c| c.is_ascii_digit())
+        && !code.is_empty()
+        && code.chars().all(|c| c.is_ascii_digit())
+    {
+        return stock_code.to_string();
     }
     // 显式市场标记（`000001.SH` / `sh000001`）优先于首位数字推断：上证综指与平安银行
     // 同为 `000001`，把 `sh000001` 去掉前缀再按首位推断会静默取回平安银行的 K 线。
@@ -2959,16 +2958,16 @@ impl StockVendor for EastMoneyVendor {
 
         // 概念标签:把证监会行业分类作为 concept_tags 的第一项
         let mut concept_tags: Vec<String> = Vec::new();
-        if let Some(csrc) = data["INDUSTRYCSRC1"].as_str() {
-            if !csrc.is_empty() {
-                concept_tags.push(csrc.to_string());
-            }
+        if let Some(csrc) = data["INDUSTRYCSRC1"].as_str()
+            && !csrc.is_empty()
+        {
+            concept_tags.push(csrc.to_string());
         }
         // SECURITY_TYPE 也作为标签(如"上交所主板A股")
-        if let Some(stype) = data["SECURITY_TYPE"].as_str() {
-            if !stype.is_empty() {
-                concept_tags.push(stype.to_string());
-            }
+        if let Some(stype) = data["SECURITY_TYPE"].as_str()
+            && !stype.is_empty()
+        {
+            concept_tags.push(stype.to_string());
         }
 
         if sector_name.is_empty() && concept_tags.is_empty() {
@@ -4016,10 +4015,10 @@ impl StockVendor for EastMoneyVendor {
         // 榜单是旁路增强：任一请求失败 ⇒ 静默跳过（该表成员保持 null），不得拖垮归属主结果。
         let mut pct_lists: Vec<Value> = Vec::new();
         for t in ["1", "2", "3"] {
-            if let Ok(resp) = self.em_get(&block_quotes_url(t)).await {
-                if let Ok(v) = resp.json::<Value>().await {
-                    pct_lists.push(v);
-                }
+            if let Ok(resp) = self.em_get(&block_quotes_url(t)).await
+                && let Ok(v) = resp.json::<Value>().await
+            {
+                pct_lists.push(v);
             }
         }
         let pct_map = build_block_pct_map(&pct_lists);
@@ -5787,21 +5786,21 @@ fn research_reports_url(stock_code: &str, begin: &str, end: &str) -> String {
 fn parse_research_report_row(r: &Value) -> ResearchReport {
     let mut eps_forecast = Vec::new();
     let mut this_year_eps: Option<f64> = None;
-    if let Some(eps) = r["predictThisYearEps"].as_str() {
-        if let Ok(val) = eps.parse::<f64>() {
-            eps_forecast.push(EpsForecast { year: "今年".into(), eps: Some(val) });
-            this_year_eps = Some(val);
-        }
+    if let Some(eps) = r["predictThisYearEps"].as_str()
+        && let Ok(val) = eps.parse::<f64>()
+    {
+        eps_forecast.push(EpsForecast { year: "今年".into(), eps: Some(val) });
+        this_year_eps = Some(val);
     }
-    if let Some(eps) = r["predictNextYearEps"].as_str() {
-        if let Ok(val) = eps.parse::<f64>() {
-            eps_forecast.push(EpsForecast { year: "明年".into(), eps: Some(val) });
-        }
+    if let Some(eps) = r["predictNextYearEps"].as_str()
+        && let Ok(val) = eps.parse::<f64>()
+    {
+        eps_forecast.push(EpsForecast { year: "明年".into(), eps: Some(val) });
     }
-    if let Some(eps) = r["predictNextTwoYearEps"].as_str() {
-        if let Ok(val) = eps.parse::<f64>() {
-            eps_forecast.push(EpsForecast { year: "后年".into(), eps: Some(val) });
-        }
+    if let Some(eps) = r["predictNextTwoYearEps"].as_str()
+        && let Ok(val) = eps.parse::<f64>()
+    {
+        eps_forecast.push(EpsForecast { year: "后年".into(), eps: Some(val) });
     }
 
     // 目标价 = 预测PE × 预测EPS（reportapi 不直接给目标价）

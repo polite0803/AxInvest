@@ -779,10 +779,10 @@ pub(crate) fn expand_horizon_samples_filtered(
     let mut samples = Vec::new();
     for (horizon, entry) in map {
         // 档位过滤：#31 通道只认本行对应的那一档（其余档由它们自己的 sp 行计票）。
-        if let Some(t) = only_tier {
-            if horizon != t {
-                continue;
-            }
+        if let Some(t) = only_tier
+            && horizon != t
+        {
+            continue;
         }
         let Some(entry) = entry.as_object() else {
             continue; // schemaVersion 等标量键
@@ -1081,12 +1081,11 @@ pub async fn build_hitrate_stats(
         }
 
         // 时间窗匹配（分析回测行 / 反思批匹配失败兜底）
-        if action.is_none() {
-            if let Some(a) = nearest_analysis_dimensions(&ana_rows, &sp.stock_code, sp.decision_at)
-            {
-                action = a.decision_action.clone();
-                horizon = a.decision_time_horizon.clone();
-            }
+        if action.is_none()
+            && let Some(a) = nearest_analysis_dimensions(&ana_rows, &sp.stock_code, sp.decision_at)
+        {
+            action = a.decision_action.clone();
+            horizon = a.decision_time_horizon.clone();
         }
 
         samples.push(DecisionPerformanceSample {

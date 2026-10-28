@@ -83,14 +83,13 @@ pub async fn evolve_node(
     // 4. 分析问题模式
     let mut problem_types: HashMap<String, u64> = HashMap::new();
     for f in &feedbacks {
-        if f.issue_count > 0 {
-            if let Ok(checks) = serde_json::from_str::<Vec<serde_json::Value>>(&f.checks_json) {
-                for check in &checks {
-                    if check.get("status").and_then(|s| s.as_str()) == Some("issue") {
-                        let field =
-                            check.get("field").and_then(|v| v.as_str()).unwrap_or("unknown");
-                        *problem_types.entry(field.to_string()).or_insert(0) += 1;
-                    }
+        if f.issue_count > 0
+            && let Ok(checks) = serde_json::from_str::<Vec<serde_json::Value>>(&f.checks_json)
+        {
+            for check in &checks {
+                if check.get("status").and_then(|s| s.as_str()) == Some("issue") {
+                    let field = check.get("field").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    *problem_types.entry(field.to_string()).or_insert(0) += 1;
                 }
             }
         }
@@ -110,65 +109,65 @@ pub async fn evolve_node(
     // 5.2 节点类型特有的一致性建议
     match node_type {
         NodeType::Analyst => {
-            if let Some(score_rate) = consistency_metrics.get("score_consistency_rate") {
-                if *score_rate < 0.7 {
-                    suggestions.push(format!(
+            if let Some(score_rate) = consistency_metrics.get("score_consistency_rate")
+                && *score_rate < 0.7
+            {
+                suggestions.push(format!(
                         "评分自洽性过低 ({:.1}%)，建议强化 'bull_score + bear_score 必须等于 100' 的约束",
                         score_rate * 100.0
                     ));
-                    should_evolve = true;
-                }
+                should_evolve = true;
             }
-            if let Some(dir_rate) = consistency_metrics.get("direction_consistency_rate") {
-                if *dir_rate < 0.7 {
-                    suggestions.push(format!(
-                        "方向一致性过低 ({:.1}%)，建议增加 verdict 与评分方向匹配的自检步骤",
-                        dir_rate * 100.0
-                    ));
-                    should_evolve = true;
-                }
+            if let Some(dir_rate) = consistency_metrics.get("direction_consistency_rate")
+                && *dir_rate < 0.7
+            {
+                suggestions.push(format!(
+                    "方向一致性过低 ({:.1}%)，建议增加 verdict 与评分方向匹配的自检步骤",
+                    dir_rate * 100.0
+                ));
+                should_evolve = true;
             }
         },
         NodeType::Debate => {
-            if let Some(logic_rate) = consistency_metrics.get("logic_consistency_rate") {
-                if *logic_rate < 0.7 {
-                    suggestions.push(format!(
-                        "逻辑一致性过低 ({:.1}%)，建议强化立场与论据的逻辑约束",
-                        logic_rate * 100.0
-                    ));
-                    should_evolve = true;
-                }
+            if let Some(logic_rate) = consistency_metrics.get("logic_consistency_rate")
+                && *logic_rate < 0.7
+            {
+                suggestions.push(format!(
+                    "逻辑一致性过低 ({:.1}%)，建议强化立场与论据的逻辑约束",
+                    logic_rate * 100.0
+                ));
+                should_evolve = true;
             }
         },
         NodeType::Decision => {
-            if let Some(criteria_rate) = consistency_metrics.get("criteria_met_rate") {
-                if *criteria_rate < 0.7 {
-                    suggestions.push(format!(
-                        "决策标准达标率过低 ({:.1}%)，建议明确决策所需的评估标准",
-                        criteria_rate * 100.0
-                    ));
-                    should_evolve = true;
-                }
+            if let Some(criteria_rate) = consistency_metrics.get("criteria_met_rate")
+                && *criteria_rate < 0.7
+            {
+                suggestions.push(format!(
+                    "决策标准达标率过低 ({:.1}%)，建议明确决策所需的评估标准",
+                    criteria_rate * 100.0
+                ));
+                should_evolve = true;
             }
-            if let Some(risk_rate) = consistency_metrics.get("risk_assessment_rate") {
-                if *risk_rate < 0.7 {
-                    suggestions.push(format!(
-                        "风险评估覆盖率过低 ({:.1}%)，建议在决策流程中强制包含风险评估",
-                        risk_rate * 100.0
-                    ));
-                    should_evolve = true;
-                }
+            if let Some(risk_rate) = consistency_metrics.get("risk_assessment_rate")
+                && *risk_rate < 0.7
+            {
+                suggestions.push(format!(
+                    "风险评估覆盖率过低 ({:.1}%)，建议在决策流程中强制包含风险评估",
+                    risk_rate * 100.0
+                ));
+                should_evolve = true;
             }
         },
         NodeType::Tool | NodeType::Valuation | NodeType::Risk => {
-            if let Some(completeness_rate) = consistency_metrics.get("completeness_rate") {
-                if *completeness_rate < 0.7 {
-                    suggestions.push(format!(
-                        "输出完整性过低 ({:.1}%)，建议检查工具的数据获取逻辑",
-                        completeness_rate * 100.0
-                    ));
-                    should_evolve = true;
-                }
+            if let Some(completeness_rate) = consistency_metrics.get("completeness_rate")
+                && *completeness_rate < 0.7
+            {
+                suggestions.push(format!(
+                    "输出完整性过低 ({:.1}%)，建议检查工具的数据获取逻辑",
+                    completeness_rate * 100.0
+                ));
+                should_evolve = true;
             }
         },
         _ => {},

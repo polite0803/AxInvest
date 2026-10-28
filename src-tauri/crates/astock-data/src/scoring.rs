@@ -605,22 +605,24 @@ impl ScoringEngine {
         industry_pb: Option<f64>,
     ) {
         let mut adj: i32 = 0;
-        if let Some(ind_pe) = industry_pe {
-            if pe > 0.0 && ind_pe > 0.0 {
-                if pe < ind_pe * 0.8 {
-                    adj += 4;
-                } else if pe > ind_pe * 1.2 {
-                    adj -= 4;
-                }
+        if let Some(ind_pe) = industry_pe
+            && pe > 0.0
+            && ind_pe > 0.0
+        {
+            if pe < ind_pe * 0.8 {
+                adj += 4;
+            } else if pe > ind_pe * 1.2 {
+                adj -= 4;
             }
         }
-        if let Some(ind_pb) = industry_pb {
-            if pb > 0.0 && ind_pb > 0.0 {
-                if pb < ind_pb * 0.8 {
-                    adj += 3;
-                } else if pb > ind_pb * 1.2 {
-                    adj -= 3;
-                }
+        if let Some(ind_pb) = industry_pb
+            && pb > 0.0
+            && ind_pb > 0.0
+        {
+            if pb < ind_pb * 0.8 {
+                adj += 3;
+            } else if pb > ind_pb * 1.2 {
+                adj -= 3;
             }
         }
         score.industry_adjustment += adj;

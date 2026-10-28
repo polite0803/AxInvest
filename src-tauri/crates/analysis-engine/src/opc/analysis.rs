@@ -390,13 +390,13 @@ impl OpcCapabilityPackAnalysisRound {
         }
 
         for kpi in kpis {
-            if let Some(target) = kpi.target {
-                if kpi.value < target * 0.8 {
-                    recs.push(format!(
-                        "📈 {} 低于目标 80%（当前 {:.1}，目标 {:.1}）",
-                        kpi.key, kpi.value, target
-                    ));
-                }
+            if let Some(target) = kpi.target
+                && kpi.value < target * 0.8
+            {
+                recs.push(format!(
+                    "📈 {} 低于目标 80%（当前 {:.1}，目标 {:.1}）",
+                    kpi.key, kpi.value, target
+                ));
             }
         }
 

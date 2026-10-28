@@ -38,10 +38,10 @@ async fn neodata_query(query: &str, token: Option<&str>) -> Result<Value, DataEr
     let mut cmd = tokio::process::Command::new(python_cmd());
     cmd.arg(&script_path).arg("--query").arg(query).stdout(Stdio::piped()).stderr(Stdio::piped());
     // 如果有 token，传入 --token 参数（让 Python 脚本使用而非读缓存文件）
-    if let Some(t) = token {
-        if !t.is_empty() {
-            cmd.arg("--token").arg(t);
-        }
+    if let Some(t) = token
+        && !t.is_empty()
+    {
+        cmd.arg("--token").arg(t);
     }
     let output = cmd.output().await.map_err(|e| DataError::VendorError {
         vendor: "neodata".into(),
@@ -121,32 +121,31 @@ fn find_script() -> PathBuf {
     }
 
     // 2) NEODATA_PATH 环境变量(用户自定义脚本所在目录)
-    if let Ok(neodata_dir) = std::env::var("NEODATA_PATH") {
-        if !neodata_dir.is_empty() {
-            let p = PathBuf::from(&neodata_dir).join(NEODATA_SCRIPT);
-            if p.exists() {
-                return p;
-            }
+    if let Ok(neodata_dir) = std::env::var("NEODATA_PATH")
+        && !neodata_dir.is_empty()
+    {
+        let p = PathBuf::from(&neodata_dir).join(NEODATA_SCRIPT);
+        if p.exists() {
+            return p;
         }
     }
 
     // 3) Windows WorkBuddy skill 目录(从 LOCALAPPDATA 推导,不再硬编码用户名)
-    if cfg!(target_os = "windows") {
-        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-            if !local_app_data.is_empty() {
-                let p = PathBuf::from(&local_app_data)
-                    .join("Programs")
-                    .join("WorkBuddy")
-                    .join("resources")
-                    .join("app.asar.unpacked")
-                    .join("resources")
-                    .join("builtin-skills")
-                    .join("neodata-financial-search")
-                    .join(NEODATA_SCRIPT);
-                if p.exists() {
-                    return p;
-                }
-            }
+    if cfg!(target_os = "windows")
+        && let Ok(local_app_data) = std::env::var("LOCALAPPDATA")
+        && !local_app_data.is_empty()
+    {
+        let p = PathBuf::from(&local_app_data)
+            .join("Programs")
+            .join("WorkBuddy")
+            .join("resources")
+            .join("app.asar.unpacked")
+            .join("resources")
+            .join("builtin-skills")
+            .join("neodata-financial-search")
+            .join(NEODATA_SCRIPT);
+        if p.exists() {
+            return p;
         }
     }
 

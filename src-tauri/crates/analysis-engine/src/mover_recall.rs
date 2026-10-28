@@ -548,10 +548,10 @@ async fn fill_missing_names_from_universe(
         .await
         .map_err(|e| format!("读市场清单(补名称)失败: {e}"))?;
     for r in rows {
-        if let Some((name, _)) = series.get_mut(&r.stock_code) {
-            if name.is_empty() {
-                *name = r.stock_name;
-            }
+        if let Some((name, _)) = series.get_mut(&r.stock_code)
+            && name.is_empty()
+        {
+            *name = r.stock_name;
         }
     }
     Ok(())

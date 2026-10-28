@@ -97,30 +97,29 @@ pub fn generate_prompt_corrections(quality_metrics_json: &str) -> Vec<String> {
 
     if let Ok(metrics) = serde_json::from_str::<serde_json::Value>(quality_metrics_json) {
         // 检查评分自洽性
-        if let Some(score_consistent) = metrics.get("score_consistent").and_then(|v| v.as_bool()) {
-            if !score_consistent {
-                corrections.push(
+        if let Some(score_consistent) = metrics.get("score_consistent").and_then(|v| v.as_bool())
+            && !score_consistent
+        {
+            corrections.push(
                     "【质量强制约束】请确保 bull_score + bear_score 的总和必须严格等于 100。在输出前务必自检。".to_string()
                 );
-            }
         }
 
         // 检查方向一致性
         if let Some(direction_consistent) =
             metrics.get("direction_consistent").and_then(|v| v.as_bool())
+            && !direction_consistent
         {
-            if !direction_consistent {
-                corrections.push(
+            corrections.push(
                     "【逻辑强制约束】请确保 verdict（看多/看空）必须与 bull_score/bear_score 的大小关系一致。看多时分数必须 bull_score > bear_score，反之亦然。".to_string()
                 );
-            }
         }
 
         // 检查置信度范围
-        if let Some(confidence) = metrics.get("confidence").and_then(|v| v.as_f64()) {
-            if !(0.0..=100.0).contains(&confidence) {
-                corrections.push("【范围约束】confidence 必须在 0-100 范围内。".to_string());
-            }
+        if let Some(confidence) = metrics.get("confidence").and_then(|v| v.as_f64())
+            && !(0.0..=100.0).contains(&confidence)
+        {
+            corrections.push("【范围约束】confidence 必须在 0-100 范围内。".to_string());
         }
     }
 

@@ -113,11 +113,11 @@ pub async fn build_seed_pool(client: &AStockClient) -> (Vec<SeedItem>, SeedPoolO
         Ok(industries) => {
             let mut taken = 0usize;
             for ind in industries.iter().take(30) {
-                if let (Some(code), Some(name)) = (&ind.leader_code, &ind.leader_name) {
-                    if seen.insert(code.clone()) {
-                        out.push((code.clone(), name.clone(), Some(ind.industry_name.clone())));
-                        taken += 1;
-                    }
+                if let (Some(code), Some(name)) = (&ind.leader_code, &ind.leader_name)
+                    && seen.insert(code.clone())
+                {
+                    out.push((code.clone(), name.clone(), Some(ind.industry_name.clone())));
+                    taken += 1;
                 }
             }
             origin.industry = taken;
@@ -349,10 +349,10 @@ pub fn load_enabled_vendors_from_template(
 /// 读取缓存（命中且未过期直接返回）
 pub fn get_cached_vendors() -> Option<HashSet<String>> {
     let guard = VENDOR_CACHE.lock();
-    if let Some((set, ts)) = guard.as_ref() {
-        if ts.elapsed() < VENDOR_TTL {
-            return Some(set.clone());
-        }
+    if let Some((set, ts)) = guard.as_ref()
+        && ts.elapsed() < VENDOR_TTL
+    {
+        return Some(set.clone());
     }
     None
 }

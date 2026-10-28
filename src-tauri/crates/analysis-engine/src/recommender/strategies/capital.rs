@@ -365,37 +365,35 @@ impl CapitalStrategy {
                 //（转正在 P4 换血；本分支旧判据的退役也随 P4 一并做，此处不调旧阈值）。
                 // 数据不可得/非两融标的 ⇒ 静默缺席（影子腿缺席是常态，不逐票刷日志）。
                 // as-of 回放下序列恒空（client 层声明缺口），影子腿自然缺席。
-                if let Ok(series) = client.get_margin_balance_trend(code, 30).await {
-                    if let Some(pct) = margin_balance_trend_pct(&series, 20) {
-                        r.push(format!("融资余额20日趋势 {pct:+.1}%"));
-                    }
+                if let Ok(series) = client.get_margin_balance_trend(code, 30).await
+                    && let Some(pct) = margin_balance_trend_pct(&series, 20)
+                {
+                    r.push(format!("融资余额20日趋势 {pct:+.1}%"));
                 }
                 // ── P2 影子腿（PLAN-capital-long-evidence.md E1）──
                 // 数据源 = **既有** `client.get_holder_count`（最新一期快照， HolderCount
                 // 自带 holder_num_ratio 环比；as-of 走降级账本 StructuralGap）。
                 // 多期「连降 streak」需 RPT_F10_EH_HOLDERNUM 序列——既有实现已声明
                 // 属下一轮，影子阶段先用单点环比。
-                if let Ok(Some(hc)) = client.get_holder_count(code).await {
-                    if let Some(ratio) = hc.holder_num_ratio {
-                        if ratio < 0.0 {
-                            r.push(format!("股东户数环比{ratio:+.1}%(筹码集中)"));
-                        }
-                    }
+                if let Ok(Some(hc)) = client.get_holder_count(code).await
+                    && let Some(ratio) = hc.holder_num_ratio
+                    && ratio < 0.0
+                {
+                    r.push(format!("股东户数环比{ratio:+.1}%(筹码集中)"));
                 }
                 // ── P3 影子腿（PLAN-capital-long-evidence.md E4）──
                 // 数据源 = **既有** `client.get_block_trades`（Vec<BlockTrade> 带
                 // discount_pct 折溢价与 as-of 截断，回放语义免费）。近 60 自然日
                 // 折价画像（中位数 <0 = 折价吸筹形态）：只进 reasons 不 gate；
                 // 溢价画像（>0）语义是派发，影子阶段不报，P4 转正时再定。
-                if let Ok(series) = client.get_block_trades(code).await {
-                    if let Some(p) = block_trade_discount_profile(&series, 60) {
-                        if p.median_premium_pct < 0.0 {
-                            r.push(format!(
-                                "近60日大宗{}笔 折价中位{:+.1}%(买方{}家 金额{:.1}亿)",
-                                p.count, p.median_premium_pct, p.distinct_buyers, p.total_amount_yi
-                            ));
-                        }
-                    }
+                if let Ok(series) = client.get_block_trades(code).await
+                    && let Some(p) = block_trade_discount_profile(&series, 60)
+                    && p.median_premium_pct < 0.0
+                {
+                    r.push(format!(
+                        "近60日大宗{}笔 折价中位{:+.1}%(买方{}家 金额{:.1}亿)",
+                        p.count, p.median_premium_pct, p.distinct_buyers, p.total_amount_yi
+                    ));
                 }
                 (true, r)
             },

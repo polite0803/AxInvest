@@ -48,10 +48,10 @@ const DAILY_TTL: Duration = Duration::from_secs(60);
 pub async fn daily_closes(client: &AStockClient, code: &str) -> Option<Arc<Vec<f64>>> {
     let suffix = axagent_astock_data::as_of::cache_suffix();
     let key = (code.to_string(), suffix.clone());
-    if let Some((v, ts)) = DAILY_CLOSES.lock().get(&key) {
-        if ts.elapsed() < DAILY_TTL {
-            return Some(v.clone());
-        }
+    if let Some((v, ts)) = DAILY_CLOSES.lock().get(&key)
+        && ts.elapsed() < DAILY_TTL
+    {
+        return Some(v.clone());
     }
     let klines = client.get_klines(code, "daily", 120).await.ok()?;
     let closes: Vec<f64> = klines.iter().map(|k| k.close).collect();
@@ -129,10 +129,11 @@ pub fn entry_band_pct(
     band_stop_pct: f64,
     fallback_range_pct: f64,
 ) -> (f64, &'static str) {
-    if let Some(v) = vol_stop_pct {
-        if v.is_finite() && v > 0.0 {
-            return (v / 2.0, "half_stop");
-        }
+    if let Some(v) = vol_stop_pct
+        && v.is_finite()
+        && v > 0.0
+    {
+        return (v / 2.0, "half_stop");
     }
     if band_stop_pct.is_finite() && band_stop_pct > 0.0 {
         return (band_stop_pct / 2.0, "half_stop_fallback_pct");

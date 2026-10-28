@@ -446,13 +446,13 @@ impl StockVendor for ThsVendor {
             page += 1;
         }
         // 半池伪装成全池 = 下游把「没数到的票」读成「没涨停」，故收不齐必须硬失败。
-        if let Some(t) = reported_total {
-            if t as usize != entries.len() {
-                return Err(DataError::ParseError(format!(
-                    "ths 涨停池分页未收齐：接口自报 total={t}，实收 {}（page={page}/last_page={last_page}）",
-                    entries.len()
-                )));
-            }
+        if let Some(t) = reported_total
+            && t as usize != entries.len()
+        {
+            return Err(DataError::ParseError(format!(
+                "ths 涨停池分页未收齐：接口自报 total={t}，实收 {}（page={page}/last_page={last_page}）",
+                entries.len()
+            )));
         }
         let pool = LimitUpPool {
             pool_date,

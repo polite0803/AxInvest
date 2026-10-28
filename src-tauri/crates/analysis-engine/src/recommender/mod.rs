@@ -737,10 +737,8 @@ async fn recommend_stocks_inner(
 ) -> Result<RecoResponse, String> {
     // preseed 模式跳过缓存（种子来自 DB 历史推荐，内容可能每次不同，不应命中缓存）
     let use_cache = preseed.is_none();
-    if use_cache {
-        if let Some(cached) = cache_get(period) {
-            return Ok(cached);
-        }
+    if use_cache && let Some(cached) = cache_get(period) {
+        return Ok(cached);
     }
     let prepared =
         prepare_scan(client, template_vars, preseed, horizon_prior, SeedOverrides::default()).await;

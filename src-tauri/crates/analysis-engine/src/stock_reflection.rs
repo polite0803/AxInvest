@@ -412,21 +412,19 @@ impl StockReflectionEngine {
     }
 
     fn extract_bottlenecks(&self, reflection: &Reflection) -> Vec<BottleneckNode> {
-        if let Some(metadata) = &reflection.metadata {
-            if let Ok(meta) = serde_json::from_value::<WorkflowReflectionMetadata>(metadata.clone())
-            {
-                return meta.bottleneck_nodes;
-            }
+        if let Some(metadata) = &reflection.metadata
+            && let Ok(meta) = serde_json::from_value::<WorkflowReflectionMetadata>(metadata.clone())
+        {
+            return meta.bottleneck_nodes;
         }
         Vec::new()
     }
 
     fn extract_failure_analysis(&self, reflection: &Reflection) -> Option<NodeFailureAnalysis> {
-        if let Some(metadata) = &reflection.metadata {
-            if let Ok(meta) = serde_json::from_value::<WorkflowReflectionMetadata>(metadata.clone())
-            {
-                return meta.failed_node_analysis;
-            }
+        if let Some(metadata) = &reflection.metadata
+            && let Ok(meta) = serde_json::from_value::<WorkflowReflectionMetadata>(metadata.clone())
+        {
+            return meta.failed_node_analysis;
         }
         None
     }

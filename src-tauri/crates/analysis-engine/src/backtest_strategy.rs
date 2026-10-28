@@ -509,10 +509,10 @@ fn detect_technical_short(klines: &[KLine], vars: &serde_json::Value) -> Option<
     }
     // 前一根 K 线 DIF 还在 DEA 下方确认金叉刚刚发生
     let prev_macd = indicators::macd(&klines[..klines.len() - 1], 12, 26, 9);
-    if let Some((prev_dif, prev_dea, _)) = prev_macd {
-        if prev_dif > prev_dea {
-            return None; // 金叉已发生多日，不是新鲜信号
-        }
+    if let Some((prev_dif, prev_dea, _)) = prev_macd
+        && prev_dif > prev_dea
+    {
+        return None; // 金叉已发生多日，不是新鲜信号
     }
     // 量比确认
     let vol_ratio_min = read_f64(vars, "technical_vol_ratio_min", 1.2);
@@ -569,10 +569,10 @@ fn detect_technical_long(klines: &[KLine], vars: &serde_json::Value) -> Option<f
     let ma200_gradient_period = read_f64(vars, "technical_ma200_period", 50.0) as usize;
     if cs.len() > ma200_gradient_period {
         let ma200_prev = indicators::sma(&cs[..cs.len() - ma200_gradient_period], 200);
-        if let Some(prev) = ma200_prev {
-            if ma200 <= prev {
-                return None;
-            }
+        if let Some(prev) = ma200_prev
+            && ma200 <= prev
+        {
+            return None;
         }
     }
     // 价格在 MA200 之上
@@ -1160,11 +1160,11 @@ pub fn adjust_strategy_weights(
             continue; // 样本太少，不调整
         }
         // 用户禁用保护：权重为 0.0 的策略跳过（用户已手动禁用的不自动恢复）
-        if let Some(existing) = existing_weights {
-            if existing.get(sid) == Some(&0.0) {
-                weights.insert(sid.clone(), 0.0);
-                continue;
-            }
+        if let Some(existing) = existing_weights
+            && existing.get(sid) == Some(&0.0)
+        {
+            weights.insert(sid.clone(), 0.0);
+            continue;
         }
         let offset = if stats.win_rate_pct >= 55.0 {
             (stats.win_rate_pct - 50.0) / 100.0 * 0.5

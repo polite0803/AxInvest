@@ -81,12 +81,12 @@ fn make_amount_rule(name: &str, desc: &str, threshold: f64) -> BusinessRule {
         name: name.to_string(),
         description: desc.to_string(),
         evaluate: Arc::new(move |_node_type: &NodeKind, input: &serde_json::Value| {
-            if let Some(amount) = input.get("amount").and_then(|v| v.as_f64()) {
-                if amount > threshold {
-                    return RuleResult::RequiresApproval {
-                        reason: format!("金额 ¥{amount:.2} 超过阈值 ¥{threshold:.2}，需要人工审批"),
-                    };
-                }
+            if let Some(amount) = input.get("amount").and_then(|v| v.as_f64())
+                && amount > threshold
+            {
+                return RuleResult::RequiresApproval {
+                    reason: format!("金额 ¥{amount:.2} 超过阈值 ¥{threshold:.2}，需要人工审批"),
+                };
             }
             RuleResult::Pass
         }),

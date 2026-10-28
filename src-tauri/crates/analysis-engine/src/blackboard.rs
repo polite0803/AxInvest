@@ -124,20 +124,13 @@ pub fn build_blackboard_snapshot(
             let mut text = extract_node_text(raw_output);
             // 如果 content 是 JSON 且含有 verdict 字段（strict_mode 重构格式），
             // 把 verdict 补回 <!-- VERDICT: ... --> 标签，让前端 tryParseVerdictFormat 能识别
-            if let Some(obj) = raw_output.as_object() {
-                if let Some(content_str) = obj.get("content").and_then(|v| v.as_str()) {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(content_str) {
-                        if let Some(verdict) = json.get("verdict") {
-                            if let Some(report) = json.get("report").and_then(|v| v.as_str()) {
-                                text = reconstruct_verdict_text(
-                                    json.get("__verdict_only"),
-                                    report,
-                                    verdict,
-                                );
-                            }
-                        }
-                    }
-                }
+            if let Some(obj) = raw_output.as_object()
+                && let Some(content_str) = obj.get("content").and_then(|v| v.as_str())
+                && let Ok(json) = serde_json::from_str::<serde_json::Value>(content_str)
+                && let Some(verdict) = json.get("verdict")
+                && let Some(report) = json.get("report").and_then(|v| v.as_str())
+            {
+                text = reconstruct_verdict_text(json.get("__verdict_only"), report, verdict);
             }
             bb.insert(key, Value::String(text));
         }
@@ -150,12 +143,11 @@ pub fn build_blackboard_snapshot(
             // V37 修复: AgentNode 输出无顶层 .params 字段（只有 CodeNode 有）。
             // AgentNode 的业务参数在 .content JSON 字符串内部，需解析后提取。
             // CodeNode 的决策结果在 .result 字段，存到 result.{node_id} 以示区分。
-            if let Some(content) = obj.get("content").and_then(|v| v.as_str()) {
-                if let Ok(parsed) = serde_json::from_str::<Value>(content) {
-                    if parsed.is_object() {
-                        bb.insert(format!("params.{node_id}"), parsed.clone());
-                    }
-                }
+            if let Some(content) = obj.get("content").and_then(|v| v.as_str())
+                && let Ok(parsed) = serde_json::from_str::<Value>(content)
+                && parsed.is_object()
+            {
+                bb.insert(format!("params.{node_id}"), parsed.clone());
             }
             // CodeNode 直接执行：.result 在顶层，存到 result.{node_id}
             if let Some(result) = obj.get("result") {
@@ -163,10 +155,11 @@ pub fn build_blackboard_snapshot(
             }
             // 兼容：如果 AgentNode 的顶层有 .params（非标准但保留），
             // 同时存到 .content 解析结果之后（后者优先）
-            if let Some(params) = obj.get("params") {
-                if !params.is_null() && !bb.contains_key(&format!("params.{node_id}")) {
-                    bb.insert(format!("params.{node_id}"), params.clone());
-                }
+            if let Some(params) = obj.get("params")
+                && !params.is_null()
+                && !bb.contains_key(&format!("params.{node_id}"))
+            {
+                bb.insert(format!("params.{node_id}"), params.clone());
             }
         }
     }

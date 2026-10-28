@@ -131,11 +131,11 @@ pub async fn get_trade_stats(db: &DatabaseConnection) -> Result<TradeStatsSummar
             if t.direction == "buy" {
                 buy_date = Some(&t.trade_date);
             } else if let Some(bd) = buy_date {
-                if let Ok(d1) = chrono::NaiveDate::parse_from_str(bd, "%Y-%m-%d") {
-                    if let Ok(d2) = chrono::NaiveDate::parse_from_str(&t.trade_date, "%Y-%m-%d") {
-                        let days = (d2 - d1).num_days();
-                        holding_days.push((days, t.realized_pnl.unwrap_or(0.0)));
-                    }
+                if let Ok(d1) = chrono::NaiveDate::parse_from_str(bd, "%Y-%m-%d")
+                    && let Ok(d2) = chrono::NaiveDate::parse_from_str(&t.trade_date, "%Y-%m-%d")
+                {
+                    let days = (d2 - d1).num_days();
+                    holding_days.push((days, t.realized_pnl.unwrap_or(0.0)));
                 }
                 buy_date = None;
             }

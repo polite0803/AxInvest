@@ -139,15 +139,15 @@ pub fn validate_financial(f: &FinancialReport) -> ValidationReport {
     if !f.has_valid_data() {
         r.missing.push("全部核心财务字段为空".into());
     }
-    if let Some(pe) = f.eps {
-        if !(-100.0..=1000.0).contains(&pe) {
-            r.add_warning(format!("eps 异常: {}", pe));
-        }
+    if let Some(pe) = f.eps
+        && !(-100.0..=1000.0).contains(&pe)
+    {
+        r.add_warning(format!("eps 异常: {}", pe));
     }
-    if let Some(roe) = f.roe {
-        if !(-100.0..=200.0).contains(&roe) {
-            r.add_warning(format!("roe 异常: {}", roe));
-        }
+    if let Some(roe) = f.roe
+        && !(-100.0..=200.0).contains(&roe)
+    {
+        r.add_warning(format!("roe 异常: {}", roe));
     }
     r.ok = r.missing.is_empty();
     r

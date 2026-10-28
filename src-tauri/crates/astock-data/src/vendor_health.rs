@@ -442,10 +442,10 @@ impl VendorHealthTracker {
                         recoverable.push(name);
                     } else {
                         // 兜底：硬超时恢复
-                        if let Some(last_fail) = h.last_failure_at {
-                            if now - last_fail >= recovery_ms {
-                                recoverable.push(name);
-                            }
+                        if let Some(last_fail) = h.last_failure_at
+                            && now - last_fail >= recovery_ms
+                        {
+                            recoverable.push(name);
                         }
                     }
                 },

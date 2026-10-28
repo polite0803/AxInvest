@@ -211,10 +211,10 @@ pub fn aggregate_reco_ic(rows: &[RecoIcRow]) -> RecoIcStats {
             let holding = group.iter().map(|r| r.holding_days).max().unwrap_or(0);
             if status == "ok" {
                 usable_cells += 1;
-                if let (Some(v), h) = (ic, holding) {
-                    if v > 0.0 {
-                        fit_points.push((h as f64, v));
-                    }
+                if let (Some(v), h) = (ic, holding)
+                    && v > 0.0
+                {
+                    fit_points.push((h as f64, v));
                 }
             }
             cells.push(RecoIcCell {

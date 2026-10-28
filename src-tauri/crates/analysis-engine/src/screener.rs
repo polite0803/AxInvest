@@ -114,10 +114,10 @@ impl StockScreener {
                 reasons.push(format!("涨幅{:.2}%", quote.change_pct));
                 score += 2;
             }
-            if let Some(max) = criteria.max_change_pct {
-                if quote.change_pct > max {
-                    continue;
-                }
+            if let Some(max) = criteria.max_change_pct
+                && quote.change_pct > max
+            {
+                continue;
             }
 
             // 换手率筛选
@@ -130,32 +130,30 @@ impl StockScreener {
             }
 
             // 龙虎榜
-            if criteria.dragon_tiger_net_min.is_some() {
-                if let Ok(dt) = client.get_dragon_tiger(code).await {
-                    let net: f64 = dt.iter().map(|d| d.net_amount).sum();
-                    if let Some(min_net) = criteria.dragon_tiger_net_min {
-                        if net >= min_net {
-                            reasons.push(format!("龙虎榜净买入{:.0}万", net / 10000.0));
-                            score += 3;
-                        } else {
-                            continue;
-                        }
+            if criteria.dragon_tiger_net_min.is_some()
+                && let Ok(dt) = client.get_dragon_tiger(code).await
+            {
+                let net: f64 = dt.iter().map(|d| d.net_amount).sum();
+                if let Some(min_net) = criteria.dragon_tiger_net_min {
+                    if net >= min_net {
+                        reasons.push(format!("龙虎榜净买入{:.0}万", net / 10000.0));
+                        score += 3;
+                    } else {
+                        continue;
                     }
                 }
             }
 
             // 主力资金
-            if criteria.main_inflow_min.is_some() {
-                if let Ok(Some(mf)) = client.get_money_flow(code).await {
-                    if let Some(min_inflow) = criteria.main_inflow_min {
-                        if mf.main_net_inflow >= min_inflow {
-                            reasons
-                                .push(format!("主力净流入{:.0}万", mf.main_net_inflow / 10000.0));
-                            score += 3;
-                        } else {
-                            continue;
-                        }
-                    }
+            if criteria.main_inflow_min.is_some()
+                && let Ok(Some(mf)) = client.get_money_flow(code).await
+                && let Some(min_inflow) = criteria.main_inflow_min
+            {
+                if mf.main_net_inflow >= min_inflow {
+                    reasons.push(format!("主力净流入{:.0}万", mf.main_net_inflow / 10000.0));
+                    score += 3;
+                } else {
+                    continue;
                 }
             }
 
@@ -264,11 +262,12 @@ impl StockScreener {
             }
 
             // PE/PB 估值信号
-            if let Some(pe) = quote.pe {
-                if pe < 15.0 && pe > 0.0 {
-                    reasons.push(format!("低PE {:.1}", pe));
-                    score += 5;
-                }
+            if let Some(pe) = quote.pe
+                && pe < 15.0
+                && pe > 0.0
+            {
+                reasons.push(format!("低PE {:.1}", pe));
+                score += 5;
             }
 
             // ST 风险提示
@@ -339,10 +338,10 @@ impl StockScreener {
                 reasons.push(format!("涨幅{:.2}%", s.change_pct));
                 score += 2;
             }
-            if let Some(max) = criteria.max_change_pct {
-                if s.change_pct > max {
-                    continue;
-                }
+            if let Some(max) = criteria.max_change_pct
+                && s.change_pct > max
+            {
+                continue;
             }
 
             // 换手率
@@ -381,12 +380,11 @@ impl StockScreener {
                 let mut set = HashSet::new();
                 if let Some(idx) = index {
                     for q in &theme_queries {
-                        if let Some(cid) = idx.resolve(q) {
-                            if idx.members(cid).contains(&s.code) {
-                                if let Some(d) = idx.display(cid) {
-                                    set.insert(d.to_string());
-                                }
-                            }
+                        if let Some(cid) = idx.resolve(q)
+                            && idx.members(cid).contains(&s.code)
+                            && let Some(d) = idx.display(cid)
+                        {
+                            set.insert(d.to_string());
                         }
                     }
                 }
@@ -500,10 +498,10 @@ impl StockScreener {
         // 2. 行业排名靠前的龙头
         if let Ok(industries) = client.get_industry_ranking().await {
             for ind in industries.iter().take(10) {
-                if let (Some(code), Some(name)) = (&ind.leader_code, &ind.leader_name) {
-                    if seen.insert(code.clone()) {
-                        stocks.push((code.clone(), name.clone()));
-                    }
+                if let (Some(code), Some(name)) = (&ind.leader_code, &ind.leader_name)
+                    && seen.insert(code.clone())
+                {
+                    stocks.push((code.clone(), name.clone()));
                 }
             }
         }

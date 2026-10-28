@@ -497,137 +497,134 @@ impl RealtimeMonitor {
         let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
         // 止损检查
-        if let Some(stop) = config.stop_loss {
-            if quote.price <= stop {
-                let suggested =
-                    Some(format!("建议: 考虑减仓50%，现价{:.2}低于止损{:.2}", quote.price, stop));
-                alerts.push(MonitorAlert {
-                    alert_id: config.alert_id.clone(),
-                    stock_code: config.stock_code.clone(),
-                    stock_name: config.stock_name.clone(),
-                    alert_type: "stop_loss".into(),
-                    alert_message: format!(
-                        "跌破止损价 {}: 现价 {:.2} <= 止损 {:.2}",
-                        config.stock_name, quote.price, stop
-                    ),
-                    current_price: quote.price,
-                    change_pct: quote.change_pct,
-                    timestamp: now.clone(),
-                    suggested_action: suggested,
-                });
-            }
+        if let Some(stop) = config.stop_loss
+            && quote.price <= stop
+        {
+            let suggested =
+                Some(format!("建议: 考虑减仓50%，现价{:.2}低于止损{:.2}", quote.price, stop));
+            alerts.push(MonitorAlert {
+                alert_id: config.alert_id.clone(),
+                stock_code: config.stock_code.clone(),
+                stock_name: config.stock_name.clone(),
+                alert_type: "stop_loss".into(),
+                alert_message: format!(
+                    "跌破止损价 {}: 现价 {:.2} <= 止损 {:.2}",
+                    config.stock_name, quote.price, stop
+                ),
+                current_price: quote.price,
+                change_pct: quote.change_pct,
+                timestamp: now.clone(),
+                suggested_action: suggested,
+            });
         }
 
         // 止盈检查
-        if let Some(tp) = config.take_profit {
-            if quote.price >= tp {
-                let suggested =
-                    Some(format!("建议: 考虑卖出50%锁利，现价{:.2}≥止盈{:.2}", quote.price, tp));
-                alerts.push(MonitorAlert {
-                    alert_id: config.alert_id.clone(),
-                    stock_code: config.stock_code.clone(),
-                    stock_name: config.stock_name.clone(),
-                    alert_type: "take_profit".into(),
-                    alert_message: format!(
-                        "突破止盈价 {}: 现价 {:.2} >= 止盈 {:.2}",
-                        config.stock_name, quote.price, tp
-                    ),
-                    current_price: quote.price,
-                    change_pct: quote.change_pct,
-                    timestamp: now.clone(),
-                    suggested_action: suggested,
-                });
-            }
+        if let Some(tp) = config.take_profit
+            && quote.price >= tp
+        {
+            let suggested =
+                Some(format!("建议: 考虑卖出50%锁利，现价{:.2}≥止盈{:.2}", quote.price, tp));
+            alerts.push(MonitorAlert {
+                alert_id: config.alert_id.clone(),
+                stock_code: config.stock_code.clone(),
+                stock_name: config.stock_name.clone(),
+                alert_type: "take_profit".into(),
+                alert_message: format!(
+                    "突破止盈价 {}: 现价 {:.2} >= 止盈 {:.2}",
+                    config.stock_name, quote.price, tp
+                ),
+                current_price: quote.price,
+                change_pct: quote.change_pct,
+                timestamp: now.clone(),
+                suggested_action: suggested,
+            });
         }
 
         // 压力位突破
-        if let Some(res) = config.resistance_break {
-            if quote.price >= res {
-                let suggested = Some(format!("建议: 压力位突破{:.2}，关注持续性和量能配合", res));
-                alerts.push(MonitorAlert {
-                    alert_id: config.alert_id.clone(),
-                    stock_code: config.stock_code.clone(),
-                    stock_name: config.stock_name.clone(),
-                    alert_type: "resistance".into(),
-                    alert_message: format!(
-                        "突破压力位 {}: 现价 {:.2} >= 压力 {:.2}",
-                        config.stock_name, quote.price, res
-                    ),
-                    current_price: quote.price,
-                    change_pct: quote.change_pct,
-                    timestamp: now.clone(),
-                    suggested_action: suggested,
-                });
-            }
+        if let Some(res) = config.resistance_break
+            && quote.price >= res
+        {
+            let suggested = Some(format!("建议: 压力位突破{:.2}，关注持续性和量能配合", res));
+            alerts.push(MonitorAlert {
+                alert_id: config.alert_id.clone(),
+                stock_code: config.stock_code.clone(),
+                stock_name: config.stock_name.clone(),
+                alert_type: "resistance".into(),
+                alert_message: format!(
+                    "突破压力位 {}: 现价 {:.2} >= 压力 {:.2}",
+                    config.stock_name, quote.price, res
+                ),
+                current_price: quote.price,
+                change_pct: quote.change_pct,
+                timestamp: now.clone(),
+                suggested_action: suggested,
+            });
         }
 
         // 支撑位跌破
-        if let Some(sup) = config.support_break {
-            if quote.price <= sup {
-                let suggested =
-                    Some(format!("建议: 支撑位{:.2}跌破，考虑减仓或设立更严格止损", sup));
-                alerts.push(MonitorAlert {
-                    alert_id: config.alert_id.clone(),
-                    stock_code: config.stock_code.clone(),
-                    stock_name: config.stock_name.clone(),
-                    alert_type: "support".into(),
-                    alert_message: format!(
-                        "跌破支撑位 {}: 现价 {:.2} <= 支撑 {:.2}",
-                        config.stock_name, quote.price, sup
-                    ),
-                    current_price: quote.price,
-                    change_pct: quote.change_pct,
-                    timestamp: now.clone(),
-                    suggested_action: suggested,
-                });
-            }
+        if let Some(sup) = config.support_break
+            && quote.price <= sup
+        {
+            let suggested = Some(format!("建议: 支撑位{:.2}跌破，考虑减仓或设立更严格止损", sup));
+            alerts.push(MonitorAlert {
+                alert_id: config.alert_id.clone(),
+                stock_code: config.stock_code.clone(),
+                stock_name: config.stock_name.clone(),
+                alert_type: "support".into(),
+                alert_message: format!(
+                    "跌破支撑位 {}: 现价 {:.2} <= 支撑 {:.2}",
+                    config.stock_name, quote.price, sup
+                ),
+                current_price: quote.price,
+                change_pct: quote.change_pct,
+                timestamp: now.clone(),
+                suggested_action: suggested,
+            });
         }
 
         // 涨跌幅异常
-        if let Some(pct) = config.change_pct_alert {
-            if quote.change_pct.abs() >= pct {
-                let dir = if quote.change_pct > 0.0 { "涨" } else { "跌" };
-                let suggested = Some(format!(
-                    "建议: 异常{}幅{:.2}%，关注消息面和资金流向",
-                    dir, quote.change_pct
-                ));
-                alerts.push(MonitorAlert {
-                    alert_id: config.alert_id.clone(),
-                    stock_code: config.stock_code.clone(),
-                    stock_name: config.stock_name.clone(),
-                    alert_type: "change".into(),
-                    alert_message: format!(
-                        "异常{}幅 {}: {:.2}%",
-                        dir, config.stock_name, quote.change_pct
-                    ),
-                    current_price: quote.price,
-                    change_pct: quote.change_pct,
-                    timestamp: now.clone(),
-                    suggested_action: suggested,
-                });
-            }
+        if let Some(pct) = config.change_pct_alert
+            && quote.change_pct.abs() >= pct
+        {
+            let dir = if quote.change_pct > 0.0 { "涨" } else { "跌" };
+            let suggested =
+                Some(format!("建议: 异常{}幅{:.2}%，关注消息面和资金流向", dir, quote.change_pct));
+            alerts.push(MonitorAlert {
+                alert_id: config.alert_id.clone(),
+                stock_code: config.stock_code.clone(),
+                stock_name: config.stock_name.clone(),
+                alert_type: "change".into(),
+                alert_message: format!(
+                    "异常{}幅 {}: {:.2}%",
+                    dir, config.stock_name, quote.change_pct
+                ),
+                current_price: quote.price,
+                change_pct: quote.change_pct,
+                timestamp: now.clone(),
+                suggested_action: suggested,
+            });
         }
 
         // 换手率异常
-        if let Some(ratio) = config.turnover_rate_alert {
-            if quote.turnover_rate >= ratio {
-                let suggested =
-                    Some(format!("建议: 换手率异常{:.2}%，关注主力进出痕迹", quote.turnover_rate));
-                alerts.push(MonitorAlert {
-                    alert_id: config.alert_id.clone(),
-                    stock_code: config.stock_code.clone(),
-                    stock_name: config.stock_name.clone(),
-                    alert_type: "volume".into(),
-                    alert_message: format!(
-                        "换手率异常 {}: {:.2}% > {:.2}%",
-                        config.stock_name, quote.turnover_rate, ratio
-                    ),
-                    current_price: quote.price,
-                    change_pct: quote.change_pct,
-                    timestamp: now.clone(),
-                    suggested_action: suggested,
-                });
-            }
+        if let Some(ratio) = config.turnover_rate_alert
+            && quote.turnover_rate >= ratio
+        {
+            let suggested =
+                Some(format!("建议: 换手率异常{:.2}%，关注主力进出痕迹", quote.turnover_rate));
+            alerts.push(MonitorAlert {
+                alert_id: config.alert_id.clone(),
+                stock_code: config.stock_code.clone(),
+                stock_name: config.stock_name.clone(),
+                alert_type: "volume".into(),
+                alert_message: format!(
+                    "换手率异常 {}: {:.2}% > {:.2}%",
+                    config.stock_name, quote.turnover_rate, ratio
+                ),
+                current_price: quote.price,
+                change_pct: quote.change_pct,
+                timestamp: now.clone(),
+                suggested_action: suggested,
+            });
         }
 
         // ── 阶段 E-2：封板状态只加标注，不吞告警（裁定 6）──
@@ -699,10 +696,10 @@ impl RealtimeMonitor {
         alerts.retain(|a| {
             // 冷却按告警条目计（此前是 `stock_code:alert_type`，同一股同类型的重复行会互相顶掉冷却槽）
             let key = a.alert_id.clone();
-            if let Some(&last_ts) = last.get(&key) {
-                if now_ts - last_ts < cooldown_secs {
-                    return false;
-                }
+            if let Some(&last_ts) = last.get(&key)
+                && now_ts - last_ts < cooldown_secs
+            {
+                return false;
             }
             last.insert(key, now_ts);
             true
@@ -831,17 +828,16 @@ impl RealtimeMonitor {
         let mut hit_volume = false;
         for a in alerts {
             if a.alert_type == "change" {
-                if let Some(th) = t0_cfg.change_pct_threshold {
-                    if quote.change_pct.abs() >= th {
-                        hit_change = true;
-                    }
+                if let Some(th) = t0_cfg.change_pct_threshold
+                    && quote.change_pct.abs() >= th
+                {
+                    hit_change = true;
                 }
-            } else if a.alert_type == "volume" {
-                if let Some(th) = t0_cfg.turnover_rate_threshold {
-                    if quote.turnover_rate >= th {
-                        hit_volume = true;
-                    }
-                }
+            } else if a.alert_type == "volume"
+                && let Some(th) = t0_cfg.turnover_rate_threshold
+                && quote.turnover_rate >= th
+            {
+                hit_volume = true;
             }
         }
         if !hit_change && !hit_volume {
@@ -854,16 +850,16 @@ impl RealtimeMonitor {
         let cooldown_secs = t0_cfg.min_interval_minutes * 60;
         {
             let mut last_map = self.t0_last_trigger_ts.write().await;
-            if let Some(&last_ts) = last_map.get(stock_code) {
-                if now_ts - last_ts < cooldown_secs {
-                    tracing::debug!(
-                        "[t0] skip {}: cooldown 未到 ({}s < {}s)",
-                        stock_code,
-                        now_ts - last_ts,
-                        cooldown_secs
-                    );
-                    return;
-                }
+            if let Some(&last_ts) = last_map.get(stock_code)
+                && now_ts - last_ts < cooldown_secs
+            {
+                tracing::debug!(
+                    "[t0] skip {}: cooldown 未到 ({}s < {}s)",
+                    stock_code,
+                    now_ts - last_ts,
+                    cooldown_secs
+                );
+                return;
             }
             last_map.insert(stock_code.to_string(), now_ts);
         }

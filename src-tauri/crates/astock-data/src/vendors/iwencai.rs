@@ -63,14 +63,14 @@ impl IwencaiVendor {
         };
 
         for item in answer {
-            if item["type"].as_str() == Some("comp_table") {
-                if let Some(components) = item["txt"]["components"].as_array() {
-                    for comp in components {
-                        if comp["type"].as_str() == Some("table") {
-                            if let Some(code_list) = comp["data"]["code_list"].as_array() {
-                                return code_list.clone();
-                            }
-                        }
+            if item["type"].as_str() == Some("comp_table")
+                && let Some(components) = item["txt"]["components"].as_array()
+            {
+                for comp in components {
+                    if comp["type"].as_str() == Some("table")
+                        && let Some(code_list) = comp["data"]["code_list"].as_array()
+                    {
+                        return code_list.clone();
                     }
                 }
             }

@@ -108,10 +108,10 @@ impl RegimeDetector {
         if let Some(ma20) = crate::indicators::sma(&closes, 20) {
             report.ma20 = Some(ma20);
         }
-        if closes.len() >= 60 {
-            if let Some(ma60) = crate::indicators::sma(&closes, 60) {
-                report.ma60 = Some(ma60);
-            }
+        if closes.len() >= 60
+            && let Some(ma60) = crate::indicators::sma(&closes, 60)
+        {
+            report.ma60 = Some(ma60);
         }
 
         // 2. 波动率(20 日年化,%)

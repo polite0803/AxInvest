@@ -167,10 +167,10 @@ impl FactorRegistry {
         // 取每个因子最新的 IC
         let mut ics: Vec<(String, f64)> = Vec::new();
         for f in &factors {
-            if let Some(series) = self.ic_history.get(&f.id) {
-                if let Some(latest) = series.last() {
-                    ics.push((f.id.clone(), latest.spearman_ic.abs()));
-                }
+            if let Some(series) = self.ic_history.get(&f.id)
+                && let Some(latest) = series.last()
+            {
+                ics.push((f.id.clone(), latest.spearman_ic.abs()));
             }
         }
 
@@ -205,20 +205,20 @@ impl FactorRegistry {
 
         let mut irs: Vec<(String, f64)> = Vec::new();
         for f in &factors {
-            if let Some(series) = self.ic_history.get(&f.id) {
-                if series.len() >= 3 {
-                    let ic_values: Vec<f64> = series.iter().map(|ic| ic.spearman_ic).collect();
-                    let mean = ic_values.iter().sum::<f64>() / ic_values.len() as f64;
-                    let variance = if ic_values.len() > 1 {
-                        ic_values.iter().map(|v| (v - mean).powi(2)).sum::<f64>()
-                            / (ic_values.len() - 1) as f64
-                    } else {
-                        0.0
-                    };
-                    let std = variance.sqrt();
-                    let ir = if std > 0.0 { mean / std } else { 0.0 };
-                    irs.push((f.id.clone(), ir.abs()));
-                }
+            if let Some(series) = self.ic_history.get(&f.id)
+                && series.len() >= 3
+            {
+                let ic_values: Vec<f64> = series.iter().map(|ic| ic.spearman_ic).collect();
+                let mean = ic_values.iter().sum::<f64>() / ic_values.len() as f64;
+                let variance = if ic_values.len() > 1 {
+                    ic_values.iter().map(|v| (v - mean).powi(2)).sum::<f64>()
+                        / (ic_values.len() - 1) as f64
+                } else {
+                    0.0
+                };
+                let std = variance.sqrt();
+                let ir = if std > 0.0 { mean / std } else { 0.0 };
+                irs.push((f.id.clone(), ir.abs()));
             }
         }
 

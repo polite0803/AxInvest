@@ -211,66 +211,63 @@ async fn evaluate_position(
     let mut target_price: Option<f64> = None;
     let mut stop_loss: Option<f64> = None;
 
-    if let Some(ref analysis) = last_analysis {
-        if let Some(ref decision_json) = analysis.decision_json {
-            if let Ok(decision) = serde_json::from_str::<serde_json::Value>(decision_json) {
-                let action_str = decision["action"].as_str().unwrap_or("");
-                target_price = decision["targetPrice"].as_f64();
-                stop_loss = decision["stopLoss"].as_f64();
+    if let Some(ref analysis) = last_analysis
+        && let Some(ref decision_json) = analysis.decision_json
+        && let Ok(decision) = serde_json::from_str::<serde_json::Value>(decision_json)
+    {
+        let action_str = decision["action"].as_str().unwrap_or("");
+        target_price = decision["targetPrice"].as_f64();
+        stop_loss = decision["stopLoss"].as_f64();
 
-                // 分析建议卖出/减持
-                // P1-6(2026-09-14): 原先只认 2 个中文字面量 —— 英文 SELL / REDUCE
-                // 不触发「分析建议卖出」退出信号（漏报，fail-open 方向）。
-                if matches!(
-                    normalize_action(action_str),
-                    Some(ActionKind::Reduce | ActionKind::Sell)
-                ) {
-                    score += SCORE_ANALYSIS_SELL;
+        // 分析建议卖出/减持
+        // P1-6(2026-09-14): 原先只认 2 个中文字面量 —— 英文 SELL / REDUCE
+        // 不触发「分析建议卖出」退出信号（漏报，fail-open 方向）。
+        if matches!(normalize_action(action_str), Some(ActionKind::Reduce | ActionKind::Sell)) {
+            score += SCORE_ANALYSIS_SELL;
+            signals.push(ExitSignal {
+                signal_type: "analysis_sell".into(),
+                severity: "high".into(),
+                detail: format!("最近分析建议「{action_str}」"),
+            });
+        }
+
+        // 已达目标价（止盈）
+        if let Some(tp) = target_price
+            && current_price_f64 > 0.0
+            && current_price_f64 >= tp
+        {
+            score += SCORE_PRICE_ABOVE_TARGET;
+            suggested_price = Some(tp);
+            signals.push(ExitSignal {
+                signal_type: "take_profit_reached".into(),
+                severity: "high".into(),
+                detail: format!("现价 {:.2} 已达到目标价 {:.2}", current_price_f64, tp),
+            });
+        }
+
+        // 跌破止损
+        if let Some(sl) = stop_loss {
+            if current_price_f64 > 0.0 && current_price_f64 <= sl {
+                score += SCORE_PRICE_BELOW_STOP;
+                suggested_price = Some(sl);
+                signals.push(ExitSignal {
+                    signal_type: "stop_loss_hit".into(),
+                    severity: "critical".into(),
+                    detail: format!("现价 {:.2} 已跌破止损价 {:.2}", current_price_f64, sl),
+                });
+            } else if let Some(sl) = stop_loss {
+                // 接近止损（距止损 < 3%）
+                let distance = (current_price_f64 - sl) / sl * 100.0;
+                if (0.0..3.0).contains(&distance) {
+                    score += SCORE_STOP_LOSS_NEAR;
                     signals.push(ExitSignal {
-                        signal_type: "analysis_sell".into(),
+                        signal_type: "stop_loss_near".into(),
                         severity: "high".into(),
-                        detail: format!("最近分析建议「{action_str}」"),
+                        detail: format!(
+                            "现价 {:.2} 距止损 {:.2} 仅 {:.1}%",
+                            current_price_f64, sl, distance
+                        ),
                     });
-                }
-
-                // 已达目标价（止盈）
-                if let Some(tp) = target_price {
-                    if current_price_f64 > 0.0 && current_price_f64 >= tp {
-                        score += SCORE_PRICE_ABOVE_TARGET;
-                        suggested_price = Some(tp);
-                        signals.push(ExitSignal {
-                            signal_type: "take_profit_reached".into(),
-                            severity: "high".into(),
-                            detail: format!("现价 {:.2} 已达到目标价 {:.2}", current_price_f64, tp),
-                        });
-                    }
-                }
-
-                // 跌破止损
-                if let Some(sl) = stop_loss {
-                    if current_price_f64 > 0.0 && current_price_f64 <= sl {
-                        score += SCORE_PRICE_BELOW_STOP;
-                        suggested_price = Some(sl);
-                        signals.push(ExitSignal {
-                            signal_type: "stop_loss_hit".into(),
-                            severity: "critical".into(),
-                            detail: format!("现价 {:.2} 已跌破止损价 {:.2}", current_price_f64, sl),
-                        });
-                    } else if let Some(sl) = stop_loss {
-                        // 接近止损（距止损 < 3%）
-                        let distance = (current_price_f64 - sl) / sl * 100.0;
-                        if (0.0..3.0).contains(&distance) {
-                            score += SCORE_STOP_LOSS_NEAR;
-                            signals.push(ExitSignal {
-                                signal_type: "stop_loss_near".into(),
-                                severity: "high".into(),
-                                detail: format!(
-                                    "现价 {:.2} 距止损 {:.2} 仅 {:.1}%",
-                                    current_price_f64, sl, distance
-                                ),
-                            });
-                        }
-                    }
                 }
             }
         }

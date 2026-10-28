@@ -757,10 +757,10 @@ pub fn aggregate_consistency_rates<'a>(
     }
 
     for (key, sum) in sums.iter_mut() {
-        if let Some(n) = counts.get(key) {
-            if *n > 0 {
-                *sum /= *n as f64;
-            }
+        if let Some(n) = counts.get(key)
+            && *n > 0
+        {
+            *sum /= *n as f64;
         }
     }
 

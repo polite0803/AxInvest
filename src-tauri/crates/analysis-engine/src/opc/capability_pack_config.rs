@@ -1048,14 +1048,14 @@ pub fn get_config(domain_pack_id: &str, app_dir: Option<&Path>) -> Option<Capabi
     // 读取域包 runtime.yaml（失败静默，走既有逻辑）
     let base = super::capability_pack::resolve_capability_packs_dir(app_dir);
     let dir = base.join(&id);
-    if dir.is_dir() {
-        if let Some(rt) = runtime_cfg_for(&dir) {
-            if !rt.automation_rules.is_empty() {
-                config.automation_rules = rt.automation_rules;
-            }
-            if !rt.entity_types.is_empty() {
-                config.entity_types = rt.entity_types;
-            }
+    if dir.is_dir()
+        && let Some(rt) = runtime_cfg_for(&dir)
+    {
+        if !rt.automation_rules.is_empty() {
+            config.automation_rules = rt.automation_rules;
+        }
+        if !rt.entity_types.is_empty() {
+            config.entity_types = rt.entity_types;
         }
     }
     Some(config)

@@ -39,11 +39,11 @@ pub struct DecisionRecord {
 ///   丢失后后续回测无法验证。现增加 tracing::error! 日志记录失败。
 pub fn record_decision(record: &DecisionRecord) {
     let path = get_records_path();
-    if let Some(parent) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            tracing::error!("[decision_tracker] 创建目录失败: {e}, path={:?}", path);
-            return;
-        }
+    if let Some(parent) = path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        tracing::error!("[decision_tracker] 创建目录失败: {e}, path={:?}", path);
+        return;
     }
     match serde_json::to_string(record) {
         Ok(json) => {

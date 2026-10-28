@@ -213,10 +213,11 @@ pub fn compute_concentration(positions: &[PositionSummary]) -> (f64, HashMap<Str
 
     let mut sector: HashMap<String, f64> = HashMap::new();
     for p in positions {
-        if let (Some(mv), Some(s)) = (p.market_value, &p.sector_name) {
-            if !s.is_empty() && total_mv > 0.0 {
-                *sector.entry(s.clone()).or_default() += (mv / total_mv) * 100.0;
-            }
+        if let (Some(mv), Some(s)) = (p.market_value, &p.sector_name)
+            && !s.is_empty()
+            && total_mv > 0.0
+        {
+            *sector.entry(s.clone()).or_default() += (mv / total_mv) * 100.0;
         }
     }
     let max_sector_pct = sector.values().cloned().fold(0.0_f64, f64::max);

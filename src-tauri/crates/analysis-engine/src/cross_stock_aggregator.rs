@@ -282,10 +282,10 @@ impl CrossStockSignalAggregator {
         // 5) 冷却检查
         {
             let last = self.last_triggered.read().await;
-            if let Some(&last_ts) = last.get(&candidate_dir) {
-                if now - last_ts < cfg.cooldown_secs {
-                    return None;
-                }
+            if let Some(&last_ts) = last.get(&candidate_dir)
+                && now - last_ts < cfg.cooldown_secs
+            {
+                return None;
             }
         }
 

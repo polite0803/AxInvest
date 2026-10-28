@@ -48,12 +48,12 @@ fn parse_index_quotes(json: &str) -> (Vec<serde_json::Value>, Option<String>, Op
     if let Some(arr) = v.as_array() {
         return (arr.clone(), None, None);
     }
-    if let Some(obj) = v.as_object() {
-        if let Some(arr) = obj.get("data").and_then(|d| d.as_array()) {
-            let status = obj.get("status").and_then(|s| s.as_str()).map(str::to_string);
-            let detail = obj.get("detail").and_then(|d| d.as_str()).map(str::to_string);
-            return (arr.clone(), status, detail);
-        }
+    if let Some(obj) = v.as_object()
+        && let Some(arr) = obj.get("data").and_then(|d| d.as_array())
+    {
+        let status = obj.get("status").and_then(|s| s.as_str()).map(str::to_string);
+        let detail = obj.get("detail").and_then(|d| d.as_str()).map(str::to_string);
+        return (arr.clone(), status, detail);
     }
     (
         vec![],

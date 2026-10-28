@@ -322,18 +322,18 @@ impl StockSelfEvolutionEngine {
         }
 
         // 条件 2：反思报告已标记需要进化
-        if report.should_trigger_evolution {
-            if let Some(reason) = &report.evolution_trigger_reason {
-                if reason.contains("信号准确性") {
-                    return Some(EvolutionTrigger::PoorSignalAccuracy {
-                        score: report.dimension_scores.signal_accuracy,
-                    });
-                }
-                if reason.contains("错误模式") {
-                    return Some(EvolutionTrigger::HighErrorRate {
-                        error_count: report.error_patterns.len(),
-                    });
-                }
+        if report.should_trigger_evolution
+            && let Some(reason) = &report.evolution_trigger_reason
+        {
+            if reason.contains("信号准确性") {
+                return Some(EvolutionTrigger::PoorSignalAccuracy {
+                    score: report.dimension_scores.signal_accuracy,
+                });
+            }
+            if reason.contains("错误模式") {
+                return Some(EvolutionTrigger::HighErrorRate {
+                    error_count: report.error_patterns.len(),
+                });
             }
         }
 
@@ -639,10 +639,10 @@ impl StockSelfEvolutionEngine {
                     result.parameter_result = param_result;
                 }
                 // 再流程进化
-                if let Some(template_id) = self.detect_template_id(plan) {
-                    if let Ok(wf_result) = self.evolve_workflow(&template_id, &reflections).await {
-                        result.workflow_result = Some(wf_result);
-                    }
+                if let Some(template_id) = self.detect_template_id(plan)
+                    && let Ok(wf_result) = self.evolve_workflow(&template_id, &reflections).await
+                {
+                    result.workflow_result = Some(wf_result);
                 }
                 result.success =
                     result.parameter_result.is_some() || result.workflow_result.is_some();
@@ -750,10 +750,10 @@ impl StockSelfEvolutionEngine {
     /// 4. 均不匹配时返回 `None`
     fn detect_template_id(&self, plan: &EvolutionPlan) -> Option<String> {
         // 1. 直接指定优先
-        if let Some(ref tid) = plan.template_id {
-            if !tid.is_empty() {
-                return Some(tid.clone());
-            }
+        if let Some(ref tid) = plan.template_id
+            && !tid.is_empty()
+        {
+            return Some(tid.clone());
         }
 
         let desc = &plan.description;

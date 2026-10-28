@@ -2449,17 +2449,17 @@ fn compute_f_score(financials: &[FinancialReport]) -> u32 {
     // P4: 经营现金流 > 净利润（应计质量）
     let np = curr.net_profit.unwrap_or(0.0);
     let ocf = curr.operating_cash_flow;
-    if let (Some(ocf_val), np_val) = (ocf, np) {
-        if ocf_val > np_val {
-            score += 1;
-        }
+    if let (Some(ocf_val), np_val) = (ocf, np)
+        && ocf_val > np_val
+    {
+        score += 1;
     }
 
     // L1: 长期负债/资产负债率不增
-    if let (Some(curr_dr), Some(prev_dr)) = (curr.debt_ratio, prev.and_then(|p| p.debt_ratio)) {
-        if curr_dr <= prev_dr {
-            score += 1;
-        }
+    if let (Some(curr_dr), Some(prev_dr)) = (curr.debt_ratio, prev.and_then(|p| p.debt_ratio))
+        && curr_dr <= prev_dr
+    {
+        score += 1;
     }
     // L2: 流动比率提升
     if let (Some(curr_cr), Some(prev_cr)) = (curr.current_ratio, prev.and_then(|p| p.current_ratio))
@@ -2742,15 +2742,15 @@ fn compute_moat_score(
     //   `< 50.0` —— 负 PE（亏损企业）会命中第二档白拿 +10 分「估值合理性」。
     //   该缺陷此前被 vendor 的 `filter(|v| *v > 0.0)` 掩盖（pe 恒为 None ⇒ 整块不进），
     //   放开负 PE 后必须显式守卫，否则「亏损」反而成为估值加分项。
-    if let Some(pe_val) = pe {
-        if pe_val > 0.0 {
-            if pe_val < 15.0 {
-                score += 15;
-            } else if pe_val < 25.0 {
-                score += 10;
-            } else if pe_val < 50.0 {
-                score += 5;
-            }
+    if let Some(pe_val) = pe
+        && pe_val > 0.0
+    {
+        if pe_val < 15.0 {
+            score += 15;
+        } else if pe_val < 25.0 {
+            score += 10;
+        } else if pe_val < 50.0 {
+            score += 5;
         }
     }
 
@@ -4535,19 +4535,18 @@ fn compute_dcf_inner(
     //     ③「持续亏损 ⇒ DCF 不适用」通常已给出更诚实的处置），不强行用非正中位数。
     // 判据常量 `GROWTH_ANNUAL_SAMPLE`(=5) 即「近 5 年」口径，不另立同义常量。
     let mut cyclical_normalized = false;
-    if cyclical {
-        if let Some(median_fcf) =
+    if cyclical
+        && let Some(median_fcf) =
             crate::cyclical::cyclical_median_annual_fcf(financials, GROWTH_ANNUAL_SAMPLE)
-        {
-            if median_fcf.is_finite() && median_fcf > 0.0 {
-                fcf = median_fcf;
-                fcf_basis = format!(
-                    "周期股行业开关触发（P0-4）：最近年报FCF可能处周期高位、不可永续外推，\
+        && median_fcf.is_finite()
+        && median_fcf > 0.0
+    {
+        fcf = median_fcf;
+        fcf_basis = format!(
+            "周期股行业开关触发（P0-4）：最近年报FCF可能处周期高位、不可永续外推，\
                      改用近{GROWTH_ANNUAL_SAMPLE}年年报FCF中位数（含负值年份）作周期中性化锚定"
-                );
-                cyclical_normalized = true;
-            }
-        }
+        );
+        cyclical_normalized = true;
     }
     // P0-I(2026-09-12): 锚定来源标记，随 `DcfAssumptions` 落库，供 f5 做置信度衰减。
     // 2026-09-21：判据由「等值于某一条 fallback 文案」改为「**不是**真实锚口径」

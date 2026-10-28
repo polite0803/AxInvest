@@ -78,17 +78,21 @@ pub fn compute_factor_completeness(
     // 存在但值域异常/中性值(如 0)的数据不计数，避免"字段有值但不可用"被误算为完整。
 
     // f1: 技术面 — totalScore 有效（0-100 值域）
-    if let Some(s) = total_score {
-        if s.is_finite() && s > 0.0 && s <= 100.0 {
-            present_count += 1.0;
-        }
+    if let Some(s) = total_score
+        && s.is_finite()
+        && s > 0.0
+        && s <= 100.0
+    {
+        present_count += 1.0;
     }
 
     // f2: 共识 — consensusScore 有效（0-100 值域）
-    if let Some(s) = consensus_score {
-        if s.is_finite() && s > 0.0 && s <= 100.0 {
-            present_count += 1.0;
-        }
+    if let Some(s) = consensus_score
+        && s.is_finite()
+        && s > 0.0
+        && s <= 100.0
+    {
+        present_count += 1.0;
     }
 
     // f3: 催化剂 — catalyst_level 非空且非"无"
@@ -100,45 +104,51 @@ pub fn compute_factor_completeness(
     }
 
     // f4: 风险 — volatility 有效（0-200% 年化值域，防 0/NaN/极端值）
-    if let Some(v) = risk_volatility {
-        if v.is_finite() && v > 0.0 && v <= 200.0 {
-            present_count += 1.0;
-        }
+    if let Some(v) = risk_volatility
+        && v.is_finite()
+        && v > 0.0
+        && v <= 200.0
+    {
+        present_count += 1.0;
     }
 
     // f5: 估值 — dcf_upside 有效（有限值，-100~1000 合理区间）
-    if let Some(u) = valuation_dcf_upside {
-        if u.is_finite() && u > -100.0 && u < 1000.0 {
-            present_count += 1.0;
-        }
+    if let Some(u) = valuation_dcf_upside
+        && u.is_finite()
+        && u > -100.0
+        && u < 1000.0
+    {
+        present_count += 1.0;
     }
 
     // f9: 资金面 — main_net_inflow 有效（≠0 表示有实际资金信号；0 为中性不计数）
-    if let Some(flow) = money_flow_main_net_inflow {
-        if flow.is_finite() && flow != 0.0 {
-            present_count += 1.0;
-        }
+    if let Some(flow) = money_flow_main_net_inflow
+        && flow.is_finite()
+        && flow != 0.0
+    {
+        present_count += 1.0;
     }
 
     // f10: 筹码面 — shareholder_trades 数组长度 > 0
-    if let Some(len) = lockup_shareholder_trades_len {
-        if len > 0 {
-            present_count += 1.0;
-        }
+    if let Some(len) = lockup_shareholder_trades_len
+        && len > 0
+    {
+        present_count += 1.0;
     }
 
     // f3 补充: 公告关键词 — announcements 数组长度 > 0
-    if let Some(len) = announcements_len {
-        if len > 0 {
-            present_count += 1.0;
-        }
+    if let Some(len) = announcements_len
+        && len > 0
+    {
+        present_count += 1.0;
     }
 
     // f11: PACE 情绪 — pace_signal 有效（[-1,1] 值域）
-    if let Some(p) = pace_signal {
-        if p.is_finite() && (-1.0..=1.0).contains(&p) {
-            present_count += 1.0;
-        }
+    if let Some(p) = pace_signal
+        && p.is_finite()
+        && (-1.0..=1.0).contains(&p)
+    {
+        present_count += 1.0;
     }
 
     present_count / total_factors
@@ -187,14 +197,16 @@ pub fn compute_kelly_odds(
     posterior: f64,
 ) -> (f64, &'static str) {
     // trader 满足看多条件（sl>0 且 cp>sl 且 tp>cp）→ 用 trader 数据计算
-    if let (Some(tp), Some(sl), Some(cp)) = (trader_target_price, trader_stop_loss, current_price) {
-        if sl > 0.0 && cp > sl && tp > cp {
-            let profit = tp - cp;
-            let loss = cp - sl;
-            if loss > 0.0 {
-                let odds = (profit / loss).clamp(0.0, 10.0);
-                return (odds, "trader");
-            }
+    if let (Some(tp), Some(sl), Some(cp)) = (trader_target_price, trader_stop_loss, current_price)
+        && sl > 0.0
+        && cp > sl
+        && tp > cp
+    {
+        let profit = tp - cp;
+        let loss = cp - sl;
+        if loss > 0.0 {
+            let odds = (profit / loss).clamp(0.0, 10.0);
+            return (odds, "trader");
         }
     }
     // trader 缺失或存在但无效（看空/止损倒挂/垃圾数据）→ 与 rhai 一致走 fallback
@@ -769,30 +781,30 @@ pub fn portfolio_risk_gate(
     // 2. 检查空头目标价强制卖出（BEARISH_TARGET_PRICE_RATIO=0.85）
     //    v183：`target_price` 的来源由 trader 报价换成「现价 ×(1+分析师安全边际)」，
     //    判据、阈值、返回结构一字未动（见 `portfolio-risk-gate.rhai` 的折算段）。
-    if let Ok(force_sell) = PositionLimits::check_bearish_force_sell(current_price, target_price) {
-        if force_sell {
-            return serde_json::to_string(&PortfolioRiskGateOutput {
-                action: "卖出".into(),
-                position_pct: 0.0,
-                risk_level: pm_risk_level.to_string(),
-                adjusted: true,
-                original_action: pm_action.to_string(),
-                original_position_pct: pm_position_pct,
-                reasons: vec![format!(
-                    "R-201 空头预测强制卖出：目标价 {:.2} < 当前价 × 0.85 = {:.2}",
-                    target_price.unwrap_or(0.0),
-                    current_price * crate::position_limits::BEARISH_TARGET_PRICE_RATIO
-                )],
-                concentration_warning: compute_concentration_warning(
-                    top_pct,
-                    max_sector_pct,
-                    n_positions,
-                ),
-                top_holding_pct: top_pct,
+    if let Ok(force_sell) = PositionLimits::check_bearish_force_sell(current_price, target_price)
+        && force_sell
+    {
+        return serde_json::to_string(&PortfolioRiskGateOutput {
+            action: "卖出".into(),
+            position_pct: 0.0,
+            risk_level: pm_risk_level.to_string(),
+            adjusted: true,
+            original_action: pm_action.to_string(),
+            original_position_pct: pm_position_pct,
+            reasons: vec![format!(
+                "R-201 空头预测强制卖出：目标价 {:.2} < 当前价 × 0.85 = {:.2}",
+                target_price.unwrap_or(0.0),
+                current_price * crate::position_limits::BEARISH_TARGET_PRICE_RATIO
+            )],
+            concentration_warning: compute_concentration_warning(
+                top_pct,
                 max_sector_pct,
-            })
-            .unwrap_or_else(|_| "{}".into());
-        }
+                n_positions,
+            ),
+            top_holding_pct: top_pct,
+            max_sector_pct,
+        })
+        .unwrap_or_else(|_| "{}".into());
     }
 
     // 3. 风险档位感知的仓位检查（仅当 action 是买入/增持时检查新增仓位）
@@ -884,16 +896,16 @@ pub fn portfolio_risk_gate(
         all_positions.retain(|_| true); // no-op，保留所有
         all_positions.push(final_pct);
         let normalized = normalize_position_weights(&all_positions, 100.0);
-        if let Some(&new_final) = normalized.last() {
-            if new_final < final_pct {
-                let delta = final_pct - new_final;
-                reasons.push(format!(
-                    "R-209 组合总仓位超 100%，新增仓位归一化 {:.1}%→{:.1}% (-{:.1}%)",
-                    final_pct, new_final, delta
-                ));
-                final_pct = new_final;
-                adjusted = true;
-            }
+        if let Some(&new_final) = normalized.last()
+            && new_final < final_pct
+        {
+            let delta = final_pct - new_final;
+            reasons.push(format!(
+                "R-209 组合总仓位超 100%，新增仓位归一化 {:.1}%→{:.1}% (-{:.1}%)",
+                final_pct, new_final, delta
+            ));
+            final_pct = new_final;
+            adjusted = true;
         }
     }
 

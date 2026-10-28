@@ -60,38 +60,40 @@ fn intl_to_tencent(code: &str) -> Option<String> {
     // 1) 已带腾讯前缀直通（保留原始大小写，腾讯对指数大小写不敏感）
     let lower = t.to_ascii_lowercase();
     for prefix in ["hk", "us"] {
-        if let Some(rest) = lower.strip_prefix(prefix) {
-            if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
-                return Some(format!("{prefix}{}", &t[2..]));
-            }
+        if let Some(rest) = lower.strip_prefix(prefix)
+            && !rest.is_empty()
+            && rest.chars().all(|c| c.is_ascii_alphanumeric())
+        {
+            return Some(format!("{prefix}{}", &t[2..]));
         }
     }
     // 2) 东财 secid（市场位 100/103=国际指数、116=港股、105/106/107=美股）
-    if let Some((market, bare)) = t.split_once('.') {
-        if !bare.is_empty() && bare.chars().all(|c| c.is_ascii_alphanumeric()) {
-            let mapped = match market {
-                "100" | "103" => TC_INTL_INDEX
-                    .iter()
-                    .find(|(alias, _)| alias.eq_ignore_ascii_case(bare))
-                    .map(|(_, tc)| (*tc).to_string()),
-                "116" => Some(format!("hk{bare}")),
-                "105" | "106" | "107" => Some(format!("us{}", bare.to_ascii_uppercase())),
-                _ => None,
-            };
-            if mapped.is_some() {
-                return mapped;
-            }
+    if let Some((market, bare)) = t.split_once('.')
+        && !bare.is_empty()
+        && bare.chars().all(|c| c.is_ascii_alphanumeric())
+    {
+        let mapped = match market {
+            "100" | "103" => TC_INTL_INDEX
+                .iter()
+                .find(|(alias, _)| alias.eq_ignore_ascii_case(bare))
+                .map(|(_, tc)| (*tc).to_string()),
+            "116" => Some(format!("hk{bare}")),
+            "105" | "106" | "107" => Some(format!("us{}", bare.to_ascii_uppercase())),
+            _ => None,
+        };
+        if mapped.is_some() {
+            return mapped;
         }
     }
     // 3) `.HK` / `.US` 后缀（`00700.HK` / `AAPL.US`）
-    if let Some((bare, tag)) = t.rsplit_once('.') {
-        if !bare.is_empty() {
-            if tag.eq_ignore_ascii_case("HK") {
-                return Some(format!("hk{bare}"));
-            }
-            if tag.eq_ignore_ascii_case("US") {
-                return Some(format!("us{}", bare.to_ascii_uppercase()));
-            }
+    if let Some((bare, tag)) = t.rsplit_once('.')
+        && !bare.is_empty()
+    {
+        if tag.eq_ignore_ascii_case("HK") {
+            return Some(format!("hk{bare}"));
+        }
+        if tag.eq_ignore_ascii_case("US") {
+            return Some(format!("us{}", bare.to_ascii_uppercase()));
         }
     }
     // 4) 裸指数别名（`SPX` / `HSI` / `IXIC` …）
@@ -509,14 +511,12 @@ impl StockVendor for TencentVendor {
             let sh_url = format!(
                 "https://{host}/appstock/app/{api_endpoint}?param={sh_code},{period_key}{param_suffix}"
             );
-            if let Ok(r) = self.http.get(&sh_url).send().await {
-                if let Ok(body) = r.text().await {
-                    if let Ok(sh_klines) = parse_klines(&body, &sh_code, period_key, fq_prefix) {
-                        if !sh_klines.is_empty() {
-                            klines = Ok(sh_klines);
-                        }
-                    }
-                }
+            if let Ok(r) = self.http.get(&sh_url).send().await
+                && let Ok(body) = r.text().await
+                && let Ok(sh_klines) = parse_klines(&body, &sh_code, period_key, fq_prefix)
+                && !sh_klines.is_empty()
+            {
+                klines = Ok(sh_klines);
             }
         }
 

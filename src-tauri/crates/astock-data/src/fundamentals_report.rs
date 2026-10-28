@@ -168,20 +168,21 @@ impl FundamentalsAnalyzer {
         } else if let (Some(bps), true) = (r.bps, bps_is_valid(r.bps)) {
             r.pb = Some(quote.price / bps);
         }
-        if let (Some(rev), Some(mv)) = (latest.and_then(|f| f.revenue), quote.total_mv) {
-            if rev > 0.0 {
-                r.ps = Some(mv / rev);
-            }
+        if let (Some(rev), Some(mv)) = (latest.and_then(|f| f.revenue), quote.total_mv)
+            && rev > 0.0
+        {
+            r.ps = Some(mv / rev);
         }
-        if let (Some(pe), Some(yoy)) = (r.pe, r.revenue_yoy) {
-            if yoy.abs() > 0.0 && pe > 0.0 {
-                r.peg = Some(pe / yoy);
-            }
+        if let (Some(pe), Some(yoy)) = (r.pe, r.revenue_yoy)
+            && yoy.abs() > 0.0
+            && pe > 0.0
+        {
+            r.peg = Some(pe / yoy);
         }
-        if let (Some(mv), Some(fcf)) = (quote.total_mv, r.fcf) {
-            if mv > 0.0 {
-                r.fcf_yield = Some(fcf / mv * 100.0);
-            }
+        if let (Some(mv), Some(fcf)) = (quote.total_mv, r.fcf)
+            && mv > 0.0
+        {
+            r.fcf_yield = Some(fcf / mv * 100.0);
         }
 
         r
@@ -290,10 +291,10 @@ impl FundamentalsAnalyzer {
             let dir = if yoy > 0.0 { "增长" } else { "下滑" };
             t.push(format!("净利同比 {:.1}% ({})", yoy, dir));
         }
-        if let Some(d) = r.debt_ratio {
-            if d > 70.0 {
-                t.push(format!("⚠️ 资产负债率偏高 {:.1}%", d));
-            }
+        if let Some(d) = r.debt_ratio
+            && d > 70.0
+        {
+            t.push(format!("⚠️ 资产负债率偏高 {:.1}%", d));
         }
         let market = crate::detect_market_type(&quote.code);
         let pct = crate::get_st_price_limit_pct(quote.is_st, market);

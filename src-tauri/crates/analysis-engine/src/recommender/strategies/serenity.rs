@@ -123,27 +123,29 @@ impl SerenityStrategy {
 
         // 5a. PE 上限过滤（高增长豁免：营收增速≥阈值时跳过PE检查）
         let max_pe = read_f64(vars, "serenity_max_pe", 100.0);
-        if let Some(pe) = quote.pe {
-            if pe > max_pe && serenity_score < 85.0 {
-                let growth_exempt_pct = read_f64(vars, "serenity_growth_exempt_pct", 50.0);
-                // 高增长标的PE常偏高，营收增速超过阈值时豁免PE检查
-                if rev_growth < growth_exempt_pct {
-                    tracing::info!(
-                        "{code}: PE={pe:.1} > {max_pe} 且增长率={rev_growth:.1}%（{growth_basis}）<{growth_exempt_pct}%, 因估值过高排除"
-                    );
-                    return None;
-                }
-                // PE高但增速也高，放行（用户可调 growth_exempt_pct 控制松紧）
+        if let Some(pe) = quote.pe
+            && pe > max_pe
+            && serenity_score < 85.0
+        {
+            let growth_exempt_pct = read_f64(vars, "serenity_growth_exempt_pct", 50.0);
+            // 高增长标的PE常偏高，营收增速超过阈值时豁免PE检查
+            if rev_growth < growth_exempt_pct {
+                tracing::info!(
+                    "{code}: PE={pe:.1} > {max_pe} 且增长率={rev_growth:.1}%（{growth_basis}）<{growth_exempt_pct}%, 因估值过高排除"
+                );
+                return None;
             }
+            // PE高但增速也高，放行（用户可调 growth_exempt_pct 控制松紧）
         }
 
         // 5b. PB 上限过滤
         let max_pb = read_f64(vars, "serenity_max_pb", 10.0);
-        if let Some(pb) = quote.pb {
-            if pb > max_pb && serenity_score < 85.0 {
-                tracing::info!("{code}: PB={pb:.1} > {max_pb}, 因估值过高排除");
-                return None;
-            }
+        if let Some(pb) = quote.pb
+            && pb > max_pb
+            && serenity_score < 85.0
+        {
+            tracing::info!("{code}: PB={pb:.1} > {max_pb}, 因估值过高排除");
+            return None;
         }
 
         // 5c. 近3月涨幅过滤（基于K线数据）
@@ -348,10 +350,10 @@ impl SerenityStrategy {
             risk_notes.push(format!("⚠ 涨幅过滤未生效：{skipped}"));
         }
         // workflow 诊断的主风险
-        if let Some(primary_risk) = detail["primary_risk"].as_str() {
-            if !primary_risk.is_empty() {
-                risk_notes.push(format!("工作流诊断风险: {}", primary_risk));
-            }
+        if let Some(primary_risk) = detail["primary_risk"].as_str()
+            && !primary_risk.is_empty()
+        {
+            risk_notes.push(format!("工作流诊断风险: {}", primary_risk));
         }
         // 退出信号
         if let Some(urgency) = exit_signals.get("overall_exit_urgency").and_then(|v| v.as_str()) {
@@ -364,10 +366,10 @@ impl SerenityStrategy {
         // 技术替代风险
         if let Some(tech_risk) =
             exit_signals.get("technology_disruption_risk").and_then(|v| v.as_str())
+            && !tech_risk.is_empty()
+            && !tech_risk.eq_ignore_ascii_case("null")
         {
-            if !tech_risk.is_empty() && !tech_risk.eq_ignore_ascii_case("null") {
-                risk_notes.push(format!("技术替代风险: {}", tech_risk));
-            }
+            risk_notes.push(format!("技术替代风险: {}", tech_risk));
         }
         // 毛利率下降
         if !margin_trend_ok && financials.len() >= 2 {

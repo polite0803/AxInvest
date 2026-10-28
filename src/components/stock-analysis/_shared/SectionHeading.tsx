@@ -22,7 +22,7 @@ export function SectionHeading({
           height: 20,
           borderRadius: 10,
           background: "var(--accent)",
-          color: "#fff",
+          color: "var(--accent-fg)",
           fontSize: 12,
           fontWeight: 600,
           display: "inline-flex",

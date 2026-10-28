@@ -1936,6 +1936,8 @@ pub async fn run_batch_reflection(
         max_count
     );
 
+    // 批次开始时刻：用于把「本轮写过的行」与历史行分开（见 `split_resolved_outcomes`）。
+    let batch_started_ms = chrono::Utc::now().timestamp_millis();
     let mut resolved = 0u32;
     let mut failed = 0u32;
     let mut skipped_young = 0u32; // 分析日之后还没有完整交易日的新行情
@@ -2049,7 +2051,7 @@ pub async fn run_batch_reflection(
         }
 
         // 2c. [实际行情] 四周期行情拉取 + 反思调用 → perform_single_reflection（技术债已清）。
-        let r = perform_single_reflection(
+        let call = perform_single_reflection(
             "D1",
             db,
             &state.astock_client,
@@ -2067,8 +2069,42 @@ pub async fn run_batch_reflection(
             // 例外：**漏检回放行必须成熟**（PLAN 阶段 B-2）—— 手动/validate 通道提前
             // 写下的「期中观察」会把终评名额永久消耗掉（002696 mid 27/28 被盖章实锤）。
             p.source == REFLECTION_SOURCE_MOVER_RECALL,
+        );
+
+        // ── 单条超时（2026-10-28）──
+        // 实证：2026-10-28 17:00 那次手动批次卡在 002812 上 45 分钟没有任何进展，
+        // 整批因此永远写不出完成行 —— UI 只能显示上一轮历史，用户看到的是「几秒就完成」。
+        // 单条 LLM 链路没有上限时，一次挂起就冻住整条队列；这里给它一个硬上限。
+        // 超时**退回 pending**（不是失败）：挂起多为供应商抖动，下一轮重试是正确处置；
+        // 若同一行反复超时，它会在队列里被看到，而不是无声消失。
+        let r = match tokio::time::timeout(
+            std::time::Duration::from_secs(REFLECTION_ROW_TIMEOUT_SECS),
+            call,
         )
-        .await;
+        .await
+        {
+            Ok(v) => v,
+            Err(_) => {
+                tracing::warn!(
+                    "[reflection] {} ({}) 单条超时（{}s）⇒ 退回 pending，本轮跳过",
+                    p.id,
+                    p.stock_code,
+                    REFLECTION_ROW_TIMEOUT_SECS
+                );
+                let _ = stock_reflections::Entity::update_many()
+                    .col_expr(stock_reflections::Column::Status, Expr::value("pending"))
+                    .col_expr(
+                        stock_reflections::Column::UpdatedAt,
+                        Expr::value(chrono::Utc::now().timestamp_millis()),
+                    )
+                    .filter(stock_reflections::Column::Id.eq(&p.id))
+                    .exec(db)
+                    .await;
+                failed += 1;
+                errors.push(format!("{}: TIMEOUT({}s)", p.id, REFLECTION_ROW_TIMEOUT_SECS));
+                continue;
+            },
+        };
 
         match r {
             Ok(ReflectionOutcome::SkippedYoung) => {
@@ -2148,6 +2184,13 @@ pub async fn run_batch_reflection(
     }
     tracing::info!("[D2 fifo_cleanup] 分批删除 {} 条超龄 completed row", cleaned_up);
 
+    // 真实结果：`resolved` 只代表「离开 pending」，不代表成功（详见 `split_resolved_outcomes`）。
+    let (completed_rows, failed_status_rows) = split_resolved_outcomes(db, batch_started_ms).await;
+    tracing::info!(
+        "[D1 batch_reflection] 真实结果: completed={} resolved_with_failure={}",
+        completed_rows,
+        failed_status_rows
+    );
     tracing::info!(
         "[D1 batch_reflection] 完成: total={} resolved={} failed={} skipped_young={} \
          skipped_immature={} orphans={} cleaned={}",
@@ -2165,6 +2208,9 @@ pub async fn run_batch_reflection(
         "processed": pendings.len().min(max_count),
         "resolved": resolved,
         "failed": failed,
+        // 逐条真实结果：`resolved` 含内部失败行，这两个字段才是「成 / 败」
+        "completed": completed_rows,
+        "resolvedWithFailure": failed_status_rows,
         "skippedYoung": skipped_young,
         "skippedImmature": skipped_immature,
         "orphans": orphans,
@@ -3287,6 +3333,8 @@ pub async fn run_batch_reflection_inner(
         max_count
     );
 
+    // 批次开始时刻：用于把「本轮写过的行」与历史行分开（见 `split_resolved_outcomes`）。
+    let batch_started_ms = chrono::Utc::now().timestamp_millis();
     let mut resolved = 0u32;
     let mut failed = 0u32;
     let mut skipped_young = 0u32;
@@ -3468,6 +3516,13 @@ pub async fn run_batch_reflection_inner(
         }
     }
 
+    // 真实结果：`resolved` 只代表「离开 pending」，不代表成功（详见 `split_resolved_outcomes`）。
+    let (completed_rows, failed_status_rows) = split_resolved_outcomes(db, batch_started_ms).await;
+    tracing::info!(
+        "[batch_reflection_inner] 真实结果: completed={} resolved_with_failure={}",
+        completed_rows,
+        failed_status_rows
+    );
     tracing::info!(
         "[batch_reflection_inner] 完成: total={} resolved={} failed={} skipped_young={} \
          skipped_immature={} orphans={} skipped_by_filter={} reclaimed={} cleaned={}",
@@ -3487,6 +3542,9 @@ pub async fn run_batch_reflection_inner(
         "processed": pendings.len().min(max_count),
         "resolved": resolved,
         "failed": failed,
+        // 逐条真实结果：`resolved` 含内部失败行，这两个字段才是「成 / 败」
+        "completed": completed_rows,
+        "resolvedWithFailure": failed_status_rows,
         "skippedYoung": skipped_young,
         "skippedImmature": skipped_immature,
         "orphans": orphans,
@@ -4978,6 +5036,28 @@ fn normalize_params_suggestion(raw: Option<String>, analysis_id: &str) -> Option
 //      一个有效前缀并解析出 candidates
 //   4) Agent 节点输出顶层 params / output / candidates 字段 → 直返
 //   5) extract_agent_output 顶层 params 优先于 content
+
+/// 单条反思的硬超时（秒）。见批次循环里的「单条超时」注释：没有它，一次挂起就冻住整批。
+const REFLECTION_ROW_TIMEOUT_SECS: u64 = 180;
+
+/// 把「离开 pending」拆成「真完成」与「写出失败标记」两桶。
+///
+/// 为什么需要（2026-10-28）：任务中心只有 `resolved`，它在 `Ok(Completed)` 时 +1，
+/// 而 `Completed` 只表示 `run_reflection_workflow` 没抛错 —— 函数内部写
+/// `status='failed: REFLECTION_OUTPUT_INCOMPLETE'` 照样返回 `Ok`（见其 Completed 返回点）。
+/// 于是「10 条全部失败」在面板上显示成「成功、resolved=10」。
+/// 本函数读库里的 status 前缀，把批次级成功与逐条结果分开；`since_ms` 传批次开始时刻，
+/// 避免把历史行算进本轮。
+async fn split_resolved_outcomes(db: &DatabaseConnection, since_ms: i64) -> (u64, u64) {
+    let rows = stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::UpdatedAt.gte(since_ms))
+        .all(db)
+        .await
+        .unwrap_or_default();
+    let completed = rows.iter().filter(|r| r.status == "completed").count() as u64;
+    let failed_status = rows.iter().filter(|r| r.status.starts_with("failed:")).count() as u64;
+    (completed, failed_status)
+}
 
 // ── 单元测试：[实际行情] 快照渲染与目标价提取（纯函数，无需网络）──
 //

@@ -7106,6 +7106,7 @@ mod sampling_source_tests {
                 top_p: None,
                 use_max_completion_tokens: None,
                 thinking_param_style: None,
+                thinking_budget: None,
             }
         );
     }

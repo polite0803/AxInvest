@@ -2,7 +2,7 @@
 //!
 //! v1 不做长线（设计文档 §2.3）
 
-use super::super::strategy::{read_f64, RecoContext, RecommendStrategy};
+use super::super::strategy::{RecoContext, RecommendStrategy, read_f64};
 use crate::candlestick_pattern;
 use crate::divergence;
 use crate::recommender::indicators;

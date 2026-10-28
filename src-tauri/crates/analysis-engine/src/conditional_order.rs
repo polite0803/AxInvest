@@ -227,7 +227,7 @@ impl ConditionalOrder {
                 None => {
                     return WindowState::BadWindow(format!(
                         "生效时段起点格式非法（应为 HH:MM）：{raw}"
-                    ))
+                    ));
                 },
             },
         };
@@ -238,7 +238,7 @@ impl ConditionalOrder {
                 None => {
                     return WindowState::BadWindow(format!(
                         "生效时段终点格式非法（应为 HH:MM）：{raw}"
-                    ))
+                    ));
                 },
             },
         };

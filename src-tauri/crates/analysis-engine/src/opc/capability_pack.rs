@@ -11,8 +11,8 @@
 //! 启动扫描注册到 `opc_capability_packs` 表，支持单独启用/禁用/导出/导入。
 //! 域包级版本号取代全局 OPC_TEMPLATE_VERSION，域包间互不影响。
 
-use axagent_harness::util_fns::now_ts;
 use axagent_harness::CapabilityDomain;
+use axagent_harness::util_fns::now_ts;
 use sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use std::io::Write;

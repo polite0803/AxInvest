@@ -5512,8 +5512,10 @@ mod board_ranking_tests {
         assert!((ok.1 - 6.0).abs() < 1e-9, "涨跌幅 = 收盘/前收 - 1: {ok:?}");
 
         // 越过截止日的那根必须剔掉 ⇒ 裁完只剩一根 ⇒ 算不出涨跌幅，如实 None（不编 0%）
-        assert!(board_change_from_bars(&bars(&["2026-09-11,100", "2026-09-12,180"]), "2026-09-11")
-            .is_none());
+        assert!(
+            board_change_from_bars(&bars(&["2026-09-11,100", "2026-09-12,180"]), "2026-09-11")
+                .is_none()
+        );
         let shifted = board_change_from_bars(
             &bars(&["2026-09-09,100", "2026-09-10,102", "2026-09-12,180"]),
             "2026-09-11",
@@ -5523,8 +5525,10 @@ mod board_ranking_tests {
         assert!((shifted.1 - 2.0).abs() < 1e-9, "{shifted:?}");
 
         assert!(board_change_from_bars(&bars(&["2026-09-11,100"]), "2026-09-11").is_none());
-        assert!(board_change_from_bars(&bars(&["2026-09-09,0", "2026-09-11,5"]), "2026-09-11")
-            .is_none());
+        assert!(
+            board_change_from_bars(&bars(&["2026-09-09,0", "2026-09-11,5"]), "2026-09-11")
+                .is_none()
+        );
     }
 
     /// 合成主体按 URL 分夹具 ⇒ 零真实网络也覆盖到「排序 + 算不出就跳过 + 越界不采信」。

@@ -9,8 +9,8 @@
 //! - **隐藏顶背离**：价格未创更高高点，RSI/OBV 创更高高点 → 上升趋势持续中的回调
 //! - **隐藏底背离**：价格未创更低低点，RSI/OBV 创更低低点 → 下降趋势持续中的反弹
 
-use crate::indicators::rsi;
 use crate::KLine;
+use crate::indicators::rsi;
 use serde::Serialize;
 
 /// 背离检测结果

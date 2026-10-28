@@ -1,7 +1,7 @@
 use axagent_astock_data::indicators::TechnicalIndicators;
 
 use crate::decision::RuleConfig;
-use crate::decision_action::{normalize_action, ActionKind};
+use crate::decision_action::{ActionKind, normalize_action};
 use crate::scoring::ObjectiveScore;
 
 /// 规则检查结果

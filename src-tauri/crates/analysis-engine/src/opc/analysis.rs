@@ -525,7 +525,7 @@ impl SelfImprovingRound for OpcCapabilityPackAnalysisRound {
 
 #[cfg(test)]
 mod tests {
-    use super::{risk_scoped_kpi_keys, DecisionType, DeclaredKpiThreshold, OpcRiskGate, RiskLevel};
+    use super::{DecisionType, DeclaredKpiThreshold, OpcRiskGate, RiskLevel, risk_scoped_kpi_keys};
     use crate::opc::analytics::{KpiAvailability, KpiValue};
 
     /// 跨语言契约夹具：本枚举的序列化值域必须与前端 `src/pages/opc/domains/types.ts`

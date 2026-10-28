@@ -10,7 +10,7 @@
 //! - valuation: 估值节点（估值区间+合理性结构）
 //! - risk: 风险节点（风险指标+阈值合规结构）
 
-use crate::decision_action::{normalize_action, ACTION_ALIASES};
+use crate::decision_action::{ACTION_ALIASES, normalize_action};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -769,7 +769,7 @@ pub fn aggregate_consistency_rates<'a>(
 
 #[cfg(test)]
 mod consistency_tests {
-    use super::{aggregate_consistency_rates, calc_consistency_metrics, NodeType};
+    use super::{NodeType, aggregate_consistency_rates, calc_consistency_metrics};
     use serde_json::json;
 
     // 2026-10-25 判据：一致性指标**只有载荷真带那个键才算**。

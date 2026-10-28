@@ -46,7 +46,7 @@ const cargoPath = resolve(root, "src-tauri/Cargo.toml");
 let cargoContent = readFileSync(cargoPath, "utf-8");
 
 // 旧 workspace 版本（lock 同步用）：只有 version 恰好等于它的 path 包才是 workspace 成员，
-// 显式写死自己版本号的本地 crate（如 analysis-engine = 0.1.0）不跟随 workspace，不能改。
+// 显式写死自己版本号的本地 crate 不跟随 workspace，不能改（当前所有成员均继承 workspace 版本）。
 const cargoOldVersion = (
   cargoContent.match(/\[workspace\.package\][\s\S]*?version\s*=\s*"([^"]*)"/) ??
     cargoContent.match(/\[package\][\s\S]*?version\s*=\s*"([^"]*)"/)

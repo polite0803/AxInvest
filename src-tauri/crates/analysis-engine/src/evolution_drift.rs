@@ -29,12 +29,12 @@ use axagent_entities::{
 };
 use axagent_harness::Period;
 
-use crate::decision_action::{normalize_action, ActionKind};
+use crate::decision_action::{ActionKind, normalize_action};
 use crate::evolution_optimizer::EvolutionResult;
-use crate::reflection_stats::{expand_horizon_samples, DecisionPerformanceSample};
+use crate::reflection_stats::{DecisionPerformanceSample, expand_horizon_samples};
 use crate::types::StrategyTrend;
 use crate::weight_decay::{
-    compute_adjusted_weights, format_rationale, StrategyPerformanceRow, WeightDecayConfig,
+    StrategyPerformanceRow, WeightDecayConfig, compute_adjusted_weights, format_rationale,
 };
 
 /// 进化历史中「人工已接受」状态（P4 两段式审批的接受态）。

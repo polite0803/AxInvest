@@ -3,8 +3,8 @@
 //! 纯函数，接收 JSON 字符串输入，输出结构化信号结果。
 
 use crate::candlestick_pattern;
-use axagent_astock_data::indicators::sma;
 use axagent_astock_data::KLine;
+use axagent_astock_data::indicators::sma;
 use serde::{Deserialize, Serialize};
 
 /// K 线原始数据（从 JSON 反序列化）。

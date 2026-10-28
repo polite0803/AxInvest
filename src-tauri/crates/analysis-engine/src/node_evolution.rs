@@ -10,7 +10,7 @@
 //! 2. 分析反馈中的共性问题（类型相关的质量指标）
 //! 3. 当问题频率超过阈值时，自动生成并应用优化建议
 
-use crate::node_quality::{aggregate_consistency_rates, NodeType};
+use crate::node_quality::{NodeType, aggregate_consistency_rates};
 use axagent_entities::analyst_feedback::{Entity as AnalystFeedback, Model as FeedbackModel};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};

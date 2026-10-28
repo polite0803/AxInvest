@@ -34,7 +34,7 @@ use axagent_trajectory::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::evolution_optimizer::{param_defs, EvolutionResult};
+use crate::evolution_optimizer::{EvolutionResult, param_defs};
 use crate::stock_reflection::{StockReflectionEngine, StockReflectionReport};
 use crate::weight_decay::WeightDecayConfig;
 
@@ -1188,9 +1188,11 @@ mod tests {
     #[tokio::test]
     async fn parameter_evolution_runs_with_mock_data() {
         let engine = make_test_engine();
-        let reflections = vec![Reflection::new("evo-test".to_string())
-            .with_quality(7, "质量良好".to_string())
-            .with_patterns(vec![], vec!["输出有效".to_string()])];
+        let reflections = vec![
+            Reflection::new("evo-test".to_string())
+                .with_quality(7, "质量良好".to_string())
+                .with_patterns(vec![], vec!["输出有效".to_string()]),
+        ];
 
         let (result, stats) = engine.evolve_parameters(&reflections).await.expect("参数进化应成功");
 

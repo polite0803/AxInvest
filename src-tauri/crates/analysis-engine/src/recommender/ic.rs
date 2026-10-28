@@ -21,7 +21,7 @@ use serde::Serialize;
 
 use crate::recommender::types::Period;
 
-use crate::reflection_stats::{signal_half_life_days, IC_MIN_SAMPLE};
+use crate::reflection_stats::{IC_MIN_SAMPLE, signal_half_life_days};
 
 /// 一条已实现的荐股预测样本。
 #[derive(Debug, Clone)]

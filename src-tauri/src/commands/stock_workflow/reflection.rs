@@ -20,41 +20,38 @@ use sea_orm::{
 use std::sync::Arc;
 use tauri::State;
 
-/// 从反思输出中按 key 取值，兼容三种**实测存在**的落库形态。
+/// 从反思输出中按 key 取值，**递归**穿透任意层「JSON 字符串 / 对象 / 数组」包装。
 ///
-/// 实测依据（`stock_reflections` 11 条 completed，2026-09-23）：
-/// - ① 顶层直接命中：`{"verdict": "..."}`
-/// - ② 一层嵌套对象：`{"reflection": {"verdict": "..."}}`（1 条，code_diff_proposal 形态）
-/// - ③ 内层 JSON 字符串（双重编码）：`{"report": "{\"verdict\": \"partial\", ...}"}`（10 条）
+/// 实测依据：
+/// - 2026-09-23（11 条 completed）：① 顶层、② 一层嵌套对象、③ 内层 JSON 字符串。
+/// - **2026-10-28（29 条 `OUTPUT_INCOMPLETE`，逐条核对）**：外层是节点输出对象，
+///   `content` 是**字符串**，解析后是 `{"report": "<又一层字符串>"}`，`report` 再解析才见
+///   `verdict` —— 即**三段编码**。旧实现只下探一层 ⇒ `has_verdict` 恒 false ⇒
+///   29/29 条明明有合法 verdict 却被判「输出不完整」，反思永远无法落 completed。
 ///
-/// 旧实现一律 `json.get(key)` 只读顶层 ⇒ ② ③ 全部取不到，
-/// 使 `verdict` / `lesson_summary` / `alpha_cited` 恒 NULL，
-/// 进而把 `was_correct` 压成 0（详见 PLAN-analysis-data-repair.md 缺陷 D1/D2）。
-///
-/// 与入口的关系：`extract_agent_output` 已在入口对 `report` 做解包（serenity.rs），
-/// 但**历史数据不经入口回灌**，且其它包装键（如 `reflection`）不由入口处理 ⇒
-/// 本函数是消费侧的第二道防线，与入口解包**二者不可只留其一**。
+/// ⇒ 不再数层数，改为递归下探（深度上限 4 防病态脏数据）。这是消费侧的**唯一**取法，
+/// 入口的 `extract_agent_output` 解包只处理入口路径，历史数据与其它包装键仍靠这里。
 fn deep_get_reflection_field(v: &serde_json::Value, key: &str) -> Option<serde_json::Value> {
-    let obj = v.as_object()?;
-    // ① 顶层命中
-    if let Some(hit) = obj.get(key) {
-        return Some(hit.clone());
-    }
-    // ② / ③ 下探一层子值
-    for child in obj.values() {
-        if let Some(inner) = child.as_object() {
-            if let Some(hit) = inner.get(key) {
-                return Some(hit.clone());
-            }
-        } else if let Some(parsed) =
-            child.as_str().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-        {
-            if let Some(hit) = parsed.get(key) {
-                return Some(hit.clone());
-            }
+    fn walk(v: &serde_json::Value, key: &str, depth: u8) -> Option<serde_json::Value> {
+        if depth > 4 {
+            return None;
+        }
+        match v {
+            serde_json::Value::Object(obj) => {
+                if let Some(hit) = obj.get(key) {
+                    return Some(hit.clone());
+                }
+                obj.values().find_map(|child| walk(child, key, depth + 1))
+            },
+            serde_json::Value::Array(items) => items.iter().find_map(|it| walk(it, key, depth + 1)),
+            serde_json::Value::String(s) => {
+                let parsed = serde_json::from_str::<serde_json::Value>(s).ok()?;
+                walk(&parsed, key, depth + 1)
+            },
+            _ => None,
         }
     }
-    None
+    walk(v, key, 0)
 }
 
 /// `deep_get_reflection_field` 的字符串便捷取法（反思字段绝大多数是字符串）。

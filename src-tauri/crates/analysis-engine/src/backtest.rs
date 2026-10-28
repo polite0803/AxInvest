@@ -4,7 +4,7 @@ use crate::decision::ScoringWeights;
 
 /// 回测使用的日 K 线数量（约 2 个交易年）。覆盖 analysis_date 后需有足够余量。
 const BACKTEST_KLINE_COUNT: u32 = 500;
-use crate::decision_action::{normalize_action, ActionKind};
+use crate::decision_action::{ActionKind, normalize_action};
 use axagent_harness::market_data::{AdjType, MarketDataProvider};
 use sea_orm::DatabaseConnection;
 

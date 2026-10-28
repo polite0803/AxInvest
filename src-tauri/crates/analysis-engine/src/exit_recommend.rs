@@ -2,7 +2,7 @@
 //! RSI 顶背离、组合风险，推荐在未来什么时间以什么价格挂出哪些持仓股票。
 
 use crate::candlestick_pattern;
-use crate::decision_action::{normalize_action, ActionKind};
+use crate::decision_action::{ActionKind, normalize_action};
 use crate::divergence;
 use axagent_astock_data::indicators::compute_indicators;
 use axagent_entities::{portfolio_holdings, stock_analyses};

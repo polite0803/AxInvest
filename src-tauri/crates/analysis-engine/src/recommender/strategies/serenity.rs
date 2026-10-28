@@ -7,7 +7,7 @@
 //!
 //! 工作流：workflow 生成候选池 → 持久化 + 全量缓存 → SerenityStrategy 读取 → scan_one 验证
 
-use super::super::strategy::{read_f64, RecoContext, RecommendStrategy};
+use super::super::strategy::{RecoContext, RecommendStrategy, read_f64};
 use crate::recommender::scoring::{calc_confidence, calc_position};
 use crate::recommender::types::{Period, RecoPick, Style};
 use async_trait::async_trait;

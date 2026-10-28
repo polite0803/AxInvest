@@ -27,9 +27,9 @@ use axagent_trajectory::numeric_evolution::{
 use axagent_trajectory::skill_evolution::EvolutionConfig;
 
 use crate::evolution_drift::{
-    load_current_weights_excluding, load_performance_window, RECO_LOOP_TRIGGER,
+    RECO_LOOP_TRIGGER, load_current_weights_excluding, load_performance_window,
 };
-use crate::weight_decay::{compute_adjusted_weights, WeightDecayConfig};
+use crate::weight_decay::{WeightDecayConfig, compute_adjusted_weights};
 
 /// 参数进化读取策略表现样本的回看窗口（天）。
 ///

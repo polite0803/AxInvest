@@ -500,7 +500,7 @@ impl StockScreener {
         // 2. 行业排名靠前的龙头
         if let Ok(industries) = client.get_industry_ranking().await {
             for ind in industries.iter().take(10) {
-                if let (Some(ref code), Some(ref name)) = (&ind.leader_code, &ind.leader_name) {
+                if let (Some(code), Some(name)) = (&ind.leader_code, &ind.leader_name) {
                     if seen.insert(code.clone()) {
                         stocks.push((code.clone(), name.clone()));
                     }

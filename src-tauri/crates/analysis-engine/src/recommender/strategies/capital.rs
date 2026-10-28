@@ -3,7 +3,7 @@
 //! 注：v1 资金流向数据仅当日，逻辑上做了"日级窗口"近似；
 //! 真正多日窗口需后续扩 AStockClient 接口。
 
-use super::super::strategy::{read_f64, RecoContext, RecommendStrategy};
+use super::super::strategy::{RecoContext, RecommendStrategy, read_f64};
 use crate::recommender::scoring::{calc_confidence, calc_position};
 use crate::recommender::types::{Period, RecoPick, Style};
 use async_trait::async_trait;

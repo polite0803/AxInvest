@@ -30,7 +30,7 @@
 
 use axagent_harness::Period;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// 一格最少观测数：Fisher-z 的正态近似在 n≥30 才够用，低于此区间宽度本身不可信。
 pub const LEG_MIN_SAMPLES: usize = 30;

@@ -1,7 +1,7 @@
 //! 技术指标辅助函数
 
-use axagent_astock_data::indicators::{build_ema_series, rsi as astock_rsi, sma as astock_sma};
 use axagent_astock_data::KLine;
+use axagent_astock_data::indicators::{build_ema_series, rsi as astock_rsi, sma as astock_sma};
 
 /// 简单移动平均（委托 `axagent_astock_data::indicators::sma`，避免重复实现）
 pub fn sma(prices: &[f64], period: usize) -> Option<f64> {

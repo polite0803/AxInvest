@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use crate::error::DataError;
-use crate::outcome::{outcome_from_opt, outcome_from_vec, Expect};
+use crate::outcome::{Expect, outcome_from_opt, outcome_from_vec};
 
 // ── G14 DojoSDK 工具执行器（trait + 全局注册器） ─────────────────────────
 //
@@ -1704,11 +1704,7 @@ pub async fn execute_mcp_tool(
             // 正确: oe(元) / mv(元) × 100
             let oe_yield =
                 if let (Some(mv), Some(oe)) = (total_mv, compute_owner_earnings(&financials)) {
-                    if mv > 0.0 {
-                        (oe / mv) * 100.0
-                    } else {
-                        0.0
-                    }
+                    if mv > 0.0 { (oe / mv) * 100.0 } else { 0.0 }
                 } else {
                     0.0
                 };
@@ -8159,7 +8155,7 @@ mod consensus_gap_tests {
     //!
     //! ⚠ 本模块必须在文件**末尾**（`clippy::items_after_test_module` 只在 clippy 下暴露）。
 
-    use super::{classify_consensus_gap, MIN_CONSENSUS_REPORTS};
+    use super::{MIN_CONSENSUS_REPORTS, classify_consensus_gap};
 
     /// **核心回归**：样本不足时不得给方向性判断 —— 单篇是「个别券商观点」，不是共识。
     /// 旧实现在此输入下（单篇目标价 = 现价 3 倍）必然输出「明显低估」。
@@ -8220,7 +8216,7 @@ mod attention_window_tests {
     //! 本模块锁两件事：① 边界随锚点走（同一批发布日，换锚点结论就换）；
     //! ② 判据不因「今天」而变 —— 也就是回归「两次同 as_of_date 读数必须相同」的纯函数形态。
 
-    use super::{publish_within_window, ATTENTION_WINDOW_DAYS};
+    use super::{ATTENTION_WINDOW_DAYS, publish_within_window};
     use chrono::NaiveDate;
 
     fn d(s: &str) -> NaiveDate {

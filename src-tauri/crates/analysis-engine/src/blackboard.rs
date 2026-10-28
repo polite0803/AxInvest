@@ -4,7 +4,7 @@
 //! 供回放审计与跨日报告聚合使用。
 
 use axagent_astock_data::as_of::{AsOfContext, DegradationEntry};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 
 /// 工作流结果 → blackboard_snapshot（JSON 对象，键名采用约定前缀）

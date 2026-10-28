@@ -1155,7 +1155,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "需真实网络 + 多页翻页；仅在手工验证舆情 as-of 通道时跑"]
     async fn social_asof_live() {
-        use crate::as_of::{AsOfContext, AsOfSource, AS_OF};
+        use crate::as_of::{AS_OF, AsOfContext, AsOfSource};
         let v = GubaVendor::new();
         let ctx = AsOfContext::new(
             chrono::NaiveDate::from_ymd_opt(2026, 9, 28).unwrap(),

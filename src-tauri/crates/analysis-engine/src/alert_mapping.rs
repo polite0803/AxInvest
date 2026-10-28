@@ -228,11 +228,7 @@ pub fn single_threshold_of(config: &MonitorConfig) -> Option<(&'static str, f64)
     .into_iter()
     .filter_map(|(k, v)| v.map(|x| (k, x)))
     .collect::<Vec<_>>();
-    if hits.len() == 1 {
-        Some(hits[0])
-    } else {
-        None
-    }
+    if hits.len() == 1 { Some(hits[0]) } else { None }
 }
 
 #[cfg(test)]

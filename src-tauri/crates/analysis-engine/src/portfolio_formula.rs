@@ -7,7 +7,7 @@
 //!
 //! 所有函数均为纯函数，无副作用，无异步。
 
-use crate::decision_action::{normalize_action, ActionKind};
+use crate::decision_action::{ActionKind, normalize_action};
 use crate::position_limits::RiskTier;
 use serde::{Deserialize, Serialize};
 

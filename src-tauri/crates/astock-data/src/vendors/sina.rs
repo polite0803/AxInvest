@@ -1,8 +1,8 @@
 use crate::as_of_capability::AsOfCapability;
 use crate::error::DataError;
 use crate::types::*;
-use crate::vendors::eastmoney::{money_flow_from_window, select_fflow_window};
 use crate::vendors::StockVendor;
+use crate::vendors::eastmoney::{money_flow_from_window, select_fflow_window};
 use async_trait::async_trait;
 
 pub struct SinaVendor {

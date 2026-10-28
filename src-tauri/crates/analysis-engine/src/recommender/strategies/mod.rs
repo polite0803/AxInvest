@@ -12,4 +12,4 @@ pub use reversion::ReversionStrategy;
 pub use serenity::SerenityStrategy;
 pub use trend::TrendStrategy;
 pub use value::ValueStrategy;
-pub use watchlist::{emit_synthetic_picks, WatchlistStrategy};
+pub use watchlist::{WatchlistStrategy, emit_synthetic_picks};

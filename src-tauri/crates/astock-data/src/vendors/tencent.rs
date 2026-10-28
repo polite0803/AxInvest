@@ -232,11 +232,7 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
     let parse = |s: &str| -> f64 { s.parse().unwrap_or(0.0) };
     let parse_opt = |s: &str| -> Option<f64> {
         let v: f64 = s.parse().ok()?;
-        if v == 0.0 {
-            None
-        } else {
-            Some(v)
-        }
+        if v == 0.0 { None } else { Some(v) }
     };
 
     // 从股票名称检测 ST 状态
@@ -283,19 +279,11 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
         circulating_mv: parse_opt(fields[ts_idx + 15]).map(|v| v * 1e8),
         limit_up: {
             let v = parse(fields[ts_idx + 17]);
-            if v > 0.0 {
-                Some(v)
-            } else {
-                None
-            }
+            if v > 0.0 { Some(v) } else { None }
         },
         limit_down: {
             let v = parse(fields[ts_idx + 18]);
-            if v > 0.0 {
-                Some(v)
-            } else {
-                None
-            }
+            if v > 0.0 { Some(v) } else { None }
         },
         is_st,
         timestamp: chrono::Utc::now().to_rfc3339(),
@@ -770,7 +758,7 @@ mod capability_tests {
     /// 前端图与回测的 K 线窗口口径。
     #[tokio::test]
     async fn kline_tail_carries_cutoff_and_live_is_unchanged() {
-        use crate::as_of::{AsOfContext, AsOfSource, AS_OF};
+        use crate::as_of::{AS_OF, AsOfContext, AsOfSource};
         use chrono::NaiveDate;
 
         let live = AS_OF.scope(None, async { kline_tail(120, None) }).await;

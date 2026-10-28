@@ -11,10 +11,10 @@
 //! 原位于 `axagent-astock-data::mcp_tools`，于 P2-8 阶段随 `industry_chain.rs`
 //! 一并迁回 `axagent-stock-analysis`。`astock-data` 仅保留数据获取类 MCP 工具。
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::industry_chain::{
-    get_industry_chain, map_news_to_chain, propagate_impact, ImpactDirection,
+    ImpactDirection, get_industry_chain, map_news_to_chain, propagate_impact,
 };
 
 /// G3 产业链相关 MCP 工具名集合

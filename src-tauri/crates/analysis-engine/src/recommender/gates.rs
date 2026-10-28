@@ -41,7 +41,7 @@
 use axagent_astock_data::FinancialReport;
 
 use super::types::{GateBlockedPick, Period, RecoPick};
-use crate::decision_action::{normalize_action, ActionKind};
+use crate::decision_action::{ActionKind, normalize_action};
 
 /// P1 回环否决的有效窗口（天）：更早的分析视为过期 —— 财报/行情会变，
 /// 三个月前的「卖出」不该永久封杀一只票。与 `stock_analyses.created_at`（毫秒）比较。

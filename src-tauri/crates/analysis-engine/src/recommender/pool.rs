@@ -4,8 +4,8 @@ use axagent_astock_data::AStockClient;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use super::types::SeedPoolOrigin;
 use super::FALLBACK_STOCKS;
+use super::types::SeedPoolOrigin;
 
 /// 候选池条目：(code, name, sector)
 pub type SeedItem = (String, String, Option<String>);

@@ -25,7 +25,7 @@
 //! `"daily"` 的 `get_klines(`」，n 段锁「本文件不得再写四臂阶梯」，e 段锁风格×档位矩阵完备。
 
 use axagent_astock_data::scale::{
-    aggregate_monthly_to_quarterly, Scale, ScaleProfile, ScaleWindowPlan,
+    Scale, ScaleProfile, ScaleWindowPlan, aggregate_monthly_to_quarterly,
 };
 use axagent_harness::market_data::{KLine, MarketDataProvider};
 

@@ -192,11 +192,7 @@ pub fn compute_beta(portfolio_returns: &[f64], market_returns: &[f64]) -> Option
         num += dp * dm;
         dm2 += dm * dm;
     }
-    if dm2 < 1e-9 {
-        None
-    } else {
-        Some(num / dm2)
-    }
+    if dm2 < 1e-9 { None } else { Some(num / dm2) }
 }
 
 /// 集中度（refactored from portfolio_risk::compute_from_positions）

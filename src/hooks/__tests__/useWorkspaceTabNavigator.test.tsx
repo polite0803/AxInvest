@@ -37,6 +37,9 @@ describe("useWorkspaceTabNavigator — store 与 URL 双写契约", () => {
     useWorkspaceTabStore.setState({ activeTab: "chat" });
   });
 
+  // 2026-10-28 起 URL 契约从 `?ws=<tab>` 迁到路径段 `/chat/<tab>`（见
+  // `workspaceTabs.tsx` 的 `workspaceTabPath` / `parseWorkspaceTabPath`）；
+  // `?ws=` 只保留给旧链接解析，新代码不再写。
   it("切换后 store 与 URL 同时更新（只写一处会让 Hub 读侧把 Tab 拉回去）", () => {
     renderAt("/chat");
     expect(addr()).toBe("/chat");
@@ -44,8 +47,7 @@ describe("useWorkspaceTabNavigator — store 与 URL 双写契约", () => {
     fireEvent.click(screen.getByText("go-terminal"));
 
     expect(useWorkspaceTabStore.getState().activeTab).toBe("terminal");
-    const params = new URLSearchParams(addr().split("?")[1] ?? "");
-    expect(params.get("ws")).toBe("terminal");
+    expect(addr().split("?")[0]).toBe("/chat/terminal");
   });
 
   it("切 Tab 时清掉 chat 专属参数（否则 WorkspaceHub 的 chat 参数分支会强制切回对话）", () => {
@@ -53,8 +55,8 @@ describe("useWorkspaceTabNavigator — store 与 URL 双写契约", () => {
 
     fireEvent.click(screen.getByText("go-terminal"));
 
+    expect(addr().split("?")[0]).toBe("/chat/terminal");
     const params = new URLSearchParams(addr().split("?")[1] ?? "");
-    expect(params.get("ws")).toBe("terminal");
     expect(params.has("conversationId")).toBe(false);
     expect(params.has("prompt")).toBe(false);
   });
@@ -66,15 +68,15 @@ describe("useWorkspaceTabNavigator — store 与 URL 双写契约", () => {
 
     const params = new URLSearchParams(addr().split("?")[1] ?? "");
     expect(params.get("stockCode")).toBe("600519");
-    expect(params.get("ws")).toBe("terminal");
+    expect(addr().split("?")[0]).toBe("/chat/terminal");
   });
 
-  it("从业务页切换：地址落到 /chat（业务页查询参数不带入工作台）", () => {
+  it("从业务页切换：地址落到 /chat/terminal（业务页查询参数不带入工作台）", () => {
     renderAt("/invest?tab=workspace&view=trade");
 
     fireEvent.click(screen.getByText("go-terminal"));
 
-    expect(addr().startsWith("/chat?")).toBe(true);
+    expect(addr().startsWith("/chat/terminal")).toBe(true);
     expect(addr()).not.toContain("view=trade");
   });
 });

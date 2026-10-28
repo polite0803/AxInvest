@@ -15,8 +15,8 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_CAPACITY: usize = 10_000;
@@ -418,8 +418,8 @@ mod tests {
         let path = tmp_path("expired");
         let c = DiskCache::load_or_default(path);
         c.set("k".into(), "v".into(), -1); // 已过期
-                                           // 模拟"过去时间"通过改 expires_at:这里 ttl=-1 → expires_at = now-1
-                                           // get 内部判 expires_at < now,直接走 remove 分支
+        // 模拟"过去时间"通过改 expires_at:这里 ttl=-1 → expires_at = now-1
+        // get 内部判 expires_at < now,直接走 remove 分支
         assert!(c.get("k").is_none());
         assert_eq!(c.len(), 0, "过期项应在 get 时被清理");
     }

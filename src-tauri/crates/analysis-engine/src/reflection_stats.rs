@@ -16,8 +16,8 @@ use std::collections::HashMap;
 
 use crate::decision_action::normalize_action;
 use axagent_entities::{stock_analyses, stock_reflections, strategy_performance};
-use axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR;
 use axagent_harness::Period;
+use axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR;
 use sea_orm::{DatabaseConnection, EntityTrait};
 use serde::{Deserialize, Serialize};
 
@@ -2285,7 +2285,7 @@ mod reflection_stats_tests {
 mod hitrate_join_tests {
     use super::match_sp_rows_to_reflections;
     // 阶段 3：层级看板的装配面（本 mod 按符号逐个 use，不加 `super::*`）
-    use super::{build_tier_board, STRUCTURAL_PROPOSAL_CHARS, STRUCTURAL_ROWS_CAP};
+    use super::{STRUCTURAL_PROPOSAL_CHARS, STRUCTURAL_ROWS_CAP, build_tier_board};
     use axagent_entities::{stock_reflections, strategy_performance};
 
     fn sp_row(

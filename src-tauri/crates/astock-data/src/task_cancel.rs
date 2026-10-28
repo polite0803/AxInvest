@@ -14,8 +14,8 @@
 //! 任务。三条慢命令的 engine 循环都在当前任务内顺序执行、内部不 spawn 子任务，
 //! 所以 task_local 的可见范围恰好就是需要取消的范围。
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// 取消旗标。克隆共享同一原子状态（命令层持一份置位、engine 侧持一份读取）。
 #[derive(Clone, Debug, Default)]

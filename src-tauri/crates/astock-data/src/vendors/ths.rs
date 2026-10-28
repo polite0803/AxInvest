@@ -1184,7 +1184,7 @@ mod hot_list_tests {
     #[tokio::test]
     #[ignore = "需真实网络；仅在手工验证热榜回溯通道时跑"]
     async fn hot_history_live() {
-        use crate::as_of::{AsOfContext, AsOfSource, AS_OF};
+        use crate::as_of::{AS_OF, AsOfContext, AsOfSource};
         let v = ThsVendor { http: reqwest::Client::new() };
         let ctx = AsOfContext::new(
             chrono::NaiveDate::from_ymd_opt(2026, 9, 28).unwrap(),

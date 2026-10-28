@@ -428,10 +428,11 @@ mod tests {
 
         // 喂入 2 个空头信号，不应触发
         assert!(agg.feed(make_signal("000001", SignalType::StopLossHit, 0.6, now)).await.is_none());
-        assert!(agg
-            .feed(make_signal("000002", SignalType::SupportBreak, 0.5, now + 10))
-            .await
-            .is_none());
+        assert!(
+            agg.feed(make_signal("000002", SignalType::SupportBreak, 0.5, now + 10))
+                .await
+                .is_none()
+        );
 
         // 第 3 个空头信号应触发组合信号
         let result = agg.feed(make_signal("000003", SignalType::DeathCross, 0.7, now + 20)).await;

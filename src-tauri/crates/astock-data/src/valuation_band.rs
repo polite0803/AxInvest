@@ -606,7 +606,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial(asof)]
     async fn since_date_anchors_to_cutoff_in_replay() {
-        use crate::as_of::{AsOfContext, AsOfSource, AS_OF};
+        use crate::as_of::{AS_OF, AsOfContext, AsOfSource};
         let cutoff = chrono::NaiveDate::from_ymd_opt(2024, 6, 3).unwrap();
         let ctx = AsOfContext::new(cutoff, AsOfSource::UserReplay).unwrap();
         let replay = AS_OF.scope(Some(ctx), async { since_date_from_years(1) }).await;

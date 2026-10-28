@@ -47,7 +47,7 @@ pub use axagent_astock_data::{candlestick_pattern, divergence};
 pub mod concept_index;
 pub mod theme_resolver;
 pub use theme_resolver::{
-    resolve_themes_pipeline, resolve_themes_pipeline_with_search, ResolvedTheme, ThemeResolution,
+    ResolvedTheme, ThemeResolution, resolve_themes_pipeline, resolve_themes_pipeline_with_search,
 };
 pub mod conditional_order;
 pub mod conditional_order_bridge;
@@ -133,7 +133,7 @@ pub use stock_analysis_round::{AnalysisError as StockAnalysisRoundError, StockAn
 // 为股票业务提供动态编排、反思、进化能力。
 pub mod stock_orchestration;
 pub use stock_orchestration::{
-    create_stock_capability_pack_adapter, register_stock_adapter, StockCapabilityPackAdapter,
+    StockCapabilityPackAdapter, create_stock_capability_pack_adapter, register_stock_adapter,
 };
 
 // ── 股票业务反思引擎（WorkflowReflector 集成）──
@@ -166,19 +166,19 @@ pub use stock_adaptive_engine::{
 // 基于历史数据质量反馈，自动优化分析师 Prompt 和输出约束
 pub mod analyst_evolution;
 pub use analyst_evolution::{
-    evolve_analyst, generate_prompt_corrections, get_analyst_evolution_status,
-    AnalystEvolutionStatus,
+    AnalystEvolutionStatus, evolve_analyst, generate_prompt_corrections,
+    get_analyst_evolution_status,
 };
 
 // ── 通用节点质量检测系统 ──
 // 为所有节点类型（分析师/辩论/决策/工具/估值/风险）提供统一质量检测接口
 pub mod node_quality;
 pub use node_quality::{
-    check_node_quality, detect_node_type, NodeQualityResult, NodeType, QualityCheck,
+    NodeQualityResult, NodeType, QualityCheck, check_node_quality, detect_node_type,
 };
 
 // ── 通用节点自我进化引擎 ──
 // 支持所有节点类型的进化：分析师/辩论/决策/工具/估值/风险
 pub mod mover_recall;
 pub mod node_evolution;
-pub use node_evolution::{evolve_node, get_node_evolution_status, NodeEvolutionStatus};
+pub use node_evolution::{NodeEvolutionStatus, evolve_node, get_node_evolution_status};

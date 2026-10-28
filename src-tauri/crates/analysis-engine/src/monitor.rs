@@ -4,7 +4,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::{interval, interval_at, Duration};
+use tokio::time::{Duration, interval, interval_at};
 
 use axagent_harness::market_data::{MarketDataProvider, StockQuote};
 
@@ -437,7 +437,9 @@ impl RealtimeMonitor {
     /// [`apply_panel_runtime_vars`] 的纯函数版（判据在此；直接测快照版会踩进程内全局、并行互踩）。
     pub async fn apply_runtime_vars(&self, vars: &HashMap<String, serde_json::Value>) {
         match axagent_harness::panel_variables::integer_in(vars, PANEL_POLL_INTERVAL_KEY) {
-            Some(v) if (POLL_INTERVAL_RANGE.0 as i64..=POLL_INTERVAL_RANGE.1 as i64).contains(&v) => {
+            Some(v)
+                if (POLL_INTERVAL_RANGE.0 as i64..=POLL_INTERVAL_RANGE.1 as i64).contains(&v) =>
+            {
                 self.set_poll_interval_secs(v as u64).await;
             },
             Some(v) => tracing::warn!(

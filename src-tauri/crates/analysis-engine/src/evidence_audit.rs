@@ -34,7 +34,7 @@
 //! [`crate::evidence_weight::DECISION_LEG_ANALYST`]、[`crate::evidence_weight::VERDICT_FACTOR_SOURCES`]、
 //! `axagent_harness::holding_period::Period::{factor_owner, verdict_spec}`。
 
-use crate::evidence_weight::{channel_snapshot_key, DECISION_LEG_ANALYST, VERDICT_FACTOR_SOURCES};
+use crate::evidence_weight::{DECISION_LEG_ANALYST, VERDICT_FACTOR_SOURCES, channel_snapshot_key};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

@@ -60,7 +60,7 @@ pub(crate) fn content_asset_entity_to_dto(e: opc_content_assets::Model) -> Conte
 #[async_trait]
 pub trait ContentAssetService: Send + Sync {
     async fn create_content_asset(&self, input: CreateContentAssetInput)
-        -> OpcResult<ContentAsset>;
+    -> OpcResult<ContentAsset>;
     async fn get_content_asset(&self, id: &str) -> OpcResult<ContentAsset>;
     async fn list_content_assets(&self) -> OpcResult<Vec<ContentAsset>>;
     async fn update_content_asset(

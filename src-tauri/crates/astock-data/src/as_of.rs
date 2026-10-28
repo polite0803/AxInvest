@@ -21,16 +21,16 @@
 use chrono::{Duration, Utc};
 use parking_lot::Mutex;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 // 共享 DTO 类型（AsOfContext / AsOfSource / AsOfDataScope / AsOfDataKind /
 // DegradationEntry / AsOfError）的权威定义在 `axagent_harness::as_of`，
 // 本模块通过 pub use re-export，不重复定义。
 // 运行时状态管理（task_local、全局 Mutex、降级日志等）仍保留在本模块。
 pub use axagent_harness::as_of::{
-    AsOfContext, AsOfDataKind, AsOfDataScope, AsOfError, AsOfSource, DegradationEntry,
-    DegradationKind, DEGRADATION_MODE_ASOF, DEGRADATION_MODE_LIVE,
+    AsOfContext, AsOfDataKind, AsOfDataScope, AsOfError, AsOfSource, DEGRADATION_MODE_ASOF,
+    DEGRADATION_MODE_LIVE, DegradationEntry, DegradationKind,
 };
 
 tokio::task_local! {

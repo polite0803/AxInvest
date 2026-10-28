@@ -21,8 +21,8 @@
 
 use futures::future::BoxFuture;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 use tokio::sync::RwLock;
 
@@ -239,7 +239,7 @@ async fn poll_and_emit(
                         trigger: trigger.to_string(),
                     };
 
-                    if let Some(ref cb) = callback {
+                    if let Some(cb) = callback {
                         cb(event).await;
                     }
                 }

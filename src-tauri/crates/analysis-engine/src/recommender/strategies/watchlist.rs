@@ -10,8 +10,8 @@
 //! ⚠ 本桶的出票默认标 `synthetic: true`（入场位是现价乘数，不是信号推导），**只有**被
 //! 分析定档命中且动作允许的那几条会升级为真实票 —— 见 [`apply_analysis_tier`]。
 
-use super::super::strategy::{read_f64, PerCodeLocks, RecoContext, RecommendStrategy};
-use crate::decision_action::{normalize_action, ActionKind};
+use super::super::strategy::{PerCodeLocks, RecoContext, RecommendStrategy, read_f64};
+use crate::decision_action::{ActionKind, normalize_action};
 use crate::recommender::pool::SeedItem;
 use crate::recommender::scoring::{calc_confidence, calc_position};
 use crate::recommender::types::{Period, RecoPick, Style};

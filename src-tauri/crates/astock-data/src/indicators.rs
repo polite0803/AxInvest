@@ -619,20 +619,20 @@ mod tests {
         let klines = rising_klines(70);
         // ① 只有一根带 ⇒ 无从比较
         let one = IndicatorConfig { ma_periods: vec![20], ..Default::default() };
-        assert!(compute_indicators_with_config("600000", &klines, Some(&one))
-            .scale_trend
-            .is_none());
+        assert!(
+            compute_indicators_with_config("600000", &klines, Some(&one)).scale_trend.is_none()
+        );
         // ② 带数重复（去重后只剩一根）
         let dup = IndicatorConfig { ma_periods: vec![20, 20], ..Default::default() };
-        assert!(compute_indicators_with_config("600000", &klines, Some(&dup))
-            .scale_trend
-            .is_none());
+        assert!(
+            compute_indicators_with_config("600000", &klines, Some(&dup)).scale_trend.is_none()
+        );
         // ③ 样本不够算最慢带 ⇒ 整块缺席（不是把 slow 记成 0）
         let few: Vec<KLine> = klines.iter().take(10).cloned().collect();
         let slow_only = IndicatorConfig { ma_periods: vec![5, 60], ..Default::default() };
-        assert!(compute_indicators_with_config("600000", &few, Some(&slow_only))
-            .scale_trend
-            .is_none());
+        assert!(
+            compute_indicators_with_config("600000", &few, Some(&slow_only)).scale_trend.is_none()
+        );
         // ④ 空输入：windows 仍回显（那是真用过的参数），scaleTrend 缺席
         let empty = compute_indicators_with_config("600000", &[], None);
         assert!(empty.scale_trend.is_none());

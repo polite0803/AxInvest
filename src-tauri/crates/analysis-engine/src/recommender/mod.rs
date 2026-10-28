@@ -59,7 +59,7 @@ pub mod strategy;
 pub mod style_matrix;
 pub mod types;
 
-pub use notify::{build_notification, run_recommendation_scan, RecommendationScan};
+pub use notify::{RecommendationScan, build_notification, run_recommendation_scan};
 pub use pool::{SeedItem, SeedOverrides};
 pub use strategy::{RecoContext, RecommendStrategy};
 pub use types::{
@@ -122,8 +122,8 @@ pub(crate) const FALLBACK_STOCKS: &[(&str, &str)] = &[
     ("601857", "中国石油"),
 ];
 
-use axagent_astock_data::as_of;
 use axagent_astock_data::AStockClient;
+use axagent_astock_data::as_of;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
@@ -137,8 +137,8 @@ use crate::recommender::pool::{
 };
 use crate::recommender::scoring::{dedup_and_merge, group_by_style_and_trim_with_audit};
 use crate::recommender::strategies::{
-    emit_synthetic_picks, CapitalStrategy, ReversionStrategy, SerenityStrategy, TrendStrategy,
-    ValueStrategy, WatchlistStrategy,
+    CapitalStrategy, ReversionStrategy, SerenityStrategy, TrendStrategy, ValueStrategy,
+    WatchlistStrategy, emit_synthetic_picks,
 };
 use crate::recommender::strategy::PerCodeLocks;
 

@@ -1307,7 +1307,8 @@ mod tests {
         for (want, mutate) in fixtures {
             let got = attribute(&ev(mutate));
             assert_eq!(
-                got, want,
+                got,
+                want,
                 "层 {} 造不出来 ⇒ 判据不可达（要么接进生产路径，要么整层退役：枚举 + as_str + ALL + i18n 一起删）",
                 want.as_str()
             );
@@ -1612,7 +1613,7 @@ mod tests {
 mod asof_generation_tests {
     use super::*;
     use axagent_dao::repo::reco_pool::{
-        self as pool_dao, purpose, NewPoolBatch, NewRecoPick, NewScanAuditTrim,
+        self as pool_dao, NewPoolBatch, NewRecoPick, NewScanAuditTrim, purpose,
     };
     use axagent_entities::reco_scan_audit;
     use sea_orm::EntityTrait;

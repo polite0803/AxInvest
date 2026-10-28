@@ -25,7 +25,7 @@
 //! - 所有状态变更均需人工触发（reviewed/executed/rejected）
 //! - 审核操作留下完整审计痕迹
 
-use crate::decision_action::{normalize_action, ActionKind};
+use crate::decision_action::{ActionKind, normalize_action};
 use axagent_entities::stock_analyses;
 use axagent_harness::AnalysisKind;
 use sea_orm::{

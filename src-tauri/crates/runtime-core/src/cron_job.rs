@@ -494,8 +494,16 @@ impl CronJobStore {
                 continue;
             };
             let original_next = job.next_run_at;
-            job.next_run_at =
-                resumed_next_run(job.next_run_at, &job.schedule, job.is_active(), now);
+            // 0 = **无效档期**（epoch），不是合法时间戳。
+            //
+            // 2026-10-28 实证：`reflection-due-daily` 的 `next_run_at` 被写成 0，UI 把它
+            // 渲染成「1970/01/01 08:00」并打上「档期停滞」；而调度器按「Some 且 now >= next
+            // 即派发」判定（见 `due` 过滤），0 这个值既不像"没有档期"（那该是 None），也
+            // 不等于一次真实到期 —— 结果这一行既没被正常重排，也没按点触发。
+            // 归零后走 None 分支：`resumed_next_run` 会按 cron 重新算，`materialize_next_runs`
+            // 也会把它补算回 DB，等于自愈。
+            let sanitized_next = job.next_run_at.filter(|t| *t > 0);
+            job.next_run_at = resumed_next_run(sanitized_next, &job.schedule, job.is_active(), now);
             job.updated_at = now;
             // 恢复策略改变了档期（过期→0 的补发标记、None→补算的下一档期）时回写 DB：
             // 否则 None→Some 只存在于内存，`materialize_next_runs` 又只扫内存中的

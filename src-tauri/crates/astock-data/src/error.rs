@@ -201,10 +201,10 @@ mod tests {
         assert!(!gap.is_transient());
 
         // 不带标记的 VendorError 不得冒充能力缺口
-        assert!(!DataError::VendorError {
-            vendor: "tencent".into(), message: "K线返回空".into()
-        }
-        .is_capability_gap());
+        assert!(
+            !DataError::VendorError { vendor: "tencent".into(), message: "K线返回空".into() }
+                .is_capability_gap()
+        );
         assert!(!DataError::NotFound("001235".into()).is_capability_gap());
     }
 
@@ -214,8 +214,10 @@ mod tests {
     /// 两条都走本机回环与非法 URL，不出本机、不依赖外网。
     #[tokio::test]
     async fn transient_is_limited_to_rate_limit_connect_and_timeout() {
-        assert!(DataError::RateLimited { vendor: "guba".into(), reason: "HTTP 429".into() }
-            .is_transient());
+        assert!(
+            DataError::RateLimited { vendor: "guba".into(), reason: "HTTP 429".into() }
+                .is_transient()
+        );
 
         // 127.0.0.1:1 无人监听 ⇒ 立即被拒（is_connect），属「再问一次可能就好」
         let refused = reqwest::Client::new()

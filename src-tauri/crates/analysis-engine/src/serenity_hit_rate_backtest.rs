@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::hit_rate_backtest::{compute_factor_ic, PickValidation};
+use crate::hit_rate_backtest::{PickValidation, compute_factor_ic};
 
 // ─────────────────────────────────────────────────
 // 数据结构

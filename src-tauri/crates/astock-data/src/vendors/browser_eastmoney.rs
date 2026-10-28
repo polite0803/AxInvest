@@ -1,16 +1,16 @@
 use crate::as_of_capability::AsOfCapability;
 use crate::error::DataError;
 use crate::types::*;
-use crate::vendors::eastmoney::{
-    earnings_from_notice_json, fflow_daykline_url, money_flow_from_window, notice_ann_url,
-    parse_fflow_klines, select_fflow_window, synthesize_industry_ranking,
-    EARNINGS_NOTICE_PAGE_SIZE,
-};
 use crate::vendors::StockVendor;
+use crate::vendors::eastmoney::{
+    EARNINGS_NOTICE_PAGE_SIZE, earnings_from_notice_json, fflow_daykline_url,
+    money_flow_from_window, notice_ann_url, parse_fflow_klines, select_fflow_window,
+    synthesize_industry_ranking,
+};
 use async_trait::async_trait;
 use serde_json::Value;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// 全局惰性预热标志 — 进程生命周期只做一次预热
 static WARMED_UP: AtomicBool = AtomicBool::new(false);

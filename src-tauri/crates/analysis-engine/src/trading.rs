@@ -12,7 +12,7 @@ use sea_orm::{
 };
 use std::sync::Arc;
 
-use crate::decision_action::{normalize_action, ActionKind};
+use crate::decision_action::{ActionKind, normalize_action};
 use axagent_astock_data::AStockClient;
 use axagent_astock_data::{detect_market_type, get_st_price_limit_pct};
 use axagent_entities::{portfolio_holdings, stock_analyses, trades};

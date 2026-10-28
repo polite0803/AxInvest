@@ -4,7 +4,7 @@
 //! 原 ~52 个 per-period read_f64 变量→硬编码周期差异 + 共享乘数。
 //! 可配置参数保留 ~10 个，见下方 TREND_VARS 文档。
 
-use super::super::strategy::{read_f64, RecoContext, RecommendStrategy};
+use super::super::strategy::{RecoContext, RecommendStrategy, read_f64};
 use crate::recommender::indicators;
 use crate::recommender::scoring::{calc_confidence, calc_position_with_consistency};
 use crate::recommender::types::{Period, RecoPick, Style};

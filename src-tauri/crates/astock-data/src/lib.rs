@@ -57,13 +57,14 @@ use crate::gate::DomainGate;
 use crate::vendor_health::{VendorHealthConfig, VendorHealthTracker};
 pub use error::DataError;
 pub use macro_data::{MacroDataClient, MacroDataPoint, MacroDataSnapshot};
-pub use outcome::{classify_error, DataOutcome, DataStatus};
+pub use outcome::{DataOutcome, DataStatus, classify_error};
 pub use realtime_quote::{
     HttpPollingStreamer, QuoteCallback, QuoteChangeEvent, RealTimeQuoteWatcher, WatchPriority,
 };
 pub use types::*;
 // R3: 估值带（暴露在 crate 根，方便 commands 端直接 `axagent_astock_data::ValuationBand`）
 pub use valuation_band::{FinancialSnapshotLike, MetricBand, ValuationBand};
+use vendors::StockVendor;
 use vendors::akshare::AkshareVendor;
 use vendors::baidu_stock::BaiduStockVendor;
 use vendors::browser_eastmoney::{BrowserEastMoneyVendor, BrowserHttpFetch};
@@ -78,7 +79,6 @@ use vendors::sina::SinaVendor;
 use vendors::tencent::TencentVendor;
 use vendors::ths::ThsVendor;
 use vendors::xueqiu::XueqiuVendor;
-use vendors::StockVendor;
 
 /// P6: 新闻入库 sink 抽象。
 ///
@@ -3188,11 +3188,7 @@ impl AStockClient {
                         let sc = stock_code.to_string();
                         Box::pin(async move {
                             let v = vendor.get_social_sentiment_with_asof(&sc).await?;
-                            if v.is_empty() {
-                                Ok(None)
-                            } else {
-                                Ok(Some(v))
-                            }
+                            if v.is_empty() { Ok(None) } else { Ok(Some(v)) }
                         })
                     },
                 )
@@ -7352,8 +7348,8 @@ mod asof_realtime_degrade_tests {
     /// 取到截止日那根并带成交额（正断言，证明换宽就救得回来）。
     #[tokio::test]
     async fn fallthrough_source_must_be_asked_for_enough_bars() {
-        use crate::as_of::AS_OF;
         use crate::AsOfCapability;
+        use crate::as_of::AS_OF;
         // 决策点：native 恒 5 根；非 native 随「截止日距今多远」推导，并夹在 5 与
         // KLINE_FETCH_FLOOR 之间。第二轮现网读数否证了「一律给 500」：窗口放大 28 倍之后
         // browser 通道对 push2his 的 page.goto 全数 net::ERR_EMPTY_RESPONSE，
@@ -7793,7 +7789,7 @@ mod asof_realtime_degrade_tests {
     #[tokio::test]
     #[serial(asof)]
     async fn d_bug_fix_market_dragon_tiger_uses_capability() {
-        use crate::as_of::{peek_global_degradation_report, AS_OF};
+        use crate::as_of::{AS_OF, peek_global_degradation_report};
         let client = AStockClient::new();
         let date = NaiveDate::from_ymd_opt(2024, 3, 15).unwrap();
         let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
@@ -7815,7 +7811,7 @@ mod asof_realtime_degrade_tests {
 #[cfg(test)]
 mod asof_snapshot_first_tests {
     use super::*;
-    use crate::as_of::{peek_global_degradation_report, AsOfContext, AsOfSource, AS_OF};
+    use crate::as_of::{AS_OF, AsOfContext, AsOfSource, peek_global_degradation_report};
     use chrono::NaiveDate;
     use serial_test::serial;
 
@@ -8166,7 +8162,7 @@ mod asof_boundary_tests {
     //!
     //! 全部走 `StubVendor` 构造数据 ⇒ 零真实网络（本仓的 live-network 测试已多次 flaky）。
     use super::*;
-    use crate::as_of::{peek_global_degradation_report, AsOfContext, AsOfSource, AS_OF};
+    use crate::as_of::{AS_OF, AsOfContext, AsOfSource, peek_global_degradation_report};
     use chrono::NaiveDate;
     use serial_test::serial;
     use std::collections::HashSet;
@@ -9382,7 +9378,7 @@ mod l2_readthrough_tests {
 mod asof_channel_alignment_tests {
     use super::*;
     use crate::as_of::{
-        peek_global_degradation_report, AsOfContext, AsOfSource, DegradationKind, AS_OF,
+        AS_OF, AsOfContext, AsOfSource, DegradationKind, peek_global_degradation_report,
     };
     use chrono::NaiveDate;
     use serial_test::serial;

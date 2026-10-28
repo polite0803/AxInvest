@@ -26,7 +26,6 @@
 //!
 //! 全部读写均经过 SeaORM，无副作用，可幂等调用。
 
-use sea_orm::sea_query::Expr;
 use sea_orm::ActiveModelTrait;
 use sea_orm::ColumnTrait;
 use sea_orm::DatabaseConnection;
@@ -35,6 +34,7 @@ use sea_orm::EntityTrait;
 use sea_orm::QueryFilter;
 use sea_orm::QueryOrder;
 use sea_orm::Set;
+use sea_orm::sea_query::Expr;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

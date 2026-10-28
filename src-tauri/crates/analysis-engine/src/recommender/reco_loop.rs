@@ -51,7 +51,7 @@
 
 use std::collections::HashMap;
 
-use crate::decision_action::{normalize_action, ActionKind};
+use crate::decision_action::{ActionKind, normalize_action};
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
     QuerySelect, Set,
@@ -61,8 +61,8 @@ use serde::Serialize;
 use axagent_entities::decision_validations;
 use axagent_entities::stock_analyses;
 use axagent_entities::workflow_template;
-use axagent_harness::workflow_types::Variable;
 use axagent_harness::AnalysisKind;
+use axagent_harness::workflow_types::Variable;
 
 use crate::hit_rate_backtest::hit_outcome_to_binary_outcome;
 use crate::recommender::style_matrix::{db_style_aliases, style_keys};
@@ -1009,9 +1009,7 @@ pub async fn recalc_and_persist_reco_loop(
             ),
             LoopCellStatus::DisabledNegativeExpectancy => format!(
                 "负期望硬停: 窗口内 {} 样本, 期窗均收益 ≤{:.1}% ⇒ 权重 {:.2}→0（本格不再出票）",
-                r.samples,
-                NEGATIVE_EXPECTANCY_MAX_MEAN_RETURN_PCT,
-                r.old_weight
+                r.samples, NEGATIVE_EXPECTANCY_MAX_MEAN_RETURN_PCT, r.old_weight
             ),
             _ => format!(
                 // 样本门未通过时**不是**「回退基线」：那是旧实现把历史降权洗掉的写法。

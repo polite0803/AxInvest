@@ -441,11 +441,7 @@ fn generate_decision(stock_code: &str, klines: &[KLine]) -> String {
     let short_trend = if klines.len() >= 10 {
         let sma_5: f64 = klines.iter().rev().take(5).map(|k| k.close).sum::<f64>() / 5.0;
         let sma_10: f64 = klines.iter().rev().take(10).map(|k| k.close).sum::<f64>() / 10.0;
-        if sma_5 > sma_10 {
-            "upward"
-        } else {
-            "downward"
-        }
+        if sma_5 > sma_10 { "upward" } else { "downward" }
     } else {
         "unknown"
     };

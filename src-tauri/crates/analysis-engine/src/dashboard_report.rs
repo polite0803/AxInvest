@@ -8,7 +8,7 @@
 //! 7 段式结构：核心结论 / 评分 / 趋势 / 买卖点位 / 风险警报 / 催化因素 / 操作检查清单
 //! + 大盘复盘模板（主要指数 / 市场概况 / 板块表现）
 
-use crate::decision_action::{normalize_action, ActionKind};
+use crate::decision_action::{ActionKind, normalize_action};
 use axagent_harness::{DashboardDigest, DashboardReport, MarketReviewReport};
 
 // ── 辅助函数 ──

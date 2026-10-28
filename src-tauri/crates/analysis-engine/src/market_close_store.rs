@@ -18,8 +18,8 @@
 use std::collections::HashMap;
 
 use sea_orm::{
-    sea_query::OnConflict, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect,
+    ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, sea_query::OnConflict,
 };
 use serde::Serialize;
 
@@ -288,7 +288,11 @@ pub async fn backfill_close_history_for_codes(
         stats.no_new,
         stats.no_data,
         stats.failed,
-        if stats.cancelled { "（用户取消，剩余未取）" } else { "" }
+        if stats.cancelled {
+            "（用户取消，剩余未取）"
+        } else {
+            ""
+        }
     );
     Ok(stats)
 }
@@ -793,8 +797,10 @@ mod tests {
         assert!(
             close_row("600059", "古越龙山", "2026-09-30", 1, 0.0, 11.15, 10.04, 0.0, 0.0).is_none()
         );
-        assert!(close_row("600059", "古越龙山", "2026-09-30", 1, f64::NAN, 11.15, 10.04, 0.0, 0.0)
-            .is_none());
+        assert!(
+            close_row("600059", "古越龙山", "2026-09-30", 1, f64::NAN, 11.15, 10.04, 0.0, 0.0)
+                .is_none()
+        );
         assert!(close_row("", "x", "2026-09-30", 1, 1.0, 1.0, 1.0, 0.0, 0.0).is_none());
     }
 

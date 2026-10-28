@@ -26,13 +26,13 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use axagent_harness::{
+    CapabilityPackAdapter, CapabilityPackContext, CapabilityPackLearningConfig, DecompositionPlan,
+    DynamicSubGraph, GeneratedSubGraph, MissionType, OrchestrationError, OrchestrationStrategy,
     capability_pack_orchestration::types::{
         AcceptanceCriterion, DependencyType, EvolutionConstraints, ForbiddenOptimization,
         ProtectedStep, QualityThresholds, QualityWeights, ReflectionCheckpoint, ReflectionTemplate,
         StepDependency,
     },
-    CapabilityPackAdapter, CapabilityPackContext, CapabilityPackLearningConfig, DecompositionPlan,
-    DynamicSubGraph, GeneratedSubGraph, MissionType, OrchestrationError, OrchestrationStrategy,
 };
 
 // ── 股票域包适配器 ──────────────────────────────────────────────

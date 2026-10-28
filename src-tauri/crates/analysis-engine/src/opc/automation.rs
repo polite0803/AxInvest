@@ -305,7 +305,7 @@ pub trait OpcAutomationService: Send + Sync {
 
     async fn create_follow_up(&self, input: CreateFollowUpTaskInput) -> OpcResult<FollowUpTask>;
     async fn list_follow_ups(&self, status: Option<FollowUpStatus>)
-        -> OpcResult<Vec<FollowUpTask>>;
+    -> OpcResult<Vec<FollowUpTask>>;
     async fn complete_follow_up(&self, id: &str) -> OpcResult<FollowUpTask>;
 }
 

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use axagent_astock_data::AStockClient;
 
 use super::types::{Period, RecoPick, Style, TrimmedPick};
-use super::{recommend_stocks_multi, RecoResponse};
+use super::{RecoResponse, recommend_stocks_multi};
 
 /// 一次定时荐股扫描的完整结果。
 ///

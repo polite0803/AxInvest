@@ -28,9 +28,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::DataError;
-use crate::outcome::{classify_error, outcome_from_opt, outcome_from_vec, DataStatus, Expect};
 use crate::AStockClient;
+use crate::error::DataError;
+use crate::outcome::{DataStatus, Expect, classify_error, outcome_from_opt, outcome_from_vec};
 
 /// 健康检查结果在每日快照归档里的保留方法名。
 ///

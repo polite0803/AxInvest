@@ -125,9 +125,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     # 硬上限：2026-10-27 run 40510438483 的 macOS 两个目标在 `Build with Tauri` 里
     # **没有任何报错**地卡满 GitHub 的 6 小时 job 上限才被取消 —— 等 6 小时才拿到
-    # 「失败」的信息量等于零，还占着 runner。这里主动收紧到 3 小时：超过即明确红，
-    # 而不是把它当成一次「跑完了但结论不明」。
-    timeout-minutes: 180
+    # 「失败」的信息量等于零，还占着 runner。这里收紧到 4 小时：macOS 现在压到单并发
+    # （见下方 macOS 步骤），全量重编约需 2 小时；超过 4 小时即明确红。
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v5
         with:
@@ -207,16 +207,21 @@ jobs:
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=1" >> "$GITHUB_ENV"
 
-      # macOS runner 只有 3 核 / 7～14 GB，却用 release 默认的 fat LTO：`Compiling` 阶段本身
-      # 就要串行跑一遍全量 LLVM 优化，链接阶段还要合并全部 codegen unit。
-      # 2026-10-27 run 40510438483 实测：两个 macOS 目标在 `Build with Tauri` 里跑满
-      # GitHub 的 6 小时 job 上限、**没有任何报错**就被取消 —— 那不是编译失败，是编不完。
-      # 这里让 macOS 也走「LTO off + cgu=16」，与 Linux x86_64 / Linux ARM64 同一套口径。
+      # macOS runner 只有 3 核 / 7 GB，默认按核数并发 3 个 rustc：大 crate（如
+      # `axagent-runtime`）单独就要 2~3 GB，三路并发直接把机器打进 swap 抖动。
+      # 2026-10-28 run 40659219187 实证：831 个 crate 在 32 分钟内编完，随后
+      # `Compiling axagent-runtime` 之后 **2 小时 24 分钟零输出**，直到 3 小时超时被取消
+      # —— 不是编译报错，也不是 LTO（LTO 已在上一步关掉），是并发把内存吃穿了在换页。
+      # 因此 macOS 与 Linux x86_64 一样把并发压到 1，让单个 rustc 独占内存。
       - name: Lower memory / link cost (macOS)
         if: matrix.os == 'macos-latest'
         run: |
           echo "CARGO_PROFILE_RELEASE_LTO=off" >> "$GITHUB_ENV"
           echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=1" >> "$GITHUB_ENV"
+          echo "--- runner memory ---"
+          sysctl -n hw.memsize hw.ncpu
+          vm_stat | head -5
 
       # ⚠ 只对 x86_64-apple-darwin 写 RUSTFLAGS，**不要**留在 `Build with Tauri` 的 step 级
       # env 里：写成 `... && '...' || ''` 会让 arm64 / Windows / Linux 也带上一个空值，

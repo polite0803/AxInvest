@@ -473,7 +473,7 @@ mod resolve_var_path_tests {
     /// ⚠ 2026-09-15 更正：此处原写「ToolNode **不用**（宽松版），它有自己的严格副本」，
     /// 并附了一处指向 `tool_executor.rs` 第 244 行的引用 —— **两者均已过期，角色互换**：
     /// ToolNode 已改调共享宽松版（`tool_executor.rs:70-77`），严格版只剩 `ConditionNode`
-    /// 这一份（`condition_executor.rs:396`）。
+    /// 这一份（`condition_executor.rs:397`）。
     /// （写法纪律：更正说明里**不得逐字复写旧引用**，否则等于把坏引用又登记一遍。）
     /// 注意签名不同：宽松版吃 `&HashMap`，不吃 `&ExecutionState`。
     #[test]

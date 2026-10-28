@@ -45,7 +45,7 @@
 //! 2. **功能重复**：会话摘要已由主库 `conversation_summaries` 承载 ——
 //!    `axagent-dao::repo::conversation::upsert_summary` 写入，字段更全
 //!    （多 `compressed_until_message_id` / `token_count` / `model_used`），
-//!    且是权威真相源（见 `src/commands/conversations/compress.rs:254`）；
+//!    且是权威真相源（见 `src/commands/conversations/compress.rs:256`）；
 //! 3. **数据必然成为孤儿**：侧车库与主库之间**没有外键** ⇒ 会话被删除后，本表的
 //!    摘要行不会被级联清理，也没有任何 TTL 之外的主体去清它 ⇒ 只增不减。
 //!

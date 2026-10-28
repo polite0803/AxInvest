@@ -14,7 +14,9 @@ use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_entities::{stock_analyses, stock_reflections};
 use axagent_harness::{ActionKind, normalize_action};
 use sea_orm::DatabaseConnection;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set, sea_query::Expr,
+};
 use std::sync::Arc;
 use tauri::State;
 
@@ -391,8 +393,6 @@ pub async fn run_reflection_workflow(
     // Key = 周期名（ultra_short / short / mid / long），Value = Some(MarketSnapshot) 或 None（该周期行情不可用）。
     horizon_snapshots: &std::collections::BTreeMap<String, Option<MarketSnapshot>>,
 ) -> Result<String, String> {
-    use sea_orm::sea_query::Expr;
-
     let now_ms = chrono::Utc::now().timestamp_millis();
 
     // ── [B2 借鉴] 幂等守卫: 如果 reflection_id 已 completed,直接返回 cached ──
@@ -2092,13 +2092,10 @@ pub async fn run_batch_reflection(
                     REFLECTION_ROW_TIMEOUT_SECS
                 );
                 let _ = stock_reflections::Entity::update_many()
-                    .col_expr(
-                        stock_reflections::Column::Status,
-                        sea_orm::sea_query::Expr::value("pending"),
-                    )
+                    .col_expr(stock_reflections::Column::Status, Expr::value("pending"))
                     .col_expr(
                         stock_reflections::Column::UpdatedAt,
-                        sea_orm::sea_query::Expr::value(chrono::Utc::now().timestamp_millis()),
+                        Expr::value(chrono::Utc::now().timestamp_millis()),
                     )
                     .filter(stock_reflections::Column::Id.eq(&p.id))
                     .exec(db)
@@ -3209,7 +3206,6 @@ pub const STALE_RUNNING_HOURS: i64 = 6;
 /// 停在 7-28，一个多月无人回收；同期 `resolved` 数为 **0** ——「自动反思从未产出
 /// 过结论」的直接原因之一（见 `AUDIT-scheduled-tasks-2026-09-13.md`）。
 pub async fn reclaim_stale_running(db: &DatabaseConnection, stale_hours: i64) -> u64 {
-    use sea_orm::sea_query::Expr;
     let now_ms = chrono::Utc::now().timestamp_millis();
     let cutoff_ms = now_ms - stale_hours * 3_600_000;
     match stock_reflections::Entity::update_many()

@@ -235,7 +235,7 @@ export function UniverseSamplePanel() {
         )}
       </Space>
       <div
-        style={{ color: "var(--color-text-tertiary)", fontSize: 11, marginTop: 4 }}
+        style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}
         data-testid="mover-sample-hints"
       >
         {t("stockAnalysis.moverRecall.fullScanHint")}

@@ -40,13 +40,13 @@ export function TimeAnchorTour() {
         zIndex: 1100,
         width: 320,
         padding: 14,
-        background: "var(--ax-bg, #fff)",
-        border: "1px solid var(--ax-warning, #f59e0b)",
+        background: "var(--surface)",
+        border: "1px solid var(--amber)",
         borderRadius: 10,
         boxShadow: "0 6px 24px rgba(0,0,0,0.12)",
         fontSize: 12,
         lineHeight: 1.5,
-        color: "var(--ax-text, #111827)",
+        color: "var(--fg)",
       }}
     >
       {/* 指向 pill 的小三角 */}
@@ -58,9 +58,9 @@ export function TimeAnchorTour() {
           right: 18,
           width: 10,
           height: 10,
-          background: "var(--ax-bg, #fff)",
-          borderTop: "1px solid var(--ax-warning, #f59e0b)",
-          borderLeft: "1px solid var(--ax-warning, #f59e0b)",
+          background: "var(--surface)",
+          borderTop: "1px solid var(--amber)",
+          borderLeft: "1px solid var(--amber)",
           transform: "rotate(45deg)",
         }}
       />
@@ -72,7 +72,7 @@ export function TimeAnchorTour() {
           marginBottom: 8,
         }}
       >
-        <Sparkles size={14} color="var(--ax-warning, #f59e0b)" style={{ flexShrink: 0, marginTop: 1 }} />
+        <Sparkles size={14} color="var(--amber)" style={{ flexShrink: 0, marginTop: 1 }} />
         <div style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>
           {t("timeTravel.tour.title")}
         </div>
@@ -85,23 +85,23 @@ export function TimeAnchorTour() {
             border: 0,
             cursor: "pointer",
             padding: 0,
-            color: "var(--ax-text-tertiary, #9ca3af)",
+            color: "var(--muted)",
             display: "flex",
           }}
         >
           <X size={12} />
         </button>
       </div>
-      <p style={{ margin: "0 0 8px 0", color: "var(--ax-text-secondary, #4b5563)" }}>
+      <p style={{ margin: "0 0 8px 0", color: "var(--fg-2)" }}>
         {t("timeTravel.tour.body")}
       </p>
       <p
         style={{
           margin: "0 0 10px 0",
           padding: "6px 8px",
-          background: "var(--ax-bg-soft, #f9fafb)",
+          background: "var(--surface-2)",
           borderRadius: 6,
-          color: "var(--ax-text-tertiary, #6b7280)",
+          color: "var(--muted)",
           fontSize: 11,
         }}
       >

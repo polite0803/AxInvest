@@ -14,15 +14,15 @@ describe("pageRegistry", () => {
   describe("BUILTIN_PAGE_PATH", () => {
     it("应包含所有内置页面", () => {
       expect(BUILTIN_PAGE_PATH.chat).toBe("/chat");
-      expect(BUILTIN_PAGE_PATH.dashboard).toBe("/dashboard");
+      expect(BUILTIN_PAGE_PATH.dashboard).toBe("/chat/dashboard");
       expect(BUILTIN_PAGE_PATH.settings).toBe("/settings");
-      expect(BUILTIN_PAGE_PATH.workflow).toBe("/workflow");
-      expect(BUILTIN_PAGE_PATH.files).toBe("/files");
+      expect(BUILTIN_PAGE_PATH.chatWorkflow).toBe("/chat/workflow");
+      expect(BUILTIN_PAGE_PATH.chatFiles).toBe("/chat/files");
       expect(BUILTIN_PAGE_PATH.knowledge).toBe("/knowledge");
       expect(BUILTIN_PAGE_PATH.memory).toBe("/memory");
       expect(BUILTIN_PAGE_PATH.link).toBe("/link");
       expect(BUILTIN_PAGE_PATH.gateway).toBe("/gateway");
-      expect(BUILTIN_PAGE_PATH.terminal).toBe("/terminal");
+      expect(BUILTIN_PAGE_PATH.chatTerminal).toBe("/chat/terminal");
     });
 
     it("应包含 devtools 路由", () => {
@@ -30,17 +30,6 @@ describe("pageRegistry", () => {
       expect(BUILTIN_PAGE_PATH.devtoolsTraceExplorer).toBe("/devtools/trace-explorer");
       expect(BUILTIN_PAGE_PATH.devtoolsBenchmark).toBe("/devtools/benchmark");
       expect(BUILTIN_PAGE_PATH.devtoolsFineTune).toBe("/devtools/fine-tune");
-    });
-
-    it("应包含 8 个能力域聚合入口路径（对应 domainMeta）", () => {
-      expect(BUILTIN_PAGE_PATH.general).toBe("/general");
-      expect(BUILTIN_PAGE_PATH.finance).toBe("/finance");
-      expect(BUILTIN_PAGE_PATH.automation).toBe("/automation");
-      expect(BUILTIN_PAGE_PATH.devops).toBe("/devops");
-      expect(BUILTIN_PAGE_PATH.data_analysis).toBe("/data-analysis");
-      expect(BUILTIN_PAGE_PATH.content_creation).toBe("/content-creation");
-      expect(BUILTIN_PAGE_PATH.ai_media).toBe("/ai-media");
-      expect(BUILTIN_PAGE_PATH.communication).toBe("/communication");
     });
 
     it("所有路径应以 / 开头", () => {

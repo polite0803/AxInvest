@@ -491,6 +491,7 @@ async fn build_llm_adapter(
     let settings = axagent_dao::repo::settings::get_settings(db).await.unwrap_or_default();
 
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key,
         key_id: key.id.clone(),
         provider_id: provider.id.clone(),

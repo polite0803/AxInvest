@@ -114,7 +114,7 @@ export function SkillLearningPanel() {
           display: "flex",
           gap: 8,
           padding: "0 0 12px",
-          borderBottom: "1px solid var(--color-border-secondary)",
+          borderBottom: "1px solid var(--border-light)",
         }}
       >
         <Button
@@ -198,7 +198,7 @@ export function SkillLearningPanel() {
                 {pendingOps.map((op) => (
                   <div
                     key={op.id}
-                    style={{ border: "1px solid var(--color-border-secondary)", borderRadius: 8, padding: 12 }}
+                    style={{ border: "1px solid var(--border-light)", borderRadius: 8, padding: 12 }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                       <Tag color="blue">{op.operationType}</Tag>
@@ -208,7 +208,7 @@ export function SkillLearningPanel() {
                       </Tag>
                       <span style={{ flex: 1 }} />
                       <Tooltip title={op.reason}>
-                        <span style={{ fontSize: 12, color: "var(--color-text-tertiary)" }}>
+                        <span style={{ fontSize: 12, color: "var(--muted)" }}>
                           {new Date(op.createdAt).toLocaleString()}
                         </span>
                       </Tooltip>
@@ -278,7 +278,7 @@ export function SkillLearningPanel() {
               />
             </div>
             <Divider style={{ margin: "8px 0" }} />
-            <div style={{ fontSize: 12, color: "var(--color-text-tertiary)" }}>
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>
               {t("skillLearning.minToolCalls")}: {config.minToolCallsForCreation} · {t("skillLearning.maxReviewMsgs")}:
               {" "}
               {config.maxReviewMessages}

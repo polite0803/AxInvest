@@ -10,6 +10,7 @@ import {
   riskStanceLabelKey,
 } from "@/lib/risk-assessment";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
+import { type CategoricalHue, hueVar } from "@/theme/categoricalColors";
 import { DownloadOutlined, ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, Modal, Spin, Tag } from "antd";
 import type { TFunction } from "i18next";
@@ -19,17 +20,28 @@ import { HorizonDecisionStrip } from "./HorizonDecisionStrip";
 import { HorizonScopeNotice } from "./HorizonScopeNotice";
 import { ReportMarkdown } from "./ReportMarkdown";
 
-/** 风险类型 → 颜色（OKLch 值与 index.css --sa-* 同步） */
-const RISK_COLORS: Record<string, string> = {
-  "risk-agg": "oklch(55% 0.20 28)",
-  "risk-con": "oklch(55% 0.18 150)",
-  "risk-neu": "oklch(55% 0.16 250)",
-  "research-mgr": "oklch(60% 0.18 85)",
-  "comprehensive": "oklch(60% 0.16 290)",
-  "risk-aggregated": "oklch(55% 0.20 28)",
-  "risk-level": "oklch(55% 0.18 45)",
-  "risk-convergence": "oklch(55% 0.16 200)",
+/**
+ * 风险类型 → 类目色相（权威在 `@/theme/categoricalColors`，这里只登记哪两个类型不能撞色）。
+ *
+ * 收编前是一张本地 oklch 表，注释还写着「与 index.css --sa-* 同步」—— 而 `--sa-*`
+ * 从未在 index.css 定义过，等于这张表就是它自己的唯一来源、且不随明暗档变。
+ * `risk-agg` 与 `risk-aggregated` 是同一个节点的两种写法，故同色是刻意的。
+ */
+const RISK_HUE: Record<string, CategoricalHue> = {
+  "risk-agg": "volcano",
+  "risk-aggregated": "volcano",
+  "risk-con": "green",
+  "risk-neu": "sky",
+  "research-mgr": "yellow",
+  "comprehensive": "purple",
+  "risk-level": "orange",
+  "risk-convergence": "cyan",
 };
+
+/** 词表外的风险类型退回中性蓝，不再退回另一张本地表 */
+function riskColor(key: string | undefined): string {
+  return hueVar(RISK_HUE[key ?? ""] ?? "sky");
+}
 
 /** 风险类型 → i18n key（key 与 riskAssessments 实际节点 ID 对齐） */
 const RISK_LABEL_KEYS: Record<string, string> = {
@@ -262,7 +274,7 @@ function RiskBody({
       {/* 收敛结论置顶：三视角的裁决先给结论，再给三票 */}
       <div className="p-2 rounded" style={{ background: "var(--surface)" }}>
         <div className="flex items-center gap-1 mb-1">
-          <Tag color={RISK_COLORS["risk-convergence"]} style={{ marginRight: 0 }}>
+          <Tag color={riskColor("risk-convergence")} style={{ marginRight: 0 }}>
             {t("stockAnalysis.riskMatrix.convergenceTitle")}
           </Tag>
         </div>
@@ -289,7 +301,7 @@ function RiskBody({
         </div>
         <div className={`grid grid-cols-1 ${dense ? "sm:grid-cols-3" : "md:grid-cols-3"} gap-2`}>
           {views.map((row) => {
-            const color = RISK_COLORS[row.key] ?? "oklch(55% 0.16 250)";
+            const color = riskColor(row.key);
             return (
               <div
                 key={row.key}
@@ -354,7 +366,7 @@ function RiskBody({
       {/* 规则风险档：category + 命中规则 + 口径缺席 + 关键指标 */}
       <div className="p-2 rounded" style={{ background: "var(--surface)" }}>
         <div className="flex items-center gap-1 flex-wrap mb-1">
-          <Tag color={RISK_COLORS["risk-level"]} style={{ marginRight: 0 }}>
+          <Tag color={riskColor("risk-level")} style={{ marginRight: 0 }}>
             {t("stockAnalysis.riskMatrix.riskLevelTitle")}
           </Tag>
           {riskLevel?.category && <Tag color={riskCategoryColor(riskLevel.category)}>{riskLevel.category}</Tag>}
@@ -393,7 +405,7 @@ function RiskBody({
                 </div>
               )}
               {riskLevel.warnings.length > 0 && (
-                <div style={{ color: "var(--sa-amber)" }}>{riskLevel.warnings.join("；")}</div>
+                <div style={{ color: "var(--amber)" }}>{riskLevel.warnings.join("；")}</div>
               )}
             </div>
           )
@@ -409,7 +421,7 @@ function RiskBody({
           style={{ color: "var(--muted)", background: "none", border: 0, padding: 0, cursor: "pointer" }}
           onClick={() => setResearchOpen((v) => !v)}
         >
-          <Tag color={RISK_COLORS["research-mgr"]} style={{ marginRight: 0 }}>
+          <Tag color={riskColor("research-mgr")} style={{ marginRight: 0 }}>
             {t("stockAnalysis.riskMatrix.researchManagerTitle")}
           </Tag>
           {researchOpen ? t("stockAnalysis.riskMatrix.collapse") : t("stockAnalysis.riskMatrix.expand")}
@@ -441,7 +453,7 @@ function RiskBody({
                 const view = parseRiskAssessment(raw);
                 return (
                   <div key={key}>
-                    <Tag color={RISK_COLORS[key] ?? "default"}>{riskEntryLabel(key, t)}</Tag>
+                    <Tag color={riskColor(key)}>{riskEntryLabel(key, t)}</Tag>
                     <div className="sa-markdown-content text-xs leading-relaxed">
                       {view.report
                         ? <ReportMarkdown content={view.report} isDark={isDark} />
@@ -561,7 +573,7 @@ export function RiskMatrix() {
                 {t("stockAnalysis.riskMatrix.loading")}
               </div>
               {runningRiskPreviews.map(([nodeId, text]) => {
-                const color = RISK_COLORS[nodeId] ?? "oklch(55% 0.16 250)";
+                const color = riskColor(nodeId);
                 return (
                   <div key={`streaming-${nodeId}`} className="w-full px-2">
                     <div className="flex items-center gap-1">
@@ -642,7 +654,7 @@ export function RiskMatrix() {
         {runningRiskPreviews.length > 0 && (
           <div className="space-y-1.5 mt-2">
             {runningRiskPreviews.map(([nodeId, text]) => {
-              const color = RISK_COLORS[nodeId] ?? "oklch(55% 0.16 250)";
+              const color = riskColor(nodeId);
               return (
                 <div key={`streaming-${nodeId}`} className="p-1.5 rounded" style={{ background: "var(--surface)" }}>
                   <div className="text-sm font-medium mb-0.5 flex items-center gap-1">
@@ -691,7 +703,7 @@ export function RiskMatrix() {
         title={selectedCard
           ? (
             <div className="flex items-center gap-2">
-              <Tag color={RISK_COLORS[selectedCard] ?? "default"}>{riskEntryLabel(selectedCard, t)}</Tag>
+              <Tag color={riskColor(selectedCard)}>{riskEntryLabel(selectedCard, t)}</Tag>
             </div>
           )
           : ""}

@@ -8,7 +8,7 @@
 //!
 //! - 端点：`POST {base}/alpha/decisions`
 //! - 默认 base：`https://openrouter.ai/api`（OpenRouter 已开放，无需 waitlist）
-//! - 默认模型 ID：`typesafe/jev-1.13`
+//! - 默认模型 ID：`typesafe/jev-1.14`
 //! - 计费：输入 `$0.042 / 1M tokens`，**输出免费**；端到端 70–500ms
 //!
 //! # 为什么这里要做「协议转换」
@@ -66,10 +66,10 @@ const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api";
 const DECISIONS_PATH: &str = "/alpha/decisions";
 
 /// 默认模型 ID（OpenRouter 上的 Jev 当前版本）。
-const DEFAULT_MODEL: &str = "typesafe/jev-1.13";
+const DEFAULT_MODEL: &str = "typesafe/jev-1.14";
 
 /// Jev 单次请求的上下文窗口（state 占其中约一半）。
-const CONTEXT_WINDOW: u32 = 32_000;
+const CONTEXT_WINDOW: u32 = 262_144;
 
 /// choice 问题最多支持的选项数（Jev 原生上限 255）。
 const MAX_CHOICE_OPTIONS: usize = 255;
@@ -563,7 +563,7 @@ mod tests {
     fn build_request_body_uses_choice_criteria_from_numbered_list() {
         let state = "可选类别\n1. billing\n2. technical";
         let body =
-            TypeSafeAdapter::build_request_body("typesafe/jev-1.13", state, QuestionKind::Choice);
+            TypeSafeAdapter::build_request_body("typesafe/jev-1.14", state, QuestionKind::Choice);
         let q = &body["questions"]["answer"];
         assert_eq!(q["type"], "choice");
         assert_eq!(q["criteria"]["billing"], "billing");
@@ -683,7 +683,7 @@ mod tests {
 
         // 手工挂到别的 provider 下时，靠命名推断也应得到 Decision
         assert_eq!(
-            axagent_harness::types::provider_model::detect_model_type("typesafe/jev-1.13"),
+            axagent_harness::types::provider_model::detect_model_type("typesafe/jev-1.14"),
             ModelType::Decision
         );
         assert_eq!(

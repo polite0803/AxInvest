@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { type CategoricalHue, hueColor } from "@/theme/categoricalColors";
 import { Badge, Card, Empty, List, Segmented, Space, Tag, Timeline, Typography } from "antd";
 import i18next from "i18next";
 import { Activity, CheckCircle, Clock, Loader2, PauseCircle, XCircle } from "lucide-react";
@@ -32,7 +34,7 @@ export interface AgentProfile {
   id: string;
   name: string;
   icon: string;
-  color: string;
+  hue: CategoricalHue;
   role: string;
 }
 
@@ -57,140 +59,140 @@ const AGENT_PROFILES: Record<string, AgentProfile> = {
     id: "code_auditor",
     name: "agentActivity.profiles.code_auditor.name",
     icon: "🔍",
-    color: "#52c41a",
+    hue: "green",
     role: "agentActivity.profiles.code_auditor.role",
   },
   architect_analyst: {
     id: "architect_analyst",
     name: "agentActivity.profiles.architect_analyst.name",
     icon: "🏗️",
-    color: "#1890ff",
+    hue: "blue",
     role: "agentActivity.profiles.architect_analyst.role",
   },
   quality_expert: {
     id: "quality_expert",
     name: "agentActivity.profiles.quality_expert.name",
     icon: "📊",
-    color: "#722ed1",
+    hue: "purple",
     role: "agentActivity.profiles.quality_expert.role",
   },
   behavior_tester: {
     id: "behavior_tester",
     name: "agentActivity.profiles.behavior_tester.name",
     icon: "🧪",
-    color: "#13c2c2",
+    hue: "cyan",
     role: "agentActivity.profiles.behavior_tester.role",
   },
   knowledge_engineer: {
     id: "knowledge_engineer",
     name: "agentActivity.profiles.knowledge_engineer.name",
     icon: "💡",
-    color: "#faad14",
+    hue: "yellow",
     role: "agentActivity.profiles.knowledge_engineer.role",
   },
   refactor_consultant: {
     id: "refactor_consultant",
     name: "agentActivity.profiles.refactor_consultant.name",
     icon: "⚠️",
-    color: "#fa541c",
+    hue: "volcano",
     role: "agentActivity.profiles.refactor_consultant.role",
   },
   solution_architect: {
     id: "solution_architect",
     name: "agentActivity.profiles.solution_architect.name",
     icon: "🎯",
-    color: "#2f54eb",
+    hue: "geekblue",
     role: "agentActivity.profiles.solution_architect.role",
   },
   tech_project_manager: {
     id: "tech_project_manager",
     name: "agentActivity.profiles.tech_project_manager.name",
     icon: "📋",
-    color: "#eb2f96",
+    hue: "pink",
     role: "agentActivity.profiles.tech_project_manager.role",
   },
   change_manager: {
     id: "change_manager",
     name: "agentActivity.profiles.change_manager.name",
     icon: "🔄",
-    color: "#a0d911",
+    hue: "lime",
     role: "agentActivity.profiles.change_manager.role",
   },
   quality_engineer: {
     id: "quality_engineer",
     name: "agentActivity.profiles.quality_engineer.name",
     icon: "✅",
-    color: "#52c41a",
+    hue: "green",
     role: "agentActivity.profiles.quality_engineer.role",
   },
   devops_engineer: {
     id: "devops_engineer",
     name: "agentActivity.profiles.devops_engineer.name",
     icon: "⚙️",
-    color: "#595959",
+    hue: "gray",
     role: "agentActivity.profiles.devops_engineer.role",
   },
   code_reviewer: {
     id: "code_reviewer",
     name: "agentActivity.profiles.code_reviewer.name",
     icon: "👁️",
-    color: "#2f54eb",
+    hue: "geekblue",
     role: "agentActivity.profiles.code_reviewer.role",
   },
   senior_engineer: {
     id: "senior_engineer",
     name: "agentActivity.profiles.senior_engineer.name",
     icon: "💻",
-    color: "#1890ff",
+    hue: "blue",
     role: "agentActivity.profiles.senior_engineer.role",
   },
   behavior_verifier: {
     id: "behavior_verifier",
     name: "agentActivity.profiles.behavior_verifier.name",
     icon: "🔬",
-    color: "#722ed1",
+    hue: "purple",
     role: "agentActivity.profiles.behavior_verifier.role",
   },
   test_engineer: {
     id: "test_engineer",
     name: "agentActivity.profiles.test_engineer.name",
     icon: "🧪",
-    color: "#13c2c2",
+    hue: "cyan",
     role: "agentActivity.profiles.test_engineer.role",
   },
   integration_engineer: {
     id: "integration_engineer",
     name: "agentActivity.profiles.integration_engineer.name",
     icon: "🔗",
-    color: "#fa8c16",
+    hue: "orange",
     role: "agentActivity.profiles.integration_engineer.role",
   },
   quality_director: {
     id: "quality_director",
     name: "agentActivity.profiles.quality_director.name",
     icon: "🎖️",
-    color: "#cf1322",
+    hue: "red",
     role: "agentActivity.profiles.quality_director.role",
   },
   tech_writer: {
     id: "tech_writer",
     name: "agentActivity.profiles.tech_writer.name",
     icon: "📝",
-    color: "#faad14",
+    hue: "yellow",
     role: "agentActivity.profiles.tech_writer.role",
   },
   ops_engineer: {
     id: "ops_engineer",
     name: "agentActivity.profiles.ops_engineer.name",
     icon: "🔧",
-    color: "#595959",
+    hue: "gray",
     role: "agentActivity.profiles.ops_engineer.role",
   },
   project_manager: {
     id: "project_manager",
     name: "agentActivity.profiles.project_manager.name",
     icon: "📊",
-    color: "#eb2f96",
+    hue: "pink",
     role: "agentActivity.profiles.project_manager.role",
   },
 };
@@ -248,6 +250,7 @@ export const AgentActivityFeed: React.FC<AgentActivityFeedProps> = ({
   agentStatuses,
 }) => {
   const { t } = useTranslation();
+  const isDark = useIsDarkTheme();
   const [filter, setFilter] = useState<"all" | "running" | "waiting" | "completed">("all");
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
 
@@ -315,14 +318,15 @@ export const AgentActivityFeed: React.FC<AgentActivityFeedProps> = ({
           dataSource={filteredAgents}
           renderItem={(agent) => {
             const status = agentStatuses[agent.id] || "idle";
+            const agentColor = hueColor(agent.hue, isDark);
             return (
               <List.Item
                 onClick={() => setSelectedAgent(selectedAgent === agent.id ? null : agent.id)}
                 style={{
                   cursor: "pointer",
                   padding: "8px 12px",
-                  background: selectedAgent === agent.id ? `${agent.color}15` : undefined,
-                  borderLeft: `3px solid ${agent.color}`,
+                  background: selectedAgent === agent.id ? `${agentColor}15` : undefined,
+                  borderLeft: `3px solid ${agentColor}`,
                 }}
               >
                 <Space>

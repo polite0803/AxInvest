@@ -5907,6 +5907,8 @@
     "renderUserMarkdownDesc": "Afficher les messages utilisateur avec le formatage Markdown, y compris les blocs de code, les sauts de ligne, etc.",
     "requestDelayMs": "Délai de requête",
     "requestDelayMsHint": "Millisecondes d'attente avant chaque appel API, utilisé pour éviter les limites de débit (par exemple, erreurs 429)",
+    "headerTimeoutSecs": "Délai de premier octet",
+    "headerTimeoutSecsHint": "Nombre total de secondes d'attente des en-têtes de réponse HTTP du service en amont (au-delà du seuil souple, une nouvelle tentative est faite chez le même fournisseur ; au-delà du seuil strict, le service en amont est considéré comme bloqué) ; vide utilise la valeur par défaut de 90 secondes",
     "resetDefault": "Réinitialiser par défaut",
     "resetShortcutDefaults": "Réinitialiser les raccourcis par défaut",
     "resetShortcutSingle": "Réinitialiser ce raccourci par défaut",
@@ -16454,7 +16456,19 @@
       "vendorLastError": "Dernière erreur",
       "vendorLastSuccess": "Dernier succès",
       "vendorLastFailure": "Dernier échec",
-      "vendorHealth": "Santé des sources de données"
+      "vendorHealth": "Santé des sources de données",
+      "interfaceHealth": {
+        "title": "Santé quotidienne des interfaces",
+        "storeDisabled": "L'archive quotidienne est désactivée ; les résultats n'ont pas été conservés",
+        "empty": "Aucun relevé quotidien pour l'instant (vérification automatique après la clôture)",
+        "unavailable": "Les relevés quotidiens ne sont pas disponibles dans cet environnement",
+        "colDate": "Date de référence",
+        "colSummary": "OK / vérifiés",
+        "colIssues": "Anomalies",
+        "summary": "{{ok}}/{{total}} OK",
+        "checkedAt": "Vérifié à",
+        "statusEmptyByTime": "Aucune donnée sur cette période"
+      }
     },
     "experiment": {
       "executeTrade": "Exécuter la transaction →",
@@ -16574,7 +16588,7 @@
     "diTableDirection": "Direction/Valeur",
     "diTableStatus": "Statut",
     "diTableNote": "Remarque",
-    "weightCollapseDqi": "Note de qualité des données F (dqi<25), base de décision invalide",
+    "weightCollapseDqi": "Note de qualité des données F, base de décision invalide",
     "weightCollapseUntrusted": "Amont non fiable ≥2 (untrusted_count={{count}})",
     "weightCollapseThreshold": "Poids du facteur {{ratio}} % sous le seuil",
     "weightCollapseConsequence": "Conséquence : position forcée à 0 %, confiance directionnelle ×0,5",
@@ -16716,7 +16730,8 @@
       "diff": "Divergence",
       "directionConflict": "Conflit de direction",
       "opposite": "Inverse",
-      "sameDirection": "Même sens"
+      "sameDirection": "Même sens",
+      "htmlReport": "Rapport HTML"
     },
     "crossCheck": {
       "title": "Sélection de tendance vs Analyse · Divergence inter-systèmes",
@@ -17102,7 +17117,9 @@
       "replayDegradedWithCount": "{{n}} data sources were skipped in replay mode; this panel is hidden.",
       "replayDegradedWithReason": "Degraded in replay mode: {{reason}}",
       "_fallback": "Aucune donnée de recommandation",
-      "empty": "Aucune donnée de recommandation"
+      "empty": "Aucune donnée de recommandation",
+      "sourceFailed": "Source de données indisponible",
+      "schemaChanged": "Structure de l'interface modifiée"
     },
     "row": {
       "entry": "Entrée",
@@ -18616,7 +18633,9 @@
         "label": "Adopter les achats de horizon au niveau supérieur",
         "desc": "Quand la calibration n'atteint pas son seuil, la confiance est plafonnée et l'action déclassée en même temps — le nombre d'achats au niveau supérieur reste nul. Ouvrir permet au niveau supérieur d'adopter les achats décidés par horizon. Le plafond de confiance reste appliqué."
       }
-    }
+    },
+    "htmlNeedAnalysisId": "ID d'enregistrement d'analyse manquant ; impossible d'exporter le rapport HTML",
+    "htmlDesktopOnly": "Rapport HTML disponible uniquement sur ordinateur"
   },
   "pipeline": {
     "title": "Pipeline d'Actions",

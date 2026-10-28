@@ -106,7 +106,7 @@ export function F7ReferenceComparison({
       className="space-y-1 rounded-md p-1.5 text-sm"
       style={{ background: "rgba(217,119,6,0.05)", border: "1px solid rgba(217,119,6,0.14)" }}
     >
-      <div data-testid={id("title")} className="font-medium" style={{ color: "#b45309" }}>
+      <div data-testid={id("title")} className="font-medium" style={{ color: "var(--amber)" }}>
         {t("stockAnalysis.f7Reference.title")}
       </div>
 
@@ -122,13 +122,13 @@ export function F7ReferenceComparison({
 
       {/* ② 同口径 ⇒ 对照本身不成立，必须单独成句（否则「差 0」会被读成「观点无影响」） */}
       {sameBasis && (
-        <div data-testid={id("same-basis")} style={{ color: "#b45309" }}>
+        <div data-testid={id("same-basis")} style={{ color: "var(--amber)" }}>
           {t("stockAnalysis.f7Reference.sameBasis")}
         </div>
       )}
 
       {collapsed && (
-        <div data-testid={id("collapsed")} style={{ color: "#ef4444" }}>
+        <div data-testid={id("collapsed")} style={{ color: "var(--red)" }}>
           {t("stockAnalysis.f7Reference.weightsCollapsed")}
         </div>
       )}

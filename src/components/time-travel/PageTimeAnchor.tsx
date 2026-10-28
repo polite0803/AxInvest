@@ -150,7 +150,7 @@ export function PageTimeAnchor() {
                 background: "none",
                 border: "none",
                 cursor: "pointer",
-                color: "var(--text-tertiary)",
+                color: "var(--muted)",
                 fontSize: 12,
                 padding: "0 4px",
               }}

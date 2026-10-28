@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { cssVar } from "@/lib/cssVar";
+import { ensureECharts } from "@/lib/echartsInstance";
 import { invoke } from "@/lib/invoke";
 import {
   DollarOutlined,
@@ -58,6 +61,7 @@ const formatTs = (ts: number): string => {
 
 export function DashboardTab() {
   const { t } = useTranslation();
+  const isDark = useIsDarkTheme();
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [cmKpis, setCmKpis] = useState<ContentMediaKpis | null>(null);
@@ -84,6 +88,8 @@ export function DashboardTab() {
     })();
   }, []);
 
+  // 依赖含 isDark：ECharts 主题只在 init 生效，档位翻转必须重跑一次建图
+  // （代价是这四个只读查询再来一遍，本地 SQLite 读，换主题的频次极低）
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -111,9 +117,7 @@ export function DashboardTab() {
         });
 
         if (contentTypeChartRef.current) {
-          if (!contentTypeChartInstance.current) {
-            contentTypeChartInstance.current = echarts.init(contentTypeChartRef.current);
-          }
+          contentTypeChartInstance.current = ensureECharts(contentTypeChartRef.current, isDark);
           contentTypeChartInstance.current.setOption({
             tooltip: { trigger: "item" },
             series: [
@@ -131,9 +135,7 @@ export function DashboardTab() {
         }
 
         if (scheduleStatusChartRef.current) {
-          if (!scheduleStatusChartInstance.current) {
-            scheduleStatusChartInstance.current = echarts.init(scheduleStatusChartRef.current);
-          }
+          scheduleStatusChartInstance.current = ensureECharts(scheduleStatusChartRef.current, isDark);
           scheduleStatusChartInstance.current.setOption({
             tooltip: { trigger: "item" },
             series: [
@@ -165,26 +167,24 @@ export function DashboardTab() {
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, [t, isDark]);
 
   useEffect(() => {
     if (!summary) { return; }
 
     if (revenueChartRef.current && summary.revenue_trend) {
-      if (!revenueChartInstance.current) {
-        revenueChartInstance.current = echarts.init(revenueChartRef.current);
-      }
+      revenueChartInstance.current = ensureECharts(revenueChartRef.current, isDark);
       revenueChartInstance.current.setOption({
         tooltip: { trigger: "axis" },
         grid: { left: 50, right: 20, top: 20, bottom: 30 },
         xAxis: {
           type: "category",
           data: summary.revenue_trend.map((item) => formatTs(item.recorded_at)),
-          axisLabel: { color: "#999" },
+          axisLabel: { color: cssVar("--muted") },
         },
         yAxis: {
           type: "value",
-          axisLabel: { color: "#999", formatter: "¥{value}" },
+          axisLabel: { color: cssVar("--muted"), formatter: "¥{value}" },
         },
         series: [
           {
@@ -193,8 +193,8 @@ export function DashboardTab() {
             data: summary.revenue_trend.map((item) => item.amount),
             smooth: true,
             areaStyle: { opacity: 0.3 },
-            lineStyle: { color: "#3f8600" },
-            itemStyle: { color: "#3f8600" },
+            lineStyle: { color: cssVar("--green") },
+            itemStyle: { color: cssVar("--green") },
           },
         ],
       });
@@ -207,7 +207,7 @@ export function DashboardTab() {
     };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [summary, t]);
+  }, [summary, t, isDark]);
 
   useEffect(() => {
     return () => {
@@ -235,7 +235,7 @@ export function DashboardTab() {
               value={summary.total_revenue}
               prefix="¥"
               precision={2}
-              valueStyle={{ color: "#3f8600" }}
+              valueStyle={{ color: "var(--green)" }}
             />
           </Card>
         </Col>
@@ -300,7 +300,7 @@ export function DashboardTab() {
                         <Statistic
                           title={t("opc.contentMedia.kpiAssets")}
                           value={cmKpis.content_assets_count}
-                          valueStyle={{ color: "#1677ff" }}
+                          valueStyle={{ color: "var(--accent)" }}
                         />
                       </Card>
                     </Col>
@@ -309,7 +309,7 @@ export function DashboardTab() {
                         <Statistic
                           title={t("opc.contentMedia.kpiBlogPosts")}
                           value={cmKpis.blog_posts_count}
-                          valueStyle={{ color: "#722ed1" }}
+                          valueStyle={{ color: "var(--purple)" }}
                         />
                       </Card>
                     </Col>
@@ -318,7 +318,7 @@ export function DashboardTab() {
                         <Statistic
                           title={t("opc.contentMedia.kpiLandingPages")}
                           value={cmKpis.landing_pages_count}
-                          valueStyle={{ color: "#13c2c2" }}
+                          valueStyle={{ color: "var(--teal)" }}
                         />
                       </Card>
                     </Col>
@@ -327,7 +327,7 @@ export function DashboardTab() {
                         <Statistic
                           title={t("opc.contentMedia.kpiSchedulesPending")}
                           value={cmKpis.publish_schedules_pending}
-                          valueStyle={{ color: "#fa8c16" }}
+                          valueStyle={{ color: "var(--amber)" }}
                         />
                       </Card>
                     </Col>
@@ -336,7 +336,7 @@ export function DashboardTab() {
                         <Statistic
                           title={t("opc.contentMedia.kpiSchedulesPublished")}
                           value={cmKpis.publish_schedules_published}
-                          valueStyle={{ color: "#52c41a" }}
+                          valueStyle={{ color: "var(--green)" }}
                         />
                       </Card>
                     </Col>

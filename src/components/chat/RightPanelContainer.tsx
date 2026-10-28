@@ -49,7 +49,7 @@ class TabErrorBoundary extends Component<
       return (
         <div style={{ padding: 16, color: "var(--muted)", fontSize: 12 }}>
           <p>{i18n.t("errorBoundary.panelLoadFailed", { tabKey: this.props.tabKey })}</p>
-          <p style={{ color: "var(--danger)", fontSize: 11 }}>
+          <p style={{ color: "var(--red)", fontSize: 11 }}>
             {this.state.error?.message || i18n.t("errorBoundary.unknownError")}
           </p>
         </div>

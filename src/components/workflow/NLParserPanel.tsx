@@ -102,10 +102,10 @@ export function NLParserPanel({ onApply }: NLParserPanelProps) {
       {result && !isParsing && (
         <div
           style={{
-            border: "1px solid var(--color-border-secondary)",
+            border: "1px solid var(--border-light)",
             borderRadius: 8,
             padding: 16,
-            backgroundColor: "var(--color-fill-tertiary)",
+            backgroundColor: "var(--surface-2)",
           }}
         >
           <Title level={5} style={{ marginTop: 0 }}>{t("workflow.nlParser.parseResult")}</Title>

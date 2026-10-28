@@ -667,7 +667,7 @@ export function WorkflowExecutor({ workflow, open, onClose }: WorkflowExecutorPr
                 <Text strong style={{ display: "block", marginBottom: 8 }}>{t("workflow.executor.outputResult")}</Text>
                 <pre
                   style={{
-                    backgroundColor: "var(--color-fill-tertiary)",
+                    backgroundColor: "var(--surface-2)",
                     padding: 8,
                     borderRadius: 4,
                     fontSize: 12,
@@ -710,7 +710,7 @@ export function WorkflowExecutor({ workflow, open, onClose }: WorkflowExecutorPr
                     style={{
                       marginTop: 12,
                       padding: 12,
-                      background: "var(--color-fill-tertiary)",
+                      background: "var(--surface-2)",
                       borderRadius: 6,
                       display: "flex",
                       flexDirection: "column",

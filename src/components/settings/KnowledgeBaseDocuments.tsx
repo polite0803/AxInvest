@@ -1509,7 +1509,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
                               ? (
                                 <CheckCircleOutlined
                                   style={{
-                                    color: "var(--ant-color-success)",
+                                    color: "var(--green)",
                                     fontSize: 16,
                                   }}
                                 />
@@ -1517,7 +1517,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
                               : (
                                 <ClockCircleOutlined
                                   style={{
-                                    color: "var(--ant-color-text-secondary)",
+                                    color: "var(--fg-2)",
                                     fontSize: 16,
                                   }}
                                 />
@@ -2012,19 +2012,19 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
                 <Statistic
                   title={t("settings.knowledge.importedCount")}
                   value={importResult.importedCount}
-                  styles={{ content: { color: "var(--ant-color-success)" } }}
+                  styles={{ content: { color: "var(--green)" } }}
                 />
                 <Statistic
                   title={t("settings.knowledge.importSkipped")}
                   value={importResult.skippedCount}
-                  styles={{ content: { color: "var(--ant-color-text-secondary)" } }}
+                  styles={{ content: { color: "var(--fg-2)" } }}
                 />
                 <Statistic
                   title={t("settings.knowledge.errorCount")}
                   value={importResult.errorCount}
                   styles={{
                     content: {
-                      color: importResult.errorCount > 0 ? "var(--ant-color-error)" : undefined,
+                      color: importResult.errorCount > 0 ? "var(--red)" : undefined,
                     },
                   }}
                 />
@@ -2037,7 +2037,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
                     key: "skipped",
                     label: `${t("settings.knowledge.importSkipped")} (${importResult.skipped.length})`,
                     children: (
-                      <ul className="m-0 pl-4 text-xs" style={{ color: "var(--ant-color-text-secondary)" }}>
+                      <ul className="m-0 pl-4 text-xs" style={{ color: "var(--fg-2)" }}>
                         {importResult.skipped.map((p) => <li key={p} className="break-all">{p}</li>)}
                       </ul>
                     ),
@@ -2052,7 +2052,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
                     key: "errors",
                     label: `${t("settings.knowledge.importErrors")} (${importResult.errors.length})`,
                     children: (
-                      <ul className="m-0 pl-4 text-xs" style={{ color: "var(--ant-color-error)" }}>
+                      <ul className="m-0 pl-4 text-xs" style={{ color: "var(--red)" }}>
                         {importResult.errors.map((e) => (
                           <li key={e.path} className="break-all">{e.path}: {e.error}</li>
                         ))}

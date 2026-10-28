@@ -239,7 +239,8 @@
 
 .sa-sheet-toggle {
   background: var(--accent);
-  color: #fff;
+  /* 必须走 --accent-fg：21th-dark 的 accent 是纯白，写死 #fff 会白底白字 */
+  color: var(--accent-fg);
   cursor: pointer;
   width: 36px;
   height: 36px;
@@ -269,7 +270,7 @@
 /* ── Markdown 报告内容 ── */
 
 .sa-markdown-content {
-  color: var(--color-text-base, inherit);
+  color: var(--fg);
   word-break: break-word;
   font-size: 13px;
   line-height: 1.65;
@@ -376,7 +377,7 @@
 }
 
 .sa-markdown-content a {
-  color: var(--ant-color-link, #1677ff);
+  color: var(--accent);
   text-decoration: none;
 }
 

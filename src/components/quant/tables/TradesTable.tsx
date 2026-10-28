@@ -116,7 +116,7 @@ export function TradesTable({ trades }: TradesTableProps) {
       align: "right",
       width: 130,
       render: (v: number) => {
-        if (v === 0) { return <span style={{ color: "#999" }}>0.00</span>; }
+        if (v === 0) { return <span style={{ color: "var(--muted)" }}>0.00</span>; }
         const color = v > 0 ? "#cf1322" : "#389e0d";
         return <span style={{ color, fontWeight: 500 }}>{v.toFixed(2)}</span>;
       },
@@ -133,7 +133,7 @@ export function TradesTable({ trades }: TradesTableProps) {
   if (trades.length === 0) {
     return (
       <Card>
-        <span style={{ color: "#999" }}>{t("quant.trades.empty")}</span>
+        <span style={{ color: "var(--muted)" }}>{t("quant.trades.empty")}</span>
       </Card>
     );
   }
@@ -229,8 +229,8 @@ function SummaryCard({
 }) {
   return (
     <Card size="small" styles={{ body: { padding: "8px 12px" } }}>
-      <div style={{ fontSize: 12, color: "#666" }}>{label}</div>
-      <div style={{ fontSize: 18, fontWeight: 500, color: color ?? "#222" }}>
+      <div style={{ fontSize: 12, color: "var(--fg-2)" }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 500, color: color ?? "var(--fg)" }}>
         {value}
       </div>
     </Card>

@@ -159,12 +159,12 @@ export function SkillDependencyCheck() {
                       : (
                         <XCircle
                           size={12}
-                          style={{ color: "var(--color-error)" }}
+                          style={{ color: "var(--red)" }}
                         />
                       )}
                     <Typography.Text
                       style={{
-                        color: dep.installed ? undefined : "var(--color-error)",
+                        color: dep.installed ? undefined : "var(--red)",
                       }}
                     >
                       {dep.skillName}

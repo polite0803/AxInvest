@@ -303,7 +303,9 @@ export function MonteCarloPanel({ stockCode: stockCodeProp, referencePriceYuan }
                   value={report.survivalRate}
                   suffix="%"
                   precision={1}
-                  styles={{ content: { fontSize: 22, color: report.survivalRate >= 50 ? "#52c41a" : "#f5222d" } }}
+                  styles={{
+                    content: { fontSize: 22, color: report.survivalRate >= 50 ? "var(--green)" : "var(--red)" },
+                  }}
                 />
               </Card>
             </Col>

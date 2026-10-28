@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { hueColor } from "@/theme/categoricalColors";
 import { theme } from "antd";
 import React, { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { NODE_KIND_LABEL_KEYS, type NodeKind } from "./types";
+import { NODE_KIND_HUE, NODE_KIND_LABEL_KEYS, type NodeKind } from "./types";
 
 /**
  * 语义化颜色 — 根据 NodeKind 从主题 token 解析可适配深色/浅色的颜色值。
@@ -13,31 +15,13 @@ import { NODE_KIND_LABEL_KEYS, type NodeKind } from "./types";
  * Condition=橙  Loop=紫  Container=青  Storage=粉
  */
 // eslint-disable-next-line react-refresh/only-export-components
-export function getNodeKindColor(kind: NodeKind): {
+export function getNodeKindColor(kind: NodeKind, isDark: boolean): {
   base: string;
   bg: string;
   border: string;
 } {
-  switch (kind) {
-    case "input":
-      return { base: "#fadb14", bg: "#fadb1415", border: "#fadb1450" };
-    case "output":
-      return { base: "#f5222d", bg: "#f5222d15", border: "#f5222d50" };
-    case "tool":
-      return { base: "#52c41a", bg: "#52c41a15", border: "#52c41a50" };
-    case "agent":
-      return { base: "#1677ff", bg: "#1677ff15", border: "#1677ff50" };
-    case "condition":
-      return { base: "#fa8c16", bg: "#fa8c1615", border: "#fa8c1650" };
-    case "loop":
-      return { base: "#722ed1", bg: "#722ed115", border: "#722ed150" };
-    case "container":
-      return { base: "#13c2c2", bg: "#13c2c215", border: "#13c2c250" };
-    case "storage":
-      return { base: "#eb2f96", bg: "#eb2f9615", border: "#eb2f9650" };
-    default:
-      return { base: "#888", bg: "#88888815", border: "#88888850" };
-  }
+  const base = hueColor(NODE_KIND_HUE[kind], isDark);
+  return { base, bg: `${base}15`, border: `${base}50` };
 }
 
 /**
@@ -47,6 +31,7 @@ export function getNodeKindColor(kind: NodeKind): {
 export const WorkflowLegend: React.FC = memo(() => {
   const { t } = useTranslation();
   const { token } = theme.useToken();
+  const isDark = useIsDarkTheme();
   const [collapsed, setCollapsed] = useState(false);
 
   const kinds: NodeKind[] = [
@@ -140,7 +125,7 @@ export const WorkflowLegend: React.FC = memo(() => {
           style={{ padding: "6px 12px 8px" }}
         >
           {kinds.map((kind) => {
-            const colors = getNodeKindColor(kind);
+            const colors = getNodeKindColor(kind, isDark);
             return (
               <div
                 key={kind}

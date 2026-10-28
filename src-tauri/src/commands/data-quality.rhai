@@ -1145,7 +1145,8 @@ let tc_excluded_names = [];  // 被剔出 avg_conf 分母的节点（中文名�
 // 2026-09-12 修复: good_count 原判据只有「自评 confidence >= 50」，与报告文本证据（路径 A）
 //   完全脱钩 ⇒ 置信度虚高的节点（hm cf=55 但报告 5 处「无法获取/返回空」）被计为 good，
 //   虚高 tool_credibility_score。现改为 **A ∪ B**：报告含失败标记即降级（degraded_count），
-//   不再计入 good。degraded 归入 low 语义（low_count = n_int - good - gap 天然包含）。
+//   不再计入 good。degraded 归入 low 语义（现由 `low_confidence_analysts` 同一份清单取数，
+//   见其定义处 2026-10-28 的注释；旧写法是减法，会在有人缺席时下溢成负数）。
 // ⚠ 2026-10-09(v149): `valid_count / total_conf`（avg_conf 分母）从「c >= 0 且非 untrusted」
 //   收窄为「conf_class ∈ {tool_gap, normal}」。被剔四类（asof_exempt / asof_low /
 //   wording_exempt / self_uncertain）的共同点是**低自评无取数证据支撑** —— 属分析师自身
@@ -2091,7 +2092,12 @@ if res_ph_e.len() > 0 { placeholder_nodes.push("研报"); placeholder_node_ids.p
 if sec_ph_e.len() > 0 { placeholder_nodes.push("行业"); placeholder_node_ids.push("sec"); }
 if cat_ph_e.len() > 0 { placeholder_nodes.push("催化剂"); placeholder_node_ids.push("cat"); }
 
-let low_count = n_int - good_count - gap_count;
+// 2026-10-28：改由**同源清单**取数，不再做减法。
+//   旧式 `n_int - good_count - gap_count` 的两个被减数不同轴：`n_int` 只数**有 verdict** 的分析师，
+//   `gap_count` 却把无 verdict / untrusted 者一并计入 ⇒ 有人缺席时**下溢成负数**。
+//   实证（2026-10-28 生产库）：8 条 D 级轮的摘要写「10 个缺失，-9 个低置信」——
+//   `n_int=1`、`gap_count=10`。本文件输出段的同名注释早已写明这条禁令，减法却还留在这里。
+let low_count = low_confidence_analysts.len();
 
 // ── P1-B3: warnings 数组（基于报告质量检测的问题列表）──
 let warnings = [];
@@ -2166,13 +2172,27 @@ if asof_designed_dims_cn.len() > 0 {
 }
 
 let replay_prefix = if asof_methods.len() > 0 { "【as-of 回放】" } else { "" };
+// 2026-10-28（第四处文案/判据不一致）：原实现把「建议检查对应分析师的上游工具数据源」
+//   作为 D/F 分支的**固定尾句**，于是整批缺位时也照说 —— 而那种形态的实测节点错误是
+//   `API_KEY_DECRYPT_FAILED`（模型凭证解不开，LLM 调用根本没发出：一次回放批次 55 个
+//   分析师节点全灭、快照里 `report.a-*` 键数 0），本节点只看得见「有没有产物」、
+//   看不见节点错误 ⇒ 十维全缺时不得预设方向。
+// 三条各占一句、单一变量两分支共用（A/B/C 分支原先**根本没有**这一句，与 2026-10-09
+//   补「缺失/低置信」之前的不对称同型）：无缺席 ⇒ 空串，不制造噪声。
+let advice = if missing_analysts.len() >= 10 {
+    "分析师层本轮整批无产出（十维全部缺位）：本节点看不见失败原因，上游取数与模型侧调用（供应商/密钥）皆有可能，请按各分析师节点的错误码定位。"
+} else if missing_analysts.len() > 0 {
+    "建议检查对应分析师的上游工具数据源。"
+} else {
+    ""
+};
 let summary_text = if grade == "F" || grade == "D" {
     let base = `${replay_prefix}数据质量 ${grade} 级（综合 ${final_score} = 报告 ${report_quality_score_final} × 0.35 + 工具 ${tool_credibility_score_final} × 0.35 + 因子完整度 ${factor_completeness_pct} × 0.30）：${gap_count} 个缺失，${low_count} 个低置信（其中 ${degraded_count} 个为报告含失败标记但自评偏高），${good_count} 个高置信，${untrusted_analyst_count} 个降级。`;
     let miss_part = if missing_analysts.len() > 0 { `缺失：${join_arr(missing_analysts, "、")}。` } else { "" };
     let low_part = if low_confidence_analysts.len() > 0 { `低置信：${join_arr(low_confidence_analysts, "、")}。` } else { "" };
     let ph_part = if placeholder_nodes.len() > 0 { `报告含失败标记：${join_arr(placeholder_nodes, "、")}（${placeholder_total_hits} 种标记、共出现 ${placeholder_total_occurrences} 次）。` } else { "" };
     let val_part = if field_validation_issues.len() > 0 { `字段校验问题：${field_validation_issues.len()} 个（仅提示，不计分）。` } else { "" };
-    `${base}${miss_part}${low_part}${ph_part}${val_part}平均置信度 ${avg_conf_d}。建议检查对应分析师的上游工具数据源。`
+    `${base}${miss_part}${low_part}${ph_part}${val_part}平均置信度 ${avg_conf_d}。${advice}`
 } else {
     // 2026-10-09：补回「缺失 / 低置信」两段 —— 此前 A/B/C 分支**只报** `${good_count}/${n_int} 高置信度`，
     //   缺失节点（`gap_count > 0`）在摘要里**完全不可见**，与 F/D 分支信息量不对称。
@@ -2185,7 +2205,7 @@ let summary_text = if grade == "F" || grade == "D" {
     //   否则用户会把它当成降级原因（截图里它紧挨着等级结论）。
     let val_part = if field_validation_issues.len() > 0 { `字段校验问题：${field_validation_issues.len()} 个（仅提示，不计分）；` } else { "" };
     let ph_part = if placeholder_nodes.len() > 0 { `报告含失败标记：${join_arr(placeholder_nodes, "、")}（${placeholder_total_hits} 种标记、共出现 ${placeholder_total_occurrences} 次）；` } else { "" };
-    `${replay_prefix}数据质量 ${grade} 级（综合 ${final_score} = 报告 ${report_quality_score_final} × 0.35 + 工具 ${tool_credibility_score_final} × 0.35 + 因子完整度 ${factor_completeness_pct} × 0.30）：${good_count}/${n_int} 高置信度，${untrusted_analyst_count} 个降级，${miss_part}${low_part}${ph_part}${val_part}平均置信度 ${avg_conf_d}。`
+    `${replay_prefix}数据质量 ${grade} 级（综合 ${final_score} = 报告 ${report_quality_score_final} × 0.35 + 工具 ${tool_credibility_score_final} × 0.35 + 因子完整度 ${factor_completeness_pct} × 0.30）：${good_count}/${n_int} 高置信度，${untrusted_analyst_count} 个降级，${miss_part}${low_part}${ph_part}${val_part}平均置信度 ${avg_conf_d}。${advice}`
 };
 
 #{

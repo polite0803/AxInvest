@@ -92,7 +92,7 @@ const BaseNodeComponent: React.FC<NodeProps> = ({
                 width: 10,
                 height: 10,
                 borderRadius: "50%",
-                background: "#ff4d4f",
+                background: "var(--red)",
                 border: "2px solid white",
                 boxShadow: "0 1px 3px rgba(255,77,79,0.4)",
               }}

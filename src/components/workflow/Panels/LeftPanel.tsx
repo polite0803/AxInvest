@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import { useWorkflowEditorStore } from "@/stores";
+import { hueColor } from "@/theme/categoricalColors";
 import { Input, Tabs, Tag, theme } from "antd";
 import { FileText, Search } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -17,6 +19,7 @@ interface LeftPanelProps {
 export const LeftPanel: React.FC<LeftPanelProps> = ({ width }) => {
   const { t } = useTranslation();
   const { token } = theme.useToken();
+  const isDark = useIsDarkTheme();
   const reactId = React.useId();
   const inputId1 = `left-panel-input-search-nodes-${reactId}`;
   const inputId2 = `left-panel-input-search-templates-${reactId}`;
@@ -220,7 +223,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({ width }) => {
                             style={{
                               padding: "8px 6px",
                               background: token.colorBgElevated,
-                              border: `1px solid ${info.color}40`,
+                              border: `1px solid ${hueColor(info.hue, isDark)}40`,
                               borderRadius: 6,
                               cursor: "grab",
                               textAlign: "center",
@@ -230,11 +233,11 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({ width }) => {
                               userSelect: "none",
                             }}
                             onMouseEnter={(e) => {
-                              e.currentTarget.style.borderColor = info.color;
-                              e.currentTarget.style.background = `${info.color}10`;
+                              e.currentTarget.style.borderColor = hueColor(info.hue, isDark);
+                              e.currentTarget.style.background = `${hueColor(info.hue, isDark)}10`;
                             }}
                             onMouseLeave={(e) => {
-                              e.currentTarget.style.borderColor = `${info.color}40`;
+                              e.currentTarget.style.borderColor = `${hueColor(info.hue, isDark)}40`;
                               e.currentTarget.style.background = token.colorBgElevated;
                             }}
                           >

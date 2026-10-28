@@ -70,7 +70,7 @@ export function RLLearningPanel({ capabilityPackId, compact = false }: RLLearnin
         <Row justify="space-between" align="middle">
           <Col>
             <Space>
-              <ThunderboltOutlined style={{ fontSize: 20, color: "#722ed1" }} />
+              <ThunderboltOutlined style={{ fontSize: 20, color: "var(--purple)" }} />
               <Title level={compact ? 5 : 4} style={{ margin: 0 }}>
                 {t("opc.rl.panelTitle")}
               </Title>
@@ -142,10 +142,10 @@ export function RLLearningPanel({ capabilityPackId, compact = false }: RLLearnin
                 value={stats.successRate.toFixed(1)}
                 suffix="%"
                 prefix={stats.successRate >= 70
-                  ? <RiseOutlined style={{ color: "#3f8600" }} />
+                  ? <RiseOutlined style={{ color: "var(--green)" }} />
                   : stats.successRate >= 40
-                  ? <MinusOutlined style={{ color: "#d48806" }} />
-                  : <FallOutlined style={{ color: "#cf1322" }} />}
+                  ? <MinusOutlined style={{ color: "var(--amber)" }} />
+                  : <FallOutlined style={{ color: "var(--red)" }} />}
               />
             </Card>
           </Col>
@@ -156,7 +156,7 @@ export function RLLearningPanel({ capabilityPackId, compact = false }: RLLearnin
           <Card
             title={
               <Space>
-                <BulbOutlined style={{ color: "#faad14" }} />
+                <BulbOutlined style={{ color: "var(--amber)" }} />
                 <span>{t("opc.rl.policyUpdate")}</span>
               </Space>
             }
@@ -206,10 +206,10 @@ function PolicyUpdateContent({
 }) {
   const { t } = useTranslation();
   const trendIcon = update.rewardTrend === "improving"
-    ? <RiseOutlined style={{ color: "#3f8600" }} />
+    ? <RiseOutlined style={{ color: "var(--green)" }} />
     : update.rewardTrend === "declining"
-    ? <FallOutlined style={{ color: "#cf1322" }} />
-    : <MinusOutlined style={{ color: "#8c8c8c" }} />;
+    ? <FallOutlined style={{ color: "var(--red)" }} />
+    : <MinusOutlined style={{ color: "var(--muted)" }} />;
 
   const trendLabel = update.rewardTrend === "improving"
     ? t("opc.rl.trendImproving")
@@ -316,9 +316,9 @@ function AutoLearningResultItem({
     <div
       style={{
         padding: compact ? 8 : 12,
-        border: "1px solid #f0f0f0",
+        border: "1px solid var(--border-light)",
         borderRadius: 8,
-        background: "#fafafa",
+        background: "var(--surface)",
       }}
     >
       <Space direction="vertical" size={4} style={{ width: "100%" }}>

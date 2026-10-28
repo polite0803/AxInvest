@@ -78,7 +78,7 @@ export function SkillMarkdownPage({ skillName }: SkillMarkdownPageProps) {
 
   if (error || !nodes) {
     return (
-      <div style={{ padding: 24, color: "var(--color-error)" }}>
+      <div style={{ padding: 24, color: "var(--red)" }}>
         {t("skill.markdown.loadFailed")}: {error || t("skill.markdown.parseError")}
       </div>
     );

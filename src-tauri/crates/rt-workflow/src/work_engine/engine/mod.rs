@@ -5585,8 +5585,24 @@ impl WorkEngine {
     pub async fn record_node_execution(
         &self,
         execution_id: &str,
-        record: NodeExecutionRecord,
+        mut record: NodeExecutionRecord,
     ) -> Result<(), WorkEngineError> {
+        // 降级兜底（典型：LLM 调用失败回退 fallback_label）的执行记录仍是 completed，
+        // 若不留痕，事后便无法区分「真实判定」与「兜底值」。这里把降级原因写入 `error`
+        // 字段供审计；**不改 status** —— 下游按 Failed 阻塞会死锁整条决策链
+        // （见 `llm_classifier_executor.rs` 的 v9 补丁说明，2026-09-08 实证）。
+        if record.error.is_none()
+            && record.output.as_ref().and_then(|o| o.get("degraded")).and_then(|v| v.as_bool())
+                == Some(true)
+        {
+            let reason = record
+                .output
+                .as_ref()
+                .and_then(|o| o.get("degraded_error"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("fallback used");
+            record.error = Some(format!("degraded: {reason}"));
+        }
         let mut executions = self.executions.lock().await;
         if let Some(state) = executions.get_mut(execution_id) {
             state.add_node_record(record);
@@ -6444,9 +6460,9 @@ const DEFAULT_CONTAINER_BODY_TIMEOUT: Duration = Duration::from_secs(300);
 ///   权限不足等），重试必然复现同样失败，只会拉长耗时。
 /// - 退避：复用 `compute_backoff`，与主循环同一实现。
 ///
-/// **不改** provider 侧的响应头超时公式 —— 那是刻意的「小请求快速失败」设计
-/// （见 `providers/openai.rs`；2026-09-09/10 起为**随体积缩放**：base 10s + 每 64KB 加 5s、
-/// 封顶 60s，**不是固定 15s**），本函数补的是**重试机会**而非抬高阈值。
+/// **不改** provider 侧的首字节预算 —— 那是 `providers::stream_budget` 的两档设计
+/// （软 45s / 硬 90s：软档超时同供应商原地重试一次，硬档判上游挂起），
+/// 本函数补的是**重试机会**而非抬高阈值。
 async fn dispatch_container_body_with_retry(
     engine: &WorkEngine,
     node: &WorkflowNode,

@@ -8,28 +8,13 @@
  * - PortfolioPerformanceLine: 组合净值 vs 基准对比曲线
  */
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { cssVar } from "@/lib/cssVar";
+import { ensureECharts } from "@/lib/echartsInstance";
+import { seriesColor } from "@/theme/categoricalColors";
 import * as echarts from "echarts";
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-
-/** 颜色方案（固定色盘，避免随机） */
-const COLORS = [
-  "#3B82F6",
-  "#22C55E",
-  "#EAB308",
-  "#EF4444",
-  "#A855F7",
-  "#EC4899",
-  "#14B8A6",
-  "#F97316",
-  "#6366F1",
-  "#84CC16",
-  "#06B6D4",
-  "#D946EF",
-  "#F43F5E",
-  "#0EA5E9",
-  "#8B5CF6",
-];
 
 /** 行业配置数据 */
 interface SectorAllocation {
@@ -50,18 +35,17 @@ function useECharts(
 ): React.RefObject<HTMLDivElement | null> {
   const ref = useRef<HTMLDivElement>(null);
   const instance = useRef<echarts.ECharts | null>(null);
+  const isDark = useIsDarkTheme();
 
   useEffect(() => {
     if (!ref.current) { return; }
-    if (!instance.current) {
-      instance.current = echarts.init(ref.current, "dark");
-    }
-    instance.current.setOption(optionBuilder());
+    instance.current = ensureECharts(ref.current, isDark);
+    instance.current.setOption(optionBuilder(), true);
     const handleResize = () => instance.current?.resize();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [...deps, isDark]);
 
   useEffect(() => {
     return () => {
@@ -84,9 +68,9 @@ export function SectorAllocationDonut({ data, height = 250 }: SectorAllocationDo
     () => ({
       tooltip: {
         trigger: "item",
-        backgroundColor: "#1F2937",
-        borderColor: "#374151",
-        textStyle: { color: "#F3F4F6", fontSize: 12 },
+        backgroundColor: cssVar("--surface-2"),
+        borderColor: cssVar("--border"),
+        textStyle: { color: cssVar("--fg"), fontSize: 12 },
         formatter: (params: unknown) => {
           const p = params as { value: number; name: string };
           return `${p.name}: ${p.value.toFixed(1)}%`;
@@ -98,12 +82,12 @@ export function SectorAllocationDonut({ data, height = 250 }: SectorAllocationDo
           radius: ["45%", "75%"],
           center: ["50%", "50%"],
           padAngle: 2,
-          itemStyle: { borderRadius: 4, borderColor: "#111827", borderWidth: 2 },
+          itemStyle: { borderRadius: 4, borderColor: cssVar("--bg"), borderWidth: 2 },
           label: { show: false },
           data: sorted.map((d, i) => ({
             value: d.pct,
             name: d.sector,
-            itemStyle: { color: COLORS[i % COLORS.length] },
+            itemStyle: { color: seriesColor(i) },
           })),
         },
       ],
@@ -131,7 +115,7 @@ export function SectorAllocationDonut({ data, height = 250 }: SectorAllocationDo
           <div key={item.sector} className="flex items-center gap-1.5 text-xs">
             <span
               className="w-2 h-2 rounded-full shrink-0"
-              style={{ backgroundColor: COLORS[i % COLORS.length] }}
+              style={{ backgroundColor: seriesColor(i) }}
             />
             <span className="text-gray-400 truncate">{item.sector}</span>
             <span className="text-gray-300 font-mono">{item.pct.toFixed(1)}%</span>
@@ -253,23 +237,23 @@ export function PnLHistogram({ data, height = 200 }: PnLHistogramProps) {
     () => ({
       tooltip: {
         trigger: "axis",
-        backgroundColor: "#1F2937",
-        borderColor: "#374151",
-        textStyle: { color: "#F3F4F6", fontSize: 12 },
+        backgroundColor: cssVar("--surface-2"),
+        borderColor: cssVar("--border"),
+        textStyle: { color: cssVar("--fg"), fontSize: 12 },
       },
       grid: { top: 12, right: 12, bottom: 24, left: 48 },
       xAxis: {
         type: "category",
         data: data.map((d) => d.range),
-        axisLine: { lineStyle: { color: "#4B5563" } },
-        axisLabel: { color: "#9CA3AF", fontSize: 10 },
+        axisLine: { lineStyle: { color: cssVar("--border") } },
+        axisLabel: { color: cssVar("--muted"), fontSize: 10 },
         axisTick: { show: false },
       },
       yAxis: {
         type: "value",
-        axisLine: { lineStyle: { color: "#4B5563" } },
-        axisLabel: { color: "#9CA3AF", fontSize: 10 },
-        splitLine: { lineStyle: { color: "#374151", type: "dashed" } },
+        axisLine: { lineStyle: { color: cssVar("--border") } },
+        axisLabel: { color: cssVar("--muted"), fontSize: 10 },
+        splitLine: { lineStyle: { color: cssVar("--border"), type: "dashed" } },
         axisTick: { show: false },
       },
       series: [
@@ -277,7 +261,7 @@ export function PnLHistogram({ data, height = 200 }: PnLHistogramProps) {
           type: "bar",
           data: data.map((d) => ({
             value: d.count,
-            itemStyle: { color: d.total >= 0 ? "#22C55E" : "#EF4444", opacity: 0.7 },
+            itemStyle: { color: d.total >= 0 ? cssVar("--green") : cssVar("--red"), opacity: 0.7 },
           })),
           barMaxWidth: 32,
           itemStyle: { borderRadius: [3, 3, 0, 0] },
@@ -330,9 +314,9 @@ export function PortfolioPerformanceLine({ data, height = 250 }: PortfolioPerfor
       return {
         tooltip: {
           trigger: "axis",
-          backgroundColor: "#1F2937",
-          borderColor: "#374151",
-          textStyle: { color: "#F3F4F6", fontSize: 12 },
+          backgroundColor: cssVar("--surface-2"),
+          borderColor: cssVar("--border"),
+          textStyle: { color: cssVar("--fg"), fontSize: 12 },
           formatter: (params: unknown) => {
             const ps = params as { seriesName: string; value: number; axisValue: string }[];
             const labels: Record<string, string> = {
@@ -346,25 +330,25 @@ export function PortfolioPerformanceLine({ data, height = 250 }: PortfolioPerfor
             return result;
           },
         },
-        legend: { textStyle: { color: "#D1D5DB", fontSize: 12 } },
+        legend: { textStyle: { color: cssVar("--fg-2"), fontSize: 12 } },
         grid: { top: 32, right: 16, bottom: 24, left: 48 },
         xAxis: {
           type: "category",
           data: data.map((d) => d.date),
-          axisLine: { lineStyle: { color: "#4B5563" } },
-          axisLabel: { color: "#9CA3AF", fontSize: 10 },
+          axisLine: { lineStyle: { color: cssVar("--border") } },
+          axisLabel: { color: cssVar("--muted"), fontSize: 10 },
           axisTick: { show: false },
           boundaryGap: false,
         },
         yAxis: {
           type: "value",
-          axisLine: { lineStyle: { color: "#4B5563" } },
+          axisLine: { lineStyle: { color: cssVar("--border") } },
           axisLabel: {
-            color: "#9CA3AF",
+            color: cssVar("--muted"),
             fontSize: 10,
             formatter: (v: number) => `${v.toFixed(0)}%`,
           },
-          splitLine: { lineStyle: { color: "#374151", type: "dashed" } },
+          splitLine: { lineStyle: { color: cssVar("--border"), type: "dashed" } },
           axisTick: { show: false },
         },
         series: [
@@ -373,8 +357,8 @@ export function PortfolioPerformanceLine({ data, height = 250 }: PortfolioPerfor
             type: "line",
             data: data.map((d) => d.portfolio),
             smooth: true,
-            lineStyle: { color: "#22C55E", width: 2 },
-            itemStyle: { color: "#22C55E" },
+            lineStyle: { color: cssVar("--green"), width: 2 },
+            itemStyle: { color: cssVar("--green") },
             showSymbol: false,
           },
           ...(hasBenchmark
@@ -384,8 +368,8 @@ export function PortfolioPerformanceLine({ data, height = 250 }: PortfolioPerfor
                 type: "line" as const,
                 data: data.map((d) => d.benchmark),
                 smooth: true,
-                lineStyle: { color: "#6B7280", width: 1, type: "dashed" as const },
-                itemStyle: { color: "#6B7280" },
+                lineStyle: { color: cssVar("--muted"), width: 1, type: "dashed" as const },
+                itemStyle: { color: cssVar("--muted") },
                 showSymbol: false,
               },
             ]

@@ -60,9 +60,7 @@ export function CompactValueAssessment({ data }: CompactValueAssessmentProps) {
             {t("stockAnalysis.compact.moat")}: {moat}
           </span>
         )}
-        {ideal && (
-          <span style={{ color: "var(--sa-green, #16a34a)" }}>{t("stockAnalysis.compact.idealBuy")} ¥{ideal}</span>
-        )}
+        {ideal && <span style={{ color: "var(--green)" }}>{t("stockAnalysis.compact.idealBuy")} ¥{ideal}</span>}
       </div>
       {verdict && (
         <div className="text-[11px] leading-snug" style={{ color: "var(--color-text-secondary)" }}>

@@ -12,7 +12,7 @@ use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest};
 use axagent_harness::workflow_types::WorkflowNode;
 use std::sync::Arc;
 
-use axagent_harness::build_provider_request_context;
+use axagent_harness::build_provider_request_context_for_model;
 use axagent_harness::{LlmCallConfig, execute_llm};
 
 #[derive(Default)]
@@ -140,7 +140,7 @@ impl NodeExecutorTrait for LlmExecutor {
         // ── 上下文窗口管理 ──
         // 已迁移至 execute_llm() 中心化处理，此处在构建 LlmCallConfig 时传递参数
 
-        let req_ctx = build_provider_request_context(&prov, &key, api_key);
+        let req_ctx = build_provider_request_context_for_model(&prov, &key, api_key, Some(&model));
         let model_for_output = model.clone();
 
         if context.dry_run {

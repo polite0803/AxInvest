@@ -150,7 +150,7 @@ export function DiagnosticDrawer({ open, onClose, onJumpToNode }: DiagnosticDraw
                     styles={{
                       content: {
                         fontSize: 18,
-                        color: sev === "error" ? "#ef4444" : sev === "warning" ? "#f59e0b" : "#3b82f6",
+                        color: sev === "error" ? "var(--red)" : sev === "warning" ? "var(--amber)" : "var(--accent)",
                       },
                     }}
                   />

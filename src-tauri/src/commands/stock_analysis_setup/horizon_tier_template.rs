@@ -10,8 +10,8 @@
 //! ⚠ 为什么是**四份逐字定义**而不是一个循环：`scripts/audit-inject-coverage.mjs` 按
 //! `input_mapping: [` 块内的**字面量**配对 Rhai 脚本的 `present()` 面，`check-tier-purity.mjs`
 //! 的 R2 按字面量判「档内不读他档」。用 `format!` 拼装源路径会让这两道门**静默失效**
-//! （与 `commands/stock_analysis_setup/seed_stock_analysis.rs:6190` 拒绝循环是同一条理由，
-//! 同文件 `:5075` 也记着同一条史）。
+//! （与 `commands/stock_analysis_setup/seed_stock_analysis.rs:5501-5503` 拒绝抽公共数组是同一条理由：
+//! 门按字面量配对，抽成公共数组/循环就静默失效）。
 //! 这里重复的是**节点声明**，不是类型或函数定义，不触 AGENTS.md 禁区 12。
 //!
 //! ⚠ 步骤 2 当年**留的一处偏离**，已在 v140 补齐（保留原因，因为它是「为什么曾经不是三节点」的史）：

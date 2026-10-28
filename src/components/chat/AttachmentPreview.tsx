@@ -93,7 +93,7 @@ export function AttachmentPreview({
       invoke<string>("resolve_attachment_path", { filePath: att.filePath })
         .then((absPath) => {
           modal.confirm({
-            icon: <CloseCircleFilled style={{ color: "#ff4d4f" }} />,
+            icon: <CloseCircleFilled style={{ color: "var(--red)" }} />,
             title: t("chat.attachmentNotFound"),
             content: absPath,
             okText: t("chat.attachmentOk"),

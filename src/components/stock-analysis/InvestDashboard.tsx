@@ -38,8 +38,8 @@ interface MarketRegimeInfo {
 
 /** 市场状态对应的颜色 */
 function regimeColor(regime: string): string {
-  if (regime === "bull") { return "var(--sa-red)"; }
-  if (regime === "bear") { return "var(--sa-green)"; }
+  if (regime === "bull") { return "var(--red)"; }
+  if (regime === "bear") { return "var(--green)"; }
   return "var(--color-text-secondary)";
 }
 
@@ -116,7 +116,7 @@ export function InvestDashboard() {
               {marketRegime.volatility === "high" ? t("stockAnalysis.dashboard.highVol") : ""}
             </span>
           </div>
-          <div className="text-xs mt-1" style={{ color: "var(--color-text-tertiary)" }}>
+          <div className="text-xs mt-1" style={{ color: "var(--muted)" }}>
             {marketRegime.description}
           </div>
         </Card>
@@ -138,7 +138,7 @@ export function InvestDashboard() {
             <span>
               {t("stockAnalysis.totalMarketValue")}: <b>{(totalMv / 10000).toFixed(1)}{t("stockAnalysis.wanUnit")}</b>
             </span>
-            <span style={{ color: totalPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
+            <span style={{ color: totalPnl >= 0 ? "var(--red)" : "var(--green)" }}>
               {t("stockAnalysis.unrealizedPnl")}: {totalPnl >= 0 ? "+" : ""}
               {totalPnl.toFixed(0)}
             </span>
@@ -163,7 +163,7 @@ export function InvestDashboard() {
                 render: (v: number | null) =>
                   v != null
                     ? (
-                      <span style={{ color: v >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
+                      <span style={{ color: v >= 0 ? "var(--red)" : "var(--green)" }}>
                         {v >= 0 ? "+" : ""}
                         {v.toFixed(1)}%
                       </span>
@@ -185,7 +185,7 @@ export function InvestDashboard() {
           <Button size="small" type="primary" onClick={() => navigate("/screener")}>
             {t("stockAnalysis.dashboard.recommendations")}
           </Button>
-          <Button size="small" onClick={() => navigate("/stock-analysis")}>
+          <Button size="small" onClick={() => navigate("/invest")}>
             {t("stockAnalysis.dashboard.analyzeStock")}
           </Button>
           <Button size="small" onClick={() => navigate("/trade")}>

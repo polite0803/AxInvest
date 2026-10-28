@@ -892,7 +892,7 @@ type AlgoToolRow = (
 ///     **只在 prompt 规则体系内部度量**：本档节点档 vs `overall_risk_llm`（全局节点档，同一套
 ///     阈值、不注入按档输入）⇒ 「本档 > 全局」当且仅当深度臂命中，差值可逐条归因。
 ///     ⚠ 不能拿本档节点档直接与主链 V54 算法档比较：那是**两套规则体系**
-///     （`seed_stock_analysis.rs:4939-4942` 明写阈值有 6 处不同、v55 影子比对一致率仅 64.4%），
+///     （`seed_stock_analysis.rs:6434` 明写阈值有 6 处不同、v55 影子比对一致率仅 64.4%），
 ///     直接 max 的每一次加严都归因不到本批的新判据上。
 ///     新 `decision_trail` 编号 **R-211**，已同步进 `portfolio-mgr` 的规则追溯码对照表。
 ///     ⚠ **只升不降**：该档更松 ⇒ 不采用 —— 按档不能成为放松风险的通道（与 action
@@ -1021,11 +1021,13 @@ type AlgoToolRow = (
 ///   全部是播种进 DB 的 include_str!/种子内容。
 ///
 /// **v134(2026-10-06)**：**#8 P5 数据质量跨轮熔断**（`PLAN-four-horizon-workflow-alignment.md` §八十三）——
-///   判据是**跨样本**事实（「近若干轮一直拿不到 A 级」），单轮 grade 表达不了，故新增持久观测
+///   判据是**跨样本**事实（「近若干轮一直降档（C/D/F 或无等级）」），单轮 grade 表达不了，故新增持久观测
 ///   （实体 `data_quality_observations` + dao `repo::data_quality_fuse`，不走 migration，
 ///   表结构正门=实体列属性 + `entities/src/lib.rs` 注册）。本版只动**模板内容**四处：
 ///   ① `portfolio-mgr` 的 `input_mapping` 新增 3 条同名映射（`dqi_streak` / `dqi_fuse_flag` /
 ///      `dqi_observations`）—— 注入的是**已判定结果**，阈值权威在 dao，脚本与 Switch 都不比阈值；
+///      **v190（2026-10-28）再加 2 条**：`dqi_orphans` / `dqi_streak_incl_orphans`，把「连续 N 轮」
+///      跨过的空档（所属分析已删除的观测行）端出来 —— 判据口径不变，只补披露。
 ///   ② `portfolio-mgr.rhai` 的置信度上限加一层熔断封顶（压到 grade 阶梯已有的最低一级，
 ///      **不新增常数**），并输出三态 `dqiFuseState`（`fused` / `ok` / `unobserved`）+ 两个佐证数
 ///      + 实际生效上限，reasoning 三态各成一句；
@@ -1638,7 +1640,7 @@ type AlgoToolRow = (
 ///   消费点收口：`rt-workflow/.../agent_executor.rs` 的 `resolve_sampling`（三档优先级）
 ///   与 `harness/types/provider_model.rs` 的 `model_param_overrides`（查找只此一份）。
 ///   变量表变更 ⇒ 换代，删键走 `SAMPLING_VARS_RETIRED_VERSION`（一次性门）。
-pub const TEMPLATE_VERSION: i32 = 189; // v189: 退役 agent_temperature / agent_max_tokens 两个模板变量 —— 采样参数唯一权威改到模型层「供应商-模型 → 参数」（推翻 v181 的「唯一权威=模板变量」），四处消费点收口到 resolve_sampling；v188: 决策否决门可配置化（风控/情绪/估值三门 + 顶层采纳档内买入）—— 走运行期 pm_gate_enabled（settings 表），**不改图结构**；同时解除 R-CALIB-CAP 对档内买入的动作联动（置信封顶仍生效）；v187: Json 输出节点恒下发 response_format（原生结构化输出；退役 structured_output_mode 开关）；v186: rule-check 交易方案改读 portfolio-risk-gate（移除对 trader 的无边软依赖）；v185: 退役 `formula_independent_f7` 回滚位 —— f7 两侧形态恒定（生产恒不吃 trader / 参照侧恒吃），「主档不得依赖 LLM 决策」由开关语义改为结构保证；v184: data-quality 逐节点诊断新增可选键 `score_sum_reason`（三态：自洽/偏离/不知道），`analyst_feedbacks` 的 `score_consistent` 从此有真值可读；v183: 生产 f7 切分析师结构票（公式决策与 LLM 决策互不消费、并行；trader 口径改由参照节点 `portfolio-mgr-f7-ref` 承接）；v182: f2 改吃辩论聚合方向（consensusDirection）——`consensus_score` 按契约是收敛程度、无方向含义；v181: Agent 节点采样参数置空（唯一权威=模板变量；**已被 v189 推翻，改指模型层参数**）；v180: 引入独立公式节点（公式决策不吃 LLM 决策输入；节点名与 f7 口径以 v183 条为准）
+pub const TEMPLATE_VERSION: i32 = 191; // v191: 上下文瘦身开关（trader_context_slim / risk_context_slim）默认 false → true，并加一次性门 CONTEXT_SLIM_DEFAULT_VERSION=191（图侧 forced + 变量表 force_variable_value 同步覆写，存量库升版即生效；实测单次运行 75–80% 提示词是上下文数据、其中 36–53% 逐字重复）；v190: 熔断「连续 N 轮」的空档披露 —— portfolio-mgr 加 `dqi_orphans` / `dqi_streak_incl_orphans` 两条同名映射，并把 5 处「拿不到 A 级」措辞订正为「降档（C/D/F 或无等级）」（判据自 2026-10-10 起 A/B 都是正常档，文案把判据说窄了）；v189: 退役 agent_temperature / agent_max_tokens 两个模板变量 —— 采样参数唯一权威改到模型层「供应商-模型 → 参数」（推翻 v181 的「唯一权威=模板变量」），四处消费点收口到 resolve_sampling；v188: 决策否决门可配置化（风控/情绪/估值三门 + 顶层采纳档内买入）—— 走运行期 pm_gate_enabled（settings 表），**不改图结构**；同时解除 R-CALIB-CAP 对档内买入的动作联动（置信封顶仍生效）；v187: Json 输出节点恒下发 response_format（原生结构化输出；退役 structured_output_mode 开关）；v186: rule-check 交易方案改读 portfolio-risk-gate（移除对 trader 的无边软依赖）；v185: 退役 `formula_independent_f7` 回滚位 —— f7 两侧形态恒定（生产恒不吃 trader / 参照侧恒吃），「主档不得依赖 LLM 决策」由开关语义改为结构保证；v184: data-quality 逐节点诊断新增可选键 `score_sum_reason`（三态：自洽/偏离/不知道），`analyst_feedbacks` 的 `score_consistent` 从此有真值可读；v183: 生产 f7 切分析师结构票（公式决策与 LLM 决策互不消费、并行；trader 口径改由参照节点 `portfolio-mgr-f7-ref` 承接）；v182: f2 改吃辩论聚合方向（consensusDirection）——`consensus_score` 按契约是收敛程度、无方向含义；v181: Agent 节点采样参数置空（唯一权威=模板变量；**已被 v189 推翻，改指模型层参数**）；v180: 引入独立公式节点（公式决策不吃 LLM 决策输入；节点名与 f7 口径以 v183 条为准）
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -2608,6 +2610,13 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     &missing[..missing.len().min(4)],
                     existing.version
                 );
+            } else if let Some((want_trader, want_risk)) =
+                context_slim_graph_drift(&existing.nodes, existing.variables.as_deref())
+            {
+                tracing::warn!(
+                    "[stock_analysis_setup] 上下文瘦身漂移：变量要求 trader={want_trader} / risk={want_risk}，图与变量不一致 ⇒ 无视版本门 v{} 重新种子化",
+                    existing.version
+                );
             } else {
                 tracing::info!(
                     "[stock_analysis_setup] 模板已是最新版本 v{}，跳过种子化 (nodes={}, edges={})",
@@ -2663,7 +2672,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         old_variables = existing.variables.clone();
         previous_version = Some(existing.version);
         // ⚠️ 2026-09-22 更正：落库其实是 DELETE（下方 `delete_by_id`）+ INSERT，**不是** UPDATE；
-        // 变量 `value` 的「保留用户自定义值」由 `merge_variable_values`（:4641 调用）逐名完成。
+        // 变量 `value` 的「保留用户自定义值」由 `merge_variable_values`（:7838 调用）逐名完成。
         // 原注释「用 UPDATE 替代 DELETE」与实现不符，会误导后续改动。
     } else {
         tracing::info!("[stock_analysis_setup] 模板 {TEMPLATE_ID} 不存在，将创建新模板");
@@ -4168,10 +4177,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             resolve_debate_rounds(old_variables.as_deref())
         };
 
-    // 建图期开关（P2-A）：默认 false = 旧图。改值后需重新播种才生效。
-    let trader_context_slim =
-        resolve_bool_flag(old_variables.as_deref(), "trader_context_slim", false);
-    let risk_context_slim = resolve_bool_flag(old_variables.as_deref(), "risk_context_slim", false);
+    // 建图期开关（P2-A）：v191 起默认 true；`forced` 把存量库里的旧 false 一次性打回默认。
+    let forced = previous_version.is_none_or(|v| v < CONTEXT_SLIM_DEFAULT_VERSION);
+    let trader_context_slim = slim_flag(old_variables.as_deref(), "trader_context_slim", forced);
+    let risk_context_slim = slim_flag(old_variables.as_deref(), "risk_context_slim", forced);
 
     // ⚠ v185：`formula_independent_f7` 开关**已退役**，此处不再读它。
     //   它唯一的作用是把含 LLM 交易观点的 f7 口径接回生产公式 ⇒ 与「主档不得依赖 LLM 决策」
@@ -5491,7 +5500,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //
     // ⚠ 七个全局字段在每个节点里**逐字重写**而不是抽公共数组：`audit-inject-coverage.mjs`
     //   是按 `input_mapping: [` 块内的**字面量**配对脚本的 present() 面的，抽走字面量就是
-    //   把门的数据面拆掉（本文件 :6190 早已为同样的理由拒绝过循环）。
+    //   把门的数据面拆掉（本文件 `:3638-3640` 早已为同样的理由拒绝过变量化）。
     //
     // ⚠ 全局节点 `cls-risk-level` **保留**且不改判据：它的下游是 research-mgr 的
     //   `context_sources`（output_var "risk-level"）与 portfolio-mgr 的 `LLM回退` 分支，
@@ -6169,6 +6178,12 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     ("dqi_streak", "dqi_streak"),
                     ("dqi_fuse_flag", "dqi_fuse_flag"),
                     ("dqi_observations", "dqi_observations"),
+                    // v190：熔断「连续 N 轮」跨过的空档。两个数都是**披露**，不改判据：
+                    //   dqi_orphans = 该区间内被剔除的孤儿观测条数（所属分析已删除）；
+                    //   dqi_streak_incl_orphans = 把它们也计入时的连续降档轮数（差值即虚高/低估幅度）。
+                    //   权威口径在 `dao::repo::data_quality_fuse::streak_from_rows`。
+                    ("dqi_orphans", "dqi_orphans"),
+                    ("dqi_streak_incl_orphans", "dqi_streak_incl_orphans"),
                     // P1/P2: 因子回测数据（compute_scoring 工具附加输出）
                     ("factor_weights", "t-scoring.result.content.factor_backtest.factors"),
                     // P1-1: 市场状态权重调节（regime-weights.rhai）替代纯回测权重
@@ -7332,7 +7347,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             id: "dqi-fuse-gate".into(),
             title: "数据质量熔断门（跨轮）".into(),
             description: Some(
-                "连续多轮拿不到 A 级数据且已触发熔断线时，走保守降级路径；判据在 dao 侧，本节点只读结果"
+                "连续多轮降档（C/D/F 或无等级）且已触发熔断线时，走保守降级路径；判据在 dao 侧，本节点只读结果"
                     .into(),
             ),
             position: Position { x: 950.0, y: 4500.0 },
@@ -7972,6 +7987,18 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         variables_val
     };
 
+    // ── v191(2026-10-28)：上下文瘦身开关默认值 false → true（P0 成本治理第一步）──
+    // 图侧由上方 `forced` 同步切换；变量侧必须一起覆写，否则面板显示 false 而图已瘦身
+    // ⇒ 「面板值」与「实际形态」两套真相。只改出厂默认不动这里 = 假修复，
+    // 理由与门值判据见模块级 `CONTEXT_SLIM_DEFAULT_VERSION`。
+    let variables_val = if previous_version.is_none_or(|v| v < CONTEXT_SLIM_DEFAULT_VERSION) {
+        let v =
+            force_variable_value(&variables_val, "trader_context_slim", serde_json::json!(true));
+        force_variable_value(&v, "risk_context_slim", serde_json::json!(true))
+    } else {
+        variables_val
+    };
+
     // ── v189(2026-10-26)：退役 `agent_temperature` / `agent_max_tokens` 两个变量 ──
     // 采样参数的唯一权威改成模型层「供应商-模型 → 参数」那一格（工作流此前对该格零消费点，
     // 只有 `request_delay_ms` 被读；聊天链一直在读，见 `commands/agent/mod.rs` 的优先级）。
@@ -8440,7 +8467,7 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
         input_schema: Set(Some(input_schema_val)),
         output_schema: Set(Some(output_schema_val)),
         // ⚠️ 2026-09-22（D11）：此处原有「再用 `old_variables` 逐名把 `value` 覆盖回旧值」的
-        // 分支，已删除 —— 它与上游 `merge_variable_values`（:4641 调用）**语义完全重复**
+        // 分支，已删除 —— 它与上游 `merge_variable_values`（:7838 调用）**语义完全重复**
         // （同为「逐名保留旧值」），且位于 DCF force **之后**，会把 force 刚写的新值抹掉
         // （这正是 D11 的成因）。逐情形对账证明删除后行为等价、且不丢失任何能力
         // （`merge` 还多带 RENAME_MAP 别名迁移）。详见
@@ -10679,6 +10706,83 @@ fn harden_decision_chain(
     changed
 }
 
+/// 上下文瘦身开关（`trader_context_slim` / `risk_context_slim`）默认值切换的**一次性**水位线。
+///
+/// ## 为什么需要它
+///
+/// `merge_variable_values` 对同名变量**无条件保留旧值**，而存量库里的 `false` 正是旧种子的
+/// 缺省（不是用户的深思）⇒ 只把 `seed_variables` 的默认值改成 true 是**假修复**
+/// （v74 DCF / v115 kline / v172 reco_ic_gate 同型）。本门在**求值点**（建图）与
+/// **落库点**（变量表）同时覆写：只改一处会造出「面板显示 false、图却是瘦身版」的第二套真相。
+///
+/// ## 取值判据
+///
+/// **「被守护的默认值最后一次变更时对应的 `TEMPLATE_VERSION`」**，不是「上一版 +1」。
+/// 下方编译期断言保证 `TEMPLATE_VERSION >= 本值` —— 门的水位线一旦超前于落库版本号，
+/// DB 会停在「仍低于门」的值上 ⇒ 门永远关不上，此后任何无关升版都会把用户在面板里
+/// 调过的开关重新打回默认（`RECO_IC_GATE_MIGRATION_VERSION` 的教训）。
+///
+/// ## 为什么声明在文件末尾
+///
+/// 本文件被其它 `.rs` 按行号引用（最高到 6819，见 `workflow_template.rs` / `scale.rs` 等）。
+/// 在那些引用之后追加，可避免整体移位后静默失准（`check-single-source-facts.mjs` 的判据面）。
+/// 模块级 `const` 的作用域是整个模块，因此 4174 行的使用点无需关心声明位置。
+pub(crate) const CONTEXT_SLIM_DEFAULT_VERSION: i32 = 191;
+
+const _: () = assert!(
+    TEMPLATE_VERSION >= CONTEXT_SLIM_DEFAULT_VERSION,
+    "版本号与上下文瘦身门水位线倒挂：`TEMPLATE_VERSION` 必须 ≥ 门值。\
+     危害与 DCF／kline／reco_ic_gate 门同型（门关不上 ⇒ 每次无关升版都把瘦身开关打回默认）。"
+);
+
+/// 读上下文瘦身开关：一次性门命中时**无视旧值**强制默认开，否则按库里的值。
+///
+/// 默认值仍是 `true`（`seed_variables` 的出厂值），本函数只是把「一次性门」与
+/// 「用户显式值」两档合成一个布尔，不另立第三套默认。
+fn slim_flag(old_variables_json: Option<&str>, name: &str, forced: bool) -> bool {
+    forced || resolve_bool_flag(old_variables_json, name, true)
+}
+
+/// 「库里的图是否按变量要求展开了上下文瘦身」——版本门答不了的那一格（v191）。
+///
+/// 返回 `Some((wanted_trader, wanted_risk))` 表示漂移；一致返回 `None`。
+///
+/// ## 为什么需要它
+///
+/// `trader_context_slim` / `risk_context_slim` 是**建图期**开关：面板保存只把 version +1，
+/// 不重展图 ⇒ 用户把它关掉（A/B 回滚）后，库里的图仍是上一次的形态、变量却已改
+/// —— 这就是「面板项存在、改了不生效」的纸面开关（辩论轮数已因同一形态加过门）。
+///
+/// ## 判据（只认事实，不看版本号）
+///
+/// - trader 瘦身态 = 其 `context_sources` **不含** `t-scoring`（剔除的是重复全文）；
+/// - 风险三视角瘦身态 = `risk-agg` 的 `context_sources` **含** `analyst-brief--mid`。
+///
+/// 两处各取一条「增/删」事实，比数数组长度更抗人工编辑；负控见
+/// `context_slim_defaults_on_and_legacy_db_is_forced` 的第 4 段。
+///
+/// `nodes` 解析失败或节点缺失 ⇒ `None`（宁可漏判也不因脏数据触发重建，重建是破坏性的；
+/// 与 `debate_rounds_graph_drift` 同一取舍）。
+pub(crate) fn context_slim_graph_drift(
+    nodes_json: &str,
+    variables_json: Option<&str>,
+) -> Option<(bool, bool)> {
+    let nodes: Vec<WorkflowNode> = serde_json::from_str(nodes_json).ok()?;
+    let want_trader = resolve_bool_flag(variables_json, "trader_context_slim", true);
+    let want_risk = resolve_bool_flag(variables_json, "risk_context_slim", true);
+    let sources = |id: &str| {
+        nodes.iter().find_map(|n| match n {
+            WorkflowNode::Agent(a) if a.base.id == id => Some(&a.config.context_sources),
+            _ => None,
+        })
+    };
+    let trader = sources("trader")?;
+    let risk = sources("risk-agg")?;
+    let got_trader = !trader.iter().any(|s| s == "t-scoring");
+    let got_risk = risk.iter().any(|s| s == "analyst-brief--mid");
+    (got_trader != want_trader || got_risk != want_risk).then_some((want_trader, want_risk))
+}
+
 // ⚠ 本测试模块**必须**留在文件末尾：`clippy::items_after_test_module` 只在 clippy 下暴露
 //   （`cargo check` / `cargo test` 都不跑），插在中间会让后续所有代码踩该 lint。
 #[cfg(test)]
@@ -11766,7 +11870,13 @@ mod fast_workflow_derivation_tests {
             let WorkflowNode::Code(code) = pm else {
                 panic!("`portfolio-mgr` 必须是 Code 节点");
             };
-            for key in ["dqi_streak", "dqi_fuse_flag", "dqi_observations"] {
+            for key in [
+                "dqi_streak",
+                "dqi_fuse_flag",
+                "dqi_observations",
+                "dqi_orphans",
+                "dqi_streak_incl_orphans",
+            ] {
                 assert_eq!(
                     code.config.input_mapping.get(key).map(String::as_str),
                     Some(key),

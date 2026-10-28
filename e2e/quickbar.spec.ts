@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test.describe("QuickBar Page", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/quickbar");
+    await page.goto("/chat/quickbar");
     await page.waitForLoadState("networkidle");
   });
 

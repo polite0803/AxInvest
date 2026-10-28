@@ -28,7 +28,7 @@ export function SearchProviderTypeIcon({
         />
       );
     default:
-      return <SearchIcon size={size - 2} color={CHAT_ICON_COLORS.Search} />;
+      return <SearchIcon size={size - 2} style={{ color: CHAT_ICON_COLORS.Search }} />;
   }
 }
 

@@ -5907,6 +5907,8 @@
     "renderUserMarkdownDesc": "Render user messages with Markdown formatting including code blocks, line breaks, etc.",
     "requestDelayMs": "Request Delay",
     "requestDelayMsHint": "Milliseconds to wait before each API call, used to avoid rate limits (e.g. 429 errors)",
+    "headerTimeoutSecs": "First-byte Timeout",
+    "headerTimeoutSecsHint": "Total seconds to wait for the upstream HTTP response headers (past the soft tier the same provider is retried once, past the hard tier the upstream is treated as hung); blank uses the 90s default",
     "resetDefault": "Reset Default",
     "resetShortcutDefaults": "Reset Shortcut Defaults",
     "resetShortcutSingle": "Reset this shortcut to default",
@@ -16698,7 +16700,19 @@
       "vendorLastError": "Last Error",
       "vendorLastSuccess": "Last Success",
       "vendorLastFailure": "Last Failure",
-      "vendorHealth": "Data Source Health"
+      "vendorHealth": "Data Source Health",
+      "interfaceHealth": {
+        "title": "Daily interface health",
+        "storeDisabled": "Daily archive is disabled; health results were not persisted",
+        "empty": "No daily health records yet (checked automatically after each trading day closes)",
+        "unavailable": "Daily health records are not available in this environment",
+        "colDate": "Anchor date",
+        "colSummary": "OK / checked",
+        "colIssues": "Issues",
+        "summary": "{{ok}}/{{total}} OK",
+        "checkedAt": "Checked at",
+        "statusEmptyByTime": "No data for this time window"
+      }
     },
     "experiment": {
       "executeTrade": "Execute Trade →",
@@ -16817,7 +16831,7 @@
     "diTableDirection": "Direction/Value",
     "diTableStatus": "Status",
     "diTableNote": "Note",
-    "weightCollapseDqi": "Data quality grade F (dqi<25), decision basis invalid",
+    "weightCollapseDqi": "Data quality grade F, decision basis invalid",
     "weightCollapseUntrusted": "Untrusted upstream ≥2 (untrusted_count={{count}})",
     "weightCollapseThreshold": "Factor weight {{ratio}}% below threshold",
     "weightCollapseConsequence": "Consequence: position forced 0%, direction confidence ×0.5",
@@ -17045,7 +17059,8 @@
       "diff": "Divergence",
       "directionConflict": "Direction Conflict",
       "opposite": "Opposite",
-      "sameDirection": "Same Direction"
+      "sameDirection": "Same Direction",
+      "htmlReport": "HTML Report"
     },
     "crossCheck": {
       "title": "Trend Pick vs Workflow · Cross-System Divergence",
@@ -17086,7 +17101,9 @@
       "replayDegraded": "Data source has no historical semantics in replay mode and was skipped.",
       "replayDegradedTitle": "Replay Mode Degraded",
       "replayDegradedWithCount": "{{n}} data sources skipped in replay mode; this panel is hidden.",
-      "replayDegradedWithReason": "Replay mode degraded: {{reason}}"
+      "replayDegradedWithReason": "Replay mode degraded: {{reason}}",
+      "sourceFailed": "Data source unavailable",
+      "schemaChanged": "Interface schema changed"
     },
     "evolutionDrift": {
       "error": "Load Failed",
@@ -18859,7 +18876,9 @@
         "label": "Let top level adopt tier-level buys",
         "desc": "When calibration has not met its threshold, confidence is capped and the action is downgraded together, leaving the top-level buy count at zero. Opening this lets the top level adopt tier-level buys. The confidence cap itself still applies."
       }
-    }
+    },
+    "htmlNeedAnalysisId": "Missing analysis record ID; cannot export HTML report",
+    "htmlDesktopOnly": "HTML report is desktop-only"
   },
   "pipeline": {
     "title": "Stock Pipeline",

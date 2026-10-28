@@ -196,6 +196,7 @@ pub async fn chat_completions(
     );
 
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key,
         key_id: provider_key.id.clone(),
         provider_id: provider.id.clone(),

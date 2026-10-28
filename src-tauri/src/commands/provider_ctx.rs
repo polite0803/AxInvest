@@ -73,6 +73,7 @@ pub(crate) async fn build_vision_context(
     let adapter = resolve_provider_adapter(&provider.provider_type)?;
 
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key: decrypted_key,
         key_id: key_row.id,
         provider_id: provider.id,

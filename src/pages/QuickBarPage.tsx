@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { Tooltip } from "@/components/layout/Tooltip";
+import { hueVar } from "@/theme/categoricalColors";
+
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke, isTauri, listen, type UnlistenFn } from "@/lib/invoke";
 import { useProviderStore, useSettingsStore } from "@/stores";
@@ -200,7 +202,7 @@ const COMMAND_DEFS: (Omit<CommandDef, "labelKey" | "descKey"> & {
     category: "tools",
     needsBody: true,
     needsModel: false,
-    color: "var(--magenta, #eb2f96)",
+    color: hueVar("pink"),
   },
   {
     key: "code",
@@ -210,7 +212,7 @@ const COMMAND_DEFS: (Omit<CommandDef, "labelKey" | "descKey"> & {
     category: "tools",
     needsBody: true,
     needsModel: false,
-    color: "var(--magenta, #eb2f96)",
+    color: hueVar("pink"),
   },
   {
     key: "model",
@@ -220,7 +222,7 @@ const COMMAND_DEFS: (Omit<CommandDef, "labelKey" | "descKey"> & {
     category: "tools",
     needsBody: false,
     needsModel: false,
-    color: "var(--magenta, #eb2f96)",
+    color: hueVar("pink"),
   },
   {
     key: "settings",
@@ -252,7 +254,7 @@ const CATEGORY_GROUPS: CategoryDef[] = [
     borderColor: "var(--color-status-success, #52c41a)",
   },
   { key: "web", labelKey: "quickbar.category.web", borderColor: "var(--color-status-warning, #fa8c16)" },
-  { key: "tools", labelKey: "quickbar.category.tools", borderColor: "var(--magenta, #eb2f96)" },
+  { key: "tools", labelKey: "quickbar.category.tools", borderColor: hueVar("pink") },
   {
     key: "system",
     labelKey: "quickbar.category.system",

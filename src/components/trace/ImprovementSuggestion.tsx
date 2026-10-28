@@ -93,7 +93,7 @@ export function ImprovementSuggestion({ traceId }: ImprovementSuggestionProps) {
             <Card
               key={item.id}
               size="small"
-              style={{ borderLeft: "3px solid #1890ff" }}
+              style={{ borderLeft: "3px solid var(--accent)" }}
             >
               <div style={{ marginBottom: 8 }}>
                 <Text type="danger" strong style={{ fontSize: 12 }}>

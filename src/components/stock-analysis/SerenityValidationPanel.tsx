@@ -72,7 +72,7 @@ export function SerenityValidationPanel() {
 
   const metric = (labelKey: string, value: string, testid: string) => (
     <div className="flex flex-col gap-0.5">
-      <span style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>{t(labelKey)}</span>
+      <span style={{ fontSize: 11, color: "var(--muted)" }}>{t(labelKey)}</span>
       <strong data-testid={testid}>{value}</strong>
     </div>
   );
@@ -198,7 +198,7 @@ export function SerenityValidationPanel() {
             data-testid="serenity-validation-loop-note"
             title={<span className="text-xs">{t("backtest.serenityValidation.loopNote")}</span>}
           />
-          <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginTop: 6 }}>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>
             {t("backtest.serenityValidation.excessNote")}
           </div>
         </>

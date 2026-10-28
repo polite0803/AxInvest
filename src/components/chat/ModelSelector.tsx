@@ -1019,7 +1019,7 @@ export function ModelSelector({
                       }}
                       style={{
                         userSelect: "none",
-                        background: "var(--ant-color-fill-quaternary, rgba(0,0,0,0.02))",
+                        background: "var(--surface-2)",
                       }}
                       onClick={() => toggleGroupExpand(row.provider.id)}
                     >

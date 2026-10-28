@@ -95,7 +95,7 @@ function DashboardTabContent() {
 
   if (!dashboardReport) {
     return (
-      <div style={{ padding: 24, textAlign: "center", color: "#8c8c8c" }}>
+      <div style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>
         {t("stockAnalysis.dashboard.empty")}
       </div>
     );
@@ -105,10 +105,10 @@ function DashboardTabContent() {
       <DashboardReportPreview report={dashboardReport} />
       {dashboardMd && (
         <details style={{ marginTop: 16, padding: "0 16px" }}>
-          <summary style={{ cursor: "pointer", color: "#8c8c8c" }}>
+          <summary style={{ cursor: "pointer", color: "var(--muted)" }}>
             {t("stockAnalysis.dashboard.viewMarkdown")}
           </summary>
-          <pre style={{ background: "#f5f5f5", padding: 12, borderRadius: 8, overflow: "auto", fontSize: 12 }}>
+          <pre style={{ background: "var(--surface-2)", padding: 12, borderRadius: 8, overflow: "auto", fontSize: 12 }}>
             {dashboardMd}
           </pre>
         </details>
@@ -495,7 +495,7 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
               data-testid="sa-replay-stripe"
               style={{
                 height: 2,
-                background: "linear-gradient(90deg, #7c3aed 0%, #a855f7 50%, #7c3aed 100%)",
+                background: "linear-gradient(90deg, var(--purple) 0%, var(--purple) 50%, var(--purple) 100%)",
                 opacity: 0.85,
               }}
             />
@@ -555,8 +555,8 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
                   data-testid="sa-debug-toggle"
                   className="text-xs px-2 py-0.5 rounded cursor-pointer hover:opacity-80 transition-opacity"
                   style={{
-                    background: showDebug ? "#7c3aed" : "rgba(124,58,237,0.12)",
-                    color: showDebug ? "#fff" : "#a78bfa",
+                    background: showDebug ? "var(--purple)" : "rgba(124,58,237,0.12)",
+                    color: showDebug ? "#fff" : "var(--purple)",
                     border: "1px solid rgba(124,58,237,0.3)",
                     fontWeight: 500,
                   }}
@@ -614,7 +614,7 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
                               className="text-xs px-3 py-1 rounded cursor-pointer transition-colors"
                               style={{
                                 background: "rgba(239,68,68,0.15)",
-                                color: "#ef4444",
+                                color: "var(--red)",
                                 border: "1px solid rgba(239,68,68,0.3)",
                               }}
                               onClick={() => {
@@ -636,12 +636,12 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
                           style={{
                             padding: 16,
                             margin: 16,
-                            border: "1px solid var(--sa-red)",
+                            border: "1px solid var(--red)",
                             borderRadius: 8,
                             background: "var(--surface)",
                           }}
                         >
-                          <h3 style={{ margin: "0 0 8px 0", color: "var(--sa-red)" }}>
+                          <h3 style={{ margin: "0 0 8px 0", color: "var(--red)" }}>
                             {failedNodes.length > 0
                               ? t("stockAnalysis.workflow.partialFailed", { count: failedNodes.length })
                               : t("stockAnalysis.workflow.startFailed")}
@@ -651,7 +651,7 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
                           </p>
                           {failedNodes.length > 0 && (
                             <div style={{ marginBottom: 12 }}>
-                              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--sa-red)", marginBottom: 4 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--red)", marginBottom: 4 }}>
                                 {t("stockAnalysis.workflow.failedSteps")}
                               </div>
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
@@ -666,8 +666,8 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
                                         fontSize: 11,
                                         padding: "2px 6px",
                                         borderRadius: 4,
-                                        background: "var(--sa-red-bg)",
-                                        color: "var(--sa-red)",
+                                        background: "var(--red-bg)",
+                                        color: "var(--red)",
                                         cursor: "pointer",
                                         display: "inline-block",
                                       }}
@@ -681,7 +681,7 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
                                           padding: 8,
                                           background: "var(--surface)",
                                           borderRadius: 6,
-                                          border: "1px solid var(--sa-red)",
+                                          border: "1px solid var(--red)",
                                           fontSize: 11,
                                           color: "var(--muted)",
                                           whiteSpace: "pre-wrap",
@@ -720,12 +720,12 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
                           style={{
                             padding: 16,
                             margin: 16,
-                            border: "1px solid var(--sa-amber, #f59e0b)",
+                            border: "1px solid var(--amber)",
                             borderRadius: 8,
                             background: "var(--surface)",
                           }}
                         >
-                          <h3 style={{ margin: "0 0 8px 0", color: "var(--sa-amber, #f59e0b)" }}>
+                          <h3 style={{ margin: "0 0 8px 0", color: "var(--amber)" }}>
                             {t("stockAnalysis.interrupted.title")}
                           </h3>
                           <p style={{ margin: "0 0 12px 0", color: "var(--muted)", whiteSpace: "pre-wrap" }}>
@@ -761,7 +761,7 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
                                   className="text-xs px-2.5 py-1 rounded cursor-pointer transition-colors shrink-0 mt-1"
                                   style={{
                                     background: "rgba(239,68,68,0.15)",
-                                    color: "#ef4444",
+                                    color: "var(--red)",
                                     border: "1px solid rgba(239,68,68,0.3)",
                                   }}
                                   onClick={() => {
@@ -810,7 +810,7 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
                           padding: "8px 0",
                           textAlign: "center",
                           fontSize: 12,
-                          border: "0.5px solid var(--color-border-tertiary)",
+                          border: "0.5px solid var(--border-light)",
                           borderRadius: 6,
                           cursor: "pointer",
                           color: "var(--color-text-secondary)",
@@ -947,7 +947,7 @@ function AnalystConsensusBar() {
         gap: 12,
         padding: "6px 12px",
         marginTop: 8,
-        border: "0.5px solid var(--color-border-tertiary)",
+        border: "0.5px solid var(--border-light)",
         borderRadius: 6,
         fontSize: 12,
       }}
@@ -967,23 +967,23 @@ function AnalystConsensusBar() {
         />
       )}
       {bull > 0 && (
-        <span style={{ color: "var(--sa-red)" }}>
+        <span style={{ color: "var(--red)" }}>
           {bull} {t("stockAnalysis.bullish")}
         </span>
       )}
       {bear > 0 && (
-        <span style={{ color: "var(--sa-green)" }}>
+        <span style={{ color: "var(--green)" }}>
           {bear} {t("stockAnalysis.bearish")}
         </span>
       )}
       {neutral > 0 && (
-        <span style={{ color: "var(--color-text-tertiary)" }}>
+        <span style={{ color: "var(--muted)" }}>
           {neutral} {t("stockAnalysis.neutral")}
         </span>
       )}
       {tierConsensus.excludedCount > 0 && (
         /* 扣票必须可见：少了的原因不写出来，剩下的票数就会被读成「分析师总数」。 */
-        <span style={{ color: "var(--ant-warning, #b45309)" }}>
+        <span style={{ color: "var(--amber)" }}>
           {t("stockAnalysis.analystConsensusExcluded", { count: tierConsensus.excludedCount })}
         </span>
       )}

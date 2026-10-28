@@ -440,6 +440,7 @@ async fn try_compute_embeddings_internal(
     let api_key = axagent_crypto::decrypt_key(&key.key_encrypted, master_key)
         .map_err(|e| format!("decrypt_key: {e}"))?;
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key,
         key_id: key.id.clone(),
         provider_id: provider.id.clone(),

@@ -164,6 +164,7 @@ pub(super) async fn resolve_ai_provider(state: &AppState) -> Result<ResolvedProv
     let base_url = resolve_base_url_for_type(&provider.api_host, &provider.provider_type);
 
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key: decrypted_key,
         key_id: provider_key.id,
         provider_id: provider.id.clone(),

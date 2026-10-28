@@ -104,7 +104,7 @@ export function ImageAnalysisPanel() {
       style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <Camera size={16} style={{ color: "#722ed1" }} />
+        <Camera size={16} style={{ color: "var(--purple)" }} />
         <Title level={5} style={{ margin: 0 }}>
           {t("chat.vision.imageAnalysis")}
         </Title>
@@ -134,7 +134,7 @@ export function ImageAnalysisPanel() {
                 gap: 4,
               }}
             >
-              <UploadCloud size={24} style={{ color: "#999" }} />
+              <UploadCloud size={24} style={{ color: "var(--muted)" }} />
               <Text type="secondary">{t("chat.vision.uploadImage")}</Text>
             </div>
           )}
@@ -180,7 +180,7 @@ export function ImageAnalysisPanel() {
             display: "flex",
             alignItems: "flex-start",
             gap: 8,
-            color: "#ff4d4f",
+            color: "var(--red)",
           }}
         >
           <XCircle size={14} style={{ marginTop: 2 }} />
@@ -219,7 +219,7 @@ export function ImageAnalysisPanel() {
                   style={{
                     margin: 0,
                     padding: 8,
-                    background: "var(--bg-secondary, #f5f5f5)",
+                    background: "var(--surface)",
                     borderRadius: 4,
                     fontSize: 12,
                     maxHeight: 160,
@@ -259,13 +259,13 @@ export function ImageAnalysisPanel() {
                         ? (
                           <CheckCircle
                             size={10}
-                            style={{ color: "#52c41a", flexShrink: 0 }}
+                            style={{ color: "var(--green)", flexShrink: 0 }}
                           />
                         )
                         : (
                           <ImageIcon
                             size={10}
-                            style={{ color: "#999", flexShrink: 0 }}
+                            style={{ color: "var(--muted)", flexShrink: 0 }}
                           />
                         )}
                       <Text strong style={{ fontSize: 12 }}>
@@ -283,7 +283,7 @@ export function ImageAnalysisPanel() {
             )}
 
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <FileImage size={12} style={{ color: "#999" }} />
+              <FileImage size={12} style={{ color: "var(--muted)" }} />
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {t("chat.vision.model")}: {result.model}
                 {" · "}

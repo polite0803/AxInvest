@@ -200,6 +200,7 @@ impl EvaluationRunner {
         });
 
         let ctx = self.provider_ctx.as_ref().cloned().unwrap_or_else(|| ProviderRequestContext {
+            header_timeout_secs: None,
             api_key: String::new(),
             key_id: String::new(),
             provider_id: String::new(),

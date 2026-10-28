@@ -117,7 +117,7 @@ export function AnalysisDebugPanel() {
         <span className="font-mono text-xs" style={{ color: getNodeColor(id) }}>
           <span
             className="inline-block w-2 h-2 rounded-full mr-1.5"
-            style={{ background: record.status === "failed" ? "#ef4444" : getNodeColor(id) }}
+            style={{ background: record.status === "failed" ? "var(--red)" : getNodeColor(id) }}
           />
           {id}
         </span>

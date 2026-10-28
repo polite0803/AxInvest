@@ -634,6 +634,7 @@ pub async fn extract_expert_structure(
     })?;
 
     let ctx = axagent_providers::ProviderRequestContext {
+        header_timeout_secs: None,
         api_key,
         key_id: key_row.id.clone(),
         provider_id: provider_id.clone(),

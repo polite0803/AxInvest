@@ -1734,6 +1734,79 @@ fn status_counts_form_a_partition_of_total() {
     );
 }
 
+/// 摘要里的「N 个低置信」必须由 `low_confidence_analysts` 同源给出，不得用减法做差。
+///
+/// 现网形态（2026-10-28，9 条 D 级轮）：`n_int` 只数**有 verdict** 的分析师，`gap_count`
+/// 却把无 verdict / untrusted 者一并计入 ⇒ 有人缺席时 `n_int - good_count - gap_count`
+/// 下溢成负数，摘要写成「10 个缺失，**-9 个低置信**」。
+/// 为什么钉源文而不是跑脚本：`low_count` 只出现在 **D/F 分支**，而本文件的夹具把因子完整度
+/// 固定在 90（`all_external_vars()` 全推 `()`），综合分最低只到 C（实测 48.0）⇒ 造不出 D。
+#[test]
+fn summary_low_count_uses_the_named_list_not_a_subtraction() {
+    // 判据本身：出现减法 / 与点名清单不同源 ⇒ 违规
+    fn violations(src: &str) -> Vec<String> {
+        src.lines()
+            .filter(|l| l.trim_start().starts_with("let low_count ="))
+            .map(|l| {
+                if l.contains("n_int -") {
+                    format!("摘要侧又用减法做差（有人缺席即下溢成负数）: {l}")
+                } else if !l.contains("low_confidence_analysts") {
+                    format!("低置信计数与点名清单不同源: {l}")
+                } else {
+                    String::new()
+                }
+            })
+            .filter(|v| !v.is_empty())
+            .collect()
+    }
+
+    // 前提：本判据不是恒真 —— 源文里必须恰有一行 `let low_count =`
+    assert_eq!(
+        SCRIPT.matches("let low_count =").count(),
+        1,
+        "判据面应为恰好一处，实得 {} 处",
+        SCRIPT.matches("let low_count =").count()
+    );
+    assert!(violations(SCRIPT).is_empty(), "现文已违规: {:?}", violations(SCRIPT));
+
+    // 负控：把旧式减法塞回同一行（内存副本，不落盘、不碰工作树），必须被同一条判据抓到
+    let broken = SCRIPT.replace(
+        "let low_count = low_confidence_analysts.len();",
+        "let low_count = n_int - good_count - gap_count;",
+    );
+    assert_ne!(broken, SCRIPT, "负控锚点腐烂：替换没生效，本用例等于没通电");
+    let v = violations(&broken);
+    assert_eq!(v.len(), 1, "负控应恰红一条，实得 {v:?}");
+    assert!(v[0].contains("减法做差"), "红的理由要指到下溢本身: {v:?}");
+}
+
+/// **十维全部缺位**时，摘要结尾不得把方向预设成「上游工具数据源」。
+///
+/// 现网实证（2026-10-28，9 条 D 级轮）：那种形态的真因是 LLM 调用整批失败于
+/// `API_KEY_DECRYPT_FAILED`（一次执行 55 个分析师节点全灭、快照里 `report.a-*` 键数 0），
+/// 而摘要固定尾句「建议检查对应分析师的上游工具数据源」把用户指到了数据源。
+/// 本节点看不见节点错误，只能看见有没有产物 ⇒ 全缺时只能说两种可能。
+#[test]
+fn summary_advice_stops_blaming_data_source_when_every_analyst_is_absent() {
+    let r = run_quality(&[], &[]);
+    let absent = names(&r, "missing_analysts");
+    assert_eq!(absent.len(), 10, "夹具应让十维全部缺位，实得 {absent:?}");
+    let summary = r["summary"].clone().into_string().unwrap_or_default();
+    assert!(summary.contains("整批无产出"), "十维全缺必须改口点名两种可能: {summary}");
+    assert!(
+        !summary.contains("建议检查对应分析师的上游工具数据源"),
+        "全缺那一格不得再把归因钉在数据源: {summary}"
+    );
+
+    // 负控（另一格）：只缺九位（有一位在场且置信达标）⇒ 仍按原句指向数据源，
+    // 不得把「两种可能」铺开成恒亮噪声。
+    let mk = "均线多头排列，量能温和放大，RSI 处于中性区。";
+    let part = run_quality(&[("mk", mk)], &[("mk", 75.0)]);
+    let s2 = part["summary"].clone().into_string().unwrap_or_default();
+    assert!(s2.contains("建议检查对应分析师的上游工具数据源"), "部分缺位仍指数据源: {s2}");
+    assert!(!s2.contains("整批无产出"), "部分缺位不得套用整批缺位的说法: {s2}");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // R2（2026-10-02）：措辞性缺席 —— 失败标记的成立条件从「文本出现了哪个词」
 // 换成「本轮该节点的工具调用有没有失败」。
@@ -1873,7 +1946,9 @@ fn r2_wording_absence_note_is_emitted_once() {
 //
 // 背景：v149 只收窄了 `avg_conf` 分母，**量程没变** —— 生产库 54 轮回放里 tc 上限
 //   仍是 69.0、grade A **0 条** ⇒ 0.35×75.6 + 0.35×69 + 0.30×100 = 80.4 < 85，
-//   A 级（≥85）结构不可达；而熔断判据是「连续 3 轮非 A」⇒ 熔断恒触发、失去判别力。
+//   A 级（≥85）结构不可达；而熔断判据当时是「连续 3 轮非 A」⇒ 熔断恒触发、失去判别力
+//   （该判据已于 2026-10-10 收窄为「C/D/F/无等级才异常」，A 与 B 都是正常档，
+//    权威在 `dao::repo::data_quality_fuse::grade_is_abnormal`；本段保留当时的量程算式）。
 // v150 换量：`tc = 100 − gap 阶梯 − tool_gap 维度数×12 − 失败工具调用占比×50`，
 //   三个证据源全部可核对，且与「分析师对自身结论的把握」无关。
 // 下列断言钉死新口径，**含负控**（确有取数问题必须被扣分）与**A 可达性**（核心议题）。

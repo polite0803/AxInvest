@@ -145,9 +145,9 @@ export const DecompositionPreview: React.FC<DecompositionPreviewProps> = ({
                       style={{
                         marginTop: 16,
                         padding: 12,
-                        background: "#fafafa",
+                        background: "var(--surface)",
                         borderRadius: 8,
-                        border: "1px solid #d9d9d9",
+                        border: "1px solid var(--border-light)",
                       }}
                     >
                       <Typography.Title level={5} style={{ marginTop: 0 }}>

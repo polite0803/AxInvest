@@ -35,7 +35,7 @@ export function ExperimentTrail() {
         ? `${actionLabel(decision)} / ${decision.confidence}% / ${decision.positionPct}%`
         : "—",
       active: experiments.length === 0,
-      color: "var(--color-background-secondary)",
+      color: "var(--surface)",
     },
     ...experiments.map((e, i) => ({
       label: t("stockAnalysis.experimentTrail.experiment", { n: e.step }),
@@ -43,7 +43,7 @@ export function ExperimentTrail() {
         e.decisionAfter.positionPct ?? "—"
       }%`,
       active: i === experiments.length - 1,
-      color: "var(--color-background-info)",
+      color: "color-mix(in srgb, var(--teal) 12%, transparent)",
       detail: Object.entries(e.params)
         .filter(([, v]) => typeof v === "number")
         .map(([k, v]) => `${k}=${v}`)
@@ -53,13 +53,13 @@ export function ExperimentTrail() {
       label: t("stockAnalysis.experimentTrail.execute"),
       sub: t("stockAnalysis.experimentTrail.acceptOrSkip"),
       active: false,
-      color: "var(--color-border-tertiary)",
+      color: "var(--border-light)",
       dashed: true,
     },
   ];
 
   return (
-    <div style={{ marginTop: 16, borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: 12 }}>
+    <div style={{ marginTop: 16, borderTop: "0.5px solid var(--border-light)", paddingTop: 12 }}>
       <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 10 }}>{t("stockAnalysis.experimentTrail.trail")}</div>
       <div style={{ display: "flex", gap: 0, fontSize: 11 }}>
         {steps.map((step, i) => (
@@ -70,8 +70,8 @@ export function ExperimentTrail() {
                 width: 24,
                 height: 24,
                 borderRadius: "50%",
-                background: step.active ? step.color : "var(--color-border-tertiary)",
-                color: step.active ? "white" : "var(--color-text-tertiary)",
+                background: step.active ? step.color : "var(--border-light)",
+                color: step.active ? "white" : "var(--muted)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -89,7 +89,7 @@ export function ExperimentTrail() {
                   flex: 1,
                   height: 1.5,
                   borderTop: ("dashed" in step && step.dashed)
-                    ? "1.5px dashed var(--color-border-tertiary)"
+                    ? "1.5px dashed var(--border-light)"
                     : `1.5px solid ${step.color}`,
                   margin: "0 4px",
                 }}
@@ -101,7 +101,7 @@ export function ExperimentTrail() {
                 style={{
                   fontWeight: 500,
                   fontSize: 11,
-                  color: step.active ? "var(--color-text-info)" : "var(--color-text-primary)",
+                  color: step.active ? "var(--teal)" : "var(--fg)",
                 }}
               >
                 {step.label}
@@ -110,7 +110,7 @@ export function ExperimentTrail() {
                 {step.sub}
               </div>
               {"detail" in step && step.detail && (
-                <div style={{ fontSize: 9, color: "var(--color-text-tertiary)", marginTop: 1 }}>
+                <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 1 }}>
                   {step.detail}
                 </div>
               )}

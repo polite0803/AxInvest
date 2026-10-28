@@ -912,6 +912,8 @@ impl ProviderAdapter for OpenAIAdapter {
         let url = Self::chat_url(ctx);
         let body = build_request(ctx, &request, &request.messages, true);
         let provider_id = ctx.provider_id.clone();
+        // 首字节预算覆盖（设置页「供应商-模型 → 首字节超时」）；None ⇒ 适配器默认。
+        let header_timeout_secs = ctx.header_timeout_secs;
 
         let body_size = serde_json::to_string(&body).ok().map(|s| s.len()).unwrap_or(0);
         // P0 DIAG: body 组成分析 — 定位 5.4MB/140万 tokens 到底来自 messages 还是 tools
@@ -984,87 +986,74 @@ impl ProviderAdapter for OpenAIAdapter {
         let (mut tx, rx) = futures::channel::mpsc::channel(256);
 
         tokio::spawn(async move {
-            // 响应头超时（2026-09-08，2026-09-10 改为随体积缩放）：上游网关 hang 住时
-            // （Agnes 500 do_request_failed 实证挂 82s 才返回），reqwest 只受 client
-            // 总超时(300s)约束，工作流每个节点白等 1-2 分钟。HTTP 响应头正常 <5s 返回
-            // （LLM 生成发生在 body 流中，不受此超时影响）。
+            // 首字节预算（2026-10-27）：软 45s / 硬 90s 两档，权威口径见 stream_budget。
             //
-            // 固定 10s 的问题（2026-09-09/10 实测）：大 prompt 请求（聚合节点
-            // portfolio-mgr 308KB / candidate-mapper 149KB / data-quality 142KB）的
-            // 上游 prefill/排队时间远超 10s，头超时对其必然触发——而固定调大（30s
-            // 实测）会把小请求节点（a-news）推过 step_timeout(120s) 触发整节点重跑。
-            // 故改为随请求体积缩放：base 10s + 每 64KB 递增 5s，封顶 60s。
-            // 小请求（<64KB，绝大多数分析师/辩手节点）维持 10s 快速失败语义不变。
-            let header_timeout_secs: u64 = (10 + (body_size / (64 * 1024)) as u64 * 5).min(60);
-            let response_headers_timeout = std::time::Duration::from_secs(header_timeout_secs);
-            let send_fut = crate::apply_stream_headers_to_request(
-                client
-                    .post(&url)
-                    .header("Authorization", format!("Bearer {}", api_key))
-                    .json(&body),
-                &custom_headers,
-            )
-            .send();
-            let resp = match tokio::time::timeout(response_headers_timeout, send_fut).await {
-                Ok(Ok(r)) if r.status().is_success() => {
-                    let ct = r
-                        .headers()
-                        .get("content-type")
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or("unknown");
-                    tracing::info!(
+            // 旧口径「10s 固定 + 按体积每 64KB 加 5s、封顶 60s」有两个结构性问题：
+            // ① 把「上游排队」误判成「网关挂起」—— 排队时长与请求体积只是弱相关，
+            //    小请求排在繁忙上游照样等 30s，被 10s 硬杀；
+            // ② 只有 OpenAI 兼容路径有这道闸门，Anthropic / Gemini / OpenAI-Responses
+            //    / transport 四条路径没有 ⇒ 同一上游在不同协议下等待时长不一致。
+            // 现在：软档超时 ⇒ 同供应商原地重试一次（慢 ≠ 死）；硬档超时 ⇒ 判「挂」，
+            // 交由上层切供应商。
+            let budget =
+                crate::stream_budget::resolve_header_budget(header_timeout_secs, body_size);
+            let header_ctx = crate::stream_budget::HeaderBudgetContext {
+                provider_id: provider_id.clone(),
+                model: body.model.clone(),
+                url: url.clone(),
+            };
+            let send_result =
+                crate::stream_budget::send_with_header_budget(budget, &header_ctx, || {
+                    crate::apply_stream_headers_to_request(
+                        client
+                            .post(&url)
+                            .header("Authorization", format!("Bearer {}", api_key))
+                            .json(&body),
+                        &custom_headers,
+                    )
+                })
+                .await;
+
+            let resp = match send_result {
+                Ok(outcome) => {
+                    tracing::debug!(
                         target: "axagent.providers.sse",
-                        status = r.status().as_u16(),
-                        content_type = ct,
-                        url = %url,
+                        status = outcome.response.status().as_u16(),
                         provider_id = %provider_id,
                         model = %body.model,
                         body_preview = %serde_json::to_string(&body).ok().map(|s| s.chars().take(500).collect::<String>()).unwrap_or_default(),
-                        "[SSE-DIAG] HTTP 响应成功"
+                        "[SSE-DIAG] 请求体预览"
                     );
-                    r
+                    outcome.response
                 },
-                Ok(Ok(r)) => {
-                    let s = r.status();
-                    let t = r.text().await.unwrap_or_default();
+                Err(crate::stream_budget::HeaderSendError::Hung { waited, budget, .. }) => {
                     let _ = tx.try_send(Err(AxAgentError::execution_with_source(
-                        super::diagnose_http_status("OpenAI", s, &t),
-                        anyhow::anyhow!("HTTP {s}: {t}"),
+                        crate::stream_budget::hung_error_message("OpenAI", waited, budget),
+                        anyhow::anyhow!(
+                            "response headers timeout after {}s (gateway hung)",
+                            waited.as_secs()
+                        ),
                     )));
                     return;
                 },
-                Ok(Err(e)) => {
+                Err(crate::stream_budget::HeaderSendError::Request(e)) => {
                     let _ = tx.try_send(Err(AxAgentError::execution_with_source(
                         super::diagnose_reqwest_error(&e),
                         e,
                     )));
                     return;
                 },
-                Err(_) => {
-                    tracing::warn!(
-                        url = %url,
-                        provider_id = %provider_id,
-                        model = %body.model,
-                        timeout_secs = response_headers_timeout.as_secs(),
-                        "[SSE-DIAG] 响应头超时：上游网关挂起，中止等待以快速切换 fallback"
-                    );
-                    let _ = tx.try_send(Err(AxAgentError::execution_with_source(
-                        format!(
-                            "OpenAI API error 504: response headers not received within {}s. \
-                             The upstream gateway is likely hung. This timeout only covers \
-                             the HTTP response headers (normally arrives in seconds; LLM \
-                             generation happens in the body stream and is NOT affected). \
-                             Retrying or switching to a fallback provider is recommended.",
-                            response_headers_timeout.as_secs()
-                        ),
-                        anyhow::anyhow!(
-                            "response headers timeout after {}s (gateway hung)",
-                            response_headers_timeout.as_secs()
-                        ),
-                    )));
-                    return;
-                },
             };
+
+            if !resp.status().is_success() {
+                let s = resp.status();
+                let t = resp.text().await.unwrap_or_default();
+                let _ = tx.try_send(Err(AxAgentError::execution_with_source(
+                    super::diagnose_http_status("OpenAI", s, &t),
+                    anyhow::anyhow!("HTTP {s}: {t}"),
+                )));
+                return;
+            }
 
             let mut byte_stream = resp.bytes_stream();
             let mut buf = String::new();

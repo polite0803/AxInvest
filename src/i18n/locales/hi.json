@@ -5907,6 +5907,8 @@
     "renderUserMarkdownDesc": "कोड ब्लॉक, लाइन ब्रेक आदि सहित Markdown फ़ॉर्मेटिंग के साथ उपयोगकर्ता संदेश प्रदर्शित करें",
     "requestDelayMs": "अनुरोध विलंब",
     "requestDelayMsHint": "प्रत्येक API कॉल से पहले प्रतीक्षा करने के लिए मिलीसेकंड, दर सीमा (जैसे 429 त्रुटियाँ) से बचने के लिए उपयोग किया जाता है",
+    "headerTimeoutSecs": "पहले बाइट टाइमआउट",
+    "headerTimeoutSecsHint": "अपस्ट्रीम से HTTP प्रतिक्रिया हेडर की प्रतीक्षा के कुल सेकंड (सॉफ्ट सीमा पार करने पर उसी प्रोवाइडर के साथ एक बार पुनः प्रयास, हार्ड सीमा पार करने पर अपस्ट्रीम को अटका माना जाता है); खाली छोड़ने पर डिफ़ॉल्ट 90 सेकंड उपयोग होता है",
     "resetDefault": "डिफ़ॉल्ट रीसेट करें",
     "resetShortcutDefaults": "शॉर्टकट डिफ़ॉल्ट रीसेट करें",
     "resetShortcutSingle": "इस शॉर्टकट को डिफ़ॉल्ट पर रीसेट करें",
@@ -16454,7 +16456,19 @@
       "vendorLastError": "अंतिम त्रुटि",
       "vendorLastSuccess": "अंतिम सफलता",
       "vendorLastFailure": "अंतिम विफलता",
-      "vendorHealth": "डेटा स्रोत स्थिति"
+      "vendorHealth": "डेटा स्रोत स्थिति",
+      "interfaceHealth": {
+        "title": "दैनिक इंटरफ़ेस स्वास्थ्य",
+        "storeDisabled": "दैनिक संग्रह बंद है; जाँच परिणाम सहेजे नहीं गए",
+        "empty": "अभी कोई दैनिक जाँच रिकॉर्ड नहीं (बाज़ार बंद होने के बाद स्वतः जाँच)",
+        "unavailable": "इस वातावरण में दैनिक स्वास्थ्य रिकॉर्ड उपलब्ध नहीं",
+        "colDate": "डेटा आधार तिथि",
+        "colSummary": "ठीक / जाँचे गए",
+        "colIssues": "असामान्य आइटम",
+        "summary": "{{ok}}/{{total}} ठीक",
+        "checkedAt": "जाँच का समय",
+        "statusEmptyByTime": "इस अवधि में डेटा नहीं"
+      }
     },
     "experiment": {
       "executeTrade": "ट्रेड निष्पादित करें →",
@@ -16574,7 +16588,7 @@
     "diTableDirection": "दिशा/मान",
     "diTableStatus": "स्थिति",
     "diTableNote": "टिप्पणी",
-    "weightCollapseDqi": "डेटा गुणवत्ता ग्रेड F (dqi<25), निर्णय आधार अमान्य",
+    "weightCollapseDqi": "डेटा गुणवत्ता ग्रेड F, निर्णय आधार अमान्य",
     "weightCollapseUntrusted": "अविश्वसनीय अपस्ट्रीम ≥2 (untrusted_count={{count}})",
     "weightCollapseThreshold": "कारक भार {{ratio}}% सीमा से नीचे",
     "weightCollapseConsequence": "परिणाम: पोज़िशन 0% पर बाध्य, दिशा विश्वास ×0.5",
@@ -16716,7 +16730,8 @@
       "diff": "मतभेद",
       "directionConflict": "दिशा संघर्ष",
       "opposite": "विपरीत",
-      "sameDirection": "समान दिशा"
+      "sameDirection": "समान दिशा",
+      "htmlReport": "HTML रिपोर्ट"
     },
     "crossCheck": {
       "title": "ट्रेंड पिक बनाम विश्लेषण · क्रॉस-सिस्टम विचलन",
@@ -17102,7 +17117,9 @@
       "replayDegradedWithCount": "{{n}} data sources were skipped in replay mode; this panel is hidden.",
       "replayDegradedWithReason": "Degraded in replay mode: {{reason}}",
       "_fallback": "No recommendation data",
-      "empty": "अभी कोई सिफ़ारिश डेटा नहीं"
+      "empty": "अभी कोई सिफ़ारिश डेटा नहीं",
+      "sourceFailed": "डेटा स्रोत अनुपलब्ध",
+      "schemaChanged": "इंटरफ़ेस संरचना बदली गई"
     },
     "row": {
       "entry": "Entry",
@@ -18616,7 +18633,9 @@
         "label": "शीर्ष स्तर द्वारा टियर-स्तरीय खरीद अपनाएँ",
         "desc": "जब अंशांकन अपनी सीमा तक नहीं पहुँचता, आत्मविश्वास सीमित हो जाता है और क्रिया भी साथ-साथ नीचे आती है, जिससे शीर्ष स्तर पर खरीदों की संख्या शून्य रहती है। इसे खोलने पर शीर्ष स्तर टियर-स्तरीय खरीद अपना लेता है। आत्मविश्वास की सीमा फिर भी लागू रहती है।"
       }
-    }
+    },
+    "htmlNeedAnalysisId": "विश्लेषण रिकॉर्ड ID अनुपस्थित; HTML रिपोर्ट निर्यात नहीं हो सकती",
+    "htmlDesktopOnly": "HTML रिपोर्ट केवल डेस्कटॉप पर उपलब्ध है"
   },
   "pipeline": {
     "title": "स्टॉक पाइपलाइन",

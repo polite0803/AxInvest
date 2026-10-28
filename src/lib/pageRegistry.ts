@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { CAPABILITY_DOMAIN_META } from "@/lib/domainMeta";
-
 /**
  * Unified page registry — 内置路由路径的单一真相源（single source of truth）。
  *
@@ -28,12 +26,13 @@ export const DEFAULT_HOME = "/chat";
  *   - 业务域路径由 CAPABILITY_DOMAIN_META 自动展开（/finance, /automation 等）
  */
 export const BUILTIN_PAGE_PATH: Record<string, string> = {
-  // ── 能力域聚合入口路径（8 个业务域，路径来源 domainMeta 单一真相源） ──
-  ...Object.fromEntries(CAPABILITY_DOMAIN_META.map((d) => [d.id, d.path])),
+  // ── 能力域聚合入口（2026-10-28 起并入 OPC）──
+  // `domainMeta.path` 仍是跨端协议值（须与后端 nav_path 一致），
+  // 但不再注册为顶级路由；统一由 `/opc/domains/:domainId` 承载。
 
   // ── AxInvest 本地业务页（2026-09-01 上游合并时路由被覆盖，09-06 按能力域恢复） ──
   "finance-investment": "/invest",
-  "replay-workbench": "/replay-workbench",
+  investReplay: "/invest/replay",
   "automation-operations": "/opc",
   // 能力包页（DomainPages.tsx 固定组件，路径 /opc/domain/:packId；
   // 2026-09-15 由 /opc/industry/:packId 迁移而来，旧链在 ContentArea 里重定向）
@@ -54,28 +53,31 @@ export const BUILTIN_PAGE_PATH: Record<string, string> = {
 
   // ── 通用功能（general 域） ──
   chat: "/chat",
-  dashboard: "/dashboard",
+  chatWorkflow: "/chat/workflow",
+  chatTerminal: "/chat/terminal",
+  chatFiles: "/chat/files",
+  chatAgents: "/chat/multiAgent",
+  chatMarketplace: "/chat/marketplace",
+  chatQuickbar: "/chat/quickbar",
+  dashboard: "/chat/dashboard",
   knowledge: "/knowledge",
+  knowledgeMemory: "/knowledge/memory",
+  knowledgeWiki: "/knowledge/wiki",
+  knowledgeLearning: "/knowledge/learning",
   memory: "/memory",
   "demand-discovery": "/demand-discovery",
   link: "/link",
   settings: "/settings",
   "tasks-center": "/tasks",
-  workflow: "/workflow",
   "dynamic-ui": "/dynamic-ui",
-  marketplace: "/marketplace",
   wiki: "/wiki",
-  multiAgent: "/multi-agent",
 
-  // ── 运维域（devops）：路径保持顶级（/terminal, /files, /gateway） ──
-  terminal: "/terminal",
-  files: "/files",
+  // ── 运维域（devops）：路径保持顶级（/gateway） ──
   gateway: "/gateway",
 
   // ── 历史兼容入口 / devtools 等 ──
   llmWiki: "/llm-wiki",
   learningGraph: "/learning-graph",
-  quickbar: "/quickbar",
   devtools: "/devtools",
   devtoolsTraceExplorer: "/devtools/trace-explorer",
   devtoolsBenchmark: "/devtools/benchmark",

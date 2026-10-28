@@ -6,7 +6,7 @@ export function StockAnalysisPage() {
   // ── Agent 上下文注入：告知 Agent 当前页面是股票分析页 ──
   useAgentContext({
     page: "stock-analysis",
-    url: "/stock-analysis",
+    url: "/invest",
     quickActions: [
       { id: "analyze-stock", description: "对指定股票执行完整分析", params: { stock_code: "string" } },
       { id: "get-quote", description: "查询股票实时行情", params: { stock_code: "string" } },

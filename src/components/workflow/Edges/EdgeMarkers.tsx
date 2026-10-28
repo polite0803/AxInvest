@@ -10,11 +10,10 @@
  * 不再依赖 `var(--orange)` / `var(--purple)` 之类的游离 CSS 变量。
  */
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { hueColor } from "@/theme/categoricalColors";
 import { theme } from "antd";
 import React from "react";
-
-const ORANGE_BASE = "#fa8c16";
-const PURPLE_BASE = "#722ed1";
 
 interface MarkerDef {
   id: string;
@@ -23,15 +22,16 @@ interface MarkerDef {
 
 export const EdgeMarkers: React.FC = () => {
   const { token } = theme.useToken();
+  const isDark = useIsDarkTheme();
 
   const markers: MarkerDef[] = [
     { id: "arrow-default", color: token.colorBorderSecondary },
     { id: "arrow-direct", color: token.colorBorderSecondary },
     { id: "arrow-conditionTrue", color: token.colorSuccess },
     { id: "arrow-conditionFalse", color: token.colorError },
-    { id: "arrow-loopBack", color: ORANGE_BASE },
+    { id: "arrow-loopBack", color: hueColor("orange", isDark) },
     { id: "arrow-error", color: token.colorError },
-    { id: "arrow-parallelBranch", color: PURPLE_BASE },
+    { id: "arrow-parallelBranch", color: hueColor("purple", isDark) },
     { id: "arrow-merge", color: token.colorPrimary },
   ];
 

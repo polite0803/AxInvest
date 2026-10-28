@@ -2,87 +2,43 @@
 
 import { Tooltip } from "@/components/layout/Tooltip";
 import { FEATURE_FLAGS } from "@/constants/featureFlags";
-import { CAPABILITY_DOMAIN_META, domainLabelKey } from "@/lib/domainMeta";
+import { NAV_GROUPS } from "@/lib/navGroups";
+import { builtinNavItems } from "@/lib/navRegistry";
 import { useAgentPanelStore, useOnboardingStore } from "@/stores";
 import { theme } from "antd";
 import { ArrowLeft, Bot, HelpCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 
-const PAGE_LABELS: Record<string, string> = {
-  "/": "nav.chat",
-  "/chat": "nav.chat",
-  "/knowledge": "nav.knowledge",
-  "/memory": "nav.memory",
-  "/demand-discovery": "opc.demand.pageTitle",
-  "/gateway": "nav.gateway",
-  "/link": "nav.link",
-  "/files": "nav.files",
-  "/workflow": "nav.workflow",
-  "/dynamic-ui": "nav.dynamicUI",
-  "/wiki": "nav.wiki",
-  "/terminal": "nav.terminal",
-  "/invest": "nav.financeInvestment",
-  "/opc": "nav.automationOperations",
-  "/tasks": "tasksCenter.title",
-  // 能力包页（/opc/domain/:id）— 顶栏标签与页面大标题（CapabilityPackHub domainTitle）保持一致
-  "/opc/domain/finance-invest": "opc.domains.finance_invest",
-  "/opc/domain/accounting": "opc.domains.accounting",
-  "/opc/domain/sales-growth": "opc.domains.sales_growth",
-  "/opc/domain/project-management": "opc.domains.project_management",
-  "/opc/domain/consulting": "opc.domains.consulting",
-  "/opc/domain/ecommerce": "opc.domains.ecommerce",
-  "/opc/domain/software-dev": "opc.domains.software_dev",
-  "/opc/domain/security": "opc.domains.security",
-  "/opc/domain/geospatial": "opc.domains.geospatial",
-  "/opc/domain/ai-research": "opc.domains.ai_research",
-  "/opc/domain/content-media": "opc.domains.content_media",
-  "/opc/domain/design": "opc.domains.design",
-  "/opc/domain/education": "opc.domains.education",
-  "/opc/domain/game-dev": "opc.domains.game_dev",
-};
-
+/**
+ * 页面标题：按导航项最长前缀匹配（`navRegistry`），回落到导航组（`navGroups`）。
+ *
+ * 2026-10-28：删除原 20+ 项 `PAGE_LABELS` 手写映射 —— 它与侧栏 `navRegistry`
+ * 是同一批路径的两个副本，新增页面必漏一处。现在单一真相源是 navRegistry / navGroups。
+ */
 function resolvePageLabel(pathname: string): string | null {
-  if (PAGE_LABELS[pathname]) {
-    return PAGE_LABELS[pathname];
-  }
-  // 能力域聚合入口（/general、/finance、/automation 等）— 显示域名
-  const domain = CAPABILITY_DOMAIN_META.find(
-    (d) => pathname === d.path || pathname.startsWith(`${d.path}/`),
-  );
-  if (domain) {
-    return domainLabelKey(domain.id);
-  }
-  if (pathname.startsWith("/settings")) {
-    return "nav.settings";
-  }
-  if (pathname.startsWith("/llm-wiki")) {
-    return "nav.wiki";
-  }
-  if (pathname.startsWith("/wiki/")) {
-    return "nav.wiki";
-  }
-  // OPC 管理面板多段路径（/opc/invoices 等）— 与 /opc 同标签
-  if (pathname === "/opc" || pathname.startsWith("/opc/")) {
-    return "nav.automationOperations";
-  }
-  if (
-    pathname.startsWith("/stock-analysis") || pathname.startsWith("/screener") || pathname.startsWith("/watchlist")
-    || pathname.startsWith("/portfolio") || pathname.startsWith("/backtest") || pathname.startsWith("/compare")
-    || pathname.startsWith("/trade") || pathname.startsWith("/quant")
-    || pathname.startsWith("/replay-workbench")
-  ) {
+  // 股票工作台有自己的 sa-header，不再叠加 AppHeader。
+  if (pathname === "/invest" || pathname.startsWith("/invest/")) {
     return null;
   }
-  return null;
+  const item = builtinNavItems
+    .filter((entry) => pathname === entry.path || pathname.startsWith(`${entry.path}/`))
+    .sort((a, b) => b.path.length - a.path.length)[0];
+  if (item) {
+    return item.labelKey;
+  }
+  const group = NAV_GROUPS.find(
+    (entry) => entry.path && (pathname === entry.path || pathname.startsWith(`${entry.path}/`)),
+  );
+  return group?.labelKey ?? null;
 }
 
 /** 非对话页面的上下文摘要 — 后续通过 store 动态注入实际数值 */
 function getPageContext(pathname: string, t: (k: string) => string): string | null {
   if (pathname.startsWith("/knowledge")) { return t("appHeader.knowledgeContext"); }
   if (pathname.startsWith("/gateway")) { return t("appHeader.gatewayContext"); }
-  if (pathname.startsWith("/files")) { return t("appHeader.filesContext"); }
-  if (pathname.startsWith("/terminal")) { return t("appHeader.terminalContext"); }
+  if (pathname.startsWith("/chat/files")) { return t("appHeader.filesContext"); }
+  if (pathname.startsWith("/chat/terminal")) { return t("appHeader.terminalContext"); }
   return null;
 }
 

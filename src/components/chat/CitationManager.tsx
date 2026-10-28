@@ -119,7 +119,7 @@ export function CitationManager({
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <CheckCircleOutlined
-                    style={{ color: item.inReport ? "#52c41a" : "#d9d9d9" }}
+                    style={{ color: item.inReport ? "var(--green)" : "var(--muted)" }}
                     onClick={(e) => {
                       e.stopPropagation();
                       handleToggle(item.id);
@@ -132,7 +132,7 @@ export function CitationManager({
                     </div>
                     <div
                       style={{
-                        color: "var(--text-secondary, rgba(0,0,0,0.45))",
+                        color: "var(--fg-2)",
                         fontSize: 13,
                         marginTop: 2,
                       }}
@@ -182,7 +182,7 @@ export function CitationManager({
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <CheckCircleOutlined
-                    style={{ color: item.inReport ? "#52c41a" : "#d9d9d9" }}
+                    style={{ color: item.inReport ? "var(--green)" : "var(--muted)" }}
                     onClick={(e) => {
                       e.stopPropagation();
                       handleToggle(item.id);
@@ -195,7 +195,7 @@ export function CitationManager({
                     </div>
                     <div
                       style={{
-                        color: "var(--text-secondary, rgba(0,0,0,0.45))",
+                        color: "var(--fg-2)",
                         fontSize: 13,
                         marginTop: 2,
                       }}

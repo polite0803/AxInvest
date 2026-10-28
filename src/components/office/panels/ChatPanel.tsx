@@ -320,13 +320,13 @@ function EventList({ events }: { events: DispatchEvent[] }) {
             );
           case "complete":
             return (
-              <div key={i} style={{ fontSize: 11, color: "#52c41a", fontWeight: 500 }}>
+              <div key={i} style={{ fontSize: 11, color: "var(--green)", fontWeight: 500 }}>
                 ✓ {t("office.chat.completed")}
               </div>
             );
           case "error":
             return (
-              <div key={i} style={{ fontSize: 11, color: "#ff4d4f" }}>
+              <div key={i} style={{ fontSize: 11, color: "var(--red)" }}>
                 ✗ {e.message}
               </div>
             );

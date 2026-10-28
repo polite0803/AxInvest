@@ -39,7 +39,7 @@ export function BacktestPage() {
   return (
     <PageErrorBoundary title={t("stockAnalysis.page.backtest")}>
       <div className="flex h-full flex-col">
-        <PageHeader titleKey="stockAnalysis.backtest.title" backTo="/stock-analysis" />
+        <PageHeader titleKey="stockAnalysis.backtest.title" backTo="/invest" />
         <div className="flex-1 overflow-auto p-4">
           <Tabs
             activeKey={tab}

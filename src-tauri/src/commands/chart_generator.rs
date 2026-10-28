@@ -95,6 +95,7 @@ Rules:
     };
 
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key,
         key_id: "chart-gen".to_string(),
         provider_id: "openai".to_string(),

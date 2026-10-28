@@ -2,6 +2,8 @@
 
 import { OfficeTab } from "@/components/office/OfficeTab";
 import { PluginDashboardPanels } from "@/components/plugin/PluginPanelHost";
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { ensureECharts } from "@/lib/echartsInstance";
 import { formatNumber } from "@/lib/format";
 import { invoke, logIpcError } from "@/lib/invoke";
 import {
@@ -11,6 +13,7 @@ import {
   useGatewayStore,
   useProviderStore,
 } from "@/stores";
+import { type CategoricalHue, hueColor } from "@/theme/categoricalColors";
 import { CostByProvider, DailyUsage, DashboardStats } from "@/types";
 import { Card, Col, Flex, Row, Spin, Statistic, Tabs, theme } from "antd";
 import * as echarts from "echarts";
@@ -90,7 +93,8 @@ function StatCard({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                background: color ? `${color}18` : token.colorFillSecondary,
+                // 主色的浅档底用 color-mix 推导，而不是 `${color}18` 拼接（后者只吃十六进制）
+                background: color ? `color-mix(in srgb, ${color} 10%, transparent)` : token.colorFillSecondary,
                 color: color || token.colorTextSecondary,
                 flexShrink: 0,
               }}
@@ -139,28 +143,21 @@ function SectionHeader({ title, icon }: { title: string; icon?: React.ReactNode 
 
 /* ── CostByProvider echarts 组件 ── */
 
-const PIE_COLORS = [
-  "#1677ff",
-  "#52c41a",
-  "#faad14",
-  "#ff4d4f",
-  "#722ed1",
-  "#13c2c2",
-  "#eb2f96",
-  "#fa8c16",
-];
+// 饼图系列色走类目色板：亮/暗两档由 HUE_COLORS 分档，互异性由色板保证
+const PIE_HUES: CategoricalHue[] = ["blue", "green", "yellow", "red", "purple", "cyan", "pink", "orange"];
 
 function CostByProviderChart({ data }: { data: CostByProvider[] }) {
   const { token } = theme.useToken();
   const { t } = useTranslation();
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<echarts.ECharts | null>(null);
+  const isDark = useIsDarkTheme();
+  // 系列色必须在组件内解析：模块级常量在 import 期就固化了，换主题后饼图仍是旧配色
+  const pieColors = useMemo(() => PIE_HUES.map((h) => hueColor(h, isDark)), [isDark]);
 
   useEffect(() => {
     if (!chartRef.current) { return; }
-    if (!chartInstance.current) {
-      chartInstance.current = echarts.init(chartRef.current);
-    }
+    chartInstance.current = ensureECharts(chartRef.current, isDark);
     const option: echarts.EChartsOption = {
       tooltip: {
         trigger: "item",
@@ -181,7 +178,7 @@ function CostByProviderChart({ data }: { data: CostByProvider[] }) {
           data: data.map((d, i) => ({
             value: d.tokenCount,
             name: d.providerId,
-            itemStyle: { color: PIE_COLORS[i % PIE_COLORS.length] },
+            itemStyle: { color: pieColors[i % pieColors.length] },
           })),
           label: {
             formatter: (params: unknown) => {
@@ -199,7 +196,7 @@ function CostByProviderChart({ data }: { data: CostByProvider[] }) {
     const handleResize = () => chartInstance.current?.resize();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [data, token, t]);
+  }, [data, token, t, isDark, pieColors]);
 
   useEffect(() => {
     return () => {
@@ -219,12 +216,11 @@ function DailyUsageChart({ data = [], loading }: { data: DailyUsage[]; loading: 
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<echarts.ECharts | null>(null);
   const safeData = Array.isArray(data) ? data : [];
+  const isDark = useIsDarkTheme();
 
   useEffect(() => {
     if (!chartRef.current) { return; }
-    if (!chartInstance.current) {
-      chartInstance.current = echarts.init(chartRef.current);
-    }
+    chartInstance.current = ensureECharts(chartRef.current, isDark);
     const option: echarts.EChartsOption = {
       tooltip: {
         trigger: "axis",
@@ -267,7 +263,7 @@ function DailyUsageChart({ data = [], loading }: { data: DailyUsage[]; loading: 
           type: "bar",
           stack: "a",
           data: safeData.map((d) => d.totalPromptTokens ?? 0),
-          itemStyle: { color: "#1677ff", borderRadius: [2, 2, 0, 0] },
+          itemStyle: { color: hueColor("blue", isDark), borderRadius: [2, 2, 0, 0] },
           barMaxWidth: 32,
         },
         {
@@ -275,7 +271,7 @@ function DailyUsageChart({ data = [], loading }: { data: DailyUsage[]; loading: 
           type: "bar",
           stack: "a",
           data: safeData.map((d) => d.totalCompletionTokens ?? 0),
-          itemStyle: { color: "#52c41a", borderRadius: [2, 2, 0, 0] },
+          itemStyle: { color: hueColor("green", isDark), borderRadius: [2, 2, 0, 0] },
           barMaxWidth: 32,
         },
       ],
@@ -284,7 +280,7 @@ function DailyUsageChart({ data = [], loading }: { data: DailyUsage[]; loading: 
     const handleResize = () => chartInstance.current?.resize();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [safeData, token, t]);
+  }, [safeData, token, t, isDark]);
 
   useEffect(() => {
     return () => {
@@ -495,7 +491,7 @@ function OverviewTab() {
             icon={<Bot size={18} />}
             title={t("dashboard.totalMessages")}
             value={formatNumber(data.totalMessages)}
-            color="#52c41a"
+            color="var(--green)"
             loading={isLoading}
           />
         </Col>
@@ -505,7 +501,7 @@ function OverviewTab() {
             title={t("dashboard.totalTokens")}
             value={formatNumber(data.totalTokens)}
             suffix={data.totalTokens >= 1_000 ? "" : ""}
-            color="#fa8c16"
+            color="var(--amber)"
             loading={isLoading}
           />
         </Col>
@@ -515,7 +511,7 @@ function OverviewTab() {
             title={t("dashboard.providers")}
             value={`${data.providerCount}`}
             suffix={t("dashboard.providersUnit", { count: data.modelCount })}
-            color="#722ed1"
+            color="var(--purple)"
             loading={isLoading}
           />
         </Col>
@@ -676,7 +672,7 @@ function OverviewTab() {
                       value={data.agentStats.completedSessions}
                       styles={{ content: { fontSize: 18, fontWeight: 600, color: token.colorText } }}
                       valueRender={(v) => (
-                        <span style={{ color: "#52c41a", fontWeight: 600, fontSize: 18 }}>
+                        <span style={{ color: "var(--green)", fontWeight: 600, fontSize: 18 }}>
                           {v}
                         </span>
                       )}
@@ -690,7 +686,7 @@ function OverviewTab() {
                       valueRender={(v) => (
                         <span
                           style={{
-                            color: data.agentStats.failedSessions > 0 ? "#ff4d4f" : token.colorText,
+                            color: data.agentStats.failedSessions > 0 ? "var(--red)" : token.colorText,
                             fontWeight: 600,
                             fontSize: 18,
                           }}
@@ -779,7 +775,7 @@ function OverviewTab() {
               icon={<Zap size={18} />}
               title={t("dashboard.totalCost")}
               value={formatCny(backendStats?.totalCostUsd ?? 0)}
-              color="#ff4d4f"
+              color="var(--red)"
               loading={isLoading}
             />
           </Col>
@@ -790,7 +786,7 @@ function OverviewTab() {
               value={backendStats && backendStats.totalAgentSessions > 0
                 ? formatCny(backendStats.totalCostUsd / backendStats.totalAgentSessions, 4)
                 : formatCny(0)}
-              color="#1677ff"
+              color="var(--accent)"
               loading={isLoading}
             />
           </Col>
@@ -799,7 +795,7 @@ function OverviewTab() {
               icon={<Database size={18} />}
               title={t("dashboard.totalAgentTokens")}
               value={formatNumber(backendStats?.totalAgentTokens ?? 0)}
-              color="#722ed1"
+              color="var(--purple)"
               loading={isLoading}
             />
           </Col>
@@ -813,7 +809,7 @@ function OverviewTab() {
                   Math.round(dailyUsage.reduce((s, d) => s + d.totalTokens, 0) / 30),
                 )
                 : "0"}
-              color="#52c41a"
+              color="var(--green)"
               loading={usageLoading}
             />
           </Col>

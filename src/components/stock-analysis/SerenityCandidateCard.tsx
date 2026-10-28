@@ -245,12 +245,12 @@ export function SerenityCandidateCard({ candidate, tierRows }: Props) {
                     </div>
                     {/* 退化必须点名：固定乘数止损不是波动率口径，混在一起读就是把两套口径压成一类 */}
                     {row.stopSource === "fallback_pct" && (
-                      <div style={{ color: "var(--sa-warning, #faad14)" }}>
+                      <div style={{ color: "var(--amber)" }}>
                         {t("stockAnalysis.recommendation.row.rowStopFallback")}
                       </div>
                     )}
                     {row.entrySource && row.entrySource !== "half_stop" && (
-                      <div style={{ color: "var(--sa-warning, #faad14)" }}>
+                      <div style={{ color: "var(--amber)" }}>
                         {row.entrySource === "half_stop_fallback_pct"
                           ? t("serenityPanel.entryBandHalfFallback")
                           : t("serenityPanel.entryBandRangeFallback")}
@@ -268,7 +268,7 @@ export function SerenityCandidateCard({ candidate, tierRows }: Props) {
           <div className="grid grid-cols-2 gap-2 text-xs">
             {bottleneckProduct && (
               <div className="flex items-start gap-1 min-w-0">
-                <AimOutlined className="mt-0.5 shrink-0" style={{ color: "#722ed1" }} />
+                <AimOutlined className="mt-0.5 shrink-0" style={{ color: "var(--purple)" }} />
                 <div className="min-w-0">
                   <Text type="secondary" className="text-[10px] block">
                     {t("serenityPanel.bottleneckProduct")}
@@ -279,7 +279,7 @@ export function SerenityCandidateCard({ candidate, tierRows }: Props) {
             )}
             {primaryRisk && (
               <div className="flex items-start gap-1 min-w-0">
-                <AlertOutlined className="mt-0.5 shrink-0" style={{ color: "#ff4d4f" }} />
+                <AlertOutlined className="mt-0.5 shrink-0" style={{ color: "var(--red)" }} />
                 <div className="min-w-0">
                   <Text type="secondary" className="text-[10px] block">
                     {t("serenityPanel.riskPrefix")}

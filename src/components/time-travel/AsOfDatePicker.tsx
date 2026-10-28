@@ -33,7 +33,7 @@ export function AsOfDatePicker({ onPick, onCancel }: AsOfDatePickerProps) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 240 }}>
-      <div style={{ fontSize: 12, color: "var(--ax-text-secondary, #6b7280)" }}>
+      <div style={{ fontSize: 12, color: "var(--fg-2)" }}>
         {t("timeTravel.datePicker.hint")}
       </div>
       <DatePicker

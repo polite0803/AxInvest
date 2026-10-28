@@ -11,6 +11,7 @@
  */
 
 import { Tooltip } from "@/components/layout/Tooltip";
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import { Button, Card, Empty, Popover, theme, Typography } from "antd";
 import {
   Download,
@@ -162,7 +163,7 @@ const WARMUP_PHYSICS_CONFIG: PhysicsConfig = {
  *
  * 后端 `PageType` 有 14 个变体（D3 后），本联合类型只有 4 个：其余值（`doc` / `daily` /
  * `knowledge` / `knowledge_document` / `synced` / `log` / `comparison` / `index` / `overview` …）
- * 在 `buildNodeColorCache`（`graphViewUtils.ts:191`）落 `typeMap[node.type] || typeMap.note`
+ * 在 `buildNodeColorCache`（`graphViewUtils.ts`）落 `typeMap[node.type] || typeMap.note`
  * ⇒ **静默显示成 `note` 的颜色**，与真正的笔记无法区分。
  *
  * 是否为新类型配色 / 加 `wiki.graph.nodeType.*` 标签属**产品决策**（要选色、要翻译）
@@ -431,11 +432,15 @@ const GraphViewInner = forwardRef<GraphViewHandle, GraphViewProps>(({
 }, ref) => {
   const { token } = theme.useToken();
   const { t } = useTranslation();
+  const isDark = useIsDarkTheme();
 
   // token 的实时引用：渲染循环/数据 effect 通过 ref 读取最新 token，
   // 主题切换无需重建物理世界，只需重算颜色缓存（见 token 主题 effect）。
   const tokenRef = useRef(token);
   tokenRef.current = token;
+  // 同 tokenRef：数据 effect 不依赖主题，但要按当前明暗档取类目色
+  const isDarkRef = useRef(isDark);
+  isDarkRef.current = isDark;
 
   // 原始图数据/社区引用：供主题 effect 重算颜色缓存（数据 effect 不再依赖 token）
   const dataRef = useRef<GraphData | null>(null);
@@ -1350,7 +1355,7 @@ const GraphViewInner = forwardRef<GraphViewHandle, GraphViewProps>(({
     // 普通模式下 effectiveCommunitiesRef.current 即**合成后的**原始社区（笔记侧 ∪ 实体侧），
     // 行为相对引入实体侧社区之前不变（那时实体侧为空、合成退化为恒等）。
     const colorCommunities = effectiveCommunitiesRef.current ?? communities;
-    nodeColorRef.current = buildNodeColorCache(data.nodes, colorCommunities, tokenRef.current);
+    nodeColorRef.current = buildNodeColorCache(data.nodes, colorCommunities, isDarkRef.current);
     buildNodeSpriteCache();
 
     // ── 初始化物理 Worker ──
@@ -1561,7 +1566,7 @@ const GraphViewInner = forwardRef<GraphViewHandle, GraphViewProps>(({
     nodeColorRef.current = buildNodeColorCache(
       d.nodes,
       effectiveCommunitiesRef.current ?? rawCommunitiesRef.current ?? undefined,
-      token,
+      isDark,
     );
 
     // 边样式颜色/宽度
@@ -1589,7 +1594,7 @@ const GraphViewInner = forwardRef<GraphViewHandle, GraphViewProps>(({
     buildNodeSpriteCache();
     bgCacheRef.current = null;
     minimapBBoxRef.current = null;
-  }, [token]);
+  }, [token, isDark]);
 
   // 主动画循环
   useEffect(() => {

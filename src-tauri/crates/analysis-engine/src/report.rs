@@ -20,6 +20,52 @@ fn parse_or_warn<T: serde::de::DeserializeOwned + Default>(label: &str, json: &s
     }
 }
 
+/// 指数行情载荷的读取：必须兼容**两代形态**。
+///
+/// - 新（2026-10-28 起）：`{"status":"ok|empty_by_time|source_failed|schema_changed",
+///   "data":[...],"detail":"..."}`；
+/// - 旧：`raw.combined` 里历史 run 存的是裸数组。
+///
+/// 返回 `(行, status, detail)`；`status=None` 表示「历史裸数组，没有成因信息」——
+/// 这种情况保持旧行为（不出板块），不得凭空补一个状态。
+fn parse_index_quotes(json: &str) -> (Vec<serde_json::Value>, Option<String>, Option<String>) {
+    let v: serde_json::Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(e) => {
+            let preview: String = json.chars().take(120).collect();
+            tracing::warn!(
+                "[stock-analysis] report.rs index_quotes 载荷解析失败 err={} preview={:?}",
+                e,
+                preview
+            );
+            return (
+                vec![],
+                Some("schema_changed".into()),
+                Some(format!("报告载荷不是合法 JSON: {e}")),
+            );
+        },
+    };
+    if let Some(arr) = v.as_array() {
+        return (arr.clone(), None, None);
+    }
+    if let Some(obj) = v.as_object() {
+        if let Some(arr) = obj.get("data").and_then(|d| d.as_array()) {
+            let status = obj.get("status").and_then(|s| s.as_str()).map(str::to_string);
+            let detail = obj.get("detail").and_then(|d| d.as_str()).map(str::to_string);
+            return (arr.clone(), status, detail);
+        }
+    }
+    (
+        vec![],
+        Some("schema_changed".into()),
+        Some("报告载荷既不是数组，也不是 {status,data} 信封".into()),
+    )
+}
+
+fn esc_html(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
 /// Generate an HTML visualization report from all analysis data
 #[allow(clippy::too_many_arguments)]
 pub fn generate_html_report(
@@ -117,9 +163,37 @@ pub fn generate_html_report(
         )
     };
 
-    let index_quotes: Vec<serde_json::Value> = parse_or_warn("index_quotes", index_quotes_json);
+    // 大盘指数：新载荷是 `{status,data,detail}` 信封，历史 run 是裸数组。
+    // 空数据必须**写明成因**（2026-10-28）：旧实现在「通道全挂」时也输出「没有板块」，
+    // 读报告的人只会以为「今天没行情」。
+    let (index_quotes, index_status, index_detail) = parse_index_quotes(index_quotes_json);
     let index_quotes_section = if index_quotes.is_empty() {
-        String::new()
+        let note = match index_status.as_deref() {
+            Some("empty_by_time") => Some(format!(
+                "本时段无指数行情{}",
+                index_detail.as_deref().map(|d| format!("（{d}）")).unwrap_or_default()
+            )),
+            Some("source_failed") => Some(format!(
+                "指数行情源不可用{}",
+                index_detail.as_deref().map(|d| format!("：{d}")).unwrap_or_default()
+            )),
+            Some("schema_changed") => Some(format!(
+                "指数行情接口结构变更{}",
+                index_detail.as_deref().map(|d| format!("：{d}")).unwrap_or_default()
+            )),
+            Some("ok") => {
+                Some("指数行情状态为 ok 但没有数据（上游自相矛盾，请查数据源）".to_string())
+            },
+            // 历史裸空数组：没有成因信息，保持旧行为（不出板块），不虚构状态
+            _ => None,
+        };
+        note.map(|n| {
+            format!(
+                "<h3 style=\"margin:16px 0 8px\">大盘指数</h3><p style=\"font-size:12px;color:#8b949e\">{}</p>",
+                esc_html(&n)
+            )
+        })
+        .unwrap_or_default()
     } else {
         let mut rows = String::new();
         for idx in index_quotes.iter() {
@@ -132,8 +206,15 @@ pub fn generate_html_report(
                 "<tr><td>{name}</td><td>{price:.2}</td><td style=\"color:{color}\">{sign}{pct:.2}%</td></tr>"
             ));
         }
+        // `ok` 但带 detail = 部分缺失（例如 3 个指数只回了 2 个）；如实附在表下。
+        let note = match index_detail.as_deref() {
+            Some(d) if !d.trim().is_empty() => {
+                format!("<p style=\"font-size:12px;color:#8b949e\">数据说明：{}</p>", esc_html(d))
+            },
+            _ => String::new(),
+        };
         format!(
-            "<h3 style=\"margin:16px 0 8px\">大盘指数</h3><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><tr style=\"color:#8b949e\"><th>指数</th><th>点位</th><th>涨跌幅</th></tr>{rows}</table>"
+            "<h3 style=\"margin:16px 0 8px\">大盘指数</h3><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><tr style=\"color:#8b949e\"><th>指数</th><th>点位</th><th>涨跌幅</th></tr>{rows}</table>{note}"
         )
     };
 
@@ -466,5 +547,90 @@ mod p0h_report_regression {
         // 已删除的两个板块不得再渲染
         assert!(!html.contains("同行业可比公司"), "已删除的同行板块仍在渲染");
         assert!(!html.contains("期权PCR"), "已删除的期权PCR板块仍在渲染");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 指数行情载荷两代兼容（2026-10-28）
+//
+// 新载荷是 `{status,data,detail}` 信封（工具返回带成因），历史 run 的 `raw.combined`
+// 里仍是裸数组。三条断言：
+//   ① 裸数组必须继续可读（历史记录重出报告不得变成空白）；
+//   ② 信封取 `data`，状态与 detail 原样透出；
+//   ③ 非 ok 且无行时，报告要**写出成因**，不得只留一个空板块。
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod index_quotes_outcome_tests {
+    use super::*;
+
+    fn html_with_index(idx: &str) -> String {
+        generate_html_report(
+            "600519",
+            "贵州茅台",
+            "2026-10-28",
+            r#"{"price":1500.0,"changePct":1.0}"#,
+            &axagent_astock_data::indicators::TechnicalIndicators::default(),
+            "{}",
+            &HashMap::new(),
+            "{}",
+            "",
+            "",
+            "{}",
+            "[]",
+            "[]",
+            idx,
+        )
+    }
+
+    #[test]
+    fn legacy_array_still_parses() {
+        let (rows, status, detail) =
+            parse_index_quotes(r#"[{"name":"上证指数","price":3888.11,"changePct":0.73}]"#);
+        assert_eq!(rows.len(), 1);
+        assert!(status.is_none(), "历史裸数组没有成因信息，不得虚构状态");
+        assert!(detail.is_none());
+    }
+
+    #[test]
+    fn envelope_carries_status_and_rows() {
+        let (rows, status, detail) = parse_index_quotes(
+            r#"{"status":"ok","data":[{"name":"上证指数","price":3888.11,"changePct":0.73}],"detail":"已换源；前序源: eastmoney_push2=empty_by_time"}"#,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(status.as_deref(), Some("ok"));
+        assert!(detail.unwrap().contains("eastmoney_push2"));
+    }
+
+    #[test]
+    fn source_failed_renders_reason_instead_of_empty_section() {
+        let html = html_with_index(
+            r#"{"status":"source_failed","data":[],"detail":"eastmoney_push2=source_failed(HTTP 429); tencent=source_failed"}"#,
+        );
+        assert!(html.contains("大盘指数"), "非 ok 也必须有板块标题，便于定位: {html}");
+        assert!(html.contains("指数行情源不可用"), "必须写明成因: {html}");
+        assert!(html.contains("HTTP 429"), "逐源证据要进报告: {html}");
+    }
+
+    #[test]
+    fn schema_changed_has_its_own_wording() {
+        let html =
+            html_with_index(r#"{"status":"schema_changed","data":[],"detail":"缺 f57(code)"}"#);
+        assert!(html.contains("指数行情接口结构变更"), "{html}");
+        assert!(!html.contains("指数行情源不可用"), "两档文案不得混用: {html}");
+    }
+
+    #[test]
+    fn legacy_empty_array_keeps_old_silence() {
+        // 没有成因信息时保持旧行为（不出板块），不补一个猜测状态。
+        let html = html_with_index("[]");
+        assert!(!html.contains("大盘指数"));
+    }
+
+    #[test]
+    fn unparsable_payload_is_reported_as_schema_changed() {
+        let (rows, status, detail) = parse_index_quotes("not-json");
+        assert!(rows.is_empty());
+        assert_eq!(status.as_deref(), Some("schema_changed"));
+        assert!(detail.unwrap().contains("JSON"));
     }
 }

@@ -230,7 +230,7 @@ export function ComputerControlPanel() {
                   top: `${(el.bounds.y / nativeResolution.height) * 100}%`,
                   width: `${(el.bounds.width / nativeResolution.width) * 100}%`,
                   height: `${(el.bounds.height / nativeResolution.height) * 100}%`,
-                  border: "2px solid #1890ff",
+                  border: "2px solid var(--accent)",
                   borderRadius: 4,
                   cursor: el.is_clickable ? "pointer" : "default",
                   pointerEvents: el.is_clickable ? "auto" : "none",

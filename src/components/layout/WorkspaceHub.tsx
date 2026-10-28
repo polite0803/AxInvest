@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { BUILTIN_PAGE_PATH } from "@/lib/pageRegistry";
 import {
-  buildWorkspaceTabSearch,
   CHAT_ONLY_QUERY_PARAMS,
   isWorkspaceTab,
   parseWorkspaceTab,
+  parseWorkspaceTabPath,
   shouldRenderTab,
+  withoutParams,
+  WORKSPACE_TAB_PARAM,
   WORKSPACE_TABS,
   type WorkspaceTab,
+  workspaceTabPath,
 } from "@/lib/workspaceTabs";
 import { ChatPage } from "@/pages/ChatPage";
 import { DashboardPage } from "@/pages/DashboardPage";
@@ -96,25 +98,31 @@ export function WorkspaceHub() {
       handledStateRef.current = state;
       if (isWorkspaceTab(state.tab)) {
         setActiveTab(state.tab);
-        // ⚠ 必须把这次性重定向意图归一化进 URL：否则 URL 里的旧 `?ws=` 会在后续
-        // 地址变化时把 Tab 翻转回去（实测：state.tab=workflow + ?ws=terminal 渲染成 terminal）。
-        // 副作用是旧路由 /dashboard → /chat 会被写成 /chat?ws=dashboard —— 正是我们要的
-        // 可深链 / 可刷新恢复。
-        navigate(
-          {
-            pathname: BUILTIN_PAGE_PATH.chat,
-            search: buildWorkspaceTabSearch(location.search, state.tab),
-          },
-          { replace: true },
-        );
+        // ⚠ 必须把这次性重定向意图归一化进 URL：否则 URL 里的旧路径/旧 `?ws=` 会在
+        // 后续地址变化时把 Tab 翻转回去。
+        // 2026-10-28：归一化目标从 `?ws=` 改为路径段。
+        navigate(workspaceTabPath(state.tab), { replace: true });
       }
       return;
     }
+    // 路径段优先（`/chat/terminal`）；`/chat` 返回 null，保持 store 的「回上次位置」。
+    const fromPath = parseWorkspaceTabPath(location.pathname);
+    if (fromPath !== null) {
+      setActiveTab(fromPath);
+      return;
+    }
+    // 兼容旧链接 `/chat?ws=terminal`：解析后归一化到路径段。
     const fromUrl = parseWorkspaceTab(location.search);
     if (fromUrl !== null) {
       setActiveTab(fromUrl);
+      const params = withoutParams(new URLSearchParams(location.search), [WORKSPACE_TAB_PARAM]);
+      const search = params.toString();
+      navigate(
+        { pathname: workspaceTabPath(fromUrl), search },
+        { replace: true },
+      );
     }
-  }, [location.state, location.search, setActiveTab, navigate]);
+  }, [location.state, location.pathname, location.search, setActiveTab, navigate]);
 
   // 把当前 Tab 记入保活集合。必须放在上面两个解析 effect **之后**：
   // 它们可能在此次渲染后改写 activeTab（如从 state/URL 落到 devtools），

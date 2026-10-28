@@ -206,6 +206,7 @@ async fn resolve_benchmark_provider(
             .ok_or_else(|| format!("Provider '{:?}' not registered", prov.provider_type))?;
 
         let ctx = axagent_harness::provider::ProviderRequestContext {
+            header_timeout_secs: None,
             api_key: decrypted,
             key_id: key.id.clone(),
             provider_id: prov.id.clone(),

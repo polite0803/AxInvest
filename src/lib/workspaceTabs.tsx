@@ -174,6 +174,28 @@ export function parseWorkspaceTab(currentSearch: string): WorkspaceTab | null {
 }
 
 /**
+ * 工作台 Tab 的路径（2026-10-28 起 URL 契约从 `?ws=` 迁到路径段）。
+ *
+ * `/chat` 表示默认 Tab（chat），其余为 `/chat/<tab>`。
+ * 保留 `?ws=` 的解析仅为兼容旧链接，新代码一律用本函数。
+ */
+export function workspaceTabPath(tab: WorkspaceTab): string {
+  return tab === DEFAULT_WORKSPACE_TAB ? "/chat" : `/chat/${tab}`;
+}
+
+/**
+ * 从 `/chat/:tab` 路径段解析 Tab。
+ *
+ * `/chat` 返回 null —— 语义是「没有显式 Tab 意图」，必须让 `WorkspaceHub`
+ * 回落到 store 的持久化位置（「回上次工作位置」），不能被强制成 chat。
+ */
+export function parseWorkspaceTabPath(pathname: string): WorkspaceTab | null {
+  const matched = pathname.match(/^\/chat\/([^/]+)\/?$/);
+  if (!matched) { return null; }
+  return isWorkspaceTab(matched[1]) ? matched[1] : null;
+}
+
+/**
  * 剔除指定查询参数，**保留其余**（尤其 `ws`）。
  *
  * ⚠ 各页「消费完自己的 URL 参数后回写」**必须**走本函数，禁止直接

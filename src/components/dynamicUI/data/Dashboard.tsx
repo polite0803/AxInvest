@@ -48,9 +48,9 @@ export const Dashboard: React.FC<DynamicUIProps> = ({ schema, dataContext }) => 
             suffix={item.unit}
             styles={item.color ? { content: { color: item.color } } : undefined}
             prefix={item.trend === "up"
-              ? <ArrowUpOutlined style={{ color: "#52c41a" }} />
+              ? <ArrowUpOutlined style={{ color: "var(--green)" }} />
               : item.trend === "down"
-              ? <ArrowDownOutlined style={{ color: "#ff4d4f" }} />
+              ? <ArrowDownOutlined style={{ color: "var(--red)" }} />
               : undefined}
           />
         </Card>

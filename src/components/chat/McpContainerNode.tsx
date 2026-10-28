@@ -266,7 +266,7 @@ function McpToolCard({ node }: { node: VmrContainerNode }) {
                       <div
                         style={{
                           fontSize: 12,
-                          color: "var(--ant-color-text-secondary)",
+                          color: "var(--fg-2)",
                           marginBottom: 4,
                         }}
                       >
@@ -282,7 +282,7 @@ function McpToolCard({ node }: { node: VmrContainerNode }) {
                       <div
                         style={{
                           fontSize: 12,
-                          color: "var(--ant-color-text-secondary)",
+                          color: "var(--fg-2)",
                           marginBottom: 4,
                         }}
                       >

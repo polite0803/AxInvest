@@ -10,6 +10,9 @@
  * 接收数据来自 BacktestRunResponse 或 BacktestPage 的回测结果
  */
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { cssVar } from "@/lib/cssVar";
+import { ensureECharts } from "@/lib/echartsInstance";
 import * as echarts from "echarts";
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -61,21 +64,20 @@ export interface BacktestChartProps {
 function useBacktestECharts(
   optionBuilder: () => echarts.EChartsOption,
   deps: unknown[],
+  isDark: boolean,
 ): React.RefObject<HTMLDivElement | null> {
   const ref = useRef<HTMLDivElement>(null);
   const instance = useRef<echarts.ECharts | null>(null);
 
   useEffect(() => {
     if (!ref.current) { return; }
-    if (!instance.current) {
-      instance.current = echarts.init(ref.current, "dark");
-    }
-    instance.current.setOption(optionBuilder());
+    instance.current = ensureECharts(ref.current, isDark);
+    instance.current.setOption(optionBuilder(), true);
     const handleResize = () => instance.current?.resize();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [...deps, isDark]);
 
   useEffect(() => {
     return () => {
@@ -99,6 +101,7 @@ export function BacktestChart({
   width = "100%",
 }: BacktestChartProps) {
   const { t } = useTranslation();
+  const isDark = useIsDarkTheme();
 
   // 回撤数据（独立图表）
   const drawdownData = useMemo(() => {
@@ -135,7 +138,7 @@ export function BacktestChart({
           data: equityCurve.map((d) => d.equity),
           smooth: true,
           showSymbol: false,
-          lineStyle: { color: "#22c55e", width: 2 },
+          lineStyle: { color: cssVar("--green"), width: 2 },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
               { offset: 0, color: "rgba(34, 197, 94, 0.25)" },
@@ -149,7 +152,7 @@ export function BacktestChart({
           data: equityCurve.map((d) => d.cash),
           smooth: true,
           showSymbol: false,
-          lineStyle: { color: "#6B7280", width: 1, type: "dashed" },
+          lineStyle: { color: cssVar("--muted"), width: 1, type: "dashed" },
         },
         {
           name: "positionValue",
@@ -157,7 +160,7 @@ export function BacktestChart({
           data: equityCurve.map((d) => d.positionValue),
           smooth: true,
           showSymbol: false,
-          lineStyle: { color: "#F59E0B", width: 1, type: "dashed" },
+          lineStyle: { color: cssVar("--amber"), width: 1, type: "dashed" },
         },
       ];
 
@@ -168,7 +171,7 @@ export function BacktestChart({
           data: benchmarkLine!.map((d) => d.value),
           smooth: true,
           showSymbol: false,
-          lineStyle: { color: "#3B82F6", width: 1 },
+          lineStyle: { color: cssVar("--accent"), width: 1 },
         });
       }
 
@@ -190,7 +193,7 @@ export function BacktestChart({
           data: buyTrades,
           symbol: "triangle",
           symbolSize: 10,
-          itemStyle: { color: "#ef4444" },
+          itemStyle: { color: cssVar("--red") },
           tooltip: { show: true, formatter: () => t("stockAnalysis.backtest.chart.buy") },
         });
       }
@@ -202,7 +205,7 @@ export function BacktestChart({
           symbol: "triangle",
           symbolRotate: 180,
           symbolSize: 10,
-          itemStyle: { color: "#22c55e" },
+          itemStyle: { color: cssVar("--green") },
           tooltip: { show: true, formatter: () => t("stockAnalysis.backtest.chart.sell") },
         });
       }
@@ -217,9 +220,9 @@ export function BacktestChart({
       return {
         tooltip: {
           trigger: "axis",
-          backgroundColor: "#1F2937",
-          borderColor: "#374151",
-          textStyle: { color: "#F3F4F6", fontSize: 12 },
+          backgroundColor: cssVar("--surface-2"),
+          borderColor: cssVar("--border"),
+          textStyle: { color: cssVar("--fg"), fontSize: 12 },
           formatter: (params: unknown) => {
             const ps = params as { seriesName: string; value: number; axisValue: string }[];
             let result = ps[0]?.axisValue ?? "";
@@ -232,33 +235,34 @@ export function BacktestChart({
           },
         },
         legend: {
-          textStyle: { color: "#D1D5DB", fontSize: 12 },
+          textStyle: { color: cssVar("--fg-2"), fontSize: 12 },
           data: ["equity", "cash", "positionValue", ...(hasBenchmark ? ["benchmark"] : [])],
         },
         grid: { top: 36, right: 16, bottom: 24, left: 72 },
         xAxis: {
           type: "category",
           data: dates,
-          axisLine: { lineStyle: { color: "#4B5563" } },
-          axisLabel: { color: "#9CA3AF", fontSize: 10 },
+          axisLine: { lineStyle: { color: cssVar("--border") } },
+          axisLabel: { color: cssVar("--muted"), fontSize: 10 },
           axisTick: { show: false },
           boundaryGap: false,
         },
         yAxis: {
           type: "value",
-          axisLine: { lineStyle: { color: "#4B5563" } },
+          axisLine: { lineStyle: { color: cssVar("--border") } },
           axisLabel: {
-            color: "#9CA3AF",
+            color: cssVar("--muted"),
             fontSize: 10,
             formatter: (v: number) => fmtMoney(v),
           },
-          splitLine: { lineStyle: { color: "#374151", type: "dashed" } },
+          splitLine: { lineStyle: { color: cssVar("--border"), type: "dashed" } },
           axisTick: { show: false },
         },
         series,
       };
     },
     [equityCurve, benchmarkLine, trades, t],
+    isDark,
   );
 
   // 回撤曲线 echarts option
@@ -266,9 +270,9 @@ export function BacktestChart({
     () => ({
       tooltip: {
         trigger: "axis",
-        backgroundColor: "#1F2937",
-        borderColor: "#374151",
-        textStyle: { color: "#F3F4F6", fontSize: 12 },
+        backgroundColor: cssVar("--surface-2"),
+        borderColor: cssVar("--border"),
+        textStyle: { color: cssVar("--fg"), fontSize: 12 },
         formatter: (params: unknown) => {
           const ps = params as { value: number }[];
           return `${ps[0]?.value.toFixed(2)}%`;
@@ -278,8 +282,8 @@ export function BacktestChart({
       xAxis: {
         type: "category",
         data: drawdownData.map((d) => d.date),
-        axisLine: { lineStyle: { color: "#4B5563" } },
-        axisLabel: { color: "#9CA3AF", fontSize: 10 },
+        axisLine: { lineStyle: { color: cssVar("--border") } },
+        axisLabel: { color: cssVar("--muted"), fontSize: 10 },
         axisTick: { show: false },
         boundaryGap: false,
       },
@@ -287,13 +291,13 @@ export function BacktestChart({
         type: "value",
         min: -100,
         max: 5,
-        axisLine: { lineStyle: { color: "#4B5563" } },
+        axisLine: { lineStyle: { color: cssVar("--border") } },
         axisLabel: {
-          color: "#9CA3AF",
+          color: cssVar("--muted"),
           fontSize: 10,
           formatter: (v: number) => `${v.toFixed(1)}%`,
         },
-        splitLine: { lineStyle: { color: "#374151", type: "dashed" } },
+        splitLine: { lineStyle: { color: cssVar("--border"), type: "dashed" } },
         axisTick: { show: false },
       },
       series: [
@@ -302,7 +306,7 @@ export function BacktestChart({
           data: drawdownData.map((d) => d.drawdown),
           smooth: true,
           showSymbol: false,
-          lineStyle: { color: "#EF4444", width: 1 },
+          lineStyle: { color: cssVar("--red"), width: 1 },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
               { offset: 0, color: "rgba(239, 68, 68, 0.25)" },
@@ -313,6 +317,7 @@ export function BacktestChart({
       ],
     }),
     [drawdownData],
+    isDark,
   );
 
   return (
@@ -323,22 +328,22 @@ export function BacktestChart({
           <MetricItem
             label={t("stockAnalysis.backtest.metrics.totalReturn")}
             value={`${(metrics.totalReturn * 100).toFixed(2)}%`}
-            color={metrics.totalReturn >= 0 ? "#22c55e" : "#ef4444"}
+            color={metrics.totalReturn >= 0 ? cssVar("--green") : cssVar("--red")}
           />
           <MetricItem
             label={t("stockAnalysis.backtest.metrics.sharpe")}
             value={metrics.sharpe.toFixed(3)}
-            color={metrics.sharpe >= 1 ? "#22c55e" : metrics.sharpe >= 0 ? "#eab308" : "#ef4444"}
+            color={metrics.sharpe >= 1 ? cssVar("--green") : metrics.sharpe >= 0 ? cssVar("--amber") : cssVar("--red")}
           />
           <MetricItem
             label={t("stockAnalysis.backtest.metrics.maxDrawdown")}
             value={`${(metrics.maxDrawdown * 100).toFixed(2)}%`}
-            color="#ef4444"
+            color={cssVar("--red")}
           />
           <MetricItem
             label={t("stockAnalysis.backtest.metrics.winRate")}
             value={`${(metrics.winRate * 100).toFixed(1)}%`}
-            color={metrics.winRate >= 0.5 ? "#22c55e" : "#eab308"}
+            color={metrics.winRate >= 0.5 ? cssVar("--green") : cssVar("--amber")}
           />
         </div>
       )}

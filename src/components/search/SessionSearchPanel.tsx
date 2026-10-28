@@ -124,8 +124,8 @@ export function SessionSearchPanel({
         <mark
           key={`hl-${start}-${end}`}
           style={{
-            backgroundColor: "var(--accent-primary, #89b4fa)",
-            color: "var(--background, #1e1e2e)",
+            backgroundColor: "var(--accent)",
+            color: "var(--bg)",
             padding: "0 2px",
             borderRadius: 2,
           }}

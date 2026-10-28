@@ -278,7 +278,7 @@ function HoldingsTab() {
       render: (_: string, r: Holding) => (
         <a onClick={() => jumpToStock({ code: r.stockCode, name: r.stockName })}>
           <span className="font-medium">{r.stockName}</span>
-          <span className="text-xs ml-1" style={{ color: "var(--color-text-tertiary)" }}>
+          <span className="text-xs ml-1" style={{ color: "var(--muted)" }}>
             {r.stockCode}
           </span>
         </a>
@@ -388,7 +388,7 @@ function HoldingsTab() {
                   ? <TrendingUp size={16} className="text-red-500" />
                   : <TrendingDown size={16} className="text-green-500" />}
                 suffix={`(${totalPnlPct >= 0 ? "+" : ""}${totalPnlPct.toFixed(2)}%)`}
-                styles={{ content: { color: totalPnl >= 0 ? "var(--color-up)" : "var(--color-down)", fontSize: 18 } }}
+                styles={{ content: { color: totalPnl >= 0 ? "var(--red)" : "var(--green)", fontSize: 18 } }}
               />
             </Card>
           </Col>

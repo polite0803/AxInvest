@@ -116,7 +116,7 @@ export function PeersPanel() {
       width: 70,
       render: (v: number | undefined) => {
         if (v == null) { return <span>-</span>; }
-        const color = v >= 0 ? "var(--sa-red)" : "var(--sa-green)";
+        const color = v >= 0 ? "var(--red)" : "var(--green)";
         return <span style={{ color, fontWeight: "bold" }}>{v >= 0 ? "+" : ""}{v.toFixed(2)}%</span>;
       },
     },

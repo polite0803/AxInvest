@@ -182,7 +182,7 @@ function SpanTreeMini({ node, depth, spanTypeColors }: SpanTreeMiniProps) {
           {node.name}
         </Text>
         <Tag style={{ fontSize: 9, lineHeight: "14px", padding: "0 4px" }}>{node.spanType}</Tag>
-        {node.errors.length > 0 && <CloseCircleOutlined style={{ color: "#ff4d4f", fontSize: 10 }} />}
+        {node.errors.length > 0 && <CloseCircleOutlined style={{ color: "var(--red)", fontSize: 10 }} />}
         <Text type="secondary" style={{ fontSize: 10 }}>{formatTraceDuration(node.durationMs)}</Text>
       </div>
       {expanded
@@ -935,12 +935,12 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
         <Space size={4}>
           {r.isOrphan && (
             <Tooltip title={t("workflow.debug.orphan")}>
-              <WarningOutlined style={{ color: "#faad14" }} />
+              <WarningOutlined style={{ color: "var(--amber)" }} />
             </Tooltip>
           )}
           {r.isDeadEnd && (
             <Tooltip title={t("workflow.debug.deadEnd")}>
-              <StopOutlined style={{ color: "#ff4d4f" }} />
+              <StopOutlined style={{ color: "var(--red)" }} />
             </Tooltip>
           )}
           <Text>{name}</Text>
@@ -1637,7 +1637,11 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
                               <Text type="secondary" style={{ fontSize: 9 }}>
                                 {tr.spanCount} spans
                               </Text>
-                              {tr.errorCount > 0 && <CloseCircleOutlined style={{ color: "#ff4d4f", fontSize: 9 }} />}
+                              {tr.errorCount > 0 && (
+                                <CloseCircleOutlined
+                                  style={{ color: "var(--red)", fontSize: 9 }}
+                                />
+                              )}
                             </Space>
                           </Tag>
                         ))}

@@ -59,7 +59,7 @@ export function ReplayWorkbench() {
     <div className="flex h-full flex-col">
       <PageHeader
         titleKey="replayWorkbench.title"
-        backTo="/stock-analysis"
+        backTo="/invest"
         backLabelKey="nav.chat"
         showTimeAnchor
       />
@@ -124,7 +124,7 @@ export function ReplayWorkbench() {
               <Space wrap>
                 <Button
                   type="primary"
-                  onClick={() => navigate("/stock-analysis")}
+                  onClick={() => navigate("/invest")}
                   data-testid="goto-stock-analysis"
                 >
                   {t("replayWorkbench.step2.analyze")}
@@ -170,7 +170,7 @@ export function ReplayWorkbench() {
         <ReplaySweep />
 
         {isLocked && (
-          <Card size="small" style={{ borderColor: "var(--sa-red, #ef4444)" }}>
+          <Card size="small" style={{ borderColor: "var(--red)" }}>
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
               description={t("replayWorkbench.exitHint")}

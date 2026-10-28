@@ -100,6 +100,7 @@ pub async fn build_llm_components_from_db_with(
     let adapter: Arc<dyn ProviderAdapter> = provider_registry.get(registry_key)?;
 
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key,
         key_id: key.id.clone(),
         provider_id: prov.id.clone(),

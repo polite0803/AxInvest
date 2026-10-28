@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { type CategoricalHue, hueVar } from "@/theme/categoricalColors";
+
 /**
  * Semantic color mapping for lucide-react icons.
  * Each key matches a lucide icon name; the value is the color applied via the `color` prop.
@@ -7,208 +9,208 @@
  */
 
 // ── Navigation / Sidebar icons ──────────────────────────────────────
-export const NAV_ICON_COLORS: Record<string, string> = {
-  MessageSquare: "#3b82f6", // blue-500  — Chat
-  Sparkles: "#f59e0b", // amber-500 — Skills
-  BookOpen: "#10b981", // emerald-500 — Knowledge
-  Library: "#14b8a6", // teal-500 — Wiki
-  Brain: "#8b5cf6", // violet-500 — Memory
-  Link2: "#06b6d4", // cyan-500 — Link
-  Router: "#f97316", // orange-500 — Gateway
-  FolderOpen: "#64748b", // slate-500 — Files
+export const NAV_ICON_COLORS: Record<string, CategoricalHue> = {
+  MessageSquare: "blue", // blue-500  — Chat
+  Sparkles: "orange", // amber-500 — Skills
+  BookOpen: "emerald", // emerald-500 — Knowledge
+  Library: "teal", // teal-500 — Wiki
+  Brain: "violet", // violet-500 — Memory
+  Link2: "cyan", // cyan-500 — Link
+  Router: "volcano", // orange-500 — Gateway
+  FolderOpen: "gray", // slate-500 — Files
 };
 
 // ── Settings sidebar icons ──────────────────────────────────────────
-export const SETTINGS_ICON_COLORS: Record<string, string> = {
-  Cloud: "#3b82f6", // blue-500  — Providers
-  MessageSquare: "#3b82f6", // blue-500  — Conversation
-  Bot: "#22c55e", // green-500 — Default Model
-  Settings: "#64748b", // slate-500 — General
-  Palette: "#ec4899", // pink-500  — Display
-  Globe: "#06b6d4", // cyan-500  — Proxy
-  Zap: "#eab308", // yellow-500 — Shortcuts
-  Database: "#8b5cf6", // violet-500 — Data
-  HardDrive: "#64748b", // slate-500 — Storage
-  Info: "#6366f1", // indigo-500 — About
-  Search: "#0ea5e9", // sky-500   — Search Providers
-  Wrench: "#f97316", // orange-500 — Local Tools
-  Plug: "#a855f7", // purple-500 — MCP Servers
-  Clock: "#14b8a6", // teal-500  — Scheduler
-  CloudUpload: "#3b82f6", // blue-500  — Backup
-  Workflow: "#8b5cf6", // violet-500 — Workflow
-  Send: "#3b82f6", // blue-500  — Message Channels
-  FileText: "#3b82f6", // blue-500  — Prompt Templates
-  Network: "#06b6d4", // cyan-500  — ACP
-  Puzzle: "#a855f7", // purple-500 — Plugins
-  ShoppingBag: "#f59e0b", // amber-500 — Skills Hub
-  LayoutDashboard: "#8b5cf6", // violet-500 — Dashboard Plugins
-  BookOpen: "#10b981", // emerald-500 — Knowledge Settings
+export const SETTINGS_ICON_COLORS: Record<string, CategoricalHue> = {
+  Cloud: "blue", // blue-500  — Providers
+  MessageSquare: "blue", // blue-500  — Conversation
+  Bot: "green", // green-500 — Default Model
+  Settings: "gray", // slate-500 — General
+  Palette: "pink", // pink-500  — Display
+  Globe: "cyan", // cyan-500  — Proxy
+  Zap: "yellow", // yellow-500 — Shortcuts
+  Database: "violet", // violet-500 — Data
+  HardDrive: "gray", // slate-500 — Storage
+  Info: "geekblue", // indigo-500 — About
+  Search: "sky", // sky-500   — Search Providers
+  Wrench: "volcano", // orange-500 — Local Tools
+  Plug: "purple", // purple-500 — MCP Servers
+  Clock: "teal", // teal-500  — Scheduler
+  CloudUpload: "blue", // blue-500  — Backup
+  Workflow: "violet", // violet-500 — Workflow
+  Send: "blue", // blue-500  — Message Channels
+  FileText: "blue", // blue-500  — Prompt Templates
+  Network: "cyan", // cyan-500  — ACP
+  Puzzle: "purple", // purple-500 — Plugins
+  ShoppingBag: "orange", // amber-500 — Skills Hub
+  LayoutDashboard: "violet", // violet-500 — Dashboard Plugins
+  BookOpen: "emerald", // emerald-500 — Knowledge Settings
 };
 
 // ── Title bar icons ─────────────────────────────────────────────────
-export const TITLEBAR_ICON_COLORS: Record<string, string> = {
-  Pin: "#3b82f6",
-  PinOff: "#64748b",
-  Monitor: "#64748b",
-  Sun: "#f59e0b",
-  Moon: "#6366f1",
-  Globe: "#06b6d4",
-  CloudUpload: "#3b82f6",
-  GitFork: "#64748b",
-  ArrowDownCircle: "#22c55e",
-  RotateCcw: "#64748b",
-  Settings: "#64748b",
-  XCircle: "#ef4444",
-  MessageSquarePlus: "#22c55e",
-  Bug: "#ef4444",
-  Star: "#eab308",
+export const TITLEBAR_ICON_COLORS: Record<string, CategoricalHue> = {
+  Pin: "blue",
+  PinOff: "gray",
+  Monitor: "gray",
+  Sun: "orange",
+  Moon: "geekblue",
+  Globe: "cyan",
+  CloudUpload: "blue",
+  GitFork: "gray",
+  ArrowDownCircle: "green",
+  RotateCcw: "gray",
+  Settings: "gray",
+  XCircle: "red",
+  MessageSquarePlus: "green",
+  Bug: "red",
+  Star: "yellow",
 };
 
 // ── Chat / common action icons ──────────────────────────────────────
-export const CHAT_ICON_COLORS: Record<string, string> = {
-  Pencil: "#3b82f6",
-  Share2: "#06b6d4",
-  Copy: "#64748b",
-  Check: "#22c55e",
-  Trash2: "#ef4444",
-  RefreshCw: "#3b82f6",
-  Search: "#0ea5e9",
-  Bot: "#22c55e",
-  Brain: "#8b5cf6",
-  Lightbulb: "#f59e0b",
-  Code: "#6366f1",
-  Terminal: "#22c55e",
-  Wrench: "#f97316",
-  BookOpen: "#10b981",
-  Globe: "#06b6d4",
-  Database: "#8b5cf6",
-  Shield: "#22c55e",
-  Key: "#eab308",
-  Zap: "#eab308",
-  Plug: "#a855f7",
-  Mic: "#ef4444",
-  Paperclip: "#64748b",
-  Download: "#3b82f6",
-  Upload: "#3b82f6",
-  Eye: "#6366f1",
-  GitBranch: "#f97316",
-  Activity: "#22c55e",
-  Clock: "#14b8a6",
-  Sparkles: "#f59e0b",
-  User: "#3b82f6",
-  X: "#ef4444",
-  ChevronDown: "#64748b",
-  ChevronRight: "#64748b",
-  ChevronLeft: "#64748b",
-  AlertCircle: "#f59e0b",
-  AlertTriangle: "#f59e0b",
-  Info: "#6366f1",
-  CheckCircle2: "#22c55e",
-  XCircle: "#ef4444",
-  Loader2: "#3b82f6",
-  ExternalLink: "#06b6d4",
-  FolderOpen: "#64748b",
-  FileText: "#64748b",
-  Plus: "#22c55e",
-  Undo2: "#64748b",
-  Layers: "#8b5cf6",
-  Route: "#f97316",
-  MessageSquare: "#3b82f6",
-  HardDrive: "#64748b",
-  Cloud: "#3b82f6",
-  Maximize2: "#64748b",
-  Minimize2: "#64748b",
-  Expand: "#64748b",
-  Shrink: "#64748b",
-  Heart: "#ef4444",
-  Power: "#ef4444",
-  PowerOff: "#64748b",
-  SquarePen: "#3b82f6",
-  ListChecks: "#22c55e",
-  CircleHelp: "#64748b",
-  GripVertical: "#64748b",
-  MoreHorizontal: "#64748b",
-  GripHorizontal: "#64748b",
-  Scissors: "#f97316",
-  Eraser: "#ef4444",
-  SlidersHorizontal: "#64748b",
-  ArrowUp: "#22c55e",
-  ArrowDown: "#64748b",
-  ArrowLeftRight: "#64748b",
-  Columns2: "#64748b",
-  LayoutList: "#64748b",
-  Rows3: "#64748b",
-  PlayCircle: "#22c55e",
-  Pause: "#f59e0b",
-  Play: "#22c55e",
-  SkipForward: "#3b82f6",
-  Archive: "#64748b",
-  PinOff: "#64748b",
-  Loader: "#3b82f6",
-  Share: "#06b6d4",
-  ArrowLeft: "#64748b",
-  FileImage: "#8b5cf6",
-  FileCode: "#6366f1",
-  FileType: "#64748b",
-  FolderPlus: "#22c55e",
-  MessageSquareText: "#3b82f6",
-  MessageCircleQuestion: "#3b82f6",
-  Send: "#3b82f6",
-  Link: "#06b6d4",
-  CheckCircle: "#22c55e",
-  ZoomIn: "#64748b",
-  ZoomOut: "#64748b",
-  Palette: "#ec4899",
-  Image: "#8b5cf6",
-  FolderEdit: "#f97316",
-  RotateCcw: "#64748b",
-  Radio: "#ef4444",
-  CloudUpload: "#3b82f6",
-  BarChart3: "#3b82f6",
-  Gauge: "#f97316",
-  ScrollText: "#64748b",
-  GitCompareArrows: "#64748b",
-  ShieldCheck: "#22c55e",
-  ShieldAlert: "#f59e0b",
-  ShieldX: "#ef4444",
-  ZapOff: "#64748b",
-  Coins: "#eab308",
-  Timer: "#14b8a6",
-  ChartNoAxesColumn: "#3b82f6",
-  ArrowUpRight: "#22c55e",
-  ArrowDownRight: "#64748b",
-  Bell: "#f59e0b",
-  Atom: "#8b5cf6",
-  Square: "#64748b",
-  Minus: "#64748b",
-  TextCursorInput: "#64748b",
-  Bug: "#ef4444",
-  ClipboardPaste: "#64748b",
-  BoxSelect: "#64748b",
-  Puzzle: "#a855f7", // purple-500
-  Code2: "#6366f1",
-  PanelLeftClose: "#64748b",
-  Network: "#06b6d4",
-  FileSearch: "#0ea5e9",
-  FileEdit: "#f97316",
-  Save: "#22c55e",
-  Smile: "#f59e0b",
-  Grid2x2: "#64748b",
-  Trash: "#ef4444",
-  Web: "#06b6d4",
-  Phone: "#22c55e",
-  Volume2: "#3b82f6",
-  MicOff: "#64748b",
-  CircleOff: "#64748b",
-  SignalLow: "#ef4444",
-  SignalMedium: "#f59e0b",
-  SignalHigh: "#22c55e",
-  Signal: "#64748b",
-  Film: "#8b5cf6",
-  Music: "#ec4899",
-  File: "#64748b",
-  ChevronsDownUp: "#64748b",
-  ChevronsUpDown: "#64748b",
+export const CHAT_ICON_COLORS: Record<string, CategoricalHue> = {
+  Pencil: "blue",
+  Share2: "cyan",
+  Copy: "gray",
+  Check: "green",
+  Trash2: "red",
+  RefreshCw: "blue",
+  Search: "sky",
+  Bot: "green",
+  Brain: "violet",
+  Lightbulb: "orange",
+  Code: "geekblue",
+  Terminal: "green",
+  Wrench: "volcano",
+  BookOpen: "emerald",
+  Globe: "cyan",
+  Database: "violet",
+  Shield: "green",
+  Key: "yellow",
+  Zap: "yellow",
+  Plug: "purple",
+  Mic: "red",
+  Paperclip: "gray",
+  Download: "blue",
+  Upload: "blue",
+  Eye: "geekblue",
+  GitBranch: "volcano",
+  Activity: "green",
+  Clock: "teal",
+  Sparkles: "orange",
+  User: "blue",
+  X: "red",
+  ChevronDown: "gray",
+  ChevronRight: "gray",
+  ChevronLeft: "gray",
+  AlertCircle: "orange",
+  AlertTriangle: "orange",
+  Info: "geekblue",
+  CheckCircle2: "green",
+  XCircle: "red",
+  Loader2: "blue",
+  ExternalLink: "cyan",
+  FolderOpen: "gray",
+  FileText: "gray",
+  Plus: "green",
+  Undo2: "gray",
+  Layers: "violet",
+  Route: "volcano",
+  MessageSquare: "blue",
+  HardDrive: "gray",
+  Cloud: "blue",
+  Maximize2: "gray",
+  Minimize2: "gray",
+  Expand: "gray",
+  Shrink: "gray",
+  Heart: "red",
+  Power: "red",
+  PowerOff: "gray",
+  SquarePen: "blue",
+  ListChecks: "green",
+  CircleHelp: "gray",
+  GripVertical: "gray",
+  MoreHorizontal: "gray",
+  GripHorizontal: "gray",
+  Scissors: "volcano",
+  Eraser: "red",
+  SlidersHorizontal: "gray",
+  ArrowUp: "green",
+  ArrowDown: "gray",
+  ArrowLeftRight: "gray",
+  Columns2: "gray",
+  LayoutList: "gray",
+  Rows3: "gray",
+  PlayCircle: "green",
+  Pause: "orange",
+  Play: "green",
+  SkipForward: "blue",
+  Archive: "gray",
+  PinOff: "gray",
+  Loader: "blue",
+  Share: "cyan",
+  ArrowLeft: "gray",
+  FileImage: "violet",
+  FileCode: "geekblue",
+  FileType: "gray",
+  FolderPlus: "green",
+  MessageSquareText: "blue",
+  MessageCircleQuestion: "blue",
+  Send: "blue",
+  Link: "cyan",
+  CheckCircle: "green",
+  ZoomIn: "gray",
+  ZoomOut: "gray",
+  Palette: "pink",
+  Image: "violet",
+  FolderEdit: "volcano",
+  RotateCcw: "gray",
+  Radio: "red",
+  CloudUpload: "blue",
+  BarChart3: "blue",
+  Gauge: "volcano",
+  ScrollText: "gray",
+  GitCompareArrows: "gray",
+  ShieldCheck: "green",
+  ShieldAlert: "orange",
+  ShieldX: "red",
+  ZapOff: "gray",
+  Coins: "yellow",
+  Timer: "teal",
+  ChartNoAxesColumn: "blue",
+  ArrowUpRight: "green",
+  ArrowDownRight: "gray",
+  Bell: "orange",
+  Atom: "violet",
+  Square: "gray",
+  Minus: "gray",
+  TextCursorInput: "gray",
+  Bug: "red",
+  ClipboardPaste: "gray",
+  BoxSelect: "gray",
+  Puzzle: "purple", // purple-500
+  Code2: "geekblue",
+  PanelLeftClose: "gray",
+  Network: "cyan",
+  FileSearch: "sky",
+  FileEdit: "volcano",
+  Save: "green",
+  Smile: "orange",
+  Grid2x2: "gray",
+  Trash: "red",
+  Web: "cyan",
+  Phone: "green",
+  Volume2: "blue",
+  MicOff: "gray",
+  CircleOff: "gray",
+  SignalLow: "red",
+  SignalMedium: "orange",
+  SignalHigh: "green",
+  Signal: "gray",
+  Film: "violet",
+  Music: "pink",
+  File: "gray",
+  ChevronsDownUp: "gray",
+  ChevronsUpDown: "gray",
 };
 
 /**
@@ -219,7 +221,15 @@ export function getIconColor(
   iconName: string,
   context?: "nav" | "settings" | "titlebar",
 ): string | undefined {
-  // Try context-specific mapping first
+  const hue = getIconHue(iconName, context);
+  return hue ? hueVar(hue) : undefined;
+}
+
+/** 取图标对应的类目色相（未登记时返回 undefined，由调用方继承文字色）。 */
+export function getIconHue(
+  iconName: string,
+  context?: "nav" | "settings" | "titlebar",
+): CategoricalHue | undefined {
   if (context === "nav") {
     return NAV_ICON_COLORS[iconName];
   }
@@ -229,6 +239,5 @@ export function getIconColor(
   if (context === "titlebar") {
     return TITLEBAR_ICON_COLORS[iconName];
   }
-  // Fall back to the general chat/common mapping
   return CHAT_ICON_COLORS[iconName];
 }

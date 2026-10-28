@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { CategoricalHue } from "@/theme/categoricalColors";
+
 export interface Position {
   x: number;
   y: number;
@@ -941,19 +943,17 @@ export interface DiagnosticReport {
 }
 
 export const NODE_CATEGORIES = [
-  { id: "trigger", labelKey: "workflow.categories.trigger", color: "#722ed1" },
+  { id: "trigger", labelKey: "workflow.categories.trigger" },
   {
     id: "execution",
     labelKey: "workflow.categories.execution",
-    color: "#52c41a",
   },
-  { id: "agent", labelKey: "workflow.categories.agent", color: "#1890ff" },
-  { id: "llm", labelKey: "workflow.categories.llm", color: "#13c2c2" },
-  { id: "flow", labelKey: "workflow.categories.flow", color: "#fa8c16" },
+  { id: "agent", labelKey: "workflow.categories.agent" },
+  { id: "llm", labelKey: "workflow.categories.llm" },
+  { id: "flow", labelKey: "workflow.categories.flow" },
   {
     id: "integration",
     labelKey: "workflow.categories.integration",
-    color: "#eb2f96",
   },
 ] as const;
 
@@ -989,6 +989,18 @@ export const NODE_KIND_LABEL_KEYS: Record<NodeKind, string> = {
   loop: "workflow.nodeKind.loop",
   container: "workflow.nodeKind.container",
   storage: "workflow.nodeKind.storage",
+};
+
+/** 节点语义分类 → 类目色相（颜色规范见 `NODE_KIND_MAP` 顶部注释）。 */
+export const NODE_KIND_HUE: Record<NodeKind, CategoricalHue> = {
+  input: "yellow",
+  output: "red",
+  tool: "green",
+  agent: "blue",
+  condition: "orange",
+  loop: "purple",
+  container: "cyan",
+  storage: "pink",
 };
 
 /** 兼容性别名：旧的 `NODE_KIND_LABELS` 已被替换为 i18n 键映射，请使用 `NODE_KIND_LABEL_KEYS`。 */
@@ -1048,227 +1060,227 @@ export const NODE_KIND_MAP: Record<string, NodeKind> = {
 
 export const NODE_TYPE_MAP: Record<
   string,
-  { labelKey: string; category: string; color: string; isContainer?: boolean; kind?: NodeKind }
+  { labelKey: string; category: string; hue: CategoricalHue; isContainer?: boolean; kind?: NodeKind }
 > = {
-  // ── Input 黄 (#fadb14) ─────────────────────────────────
+  // ── Input 黄 (yellow) ─────────────────────────────────
   trigger: {
     labelKey: "workflow.nodeTypes.trigger",
     category: "trigger",
-    color: "#fadb14",
+    hue: "yellow",
     kind: "input",
   },
-  // ── Agent 蓝 (#1677ff) ─────────────────────────────────
+  // ── Agent 蓝 (blue) ─────────────────────────────────
   agent: {
     labelKey: "workflow.nodeTypes.agent",
     category: "agent",
-    color: "#1677ff",
+    hue: "blue",
     kind: "agent",
   },
   llm: {
     labelKey: "workflow.nodeTypes.llm",
     category: "llm",
-    color: "#1677ff",
+    hue: "blue",
     kind: "agent",
   },
   llmClassifier: {
     labelKey: "workflow.nodeTypes.llmClassifier",
     category: "llm",
-    color: "#1677ff",
+    hue: "blue",
     kind: "agent",
   },
   multiAgent: {
     labelKey: "workflow.nodeTypes.multiAgent",
     category: "agent",
-    color: "#1677ff",
+    hue: "blue",
     kind: "agent",
   },
-  // ── Condition 橙 (#fa8c16) ─────────────────────────────
+  // ── Condition 橙 (orange) ─────────────────────────────
   condition: {
     labelKey: "workflow.nodeTypes.condition",
     category: "flow",
-    color: "#fa8c16",
+    hue: "orange",
     kind: "condition",
   },
   switch: {
     labelKey: "workflow.nodeTypes.switch",
     category: "flow",
-    color: "#fa8c16",
+    hue: "orange",
     kind: "condition",
   },
-  // ── Loop 紫 (#722ed1) ──────────────────────────────────
+  // ── Loop 紫 (purple) ──────────────────────────────────
   loop: {
     labelKey: "workflow.nodeTypes.loop",
     category: "flow",
-    color: "#722ed1",
+    hue: "purple",
     isContainer: true,
     kind: "loop",
   },
-  // ── Container 青 (#13c2c2) ──────────────────────────────
+  // ── Container 青 (cyan) ──────────────────────────────
   parallel: {
     labelKey: "workflow.nodeTypes.parallel",
     category: "flow",
-    color: "#13c2c2",
+    hue: "cyan",
     isContainer: true,
     kind: "container",
   },
   debate: {
     labelKey: "workflow.nodeTypes.debate",
     category: "flow",
-    color: "#13c2c2",
+    hue: "cyan",
     isContainer: true,
     kind: "container",
   },
   swarm: {
     labelKey: "workflow.nodeTypes.swarm",
     category: "flow",
-    color: "#13c2c2",
+    hue: "cyan",
     isContainer: true,
     kind: "container",
   },
   subWorkflow: {
     labelKey: "workflow.nodeTypes.subWorkflow",
     category: "integration",
-    color: "#13c2c2",
+    hue: "cyan",
     isContainer: true,
     kind: "container",
   },
   workflowRef: {
     labelKey: "workflow.nodeTypes.workflowRef",
     category: "integration",
-    color: "#13c2c2",
+    hue: "cyan",
     isContainer: true,
     kind: "container",
   },
   aggregator: {
     labelKey: "workflow.nodeTypes.aggregator",
     category: "execution",
-    color: "#13c2c2",
+    hue: "cyan",
     isContainer: true,
     kind: "container",
   },
   merge: {
     labelKey: "workflow.nodeTypes.merge",
     category: "flow",
-    color: "#13c2c2",
+    hue: "cyan",
     isContainer: true,
     kind: "container",
   },
-  // ── Tool 绿 (#52c41a) ──────────────────────────────────
+  // ── Tool 绿 (green) ──────────────────────────────────
   tool: {
     labelKey: "workflow.nodeTypes.tool",
     category: "execution",
-    color: "#52c41a",
+    hue: "green",
     kind: "tool",
   },
   code: {
     labelKey: "workflow.nodeTypes.code",
     category: "execution",
-    color: "#52c41a",
+    hue: "green",
     kind: "tool",
   },
   delay: {
     labelKey: "workflow.nodeTypes.delay",
     category: "flow",
-    color: "#52c41a",
+    hue: "green",
     kind: "tool",
   },
   validation: {
     labelKey: "workflow.nodeTypes.validation",
     category: "flow",
-    color: "#52c41a",
+    hue: "green",
     kind: "tool",
   },
   documentParser: {
     labelKey: "workflow.nodeTypes.documentParser",
     category: "integration",
-    color: "#52c41a",
+    hue: "green",
     kind: "tool",
   },
   httpRequest: {
     labelKey: "workflow.nodeTypes.httpRequest",
     category: "integration",
-    color: "#52c41a",
+    hue: "green",
     kind: "tool",
   },
   fileOperation: {
     labelKey: "workflow.nodeTypes.fileOperation",
     category: "execution",
-    color: "#52c41a",
+    hue: "green",
     kind: "tool",
   },
   dataTransformer: {
     labelKey: "workflow.nodeTypes.dataTransformer",
     category: "execution",
-    color: "#52c41a",
+    hue: "green",
     kind: "tool",
   },
   logging: {
     labelKey: "workflow.nodeTypes.logging",
     category: "flow",
-    color: "#52c41a",
+    hue: "green",
     kind: "tool",
   },
-  // ── Output 红 (#f5222d) ─────────────────────────────────
+  // ── Output 红 (red) ─────────────────────────────────
   end: {
     labelKey: "workflow.nodeTypes.end",
     category: "flow",
-    color: "#f5222d",
+    hue: "red",
     kind: "output",
   },
   notification: {
     labelKey: "workflow.nodeTypes.notification",
     category: "integration",
-    color: "#f5222d",
+    hue: "red",
     kind: "output",
   },
   approval: {
     labelKey: "workflow.nodeTypes.approval",
     category: "flow",
-    color: "#f5222d",
+    hue: "red",
     kind: "output",
   },
   email: {
     labelKey: "workflow.nodeTypes.email",
     category: "integration",
-    color: "#f5222d",
+    hue: "red",
     kind: "output",
   },
   webhookSend: {
     labelKey: "workflow.nodeTypes.webhookSend",
     category: "integration",
-    color: "#f5222d",
+    hue: "red",
     kind: "output",
   },
   // ── RAG（归在 Agent 分类，与 Agent 节点同组便于发现） ──────
   vectorRetrieve: {
     labelKey: "workflow.nodeTypes.vectorRetrieve",
     category: "agent",
-    color: "#eb2f96",
+    hue: "pink",
     kind: "storage",
   },
   storage: {
     labelKey: "workflow.nodeTypes.storage",
     category: "integration",
-    color: "#eb2f96",
+    hue: "pink",
     kind: "storage",
   },
   databaseQuery: {
     labelKey: "workflow.nodeTypes.databaseQuery",
     category: "integration",
-    color: "#eb2f96",
+    hue: "pink",
     kind: "storage",
   },
   /** 阶段分隔线（不参与执行逻辑） */
   _phaseSeparator: {
     labelKey: "workflow.nodeTypes.phaseSeparator",
     category: "flow",
-    color: "#555555",
+    hue: "gray",
     kind: "tool",
   },
   groupFrame: {
     labelKey: "workflow.nodeTypes.groupFrame",
     category: "flow",
-    color: "#555555",
+    hue: "gray",
     kind: "tool",
   },
 };

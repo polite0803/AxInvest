@@ -13,7 +13,7 @@
 
 /* 折叠按钮 hover */
 .agent-exec-panel__compact-btn:hover {
-  background-color: var(--color-fill-secondary) !important;
+  background-color: var(--surface-2) !important;
   color: var(--color-text) !important;
 }
 

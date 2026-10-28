@@ -1548,10 +1548,10 @@ export function SerenityScreeningPanel() {
                 ? "red"
                 : "blue";
               const statusIcon = s.status === "completed"
-                ? <CheckCircleOutlined style={{ color: "#52c41a" }} />
+                ? <CheckCircleOutlined style={{ color: "var(--green)" }} />
                 : isFailed
-                ? <span style={{ color: "#ff4d4f" }}>✕</span>
-                : <LoadingOutlined style={{ color: "#1677ff" }} />;
+                ? <span style={{ color: "var(--red)" }}>✕</span>
+                : <LoadingOutlined style={{ color: "var(--accent)" }} />;
               // 节点输出语义化分析（ToolNode 表格 / CodeNode 计算 / AgentNode 文本）
               const view = buildNodeOutputView(s.nodeId, s.output);
               // 失败节点的展示文案。`s.error` 是后端 `NodeError::Display` 的**自由文本**
@@ -1900,7 +1900,7 @@ export function SerenityScreeningPanel() {
             <div className="text-center flex-1 rounded p-2" style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
               <div
                 className="text-lg font-bold"
-                style={{ color: feedbackData.win_rate >= 0.5 ? "#52c41a" : "#ff4d4f" }}
+                style={{ color: feedbackData.win_rate >= 0.5 ? "var(--green)" : "var(--red)" }}
               >
                 {(feedbackData.win_rate * 100).toFixed(0)}%
               </div>
@@ -1909,7 +1909,7 @@ export function SerenityScreeningPanel() {
             <div className="text-center flex-1 rounded p-2" style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
               <div
                 className="text-lg font-bold"
-                style={{ color: feedbackData.avg_return_pct >= 0 ? "#52c41a" : "#ff4d4f" }}
+                style={{ color: feedbackData.avg_return_pct >= 0 ? "var(--green)" : "var(--red)" }}
               >
                 {feedbackData.avg_return_pct.toFixed(1)}%
               </div>
@@ -1941,7 +1941,7 @@ export function SerenityScreeningPanel() {
                       })}
                     </Tag>
                   )}
-                  <span style={{ color: p.return_pct >= 0 ? "#52c41a" : "#ff4d4f" }}>
+                  <span style={{ color: p.return_pct >= 0 ? "var(--green)" : "var(--red)" }}>
                     {p.return_pct > 0 ? "+" : ""}
                     {p.return_pct.toFixed(1)}%
                   </span>

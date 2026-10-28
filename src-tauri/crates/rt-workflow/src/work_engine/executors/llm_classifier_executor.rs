@@ -146,10 +146,10 @@ impl NodeExecutorTrait for LlmClassifierExecutor {
             });
         }
 
-        use axagent_harness::build_provider_request_context;
+        use axagent_harness::build_provider_request_context_for_model;
         use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest};
 
-        let req_ctx = build_provider_request_context(&prov, &key, api_key);
+        let req_ctx = build_provider_request_context_for_model(&prov, &key, api_key, Some(&model));
 
         let request = ChatRequest {
             model: model.clone(),
@@ -207,6 +207,10 @@ impl NodeExecutorTrait for LlmClassifierExecutor {
                         output_obj.insert("input_var".to_string(), serde_json::json!(c.input_var));
                         output_obj.insert("node_id".to_string(), serde_json::json!(node.base_id()));
                         output_obj.insert("degraded".to_string(), serde_json::json!(true));
+                        // 把真实失败原因一并带出：`record_node_execution` 会据此在
+                        // 执行记录里写 `error` 字段，使「静默兜底」在事后审计中可见。
+                        output_obj
+                            .insert("degraded_error".to_string(), serde_json::json!(e.to_string()));
                         return Ok(NodeOutput {
                             output: serde_json::Value::Object(output_obj),
                             output_var: if c.output_var.is_empty() {

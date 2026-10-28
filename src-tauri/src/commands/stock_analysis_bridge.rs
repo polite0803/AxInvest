@@ -92,7 +92,7 @@ pub fn build_stock_tool_defs() -> Vec<TauriCommandToolDef> {
         },
         TauriCommandToolDef {
             name: "stock_get_index_quotes",
-            description: "获取主要指数实时行情（上证指数、深证成指、创业板指等），返回点位、涨跌幅",
+            description: "获取主要指数实时行情（上证指数、深证成指、创业板指等），返回信封 {status, data, detail}：status=ok 时 data 为点位/涨跌幅；empty_by_time=该时点无行情；source_failed=取数通道故障；schema_changed=接口结构变更（data 恒为数组，不会用空数组冒充故障）",
             input_schema: serde_json::json!({ "type": "object", "properties": {} }),
             is_read_only: true,
         },
@@ -449,9 +449,10 @@ async fn dispatch_stock_command<R: tauri::Runtime>(
             })
         },
         "stock_get_index_quotes" => {
-            let data =
-                client.get_index_quotes().await.map_err(|e| format!("获取指数行情失败: {e}"))?;
-            serde_json::to_string_pretty(&data).map_err(|e| {
+            // 与 `execute_mcp_tool` 的 `get_index_quotes` 同一份信封（status/data/detail）：
+            // 桥接出来的 LLM 工具同样不能把「通道全挂」伪装成「今天没行情」。
+            let outcome = client.get_index_quotes_outcome().await;
+            serde_json::to_string_pretty(&outcome).map_err(|e| {
                 String::from(crate::commands::error::ErrorResponse::from_error(
                     e,
                     crate::commands::error::ErrorCategory::Unrecoverable,

@@ -7,6 +7,7 @@ import { toDbVariable } from "@/lib/workflowVariables";
 import { App, Button, Card, Input, Select, Space, Spin, Switch, Table, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { InterfaceHealthPanel } from "./InterfaceHealthPanel";
 
 // 后端 `FallbackRecord`（`crates/astock-data/src/vendor_health.rs`，带
 // `#[serde(rename_all = "camelCase")]`）的 TS 投影；`timestamp` 单位是毫秒。
@@ -771,6 +772,12 @@ export function DataVendorsTab() {
             </>
           )}
       </Card>
+
+      {
+        /* 日级接口健康：与上面两个格子是不同事实（某一天有没有取到数），
+          不得把「接口故障」显示成「今日无行情」。 */
+      }
+      <InterfaceHealthPanel />
 
       {/* 本地计算工具 */}
       <div className="pt-2">

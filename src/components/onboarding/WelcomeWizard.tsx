@@ -169,7 +169,7 @@ export function WelcomeWizard() {
                 size={16}
                 style={{
                   color: ollamaAvailable
-                    ? "#52c41a"
+                    ? "var(--green)"
                     : token.colorTextQuaternary,
                 }}
               />
@@ -226,7 +226,7 @@ export function WelcomeWizard() {
                 size={16}
                 style={{
                   color: detectedKeys.length > 0
-                    ? "#52c41a"
+                    ? "var(--green)"
                     : token.colorTextQuaternary,
                 }}
               />
@@ -385,7 +385,7 @@ export function WelcomeWizard() {
         <div className="wizard-step" style={{ textAlign: "center" }}>
           <CheckCircle2
             size={56}
-            style={{ color: "#52c41a", marginBottom: 16 }}
+            style={{ color: "var(--green)", marginBottom: 16 }}
           />
           <Title level={3}>{t("onboarding.ready")}</Title>
           <Paragraph type="secondary">

@@ -220,6 +220,7 @@ pub(crate) async fn do_compress(
     };
 
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key: comp_key,
         key_id: comp_key_id,
         provider_id: comp_provider.id.clone(),

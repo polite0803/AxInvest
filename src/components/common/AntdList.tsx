@@ -134,7 +134,7 @@ export function AntdList<T>({
 }: ListProps<T>) {
   const padding = size === "small" ? "4px 8px" : size === "large" ? "16px" : "8px 12px";
   const borderStyle: CSSProperties = bordered
-    ? { border: "1px solid var(--color-border-secondary, #f0f0f0)", borderRadius: 8 }
+    ? { border: "1px solid var(--border-light)", borderRadius: 8 }
     : {};
 
   const hasPagination = pagination !== false && pagination !== undefined;
@@ -174,7 +174,7 @@ export function AntdList<T>({
         key="header"
         style={{
           padding,
-          borderBottom: split ? "1px solid var(--color-border-secondary, #f0f0f0)" : "none",
+          borderBottom: split ? "1px solid var(--border-light)" : "none",
           fontWeight: 500,
         }}
       >
@@ -210,7 +210,7 @@ export function AntdList<T>({
           style={{
             padding,
             borderBottom: split && idx < pagedData.length - 1
-              ? "1px solid var(--color-border-secondary, #f0f0f0)"
+              ? "1px solid var(--border-light)"
               : "none",
           }}
         >
@@ -228,7 +228,7 @@ export function AntdList<T>({
     items.push(
       <div
         key="footer"
-        style={{ padding, borderTop: split ? "1px solid var(--color-border-secondary, #f0f0f0)" : "none" }}
+        style={{ padding, borderTop: split ? "1px solid var(--border-light)" : "none" }}
       >
         {footer}
       </div>,
@@ -247,7 +247,7 @@ export function AntdList<T>({
           key="pagination"
           style={{
             padding: "8px 12px",
-            borderTop: split ? "1px solid var(--color-border-secondary, #f0f0f0)" : "none",
+            borderTop: split ? "1px solid var(--border-light)" : "none",
             display: "flex",
             justifyContent: "flex-end",
           }}

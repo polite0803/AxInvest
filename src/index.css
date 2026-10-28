@@ -42,6 +42,10 @@
 
 /* ── 共享变量 (非颜色) ── */
 :root {
+  /* 原生控件（滚动条 / select 下拉 / 日期选择 / 输入框自动填充）跟随应用主题，
+     而不是系统偏好。缺这条时 WebView2 按系统偏好渲染它们：系统浅色的机器上，
+     深色界面里会冒出白色滚动条和白底下拉。data-theme 由 App.tsx 按 isDark 写入。 */
+  color-scheme: dark;
   --breakpoint-mobile: 600px;
   --font-size-base: 14px;
   --nav-w: 40px;
@@ -66,6 +70,10 @@
   --z-modal: 1000;
   --z-tooltip: 1100;
   --z-notification: 1200;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 /* ═══ 压在 --accent 上的前景色 ═══
@@ -94,7 +102,10 @@
   --accent-dim: oklch(62% 0.16 195 / 0.06);
   --green: oklch(62% 0.18 150);
   --green-bg: oklch(62% 0.18 150 / 0.12);
+  // --red-deep：风险四档的第四档（极高）。与 --red 必须肉眼可分，
+  // 否则「高」和「极高」在界面上是同一档（判据见 src/theme/__tests__/riskRampTokens.test.ts）。
   --red: oklch(60% 0.20 30);
+  --red-deep: oklch(58% 0.24 12);
   --red-bg: oklch(60% 0.20 30 / 0.12);
   --amber: oklch(68% 0.16 85);
   --amber-bg: oklch(68% 0.16 85 / 0.12);
@@ -121,6 +132,7 @@
   --green: oklch(52% 0.18 150);
   --green-bg: oklch(52% 0.18 150 / 0.12);
   --red: oklch(52% 0.20 30);
+  --red-deep: oklch(40% 0.22 12);
   --red-bg: oklch(52% 0.20 30 / 0.10);
   --amber: oklch(58% 0.16 85);
   --amber-bg: oklch(58% 0.16 85 / 0.12);
@@ -147,6 +159,7 @@
   --green: oklch(60% 0.16 150);
   --green-bg: oklch(60% 0.16 150 / 0.12);
   --red: oklch(58% 0.18 30);
+  --red-deep: oklch(56% 0.23 12);
   --red-bg: oklch(58% 0.18 30 / 0.12);
   --amber: oklch(65% 0.14 85);
   --amber-bg: oklch(65% 0.14 85 / 0.12);
@@ -173,6 +186,7 @@
   --green: oklch(62% 0.18 145);
   --green-bg: oklch(62% 0.18 145 / 0.12);
   --red: oklch(58% 0.20 30);
+  --red-deep: oklch(56% 0.24 12);
   --red-bg: oklch(58% 0.20 30 / 0.12);
   --amber: oklch(65% 0.16 85);
   --amber-bg: oklch(65% 0.16 85 / 0.12);
@@ -201,6 +215,7 @@
   --green: oklch(77.29% 0.1535 163.2231);
   --green-bg: oklch(77.29% 0.1535 163.2231 / 0.12);
   --red: oklch(63.68% 0.2078 25.3313);
+  --red-deep: oklch(60% 0.24 12);
   --red-bg: oklch(63.68% 0.2078 25.3313 / 0.12);
   --amber: oklch(83.69% 0.1644 84.4286);
   --amber-bg: oklch(83.69% 0.1644 84.4286 / 0.12);
@@ -234,6 +249,7 @@
   --green: oklch(52% 0.18 150);
   --green-bg: oklch(52% 0.18 150 / 0.12);
   --red: oklch(57.87% 0.2005 26.1521);
+  --red-deep: oklch(42% 0.22 12);
   --red-bg: oklch(57.87% 0.2005 26.1521 / 0.12);
   --amber: oklch(58% 0.16 85);
   --amber-bg: oklch(58% 0.16 85 / 0.12);
@@ -551,6 +567,17 @@
   --border-color: var(--border);
   --color-primary: var(--accent);
   --color-fill-alter: var(--accent-dim);
+  --table-border: var(--border);
+  --hr-border-color: var(--border);
+  --blockquote-border-color: var(--border);
+  /* 霓虹族：`.ax-cyber-border`（AppHeader 流光描边）与 `.ax-neon-text`（cyberpunk /
+     dark-neon 预设下的标题辉光）一直引用它们，但从未定义 ⇒ 整条 `background:` /
+     `text-shadow:` 被浏览器判为非法而**整条丢弃**，那两个特效从未出现。
+     取 --cat-*（类目色板的运行时投影，见 theme/categoricalColors.ts）而不另写十六进制，
+     这样亮/暗两档自动跟随，不构成第二份色来源。 */
+  --neon-cyan: var(--cat-cyan, #08979c);
+  --neon-purple: var(--cat-violet, #5b21b6);
+  --neon-magenta: var(--cat-pink, #c41d7f);
   --accent-deco: var(--accent);
   /* 滚动指示器颜色 —— 由「全局滚动条样式」消费（见 Scrollbar styling 区）。
      取 --fg-2 混 80% 透明：实测在全部预设下对内容背景对比度 ≥ 3.3:1
@@ -576,7 +603,7 @@
 .surface-card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--ant-border-radius, 6px);
+  border-radius: var(--radius);
 }
 
 .surface-elevated {
@@ -1365,13 +1392,13 @@ html[data-theme="dark"] .markstream-react .table-node thead {
 
 /* ── Switch 启用/禁用高对比度 ──────── */
 .ant-switch.ant-switch-checked {
-  background-color: var(--ant-color-primary, var(--accent)) !important;
+  background-color: var(--accent) !important;
 }
 .ant-switch.ant-switch-checked:hover:not(.ant-switch-disabled) {
-  background-color: var(--ant-color-primary-hover, #73d13d) !important;
+  background-color: var(--accent) !important;
 }
 .ant-switch.ant-switch-small.ant-switch-checked {
-  background-color: var(--ant-color-primary, var(--accent)) !important;
+  background-color: var(--accent) !important;
 }
 .ant-switch:not(.ant-switch-checked) {
   background-color: rgba(0, 0, 0, 0.25) !important;
@@ -1716,17 +1743,11 @@ html[data-theme="dark"] .markstream-react .table-node thead {
 
   /* Active state for touch feedback instead of hover */
   .nav-item:active {
-    background-color: var(
-      --ant-color-fill-secondary,
-      rgba(255, 255, 255, 0.08)
-    ) !important;
+    background-color: var(--surface-2) !important;
   }
 
   .ax-sidebar-user:active {
-    background-color: var(
-      --ant-color-fill-secondary,
-      rgba(255, 255, 255, 0.08)
-    ) !important;
+    background-color: var(--surface-2) !important;
   }
 
   .axagent-action-item:active {
@@ -2914,14 +2935,14 @@ html[data-theme="dark"] .markstream-react .table-node thead {
 
 .rp-tabs-overflow:hover {
   color: var(--color-text);
-  background: var(--hover);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
 }
 
 .rp-tabs-overflow.active {
   color: var(--color-primary);
   border-bottom-color: var(--color-primary);
 }
-.rp-tab:hover { color: var(--color-text); background: var(--hover); }
+.rp-tab:hover { color: var(--color-text); background: color-mix(in srgb, var(--fg) 6%, transparent); }
 .rp-tab.active {
   color: var(--color-primary);
   border-bottom-color: var(--color-primary);
@@ -3017,7 +3038,7 @@ html[data-theme="dark"] .markstream-react .table-node thead {
 }
 .st-search-box .ant-input-affix-wrapper,
 .st-search-box .ant-input {
-  background: var(--bg-2);
+  background: var(--surface-2);
   border-color: var(--border-light);
 }
 .st-search-box .ant-input-prefix {
@@ -3053,8 +3074,8 @@ html[data-theme="dark"] .markstream-react .table-node thead {
 /* Phase 2 项级搜索 — 高亮闪烁动画 */
 @keyframes st-highlight-pulse {
   0%, 100% { background-color: transparent; }
-  20% { background-color: var(--color-primary-bg, rgba(22,119,255,0.15)); }
-  60% { background-color: var(--color-primary-bg, rgba(22,119,255,0.08)); }
+  20% { background-color: var(--accent-bg); }
+  60% { background-color: var(--accent-bg); }
 }
 .st-highlight-flash {
   animation: st-highlight-pulse 2s ease-out;

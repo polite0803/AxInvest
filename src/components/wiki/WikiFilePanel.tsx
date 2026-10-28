@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { GraphData } from "@/components/wiki/GraphView";
+import { hueVar } from "@/theme/categoricalColors";
 import type { Note } from "@/types";
 import { SearchOutlined } from "@ant-design/icons";
 import { Empty, Input, Space, Spin, theme, Tooltip, Tree, Typography } from "antd";
@@ -14,8 +15,8 @@ const { Text } = Typography;
 const getTypeColorMap = (token: ReturnType<typeof theme.useToken>["token"]): Record<string, string> => ({
   note: token.colorPrimary,
   concept: token.colorSuccess,
-  entity: "var(--orange, #fa8c16)",
-  source: "var(--magenta, #eb2f96)",
+  entity: hueVar("orange"),
+  source: hueVar("pink"),
 });
 
 function getTypeColor(type: string, token: ReturnType<typeof theme.useToken>["token"]): string {

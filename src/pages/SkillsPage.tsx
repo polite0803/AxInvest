@@ -78,37 +78,37 @@ const INSTALL_TARGETS: InstallTarget[] = [
     key: "axagent",
     label: "~/.axagent/skills/",
     descKey: "skill.sourceLocal",
-    icon: <Sparkles size={14} color={CHAT_ICON_COLORS.Sparkles} />,
+    icon: <Sparkles size={14} style={{ color: CHAT_ICON_COLORS.Sparkles }} />,
   },
   {
     key: "claude",
     label: "~/.claude/skills/",
     desc: "Claude",
-    icon: <FolderOpen size={14} color={CHAT_ICON_COLORS.FolderOpen} />,
+    icon: <FolderOpen size={14} style={{ color: CHAT_ICON_COLORS.FolderOpen }} />,
   },
   {
     key: "trae",
     label: "~/.trae/skills/",
     desc: "Trae",
-    icon: <FolderOpen size={14} color={CHAT_ICON_COLORS.FolderOpen} />,
+    icon: <FolderOpen size={14} style={{ color: CHAT_ICON_COLORS.FolderOpen }} />,
   },
   {
     key: "codebuddy",
     label: "~/.codebuddy/skills/",
     desc: "CodeBuddy",
-    icon: <FolderOpen size={14} color={CHAT_ICON_COLORS.FolderOpen} />,
+    icon: <FolderOpen size={14} style={{ color: CHAT_ICON_COLORS.FolderOpen }} />,
   },
   {
     key: "workbuddy",
     label: "~/.workbuddy/skills/",
     desc: "WorkBuddy",
-    icon: <FolderOpen size={14} color={CHAT_ICON_COLORS.FolderOpen} />,
+    icon: <FolderOpen size={14} style={{ color: CHAT_ICON_COLORS.FolderOpen }} />,
   },
   {
     key: "agents",
     label: "~/.agents/skills/",
     desc: "Agents",
-    icon: <FolderOpen size={14} color={CHAT_ICON_COLORS.FolderOpen} />,
+    icon: <FolderOpen size={14} style={{ color: CHAT_ICON_COLORS.FolderOpen }} />,
   },
 ];
 
@@ -129,7 +129,7 @@ const SOURCE_ICONS: Record<string, React.ReactNode> = {
     />
   ),
   claude: <Claude.Color size={14} />,
-  agents: <Radio size={14} color={CHAT_ICON_COLORS.Route} />,
+  agents: <Radio size={14} style={{ color: CHAT_ICON_COLORS.Route }} />,
   builtin: <Cpu size={14} />,
   bundled: <Package size={14} />,
   codebuddy: <Code size={14} />,
@@ -157,7 +157,7 @@ const getSourceLabel = (source: string | undefined, t: TFunction) => {
   return labelOrKey.startsWith("skills.source.") ? t(labelOrKey) : labelOrKey;
 };
 
-const ALL_SOURCE_ICON = <Layers size={14} color={CHAT_ICON_COLORS.Layers} />;
+const ALL_SOURCE_ICON = <Layers size={14} style={{ color: CHAT_ICON_COLORS.Layers }} />;
 
 function SkillCard({
   skill,
@@ -256,13 +256,13 @@ function SkillCard({
           <Button
             type="text"
             size="small"
-            icon={<FolderOpen size={14} color={CHAT_ICON_COLORS.FolderOpen} />}
+            icon={<FolderOpen size={14} style={{ color: CHAT_ICON_COLORS.FolderOpen }} />}
             onClick={() => onOpenDir(skill.sourcePath)}
           />
           <Button
             type="text"
             size="small"
-            icon={<LayoutPanelTop size={14} color={CHAT_ICON_COLORS.Trash2} />}
+            icon={<LayoutPanelTop size={14} style={{ color: CHAT_ICON_COLORS.Trash2 }} />}
             onClick={() => onEditFrontend(skill.name)}
             title={hasManifest ? t("skill.editFrontend") : t("skill.addFrontend")}
           />
@@ -286,7 +286,7 @@ function SkillCard({
                 type="text"
                 size="small"
                 danger
-                icon={<Trash2 size={14} color={CHAT_ICON_COLORS.Trash2} />}
+                icon={<Trash2 size={14} style={{ color: CHAT_ICON_COLORS.Trash2 }} />}
               />
             </Popconfirm>
           )}
@@ -395,7 +395,7 @@ function MarketplaceCard({
           <Button
             size="small"
             type="text"
-            icon={<GitFork size={14} color={CHAT_ICON_COLORS.GitFork} />}
+            icon={<GitFork size={14} style={{ color: CHAT_ICON_COLORS.GitFork }} />}
             onClick={() => openExternalUrl(externalUrl)}
           >
             {isOpenClaw ? "ClawHub" : "GitHub"}
@@ -804,7 +804,7 @@ export function SkillsPage() {
             </Button>
           </Dropdown>
           <Button
-            icon={<RefreshCw size={14} color={CHAT_ICON_COLORS.RefreshCw} />}
+            icon={<RefreshCw size={14} style={{ color: CHAT_ICON_COLORS.RefreshCw }} />}
             onClick={() => loadSkills()}
           />
           <Button onClick={() => setCreateModalOpen(true)}>
@@ -814,7 +814,7 @@ export function SkillsPage() {
             {t("skill.generateAgent")}
           </Button>
           <Button
-            icon={<Lightbulb size={14} color={CHAT_ICON_COLORS.Lightbulb} />}
+            icon={<Lightbulb size={14} style={{ color: CHAT_ICON_COLORS.Lightbulb }} />}
             onClick={() => setProposalPanelOpen(true)}
             title={t("skill.proposal.title")}
           />
@@ -852,7 +852,7 @@ export function SkillsPage() {
                     {t("skills.sourceAll")}
                     <span
                       style={{
-                        color: "var(--color-text-quaternary)",
+                        color: "var(--muted)",
                         fontSize: 12,
                       }}
                     >
@@ -878,7 +878,7 @@ export function SkillsPage() {
                     {SOURCE_LABELS[src] ?? src}
                     <span
                       style={{
-                        color: "var(--color-text-quaternary)",
+                        color: "var(--muted)",
                         fontSize: 12,
                       }}
                     >
@@ -908,7 +908,7 @@ export function SkillsPage() {
                     {SOURCE_LABELS[src] ?? src}
                     <span
                       style={{
-                        color: "var(--color-text-quaternary)",
+                        color: "var(--muted)",
                         fontSize: 12,
                       }}
                     >
@@ -1254,7 +1254,7 @@ export function SkillsPage() {
                     gap: 6,
                   }}
                 >
-                  <Sparkles size={14} color={CHAT_ICON_COLORS.Sparkles} />
+                  <Sparkles size={14} style={{ color: CHAT_ICON_COLORS.Sparkles }} />
                   {t("skills.mySkills")}
                 </span>
               ),
@@ -1270,7 +1270,7 @@ export function SkillsPage() {
                     gap: 6,
                   }}
                 >
-                  <Store size={14} color={CHAT_ICON_COLORS.Cloud} />
+                  <Store size={14} style={{ color: CHAT_ICON_COLORS.Cloud }} />
                   {t("skills.marketplace.title")}
                 </span>
               ),
@@ -1286,7 +1286,7 @@ export function SkillsPage() {
                     gap: 6,
                   }}
                 >
-                  <BarChart3 size={14} color={CHAT_ICON_COLORS.Chart} />
+                  <BarChart3 size={14} style={{ color: CHAT_ICON_COLORS.Chart }} />
                   {t("skills.stats")}
                 </span>
               ),

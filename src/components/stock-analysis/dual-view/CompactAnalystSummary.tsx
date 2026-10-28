@@ -96,26 +96,26 @@ export function CompactAnalystSummary({ data }: CompactAnalystSummaryProps) {
   const consensus = deriveAnalystConsensus(summary);
   const consensusConfig: Record<Consensus, { color: string; bg: string; labelKey: string; icon: string }> = {
     bullish: {
-      color: "var(--sa-red, #dc2626)",
-      bg: "var(--sa-red-bg, #fee2e2)",
+      color: "var(--red)",
+      bg: "var(--red-bg)",
       labelKey: "consensusBullish",
       icon: "📈",
     },
     bearish: {
-      color: "var(--sa-green, #16a34a)",
-      bg: "var(--sa-green-bg, #dcfce7)",
+      color: "var(--green)",
+      bg: "var(--green-bg)",
       labelKey: "consensusBearish",
       icon: "📉",
     },
     neutral: {
       color: "var(--muted, #6b7280)",
-      bg: "var(--muted-bg, #e5e7eb)",
+      bg: "var(--surface-2)",
       labelKey: "consensusNeutral",
       icon: "➖",
     },
     divided: {
-      color: "var(--ant-warning, #f59e0b)",
-      bg: "var(--ant-warning-bg, #fef3c7)",
+      color: "var(--amber)",
+      bg: "var(--amber-bg)",
       labelKey: "consensusDivided",
       icon: "⚖️",
     },
@@ -139,7 +139,7 @@ export function CompactAnalystSummary({ data }: CompactAnalystSummaryProps) {
         </span>
         {summary.excludedCount > 0 && (
           /* 扣票原因与页面顶部条、分歧卡同一句文案（同一个键，不各写一套） */
-          <span style={{ color: "var(--ant-warning, #b45309)" }}>
+          <span style={{ color: "var(--amber)" }}>
             {t("stockAnalysis.analystConsensusExcluded", { count: summary.excludedCount })}
           </span>
         )}
@@ -148,12 +148,12 @@ export function CompactAnalystSummary({ data }: CompactAnalystSummaryProps) {
       {/* 多空条 */}
       <div className="flex items-baseline gap-2 flex-wrap">
         <Tooltip title={t("stockAnalysis.recommendation.bullishTooltip")}>
-          <span style={{ color: "var(--sa-red, #dc2626)" }} className="cursor-default">
+          <span style={{ color: "var(--red)" }} className="cursor-default">
             📈 {t("stockAnalysis.recommendation.bullish")} {summary.bullish}
           </span>
         </Tooltip>
         <Tooltip title={t("stockAnalysis.recommendation.bearishTooltip")}>
-          <span style={{ color: "var(--sa-green, #16a34a)" }} className="cursor-default">
+          <span style={{ color: "var(--green)" }} className="cursor-default">
             📉 {t("stockAnalysis.recommendation.bearish")} {summary.bearish}
           </span>
         </Tooltip>
@@ -164,12 +164,12 @@ export function CompactAnalystSummary({ data }: CompactAnalystSummaryProps) {
         </Tooltip>
       </div>
       {summary.total > 0 && (
-        <div className="flex h-1.5 rounded overflow-hidden" style={{ background: "var(--muted-bg, #e5e7eb)" }}>
+        <div className="flex h-1.5 rounded overflow-hidden" style={{ background: "var(--surface-2)" }}>
           {summary.bullish > 0 && (
             <div
               style={{
                 width: `${(summary.bullish / summary.total) * 100}%`,
-                background: "var(--sa-red, #dc2626)",
+                background: "var(--red)",
                 transition: "width 0.3s ease",
               }}
             />
@@ -187,7 +187,7 @@ export function CompactAnalystSummary({ data }: CompactAnalystSummaryProps) {
             <div
               style={{
                 width: `${(summary.bearish / summary.total) * 100}%`,
-                background: "var(--sa-green, #16a34a)",
+                background: "var(--green)",
                 transition: "width 0.3s ease",
               }}
             />
@@ -201,14 +201,14 @@ export function CompactAnalystSummary({ data }: CompactAnalystSummaryProps) {
               className="text-[9px] font-mono px-1 rounded shrink-0"
               style={{
                 background: d.sentiment === "bullish"
-                  ? "var(--sa-red-bg, #fee2e2)"
+                  ? "var(--red-bg)"
                   : d.sentiment === "bearish"
-                  ? "var(--sa-green-bg, #dcfce7)"
-                  : "var(--muted-bg, #e5e7eb)",
+                  ? "var(--green-bg)"
+                  : "var(--surface-2)",
                 color: d.sentiment === "bullish"
-                  ? "var(--sa-red, #dc2626)"
+                  ? "var(--red)"
                   : d.sentiment === "bearish"
-                  ? "var(--sa-green, #16a34a)"
+                  ? "var(--green)"
                   : "var(--muted, #6b7280)",
               }}
             >

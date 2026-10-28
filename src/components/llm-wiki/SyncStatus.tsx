@@ -209,14 +209,14 @@ export function SyncStatus({
               </div>
               <div className="text-center flex-1">
                 <Text type="secondary" style={{ fontSize: 10 }}>{t("wiki.sync.processing")}</Text>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "#1677ff" }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--accent)" }}>
                   <SyncOutlined spin style={{ fontSize: 11, marginRight: 2 }} />
                   {processingCount}
                 </div>
               </div>
               <div className="text-center flex-1">
                 <Text type="secondary" style={{ fontSize: 10 }}>{t("wiki.sync.failed")}</Text>
-                <div style={{ fontSize: 14, fontWeight: 600, color: failedCount > 0 ? "#ff4d4f" : undefined }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: failedCount > 0 ? "var(--red)" : undefined }}>
                   {failedCount > 0
                     ? <CloseCircleOutlined style={{ fontSize: 11, marginRight: 2 }} />
                     : <CheckCircleOutlined style={{ fontSize: 11, marginRight: 2 }} />}
@@ -335,7 +335,7 @@ export function SyncStatus({
                 <SyncOutlined
                   spin={refreshing || processingCount > 0}
                   style={{
-                    color: failedCount > 0 ? "#ff4d4f" : undefined,
+                    color: failedCount > 0 ? "var(--red)" : undefined,
                     fontSize: 13,
                   }}
                 />
@@ -438,7 +438,7 @@ function SyncStatusPanel({
             <Statistic
               title={t("wiki.sync.failed")}
               value={failedCount}
-              styles={{ content: { fontSize: 18, color: failedCount > 0 ? "#ff4d4f" : undefined } }}
+              styles={{ content: { fontSize: 18, color: failedCount > 0 ? "var(--red)" : undefined } }}
               prefix={failedCount > 0 ? <CloseCircleOutlined /> : <CheckCircleOutlined />}
             />
           </Col>

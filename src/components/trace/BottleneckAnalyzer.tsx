@@ -99,12 +99,12 @@ function BarChart({ data }: { data: TokenConsumptionItem[] }) {
             <Text style={{ fontSize: 12 }}>{d.name}</Text>
             <Text style={{ fontSize: 12 }}>{d.tokens.toLocaleString()}</Text>
           </div>
-          <div style={{ height: 20, background: "#f5f5f5", borderRadius: 4, overflow: "hidden" }}>
+          <div style={{ height: 20, background: "var(--surface-2)", borderRadius: 4, overflow: "hidden" }}>
             <div
               style={{
                 height: "100%",
                 width: `${(d.tokens / maxVal) * 100}%`,
-                background: "linear-gradient(90deg, #1890ff, #69c0ff)",
+                background: "linear-gradient(90deg, var(--accent), var(--teal))",
                 borderRadius: 4,
                 transition: "width 0.4s",
               }}

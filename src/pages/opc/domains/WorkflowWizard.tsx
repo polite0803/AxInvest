@@ -153,7 +153,7 @@ function renderConfirmStep(
       {fields.length > 0 && (
         <div
           style={{
-            background: "var(--color-bg-soft, #f5f5f5)",
+            background: "var(--surface-2)",
             borderRadius: 8,
             padding: 16,
           }}
@@ -173,7 +173,7 @@ function renderConfirmStep(
                   display: "flex",
                   justifyContent: "space-between",
                   padding: "4px 0",
-                  borderBottom: "1px dashed var(--color-border-soft, #e8e8e8)",
+                  borderBottom: "1px dashed var(--border-light)",
                 }}
               >
                 <Text type="secondary">{t(field.label)}</Text>
@@ -226,8 +226,8 @@ function renderResultStep(
       {status === "success"
         ? (
           <>
-            <CheckCircleFilled style={{ fontSize: 64, color: "#52c41a" }} />
-            <Title level={4} style={{ margin: 0, color: "#52c41a" }}>
+            <CheckCircleFilled style={{ fontSize: 64, color: "var(--green)" }} />
+            <Title level={4} style={{ margin: 0, color: "var(--green)" }}>
               {t("opc.domain.wizard.resultSuccess")}
             </Title>
             <Alert type="success" showIcon message={message} style={{ width: "100%" }} />
@@ -237,9 +237,9 @@ function renderResultStep(
         ? (
           <>
             <CheckCircleFilled
-              style={{ fontSize: 64, color: "#ff4d4f", transform: "rotate(180deg)" }}
+              style={{ fontSize: 64, color: "var(--red)", transform: "rotate(180deg)" }}
             />
-            <Title level={4} style={{ margin: 0, color: "#ff4d4f" }}>
+            <Title level={4} style={{ margin: 0, color: "var(--red)" }}>
               {t("opc.domain.wizard.resultFailed")}
             </Title>
             <Alert type="error" showIcon message={message} style={{ width: "100%" }} />

@@ -250,6 +250,9 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
   const [editRequestDelayMs, setEditRequestDelayMs] = useState<number | null>(
     null,
   );
+  const [editHeaderTimeoutSecs, setEditHeaderTimeoutSecs] = useState<number | null>(
+    null,
+  );
   const [editGroupName, setEditGroupName] = useState<string>("");
   const [iconOverrides, setIconOverrides] = useState<Record<string, string>>(
     {},
@@ -771,6 +774,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
       model.paramOverrides?.thinkingParamStyle ?? "reasoning_effort",
     );
     setEditRequestDelayMs(model.paramOverrides?.requestDelayMs ?? null);
+    setEditHeaderTimeoutSecs(model.paramOverrides?.headerTimeoutSecs ?? null);
     setEditGroupName(model.groupName ?? "");
     setSettingsModalOpen(true);
   }, []);
@@ -789,6 +793,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
         ? undefined
         : editThinkingParamStyle,
       requestDelayMs: editRequestDelayMs ?? undefined,
+      headerTimeoutSecs: editHeaderTimeoutSecs ?? undefined,
     };
     const nextCapabilities = sanitizeModelCapabilities(
       editModelType,
@@ -827,6 +832,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
     editNoSystemRole,
     editThinkingParamStyle,
     editRequestDelayMs,
+    editHeaderTimeoutSecs,
     editGroupName,
     providerId,
     updateModelParams,
@@ -1769,7 +1775,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                       style={{
                         cursor: "pointer",
                         userSelect: "none",
-                        background: "var(--ant-color-fill-quaternary, rgba(0,0,0,0.02))",
+                        background: "var(--surface-2)",
                       }}
                       onClick={() => {
                         if (batchMode) {
@@ -2676,6 +2682,38 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                       {t("settings.requestDelayMsHint")}
                     </div>
                   )}
+                  <div className="flex items-center justify-between">
+                    <span
+                      className="text-sm"
+                      style={{ color: token.colorText }}
+                    >
+                      {t("settings.headerTimeoutSecs")}
+                    </span>
+                    <Space.Compact style={{ width: 120 }}>
+                      <InputNumber
+                        id="provider-detail-inputnumber-146"
+                        size="small"
+                        style={{ width: "100%" }}
+                        min={10}
+                        max={240}
+                        step={5}
+                        value={editHeaderTimeoutSecs}
+                        onChange={(v) => setEditHeaderTimeoutSecs(v)}
+                      />
+                      <Button disabled>s</Button>
+                    </Space.Compact>
+                  </div>
+                  {editHeaderTimeoutSecs != null && editHeaderTimeoutSecs > 0 && (
+                    <div
+                      style={{
+                        fontSize: 10,
+                        color: token.colorTextSecondary,
+                        marginTop: -4,
+                      }}
+                    >
+                      {t("settings.headerTimeoutSecsHint")}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -3228,7 +3266,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                             style={{
                               cursor: "pointer",
                               userSelect: "none",
-                              background: "var(--ant-color-fill-quaternary, rgba(0,0,0,0.02))",
+                              background: "var(--surface-2)",
                             }}
                             onClick={() =>
                               setPickerCollapsed((prev) => {

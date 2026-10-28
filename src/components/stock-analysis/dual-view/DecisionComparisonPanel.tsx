@@ -207,7 +207,7 @@ export function DecisionComparisonPanel({ data }: DecisionComparisonPanelProps) 
             >
               <span
                 className="cursor-help px-1 py-0.5 rounded text-sm underline decoration-dotted"
-                style={{ color: "#ef4444", opacity: 0.85 }}
+                style={{ color: "var(--red)", opacity: 0.85 }}
               >
                 ⚠{view.agreementBreakdown.actionNote === "opposite"
                   ? ` ${t("dualView.decision.reviewRecommended")}`
@@ -247,7 +247,7 @@ export function DecisionComparisonPanel({ data }: DecisionComparisonPanelProps) 
           <div className="flex items-center justify-between">
             <span
               className="text-sm font-medium px-1 py-px rounded"
-              style={{ background: "rgba(37,99,235,0.10)", color: "#2563eb" }}
+              style={{ background: "rgba(37,99,235,0.10)", color: "var(--accent)" }}
             >
               {t("dualView.decision.formula")}
             </span>
@@ -299,7 +299,7 @@ export function DecisionComparisonPanel({ data }: DecisionComparisonPanelProps) 
           <div className="flex items-center justify-between">
             <span
               className="text-sm font-medium px-1 py-px rounded"
-              style={{ background: "rgba(124,58,237,0.10)", color: "#7c3aed" }}
+              style={{ background: "rgba(124,58,237,0.10)", color: "var(--purple)" }}
             >
               {t("dualView.decision.llm")}
             </span>

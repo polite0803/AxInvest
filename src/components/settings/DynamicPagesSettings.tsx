@@ -391,7 +391,7 @@ export function DynamicPagesSettings() {
             style: {
               cursor: "pointer",
               background: selectedSchema?.id === record.id
-                ? "var(--color-primary-bg)"
+                ? "var(--accent-bg)"
                 : undefined,
             },
           })}

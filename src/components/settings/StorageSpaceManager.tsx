@@ -226,7 +226,7 @@ export function StorageSpaceManager() {
                     <div className="flex items-center gap-3 w-full">
                       <span
                         className="flex items-center"
-                        style={{ color: "var(--ant-color-text-secondary)" }}
+                        style={{ color: "var(--fg-2)" }}
                       >
                         {BUCKET_ICONS[bucket.bucket]}
                       </span>

@@ -387,7 +387,7 @@ function FieldEditor({
         gap: 12,
         alignItems: "flex-start",
         padding: "6px 0",
-        borderBottom: "1px solid var(--color-border-secondary, rgba(255,255,255,0.06))",
+        borderBottom: "1px solid var(--border-light)",
       }}
     >
       <div
@@ -479,10 +479,10 @@ function FieldEditor({
                       borderRadius: 4,
                       cursor: "pointer",
                       border: active
-                        ? "1px solid var(--ant-color-primary, #1677ff)"
+                        ? "1px solid var(--accent)"
                         : "1px solid var(--color-border, #434343)",
                       background: active
-                        ? "var(--ant-color-primary, #1677ff)"
+                        ? "var(--accent)"
                         : "transparent",
                       color: active ? "#fff" : "var(--color-text, rgba(255,255,255,0.85))",
                     }}
@@ -500,7 +500,7 @@ function FieldEditor({
                 {t("settings.scheduler.cronClear")}
               </Button>
               {field.selected.length === 0 && (
-                <span style={{ fontSize: 12, color: "var(--color-error, #ff4d4f)" }}>
+                <span style={{ fontSize: 12, color: "var(--red)" }}>
                   {t("settings.scheduler.cronSelectRequired")}
                 </span>
               )}
@@ -617,7 +617,7 @@ export function CronScheduleBuilder({ value = "", onChange }: CronScheduleBuilde
                 color: "var(--color-text, rgba(255,255,255,0.88))",
                 border: `1px solid ${
                   syntaxError
-                    ? "var(--color-error, #ff4d4f)"
+                    ? "var(--red)"
                     : "var(--color-border, #434343)"
                 }`,
                 borderRadius: 6,
@@ -685,7 +685,7 @@ export function CronScheduleBuilder({ value = "", onChange }: CronScheduleBuilde
         style={{
           padding: "8px 12px",
           borderRadius: 6,
-          background: "var(--color-fill-quaternary, rgba(255,255,255,0.04))",
+          background: "var(--surface-2)",
           fontSize: 12,
         }}
       >
@@ -696,12 +696,12 @@ export function CronScheduleBuilder({ value = "", onChange }: CronScheduleBuilde
           <Typography.Text
             code
             copyable={{ text: cron }}
-            style={{ color: syntaxError ? "var(--color-error, #ff4d4f)" : undefined }}
+            style={{ color: syntaxError ? "var(--red)" : undefined }}
           >
             {cron || "-"}
           </Typography.Text>
           {syntaxError && (
-            <Typography.Text style={{ fontSize: 12, color: "var(--color-error, #ff4d4f)" }}>
+            <Typography.Text style={{ fontSize: 12, color: "var(--red)" }}>
               {t(syntaxError)}
             </Typography.Text>
           )}

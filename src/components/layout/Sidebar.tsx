@@ -4,9 +4,9 @@ import { Icon } from "@/components/common/Icon";
 import { Tooltip } from "@/components/layout/Tooltip";
 import { FEATURE_FLAGS } from "@/constants/featureFlags";
 import { useResolvedAvatarSrc } from "@/hooks/useResolvedAvatarSrc";
-import { CAPABILITY_DOMAIN_META, domainLabelKey } from "@/lib/domainMeta";
 import { invoke, logIpcError } from "@/lib/invoke";
-import { type NavItem, navItemsByDomain } from "@/lib/navRegistry";
+import { NAV_GROUPS } from "@/lib/navGroups";
+import { builtinNavItems, type NavItem } from "@/lib/navRegistry";
 import { BUILTIN_PAGE_PATH } from "@/lib/pageRegistry";
 import { formatShortcutForDisplay, getShortcutBinding } from "@/lib/shortcuts";
 import type { ShortcutAction } from "@/lib/shortcuts";
@@ -50,10 +50,10 @@ function pathToPageKey(path: string): PageKey {
 interface SidebarSection {
   key: string;
   labelKey: string;
-  /** 域主题色（用于分组标题高亮点） */
+  /** 组主题色（用于分组标题高亮点） */
   color?: string;
-  /** 域聚合入口路径（点击分组标题跳转），无则不可点击 */
-  domainPath?: string;
+  /** 组入口路径（点击分组标题跳转），无则不可点击 */
+  path?: string;
   items: NavItem[];
 }
 
@@ -81,10 +81,8 @@ function NavItemButton({
   const { t } = useTranslation();
   const location = useLocation();
 
-  const isActive = item.isPlugin
-    ? location.pathname === item.path
-      || location.pathname.startsWith(item.path + "/")
-    : activePage === item.key;
+  // 2026-10-28：按路径判定，兼容 `chat-workflow` 这类 key 与 pageKey 不同名的入口。
+  const isActive = location.pathname === item.path || activePage === item.key;
   const label = item.isPlugin ? item.labelKey : t(item.labelKey);
   const tooltipText = item.isPlugin ? `${label} (${item.pluginName})` : label;
   const action = !item.isPlugin && item.key in NAV_SHORTCUT_MAP
@@ -152,7 +150,7 @@ function UserAvatarButton({
           width: size,
           height: size,
           borderRadius: "50%",
-          backgroundColor: "var(--color-fill-secondary)",
+          backgroundColor: "var(--surface-2)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -229,7 +227,7 @@ function MobileActions() {
         gap: 2,
         justifyContent: "center",
         padding: "4px 0",
-        borderTop: `1px solid ${"var(--color-border-secondary)"}`,
+        borderTop: `1px solid ${"var(--border-light)"}`,
       }}
     >
       <Tooltip title={t("desktop.alwaysOnTop")} placement="right">
@@ -271,25 +269,18 @@ export function Sidebar() {
   const agentInTheLoopEnabled = FEATURE_FLAGS.AGENT_IN_THE_LOOP;
 
   const sections = useMemo<SidebarSection[]>(() => {
-    const sections: SidebarSection[] = [];
-
-    // 侧栏以「能力域」为组织轴：8 个业务域分组，域内导航项按业务本质归域。
-    // 每个域分组标题可点击，跳转到该域的聚合入口页（DomainHubPage）。
-    for (const domain of CAPABILITY_DOMAIN_META) {
-      const items = navItemsByDomain(domain.id);
-      if (items.length === 0) {
-        continue;
-      }
-      sections.push({
-        key: domain.id,
-        labelKey: domainLabelKey(domain.id),
-        color: domain.color,
-        domainPath: domain.path,
-        items,
-      });
-    }
-
-    return sections;
+    // 2026-10-28：侧栏改为「产品导航组」轴（`navGroups.ts`），不再按 8 个能力域分组。
+    // 能力域仍是协议概念（DomainHubPage / 工具域过滤用），两轴解耦。
+    const byKey = new Map(builtinNavItems.map((item) => [item.key, item]));
+    return NAV_GROUPS.map((group) => ({
+      key: group.key,
+      labelKey: group.labelKey,
+      color: group.color,
+      path: group.path,
+      items: group.itemKeys
+        .map((key) => byKey.get(key))
+        .filter((item): item is NavItem => Boolean(item)),
+    })).filter((section) => section.items.length > 0);
   }, []);
 
   // 动态固定页面已移至设置/扩展分组管理，不再在侧栏加载和渲染
@@ -314,14 +305,14 @@ export function Sidebar() {
             <button
               type="button"
               className="ax-sidebar-section-header"
-              onClick={() => section.domainPath && navigate(section.domainPath)}
+              onClick={() => section.path && navigate(section.path)}
               aria-label={t(section.labelKey)}
               style={{
                 width: "100%",
                 textAlign: "left",
                 background: "none",
                 border: "none",
-                cursor: section.domainPath ? "pointer" : "default",
+                cursor: section.path ? "pointer" : "default",
                 padding: "2px 8px",
                 fontSize: 11,
                 fontWeight: 600,
@@ -330,7 +321,7 @@ export function Sidebar() {
                 borderRadius: 4,
               }}
               onMouseEnter={(e) => {
-                if (section.domainPath) { e.currentTarget.style.backgroundColor = "var(--accent-bg)"; }
+                if (section.path) { e.currentTarget.style.backgroundColor = "var(--accent-bg)"; }
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.backgroundColor = "transparent";

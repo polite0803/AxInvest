@@ -49,7 +49,7 @@ export const SplitView = memo(function SplitView({
     <div style={{ display: "flex", flexDirection, height: "100%" }}>
       <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
         {showPreview && (
-          <div style={{ padding: "4px 8px", borderBottom: "1px solid #eee" }}>
+          <div style={{ padding: "4px 8px", borderBottom: "1px solid var(--border-light)" }}>
             <Segmented
               size="small"
               value={activeTab}
@@ -71,7 +71,7 @@ export const SplitView = memo(function SplitView({
       </div>
 
       {activeTab === "preview" && showPreview && isHtml && (
-        <div style={{ flex: 1, borderLeft: "1px solid #eee" }}>
+        <div style={{ flex: 1, borderLeft: "1px solid var(--border-light)" }}>
           <HtmlPreview
             html={htmlParts.html}
             css={htmlParts.css}

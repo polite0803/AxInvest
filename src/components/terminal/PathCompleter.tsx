@@ -276,8 +276,8 @@ export function PathCompleterWidget({
         position: "absolute",
         bottom: 24,
         left: 8,
-        background: "#181825",
-        border: "1px solid #45475a",
+        background: "var(--theme-background, #1e1e2e)",
+        border: "1px solid var(--theme-black, #45475a)",
         borderRadius: 6,
         maxHeight: 200,
         overflow: "auto",
@@ -292,7 +292,7 @@ export function PathCompleterWidget({
           style={{
             padding: "4px 12px",
             cursor: "pointer",
-            background: index === selectedIndex ? "#585b70" : "transparent",
+            background: index === selectedIndex ? "var(--theme-bright-black, #585b70)" : "transparent",
             fontSize: 12,
             fontFamily: "'JetBrains Mono', monospace",
             whiteSpace: "nowrap",
@@ -300,17 +300,17 @@ export function PathCompleterWidget({
             textOverflow: "ellipsis",
           }}
         >
-          <span style={{ color: "#89b4fa" }}>{"📄 "}</span>
-          <span style={{ color: "#cdd6f4" }}>{path}</span>
+          <span style={{ color: "var(--theme-blue, #89b4fa)" }}>{"📄 "}</span>
+          <span style={{ color: "var(--theme-foreground, #cdd6f4)" }}>{path}</span>
         </div>
       ))}
       {suggestions.length > 10 && (
         <div
           style={{
             padding: "4px 12px",
-            color: "#6c7086",
+            color: "var(--theme-bright-black, #585b70)",
             fontSize: 12,
-            borderTop: "1px solid #45475a",
+            borderTop: "1px solid var(--theme-black, #45475a)",
           }}
         >
           ...{t("terminal.more", { count: suggestions.length - 10 })}

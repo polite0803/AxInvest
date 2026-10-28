@@ -507,7 +507,7 @@ export function IngestPanel({ wikiId, onClose }: IngestPanelProps) {
                       <div style={{ fontWeight: 500 }}>{item.title}</div>
                       <div
                         style={{
-                          color: "var(--text-secondary, rgba(0,0,0,0.45))",
+                          color: "var(--fg-2)",
                           fontSize: 13,
                           marginTop: 2,
                         }}

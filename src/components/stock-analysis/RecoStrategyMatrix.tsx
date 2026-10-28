@@ -27,9 +27,9 @@ const PERIOD_KEYS = ["ultra_short", "short", "mid", "long"] as const;
 
 /** 色标辅助 */
 function rateColor(rate: number): string {
-  if (rate >= 55) { return "var(--sa-red)"; }
-  if (rate >= 45) { return "var(--sa-warning, #faad14)"; }
-  return "var(--sa-green)";
+  if (rate >= 55) { return "var(--red)"; }
+  if (rate >= 45) { return "var(--amber)"; }
+  return "var(--green)";
 }
 
 function rateBg(rate: number): string {
@@ -205,7 +205,7 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
     >
       {/* 读法：把「一格里的四行」一次讲清，免得把 IC 样本数读成胜率样本 */}
       <div
-        style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 6 }}
+        style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}
         data-testid="reco-matrix-legend"
       >
         {t("stockAnalysis.backtest.matrixLegend")}
@@ -217,7 +217,7 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
             style={{
               fontSize: 11,
               color: "var(--color-text-secondary)",
-              background: "var(--color-bg-secondary, rgba(127,127,127,0.06))",
+              background: "var(--surface)",
               borderRadius: 4,
               padding: "4px 8px",
               marginBottom: 8,
@@ -241,7 +241,7 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
         : null}
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
         <thead>
-          <tr style={{ borderBottom: "0.5px solid var(--color-border-tertiary)" }}>
+          <tr style={{ borderBottom: "0.5px solid var(--border-light)" }}>
             <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 500, width: 100 }}>
               {t("stockAnalysis.backtest.colStyle")}
             </th>
@@ -257,7 +257,7 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
         </thead>
         <tbody>
           {styleKeys.map((style) => (
-            <tr key={style} style={{ borderBottom: "0.5px solid var(--color-border-tertiary)" }}>
+            <tr key={style} style={{ borderBottom: "0.5px solid var(--border-light)" }}>
               <td style={{ padding: "8px 10px", fontWeight: 500 }}>
                 {t(`stockAnalysis.recommendation.style${style.charAt(0).toUpperCase() + style.slice(1)}`)}
                 {(() => {
@@ -265,12 +265,10 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                   if (!hl) {
                     return null;
                   }
-                  const st = ic?.styles.find((x) =>
-                    x.style === style
-                  );
+                  const st = ic?.styles.find((x) => x.style === style);
                   return (
                     <div
-                      style={{ fontSize: 10, fontWeight: 400, color: "var(--color-text-tertiary)" }}
+                      style={{ fontSize: 10, fontWeight: 400, color: "var(--muted)" }}
                       data-testid="reco-ic-half-life"
                     >
                       {`${t("stockAnalysis.reflection.hitrateHalfLife")}: ${hl}`}
@@ -291,7 +289,7 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                   return (
                     <td key={period} style={{ padding: "8px 10px", textAlign: "center" }}>
                       <span
-                        style={{ color: "var(--color-text-tertiary)", fontSize: 11 }}
+                        style={{ color: "var(--muted)", fontSize: 11 }}
                         data-testid="matrix-absence"
                       >
                         {reasonText("stockAnalysis.backtest.matrixAbsence", view.reasonCode)}
@@ -304,9 +302,9 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                 if (!s || s.totalSignals === 0) {
                   return (
                     <td key={period} style={{ padding: "8px 10px", textAlign: "center" }}>
-                      <span style={{ color: "var(--color-text-tertiary)", fontSize: 11 }}>—</span>
+                      <span style={{ color: "var(--muted)", fontSize: 11 }}>—</span>
                       <div
-                        style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}
+                        style={{ fontSize: 10, color: "var(--muted)" }}
                         data-testid="matrix-no-sample"
                       >
                         {t("stockAnalysis.backtest.matrixNoSample")}
@@ -365,14 +363,14 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                         {s.winRatePct.toFixed(1)}%
                       </span>
                     </Tooltip>
-                    <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginTop: 2 }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
                       {`S ${s.sharpeRatio != null ? s.sharpeRatio.toFixed(1) : "—"} · ${s.totalSignals}`}
                     </div>
                     {/* 第三种状态：出票但该方法论在该尺度上兑现不了（按裁定保留，必须带声明） */}
                     {view?.misfitCode
                       ? (
                         <div
-                          style={{ fontSize: 10, color: "var(--sa-warning, #faad14)" }}
+                          style={{ fontSize: 10, color: "var(--amber)" }}
                           data-testid="matrix-misfit"
                         >
                           {reasonText("stockAnalysis.backtest.matrixMisfit", view.misfitCode)}
@@ -384,21 +382,21 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                       if (!cell) {
                         // 一格都没有实现样本：与「样本不够」不同，得说不清的方向
                         return (
-                          <div style={{ fontSize: 10, color: "var(--color-text-tertiary)" }} data-testid="reco-ic-none">
+                          <div style={{ fontSize: 10, color: "var(--muted)" }} data-testid="reco-ic-none">
                             {t("stockAnalysis.backtest.icNoValidatedSample")}
                           </div>
                         );
                       }
                       if (cell.rankIc != null) {
                         return (
-                          <div style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>
+                          <div style={{ fontSize: 10, color: "var(--muted)" }}>
                             {`IC ${cell.rankIc.toFixed(3)} · n=${cell.samples}`}
                           </div>
                         );
                       }
                       const key = horizonIcAbsenceKey(cell.icStatus);
                       return (
-                        <div style={{ fontSize: 10, color: "var(--sa-warning, #faad14)" }}>
+                        <div style={{ fontSize: 10, color: "var(--amber)" }}>
                           {key ? t(key) : cell.icStatus}
                         </div>
                       );
@@ -417,7 +415,7 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                       if (lc.status === "insufficient_samples" || lc.status === "ic_unmeasurable") {
                         return (
                           <div
-                            style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}
+                            style={{ fontSize: 10, color: "var(--muted)" }}
                             data-testid="reco-loop-uncalibrated"
                           >
                             {t(
@@ -436,7 +434,7 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                         <div
                           style={{
                             fontSize: 10,
-                            color: demoted ? "var(--sa-warning, #faad14)" : "var(--color-text-tertiary)",
+                            color: demoted ? "var(--amber)" : "var(--muted)",
                           }}
                           data-testid="reco-loop-weight"
                         >

@@ -34,8 +34,8 @@ function toTreeNode(
     title: (
       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
         {isFork
-          ? <BranchesOutlined style={{ color: "#722ed1", fontSize: 13 }} />
-          : <RobotOutlined style={{ color: "#1890ff", fontSize: 13 }} />}
+          ? <BranchesOutlined style={{ color: "var(--purple)", fontSize: 13 }} />
+          : <RobotOutlined style={{ color: "var(--accent)", fontSize: 13 }} />}
         <Text style={{ fontSize: 13 }}>{item.name}</Text>
         <Tag
           color={item.status === "running"
@@ -93,8 +93,8 @@ export function AgentHierarchyTree({
     <div
       style={{
         padding: "8px 12px",
-        borderBottom: "1px solid #f0f0f0",
-        background: "#fafafa",
+        borderBottom: "1px solid var(--border-light)",
+        background: "var(--surface)",
       }}
     >
       <div
@@ -105,7 +105,7 @@ export function AgentHierarchyTree({
           marginBottom: 6,
         }}
       >
-        <BranchesOutlined style={{ fontSize: 13, color: "#722ed1" }} />
+        <BranchesOutlined style={{ fontSize: 13, color: "var(--purple)" }} />
         <Text style={{ fontSize: 12, fontWeight: 600 }}>
           {t("agentHierarchy.title")}
         </Text>

@@ -49,7 +49,7 @@ export function SkillPanels() {
               style={{
                 flexShrink: 0,
                 overflow: "auto",
-                borderLeft: "1px solid var(--color-border-secondary)",
+                borderLeft: "1px solid var(--border-light)",
               }}
             >
               {sidebarPanels.map((panel) => {
@@ -116,7 +116,7 @@ function CollapsiblePanel({
           color: "var(--color-text-secondary)",
           borderBottom: collapsed
             ? "none"
-            : "1px solid var(--color-border-secondary)",
+            : "1px solid var(--border-light)",
         }}
         onClick={() => setCollapsed(!collapsed)}
         onKeyDown={(e) => {

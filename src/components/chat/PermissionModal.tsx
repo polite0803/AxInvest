@@ -17,18 +17,23 @@ function getRiskConfig(token: GlobalToken) {
   return {
     read_only: {
       color: "blue",
+      // Tag 仍用 AntD 预设名；描边/图标改走应用 token —— 旧代码拼出的名字形如 `--ant-color-blue`，
+      // 而 AntD 的变量是语义名（primary/success/error），没有色相名 ⇒ 那一档永远取不到值。
+      lineColor: "var(--accent)",
       icon: <Eye size={14} />,
       labelKey: "permission.readonly",
       bgColor: token.colorPrimaryBg,
     },
     write: {
       color: "orange",
+      lineColor: "var(--amber)",
       icon: <Pencil size={14} />,
       labelKey: "permission.write",
       bgColor: token.colorWarningBg,
     },
     execute: {
       color: "red",
+      lineColor: "var(--red)",
       icon: <Terminal size={14} />,
       labelKey: "permission.execute",
       bgColor: token.colorErrorBg,
@@ -212,7 +217,7 @@ export const PermissionModal: React.FC = () => {
     <Modal
       title={
         <Space size={8}>
-          <Shield size={18} style={{ color: "var(--ant-color-primary)" }} />
+          <Shield size={18} style={{ color: "var(--accent)" }} />
           <span id="permission-modal-title">{t("permissionModal.title")}</span>
           {permissionRequest && (
             <Tag
@@ -245,7 +250,7 @@ export const PermissionModal: React.FC = () => {
           }}
         >
           <div
-            style={{ fontSize: 12, color: "var(--ant-color-text-secondary)" }}
+            style={{ fontSize: 12, color: "var(--fg-2)" }}
           >
             {pendingEntries.length > 1
               ? t("permissionModal.pendingCount", {
@@ -291,14 +296,14 @@ export const PermissionModal: React.FC = () => {
             padding: "10px 14px",
             backgroundColor: riskCfg.bgColor,
             borderRadius: 8,
-            borderLeft: `3px solid var(--ant-color-${riskCfg.color})`,
+            borderLeft: `3px solid ${riskCfg.lineColor}`,
           }}
         >
           <Space size={4} align="start">
             <Info
               size={14}
               style={{
-                color: `var(--ant-color-${riskCfg.color})`,
+                color: riskCfg.lineColor,
                 marginTop: 2,
                 flexShrink: 0,
               }}
@@ -362,7 +367,7 @@ export const PermissionModal: React.FC = () => {
                 padding: 10,
                 fontSize: 12,
                 fontFamily: "var(--font-mono, 'JetBrains Mono', ui-monospace, monospace)",
-                backgroundColor: "var(--ant-color-fill-tertiary)",
+                backgroundColor: "var(--surface-2)",
                 borderRadius: 6,
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-all",
@@ -381,7 +386,7 @@ export const PermissionModal: React.FC = () => {
               style={{
                 fontSize: 12,
                 fontFamily: "var(--font-mono, 'JetBrains Mono', ui-monospace, monospace)",
-                backgroundColor: "var(--ant-color-fill-tertiary)",
+                backgroundColor: "var(--surface-2)",
                 padding: "6px 10px",
                 borderRadius: 6,
                 margin: 0,

@@ -21,7 +21,7 @@ export function SectionHeading({
           width: 20,
           height: 20,
           borderRadius: 10,
-          background: "var(--sa-blue, #1677ff)",
+          background: "var(--accent)",
           color: "#fff",
           fontSize: 12,
           fontWeight: 600,
@@ -36,7 +36,7 @@ export function SectionHeading({
       </span>
       <div>
         <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>{title}</div>
-        <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginTop: 2 }}>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
           {description}
         </div>
       </div>

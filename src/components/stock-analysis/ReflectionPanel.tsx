@@ -1221,7 +1221,7 @@ function renderPrettyJson(label: string, raw: string, maxHeight: number) {
       <pre
         style={{
           fontSize: 11,
-          background: "var(--bg-elevated)",
+          background: "var(--surface)",
           padding: 8,
           borderRadius: 4,
           maxHeight,
@@ -1252,7 +1252,7 @@ function renderBlackboardSnapshot(raw: string, label: string) {
       <pre
         style={{
           fontSize: 11,
-          background: "var(--bg-elevated)",
+          background: "var(--surface)",
           padding: 8,
           borderRadius: 4,
           maxHeight: 400,
@@ -1437,8 +1437,8 @@ export function TierSummary({
               <li key={r.reflectionId} style={{ marginBottom: 8, fontSize: 12 }}>
                 <Tag color={r.tier === "L2" ? "geekblue" : "purple"}>{r.tier}</Tag>
                 <Text strong>{r.stockCode}</Text> {r.stockName} · {horizonLabel(r.horizon)}
-                {r.proposal && <div style={{ color: "#595959", marginTop: 2 }}>{r.proposal}</div>}
-                {r.whatWentWrong && <div style={{ color: "#8c8c8c", marginTop: 2 }}>{r.whatWentWrong}</div>}
+                {r.proposal && <div style={{ color: "var(--fg-2)", marginTop: 2 }}>{r.proposal}</div>}
+                {r.whatWentWrong && <div style={{ color: "var(--muted)", marginTop: 2 }}>{r.whatWentWrong}</div>}
               </li>
             ))}
           </ul>
@@ -1873,7 +1873,7 @@ export function ExpandedReflectionRow(
             const labelKey = horizonLabelKey(key);
             const label = labelKey ? t(labelKey) : key;
             if (!entry) {
-              return { key, label: <span style={{ color: "#aaa" }}>{label}</span>, children: null };
+              return { key, label: <span style={{ color: "var(--muted)" }}>{label}</span>, children: null };
             }
             const badge = (() => {
               switch (entry.status) {
@@ -1936,7 +1936,7 @@ export function ExpandedReflectionRow(
             <div style={{ marginTop: 8 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
-                  <tr style={{ borderBottom: "1px solid #d9d9d9" }}>
+                  <tr style={{ borderBottom: "1px solid var(--border-light)" }}>
                     <th style={{ padding: "4px 8px", textAlign: "left", width: 32 }} />
                     <th style={{ padding: "4px 8px", textAlign: "left" }}>
                       {t("stockAnalysis.reflection.paramCol")}
@@ -1954,7 +1954,7 @@ export function ExpandedReflectionRow(
                 </thead>
                 <tbody>
                   {suggestions.map((s) => (
-                    <tr key={s.param} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                    <tr key={s.param} style={{ borderBottom: "1px solid var(--border-light)" }}>
                       <td style={{ padding: "4px 8px" }}>
                         <Checkbox
                           checked={checkedParams.includes(s.param)}
@@ -1974,7 +1974,7 @@ export function ExpandedReflectionRow(
                         {s.current_value}
                       </td>
                       <td style={{ padding: "4px 8px", textAlign: "right" }}>
-                        <Text strong style={{ color: "#1890ff" }}>{s.suggested_value}</Text>
+                        <Text strong style={{ color: "var(--accent)" }}>{s.suggested_value}</Text>
                       </td>
                       <td style={{ padding: "4px 8px" }}>
                         <Text type="secondary">{s.reason}</Text>
@@ -2087,7 +2087,7 @@ export function ExpandedReflectionRow(
                     padding: 8,
                     marginBottom: 6,
                     fontSize: 12,
-                    background: aiSelected.has(i) ? "transparent" : "var(--bg-disabled, #f5f5f5)",
+                    background: aiSelected.has(i) ? "transparent" : "var(--surface-2)",
                   }}
                 >
                   {/* P1-9 修复: Checkbox 让用户选择单条 */}
@@ -2114,7 +2114,7 @@ export function ExpandedReflectionRow(
                   <pre
                     style={{
                       fontSize: 11,
-                      background: "var(--bg-elevated, #fafafa)",
+                      background: "var(--surface)",
                       padding: 6,
                       borderRadius: 3,
                       margin: 0,
@@ -2139,7 +2139,7 @@ export function ExpandedReflectionRow(
             <pre
               style={{
                 fontSize: 11,
-                background: "var(--bg-elevated, #fafafa)",
+                background: "var(--surface)",
                 padding: 8,
                 borderRadius: 4,
                 marginTop: 4,

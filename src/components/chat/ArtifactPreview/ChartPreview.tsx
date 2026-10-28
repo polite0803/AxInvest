@@ -1,28 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { memo, useEffect, useRef } from "react";
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { cssVar } from "@/lib/cssVar";
+import { hueColor, SERIES_HUES } from "@/theme/categoricalColors";
+import { memo, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 interface ChartPreviewProps {
   option: Record<string, unknown>;
   width?: number | string;
   height?: number | string;
-  theme?: "light" | "dark";
 }
 
 export const ChartPreview = memo(function ChartPreview({
   option,
   width,
   height,
-  theme = "light",
 }: ChartPreviewProps) {
   const { t } = useTranslation();
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const isDark = useIsDarkTheme();
+  // 系列色取自类目色板（宿主侧按明暗档解析成具体值后注入 iframe）
+  const palette = useMemo(() => SERIES_HUES.map((hue) => hueColor(hue, isDark)), [isDark]);
 
   useEffect(() => {
     if (iframeRef.current) {
-      const bgColor = theme === "dark" ? "#1e1e1e" : "#ffffff";
-      const textColor = theme === "dark" ? "#ccc" : "#333";
+      // iframe 是独立文档，看不到宿主的 CSS 变量 ⇒ 在宿主侧把 token 解析成具体色值再注入。
+      // 兜底不再是「另一套写死的深色」，而是宿主主题的真实底色/前景色。
+      const bgColor = cssVar("--bg");
+      const textColor = cssVar("--fg");
 
       iframeRef.current.srcdoc = `<!DOCTYPE html>
 <html>
@@ -39,7 +45,7 @@ export const ChartPreview = memo(function ChartPreview({
 <script>
 var chart = echarts.init(document.getElementById('chart'), null, { renderer: 'canvas' });
 var option = ${JSON.stringify(option)};
-option.color = option.color || ['#5470c6','#91cc75','#fac858','#ee6666','#73c0de','#3ba272'];
+option.color = option.color || ${JSON.stringify(palette)};
 if (!option.textStyle) option.textStyle = { color: '${textColor}' };
 chart.setOption(option);
 window.addEventListener('resize', function() { chart.resize(); });
@@ -47,7 +53,7 @@ window.addEventListener('resize', function() { chart.resize(); });
 </body>
 </html>`;
     }
-  }, [option, theme]);
+  }, [option, palette]);
 
   return (
     <iframe

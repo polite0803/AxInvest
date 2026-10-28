@@ -210,6 +210,7 @@ pub async fn generate_research_report(
         .ok_or_else(|| format!("未找到供应商适配器: {}", registry_key))?;
 
     let ctx = axagent_providers::ProviderRequestContext {
+        header_timeout_secs: None,
         api_key,
         key_id: key_row.id,
         provider_id: conversation.provider_id.clone(),
@@ -419,6 +420,7 @@ pub async fn deep_research_topic(
             .ok_or_else(|| format!("未找到供应商适配器: {}", registry_key))?;
 
         let ctx = ProviderRequestContext {
+            header_timeout_secs: None,
             api_key,
             key_id: key_row.id,
             provider_id: pid.to_string(),

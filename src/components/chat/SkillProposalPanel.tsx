@@ -53,7 +53,7 @@ const SkillProposalCard: React.FC<SkillProposalCardProps> = ({
   return (
     <Card
       size="small"
-      style={{ marginBottom: 12, border: "1px solid #f0f0f0" }}
+      style={{ marginBottom: 12, border: "1px solid var(--border-light)" }}
       styles={{ body: { padding: 16 } }}
     >
       <div

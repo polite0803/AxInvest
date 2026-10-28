@@ -72,13 +72,13 @@ export function RealtimePushPanel() {
   const getStatusIcon = () => {
     switch (realtimePush.wsStatus) {
       case "connected":
-        return <CheckCircleOutlined style={{ color: "#52c41a" }} />;
+        return <CheckCircleOutlined style={{ color: "var(--green)" }} />;
       case "connecting":
-        return <SyncOutlined spin style={{ color: "#1890ff" }} />;
+        return <SyncOutlined spin style={{ color: "var(--accent)" }} />;
       case "disconnected":
-        return <DisconnectOutlined style={{ color: "#8c8c8c" }} />;
+        return <DisconnectOutlined style={{ color: "var(--muted)" }} />;
       case "error":
-        return <WarningOutlined style={{ color: "#ff4d4f" }} />;
+        return <WarningOutlined style={{ color: "var(--red)" }} />;
       default:
         return null;
     }
@@ -138,7 +138,7 @@ export function RealtimePushPanel() {
             justifyContent: "space-between",
             alignItems: "center",
             padding: "16px",
-            background: "#f5f5f5",
+            background: "var(--surface-2)",
             borderRadius: "8px",
           }}
         >
@@ -157,7 +157,7 @@ export function RealtimePushPanel() {
           <div
             style={{
               padding: "12px",
-              background: "#e6f7ff",
+              background: "var(--accent-bg)",
               borderRadius: "4px",
             }}
           >
@@ -206,7 +206,7 @@ export function RealtimePushPanel() {
                     <Space>
                       <Tag color="blue">{signal.type}</Tag>
                       {signal.deviceId && (
-                        <span style={{ color: "#8c8c8c", fontSize: 12 }}>
+                        <span style={{ color: "var(--muted)", fontSize: 12 }}>
                           {signal.deviceId}
                         </span>
                       )}
@@ -222,7 +222,7 @@ export function RealtimePushPanel() {
           <div
             style={{
               padding: "16px",
-              background: "#fff2e8",
+              background: "var(--amber-bg)",
               borderRadius: "4px",
               textAlign: "center",
             }}

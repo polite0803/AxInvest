@@ -3,7 +3,7 @@
 import { showBackendError } from "@/lib/errorI18n";
 import { message } from "@/lib/toast";
 import { Theme, ThemeColors, useThemeStore } from "@/stores/feature/themeStore";
-import { Button, Card, Form, Input, Modal, Popconfirm, Space, Typography } from "antd";
+import { Button, Card, Form, Input, Modal, Popconfirm, Space, theme, Typography } from "antd";
 import { Check, Copy, Delete, RefreshCw, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -71,6 +71,7 @@ function ThemePreview({ colors, name }: ThemePreviewProps) {
 
 export function ThemeManager() {
   const { t } = useTranslation();
+  const { token } = theme.useToken();
   const {
     currentTheme,
     themes,
@@ -79,6 +80,7 @@ export function ThemeManager() {
     setCurrentTheme,
     loadThemes,
     deleteCustomTheme,
+    getThemeColors,
   } = useThemeStore();
 
   const _selectedThemeRef = useRef<string | null>(null);
@@ -199,102 +201,6 @@ colors:
     (t) => !customThemes.some((ct) => ct.metadata.name === t.name),
   );
 
-  const getThemeColors = (themeName: string): ThemeColors | null => {
-    const builtInColors: Record<string, ThemeColors> = {
-      default: {
-        background: "#1e1e2e",
-        foreground: "#cdd6f4",
-        cursor: "#f5e0dc",
-        black: "#45475a",
-        red: "#f38ba8",
-        green: "#a6e3a1",
-        yellow: "#f9e2af",
-        blue: "#89b4fa",
-        magenta: "#f5c2e7",
-        cyan: "#94e2d5",
-        white: "#bac2de",
-        brightBlack: "#585b70",
-        brightRed: "#f38ba8",
-        brightGreen: "#a6e3a1",
-        brightYellow: "#f9e2af",
-        brightBlue: "#89b4fa",
-        brightMagenta: "#f5c2e7",
-        brightCyan: "#94e2d5",
-        brightWhite: "#a6adc8",
-      },
-      monokai: {
-        background: "#272822",
-        foreground: "#f8f8f2",
-        cursor: "#f8f8f0",
-        black: "#272822",
-        red: "#f92672",
-        green: "#a6e22e",
-        yellow: "#f4bf75",
-        blue: "#66d9ef",
-        magenta: "#ae81ff",
-        cyan: "#a1efe4",
-        white: "#f8f8f2",
-        brightBlack: "#75715E",
-        brightRed: "#f92672",
-        brightGreen: "#a6e22e",
-        brightYellow: "#f4bf75",
-        brightBlue: "#66d9ef",
-        brightMagenta: "#ae81ff",
-        brightCyan: "#a1efe4",
-        brightWhite: "#f9f8f5",
-      },
-      gruvbox: {
-        background: "#282828",
-        foreground: "#ebdbb2",
-        cursor: "#ebdbb2",
-        black: "#282828",
-        red: "#cc241d",
-        green: "#98971a",
-        yellow: "#d79921",
-        blue: "#458588",
-        magenta: "#b16286",
-        cyan: "#689d6a",
-        white: "#a89984",
-        brightBlack: "#928374",
-        brightRed: "#fb4934",
-        brightGreen: "#b8bb26",
-        brightYellow: "#fabd2f",
-        brightBlue: "#83a598",
-        brightMagenta: "#d3869b",
-        brightCyan: "#8ec07c",
-        brightWhite: "#ebdbb2",
-      },
-      "catppuccin-mocha": {
-        background: "#1e1e2e",
-        foreground: "#cdd6f4",
-        cursor: "#f5e0dc",
-        black: "#45475a",
-        red: "#f38ba8",
-        green: "#a6e3a1",
-        yellow: "#f9e2af",
-        blue: "#89b4fa",
-        magenta: "#f5c2e7",
-        cyan: "#94e2d5",
-        white: "#bac2de",
-        brightBlack: "#585b70",
-        brightRed: "#f38ba8",
-        brightGreen: "#a6e3a1",
-        brightYellow: "#f9e2af",
-        brightBlue: "#89b4fa",
-        brightMagenta: "#f5c2e7",
-        brightCyan: "#94e2d5",
-        brightWhite: "#a6adc8",
-      },
-    };
-
-    if (builtInColors[themeName]) {
-      return builtInColors[themeName];
-    }
-
-    const customTheme = customThemes.find((t) => t.metadata.name === themeName);
-    return customTheme?.colors || null;
-  };
-
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -339,8 +245,8 @@ colors:
               onClick={() => handleThemeSelect(theme.name)}
               style={{
                 border: currentTheme === theme.name
-                  ? "2px solid #89b4fa"
-                  : "1px solid #45475a",
+                  ? `2px solid ${token.colorPrimary}`
+                  : `1px solid ${token.colorBorder}`,
                 background: colors.background,
               }}
             >
@@ -384,8 +290,8 @@ colors:
                     onClick={() => handleThemeSelect(theme.metadata.name)}
                     style={{
                       border: currentTheme === theme.metadata.name
-                        ? "2px solid #89b4fa"
-                        : "1px solid #45475a",
+                        ? `2px solid ${token.colorPrimary}`
+                        : `1px solid ${token.colorBorder}`,
                       background: colors.background,
                     }}
                   >

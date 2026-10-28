@@ -1980,6 +1980,46 @@ mod tests {
         );
     }
 
+    /// v190：熔断那句话必须①用判据的同一套词表（降档，不是「未达 A 级」），
+    /// ②把「连续 N 轮」跨过的空档说出来（被剔除的孤儿观测条数 + 计入时的轮数）。
+    ///
+    /// 为什么要单独一条：文案在 Rhai 里拼，`dqi_orphans` 若没接进那句话，dao 与 hooks
+    /// 两侧照样全绿 —— 正是「补了值表 ≠ 锁住参与」那一格。
+    #[test]
+    fn portfolio_mgr_dqi_fuse_note_discloses_the_skipped_gap() {
+        let src = PRODUCTION_SCRIPTS
+            .iter()
+            .find(|(l, _)| *l == "portfolio-mgr")
+            .expect("脚本清单缺 portfolio-mgr")
+            .1;
+
+        let run = |orphans: i64, incl: i64| -> serde_json::Value {
+            let vars: Vec<(&str, serde_json::Value)> = vec![
+                ("dqi_grade", serde_json::json!("A")),
+                ("dqi_observations", serde_json::json!(12)),
+                ("dqi_streak", serde_json::json!(9)),
+                ("dqi_fuse_flag", serde_json::json!(1)),
+                ("dqi_orphans", serde_json::json!(orphans)),
+                ("dqi_streak_incl_orphans", serde_json::json!(incl)),
+            ];
+            run_portfolio_mgr_fully(src, &[], &vars)
+        };
+
+        // 现网形态：读 9 轮，其中 4 条观测因所属分析已删除被剔除，计入则断在 2 ⇒ 虚高
+        let inflated = run(4, 2);
+        let r = inflated["reasoning"].as_str().unwrap_or_default();
+        assert!(r.contains("连续9轮降档"), "熔断句要成句且按判据措辞: {r}");
+        assert!(!r.contains("未达A级"), "旧措辞不得复活（A/B 都是正常档）: {r}");
+        assert!(r.contains("其间4轮观测因所属分析已删除未参与"), "空档条数必须点名: {r}");
+        assert!(r.contains("计入则为2轮"), "差值必须端出来，只报条数不足以判断虚高还是低估: {r}");
+
+        // 负控：没有空档 ⇒ 那半句一个字都不许出现（恒亮的披露等于噪声，也是伪造的缺席）
+        let no_gap = run(0, 9);
+        let r2 = no_gap["reasoning"].as_str().unwrap_or_default();
+        assert!(r2.contains("连续9轮降档"), "{r2}");
+        assert!(!r2.contains("其间"), "orphans=0 却凭空造出一句披露: {r2}");
+    }
+
     /// P1-4（`PLAN-stock-decision-reliability.md` R6）：追涨门 —— 大阳放量的当日
     /// 不得盘后直接出开仓（紫金 10-09 形态：+4.87% 天量、次日接力被套）。
     #[test]

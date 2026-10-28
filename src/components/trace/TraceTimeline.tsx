@@ -145,9 +145,9 @@ export function TraceTimeline({ traceId }: TraceTimelineProps) {
           display: "flex",
           gap: 32,
           padding: "8px 16px",
-          background: "var(--ant-color-bg-container, #fff)",
+          background: "var(--surface)",
           borderRadius: 8,
-          border: "1px solid var(--ant-color-border-secondary, #f0f0f0)",
+          border: "1px solid var(--border-light)",
           marginBottom: 16,
         }}
       >
@@ -187,9 +187,9 @@ export function TraceTimeline({ traceId }: TraceTimelineProps) {
           alignItems: "flex-start",
           gap: 4,
           padding: 12,
-          background: "var(--ant-color-bg-container, #fff)",
+          background: "var(--surface)",
           borderRadius: 8,
-          border: "1px solid var(--ant-color-border-secondary, #f0f0f0)",
+          border: "1px solid var(--border-light)",
           overflow: "auto",
           minHeight: 80,
         }}

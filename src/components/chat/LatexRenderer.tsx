@@ -26,8 +26,8 @@ function renderLatexError(content: string, title: string): ReactNode {
     <span
       style={{
         display: "inline-block",
-        border: "1px solid #ff4d4f",
-        color: "#ff4d4f",
+        border: "1px solid var(--red)",
+        color: "var(--red)",
         padding: "2px 6px",
         borderRadius: 4,
         fontFamily: "var(--font-mono, 'JetBrains Mono', ui-monospace, monospace)",

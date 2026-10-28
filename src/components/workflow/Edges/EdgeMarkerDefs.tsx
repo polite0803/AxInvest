@@ -4,14 +4,14 @@
 //
 // 在 WorkflowEditor.tsx 的 <ReactFlow> 内部包含一次即可。
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { hueColor } from "@/theme/categoricalColors";
 import { theme } from "antd";
 import React from "react";
 
-const ORANGE_BASE = "#fa8c16";
-const PURPLE_BASE = "#722ed1";
-
 const EdgeMarkerDefs: React.FC = () => {
   const { token } = theme.useToken();
+  const isDark = useIsDarkTheme();
 
   return (
     <defs>
@@ -68,7 +68,7 @@ const EdgeMarkerDefs: React.FC = () => {
         markerHeight="6"
         orient="auto-start-reverse"
       >
-        <path d="M 0 0 L 10 5 L 0 10 z" fill={ORANGE_BASE} />
+        <path d="M 0 0 L 10 5 L 0 10 z" fill={hueColor("orange", isDark)} />
       </marker>
       <marker
         id="arrow-error"
@@ -90,7 +90,7 @@ const EdgeMarkerDefs: React.FC = () => {
         markerHeight="6"
         orient="auto-start-reverse"
       >
-        <path d="M 0 0 L 10 5 L 0 10 z" fill={PURPLE_BASE} />
+        <path d="M 0 0 L 10 5 L 0 10 z" fill={hueColor("purple", isDark)} />
       </marker>
       <marker
         id="arrow-merge"

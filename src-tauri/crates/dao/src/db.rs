@@ -721,11 +721,11 @@ pub fn get_builtin_providers() -> Vec<BuiltinProvider> {
             // 拼上 `/alpha/decisions` 组成完整端点，两者不一致会打偏。
             api_host: "https://openrouter.ai/api",
             models: vec![(
-                "typesafe/jev-1.13",
-                "Jev 1.13 (TypeSafe)",
+                "typesafe/jev-1.14",
+                "Jev 1.14 (TypeSafe)",
                 // 决策模型不挂 chat 能力标签（同 `TypeSafeAdapter::builtin_models`）。
                 vec![],
-                Some(32_000),
+                Some(262_144),
             )],
         },
     ]

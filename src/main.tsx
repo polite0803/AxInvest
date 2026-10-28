@@ -8,6 +8,7 @@ import ReactDOM from "react-dom/client";
 import { AppRoot } from "./App";
 import "./index.css";
 import { logIpcError } from "@/lib/invoke";
+import { initializeTheme } from "@/stores/feature/themeStore";
 import { initStoreRegistry } from "./lib/storeRegistry";
 // 预加载 fluent 图标集到内存，避免运行时从 Iconify CDN（api.iconify.design /
 // api.unisvg.com）按需拉取。中国大陆网络环境下这些 CDN 常超时，导致 Sidebar
@@ -49,6 +50,9 @@ queueMicrotask(() => {
     .then(({ registerDomainSceneTemplates }) => registerDomainSceneTemplates())
     .catch(logIpcError("Domain scene template registration failed"));
 });
+
+// 终端配色变量必须在首帧前落到根节点，否则终端面板只能吃兜底色
+initializeTheme();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

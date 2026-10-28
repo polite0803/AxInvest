@@ -159,7 +159,7 @@ function OverviewDetail({ overview }: { overview: PaperOverview }) {
           />
         </div>
       )}
-      <div style={{ marginTop: 8, fontSize: 12, color: "var(--ant-color-text-tertiary)" }}>
+      <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted)" }}>
         <Space split={<span>·</span>}>
           <span>
             {t("paper.createdAt")}: {new Date(overview.createdAt).toLocaleString()}
@@ -281,7 +281,7 @@ export function PaperOverviewPanel() {
                     style={{
                       cursor: "pointer",
                       background: overview.id === selectedOverviewId
-                        ? "var(--ant-color-fill-quaternary, #fafafa)"
+                        ? "var(--surface-2)"
                         : undefined,
                     }}
                     onClick={() => setSelectedOverviewId(overview.id)}

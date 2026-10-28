@@ -200,6 +200,7 @@ componentType 可选: "Sandbox" (沙箱页面) 或 "Markdown" (纯文档)。
     let base_url =
         axagent_harness::resolve_base_url_for_type(&provider.api_host, &provider.provider_type);
     let ctx = axagent_harness::ProviderRequestContext {
+        header_timeout_secs: None,
         api_key: decrypted_key,
         key_id: key_row.id,
         provider_id: provider.id.clone(),

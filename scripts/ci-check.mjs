@@ -283,6 +283,11 @@ if (canRunFrontend) {
   //   基线 27 是**未修的树**上的首读快照，清零后该规则自动变硬拦。见 scripts/check-analyst-id-shape.mjs 头。
   step("分析师 id 形态自检（六条负控 + 权威集推导）", "node scripts/check-analyst-id-shape.mjs --selftest");
   step("分析师 id 形态（base 域 / 带档后缀 / 裸匹配基线）", "node scripts/check-analyst-id-shape.mjs");
+  // 首字节预算口径（2026-10-27）：五条流式路径同源 + 默认值权威唯一 + 旧的 10s 固定闸门
+  //   已退役 + 模型级「首字节超时」可配置链路接通。此前只有 OpenAI 兼容路径有闸门，
+  //   且是「10s 固定 + 按体积每 64KB 加 5s」，改回去不会有任何门报错。
+  step("首字节预算口径自检（五条负控）", "node scripts/check-sse-header-budget.mjs --selftest");
+  step("首字节预算口径（五条路径同源 / 权威唯一 / 旧闸门退役）", "node scripts/check-sse-header-budget.mjs");
 
   // ── 补两条 CI 早已有、本地镜像却缺的门禁（2026-09-14：漂移修复）──
   // 为什么必须补：它们此前**只挂在 CI**，本地跑 `ci-check` 一路绿 ⇒ 本地绿冒充 CI 绿。

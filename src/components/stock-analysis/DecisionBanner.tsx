@@ -422,6 +422,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
         rawData,
         failedNodes,
         dataWarnings,
+        analysisId,
       };
       const result = await exportAnalysisReport(exportData, format, t);
       message.success(result);
@@ -461,6 +462,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     rawData,
     failedNodes,
     dataWarnings,
+    analysisId,
     t,
     message,
   ]);
@@ -469,6 +471,8 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     { key: "md", icon: <FileTextOutlined />, label: "Markdown (.md)" },
     { key: "docx", icon: <FileWordOutlined />, label: t("stockAnalysis.decision.wordDocument") },
     { key: "pptx", icon: <FilePptOutlined />, label: "PowerPoint (.pptx)" },
+    // HTML 走后端 `generate_stock_report`，含大盘指数/大宗交易/机构调研板块
+    { key: "html", icon: <FileTextOutlined />, label: t("stockAnalysis.decision.htmlReport") },
   ];
 
   const handleAskAI = useCallback(() => {
@@ -561,7 +565,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
           size="small"
           styles={{ body: { padding: "12px 16px" } }}
           style={{
-            borderLeft: "4px solid var(--sa-red, #ef4444)",
+            borderLeft: "4px solid var(--red)",
           }}
           data-testid="decision-banner-load-failed"
         >
@@ -601,7 +605,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
         size="small"
         styles={{ body: { padding: "12px 16px" } }}
         style={{
-          borderLeft: "4px solid var(--sa-amber, #f59e0b)",
+          borderLeft: "4px solid var(--amber)",
           ...(highlightedPanel === "decision"
             ? { boxShadow: "0 0 0 3px var(--accent)", transition: "box-shadow 0.4s" }
             : {}),
@@ -705,10 +709,10 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
   const rawConfidence = decision.confidence ?? 0;
   const confidencePct = Math.round(Math.max(0, Math.min(100, rawConfidence ?? 0)));
   const meterColor = confidencePct >= 70
-    ? "var(--sa-green)"
+    ? "var(--green)"
     : confidencePct >= 45
-    ? "var(--sa-amber)"
-    : "var(--sa-red)";
+    ? "var(--amber)"
+    : "var(--red)";
 
   // V58: 决策方向置信度 — 当与 confidence 差异大时（看空决策被低 confidence 掩盖）展示
   const decisionConfidencePct = decision.decisionConfidence != null
@@ -718,11 +722,11 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     && Math.abs(decisionConfidencePct - confidencePct) > 15;
   const decisionConfidenceColor = decisionConfidencePct != null
     ? (decisionConfidencePct >= 70
-      ? "var(--sa-green)"
+      ? "var(--green)"
       : decisionConfidencePct >= 45
-      ? "var(--sa-amber)"
-      : "var(--sa-red)")
-    : "var(--sa-amber)";
+      ? "var(--amber)"
+      : "var(--red)")
+    : "var(--amber)";
 
   // 置信度定性标签：让用户快速理解数字含义，而非只看到裸百分比
   const confidenceLabel = confidencePct >= 70
@@ -731,10 +735,10 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     ? t("stockAnalysis.confidenceMedium")
     : t("stockAnalysis.confidenceLow");
   const confidenceLabelColor = confidencePct >= 70
-    ? "var(--sa-green)"
+    ? "var(--green)"
     : confidencePct >= 45
-    ? "var(--sa-amber)"
-    : "var(--sa-red)";
+    ? "var(--amber)"
+    : "var(--red)";
 
   // 从报价和决策计算预期收益
   const currentPrice = quote?.price ?? 0;
@@ -824,7 +828,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
       ? t(`stockAnalysis.timeHorizon${HORIZON_T_SUFFIX[rec.horizon]}`)
       : timeHorizonLabel ?? "";
     return (
-      <span className="text-xs" style={{ color: "var(--sa-amber, #f59e0b)" }}>
+      <span className="text-xs" style={{ color: "var(--amber)" }}>
         {t(key, {
           valuationAction: rec?.valuationAction ?? "",
           horizon: horizonName,
@@ -886,7 +890,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
             {decision.expectedHoldingDays && (
               <span className="text-xs font-mono" style={{ color: "var(--muted)" }}>
                 {t("stockAnalysis.expectedHoldingDaysLabel")}{" "}
-                <span style={{ color: "var(--color-text-primary)", fontWeight: 500 }}>
+                <span style={{ color: "var(--fg)", fontWeight: 500 }}>
                   {t("stockAnalysis.expectedHoldingDays", { days: decision.expectedHoldingDays })}
                 </span>
               </span>
@@ -894,7 +898,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
             {decision.targetTimeframe && (
               <span className="text-xs font-mono" style={{ color: "var(--muted)" }}>
                 {t("stockAnalysis.targetTimeframe")}{" "}
-                <span style={{ color: "var(--color-text-primary)", fontWeight: 500 }}>
+                <span style={{ color: "var(--fg)", fontWeight: 500 }}>
                   {decision.targetTimeframe}
                 </span>
               </span>
@@ -1181,12 +1185,12 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                 style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold" style={{ color: "#7c3aed" }}>
+                  <span className="text-sm font-semibold" style={{ color: "var(--purple)" }}>
                     📊 {t("stockAnalysis.dualViewComparisonTitle")}
                   </span>
                   <span
                     className="text-sm font-mono px-1 py-px rounded"
-                    style={{ background: "rgba(239,68,68,0.10)", color: "#ef4444" }}
+                    style={{ background: "rgba(239,68,68,0.10)", color: "var(--red)" }}
                   >
                     {decisionAgreementScore}/100
                   </span>
@@ -1195,10 +1199,12 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                   {/* 公式视角 */}
                   <div
                     className="rounded px-1.5 py-1 space-y-0.5"
-                    style={{ background: "rgba(37,99,235,0.05)", borderLeft: "2px solid #2563eb" }}
+                    style={{ background: "rgba(37,99,235,0.05)", borderLeft: "2px solid var(--accent)" }}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-medium" style={{ color: "#2563eb" }}>{t("stockAnalysis.formula")}</span>
+                      <span className="font-medium" style={{ color: "var(--accent)" }}>
+                        {t("stockAnalysis.formula")}
+                      </span>
                       <Tag
                         color={getActionColor(displayAction ?? "")}
                         style={{ fontSize: 12, lineHeight: "20px", height: 20, paddingInline: 6 }}
@@ -1229,10 +1235,10 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                   {/* LLM 视角 */}
                   <div
                     className="rounded px-1.5 py-1 space-y-0.5"
-                    style={{ background: "rgba(124,58,237,0.05)", borderLeft: "2px solid #7c3aed" }}
+                    style={{ background: "rgba(124,58,237,0.05)", borderLeft: "2px solid var(--purple)" }}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-medium" style={{ color: "#7c3aed" }}>LLM</span>
+                      <span className="font-medium" style={{ color: "var(--purple)" }}>LLM</span>
                       <div className="flex items-center gap-1">
                         <Tag
                           color={getActionColor(llmStance)}
@@ -1246,7 +1252,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                             return (
                               <span
                                 className="text-sm px-0.5 rounded font-medium"
-                                style={{ background: "rgba(16,185,129,0.15)", color: "#10b981" }}
+                                style={{ background: "rgba(16,185,129,0.15)", color: "var(--green)" }}
                               >
                                 ✓ {t("stockAnalysis.recommended")}
                               </span>
@@ -1335,9 +1341,9 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
             {decisionAgreementScore !== null && decisionAgreementScore < disagreementThreshold && llmSummary && (
               <div
                 className="text-sm mb-2 p-2 rounded"
-                style={{ background: "rgba(124, 58, 237, 0.08)", borderLeft: "3px solid #7c3aed" }}
+                style={{ background: "rgba(124, 58, 237, 0.08)", borderLeft: "3px solid var(--purple)" }}
               >
-                <span className="font-medium" style={{ color: "#7c3aed" }}>
+                <span className="font-medium" style={{ color: "var(--purple)" }}>
                   💡 {t("stockAnalysis.llmPerspective")}:
                 </span>
                 <span className="ml-1" style={{ color: "var(--color-text-secondary)" }}>
@@ -1361,7 +1367,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               {decision.targetPrice && (
                 <span
                   className="text-sm px-2 py-1 rounded font-mono flex items-center justify-between"
-                  style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
+                  style={{ background: "var(--surface)", color: "var(--fg)" }}
                 >
                   <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetPrice")}</span>
                   <span className="font-semibold">¥{decision.targetPrice}</span>
@@ -1370,7 +1376,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               {decision.stopLoss && (
                 <span
                   className="text-sm px-2 py-1 rounded font-mono flex items-center justify-between"
-                  style={{ background: "var(--surface)", color: "var(--sa-red)" }}
+                  style={{ background: "var(--surface)", color: "var(--red)" }}
                 >
                   <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.stopLoss")}</span>
                   <span className="font-semibold">¥{decision.stopLoss}</span>
@@ -1378,7 +1384,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               )}
               <span
                 className="text-sm px-2 py-1 rounded font-mono flex items-center justify-between"
-                style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
+                style={{ background: "var(--surface)", color: "var(--fg)" }}
               >
                 <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.position")}</span>
                 <span className="font-semibold">{decision.positionPct}%</span>
@@ -1388,7 +1394,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                   className="text-sm px-2 py-1 rounded font-mono flex items-center justify-between"
                   style={{
                     background: "var(--surface)",
-                    color: upside >= 0 ? "var(--sa-green)" : "var(--sa-red)",
+                    color: upside >= 0 ? "var(--green)" : "var(--red)",
                   }}
                 >
                   <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.expectedUpside")}</span>
@@ -1408,7 +1414,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                   className="text-sm px-2 py-1 rounded flex items-center justify-between"
                   style={{
                     background: "var(--surface)",
-                    color: stockCodeEvidence.holdGate.holdAllowed ? "var(--sa-blue)" : "var(--sa-amber)",
+                    color: stockCodeEvidence.holdGate.holdAllowed ? "var(--accent)" : "var(--amber)",
                   }}
                 >
                   <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.decision.gateControl")}</span>
@@ -1422,7 +1428,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               {stockCodeEvidence && (
                 <span
                   className="text-sm px-2 py-1 rounded flex items-center justify-between font-mono"
-                  style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
+                  style={{ background: "var(--surface)", color: "var(--fg)" }}
                 >
                   <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.decision.evidenceScore")}</span>
                   <span className="font-semibold">
@@ -1436,7 +1442,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               {decision.expectedHoldingDays && (
                 <span
                   className="text-sm px-2 py-1 rounded font-mono flex items-center justify-between"
-                  style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
+                  style={{ background: "var(--surface)", color: "var(--fg)" }}
                 >
                   <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.expectedHoldingDaysLabel")}</span>
                   <span className="font-semibold">
@@ -1447,7 +1453,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               {decision.targetTimeframe && (
                 <span
                   className="text-sm px-2 py-1 rounded font-mono flex items-center justify-between"
-                  style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
+                  style={{ background: "var(--surface)", color: "var(--fg)" }}
                 >
                   <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetTimeframe")}</span>
                   <span className="font-semibold">{decision.targetTimeframe}</span>
@@ -1472,7 +1478,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       <div
                         key={h.key}
                         className="text-sm px-2 py-1 rounded"
-                        style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
+                        style={{ background: "var(--surface)", color: "var(--fg)" }}
                       >
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-semibold">{t(`stockAnalysis.timeHorizon${h.tSuffix}`)}</span>
@@ -1486,7 +1492,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                         </div>
                         <div className="flex items-center justify-between font-mono">
                           <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.stopLoss")}</span>
-                          <span className="font-semibold" style={{ color: "var(--sa-red)" }}>
+                          <span className="font-semibold" style={{ color: "var(--red)" }}>
                             {groupStop > 0 ? `¥${groupStop}` : "—"}
                           </span>
                         </div>
@@ -1512,11 +1518,11 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                     className="text-sm px-2 py-1 rounded mb-1.5 flex items-center gap-1.5"
                     style={{
                       background: "rgba(239,68,68,0.08)",
-                      borderLeft: "3px solid var(--sa-red, #ef4444)",
+                      borderLeft: "3px solid var(--red)",
                     }}
                   >
                     <span>⚠️</span>
-                    <span className="font-medium" style={{ color: "var(--sa-red, #ef4444)" }}>
+                    <span className="font-medium" style={{ color: "var(--red)" }}>
                       {t("stockAnalysis.horizonConflictTitle")}
                     </span>
                     <span style={{ color: "var(--muted)" }}>
@@ -1530,9 +1536,9 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                     const isActive = e.key === currentHorizonTab;
                     const dir = actionToDirection(e.d.action);
                     const tabColor = dir === "buy"
-                      ? "var(--sa-green, #10b981)"
+                      ? "var(--green)"
                       : dir === "sell"
-                      ? "var(--sa-red, #ef4444)"
+                      ? "var(--red)"
                       : "var(--muted)";
                     return (
                       <button
@@ -1572,10 +1578,10 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                   const dir = actionToDirection(d.action);
                   const hConf = Math.round(Math.max(0, Math.min(100, d.confidence ?? 0)));
                   const hConfColor = hConf >= 70
-                    ? "var(--sa-green)"
+                    ? "var(--green)"
                     : hConf >= 45
-                    ? "var(--sa-amber)"
-                    : "var(--sa-red)";
+                    ? "var(--amber)"
+                    : "var(--red)";
                   const hTarget = d.targetPrice != null ? Number(d.targetPrice) : null;
                   const hStop = d.stopLoss != null ? Number(d.stopLoss) : null;
                   return (
@@ -1584,7 +1590,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       style={{
                         background: "var(--surface)",
                         borderLeft: `3px solid ${
-                          dir === "buy" ? "var(--sa-green)" : dir === "sell" ? "var(--sa-red)" : "var(--muted)"
+                          dir === "buy" ? "var(--green)" : dir === "sell" ? "var(--red)" : "var(--muted)"
                         }`,
                       }}
                     >
@@ -1612,14 +1618,14 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                         </span>
                         <span className="text-sm" style={{ color: "var(--muted)" }}>·</span>
                         <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.stopLoss")}</span>
-                        <span className="font-mono font-semibold" style={{ color: "var(--sa-red)" }}>
+                        <span className="font-mono font-semibold" style={{ color: "var(--red)" }}>
                           {hStop != null && hStop > 0 ? `¥${hStop}` : "—"}
                         </span>
                         {d.takeProfitPct > 0 && (
                           <>
                             <span className="text-sm" style={{ color: "var(--muted)" }}>·</span>
                             <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.takeProfit")}</span>
-                            <span className="font-mono font-semibold" style={{ color: "var(--sa-green)" }}>
+                            <span className="font-mono font-semibold" style={{ color: "var(--green)" }}>
                               +{d.takeProfitPct}%
                             </span>
                           </>
@@ -1628,7 +1634,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                           <>
                             <span className="text-sm" style={{ color: "var(--muted)" }}>·</span>
                             <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.stopLoss")}%</span>
-                            <span className="font-mono font-semibold" style={{ color: "var(--sa-red)" }}>
+                            <span className="font-mono font-semibold" style={{ color: "var(--red)" }}>
                               -{d.stopLossPct}%
                             </span>
                           </>
@@ -1649,8 +1655,8 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                         <div
                           className="text-xs"
                           style={{
-                            color: "var(--sa-amber, #f59e0b)",
-                            borderLeft: "2px solid var(--sa-amber, #f59e0b)",
+                            color: "var(--amber)",
+                            borderLeft: "2px solid var(--amber)",
                             paddingLeft: 6,
                           }}
                         >
@@ -1731,8 +1737,8 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                         <div
                           className="text-xs"
                           style={{
-                            color: "var(--sa-amber, #f59e0b)",
-                            borderLeft: "2px solid var(--sa-amber, #f59e0b)",
+                            color: "var(--amber)",
+                            borderLeft: "2px solid var(--amber)",
                             paddingLeft: 6,
                           }}
                         >
@@ -1804,7 +1810,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                           不是本档自己的历史命中率（R-11 想要的逐档先验在该票上尚未成立）。 */
                       }
                       {d.priorSource != null && (d.priorSamples ?? 0) === 0 && (
-                        <div className="text-xs" style={{ color: "var(--sa-amber, #f59e0b)" }}>
+                        <div className="text-xs" style={{ color: "var(--amber)" }}>
                           {t("stockAnalysis.horizonPriorNoSamples")}
                         </div>
                       )}
@@ -1830,7 +1836,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                           {(d.absentLegs?.length ?? 0) > 0 && (
                             <div
                               className="flex items-center gap-1.5 flex-wrap"
-                              style={{ color: "var(--sa-amber, #f59e0b)" }}
+                              style={{ color: "var(--amber)" }}
                             >
                               <span>
                                 {t("stockAnalysis.horizonAbsentLegsLabel", { count: d.absentLegs?.length ?? 0 })}
@@ -1878,7 +1884,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                             : dir === "sell"
                             ? "rgba(239,68,68,0.12)"
                             : "rgba(156,163,175,0.12)",
-                          color: dir === "buy" ? "var(--sa-green)" : dir === "sell" ? "var(--sa-red)" : "var(--muted)",
+                          color: dir === "buy" ? "var(--green)" : dir === "sell" ? "var(--red)" : "var(--muted)",
                           cursor: "pointer",
                         }}
                         onClick={() => setActiveHorizonTab(e.key)}
@@ -1909,10 +1915,10 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                     style={{
                       width: 60,
                       padding: "1px 4px",
-                      border: "1px solid var(--color-border-tertiary)",
+                      border: "1px solid var(--border-light)",
                       borderRadius: 4,
                       background: "transparent",
-                      color: "var(--color-text-primary)",
+                      color: "var(--fg)",
                       height: 24,
                     }}
                   />
@@ -1925,10 +1931,10 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                     style={{
                       width: 50,
                       padding: "1px 4px",
-                      border: "1px solid var(--color-border-tertiary)",
+                      border: "1px solid var(--border-light)",
                       borderRadius: 4,
                       background: "transparent",
-                      color: "var(--color-text-primary)",
+                      color: "var(--fg)",
                       height: 24,
                     }}
                   />
@@ -2064,14 +2070,14 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                   <span className="text-sm" style={{ color: "var(--muted)" }}>·</span>
                   <span
                     className="px-1.5 rounded text-sm font-medium"
-                    style={{ background: "var(--sa-purple-bg, #ede9fe)", color: "#7c3aed" }}
+                    style={{ background: "var(--purple-bg)", color: "var(--purple)" }}
                   >
                     LLM: {llmStance}
                   </span>
                 </>
               )}
               {decisionAgreementScore < disagreementThreshold && (
-                <span className="text-sm" style={{ color: "#ef4444" }}>
+                <span className="text-sm" style={{ color: "var(--red)" }}>
                   ⚠️ {t("stockAnalysis.dualViewDisagreement")}
                 </span>
               )}
@@ -2085,7 +2091,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
             >
               <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold" style={{ color: "#7c3aed" }}>
+                <span className="text-sm font-semibold" style={{ color: "var(--purple)" }}>
                   📊 {t("stockAnalysis.fullComparisonTitle")}
                 </span>
                 <button
@@ -2100,10 +2106,12 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                 {/* 公式列 */}
                 <div
                   className="rounded px-1.5 py-1 space-y-0.5"
-                  style={{ background: "rgba(37,99,235,0.05)", borderLeft: "2px solid #2563eb" }}
+                  style={{ background: "rgba(37,99,235,0.05)", borderLeft: "2px solid var(--accent)" }}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-medium" style={{ color: "#2563eb" }}>{t("dualView.decision.formula")}</span>
+                    <span className="font-medium" style={{ color: "var(--accent)" }}>
+                      {t("dualView.decision.formula")}
+                    </span>
                     {decision?.action
                       ? <Tag color={getActionColor(displayAction ?? "")}>{t(getActionTKey(displayAction ?? ""))}</Tag>
                       : <span style={{ color: "var(--muted)" }}>—</span>}
@@ -2127,10 +2135,10 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                 {/* LLM 列 */}
                 <div
                   className="rounded px-1.5 py-1 space-y-0.5"
-                  style={{ background: "rgba(124,58,237,0.05)", borderLeft: "2px solid #7c3aed" }}
+                  style={{ background: "rgba(124,58,237,0.05)", borderLeft: "2px solid var(--purple)" }}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-medium" style={{ color: "#7c3aed" }}>LLM</span>
+                    <span className="font-medium" style={{ color: "var(--purple)" }}>LLM</span>
                     {llmStance
                       ? <Tag color={getActionColor(llmStance)}>{t(getActionTKey(llmStance))}</Tag>
                       : <span style={{ color: "var(--muted)" }}>—</span>}
@@ -2173,13 +2181,13 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       {llmFields.stopLossPct != null && (
                         <span>
                           {t("stockAnalysis.stopLoss")}{" "}
-                          <b style={{ color: "var(--sa-red)" }}>{llmFields.stopLossPct.toFixed(1)}%</b>
+                          <b style={{ color: "var(--red)" }}>{llmFields.stopLossPct.toFixed(1)}%</b>
                         </span>
                       )}
                       {llmFields.takeProfitPct != null && (
                         <span>
                           {t("stockAnalysis.takeProfit")}{" "}
-                          <b style={{ color: "var(--sa-green)" }}>{llmFields.takeProfitPct.toFixed(1)}%</b>
+                          <b style={{ color: "var(--green)" }}>{llmFields.takeProfitPct.toFixed(1)}%</b>
                         </span>
                       )}
                     </div>
@@ -2192,7 +2200,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                         <span
                           key={i}
                           className="px-1 rounded"
-                          style={{ background: "rgba(239,68,68,0.10)", color: "#ef4444" }}
+                          style={{ background: "rgba(239,68,68,0.10)", color: "var(--red)" }}
                         >
                           {g}
                         </span>
@@ -2212,7 +2220,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       </span>
                       {llmFields.evidence.slice(0, 2).map((e, i) => (
                         <div key={i} style={{ color: "var(--color-text-secondary)" }}>
-                          <span style={{ color: "#7c3aed" }}>[{e.source ?? "?"}]</span>{" "}
+                          <span style={{ color: "var(--purple)" }}>[{e.source ?? "?"}]</span>{" "}
                           <span className="line-clamp-1">{e.point ?? ""}</span>
                         </div>
                       ))}
@@ -2326,7 +2334,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                   className="pt-0.5 space-y-1"
                   style={{ borderTop: "1px solid var(--border)" }}
                 >
-                  <div className="text-[11px]" style={{ color: "#f59e0b" }}>
+                  <div className="text-[11px]" style={{ color: "var(--amber)" }}>
                     🔀 {t("stockAnalysis.crossCheck.title")}
                   </div>
                   {decision.crossCheck.recoGeneratedAt && decision.crossCheck.decisionGeneratedAt && (
@@ -2416,7 +2424,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                           className="line-clamp-1 text-[11px]"
                           style={{ color: "var(--muted)" }}
                         >
-                          <span style={{ color: "#10b981" }}>
+                          <span style={{ color: "var(--green)" }}>
                             {t("stockAnalysis.crossCheck.catalystLabel", {
                               confidence: Math.round(cat.confidence),
                             })}
@@ -2515,7 +2523,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
           {decision.stopLoss && (
             <div className="text-center p-3 rounded" style={{ background: "var(--surface)" }}>
               <div className="text-sm" style={{ color: "var(--muted)" }}>{t("stockAnalysis.stopLoss")}</div>
-              <div className="text-lg font-semibold font-mono" style={{ color: "var(--sa-red)" }}>
+              <div className="text-lg font-semibold font-mono" style={{ color: "var(--red)" }}>
                 ¥{decision.stopLoss}
               </div>
             </div>
@@ -2529,7 +2537,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               <div className="text-sm" style={{ color: "var(--muted)" }}>{t("stockAnalysis.expectedUpside")}</div>
               <div
                 className="text-lg font-semibold font-mono"
-                style={{ color: upside >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}
+                style={{ color: upside >= 0 ? "var(--green)" : "var(--red)" }}
               >
                 {upside >= 0 ? "+" : ""}
                 {upside.toFixed(1)}%
@@ -2568,7 +2576,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                   ? "rgba(239, 68, 68, 0.06)"
                   : "rgba(16, 185, 129, 0.05)",
                 borderLeft: `3px solid ${
-                  dataQualityReport.grade === "F" || dataQualityReport.grade === "D" ? "#ef4444" : "#10b981"
+                  dataQualityReport.grade === "F" || dataQualityReport.grade === "D" ? "var(--red)" : "var(--green)"
                 }`,
               }}
             >
@@ -2608,10 +2616,10 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       className="text-xs font-mono"
                       style={{
                         color: dataQualityReport.factor_completeness_pct >= 70
-                          ? "#10b981"
+                          ? "var(--green)"
                           : dataQualityReport.factor_completeness_pct >= 40
-                          ? "#f59e0b"
-                          : "#ef4444",
+                          ? "var(--amber)"
+                          : "var(--red)",
                       }}
                     >
                       {dataQualityReport.factor_completeness_pct.toFixed(1)}%
@@ -2620,13 +2628,13 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                   {dataQualityReport.missing_factors && dataQualityReport.missing_factors.length > 0 && (
                     <div className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
                       <span className="font-medium">{t("stockAnalysis.missingFactors")}</span>
-                      <span className="ml-1" style={{ color: "#ef4444" }}>
+                      <span className="ml-1" style={{ color: "var(--red)" }}>
                         {dataQualityReport.missing_factors.join("、")}
                       </span>
                     </div>
                   )}
                   {(!dataQualityReport.missing_factors || dataQualityReport.missing_factors.length === 0) && (
-                    <div className="text-xs" style={{ color: "#10b981" }}>
+                    <div className="text-xs" style={{ color: "var(--green)" }}>
                       {t("stockAnalysis.allFactorsComplete")}
                     </div>
                   )}
@@ -2645,7 +2653,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                     <div className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
                       <span className="font-medium">{t("stockAnalysis.upstreamDataGaps")}</span>
                       {dataQualityReport.upstream_data_gaps.map((g) => (
-                        <div key={g} className="ml-1" style={{ color: "#f59e0b" }}>
+                        <div key={g} className="ml-1" style={{ color: "var(--amber)" }}>
                           {g}
                         </div>
                       ))}
@@ -2667,7 +2675,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                     <div className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
                       <span className="font-medium">{t("stockAnalysis.verdictFieldGaps")}</span>
                       {dataQualityReport.verdict_field_gaps.map((g) => (
-                        <div key={g} className="ml-1" style={{ color: "#7c3aed" }}>
+                        <div key={g} className="ml-1" style={{ color: "var(--purple)" }}>
                           {g}
                         </div>
                       ))}
@@ -2691,7 +2699,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                         {t("stockAnalysis.methodNotApplicable")}
                       </span>
                       {dataQualityReport.method_not_applicable.map((g) => (
-                        <div key={g} className="ml-1" style={{ color: "#2563eb" }}>
+                        <div key={g} className="ml-1" style={{ color: "var(--accent)" }}>
                           {g}
                         </div>
                       ))}
@@ -2818,7 +2826,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                                   </td>
                                   <td
                                     className="py-1.5 px-2 text-right font-mono"
-                                    style={{ color: phHits > 0 ? "#f59e0b" : "var(--muted)" }}
+                                    style={{ color: phHits > 0 ? "var(--amber)" : "var(--muted)" }}
                                     title={phHits > 0
                                       ? t("stockAnalysis.dqPlaceholderTooltip", { count: phHits })
                                       : undefined}
@@ -2858,9 +2866,9 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                两种缺席各占一句；动作只给「重跑分析」：重跑决策不重写快照，给它是假门。 */
             <div
               className="mb-4 p-2 rounded text-xs"
-              style={{ background: "var(--surface)", borderLeft: "3px solid var(--sa-amber, #f59e0b)" }}
+              style={{ background: "var(--surface)", borderLeft: "3px solid var(--amber)" }}
             >
-              <div className="font-semibold mb-1" style={{ color: "#f59e0b" }}>
+              <div className="font-semibold mb-1" style={{ color: "var(--amber)" }}>
                 {t("stockAnalysis.dataQuality.snapshotAbsentTitle")}
               </div>
               <div style={{ color: "var(--color-text-secondary)" }}>
@@ -2894,9 +2902,9 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
             // 方便用户/开发者一眼看出是"空"还是"格式不匹配"还是"字段缺失"
             <div
               className="mb-4 p-2 rounded text-xs"
-              style={{ background: "var(--surface)", borderLeft: "3px solid var(--sa-amber, #f59e0b)" }}
+              style={{ background: "var(--surface)", borderLeft: "3px solid var(--amber)" }}
             >
-              <div className="font-semibold mb-1" style={{ color: "#f59e0b" }}>
+              <div className="font-semibold mb-1" style={{ color: "var(--amber)" }}>
                 {t("stockAnalysis.dataQuality.renderFailed")}
               </div>
               <div style={{ color: "var(--muted)" }}>
@@ -2907,7 +2915,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                     <span className="ml-2">{t("stockAnalysis.dataQuality.first200Chars")}</span>
                     <pre
                       className="mt-1 p-2 rounded font-mono"
-                      style={{ background: "var(--background)", whiteSpace: "pre-wrap", wordBreak: "break-all" }}
+                      style={{ background: "var(--bg)", whiteSpace: "pre-wrap", wordBreak: "break-all" }}
                     >
                       {dataQualitySummary.slice(0, 200)}
                       {dataQualitySummary.length > 200 ? "..." : ""}
@@ -2933,9 +2941,9 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
         {analystFeedback && analystFeedback.failed > 0 && (
           <div
             className="mb-4 p-2 rounded text-xs"
-            style={{ background: "var(--surface)", borderLeft: "3px solid #f5222d" }}
+            style={{ background: "var(--surface)", borderLeft: "3px solid var(--red)" }}
           >
-            <div className="font-semibold" style={{ color: "#f5222d" }}>
+            <div className="font-semibold" style={{ color: "var(--red)" }}>
               {t("stockAnalysis.dataQuality.feedbackWriteFailed", {
                 failed: analystFeedback.failed,
                 written: analystFeedback.written,
@@ -2946,7 +2954,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
         {analystFeedback && analystFeedback.failed === 0 && analystFeedback.skipped && (
           <div
             className="mb-4 p-2 rounded text-xs"
-            style={{ background: "var(--surface)", borderLeft: "3px solid var(--sa-amber, #f59e0b)" }}
+            style={{ background: "var(--surface)", borderLeft: "3px solid var(--amber)" }}
           >
             <div style={{ color: "var(--color-text-secondary)" }}>
               {feedbackSkippedText(t, analystFeedback.skipped)}
@@ -2965,9 +2973,9 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
         {decisionAgreementScore !== null && decisionAgreementScore < disagreementThreshold && llmSummary && (
           <div
             className="text-sm mb-4 p-3 rounded"
-            style={{ background: "rgba(124, 58, 237, 0.08)", borderLeft: "3px solid #7c3aed" }}
+            style={{ background: "rgba(124, 58, 237, 0.08)", borderLeft: "3px solid var(--purple)" }}
           >
-            <span className="font-medium" style={{ color: "#7c3aed" }}>
+            <span className="font-medium" style={{ color: "var(--purple)" }}>
               💡 {t("stockAnalysis.llmPerspective")}:
             </span>
             <span className="ml-1" style={{ color: "var(--color-text-secondary)" }}>
@@ -3061,13 +3069,17 @@ function DecisionInputsDiagPanel({ report }: { report: DecisionInputsReport }) {
         </div>
         <span className="text-xs font-mono" style={{ color: "var(--muted)" }}>
           {summary.missing > 0 && (
-            <span style={{ color: "#ef4444" }}>{t("stockAnalysis.diMissing", { count: summary.missing })} ·</span>
+            <span style={{ color: "var(--red)" }}>{t("stockAnalysis.diMissing", { count: summary.missing })} ·</span>
           )}
           {summary.low > 0 && (
-            <span style={{ color: "#f59e0b" }}>{t("stockAnalysis.diLowConfidence", { count: summary.low })} ·</span>
+            <span style={{ color: "var(--amber)" }}>
+              {t("stockAnalysis.diLowConfidence", { count: summary.low })} ·
+            </span>
           )}
           {summary.untrusted > 0 && (
-            <span style={{ color: "#ef4444" }}>{t("stockAnalysis.diUntrusted", { count: summary.untrusted })} ·</span>
+            <span style={{ color: "var(--red)" }}>
+              {t("stockAnalysis.diUntrusted", { count: summary.untrusted })} ·
+            </span>
           )}
           <span>{t("stockAnalysis.diTotal", { total: summary.total })}</span>
         </span>

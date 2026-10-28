@@ -1,4 +1,6 @@
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import i18n from "@/i18n";
+import { ensureECharts } from "@/lib/echartsInstance";
 import { invoke } from "@/lib/invoke";
 import type { StockQuote } from "@/types/stock-analysis";
 import { SwapOutlined } from "@ant-design/icons";
@@ -40,6 +42,7 @@ function CompareRow({ label, v1, v2, color1, color2, better }: {
 
 export function CompareView() {
   const { t } = useTranslation();
+  const isDark = useIsDarkTheme();
   const [code1, setCode1] = useState("");
   const [code2, setCode2] = useState("");
   const [quote1, setQuote1] = useState<StockQuote | null>(null);
@@ -93,10 +96,7 @@ export function CompareView() {
     if (radarRef.current.clientWidth === 0 || radarRef.current.clientHeight === 0) {
       return;
     }
-    if (!radarInstance.current || radarInstance.current.isDisposed()) {
-      radarInstance.current?.dispose();
-      radarInstance.current = echarts.init(radarRef.current, undefined, { renderer: "canvas" });
-    }
+    radarInstance.current = ensureECharts(radarRef.current, isDark);
     const chart = radarInstance.current;
     if (!quote1 || !quote2) {
       chart.clear();
@@ -158,7 +158,7 @@ export function CompareView() {
       chart.dispose();
       radarInstance.current = null;
     };
-  }, [quote1, quote2, t]);
+  }, [quote1, quote2, t, isDark]);
 
   return (
     <Card
@@ -221,8 +221,8 @@ export function CompareView() {
             label={t("stockAnalysis.change")}
             v1={`${quote1.changePct.toFixed(2)}%`}
             v2={`${quote2.changePct.toFixed(2)}%`}
-            color1={quote1.changePct >= 0 ? "var(--sa-red)" : "var(--sa-green)"}
-            color2={quote2.changePct >= 0 ? "var(--sa-red)" : "var(--sa-green)"}
+            color1={quote1.changePct >= 0 ? "var(--red)" : "var(--green)"}
+            color2={quote2.changePct >= 0 ? "var(--red)" : "var(--green)"}
             better={quote1.changePct > quote2.changePct ? "left" : "right"}
           />
           <CompareRow

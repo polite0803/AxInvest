@@ -194,6 +194,7 @@ async fn resolve_fallback_retry(
     );
 
     let ctx = ProviderRequestContext {
+        header_timeout_secs: overrides.as_ref().and_then(|p| p.header_timeout_secs),
         api_key: decrypted_key,
         key_id: key_row.id.clone(),
         provider_id: provider.id.clone(),
@@ -1502,6 +1503,7 @@ pub async fn send_message(
     let assistant_message_id = axagent_kit::utils::gen_id();
 
     let ctx = ProviderRequestContext {
+        header_timeout_secs: model_param_overrides.as_ref().and_then(|p| p.header_timeout_secs),
         api_key: decrypted_key,
         key_id: key_row.id.clone(),
         provider_id: provider.id.clone(),
@@ -1894,7 +1896,19 @@ pub async fn regenerate_message(
         &global_settings,
     );
 
+    // 首字节预算取模型级那一格（设置页「供应商-模型 → 首字节超时」）。
+    // 必须在 ctx 之前解析 —— ctx 按值构造，构造完再补就迟了。
+    let regen_model_overrides = axagent_dao::repo::provider::get_model(
+        state.harness.db(),
+        &conversation.provider_id,
+        &conversation.model_id,
+    )
+    .await
+    .ok()
+    .and_then(|m| m.param_overrides);
+
     let ctx = ProviderRequestContext {
+        header_timeout_secs: regen_model_overrides.as_ref().and_then(|p| p.header_timeout_secs),
         api_key: decrypted_key,
         key_id: key_row.id.clone(),
         provider_id: provider.id.clone(),
@@ -1943,14 +1957,6 @@ pub async fn regenerate_message(
     )
     .await;
 
-    let regen_model_overrides = axagent_dao::repo::provider::get_model(
-        state.harness.db(),
-        &conversation.provider_id,
-        &conversation.model_id,
-    )
-    .await
-    .ok()
-    .and_then(|m| m.param_overrides);
     let use_max_completion_tokens =
         regen_model_overrides.as_ref().and_then(|p| p.use_max_completion_tokens);
     let model_temperature = regen_model_overrides.as_ref().and_then(|p| p.temperature);
@@ -2273,7 +2279,19 @@ pub async fn regenerate_with_model(
         &global_settings,
     );
 
+    // 首字节预算取模型级那一格（设置页「供应商-模型 → 首字节超时」）。
+    // 必须在 ctx 之前解析 —— ctx 按值构造，构造完再补就迟了。
+    let rwm_overrides = axagent_dao::repo::provider::get_model(
+        state.harness.db(),
+        &conversation.provider_id,
+        &conversation.model_id,
+    )
+    .await
+    .ok()
+    .and_then(|m| m.param_overrides);
+
     let ctx = ProviderRequestContext {
+        header_timeout_secs: rwm_overrides.as_ref().and_then(|p| p.header_timeout_secs),
         api_key: decrypted_key,
         key_id: key_row.id.clone(),
         provider_id: provider.id.clone(),
@@ -2320,14 +2338,6 @@ pub async fn regenerate_with_model(
     )
     .await;
 
-    let rwm_overrides = axagent_dao::repo::provider::get_model(
-        state.harness.db(),
-        &conversation.provider_id,
-        &conversation.model_id,
-    )
-    .await
-    .ok()
-    .and_then(|m| m.param_overrides);
     let use_max_completion_tokens =
         rwm_overrides.as_ref().and_then(|p| p.use_max_completion_tokens);
     let model_temperature = rwm_overrides.as_ref().and_then(|p| p.temperature);

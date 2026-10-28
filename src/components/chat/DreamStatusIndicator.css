@@ -13,20 +13,20 @@
 }
 
 .dream-indicator--running {
-  color: #722ed1;
-  background: rgba(114, 45, 209, 0.08);
-  border: 1px solid rgba(114, 45, 209, 0.15);
+  color: var(--purple);
+  background: var(--purple-bg);
+  border: 1px solid color-mix(in srgb, var(--purple) 15%, transparent);
 }
 
 .dream-indicator--completed {
-  color: #52c41a;
-  background: rgba(82, 196, 26, 0.08);
-  border: 1px solid rgba(82, 196, 26, 0.15);
+  color: var(--green);
+  background: var(--green-bg);
+  border: 1px solid color-mix(in srgb, var(--green) 15%, transparent);
   animation: dream-fade-in 0.3s ease;
 }
 
 .dream-indicator--idle {
-  color: var(--text-tertiary, #bfbfbf);
+  color: var(--muted);
   background: transparent;
   border: 1px solid transparent;
 }
@@ -48,11 +48,11 @@
 
 .dream-indicator__icon--pulse {
   animation: dream-pulse 1.8s ease-in-out infinite;
-  color: #722ed1;
+  color: var(--purple);
 }
 
 .dream-indicator__icon--done {
-  color: #52c41a;
+  color: var(--green);
   font-size: 13px;
 }
 

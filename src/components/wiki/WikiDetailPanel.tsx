@@ -252,7 +252,7 @@ export function WikiDetailPanel({
         >
           <div
             className="w-1.5 h-5 rounded-full"
-            style={{ backgroundColor: "#FA8C16" }}
+            style={{ backgroundColor: "var(--amber)" }}
           />
           <Text strong ellipsis style={{ flex: 1 }}>
             {noteNode?.title || noteId}

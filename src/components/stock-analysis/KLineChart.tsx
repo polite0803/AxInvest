@@ -1,5 +1,9 @@
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { cssVar } from "@/lib/cssVar";
+import { ensureECharts } from "@/lib/echartsInstance";
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { hueColor } from "@/theme/categoricalColors";
 import type { KLine } from "@/types/stock-analysis";
 import * as echarts from "echarts";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -47,22 +51,31 @@ function calcMA(data: number[], w: number): (number | null)[] {
 }
 
 // ── 颜色 ──
-const SA_RED = "#ef4444";
-const SA_GREEN = "#22c55e";
-const MA_ORANGE = "#f59e0b";
-const MA_BLUE = "#3b82f6";
-const MA_PURPLE = "#a855f7";
-const LIMIT_UP_COLOR = "#ef4444";
-const LIMIT_DOWN_COLOR = "#22c55e";
-const CURRENT_PRICE_COLOR = "#8b5cf6";
+// 涨跌走语义 token，MA / 财报事件走类目色板（四类必须彼此可分辨）。
+// ⚠ 必须在**取值点**解析，不能退回模块级常量：模块在 import 期求值一次，
+// 换主题后 K 线、均线、图例全是旧配色（ECharts 只认具体色值，不认 var()）。
+function buildKLinePalette(isDark: boolean) {
+  return {
+    // A 股口径：涨=红、跌=绿
+    up: cssVar("--red"),
+    down: cssVar("--green"),
+    currentPrice: cssVar("--accent"),
+    ma5: hueColor("orange", isDark),
+    ma10: hueColor("blue", isDark),
+    ma20: hueColor("purple", isDark),
+    // 压在三类财报事件图钉上的标签文字：亮档图钉是深色（取白），暗档图钉是浅色（取画布底）
+    onColor: isDark ? cssVar("--bg") : cssVar("--surface"),
+    earnings: {
+      preliminary: hueColor("pink", isDark),
+      express: hueColor("violet", isDark),
+      formal: hueColor("geekblue", isDark),
+      shareholders_meeting: hueColor("cyan", isDark),
+      other: hueColor("gray", isDark),
+    } as Record<string, string>,
+  };
+}
 
-const EARNINGS_COLORS: Record<string, string> = {
-  preliminary: "#c026d3",
-  express: "#7c3aed",
-  formal: "#1e40af",
-  shareholders_meeting: "#0891b2",
-  other: "#6b7280",
-};
+type KLinePalette = ReturnType<typeof buildKLinePalette>;
 
 export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
   const { t } = useTranslation();
@@ -80,6 +93,8 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
   const showEarningsOnChart = useStockAnalysisStore((s) => s.showEarningsOnChart);
   const setShowEarningsOnChart = useStockAnalysisStore((s) => s.setShowEarningsOnChart);
   const asOfDate = useTimeAnchorStore((s) => s.asOfDate);
+  const isDark = useIsDarkTheme();
+  const pal = useMemo<KLinePalette>(() => buildKLinePalette(isDark), [isDark]);
   const chartRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
 
@@ -148,7 +163,7 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
       if (el.clientWidth === 0 || el.clientHeight === 0) { return; }
       const existing = instanceRef.current;
       if (existing && !existing.isDisposed()) { existing.dispose(); }
-      instanceRef.current = echarts.init(el, undefined, { renderer: "canvas" });
+      instanceRef.current = ensureECharts(el, isDark);
       // init 时安装一次性的 zoom handler，注销旧 handler
       const chart = instanceRef.current;
       const oldHandler = zoomHandlerRef.current;
@@ -183,7 +198,7 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
       instanceRef.current = null;
       zoomHandlerRef.current = null;
     };
-  }, []);
+  }, [isDark]);
 
   // ── 缓存写入 ──
   useEffect(() => {
@@ -252,7 +267,7 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
           name: ev.eventType,
           coord: [ev.eventDate, klineData[idx].high],
           value: ev.period ?? ev.eventType,
-          itemStyle: { color: EARNINGS_COLORS[ev.eventType] ?? EARNINGS_COLORS.other },
+          itemStyle: { color: pal.earnings[ev.eventType] ?? pal.earnings.other },
         });
       }
     }
@@ -277,10 +292,10 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
       markLineData.push({
         name: t("stockAnalysis.limitUp"),
         yAxis: quote.limitUp,
-        lineStyle: { color: LIMIT_UP_COLOR, type: "dashed", width: 1 },
+        lineStyle: { color: pal.up, type: "dashed", width: 1 },
         label: {
           formatter: `${t("stockAnalysis.limitUp")} ${quote.limitUp.toFixed(2)}`,
-          color: LIMIT_UP_COLOR,
+          color: pal.up,
           position: "insideStartTop",
         },
       });
@@ -289,10 +304,10 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
       markLineData.push({
         name: t("stockAnalysis.limitDown"),
         yAxis: quote.limitDown,
-        lineStyle: { color: LIMIT_DOWN_COLOR, type: "dashed", width: 1 },
+        lineStyle: { color: pal.down, type: "dashed", width: 1 },
         label: {
           formatter: `${t("stockAnalysis.limitDown")} ${quote.limitDown.toFixed(2)}`,
-          color: LIMIT_DOWN_COLOR,
+          color: pal.down,
           position: "insideStartBottom",
         },
       });
@@ -301,10 +316,10 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
       markLineData.push({
         name: t("stockAnalysis.price"),
         yAxis: quote.price,
-        lineStyle: { color: CURRENT_PRICE_COLOR, type: "solid", width: 1.5 },
+        lineStyle: { color: pal.currentPrice, type: "solid", width: 1.5 },
         label: {
           formatter: `${t("stockAnalysis.price")} ${quote.price.toFixed(2)}`,
-          color: CURRENT_PRICE_COLOR,
+          color: pal.currentPrice,
           position: "insideEndTop",
         },
       });
@@ -332,7 +347,7 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
           const prevRaw = idx > 0 ? klineData[idx - 1] : null;
           const prevClose = prevRaw?.close ?? null;
           const changePct = raw && prevClose ? (raw.close - prevClose) / prevClose * 100 : null;
-          const changeColor = changePct == null ? "var(--fg)" : changePct >= 0 ? SA_RED : SA_GREEN;
+          const changeColor = changePct == null ? "var(--fg)" : changePct >= 0 ? pal.up : pal.down;
           const lines = [
             `<div style="font-weight:600;margin-bottom:4px">${dates[idx] || ""}</div>`,
             `${t("stockAnalysis.open")}: ${k[0].toFixed(2)} &nbsp; ${
@@ -358,13 +373,13 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
             lines.push(`${t("stockAnalysis.turnoverRate")}: ${raw.turnoverRate.toFixed(2)}%`);
           }
           if (indicators.ma5 && ma5[idx] != null) {
-            lines.push(`<span style="color:${MA_ORANGE}">MA5: ${ma5[idx]}</span>`);
+            lines.push(`<span style="color:${pal.ma5}">MA5: ${ma5[idx]}</span>`);
           }
           if (indicators.ma10 && ma10[idx] != null) {
-            lines.push(`<span style="color:${MA_BLUE}">MA10: ${ma10[idx]}</span>`);
+            lines.push(`<span style="color:${pal.ma10}">MA10: ${ma10[idx]}</span>`);
           }
           if (indicators.ma20 && ma20[idx] != null) {
-            lines.push(`<span style="color:${MA_PURPLE}">MA20: ${ma20[idx]}</span>`);
+            lines.push(`<span style="color:${pal.ma20}">MA20: ${ma20[idx]}</span>`);
           }
           return lines.filter(Boolean).join("<br>");
         },
@@ -417,14 +432,19 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
           data: ohlc,
           xAxisIndex: 0,
           yAxisIndex: 0,
-          itemStyle: { color: SA_RED, color0: SA_GREEN, borderColor: SA_RED, borderColor0: SA_GREEN },
+          itemStyle: { color: pal.up, color0: pal.down, borderColor: pal.up, borderColor0: pal.down },
           markPoint: earningsPoints.length > 0
             ? {
               symbol: "pin",
               symbolSize: 22,
               symbolOffset: [0, -8],
               data: earningsPoints,
-              label: { show: true, formatter: (p: { value?: string }) => p.value ?? "", fontSize: 9, color: "#fff" },
+              label: {
+                show: true,
+                formatter: (p: { value?: string }) => p.value ?? "",
+                fontSize: 9,
+                color: pal.onColor,
+              },
               z: 5,
             }
             : undefined,
@@ -445,7 +465,7 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
             yAxisIndex: 0,
             smooth: true,
             showSymbol: false,
-            lineStyle: { width: 1.5, color: MA_ORANGE } as const,
+            lineStyle: { width: 1.5, color: pal.ma5 } as const,
             z: 1,
           }]
           : []),
@@ -458,7 +478,7 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
             yAxisIndex: 0,
             smooth: true,
             showSymbol: false,
-            lineStyle: { width: 1.5, color: MA_BLUE } as const,
+            lineStyle: { width: 1.5, color: pal.ma10 } as const,
             z: 1,
           }]
           : []),
@@ -471,7 +491,7 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
             yAxisIndex: 0,
             smooth: true,
             showSymbol: false,
-            lineStyle: { width: 1.5, color: MA_PURPLE } as const,
+            lineStyle: { width: 1.5, color: pal.ma20 } as const,
             z: 1,
           }]
           : []),
@@ -484,7 +504,7 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
           itemStyle: {
             color: (p: { dataIndex: number }) => {
               const k = ohlc[p.dataIndex];
-              return k && k[1] >= k[0] ? SA_RED : SA_GREEN;
+              return k && k[1] >= k[0] ? pal.up : pal.down;
             },
           },
         },
@@ -497,7 +517,7 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
     const newHandler = buildZoomHandler(dates.length);
     zoomHandlerRef.current = newHandler;
     chart.on("dataZoom", newHandler);
-  }, [klineData, quote, t, indicators, getChart, earningsEvents, showEarningsOnChart, buildZoomHandler]);
+  }, [klineData, quote, t, indicators, getChart, earningsEvents, showEarningsOnChart, buildZoomHandler, pal]);
 
   const chartHeight = Math.max(300, Math.min(520, window.innerHeight * 0.38));
   const curTierInfo = useMemo(() => {
@@ -519,9 +539,9 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
               padding: "2px 8px",
               fontSize: 12,
               borderRadius: 4,
-              background: "rgba(124,58,237,0.12)",
-              color: "#7c3aed",
-              border: "1px solid rgba(124,58,237,0.35)",
+              background: "var(--purple-bg)",
+              color: "var(--purple)",
+              border: "1px solid color-mix(in srgb, var(--purple) 35%, transparent)",
             }}
             title={t("timeTravel.badge.replayTooltip", { date: asOfDate })}
           >
@@ -582,9 +602,9 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
 
       {/* MA/财报图例开关 */}
       <div className="flex gap-3 mb-1 flex-wrap items-center text-xs" style={{ color: "var(--muted)" }}>
-        {[{ k: "ma5" as const, c: MA_ORANGE, l: "MA5" }, { k: "ma10" as const, c: MA_BLUE, l: "MA10" }, {
+        {[{ k: "ma5" as const, c: pal.ma5, l: "MA5" }, { k: "ma10" as const, c: pal.ma10, l: "MA10" }, {
           k: "ma20" as const,
-          c: MA_PURPLE,
+          c: pal.ma20,
           l: "MA20",
         }].map((opt) => (
           <label
@@ -611,7 +631,7 @@ export function KLineChart(_props?: { klines?: KLine[]; height?: number }) {
             onChange={() => setShowEarningsOnChart(!showEarningsOnChart)}
             style={{ width: 12, height: 12 }}
           />
-          <span style={{ color: EARNINGS_COLORS.formal }}>📅</span>
+          <span style={{ color: pal.earnings.formal }}>📅</span>
           {t("stockAnalysis.earningsOnChart")}
           {earningsEvents.length > 0 && <span className="text-gray-400">({earningsEvents.length})</span>}
         </label>

@@ -459,3 +459,135 @@ LLM 侧**都真的没有决策**（`llm_decision_json` 为空）。
   `debate-bull-bear` 之后按既有降级话术继续 ⇒ **本轮仍产出决策**（而非 `数据缺失`）。
 - 真出现「所有分析师都被卡」的极端情形时，占位卡的 `hint` 现在指向**真正的根因节点**，不再误导去查 Rhai。
 - 存量库需**重播种**（升版触发）后新图才落库；已生成的旧记录不回写。
+
+---
+
+## 补充七（2026-10-28）「9 个降级」是跨轮熔断读数；文案与判据三处不一致收口
+
+### 现象与用户判读
+
+用户：「最新的股票分析结果出现 9 个降级」→ 追问「为什么会出现决策不可信」。
+
+实测（生产库 `axinvest`，记录 `bdb58aea…` = 002812 / `analysis_kind=live` / 2026-10-28 05:47 / 模板 v189）：
+
+- 本轮 data-quality：grade **A**、score 86.9、`degraded_count=0`、`gap_count=0`、10/10 `status=normal`；
+- `decision_json`：`weightsCollapsed=false`、`collapseReason=none`、`dataGaps=[]`，但 **`dqiFuseState="fused"`、`dqiStreak=9`**；
+- reasoning 原文：`⚠️数据质量熔断(连续9.0轮未达A级),置信度上限压至60.0`。
+
+⇒ 「9」**不是本轮的 9 个降级**，是 `dao::repo::data_quality_fuse::load_recent_streak` 的**跨轮**计数；点亮「决策可信度受限」的是 `DecisionTrustNotice` 的 `fused` 分支（该分支与本轮 grade 无关，属设计）。
+
+### 那 9 轮是谁（按 `observed_at` 倒序、剔孤儿、同 `analysis_id` 去重 —— 即 dao 口径）
+
+| # | observed_at | grade | 股票 | 来历 |
+|---|---|---|---|---|
+| 1 | 10-28 03:42 | D | 000001 | live（10 位分析师全缺位） |
+| 2 | 10-27 23:50 | C | 001359 | replay / time_travel |
+| 3–8 | 10-27 08:14→12:17 | D | 002343 / 001216 / 003006 / 600802 / 600267 / 002141 | replay / **mover_recall**（as-of 2026-06-11，每条都是「10 个缺失，报告 0.0」） |
+| 9 | 10-27 08:10 | D | 000001 | live |
+| — | 10-26 20:59 | **B** | 603466 | live ⇒ 正常档，前缀在此断开 |
+
+计数器**不分票、不分 live/回放**（`DQI_SCOPE_GLOBAL` 注释明写「一轮分析一条，不区分票、不区分档」）⇒ 9 行里 7 行来自补分析回放批次。熔断后 `cap_floor=60` 压顶：本轮 A 档阶梯上限 99.9 被压到 60.0（同一条 reasoning 里还有第二处独立封顶也压到 60）。
+
+### 三处不一致与修法
+
+1. **文案比判据说得严**。判据自 2026-10-10 起 `A` 与 `B` 都是正常档（`grade_is_abnormal` 只把 C/D/F/无等级算异常，见本文件补充二/四），但仍有 5 处写「拿不到 A 级 / 未达 A 级」：`portfolio-mgr.rhai` 的 reasoning 两句、`hooks.rs` 的注入变量描述与段头注释、`seed_stock_analysis.rs` 熔断门节点描述（LLM 可见）、`DecisionTrustNotice.tsx` 的组件注释、`data_quality_placeholder_gate.rs` 的历史段。另 11 语言 `stockAnalysis.weightCollapseDqi` 带括注 `dqi<25`，而代码里根本没有该阈值（`dqi_collapsed = dqi_grade_str == "F"`）。
+   → 统一改「降档（C/D/F 或无等级）」；删 11 语言的 `dqi<25` 括注（每份一行）；顺带把 reasoning 里 `连续9.0轮` 的 f64 直插改 `to_int()`。
+2. **「连续 N 轮」跨过空档却不披露**。`alive_analysis_ids` 把「所属分析已删除」的观测行剔出前缀，模块头却声称「剔除它不会把某条真实轮次算少」——**不成立**：本次 15 条孤儿行里的 `10-27 14:29:51`（B 级、正常档）本可把前缀断在 **2**，剔除后读出 **9**；反向（被剔的都是异常轮）则低估。
+   → 判据口径**不动**（剔除仍是判据），只补披露：`DqiStreak` 加 `orphans_skipped` / `consecutive_abnormal_incl_orphans`，聚合逻辑抽成纯函数 `streak_from_rows`（跨度下界取**第一个存活正常档**，不是最后一条被数的异常轮——取后者会漏报「正常档孤儿夹在两条存活异常轮之间」那种形态）；`hooks.rs` 注入 `dqi_orphans` / `dqi_streak_incl_orphans`；reasoning 追加「其间 N 轮观测因所属分析已删除未参与(计入则为 M 轮)」；`portfolio-mgr` 的 `input_mapping` 加两条同名映射 ⇒ **`TEMPLATE_VERSION` 189→190**。
+3. **摘要下溢成负数**。`data-quality.rhai` 的 `low_count = n_int - good_count - gap_count`：`n_int` 只数**有 verdict** 的分析师，`gap_count` 却把无 verdict / untrusted 者一并计入 ⇒ 有人缺席时减法为负。实证：当日 8 条 D 级轮的摘要写「10 个缺失，**-9 个低置信**」。同一文件输出段（`status_*_count` 处）早已写明「不用那种减法，会下溢成负数」，减法却留在摘要侧。
+   → `low_count = low_confidence_analysts.len()`，与紧随其后的点名清单同源。
+
+### 现网读数（修复后自愈，不回写历史）
+
+2026-10-28 06:57 补分析批次落了一条 D 级观测，其前一条是 05:53 的 A（正常档）⇒ 现读 `consecutive_abnormal=1`、`fused=false`。
+**冻结在 05:47 那轮快照里的 `9` 不回写**（沿用补充四裁定：那是该轮运行时的真实读数，属历史审计值）。
+
+### 刻意未改 / 待裁
+
+- **呈现层不带空档披露**：`trustNotice.dqiFuse` 标签仍只显示 `dqiStreak`。要在标签上并列须把 `dqiOrphans` 打通 DTO + 11 语言；且「轮数」与「被剔除行数」不同轴，并排显示容易诱导用户相减 ⇒ 先只进 reasoning 长文。**待裁**。
+- **判据本身是否该计入孤儿行**（甲：维持剔除 + 披露，本批已落；乙：孤儿行参与前缀 ⇒ 本例 streak 自动变 2、熔断解除，但让"已删除的分析"继续决定现网置信上限）。本批刻意选甲，**待裁**。
+- 15 条存量孤儿观测行**不删**：读侧本就不参与 ⇒ 删除不改变任何读数，属历史审计值。
+- `docs/plans/PLAN-stock-decision-reliability.md` 里「连续 3 轮未达 A 级」是当日实测记录（快照），按「不回写历史快照」裁定保留。
+- 那 8 条 D 级轮的**上游成因**（分析师层整批没产出、报告 0.0）不在本批范围，属独立的产出形态子系统（见补充二/三「遗留」）。
+
+### 验证（前端与静态门，本轮实测）
+
+- `npm run typecheck` `EXIT=0`；`npm run lint:eslint`（oxlint）`EXIT=0`（0 warnings / 0 errors，1418 文件）。
+- `npx dprint check "src/i18n/locales/*.json" + 改动的 tsx` `EXIT=0`。
+- `check-i18n-key-parity`：11 份 key 路径集合一致（各 16256 条）；`check-i18n-untranslated` `EXIT=0`；`check-i18n-placeholder-usage` `EXIT=0`；`python scripts/check_i18n.py` 全部通过；`check-errorcode-alignment`：后端 448 码 ↔ 11 语言对齐一致。
+- `check-input-mapping` / `check-panel-var-landing` / `check-builtin-vars-keys` / `check-replay-live-consistency` 四条 `EXIT=0`。
+- `npx vitest run` 分析组件全域：**596/596**（83 文件；首跑在并发编译负载下 1 条超时红，重跑全绿）。
+- `cargo test -p axagent --lib dqi`：**5 passed / 0 failed**（`MAIN_TEST_EXIT=0`）——含新增
+  `portfolio_mgr_dqi_fuse_note_discloses_the_skipped_gap`（钉「连续 9 轮降档 + 其间 4 轮…计入则为 2 轮」
+  真出现在 reasoning 里，并负控 `orphans=0` 时那句披露不得凭空出现）、
+  `portfolio_mgr_receives_dqi_fuse_inputs_on_both_chains`（两条链的 portfolio-mgr 都带 5 个同名映射）、
+  `dqi_fuse_gate_is_wired_on_both_chains`、`dqi_observations_are_written_only_by_the_full_chain`。
+- `cargo test -p axagent-rt-workflow --test data_quality_placeholder_gate`：首轮 **49 passed / 0 failed**
+  （改动前形态）；新增 `summary_low_count_never_underflows_when_most_analysts_are_absent` 后重跑见下。
+  该用例本身即负控：旧式 `n_int - good_count - gap_count` 在本夹具下得 `1-1-9=-9`，必红。
+- `cargo fmt --all --check`：`EXIT=1`，仅 2 处 diff 且分属
+  `crates/astock-data/src/vendors/tencent.rs`（他人未提交文件，本批未碰）与本批新用例的换行偏好（已按
+  rustfmt 建议改正）；本批四个 Rust 文件经 `cargo fmt -p` 后无残留 diff。
+- dao 侧 `data_quality_fuse`（含 4 条纯函数口径 + 1 条端到端落库用例）与 `clippy -p axagent-dao
+  --all-targets`：见本节末尾补记。clippy 首轮抓到本批新写的 3 条 lint（两处
+  `unnecessary_sort_by` + 一处 `manual_contains`），已全部改正后复跑。
+
+---
+
+## 补充八（2026-10-28 续）第四处不一致：解密失败被报成「不支持的数据供应商」
+
+### 现象与用户判读
+
+追问补充七里那 9 条 D 级轮的成因。用户随后批准「继续修第四处（解密失败报错）」。
+
+### 实测（生产库 `axinvest` + 节点级现场）
+
+- 记录 `bdb58aea…`（002812 / live / A 级）快照 `report.a-*`=21、`_raw.a-*`=21、`params.a-*`=21；
+  而 9 条 D 级轮**三个键数都是 0** ⇒ 分析师层不是解析失败，是 LLM 调用整批没发出。
+- 执行 `664e4fd0…`（回放 002343）：284 条节点尝试中 **235 次失败、涉及 55 个节点，全部是 `a-*`**，
+  每个 6 次重试，错误逐字 `UNSUPPORTED_PROVIDER: API key decryption failed: Crypto error: Decryption failed: aead::Error`；
+  同批 `completed` 的 49 个节点全是 code/tool 节点（`analyst-brief--*` / `portfolio-mgr` / `data-quality` 等）。
+- live 同因：执行 `9916375f…`（000001 / 02:41）232 次同类失败、`status=partially_completed`。
+- 已排除的两条猜测：① 环境变量覆盖主密钥（进程内 / User / Machine 三处均未设置）；
+  ② 多密钥轮询撞上坏行（默认 provider DeepSeek 只有 1 行密钥，`get_active_key` 在 `len==1` 时直接返回）。
+  仍缺的读数：`[LLM-RESOLVE] 选中 provider`（含 provider_id / key_id）—— 库侧 `gateway_usage` 为 **0 行**、
+  快照 `_meta` 不记 provider ⇒ 定不到失败那次解析到哪一家，属应用侧日志。
+
+### 根因
+
+`crates/rt-workflow/src/work_engine/executors/llm_resolve.rs` 把 `decrypt_key` 的失败套在
+`resolve_model_for_node` 之后同一个 `UNSUPPORTED_PROVIDER` 码上；同一条故障在缓存路径
+`executors/agent_executor.rs` 里用的却是语义正确的 `API_KEY_DECRYPT_FAILED`。⇒ 一条故障两个码，
+归因随「有没有命中缓存」而变，界面把「密钥解不开」显示成「不支持的数据供应商」。
+
+### 修复（三件）
+
+1. `llm_resolve.rs` 解密站点改码 `API_KEY_DECRYPT_FAILED`（与缓存路径同码）。
+2. **重试语义随码改变，是有意的取舍**：`API_KEY_DECRYPT_FAILED` 在 `node_executor_trait.rs`
+   的 `NON_RETRYABLE` 清单内，`UNSUPPORTED_PROVIDER` 不在。改码后这类节点**一次即定**，
+   不再空跑六次（实测那次批次因此多花 235 次尝试）。依据：master key 与密文都不随重试改变。
+   ⚠ 代价与未做的更优解：多密钥供应商若只有一行坏，旧行为靠轮询"意外"转到好行；正解是
+   key 级 failover（仓内既有 `report_key_failure` 形态），属另一格改动，本批没做。
+3. `data-quality.rhai` 摘要尾句改成分支共用的 `advice` 三态：无缺席 ⇒ 空串；**十维全缺** ⇒
+   「分析师层本轮整批无产出…上游取数与模型侧调用（供应商/密钥）皆有可能，请按各分析师节点的
+   错误码定位」；部分缺席 ⇒ 原句「建议检查对应分析师的上游工具数据源」。
+   顺带补上 A/B/C 分支**根本没有这一句**的不对称（与 2026-10-09 补「缺失/低置信」同型问题）。
+
+### 验证
+
+新增三条用例（实测读数）：
+
+- `data_quality_placeholder_gate.rs`：**51 passed / 0 failed**（`DQ_GATE_EXIT=0`，原 49 + 本批 2）。
+  `summary_advice_stops_blaming_data_source_when_every_analyst_is_absent` 钉「十维全缺 ⇒ 说两种可能」
+  与「只缺九位 ⇒ 仍指数据源」两格；`summary_low_count_uses_the_named_list_not_a_subtraction`
+  因 `low_count` 只出现在 D/F 分支、而本文件夹具把因子完整度固定在 90（综合分最低只到 C，实测 48.0）
+  构造不出 D ⇒ 改为源文扫描 + 内存负控（把旧式减法塞回同一行，判据必须恰红一条）。
+- `llm_resolve.rs` 两条：`api_key_decrypt_failure_stays_non_retryable` **ok**（钉住"本码不可重试"
+  这一后果 + 对照 `UNSUPPORTED_PROVIDER` 仍可重试）；`decrypt_failure_keeps_the_api_key_decrypt_code`
+  第一版**假红**（600 字符窗口正好截在 `error_code::API_KEY_DECRY` 上，且窗口再宽会吞掉下一站
+  adapter 缺失那处本应保留的 `UNSUPPORTED_PROVIDER`）⇒ 判据改成「解密站点上先出现哪个码」，
+  配「把码换回旧值必须翻红」的负控；复跑读数见本节末。
+- dao：`data_quality_fuse` **15 passed / 0 failed**；`clippy -p axagent-dao --all-targets` `EXIT=0`；
+  `clippy -p axagent-rt-workflow --all-targets` `EXIT=0`（含他人未提交文件，一并干净）。
+- `cargo fmt --all --check`：`EXIT=1`，唯一 diff 在 `crates/astock-data/src/vendors/tencent.rs`
+  （他人未提交文件，本批未碰）。

@@ -51,7 +51,7 @@ async function dismissModals(page: import("@playwright/test").Page) {
 test.describe("Workflow Editor E2E Tests", () => {
   test.beforeEach(async ({ page }) => {
     await seedOnboarding(page);
-    await page.goto("/workflow");
+    await page.goto("/chat/workflow");
     await page.waitForLoadState("networkidle");
     await dismissModals(page);
   });
@@ -109,7 +109,7 @@ test.describe("Workflow Editor E2E Tests", () => {
 test.describe("Workflow Editor Canvas", () => {
   test.beforeEach(async ({ page }) => {
     await seedOnboarding(page);
-    await page.goto("/workflow");
+    await page.goto("/chat/workflow");
     await page.waitForLoadState("networkidle");
     await dismissModals(page);
 

@@ -187,9 +187,9 @@ export function EvolutionSettings() {
           justifyContent: "space-between",
           marginBottom: 24,
           padding: "12px 16px",
-          background: "var(--ant-color-bg-container, #fff)",
+          background: "var(--surface)",
           borderRadius: 8,
-          border: "1px solid var(--ant-color-border-secondary, #f0f0f0)",
+          border: "1px solid var(--border-light)",
         }}
       >
         <Space>
@@ -234,7 +234,7 @@ export function EvolutionSettings() {
                             fontSize: 11,
                             padding: "1px 6px",
                             borderRadius: 4,
-                            background: CATEGORY_COLORS[engine.category] ?? "#888",
+                            background: CATEGORY_COLORS[engine.category] ?? "var(--muted)",
                             color: "#fff",
                           }}
                         >

@@ -31,6 +31,8 @@ export interface ExportData {
   rawData: Record<string, string>;
   failedNodes: string[];
   dataWarnings: string[];
+  /** 分析记录 id —— HTML 报告由后端按 id 读黑板快照生成（`generate_stock_report`） */
+  analysisId: string | null;
 }
 
 // ── 分析师名称映射 ──
@@ -380,7 +382,7 @@ export function buildMarkdownReport(data: ExportData): string {
 //  导出处理
 // ═════════════════════════════════════════════════════════════════════════
 
-export type ExportFormat = "md" | "docx" | "pptx";
+export type ExportFormat = "md" | "docx" | "pptx" | "html";
 
 function downloadBlob(content: string, filename: string, mime: string) {
   const blob = new Blob([content], { type: mime });
@@ -398,6 +400,18 @@ export async function exportAnalysisReport(
   format: ExportFormat,
   t: TFunction,
 ): Promise<string> {
+  // HTML 报告走**后端**：`generate_stock_report` 按 analysisId 读黑板快照，
+  // 含前端 Markdown 没有的「大盘指数 / 大宗交易 / 机构调研」板块。
+  // 2026-10-28 接回前端入口 —— 此前该命令全仓零调用（死命令），报告只能靠 Agent 触发。
+  if (format === "html") {
+    if (!data.analysisId) { return t("stockAnalysis.htmlNeedAnalysisId"); }
+    if (!isTauri()) { return t("stockAnalysis.htmlDesktopOnly"); }
+    const savedPath = await invoke<string>("generate_stock_report", {
+      analysisId: data.analysisId,
+    });
+    return t("stockAnalysis.exportSaved", { path: savedPath });
+  }
+
   const markdown = buildMarkdownReport(data);
   const baseName = `AxInvest_${data.stockCode}_${new Date().toISOString().slice(0, 10)}`;
 

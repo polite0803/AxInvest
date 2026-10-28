@@ -131,14 +131,14 @@ export function CompactDebateNode({ data }: CompactDebateNodeProps) {
           className="px-1.5 py-0.5 rounded text-[10px] font-medium"
           style={{
             background: summary.ratio > 0.55
-              ? "var(--sa-red-bg, #fee2e2)"
+              ? "var(--red-bg)"
               : summary.ratio < 0.45
-              ? "var(--sa-green-bg, #dcfce7)"
-              : "var(--muted-bg, #e5e7eb)",
+              ? "var(--green-bg)"
+              : "var(--surface-2)",
             color: summary.ratio > 0.55
-              ? "var(--sa-red, #dc2626)"
+              ? "var(--red)"
               : summary.ratio < 0.45
-              ? "var(--sa-green, #16a34a)"
+              ? "var(--green)"
               : "var(--muted, #6b7280)",
           }}
         >
@@ -159,13 +159,13 @@ export function CompactDebateNode({ data }: CompactDebateNodeProps) {
               </span>
             )}
             {line.bull?.claim && (
-              <span style={{ color: "var(--sa-red, #dc2626)" }}>
+              <span style={{ color: "var(--red)" }}>
                 {t("stockAnalysis.compact.bull")}: {line.bull.claim}
               </span>
             )}
             {line.bull?.claim && line.bear?.claim && <span style={{ color: "var(--muted)" }}>·</span>}
             {line.bear?.claim && (
-              <span style={{ color: "var(--sa-green, #16a34a)" }}>
+              <span style={{ color: "var(--green)" }}>
                 {t("stockAnalysis.compact.bear")}: {line.bear.claim}
               </span>
             )}
@@ -175,7 +175,7 @@ export function CompactDebateNode({ data }: CompactDebateNodeProps) {
           <>
             {summary.tierLines[0]?.bull?.claim && (
               <div className="text-[11px] leading-snug flex gap-1">
-                <span style={{ color: "var(--sa-red, #dc2626)", fontWeight: 600 }}>
+                <span style={{ color: "var(--red)", fontWeight: 600 }}>
                   {t("stockAnalysis.compact.bull")}:
                 </span>
                 <span style={{ color: "var(--color-text-secondary)" }}>{summary.tierLines[0].bull.claim}</span>
@@ -183,7 +183,7 @@ export function CompactDebateNode({ data }: CompactDebateNodeProps) {
             )}
             {summary.tierLines[0]?.bear?.claim && (
               <div className="text-[11px] leading-snug flex gap-1">
-                <span style={{ color: "var(--sa-green, #16a34a)", fontWeight: 600 }}>
+                <span style={{ color: "var(--green)", fontWeight: 600 }}>
                   {t("stockAnalysis.compact.bear")}:
                 </span>
                 <span style={{ color: "var(--color-text-secondary)" }}>{summary.tierLines[0].bear.claim}</span>

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import { useWorkflowEditorStore } from "@/stores";
+import { hueColor } from "@/theme/categoricalColors";
 import { Button, Divider, Input, Modal, Select, Tabs, theme } from "antd";
 import { Trash2 } from "lucide-react";
 import React from "react";
@@ -428,7 +430,7 @@ const SchemaEditorModal: React.FC<{
         style={{ fontFamily: "var(--font-mono, 'JetBrains Mono', ui-monospace, monospace)", fontSize: 12 }}
         spellCheck={false}
       />
-      {error && <div style={{ color: "#ff4d4f", fontSize: 12, marginTop: 6 }}>{error}</div>}
+      {error && <div style={{ color: "var(--red)", fontSize: 12, marginTop: 6 }}>{error}</div>}
     </Modal>
   );
 };
@@ -696,6 +698,7 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(
   ({ width, selectedNodeId, selectedEdge }) => {
     const { t } = useTranslation();
     const { token } = theme.useToken();
+    const isDark = useIsDarkTheme();
     const deleteNode = useWorkflowEditorStore((state) => state.deleteNode);
     const deleteEdge = useWorkflowEditorStore((state) => state.deleteEdge);
     const updateNode = useWorkflowEditorStore((state) => state.updateNode);
@@ -762,10 +765,11 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(
         );
       }
 
-      const nodeTypeInfo = NODE_TYPE_MAP[selectedNode.type] || {
-        labelKey: "",
-        color: token.colorTextTertiary,
-      };
+      const nodeTypeMeta = NODE_TYPE_MAP[selectedNode.type];
+      const nodeTypeInfo = nodeTypeMeta ?? { labelKey: "" };
+      const nodeTypeColor = nodeTypeMeta
+        ? hueColor(nodeTypeMeta.hue, isDark)
+        : token.colorTextTertiary;
 
       return (
         <div style={{ padding: 12 }}>
@@ -788,8 +792,8 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(
               </span>
               <span
                 style={{
-                  background: `${nodeTypeInfo.color}20`,
-                  color: nodeTypeInfo.color,
+                  background: `${nodeTypeColor}20`,
+                  color: nodeTypeColor,
                   padding: "2px 8px",
                   borderRadius: 4,
                   fontSize: 12,

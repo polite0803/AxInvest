@@ -61,7 +61,7 @@ export const BalanceBadge: React.FC = () => {
       <Badge
         count={loading ? <Spin size="small" /> : undefined}
         size="small"
-        style={{ backgroundColor: isLow ? "#ff4d4f" : "#52c41a" }}
+        style={{ backgroundColor: isLow ? "var(--red)" : "var(--green)" }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 8px", cursor: "pointer" }}>
           <Wallet size={14} />

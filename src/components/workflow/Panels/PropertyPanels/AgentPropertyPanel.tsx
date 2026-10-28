@@ -721,7 +721,7 @@ export const AgentPropertyPanel: React.FC<AgentPropertyPanelProps> = ({
       </div>
 
       <div style={{ marginBottom: 12 }}>
-        <label style={{ display: "block", color: "#999", fontSize: 12, marginBottom: 4 }}>
+        <label style={{ display: "block", color: "var(--muted)", fontSize: 12, marginBottom: 4 }}>
           {t("workflow.props.executionMode")}
         </label>
         <Select
@@ -734,14 +734,14 @@ export const AgentPropertyPanel: React.FC<AgentPropertyPanelProps> = ({
             { value: "plan", label: t("workflow.props.executionPlan") },
           ]}
         />
-        <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>
+        <div style={{ fontSize: 11, color: "var(--fg-2)", marginTop: 2 }}>
           {t(`workflow.props.execution${config.executionMode === "plan" ? "Plan" : "React"}Hint`)}
         </div>
       </div>
 
       {/* 3.7 P2:TaskScene 场景化输出约束 */}
       <div style={{ marginBottom: 12 }}>
-        <label style={{ display: "block", color: "#999", fontSize: 12, marginBottom: 4 }}>
+        <label style={{ display: "block", color: "var(--muted)", fontSize: 12, marginBottom: 4 }}>
           {t("workflow.props.taskScene")}
         </label>
         <Select
@@ -756,7 +756,7 @@ export const AgentPropertyPanel: React.FC<AgentPropertyPanelProps> = ({
             { value: "auto", label: t("workflow.props.taskSceneAuto") },
           ]}
         />
-        <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>
+        <div style={{ fontSize: 11, color: "var(--fg-2)", marginTop: 2 }}>
           {t("workflow.props.taskSceneHint")}
         </div>
       </div>
@@ -834,7 +834,7 @@ export const AgentPropertyPanel: React.FC<AgentPropertyPanelProps> = ({
                 key={toolDef.name}
                 style={{
                   marginBottom: 6,
-                  border: "1px solid #333",
+                  border: "1px solid var(--border)",
                   borderRadius: 6,
                   overflow: "hidden",
                 }}

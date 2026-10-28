@@ -44,7 +44,7 @@ export function QuantMetricsCard({
         styles={{ content: color ? { color } : undefined }}
         formatter={formatter ?? ((v) => v)}
       />
-      {hint && <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 4 }}>{hint}</div>}
+      {hint && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>{hint}</div>}
     </Card>
   );
 }

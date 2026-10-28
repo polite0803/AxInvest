@@ -361,7 +361,7 @@ export const LLMPropertyPanel: React.FC<LLMPropertyPanelProps> = ({
                       style={{
                         padding: "8px 12px",
                         cursor: "pointer",
-                        borderBottom: "1px solid #333",
+                        borderBottom: "1px solid var(--border)",
                       }}
                     >
                       <div style={{ fontWeight: 500 }}>{template.name}</div>

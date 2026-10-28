@@ -249,7 +249,7 @@ export function QuickBacktestPanel() {
                   precision={1}
                   suffix="%"
                   styles={{
-                    content: { color: result.winRate >= 50 ? "var(--color-up)" : "var(--color-down)", fontSize: 18 },
+                    content: { color: result.winRate >= 50 ? "var(--red)" : "var(--green)", fontSize: 18 },
                   }}
                 />
               </Card>
@@ -264,7 +264,7 @@ export function QuickBacktestPanel() {
                   prefix={result.avgReturnPct >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
                   styles={{
                     content: {
-                      color: result.avgReturnPct >= 0 ? "var(--color-up)" : "var(--color-down)",
+                      color: result.avgReturnPct >= 0 ? "var(--red)" : "var(--green)",
                       fontSize: 18,
                     },
                   }}

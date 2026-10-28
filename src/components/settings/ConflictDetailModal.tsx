@@ -76,7 +76,7 @@ export function ConflictDetailModal({
       open={open}
       title={
         <Space>
-          <WarningOutlined style={{ color: "#faad14" }} />
+          <WarningOutlined style={{ color: "var(--amber)" }} />
           <span>{t("deviceSync.conflictDetail")}</span>
         </Space>
       }

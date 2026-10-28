@@ -1,6 +1,10 @@
 // EquityCurveChart — 收益曲线 + 基准对比
 // 用 ECharts line + area
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { cssVar } from "@/lib/cssVar";
+import { ensureECharts } from "@/lib/echartsInstance";
+import { hueColor } from "@/theme/categoricalColors";
 import * as echarts from "echarts";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -21,18 +25,21 @@ export function EquityCurveChart({
   height = 360,
 }: EquityCurveChartProps) {
   const { t } = useTranslation();
+  const isDark = useIsDarkTheme();
   const benchLabel = benchmarkName ?? t("benchmark.name");
   const chartRef = useRef<HTMLDivElement>(null);
   const instRef = useRef<echarts.ECharts | null>(null);
 
   useEffect(() => {
     if (!chartRef.current) { return; }
-    instRef.current = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
+    // 主题档变化必须重建实例：ECharts 的坐标轴文字 / 图例 / tooltip 底色取自 init 时的主题，
+    // setOption 只覆盖我们显式写的那些颜色，暗色下不给 "dark" 就是深字压深底。
+    instRef.current = ensureECharts(chartRef.current, isDark);
     return () => {
       instRef.current?.dispose();
       instRef.current = null;
     };
-  }, []);
+  }, [isDark]);
 
   useEffect(() => {
     if (!instRef.current || curve.length === 0) { return; }
@@ -47,7 +54,7 @@ export function EquityCurveChart({
         smooth: true,
         showSymbol: false,
         sampling: "lttb",
-        lineStyle: { width: 2, color: "#1677ff" },
+        lineStyle: { width: 2, color: hueColor("blue", isDark) },
         areaStyle: { color: "rgba(22, 119, 255, 0.12)" },
         data: equities,
       },
@@ -61,7 +68,7 @@ export function EquityCurveChart({
         smooth: true,
         showSymbol: false,
         sampling: "lttb",
-        lineStyle: { width: 1.5, color: "#999", type: "dashed" },
+        lineStyle: { width: 1.5, color: cssVar("--muted"), type: "dashed" },
         data: norm.map((v) => parseFloat(v.toFixed(2))),
       });
     }
@@ -88,7 +95,7 @@ export function EquityCurveChart({
       },
       true,
     );
-  }, [curve, benchmark, benchLabel, t]);
+  }, [curve, benchmark, benchLabel, t, isDark]);
 
   useEffect(() => {
     const onResize = () => instRef.current?.resize();

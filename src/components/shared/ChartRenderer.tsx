@@ -11,7 +11,6 @@ interface ChartRendererProps {
   request?: ChartGenRequest;
   width?: number | string;
   height?: number | string;
-  theme?: "light" | "dark";
 }
 
 export function ChartRenderer({
@@ -19,7 +18,6 @@ export function ChartRenderer({
   request,
   width,
   height,
-  theme = "light",
 }: ChartRendererProps) {
   const { t } = useTranslation();
   const [option, setOption] = useState<Record<string, unknown> | null>(
@@ -71,7 +69,7 @@ export function ChartRenderer({
 
   if (error) {
     return (
-      <div style={{ color: "#ff4d4f", padding: 16 }}>
+      <div style={{ color: "var(--red)", padding: 16 }}>
         {t("chat.workflow.chart.renderError", { error })}
       </div>
     );
@@ -81,5 +79,5 @@ export function ChartRenderer({
     return null;
   }
 
-  return <ChartPreview option={option} width={width} height={height} theme={theme} />;
+  return <ChartPreview option={option} width={width} height={height} />;
 }

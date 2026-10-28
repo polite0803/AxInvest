@@ -37,9 +37,9 @@ export function RLTrainingPanel() {
           justifyContent: "space-between",
           marginBottom: 24,
           padding: "12px 16px",
-          background: "var(--ant-color-bg-container, #fff)",
+          background: "var(--surface)",
           borderRadius: 8,
-          border: "1px solid var(--ant-color-border-secondary, #f0f0f0)",
+          border: "1px solid var(--border-light)",
         }}
       >
         <Space>

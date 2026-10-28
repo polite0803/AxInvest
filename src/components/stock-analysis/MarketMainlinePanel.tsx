@@ -85,7 +85,7 @@ export function MarketMainlinePanel() {
       render: (theme: string, row) => (
         <div>
           <strong>{theme}</strong>
-          <div style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>{row.narrative}</div>
+          <div style={{ fontSize: 11, color: "var(--muted)" }}>{row.narrative}</div>
         </div>
       ),
     },

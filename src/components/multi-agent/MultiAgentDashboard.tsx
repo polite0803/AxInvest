@@ -84,7 +84,7 @@ function RoleCard({ role, selected, onSelect }: RoleCardProps) {
       size="small"
       onClick={() => onSelect(role.id)}
       style={{
-        borderColor: selected ? "#1677ff" : undefined,
+        borderColor: selected ? "var(--accent)" : undefined,
         borderWidth: selected ? 2 : 1,
         cursor: "pointer",
       }}
@@ -96,7 +96,7 @@ function RoleCard({ role, selected, onSelect }: RoleCardProps) {
           </Tag>
           <Text strong>{role.name}</Text>
         </Space>
-        <Paragraph style={{ marginBottom: 0, fontSize: 12, color: "#666" }}>
+        <Paragraph style={{ marginBottom: 0, fontSize: 12, color: "var(--fg-2)" }}>
           {role.description}
         </Paragraph>
         <Space size="small">
@@ -390,7 +390,7 @@ function HistoryItem({ entry }: HistoryItemProps) {
                     whiteSpace: "pre-wrap",
                     maxHeight: 200,
                     overflow: "auto",
-                    background: "#fafafa",
+                    background: "var(--surface)",
                     padding: 8,
                     borderRadius: 4,
                   }}
@@ -472,7 +472,7 @@ export function MultiAgentDashboard() {
       {/* 顶部标题 */}
       <Card size="small" style={{ marginBottom: 16 }}>
         <Space>
-          <TeamOutlined style={{ fontSize: 20, color: "#1677ff" }} />
+          <TeamOutlined style={{ fontSize: 20, color: "var(--accent)" }} />
           <Title level={5} style={{ margin: 0 }}>
             {t("multiAgent.title")}
           </Title>

@@ -1,3 +1,5 @@
+import { cssVar } from "@/lib/cssVar";
+import { ensureECharts } from "@/lib/echartsInstance";
 import { useSettingsStore } from "@/stores";
 import * as echarts from "echarts";
 import { useCallback, useEffect, useRef } from "react";
@@ -37,11 +39,11 @@ const PERCENTILE_LABELS = ["P5", "P10", "P25", "P50", "P75", "P90", "P95"];
 const EMPTY_METRIC: MetricBandData = { percentiles: [], sampleSize: 0 };
 
 const verdictColor = (v: string): string => {
-  if (v === "deep_value") { return "#16a34a"; }
-  if (v === "undervalued") { return "#22c55e"; }
-  if (v === "overvalued") { return "#ef4444"; }
-  if (v === "expensive") { return "#f97316"; }
-  return "#94a3b8";
+  if (v === "deep_value") { return cssVar("--green"); }
+  if (v === "undervalued") { return cssVar("--green"); }
+  if (v === "overvalued") { return cssVar("--red"); }
+  if (v === "expensive") { return cssVar("--amber"); }
+  return cssVar("--muted");
 };
 
 const verdictLabel = (v: string, t: (k: string) => string): string => {
@@ -77,7 +79,7 @@ export function ValuationBandChart({ data, primary = "pe", loading, height = 240
           text: t("stockAnalysis.valuationBand.noData"),
           left: "center",
           top: 8,
-          textStyle: { fontSize: 12, color: "#94a3b8" },
+          textStyle: { fontSize: 12, color: cssVar("--muted") },
         },
       };
     }
@@ -103,13 +105,13 @@ export function ValuationBandChart({ data, primary = "pe", loading, height = 240
           text: `${primaryLabel} ${t("stockAnalysis.valuationBand.title")}`,
           left: 60,
           top: 10,
-          textStyle: { fontSize: 11, color: isDark ? "#cbd5e1" : "#475569" },
+          textStyle: { fontSize: 11, color: cssVar("--fg-2") },
         },
         {
           text: `${otherLabel} ${t("stockAnalysis.valuationBand.title")}`,
           left: "55%",
           top: 10,
-          textStyle: { fontSize: 11, color: isDark ? "#cbd5e1" : "#475569" },
+          textStyle: { fontSize: 11, color: cssVar("--fg-2") },
         },
       ],
       tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
@@ -118,13 +120,13 @@ export function ValuationBandChart({ data, primary = "pe", loading, height = 240
           gridIndex: 0,
           type: "category",
           data: PERCENTILE_LABELS,
-          axisLabel: { fontSize: 9, color: isDark ? "#cbd5e1" : "#475569" },
+          axisLabel: { fontSize: 9, color: cssVar("--fg-2") },
         },
         {
           gridIndex: 1,
           type: "category",
           data: PERCENTILE_LABELS,
-          axisLabel: { fontSize: 9, color: isDark ? "#cbd5e1" : "#475569" },
+          axisLabel: { fontSize: 9, color: cssVar("--fg-2") },
         },
       ],
       yAxis: [
@@ -132,15 +134,15 @@ export function ValuationBandChart({ data, primary = "pe", loading, height = 240
           gridIndex: 0,
           type: "value",
           name: primaryLabel,
-          nameTextStyle: { fontSize: 9, color: isDark ? "#94a3b8" : "#64748b" },
-          axisLabel: { fontSize: 9, color: isDark ? "#94a3b8" : "#64748b" },
+          nameTextStyle: { fontSize: 9, color: cssVar("--muted") },
+          axisLabel: { fontSize: 9, color: cssVar("--muted") },
         },
         {
           gridIndex: 1,
           type: "value",
           name: otherLabel,
-          nameTextStyle: { fontSize: 9, color: isDark ? "#94a3b8" : "#64748b" },
-          axisLabel: { fontSize: 9, color: isDark ? "#94a3b8" : "#64748b" },
+          nameTextStyle: { fontSize: 9, color: cssVar("--muted") },
+          axisLabel: { fontSize: 9, color: cssVar("--muted") },
         },
       ],
       series: [
@@ -150,7 +152,10 @@ export function ValuationBandChart({ data, primary = "pe", loading, height = 240
           xAxisIndex: 0,
           yAxisIndex: 0,
           data: hasPrimary ? primaryMetric.percentiles : [],
-          itemStyle: { color: primary === "pb" ? "#3b82f6" : primary === "ps" ? "#a855f7" : "#f97316", opacity: 0.7 },
+          itemStyle: {
+            color: primary === "pb" ? cssVar("--accent") : primary === "ps" ? cssVar("--purple") : cssVar("--amber"),
+            opacity: 0.7,
+          },
           barWidth: "60%",
           markPoint: primaryMetric.current != null
             ? {
@@ -160,7 +165,7 @@ export function ValuationBandChart({ data, primary = "pe", loading, height = 240
                 name: t("stockAnalysis.valuationBand.current"),
                 coord: ["P50", primaryMetric.current],
                 value: primaryMetric.current,
-                itemStyle: { color: "#dc2626" },
+                itemStyle: { color: cssVar("--red") },
               }],
             }
             : undefined,
@@ -171,7 +176,7 @@ export function ValuationBandChart({ data, primary = "pe", loading, height = 240
           xAxisIndex: 1,
           yAxisIndex: 1,
           data: otherMetric.percentiles,
-          itemStyle: { color: primary === "pb" ? "#f97316" : "#3b82f6", opacity: 0.5 },
+          itemStyle: { color: primary === "pb" ? cssVar("--amber") : cssVar("--accent"), opacity: 0.5 },
           barWidth: "60%",
           markPoint: otherMetric.current != null
             ? {
@@ -181,7 +186,7 @@ export function ValuationBandChart({ data, primary = "pe", loading, height = 240
                 name: t("stockAnalysis.valuationBand.current"),
                 coord: ["P50", otherMetric.current],
                 value: otherMetric.current,
-                itemStyle: { color: "#dc2626" },
+                itemStyle: { color: cssVar("--red") },
               }],
             }
             : undefined,
@@ -192,12 +197,12 @@ export function ValuationBandChart({ data, primary = "pe", loading, height = 240
 
   useEffect(() => {
     if (!elRef.current) { return; }
-    instanceRef.current = echarts.init(elRef.current, undefined, { renderer: "canvas" });
+    instanceRef.current = ensureECharts(elRef.current, isDark);
     return () => {
       instanceRef.current?.dispose();
       instanceRef.current = null;
     };
-  }, []);
+  }, [isDark]);
 
   useEffect(() => {
     if (!instanceRef.current) { return; }

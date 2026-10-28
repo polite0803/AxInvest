@@ -5907,6 +5907,8 @@
     "renderUserMarkdownDesc": "Renderizar mensajes del usuario con formato Markdown, incluyendo bloques de código, saltos de línea, etc.",
     "requestDelayMs": "Retardo de solicitud",
     "requestDelayMsHint": "Milisegundos de espera antes de cada llamada a la API, utilizado para evitar límites de tasa (por ejemplo, errores 429)",
+    "headerTimeoutSecs": "Tiempo de espera del primer byte",
+    "headerTimeoutSecsHint": "Segundos totales de espera de las cabeceras de respuesta HTTP del proveedor (superado el umbral suave se reintenta una vez con el mismo proveedor; superado el umbral estricto se considera que el proveedor está colgado); vacío usa el valor predeterminado de 90 segundos",
     "resetDefault": "Restablecer predeterminado",
     "resetShortcutDefaults": "Restablecer atajos predeterminados",
     "resetShortcutSingle": "Restablecer este atajo al predeterminado",
@@ -16454,7 +16456,19 @@
       "vendorLastError": "Último error",
       "vendorLastSuccess": "Último éxito",
       "vendorLastFailure": "Último fallo",
-      "vendorHealth": "Estado de fuentes de datos"
+      "vendorHealth": "Estado de fuentes de datos",
+      "interfaceHealth": {
+        "title": "Salud diaria de interfaces",
+        "storeDisabled": "El archivo diario está desactivado; los resultados no se guardaron",
+        "empty": "Aún no hay registros diarios (verificación automática tras el cierre)",
+        "unavailable": "Los registros diarios no están disponibles en este entorno",
+        "colDate": "Fecha de referencia",
+        "colSummary": "OK / comprobados",
+        "colIssues": "Incidencias",
+        "summary": "{{ok}}/{{total}} OK",
+        "checkedAt": "Comprobado a las",
+        "statusEmptyByTime": "Sin datos en este periodo"
+      }
     },
     "experiment": {
       "executeTrade": "Ejecutar operación →",
@@ -16574,7 +16588,7 @@
     "diTableDirection": "Dirección/Valor",
     "diTableStatus": "Estado",
     "diTableNote": "Nota",
-    "weightCollapseDqi": "Calificación de calidad de datos F (dqi<25), base de decisión no válida",
+    "weightCollapseDqi": "Calificación de calidad de datos F, base de decisión no válida",
     "weightCollapseUntrusted": "Origen no fiable ≥2 (untrusted_count={{count}})",
     "weightCollapseThreshold": "Peso del factor {{ratio}} % por debajo del umbral",
     "weightCollapseConsequence": "Consecuencia: posición forzada a 0 %, confianza direccional ×0,5",
@@ -16716,7 +16730,8 @@
       "diff": "Divergencia",
       "directionConflict": "Conflicto de dirección",
       "opposite": "Contrario",
-      "sameDirection": "Misma dirección"
+      "sameDirection": "Misma dirección",
+      "htmlReport": "Informe HTML"
     },
     "crossCheck": {
       "title": "Selección de tendencia vs Análisis · Divergencia entre sistemas",
@@ -17102,7 +17117,9 @@
       "replayDegradedWithCount": "{{n}} data sources were skipped in replay mode; this panel is hidden.",
       "replayDegradedWithReason": "Degraded in replay mode: {{reason}}",
       "_fallback": "Sin datos de recomendación",
-      "empty": "No hay datos de recomendación"
+      "empty": "No hay datos de recomendación",
+      "sourceFailed": "Fuente de datos no disponible",
+      "schemaChanged": "Estructura de la interfaz modificada"
     },
     "row": {
       "entry": "Entrada",
@@ -18616,7 +18633,9 @@
         "label": "Adoptar las compras de horizonte en el nivel superior",
         "desc": "Cuando la calibración no alcanza su umbral, la confianza se topa y la acción se degrada en consecuencia, por lo que el número de compras del nivel superior se queda en cero. Al abrirlo, el nivel superior adopta las compras decididas en el horizonte. El tope de confianza sigue vigente."
       }
-    }
+    },
+    "htmlNeedAnalysisId": "Falta el ID del registro de análisis; no se puede exportar el informe HTML",
+    "htmlDesktopOnly": "El informe HTML solo está disponible en escritorio"
   },
   "pipeline": {
     "title": "Pipeline de Acciones",

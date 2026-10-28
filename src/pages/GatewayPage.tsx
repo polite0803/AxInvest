@@ -30,25 +30,25 @@ export function GatewayPage() {
     {
       key: "overview",
       label: t("gateway.overview"),
-      icon: <Gauge size={14} color={CHAT_ICON_COLORS.Gauge} />,
+      icon: <Gauge size={14} style={{ color: CHAT_ICON_COLORS.Gauge }} />,
       children: <GatewayOverview onViewMoreLogs={handleViewMoreLogs} />,
     },
     {
       key: "keys",
       label: t("gateway.keys"),
-      icon: <Key size={14} color={CHAT_ICON_COLORS.Key} />,
+      icon: <Key size={14} style={{ color: CHAT_ICON_COLORS.Key }} />,
       children: <GatewayKeys />,
     },
     {
       key: "metrics",
       label: t("gateway.metrics"),
-      icon: <BarChart3 size={14} color={CHAT_ICON_COLORS.BarChart3} />,
+      icon: <BarChart3 size={14} style={{ color: CHAT_ICON_COLORS.BarChart3 }} />,
       children: <GatewayMetrics />,
     },
     {
       key: "diagnostics",
       label: t("gateway.logs"),
-      icon: <ScrollText size={14} color={CHAT_ICON_COLORS.ScrollText} />,
+      icon: <ScrollText size={14} style={{ color: CHAT_ICON_COLORS.ScrollText }} />,
       children: <GatewayDiagnostics />,
     },
     {
@@ -60,13 +60,13 @@ export function GatewayPage() {
     {
       key: "settings",
       label: t("gateway.settings"),
-      icon: <Settings size={14} color={CHAT_ICON_COLORS.Settings} />,
+      icon: <Settings size={14} style={{ color: CHAT_ICON_COLORS.Settings }} />,
       children: <GatewaySettings />,
     },
     {
       key: "monitor",
       label: t("gateway.tab.monitor"),
-      icon: <Activity size={14} color={CHAT_ICON_COLORS.Settings} />,
+      icon: <Activity size={14} style={{ color: CHAT_ICON_COLORS.Settings }} />,
       children: <GatewayMonitor />,
     },
   ];

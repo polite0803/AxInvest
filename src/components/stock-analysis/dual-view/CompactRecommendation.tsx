@@ -3,7 +3,7 @@
  * 输入:推荐响应 { period, picks: { style: Pick[] } }
  * 输出:Top 3 最高信心度股票 + 风格标签
  */
-import { horizonSuffix } from "@/lib/stock-analysis-utils";
+import { horizonSuffix, recoStyleColors } from "@/lib/stock-analysis-utils";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -29,14 +29,6 @@ const STYLE_LABEL_KEY: Record<string, string> = {
   capital: "stockAnalysis.recommendation.styleLabelCapital",
   reversion: "stockAnalysis.recommendation.styleLabelReversion",
   serenity: "stockAnalysis.recommendation.styleLabelSerenity",
-};
-
-const STYLE_COLOR: Record<string, string> = {
-  trend: "blue",
-  value: "gold",
-  capital: "magenta",
-  reversion: "green",
-  serenity: "purple",
 };
 
 interface CompactRecommendationProps {
@@ -95,7 +87,7 @@ export function CompactRecommendation({ data }: CompactRecommendationProps) {
       <div className="space-y-0.5">
         {picks.map((p, i) => {
           const styleLabel = STYLE_LABEL_KEY[p.style] ? t(STYLE_LABEL_KEY[p.style]) : p.style;
-          const styleColor = STYLE_COLOR[p.style] ?? "default";
+          const styleTint = recoStyleColors(p.style);
           return (
             <div
               key={`${p.stockCode}-${i}`}
@@ -104,8 +96,8 @@ export function CompactRecommendation({ data }: CompactRecommendationProps) {
               <span
                 className="px-1 rounded text-[9px] font-medium"
                 style={{
-                  background: `var(--sa-${styleColor}-bg, #dbeafe)`,
-                  color: `var(--sa-${styleColor}, #2563eb)`,
+                  background: styleTint.bg,
+                  color: styleTint.color,
                 }}
               >
                 {styleLabel}

@@ -605,11 +605,18 @@ impl StockVendor for TencentVendor {
                 continue;
             }
             let fields: Vec<&str> = line.split('~').collect();
-            if fields.len() < 50 {
+            // 2026-10-28 修：原判据 `fields.len() < 50` 把**有效响应**判成 `schema_changed`。
+            // 实测腾讯指数（`v_sh000001=`）只有约 30 个字段（指数无买卖五档），50 是
+            // 个股行情（`get_stock_quote`）的形态，两处不可共用同一阈值。
+            if fields.len() < 7 {
                 continue;
             }
 
-            let code_in = fields[2]; // e.g. "sh000001"
+            // 代码从**变量名前缀**取（`v_sh000001=` → `sh000001`）。
+            // 原实现取 `fields[2]`，那是裸代码 `000001`，与 `TC_INDICES` 的 `sh000001`
+            // 永不相等 ⇒ 即便字段数够也全部 `continue`，最终报成「结构变更」。
+            let var_name = line.split('=').next().unwrap_or("").trim();
+            let code_in = var_name.strip_prefix("v_").unwrap_or(var_name);
             let name = match name_map.get(code_in) {
                 Some(n) => n.to_string(),
                 None => continue, // 不是我们请求的指数
@@ -617,23 +624,38 @@ impl StockVendor for TencentVendor {
 
             let parse = |s: &str| -> f64 { s.parse().unwrap_or(0.0) };
 
-            let ts_idx = fields
-                .iter()
-                .position(|f| f.len() == 14 && f.chars().all(|c| c.is_ascii_digit()))
-                .unwrap_or(30);
+            // 通过时间戳定位后续字段（14位数字），兼容字段数可能变化的情况。
+            let ts_idx =
+                fields.iter().position(|f| f.len() == 14 && f.chars().all(|c| c.is_ascii_digit()));
 
-            if fields.len() < ts_idx + 8 {
-                continue;
-            }
+            // 有完整时间戳尾段 ⇒ 用原始字段；否则按「腾讯指数精简格式」降级：
+            // 涨跌幅由现价/昨收现算、成交量取字段 6，成交额如实给 0（不臆造）。
+            let (change_pct, volume, amount) = match ts_idx {
+                Some(t) if fields.len() >= t + 8 => (
+                    parse(fields[t + 2]),
+                    parse(fields[t + 6]) * 100.0,
+                    parse(fields[t + 7]) * 10000.0,
+                ),
+                _ => {
+                    let price = parse(fields[3]);
+                    let pre_close = parse(fields[4]);
+                    let pct = if pre_close > 0.0 {
+                        (price - pre_close) / pre_close * 100.0
+                    } else {
+                        0.0
+                    };
+                    (pct, parse(fields[6]) * 100.0, 0.0)
+                },
+            };
 
             results.push(IndexQuote {
                 code: code_in.to_string(),
                 name,
                 price: parse(fields[3]),
                 pre_close: parse(fields[4]),
-                change_pct: parse(fields[ts_idx + 2]),
-                volume: parse(fields[ts_idx + 6]) * 100.0,
-                amount: parse(fields[ts_idx + 7]) * 10000.0,
+                change_pct,
+                volume,
+                amount,
             });
         }
 
@@ -642,6 +664,24 @@ impl StockVendor for TencentVendor {
             indices.iter().enumerate().map(|(i, (c, _))| (*c, i)).collect();
         results.sort_by_key(|q| order.get(q.code.as_str()).copied().unwrap_or(99));
 
+        // 一条都没解析出来时**不得**返回 `Ok(vec![])`（2026-10-28）：
+        // 路由层会把「源返回空」写进 `empty_sources`，最终归成「时段性无数据」——
+        // 而真实原因往往是站点拒绝（空壳）或字段序改版。两种都要显式回 Err。
+        if results.is_empty() {
+            let preview: String = text.chars().take(120).collect();
+            if text.trim().is_empty() || text.contains("v_pv_none_match") || text.contains("<html")
+            {
+                // 文案避开「为空/返回空/无数据」——那是 `is_empty_data` 的判据，
+                // 被拒不是「时段性无数据」，误判会让健康检查给出错误的归因。
+                return Err(DataError::VendorError {
+                    vendor: "tencent".into(),
+                    message: format!("指数行情响应无可识别内容（疑似空壳/被拒）: {preview:?}"),
+                });
+            }
+            return Err(DataError::ParseError(format!(
+                "指数行情响应无法识别（期望 `v_<code>=` 前缀 + `~` 分隔字段）: {preview:?}"
+            )));
+        }
         Ok(results)
     }
 

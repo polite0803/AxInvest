@@ -2666,12 +2666,33 @@ let disagreement_mod = if present(risk_disagreement) {
 	};
 	// 本段只**陈述**上面那条封顶，不再判一次：判据在 `dqi_fuse_state` 里已定，
 	//   文案里再比一次阈值就会出现两份载体。三种状态各占一句，缺席不得留空成"没问题"。
+	// ⚠ 措辞订正(2026-10-28)：原写「未达A级」，而判据自 2026-10-10 起把 A 与 B 都算正常档
+	//   （`dao::repo::data_quality_fuse::grade_is_abnormal` 只把 C/D/F/无等级算异常）。
+	//   文案比判据说得严 ⇒ 用户会去追一轮 B 级的"降级"，而那本来不是缺陷。现按同一套词表说「降档」。
+	// ⚠ 空档披露(2026-10-28)：「连续 N 轮」只数所属分析仍存在的观测；被剔除的孤儿行里
+	//   若有正常档，N 就**虚高**（现网实测：界面读 9，计入则为 2），反之低估。
+	//   判据口径不动（剔除仍是判据），只把差值端出来 —— 见 `dqi_orphans` / `dqi_streak_incl_orphans`。
+	// ⚠ 一律用 `num_of(x, 0.0)` 双参形态而不是单参：单参返回 Dynamic，嵌层整数落 i64、
+	//   注入值落 f64，`to_int()` 虽两侧都有，但对 unit 调它是运行时 Function not found
+	//   （见 `portfolio-mgr-h-long.rhai` 同名警告）。双参把类型钉成 f64，缺席也不会裸传 unit。
+	let dqi_orphan_count = if present(dqi_orphans) { num_of(dqi_orphans, 0.0) } else { 0.0 };
+	let dqi_streak_int = num_of(dqi_abnormal_streak, 0.0).to_int();
+	let dqi_streak_incl_int = if present(dqi_streak_incl_orphans) {
+	    num_of(dqi_streak_incl_orphans, 0.0).to_int()
+	} else {
+	    dqi_streak_int
+	};
+	let dqi_span_gap_note = if dqi_orphan_count > 0.0 {
+	    `,其间${dqi_orphan_count.to_int()}轮观测因所属分析已删除未参与(计入则为${dqi_streak_incl_int}轮)`
+	} else {
+	    ""
+	};
 	let dqi_fuse_note = if dqi_fuse_state == "fused" {
-	    ` | ⚠️数据质量熔断(连续${dqi_abnormal_streak}轮未达A级),置信度上限压至${cap_floor}`
+	    ` | ⚠️数据质量熔断(连续${dqi_streak_int}轮降档),置信度上限压至${cap_floor}${dqi_span_gap_note}`
 	} else if dqi_fuse_state == "unobserved" {
 	    " | 数据质量跨轮观测缺失(观测表 0 条),熔断判定未参与"
 	} else if dqi_abnormal_streak > 0.0 {
-	    ` | 数据质量已连续${dqi_abnormal_streak}轮未达A级(未达熔断线)`
+	    ` | 数据质量已连续${dqi_streak_int}轮降档(未达熔断线)${dqi_span_gap_note}`
 	} else {
 	    ""
 	};

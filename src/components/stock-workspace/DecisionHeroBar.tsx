@@ -97,7 +97,7 @@ export function DecisionHeroBar() {
         data-testid="decision-hero-empty-professional"
       >
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
+          <span className="text-sm font-semibold" style={{ color: "var(--fg)" }}>
             {t("workspace.decisionHero.noDecision")}
           </span>
         </div>
@@ -110,10 +110,10 @@ export function DecisionHeroBar() {
 
   const confidencePct = Math.round(decision.confidence ?? 0);
   const confidenceColor = confidencePct >= 70
-    ? "var(--sa-green)"
+    ? "var(--green)"
     : confidencePct >= 45
-    ? "var(--sa-amber)"
-    : "var(--sa-red)";
+    ? "var(--amber)"
+    : "var(--red)";
 
   // 2026-09-22: 展示档 = 方向档（`resolveDisplayAction` 已改为恒等，不再按仓位派生）。
   //   旧派生用**本次决策刚算出的建议仓位**反推本次展示名，是循环判据 ——
@@ -136,7 +136,7 @@ export function DecisionHeroBar() {
       >
         {/* 股票名称 */}
         {stockName && (
-          <span className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>
+          <span className="text-sm font-semibold" style={{ color: "var(--fg)" }}>
             {stockName}
           </span>
         )}
@@ -150,12 +150,12 @@ export function DecisionHeroBar() {
         }
         <DecisionTrustNotice decision={decision} variant="tag" />
         {/* 仓位 */}
-        <span className="text-sm font-mono" style={{ color: "var(--color-text-primary)" }}>
+        <span className="text-sm font-mono" style={{ color: "var(--fg)" }}>
           {t("workspace.decisionHero.position")} {decision.positionPct}%
         </span>
         {/* 目标价 */}
         {decision.targetPrice && (
-          <span className="text-sm font-mono" style={{ color: "var(--sa-green)" }}>
+          <span className="text-sm font-mono" style={{ color: "var(--green)" }}>
             {t("workspace.decisionHero.targetPrice")} ¥{decision.targetPrice}
           </span>
         )}
@@ -163,7 +163,7 @@ export function DecisionHeroBar() {
         {upside != null && (
           <span
             className="text-sm font-mono"
-            style={{ color: upside >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}
+            style={{ color: upside >= 0 ? "var(--green)" : "var(--red)" }}
           >
             {upside >= 0 ? "+" : ""}
             {upside.toFixed(1)}%
@@ -227,7 +227,7 @@ export function DecisionHeroBar() {
       <div className="flex items-center gap-3 flex-wrap">
         {/* 股票名称 */}
         {stockName && (
-          <span className="font-semibold" style={{ color: "var(--color-text-primary)" }}>
+          <span className="font-semibold" style={{ color: "var(--fg)" }}>
             {stockName}
           </span>
         )}
@@ -244,7 +244,7 @@ export function DecisionHeroBar() {
         {decision.targetPrice && (
           <span className="text-sm font-mono flex items-center gap-1">
             <span style={{ color: "var(--muted)" }}>{t("workspace.decisionHero.targetPrice")}</span>
-            <span className="font-semibold" style={{ color: "var(--sa-green)" }}>
+            <span className="font-semibold" style={{ color: "var(--green)" }}>
               ¥{decision.targetPrice}
             </span>
           </span>
@@ -253,7 +253,7 @@ export function DecisionHeroBar() {
         {decision.stopLoss && (
           <span className="text-sm font-mono flex items-center gap-1">
             <span style={{ color: "var(--muted)" }}>{t("workspace.decisionHero.stopLoss")}</span>
-            <span className="font-semibold" style={{ color: "var(--sa-red)" }}>
+            <span className="font-semibold" style={{ color: "var(--red)" }}>
               ¥{decision.stopLoss}
             </span>
           </span>
@@ -264,7 +264,7 @@ export function DecisionHeroBar() {
             <span style={{ color: "var(--muted)" }}>{t("workspace.decisionHero.expectedUpside")}</span>
             <span
               className="font-semibold"
-              style={{ color: upside >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}
+              style={{ color: upside >= 0 ? "var(--green)" : "var(--red)" }}
             >
               {upside >= 0 ? "+" : ""}
               {upside.toFixed(1)}%
@@ -308,7 +308,7 @@ export function DecisionHeroBar() {
           }
           <div
             className="relative rounded-full overflow-hidden"
-            style={{ width: 60, height: 4, background: "var(--color-border-tertiary)" }}
+            style={{ width: 60, height: 4, background: "var(--border-light)" }}
           >
             <div
               style={{
@@ -422,7 +422,7 @@ function DecisionDetailDrawer({
           </div>
           <div
             className="relative rounded-full overflow-hidden"
-            style={{ height: 8, background: "var(--color-border-tertiary)" }}
+            style={{ height: 8, background: "var(--border-light)" }}
           >
             <div
               style={{
@@ -453,7 +453,7 @@ function DecisionDetailDrawer({
               <div className="text-sm" style={{ color: "var(--muted)" }}>
                 {t("workspace.decisionHero.stopLoss")}
               </div>
-              <div className="font-mono font-semibold" style={{ color: "var(--sa-red)" }}>
+              <div className="font-mono font-semibold" style={{ color: "var(--red)" }}>
                 ¥{decision.stopLoss}
               </div>
             </div>
@@ -471,7 +471,7 @@ function DecisionDetailDrawer({
               </div>
               <div
                 className="font-mono font-semibold"
-                style={{ color: upside >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}
+                style={{ color: upside >= 0 ? "var(--green)" : "var(--red)" }}
               >
                 {upside >= 0 ? "+" : ""}
                 {upside.toFixed(1)}%
@@ -523,9 +523,9 @@ function DecisionDetailDrawer({
         {llmStance && agreementScore !== null && (
           <div
             className="text-sm p-2 rounded"
-            style={{ background: "rgba(124,58,237,0.06)", borderLeft: "3px solid #7c3aed" }}
+            style={{ background: "rgba(124,58,237,0.06)", borderLeft: "3px solid var(--purple)" }}
           >
-            <span className="font-medium" style={{ color: "#7c3aed" }}>LLM</span>
+            <span className="font-medium" style={{ color: "var(--purple)" }}>LLM</span>
             <Tag color={getActionColor(llmStance)} className="ml-2">
               {t(getActionTKey(llmStance))}
             </Tag>

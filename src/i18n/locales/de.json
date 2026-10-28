@@ -5907,6 +5907,8 @@
     "renderUserMarkdownDesc": "Benutzernachrichten mit Markdown-Formatierung rendern, einschließlich Codeblöcke, Zeilenumbrüche usw.",
     "requestDelayMs": "Anfrageverzögerung",
     "requestDelayMsHint": "Millisekunden, die vor jedem API-Aufruf gewartet werden sollen, verwendet um Ratenbeschränkungen (z. B. 429-Fehler) zu vermeiden",
+    "headerTimeoutSecs": "Timeout für das erste Byte",
+    "headerTimeoutSecsHint": "Gesamtsekunden, die auf die HTTP-Antwortheader des Upstreams gewartet wird (über dem weichen Grenzwert wird derselbe Anbieter einmal erneut versucht, über dem harten Grenzwert gilt der Upstream als hängend); leer verwendet den Standard von 90 Sekunden",
     "resetDefault": "Standard zurücksetzen",
     "resetShortcutDefaults": "Tastenkürzel zurücksetzen",
     "resetShortcutSingle": "Dieses Tastenkürzel auf Standard zurücksetzen",
@@ -16454,7 +16456,19 @@
       "vendorLastError": "Letzter Fehler",
       "vendorLastSuccess": "Letzter Erfolg",
       "vendorLastFailure": "Letzter Fehler",
-      "vendorHealth": "Datenquellen-Status"
+      "vendorHealth": "Datenquellen-Status",
+      "interfaceHealth": {
+        "title": "Tägliche Schnittstellenintegrität",
+        "storeDisabled": "Tagesarchiv ist deaktiviert; Prüfergebnisse wurden nicht gespeichert",
+        "empty": "Noch keine täglichen Prüfprotokolle (automatische Prüfung nach Handelsschluss)",
+        "unavailable": "Tägliche Integritätsprotokolle sind in dieser Umgebung nicht verfügbar",
+        "colDate": "Bezugsdatum",
+        "colSummary": "OK / geprüft",
+        "colIssues": "Auffälligkeiten",
+        "summary": "{{ok}}/{{total}} OK",
+        "checkedAt": "Geprüft um",
+        "statusEmptyByTime": "Keine Daten in diesem Zeitfenster"
+      }
     },
     "experiment": {
       "executeTrade": "Transaktion ausführen →",
@@ -16574,7 +16588,7 @@
     "diTableDirection": "Richtung/Wert",
     "diTableStatus": "Status",
     "diTableNote": "Hinweis",
-    "weightCollapseDqi": "Datenqualitätsnote F (dqi<25), Entscheidungsgrundlage ungültig",
+    "weightCollapseDqi": "Datenqualitätsnote F, Entscheidungsgrundlage ungültig",
     "weightCollapseUntrusted": "Nicht vertrauenswürdige Vorgänger ≥2 (untrusted_count={{count}})",
     "weightCollapseThreshold": "Faktor-Gewicht {{ratio}} % unter Schwellenwert",
     "weightCollapseConsequence": "Folge: Position auf 0 % gesetzt, Richtungskonfidenz ×0,5",
@@ -16716,7 +16730,8 @@
       "diff": "Meinungsverschiedenheit",
       "directionConflict": "Richtungskonflikt",
       "opposite": "Gegenläufig",
-      "sameDirection": "Gleichläufig"
+      "sameDirection": "Gleichläufig",
+      "htmlReport": "HTML-Bericht"
     },
     "crossCheck": {
       "title": "Trendauswahl vs Analyse · Systemübergreifende Abweichung",
@@ -17102,7 +17117,9 @@
       "replayDegradedWithCount": "{{n}} data sources were skipped in replay mode; this panel is hidden.",
       "replayDegradedWithReason": "Degraded in replay mode: {{reason}}",
       "_fallback": "Keine Empfehlungsdaten",
-      "empty": "Noch keine Empfehlungsdaten"
+      "empty": "Noch keine Empfehlungsdaten",
+      "sourceFailed": "Datenquelle nicht verfügbar",
+      "schemaChanged": "Schnittstellenstruktur geändert"
     },
     "row": {
       "entry": "Einstieg",
@@ -18616,7 +18633,9 @@
         "label": "Top-Level übernimmt Stufen-Käufe",
         "desc": "Ist die Kalibrierung unter dem Schwellenwert, wird die Konfidenz gedeckelt und die Aktion mitabgestuft — die Top-Level-Kaufzahl bleibt damit null. Nach dem Öffnen übernimmt das Top-Level die in der Stufe getroffenen Kaufentscheidungen. Die Konfidenzdeckelung gilt weiterhin."
       }
-    }
+    },
+    "htmlNeedAnalysisId": "Analyse-Datensatz-ID fehlt; HTML-Bericht kann nicht exportiert werden",
+    "htmlDesktopOnly": "HTML-Bericht nur auf dem Desktop verfügbar"
   },
   "pipeline": {
     "title": "Aktien-Pipeline",

@@ -105,7 +105,7 @@ export function TradeReviewPanel() {
       dataIndex: "pnlPct",
       width: 50,
       render: (v: number) => (
-        <span style={{ color: v >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
+        <span style={{ color: v >= 0 ? "var(--red)" : "var(--green)" }}>
           {v >= 0 ? "+" : ""}
           {v.toFixed(1)}%
         </span>
@@ -142,7 +142,7 @@ export function TradeReviewPanel() {
         </div>
         <div className="p-1 rounded" style={{ background: "var(--surface)" }}>
           {t("stockAnalysis.tradeReview.totalPnl")}
-          <div style={{ color: review.totalPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)", fontWeight: "bold" }}>
+          <div style={{ color: review.totalPnl >= 0 ? "var(--red)" : "var(--green)", fontWeight: "bold" }}>
             {review.totalPnl >= 0 ? "+" : ""}
             {review.totalPnl.toFixed(0)}
           </div>
@@ -160,7 +160,7 @@ export function TradeReviewPanel() {
         {review.suggestions.map((s, i) => (
           <div
             key={i}
-            style={{ color: s.includes("优秀") || s.includes("良好") ? "var(--sa-red)" : "var(--sa-green)" }}
+            style={{ color: s.includes("优秀") || s.includes("良好") ? "var(--red)" : "var(--green)" }}
           >
             • {s}
           </div>

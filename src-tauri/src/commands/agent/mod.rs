@@ -855,6 +855,7 @@ pub async fn agent_query(
 
     // Create provider context
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key,
         key_id: key.id.clone(),
         provider_id: prov.id.clone(),
@@ -956,6 +957,7 @@ pub async fn agent_query(
                     let fb_base_url =
                         resolve_base_url_for_type(&fb_prov.api_host, &fb_prov.provider_type);
                     let fb_ctx = ProviderRequestContext {
+                        header_timeout_secs: None,
                         api_key: fb_api_key,
                         key_id: fb_key.id.clone(),
                         provider_id: fb_prov.id.clone(),
@@ -3880,6 +3882,7 @@ pub async fn simple_chat_completion(
     let settings =
         axagent_dao::repo::settings::get_settings(app_state.harness.db()).await.unwrap_or_default();
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key,
         key_id: key.id.clone(),
         provider_id: prov.id.clone(),

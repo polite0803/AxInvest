@@ -95,6 +95,7 @@ impl WorkflowAgentTurnRunner {
             axagent_dao::repo::settings::get_settings(self.harness.db()).await.unwrap_or_default();
 
         let ctx = ProviderRequestContext {
+            header_timeout_secs: None,
             api_key,
             key_id: key.id.clone(),
             provider_id: prov.id.clone(),

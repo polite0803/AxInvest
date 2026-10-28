@@ -403,14 +403,14 @@ export function GatewayTemplates() {
             alignItems: "center",
             gap: 8,
             padding: "8px 12px",
-            background: "var(--ant-color-warning-bg)",
+            background: "var(--amber-bg)",
             borderRadius: 6,
             marginBottom: 4,
           }}
         >
           <AlertCircle
             size={16}
-            style={{ color: "var(--ant-color-warning)" }}
+            style={{ color: "var(--amber)" }}
           />
           <Text type="secondary" style={{ fontSize: 13 }}>
             {t("gateway.cliStartGatewayFirst")}
@@ -424,14 +424,14 @@ export function GatewayTemplates() {
             alignItems: "center",
             gap: 8,
             padding: "8px 12px",
-            background: "var(--ant-color-warning-bg)",
+            background: "var(--amber-bg)",
             borderRadius: 6,
             marginBottom: 4,
           }}
         >
           <AlertCircle
             size={16}
-            style={{ color: "var(--ant-color-warning)" }}
+            style={{ color: "var(--amber)" }}
           />
           <Text type="secondary" style={{ fontSize: 13 }}>
             {t("gateway.cliNoKeys")}

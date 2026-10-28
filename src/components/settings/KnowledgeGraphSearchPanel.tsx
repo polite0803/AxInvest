@@ -20,7 +20,7 @@ function EntityCard({ entity }: { entity: GraphEnhancedContextChunk }) {
   return (
     <div
       style={{
-        border: "1px solid var(--ant-color-border-secondary, #f0f0f0)",
+        border: "1px solid var(--border-light)",
         borderRadius: 8,
         padding: 12,
         marginBottom: 8,
@@ -225,7 +225,7 @@ export function KnowledgeGraphSearchPanel() {
                 style={{
                   fontSize: 12,
                   padding: 8,
-                  background: "var(--ant-color-fill-quaternary, #fafafa)",
+                  background: "var(--surface-2)",
                   borderRadius: 6,
                   maxHeight: 200,
                   overflow: "auto",

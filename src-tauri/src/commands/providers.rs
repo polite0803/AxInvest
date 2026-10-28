@@ -327,6 +327,7 @@ pub async fn validate_provider_key(
         &global_settings,
     );
     let ctx = axagent_harness::ProviderRequestContext {
+        header_timeout_secs: None,
         api_key: decrypted,
         key_id: key_id.clone(),
         provider_id: provider.id.clone(),
@@ -541,6 +542,7 @@ pub async fn fetch_remote_models(
         &global_settings,
     );
     let ctx = axagent_harness::ProviderRequestContext {
+        header_timeout_secs: None,
         api_key: decrypted,
         key_id: key_row.id.clone(),
         provider_id: provider.id.clone(),
@@ -657,6 +659,7 @@ pub async fn test_model(
         &global_settings,
     );
     let ctx = axagent_harness::ProviderRequestContext {
+        header_timeout_secs: None,
         api_key: decrypted,
         key_id: key_row.id.clone(),
         provider_id: provider.id.clone(),

@@ -116,6 +116,7 @@ pub(crate) async fn resolve_hermes_provider_context(
     );
 
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key,
         key_id: provider_key.id.clone(),
         provider_id: provider.id.clone(),

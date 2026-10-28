@@ -2,6 +2,7 @@
 
 import { useUIStore } from "@/stores";
 import { type BuddyAttributes, useBuddyStore } from "@/stores/feature/buddyStore";
+import { hueVar } from "@/theme/categoricalColors";
 import { CloseOutlined, EyeInvisibleOutlined, EyeOutlined, RobotOutlined } from "@ant-design/icons";
 import { Button, Card, Progress, Tag, theme, Typography } from "antd";
 import type { GlobalToken } from "antd/es/theme/interface";
@@ -25,9 +26,9 @@ function getAttrColors(token: GlobalToken): Record<keyof BuddyAttributes, string
   return {
     debugging: token.colorPrimary,
     patience: token.colorSuccess,
-    chaos: "var(--orange, #fa541c)",
+    chaos: hueVar("volcano"),
     wisdom: "var(--purple, #722ed1)",
-    snark: "var(--magenta, #eb2f96)",
+    snark: hueVar("pink"),
   };
 }
 

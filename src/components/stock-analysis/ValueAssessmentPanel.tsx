@@ -947,7 +947,7 @@ export function ValueAssessmentPanel() {
           size="small"
           title={
             <div className="flex items-center gap-2">
-              <LineChartOutlined style={{ color: "#f97316" }} />
+              <LineChartOutlined style={{ color: "var(--amber)" }} />
               <span className="text-sm">{t("stockAnalysis.valuationBand.title")}</span>
               <Tag color="orange" className="m-0 text-xs">PE / PB</Tag>
             </div>
@@ -1040,7 +1040,7 @@ export function ValueAssessmentPanel() {
                 className="text-sm px-2 py-0.5 rounded font-medium transition-colors"
                 style={{
                   background: isActive ? "rgba(250,173,20,0.18)" : "var(--surface)",
-                  color: isActive ? "#d48806" : "var(--muted)",
+                  color: isActive ? "var(--amber)" : "var(--muted)",
                   border: isActive ? "1px solid rgba(250,173,20,0.45)" : "1px solid var(--border)",
                   cursor: "pointer",
                 }}

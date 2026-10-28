@@ -1233,6 +1233,7 @@ macro_rules! register_all_commands {
             commands::stock_analysis::get_hot_stocks,
             commands::stock_analysis::get_index_quotes,
             commands::stock_analysis::get_industry_ranking,
+            commands::stock_analysis::get_interface_health_history,
             commands::stock_analysis::get_international_stock_kline,
             commands::stock_analysis::get_international_stock_quote,
             commands::stock_analysis::get_latest_analyses_for_stocks,

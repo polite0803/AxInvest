@@ -5907,6 +5907,8 @@
     "renderUserMarkdownDesc": "ユーザー送信メッセージを Markdown でレンダリング（コードブロック、改行など）",
     "requestDelayMs": "リクエスト遅延",
     "requestDelayMsHint": "API呼び出し前に待機するミリ秒数。レート制限（429エラーなど）を回避するために使用",
+    "headerTimeoutSecs": "初回バイトタイムアウト",
+    "headerTimeoutSecsHint": "アップストリームが HTTP レスポンスヘッダーを返すまでの合計秒数の上限（ソフト上限を超えた場合は同じプロバイダーで 1 回再試行、ハード上限を超えた場合は上流がハングしたと判定）。空欄の場合は既定の 90 秒",
     "resetDefault": "デフォルトにリセット",
     "resetShortcutDefaults": "ショートカットをデフォルトにリセット",
     "resetShortcutSingle": "このショートカットをデフォルトにリセット",
@@ -16454,7 +16456,19 @@
       "vendorLastError": "最終エラー",
       "vendorLastSuccess": "最終成功",
       "vendorLastFailure": "最終失敗",
-      "vendorHealth": "データソース健全性"
+      "vendorHealth": "データソース健全性",
+      "interfaceHealth": {
+        "title": "日次インターフェースヘルス",
+        "storeDisabled": "日次アーカイブが無効のため、検査結果は保存されていません",
+        "empty": "日次検査の記録はまだありません（各取引日の大引け後に自動検査）",
+        "unavailable": "この環境では日次ヘルス記録を提供していません",
+        "colDate": "データ基準日",
+        "colSummary": "正常 / 検査項目",
+        "colIssues": "異常項目",
+        "summary": "{{ok}}/{{total}} 正常",
+        "checkedAt": "検査時刻",
+        "statusEmptyByTime": "時間帯によるデータなし"
+      }
     },
     "experiment": {
       "executeTrade": "执行交易 →",
@@ -16574,7 +16588,7 @@
     "diTableDirection": "方向/值",
     "diTableStatus": "状态",
     "diTableNote": "备注",
-    "weightCollapseDqi": "数据质量 F 级（dqi<25），决策基础不成立",
+    "weightCollapseDqi": "数据质量 F 级，决策基础不成立",
     "weightCollapseUntrusted": "不可信上游 ≥2 个（untrusted_count={{count}}）",
     "weightCollapseThreshold": "因子权重占比 {{ratio}}% 低于阈值",
     "weightCollapseConsequence": "后果：仓位强制 0%、方向置信度 ×0.5",
@@ -16716,7 +16730,8 @@
       "diff": "分歧",
       "directionConflict": "方向冲突",
       "opposite": "反向",
-      "sameDirection": "同向"
+      "sameDirection": "同向",
+      "htmlReport": "HTML レポート"
     },
     "crossCheck": {
       "title": "トレンド選択 vs 分析ワークフロー · システム間の乖離",
@@ -17102,7 +17117,9 @@
       "replayDegradedWithCount": "{{n}} 个数据源在回放模式下跳过，此面板已隐藏。",
       "replayDegradedWithReason": "回放模式降级: {{reason}}",
       "_fallback": "无推荐数据",
-      "empty": "暂无推荐数据"
+      "empty": "暂无推荐数据",
+      "sourceFailed": "データソース利用不可",
+      "schemaChanged": "インターフェース構造変更"
     },
     "row": {
       "entry": "入场区间",
@@ -18616,7 +18633,9 @@
         "label": "上位レイヤでティア内買いを採用",
         "desc": "較正が基準未達だと信頼度上限が働き、アクションも連動して下げられ、上位レイヤの買いは 0 のままです。開放後はティア内で確定した買いを採用します。信頼度上限自体は引き続き有効です。"
       }
-    }
+    },
+    "htmlNeedAnalysisId": "分析レコード ID がないため HTML レポートを出力できません",
+    "htmlDesktopOnly": "HTML レポートはデスクトップ版のみ対応しています"
   },
   "pipeline": {
     "title": "株式パイプライン",

@@ -118,7 +118,7 @@ export function RecoSignalTimeline({ strategyId }: RecoSignalTimelineProps) {
       width: 70,
       align: "right" as const,
       render: (v: number) => {
-        const color = v >= 0 ? "var(--sa-red)" : "var(--sa-green)";
+        const color = v >= 0 ? "var(--red)" : "var(--green)";
         return <span className="text-xs font-bold" style={{ color }}>{v >= 0 ? "+" : ""}{v.toFixed(2)}%</span>;
       },
       sorter: (a: StrategySignalResult, b: StrategySignalResult) => a.returnPct - b.returnPct,
@@ -129,7 +129,7 @@ export function RecoSignalTimeline({ strategyId }: RecoSignalTimelineProps) {
       key: "maxDrawdownPct",
       width: 70,
       align: "right" as const,
-      render: (v: number) => <span className="text-xs" style={{ color: "var(--sa-green)" }}>{v.toFixed(1)}%</span>,
+      render: (v: number) => <span className="text-xs" style={{ color: "var(--green)" }}>{v.toFixed(1)}%</span>,
     },
     {
       title: t("stockAnalysis.backtest.colHolding"),
@@ -209,13 +209,13 @@ export function RecoSignalTimeline({ strategyId }: RecoSignalTimelineProps) {
                 </span>
                 <span>
                   {t("stockAnalysis.backtest.colWinRate")}:{" "}
-                  <strong style={{ color: stats.winRate >= 55 ? "var(--sa-red)" : "var(--sa-green)" }}>
+                  <strong style={{ color: stats.winRate >= 55 ? "var(--red)" : "var(--green)" }}>
                     {stats.winRate.toFixed(1)}%
                   </strong>
                 </span>
                 <span>
                   {t("stockAnalysis.backtest.colAvgReturn")}:{" "}
-                  <strong style={{ color: stats.avgRet >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
+                  <strong style={{ color: stats.avgRet >= 0 ? "var(--red)" : "var(--green)" }}>
                     {stats.avgRet >= 0 ? "+" : ""}
                     {stats.avgRet.toFixed(2)}%
                   </strong>

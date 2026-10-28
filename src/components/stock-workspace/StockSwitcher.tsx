@@ -105,9 +105,9 @@ export function StockSwitcher() {
           placeholder={t("workspace.stockSwitcher.search")}
           className="w-full text-sm px-2 py-1 rounded"
           style={{
-            border: "1px solid var(--color-border-tertiary)",
+            border: "1px solid var(--border-light)",
             background: "transparent",
-            color: "var(--color-text-primary)",
+            color: "var(--fg)",
           }}
         />
       </div>
@@ -138,7 +138,7 @@ export function StockSwitcher() {
                     <div className="flex-1 min-w-0">
                       <div
                         className="text-sm truncate"
-                        style={{ color: isActive ? "var(--accent)" : "var(--color-text-primary)" }}
+                        style={{ color: isActive ? "var(--accent)" : "var(--fg)" }}
                       >
                         {stock.name}
                       </div>

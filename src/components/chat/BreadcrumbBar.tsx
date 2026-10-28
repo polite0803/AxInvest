@@ -52,7 +52,7 @@ export function BreadcrumbBar({
     <div
       className="flex items-center gap-1 px-3 py-1.5 text-xs border-b border-zinc-400/10"
       style={{
-        backgroundColor: "color-mix(in srgb, var(--background-base, #fff) 96%, transparent)",
+        backgroundColor: "color-mix(in srgb, var(--bg) 96%, transparent)",
         overflow: "hidden",
         whiteSpace: "nowrap",
       }}
@@ -80,7 +80,7 @@ export function BreadcrumbBar({
                 : "truncate cursor-pointer hover:underline"}
               style={{
                 maxWidth: isLast ? "none" : 160,
-                color: isLast ? undefined : "var(--text-secondary, #666)",
+                color: isLast ? undefined : "var(--fg-2)",
               }}
               title={conv.title}
             >

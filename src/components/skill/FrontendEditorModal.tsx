@@ -167,7 +167,7 @@ export function FrontendEditorModal({
                   overflow: "auto",
                   fontSize: 12,
                   fontFamily: "var(--font-mono, 'JetBrains Mono', ui-monospace, monospace)",
-                  background: "var(--color-fill-secondary)",
+                  background: "var(--surface-2)",
                   padding: 12,
                   borderRadius: 6,
                 }}

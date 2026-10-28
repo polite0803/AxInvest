@@ -616,7 +616,8 @@ export function AnalysisHistoryButton() {
                       navigate(`/stock-analysis/${r.id}`);
                     }}
                     onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLElement).style.background = "var(--hover, rgba(255,255,255,0.06))";
+                      (e.currentTarget as HTMLElement).style.background =
+                        "color-mix(in srgb, var(--fg) 6%, transparent)";
                     }}
                     onMouseLeave={(e) => {
                       (e.currentTarget as HTMLElement).style.background = "transparent";
@@ -643,7 +644,7 @@ export function AnalysisHistoryButton() {
                             style={{ width: 200, height: 26, fontSize: 12 }}
                           />
                           <span
-                            style={{ cursor: "pointer", display: "inline-flex", color: "var(--sa-green, #22c55e)" }}
+                            style={{ cursor: "pointer", display: "inline-flex", color: "var(--green)" }}
                             onClick={(e) => confirmRename(e, r.id)}
                           >
                             <Check size={14} />
@@ -859,16 +860,14 @@ export function AnalysisHistoryButton() {
                     {(() => {
                       // 完成态沿用 ✓；其余走 i18n 标签，未知值退回原始串（不吞信息）。
                       if (r.status === "completed") {
-                        return (
-                          <span style={{ color: "var(--sa-green, #22c55e)", fontSize: 10, marginRight: 4 }}>✓</span>
-                        );
+                        return <span style={{ color: "var(--green)", fontSize: 10, marginRight: 4 }}>✓</span>;
                       }
                       const key = recordStatusKey(r.status);
                       // `running` 是**进行中**、不是错误 ⇒ 用 amber，不再一律标红
                       // （红字配上「已中断」文案会让人以为分析失败，而真相是进程消失了）。
                       const color = r.status === "running"
-                        ? "var(--sa-amber, #f59e0b)"
-                        : "var(--sa-red, #ef4444)";
+                        ? "var(--amber)"
+                        : "var(--red)";
                       return (
                         <span title={r.status} style={{ color, fontSize: 10, marginRight: 4 }}>
                           {key ? t(key) : r.status}
@@ -910,7 +909,7 @@ export function AnalysisHistoryButton() {
                         alignItems: "center",
                       }}
                       onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLElement).style.color = "var(--sa-red, #ef4444)";
+                        (e.currentTarget as HTMLElement).style.color = "var(--red)";
                       }}
                       onMouseLeave={(e) => {
                         (e.currentTarget as HTMLElement).style.color = "var(--muted, #888)";

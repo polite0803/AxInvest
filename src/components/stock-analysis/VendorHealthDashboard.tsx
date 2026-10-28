@@ -124,7 +124,7 @@ function VendorCard(props: VendorCardProps) {
         <div className="flex items-center gap-2 min-w-0">
           <span
             className="w-2 h-2 rounded-full shrink-0"
-            style={{ backgroundColor: STATUS_COLORS[status] ?? "#6B7280" }}
+            style={{ backgroundColor: STATUS_COLORS[status] ?? "var(--muted)" }}
           />
           <span className="text-gray-200 truncate">{t(nameKey)}</span>
           <Tag

@@ -5907,6 +5907,8 @@
     "renderUserMarkdownDesc": "使用 Markdown 渲染用户发送的消息，包括代码块、换行等",
     "requestDelayMs": "请求延时",
     "requestDelayMsHint": "每次调用 API 前等待的毫秒数，用于避免触发速率限制（如 429 错误）",
+    "headerTimeoutSecs": "首字节超时",
+    "headerTimeoutSecsHint": "等待上游返回 HTTP 响应头的总秒数上限（超软档会同供应商原地重试一次，超硬档判上游挂起）；留空用默认 90 秒",
     "resetDefault": "恢复默认",
     "resetShortcutDefaults": "恢复默认快捷键",
     "resetShortcutSingle": "恢复该项默认快捷键",
@@ -16650,7 +16652,19 @@
       "vendorLastError": "最后错误",
       "vendorLastSuccess": "成功",
       "vendorLastFailure": "失败",
-      "vendorHealth": "数据源健康状态"
+      "vendorHealth": "数据源健康状态",
+      "interfaceHealth": {
+        "title": "日级接口健康",
+        "storeDisabled": "每日归档未启用，日检结果未留存",
+        "empty": "尚无日检记录（每个交易日收盘后自动检查）",
+        "unavailable": "本环境不提供日级健康记录",
+        "colDate": "数据归属日",
+        "colSummary": "正常/检查项",
+        "colIssues": "异常项",
+        "summary": "{{ok}}/{{total}} 正常",
+        "checkedAt": "检查时间",
+        "statusEmptyByTime": "时段性无数据"
+      }
     },
     "experiment": {
       "executeTrade": "执行交易 →",
@@ -16754,7 +16768,7 @@
     "diTableDirection": "方向/值",
     "diTableStatus": "状态",
     "diTableNote": "备注",
-    "weightCollapseDqi": "数据质量 F 级（dqi<25），决策基础不成立",
+    "weightCollapseDqi": "数据质量 F 级，决策基础不成立",
     "weightCollapseUntrusted": "不可信上游 ≥2 个（untrusted_count={{count}}）",
     "weightCollapseThreshold": "因子权重占比 {{ratio}}% 低于阈值",
     "weightCollapseConsequence": "后果：仓位强制 0%、方向置信度 ×0.5",
@@ -16907,7 +16921,8 @@
       "diff": "分歧",
       "directionConflict": "方向冲突",
       "opposite": "反向",
-      "sameDirection": "同向"
+      "sameDirection": "同向",
+      "htmlReport": "HTML 报告"
     },
     "crossCheck": {
       "title": "趋势智选 vs 股票分析 · 跨系统分歧",
@@ -17435,7 +17450,9 @@
       "replayDegradedWithCount": "{{n}} 个数据源在回放模式下跳过，此面板已隐藏。",
       "replayDegradedWithReason": "回放模式降级: {{reason}}",
       "_fallback": "无推荐数据",
-      "empty": "暂无推荐数据"
+      "empty": "暂无推荐数据",
+      "sourceFailed": "数据源不可用",
+      "schemaChanged": "接口结构变更"
     },
     "row": {
       "entry": "入场区间",
@@ -18861,7 +18878,9 @@
         "label": "顶层采纳档内买入",
         "desc": "校准未达标会把置信度封顶并联动压低动作，导致顶层买入长期为 0；放开后顶层采纳档内已判出的买入。置信度封顶本身仍然生效。"
       }
-    }
+    },
+    "htmlNeedAnalysisId": "缺少分析记录 ID，无法导出 HTML 报告",
+    "htmlDesktopOnly": "HTML 报告仅支持桌面端"
   },
   "pipeline": {
     "title": "股票管道",

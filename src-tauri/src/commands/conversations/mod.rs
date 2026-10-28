@@ -2181,6 +2181,7 @@ pub(crate) async fn generate_ai_title(
             settings,
         );
         let ctx = ProviderRequestContext {
+            header_timeout_secs: None,
             api_key: dk,
             key_id: key_row.id.clone(),
             provider_id: provider.id.clone(),
@@ -2395,6 +2396,7 @@ pub async fn regenerate_conversation_title(
         &global_settings,
     );
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key: decrypted_key,
         key_id: key_row.id.clone(),
         provider_id: provider.id.clone(),

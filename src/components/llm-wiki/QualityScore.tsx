@@ -168,12 +168,12 @@ export function QualityScore({
 
   const getScoreIcon = (score: number) => {
     if (score >= 0.8) {
-      return <CheckCircleOutlined style={{ color: "#52c41a" }} />;
+      return <CheckCircleOutlined style={{ color: "var(--green)" }} />;
     }
     if (score >= 0.5) {
-      return <WarningOutlined style={{ color: "#faad14" }} />;
+      return <WarningOutlined style={{ color: "var(--amber)" }} />;
     }
-    return <CloseCircleOutlined style={{ color: "#ff4d4f" }} />;
+    return <CloseCircleOutlined style={{ color: "var(--red)" }} />;
   };
 
   const getScoreLabel = (score: number) => {
@@ -229,7 +229,7 @@ export function QualityScore({
               <Space size={4}>
                 {details
                   ? getScoreIcon(details.score)
-                  : <CheckCircleOutlined style={{ color: "#52c41a", fontSize: 12 }} />}
+                  : <CheckCircleOutlined style={{ color: "var(--green)", fontSize: 12 }} />}
                 <Text strong style={{ fontSize: 12 }}>{t("wiki.quality.title")}</Text>
               </Space>
               <Tooltip title={t("wiki.quality.refresh")}>
@@ -336,7 +336,7 @@ export function QualityScore({
             style={{
               backgroundColor: details
                 ? getScoreColor(details.score)
-                : "#52c41a",
+                : "var(--green)",
             }}
             showZero={false}
           >

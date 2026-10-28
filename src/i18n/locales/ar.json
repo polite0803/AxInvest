@@ -5907,6 +5907,8 @@
     "renderUserMarkdownDesc": "عرض رسائل المستخدم بتنسيق Markdown بما في ذلك كتل التعليمات البرمجية وفواصل الأسطر وما إلى ذلك",
     "requestDelayMs": "تأخير الطلب",
     "requestDelayMsHint": "عدد المللي ثانية للانتظار قبل كل استدعاء API، يُستخدم لتجنب حدود المعدل (مثل أخطاء 429)",
+    "headerTimeoutSecs": "مهلة أول بايت",
+    "headerTimeoutSecsHint": "إجمالي الثواني التي يُنتظر فيها ردود HTTP من المزود الأول (عند تجاوز الحد اللين يُعاد الطلب مرة واحدة لدى المزود نفسه، وعند تجاوز الحد الصارم يُعتبر المزود معطلاً). اتركه فارغًا لاستخدام الافتراضي 90 ثانية",
     "resetDefault": "إعادة التعيين الافتراضي",
     "resetShortcutDefaults": "إعادة تعيين الاختصارات",
     "resetShortcutSingle": "إعادة تعيين هذا الاختصار",
@@ -16454,7 +16456,19 @@
       "vendorLastError": "آخر خطأ",
       "vendorLastSuccess": "آخر نجاح",
       "vendorLastFailure": "آخر فشل",
-      "vendorHealth": "حالة مصادر البيانات"
+      "vendorHealth": "حالة مصادر البيانات",
+      "interfaceHealth": {
+        "title": "صحة الواجهات اليومية",
+        "storeDisabled": "الأرشيف اليومي معطّل؛ لم يتم حفظ نتائج الفحص",
+        "empty": "لا توجد سجلات فحص يومية بعد (فحص تلقائي بعد إغلاق كل يوم تداول)",
+        "unavailable": "سجلات الصحة اليومية غير متاحة في هذه البيئة",
+        "colDate": "تاريخ المرجع",
+        "colSummary": "سليم / تم فحصه",
+        "colIssues": "عناصر غير طبيعية",
+        "summary": "{{ok}}/{{total}} سليم",
+        "checkedAt": "وقت الفحص",
+        "statusEmptyByTime": "لا توجد بيانات في هذه الفترة"
+      }
     },
     "experiment": {
       "executeTrade": "Execute Trade →",
@@ -16574,7 +16588,7 @@
     "diTableDirection": "الاتجاه/القيمة",
     "diTableStatus": "الحالة",
     "diTableNote": "ملاحظة",
-    "weightCollapseDqi": "درجة جودة البيانات F (dqi<25)، أساس القرار غير صالح",
+    "weightCollapseDqi": "درجة جودة البيانات F، أساس القرار غير صالح",
     "weightCollapseUntrusted": "المصدر غير الموثوق ≥2 (untrusted_count={{count}})",
     "weightCollapseThreshold": "وزن العامل {{ratio}}% أقل من الحد الأدنى",
     "weightCollapseConsequence": "النتيجة: إلزام المركز بـ 0%، ثقة الاتجاه ×0.5",
@@ -16716,7 +16730,8 @@
       "diff": "الخلاف",
       "directionConflict": "تعارض الاتجاه",
       "opposite": "معاكس",
-      "sameDirection": "متماشٍ"
+      "sameDirection": "متماشٍ",
+      "htmlReport": "تقرير HTML"
     },
     "crossCheck": {
       "title": "الانتقاء الاتجاهي مقابل التحليل · تباعد بين الأنظمة",
@@ -17102,7 +17117,9 @@
       "replayDegradedWithCount": "{{n}} data sources were skipped in replay mode; this panel is hidden.",
       "replayDegradedWithReason": "Degraded in replay mode: {{reason}}",
       "_fallback": "No recommendation data",
-      "empty": "No recommendation data"
+      "empty": "No recommendation data",
+      "sourceFailed": "مصدر البيانات غير متاح",
+      "schemaChanged": "تم تغيير بنية الواجهة"
     },
     "row": {
       "entry": "Entry",
@@ -18616,7 +18633,9 @@
         "label": "اعتماد مشتريات الأفق في المستوى الأعلى",
         "desc": "حين لا يبلغ المعايرة عتبةها، تُحدّ الثقة ويُنزَّل الإجراء معاً، فيبقى عدد عمليات الشراء في المستوى الأعلى صفراً. الفتح يتيح للمستوى الأعلى اعتماد المشتريات المقرَّرة على مستوى الأفق. يبقى سقف الثقة سارياً."
       }
-    }
+    },
+    "htmlNeedAnalysisId": "معرّف سجل التحليل مفقود؛ تعذّر تصدير تقرير HTML",
+    "htmlDesktopOnly": "تقرير HTML متاح على سطح المكتب فقط"
   },
   "pipeline": {
     "title": "خط أنابيب الأسهم",

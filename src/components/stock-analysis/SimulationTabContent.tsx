@@ -241,7 +241,7 @@ function MetricCell(
       <div className="text-xs text-secondary">{label}</div>
       <div className="mt-0.5 font-mono text-base">{value}</div>
       {note && (
-        <div className="text-xs" style={{ color: warn ? "#faad14" : "var(--color-text-secondary)" }}>
+        <div className="text-xs" style={{ color: warn ? "var(--amber)" : "var(--color-text-secondary)" }}>
           {note}
         </div>
       )}

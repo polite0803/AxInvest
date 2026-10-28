@@ -25,8 +25,10 @@ pub mod task_cancel;
 // G3 industry_chain 已于 P2-8 阶段迁回 axagent-stock-analysis crate（架构归属：
 // 产业链定义/传导算法/新闻映射均为分析逻辑而非数据获取）。
 // 调用方应使用 `axagent_analysis_engine::industry_chain::*`。
+pub mod health_check;
 pub mod macro_data;
 pub mod mcp_tools;
+pub mod outcome;
 pub mod quality;
 pub mod realtime_quote;
 pub mod regime;
@@ -55,6 +57,7 @@ use crate::gate::DomainGate;
 use crate::vendor_health::{VendorHealthConfig, VendorHealthTracker};
 pub use error::DataError;
 pub use macro_data::{MacroDataClient, MacroDataPoint, MacroDataSnapshot};
+pub use outcome::{classify_error, DataOutcome, DataStatus};
 pub use realtime_quote::{
     HttpPollingStreamer, QuoteCallback, QuoteChangeEvent, RealTimeQuoteWatcher, WatchPriority,
 };
@@ -6108,7 +6111,18 @@ impl AStockClient {
         }))
     }
 
-    pub async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
+    /// 取指数行情，并**保留成因**（`ok` / `empty_by_time` / `source_failed` / `schema_changed`）。
+    ///
+    /// 为什么必须让成因随值一起返回（2026-10-28）：旧实现三条通道全失败时 `Ok(vec![])`，
+    /// 下游只能看到「空」——报告「大盘指数」板块恒空、分析师把没取到数当成「今天没有」，
+    /// 而日志里连是 429 / 连接级 / 还是字段改版都分不出来。本方法把逐源证据放进 `detail`。
+    ///
+    /// 四态判据：
+    /// - 有数据 ⇒ `Ok`（`detail` 记录被跳过/返回空的前序源，部分缺失不伪装成全集）；
+    /// - 各源都**正常应答**但没有数据 ⇒ `EmptyByTime`；
+    /// - 传输/反爬/限流或全部通道被过滤掉 ⇒ `SourceFailed`；
+    /// - 响应结构不符（JSON 解析失败、字段缺失）⇒ `SchemaChanged`（重试无意义）。
+    pub async fn get_index_quotes_outcome(&self) -> DataOutcome<Vec<IndexQuote>> {
         if crate::as_of::is_asof_active() {
             // as-of 模式的指数行情有三条真实通道，全部走完才允许降级 ——
             // 此前这里是**无条件 `record_degradation + return Ok(vec![])`**，一条通道都没试
@@ -6117,14 +6131,17 @@ impl AStockClient {
             let cache_key = Self::cache_key_for("index_quotes", "market");
             if let Some(cached) = self.cache_get(&cache_key).await {
                 if let Ok(v) = serde_json::from_str::<Vec<IndexQuote>>(&cached) {
-                    return Ok(v);
+                    return DataOutcome::ok(v).with_detail("as-of 内存缓存命中");
                 }
             }
             // ① 每日快照：live 模式当日收盘后采集过，回放即可直接复用
             let date = crate::as_of::current_date_or_now();
             if let Some(cached) = self.try_daily_snapshot("get_index_quotes", &date).await {
                 match serde_json::from_str::<Vec<IndexQuote>>(&cached) {
-                    Ok(v) if !v.is_empty() => return Ok(v),
+                    Ok(v) if !v.is_empty() => {
+                        return DataOutcome::ok(v)
+                            .with_detail(format!("as-of 当日快照命中（{date}）"));
+                    },
                     Err(e) => tracing::warn!(
                         "[asof] daily_snapshot 反序列化失败(get_index_quotes/{date}): {e}"
                     ),
@@ -6132,8 +6149,8 @@ impl AStockClient {
                 }
             }
             // ② vendor 的 as-of 通道（按截止日 K 线合成，见 `eastmoney`/`tencent` 的
-            //    `get_index_quotes_with_asof`）。逐源失败只落 tracing，汇总成**一条**降级留痕。
-            let mut failed: Vec<String> = Vec::new();
+            //    `get_index_quotes_with_asof`）。逐源结论必须留下来，不能只汇总成一句降级留痕。
+            let mut sources: Vec<(String, DataStatus, String)> = Vec::new();
             let mut unsupported = 0usize;
             for name in &self.routing.index_quotes {
                 let Some(vendor) = self.find_vendor(name) else { continue };
@@ -6149,40 +6166,82 @@ impl AStockClient {
                 }
                 match vendor.get_index_quotes_with_asof().await {
                     Ok(quotes) if !quotes.is_empty() => {
+                        let detail = if sources.is_empty() {
+                            format!("as-of 通道 {name} 命中")
+                        } else {
+                            format!(
+                                "as-of 通道 {name} 命中；前序源: {}",
+                                crate::outcome::summarize_sources(&sources)
+                            )
+                        };
                         self.cache_set_serialized(cache_key, &quotes, 300).await;
-                        return Ok(quotes);
+                        return DataOutcome::ok(quotes).with_detail(detail);
                     },
-                    Ok(_) => failed.push(format!("{name}=返回空")),
+                    Ok(_) => sources.push((name.clone(), DataStatus::EmptyByTime, "返回空".into())),
                     Err(e) => {
                         tracing::warn!("[asof] {name} get_index_quotes_with_asof 失败: {e}");
                         // 原因必须留在面板里：2026-09-26 那次「eastmoney 未实现或取数失败」
                         // 把「没实现」与「网络/反爬挂了」写成同一句，导致现场无法归因。
-                        let reason = e.to_string();
-                        failed.push(format!(
-                            "{name}={}",
-                            reason.chars().take(90).collect::<String>()
-                        ));
+                        let reason: String = e.to_string().chars().take(90).collect();
+                        sources.push((name.clone(), crate::outcome::classify_error(&e), reason));
                     },
                 }
             }
+            let summary = crate::outcome::summarize_sources(&sources);
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_index_quotes",
                 &format!(
-                    "as-of 指数行情不可用：无当日快照；有 as-of 通道的源全部失败 [{}]，\
-                     未申报该能力 {unsupported} 源",
-                    failed.join("; ")
+                    "as-of 指数行情不可用：无当日快照；通道结论 [{summary}]，\
+                     未申报该能力 {unsupported} 源"
                 ),
             );
-            return Ok(vec![]);
+            // 分类取**最可行动**的那一档（判据在 `outcome::chain_status`）：
+            // 结构变更（要改代码）> 故障（可重试）> 时段性空；无证据按故障。
+            let status = crate::outcome::chain_status(&sources);
+            let detail = if unsupported > 0 {
+                format!("{summary}；{unsupported} 源未申报 as-of 能力")
+            } else {
+                summary.clone()
+            };
+            return match status {
+                DataStatus::SchemaChanged => DataOutcome::schema_changed(vec![], detail),
+                DataStatus::EmptyByTime => DataOutcome::empty_by_time(vec![], detail),
+                _ => DataOutcome::source_failed(vec![], detail),
+            };
         }
         // ── live 模式 ──
+        // 逐源证据：`try_vendors_retry` 只回传链级结论，失败源的形态（429 / 连接 / 改版）
+        // 会在 `compose_chain_give_up` 里被合并成一句话 ⇒ 在闭包里就地记录，不另造重试循环。
+        let attempts: std::sync::Arc<parking_lot::Mutex<Vec<(String, DataStatus, String)>>> =
+            std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
         let vendor_names: Vec<String> =
             self.routing.index_quotes.iter().map(|n| n.to_string()).collect();
+        let recorded = attempts.clone();
         match self
-            .try_vendors_retry("", "index_quotes", &vendor_names, 2, |_, vendor| {
+            .try_vendors_retry("", "index_quotes", &vendor_names, 2, move |name, vendor| {
+                let recorded = recorded.clone();
+                let name = name.to_string();
                 Box::pin(async move {
-                    let result = vendor.get_index_quotes().await?;
+                    let result = vendor.get_index_quotes().await;
+                    let note = match &result {
+                        Ok(rows) if rows.is_empty() => {
+                            (DataStatus::EmptyByTime, "返回空".to_string())
+                        },
+                        Ok(_) => (DataStatus::Ok, String::new()),
+                        Err(e) => (crate::outcome::classify_error(e), e.to_string()),
+                    };
+                    {
+                        let mut log = recorded.lock();
+                        // 重试会重复命中同一源：**保留最后一次**（成功则覆盖先前的失败，
+                        // 失败则留下最接近放弃时的那条原因），避免「已换源」误指同一源重试。
+                        if let Some(slot) = log.iter_mut().find(|(n, _, _)| n == &name) {
+                            *slot = (name, note.0, note.1);
+                        } else {
+                            log.push((name, note.0, note.1));
+                        }
+                    }
+                    let result = result?;
                     if result.is_empty() {
                         return Err(DataError::VendorError {
                             vendor: "__market__".into(),
@@ -6194,27 +6253,52 @@ impl AStockClient {
             })
             .await
         {
-            Ok(result) => Ok(result),
+            Ok(result) => {
+                let log = attempts.lock().clone();
+                // 只有「有前序源失败/返回空」时才写 detail —— 首选源直接成功是常态，
+                // 不必每轮都带一句没有诊断价值的话。
+                let noise: Vec<_> = log.into_iter().filter(|(_, st, _)| !st.is_ok()).collect();
+                if noise.is_empty() {
+                    DataOutcome::ok(result)
+                } else {
+                    DataOutcome::ok(result).with_detail(format!(
+                        "已换源；前序源: {}",
+                        crate::outcome::summarize_sources(&noise)
+                    ))
+                }
+            },
             Err(e) => {
-                // P0-I(2026-09-12): 原实现是 `Err(_) => Ok(vec![])` —— 把「所有 vendor 全失败」
-                // 静默降级成「空数组」。下游（报告「大盘指数」板块 / 因子链）只能看到「没有数据」，
-                // 无法区分「指数行情源不可用」与「今天没有指数行情」。
-                //
-                // 603353 实证（模板 v37）：新增的 `t-index-quotes` 节点载荷恒为 `"[]"`，
-                // 报告「大盘指数」板块恒空；而同一 URL（`push2his/push2 stock/get?secid=1.000001`）
-                // 从宿主机直连**完全正常**返回（上证 3888.11）。⇒ 失败发生在 app 运行时，
-                // 且被 `eastmoney::get_index_quotes` 的 `Err(_) => continue` +
-                // `unwrap_or(Value::Null)` 与这里的 `Err(_)` **两处一起**吞掉，链路上零日志。
-                // fail-open 三问之③「是否本可补救却放弃」：是。
-                //
-                // 此处仅补可观测性（语义不变：仍返回空数组），
-                // 下一次运行的日志将直接指明是 429 / 连接级 / 还是 data=null。
-                tracing::warn!(
-                    "[astock-data] get_index_quotes 全部 vendor 失败，降级为空数组: {e}"
-                );
-                Ok(vec![])
+                // P0-I(2026-09-12) 的根因修在这里：旧实现 `Err(_) => Ok(vec![])` 把
+                // 「所有 vendor 全失败」静默降级成「空数组」。现在空数组只在
+                // 「各源都正常应答但没有数据」时出现，其余情况必须带状态。
+                let log = attempts.lock().clone();
+                let summary = crate::outcome::summarize_sources(&log);
+                let chain_err = e.to_string();
+                let detail = if summary.is_empty() {
+                    format!("无可用通道（全部已降级/无凭据，未发出请求）；链级结论: {chain_err}")
+                } else {
+                    format!("{summary}；链级结论: {chain_err}")
+                };
+                // 与 as-of 分支同一判据：混合（有空有故障）不得判成「时段性无数据」。
+                match crate::outcome::chain_status(&log) {
+                    DataStatus::SchemaChanged => DataOutcome::schema_changed(vec![], detail),
+                    DataStatus::EmptyByTime => DataOutcome::empty_by_time(vec![], detail),
+                    _ => {
+                        tracing::warn!("[astock-data] get_index_quotes 全部 vendor 失败: {e}");
+                        DataOutcome::source_failed(vec![], detail)
+                    },
+                }
             },
         }
+    }
+
+    /// 兼容入口：旧语义 = 失败降级为空数组（`Ok(vec![])`）。
+    ///
+    /// ⚠ 对外/对 LLM 的通道**不得**用它 —— 那正是「看起来正常但其实是空数据」的来源。
+    /// 目前只保留给内部聚合（`fetch_market_data`）与历史测试；需要成因的调用方一律走
+    /// [`Self::get_index_quotes_outcome`]。
+    pub async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
+        Ok(self.get_index_quotes_outcome().await.into_data())
     }
 
     pub async fn get_peers(&self, stock_code: &str) -> Result<Vec<PeerComparison>, DataError> {

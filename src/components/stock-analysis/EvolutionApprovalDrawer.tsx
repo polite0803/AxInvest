@@ -242,7 +242,7 @@ export function EvolutionApprovalDrawer({
           <Badge
             count={pendingPlans?.length ?? 0}
             showZero
-            style={{ backgroundColor: (pendingPlans?.length ?? 0) > 0 ? "#fa8c16" : "#bfbfbf" }}
+            style={{ backgroundColor: (pendingPlans?.length ?? 0) > 0 ? "var(--amber)" : "var(--muted)" }}
           />
         </Space>
       }
@@ -279,7 +279,7 @@ export function EvolutionApprovalDrawer({
                     style={{
                       cursor: "pointer",
                       padding: "6px 12px",
-                      backgroundColor: selected?.id === item.id ? "var(--ant-color-primary-bg, #e6f4ff)" : undefined,
+                      backgroundColor: selected?.id === item.id ? "var(--accent-bg)" : undefined,
                     }}
                   >
                     <Space size={6} wrap>
@@ -436,7 +436,7 @@ export function EvolutionApprovalDrawer({
 
           {/* 操作区 */}
           <div
-            style={{ marginTop: 20, paddingTop: 12, borderTop: "1px solid var(--ant-color-border-secondary, #f0f0f0)" }}
+            style={{ marginTop: 20, paddingTop: 12, borderTop: "1px solid var(--border-light)" }}
           >
             <Space wrap>
               {isPending && (

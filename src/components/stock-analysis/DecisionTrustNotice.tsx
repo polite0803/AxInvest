@@ -62,8 +62,12 @@ export function DecisionTrustNotice({ decision, variant = "banner", showConseque
   const collapsed = decision.weightsCollapsed === true;
   const gaps = decision.dataGaps ?? [];
   // #8 P5：跨轮数据质量熔断。与 `collapsed`（本轮因子权重坍缩）是**两件事**：
-  //   本轮 grade 可以是 B、因子权重也没坍缩、缺口清单为空，但近若干轮一直拿不到 A 级。
+  //   本轮 grade 可以是 A、因子权重也没坍缩、缺口清单为空，但近若干轮一直降档
+  //   （C/D/F 或无等级 —— 2026-10-10 起 A 与 B 都算正常档，别按「没拿到 A」理解本条）。
   //   这种"证据面一直坏"必须能单独把本警示条点亮，否则它只出现在 reasoning 长文里。
+  // ⚠ 空档披露（v190）只在 reasoning 那句里（`其间 N 轮…计入则为 M 轮`），本条不重复：
+  //   要在标签上并列就得给 `dqiOrphans` 打通 DTO + 11 语言，而那条数与 streak 不同轴
+  //   （一个是轮数、一个是被剔除的行数），并排显示反而 invites 用户相减。
   const fused = decision.dqiFuseState === "fused";
 
   /** 权重坍缩原因文案（与 DecisionBanner 原有口径一致，避免两处各写一套映射） */
@@ -157,15 +161,15 @@ export function DecisionTrustNotice({ decision, variant = "banner", showConseque
       className="rounded px-2.5 py-1.5 text-xs"
       style={{
         background: "rgba(250, 173, 20, 0.10)",
-        borderLeft: "3px solid var(--sa-amber)",
+        borderLeft: "3px solid var(--amber)",
       }}
     >
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="font-semibold" style={{ color: "var(--sa-amber)" }}>
+        <span className="font-semibold" style={{ color: "var(--amber)" }}>
           ⚠️ {t("stockAnalysis.trustNotice.title")}
         </span>
         {isPassiveDowngrade && (
-          <span style={{ color: "var(--color-text-primary)" }}>
+          <span style={{ color: "var(--fg)" }}>
             {t("stockAnalysis.trustNotice.passiveWatch")}
           </span>
         )}
@@ -175,7 +179,7 @@ export function DecisionTrustNotice({ decision, variant = "banner", showConseque
           </span>
         )}
         {fused && (
-          <span style={{ color: "var(--sa-amber)" }}>
+          <span style={{ color: "var(--amber)" }}>
             {t("stockAnalysis.trustNotice.dqiFuse", { streak: decision.dqiStreak ?? "?" })}
           </span>
         )}

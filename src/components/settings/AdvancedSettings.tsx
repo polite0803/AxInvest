@@ -655,7 +655,7 @@ function PrivacyControlSection() {
         className="text-xs"
         style={{
           padding: "4px 0",
-          color: "var(--ant-color-text-tertiary)",
+          color: "var(--muted)",
           lineHeight: 1.6,
         }}
       >
@@ -715,7 +715,7 @@ function SmartRouterSection() {
         className="text-xs"
         style={{
           padding: "4px 0",
-          color: "var(--ant-color-text-tertiary)",
+          color: "var(--muted)",
           lineHeight: 1.6,
         }}
       >

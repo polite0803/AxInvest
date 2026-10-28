@@ -281,6 +281,7 @@ pub async fn build_embed_context(
     );
 
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key: decrypted_key,
         key_id,
         provider_id: provider.id.clone(),

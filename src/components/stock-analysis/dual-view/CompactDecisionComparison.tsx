@@ -154,7 +154,7 @@ export function CompactDecisionComparison({ data }: CompactDecisionComparisonPro
       <div className="flex items-center gap-1.5">
         <span
           className="px-1 rounded text-sm font-medium"
-          style={{ background: "var(--sa-blue-bg, #dbeafe)", color: "#2563eb" }}
+          style={{ background: "var(--accent-bg)", color: "var(--accent)" }}
         >
           {t("dualView.decision.formulaBadge")}
         </span>
@@ -187,7 +187,7 @@ export function CompactDecisionComparison({ data }: CompactDecisionComparisonPro
           <div className="flex items-center gap-1.5">
             <span
               className="px-1 rounded text-sm font-medium"
-              style={{ background: "var(--sa-purple-bg, #ede9fe)", color: "#7c3aed" }}
+              style={{ background: "var(--purple-bg)", color: "var(--purple)" }}
             >
               {t("dualView.decision.llmBadge")}
             </span>
@@ -205,7 +205,7 @@ export function CompactDecisionComparison({ data }: CompactDecisionComparisonPro
             {actionsMatch && (
               <span
                 className="text-sm px-1 rounded"
-                style={{ background: "rgba(16, 185, 129, 0.15)", color: "#10b981" }}
+                style={{ background: "rgba(16, 185, 129, 0.15)", color: "var(--green)" }}
               >
                 ✓
               </span>
@@ -219,7 +219,7 @@ export function CompactDecisionComparison({ data }: CompactDecisionComparisonPro
           >
             <span
               className="px-1 rounded text-sm font-medium"
-              style={{ background: "var(--sa-purple-bg, #ede9fe)", color: "#7c3aed" }}
+              style={{ background: "var(--purple-bg)", color: "var(--purple)" }}
             >
               {t("dualView.decision.llmBadge")}
             </span>
@@ -234,7 +234,7 @@ export function CompactDecisionComparison({ data }: CompactDecisionComparisonPro
       />
       {/* V50: 分歧诊断摘要（仅低一致时显示） */}
       {agreement !== null && agreement < 60 && view.agreementBreakdown && (
-        <div className="text-sm" style={{ color: "#ef4444", opacity: 0.85 }}>
+        <div className="text-sm" style={{ color: "var(--red)", opacity: 0.85 }}>
           {view.agreementBreakdown.actionNote === "opposite"
             ? `⚠ ${view.agreementBreakdown.formulaAction} ≠ ${view.agreementBreakdown.llmAction}（${
               t("stockAnalysis.decision.oppositeDirection")

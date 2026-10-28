@@ -486,7 +486,9 @@ pub use route_bridge::{
 };
 
 // ── Provider 契约重导出 ──
-pub use context_builder::build_provider_request_context;
+pub use context_builder::{
+    build_provider_request_context, build_provider_request_context_for_model,
+};
 pub use has_provider_registry::HasProviderRegistry;
 pub use provider::{
     ProviderAdapter, ProviderProxyConfig, ProviderRequestContext, RealtimeProviderConfig,

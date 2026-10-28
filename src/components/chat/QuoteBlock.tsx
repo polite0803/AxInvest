@@ -54,7 +54,7 @@ export function QuoteBlock({ quotedMessage, onJump }: QuoteBlockProps) {
           padding: "6px 10px",
           marginBottom: 8,
           backgroundColor: "rgba(0, 0, 0, 0.04)",
-          borderLeft: "3px solid #1677ff",
+          borderLeft: "3px solid var(--accent)",
           borderRadius: 4,
           cursor: "pointer",
           display: "flex",
@@ -72,7 +72,7 @@ export function QuoteBlock({ quotedMessage, onJump }: QuoteBlockProps) {
         <Avatar
           size={20}
           icon={<MessageSquare size={12} />}
-          style={{ backgroundColor: "#1677ff", flexShrink: 0, marginTop: 2 }}
+          style={{ backgroundColor: "var(--accent)", flexShrink: 0, marginTop: 2 }}
         />
         <div style={{ minWidth: 0, flex: 1 }}>
           <Typography.Text

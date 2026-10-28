@@ -3,6 +3,7 @@
 import { Tooltip } from "@/components/layout/Tooltip";
 import { isTauri, listen, logIpcError, type UnlistenFn } from "@/lib/invoke";
 import { type PtySessionInfo, useTerminalStore } from "@/stores/feature/terminalStore";
+import { getXtermTheme, useThemeStore } from "@/stores/feature/themeStore";
 import { Badge, Button, Empty, Select } from "antd";
 import { AlertTriangle, CheckCircle, Maximize2, Minimize2, Plus, RefreshCw, Terminal, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -23,6 +24,7 @@ export function IntegratedTerminal({
   onError,
 }: IntegratedTerminalProps) {
   const { t } = useTranslation();
+  const currentTheme = useThemeStore((s) => s.currentTheme);
   const {
     sessions,
     activeSessionId,
@@ -62,6 +64,13 @@ export function IntegratedTerminal({
     resizeSessionRef.current = resizeSession;
   }, [activeSessionId, writeToSession, resizeSession]);
 
+  // 终端配色以 themeStore 为唯一来源；切换主题时同步到已创建的实例
+  useEffect(() => {
+    if (xtermRef.current) {
+      xtermRef.current.options.theme = getXtermTheme(currentTheme);
+    }
+  }, [currentTheme]);
+
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const activeOutput = useMemo(
     () => (activeSessionId ? (outputBuffers[activeSessionId] ?? []) : []),
@@ -90,20 +99,7 @@ export function IntegratedTerminal({
         cursorBlink: true,
         fontSize: 14,
         fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-        theme: {
-          background: "#1e1e2e",
-          foreground: "#cdd6f4",
-          cursor: "#f5e0dc",
-          selectionBackground: "#585b7066",
-          black: "#45475a",
-          red: "#f38ba8",
-          green: "#a6e3a1",
-          yellow: "#f9e2af",
-          blue: "#89b4fa",
-          magenta: "#f5c2e7",
-          cyan: "#94e2d5",
-          white: "#bac2de",
-        },
+        theme: getXtermTheme(useThemeStore.getState().currentTheme),
       });
 
       const fitAddon = new FitAddon();
@@ -371,10 +367,10 @@ export function IntegratedTerminal({
         flex: 1,
         minHeight: 0,
         width: "100%",
-        border: "1px solid #333",
+        border: "1px solid var(--theme-black, #45475a)",
         borderRadius: isMaximized ? 0 : 8,
         overflow: "hidden",
-        background: "#1e1e2e",
+        background: "var(--theme-background, #1e1e2e)",
       }}
     >
       <div
@@ -382,14 +378,14 @@ export function IntegratedTerminal({
           display: "flex",
           alignItems: "center",
           padding: "4px 12px",
-          background: "#181825",
-          borderBottom: "1px solid #333",
+          background: "var(--theme-background, #1e1e2e)",
+          borderBottom: "1px solid var(--theme-black, #45475a)",
           gap: 8,
           flexShrink: 0,
         }}
       >
-        <Terminal size={16} color="#89b4fa" />
-        <span style={{ color: "#cdd6f4", fontSize: 13, fontWeight: 500 }}>
+        <Terminal size={16} style={{ color: "var(--theme-blue, #89b4fa)" }} />
+        <span style={{ color: "var(--theme-foreground, #cdd6f4)", fontSize: 13, fontWeight: 500 }}>
           {t("nav.terminal")}
         </span>
 
@@ -419,7 +415,7 @@ export function IntegratedTerminal({
               icon={<Plus size={14} />}
               onClick={handleCreateSession}
               loading={loading}
-              style={{ color: "#a6e3a1" }}
+              style={{ color: "var(--theme-green, #a6e3a1)" }}
             />
           </Tooltip>
 
@@ -431,7 +427,7 @@ export function IntegratedTerminal({
                   type="text"
                   icon={<AlertTriangle size={14} />}
                   onClick={handleAnalyze}
-                  style={{ color: "#f9e2af" }}
+                  style={{ color: "var(--theme-yellow, #f9e2af)" }}
                 />
               </Tooltip>
               <Tooltip title={t("terminal.clear")}>
@@ -440,7 +436,7 @@ export function IntegratedTerminal({
                   type="text"
                   icon={<RefreshCw size={14} />}
                   onClick={handleClear}
-                  style={{ color: "#89b4fa" }}
+                  style={{ color: "var(--theme-blue, #89b4fa)" }}
                 />
               </Tooltip>
               <Tooltip title={t("terminal.killProcess")}>
@@ -449,7 +445,7 @@ export function IntegratedTerminal({
                   type="text"
                   icon={<X size={14} />}
                   onClick={handleKillSession}
-                  style={{ color: "#f38ba8" }}
+                  style={{ color: "var(--theme-red, #f38ba8)" }}
                 />
               </Tooltip>
               <Tooltip title={t("terminal.closeSession")}>
@@ -458,7 +454,7 @@ export function IntegratedTerminal({
                   type="text"
                   icon={<Trash2 size={14} />}
                   onClick={handleRemoveSession}
-                  style={{ color: "#f38ba8" }}
+                  style={{ color: "var(--theme-red, #f38ba8)" }}
                 />
               </Tooltip>
             </>
@@ -470,7 +466,7 @@ export function IntegratedTerminal({
               type="text"
               icon={isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
               onClick={toggleMaximize}
-              style={{ color: "#cdd6f4" }}
+              style={{ color: "var(--theme-foreground, #cdd6f4)" }}
             />
           </Tooltip>
         </div>
@@ -480,8 +476,8 @@ export function IntegratedTerminal({
         <div
           style={{
             padding: "4px 12px",
-            background: "#f38ba822",
-            color: "#f38ba8",
+            background: "color-mix(in srgb, var(--theme-red, #f38ba8) 13%, transparent)",
+            color: "var(--theme-red, #f38ba8)",
             fontSize: 12,
             display: "flex",
             alignItems: "center",
@@ -494,7 +490,7 @@ export function IntegratedTerminal({
             size="small"
             type="text"
             onClick={clearError}
-            style={{ color: "#f38ba8", marginLeft: "auto", padding: "0 4px" }}
+            style={{ color: "var(--theme-red, #f38ba8)", marginLeft: "auto", padding: "0 4px" }}
           >
             {t("common.dismiss")}
           </Button>
@@ -505,8 +501,8 @@ export function IntegratedTerminal({
         <div
           style={{
             padding: "4px 12px",
-            background: "#f9e2af22",
-            color: "#f9e2af",
+            background: "color-mix(in srgb, var(--theme-yellow, #f9e2af) 13%, transparent)",
+            color: "var(--theme-yellow, #f9e2af)",
             fontSize: 12,
             display: "flex",
             alignItems: "center",
@@ -541,24 +537,23 @@ export function IntegratedTerminal({
               alignItems: "center",
               justifyContent: "center",
               gap: 12,
-              background: "#1e1e2e",
+              background: "var(--theme-background, #1e1e2e)",
               zIndex: 1,
             }}
           >
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={<span style={{ color: "#6c7086" }}>{t("terminal.noSessions")}</span>}
+              description={
+                <span style={{ color: "var(--theme-bright-black, #585b70)" }}>
+                  {t("terminal.noSessions")}
+                </span>
+              }
             />
             <Button
               size="small"
               icon={<Plus size={14} />}
               onClick={handleCreateSession}
               loading={loading}
-              style={{
-                background: "#313244",
-                borderColor: "#45475a",
-                color: "#cdd6f4",
-              }}
             >
               {t("terminal.newTerminal")}
             </Button>
@@ -572,11 +567,11 @@ export function IntegratedTerminal({
             display: "flex",
             alignItems: "center",
             padding: "2px 12px",
-            background: "#181825",
-            borderTop: "1px solid #333",
+            background: "var(--theme-background, #1e1e2e)",
+            borderTop: "1px solid var(--theme-black, #45475a)",
             gap: 12,
             fontSize: 12,
-            color: "#6c7086",
+            color: "var(--theme-bright-black, #585b70)",
             flexShrink: 0,
           }}
         >
@@ -593,13 +588,13 @@ export function IntegratedTerminal({
             <span style={{ marginLeft: "auto" }}>
               {activeAnalysis.has_errors
                 ? (
-                  <span style={{ color: "#f38ba8" }}>
+                  <span style={{ color: "var(--theme-red, #f38ba8)" }}>
                     <AlertTriangle size={10} style={{ marginRight: 4 }} />
                     {t("terminal.errorsCount", { count: activeAnalysis.errors.length })}
                   </span>
                 )
                 : (
-                  <span style={{ color: "#a6e3a1" }}>
+                  <span style={{ color: "var(--theme-green, #a6e3a1)" }}>
                     <CheckCircle size={10} style={{ marginRight: 4 }} />
                     {t("terminal.ok")}
                   </span>
@@ -614,11 +609,16 @@ export function IntegratedTerminal({
 
 function SessionStatusBadge({ status }: { status: PtySessionInfo["status"] }) {
   const colorMap: Record<string, string> = {
-    starting: "#f9e2af",
-    running: "#a6e3a1",
-    exited: "#6c7086",
-    error: "#f38ba8",
+    starting: "var(--theme-yellow, #f9e2af)",
+    running: "var(--theme-green, #a6e3a1)",
+    exited: "var(--theme-bright-black, #585b70)",
+    error: "var(--theme-red, #f38ba8)",
   };
 
-  return <Badge color={colorMap[status] ?? "#6c7086"} style={{ marginRight: 4 }} />;
+  return (
+    <Badge
+      color={colorMap[status] ?? "var(--theme-bright-black, #585b70)"}
+      style={{ marginRight: 4 }}
+    />
+  );
 }

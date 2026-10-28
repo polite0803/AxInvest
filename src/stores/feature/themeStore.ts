@@ -69,30 +69,35 @@ interface ThemeState {
   getThemeColors: (themeName: string) => ThemeColors | null;
 }
 
-const BUILT_IN_THEMES: Record<string, ThemeColors> = {
-  default: {
-    background: "#1e1e2e",
-    foreground: "#cdd6f4",
-    cursor: "#f5e0dc",
-    cursorAccent: "#1e1e2e",
-    selectionBackground: "#585b7066",
-    black: "#45475a",
-    red: "#f38ba8",
-    green: "#a6e3a1",
-    yellow: "#f9e2af",
-    blue: "#89b4fa",
-    magenta: "#f5c2e7",
-    cyan: "#94e2d5",
-    white: "#bac2de",
-    brightBlack: "#585b70",
-    brightRed: "#f38ba8",
-    brightGreen: "#a6e3a1",
-    brightYellow: "#f9e2af",
-    brightBlue: "#89b4fa",
-    brightMagenta: "#f5c2e7",
-    brightCyan: "#94e2d5",
-    brightWhite: "#a6adc8",
-  },
+/** Catppuccin Mocha —— 终端默认配色，也是 xterm 初始主题的唯一来源。 */
+export const TERMINAL_THEME_DEFAULT: ThemeColors = {
+  background: "#1e1e2e",
+  foreground: "#cdd6f4",
+  cursor: "#f5e0dc",
+  cursorAccent: "#1e1e2e",
+  selectionBackground: "#585b7066",
+  black: "#45475a",
+  red: "#f38ba8",
+  green: "#a6e3a1",
+  yellow: "#f9e2af",
+  blue: "#89b4fa",
+  magenta: "#f5c2e7",
+  cyan: "#94e2d5",
+  white: "#bac2de",
+  brightBlack: "#585b70",
+  brightRed: "#f38ba8",
+  brightGreen: "#a6e3a1",
+  brightYellow: "#f9e2af",
+  brightBlue: "#89b4fa",
+  brightMagenta: "#f5c2e7",
+  brightCyan: "#94e2d5",
+  brightWhite: "#a6adc8",
+};
+
+export const BUILT_IN_THEMES: Record<string, ThemeColors> = {
+  default: TERMINAL_THEME_DEFAULT,
+  // 同一套配色的旧名字；此前 ThemeManager 里另维护了一份，现已合并到这里
+  "catppuccin-mocha": TERMINAL_THEME_DEFAULT,
   monokai: {
     background: "#272822",
     foreground: "#f8f8f2",
@@ -156,6 +161,7 @@ export const useThemeStore = create<ThemeState>()(
         // Map theme name to its corresponding data-theme-preset attribute
         const presetMap: Record<string, string> = {
           default: "deep-dusk",
+          "catppuccin-mocha": "deep-dusk",
           monokai: "deep-dusk",
           gruvbox: "deep-dusk",
         };
@@ -250,6 +256,8 @@ export function applyThemeToDocument(themeName: string) {
   const colors = store.getThemeColors(themeName);
 
   if (colors) {
+    // 作用域只到根节点上的 --theme-* 变量：它们服务终端面板（xterm 色板）。
+    // 不要再改 body 的背景/前景——那会把整个应用压成终端配色，盖掉 oklch 主题 token。
     document.documentElement.style.setProperty(
       "--theme-background",
       colors.background,
@@ -302,9 +310,6 @@ export function applyThemeToDocument(themeName: string) {
       "--theme-bright-white",
       colors.brightWhite,
     );
-
-    document.body.style.backgroundColor = colors.background;
-    document.body.style.color = colors.foreground;
   }
 }
 
@@ -341,8 +346,12 @@ export function getXtermTheme(themeName: string) {
   };
 }
 
+/**
+ * 启动时把当前终端配色落到根变量上，必须在首帧渲染前调用。
+ *
+ * 这里不加载主题列表：`themes` 的唯一消费方是 ThemeManager，它在挂载时自己调
+ * `loadThemes()`；在启动同步路径上发 IPC 只会制造一个随时可能失败的早期请求。
+ */
 export function initializeTheme() {
-  const store = useThemeStore.getState();
-  store.loadThemes();
-  applyThemeToDocument(store.currentTheme);
+  applyThemeToDocument(useThemeStore.getState().currentTheme);
 }

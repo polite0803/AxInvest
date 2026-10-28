@@ -67,7 +67,7 @@ export const BuddyMessageBubble = React.memo(
           }}
         >
           <Text style={{ fontSize: 14 }}>{buddyEmoji}</Text>
-          <Text style={{ fontSize: 12, color: "#666", fontWeight: 500 }}>
+          <Text style={{ fontSize: 12, color: "var(--fg-2)", fontWeight: 500 }}>
             {buddyName}
           </Text>
           <Text

@@ -736,6 +736,7 @@ Only output the JSON, no other text."#,
     let base_url =
         axagent_harness::resolve_base_url_for_type(&provider.api_host, &provider.provider_type);
     let ctx = axagent_harness::ProviderRequestContext {
+        header_timeout_secs: None,
         api_key: decrypted_key,
         key_id: key_row.id,
         provider_id: provider.id.clone(),

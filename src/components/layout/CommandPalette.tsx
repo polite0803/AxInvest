@@ -120,7 +120,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       {
         id: "go-chat",
         label: t("commandPalette.goToChat"),
-        icon: <MessageSquare size={16} color={CHAT_ICON_COLORS.MessageSquare} />,
+        icon: <MessageSquare size={16} style={{ color: CHAT_ICON_COLORS.MessageSquare }} />,
         shortcut: workspaceTabShortcutLabel("chat"),
         category: nav,
         action: () => {
@@ -131,7 +131,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       {
         id: "go-settings",
         label: t("commandPalette.goToSettings"),
-        icon: <Settings size={16} color={CHAT_ICON_COLORS.Settings} />,
+        icon: <Settings size={16} style={{ color: CHAT_ICON_COLORS.Settings }} />,
         shortcut: "⌘,",
         category: nav,
         action: () => {
@@ -142,7 +142,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       {
         id: "go-settings-gateway",
         label: t("commandPalette.goToGateway"),
-        icon: <Network size={16} color={CHAT_ICON_COLORS.Network} />,
+        icon: <Network size={16} style={{ color: CHAT_ICON_COLORS.Network }} />,
         category: nav,
         action: () => {
           // 网关管理已迁入设置/网络分组；保留 /gateway 路由用于 OAuth 回调
@@ -154,7 +154,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       {
         id: "go-skills",
         label: t("commandPalette.goToSkills"),
-        icon: <Sparkles size={16} color={CHAT_ICON_COLORS.Sparkles} />,
+        icon: <Sparkles size={16} style={{ color: CHAT_ICON_COLORS.Sparkles }} />,
         category: nav,
         action: () => {
           navigate("/settings");
@@ -165,7 +165,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       {
         id: "go-plugins",
         label: t("commandPalette.goToPlugins"),
-        icon: <Puzzle size={16} color={CHAT_ICON_COLORS.Puzzle} />,
+        icon: <Puzzle size={16} style={{ color: CHAT_ICON_COLORS.Puzzle }} />,
         category: nav,
         action: () => {
           navigate("/settings");
@@ -176,7 +176,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       {
         id: "new-conversation",
         label: t("commandPalette.newConversation"),
-        icon: <Plus size={16} color={CHAT_ICON_COLORS.Plus} />,
+        icon: <Plus size={16} style={{ color: CHAT_ICON_COLORS.Plus }} />,
         shortcut: "⌘N",
         category: actions,
         action: () => {
@@ -187,7 +187,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       {
         id: "toggle-sidebar",
         label: t("commandPalette.toggleSidebar"),
-        icon: <PanelLeftClose size={16} color={CHAT_ICON_COLORS.PanelLeftClose} />,
+        icon: <PanelLeftClose size={16} style={{ color: CHAT_ICON_COLORS.PanelLeftClose }} />,
         category: actions,
         action: () => {
           toggleSidebar();
@@ -197,7 +197,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       {
         id: "search-conversations",
         label: t("commandPalette.searchConversations"),
-        icon: <Search size={16} color={CHAT_ICON_COLORS.Search} />,
+        icon: <Search size={16} style={{ color: CHAT_ICON_COLORS.Search }} />,
         shortcut: "⌘F",
         category: actions,
         action: () => {
@@ -208,7 +208,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       {
         id: "settings-search",
         label: `${t("commandPalette.goToSettings")} → ${t("settings.searchProviders.title")}`,
-        icon: <Settings size={16} color={CHAT_ICON_COLORS.Settings} />,
+        icon: <Settings size={16} style={{ color: CHAT_ICON_COLORS.Settings }} />,
         category: settings,
         action: () => {
           navigate("/settings");
@@ -218,7 +218,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       {
         id: "settings-mcp",
         label: `${t("commandPalette.goToSettings")} → ${t("settings.mcpServers.title")}`,
-        icon: <Settings size={16} color={CHAT_ICON_COLORS.Settings} />,
+        icon: <Settings size={16} style={{ color: CHAT_ICON_COLORS.Settings }} />,
         category: settings,
         action: () => {
           navigate("/settings");
@@ -367,7 +367,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       <div role="application" onKeyDown={handleKeyDown}>
         <Input
           id="command-palette-input-48"
-          prefix={<Search size={16} color={CHAT_ICON_COLORS.Search} />}
+          prefix={<Search size={16} style={{ color: CHAT_ICON_COLORS.Search }} />}
           placeholder={t("commandPalette.placeholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}

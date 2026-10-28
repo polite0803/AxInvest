@@ -147,7 +147,7 @@ export function WorkflowMarketplace() {
   // ── Agent 上下文注入：告知 Agent 当前页面是工作流市场 ──
   useAgentContext({
     page: "workflow-marketplace",
-    url: "/marketplace",
+    url: "/chat/marketplace",
     quickActions: [
       { id: "browse-templates", description: "浏览/搜索工作流模板市场" },
       { id: "install-template", description: "安装工作流模板到本地", requireConfirmation: true },

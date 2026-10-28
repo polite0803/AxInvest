@@ -25,9 +25,9 @@ const { Text } = Typography;
 
 // ── 严重度图标 ──────────────────────────────────────────────
 const STATUS_ICON: Record<string, React.ReactNode> = {
-  good: <CheckCircleFilled style={{ color: "#52c41a" }} />,
-  warning: <ExclamationCircleFilled style={{ color: "#faad14" }} />,
-  issue: <CloseCircleFilled style={{ color: "#f5222d" }} />,
+  good: <CheckCircleFilled style={{ color: "var(--green)" }} />,
+  warning: <ExclamationCircleFilled style={{ color: "var(--amber)" }} />,
+  issue: <CloseCircleFilled style={{ color: "var(--red)" }} />,
   // 2026-09-21 新增第 4 态「无值」：旧快照没有 report_quality 字段时使用。
   // 此前该情形被并入 good ⇒ 绿色对勾旁边写着「旧版快照无此字段」，
   // 等于把「不知道」渲染成「好」（与项目「兜底档不得冒充正常」的判据相反）。
@@ -361,7 +361,7 @@ export function AnalystDataQualityModal({
                   style={{
                     fontSize: 48,
                     fontWeight: 700,
-                    color: GRADE_COLOR[report.grade] ?? "#888780",
+                    color: GRADE_COLOR[report.grade] ?? "var(--muted)",
                     lineHeight: 1,
                     marginTop: 16,
                   }}
@@ -418,7 +418,7 @@ export function AnalystDataQualityModal({
               style={{
                 marginBottom: 16,
                 padding: "8px 12px",
-                background: "var(--ant-color-fill-quaternary)",
+                background: "var(--surface-2)",
                 borderRadius: 8,
               }}
             >
@@ -497,7 +497,14 @@ export function AnalystDataQualityModal({
 
             {/* 自我进化建议 */}
             {evolutionSuggestions.length > 0 && (
-              <div style={{ marginTop: 16, padding: 12, background: "var(--ant-color-info-bg)", borderRadius: 8 }}>
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: 12,
+                  background: "color-mix(in srgb, var(--teal) 12%, transparent)",
+                  borderRadius: 8,
+                }}
+              >
                 <Text strong>{t("stockAnalysis.analystReport.evolutionSuggestion", { nodeName: nodeTypeUiName })}</Text>
                 <ul style={{ margin: "8px 0 0 0", paddingLeft: 20 }}>
                   {evolutionSuggestions.map((s, i) => (

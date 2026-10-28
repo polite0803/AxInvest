@@ -11,7 +11,7 @@
  */
 
 import { BUILTIN_PAGE_PATH } from "@/lib/pageRegistry";
-import { buildWorkspaceTabSearch, type WorkspaceTab } from "@/lib/workspaceTabs";
+import { CHAT_ONLY_QUERY_PARAMS, withoutParams, type WorkspaceTab, workspaceTabPath } from "@/lib/workspaceTabs";
 import { useWorkspaceTabStore } from "@/stores";
 import { useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -24,16 +24,19 @@ export function useWorkspaceTabNavigator(): (tab: WorkspaceTab) => void {
     (tab: WorkspaceTab) => {
       useWorkspaceTabStore.getState().setActiveTab(tab);
       const isOnHub = location.pathname === BUILTIN_PAGE_PATH.chat
+        || location.pathname.startsWith(`${BUILTIN_PAGE_PATH.chat}/`)
         || location.pathname === "/"
         || location.pathname === "";
       // 已在工作台内切 Tab：保留当前无关参数（如 stockCode）；从业务页进入工作台：
       // **不继承**业务页查询串（/invest?tab=workspace&view=trade 这种参数带进 /chat
-      // 会被下游误读成工作台语义），只写 ws。
+      // 会被下游误读成工作台语义）。
+      // 2026-10-28：Tab 写入路径段，chat 专属参数从查询串清掉，不再写 `ws`。
       const baseSearch = isOnHub ? location.search : "";
+      const params = withoutParams(new URLSearchParams(baseSearch), CHAT_ONLY_QUERY_PARAMS);
       navigate(
         {
-          pathname: BUILTIN_PAGE_PATH.chat,
-          search: buildWorkspaceTabSearch(baseSearch, tab),
+          pathname: workspaceTabPath(tab),
+          search: params.toString(),
         },
         { replace: isOnHub },
       );

@@ -75,7 +75,7 @@ export const HtmlPreview = memo(function HtmlPreview({
         style={{
           padding: 16,
           background: "#fff",
-          color: "#ff4d4f",
+          color: "var(--red)",
           borderRadius: 8,
         }}
       >

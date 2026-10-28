@@ -108,7 +108,7 @@ export function SkillVersionTimeline({ skillId }: SkillVersionTimelineProps) {
           <div style={{ fontFamily: "var(--font-mono, 'JetBrains Mono', ui-monospace, monospace)", fontSize: 12 }}>
             <div
               style={{
-                background: token.colorErrorBg ?? "#fff1f0",
+                background: token.colorErrorBg ?? "var(--red-bg)",
                 padding: 8,
                 borderRadius: 4,
                 marginBottom: 8,
@@ -125,7 +125,7 @@ export function SkillVersionTimeline({ skillId }: SkillVersionTimelineProps) {
             </div>
             <div
               style={{
-                background: token.colorSuccessBg ?? "#f6ffed",
+                background: token.colorSuccessBg ?? "var(--green-bg)",
                 padding: 8,
                 borderRadius: 4,
               }}

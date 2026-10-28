@@ -288,7 +288,7 @@ export const ParallelPropertyPanel: React.FC<ParallelPropertyPanelProps> = ({
                   padding: 8,
                   background: token.colorBgElevated,
                   borderRadius: 6,
-                  border: "1px solid #333",
+                  border: "1px solid var(--border)",
                 }}
               >
                 <div
@@ -336,7 +336,7 @@ export const ParallelPropertyPanel: React.FC<ParallelPropertyPanelProps> = ({
                         onClose={() => handleRemoveStepFromBranch(index, stepId)}
                         style={{
                           background: token.colorFillQuaternary,
-                          border: "1px solid #444",
+                          border: "1px solid var(--border)",
                           color: token.colorTextQuaternary,
                         }}
                         closeIcon={<X size={10} />}

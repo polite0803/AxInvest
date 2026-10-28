@@ -84,7 +84,7 @@ export function BenchmarkReportView({ report }: BenchmarkReportViewProps) {
               value={report.summary.passRate * 100}
               suffix="%"
               precision={1}
-              styles={{ content: { color: report.summary.passRate >= 0.7 ? "#52c41a" : "#ff4d4f" } }}
+              styles={{ content: { color: report.summary.passRate >= 0.7 ? "var(--green)" : "var(--red)" } }}
             />
           </Card>
         </Col>

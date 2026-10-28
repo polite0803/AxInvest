@@ -9,6 +9,7 @@
 // ── 证据质量驱动权重 (P0-1) ──
 
 import { invoke } from "@/lib/invoke";
+import { antdTagPreset, type CategoricalHue, HUE_COLORS, hueVar } from "@/theme/categoricalColors";
 import type { CSSProperties } from "react";
 
 /**
@@ -691,26 +692,38 @@ export function parseRiskLevel(raw: unknown): StockRiskLevelType {
  * 旧表把 买入/增持 并成 `--color-danger`、卖出/减持 并成 `--color-success`、
  * 不确定/数据缺失 并成灰 ⇒ 同一屏两档颜色相同，强度差完全看不见，只能靠读文字区分。
  *
- * 按 A 股涨跌习惯取色（红 = 利好、绿 = 利空）。主题 token 只有
- * danger / success / info / warning 四枚，装不下八档互异 ⇒ 落 hex 单表；
- * 底色与描边用 `color-mix` 从同一 hex 派生，深/浅主题都成立。
+ * 按 A 股涨跌习惯取色（红 = 利好、绿 = 利空）。
+ *
+ * 2026-10-28 收编：原表是手抄 hex，理由写的是「主题 token 只有四枚，装不下八档互异」——
+ * 那个前提在类目色板（`@/theme/categoricalColors`，16 色相 × 亮/暗两档）落地后已不成立，
+ * 故这里只登记**色相**，取值回落到色板这一张权威表：
+ *   · 实心 Tag 的底色固定取深档（`actionFill`）不随明暗翻 —— 白字压在上面才可读；
+ *   · 自定义徽标的文字与底色走 `hueVar`，随 `--cat-*` 投影切档。
  */
-export const ACTION_PALETTE: Record<StockActionType, { readonly hex: string; readonly rank: number | null }> = {
-  [StockAction.SELL]: { hex: "#13c2c2", rank: 0 },
-  [StockAction.REDUCE]: { hex: "#52c41a", rank: 1 },
-  [StockAction.WAIT]: { hex: "#a0d911", rank: 2 },
-  [StockAction.HOLD]: { hex: "#faad14", rank: 3 },
-  [StockAction.INCREASE]: { hex: "#fa541c", rank: 4 },
-  [StockAction.BUY]: { hex: "#f5222d", rank: 5 },
-  [StockAction.UNCERTAIN]: { hex: "#9254de", rank: null },
-  [StockAction.UNAVAILABLE]: { hex: "#8c8c8c", rank: null },
+export const ACTION_PALETTE: Record<
+  StockActionType,
+  { readonly hue: CategoricalHue; readonly rank: number | null }
+> = {
+  [StockAction.SELL]: { hue: "cyan", rank: 0 },
+  [StockAction.REDUCE]: { hue: "green", rank: 1 },
+  [StockAction.WAIT]: { hue: "lime", rank: 2 },
+  [StockAction.HOLD]: { hue: "yellow", rank: 3 },
+  [StockAction.INCREASE]: { hue: "volcano", rank: 4 },
+  [StockAction.BUY]: { hue: "red", rank: 5 },
+  [StockAction.UNCERTAIN]: { hue: "purple", rank: null },
+  [StockAction.UNAVAILABLE]: { hue: "gray", rank: null },
 };
+
+/** 实心 Tag 底色：固定深档（白字压在上面才可读），刻意不随明暗档翻。 */
+export function actionFill(action: StockActionType): string {
+  return HUE_COLORS.light[ACTION_PALETTE[action].hue];
+}
 
 export function getActionColor(action: string): string {
   // P1-6(2026-09-14): 原先直接 `switch (action)` **不解析** —— 传入中文「买入」或小写
   // `buy` 全部落到 `default`（无配色）。同文件的 getActionTKey 一直是解析后再查表的，
   // 三者判据不一致，导致「标签显示了颜色却没有」。现统一走 parseAction。
-  return ACTION_PALETTE[parseAction(action)].hex;
+  return actionFill(parseAction(action));
 }
 
 /**
@@ -721,7 +734,7 @@ export function getActionColor(action: string): string {
  */
 export function getActionTagStyle(action: string): CSSProperties {
   // P1-6(2026-09-14): 同 getActionColor —— 原 switch 不解析原串，中文/小写值无配色。
-  const hex = ACTION_PALETTE[parseAction(action)].hex;
+  const tint = hueVar(ACTION_PALETTE[parseAction(action)].hue);
   return {
     margin: 0,
     fontSize: 10,
@@ -729,9 +742,9 @@ export function getActionTagStyle(action: string): CSSProperties {
     padding: "0 5px",
     borderRadius: 3,
     border: "1px solid",
-    color: hex,
-    background: `color-mix(in oklch, ${hex} 14%, transparent)`,
-    borderColor: `color-mix(in oklch, ${hex} 30%, transparent)`,
+    color: tint,
+    background: `color-mix(in srgb, ${tint} 14%, transparent)`,
+    borderColor: `color-mix(in srgb, ${tint} 30%, transparent)`,
   };
 }
 
@@ -772,16 +785,73 @@ export function getRiskColor(level: string): string {
   //   两者必须同判据，否则又回到「文字一档、颜色另一档」。
   switch (parseRiskLevel(level)) {
     case StockRiskLevel.LOW:
-      return "var(--sa-green)";
+      return "var(--green)";
     case StockRiskLevel.MID:
-      return "var(--sa-amber)";
+      return "var(--amber)";
     case StockRiskLevel.HIGH:
-      return "var(--sa-red)";
+      return "var(--red)";
     case StockRiskLevel.EXTREME:
-      return "var(--sa-extreme)";
+      return "var(--red-deep)";
     default:
       return "var(--muted)";
   }
+}
+
+/**
+ * 荐股风格 → 类目色相（单一权威）。
+ *
+ * 收编前有两份：`CompactRecommendation` 拼 `var(--sa-…)`（`--sa-*` 从未定义 ⇒ 所有风格
+ * 恒退到同一个 `--accent`），`RecoHistoryModal` 另抄了一张 AntD 预设名表
+ * （trend=red、serenity=green、technical=value 同色…）。这里按后端 `Style` 枚举的
+ * 11 个变体登记一次色相，两处消费方都指过来 —— 同一风格在列表与详情必须同色。
+ */
+export const RECO_STYLE_HUE: Record<string, CategoricalHue> = {
+  trend: "red",
+  value: "blue",
+  capital: "orange",
+  reversion: "purple",
+  watchlist: "gray",
+  bottleneck: "pink",
+  policy: "geekblue",
+  earnings: "lime",
+  capital_flow: "yellow",
+  event: "volcano",
+  technical: "green",
+};
+
+/**
+ * 后端 `Style` 的 serde **别名** → 规范键。`serenity` 与 `bottleneck` 是同一个风格，
+ * 同色是刻意的（不算撞色）；词表外的风格不猜，由调用方退回中性色。
+ */
+export const RECO_STYLE_ALIASES: Record<string, string> = {
+  serenity: "bottleneck",
+  capitalFlow: "capital_flow",
+};
+
+/** 风格 → 色相（含别名解析）；词表外返回 null，由消费方各自兜底。 */
+export function recoStyleHue(style: string): CategoricalHue | null {
+  return RECO_STYLE_HUE[RECO_STYLE_ALIASES[style] ?? style] ?? null;
+}
+
+/**
+ * 风格 → AntD Tag 的预设色名（全站唯一出口）。
+ *
+ * 此前有三处各自登记了风格配色：RecommendationPanel 的分组标签、RecoHistoryModal 的
+ * 历史列表与详情、CompactRecommendation 的紧凑徽标 —— 同一个 `trend` 在三处分别是
+ * blue / red / blue。调用方一律走这个出口，不再各抄一张表。
+ */
+export function recoTagPreset(style: string): string {
+  return antdTagPreset(recoStyleHue(style) ?? "gray");
+}
+
+/** 风格徽标取色；词表外的风格退回 `--accent`（与收编前的可见结果一致）。 */
+export function recoStyleColors(style: string): { color: string; bg: string } {
+  const hue = recoStyleHue(style);
+  if (!hue) {
+    return { color: "var(--accent)", bg: "var(--accent-bg)" };
+  }
+  const color = hueVar(hue);
+  return { color, bg: `color-mix(in srgb, ${color} 12%, transparent)` };
 }
 
 export function getRiskTKey(level: string): string {
@@ -821,15 +891,15 @@ export function portfolioRiskTKey(raw: unknown): string {
 export function portfolioRiskColor(raw: unknown): string {
   switch (String(raw ?? "").trim()) {
     case "低风险":
-      return "var(--sa-green)";
+      return "var(--green)";
     case "中高风险":
     case "高风险":
-      return "var(--sa-red)";
+      return "var(--red)";
     case "无持仓":
       return "var(--muted)";
     default:
       // 「中等风险」及未识别输入
-      return "var(--sa-amber)";
+      return "var(--amber)";
   }
 }
 
@@ -994,18 +1064,18 @@ export function getCatalystTimelineTKey(raw: unknown): string | null {
  * 兜底与后端 `apply_risk_veto` 同一判据：空 = 数据缺失（灰），非空但不识别 = 不确定（紫）。
  */
 export function getDashboardActionColor(raw: unknown): string {
-  if (typeof raw !== "string" || isAbsentDecisionAction(raw)) { return ACTION_PALETTE[StockAction.UNAVAILABLE].hex; }
+  if (typeof raw !== "string" || isAbsentDecisionAction(raw)) { return actionFill(StockAction.UNAVAILABLE); }
   const bucket = parseActionStrict(raw);
-  return ACTION_PALETTE[bucket ?? StockAction.UNCERTAIN].hex;
+  return actionFill(bucket ?? StockAction.UNCERTAIN);
 }
 
 /** 非档位值域（trend 等）的未知值兜底色：中性灰，不臆造方向 */
-const DASHBOARD_NEUTRAL_COLOR = "#8c8c8c";
+const DASHBOARD_NEUTRAL_COLOR = HUE_COLORS.light.gray;
 
 /** `dashboard_report.trend` 配色：看多红 / 看空绿（A 股涨跌色习惯），其余中性灰 */
 const DASHBOARD_TREND_COLORS: Record<string, string> = {
-  "看多": "#f5222d",
-  "看空": "#52c41a",
+  "看多": HUE_COLORS.light.red,
+  "看空": HUE_COLORS.light.green,
 };
 
 export function getDashboardTrendColor(raw: unknown): string {
@@ -1054,12 +1124,12 @@ export function getSignalColor(signal: string): string {
   // 端点直取强度表的端点（看多↔买入、看空↔卖出、关注↔持有），不再各自写 antd 色名 ——
   // 写死色名就是「同一套约定两处表达」，一处改色另一处不会跟着改（2026-09-21 那次相反配色即此成因）。
   if (s.includes("买") || s.includes("多") || s.includes("涨") || s.includes("牛")) {
-    return ACTION_PALETTE[StockAction.BUY].hex;
+    return actionFill(StockAction.BUY);
   }
   if (s.includes("卖") || s.includes("空") || s.includes("跌") || s.includes("熊")) {
-    return ACTION_PALETTE[StockAction.SELL].hex;
+    return actionFill(StockAction.SELL);
   }
-  return ACTION_PALETTE[StockAction.HOLD].hex;
+  return actionFill(StockAction.HOLD);
 }
 
 /** 尝试解析报告字符串为 JSON 对象 */

@@ -619,6 +619,9 @@ impl ProviderAdapter for OpenAIResponsesAdapter {
         });
         let api_key = ctx.api_key.clone();
         let custom_headers = ctx.custom_headers.clone();
+        let provider_id = ctx.provider_id.clone();
+        let header_timeout_secs = ctx.header_timeout_secs;
+        let model = request.model.clone();
         let url = Self::chat_url(ctx);
         let mut body = build_request(&request, true);
         // R4-2：同 `chat` —— 回退到会话级续写 id。
@@ -632,27 +635,44 @@ impl ProviderAdapter for OpenAIResponsesAdapter {
         let (mut tx, rx) = futures::channel::mpsc::channel(256);
 
         tokio::spawn(async move {
-            let resp = match crate::apply_stream_headers_to_request(
-                client
-                    .post(&url)
-                    .header("Authorization", format!("Bearer {}", api_key))
-                    .json(&body),
-                &custom_headers,
-            )
-            .send()
-            .await
-            {
-                Ok(r) if r.status().is_success() => r,
-                Ok(r) => {
-                    let s = r.status();
-                    let t = r.text().await.unwrap_or_default();
+            // 首字节预算与其它协议路径同口径（见 stream_budget）。
+            let body_size = serde_json::to_string(&body).ok().map(|s| s.len()).unwrap_or(0);
+            let budget =
+                crate::stream_budget::resolve_header_budget(header_timeout_secs, body_size);
+            let header_ctx = crate::stream_budget::HeaderBudgetContext {
+                provider_id: provider_id.clone(),
+                model: model.clone(),
+                url: url.clone(),
+            };
+            let send_result =
+                crate::stream_budget::send_with_header_budget(budget, &header_ctx, || {
+                    crate::apply_stream_headers_to_request(
+                        client
+                            .post(&url)
+                            .header("Authorization", format!("Bearer {}", api_key))
+                            .json(&body),
+                        &custom_headers,
+                    )
+                })
+                .await;
+
+            let resp = match send_result {
+                Ok(outcome) => outcome.response,
+                Err(crate::stream_budget::HeaderSendError::Hung { waited, budget, .. }) => {
                     let _ = tx.try_send(Err(AxAgentError::execution_with_source(
-                        super::diagnose_http_status("OpenAI Responses", s, &t),
-                        anyhow::anyhow!("HTTP {s}: {t}"),
+                        crate::stream_budget::hung_error_message(
+                            "OpenAI Responses",
+                            waited,
+                            budget,
+                        ),
+                        anyhow::anyhow!(
+                            "response headers timeout after {}s (gateway hung)",
+                            waited.as_secs()
+                        ),
                     )));
                     return;
                 },
-                Err(e) => {
+                Err(crate::stream_budget::HeaderSendError::Request(e)) => {
                     let _ = tx.try_send(Err(AxAgentError::execution_with_source(
                         super::diagnose_reqwest_error(&e),
                         e,
@@ -660,6 +680,16 @@ impl ProviderAdapter for OpenAIResponsesAdapter {
                     return;
                 },
             };
+
+            if !resp.status().is_success() {
+                let s = resp.status();
+                let t = resp.text().await.unwrap_or_default();
+                let _ = tx.try_send(Err(AxAgentError::execution_with_source(
+                    super::diagnose_http_status("OpenAI Responses", s, &t),
+                    anyhow::anyhow!("HTTP {s}: {t}"),
+                )));
+                return;
+            }
 
             let mut byte_stream = resp.bytes_stream();
             let mut buf = String::new();

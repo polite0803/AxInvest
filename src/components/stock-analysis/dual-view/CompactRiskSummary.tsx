@@ -76,9 +76,9 @@ export function CompactRiskSummary({ data }: CompactRiskSummaryProps) {
         <div
           className="rounded px-2 py-1 text-[11px] font-medium"
           style={{
-            background: "var(--sa-red-bg, #fee2e2)",
-            color: "var(--sa-red, #dc2626)",
-            border: "1px solid var(--sa-red, #dc2626)",
+            background: "var(--red-bg)",
+            color: "var(--red)",
+            border: "1px solid var(--red)",
           }}
         >
           ⚠️ {t("stockAnalysis.dataAlert", { nodes: untrustedRiskNodes.join(", ") })}

@@ -117,7 +117,7 @@ export function MarketPackTab() {
                 </Space>
               }
             >
-              <div style={{ fontSize: 12, color: "#888" }}>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>
                 <div>ID: {p.id}</div>
                 <div>{t("opc.market.version", { version: p.version })}</div>
                 <div>

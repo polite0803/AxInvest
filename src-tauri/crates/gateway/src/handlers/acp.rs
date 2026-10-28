@@ -215,6 +215,7 @@ async fn build_ctx(
         .map_err(|e| format!("decrypt: {e}"))?;
     let base = resolve_base_url_for_type(&provider.api_host, &provider.provider_type);
     Ok(ProviderRequestContext {
+        header_timeout_secs: None,
         api_key,
         key_id: key.id,
         provider_id: provider.id.clone(),

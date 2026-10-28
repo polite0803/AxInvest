@@ -1,5 +1,6 @@
 import {
   ACTION_PALETTE,
+  actionFill,
   actionToDirection,
   alignReasoningDecisionLabel,
   classifyDirectionText,
@@ -28,6 +29,7 @@ import {
   resolveDisplayAction,
   StockAction,
 } from "@/lib/stock-analysis-utils";
+import { HUE_COLORS, hueVar } from "@/theme/categoricalColors";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -339,23 +341,25 @@ describe("dashboard_report 值域 → i18n key", () => {
     // 第二份档位→色映射，会与档位表各自漂移（本次改八色之后它就自动落后）。
     // 权威把「强烈买入 / 强烈卖出」折进 BUY / SELL ⇒ 与买入/卖出**同色是裁定的结果**；
     // 强度没丢，丢的是那张表 —— 文字仍分两档，由下面两条钉住。
-    expect(getDashboardActionColor("强烈买入")).toBe(ACTION_PALETTE[StockAction.BUY].hex);
-    expect(getDashboardActionColor("买入")).toBe(ACTION_PALETTE[StockAction.BUY].hex);
-    expect(getDashboardActionColor("增持")).toBe(ACTION_PALETTE[StockAction.INCREASE].hex);
-    expect(getDashboardActionColor("持有")).toBe(ACTION_PALETTE[StockAction.HOLD].hex);
-    expect(getDashboardActionColor("减持")).toBe(ACTION_PALETTE[StockAction.REDUCE].hex);
-    expect(getDashboardActionColor("卖出")).toBe(ACTION_PALETTE[StockAction.SELL].hex);
+    expect(getDashboardActionColor("强烈买入")).toBe(actionFill(StockAction.BUY));
+    expect(getDashboardActionColor("买入")).toBe(actionFill(StockAction.BUY));
+    expect(getDashboardActionColor("增持")).toBe(actionFill(StockAction.INCREASE));
+    expect(getDashboardActionColor("持有")).toBe(actionFill(StockAction.HOLD));
+    expect(getDashboardActionColor("减持")).toBe(actionFill(StockAction.REDUCE));
+    expect(getDashboardActionColor("卖出")).toBe(actionFill(StockAction.SELL));
     expect(getDashboardActionTKey("强烈买入")).toBe("stockAnalysis.dashboard.actionStrongBuy");
     expect(getDashboardActionTKey("买入")).not.toBe(getDashboardActionTKey("强烈买入"));
     // 兜底与后端 `apply_risk_veto` 同判据：空 = 数据缺失，非空但不识别 = 不确定
-    expect(getDashboardActionColor("")).toBe(ACTION_PALETTE[StockAction.UNAVAILABLE].hex);
-    expect(getDashboardActionColor("未知档")).toBe(ACTION_PALETTE[StockAction.UNCERTAIN].hex);
+    expect(getDashboardActionColor("")).toBe(actionFill(StockAction.UNAVAILABLE));
+    expect(getDashboardActionColor("未知档")).toBe(actionFill(StockAction.UNCERTAIN));
   });
 
   it("配色遵循 A 股涨跌习惯：看多红 / 看空绿 / 利好红 / 利空绿", () => {
-    expect(getDashboardTrendColor("看多")).toBe("#f5222d");
-    expect(getDashboardTrendColor("看空")).toBe("#52c41a");
-    expect(getDashboardTrendColor("震荡")).toBe("#8c8c8c");
+    // 端点必须与强度表同源，别把十六进制写第二遍（2026-10-28 收编进类目色板后，
+    // 具体取值由 HUE_COLORS 决定；这里断言的是「看多=买入档色、看空=卖出档色」这套约定）
+    expect(getDashboardTrendColor("看多")).toBe(actionFill(StockAction.BUY));
+    expect(getDashboardTrendColor("看空")).toBe(HUE_COLORS.light.green);
+    expect(getDashboardTrendColor("震荡")).toBe(HUE_COLORS.light.gray);
     expect(getCatalystDirectionColor("利好")).toBe("red");
     expect(getCatalystDirectionColor("利空")).toBe("green");
     expect(getDashboardSeverityColor("高")).toBe("red");
@@ -543,7 +547,7 @@ describe("ACTION_PALETTE · 档位强度配色（2026-10-22 用户要求：结�
   const rank = (a: string) => ACTION_PALETTE[a as keyof typeof ACTION_PALETTE].rank as number;
 
   it("八档各有独立 hex", () => {
-    const hexes = [...OP, ...ABSENT].map((a) => ACTION_PALETTE[a].hex);
+    const hexes = [...OP, ...ABSENT].map((a) => actionFill(a));
     expect(new Set(hexes).size).toBe(OP.length + ABSENT.length);
   });
 
@@ -567,26 +571,26 @@ describe("ACTION_PALETTE · 档位强度配色（2026-10-22 用户要求：结�
 
   it("同一档从 token / 中文 / 别名任一口径进来都取到同一个色（解析只有一处）", () => {
     for (const raw of ["BUY", "买入", "strong_buy", "强烈买入"]) {
-      expect(getActionColor(raw)).toBe(ACTION_PALETTE[StockAction.BUY].hex);
+      expect(getActionColor(raw)).toBe(actionFill(StockAction.BUY));
     }
     for (const raw of ["SELL", "卖出", "clear", "强烈卖出"]) {
-      expect(getActionColor(raw)).toBe(ACTION_PALETTE[StockAction.SELL].hex);
+      expect(getActionColor(raw)).toBe(actionFill(StockAction.SELL));
     }
     expect(getActionColor("watch")).toBe(getActionColor("观望"));
   });
 
   it("getActionTagStyle 与 getActionColor 同源（文字色就是表里的 hex）", () => {
     for (const a of [...OP, ...ABSENT]) {
-      expect(getActionColor(a)).toBe(ACTION_PALETTE[a].hex);
-      expect(getActionTagStyle(a).color).toBe(ACTION_PALETTE[a].hex);
+      expect(getActionColor(a)).toBe(actionFill(a));
+      expect(getActionTagStyle(a).color).toBe(hueVar(ACTION_PALETTE[a].hue));
     }
   });
 
   it("看板报告侧不再养第二张色表，且兜底与后端同判据（空=数据缺失 / 不识别=不确定）", () => {
-    expect(getDashboardActionColor("买入")).toBe(ACTION_PALETTE[StockAction.BUY].hex);
-    expect(getDashboardActionColor("强烈买入")).toBe(ACTION_PALETTE[StockAction.BUY].hex);
-    expect(getDashboardActionColor("")).toBe(ACTION_PALETTE[StockAction.UNAVAILABLE].hex);
-    expect(getDashboardActionColor("明天再看")).toBe(ACTION_PALETTE[StockAction.UNCERTAIN].hex);
+    expect(getDashboardActionColor("买入")).toBe(actionFill(StockAction.BUY));
+    expect(getDashboardActionColor("强烈买入")).toBe(actionFill(StockAction.BUY));
+    expect(getDashboardActionColor("")).toBe(actionFill(StockAction.UNAVAILABLE));
+    expect(getDashboardActionColor("明天再看")).toBe(actionFill(StockAction.UNCERTAIN));
   });
 
   it("双视角两张卡不再自带「买绿卖红」的反向配色", () => {

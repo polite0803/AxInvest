@@ -10,6 +10,10 @@
 // - 水平参考线 = initialCash（基线）
 // - 跳变点（fold 起点不连续）由 markPoint 标注
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { cssVar } from "@/lib/cssVar";
+import { ensureECharts } from "@/lib/echartsInstance";
+import { hueColor } from "@/theme/categoricalColors";
 import * as echarts from "echarts";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -65,17 +69,20 @@ export function WalkForwardOOSChart({
   height = 320,
 }: WalkForwardOOSChartProps) {
   const { t } = useTranslation();
+  const isDark = useIsDarkTheme();
   const chartRef = useRef<HTMLDivElement>(null);
   const instRef = useRef<echarts.ECharts | null>(null);
 
   useEffect(() => {
     if (!chartRef.current) { return; }
-    instRef.current = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
+    // 主题档变化必须重建实例：ECharts 的坐标轴文字 / 图例 / tooltip 底色取自 init 时的主题，
+    // setOption 只覆盖我们显式写的那些颜色，暗色下不给 "dark" 就是深字压深底。
+    instRef.current = ensureECharts(chartRef.current, isDark);
     return () => {
       instRef.current?.dispose();
       instRef.current = null;
     };
-  }, []);
+  }, [isDark]);
 
   useEffect(() => {
     if (!instRef.current || aggregatedOosEquity.length === 0) { return; }
@@ -111,14 +118,14 @@ export function WalkForwardOOSChart({
             type: "line",
             smooth: false,
             showSymbol: false,
-            lineStyle: { width: 2, color: "#1677ff" },
+            lineStyle: { width: 2, color: hueColor("blue", isDark) },
             areaStyle: { color: "rgba(22, 119, 255, 0.10)" },
             data: equities,
             markArea: { silent: true, data: markAreas as never[] },
             markLine: {
               silent: true,
               symbol: "none",
-              lineStyle: { color: "#999", type: "dashed", width: 1 },
+              lineStyle: { color: cssVar("--muted"), type: "dashed", width: 1 },
               data: [{ yAxis: initialCash, label: { formatter: t("quant.backtest.initialCash") } }],
             },
           },
@@ -134,7 +141,7 @@ export function WalkForwardOOSChart({
       },
       true,
     );
-  }, [aggregatedOosEquity, windows, initialCash, t]);
+  }, [aggregatedOosEquity, windows, initialCash, t, isDark]);
 
   useEffect(() => {
     const onResize = () => instRef.current?.resize();

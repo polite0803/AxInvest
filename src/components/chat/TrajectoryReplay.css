@@ -10,7 +10,7 @@
 }
 
 .trajectory-replay__btn:hover {
-  background-color: var(--color-fill-secondary, rgba(0, 0, 0, 0.06)) !important;
+  background-color: var(--surface-2) !important;
 }
 
 .trajectory-replay__btn--play:hover {

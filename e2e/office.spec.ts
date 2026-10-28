@@ -35,7 +35,7 @@ async function dismissAllModals(page: import("@playwright/test").Page) {
 
 test.describe("Office (Pixel Office)", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/dashboard");
+    await page.goto("/chat/dashboard");
     await page.waitForSelector("body");
     await dismissAllModals(page);
     // 切换到「像素办公室」Tab

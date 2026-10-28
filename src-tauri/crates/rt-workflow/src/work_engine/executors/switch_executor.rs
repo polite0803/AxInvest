@@ -276,10 +276,15 @@ impl NodeExecutorTrait for SwitchExecutor {
                             .map(|case| case.label.clone())
                             .or_else(|| c.default_case.clone());
                     } else {
-                        use axagent_harness::build_provider_request_context;
+                        use axagent_harness::build_provider_request_context_for_model;
                         use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest};
 
-                        let req_ctx = build_provider_request_context(&prov, &key, api_key);
+                        let req_ctx = build_provider_request_context_for_model(
+                            &prov,
+                            &key,
+                            api_key,
+                            Some(&model),
+                        );
                         let request = ChatRequest {
                             model: model.clone(),
                             messages: vec![ChatMessage {

@@ -27,7 +27,7 @@ export function KnowledgeHubPage() {
           type="default"
           shape="circle"
           icon={<GitGraph size={16} />}
-          onClick={() => navigate("/learning-graph")}
+          onClick={() => navigate("/knowledge/learning")}
           aria-label={t("nav.learningGraph")}
           style={{
             position: "absolute",

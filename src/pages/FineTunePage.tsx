@@ -60,7 +60,7 @@ export function FineTunePage() {
             marginBottom: 16,
             padding: "8px 16px",
             borderRadius: 8,
-            background: "var(--color-bg-tertiary)",
+            background: "var(--surface-2)",
             fontSize: 13,
             flexShrink: 0,
           }}

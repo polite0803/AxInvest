@@ -524,14 +524,23 @@ pub fn run() {
                     let _ = main_window.set_maximizable(true);
                 }
 
-                if let Some(saved_state) = window_state::load_window_state(&app_data_dir) {
-                    let restored_state = if let Ok(Some(monitor)) = main_window.current_monitor() {
-                        let monitor_size = monitor.size().to_logical::<f64>(main_window.scale_factor().unwrap_or(1.0));
-                        window_state::clamp_window_state_to_monitor(saved_state, monitor_size.width, monitor_size.height)
-                    } else {
-                        saved_state
-                    };
+                // 首次安装没有保存状态，但同样要按显示器收敛：配置里的 1200×800
+                // 在 150% 缩放的 1080p 屏上会超出可用高度，窗口底部被裁掉。
+                let scale_factor = main_window.scale_factor().unwrap_or(1.0);
+                let current_size = main_window.inner_size().ok().map(|size| {
+                    let logical = size.to_logical::<f64>(scale_factor);
+                    (logical.width, logical.height)
+                });
+                let monitor_size = main_window.current_monitor().ok().flatten().map(|monitor| {
+                    let logical = monitor.size().to_logical::<f64>(scale_factor);
+                    (logical.width, logical.height)
+                });
 
+                if let Some(restored_state) = window_state::resolve_window_state(
+                    window_state::load_window_state(&app_data_dir),
+                    current_size,
+                    monitor_size,
+                ) {
                     let _ = main_window.set_size(tauri::LogicalSize::new(restored_state.width, restored_state.height));
                     if let (Some(x), Some(y)) = (restored_state.x, restored_state.y) {
                         let _ = main_window.set_position(tauri::LogicalPosition::new(x, y));

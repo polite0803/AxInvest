@@ -169,7 +169,7 @@ export function ScheduledAnalysisPanel() {
               </Tooltip>
             )}
             {failures > 0 && failures < FAILURE_THRESHOLD && (
-              <span className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>
+              <span className="text-xs" style={{ color: "var(--muted)" }}>
                 ({failures}/{FAILURE_THRESHOLD})
               </span>
             )}
@@ -195,7 +195,7 @@ export function ScheduledAnalysisPanel() {
       dataIndex: "lastRunAt",
       width: 100,
       render: (v: number | null) => {
-        if (!v) { return <span className="text-xs" style={{ color: "var(--color-text-tertiary)" }}>-</span>; }
+        if (!v) { return <span className="text-xs" style={{ color: "var(--muted)" }}>-</span>; }
         const d = new Date(v);
         return (
           <span className="text-xs">
@@ -260,7 +260,7 @@ export function ScheduledAnalysisPanel() {
             <Statistic
               title={t("stockAnalysis.scheduledAnalysis.activeTasks")}
               value={activeCount}
-              styles={{ content: { fontSize: 18, color: activeCount > 0 ? "var(--color-up)" : undefined } }}
+              styles={{ content: { fontSize: 18, color: activeCount > 0 ? "var(--accent)" : undefined } }}
             />
           </Card>
         </Col>
@@ -269,7 +269,7 @@ export function ScheduledAnalysisPanel() {
             <Statistic
               title={t("stockAnalysis.scheduledAnalysis.failedTasks")}
               value={failedCount}
-              styles={{ content: { fontSize: 18, color: failedCount > 0 ? "var(--color-down)" : undefined } }}
+              styles={{ content: { fontSize: 18, color: failedCount > 0 ? "var(--red)" : undefined } }}
               prefix={failedCount > 0 ? <AlertCircle size={14} /> : undefined}
             />
           </Card>

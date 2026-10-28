@@ -85,7 +85,7 @@ export function OptionPcrPanel({ stockCode }: { stockCode: string }) {
   }, [stockCode]);
 
   // PCR > 1 表示看空力量更强（红色）；PCR < 1 表示看多（绿色）
-  const pcrColor = (v: number) => v > 1 ? "var(--sa-red)" : "var(--sa-green)";
+  const pcrColor = (v: number) => v > 1 ? "var(--red)" : "var(--green)";
 
   return (
     <Card

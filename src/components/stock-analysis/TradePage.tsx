@@ -15,7 +15,7 @@ export function TradePage() {
   return (
     <PageErrorBoundary title={t("stockAnalysis.page.trade")}>
       <div className="flex h-full flex-col">
-        <PageHeader titleKey="trade.title" backTo="/stock-analysis" />
+        <PageHeader titleKey="trade.title" backTo="/invest" />
         <div className="flex-1 overflow-auto p-4 space-y-4">
           <PortfolioMonitorPanel />
           <TradePanel />

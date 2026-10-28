@@ -224,7 +224,7 @@ export function ExperimentSidebar() {
   return (
     <div
       style={{
-        border: "0.5px solid var(--color-border-info)",
+        border: "0.5px solid var(--teal)",
         borderRadius: 8,
         overflow: "hidden",
         fontSize: 12,
@@ -233,9 +233,9 @@ export function ExperimentSidebar() {
       {/* Header */}
       <div
         style={{
-          background: "var(--color-background-info)",
+          background: "color-mix(in srgb, var(--teal) 12%, transparent)",
           padding: "10px 12px",
-          color: "var(--color-text-info)",
+          color: "var(--teal)",
           fontWeight: 500,
           fontSize: 13,
         }}
@@ -310,7 +310,7 @@ export function ExperimentSidebar() {
         </div>
 
         {/* Config overrides toggle */}
-        <div style={{ borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: 8, marginBottom: 10 }}>
+        <div style={{ borderTop: "0.5px solid var(--border-light)", paddingTop: 8, marginBottom: 10 }}>
           <div
             onClick={() => setShowConfig(!showConfig)}
             style={{ cursor: "pointer", fontWeight: 500, fontSize: 11, marginBottom: showConfig ? 6 : 0 }}
@@ -351,11 +351,11 @@ export function ExperimentSidebar() {
         </div>
 
         {/* Live preview */}
-        <div style={{ borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: 8, marginBottom: 10 }}>
+        <div style={{ borderTop: "0.5px solid var(--border-light)", paddingTop: 8, marginBottom: 10 }}>
           <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 4 }}>
             {t("stockAnalysis.experiment.preview")}
           </div>
-          <div style={{ border: "0.5px solid var(--color-border-success)", borderRadius: 6, padding: "8px 10px" }}>
+          <div style={{ border: "0.5px solid var(--green)", borderRadius: 6, padding: "8px 10px" }}>
             <div style={{ display: "flex", gap: 16 }}>
               <div>
                 <div style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>
@@ -375,7 +375,7 @@ export function ExperimentSidebar() {
                   style={{
                     fontSize: 13,
                     fontWeight: 500,
-                    color: hasChanges ? "var(--color-text-success)" : "var(--color-text-secondary)",
+                    color: hasChanges ? "var(--green)" : "var(--color-text-secondary)",
                     marginTop: 2,
                   }}
                 >
@@ -431,7 +431,7 @@ function ParamSlider({ label, value, min, max, step, onChange }: {
         }}
       >
         <span>{label}</span>
-        <span style={{ color: "var(--color-text-primary)" }}>{value}</span>
+        <span style={{ color: "var(--fg)" }}>{value}</span>
       </div>
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
         <Slider

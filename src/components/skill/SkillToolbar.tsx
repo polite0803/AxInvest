@@ -41,7 +41,7 @@ export function SkillToolbar() {
               style={{
                 width: 1,
                 height: 16,
-                backgroundColor: "var(--color-border-secondary)",
+                backgroundColor: "var(--border-light)",
                 margin: "0 4px",
               }}
             />

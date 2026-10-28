@@ -16,25 +16,25 @@ const GAP_TYPE_CONFIG: Record<
 > = {
   guard_rule: {
     color: "red",
-    bg: "var(--ant-color-error-bg)",
+    bg: "var(--red-bg)",
     icon: <ShieldOff size={14} />,
     labelKey: "evolutionConsentModal.gapType.guardRule",
   },
   exempt_authorize: {
     color: "orange",
-    bg: "var(--ant-color-warning-bg)",
+    bg: "var(--amber-bg)",
     icon: <Shield size={14} />,
     labelKey: "evolutionConsentModal.gapType.exemptAuthorize",
   },
   capability_missing: {
     color: "blue",
-    bg: "var(--ant-color-primary-bg)",
+    bg: "var(--accent-bg)",
     icon: <Lightbulb size={14} />,
     labelKey: "evolutionConsentModal.gapType.capabilityMissing",
   },
   skill_evolution: {
     color: "purple",
-    bg: "var(--ant-purple-1, #f3e8ff)",
+    bg: "var(--cat-purple, #722ed1)",
     icon: <Sparkles size={14} />,
     labelKey: "evolutionConsentModal.gapType.skillEvolution",
   },
@@ -82,7 +82,7 @@ export const EvolutionConsentModal: React.FC = () => {
 
   const content = entries.length === 0
     ? (
-      <div style={{ padding: "12px 16px", color: "var(--ant-color-text-secondary)" }}>
+      <div style={{ padding: "12px 16px", color: "var(--fg-2)" }}>
         {t("evolutionConsentModal.noPending")}
       </div>
     )
@@ -97,7 +97,7 @@ export const EvolutionConsentModal: React.FC = () => {
                 padding: "10px 14px",
                 backgroundColor: cfg.bg,
                 borderRadius: 8,
-                borderLeft: "3px solid var(--ant-color-primary)",
+                borderLeft: "3px solid var(--accent)",
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
@@ -162,7 +162,7 @@ export const EvolutionConsentModal: React.FC = () => {
                         padding: 8,
                         fontSize: 11,
                         fontFamily: "var(--font-mono, 'JetBrains Mono', ui-monospace, monospace)",
-                        backgroundColor: "var(--ant-color-fill-tertiary)",
+                        backgroundColor: "var(--surface-2)",
                         borderRadius: 6,
                         whiteSpace: "pre-wrap",
                         wordBreak: "break-all",
@@ -205,8 +205,8 @@ export const EvolutionConsentModal: React.FC = () => {
           size={18}
           style={{
             color: entries.length > 0
-              ? "var(--ant-color-warning)"
-              : "var(--ant-color-text-quaternary)",
+              ? "var(--amber)"
+              : "var(--muted)",
           }}
         />
       </Badge>

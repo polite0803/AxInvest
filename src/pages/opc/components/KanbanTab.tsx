@@ -116,7 +116,10 @@ export function KanbanTab() {
                     </Tag>
                   </Space>
                 }
-                style={{ minHeight: 200, background: colLabel === t("opc.kanban.colBlocked") ? "#fff2f0" : undefined }}
+                style={{
+                  minHeight: 200,
+                  background: colLabel === t("opc.kanban.colBlocked") ? "var(--red-bg)" : undefined,
+                }}
               >
                 {items.length === 0
                   ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("opc.kanban.empty")} />
@@ -127,11 +130,11 @@ export function KanbanTab() {
                           <Text strong style={{ fontSize: 12 }}>
                             {it.title}
                           </Text>
-                          <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>
+                          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
                             <div>ID: {it.id}</div>
                             <div>{t("opc.kanban.owner", { id: it.owner_role_id ?? "-" })}</div>
                             {it.deps.length > 0 && <div>{t("opc.kanban.deps", { deps: it.deps.join(", ") })}</div>}
-                            {it.last_error && <div style={{ color: "#cf1322" }}>⚠ {it.last_error}</div>}
+                            {it.last_error && <div style={{ color: "var(--red)" }}>⚠ {it.last_error}</div>}
                           </div>
                           <Space wrap style={{ marginTop: 6 }}>
                             <Button

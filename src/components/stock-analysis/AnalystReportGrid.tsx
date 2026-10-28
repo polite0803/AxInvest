@@ -144,12 +144,12 @@ const JEV_BEAR_CATEGORIES = new Set(["反对", "利空", "看空"]);
 /** 判定档位 → 展示配色（A 股约定：红=偏多、绿=偏空、灰=中性/数据不足）。 */
 function jevCategoryStyle(category: string): { color: string; bg: string } {
   if (JEV_BULL_CATEGORIES.has(category)) {
-    return { color: "var(--sa-red, #dc2626)", bg: "var(--sa-red-bg, #fee2e2)" };
+    return { color: "var(--red)", bg: "var(--red-bg)" };
   }
   if (JEV_BEAR_CATEGORIES.has(category)) {
-    return { color: "var(--sa-green, #16a34a)", bg: "var(--sa-green-bg, #dcfce7)" };
+    return { color: "var(--green)", bg: "var(--green-bg)" };
   }
-  return { color: "var(--muted, #6b7280)", bg: "var(--muted-bg, #e5e7eb)" };
+  return { color: "var(--muted, #6b7280)", bg: "var(--surface-2)" };
 }
 
 /**
@@ -167,7 +167,7 @@ function JevJudgmentCard({ expertId, judgment }: { expertId: string; judgment: J
   return (
     <Card size="small" className="h-full" styles={{ body: { padding: 12 } }}>
       <div className="flex items-center gap-2 mb-2">
-        <span className="font-medium text-sm" style={{ color: "var(--color-text-base)" }}>{name}</span>
+        <span className="font-medium text-sm" style={{ color: "var(--fg)" }}>{name}</span>
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <span
@@ -190,7 +190,7 @@ function JevJudgmentCard({ expertId, judgment }: { expertId: string; judgment: J
       </div>
       {/* LLM 失败会降级为 `fallback_label`（多为「中性」）—— 不标出来就是把失败伪装成判定 */}
       {judgment.degraded && (
-        <div className="mt-2 text-xs" style={{ color: "var(--ant-warning, #f59e0b)" }}>
+        <div className="mt-2 text-xs" style={{ color: "var(--amber)" }}>
           {t("stockAnalysis.workflow.jevDegraded")}
         </div>
       )}
@@ -226,21 +226,21 @@ function AnalystPlaceholderCard({
     pending: {
       icon: "⏳",
       color: "var(--muted, #6b7280)",
-      bg: "var(--muted-bg, #e5e7eb)",
+      bg: "var(--surface-2)",
       label: t("stockAnalysis.workflow.pending"),
       tagColor: "default" as const,
     },
     streaming: {
       icon: "⚙️",
       color: "var(--muted, #6b7280)",
-      bg: "var(--muted-bg, #e5e7eb)",
+      bg: "var(--surface-2)",
       label: t("stockAnalysis.workflow.running"),
       tagColor: "processing" as const,
     },
     failed: {
       icon: "❌",
-      color: "var(--sa-red, #dc2626)",
-      bg: "var(--sa-red-bg, #fee2e2)",
+      color: "var(--red)",
+      bg: "var(--red-bg)",
       label: t("common.failed"),
       tagColor: "error" as const,
     },
@@ -254,7 +254,7 @@ function AnalystPlaceholderCard({
     >
       <div className="flex items-center gap-2 mb-2">
         <span className="text-base leading-none">{config.icon}</span>
-        <span className="font-medium text-sm" style={{ color: "var(--color-text-base)" }}>{name}</span>
+        <span className="font-medium text-sm" style={{ color: "var(--fg)" }}>{name}</span>
         {tierLabel && <Tag style={{ marginInlineStart: 0 }}>{tierLabel}</Tag>}
       </div>
       <Tag color={config.tagColor}>{config.label}</Tag>
@@ -447,26 +447,26 @@ export function AnalystReportGrid() {
 
   const consensusConfig: Record<Consensus, { color: string; bg: string; labelKey: string; icon: string }> = {
     bullish: {
-      color: "var(--sa-red, #dc2626)",
-      bg: "var(--sa-red-bg, #fee2e2)",
+      color: "var(--red)",
+      bg: "var(--red-bg)",
       labelKey: "consensusBullish",
       icon: "📈",
     },
     bearish: {
-      color: "var(--sa-green, #16a34a)",
-      bg: "var(--sa-green-bg, #dcfce7)",
+      color: "var(--green)",
+      bg: "var(--green-bg)",
       labelKey: "consensusBearish",
       icon: "📉",
     },
     neutral: {
       color: "var(--muted, #6b7280)",
-      bg: "var(--muted-bg, #e5e7eb)",
+      bg: "var(--surface-2)",
       labelKey: "consensusNeutral",
       icon: "➖",
     },
     divided: {
-      color: "var(--ant-warning, #f59e0b)",
-      bg: "var(--ant-warning-bg, #fef3c7)",
+      color: "var(--amber)",
+      bg: "var(--amber-bg)",
       labelKey: "consensusDivided",
       icon: "⚖️",
     },
@@ -603,7 +603,7 @@ export function AnalystReportGrid() {
         avail
           ? (
             <Tooltip title={t("stockAnalysis.analystReport.dataAvailable")}>
-              <span style={{ color: "#52c41a" }}>✅</span>
+              <span style={{ color: "var(--green)" }}>✅</span>
             </Tooltip>
           )
           : (
@@ -636,7 +636,7 @@ export function AnalystReportGrid() {
       align: "right",
       render: (v: number | null) =>
         v !== null
-          ? <span style={{ color: "#f5222d", fontWeight: 600, fontSize: 12 }}>{Math.round(v)}</span>
+          ? <span style={{ color: "var(--red)", fontWeight: 600, fontSize: 12 }}>{Math.round(v)}</span>
           : <span style={{ color: "var(--muted)", fontSize: 11 }}>-</span>,
     },
     {
@@ -647,7 +647,7 @@ export function AnalystReportGrid() {
       align: "right",
       render: (v: number | null) =>
         v !== null
-          ? <span style={{ color: "#52c41a", fontWeight: 600, fontSize: 12 }}>{Math.round(v)}</span>
+          ? <span style={{ color: "var(--green)", fontWeight: 600, fontSize: 12 }}>{Math.round(v)}</span>
           : <span style={{ color: "var(--muted)", fontSize: 11 }}>-</span>,
     },
     {
@@ -688,7 +688,7 @@ export function AnalystReportGrid() {
         row.hasBullPoints
           ? (
             <Tooltip title={t("stockAnalysis.analystReport.hasBullArgument")}>
-              <span style={{ color: "#f5222d" }}>✅</span>
+              <span style={{ color: "var(--red)" }}>✅</span>
             </Tooltip>
           )
           : <span style={{ color: "var(--muted)" }}>➖</span>,
@@ -702,7 +702,7 @@ export function AnalystReportGrid() {
         row.hasBearPoints
           ? (
             <Tooltip title={t("stockAnalysis.analystReport.hasBearArgument")}>
-              <span style={{ color: "#52c41a" }}>✅</span>
+              <span style={{ color: "var(--green)" }}>✅</span>
             </Tooltip>
           )
           : <span style={{ color: "var(--muted)" }}>➖</span>,
@@ -759,7 +759,7 @@ export function AnalystReportGrid() {
               判据与扣除都住在后端 data-quality + hook，这里只呈现原因，不重算。 */
           }
           {!isJevMode && tierConsensus.excludedCount > 0 && (
-            <div className="text-xs mb-2" style={{ color: "var(--ant-warning, #b45309)" }}>
+            <div className="text-xs mb-2" style={{ color: "var(--amber)" }}>
               {t("stockAnalysis.analystConsensusExcluded", { count: tierConsensus.excludedCount })}
             </div>
           )}
@@ -769,12 +769,12 @@ export function AnalystReportGrid() {
             <Tooltip title={t("stockAnalysis.recommendation.bullishTooltip")}>
               <div
                 className="rounded p-2 text-center cursor-default"
-                style={{ background: "var(--sa-red-bg, #fee2e2)" }}
+                style={{ background: "var(--red-bg)" }}
               >
-                <div className="text-2xl font-bold leading-none" style={{ color: "var(--sa-red, #dc2626)" }}>
+                <div className="text-2xl font-bold leading-none" style={{ color: "var(--red)" }}>
                   {sentiment.bullish}
                 </div>
-                <div className="text-[10px] mt-1" style={{ color: "var(--sa-red, #dc2626)" }}>
+                <div className="text-[10px] mt-1" style={{ color: "var(--red)" }}>
                   📈 {t("stockAnalysis.recommendation.bullish")} {bullPct}%
                 </div>
               </div>
@@ -782,15 +782,15 @@ export function AnalystReportGrid() {
             <Tooltip title={t("stockAnalysis.recommendation.bearishTooltip")}>
               <div
                 className="rounded p-2 text-center cursor-default"
-                style={{ background: "var(--sa-green-bg, #dcfce7)" }}
+                style={{ background: "var(--green-bg)" }}
               >
                 <div
                   className="text-2xl font-bold leading-none"
-                  style={{ color: "var(--sa-green, #16a34a)" }}
+                  style={{ color: "var(--green)" }}
                 >
                   {sentiment.bearish}
                 </div>
-                <div className="text-[10px] mt-1" style={{ color: "var(--sa-green, #16a34a)" }}>
+                <div className="text-[10px] mt-1" style={{ color: "var(--green)" }}>
                   📉 {t("stockAnalysis.recommendation.bearish")} {bearPct}%
                 </div>
               </div>
@@ -798,7 +798,7 @@ export function AnalystReportGrid() {
             <Tooltip title={t("stockAnalysis.recommendation.neutralTooltip")}>
               <div
                 className="rounded p-2 text-center cursor-default"
-                style={{ background: "var(--muted-bg, #e5e7eb)" }}
+                style={{ background: "var(--surface-2)" }}
               >
                 <div className="text-2xl font-bold leading-none" style={{ color: "var(--muted, #6b7280)" }}>
                   {sentiment.neutral}
@@ -811,12 +811,12 @@ export function AnalystReportGrid() {
           </div>
 
           {/* 色彩条 */}
-          <div className="flex h-2.5 rounded-full overflow-hidden" style={{ background: "var(--muted-bg, #e5e7eb)" }}>
+          <div className="flex h-2.5 rounded-full overflow-hidden" style={{ background: "var(--surface-2)" }}>
             {sentiment.bullish > 0 && (
               <div
                 style={{
                   width: `${bullPct}%`,
-                  background: "var(--sa-red, #dc2626)",
+                  background: "var(--red)",
                   transition: "width 0.3s ease",
                 }}
               />
@@ -834,7 +834,7 @@ export function AnalystReportGrid() {
               <div
                 style={{
                   width: `${bearPct}%`,
-                  background: "var(--sa-green, #16a34a)",
+                  background: "var(--green)",
                   transition: "width 0.3s ease",
                 }}
               />

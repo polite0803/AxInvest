@@ -51,7 +51,7 @@ test.describe("Chat Navigation", () => {
   });
 
   test("should navigate to dashboard from chat", async ({ page }) => {
-    await page.goto("/dashboard");
+    await page.goto("/chat/dashboard");
     await page.waitForLoadState("networkidle");
     await expect(page.locator("body")).toBeVisible();
   });
@@ -69,13 +69,13 @@ test.describe("Chat Navigation", () => {
   });
 
   test("should navigate to workflow from chat", async ({ page }) => {
-    await page.goto("/workflow");
+    await page.goto("/chat/workflow");
     await page.waitForLoadState("networkidle");
     await expect(page.locator("body")).toBeVisible();
   });
 
   test("should navigate to files from chat", async ({ page }) => {
-    await page.goto("/files");
+    await page.goto("/chat/files");
     await page.waitForLoadState("networkidle");
     await expect(page.locator("body")).toBeVisible();
   });

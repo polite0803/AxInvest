@@ -10,6 +10,10 @@ export type PanelEmptyKind =
   | "noStock"
   | "backendOffline"
   | "connectionFailed"
+  /** 取数通道故障（与「该时点确实没数据」不是一回事）—— 2026-10-28 由数据状态四态引入 */
+  | "sourceFailed"
+  /** 接口结构变更（字段缺失/改名/解析失败），重试无意义 */
+  | "schemaChanged"
   /** 缺陷 F 修复:replay 模式下数据降级(无历史语义/被跳过) */
   | "replayDegraded";
 
@@ -54,6 +58,10 @@ export function PanelEmpty(props: PanelEmptyProps) {
         return t("stockAnalysis.settings.vendor.backendOffline");
       case "connectionFailed":
         return t("stockAnalysis.settings.vendor.connectionFailed");
+      case "sourceFailed":
+        return t("stockAnalysis.empty.sourceFailed");
+      case "schemaChanged":
+        return t("stockAnalysis.empty.schemaChanged");
       case "replayDegraded":
         return reason
           ? t("stockAnalysis.empty.replayDegradedWithReason", { reason })

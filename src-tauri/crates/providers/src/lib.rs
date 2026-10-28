@@ -23,6 +23,7 @@ pub mod qwen;
 pub mod registry;
 #[cfg(feature = "computer-use")]
 pub mod screen_vision;
+pub mod stream_budget;
 pub mod structured_output;
 pub mod transport;
 pub mod typesafe;

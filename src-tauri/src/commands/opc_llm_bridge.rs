@@ -46,6 +46,7 @@ async fn resolve_default_provider(harness: &RuntimeHarness) -> Result<ResolvedPr
         .map_err(|e| format!("解密 API key 失败: {e}"))?;
 
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key,
         key_id: key.id.clone(),
         provider_id: prov.id.clone(),

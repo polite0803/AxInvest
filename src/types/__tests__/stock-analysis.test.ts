@@ -1,4 +1,5 @@
 import { ACTION_PALETTE } from "@/lib/stock-analysis-utils";
+import { HUE_COLORS } from "@/theme/categoricalColors";
 import { describe, expect, it } from "vitest";
 import { classifySentiment, getActionColor, getSignalColor, parseAction, StockAction } from "../stock-analysis";
 
@@ -111,7 +112,7 @@ describe("getSignalColor", () => {
   });
 
   it("与 getActionColor 同源：三端都落在强度表的 hex 上（防两套口径回流）", () => {
-    const hexes = new Set(Object.values(ACTION_PALETTE).map((p) => p.hex));
+    const hexes = new Set(Object.values(ACTION_PALETTE).map((p) => HUE_COLORS.light[p.hue]));
     for (const s of ["看多", "看空", "关注"]) {
       expect(hexes.has(getSignalColor(s))).toBe(true);
     }

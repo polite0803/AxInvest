@@ -129,7 +129,7 @@ export function TasksCenterPage() {
           margin: 0,
           padding: "0 16px",
           background: "var(--color-bg-container)",
-          borderBottom: "1px solid var(--color-border-secondary)",
+          borderBottom: "1px solid var(--border-light)",
         }}
         tabBarGutter={24}
         size="small"

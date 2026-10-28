@@ -496,11 +496,14 @@ pub(crate) async fn build_stock_analysis_variables(
         }
     }
     // ── #8 P5 数据质量熔断状态注入（2026-10-06）──
-    // 「连续多少轮拿不到 A 级」是**跨样本**事实，只有持久观测能回答，故从
+    // 「连续多少轮降档（C/D/F 或无等级）」是**跨样本**事实，只有持久观测能回答，故从
     // `data_quality_observations` 读；判据（什么算异常、几轮熔断）单源在
     // `dao::repo::data_quality_fuse`，本处只把**已判定结果**推进变量池 ——
     // Rhai 与 SwitchNode 都不再自己比阈值，否则阈值就有了第二份载体。
-    // 三个数分开注入是刻意的：`observations == 0`（无观测）与 `streak == 0`（最近一轮是 A 级）
+    // ⚠ 措辞订正（2026-10-28）：这里原先写「拿不到 A 级」，而判据自 2026-10-10 起
+    //   `A` 与 `B` 都是可接受档（`grade_is_abnormal` 只把 C/D/F/无等级算异常）。
+    //   文案把判据说窄了 ⇒ 用户据「未达 A 级」去追一轮 B 级的「降级」，那本来不是缺陷。
+    // 五个数分开注入是刻意的：`observations == 0`（无观测）与 `streak == 0`（最近一轮是正常档）
     // 是两件事，合成一个数就会让「从没跑过」冒充「证据面健康」。
     // ⚠ 读数时机：本读取发生在**本轮运行开始处**，而本轮的观测行要等 `data-quality` 节点
     //   跑完才落库 ⇒ 注入的 `dqi_streak` **不含本轮**。于是同一次分析里「界面显示的连续轮数」
@@ -519,11 +522,11 @@ pub(crate) async fn build_stock_analysis_variables(
                 axagent_dao::repo::data_quality_fuse::DqiStreak::EMPTY
             },
         };
-        let injected: [(&str, f64, &str); 3] = [
+        let injected: [(&str, f64, &str); 5] = [
             (
                 "dqi_streak",
                 fuse.consecutive_abnormal as f64,
-                "最近连续异常（没拿到 A 级）的轮数（含本轮）",
+                "最近连续降档（C/D/F 或无等级）的轮数，只数所属分析仍存在的观测（含本轮）",
             ),
             (
                 "dqi_fuse_flag",
@@ -534,6 +537,18 @@ pub(crate) async fn build_stock_analysis_variables(
                 "dqi_observations",
                 fuse.observations as f64,
                 "参与该计数的观测条数；0 = 无观测，不等于「质量一直好」",
+            ),
+            // 2026-10-28：「连续 N 轮」这句话跳过了多少条「所属分析已删除」的观测行。
+            // 判据口径不变（仍剔除），但空档必须可读出 —— 否则 N 既可虚高也可低估而界面无从分辨。
+            (
+                "dqi_orphans",
+                fuse.orphans_skipped as f64,
+                "该连续区间内被剔除的孤儿观测条数（所属分析已删除）；0 = 这句「连续」没有空档",
+            ),
+            (
+                "dqi_streak_incl_orphans",
+                fuse.consecutive_abnormal_incl_orphans as f64,
+                "把上面那些孤儿观测也计入时的连续降档轮数；与 dqi_streak 的差值即虚高/低估幅度",
             ),
         ];
         for (name, value, desc) in injected {

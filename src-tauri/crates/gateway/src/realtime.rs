@@ -579,6 +579,7 @@ async fn handle_realtime_session(socket: WebSocket, state: GatewayAppState) {
             .decrypt_key(&key.key_encrypted)
             .map_err(|e| format!("Failed to decrypt key: {}", e))?;
         let ctx = ProviderRequestContext {
+            header_timeout_secs: None,
             api_key: decrypted,
             key_id: key.id,
             provider_id: cfg.id.clone(),
@@ -612,6 +613,7 @@ async fn handle_realtime_session(socket: WebSocket, state: GatewayAppState) {
             },
         };
     let llm_ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key: llm_decrypted_key,
         key_id: llm_provider_key.id.clone(),
         provider_id: llm_provider_config.id.clone(),

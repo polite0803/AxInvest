@@ -460,7 +460,7 @@ export function MoverRecallPanel() {
       {runs.length === 0
         ? (
           <div
-            style={{ color: "var(--color-text-tertiary)", marginBottom: 6 }}
+            style={{ color: "var(--muted)", marginBottom: 6 }}
             data-testid="mover-recall-runs-empty"
           >
             {t("stockAnalysis.moverRecall.runsEmpty")}
@@ -472,7 +472,7 @@ export function MoverRecallPanel() {
       {runGone
         ? (
           <div
-            style={{ color: "var(--sa-warning, #faad14)", marginBottom: 6 }}
+            style={{ color: "var(--amber)", marginBottom: 6 }}
             data-testid="mover-recall-run-gone"
           >
             {t("stockAnalysis.moverRecall.runGone", { id: runGone })}
@@ -484,7 +484,7 @@ export function MoverRecallPanel() {
       {reflow
         ? (
           <div
-            style={{ color: "var(--color-text-tertiary)", marginBottom: 6 }}
+            style={{ color: "var(--muted)", marginBottom: 6 }}
             data-testid={`mover-reflow-${reflow.items === 0 ? "none" : reflow.ready ? "ready" : "pending"}`}
           >
             {reflow.items === 0
@@ -558,7 +558,7 @@ export function MoverRecallPanel() {
           }}
         />
         <span>{t("stockAnalysis.moverRecall.reflowMergeLabel")}</span>
-        <span style={{ color: "var(--color-text-tertiary)" }}>
+        <span style={{ color: "var(--muted)" }}>
           {t("stockAnalysis.moverRecall.reflowMergeHint")}
         </span>
       </div>
@@ -567,7 +567,7 @@ export function MoverRecallPanel() {
       {batchInfo
         ? (
           <div
-            style={{ color: "var(--color-text-tertiary)", marginBottom: 6 }}
+            style={{ color: "var(--muted)", marginBottom: 6 }}
             data-testid={`mover-batches-${batchInfo.kind}`}
           >
             {batchInfo.kind === "never"
@@ -601,7 +601,7 @@ export function MoverRecallPanel() {
             {data.chain === "unlabeled"
               ? (
                 <span
-                  style={{ color: "var(--sa-warning, #faad14)", marginLeft: 6 }}
+                  style={{ color: "var(--amber)", marginLeft: 6 }}
                   data-testid="mover-recall-chain-unlabeled"
                 >
                   {t("stockAnalysis.moverRecall.chainUnlabeledNote")}
@@ -638,7 +638,7 @@ export function MoverRecallPanel() {
 
       {failed
         ? (
-          <div style={{ color: "var(--sa-warning, #faad14)" }} data-testid="mover-recall-failed">
+          <div style={{ color: "var(--amber)" }} data-testid="mover-recall-failed">
             {t("stockAnalysis.moverRecall.failed", { detail: failed })}
           </div>
         )
@@ -654,7 +654,7 @@ export function MoverRecallPanel() {
             <BlockTitle>{t("stockAnalysis.moverRecall.scopeTitle")}</BlockTitle>
             <div
               style={{
-                background: "var(--color-bg-secondary, rgba(127,127,127,0.06))",
+                background: "var(--surface)",
                 borderRadius: 4,
                 padding: "6px 8px",
                 marginBottom: 10,
@@ -703,14 +703,14 @@ export function MoverRecallPanel() {
 
               {/* F-3：collectedDays 只说明「历史有多长」，不再被读成「全市场窗口都满」 */}
               <div
-                style={{ fontSize: 12, color: "var(--color-text-tertiary)", marginBottom: 6 }}
+                style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}
                 data-testid="mover-recall-history-days"
               >
                 {t("stockAnalysis.moverRecall.historyDays", { days: data.collectedDays })}
               </div>
 
               <div
-                style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}
+                style={{ fontSize: 11, color: "var(--muted)" }}
                 data-testid="mover-recall-gate-version"
               >
                 {data.gateVersion
@@ -737,7 +737,7 @@ export function MoverRecallPanel() {
               <div
                 style={{
                   fontSize: 11,
-                  color: "var(--color-text-tertiary)",
+                  color: "var(--muted)",
                   alignSelf: "flex-end",
                 }}
               >
@@ -757,7 +757,7 @@ export function MoverRecallPanel() {
             {data.rates.events === 0
               ? (
                 <div
-                  style={{ color: "var(--color-text-tertiary)" }}
+                  style={{ color: "var(--muted)" }}
                   data-testid="mover-recall-empty"
                 >
                   {/* C-2 三态：全满 ⇒ 结论；全未满 ⇒ 尚不可判定；部分满 ⇒ 点名未满档 */}
@@ -792,7 +792,7 @@ export function MoverRecallPanel() {
                   {data.collectedDays < r.windowDays
                     ? (
                       <span
-                        style={{ color: "var(--sa-warning, #faad14)", marginLeft: 6 }}
+                        style={{ color: "var(--amber)", marginLeft: 6 }}
                         data-testid={`mover-window-open-${r.period}`}
                       >
                         {t("stockAnalysis.moverRecall.windowOpen", {
@@ -804,7 +804,7 @@ export function MoverRecallPanel() {
                     : data.eventsByTier == null
                     ? (
                       <span
-                        style={{ color: "var(--color-text-tertiary)", marginLeft: 6 }}
+                        style={{ color: "var(--muted)", marginLeft: 6 }}
                         data-testid={`mover-tier-count-missing-${r.period}`}
                       >
                         {t("stockAnalysis.moverRecall.tierCountMissing")}
@@ -813,7 +813,7 @@ export function MoverRecallPanel() {
                     : (data.eventsByTier[r.period] ?? 0) === 0
                     ? (
                       <span
-                        style={{ color: "var(--color-text-tertiary)", marginLeft: 6 }}
+                        style={{ color: "var(--muted)", marginLeft: 6 }}
                         data-testid={`mover-tier-no-events-${r.period}`}
                       >
                         {t("stockAnalysis.moverRecall.tierNoEvents")}
@@ -821,7 +821,7 @@ export function MoverRecallPanel() {
                     )
                     : (
                       <span
-                        style={{ color: "var(--color-text-tertiary)", marginLeft: 6 }}
+                        style={{ color: "var(--muted)", marginLeft: 6 }}
                         data-testid={`mover-tier-events-${r.period}`}
                       >
                         {t("stockAnalysis.moverRecall.tierEvents", {
@@ -834,7 +834,7 @@ export function MoverRecallPanel() {
                       && (data.judgeableCodesByTier[r.period] ?? 0) < data.reportedTotal
                     ? (
                       <span
-                        style={{ color: "var(--sa-warning, #faad14)", marginLeft: 6 }}
+                        style={{ color: "var(--amber)", marginLeft: 6 }}
                         data-testid={`mover-tier-judgeable-${r.period}`}
                       >
                         {t("stockAnalysis.moverRecall.tierJudgeableOfUniverse", {
@@ -850,7 +850,7 @@ export function MoverRecallPanel() {
                       // 旧轮次没有 `reportedTotal`（分母未记录）：只说「可判 / 已采到收盘」，
                       // 不拿收盘数冒充全 A 股分母。
                       <span
-                        style={{ color: "var(--sa-warning, #faad14)", marginLeft: 6 }}
+                        style={{ color: "var(--amber)", marginLeft: 6 }}
                         data-testid={`mover-tier-judgeable-${r.period}`}
                       >
                         {t("stockAnalysis.moverRecall.tierJudgeable", {
@@ -866,7 +866,7 @@ export function MoverRecallPanel() {
             {data.rules.length < 4
               ? (
                 <div
-                  style={{ color: "var(--sa-warning, #faad14)", marginBottom: 6 }}
+                  style={{ color: "var(--amber)", marginBottom: 6 }}
                   data-testid="mover-recall-rules-missing"
                 >
                   {t("stockAnalysis.moverRecall.rulesMissing", { count: 4 - data.rules.length })}
@@ -881,7 +881,7 @@ export function MoverRecallPanel() {
                 {data.layers.map((row) => (
                   <tr
                     key={row.layer}
-                    style={{ borderBottom: "0.5px solid var(--color-border-tertiary)" }}
+                    style={{ borderBottom: "0.5px solid var(--border-light)" }}
                   >
                     <td style={{ padding: "3px 0" }}>{layerName(row.layer)}</td>
                     <td style={{ padding: "3px 0", textAlign: "right", fontWeight: 500 }}>
@@ -891,7 +891,7 @@ export function MoverRecallPanel() {
                       style={{
                         padding: "3px 0 3px 12px",
                         fontSize: 11,
-                        color: "var(--color-text-tertiary)",
+                        color: "var(--muted)",
                       }}
                     >
                       {row.byMarketType
@@ -914,7 +914,7 @@ export function MoverRecallPanel() {
                       data-testid="mover-miss-table"
                     >
                       <thead>
-                        <tr style={{ color: "var(--color-text-tertiary)" }}>
+                        <tr style={{ color: "var(--muted)" }}>
                           <th style={{ textAlign: "left", padding: "3px 0" }}>
                             {t("stockAnalysis.moverRecall.colName")}
                           </th>
@@ -951,7 +951,7 @@ export function MoverRecallPanel() {
                                   style={{
                                     textAlign: "right",
                                     padding: "3px 0",
-                                    color: "var(--sa-red)",
+                                    color: "var(--red)",
                                   }}
                                 >
                                   {`+${m.event.cumGainPct.toFixed(1)}%`}
@@ -964,7 +964,7 @@ export function MoverRecallPanel() {
                                   {m.scoredOutStyles.length > 0
                                     ? (
                                       <div
-                                        style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}
+                                        style={{ fontSize: 10, color: "var(--muted)" }}
                                         data-testid="mover-scored-out"
                                       >
                                         {t("stockAnalysis.moverRecall.scoredOut", {
@@ -1020,7 +1020,7 @@ export function MoverRecallPanel() {
               style={{
                 marginTop: 8,
                 fontSize: 10,
-                color: "var(--color-text-tertiary)",
+                color: "var(--muted)",
                 lineHeight: 1.7,
               }}
             >
@@ -1056,12 +1056,12 @@ function RateStat({ label, value }: { label: string; value: number | null }) {
   const { t } = useTranslation();
   return (
     <div style={{ minWidth: 130 }}>
-      <div style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>{label}</div>
+      <div style={{ fontSize: 11, color: "var(--muted)" }}>{label}</div>
       <div
         style={{
           fontSize: 16,
           fontWeight: 500,
-          color: value == null ? "var(--color-text-tertiary)" : undefined,
+          color: value == null ? "var(--muted)" : undefined,
         }}
       >
         {value == null
@@ -1191,7 +1191,7 @@ function MoverReviewDetail({
   // 实时核查视图的 misses 不落库；命令按三键查不到事件 ⇒ 提示而非留白。
   if (r == null) {
     return (
-      <div style={{ fontSize: 12, color: "var(--color-text-tertiary)" }} data-testid="mover-review-not-tracked">
+      <div style={{ fontSize: 12, color: "var(--muted)" }} data-testid="mover-review-not-tracked">
         {t("stockAnalysis.moverRecall.review.notTracked")}
       </div>
     );
@@ -1225,8 +1225,8 @@ function MoverReviewDetail({
     <div
       data-testid="mover-review-detail"
       style={{
-        background: "var(--color-bg-secondary, rgba(127,127,127,0.06))",
-        border: "1px solid var(--color-border-secondary, rgba(127,127,127,0.2))",
+        background: "var(--surface)",
+        border: "1px solid var(--border-light)",
         borderRadius: 6,
         padding: "8px 10px",
         fontSize: 12,
@@ -1241,7 +1241,7 @@ function MoverReviewDetail({
             </span>
           )
           : null}
-        <span style={{ color: "var(--color-text-tertiary)" }}>
+        <span style={{ color: "var(--muted)" }}>
           {t("stockAnalysis.moverRecall.review.windowFacts", {
             start: r.windowStart,
             anchor: r.anchorDate,
@@ -1301,7 +1301,7 @@ function MoverReviewDetail({
             );
           })()
           : (
-            <div style={{ color: "var(--color-text-tertiary)" }}>
+            <div style={{ color: "var(--muted)" }}>
               {t("stockAnalysis.moverRecall.review.asofMissing")}
             </div>
           )}
@@ -1342,7 +1342,7 @@ function MoverReviewDetail({
         : null}
       {(r.status === "pending" || r.status === "excluded" || r.status === "running") && r.errorDetail
         ? (
-          <div style={{ marginTop: 6, color: "var(--color-text-tertiary)" }}>
+          <div style={{ marginTop: 6, color: "var(--muted)" }}>
             {t("stockAnalysis.moverRecall.review.errorDetail", { detail: r.errorDetail })}
           </div>
         )
@@ -1358,7 +1358,7 @@ function MoverReviewDetail({
             </div>
             {a == null
               ? (
-                <div style={{ color: "var(--color-text-tertiary)" }}>
+                <div style={{ color: "var(--muted)" }}>
                   {t("stockAnalysis.moverRecall.review.analysisMissing")}
                 </div>
               )
@@ -1404,7 +1404,7 @@ function MoverReviewDetail({
             </div>
             {sortedReflections.length === 0
               ? (
-                <div style={{ color: "var(--color-text-tertiary)" }}>
+                <div style={{ color: "var(--muted)" }}>
                   {t("stockAnalysis.moverRecall.review.noReflection")}
                 </div>
               )
@@ -1439,7 +1439,7 @@ function ReflectionCard({
     <div
       data-testid={`mover-review-rf-${rf.horizon ?? "unknown"}`}
       style={{
-        border: "1px solid var(--color-border-secondary, rgba(127,127,127,0.2))",
+        border: "1px solid var(--border-light)",
         borderRadius: 4,
         padding: "6px 8px",
       }}
@@ -1457,7 +1457,7 @@ function ReflectionCard({
           : null}
         {rf.status === "completed" && rf.rawReturn != null
           ? (
-            <span style={{ color: "var(--color-text-tertiary)" }}>
+            <span style={{ color: "var(--muted)" }}>
               {t("stockAnalysis.moverRecall.review.rawReturn")}
               {": "}
               {`${rf.rawReturn >= 0 ? "+" : ""}${rf.rawReturn.toFixed(1)}%`}

@@ -5288,17 +5288,22 @@ fn start_daily_snapshot_sweep(state: &AppState) {
     let client = state.astock_client.clone();
     let shutdown = state.shutdown_token.clone();
 
-    // 快照归档未启用时，采集只剩「打一遍 vendor 然后写进 no-op」⇒ 每小时空转一轮网络。
-    // 启用点在 `init/state.rs`（with_daily_snapshot_store），装配缺失就该在这里显式失败可见。
-    if !client.daily_snapshot_enabled() {
-        tracing::warn!("[startup] 每日快照归档未启用，跳过定时采集（as-of 兜底通道将始终为空）");
-        return;
+    // 快照归档未启用时，采集只剩「打一遍 vendor 然后写进 no-op」⇒ 不再每小时空转网络。
+    // 但**日级接口健康检查**不依赖归档（结果至少进日志），所以这里只关采集、不整体退出。
+    let snapshot_enabled = client.daily_snapshot_enabled();
+    if !snapshot_enabled {
+        tracing::warn!(
+            "[startup] 每日快照归档未启用：跳过定时采集（as-of 兜底通道将始终为空）；\
+             日级接口健康检查仍会运行，但结果只进日志、历史查询为空"
+        );
     }
 
     tauri::async_runtime::spawn(async move {
         // 启动延迟 5 分钟，避开启动高峰（与 start_batch_reflection 同口径）
         tokio::time::sleep(std::time::Duration::from_secs(300)).await;
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+        // 归档关闭时没有「按行幂等」的锚点，改用进程内记忆，避免每小时重复打 12 个接口。
+        let mut last_health_date: Option<String> = None;
         loop {
             tokio::select! {
                 _ = shutdown.cancelled() => break,
@@ -5316,22 +5321,43 @@ fn start_daily_snapshot_sweep(state: &AppState) {
                 continue;
             };
             let date = target.format("%Y-%m-%d").to_string();
-            if client.has_daily_snapshot("get_index_quotes", &date).await {
-                continue;
+            if snapshot_enabled && !client.has_daily_snapshot("get_index_quotes", &date).await {
+                match crate::commands::stock_analysis::run_daily_snapshot_sweep(&client, &db, &date)
+                    .await
+                {
+                    Ok(summary) => {
+                        tracing::info!("[daily-snapshot] 快照采集完成: {summary}");
+                    },
+                    Err(e) => {
+                        tracing::warn!("[daily-snapshot] 快照采集失败: {e}");
+                    },
+                }
             }
-            match crate::commands::stock_analysis::run_daily_snapshot_sweep(&client, &db, &date)
-                .await
-            {
-                Ok(summary) => {
-                    tracing::info!("[daily-snapshot] 快照采集完成: {summary}");
-                },
-                Err(e) => {
-                    tracing::warn!("[daily-snapshot] 快照采集失败: {e}");
-                },
+            // 日级接口健康检查（2026-10-28）：与快照同一归属日、同一条 tick。
+            // 有归档 ⇒ 按行幂等（`has_health_snapshot`）；无归档 ⇒ 按进程内记忆幂等。
+            let need_health = if snapshot_enabled {
+                !client.has_health_snapshot(&date).await
+            } else {
+                last_health_date.as_deref() != Some(date.as_str())
+            };
+            if need_health {
+                match axagent_astock_data::health_check::run_and_store(&client, &date).await {
+                    Ok(report) => {
+                        tracing::info!(
+                            "[interface-health] {date} 日检完成：{}（探针 {}）",
+                            report.summary(),
+                            report.probe_code
+                        );
+                    },
+                    Err(e) => tracing::warn!("[interface-health] {date} 日检失败: {e}"),
+                }
+                last_health_date = Some(date.clone());
             }
         }
     });
-    tracing::info!("[startup] 每日快照采集已启动（交易日 15:00 后，每小时幂等 tick）");
+    tracing::info!(
+        "[startup] 每日快照采集 + 日级接口健康检查已启动（交易日 15:00 后，每小时幂等 tick）"
+    );
 }
 
 /// OPC 域包/领域工作流模板种子化（后台异步，幂等 upsert）

@@ -1223,8 +1223,8 @@ export function SchedulerSettings() {
                             borderRadius: 6,
                             cursor: "pointer",
                             backgroundColor: selectedTemplate === template.template_type
-                              ? "var(--color-bg-tertiary)"
-                              : "var(--color-bg-secondary)",
+                              ? "var(--surface-2)"
+                              : "var(--surface)",
                             transition: "box-shadow 0.2s, transform 0.2s",
                           }}
                         >
@@ -1295,8 +1295,8 @@ export function SchedulerSettings() {
                             borderRadius: 6,
                             cursor: "pointer",
                             backgroundColor: selectedTemplate === template.template_type
-                              ? "var(--color-bg-tertiary)"
-                              : "var(--color-bg-secondary)",
+                              ? "var(--surface-2)"
+                              : "var(--surface)",
                             transition: "box-shadow 0.2s, transform 0.2s",
                           }}
                         >

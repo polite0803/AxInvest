@@ -57,15 +57,15 @@ export function DecisionExplanationPanel() {
       className="rounded px-2.5 py-1.5 text-xs"
       style={{
         background: "rgba(22, 119, 255, 0.08)",
-        borderLeft: "3px solid var(--sa-blue)",
+        borderLeft: "3px solid var(--accent)",
       }}
     >
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="font-semibold" style={{ color: "var(--sa-blue)" }}>
+        <span className="font-semibold" style={{ color: "var(--accent)" }}>
           📘 {t("stockAnalysis.decisionExplanation.title")}
         </span>
         {summary && (
-          <span style={{ color: "var(--color-text-primary)" }} title={summary}>
+          <span style={{ color: "var(--fg)" }} title={summary}>
             {expanded || summary.length <= 80 ? summary : `${summary.slice(0, 80)}…`}
           </span>
         )}
@@ -86,7 +86,7 @@ export function DecisionExplanationPanel() {
       {expanded && (
         <div className="mt-1.5 space-y-1.5">
           {detail && (
-            <div style={{ color: "var(--color-text-primary)", whiteSpace: "pre-wrap" }}>
+            <div style={{ color: "var(--fg)", whiteSpace: "pre-wrap" }}>
               {detail}
             </div>
           )}
@@ -106,7 +106,7 @@ export function DecisionExplanationPanel() {
                       {r.ruleId}
                     </Tag>
                     <span style={{ color: "var(--muted)", minWidth: 74 }}>{r.status}</span>
-                    <span style={{ color: "var(--color-text-primary)" }}>{r.description}</span>
+                    <span style={{ color: "var(--fg)" }}>{r.description}</span>
                   </div>
                 ))}
               </div>
@@ -119,7 +119,7 @@ export function DecisionExplanationPanel() {
                 {t("stockAnalysis.decisionExplanation.riskCommentLabel")}
                 {"："}
               </span>
-              <span style={{ color: "var(--color-text-primary)" }}>{riskComment}</span>
+              <span style={{ color: "var(--fg)" }}>{riskComment}</span>
             </div>
           )}
 
@@ -129,7 +129,7 @@ export function DecisionExplanationPanel() {
                 {t("stockAnalysis.decisionExplanation.confidenceNoteLabel")}
                 {"："}
               </span>
-              <span style={{ color: "var(--color-text-primary)" }}>{confidenceNote}</span>
+              <span style={{ color: "var(--fg)" }}>{confidenceNote}</span>
             </div>
           )}
 

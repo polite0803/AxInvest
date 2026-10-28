@@ -2,6 +2,7 @@
 
 import i18n from "@/i18n";
 import { stripAxAgentTags } from "@/lib/chatMarkdown";
+import { cssVar } from "@/lib/cssVar";
 import { invoke, isTauri, logIpcError } from "@/lib/invoke";
 import { formatExportAsync } from "@/lib/workers";
 import type { Message } from "@/types";
@@ -129,7 +130,9 @@ export async function exportAsPNG(element: HTMLElement | null, title: string) {
   const canvas = await html2canvas(element, {
     useCORS: true,
     scale: 2,
-    backgroundColor: "#fff",
+    // 截图底色取应用当前底色：html2canvas 只在元素自身留空的地方填这个值，
+    // 写死 #fff 会让暗色主题下截出来的图与屏幕上看到的不一致（四周发白）。
+    backgroundColor: cssVar("--bg"),
   });
 
   if (isTauri()) {
@@ -238,10 +241,29 @@ export function buildHtmlTranscript(
 <title>${escapedTitle}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+    /* 导出稿配色 —— 这个独立文档里唯一的一张色表。
+       导出件刻意保持浅色纸张观感（打印与任意查看器下稳定），不跟随应用主题；
+       要改导出观感只改这一段，正文规则一律走 var()。 */
+    --paper: #f5f5f5;        /* 页面底 */
+    --surface: #ffffff;      /* 助手气泡底 */
+    --ink: #1a1a1a;          /* 正文 */
+    --ink-soft: #888888;     /* 次要文字 / 系统消息 */
+    --ink-faint: #aaaaaa;    /* 页脚 */
+    --line: #e0e0e0;         /* 分隔线 */
+    --line-soft: #e8e8e8;    /* 气泡描边 */
+    --line-dashed: #d9d9d9;  /* 系统消息虚线 */
+    --brand: #1677ff;        /* 用户气泡 / 标题 */
+    --on-brand: #ffffff;     /* 品牌面上的文字 */
+    --on-brand-soft: rgba(255, 255, 255, 0.85);
+    --code-shade: rgba(0, 0, 0, 0.06);
+    --code-shade-on-brand: rgba(255, 255, 255, 0.15);
+    --code-inline-on-brand: rgba(255, 255, 255, 0.2);
+  }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
-    background: #f5f5f5;
-    color: #1a1a1a;
+    background: var(--paper);
+    color: var(--ink);
     line-height: 1.6;
     padding: 20px;
     max-width: 900px;
@@ -250,11 +272,11 @@ export function buildHtmlTranscript(
   .export-header {
     text-align: center;
     padding: 24px 0;
-    border-bottom: 2px solid #e0e0e0;
+    border-bottom: 2px solid var(--line);
     margin-bottom: 24px;
   }
-  .export-header h1 { font-size: 1.6em; color: #1677ff; }
-  .export-header .meta { font-size: 0.85em; color: #888; margin-top: 4px; }
+  .export-header h1 { font-size: 1.6em; color: var(--brand); }
+  .export-header .meta { font-size: 0.85em; color: var(--ink-soft); margin-top: 4px; }
   .message {
     margin-bottom: 20px;
     padding: 16px;
@@ -262,23 +284,23 @@ export function buildHtmlTranscript(
     max-width: 85%;
   }
   .message.user {
-    background: #1677ff;
-    color: #fff;
+    background: var(--brand);
+    color: var(--on-brand);
     margin-left: auto;
     margin-right: 0;
   }
   .message.assistant {
-    background: #fff;
-    border: 1px solid #e8e8e8;
+    background: var(--surface);
+    border: 1px solid var(--line-soft);
     margin-left: 0;
   }
   .message.system {
-    background: #fafafa;
-    border: 1px dashed #d9d9d9;
+    background: var(--surface);
+    border: 1px dashed var(--line-dashed);
     margin: 0 auto;
     text-align: center;
     max-width: 90%;
-    color: #888;
+    color: var(--ink-soft);
   }
   .message-header {
     display: flex;
@@ -287,10 +309,10 @@ export function buildHtmlTranscript(
     font-size: 0.8em;
     opacity: 0.7;
   }
-  .message.user .message-header { color: rgba(255,255,255,0.85); }
+  .message.user .message-header { color: var(--on-brand-soft); }
   .message-body { font-size: 0.95em; word-wrap: break-word; }
   .message-body pre {
-    background: rgba(0,0,0,0.06);
+    background: var(--code-shade);
     padding: 12px;
     border-radius: 8px;
     overflow-x: auto;
@@ -299,20 +321,20 @@ export function buildHtmlTranscript(
     margin: 8px 0;
     white-space: pre-wrap;
   }
-  .message.user .message-body pre { background: rgba(255,255,255,0.15); color: #fff; }
+  .message.user .message-body pre { background: var(--code-shade-on-brand); color: var(--on-brand); }
   .message-body code {
-    background: rgba(0,0,0,0.06);
+    background: var(--code-shade);
     padding: 1px 4px;
     border-radius: 4px;
     font-size: 0.9em;
   }
-  .message.user .message-body code { background: rgba(255,255,255,0.2); }
+  .message.user .message-body code { background: var(--code-inline-on-brand); }
   .export-footer {
     text-align: center;
     margin-top: 32px;
     padding: 16px;
-    border-top: 1px solid #e0e0e0;
-    color: #aaa;
+    border-top: 1px solid var(--line);
+    color: var(--ink-faint);
     font-size: 0.8em;
   }
 </style>

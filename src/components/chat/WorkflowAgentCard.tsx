@@ -282,13 +282,13 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
           <div
             style={{
               flex: 1,
-              background: "var(--sa-red-glass)",
+              background: "color-mix(in srgb, var(--red) 18%, transparent)",
               padding: 8,
               borderRadius: 6,
-              border: "1px solid var(--sa-red-soft)",
+              border: "1px solid color-mix(in srgb, var(--red) 35%, transparent)",
             }}
           >
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: "var(--sa-red)" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: "var(--red)" }}>
               🐂 {t("stockAnalysis.workflow.bullCase")}
             </div>
             <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>{bullBrief}</div>
@@ -296,13 +296,13 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
           <div
             style={{
               flex: 1,
-              background: "var(--sa-green-glass)",
+              background: "color-mix(in srgb, var(--green) 18%, transparent)",
               padding: 8,
               borderRadius: 6,
-              border: "1px solid var(--sa-green-soft)",
+              border: "1px solid color-mix(in srgb, var(--green) 35%, transparent)",
             }}
           >
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: "var(--sa-green)" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: "var(--green)" }}>
               🐻 {t("stockAnalysis.workflow.bearCase")}
             </div>
             <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>{bearBrief}</div>
@@ -355,7 +355,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
     return (
       <Card
         size="small"
-        style={{ borderColor: isBull ? "var(--sa-red)" : isBear ? "var(--sa-green)" : undefined }}
+        style={{ borderColor: isBull ? "var(--red)" : isBear ? "var(--green)" : undefined }}
         title={
           <span>
             {isBull ? "🟢" : isBear ? "🔴" : "🟡"} {t("stockAnalysis.workflow.decisionTitle")}：
@@ -446,7 +446,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                   fontSize: 12,
                   fontWeight: 600,
                   marginBottom: 8,
-                  color: "var(--text)",
+                  color: "var(--fg)",
                   display: "flex",
                   alignItems: "center",
                   gap: 6,
@@ -471,13 +471,13 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                     style={{
                       padding: "6px 10px",
                       background: ds.status === "failed"
-                        ? "var(--error-glass, rgba(255,77,79,0.06))"
+                        ? "color-mix(in srgb, var(--red) 18%, transparent)"
                         : ds.status === "success"
-                        ? "var(--accent-glass)"
-                        : "var(--bg-glass)",
+                        ? "color-mix(in srgb, var(--accent) 14%, transparent)"
+                        : "color-mix(in srgb, var(--surface) 72%, transparent)",
                       borderRadius: 6,
                       border: ds.status === "failed"
-                        ? "1px solid var(--error-soft, rgba(255,77,79,0.2))"
+                        ? "1px solid color-mix(in srgb, var(--red) 35%, transparent)"
                         : ds.status === "success"
                         ? "1px solid var(--accent-soft)"
                         : "1px solid var(--border)",
@@ -518,7 +518,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                       </div>
                     )}
                     {ds.status === "failed" && ds.error && (
-                      <div style={{ fontSize: 11, color: "var(--error, #ff4d4f)", marginTop: 2, lineHeight: 1.4 }}>
+                      <div style={{ fontSize: 11, color: "var(--red)", marginTop: 2, lineHeight: 1.4 }}>
                         {ds.error}
                       </div>
                     )}
@@ -530,7 +530,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
 
           {analysts.length > 0 && (
             <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--fg)" }}>
                 📊 {t("stockAnalysis.workflow.analystReports")}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -539,7 +539,9 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                     key={a.nodeId}
                     style={{
                       padding: "8px 10px",
-                      background: a.status === "done" ? "var(--accent-glass)" : "var(--bg-glass)",
+                      background: a.status === "done"
+                        ? "color-mix(in srgb, var(--accent) 14%, transparent)"
+                        : "color-mix(in srgb, var(--surface) 72%, transparent)",
                       borderRadius: 6,
                       border: a.status === "done" ? "1px solid var(--accent-soft)" : "1px solid var(--border)",
                     }}
@@ -580,7 +582,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
 
           {data.debates && data.debates.length > 0 && (
             <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--fg)" }}>
                 🎯 {t("stockAnalysis.workflow.bullBearDebate")}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -589,7 +591,9 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                     key={`debate-${d.tier ?? "legacy"}-${d.round}`}
                     style={{
                       padding: "8px 10px",
-                      background: d.status === "done" ? "var(--accent-glass)" : "var(--bg-glass)",
+                      background: d.status === "done"
+                        ? "color-mix(in srgb, var(--accent) 14%, transparent)"
+                        : "color-mix(in srgb, var(--surface) 72%, transparent)",
                       borderRadius: 6,
                       border: d.status === "done" ? "1px solid var(--accent-soft)" : "1px solid var(--border)",
                     }}
@@ -605,13 +609,13 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                           <div
                             style={{
                               flex: 1,
-                              background: "var(--sa-red-glass)",
+                              background: "color-mix(in srgb, var(--red) 18%, transparent)",
                               padding: 8,
                               borderRadius: 6,
-                              border: "1px solid var(--sa-red-soft)",
+                              border: "1px solid color-mix(in srgb, var(--red) 35%, transparent)",
                             }}
                           >
-                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: "var(--sa-red)" }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: "var(--red)" }}>
                               🐂 {t("stockAnalysis.workflow.bullCase")}
                             </div>
                             <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
@@ -623,13 +627,13 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                           <div
                             style={{
                               flex: 1,
-                              background: "var(--sa-green-glass)",
+                              background: "color-mix(in srgb, var(--green) 18%, transparent)",
                               padding: 8,
                               borderRadius: 6,
-                              border: "1px solid var(--sa-green-soft)",
+                              border: "1px solid color-mix(in srgb, var(--green) 35%, transparent)",
                             }}
                           >
-                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: "var(--sa-green)" }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: "var(--green)" }}>
                               🐻 {t("stockAnalysis.workflow.bearCase")}
                             </div>
                             <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
@@ -647,7 +651,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
 
           {data.risks && data.risks.length > 0 && (
             <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--fg)" }}>
                 ⚠️ {t("stockAnalysis.workflow.riskAssessment")}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -656,7 +660,9 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                     key={`risk-${r.key}`}
                     style={{
                       padding: "8px 10px",
-                      background: r.status === "done" ? "var(--accent-glass)" : "var(--bg-glass)",
+                      background: r.status === "done"
+                        ? "color-mix(in srgb, var(--accent) 14%, transparent)"
+                        : "color-mix(in srgb, var(--surface) 72%, transparent)",
                       borderRadius: 6,
                       border: r.status === "done" ? "1px solid var(--accent-soft)" : "1px solid var(--border)",
                     }}
@@ -697,7 +703,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
 
           {data.extraNodes && data.extraNodes.length > 0 && (
             <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--fg)" }}>
                 🔧 {t("stockAnalysis.workflow.auxNodes")}
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -730,12 +736,12 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
             style={{
               marginTop: 12,
               padding: 12,
-              background: "var(--error-glass, rgba(255,77,79,0.06))",
+              background: "color-mix(in srgb, var(--red) 18%, transparent)",
               borderRadius: 6,
-              border: "1px solid var(--error-soft, rgba(255,77,79,0.2))",
+              border: "1px solid color-mix(in srgb, var(--red) 35%, transparent)",
             }}
           >
-            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--error, #ff4d4f)", marginBottom: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--red)", marginBottom: 8 }}>
               ❌ {data.error || t("stockAnalysis.workflow.startFailed")}
             </div>
             {data.failedSteps && data.failedSteps.length > 0 && (
@@ -748,7 +754,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                     <summary
                       style={{
                         cursor: "pointer",
-                        color: "var(--error, #ff4d4f)",
+                        color: "var(--red)",
                         padding: "2px 0",
                       }}
                     >
@@ -759,7 +765,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                         style={{
                           margin: "4px 0 0 0",
                           padding: 8,
-                          background: "var(--bg-glass)",
+                          background: "color-mix(in srgb, var(--surface) 72%, transparent)",
                           borderRadius: 4,
                           fontSize: 10,
                           whiteSpace: "pre-wrap",

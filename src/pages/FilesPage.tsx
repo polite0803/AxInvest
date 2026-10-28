@@ -17,7 +17,7 @@ export function FilesPage() {
           style={{
             width: 200,
             minWidth: 200,
-            borderRight: "1px solid var(--color-border-secondary)",
+            borderRight: "1px solid var(--border-light)",
             display: "flex",
             flexDirection: "column",
             padding: "8px",
@@ -29,7 +29,7 @@ export function FilesPage() {
               padding: "8px 10px 4px",
               fontSize: 11,
               fontWeight: 600,
-              color: "var(--color-text-tertiary)",
+              color: "var(--muted)",
               letterSpacing: "0.04em",
               textTransform: "uppercase",
             }}

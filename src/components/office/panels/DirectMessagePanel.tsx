@@ -302,14 +302,14 @@ function DMEventList({ events }: { events: DispatchEvent[] }) {
         }
         if (e.type === "error") {
           return (
-            <div key={i} style={{ fontSize: 11, color: "#ff4d4f" }}>
+            <div key={i} style={{ fontSize: 11, color: "var(--red)" }}>
               ✗ {e.message}
             </div>
           );
         }
         if (e.type === "complete") {
           return (
-            <div key={i} style={{ fontSize: 11, color: "#52c41a" }}>
+            <div key={i} style={{ fontSize: 11, color: "var(--green)" }}>
               ✓
             </div>
           );

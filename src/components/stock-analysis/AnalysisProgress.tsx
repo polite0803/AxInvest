@@ -149,7 +149,7 @@ export function AnalysisProgress() {
       {status === "cancelled" && (
         <div
           className="mb-1 p-1.5 rounded flex justify-between items-center text-xs"
-          style={{ color: "var(--sa-amber)", background: "rgba(245,158,11,0.08)" }}
+          style={{ color: "var(--amber)", background: "rgba(245,158,11,0.08)" }}
         >
           <span>{t("stockAnalysis.cancelled")}</span>
           {stockCode && (
@@ -162,7 +162,7 @@ export function AnalysisProgress() {
       {error && (
         <div
           className="mb-1 p-1.5 rounded flex justify-between items-center text-xs"
-          style={{ color: "var(--sa-red)", background: "var(--sa-red-bg)" }}
+          style={{ color: "var(--red)", background: "var(--red-bg)" }}
         >
           <span style={{ flex: 1 }}>{error}</span>
           {stockCode && status === "error" && (
@@ -218,12 +218,12 @@ export function AnalysisProgress() {
         </div>
       )}
       {status === "completed" && progressMessage && (
-        <div className="mt-1 text-xs" style={{ color: "var(--sa-green)" }}>
+        <div className="mt-1 text-xs" style={{ color: "var(--green)" }}>
           {progressMessage}
         </div>
       )}
       {status === "error" && progressMessage && (
-        <div className="mt-1 text-xs" style={{ color: "var(--sa-red)" }}>
+        <div className="mt-1 text-xs" style={{ color: "var(--red)" }}>
           {progressMessage}
         </div>
       )}

@@ -274,7 +274,7 @@ export const LoopPropertyPanel: React.FC<LoopPropertyPanelProps> = ({
               onClose={() => handleRemoveStep(stepId)}
               style={{
                 background: token.colorFillQuaternary,
-                border: "1px solid #444",
+                border: "1px solid var(--border)",
                 color: token.colorTextQuaternary,
               }}
               closeIcon={<X size={10} />}

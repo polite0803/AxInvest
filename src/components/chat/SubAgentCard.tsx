@@ -94,7 +94,7 @@ export function SubAgentCard({ card }: SubAgentCardProps) {
         <span className="sub-agent-card__name" style={{ color }}>
           {card.isFork && (
             <BranchesOutlined
-              style={{ marginRight: 4, color: "#722ed1" }}
+              style={{ marginRight: 4, color: "var(--purple)" }}
               title={t("subAgentCard.fork")}
             />
           )}
@@ -102,8 +102,8 @@ export function SubAgentCard({ card }: SubAgentCardProps) {
         </span>
         <span className="sub-agent-card__status">
           {isRunning && <LoadingOutlined spin style={{ color }} />}
-          {isCompleted && <CheckCircleOutlined style={{ color: "#52c41a" }} />}
-          {isFailed && <CloseCircleOutlined style={{ color: "#ff4d4f" }} />}
+          {isCompleted && <CheckCircleOutlined style={{ color: "var(--green)" }} />}
+          {isFailed && <CloseCircleOutlined style={{ color: "var(--red)" }} />}
         </span>
       </div>
       <div className="sub-agent-card__desc">{card.description}</div>

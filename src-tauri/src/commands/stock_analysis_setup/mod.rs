@@ -4593,4 +4593,171 @@ mod horizon_tier_fanout_tests {
             "把 kline_limit 改成一个不存在的变量名后仍不报 ⇒ 主图侧判据没电：{problems:?}"
         );
     }
+
+    /// v191：上下文瘦身开关默认开，且**存量库**的一次性门真的把旧 `false` 打回 `true`。
+    ///
+    /// 为什么必须测「存量库」这一路：`merge_variable_values` 无条件保留旧值，只改
+    /// `seed_variables` 的出厂默认对已装用户完全无效（v74 DCF / v115 kline /
+    /// v172 reco_ic_gate 三次同型事故）。本测试同时看三件东西 —— 图、变量表、版本号；
+    /// 少看一件就会漏掉「面板显示 false 而图已瘦身」的第二套真相。
+    #[tokio::test]
+    async fn context_slim_defaults_on_and_legacy_db_is_forced() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+
+        // 1) 空库：建图即瘦身态，变量表与图一致（都是 true）
+        seed(db).await.expect("空库种子应成功");
+        assert_slim_graph(db, true).await;
+        assert_slim_variables(db, true).await;
+
+        // 2) 伪造存量库：版本退回门值 -1，两个开关写回旧种子的 false
+        force_version(db, super::seed_stock_analysis::CONTEXT_SLIM_DEFAULT_VERSION - 1).await;
+        set_bool_variable(db, "trader_context_slim", false).await;
+        set_bool_variable(db, "risk_context_slim", false).await;
+        // 只改库不重播种 ⇒ 图仍是上一次的瘦身态（这一步不构成判据，只固定前提）
+        assert_slim_graph(db, true).await;
+
+        // 3) 再播种：一次性门必须把图与变量**同时**打回瘦身态
+        seed(db).await.expect("存量库重播种应成功");
+        assert_slim_graph(db, true).await;
+        assert_slim_variables(db, true).await;
+        assert_eq!(row_version(db, TEMPLATE_ID).await, TEMPLATE_VERSION);
+
+        // 4) 漂移门负控（不落库版本）：喂**真实图 JSON**，只改两处 contextSources。
+        //    两个方向都要能识别 —— 只测一个方向的话，"恒 Some" 或 "恒 None" 都能骗过测试。
+        let slim_json = raw_nodes(db).await;
+        let mut legacy = slim_json.clone();
+        set_sources(&mut legacy, "trader", vec!["t-scoring", "research-mgr"]);
+        set_sources(&mut legacy, "risk-agg", vec!["t-scoring"]);
+        let vars = |t: bool, r: bool| {
+            Some(
+                serde_json::json!([
+                    {"name": "trader_context_slim", "value": t},
+                    {"name": "risk_context_slim", "value": r},
+                ])
+                .to_string(),
+            )
+        };
+        let drift = |nodes: &[serde_json::Value], v: Option<String>| {
+            super::seed_stock_analysis::context_slim_graph_drift(
+                &serde_json::to_string(nodes).expect("序列化节点失败"),
+                v.as_deref(),
+            )
+        };
+        assert_eq!(drift(&slim_json, vars(true, true)), None, "图与变量一致时不得报漂移");
+        assert_eq!(
+            drift(&legacy, vars(true, true)),
+            Some((true, true)),
+            "变量要瘦身、图是旧形态 ⇒ 必须报漂移"
+        );
+        assert_eq!(
+            drift(&slim_json, vars(false, false)),
+            Some((false, false)),
+            "变量要回滚、图还是瘦身态 ⇒ 必须报漂移"
+        );
+        assert_eq!(drift(&slim_json, Some("{ not json".into())), None, "变量表脏数据不得触发重建");
+
+        // 5) v191 之后把开关关掉：版本门放行（191 >= 191），只有漂移门能把它改回旧图
+        force_version(db, TEMPLATE_VERSION).await;
+        set_bool_variable(db, "trader_context_slim", false).await;
+        set_bool_variable(db, "risk_context_slim", false).await;
+        seed(db).await.expect("关掉瘦身后的重播种应成功");
+        assert_slim_graph(db, false).await;
+        assert_slim_variables(db, false).await;
+
+        // 6) 再打开：同一道门反向也要生效（A/B 是双向的，不是只能"开"）
+        set_bool_variable(db, "trader_context_slim", true).await;
+        set_bool_variable(db, "risk_context_slim", true).await;
+        seed(db).await.expect("恢复瘦身后的重播种应成功");
+        assert_slim_graph(db, true).await;
+        assert_slim_variables(db, true).await;
+    }
+
+    async fn raw_nodes(db: &DatabaseConnection) -> Vec<serde_json::Value> {
+        let model = workflow_template::Entity::find_by_id(TEMPLATE_ID)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .expect("模板应已存在");
+        serde_json::from_str(&model.nodes).expect("nodes 应是 JSON 数组")
+    }
+
+    fn set_sources(nodes: &mut [serde_json::Value], node_id: &str, sources: Vec<&str>) {
+        let node = nodes
+            .iter_mut()
+            .find(|n| n.get("id").and_then(|v| v.as_str()) == Some(node_id))
+            .unwrap_or_else(|| panic!("模板应含节点 {node_id}"));
+        node["config"]["contextSources"] = serde_json::json!(sources);
+    }
+
+    /// 瘦身态的图事实：trader 不再吃 `t-scoring` 全文；风险三视角改读 `analyst-brief--mid`。
+    async fn assert_slim_graph(db: &DatabaseConnection, slim: bool) {
+        let trader = agent_context_sources(db, "trader").await;
+        let risk = agent_context_sources(db, "risk-agg").await;
+        // 抽取面自证：两边都抽到非空，否则下面的判据恒真/恒假，区分不了对错
+        assert!(!trader.is_empty() && !risk.is_empty(), "contextSources 抽取面失效");
+        assert_eq!(
+            !trader.iter().any(|s| s == "t-scoring"),
+            slim,
+            "trader 是否剔除 t-scoring 全文应与瘦身开关一致：{trader:?}"
+        );
+        assert_eq!(
+            risk.iter().any(|s| s == "analyst-brief--mid"),
+            slim,
+            "风险视角是否改读 analyst-brief--mid 应与瘦身开关一致：{risk:?}"
+        );
+    }
+
+    async fn assert_slim_variables(db: &DatabaseConnection, expected: bool) {
+        for name in ["trader_context_slim", "risk_context_slim"] {
+            assert_eq!(bool_variable(db, name).await, expected, "变量 {name} 的落库值不对");
+        }
+    }
+
+    async fn agent_context_sources(db: &DatabaseConnection, node_id: &str) -> Vec<String> {
+        row_nodes(db, TEMPLATE_ID)
+            .await
+            .into_iter()
+            .find_map(|n| match n {
+                WorkflowNode::Agent(a) if a.base.id == node_id => {
+                    Some(a.config.context_sources.clone())
+                },
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("模板应含 Agent 节点 {node_id}"))
+    }
+
+    async fn bool_variable(db: &DatabaseConnection, name: &str) -> bool {
+        let model = workflow_template::Entity::find_by_id(TEMPLATE_ID)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .expect("模板应已存在");
+        let raw = model.variables.unwrap_or_default();
+        let arr: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("variables 应是 JSON 数组");
+        arr.iter()
+            .find(|v| v.get("name").and_then(|n| n.as_str()) == Some(name))
+            .and_then(|v| v.get("value").and_then(|x| x.as_bool()))
+            .unwrap_or_else(|| panic!("变量表应含布尔变量 {name}"))
+    }
+
+    async fn set_bool_variable(db: &DatabaseConnection, name: &str, value: bool) {
+        let model = workflow_template::Entity::find_by_id(TEMPLATE_ID)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .expect("模板应已存在");
+        let raw = model.variables.clone().unwrap_or_default();
+        let mut arr: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("variables 应是 JSON 数组");
+        let slot = arr
+            .iter_mut()
+            .find(|v| v.get("name").and_then(|n| n.as_str()) == Some(name))
+            .unwrap_or_else(|| panic!("变量表应含 {name}"));
+        slot["value"] = serde_json::json!(value);
+        let mut am: workflow_template::ActiveModel = model.into();
+        am.variables = Set(Some(serde_json::to_string(&arr).expect("序列化变量表失败")));
+        am.update(db).await.expect("改变量表失败");
+    }
 }

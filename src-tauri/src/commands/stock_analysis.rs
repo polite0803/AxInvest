@@ -4033,12 +4033,23 @@ pub async fn get_north_bound_flow(
 #[tauri::command]
 pub async fn get_index_quotes(
     state: State<'_, AppState>,
-) -> Result<Vec<axagent_astock_data::IndexQuote>, String> {
-    state.astock_client.get_index_quotes().await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL)
-            .with_detail(format!("获取指数行情失败: {e}"))
-            .to_string()
-    })
+) -> Result<axagent_astock_data::DataOutcome<Vec<axagent_astock_data::IndexQuote>>, String> {
+    // 返回信封而非裸数组：空数据必须能区分「该时点无行情」与「通道故障/接口改版」。
+    // 面板据此显示不同空态，不再把取数故障统一说成「暂无数据」。
+    Ok(state.astock_client.get_index_quotes_outcome().await)
+}
+
+/// 最近 N 个交易日的核心接口健康检查记录（倒序，缺失日不出现）。
+///
+/// `storeEnabled=false` 是「归档没启用、结果没留存」，与「检查过且全好」必须分开显示。
+#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取核心接口日级健康记录")]
+#[tauri::command]
+pub async fn get_interface_health_history(
+    state: State<'_, AppState>,
+    days: Option<u32>,
+) -> Result<axagent_astock_data::health_check::InterfaceHealthHistory, String> {
+    let days = days.unwrap_or(7).clamp(1, 30) as usize;
+    Ok(state.astock_client.interface_health_history(days).await)
 }
 
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取同行业对比")]

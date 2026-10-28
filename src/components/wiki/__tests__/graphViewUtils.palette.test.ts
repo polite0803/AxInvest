@@ -10,11 +10,13 @@
 // 容量、**唯一性**、以及「相邻 cid 必须异色」这个真正的目的。
 import { describe, expect, it } from "vitest";
 import {
+  buildNodeColorCache,
   COMMUNITY_PALETTE_SIZE,
   COMMUNITY_RADIUS_MAX,
   COMMUNITY_RADIUS_MIN,
   communityPalette,
   communityRadius,
+  getNodeColorMap,
 } from "../graphViewUtils";
 
 // 历史前 12 色（与迁移前逐字节一致）—— 小图 / 社区数 ≤ 12 时取色不得漂移
@@ -98,5 +100,61 @@ describe("communityRadius", () => {
   it("退化输入不产生 NaN（成员数为 0 / 负数）", () => {
     expect(Number.isFinite(communityRadius(0))).toBe(true);
     expect(Number.isFinite(communityRadius(-5))).toBe(true);
+  });
+});
+
+// ── 节点类型色（2026-10-28 收编进类目色板）──
+//
+// 收编前的缺陷：`getNodeColorMap` 里 note/concept 走 antd 语义 token、entity/source 是手抄
+// hex；而 `buildNodeColorCache` 在「没传 token」时另有一份四色全 hex 的表 —— 同一节点
+// 经两条路径取到不同颜色。现在两份合成一份，取值全部来自 `@/theme/categoricalColors`。
+function node(id: string, type: string) {
+  return {
+    id,
+    title: id,
+    type: type as never,
+    tags: [],
+    linkCount: 1,
+    backlinkCount: 0,
+    path: `/${id}`,
+  };
+}
+
+describe("getNodeColorMap", () => {
+  const KINDS = ["note", "concept", "entity", "source"] as const;
+
+  it("亮 / 暗两档各自四类互异 —— 撞色等于图上分不出类型", () => {
+    for (const isDark of [false, true]) {
+      const map = getNodeColorMap(isDark);
+      const colors = KINDS.map((k) => map[k]);
+      expect(new Set(colors).size).toBe(KINDS.length);
+    }
+  });
+
+  it("四类颜色随明暗档变化（不是一档写死两档共用）", () => {
+    for (const kind of KINDS) {
+      expect(getNodeColorMap(false)[kind]).not.toBe(getNodeColorMap(true)[kind]);
+    }
+  });
+
+  it("buildNodeColorCache 无社区分色时逐类等于 getNodeColorMap（单一来源）", () => {
+    for (const isDark of [false, true]) {
+      const map = getNodeColorMap(isDark);
+      const cache = buildNodeColorCache(KINDS.map((k) => node(k, k)), undefined, isDark);
+      for (const kind of KINDS) {
+        expect(cache.get(kind)).toBe(map[kind]);
+      }
+    }
+  });
+
+  it("词表外的后端类型静默落 note 色（这是已登记的产品待裁，不是取色故障）", () => {
+    const cache = buildNodeColorCache([node("x", "daily")], undefined, false);
+    expect(cache.get("x")).toBe(getNodeColorMap(false).note);
+  });
+
+  it("有社区分色时优先社区色，且仍取自 communityPalette（与聚合彩球同源）", () => {
+    const communities = new Map([["n1", 3]]);
+    const cache = buildNodeColorCache([node("n1", "note")], communities, false);
+    expect(cache.get("n1")).toBe(communityPalette[3]);
   });
 });

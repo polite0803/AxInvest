@@ -229,7 +229,7 @@ export function DashboardReportPreview({ report }: { report: DashboardReport }) 
           {/* 交易目标价（LLM trader 的方向性目标）—— 与下方「内在价值」是两个不同概念 */}
           <Text>
             {t("stockAnalysis.dashboard.targetPriceTrading")}: {targetPriceMeaningful
-              ? <Text strong style={{ color: "#f5222d" }}>{fmtNum(report.targetPrice)}</Text>
+              ? <Text strong style={{ color: "var(--red)" }}>{fmtNum(report.targetPrice)}</Text>
               : <Text type="secondary">{t("stockAnalysis.dashboard.targetPriceUnset")}</Text>}
           </Text>
           {
@@ -239,7 +239,7 @@ export function DashboardReportPreview({ report }: { report: DashboardReport }) 
           {intrinsicRange && (
             <Text>
               {t("stockAnalysis.dashboard.intrinsicValue")}:{" "}
-              <Text strong style={{ color: "#1677ff" }}>{intrinsicRange}</Text>
+              <Text strong style={{ color: "var(--accent)" }}>{intrinsicRange}</Text>
               {report.currentPrice != null && (
                 <Text type="secondary">
                   {" ("}
@@ -262,7 +262,7 @@ export function DashboardReportPreview({ report }: { report: DashboardReport }) 
           )}
           <Text>
             {t("stockAnalysis.dashboard.stopLoss")}:{" "}
-            <Text strong style={{ color: "#52c41a" }}>{fmtNum(report.stopLoss)}</Text>
+            <Text strong style={{ color: "var(--green)" }}>{fmtNum(report.stopLoss)}</Text>
           </Text>
           <Text>
             {t("stockAnalysis.dashboard.positionPct")}: <Text strong>{report.positionPct.toFixed(0)}%</Text>

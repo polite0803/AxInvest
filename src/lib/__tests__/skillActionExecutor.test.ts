@@ -114,7 +114,7 @@ describe("skillActionExecutor", () => {
       const actions: SkillCommandAction[] = [
         {
           mode: "declarative",
-          action: { type: "navigate", path: "/dashboard" },
+          action: { type: "navigate", path: "/chat/dashboard" },
         },
         {
           mode: "declarative",
@@ -131,7 +131,7 @@ describe("skillActionExecutor", () => {
       await executeActionChain(actions, mockNavigate);
 
       expect(mockNavigate).toHaveBeenCalledOnce();
-      expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
+      expect(mockNavigate).toHaveBeenCalledWith("/chat/dashboard");
       expect(actionRouterMock.execute).toHaveBeenCalledTimes(2);
     });
   });

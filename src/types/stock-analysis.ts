@@ -1031,11 +1031,32 @@ export interface DashboardReport {
   integrityPassed: boolean;
 }
 
-/** 指数行情 */
+/** 指数行情（`get_index_quotes` 的一行） */
 export interface IndexQuote {
+  /** 供应商代码（如 sh000001 / 000001）；历史载荷可能缺省 */
+  code?: string;
   name: string;
   price: number;
+  preClose?: number;
   changePct: number;
+  volume?: number;
+  amount?: number;
+}
+
+/**
+ * 一次取数调用的结论 —— 与后端 `axagent_astock_data::outcome::DataStatus` 的
+ * serde 输出（snake_case）逐值对齐，改一边必须改另一边。
+ *
+ * 「空」必须能区分成因：`empty_by_time`（该时点确实没数据）与
+ * `source_failed`（通道故障）/ `schema_changed`（接口改版）在 UI 上不得合并成一句。
+ */
+export type DataStatus = "ok" | "empty_by_time" | "source_failed" | "schema_changed";
+
+/** 取数结果信封（后端 `DataOutcome<T>`；`data` 恒存在，空集合也是合法值） */
+export interface DataOutcome<T> {
+  status: DataStatus;
+  data: T;
+  detail?: string;
 }
 
 /** 大盘复盘报告 */

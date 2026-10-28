@@ -3405,6 +3405,7 @@ mod tests {
     /// 构造一份最小可用的 provider 调用上下文（字段全填以便断言 camelCase 出线）。
     fn sample_provider_ctx() -> ProviderRequestContext {
         ProviderRequestContext {
+            header_timeout_secs: None,
             api_key: "sk-demo".to_string(),
             key_id: "k1".to_string(),
             provider_id: "p1".to_string(),

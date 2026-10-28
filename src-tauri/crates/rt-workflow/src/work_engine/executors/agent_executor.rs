@@ -670,19 +670,6 @@ impl NodeExecutorTrait for AgentExecutor {
             }
         }
 
-        // 4c. 行内 system_prompt 追加（从 pre-compiled 缓存取或现场编译）
-        if !an.config.system_prompt.is_empty() {
-            if let Some(ref compiled_map) = context.compiled_prompts {
-                if let Some(inline_compiled) = compiled_map.get(&an.base.id) {
-                    all_segments.extend(inline_compiled.segments.clone());
-                } else {
-                    all_segments.extend(compile_prompt(&an.config.system_prompt).segments);
-                }
-            } else {
-                all_segments.extend(compile_prompt(&an.config.system_prompt).segments);
-            }
-        }
-
         // 4d. 上下文数据（自然语言格式化，替代 raw JSON dump）
         let debate_context_mode =
             context.variables.get("debate_context_mode").and_then(|v| v.as_str()).unwrap_or("full");
@@ -753,6 +740,24 @@ impl NodeExecutorTrait for AgentExecutor {
                     missing_sources.join(", ")
                 );
                 all_segments.push(TemplateSegment::Static(msg));
+            }
+        }
+
+        // 4c'. 行内 system_prompt 在**数据之后**追加（v191 成本治理，2026-10-28）。
+        // 为什么不在 4d 之前：四个档位副本共用同一份 `context_sources`（同一批 K 线，
+        // 实测 36k 字符逐字节相同），而档位差异（`verdict_contract_prompt()`）写在 inline
+        // prompt 里。inline 排在数据前 ⇒ 前缀在第 3.8k 字符处分叉 ⇒ 后面 36k 一个字节都
+        // 共享不到（实测同任务副本 LCP 中位数 3814）。挪到数据之后，四副本的公共前缀
+        // = 角色 + 专家 + 数据整包；同时任务指令贴近末尾，符合 recency。
+        if !an.config.system_prompt.is_empty() {
+            if let Some(ref compiled_map) = context.compiled_prompts {
+                if let Some(inline_compiled) = compiled_map.get(&an.base.id) {
+                    all_segments.extend(inline_compiled.segments.clone());
+                } else {
+                    all_segments.extend(compile_prompt(&an.config.system_prompt).segments);
+                }
+            } else {
+                all_segments.extend(compile_prompt(&an.config.system_prompt).segments);
             }
         }
 
@@ -1140,7 +1145,12 @@ impl NodeExecutorTrait for AgentExecutor {
                 .await;
         }
 
-        let req_ctx = axagent_harness::build_provider_request_context(&prov, &key, api_key);
+        let req_ctx = axagent_harness::build_provider_request_context_for_model(
+            &prov,
+            &key,
+            api_key,
+            Some(&model),
+        );
         // 2026-10-26：产出里记录的模型必须是**实际服务的那一个**。此前它在主通路解析时就
         // 定死、回退接管后从不更新 ⇒ 节点账单落在回退供应商，DB 却写着主模型。
         // 现网实证（2026-10-26 DeepSeek 账单 CSV 对账）：DeepSeek 侧 20:00–21:00 记 632 次
@@ -2454,8 +2464,8 @@ impl NodeExecutorTrait for AgentExecutor {
                                 {
                                     Ok((fb_prov, fb_key, fb_model, fb_adapter, fb_api_key)) => {
                                         let fb_req_ctx =
-                                            axagent_harness::build_provider_request_context(
-                                                &fb_prov, &fb_key, fb_api_key,
+                                            axagent_harness::build_provider_request_context_for_model(
+                                                &fb_prov, &fb_key, fb_api_key, Some(&fb_model),
                                             );
                                         // H4.1 回退流的采样参数按**回退模型自己**那格算
                                         // （节点配置 > 回退模型 override > 不下发），
@@ -3017,8 +3027,11 @@ impl NodeExecutorTrait for AgentExecutor {
                     )
                     .await
                 {
-                    let fb_req_ctx = axagent_harness::build_provider_request_context(
-                        &fb_prov, &fb_key, fb_api_key,
+                    let fb_req_ctx = axagent_harness::build_provider_request_context_for_model(
+                        &fb_prov,
+                        &fb_key,
+                        fb_api_key,
+                        Some(&fb_model),
                     );
                     // H4.2 空内容保护的补救流：同样按回退模型自己那格算，见 H4.1 同位置注释。
                     let fb_overrides = model_param_overrides(&fb_prov, &fb_model).cloned();
@@ -3255,6 +3268,7 @@ impl AgentExecutor {
         let plan_prompt =
             build_plan_extraction_prompt(&an.config.system_prompt, &role_desc, &tool_names);
         let plan_ctx = axagent_harness::ProviderRequestContext {
+            header_timeout_secs: None,
             provider_id: prov.id.clone(),
             api_key: api_key.to_string(),
             key_id: String::new(),
@@ -3828,8 +3842,12 @@ impl AgentExecutor {
         let fb_overrides = model_param_overrides(&fb_prov, &fb_model).cloned();
         let fb_sampling =
             resolve_sampling(node_temperature, node_max_tokens, fb_overrides.as_ref());
-        let fb_req_ctx =
-            axagent_harness::build_provider_request_context(&fb_prov, &fb_key, fb_api_key);
+        let fb_req_ctx = axagent_harness::build_provider_request_context_for_model(
+            &fb_prov,
+            &fb_key,
+            fb_api_key,
+            Some(&fb_model),
+        );
         let fb_request = ChatRequest {
             model: fb_model.clone(),
             messages: messages.to_vec(),
@@ -3923,10 +3941,10 @@ fn resolve_role(profile: Option<&axagent_harness::types::AgentProfile>) -> Strin
 
 /// 判断 LLM 调用错误是否为「上游网关响应头超时」。
 ///
-/// `providers::openai::chat_stream` 在响应头超时时会本地合成
-/// `"OpenAI API error 504: response headers not received within Ns..."` 错误
-/// （超时值随请求体缩放：base 10s + 每 64KB 递增 5s，封顶 60s），这是设计的
-/// 快速失败路径——重试 / 切换回退模型是预期处置，与「供应商是否受支持」无关。
+/// `providers::stream_budget::hung_error_message` 在**硬档**超时（上游挂起）时本地合成
+/// `"...API error 504: response headers not received within Ns..."` 错误（预算软 45s /
+/// 硬 90s 两档，见 `providers::stream_budget`）—— 这是设计的「判上游挂起」路径：
+/// 换回退模型是预期处置，与「供应商是否受支持」无关。
 ///
 /// 该错误此前被上层统一包装成 `UNSUPPORTED_PROVIDER`（"不支持的数据供应商"），
 /// 用户据此会误以为需要更换供应商（2026-09-23 实证）。

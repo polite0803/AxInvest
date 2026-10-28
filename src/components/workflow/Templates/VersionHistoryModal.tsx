@@ -290,7 +290,7 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
                     </div>
                     <div
                       style={{
-                        color: "var(--text-secondary, rgba(0,0,0,0.45))",
+                        color: "var(--fg-2)",
                         fontSize: 13,
                         marginTop: 2,
                       }}

@@ -21,13 +21,13 @@ export function GatewayLinkPage() {
     {
       key: "gateway",
       label: t("gateway.title"),
-      icon: <Router size={16} color={CHAT_ICON_COLORS.Settings} />,
+      icon: <Router size={16} style={{ color: CHAT_ICON_COLORS.Settings }} />,
       children: <GatewayPage />,
     },
     {
       key: "link",
       label: t("nav.link"),
-      icon: <Link2 size={16} color={CHAT_ICON_COLORS.Settings} />,
+      icon: <Link2 size={16} style={{ color: CHAT_ICON_COLORS.Settings }} />,
       children: <LinkPage />,
     },
   ];

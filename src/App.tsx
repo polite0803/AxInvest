@@ -55,10 +55,11 @@ import {
   useUIStore,
   useWorkspaceTabStore,
 } from "@/stores";
+import { applyCategoricalCssVars } from "@/theme/categoricalColors";
 import { useShadcnTheme } from "@/theme/shadcnTheme";
 import type { ThemePreset } from "@/theme/shadcnTheme";
 import type { SkillProposal } from "@/types";
-import { App as AntdApp, ConfigProvider, theme } from "antd";
+import { App as AntdApp, ConfigProvider } from "antd";
 import type { Locale } from "antd/es/locale";
 import { setDefaultI18nMap } from "markstream-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -83,8 +84,6 @@ const LOCAL_MODULE_MAP: Record<string, () => Promise<Record<string, unknown>>> =
 };
 
 const LazyQuickBarPage = lazy(() => import("@/pages/QuickBarPage").then((m) => ({ default: m.QuickBarPage })));
-
-const { useToken } = theme;
 
 function PageTransitionWrapper({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -122,9 +121,15 @@ function GlobalStatusBarWrapper() {
   );
 }
 
+/** 工作台路由：`/chat` 与 `/chat/<tab>`（2026-10-28 起工作台 Tab 用路径段）。 */
+function isWorkspacePath(pathname: string): boolean {
+  return pathname === "/chat" || pathname.startsWith("/chat/")
+    || pathname === "/" || pathname === "";
+}
+
 function GlobalTabBar() {
   const location = useLocation();
-  const isChatPage = location.pathname === "/chat" || location.pathname === "/" || location.pathname === "";
+  const isChatPage = isWorkspacePath(location.pathname);
   const workspaceTab = useWorkspaceTabStore((s) => s.activeTab);
   // 仅在 /chat 路由且功能 Tab 为「对话」时显示会话 TabBar
   if (!isChatPage || workspaceTab !== "chat") {
@@ -142,7 +147,7 @@ function GlobalTabBar() {
  */
 function WorkspaceSwitcherBar() {
   const location = useLocation();
-  const isChatPage = location.pathname === "/chat" || location.pathname === "/" || location.pathname === "";
+  const isChatPage = isWorkspacePath(location.pathname);
   if (!isChatPage) {
     return null;
   }
@@ -154,7 +159,6 @@ function WorkspaceSwitcherBar() {
 }
 
 function AppInner() {
-  const { token } = useToken();
   const { t } = useTranslation();
   const { modal, message: antdMessage } = AntdApp.useApp();
   // 将 App.useApp().message 注入全局 toast proxy，使非组件模块（store / 全局快捷键）也能使用上下文感知的 message
@@ -182,11 +186,11 @@ function AppInner() {
     const params = new URLSearchParams(window.location.search);
     return params.get("__route") === "quickbar";
   });
-  const isQuickBar = isQuickBarWindow || location.pathname === "/quickbar";
+  const isQuickBar = isQuickBarWindow || location.pathname === "/chat/quickbar";
 
   useEffect(() => {
     if (isQuickBarWindow) {
-      navigate("/quickbar", { replace: true });
+      navigate("/chat/quickbar", { replace: true });
       return;
     }
     if (isTauri()) {
@@ -195,7 +199,7 @@ function AppInner() {
           try {
             const label = getCurrentWebviewWindow().label;
             if (label === "quickbar") {
-              navigate("/quickbar", { replace: true });
+              navigate("/chat/quickbar", { replace: true });
             }
           } catch {
             /* not a Tauri webview window */
@@ -300,23 +304,6 @@ function AppInner() {
     };
   }, [t]);
 
-  useEffect(() => {
-    const root = document.documentElement;
-    root.style.setProperty("--border-color", token.colorBorderSecondary);
-    root.style.setProperty("--color-bg-container", token.colorBgContainer);
-    root.style.setProperty("--color-bg-elevated", token.colorBgElevated);
-    root.style.setProperty("--color-text", token.colorText);
-    root.style.setProperty("--color-text-secondary", token.colorTextSecondary);
-    root.style.setProperty("--color-primary", token.colorPrimary);
-    root.style.setProperty("--color-fill-alter", token.colorFillAlter);
-    root.style.setProperty("--table-border", token.colorBorderSecondary);
-    root.style.setProperty("--hr-border-color", token.colorBorderSecondary);
-    root.style.setProperty(
-      "--blockquote-border-color",
-      token.colorBorderSecondary,
-    );
-  }, [token]);
-
   const stopStreamListening = useStreamStore((s) => s.stopStreamListening);
   useEffect(() => {
     return () => stopStreamListening();
@@ -367,7 +354,7 @@ function AppInner() {
       <div className={shellClass}>
         {isQuickBar
           ? (
-            isQuickBarWindow && location.pathname !== "/quickbar"
+            isQuickBarWindow && location.pathname !== "/chat/quickbar"
               ? (
                 <Suspense
                   fallback={
@@ -538,6 +525,8 @@ function AppRoot() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = isDark ? "dark" : "light";
+    // 类目色板投影到 --cat-*，供只能走 CSS 的消费方（图标、内联样式）使用
+    applyCategoricalCssVars(isDark);
   }, [isDark]);
 
   useEffect(() => {

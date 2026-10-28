@@ -116,6 +116,7 @@ fn bench_diagnose_http_status(c: &mut Criterion) {
 
 fn bench_apply_request_headers(c: &mut Criterion) {
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         custom_headers: Some(
             [
                 ("X-Request-ID".to_string(), "abc-123".to_string()),

@@ -57,7 +57,7 @@ export function AgentEntryPoint() {
       </Tooltip>
       <button
         type="button"
-        className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-[var(--color-fill-alter)] text-[var(--color-text-secondary)] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[var(--color-error)] hover:text-white cursor-pointer"
+        className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-[var(--color-fill-alter)] text-[var(--color-text-secondary)] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[var(--red)] hover:text-white cursor-pointer"
         onClick={hide}
         aria-label={t("common.hide")}
         title={t("common.hide")}

@@ -268,9 +268,13 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
         Variable {
             name: "trader_context_slim".into(),
             var_type: "boolean".into(),
-            value: serde_json::json!(false),
+            // v191（2026-10-28）：默认 false → true。这两格是 P0 成本治理的第一步：
+            // 实测单次运行 1.0–1.2M 字符提示词中 75–80% 是上下文数据，而同一份数据在
+            // 「全文 + input_mapping 结构化字段」两条路上各进一次（本文件的旧注释自己
+            // 写着「全文再注入一遍是重复上下文」）。默认关着 = 最有把握的一处省法从未生效。
+            value: serde_json::json!(true),
             description: Some(
-                "trader 输入瘦身：去掉与 input_mapping 重复的 t-scoring/t-valuation/催化剂/资金全文（建图时生效）"
+                "trader 输入瘦身：去掉与 input_mapping 重复的 t-scoring/t-valuation/催化剂/资金全文（建图时生效；默认开，回滚需改 false 后重新播种）"
                     .into(),
             ),
             is_secret: false,
@@ -278,9 +282,9 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
         Variable {
             name: "risk_context_slim".into(),
             var_type: "boolean".into(),
-            value: serde_json::json!(false),
+            value: serde_json::json!(true),
             description: Some(
-                "风险三视角输入瘦身：用 analyst-brief--mid 替代 9 份分析师全文（建图时生效）"
+                "风险三视角输入瘦身：用 analyst-brief--mid 替代 9 份分析师全文（建图时生效；默认开，回滚需改 false 后重新播种）"
                     .into(),
             ),
             is_secret: false,

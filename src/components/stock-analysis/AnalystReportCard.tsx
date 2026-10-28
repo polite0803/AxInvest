@@ -854,12 +854,12 @@ export function AnalystReportCard({ expertId, report, tierLabel, tier = null }: 
                 </Tag>
               )}
               {bullScore != null && (
-                <span className="text-xs" style={{ color: "#f5222d", fontWeight: 600 }}>
+                <span className="text-xs" style={{ color: "var(--red)", fontWeight: 600 }}>
                   {t("stockAnalysis.sentimentBullish")} {Math.round(bullScore)}
                 </span>
               )}
               {bearScore != null && (
-                <span className="text-xs" style={{ color: "#52c41a", fontWeight: 600 }}>
+                <span className="text-xs" style={{ color: "var(--green)", fontWeight: 600 }}>
                   {t("stockAnalysis.sentimentBearish")} {Math.round(bearScore)}
                 </span>
               )}
@@ -1014,7 +1014,7 @@ export function AnalystReportCard({ expertId, report, tierLabel, tier = null }: 
                 children: (
                   <pre
                     style={{
-                      background: isDark ? "#1f1f1f" : "#f5f5f5",
+                      background: "var(--surface-2)",
                       padding: 12,
                       borderRadius: 6,
                       fontSize: 12,
@@ -1246,7 +1246,7 @@ export function AnalystReportCard({ expertId, report, tierLabel, tier = null }: 
               children: (
                 <pre
                   style={{
-                    background: isDark ? "#1f1f1f" : "#f5f5f5",
+                    background: "var(--surface-2)",
                     padding: 12,
                     borderRadius: 6,
                     fontSize: 12,

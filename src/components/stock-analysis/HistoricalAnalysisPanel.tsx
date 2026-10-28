@@ -255,7 +255,7 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
               {t("stockAnalysis.scoreLabel", { score: dataQualityInfo.score })}
             </span>
             {dataQualityInfo.missingFactors.length > 0 && (
-              <span style={{ color: "var(--sa-amber, #f59e0b)" }}>
+              <span style={{ color: "var(--amber)" }}>
                 {t("stockAnalysis.missingFactorsLabel", { factors: dataQualityInfo.missingFactors.join("、") })}
               </span>
             )}
@@ -281,7 +281,7 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
               title={t("stockAnalysis.backtest.accuracy")}
               value={btStats.correct}
               suffix={`/${btStats.total}`}
-              styles={{ content: { fontSize: 14, color: "var(--sa-green)" } }}
+              styles={{ content: { fontSize: 14, color: "var(--green)" } }}
             />
             <Statistic
               title={t("stockAnalysis.backtest.avgReturn")}

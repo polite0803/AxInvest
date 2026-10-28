@@ -187,8 +187,8 @@ export function DailyReviewPanel() {
                               color: !Number.isFinite(w.changePct)
                                 ? "var(--muted)"
                                 : w.changePct >= 0
-                                ? "var(--sa-red)"
-                                : "var(--sa-green)",
+                                ? "var(--red)"
+                                : "var(--green)",
                             }}
                           >
                             {Number.isFinite(w.changePct)

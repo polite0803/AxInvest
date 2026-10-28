@@ -46,6 +46,10 @@ pub struct TransportRequest {
     pub stream: bool,
     pub tools: Option<serde_json::Value>,
     pub extra: serde_json::Value,
+    /// 首字节（HTTP 响应头）等待预算（秒）。语义与
+    /// `ModelParamOverrides::header_timeout_secs` 一致：这是**硬档总上限**，
+    /// 软档取其一半；`None` = 用默认（软 45s / 硬 90s）。
+    pub header_timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone)]

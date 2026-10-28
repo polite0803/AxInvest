@@ -192,7 +192,7 @@ export function RecoLoopPanel({ asOfDate }: { asOfDate?: string | null }) {
           parts.push(t("stockAnalysis.recoLoop.dqiPenalty", { p: cell.dqiPenalty.toFixed(2) }));
         }
         return parts.length === 0
-          ? <span style={{ color: "var(--color-text-tertiary)" }}>—</span>
+          ? <span style={{ color: "var(--muted)" }}>—</span>
           : <span style={{ fontSize: 11 }}>{parts.join(" · ")}</span>;
       },
     },
@@ -255,7 +255,7 @@ export function RecoLoopPanel({ asOfDate }: { asOfDate?: string | null }) {
         ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.recoLoop.empty")} />
         : (
           <>
-            <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 6 }}>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
               {gateText}
               <span style={{ marginLeft: 8 }}>
                 {t("stockAnalysis.recoLoop.summary", summary)}

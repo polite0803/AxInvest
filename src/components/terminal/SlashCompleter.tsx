@@ -232,8 +232,8 @@ export function SlashCompleterWidget({
         position: "absolute",
         bottom: 24,
         left: 8,
-        background: "#181825",
-        border: "1px solid #45475a",
+        background: "var(--theme-background, #1e1e2e)",
+        border: "1px solid var(--theme-black, #45475a)",
         borderRadius: 6,
         maxHeight: 200,
         overflow: "auto",
@@ -248,21 +248,21 @@ export function SlashCompleterWidget({
           style={{
             padding: "6px 12px",
             cursor: "pointer",
-            background: index === selectedIndex ? "#585b70" : "transparent",
+            background: index === selectedIndex ? "var(--theme-bright-black, #585b70)" : "transparent",
             borderLeft: index === selectedIndex
-              ? "2px solid #89b4fa"
+              ? "2px solid var(--theme-blue, #89b4fa)"
               : "2px solid transparent",
           }}
           onMouseEnter={() => {}}
         >
-          <div style={{ color: "#cdd6f4", fontSize: 13 }}>
-            <span style={{ color: "#89b4fa" }}>{triggerChar}</span>
+          <div style={{ color: "var(--theme-foreground, #cdd6f4)", fontSize: 13 }}>
+            <span style={{ color: "var(--theme-blue, #89b4fa)" }}>{triggerChar}</span>
             {cmd.command.slice(1)}
           </div>
           {cmd.description && (
             <div
               style={{
-                color: "#6c7086",
+                color: "var(--theme-bright-black, #585b70)",
                 fontSize: 12,
                 marginTop: 2,
               }}

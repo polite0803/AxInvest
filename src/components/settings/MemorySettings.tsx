@@ -849,10 +849,10 @@ function MemoryItemsPanel({ namespace }: { namespace: MemoryNamespace }) {
                 style={{
                   fontSize: 12,
                   color: importance >= 0.7
-                    ? "#f59e0b"
+                    ? "var(--amber)"
                     : importance >= 0.4
-                    ? "#3b82f6"
-                    : "#94a3b8",
+                    ? "var(--accent)"
+                    : "var(--muted)",
                 }}
               >
                 {t(formatImportance(importance))}

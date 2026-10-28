@@ -126,7 +126,7 @@ export function NorthBoundPanel() {
 
   const total = flow?.totalFlow ?? 0;
   const dir = total >= 0 ? t("stockAnalysis.settings.panels.inflow") : t("stockAnalysis.settings.panels.outflow");
-  const color = total >= 0 ? "var(--sa-red)" : "var(--sa-green)";
+  const color = total >= 0 ? "var(--red)" : "var(--green)";
 
   return (
     <Card

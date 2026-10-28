@@ -108,6 +108,6 @@ describe("DecisionTimelinePanel", () => {
       ],
     });
     const { container } = renderWithRouter(<DecisionTimelinePanel />);
-    expect(container.innerHTML).toContain("var(--sa-red)");
+    expect(container.innerHTML).toContain("var(--red)");
   });
 });

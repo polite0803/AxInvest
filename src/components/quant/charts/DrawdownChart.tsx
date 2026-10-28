@@ -1,5 +1,8 @@
 // DrawdownChart — 回撤面积图
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { cssVar } from "@/lib/cssVar";
+import { ensureECharts } from "@/lib/echartsInstance";
 import * as echarts from "echarts";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -15,17 +18,20 @@ interface DrawdownChartProps {
 
 export function DrawdownChart({ curve, height = 220 }: DrawdownChartProps) {
   const { t } = useTranslation();
+  const isDark = useIsDarkTheme();
   const chartRef = useRef<HTMLDivElement>(null);
   const instRef = useRef<echarts.ECharts | null>(null);
 
   useEffect(() => {
     if (!chartRef.current) { return; }
-    instRef.current = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
+    // 主题档变化必须重建实例：ECharts 的坐标轴文字 / 图例 / tooltip 底色取自 init 时的主题，
+    // setOption 只覆盖我们显式写的那些颜色，暗色下不给 "dark" 就是深字压深底。
+    instRef.current = ensureECharts(chartRef.current, isDark);
     return () => {
       instRef.current?.dispose();
       instRef.current = null;
     };
-  }, []);
+  }, [isDark]);
 
   useEffect(() => {
     if (!instRef.current || curve.length === 0) { return; }
@@ -50,7 +56,7 @@ export function DrawdownChart({ curve, height = 220 }: DrawdownChartProps) {
             type: "line",
             showSymbol: false,
             smooth: true,
-            lineStyle: { color: "#cf1322", width: 1.5 },
+            lineStyle: { color: cssVar("--red"), width: 1.5 },
             areaStyle: { color: "rgba(207, 19, 34, 0.18)" },
             data,
           },
@@ -58,7 +64,7 @@ export function DrawdownChart({ curve, height = 220 }: DrawdownChartProps) {
       },
       true,
     );
-  }, [curve, t]);
+  }, [curve, t, isDark]);
 
   useEffect(() => {
     const onResize = () => instRef.current?.resize();

@@ -156,7 +156,7 @@ export function ReportViewer({
           background: token.colorBgContainer,
           padding: "16px",
           borderRadius: "8px",
-          border: "1px solid #f0f0f0",
+          border: "1px solid var(--border-light)",
           maxHeight: "500px",
           overflow: "auto",
         }}

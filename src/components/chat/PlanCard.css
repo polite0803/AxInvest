@@ -4,7 +4,7 @@
 
 .plan-card:hover {
   box-shadow: 0 1px 3px
-    color-mix(in srgb, var(--ant-color-bg-mask, #000) 4%, transparent);
+    color-mix(in srgb, color-mix(in srgb, var(--fg) 45%, transparent) 4%, transparent);
 }
 
 .plan-step-item {
@@ -15,7 +15,7 @@
 }
 
 .plan-step-item:hover {
-  border-left-color: var(--ant-color-primary, #1677ff);
+  border-left-color: var(--accent);
 }
 
 .plan-step-dot {

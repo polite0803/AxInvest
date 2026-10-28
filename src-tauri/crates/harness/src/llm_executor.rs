@@ -621,8 +621,8 @@ impl Stream for ExecuteLlmStream {
                         },
                         // P0 修复(2026-08-29): 流式运行期 provider 错误补 tracing 日志 + 审计
                         // 此前直接透传，运行日志里完全搜不到网络中断 / chunk 解析失败的详细信息
-                        // 2026-09-10 降级：本地合成的「10s 响应头超时」是设计的快速失败
-                        // （openai.rs），切 fallback/重试是预期路径，按 ERROR 记录会造成
+                        // 2026-10-27 降级：本地合成的「响应头硬档超时」是设计的判挂路径
+                        // （providers::stream_budget），切 fallback/重试是预期路径，按 ERROR 记录会造成
                         // 「回退已兜住仍在刷 ERROR」的日志噪音（2026-09-09 实证），降为 WARN；
                         // 其余真实运行期错误维持 ERROR。
                         Poll::Ready(Some(Err(e))) => {

@@ -79,9 +79,9 @@ export function TradeStatsPanel() {
   if (!stats || stats.totalBuys === 0) { return null; }
 
   const profitFactorColor = (pf: number) => {
-    if (pf >= 2) { return "var(--sa-red)"; }
+    if (pf >= 2) { return "var(--red)"; }
     if (pf >= 1) { return "#fa8c16"; }
-    return "var(--sa-green)";
+    return "var(--green)";
   };
 
   return (
@@ -99,7 +99,7 @@ export function TradeStatsPanel() {
       <div className="grid grid-cols-4 gap-2 mb-2">
         <div className="text-xs p-1 rounded" style={{ background: "var(--surface)" }}>
           <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.tradeStats.totalPl")}</span>
-          <div style={{ color: stats.totalRealizedPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)", fontWeight: "bold" }}>
+          <div style={{ color: stats.totalRealizedPnl >= 0 ? "var(--red)" : "var(--green)", fontWeight: "bold" }}>
             {stats.totalRealizedPnl >= 0 ? "+" : ""}
             {stats.totalRealizedPnl.toFixed(0)}
           </div>
@@ -130,7 +130,7 @@ export function TradeStatsPanel() {
       {/* 税费 */}
       <div className="text-xs mb-2 p-1 rounded" style={{ background: "var(--surface)" }}>
         <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.tradeStats.feeEstimate")}</span>
-        <span style={{ color: "var(--sa-green)" }}>
+        <span style={{ color: "var(--green)" }}>
           {t("stockAnalysis.tradeStats.stampTax")} ¥{stats.totalStampTax.toFixed(0)}
         </span>
         <span className="mx-1" style={{ color: "var(--muted)" }}>|</span>
@@ -158,7 +158,7 @@ export function TradeStatsPanel() {
               <div key={h.label} className="text-xs p-1 rounded" style={{ background: "var(--surface)", minWidth: 60 }}>
                 <div>{h.label}</div>
                 <b>{t("stockAnalysis.tradeStats.tradeCountUnit", { count: h.count })}</b>
-                <div style={{ color: h.totalPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)", fontSize: 9 }}>
+                <div style={{ color: h.totalPnl >= 0 ? "var(--red)" : "var(--green)", fontSize: 9 }}>
                   {h.totalPnl >= 0 ? "+" : ""}
                   {h.totalPnl.toFixed(0)}
                 </div>
@@ -183,7 +183,7 @@ export function TradeStatsPanel() {
               >
                 <Tag style={{ fontSize: 9, lineHeight: "14px", margin: 0 }}>{s.strategy}</Tag>
                 <div>{t("stockAnalysis.tradeStats.tradeCountUnit", { count: s.tradeCount })}</div>
-                <div style={{ color: s.totalPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)", fontSize: 9 }}>
+                <div style={{ color: s.totalPnl >= 0 ? "var(--red)" : "var(--green)", fontSize: 9 }}>
                   {s.totalPnl >= 0 ? "+" : ""}
                   {s.totalPnl.toFixed(0)} ({s.winRate.toFixed(0)}%)
                 </div>
@@ -211,7 +211,7 @@ export function TradeStatsPanel() {
                 }}
               >
                 <div style={{ fontSize: 9, color: "var(--muted)" }}>{m.yearMonth.slice(5)}</div>
-                <div style={{ color: m.realizedPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)", fontWeight: "bold" }}>
+                <div style={{ color: m.realizedPnl >= 0 ? "var(--red)" : "var(--green)", fontWeight: "bold" }}>
                   {m.realizedPnl >= 0 ? "+" : ""}
                   {m.realizedPnl.toFixed(0)}
                 </div>

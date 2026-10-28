@@ -129,7 +129,7 @@ export function ToolRecommendationPanel() {
                         </div>
                         <div
                           style={{
-                            color: "var(--text-secondary, rgba(0,0,0,0.45))",
+                            color: "var(--fg-2)",
                             fontSize: 13,
                             marginTop: 2,
                           }}
@@ -166,7 +166,7 @@ export function ToolRecommendationPanel() {
                           </div>
                           <div
                             style={{
-                              color: "var(--text-secondary, rgba(0,0,0,0.45))",
+                              color: "var(--fg-2)",
                               fontSize: 13,
                               marginTop: 2,
                             }}
@@ -194,7 +194,7 @@ export function ToolRecommendationPanel() {
 
           {!recommendations && !isLoading && !error && (
             <div
-              style={{ textAlign: "center", padding: "40px", color: "#999" }}
+              style={{ textAlign: "center", padding: "40px", color: "var(--muted)" }}
             >
               <Paragraph>
                 Enter a task description and click "Get Recommendations" to see tool suggestions.

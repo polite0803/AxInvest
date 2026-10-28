@@ -50,7 +50,7 @@ export const FilePreviewView: React.FC<DynamicUIProps> = ({ schema }) => {
           className="flex flex-col items-center justify-center border rounded p-6 bg-gray-50 dark:bg-gray-800"
           style={schema.style as React.CSSProperties}
         >
-          <FileOutlined style={{ fontSize: 48, color: "#8c8c8c" }} />
+          <FileOutlined style={{ fontSize: 48, color: "var(--muted)" }} />
           <Text className="mt-2 mb-1 font-medium">
             {fileName || t("dynamicUI.unknownFile")}
           </Text>

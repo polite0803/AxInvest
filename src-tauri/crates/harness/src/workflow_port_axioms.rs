@@ -12,7 +12,7 @@
 //! | `Switch` | `source_handle` == `SwitchCase.label`（`None` = 默认分支） |
 //! | `Condition` | `source_handle` == `"true"` / `"false"`（`None` 时由 `edge_type` 兜底） |
 //!
-//! 这些约定**只写在注释与文档里** —— 例：`src/commands/stock_analysis_setup/seed_stock_analysis.rs:6819-6821`
+//! 这些约定**只写在注释与文档里** —— 例：`src/commands/stock_analysis_setup/seed_stock_analysis.rs:7418-7420`
 //! 用注释解释「case 命中 ⇒ 具名边；default ⇒ 无 handle 的边」。引擎侧没有任何校验
 //! （`commands/workflow_template.rs::validate_workflow_template` 只查了边的源/目标节点是否存在、
 //! 以及 `ParallelBranch` 是否源自 `Parallel` 节点）。
@@ -123,7 +123,7 @@ pub const HANDLE_DECLS: &[HandleDecl] = &[
         handle: "acceptable",
         kind: HandleKind::SemanticLabel,
         meaning: "语义分支：数据质量可接受（stock-analysis 的 quality-gate）",
-        evidence: "src/commands/stock_analysis_setup/seed_stock_analysis.rs:6101（quality-gate 节点定义；可接受分支的 case label 在其 branches 内，按内容找不按行号）",
+        evidence: "src/commands/stock_analysis_setup/seed_stock_analysis.rs:7290（quality-gate 节点定义；可接受分支的 case label 在其 branches 内，按内容找不按行号）",
     },
 ];
 

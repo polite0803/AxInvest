@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import { type NodePositionLike, toRelativePosition } from "@/lib/workflowLayout";
 import { getNodeSize } from "@/lib/workflowLayout";
 import type { ValidateIssue } from "@/lib/workflowLayout";
 import { useWorkflowEditorStore } from "@/stores";
 import { useAgentStore } from "@/stores/feature/agentStore";
 import { useExpertStore } from "@/stores/feature/expertStore";
+import { hueColor } from "@/theme/categoricalColors";
 import { type Edge, type Node } from "@xyflow/react";
 import { useMemo } from "react";
 import { type AgentNode as AgentNodeType, NODE_TYPE_MAP, type WorkflowEdge, type WorkflowNode } from "../types";
@@ -42,6 +44,7 @@ export function useFlowNodes(params: UseFlowNodesParams) {
   } = params;
 
   const expandedSubWorkflows = useWorkflowEditorStore((s) => s.expandedSubWorkflows);
+  const isDark = useIsDarkTheme();
   // 提取 only token 中实际用到的值，避免整个 token 对象作为 useMemo 依赖（引用随渲染变化）
   const fallbackColor = token.colorTextQuaternary;
 
@@ -203,7 +206,7 @@ export function useFlowNodes(params: UseFlowNodesParams) {
         data: {
           ...node,
           label: node.title,
-          color: typeInfo.color,
+          color: hueColor(typeInfo.hue, isDark),
           nodeType: node.type,
           ...(pid ? { parentId: pid } : {}),
           ...(nodeConfig?.kind ? { kind: nodeConfig.kind as string } : {}),
@@ -442,11 +445,11 @@ export function useFlowNodes(params: UseFlowNodesParams) {
       // 能把它们映射到父容器，外部边才能重写到折叠容器上；hidden 节点不会被渲染。
       for (const subNode of subGraph.nodes) {
         const existingIdx = flowNodeIndexMap.get(subNode.id);
-        const subTypeInfo = NODE_TYPE_MAP[subNode.type] || { color: fallbackColor };
+        const subTypeInfo = NODE_TYPE_MAP[subNode.type];
         const subData = {
           ...subNode,
           label: subNode.title,
-          color: subTypeInfo.color,
+          color: subTypeInfo ? hueColor(subTypeInfo.hue, isDark) : fallbackColor,
           nodeType: subNode.type,
           enabled: true,
         };
@@ -735,5 +738,6 @@ export function useFlowNodes(params: UseFlowNodesParams) {
     validationMsgMap,
     expandedSubWorkflows,
     fallbackColor,
+    isDark,
   ]);
 }

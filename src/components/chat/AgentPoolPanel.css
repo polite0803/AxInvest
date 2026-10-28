@@ -21,7 +21,7 @@
 .pool-summary__label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary, #8c8c8c);
+  color: var(--fg-2);
   white-space: nowrap;
 }
 
@@ -30,14 +30,14 @@
   min-width: 80px;
   height: 4px;
   border-radius: 2px;
-  background: var(--border-weak, #e8e8e8);
+  background: var(--border-light);
   overflow: hidden;
 }
 
 .pool-summary__fill {
   height: 100%;
   border-radius: 2px;
-  background: var(--ant-color-success, #52c41a);
+  background: var(--green);
   transition: width 0.4s ease;
 }
 
@@ -54,28 +54,28 @@
 }
 
 .pool-summary__count--running {
-  color: var(--ant-color-primary, #1890ff);
+  color: var(--accent);
   background: color-mix(
     in srgb,
-    var(--ant-color-primary, #1890ff) 10%,
+    var(--accent) 10%,
     transparent
   );
 }
 
 .pool-summary__count--pending {
-  color: var(--ant-color-text-tertiary, #8c8c8c);
+  color: var(--muted);
   background: color-mix(
     in srgb,
-    var(--ant-color-text-tertiary, #8c8c8c) 10%,
+    var(--muted) 10%,
     transparent
   );
 }
 
 .pool-summary__count--failed {
-  color: var(--ant-color-error, #ff4d4f);
+  color: var(--red);
   background: color-mix(
     in srgb,
-    var(--ant-color-error, #ff4d4f) 10%,
+    var(--red) 10%,
     transparent
   );
 }
@@ -91,8 +91,8 @@
 [data-component="agent-pool-item"] {
   padding: 10px 12px;
   border-radius: 6px;
-  border: 1px solid var(--border-weak, #e8e8e8);
-  background: color-mix(in srgb, var(--background-base, #fff) 95%, transparent);
+  border: 1px solid var(--border-light);
+  background: color-mix(in srgb, var(--bg) 95%, transparent);
   transition:
     background 0.2s,
     border-color 0.2s,
@@ -101,7 +101,7 @@
 }
 
 [data-component="agent-pool-item"]:hover {
-  background: color-mix(in srgb, var(--background-base, #fff) 90%, transparent);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
 }
 
 .pool-item--running {
@@ -113,7 +113,7 @@
 .pool-item--completed {
   border-color: color-mix(
     in srgb,
-    var(--ant-color-success, #52c41a) 20%,
+    var(--green) 20%,
     transparent
   );
 }
@@ -121,7 +121,7 @@
 .pool-item--failed {
   border-color: color-mix(
     in srgb,
-    var(--ant-color-error, #ff4d4f) 20%,
+    var(--red) 20%,
     transparent
   );
 }
@@ -130,11 +130,11 @@
   0%,
   100% {
     box-shadow: 0 0 0 0
-      color-mix(in srgb, var(--ant-color-primary, #1890ff) 12%, transparent);
+      color-mix(in srgb, var(--accent) 12%, transparent);
   }
   50% {
     box-shadow: 0 0 0 3px
-      color-mix(in srgb, var(--ant-color-primary, #1890ff) 4%, transparent);
+      color-mix(in srgb, var(--accent) 4%, transparent);
   }
 }
 
@@ -180,7 +180,7 @@
 
 .pool-item__desc {
   font-size: 12px;
-  color: var(--text-secondary, #8c8c8c);
+  color: var(--fg-2);
   line-height: 1.4;
   padding-left: 23px;
   margin-top: 2px;
@@ -194,7 +194,7 @@
 
 .pool-item__error {
   font-size: 11px;
-  color: var(--ant-color-error, #ff4d4f);
+  color: var(--red);
   padding-left: 23px;
   margin-top: 2px;
   display: flex;
@@ -209,7 +209,7 @@
   margin-top: 4px;
   height: 3px;
   border-radius: 2px;
-  background: var(--border-weak, #e8e8e8);
+  background: var(--border-light);
   overflow: hidden;
 }
 
@@ -227,14 +227,14 @@
   padding-left: 23px;
   margin-top: 3px;
   font-size: 11px;
-  color: var(--text-tertiary, #bfbfbf);
+  color: var(--muted);
 }
 
 /* 子会话跳转 */
 
 .pool-item__action {
   font-size: 11px;
-  color: var(--text-tertiary, #bfbfbf);
+  color: var(--muted);
   padding-left: 23px;
   margin-top: 4px;
   display: flex;
@@ -260,7 +260,7 @@
   border: none;
   padding: 2px 0;
   font-size: 11px;
-  color: var(--text-tertiary, #bfbfbf);
+  color: var(--muted);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -268,7 +268,7 @@
 }
 
 .worker-msg-log__toggle:hover {
-  color: var(--text-secondary, #8c8c8c);
+  color: var(--fg-2);
 }
 
 .worker-msg-log__list {
@@ -290,29 +290,29 @@
 }
 
 .worker-msg-log__entry--progress {
-  color: var(--ant-color-primary, #1890ff);
+  color: var(--accent);
   background: color-mix(
     in srgb,
-    var(--ant-color-primary, #1890ff) 6%,
+    var(--accent) 6%,
     transparent
   );
 }
 
 .worker-msg-log__entry--result,
 .worker-msg-log__entry--completion {
-  color: var(--ant-color-success, #52c41a);
+  color: var(--green);
   background: color-mix(
     in srgb,
-    var(--ant-color-success, #52c41a) 6%,
+    var(--green) 6%,
     transparent
   );
 }
 
 .worker-msg-log__entry--error {
-  color: var(--ant-color-error, #ff4d4f);
+  color: var(--red);
   background: color-mix(
     in srgb,
-    var(--ant-color-error, #ff4d4f) 6%,
+    var(--red) 6%,
     transparent
   );
 }
@@ -333,6 +333,6 @@
 
 .worker-msg-log__time {
   font-size: 10px;
-  color: var(--text-tertiary, #bfbfbf);
+  color: var(--muted);
   white-space: nowrap;
 }

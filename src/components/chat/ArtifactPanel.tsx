@@ -92,7 +92,7 @@ export function ArtifactPanel({
   if (!artifact) {
     return (
       <Card size="small">
-        <div style={{ textAlign: "center", padding: "40px 0", color: "#999" }}>
+        <div style={{ textAlign: "center", padding: "40px 0", color: "var(--muted)" }}>
           {t("artifactPanel.noArtifactSelected")}
         </div>
       </Card>
@@ -111,8 +111,8 @@ export function ArtifactPanel({
       title={
         <Space>
           <span>{artifact.title || t("artifactPanel.untitled")}</span>
-          <span style={{ fontSize: 12, color: "#999" }}>{artifact.kind}</span>
-          <span style={{ fontSize: 12, color: "#999" }}>{artifact.format}</span>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>{artifact.kind}</span>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>{artifact.format}</span>
         </Space>
       }
       extra={
@@ -189,9 +189,9 @@ export function ArtifactPanel({
               style={{
                 width: "50%",
                 overflow: "auto",
-                borderRight: "1px solid #f0f0f0",
+                borderRight: "1px solid var(--border-light)",
                 padding: 16,
-                background: "#fafafa",
+                background: "var(--surface)",
               }}
             >
               <pre
@@ -215,7 +215,7 @@ export function ArtifactPanel({
                 )
                 : (
                   <div
-                    style={{ padding: 16, textAlign: "center", color: "#999" }}
+                    style={{ padding: 16, textAlign: "center", color: "var(--muted)" }}
                   >
                     {t("artifactPanel.previewNotAvailable")}
                   </div>

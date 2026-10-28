@@ -257,7 +257,7 @@ export function PlanHistoryPanel({ conversationId }: PlanHistoryPanelProps) {
                                     width: 10,
                                     height: 10,
                                     borderRadius: "50%",
-                                    border: "1px solid #d9d9d9",
+                                    border: "1px solid var(--border-light)",
                                     display: "inline-block",
                                   }}
                                 />

@@ -1412,6 +1412,7 @@ mod tests {
 
     fn make_llm_ctx() -> ProviderRequestContext {
         ProviderRequestContext {
+            header_timeout_secs: None,
             api_key: "test".to_string(),
             key_id: "test".to_string(),
             provider_id: "test".to_string(),

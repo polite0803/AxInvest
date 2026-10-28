@@ -34,13 +34,13 @@ export function CredibilityBadge({
           ? (
             <StarFilled
               key={i}
-              style={{ color: "#faad14", fontSize: size === "small" ? 12 : 14 }}
+              style={{ color: "var(--amber)", fontSize: size === "small" ? 12 : 14 }}
             />
           )
           : (
             <StarOutlined
               key={i}
-              style={{ color: "#d9d9d9", fontSize: size === "small" ? 12 : 14 }}
+              style={{ color: "var(--muted)", fontSize: size === "small" ? 12 : 14 }}
             />
           ),
       );

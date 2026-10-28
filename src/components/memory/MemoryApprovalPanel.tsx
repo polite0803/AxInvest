@@ -72,7 +72,7 @@ export function MemoryApprovalPanel() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <b>{t("skillLearning.memApprovalTitle")}</b>
         <Space>
-          <span style={{ fontSize: 12, color: "var(--color-text-tertiary)" }}>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>
             {t("skillLearning.memApprovalGate")}
           </span>
           <Switch checked={config?.enabled ?? false} onChange={toggleGate} />
@@ -86,13 +86,13 @@ export function MemoryApprovalPanel() {
             {pending.map((item) => (
               <div
                 key={item.id}
-                style={{ border: "1px solid var(--color-border-secondary)", borderRadius: 8, padding: 10 }}
+                style={{ border: "1px solid var(--border-light)", borderRadius: 8, padding: 10 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                   <Tag color="purple">{item.namespace ?? "memory"}</Tag>
                   <span style={{ flex: 1 }} />
                   <Tooltip title={item.reason}>
-                    <span style={{ fontSize: 12, color: "var(--color-text-tertiary)" }}>{item.id}</span>
+                    <span style={{ fontSize: 12, color: "var(--muted)" }}>{item.id}</span>
                   </Tooltip>
                 </div>
                 <div

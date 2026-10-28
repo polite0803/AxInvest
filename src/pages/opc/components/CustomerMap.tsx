@@ -2,6 +2,10 @@
 
 // CustomerMap — 客户地理分布地图（ECharts geo 散点打点，中国 / 世界可切换）
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { cssVar } from "@/lib/cssVar";
+import { ensureECharts } from "@/lib/echartsInstance";
+import { hueColor } from "@/theme/categoricalColors";
 import * as echarts from "echarts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -24,6 +28,7 @@ interface CustomerMapProps {
 
 export function CustomerMap({ customers, height = 420 }: CustomerMapProps) {
   const { t } = useTranslation();
+  const isDark = useIsDarkTheme();
   const [scope, setScope] = useState<Scope>("china");
   const chartRef = useRef<HTMLDivElement>(null);
   const instRef = useRef<echarts.ECharts | null>(null);
@@ -43,12 +48,12 @@ export function CustomerMap({ customers, height = 420 }: CustomerMapProps) {
 
   useEffect(() => {
     if (!chartRef.current) { return; }
-    instRef.current = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
+    instRef.current = ensureECharts(chartRef.current, isDark);
     return () => {
       instRef.current?.dispose();
       instRef.current = null;
     };
-  }, []);
+  }, [isDark]);
 
   useEffect(() => {
     if (!instRef.current) { return; }
@@ -84,10 +89,11 @@ export function CustomerMap({ customers, height = 420 }: CustomerMapProps) {
               map: scope,
               roam: true,
               itemStyle: {
-                areaColor: "#eef2f7",
-                borderColor: "#b8c4d2",
+                // 地图底色是「面板的第二档表面」而不是某个浅灰：暗档下它必须跟着变深
+                areaColor: cssVar("--surface-2"),
+                borderColor: cssVar("--border"),
               },
-              emphasis: { label: { show: false }, itemStyle: { areaColor: "#dbe6f1" } },
+              emphasis: { label: { show: false }, itemStyle: { areaColor: cssVar("--border") } },
             },
             series: [
               {
@@ -99,7 +105,7 @@ export function CustomerMap({ customers, height = 420 }: CustomerMapProps) {
                   // 按客户类型着色：business 紫 / consumer 青
                   color: (params: unknown) => {
                     const p2 = params as { data: { type?: string } };
-                    return p2.data?.type === "business" ? "#722ed1" : "#13c2c2";
+                    return p2.data?.type === "business" ? hueColor("purple", isDark) : hueColor("cyan", isDark);
                   },
                 },
                 label: {
@@ -107,7 +113,7 @@ export function CustomerMap({ customers, height = 420 }: CustomerMapProps) {
                   formatter: "{b}",
                   position: "right",
                   fontSize: 10,
-                  color: "#333",
+                  color: cssVar("--fg"),
                 },
                 data: points.map((p) => ({ name: p.name, type: p.type, value: p.value })),
               },
@@ -123,7 +129,7 @@ export function CustomerMap({ customers, height = 420 }: CustomerMapProps) {
     return () => {
       cancelled = true;
     };
-  }, [scope, points, t]);
+  }, [scope, points, t, isDark]);
 
   useEffect(() => {
     const onResize = () => instRef.current?.resize();

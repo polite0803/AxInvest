@@ -4,6 +4,7 @@
 // 布局持久化 / 配色 / 节点尺寸 / 颜色工具，降低主文件体积）。
 // 仅 import 类型（type-only），运行时与 GraphView.tsx 无相互依赖。
 
+import { type CategoricalHue, hueColor } from "@/theme/categoricalColors";
 import { theme } from "antd";
 import type { PhysicsNode } from "./graphPhysics";
 import type { GraphEdgeType, GraphNode, GraphNodeType } from "./GraphView";
@@ -291,11 +292,26 @@ export function hashStringToInt(str: string): number {
   return hash;
 }
 
-export const getNodeColorMap = (token: TokenType): Record<GraphNodeType, string> => ({
-  note: token.colorPrimary,
-  concept: token.colorSuccess,
-  entity: "#FA8C16",
-  source: "#EB2F96",
+/**
+ * 前端有配色的节点类型 → 类目色相。
+ *
+ * 走类目色板而不是 antd 语义 token 的理由：这四类要在**同一张画布上彼此可分辨**，
+ * 而 `colorPrimary` 随主题预设变化 —— 某个预设的主色可能等于 `colorSuccess`，
+ * `note` 与 `concept` 就撞色了。类目色板的亮/暗两档按色相分档，互异性由
+ * `HUE_COLORS` 保证（判据见 `src/theme/__tests__/categoricalColors.test.ts`）。
+ */
+export const NODE_KIND_HUE: Record<GraphNodeType, CategoricalHue> = {
+  note: "blue",
+  concept: "green",
+  entity: "orange",
+  source: "pink",
+};
+
+export const getNodeColorMap = (isDark: boolean): Record<GraphNodeType, string> => ({
+  note: hueColor(NODE_KIND_HUE.note, isDark),
+  concept: hueColor(NODE_KIND_HUE.concept, isDark),
+  entity: hueColor(NODE_KIND_HUE.entity, isDark),
+  source: hueColor(NODE_KIND_HUE.source, isDark),
 });
 
 // ── 布局持久化：localStorage 存储节点坐标 ──
@@ -467,15 +483,13 @@ export const edgeTypeLabels: Record<GraphEdgeType, string> = {
 export function buildNodeColorCache(
   nodes: GraphNode[],
   communities?: Map<string, number>,
-  token?: TokenType,
+  isDark = false,
 ): Map<string, string> {
   const cache = new Map<string, string>();
-  const typeMap = token ? getNodeColorMap(token) : {
-    note: "#1890ff",
-    concept: "#52c41a",
-    entity: "#fa8c16",
-    source: "#eb2f96",
-  };
+  // 单一来源：无社区分色时也只能走 getNodeColorMap。此前这里另写了一份 antd 早期
+  // 字面量色表（`#1890ff` / `#52c41a` …），与主题档完全脱钩 ⇒ 同一节点在「传 token」
+  // 与「不传 token」两条路径下颜色不同。
+  const typeMap = getNodeColorMap(isDark);
   for (const node of nodes) {
     if (communities && communities.has(node.id)) {
       const cid = communities.get(node.id)!;

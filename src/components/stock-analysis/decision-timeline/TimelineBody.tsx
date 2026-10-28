@@ -33,11 +33,11 @@ export function PhaseSection({ phase, nodes }: PhaseSectionProps) {
   const running = nodes.filter((n) => n.status === "running").length;
 
   const statusColor = failed > 0
-    ? "var(--sa-red)"
+    ? "var(--red)"
     : running > 0
     ? "var(--accent)"
     : done === total && total > 0
-    ? "var(--sa-green)"
+    ? "var(--green)"
     : "var(--muted)";
 
   return (
@@ -68,7 +68,7 @@ export function PhaseSection({ phase, nodes }: PhaseSectionProps) {
         <span>{t(PHASE_TKEY[phase])}</span>
         <span style={{ color: "var(--muted)", fontWeight: 400 }}>
           {done}/{total}
-          {failed > 0 && <span style={{ color: "var(--sa-red)" }}>· {failed} failed</span>}
+          {failed > 0 && <span style={{ color: "var(--red)" }}>· {failed} failed</span>}
         </span>
       </button>
 

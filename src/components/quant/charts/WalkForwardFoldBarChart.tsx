@@ -8,6 +8,10 @@
 // - 0.3 阈值线：低于则视为过拟合
 // - tooltip：fold 区间 + 关键指标
 
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { cssVar } from "@/lib/cssVar";
+import { ensureECharts } from "@/lib/echartsInstance";
+import { hueColor } from "@/theme/categoricalColors";
 import * as echarts from "echarts";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -21,17 +25,20 @@ interface WalkForwardFoldBarChartProps {
 
 export function WalkForwardFoldBarChart({ windows, height = 280 }: WalkForwardFoldBarChartProps) {
   const { t } = useTranslation();
+  const isDark = useIsDarkTheme();
   const chartRef = useRef<HTMLDivElement>(null);
   const instRef = useRef<echarts.ECharts | null>(null);
 
+  // 主题档变化必须重建实例：ECharts 的坐标轴文字 / 图例 / tooltip 底色取自 init 时的
+  // 主题，setOption 只覆盖我们显式写的那些颜色，暗色下不给 "dark" 就是深字压深底。
   useEffect(() => {
     if (!chartRef.current) { return; }
-    instRef.current = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
+    instRef.current = ensureECharts(chartRef.current, isDark);
     return () => {
       instRef.current?.dispose();
       instRef.current = null;
     };
-  }, []);
+  }, [isDark]);
 
   useEffect(() => {
     if (!instRef.current || windows.length === 0) { return; }
@@ -40,7 +47,8 @@ export function WalkForwardFoldBarChart({ windows, height = 280 }: WalkForwardFo
     const trainSharpe = windows.map((w) => parseFloat(w.trainMetrics.sharpe.toFixed(3)));
     const testSharpe = windows.map((w) => parseFloat(w.testMetrics.sharpe.toFixed(3)));
     // test_bar 颜色：过拟合 fold 红色，否则绿色
-    const testColors = windows.map((w) => (w.overfitFlag ? "#cf1322" : "#52c41a"));
+    // 过拟合标红 / 正常标绿走语义 token；训练柱与退化率折线走类目色板（两柱并排必须可辨）
+    const testColors = windows.map((w) => (w.overfitFlag ? cssVar("--red") : cssVar("--green")));
     const degradation = windows.map((w) => parseFloat(w.degradationRatio.toFixed(3)));
 
     instRef.current.setOption(
@@ -54,7 +62,7 @@ export function WalkForwardFoldBarChart({ windows, height = 280 }: WalkForwardFo
             const f = w.fold;
             return [
               `<b>Fold ${f.foldIndex}</b> ${
-                w.overfitFlag ? `<span style='color:#cf1322'>(${t("quant.metrics.overfit")})</span>` : ""
+                w.overfitFlag ? `<span style='color:var(--red)'>(${t("quant.metrics.overfit")})</span>` : ""
               }`,
               `IS: ${f.trainStart} → ${f.trainEnd} (${t("quant.backtest.barsCount", { count: f.trainBarsCount })})`,
               `OOS: ${f.testStart} → ${f.testEnd} (${t("quant.backtest.barsCount", { count: f.testBarsCount })})`,
@@ -79,7 +87,7 @@ export function WalkForwardFoldBarChart({ windows, height = 280 }: WalkForwardFo
           {
             type: "value",
             name: "Sharpe",
-            splitLine: { lineStyle: { color: "rgba(0,0,0,0.05)" } },
+            splitLine: { lineStyle: { color: cssVar("--border") } },
           },
           {
             type: "value",
@@ -96,7 +104,7 @@ export function WalkForwardFoldBarChart({ windows, height = 280 }: WalkForwardFo
             name: "Train Sharpe",
             type: "bar",
             data: trainSharpe,
-            itemStyle: { color: "#1677ff" },
+            itemStyle: { color: hueColor("blue", isDark) },
             barGap: 0,
           },
           {
@@ -111,13 +119,13 @@ export function WalkForwardFoldBarChart({ windows, height = 280 }: WalkForwardFo
             smooth: false,
             showSymbol: true,
             symbolSize: 6,
-            lineStyle: { width: 1.5, color: "#fa8c16", type: "dashed" },
-            itemStyle: { color: "#fa8c16" },
+            lineStyle: { width: 1.5, color: hueColor("orange", isDark), type: "dashed" },
+            itemStyle: { color: hueColor("orange", isDark) },
             data: degradation,
             markLine: {
               silent: true,
               symbol: "none",
-              lineStyle: { color: "#cf1322", type: "dotted", width: 1 },
+              lineStyle: { color: cssVar("--red"), type: "dotted", width: 1 },
               data: [{
                 yAxis: 0.3,
                 label: { formatter: `${t("quant.metrics.overfit")} ${t("quant.chart.threshold", { value: "0.3" })}` },
@@ -128,7 +136,7 @@ export function WalkForwardFoldBarChart({ windows, height = 280 }: WalkForwardFo
       },
       true,
     );
-  }, [windows, t]);
+  }, [windows, t, isDark]);
 
   useEffect(() => {
     const onResize = () => instRef.current?.resize();

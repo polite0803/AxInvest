@@ -163,38 +163,7 @@ export function StockWorkspaceShell() {
     }
   };
 
-  // ── 桌面端视图切换器 ──
-  const desktopTabBar = (
-    <div
-      className="flex items-center gap-1 px-3 py-1.5"
-      style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}
-    >
-      {DESKTOP_TABS.map((tab) => {
-        const isActive = currentView === tab.key;
-        return (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => {
-              setCurrentView(tab.key);
-              // 同步 URL（避免 URL→store effect 反向覆盖）
-              const next = new URLSearchParams(searchParams);
-              next.set("view", tab.key);
-              setSearchParams(next, { replace: true });
-            }}
-            className="flex items-center gap-1.5 px-3 py-1 rounded text-sm transition-colors"
-            style={{
-              background: isActive ? "var(--accent)" : "transparent",
-              color: isActive ? "var(--accent-fg)" : "var(--muted)",
-            }}
-          >
-            {tab.icon}
-            {t(`workspace.view.${tab.key}`)}
-          </button>
-        );
-      })}
-    </div>
-  );
+  // ── 桌面端视图切换已合并进 Header（2026-10-28），不再单独占一行 ──
 
   // ── 移动端布局 ──
   if (isMobile) {
@@ -238,21 +207,21 @@ export function StockWorkspaceShell() {
   // ── 桌面端/平板布局 ──
   return (
     <div className="ax-stock-workspace flex flex-col h-full min-h-0" style={{ overflow: "hidden" }}>
-      {/* 顶部 Header */}
+      {/* 顶部 Header：返回 + 股票 + 视图切换 + 模式，2026-10-28 合并原先独立的 Tab 行 */}
       <div
-        className="flex items-center gap-3 px-3 py-2"
-        style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}
+        className="flex items-center gap-2 px-3 py-2"
+        style={{ borderBottom: "1px solid var(--border)", flexShrink: 0, minWidth: 0 }}
       >
         <button
           type="button"
           onClick={() => navigate("/")}
-          className="flex items-center gap-1 p-1 rounded hover:opacity-70"
+          className="flex items-center gap-1 p-1 rounded hover:opacity-70 shrink-0"
         >
           <ArrowLeft size={16} />
           <span className="text-sm">{t("nav.chat")}</span>
         </button>
-        <span className="text-sm" style={{ color: "var(--muted)" }}>|</span>
-        <h2 className="text-sm font-semibold flex-1">
+        <span className="text-sm shrink-0" style={{ color: "var(--muted)" }}>|</span>
+        <h2 className="text-sm font-semibold shrink-0 max-w-56 truncate">
           {t("workspace.title")}
           {headerStockLabel && (
             <span className="ml-2" style={{ color: "var(--muted)" }}>
@@ -260,6 +229,35 @@ export function StockWorkspaceShell() {
             </span>
           )}
         </h2>
+        <div
+          className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto"
+          style={{ scrollbarWidth: "none" }}
+        >
+          {DESKTOP_TABS.map((tab) => {
+            const isActive = currentView === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => {
+                  setCurrentView(tab.key);
+                  // 同步 URL（避免 URL→store effect 反向覆盖）
+                  const next = new URLSearchParams(searchParams);
+                  next.set("view", tab.key);
+                  setSearchParams(next, { replace: true });
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-sm transition-colors shrink-0"
+                style={{
+                  background: isActive ? "var(--accent)" : "transparent",
+                  color: isActive ? "var(--accent-fg)" : "var(--muted)",
+                }}
+              >
+                {tab.icon}
+                {t(`workspace.view.${tab.key}`)}
+              </button>
+            );
+          })}
+        </div>
         <UserModeToggle />
       </div>
 
@@ -275,7 +273,6 @@ export function StockWorkspaceShell() {
 
         {/* 中栏：视图区 */}
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          {desktopTabBar}
           {/* 视图容器：单视图在大内容时竖向滚动（唯一滚动入口） */}
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
             {renderView()}

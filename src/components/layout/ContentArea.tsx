@@ -8,18 +8,21 @@ import { useIpcHealth } from "@/hooks/useIpcHealth";
 import { DEVTOOLS_SUB_PARAM, DEVTOOLS_SUB_PATHS, DEVTOOLS_SUBS, type DevToolsSub } from "@/lib/devtoolsSubTabs";
 import { CAPABILITY_DOMAIN_META } from "@/lib/domainMeta";
 import { BUILTIN_PAGE_PATH, DEFAULT_HOME } from "@/lib/pageRegistry";
-import { buildWorkspaceTabSearch, WORKSPACE_TAB_PARAM, type WorkspaceTab } from "@/lib/workspaceTabs";
+import { workspaceTabPath } from "@/lib/workspaceTabs";
 
 import { Button, Result, Spin } from "antd";
 import { lazy, memo, Suspense } from "react";
 import { useTranslation } from "react-i18next";
-import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 // ── 页面 lazy 导入 ──
 const LazyWorkspaceHub = lazy(() =>
   import("@/components/layout/WorkspaceHub").then((m) => ({ default: m.WorkspaceHub }))
 );
 const LazyMemoryPage = lazy(() => import("@/pages/MemoryPage").then((m) => ({ default: m.MemoryPage })));
+const LazyKnowledgeHubPage = lazy(() =>
+  import("@/pages/KnowledgeHubPage").then((m) => ({ default: m.KnowledgeHubPage }))
+);
 const LazyGatewayLinkPage = lazy(() =>
   import("@/pages/GatewayLinkPage").then((m) => ({
     default: m.GatewayLinkPage,
@@ -175,10 +178,7 @@ function NotFoundRoute() {
  * 落到 router 的 location.state，导致引擎回落到 store 持久化的上一个 Tab
  * （实测 14 个 /knowledge Chromium E2E 全量超时，App 本身可渲染）。直接写出
  * `?ws=` 后，WorkspaceHub 经 parseWorkspaceTab 首帧即命中，可深链、可刷新恢复。 */
-function redirectToChat(tab: WorkspaceTab) {
-  const search = buildWorkspaceTabSearch(window.location.search, tab);
-  return <Navigate to={{ pathname: BUILTIN_PAGE_PATH.chat, search }} replace />;
-}
+/** 2026-10-28：`redirectToChat` 已删除（`/knowledge` 改为独立域，其余旧链均已移除）。 */
 
 /** 开发工具旧子路由 → `/chat?ws=devtools&sub=<子页>`。
  *
@@ -188,51 +188,16 @@ function redirectToChat(tab: WorkspaceTab) {
  * 由 DevToolsPage 回落到默认子页。 */
 function redirectToDevTools(sub?: DevToolsSub) {
   const params = new URLSearchParams();
-  params.set(WORKSPACE_TAB_PARAM, "devtools");
   if (sub) {
     params.set(DEVTOOLS_SUB_PARAM, sub);
   }
-  return <Navigate to={{ pathname: BUILTIN_PAGE_PATH.chat, search: params.toString() }} replace />;
+  return <Navigate to={{ pathname: workspaceTabPath("devtools"), search: params.toString() }} replace />;
 }
 
-/** 重定向到 /chat 并保留当前 URL 的查询参数（如 template=xxx）、同时写入 `ws=<tab>`。
- * 用于 /workflow/new?template=xxx 等需要透传查询参数的场景。
- * 与 redirectToChat 一致走 URL 查询形式（不走 location.state，见其上注释）。
- * 必须是真正的组件，因为 useLocation 只能在组件渲染时调用，
- * 而路由的 element 属性在路由定义时就被求值。 */
-function RedirectToChatWithParams({ tab }: { tab: string }) {
-  const location = useLocation();
-  const search = buildWorkspaceTabSearch(location.search, tab as WorkspaceTab);
-  return <Navigate to={{ pathname: BUILTIN_PAGE_PATH.chat, search }} replace />;
-}
+/** 2026-10-28：`/workflow/new` 旧链已删除，`RedirectToChatWithParams` 随之移除。 */
 
-/** 旧股票业务路由 → 投资中心 /invest?tab=…。
- * 分析/交易/回测等独立页已内嵌进 StockWorkspaceShell 或 InvestHub Tab，
- * 旧路由已移除，但全项目仍有大量调用方（历史记录按钮 / 复盘面板 / 行情表格 /
- * 时间旅行工作台等）在跳旧地址，不重定向会落入 * 通配路由报 404。
- * 参数映射（query 全量保留）：
- *   - code → stockCode（工作区切换器同步选中该股票）
- *   - from="id"：/stock-analysis/:id 的 :id → analysisId + view=analysis
- *     （与 StockAnalysisPage 既有的工作区入口参数约定一致）
- *   - from="stockCode"：/workspace/:stockCode 的 :stockCode → stockCode */
-function RedirectToInvest({ tab, view, from }: { tab: string; view?: string; from?: "id" | "stockCode" }) {
-  const location = useLocation();
-  const params = useParams<{ id?: string; stockCode?: string }>();
-  const qs = new URLSearchParams(location.search);
-  const code = (from === "stockCode" ? params.stockCode : undefined) ?? qs.get("code");
-  if (code && !qs.get("stockCode")) {
-    qs.set("stockCode", code);
-  }
-  if (from === "id" && params.id) {
-    qs.set("view", "analysis");
-    qs.set("analysisId", params.id);
-  }
-  if (view) {
-    qs.set("view", view);
-  }
-  qs.set("tab", tab);
-  return <Navigate to={`/invest?${qs.toString()}`} replace />;
-}
+/** 2026-10-28：股票旧业务路由（`/stock-analysis`、`/trade`、`/watchlist` 等）已删除，
+ * 组件内的 `backTo` / `navigate` 已统一改为 `/invest`。 */
 
 export const ContentArea = memo(function ContentArea() {
   const { ipcHealthy } = useIpcHealth();
@@ -247,16 +212,21 @@ export const ContentArea = memo(function ContentArea() {
         <Routes>
           <Route path="/" element={<Navigate to={DEFAULT_HOME} replace />} />
 
-          {/* ── 能力域聚合入口（8 个业务域） ── */}
+          {/* ── 能力域聚合页：2026-10-28 并入 OPC，统一由 /opc/domains/:domainId 承载 ── */}
+          <Route
+            path="/opc/domains/:domainId"
+            element={
+              <PageContextProvider page="automation-operations">
+                <SafeLazyPage Page={LazyDomainHubPage} />
+              </PageContextProvider>
+            }
+          />
+          {/* 旧顶级域路径 → 新路径（保留一个版本） */}
           {CAPABILITY_DOMAIN_META.map((domain) => (
             <Route
               key={domain.id}
               path={domain.path}
-              element={
-                <PageContextProvider page={domain.id}>
-                  <SafeLazyPage Page={LazyDomainHubPage} />
-                </PageContextProvider>
-              }
+              element={<Navigate to={`/opc/domains/${domain.id}`} replace />}
             />
           ))}
 
@@ -269,14 +239,65 @@ export const ContentArea = memo(function ContentArea() {
               </PageContextProvider>
             }
           />
-          <Route path={BUILTIN_PAGE_PATH.dashboard} element={redirectToChat("dashboard")} />
-          <Route path={BUILTIN_PAGE_PATH.workflow} element={redirectToChat("workflow")} />
-          <Route path={`${BUILTIN_PAGE_PATH.workflow}/new`} element={<RedirectToChatWithParams tab="workflow" />} />
-          <Route path={BUILTIN_PAGE_PATH.terminal} element={redirectToChat("terminal")} />
-          <Route path={BUILTIN_PAGE_PATH.files} element={redirectToChat("files")} />
-          <Route path={BUILTIN_PAGE_PATH.knowledge} element={redirectToChat("knowledge")} />
-          <Route path={BUILTIN_PAGE_PATH.multiAgent} element={redirectToChat("multiAgent")} />
-          <Route path={BUILTIN_PAGE_PATH.marketplace} element={redirectToChat("workflow")} />
+          {/* 工作台 Tab 的路径段（2026-10-28 起 URL 契约：/chat/<tab>） */}
+          <Route
+            path={`${BUILTIN_PAGE_PATH.chat}/:tab`}
+            element={
+              <PageContextProvider page="chat">
+                <SafeLazyPage Page={LazyWorkspaceHub} />
+              </PageContextProvider>
+            }
+          />
+          {/* 独立于工作台 Tab 的 chat 子页：静态段优先于上面的 :tab */}
+          <Route
+            path={`${BUILTIN_PAGE_PATH.chat}/quickbar`}
+            element={
+              <PageContextProvider page="chat">
+                <SafeLazyPage Page={LazyQuickBarPage} />
+              </PageContextProvider>
+            }
+          />
+          <Route
+            path={`${BUILTIN_PAGE_PATH.chat}/marketplace`}
+            element={<Navigate to={workspaceTabPath("workflow")} replace />}
+          />
+          {
+            /* 2026-10-28：chat 类旧路由（/dashboard、/workflow、/terminal、/files、
+              /multi-agent、/marketplace）已删除，统一走 /chat/<tab>。 */
+          }
+          {/* Knowledge 域：2026-10-28 起为独立域，不再重定向到 chat */}
+          <Route
+            path={BUILTIN_PAGE_PATH.knowledge}
+            element={
+              <PageContextProvider page="knowledge">
+                <SafeLazyPage Page={LazyKnowledgeHubPage} />
+              </PageContextProvider>
+            }
+          />
+          <Route
+            path={`${BUILTIN_PAGE_PATH.knowledge}/memory`}
+            element={
+              <PageContextProvider page="knowledge">
+                <SafeLazyPage Page={LazyMemoryPage} />
+              </PageContextProvider>
+            }
+          />
+          <Route
+            path={`${BUILTIN_PAGE_PATH.knowledge}/wiki`}
+            element={
+              <PageContextProvider page="knowledge">
+                <SafeLazyPage Page={LazyKnowledgeHubPage} />
+              </PageContextProvider>
+            }
+          />
+          <Route
+            path={`${BUILTIN_PAGE_PATH.knowledge}/learning`}
+            element={
+              <PageContextProvider page="knowledge">
+                <SafeLazyPage Page={LazyLearningGraphPage} />
+              </PageContextProvider>
+            }
+          />
           <Route
             path={BUILTIN_PAGE_PATH["finance-investment"]}
             element={
@@ -285,14 +306,16 @@ export const ContentArea = memo(function ContentArea() {
               </PageContextProvider>
             }
           />
+          {/* 回放工作台：2026-10-28 起归入投资域，旧 /replay-workbench 302 */}
           <Route
-            path={BUILTIN_PAGE_PATH["replay-workbench"]}
+            path={`${BUILTIN_PAGE_PATH["finance-investment"]}/replay`}
             element={
-              <PageContextProvider page="replay-workbench">
+              <PageContextProvider page="finance-investment">
                 <SafeLazyPage Page={LazyReplayWorkbenchPage} />
               </PageContextProvider>
             }
           />
+          {/* 2026-10-28：/replay-workbench 旧链已删除，统一走 /invest/replay。 */}
           <Route
             path={BUILTIN_PAGE_PATH["tasks-center"]}
             element={
@@ -339,14 +362,7 @@ export const ContentArea = memo(function ContentArea() {
               </PageContextProvider>
             }
           />
-          <Route
-            path={BUILTIN_PAGE_PATH.memory}
-            element={
-              <PageContextProvider page="memory">
-                <SafeLazyPage Page={LazyMemoryPage} />
-              </PageContextProvider>
-            }
-          />
+          <Route path={BUILTIN_PAGE_PATH.memory} element={<Navigate to="/knowledge/memory" replace />} />
           <Route
             path={BUILTIN_PAGE_PATH.link}
             element={
@@ -371,7 +387,7 @@ export const ContentArea = memo(function ContentArea() {
               </PageContextProvider>
             }
           />
-          <Route path={BUILTIN_PAGE_PATH.llmWiki} element={redirectToChat("knowledge")} />
+          <Route path={BUILTIN_PAGE_PATH.llmWiki} element={<Navigate to="/knowledge/wiki" replace />} />
           <Route
             path={`${BUILTIN_PAGE_PATH.llmWiki}/:wikiId/graph`}
             element={
@@ -396,14 +412,7 @@ export const ContentArea = memo(function ContentArea() {
               </PageContextProvider>
             }
           />
-          <Route
-            path={BUILTIN_PAGE_PATH.quickbar}
-            element={
-              <PageContextProvider page="quickbar">
-                <SafeLazyPage Page={LazyQuickBarPage} />
-              </PageContextProvider>
-            }
-          />
+          {/* 2026-10-28：/quickbar 旧链已删除，统一走 /chat/quickbar。 */}
           <Route
             path={`${BUILTIN_PAGE_PATH["dynamic-ui"]}/:schemaId`}
             element={
@@ -428,25 +437,10 @@ export const ContentArea = memo(function ContentArea() {
           ))}
 
           {/* 学习图 */}
-          <Route
-            path={BUILTIN_PAGE_PATH.learningGraph}
-            element={
-              <PageContextProvider page="learning-graph">
-                <SafeLazyPage Page={LazyLearningGraphPage} />
-              </PageContextProvider>
-            }
-          />
+          <Route path={BUILTIN_PAGE_PATH.learningGraph} element={<Navigate to="/knowledge/learning" replace />} />
 
           {/* 旧股票业务路由 → 投资中心（历史记录/复盘/行情表格/时间旅行等调用方仍指向旧地址） */}
-          <Route path="/stock-analysis" element={<RedirectToInvest tab="workspace" />} />
-          <Route path="/stock-analysis/:id" element={<RedirectToInvest tab="workspace" from="id" />} />
-          <Route path="/trade" element={<RedirectToInvest tab="workspace" view="trade" />} />
-          <Route path="/watchlist" element={<RedirectToInvest tab="workspace" view="monitor" />} />
-          <Route path="/backtest" element={<RedirectToInvest tab="workspace" view="backtest" />} />
-          <Route path="/compare" element={<RedirectToInvest tab="workspace" view="compare" />} />
-          <Route path="/screener" element={<RedirectToInvest tab="screener" />} />
-          <Route path="/quant" element={<RedirectToInvest tab="quant" />} />
-          <Route path="/workspace/:stockCode" element={<RedirectToInvest tab="workspace" from="stockCode" />} />
+          {/* 2026-10-28：股票旧路由已全部删除，统一走 /invest（query 参数由 InvestPage 消费）。 */}
 
           <Route path="*" element={<NotFoundRoute />} />
         </Routes>

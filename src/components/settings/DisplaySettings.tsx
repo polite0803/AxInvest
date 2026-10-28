@@ -4,7 +4,7 @@ import { Tooltip } from "@/components/layout/Tooltip";
 import { formatThemeName, SHIKI_DARK_THEMES, SHIKI_LIGHT_THEMES } from "@/constants/codeThemes";
 import { invoke, isTauri, logIpcError } from "@/lib/invoke";
 import { useSettingsStore } from "@/stores";
-import type { ThemePreset } from "@/theme/shadcnTheme";
+import { PRESET_PREVIEW, type ThemePreset } from "@/theme/shadcnTheme";
 import { ColorPicker, Divider, Segmented, Slider } from "antd";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -18,91 +18,24 @@ export function DisplaySettings() {
   const THEME_PRESETS: {
     key: ThemePreset;
     label: string;
-    bg: string;
-    accent: string;
   }[] = [
     // 2026 设计改版新增预设
-    {
-      key: "deep-dusk",
-      label: t("settings.themePresetDeepDusk"),
-      bg: "#1a1817",
-      accent: "#00A8A8",
-    },
-    {
-      key: "light-dawn",
-      label: t("settings.themePresetLightDawn"),
-      bg: "#f5f0ea",
-      accent: "#00A8A8",
-    },
-    {
-      key: "oceanic-dark",
-      label: t("settings.themePresetOceanicDark"),
-      bg: "#12141a",
-      accent: "#5b9aff",
-    },
-    {
-      key: "forest-dark",
-      label: t("settings.themePresetForestDark"),
-      bg: "#131a13",
-      accent: "#3dbf5c",
-    },
+    { key: "deep-dusk", label: t("settings.themePresetDeepDusk") },
+    { key: "light-dawn", label: t("settings.themePresetLightDawn") },
+    { key: "oceanic-dark", label: t("settings.themePresetOceanicDark") },
+    { key: "forest-dark", label: t("settings.themePresetForestDark") },
     // 21th 设计系统 — 新野兽派风格
-    {
-      key: "21th-dark",
-      label: t("settings.themePreset21thDark"),
-      bg: "#0a0a0a",
-      accent: "#ffffff",
-    },
-    {
-      key: "21th-light",
-      label: t("settings.themePreset21thLight"),
-      bg: "#c5c9c9",
-      accent: "#111111",
-    },
+    { key: "21th-dark", label: t("settings.themePreset21thDark") },
+    { key: "21th-light", label: t("settings.themePreset21thLight") },
     // 经典预设
-    {
-      key: "cyberpunk-dark",
-      label: "Cyberpunk Dark",
-      bg: "#0a0a12",
-      accent: "#00f0ff",
-    },
-    {
-      key: "cyberpunk-light",
-      label: "Cyberpunk Light",
-      bg: "#f0f0f8",
-      accent: "#7b2ff7",
-    },
-    {
-      key: "paperclip-dark",
-      label: "Paperclip Dark",
-      bg: "#18181b",
-      accent: "#a1a1aa",
-    },
-    {
-      key: "paperclip-light",
-      label: "Paperclip Light",
-      bg: "#fafafa",
-      accent: "#71717a",
-    },
-    {
-      key: "dark-elegance",
-      label: "Dark Elegance",
-      bg: "#141414",
-      accent: "#1677ff",
-    },
-    { key: "dark-neon", label: "Dark Neon", bg: "#0a0a0f", accent: "#a855f7" },
-    {
-      key: "light-professional",
-      label: "Light Pro",
-      bg: "#ffffff",
-      accent: "#1677ff",
-    },
-    {
-      key: "light-minimal",
-      label: "Light Minimal",
-      bg: "#f8fafc",
-      accent: "#0891b2",
-    },
+    { key: "cyberpunk-dark", label: "Cyberpunk Dark" },
+    { key: "cyberpunk-light", label: "Cyberpunk Light" },
+    { key: "paperclip-dark", label: "Paperclip Dark" },
+    { key: "paperclip-light", label: "Paperclip Light" },
+    { key: "dark-elegance", label: "Dark Elegance" },
+    { key: "dark-neon", label: "Dark Neon" },
+    { key: "light-professional", label: "Light Pro" },
+    { key: "light-minimal", label: "Light Minimal" },
   ];
 
   const settings = useSettingsStore((s) => s.settings);
@@ -174,6 +107,7 @@ export function DisplaySettings() {
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
             {THEME_PRESETS.map((preset) => {
               const isActive = (settings.themePreset || "deep-dusk") === preset.key;
+              const preview = PRESET_PREVIEW[preset.key];
               return (
                 <Tooltip key={preset.key} title={preset.label}>
                   <div
@@ -189,10 +123,10 @@ export function DisplaySettings() {
                       width: 48,
                       height: 48,
                       borderRadius: 8,
-                      backgroundColor: preset.bg,
+                      backgroundColor: preview.bg,
                       cursor: "pointer",
                       border: isActive
-                        ? `2px solid ${preset.accent}`
+                        ? `2px solid ${preview.accent}`
                         : "2px solid transparent",
                       display: "flex",
                       flexDirection: "column",
@@ -201,7 +135,7 @@ export function DisplaySettings() {
                       gap: 4,
                       transition: "border-color 0.2s",
                       boxShadow: isActive
-                        ? `0 0 0 1px ${preset.accent}`
+                        ? `0 0 0 1px ${preview.accent}`
                         : "none",
                     }}
                   >
@@ -210,7 +144,7 @@ export function DisplaySettings() {
                         width: 20,
                         height: 4,
                         borderRadius: 2,
-                        backgroundColor: preset.accent,
+                        backgroundColor: preview.accent,
                       }}
                     />
                     <div style={{ display: "flex", gap: 2 }}>
@@ -219,7 +153,7 @@ export function DisplaySettings() {
                           width: 8,
                           height: 8,
                           borderRadius: 2,
-                          backgroundColor: preset.accent,
+                          backgroundColor: preview.accent,
                           opacity: 0.6,
                         }}
                       />
@@ -228,7 +162,7 @@ export function DisplaySettings() {
                           width: 8,
                           height: 8,
                           borderRadius: 2,
-                          backgroundColor: preset.accent,
+                          backgroundColor: preview.accent,
                           opacity: 0.3,
                         }}
                       />

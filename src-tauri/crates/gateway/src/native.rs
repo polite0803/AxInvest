@@ -538,6 +538,7 @@ async fn resolve_native_context(
     Ok(ResolvedNativeContext {
         provider: provider.clone(),
         request_ctx: ProviderRequestContext {
+            header_timeout_secs: None,
             api_key,
             key_id: provider_key.id.clone(),
             provider_id: provider.id.clone(),

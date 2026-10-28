@@ -39,9 +39,9 @@ import { evolutionStatusMeta, formatEvolutionTime, parseTrigger } from "./evolut
 import { EvolutionApprovalDrawer } from "./EvolutionApprovalDrawer";
 
 const trendIcon: Record<string, ReactNode> = {
-  up: <ArrowUpOutlined style={{ color: "#cf1322" }} />,
-  down: <ArrowDownOutlined style={{ color: "#389e0d" }} />,
-  stable: <MinusOutlined style={{ color: "#8c8c8c" }} />,
+  up: <ArrowUpOutlined style={{ color: "var(--red)" }} />,
+  down: <ArrowDownOutlined style={{ color: "var(--green)" }} />,
+  stable: <MinusOutlined style={{ color: "var(--muted)" }} />,
 };
 
 export function EvolutionDriftPanel() {
@@ -215,7 +215,7 @@ export function EvolutionDriftPanel() {
       <div style={{ padding: 16, textAlign: "center" }}>
         <Spin description={t("stockAnalysis.evolutionDrift.loading")} />
         {lastError && (
-          <div style={{ marginTop: 12, color: "#cf1322" }}>
+          <div style={{ marginTop: 12, color: "var(--red)" }}>
             {t("stockAnalysis.evolutionDrift.error", { msg: lastError })}
           </div>
         )}
@@ -253,7 +253,7 @@ export function EvolutionDriftPanel() {
       width: 90,
       align: "right",
       render: (v: number) => (
-        <strong style={{ color: v > 1.0 ? "#cf1322" : v < 1.0 ? "#389e0d" : undefined }}>
+        <strong style={{ color: v > 1.0 ? "var(--red)" : v < 1.0 ? "var(--green)" : undefined }}>
           {v.toFixed(2)}
         </strong>
       ),
@@ -265,7 +265,7 @@ export function EvolutionDriftPanel() {
       width: 90,
       align: "right",
       render: (v: number) => {
-        if (Math.abs(v) < 0.5) { return <span style={{ color: "#8c8c8c" }}>—</span>; }
+        if (Math.abs(v) < 0.5) { return <span style={{ color: "var(--muted)" }}>—</span>; }
         const color = v > 0 ? "#cf1322" : "#389e0d";
         return <span style={{ color, fontWeight: 500 }}>{(v > 0 ? "+" : "") + v.toFixed(1) + "%"}</span>;
       },
@@ -330,7 +330,7 @@ export function EvolutionDriftPanel() {
           </Button>
         </div>
 
-        <div style={{ marginBottom: 12, fontSize: 12, color: "#8c8c8c" }}>
+        <div style={{ marginBottom: 12, fontSize: 12, color: "var(--muted)" }}>
           {t("stockAnalysis.evolutionDrift.lastRecalcAt", {
             time: formatEvolutionTime(dashboard.lastRecalcAt),
           })}
@@ -360,14 +360,14 @@ export function EvolutionDriftPanel() {
             style={{
               marginBottom: 16,
               padding: "10px 12px",
-              border: "1px solid #ffd591",
+              border: "1px solid color-mix(in srgb, var(--amber) 45%, transparent)",
               borderRadius: 6,
-              background: "#fff7e6",
+              background: "var(--amber-bg)",
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <Space>
-                <AuditOutlined style={{ color: "#fa8c16" }} />
+                <AuditOutlined style={{ color: "var(--amber)" }} />
                 <strong>
                   {t("stockAnalysis.evolutionApproval.panelPendingTitle", {
                     count: pendingEvolutionPlans!.length,
@@ -391,7 +391,7 @@ export function EvolutionDriftPanel() {
                   onClick={() => openApproval(p)}
                 >
                   <Tag color="orange">{p.evolutionType}</Tag>
-                  <span style={{ color: "#8c8c8c" }}>{formatEvolutionTime(p.createdAt)}</span>
+                  <span style={{ color: "var(--muted)" }}>{formatEvolutionTime(p.createdAt)}</span>
                   {" · "}
                   {parseTrigger(p.trigger, t)}
                 </li>
@@ -409,18 +409,18 @@ export function EvolutionDriftPanel() {
               <div
                 key={s.strategyId}
                 style={{
-                  border: "1px solid #d9d9d9",
+                  border: "1px solid var(--border-light)",
                   borderRadius: 4,
                   padding: "8px 12px",
                   minWidth: 140,
                 }}
               >
-                <div style={{ fontSize: 12, color: "#8c8c8c" }}>{s.strategyId}</div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>{s.strategyId}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
                   {trendIcon[s.trend] ?? trendIcon.stable}
                   <span style={{ fontSize: 18, fontWeight: 600 }}>{s.avgWeight.toFixed(2)}</span>
                 </div>
-                <div style={{ fontSize: 11, color: "#8c8c8c", marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
                   {t("stockAnalysis.evolutionDrift.summarySamples", { n: s.totalSamples })} ·{" "}
                   {t("stockAnalysis.evolutionDrift.summaryWinRate", { p: (s.avgWinRate * 100).toFixed(0) })}
                 </div>
@@ -447,7 +447,7 @@ export function EvolutionDriftPanel() {
         />
 
         {selectedKey && (
-          <div style={{ marginTop: 16, padding: 12, background: "#fafafa", borderRadius: 4 }}>
+          <div style={{ marginTop: 16, padding: 12, background: "var(--surface)", borderRadius: 4 }}>
             <h4 style={{ marginTop: 0 }}>
               {t("stockAnalysis.evolutionDrift.timelineTitle", { key: selectedKey })}
             </h4>
@@ -477,11 +477,11 @@ export function EvolutionDriftPanel() {
                     <Tag color={r.deltaPct > 0 ? "red" : r.deltaPct < 0 ? "green" : "default"}>
                       {(r.deltaPct > 0 ? "+" : "") + r.deltaPct.toFixed(1) + "%"}
                     </Tag>
-                    <span style={{ color: "#8c8c8c", marginLeft: 8 }}>
+                    <span style={{ color: "var(--muted)", marginLeft: 8 }}>
                       {formatEvolutionTime(r.appliedAt)}
                     </span>
                     {r.rationale && (
-                      <div style={{ color: "#595959", marginTop: 2, marginLeft: 8 }}>
+                      <div style={{ color: "var(--fg-2)", marginTop: 2, marginLeft: 8 }}>
                         {r.rationale}
                       </div>
                     )}
@@ -516,7 +516,7 @@ export function EvolutionDriftPanel() {
         {calibrateResult?.bestParams && (
           <div>
             <h4>{t("stockAnalysis.evolutionDrift.calibrateBestTitle")}</h4>
-            <div style={{ background: "var(--bg-secondary, #f5f5f5)", padding: 12, borderRadius: 6, marginBottom: 16 }}>
+            <div style={{ background: "var(--surface)", padding: 12, borderRadius: 6, marginBottom: 16 }}>
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                 {[
                   { key: "buyThreshold", label: t("stockAnalysis.evolutionDrift.calibrateBuyThreshold") },
@@ -641,7 +641,7 @@ export function EvolutionDriftPanel() {
         )}
         {calibrateResult?.message && !calibrateResult.bestParams && <Empty description={calibrateResult.message} />}
         {(calibrateResult?.structuralExcluded ?? 0) > 0 && (
-          <div style={{ marginTop: 12, fontSize: 12, color: "#d46b08" }}>
+          <div style={{ marginTop: 12, fontSize: 12, color: "var(--amber)" }}>
             {t("stockAnalysis.evolutionDrift.calibrateStructuralCount", {
               count: calibrateResult!.structuralExcluded,
             })}
@@ -672,7 +672,7 @@ export function EvolutionDriftPanel() {
                     <Tag color={meta.color}>{t(meta.textKey)}</Tag>
                     <Tag>{h.evolutionType}</Tag>
                     <Tag>{formatEvolutionTime(h.createdAt)}</Tag>
-                    <span style={{ color: "#595959", marginLeft: 4 }}>
+                    <span style={{ color: "var(--fg-2)", marginLeft: 4 }}>
                       {parseTrigger(h.trigger, t)}
                     </span>
                     <Button
@@ -686,12 +686,12 @@ export function EvolutionDriftPanel() {
                         : t("stockAnalysis.evolutionApproval.viewAction")}
                     </Button>
                     {h.rejectReason && (
-                      <div style={{ color: "#cf1322", marginTop: 2, marginLeft: 4, fontSize: 12 }}>
+                      <div style={{ color: "var(--red)", marginTop: 2, marginLeft: 4, fontSize: 12 }}>
                         {h.rejectReason}
                       </div>
                     )}
                     {h.improvementSummary && (
-                      <div style={{ color: "#8c8c8c", marginTop: 2, marginLeft: 4 }}>
+                      <div style={{ color: "var(--muted)", marginTop: 2, marginLeft: 4 }}>
                         {h.improvementSummary}
                       </div>
                     )}
@@ -815,7 +815,7 @@ function AgreementSparkline({
         })}
       </svg>
       <div className="flex items-center gap-2 mt-1">
-        <span className="text-[10px]" style={{ color: "#7c3aed" }}>
+        <span className="text-[10px]" style={{ color: "var(--purple)" }}>
           {t("stockAnalysis.evolutionDrift.agreementTrendLabel")}
         </span>
         <span className="text-[10px]" style={{ color: "var(--muted)" }}>

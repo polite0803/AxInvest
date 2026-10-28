@@ -134,13 +134,25 @@ impl TransportProvider for ChatCompletionsTransport {
     > {
         let url = format!("{}/chat/completions", base_url.unwrap_or(default_url::OPENAI_BASE));
 
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .json(&self.build_body(&request))
-            .send()
-            .await?;
+        // 首字节预算与其它协议路径同口径（见 stream_budget）。
+        let body = self.build_body(&request);
+        let body_size = serde_json::to_string(&body).ok().map(|s| s.len()).unwrap_or(0);
+        let budget =
+            crate::stream_budget::resolve_header_budget(request.header_timeout_secs, body_size);
+        let header_ctx = crate::stream_budget::HeaderBudgetContext {
+            provider_id: self.provider_name().to_string(),
+            model: request.model.clone(),
+            url: url.clone(),
+        };
+        let response = crate::stream_budget::send_with_header_budget(budget, &header_ctx, || {
+            self.client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", api_key))
+                .json(&body)
+        })
+        .await
+        .map_err(|e| e.into_anyhow(self.provider_name()))?
+        .response;
 
         let stream = response.bytes_stream().filter_map(|chunk| {
             let result = match chunk {

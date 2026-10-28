@@ -109,6 +109,7 @@ pub fn apply_mapping_to_context(
     mapping: &TierModelMapping,
 ) -> ProviderRequestContext {
     ProviderRequestContext {
+        header_timeout_secs: None,
         provider_id: if mapping.provider_id.is_empty() {
             ctx.provider_id.clone()
         } else {
@@ -166,6 +167,7 @@ mod tests {
 
     fn make_ctx(provider_id: &str) -> ProviderRequestContext {
         ProviderRequestContext {
+            header_timeout_secs: None,
             api_key: "sk-test".to_string(),
             key_id: "key1".to_string(),
             provider_id: provider_id.to_string(),
@@ -294,6 +296,7 @@ mod tests {
     #[test]
     fn test_apply_mapping_preserves_all_context_fields() {
         let ctx = ProviderRequestContext {
+            header_timeout_secs: None,
             api_key: "sk-key".to_string(),
             key_id: "kid".to_string(),
             provider_id: "orig".to_string(),

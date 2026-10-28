@@ -83,7 +83,7 @@ export function PositionsMiniPanel() {
       render: (v: number | null) =>
         v != null
           ? (
-            <span style={{ color: v >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
+            <span style={{ color: v >= 0 ? "var(--red)" : "var(--green)" }}>
               {v >= 0 ? "+" : ""}
               {v.toFixed(1)}%
             </span>
@@ -115,7 +115,7 @@ export function PositionsMiniPanel() {
           {" | "}
           {t("stockAnalysis.totalMarketValue")}: <b>{(totalMv / 10000).toFixed(1)}{t("stockAnalysis.wanUnit")}</b>
           {" | "}
-          <span style={{ color: totalPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
+          <span style={{ color: totalPnl >= 0 ? "var(--red)" : "var(--green)" }}>
             {t("stockAnalysis.unrealizedPnl")}: {totalPnl >= 0 ? "+" : ""}
             {totalPnl.toFixed(0)}
           </span>

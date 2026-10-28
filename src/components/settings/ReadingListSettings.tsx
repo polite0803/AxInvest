@@ -493,7 +493,7 @@ export function ReadingListSettings() {
                     style={{
                       cursor: "pointer",
                       background: list.id === selectedListId
-                        ? "var(--ant-color-fill-quaternary, #fafafa)"
+                        ? "var(--surface-2)"
                         : undefined,
                     }}
                     onClick={() => setSelectedList(list.id)}

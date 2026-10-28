@@ -186,17 +186,17 @@ export function EngineDetailPanel({ engineName, open, onClose }: EngineDetailPan
               <span>
                 {t("settings.evolution.logs")}
                 {runningCount > 0 && (
-                  <span style={{ marginLeft: 4, fontSize: 12, color: "#888" }}>
+                  <span style={{ marginLeft: 4, fontSize: 12, color: "var(--muted)" }}>
                     ({runningCount})
                   </span>
                 )}
                 {warnCount > 0 && (
-                  <span style={{ marginLeft: 4, fontSize: 12, color: "#faad14" }}>
+                  <span style={{ marginLeft: 4, fontSize: 12, color: "var(--amber)" }}>
                     W{warnCount}
                   </span>
                 )}
                 {errorCount > 0 && (
-                  <span style={{ marginLeft: 4, fontSize: 12, color: "#ff4d4f" }}>
+                  <span style={{ marginLeft: 4, fontSize: 12, color: "var(--red)" }}>
                     E{errorCount}
                   </span>
                 )}
@@ -218,10 +218,14 @@ export function EngineDetailPanel({ engineName, open, onClose }: EngineDetailPan
                       key={`log-${i}`}
                       style={{
                         padding: "2px 0",
-                        color: log.level === "error" ? "#ff4d4f" : log.level === "warn" ? "#faad14" : "#888",
+                        color: log.level === "error"
+                          ? "var(--red)"
+                          : log.level === "warn"
+                          ? "var(--amber)"
+                          : "var(--muted)",
                       }}
                     >
-                      <span style={{ color: "#999", marginRight: 8 }}>
+                      <span style={{ color: "var(--muted)", marginRight: 8 }}>
                         {new Date(log.timestamp).toLocaleTimeString()}
                       </span>
                       [{log.level.toUpperCase()}] {log.message}

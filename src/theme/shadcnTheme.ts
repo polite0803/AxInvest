@@ -284,6 +284,17 @@ const PRESETS: Record<ThemePreset, PresetColors> = {
   },
 };
 
+/**
+ * 主题选择器缩略色块。必须从 `PRESETS` 派生 —— 手写副本会与真实 token 漂移
+ * （deep-dusk 曾写成 #1a1817，而真实 bg 是 oklch(17% 0.008 55) = #120f0c）。
+ */
+export const PRESET_PREVIEW = Object.fromEntries(
+  Object.entries(PRESETS).map(([key, preset]) => [
+    key,
+    { bg: preset.bgBase, accent: preset.primaryColor },
+  ]),
+) as Record<ThemePreset, { bg: string; accent: string }>;
+
 export const IS_DARK_PRESET: Record<ThemePreset, boolean> = {
   "dark-elegance": true,
   "dark-neon": true,

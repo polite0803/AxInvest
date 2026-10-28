@@ -204,9 +204,9 @@ pub async fn init_database_with_dir(app_dir: PathBuf) -> Result<DatabaseInitResu
     axagent_tools::global_state::set_db_path(&db_url);
 
     // 直接使用当前 tokio runtime，不再创建嵌套 Runtime
-    let db_handle = axagent_dao::db::create_pool(&db_url)
-        .await
-        .map_err(|e| format!("database initialization failed: {}", e))?;
+    let db_handle = axagent_dao::db::create_pool(&db_url).await.map_err(|e| {
+        format!("database initialization failed: {}", explain_pg_error(&e.to_string()))
+    })?;
 
     // ── Schema 自愈：适配用户选择的任意数据库 ─────────────────────────
     // 用户可在 UI（设置 → 数据库）中选择任何 PostgreSQL/SQLite 库，程序必须
@@ -360,11 +360,17 @@ fn secure_zero(buf: &mut [u8]) {
 // Postgres 可用性探测 + 降级 helper（init/database.rs 私有）
 // ──────────────────────────────────────────────────────────────────────
 
-/// 探测 Postgres 连接是否可用。
+/// 探测 Postgres 是否**真的可用**：先 3 秒 TCP 快探排除网络不通与超时，
+/// 再走一次完整握手（`connect_without_initialization`：只连库，不建表、不收敛）。
 ///
-/// 用 3 秒超时做 TCP 探测——`tokio::net::TcpStream::connect` 不进入 postgres 协议层，
-/// 因此不依赖服务端 lc_messages 编码、不会触发 sqlx 的 UTF-8 解析 panic。
-/// 返回 `Some(原因)` 表示不可达且应降级；返回 `None` 表示连得通（后续让 create_pool 走完整握手）。
+/// ⚠ 为什么不能停在 TCP 层（2026-10-28 实测）：此前只判 TCP，于是
+/// `pg_hba.conf` 拒绝 / 口令错误 / 库不存在这三类都会「探测通过」，直到
+/// `create_pool` 才失败 —— 而它们全是**认证阶段的 FATAL**，服务端此时按
+/// `lc_messages` 的 locale 编码消息。中文 Windows 上 initdb 默认
+/// `Chinese (Simplified)_China.936`，sqlx 无法按 UTF-8 解码 ⇒ 只剩
+/// `non-UTF-8 string for its error message` 这一句，真正的
+/// `FATAL: no pg_hba.conf entry for host "…"` 被整条吞掉，且降级逻辑不触发。
+/// 握手失败同样计入「不可达」，让既有降级/报错路径给出可操作结论。
 async fn pg_unreachable(url: &str) -> Option<String> {
     // 解析 host:port
     let rest = url.strip_prefix("postgres://").or_else(|| url.strip_prefix("postgresql://"))?;
@@ -381,9 +387,14 @@ async fn pg_unreachable(url: &str) -> Option<String> {
     )
     .await
     {
-        Ok(Ok(_stream)) => None,
-        Ok(Err(e)) => Some(format!("TCP 连接失败: {}", e)),
-        Err(_) => Some("连接超时（3s）".to_string()),
+        Ok(Ok(_stream)) => {},
+        Ok(Err(e)) => return Some(format!("TCP 连接失败: {}", e)),
+        Err(_) => return Some("连接超时（3s）".to_string()),
+    }
+    // TCP 通 ≠ 可用：hba 拒绝 / 口令错误 / 库不存在都在握手阶段才暴露。
+    match axagent_dao::db::connect_without_initialization(url).await {
+        Ok(_handle) => None,
+        Err(e) => Some(explain_pg_error(&e.to_string())),
     }
 }
 
@@ -437,4 +448,47 @@ fn write_fallback_marker(app_dir: &Path, reason: &str, details: &str) -> std::io
         "version": 1,
     });
     std::fs::write(marker_path, serde_json::to_vec_pretty(&body).unwrap_or_default())
+}
+
+/// 把 sqlx 的「服务端错误消息不是 UTF-8」翻译成带修法的中文。
+///
+/// 触发条件：PostgreSQL 服务端 `lc_messages` 是非 UTF-8 兼容 locale（中文 Windows
+/// initdb 默认 `Chinese (Simplified)_China.936`）。认证阶段的 FATAL（`pg_hba` 拒绝、
+/// 口令错误）按该 locale 编码，客户端按 UTF-8 解码失败 ⇒ 真正原因被掩盖。
+///
+/// 不命中原样返回：错误原文是排查现场，改写它就查不到了。
+fn explain_pg_error(raw: &str) -> String {
+    if !raw.contains("non-UTF-8 string for its error message") {
+        return raw.to_string();
+    }
+    format!(
+        "{raw}\n\n\
+         ↑ 这不是真正原因：PostgreSQL 服务端用非 UTF-8 的 locale（lc_messages）编码了错误消息，\
+         客户端无法解码，真实的服务端错误（常见为 pg_hba.conf 未放行该客户端地址、口令错误、\
+         库不存在）被吞掉了。\n\
+         修法（在数据库服务端执行，二选一）：\n\
+         · psql: ALTER SYSTEM SET lc_messages = 'C'; SELECT pg_reload_conf();\n\
+         · 改 postgresql.conf 的 lc_messages = 'C' 后重载服务\n\
+         改完重试即可看到服务端原文错误。"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 命中编码特征 → 必须保留原文并给出两条修法；未命中 → 一个字都不许改。
+    #[test]
+    fn explain_pg_error_only_rewrites_encoding_failures() {
+        let raw = "Connection Error: Postgres returned a non-UTF-8 string for its error \
+                   message. This is most likely due to an error that occurred during \
+                   authentication (sqlx_postgres:message:139)";
+        let out = explain_pg_error(raw);
+        assert!(out.contains(raw), "原文必须保留，否则现场丢失：{out}");
+        assert!(out.contains("lc_messages"), "{out}");
+        assert!(out.contains("pg_hba"), "{out}");
+
+        let other = "TCP 连接失败: 由于目标计算机积极拒绝，无法连接。";
+        assert_eq!(explain_pg_error(other), other, "非编码类错误不得被改写");
+    }
 }

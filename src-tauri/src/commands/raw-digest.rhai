@@ -183,6 +183,31 @@ fn render_map(raw, priority, budget) {
     clip(join(parts, " | "), budget)
 }
 
+// render_outcome: 兼容「结果信封」与历史裸数组（2026-10-28）。
+//   新形态：{"status":"ok|empty_by_time|source_failed|schema_changed","data":[...],"detail":"..."}
+//   旧形态：裸数组（历史 run 的 raw.combined 仍然是数组）
+// 空数据必须写出成因 —— 只写「（无数据）」会把「通道故障」和「今天没行情」混成一句。
+fn render_outcome(raw, priority, budget) {
+    let v = load(raw);
+    if !present(v) { return "（无数据）"; }
+    if type_of(v) == "array" { return render_list(v, priority, budget); }
+    if type_of(v) == "map" && type_of(v["status"]) == "string" {
+        let st = v["status"];
+        let detail = if type_of(v["detail"]) == "string" { v["detail"] } else { "" };
+        let suffix = if detail == "" { "" } else { "：" + detail };
+        if st == "ok" {
+            let body = render_list(v["data"], priority, budget);
+            if detail == "" { return body; }
+            return body + "（说明" + suffix + "）";
+        }
+        if st == "empty_by_time" { return "（本时段无数据" + suffix + "）"; }
+        if st == "source_failed" { return "（数据源不可用" + suffix + "）"; }
+        if st == "schema_changed" { return "（接口结构变更" + suffix + "）"; }
+        return "（未知状态：" + st + "）";
+    }
+    render_map(v, priority, budget);
+}
+
 // ── 字段优先级表（按数据源 DTO 的语义字段名，camelCase）──
 let P_NEWS = ["title", "summary", "publishTime", "source", "url"];
 let P_REPORT = [
@@ -219,7 +244,7 @@ out["lockup"] = render_map(lockup_data, P_LOCKUP, 700);
 out["sector"] = render_map(sector_data, P_SECTOR, 700);
 
 out["pledge"] = render_map(pledge_data, P_PLEDGE, 400);
-out["index_quotes"] = render_map(index_quotes, [], 400);
+out["index_quotes"] = render_outcome(index_quotes, [], 400);
 out["institutional_visits"] = render_map(institutional_visits, P_VISIT, 400);
 out["dragon_tiger"] = render_map(dragon_tiger_data, P_TIGER, 400);
 

@@ -5907,6 +5907,8 @@
     "renderUserMarkdownDesc": "코드 블록, 줄바꿈 등 Markdown 서식으로 사용자 메시지를 렌더링합니다",
     "requestDelayMs": "요청 지연",
     "requestDelayMsHint": "API 호출 전 대기할 밀리초 수, 속도 제한(예: 429 오류) 방지에 사용",
+    "headerTimeoutSecs": "첫 바이트 타임아웃",
+    "headerTimeoutSecsHint": "업스트림이 HTTP 응답 헤더를 반환할 때까지 기다리는 총 초 제한(소프트 한계를 넘으면 같은 제공업체로 1회 재시도, 하드 한계를 넘으면 업스트림 정지로 판정). 비워 두면 기본 90초 사용",
     "resetDefault": "기본값으로 초기화",
     "resetShortcutDefaults": "단축키 기본값으로 재설정",
     "resetShortcutSingle": "이 단축키를 기본값으로 재설정",
@@ -16454,7 +16456,19 @@
       "vendorLastError": "마지막 오류",
       "vendorLastSuccess": "마지막 성공",
       "vendorLastFailure": "마지막 실패",
-      "vendorHealth": "데이터 소스 상태"
+      "vendorHealth": "데이터 소스 상태",
+      "interfaceHealth": {
+        "title": "일별 인터페이스 상태",
+        "storeDisabled": "일별 아카이브가 비활성화되어 검사 결과가 저장되지 않았습니다",
+        "empty": "아직 일별 검사 기록이 없습니다(각 거래일 마감 후 자동 검사)",
+        "unavailable": "이 환경에서는 일별 상태 기록을 제공하지 않습니다",
+        "colDate": "데이터 기준일",
+        "colSummary": "정상 / 검사 항목",
+        "colIssues": "이상 항목",
+        "summary": "{{ok}}/{{total}} 정상",
+        "checkedAt": "검사 시각",
+        "statusEmptyByTime": "시간대상 데이터 없음"
+      }
     },
     "experiment": {
       "executeTrade": "거래 실행 →",
@@ -16574,7 +16588,7 @@
     "diTableDirection": "방향/값",
     "diTableStatus": "상태",
     "diTableNote": "비고",
-    "weightCollapseDqi": "데이터 품질 등급 F (dqi<25), 의사결정 근거 무효",
+    "weightCollapseDqi": "데이터 품질 등급 F, 의사결정 근거 무효",
     "weightCollapseUntrusted": "신뢰 불가 상류 ≥2 (untrusted_count={{count}})",
     "weightCollapseThreshold": "팩터 가중치 {{ratio}}% — 임계값 미달",
     "weightCollapseConsequence": "결과: 포지션 0% 강제, 방향 신뢰도 ×0.5",
@@ -16716,7 +16730,8 @@
       "diff": "의견 차이",
       "directionConflict": "방향 충돌",
       "opposite": "역방향",
-      "sameDirection": "동방향"
+      "sameDirection": "동방향",
+      "htmlReport": "HTML 보고서"
     },
     "crossCheck": {
       "title": "트렌드 픽 vs 분석 워크플로 · 시스템 간 불일치",
@@ -17102,7 +17117,9 @@
       "replayDegradedWithCount": "{{n}} data sources were skipped in replay mode; this panel is hidden.",
       "replayDegradedWithReason": "Degraded in replay mode: {{reason}}",
       "_fallback": "추천 데이터 없음",
-      "empty": "추천 데이터 없음"
+      "empty": "추천 데이터 없음",
+      "sourceFailed": "데이터 소스 사용 불가",
+      "schemaChanged": "인터페이스 구조 변경"
     },
     "row": {
       "entry": "엔트리 구간",
@@ -18616,7 +18633,9 @@
         "label": "상위 레벨이 티어 내 매수를 채택",
         "desc": "교정이 기준에 미달하면 신뢰도가 상한으로 묶이고 액션도 함께 강등되어 상위 레벨 매수가 0으로 유지됩니다. 열면 티어 내 결정된 매수를 채택합니다. 신뢰도 상한 자체는 계속 적용됩니다."
       }
-    }
+    },
+    "htmlNeedAnalysisId": "분석 기록 ID가 없어 HTML 보고서를 내보낼 수 없습니다",
+    "htmlDesktopOnly": "HTML 보고서는 데스크톱에서만 지원됩니다"
   },
   "pipeline": {
     "title": "주식 파이프라인",

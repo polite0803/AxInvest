@@ -236,7 +236,7 @@ export function BacktestTab() {
           )}
 
           {/* ── 底部摘要 ── */}
-          <div style={{ marginTop: 12, color: "var(--text-3)", fontSize: 12 }}>
+          <div style={{ marginTop: 12, color: "var(--muted)", fontSize: 12 }}>
             signals: {currentRun.signalCount} · trades: {currentRun.tradeCount} · duration:{" "}
             {(currentResult.durationMs / 1000).toFixed(1)}s
           </div>

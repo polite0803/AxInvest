@@ -88,17 +88,17 @@ const RestoreIcon = () => (
 const THEME_OPTIONS = [
   {
     key: "system",
-    icon: <Monitor size={14} color={TITLEBAR_ICON_COLORS.Monitor} />,
+    icon: <Monitor size={14} style={{ color: TITLEBAR_ICON_COLORS.Monitor }} />,
     labelKey: "settings.themeSystem",
   },
   {
     key: "light",
-    icon: <Sun size={14} color={TITLEBAR_ICON_COLORS.Sun} />,
+    icon: <Sun size={14} style={{ color: TITLEBAR_ICON_COLORS.Sun }} />,
     labelKey: "settings.themeLight",
   },
   {
     key: "dark",
-    icon: <Moon size={14} color={TITLEBAR_ICON_COLORS.Moon} />,
+    icon: <Moon size={14} style={{ color: TITLEBAR_ICON_COLORS.Moon }} />,
     labelKey: "settings.themeDark",
   },
 ] as const;
@@ -416,20 +416,20 @@ export function TitleBar() {
       icon: (
         <MessageSquarePlus
           size={14}
-          color={TITLEBAR_ICON_COLORS.MessageSquarePlus}
+          style={{ color: TITLEBAR_ICON_COLORS.MessageSquarePlus }}
         />
       ),
       label: t("titlebar.submitFeature"),
     },
     {
       key: "bug",
-      icon: <Bug size={14} color={TITLEBAR_ICON_COLORS.Bug} />,
+      icon: <Bug size={14} style={{ color: TITLEBAR_ICON_COLORS.Bug }} />,
       label: t("titlebar.submitBug"),
     },
     { divider: true, key: "sep" },
     {
       key: "star",
-      icon: <Star size={14} color={TITLEBAR_ICON_COLORS.Star} />,
+      icon: <Star size={14} style={{ color: TITLEBAR_ICON_COLORS.Star }} />,
       label: t("titlebar.giveStar"),
     },
   ];
@@ -592,8 +592,8 @@ export function TitleBar() {
                   }}
                 >
                   {pinned
-                    ? <Pin size={12} color={TITLEBAR_ICON_COLORS.Pin} />
-                    : <PinOff size={12} color={TITLEBAR_ICON_COLORS.PinOff} />}
+                    ? <Pin size={12} style={{ color: TITLEBAR_ICON_COLORS.Pin }} />
+                    : <PinOff size={12} style={{ color: TITLEBAR_ICON_COLORS.PinOff }} />}
                 </button>
               </Tooltip>
             )}
@@ -631,7 +631,7 @@ export function TitleBar() {
                 className="titlebar-btn"
                 style={{ color: token.colorTextSecondary }}
               >
-                <Globe size={12} color={TITLEBAR_ICON_COLORS.Globe} />
+                <Globe size={12} style={{ color: TITLEBAR_ICON_COLORS.Globe }} />
               </button>
             </DropdownMenu>
 
@@ -726,7 +726,7 @@ export function TitleBar() {
                         {backingUp === "local" ? <Spin size="small" /> : (
                           <CloudUpload
                             size={14}
-                            color={TITLEBAR_ICON_COLORS.CloudUpload}
+                            style={{ color: TITLEBAR_ICON_COLORS.CloudUpload }}
                           />
                         )}
                         {t("titlebar.localBackup")}
@@ -750,7 +750,7 @@ export function TitleBar() {
                         {backingUp === "webdav" ? <Spin size="small" /> : (
                           <CloudUpload
                             size={14}
-                            color={TITLEBAR_ICON_COLORS.CloudUpload}
+                            style={{ color: TITLEBAR_ICON_COLORS.CloudUpload }}
                           />
                         )}
                         {t("titlebar.webdavBackup")}
@@ -774,7 +774,7 @@ export function TitleBar() {
                   >
                     <CloudUpload
                       size={12}
-                      color={TITLEBAR_ICON_COLORS.CloudUpload}
+                      style={{ color: TITLEBAR_ICON_COLORS.CloudUpload }}
                     />
                     {countdownText && <span>({countdownText})</span>}
                   </button>
@@ -798,7 +798,7 @@ export function TitleBar() {
                         icon: (
                           <ArrowDownCircle
                             size={12}
-                            color={TITLEBAR_ICON_COLORS.ArrowDownCircle}
+                            style={{ color: TITLEBAR_ICON_COLORS.ArrowDownCircle }}
                           />
                         ),
                         label: t("settings.checkUpdate"),
@@ -811,7 +811,7 @@ export function TitleBar() {
                     icon: (
                       <RotateCcw
                         size={12}
-                        color={TITLEBAR_ICON_COLORS.RotateCcw}
+                        style={{ color: TITLEBAR_ICON_COLORS.RotateCcw }}
                       />
                     ),
                     label: t("desktop.reloadPage"),
@@ -824,7 +824,7 @@ export function TitleBar() {
                   className="titlebar-btn"
                   style={{ color: token.colorTextSecondary }}
                 >
-                  <Ellipsis size={12} color={TITLEBAR_ICON_COLORS.GitFork} />
+                  <Ellipsis size={12} style={{ color: TITLEBAR_ICON_COLORS.GitFork }} />
                 </button>
               </DropdownMenu>
             )}
@@ -864,8 +864,8 @@ export function TitleBar() {
                 }}
               >
                 {isInSettings
-                  ? <XCircle size={12} color={TITLEBAR_ICON_COLORS.XCircle} />
-                  : <Settings size={12} color={TITLEBAR_ICON_COLORS.Settings} />}
+                  ? <XCircle size={12} style={{ color: TITLEBAR_ICON_COLORS.XCircle }} />
+                  : <Settings size={12} style={{ color: TITLEBAR_ICON_COLORS.Settings }} />}
               </button>
             </Tooltip>
           </div>

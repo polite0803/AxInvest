@@ -169,7 +169,7 @@ export function PortfolioMonitorPanel() {
             styles={{
               content: {
                 fontSize: 18,
-                color: dashboard.totalPnl >= 0 ? "#cf1322" : "#389e0d",
+                color: dashboard.totalPnl >= 0 ? "var(--red)" : "var(--green)",
               },
             }}
             prefix={dashboard.totalPnl >= 0 ? "+" : ""}
@@ -182,7 +182,7 @@ export function PortfolioMonitorPanel() {
             styles={{
               content: {
                 fontSize: 18,
-                color: dashboard.totalPnlPct >= 0 ? "#cf1322" : "#389e0d",
+                color: dashboard.totalPnlPct >= 0 ? "var(--red)" : "var(--green)",
               },
             }}
           />
@@ -219,7 +219,7 @@ export function PortfolioMonitorPanel() {
               styles={{
                 content: {
                   fontSize: 18,
-                  color: dashboard.diversificationScore >= 70 ? "#389e0d" : "#d46b08",
+                  color: dashboard.diversificationScore >= 70 ? "var(--green)" : "var(--amber)",
                 },
               }}
             />
@@ -349,7 +349,7 @@ export function PortfolioMonitorPanel() {
                     <div className="text-sm font-semibold">{s.label}</div>
                     <div
                       className="text-2xl font-bold"
-                      style={{ color: s.portfolioPnl < 0 ? "#cf1322" : "#389e0d" }}
+                      style={{ color: s.portfolioPnl < 0 ? "var(--red)" : "var(--green)" }}
                     >
                       {fmtMoney(s.portfolioPnl)}
                       {t("stockAnalysis.portfolio.yuan")}

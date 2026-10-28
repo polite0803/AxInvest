@@ -5907,6 +5907,8 @@
     "renderUserMarkdownDesc": "使用 Markdown 渲染用戶發送的訊息，包括程式碼區塊、換行等",
     "requestDelayMs": "請求延時",
     "requestDelayMsHint": "每次呼叫 API 前等待的毫秒數，用於避免觸發速率限制（如 429 錯誤）",
+    "headerTimeoutSecs": "首位元組逾時",
+    "headerTimeoutSecsHint": "等待上游回傳 HTTP 回應標頭的總秒數上限（超過軟檔會同供應商原地重試一次，超過硬檔判定上游掛起）；留空用預設 90 秒",
     "resetDefault": "恢復預設",
     "resetShortcutDefaults": "恢復預設快捷鍵",
     "resetShortcutSingle": "恢復此項預設快捷鍵",
@@ -16571,7 +16573,19 @@
       "vendorLastError": "最後錯誤",
       "vendorLastSuccess": "成功",
       "vendorLastFailure": "失敗",
-      "vendorHealth": "資料源健康狀態"
+      "vendorHealth": "資料源健康狀態",
+      "interfaceHealth": {
+        "title": "日級介面健康",
+        "storeDisabled": "每日歸檔未啟用，日檢結果未留存",
+        "empty": "尚無日檢記錄（每個交易日收盤後自動檢查）",
+        "unavailable": "本環境不提供日級健康記錄",
+        "colDate": "資料歸屬日",
+        "colSummary": "正常/檢查項",
+        "colIssues": "異常項",
+        "summary": "{{ok}}/{{total}} 正常",
+        "checkedAt": "檢查時間",
+        "statusEmptyByTime": "時段性無資料"
+      }
     },
     "experiment": {
       "executeTrade": "執行交易 →",
@@ -16823,7 +16837,7 @@
     "diTableDirection": "方向/值",
     "diTableStatus": "状态",
     "diTableNote": "备注",
-    "weightCollapseDqi": "数据质量 F 级（dqi<25），决策基础不成立",
+    "weightCollapseDqi": "数据质量 F 级，决策基础不成立",
     "weightCollapseUntrusted": "不可信上游 ≥2 个（untrusted_count={{count}}）",
     "weightCollapseThreshold": "因子权重占比 {{ratio}}% 低于阈值",
     "weightCollapseConsequence": "后果：仓位强制 0%、方向置信度 ×0.5",
@@ -16965,7 +16979,8 @@
       "diff": "分歧",
       "directionConflict": "方向冲突",
       "opposite": "反向",
-      "sameDirection": "同向"
+      "sameDirection": "同向",
+      "htmlReport": "HTML 報告"
     },
     "crossCheck": {
       "title": "趨勢智選 vs 股票分析 · 跨系統分歧",
@@ -17351,7 +17366,9 @@
       "replayDegradedWithCount": "{{n}} data sources were skipped in replay mode; this panel is hidden.",
       "replayDegradedWithReason": "Degraded in replay mode: {{reason}}",
       "empty": "暫無推薦數據",
-      "_fallback": "无推荐数据"
+      "_fallback": "无推荐数据",
+      "sourceFailed": "資料源不可用",
+      "schemaChanged": "介面結構變更"
     },
     "row": {
       "entry": "入場區間",
@@ -18865,7 +18882,9 @@
         "label": "頂層採納檔內買入",
         "desc": "校準未達標會把置信度封頂並聯動壓低動作，導致頂層買入長期為 0；放開後頂層採納檔內已判出的買入。置信度封頂本身仍然生效。"
       }
-    }
+    },
+    "htmlNeedAnalysisId": "缺少分析記錄 ID，無法匯出 HTML 報告",
+    "htmlDesktopOnly": "HTML 報告僅支援桌面端"
   },
   "pipeline": {
     "title": "股票管道",

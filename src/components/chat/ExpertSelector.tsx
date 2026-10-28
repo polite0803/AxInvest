@@ -485,7 +485,7 @@ export function ExpertSelector({
             style={{
               marginBottom: 12,
               padding: 12,
-              background: "var(--color-background-secondary)",
+              background: "var(--surface)",
               borderRadius: 8,
             }}
           >
@@ -529,7 +529,7 @@ export function ExpertSelector({
               style={{
                 textAlign: "center",
                 padding: "48px 0",
-                color: "var(--color-text-quaternary)",
+                color: "var(--muted)",
               }}
             >
               <Text
@@ -588,12 +588,12 @@ export function ExpertSelector({
                         style={{
                           cursor: "pointer",
                           border: isSelected
-                            ? "1.5px solid var(--color-border-info)"
+                            ? "1.5px solid var(--teal)"
                             : undefined,
                           background: isSelected
-                            ? "var(--color-background-info)"
+                            ? "color-mix(in srgb, var(--teal) 12%, transparent)"
                             : isDefault
-                            ? "var(--color-background-secondary)"
+                            ? "var(--surface)"
                             : undefined,
                         }}
                       >
@@ -625,7 +625,7 @@ export function ExpertSelector({
                                 <Check
                                   size={14}
                                   style={{
-                                    color: "var(--color-text-info)",
+                                    color: "var(--teal)",
                                     flexShrink: 0,
                                   }}
                                 />

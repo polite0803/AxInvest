@@ -415,6 +415,7 @@ async fn generate_plan_via_llm(
     let proxy_config = provider_config.proxy_config.clone();
 
     let ctx = axagent_harness::ProviderRequestContext {
+        header_timeout_secs: None,
         api_key,
         key_id: key_row.id.clone(),
         provider_id: provider_id.to_string(),
@@ -647,6 +648,7 @@ async fn build_agent_context(
     let settings = axagent_dao::repo::settings::get_settings(db).await.unwrap_or_default();
 
     let ctx = axagent_harness::ProviderRequestContext {
+        header_timeout_secs: None,
         api_key,
         key_id: key.id.clone(),
         provider_id: prov.id.clone(),

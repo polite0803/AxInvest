@@ -33,6 +33,23 @@ function formatEventTime(ms: number): string {
   return new Date(ms).toLocaleString();
 }
 
+/**
+ * 状态词 → 图标着色 token。
+ *
+ * 这里原本写的是 `var(--color-` + `${cfg.color}` 的动态拼接：`cfg.color` 是 AntD Tag 的状态词
+ * （default / processing / success / error / warning），而 index.css 的 @theme 别名只有
+ * `--color-success`、`--color-warning`、`--color-danger`、`--color-info`
+ * ⇒ 失败（error）、进行中（processing）、待处理（default）三档的图标**一直不吃色**，
+ * 与 completed / stopped 看起来同一层级。Tag 自身仍走 AntD 状态词，不受影响。
+ */
+const STATUS_TOKEN: Record<string, string> = {
+  default: "var(--muted)",
+  processing: "var(--accent)",
+  success: "var(--green)",
+  error: "var(--red)",
+  warning: "var(--amber)",
+};
+
 export function TaskPanel() {
   const { t } = useTranslation();
   const [tasks, setTasks] = useState<BackgroundTaskInfo[]>([]);
@@ -286,7 +303,7 @@ export function TaskPanel() {
               >
                 <span
                   style={{
-                    color: `var(--color-${cfg.color})`,
+                    color: STATUS_TOKEN[cfg.color] ?? "var(--muted)",
                     display: "flex",
                   }}
                 >
@@ -327,7 +344,7 @@ export function TaskPanel() {
                 <div
                   style={{
                     padding: "8px 12px 12px",
-                    borderTop: "1px solid var(--color-border-secondary)",
+                    borderTop: "1px solid var(--border-light)",
                   }}
                 >
                   {task.description && (
@@ -358,7 +375,7 @@ export function TaskPanel() {
                   <div
                     style={{
                       marginTop: 8,
-                      background: "var(--color-fill-secondary)",
+                      background: "var(--surface-2)",
                       borderRadius: 6,
                       padding: "8px 12px",
                       maxHeight: 300,
@@ -401,7 +418,7 @@ export function TaskPanel() {
                               flexWrap: "wrap",
                               gap: 6,
                               padding: "3px 0",
-                              borderTop: "1px dashed var(--color-border-secondary)",
+                              borderTop: "1px dashed var(--border-light)",
                             }}
                           >
                             <Text

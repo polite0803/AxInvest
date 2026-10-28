@@ -27,7 +27,7 @@ export function ExpertBadge({ agentProfileId, onClick }: ExpertBadgeProps) {
             gap: 4,
             padding: "2px 8px",
             borderRadius: 6,
-            border: "1px dashed var(--color-border-tertiary)",
+            border: "1px dashed var(--border-light)",
             background: "transparent",
             cursor: "pointer",
             fontSize: 12,
@@ -53,11 +53,11 @@ export function ExpertBadge({ agentProfileId, onClick }: ExpertBadgeProps) {
           gap: 4,
           padding: "2px 8px",
           borderRadius: 6,
-          border: "1px solid var(--color-border-info)",
-          background: "var(--color-background-info)",
+          border: "1px solid var(--teal)",
+          background: "color-mix(in srgb, var(--teal) 12%, transparent)",
           cursor: "pointer",
           fontSize: 12,
-          color: "var(--color-text-primary)",
+          color: "var(--fg)",
           transition: "box-shadow 0.15s, transform 0.15s",
         }}
       >

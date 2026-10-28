@@ -59,15 +59,15 @@ function actionLabel(action: string, t: (key: string) => string): string {
 function actionColor(action: string): string {
   switch (action) {
     case "SELL_NOW":
-      return "var(--sa-green)";
+      return "var(--green)";
     case "SELL_AT_LIMIT":
       return "#fa8c16";
     case "SET_STOP_LOSS":
       return "#faad14";
     case "HOLD":
-      return "var(--sa-blue)";
+      return "var(--accent)";
     case "CONSIDER_ADD":
-      return "var(--sa-red)";
+      return "var(--red)";
     default:
       return "var(--muted)";
   }
@@ -123,12 +123,12 @@ export function ExitRecommendationPanel() {
                 </span>
               )}
               {summary.limitExits > 0 && (
-                <span style={{ color: "#fa8c16" }}>
+                <span style={{ color: "var(--amber)" }}>
                   ⏰ {summary.limitExits} {t("stockAnalysis.exitRecommendation.limit")}
                 </span>
               )}
               {summary.stopLossNeeded > 0 && (
-                <span style={{ color: "#faad14" }}>
+                <span style={{ color: "var(--amber)" }}>
                   🛡 {summary.stopLossNeeded} {t("stockAnalysis.exitRecommendation.stopLoss")}
                 </span>
               )}
@@ -146,7 +146,7 @@ export function ExitRecommendationPanel() {
 
 function RecommendationCard({ rec }: { rec: ExitRecommendation }) {
   const { t } = useTranslation();
-  const pnlColor = rec.pnlPct >= 0 ? "var(--sa-red)" : "var(--sa-green)";
+  const pnlColor = rec.pnlPct >= 0 ? "var(--red)" : "var(--green)";
   const scoreColor = rec.exitScore >= 40 ? "red" : rec.exitScore >= 20 ? "#fa8c16" : "#52c41a";
   const scoreBg = rec.exitScore >= 40 ? "#fff0f0" : rec.exitScore >= 20 ? "#fffbe6" : "#f6ffed";
 
@@ -185,7 +185,7 @@ function RecommendationCard({ rec }: { rec: ExitRecommendation }) {
         </span>
         <span>{t("stockAnalysis.exitRecommendation.position")} {rec.positionPct.toFixed(0)}%</span>
         {rec.suggestedPrice && (
-          <span style={{ color: "#fa8c16" }}>
+          <span style={{ color: "var(--amber)" }}>
             {t("stockAnalysis.exitRecommendation.suggestedPrice")} <b>{rec.suggestedPrice.toFixed(2)}</b>
           </span>
         )}

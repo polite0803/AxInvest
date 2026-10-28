@@ -91,8 +91,8 @@ export function BacktestPanel() {
     }
   }, [strategyTaskError]);
 
-  const accuracyColor = stats ? stats.accuracyPct >= 60 ? "var(--sa-red)" : "var(--sa-green)" : undefined;
-  const returnColor = stats && stats.avgReturnPct >= 0 ? "var(--sa-red)" : "var(--sa-green)";
+  const accuracyColor = stats ? stats.accuracyPct >= 60 ? "var(--red)" : "var(--green)" : undefined;
+  const returnColor = stats && stats.avgReturnPct >= 0 ? "var(--red)" : "var(--green)";
 
   return (
     <Card
@@ -178,7 +178,7 @@ export function BacktestPanel() {
                   title={t("stockAnalysis.backtest.maxDrawdown")}
                   value={stats.avgMaxDrawdownPct.toFixed(2)}
                   suffix="%"
-                  styles={{ content: { fontSize: 18, color: "var(--sa-green)" } }}
+                  styles={{ content: { fontSize: 18, color: "var(--green)" } }}
                 />
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs text-gray-500">
@@ -283,7 +283,7 @@ function StrategyTable({ data }: { data: GroupBacktestResult }) {
       key: "winRatePct",
       width: 70,
       render: (v: number) => {
-        const color = v >= 50 ? "var(--sa-red)" : "var(--sa-green)";
+        const color = v >= 50 ? "var(--red)" : "var(--green)";
         return <span className="text-xs font-bold" style={{ color }}>{v.toFixed(1)}%</span>;
       },
     },
@@ -293,7 +293,7 @@ function StrategyTable({ data }: { data: GroupBacktestResult }) {
       key: "avgReturnPct",
       width: 80,
       render: (v: number) => {
-        const color = v >= 0 ? "var(--sa-red)" : "var(--sa-green)";
+        const color = v >= 0 ? "var(--red)" : "var(--green)";
         return <span className="text-xs" style={{ color }}>{v.toFixed(2)}%</span>;
       },
     },
@@ -303,7 +303,7 @@ function StrategyTable({ data }: { data: GroupBacktestResult }) {
       key: "totalReturnPct",
       width: 80,
       render: (v: number) => {
-        const color = v >= 0 ? "var(--sa-red)" : "var(--sa-green)";
+        const color = v >= 0 ? "var(--red)" : "var(--green)";
         return <span className="text-xs" style={{ color }}>{v.toFixed(1)}%</span>;
       },
     },
@@ -312,7 +312,7 @@ function StrategyTable({ data }: { data: GroupBacktestResult }) {
       dataIndex: "avgMaxDrawdownPct",
       key: "avgMaxDrawdownPct",
       width: 80,
-      render: (v: number) => <span className="text-xs" style={{ color: "var(--sa-green)" }}>{v.toFixed(1)}%</span>,
+      render: (v: number) => <span className="text-xs" style={{ color: "var(--green)" }}>{v.toFixed(1)}%</span>,
     },
     {
       title: t("stockAnalysis.backtest.colMaxLossStreak"),

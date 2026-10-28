@@ -346,6 +346,14 @@ jobs:
           node scripts/check-analyst-id-shape.mjs --selftest
           node scripts/check-analyst-id-shape.mjs
 
+      # 首字节预算口径门（2026-10-27）：五条流式路径同源 + 默认值权威唯一 +
+      # 旧的 10s 固定闸门已退役 + 模型级「首字节超时」可配置链路接通。
+      # 与 scripts/ci-check.mjs 对应两条 step **命令行逐字同源**。
+      - name: Check SSE header budget consistency
+        run: |
+          node scripts/check-sse-header-budget.mjs --selftest
+          node scripts/check-sse-header-budget.mjs
+
       # #7 ②④（2026-10-06）：逐档分支的档内纯度门 —— 四个 `pm-h-<档>` 种子块 + 四份
       # `portfolio-mgr-h-<档>.rhai` 只读本档，且四档 tier_score 来源互不相同。
       # 与 scripts/ci-check.mjs 对应两条 step 逐字同源。

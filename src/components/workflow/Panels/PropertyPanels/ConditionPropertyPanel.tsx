@@ -270,7 +270,7 @@ export const ConditionPropertyPanel: React.FC<ConditionPropertyPanelProps> = ({
 
       {config.judgeByLlm && (
         <>
-          <Divider style={{ margin: "6px 0", borderColor: "#333" }} />
+          <Divider style={{ margin: "6px 0", borderColor: "var(--border)" }} />
           <div style={{ marginBottom: 10 }}>
             <div
               style={{
@@ -280,7 +280,7 @@ export const ConditionPropertyPanel: React.FC<ConditionPropertyPanelProps> = ({
                 marginBottom: 4,
               }}
             >
-              <label style={{ color: "#999", fontSize: 12 }}>
+              <label style={{ color: "var(--muted)", fontSize: 12 }}>
                 {t("workflow.props.routingPrompt")}
               </label>
               <Button
@@ -310,7 +310,7 @@ export const ConditionPropertyPanel: React.FC<ConditionPropertyPanelProps> = ({
             />
           </div>
           <div style={{ marginBottom: 10 }}>
-            <label style={{ display: "block", color: "#999", fontSize: 12, marginBottom: 4 }}>
+            <label style={{ display: "block", color: "var(--muted)", fontSize: 12, marginBottom: 4 }}>
               {t("workflow.props.routingModel")}
             </label>
             {
@@ -383,7 +383,7 @@ export const ConditionPropertyPanel: React.FC<ConditionPropertyPanelProps> = ({
                 padding: 8,
                 background: token.colorBgElevated,
                 borderRadius: 6,
-                border: "1px solid #333",
+                border: "1px solid var(--border)",
               }}
             >
               <div style={{ marginBottom: 8 }}>

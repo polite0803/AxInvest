@@ -618,8 +618,12 @@ impl ProviderAdapter for GeminiAdapter {
         });
         let api_key = ctx.api_key.clone();
         let custom_headers = ctx.custom_headers.clone();
+        let provider_id = ctx.provider_id.clone();
+        let header_timeout_secs = ctx.header_timeout_secs;
         let base_url = Self::base_url(ctx);
         // 不在 URL 中传递 API key,改用 x-goog-api-key header (更安全,且避免 URL 日志泄露)
+        // Gemini 请求体里没有 model 字段（模型在 URL 上），单独留一份供诊断日志用。
+        let model = request.model.clone();
         let url = format!("{}/models/{}:streamGenerateContent?alt=sse", base_url, request.model);
 
         let (system_instruction, contents) = convert_messages(&request.messages);
@@ -633,24 +637,37 @@ impl ProviderAdapter for GeminiAdapter {
         let (mut tx, rx) = futures::channel::mpsc::channel(256);
 
         tokio::spawn(async move {
-            let resp = match crate::apply_stream_headers_to_request(
-                client.post(&url).header("x-goog-api-key", &api_key).json(&body),
-                &custom_headers,
-            )
-            .send()
-            .await
-            {
-                Ok(r) if r.status().is_success() => r,
-                Ok(r) => {
-                    let s = r.status();
-                    let t = r.text().await.unwrap_or_default();
+            // 首字节预算与其它协议路径同口径（见 stream_budget）。
+            let body_size = serde_json::to_string(&body).ok().map(|s| s.len()).unwrap_or(0);
+            let budget =
+                crate::stream_budget::resolve_header_budget(header_timeout_secs, body_size);
+            let header_ctx = crate::stream_budget::HeaderBudgetContext {
+                provider_id: provider_id.clone(),
+                model: model.clone(),
+                url: url.clone(),
+            };
+            let send_result =
+                crate::stream_budget::send_with_header_budget(budget, &header_ctx, || {
+                    crate::apply_stream_headers_to_request(
+                        client.post(&url).header("x-goog-api-key", &api_key).json(&body),
+                        &custom_headers,
+                    )
+                })
+                .await;
+
+            let resp = match send_result {
+                Ok(outcome) => outcome.response,
+                Err(crate::stream_budget::HeaderSendError::Hung { waited, budget, .. }) => {
                     let _ = tx.try_send(Err(AxAgentError::execution_with_source(
-                        super::diagnose_http_status("Gemini", s, &t),
-                        anyhow::anyhow!("HTTP {s}: {t}"),
+                        crate::stream_budget::hung_error_message("Gemini", waited, budget),
+                        anyhow::anyhow!(
+                            "response headers timeout after {}s (gateway hung)",
+                            waited.as_secs()
+                        ),
                     )));
                     return;
                 },
-                Err(e) => {
+                Err(crate::stream_budget::HeaderSendError::Request(e)) => {
                     let _ = tx.try_send(Err(AxAgentError::execution_with_source(
                         format!("Request to {url} failed: {}", super::diagnose_reqwest_error(&e)),
                         e,
@@ -658,6 +675,16 @@ impl ProviderAdapter for GeminiAdapter {
                     return;
                 },
             };
+
+            if !resp.status().is_success() {
+                let s = resp.status();
+                let t = resp.text().await.unwrap_or_default();
+                let _ = tx.try_send(Err(AxAgentError::execution_with_source(
+                    super::diagnose_http_status("Gemini", s, &t),
+                    anyhow::anyhow!("HTTP {s}: {t}"),
+                )));
+                return;
+            }
 
             let mut byte_stream = resp.bytes_stream();
             let mut buf = String::new();

@@ -21,6 +21,7 @@ import {
 import html2canvas from "html2canvas";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import "@xyflow/react/dist/style.css";
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import { invoke, isTauri, logIpcError } from "@/lib/invoke";
 import {
   autoLayout,
@@ -35,6 +36,7 @@ import {
   wouldCreateCycle,
 } from "@/lib/workflowLayout";
 import { useWorkflowEditorStore } from "@/stores";
+import { hueColor } from "@/theme/categoricalColors";
 
 import { showBackendError } from "@/lib/errorI18n";
 import { message } from "@/lib/toast";
@@ -167,6 +169,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
 }) => {
   const { t } = useTranslation();
   const { token } = theme.useToken();
+  const isDark = useIsDarkTheme();
   const {
     currentTemplate,
     nodes,
@@ -623,10 +626,8 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       }
 
       try {
-        const typeInfo = NODE_TYPE_MAP[payload.type] || {
-          labelKey: "",
-          color: token.colorTextQuaternary,
-        };
+        const typeMeta = NODE_TYPE_MAP[payload.type];
+        const typeInfo = typeMeta ?? { labelKey: "" };
 
         // Check if the mouse is within the canvas area
         const canvasEl = document.querySelector(".react-flow");
@@ -710,7 +711,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               type: typeInfo.labelKey ? t(typeInfo.labelKey) : payload.type,
             }),
             description: "",
-            color: typeInfo.color,
+            color: typeMeta ? hueColor(typeMeta.hue, isDark) : token.colorTextQuaternary,
             nodeType: payload.type,
             enabled: true,
             ...getDefaultNodeConfig(payload.type),

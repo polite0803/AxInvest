@@ -124,6 +124,11 @@ export interface ModelParamOverrides {
   noSystemRole?: boolean;
   thinkingParamStyle?: string;
   requestDelayMs?: number;
+  /**
+   * 首字节（HTTP 响应头）等待预算（秒）。这是**硬档总上限**（含同供应商原地重试一次），
+   * 软档取其一半；不填 = 用默认（软 45s / 硬 90s）。
+   */
+  headerTimeoutSecs?: number;
 }
 
 // === Conversation & Message ===

@@ -531,7 +531,7 @@ function R1View({ data, isDark }: { data: R1DebateJson; isDark: boolean }) {
                 <span className="font-medium">{arg.claim || t("stockAnalysis.unnamedArgument")}</span>
                 {arg.category && <Tag className="ml-1 text-xs">{arg.category}</Tag>}
                 {typeof arg.strength === "number" && (
-                  <span className="ml-1" style={{ color: "var(--sa-red)" }}>
+                  <span className="ml-1" style={{ color: "var(--red)" }}>
                     {t("stockAnalysis.strength")}:{arg.strength}
                   </span>
                 )}
@@ -561,7 +561,7 @@ function R1View({ data, isDark }: { data: R1DebateJson; isDark: boolean }) {
                   </span>
                 )}
                 {typeof rp.weight === "number" && (
-                  <span className="ml-1" style={{ color: "var(--sa-amber)" }}>
+                  <span className="ml-1" style={{ color: "var(--amber)" }}>
                     {t("stockAnalysis.weight")}:{rp.weight}
                   </span>
                 )}
@@ -583,19 +583,19 @@ function R1View({ data, isDark }: { data: R1DebateJson; isDark: boolean }) {
                 className="p-2 rounded text-xs"
                 style={{
                   background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
-                  borderLeft: "2px solid var(--sa-amber)",
+                  borderLeft: "2px solid var(--amber)",
                 }}
               >
                 <div className="font-medium mb-0.5">
                   {pa.our_claim || `${t("stockAnalysis.argument")} ${i + 1}`}
                 </div>
                 {pa.bear_attack && (
-                  <div className="mb-0.5" style={{ color: "var(--sa-green)" }}>
+                  <div className="mb-0.5" style={{ color: "var(--green)" }}>
                     <span className="font-medium">{t("stockAnalysis.bearAttack")}:</span> {pa.bear_attack}
                   </div>
                 )}
                 {pa.our_response && (
-                  <div style={{ color: "var(--sa-red)" }}>
+                  <div style={{ color: "var(--red)" }}>
                     <span className="font-medium">{t("stockAnalysis.ourResponse")}:</span> {pa.our_response}
                   </div>
                 )}
@@ -641,7 +641,7 @@ function R2View({ data, isDark }: { data: R2DebateJson; isDark: boolean }) {
                 className="p-2 rounded text-xs"
                 style={{
                   background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
-                  borderLeft: "2px solid var(--primary)",
+                  borderLeft: "2px solid var(--accent)",
                 }}
               >
                 <div className="font-medium mb-0.5">
@@ -765,8 +765,8 @@ function R3View({ data, isDark }: { data: R3DebateJson; isDark: boolean }) {
             background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
             borderLeft: posInfo?.color === "green"
                 || (typeof data.final_position === "string" && data.final_position.includes("bear"))
-              ? "2px solid var(--sa-green)"
-              : "2px solid var(--sa-red)",
+              ? "2px solid var(--green)"
+              : "2px solid var(--red)",
           }}
         >
           <span className="font-medium">{t("stockAnalysis.debate.finalPosition")}:</span> {data.claim}
@@ -788,7 +788,7 @@ function R3View({ data, isDark }: { data: R3DebateJson; isDark: boolean }) {
                   className="p-2 rounded text-xs"
                   style={{
                     background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
-                    borderLeft: "2px solid var(--primary)",
+                    borderLeft: "2px solid var(--accent)",
                   }}
                 >
                   <div className="flex items-center gap-1 flex-wrap mb-0.5">
@@ -807,7 +807,7 @@ function R3View({ data, isDark }: { data: R3DebateJson; isDark: boolean }) {
                   )}
                   {resp.response && <div className="text-xs">{resp.response}</div>}
                   {resp.concession && (
-                    <div className="text-xs mt-0.5" style={{ color: "var(--sa-amber)" }}>
+                    <div className="text-xs mt-0.5" style={{ color: "var(--amber)" }}>
                       <span className="font-medium">{t("stockAnalysis.debate.concession")}:</span> {resp.concession}
                     </div>
                   )}
@@ -834,7 +834,7 @@ function R3View({ data, isDark }: { data: R3DebateJson; isDark: boolean }) {
                   </span>
                 )}
                 {typeof sa.final_strength === "number" && (
-                  <span className="ml-1" style={{ color: "var(--sa-red)" }}>
+                  <span className="ml-1" style={{ color: "var(--red)" }}>
                     {t("stockAnalysis.finalStrength")}:{sa.final_strength}
                   </span>
                 )}
@@ -1023,7 +1023,7 @@ function DebateContentView({ content, isDark }: { content: DebateContent; isDark
     return (
       <pre
         className="text-xs leading-relaxed whitespace-pre-wrap"
-        style={{ color: "var(--text-primary)", fontFamily: "inherit", margin: 0 }}
+        style={{ color: "var(--fg)", fontFamily: "inherit", margin: 0 }}
       >
         {cleanText}
       </pre>
@@ -1209,7 +1209,7 @@ export function DebatePanel() {
                   <pre
                     className="text-xs leading-relaxed whitespace-pre-wrap mt-1 px-2 py-1 rounded"
                     style={{
-                      color: "var(--text-primary)",
+                      color: "var(--fg)",
                       fontFamily: "inherit",
                       maxHeight: 160,
                       overflow: "hidden",
@@ -1292,16 +1292,16 @@ export function DebatePanel() {
         )}
         <div className="mb-3">
           <div className="flex justify-between text-xs mb-1">
-            <span style={{ color: "var(--sa-green)" }}>{t("stockAnalysis.bear")}</span>
+            <span style={{ color: "var(--green)" }}>{t("stockAnalysis.bear")}</span>
             <span className="font-semibold" style={{ fontSize: 13 }}>{sentimentText}</span>
-            <span style={{ color: "var(--sa-red)" }}>{t("stockAnalysis.bull")}</span>
+            <span style={{ color: "var(--red)" }}>{t("stockAnalysis.bull")}</span>
           </div>
           <div
             className="relative"
             style={{
               height: 18,
               borderRadius: 9,
-              background: "linear-gradient(to right, var(--sa-green), var(--sa-amber), var(--sa-red))",
+              background: "linear-gradient(to right, var(--green), var(--amber), var(--red))",
               overflow: "hidden",
             }}
           >
@@ -1373,7 +1373,7 @@ export function DebatePanel() {
                       >
                         <div className="flex items-center gap-2 mb-1">
                           <span aria-hidden="true">⚖️</span>
-                          <span className="font-semibold" style={{ color: "#7c3aed" }}>
+                          <span className="font-semibold" style={{ color: "var(--purple)" }}>
                             {t("stockAnalysis.verdictReason")}
                           </span>
                         </div>
@@ -1387,13 +1387,13 @@ export function DebatePanel() {
                       </div>
                     )}
                     <div className="flex flex-col sm:flex-row gap-2">
-                      <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-red)" }}>
+                      <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--red)" }}>
                         <Tag color="red">{t("stockAnalysis.bull")}</Tag>
                         <div className="mt-1">
                           <DebateContentView content={round.bull} isDark={isDark} />
                         </div>
                       </div>
-                      <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-green)" }}>
+                      <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--green)" }}>
                         <Tag color="green">{t("stockAnalysis.bear")}</Tag>
                         <div className="mt-1">
                           <DebateContentView content={round.bear} isDark={isDark} />
@@ -1419,16 +1419,16 @@ export function DebatePanel() {
       >
         <div className="mb-3">
           <div className="flex justify-between text-sm mb-1">
-            <span style={{ color: "var(--sa-green)" }}>{t("stockAnalysis.bear")}</span>
+            <span style={{ color: "var(--green)" }}>{t("stockAnalysis.bear")}</span>
             <span className="font-semibold">{sentimentText}</span>
-            <span style={{ color: "var(--sa-red)" }}>{t("stockAnalysis.bull")}</span>
+            <span style={{ color: "var(--red)" }}>{t("stockAnalysis.bull")}</span>
           </div>
           <div
             className="relative"
             style={{
               height: 22,
               borderRadius: 11,
-              background: "linear-gradient(to right, var(--sa-green), var(--sa-amber), var(--sa-red))",
+              background: "linear-gradient(to right, var(--green), var(--amber), var(--red))",
               overflow: "hidden",
             }}
           >
@@ -1485,7 +1485,7 @@ export function DebatePanel() {
                       >
                         <div className="flex items-center gap-2 mb-2">
                           <span style={{ fontSize: 20 }} aria-hidden="true">⚖️</span>
-                          <span className="font-semibold" style={{ color: "#7c3aed" }}>
+                          <span className="font-semibold" style={{ color: "var(--purple)" }}>
                             {t("stockAnalysis.debate.finalVerdict")}
                           </span>
                         </div>
@@ -1509,13 +1509,13 @@ export function DebatePanel() {
                       </div>
                     )}
                     <div className="flex flex-col sm:flex-row gap-3">
-                      <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-red)" }}>
+                      <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--red)" }}>
                         <Tag color="red">{t("stockAnalysis.bull")}</Tag>
                         <div className="mt-2">
                           <DebateContentView content={round.bull} isDark={isDark} />
                         </div>
                       </div>
-                      <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-green)" }}>
+                      <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--green)" }}>
                         <Tag color="green">{t("stockAnalysis.bear")}</Tag>
                         <div className="mt-2">
                           <DebateContentView content={round.bear} isDark={isDark} />

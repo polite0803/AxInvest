@@ -1,8 +1,8 @@
 [data-component="sub-agent-card"] {
   padding: 12px 14px;
   border-radius: 6px;
-  border: 1px solid var(--border-weak, #e8e8e8);
-  background: color-mix(in srgb, var(--background-base, #fff) 94%, transparent);
+  border: 1px solid var(--border-light);
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
   margin: 8px 0;
   transition:
     background 0.2s,
@@ -11,7 +11,7 @@
 }
 
 [data-component="sub-agent-card"]:hover {
-  background: color-mix(in srgb, var(--background-base, #fff) 88%, transparent);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
 }
 
 .sub-agent-card--running {
@@ -22,7 +22,7 @@
 .sub-agent-card--completed {
   border-color: color-mix(
     in srgb,
-    var(--ant-color-success, #52c41a) 19%,
+    var(--green) 19%,
     transparent
   );
 }
@@ -30,7 +30,7 @@
 .sub-agent-card--failed {
   border-color: color-mix(
     in srgb,
-    var(--ant-color-error, #ff4d4f) 19%,
+    var(--red) 19%,
     transparent
   );
 }
@@ -39,11 +39,11 @@
   0%,
   100% {
     box-shadow: 0 0 0 0
-      color-mix(in srgb, var(--ant-color-primary, #1890ff) 15%, transparent);
+      color-mix(in srgb, var(--accent) 15%, transparent);
   }
   50% {
     box-shadow: 0 0 0 4px
-      color-mix(in srgb, var(--ant-color-primary, #1890ff) 5%, transparent);
+      color-mix(in srgb, var(--accent) 5%, transparent);
   }
 }
 
@@ -72,7 +72,7 @@
 
 .sub-agent-card__desc {
   font-size: 12px;
-  color: var(--text-secondary, #8c8c8c);
+  color: var(--fg-2);
   line-height: 1.4;
   padding-left: 24px;
   overflow: hidden;
@@ -83,7 +83,7 @@
 
 .sub-agent-card__action {
   font-size: 11px;
-  color: var(--text-tertiary, #bfbfbf);
+  color: var(--muted);
   padding-left: 24px;
   margin-top: 4px;
   display: flex;

@@ -226,14 +226,14 @@ export function TradePanel() {
       dataIndex: "unrealizedPnlPct",
       width: 50,
       render: (v: number | null) =>
-        v != null ? <span style={{ color: v >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>{v.toFixed(1)}%</span> : "-",
+        v != null ? <span style={{ color: v >= 0 ? "var(--red)" : "var(--green)" }}>{v.toFixed(1)}%</span> : "-",
     },
     {
       title: t("trade.pnl"),
       dataIndex: "unrealizedPnl",
       width: 50,
       render: (v: number | null) =>
-        v != null ? <span style={{ color: v >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>{v.toFixed(0)}</span> : "-",
+        v != null ? <span style={{ color: v >= 0 ? "var(--red)" : "var(--green)" }}>{v.toFixed(0)}</span> : "-",
     },
   ];
 
@@ -259,7 +259,7 @@ export function TradePanel() {
       dataIndex: "realizedPnl",
       width: 50,
       render: (v: number | null) =>
-        v != null ? <span style={{ color: v >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>{v.toFixed(0)}</span> : "-",
+        v != null ? <span style={{ color: v >= 0 ? "var(--red)" : "var(--green)" }}>{v.toFixed(0)}</span> : "-",
     },
   ];
 
@@ -315,7 +315,7 @@ export function TradePanel() {
           <Statistic
             title={t("stockAnalysis.trade.totalPnl")}
             value={stats.totalPnl.toFixed(0)}
-            styles={{ content: { fontSize: 14, color: stats.totalPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)" } }}
+            styles={{ content: { fontSize: 14, color: stats.totalPnl >= 0 ? "var(--red)" : "var(--green)" } }}
           />
         </div>
       )}
@@ -392,7 +392,7 @@ export function TradePanel() {
             <span>
               {t("stockAnalysis.totalMarketValue")}: <b>{(totalMv / 10000).toFixed(1)}{t("stockAnalysis.wanUnit")}</b>
             </span>
-            <span style={{ color: totalPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
+            <span style={{ color: totalPnl >= 0 ? "var(--red)" : "var(--green)" }}>
               {t("stockAnalysis.unrealizedPnl")}: <b>{totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(0)}</b>
             </span>
             <span>

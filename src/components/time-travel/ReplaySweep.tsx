@@ -154,7 +154,7 @@ export function ReplaySweep() {
         key: "return_rate",
         width: 100,
         render: (v: number) => (
-          <span style={{ color: v >= 0 ? "var(--sa-green, #10b981)" : "var(--sa-red, #ef4444)" }}>
+          <span style={{ color: v >= 0 ? "var(--green)" : "var(--red)" }}>
             {(v * 100).toFixed(2)}%
           </span>
         ),

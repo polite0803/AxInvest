@@ -1,5 +1,8 @@
 use serde_json::json;
 
+use crate::error::DataError;
+use crate::outcome::{outcome_from_opt, outcome_from_vec, Expect};
+
 // ── G14 DojoSDK 工具执行器（trait + 全局注册器） ─────────────────────────
 //
 // astock-data 是 implementor 层级，不能依赖 quant（consumer）/
@@ -918,6 +921,26 @@ fn news_limit_from_arguments(arguments: &serde_json::Value) -> u32 {
     }
 }
 
+/// 把 `Vec` 型取数结果包成带状态的信封（2026-10-28）。
+///
+/// 背景：`get_index_quotes` 曾在三条通道全失败时返回裸 `[]`，LLM 只能看到
+/// 「今天没有指数行情」，报告板块与分析师会把取数故障当成真实结论消费。
+/// 现统一走 `{status,data,detail}`，四态判据见 `crate::outcome`。
+fn envelope_vec<T: serde::Serialize>(
+    res: Result<Vec<T>, DataError>,
+    expect: Expect,
+) -> Result<String, String> {
+    serde_json::to_string(&outcome_from_vec(res, expect)).map_err(|e| e.to_string())
+}
+
+/// 把 `Option` 型取数结果包成带状态的信封（单对象维度：北向资金等）。
+fn envelope_opt<T: serde::Serialize>(
+    res: Result<Option<T>, DataError>,
+    expect: Expect,
+) -> Result<String, String> {
+    serde_json::to_string(&outcome_from_opt(res, expect)).map_err(|e| e.to_string())
+}
+
 pub async fn execute_mcp_tool(
     client: &crate::AStockClient,
     tool_name: &str,
@@ -1040,8 +1063,7 @@ pub async fn execute_mcp_tool(
             let keyword = parse_str(arguments, "keyword");
             let keyword = keyword.as_str();
             let limit = arguments["limit"].as_u64().unwrap_or(10) as u32;
-            let results = client.search_news(keyword, limit).await.map_err(|e| e.to_string())?;
-            serde_json::to_string(&results).map_err(|e| e.to_string())
+            envelope_vec(client.search_news(keyword, limit).await, Expect::MayBeEmpty)
         },
         "get_stock_quote" => {
             let code = parse_code(arguments);
@@ -1054,8 +1076,7 @@ pub async fn execute_mcp_tool(
             let code = code.as_str();
             let period = arguments["period"].as_str().unwrap_or("daily");
             let limit = arguments["limit"].as_u64().unwrap_or(120).min(500) as u32;
-            let klines = client.get_klines(code, period, limit).await.map_err(|e| e.to_string())?;
-            serde_json::to_string(&klines).map_err(|e| e.to_string())
+            envelope_vec(client.get_klines(code, period, limit).await, Expect::MustHaveRows)
         },
         // ── G1 跨市场数据接入 ──
         "get_international_stock_quote" => {
@@ -1152,14 +1173,12 @@ pub async fn execute_mcp_tool(
         "get_stock_money_flow" => {
             let code = parse_code(arguments);
             let code = code.as_str();
-            let flow = client.get_money_flow(code).await.map_err(|e| e.to_string())?;
-            serde_json::to_string(&flow).map_err(|e| e.to_string())
+            envelope_opt(client.get_money_flow(code).await, Expect::MustHaveRows)
         },
         "get_social_sentiment" => {
             let code = parse_code(arguments);
             let code = code.as_str();
-            let sentiment = client.get_social_sentiment(code).await.map_err(|e| e.to_string())?;
-            serde_json::to_string(&sentiment).map_err(|e| e.to_string())
+            envelope_vec(client.get_social_sentiment(code).await, Expect::MayBeEmpty)
         },
         "get_stock_dragon_tiger" => {
             let code = parse_code(arguments);
@@ -1258,13 +1277,9 @@ pub async fn execute_mcp_tool(
             serde_json::to_string(&visits).map_err(|e| e.to_string())
         },
         "get_market_dragon_tiger" => {
-            let dt = client.get_market_dragon_tiger().await.map_err(|e| e.to_string())?;
-            serde_json::to_string(&dt).map_err(|e| e.to_string())
+            envelope_vec(client.get_market_dragon_tiger().await, Expect::MayBeEmpty)
         },
-        "get_hot_stocks" => {
-            let hot = client.get_hot_stocks().await.map_err(|e| e.to_string())?;
-            serde_json::to_string(&hot).map_err(|e| e.to_string())
-        },
+        "get_hot_stocks" => envelope_vec(client.get_hot_stocks().await, Expect::MustHaveRows),
         "get_limit_up_pool" => {
             // 空串按「未指定」处理：LLM 常把可选 string 传成 ""，直接透传会让
             // vendor 拿 `date=` 打一次必失败的请求。
@@ -1283,20 +1298,19 @@ pub async fn execute_mcp_tool(
             serde_json::to_string(&snap).map_err(|e| e.to_string())
         },
         "get_industry_ranking" => {
-            let ranking = client.get_industry_ranking().await.map_err(|e| e.to_string())?;
-            serde_json::to_string(&ranking).map_err(|e| e.to_string())
+            envelope_vec(client.get_industry_ranking().await, Expect::MustHaveRows)
         },
-        "get_cls_flash" => {
-            let flash = client.get_cls_flash().await.map_err(|e| e.to_string())?;
-            serde_json::to_string(&flash).map_err(|e| e.to_string())
-        },
+        "get_cls_flash" => envelope_vec(client.get_cls_flash().await, Expect::MayBeEmpty),
         "get_north_bound_flow" => {
-            let flow = client.get_north_bound_flow().await.map_err(|e| e.to_string())?;
-            serde_json::to_string(&flow).map_err(|e| e.to_string())
+            envelope_opt(client.get_north_bound_flow().await, Expect::MayBeEmpty)
         },
         "get_index_quotes" => {
-            let idx = client.get_index_quotes().await.map_err(|e| e.to_string())?;
-            serde_json::to_string(&idx).map_err(|e| e.to_string())
+            // 工具返回**带状态**（2026-10-28）：`{"status":"ok|empty_by_time|source_failed|
+            // schema_changed","data":[...],"detail":"..."}`。
+            // 旧实现把「全部通道失败」序列化成裸 `[]` —— LLM 只能看到「今天没有指数行情」，
+            // 而报告板块与分析师会把「取数故障」当成真实结论消费。
+            let outcome = client.get_index_quotes_outcome().await;
+            serde_json::to_string(&outcome).map_err(|e| e.to_string())
         },
         "get_stock_peers" => {
             let code = parse_code(arguments);
@@ -5862,14 +5876,16 @@ async fn compute_serenity_performance_impl(
         _ => 0.0,
     };
 
-    // 大盘基准（上证指数）
-    let index_quotes = client.get_index_quotes().await.map_err(|e| e.to_string())?;
-    let sh_index = index_quotes.iter().find(|q| q.code.starts_with("000001"));
-    let index_change_pct = sh_index.map(|q| q.change_pct).unwrap_or(0.0);
+    // 大盘基准（上证指数）。⚠ 基准取不到时**不得**把大盘涨跌幅记成 0 ——
+    // 那会让 `outperform_pct == return_pct`，把「基准缺失」伪装成「与基准持平」。
+    // 2026-10-28：改用带成因的 outcome，缺失时两列都给 null 并单列 `benchmark_status`。
+    let index_outcome = client.get_index_quotes_outcome().await;
+    let sh_index = index_outcome.data.iter().find(|q| q.code.starts_with("000001"));
+    let index_change_pct = sh_index.map(|q| q.change_pct);
     // outperform_pct = return_pct - 当日大盘涨跌幅
     // 注：这里用今日大盘涨跌幅作为近似（推荐日至今的累计需要历史 K 线，
     //     简化处理：仅用今日大盘涨跌幅作为相对参考）
-    let outperform_pct = return_pct - index_change_pct;
+    let outperform_pct = index_change_pct.map(|bench| return_pct - bench);
 
     // 止盈止损触发（默认 +30% 止盈，-15% 止损）
     let hit_target = return_pct >= 30.0;
@@ -5884,11 +5900,19 @@ async fn compute_serenity_performance_impl(
         "active"
     };
 
+    let excess_text = match outperform_pct {
+        Some(v) => format!("{v:+.2}%"),
+        None => format!("不可得({})", index_outcome.status.as_str()),
+    };
     let result = json!({
         "stock_code": stock_code,
         "recommend_date": recommend_date,
         "return_pct": round2(return_pct),
-        "outperform_pct": round2(outperform_pct),
+        "outperform_pct": outperform_pct.map(round2),
+        "index_change_pct": index_change_pct.map(round2),
+        // 基准缺失的成因（与工具 `get_index_quotes` 同一套四态拼写）
+        "benchmark_status": index_outcome.status.as_str(),
+        "benchmark_detail": index_outcome.detail,
         "holding_days": holding_days,
         "hit_target": hit_target,
         "hit_stop": hit_stop,
@@ -5896,7 +5920,7 @@ async fn compute_serenity_performance_impl(
         "baseline_price": baseline.map(|b| round2(b.close)),
         "latest_price": latest.map(|l| round2(l.close)),
         "summary": format!(
-            "持有{holding_days}天 | 涨幅:{return_pct:.2}% | 超额:{outperform_pct:+.2}% | 状态:{status}"
+            "持有{holding_days}天 | 涨幅:{return_pct:.2}% | 超额:{excess_text} | 状态:{status}"
         )
     });
     Ok(result)

@@ -3530,24 +3530,27 @@ impl StockVendor for EastMoneyVendor {
 
     async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
         let mut results = Vec::with_capacity(EM_INDEX_SECIDS.len());
+        // 逐 secid 留证（2026-10-28）：旧实现把三种完全不同的结局 —— 请求失败 /
+        // JSON 解析失败 / data=null —— 全部 `continue` 掉，最后统一 `Ok(vec![])`。
+        // 路由层因此只能判「源返回空」，把「接口改版」与「今日无行情」写成同一句。
+        let mut http_failed: Vec<String> = Vec::new();
+        let mut parse_failed: Vec<String> = Vec::new();
+        let mut schema_missing: Vec<String> = Vec::new();
+        let mut null_payload: Vec<String> = Vec::new();
+        let mut no_point: Vec<String> = Vec::new();
         for (secid, _, name) in &EM_INDEX_SECIDS {
             let url = format!(
                 "https://push2his.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f170"
             );
             match self.em_get(&url).await {
                 Ok(resp) => {
-                    // P0-I(2026-09-12): 原实现 `unwrap_or(Value::Null)` + `if d.is_null() { continue }`
-                    // 把「响应体解析失败」与「data 为 null」两种完全不同的故障合并成同一个
-                    // 静默 `continue`，配合下方的 `Err(_) => continue` ⇒ 三个指数全失败时
-                    // 本函数返回 `Ok(vec![])`，调用方无法区分「源不可用」与「今日无行情」。
-                    // 603353 实证（v37）：`t-index-quotes` 载荷恒 `"[]"`，报告板块恒空，
-                    // 而同一 URL 从宿主机直连正常（上证 3888.11）⇒ 需日志才能定位。
                     let json: Value = match resp.json().await {
                         Ok(j) => j,
                         Err(e) => {
                             tracing::warn!(
                                 "[eastmoney] get_index_quotes {secid}({name}) 响应解析失败: {e}"
                             );
+                            parse_failed.push(format!("{secid}({name}): {e}"));
                             continue;
                         },
                     };
@@ -3557,13 +3560,38 @@ impl StockVendor for EastMoneyVendor {
                             "[eastmoney] get_index_quotes {secid}({name}) 返回 data=null, rc={}",
                             json["rc"]
                         );
+                        null_payload.push(format!("{secid}({name}) rc={}", json["rc"]));
+                        continue;
+                    }
+                    // 结构闸门：`f57`(代码) 缺失 = 字段名/层级变了，属改版而不是「没数据」。
+                    // 旧实现 `unwrap_or("")` 会产出 code="" 的行，下游看着像正常结果。
+                    let code = match d.get("f57").and_then(Value::as_str) {
+                        Some(c) if !c.trim().is_empty() => c.trim().to_string(),
+                        _ => {
+                            schema_missing.push(format!("{secid}({name}): 缺 f57(code)"));
+                            continue;
+                        },
+                    };
+                    // `f43`(最新点位) 缺失/非数值（东财用 "-" 表示该时点不可用）⇒ 该时点无数据；
+                    // 键整个不在 ⇒ 结构变更。两者必须分开。
+                    let Some(f43) = d.get("f43") else {
+                        schema_missing.push(format!("{secid}({name}): 缺 f43(price)"));
+                        continue;
+                    };
+                    let Some(raw_price) = f43.as_f64() else {
+                        no_point.push(format!("{secid}({name}): f43={f43}"));
+                        continue;
+                    };
+                    let price = raw_price / 100.0;
+                    if price <= 0.0 {
+                        no_point.push(format!("{secid}({name}): f43={raw_price}"));
                         continue;
                     }
                     let f = |key: &str| d[key].as_f64().unwrap_or(0.0);
                     results.push(IndexQuote {
-                        code: d["f57"].as_str().unwrap_or("").to_string(),
+                        code,
                         name: name.to_string(),
-                        price: f("f43") / 100.0,
+                        price,
                         pre_close: f("f60") / 100.0,
                         change_pct: f("f170") / 100.0,
                         volume: f("f47"),
@@ -3574,11 +3602,67 @@ impl StockVendor for EastMoneyVendor {
                     tracing::warn!(
                         "[eastmoney] get_index_quotes {secid}({name}) 请求失败（已含重试）: {e}"
                     );
-                    continue;
+                    http_failed.push(format!("{secid}({name}): {e}"));
                 },
             }
         }
-        Ok(results)
+        if !results.is_empty() {
+            // 部分成功：可用数据必须返回，但缺失项不得静默 —— 打一条带逐个 secid 的 warn。
+            if !(http_failed.is_empty()
+                && parse_failed.is_empty()
+                && schema_missing.is_empty()
+                && null_payload.is_empty()
+                && no_point.is_empty())
+            {
+                tracing::warn!(
+                    "[eastmoney] get_index_quotes 部分成功 {}/{}；http={:?} parse={:?} schema={:?} null={:?} no_point={:?}",
+                    results.len(),
+                    EM_INDEX_SECIDS.len(),
+                    http_failed,
+                    parse_failed,
+                    schema_missing,
+                    null_payload,
+                    no_point
+                );
+            }
+            return Ok(results);
+        }
+        // 一条都没取到 ⇒ 必须回 Err（旧实现这里 `Ok(vec![])`，是「看起来正常但其实是空数据」的源头）。
+        if !parse_failed.is_empty() || !schema_missing.is_empty() {
+            let mut msg = Vec::new();
+            if !parse_failed.is_empty() {
+                msg.push(format!("响应解析失败: {}", parse_failed.join("; ")));
+            }
+            if !schema_missing.is_empty() {
+                msg.push(format!("必需字段缺失: {}", schema_missing.join("; ")));
+            }
+            return Err(DataError::ParseError(msg.join("；")));
+        }
+        if !http_failed.is_empty() {
+            return Err(DataError::VendorError {
+                vendor: "eastmoney_push2".into(),
+                message: format!("指数行情请求失败: {}", http_failed.join("; ")),
+            });
+        }
+        if !null_payload.is_empty() {
+            // `data=null` 是**结构在、载荷空**：多为反爬壳页/参数被拒，不是「改版」也不是「无行情」。
+            // 文案刻意不含「为空/无数据」，避免被 `is_empty_data` 误判成时段性空值。
+            return Err(DataError::VendorError {
+                vendor: "eastmoney_push2".into(),
+                message: format!("指数行情返回 data=null: {}", null_payload.join("; ")),
+            });
+        }
+        if !no_point.is_empty() {
+            // 结构完整但点位不可用（开盘前/停牌）⇒ 该时点无数据，可由 `is_empty_data` 识别。
+            return Err(DataError::VendorError {
+                vendor: "eastmoney_push2".into(),
+                message: format!("指数点位该时点无数据: {}", no_point.join("; ")),
+            });
+        }
+        Err(DataError::VendorError {
+            vendor: "eastmoney_push2".into(),
+            message: "指数行情未返回任何行".into(),
+        })
     }
 
     async fn get_peers(&self, stock_code: &str) -> Result<Vec<PeerComparison>, DataError> {

@@ -14,6 +14,9 @@
  */
 
 import { ChartPreview } from "@/components/chat/ArtifactPreview/ChartPreview";
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { cssVar } from "@/lib/cssVar";
+import { SERIES_HUES, seriesColor } from "@/theme/categoricalColors";
 import { Empty, Spin, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React, { useMemo } from "react";
@@ -36,17 +39,6 @@ import {
   type VizTableColumn,
   type VizTreemapNode,
 } from "@/lib/vizBlocks";
-
-const COLORS = [
-  "#1677ff",
-  "#52c41a",
-  "#faad14",
-  "#ff4d4f",
-  "#722ed1",
-  "#13c2c2",
-  "#eb2f96",
-  "#fa8c16",
-];
 
 // ── VizBlockRenderer 主组件 ────────────────────────────────────────────────
 
@@ -74,7 +66,7 @@ export function VizBlockRenderer({
 
   if (errors.length > 0) {
     return (
-      <div style={{ padding: 16, color: "#ff4d4f" }}>
+      <div style={{ padding: 16, color: cssVar("--red") }}>
         <div>{t("viz.invalidBlock")}</div>
         <ul>
           {errors.map((e) => <li key={e}>{e}</li>)}
@@ -106,12 +98,12 @@ export function VizBlockRenderer({
       {(block.title || block.subtitle) && (
         <div style={{ marginBottom: 8 }}>
           {block.title && (
-            <div style={{ fontSize: 14, fontWeight: 600, color: "#1f1f1f" }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: cssVar("--fg") }}>
               {block.title}
             </div>
           )}
           {block.subtitle && (
-            <div style={{ fontSize: 12, color: "#8c8c8c", marginTop: 2 }}>
+            <div style={{ fontSize: 12, color: cssVar("--muted"), marginTop: 2 }}>
               {block.subtitle}
             </div>
           )}
@@ -147,7 +139,9 @@ interface EChartsBlockProps {
 }
 
 const EChartsBlock: React.FC<EChartsBlockProps> = ({ block, buildOption, compact }) => {
-  const option = useMemo(() => buildOption(block), [block, buildOption]);
+  const isDark = useIsDarkTheme();
+  // option 里的颜色是构建时从 CSS 变量解析出来的，主题切换必须重建
+  const option = useMemo(() => buildOption(block), [block, buildOption, isDark]);
   const height = compact ? 220 : 360;
   return (
     <div style={{ width: "100%", height }}>
@@ -180,21 +174,21 @@ function buildLineChartOption(block: VizBlock): Record<string, unknown> {
 
   return {
     tooltip: { trigger: "axis" },
-    legend: showLegend ? { textStyle: { color: "#D1D5DB", fontSize: 12 } } : undefined,
+    legend: showLegend ? { textStyle: { color: cssVar("--fg-2"), fontSize: 12 } } : undefined,
     grid: { top: showLegend ? 32 : 12, right: 16, bottom: 24, left: 56 },
     xAxis: {
       type: "category",
       data: data.map((d) => d.name),
-      axisLine: { lineStyle: { color: "#4B5563" } },
-      axisLabel: { color: "#9CA3AF", fontSize: 10 },
+      axisLine: { lineStyle: { color: cssVar("--border") } },
+      axisLabel: { color: cssVar("--muted"), fontSize: 10 },
       axisTick: { show: false },
       boundaryGap: false,
     },
     yAxis: {
       type: "value",
-      axisLine: { lineStyle: { color: "#4B5563" } },
-      axisLabel: { color: "#9CA3AF", fontSize: 10 },
-      splitLine: { lineStyle: { color: "#374151", type: "dashed" } },
+      axisLine: { lineStyle: { color: cssVar("--border") } },
+      axisLabel: { color: cssVar("--muted"), fontSize: 10 },
+      splitLine: { lineStyle: { color: cssVar("--border"), type: "dashed" } },
       axisTick: { show: false },
     },
     series: seriesKeys.map((key, i) => ({
@@ -203,8 +197,8 @@ function buildLineChartOption(block: VizBlock): Record<string, unknown> {
       data: data.map((d) => (d as Record<string, unknown>)[key] as number),
       smooth,
       showSymbol: false,
-      lineStyle: { color: COLORS[i % COLORS.length], width: 2 },
-      itemStyle: { color: COLORS[i % COLORS.length] },
+      lineStyle: { color: seriesColor(i), width: 2 },
+      itemStyle: { color: seriesColor(i) },
     })),
   };
 }
@@ -223,7 +217,7 @@ function buildBarChartOption(block: VizBlock): Record<string, unknown> {
   const horizontal = opts.orientation === "horizontal";
   const stack = opts.stack === true;
   const showLegend = opts.showLegend === true;
-  const colors = Array.isArray(opts.colors) ? (opts.colors as string[]) : COLORS;
+  const colors = Array.isArray(opts.colors) ? (opts.colors as string[]) : SERIES_HUES.map((_, idx) => seriesColor(idx));
 
   if (data.length === 0) { return {}; }
 
@@ -239,25 +233,25 @@ function buildBarChartOption(block: VizBlock): Record<string, unknown> {
         ? { top: 12, right: 16, bottom: 24, left: 80 }
         : { top: 12, right: 16, bottom: 24, left: 56 },
       xAxis: horizontal
-        ? { type: "value", axisLine: { lineStyle: { color: "#4B5563" } } }
+        ? { type: "value", axisLine: { lineStyle: { color: cssVar("--border") } } }
         : {
           type: "category",
           data: data.map((d) => d.name),
-          axisLine: { lineStyle: { color: "#4B5563" } },
-          axisLabel: { color: "#9CA3AF", fontSize: 10 },
+          axisLine: { lineStyle: { color: cssVar("--border") } },
+          axisLabel: { color: cssVar("--muted"), fontSize: 10 },
         },
       yAxis: horizontal
         ? {
           type: "category",
           data: data.map((d) => d.name),
-          axisLine: { lineStyle: { color: "#4B5563" } },
-          axisLabel: { color: "#9CA3AF", fontSize: 10 },
+          axisLine: { lineStyle: { color: cssVar("--border") } },
+          axisLabel: { color: cssVar("--muted"), fontSize: 10 },
         }
         : {
           type: "value",
-          axisLine: { lineStyle: { color: "#4B5563" } },
-          axisLabel: { color: "#9CA3AF", fontSize: 10 },
-          splitLine: { lineStyle: { color: "#374151", type: "dashed" } },
+          axisLine: { lineStyle: { color: cssVar("--border") } },
+          axisLabel: { color: cssVar("--muted"), fontSize: 10 },
+          splitLine: { lineStyle: { color: cssVar("--border"), type: "dashed" } },
         },
       series: [
         {
@@ -275,32 +269,32 @@ function buildBarChartOption(block: VizBlock): Record<string, unknown> {
 
   return {
     tooltip: { trigger: "axis" },
-    legend: showLegend ? { textStyle: { color: "#D1D5DB", fontSize: 12 } } : undefined,
+    legend: showLegend ? { textStyle: { color: cssVar("--fg-2"), fontSize: 12 } } : undefined,
     grid: horizontal
       ? { top: showLegend ? 32 : 12, right: 16, bottom: 24, left: 80 }
       : { top: showLegend ? 32 : 12, right: 16, bottom: 24, left: 56 },
     xAxis: horizontal
-      ? { type: "value", axisLine: { lineStyle: { color: "#4B5563" } } }
+      ? { type: "value", axisLine: { lineStyle: { color: cssVar("--border") } } }
       : {
         type: "category",
         data: data.map((d) => d.name),
-        axisLine: { lineStyle: { color: "#4B5563" } },
-        axisLabel: { color: "#9CA3AF", fontSize: 10 },
+        axisLine: { lineStyle: { color: cssVar("--border") } },
+        axisLabel: { color: cssVar("--muted"), fontSize: 10 },
         axisTick: { show: false },
       },
     yAxis: horizontal
       ? {
         type: "category",
         data: data.map((d) => d.name),
-        axisLine: { lineStyle: { color: "#4B5563" } },
-        axisLabel: { color: "#9CA3AF", fontSize: 10 },
+        axisLine: { lineStyle: { color: cssVar("--border") } },
+        axisLabel: { color: cssVar("--muted"), fontSize: 10 },
         axisTick: { show: false },
       }
       : {
         type: "value",
-        axisLine: { lineStyle: { color: "#4B5563" } },
-        axisLabel: { color: "#9CA3AF", fontSize: 10 },
-        splitLine: { lineStyle: { color: "#374151", type: "dashed" } },
+        axisLine: { lineStyle: { color: cssVar("--border") } },
+        axisLabel: { color: cssVar("--muted"), fontSize: 10 },
+        splitLine: { lineStyle: { color: cssVar("--border"), type: "dashed" } },
         axisTick: { show: false },
       },
     series: seriesKeys.map((key, i) => ({
@@ -360,21 +354,21 @@ function buildAreaChartOption(block: VizBlock): Record<string, unknown> {
 
   return {
     tooltip: { trigger: "axis" },
-    legend: showLegend ? { textStyle: { color: "#D1D5DB", fontSize: 12 } } : undefined,
+    legend: showLegend ? { textStyle: { color: cssVar("--fg-2"), fontSize: 12 } } : undefined,
     grid: { top: showLegend ? 32 : 12, right: 16, bottom: 24, left: 56 },
     xAxis: {
       type: "category",
       data: data.map((d) => d.name),
-      axisLine: { lineStyle: { color: "#4B5563" } },
-      axisLabel: { color: "#9CA3AF", fontSize: 10 },
+      axisLine: { lineStyle: { color: cssVar("--border") } },
+      axisLabel: { color: cssVar("--muted"), fontSize: 10 },
       axisTick: { show: false },
       boundaryGap: false,
     },
     yAxis: {
       type: "value",
-      axisLine: { lineStyle: { color: "#4B5563" } },
-      axisLabel: { color: "#9CA3AF", fontSize: 10 },
-      splitLine: { lineStyle: { color: "#374151", type: "dashed" } },
+      axisLine: { lineStyle: { color: cssVar("--border") } },
+      axisLabel: { color: cssVar("--muted"), fontSize: 10 },
+      splitLine: { lineStyle: { color: cssVar("--border"), type: "dashed" } },
       axisTick: { show: false },
     },
     series: seriesKeys.map((key, i) => ({
@@ -384,9 +378,9 @@ function buildAreaChartOption(block: VizBlock): Record<string, unknown> {
       smooth: true,
       showSymbol: false,
       stack: stack ? "a" : undefined,
-      lineStyle: { color: COLORS[i % COLORS.length], width: 2 },
-      itemStyle: { color: COLORS[i % COLORS.length] },
-      areaStyle: buildGradient(COLORS[i % COLORS.length]),
+      lineStyle: { color: seriesColor(i), width: 2 },
+      itemStyle: { color: seriesColor(i) },
+      areaStyle: buildGradient(seriesColor(i)),
     })),
   };
 }
@@ -410,7 +404,7 @@ function buildPieChartOption(block: VizBlock): Record<string, unknown> {
 
   return {
     tooltip: { trigger: "item" },
-    legend: showLegend ? { bottom: 0, textStyle: { color: "#D1D5DB", fontSize: 12 } } : undefined,
+    legend: showLegend ? { bottom: 0, textStyle: { color: cssVar("--fg-2"), fontSize: 12 } } : undefined,
     series: [
       {
         type: "pie",
@@ -418,12 +412,12 @@ function buildPieChartOption(block: VizBlock): Record<string, unknown> {
         center: ["50%", "45%"],
         avoidLabelOverlap: false,
         padAngle: 2,
-        itemStyle: { borderRadius: 4, borderColor: "#111827", borderWidth: 2 },
-        label: { show: showLabel, color: "#D1D5DB" },
+        itemStyle: { borderRadius: 4, borderColor: cssVar("--fg"), borderWidth: 2 },
+        label: { show: showLabel, color: cssVar("--fg-2") },
         data: data.map((slice, i) => ({
           value: slice.value,
           name: slice.name,
-          itemStyle: { color: slice.color || COLORS[i % COLORS.length] },
+          itemStyle: { color: slice.color || seriesColor(i) },
         })),
       },
     ],
@@ -454,28 +448,28 @@ function buildScatterChartOption(block: VizBlock): Record<string, unknown> {
 
   return {
     tooltip: { trigger: "item" },
-    legend: showLegend ? { textStyle: { color: "#D1D5DB", fontSize: 12 } } : undefined,
+    legend: showLegend ? { textStyle: { color: cssVar("--fg-2"), fontSize: 12 } } : undefined,
     grid: { top: showLegend ? 32 : 12, right: 16, bottom: 24, left: 56 },
     xAxis: {
       type: "value",
       name: "x",
-      axisLine: { lineStyle: { color: "#4B5563" } },
-      axisLabel: { color: "#9CA3AF", fontSize: 10 },
-      splitLine: { lineStyle: { color: "#374151", type: "dashed" } },
+      axisLine: { lineStyle: { color: cssVar("--border") } },
+      axisLabel: { color: cssVar("--muted"), fontSize: 10 },
+      splitLine: { lineStyle: { color: cssVar("--border"), type: "dashed" } },
     },
     yAxis: {
       type: "value",
       name: "y",
-      axisLine: { lineStyle: { color: "#4B5563" } },
-      axisLabel: { color: "#9CA3AF", fontSize: 10 },
-      splitLine: { lineStyle: { color: "#374151", type: "dashed" } },
+      axisLine: { lineStyle: { color: cssVar("--border") } },
+      axisLabel: { color: cssVar("--muted"), fontSize: 10 },
+      splitLine: { lineStyle: { color: cssVar("--border"), type: "dashed" } },
     },
     series: Array.from(groups.entries()).map(([groupName, points], i) => ({
       name: groupName,
       type: "scatter",
       data: points.map((p) => [p.x, p.y, p.z ?? 10]),
       symbolSize: (val: number[]) => Math.max(6, Math.min(40, val[2] ?? 10)),
-      itemStyle: { color: COLORS[i % COLORS.length] },
+      itemStyle: { color: seriesColor(i) },
     })),
   };
 }
@@ -493,7 +487,7 @@ function buildHeatmapOption(block: VizBlock): Record<string, unknown> {
   const opts = (block.options ?? {}) as Record<string, unknown>;
   const colorRange = Array.isArray(opts.colorRange) && opts.colorRange.length === 2
     ? (opts.colorRange as [string, string])
-    : ["#52c41a", "#ff4d4f"];
+    : [cssVar("--green"), cssVar("--red")];
   const valueRange = Array.isArray(opts.valueRange) && opts.valueRange.length === 2
     ? (opts.valueRange as [number, number])
     : (() => {
@@ -541,8 +535,8 @@ function buildCandlestickOption(block: VizBlock): Record<string, unknown> {
   const data = asArray<VizCandle>(block.data);
   const opts = (block.options ?? {}) as Record<string, unknown>;
   const showVolume = opts.showVolume !== false;
-  const upColor = typeof opts.upColor === "string" ? opts.upColor : "#ef232a";
-  const downColor = typeof opts.downColor === "string" ? opts.downColor : "#14b143";
+  const upColor = typeof opts.upColor === "string" ? opts.upColor : cssVar("--red");
+  const downColor = typeof opts.downColor === "string" ? opts.downColor : cssVar("--green");
 
   const dates = data.map((d) => d.date);
   const ohlc = data.map((d) => [d.open, d.close, d.low, d.high]);
@@ -617,8 +611,8 @@ function buildTreemapOption(block: VizBlock): Record<string, unknown> {
         })),
         label: { show: showLabel },
         levels: [
-          { itemStyle: { borderColor: "#fff", borderWidth: 0, gapWidth: 1 } },
-          { itemStyle: { borderColor: "#ddd", borderWidth: 1, gapWidth: 1 } },
+          { itemStyle: { borderColor: cssVar("--bg"), borderWidth: 0, gapWidth: 1 } },
+          { itemStyle: { borderColor: cssVar("--border"), borderWidth: 1, gapWidth: 1 } },
         ],
       },
     ],
@@ -675,8 +669,8 @@ function buildGaugeOption(block: VizBlock): Record<string, unknown> {
   const min = typeof opts.min === "number" ? opts.min : 0;
   const max = typeof opts.max === "number" ? opts.max : 100;
   const ranges = (data?.ranges ?? (opts.ranges as VizGaugeRange[] | undefined)) ?? [
-    { from: min, to: (min + max) / 2, color: "#52c41a" },
-    { from: (min + max) / 2, to: max, color: "#ff4d4f" },
+    { from: min, to: (min + max) / 2, color: cssVar("--green") },
+    { from: (min + max) / 2, to: max, color: cssVar("--red") },
   ];
   const value = typeof data?.value === "number" ? data.value : asNumber(opts.value);
 
@@ -693,8 +687,8 @@ function buildGaugeOption(block: VizBlock): Record<string, unknown> {
           },
         },
         pointer: { itemStyle: { color: "auto" } },
-        axisTick: { distance: -20, length: 6, lineStyle: { color: "#fff", width: 1 } },
-        splitLine: { distance: -20, length: 18, lineStyle: { color: "#fff", width: 2 } },
+        axisTick: { distance: -20, length: 6, lineStyle: { color: cssVar("--bg"), width: 1 } },
+        splitLine: { distance: -20, length: 18, lineStyle: { color: cssVar("--bg"), width: 2 } },
         axisLabel: { color: "inherit", distance: 30 },
         detail: {
           valueAnimation: true,
@@ -744,7 +738,7 @@ const TableFull: React.FC<{ block: VizBlock; compact?: boolean }> = ({ block, co
           : undefined,
         render: (val: unknown) => {
           if (typeof val === "number") {
-            const color = val > 0 ? "#52c41a" : val < 0 ? "#ff4d4f" : undefined;
+            const color = val > 0 ? cssVar("--green") : val < 0 ? cssVar("--red") : undefined;
             return color ? <span style={{ color, fontWeight: 600 }}>{val}</span> : val;
           }
           if (typeof val === "string" && val.startsWith("tag:")) {

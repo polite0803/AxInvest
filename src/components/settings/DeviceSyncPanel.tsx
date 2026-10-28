@@ -48,13 +48,13 @@ const getTrustLevelConfig = (t: (key: string) => string) => ({
 function DeviceIcon({ type }: { type: string }) {
   switch (type) {
     case "mobile":
-      return <MobileOutlined style={{ fontSize: 24, color: "#1890ff" }} />;
+      return <MobileOutlined style={{ fontSize: 24, color: "var(--accent)" }} />;
     case "tablet":
-      return <TableOutlined style={{ fontSize: 24, color: "#722ed1" }} />;
+      return <TableOutlined style={{ fontSize: 24, color: "var(--purple)" }} />;
     case "server":
-      return <CloudOutlined style={{ fontSize: 24, color: "#fa8c16" }} />;
+      return <CloudOutlined style={{ fontSize: 24, color: "var(--amber)" }} />;
     default:
-      return <DesktopOutlined style={{ fontSize: 24, color: "#52c41a" }} />;
+      return <DesktopOutlined style={{ fontSize: 24, color: "var(--green)" }} />;
   }
 }
 
@@ -310,7 +310,7 @@ export function DeviceSyncPanel() {
         <Card
           title={
             <Space>
-              <SafetyOutlined style={{ color: "#faad14" }} />
+              <SafetyOutlined style={{ color: "var(--amber)" }} />
               {t("deviceSync.pendingConflicts")} ({pendingConflicts.length})
             </Space>
           }
@@ -394,7 +394,7 @@ export function DeviceSyncPanel() {
         {currentPairingCode
           ? (
             <div style={{ textAlign: "center", padding: 16 }}>
-              <QrcodeOutlined style={{ fontSize: 48, color: "#1890ff" }} />
+              <QrcodeOutlined style={{ fontSize: 48, color: "var(--accent)" }} />
               <Title level={2} style={{ margin: "16px 0" }}>
                 {currentPairingCode.code}
               </Title>

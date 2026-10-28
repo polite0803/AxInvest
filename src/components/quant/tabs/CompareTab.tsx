@@ -89,7 +89,7 @@ export function CompareTab() {
                 border: "1px solid var(--border-color, #d9d9d9)",
                 borderRadius: 16,
                 cursor: "pointer",
-                background: selectedIds.includes(r.id) ? "#1677ff22" : "transparent",
+                background: selectedIds.includes(r.id) ? "var(--accent-bg)" : "transparent",
               }}
             >
               <input

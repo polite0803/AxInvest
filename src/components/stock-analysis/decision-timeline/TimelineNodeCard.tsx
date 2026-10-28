@@ -77,7 +77,7 @@ function highlightViolations(
           className={markClass}
           style={{
             background: "rgba(239, 68, 68, 0.18)",
-            color: "var(--sa-red, #ef4444)",
+            color: "var(--red)",
             padding: "0 2px",
             borderRadius: 3,
             fontWeight: 600,
@@ -116,9 +116,9 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
   );
 
   const statusColor = node.status === "done"
-    ? "var(--sa-green)"
+    ? "var(--green)"
     : node.status === "failed"
-    ? "var(--sa-red)"
+    ? "var(--red)"
     : node.status === "running"
     ? "var(--accent)"
     : "var(--muted)";
@@ -136,7 +136,7 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
       className="rounded border text-sm relative"
       style={{
         background: "var(--surface)",
-        borderColor: node.status === "failed" || violationCount > 0 ? "var(--sa-red)" : "var(--border)",
+        borderColor: node.status === "failed" || violationCount > 0 ? "var(--red)" : "var(--border)",
         borderLeft: `3px solid ${statusColor}`,
       }}
     >
@@ -170,7 +170,7 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
                 fontSize: 12,
                 fontWeight: 700,
                 background: "rgba(239, 68, 68, 0.12)",
-                color: "var(--sa-red, #ef4444)",
+                color: "var(--red)",
                 border: "1px solid rgba(239, 68, 68, 0.35)",
                 flexShrink: 0,
               }}
@@ -202,7 +202,7 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
                 margin: 0,
                 paddingLeft: 16,
                 fontSize: 12,
-                color: "var(--sa-red, #ef4444)",
+                color: "var(--red)",
               }}
             >
               {nodeViolations.map((v, i) => (

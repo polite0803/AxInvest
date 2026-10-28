@@ -1,8 +1,8 @@
 {
   "version": "2",
   "generated": "2026-10-16",
-  "total_entries": 434,
-  "total_files": 434,
+  "total_entries": 433,
+  "total_files": 433,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -980,12 +980,6 @@
       "file": "src/components/terminal/StatusBarWidget.tsx",
       "lines": "104",
       "reason": "历史硬编码基线（注释/内部日志/数据/技术字符串）",
-      "phase": 3
-    },
-    {
-      "file": "src/components/terminal/XtermEnhancement.tsx",
-      "lines": "192",
-      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {

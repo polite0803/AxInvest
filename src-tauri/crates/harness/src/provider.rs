@@ -287,6 +287,13 @@ pub struct ProviderRequestContext {
     pub conversation: Option<String>,
     pub previous_response_id: Option<String>,
     pub store_response: Option<bool>,
+    /// 首字节（HTTP 响应头）等待预算（秒）。
+    ///
+    /// `None` = 用 provider 适配器的默认值（软 45s / 硬 90s，见
+    /// `axagent_providers::stream_budget`）。非 `None` 时由调用方从
+    /// `ModelParamOverrides::header_timeout_secs` 解析而来（设置页「供应商-模型 →
+    /// 首字节超时」那一格）。
+    pub header_timeout_secs: Option<u64>,
 }
 
 // ── Realtime Voice ────────────────────────────────────────────

@@ -81,6 +81,7 @@ pub(crate) async fn resolve_default_provider(state: &AppState) -> Result<Resolve
         &settings,
     );
     let ctx = ProviderRequestContext {
+        header_timeout_secs: None,
         api_key: api_key.clone(),
         key_id: key_row.id.clone(),
         provider_id: provider.id.clone(),

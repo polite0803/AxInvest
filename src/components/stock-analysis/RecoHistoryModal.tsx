@@ -2,9 +2,10 @@
 import { List } from "@/components/common/AntdList";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
-import { horizonSuffix } from "@/lib/stock-analysis-utils";
+import { horizonSuffix, recoTagPreset } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { App, Button, Card, Checkbox, Collapse, Empty, Modal, Table, Tag, Typography } from "antd";
+
 const { Text } = Typography;
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -30,22 +31,6 @@ interface RecoDetailItem {
   pickData?: string | null;
   createdAt: string;
 }
-
-/** 风格颜色映射（覆盖所有后端 Style 枚举序列化值，2026-08-01 补 serenity 系 5 个） */
-const STYLE_COLOR: Record<string, string> = {
-  trend: "red",
-  value: "blue",
-  capital: "orange",
-  reversion: "purple",
-  watchlist: "cyan",
-  serenity: "green",
-  bottleneck: "magenta",
-  capital_flow: "gold",
-  earnings: "lime",
-  event: "volcano",
-  policy: "geekblue",
-  technical: "blue",
-};
 
 /**
  * 档位标签。显示名走全仓唯一一套键（`stockAnalysis.timeHorizon*`，经 `horizonSuffix`）；
@@ -270,7 +255,7 @@ export function RecoHistoryModal() {
               render: (v: string) => (
                 <div className="flex gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
                   {v.split(",").map((s) => (
-                    <Tag key={s} color={STYLE_COLOR[s]} className="text-[10px] m-0">
+                    <Tag key={s} color={recoTagPreset(s)} className="text-[10px] m-0">
                       {t(`stockAnalysis.recommendation.style${s.charAt(0).toUpperCase() + s.slice(1)}`)}
                     </Tag>
                   ))}
@@ -318,7 +303,7 @@ export function RecoHistoryModal() {
                 key: style,
                 label: (
                   <div className="flex items-center gap-2">
-                    <Tag color={STYLE_COLOR[style] ?? "default"} className="m-0 text-xs">
+                    <Tag color={recoTagPreset(style)} className="m-0 text-xs">
                       {t(`stockAnalysis.recommendation.style${style.charAt(0).toUpperCase() + style.slice(1)}`)}
                     </Tag>
                     <span className="text-xs text-gray-500">

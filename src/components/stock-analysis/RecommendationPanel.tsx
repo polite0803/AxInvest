@@ -8,6 +8,7 @@ import {
   getActionColor,
   getActionTKey,
   horizonSuffix,
+  recoTagPreset,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
@@ -58,15 +59,6 @@ const noop = () => {};
 const STYLE_KEYS: StyleKey[] = ["trend", "value", "capital", "reversion", "watchlist", "serenity"];
 /** 档位顺序：徽章默认只显示当前档，Tooltip 按本表逐档列出（不合并、不平均）。 */
 const PERIOD_ORDER: PeriodKey[] = ["ultra_short", "short", "mid", "long"];
-const STYLE_COLOR: Record<StyleKey, string> = {
-  trend: "blue",
-  value: "gold",
-  capital: "magenta",
-  reversion: "green",
-  watchlist: "default",
-  serenity: "purple",
-};
-
 const FALLBACK = "—";
 const isFiniteNumber = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
 
@@ -766,7 +758,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
                   key: style,
                   label: (
                     <div className="flex items-center gap-2">
-                      <Tag color={STYLE_COLOR[style]} className="m-0 text-xs">
+                      <Tag color={recoTagPreset(style)} className="m-0 text-xs">
                         {t(`stockAnalysis.recommendation.style${capitalize(style)}`)}
                       </Tag>
                       {/* P0-2: 策略回测徽章 */}
@@ -1283,7 +1275,7 @@ function AutoCalibrateButton({ t }: { t: TFunction }) {
           : (
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
-                <tr style={{ borderBottom: "1px solid var(--color-border-tertiary)" }}>
+                <tr style={{ borderBottom: "1px solid var(--border-light)" }}>
                   <th style={{ padding: 4, textAlign: "left" }}>
                     {t("stockAnalysis.recommendation.calibrateStrategy")}
                   </th>
@@ -1301,7 +1293,7 @@ function AutoCalibrateButton({ t }: { t: TFunction }) {
               </thead>
               <tbody>
                 {diff.map((d) => (
-                  <tr key={d.strategyId} style={{ borderBottom: "1px solid var(--color-border-tertiary)" }}>
+                  <tr key={d.strategyId} style={{ borderBottom: "1px solid var(--border-light)" }}>
                     <td style={{ padding: 4 }}>{d.strategyId}</td>
                     <td style={{ padding: 4, textAlign: "right" }}>{d.oldWeight.toFixed(2)}</td>
                     <td style={{ padding: 4, textAlign: "right", fontWeight: 600 }}>
@@ -1311,7 +1303,7 @@ function AutoCalibrateButton({ t }: { t: TFunction }) {
                       style={{
                         padding: 4,
                         textAlign: "right",
-                        color: d.delta > 0 ? "var(--sa-green)" : d.delta < 0 ? "var(--sa-red)" : undefined,
+                        color: d.delta > 0 ? "var(--green)" : d.delta < 0 ? "var(--red)" : undefined,
                       }}
                     >
                       {d.delta > 0 ? "+" : ""}
@@ -1324,9 +1316,7 @@ function AutoCalibrateButton({ t }: { t: TFunction }) {
                           setChecked(
                             e.target.checked
                               ? [...checked, d.strategyId]
-                              : checked.filter((id) =>
-                                id !== d.strategyId
-                              ),
+                              : checked.filter((id) => id !== d.strategyId),
                           );
                         }}
                       />

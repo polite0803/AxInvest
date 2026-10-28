@@ -1,19 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useTranslation } from "react-i18next";
+import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
+import { cssVar } from "@/lib/cssVar";
+import { ensureECharts } from "@/lib/echartsInstance";
+import { seriesColor } from "@/theme/categoricalColors";
 import { useEffect, useMemo, useRef } from "react";
 import * as echarts from "echarts";
-
-const COLORS = [
-  "#1677ff",
-  "#52c41a",
-  "#faad14",
-  "#ff4d4f",
-  "#722ed1",
-  "#13c2c2",
-  "#eb2f96",
-  "#fa8c16",
-];
 
 type ChartType = "line" | "bar" | "pie" | "scatter" | "area";
 
@@ -43,15 +36,15 @@ function buildChartOption(
           xAxis: {
             type: "category",
             data: xData,
-            axisLabel: { color: "#999" },
+            axisLabel: { color: cssVar("--muted") },
           },
-          yAxis: { type: "value", axisLabel: { color: "#999" } },
+          yAxis: { type: "value", axisLabel: { color: cssVar("--muted") } },
           series: [
             {
               type: "bar",
               data: data.map((d, i) => ({
                 value: Number(d[seriesKey] ?? 0),
-                itemStyle: { color: COLORS[i % COLORS.length] },
+                itemStyle: { color: seriesColor(i) },
               })),
             },
           ],
@@ -63,14 +56,14 @@ function buildChartOption(
         xAxis: {
           type: "category",
           data: xData,
-          axisLabel: { color: "#999" },
+          axisLabel: { color: cssVar("--muted") },
         },
-        yAxis: { type: "value", axisLabel: { color: "#999" } },
+        yAxis: { type: "value", axisLabel: { color: cssVar("--muted") } },
         series: [
           {
             type: "bar",
             data: data.map((d) => Number(d[yKey] ?? 0)),
-            itemStyle: { color: COLORS[0] },
+            itemStyle: { color: seriesColor(0) },
           },
         ],
       };
@@ -84,17 +77,17 @@ function buildChartOption(
           type: "category",
           data: xData,
           boundaryGap: false,
-          axisLabel: { color: "#999" },
+          axisLabel: { color: cssVar("--muted") },
         },
-        yAxis: { type: "value", axisLabel: { color: "#999" } },
+        yAxis: { type: "value", axisLabel: { color: cssVar("--muted") } },
         series: [
           {
             type: "line",
             data: data.map((d) => Number(d[yKey] ?? 0)),
             smooth: true,
             showSymbol: false,
-            lineStyle: { color: COLORS[0], width: 2 },
-            itemStyle: { color: COLORS[0] },
+            lineStyle: { color: seriesColor(0), width: 2 },
+            itemStyle: { color: seriesColor(0) },
           },
         ],
       };
@@ -108,18 +101,18 @@ function buildChartOption(
           type: "category",
           data: xData,
           boundaryGap: false,
-          axisLabel: { color: "#999" },
+          axisLabel: { color: cssVar("--muted") },
         },
-        yAxis: { type: "value", axisLabel: { color: "#999" } },
+        yAxis: { type: "value", axisLabel: { color: cssVar("--muted") } },
         series: [
           {
             type: "line",
             data: data.map((d) => Number(d[yKey] ?? 0)),
             smooth: true,
             showSymbol: false,
-            lineStyle: { color: COLORS[0], width: 2 },
-            itemStyle: { color: COLORS[0] },
-            areaStyle: { color: COLORS[0], opacity: 0.3 },
+            lineStyle: { color: seriesColor(0), width: 2 },
+            itemStyle: { color: seriesColor(0) },
+            areaStyle: { color: seriesColor(0), opacity: 0.3 },
           },
         ],
       };
@@ -137,7 +130,7 @@ function buildChartOption(
             data: data.map((d, i) => ({
               value: Number(d[yKey] ?? 0),
               name: String(d[xKey] ?? ""),
-              itemStyle: { color: COLORS[i % COLORS.length] },
+              itemStyle: { color: seriesColor(i) },
             })),
             label: { show: true },
           },
@@ -149,13 +142,13 @@ function buildChartOption(
       return {
         tooltip: { trigger: "item" },
         grid: { top: 16, right: 16, bottom: 32, left: 48 },
-        xAxis: { type: "value", name: xKey, axisLabel: { color: "#999" } },
-        yAxis: { type: "value", name: yKey, axisLabel: { color: "#999" } },
+        xAxis: { type: "value", name: xKey, axisLabel: { color: cssVar("--muted") } },
+        yAxis: { type: "value", name: yKey, axisLabel: { color: cssVar("--muted") } },
         series: [
           {
             type: "scatter",
             data: data.map((d) => [Number(d[xKey] ?? 0), Number(d[yKey] ?? 0)]),
-            itemStyle: { color: COLORS[0] },
+            itemStyle: { color: seriesColor(0) },
           },
         ],
       };
@@ -177,16 +170,16 @@ export function ChartRendererImpl({
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<echarts.ECharts | null>(null);
 
+  const isDark = useIsDarkTheme();
   const option = useMemo(
     () => buildChartOption(chartType, data, xKey, yKey, seriesKey),
-    [chartType, data, xKey, yKey, seriesKey],
+    // 系列色是构建时从 CSS 变量解析的，主题切换要重建
+    [chartType, data, xKey, yKey, seriesKey, isDark],
   );
 
   useEffect(() => {
     if (!chartRef.current) { return; }
-    if (!chartInstance.current) {
-      chartInstance.current = echarts.init(chartRef.current);
-    }
+    chartInstance.current = ensureECharts(chartRef.current, isDark);
     chartInstance.current.setOption(option, true);
     const handleResize = () => chartInstance.current?.resize();
     window.addEventListener("resize", handleResize);
@@ -195,7 +188,7 @@ export function ChartRendererImpl({
       chartInstance.current?.dispose();
       chartInstance.current = null;
     };
-  }, [option]);
+  }, [option, isDark]);
 
   if (data.length === 0) {
     return (

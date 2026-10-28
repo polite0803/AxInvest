@@ -8122,7 +8122,7 @@ mod margin_contract_tests {
     #[tokio::test]
     async fn margin_handler_reports_designified_absence_not_bare_null() {
         let mut client = crate::AStockClient::new();
-        // 清空 vendor ⇒ live 路由循环必然落到 `return Ok(None)`（crates/astock-data/src/lib.rs:3936），零网络
+        // 清空 vendor ⇒ live 路由循环必然落到 `return Ok(None)`（crates/astock-data/src/lib.rs:4426），零网络
         client.vendors.clear();
         let out = execute_mcp_tool(
             &client,

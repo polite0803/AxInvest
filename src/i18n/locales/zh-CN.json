@@ -15166,7 +15166,14 @@
       "c-bottleneck-trend3": "瓶颈计算 #3",
       "c-bottleneck-trend4": "瓶颈计算 #4",
       "c-bottleneck-trend5": "瓶颈计算 #5",
-      "s-save-candidates": "保存候选"
+      "s-save-candidates": "保存候选",
+      "c-trend-split": "趋势分槽",
+      "c-scanner-brief": "市场简报",
+      "j-strategy-type": "策略类型判定",
+      "j-bottleneck": "瓶颈存在性判定",
+      "t-candidate-search": "候选检索",
+      "c-candidate-pool": "候选池",
+      "j-candidate-pick": "候选首选"
     },
     "catalystEarnings": "财报",
     "catalystProdRamp": "量产",

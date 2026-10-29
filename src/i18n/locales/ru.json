@@ -15038,7 +15038,14 @@
       "c-scorer-trend5": "Оценка #5",
       "c-consistency-check": "Проверка согласованности",
       "c-data-verifier": "Проверитель данных",
-      "s-save-candidates": "Сохранить кандидатов"
+      "s-save-candidates": "Сохранить кандидатов",
+      "c-trend-split": "Разделение трендов",
+      "c-scanner-brief": "Сводка рынка",
+      "j-strategy-type": "Определение стратегии",
+      "j-bottleneck": "Проверка узкого места",
+      "t-candidate-search": "Поиск кандидатов",
+      "c-candidate-pool": "Пул кандидатов",
+      "j-candidate-pick": "Основной кандидат"
     },
     "strategyOverwrite": "Перезаписать",
     "strategyMerge": "Объединить",

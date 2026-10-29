@@ -1195,9 +1195,11 @@ async fn run_asof_reco_replay(
                     &flat,
                     snapshot.clone(),
                     weights_json.clone(),
-                    generated_at,
-                    as_of_date,
-                    crate::commands::_shared_reco_pool::purpose::MOVER_REPLAY,
+                    &axagent_dao::repo::reco_pool::BatchKey {
+                        generated_at,
+                        as_of_date,
+                        purpose: crate::commands::_shared_reco_pool::purpose::MOVER_REPLAY,
+                    },
                 )
                 .await;
                 crate::commands::_shared_reco_pool::persist_reco_pool_batch(

@@ -15038,7 +15038,14 @@
       "c-scorer-trend5": "スコアリング #5",
       "c-consistency-check": "整合性チェック",
       "c-data-verifier": "データ検証",
-      "s-save-candidates": "候補を保存"
+      "s-save-candidates": "候補を保存",
+      "c-trend-split": "トレンド分割",
+      "c-scanner-brief": "マーケット概況",
+      "j-strategy-type": "戦略タイプ判定",
+      "j-bottleneck": "ボトルネック判定",
+      "t-candidate-search": "候補検索",
+      "c-candidate-pool": "候補プール",
+      "j-candidate-pick": "筆頭候補"
     },
     "strategyOverwrite": "Overwrite（覆盖）",
     "strategyMerge": "Merge（合并）",

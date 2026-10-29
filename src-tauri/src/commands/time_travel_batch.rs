@@ -890,9 +890,11 @@ async fn execute_batch(
             &reco_picks_by_period,
             scan.seed_pool_snapshot.clone(),
             reco_strategy_weights_json,
-            &reco_generated_at,
-            Some(&as_of_str),
-            crate::commands::_shared_reco_pool::purpose::TIME_TRAVEL_REPLAY,
+            &axagent_dao::repo::reco_pool::BatchKey {
+                generated_at: &reco_generated_at,
+                as_of_date: Some(&as_of_str),
+                purpose: crate::commands::_shared_reco_pool::purpose::TIME_TRAVEL_REPLAY,
+            },
         )
         .await;
         tracing::info!(

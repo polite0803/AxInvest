@@ -15038,7 +15038,14 @@
       "c-scorer-trend5": "التقييم #5",
       "c-consistency-check": "فحص الاتساق",
       "c-data-verifier": "التحقق من البيانات",
-      "s-save-candidates": "حفظ المرشحين"
+      "s-save-candidates": "حفظ المرشحين",
+      "c-trend-split": "تقسيم الاتجاهات",
+      "c-scanner-brief": "ملخص السوق",
+      "j-strategy-type": "تصنيف الاستراتيجية",
+      "j-bottleneck": "التحقق من الاختناق",
+      "t-candidate-search": "البحث عن المرشحين",
+      "c-candidate-pool": "مجموعة المرشحين",
+      "j-candidate-pick": "المرشح الرئيسي"
     },
     "strategyOverwrite": "استبدال",
     "strategyMerge": "دمج",

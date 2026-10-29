@@ -15038,7 +15038,14 @@
       "c-scorer-trend5": "Notation #5",
       "c-consistency-check": "Vérification de cohérence",
       "c-data-verifier": "Vérificateur de données",
-      "s-save-candidates": "Enregistrer candidats"
+      "s-save-candidates": "Enregistrer candidats",
+      "c-trend-split": "Répartition des tendances",
+      "c-scanner-brief": "Synthèse de marché",
+      "j-strategy-type": "Classification de stratégie",
+      "j-bottleneck": "Détection de goulot d'étranglement",
+      "t-candidate-search": "Recherche de candidats",
+      "c-candidate-pool": "Pool de candidats",
+      "j-candidate-pick": "Candidat principal"
     },
     "strategyOverwrite": "Écraser (Overwrite)",
     "strategyMerge": "Fusionner (Merge)",

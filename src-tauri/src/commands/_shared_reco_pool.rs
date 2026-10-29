@@ -28,15 +28,18 @@ use axagent_harness::DatabaseConnection;
 ///
 /// - `seed_pool_json`：本次扫描**实际使用**的候选池快照（回测负向样本的来源）
 /// - `strategy_weights_json`：当时的策略权重快照（回溯某次荐股用的权重配置）
-/// - `generated_at`：批次标识，同批各档共用一个值，供缓存按批取回整批
+/// - `batch`：批次键三列（`generated_at` / `as_of_date` / `purpose`）**具名同传**。
+///   此前它们是三个平铺参数 —— 与 [`persist_reco_pick`] 用的 `BatchKey` 形态不一致，
+///   后果是代际在调用点读不出统一证据：`as-of` 接线门 R2 原先盯命令层的
+///   `pick.insert(db)` 字面量，落库下沉到 dao 后该字面量消失，四条链的代际写入
+///   **一度完全不在任何证据之下**（2026-10-29 实测）。收成 `BatchKey` 后
+///   `as_of_date` 是必填字段，漏传直接编译不过。
 pub async fn persist_reco_picks(
     db: &DatabaseConnection,
     picks: &[RecoPick],
     seed_pool_json: Option<String>,
     strategy_weights_json: Option<String>,
-    generated_at: &str,
-    as_of_date: Option<&str>,
-    purpose: &str,
+    batch: &BatchKey<'_>,
 ) -> usize {
     let rows: Vec<NewRecoPick> = picks
         .iter()
@@ -57,18 +60,24 @@ pub async fn persist_reco_picks(
         &rows,
         seed_pool_json,
         strategy_weights_json,
-        &BatchKey { generated_at, as_of_date, purpose },
+        batch,
         // 算法代际随样本一起落库，否则闭环 IC 会把跨代样本混成一格
         Some(recommender::RECO_ALGORITHM_VERSION),
     )
     .await
 }
 
-/// 落**一行** `reco_picks`（同业务键覆盖，保留既有 `id`），返回首个错误。
+/// 落**一行** `reco_picks`（同业务键覆盖，保留既有 `id`），返回**技术详情文本**。
 ///
 /// 与 [`persist_reco_picks`] 同一份幂等实现（dao `upsert_pick`），区别只在：
 /// 调用方需要逐行的失败信息（趋势智选要把「哪只 / 为什么」回传前端），
 /// 且每行的候选池快照不同（智选按**候选对象**逐行存 `seed_pool_json`）。
+///
+/// ⚠ 返回值不是命令边界的错误载荷 —— 命令边界（`run_serenity_screening_inner`）已经把
+/// 错误码 `wf_err::PERSIST_FAILED` 与 `persistenceStockCode` 一并发给了前端，这里只补
+/// `persistenceError` 那条**技术详情**。所以它既不能是裸的 `e.to_string()`（读者不知道
+/// 是哪一步失败，`check-rust-raw-map-err.mjs` 也据此判身份式违规），也不该压成
+/// `ErrorResponse` JSON（那会让 detail 里再套一坨 JSON、错误码出现两遍）。
 pub async fn persist_reco_pick(
     db: &DatabaseConnection,
     pick: &NewRecoPick,
@@ -84,7 +93,9 @@ pub async fn persist_reco_pick(
         Some(recommender::RECO_ALGORITHM_VERSION),
     )
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| {
+        format!("落库 reco_picks 失败（{} / {} 档，业务键覆盖）: {e}", pick.stock_code, pick.period)
+    })
 }
 
 /// 落一个候选池批次快照（每批一行，**0 票也写**）。

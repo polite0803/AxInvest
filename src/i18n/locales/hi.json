@@ -15038,7 +15038,14 @@
       "c-scorer-trend5": "स्कोरिंग #5",
       "c-consistency-check": "संगति जांच",
       "c-data-verifier": "डेटा सत्यापनकर्ता",
-      "s-save-candidates": "उम्मीदवार सहेजें"
+      "s-save-candidates": "उम्मीदवार सहेजें",
+      "c-trend-split": "ट्रेंड विभाजन",
+      "c-scanner-brief": "बाज़ार सारांश",
+      "j-strategy-type": "रणनीति वर्गीकरण",
+      "j-bottleneck": "अड़चन पहचान",
+      "t-candidate-search": "उम्मीदवार खोज",
+      "c-candidate-pool": "उम्मीदवार पूल",
+      "j-candidate-pick": "प्राथमिक उम्मीदवार"
     },
     "strategyOverwrite": "Overwrite（ओवरराइट）",
     "strategyMerge": "Merge（मर्ज）",

@@ -15200,7 +15200,14 @@
       "c-scorer-trend5": "Scoring #5",
       "c-consistency-check": "Consistency Check",
       "c-data-verifier": "Data Verifier",
-      "s-save-candidates": "Save Candidates"
+      "s-save-candidates": "Save Candidates",
+      "c-trend-split": "Trend Slotting",
+      "c-scanner-brief": "Market Brief",
+      "j-strategy-type": "Strategy Classifier",
+      "j-bottleneck": "Bottleneck Check",
+      "t-candidate-search": "Candidate Search",
+      "c-candidate-pool": "Candidate Pool",
+      "j-candidate-pick": "Top Candidate"
     },
     "catalystEarnings": "Earnings",
     "catalystProdRamp": "Ramp Up",

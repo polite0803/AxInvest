@@ -15038,7 +15038,14 @@
       "c-scorer-trend5": "Puntuación #5",
       "c-consistency-check": "Verificación de consistencia",
       "c-data-verifier": "Verificador de datos",
-      "s-save-candidates": "Guardar candidatos"
+      "s-save-candidates": "Guardar candidatos",
+      "c-trend-split": "División de tendencias",
+      "c-scanner-brief": "Resumen de mercado",
+      "j-strategy-type": "Clasificación de estrategia",
+      "j-bottleneck": "Detección de cuello de botella",
+      "t-candidate-search": "Búsqueda de candidatos",
+      "c-candidate-pool": "Pool de candidatos",
+      "j-candidate-pick": "Candidato principal"
     },
     "strategyOverwrite": "Sobrescribir",
     "strategyMerge": "Fusionar",

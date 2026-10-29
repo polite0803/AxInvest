@@ -15038,7 +15038,14 @@
       "c-scorer-trend5": "점수 매기기 #5",
       "c-consistency-check": "일관성 검사",
       "c-data-verifier": "데이터 검증기",
-      "s-save-candidates": "후보 저장"
+      "s-save-candidates": "후보 저장",
+      "c-trend-split": "추세 슬롯 분리",
+      "c-scanner-brief": "시장 브리핑",
+      "j-strategy-type": "전략 유형 판정",
+      "j-bottleneck": "병목 존재 판정",
+      "t-candidate-search": "후보 검색",
+      "c-candidate-pool": "후보 풀",
+      "j-candidate-pick": "최우선 후보"
     },
     "strategyOverwrite": "Overwrite（덮어쓰기）",
     "strategyMerge": "Merge（병합）",

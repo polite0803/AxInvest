@@ -15088,7 +15088,14 @@
       "c-scorer-trend5": "評分計算 #5",
       "c-consistency-check": "一致性檢查",
       "c-data-verifier": "資料驗證",
-      "s-save-candidates": "保存候選"
+      "s-save-candidates": "保存候選",
+      "c-trend-split": "趨勢分槽",
+      "c-scanner-brief": "市場簡報",
+      "j-strategy-type": "策略類型判定",
+      "j-bottleneck": "瓶頸存在性判定",
+      "t-candidate-search": "候選檢索",
+      "c-candidate-pool": "候選池",
+      "j-candidate-pick": "候選首選"
     },
     "catalystEarnings": "Earnings",
     "catalystProdRamp": "Ramp Up",

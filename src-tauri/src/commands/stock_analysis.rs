@@ -4727,9 +4727,8 @@ async fn persist_reco_response_picks(
         &flat,
         seed_pool_json,
         reco_strategy_weights_snapshot(served_vars),
-        generated_at,
-        as_of_date,
-        purpose,
+        // 批次键三列具名同传（代际 = response.as_of_date 的派生值）
+        &axagent_dao::repo::reco_pool::BatchKey { generated_at, as_of_date, purpose },
     )
     .await;
     tracing::info!(

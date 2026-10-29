@@ -1,7 +1,7 @@
 {
   "//": "src-tauri/src/commands 下「中文裸串式 map_err」的每文件处数基线（只许降不许升）。重生成：node scripts/check-rust-raw-map-err.mjs --update-baseline",
   "generated_by": "check-rust-raw-map-err.mjs --update-baseline",
-  "total": 474,
+  "total": 473,
   "files": {
     "src-tauri/src/commands/agency_expert.rs": 2,
     "src-tauri/src/commands/agent/mod.rs": 1,
@@ -62,7 +62,7 @@
     "src-tauri/src/commands/skills/management.rs": 6,
     "src-tauri/src/commands/skills_hub.rs": 12,
     "src-tauri/src/commands/stock_analysis.rs": 22,
-    "src-tauri/src/commands/stock_analysis_bridge.rs": 16,
+    "src-tauri/src/commands/stock_analysis_bridge.rs": 15,
     "src-tauri/src/commands/stock_analysis_setup/seed_consistency_tests.rs": 2,
     "src-tauri/src/commands/stock_analysis_setup/seed_daily_market_events.rs": 7,
     "src-tauri/src/commands/stock_analysis_setup/seed_news_cross_market.rs": 6,

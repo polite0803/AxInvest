@@ -2603,12 +2603,14 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
                         &picks,
                         scan.seed_pool_snapshot.clone(),
                         strategy_weights_json,
-                        &generated_at,
-                        // 代际 = 实盘：本分支整体包在 `cron_live` 里（task_local 被压成
-                        // None），不可能产出回放行。用具名常量而非裸 None，让代际门读得出
-                        // 这里是**想过**代际的，而不是漏传。
-                        axagent_astock_data::as_of::LIVE_GENERATION,
-                        crate::commands::_shared_reco_pool::purpose::LIVE,
+                        &axagent_dao::repo::reco_pool::BatchKey {
+                            generated_at: &generated_at,
+                            // 代际 = 实盘：本分支整体包在 `cron_live` 里（task_local 被压成
+                            // None），不可能产出回放行。用具名常量而非裸 None，让代际门读得出
+                            // 这里是**想过**代际的，而不是漏传。
+                            as_of_date: axagent_astock_data::as_of::LIVE_GENERATION,
+                            purpose: crate::commands::_shared_reco_pool::purpose::LIVE,
+                        },
                     )
                     .await;
                     tracing::info!(

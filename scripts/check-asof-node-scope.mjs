@@ -20,8 +20,8 @@
 //    （`parse_asof_param(` / `with_optional_asof(` / `as_of_ctx` / `AS_OF.scope(`）
 //    ⇒ 必须出现 `node_task_scope`。
 // R2 硬：两类「写进实盘可见状态」的调用点，**判据不同向**（2026-10-12 裁定改了其一）——
-//    `pick.insert(db)` 的前窗口内必须有**代际写入**（`as_of_date: Set(`）：回放的候选
-//    现在要落库供反思，防污染靠代际列而不是靠跳过写库；
+//    `persist_reco_pick(s)(` 的前窗口内必须有**代际写入**（`BatchKey { as_of_date: .. }`）：
+//    回放的候选现在要落库供反思，防污染靠代际列而不是靠跳过写库；`fn` 定义位不计入；
 //    `set_serenity_seed(` 的前窗口内仍必须有 **live 守卫**（`as_of_ctx.is_none()` 等）：
 //    那是进程内状态，没有代际可打，被回放写过就分不回来。
 // R4 硬：`init/services.rs` 里 cron 数据分支的 spawn 任务体必须压 `declare_cron_live_mode()`
@@ -29,9 +29,10 @@
 //    并发回放留在全局作用域栈上的截止日会渗进取数 —— 那是 2026-09-23 事故的镜像形态。
 // R3 硬（前端）：趋势智选面板必须把「本轮口径」绑到 payload，而不是渲染时读全局时间锚点
 //    （T11 复发形态）⇒ 事件侧 `setLastRunAsOfDate(` 与渲染侧 `lastRunAsOfDate` 都必须存在。
-// 自证：`--selftest` 用合成骨架证明检测器不空转，共十组负控（拆钩子 / 拆 asOfDate 键 /
-//    代际写入后置 / 写入挪远 / 拆种子守卫 / 无调用点不误报 / 快照校验只剩定义 /
-//    调用点藏在注释里 / 逐条拆面板绑定 / 定时声明计数），
+// 自证：`--selftest` 用合成骨架证明检测器不空转，共负控十三项（拆钩子 / 拆 asOfDate 键 /
+//    代际写在邻域外 / 完全没传代际 / 种子守卫写在调用点之后 / 拆种子守卫 / 无调用点不误报 /
+//    定义位不算调用点 / 排除定义不放过真调用点 / 快照校验只剩定义 / 调用点藏在注释里 /
+//    逐条拆面板绑定 / 定时声明计数），
 //    以及「token 只出现在注释或字符串里不算数」的剥离负控。
 //
 // ⚠ 判据两侧都在**剥注释后、空白归一**的骨架上比 —— 直接 grep 原文件会被注释里的
@@ -58,24 +59,75 @@ const ASOF_MARKERS = [
 ];
 /**
  * R2：两类「写进实盘可见状态」的调用点，判据**不同向**（2026-10-12 裁定改了其一）：
- *  - `pick.insert(db)`：回放的候选**要**落库（不落就没有样本可供反思），所以这里锁的是
- *    「写库时带上代际」（`as_of_date: Set(` 落在调用点前窗口），不再是 10-11 那版的
- *    「回放跳过写库」。仍接受旧的 `is_none()` 守卫形态会让门对「忘了打标记」睁一只眼。
+ *  - `persist_reco_pick(s)(`：回放的候选**要**落库（不落就没有样本可供反思），所以这里锁的是
+ *    「写库时带上代际」—— 批次键 `BatchKey { as_of_date, .. }` 的具名字段必须落在调用点前窗口，
+ *    不再是 10-11 那版的「回放跳过写库」。仍接受旧的 `is_none()` 守卫形态会让门对
+ *    「忘了打标记」睁一只眼。
+ *    ⚠ 检法随接线形态一起改过（2026-10-29）：这一版原先盯命令层的 `pick.insert(db)`，
+ *    落库下沉到 dao 后该字面量在命令层彻底消失 ⇒ R2 只剩种子那半边在计数，把四条真实
+ *    落库链（主荐股 / 趋势智选 / 时间旅行批次 / 漏检回放）全放到了证据之外，直到
+ *    「命中数下限」报出「判据失效」才暴露。**下限是唯一还在起作用的部分** —— 这条教训
+ *    写在这里，是为了让下一次「把证据改成现网恰好长什么样」之前先想起来问一句：
+ *    现网那四种写法互不相同（`as_of_date:` / `as_of_date,` / `Some(&as_of_str)`），
+ *    按链各配证据串等于把门退化成记账；所以改的是**生产形态**（统一收成必填的 BatchKey），
+ *    不是把证据串写成四个别名。
  *  - `set_serenity_seed(`：进程内可变状态，没有代际可打，一旦被回放写过就分不回来
  *    ⇒ 仍必须被 live 守卫挡住。
+ * `calls` 是调用点族：同一族里任一出现都算一个落库调用点。
  */
 const PERSIST_CALLS = [
   {
-    call: "pick.insert(db)",
-    evidence: ["as_of_date: Set("],
-    label: "代际写入（as_of_date: Set(..)）",
+    calls: ["persist_reco_pick(", "persist_reco_picks("],
+    // `as_of_date:` = 具名赋值；`as_of_date,` = struct shorthand（`BatchKey { as_of_date, .. }`）。
+    // shorthand 必须一起认：写全 `as_of_date: as_of_date` 会撞 clippy::redundant_field_names，
+    // 而该仓 clippy 是 `-D warnings` —— 逼调用方为了过门改写法，等于让门和门禁互相打架。
+    evidence: ["as_of_date:", "as_of_date,"],
+    label: "代际写入（BatchKey 的 as_of_date 字段）",
+    // 证据落在调用点**邻域**（前后各一窗）：批次键现在是调用点的实参字面量
+    // （`persist_reco_picks(.., &BatchKey { as_of_date: .. })`），也可能像趋势智选那样
+    // 在循环外先构好再传 `&batch_key`。两侧的具名写入都算「想过代际」。
+    // ⚠ 这里放弃旧的「只看前窗口」方向性，理由要说清：旧形态下方向性防的是
+    // 「先 insert 再补 as_of_date」，而那个字段现在收进了 BatchKey 的**必填字段**，
+    // 顺序错了直接编译不过 —— 方向性已由类型系统承担，门只需盯「邻域内有没有具名代际」。
+    side: "near",
   },
   {
-    call: "set_serenity_seed(",
+    calls: ["set_serenity_seed("],
     evidence: ["as_of_ctx.is_none()", "as_of_date.is_none()"],
     label: "live 守卫",
+    // 种子没有代际可打，守卫必须是**包住它的那个 if** ⇒ 只看前窗口，方向性保留。
+    side: "before",
   },
 ];
+
+/**
+ * 证据窗口：按 spec.side 取调用点邻域。
+ * `near` = 前后各 GUARD_WINDOW；`before` = 只看前 GUARD_WINDOW。
+ */
+function evidenceWindow(body, at, side) {
+  return side === "near"
+    ? body.slice(Math.max(0, at - GUARD_WINDOW), at + GUARD_WINDOW + 400)
+    : body.slice(Math.max(0, at - GUARD_WINDOW), at);
+}
+
+/**
+ * 调用点族里排除**定义位**：`pub async fn persist_reco_picks(` 自身含该字面量，
+ * 把定义当调用点计数会让读数虚高、并在定义段里判「没带代际」（它的形参就叫
+ * as_of_date，证据是巧合不是接线）。与 R4「只数包裹点、`fn cron_live<F>` 定义行不计入」
+ * 同一条理由：会说谎的读数比没有读数更坏。
+ */
+function callSites(body, calls) {
+  const hits = [];
+  for (const call of calls) {
+    let at = body.indexOf(call);
+    while (at !== -1) {
+      const isDefinition = body.slice(Math.max(0, at - 3), at) === "fn ";
+      if (!isDefinition) hits.push(at);
+      at = body.indexOf(call, at + call.length);
+    }
+  }
+  return hits;
+}
 
 /**
  * 剥 Rust 注释，保留字符串与 raw string 原样。
@@ -240,17 +292,16 @@ export function checkRustSources(dump) {
       }
       // R2：写进实盘可见状态的调用点必须带上各自的证据（代际写入 / live 守卫）
       for (const spec of PERSIST_CALLS) {
-        let at = fn.body.indexOf(spec.call);
-        while (at !== -1) {
+        for (const at of callSites(fn.body, spec.calls)) {
           r2Hits += 1;
-          const window = fn.body.slice(Math.max(0, at - GUARD_WINDOW), at);
+          const window = evidenceWindow(fn.body, at, spec.side);
           if (!spec.evidence.some((g) => window.includes(g))) {
             violations.push(
-              `R2 ${rel}::${fn.name} —— 调用点 \`${spec.call}\` 的前 ${GUARD_WINDOW} 字符内没有 ` +
+              `R2 ${rel}::${fn.name} —— 调用点（${spec.calls.join(" 或 ")}）的` +
+                `${spec.side === "near" ? "邻域" : "前窗口"} ${GUARD_WINDOW} 字符内没有 ` +
                 `${spec.label} ⇒ 回放产物会与实盘同表同种子、分不出代际`,
             );
           }
-          at = fn.body.indexOf(spec.call, at + 1);
         }
       }
       if (dump) console.log(`  段 ${rel}::${fn.name} (${fn.body.length} 字符)`);
@@ -266,9 +317,13 @@ export function checkRustSources(dump) {
       `判据失效: R1 只命中 ${r1Hits} 处（现网至少有主分析链与趋势智选两处 as-of + RunOptions）`,
     );
   }
+  // 下限 2 的含义是「落库链 + 种子链各至少一处」，不是现网调用点点名清单。
+  // （2026-10-29 校准：旧文案写「趋势智选链至少 2 处」，指的是 `pick.insert(db)` +
+  //  `set_serenity_seed(`；落库下沉 dao 后前者消失，靠这条下限才把「R2 已经看不见落库」
+  //  暴露出来 —— 下限本来就是为这一刻准备的，别把它调低。）
   if (r2Hits < 2) {
     violations.push(
-      `判据失效: R2 只命中 ${r2Hits} 个落库/种子调用点（趋势智选链至少 2 处）`,
+      `判据失效: R2 只命中 ${r2Hits} 个落库/种子调用点（现网至少有 persist_reco_pick(s) 落库与 set_serenity_seed 两类）`,
     );
   }
   return { violations, fnCount, r1Hits, r2Hits, fileCount: files.length };
@@ -394,17 +449,18 @@ function selftest() {
     fail("剥离失败：注释没剥掉或代码被误剥");
   }
   // 剥离器：`//` 出现在字符串里不得吃掉后面的代码
-  const urlish = skeleton("fn b() { let u = \"https://x//y\"; pick.insert(db); }");
-  if (!urlish.includes("pick.insert(db)")) {
+  const urlish = skeleton(
+    'fn b() { let u = "https://x//y"; persist_reco_pick(db, &p, &BatchKey { as_of_date: d }); }',
+  );
+  if (!urlish.includes("persist_reco_pick(db")) {
     fail("剥离失败：字符串里的 // 把后面的代码当注释吃掉了");
   }
 
   // 正样本要同时给出现代两种合法形态：落库**带代际写入**、种子**被 live 守卫挡住**
   const good =
     "fn run(x) { let ctx = parse_asof_param(d); let o = RunOptions { node_task_scope: Some(h) }; " +
-    "let j = json!({ \"asOfDate\": d }); " +
-    "let am = ActiveModel { as_of_date: Set(as_of_ctx.as_ref().map(|c| c.as_string())) }; " +
-    "if let Err(e) = pick.insert(db) { } " +
+    'let j = json!({ "asOfDate": d }); ' +
+    "if let Err(e) = persist_reco_pick(db, &p, &BatchKey { generated_at: g, as_of_date: d, purpose: q }) { } " +
     "if as_of_ctx.is_none() { set_serenity_seed(s); } }";
   const mk = (body) => skeleton(body);
   const seg = (body) => splitTopLevelFns(mk(body));
@@ -412,10 +468,15 @@ function selftest() {
   // 正样本：R1/R2 都不报
   const probe = (body, spec) => {
     const b = seg(body)[0]?.body ?? "";
-    const at = b.indexOf(spec.call);
-    if (at === -1) return "no-call";
-    const window = b.slice(Math.max(0, at - GUARD_WINDOW), at);
-    return spec.evidence.some((g) => window.includes(g)) ? "guarded" : "unguarded";
+    const sites = callSites(b, spec.calls);
+    if (sites.length === 0) return "no-call";
+    // 同族多个调用点：任一缺证据就判 unguarded（否则「一处带代际」会替另一处背书）
+    return sites.every((at) => {
+      const window = evidenceWindow(b, at, spec.side);
+      return spec.evidence.some((g) => window.includes(g));
+    })
+      ? "guarded"
+      : "unguarded";
   };
   if (missingEngineWirings(seg(good)[0].body).length !== 0) {
     fail(`自证失败：正样本被判缺接线 ${missingEngineWirings(seg(good)[0].body)}`);
@@ -441,32 +502,54 @@ function selftest() {
     fail("自证失败：拆掉 asOfDate 键后 R1 没报出（前端会绑到恒 undefined 的键）");
   }
 
-  // 负控 2：代际写入落在调用点**之后** ⇒ 必须判成未带代际（判据要有方向性）
-  const genAfter =
-    "fn run(x) { if let Err(e) = pick.insert(db) { } let am = ActiveModel { as_of_date: Set(d) }; }";
-  if (probe(genAfter, PERSIST_CALLS[0]) !== "unguarded") {
-    fail("自证失败：代际写入在调用点之后仍被当成已带代际（判据没方向性）");
+  // 负控 2：调用点只传 `&b` 变量、具名代际写在**邻域之外** ⇒ 必须判成未带代际。
+  //（这条锁的是邻域宽度：门认的是就地给出的 BatchKey 字面量，不是「某处曾经存在」）
+  const genOutsideNeighbourhood =
+    `fn run(x) { let b = BatchKey { as_of_date: d }; ${"let z = 0; ".repeat(400)} ` +
+    "persist_reco_pick(db, &p, &b); }";
+  if (probe(genOutsideNeighbourhood, PERSIST_CALLS[0]) !== "unguarded") {
+    fail("自证失败：代际写在邻域之外仍被当成已带代际（邻域宽度不起作用）");
   }
 
-  // 负控 3：代际写入存在但离调用点超过前窗口 ⇒ 必须判成未带代际
-  const farGen =
-    `fn run(x) { let am = ActiveModel { as_of_date: Set(d) }; ${"let z = 0; ".repeat(160)} pick.insert(db); }`;
-  if (probe(farGen, PERSIST_CALLS[0]) !== "unguarded") {
-    fail("自证失败：前窗口宽度不起作用（远处写入被当成本处写入）");
+  // 负控 2b：调用点邻域内根本没有 as_of_date 字样 ⇒ 必须判成未带代际
+  const genAbsent = "fn run(x) { let b = make_batch(); persist_reco_picks(db, picks, &b); }";
+  if (probe(genAbsent, PERSIST_CALLS[0]) !== "unguarded") {
+    fail("自证失败：没传代际的落库调用点没被判出 ⇒ 回放写进实盘表的形态会静默复活");
+  }
+
+  // 负控 3：种子守卫必须**包住**调用点 ⇒ 写在调用点之后不算（before 侧的方向性仍在）
+  const seedGuardAfter = "fn run(x) { set_serenity_seed(s); if as_of_ctx.is_none() { } }";
+  if (probe(seedGuardAfter, PERSIST_CALLS[1]) !== "unguarded") {
+    fail("自证失败：种子守卫写在调用点之后仍被当成已守卫（live 侧判据失去方向性）");
   }
 
   // 负控 3b：拆掉 set_serenity_seed 的 live 守卫 ⇒ 必须判成未守卫
   //（种子这半边判据没被新裁定退役，拆掉就该红）
   const seedUnguarded =
-    "fn run(x) { let am = ActiveModel { as_of_date: Set(d) }; " +
-    "if let Err(e) = pick.insert(db) { } set_serenity_seed(s); }";
+    "fn run(x) { persist_reco_pick(db, &p, &BatchKey { as_of_date: d }); set_serenity_seed(s); }";
   if (probe(seedUnguarded, PERSIST_CALLS[1]) !== "unguarded") {
     fail("自证失败：种子调用点没了 live 守卫却没被判出 ⇒ 污染实盘池的形态会静默复活");
   }
 
   // 负控 4：完全没有落库调用 ⇒ 检测器不得凭空报（恒真判据的另一种形态）
-  if (seg("fn run(x) { let a = 1; }")[0].body.includes("pick.insert(db)")) {
-    fail("自证失败：无调用点的样本被读出调用点");
+  if (callSites(seg("fn run(x) { let a = 1; }")[0].body, PERSIST_CALLS[0].calls).length !== 0) {
+    fail("自证失败：无调用点的样本被读出落库调用点");
+  }
+
+  // 负控 4b（2026-10-29 随「排除定义位」一起补）：定义位不是调用点。
+  //   `pub async fn persist_reco_picks(` 自身含该字面量 ⇒ 计入会让读数虚高一格，
+  //   还会在定义段里判出「没带代际」的假阳性（它的**形参**就叫 as_of_date，那是巧合）。
+  //   ⚠ 这条同时锁住反面：排除定义**不得顺手把真调用点也放过**（判 1 不是判 0）。
+  const defOnly = "pub async fn persist_reco_picks(db, as_of_date: Option<&str>) { inner(); }";
+  if (callSites(skeleton(defOnly), PERSIST_CALLS[0].calls).length !== 0) {
+    fail("自证失败：R2 把落库函数的定义位当成调用点（读数会说谎）");
+  }
+  const defPlusUnguardedCall =
+    "pub async fn persist_reco_picks(db, as_of_date: Option<&str>) { inner(); }\n" +
+    "fn run(x) { persist_reco_picks(db, picks); }";
+  const mixedSites = callSites(skeleton(defPlusUnguardedCall), PERSIST_CALLS[0].calls);
+  if (mixedSites.length !== 1) {
+    fail(`自证失败：定义 + 一处真调用点的读数应为 1，实得 ${mixedSites.length} ⇒ 排除逻辑过宽`);
   }
 
   // 负控 4c（R5）：批次建池快照校验的三种形态必须给出不同读数
@@ -523,9 +606,10 @@ function selftest() {
     process.exit(1);
   }
   console.log(
-    "✅ 自证通过（剥注释不吞代码；正样本读得出钩子/回灌键/代际写入；十组负控：拆钩子 / " +
-      "拆 asOfDate 键 / 代际写入后置 / 写入挪远 / 拆种子守卫 / 无调用点不误报 / " +
-      "快照校验只剩定义 / 调用点藏在注释里 / 面板绑定逐条拆 / 定时声明计数，均按预期）",
+    "✅ 自证通过（剥注释不吞代码；正样本读得出钩子/回灌键/代际写入；负控十三项：拆钩子 / " +
+      "拆 asOfDate 键 / 代际写在邻域外 / 完全没传代际 / 种子守卫写在调用点之后 / 拆种子守卫 / " +
+      "无调用点不误报 / 定义位不算调用点 / 排除定义不放过真调用点 / 快照校验只剩定义 / " +
+      "调用点藏在注释里 / 面板绑定逐条拆 / 定时声明计数，均按预期）",
   );
   process.exit(0);
 }

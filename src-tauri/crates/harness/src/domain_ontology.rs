@@ -357,7 +357,7 @@ pub const METRICS: &[Metric] = &[
         unit: "0-100 分",
         min: 0.0,
         max: 100.0,
-        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:122 | src-tauri/src/commands/bottleneck-calc.rhai:148",
+        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:130 | src-tauri/src/commands/bottleneck-calc.rhai:148",
     },
     Metric {
         id: "demand_elasticity_score",
@@ -366,7 +366,7 @@ pub const METRICS: &[Metric] = &[
         unit: "0-100 分",
         min: 0.0,
         max: 100.0,
-        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:123 | src-tauri/src/commands/bottleneck-calc.rhai:148",
+        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:131 | src-tauri/src/commands/bottleneck-calc.rhai:148",
     },
     Metric {
         id: "irreplaceability_score",
@@ -375,7 +375,7 @@ pub const METRICS: &[Metric] = &[
         unit: "0-100 分",
         min: 0.0,
         max: 100.0,
-        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:124 | src-tauri/src/commands/bottleneck-calc.rhai:148",
+        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:132 | src-tauri/src/commands/bottleneck-calc.rhai:148",
     },
     Metric {
         id: "bottleneck_composite",
@@ -384,7 +384,7 @@ pub const METRICS: &[Metric] = &[
         unit: "0-100 分",
         min: 0.0,
         max: 100.0,
-        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:125 | src-tauri/src/commands/bottleneck-calc.rhai:148",
+        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:133 | src-tauri/src/commands/bottleneck-calc.rhai:148",
     },
 ];
 

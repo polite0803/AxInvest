@@ -4142,7 +4142,11 @@ pub async fn create_stock_cron(
     );
     let prompt = format!("对 {} ({}) 执行完整股票分析", stock_code, stock_name);
     let desc = format!("定时分析 {}", stock_code);
-    let job = CronJob::new(&id, &cron_expression, &prompt, &desc)
+    // name 放人话（含股票名，便于在多条同类任务里分辨），id 走 with_id ——
+    // 见 `CronJob::with_id` 文档：name 与 id 不能互相顶替。
+    let name = format!("定时分析 {} {}", stock_code, stock_name);
+    let job = CronJob::new(&name, &cron_expression, &prompt, &desc)
+        .with_id(id.clone())
         .with_workflow_id("stock-analysis".to_string())
         .with_task_type("stock-analysis");
     state.cron_job_store.add(job.clone()).await;
@@ -6053,11 +6057,12 @@ pub async fn create_watchlist_scan_cron(
     let id =
         format!("wlscan-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("x"));
     let mut job = CronJob::new(
-        &id,
+        "自选股自动扫描",
         &cron_expression,
         "自选股自动扫描",
         "定时扫描自选股列表，对每只股票执行完整分析工作流",
     )
+    .with_id(id.clone())
     .with_task_type("watchlist-scan");
     if !enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
@@ -6133,6 +6138,26 @@ fn validate_decisions_desc(threshold: i32, depth: &str) -> String {
     format!("反思复盘：按待办队列逐条复盘（最低置信度:{threshold}, 深度:{depth}）")
 }
 
+/// 决策校验任务的**显示名**（任务中心「名称」列）。
+///
+/// ⚠ 与 `validate_decisions_desc` 分开：`CronJob::new` 的第一个参数是 name，
+/// 历史上这里误传了参数指纹 id（`vldec-0-light`），任务中心就显示成 id 串
+/// （用户实证两行名称 `vldec-18b830d5` / `vldec-c1d0961c`，2026-10-29）。
+/// name 只放「人话 + 区分参数」，id 由 `with_id` 单独给。
+fn validate_decisions_name(threshold: i32, depth: &str) -> String {
+    let conf = if threshold <= 0 {
+        "全部置信度".to_string()
+    } else {
+        format!("置信度≥{threshold}")
+    };
+    let depth_label = match depth {
+        "deep" => "详细",
+        "light" => "简要",
+        other => other,
+    };
+    format!("反思复盘（{conf}，{depth_label}）")
+}
+
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "创建决策校验定时任务")]
 #[tauri::command]
 pub async fn create_validate_decisions_cron(
@@ -6146,19 +6171,69 @@ pub async fn create_validate_decisions_cron(
     // ⇒ 每调一次 `create` 就多一条 active 任务（实测库里累积到 **7 条**
     // `validate-decisions@0 6 * * *`，`scripts/check-cron-job-authority.mjs` 的 R3/R4 因此报红）。
     //
-    // 修法：**id 由「参数指纹」派生** ⇒ 同参数 ⇒ 同 id ⇒ 覆盖（幂等）；
-    // 不同参数（threshold/depth 不同）⇒ 不同 id ⇒ 可并存（用户要建多个不同配置的任务）。
+    // 修法：**id 由「参数指纹」派生** ⇒ 同参数 ⇒ 同 id ⇒ 覆盖（幂等）。
+    // ⚠ 原注释还写过「不同参数 ⇒ 不同 id ⇒ 可并存（用户要建多个不同配置的任务）」——
+    // 那半句已被下面的收敛闸推翻：并存的只是**任务定义**，被重复消费的是**同一个队列**
+    // （见本函数内「收敛闸（2026-10-29）」）。
     // 且 `add` 前先 `remove` 同 id 的旧行 ⇒ 覆盖而非并存。
     //
-    // ⚠ 库里**已存在的 7 条**历史重复不在本次处理范围 ——
-    // `check-cron-job-authority.mjs` 明写「处置动作是**在任务中心删除**，本门不代删
-    // （那是用户建的任务）」⇒ 本次只修**代码根因**，不代删用户数据。
+    // ⚠ [2026-10-29 纠错] 上一轮 R-3g 的「修法」**没有生效**，只做了一半：
+    // 它把指纹 `id` 传给了 `CronJob::new` 的**第一个参数 —— 那是 name 不是 id**，
+    // 而 `CronJob::new` 内部把 `id` 写成 `Uuid::new_v4()`。后果两条同时成立：
+    //   ① 任务中心「名称」列渲染成 id 串（用户实证：`vldec-18b830d5` / `vldec-c1d0961c`）；
+    //   ② `job.id` 仍是随机 uuid ⇒ 下面这行 `remove(&id)` **永远删不到任何行**，
+    //      「先 remove 再 add」的幂等覆盖等于不存在，重复行照旧累积。
+    // 现改为「name 给人话（`validate_decisions_name`）+ `with_id(id)` 给指纹 id」，
+    // 两半都到位后覆盖才真正成立（`add` 的落库 id 取自 `job.id`，见 cron_job.rs:548）。
+    //
+    // ⚠ 库里那批历史重复：按门禁口径本门「不代删」（那是用户建的任务），
+    // 但 2026-10-29 用户**明确指令**收敛后已手工删掉两行
+    // （`vldec-1-deep` 先删、`vldec-0-light` 随后删，只留播种的 18:00 那条）；
+    // 代码侧现在靠下面的收敛闸挡住复发，不依赖「库里恰好没有重复」。
     let expr = cron_expression.unwrap_or_else(|| "0 6 * * *".to_string());
     let threshold = min_confidence_threshold.unwrap_or(0);
     let depth = reflection_depth.unwrap_or_else(|| "light".to_string());
     // 参数指纹：只取影响任务行为的两个参数（schedule 变化时同 id 也可覆盖）
     let id = format!("vldec-{threshold}-{depth}");
     let desc = validate_decisions_desc(threshold, &depth);
+    // ── 收敛闸（2026-10-29）──
+    // `batch-reflection`（播种的 `reflection-due-daily`，18:00）与 `validate-decisions`
+    // 在 `init/services.rs:3116` 路由到**同一个** `run_batch_reflection_inner`，消费同一个
+    // `stock_reflections` pending 队列 ⇒ 两条 active 的反思 cron = 同一批待办被两趟消费、
+    // 各自配额互不知情（`scripts/check-cron-job-authority.mjs` 头部 14-16 行记的就是这个坑；
+    // 2026-10-29 现网实证 `vldec-0-light` 与 `vldec-1-deep` 同时刻并存）。
+    //
+    // 这段推翻了本函数原先「不同参数 ⇒ 不同 id ⇒ 可并存」的思路：**并存的是任务定义，
+    // 重复的是队列消费**——参数不同也照样把同一批行跑两遍。故已有入口在跑时直接拒绝，
+    // 并指向真正该操作的那条任务；同 id 的覆盖（幂等重建）不受影响。
+    //
+    // 为什么是拒绝而不是自动接管：配置模型不同（本任务 `minConfidence/reflectionDepth`，
+    // 内置任务是 `period/dueOnly`），把内置行的 prompt 改写成前者会让执行侧
+    // 按 `batch-reflection` 解析失败 ⇒ 只能拒绝，不能替它改配置。
+    // 独立绑定一次性快照：避免把临时 Vec 的生命周期押在 `if let` 的临时延长规则上。
+    let existing_jobs = state.cron_job_store.list().await;
+    let conflict = existing_jobs.iter().find(|j| {
+        j.id != id
+            && j.is_active()
+            && matches!(
+                j.task_type.as_deref(),
+                Some("batch-reflection") | Some("validate-decisions")
+            )
+    });
+    if let Some(existing) = conflict {
+        // 错误码选 `COMMON_INVALID_INPUT` 而不是 `wf_err::VALIDATION_FAILED`：
+        // 后者译作「节点输入/输出校验未通过」（`locales/zh-CN.json` 的
+        // `error.STOCK_WORKFLOW_VALIDATION_FAILED`），与本情形（**当前状态下该请求无效**）
+        // 语义不符，会给用户一个误导性前缀。本码译作「无效的输入」，接 detail 后通顺；
+        // 而且它是既有码，不必新增 11 语言翻译。
+        return Err(ErrorResponse::new(common_err::INVALID_INPUT)
+            .with_detail(format!(
+                "反思入口已存在（{} · {}）：同一 pending 队列只保留一个 cron 入口，\
+                 否则同一批待办会被两趟消费、双倍计费。如需启停或调整，请到任务中心操作该任务。",
+                existing.name, existing.schedule
+            ))
+            .to_string());
+    }
     // [2026-09-13] 配置必须序列化进 `prompt`。
     // executor 的 `validate-decisions` 分支从 `prompt` 反序列化
     // `ValidateDecisionsConfig`；此前 prompt 写的是「决策校验 + 反思复盘」这句中文，
@@ -6169,7 +6244,10 @@ pub async fn create_validate_decisions_cron(
         max_count: None,
     };
     let prompt = config.to_json()?;
-    let mut job = CronJob::new(&id, &expr, &prompt, &desc).with_task_type("validate-decisions");
+    let name = validate_decisions_name(threshold, &depth);
+    let mut job = CronJob::new(&name, &expr, &prompt, &desc)
+        .with_id(id.clone())
+        .with_task_type("validate-decisions");
     if !enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
     }
@@ -6338,7 +6416,10 @@ pub async fn create_batch_reflection_cron(
         },
         config.max_count.unwrap_or(20)
     );
-    let mut job = CronJob::new(&id, &expr, &prompt, &desc).with_task_type("batch-reflection");
+    let name = format!("批量反思复盘（{period_label}）");
+    let mut job = CronJob::new(&name, &expr, &prompt, &desc)
+        .with_id(id.clone())
+        .with_task_type("batch-reflection");
     if !enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
     }

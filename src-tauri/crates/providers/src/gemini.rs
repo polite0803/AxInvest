@@ -206,6 +206,15 @@ fn convert_tools_to_gemini(tools: &Option<Vec<ChatTool>>) -> Option<Vec<GeminiTo
 }
 
 fn convert_messages(messages: &[ChatMessage]) -> (Option<GeminiContent>, Vec<GeminiContent>) {
+    // 与 OpenAI 路径同一套净化判据：空名调用/无响应调用/孤儿 functionResponse 剔除，
+    // 空 id 合成并让配对消息回写同一 id（判据见 crate::tool_calls）。
+    match crate::tool_calls::sanitize_messages(messages) {
+        Some(sanitized) => convert_raw_messages(&sanitized),
+        None => convert_raw_messages(messages),
+    }
+}
+
+fn convert_raw_messages(messages: &[ChatMessage]) -> (Option<GeminiContent>, Vec<GeminiContent>) {
     let mut system_instruction = None;
     let mut contents = Vec::new();
 
@@ -321,21 +330,9 @@ fn convert_messages(messages: &[ChatMessage]) -> (Option<GeminiContent>, Vec<Gem
                 }
                 if let Some(ref tcs) = msg.tool_calls {
                     for tc in tcs {
-                        // 解析失败应记录 warn,避免静默退化为空对象导致上游调用失败难以定位
-                        let args: serde_json::Value = match serde_json::from_str(
-                            &tc.function.arguments,
-                        ) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                tracing::warn!(
-                                    "gemini: failed to parse tool_call args for tool '{}' (id={}): {}",
-                                    tc.function.name,
-                                    tc.id,
-                                    e
-                                );
-                                serde_json::Value::Object(serde_json::Map::new())
-                            },
-                        };
+                        // `args` 只接受 JSON 对象：非法/非对象参数统一降级为 {}（带 warn）
+                        let args =
+                            crate::tool_calls::normalize_arguments_object(&tc.function.arguments);
                         parts.push(GeminiPart {
                             text: None,
                             inline_data: None,
@@ -509,6 +506,46 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn function_call_without_name_is_dropped() {
+        let fc = GeminiFunctionCall { name: "  ".to_string(), args: json!({}) };
+        assert!(tool_call_from_function_call(&fc).is_none());
+    }
+
+    #[test]
+    fn function_call_args_are_forced_to_object() {
+        let fc = GeminiFunctionCall { name: "read_file".to_string(), args: json!([1, 2]) };
+        let call = tool_call_from_function_call(&fc).expect("测试：应保留");
+        assert_eq!(call.function.name, "read_file");
+        assert_eq!(call.function.arguments, "{}");
+    }
+
+    /// 序列化接线测试：空名 functionCall 与无承接的 functionResponse 都不上网。
+    #[test]
+    fn convert_messages_drops_nameless_function_call_and_orphan_response() {
+        let assistant = ChatMessage {
+            role: "assistant".to_string(),
+            content: ChatContent::Text(String::new()),
+            tool_calls: Some(vec![ToolCall {
+                id: "call_a".to_string(),
+                call_type: "function".to_string(),
+                function: ToolCallFunction { name: String::new(), arguments: "{}".to_string() },
+            }]),
+            tool_call_id: None,
+            thinking: None,
+        };
+        let orphan = ChatMessage {
+            role: "tool".to_string(),
+            content: ChatContent::Text("ok".to_string()),
+            tool_calls: None,
+            tool_call_id: Some("call_a".to_string()),
+            thinking: None,
+        };
+
+        let (_, contents) = convert_messages(&[assistant, orphan]);
+        assert!(contents.is_empty(), "空名调用与其结果都不应出现在 contents");
+    }
 }
 
 fn simple_id() -> String {
@@ -517,6 +554,40 @@ fn simple_id() -> String {
 
 fn tool_call_id() -> String {
     format!("gemini-fc-{}", uuid::Uuid::new_v4())
+}
+
+/// 把 Gemini 的 `functionCall` 归一化为内部 ToolCall：空名丢弃、`args` 强制 JSON 对象。
+///
+/// Gemini 没有调用 id（按函数名配对），所以 id 由本地生成；空名既无法执行、也无法
+/// 写回历史（回写会被上游判「无效函数调用」），只有丢弃这一条路。
+fn tool_call_from_function_call(
+    fc: &GeminiFunctionCall,
+) -> Option<axagent_harness::types::ToolCall> {
+    let name = fc.name.trim();
+    if name.is_empty() {
+        tracing::warn!(
+            target: "axagent.providers.tool_call",
+            "gemini: functionCall 缺少函数名，已丢弃（无法执行）"
+        );
+        return None;
+    }
+    let args = match &fc.args {
+        serde_json::Value::Object(_) => fc.args.clone(),
+        other => {
+            tracing::warn!(
+                target: "axagent.providers.tool_call",
+                args = %other,
+                "gemini: functionCall args 不是 JSON 对象，降级为 {{}}"
+            );
+            serde_json::Value::Object(serde_json::Map::new())
+        },
+    };
+    let arguments = serde_json::to_string(&args).unwrap_or_else(|_| "{}".to_string());
+    Some(axagent_harness::types::ToolCall {
+        id: tool_call_id(),
+        call_type: "function".to_string(),
+        function: axagent_harness::types::ToolCallFunction { name: name.to_string(), arguments },
+    })
 }
 
 #[async_trait]
@@ -575,15 +646,10 @@ impl ProviderAdapter for GeminiAdapter {
                         content.push_str(text);
                     }
                 }
-                if let Some(ref fc) = part.function_call {
-                    tool_calls.push(axagent_harness::types::ToolCall {
-                        id: tool_call_id(),
-                        call_type: "function".to_string(),
-                        function: axagent_harness::types::ToolCallFunction {
-                            name: fc.name.clone(),
-                            arguments: serde_json::to_string(&fc.args).unwrap_or_default(),
-                        },
-                    });
+                if let Some(ref fc) = part.function_call
+                    && let Some(call) = tool_call_from_function_call(fc)
+                {
+                    tool_calls.push(call);
                 }
             }
         }
@@ -731,20 +797,10 @@ impl ProviderAdapter for GeminiAdapter {
                                                     content = Some(text.clone());
                                                 }
                                             }
-                                            if let Some(ref fc) = part.function_call {
-                                                tool_calls_vec
-                                                    .push(axagent_harness::types::ToolCall {
-                                                    id: tool_call_id(),
-                                                    call_type: "function".to_string(),
-                                                    function:
-                                                        axagent_harness::types::ToolCallFunction {
-                                                            name: fc.name.clone(),
-                                                            arguments: serde_json::to_string(
-                                                                &fc.args,
-                                                            )
-                                                            .unwrap_or_default(),
-                                                        },
-                                                });
+                                            if let Some(ref fc) = part.function_call
+                                                && let Some(call) = tool_call_from_function_call(fc)
+                                            {
+                                                tool_calls_vec.push(call);
                                             }
                                         }
                                     }

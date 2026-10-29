@@ -152,6 +152,17 @@ struct AnthropicModelInfo {
 fn convert_messages(
     messages: &[ChatMessage],
 ) -> (Option<serde_json::Value>, Vec<AnthropicMessage>) {
+    // 与 OpenAI 路径同一套净化判据：空名调用/无响应调用/孤儿 tool_result 在序列化前剔除，
+    // 空 id 合成并让 tool_result 回写同一 id（判据见 crate::tool_calls）。
+    match crate::tool_calls::sanitize_messages(messages) {
+        Some(sanitized) => convert_raw_messages(&sanitized),
+        None => convert_raw_messages(messages),
+    }
+}
+
+fn convert_raw_messages(
+    messages: &[ChatMessage],
+) -> (Option<serde_json::Value>, Vec<AnthropicMessage>) {
     // 收集所有 system 消息并合并，而非仅保留最后一条
     let system_texts: Vec<&str> = messages
         .iter()
@@ -206,21 +217,9 @@ fn convert_messages(
                 }
                 if let Some(ref tcs) = msg.tool_calls {
                     for tc in tcs {
-                        // 解析失败不应静默退化为空对象,改用 warn 记录便于排查
-                        let args: serde_json::Value = match serde_json::from_str(
-                            &tc.function.arguments,
-                        ) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                tracing::warn!(
-                                    "anthropic: failed to parse tool_call args for tool '{}' (id={}): {}",
-                                    tc.function.name,
-                                    tc.id,
-                                    e
-                                );
-                                serde_json::Value::Object(serde_json::Map::new())
-                            },
-                        };
+                        // `input` 只接受 JSON 对象：非法/非对象参数统一降级为 {}（带 warn）。
+                        let args =
+                            crate::tool_calls::normalize_arguments_object(&tc.function.arguments);
                         blocks.push(serde_json::json!({
                             "type": "tool_use",
                             "id": tc.id,
@@ -387,6 +386,34 @@ mod tests {
             ])
         );
     }
+
+    /// 序列化接线测试：空名 tool_use 与无承接的 tool_result 都必须在上网前剔除。
+    #[test]
+    fn convert_messages_drops_nameless_tool_use_and_orphan_result() {
+        let assistant = ChatMessage {
+            role: "assistant".to_string(),
+            content: ChatContent::Text("先看行情".to_string()),
+            tool_calls: Some(vec![ToolCall {
+                id: "call_a".to_string(),
+                call_type: "function".to_string(),
+                function: ToolCallFunction { name: String::new(), arguments: "{}".to_string() },
+            }]),
+            tool_call_id: None,
+            thinking: None,
+        };
+        let orphan = ChatMessage {
+            role: "tool".to_string(),
+            content: ChatContent::Text("ok".to_string()),
+            tool_calls: None,
+            tool_call_id: Some("call_a".to_string()),
+            thinking: None,
+        };
+
+        let (_, messages) = convert_messages(&[assistant, orphan]);
+        assert_eq!(messages.len(), 1, "空名 tool_use 与无承接的 tool_result 都要剔除");
+        assert_eq!(messages[0].role, "assistant");
+        assert_eq!(messages[0].content, json!("先看行情"));
+    }
 }
 
 #[async_trait]
@@ -468,20 +495,20 @@ impl ProviderAdapter for AnthropicAdapter {
                     }
                 },
                 "tool_use" => {
-                    if let (Some(id), Some(name)) = (&block.id, &block.name) {
-                        let arguments = block
-                            .input
-                            .as_ref()
-                            .map(|v| serde_json::to_string(v).unwrap_or_default())
-                            .unwrap_or_default();
-                        tool_calls.push(axagent_harness::types::ToolCall {
-                            id: id.clone(),
-                            call_type: "function".to_string(),
-                            function: axagent_harness::types::ToolCallFunction {
-                                name: name.clone(),
-                                arguments,
-                            },
-                        });
+                    // 空名 tool_use 不能执行，也不能写回历史：直接丢弃（与 OpenAI 非流式同判据）
+                    let arguments = block
+                        .input
+                        .as_ref()
+                        .map(|v| serde_json::to_string(v).unwrap_or_default())
+                        .unwrap_or_default();
+                    if let Some(call) = crate::tool_calls::normalize_tool_call(
+                        block.id.as_deref(),
+                        Some("function"),
+                        block.name.as_deref(),
+                        Some(arguments.as_str()),
+                        tool_calls.len(),
+                    ) {
+                        tool_calls.push(call);
                     }
                 },
                 _ => {},
@@ -795,23 +822,38 @@ impl ProviderAdapter for AnthropicAdapter {
                                     }
                                 },
                                 "message_stop" => {
-                                    let tool_calls = if pending_tool_uses.is_empty() {
-                                        None
-                                    } else {
-                                        Some(
-                                            pending_tool_uses
-                                                .iter()
-                                                .map(|tu| axagent_harness::types::ToolCall {
-                                                    id: tu.id.clone(),
-                                                    call_type: "function".to_string(),
-                                                    function:
-                                                        axagent_harness::types::ToolCallFunction {
-                                                            name: tu.name.clone(),
-                                                            arguments: tu.arguments.clone(),
-                                                        },
-                                                })
-                                                .collect(),
-                                        )
+                                    // 与 OpenAI 流式终结同判据：空名 / 非法参数不写入历史，
+                                    // 改发流错误让引擎重新生成本轮（坏历史重放是确定性 400）。
+                                    let collected = pending_tool_uses.iter().map(|tu| {
+                                        axagent_harness::types::ToolCall {
+                                            id: tu.id.clone(),
+                                            call_type: "function".to_string(),
+                                            function: axagent_harness::types::ToolCallFunction {
+                                                name: tu.name.clone(),
+                                                arguments: tu.arguments.clone(),
+                                            },
+                                        }
+                                    });
+                                    let tool_calls = match crate::tool_calls::finalize_tool_calls(
+                                        collected.collect(),
+                                    ) {
+                                        Ok(calls) => calls,
+                                        Err(err) => {
+                                            let message = crate::tool_calls::finalize_error_message(
+                                                "Anthropic",
+                                                "tool_use",
+                                                &err,
+                                            );
+                                            let _ = tx.try_send(Err(
+                                                AxAgentError::execution_with_source(
+                                                    message,
+                                                    anyhow::anyhow!(
+                                                        "malformed tool_use at stream finalization: {err:?}"
+                                                    ),
+                                                ),
+                                            ));
+                                            return;
+                                        },
                                     };
                                     // 放宽条件:只要有任何 token 统计字段,均视为有效 usage
                                     let final_usage = if accumulated_prompt_tokens > 0

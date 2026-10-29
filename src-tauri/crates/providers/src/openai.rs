@@ -18,6 +18,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::pin::Pin;
 
 use crate::compat::impl_default_via_new;
+use crate::tool_calls::{
+    FinalizeError, ToolCallAccumulator, normalize_tool_call, validate_tool_call_arguments,
+};
 use crate::url_utils::resolve_chat_url;
 use crate::{ProviderAdapter, ProviderRequestContext, build_http_client};
 
@@ -258,26 +261,8 @@ fn extract_primary_content(
     None
 }
 
-// V69 修复(2026-09-10): 校验并归一化 tool_call arguments。
-// 上游模型（agnes 免费档等）可能吐出截断/畸形 JSON 参数（finish_reason=length
-// 截断、网关抖动丢 delta 等）。坏参数一旦写入会话历史，下一轮请求必被上游
-// 以 400 "Assistant tool call .arguments must be valid JSON" 拒绝，且重试时
-// 历史不变 → 确定性失败，烧完全部重试次数。返回 None 表示参数非法。
-pub(crate) fn validate_tool_call_arguments(args: &str) -> Option<String> {
-    let trimmed = args.trim();
-    if trimmed.is_empty() {
-        // 无参调用归一化为 "{}"，部分上游对空字符串参数同样报 400
-        return Some("{}".to_string());
-    }
-    if serde_json::from_str::<serde_json::Value>(trimmed).is_ok() {
-        return Some(args.to_string());
-    }
-    tracing::warn!(
-        args_preview = %&trimmed[..trimmed.len().min(200)],
-        "[openai] tool_call arguments 非法 JSON（上游截断或畸形），拒绝写入会话历史"
-    );
-    None
-}
+// tool_call 的合法性判据（arguments 校验 / 空 id 合成 / 空名丢弃）统一收口在
+// crate::tool_calls：流式累积、非流式解析、历史序列化三条路径共用同一套规则。
 
 fn extract_gemini_compat_chunk(data: &str) -> Option<ChatStreamChunk> {
     let parsed = serde_json::from_str::<GeminiCompatChunk>(data).ok()?;
@@ -453,6 +438,16 @@ struct OpenAIEmbedData {
 pub use crate::extract_reasoning_from_text;
 
 fn convert_messages(messages: &[ChatMessage]) -> Vec<OpenAIMessage> {
+    // 入参历史先过 tool_call 净化（判据见 crate::tool_calls）：空名调用丢弃、空 id
+    // 合成、无响应的 assistant.tool_calls 与孤儿 tool 消息剔除。正常历史不会产生
+    // 任何改动，因此这里零拷贝；只有真的需要修时才复制一份再序列化。
+    match crate::tool_calls::sanitize_messages(messages) {
+        Some(sanitized) => convert_raw_messages(&sanitized),
+        None => convert_raw_messages(messages),
+    }
+}
+
+fn convert_raw_messages(messages: &[ChatMessage]) -> Vec<OpenAIMessage> {
     messages
         .iter()
         .map(|msg| {
@@ -514,9 +509,8 @@ fn convert_messages(messages: &[ChatMessage]) -> Vec<OpenAIMessage> {
                         content,
                         tool_calls: msg.tool_calls.as_ref().map(|tcs| {
                             tcs.iter().map(|tc| {
-                                // V69 修复(2026-09-10): 回传历史兜底净化。流式路径已在
-                                // [DONE] 终结时拦截非法参数，此处覆盖非流式/其他来源：
-                                // 非法 JSON 替换为 "{}"，避免整个请求被上游 400 拒绝。
+                                // 回传历史兜底净化：非法 JSON 替换为 "{}"，避免整个请求被
+                                // 上游 400 拒绝（空 id / 空名已由净化计划处理）。
                                 let arguments = validate_tool_call_arguments(&tc.function.arguments)
                                     .unwrap_or_else(|| "{}".to_string());
                                 serde_json::json!({
@@ -767,6 +761,34 @@ mod tests {
             ]))
         );
     }
+
+    /// 序列化接线测试：净化必须发生在 convert 之前，否则坏调用会原样上网。
+    #[test]
+    fn convert_messages_sanitizes_broken_tool_calls() {
+        let assistant = ChatMessage {
+            role: "assistant".to_string(),
+            content: ChatContent::Text("先看行情".to_string()),
+            tool_calls: Some(vec![ToolCall {
+                id: String::new(),
+                call_type: "function".to_string(),
+                function: ToolCallFunction { name: String::new(), arguments: "{}".to_string() },
+            }]),
+            tool_call_id: None,
+            thinking: None,
+        };
+        let orphan = ChatMessage {
+            role: "tool".to_string(),
+            content: ChatContent::Text("ok".to_string()),
+            tool_calls: None,
+            tool_call_id: Some(String::new()),
+            thinking: None,
+        };
+
+        let converted = convert_messages(&[assistant, orphan]);
+        assert_eq!(converted.len(), 1, "空名调用与无承接的 tool 消息都要在序列化前剔除");
+        assert!(converted[0].tool_calls.is_none());
+        assert_eq!(converted[0].content, Some(json!("先看行情")));
+    }
 }
 
 #[async_trait]
@@ -874,21 +896,27 @@ impl ProviderAdapter for OpenAIAdapter {
 
         let usage = oai.usage.map(|u| u.to_token_usage()).unwrap_or_default();
 
-        let tool_calls = msg.tool_calls.as_ref().map(|tcs| {
-            tcs.iter()
-                .map(|tc| axagent_harness::types::ToolCall {
-                    id: tc.id.clone().unwrap_or_default(),
-                    call_type: tc.call_type.clone().unwrap_or_else(|| "function".into()),
-                    function: axagent_harness::types::ToolCallFunction {
-                        name: tc.function.as_ref().and_then(|f| f.name.clone()).unwrap_or_default(),
-                        arguments: tc
-                            .function
-                            .as_ref()
-                            .and_then(|f| f.arguments.clone())
-                            .unwrap_or_default(),
-                    },
+        // 非流式同样过一遍判据：空名调用丢弃（无从执行），空 id 合成，非法参数降级 "{}"。
+        // 少了这一步，中转返回的残缺 tool_calls 会在下一轮被原样写回并 400。
+        let tool_calls = msg.tool_calls.as_ref().and_then(|tcs| {
+            let normalized: Vec<ToolCall> = tcs
+                .iter()
+                .enumerate()
+                .filter_map(|(index, tc)| {
+                    normalize_tool_call(
+                        tc.id.as_deref(),
+                        tc.call_type.as_deref(),
+                        tc.function.as_ref().and_then(|f| f.name.as_deref()),
+                        tc.function.as_ref().and_then(|f| f.arguments.as_deref()),
+                        index,
+                    )
                 })
-                .collect()
+                .collect();
+            if normalized.is_empty() {
+                None
+            } else {
+                Some(normalized)
+            }
         });
 
         Ok(ChatResponse {
@@ -1061,7 +1089,7 @@ impl ProviderAdapter for OpenAIAdapter {
 
             let mut byte_stream = resp.bytes_stream();
             let mut buf = String::new();
-            let mut pending_tool_calls: Vec<(String, String, String, String)> = Vec::new();
+            let mut pending_tool_calls = ToolCallAccumulator::new();
             let mut event_data_lines: Vec<String> = Vec::new();
             let mut last_usage: Option<axagent_harness::types::TokenUsage> = None;
             let mut total_bytes_received: usize = 0;
@@ -1077,42 +1105,39 @@ impl ProviderAdapter for OpenAIAdapter {
                     "[SSE-DIAG] 收到 data 事件"
                 );
                 if data.trim() == "[DONE]" {
-                    // V69 修复(2026-09-10): 终结时校验每个 tool_call 的 arguments。
-                    // 非法 JSON 不写入会话历史，改发流错误（引擎按 retryable 重新
-                    // 生成本轮对话，而非带着坏历史重放必 400 的请求）。
-                    let mut finalized: Vec<axagent_harness::types::ToolCall> = Vec::new();
-                    for (id, ct, name, args) in &pending_tool_calls {
-                        match validate_tool_call_arguments(args) {
-                            Some(valid_args) => {
-                                finalized.push(axagent_harness::types::ToolCall {
-                                    id: id.clone(),
-                                    call_type: ct.clone(),
-                                    function: axagent_harness::types::ToolCallFunction {
-                                        name: name.clone(),
-                                        arguments: valid_args,
-                                    },
-                                });
-                            },
-                            None => {
-                                let _ = tx.try_send(Err(AxAgentError::execution_with_source(
-                                    format!(
-                                        "OpenAI API error 400: assistant tool_call `{name}` produced \
-                                         invalid JSON arguments (upstream truncated or malformed). \
-                                         Retrying to regenerate this turn is recommended; the malformed \
-                                         call was NOT written into conversation history."
-                                    ),
-                                    anyhow::anyhow!(
-                                        "malformed tool_call arguments at stream finalization: {name}"
-                                    ),
-                                )));
-                                return true;
-                            },
-                        }
-                    }
-                    let tool_calls = if finalized.is_empty() {
-                        None
-                    } else {
-                        Some(finalized)
+                    // 终结时统一判据（见 crate::tool_calls）：空名/非法参数不写入会话
+                    // 历史，改发流错误（引擎按 retryable 重新生成本轮，而不是带着坏
+                    // 历史重放一个必 400 的请求）。空 id 由累积器合成后继续。
+                    let tool_calls = match pending_tool_calls.finalize() {
+                        Ok(calls) => calls,
+                        Err(FinalizeError::InvalidArguments { name }) => {
+                            let _ = tx.try_send(Err(AxAgentError::execution_with_source(
+                                format!(
+                                    "OpenAI API error 400: assistant tool_call `{name}` produced \
+                                     invalid JSON arguments (upstream truncated or malformed). \
+                                     Retrying to regenerate this turn is recommended; the malformed \
+                                     call was NOT written into conversation history."
+                                ),
+                                anyhow::anyhow!(
+                                    "malformed tool_call arguments at stream finalization: {name}"
+                                ),
+                            )));
+                            return true;
+                        },
+                        Err(FinalizeError::MissingFunctionName { index }) => {
+                            let _ = tx.try_send(Err(AxAgentError::execution_with_source(
+                                format!(
+                                    "OpenAI API error 400: assistant tool_call at index {index} has \
+                                     an empty function name (the upstream relay dropped the name \
+                                     delta). Retrying to regenerate this turn is recommended; the \
+                                     malformed call was NOT written into conversation history."
+                                ),
+                                anyhow::anyhow!(
+                                    "empty tool_call function name at stream finalization: index {index}"
+                                ),
+                            )));
+                            return true;
+                        },
                     };
                     let _ = tx.try_send(Ok(ChatStreamChunk {
                         content: None,
@@ -1158,39 +1183,15 @@ impl ProviderAdapter for OpenAIAdapter {
                                 args_preview = ?tc.function.as_ref().and_then(|f| f.arguments.as_ref()).map(|a| &a[..a.len().min(100)]),
                                 "tool_call delta received"
                             );
-                            // 上限保护:防止恶意/异常上游把 index 推到很大,
-                            // 导致 vector grow 吃掉内存
-                            const MAX_PENDING_TOOL_CALLS: usize = 256;
-                            let idx =
-                                (tc.index as u32).min(MAX_PENDING_TOOL_CALLS as u32 - 1) as usize;
-                            while pending_tool_calls.len() <= idx {
-                                pending_tool_calls.push((
-                                    String::new(),
-                                    String::from("function"),
-                                    String::new(),
-                                    String::new(),
-                                ));
-                            }
-                            if let Some(ref id) = tc.id
-                                && !id.is_empty()
-                            {
-                                pending_tool_calls[idx].0 = id.clone();
-                            }
-                            if let Some(ref ct) = tc.call_type
-                                && !ct.is_empty()
-                            {
-                                pending_tool_calls[idx].1 = ct.clone();
-                            }
-                            if let Some(ref f) = tc.function {
-                                if let Some(ref name) = f.name
-                                    && !name.is_empty()
-                                {
-                                    pending_tool_calls[idx].2 = name.clone();
-                                }
-                                if let Some(ref args) = f.arguments {
-                                    pending_tool_calls[idx].3.push_str(args);
-                                }
-                            }
+                            // 上限保护与「空 id / 空 name 不覆盖」都在累积器里：
+                            // 跳号的 index 不再补空串占位（那是幽灵调用的来源）。
+                            pending_tool_calls.apply_delta(
+                                tc.index,
+                                tc.id.as_deref(),
+                                tc.call_type.as_deref(),
+                                tc.function.as_ref().and_then(|f| f.name.as_deref()),
+                                tc.function.as_ref().and_then(|f| f.arguments.as_deref()),
+                            );
                         }
                     }
 

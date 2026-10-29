@@ -25,6 +25,8 @@ pub mod registry;
 pub mod screen_vision;
 pub mod stream_budget;
 pub mod structured_output;
+/// tool_call 合法性收口（累积/终结/序列化共用，crate 内部使用）。
+mod tool_calls;
 pub mod transport;
 pub mod typesafe;
 pub mod url_utils;

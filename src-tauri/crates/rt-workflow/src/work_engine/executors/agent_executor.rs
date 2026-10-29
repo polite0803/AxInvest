@@ -4478,11 +4478,17 @@ fn user_prompt_for_rag(
 /// 并将解析结果作为标准 `tool_calls` 处理。
 fn parse_inline_tool_calls(text: &str) -> Option<Vec<axagent_harness::types::ToolCall>> {
     // 先尝试 CHAT2API 格式
-    if let Some(results) = parse_chat2api_format(text) {
-        return Some(results);
-    }
-    // 再尝试 XML <tool_call> 格式（agi X-2.0-flash 等模型使用）
-    parse_xml_tool_call_format(text)
+    let parsed = parse_chat2api_format(text).or_else(|| {
+        // 再尝试 XML <tool_call> 格式（agi X-2.0-flash 等模型使用）
+        parse_xml_tool_call_format(text)
+    })?;
+    // 内联格式靠字符串切分重建，模型少写一个 `name=` 就会产出无名调用。
+    // 无名调用既不能执行，回写下一轮又会被 provider 以
+    // `assistant.tool_calls contains an invalid function call` 整条拒绝，
+    // 因此在这里就丢掉（与 providers 侧 tool_call 判据保持同一口径）。
+    let calls: Vec<_> =
+        parsed.into_iter().filter(|call| !call.function.name.trim().is_empty()).collect();
+    if calls.is_empty() { None } else { Some(calls) }
 }
 
 /// 清理 LLM 输出中内联的工具调用标签，判断剩余内容是否为有效非空文本。

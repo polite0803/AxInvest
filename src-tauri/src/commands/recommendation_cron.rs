@@ -268,9 +268,15 @@ pub async fn create_trend_screening_cron(
             "趋势智选定时筛选（产物进候选池，供候选池分析任务消费）",
         )
     };
-    let mut job = CronJob::new(&id, &expr, prompt, &format!("{chain_name}：{description}"))
-        .with_task_type(TREND_SCREENING_TASK_TYPE)
-        .with_workflow_id(wf_id.to_string());
+    let mut job = CronJob::new(
+        &format!("{chain_name}定时筛选"),
+        &expr,
+        prompt,
+        &format!("{chain_name}：{description}"),
+    )
+    .with_id(id.clone())
+    .with_task_type(TREND_SCREENING_TASK_TYPE)
+    .with_workflow_id(wf_id.to_string());
     if !enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
     }

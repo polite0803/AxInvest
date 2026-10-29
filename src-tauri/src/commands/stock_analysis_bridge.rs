@@ -675,7 +675,9 @@ async fn dispatch_stock_command<R: tauri::Runtime>(
             );
             let prompt = format!("对 {} ({}) 执行完整股票分析", stock_code, stock_name);
             let desc = format!("定时分析 {}", stock_code);
-            let job = axagent_runtime_core::CronJob::new(&id, cron_expression, &prompt, &desc)
+            let name = format!("定时分析 {} {}", stock_code, stock_name);
+            let job = axagent_runtime_core::CronJob::new(&name, cron_expression, &prompt, &desc)
+                .with_id(id.clone())
                 .with_workflow_id("stock-analysis".to_string())
                 .with_task_type("stock-analysis");
             cron_job_store.add(job.clone()).await;

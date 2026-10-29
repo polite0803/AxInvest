@@ -9,8 +9,8 @@ use axagent_harness::types::*;
 use futures::Stream;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-// V69 修复(2026-09-10): 复用 openai.rs 的 tool_call arguments 校验（终结时拦截非法 JSON）
-use crate::openai::validate_tool_call_arguments;
+// tool_call arguments 校验（终结时拦截非法 JSON）与 openai 路径共用同一份判据
+use crate::tool_calls::validate_tool_call_arguments;
 use std::pin::Pin;
 
 use crate::compat::impl_default_via_new;
@@ -304,6 +304,18 @@ fn build_responses_input(
     messages: &[ChatMessage],
     extra_instructions: Option<&str>,
 ) -> (serde_json::Value, Option<String>) {
+    // 与 chat/completions 路径同一套净化判据（判据见 crate::tool_calls）：
+    // 空名 function_call、无 function_call_output 的调用、孤儿输出项在序列化前剔除。
+    match crate::tool_calls::sanitize_messages(messages) {
+        Some(sanitized) => build_raw_responses_input(&sanitized, extra_instructions),
+        None => build_raw_responses_input(messages, extra_instructions),
+    }
+}
+
+fn build_raw_responses_input(
+    messages: &[ChatMessage],
+    extra_instructions: Option<&str>,
+) -> (serde_json::Value, Option<String>) {
     let mut instructions: Option<String> = None;
 
     if let Some(extra) = extra_instructions {
@@ -375,7 +387,10 @@ fn build_responses_input(
                         );
                         item.insert(
                             "arguments".to_string(),
-                            serde_json::Value::String(tc.function.arguments.clone()),
+                            serde_json::Value::String(
+                                validate_tool_call_arguments(&tc.function.arguments)
+                                    .unwrap_or_else(|| "{}".to_string()),
+                            ),
                         );
                         input_items.push(serde_json::Value::Object(item));
                     }
@@ -532,17 +547,19 @@ fn parse_response_output(output: &[serde_json::Value]) -> (String, Option<Vec<To
                 let call_id = obj
                     .get("call_id")
                     .and_then(|v| v.as_str())
-                    .or_else(|| obj.get("id").and_then(|v| v.as_str()))
-                    .unwrap_or_default()
-                    .to_string();
-                let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                let arguments =
-                    obj.get("arguments").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                tool_calls.push(ToolCall {
-                    id: call_id,
-                    call_type: "function".to_string(),
-                    function: ToolCallFunction { name, arguments },
-                });
+                    .or_else(|| obj.get("id").and_then(|v| v.as_str()));
+                let name = obj.get("name").and_then(|v| v.as_str());
+                let arguments = obj.get("arguments").and_then(|v| v.as_str());
+                // 空名丢弃、空 call_id 合成、非法 arguments 降级 "{}"（与其它协议同判据）
+                if let Some(call) = crate::tool_calls::normalize_tool_call(
+                    call_id,
+                    Some("function"),
+                    name,
+                    arguments,
+                    tool_calls.len(),
+                ) {
+                    tool_calls.push(call);
+                }
             },
             _ => {},
         }
@@ -946,53 +963,33 @@ impl ProviderAdapter for OpenAIResponsesAdapter {
                                         None
                                     };
 
-                                    // V69 修复(2026-09-10): 与 openai.rs [DONE] 终结校验同源——
-                                    // 非法 JSON 参数不写入会话历史，改发流错误让引擎重新生成本轮
+                                    // 与 chat/completions 终结同判据：空名 / 非法参数不写入
+                                    // 历史，改发流错误让引擎重新生成本轮。
                                     let tool_calls = match tool_calls {
                                         Some(tcs) => {
-                                            let mut malformed = false;
-                                            let validated: Vec<ToolCall> = tcs
-                                                .into_iter()
-                                                .filter_map(
-                                                    |tc| match validate_tool_call_arguments(
-                                                        &tc.function.arguments,
-                                                    ) {
-                                                        Some(args) => Some(ToolCall {
-                                                            function: ToolCallFunction {
-                                                                arguments: args,
-                                                                ..tc.function
-                                                            },
-                                                            ..tc
-                                                        }),
-                                                        None => {
-                                                            malformed = true;
-                                                            None
-                                                        },
-                                                    },
-                                                )
-                                                .collect();
-                                            if malformed {
-                                                let _ = tx.try_send(Err(
-                                                    AxAgentError::execution_with_source(
-                                                        "OpenAI API error 400: assistant tool_call \
-                                                         produced invalid JSON arguments (upstream \
-                                                         truncated or malformed). Retrying to regenerate \
-                                                         this turn is recommended."
-                                                            .to_string(),
-                                                        anyhow::anyhow!(
-                                                            "malformed tool_call arguments at responses-api finalization"
+                                            match crate::tool_calls::finalize_tool_calls(tcs) {
+                                                Ok(calls) => calls,
+                                                Err(err) => {
+                                                    let message =
+                                                        crate::tool_calls::finalize_error_message(
+                                                            "OpenAI",
+                                                            "function_call",
+                                                            &err,
+                                                        );
+                                                    let _ = tx.try_send(Err(
+                                                        AxAgentError::execution_with_source(
+                                                            message,
+                                                            anyhow::anyhow!(
+                                                                "malformed function_call at \
+                                                                 responses-api finalization: {err:?}"
+                                                            ),
                                                         ),
-                                                    ),
-                                                ));
-                                                return;
-                                            }
-                                            if validated.is_empty() {
-                                                None
-                                            } else {
-                                                Some(validated)
+                                                    ));
+                                                    return;
+                                                },
                                             }
                                         },
-                                        other => other,
+                                        None => None,
                                     };
 
                                     let _ = tx.try_send(Ok(ChatStreamChunk {
@@ -1306,6 +1303,71 @@ mod tests {
         assert_eq!(arr[1]["type"], "function_call_output");
         assert_eq!(arr[1]["call_id"], "call_1");
         assert_eq!(arr[1]["output"], "Sunny, 72F");
+    }
+
+    /// 序列化接线测试：空名 function_call 与无承接的 function_call_output 都不上网。
+    #[test]
+    fn build_input_drops_nameless_function_call_and_orphan_output() {
+        let messages = vec![
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: ChatContent::Text("先看行情".to_string()),
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_a".to_string(),
+                    call_type: "function".to_string(),
+                    function: ToolCallFunction { name: String::new(), arguments: "{}".to_string() },
+                }]),
+                tool_call_id: None,
+                thinking: None,
+            },
+            ChatMessage {
+                role: "tool".to_string(),
+                content: ChatContent::Text("ok".to_string()),
+                tool_calls: None,
+                tool_call_id: Some("call_a".to_string()),
+                thinking: None,
+            },
+        ];
+
+        let (input, _) = build_responses_input(&messages, None);
+        let arr = input.as_array().expect("测试：as_array 应成功");
+        assert_eq!(arr.len(), 1, "空名 function_call 与其输出项都要剔除");
+        assert_eq!(arr[0]["role"], "assistant");
+    }
+
+    /// 空 call_id 必须补成「调用项与输出项一致」的合成 id，否则上游判配对失败。
+    #[test]
+    fn build_input_repairs_blank_call_ids() {
+        let messages = vec![
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: ChatContent::Text(String::new()),
+                tool_calls: Some(vec![ToolCall {
+                    id: String::new(),
+                    call_type: "function".to_string(),
+                    function: ToolCallFunction {
+                        name: "get_weather".to_string(),
+                        arguments: r#"{"city":"SF"}"#.to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                thinking: None,
+            },
+            ChatMessage {
+                role: "tool".to_string(),
+                content: ChatContent::Text("Sunny".to_string()),
+                tool_calls: None,
+                tool_call_id: Some(String::new()),
+                thinking: None,
+            },
+        ];
+
+        let (input, _) = build_responses_input(&messages, None);
+        let arr = input.as_array().expect("测试：as_array 应成功");
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["call_id"], "call_0_0");
+        assert_eq!(arr[0]["id"], "fc_0_0");
+        assert_eq!(arr[1]["call_id"], "call_0_0", "输出项必须回写同一合成 id");
     }
 
     #[test]

@@ -1459,7 +1459,9 @@ pub async fn create_decision_backtest_cron(
         max_picks.unwrap_or(200)
     );
 
-    let mut job = axagent_runtime_core::CronJob::new(&id, &expr, &prompt, &desc)
+    let name = format!("决策回测（{windows}）");
+    let mut job = axagent_runtime_core::CronJob::new(&name, &expr, &prompt, &desc)
+        .with_id(id.clone())
         .with_task_type(DECISION_BACKTEST_TASK_TYPE);
     if !enabled.unwrap_or(true) {
         job.status = axagent_runtime_core::CronJobStatus::Paused;

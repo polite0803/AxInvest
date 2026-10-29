@@ -1,5 +1,6 @@
 // i18n-exempt: 业务逻辑判断字符串，非 UI 展示文本
 import type { AiChatAction } from "@/components/workflow/types/workflow.types";
+import { parseBackendError, translateBackendError } from "@/lib/errorI18n";
 import { invoke, listen } from "@/lib/invoke";
 import { horizonIcAbsenceKey, horizonLabelKey, moverLabelPresentation } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
@@ -43,6 +44,29 @@ import { useNavigate } from "react-router-dom";
 import { HorizonConfusionBoard } from "./HorizonConfusionBoard";
 
 const { Text } = Typography;
+
+/**
+ * 后端错误 → 用户可见 toast 文本（**本地化原因**与**底层 detail** 同时给）。
+ *
+ * 为什么不能直接 `String(e)`：Tauri 把 `ErrorResponse` 序列化成 JSON 串，
+ * `String(e)` 会把 `{"code":…,"detail":…}` 原样糊到界面上（2026-10-29 实证：
+ * 反思 cron 收敛闸拒绝创建时，用户看到的是一坨 JSON）。
+ *
+ * 为什么不能只用 `translateBackendError`：它在**码被 locale 收录**时只返回译文、
+ * 把 `detail` 丢掉（`errorI18n.ts:146-163`）—— 而本面板的 detail 恰是有用信息
+ * （如「反思入口已存在（到期反思（内置） · 0 18 * * *）」），丢掉后就只剩
+ * 通用的「参数校验失败」，等于把可操作的原因抹平。
+ *
+ * 形态照抄既有先例 `settings/DatabaseSettings.tsx:186-198`：两者不同才拼接，
+ * 未命中码时（纯文本错误）两者相同 ⇒ 不拼，避免同一句话出现两遍。
+ */
+function backendErrorText(e: unknown): string {
+  const parsed = parseBackendError(e);
+  const localized = translateBackendError(e);
+  return parsed.detail && parsed.detail !== localized
+    ? `${localized} — ${parsed.detail}`
+    : localized;
+}
 
 // 导出理由：`buildAiAssistPrompt` / `parseActionsFromAccumulated` 是本面板的结构层出口，
 // 两者各有一条回归测试（层级缺席不得冒充 L1、action 拼写两侧都得认），夹具需要这个类型。
@@ -340,7 +364,7 @@ export function ReflectionPanel() {
       if (h && typeof h === "object") { setHitrate(h); }
     } catch (e) {
       // P0-2 修复: 加载失败必须显式告知用户,否则后端挂掉时用户无感知
-      message.error(t("stockAnalysis.reflection.loadFailed", { error: String(e) }));
+      message.error(t("stockAnalysis.reflection.loadFailed", { error: backendErrorText(e) }));
     } finally {
       if (myToken === loadTokenRef.current) { setLoading(false); }
     }
@@ -395,7 +419,7 @@ export function ReflectionPanel() {
       await load();
     } catch (e) {
       // P0-2 修复: 切换 cron 失败必须显式告知用户
-      message.error(t("stockAnalysis.reflection.toggleCronFailed", { error: String(e) }));
+      message.error(t("stockAnalysis.reflection.toggleCronFailed", { error: backendErrorText(e) }));
     }
   };
 
@@ -414,7 +438,7 @@ export function ReflectionPanel() {
       await load();
       message.success(t("stockAnalysis.reflection.saveConfigSuccess"));
     } catch (e) {
-      message.error(t("stockAnalysis.reflection.saveConfigFailed", { error: String(e) }));
+      message.error(t("stockAnalysis.reflection.saveConfigFailed", { error: backendErrorText(e) }));
     } finally {
       setSavingConfig(false);
     }
@@ -427,7 +451,7 @@ export function ReflectionPanel() {
       await load();
     } catch (e) {
       // P0-2 修复: 删除 cron 失败必须显式告知用户
-      message.error(t("stockAnalysis.reflection.deleteCronFailed", { error: String(e) }));
+      message.error(t("stockAnalysis.reflection.deleteCronFailed", { error: backendErrorText(e) }));
     }
   };
 
@@ -448,7 +472,7 @@ export function ReflectionPanel() {
       message.success(t("stockAnalysis.reflection.rerunSuccess"));
       await load();
     } catch (e) {
-      message.error(t("stockAnalysis.reflection.rerunFailed", { error: String(e) }));
+      message.error(t("stockAnalysis.reflection.rerunFailed", { error: backendErrorText(e) }));
     }
   };
 
@@ -458,7 +482,7 @@ export function ReflectionPanel() {
       message.success(t("stockAnalysis.reflection.deleteSuccess"));
       await load();
     } catch (e) {
-      message.error(t("stockAnalysis.reflection.deleteFailed", { error: String(e) }));
+      message.error(t("stockAnalysis.reflection.deleteFailed", { error: backendErrorText(e) }));
     }
   };
 
@@ -514,7 +538,7 @@ export function ReflectionPanel() {
       );
       setFeedbackModalOpen(false);
     } catch (e) {
-      message.error(t("stockAnalysis.reflection.feedbackFailed", { error: String(e) }));
+      message.error(t("stockAnalysis.reflection.feedbackFailed", { error: backendErrorText(e) }));
     } finally {
       setFeedbackSubmitting(false);
     }
@@ -657,7 +681,7 @@ export function ReflectionPanel() {
       message.success(t("stockAnalysis.reflection.triggerSuccess"));
       await load();
     } catch (e) {
-      message.error(t("stockAnalysis.reflection.triggerFailed", { error: String(e) }));
+      message.error(t("stockAnalysis.reflection.triggerFailed", { error: backendErrorText(e) }));
     } finally {
       setRunning(false);
     }
@@ -1486,7 +1510,7 @@ export function ExpandedReflectionRow(
       message.success(t("stockAnalysis.reflection.applySuccess"));
       setCheckedParams([]);
     } catch (e) {
-      message.error(t("stockAnalysis.reflection.applyFailed", { error: String(e) }));
+      message.error(t("stockAnalysis.reflection.applyFailed", { error: backendErrorText(e) }));
     } finally {
       setApplying(false);
     }
@@ -1548,7 +1572,7 @@ export function ExpandedReflectionRow(
         sessionId,
       });
     } catch (e) {
-      setAiContent((prev) => prev + `\n\n❌ ${String(e)}`);
+      setAiContent((prev) => prev + `\n\n❌ ${backendErrorText(e)}`);
       setAiStreaming(false);
     }
   };
@@ -1595,7 +1619,7 @@ export function ExpandedReflectionRow(
         );
       }
     } catch (e) {
-      message.error(t("stockAnalysis.reflection.aiApplyFailed", { error: String(e), rollback: "" }));
+      message.error(t("stockAnalysis.reflection.aiApplyFailed", { error: backendErrorText(e), rollback: "" }));
     } finally {
       setAiApplying(false);
     }

@@ -645,7 +645,9 @@ pub async fn create_pool_scan_cron(
     );
     let id =
         format!("poolscan-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("x"));
-    let mut job = CronJob::new(&id, &expr, &prompt, &desc).with_task_type(POOL_SCAN_TASK_TYPE);
+    let mut job = CronJob::new(&format!("候选池扫描（{window_desc}）"), &expr, &prompt, &desc)
+        .with_id(id.clone())
+        .with_task_type(POOL_SCAN_TASK_TYPE);
     if !enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
     }

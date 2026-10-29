@@ -261,6 +261,19 @@ impl CronJob {
         self
     }
 
+    /// 显式指定稳定 id，覆盖 `new()` 里生成的随机 uuid。
+    ///
+    /// ⚠ 必须用它的场景：命令层按「参数指纹」派生 id 做幂等覆盖
+    /// （如 `vldec-{阈值}-{深度}`）。`CronJob::new(name, ..)` 的第一个参数是
+    /// **name** 而不是 id，它在内部把 `id` 写成 `Uuid::new_v4()` —— 于是
+    /// ① 派生 id 只被当成了显示名（任务中心显示 `vldec-18b830d5` 这类 id 串）；
+    /// ② `remove(派生id)` 永远删不到任何行 ⇒ 每点一次创建就多一行，
+    ///    「先 remove 再 add」的幂等覆盖形同不存在（2026-10-29 实证两行 vldec 任务）。
+    pub fn with_id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
+    }
+
     pub fn with_task_type(mut self, task_type: &str) -> Self {
         self.task_type = Some(task_type.to_string());
         self

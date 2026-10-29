@@ -31,6 +31,16 @@ use tauri::State;
 ///
 /// ⇒ 不再数层数，改为递归下探（深度上限 4 防病态脏数据）。这是消费侧的**唯一**取法，
 /// 入口的 `extract_agent_output` 解包只处理入口路径，历史数据与其它包装键仍靠这里。
+/// 合法反思结论值域。
+///
+/// 为什么必须有它（2026-10-29）：`verdict` 这个键名**不只属于反思** —— 决策卡/比较器
+/// 的输出里也有，值是「决策=观望 置信=86.4% 档=long 出场=…」这类长文本。全量兜底扫描
+/// （`wf.results` 逐节点递归找 verdict）如果不校验值域，就会把这种长文本当成反思结论：
+/// 实测 167 条 completed 里混进 7 条，会污染三态分布与后续校准。
+fn is_reflection_verdict(v: &str) -> bool {
+    matches!(v.trim(), "correct" | "partial" | "wrong" | "incorrect" | "insufficient")
+}
+
 fn deep_get_reflection_field(v: &serde_json::Value, key: &str) -> Option<serde_json::Value> {
     fn walk(v: &serde_json::Value, key: &str, depth: u8) -> Option<serde_json::Value> {
         if depth > 4 {
@@ -96,7 +106,7 @@ fn deep_get_reflection_text(v: &serde_json::Value, key: &str) -> Option<String> 
 fn select_reflection_payload(candidates: &[serde_json::Value]) -> serde_json::Value {
     let mut fallback = serde_json::Value::Null;
     for c in candidates {
-        if deep_get_reflection_str(c, "verdict").is_some_and(|v| !v.is_empty()) {
+        if deep_get_reflection_str(c, "verdict").is_some_and(|v| is_reflection_verdict(&v)) {
             return c.clone();
         }
         if fallback.is_null() {
@@ -1131,11 +1141,50 @@ pub async fn run_reflection_workflow(
                 };
                 normalized.push(extract_agent_output(raw).await);
             }
-            let reflection_json = select_reflection_payload(&normalized);
+            let mut reflection_json = select_reflection_payload(&normalized);
+            // ── 兜底直读原始节点输出（2026-10-29）──
+            // 实证：04:27–04:31 仍落 `OUTPUT_INCOMPLETE` 的那批，`stock_reflections`
+            // 里存的 `reflection.content` 逐条都含合法 verdict（`{content:"{report:"{verdict}"}"}`），
+            // 但 `extract_agent_output` 归一化后的候选里没有它 ⇒ `has_verdict` 恒 false。
+            // 归一化层属于入口公共管线、改动面大；这里在**消费侧**直接回读原始节点输出，
+            // 用同一个递归取值器找 verdict，找到就整份替换 —— 只在归一化丢层时生效。
+            // ── 兜底：全量递归搜 verdict（2026-10-29 第二次收口）──
+            // 第一版只试 `reflection` 一个键，实测 04:27 / 05:37 两批仍落 INCOMPLETE
+            // ⇒ 单键假设不成立（键名与包装层会随引擎/模板变化）。改为扫**所有**节点输出：
+            // 任何一份里能递归取到非空 verdict 就用它；一个都没有才算真的没有 ——
+            // 且此时把节点名打出来，下一条失败可以直接定位，不必再猜。
+            if deep_get_reflection_str(&reflection_json, "verdict")
+                .is_none_or(|v| !is_reflection_verdict(&v))
+            {
+                let mut hit: Option<(String, serde_json::Value)> = None;
+                for (node_key, raw) in &wf.results {
+                    if deep_get_reflection_str(raw, "verdict")
+                        .is_some_and(|v| is_reflection_verdict(&v))
+                    {
+                        hit = Some((node_key.clone(), raw.clone()));
+                        break;
+                    }
+                }
+                match hit {
+                    Some((node_key, raw)) => {
+                        tracing::info!(
+                            "[reflection] {stock_code} 归一化候选无 verdict ⇒ 改用节点 {node_key} \
+                             的原始输出（递归命中；analysis_id={analysis_id}）"
+                        );
+                        reflection_json = raw;
+                    },
+                    None => tracing::warn!(
+                        "[reflection] {stock_code} 归一化候选与 {} 个节点输出里都没有 verdict\
+                         （节点={:?}；analysis_id={analysis_id}）",
+                        wf.results.len(),
+                        wf.results.keys().collect::<Vec<_>>()
+                    ),
+                }
+            }
             // 没有 verdict 就不是一次有效反思：不得盖 completed（旧实现把
             // 「节点 completed 但输出为空」也写成 completed，导致 222 条 completed/verdict NULL）。
-            let has_verdict =
-                deep_get_reflection_str(&reflection_json, "verdict").is_some_and(|v| !v.is_empty());
+            let has_verdict = deep_get_reflection_str(&reflection_json, "verdict")
+                .is_some_and(|v| is_reflection_verdict(&v));
             // 兜底与字段提取统一走 `deep_get_reflection_*`：它们自带
             // 「顶层 / 一层嵌套 / 双重编码字符串」三形态容错。因此原先此处手写的
             // 「as_object() 失败则二次 parse」与「reflection 子对象 lookup」两段特殊处理

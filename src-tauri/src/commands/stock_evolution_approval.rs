@@ -94,6 +94,14 @@ pub async fn approve_evolution_plan(
         .await
         .map_err(|e| internal_err(format!("读取进化计划失败: {e}")))?
         .ok_or_else(|| internal_err(format!("进化计划不存在: {history_id}")))?;
+    // ── 幂等：已接受过再点一次是**无操作成功**，不是内部错误（2026-10-29）──
+    // 实证：面板上重复点「接受」会弹 `STOCK_WORKFLOW_INTERNAL … 不可接受`，读起来像功能
+    // 坏了；而 `accepted` 恰恰是这次点击想要的终态。只有 accepted 走幂等返回，
+    // 其余状态（rejected / executing 等）仍在下面如实拒绝。
+    if row.status == evo_hist::STATUS_ACCEPTED {
+        tracing::info!("[evolution] {history_id} 已处于 accepted，按幂等返回（不重复执行进化）");
+        return Ok(row);
+    }
     if row.status != evo_hist::STATUS_PENDING_APPROVAL {
         return Err(internal_err(format!(
             "进化计划 {history_id} 当前状态为 {}，不可接受（仅待审批计划可接受）",

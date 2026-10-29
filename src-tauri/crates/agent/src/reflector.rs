@@ -216,7 +216,7 @@ impl Reflector {
         };
 
         // v109: 经验溯源 — task_id 格式为 `{conversation_id}-{timestamp_millis}`
-        // (session_manager.rs:855),解析出 conversation_id 设入 source_conversation_id,
+        // (session_manager.rs:1071),解析出 conversation_id 设入 source_conversation_id,
         // 便于前端从经验跳转到原始会话。
         let source_conversation_id = parse_conversation_id_from_task_id(&reflection.task_id);
 
@@ -764,7 +764,7 @@ impl Reflector {
 
 /// 从 task_id 解析出 conversation_id。
 ///
-/// task_id 格式由 session_manager.rs:855 定义为 `{conversation_id}-{timestamp_millis}`,
+/// task_id 格式由 session_manager.rs:1071 定义为 `{conversation_id}-{timestamp_millis}`,
 /// 其中 conversation_id 本身是 UUID(不包含连字符以外的特殊字符),
 /// timestamp 是纯数字。因此最后一个连字符之前的部分即为 conversation_id。
 ///

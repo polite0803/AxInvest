@@ -5154,12 +5154,46 @@ mod reflection_payload_tests {
 
     /// 负控：第一个候选**有** verdict 时必须用它（validator 的输出优先，
     /// 读 raw 等于把校验层白做了）。
+    ///
+    /// ⚠ 夹具的 verdict 必须落在 `is_reflection_verdict` 的**值域内**（2026-10-29 校正）。
+    /// 这里原本是 `"good"` —— 而 `good` 从来不是反思结论的合法值，于是值域校验生效后
+    /// 该候选被正确跳过、测试落到第二个候选，负控想测的「优先用第一个」根本没被执行
+    /// （CI `cargo test --workspace` 报 left `partial` / right `good`）。
     #[test]
     fn payload_selection_prefers_the_first_candidate_with_verdict() {
-        let first = serde_json::json!({ "verdict": "good", "tag": "validator" });
+        let first = serde_json::json!({ "verdict": "correct", "tag": "validator" });
         let second = serde_json::json!({ "verdict": "partial", "tag": "agent" });
         let picked = select_reflection_payload(&[first, second]);
-        assert_eq!(deep_get_reflection_str(&picked, "verdict").as_deref(), Some("good"));
+        assert_eq!(deep_get_reflection_str(&picked, "verdict").as_deref(), Some("correct"));
+        assert_eq!(deep_get_reflection_str(&picked, "tag").as_deref(), Some("validator"));
+    }
+
+    /// 值域校验的回归（2026-10-29）：键名 `verdict` **不只属于反思** —— 决策卡 / 比较器
+    /// 的输出里也有，值是「决策=观望 置信=86.4% 档=long …」这类长文本。不校验值域就会
+    /// 把它当成反思结论，污染三态分布与校准样本。所以值域外的候选**不算命中**，
+    /// 必须继续往后找；全都不合法时退回第一个候选（让下游照常判「无 verdict」）。
+    #[test]
+    fn payload_selection_ignores_verdicts_outside_the_reflection_value_domain() {
+        let decision_card = serde_json::json!({
+            "verdict": "决策=观望 置信=86.4% 档=long 出场=2026-11-02",
+            "tag": "decision-card",
+        });
+        let agent = serde_json::json!({ "verdict": "wrong", "tag": "agent" });
+
+        let picked = select_reflection_payload(&[decision_card.clone(), agent]);
+        assert_eq!(
+            deep_get_reflection_str(&picked, "tag").as_deref(),
+            Some("agent"),
+            "值域外的候选不得被采纳"
+        );
+
+        // 全是值域外 ⇒ 兜底取第一个候选，且不凭空造出合法 verdict
+        let none = select_reflection_payload(&[decision_card.clone(), decision_card]);
+        assert_eq!(deep_get_reflection_str(&none, "tag").as_deref(), Some("decision-card"));
+        assert!(
+            deep_get_reflection_str(&none, "verdict").is_some_and(|v| !is_reflection_verdict(&v)),
+            "兜底候选的 verdict 必须仍被判为非法"
+        );
     }
 
     /// 负控：一个都没有 verdict ⇒ 取第一个当兜底（下游照常「不盖 completed」）。

@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import i18n from "@/i18n";
 import {
+  backendErrorText,
   getBackendErrorCategory,
   parseBackendError,
   showBackendError,
@@ -136,6 +137,33 @@ describe("translateBackendError", () => {
   it("Error 对象的 JSON message 也能翻译", () => {
     const err = new Error(JSON.stringify({ code: "CONVERSATION_NOT_FOUND" }));
     expect(translateBackendError(err)).toBe("会话未找到");
+  });
+});
+
+describe("backendErrorText", () => {
+  it("码被收录时同时给出译文与底层 detail（不丢可操作原因）", () => {
+    const text = backendErrorText({
+      code: "CONVERSATION_NOT_FOUND",
+      category: "unrecoverable",
+      detail: "id=42",
+    });
+    expect(text).toBe("会话未找到 — id=42");
+  });
+
+  it("未知码只回 detail，不把 JSON 串糊到界面上", () => {
+    const text = backendErrorText('{"code":"TOTALLY_UNKNOWN_CODE","detail":"boom"}');
+    expect(text).toBe("boom");
+    expect(text).not.toContain('{"code"');
+  });
+
+  it("自由文本原样返回，且不与自己重复拼接", () => {
+    expect(backendErrorText("key must be a string")).toBe("key must be a string");
+  });
+
+  it("【2026-10-29 实证】IPC 序列化失败的自由文本不得被吞（进化面板曾只剩「加载失败」四个字）", () => {
+    // Tauri 在命令返回值无法 JSON 序列化时 reject 的就是这种自由文本；
+    // 后端 tracing 里没有任何一行对应它 ⇒ 它是排查该故障**唯一**可用的线索。
+    expect(backendErrorText(new Error("key must be a string"))).toBe("key must be a string");
   });
 });
 

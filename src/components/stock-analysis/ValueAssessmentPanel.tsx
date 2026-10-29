@@ -337,15 +337,12 @@ function tryParseValueReport(report: string): ValueReportData | null {
     // 去重
     const unique = [...new Set(candidates)];
 
-    console.log("[tryParseValueReport] candidates:", unique.length, unique.map(c => c.slice(0, 80)));
-
     // 依次尝试解析
     for (const candidate of unique) {
       // 直接解析
       try {
         const parsed = JSON.parse(candidate);
         if (parsed && typeof parsed === "object") {
-          console.log("[tryParseValueReport] 解析成功（直接）");
           return flattenVerdictReport(parsed as ValueReportData);
         }
       } catch { /* try next */ }
@@ -355,7 +352,6 @@ function tryParseValueReport(report: string): ValueReportData | null {
         const sanitized = sanitizeJsonString(candidate);
         const parsed = JSON.parse(sanitized);
         if (parsed && typeof parsed === "object") {
-          console.log("[tryParseValueReport] 解析成功（修复后）");
           return flattenVerdictReport(parsed as ValueReportData);
         }
       } catch (e) {
@@ -380,7 +376,6 @@ function tryParseValueReport(report: string): ValueReportData | null {
         const candidate = cleaned.slice(fb2, lb2 + 1);
         const parsed = JSON.parse(candidate);
         if (parsed && typeof parsed === "object") {
-          console.log("[tryParseValueReport] 解析成功（清理 tool call 后）");
           return flattenVerdictReport(parsed as ValueReportData);
         }
       }
@@ -391,7 +386,6 @@ function tryParseValueReport(report: string): ValueReportData | null {
   const cleanedFull = cleanToolCallTags(report);
   const extracted = extractFieldsByRegex(cleanedFull);
   if (extracted) {
-    console.log("[tryParseValueReport] 解析成功（正则兜底）");
     return extracted;
   }
 
@@ -845,9 +839,23 @@ export function ValueAssessmentPanel() {
   //   算法侧结论完全不可见 ⇒ 用户以为那就是结论。此处把它提到最上方。
   const algoConclusion = parsed?.valuation_conclusion ?? null;
 
-  // 暴露调试数据到 window，方便 Console 检查
+  // 暴露调试数据到 window，方便 Console 检查（仅开发期）
+  //
+  // 2026-10-29 收敛：原实现除挂 `__DEBUG_VALUE__` 外，还把同一份内容用 10 条
+  // `console.log` **逐项再打印一遍**（parsed / rawValue / buffett_verdict / all keys /
+  // readableText …）。后果有二：
+  //   ① 重复：数据已在 `__DEBUG_VALUE__` 里，排查时一条 `copy(__DEBUG_VALUE__)` 即可，
+  //      逐项打印只是把同一个对象拆成十行噪音（且 `console.log` 的懒求值会让对象
+  //      在打印展开时显示的是**后续**状态，反而不如快照可靠）；
+  //   ② 面板每次重渲染都重跑：本 effect 依赖 `parsed`（每次渲染新建的对象引用）
+  //      ⇒ 工作流跑动期间会持续刷屏。
+  // 现只保留「已暴露」这一条存在性标记（挂上就说明分支生效了），内容看 window。
+  //
+  // ⚠ 开关改用 `import.meta.env.DEV`（全仓前端既有惯例，14 处先例）：
+  //   原写 `process.env.NODE_ENV === "development"` 依赖 Vite 的 Node 兼容 shim，
+  //   与该文件其余代码、以及 `devAntdSuppress.ts` / `agentOutput.ts` 等的写法不一致。
   useEffect(() => {
-    if (typeof window !== "undefined" && hasValue && process.env.NODE_ENV === "development") {
+    if (typeof window !== "undefined" && hasValue && import.meta.env.DEV) {
       Object.assign(window, {
         __DEBUG_VALUE__: {
           raw: valueReport.slice(0, 2000),
@@ -857,19 +865,7 @@ export function ValueAssessmentPanel() {
           rawValueType: typeof rawValue,
         },
       });
-      console.log("[ValueAssessmentPanel] DEBUG 数据已暴露到 window.__DEBUG_VALUE__");
-      console.log("[ValueAssessmentPanel] parsed:", parsed);
-      console.log("[ValueAssessmentPanel] rawValue type:", typeof rawValue);
-      console.log("[ValueAssessmentPanel] rawValue preview:", String(rawValue).slice(0, 500));
-      if (parsed) {
-        console.log("[ValueAssessmentPanel] buffett_verdict type:", typeof parsed.buffett_verdict);
-        console.log("[ValueAssessmentPanel] buffett_verdict preview:", String(parsed.buffett_verdict).slice(0, 200));
-        console.log("[ValueAssessmentPanel] all keys:", Object.keys(parsed));
-      } else {
-        console.log("[ValueAssessmentPanel] parsed = null，将使用可读文本渲染");
-        console.log("[ValueAssessmentPanel] readableText preview:", readableText.slice(0, 500));
-        console.log("[ValueAssessmentPanel] looksLikeJson(readableText):", looksLikeJson(readableText));
-      }
+      console.log("[ValueAssessmentPanel] 调试数据已暴露到 window.__DEBUG_VALUE__（内容见该对象，不再逐项打印）");
     }
   }, [valueReport, parsed, readableText, rawValue, hasValue]);
 

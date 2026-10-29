@@ -68,6 +68,36 @@ impl SeedOverrides {
 /// 不另抄一份（抄一份就会随建池改动而悄悄失真）。
 pub const POOL_SNAPSHOT_METHODS: [&str; 2] = ["get_hot_stocks", "get_industry_ranking"];
 
+/// 判定一份快照 payload **能否真正产出候选股** —— 回放日覆盖判据（2026-10-29）。
+///
+/// 为什么不能把判据降级成「快照记录存在」：实测 `get_industry_ranking` 的历史快照
+/// （2026-05-27～09-24 段）`leaderCode` **全为 null**（只有行业名+涨跌幅，
+/// 见 `build_seed_pool` 的实证注释）⇒ 建池实际取到 **0 只** ⇒ 池 100% 是
+/// `FALLBACK_STOCKS`。按「记录存在」判会让这些日期混进回放日程，产出
+/// 结构性不同构的脏样本（long 档已结算的 7 个 T+28 独立日正是这个形态）。
+///
+/// 判据与 [`build_seed_pool`] 逐分支对齐：
+/// · `get_hot_stocks`：榜单数组非空（live/回放都会取到票）；
+/// · `get_industry_ranking`：`leaderCode` 非空的元素 **≥ 1**（对齐 `taken > 0`）；
+/// · 其它源：数组非空即算（保守放行，清单由 `POOL_SNAPSHOT_METHODS` 调用方约束）。
+///
+/// 解析失败 / 非 JSON / 非数组一律返回 `false`（宁缺勿滥：判成不可回放的代价是
+/// 少补一天样本，判错的代价是混入脏样本）。
+pub fn snapshot_payload_yields_stocks(method: &str, payload: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+        return false;
+    };
+    let Some(items) = value.as_array() else {
+        return false;
+    };
+    match method {
+        "get_industry_ranking" => items
+            .iter()
+            .any(|e| e.get("leaderCode").and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty())),
+        _ => !items.is_empty(),
+    }
+}
+
 /// 构造 seed pool
 ///
 /// 顺序：get_hot_stocks(30) ∪ get_industry_ranking 龙头(20) ∪ FALLBACK_STOCKS 冷门补全

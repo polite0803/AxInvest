@@ -138,7 +138,8 @@
     "check:analyst-id-shape": "node scripts/check-analyst-id-shape.mjs",
     "check:analyst-id-shape:selftest": "node scripts/check-analyst-id-shape.mjs --selftest",
     "check:accent-fg": "node scripts/check-accent-foreground.mjs",
-    "check:accent-fg:selftest": "node scripts/check-accent-foreground.mjs --selftest"
+    "check:accent-fg:selftest": "node scripts/check-accent-foreground.mjs --selftest",
+    "check:routes:selftest": "node scripts/check-route-reachability.mjs --selftest"
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.1",

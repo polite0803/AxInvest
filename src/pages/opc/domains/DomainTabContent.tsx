@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom";
 
 import { CodeRefactorSettingsModal } from "@/components/settings/CodeRefactorSettingsModal";
 import { LiteraryCreationSettingsModal } from "@/components/settings/LiteraryCreationSettingsModal";
+import { workflowEditorPath } from "@/lib/workspaceTabs";
 import { useConversationStore, useSettingsStore } from "@/stores";
 
 import type { ActionItem, DomainConfig, DomainTab, DomainWorkflow } from "./types";
@@ -104,7 +105,7 @@ export function DomainTabContent({ capabilityPackId, config, tabKey, data }: Dom
         return;
       }
       if (templateId) {
-        navigate(`/workflow/new?domain=${capabilityPackId}&template=${templateId}`);
+        navigate(workflowEditorPath({ domain: capabilityPackId, template: templateId }));
       } else {
         message.error(t("opc.domain.workflowTemplateNotFound"));
       }
@@ -160,7 +161,7 @@ export function DomainTabContent({ capabilityPackId, config, tabKey, data }: Dom
 
   const handleOpenWorkflowEditor = (wf: DomainWorkflow) => {
     const templateId = wf.template_id || wf.id;
-    navigate(`/workflow/new?domain=${capabilityPackId}&template=${templateId}`);
+    navigate(workflowEditorPath({ domain: capabilityPackId, template: templateId }));
   };
 
   const handleWizardClose = () => {

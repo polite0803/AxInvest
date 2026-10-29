@@ -109,110 +109,118 @@ pub async fn insert_picks(
 ) -> usize {
     let mut written = 0usize;
     for pick in picks {
-        // ── 幂等：先查同业务键的既有行（一次 SELECT，不在循环里 N+1）──
-        let existing_id = find_existing_pick_id(
+        match upsert_pick(
             db,
-            batch.as_of_date,
-            batch.purpose,
-            &pick.period,
-            &pick.stock_code,
-            &pick.style,
+            pick,
+            seed_pool_json.as_deref(),
+            strategy_weights_json.as_deref(),
+            batch,
+            reco_version,
         )
-        .await;
-
-        // ⚠ `existing_id` 只能消费一次 ⇒ 先取判据再移动（E0382）
-        let is_update = existing_id.is_some();
-        let pick_id = existing_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-
-        // 用**闭包**构造 ActiveModel，而不是先造一个值 ——
-        // `update`/`insert` 都会**消费** ActiveModel（E0382），
-        // 而「撞唯一约束后重试覆盖」需要**再造一次** ⇒ 值形态做不到，闭包可以。
-        let build_model = || reco_picks::ActiveModel {
-            id: Set(pick_id.clone()),
-            generated_at: Set(batch.generated_at.to_string()),
-            period: Set(pick.period.clone()),
-            stock_code: Set(pick.stock_code.clone()),
-            stock_name: Set(pick.stock_name.clone()),
-            style: Set(pick.style.clone()),
-            confidence: Set(pick.confidence),
-            synthetic: Set(i32::from(pick.synthetic)),
-            seed_pool_json: Set(seed_pool_json.clone()),
-            strategy_weights_json: Set(strategy_weights_json.clone()),
-            pick_data: Set(pick.pick_data.clone()),
-            reco_version: Set(reco_version),
-            as_of_date: Set(batch.as_of_date.map(|s| s.to_string())),
-            purpose: Set(Some(batch.purpose.to_string())),
-            created_at: Set(batch.generated_at.to_string()),
-        };
-        let outcome = match is_update {
-            // 同键已存在 ⇒ 覆盖（保留 id），不新增行
-            true => build_model().update(db).await.map(|_| ()),
-            false => build_model().insert(db).await.map(|_| ()),
-        };
-        match outcome {
-            Ok(_) => written += 1,
-            Err(e) => {
-                // ⚠ 唯一约束冲突（2026-10-26 加 `uq_reco_picks_business_key` 之后）：
-                //   「先查已有行 → 无 ⇒ INSERT」这条路在**并发**下会撞（两个进程同时查到
-                //   无已有行、都去 INSERT）⇒ 第二个撞唯一约束。
-                //   撞了**不能只 warn**：那等于静默丢一行荐股票（= 少一个候选）。
-                //   正确处置 = 当成「同键已被别人写进」⇒ 重查该键的 id 并改成覆盖（保留 id）。
-                //   ⚠ live 荐股 cron **没有全局互斥锁**（只有时间旅行批次有）⇒ 撞约束是现实的。
-                if is_unique_violation(&e) {
-                    match find_existing_pick_id(
-                        db,
-                        batch.as_of_date,
-                        batch.purpose,
-                        &pick.period,
-                        &pick.stock_code,
-                        &pick.style,
-                    )
-                    .await
-                    {
-                        Some(existing_id) => {
-                            // 用**已存在行的 id** 覆盖（保留 id ⇒ 下游引用不悬空）。
-                            // ⚠ 不能用 `..build_model()`（那会把 `id` 字段重复指定 ⇒ 编译错）
-                            //   ⇒ 先造再改 `id`。
-                            let mut retry = build_model();
-                            retry.id = Set(existing_id);
-                            match retry.update(db).await {
-                                Ok(_) => {
-                                    written += 1;
-                                    continue;
-                                },
-                                Err(e2) => {
-                                    tracing::warn!(
-                                        "[reco_pool::insert_picks] 同键冲突后覆盖仍失败 \
-                                         ({} {} {}): {e2}",
-                                        pick.period,
-                                        pick.stock_code,
-                                        pick.style
-                                    );
-                                },
-                            }
-                        },
-                        None => {
-                            tracing::warn!(
-                                "[reco_pool::insert_picks] 同键冲突但重查不到该键 \
-                                 ({} {} {}): {e}",
-                                pick.period,
-                                pick.stock_code,
-                                pick.style
-                            );
-                        },
-                    }
-                } else {
-                    tracing::warn!(
-                        "[reco_pool::insert_picks] 写入 reco_picks 失败 ({} {} {}): {e}",
-                        pick.period,
-                        pick.stock_code,
-                        pick.style
-                    );
-                }
-            },
+        .await
+        {
+            Ok(()) => written += 1,
+            Err(e) => tracing::warn!(
+                "[reco_pool::insert_picks] 写入 reco_picks 失败 ({} {} {}): {e}",
+                pick.period,
+                pick.stock_code,
+                pick.style
+            ),
         }
     }
     written
+}
+
+/// 落**一行** `reco_picks`：同业务键覆盖（保留既有 `id`），返回成功 / 首个错误。
+///
+/// 与 [`insert_picks`] 同一份幂等实现，区别只在错误处置：批量入口把失败降级为 warn
+/// 并继续写下一行；调用方需要**逐行的结构化失败信息**（趋势智选要把「哪只 / 为什么」
+/// 回传前端）时用本函数。
+///
+/// ⚠ 2026-10-29：趋势智选链此前**绕过**本模块直接 `pick.insert(db)`，每行现造
+/// `serenity-{ts_ms}-…` 主键 ⇒ 同业务键第二次落库必撞库级唯一索引
+/// `uq_reco_picks_business_key`，表现为「筛选已完成，但结果未能保存到历史记录」。
+pub async fn upsert_pick(
+    db: &DatabaseConnection,
+    pick: &NewRecoPick,
+    seed_pool_json: Option<&str>,
+    strategy_weights_json: Option<&str>,
+    batch: &BatchKey<'_>,
+    reco_version: Option<i32>,
+) -> Result<(), DbErr> {
+    // ── 幂等：先查同业务键的既有行（一次 SELECT，不在循环里 N+1）──
+    let existing_id = find_existing_pick_id(
+        db,
+        batch.as_of_date,
+        batch.purpose,
+        &pick.period,
+        &pick.stock_code,
+        &pick.style,
+    )
+    .await;
+
+    // ⚠ `existing_id` 只能消费一次 ⇒ 先取判据再移动（E0382）
+    let is_update = existing_id.is_some();
+    let pick_id = existing_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    // 用**闭包**构造 ActiveModel，而不是先造一个值 ——
+    // `update`/`insert` 都会**消费** ActiveModel（E0382），
+    // 而「撞唯一约束后重试覆盖」需要**再造一次** ⇒ 值形态做不到，闭包可以。
+    let build_model = || reco_picks::ActiveModel {
+        id: Set(pick_id.clone()),
+        generated_at: Set(batch.generated_at.to_string()),
+        period: Set(pick.period.clone()),
+        stock_code: Set(pick.stock_code.clone()),
+        stock_name: Set(pick.stock_name.clone()),
+        style: Set(pick.style.clone()),
+        confidence: Set(pick.confidence),
+        synthetic: Set(i32::from(pick.synthetic)),
+        seed_pool_json: Set(seed_pool_json.map(str::to_string)),
+        strategy_weights_json: Set(strategy_weights_json.map(str::to_string)),
+        pick_data: Set(pick.pick_data.clone()),
+        reco_version: Set(reco_version),
+        as_of_date: Set(batch.as_of_date.map(|s| s.to_string())),
+        purpose: Set(Some(batch.purpose.to_string())),
+        created_at: Set(batch.generated_at.to_string()),
+    };
+    let outcome = match is_update {
+        // 同键已存在 ⇒ 覆盖（保留 id），不新增行
+        true => build_model().update(db).await.map(|_| ()),
+        false => build_model().insert(db).await.map(|_| ()),
+    };
+    match outcome {
+        Ok(_) => Ok(()),
+        Err(e) if is_unique_violation(&e) => {
+            // ⚠ 唯一约束冲突（2026-10-26 加 `uq_reco_picks_business_key` 之后）：
+            //   「先查已有行 → 无 ⇒ INSERT」这条路在**并发**下会撞（两个进程同时查到
+            //   无已有行、都去 INSERT）⇒ 第二个撞唯一约束。
+            //   撞了**不能只 warn**：那等于静默丢一行荐股票（= 少一个候选）。
+            //   正确处置 = 当成「同键已被别人写进」⇒ 重查该键的 id 并改成覆盖（保留 id）。
+            //   ⚠ live 荐股 cron **没有全局互斥锁**（只有时间旅行批次有）⇒ 撞约束是现实的。
+            match find_existing_pick_id(
+                db,
+                batch.as_of_date,
+                batch.purpose,
+                &pick.period,
+                &pick.stock_code,
+                &pick.style,
+            )
+            .await
+            {
+                // 用**已存在行的 id** 覆盖（保留 id ⇒ 下游引用不悬空）。
+                // ⚠ 不能用 `..build_model()`（那会把 `id` 字段重复指定 ⇒ 编译错）
+                //   ⇒ 先造再改 `id`。
+                Some(existing_id) => {
+                    let mut retry = build_model();
+                    retry.id = Set(existing_id);
+                    retry.update(db).await.map(|_| ())
+                },
+                // 重查不到 ⇒ 原样上抛（不是可自愈的并发冲突）
+                None => Err(e),
+            }
+        },
+        Err(e) => Err(e),
+    }
 }
 
 /// 是不是「唯一约束冲突」（并发写同一业务键）。
@@ -545,5 +553,43 @@ mod tests {
         assert_eq!(replay_rows.len(), 1);
         assert_eq!(replay_rows[0].id, "rpb-replay");
         assert!(!replay_rows[0].degraded);
+    }
+
+    /// 回归（2026-10-29）：同业务键重跑必须**覆盖**，不得再插一行。
+    ///
+    /// 背景：趋势智选链曾绕过本模块直接 `insert` 现造主键 ⇒ 撞库级唯一索引
+    /// `uq_reco_picks_business_key`（键不含 `generated_at`），表现为
+    /// 「筛选已完成，但结果未能保存到历史记录」。这里锁住 dao 的正确行为：
+    /// 第二次同键写入成功、行数仍为 1、`id` 保留、`generated_at` 更新到新批次。
+    #[tokio::test]
+    async fn insert_picks_overwrites_same_business_key_and_keeps_id() {
+        let db = setup().await;
+        insert_pool_row(&db, "2026-10-29T09:00:00Z", &["688498"], None).await;
+        let before = reco_picks::Entity::find().all(&db).await.expect("读应成功");
+        assert_eq!(before.len(), 1);
+        let kept_id = before[0].id.clone();
+
+        let pick = NewRecoPick {
+            period: "mid".to_string(),
+            stock_code: "688498".to_string(),
+            stock_name: "测试票".to_string(),
+            style: "trend".to_string(),
+            confidence: 90,
+            synthetic: false,
+            pick_data: None,
+        };
+        let batch = BatchKey {
+            generated_at: "2026-10-29T14:00:00Z",
+            as_of_date: None,
+            purpose: purpose::LIVE,
+        };
+        let written =
+            insert_picks(&db, &[pick], Some("[]".to_string()), None, &batch, Some(1)).await;
+        assert_eq!(written, 1, "同键覆盖应算作成功写入");
+
+        let after = reco_picks::Entity::find().all(&db).await.expect("读应成功");
+        assert_eq!(after.len(), 1, "同业务键不得累积重复行");
+        assert_eq!(after[0].id, kept_id, "覆盖必须保留原 id（decision_validations 按 id 引用）");
+        assert_eq!(after[0].generated_at, "2026-10-29T14:00:00Z");
     }
 }

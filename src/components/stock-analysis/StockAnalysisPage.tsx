@@ -4,6 +4,7 @@ import { useShowAdvancedPanels } from "@/components/stock-workspace/_shared/useS
 import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
 import { extractLlmField } from "@/lib/agentOutput";
 import { parseDataQualityReport } from "@/lib/dataQualityDiagnosis";
+import { investPath } from "@/lib/investRoutes";
 import { invoke } from "@/lib/invoke";
 import { horizonLabelKey } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
@@ -25,7 +26,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
 import { AnalysisDebugPanel } from "./AnalysisDebugPanel";
 import { AnalysisProgress } from "./AnalysisProgress";
@@ -152,12 +153,15 @@ interface SheetPanel {
 export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace?: boolean }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { id: routeId } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
-  // 兼容两种进入路径：
-  //   - 旧路由 /stock-analysis/:id → routeId 来自 useParams
-  //   - InvestHub 工作区 /invest?tab=workspace&view=analysis&analysisId=xxx → analysisId 来自 searchParams
-  const id = routeId ?? searchParams.get("analysisId");
+  // 唯一的进入路径：`/invest?tab=workspace&view=analysis&analysisId=xxx`
+  // （InvestHub 工作区）；`analysisId` 来自 searchParams。
+  //
+  // 历史上这里还有一条 `routeId ?? …` 的兜底（旧路由 `/stock-analysis/:id` 的
+  // `useParams()`）。该路由已于 2026-10-28 从 ContentArea 删除 ⇒ `routeId` 恒为
+  // `undefined`，属于**永不成立的分支**；留着它会让读者以为还有第二条入口，
+  // 也会让「记录详情从哪进」的排查多绕一圈。已删除（2026-10-29）。
+  const id = searchParams.get("analysisId");
   const loadAnalysis = useStockAnalysisStore((s) => s.loadAnalysis);
   const status = useStockAnalysisStore((s) => s.status);
   const [showDebug, setShowDebug] = useState(false);
@@ -222,8 +226,8 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
 
   // ── URL 股票代码/名称 → 分析页预填 ──
   // 两个参数名都指向同一语义（当前股票代码），必须同时接受：
-  //   - ?code=      → /stock-analysis?code=xxx。该路由由 ContentArea 的 RedirectToInvest
-  //                   重定向到 /invest?tab=workspace（原 query 全量保留 + 补 stockCode）
+  //   - ?code=      → 等价参数名（历史上由旧 `/stock-analysis?code=` 入口写入）；
+  //                   旧路由已于 2026-10-28 删除，`useStockJump` 现直接产出 stockCode
   //   - ?stockCode= → InvestHub 内跳转（useStockJump 统一写入）直接改写 query
   // 此前只认 code，而 InvestHub 内跳转只写 stockCode，导致「能切到分析页但搜索栏/行情不预填」。
   // ?stockName= 是可选增强：由 useStockJump 写入，有它就不必等行情回来才知道名称。
@@ -471,7 +475,7 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
               <button
                 type="button"
                 className="sa-header-back"
-                onClick={() => navigate("/trade")}
+                onClick={() => navigate(investPath({ view: "trade" }))}
                 title={t("nav.trade")}
               >
                 <ArrowLeftRight size={14} /> {t("nav.trade")}
@@ -804,7 +808,7 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
                       <ExperimentSidebar />
                       {/* Execute shortcut */}
                       <div
-                        onClick={() => navigate("/trade")}
+                        onClick={() => navigate(investPath({ view: "trade" }))}
                         style={{
                           marginTop: 8,
                           padding: "8px 0",

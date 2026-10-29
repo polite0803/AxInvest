@@ -200,8 +200,8 @@ export function StockScreenerPanel() {
   };
 
   const handleAnalyze = async (code: string, name?: string) => {
-    // URL 是当前股票的唯一真相源：跳转统一走 useStockJump（独立页分支由
-    // ContentArea 的 RedirectToInvest 归一成 /invest?tab=workspace&stockCode=…）
+    // URL 是当前股票的唯一真相源：跳转统一走 useStockJump（独立页分支同样落
+    // /invest?tab=workspace&stockCode=…，旧 `/stock-analysis` 路由已于 2026-10-28 删除）
     jumpToStock({ code, name });
     if (!isInInvestHub) {
       // 独立页入口保持原有行为：跳转后在本页内加载行情并直接开跑分析

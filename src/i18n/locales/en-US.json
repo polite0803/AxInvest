@@ -6292,6 +6292,8 @@
     "useActiveModel": "Use active conversation model",
     "useMaxCompletionTokens": "Use max_completion_tokens",
     "useModelIcon": "Use Model Icon",
+    "showKey": "Show",
+    "hideKey": "Hide",
     "validateKey": "Validate Key",
     "version": "Version",
     "webhook": {
@@ -15010,6 +15012,7 @@
       "minConfidence": "Min. confidence",
       "topN": "Max candidates per horizon",
       "reflectNow": "Reflect due horizons now",
+      "analyzeNow": "Per-stock analysis (billed)",
       "start": "Start batch review",
       "running": "Batch running…",
       "needPeriod": "Select at least one horizon",
@@ -17108,7 +17111,7 @@
       "schemaChanged": "Interface schema changed"
     },
     "evolutionDrift": {
-      "error": "Load Failed",
+      "error": "Load Failed: {{msg}}",
       "lastRecalcAt": "Last Recalculated",
       "loading": "Loading",
       "neverRecalculated": "Never Recalculated",

@@ -163,6 +163,29 @@ export function translateBackendError(e: unknown): string {
 }
 
 /**
+ * 后端错误 → 用户可见文本（**本地化原因**与**底层 detail** 同时给）。
+ *
+ * 为什么不能直接 `String(e)`：Tauri 把 `ErrorResponse` 序列化成 JSON 串，
+ * `String(e)` 会把 `{"code":…,"detail":…}` 原样糊到界面上（2026-10-29 实证：
+ * 反思 cron 收敛闸拒绝创建时，用户看到的是一坨 JSON）。
+ *
+ * 为什么不能只用 `translateBackendError`：它在**码被 locale 收录**时只返回译文、
+ * 把 `detail` 丢掉（本文件 `translateBackendError` 的返回路径）—— 而 `detail` 恰是
+ * 有用信息（如「反思入口已存在（到期反思（内置） · 0 18 * * *）」），丢掉后就只剩
+ * 通用的「参数校验失败」，等于把可操作的原因抹平。
+ *
+ * 形态照抄既有先例 `settings/DatabaseSettings.tsx:186-198`：两者不同才拼接，
+ * 未命中码时（纯文本错误）两者相同 ⇒ 不拼，避免同一句话出现两遍。
+ */
+export function backendErrorText(e: unknown): string {
+  const parsed = parseBackendError(e);
+  const localized = translateBackendError(e);
+  return parsed.detail && parsed.detail !== localized
+    ? `${localized} — ${parsed.detail}`
+    : localized;
+}
+
+/**
  * 把「自由文本 + 结构化码」形态的**执行失败**信息译成用户可见文本。
  *
  * 适用于两级失败通道（同一个形态、同一套码）：

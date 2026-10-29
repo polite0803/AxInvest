@@ -4,6 +4,9 @@
  * 抽离到独立文件以满足 react-refresh/only-export-components 规则（页面组件
  * 文件不应 export 非组件内容）。
  */
+
+import { investPath } from "@/lib/investRoutes";
+
 export interface TimelineJumpPlan {
   activeTab?: string;
   sheetTab?: string;
@@ -50,8 +53,9 @@ export function resolveTimelineJump(tabKey?: string, panelKey?: string): Timelin
     return { scrollTo: "decision-banner-top" };
   }
   if (panelKey === "trade") {
-    // trader 的 evidence — 跳到交易页
-    return { navigateTo: "/trade" };
+    // trader 的 evidence — 跳到交易视图（旧顶级 `/trade` 路由已于 2026-10-28 删除，
+    // 现在交易页是投资中心 `?tab=workspace&view=trade` 的工作区视图）
+    return { navigateTo: investPath({ view: "trade" }) };
   }
 
   // ── sheet panel（侧栏） ──

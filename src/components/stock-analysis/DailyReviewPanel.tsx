@@ -1,5 +1,6 @@
 import { List } from "@/components/common/AntdList";
 import { useStockJump } from "@/hooks/useStockJump";
+import { investPath } from "@/lib/investRoutes";
 import { invoke } from "@/lib/invoke";
 import { getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
@@ -211,7 +212,14 @@ export function DailyReviewPanel() {
                               size="small"
                               type="text"
                               icon={<HistoryOutlined style={{ fontSize: 11 }} />}
-                              onClick={() => navigate(`/backtest?code=${w.stockCode}`)}
+                              onClick={() =>
+                                navigate(
+                                  investPath({
+                                    view: "backtest",
+                                    stockCode: w.stockCode,
+                                    stockName: w.stockName,
+                                  }),
+                                )}
                             />
                           </Tooltip>
                           <ArrowRightOutlined style={{ fontSize: 10, color: "var(--muted)", alignSelf: "center" }} />

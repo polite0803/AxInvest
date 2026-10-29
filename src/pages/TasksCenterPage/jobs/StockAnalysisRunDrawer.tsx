@@ -13,7 +13,9 @@ import { RunStatusTag } from "../RunStatusTag";
  * 单股分析运行详情：`raw` 是 `list_stock_analyses` 的 DTO。
  *
  * 列表 DTO 不含 workflowId 与失败原因 ⇒ 这里不做取消/重试；完整报告在工作台，
- * 「打开」按 deepLink 跳 `/stock-analysis/:id`（该路由会重定向到投资工作区）。
+ * 「打开」按 deepLink 跳投资工作区（`/invest?tab=workspace&view=analysis&analysisId=…`）。
+ * ⚠ deepLink 由适配器的 `analysisRecordPath` 统一构造 —— 勿在此重拼路径（旧
+ * `/stock-analysis/:id` 已于 2026-10-28 删除，重拼即 404）。
  */
 export function StockAnalysisRunDrawer({
   run,

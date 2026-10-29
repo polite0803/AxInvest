@@ -17,7 +17,7 @@ import {
 } from "@/lib/agentOutput";
 import { computeAgreementScore } from "@/lib/decision-agreement";
 import { buildDecisionInputsReport, type DecisionInputsReport } from "@/lib/decisionInputDiagnosis";
-import { translateBackendError } from "@/lib/errorI18n";
+import { backendErrorText, translateBackendError } from "@/lib/errorI18n";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import {
@@ -379,7 +379,14 @@ export interface EvolutionStrategySummaryRow {
 
 /** R1 复盘→进化：dashboard 完整结构 */
 export interface EvolutionDriftDashboard {
-  currentWeights: Record<string, number>;
+  /**
+   * `[strategyId, period, weight]` 三元组。
+   *
+   * 后端不用对象映射：JSON 的 map 键必须是字符串，`HashMap<(String, String), f64>`
+   * 会在 Tauri IPC 序列化阶段直接失败（前端表现为「加载失败」）。形状与
+   * `manual_recalc_strategy_weights` 返回的 `currentWeights` 一致。
+   */
+  currentWeights: Array<[string, string, number]>;
   lastRecalcAt: number;
   stats: EvolutionStrategyStatRow[];
   recentChanges: EvolutionRecentChangeRow[];
@@ -1518,17 +1525,12 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
     // 如果是 replay 分析且有 asOfDate，同步设置全局时间锚点，
     // 确保后续 getStockQuote / getStockKline 拉取的是分析时刻的数据而非当前实时数据
-    console.log("[loadAnalysis] record:", { analysisKind: record.analysisKind, asOfDate: record.asOfDate });
     // 只对 replay 分析切换时间锚点，live 分析保持当前模式
     if (record.analysisKind === "replay" && record.asOfDate) {
       useTimeAnchorStore.getState().enterReplay(record.asOfDate);
     } else {
       useTimeAnchorStore.getState().enterLive(false);
     }
-    console.log("[loadAnalysis] timeAnchor after:", {
-      mode: useTimeAnchorStore.getState().mode,
-      asOfDate: useTimeAnchorStore.getState().asOfDate,
-    });
     // ── LLM 决策兜底（单点）──
     // 公式侧（portfolio-mgr）产出缺失时，用 llm_decision_json 填充 decision。
     // 三个入口共用这一份实现：① decisionJson 解析成空壳；② decisionJson 解析抛异常；
@@ -1612,9 +1614,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     let decisionAgreementScore: number | null = null;
     if (record.llmDecisionJson) {
       llmDecisionJson = record.llmDecisionJson;
-      // 调试: 确认 record.llmDecisionJson 的实际值和前 200 字符
-      console.log("[loadAnalysis] llmDecisionJson exists, first 200 chars:", record.llmDecisionJson.slice(0, 200));
-      console.log("[loadAnalysis] decisionJson exists:", !!record.decisionJson);
       // V40 修复:
       // 1. 后端 compute_decision_agreement 已在 workflow 完成时计算并嵌入
       //    decision_json.formulaLlmAgreement，优先使用该值。
@@ -1623,10 +1622,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         // 优先取后端预计算的一致性分数
         // 宽松解析：decisionJson 同样可能被 ```json 代码块包裹
         const djParsed = record.decisionJson ? parseJsonLoose(record.decisionJson) : null;
-        console.log(
-          "[loadAnalysis] djParsed.formulaLlmAgreement:",
-          djParsed?.formulaLlmAgreement ?? "(未设置，将使用前端手动计算降级)",
-        );
         if (djParsed?.formulaLlmAgreement != null) {
           decisionAgreementScore = Math.round(Number(djParsed.formulaLlmAgreement));
         } else {
@@ -1994,7 +1989,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       });
       set({ evolutionDashboard: data, evolutionLastError: null });
     } catch (e) {
-      set({ evolutionLastError: e instanceof Error ? e.message : String(e) });
+      // 落库前就译成人话：直接存 `String(e)` 会把 Tauri 的 `ErrorResponse` JSON 串
+      // 原样带进界面（`{"code":…,"detail":…}`），而展示侧的文案只有「加载失败」一句
+      // 模板 —— 一旦再把 msg 吞掉，用户和排查者都拿不到任何线索（2026-10-29 实证）。
+      set({ evolutionLastError: backendErrorText(e) });
       console.error("[EvolutionDrift] fetch dashboard failed:", e);
     }
   },
@@ -2009,7 +2007,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       // 重算后立即拉一次新 dashboard
       await get().fetchEvolutionDashboard(asOfDate ?? null);
     } catch (e) {
-      set({ evolutionLastError: e instanceof Error ? e.message : String(e) });
+      set({ evolutionLastError: backendErrorText(e) });
       console.error("[EvolutionDrift] manual recalc failed:", e);
     } finally {
       set({ evolutionRecalculating: false });
@@ -2807,13 +2805,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             }
           }
         }
-        console.log("[workflow-completed] portfolio-mgr raw:", {
-          pmRaw: pmRaw ? JSON.stringify(pmRaw).slice(0, 2000) : "(undefined)",
-          pmRawKeys: pmRaw && typeof pmRaw === "object" ? Object.keys(pmRaw as object) : null,
-          hasResult: pmRaw && typeof pmRaw === "object" ? !!(pmRaw as Record<string, unknown>).result : null,
-          decisionConfidence: decision?.confidence,
-          decisionAction: decision?.action,
-        });
         // P0 防御日志: 当 event 提取的置信度为 0 但 pmRaw 有 result 时, dump 完整结构
         if (decision?.confidence === 0 && pmRaw && typeof pmRaw === "object") {
           const pmObj = pmRaw as Record<string, unknown>;
@@ -2926,13 +2917,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         // 该节点输出在 results 里是 AgentNode 包装（{role, content: <json_string>}），
         // parseDecisionExplanation 会解 content 内层；缺失时返回 null（不伪造空壳）。
         const decisionExplanation = parseDecisionExplanation(results["decision-explainer"]);
-        // 调试日志: 验证 results["trader"] 的实际格式
-        console.log(
-          "[workflow-completed] traderRaw type:",
-          typeof traderRaw,
-          traderRaw ? Object.keys(traderRaw as object).join(",") : "null/undefined",
-        );
-        console.log("[workflow-completed] llmDecisionJson:", llmDecisionJson);
         // 清理 LLM 输出中的 markdown 代码围栏（```json ... ```），部分 model 会在 JSON 外包裹这些标记
         if (llmDecisionJson) {
           llmDecisionJson = llmDecisionJson

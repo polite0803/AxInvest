@@ -359,7 +359,17 @@ describe("stockAnalysis.mapStockAnalysisRun", () => {
     expect(run.startedAt).toBe(1_000);
     expect(run.finishedAt).toBeUndefined();
     expect(run.durationMs).toBeUndefined();
-    expect(run.deepLink).toBe("/stock-analysis/a1");
+    // 旧 `/stock-analysis/:id` 已于 2026-10-28 从路由表删除 ⇒ 深链必须指向投资工作区，
+    // 否则点「打开」会命中 `path="*"` 的 404 页（用户报的正是这一条）。
+    // 断言按**参数值**取，不钉查询串的拼接顺序（顺序不是契约，参数集合才是）。
+    expect(run.deepLink).not.toContain("/stock-analysis");
+    const link = new URL(run.deepLink!, "http://x");
+    expect(link.pathname).toBe("/invest");
+    expect(link.searchParams.get("tab")).toBe("workspace");
+    expect(link.searchParams.get("view")).toBe("analysis");
+    expect(link.searchParams.get("stockCode")).toBe("300308");
+    expect(link.searchParams.get("stockName")).toBe("中际旭创");
+    expect(link.searchParams.get("analysisId")).toBe("a1");
   });
 
   it("completed：用 completedAt 作为结束时刻", () => {

@@ -142,6 +142,11 @@ axagent-layout-v4.html
 
 # Dprint temp cache (should never have been tracked)
 /temp/
+# ⚠ 上面这条 `/temp/` 盖不住 dprint 的真实缓存目录 —— 2026-10-29 `git status`
+# 仍把 `.dprint-cache/`（incremental / locks / plugins，20 个文件）列为 Untracked。
+# 它是格式化器的构建产物，与 `src/register_commands.rs` 同性质：进了库就等于
+# 提交一份每次运行都会漂移的二进制缓存。
+/.dprint-cache/
 
 # Python
 __pycache__/

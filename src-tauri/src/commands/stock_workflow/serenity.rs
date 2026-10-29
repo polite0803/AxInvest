@@ -5,14 +5,13 @@ use crate::commands::error_code::stock_workflow as wf_err;
 use axagent_agent_macro::agent_command;
 use axagent_astock_data::AStockClient;
 use axagent_astock_data::as_of::{self};
-use axagent_entities::reco_picks;
 use axagent_harness::DatabaseConnection;
 use axagent_harness::IpcEventName;
 use axagent_harness::response_normalizer::ResponseNormalizer;
 use axagent_harness::types::{ChatResponse, ContentBlock};
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use axagent_runtime_core::DefaultResponseNormalizer;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
@@ -1538,7 +1537,13 @@ pub(crate) async fn run_serenity_screening_inner(
                 // db 复用 inner 入参（命令 / 批次两条入口同一连接）
                 // 统一 generated_at 格式：与 recommend_stocks 一致(ISO 8601 带毫秒)
                 let now_str = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
-                let ts_ms = chrono::Utc::now().timestamp_millis();
+                // 代际与用途：与荐股链同口径（实盘 = None + live；回放 = 截止日 + 本链用途）
+                let serenity_as_of: Option<String> = as_of_ctx.as_ref().map(|c| c.as_string());
+                let serenity_purpose = if as_of_ctx.is_some() {
+                    replay_purpose
+                } else {
+                    axagent_dao::repo::reco_pool::purpose::LIVE
+                };
                 // candidates 可能是 { candidates: [...] } 对象、{name, arguments: {candidates: [...]}} 格式、
                 // 也可能是原始数组
                 // 优先使用已经过校验(过滤缺 stock_code + exit_now)的 candidate_array
@@ -1636,7 +1641,7 @@ pub(crate) async fn run_serenity_screening_inner(
                 // 去重：同一 stock_code 只保留第一个（置信度最高的）候选
                 let mut seen_codes: std::collections::HashSet<String> =
                     std::collections::HashSet::new();
-                for (i, c) in candidate_list.iter().enumerate() {
+                for c in candidate_list.iter() {
                     let code = c["stock_code"].as_str().unwrap_or("");
                     let name = c["stock_name"].as_str().unwrap_or("");
                     let conf_input = candidate_score_input(c);
@@ -1833,48 +1838,41 @@ pub(crate) async fn run_serenity_screening_inner(
                         live_candidates.push(live_candidate);
                         // 持久化到 reco_picks。style 统一为 "serenity" 便于历史过滤；
                         // 策略子类型（bottleneck/policy/earnings…）仍在 pick_data.strategy_type 里。
-                        // id 带档位后缀：一次运行每票产 mid/long 两行，无后缀会主键相撞（后者静默丢）
-                        let pick_id = format!("serenity-{ts_ms}-{i}-{code}-{tier_period}");
-                        let pick = reco_picks::ActiveModel {
-                            id: Set(pick_id),
-                            generated_at: Set(now_str.clone()),
-                            period: Set(tier_period.to_string()),
-                            stock_code: Set(code.to_string()),
-                            stock_name: Set(name.to_string()),
-                            style: Set("serenity".to_string()),
+                        // ⚠ 必须走 `persist_reco_pick`（dao 的**同业务键覆盖**）—— 库级唯一索引
+                        // `uq_reco_picks_business_key` 的键是 `(as_of_date, purpose, period,
+                        // stock_code, style)`，**不含 generated_at**：同票同档重跑（今日再跑一次、
+                        // 或之前已出过该票）时现造主键 INSERT 必撞约束，前端表现为
+                        // 「筛选已完成，但结果未能保存到历史记录」。
+                        let seed_pool_json = serde_json::to_string(c).unwrap_or_default();
+                        let pick = axagent_dao::repo::reco_pool::NewRecoPick {
+                            period: tier_period.to_string(),
+                            stock_code: code.to_string(),
+                            stock_name: name.to_string(),
+                            style: "serenity".to_string(),
                             // `reco_picks.confidence` 是 i32（列类型）；折算函数给 u8（胜率 0-100）
-                            confidence: Set(conf as i32),
-                            synthetic: Set(0),
-                            seed_pool_json: Set(Some(serde_json::to_string(c).unwrap_or_default())),
-                            strategy_weights_json: Set(None),
-                            pick_data: Set(Some(
+                            confidence: conf as i32,
+                            synthetic: false,
+                            pick_data: Some(
                                 serde_json::to_string(&pick_data_val).unwrap_or_default(),
-                            )),
-                            reco_version: Set(Some(
-                                axagent_analysis_engine::recommender::RECO_ALGORITHM_VERSION,
-                            )),
-                            // 代际标记：实盘 = None，回放 = 本批 as-of 截止日。与荐股链
-                            // `persist_reco_picks` 同一列口径（两链同名目、同一张 reco_picks）。
-                            as_of_date: Set(as_of_ctx.as_ref().map(|c| c.as_string())),
-                            // 用途与代际分开：智选工作流不是「荐股矩阵回放」，也没有
-                            // 漏检回放的同款语义 ⇒ 回放记 `manual_replay`，实盘记 `live`。
-                            purpose: Set(Some(
-                                if as_of_ctx.is_some() {
-                                    replay_purpose
-                                } else {
-                                    axagent_dao::repo::reco_pool::purpose::LIVE
-                                }
-                                .to_string(),
-                            )),
-                            // 智选链与工作流链共用同一版本常量：两链同名目、同一张 reco_picks，
-                            // 分版就会造出「同一批 pick 两种归属」。
-                            created_at: Set(now_str.clone()),
+                            ),
+                        };
+                        let batch_key = axagent_dao::repo::reco_pool::BatchKey {
+                            generated_at: &now_str,
+                            as_of_date: serenity_as_of.as_deref(),
+                            purpose: serenity_purpose,
                         };
                         // 回放**同样落库**（2026-10-12 裁定：as-of 候选必须持久化，否则回放
                         // 结束后无样本可供反思）。代际写在每行的 `as_of_date` 上 ⇒ 与实盘票
                         // 同表但不混码；只读实盘的下游（趋势智选历史面板、退出信号 / 反馈
                         // 刷新、缓存回读）必须带 `as_of_date IS NULL` 谓词。
-                        if let Err(e) = pick.insert(db).await {
+                        if let Err(e) = crate::commands::_shared_reco_pool::persist_reco_pick(
+                            db,
+                            &pick,
+                            Some(seed_pool_json.as_str()),
+                            &batch_key,
+                        )
+                        .await
+                        {
                             tracing::warn!(
                                 "[serenity] 写入 reco_picks 失败 ({code} {tier_period}): {e}"
                             );
@@ -1882,7 +1880,7 @@ pub(crate) async fn run_serenity_screening_inner(
                             // 只保留**首个**失败的结构化三元组；多只失败时上方逐只 `warn!` 已记录全量原因。
                             if persistence_stock_code.is_empty() {
                                 persistence_stock_code = code.to_string();
-                                persistence_detail = e.to_string();
+                                persistence_detail = e;
                             }
                         }
                     }

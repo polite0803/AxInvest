@@ -11,6 +11,7 @@
  * 支持折叠 / 刷新 / 跳转到 quant 页面。
  */
 
+import { investPath } from "@/lib/investRoutes";
 import { useStrategyStore } from "@/stores";
 import type { StrategyMeta, StrategyType } from "@/types";
 import { Button, Empty, Spin, Tag, theme, Tooltip, Typography } from "antd";
@@ -72,7 +73,8 @@ export function StrategyRoomMiniBar({ sceneTemplateSlug }: StrategyRoomMiniBarPr
   };
 
   const handleJumpToQuant = () => {
-    void navigate("/quant");
+    // 量化页现为投资中心业务 tab（旧顶级 `/quant` 路由已于 2026-10-28 删除）
+    void navigate(investPath({ tab: "quant", view: null }));
   };
 
   const wfEnabledCount = strategies.filter((s) => s.walkForwardEnabled).length;

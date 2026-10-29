@@ -1,4 +1,5 @@
 import { useStockJump } from "@/hooks/useStockJump";
+import { investPath } from "@/lib/investRoutes";
 import { invoke } from "@/lib/invoke";
 import { ReloadOutlined } from "@ant-design/icons";
 import { Button, Spin, Table, Tag } from "antd";
@@ -100,7 +101,7 @@ export function PositionsMiniPanel() {
     return (
       <div className="text-xs text-gray-400 text-center py-4">
         <div className="mb-1">{t("stockAnalysis.noHoldings")}</div>
-        <Button size="small" type="link" onClick={() => navigate("/trade")}>
+        <Button size="small" type="link" onClick={() => navigate(investPath({ view: "trade" }))}>
           {t("stockAnalysis.goToTrade")}
         </Button>
       </div>

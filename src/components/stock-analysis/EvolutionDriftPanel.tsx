@@ -215,7 +215,18 @@ export function EvolutionDriftPanel() {
       <div style={{ padding: 16, textAlign: "center" }}>
         <Spin description={t("stockAnalysis.evolutionDrift.loading")} />
         {lastError && (
-          <div style={{ marginTop: 12, color: "var(--red)" }}>
+          // 详情必须露出来：这条命令的失败可能发生在 **IPC 序列化阶段**（后端日志里
+          // 什么都不留），只显示「加载失败」等于把唯一线索丢掉。`title` 兜底全文，
+          // 避免超长串把布局撑破；换行交给 word-break（JSON / SQL 都是长 token）。
+          <div
+            style={{
+              margin: "12px auto 0",
+              maxWidth: 720,
+              color: "var(--red)",
+              wordBreak: "break-word",
+            }}
+            title={lastError}
+          >
             {t("stockAnalysis.evolutionDrift.error", { msg: lastError })}
           </div>
         )}

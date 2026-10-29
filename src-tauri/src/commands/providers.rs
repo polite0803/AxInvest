@@ -273,6 +273,36 @@ pub async fn get_decrypted_provider_key(
     Ok(axagent_crypto::key_prefix(&decrypted))
 }
 
+/// SECURITY (C1 修订): 完整明文密钥仅在 UI 显式请求（「显示」按钮）时返回，
+/// 供用户查看/复制自己的密钥。与 `get_decrypted_provider_key`（仅前缀，Safe）区分：
+/// 本命令经 agent 桥暴露为 Caution（需确认），避免智能体静默读取完整密钥。
+#[tauri::command]
+#[agent_command(
+    domain = provider,
+    safety = Caution,
+    call_mode = StateInput,
+    description = "获取提供商完整 API 密钥（用户在 UI 显式请求显示时使用）"
+)]
+pub async fn reveal_provider_key(
+    state: State<'_, AppState>,
+    key_id: String,
+) -> Result<String, String> {
+    let key_row = axagent_dao::repo::provider::get_provider_key(state.harness.db(), &key_id)
+        .await
+        .map_err(|e| {
+            String::from(crate::commands::error::ErrorResponse::from_error(
+                e,
+                crate::commands::error::ErrorCategory::Unrecoverable,
+            ))
+        })?;
+    axagent_crypto::decrypt_key(&key_row.key_encrypted, state.harness.master_key()).map_err(|e| {
+        String::from(crate::commands::error::ErrorResponse::from_error(
+            e,
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })
+}
+
 #[tauri::command]
 #[agent_command(
     domain = provider,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import i18n from "@/i18n";
+import { analysisRecordPath } from "@/lib/investRoutes";
 import { invoke } from "@/lib/invoke";
 import type { AnalysisSummary } from "@/types";
 import { runIdOf, type RunState, type UnifiedRun } from "../model";
@@ -54,7 +55,8 @@ export function mapStockAnalysisRun(row: AnalysisSummary): UnifiedRun {
     finishedAt,
     durationMs: finishedAt !== undefined ? finishedAt - row.createdAt : undefined,
     badges: state === "canceled" && row.status === "interrupted" ? ["interrupted"] : undefined,
-    deepLink: `/stock-analysis/${row.id}`,
+    // 必须走 `investPath`：2026-10-28 起 `/stock-analysis/:id` 已删除，落到 404 页。
+    deepLink: analysisRecordPath({ id: row.id, stockCode: row.stockCode, stockName: row.stockName }),
     capabilities: {
       openSource: true,
     },

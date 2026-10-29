@@ -1,5 +1,6 @@
 import { useStockJump } from "@/hooks/useStockJump";
 import i18n from "@/i18n";
+import { investPath } from "@/lib/investRoutes";
 import { invoke } from "@/lib/invoke";
 import { getActionColor, getActionTKey } from "@/lib/stock-analysis-utils";
 import { ReloadOutlined } from "@ant-design/icons";
@@ -129,7 +130,12 @@ export function InvestDashboard() {
           title={<span className="text-xs font-medium">{t("stockAnalysis.holdings")} ({positions.length})</span>}
           styles={{ body: { padding: "4px 8px" } }}
           extra={
-            <Button size="small" type="link" className="text-xs" onClick={() => navigate("/trade")}>
+            <Button
+              size="small"
+              type="link"
+              className="text-xs"
+              onClick={() => navigate(investPath({ view: "trade" }))}
+            >
               {t("stockAnalysis.dashboard.viewAll")}
             </Button>
           }
@@ -182,16 +188,16 @@ export function InvestDashboard() {
       {/* Quick Actions */}
       <Card size="small" styles={{ body: { padding: "8px 12px" } }}>
         <div className="flex gap-2 flex-wrap">
-          <Button size="small" type="primary" onClick={() => navigate("/screener")}>
+          <Button size="small" type="primary" onClick={() => navigate(investPath({ tab: "screener", view: null }))}>
             {t("stockAnalysis.dashboard.recommendations")}
           </Button>
-          <Button size="small" onClick={() => navigate("/invest")}>
+          <Button size="small" onClick={() => navigate(investPath({ view: "analysis" }))}>
             {t("stockAnalysis.dashboard.analyzeStock")}
           </Button>
-          <Button size="small" onClick={() => navigate("/trade")}>
+          <Button size="small" onClick={() => navigate(investPath({ view: "trade" }))}>
             {t("stockAnalysis.dashboard.recordTrade")}
           </Button>
-          <Button size="small" onClick={() => navigate("/watchlist")}>
+          <Button size="small" onClick={() => navigate(investPath({ view: "monitor" }))}>
             {t("stockAnalysis.dashboard.dailyReview")}
           </Button>
         </div>

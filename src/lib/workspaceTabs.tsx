@@ -196,6 +196,27 @@ export function parseWorkspaceTabPath(pathname: string): WorkspaceTab | null {
 }
 
 /**
+ * 工作流编辑器的深链（`/chat/workflow?template=X&domain=Y`）。
+ *
+ * 2026-10-28 起旧顶级路由 `/workflow/new` 已删除，落到 `path="*"` 的 404 页；
+ * 工作流页现在只经工作台 Tab 的路径段 `/chat/workflow` 承载，参数由
+ * `WorkflowPage` 消费 `template` / `domain`（见其 `WORKFLOW_PAGE_QUERY_PARAMS`）。
+ * 任何「打开工作流编辑器」的调用点都必须走本函数，不要自己拼路径。
+ */
+export function workflowEditorPath(init: { template?: string; domain?: string } = {}): string {
+  const params = new URLSearchParams();
+  if (init.template) {
+    params.set("template", init.template);
+  }
+  if (init.domain) {
+    params.set("domain", init.domain);
+  }
+  const qs = params.toString();
+  const path = workspaceTabPath("workflow");
+  return qs ? `${path}?${qs}` : path;
+}
+
+/**
  * 剔除指定查询参数，**保留其余**（尤其 `ws`）。
  *
  * ⚠ 各页「消费完自己的 URL 参数后回写」**必须**走本函数，禁止直接

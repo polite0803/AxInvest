@@ -52,6 +52,13 @@ type DateMode = "ago" | "fixed";
  *   2. 时间旅行回放工作台（/replay-workbench）历史验证区，与 ReplaySweep 并列。
  * 批次复盘是历史验证逻辑，不属于选股页的当日生产。卡片自带历史交易日选择
  * （N 交易日前 / 指定日期），后端自开 as_of guard，与全局锚点正交。
+ *
+ * ⚠ `analyze`（逐只 LLM 分析）在 UI 显式暴露且**默认 false**（2026-10-29 成本治理）：
+ *   后端 serde 缺省是 true（CLI / cron 都显式传 false），此前前端不传该字段
+ *   ⇒ UI 隐性 true ⇒ 点一次烧约 25 元 LLM 费 + 30~60 分钟（供应商限速），
+ *   而盈利能力样本（reco_picks → decision_validations）**不依赖**分析阶段
+ *   （见 `TimeTravelBatchRequest::analyze` 的 R-2 文档）。默认与 cron/CLI 口径对齐，
+ *   要决策质量口径（`stock_analyses.outcome`）时手动打开。
  */
 export function TimeTravelBatchCard() {
   const { t } = useTranslation();
@@ -69,6 +76,8 @@ export function TimeTravelBatchCard() {
   const [minConfidence, setMinConfidence] = useState<number>(50);
   const [topN, setTopN] = useState<number>(20);
   const [reflect, setReflect] = useState<boolean>(true);
+  // 逐只 LLM 分析：默认 false（成本治理，与 cron/CLI 出厂口径对齐），见组件文档注释
+  const [analyze, setAnalyze] = useState<boolean>(false);
 
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -134,6 +143,7 @@ export function TimeTravelBatchCard() {
       minConfidence,
       topN,
       reflect,
+      analyze,
     };
 
     setStarting(true);
@@ -245,6 +255,10 @@ export function TimeTravelBatchCard() {
                   </span>
                   <span>
                     {t("replayWorkbench.batch.reflectNow")}: <Switch checked={reflect} onChange={setReflect} />
+                  </span>
+                  <span>
+                    {t("replayWorkbench.batch.analyzeNow")}:{" "}
+                    <Switch checked={analyze} onChange={setAnalyze} data-testid="ttb-analyze" />
                   </span>
                 </Space>
               ),

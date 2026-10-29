@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { ProviderKey } from "@/types";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "antd";
@@ -38,7 +39,7 @@ let provider = {
       paramOverrides: null,
     },
   ],
-  keys: [],
+  keys: [] as ProviderKey[],
   proxyConfig: null,
   sortOrder: 0,
   createdAt: 0,
@@ -66,6 +67,8 @@ const zh: Record<string, string> = {
   "error.loadFailed": "加载失败",
   "error.unknown": "未知错误",
   "error.keyValidationFailed": "密钥验证失败",
+  "settings.showKey": "显示",
+  "settings.hideKey": "隐藏",
 };
 
 vi.mock("react-i18next", () => ({
@@ -107,6 +110,11 @@ vi.mock("../IconPickerModal", () => ({
 }));
 
 const setSelectedProviderId = vi.fn();
+
+vi.mock("@/lib/invoke", () => ({
+  invoke: vi.fn(async (cmd: string) => cmd === "reveal_provider_key" ? "sk-full-plain-key-000" : ""),
+  logIpcError: () => {},
+}));
 
 vi.mock("@/stores", () => ({
   useProviderStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -159,7 +167,7 @@ describe("ProviderDetail", () => {
           paramOverrides: null,
         },
       ],
-      keys: [],
+      keys: [] as ProviderKey[],
       proxyConfig: null,
       sortOrder: 0,
       createdAt: 0,
@@ -228,5 +236,42 @@ describe("ProviderDetail", () => {
     const dialog = await screen.findByRole("dialog");
     const comboboxes = within(dialog).getAllByRole("combobox");
     expect(comboboxes[0]).toHaveValue("gpt-5.4");
+  });
+
+  it("reveals and hides the full API key via the eye button", async () => {
+    provider = {
+      ...provider,
+      keys: [
+        {
+          id: "key-1",
+          providerId: "provider-1",
+          keyEncrypted: "enc",
+          keyPrefix: "abcd1234...",
+          enabled: true,
+          lastValidatedAt: null,
+          lastError: null,
+          rotationIndex: 0,
+          createdAt: 0,
+        },
+      ],
+    };
+    render(
+      <App>
+        <ProviderDetail providerId="provider-1" />
+      </App>,
+    );
+
+    // 默认掩码展示
+    expect(screen.getByText("abcd1234...••••••••")).toBeTruthy();
+    expect(screen.queryByText("sk-full-plain-key-000")).toBeNull();
+
+    // 点击「显示」→ 明文密钥可见
+    await userEvent.click(screen.getByTitle("显示"));
+    expect(await screen.findByText("sk-full-plain-key-000")).toBeTruthy();
+
+    // 点击「隐藏」→ 回到掩码
+    await userEvent.click(screen.getByTitle("隐藏"));
+    expect(screen.queryByText("sk-full-plain-key-000")).toBeNull();
+    expect(screen.getByText("abcd1234...••••••••")).toBeTruthy();
   });
 });

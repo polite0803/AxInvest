@@ -3,6 +3,7 @@ import { AsOfDatePicker } from "@/components/time-travel/AsOfDatePicker";
 import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBadge";
 import { ReplaySweep } from "@/components/time-travel/ReplaySweep";
 import { TimeTravelBatchCard } from "@/components/time-travel/TimeTravelBatchCard";
+import { investPath } from "@/lib/investRoutes";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { Alert, Button, Card, Empty, Space, Typography } from "antd";
 import { RotateCcw, Zap } from "lucide-react";
@@ -27,8 +28,14 @@ const { Paragraph } = Typography;
  *   - "切回 Live" 按钮 → 调用 enterLive(requireConfirm=false)
  *     （PageHeader 的 ModeSwitch 仍会弹二次确认 Modal）
  *
- * 入口：工作区 → 回测视图右上角时钟按钮（BacktestView）跳转 /replay-workbench；
- * 投资中心标题栏另有「批次复盘」快捷入口（Drawer），两者复用同一 TimeTravelBatchCard。
+ * 入口：工作区 → 回测视图右上角时钟按钮（`BacktestView`）跳 `/invest/replay`
+ * （`BUILTIN_PAGE_PATH.investReplay`）；投资中心标题栏另有「批次复盘」快捷入口（Drawer），
+ * 两者复用同一 `TimeTravelBatchCard`。
+ *
+ * ⚠ 路由历史：本页原由顶级 `/replay-workbench` 承载，该路由已于 2026-10-28 删除，
+ * 现为投资域内的 `/invest/replay`（ContentArea 注册的 `LazyReplayWorkbenchPage`）。
+ * 任何「进入回放工作台」的新调用点请走 `BUILTIN_PAGE_PATH.investReplay`，
+ * 不要再写字面量，也不要再取已删除的 `replay-workbench` 键（那会得到 `undefined`）。
  */
 export function ReplayWorkbench() {
   const { t } = useTranslation();
@@ -86,7 +93,7 @@ export function ReplayWorkbench() {
             ? (
               <AsOfDatePicker
                 onPick={handlePick}
-                onCancel={() => navigate("/backtest")}
+                onCancel={() => navigate(investPath({ view: "backtest" }))}
               />
             )
             : (
@@ -124,19 +131,19 @@ export function ReplayWorkbench() {
               <Space wrap>
                 <Button
                   type="primary"
-                  onClick={() => navigate("/invest")}
+                  onClick={() => navigate(investPath({ view: "analysis" }))}
                   data-testid="goto-stock-analysis"
                 >
                   {t("replayWorkbench.step2.analyze")}
                 </Button>
                 <Button
-                  onClick={() => navigate("/backtest")}
+                  onClick={() => navigate(investPath({ view: "backtest" }))}
                   data-testid="goto-backtest"
                 >
                   {t("replayWorkbench.step2.backtest")}
                 </Button>
                 <Button
-                  onClick={() => navigate("/watchlist")}
+                  onClick={() => navigate(investPath({ view: "monitor" }))}
                   data-testid="goto-watchlist"
                 >
                   {t("replayWorkbench.step2.watchlist")}

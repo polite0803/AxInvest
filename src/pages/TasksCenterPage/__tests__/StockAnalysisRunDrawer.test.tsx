@@ -38,7 +38,8 @@ function makeRun(over: Partial<UnifiedRun> = {}, rawOver: Partial<AnalysisSummar
     startedAt: 1_000,
     finishedAt: 4_000,
     durationMs: 3_000,
-    deepLink: "/stock-analysis/a1",
+    deepLink:
+      "/invest?tab=workspace&stockCode=300308&stockName=%E4%B8%AD%E9%99%85%E6%97%AD%E5%88%9B&view=analysis&analysisId=a1",
     capabilities: { openSource: true },
     raw: { ...RAW, ...rawOver },
     ...over,

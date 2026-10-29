@@ -64,6 +64,29 @@ pub async fn persist_reco_picks(
     .await
 }
 
+/// 落**一行** `reco_picks`（同业务键覆盖，保留既有 `id`），返回首个错误。
+///
+/// 与 [`persist_reco_picks`] 同一份幂等实现（dao `upsert_pick`），区别只在：
+/// 调用方需要逐行的失败信息（趋势智选要把「哪只 / 为什么」回传前端），
+/// 且每行的候选池快照不同（智选按**候选对象**逐行存 `seed_pool_json`）。
+pub async fn persist_reco_pick(
+    db: &DatabaseConnection,
+    pick: &NewRecoPick,
+    seed_pool_json: Option<&str>,
+    batch: &BatchKey<'_>,
+) -> Result<(), String> {
+    pool_dao::upsert_pick(
+        db,
+        pick,
+        seed_pool_json,
+        None,
+        batch,
+        Some(recommender::RECO_ALGORITHM_VERSION),
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// 落一个候选池批次快照（每批一行，**0 票也写**）。
 ///
 /// 漏检归因需要「这批扫过、池子是什么」；只在出票行上带 `seed_pool_json` 时，

@@ -51,6 +51,7 @@ import {
   Download,
   Expand,
   Eye,
+  EyeOff,
   Heart,
   Key,
   Lightbulb,
@@ -511,6 +512,49 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
       showBackendError(message, e, { context: "ProviderDetail.addKey" });
     }
   }, [keyValue, providerId, addProviderKey, validateProviderKey, message, t]);
+
+  // 「显示」按钮状态：正在展示完整明文密钥的 keyId 集合、已取回的明文文本、加载中集合
+  const [revealedKeyIds, setRevealedKeyIds] = useState<Set<string>>(new Set());
+  const [revealedKeyText, setRevealedKeyText] = useState<Record<string, string>>(
+    {},
+  );
+  const [revealingKeys, setRevealingKeys] = useState<Set<string>>(new Set());
+
+  // 切换服务商时清空已揭示的明文密钥，避免残留展示
+  useEffect(() => {
+    setRevealedKeyIds(new Set());
+    setRevealedKeyText({});
+  }, [providerId]);
+
+  const toggleRevealKey = useCallback(async (keyId: string) => {
+    if (revealedKeyIds.has(keyId)) {
+      setRevealedKeyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(keyId);
+        return next;
+      });
+      setRevealedKeyText((prev) => {
+        const next = { ...prev };
+        delete next[keyId];
+        return next;
+      });
+      return;
+    }
+    setRevealingKeys((prev) => new Set(prev).add(keyId));
+    try {
+      const raw = await invoke<string>("reveal_provider_key", { keyId });
+      setRevealedKeyText((prev) => ({ ...prev, [keyId]: raw }));
+      setRevealedKeyIds((prev) => new Set(prev).add(keyId));
+    } catch (e) {
+      showBackendError(message, e, { context: "ProviderDetail.revealKey" });
+    } finally {
+      setRevealingKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(keyId);
+        return next;
+      });
+    }
+  }, [revealedKeyIds, message]);
 
   const handleValidateKey = useCallback(
     async (keyId: string) => {
@@ -1290,7 +1334,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                   className="flex items-center justify-between rounded-md px-3 py-2"
                   style={{ border: "1px solid var(--border-color)" }}
                 >
-                  <Space>
+                  <Space className="min-w-0 flex-1">
                     <Switch
                       id="provider-detail-switch-113"
                       size="small"
@@ -1298,13 +1342,31 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                       onChange={(checked) => toggleProviderKey(key.id, checked)}
                     />
                     <Key size={14} />
-                    <Text code>{key.keyPrefix}••••••••</Text>
+                    {revealedKeyIds.has(key.id)
+                      ? (
+                        <Text code style={{ wordBreak: "break-all" }}>
+                          {revealedKeyText[key.id] ?? key.keyPrefix}
+                        </Text>
+                      )
+                      : <Text code>{key.keyPrefix}••••••••</Text>}
                   </Space>
                   <Space size="small">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={revealedKeyIds.has(key.id)
+                        ? <EyeOff size={14} />
+                        : <Eye size={14} />}
+                      loading={revealingKeys.has(key.id)}
+                      onClick={() => toggleRevealKey(key.id)}
+                      title={revealedKeyIds.has(key.id)
+                        ? t("settings.hideKey")
+                        : t("settings.showKey")}
+                    />
                     <CopyButton
                       text={async () => {
                         const raw = await invoke<string>(
-                          "get_decrypted_provider_key",
+                          "reveal_provider_key",
                           { keyId: key.id },
                         );
                         return raw;

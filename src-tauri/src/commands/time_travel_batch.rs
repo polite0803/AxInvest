@@ -475,13 +475,28 @@ async fn require_pool_snapshot_coverage(
 /// **cron 不调命令**（命令要 `State<'_, AppState>`，cron 拿不到）。
 pub use crate::commands::constants::TIME_TRAVEL_BATCH_TASK_TYPE;
 
-/// 列出「今天可回放」的 as_of 日：建池快照**至少一源**齐全 **且** 至少已过 `min_holding_days` 个交易日。
+/// 列出「今天可回放」的 as_of 日：建池快照**至少一源能真正产出候选股**，
+/// **且** 至少已过 `min_holding_days` 个交易日。
 ///
 /// ## 为什么要「至少过 N 个交易日」而不是「快照齐全即可」
 ///
 /// 回放的产物要能被判定才有价值，而判定 T+N 的前提是 **as_of + N 个交易日 ≤ 今天**。
 /// 快照齐全但持有期未到期的日子，跑出来只会得到一堆判不出胜负的样本 ——
 /// 那种样本进不了胜率分母，只是白跑一遍选股与分析。
+///
+/// ## 为什么判据是「**能产出候选股**」而不是「快照记录存在」（2026-10-29，R-3h 修正）
+///
+/// R-3h（2026-10-26）把「全部源」放宽成「至少一源**有记录**」，动机是对的
+/// （05-27～09-09 只有行业榜一源，且行情库 06-10 之后恰好 90 根 K 线 ⇒ 回放即可让
+/// long 档成熟，不必等 wall-clock），但**实证推翻了它的前提**「少一源时池子仍有真实成分」：
+/// 那段历史快照的 `leaderCode` **全为 null**（见 `pool.rs::build_seed_pool` 的实证注释）
+/// ⇒ 行业榜实际取到 0 只 ⇒ 池 100% 是 FALLBACK_STOCKS。
+/// 现网 `decision_validations` 里 long T+28 已结算的 7 个独立日正是这种样本
+/// （2026-10-29 核对），它们证明的是「FALLBACK 名单长持亏」，不是档位选股能力。
+///
+/// 故判据改为**快照内容能否产出候选股**（单点判据
+/// `pool::snapshot_payload_yields_stocks`，与 `build_seed_pool` 的 `taken > 0` 同口径）：
+/// 记录存在但榜单取不出票的日期（零源日与「有记录零成分」日）一律排除。
 ///
 /// ## 返回
 ///
@@ -491,32 +506,30 @@ pub async fn list_replayable_as_of_dates(
     db: &DatabaseConnection,
     min_holding_days: i32,
 ) -> Result<Vec<(String, i32)>, String> {
-    use axagent_analysis_engine::recommender::pool::POOL_SNAPSHOT_METHODS;
+    use axagent_analysis_engine::recommender::pool::{
+        POOL_SNAPSHOT_METHODS, snapshot_payload_yields_stocks,
+    };
 
     let today = beijing_today();
-    // ⚠ 用「**至少一**源有快照」而不是「全部源」（2026-10-26，R-3h）。
-    // 实测 `astock_daily_snapshot`：05-27 / 06-10 / 06-11 / 08-18 / 09-04 / 09-07 / 09-09
-    // 这些日期**只有 `get_industry_ranking` 一源**（热股榜快照最早到 09-28），
-    // 用「全部源」判会把它们全部排除 ⇒ 只能从 09-28 起回放。
-    //
-    // 而档位成熟判定只看「行情库里决策日之后有没有 N 根 K 线」，**不看今天**
-    // ⇒ 回放 06-10 立刻能让 long 档（T+90）成熟、09-07 能让 mid 档（T+28）成熟
-    // ⇒ long/mid 的校准样本不必等 wall-clock（详见 `list_snapshot_dates_with_any_method` 文档）。
-    //
-    // ⚠ 零源日（两源都没快照）**仍排除**：那时池子 100% 是静态 FALLBACK_STOCKS，
-    //   不是「当时的候选池」⇒ 回放与系统真实行为不同构，混进来会污染校准样本。
-    let covered_any =
-        axagent_dao::repo::astock_daily_snapshot::list_snapshot_dates_with_any_method(
-            db,
-            &POOL_SNAPSHOT_METHODS,
-        )
-        .await
-        .map_err(|e| {
-            ErrorResponse::err_with_detail(ec::QUERY_FAILED, format!("读快照覆盖失败: {e}"))
-        })?;
+    // 一次拉回全部快照行，按「内容能否产出候选股」聚出可用日期集合。
+    // （判据在 pool.rs 单点维护，dao 只负责搬 payload，不抄业务语义。）
+    let rows = axagent_dao::repo::astock_daily_snapshot::list_snapshot_rows_with_payload(
+        db,
+        &POOL_SNAPSHOT_METHODS,
+    )
+    .await
+    .map_err(|e| {
+        ErrorResponse::err_with_detail(ec::QUERY_FAILED, format!("读快照覆盖失败: {e}"))
+    })?;
+    let mut viable: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for (d, method, payload) in rows {
+        if snapshot_payload_yields_stocks(&method, &payload) {
+            viable.insert(d);
+        }
+    }
 
     let mut out = Vec::new();
-    for (d, _srcs) in covered_any {
+    for d in viable {
         let Ok(nd) = chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d") else {
             tracing::warn!("[time-travel-batch] 快照日期 `{d}` 不是 ISO 日期，跳过");
             continue;
@@ -1001,8 +1014,32 @@ async fn execute_batch(
         (reco_count, serenity_count, serenity_error, outcome)
     };
 
+    // ── 降级水位（2026-10-29「堵降级」）─────────────────────────────────────────
+    // 本批运行期间记录的全部 as-of 逐源降级，运行结束即切片汇总进批次消息。
+    // 为什么必须做：看不见的降级堵不住 —— 此前批次消息只有 pool_degradation_note
+    // 一句话，逐源降级（快讯/资金流/热榜回溯失败…）只散落在各分析的黑板里，
+    // 批次层面完全不可见 ⇒ 「回放样本带多少降级」无从统计，更无从验收「不降级运行」。
+    // 切片口径与 recommender 的 `asof_degradations` 同一模式：进 guard 前取全局
+    // 序列水位，出 guard 后按 `seq > watermark` 精确切本批（环形缓冲不排空，无重复计数）。
+    let deg_watermark = as_of::global_degradation_seq_watermark();
+
     let (reco_count, serenity_count, serenity_error, outcome) =
         as_of::with_optional_asof(Some(ctx), pipeline).await;
+
+    let degradations = as_of::take_global_degradations_since(deg_watermark);
+    // 按 vendor:method 聚合计数（保序字典序，消息可读且确定）；明细仍在各分析黑板。
+    let deg_summary = if degradations.is_empty() {
+        "as-of 降级 0 项".to_string()
+    } else {
+        let mut by_site: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        for d in &degradations {
+            *by_site.entry(format!("{}/{}", d.vendor, d.method)).or_default() += 1;
+        }
+        let pairs: Vec<String> =
+            by_site.into_iter().map(|(site, n)| format!("{site}×{n}")).collect();
+        format!("as-of 降级 {} 项（{}）", degradations.len(), pairs.join("，"))
+    };
 
     // 成功分析的 analysis_id 集合 —— 阶段 4 反思范围严格收口于此
     let analysis_ids: Vec<String> =
@@ -1016,8 +1053,9 @@ async fn execute_batch(
     s.serenity_error = serenity_error.clone();
     s.analyses = outcome.results;
     if reco_count == 0 && serenity_count == 0 {
-        s.message =
-            Some(format!("{as_of_str} 荐股与趋势智选均无候选（可能当日数据缺失或阈值过高）"));
+        s.message = Some(format!(
+            "{as_of_str} 荐股与趋势智选均无候选（可能当日数据缺失或阈值过高）；{deg_summary}"
+        ));
     } else if s.total == 0 {
         s.message = Some("候选队列执行异常：0 只进入分析".to_string());
     } else {
@@ -1034,6 +1072,9 @@ async fn execute_batch(
             msg.push('；');
             msg.push_str(note);
         }
+        // as-of 逐源降级汇总（「不降级运行」的验收读数：0 项 = 本批取数全部走通）。
+        msg.push('；');
+        msg.push_str(&deg_summary);
         s.message = Some(msg);
     }
     save_state(&db, s.clone()).await;

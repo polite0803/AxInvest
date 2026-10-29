@@ -1000,6 +1000,7 @@ macro_rules! register_all_commands {
             commands::providers::get_decrypted_provider_key,
             commands::providers::list_providers,
             commands::providers::reorder_providers,
+            commands::providers::reveal_provider_key,
             commands::providers::save_models,
             commands::providers::test_model,
             commands::providers::toggle_model,

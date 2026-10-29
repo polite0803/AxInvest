@@ -9,10 +9,10 @@ describe("resolveTimelineJump - 修复 evidence chip 死链", () => {
     expect(plan.navigateTo).toBeUndefined();
   });
 
-  it("abstract panelKey 'trade' → 跳到 /trade 路由", () => {
+  it("abstract panelKey 'trade' → 跳到投资中心的交易视图（旧顶级 /trade 已删除）", () => {
     const plan = resolveTimelineJump("execute", "trade");
     expect(plan.activeTab).toBeUndefined();
-    expect(plan.navigateTo).toBe("/trade");
+    expect(plan.navigateTo).toBe("/invest?tab=workspace&view=trade");
     expect(plan.scrollTo).toBeUndefined();
   });
 

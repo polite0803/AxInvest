@@ -1,3 +1,4 @@
+import { analysisRecordPath } from "@/lib/investRoutes";
 import { invoke } from "@/lib/invoke";
 import {
   actionSourceLabelKey,
@@ -613,16 +614,10 @@ export function AnalysisHistoryButton() {
                     onClick={() => {
                       if (editingId) { return; }
                       setOpen(false);
-                      // 2026-10-28 起 `/stock-analysis/:id` 已删除，记录详情并入投资工作区
-                      // （`?tab=workspace&view=analysis`，`analysisId` 由 StockAnalysisPage 消费）。
-                      const qs = new URLSearchParams({
-                        tab: "workspace",
-                        view: "analysis",
-                        stockCode: r.stockCode,
-                        analysisId: r.id,
-                      });
-                      if (r.stockName) { qs.set("stockName", r.stockName); }
-                      navigate(`/invest?${qs.toString()}`);
+                      // 记录详情并入投资工作区：路径统一由 `analysisRecordPath` 构造
+                      navigate(
+                        analysisRecordPath({ id: r.id, stockCode: r.stockCode, stockName: r.stockName }),
+                      );
                     }}
                     onMouseEnter={(e) => {
                       (e.currentTarget as HTMLElement).style.background =

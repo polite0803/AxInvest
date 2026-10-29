@@ -84,8 +84,13 @@ pub async fn load_active_weight_decay_config(db: &DatabaseConnection) -> WeightD
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EvolutionDriftDashboard {
-    /// 当前生效的 (strategy, period) -> 权重
-    pub current_weights: HashMap<(String, String), f64>,
+    /// 当前生效的 (strategy, period) -> 权重，按 `[strategyId, period, weight]` 三元组给出。
+    ///
+    /// ⚠ 这里**不能**用 `HashMap<(String, String), f64>`：JSON 对象的键只能是字符串，
+    /// 元组键会在 Tauri IPC 序列化阶段直接失败（实测 `serde_json` 报 `key must be a string`），
+    /// 前端拿到的是 reject ⇒ 面板只能显示「加载失败」，后端日志里也看不到任何错误。
+    /// 形状与 `manual_recalc_strategy_weights` 返回的 `currentWeights` 保持一致。
+    pub current_weights: Vec<(String, String, f64)>,
     /// 最近一次重算时间（ms），0 表示尚未重算
     pub last_recalc_at: i64,
     /// 仪表盘当前所有 (strategy, period) 的统计
@@ -504,8 +509,15 @@ pub async fn get_dashboard(
         })
         .collect();
 
-    let weight_only: HashMap<(String, String), f64> =
-        new_map.iter().map(|(k, v)| (k.clone(), v.new_weight)).collect();
+    // 展平成 JSON 可表示的三元组；排序是为了让 IPC 输出可复现 ——
+    // HashMap 的迭代顺序不稳定，同一份数据两次调用会给出不同顺序。
+    let mut current_weights: Vec<(String, String, f64)> = new_map
+        .iter()
+        .map(|((strategy_id, period), adjusted)| {
+            (strategy_id.clone(), period.clone(), adjusted.new_weight)
+        })
+        .collect();
+    current_weights.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
 
     // #31：把「被代际排除多少」一并报出 —— 否则面板只看到样本变少，
     // 分不清「旧代不可比」与「还没盖章」（两者处置不同）。
@@ -513,7 +525,7 @@ pub async fn get_dashboard(
         count_excluded_performance_window(db, cfg.lookback_days, as_of_date).await?;
 
     Ok(EvolutionDriftDashboard {
-        current_weights: weight_only,
+        current_weights,
         last_recalc_at,
         stats,
         recent_changes,
@@ -906,8 +918,12 @@ mod tests {
 
     #[test]
     fn dashboard_struct_serde_camel_case() {
+        // 回归（2026-10-29）：`current_weights` 曾经是 `HashMap<(String, String), f64>`。
+        // 空 map 能序列化，所以旧测试全绿；一旦窗口内有样本，元组键就会让
+        // `serde_json` 报 `key must be a string` ⇒ 命令在 IPC 序列化阶段失败 ⇒
+        // 前端只能看到「加载失败」。这里必须放**非空**样本并断言展平后的三元组形状。
         let d = EvolutionDriftDashboard {
-            current_weights: HashMap::new(),
+            current_weights: vec![("trend".to_string(), "short".to_string(), 0.82)],
             last_recalc_at: 123,
             stats: vec![],
             recent_changes: vec![],
@@ -916,10 +932,12 @@ mod tests {
             excluded_pre_floor_generation: 3,
             excluded_unknown_generation: 5,
         };
-        let json = serde_json::to_string(&d).unwrap();
-        assert!(json.contains("\"currentWeights\""), "camelCase 序列化");
-        assert!(json.contains("\"lastRecalcAt\""), "camelCase 序列化");
-        assert!(!json.contains("\"last_recalc_at\""), "不应有 snake_case 字段");
+        let json = serde_json::to_value(&d).expect("含非空 current_weights 也必须能序列化");
+        assert_eq!(json["currentWeights"][0][0], "trend");
+        assert_eq!(json["currentWeights"][0][1], "short");
+        assert_eq!(json["currentWeights"][0][2].as_f64(), Some(0.82));
+        assert!(json.get("lastRecalcAt").is_some(), "camelCase 序列化");
+        assert!(json.get("last_recalc_at").is_none(), "不应有 snake_case 字段");
     }
 
     #[test]

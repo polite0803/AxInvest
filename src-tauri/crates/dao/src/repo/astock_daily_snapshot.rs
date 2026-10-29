@@ -49,44 +49,17 @@ pub async fn earliest_snapshot_date(
         .map(|r| r.snapshot_date))
 }
 
-/// 列出**至少一个**所查源有快照的快照日期（升序）。
+/// 拉取指定源的快照行 `(snapshot_date, method, payload)` —— 供调用方按
+/// **快照内容**判定「该日能否建出候选池」（判据权威在
+/// `recommender::pool::snapshot_payload_yields_stocks`，dao 不理解 vendor 业务语义）。
 ///
-/// 为什么要有这个查询：`missing_snapshot_sources` 只能逐日判断，
-/// 而「今天能回放哪些日」需要**一次列出全部候选日**（R-2 每日批次用）。
-/// 逐日循环在快照积累到几百天后会退化成 N 次查询。
-///
-/// 返回 `(snapshot_date, 该日命中的源数)`；`methods` 为空时返回空 Vec
-/// （空清单 ⇒ 无源可命中，不返回「全部日期都命中」）。
-///
-/// ## 为什么判据是「**一**源」而不是「全部源」（2026-10-26，R-3h）
-///
-/// 实测 `astock_daily_snapshot` 的历史分布：
-/// `2026-05-27 / 06-10 / 06-11 / 08-18 / 09-04 / 09-07 / 09-09` 这些日期**只有
-/// `get_industry_ranking` 一源**（`get_hot_stocks` 的快照最早只到 2026-09-28）。
-/// 用「全部源」判 ⇒ 这些日期全部不可回放 ⇒ 只能从 2026-09-28 起回放。
-///
-/// 但「缺一源」≠「池子空」：
-/// ① 缺的那源在 as-of 下**仍走 vendor 历史通道**（如 THS 热榜回溯），取不到返回**空榜**
-///    （`Ok(vec![])`，不是失败）；
-/// ② 建池 = `get_hot_stocks(30) ∪ get_industry_ranking 龙头(20) ∪ FALLBACK_STOCKS`，
-///    **FALLBACK 是静态大盘股列表**（与日期无关 ⇒ **无前视偏差**）⇒ 少一源时池子仍有真实成分。
-///
-/// ## 为什么这决定 long 档能不能攒到校准样本
-///
-/// 档位成熟判定只看「行情库里决策日之后有没有 N 根 K 线」，**不看今天**
-/// （`compute_market_snapshots` 取最近 500 根，`exit_idx = entry_idx + expected_days`）。
-/// 实测行情库 6575 个交易日：**2026-06-10 之后恰好 90 根** ⇒ 回放 06-10 立刻让
-/// long 档（T+90）成熟；**09-07 之后恰好 28 根** ⇒ mid 档（T+28）同理。
-/// 不放宽 ⇒ long/mid 的校准样本只能等 wall-clock（long 需 2027-01），
-/// 而 `CALIBRATION_MIN_SAMPLES = 30` 的门槛又不允许降 ⇒ 长期档**永远校准不了**
-/// ⇒ 置信被永久封顶 ⇒ 顶层「买入」永远为 0（R-3h 死循环）。
-///
-/// ⚠ 零源日（两源都没快照）**必须由调用方排除** —— 那时池子 100% 是
-/// FALLBACK_STOCKS，不是「当时的候选池」，回放与系统真实行为不同构。
-pub async fn list_snapshot_dates_with_any_method(
+/// 为什么把 payload 原样带回而不是在 SQL 里判：jsonb 谓词会把 vendor 的 payload
+/// 结构焊死进 dao 的 SQL（换 vendor / 改字段名就得改这里）；行数 = 天数 × 源数，
+/// 快照积累期内存量可控。
+pub async fn list_snapshot_rows_with_payload(
     db: &DatabaseConnection,
     methods: &[&str],
-) -> Result<Vec<(String, usize)>, sea_orm::DbErr> {
+) -> Result<Vec<(String, String, String)>, sea_orm::DbErr> {
     if methods.is_empty() {
         return Ok(Vec::new());
     }
@@ -94,11 +67,5 @@ pub async fn list_snapshot_dates_with_any_method(
         .filter(astock_daily_snapshot::Column::Method.is_in(methods.to_vec()))
         .all(db)
         .await?;
-    // 内存聚合：方法数只有个位数、行数在快照积累期内可控（每天 2~13 行）。
-    let mut per_day: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
-        std::collections::BTreeMap::new();
-    for r in rows {
-        per_day.entry(r.snapshot_date.clone()).or_default().insert(r.method.clone());
-    }
-    Ok(per_day.into_iter().filter(|(_, ms)| !ms.is_empty()).map(|(d, ms)| (d, ms.len())).collect())
+    Ok(rows.into_iter().map(|r| (r.snapshot_date, r.method, r.payload)).collect())
 }

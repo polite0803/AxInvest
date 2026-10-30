@@ -84,9 +84,27 @@ const WRITE_FORMS = [
  * 只有落在调用点近邻的具名代际常量或 `as_of*` 实参，才证明这里想过代际。
  */
 const CALL_WINDOW = 400;
-function evidenceAtCallSite(body, form) {
-  const at = body.indexOf(form);
-  if (at === -1) return null;
+/**
+ * R2 的命中必须落在**调用点**，不是函数自己的定义位（2026-10-30）。
+ *
+ * `pub async fn persist_reco_picks(` 自身就含写形态字面量，把它当调用点会让读数说谎，
+ * 两个方向都实测到过：
+ * - **假红**：批次键收成 `BatchKey` 后，`persist_reco_picks` 的形参里不再有平铺的
+ *   `as_of_date` ⇒ 定义段近邻读不到证据，门把共享入口判成「落库没带代际」；
+ * - **假绿**：`persist_reco_scan_audit` 的形参还叫 `as_of_date` ⇒ 同一 bug 下它靠
+ *   巧合过关，真正的接线从未被检查。
+ *
+ * 与 as-of 接线门 `callSites` 同一口径（那边 2026-10-29 已排除定义位）。
+ */
+function writeCallSite(body, form) {
+  let at = body.indexOf(form);
+  while (at !== -1) {
+    if (body.slice(Math.max(0, at - 3), at) !== "fn ") return at;
+    at = body.indexOf(form, at + form.length);
+  }
+  return -1;
+}
+function evidenceAtCallSite(body, at) {
   const win = body.slice(Math.max(0, at - CALL_WINDOW), at + CALL_WINDOW);
   return win.includes("as_of") || win.includes("GENERATION") ? "调用点近邻含代际" : null;
 }
@@ -182,8 +200,15 @@ const EXEMPT = new Map([
 /**
  * 命中数下限（**不是**「门绿的充分条件」，只是「扫描面没缩水」的必要条件）。
  * 基线取自 2026-10-13 现网：改动前用 `--dump` 复算，若低于下限说明扫描面或判据被削弱。
+ *
+ * R2 于 2026-10-30 重测：7 → 4。差额全部是**不该计入的命中**，不是扫描面缩水 ——
+ *   · 2 处函数定义自指（`persist_reco_picks` / `persist_reco_scan_audit` 的签名本身），
+ *   · 1 处文档注释（`seed_consistency_tests.rs`，剥离器被字符字面量带偏所致，已修）。
+ * 剩下的 4 处就是四条落库链的实际调用点：主荐股 / 漏检回放 / 时间旅行批次 / 00:00 荐股 cron。
+ * 趋势智选走单行入口 `persist_reco_pick(`，由 as-of 接线门 `PERSIST_CALLS` 覆盖，不在本门写形态族里。
+ * ⚠ 下限只许**跟着实测**下调并写明差额去向；写不出差额去向就是判据被削弱。
  */
-const MIN_HITS = { R1: 14, R2: 6, R3: 5 };
+const MIN_HITS = { R1: 14, R2: 4, R3: 5 };
 
 function listRustFiles(dir) {
   const out = [];
@@ -227,9 +252,11 @@ function evaluateBody(body) {
   const out = [];
   const read = anyIn(body, READ_FORMS);
   if (read) out.push({ rule: "R1", form: read, ok: !!anyIn(body, GENERATION_FORMS) });
-  const write = anyIn(body, WRITE_FORMS);
+  const write = WRITE_FORMS
+    .map((form) => ({ form, at: writeCallSite(body, form) }))
+    .find((candidate) => candidate.at !== -1) ?? null;
   if (write) {
-    out.push({ rule: "R2", form: write, ok: !!evidenceAtCallSite(body, write) });
+    out.push({ rule: "R2", form: write.form, ok: !!evidenceAtCallSite(body, write.at) });
     // R5（2026-10-18，PLAN-mover-coverage §0-C）：写候选池的段内**不得**把「池来源不可得」
     // 折成空数组字面量。`None` 与 `"[]"` 含义相反（前者=取数侧没给，后者=池子真的空），
     // 而 `mover_recall::code_in_pool_snapshot` 对两者同判「不在池」⇒ 折空即把取数缺痕
@@ -468,6 +495,33 @@ pub async fn persist_reco_picks2(db: &DatabaseConnection) -> usize {
 }
 `;
   cases.push({ name: "负控·落库无代际", fns: mk(fakeWrite), expect: 1 });
+
+  // 负控 12（2026-10-30）：落库函数的**定义位**不是调用点 ——
+  // `pub async fn persist_reco_picks(` 自身含写形态字面量。BatchKey 重构后形参里没有
+  // 平铺 `as_of_date`，把定义当调用会让共享入口被自己判成「没带代际」。
+  const selfDefinition = `
+pub async fn persist_reco_picks(db: &DatabaseConnection, batch: &BatchKey<'_>) -> usize {
+    inner(db, batch)
+}
+`;
+  cases.push({ name: "负控·落库函数定义位不算写调用", fns: mk(selfDefinition), expect: 0 });
+
+  // 负控 13（2026-10-30）：池写形态只出现在**文档注释**里 ⇒ 不算。
+  // 前面的 `'"'` 是现网形态：剥离器若不认字符字面量，会把它后面整段 `///` 当成
+  // 字符串原样保留进骨架（2026-10-30 实测：seed_consistency_tests.rs 因此被报 R2）。
+  const dq = String.fromCharCode(34);
+  const docMention = `
+pub async fn helper(q: u32) -> u32 {
+    let quote = '${dq}';
+    q
+}
+
+/// 历史形态：pick.insert(db) 已下沉到 dao
+pub async fn next_helper() -> u32 {
+    0
+}
+`;
+  cases.push({ name: "负控·文档注释里的池写形态不算", fns: mk(docMention), expect: 0 });
 
   // 负控 4：整段没有候选池读写 ⇒ 不得命中（防判据过宽变成噪声门）
   const unrelated = `

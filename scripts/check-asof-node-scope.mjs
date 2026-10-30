@@ -176,6 +176,30 @@ export function stripRustComments(src) {
       i = stop;
       continue;
     }
+    // 字符字面量（`'"'` / `'\''` / `'\\'` / `'\n'`）整段跳过。
+    // 不处理时 `'"'` 里的双引号会被当成字符串起点 ⇒ 从那里到下一个双引号之间的
+    // **代码（含文档注释）被当作字符串保留**：2026-10-30 实测，`rest.find('"')` 让其后
+    // 12 行 `///` 进了骨架，代际门于是在文档里读出一个 `pick.insert(db)` 池写形态。
+    // 生命周期（`'a` / `'static`）不满足闭合形态，按普通字符放行。
+    if (c === "'") {
+      const afterQuote = i + 1;
+      if (src[afterQuote] === "\\") {
+        let j = afterQuote + 2;
+        while (j < n && src[j] !== "'" && src[j] !== "\n") j += 1;
+        if (src[j] === "'") {
+          out += src.slice(i, j + 1);
+          i = j + 1;
+          continue;
+        }
+      } else if (src[afterQuote + 1] === "'") {
+        out += src.slice(i, afterQuote + 2);
+        i = afterQuote + 2;
+        continue;
+      }
+      out += c;
+      i += 1;
+      continue;
+    }
     if (c === "\"") {
       out += c;
       i += 1;
@@ -596,6 +620,19 @@ function selftest() {
   }
   if (!stripRustComments("fn f() { g.enter_global_asof(None); }\n").includes("enter_global_asof(None)")) {
     fail("代码里的写法被剥注释误吞：R4 的反噬判据会恒假");
+  }
+  // 剥离器：字符字面量 `'"'` 不得开启字符串模式（2026-10-30 实测缺陷）——
+  // 一处 `rest.find('"')` 让其后 12 行 `///` 被当成字符串原样保留进代码骨架，
+  // 代际门 R2 于是在**文档注释**里读出一个 `pick.insert(db)` 池写形态。
+  const dq = String.fromCharCode(34);
+  const charLiteralThenDoc = skeleton(
+    "fn f() { let q = '" + dq + "'; }\n/// 历史形态：pick.insert(db)\nfn g() {}\n",
+  );
+  if (charLiteralThenDoc.includes("pick.insert(db)")) {
+    fail("剥离失败：字符字面量里的双引号开启了字符串模式，其后文档注释被当成代码");
+  }
+  if (!charLiteralThenDoc.includes("let q = '" + dq + "'")) {
+    fail("剥离失败：字符字面量本体被误删（剥注释不该动代码）");
   }
   const cronReal = checkCronLiveMode();
   if (cronReal.calls < 6) fail(`自证失败：现网定时 live 包裹只有 ${cronReal.calls} 处 ⇒ 门本该红，先补代码`);

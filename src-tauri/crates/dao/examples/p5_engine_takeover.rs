@@ -105,6 +105,17 @@ async fn main() {
             Ok(h) => h.conn,
             Err(e) => exit2(format!("连库失败: {e}")),
         };
+        // ⚠ 环境前置（2026-10-30 补）：全新 PG 库上 `vector` 扩展与 `ax_cjk_ngram` 函数
+        // 都必须**先于建表**存在，否则建第一张依赖它们的表即失败、并 abort 整批后续表。
+        // 引擎把「建函数」安排在**建表之后**（`ChangeKind` 无 `CreateFunction`），且完全不建扩展
+        // ⇒ 只靠引擎无法从真空库建全（实测：192 张只建成 57 张）。
+        //
+        // 本开关把这两步**显式化**，不改变被测对象（引擎的建表与收敛行为），只把
+        // 「环境准备」从被测面里分离出来。语义与 `crates/dao/tests/pg_cjk_fts.rs:71-89`
+        // 逐字同源（同一份函数模板 `cjk_ngram::render_function_sql`，不手抄第二份）。
+        if args.iter().any(|a| a == "--with-pg-prereqs") {
+            prepare_pg_prerequisites(&db).await;
+        }
         ok &= or_exit2(fresh_and_verify(&db, Dialect::Postgres, "全新 PG").await);
     }
 
@@ -163,11 +174,42 @@ fn or_exit2(r: Result<bool, DbErr>) -> bool {
     }
 }
 
+/// 建 PG 侧的**环境前置**：`vector` 扩展 + `ax_cjk_ngram` 函数（`--with-pg-prereqs`）。
+///
+/// 为什么这两件必须在**建表之前**做（两处注释同源，见 `crates/dao/tests/pg_cjk_fts.rs:71-89`）：
+/// * pgvector 镜像**不自动**启用扩展；缺 `vector` 类型 ⇒ 建第一张用它的表即失败；
+/// * `notes` / `memory_items` 等表的生成列**内联在 `CREATE TABLE`** 里引用
+///   `ax_cjk_ngram(text)`，而引擎把「建函数」排在建表**之后**（`ChangeKind` 无
+///   `CreateFunction`）⇒ 全新空库必然在建第一张此类表时 abort。
+///
+/// 两步都幂等（`IF NOT EXISTS` / `CREATE OR REPLACE`），旧库重复调用无副作用。
+/// 失败一律 `exit2`（前置条件失败，与「判据不满足」的退出码 1 区分）。
+async fn prepare_pg_prerequisites(db: &DatabaseConnection) {
+    println!("─── PG 环境前置（--with-pg-prereqs）───");
+    match db.execute_unprepared("CREATE EXTENSION IF NOT EXISTS vector").await {
+        Ok(_) => println!("  [✓] CREATE EXTENSION IF NOT EXISTS vector"),
+        Err(e) => {
+            exit2(format!("建 vector 扩展失败（bootstrap 将因 vector 类型缺失而 abort）：{e}"))
+        },
+    }
+    match db.execute_unprepared(&axagent_dao::cjk_ngram::render_function_sql()).await {
+        Ok(_) => println!("  [✓] CREATE OR REPLACE FUNCTION ax_cjk_ngram"),
+        Err(e) => exit2(format!("建 ax_cjk_ngram 函数失败（bootstrap 将因函数缺失而 abort）：{e}")),
+    }
+    println!();
+}
+
 fn usage() {
     eprintln!("用法:");
     eprintln!("  p5_engine_takeover --fresh-sqlite         # 空内存库：只靠引擎建出全部表并验收敛");
     eprintln!(
         "  p5_engine_takeover --fresh-pg <url>       # ⚠ 会写库；目标**必须为空库**，非空即拒"
+    );
+    eprintln!(
+        "      [--with-pg-prereqs]                   # 全新 PG 库必需：先建 vector 扩展 + ax_cjk_ngram 函数"
+    );
+    eprintln!(
+        "                                            # （引擎不建扩展、且把建函数排在建表之后 ⇒ 不加此开关必然中止）"
     );
     eprintln!(
         "  p5_engine_takeover --diff <url>           # 只读：真实存量库的差集 + 本方言表达不了的条目"
@@ -240,6 +282,22 @@ async fn fresh_and_verify(
         match &out.refusal {
             None => "无整批拒绝".to_string(),
             Some(r) => format!("[{}] {}", r.kind_str(), r.reason()),
+        },
+    );
+    // ⚠ 必须**单独**断言 `aborted`（2026-10-30 补）：引擎对执行期失败的处置是 **fail-open**
+    // —— warn 后继续，其后所有对象一律 `AbortedAfterError` 跳过；而那条 warn 走 tracing，
+    // 本探针未初始化 subscriber ⇒ **根本不会打印**。不检查它，「建表没建完」就只表现为
+    // 后面「期望表逐张存在」的缺项，**真因（哪条 DDL 失败）被吞掉**。
+    //
+    // 实测代价（2026-10-30，全新 PG 库）：`notes` 建表因
+    // `function ax_cjk_ngram(text) does not exist` 失败 ⇒ 192 张只建成 **57** 张、
+    // 135 张被跳过；而同一份报告仍打印「未被拒（refusal 为空）」—— **自相矛盾的红灯**。
+    check(
+        "无执行中止（aborted 为空）",
+        out.aborted.is_none(),
+        match &out.aborted {
+            None => "无中止".to_string(),
+            Some(a) => format!("中止于：{a}"),
         },
     );
     check("真的执行了 DDL", out.executed > 0, format!("executed = {}", out.executed));

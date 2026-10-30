@@ -14,7 +14,12 @@
          容易被误判为“卡死”。这里给一个纯 CSS 的加载态，React 挂载后由 createRoot
          覆盖掉 #root 内容，无需任何 JS 清理。
          注意 CSP：style-src 允许 unsafe-inline，script-src 不允许 ⇒ 只能用 CSS，不能用内联脚本
-         （原先那段靠内联脚本设置 body 背景色的代码实际被 CSP 全部拦掉，从未生效）。 */
+         （原先那段靠内联脚本设置 body 背景色的代码实际被 CSP 全部拦掉，从未生效）。
+         ⚠ 本文件的这个内联 <style> 不是无害的：Tauri 打包时会给所有内联 <style> 注入
+         nonce 并把 'nonce-…' 追加进 style-src，而 CSP 规范规定出现 nonce 后
+         'unsafe-inline' 即失效 ⇒ AntD cssinjs 运行时注入的无 nonce <style> 会被全部
+         拦截（表现为打包后所有 AntD 组件裸奔、布局全乱）。因此 tauri.conf.json 必须保留
+         "dangerousDisableAssetCspModification": ["style-src"]，删掉即复发。 */
       /* 首屏占位跟随应用主题，不跟随系统偏好：应用默认 themeMode=dark，而用户
          设置在 React 挂载前拿不到（存在后端库、不在 localStorage，且 CSP 禁用内联
          脚本）。用 prefers-color-scheme 会让浅色系统的机器先白后黑闪一次。

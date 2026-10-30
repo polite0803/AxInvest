@@ -360,11 +360,14 @@ let pace_factor = 1.0;
 //   · money_flow_net     ⇒ 数值（f64 为主；整数载荷按 i64 归一为 f64）
 let mf_history_len = 0;
 let mf_avg_net = 0.0;
-let mf_hist_arr = if type_of(money_flow_history) == "array" {
-    money_flow_history
-} else if present(money_flow_history) && type_of(money_flow_history) == "string" && money_flow_history != "" {
-    safe_parse(money_flow_history)
-} else { () };
+// ⚠ 每个变量的第一次引用必须落在 `present(...)` 里：引擎按 `present(NAME)` 的出现
+// 集合给缺失的 input_mapping 自动补 UNIT（`extract_present_vars`），先写
+// `type_of(NAME)` 会让未注入的变量变成「Variable not found」（2026-10-30 CI 实测）。
+let mf_hist_arr = if !present(money_flow_history) { () }
+    else if type_of(money_flow_history) == "array" { money_flow_history }
+    else if type_of(money_flow_history) == "string" && money_flow_history != "" {
+        safe_parse(money_flow_history)
+    } else { () };
 if type_of(mf_hist_arr) == "array" {
     mf_history_len = len(mf_hist_arr);
     let sum_net = 0.0;
@@ -378,7 +381,8 @@ if type_of(mf_hist_arr) == "array" {
     }
     if mf_history_len > 0 { mf_avg_net = sum_net / mf_history_len; }
 }
-let mf_net_f = if type_of(money_flow_net) == "f64" { money_flow_net }
+let mf_net_f = if !present(money_flow_net) { () }
+    else if type_of(money_flow_net) == "f64" { money_flow_net }
     else if type_of(money_flow_net) == "i64" || type_of(money_flow_net) == "int" { money_flow_net.to_float() }
     else { () };
 if present(mf_net_f) && mf_history_len >= 3 {

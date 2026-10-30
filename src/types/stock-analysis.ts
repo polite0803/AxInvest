@@ -310,6 +310,38 @@ export interface HorizonDecision {
    * 消费判定以 `p05CapApplied === true` 为准，本字段只回答「封顶前是什么」。
    */
   actionBeforeCap?: string;
+  /**
+   * 超短档 v194：微观结构（涨停池）个股腿**是否在场**。
+   * 产端 `portfolio-mgr-h-ultra-short.rhai` 恒写本键。
+   * ⚠ 它**不改变任何动作**（封顶仍无条件生效，见 `p05CapApplied`）：存在的意义是让
+   * 「进涨停池算不算开仓证据」这个尚未拍板的产品口径**有数据可依** —— 在此之前，
+   * 封顶触发与否只表现为动作被压回，看不出是「腿不在场」还是「腿在场但仍封顶」。
+   * 呈现层若与 `p05CapApplied === true` 同屏显示，即是在提示「腿已有数据、缺的是产品裁决」。
+   */
+  microLegPresent?: boolean;
+  /**
+   * 超短档 v194：微观结构腿**缺席/在场的原因分通道**（四态枚举）。
+   * `in_pool` = 已进涨停池；`not_in_pool` = 没进池（盘面事实）；
+   * `break_count_absent` = 炸板数接口没给（取数缺席）；
+   * `stock_code_missing` / `pool_entries_missing` = 映射没到（接线缺陷）。
+   * ⚠ 三者混成一句，就是「结构性缺口在呈现层造成歧义」的老形态 ⇒ 呈现层应按本键
+   * 分通道措辞，**不得**解析 `dataGaps` 的中文文案反推原因。
+   */
+  microBasis?: string;
+  /**
+   * 超短档 v194：个股连板数（`limit_up_streak`）。
+   * 仅在「已进池且接口给值」时存在；**缺席不补 0**（与 `types.rs` 同纪律）——
+   * 0 连板是有效读数，缺席是「不知道」，两者不得混为一谈。
+   */
+  microLimitUpStreak?: number;
+  /**
+   * 超短档 v194：`pool_break_count` 的**真实语义**披露。
+   * 它是 `LimitUpBreadth.breakCount` = **全市场炸板家数**（市场级量），
+   * 与个股 `microstructure` 腿无关。本轮按保守方案保留原映射名，只在此显式披露 ——
+   * 防下一个读者再把它当个股炸板次数用（量纲错配，#738 族）。
+   * 缺席 = 该市场级披露位未取到值。
+   */
+  marketBreakCount?: number;
   /** 短线档：时机过滤是否放行（追高/带外判定） */
   timingFiltered?: boolean;
   /** 中线档：价带 z 值（×100，四舍五入到 0.1）；K 线不足 ⇒ null */

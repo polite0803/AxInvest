@@ -4115,6 +4115,20 @@ fn branch_node_scope_is_exactly_the_seed_mapping_inner() {
                 // 对中证全指），这样「齐备态」同时也是那条样本的复现，而不是随手挑的数。
                 "excess_return_pct" => serde_json::json!(2.247482476),
                 "pool_break_count" => serde_json::json!(0.0),
+                // v194：涨停池 entries[] 整份数组（**个股** microstructure 腿的原料）。
+                // 齐备态必须让「本代码在池内 + bool 可定 + 个股 breakCount 可读」同时成立，
+                // 否则测的不是齐备输入。形态照 `astock-data/src/types.rs` 的 `LimitUpPoolEntry`
+                // serde camelCase（`stockCode` / `breakCount` / `limitUpStreak`）。
+                // ⚠ 夹具自带区分力（两条同构陷阱各一组）：
+                //   ① **取错行**：本行刻意排第二，干扰行 stockCode=000001 在前 ⇒
+                //      「不按 code 过滤、直接取第一行」会拿到 breakCount=2，与真行的 0 不同。
+                //   ② **量纲混淆**：个股真行 breakCount 取 0，而 `pool_break_count`（市场级
+                //      炸板家数）取 0.0 —— 两者若被互换，第 ② 组断言（见下方新门）会红。
+                //   ③ stockCode 与下方 `stock_code` 夹具（600519）**必须一致**，否则命中失败。
+                "pool_entries" => serde_json::json!([
+                    { "stockCode": "000001", "breakCount": 2, "limitUpStreak": 1 },
+                    { "stockCode": "600519", "breakCount": 0, "limitUpStreak": 2 },
+                ]),
                 "stop_vol_mult" => serde_json::json!(1.2),
                 "take_profit_vol_mult" => serde_json::json!(2.0),
                 "pe_percentile" => serde_json::json!(18.0),
@@ -5392,4 +5406,80 @@ fn envelope_driven_to_array_call_sites_are_wired() {
         ser.last(),
         "seed_serenity.rs 里源码常量与测试副本已漂移（见 1731 行注释：副本必须同步）。"
     );
+}
+
+/// v194（2026-10-30）：超短档个股 microstructure 腿的**量纲**双端锁定。
+///
+/// 病灶（接线前一直潜伏，因为该腿恒缺席所以从未暴露）：
+/// 同一个 `breakCount` 键名在 `astock-data/src/types.rs` 指两个不同量纲 ——
+/// - `LimitUpPoolEntry.break_count` = **个股**炸板次数（接口 `open_num`，约 2/3 行为 null）
+/// - `LimitUpBreadth.break_count`  = **全市场**炸板家数
+///
+/// 而 `horizon_tier_template.rs` 原有的 `pool_break_count` 映射走的是 `breadth`（市场级）。
+/// 若把它当个股腿原料喂给 `leg_signal` 的 `microstructure`，就是拿「全市场炸了 N 家」
+/// 算「这只票炸了 N 次」—— 这正是 MEMORY-RULES #738「同名不同义」的教科书形态。
+///
+/// 本门钉三件事（任一侧被改回即红）：
+/// ① 映射面：`pool_entries` 必须接 `content.entries`（而非 breadth 下的任何字段）；
+/// ② 脚本面：`raw.breakCount` 必须来自个股归约结果，**不得**直接用 `pool_break_count`；
+/// ③ 语义面：`pool_break_count` 仍保留（市场级披露用途），但其映射路径必须仍是 `breadth`。
+#[test]
+fn ultra_short_microstructure_break_count_is_stock_level_not_market_level() {
+    let tier_builder = read_ws_file("src/commands/stock_analysis_setup/horizon_tier_template.rs");
+
+    // ── ① 映射面：pool_entries 指向 entries[] 整份数组 ──
+    assert!(
+        tier_builder.contains(r#"("pool_entries", "t-limitup-pool.result.content.entries")"#),
+        "超短档必须有 `pool_entries` 映射指向 `content.entries` —— 个股 microstructure 腿\n\
+         的原料是 entries[]（`LimitUpPoolEntry.break_count`），不是 breadth 下的市场级汇总。\n\
+         缺这条映射 ⇒ 个股炸板次数只能退回市场级，量纲错配（#738 族）。"
+    );
+
+    // ── ② 语义面：pool_break_count 仍是市场级（breadth），且不得被当成个股腿原料 ──
+    assert!(
+        tier_builder.contains(
+            r#"("pool_break_count", "t-limitup-pool.result.content.breadth.breakCount")"#
+        ),
+        "`pool_break_count` 的映射必须仍是 `breadth.breakCount`（全市场炸板家数）。\n\
+         若有人把它改指 entries[]，那它的名字就与内容不符 —— 市场级披露位会消失。"
+    );
+
+    // ── ③ 脚本面：raw.breakCount 取个股归约值，不得直取 pool_break_count ──
+    let script = read_ws_file("src/commands/portfolio-mgr-h-ultra-short.rhai");
+    assert!(
+        script.contains("breakCount: micro_breaks,"),
+        "超短脚本的 `raw.breakCount` 必须绑定个股归约结果 `micro_breaks`。\n\
+         退回「`if present(pool_break_count)` 就直接取它」就是拿全市场炸板家数\n\
+         算个股微观结构信号（v194 修掉的正是这条）。"
+    );
+    assert!(
+        !script.contains("breakCount: if present(pool_break_count)"),
+        "`raw.breakCount` 不得直取 `pool_break_count`（市场级量）—— 见上一条。"
+    );
+    // 个股归约必须真的按 code 挑行：只取第一行是「碰巧对上」而非「按目标挑」。
+    assert!(
+        script.contains("fn pm_pool_row_for(entries, code)"),
+        "必须有按 code 归约 entries[] 的纯函数 `pm_pool_row_for` —— \n\
+         `input_mapping` 表达不了「按字段过滤数组」，归约只能在脚本内写。"
+    );
+    assert!(
+        script.contains(r#"pm_pool_row_for(pool_entries, stock_code)"#),
+        "归约函数的入参必须是注入的 `pool_entries` 与 `stock_code`（两侧都是映射键）。"
+    );
+
+    // ── ④ P0-5 封顶**未解除**的事实必须留在脚本里（防下一个人误以为已放开）──
+    // 本批只接线数据 + 透出信号，产品口径（进池是否算开仓证据）未拍板 ⇒ 封顶一字未改。
+    assert!(
+        script.contains(r#"if action == "买入" || action == "增持" { "持有" } else { action }"#),
+        "`pm_cap_unwired_action` 的封顶行为必须保持原样（v194 未解除封顶，只接线了数据）。\n\
+         若有人在此处放开了买入，须同时改本门并在版本注释里说明产品口径已裁决。"
+    );
+    // 可观测信号必须在输出里（否则「腿在不在场」对产品裁决不可见）。
+    for key in ["microLegPresent", "microBasis"] {
+        assert!(
+            script.contains(&format!("{key}:")),
+            "输出缺 `{key}` —— v194 的价值一半是把「腿在不在场」透出给产品裁决，\n\
+             只接线不透出等于把裁决依据留在日志里。"
+        );
+    }
 }

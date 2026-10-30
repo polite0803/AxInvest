@@ -44,9 +44,19 @@
 //                      的累计超额，百分点）。**只作入场门的个股前提并列分支**，不是方向腿
 //                      （未进 `verdict_spec` 的 participating，与 `breadthState` 只作门同源）
 // seal_rate          : 已接 —— 涨停池 breadth.sealRate（breadthState 腿 + breadth_required 门的必要条件）
-// pool_break_count   : 已接 —— 涨停池 breadth.breakCount（microstructure 条件腿）
-// pool_in_pool       : 未接且本脚本**不读** —— 语义是「本代码 ∈ entries[]」，点号路径表达不了
-//                      数组包含；下一片改成注入池子串 + 脚本内 parse 后，这个键才随映射一起回来
+// pool_break_count   : 已接 —— 涨停池 **breadth**.breakCount = **全市场炸板家数**（市场级量）
+//                      ⚠ **禁止**用于个股 `microstructure` 腿：同名不同义的第二个载体是
+//                      `LimitUpPoolEntry.break_count`（**个股**炸板次数，见下一条）。
+//                      本键现在只作披露（输出 `marketBreakCount`），`leg_signal` 不读它。
+// pool_entries       : 已接（v194）—— 涨停池 **entries[]** 整份数组。脚本内按 `stockCode`
+//                      定位本代码那一行，取**个股** `breakCount` 并判定 `inLimitUpPool`。
+//                      为什么只能在脚本内做（映射层的表达力上限，写在这里供后续同类任务复用）：
+//                      `input_mapping` 的取值器只做「按 `.` 拆段、逐段 `get`」
+//                      （`subworkflow_executor.rs` 的 `resolve_var_path`，其全部能力 = 定值取值
+//                      + 数组下标/字段下钻），**不能**表达「按某字段值过滤数组」这类归约；
+//                      而 `json_value_to_dynamic` 会把整份数组原样转成 Rhai Array
+//                      ⇒ 归约必须写在脚本里。凡「数组按字段挑一行」的接线都照此形态。
+//                      （旧注 `pool_in_pool` 已随本条接线退役：那正是本条判定出来的布尔）
 // catalyst_level     : 已接（v156，P1 催化剂腿 · #22 另一半）—— `verdict_spec.UltraShort`
 //                      participating 已含 eventCatalyst；路径与主链 f3 的读法逐字一致
 // flow_persistence   : 未接且本脚本**不读** —— 不是本档腿，且 a-hot-money 的 verdict 还没这个字段
@@ -96,10 +106,58 @@ fn pm_ultra_entry_gate(seal_rate, lim_up_count, cum_gain_pct, excess_return_pct)
     [false, "stock_not_strong"]
 }
 
+// 涨停池 entries[] 归约（v194）：从整份池子里挑出**本代码那一行**。
+//
+// 为什么必须有这个函数（映射层做不到）：`input_mapping` 只能按点号路径定值取值，
+// 表达不了「按 stockCode 过滤数组」的归约 ⇒ 归约只能在脚本内做。
+//
+// 返回 map（**不用数组**）：三个字段类型不同（bool / 数值或 unit / 数值或 unit），
+// 而 Rhai 数组元素类型不受约束、`arr[1]` 取 unit 位是合法但易被后续读者误当「有值」的形态；
+// 用具名键能把「缺席」写成显式的 `hasBreakCount`，与 `absentLegs`/`dataGaps` 的既有纪律同族。
+//   · inPool      ：本代码是否在 entries[] 里（**确定布尔**，接口给了池子就一定可判）
+//   · breakCount  ：**个股**炸板次数；未进池或接口未给 ⇒ ()
+//   · limitUpStreak：**个股**连板数；同上 ⇒ ()
+// **缺席 ≠ 0**：「没进涨停池」与「进了但炸板数接口没给」是两个不同事实；
+// 混成 0 会让 `leg_signal` 把「接口没说」当「零次炸板」⇒ 白送满强度 +1.0
+// （`astock-data/src/types.rs` 对 `open_num` 约 2/3 行为 null 的实证就是这条的代价）。
+//
+// 代码比对方式：**trim 后逐字相等**，不做「去后缀/抽数字」的归一。
+// 依据是本分支已有的同一条契约假设 —— `pm_recent_strength(kline_bars, stock_code, 5)`
+// 正是拿 `stock_code` 判 10/20/30cm 板幅，它同样要求 `stock_code` 是纯 6 位；
+// 池子侧 `LimitUpPoolEntry.stock_code` 由同花顺接口直接给纯 6 位。
+// 两侧同契约 ⇒ 在这里再造一套归一逻辑，只会引入「归一规则与宿主模块判定不一致」的第二真相源。
+fn pm_pool_row_for(entries, code) {
+    let miss = #{ inPool: false, breakCount: (), limitUpStreak: () };
+    if type_of(entries) != "array" { return miss; }
+    if !present(code) || type_of(code) != "string" { return miss; }
+    let want = code.trim();
+    if want == "" { return miss; }
+    for row in entries {
+        if type_of(row) != "map" { continue; }
+        let got = row["stockCode"];
+        if !present(got) || type_of(got) != "string" { continue; }
+        if got.trim() != want { continue; }
+        return #{
+            inPool: true,
+            // 个股炸板次数（`LimitUpPoolEntry.break_count` ⇐ `open_num`，实测多为 null）
+            // 与连板数（`limit_up_streak`，同样可为 null）分别取 —— 不互相兜底。
+            breakCount: num_of(row["breakCount"]),
+            limitUpStreak: num_of(row["limitUpStreak"]),
+        };
+    }
+    miss
+}
+
 // 降杠杆封顶（P0-5）：microstructure 个股腿（本代码 ∈ 涨停池 entries[]，封单/砸单/
 // 池内成员）未接线期间，超短档**最高只出「持有」**。门通过只说明「情绪 + 个股代理」
 // 不否决，并不等于拿到了个股微观结构的开仓证据 ⇒ 买入/增持一律压回持有，
 // 其余动作原样（观望/减持/卖出本就比持有更弱，不许被「封顶」反向抬升）。
+//
+// ⚠ v194 现状（**勿误读成已解除**）：个股腿的**数据**已接线（`pool_entries` ⇒
+//   `inLimitUpPool` / 个股 `breakCount`），但「进涨停池 = 有开仓证据」这个**产品口径
+//   尚未拍板**（见上方 P0-5 注释的原始理由）⇒ **封顶行为一字未改**。
+//   本轮只把「腿到底在不在场」透出为 `microLegPresent` / `microBasis`，
+//   让该产品口径的裁决有数据可依，且不改变任何现网动作。
 fn pm_cap_unwired_action(action) {
     if action == "买入" || action == "增持" { "持有" } else { action }
 }
@@ -107,9 +165,11 @@ fn pm_cap_unwired_action(action) {
 let h = "ultra_short";
 let gaps = [];
 gaps.push("超短分支：基本面/估值/研报/政策/解禁按构造不适用（兑现周期 > 2 日），缺腿是声明不是漏项");
-// `absentLegs` 只说「这条腿没数」，分不清「市场今天没有涨停」与「成员判定根本没接线」⇒ 后者要单列，
-// 否则缺席会被读成市场事实（本仓「结构性缺口不得在呈现层造成歧义」的同一条裁定）。
-gaps.push("microstructure 腿本轮不可评估：涨停池成员判定（本代码 ∈ entries[]）尚未接进本分支 ⇒ 缺席是接线状态，不是盘面事实");
+// v194：原「microstructure 腿尚未接进本分支」那条固定 gap 已退役 —— 个股腿的数据面
+// （`pool_entries` ⇒ `inLimitUpPool` / 个股 `breakCount`）本版已接线。
+// ⇒ gap 改为**按实况分通道**（见下方 raw 段之后的 `microBasis` 分支）：
+//   「没进池」是盘面事实、「炸板数接口没给」是取数缺席、「映射没到」才是接线缺陷 ——
+//   三者混成一句就回到「结构性缺口在呈现层造成歧义」的老形态（本仓已立法禁止）。
 // v156：催化剂腿已接入（#22 另一半）⇒ 原先那条「按构造不作废评估」的 gap 退役。
 // 缺席语义回到通用通道：催化剂为「无」/空/表外标签 ⇒ `leg_signal` 判缺席 ⇒ 出现在
 // `absentLegs` 里（那是「今天没有可计权的催化剂」，与接线状态无关 —— 该腿的接线由
@@ -143,17 +203,53 @@ let band_lookback = if spec_ok { spec_int.call(branch_json["volLookbackDays"]) }
 //   **运行期 Variable not found ⇒ 整节点失败**（本仓 `Variable not found: horizon_prior_json`
 //   的同型事故，见 `stock_workflow/rhai_registry.rs:826`）。测试里不会暴露这一条 ——
 //   运行门按生产形态把 `present()` 的名字全铺 unit 再注入真值，**恰好把它糊过去了**。
-//   所以这里刻意没有 `flowPersistence` / `inLimitUpPool`：资金持续性不是本档腿、
-//   涨停池成员判定要的是「本代码 ∈ entries[]」= 数组归约，点号路径表达不了（下一片改成注入
-//   池子串 + 脚本内 parse，届时这两个键才随各自的映射一起回来）。
-//   （`catalystLevel` 已在 v156 随 P1 接线回来 —— 见下。）
+//   ⇒ 新增任何读名之前，先在 `horizon_tier_template.rs` 的 `input_mapping` 里加映射。
+//   （v194：`pool_entries` 已按此加映射 ⇒ `inLimitUpPool` / 个股 `breakCount` 接线完成；
+//     `flowPersistence` 仍刻意不接 —— 它不是本档腿，且 a-hot-money 的 verdict 还没该字段。）
+//
+// ── v194：个股微观结构腿的原料（**修「同名不同义」**）─────────────────────────
+// `pool_break_count` 是 `LimitUpBreadth.breakCount` = **全市场炸板家数**（市场级量，
+// `astock-data/src/types.rs` 的 `LimitUpBreadth`）。而 `leg_signal` 的 `microstructure`
+// 要的是 **个股**炸板次数（`LimitUpPoolEntry.break_count` ⇐ `open_num`）。
+// 同一个键名 `breakCount` 在两处指两个量纲 —— 此前因 `inLimitUpPool` 恒缺席，
+// 该腿从未进融合，错配一直没暴露；一旦接线 inLimitUpPool 而仍喂市场级数，
+// 就是拿「全市场炸了 N 家」当「这只票炸了 N 次」算个股信号。
+// ⇒ 现在 raw.breakCount 一律取**个股级**（下方 `micro_breaks`）；
+//    `pool_break_count` 不再进 `raw`，仅作披露输出 `marketBreakCount`（用途见输出段）。
+let pool_row = pm_pool_row_for(pool_entries, stock_code);
+// ⚠ `pm_pool_row_for` 返回的是 **map**（`#{ inPool / breakCount / limitUpStreak }`），
+// 必须按**键名**取值。曾误写成数组下标 `pool_row[0]`/`[1]`/`[2]` ⇒ Rhai 把 `0` 当 map 键、
+// 要求键为 string，运行时报 `Data type incorrect: i64 (expecting string)`。
+// （实测由 `branch_node_scope_is_exactly_the_seed_mapping` 在 ultra_short 档抓住 —— 见 v194）
+let in_limit_up_pool = pool_row.inPool == true;
+let micro_breaks = if in_limit_up_pool { pool_row.breakCount } else { () };
+let micro_streak = if in_limit_up_pool { pool_row.limitUpStreak } else { () };
+// 腿「在不在场」的可观测信号（v194）。判据 = 池内成员判定拿到了确定的布尔 + 炸板数可读。
+// ⚠ 这不是「有开仓证据」的判据 —— 那个产品口径未拍板（见 `pm_cap_unwired_action` 的注）。
+let micro_leg_present = in_limit_up_pool && present(micro_breaks);
+let micro_basis = if !present(stock_code) {
+    "stock_code_missing"
+} else if type_of(pool_entries) != "array" {
+    "pool_entries_missing"
+} else if !in_limit_up_pool {
+    "not_in_pool"
+} else if !present(micro_breaks) {
+    "break_count_absent"
+} else {
+    "in_pool"
+};
+
 let raw = #{
     totalScore: if present(tier_score) { tier_score } else { () },
     macdDif: if present(macd_dif) { macd_dif } else { () },
     macdDea: if present(macd_dea) { macd_dea } else { () },
     rsi: if present(rsi_value) { rsi_value } else { () },
     sealRate: if present(seal_rate) { seal_rate } else { () },
-    breakCount: if present(pool_break_count) { pool_break_count } else { () },
+    // v194：**个股**炸板次数（不是 `pool_break_count` 的市场级炸板家数，见上）。
+    // 未进池 ⇒ 缺席（`leg_signal` 会先看 inLimitUpPool 再读本键，两处同拒）。
+    breakCount: micro_breaks,
+    // v194：池内成员判定 —— `leg_signal` 的 microstructure 分支以它为前置必要条件。
+    inLimitUpPool: in_limit_up_pool,
     // v156（#22 另一半）：催化剂腿 —— `leg_signal` 的 eventCatalyst 走受控六级标签词表
     // （L-3~L3），「无」/空/表外标签 ⇒ 缺席（不按 0 参与）。
     catalystLevel: if present(catalyst_level) { catalyst_level } else { () },
@@ -172,6 +268,20 @@ for row in legs {
         if row["icZeroed"] == true { out.icZeroed = true; }
         present_legs.push(out);
     }
+}
+
+// v194：微观结构腿的缺席按 `microBasis` **分通道留痕**（不写一句「不可评估」了事）。
+// 四态语义刻意不同，呈现层与审计据此分辨「盘面事实 / 取数缺席 / 接线缺陷」：
+//   · in_pool              ⇒ 腿在场，不进 gap（在场就不是缺口）
+//   · not_in_pool          ⇒ **盘面事实**：本代码今天不在涨停池里（这不是缺陷）
+//   · break_count_absent  ⇒ **取数缺席**：进了池但接口没给 `open_num`（实测常见）
+//   · stock_code_missing / pool_entries_missing ⇒ **接线缺陷**，必须显式告警
+if micro_basis == "not_in_pool" {
+    gaps.push("microstructure 腿本轮缺席：本代码不在涨停池 entries[]（盘面事实，不是接线缺陷）");
+} else if micro_basis == "break_count_absent" {
+    gaps.push("microstructure 腿本轮缺席：已进涨停池但接口未给个股炸板次数（取数缺席，非零次炸板）");
+} else if micro_basis == "stock_code_missing" || micro_basis == "pool_entries_missing" {
+    gaps.push(`microstructure 腿本轮不可评估：${micro_basis} ⇒ 这是接线/注入缺陷，不是盘面事实`);
 }
 
 // ── ③ 融合：只算 role=="direction" 且拿得到数的腿；配比按在场腿归一 ──
@@ -328,7 +438,7 @@ let pre_cap_action = action;
 action = pm_cap_unwired_action(action);
 let p05_cap_applied = action != pre_cap_action;
 if p05_cap_applied {
-    gaps.push(`P0-5 降杠杆：microstructure 个股腿（涨停池成员判定）尚未接线 ⇒ 开仓动作封顶 ${pre_cap_action}→持有（breadth 门依据=${gate_basis}）；池内成员接线后放开`);
+    gaps.push(`P0-5 降杠杆：microstructure 个股腿数据已接线（v194，basis=${micro_basis}）但「进池=开仓证据」产品口径未拍板 ⇒ 开仓动作仍封顶 ${pre_cap_action}→持有（breadth 门依据=${gate_basis}）；该口径裁决后放开`);
 }
 
 // ── ⑨′ 档内风控否决（2026-10-10 B 裁定）──
@@ -408,6 +518,22 @@ if action != "买入" && action != "增持" && action != "持有" {
     stockStrength: stock_strength,
     // P0-5 降杠杆封顶是否触发（true = 原动作是买入/增持、被压成持有）
     p05CapApplied: p05_cap_applied,
+    // ── v194：微观结构腿的**在场状态**（产品口径裁决的数据面）───────────────
+    // ⚠ 这三个键**不改变任何动作**：封顶仍无条件生效（`pm_cap_unwired_action` 一字未改）。
+    //   它们的作用是让「进涨停池算不算开仓证据」这个未拍板的产品口径**有数据可依** ——
+    //   在此之前，封顶触发与否只表现为动作被压回，看不出是「腿不在场」还是「腿在场但仍封顶」。
+    //   呈现层若把 `microLegPresent==true && p05CapApplied==true` 同屏显示，
+    //   就是在提示「腿已有数据、缺的是产品裁决」。
+    microLegPresent: micro_leg_present,
+    // 四态：in_pool / not_in_pool / break_count_absent / stock_code_missing / pool_entries_missing
+    // （判据见 raw 段上方的 `micro_basis`；呈现层按此分通道措辞，不解析 dataGaps 中文）。
+    microBasis: micro_basis,
+    // 个股连板数（`limit_up_streak`）：仅在池内且接口给值时存在，缺席不补 0（`types.rs` 同纪律）。
+    microLimitUpStreak: micro_streak,
+    // `pool_break_count` 的**真实语义**披露：它是 `LimitUpBreadth.breakCount` = **全市场炸板家数**
+    // （市场级量），与个股 `microstructure` 腿无关。改名属独立改造（牵动映射键/夹具/变量表），
+    // 本轮按保守方案保留原名，只在此显式披露 —— 防下一个读者再把它当个股炸板次数用。
+    marketBreakCount: if present(pool_break_count) { pool_break_count } else { () },
     // P2a（2026-10-18）：封顶**前置动作**的结构化自证 —— 主链摘要「动作=封顶结果(买入被
     //   压回…)」读这里，不从 dataGaps 文案反解。未封顶时恒等于 action（消费方以
     //   p05CapApplied==true 为准，本键只供展示封顶前是什么）。

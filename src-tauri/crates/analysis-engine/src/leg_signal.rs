@@ -135,11 +135,22 @@ pub fn leg_signal(factor: &str, in_: &Value) -> Option<f64> {
         "breadthState" => num(in_, "sealRate").map(|r| cl((r - 0.5) / 0.5)),
         // 个股封单结构：封住且零炸板 = 满强度正；每次炸板扣 1/3（当日反复开板 3 次即打满负），
         // 3 次之后不再累加 —— 截断上界，不是阈值。未进涨停池由调用方判「缺席」而不是 0。
+        //
+        // v194 两处订正（接线前该分支恒走不到，缺陷一直潜伏）：
+        // ① `breakCount` 缺失**必须返回 None**，不得 `unwrap_or(0.0)` ——
+        //    违反本模块第 1 条硬约束（「拿不到就是拿不到，绝不返回 0.0」）。
+        //    代价是实的：`LimitUpPoolEntry.break_count`（`astock-data/src/types.rs` 的
+        //    `open_num`）**实测约 2/3 的行是 null** ⇒ 旧写法把「接口没说」当成
+        //    「零次炸板」⇒ 恒给满强度 +1.0 的正信号，那是凭空白送的看多证据。
+        //    「没进池」与「进了但炸板数没给」是两件不同的事，必须分开表达（前者 false、后者 None）。
+        // ② 量纲：本键是**个股**炸板次数（`LimitUpPoolEntry.break_count`），
+        //    **不是** `LimitUpBreadth.break_count`（全市场炸板家数）。两者同名不同义
+        //    （MEMORY-RULES #738 族），生产侧映射已按个股级注入（`pool_entries` 归约）。
         "microstructure" => {
             if in_.get("inLimitUpPool").and_then(|v| v.as_bool()) != Some(true) {
                 return None;
             }
-            let breaks = num(in_, "breakCount").unwrap_or(0.0);
+            let breaks = num(in_, "breakCount")?;
             Some(cl(1.0 - breaks / 3.0))
         },
         // 资金持续性只有 LLM 分析师能给（本仓无 ≥5 日资金流序列节点）⇒
@@ -302,6 +313,30 @@ mod tests {
             "越界仍截断",
             leg_signal("microstructure", &json!({ "inLimitUpPool": true, "breakCount": 9 })),
             -1.0,
+        );
+        // v194 回归锁：**进池但炸板数缺席 ⇒ None，不得折成满强度 +1.0**。
+        // 旧实现 `unwrap_or(0.0)` 会在 `open_num` 为 null（实测约 2/3 的行）时
+        // 把「接口没说」当「零次炸板」⇒ 凭空白送最正的个股微观结构证据。
+        // 这条是本模块第 1 条硬约束（「绝不返回 0.0」）在该分支上的具体实例。
+        assert_eq!(
+            leg_signal("microstructure", &json!({ "inLimitUpPool": true })),
+            None,
+            "进池但 breakCount 缺席 ⇒ 必须判缺席（旧实现会折成 0 次炸板 ⇒ 满强度 +1.0）"
+        );
+        assert_eq!(
+            leg_signal("microstructure", &json!({ "inLimitUpPool": true, "breakCount": null })),
+            None,
+            "breakCount 显式 null 与键缺席同判（`as_f64()` 对 null 返回 None）"
+        );
+        // 量纲锁：市场级炸板家数若被误当个股炸板次数喂进来，本函数**无法从值本身分辨**
+        // （两者都是整数）⇒ 只能靠生产侧映射保证。这里只锁「值语义」：
+        // breakCount=5 ⇒ 1 - 5/3 截断为 -0.667（个股口径的次数），
+        // 若哪天有人把 `breadth.breakCount`（家数，常为两位数）接进来，会得到恒定 -1.0
+        // 的满负信号 —— 那不是「炸了 5 次」，是「全市场炸了 5 家」，语义完全不同。
+        assert_sig(
+            "炸五次（个股口径）",
+            leg_signal("microstructure", &json!({ "inLimitUpPool": true, "breakCount": 5 })),
+            1.0 - 5.0 / 3.0,
         );
     }
 

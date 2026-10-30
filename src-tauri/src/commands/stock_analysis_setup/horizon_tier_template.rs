@@ -313,7 +313,20 @@ fn ultra_short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
                     // 涨停池广度（本档 entryGate 的必要条件 + breadthState 腿的原料）；
                     // `breadth` 为 None 时导航失败 ⇒ 注入补 unit ⇒ 脚本走「缺席」分支并留痕。
                     ("seal_rate", "t-limitup-pool.result.content.breadth.sealRate"),
+                    // ⚠ `breadth.breakCount` 是 **`LimitUpBreadth.break_count` = 全市场炸板家数**
+                    //   （市场级量），**不是**个股炸板次数。个股 microstructure 腿要的是后者
+                    //   （`LimitUpPoolEntry.break_count` ⇐ `open_num`），走下方 `pool_entries` 在脚本内归约。
+                    //   同名不同义（MEMORY-RULES #738 族）—— 此前个股腿恒缺席，该键错喂也看不出来；
+                    //   v194 接线后脚本已改用个股级，本键仅作市场级披露（输出 `marketBreakCount`）。
                     ("pool_break_count", "t-limitup-pool.result.content.breadth.breakCount"),
+                    // v194：涨停池 **entries[] 整份数组**（不是点号路径能表达的形态）。
+                    // 为什么必须整份注入而不是「按 code 取那一行」：`input_mapping` 的取值器
+                    // （`subworkflow_executor.rs` 的 `resolve_var_path`）只会「按 `.` 拆段、逐段
+                    // `get`」，其全部表达力 = 定值取值 + 数组下标/字段下钻，**不能**按字段值过滤数组。
+                    // ⇒ 归约（本代码 ∈ entries[]）只能写在脚本里；`json_value_to_dynamic`
+                    // 会把 JSON 数组原样转成 Rhai Array，脚本内 `for` + 比较即可。
+                    // 凡「数组按字段挑一行」的接线都照此形态，不要在映射层另造归一。
+                    ("pool_entries", "t-limitup-pool.result.content.entries"),
                     // v156（P1 催化剂腿 · #22 另一半）：个股级事件证据（与小时线 MACD 独立
                     // 的信息源）。路径与主链 f3 的 `catalyst_level_ultra_short` 读法**逐字一致**；
                     // `leg_signal` 的 eventCatalyst 走受控六级词表（L1~L3），"无"/空/表外标签

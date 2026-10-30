@@ -59,13 +59,12 @@ const MIN_BRANCH_SCRIPTS = 4;
 // `sectorRotation` 缺席 80/80（长档全缺席）、`microstructure` 缺席 80/80。
 // 登记基线**不是**把红清零：它是接线批的完成计数器 —— 每修一条必须从本表**摘掉一行**，
 // 摘光即接线完成。表内条目若已不再命中，运行时会提示「可摘除」而不是报错（否则下次真修完反而红）。
+//
+// 已摘除：`L1 'inLimitUpPool'`（登记 2026-10-18，摘于 2026-10-31）—— v194 把涨停池 `entries[]`
+// 整份注入档脚本，`pm_pool_row_for` 按 `stockCode` 归约出成员判定后落进 ultra-short 的 `raw`
+// （`portfolio-mgr-h-ultra-short.rhai` 的 `inLimitUpPool:`）。⚠ 摘的是**键级接线**这一格，
+// P0-5 的降杠杆封顶（买入/增持压回持有）仍按未拍板的产品口径保留，本表不为它作证。
 const BASELINE = [
-  {
-    kind: "L1",
-    token: "inLimitUpPool",
-    since: "2026-10-18",
-    why: "涨停池工具在跑（sealRate/breakCount 已接），成员判定未进 raw ⇒ 阶段 0 接线批修",
-  },
   {
     kind: "L1",
     token: "industryRankPercentile",

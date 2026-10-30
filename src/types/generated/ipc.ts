@@ -54,8 +54,18 @@ type ContentBlock = { "Text": { text: string, } } | { "ToolUse": { id: string, n
 
 type ConversationMessage = { role: MessageRole, blocks: Array<ContentBlock>, 
 /**
- * 模型思考链（DeepSeek reasoning_content 等）。
- * 回放带 tool_calls 的 assistant 历史时必须与之一并回传（DeepSeek 思考模式成对判据）。
+ * 模型思考链的 provider-中性载体（DeepSeek `reasoning_content`、通义/智谱
+ * `thinking`、Anthropic `thinking` 等的归一存储）。
+ *
+ * 历史上思考内容只有「思维链可视化开启时包成 `<think data-axagent="1">` 写进正文」
+ * 一条持久化途径；可视化关闭、或中转把 `reasoning_content` 剥成正文 inline 裸
+ * `<think>` 时，回放侧无从恢复 —— DeepSeek 思考模式要求 assistant 历史里
+ * `reasoning_content` 与 `tool_calls` 成对，缺失即判历史不完整
+ * （`assistant.tool_calls contains an invalid function call`，整轮报废）。
+ * 专用字段把「回放保真」与「UI 可视化」解耦。
+ *
+ * `serde(default)`：旧数据（会话事件流 / 前端透传）无此字段时反序列化为
+ * `None`，向前兼容。
  */
 thinking?: string | null, usage: TokenUsage | null, };
 

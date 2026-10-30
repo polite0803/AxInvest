@@ -5,6 +5,9 @@
   "description": "AxInvest - AI Chat Desktop App",
   "author": "刘小平 <polite0803@outlook.com>",
   "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=24"
+  },
   "overrides": {
     "dompurify": "^3.4.17",
     "@babel/runtime": "7.29.2",

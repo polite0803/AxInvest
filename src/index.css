@@ -2070,6 +2070,22 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   overflow: hidden;
 }
 
+/* ── 高度链兜底 ──
+   flex 子项的 min-height 默认是 auto，即「不小于内容高度」，因此拒绝收缩。
+   当视口高度低于内容的最小需求时（例如逻辑视口 823px 而非 900px），
+   子项会把父容器撑破，再被 .app-shell 的 overflow:hidden 裁切，
+   表现为：中间区域控件压叠、底部出现无法解释的空白。
+   这里统一放行收缩。titlebar / tabbar / statusbar 等固定行已显式声明
+   min-height（如 var(--title-h)），所以不会被这条规则改动。 */
+.app-shell > *,
+.main-area > *,
+.content-col > * {
+  min-width: 0;
+}
+.content-col > :not(.tabbar) {
+  min-height: 0;
+}
+
 /* ── TitleBar ── */
 .titlebar {
   height: var(--title-h);

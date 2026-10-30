@@ -466,7 +466,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       }
       styles={{ body: { padding: "8px 10px" } }}
       extra={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           {generatedAtText && (
             <span className="text-[10px] text-gray-400">
               {isCached

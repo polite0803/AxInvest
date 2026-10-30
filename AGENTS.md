@@ -44,7 +44,7 @@ src-tauri/                   # Rust 后端 (Cargo workspace)
 │   ├── commands/            # 120 个命令模块，mod.rs 统一声明
 │   ├── init/                # 初始化（database, plugins, services, state）
 │   └── app_state.rs         # 全局 AppState
-├── crates/                  # 36 个 workspace crate（另含 src-tauri/schema-gen，共 37 个成员）
+├── crates/                  # 41 个 workspace crate（另含 src-tauri/schema-gen，共 42 个成员）
 │   ├── agent/               # 智能体引擎（SessionManager 等）
 │   ├── providers/           # LLM 提供商抽象层
 │   ├── runtime/             # WebSocket、工作流引擎、消息网关
@@ -154,7 +154,7 @@ __TAURI_WORKSPACE__=true cargo test -p axagent --lib commands::knowledge_source
 
    ⚠ **两条易漏的覆盖面差异（2026-09-21 实测）—— 「本地绿」≠「CI 绿」**：
 
-   - **`cargo fmt --check` 不带 `--all` 只格式化根 package** —— `crates/*`（36 个 workspace
+   - **`cargo fmt --check` 不带 `--all` 只格式化根 package** —— `crates/*`（41 个 workspace
      成员，本仓大部分逻辑在此）**完全不被检查**。实测：`--check` 为 `EXIT=0`（绿），而
      `--all --check` 报 4 处 diff，且**全在 `crates/` 下**。CI 已补 `--all`。
    - **`clippy` 不带 `--all-features` 只 lint 默认 feature 组合** ⇒ feature-gated 的代码路径
@@ -278,13 +278,13 @@ __TAURI_WORKSPACE__=true cargo test -p axagent --lib commands::knowledge_source
 foundation (harness 零 axagent-* 依赖；entities 仅依赖 harness):
   harness        — trait 契约 + 纯 DTO
   entities       — SeaORM 数据定义（共享数据模型，仅依赖 harness）
-  disk-cache, rt-dashboard, rt-theme
+  disk-cache, rt-theme
   schema-gen     — 代码生成辅助（SeaORM schema 生成），仅依赖 harness，位于 src-tauri/ 根目录（不在 crates/ 下）
 
 implementor (harness + entities + 兄弟 implementor):
   dao, storage, migration, kit, crypto, mcp, search, providers,
   cache, credential, prompt-guard, telemetry, trajectory, plugins,
-  npm, document-parser, rt-webhook, scanner
+  npm, document-parser, rt-webhook
 
 hybrid (harness + 按需 implementor，禁止依赖 consumer 和 entities):
   tools, rt-messaging, rt-workflow
@@ -328,7 +328,7 @@ wiring (全栈胶水，通过 harness trait 传递能力):
 | ------------------------------------ | ----------------------- | ------------------------------- | ------------------ | ---------------------- |
 | `harness`                            | `agent`, `orchestrator` | `dao`                           | **`tools`**        | `runtime`              |
 | `disk-cache`                         | `runtime-core`          | `storage`                       | **`rt-messaging`** | 二进制 `src/commands/` |
-| `rt-dashboard`                       | `gateway`               | `migration`                     | **`rt-workflow`**  | `src/init/`            |
+|                                      | `gateway`               | `migration`                     | **`rt-workflow`**  | `src/init/`            |
 | `rt-theme`, `entities`, `schema-gen` | `crdt`                  | `kit`                           |                    | `axagent-mobile`       |
 | `axagent-agent-command-types`, `axagent-agent-macro` |                         | `cache`, `crypto`, `credential` |                    |                        |
 |                                      |                         | `mcp`, `search`                 |                    |                        |
@@ -339,7 +339,7 @@ wiring (全栈胶水，通过 harness trait 传递能力):
 |                                      |                         | `plugins`, `npm`                |                    |                        |
 |                                      |                         | `document-parser`               |                    |                        |
 |                                      |                         | `rt-webhook`                    |                    |                        |
-|                                      |                         | `scanner`, `device`             |                    |                        |
+|                                      |                         | `device`                        |                    |                        |
 
 > **规则**：foundation（harness 零依赖，entities 仅依赖 harness）；consumer 仅依赖 harness；implementor 可依赖 harness + entities + 其他 implementor。
 
@@ -383,3 +383,19 @@ Conventional Commits + 中文描述。类型映射：
 - `plugin-proto`（`crates/plugin-proto`）：**foundation** —— 插件 worker 帧协议（长度前缀 JSON 帧 + 插件声明 schema）。零 `axagent-*` 依赖，仅 `serde` / `serde_json` / `thiserror`。
 - `analysis-engine`（`crates/analysis-engine`）：**implementor** —— 股票分析引擎（专家编排 / 反思进化 / OPC 域包 / 策略包）。依赖 `harness + entities + dao + trajectory + astock-data`，符合 implementor 允许组合（此前缺席角色表，2026-09-25 补登）。
 - ⚠ **rt-dashboard 已摘除**（2026-09-25，`PLAN-plugin-gap-closure.md` §3 dashboard 合流）：上方角色表 foundation 列中的 `rt-theme, entities, schema-gen` 一行原并列的 `rt-dashboard` 已随系统删除 —— 仪表盘面板声明统一到 `plugins::types::PluginDashboardPanel`（`PluginManifest.dashboard_panels`），清单/启停/卸载全部收口到 `PluginManager` + `plugin_*` 命令；`dashboard_list_plugins` 仅保留只读投影。新增登记表：`plugins` 同时是 dashboard 面板声明的**唯一权威**，不得再建平行 manifest。
+
+**补登 2026-10-30（下面 5 个 crate 一直是 workspace 成员，但从未登记角色 —— 违反本文件铁律 6）**
+
+- `quant`（`crates/quant`）：**consumer** —— 量化策略引擎（Rhai 脚本策略、回测）。仅依赖 `axagent-harness`（`crates/quant/Cargo.toml:13`），符合 consumer 约束。
+- `market-sim`（`crates/market-sim`）：**consumer** —— ABIDES 风格市场仿真（限价订单簿、DES 内核、多 Agent 交易）。仅依赖 `axagent-harness`（`crates/market-sim/Cargo.toml:10`）；其自身 `Cargo.toml:23-24` 的注释也自述 consumer（「按铁律 5 不依赖 quant，本地 MockMaCrossStrategy 替代真实策略」）。
+- `notification`（`crates/notification`）：**consumer** —— 通知渠道（pushplus 等）。仅依赖 `axagent-harness`（`crates/notification/Cargo.toml:9`）。
+- `company-runtime`（`crates/company-runtime`）：**implementor** —— OpenOPC 三机制（Self-Built 组织/招聘 · Self-Run WorkItem 状态机 · Self-Grown 经验闭环）。依赖 `analysis-engine + entities + harness`（`crates/company-runtime/Cargo.toml:15-17`）；`analysis-engine` 是 implementor ⇒ 符合「implementor 可依赖其他 implementor」。其 `Cargo.toml:8` 亦自述 implementor。
+- `astock-data`（`crates/astock-data`）：**implementor** —— A 股行情数据源实现层（多 vendor 适配、`MarketDataProvider` 实现）。⚠ **依赖形态看似 consumer（仅依赖 harness，`crates/astock-data/Cargo.toml:10`），但必须判 implementor**：`analysis-engine`（implementor）依赖它（`crates/analysis-engine/Cargo.toml:11`），若判 consumer 则构成「implementor 依赖 consumer」= 违反铁律 2。上方 `analysis-engine` 的登记条目（依赖列表含 `astock-data`）也已隐含把它当兄弟 implementor 层对待。
+
+**已知缺口登记 2026-10-30（只登记，未改配置）**
+
+- `[lints] workspace = true` 继承面不完整：41 个 crate 中**仅 7 个真正继承**（`plugins` · `plugin-proto` · `rt-messaging` · `rt-theme` · `rt-webhook` · `runtime` · `telemetry`），另 34 个未继承。⚠ **「写了 `[lints]` 段」≠「继承了」** —— 以下 3 个是**假继承**，逐条读原文确认：`crates/notification/Cargo.toml:20-21` 的 `workspace = true` 被 `#` 注释掉；`crates/rt-workflow/Cargo.toml:55` 与 `crates/runtime-core/Cargo.toml:29` 的 `[lints]` 段下**没有任何键**（空表 ⇒ no-op）。
+  - 后果两面，方向相反，**不要只看到一面**：
+    - `disallowed_types` 是 **warn-by-default**（`cargo clippy -- --explain disallowed_types` 原文「Even though this lint is warn-by-default…」），CI 的 `-D warnings` 会把它提升为 deny ⇒ **禁区 8（无 std::sync 锁）并未失守**。
+    - `module_name_repetitions = "allow"`（`Cargo.toml:103`）在未继承的 34 个 crate 里**同样丢失**，而它也是 warn-by-default ⇒ 若那些 crate 存在模块名重复，`-D warnings` 会把它变成 **error**。这是一条**潜在的既存红灯**，不是「lint 缺失」。
+  - 量化待办：跑一次全量 `cargo clippy --workspace --all-targets --all-features -- -D warnings`，确认这 34 个 crate 是否因 `module_name_repetitions` 丢失而本来就有 warn。⚠ 因 clippy 遇首个 error 即短路（见上文「三条硬约束」第 2 条），须反复跑到全绿或按 target 分批，**单轮输出不足以定论**。

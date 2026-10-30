@@ -504,6 +504,14 @@ fn convert_raw_messages(messages: &[ChatMessage]) -> Vec<OpenAIMessage> {
                             ),
                         })
                     };
+                    // DeepSeek 思考模式成对判据（2026-10-30）：assistant 历史带
+                    // tool_calls 时必须与 reasoning_content 成对回传，上游才认这段
+                    // 历史完整（缺失即 `assistant.tool_calls contains an invalid
+                    // function call` 整轮报废）。这里取并集：带 tool_calls 即使
+                    // thinking 字段缺省也回传提取结果；无工具轮保持既有行为
+                    //（仅专用思考字段存在时回传，兼容纯文本多轮端点）。
+                    let has_tool_calls =
+                        msg.tool_calls.as_ref().is_some_and(|calls| !calls.is_empty());
                     OpenAIMessage {
                         role: "assistant".to_string(),
                         content,
@@ -521,7 +529,7 @@ fn convert_raw_messages(messages: &[ChatMessage]) -> Vec<OpenAIMessage> {
                             }).collect()
                         }),
                         tool_call_id: None,
-                        reasoning_content: if msg.thinking.is_some() {
+                        reasoning_content: if has_tool_calls || msg.thinking.is_some() {
                             reasoning
                         } else {
                             None
@@ -788,6 +796,83 @@ mod tests {
         assert_eq!(converted.len(), 1, "空名调用与无承接的 tool 消息都要在序列化前剔除");
         assert!(converted[0].tool_calls.is_none());
         assert_eq!(converted[0].content, Some(json!("先看行情")));
+    }
+
+    /// 构造一段合法历史：assistant（带 tool_calls + thinking）+ 承接的 tool 结果。
+    /// 不带结果会被净化计划按「工具执行前中断」整段剔除，那不是本组测试的对象。
+    fn answered_tool_call_history(thinking: Option<String>, content: &str) -> Vec<ChatMessage> {
+        vec![
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: ChatContent::Text(content.to_string()),
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_a".to_string(),
+                    call_type: "function".to_string(),
+                    function: ToolCallFunction {
+                        name: "read_file".to_string(),
+                        arguments: "{}".to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                thinking,
+            },
+            ChatMessage {
+                role: "tool".to_string(),
+                content: ChatContent::Text("ok".to_string()),
+                tool_calls: None,
+                tool_call_id: Some("call_a".to_string()),
+                thinking: None,
+            },
+        ]
+    }
+
+    /// DeepSeek 思考模式成对判据（2026-10-30）：带 tool_calls 的 assistant 历史必须
+    /// 与 reasoning_content 成对回传，否则上游判历史不完整
+    ///（`assistant.tool_calls contains an invalid function call`）。
+    #[test]
+    fn convert_messages_pairs_reasoning_with_tool_calls() {
+        let converted = convert_messages(&answered_tool_call_history(
+            Some("用户要分析这只股票，先取行情".to_string()),
+            "",
+        ));
+        assert!(converted[0].tool_calls.is_some(), "tool_calls 必须保留");
+        assert_eq!(
+            converted[0].reasoning_content.as_deref(),
+            Some("用户要分析这只股票，先取行情"),
+            "带 tool_calls 时 reasoning_content 必须成对回传"
+        );
+    }
+
+    /// 带 tool_calls 但本轮无思考（thinking 缺省）：不得伪造 reasoning_content，
+    /// 序列化时由 skip_serializing_if 摘掉字段。
+    #[test]
+    fn convert_messages_does_not_fabricate_reasoning_for_tool_calls() {
+        let converted = convert_messages(&answered_tool_call_history(None, "直接给结论"));
+        assert!(converted[0].tool_calls.is_some());
+        assert_eq!(converted[0].reasoning_content, None);
+    }
+
+    /// 无工具的纯文本轮保持既有行为：专用思考字段存在才回传
+    ///（兼容只认 reasoning_content 的思考端点，同时不给非思考端点发未知字段）。
+    #[test]
+    fn convert_messages_keeps_text_only_reasoning_semantics() {
+        let plain_with_thinking = ChatMessage {
+            role: "assistant".to_string(),
+            content: ChatContent::Text("结论如下".to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+            thinking: Some("思考过程".to_string()),
+        };
+        let plain_without_thinking = ChatMessage {
+            role: "assistant".to_string(),
+            content: ChatContent::Text("结论如下".to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+            thinking: None,
+        };
+        let converted = convert_messages(&[plain_with_thinking, plain_without_thinking]);
+        assert_eq!(converted[0].reasoning_content.as_deref(), Some("思考过程"));
+        assert_eq!(converted[1].reasoning_content, None);
     }
 }
 

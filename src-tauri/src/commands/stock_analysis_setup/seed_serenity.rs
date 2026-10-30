@@ -106,7 +106,12 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     //        补齐，DB 里它是漏绑的那一个）；② 19 个节点 position 对齐 DB 现值。
     //      抬到 60 = DB 现值 + 1，是让「代码重新成为权威」的必要条件；在此之前 version(59) >
     //      常量(53) 恒走「跳过重建」，代码侧任何图改动都落不了库。
-    const TEMPLATE_VERSION: i32 = 62; // v62: 新增 c-trend-split，5 个评分器按各自趋势的 strategy_type 评分
+    // v63（2026-10-30）：信封对齐 —— get_industry_ranking / get_cls_flash / search_news 自
+    //   2026-10-28（ff9c46f39）改发 {status,data,detail}，而 strategy-scorer / bottleneck-calc /
+    //   scanner-brief / candidate-pool 的 to_array 只认裸数组 ⇒ 行业动量腿与候选池静默降级成
+    //   「今天没数据」（to_array 返回 [] 与真空数据不可区分，零告警）。四脚本的 string 分支
+    //   已补 data 下钻；脚本经 include_str! 嵌入 CodeNode.code ⇒ **不升版旧库照跑旧脚本**。
+    const TEMPLATE_VERSION: i32 = 63; // v62: 新增 c-trend-split，5 个评分器按各自趋势的 strategy_type 评分
 
     let now = chrono::Utc::now().timestamp_millis();
 
@@ -1732,7 +1737,12 @@ mod serenity_version_gate_tests {
     /// ⚠ 它是**副本**：改源码里那个常量时必须一起改。不同步**不会静默失效** ——
     /// 状态①的 `assert_eq!(version, Some(TEMPLATE_VERSION))` 会当场失败（写成本测试的
     /// 第一道断言就是为了这个）。宁可响亮地红，也不要一条「看着在跑、其实没在测」的测试。
-    const TEMPLATE_VERSION: i32 = 62; // v62: 新增 c-trend-split，5 个评分器按各自趋势的 strategy_type 评分
+    // v63（2026-10-30）：信封对齐 —— get_industry_ranking / get_cls_flash / search_news 自
+    //   2026-10-28（ff9c46f39）改发 {status,data,detail}，而 strategy-scorer / bottleneck-calc /
+    //   scanner-brief / candidate-pool 的 to_array 只认裸数组 ⇒ 行业动量腿与候选池静默降级成
+    //   「今天没数据」（to_array 返回 [] 与真空数据不可区分，零告警）。四脚本的 string 分支
+    //   已补 data 下钻；脚本经 include_str! 嵌入 CodeNode.code ⇒ **不升版旧库照跑旧脚本**。
+    const TEMPLATE_VERSION: i32 = 63; // v62: 新增 c-trend-split，5 个评分器按各自趋势的 strategy_type 评分
 
     async fn fresh_db() -> axagent_dao::db::DbHandle {
         axagent_dao::db::create_test_pool().await.expect("建临时测试库失败")

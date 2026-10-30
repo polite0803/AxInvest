@@ -19,7 +19,13 @@ fn to_array(v) {
     if type_of(v) == "array" { v }
     else if type_of(v) == "string" {
         let p = json_parse(v.to_string());
-        if type_of(p) == "array" { p } else { [] }
+        // 2026-10-30（v193 同批）：search_news 自 2026-10-28 起返回 {status,data,detail}
+        // ⇒ 注入串带信封，必须下钻 data（否则候选池恒空 = 「今天搜不到票」的假象）。
+        if type_of(p) == "array" { p }
+        else if type_of(p) == "map" && p["status"] == "ok"
+            && p["data"] != () && type_of(p["data"]) == "array" { p["data"] }
+        else if type_of(p) == "map" && p["data"] != () && type_of(p["data"]) == "array" { p["data"] }
+        else { [] }
     } else if type_of(v) == "map" {
         if v["content"] != () && type_of(v["content"]) == "string" {
             let p = json_parse(v["content"].to_string());

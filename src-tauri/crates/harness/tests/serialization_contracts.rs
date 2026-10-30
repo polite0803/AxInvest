@@ -247,6 +247,7 @@ serialization_contract!(
     ConversationMessage {
         role: MessageRole::Assistant,
         blocks: vec![ContentBlock::Text { text: "Here's the result.".to_string() }],
+        thinking: None,
         usage: Some(TokenUsage {
             input_tokens: 50,
             output_tokens: 30,
@@ -263,6 +264,7 @@ serialization_contract!(
     ConversationMessage {
         role: MessageRole::User,
         blocks: vec![ContentBlock::Text { text: "Hello".to_string() }],
+        thinking: None,
         usage: None,
     }
 );
@@ -285,9 +287,38 @@ serialization_contract!(
                 is_error: false,
             },
         ],
+        thinking: None,
         usage: None,
     }
 );
+
+// thinking 专用字段契约（2026-10-30）：带值往返 + 旧数据（无该字段的 JSON）
+// 反序列化为 `None` 的向前兼容 —— 会话事件流 / 旧前端透传都依赖这条兼容。
+serialization_contract!(
+    test_conversation_message_with_thinking,
+    ConversationMessage,
+    ConversationMessage {
+        role: MessageRole::Assistant,
+        blocks: vec![ContentBlock::ToolUse {
+            id: "call_a".to_string(),
+            name: "read_file".to_string(),
+            input: "{}".to_string(),
+        }],
+        thinking: Some("用户要分析这只股票，先取行情".to_string()),
+        usage: None,
+    }
+);
+
+#[test]
+fn test_conversation_message_legacy_json_without_thinking_deserializes_as_none() {
+    // 旧版序列化输出（无 thinking 字段）必须能反序列化且 thinking=None
+    // ContentBlock 是外部标记格式（{"Text": {...}}），与 ts-rs 生成物一致
+    let legacy_json = r#"{"role":"assistant","blocks":[{"Text":{"text":"hi"}}]}"#;
+    let restored: ConversationMessage =
+        serde_json::from_str(legacy_json).expect("旧版 JSON（无 thinking 字段）应能反序列化");
+    assert_eq!(restored.thinking, None, "缺省 thinking 字段必须落 None");
+    assert_eq!(restored.usage, None);
+}
 
 // SessionInfo
 serialization_contract!(
@@ -564,6 +595,7 @@ fn test_nested_content_blocks() {
             },
             ContentBlock::Text { text: "Here are the results.".to_string() },
         ],
+        thinking: None,
         usage: Some(TokenUsage {
             input_tokens: 100,
             output_tokens: 50,

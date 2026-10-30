@@ -352,31 +352,43 @@ let pace_factor = 1.0;
 // 资金流向检查：当日净流出 vs 近5日均值（趋势背离）
 // 旧实现引用 daily_avg_volume 字段，但 MoneyFlow 结构体无此字段，该分支从不触发。
 // 改用 history 多日序列计算均值，判断"当日反向流出是否显著偏离近期趋势"。
+// 2026-10-29 信封对齐：seed 侧映射改指 `t-hotmoney-data.result.content.data.*`
+// （get_stock_money_flow 于 2026-10-28 改发 {status,data} 信封，扁平路径全部 miss ⇒
+// 本修正分支自那起**静默失效**——连告警都没有，是最隐蔽的一类回归）。
+// 注入形态随 resolve_var_path 的「终值原样」规则：
+//   · money_flow_history ⇒ 原生 array（v193 起）；仍兼容 string（v192 前形态）
+//   · money_flow_net     ⇒ 数值（f64 为主；整数载荷按 i64 归一为 f64）
 let mf_history_len = 0;
 let mf_avg_net = 0.0;
-if present(money_flow_history) && type_of(money_flow_history) == "string" && money_flow_history != "" {
-    let hf = safe_parse(money_flow_history);
-    if type_of(hf) == "array" {
-        mf_history_len = len(hf);
-        let sum_net = 0.0;
-        for i in 0..len(hf) {
-            let day = hf[i];
-            if type_of(day) == "map" {
-                let v = day["mainNetInflow"];
-                if type_of(v) == "f64" { sum_net += v; }
-            }
+let mf_hist_arr = if type_of(money_flow_history) == "array" {
+    money_flow_history
+} else if present(money_flow_history) && type_of(money_flow_history) == "string" && money_flow_history != "" {
+    safe_parse(money_flow_history)
+} else { () };
+if type_of(mf_hist_arr) == "array" {
+    mf_history_len = len(mf_hist_arr);
+    let sum_net = 0.0;
+    for i in 0..len(mf_hist_arr) {
+        let day = mf_hist_arr[i];
+        if type_of(day) == "map" {
+            let v = day["mainNetInflow"];
+            if type_of(v) == "f64" { sum_net += v; }
+            else if type_of(v) == "i64" || type_of(v) == "int" { sum_net += v.to_float(); }
         }
-        if mf_history_len > 0 { mf_avg_net = sum_net / mf_history_len; }
     }
+    if mf_history_len > 0 { mf_avg_net = sum_net / mf_history_len; }
 }
-if present(money_flow_net) && type_of(money_flow_net) == "f64" && mf_history_len >= 3 {
+let mf_net_f = if type_of(money_flow_net) == "f64" { money_flow_net }
+    else if type_of(money_flow_net) == "i64" || type_of(money_flow_net) == "int" { money_flow_net.to_float() }
+    else { () };
+if present(mf_net_f) && mf_history_len >= 3 {
     // 当日净流出，且近5日均值偏正（近期资金面偏多） → 趋势背离
     let net_outflow_ratio = if mf_avg_net.abs() > 1.0 {
-        (-money_flow_net) / mf_avg_net.abs()
+        (-mf_net_f) / mf_avg_net.abs()
     } else {
         0.0
     };
-    if p_score > 0.0 && money_flow_net < 0.0 && net_outflow_ratio > 0.5 {
+    if p_score > 0.0 && mf_net_f < 0.0 && net_outflow_ratio > 0.5 {
         // Polarity 为正（看多）但当日资金净流出 > 近期均值 50% → 对冲衰减 ×0.5
         divergence_flag = true;
         divergence_reason = `情绪与资金背离:P=${(p_score*100.0).round()/100.0}(正) 但当日净流出为近${mf_history_len}日均值${(net_outflow_ratio*100.0).round()}%`;

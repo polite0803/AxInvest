@@ -192,6 +192,7 @@ pub fn compact_session(
     let mut compacted_messages = vec![ConversationMessage {
         role: MessageRole::System,
         blocks: vec![ContentBlock::Text { text: continuation }],
+        thinking: None,
         usage: None,
     }];
     compacted_messages.extend(preserved);
@@ -704,6 +705,7 @@ mod tests {
         ConversationMessage {
             role: MessageRole::User,
             blocks: vec![ContentBlock::Text { text: text.to_string() }],
+            thinking: None,
             usage: None,
         }
     }
@@ -712,6 +714,7 @@ mod tests {
         ConversationMessage {
             role: MessageRole::Assistant,
             blocks: vec![ContentBlock::Text { text: text.to_string() }],
+            thinking: None,
             usage: None,
         }
     }
@@ -741,6 +744,7 @@ mod tests {
         let message = ConversationMessage {
             role: MessageRole::System,
             blocks: vec![ContentBlock::Text { text: format!("{formatted}\n\n\n") }],
+            thinking: None,
             usage: None,
         };
         let extracted = extract_existing_compacted_summary(&message, &NoopPromptProvider)

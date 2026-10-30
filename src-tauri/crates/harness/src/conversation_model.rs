@@ -96,6 +96,7 @@ pub fn history_to_conversation_messages(
             out.push(ConversationMessage {
                 role: MessageRole::Assistant,
                 blocks: assistant_blocks,
+                thinking: None,
                 usage: None,
             });
         }
@@ -103,13 +104,14 @@ pub fn history_to_conversation_messages(
             out.push(ConversationMessage {
                 role: MessageRole::Tool,
                 blocks: tool_results,
+                thinking: None,
                 usage: None,
             });
         }
         return out;
     }
 
-    vec![ConversationMessage { role, blocks, usage: None }]
+    vec![ConversationMessage { role, blocks, thinking: None, usage: None }]
 }
 
 // ── ConversationMessage ──────────────────────────────────────────────────────
@@ -120,6 +122,20 @@ pub fn history_to_conversation_messages(
 pub struct ConversationMessage {
     pub role: MessageRole,
     pub blocks: Vec<ContentBlock>,
+    /// 模型思考链的 provider-中性载体（DeepSeek `reasoning_content`、通义/智谱
+    /// `thinking`、Anthropic `thinking` 等的归一存储）。
+    ///
+    /// 历史上思考内容只有「思维链可视化开启时包成 `<think data-axagent="1">` 写进正文」
+    /// 一条持久化途径；可视化关闭、或中转把 `reasoning_content` 剥成正文 inline 裸
+    /// `<think>` 时，回放侧无从恢复 —— DeepSeek 思考模式要求 assistant 历史里
+    /// `reasoning_content` 与 `tool_calls` 成对，缺失即判历史不完整
+    /// （`assistant.tool_calls contains an invalid function call`，整轮报废）。
+    /// 专用字段把「回放保真」与「UI 可视化」解耦。
+    ///
+    /// `serde(default)`：旧数据（会话事件流 / 前端透传）无此字段时反序列化为
+    /// `None`，向前兼容。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<TokenUsage>,
 }

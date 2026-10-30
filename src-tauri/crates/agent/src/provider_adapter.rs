@@ -250,24 +250,35 @@ impl AxAgentApiClient {
     /// Extract thinking content from text that may contain `<think data-axagent="1">...</think>` tags.
     /// The runtime's `build_assistant_message` wraps thinking in `<think data-axagent="1">` tags.
     /// Returns (cleaned_text, extracted_thinking).
+    ///
+    /// 两级匹配（2026-10-30，DeepSeek 系渠道多轮工具调用整轮报废的根因之一）：
+    /// 1. `<think data-axagent="1">` —— runtime 思维链可视化写入的标签；
+    /// 2. 裸 `<think>` —— DeepSeek v4 等推理模型把思考 token 以 inline 标签混进
+    ///    `delta.content`（中转常剥掉 `reasoning_content` 字段，思考只能以裸标签下发）。
+    ///    回放时若不识别裸标签，思考内容既进不了 `reasoning_content`，还会以正文形式
+    ///    重复喂回模型；DeepSeek 思考模式会因 assistant 历史缺 `reasoning_content`
+    ///    判历史不完整，报 `assistant.tool_calls contains an invalid function call`。
     fn extract_thinking_from_text(text: &str) -> (String, Option<String>) {
-        const THINK_START_TAG: &str = "<think data-axagent=\"1\">";
         const THINK_END_TAG: &str = "</think>";
+        // 开标签按优先级排列；裸 `<think>` 精确匹配，不会误命中带属性的变体
+        const OPEN_TAGS: [&str; 2] = ["<think data-axagent=\"1\">", "<think>"];
 
-        if let Some(start) = text.find(THINK_START_TAG) {
-            let after_start = &text[start + THINK_START_TAG.len()..];
-            if let Some(end) = after_start.find(THINK_END_TAG) {
-                let thinking = after_start[..end].trim().to_string();
-                let thinking = if thinking.is_empty() {
-                    None
-                } else {
-                    Some(thinking)
-                };
-                // Everything before <think> tag + everything after </think> tag
-                let before = &text[..start];
-                let after = &after_start[end + THINK_END_TAG.len()..];
-                let cleaned = format!("{}{}", before, after).trim().to_string();
-                return (cleaned, thinking);
+        for open_tag in OPEN_TAGS {
+            if let Some(start) = text.find(open_tag) {
+                let after_start = &text[start + open_tag.len()..];
+                if let Some(end) = after_start.find(THINK_END_TAG) {
+                    let thinking = after_start[..end].trim().to_string();
+                    let thinking = if thinking.is_empty() {
+                        None
+                    } else {
+                        Some(thinking)
+                    };
+                    // Everything before <think> tag + everything after </think> tag
+                    let before = &text[..start];
+                    let after = &after_start[end + THINK_END_TAG.len()..];
+                    let cleaned = format!("{}{}", before, after).trim().to_string();
+                    return (cleaned, thinking);
+                }
             }
         }
         (text.to_string(), None)
@@ -347,8 +358,12 @@ impl AxAgentApiClient {
                     // Extract thinking from <think data-axagent="1"> tags embedded by
                     // the runtime's build_assistant_message, so it flows through
                     // ChatMessage.thinking → OpenAIMessage.reasoning_content.
+                    // 专用字段（ConversationMessage.thinking，2026-10-30 起 build 阶段
+                    // 无条件填充）优先于正文标签：可视化开关关闭时正文没有标签，字段是
+                    // 唯一来源；inline 裸 <think>（DeepSeek v4 中转剥字段）由提取兜底。
                     let (clean_text, extracted_thinking) =
                         Self::extract_thinking_from_text(&text_parts);
+                    let thinking = message.thinking.clone().or(extracted_thinking);
 
                     result.push(ChatMessage {
                         role: "assistant".to_string(),
@@ -359,7 +374,7 @@ impl AxAgentApiClient {
                             Some(tool_calls)
                         },
                         tool_call_id: None,
-                        thinking: extracted_thinking,
+                        thinking,
                     });
                 },
                 _ => {
@@ -487,6 +502,7 @@ impl ApiClient for AxAgentApiClient {
             all_conv_messages.push(ConversationMessage {
                 role: MessageRole::System,
                 blocks: vec![ContentBlock::Text { text: prompt_text.clone() }],
+                thinking: None,
                 usage: None,
             });
         }
@@ -735,8 +751,74 @@ mod tests {
         vec![ConversationMessage {
             role: MessageRole::User,
             blocks: vec![ContentBlock::Text { text: "Hello".to_string() }],
+            thinking: None,
             usage: None,
         }]
+    }
+
+    /// DeepSeek v4 inline `<think>`（中转常剥掉 reasoning_content 字段，思考以裸标签
+    /// 混进正文）：回放时必须提取进 ChatMessage.thinking → reasoning_content 成对
+    /// 回传，而不是把思考以正文形式重复喂回模型。
+    #[test]
+    fn convert_messages_extracts_inline_bare_think_tag() {
+        let messages = vec![ConversationMessage {
+            role: MessageRole::Assistant,
+            blocks: vec![
+                ContentBlock::Text {
+                    text: "<think>先取行情再判断</think>\n\n我来帮你分析。".to_string(),
+                },
+                ContentBlock::ToolUse {
+                    id: "call_a".to_string(),
+                    name: "get_quote".to_string(),
+                    input: "{}".to_string(),
+                },
+            ],
+            thinking: None,
+            usage: None,
+        }];
+        let result = AxAgentApiClient::convert_messages(&messages, &[]);
+        assert_eq!(result[0].thinking.as_deref(), Some("先取行情再判断"));
+        match &result[0].content {
+            ChatContent::Text(t) => {
+                assert!(!t.contains("<think>"), "裸标签必须从正文剥离，实得: {t}");
+                assert!(t.contains("我来帮你分析"), "可见正文必须保留");
+            },
+            other => panic!("Expected text content, got {other:?}"),
+        }
+        assert!(result[0].tool_calls.is_some(), "tool_calls 不受影响");
+    }
+
+    /// runtime 可视化标签（`data-axagent="1"`）继续按原语义提取。
+    #[test]
+    fn convert_messages_extracts_annotated_think_tag() {
+        let messages = vec![ConversationMessage {
+            role: MessageRole::Assistant,
+            blocks: vec![ContentBlock::Text {
+                text: "<think data-axagent=\"1\">\n先看趋势\n</think>\n\n结论如下".to_string(),
+            }],
+            thinking: None,
+            usage: None,
+        }];
+        let result = AxAgentApiClient::convert_messages(&messages, &[]);
+        assert_eq!(result[0].thinking.as_deref(), Some("先看趋势"));
+        match &result[0].content {
+            ChatContent::Text(t) => assert_eq!(t, "结论如下"),
+            other => panic!("Expected text content, got {other:?}"),
+        }
+    }
+
+    /// ConversationMessage.thinking 专用字段（build 阶段无条件填充）优先于正文
+    /// 标签 —— thought_chain_enabled 关闭时正文没有标签，字段是唯一来源。
+    #[test]
+    fn convert_messages_prefers_dedicated_thinking_field() {
+        let messages = vec![ConversationMessage {
+            role: MessageRole::Assistant,
+            blocks: vec![ContentBlock::Text { text: "直接给结论".to_string() }],
+            thinking: Some("思考链来自专用字段".to_string()),
+            usage: None,
+        }];
+        let result = AxAgentApiClient::convert_messages(&messages, &[]);
+        assert_eq!(result[0].thinking.as_deref(), Some("思考链来自专用字段"));
     }
 
     #[test]
@@ -752,6 +834,7 @@ mod tests {
         let messages = vec![ConversationMessage {
             role: MessageRole::System,
             blocks: vec![ContentBlock::Text { text: "You are helpful".to_string() }],
+            thinking: None,
             usage: None,
         }];
         let result = AxAgentApiClient::convert_messages(&messages, &[]);
@@ -764,6 +847,7 @@ mod tests {
         let messages = vec![ConversationMessage {
             role: MessageRole::Assistant,
             blocks: vec![ContentBlock::Text { text: "Hi there".to_string() }],
+            thinking: None,
             usage: None,
         }];
         let result = AxAgentApiClient::convert_messages(&messages, &[]);
@@ -787,6 +871,7 @@ mod tests {
                     input: "{}".to_string(),
                 },
             ],
+            thinking: None,
             usage: None,
         }];
         let result = AxAgentApiClient::convert_messages(&messages, &[]);
@@ -807,6 +892,7 @@ mod tests {
                 output: "result data".to_string(),
                 is_error: false,
             }],
+            thinking: None,
             usage: None,
         }];
         let result = AxAgentApiClient::convert_messages(&messages, &[]);
@@ -820,6 +906,7 @@ mod tests {
         let messages = vec![ConversationMessage {
             role: MessageRole::User,
             blocks: vec![ContentBlock::Text { text: "Describe this image".to_string() }],
+            thinking: None,
             usage: None,
         }];
         let image_urls = vec!["data:image/png;base64,abc".to_string()];
@@ -841,11 +928,13 @@ mod tests {
             ConversationMessage {
                 role: MessageRole::User,
                 blocks: vec![ContentBlock::Text { text: "First".to_string() }],
+                thinking: None,
                 usage: None,
             },
             ConversationMessage {
                 role: MessageRole::User,
                 blocks: vec![ContentBlock::Text { text: "Second".to_string() }],
+                thinking: None,
                 usage: None,
             },
         ];
@@ -905,6 +994,7 @@ mod tests {
                 name: "tool".to_string(),
                 input: "{}".to_string(),
             }],
+            thinking: None,
             usage: None,
         }];
         let result = AxAgentApiClient::convert_messages(&messages, &[]);
@@ -934,6 +1024,7 @@ mod tests {
                     is_error: false,
                 },
             ],
+            thinking: None,
             usage: None,
         }];
         let result = AxAgentApiClient::convert_messages(&messages, &[]);
@@ -956,6 +1047,7 @@ mod tests {
                     input: "{\"q\":\"test\"}".to_string(),
                 },
             ],
+            thinking: None,
             usage: None,
         }];
         let result = AxAgentApiClient::convert_messages(&messages, &[]);
@@ -988,6 +1080,7 @@ mod tests {
                     input: "{}".to_string(),
                 },
             ],
+            thinking: None,
             usage: None,
         }];
         let result = AxAgentApiClient::convert_messages(&messages, &[]);
@@ -1000,6 +1093,7 @@ mod tests {
         let messages = vec![ConversationMessage {
             role: MessageRole::System,
             blocks: vec![ContentBlock::Text { text: "You are helpful".to_string() }],
+            thinking: None,
             usage: None,
         }];
         let result = AxAgentApiClient::convert_messages(&messages, &[]);
@@ -1017,6 +1111,7 @@ mod tests {
         let messages = vec![ConversationMessage {
             role: MessageRole::User,
             blocks: vec![ContentBlock::Text { text: String::new() }],
+            thinking: None,
             usage: None,
         }];
         let image_urls = vec!["data:image/png;base64,abc".to_string()];
@@ -1035,6 +1130,7 @@ mod tests {
         let messages = vec![ConversationMessage {
             role: MessageRole::User,
             blocks: vec![ContentBlock::Text { text: "Compare these".to_string() }],
+            thinking: None,
             usage: None,
         }];
         let image_urls = vec![
@@ -1058,6 +1154,7 @@ mod tests {
         let messages = vec![ConversationMessage {
             role: MessageRole::System,
             blocks: vec![ContentBlock::Text { text: "System prompt".to_string() }],
+            thinking: None,
             usage: None,
         }];
         let image_urls = vec!["data:image/png;base64,abc".to_string()];
@@ -1111,16 +1208,19 @@ mod tests {
             ConversationMessage {
                 role: MessageRole::System,
                 blocks: vec![ContentBlock::Text { text: "System".to_string() }],
+                thinking: None,
                 usage: None,
             },
             ConversationMessage {
                 role: MessageRole::User,
                 blocks: vec![ContentBlock::Text { text: "Hello".to_string() }],
+                thinking: None,
                 usage: None,
             },
             ConversationMessage {
                 role: MessageRole::Assistant,
                 blocks: vec![ContentBlock::Text { text: "Hi".to_string() }],
+                thinking: None,
                 usage: None,
             },
             ConversationMessage {
@@ -1130,6 +1230,7 @@ mod tests {
                     name: "tool".to_string(),
                     input: "{}".to_string(),
                 }],
+                thinking: None,
                 usage: None,
             },
             ConversationMessage {
@@ -1140,6 +1241,7 @@ mod tests {
                     output: "done".to_string(),
                     is_error: false,
                 }],
+                thinking: None,
                 usage: None,
             },
         ];
@@ -1165,6 +1267,7 @@ mod tests {
                 },
                 ContentBlock::Text { text: "extra text".to_string() },
             ],
+            thinking: None,
             usage: None,
         }];
         let result = AxAgentApiClient::convert_messages(&messages, &[]);
@@ -1180,6 +1283,7 @@ mod tests {
                 ContentBlock::Text { text: "Hello".to_string() },
                 ContentBlock::Text { text: " World".to_string() },
             ],
+            thinking: None,
             usage: None,
         }];
         let result = AxAgentApiClient::convert_messages(&messages, &[]);

@@ -8,11 +8,19 @@
 // ═══════════════════════════════════════════════
 
 // 任意值 → 数组（防御 ToolNode 输出的多种形态）
+// 2026-10-30（v193 同批）：string 分支补**信封解包** —— `t-industry-rank.result` 注入的是
+// ToolNode 的 content 字符串，而 get_industry_ranking 自 2026-10-28（ff9c46f39）改发
+// `{status,data,detail}` ⇒ 旧实现只认裸数组，信封被压成 `[]`，行业动量腿静默降级
+// （无告警：to_array 返回空数组与「今天没数据」不可区分）。
 fn to_array(v) {
     if type_of(v) == "array" { v }
     else if type_of(v) == "string" {
         let p = json_parse(v.to_string());
-        if type_of(p) == "array" { p } else { [] }
+        if type_of(p) == "array" { p }
+        else if type_of(p) == "map" && p["status"] == "ok"
+            && p["data"] != () && type_of(p["data"]) == "array" { p["data"] }
+        else if type_of(p) == "map" && p["data"] != () && type_of(p["data"]) == "array" { p["data"] }
+        else { [] }
     } else if type_of(v) == "map" {
         if v["content"] != () && type_of(v["content"]) == "string" {
             let p = json_parse(v["content"].to_string());

@@ -275,51 +275,154 @@ fn assert_all_resolvable(seed_rs: &str) {
     );
 }
 
-/// P2 写侧结构门：每个 `reco_picks::ActiveModel` 字面量都必须给 `reco_version`。
+/// 递归收集 `.rs`，跳过构建产物目录。
+///
+/// `target/` 必须跳过：build script 的 `OUT_DIR` 里也有 `.rs`，那些是**编译产物**，
+/// 扫进来会让计数虚高（且和源码改动无关 ⇒ 假红）。
+fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    const SKIP_DIRS: [&str; 6] = ["target", "target2", "output", "node_modules", ".git", "dist"];
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        match entry.file_type() {
+            Ok(t) if t.is_dir() => {
+                let name = path.file_name().and_then(|s| s.to_str()).unwrap_or_default();
+                if SKIP_DIRS.contains(&name) {
+                    continue;
+                }
+                collect_rs_files(&path, out);
+            },
+            Ok(t) if t.is_file() => {
+                if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                    out.push(path);
+                }
+            },
+            _ => {},
+        }
+    }
+}
+
+/// P2 写侧结构门：`reco_picks` 的建行点必须**全仓唯一**，且那一处给 `reco_version` 盖章。
 ///
 /// 为什么锁写入而不是读取：算法归属是**不可逆**的 —— 今天不盖章的样本，将来无论
 /// 怎么补筛都拿不回来（只能整批当「未知代」排除）。而荐股闭环是按 rank IC 降权的，
 /// 没有归属就是把「旧算法的预测」和「新算法的预测」配进同一格。
+///
+/// ## 判据形态（2026-10-29 校准）
+///
+/// 原写法是**人工登记的 2 个文件 × 硬编码总数 2**（`reco_pool.rs` + `serenity.rs`）。
+/// 2026-10-29 趋势智选链的 `pick.insert(db)` 被下沉到 `_shared_reco_pool::persist_reco_pick`
+/// ⇒ `serenity.rs` 里不再有任何 `ActiveModel` 字面量，总数变 1，**门自己红了**。
+/// 那次重构是**收敛**而不是丢写入点（5 条链仍在写：4 条走 `persist_reco_picks`，
+/// 趋势智选走 `persist_reco_pick`，全部汇聚到 `dao::repo::reco_pool::upsert_pick`）。
+///
+/// ⚠ 但「把 2 改成 1」是**削判据**：清单一旦再被重构打偏，下一次仍然要人肉对答案，
+/// 而这正是本次红的成因。故改成两条**与重构形态无关**的判据：
+///
+/// 1. **全仓扫描**（不再维护清单）：非注释行出现 `reco_picks::ActiveModel {` 的文件处数
+///    必须恰为 1 —— 新增任何第二个直接构造点（绕过 dao 的唯一落库口）当场红；
+/// 2. **代际透传**（新增，补上唯一构造点之后的真实风险面）：共享入口
+///    `_shared_reco_pool.rs` 里每个 `insert_picks(` / `upsert_pick(` 调用点的近邻必须出现
+///    `RECO_ALGORITHM_VERSION` 或 `reco_version`。
+///    —— 只锁「字面量里有 `reco_version:` 字段」是**不够的**：字段在、实参传 `None`，
+///    样本照样无归属，而结构门全绿（那是 fail-open 形态，不是结构完整）。
 #[test]
 fn every_reco_picks_insert_stamps_algorithm_version() {
-    // 登记清单（2026-10-13）：`stock_analysis.rs` 的建行点已下沉到
-    // `crates/dao/src/repo/reco_pool.rs::insert_picks`（分层门禁止命令层构造 ActiveModel），
-    // ⇒ 本清单从「两个命令层文件」换成「智选命令层 + 共用 dao」。计数仍应是 2：
-    // 一处实盘/回放共用落库口、一处趋势智选逐档落库。
-    let files = ["crates/dao/src/repo/reco_pool.rs", "src/commands/stock_workflow/serenity.rs"];
-    let mut checked = 0usize;
-    for rel in files {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
-        let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("读取 {rel} 失败: {e}"));
-        for (i, line) in src.lines().enumerate() {
-            if !line.contains("reco_picks::ActiveModel {") {
+    use std::path::Path;
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    // 本文件自己含判据字符串（`"reco_picks::ActiveModel {"`）⇒ 不自指排除就会多算一处
+    const SELF_FILE: &str = "seed_consistency_tests.rs";
+
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    for sub in ["src", "crates"] {
+        collect_rs_files(&root.join(sub), &mut files);
+    }
+    assert!(
+        files.len() > 100,
+        "扫描面只读到 {} 个 .rs 文件 ⇒ 判据失效（递归收集被改坏了）",
+        files.len()
+    );
+
+    let mut sites: Vec<(String, usize)> = Vec::new();
+    for path in &files {
+        if path.file_name().and_then(|s| s.to_str()) == Some(SELF_FILE) {
+            continue;
+        }
+        let src = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(_) => continue, // 非 UTF-8 的生成物不参与本判据
+        };
+        // 按**行起始字节偏移**切 body（旧写法 `src.find(line)` 在同样文本出现第二次时
+        // 会定位回第一处 ⇒ 一对多时判据说谎）
+        let mut offset = 0usize;
+        for (i, line) in src.split('\n').enumerate() {
+            let line_start = offset;
+            offset += line.len() + 1;
+            if line.trim_start().starts_with("//") || !line.contains("reco_picks::ActiveModel {") {
                 continue;
             }
-            checked += 1;
-            // 字面量向后扫到闭合（同层 `};`），其间必须出现 reco_version
-            let rest = &src[src.find(line).unwrap()..];
-            let body = rest
-                .split(
-                    "
-        };",
-                )
-                .next()
-                .unwrap_or(rest);
-            let body = body
-                .split(
-                    "
-            };",
-                )
-                .next()
-                .unwrap_or(body);
+            let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+            sites.push((rel.clone(), i + 1));
+            // 字面量向后扫到首个 `};`（结构体闭合），其间必须出现 reco_version
+            let rest = &src[line_start..];
+            let body = match rest.find("};") {
+                Some(end) => &rest[..end],
+                None => rest,
+            };
             assert!(
                 body.contains("reco_version:"),
-                "[{rel}:{}] `reco_picks` 建行没盖章 `reco_version` ⇒ 该批样本算法归属永久未知，                 闭环 IC 只能整批排除它（或更糟：混进当前代）。",
+                "[{rel}:{}] `reco_picks` 建行没盖章 `reco_version` ⇒ 该批样本算法归属永久未知，\
+                 闭环 IC 只能整批排除它（或更糟：混进当前代）。",
                 i + 1
             );
         }
     }
-    assert_eq!(checked, 2, "预期扫到 2 处 reco_picks 建行点，实际 {checked} —— 有新增写入点未入册");
+
+    // ── 判据 1：全仓唯一构造点 ──
+    assert_eq!(
+        sites.len(),
+        1,
+        "预期全仓恰 1 处 `reco_picks` 建行点（dao `upsert_pick`），实际 {} 处: {sites:?}\n\
+         新增直接构造点会绕过同业务键覆盖 + 代际盖章 ⇒ 请改走 \
+         `dao::repo::reco_pool::upsert_pick`（若确需第二个落库口，须同改本条判据并说明理由）",
+        sites.len()
+    );
+    assert_eq!(
+        sites[0].0, "crates/dao/src/repo/reco_pool.rs",
+        "唯一建行点搬离 dao 了（现在在 {}） ⇒ 分层门（commands-no-direct-db）应同步检查",
+        sites[0].0
+    );
+
+    // ── 判据 2：共享入口必须把代际**真值**传下去（不是 None）──
+    let shared_rel = "src/commands/_shared_reco_pool.rs";
+    let shared = std::fs::read_to_string(root.join(shared_rel))
+        .unwrap_or_else(|e| panic!("读取 {shared_rel} 失败: {e}"));
+    let mut call_points = 0usize;
+    for form in ["pool_dao::insert_picks(", "pool_dao::upsert_pick("] {
+        let mut from = 0usize;
+        while let Some(pos) = shared[from..].find(form) {
+            let at = from + pos;
+            from = at + form.len();
+            call_points += 1;
+            let lo = at.saturating_sub(200);
+            let hi = (at + 600).min(shared.len());
+            let window = &shared[lo..hi];
+            assert!(
+                window.contains("RECO_ALGORITHM_VERSION") || window.contains("reco_version"),
+                "[{shared_rel}] `{form}` 调用点近邻没有代际透传（`RECO_ALGORITHM_VERSION` / \
+                 `reco_version`）⇒ 写入行 `reco_version` 为 NULL，样本算法归属永久未知"
+            );
+        }
+    }
+    assert!(
+        call_points >= 2,
+        "共享入口里只找到 {call_points} 个 dao 落库调用点（至少应有 insert_picks + upsert_pick 两个）\
+         ⇒ 判据失效或被改名"
+    );
 }
 
 /// 读「出厂变量表里某个变量的字符串值是否等于 `on`」。
@@ -2421,6 +2524,26 @@ fn portfolio_mgr_ultra_entry_gate_requires_stock_level_strength() {
     assert_eq!(cap("卖出"), "卖出");
 }
 
+/// 决策否决门状态的**进程内排他锁**（`decision_gates` 的 GATES / 冻结计数都是进程级全局）。
+///
+/// 两种测试会用门状态，且**方向相反**：
+/// - 「跑 Rhai 脚本、断言门关行为」的测试 → 用 `with_gates_disabled` **冻结成全关**，
+///   这会全局生效 ⇒ 别的线程此刻读门一律得 `false`；
+/// - 「断言某门为开」的测试 → `set_state(true, ..)` 后必须读到 `true`。
+///
+/// 冻结计数是原子加法，能造「全关」，**造不出「指定门开」** ⇒ 后者被前者压成假红
+/// （2026-10-29 实测：`cargo test -p axagent --lib ...seed_consistency_tests` 并发跑时
+/// `decision_gate_switch_reaches_rhai_scripts` 报「风控门打开后必须报 true」，
+/// 单跑必绿 —— 典型幽灵红）。
+///
+/// ⇒ 凡**冻结**或**断言门开**的测试都必须先取本 guard（普通「断言门关」的测试不必：
+/// 冻结只会让门读 `false`，与它们的期望同向）。
+///
+/// ⚠ 用 `parking_lot::Mutex` 而非 `std::sync::Mutex`：后者在 `clippy.toml` 的
+/// `disallowed-types` 里（`-D warnings` 会红）。
+/// ⚠ **不可嵌套取锁**（同线程二次 lock 会死锁）⇒ 不要在同一测试里重复 `lock()`。
+static GATE_STATE_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 /// 决策否决门开关（2026-10-26 用户裁决）在**生产同构引擎**上的行为判据。
 ///
 /// 这条门锁的是**「开关真的接到了脚本」** —— 不是「函数存在」：
@@ -2431,6 +2554,10 @@ fn portfolio_mgr_ultra_entry_gate_requires_stock_level_strength() {
 #[test]
 fn decision_gate_switch_reaches_rhai_scripts() {
     use axagent_analysis_engine::decision_gates::{self, Gate};
+
+    // ② 步要求「门开之后读到 true」⇒ 必须与「冻结成全关」的测试互斥，否则幽灵红
+    // （见 `GATE_STATE_LOCK` 的文档）。
+    let _gate_guard = GATE_STATE_LOCK.lock();
 
     let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
     // 「门是否放开」用**宿主函数**读，而不是脚本内的字面量 ⇒ 这条门同时证明
@@ -3835,6 +3962,11 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
     //   本门里「门把『算不出』当成了『通过』」这类断言会**随机变红**
     //   （红的原因与被测代码无关 —— 这类幽灵红比红本身更费时间）。
     // ⇒ 冻结门状态（全关 = 引入前的形态）再跑本门。
+    //
+    // ⚠ 冻结是**进程级**的（`TEST_FREEZE_DEPTH` 原子计数）⇒ 与「断言门为开」的
+    // `decision_gate_switch_reaches_rhai_scripts` 方向相反，两者并发必有一个假红
+    // （2026-10-29 实测）。故取同一个 `GATE_STATE_LOCK` 串行化。
+    let _gate_guard = GATE_STATE_LOCK.lock();
     axagent_analysis_engine::decision_gates::with_gates_disabled(|| {
         branch_node_scope_is_exactly_the_seed_mapping_inner();
     });
@@ -4964,9 +5096,23 @@ fn persist_shape_gate_fires_on_each_broken_wiring() {
     let vb = dm_persist_shape_violations(&typo);
     assert_eq!(vb.len(), 1, "破坏 B 应只红一条（mainlines 路径缺失），实得 {vb:?}");
 
-    // 破坏 C：版本号回落到 1 —— 图改了但不抬版，现网永远读不到新图。
-    let stale =
-        good.replace("const TEMPLATE_VERSION: i32 = 2;", "const TEMPLATE_VERSION: i32 = 1;");
+    // 破坏 C：版本号回落 —— 图改了但不抬版，现网永远读不到新图。
+    // ⚠ 锚点必须**从源文实测的现值构造**，不得硬编码 `= 2;`：2026-10-30 抬到 v3 时
+    //   硬编码锚点当即失配，本自负控变成「破坏未生效」的假红（自己把自己的守卫考倒）。
+    let cur_version: i32 = good
+        .lines()
+        .find_map(|l| {
+            let i = l.find("const TEMPLATE_VERSION: i32 =")?;
+            let tail = &l[i + "const TEMPLATE_VERSION: i32 =".len()..];
+            let digits: String = tail.trim().chars().take_while(|c| c.is_ascii_digit()).collect();
+            digits.parse().ok()
+        })
+        .expect("TEMPLATE_VERSION 常量应可解析");
+    assert!(cur_version >= 2, "现值须 >= 2 才有回落空间（实得 v{cur_version}）");
+    let stale = good.replace(
+        &format!("const TEMPLATE_VERSION: i32 = {cur_version};"),
+        "const TEMPLATE_VERSION: i32 = 1;",
+    );
     assert_ne!(stale, good, "破坏 C 未生效（锚点腐烂）");
     let version: i32 = stale
         .lines()
@@ -5030,4 +5176,220 @@ fn sampling_template_variables_are_retired_across_all_three_layers() {
             "RENAME_MAP 仍可能把别名复制到已退役的 {n}"
         );
     }
+}
+
+/// v193（2026-10-29）：资金流**信封对齐**的双端锁定。
+///
+/// 病灶（现网实证）：`ff9c46f39`（2026-10-28）把 `get_stock_money_flow` 从扁平
+/// JSON 改发 `{status,data,detail}` 信封，**没带消费端清单** ⇒ dq / portfolio-mgr /
+/// pace-calc / raw-digest 四个消费端集体静默 miss，「主力净流入」10-28 起 39/39
+/// 误判缺失。行为面由 rt-workflow `data_quality_placeholder_gate.rs` 的
+/// `money_flow_envelope_three_state_read_path_is_wired` 负责；本测试钉的是
+/// **接线面**（映射路径 + 解包锚点 + 死名防回流）—— 两侧都锁，改一边必红另一边。
+#[test]
+fn money_flow_envelope_paths_wired() {
+    let seed = read_ws_file("src/commands/stock_analysis_setup/seed_stock_analysis.rs");
+
+    // ── ① pace-calc 两路映射必须指向 content.data.* ──
+    for (key, path) in [
+        ("money_flow_net", "t-hotmoney-data.result.content.data.mainNetInflow"),
+        ("money_flow_history", "t-hotmoney-data.result.content.data.history"),
+    ] {
+        assert!(
+            seed.contains(&format!(r#"("{key}", "{path}")"#)),
+            "`{key}` 的注入源必须是信封后的 `{path}`。\n\
+             若退回 content.mainNetInflow / content.history 的扁平路径，10-28 起该值恒 miss\n\
+             （dq「主力净流入」39/39 误判缺失即此病灶；行为门在 data_quality_placeholder_gate.rs）。"
+        );
+    }
+
+    // ── ② 防回流：扁平旧路不得复活（只查 money flow 这一对键，别扩他源）──
+    for stale in [
+        r#"("money_flow_net", "t-hotmoney-data.result.content.mainNetInflow")"#,
+        r#"("money_flow_history", "t-hotmoney-data.result.content.history")"#,
+    ] {
+        assert!(
+            !seed.contains(stale),
+            "映射退回扁平旧路径 `{stale}` —— 信封（ff9c46f39）之后该路径恒不命中，\n\
+             属已知回归形态，必须走 content.data.*"
+        );
+    }
+
+    // ── ③ dq 信封解包锚点：status 三态读路必须在脚本里 ──
+    let dq = read_ws_file("src/commands/data-quality.rhai");
+    let dq_slice = slice_between(
+        "data-quality.rhai",
+        &dq,
+        "fn extract_main_net_inflow(raw)",
+        "// 提取股东增减持交易条数",
+    );
+    assert!(
+        dq_slice.contains(r#"type_of(mf["status"]) == "string""#)
+            && dq_slice.contains("mf[\"status\"] != \"ok\"")
+            && dq_slice.contains(r#"mf = mf["data"]"#),
+        "extract_main_net_inflow 的 status 感知解包（ok 下钻 data / !=ok 视为无数据）被摘除 ⇒\n\
+         信封形态退回「扁平 miss = 缺失」的 39/39 误判。"
+    );
+    assert!(
+        dq_slice.contains(r#"mf["mainNetInflow"]"#)
+            && dq_slice.contains(r#"mf["main_net_inflow"]"#),
+        "camelCase + snake_case 双名兼容（V60 修复）不得随信封改造一并被删 —— 旧快照仍按裸 map 读。"
+    );
+
+    // ── ④ portfolio-mgr：f9 必须吃 mf_body，且 data_gaps 与 f9 同源 ──
+    let pm = read_ws_file("src/commands/portfolio-mgr.rhai");
+    assert!(
+        pm.contains("let mf_body =")
+            && pm.contains("let f9_signal = if type_of(mf_body) == \"map\""),
+        "portfolio-mgr 的 f9 必须从 mf_body（status 感知解包后的载荷层）读值；\n\
+         绕回直接 safe_parse(money_flow) 的扁平读会复刻 10-28 的 f9 恒 0 回归。"
+    );
+    assert!(
+        pm.contains(
+            r#"if type_of(mf_body) != "map" { data_gaps.push("资金流向(t-hotmoney-data)"); }"#
+        ),
+        "data_gaps 的资金流向判据必须与 f9 同源于 mf_body —— 旧判据 `!present(money_flow)` \n\
+         在 source_failed 信封下恒为「有数据」，缺口栏与 f9=0 互相矛盾。"
+    );
+
+    // ── ⑤ pace-calc：history 双形态兼容锚点 ──
+    let pace = read_ws_file("src/commands/pace-calc.rhai");
+    assert!(
+        pace.contains(r#"type_of(money_flow_history) == "array""#)
+            && pace.contains("let mf_net_f ="),
+        "pace-calc 必须同时接受 array（v193 注入形态）与 string（v192 前形态），\n\
+         且 money_flow_net 数值归一（f64/i64）—— 否则背离修正分支再次静默失效（该分支零告警，\n\
+         是 10-28 回归里最隐蔽的一条：dq 不会为它报缺失）。"
+    );
+
+    // ── ⑥ raw-digest：四个已包信封的源必须走 render_outcome；死名不得回流 ──
+    let rd = read_ws_file("src/commands/raw-digest.rhai");
+    for key in ["market", "sentiment", "hotmoney", "sector"] {
+        assert!(
+            rd.contains(&format!("out[\"{key}\"] = render_outcome(")),
+            "raw-digest 的 `{key}` 段必须走 render_outcome —— 其源工具（get_stock_kline / \n\
+             get_social_sentiment / get_stock_money_flow / get_industry_ranking）自 ff9c46f39 \n\
+             起带 {{status,data}} 信封，render_map 会把空态伪渲染成无成因文本。"
+        );
+    }
+    let p_flow = slice_between("raw-digest.rhai", &rd, "let P_FLOW = [", "];");
+    assert!(
+        p_flow.contains("\"superLargeNet\"") && p_flow.contains("\"mediumNet\""),
+        "P_FLOW 必须是 MoneyFlow DTO 的真实 camelCase 字段名。"
+    );
+    // 死名只在 P_FLOW **表体**内禁止：注释里可以（也应当）留着出处说明，
+    // 否则「记录历史病灶」与「禁止回流」两条纪律会互相打脸（2026-10-29 实测踩中）。
+    for dead in ["largeNetInflow", "xlargeNetInflow"] {
+        assert!(
+            !p_flow.contains(dead),
+            "`{dead}` 是 MoneyFlow 任何版本都从未产出过的死名（旧 P_FLOW 抄错），写回表体即红。"
+        );
+    }
+
+    // ── ⑦ 版本门：以上全是图内容（CodeNode.code / input_mapping）⇒ 必须升版 ──
+    // ⚠ 断言用**下限**而非等值：等值断言会在下一次抬版时自己腐烂（同
+    //   `persist_shape_gate_fires_on_each_broken_wiring` 的「破坏 C」教训，2026-10-30 实测）。
+    let main_ver: i32 = seed
+        .lines()
+        .find_map(|l| {
+            let i = l.find("pub const TEMPLATE_VERSION: i32 =")?;
+            let tail = &l[i + "pub const TEMPLATE_VERSION: i32 =".len()..];
+            let digits: String = tail.trim().chars().take_while(|c| c.is_ascii_digit()).collect();
+            digits.parse().ok()
+        })
+        .expect("seed_stock_analysis.rs 的 TEMPLATE_VERSION 应可解析");
+    assert!(
+        main_ver >= 193,
+        "信封对齐改了 data-quality/portfolio-mgr/pace-calc/raw-digest 的脚本正文与 pace \n\
+         映射（均随模板落库）⇒ 必须抬版（实测 v{main_ver} < 193 ⇒ 旧库照跑扁平读，\n\
+         v50/v118/v119 记载的生成物陷阱）。"
+    );
+}
+
+/// v193 第二批（2026-10-30）：**信封波及面的第二组** —— 趋势智选 / 每日主线 / 跨市场。
+///
+/// 与第一组（资金流）同源、不同槽位：`ff9c46f39` 把 10 个工具统一改发
+/// `{status,data,detail}`，而这一组的消费端是 `to_array()` 的**字符串分支**——
+/// 它当年只认裸数组（`if type_of(p) == "array" { p } else { [] }`）。
+/// 病灶形态特别隐蔽：信封（map）被静默压成 `[]`，而 `[]` 与「今天确实没有数据」
+/// **完全不可区分**，不产生任何告警（dq 也不会为此报缺失，因为它根本不知道这些腿存在）。
+///
+/// 本测试钉三件事：
+///   ① 四个脚本 `to_array` 的 string 分支都必须先下钻 `data`；
+///   ② 四个模板的版本门都必须抬到能落库的值（脚本随 CodeNode.code 落库）；
+///   ③ 防回流：string 分支不得退回「只认 array」的旧形态。
+#[test]
+fn envelope_driven_to_array_call_sites_are_wired() {
+    // ① 四个脚本的 string 分支
+    //    锚点取**函数头** `fn to_array(v) {` 到 map 分支：同文件里 `to_f64` 也有
+    //    `else if type_of(v) == "string" {`，只锚后半句会切到错误函数上（假绿风险）。
+    for (path, label) in [
+        ("src/commands/bottleneck-calc.rhai", "bottleneck-calc.rhai"),
+        ("src/commands/scanner-brief.rhai", "scanner-brief.rhai"),
+        ("src/commands/strategy-scorer.rhai", "scanner-brief 同源的 strategy-scorer.rhai"),
+        ("src/commands/candidate-pool.rhai", "candidate-pool.rhai"),
+    ] {
+        let src = read_ws_file(path);
+        let slice =
+            slice_between(label, &src, "fn to_array(v) {", "} else if type_of(v) == \"map\" {");
+        assert!(
+            slice.contains(r#"p["data"]"#),
+            "{label} 的 to_array string 分支没有下钻 `p[\"data\"]` ⇒ \
+             {{status,data,detail}} 信封会被压成空数组，\n\
+             该腿静默降级且与「今天无数据」不可区分（唯一可观测后果是评分/候选凭空变空）。"
+        );
+        assert!(
+            !slice.contains("if type_of(p) == \"array\" { p } else { [] }"),
+            "{label} 的 string 分支退回了「只认裸数组」的旧形态。"
+        );
+    }
+
+    // ② 版本门（四模板各自独立落库）
+    //    ⚠ 用**下限**而不是等值：等值断言会在下一次抬版时自己腐烂
+    //    （2026-10-30 实测：`persist_shape_gate_fires_on_each_broken_wiring` 的「破坏 C」
+    //      硬编码 `= 2;`，本批抬到 3 后当场变成「破坏未生效」的假红）。
+    fn seed_versions(src: &str) -> Vec<i32> {
+        src.lines()
+            .filter_map(|l| {
+                let i = l.find("TEMPLATE_VERSION: i32 =")?;
+                let tail = &l[i + "TEMPLATE_VERSION: i32 =".len()..];
+                let digits: String =
+                    tail.trim().chars().take_while(|c| c.is_ascii_digit()).collect();
+                digits.parse().ok()
+            })
+            .collect()
+    }
+
+    for (path, floor, why) in [
+        (
+            "src/commands/stock_analysis_setup/seed_serenity.rs",
+            63,
+            "行业排名/快讯/政策三条工具腿的 to_array",
+        ),
+        ("src/commands/stock_analysis_setup/seed_serenity_fast.rs", 3, "复用同四份脚本"),
+        (
+            "src/commands/stock_analysis_setup/seed_daily_market_events.rs",
+            3,
+            "scanner-brief / candidate-pool",
+        ),
+        ("src/commands/stock_analysis_setup/seed_news_cross_market.rs", 2, "candidate-pool"),
+    ] {
+        let versions = seed_versions(&read_ws_file(path));
+        assert!(!versions.is_empty(), "{path} 里找不到 TEMPLATE_VERSION 常量锚点");
+        for v in &versions {
+            assert!(
+                *v >= floor,
+                "{path} 的 TEMPLATE_VERSION=v{v} 低于下限 {floor} —— {why} 随 CodeNode.code 落库，\n\
+                 退回旧值会让旧脚本继续在库里跑（本门抬版后仍绿，故用下限而非等值）。"
+            );
+        }
+    }
+
+    // seed_serenity.rs 的**源码常量与测试副本**必须同值（不同步 ⇒ 写侧断言红）。
+    let ser = seed_versions(&read_ws_file("src/commands/stock_analysis_setup/seed_serenity.rs"));
+    assert_eq!(
+        ser.first(),
+        ser.last(),
+        "seed_serenity.rs 里源码常量与测试副本已漂移（见 1731 行注释：副本必须同步）。"
+    );
 }

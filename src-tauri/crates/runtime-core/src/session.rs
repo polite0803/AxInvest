@@ -107,6 +107,7 @@ impl SessionExt for Session {
         self.push_message(ConversationMessage {
             role: MessageRole::User,
             blocks: vec![ContentBlock::Text { text: processed_text }],
+            thinking: None,
             usage: None,
         })
     }
@@ -335,16 +336,17 @@ impl ConversationMessageExt for ConversationMessage {
         Self {
             role: MessageRole::User,
             blocks: vec![ContentBlock::Text { text: text.into() }],
+            thinking: None,
             usage: None,
         }
     }
 
     fn assistant(blocks: Vec<ContentBlock>) -> Self {
-        Self { role: MessageRole::Assistant, blocks, usage: None }
+        Self { role: MessageRole::Assistant, blocks, thinking: None, usage: None }
     }
 
     fn assistant_with_usage(blocks: Vec<ContentBlock>, usage: Option<TokenUsage>) -> Self {
-        Self { role: MessageRole::Assistant, blocks, usage }
+        Self { role: MessageRole::Assistant, blocks, thinking: None, usage }
     }
 
     fn tool_result(
@@ -361,6 +363,7 @@ impl ConversationMessageExt for ConversationMessage {
                 output: output.into(),
                 is_error,
             }],
+            thinking: None,
             usage: None,
         }
     }
@@ -383,6 +386,11 @@ impl ConversationMessageExt for ConversationMessage {
             "blocks".to_string(),
             JsonValue::Array(self.blocks.iter().map(ContentBlockExt::to_json).collect()),
         );
+        // thinking 专用字段（2026-10-30）：会话持久化也必须携带，否则恢复后的
+        // 历史缺 reasoning_content，DeepSeek 思考模式多轮工具调用整轮报废。
+        if let Some(thinking) = &self.thinking {
+            object.insert("thinking".to_string(), JsonValue::String(thinking.clone()));
+        }
         if let Some(usage) = self.usage {
             object.insert("usage".to_string(), usage_to_json(usage));
         }
@@ -413,8 +421,10 @@ impl ConversationMessageExt for ConversationMessage {
             .iter()
             .map(<ContentBlock as ContentBlockExt>::from_json)
             .collect::<Result<Vec<_>, _>>()?;
+        // thinking 可选：旧持久化 JSON 无此键 → None（向前兼容）
+        let thinking = object.get("thinking").and_then(JsonValue::as_str).map(str::to_string);
         let usage = object.get("usage").map(usage_from_json).transpose()?;
-        Ok(Self { role, blocks, usage })
+        Ok(Self { role, blocks, thinking, usage })
     }
 }
 

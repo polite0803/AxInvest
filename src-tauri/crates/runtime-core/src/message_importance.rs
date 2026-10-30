@@ -27,11 +27,13 @@ mod tests {
         let user_msg = ConversationMessage {
             role: MessageRole::User,
             blocks: vec![ContentBlock::Text { text: "帮我分析这个bug".into() }],
+            thinking: None,
             usage: None,
         };
         let assistant_msg = ConversationMessage {
             role: MessageRole::Assistant,
             blocks: vec![ContentBlock::Text { text: "好的".into() }],
+            thinking: None,
             usage: None,
         };
         assert!(score_message(&user_msg) > score_message(&assistant_msg));
@@ -42,6 +44,7 @@ mod tests {
         let plain = ConversationMessage {
             role: MessageRole::Assistant,
             blocks: vec![ContentBlock::Text { text: "ok".into() }],
+            thinking: None,
             usage: None,
         };
         let with_tool = ConversationMessage {
@@ -51,6 +54,7 @@ mod tests {
                 name: "Read".into(),
                 input: "{}".into(),
             }],
+            thinking: None,
             usage: None,
         };
         assert!(score_message(&with_tool) > score_message(&plain));
@@ -66,6 +70,7 @@ mod tests {
                 output: "success".into(),
                 is_error: false,
             }],
+            thinking: None,
             usage: None,
         };
         let error_result = ConversationMessage {
@@ -76,6 +81,7 @@ mod tests {
                 output: "command not found".into(),
                 is_error: true,
             }],
+            thinking: None,
             usage: None,
         };
         assert!(score_message(&ok_result) > score_message(&error_result));
@@ -86,11 +92,13 @@ mod tests {
         let long_msg = ConversationMessage {
             role: MessageRole::Assistant,
             blocks: vec![ContentBlock::Text { text: "x".repeat(600) }],
+            thinking: None,
             usage: None,
         };
         let short_msg = ConversationMessage {
             role: MessageRole::Assistant,
             blocks: vec![ContentBlock::Text { text: "ok".into() }],
+            thinking: None,
             usage: None,
         };
         assert!(score_message(&long_msg) > score_message(&short_msg));
@@ -112,6 +120,7 @@ mod tests {
                     is_error: true, // 错误
                 },
             ],
+            thinking: None,
             usage: None,
         };
         // 基础 50 - 5(短文本) - 10(错误) = 35，不应为负

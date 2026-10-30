@@ -163,6 +163,7 @@ mod tests {
         let msg = ConversationMessage {
             role: MessageRole::User,
             blocks: vec![ContentBlock::Text { text: "hello world".to_string() }],
+            thinking: None,
             usage: None,
         };
         // 4 (角色) + "hello world" 11 字符 / 4 = 2 → max(1) → 2 → total: 4 + 2 = 6
@@ -179,6 +180,7 @@ mod tests {
             blocks: vec![axagent_runtime_core::session::ContentBlock::Text {
                 text: "x".repeat(400), // 400 / 4 ≈ 100 + 4 角色 = 104 > 100
             }],
+            thinking: None,
             usage: None,
         };
         let decision = predictor.evaluate(&[msg]);
@@ -196,6 +198,7 @@ mod tests {
             blocks: vec![axagent_runtime_core::session::ContentBlock::Text {
                 text: "hello".to_string(),
             }],
+            thinking: None,
             usage: None,
         };
         let decision = predictor.evaluate(&[msg]);
@@ -239,6 +242,7 @@ mod tests {
         let msg = ConversationMessage {
             role: MessageRole::User,
             blocks: vec![ContentBlock::Text { text: "a".to_string() }],
+            thinking: None,
             usage: None,
         };
         for _ in 0..25 {

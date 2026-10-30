@@ -221,7 +221,17 @@ let P_REPORT = [
 ];
 let P_ANNOUNCE = ["title", "announceDate", "annType", "summary"];
 let P_KLINE = ["date", "close", "pctChg", "open", "high", "low", "volume"];
-let P_FLOW = ["date", "mainNetInflow", "largeNetInflow", "xlargeNetInflow", "history"];
+// 2026-10-29：按 MoneyFlow/MoneyFlowDaily DTO 的真实 camelCase 字段改列
+// （旧表里的 largeNetInflow/xlargeNetInflow 任何版本都没产出过，属抄错的死名）。
+let P_FLOW = [
+    "date",
+    "mainNetInflow",
+    "superLargeNet",
+    "largeNet",
+    "mediumNet",
+    "smallNet",
+    "history",
+];
 let P_LOCKUP = ["date", "title", "ratio", "shares", "type", "announceDate"];
 let P_SECTOR = ["name", "rank", "pctChg", "indexName", "total"];
 let P_VISIT = ["date", "institution", "type", "title", "summary"];
@@ -236,12 +246,17 @@ out["policy"] = render_list(policy_data, P_NEWS, 1800);
 out["research"] = render_list(research_data, P_REPORT, 1800);
 out["catalyst"] = render_list(catalyst_data, P_ANNOUNCE, 1800);
 
-out["market"] = render_map(market_data, P_KLINE, 800);
-out["sentiment"] = render_map(sentiment_data, P_NEWS, 600);
+// 2026-10-29 信封对齐：market(get_stock_kline)/sentiment(get_social_sentiment)/
+// hotmoney(get_stock_money_flow)/sector(get_industry_ranking) 四源于 10-28 起改发
+// {status,data,detail} 信封（mcp_tools.rs ff9c46f39）⇒ 必须走 render_outcome，
+// 否则空态会被渲染成裸 "{}"/"[]" 伪装「无数据」，故障成因整层丢失。
+// render_outcome 对历史裸 array/裸 map 同形兼容，无需再分形态。
+out["market"] = render_outcome(market_data, P_KLINE, 800);
+out["sentiment"] = render_outcome(sentiment_data, P_NEWS, 600);
 out["fundamentals"] = render_map(fundamentals_data, P_REPORT, 1000);
-out["hotmoney"] = render_map(hotmoney_data, P_FLOW, 700);
+out["hotmoney"] = render_outcome(hotmoney_data, P_FLOW, 700);
 out["lockup"] = render_map(lockup_data, P_LOCKUP, 700);
-out["sector"] = render_map(sector_data, P_SECTOR, 700);
+out["sector"] = render_outcome(sector_data, P_SECTOR, 700);
 
 out["pledge"] = render_map(pledge_data, P_PLEDGE, 400);
 out["index_quotes"] = render_outcome(index_quotes, [], 400);

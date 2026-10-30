@@ -26,7 +26,13 @@ fn to_array(v) {
     if type_of(v) == "array" { v }
     else if type_of(v) == "string" {
         let p = json_parse(v.to_string());
-        if type_of(p) == "array" { p } else { [] }
+        // 2026-10-30（v193 同批）：get_industry_ranking 自 2026-10-28 改发
+        // {status,data,detail} 信封 ⇒ 注入串是信封 JSON，必须下钻 data 才拿得到行业数组。
+        if type_of(p) == "array" { p }
+        else if type_of(p) == "map" && p["status"] == "ok"
+            && p["data"] != () && type_of(p["data"]) == "array" { p["data"] }
+        else if type_of(p) == "map" && p["data"] != () && type_of(p["data"]) == "array" { p["data"] }
+        else { [] }
     } else if type_of(v) == "map" {
         // ToolNode 输出常被包装为 {"content": "JSON字符串"}
         if v["content"] != () && type_of(v["content"]) == "string" {

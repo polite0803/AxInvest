@@ -21,11 +21,18 @@
 // 故需要读注入变量的逻辑全部写在顶层。
 
 // ── 通用防御（形态与 strategy-scorer.rhai 一致） ──
+// 2026-10-30（v193 同批）：string 分支补信封解包。industry_ranking / cls_flash 的注入源是
+// `t-*.result`（ToolNode content 字符串），而这两个工具自 2026-10-28（ff9c46f39）改发
+// `{status,data,detail}` ⇒ 旧实现只认裸数组 ⇒ 信封被压成 `[]`，行业/快讯两段静默降级。
 fn to_array(v) {
     if type_of(v) == "array" { v }
     else if type_of(v) == "string" {
         let p = json_parse(v.to_string());
-        if type_of(p) == "array" { p } else { [] }
+        if type_of(p) == "array" { p }
+        else if type_of(p) == "map" && p["status"] == "ok"
+            && p["data"] != () && type_of(p["data"]) == "array" { p["data"] }
+        else if type_of(p) == "map" && p["data"] != () && type_of(p["data"]) == "array" { p["data"] }
+        else { [] }
     } else if type_of(v) == "map" {
         if v["content"] != () && type_of(v["content"]) == "string" {
             let p = json_parse(v["content"].to_string());

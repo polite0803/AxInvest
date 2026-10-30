@@ -426,6 +426,7 @@ mod tests {
         session.messages = vec![ConversationMessage {
             role: MessageRole::Assistant,
             blocks: vec![ContentBlock::Text { text: "done".to_string() }],
+            thinking: None,
             usage: Some(TokenUsage {
                 input_tokens: 5,
                 output_tokens: 2,

@@ -28,7 +28,10 @@ use axagent_harness::workflow_types::{
 };
 
 const TEMPLATE_ID: &str = "news-to-cross-market-analysis";
-const TEMPLATE_VERSION: i32 = 1;
+/// v2（2026-10-30）：信封对齐 —— 本链 LLM 与代码节点消费的 `search_news` 自 10-28（ff9c46f39）
+/// 改发 `{status,data,detail}`；`candidate-pool.rhai` 的 `to_array` 已补 data 下钻
+/// （否则候选池恒空、被读成「今天无跨市场线索」）。脚本随 CodeNode.code 落库 ⇒ 必须升版。
+const TEMPLATE_VERSION: i32 = 2;
 
 /// 种子化 news-to-cross-market-analysis 工作流模板
 pub async fn seed_news_cross_market_template(

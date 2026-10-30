@@ -52,7 +52,12 @@ type TokenUsage = { inputTokens: number, outputTokens: number, cacheCreationInpu
 
 type ContentBlock = { "Text": { text: string, } } | { "ToolUse": { id: string, name: string, input: string, } } | { "ToolResult": { tool_use_id: string, tool_name: string, output: string, is_error: boolean, } };
 
-type ConversationMessage = { role: MessageRole, blocks: Array<ContentBlock>, usage: TokenUsage | null, };
+type ConversationMessage = { role: MessageRole, blocks: Array<ContentBlock>, 
+/**
+ * 模型思考链（DeepSeek reasoning_content 等）。
+ * 回放带 tool_calls 的 assistant 历史时必须与之一并回传（DeepSeek 思考模式成对判据）。
+ */
+thinking?: string | null, usage: TokenUsage | null, };
 
 type SessionInfo = { sessionId: string, userId: string, title: string | null, createdAt: bigint, updatedAt: bigint, tokenUsage: TokenUsage | null, };
 

@@ -169,19 +169,17 @@ fn build_engine_with_asof_methods(methods_json: &'static str) -> Engine {
     engine.register_fn("join", |arr: rhai::Array, sep: &str| -> String {
         arr.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(sep)
     });
-    // 替身策略：对象/标量维持原「返回 UNIT」形态（既有测试都直接注入 map，
-    // 不走解析路径）；**字符串数组**给出真实解析 —— S2 的 asof 方法清单判据
-    // 必须能真的解析出数组，否则豁免逻辑在测试里恒为假绿。
+    // `json_parse` 必须是**忠实替身**（2026-10-29 v193 修正）：
+    //   旧替身只认「纯字符串数组」一个形态，其余 JSON 一律返回 UNIT —— 这与生产
+    //   （code_executor 注册的真 json_parse / json_value_to_dynamic）不符。
+    //   后果实测：`safe_parse('{"status":"ok","data":{...}}')` 在测试里恒为 ()，
+    //   信封解包的行为门因此**永远测不到真实路径**（v193 首个用例即被它判红，
+    //   而同一脚本在生产 39/39 的缺失正是另一侧的事实）。
+    //   现改为真解析，并保留字符串数组的 Dynamic 化（S2 的 asof 清单判据依赖它）。
     engine.register_fn("json_parse", |s: &str| -> Dynamic {
         match serde_json::from_str::<serde_json::Value>(s) {
-            Ok(serde_json::Value::Array(arr)) if arr.iter().all(|v| v.is_string()) => {
-                Dynamic::from(
-                    arr.iter()
-                        .map(|v| Dynamic::from(v.as_str().unwrap_or("").to_string()))
-                        .collect::<rhai::Array>(),
-                )
-            },
-            _ => Dynamic::UNIT,
+            Ok(v) => axagent_harness::json_value_to_dynamic(&v),
+            Err(_) => Dynamic::UNIT,
         }
     });
     engine.register_fn("print", |_s: &str| {});
@@ -2443,5 +2441,63 @@ fn score_sum_reason_absent_when_score_unknown() {
     assert!(
         !diag(&r, "mk").contains_key("score_sum_reason"),
         "多空分缺位时 score_sum_reason 必须整键缺席（= 不知道），不得写 null 或空串顶数"
+    );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// 2026-10-29（v193）：资金流信封对齐 —— extract_main_net_inflow 的三态读路
+// ───────────────────────────────────────────────────────────────────────────
+
+/// 为什么必须有（现网实证）：`get_stock_money_flow` 于 2026-10-28（mcp_tools.rs
+/// ff9c46f39）从扁平 JSON 改发 `{status,data,detail}` 信封，mainNetInflow 落到
+/// data 层 ⇒ 消费端扁平读全数 miss，10-28 起「主力净流入」在 **39/39** 条完成
+/// run 里被判缺失（PG `stock_analyses` 2026-10-29 全量核对），而数据本身有值
+/// （当日实取 -33,618,073 元）。病灶是**读路**不是取数 —— 没有这组测试，
+/// 下一次信封/契约变更还会以同样形态复发（本仓「契约变更未带消费端清单」高发型）。
+///
+/// 三态判据各钉一条，缺一即红：
+///   ① `status=ok` 信封 ⇒ 下钻 data 层读到值 ⇒ **不得**进 missing_factors；
+///   ② `status!=ok` 信封 ⇒ 视为无数据（成因归上游工具披露，本层不吃旧值）⇒ 必须进；
+///   ③ 裸扁平 map（历史快照 / 未包信封通道）⇒ 照旧读（向后兼容，删此路即红）；
+///   ④ `status=ok` 且净额恰为 0 ⇒ P2-1「零=中性无信号」口径保持（不得被信封改造顺手放宽）。
+#[test]
+fn money_flow_envelope_three_state_read_path_is_wired() {
+    let report = "均线多头排列，量能温和放大，RSI 处于中性区。";
+    let missing = |env: &str| -> Vec<String> {
+        let r = run_quality_with_scalars(
+            &[("mk", report)],
+            &[("money_flow", Dynamic::from(env.to_string()))],
+        );
+        names(&r, "missing_factors")
+    };
+
+    // ① 现网实测形态（002850，2026-10-29 19:18 run）
+    let ok_env = r#"{"status":"ok","data":{"date":"2026-10-29","mainNetInflow":-33618073.0,"superLargeNet":-11905003.0,"largeNet":-21713070.0,"mediumNet":-9185369.0,"smallNet":42803440.0},"detail":""}"#;
+    let mf_list = missing(ok_env);
+    assert!(
+        !mf_list.contains(&"主力净流入".to_string()),
+        "① ok 信封净额 -33,618,073 有值 ⇒ 不得判缺失（10-28~29 的 39/39 病灶正是这条）。实际 missing_factors: {mf_list:?}"
+    );
+
+    // ② 失败信封：载荷为 null，只吃 status
+    let fail_env = r#"{"status":"source_failed","data":null,"detail":"全部通道失败"}"#;
+    assert!(
+        missing(fail_env).contains(&"主力净流入".to_string()),
+        "② status!=ok 信封必须如实判缺失 —— 把故障伪装成有值比误报缺失更坏"
+    );
+
+    // ③ 旧扁平形态（10-26 及以前的 content）：向后兼容
+    let flat = r#"{"date":"2026-10-26 15:00","mainNetInflow":5604835.0,"superLargeNet":-47290830.0,"largeNet":41686004.0,"mediumNet":-16234656.0,"smallNet":null}"#;
+    assert!(
+        !missing(flat).contains(&"主力净流入".to_string()),
+        "③ 旧扁平 map 仍须可读 —— 删兼容分支会让历史快照/as-of 数据全体误判缺失"
+    );
+
+    // ④ 零值 = 中性无信号（P2-1 口径，与信封改造正交，不得顺手放宽）
+    let zero_env =
+        r#"{"status":"ok","data":{"date":"2026-10-29","mainNetInflow":0.0},"detail":""}"#;
+    assert!(
+        missing(zero_env).contains(&"主力净流入".to_string()),
+        "④ 净额 0 仍按 P2-1「零=中性」计缺失，信封兼容不得改变该判据"
     );
 }

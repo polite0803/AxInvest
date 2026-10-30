@@ -1762,6 +1762,17 @@ fn build_assistant_message(
 
     flush_text_block(&mut text, &mut blocks);
 
+    // 回放保真（2026-10-30）：思考链无条件进入专用字段，供下一轮回放时与
+    // tool_calls 成对带回 reasoning_content —— DeepSeek 思考模式强制两者成对，
+    // 缺失即报 `assistant.tool_calls contains an invalid function call`，整轮
+    // 会话报废。UI 可视化（下方 `<think>` 标签注入）仍由 show_thought_chain
+    // 门控，二者自此解耦：关闭可视化不再丢失回放所需的 reasoning_content。
+    let thinking_for_message = if thinking.is_empty() {
+        None
+    } else {
+        Some(thinking.clone())
+    };
+
     // 思维链可视化：仅当 thought_chain_enabled 开启时，才把推理内容包成
     // `<think>` 块前置到正文（前端据此渲染可折叠的"思考过程"）。关闭时
     // 推理内容仍被捕获并作为第 4 个返回值透出（用于 trajectory / 日志），
@@ -1816,12 +1827,10 @@ fn build_assistant_message(
             // Return partial result — the agent loop will treat this as
             // a complete assistant turn and continue (potentially retrying
             // or asking the user)
-            return Ok((
-                ConversationMessageExt::assistant_with_usage(blocks, usage),
-                usage,
-                prompt_cache_events,
-                thinking,
-            ));
+            let mut message: ConversationMessage =
+                ConversationMessageExt::assistant_with_usage(blocks, usage);
+            message.thinking = thinking_for_message;
+            return Ok((message, usage, prompt_cache_events, thinking));
         }
         return Err(RuntimeError::new(
             "assistant stream ended without a message stop event and no content was received",
@@ -1831,12 +1840,11 @@ fn build_assistant_message(
         return Err(RuntimeError::new("assistant stream produced no content"));
     }
 
-    Ok((
-        ConversationMessageExt::assistant_with_usage(blocks, usage),
-        usage,
-        prompt_cache_events,
-        thinking,
-    ))
+    let mut message: ConversationMessage =
+        ConversationMessageExt::assistant_with_usage(blocks, usage);
+    message.thinking = thinking_for_message;
+
+    Ok((message, usage, prompt_cache_events, thinking))
 }
 
 fn flush_text_block(text: &mut String, blocks: &mut Vec<ContentBlock>) {
@@ -3219,6 +3227,43 @@ mod tests {
         assert!(!text.contains("<think"), "关闭时不应注入 <think> 可视化块");
         assert!(text.contains("final answer"), "正文应保留");
         assert_eq!(thinking, "weighing options", "关闭可视化不影响推理内容捕获");
+    }
+
+    /// 回放保真（2026-10-30）：无论思维链可视化开关如何，thinking 都必须进入
+    /// ConversationMessage 专用字段 —— 否则带 tool_calls 的 assistant 历史
+    /// 回放时缺 reasoning_content，DeepSeek 思考模式整轮报废。
+    #[test]
+    fn build_assistant_message_always_populates_thinking_field() {
+        let events = vec![
+            AssistantEvent::ThinkingDelta("weighing options".to_string()),
+            AssistantEvent::TextDelta("final answer".to_string()),
+            AssistantEvent::MessageStop,
+        ];
+
+        for show_thought_chain in [true, false] {
+            let (msg, _usage, _cache, thinking) =
+                build_assistant_message(events.clone(), show_thought_chain)
+                    .expect("should build message");
+            assert_eq!(
+                msg.thinking.as_deref(),
+                Some("weighing options"),
+                "show_thought_chain={show_thought_chain} 时专用字段必须填充"
+            );
+            assert_eq!(thinking, "weighing options");
+        }
+    }
+
+    /// 无思考轮：专用字段必须为 None（而非 Some("")）。
+    #[test]
+    fn build_assistant_message_leaves_thinking_none_without_reasoning() {
+        let events = vec![
+            AssistantEvent::TextDelta("plain answer".to_string()),
+            AssistantEvent::MessageStop,
+        ];
+        let (msg, _usage, _cache, thinking) =
+            build_assistant_message(events, false).expect("should build message");
+        assert_eq!(msg.thinking, None);
+        assert_eq!(thinking, "");
     }
 
     #[test]

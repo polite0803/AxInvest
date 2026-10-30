@@ -1513,41 +1513,52 @@ let f7_weight = if f7_signal != 0.0 { f7_default } else { 0.0 };
 //   若 kline_json 缺失（数据缺口），退回绝对额饱和（K=1 亿元），
 //   仍是连续值而非恒定 ±0.67。
 let f9_default = 0.08;
-let f9_signal = if present(money_flow) && type_of(money_flow) == "string" && money_flow != "" {
-    let mf = safe_parse(money_flow);
-    if type_of(mf) == "map" {
-        // V60 字段名兼容(2026-09-10): get_stock_money_flow 实际输出 camelCase
-        // (mainNetInflow/superLargeNet/largeNet/mediumNet)，同时兼容 snake_case。
-        // num_of 统一处理 f64 / i64（JSON 整数会解析为 i64，旧代码只判 f64 会漏读）。
-        let main_in = if present(mf["mainNetInflow"]) { num_of(mf["mainNetInflow"]) }
-            else if present(mf["main_net_inflow"]) { num_of(mf["main_net_inflow"]) }
-            else { () };
-        let super_large_in = if present(mf["superLargeNet"]) { num_of(mf["superLargeNet"]) }
-            else if present(mf["super_large_net"]) { num_of(mf["super_large_net"]) }
-            else { () };
-        let large_in = if present(mf["largeNet"]) { num_of(mf["largeNet"]) }
-            else if present(mf["large_net"]) { num_of(mf["large_net"]) }
-            else { () };
-        let medium_in = if present(mf["mediumNet"]) { num_of(mf["mediumNet"]) }
-            else if present(mf["medium_net"]) { num_of(mf["medium_net"]) }
-            else { () };
-        // 主力净额优先；缺失时用超大单+大单合成
-        let net = if type_of(main_in) == "f64" { main_in }
-            else if type_of(super_large_in) == "f64" && type_of(large_in) == "f64" { super_large_in + large_in }
-            else { () };
-        if type_of(net) == "f64" {
-            let avg_amt = pm_avg_turnover(kline_json, 5);
-            if type_of(avg_amt) == "f64" && avg_amt > 0.0 {
-                // 与个股自身流动性匹配：净额 / 近 5 日均成交额，K=6%
-                pm_saturate(net / avg_amt, 0.06)
-            } else {
-                // 兜底：无 K 线时按绝对额饱和（K=1 亿元），仍是连续值
-                pm_saturate(net, 100000000.0)
-            }
-        } else if type_of(medium_in) == "f64" {
-            // 只有中小单数据时反推：中单净流出=主力可能在买入（弱信号，封顶 ±0.4）
-            clamp(-pm_saturate(medium_in, 100000000.0) * 0.4, -0.4, 0.4)
-        } else { 0.0 }
+// 2026-10-29 信封对齐（与 data-quality.rhai 的 extract_main_net_inflow 同形态）：
+// get_stock_money_flow 自 2026-10-28（mcp_tools.rs ff9c46f39）改发 {status,data,detail}
+// 信封，mainNetInflow/superLargeNet/… 全部落到 data 层 ⇒ 旧的扁平读全数 miss
+// （实测 10-28 起 f9 恒 0、「主力净流入」100% 误判缺失，而数据本身有值）。
+// mf_body：载荷层 map；() ⇒ 本轮无可用资金流数据（无输入 / status != ok /
+// 信封载荷非 map）。裸 map（历史快照、未包信封的通道）照旧按当前层读。
+let mf_body = if present(money_flow) && type_of(money_flow) == "string" && money_flow != "" {
+    let mf0 = safe_parse(money_flow);
+    if type_of(mf0) != "map" { () }
+    else if type_of(mf0["status"]) == "string" {
+        if mf0["status"] == "ok" && type_of(mf0["data"]) == "map" { mf0["data"] } else { () }
+    } else { mf0 }
+} else { () };
+let f9_signal = if type_of(mf_body) == "map" {
+    let mf = mf_body;
+    // V60 字段名兼容(2026-09-10): get_stock_money_flow 实际输出 camelCase
+    // (mainNetInflow/superLargeNet/largeNet/mediumNet)，同时兼容 snake_case。
+    // num_of 统一处理 f64 / i64（JSON 整数会解析为 i64，旧代码只判 f64 会漏读）。
+    let main_in = if present(mf["mainNetInflow"]) { num_of(mf["mainNetInflow"]) }
+        else if present(mf["main_net_inflow"]) { num_of(mf["main_net_inflow"]) }
+        else { () };
+    let super_large_in = if present(mf["superLargeNet"]) { num_of(mf["superLargeNet"]) }
+        else if present(mf["super_large_net"]) { num_of(mf["super_large_net"]) }
+        else { () };
+    let large_in = if present(mf["largeNet"]) { num_of(mf["largeNet"]) }
+        else if present(mf["large_net"]) { num_of(mf["large_net"]) }
+        else { () };
+    let medium_in = if present(mf["mediumNet"]) { num_of(mf["mediumNet"]) }
+        else if present(mf["medium_net"]) { num_of(mf["medium_net"]) }
+        else { () };
+    // 主力净额优先；缺失时用超大单+大单合成
+    let net = if type_of(main_in) == "f64" { main_in }
+        else if type_of(super_large_in) == "f64" && type_of(large_in) == "f64" { super_large_in + large_in }
+        else { () };
+    if type_of(net) == "f64" {
+        let avg_amt = pm_avg_turnover(kline_json, 5);
+        if type_of(avg_amt) == "f64" && avg_amt > 0.0 {
+            // 与个股自身流动性匹配：净额 / 近 5 日均成交额，K=6%
+            pm_saturate(net / avg_amt, 0.06)
+        } else {
+            // 兜底：无 K 线时按绝对额饱和（K=1 亿元），仍是连续值
+            pm_saturate(net, 100000000.0)
+        }
+    } else if type_of(medium_in) == "f64" {
+        // 只有中小单数据时反推：中单净流出=主力可能在买入（弱信号，封顶 ±0.4）
+        clamp(-pm_saturate(medium_in, 100000000.0) * 0.4, -0.4, 0.4)
     } else { 0.0 }
 } else { 0.0 };
 // V56: 资金流因子消费 IC 代理权重（key="money_flow"）
@@ -3473,7 +3484,10 @@ if !present(consensusScore) { data_gaps.push("辩论共识分数(debate-converge
 if !f2_direction_known { data_gaps.push("辩论聚合方向(aggregate_prediction.direction 未产出或值域外)"); }
 if !present(catalyst_level) || catalyst_level == "" { data_gaps.push("催化剂评估(a-catalyst)"); }
 // overall_risk 始终存在（算法分类确保兜底）
-if !present(money_flow) { data_gaps.push("资金流向(t-hotmoney-data)"); }
+// 2026-10-29 信封对齐：判据从「输入串存在」收紧为「载荷可用」（mf_body 见 f9 段）。
+// 旧判据下 source_failed 信封也是非空字符串 ⇒ 缺口栏永远不报「资金流向」，
+// 与 f9 恒 0 互相矛盾；现两者同源于 mf_body，status != ok 会如实进 data_gaps。
+if type_of(mf_body) != "map" { data_gaps.push("资金流向(t-hotmoney-data)"); }
 if !present(lockup_bundle) { data_gaps.push("筹码面数据(t-lockup-data)"); }
 if !present(dragon_tiger) { data_gaps.push("龙虎榜数据(t-dragon-tiger-data)"); }
 

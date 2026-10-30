@@ -407,6 +407,7 @@ pub fn to_compaction_result(
     let mut compacted_messages = vec![ConversationMessage {
         role: MessageRole::System,
         blocks: vec![ContentBlock::Text { text: continuation_message }],
+        thinking: None,
         usage: None,
     }];
     compacted_messages.extend(sm_result.messages_to_keep.clone());

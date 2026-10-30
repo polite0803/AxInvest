@@ -129,6 +129,7 @@ pub fn append_user_message(session: &mut Session, text: &str) -> Result<(), Stri
         .push_message(ConversationMessage {
             role: axagent_harness::conversation_model::MessageRole::User,
             blocks: vec![axagent_harness::ContentBlock::Text { text: processed }],
+            thinking: None,
             usage: None,
         })
         .map_err(|e| e.to_string())
@@ -1788,6 +1789,7 @@ mod tests {
         let messages = vec![HarnessConversationMessage {
             role: HarnessMessageRole::User,
             blocks: vec![HarnessContentBlock::Text { text: "hello world".to_string() }],
+            thinking: None,
             usage: None,
         }];
         assert_eq!(estimate_tokens_from_messages(&messages), 2);
@@ -1802,6 +1804,7 @@ mod tests {
                 name: "read_file".to_string(),
                 input: "{}".to_string(),
             }],
+            thinking: None,
             usage: None,
         }];
         let tokens = estimate_tokens_from_messages(&messages);
@@ -1818,6 +1821,7 @@ mod tests {
                 output: "file contents here".to_string(),
                 is_error: false,
             }],
+            thinking: None,
             usage: None,
         }];
         let tokens = estimate_tokens_from_messages(&messages);
@@ -2132,17 +2136,20 @@ mod tests {
             axagent_harness::ConversationMessage {
                 role: axagent_harness::conversation_model::MessageRole::User,
                 blocks: vec![ContentBlock::Text { text: "你好".to_string() }],
+                thinking: None,
                 usage: None,
             },
             axagent_harness::ConversationMessage {
                 role: axagent_harness::conversation_model::MessageRole::Assistant,
                 blocks: vec![ContentBlock::Text { text: "答复".to_string() }],
+                thinking: None,
                 usage: None,
             },
             // 尾部 user 行应被截断（模拟当前 turn 输入已落库的场景）
             axagent_harness::ConversationMessage {
                 role: axagent_harness::conversation_model::MessageRole::User,
                 blocks: vec![ContentBlock::Text { text: "当前输入".to_string() }],
+                thinking: None,
                 usage: None,
             },
         ];
@@ -2178,11 +2185,13 @@ mod tests {
                     axagent_harness::ConversationMessage {
                         role: axagent_harness::conversation_model::MessageRole::User,
                         blocks: vec![ContentBlock::Text { text: "第一轮".to_string() }],
+                        thinking: None,
                         usage: None,
                     },
                     axagent_harness::ConversationMessage {
                         role: axagent_harness::conversation_model::MessageRole::Assistant,
                         blocks: vec![ContentBlock::Text { text: "第一轮回复".to_string() }],
+                        thinking: None,
                         usage: None,
                     },
                 ],
@@ -2196,6 +2205,7 @@ mod tests {
                 vec![axagent_harness::ConversationMessage {
                     role: axagent_harness::conversation_model::MessageRole::User,
                     blocks: vec![ContentBlock::Text { text: "第二轮".to_string() }],
+                    thinking: None,
                     usage: None,
                 }],
             )
@@ -2220,6 +2230,7 @@ mod tests {
                     blocks: vec![axagent_harness::conversation_model::ContentBlock::Text {
                         text: "孤儿".to_string()
                     }],
+                    thinking: None,
                     usage: None,
                 }],
             )
@@ -2483,6 +2494,7 @@ mod tests {
             HarnessConversationMessage {
                 role: HarnessMessageRole::User,
                 blocks: vec![HarnessContentBlock::Text { text: "hello".to_string() }],
+                thinking: None,
                 usage: None,
             },
             HarnessConversationMessage {
@@ -2495,6 +2507,7 @@ mod tests {
                         input: "{\"command\":\"ls\"}".to_string(),
                     },
                 ],
+                thinking: None,
                 usage: None,
             },
         ];
@@ -2541,16 +2554,19 @@ mod tests {
             HarnessConversationMessage {
                 role: HarnessMessageRole::User,
                 blocks: vec![HarnessContentBlock::Text { text: "first message".to_string() }],
+                thinking: None,
                 usage: None,
             },
             HarnessConversationMessage {
                 role: HarnessMessageRole::Assistant,
                 blocks: vec![HarnessContentBlock::Text { text: "second message".to_string() }],
+                thinking: None,
                 usage: None,
             },
             HarnessConversationMessage {
                 role: HarnessMessageRole::User,
                 blocks: vec![HarnessContentBlock::Text { text: "third message here".to_string() }],
+                thinking: None,
                 usage: None,
             },
         ];

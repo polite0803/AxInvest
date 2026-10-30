@@ -1403,10 +1403,21 @@ if validation_penalty > 15.0 { validation_penalty = 15.0; }
 // 现改为 map/string 双兼容：map 直接提取，string 先 safe_parse。
 
 // 提取主力净流入（camelCase 优先 + snake_case 兜底）
+// 2026-10-29 信封对齐：get_stock_money_flow 自 2026-10-28（mcp_tools.rs ff9c46f39）
+// 改发 {status,data,detail} 信封，mainNetInflow 落到 data 层 ⇒ 扁平读全数 miss，
+// 10-28 起「主力净流入」被 100% 判缺失（实测 39/39，而数据本身有值 —— 病灶是读路
+// 不是取数）。现三态口径：
+//   · 带信封且 status != "ok" ⇒ 返回 ()（取数故障的成因归上游工具披露，本层不吃旧值）
+//   · 带信封且 status == "ok" ⇒ 下钻 data 层照旧读
+//   · 裸 map（历史快照 / 未包信封通道）⇒ 照旧读本层（向后兼容，不得删此分支）
 fn extract_main_net_inflow(raw) {
     if !present(raw) { return (); }
     let mf = if type_of(raw) == "string" { safe_parse(raw) } else { raw };
     if type_of(mf) == "map" {
+        if type_of(mf["status"]) == "string" {
+            if mf["status"] != "ok" { return (); }
+            if type_of(mf["data"]) == "map" { mf = mf["data"]; }
+        }
         let v = mf["mainNetInflow"];
         if type_of(v) == "()" { v = mf["main_net_inflow"]; }
         if type_of(v) == "f64" { return v; }

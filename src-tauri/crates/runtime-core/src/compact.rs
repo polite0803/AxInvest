@@ -315,6 +315,7 @@ mod tests {
             ConversationMessage {
                 role: MessageRole::Assistant,
                 blocks: vec![ContentBlock::Text { text: "recent".to_string() }],
+                thinking: None,
                 usage: None,
             },
         ];
@@ -356,6 +357,54 @@ mod tests {
         // not guaranteed for small sessions. The invariant that matters is that
         // the removed_message_count is non-zero (something was compacted).
         assert!(result.removed_message_count > 0, "compaction must remove at least one message");
+    }
+
+    /// 压缩保真（2026-10-30）：被压缩保留的 assistant 消息必须连同 thinking 一起
+    /// 保留 —— DeepSeek 思考模式要求回放时 reasoning_content 与 tool_calls 成对；
+    /// 压缩若只留 tool_calls 丢 thinking，下一轮请求整轮报废
+    ///（`assistant.tool_calls contains an invalid function call`）。
+    #[test]
+    fn compaction_preserves_thinking_on_kept_messages() {
+        let mut session = Session::new();
+        let mut assistant = ConversationMessage::assistant(vec![
+            ContentBlock::Text { text: "需要进一步核实".to_string() },
+            ContentBlock::ToolUse {
+                id: "call_a".to_string(),
+                name: "get_quote".to_string(),
+                input: "{}".to_string(),
+            },
+        ]);
+        assistant.thinking = Some("先取行情再判断".to_string());
+        session.messages = vec![
+            ConversationMessage::user_text("older ".repeat(300)),
+            assistant,
+            ConversationMessage::tool_result("call_a", "get_quote", "ok", false),
+            ConversationMessage::user_text("recent ".repeat(200)),
+        ];
+
+        let result = compact_session(
+            &session,
+            CompactionConfig {
+                // 保留最后三条（assistant / tool 结果 / 最近 user），确保
+                // 带 tool_calls 的 assistant 轮落在保留集内
+                preserve_recent_messages: 3,
+                max_estimated_tokens: 1,
+                ..Default::default()
+            },
+            NP,
+        );
+
+        let kept = result
+            .compacted_session
+            .messages
+            .iter()
+            .find(|message| message.thinking.is_some())
+            .expect("被保留的 assistant 消息必须携带 thinking");
+        assert_eq!(kept.thinking.as_deref(), Some("先取行情再判断"));
+        assert!(
+            kept.blocks.iter().any(|block| matches!(block, ContentBlock::ToolUse { .. })),
+            "保留的应是带 tool_calls 的 assistant 轮"
+        );
     }
 
     #[test]
@@ -420,6 +469,7 @@ mod tests {
                 blocks: vec![ContentBlock::Text {
                     text: get_compact_continuation_message(summary, true, true, NP),
                 }],
+                thinking: None,
                 usage: None,
             },
             ConversationMessage::user_text("tiny"),
@@ -549,6 +599,7 @@ mod tests {
                     name: "read_file".to_string(),
                     input: "main.rs".to_string(),
                 }],
+                thinking: None,
                 usage: None,
             },
             ConversationMessage::tool_result("1", "read_file", "file contents", false),

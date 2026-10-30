@@ -37,7 +37,11 @@ const TEMPLATE_ID: &str = "daily-market-events";
 ///
 /// ⚠ 播种门是 `existing.version >= TEMPLATE_VERSION` 先 return —— **不抬版本就不重播种**，
 /// 改动只留在代码里、库里仍是 v1 的三节点图（与 `debate_rounds` 那次同一个坑）。
-const TEMPLATE_VERSION: i32 = 2;
+/// v3（2026-10-30）：信封对齐 —— 本链用的 `get_cls_flash` / `search_news` 自 10-28（ff9c46f39）
+/// 改发 `{status,data,detail}`；`scanner-brief.rhai` / `candidate-pool.rhai` 的 `to_array`
+/// 已补 data 下钻（否则「今天没主线」与「接口改形态」不可区分）。脚本随 CodeNode.code 落库
+/// ⇒ 不升版旧库照跑旧脚本。
+const TEMPLATE_VERSION: i32 = 3;
 
 /// 种子化 daily-market-events 工作流模板
 pub async fn seed_daily_market_events_template(

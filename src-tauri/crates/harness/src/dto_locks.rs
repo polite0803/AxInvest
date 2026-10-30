@@ -92,8 +92,12 @@ mod size_locks_64 {
     // ContentBlock: 枚举（最大变体包含 tool_use_id + tool_name + output + is_error + 对齐）
     static_assertions::assert_eq_size!(crate::conversation_model::ContentBlock, [u8; 80]);
 
-    // ConversationMessage: role(MessageRole) + blocks(Vec<ContentBlock>) + usage(Option<TokenUsage>)
-    static_assertions::assert_eq_size!(crate::conversation_model::ConversationMessage, [u8; 56]);
+    // ConversationMessage: role(MessageRole) + blocks(Vec<ContentBlock>) +
+    //                      thinking(Option<String>) + usage(Option<TokenUsage>)
+    // 2026-10-30：新增 thinking 专用字段（DeepSeek 思考模式要求回放时
+    // reasoning_content 与 tool_calls 成对；锁定值由 56 → 80，
+    // 经 inspect_dto_sizes 实测确认）。
+    static_assertions::assert_eq_size!(crate::conversation_model::ConversationMessage, [u8; 80]);
 
     // SessionInfo: session_id + user_id + title(Option<String>) + timestamps + token_usage
     static_assertions::assert_eq_size!(crate::conversation_model::SessionInfo, [u8; 112]);

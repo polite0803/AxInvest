@@ -1640,7 +1640,7 @@ type AlgoToolRow = (
 ///   消费点收口：`rt-workflow/.../agent_executor.rs` 的 `resolve_sampling`（三档优先级）
 ///   与 `harness/types/provider_model.rs` 的 `model_param_overrides`（查找只此一份）。
 ///   变量表变更 ⇒ 换代，删键走 `SAMPLING_VARS_RETIRED_VERSION`（一次性门）。
-pub const TEMPLATE_VERSION: i32 = 192; // v192: 熔断判据改为**计入**孤儿观测行（所属分析已删除的那一轮确实跑过，摘掉会让「连续 N 轮」跨过空档继续数；实测现网读 9、计入则断在 2）；portfolio-mgr 退役 `dqi_streak_incl_orphans`（新口径下差值恒 0，属第二份载体），新增输出 `dqiOrphans` 供决策卡披露；v191: 上下文瘦身开关（trader_context_slim / risk_context_slim）默认 false → true，并加一次性门 CONTEXT_SLIM_DEFAULT_VERSION=191（图侧 forced + 变量表 force_variable_value 同步覆写，存量库升版即生效；实测单次运行 75–80% 提示词是上下文数据、其中 36–53% 逐字重复）；v190: 熔断「连续 N 轮」的空档披露 —— portfolio-mgr 加 `dqi_orphans` / `dqi_streak_incl_orphans` 两条同名映射，并把 5 处「拿不到 A 级」措辞订正为「降档（C/D/F 或无等级）」（判据自 2026-10-10 起 A/B 都是正常档，文案把判据说窄了）；v189: 退役 agent_temperature / agent_max_tokens 两个模板变量 —— 采样参数唯一权威改到模型层「供应商-模型 → 参数」（推翻 v181 的「唯一权威=模板变量」），四处消费点收口到 resolve_sampling；v188: 决策否决门可配置化（风控/情绪/估值三门 + 顶层采纳档内买入）—— 走运行期 pm_gate_enabled（settings 表），**不改图结构**；同时解除 R-CALIB-CAP 对档内买入的动作联动（置信封顶仍生效）；v187: Json 输出节点恒下发 response_format（原生结构化输出；退役 structured_output_mode 开关）；v186: rule-check 交易方案改读 portfolio-risk-gate（移除对 trader 的无边软依赖）；v185: 退役 `formula_independent_f7` 回滚位 —— f7 两侧形态恒定（生产恒不吃 trader / 参照侧恒吃），「主档不得依赖 LLM 决策」由开关语义改为结构保证；v184: data-quality 逐节点诊断新增可选键 `score_sum_reason`（三态：自洽/偏离/不知道），`analyst_feedbacks` 的 `score_consistent` 从此有真值可读；v183: 生产 f7 切分析师结构票（公式决策与 LLM 决策互不消费、并行；trader 口径改由参照节点 `portfolio-mgr-f7-ref` 承接）；v182: f2 改吃辩论聚合方向（consensusDirection）——`consensus_score` 按契约是收敛程度、无方向含义；v181: Agent 节点采样参数置空（唯一权威=模板变量；**已被 v189 推翻，改指模型层参数**）；v180: 引入独立公式节点（公式决策不吃 LLM 决策输入；节点名与 f7 口径以 v183 条为准）
+pub const TEMPLATE_VERSION: i32 = 193; // v193: 资金流信封对齐 —— get_stock_money_flow 于 2026-10-28（ff9c46f39）改发 {status,data,detail} 信封后，dq/portfolio-mgr/pace-calc/raw-digest 四个消费端仍按扁平路径读 ⇒ 10-28 起「主力净流入」100% 误判缺失（实测 39/39，数据本身有值）、f9 恒 0、pace 背离分支静默失效、raw-digest 四段信封渲染退化。本批：① data-quality.rhai `extract_main_net_inflow` 与 portfolio-mgr.rhai f9 引入 **status 感知**的信封解包（status!=ok ⇒ 视为无数据，portfolio 的 data_gaps 同源于此，失败信封如实进缺口栏）；② pace 两路映射 `money_flow_net/money_flow_history` 改指 `t-hotmoney-data.result.content.data.*`（终值原样注入 net=数值、history=数组，pace-calc.rhai 已双形态兼容）；③ raw-digest.rhai market/sentiment/hotmoney/sector 四段改走既有 `render_outcome`（裸 array/map 同形兼容），P_FLOW 换成 DTO 真实 camelCase 字段名（旧 largeNetInflow/xlargeNetInflow 是从未产出过的死名）。⚠ 必须升版：dq/portfolio/pace/raw-digest 脚本正文以 include_str! 嵌入 CodeNode.code 落库（v50/v118/v119 所记生成物陷阱），且 ② 改的是 input_mapping 图内容 ⇒ 不升版旧库照跑扁平读。门禁：rt-workflow `data_quality_placeholder_gate.rs` 新增信封四态行为测试、seed_consistency `money_flow_envelope_paths_wired` 钉映射与解包锚点；v192: 熔断判据改为**计入**孤儿观测行（所属分析已删除的那一轮确实跑过，摘掉会让「连续 N 轮」跨过空档继续数；实测现网读 9、计入则断在 2）；portfolio-mgr 退役 `dqi_streak_incl_orphans`（新口径下差值恒 0，属第二份载体），新增输出 `dqiOrphans` 供决策卡披露；v191: 上下文瘦身开关（trader_context_slim / risk_context_slim）默认 false → true，并加一次性门 CONTEXT_SLIM_DEFAULT_VERSION=191（图侧 forced + 变量表 force_variable_value 同步覆写，存量库升版即生效；实测单次运行 75–80% 提示词是上下文数据、其中 36–53% 逐字重复）；v190: 熔断「连续 N 轮」的空档披露 —— portfolio-mgr 加 `dqi_orphans` / `dqi_streak_incl_orphans` 两条同名映射，并把 5 处「拿不到 A 级」措辞订正为「降档（C/D/F 或无等级）」（判据自 2026-10-10 起 A/B 都是正常档，文案把判据说窄了）；v189: 退役 agent_temperature / agent_max_tokens 两个模板变量 —— 采样参数唯一权威改到模型层「供应商-模型 → 参数」（推翻 v181 的「唯一权威=模板变量」），四处消费点收口到 resolve_sampling；v188: 决策否决门可配置化（风控/情绪/估值三门 + 顶层采纳档内买入）—— 走运行期 pm_gate_enabled（settings 表），**不改图结构**；同时解除 R-CALIB-CAP 对档内买入的动作联动（置信封顶仍生效）；v187: Json 输出节点恒下发 response_format（原生结构化输出；退役 structured_output_mode 开关）；v186: rule-check 交易方案改读 portfolio-risk-gate（移除对 trader 的无边软依赖）；v185: 退役 `formula_independent_f7` 回滚位 —— f7 两侧形态恒定（生产恒不吃 trader / 参照侧恒吃），「主档不得依赖 LLM 决策」由开关语义改为结构保证；v184: data-quality 逐节点诊断新增可选键 `score_sum_reason`（三态：自洽/偏离/不知道），`analyst_feedbacks` 的 `score_consistent` 从此有真值可读；v183: 生产 f7 切分析师结构票（公式决策与 LLM 决策互不消费、并行；trader 口径改由参照节点 `portfolio-mgr-f7-ref` 承接）；v182: f2 改吃辩论聚合方向（consensusDirection）——`consensus_score` 按契约是收敛程度、无方向含义；v181: Agent 节点采样参数置空（唯一权威=模板变量；**已被 v189 推翻，改指模型层参数**）；v180: 引入独立公式节点（公式决策不吃 LLM 决策输入；节点名与 f7 口径以 v183 条为准）
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -7181,13 +7181,18 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // pace-calc.rhai 按契约 json_parse）
                     ("announcement_events", "t-catalyst-data.result.content"),
                     // 资金流向数据（用于背离修正）
-                    // 2026-09-09: MoneyFlow 序列化为 camelCase（mainNetInflow），
-                    // 且数据在 result.content 字符串层
-                    ("money_flow_net", "t-hotmoney-data.result.content.mainNetInflow"),
+                    // 2026-09-09: MoneyFlow 序列化为 camelCase（mainNetInflow）。
+                    // 2026-10-29（v193）: get_stock_money_flow 于 10-28（ff9c46f39）改发
+                    // {status,data,detail} 信封 ⇒ 载荷在 content.data.* 层；扁平路径
+                    // 全部 miss（实测 10-28 起「主力净流入」39/39 误判缺失、pace 背离
+                    // 分支静默失效）。终值按「原样」注入：net=数值、history=数组，
+                    // pace-calc.rhai 已按双形态兼容读取（见其背离段）。
+                    ("money_flow_net", "t-hotmoney-data.result.content.data.mainNetInflow"),
                     // 资金流向历史序列（近5日，含当日），用于趋势背离判断
-                    // 注：当前 get_money_flow 实现只返回最新一日（无 history 字段），
-                    // 此映射取不到值时 pace-calc 按缺失降级
-                    ("money_flow_history", "t-hotmoney-data.result.content.history"),
+                    // 2026-10-29 订正旧注：MoneyFlow.history 由 eastmoney/sina 等多日源
+                    // 填充（baidu 等单日源为空 Vec ⇒ skip_serializing 后该路径 miss ⇒
+                    // pace-calc 按缺失降级，与原语义一致）。
+                    ("money_flow_history", "t-hotmoney-data.result.content.data.history"),
                     // 板块 ETF 资金流向（用于协同增强）- 暂未接入
                     ("sector_etf_direction", ""),
                     // 历史 P 值 - 暂未接入（需要 upstream LLM 长期输出）

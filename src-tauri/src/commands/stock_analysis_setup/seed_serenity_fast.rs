@@ -117,7 +117,10 @@ const TEMPLATE_ID: &str = "serenity-screening-fast";
 /// ```
 // v2 (2026-10-24): 5 个评分节点的 `trend_strategy` 改取各自趋势的 strategy_type
 // （修「一个全局分类喂 5 个策略槽 ⇒ 非瓶颈趋势评分 no_data、候选只能拿 LLM 自报 confidence 冒充分数」）。
-const TEMPLATE_VERSION: i32 = 2;
+// v3 (2026-10-30): 信封对齐 —— 本链共用的 scanner-brief / candidate-pool / strategy-scorer /
+// bottleneck-calc 的 `to_array` 已补 `{status,data,detail}` 解包（10-28 起 get_industry_ranking /
+// get_cls_flash / search_news 改发信封）。脚本经 include_str! 嵌入 CodeNode.code ⇒ 必须升版重建。
+const TEMPLATE_VERSION: i32 = 3;
 
 pub(crate) async fn seed_serenity_fast_workflow_template(
     db: &sea_orm::DatabaseConnection,

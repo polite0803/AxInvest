@@ -6,10 +6,21 @@
  *
  * 用法:
  *   node scripts/ci-check.mjs           # 完整检查
- *   node scripts/ci-check.mjs --quick   # 快速检查 (dprint + rustfmt + tsc)
+ *   node scripts/ci-check.mjs --quick   # 快速检查 (纯 Node 静态门 + dprint + oxlint + tsc + rustfmt)
  *   node scripts/ci-check.mjs --frontend-only
  *   node scripts/ci-check.mjs --rust-only
  *   node scripts/ci-check.mjs --skip-rust  # 跳过 Rust 检查（无 Rust 环境时）
+ *
+ * ⚠ 本脚本是 CI 的**近似**，不是等价物。跑绿只代表「没踩到它覆盖的那部分」。
+ *   已知**未覆盖**的 CI 步骤（改脚本前请先读 `scripts/ci-check.mjs` 与 ci.yml 的对账）：
+ *     · `npm run build`（ci.yml:442，= `tsc && vite build`）—— 本地只有 `npx tsc --noEmit`，
+ *       ⇒ vite 构建期问题（如禁区 11 的 removeCrossorigin、SHIKI_ALLOWED_LANGS 白名单）本地看不见
+ *     · `npm run contracts -- --only=a,c,d,f,g,h`（ci.yml:515）—— 本地完全没有
+ *     · 行尾检查（ci.yml:72 的 `bash scripts/check-line-endings.sh`）—— 本地镜像没有；
+ *       本机无 bash 时请改用 `node scripts/check-line-endings.mjs`（同一检测核心）
+ *     · `cargo check --workspace`（ci.yml:567）、`cargo nextest run --workspace`（ci.yml:679，
+ *       本地用 `cargo test -p …` 裁剪版）、PG 集成三目标、E2E、`npm audit`、cargo deny
+ *   若要把本脚本当验收证据，上述各项须**另行手动跑**。
  */
 
 import { execSync } from "node:child_process";
@@ -91,7 +102,11 @@ function step(label, cmd, opts = {}) {
 console.log(`\n${c.bold}AxAgent CI 本地检查${c.reset}`);
 console.log(
   `${c.cyan}模式: ${
-    quick ? "快速 (dprint + rustfmt + tsc)" : frontendOnly ? "仅前端" : rustOnly ? "仅 Rust" : "完整"
+    quick ? "快速 (纯 Node 静态门 + dprint + oxlint + tsc + rustfmt)" : frontendOnly
+      ? "仅前端"
+      : rustOnly
+      ? "仅 Rust"
+      : "完整"
   }${c.reset}`,
 );
 console.log(`${c.cyan}平台: ${process.platform} | Node: ${process.version}${c.reset}`);
@@ -354,12 +369,19 @@ if (canRunFrontend) {
 
   step("dprint 格式化检查", "npx dprint check --incremental=false");
 
-  // ⚠️ TS7 临时禁用：typescript-eslint 全版本 peer 上限 typescript <6.1.0，
-  // 在 TS 7 下 typescript-estree 读已变更内部 API 会崩（TypeError ... 'Cjs'）。
-  // 待 typescript-eslint 发 TS7 支持版后，恢复下方 ESLint 检查。
-  // if (!quick) {
-  //   step("ESLint 检查", "npx eslint src --max-warnings=0");
-  // }
+  // OxLint 检查 —— 命令与 `.github/workflows/ci.yml:436` **逐字同源**。
+  //
+  // 为什么是 oxlint 而不是 eslint：项目已升到 TypeScript 7.0.2，而 typescript-eslint
+  // 全版本 peer 上限是 `typescript <6.1.0` ⇒ eslint 一启动就崩（退出码 2，报
+  // 「does not support TS 7」），那是**工具链不兼容、不是代码问题**。CI 已换成 oxlint。
+  //
+  // 为什么本步此前是「假绿」：整段被注释掉 ⇒ 本地**零 lint**，而 `pre-push` 跑的正是
+  // `npm run ci:check:quick` ⇒ lint 违规只会在 push 之后由 CI 告知。
+  // 这是「本地绿冒充 CI 绿」里最典型的一处（门禁看起来在，实际一行都没跑）。
+  //
+  // 为什么**不加** `if (!quick)` 门控：oxlint 实测全仓 87ms（1421 文件 / 96 规则），
+  // 代价可忽略；一旦加门控，pre-push 的快速档又会退回零 lint —— 那正是本次要修的缺口。
+  step("OxLint 检查", "npx oxlint src --max-warnings=0");
 
   step("TypeScript 类型检查", "npx tsc --noEmit");
 
@@ -554,16 +576,41 @@ if (canRunRust && !quick) {
     { cwd: srcTauri, env: { ...process.env } },
   );
 
+  // 覆盖面必须与 `.github/workflows/ci.yml:562-564` 逐字同源：`--workspace` 不可省。
+  //
+  // 为什么补 `--workspace`：本仓 `src-tauri` 是「根 package + 43 个 member」的 workspace
+  // （`src-tauri/Cargo.toml:1-46`：`.` = axagent + 42 个 `crates/*` + `schema-gen`）。
+  // 在 workspace 根不带 `--workspace` 执行 clippy 时，cargo 的默认包选择**只覆盖当前
+  // package**（根 `axagent`）⇒ `crates/` 下 42 个成员逐个不被 lint。而本仓大部分逻辑
+  // 正在 crates/ 里 ⇒ 「本地 clippy 绿」完全不能推出「CI clippy 绿」。
+  // 判据来源：AGENTS.md「⚠ Rust 验证门禁」第 1 条 —— 三条全量命令必须与 ci.yml 逐字一致。
   step(
     "cargo clippy (deny warnings)",
-    "cargo clippy --all-targets --all-features -- -D warnings",
+    "cargo clippy --workspace --all-targets --all-features -- -D warnings",
     { cwd: srcTauri, timeout: 10 * 60 * 1000, env: { ...process.env } },
   );
 
+  // ⚠ 这里**不得**再写 `cmdA || cmdB` 这种兜底。
+  //
+  // 原写法：`cargo test -p … -p harness -p tools --lib 2>&1 || cargo test -p … -p … --lib`
+  // ⇒ 前半句失败、后半句成功时，execSync 拿到的是**最后一个命令的退出码 0**
+  // ⇒ `step()` 打 `✓`。harness / tools 的单测失败被静默吞掉，门禁看上去是绿的。
+  // 这是「门禁已死而报绿」的典型形态（退出码取的不是我们想判的那个命令）。
+  // 正解：单一命令，失败就是失败；要缩小范围就明确写哪几个 crate，不要用 `||` 兜。
+  //
+  // 为什么用 env 传 `__TAURI_WORKSPACE__=true` 而不是写成 `__TAURI_WORKSPACE__=true cargo …`：
+  // ① 后者是 bash 语法，Windows（cmd/PowerShell 下 execSync 的默认 shell）**不认**；
+  // ② 本仓测试 exe 未嵌入 Common Controls v6 manifest 时，链接 tauri 的测试启动即报
+  //    `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)`，见 AGENTS.md 与 tauri issue #11028
+  //    ⇒ Windows 上这个变量是**必需**的，不能只写在文档里。
   step(
     "cargo test 单元测试 (quant + analysis-engine + harness + tools)",
-    "cargo test -p axagent-quant -p axagent-analysis-engine -p axagent-harness -p axagent-tools --lib 2>&1 || cargo test -p axagent-quant -p axagent-analysis-engine --lib",
-    { cwd: srcTauri, timeout: 10 * 60 * 1000, env: { ...process.env } },
+    "cargo test -p axagent-quant -p axagent-analysis-engine -p axagent-harness -p axagent-tools --lib",
+    {
+      cwd: srcTauri,
+      timeout: 10 * 60 * 1000,
+      env: { ...process.env, __TAURI_WORKSPACE__: "true" },
+    },
   );
 
   // 生成物漂移门（与 ci.yml 的对应 step 逐字同源）：`src/types/generated/ipc.ts` /

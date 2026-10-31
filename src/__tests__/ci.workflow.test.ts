@@ -280,3 +280,225 @@ describe(".github/workflows/ci.yml — 静态门禁接线", () => {
     expect(bad, `缩进异常（会导致 YAML 解析成别的结构）：\n${bad.join("\n")}`).toHaveLength(0);
   });
 });
+
+// ── #5 自动提取护栏（2026-10-31）─────────────────────────────────────────────
+// 为什么需要：上面那两段「同步护栏」是**手写白名单**，只守 7 个门；ci.yml 实有约 60 个
+//   scripts/** 门，≈80% 不受保护。④⑤「只进了 ci.yml、没进本地镜像」持续近一个月无人红
+//   （见上方 i18n describe 批注）—— 手写清单挡不住「漏登记」。
+// 形态：从两侧**自动提取** scripts/** 域命令（ci.yml 的 run 行 ↔ ci-check.mjs 的
+//   step() 第二参），归一化后做**对称差集**。任一侧新增命令而另一侧没有 ⇒ 红。
+// 口径（qa-verifier 规格二终稿）：
+//   · 只比 `scripts/**` 域 —— dprint / oxlint / tsc / vitest / cargo 两侧拼写不同
+//     （`npx dprint check` vs `dprint check --incremental=false` 等），v1 不纳入；
+//   · canon()：去解释器/env 前缀 → 折叠空白 → 参数 token 排序（`--tier all --strict`
+//     ≡ `--strict --tier all`）；
+//   · 已知不对称必须以 {ciYml, ciCheck, reason} 写进 allowlist（≤8 条，无 reason 即红，
+//     失效不删也红 —— 防 allowlist 腐化成新白名单，pr-ci.workflow.test.ts 教训）；
+//   · 分母非零断言（提取器写坏 ⇒ 差集恒空 = 空转守卫）。
+describe("ci.yml ↔ ci-check.mjs 命令清单自动提取比对（对称差集）", () => {
+  const MIN_COMMANDS_PER_SIDE = 40;
+  const MAX_ALLOWLIST = 8;
+
+  /** 去掉 `//` 行注释与 `/* *\/` 块注释（`[^:]` 防吃掉 `node:fs` 这类协议前缀）。 */
+  function stripJsComments(s: string): string {
+    const noBlock = s.replace(/\/\*[\s\S]*?\*\//g, " ");
+    return noBlock
+      .split("\n")
+      .map((l) => {
+        const m = /(^|[^:])\/\//.exec(l);
+        return m ? l.slice(0, (m.index ?? 0) + (m[1] ? m[1].length : 0)) : l;
+      })
+      .join("\n");
+  }
+
+  /**
+   * 从 ci.yml 提取 `scripts/**` 命令：逐行匹配解释器 + 脚本路径 + 参数。
+   * 允许 `run: node …`、`NODE_PATH=… node …`、`&&` 串联等形态（不锚行首 ——
+   * `- run: node …` 单行形态是真实存在的主流写法，锚行首会整批漏抓）；
+   * 整行注释已在 stripComments 剥除。
+   */
+  function extractCiYmlCommands(text: string): Set<string> {
+    const out = new Set<string>();
+    const re =
+      /(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*(?:node|bash|sh|python3?|npx)\s+(scripts\/[A-Za-z0-9_./-]+\.(?:mjs|sh|py|ts)[^\n"'|;&\\]*(?:\s+[^"'|;&\\\n]+)*)/g;
+    for (const raw of stripComments(text).split("\n")) {
+      let m: RegExpExecArray | null;
+      re.lastIndex = 0;
+      while ((m = re.exec(raw)) !== null) {
+        const canon = canonCommand(m[1]);
+        if (canon.startsWith("scripts/")) { out.add(canon); }
+      }
+    }
+    return out;
+  }
+
+  /** 从 ci-check.mjs 提取 step() 的第二个参数（label/cmd 接受 " ' ` 三种引号形态）。 */
+  function extractCiCheckCommands(text: string): Set<string> {
+    const out = new Set<string>();
+    const src = stripJsComments(text);
+    const BT = "`";
+    // 单个字符串字面量：双引号 / 单引号 / 反引号（不含未转义的同种引号与换行）
+    const str = `(?:"(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|${BT}(?:[^${BT}\\\\]|\\\\.)*${BT})`;
+    const re = new RegExp(`step\\(\\s*${str}\\s*,\\s*(${str})`, "g");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src)) !== null) {
+      const quoted = m[1];
+      const canon = canonCommand(quoted.slice(1, -1));
+      // 只比 scripts/** 域（cargo/npx/vitest/tsc 两侧拼写不同，v1 不纳入 —— 见规格）
+      if (canon.startsWith("scripts/")) { out.add(canon); }
+    }
+    return out;
+  }
+
+  /** 归一化：剥解释器/env/`${var}`/`./` 前缀 → 折叠空白 → 脚本路径之后的参数 token 排序。 */
+  function canonCommand(cmd: string): string {
+    let s = cmd.trim().replace(/\\+$/, "").trim();
+    // 反复剥前缀：env 赋值、解释器、${var}、./
+    for (let i = 0; i < 6; i++) {
+      const before = s;
+      s = s
+        .replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)+/, "")
+        .replace(/^(?:node|bash|sh|python3|python|npx)\s+/, "")
+        .replace(/^\$\{[A-Za-z_][A-Za-z0-9_]*\}\s+/, "")
+        .replace(/^\.?\//, "");
+      if (s === before) { break; }
+    }
+    const tokens = s.split(/\s+/).filter(Boolean).map((t) => t.replace(/\\+$/, ""));
+    if (tokens.length === 0) { return ""; }
+    const [script, ...args] = tokens;
+    // 行尾连接符（\ | ; &）在参数位置不该出现，出现即剥
+    const cleanArgs = args.filter((a) => a !== "\\" && a !== "|" && a !== ";" && a !== "&");
+    return [script, ...cleanArgs.sort()].join(" ");
+  }
+
+  /** 纯函数：两侧命令集合的对称差集（未套 allowlist 的原始差集）。 */
+  function diffCommands(
+    ciYmlText: string,
+    ciCheckText: string,
+  ): { ymlOnly: string[]; checkOnly: string[] } {
+    const yml = extractCiYmlCommands(ciYmlText);
+    const check = extractCiCheckCommands(ciCheckText);
+    const ymlOnly = [...yml].filter((c) => !check.has(c)).sort();
+    const checkOnly = [...check].filter((c) => !yml.has(c)).sort();
+    return { ymlOnly, checkOnly };
+  }
+
+  // 已知不对称（每条必须带 reason；两边命令取 canon 形态）。
+  const ALLOWLIST: { ciYml: string | null; ciCheck: string | null; reason: string }[] = [
+    {
+      ciYml: "scripts/check-hardcoded-i18n.sh --strict",
+      ciCheck: "scripts/i18n-scan.mjs --strict",
+      reason: "同一门两种实现：CI 用 .sh，本地 node 直调 i18n-scan.mjs（Windows 无 bash，见 ci-check.mjs i18n 段注释）",
+    },
+    {
+      ciYml: "scripts/check-line-endings.sh",
+      ciCheck: null,
+      reason:
+        "本地镜像没有行尾门（ci-check.mjs 头部自陈缺 9 类之一）；本机无 bash 时可用 node scripts/check-line-endings.mjs 同核心替代",
+    },
+    {
+      ciYml: "scripts/check-ngram-consistency.mjs --only=consistency",
+      ciCheck: "scripts/check-ngram-consistency.mjs",
+      reason: "同门不同参数：CI 库是干净的（无 v227 迁移），限定 consistency 子集；本地跑全量",
+    },
+    {
+      ciYml: null,
+      ciCheck: "scripts/check-accent-foreground.mjs --selftest",
+      reason: "本地跑、CI 不跑（台账类别 2）：主题前景 token 门只挂在本地镜像",
+    },
+    {
+      ciYml: null,
+      ciCheck: "scripts/check-accent-foreground.mjs",
+      reason: "本地跑、CI 不跑（台账类别 2）：主题前景 token 门只挂在本地镜像",
+    },
+    {
+      ciYml: null,
+      ciCheck: "scripts/check-decision-validation-integrity.mjs",
+      reason: "本地跑、CI 不跑（台账类别 2）：决策验证表引用完整性门只挂在本地镜像（需本机 PG）",
+    },
+    {
+      ciYml: null,
+      ciCheck: "scripts/check-replay-live-consistency.mjs",
+      reason: "本地跑、CI 不跑（台账类别 2）：回放↔实盘一致性门只挂在本地镜像（需本机 PG）",
+    },
+  ];
+
+  it("ci.yml 与 ci-check.mjs 都存在（硬断言，不 skip）", () => {
+    expect(hasCi, `${ymlPath} 不存在`).toBe(true);
+    expect(existsSync(resolve(process.cwd(), "scripts/ci-check.mjs")), "scripts/ci-check.mjs 不存在").toBe(true);
+  });
+
+  it("提取分母非零：两侧各 > 40 条（提取器写坏 ⇒ 差集恒空 = 空转守卫）", () => {
+    const yml = extractCiYmlCommands(loadCi());
+    const check = extractCiCheckCommands(readFileSync(resolve(process.cwd(), "scripts/ci-check.mjs"), "utf8"));
+    expect(
+      yml.size,
+      `ci.yml 只提取到 ${yml.size} 条 scripts 命令（实测基线 >90）—— 提取器或文件被改坏`,
+    ).toBeGreaterThan(MIN_COMMANDS_PER_SIDE);
+    expect(
+      check.size,
+      `ci-check.mjs 只提取到 ${check.size} 条 step 命令（实测基线 >90）—— 提取器或文件被改坏`,
+    ).toBeGreaterThan(MIN_COMMANDS_PER_SIDE);
+  });
+
+  it("提取器负控：ci.yml 侧独有的合成命令必须出现在差集里", () => {
+    const d = diffCommands(
+      "jobs:\n  a:\n    steps:\n      - run: node scripts/zzz-new-gate.mjs --strict\n",
+      'step("已有", "node scripts/known.mjs")\n',
+    );
+    expect(d.ymlOnly).toContain("scripts/zzz-new-gate.mjs --strict");
+  });
+
+  it("提取器负控：ci-check 侧独有的合成命令必须出现在差集里（反方向）", () => {
+    const d = diffCommands(
+      "- run: node scripts/known.mjs\n",
+      'step(\n  "新门",\n  `node scripts/zzz-other-gate.mjs`,\n);\n',
+    );
+    expect(d.checkOnly).toContain("scripts/zzz-other-gate.mjs");
+  });
+
+  it("canon 负控：参数顺序 / env 前缀 / 解释器差异必须归一为同一条", () => {
+    const yml = extractCiYmlCommands("- run: NODE_PATH=/x node scripts/foo.mjs --strict --tier all\n");
+    const check = extractCiCheckCommands('step("x", `${pythonBin} scripts/foo.mjs --tier all --strict`)\n');
+    expect([...yml][0]).toBe("scripts/foo.mjs --strict --tier all");
+    expect([...check][0]).toBe("scripts/foo.mjs --strict --tier all");
+  });
+
+  it("allowlist 条数 ≤ 8 且每条必须带 reason（防白名单再生 / 腐化）", () => {
+    expect(ALLOWLIST.length).toBeLessThanOrEqual(MAX_ALLOWLIST);
+    for (const e of ALLOWLIST) {
+      expect(e.reason.trim().length, `allowlist 条目缺 reason：${JSON.stringify(e)}`).toBeGreaterThan(4);
+      expect(e.ciYml !== null || e.ciCheck !== null, "allowlist 条目两侧皆空").toBe(true);
+    }
+  });
+
+  it("真实数据：对称差集必须恰好等于 allowlist（多一条 = 漂移，红）", () => {
+    const d = diffCommands(loadCi(), readFileSync(resolve(process.cwd(), "scripts/ci-check.mjs"), "utf8"));
+    const allowYml = new Set(ALLOWLIST.map((e) => e.ciYml).filter((x): x is string => x !== null));
+    const allowCheck = new Set(ALLOWLIST.map((e) => e.ciCheck).filter((x): x is string => x !== null));
+    const unexplainedYml = d.ymlOnly.filter((c) => !allowYml.has(c));
+    const unexplainedCheck = d.checkOnly.filter((c) => !allowCheck.has(c));
+    expect(
+      unexplainedYml,
+      "ci.yml 有、ci-check.mjs 没有的门（本地绿会冒充 CI 绿）；若是新门请同步加进本地镜像，若是已知不对称请进 ALLOWLIST 并写 reason",
+    ).toEqual([]);
+    expect(
+      unexplainedCheck,
+      "ci-check.mjs 有、ci.yml 没有的门（本地严 CI 松，违规可绕过 CI 合入）；若是新门请同步加进 ci.yml，若是已知不对称请进 ALLOWLIST 并写 reason",
+    ).toEqual([]);
+  });
+
+  it("allowlist 防腐化：每条都必须仍命中真实差集（失效即红，逼人删除）", () => {
+    const d = diffCommands(loadCi(), readFileSync(resolve(process.cwd(), "scripts/ci-check.mjs"), "utf8"));
+    const ymlSet = new Set(d.ymlOnly);
+    const checkSet = new Set(d.checkOnly);
+    for (const e of ALLOWLIST) {
+      const hitYml = e.ciYml === null || ymlSet.has(e.ciYml);
+      const hitCheck = e.ciCheck === null || checkSet.has(e.ciCheck);
+      expect(
+        hitYml && hitCheck,
+        `allowlist 条目已失效（对称差集里已不存在）：ciYml=${e.ciYml} ciCheck=${e.ciCheck} —— 请删除该条目，不要留着糊弄下一代`,
+      ).toBe(true);
+    }
+  });
+});

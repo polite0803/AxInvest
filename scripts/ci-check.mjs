@@ -21,6 +21,15 @@
  *     · `cargo check --workspace`（ci.yml:567）、`cargo nextest run --workspace`（ci.yml:679，
  *       本地用 `cargo test -p …` 裁剪版）、PG 集成三目标、E2E、`npm audit`、cargo deny
  *   若要把本脚本当验收证据，上述各项须**另行手动跑**。
+ *
+ * ⚠ 关于「跳过」的记账口径（**2026-10-31 起的语义，此前不成立**）：
+ *   工具链缺失（没装 Rust / 没装 python）导致的跳过**不再被算作通过**。
+ *   旧行为：跳过处虽打印了黄字「跳过 ≠ 通过」，但结果段只看 `failures === 0`
+ *   ⇒ 照样打绿色「全部检查通过!」并 exit 0 ⇒ `pre-push` 放行，然后 CI 才挂。
+ *   新行为：这类跳过记入 `skipped`，结果段走独立的黄色分支，打印「N 项通过，
+ *   但 M 项被跳过」并逐条列出；默认仍 exit 0（缺工具链的环境不该被无条件拦死），
+ *   加 `--strict-skip` 才判失败。使用者**显式选择**的跳过（`--skip-rust` /
+ *   `--frontend-only` / `--rust-only` / `--quick`）不计入 `skipped` —— 那是明确意图。
  */
 
 import { execSync } from "node:child_process";
@@ -38,6 +47,9 @@ const quick = args.includes("--quick");
 const frontendOnly = args.includes("--frontend-only");
 const rustOnly = args.includes("--rust-only");
 const skipRust = args.includes("--skip-rust");
+// 有 skipped 时是否判失败：**默认必须是 exit 0** —— 缺 rust / python 工具链的环境不应被
+// 无条件拦死（纯前端开发者在本机根本无从修）。留给 CI 或想严格自查的人显式打开。
+const strictSkip = args.includes("--strict-skip");
 
 const hasRust = existsSync(resolve(srcTauri, "Cargo.toml"));
 const canRunRust = hasRust && !skipRust && !frontendOnly;
@@ -72,6 +84,32 @@ const ok = `${c.green}✓${c.reset}`;
 const fail = `${c.red}✗${c.reset}`;
 
 let failures = 0;
+let passed = 0;
+
+// 被跳过的检查 —— **不计入 failures**（「没跑」不是「跑挂了」），
+// 但也**绝不等于通过**：记在这里，由结果段单独呈现。
+// 为什么必须单独记：各跳过处早就在正文打印了黄字「跳过 ≠ 通过」，但结果段原来只看
+// `failures === 0` ⇒ 结论行照样打绿色「全部检查通过!」，退出 0 ⇒ pre-push 放行。
+// 于是「正文说跳过了、结论说全通过」正面矛盾 —— 这是假绿的最后一环。
+// ⚠ 只记「环境缺失导致的跳过」（缺少工具 / 缺少目录）。使用者**显式选择**的跳过
+//   （`--skip-rust` / `--frontend-only` / `--rust-only` / `--quick`）不记 —— 那是明确意图，
+//   不是缺陷；否则 `--frontend-only` 会被误判成异常。
+const skipped = [];
+
+/**
+ * 统一处理「跳过某个检查」：打印与现状一致的黄字，并记进 skipped。
+ * @param label  概要名（结果段的逐条清单用它）
+ * @param reason 跳过原因
+ * @param bannerText 存在时按「横幅」样式整行打印（沿用原有措辞），否则按「对齐到 step 列」打印
+ */
+function skipStep(label, reason, bannerText) {
+  if (bannerText) {
+    console.log(`${c.yellow}${bannerText}${c.reset}`);
+  } else {
+    console.log(`  ${label.padEnd(52)}${c.yellow}跳过（${reason}）${c.reset}`);
+  }
+  skipped.push({ label, reason });
+}
 
 function step(label, cmd, opts = {}) {
   const displayLabel = label.padEnd(52);
@@ -79,6 +117,7 @@ function step(label, cmd, opts = {}) {
   try {
     execSync(cmd, { stdio: "pipe", cwd: opts.cwd || root, ...opts });
     console.log(`${ok}`);
+    passed++;
     return true;
   } catch (e) {
     console.log(`${fail}`);
@@ -110,7 +149,20 @@ console.log(
   }${c.reset}`,
 );
 console.log(`${c.cyan}平台: ${process.platform} | Node: ${process.version}${c.reset}`);
-if (!hasRust) { console.log(`${c.yellow}Rust 环境未检测到，自动跳过 Rust 检查${c.reset}`); }
+if (!hasRust) {
+  // 「排除意图」优先：--skip-rust / --frontend-only 本就不打算跑 Rust ⇒ 不算环境缺失跳过，
+  // 只保留原有黄字（措辞与回归前一致），不进 skipped。
+  const rustExcludedByIntent = skipRust || frontendOnly;
+  if (rustExcludedByIntent) {
+    console.log(`${c.yellow}Rust 环境未检测到，自动跳过 Rust 检查${c.reset}`);
+  } else {
+    skipStep(
+      "Rust 全部检查（rustfmt / clippy / cargo test）",
+      "未检测到 src-tauri/Cargo.toml，Rust 环境缺失",
+      "Rust 环境未检测到，自动跳过 Rust 检查",
+    );
+  }
+}
 console.log();
 
 const startedAt = Date.now();
@@ -357,8 +409,13 @@ if (canRunFrontend) {
   if (hasPython) {
     // ② 是 py 脚本：CI 用 `python3`，Windows 本地用 `python`，故先探测再决定跑/跳过。
     step("i18n key 对齐 + zh-CN 空值", `${pythonBin} scripts/check_i18n.py --strict`);
-  } else {
+  } else if (canRunFrontend) {
     // ⚠ 明确打出「跳过」而不静默略过 —— 静默略过会让本地绿冒充 CI 绿。
+    // 记进 skipped ⇒ 结果段不许再打「全部检查通过!」。
+    // 判据：只有**前端真的在跑**时，缺 python 才算少验了一项；
+    //       `--rust-only` 下本段整块不执行 ⇒ 不存在「被跳过」。
+    skipStep("i18n key 对齐 + zh-CN 空值", "未找到 python，**跳过 ≠ 通过**");
+  } else {
     console.log(
       `  ${"i18n key 对齐 + zh-CN 空值".padEnd(52)}${c.yellow}跳过（未找到 python，**跳过 ≠ 通过**）${c.reset}`,
     );
@@ -646,11 +703,26 @@ if (canRunRust && quick) {
 }
 
 // ── 结果 ──────────────────────────────────────────────────
+// 三分支：**有跳过时禁止打绿色「全部检查通过!」** —— 那是跳过语义的最后一环假绿。
 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
-console.log(
-  `\n${c.bold}${failures === 0 ? c.green : c.red}${
-    failures === 0 ? "全部检查通过!" : `${failures} 项检查失败`
-  }${c.reset} (耗时 ${elapsed}s)\n`,
-);
 
-process.exit(failures > 0 ? 1 : 0);
+if (failures > 0) {
+  console.log(`\n${c.bold}${c.red}${failures} 项检查失败${c.reset} (耗时 ${elapsed}s)\n`);
+  process.exit(1);
+}
+
+if (skipped.length > 0) {
+  console.log(
+    `\n${c.bold}${c.yellow}${passed} 项通过，但 ${skipped.length} 项被跳过（跳过 ≠ 通过）${c.reset} (耗时 ${elapsed}s)`,
+  );
+  for (const s of skipped) {
+    console.log(`  ${c.yellow}- ${s.label}${c.reset} —— ${s.reason}`);
+  }
+  console.log(
+    `  ${c.yellow}=> 本轮未验证上述项；要把它当失败请加 --strict-skip${c.reset}\n`,
+  );
+  process.exit(strictSkip ? 1 : 0);
+}
+
+console.log(`\n${c.bold}${c.green}全部检查通过!${c.reset} (耗时 ${elapsed}s)\n`);
+process.exit(0);

@@ -1,0 +1,263 @@
+{
+  "version": "1",
+  "updated": "2026-10-31",
+  "note": "JSX children 裸文本基线（棘轮：键 = file+text，只许减少）。行号刻意不进键 —— 行号键会随编辑成批漂移（.i18n-allowlist.json 教训）。",
+  "total": 51,
+  "entries": [
+    {
+      "file": "src/components/chat/ChatViewMessages.tsx",
+      "text": "Markdown (.md)",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/chat/ChatViewMessages.tsx",
+      "text": "PDF (.pdf)",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/chat/ChatViewMessages.tsx",
+      "text": "Word (.docx)",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/fine-tune/LoRAConfig.tsx",
+      "text": "LoRA Parameters",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/fine-tune/LoRAConfig.tsx",
+      "text": "LoRA Training Configuration",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/recommendation/ToolRecommendationPanel.tsx",
+      "text": "Reasoning:",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/recommendation/ToolRecommendationPanel.tsx",
+      "text": "Tools:",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/recommendation/ToolRecommendationPanel.tsx",
+      "text": "Tradeoffs:",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/AboutPage.tsx",
+      "text": "AGPL-3.0",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/DevicePermissionsPanel.tsx",
+      "text": "Pull",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/DevicePermissionsPanel.tsx",
+      "text": "Resolve",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/ProviderDetail.tsx",
+      "text": "ms",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/SearchProviderSettings.tsx",
+      "text": "⚡ Exa",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/SearchProviderSettings.tsx",
+      "text": "🔍 SerpAPI",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/SearchProviderSettings.tsx",
+      "text": "🔎 SearXNG",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/SearchProviderSettings.tsx",
+      "text": "🔴 Google PSE",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/SearchProviderSettings.tsx",
+      "text": "🔷 Bing Search",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/SearchProviderSettings.tsx",
+      "text": "🦁 Brave Search",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/SearchProviderSettings.tsx",
+      "text": "🦆 DuckDuckGo",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/SearchProviderSettings.tsx",
+      "text": "🧠 Perplexity",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/SearchProviderSettings.tsx",
+      "text": "ms",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/SettingsSidebar.tsx",
+      "text": "Esc",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/StockAnalysisConfigPanel.tsx",
+      "text": "📈 compute_valuation",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/ThemeManager.tsx",
+      "text": "error",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/ThemeManager.tsx",
+      "text": "success",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/ThemeManager.tsx",
+      "text": "warning",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/WebhookSettings.tsx",
+      "text": "agent_end",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/WebhookSettings.tsx",
+      "text": "agent_error",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/WebhookSettings.tsx",
+      "text": "agent_start",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/WebhookSettings.tsx",
+      "text": "message_received",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/WebhookSettings.tsx",
+      "text": "message_sent",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/WebhookSettings.tsx",
+      "text": "session_end",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/WebhookSettings.tsx",
+      "text": "session_start",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/WebhookSettings.tsx",
+      "text": "tool_complete",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/settings/WebhookSettings.tsx",
+      "text": "tool_error",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/stock-analysis/DecisionBanner.tsx",
+      "text": "vs",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/stock-analysis/RecommendationPanel.tsx",
+      "text": "BUY",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/workflow/DebugPanel.tsx",
+      "text": "clean",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/workflow/DebugPanel.tsx",
+      "text": "NOT FOUND",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/workflow/DebugPanel.tsx",
+      "text": "Recursive References Detected",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/workflow/DebugPanel.tsx",
+      "text": "sub",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/workflow/NarrativeStructure/NarrativeStructurePanel.tsx",
+      "text": "Need:",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/workflow/NarrativeStructure/NarrativeStructurePanel.tsx",
+      "text": "Want:",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/workflow/Panels/PropertyPanels/ApprovalPropertyPanel.tsx",
+      "text": "Timeout (s)",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/workflow/Panels/PropertyPanels/ApprovalPropertyPanel.tsx",
+      "text": "Timeout Action",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/workflow/Panels/PropertyPanels/FileOperationPropertyPanel.tsx",
+      "text": "Output Var",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/workflow/Panels/PropertyPanels/LoggingPropertyPanel.tsx",
+      "text": "Level",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/workflow/Panels/PropertyPanels/NotificationPropertyPanel.tsx",
+      "text": "Channel",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/workflow/Panels/PropertyPanels/NotificationPropertyPanel.tsx",
+      "text": "Output Var",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/workflow/Panels/PropertyPanels/NotificationPropertyPanel.tsx",
+      "text": "Webhook URL",
+      "reason": "存量裸文本（待翻译或技术串）"
+    },
+    {
+      "file": "src/components/workflow/Templates/VersionHistoryModal.tsx",
+      "text": "vs",
+      "reason": "存量裸文本（待翻译或技术串）"
+    }
+  ]
+}

@@ -1,0 +1,1277 @@
+{
+  "note": "棘轮基线：键 = file + target（不含行号，防漂移）。只许减少不许增加；新增违规必须当场修或登记白名单。NEUTRAL_PREFIXES 见 check-component-neutrality.mjs 头部。",
+  "entries": [
+    {
+      "file": "src/components/agent/AgentExecutionTab.tsx",
+      "target": "@/components/chat/AgentExecutionPanel",
+      "kind": "component",
+      "targetOwner": "chat"
+    },
+    {
+      "file": "src/components/agent/AgentExecutionTab.tsx",
+      "target": "@/stores/feature/executionStore",
+      "kind": "store",
+      "targetOwner": "execution"
+    },
+    {
+      "file": "src/components/agent/AgentSkillTab.tsx",
+      "target": "@/stores/feature/skillStore",
+      "kind": "store",
+      "targetOwner": "skill"
+    },
+    {
+      "file": "src/components/agent/AgentWfTab.tsx",
+      "target": "@/components/workflow/AIPanel/NL2SkillResultView",
+      "kind": "component",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/agent/AgentWfTab.tsx",
+      "target": "@/components/workflow/AIPanel/NL2UIResultView",
+      "kind": "component",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/agent/AgentWfTab.tsx",
+      "target": "@/stores/feature/skillStore",
+      "kind": "store",
+      "targetOwner": "skill"
+    },
+    {
+      "file": "src/components/agent/AgentWfTab.tsx",
+      "target": "@/stores/feature/workflowStore",
+      "kind": "store",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/chat/AgentExecutionPanel.tsx",
+      "target": "@/stores/feature/executionStore",
+      "kind": "store",
+      "targetOwner": "execution"
+    },
+    {
+      "file": "src/components/chat/AgentHierarchyTree.tsx",
+      "target": "@/stores/feature/executionStore",
+      "kind": "store",
+      "targetOwner": "execution"
+    },
+    {
+      "file": "src/components/chat/AgentPoolPanel.tsx",
+      "target": "@/stores/feature/executionStore",
+      "kind": "store",
+      "targetOwner": "execution"
+    },
+    {
+      "file": "src/components/chat/AgentProgressBar.tsx",
+      "target": "@/stores/feature/agentStore",
+      "kind": "store",
+      "targetOwner": "agent"
+    },
+    {
+      "file": "src/components/chat/AssistantFooter.tsx",
+      "target": "../gateway/tokenFormat",
+      "kind": "component",
+      "targetOwner": "gateway"
+    },
+    {
+      "file": "src/components/chat/AwarenessPanel.tsx",
+      "target": "@/stores/feature/appConfigStore",
+      "kind": "store",
+      "targetOwner": "appConfig"
+    },
+    {
+      "file": "src/components/chat/BuddyMessage.tsx",
+      "target": "@/stores/feature/buddyStore",
+      "kind": "store",
+      "targetOwner": "buddy"
+    },
+    {
+      "file": "src/components/chat/BuddyWidget.tsx",
+      "target": "@/stores/feature/buddyStore",
+      "kind": "store",
+      "targetOwner": "buddy"
+    },
+    {
+      "file": "src/components/chat/ChatMarkdownNodes.tsx",
+      "target": "@/stores/feature/executionStore",
+      "kind": "store",
+      "targetOwner": "execution"
+    },
+    {
+      "file": "src/components/chat/ChatMarkdownNodes.tsx",
+      "target": "../gateway/tokenFormat",
+      "kind": "component",
+      "targetOwner": "gateway"
+    },
+    {
+      "file": "src/components/chat/ChatSidebar.tsx",
+      "target": "@/components/search/SessionSearchPanel",
+      "kind": "component",
+      "targetOwner": "search"
+    },
+    {
+      "file": "src/components/chat/ChatView.tsx",
+      "target": "@/stores/feature/topicGroupStore",
+      "kind": "store",
+      "targetOwner": "topicGroup"
+    },
+    {
+      "file": "src/components/chat/ChatView.tsx",
+      "target": "../proactive/PrefetchIndicator",
+      "kind": "component",
+      "targetOwner": "proactive"
+    },
+    {
+      "file": "src/components/chat/ChatViewToolbar.tsx",
+      "target": "../gateway/tokenFormat",
+      "kind": "component",
+      "targetOwner": "gateway"
+    },
+    {
+      "file": "src/components/chat/CognitiveRoutePanel.tsx",
+      "target": "@/stores/feature/cognitiveRouteStore",
+      "kind": "store",
+      "targetOwner": "cognitiveRoute"
+    },
+    {
+      "file": "src/components/chat/ContextBar.tsx",
+      "target": "@/components/gateway/tokenFormat",
+      "kind": "component",
+      "targetOwner": "gateway"
+    },
+    {
+      "file": "src/components/chat/ContextClassificationBar.tsx",
+      "target": "@/components/gateway/tokenFormat",
+      "kind": "component",
+      "targetOwner": "gateway"
+    },
+    {
+      "file": "src/components/chat/ConversationSettingsModal.tsx",
+      "target": "@/stores/feature/agentStore",
+      "kind": "store",
+      "targetOwner": "agent"
+    },
+    {
+      "file": "src/components/chat/DelegateTaskModal.tsx",
+      "target": "@/stores/feature/multiAgentStore",
+      "kind": "store",
+      "targetOwner": "multiAgent"
+    },
+    {
+      "file": "src/components/chat/ExecutionTimeline.tsx",
+      "target": "@/stores/feature/executionStore",
+      "kind": "store",
+      "targetOwner": "execution"
+    },
+    {
+      "file": "src/components/chat/ExpertBadge.tsx",
+      "target": "@/stores/feature/agentStore",
+      "kind": "store",
+      "targetOwner": "agent"
+    },
+    {
+      "file": "src/components/chat/ExpertSelector.tsx",
+      "target": "@/stores/feature/expertStore",
+      "kind": "store",
+      "targetOwner": "expert"
+    },
+    {
+      "file": "src/components/chat/ExtractMemoriesModal.tsx",
+      "target": "@/stores/feature/memoryStore",
+      "kind": "store",
+      "targetOwner": "memory"
+    },
+    {
+      "file": "src/components/chat/InputArea.tsx",
+      "target": "@/components/skill/SkillToolbar",
+      "kind": "component",
+      "targetOwner": "skill"
+    },
+    {
+      "file": "src/components/chat/InputArea.tsx",
+      "target": "@/stores/feature/gatewayStore",
+      "kind": "store",
+      "targetOwner": "gateway"
+    },
+    {
+      "file": "src/components/chat/InputArea.tsx",
+      "target": "@/stores/feature/llmWikiStore",
+      "kind": "store",
+      "targetOwner": "llmWiki"
+    },
+    {
+      "file": "src/components/chat/InputArea.tsx",
+      "target": "@/stores/feature/promptTemplateStore",
+      "kind": "store",
+      "targetOwner": "promptTemplate"
+    },
+    {
+      "file": "src/components/chat/InputAreaControls.tsx",
+      "target": "@/components/skill/SkillToolbar",
+      "kind": "component",
+      "targetOwner": "skill"
+    },
+    {
+      "file": "src/components/chat/RightPanelContainer.tsx",
+      "target": "@/stores/feature/cacheStore",
+      "kind": "store",
+      "targetOwner": "cache"
+    },
+    {
+      "file": "src/components/chat/SuggestionPanel.tsx",
+      "target": "@/stores/feature/appConfigStore",
+      "kind": "store",
+      "targetOwner": "appConfig"
+    },
+    {
+      "file": "src/components/chat/SuggestionPanel.tsx",
+      "target": "@/stores/feature/proactiveStore",
+      "kind": "store",
+      "targetOwner": "proactive"
+    },
+    {
+      "file": "src/components/chat/TeammatePanel.tsx",
+      "target": "@/stores/feature/executionStore",
+      "kind": "store",
+      "targetOwner": "execution"
+    },
+    {
+      "file": "src/components/chat/TopicGroupDivider.tsx",
+      "target": "@/stores/feature/topicGroupStore",
+      "kind": "store",
+      "targetOwner": "topicGroup"
+    },
+    {
+      "file": "src/components/chat/TrajectoryReplay.tsx",
+      "target": "@/stores/feature/executionStore",
+      "kind": "store",
+      "targetOwner": "execution"
+    },
+    {
+      "file": "src/components/chat/VizBlockNode.tsx",
+      "target": "@/components/viz/VizBlockRenderer",
+      "kind": "component",
+      "targetOwner": "viz"
+    },
+    {
+      "file": "src/components/chat/VoiceCall.tsx",
+      "target": "@/stores/feature/approvalStore",
+      "kind": "store",
+      "targetOwner": "approval"
+    },
+    {
+      "file": "src/components/chat/VoiceCall.tsx",
+      "target": "@/stores/feature/executionStore",
+      "kind": "store",
+      "targetOwner": "execution"
+    },
+    {
+      "file": "src/components/chat/VoiceCall.tsx",
+      "target": "../approval/ApprovalCard",
+      "kind": "component",
+      "targetOwner": "approval"
+    },
+    {
+      "file": "src/components/chat/VoiceCall.tsx",
+      "target": "../voice/DagProgressCard",
+      "kind": "component",
+      "targetOwner": "voice"
+    },
+    {
+      "file": "src/components/chat/VoiceCall.tsx",
+      "target": "../voice/IntentClarificationPanel",
+      "kind": "component",
+      "targetOwner": "voice"
+    },
+    {
+      "file": "src/components/chat/VoiceCall.tsx",
+      "target": "../voice/VoiceWaveform",
+      "kind": "component",
+      "targetOwner": "voice"
+    },
+    {
+      "file": "src/components/chat/WorkflowAgentCard.tsx",
+      "target": "@/components/stock-analysis/utils",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/devtools/RLCheckpointManager.tsx",
+      "target": "@/stores/feature/rlTrainingStore",
+      "kind": "store",
+      "targetOwner": "rlTraining"
+    },
+    {
+      "file": "src/components/devtools/RLTrainingConfig.tsx",
+      "target": "@/components/settings/EngineConfigForm",
+      "kind": "component",
+      "targetOwner": "settings"
+    },
+    {
+      "file": "src/components/devtools/RLTrainingConfig.tsx",
+      "target": "@/stores/feature/rlTrainingStore",
+      "kind": "store",
+      "targetOwner": "rlTraining"
+    },
+    {
+      "file": "src/components/devtools/RLTrainingMonitor.tsx",
+      "target": "@/stores/feature/rlTrainingStore",
+      "kind": "store",
+      "targetOwner": "rlTraining"
+    },
+    {
+      "file": "src/components/devtools/RLTrainingPanel.tsx",
+      "target": "@/stores/feature/rlTrainingStore",
+      "kind": "store",
+      "targetOwner": "rlTraining"
+    },
+    {
+      "file": "src/components/dynamicUI/DynamicUIRenderer.tsx",
+      "target": "@/stores/feature/securityStore",
+      "kind": "store",
+      "targetOwner": "security"
+    },
+    {
+      "file": "src/components/invest/InvestHub.tsx",
+      "target": "@/components/time-travel/PageTimeAnchor",
+      "kind": "component",
+      "targetOwner": "time-travel"
+    },
+    {
+      "file": "src/components/layout/GlobalStatusBar.tsx",
+      "target": "./../skill/SkillStatusBar",
+      "kind": "component",
+      "targetOwner": "skill"
+    },
+    {
+      "file": "src/components/layout/UserProfileModal.tsx",
+      "target": "@/components/style",
+      "kind": "component",
+      "targetOwner": "style"
+    },
+    {
+      "file": "src/components/layout/UserProfileModal.tsx",
+      "target": "@/stores/feature/styleStore",
+      "kind": "store",
+      "targetOwner": "style"
+    },
+    {
+      "file": "src/components/layout/UserProfileModal.tsx",
+      "target": "@/stores/feature/userProfileStore",
+      "kind": "store",
+      "targetOwner": "userProfile"
+    },
+    {
+      "file": "src/components/memory/MemoryGraphView.tsx",
+      "target": "@/components/wiki/GraphView",
+      "kind": "component",
+      "targetOwner": "wiki"
+    },
+    {
+      "file": "src/components/multi-agent/MultiAgentDashboard.tsx",
+      "target": "@/stores/feature/multiAgentStore",
+      "kind": "store",
+      "targetOwner": "multiAgent"
+    },
+    {
+      "file": "src/components/multi-agent/MultiAgentDashboard.tsx",
+      "target": "@/stores/feature/providerStore",
+      "kind": "store",
+      "targetOwner": "provider"
+    },
+    {
+      "file": "src/components/plugin/PluginPanelHost.tsx",
+      "target": "@/components/skill/SkillSandboxContainer",
+      "kind": "component",
+      "targetOwner": "skill"
+    },
+    {
+      "file": "src/components/quant/QuantLab.tsx",
+      "target": "@/components/stock-analysis/_shared/PageHeader",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/settings/AgentProfileManager.tsx",
+      "target": "@/stores/feature/agentStore",
+      "kind": "store",
+      "targetOwner": "agent"
+    },
+    {
+      "file": "src/components/settings/CodeRefactorConfigPanel.tsx",
+      "target": "@/components/workflow/types",
+      "kind": "component",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/settings/DataVendorsTab.tsx",
+      "target": "@/components/workflow/types",
+      "kind": "component",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/settings/DemandDiscoveryConfigPanel.tsx",
+      "target": "@/components/workflow/types",
+      "kind": "component",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/settings/DirectoryImportWizard.tsx",
+      "target": "@/stores/feature/sourceStore",
+      "kind": "store",
+      "targetOwner": "source"
+    },
+    {
+      "file": "src/components/settings/EncryptionSettingsPanel.tsx",
+      "target": "@/stores/feature/deviceSyncStore",
+      "kind": "store",
+      "targetOwner": "deviceSync"
+    },
+    {
+      "file": "src/components/settings/EngineDetailPanel.tsx",
+      "target": "@/stores/feature/evolutionStore",
+      "kind": "store",
+      "targetOwner": "evolution"
+    },
+    {
+      "file": "src/components/settings/EvolutionSettings.tsx",
+      "target": "@/stores/feature/evolutionStore",
+      "kind": "store",
+      "targetOwner": "evolution"
+    },
+    {
+      "file": "src/components/settings/GeneralSettings.tsx",
+      "target": "@/stores/feature/voicePreferenceStore",
+      "kind": "store",
+      "targetOwner": "voicePreference"
+    },
+    {
+      "file": "src/components/settings/index.ts",
+      "target": "../chat/PluginMarketplace",
+      "kind": "component",
+      "targetOwner": "chat"
+    },
+    {
+      "file": "src/components/settings/LiteraryCreationConfigPanel.tsx",
+      "target": "@/components/workflow/types",
+      "kind": "component",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/settings/numberBounds.test.ts",
+      "target": "@/components/workflow/types",
+      "kind": "component",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/settings/numberBounds.ts",
+      "target": "@/components/workflow/types",
+      "kind": "component",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/settings/PromptImportModal.tsx",
+      "target": "@/stores/feature/promptTemplateStore",
+      "kind": "store",
+      "targetOwner": "promptTemplate"
+    },
+    {
+      "file": "src/components/settings/PromptTemplatesSettings.tsx",
+      "target": "@/stores/feature/promptTemplateStore",
+      "kind": "store",
+      "targetOwner": "promptTemplate"
+    },
+    {
+      "file": "src/components/settings/RealtimePushPanel.tsx",
+      "target": "@/stores/feature/deviceSyncStore",
+      "kind": "store",
+      "targetOwner": "deviceSync"
+    },
+    {
+      "file": "src/components/settings/SettingsPanel.tsx",
+      "target": "@/stores/feature/appConfigStore",
+      "kind": "store",
+      "targetOwner": "appConfig"
+    },
+    {
+      "file": "src/components/settings/SourceManager.tsx",
+      "target": "@/components/memory/MemoryGraphView",
+      "kind": "component",
+      "targetOwner": "memory"
+    },
+    {
+      "file": "src/components/settings/SourceManager.tsx",
+      "target": "@/stores/feature/llmWikiStore",
+      "kind": "store",
+      "targetOwner": "llmWiki"
+    },
+    {
+      "file": "src/components/settings/SourceManager.tsx",
+      "target": "@/stores/feature/memoryStore",
+      "kind": "store",
+      "targetOwner": "memory"
+    },
+    {
+      "file": "src/components/settings/SourceManager.tsx",
+      "target": "@/stores/feature/sourceStore",
+      "kind": "store",
+      "targetOwner": "source"
+    },
+    {
+      "file": "src/components/settings/StockAnalysisConfigPanel.tsx",
+      "target": "@/components/workflow/types",
+      "kind": "component",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/settings/ThemeManager.tsx",
+      "target": "@/stores/feature/themeStore",
+      "kind": "store",
+      "targetOwner": "theme"
+    },
+    {
+      "file": "src/components/settings/ToolSemanticCheck.tsx",
+      "target": "@/components/workflow/types/workflow.types",
+      "kind": "component",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/settings/UserProfileSettings.tsx",
+      "target": "@/components/style",
+      "kind": "component",
+      "targetOwner": "style"
+    },
+    {
+      "file": "src/components/settings/UserProfileSettings.tsx",
+      "target": "@/stores/feature/styleStore",
+      "kind": "store",
+      "targetOwner": "style"
+    },
+    {
+      "file": "src/components/settings/UserProfileSettings.tsx",
+      "target": "@/stores/feature/userProfileStore",
+      "kind": "store",
+      "targetOwner": "userProfile"
+    },
+    {
+      "file": "src/components/settings/VariableControls.tsx",
+      "target": "@/components/workflow/types",
+      "kind": "component",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/settings/WorkflowSettings.tsx",
+      "target": "@/components/workflow/Templates",
+      "kind": "component",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/settings/WorkflowSettings.tsx",
+      "target": "@/components/workflow/types",
+      "kind": "component",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/shared/ChartRenderer.tsx",
+      "target": "@/components/chat/ArtifactPreview/ChartPreview",
+      "kind": "component",
+      "targetOwner": "chat"
+    },
+    {
+      "file": "src/components/skill/SkillABTestResults.tsx",
+      "target": "@/stores/feature/evolutionStore",
+      "kind": "store",
+      "targetOwner": "evolution"
+    },
+    {
+      "file": "src/components/skill/SkillChatCommands.tsx",
+      "target": "@/stores/feature/skillExtensionStore",
+      "kind": "store",
+      "targetOwner": "skillExtension"
+    },
+    {
+      "file": "src/components/skill/SkillEvolutionViewer.tsx",
+      "target": "@/stores/feature/evolutionStore",
+      "kind": "store",
+      "targetOwner": "evolution"
+    },
+    {
+      "file": "src/components/skill/SkillStatusBar.tsx",
+      "target": "@/stores/feature/skillExtensionStore",
+      "kind": "store",
+      "targetOwner": "skillExtension"
+    },
+    {
+      "file": "src/components/skill/SkillToolbar.tsx",
+      "target": "@/stores/feature/skillExtensionStore",
+      "kind": "store",
+      "targetOwner": "skillExtension"
+    },
+    {
+      "file": "src/components/skill/SkillVersionTimeline.tsx",
+      "target": "@/stores/feature/evolutionStore",
+      "kind": "store",
+      "targetOwner": "evolution"
+    },
+    {
+      "file": "src/components/stock-analysis/AnalysisProgress.tsx",
+      "target": "@/stores/feature/stockWorkflowChatBridge",
+      "kind": "store",
+      "targetOwner": "stockWorkflowChatBridge"
+    },
+    {
+      "file": "src/components/stock-analysis/BacktestPage.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/BacktestPanel.tsx",
+      "target": "@/components/time-travel/ReplayBadge",
+      "kind": "component",
+      "targetOwner": "time-travel"
+    },
+    {
+      "file": "src/components/stock-analysis/BacktestPanel.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/decision-timeline/DecisionPhaseOverview.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/decision-timeline/TimelineBody.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/decision-timeline/TimelineNodeCard.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/decision-timeline/__tests__/TimelineNodeCard.violations.test.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/DecisionBanner.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/DecisionTimelinePanel.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/dual-view/CompactRiskSummary.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/evolution-ui-utils.ts",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/EvolutionApprovalDrawer.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/EvolutionDriftPanel.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/EvolutionDriftPanel.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/ExperimentSidebar.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/ExperimentTrail.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/KLineChart.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/PanelEmpty.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/PaperPortfolioDashboard.tsx",
+      "target": "@/stores/feature/paperPortfolioStore",
+      "kind": "store",
+      "targetOwner": "paperPortfolio"
+    },
+    {
+      "file": "src/components/stock-analysis/PortfolioMonitorPanel.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/PortfolioMonitorPanel.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/PriceAlertPanel.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/RecoHistoryModal.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/RecommendationPanel.tsx",
+      "target": "@/components/time-travel/ReplayBadge",
+      "kind": "component",
+      "targetOwner": "time-travel"
+    },
+    {
+      "file": "src/components/stock-analysis/RecommendationPanel.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/ReflectionPanel.tsx",
+      "target": "@/components/workflow/types/workflow.types",
+      "kind": "component",
+      "targetOwner": "workflow"
+    },
+    {
+      "file": "src/components/stock-analysis/ScreenshotDiagnosisDashboard.tsx",
+      "target": "@/stores/feature/providerStore",
+      "kind": "store",
+      "targetOwner": "provider"
+    },
+    {
+      "file": "src/components/stock-analysis/ScreenshotDiagnosisDashboard.tsx",
+      "target": "@/stores/feature/screenshotDiagnosisStore",
+      "kind": "store",
+      "targetOwner": "screenshotDiagnosis"
+    },
+    {
+      "file": "src/components/stock-analysis/SerenityCandidateCard.tsx",
+      "target": "@/stores/feature/serenityStore",
+      "kind": "store",
+      "targetOwner": "serenity"
+    },
+    {
+      "file": "src/components/stock-analysis/SerenityScreeningPanel.tsx",
+      "target": "@/stores/feature/serenityStore",
+      "kind": "store",
+      "targetOwner": "serenity"
+    },
+    {
+      "file": "src/components/stock-analysis/SerenityScreeningPanel.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/SerenityValidationPanel.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/StockAnalysisPage.tsx",
+      "target": "@/components/settings/StockAnalysisSettings",
+      "kind": "component",
+      "targetOwner": "settings"
+    },
+    {
+      "file": "src/components/stock-analysis/StockAnalysisPage.tsx",
+      "target": "@/components/stock-workspace/_shared/useSimpleMode",
+      "kind": "component",
+      "targetOwner": "stock-workspace"
+    },
+    {
+      "file": "src/components/stock-analysis/StockAnalysisPage.tsx",
+      "target": "@/components/time-travel/PageTimeAnchor",
+      "kind": "component",
+      "targetOwner": "time-travel"
+    },
+    {
+      "file": "src/components/stock-analysis/StockAnalysisPage.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/StockAnalysisSettingsModal.tsx",
+      "target": "@/components/settings/StockAnalysisSettings",
+      "kind": "component",
+      "targetOwner": "settings"
+    },
+    {
+      "file": "src/components/stock-analysis/WhatIfBacktest.tsx",
+      "target": "@/components/settings/StockAnalysisConfigPanel",
+      "kind": "component",
+      "targetOwner": "settings"
+    },
+    {
+      "file": "src/components/stock-analysis/_shared/PageHeader.tsx",
+      "target": "@/components/time-travel/PageTimeAnchor",
+      "kind": "component",
+      "targetOwner": "time-travel"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/DecisionTimelinePanel.test.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/EvolutionApprovalDrawer.test.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/EvolutionDriftPanel.failure.test.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/PriceAlertPanel.alertRow.test.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/PriceAlertPanel.t0.test.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/RecommendationPanel.asOfDate.test.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/RecommendationPanel.horizonPresentation.test.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/RecommendationPanel.seedPoolOrigin.test.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/RecommendationPanel.syntheticMarking.test.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/ScreenerPage.test.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/ScreenerToWorkspace.integration.test.tsx",
+      "target": "@/components/invest/InvestHub",
+      "kind": "component",
+      "targetOwner": "invest"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/SerenityCandidateCard.tier.test.tsx",
+      "target": "@/stores/feature/serenityStore",
+      "kind": "store",
+      "targetOwner": "serenity"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/SerenityScreeningPanel.asOfRunScope.test.tsx",
+      "target": "@/stores/feature/serenityStore",
+      "kind": "store",
+      "targetOwner": "serenity"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/SerenityScreeningPanel.asOfRunScope.test.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/SerenityScreeningPanel.historyGeneration.test.tsx",
+      "target": "@/stores/feature/serenityStore",
+      "kind": "store",
+      "targetOwner": "serenity"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/SerenityScreeningPanel.historyGeneration.test.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/SerenityScreeningPanel.nodeFailure.test.tsx",
+      "target": "@/stores/feature/serenityStore",
+      "kind": "store",
+      "targetOwner": "serenity"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/ValueAssessmentPanel.render.test.tsx",
+      "target": "@/stores/feature/settingsStore",
+      "kind": "store",
+      "targetOwner": "settings"
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/ValueAssessmentPanel.render.test.tsx",
+      "target": "@/stores/feature/stockAnalysisStore",
+      "kind": "store",
+      "targetOwner": "stockAnalysis"
+    },
+    {
+      "file": "src/components/stock-workspace/ContextSidebar.tsx",
+      "target": "@/components/stock-analysis/AnnouncementsPanel",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/ContextSidebar.tsx",
+      "target": "@/components/stock-analysis/ClsFlashPanel",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/ContextSidebar.tsx",
+      "target": "@/components/stock-analysis/ConceptBlocksPanel",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/ContextSidebar.tsx",
+      "target": "@/components/stock-analysis/EventCalendarPanel",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/ContextSidebar.tsx",
+      "target": "@/components/stock-analysis/IndexQuotesPanel",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/ContextSidebar.tsx",
+      "target": "@/components/stock-analysis/IndustryRankingPanel",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/ContextSidebar.tsx",
+      "target": "@/components/stock-analysis/NorthBoundPanel",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/ContextSidebar.tsx",
+      "target": "@/components/stock-analysis/OptionPcrPanel",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/ContextSidebar.tsx",
+      "target": "@/components/stock-analysis/PositionsMiniPanel",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/ContextSidebar.tsx",
+      "target": "@/components/stock-analysis/SectorHeatmapPanel",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/DecisionHeroBar.tsx",
+      "target": "@/components/stock-analysis/DecisionTrustNotice",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/DecisionHeroBar.tsx",
+      "target": "@/components/stock-analysis/MobileResponsive",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/DecisionHeroBar.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/stock-workspace/StockWorkspaceShell.tsx",
+      "target": "@/components/stock-analysis/AgentStockUIHost",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/views/AnalysisView.tsx",
+      "target": "@/components/stock-analysis/StockAnalysisPage",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/views/BacktestView.tsx",
+      "target": "@/components/stock-analysis/BacktestPage",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/views/CompareView.tsx",
+      "target": "@/components/stock-analysis/ComparePage",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/views/MonitorView.tsx",
+      "target": "@/components/stock-analysis/PortfolioDashboard",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/views/MonitorView.tsx",
+      "target": "@/components/stock-analysis/WatchlistPage",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/views/ReviewView.tsx",
+      "target": "@/components/stock-analysis/EvolutionDriftPanel",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/views/ReviewView.tsx",
+      "target": "@/components/stock-analysis/ReflectionPanel",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/stock-workspace/views/TradeView.tsx",
+      "target": "@/components/stock-analysis/TradePage",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/terminal/IntegratedTerminal.tsx",
+      "target": "@/stores/feature/themeStore",
+      "kind": "store",
+      "targetOwner": "theme"
+    },
+    {
+      "file": "src/components/time-travel/PageTimeAnchor.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/time-travel/ReplayBadge.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/time-travel/ReplaySweep.tsx",
+      "target": "@/components/tasks/JobCard",
+      "kind": "component",
+      "targetOwner": "tasks"
+    },
+    {
+      "file": "src/components/time-travel/ReplayWorkbench.tsx",
+      "target": "@/components/stock-analysis/_shared/PageHeader",
+      "kind": "component",
+      "targetOwner": "stock-analysis"
+    },
+    {
+      "file": "src/components/time-travel/ReplayWorkbench.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/time-travel/TimeAnchorTour.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/time-travel/TimeTravelBatchCard.tsx",
+      "target": "@/components/tasks/JobCard",
+      "kind": "component",
+      "targetOwner": "tasks"
+    },
+    {
+      "file": "src/components/time-travel/TimeTravelBatchCard.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/time-travel/__tests__/ReplayWorkbench.test.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/time-travel/__tests__/TimeAnchorTour.test.tsx",
+      "target": "@/stores/feature/timeAnchorStore",
+      "kind": "store",
+      "targetOwner": "timeAnchor"
+    },
+    {
+      "file": "src/components/viz/VizBlockRenderer.tsx",
+      "target": "@/components/chat/ArtifactPreview/ChartPreview",
+      "kind": "component",
+      "targetOwner": "chat"
+    },
+    {
+      "file": "src/components/wiki/IngestPanel.tsx",
+      "target": "@/stores/feature/llmWikiStore",
+      "kind": "store",
+      "targetOwner": "llmWiki"
+    },
+    {
+      "file": "src/components/wiki/LintReport.tsx",
+      "target": "@/stores/feature/llmWikiStore",
+      "kind": "store",
+      "targetOwner": "llmWiki"
+    },
+    {
+      "file": "src/components/wiki/OperationTimeline.tsx",
+      "target": "@/stores/feature/llmWikiStore",
+      "kind": "store",
+      "targetOwner": "llmWiki"
+    },
+    {
+      "file": "src/components/workflow/AIPanel/AIPanel.tsx",
+      "target": "@/stores/feature/evolutionStore",
+      "kind": "store",
+      "targetOwner": "evolution"
+    },
+    {
+      "file": "src/components/workflow/AIPanel/AIPanel.tsx",
+      "target": "@/stores/feature/workflowEditorStore",
+      "kind": "store",
+      "targetOwner": "workflowEditor"
+    },
+    {
+      "file": "src/components/workflow/AIPanel/EvolutionTab.tsx",
+      "target": "@/stores/feature/evolutionStore",
+      "kind": "store",
+      "targetOwner": "evolution"
+    },
+    {
+      "file": "src/components/workflow/DebugPanel.tsx",
+      "target": "@/stores/feature/workEngineStore",
+      "kind": "store",
+      "targetOwner": "workEngine"
+    },
+    {
+      "file": "src/components/workflow/Diagnostic/DiagnosticDrawer.tsx",
+      "target": "@/stores/feature/workflowEditorStore",
+      "kind": "store",
+      "targetOwner": "workflowEditor"
+    },
+    {
+      "file": "src/components/workflow/Edges/BaseEdge.tsx",
+      "target": "@/stores/feature/workEngineStore",
+      "kind": "store",
+      "targetOwner": "workEngine"
+    },
+    {
+      "file": "src/components/workflow/Hooks/useFlowNodes.ts",
+      "target": "@/stores/feature/agentStore",
+      "kind": "store",
+      "targetOwner": "agent"
+    },
+    {
+      "file": "src/components/workflow/Hooks/useFlowNodes.ts",
+      "target": "@/stores/feature/expertStore",
+      "kind": "store",
+      "targetOwner": "expert"
+    },
+    {
+      "file": "src/components/workflow/Nodes/BaseNode.tsx",
+      "target": "@/stores/feature/workEngineStore",
+      "kind": "store",
+      "targetOwner": "workEngine"
+    },
+    {
+      "file": "src/components/workflow/Panels/PropertyPanels/AgentPropertyPanel.tsx",
+      "target": "@/components/chat/ExpertSelector",
+      "kind": "component",
+      "targetOwner": "chat"
+    },
+    {
+      "file": "src/components/workflow/Panels/PropertyPanels/AgentPropertyPanel.tsx",
+      "target": "@/stores/feature/expertStore",
+      "kind": "store",
+      "targetOwner": "expert"
+    },
+    {
+      "file": "src/components/workflow/Panels/PropertyPanels/WorkflowPromptTemplateSelector.tsx",
+      "target": "@/stores/feature/promptTemplateStore",
+      "kind": "store",
+      "targetOwner": "promptTemplate"
+    },
+    {
+      "file": "src/components/workflow/WorkflowEditor.tsx",
+      "target": "@/stores/feature/workEngineStore",
+      "kind": "store",
+      "targetOwner": "workEngine"
+    },
+    {
+      "file": "src/components/workflow/WorkflowExecutor.tsx",
+      "target": "@/stores/feature/workflowEditorStore",
+      "kind": "store",
+      "targetOwner": "workflowEditor"
+    }
+  ]
+}

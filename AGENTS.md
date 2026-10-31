@@ -399,3 +399,11 @@ Conventional Commits + 中文描述。类型映射：
     - `disallowed_types` 是 **warn-by-default**（`cargo clippy -- --explain disallowed_types` 原文「Even though this lint is warn-by-default…」），CI 的 `-D warnings` 会把它提升为 deny ⇒ **禁区 8（无 std::sync 锁）并未失守**。
     - `module_name_repetitions = "allow"`（`Cargo.toml:103`）在未继承的 34 个 crate 里**同样丢失**，而它也是 warn-by-default ⇒ 若那些 crate 存在模块名重复，`-D warnings` 会把它变成 **error**。这是一条**潜在的既存红灯**，不是「lint 缺失」。
   - 量化待办：跑一次全量 `cargo clippy --workspace --all-targets --all-features -- -D warnings`，确认这 34 个 crate 是否因 `module_name_repetitions` 丢失而本来就有 warn。⚠ 因 clippy 遇首个 error 即短路（见上文「三条硬约束」第 2 条），须反复跑到全绿或按 target 分批，**单轮输出不足以定论**。
+
+## 组件中立性规范（2026-10-31 追加，门禁 `scripts/check-component-neutrality.mjs`）
+
+- **规则**：`src/components/<A>/**` 不得 import `@/stores/feature/<B>Store`（B≠A，目录名剥 `Store` 后缀比较）或 `@/components/<B>/**`（B≠A）。`@/` 别名与 `../` 相对路径统一 resolve 后判定，动态 `import()` 不在本门职责。
+- **中性目标目录**（天然跨 feature，不算违规）：`layout` / `common` / `shared` / `dynamicUI`——共享 UI 基元下沉地（Tooltip / DropdownMenu / AntdList / MonacoEditor 等）。新增中性目录必须登记进脚本 `NEUTRAL_PREFIXES` 并写明理由，不许静默扩。
+- **白名单**：`scripts/component-neutrality-allowlist.json`，键 = file + 精确 import 串（**不含行号**，行号随编辑漂移）；登记必须带 reason。现存唯一条目：`shared/PageContextProvider.tsx`（边界聚合器）。
+- **棘轮基线**：`scripts/component-neutrality-baseline.json`（2026-10-31 首建 212 条唯一键，存量跨 feature 引用），**只减不增**——新违规必须当场修（下沉/注入/事件化）或显式登记白名单；存量修复后跑 `--update-baseline` 收紧（存在新违规时该命令拒绝执行，不许用它洗白）。
+- **门禁**：`node scripts/check-component-neutrality.mjs`（selftest：`--selftest`）。

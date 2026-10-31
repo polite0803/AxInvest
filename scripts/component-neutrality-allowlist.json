@@ -1,0 +1,14 @@
+{
+  "fileExemptions": [
+    {
+      "file": "src/components/shared/PageContextProvider.tsx",
+      "targets": [
+        "@/stores/feature/evolutionStore",
+        "@/stores/feature/workflowEditorStore",
+        "@/stores/feature/workflowStore"
+      ],
+      "reason": "边界聚合器：提供页面级 Context，聚合三个 feature store 的只读快照供中立组件消费（team-lead-15 规格首个登记候选）"
+    }
+  ],
+  "targetPrefixExemptions": []
+}

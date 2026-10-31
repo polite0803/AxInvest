@@ -82,9 +82,27 @@ pub(crate) fn build_db_url(
     master_key: &[u8; 32],
 ) -> Result<(String, bool), String> {
     if cfg.db_type == "postgres" {
-        let host = cfg.pg_host.clone().unwrap_or_else(|| "localhost".to_string());
+        // 校验在拼 URL **之前**：host/database 是**裸拼**进 URL 的（不像 user/password
+        // 有 pg_url_encode 兜底），host 里一个 `@` 就把 userinfo 边界改写掉、
+        // database 里一个 `/` 就伪造出多级 path ⇒ 连错库 / 解析错 host ⇒ 假降级。
+        // `None` 走文档化默认值；`Some("")` **不猜** —— 与 dao
+        // `resolve_db_url_from_path` 对空串报错的纪律同源：把「配置没填好」
+        // 伪装成「连上了默认库」正是「数据不知去哪了」的事故形态。
+        let host = match &cfg.pg_host {
+            Some(h) => {
+                validate_pg_host(h)?;
+                h.clone()
+            },
+            None => "localhost".to_string(),
+        };
         let port = cfg.pg_port.unwrap_or(5432);
-        let database = cfg.pg_database.clone().unwrap_or_else(|| "axagent".to_string());
+        let database = match &cfg.pg_database {
+            Some(d) => {
+                validate_pg_database(d)?;
+                d.clone()
+            },
+            None => "axagent".to_string(),
+        };
         let user = cfg.pg_user.clone().unwrap_or_else(|| "postgres".to_string());
         let password = match &cfg.pg_password {
             Some(pw) if !pw.is_empty() => pw.clone(),
@@ -136,6 +154,85 @@ fn pg_url_encode(s: &str) -> String {
     out
 }
 
+/// 校验 `pg_host` 输入。**纯函数**，好在拼 URL 之前就把结构性破坏拒掉。
+///
+/// 为什么是**拒绝**而不是 percent-encode：host 是寻址语义，编码修不了歧义 ——
+/// `ho@st` 编码成 `ho%40st` 后 libpq 会当主机名解析，照样连不上；而 `ho@st`
+/// 不编码则 userinfo 边界被改写（`parse_pg_host_port` 按「最后一个 `@`」取
+/// host，会把 host 取成 `st`）。两种都产生假故障，唯一正确处理是让用户
+/// 在入口就看到可操作的报错。
+///
+/// 规则（host 出现在 URL authority 段，`{host}:{port}` 由 `build_db_url` 的
+/// `format!` 拼接）：
+/// * 非空、无首尾空白（首尾空白几乎必是输入失误，静默 trim 是在猜）
+/// * 白名单 `[A-Za-z0-9._-]` —— 主机名的合法字符集本来就小，黑名单追不完
+/// * IPv6 **必须**方括号形式 `[...]`：内部只允许十六进制 / `:` / `.`（兼容
+///   v4 映射 `::ffff:192.168.0.1`）；`]` 之后不允许再带东西（端口有自己的
+///   输入框，`[::1]:5432` 会拼成 `...@[::1]:5432:5432/...`）
+/// * 裸 `::1` 被白名单拒绝并提示改用 `[::1]` —— 不拒绝的话
+///   `postgres://u:p@::1:5432/db` 是结构歧义的，且
+///   `parse_pg_host_port` 对它解析出空 host
+fn validate_pg_host(host: &str) -> Result<(), String> {
+    let bad = |reason: String| Err(format!("pg_host 非法：`{host}` —— {reason}"));
+    if host.is_empty() {
+        return bad("不能为空。留空请在配置里删掉该字段（会回退 localhost），或填一个主机名".into());
+    }
+    if host.trim() != host {
+        return bad("含首尾空白，请去掉空格".into());
+    }
+    if let Some(inner) = host.strip_prefix('[') {
+        let Some((addr, tail)) = inner.split_once(']') else {
+            return bad("方括号未闭合，IPv6 应写作 `[::1]`".into());
+        };
+        if !tail.is_empty() {
+            return bad(
+                "`]` 之后不应再带内容（端口请在「端口」输入框单独填，不要写进主机名）".into()
+            );
+        }
+        if addr.is_empty() || !addr.chars().all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.') {
+            return bad("方括号内只允许 IPv6 字符（十六进制、`:`、`.`）".into());
+        }
+        return Ok(());
+    }
+    if let Some(c) =
+        host.chars().find(|c| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')))
+    {
+        let hint = if c == ':' {
+            "IPv6 请用方括号形式，如 `[::1]`"
+        } else {
+            "主机名只允许字母、数字、`.`、`-`、`_`"
+        };
+        return bad(format!("含非法字符 `{c}`（{hint}）"));
+    }
+    Ok(())
+}
+
+/// 校验 `pg_database` 输入。**纯函数**，规则黑名单：database 落在 URL path 段，
+/// 会破坏结构的是 `/ ? # @ %` 与空白（`@` 尤其要拒 —— 本文件 `parse_pg_host_port`
+/// 按「最后一个 `@`」切 userinfo，库名带 `@` 会把自己的诊断解析也带歪；
+/// `%` 会被 URL 解析器当 percent-escape，非法序列直接让连接失败且报错指向无关处）。
+/// 不做白名单：PG 标识符在带引号时合法字符很多，黑名单漏拒的顶多连不上
+/// （服务端报错），白名单误杀的是合法库。
+fn validate_pg_database(name: &str) -> Result<(), String> {
+    let bad = |reason: String| Err(format!("pg_database 非法：`{name}` —— {reason}"));
+    if name.is_empty() {
+        return bad("不能为空。留空请在配置里删掉该字段（会回退 axagent）".into());
+    }
+    if name.trim() != name {
+        return bad("含首尾空白，请去掉空格".into());
+    }
+    if name.chars().any(char::is_whitespace) {
+        return bad("不能含空白字符（需要带空格的库名请在 PG 里改用不含空格的名字）".into());
+    }
+    if let Some(c) = name.chars().find(|c| matches!(c, '/' | '?' | '#' | '@' | '%')) {
+        return bad(format!(
+            "含非法字符 `{c}`（会破坏连接串结构：`/` 伪造 path 层级，`?`/`#` 伪造查询与片段，\
+             `@` 干扰 userinfo 解析，`%` 落进 URL 会被当 percent-escape 解码）"
+        ));
+    }
+    Ok(())
+}
+
 pub async fn init_database_with_dir(app_dir: PathBuf) -> Result<DatabaseInitResult, String> {
     axagent_storage::storage_paths::ensure_documents_dirs().unwrap_or_else(|e| {
         tracing::warn!(
@@ -170,12 +267,27 @@ pub async fn init_database_with_dir(app_dir: PathBuf) -> Result<DatabaseInitResu
         }
         tracing::error!(
             target: "startup",
-            "⚠️ Postgres 不可达，降级到本地 SQLite。原因: {} | 原 URL: {}",
-            reason,
-            redact_pg_password(&db_url)
+            "{}",
+            format_pg_fallback_log(&reason, &db_url)
         );
         write_fallback_marker(&app_dir, "pg_unreachable", &reason).ok();
-        let sqlite_url = format!("sqlite:{}/axagent.db?mode=rwc", app_dir.display());
+        // ⚠ **不要在这里拼 `?mode=rwc`**。
+        //
+        // dao 侧 `resolve_db_url_from_path`（crates/dao/src/db.rs:110-115）对
+        // `sqlite:` 开头且不带查询串的输入**自己就会追加** `?mode=rwc`，`create_pool`
+        // 拿到的 URL 与拼过的完全一致。而这里多拼的这一段会原样进
+        // `global_state::set_db_path`（见下方），于是整个进程生命周期内
+        // `db_path()` 都返回一个**带查询串的假路径**，下游 4 处只做了
+        // `strip_prefix("sqlite:")` 就把它当文件名用：
+        //   · src/commands/backup.rs:80        → 恢复时 restore_sqlite_backup 打不开
+        //   · src/commands/webdav.rs:280       → std::fs::copy 失败 ⇒「已中止恢复」
+        //   · src/init/state.rs:196            → FTS5 建表失败 ⇒ 全文检索静默降级
+        //   · crates/tools/src/tools/knowledge.rs:181 → 文本兜底搜索打不开库
+        // （Windows 上 `?` 是非法文件名字符，所以是直接报错；Linux 上会落地一个
+        //   名叫 `axagent.db?mode=rwc` 的空库 —— 连错库那种「数据不知去哪了」。）
+        // 正确形态见 crates/dao/src/integrity.rs:90：strip prefix 后还要 `.split('?')`。
+        // 在这里去掉 `?mode=rwc` 是**一处改动同时修掉上面四处**，不必去改四个文件。
+        let sqlite_url = format!("sqlite:{}/axagent.db", app_dir.display());
         (sqlite_url, true)
     } else {
         (db_url, is_sqlite)
@@ -360,6 +472,53 @@ fn secure_zero(buf: &mut [u8]) {
 // Postgres 可用性探测 + 降级 helper（init/database.rs 私有）
 // ──────────────────────────────────────────────────────────────────────
 
+/// 构造「Postgres 不可达，降级到 SQLite」这条启动日志的文本。
+///
+/// **纯函数，好让「日志里有没有明文密码」可被单测守住。** 这是本次事故的形态：
+/// 降级日志把含明文口令的连接串写进了日志文件。历史上本文件还自带一份脱敏副本
+/// 并取第一个 `@`，密码含未编码 `@` 时后半段直接外泄。
+///
+/// 现在脱敏口径的**唯一真源**是 `axagent_dao::db::redact_db_url`（取最后一个 `@`），
+/// 本文件不再有第二份实现 —— 两份实现正是分叉的根源。
+fn format_pg_fallback_log(reason: &str, db_url: &str) -> String {
+    format!(
+        "⚠️ Postgres 不可达，降级到本地 SQLite。原因: {} | 原 URL: {}",
+        reason,
+        axagent_dao::db::redact_db_url(db_url)
+    )
+}
+
+/// 从 Postgres URL 里解析出 `(host, port)`。纯函数，好让「取哪个 `@`」这条判据可被单测守住。
+///
+/// **必须取最后一个 `@`**：密码含未编码 `@`（如 `p@ss`）时，取第一个会把 host
+/// 解析成 `ss@host:5432` ⇒ TCP 必然连不上 ⇒ 误报「Postgres 不可达」⇒ 触发降级
+/// 并打印 URL。与脱敏口径 `axagent_dao::db::redact_db_url` 同口径。
+///
+/// **IPv6 字面量必须走方括号分支**（RFC 3986 §3.2.2）：host 以 `[` 开头时，端口
+/// 分隔符是 `]` **之后**那个 `:`，而不是 host 内部的 `:`。用朴素的
+/// `split_once(':')` 会把 `[::1]:5432` 解析成 host=`[`、port 回退 5432 ⇒ TCP 连
+/// 一个叫 `[` 的主机名必然失败 ⇒ 误报「Postgres 不可达」⇒ 触发降级 + 打印 URL。
+/// IPv6 回环（`[::1]`）是本地自建 PG 的常见写法，比「密码含 `@`」更容易触发。
+///
+/// 返回的 host **不带方括号**：`tokio::net::TcpStream::connect((host, port))` 走
+/// `ToSocketAddrs`，它要的是 `::1` 这种裸地址，`[::1]` 会解析失败。
+fn parse_pg_host_port(url: &str) -> Option<(String, u16)> {
+    let rest = url.strip_prefix("postgres://").or_else(|| url.strip_prefix("postgresql://"))?;
+    // 跳过 user:pass@
+    let after_auth = rest.rsplit_once('@')?.1;
+    let host_port = after_auth.split('/').next()?;
+    // IPv6 字面量：`[::1]` / `[::1]:5432` / `[2001:db8::1]`
+    if let Some(inner) = host_port.strip_prefix('[') {
+        let (addr, tail) = inner.split_once(']')?;
+        let port = tail.strip_prefix(':').and_then(|p| p.parse::<u16>().ok()).unwrap_or(5432);
+        return Some((addr.to_string(), port));
+    }
+    Some(match host_port.split_once(':') {
+        Some((h, p)) => (h.to_string(), p.parse::<u16>().unwrap_or(5432)),
+        None => (host_port.to_string(), 5432),
+    })
+}
+
 /// 探测 Postgres 是否**真的可用**：先 3 秒 TCP 快探排除网络不通与超时，
 /// 再走一次完整握手（`connect_without_initialization`：只连库，不建表、不收敛）。
 ///
@@ -373,14 +532,7 @@ fn secure_zero(buf: &mut [u8]) {
 /// 握手失败同样计入「不可达」，让既有降级/报错路径给出可操作结论。
 async fn pg_unreachable(url: &str) -> Option<String> {
     // 解析 host:port
-    let rest = url.strip_prefix("postgres://").or_else(|| url.strip_prefix("postgresql://"))?;
-    // 跳过 user:pass@
-    let after_auth = rest.split_once('@')?.1;
-    let host_port = after_auth.split('/').next()?;
-    let (host, port) = match host_port.split_once(':') {
-        Some((h, p)) => (h, p.parse::<u16>().unwrap_or(5432)),
-        None => (host_port, 5432),
-    };
+    let (host, port) = parse_pg_host_port(url)?;
     match tokio::time::timeout(
         std::time::Duration::from_secs(3),
         tokio::net::TcpStream::connect((host, port)),
@@ -415,23 +567,6 @@ fn fallback_enabled(app_dir: &Path) -> bool {
         }
     }
     true
-}
-
-/// 将 Postgres URL 中的 `:password@` 段替换成 `:***@`，避免密钥进日志。
-/// 已经过 percent-encode（`%40`、`%3A` 等）的密码无法可靠区分，跳过。
-fn redact_pg_password(url: &str) -> String {
-    if let Some(at_idx) = url.find('@') {
-        if let Some(scheme_end) = url.find("://") {
-            let auth_start = scheme_end + 3;
-            if at_idx > auth_start {
-                let user_end = url[auth_start..at_idx].find(':').map(|i| auth_start + i);
-                if let Some(colon) = user_end {
-                    return format!("{}:***{}", &url[..colon], &url[at_idx..]);
-                }
-            }
-        }
-    }
-    url.to_string()
 }
 
 /// 写一个伴生标记文件，UI 重连 PG 时可读取提示用户。
@@ -490,5 +625,185 @@ mod tests {
 
         let other = "TCP 连接失败: 由于目标计算机积极拒绝，无法连接。";
         assert_eq!(explain_pg_error(other), other, "非编码类错误不得被改写");
+    }
+
+    /// 降级日志里打印的 URL 必须已脱敏（脱敏口径的唯一真源在 dao 侧）。
+    ///
+    /// 2026-10-31 事故：本文件曾自带一份副本并取第一个 `@`，密码含未编码 `@` 时
+    /// 密码后半段会外泄。合并到 `axagent_dao::db::redact_db_url` 后，此路径不可能
+    /// 再与 dao 侧分叉。完整的 8 组输入由 `crates/dao/src/db.rs` 的
+    /// `redact_db_url_replaces_password_entirely` 守住。
+    #[test]
+    fn startup_log_url_is_redacted() {
+        assert_eq!(
+            axagent_dao::db::redact_db_url("postgres://user:p@ss@host/db"),
+            "postgres://user:***@host/db",
+            "密码里的 @ 之后不得有明文残留"
+        );
+    }
+
+    /// host:port 解析：密码含未编码 `@` 时，host 不得被解析成 `ss@host`。
+    ///
+    /// 这条不是洁癖：解析错了 ⇒ TCP 连的是不存在的 host ⇒ 必然超时 ⇒ 误报
+    /// 「Postgres 不可达」⇒ 触发降级并把连接串打进日志。
+    #[test]
+    fn parse_pg_host_port_takes_last_at() {
+        // 常规
+        assert_eq!(
+            parse_pg_host_port("postgres://user:pw@host:5432/db"),
+            Some(("host".to_string(), 5432))
+        );
+        // 无端口 → 默认 5432
+        assert_eq!(
+            parse_pg_host_port("postgres://user:pw@host/db"),
+            Some(("host".to_string(), 5432))
+        );
+        // 密码含未编码 @ → host 必须仍是 host，而不是 ss@host
+        assert_eq!(
+            parse_pg_host_port("postgres://user:p@ss@host:5432/db"),
+            Some(("host".to_string(), 5432)),
+            "取最后一个 @，否则 host 变成 ss@host ⇒ 必然连不上"
+        );
+        // percent-encode 过的密码
+        assert_eq!(
+            parse_pg_host_port("postgresql://user:p%40ss@host/db"),
+            Some(("host".to_string(), 5432))
+        );
+        // 非 PG scheme / 无 @ → None
+        assert_eq!(parse_pg_host_port("sqlite:/tmp/a.db"), None);
+        assert_eq!(parse_pg_host_port("postgres://host/db"), None);
+        // 密码含多个未编码 @ → host 仍须是最后一个 @ 之后的部分
+        assert_eq!(
+            parse_pg_host_port("postgres://u:a@b@c@host:5432/db"),
+            Some(("host".to_string(), 5432))
+        );
+        // 端口不是数字 → 回退默认 5432，host 不得含端口残留
+        assert_eq!(
+            parse_pg_host_port("postgres://u:pw@host:notaport/db"),
+            Some(("host".to_string(), 5432))
+        );
+    }
+
+    /// IPv6 字面量必须走方括号分支，且返回的 host **不带方括号**。
+    ///
+    /// 修复前 `split_once(':')` 会把 `[::1]:5432` 切成 host=`[`、port=`::1]:5432`
+    /// 解析失败后退回 5432 ⇒ 拿 `[` 当主机名去 connect ⇒ 必然失败 ⇒ 误报
+    /// 「Postgres 不可达」⇒ 触发降级并把连接串打进日志。IPv6 回环是本地自建
+    /// PG 的常见写法，这条是**当前就会踩**的路径，不是理论洁癖。
+    ///
+    /// 返回不带方括号是因为 `tokio::net::TcpStream::connect((host, port))` 走
+    /// `ToSocketAddrs`，它要 `::1` 裸地址，`[::1]` 会解析失败。
+    #[test]
+    fn parse_pg_host_port_handles_ipv6_brackets() {
+        assert_eq!(
+            parse_pg_host_port("postgres://user:pw@[::1]:5432/db"),
+            Some(("::1".to_string(), 5432)),
+            "端口分隔符必须是 ] 之后那个 :，不是 host 内部的 :"
+        );
+        assert_eq!(
+            parse_pg_host_port("postgres://user:pw@[::1]/db"),
+            Some(("::1".to_string(), 5432)),
+            "无端口 → 默认 5432"
+        );
+        assert_eq!(
+            parse_pg_host_port("postgresql://user:pw@[2001:db8::1]:6543/db"),
+            Some(("2001:db8::1".to_string(), 6543))
+        );
+        // 密码含未编码 @ 与 IPv6 同时出现：两层解析都得对
+        assert_eq!(
+            parse_pg_host_port("postgres://user:p@ss@[::1]:5432/db"),
+            Some(("::1".to_string(), 5432))
+        );
+        // 开了方括号却没闭合 → None，不得猜
+        assert_eq!(parse_pg_host_port("postgres://user:pw@[::1:5432/db"), None);
+    }
+
+    /// host 校验：合法形态放行；结构性破坏逐个拒绝，且**报错必须可操作**
+    ///（断言报错里出现指导性关键词，而不是只断言 Err —— 报错不可操作等于
+    /// 把用户堵在门外）。
+    #[test]
+    fn validate_pg_host_accepts_and_rejects() {
+        // 合法：常见主机名 / IPv4 / 域名 / IPv6 方括号（含 v4 映射）
+        for ok in [
+            "localhost",
+            "127.0.0.1",
+            "db.internal",
+            "MY-DB_1",
+            "[::1]",
+            "[2001:db8::1]",
+            "[::ffff:192.168.0.1]",
+        ] {
+            assert!(validate_pg_host(ok).is_ok(), "应放行：{ok}");
+        }
+        // 非法：每条给出报错里必须出现的关键词
+        let cases: &[(&str, &str)] = &[
+            ("", "不能为空"),
+            ("ho@st", "非法字符"),   // @ 改写 userinfo 边界
+            ("host/db", "非法字符"), // / 伪造 path
+            ("host?x", "非法字符"),  // ? 伪造 query
+            ("host#x", "非法字符"),  // # 伪造 fragment
+            ("ho st", "非法字符"),   // 中间空白
+            (" host", "首尾空白"),
+            ("host ", "首尾空白"),
+            ("::1", "方括号"), // 裸 IPv6：必须提示改用 [::1]
+            ("[::1", "未闭合"),
+            ("[::1]:5432", "端口"),   // host 字段里带端口 → 会拼出双端口
+            ("[::1]x", "端口"),       // ] 之后有残留（提示里点名端口规则）
+            ("[zz::1]", "IPv6 字符"), // 方括号内非十六进制
+        ];
+        for (input, keyword) in cases {
+            let e = validate_pg_host(input).expect_err("应拒绝");
+            assert!(e.contains(keyword), "输入 {input:?} 的报错应提到 {keyword:?}，实际：{e}");
+        }
+    }
+
+    /// database 校验：黑名单逐字符命中，报错解释**为什么**这个字符会坏事。
+    #[test]
+    fn validate_pg_database_accepts_and_rejects() {
+        for ok in ["axagent", "axinvest", "my-db", "db_1", "AxAgent2026"] {
+            assert!(validate_pg_database(ok).is_ok(), "应放行：{ok}");
+        }
+        let cases: &[(&str, &str)] = &[
+            ("", "不能为空"),
+            ("a/b", "伪造 path"),
+            ("a?b", "伪造"),
+            ("a#b", "伪造"),
+            ("a@b", "userinfo"),
+            ("a%b", "percent"),
+            ("a b", "空白"),
+            (" db", "首尾空白"),
+            ("db ", "首尾空白"),
+        ];
+        for (input, keyword) in cases {
+            let e = validate_pg_database(input).expect_err("应拒绝");
+            assert!(e.contains(keyword), "输入 {input:?} 的报错应提到 {keyword:?}，实际：{e}");
+        }
+    }
+
+    /// 守住**调用点接线**：降级日志的实际输出里不得出现明文密码。
+    ///
+    /// 为什么不能只测 dao 侧的脱敏函数：那只证明「函数是对的」，证明不了
+    /// 「调用点真的用了它」。若将来有人把降级日志改回直接打 `db_url`，
+    /// 函数侧测试依然全绿，而密码又回到日志里 —— 这正是本次事故的形态。
+    ///
+    /// 判据取**行为**（输出内容）而非源码文本形状：日志文案、格式串、
+    /// 参数顺序怎么改都不影响这条断言。
+    #[test]
+    fn fallback_log_output_contains_no_plaintext_password() {
+        // 密码含未编码 @ —— 事故形态（修复前日志里会出现 `ss`）
+        let out = format_pg_fallback_log(
+            "TCP 连接失败: 由于目标计算机积极拒绝，无法连接。",
+            "postgres://user:p@ss@host:5432/db",
+        );
+        assert!(!out.contains("p@ss"), "日志不得含明文密码：{out}");
+        assert!(!out.contains(":p@"), "日志不得含明文密码：{out}");
+        assert!(out.contains("postgres://user:***@host:5432/db"), "{out}");
+        // 原因文本必须保留，否则排查现场丢失
+        assert!(out.contains("TCP 连接失败"), "{out}");
+
+        // 常规密码也不得明文出现
+        let out = format_pg_fallback_log("连接超时（3s）", "postgres://postgres:s3cret@h/db");
+        assert!(!out.contains("s3cret"), "日志不得含明文密码：{out}");
+        assert!(out.contains("postgres://postgres:***@h/db"), "{out}");
     }
 }

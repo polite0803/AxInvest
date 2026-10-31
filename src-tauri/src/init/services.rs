@@ -2105,6 +2105,26 @@ pub async fn start_cron_scheduler_headless(state: &AppState) {
     start_cron_scheduler_opt(None, state).await
 }
 
+/// 生成跨进程调度租约的**持有者标识**。
+///
+/// **绝不能包含数据库连接串。** PG 模式下 `harness.db_path()` 是**含明文口令**的
+/// 完整连接串（`crates/dao/src/db.rs` 的 `DbHandle.path` 存的就是原始入参，
+/// 该文件自己的注释亦明写「db_path 在 PG 场景下是含明文密码的连接串」）。
+/// 历史实现直接把它拼进 holder_id ⇒ 明文口令被写进三处：
+///   ① 本进程的启动日志（`tracing::info!` 打印 holder_id，**每次启动无条件发生**）；
+///   ② **别的进程**的 holder_id 日志（抢不到租约时 warn 出来 ⇒ 多实例部署互相
+///      打印对方的明文口令）；
+///   ③ `cron_leader_lease` **库表**（PG 模式下该表就在共享 PG 库里）。
+///
+/// 租约对 holder_id 的全部要求只有两条：**进程内唯一** + **可诊断**
+/// （`crates/entities/src/cron_leader_lease.rs` 的列注释原文：「持有者标识
+/// （本进程启动时生成，进程内唯一）」）。dao 层对它只做**相等比较**
+/// （`row.holder_id != holder_id` / `Column::HolderId.eq(holder_id)`），
+/// **从不解析**其内容 ⇒ 改格式不影响租约语义。
+fn build_lease_holder_id() -> String {
+    format!("pid-{}-{}", std::process::id(), chrono::Utc::now().timestamp_millis())
+}
+
 /// 启动 cron 调度器（`app` 可选 ⇒ 桌面 / 无头共用一份实现）。
 ///
 /// ⚠ **C 方案（2026-10-26）**：`app` 改为 `Option<tauri::AppHandle>` ——
@@ -4451,8 +4471,8 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
     let leader = {
         use axagent_dao::repo::cron_leader_lease as lease_repo;
         let db = state.harness.db().clone();
-        let holder_id =
-            format!("{}-{}", state.harness.db_path(), chrono::Utc::now().timestamp_millis());
+        // holder_id 只用 pid + 启动时刻，**绝不拼接 db_path**（PG 下含明文口令）。
+        let holder_id = build_lease_holder_id();
         match lease_repo::try_acquire(
             &db,
             lease_repo::LEASE_SCHEDULER,
@@ -5710,5 +5730,26 @@ mod tests {
             assert!(all.contains_key(k), "缺键 {k}：{all:?}");
             assert!(live.contains_key(k), "live 缺键 {k}：{live:?}");
         }
+    }
+
+    /// 租约 holder_id **绝不能携带数据库连接串**（PG 下 `db_path()` 含明文口令）。
+    ///
+    /// 这条不是洁癖：历史实现把 `harness.db_path()` 直接拼进 holder_id ⇒ 明文口令
+    /// 落进 ①启动日志 ②别的进程的 holder_id 日志 ③`cron_leader_lease` 库表。
+    /// 回归判据写成**形状**而非具体值：只要不出现连接串的结构特征就合格。
+    #[test]
+    fn lease_holder_id_never_carries_db_path() {
+        let holder_id = super::build_lease_holder_id();
+        assert!(!holder_id.contains("://"), "holder_id 不得含 scheme 分隔：{holder_id}");
+        assert!(!holder_id.contains('@'), "holder_id 不得含 userinfo：{holder_id}");
+        assert!(!holder_id.contains(':'), "holder_id 不得含端口分隔：{holder_id}");
+        assert!(holder_id.starts_with("pid-"), "holder_id 形如 pid-<pid>-<ts>：{holder_id}");
+        // ⚠ 不断言「两次生成必不同」：时间戳精度是**毫秒**，同进程内两次连续调用
+        //   完全可能落在同一毫秒 ⇒ 那样的断言是**概率性 flaky**（约一半概率失败）。
+        //   唯一性的真实来源是 pid（跨进程）+ 启动时刻（跨同 pid 的重启），不靠调用间隔。
+        assert!(
+            holder_id.contains(&std::process::id().to_string()),
+            "holder_id 必须含本进程 pid：{holder_id}"
+        );
     }
 }

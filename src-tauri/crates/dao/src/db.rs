@@ -31,7 +31,11 @@ pub use sea_orm::DatabaseConnection;
 /// - userinfo 不含 `:`（无密码）时原样返回，不做无意义的改写；
 /// - 用最后一个 `@` 分隔（密码可能被 URL 编码，但 `@` 若出现在密码里未经编码，
 ///   `split_once('@')` 会把 host 截错 ⇒ 取 `rsplit_once`）。
-fn redact_db_url(raw: &str) -> String {
+///
+/// **唯一真源**：根包 `axagent` 的启动降级日志（`src/init/database.rs`）已改为
+/// 直接调用本函数，不再自带一份副本。历史上正是因为存在两份实现（一个取第一个
+/// `@`、一个取最后一个 `@`）才出现「同一个密码在不同调用点泄漏程度不同」。
+pub fn redact_db_url(raw: &str) -> String {
     let Some((scheme, rest)) = raw.split_once("://") else {
         return raw.to_string();
     };
@@ -46,6 +50,13 @@ fn redact_db_url(raw: &str) -> String {
 
 pub struct DbHandle {
     pub conn: DatabaseConnection,
+    /// **永远脱敏安全**（构造点统一过 [`redact_db_url`]）。SQLite 路径 / `:memory:` /
+    /// 裸文件路径没有 userinfo，脱敏是恒等变换；只有 PG 连接串会被抹掉口令。
+    ///
+    /// 为什么在构造点做而不是让消费者自己脱敏：trait 契约（harness 的
+    /// `persistence_mod.rs:25`）写明本字段「仅用于诊断 / 日志」，但 `pub` 字段
+    /// 拦不住误用 —— 历史事故正是 holder_id 把明文口令拼进了日志与租约表。
+    /// 语义只有一条：「拿到 `path` 就能安全打印」，分叉即事故。
     pub path: String,
 }
 
@@ -309,7 +320,9 @@ pub async fn create_pool(db_path: &str) -> Result<DbHandle> {
 
     // 脱敏后打印：`db_path` 在 PG 场景下是含明文密码的连接串，见 `redact_db_url` 文档。
     info!("Database initialized at {}", redact_db_url(db_path));
-    Ok(DbHandle { conn, path: db_path.to_string() })
+    // path 字段同样脱敏：`DbHandle.path` 的语义是「永远可安全打印 / 落日志 / 进
+    // 诊断标识」（见字段文档）。SQLite 路径无 userinfo，脱敏是恒等变换，不受影响。
+    Ok(DbHandle { conn, path: redact_db_url(db_path) })
 }
 
 pub fn default_db_path() -> String {
@@ -374,7 +387,7 @@ pub async fn connect_without_initialization(db_path: &str) -> Result<DbHandle> {
     let mut opt = ConnectOptions::new(&url);
     opt.max_connections(2).min_connections(1).sqlx_logging(false);
     let conn = Database::connect(opt).await?;
-    Ok(DbHandle { conn, path: db_path.trim().to_string() })
+    Ok(DbHandle { conn, path: redact_db_url(db_path.trim()) })
 }
 
 pub async fn create_pool_for_profile(profile_name: &str) -> Result<DbHandle> {
@@ -828,7 +841,9 @@ pub async fn create_test_pool() -> Result<DbHandle> {
     // 多连接会引入锁竞争，而生产主库需要 20。差异只在**连接**，不在建表链。
     initialize_schema(&conn).await?;
 
-    Ok(DbHandle { conn, path: db_path.to_string_lossy().to_string() })
+    // temp 路径无 userinfo，redact 是恒等 —— 走同一构造约定，让「path 永远脱敏安全」
+    // 这条语义不因调用入口不同而分叉（分叉正是 2026-10-31 脱敏事故的根源形态）。
+    Ok(DbHandle { conn, path: redact_db_url(&db_path.to_string_lossy()) })
 }
 
 #[cfg(test)]
@@ -883,6 +898,53 @@ mod tests {
         let e = resolve_db_url_from_path("mysql://u@h/db").expect_err("未知 scheme 必须报错");
         assert!(e.to_string().contains("mysql"), "报错要点出是哪个 scheme：{e}");
         assert!(e.to_string().contains("不支持"), "{e}");
+    }
+
+    /// 脱敏：userinfo 的 password 段必须**整体**替换。
+    ///
+    /// 本函数是 PG 连接串脱敏的**唯一实现**（2026-10-31 起，根包 `axagent` 的启动
+    /// 降级日志也直接调用它）。历史上 `src/init/database.rs` 曾自带一份副本且取
+    /// 第一个 `@`，导致密码后半段外泄 —— 两份实现各带各的测试、却"各自都通过"却
+    /// 泄漏程度不同。因此这里用完整的一组输入把行为钉死。
+    #[test]
+    fn redact_db_url_replaces_password_entirely() {
+        // 密码含未编码 @ —— 旧口径（取第一个 @）会在此泄漏后半段
+        assert_eq!(
+            redact_db_url("postgres://user:p@ss@host/db"),
+            "postgres://user:***@host/db",
+            "密码里的 @ 之后不得有明文残留"
+        );
+        // 带端口与查询参数
+        assert_eq!(
+            redact_db_url("postgres://user:p@ss@host:5432/db?sslmode=disable"),
+            "postgres://user:***@host:5432/db?sslmode=disable"
+        );
+        // 常规密码
+        assert_eq!(
+            redact_db_url("postgres://postgres:s3cret@localhost:5432/axinvest"),
+            "postgres://postgres:***@localhost:5432/axinvest"
+        );
+        // userinfo 不含 ":"（无密码）→ 原样返回
+        assert_eq!(redact_db_url("postgres://user@host/db"), "postgres://user@host/db");
+        // 非 `://` URL（SQLite 本地路径 / 裸文件名）→ 原样返回
+        assert_eq!(redact_db_url("C:\\data\\axagent.db"), "C:\\data\\axagent.db");
+        assert_eq!(redact_db_url("file.db"), "file.db");
+        // 生产形态的 SQLite URL（`build_db_url` 产出的是 `sqlite:{path}`）
+        assert_eq!(
+            redact_db_url("sqlite:C:\\Users\\polit\\AppData\\Local\\axinvest\\axagent.db"),
+            "sqlite:C:\\Users\\polit\\AppData\\Local\\axinvest\\axagent.db"
+        );
+        // 密码含多个未编码 @
+        assert_eq!(
+            redact_db_url("postgres://u:a@b@c@host/db"),
+            "postgres://u:***@host/db",
+            "取最后一个 @，密码整体隐藏"
+        );
+        // percent-encode 过的密码：%40 不是分隔符，不得被误当 @ 切分
+        assert_eq!(
+            redact_db_url("postgresql://user:p%40ss@host/db"),
+            "postgresql://user:***@host/db"
+        );
     }
 
     /// **存量 SQLite 库（迁移建出来的形态）必须能初始化成功。**

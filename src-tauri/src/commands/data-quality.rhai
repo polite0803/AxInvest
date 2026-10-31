@@ -2185,7 +2185,7 @@ if asof_designed_dims_cn.len() > 0 {
 let replay_prefix = if asof_methods.len() > 0 { "【as-of 回放】" } else { "" };
 // 2026-10-28（第四处文案/判据不一致）：原实现把「建议检查对应分析师的上游工具数据源」
 //   作为 D/F 分支的**固定尾句**，于是整批缺位时也照说 —— 而那种形态的实测节点错误是
-//   `API_KEY_DECRYPT_FAILED`（模型凭证解不开，LLM 调用根本没发出：一次回放批次 55 个
+//   `API_KEY_DECRYPT_FAILED`（现名 `PROVIDER_KEY_DECRYPT_FAILED`；模型凭证解不开，LLM 调用根本没发出：一次回放批次 55 个
 //   分析师节点全灭、快照里 `report.a-*` 键数 0），本节点只看得见「有没有产物」、
 //   看不见节点错误 ⇒ 十维全缺时不得预设方向。
 // 三条各占一句、单一变量两分支共用（A/B/C 分支原先**根本没有**这一句，与 2026-10-09

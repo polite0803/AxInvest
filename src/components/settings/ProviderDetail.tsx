@@ -7,7 +7,7 @@ import { Tooltip } from "@/components/layout/Tooltip";
 import { LocalModelPanel } from "@/components/settings/LocalModelPanel";
 import { DynamicLobeIcon } from "@/components/shared/DynamicLobeIcon";
 import { IconEditor } from "@/components/shared/IconEditor";
-import { showBackendError } from "@/lib/errorI18n";
+import { backendErrorText, parseBackendError, showBackendError } from "@/lib/errorI18n";
 import { invoke, logIpcError } from "@/lib/invoke";
 import {
   getEditableCapabilities,
@@ -505,7 +505,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
             message.error(t("settings.keyInvalidError"));
           }
         } catch (e) {
-          message.error(t("error.keyValidationFailed") + ": " + String(e));
+          showBackendError(message, e, { context: "ProviderDetail.addKey.autoValidate" });
         }
       }
     } catch (e) {
@@ -567,7 +567,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
           message.error(t("settings.keyInvalidError"));
         }
       } catch (e) {
-        message.error(t("error.keyValidationFailed") + ": " + String(e));
+        showBackendError(message, e, { context: "ProviderDetail.handleValidateKey" });
       } finally {
         setValidatingKeys((s) => {
           const next = new Set(s);
@@ -606,11 +606,12 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
       setPickerCollapsed(new Set());
       setPickerOpen(true);
     } catch (e) {
-      const errMsg = String(e);
-      if (errMsg.includes("No active key") || errMsg.includes("key")) {
+      // 按后端错误码分支，不再用 `String(e).includes("key")` 猜（子串嗅探既会误伤
+      // 任何含 "key" 的无关错误，也接不住「密钥解密失败」这种真正指到凭证的失败）。
+      if (parseBackendError(e).code === "PROVIDER_NO_ACTIVE_KEY") {
         message.error(t("settings.noActiveKeyError"));
       } else {
-        message.error(t("error.loadFailed") + ": " + errMsg);
+        showBackendError(message, e, { context: "ProviderDetail.handleRefreshModels" });
       }
     } finally {
       setRefreshing(false);
@@ -641,11 +642,10 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
       setPickerCollapsed(new Set());
       setPickerOpen(true);
     } catch (e) {
-      const errMsg = String(e);
-      if (errMsg.includes("No active key") || errMsg.includes("key")) {
+      if (parseBackendError(e).code === "PROVIDER_NO_ACTIVE_KEY") {
         message.error(t("settings.noActiveKeyError"));
       } else {
-        message.error(t("error.loadFailed") + ": " + errMsg);
+        showBackendError(message, e, { context: "ProviderDetail.handleFetchAllModels" });
       }
     } finally {
       setFetchingAll(false);
@@ -697,7 +697,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
       const latencyMs = await testModel(providerId, singleTestModelId);
       setSingleTestResult({ latencyMs });
     } catch (e) {
-      setSingleTestResult({ error: String(e) });
+      setSingleTestResult({ error: backendErrorText(e) });
     } finally {
       setSingleTestLoading(false);
     }
@@ -710,7 +710,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
         const latencyMs = await testModel(providerId, model_id);
         setTestResults((prev) => new Map(prev).set(model_id, { latencyMs }));
       } catch (e) {
-        setTestResults((prev) => new Map(prev).set(model_id, { error: String(e) }));
+        setTestResults((prev) => new Map(prev).set(model_id, { error: backendErrorText(e) }));
       } finally {
         setTestingModels((prev) => {
           const next = new Set(prev);
@@ -735,7 +735,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
           const latencyMs = await testModel(providerId, model.modelId);
           setTestResults((prev) => new Map(prev).set(model.modelId, { latencyMs }));
         } catch (e) {
-          setTestResults((prev) => new Map(prev).set(model.modelId, { error: String(e) }));
+          setTestResults((prev) => new Map(prev).set(model.modelId, { error: backendErrorText(e) }));
         } finally {
           setTestingModels((prev) => {
             const next = new Set(prev);
@@ -1687,6 +1687,8 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                 <Button
                   type="text"
                   size="small"
+                  // 图标按钮必须有可访问名（Tooltip 的文案只在 hover 时出现，不构成名称）
+                  aria-label={t("settings.syncModels")}
                   icon={<RefreshCw size={14} />}
                   loading={refreshing}
                   onClick={handleRefreshModels}
@@ -1696,6 +1698,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                 <Button
                   type="text"
                   size="small"
+                  aria-label={t("settings.fetchAllModels")}
                   icon={<Download size={14} />}
                   loading={fetchingAll}
                   onClick={handleFetchAllModels}

@@ -13,4 +13,5 @@ pub use crypto::derive_storage_master_key;
 pub use crypto::encrypt_key;
 pub use crypto::generate_master_key;
 pub use crypto::key_prefix;
+pub use crypto::master_key_fingerprint;
 pub use crypto::sha256_hash;

@@ -783,7 +783,9 @@ fn humanize_node_error(error_msg: &str) -> String {
     const CODE_LABELS: &[(&str, &str)] = &[
         (code::PROVIDER_QUERY_FAILED, "数据供应商查询失败"),
         (code::NO_AVAILABLE_PROVIDER, "无可用数据供应商"),
-        (code::API_KEY_DECRYPT_FAILED, "API 密钥解密失败"),
+        (code::KEY_DECRYPT_FAILED, "API 密钥解密失败"),
+        // 并码前（2026-10-31 之前）入库的节点错误里仍是旧码串，读历史记录时要同样译得出来。
+        ("API_KEY_DECRYPT_FAILED", "API 密钥解密失败"),
         (code::UNSUPPORTED_PROVIDER, "不支持的数据供应商"),
         (code::LLM_CALL_FAILED, "LLM 调用失败"),
         (code::AGENT_PROFILE_NOT_FOUND, "Agent 配置未找到"),

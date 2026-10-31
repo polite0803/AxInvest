@@ -1781,7 +1781,7 @@ fn summary_low_count_uses_the_named_list_not_a_subtraction() {
 /// **十维全部缺位**时，摘要结尾不得把方向预设成「上游工具数据源」。
 ///
 /// 现网实证（2026-10-28，9 条 D 级轮）：那种形态的真因是 LLM 调用整批失败于
-/// `API_KEY_DECRYPT_FAILED`（一次执行 55 个分析师节点全灭、快照里 `report.a-*` 键数 0），
+/// `API_KEY_DECRYPT_FAILED`（现名 `PROVIDER_KEY_DECRYPT_FAILED`；一次执行 55 个分析师节点全灭、快照里 `report.a-*` 键数 0），
 /// 而摘要固定尾句「建议检查对应分析师的上游工具数据源」把用户指到了数据源。
 /// 本节点看不见节点错误，只能看见有没有产物 ⇒ 全缺时只能说两种可能。
 #[test]

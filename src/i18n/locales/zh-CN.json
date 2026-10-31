@@ -2520,7 +2520,6 @@
     "deleteFailed": "删除失败，请重试",
     "gatewayStartFailed": "网关启动失败",
     "invalidFormat": "格式无效",
-    "keyValidationFailed": "密钥验证失败",
     "loadFailed": "加载失败，请重试",
     "page": "出错了",
     "pageNotFound": "抱歉，您访问的页面不存在。",

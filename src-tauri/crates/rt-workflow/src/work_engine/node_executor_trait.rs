@@ -44,7 +44,9 @@ pub struct ApprovalRequest {
 pub mod error_code {
     pub const PROVIDER_QUERY_FAILED: &str = "PROVIDER_QUERY_FAILED";
     pub const NO_AVAILABLE_PROVIDER: &str = "NO_AVAILABLE_PROVIDER";
-    pub const API_KEY_DECRYPT_FAILED: &str = "API_KEY_DECRYPT_FAILED";
+    // 「密钥解不开」在供应商页与工作流两条链上是同一条故障，必须同码；码的单一权威在
+    // harness::error_codes::provider（前端 11 语言的 error 段按该码收录）。
+    pub use axagent_harness::error_codes::provider::KEY_DECRYPT_FAILED;
     pub const UNSUPPORTED_PROVIDER: &str = "UNSUPPORTED_PROVIDER";
     pub const LLM_CALL_FAILED: &str = "LLM_CALL_FAILED";
     pub const AGENT_PROFILE_NOT_FOUND: &str = "AGENT_PROFILE_NOT_FOUND";
@@ -146,7 +148,7 @@ pub fn is_non_retryable_error(err_msg: &str) -> bool {
         error_code::PERMISSION_DENIED,
         error_code::AGENT_PROFILE_NOT_FOUND,
         error_code::MODEL_NOT_CONFIGURED,
-        error_code::API_KEY_DECRYPT_FAILED,
+        error_code::KEY_DECRYPT_FAILED,
         error_code::TOOL_NOT_CONFIGURED,
         error_code::NODE_NOT_FOUND,
         error_code::NODE_TYPE_MISMATCH,

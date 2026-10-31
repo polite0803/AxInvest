@@ -92,14 +92,17 @@ pub(crate) async fn resolve_provider_and_adapter(
         }
     }
     let (key, api_key) = resolved.ok_or_else(|| {
-        // ⚠ 码必须是 `API_KEY_DECRYPT_FAILED` 而不是 `UNSUPPORTED_PROVIDER`（2026-10-28）。
+        // ⚠ 码必须是本模块的 KEY_DECRYPT_FAILED（值 PROVIDER_KEY_DECRYPT_FAILED），
+        //   而不是下面 adapter 缺失那一站的码（2026-10-28）。
         //   同一条故障在缓存路径 `agent_executor.rs` 里早就用的是这个码；这里跟着
-        //   `resolve_model_for_node` 的失败一起套 UNSUPPORTED_PROVIDER，于是界面把
+        //   `resolve_model_for_node` 的失败一起套错码，于是界面把
         //   「密钥解不开」显示成「不支持的数据供应商」，把用户指向供应商配置而不是凭证。
         //   代价（有意的）：本码在 `is_non_retryable_error` 清单内 ⇒ 该节点**不再重试**。
         //   到这一步重试也不会变好 —— 逐把 key 的轮换已在上面做完，剩下的只有换凭证。
+        //   ⚠ 本注释不得写成带模块前缀的符号形式：下面的判据按「谁先出现」取段，
+        //   注释里的前缀式符号会被当成第一次命中，负控就会假红（2026-10-31 实测）。
         NodeError::exec_failed(
-            error_code::API_KEY_DECRYPT_FAILED,
+            error_code::KEY_DECRYPT_FAILED,
             format!(
                 "API key decryption failed: {}（已轮换该供应商的 {decrypt_attempts} 把 key）",
                 last_decrypt_err.unwrap_or_else(|| "无错误详情".to_string())
@@ -160,16 +163,17 @@ mod tests {
     fn decrypt_site_code(src: &str) -> Option<&'static str> {
         let at = src.find("decrypt_key(&candidate.key_encrypted, master_key)")?;
         let rest = &src[at..];
-        let decrypt = rest.find("error_code::API_KEY_DECRYPT_FAILED");
+        let decrypt = rest.find("error_code::KEY_DECRYPT_FAILED");
         let unsupported = rest.find("error_code::UNSUPPORTED_PROVIDER");
         match (decrypt, unsupported) {
             (Some(i), Some(j)) if j < i => Some("UNSUPPORTED_PROVIDER"),
-            (Some(_), _) => Some("API_KEY_DECRYPT_FAILED"),
+            (Some(_), _) => Some("PROVIDER_KEY_DECRYPT_FAILED"),
             (None, _) => None,
         }
     }
 
-    /// 解密失败的错误码必须留在 `API_KEY_DECRYPT_FAILED`（2026-10-28 归因收口）。
+    /// 解密失败的错误码必须留在 `PROVIDER_KEY_DECRYPT_FAILED`（2026-10-28 归因收口；
+    /// 2026-10-31 与供应商页并成同一个码，单一权威在 `harness::error_codes::provider`）。
     ///
     /// 为什么钉源码文本而不是走行为测试：`resolve_provider_and_adapter` 走
     /// `harness::repositories::provider_repository()` 这个**进程级全局**，测试里换一张假表会
@@ -181,12 +185,12 @@ mod tests {
         let src = include_str!("llm_resolve.rs");
         assert_eq!(
             decrypt_site_code(src),
-            Some("API_KEY_DECRYPT_FAILED"),
-            "解密失败必须报 API_KEY_DECRYPT_FAILED：界面标签才指得到凭证，且与缓存路径同码"
+            Some("PROVIDER_KEY_DECRYPT_FAILED"),
+            "解密失败必须报 PROVIDER_KEY_DECRYPT_FAILED：界面标签才指得到凭证，且与缓存路径同码"
         );
         // 负控：把本站的码改回旧值 ⇒ 判据必须翻成 UNSUPPORTED_PROVIDER（否则本用例恒真）
         let broken =
-            src.replace("error_code::API_KEY_DECRYPT_FAILED,", "error_code::UNSUPPORTED_PROVIDER,");
+            src.replace("error_code::KEY_DECRYPT_FAILED,", "error_code::UNSUPPORTED_PROVIDER,");
         assert_ne!(broken, src, "负控锚点腐烂：替换没生效，本用例等于没通电");
         assert_eq!(decrypt_site_code(&broken), Some("UNSUPPORTED_PROVIDER"));
     }
@@ -251,10 +255,14 @@ mod tests {
     /// 与「逐把 key 已在上面轮换过」配套 —— 少了任何一半，要么白跑六次，要么一行坏 key 定死全链。
     #[test]
     fn api_key_decrypt_failure_stays_non_retryable() {
-        let msg = "API_KEY_DECRYPT_FAILED: API key decryption failed: Crypto error: \
-                   Decryption failed: aead::Error";
+        // 用发送端同一个常量拼，而不是再抄一遍码串字面量：码改名时这里必须跟着动，
+        // 而不是悄悄变成「清单里那条永远命中不到的死项」。
+        let msg = format!(
+            "{}: API key decryption failed: Crypto error: Decryption failed: aead::Error",
+            crate::work_engine::node_executor_trait::error_code::KEY_DECRYPT_FAILED
+        );
         assert!(
-            crate::work_engine::node_executor_trait::is_non_retryable_error(msg),
+            crate::work_engine::node_executor_trait::is_non_retryable_error(&msg),
             "换完全部 key 仍解不开时是确定性失败：master key 与密文都不随重试改变"
         );
         // 对照（同族但性质不同）：供应商解析失败仍可重试，不得被顺手移进来

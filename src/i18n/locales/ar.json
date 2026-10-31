@@ -2520,7 +2520,6 @@
     "deleteFailed": "فشل الحذف، يرجى المحاولة مجدداً",
     "gatewayStartFailed": "فشل تشغيل البوابة",
     "invalidFormat": "تنسيق غير صالح",
-    "keyValidationFailed": "فشل التحقق من المفتاح",
     "loadFailed": "فشل التحميل، يرجى المحاولة مجدداً",
     "page": "خطأ",
     "pageNotFound": "عذراً، الصفحة التي زرتها غير موجودة.",

@@ -76,6 +76,16 @@ pub fn sha256_hash(input: &str) -> String {
     hex::encode(hasher.finalize().as_slice())
 }
 
+/// 当前主密钥的短指纹（sha256 前 4 字节 hex，等同 key-checking value）。
+///
+/// 密文里没有任何「用哪把 key 加密」的标识，所以一行 `Decryption failed: aead::Error`
+/// 事后无法区分「这行是被别的 master.key 写进来的」还是「本机 master.key 换过」。
+/// 只用于日志归因，不参与任何判定，也不进界面。
+pub fn master_key_fingerprint(master_key: &[u8; 32]) -> String {
+    let digest = Sha256::digest(master_key);
+    hex::encode(&digest.as_slice()[..4])
+}
+
 /// 解密 secure storage 中的值，自动兼容 v1（SHA256）和 v2（Argon2id）密钥派生。
 /// 先用 v2 密钥尝试，失败则回退到 v1 密钥（用于解密升级前存储的旧数据）。
 pub fn decrypt_storage_key(encrypted: &str) -> Result<String> {
@@ -516,6 +526,26 @@ mod tests {
     #[test]
     fn sha256_distinct_inputs_distinct_outputs() {
         assert_ne!(sha256_hash("foo"), sha256_hash("bar"));
+    }
+
+    #[test]
+    fn master_key_fingerprint_stable_short_and_distinct() {
+        let k = generate_master_key();
+        assert_eq!(
+            master_key_fingerprint(&k),
+            master_key_fingerprint(&k),
+            "同一把 key 必须同一指纹"
+        );
+        assert_eq!(master_key_fingerprint(&k).len(), 8, "固定 8 个 hex 字符");
+        assert!(
+            master_key_fingerprint(&k).chars().all(|c| c.is_ascii_hexdigit()),
+            "指纹必须是 hex"
+        );
+        assert_ne!(
+            master_key_fingerprint(&k),
+            master_key_fingerprint(&generate_master_key()),
+            "不同 key 必须不同指纹"
+        );
     }
 
     // ── hmac_sha256 (RFC 4231 Test Case 6) ──

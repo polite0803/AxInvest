@@ -2520,7 +2520,6 @@
     "deleteFailed": "Échec de la suppression, veuillez réessayer",
     "gatewayStartFailed": "Échec du démarrage de la passerelle",
     "invalidFormat": "Format invalide",
-    "keyValidationFailed": "Échec de la validation de la clé",
     "loadFailed": "Échec du chargement, veuillez réessayer",
     "page": "Erreur",
     "pageNotFound": "Désolé, la page que vous avez visitée n'existe pas.",

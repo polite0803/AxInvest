@@ -2520,7 +2520,6 @@
     "deleteFailed": "Error al eliminar, inténtelo de nuevo",
     "gatewayStartFailed": "Error al iniciar la pasarela",
     "invalidFormat": "Formato inválido",
-    "keyValidationFailed": "Error en la validación de la clave",
     "loadFailed": "Error al cargar, inténtelo de nuevo",
     "page": "Error",
     "pageNotFound": "Lo sentimos, la página que visitó no existe.",

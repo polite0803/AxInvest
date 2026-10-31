@@ -2520,7 +2520,6 @@
     "deleteFailed": "刪除失敗，請重試",
     "gatewayStartFailed": "閘道啟動失敗",
     "invalidFormat": "格式無效",
-    "keyValidationFailed": "金鑰驗證失敗",
     "loadFailed": "載入失敗，請重試",
     "page": "出錯了",
     "pageNotFound": "抱歉，您訪問的頁面不存在。",

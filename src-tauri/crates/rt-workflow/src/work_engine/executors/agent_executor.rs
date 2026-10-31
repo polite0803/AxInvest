@@ -3689,7 +3689,7 @@ impl AgentExecutor {
                     axagent_crypto::crypto::decrypt_key(&key.key_encrypted, &self.master_key)
                         .map_err(|e| {
                             NodeError::exec_failed(
-                                error_code::API_KEY_DECRYPT_FAILED,
+                                error_code::KEY_DECRYPT_FAILED,
                                 format!("API key decryption failed: {e}"),
                             )
                         })?;

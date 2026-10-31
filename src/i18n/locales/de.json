@@ -2520,7 +2520,6 @@
     "deleteFailed": "Löschen fehlgeschlagen, bitte erneut versuchen",
     "gatewayStartFailed": "Gateway-Start fehlgeschlagen",
     "invalidFormat": "Ungültiges Format",
-    "keyValidationFailed": "Schlüsselvalidierung fehlgeschlagen",
     "loadFailed": "Laden fehlgeschlagen, bitte erneut versuchen",
     "page": "Fehler",
     "pageNotFound": "Die aufgerufene Seite existiert leider nicht.",

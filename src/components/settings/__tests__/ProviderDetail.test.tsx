@@ -66,10 +66,24 @@ const zh: Record<string, string> = {
   "error.saveFailed": "保存失败",
   "error.loadFailed": "加载失败",
   "error.unknown": "未知错误",
-  "error.keyValidationFailed": "密钥验证失败",
   "settings.showKey": "显示",
   "settings.hideKey": "隐藏",
+  "settings.syncModels": "同步模型",
+  "settings.fetchAllModels": "获取全部模型",
+  "settings.noActiveKeyError": "操作失败：请先添加并启用 API 密钥",
+  "error.PROVIDER_KEY_DECRYPT_FAILED": "解密提供商密钥失败",
 };
+
+// errorI18n 走的是 i18n 单例（不是 useTranslation），组件测试里同样用字典替身：
+// 未收录的 key 返回 key 原文 ⇒ 翻译未命中时回落到 detail，与真 i18next 行为一致。
+vi.mock("@/i18n", () => ({
+  default: {
+    t: (key: string) => zh[key] ?? key,
+    language: "zh",
+    exists: () => true,
+    changeLanguage: vi.fn(),
+  },
+}));
 
 vi.mock("react-i18next", () => ({
   initReactI18next: { type: "3rdParty", init: vi.fn() },
@@ -273,5 +287,68 @@ describe("ProviderDetail", () => {
     await userEvent.click(screen.getByTitle("隐藏"));
     expect(screen.queryByText("sk-full-plain-key-000")).toBeNull();
     expect(screen.getByText("abcd1234...••••••••")).toBeTruthy();
+  });
+
+  // 同步模型失败提示按**后端错误码**分支。旧写法是 `String(e).includes("key")` 子串嗅探
+  // + `t("error.loadFailed") + ": " + String(e)`，于是「密钥解不开」在界面上糊成一坨 JSON
+  // （2026-10-31 用户实测），而任何 detail 里带 "key" 的无关错误又会被误报成「请先添加密钥」。
+  it("密钥解密失败时提示指到凭证，不把后端 JSON 糊在界面上", async () => {
+    fetchRemoteModels.mockRejectedValue(
+      JSON.stringify({
+        code: "PROVIDER_KEY_DECRYPT_FAILED",
+        category: "unrecoverable",
+        detail: "密钥行 key-1 解密失败: Crypto error: Decryption failed: aead::Error",
+      }),
+    );
+    render(
+      <App>
+        <ProviderDetail providerId="provider-1" />
+      </App>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "同步模型" }));
+
+    expect(await screen.findByText("解密提供商密钥失败")).toBeTruthy();
+    expect(screen.queryByText(/aead::Error/)).toBeNull();
+    expect(screen.queryByText(/"code":/)).toBeNull();
+  });
+
+  it("供应商没有启用密钥时提示去添加密钥", async () => {
+    fetchRemoteModels.mockRejectedValue(
+      JSON.stringify({
+        code: "PROVIDER_NO_ACTIVE_KEY",
+        category: "unrecoverable",
+        detail: "NotFound: No active key for provider provider-1",
+      }),
+    );
+    render(
+      <App>
+        <ProviderDetail providerId="provider-1" />
+      </App>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "同步模型" }));
+
+    expect(await screen.findByText("操作失败：请先添加并启用 API 密钥")).toBeTruthy();
+  });
+
+  it("负控：detail 里含 key 字样的其它失败不得被报成「请先添加密钥」", async () => {
+    fetchRemoteModels.mockRejectedValue(
+      JSON.stringify({
+        code: "UNKNOWN_FOR_TEST",
+        category: "unrecoverable",
+        detail: "upstream rejected the key header",
+      }),
+    );
+    render(
+      <App>
+        <ProviderDetail providerId="provider-1" />
+      </App>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "同步模型" }));
+
+    expect(await screen.findByText(/upstream rejected the key header/)).toBeTruthy();
+    expect(screen.queryByText("操作失败：请先添加并启用 API 密钥")).toBeNull();
   });
 });

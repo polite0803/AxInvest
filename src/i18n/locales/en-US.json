@@ -2520,7 +2520,6 @@
     "deleteFailed": "Delete failed, please retry",
     "gatewayStartFailed": "Gateway start failed",
     "invalidFormat": "Invalid format",
-    "keyValidationFailed": "Key validation failed",
     "loadFailed": "Load failed, please retry",
     "page": "Error",
     "pageNotFound": "Sorry, the page you visited does not exist.",

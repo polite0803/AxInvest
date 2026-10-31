@@ -2520,7 +2520,6 @@
     "deleteFailed": "削除に失敗しました。もう一度お試しください",
     "gatewayStartFailed": "ゲートウェイの起動に失敗しました",
     "invalidFormat": "無効なフォーマット",
-    "keyValidationFailed": "キーの検証に失敗しました",
     "loadFailed": "読み込みに失敗しました。もう一度お試しください",
     "page": "エラー",
     "pageNotFound": "申し訳ありませんが、アクセスしたページは存在しません。",

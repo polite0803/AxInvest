@@ -4,9 +4,48 @@ use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::provider as provider_err;
 use axagent_agent_macro::agent_command;
+use axagent_harness::core_error::AxAgentError;
 use axagent_harness::types::*;
 use std::time::Instant;
 use tauri::State;
+
+/// 取该供应商的启用密钥 —— dao 侧「没有启用的密钥」与「取行失败」是两种失败，必须分码：
+/// 前者用户能自己处置（去添加/启用密钥），后者是库侧故障。二者原本一起塌进 `COMMON_INTERNAL`，
+/// 界面只能靠 `errMsg.includes("key")` 猜（ProviderDetail 旧写法）。
+fn active_key_error(e: AxAgentError) -> String {
+    // 写成 `matches!(&e, …)`：若 `match &e` 后在分支里消费 `e`，值仍被 scrutinee 借用 ⇒ E0507。
+    if matches!(&e, AxAgentError::NotFound(_)) {
+        String::from(ErrorResponse::new(provider_err::NO_ACTIVE_KEY).with_detail(e.to_string()))
+    } else {
+        String::from(ErrorResponse::from_error(
+            e,
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    }
+}
+
+/// 解密提供商密钥行 —— 失败必须报 `PROVIDER_KEY_DECRYPT_FAILED`，不许塌进 `COMMON_INTERNAL`：
+/// 「内部错误」指不到凭证，而这类失败重试也不会变好（master key 与密文都不随重试改变），
+/// 用户唯一能做的动作是重新录入那一把密钥。
+///
+/// 日志带 provider_id / key_id / 密文长度 / 当前 master key 指纹：2026-10-28 与 10-31 两次
+/// 现场都因为「不知道是哪一行、被哪把 key 加密」而无法结案（10-31 那次坏行在报错后被人重存覆盖）。
+fn decrypt_provider_key(key_row: &ProviderKey, master_key: &[u8; 32]) -> Result<String, String> {
+    axagent_crypto::decrypt_key(&key_row.key_encrypted, master_key).map_err(|e| {
+        tracing::error!(
+            target: "axagent.providers",
+            provider_id = %key_row.provider_id,
+            key_id = %key_row.id,
+            cipher_len = key_row.key_encrypted.len(),
+            master_key_fp = %axagent_crypto::master_key_fingerprint(master_key),
+            "提供商密钥解密失败: {e}"
+        );
+        String::from(
+            ErrorResponse::new(provider_err::KEY_DECRYPT_FAILED)
+                .with_detail(format!("密钥行 {} 解密失败: {e}", key_row.id)),
+        )
+    })
+}
 
 #[tauri::command]
 #[agent_command(
@@ -263,13 +302,7 @@ pub async fn get_decrypted_provider_key(
                 crate::commands::error::ErrorCategory::Unrecoverable,
             ))
         })?;
-    let decrypted = axagent_crypto::decrypt_key(&key_row.key_encrypted, state.harness.master_key())
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
+    let decrypted = decrypt_provider_key(&key_row, state.harness.master_key())?;
     Ok(axagent_crypto::key_prefix(&decrypted))
 }
 
@@ -295,12 +328,7 @@ pub async fn reveal_provider_key(
                 crate::commands::error::ErrorCategory::Unrecoverable,
             ))
         })?;
-    axagent_crypto::decrypt_key(&key_row.key_encrypted, state.harness.master_key()).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
+    decrypt_provider_key(&key_row, state.harness.master_key())
 }
 
 #[tauri::command]
@@ -322,13 +350,7 @@ pub async fn validate_provider_key(
                 crate::commands::error::ErrorCategory::Unrecoverable,
             ))
         })?;
-    let decrypted = axagent_crypto::decrypt_key(&key_row.key_encrypted, state.harness.master_key())
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
+    let decrypted = decrypt_provider_key(&key_row, state.harness.master_key())?;
     let provider =
         axagent_dao::repo::provider::get_provider(state.harness.db(), &key_row.provider_id)
             .await
@@ -541,19 +563,8 @@ pub async fn fetch_remote_models(
     // Get an enabled key for the provider
     let key_row = axagent_dao::repo::provider::get_active_key(state.harness.db(), &real_id)
         .await
-        .map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-    let decrypted = axagent_crypto::decrypt_key(&key_row.key_encrypted, state.harness.master_key())
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
+        .map_err(active_key_error)?;
+    let decrypted = decrypt_provider_key(&key_row, state.harness.master_key())?;
 
     let provider_type_str = axagent_harness::types::provider_registry_key(&provider.provider_type);
     let adapter = state
@@ -658,19 +669,8 @@ pub async fn test_model(
         })?;
     let key_row = axagent_dao::repo::provider::get_active_key(state.harness.db(), &real_id)
         .await
-        .map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-    let decrypted = axagent_crypto::decrypt_key(&key_row.key_encrypted, state.harness.master_key())
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
+        .map_err(active_key_error)?;
+    let decrypted = decrypt_provider_key(&key_row, state.harness.master_key())?;
 
     let provider_type_str = axagent_harness::types::provider_registry_key(&provider.provider_type);
     let adapter = state
@@ -771,4 +771,68 @@ pub async fn reorder_providers(
             ))
         },
     )
+}
+
+#[cfg(test)]
+mod key_error_code_gate_tests {
+    /// 「提供商密钥失败分码」的站点普查（纯函数，入参是源码文本）。
+    ///
+    /// 返回违规清单而不是直接 assert：一次能看全缺口，负控也能拆在同一条守卫上。
+    /// 为什么钉源码文本而不是走行为测试：这些命令都要 `State<'_, AppState>`（进程级
+    /// harness + 真库），拿不到假表；而 2026-10-28 与 10-31 两次现场都是「解密失败塌进
+    /// COMMON_INTERNAL ⇒ 界面指不到凭证」，改动者把站点换回就地 `decrypt_key` 时不会碰到别的门。
+    fn decrypt_sites_lose_their_codes(full_src: &str) -> Vec<String> {
+        // 只普查 `#[cfg(test)]` 之前的生产代码：本模块里负控用的锚点字面量（以及上面那句
+        // 注释）本身就含这些子串，按整文件计数必然假红。
+        let src = full_src.split("#[cfg(test)]").next().unwrap_or(full_src);
+        let mut gaps = Vec::new();
+        // 就地 `axagent_crypto::decrypt_key(` 只允许出现在 helper 内部这一处。
+        let inline = src.matches("axagent_crypto::decrypt_key(").count();
+        if inline != 1 {
+            gaps.push(format!("就地解密站点应为 1 处（helper 内），现为 {inline} 处：多出来的会重新塌进 COMMON_INTERNAL"));
+        }
+        if src.matches("decrypt_provider_key(&key_row, state.harness.master_key())").count() != 5 {
+            gaps.push("五个界面入口没都走 decrypt_provider_key".to_string());
+        }
+        if src.matches("map_err(active_key_error)?").count() != 2 {
+            gaps.push("取密钥的两站没都按码分支（fetch_remote_models / test_model）".to_string());
+        }
+        gaps
+    }
+
+    #[test]
+    fn provider_key_failures_keep_their_own_codes() {
+        let gaps = decrypt_sites_lose_their_codes(include_str!("providers.rs"));
+        assert!(gaps.is_empty(), "密钥失败必须各归其码：{gaps:?}");
+    }
+
+    /// 负控 A：把四处入口换回就地解密 + `from_error` ⇒ 前两条守卫必须同时翻红。
+    #[test]
+    fn gate_is_live_for_decrypt_sites() {
+        let broken = include_str!("providers.rs").replace(
+            "let decrypted = decrypt_provider_key(&key_row, state.harness.master_key())?;",
+            "let decrypted = axagent_crypto::decrypt_key(&key_row.key_encrypted, state.harness.master_key())\n        .map_err(|e| String::from(crate::commands::error::ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)))?;",
+        );
+        assert_ne!(
+            broken,
+            include_str!("providers.rs"),
+            "负控锚点腐烂：替换没生效，本用例等于没通电"
+        );
+        assert_eq!(decrypt_sites_lose_their_codes(&broken).len(), 2);
+    }
+
+    /// 负控 B：把取密钥两站换回 `from_error` ⇒ 只有第三条守卫翻红（证明三条各管各的）。
+    #[test]
+    fn gate_is_live_for_active_key_sites() {
+        let broken = include_str!("providers.rs").replace(
+            "map_err(active_key_error)?",
+            "map_err(|e| String::from(crate::commands::error::ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)))?",
+        );
+        assert_ne!(
+            broken,
+            include_str!("providers.rs"),
+            "负控锚点腐烂：替换没生效，本用例等于没通电"
+        );
+        assert_eq!(decrypt_sites_lose_their_codes(&broken).len(), 1);
+    }
 }

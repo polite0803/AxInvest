@@ -446,6 +446,26 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      # 2026-10-31 v3.0.0 重跑实测：连续两趟（attempt 1 与 2）都在「Build for Linux ARM64」
+      # 这一步以完全相同的形态终止——末行 `The runner has received a shutdown signal`，
+      # 且日志最后一条编译记录同为 `Compiling axagent v3.0.0`（最重的根 crate）。
+      # 同文件 build-android 那步已因同一症状（jobs=1 + LTO off 仍被单 rustc 瞬时峰值顶穿）
+      # 加了 10Gi swap，本 job 此前是唯一没有 swap 兜底的 Linux 构建 ⇒ 照抄那一段形态。
+      # ⚠ 不能用 /swapfile：runner 镜像已启用该路径，再 fallocate 报 "Text file busy"。
+      - name: Add swap (OOM buffer)
+        run: |
+          SWAPFILE=/mnt/ci-extra-swapfile
+          if ! sudo fallocate -l 10G "$SWAPFILE"; then
+            SWAPFILE=/var/ci-extra-swapfile
+            sudo fallocate -l 10G "$SWAPFILE" || sudo dd if=/dev/zero of="$SWAPFILE" bs=1M count=10240
+          fi
+          sudo chmod 600 "$SWAPFILE"
+          sudo mkswap "$SWAPFILE"
+          sudo swapon "$SWAPFILE"
+          echo "--- swap ---"
+          swapon --show
+          free -h
+
       - name: Build for Linux ARM64
         run: |
           npm run tauri build -- --target aarch64-unknown-linux-gnu --bundles deb,rpm

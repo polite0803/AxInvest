@@ -386,6 +386,18 @@ if (canRunFrontend) {
   step("主题前景 token（--accent 上禁写死白）自检", "node scripts/check-accent-foreground.mjs --selftest");
   step("主题前景 token（--accent 上禁写死白）", "node scripts/check-accent-foreground.mjs");
 
+  // ── 组件中立性（跨 feature 耦合棘轮）──
+  // 为什么需要：`src/components/<A>/**` 直接 import 另一个 feature 的 store
+  //   （`@/stores/feature/<B>Store`）或另一个 feature 的组件目录，会让 A 的改动静默波及 B ——
+  //   没有编译错误、没有测试红，只有「改一处、炸一片」在发布后才暴露。
+  // 判据按 import 图静态判定（`@/` 与 `../` 统一 resolve 后比较），中性目录
+  //   （layout / common / shared / dynamicUI）天然跨 feature、不算违规。
+  // 棘轮：基线只许缩短。新违规要么当场修（下沉共享基元 / 注入 / 事件化），
+  //   要么进 `scripts/component-neutrality-allowlist.json` 显式登记 reason —— 不许静默扩白。
+  // 命令行与 `.github/workflows/ci.yml` 对应步骤**逐字同源**。
+  step("组件中立性（跨 feature 耦合）自检", "node scripts/check-component-neutrality.mjs --selftest");
+  step("组件中立性（跨 feature 耦合棘轮）", "node scripts/check-component-neutrality.mjs");
+
   // ── i18n **五道**互补门禁（2026-09-14 补三道：此前本地镜像**一条都没有**）──
   // 为什么必须五道都在：它们查的是**互不重叠**的东西，缺一条就有一种逃逸路径 ——
   //   ① 硬编码文案：代码里直接写死中文字面量（值层查不到，因为压根没进 locale）
@@ -423,6 +435,26 @@ if (canRunFrontend) {
   // ④⑤ 命令行与 `.github/workflows/ci.yml:405/418` **逐字同源**（两处都写 `node`，不用 npx）。
   step("i18n key 集合（zh-CN ↔ 其余 10 语言）", "node scripts/check-i18n-key-parity.mjs");
   step("i18n 占位符使用（值不得==键名；{{x}} 必须被插值）", "node scripts/check-i18n-placeholder-usage.mjs");
+
+  // ── i18n 豁免预算 / JSX 文本节点 / 增量孤儿键（2026-10-31 补三道）──
+  // 上面五道查的是「key 在不在、值空不空、值是不是中文、占位符插没插」，
+  // 这三道补的是**豁免面**与**增量面**：
+  //   · 豁免预算：文件级 `i18n-exempt` 与行级 allowlist 是「有意绕过 i18n」的合法口子，
+  //     但口子没有预算 ⇒ 每次绕过都合法 ⇒ 门禁退化成摆设。本门三本账：
+  //     文件级必须带 until 到期日、行级 reason 不得是默认措辞、总量只减不增。
+  //   · JSX 文本节点：`<Tag>中文</Tag>` 这类**没有 t() 包裹**的字面量，五道门里只有
+  //     「硬编码文案」能碰到它，且覆盖有限 ⇒ 单独一道按「CJK 即违规 / 英文词须匹配某
+  //     locale 值」判。
+  //   · 增量孤儿键：删页面/组件后遗留的 locale key，上面五道**全不红**
+  //     （check_i18n.py 的孤儿只报告不拦截）⇒ 删代码漏删 11 语言 locale，
+  //     运行时静默缺译。本门只扫本次 `git diff --name-status HEAD` 的 src/** 变更。
+  // 三道的命令行与 `.github/workflows/ci.yml` 对应步骤**逐字同源**。
+  step("i18n 豁免预算（文件级 until / 行级 reason / 总量棘轮）自检", "node scripts/check-i18n-exemption-budget.mjs --selftest");
+  step("i18n 豁免预算（文件级 until / 行级 reason / 总量棘轮）", "node scripts/check-i18n-exemption-budget.mjs");
+  step("JSX 文本节点 i18n（children 字面量须走 t()）自检", "node scripts/check-jsx-text-i18n.mjs --selftest");
+  step("JSX 文本节点 i18n（children 字面量须走 t()）", "node scripts/check-jsx-text-i18n.mjs");
+  step("增量孤儿 i18n 键（删码须同步删 11 语言）自检", "node scripts/check-i18n-orphan-diff.mjs --selftest");
+  step("增量孤儿 i18n 键（删码须同步删 11 语言）", "node scripts/check-i18n-orphan-diff.mjs");
 
   step("dprint 格式化检查", "npx dprint check --incremental=false");
 

@@ -406,4 +406,32 @@ Conventional Commits + 中文描述。类型映射：
 - **中性目标目录**（天然跨 feature，不算违规）：`layout` / `common` / `shared` / `dynamicUI`——共享 UI 基元下沉地（Tooltip / DropdownMenu / AntdList / MonacoEditor 等）。新增中性目录必须登记进脚本 `NEUTRAL_PREFIXES` 并写明理由，不许静默扩。
 - **白名单**：`scripts/component-neutrality-allowlist.json`，键 = file + 精确 import 串（**不含行号**，行号随编辑漂移）；登记必须带 reason。现存唯一条目：`shared/PageContextProvider.tsx`（边界聚合器）。
 - **棘轮基线**：`scripts/component-neutrality-baseline.json`（2026-10-31 首建 212 条唯一键，存量跨 feature 引用），**只减不增**——新违规必须当场修（下沉/注入/事件化）或显式登记白名单；存量修复后跑 `--update-baseline` 收紧（存在新违规时该命令拒绝执行，不许用它洗白）。
-- **门禁**：`node scripts/check-component-neutrality.mjs`（selftest：`--selftest`）。
+- **门禁**：`node scripts/check-component-neutrality.mjs`（selftest：`--selftest`）。**已接线**：`scripts/ci-check.mjs` 的对应 step 与 `.github/workflows/ci.yml` 的对应步骤命令行逐字同源，由 `src/__tests__/ci.workflow.test.ts` 的对称差集护栏自动校验（见文末「CI 接线」节）。
+
+## CI 接线（2026-10-31 追加）：静态门禁的两处同源注册
+
+**规则**：任何 `scripts/check-*.mjs` 门禁要**真正生效**，必须在**两处**注册，且命令行**逐字同源**：
+
+| 位置 | 写法 |
+|---|---|
+| `scripts/ci-check.mjs` | `step("<中文标签>", "node scripts/<gate>.mjs …")` |
+| `.github/workflows/ci.yml` | `- name: …` + `run: node scripts/<gate>.mjs …`（自检与判定各一步） |
+
+- **自检先行**：凡脚本带 `--selftest`，两处都必须**先跑 `--selftest` 再跑判定** ——
+  扫描器自身会撒谎（漏文件 / 剥错注释 / 检测器写偏），自检不过则后面的「通过」没有任何意义。
+- **缺一即红**：`src/__tests__/ci.workflow.test.ts` 的「对称差集护栏」从两侧**自动提取**
+  `scripts/**` 命令清单做差集比对。任一方写了另一方没写 ⇒ 护栏叫停。确属已知不对称
+  （如 CI 用 `.sh`、本地用 `node` 直调）⇒ 进该测试的 `ALLOWLIST`（≤8 条，每条必须带
+  reason，失效不删也红）。**不许为绕过护栏往 ALLOWLIST 塞新门。**
+- **本地绿 ≠ CI 绿**：只挂 CI 不进本地镜像（或反之）是本仓反复出现的缺陷形态 ——
+  本地反馈环里看不见，只能在推送后由 CI 告知。`ci-check.mjs --quick` 是 pre-push 走的路径，
+  故纯 Node 静态门必须落在该路径上（不加 `if (!quick)` 门控）。
+
+**2026-10-31 接线的四道门**（此前只手工跑，CI 不执行 ⇒ 门看着在、实际一行没跑）：
+
+| 门禁 | 查什么 | 棘轮 / 白名单 |
+|---|---|---|
+| `check-component-neutrality.mjs` | 组件目录跨 feature 耦合（见上节） | 基线 212 条，只减不增 |
+| `check-i18n-exemption-budget.mjs` | 豁免口子的预算：文件级 `i18n-exempt` 必须带 until、行级 allowlist 的 reason 不得是默认措辞、总量只减不增 | 基线 142 条 |
+| `check-jsx-text-i18n.mjs` | JSX children 里的未翻译字面量（CJK 即违规；英文词须匹配某 locale 值） | 基线 51 条 |
+| `check-i18n-orphan-diff.mjs` | 增量孤儿 key：删 `src/**` 代码后遗留的 locale key（只扫 `git diff --name-status HEAD`，变更面过大时显式降级 report-only） | 无（判据机械，零基线） |

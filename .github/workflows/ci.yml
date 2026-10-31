@@ -487,6 +487,38 @@ jobs:
         # 接入时实测：R1 修掉 14 处（zh-TW 10 / zh-CN 2 / ja 2）、R2 修掉 18 处调用点后归零。
         run: node scripts/check-i18n-placeholder-usage.mjs
 
+      # ── i18n 豁免预算 / JSX 文本节点 / 增量孤儿键（2026-10-31 补三道）──
+      # 上面五道查的是「key 在不在、值空不空、值是不是中文、占位符插没插」，
+      # 这三道补的是**豁免面**与**增量面**：
+      #   · 豁免预算：文件级 `i18n-exempt` 与行级 allowlist 是「有意绕过 i18n」的合法口子，
+      #     但口子没有预算 ⇒ 每次绕过都合法 ⇒ 门禁退化成摆设。三本账：
+      #     文件级必须带 until 到期日、行级 reason 不得是默认措辞、总量只减不增。
+      #   · JSX 文本节点：`<Tag>中文</Tag>` 这类**没有 t() 包裹**的字面量，五道门里只有
+      #     「硬编码文案」能碰到它且覆盖有限 ⇒ 单独一道按「CJK 即违规 / 英文词须匹配某
+      #     locale 值」判。
+      #   · 增量孤儿键：删页面/组件后遗留的 locale key，上面五道**全不红**
+      #     （check_i18n.py 的孤儿只报告不拦截）⇒ 删代码漏删 11 语言 locale，
+      #     运行时静默缺译。只扫本次 `git diff --name-status HEAD` 的 src/** 变更；
+      #     变更面过大时显式降级 report-only（跳过 ≠ 通过）。
+      # 三道的命令行与 scripts/ci-check.mjs 对应 step **逐字同源**。
+      - name: Check i18n exemption budget selftest (file-level until / line-level reason / total ratchet)
+        run: node scripts/check-i18n-exemption-budget.mjs --selftest
+
+      - name: Check i18n exemption budget (file-level until / line-level reason / total ratchet)
+        run: node scripts/check-i18n-exemption-budget.mjs
+
+      - name: Check JSX text-node i18n selftest (children literals must go through t())
+        run: node scripts/check-jsx-text-i18n.mjs --selftest
+
+      - name: Check JSX text-node i18n (children literals must go through t())
+        run: node scripts/check-jsx-text-i18n.mjs
+
+      - name: Check incremental orphan i18n keys selftest (deleting code must delete 11 locales)
+        run: node scripts/check-i18n-orphan-diff.mjs --selftest
+
+      - name: Check incremental orphan i18n keys (deleting code must delete 11 locales)
+        run: node scripts/check-i18n-orphan-diff.mjs
+
       - name: Check ID validation (prevent undefined/null string corruption)
         run: node scripts/check-id-validation.mjs
 
@@ -505,6 +537,21 @@ jobs:
 
       - name: SQL dialect guard (SQLite-only syntax)
         run: node scripts/check-sql-dialect.mjs
+
+      # ── 组件中立性（跨 feature 耦合棘轮）──
+      # 为什么需要：`src/components/<A>/**` 直接 import 另一个 feature 的 store
+      #   （`@/stores/feature/<B>Store`）或另一个 feature 的组件目录，会让 A 的改动静默波及 B ——
+      #   没有编译错误、没有测试红，只有「改一处、炸一片」在发布后才暴露。
+      # 判据按 import 图静态判定（`@/` 与 `../` 统一 resolve 后比较），中性目录
+      #   （layout / common / shared / dynamicUI）天然跨 feature、不算违规。
+      # 棘轮：基线只许缩短。新违规要么当场修（下沉共享基元 / 注入 / 事件化），
+      #   要么进 `scripts/component-neutrality-allowlist.json` 显式登记 reason —— 不许静默扩白。
+      # 命令行与 scripts/ci-check.mjs 对应 step **逐字同源**。
+      - name: Check component neutrality selftest (cross-feature coupling)
+        run: node scripts/check-component-neutrality.mjs --selftest
+
+      - name: Check component neutrality (cross-feature coupling ratchet)
+        run: node scripts/check-component-neutrality.mjs
 
       - name: Contract consistency check (command registration / i18n keys / harness deps / field & event edge supply)
         # 注意：本步用 `--only` **白名单**限定检查段，新增段必须同步加进来，

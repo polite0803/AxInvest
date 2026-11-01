@@ -1696,13 +1696,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             is_secret: false,
         },
         Variable {
-            name: "serenity_base_position".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(10),
-            description: Some("Serenity 严选策略：基准仓位（%）".into()),
-            is_secret: false,
-        },
-        Variable {
             name: "serenity_entry_range".into(),
             var_type: "number".into(),
             value: serde_json::json!(0.05),
@@ -1721,13 +1714,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             var_type: "number".into(),
             value: serde_json::json!(1.3),
             description: Some("Serenity 严选策略：目标涨幅乘数（1.0=标准，>1 更激进）".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "serenity_target_pe".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(25),
-            description: Some("Serenity 严选策略：目标市盈率".into()),
             is_secret: false,
         },
         Variable {

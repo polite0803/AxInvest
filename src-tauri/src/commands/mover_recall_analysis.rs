@@ -1053,11 +1053,12 @@ fn update_item(s: &mut MoverBatchState, event_id: &str, f: impl FnOnce(&mut Even
 //
 // ## 为什么两步、且回放在前
 //
-// `served_vars_with_analysis_tiers`（live 四档入口）会把 `stock_analyses.as_of_date =
-// window_start` 的定档变量并进 `reco_analysis_tiers`。若先跑逐票分析，漏检票自己的
-// as-of 分析会进入定档池 —— 等于把「我们已知的漏检清单」喂回候选池，回放不再独立。
-// 因此回放只吃 `load_reco_served_vars_db`（当前模板 + 当前闭环权重），并**刻意不喂**
-// 分析定档来源；差异 JSON 的 `analysisTierSourceIncluded=false` 是对这条的显式声明。
+// `stock_analyses` 的定档来源**已不再是荐股的输入**（2026-11-01 裁定：荐股的候选来源、
+// 留弃与分数只能来自市场数据；原 `served_vars_with_analysis_tiers` /
+// `reco_analysis_tiers` 整体删除）。所以这里不需要再解释「本轮刻意不喂」——那条通道在
+// 荐股链里已经不存在。差异 JSON 的 `analysisTierSourceIncluded=false` 保留为**结构性声明**
+// （读侧据此知道回放与 live 都不吃分析结论），而不是逐轮的取舍。
+// 若先跑逐票分析，漏检票自己的 as-of 分析也不会进候选池；它只进差异对账与反思。
 //
 // ## 语义边界（不得混读）
 //
@@ -1122,25 +1123,40 @@ async fn run_asof_reco_replay(
             .map_err(|e| {
                 ErrorResponse::err_with_detail(ec::QUERY_FAILED, format!("读收盘快照失败: {e}"))
             })?;
-    let mover: Vec<SeedItem> = mover_raw
+    let mut mover: Vec<SeedItem> = mover_raw
         .into_iter()
         .filter(|(_, name)| !name.contains("ST"))
         .take(ASOF_MOVER_TOP_N as usize)
         .map(|(code, name)| (code, name, None))
         .collect();
+    // W4-1：与 live 同源补行业（`market_stock_universe` 无历史列 ⇒ 回放拿到的是当前归属，
+    // 边界见 `pool::attach_industries` 的文档）。不补的话 live 与回放的两条链在行业维度
+    // 根本不可比，R-3b 对照门会把「字段缺失」读成「行业不一致」。
+    recommender::pool::attach_industries(
+        &mut mover,
+        &crate::commands::_shared_reco_pool::universe_industries(db).await,
+    );
 
     let weights_json = vars
         .iter()
         .find(|(k, _)| k == "reco_strategy_weights")
         .and_then(|(_, v)| v.is_object().then(|| v.to_string()));
 
+    // W3：全市场快照也按窗口起点截断；显式传给 SeedOverrides，避免读进程级全局
+    // （并发 live 扫描会把「今天」覆盖上去）。
+    let universe_items =
+        crate::commands::_shared_reco_pool::build_universe_seed_items(db, Some(window_start)).await;
+    let overrides = SeedOverrides {
+        universe: Some(universe_items),
+        ..SeedOverrides::asof_replay(mover.clone())
+    };
     let results = recommender::recommend_stocks_multi(
         client.clone(),
         &Period::ALL,
         &vars,
         None,
         prior,
-        SeedOverrides::asof_replay(mover.clone()),
+        overrides,
     )
     .await;
 

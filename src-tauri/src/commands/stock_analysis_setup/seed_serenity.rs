@@ -111,7 +111,7 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     //   scanner-brief / candidate-pool 的 to_array 只认裸数组 ⇒ 行业动量腿与候选池静默降级成
     //   「今天没数据」（to_array 返回 [] 与真空数据不可区分，零告警）。四脚本的 string 分支
     //   已补 data 下钻；脚本经 include_str! 嵌入 CodeNode.code ⇒ **不升版旧库照跑旧脚本**。
-    const TEMPLATE_VERSION: i32 = 63; // v62: 新增 c-trend-split，5 个评分器按各自趋势的 strategy_type 评分
+    const TEMPLATE_VERSION: i32 = 65; // v65: 阶段3「打分重构」——新增 t-factors/c-factor-score（rev_1m 横截面打分），data-verifier 注入 factor_scores 覆盖 serenity_score，mapper 注入 factor_ranking
 
     let now = chrono::Utc::now().timestamp_millis();
 
@@ -228,6 +228,10 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
          5. **策略分类**：每个趋势必须标注 strategy_type（bottleneck/policy/earnings/capital/event/technical）。\n\
             bottleneck=产业链供给瓶颈（首选），policy=政策驱动，earnings=业绩驱动，capital=资金面驱动。\n\
          6. 必须输出至少一个 bottleneck_candidate（初步判断的瓶颈环节）。\n\
+         7. **行业标签（阶段 2 新增，下游确定性候选池依赖它）**：每个趋势必须标注 \
+            industry_tags 数组（1-3 个）。标签必须**逐字取自** `industry_ranking` 中出现的 \
+            industryName（不要改写、不要自造行业名）——系统按标签从股票宇宙表拉取该行业 \
+            全部成分股作候选池，写错或自造会导致该趋势拿不到确定性成分股。\n\
          \n\
          ============== 输出格式强约束（必须严格遵守） ==============\n\
          1. 你的回复必须且只能包含一个代码块，开头三个反引号紧跟 tool_json。\n\
@@ -243,6 +247,7 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
          {\"trends\": [{\"trend_name\": \"...\", \"confidence\": 75, \"phase\": \"accelerating\",\
          \"core_logic\": \"...\", \"causal_chain\": \"...\",\
          \"strategy_type\": \"bottleneck | policy | earnings | capital | event | technical\",\
+         \"industry_tags\": [\"逐字取自行业排名的行业名\"],\
          \"bottleneck_candidate\": \"...\", \"bottleneck_rationale\": \"...\",\
          \"demand_evidence\": {\"type\": \"capex | policy_mandate | order_backlog\",\
          \"source\": \"具体证据来源\", \"confidence\": 75, \"detail\": \"...\"},\
@@ -323,6 +328,102 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
         "e-a-trend-scanner-c-trend-split",
         "a-trend-scanner",
         "c-trend-split",
+    ));
+
+    // ── 趋势行业标签聚合 + 全成分股拉取（确定性，阶段 2「候选池改趋势→全关联股票」）──
+    // c-industry-tags 把 5 个趋势槽位的 industry_tags 聚合去重；t-constituents
+    // （get_industry_constituents，tools::register_all 注册 ⇒ ToolResolver 可达）按行业名
+    // 从宇宙表拉**全部**成分股。产出经 input_mapping 注入 a-candidate-mapper —— 断掉
+    // 「模型凭训练知识自由 search_stock 选票」这一「候选老是那几只」的根源。
+    let tags_code = include_str!("../industry-tags.rhai").to_string();
+    let mut tags_input = HashMap::new();
+    for tn in trend_names {
+        tags_input.insert(tn.to_string(), format!("c-trend-split.result.{tn}"));
+    }
+    nodes.push(serenity_code_node(
+        "c-industry-tags",
+        "趋势行业标签",
+        "聚合 trend1..trend5 的 industry_tags（去重）",
+        &tags_code,
+        tags_input,
+        180.0,
+        680.0,
+        15,
+    ));
+    edges.push(serenity_edge(
+        "e-c-trend-split-c-industry-tags",
+        "c-trend-split",
+        "c-industry-tags",
+    ));
+    let mut constituents_node = serenity_tool_node(
+        "t-constituents",
+        "行业成分股",
+        "get_industry_constituents",
+        "t-constituents",
+        180.0,
+        790.0,
+    );
+    if let WorkflowNode::Tool(t) = &mut constituents_node {
+        t.config
+            .input_mapping
+            .insert("industries".to_string(), "c-industry-tags.result.tags".to_string());
+        t.base.description = Some("按各趋势关联行业拉取全部成分股（确定性）".to_string());
+        // 拉取失败不该阻断主链：mapper 还有 LLM 自主检索兜底（prompt 原则 11）
+        t.base.continue_on_fail = true;
+    }
+    nodes.push(constituents_node);
+    edges.push(serenity_edge(
+        "e-c-industry-tags-t-constituents",
+        "c-industry-tags",
+        "t-constituents",
+    ));
+    edges.push(serenity_edge(
+        "e-t-constituents-a-candidate-mapper",
+        "t-constituents",
+        "a-candidate-mapper",
+    ));
+
+    // ── 阶段 3（打分重构）：1 月反转因子取数 + 横截面打分 ──
+    // t-factors 输入整取 t-constituents 信封（get_stock_factor 宽容归一兼容分组嵌套）；
+    // c-factor-score 输出 score_map（data-verifier 覆盖 serenity_score 的单点权威）与
+    // ranked_text（mapper prompt 的因子排序参考）。labels 原链无消费方，不注入。
+    let mut factors_node = serenity_tool_node(
+        "t-factors",
+        "1月反转因子",
+        "get_stock_factor",
+        "t-factors",
+        180.0,
+        900.0,
+    );
+    if let WorkflowNode::Tool(t) = &mut factors_node {
+        t.config
+            .input_mapping
+            .insert("stock_codes".to_string(), "t-constituents.result".to_string());
+        t.base.description =
+            Some("按候选池逐票取 1 月涨跌幅（rev_1m 因子原料，确定性）".to_string());
+        t.base.continue_on_fail = true;
+    }
+    nodes.push(factors_node);
+    let fscore_code = include_str!("../factor-score.rhai").to_string();
+    let mut fscore_input = HashMap::new();
+    fscore_input.insert("stocks".to_string(), "t-constituents.result".to_string());
+    fscore_input.insert("factors".to_string(), "t-factors.result".to_string());
+    nodes.push(serenity_code_node(
+        "c-factor-score",
+        "因子打分",
+        "1 月反转横截面百分位（阶段 1 IC 普查唯一稳定有效因子）",
+        &fscore_code,
+        fscore_input,
+        180.0,
+        1010.0,
+        15,
+    ));
+    edges.push(serenity_edge("e-t-constituents-t-factors", "t-constituents", "t-factors"));
+    edges.push(serenity_edge("e-t-factors-c-factor-score", "t-factors", "c-factor-score"));
+    edges.push(serenity_edge(
+        "e-c-factor-score-a-candidate-mapper",
+        "c-factor-score",
+        "a-candidate-mapper",
     ));
 
     for (i, tn) in trend_names.iter().enumerate() {
@@ -614,12 +715,23 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
          利用这些数据结合 search_news 工具搜索关键词验证（如搜索\"英伟达 CapEx\"确认需求真实性），\
          确保持续需求由 CapEx/订单/政策硬证据支撑而非 LLM 推测。无硬证据扣 20 分。\n\
          10. 每个候选必须给出具体的 serenity_score 和风险提示。\n\
-         11. **股票发现策略（重要！瓶颈环节关键词高度专业化，直接搜索可能无结果）**：\n\
-            a) 先搜索具体产品关键词（如\"高纯氮化铝\"）\n\
-            b) 无结果则搜索上游材料/工艺关键词（如\"陶瓷基板\"、\"第三代半导体\"）\n\
-            c) 仍无结果则搜索产业链关键词（如\"半导体材料\"、\"电子化学品\"）\n\
-            d) 可调用 get_industry_ranking 或 get_stock_concept_blocks 获取概念板块成分股\n\
-            e) 搜索到后逐一用 get_stock_financials/get_stock_quote 验证财务\n\
+         11. **候选来源优先级（重要！2026-10-31 阶段 2 改造）**：\
+            你的输入 `industry_constituents` 是**确定性候选池**（各趋势关联行业的全部成分股，\
+            由 get_industry_constituents 从股票宇宙表拉取，分行业分组、每组带 matchMode）。\
+            你的输入 `factor_ranking` 是池内**1 月反转因子分降序清单**（跌得多的靠前——\
+            阶段 1 全市场 IC 普查唯一稳定有效的预测因子；你自报的 serenity_score 之后会被\
+            该因子分覆盖，只作参考）。\
+            \n\
+            a) **候选必须优先从该池中选**——按行业分组逐一评估，禁止先入为主只看熟悉的票；\
+            \n- 因子分排名靠前且趋势匹配的候选优先（同类匹配度下取排名更高者）\
+            \n- 池内候选仍须用 get_stock_financials/get_stock_quote 逐一验证财务\
+            \n- matchMode 为 missing 的行业说明宇宙表无该行业成分（词表缺席，如实报告，不要编票补位）\
+            \n- 池为空或不足 3 个达标候选时才回退自主发现：\
+            \n  b) 先搜索具体产品关键词（如\"高纯氮化铝\"）\
+            \n  c) 无结果则搜索上游材料/工艺关键词（如\"陶瓷基板\"、\"第三代半导体\"）\
+            \n  d) 仍无结果则搜索产业链关键词（如\"半导体材料\"、\"电子化学品\"）\
+            \n  e) 可调用 get_industry_ranking 或 get_stock_concept_blocks 获取概念板块成分股\
+            \n  f) 搜索到后逐一用 get_stock_financials/get_stock_quote 验证财务\n\
          12. **瓶颈股财务容忍度**：瓶颈企业多处于扩张/技术爬坡期，毛利率 15-30%、\n\
          负债率 50-75%、营收增速 0-10%、PE 为负但 ROE 改善——均属正常。\n\
          不要用消费/互联网标准要求制造业瓶颈股，核心判断标准是瓶颈环节的不可替代性。\n\
@@ -668,12 +780,22 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
         "c-scorer-trend4",
         "c-scorer-trend5",
         "c-consistency-check", // FIX-04: 一致性检查报告注入 context
+        "t-constituents",      // 阶段 2：确定性候选池（各趋势关联行业全部成分股）
+        "t-factors",           // 阶段 3：1 月反转因子取数
+        "c-factor-score",      // 阶段 3：rev_1m 横截面打分
     ];
     // 注入 bottleneck-calc 计算结果作为结构化变量
     let mut mapper_input_mapping = std::collections::HashMap::new();
     for tn in &trend_names {
         mapper_input_mapping.insert(format!("strategy_{tn}"), format!("c-scorer-{tn}.result"));
     }
+    // 阶段 2：确定性候选池（各趋势关联行业全部成分股）。工具失败时 resolve 为 Null ⇒
+    // 注入 unit，脚本/消费端按「池缺席」处理，LLM 仍可走自主检索兜底。
+    mapper_input_mapping
+        .insert("industry_constituents".to_string(), "t-constituents.result".to_string());
+    // 阶段 3：1 月反转因子分降序清单（prompt 原则 11 的排序参考）
+    mapper_input_mapping
+        .insert("factor_ranking".to_string(), "c-factor-score.result.ranked_text".to_string());
     nodes.push(agent_node(
         "a-candidate-mapper",
         "候选公司筛选",
@@ -729,6 +851,9 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     // 增加路径3：直接注入 a-candidate-mapper.content 整体，由 data-verifier.rhai json_parse 兜底。
     verifier_input_mapping
         .insert("candidates_raw".to_string(), "a-candidate-mapper.content".to_string());
+    // 阶段 3：因子分覆盖 serenity_score（verifier 内单点权威）+ 出票按因子分降序
+    verifier_input_mapping
+        .insert("factor_scores".to_string(), "c-factor-score.result.score_map".to_string());
     // P0-2 修复: 传入 tool_calls_made 用于交叉验证
     // LLM 在候选映射阶段调用的 get_stock_financials 工具返回真实财务数据，
     // data-verifier.rhai 比对 LLM 输出的 financial_snapshot 与工具返回的真实数据，
@@ -1742,7 +1867,7 @@ mod serenity_version_gate_tests {
     //   scanner-brief / candidate-pool 的 to_array 只认裸数组 ⇒ 行业动量腿与候选池静默降级成
     //   「今天没数据」（to_array 返回 [] 与真空数据不可区分，零告警）。四脚本的 string 分支
     //   已补 data 下钻；脚本经 include_str! 嵌入 CodeNode.code ⇒ **不升版旧库照跑旧脚本**。
-    const TEMPLATE_VERSION: i32 = 63; // v62: 新增 c-trend-split，5 个评分器按各自趋势的 strategy_type 评分
+    const TEMPLATE_VERSION: i32 = 65; // v65: 阶段3「打分重构」——新增 t-factors/c-factor-score（rev_1m 横截面打分），data-verifier 注入 factor_scores 覆盖 serenity_score，mapper 注入 factor_ranking
 
     async fn fresh_db() -> axagent_dao::db::DbHandle {
         axagent_dao::db::create_test_pool().await.expect("建临时测试库失败")

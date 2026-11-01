@@ -2975,7 +2975,9 @@
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "लाइव पाइपलाइन विंडो (23:50–02:10 / 17:50–18:10) में हैं; विंडो के बाहर फिर शुरू करें।",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "बैकफ़िल बैच निष्पादन विफल; बैच विवरण देखें।",
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "बैकफ़िल बैच इतिहास क्वेरी विफल; बाद में पुनः प्रयास करें।",
-    "TRADING_DISABLED": "ट्रेडिंग फ़ंक्शन अक्षम है। लेन-देन दर्ज करने से पहले इसे सक्षम करें"
+    "TRADING_DISABLED": "ट्रेडिंग फ़ंक्शन अक्षम है। लेन-देन दर्ज करने से पहले इसे सक्षम करें",
+    "KEY_FROM_OTHER_DEVICE": "यह साइफरटेक्स्ट किसी अन्य डिवाइस की मास्टर की से एन्क्रिप्ट किया गया था (साइफरटेक्स्ट फिंगरप्रिंट {{cipherFingerprint}}, लोकल फिंगरप्रिंट {{localFingerprint}}) — उस डिवाइस से की एक्सपोर्ट करें (सेटिंग्स → डेटाबेस → मास्टर की) और यहाँ इंपोर्ट करें।",
+    "MASTER_KEY_NOT_FOUND": "इस डिवाइस पर master.key फ़ाइल नहीं है; मास्टर की एक्सपोर्ट/इंपोर्ट नहीं हो सकती।"
   },
   "errorBoundary": {
     "copied": "कॉपी हुआ",
@@ -5333,7 +5335,30 @@
       "schemaRepairRunning": "ठीक किया जा रहा है...",
       "schemaRepairSuccess": "मरम्मत पूर्ण: {{columns}} कॉलम जोड़े गए, {{types}} प्रकार ठीक किए गए",
       "schemaRepairFailed": "स्कीमा ठीक करना विफल: {{error}}",
-      "schemaRepairPartial": "मरम्मत अधूरी: {{count}} तालिकाओं की तुलना नहीं हो सकी (विवरण नीचे)"
+      "schemaRepairPartial": "मरम्मत अधूरी: {{count}} तालिकाओं की तुलना नहीं हो सकी (विवरण नीचे)",
+      "masterKey": {
+        "title": "मास्टर की (क्रॉस-डिवाइस साझा डेटाबेस)",
+        "fingerprintLabel": "लोकल मास्टर की फिंगरप्रिंट: {{fingerprint}} (साझा DB के साइफरटेक्स्ट हेडर के फिंगरप्रिंट से मेल खाना ज़रूरी)",
+        "noKeyWarning": "इस डिवाइस पर master.key नहीं है; एक्सपोर्ट/इंपोर्ट उपलब्ध नहीं। साझा डेटाबेस में दूसरे डिवाइस द्वारा एन्क्रिप्ट किए गए डेटा के लिए वहाँ से की एक्सपोर्ट करें (सेटिंग्स → डेटाबेस → मास्टर की) और यहाँ इंपोर्ट करें।",
+        "loadFailed": "मास्टर की जानकारी लोड करने में विफल: {{error}}",
+        "exportButton": "एक्सपोर्ट",
+        "importButton": "इंपोर्ट",
+        "exportModalTitle": "मास्टर की एक्सपोर्ट करें",
+        "exportWarning": "यह मास्टर की स्वयं है (64-अक्षर हेक्स)। इसे सुरक्षित माध्यम से भेजें और सुरक्षित रखें; इसे रखने वाला इस डिवाइस द्वारा एन्क्रिप्ट किया गया सब कुछ डिक्रिप्ट कर सकता है।",
+        "exportHexLabel": "मास्टर की फिंगरप्रिंट {{fp}}। कॉपी करने के लिए दाएँ आइकन पर क्लिक करें:",
+        "importModalTitle": "मास्टर की इंपोर्ट करें",
+        "importWarning": "यह लोकल master.key को अधिलेखित करेगा और लोकल DB कॉन्फ़िगरेशन के पासवर्ड को पुनः एन्क्रिप्ट करेगा; पुरानी की और कॉन्फ़िगरेशन स्वतः बैकअप हो जाते हैं। बाद में ऐप पुनरारंभ करना अनिवार्य है; पुनरारंभ से पहले नया गोपनीय डेटा सहेजें नहीं।",
+        "importPlaceholder": "दूसरे डिवाइस से एक्सपोर्ट की गई 64-अक्षर हेक्स मास्टर की पेस्ट करें",
+        "importEmpty": "पहले मास्टर की हेक्स पेस्ट करें",
+        "importConfirmOk": "अधिलेखित करके इंपोर्ट करें",
+        "cancel": "रद्द करें",
+        "importDoneTitle": "मास्टर की इंपोर्ट हो गई",
+        "importDoneFingerprints": "फिंगरप्रिंट: {{oldFp}} → {{newFp}}",
+        "backupPathLabel": "बैकअप: {{path}}",
+        "reencrypted": "लोकल DB पासवर्ड नई की से पुनः एन्क्रिप्ट हो गया",
+        "restartRequired": "नई की केवल ऐप पुनरारंभ करने के बाद लागू होगी; पुनरारंभ से पहले नया गोपनीय डेटा सहेजें नहीं।",
+        "importNoop": "इंपोर्ट की गई की वर्तमान की के समान है (फिंगरप्रिंट {{fp}}); कुछ भी बदला नहीं गया।"
+      }
     },
     "defaultConversationModel": "डिफ़ॉल्ट बातचीत मॉडल",
     "defaultConversationModelDesc": "नई बातचीत के लिए डिफ़ॉल्ट मॉडल। सेट नहीं होने पर अंतिम सक्रिय बातचीत मॉडल पर वापस आता है",
@@ -17033,12 +17058,6 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "इस दौर में यह क्षितिज ({{horizon}}) स्कैन नहीं हो सका: {{reason}}; अन्य क्षितिज प्रभावित नहीं हैं",
       "bannerPoolFallbackOnly": "कुल {{fallback}} उम्मीदवार अंतर्निहित नमूना पूल से हैं; लोकप्रिय शेयर या क्षेत्र-नेता रैंकिंग उपलब्ध नहीं थी, इसलिए परिणाम बाज़ार के वास्तविक नेताओं को नहीं दर्शाते।",
-      "bannerGateBlocked": "लॉन्ग-हराइज़न गेट ने {{count}} उम्मीदवारों को रोका (पहली हानि / दो अवधि गिरावट / 30 दिनों में बेचने का निर्णय)",
-      "gateReason": {
-        "firstLoss": "पहली हानि: मूल कंपनी शुद्ध लाभ ≤ 0",
-        "twoPeriodDecline": "शुद्ध लाभ लगातार दो अवधि गिरा",
-        "analysisVeto": "विश्लेषण {{period}}: \"{{action}}\" (30 दिनों में)"
-      },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",

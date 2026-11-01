@@ -22,8 +22,10 @@ use axagent_agent_macro::agent_command;
 
 use crate::AppState;
 
+/// `db_config.json` 的路径**权威在 `crate::paths::db_config_path()`**（见该函数注释）。
+/// 这里只是私有转调，让本文件的调用点保持简短，且 `master_key` 不必跨 commands 模块来取。
 fn db_config_path() -> PathBuf {
-    crate::paths::axagent_home().join("db_config.json")
+    crate::paths::db_config_path()
 }
 
 /// 读取 master.key（用于密码加解密），复用 init::database 的加载逻辑。

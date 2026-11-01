@@ -4781,10 +4781,19 @@ pub async fn recommend_stocks(
 
     let served_vars = load_reco_served_vars(&state).await?;
     let generation = as_of_ctx.as_ref().map(|c| c.as_of_date.format("%Y-%m-%d").to_string());
-    let vars = served_vars_with_analysis_tiers(&state, &served_vars, generation).await;
+    let vars = served_vars.clone();
 
     // state.astock_client 已是 Arc<AStockClient>，直接 clone Arc 即可
     let client: std::sync::Arc<_> = state.astock_client.clone();
+    // 单档入口也必须刷新同一套种子（含 W3 全市场快照）——否则它会读到上一次扫描
+    // 留下的进程级 USER/MOVER/UNIVERSE，表现为「单档与四档看到的池子不同」。
+    let seed_counts =
+        refresh_all_reco_seeds_db(state.harness.db(), generation.as_deref(), client.as_ref()).await;
+    tracing::info!(
+        "[reco] 单档荐股：候选种子合计 {}（全市场快照 {}）",
+        seed_counts.total(),
+        seed_counts.universe
+    );
     let prior = reco_horizon_prior(state.harness.db(), &served_vars).await;
     let response = if let Some(ctx) = as_of_ctx {
         axagent_astock_data::as_of::AS_OF
@@ -4843,6 +4852,11 @@ pub(crate) async fn refresh_user_seed_db(db: &DatabaseConnection) -> usize {
         },
         Err(e) => tracing::warn!("[reco] 读本机标的失败，本轮不注入该来源: {e}"),
     }
+    // W4-1：用户标的路径给的是 `(code, name, None)`，行业不补就永远进不了分散判据。
+    recommender::pool::attach_industries(
+        &mut items,
+        &crate::commands::_shared_reco_pool::universe_industries(db).await,
+    );
 
     axagent_analysis_engine::recommender::set_user_seed(items.clone());
     items.len()
@@ -5032,6 +5046,12 @@ pub(crate) async fn refresh_mover_seed_db(
         axagent_analysis_engine::recommender::set_mover_seed(Vec::new());
         return 0;
     }
+    // W4-1：收盘快照那一路给的是 `(code, name, None)`（快照表没有行业列），不补就永远
+    // 进不了行业分散判据。板块轮动来源自带的行业名保持优先。
+    recommender::pool::attach_industries(
+        &mut merged,
+        &crate::commands::_shared_reco_pool::universe_industries(db).await,
+    );
     axagent_analysis_engine::recommender::set_mover_seed(merged);
     tracing::info!("[reco] 涨幅榜 {day_label}：注入 {n} 只（板块轮动 + 收盘快照；ST 已剔除）");
     n
@@ -5132,7 +5152,7 @@ pub(crate) async fn refresh_reflow_seed_db(db: &DatabaseConnection) -> usize {
 }
 
 /// 一次扫描注入的**四类来源条数**。
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct RecoSeedCounts {
     /// 自选股 ∪ 本机标的。
     pub user: usize,
@@ -5142,6 +5162,12 @@ pub struct RecoSeedCounts {
     pub miss: usize,
     /// 回灌清单（默认 shadow，开关 on 且样本达标才并入）。
     pub reflow: usize,
+    /// 全市场快照里可用于按策略分桶的票数（≥21 根 / 成交额 ≥1 亿 / 非 ST）。
+    /// 它不是「并入基础池的种子」，而是分桶的底座；不计入 `total`。
+    pub universe: usize,
+    /// as-of 入口必须把这份**截止日快照**显式传进 `SeedOverrides::universe`，
+    /// 不能只依赖进程级全局（并发 live 扫描会覆盖它 ⇒ 前视）。
+    pub universe_items: Vec<recommender::universe::UniverseItem>,
 }
 
 impl RecoSeedCounts {
@@ -5170,10 +5196,13 @@ pub(crate) async fn refresh_all_reco_seeds_db(
     let mover = refresh_mover_seed_db(db, generation, client).await;
     let reflow = refresh_reflow_seed_db(db).await;
     let miss = refresh_miss_seed_db(db).await;
-    let counts = RecoSeedCounts { user, mover, miss, reflow };
+    // W3：全市场快照（分桶底座；不并入基础池，单独计数）
+    let (universe, universe_items) =
+        crate::commands::_shared_reco_pool::refresh_universe_seed_db(db, generation).await;
+    let counts = RecoSeedCounts { user, mover, miss, reflow, universe, universe_items };
     tracing::info!(
-        "[reco] 候选种子已刷新：用户 {user} / 涨幅榜 {mover} / 漏检 {miss} / 回灌 {reflow} \
-         （合计 {}）",
+        "[reco] 候选种子已刷新：用户 {user} / 涨幅榜 {mover} / 漏检 {miss} / 回灌 {reflow} / \
+         全市场快照 {universe}（基础池合计 {}）",
         counts.total()
     );
     counts
@@ -5269,45 +5298,6 @@ pub async fn get_mover_asof_summary(
     })))
 }
 
-/// 把「分析侧自动定档」变量并入 served_vars（fail-open：读不到就按原行为跑）。
-///
-/// 代际必须由调用方显式给出（`None`=实盘代、`Some(截止日)`=回放代）—— served_vars 是在
-/// as_of scope 之外加载的，那一刻 `current_as_of()` 恒为 None，加载侧自判代际是假守卫。
-async fn served_vars_with_analysis_tiers(
-    state: &State<'_, AppState>,
-    served_vars: &[(String, serde_json::Value)],
-    generation: Option<String>,
-) -> Vec<(String, serde_json::Value)> {
-    let mut vars = served_vars.to_vec();
-    match axagent_analysis_engine::recommender::reco_loop::load_analysis_tier_var(
-        state.harness.db(),
-        generation.as_deref(),
-    )
-    .await
-    {
-        Ok(Some(v)) => {
-            // 留痕：这一代读到了哪些票的定档。没有这行，就无法区分「定档表里没有它」
-            // 与「定档了但没被扫到」——这正是 2026-10-19 连查数轮的盲区。
-            let codes: Vec<&str> =
-                v.as_object().map(|m| m.keys().map(String::as_str).collect()).unwrap_or_default();
-            tracing::info!(
-                "[reco] 分析定档 {generation:?}：{} 只 {}{}",
-                codes.len(),
-                codes.iter().take(12).cloned().collect::<Vec<_>>().join(","),
-                if codes.len() > 12 { " …" } else { "" }
-            );
-            vars.push(("reco_analysis_tiers".to_string(), v));
-        },
-        Ok(None) => {
-            tracing::info!("[reco] 分析定档 {generation:?}：0 只（该代没有 completed 定档）")
-        },
-        Err(e) => {
-            tracing::warn!("[reco] 分析定档表加载失败（fail-open，按档归位不生效）: {e}")
-        },
-    }
-    vars
-}
-
 /// 一次拿**四档**荐股结果（候选池只建一次）。
 ///
 /// 为什么要有这条命令：四周期科学化要求四档是四个独立预测，而单档命令下
@@ -5347,10 +5337,16 @@ pub async fn recommend_stocks_all_periods(
         refresh_all_reco_seeds_db(state.harness.db(), generation.as_deref(), client.as_ref()).await;
     tracing::info!("[reco] 手动四档荐股：候选种子合计 {} 只", seed_counts.total());
 
-    let vars = served_vars_with_analysis_tiers(&state, &served_vars, generation).await;
+    let vars = served_vars.clone();
 
     let prior = reco_horizon_prior(state.harness.db(), &served_vars).await;
     let results = if let Some(ctx) = as_of_ctx {
+        // as-of 必须把**截止日**的全市场快照显式带进扫描：进程级全局随时可能被
+        // 并发 live 扫描覆盖，读全局就是把今天的池带进历史回放（前视）。
+        let overrides = recommender::SeedOverrides {
+            universe: Some(seed_counts.universe_items.clone()),
+            ..Default::default()
+        };
         axagent_astock_data::as_of::AS_OF
             .scope(Some(ctx), async {
                 recommender::recommend_stocks_multi(
@@ -5359,7 +5355,7 @@ pub async fn recommend_stocks_all_periods(
                     &vars,
                     None,
                     prior,
-                    recommender::SeedOverrides::default(),
+                    overrides,
                 )
                 .await
             })
@@ -5837,7 +5833,6 @@ pub async fn get_cached_recommendation(
         // 缓存还原不是一次扫描 ⇒ 无本批截断留痕（留痕只在 persist 时写库）
         scan_audit: vec![],
         // 缓存还原自历史批次 ⇒ 拦截留痕属于产生该批的那次扫描，这里无从还原（空即可）
-        gate_blocked: vec![],
     }))
 }
 
@@ -8467,7 +8462,6 @@ mod reco_batch_contract_tests {
             error_detail: None,
             seed_pool_snapshot: None,
             scan_audit: vec![],
-            gate_blocked: vec![],
         }
     }
 

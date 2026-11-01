@@ -2975,7 +2975,9 @@
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "ライブパイプライン時間帯（23:50–02:10 / 17:50–18:10）です。時間帯を外して開始してください。",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "捕捉漏れバックフィルバッチの実行に失敗しました。バッチ明細を確認してください。",
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "捕捉漏れバックフィルの履歴取得に失敗しました。後でもう一度お試しください。",
-    "TRADING_DISABLED": "取引機能がオフです。取引を記録する前に有効にしてください"
+    "TRADING_DISABLED": "取引機能がオフです。取引を記録する前に有効にしてください",
+    "KEY_FROM_OTHER_DEVICE": "この暗文は他のデバイスのマスターキーで暗号化されています（暗文指紋 {{cipherFingerprint}}、ローカル指紋 {{localFingerprint}}）。そのデバイスの「設定 → データベース → マスターキー」でエクスポートし、こちらでインポートしてください。",
+    "MASTER_KEY_NOT_FOUND": "このデバイスに master.key ファイルがなく、マスターキーのエクスポート / インポートができません。"
   },
   "errorBoundary": {
     "copied": "コピーしました",
@@ -5333,7 +5335,30 @@
       "schemaRepairRunning": "修復中...",
       "schemaRepairSuccess": "修復が完了しました：列を {{columns}} 件追加、型を {{types}} 件修正",
       "schemaRepairFailed": "データベース構造の修復に失敗しました：{{error}}",
-      "schemaRepairPartial": "修復は不完全です：{{count}} テーブルの照合に失敗しました（詳細は下記）"
+      "schemaRepairPartial": "修復は不完全です：{{count}} テーブルの照合に失敗しました（詳細は下記）",
+      "masterKey": {
+        "title": "マスターキー（デバイス間共有データベース）",
+        "fingerprintLabel": "ローカルのマスターキー指紋：{{fingerprint}}（共有 DB の暗文ヘッダーと一致する場合のみ復号可能）",
+        "noKeyWarning": "このデバイスには master.key がなく、エクスポート / インポートはできません。共有データベース内の他デバイス暗号化データは、そのデバイスの「設定 → データベース → マスターキー」でエクスポートし、こちらでインポートしてください。",
+        "loadFailed": "マスターキー情報の取得に失敗：{{error}}",
+        "exportButton": "エクスポート",
+        "importButton": "インポート",
+        "exportModalTitle": "マスターキーをエクスポート",
+        "exportWarning": "以下はマスターキー本体（64 文字の hex）です。安全な経路で渡し、厳重に保管してください。所持者はこのデバイスが暗号化した全データを復号できます。",
+        "exportHexLabel": "マスターキー指紋 {{fp}}。右のアイコンをクリックしてコピー：",
+        "importModalTitle": "マスターキーをインポート",
+        "importWarning": "ローカルの master.key を上書きし、ローカル DB 設定内のパスワードを再暗号化します。旧キーと設定は自動バックアップされます。完了後は必ずアプリを再起動してください。再起動まで新しい機密データを保存しないでください。",
+        "importPlaceholder": "相手デバイスでエクスポートした 64 文字の hex マスターキーを貼り付け",
+        "importEmpty": "先にマスターキー hex を貼り付けてください",
+        "importConfirmOk": "上書きしてインポート",
+        "cancel": "キャンセル",
+        "importDoneTitle": "マスターキーをインポートしました",
+        "importDoneFingerprints": "指紋：{{oldFp}} → {{newFp}}",
+        "backupPathLabel": "バックアップ先：{{path}}",
+        "reencrypted": "ローカル DB パスワードを新しいキーで再暗号化しました",
+        "restartRequired": "新しいキーはアプリ再起動後に有効になります。再起動前に新しい機密データを保存しないでください。",
+        "importNoop": "インポートしたキーは現在のキーと同一です（指紋 {{fp}}）。変更はありません。"
+      }
     },
     "defaultConversationModel": "デフォルト会話モデル",
     "defaultConversationModelDesc": "新しい会話のデフォルトモデル。設定されていない場合は最後のアクティブな会話モデルにフォールバック",
@@ -17033,12 +17058,6 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "この回はこの期間（{{horizon}}）のスキャンに失敗しました：{{reason}}。他の期間は影響を受けません",
       "bannerPoolFallbackOnly": "候補 {{fallback}} 件はすべて内蔵サンプルプール由来です。人気株／業種リーダーのランキングを取得できなかったため、結果は市場の実際の人気株を反映していません。",
-      "bannerGateBlocked": "長期ゲートが {{count}} 銘柄を遮断（初赤字/2期連続減益/30日以内の売り判定）",
-      "gateReason": {
-        "firstLoss": "初赤字：最新の親会社純利益 ≤ 0",
-        "twoPeriodDecline": "純利益が2期連続で前年割れ",
-        "analysisVeto": "分析{{period}}の判定「{{action}}」（30日以内）"
-      },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",

@@ -333,17 +333,62 @@ fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
 fn every_reco_picks_insert_stamps_algorithm_version() {
     use std::path::Path;
 
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    // 扫描面 = 仓库根下「应用壳层 + 全部逻辑 workspace」：
+    //   src-tauri/src、src-tauri/crates，以及每个含 [workspace] 的 axagent-*/crates。
+    // 不手抄 workspace 名：L2 拆分/后续再搬时自动纳入，漏收由下面的下界断言兜住。
+    let repo_root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("src-tauri 应有父目录（仓库根）");
+    let mut roots: Vec<std::path::PathBuf> =
+        vec![repo_root.join("src-tauri").join("src"), repo_root.join("src-tauri").join("crates")];
+    let mut workspaces = 0usize;
+    for entry in std::fs::read_dir(repo_root).expect("读取仓库根失败").flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() || !entry.file_name().to_string_lossy().starts_with("axagent-") {
+            continue;
+        }
+        let Ok(manifest) = std::fs::read_to_string(dir.join("Cargo.toml")) else {
+            continue;
+        };
+        if !manifest.contains("[workspace]") {
+            continue;
+        }
+        workspaces += 1;
+        roots.push(dir.join("crates"));
+    }
+    assert!(
+        workspaces >= 7,
+        "只探测到 {workspaces} 个含 [workspace] 的 axagent-* ⇒ 扫描面塌缩（L2 拆分后应为 7 个）"
+    );
+
     // 本文件自己含判据字符串（`"reco_picks::ActiveModel {"`）⇒ 不自指排除就会多算一处
     const SELF_FILE: &str = "seed_consistency_tests.rs";
 
     let mut files: Vec<std::path::PathBuf> = Vec::new();
-    for sub in ["src", "crates"] {
-        collect_rs_files(&root.join(sub), &mut files);
+    for root in &roots {
+        collect_rs_files(root, &mut files);
+    }
+    // 下界按「crate 目录数」表达，而不是一个能被 src-tauri/src 单独撑大的文件总数：
+    // 搬家后若有 workspace 漏收，crate 目录数会掉到 42 以下（文件数仍可能 >2000）⇒ 当场红。
+    let mut crate_dirs = 0usize;
+    for root in &roots {
+        if root.file_name().and_then(|s| s.to_str()) != Some("crates") {
+            continue;
+        }
+        for entry in std::fs::read_dir(root).expect("读取 crates 目录失败").flatten() {
+            let dir = entry.path();
+            if dir.is_dir() && dir.join("Cargo.toml").is_file() {
+                crate_dirs += 1;
+            }
+        }
     }
     assert!(
-        files.len() > 100,
-        "扫描面只读到 {} 个 .rs 文件 ⇒ 判据失效（递归收集被改坏了）",
+        crate_dirs >= 42,
+        "扫描面只覆盖 {crate_dirs} 个 crate 目录（L2 后应为 42 = 主壳 1 + 7 workspace 41）\
+         ⇒ 有 workspace 未被探测到，判据会静默少查"
+    );
+    assert!(
+        files.len() >= 2000,
+        "扫描面只读到 {} 个 .rs（crate 目录 {crate_dirs}）⇒ 判据失效（递归收集被改坏了）",
         files.len()
     );
 
@@ -365,7 +410,8 @@ fn every_reco_picks_insert_stamps_algorithm_version() {
             if line.trim_start().starts_with("//") || !line.contains("reco_picks::ActiveModel {") {
                 continue;
             }
-            let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+            let rel =
+                path.strip_prefix(repo_root).unwrap_or(path).to_string_lossy().replace('\\', "/");
             sites.push((rel.clone(), i + 1));
             // 字面量向后扫到首个 `};`（结构体闭合），其间必须出现 reco_version
             let rest = &src[line_start..];
@@ -392,14 +438,14 @@ fn every_reco_picks_insert_stamps_algorithm_version() {
         sites.len()
     );
     assert_eq!(
-        sites[0].0, "crates/dao/src/repo/reco_pool.rs",
+        sites[0].0, "axagent-infra/crates/dao/src/repo/reco_pool.rs",
         "唯一建行点搬离 dao 了（现在在 {}） ⇒ 分层门（commands-no-direct-db）应同步检查",
         sites[0].0
     );
 
     // ── 判据 2：共享入口必须把代际**真值**传下去（不是 None）──
-    let shared_rel = "src/commands/_shared_reco_pool.rs";
-    let shared = std::fs::read_to_string(root.join(shared_rel))
+    let shared_rel = "src-tauri/src/commands/_shared_reco_pool.rs";
+    let shared = std::fs::read_to_string(repo_root.join(shared_rel))
         .unwrap_or_else(|e| panic!("读取 {shared_rel} 失败: {e}"));
     let mut call_points = 0usize;
     for form in ["pool_dao::insert_picks(", "pool_dao::upsert_pick("] {
@@ -456,7 +502,7 @@ fn seeded_value_is_on(name: &str) -> bool {
 fn ic_gate_can_only_turn_on_after_version_screening_exists() {
     let ic_src = {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("crates/analysis-engine/src/recommender/ic.rs");
+            .join("../axagent-quant/crates/analysis-engine/src/recommender/ic.rs");
         std::fs::read_to_string(&path).expect("读取 recommender/ic.rs 失败")
     };
     // 剥注释再判：只在注释里写「按代际筛样」不得算已实现（同全仓禁词门的口径）
@@ -2001,7 +2047,7 @@ fn moat_level_vocabulary_matches_rhai_consumer() {
     // 2026-10-09 B 批：门限从写死的 `if score >= 70` 改成 [`MoatTiers`]（面板
     // `value_moat_threshold` 派生），**词表三个值一字未动** ⇒ 本切片改锚在纯函数
     // `moat_level_of` 上（它是词表的唯一产地），不再依赖某个具体门限的数字形态。
-    let mcp = read_ws_file("crates/astock-data/src/mcp_tools.rs");
+    let mcp = read_ws_file("../axagent-quant/crates/astock-data/src/mcp_tools.rs");
     let producer_slice = slice_between(
         "mcp_tools.rs",
         &mcp,
@@ -4917,7 +4963,7 @@ fn suggestion_entry_key_shape_is_identical_across_prompt_and_parser() {
 
     let md = read("agency_experts/stock-analysis/reflection.md");
     let inline = read("src/commands/stock_analysis_setup/mod.rs");
-    let parser = read("crates/analysis-engine/src/portfolio_formula.rs");
+    let parser = read("../axagent-quant/crates/analysis-engine/src/portfolio_formula.rs");
 
     for (label, text) in [("reflection.md", &md), ("内联 system_prompt", &inline)] {
         let missing: Vec<&str> =

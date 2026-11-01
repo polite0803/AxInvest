@@ -85,6 +85,7 @@ pub mod local_tool;
 pub mod market_close_sweep;
 pub mod market_mainline;
 pub mod marketplace;
+pub mod master_key;
 pub mod mcp;
 pub mod memory;
 pub mod message_continuation;

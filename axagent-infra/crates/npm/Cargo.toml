@@ -1,0 +1,15 @@
+[package]
+name = "axagent-npm"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+axagent-harness = { version = "3.0.0", path = "../../../axagent-core/crates/harness" }
+flate2 = "1.0"
+reqwest = { workspace = true }
+serde = { workspace = true }
+tar = "0.4"
+thiserror = { workspace = true }
+tracing = { workspace = true }

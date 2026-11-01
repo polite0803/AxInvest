@@ -8,7 +8,7 @@
  *
  * | 载体 | 位置 | 机制 |
  * |---|---|---|
- * | **单一真相源** | `src-tauri/crates/analysis-engine/src/evidence_weight.rs` 的 `get_horizon_base_weights` | Rust `HashMap` 逐档显式 insert |
+ * | **单一真相源** | `axagent-quant/crates/analysis-engine/src/evidence_weight.rs` 的 `get_horizon_base_weights` | Rust `HashMap` 逐档显式 insert |
  * | 前端离线兜底 | `src/lib/stock-analysis-utils.ts` 的 `ANALYST_TIME_HORIZON_WEIGHT` | 手抄（`compute_evidence_weights` 命令失败时的共识兜底） |
  *
  * 兜底侧的读取函数 `getAnalystWeight` 对**缺键**的处理是 `weights.default ?? 1.0` ——
@@ -58,11 +58,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const BACKEND = "src-tauri/crates/analysis-engine/src/evidence_weight.rs";
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
+const BACKEND = `${crateRel("analysis-engine", "src/evidence_weight.rs")}`;
 const FRONTEND = "src/lib/stock-analysis-utils.ts";
-const HOLDING = "src-tauri/crates/harness/src/holding_period.rs";
+const HOLDING = "axagent-core/crates/harness/src/holding_period.rs";
 const SEED = "src-tauri/src/commands/stock_analysis_setup/seed_stock_analysis.rs";
 const LOCALE_DIR = "src/i18n/locales";
 /** 唯一档名键族的四档键名（扁平，挂 `stockAnalysis` 段；2026-10-16 由 8 族收敛而来）。 */

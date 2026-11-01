@@ -28,6 +28,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::string::ToString;
 
+use axagent_harness::core_error::AxAgentError;
+
 /// 错误分类，供前端做分支处理（重试 / 授权 / 放弃等）。
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -146,6 +148,24 @@ impl ErrorResponse {
         category: ErrorCategory,
     ) -> Self {
         Self { code: code.into(), category, detail: Some(e.to_string()), params: None }
+    }
+
+    /// 从 `AxAgentError` 创建，**识别跨设备密钥错误**（v2 密文头指纹不匹配）并映射为
+    /// `KEY_FROM_OTHER_DEVICE` 专属码（携带双方指纹翻译参数）；其余一律塌进
+    /// `COMMON_INTERNAL`（与 `from_error` 同口径）。
+    ///
+    /// 为什么单开入口而不改 `from_error`：后者接受任意 `Display`，是全仓几百个调用点
+    /// 的兜底通道，塞类型分支会让「兜底」语义变模糊；跨设备归因只有拿得到
+    /// `AxAgentError` 枚举本体的调用点才做得到。
+    pub fn from_axagent_error(e: AxAgentError, category: ErrorCategory) -> Self {
+        if let AxAgentError::KeyFromOtherDevice { cipher_fingerprint, local_fingerprint } = &e {
+            return Self::new(crate::commands::error_code::master_key::FROM_OTHER_DEVICE)
+                .with_category(category)
+                .with_detail(e.to_string())
+                .with_param("cipherFingerprint", cipher_fingerprint.clone())
+                .with_param("localFingerprint", local_fingerprint.clone());
+        }
+        Self::from_error(e, category)
     }
 }
 

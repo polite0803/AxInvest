@@ -20,7 +20,7 @@
 //!    消费点：`AStockClient::snapshot_absence_clause`（呈现/诊断侧，不动决策数值）。
 //! 3. DiskCache 每次落盘都是**全量重写**单文件。
 //!
-//! 同族的既有正门：`crates/entities/src/market_daily_close.rs` +
+//! 同族的既有正门：`axagent-core/crates/entities/src/market_daily_close.rs` +
 //! `crates/analysis-engine/src/market_close_store.rs`（文件头写的就是同一句理由）。
 //!
 //! ## 空快照的唯一出口

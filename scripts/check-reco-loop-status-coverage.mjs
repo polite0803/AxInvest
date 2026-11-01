@@ -42,9 +42,12 @@ import path from "node:path";
 import process from "node:process";
 
 import { matchBraceEnd } from "./lib/rust-source-scan.mjs";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const RECO_LOOP_RS = "src-tauri/crates/analysis-engine/src/recommender/reco_loop.rs";
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
+const RECO_LOOP_RS = `${crateRel("analysis-engine", "src/recommender/reco_loop.rs")}`;
 const TYPES_TS = "src/types/stock-analysis.ts";
 const PANEL_TSX = "src/components/stock-analysis/RecoLoopPanel.tsx";
 const MATRIX_TSX = "src/components/stock-analysis/RecoStrategyMatrix.tsx";

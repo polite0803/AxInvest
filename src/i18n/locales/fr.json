@@ -2975,7 +2975,9 @@
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "Dans la fenêtre du pipeline en direct (23:50–02:10 / 17:50–18:10) ; relancez en dehors.",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "Le lot de rattrapage a échoué ; consultez les détails du lot.",
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Échec de la requête d'historique des lots de rattrapage ; réessayez plus tard.",
-    "TRADING_DISABLED": "La fonction de trading est désactivée. Activez-la avant d'enregistrer des transactions."
+    "TRADING_DISABLED": "La fonction de trading est désactivée. Activez-la avant d'enregistrer des transactions.",
+    "KEY_FROM_OTHER_DEVICE": "Ce chiffré a été créé avec la clé maîtresse d'un autre appareil (empreinte du chiffré {{cipherFingerprint}}, empreinte locale {{localFingerprint}}) — exportez la clé depuis cet appareil (Paramètres → Base de données → Clé maîtresse) puis importez-la ici.",
+    "MASTER_KEY_NOT_FOUND": "Aucun fichier master.key sur cet appareil ; impossible d'exporter/importer la clé maîtresse."
   },
   "errorBoundary": {
     "copied": "Copié",
@@ -5333,7 +5335,30 @@
       "schemaRepairRunning": "Réparation en cours...",
       "schemaRepairSuccess": "Réparation terminée : {{columns}} colonnes ajoutées, {{types}} types corrigés",
       "schemaRepairFailed": "Échec de la réparation du schéma : {{error}}",
-      "schemaRepairPartial": "Réparation incomplète : {{count}} tables n'ont pas pu être comparées (détails ci-dessous)"
+      "schemaRepairPartial": "Réparation incomplète : {{count}} tables n'ont pas pu être comparées (détails ci-dessous)",
+      "masterKey": {
+        "title": "Clé maîtresse (base de données partagée entre appareils)",
+        "fingerprintLabel": "Empreinte de la clé maîtresse locale : {{fingerprint}} (doit correspondre à l'empreinte de l'en-tête du chiffré dans la BD partagée)",
+        "noKeyWarning": "Aucune master.key sur cet appareil ; export/import indisponibles. Pour les chiffrés de la BD partagée créés par un autre appareil, exportez la clé là-bas (Paramètres → Base de données → Clé maîtresse) puis importez-la ici.",
+        "loadFailed": "Échec du chargement des informations de la clé maîtresse : {{error}}",
+        "exportButton": "Exporter",
+        "importButton": "Importer",
+        "exportModalTitle": "Exporter la clé maîtresse",
+        "exportWarning": "Ceci est la clé maîtresse elle-même (hex de 64 caractères). Transmettez-la par un canal sécurisé et conservez-la précieusement ; quiconque la détient peut déchiffrer tout ce qui a été chiffré par cet appareil.",
+        "exportHexLabel": "Empreinte de la clé maîtresse {{fp}}. Cliquez sur l'icône à droite pour copier :",
+        "importModalTitle": "Importer la clé maîtresse",
+        "importWarning": "Ceci remplacera la master.key locale et rechiffrera le mot de passe de la base de données dans la configuration locale ; l'ancienne clé et la configuration sont sauvegardées automatiquement. Vous devez redémarrer l'application ensuite ; n'enregistrez pas de nouvelles données secrètes avant le redémarrage.",
+        "importPlaceholder": "Collez la clé maîtresse hex de 64 caractères exportée depuis l'autre appareil",
+        "importEmpty": "Collez d'abord la clé maîtresse en hex",
+        "importConfirmOk": "Remplacer et importer",
+        "cancel": "Annuler",
+        "importDoneTitle": "Clé maîtresse importée",
+        "importDoneFingerprints": "Empreinte : {{oldFp}} → {{newFp}}",
+        "backupPathLabel": "Sauvegardé sous : {{path}}",
+        "reencrypted": "Mot de passe local de la BD rechiffré avec la nouvelle clé",
+        "restartRequired": "La nouvelle clé ne prend effet qu'après le redémarrage de l'application ; n'enregistrez pas de nouvelles données secrètes avant le redémarrage.",
+        "importNoop": "La clé importée est identique à l'actuelle (empreinte {{fp}}) ; rien n'a été modifié."
+      }
     },
     "defaultConversationModel": "Modèle de conversation par défaut",
     "defaultConversationModelDesc": "Modèle par défaut pour les nouvelles conversations. Utilise le dernier modèle de conversation actif si non défini",
@@ -17033,12 +17058,6 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "Cet horizon ({{horizon}}) n'a pas pu être analysé lors de cette passe : {{reason}} ; les autres horizons ne sont pas affectés",
       "bannerPoolFallbackOnly": "Les {{fallback}} candidats proviennent du pool d'échantillons intégré ; aucun classement de valeurs en vue ni de secteurs meneurs n'a été récupéré, le résultat ne reflète donc pas les véritables leaders du marché.",
-      "bannerGateBlocked": "Le filtre long terme a bloqué {{count}} candidats (première perte / baisse sur 2 périodes / verdict de vente sous 30 jours)",
-      "gateReason": {
-        "firstLoss": "Première perte : résultat net parent ≤ 0",
-        "twoPeriodDecline": "Résultat net en baisse deux périodes consécutives",
-        "analysisVeto": "Analyse {{period}} : « {{action}} » (sous 30 jours)"
-      },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",

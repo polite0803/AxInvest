@@ -56,7 +56,10 @@ const noop = () => {};
 // entryHigh/stopLoss/targetPrice/positionPct/holdingDays/riskNotes 等)。
 // 这里不再保留本地 panel-specific 富化类型。
 
-const STYLE_KEYS: StyleKey[] = ["trend", "value", "capital", "reversion", "watchlist", "serenity"];
+// 荐股面板的五个风格桶。2026-11-01 裁定：趋势智选（`serenity`）不再是荐股的一个风格
+// （它的候选来自 LLM 工作流），因此这里不再渲染那个桶 —— 智选有自己的面板
+// `SerenityScreeningPanel`，它的落库行与闭环权重格都不受影响。
+const STYLE_KEYS: StyleKey[] = ["trend", "value", "capital", "reversion", "watchlist"];
 /** 档位顺序：徽章默认只显示当前档，Tooltip 按本表逐档列出（不合并、不平均）。 */
 const PERIOD_ORDER: PeriodKey[] = ["ultra_short", "short", "mid", "long"];
 const FALLBACK = "—";
@@ -595,38 +598,6 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
         )}
 
         {
-          /* 长线门拦截留痕（P0 财报门 / P1 分析回环，2026-10-18）：候选「变少」的
-            结构化归因——此前只有日志，用户读不到「为什么这只票没出现在长线候选里」。
-            非空才渲染；回放仅财报门生效（回环门消费侧守卫）。 */
-        }
-        {data && (data.gateBlocked?.length ?? 0) > 0 && (
-          <Alert
-            type="info"
-            showIcon
-            className="text-xs! mb-2!"
-            data-testid="reco-gate-blocked"
-            title={
-              <span className="text-xs">
-                {t("stockAnalysis.recommendation.bannerGateBlocked", {
-                  count: data.gateBlocked!.length,
-                })}
-              </span>
-            }
-            description={
-              <div className="text-[10px] leading-4">
-                {data.gateBlocked!.map((b) => (
-                  <div key={`${b.stockCode}-${b.style}`}>
-                    {b.stockName}({b.stockCode})·
-                    {t(`stockAnalysis.recommendation.style${capitalize(b.style)}`)}：
-                    {b.reasons.map((r) => gateReasonText(r, t)).join("；")}
-                  </div>
-                ))}
-              </div>
-            }
-          />
-        )}
-
-        {
           /* B15: 降级风格提示 —— 与 disabled 不同,degraded 是"可用但效果减弱",用橙色 info 区分。
             后端逐风格的 `degradedReasons` 归因文本此前从未被消费（只列风格名），
             用户读不到「为什么这个风格在这个截止日降级」。 */
@@ -870,25 +841,6 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
 
 function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-/** 长线门拦截理由码 → 用户文案（机器可读理由码由后端 gates.rs 产出）。
- *  `analysis_veto_<档>:<动作>` 拆参插值；未知码原样透出（不猜）。 */
-function gateReasonText(r: string, t: TFunction): string {
-  if (r === "first_loss") {
-    return t("stockAnalysis.recommendation.gateReason.firstLoss");
-  }
-  if (r === "two_period_decline") {
-    return t("stockAnalysis.recommendation.gateReason.twoPeriodDecline");
-  }
-  if (r.startsWith("analysis_veto_")) {
-    const [period, action] = r.slice("analysis_veto_".length).split(":");
-    return t("stockAnalysis.recommendation.gateReason.analysisVeto", {
-      period: t(`stockAnalysis.timeHorizon${horizonSuffix(period ?? "")}`),
-      action: action ?? "",
-    });
-  }
-  return r;
 }
 
 /** 荐股 ↔ 分析师共识交叉验证徽章

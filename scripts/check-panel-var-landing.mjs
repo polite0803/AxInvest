@@ -64,21 +64,24 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
 const read = (rel) => readFileSync(resolve(ROOT, rel), "utf8");
 
 const PANEL_REL = "src/components/settings/StockAnalysisConfigPanel.tsx";
-const SCORING_REL = "src-tauri/crates/astock-data/src/scoring.rs";
-const POS_REL = "src-tauri/crates/analysis-engine/src/position_limits.rs";
-const MONITOR_REL = "src-tauri/crates/analysis-engine/src/monitor.rs";
-const MCP_REL = "src-tauri/crates/astock-data/src/mcp_tools.rs";
-const FORMULA_REL = "src-tauri/crates/analysis-engine/src/portfolio_formula.rs";
-const TRADING_REL = "src-tauri/crates/analysis-engine/src/trading.rs";
+const SCORING_REL = `${crateRel("astock-data", "src/scoring.rs")}`;
+const POS_REL = `${crateRel("analysis-engine", "src/position_limits.rs")}`;
+const MONITOR_REL = `${crateRel("analysis-engine", "src/monitor.rs")}`;
+const MCP_REL = `${crateRel("astock-data", "src/mcp_tools.rs")}`;
+const FORMULA_REL = `${crateRel("analysis-engine", "src/portfolio_formula.rs")}`;
+const TRADING_REL = `${crateRel("analysis-engine", "src/trading.rs")}`;
 const SERVICES_REL = "src-tauri/src/init/services.rs";
 const WF_TEMPLATE_REL = "src-tauri/src/commands/workflow_template.rs";
 const REPLAY_REL = "src-tauri/src/commands/stock_analysis.rs";
-const PM_REL = "src-tauri/crates/analysis-engine/src/portfolio_monitor.rs";
+const PM_REL = `${crateRel("analysis-engine", "src/portfolio_monitor.rs")}`;
 const SEED_REL = "src-tauri/src/commands/stock_analysis_setup/seed_variables.rs";
 // B 批 `value_safety_margin` 的两个**载体**（跨载体单一权威判据用）：
 // 决策脚本本体 + 宿主函数的注册点。`.rhai` 由 `include_str!` 进主 crate 二进制 ⇒

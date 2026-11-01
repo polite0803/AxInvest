@@ -36,11 +36,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
 
-const FAILURE_MODE_RS = "src-tauri/crates/analysis-engine/src/failure_mode.rs";
-const REFLECTION_TIER_RS = "src-tauri/crates/analysis-engine/src/reflection_tier.rs";
+const FAILURE_MODE_RS = `${crateRel("analysis-engine", "src/failure_mode.rs")}`;
+const REFLECTION_TIER_RS = `${crateRel("analysis-engine", "src/reflection_tier.rs")}`;
 const PANEL_TSX = "src/components/stock-analysis/ReflectionPanel.tsx";
 const INLINE_PROMPT_RS = "src-tauri/src/commands/stock_analysis_setup/mod.rs";
 const REFLECTION_MD = "src-tauri/agency_experts/stock-analysis/reflection.md";

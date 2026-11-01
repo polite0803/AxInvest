@@ -14,7 +14,7 @@
 //! - 埋点在两条外部依赖的**唯一收口**上（LLM：`execute_llm` / `execute_llm_stream`；
 //!   vendor：`VendorHealthTracker::record_success` / `record_failure`），故无需各调用点配合；
 //! - 口径细节（缓存命中不计入、429/空数据不计入、`Disabled` 冻结、
-//!   **进程重启归零**）写在 `crates/harness/src/dependency_metrics.rs` 模块头，
+//!   **进程重启归零**）写在 `axagent-core/crates/harness/src/dependency_metrics.rs` 模块头，
 //!   **读数前必须先看那里**，否则会把「本次进程启动以来」误读成「长期统计」。
 //!
 //! # 形态说明

@@ -53,6 +53,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { discoverWorkspaceRoots, repoRel } from "./lib/workspace-roots.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -72,7 +73,12 @@ const SELFTEST = ARG("selftest");
 const ONLY = ARGV("concept");
 
 // ── 扫描面 ────────────────────────────────────────────────────────────
-const SCAN_ROOTS = ["src-tauri/crates", "src-tauri/src", "src"];
+// crate 分散到多个 workspace：`crates/` 面按自动探测的根展开；应用壳层/前端面保持不变。
+const SCAN_ROOTS = [
+  "src-tauri/src",
+  "src",
+  ...discoverWorkspaceRoots(ROOT).map((r) => `${repoRel(ROOT, r)}/crates`),
+];
 const EXTS = new Set([".rs", ".ts", ".tsx", ".rhai"]);
 const SKIP_SEG = [
   "/target/", "/node_modules/", "/dist/", "/output/", "/.git/",
@@ -93,7 +99,7 @@ const SKIP_SEG = [
  *   · 现场量纲簇**被登记概念的量纲覆盖** ⇒ 已知多义，**不是缺陷**；
  *   · 现场量纲簇**不被任何登记概念覆盖** ⇒ 真异常（新量纲未经登记）。
  */
-const REGISTRY_REL = "src-tauri/crates/harness/src/domain_semantics.rs";
+const REGISTRY_REL = "axagent-core/crates/harness/src/domain_semantics.rs";
 
 /** 解析 Rust 侧 `CONCEPTS` 常量表（格式固定：每字段一行、以 `},` 收尾）。 */
 function parseRegistry() {

@@ -67,7 +67,8 @@ pub async fn list_reco_history(
 
     // style_filter 支持单个或多个（逗号分隔）——趋势智选面板同时认
     // 'serenity'（serenity-screening 工作流产物）和 'bottleneck'
-    // （智能荐股内置 SerenityStrategy 产物，业务上都是"趋势智选"）。
+    // （趋势智选工作流产物；智能荐股自 2026-11-01 起不再内置 Serenity 策略，见
+    // `recommender::strategies_for_period` 的裁定说明）。
     // 注意：占位符编号必须用"已 push 的 values 数量"作基准（base），
     // 不能边循环边用 values.len()——values 在循环后才 push，
     // 旧实现生成 ($1,$1) 导致只匹配第一个风格（2026-08-01 实锤修复）。
@@ -306,9 +307,7 @@ pub async fn delete_serenity_pick(state: State<'_, AppState>, id: String) -> Res
     pick.delete(db).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("删除候选记录失败: {e}"))
     })?;
-    // 同步清空 Serenity 全局缓存，避免下次荐股仍包含已删除的候选
-    axagent_analysis_engine::recommender::clear_serenity_candidate_cache();
-    tracing::info!("[serenity] 已删除候选记录: {id}，Serenity 缓存已同步清空");
+    tracing::info!("[serenity] 已删除候选记录: {id}");
     Ok(())
 }
 

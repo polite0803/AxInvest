@@ -12,10 +12,10 @@ describe("Phase B category template regressions", () => {
   it("keeps the category contract to model selection only", () => {
     const typeSource = readSource("src/types/index.ts");
     const rustTypeSource = readSource(
-      "src-tauri/crates/harness/src/types/conversation.rs",
+      "axagent-core/crates/harness/src/types/conversation.rs",
     );
     const entitySource = readSource(
-      "src-tauri/crates/entities/src/conversation_categories.rs",
+      "axagent-core/crates/entities/src/conversation_categories.rs",
     );
 
     // 只截分类自己的声明段 —— AppSettings 仍合法保留 defaultTemperature 等全局默认字段，

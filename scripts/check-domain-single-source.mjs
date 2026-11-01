@@ -143,9 +143,9 @@ const CI = ARG("ci");
 // ── 站点清单（契约：每条都必须抓到，抓不到 = 代码被重构了，不是「没问题」）──
 
 /** 权威源 */
-const AUTHORITY_REL = "src-tauri/crates/harness/src/capability.rs";
+const AUTHORITY_REL = "axagent-core/crates/harness/src/capability.rs";
 /** L1 域元数据声明（2026-09-15 新增；枚举变体 + nav_path/nav_order） */
-const REGISTRY_REL = "src-tauri/crates/harness/src/domain_registry.rs";
+const REGISTRY_REL = "axagent-core/crates/harness/src/domain_registry.rs";
 /** TS 联合类型 */
 const TS_TYPE_REL = "src/types/capability.ts";
 /** 前端域元数据 + 协议顺序（同一文件两处声明） */

@@ -30,17 +30,21 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { crateRepoRel, discoverWorkspaceRoots } from "./lib/workspace-roots.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
+const WORKSPACE_ROOTS = discoverWorkspaceRoots(ROOT);
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由扫描面自证报红）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
 
-const HARNESS = "src-tauri/crates/harness/src/holding_period.rs";
+const HARNESS = "axagent-core/crates/harness/src/holding_period.rs";
 const WRITE_SIDE = "src-tauri/src/commands/backtest_validation.rs";
 /** 三个跨行池化的统计读点（按**文件**列，一条一个分母）。 */
 const READ_POINTS = [
   { name: "compute_validation_report", file: "src-tauri/src/commands/backtest_validation.rs" },
   { name: "reco_ic_stats", file: "src-tauri/src/commands/stock_analysis.rs" },
-  { name: "reco_loop", file: "src-tauri/crates/analysis-engine/src/recommender/reco_loop.rs" },
+  { name: "reco_loop", file: crateRel("analysis-engine", "src/recommender/reco_loop.rs") },
 ];
 /** 旧窗口集字面量的两种写法（dprint 会在逗号后补空格，两种都要拦）。 */
 const STALE_ARRAYS = ["[5, 20, 60]", "[5,20,60]"];
@@ -177,7 +181,7 @@ function runChecks(files) {
 
 function collectDiskFiles() {
   const files = {};
-  for (const p of listRustFiles(path.join(ROOT, "src-tauri"), [])) {
+  for (const p of WORKSPACE_ROOTS.flatMap((r) => listRustFiles(r, []))) {
     const rel = path.relative(ROOT, p).replace(/\\/g, "/");
     files[rel] = fs.readFileSync(p, "utf8");
   }

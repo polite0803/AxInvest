@@ -1057,7 +1057,7 @@ pub(crate) fn extract_decision_from_results_map(results: &serde_json::Value) -> 
 /// 前端快照比对与测试都会变成 flaky。
 ///
 /// ⚠ 覆盖范围只有**工作流链**：对话直执行链拿到的 `HookOutcome`
-/// （`crates/harness/src/workflow_lifecycle.rs:65`）只有 `status` / `results`，
+/// （`axagent-core/crates/harness/src/workflow_lifecycle.rs:65`）只有 `status` / `results`，
 /// **没有节点状态**，那条链无法在此声明缺席。给它补上是 harness DTO 变更，未列入本轮 ——
 /// 宁可少一条链有声明，也不要在那里造一条恒空的假声明。
 pub(crate) fn tolerated_failure_notes(wf: &Workflow) -> Vec<String> {

@@ -30,13 +30,16 @@
 // 退出码：0 通过 ｜ 1 违规（含判据没电）
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { discoverWorkspaceRoots } from "./lib/workspace-roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TASK_REL = "src-tauri/src/commands/scheduled_task.rs";
 const GROUPING_REL = "src/pages/TasksCenterPage/taskGrouping.ts";
-const SRC_TAURI = join(ROOT, "src-tauri");
+// crate 已分散到多个 workspace：常量来源要在全部根一起找，
+// 否则 crate 搬走后 I3「逐字来源」会把合法条目误判成「常量被删」。
+const WORKSPACE_ROOTS = discoverWorkspaceRoots(ROOT);
 const read = (rel) => readFileSync(resolve(ROOT, rel), "utf8");
 
 /** 全部 `.rs`（用于解析常量定义与 I3 的逐字来源），排除构建产物与备份目录。 */
@@ -59,11 +62,11 @@ function collectRustSources() {
       if (st.isDirectory()) {
         walk(full);
       } else if (name.endsWith(".rs")) {
-        out.push([full.slice(SRC_TAURI.length + 1).replaceAll("\\", "/"), readFileSync(full, "utf8")]);
+        out.push([relative(ROOT, full).replaceAll("\\", "/"), readFileSync(full, "utf8")]);
       }
     }
   };
-  walk(SRC_TAURI);
+  for (const r of WORKSPACE_ROOTS) walk(r);
   return out;
 }
 

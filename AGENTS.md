@@ -102,7 +102,7 @@ docs/                        # 📝 文档。**除根目录白名单外，所有
 - 数据库操作：方向在 entity 层用 sea-orm，有复杂查询逻辑用 repository 模式
 - **rustfmt 格式化**：`cargo fmt` 必须通过，CI 强制检查，禁止提交未格式化的 Rust 代码
 - **分层检查策略**：多阶段方案**逐阶段完成时不跑全量**（用 `cargo check` + 定点 `cargo clippy -p <crate>`）；**全部阶段完成后**跑一次全量 `clippy --workspace` / `test --workspace`（即提交前那一次，CI 强制）
-- **增量编译加速**：`Cargo.toml` 已配置 `[profile.dev.build-override]` 优化第三方依赖编译，sccache 缓存 50G，避免全量重编
+- **增量编译加速**：`src-tauri/Cargo.toml` 配 `[profile.dev]`（`debug = "line-tables-only"` + `incremental = false` + `split-debuginfo = "unpacked"`）与 `[profile.dev.build-override]`（`codegen-units = 16`）。**L2 拆分后这 2 段必须在 8 个 workspace 根逐字各写一份** —— `[profile.*]` 只在「发起构建的那个 workspace 根」生效，写在成员里会被 cargo 忽略；子根缺它即退回 `debug = true` / `incremental = true`，实测多编出 879 个僵尸增量会话（68G）且同一依赖按 hash 重复编译（`axagent_harness` 36 份）。**sccache 未启用**（本机 PATH / `RUSTC_WRAPPER` / 缓存目录三处皆空，CI 亦未安装）—— 引用它当缓解项前先确认机器状态，见 `PLAN-repo-split.md` §20.7
 
 ## 常用命令
 

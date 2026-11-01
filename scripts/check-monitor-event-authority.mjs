@@ -4,7 +4,7 @@
 // 门 A · 股票告警的事件名与 payload 单一权威对账
 //
 // ── 本门要钉住的历史缺陷（2026-10-14 评估）──
-//   发射点 `src-tauri/crates/analysis-engine/src/monitor.rs` 发的是字面量 `"stock-monitor-alert"`，
+//   发射点 `axagent-quant/crates/analysis-engine/src/monitor.rs` 发的是字面量 `"stock-monitor-alert"`，
 //   前端 `PriceAlertPanel` 听的是 `price-alert-triggered`，而两头之间唯一那份完整实现
 //   （`src-tauri/src/init/monitor_emitter.rs`）全仓零构造点 —— 现役桥只做 `app.emit`。
 //   结果：告警真的算出来了，但没人收；`price_alerts.is_triggered` 无人回写；
@@ -50,24 +50,27 @@ import { fileURLToPath } from "node:url";
 
 // 复用落地门的剥离器，不再抄第三份（那两条判据的存在理由见 check-panel-var-landing.mjs 头）。
 import { stripComments, stripTestModules } from "./check-panel-var-landing.mjs";
+import { crateRepoRel, discoverWorkspaceRoots, repoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由「文件不可读」主动报红）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
 
 /** 生产源文口径：`.rs` 先剥注释再剥 `#[cfg(test)]` 块；TS/TSX 原样（与落地门同口径）。 */
 const prod = (rel) => (rel.endsWith(".rs") ? stripTestModules(stripComments(read(rel))) : read(rel));
 
-const MONITOR_RS = "src-tauri/crates/analysis-engine/src/monitor.rs";
-const EVENT_NAMES_RS = "src-tauri/crates/harness/src/event_names.rs";
+const MONITOR_RS = crateRel("analysis-engine", "src/monitor.rs");
+const EVENT_NAMES_RS = "axagent-core/crates/harness/src/event_names.rs";
 const PANEL_TSX = "src/components/stock-analysis/PriceAlertPanel.tsx";
 const TYPES_TS = "src/types/stock-analysis.ts";
 const EVENTS_TS = "src/types/generated/events.ts";
 const STOCK_ANALYSIS_RS = "src-tauri/src/commands/stock_analysis.rs";
 // 阶段 G 的第三条链：组合级信号（跨股聚合器 → `RealtimeMonitor` → 组合看板）
-const AGGREGATOR_RS = "src-tauri/crates/analysis-engine/src/cross_stock_aggregator.rs";
+const AGGREGATOR_RS = crateRel("analysis-engine", "src/cross_stock_aggregator.rs");
 const PORTFOLIO_PANEL_TSX = "src/components/stock-analysis/PortfolioDashboard.tsx";
 const SIGNAL_KEYS_MIN = 7;
-const DASHBOARD_RS = "src-tauri/crates/analysis-engine/src/portfolio_monitor.rs";
+const DASHBOARD_RS = crateRel("analysis-engine", "src/portfolio_monitor.rs");
 // 组合 dashboard 的 TS 侧权威住在 store 文件里（`PortfolioDashboard` 接口），不在 src/types 下
 const STORE_TS = "src/stores/feature/stockAnalysisStore.ts";
 /** `MonitorStatusDto` 九个键 —— 少一键就是「后端发了、前端读旧键」的半改态。 */
@@ -80,15 +83,18 @@ const OLD_ALERT_LITERAL = "stock-monitor-alert";
 const PAYLOAD_KEYS_MIN = 8;
 
 // 阶段 F 的第二条链：条件单触发（`conditional_orders` 表 → 行情回调 → 同一个发射器 trait）
-const CONDITION_ENGINE_RS = "src-tauri/crates/analysis-engine/src/conditional_order.rs";
+const CONDITION_ENGINE_RS = crateRel("analysis-engine", "src/conditional_order.rs");
 const CONDITION_PAYLOAD_KEYS_MIN = 9;
 
 /**
- * R1/R5 的扫描面：`src-tauri` 下的全部生产 `.rs`。
+ * R1/R5 的扫描面：`src-tauri/src` 与全部 workspace 的 `crates/` 下生产 `.rs`（根自动探测）。
  * 副本目录一律排除 —— `.worktrees/` `output/` `target/` 里的整棵树副本会把命中面撑大、
  * 把真正的「零命中」结论撑成假绿。
  */
-const RS_SCAN_DIRS = ["src-tauri/src", "src-tauri/crates"];
+const RS_SCAN_DIRS = [
+  "src-tauri/src",
+  ...discoverWorkspaceRoots(ROOT).map((r) => `${repoRel(ROOT, r)}/crates`),
+];
 const SKIP_DIR_NAMES = new Set(["target", "node_modules", ".worktrees", "output", ".git", "dist"]);
 
 function walkRels(dir) {

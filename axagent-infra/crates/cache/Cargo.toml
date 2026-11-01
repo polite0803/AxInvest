@@ -1,0 +1,12 @@
+[package]
+name = "axagent-cache"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+axagent-harness = { version = "3.0.0", path = "../../../axagent-core/crates/harness" }
+quick_cache = "0.4"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }

@@ -22,7 +22,7 @@ const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
 
 describe("工作流模板列表的代（version）呈现", () => {
   it("后端 DTO 带 version: i32", () => {
-    const rs = read("src-tauri/crates/harness/src/workflow_types.rs");
+    const rs = read("axagent-core/crates/harness/src/workflow_types.rs");
     const start = rs.indexOf("pub struct WorkflowTemplateResponse");
     expect(start, "应存在 WorkflowTemplateResponse").toBeGreaterThan(-1);
     expect(rs.slice(start, start + 1200)).toMatch(/pub version: i32,/);

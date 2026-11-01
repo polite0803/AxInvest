@@ -5,9 +5,10 @@ import { invoke, logIpcError } from "@/lib/invoke";
 import { Alert, App, Button, Card, Form, Input, InputNumber, Radio, Space, Switch, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { MasterKeyCard } from "./MasterKeyCard";
 
 // 本表单字段集 **逐字段核对** 过 `axagent_dao::config::DbConfig` 的全部 11 个字段
-// （`src-tauri/crates/dao/src/config.rs:11-35`），差集**只有一个**：
+// （`axagent-infra/crates/dao/src/config.rs:11-35`），差集**只有一个**：
 //
 //   `pg_password_enc`（后端内部的密文槽位，前端不认识、也不该认识）
 //
@@ -465,6 +466,9 @@ export function DatabaseSettings() {
           </>
         )}
       </Card>
+
+      {/* 主密钥（跨设备共享数据库）：导出 / 导入 master.key，与上方数据库配置独立成卡 */}
+      <MasterKeyCard />
     </Card>
   );
 }

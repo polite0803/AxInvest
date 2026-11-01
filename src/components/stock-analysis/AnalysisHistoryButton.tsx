@@ -195,7 +195,7 @@ function FilterChip({ label, active, onClick }: {
  * 修复（2026-10-17）：此前这里把 `r.status` **原样打印**，界面出现的是后端字面量
  * 英文小写串（`running` / `interrupted`）；读者既看不懂，也无从分辨
  * 「仍在跑」与「已中断」—— 用户据此报障「挂着好多过期记录状态为 running」。
- * 后端值域见 `src-tauri/crates/entities/src/stock_analyses.rs` 的 `status` 列注释。
+ * 后端值域见 `axagent-core/crates/entities/src/stock_analyses.rs` 的 `status` 列注释。
  */
 export function recordStatusKey(status: string): string | null {
   if (status === "running") { return "stockAnalysis.recordStatus.running"; }

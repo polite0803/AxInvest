@@ -10,7 +10,7 @@
  * | 载体 | 位置 | 谁消费它 |
  * |---|---|---|
  * | **rhai 脚本体** | `src-tauri/src/commands/data-quality.rhai` 的 `extract_conf(<abbr>_verdict)` | 逐节点诊断产出（`diagnostics` / `diagnostics_by_tier` 的键） |
- * | **Rust 登记表** | `src-tauri/crates/harness/src/holding_period.rs` 的 `DQ_ABBR_TO_BASE` | 种子的 40 键 `input_mapping` + `analyst_feedbacks` 写侧的 `node_id` |
+ * | **Rust 登记表** | `axagent-core/crates/harness/src/holding_period.rs` 的 `DQ_ABBR_TO_BASE` | 种子的 40 键 `input_mapping` + `analyst_feedbacks` 写侧的 `node_id` |
  * | **前端镜像表** | `src/lib/dataQualityDiagnosis.ts` 的 `EXPERT_ID_TO_DQ_ABBR` | 弹窗把诊断条目映射回分析师、反馈落库的 `node_id` 键形 |
  *
  * 漂移的症状（本仓已实测过同族形态）：
@@ -45,7 +45,7 @@ import process from "node:process";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const RHAI = "src-tauri/src/commands/data-quality.rhai";
-const RUST_REG = "src-tauri/crates/harness/src/holding_period.rs";
+const RUST_REG = "axagent-core/crates/harness/src/holding_period.rs";
 const TS_REG = "src/lib/dataQualityDiagnosis.ts";
 const WRITER = "src-tauri/src/commands/analyst_feedback.rs";
 /** 槽位下限：任一侧解析到的槽位数低于它 ⇒ 判据失效（不是「不一致」，是「没扫到」）。 */

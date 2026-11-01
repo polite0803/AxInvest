@@ -8,8 +8,8 @@
  *
  * | 通道 | 代码位置 | 整数的落点 |
  * |---|---|---|
- * | 顶层**标量** number 参数 | `src-tauri/crates/rt-workflow/src/work_engine/executors/code_executor.rs` 的 `Value::Number` 分支（先 `as_f64`） | f64 |
- * | 其余一切（顶层 map/array 参数的**每一层**、`json_parse()` 的产物） | `src-tauri/crates/harness/src/rhai_engine.rs` 的 `json_value_to_dynamic`（`as_i64` 优先） | **i64** |
+ * | 顶层**标量** number 参数 | `axagent-runtime/crates/rt-workflow/src/work_engine/executors/code_executor.rs` 的 `Value::Number` 分支（先 `as_f64`） | f64 |
+ * | 其余一切（顶层 map/array 参数的**每一层**、`json_parse()` 的产物） | `axagent-core/crates/harness/src/rhai_engine.rs` 的 `json_value_to_dynamic`（`as_i64` 优先） | **i64** |
  *
  * 于是 `type_of(x) == "f64"` 只在第一种形态下等价于「x 是个数」。拿它当嵌层值的数值判据 ⇒
  * **整数被静默判成缺席**（2026-10-04 实证：分支表 `days`/`volLookbackDays` 是整数 ⇒ 四档价带恒 0）。
@@ -34,7 +34,7 @@ import process from "node:process";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const RHAI_DIR = "src-tauri/src/commands";
-const HARNESS_ENGINE = "src-tauri/crates/harness/src/rhai_engine.rs";
+const HARNESS_ENGINE = "axagent-core/crates/harness/src/rhai_engine.rs";
 
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 

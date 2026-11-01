@@ -28,7 +28,7 @@ interface QuoteSnapshot {
 
 /**
  * 后端 `stock-quote-update` 的 payload —— 即 `QuoteChangeEvent` 的 serde 投影
- * （`src-tauri/crates/astock-data/src/realtime_quote.rs`，`rename_all = "camelCase"`）。
+ * （`axagent-quant/crates/astock-data/src/realtime_quote.rs`，`rename_all = "camelCase"`）。
  * 只声明消费端读到的字段；`f64` 的非有限值经 serde_json 序列化为 JSON `null`，故标 `| null`。
  */
 interface StockQuoteUpdatePayload {

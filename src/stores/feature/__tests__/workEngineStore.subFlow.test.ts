@@ -113,7 +113,7 @@ describe("subFlow 桶 —— 父子同 id 不互相覆盖", () => {
  */
 describe("生产端拼写锁", () => {
   const CMD = path.join(ROOT, "src-tauri/src/commands/work_engine.rs");
-  const DTO = path.join(ROOT, "src-tauri/crates/harness/src/workflow_types.rs");
+  const DTO = path.join(ROOT, "axagent-core/crates/harness/src/workflow_types.rs");
 
   it("commands 层两条载荷都发 sub_workflow_origin", () => {
     const body = fs.readFileSync(CMD, "utf8");

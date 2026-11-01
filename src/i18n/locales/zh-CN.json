@@ -2975,7 +2975,9 @@
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "当前处于实时流水线时间窗（23:50–02:10 / 17:50–18:10），请避开后再发起。",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "漏检补分析批次执行失败，请查看批次明细。",
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "查询漏检补分析批次历史失败，请稍后重试。",
-    "TRADING_DISABLED": "交易功能未启用，请先开启后再记录交易"
+    "TRADING_DISABLED": "交易功能未启用，请先开启后再记录交易",
+    "KEY_FROM_OTHER_DEVICE": "这段密文由其他设备的主密钥加密（密文指纹 {{cipherFingerprint}}，本机指纹 {{localFingerprint}}）—— 请到该设备「设置 → 数据库 → 主密钥」导出，再在本机导入。",
+    "MASTER_KEY_NOT_FOUND": "本机没有 master.key 文件，无法导出 / 导入主密钥。"
   },
   "errorBoundary": {
     "copied": "已复制",
@@ -5333,7 +5335,30 @@
       "typeLabel": "数据库类型",
       "typePostgres": "PostgreSQL（含 pgvector 向量支持）",
       "typeSqlite": "SQLite（本地文件，默认）",
-      "useSslLabel": "使用 SSL 连接"
+      "useSslLabel": "使用 SSL 连接",
+      "masterKey": {
+        "title": "主密钥（跨设备共享数据库）",
+        "fingerprintLabel": "本机主密钥指纹：{{fingerprint}}（与共享库密文头的指纹一致才能解密）",
+        "noKeyWarning": "本机没有 master.key，无法导出 / 导入。共享数据库中由其他设备加密的密文，请在其「设置 → 数据库 → 主密钥」导出后在本机导入。",
+        "loadFailed": "主密钥信息加载失败：{{error}}",
+        "exportButton": "导出",
+        "importButton": "导入",
+        "exportModalTitle": "导出主密钥",
+        "exportWarning": "以下为主密钥本体（64 位 hex），请通过安全渠道传递并妥善保管；持有它即可解密由本机加密的全部数据。",
+        "exportHexLabel": "主密钥指纹 {{fp}}，点击右侧图标复制：",
+        "importModalTitle": "导入主密钥",
+        "importWarning": "将覆盖本机 master.key，并重加密本机数据库配置中的密码；旧钥匙与配置会自动备份。完成后必须重启应用，重启前请勿保存新的密钥类数据。",
+        "importPlaceholder": "粘贴对方导出的 64 位 hex 主密钥",
+        "importEmpty": "请先粘贴主密钥 hex",
+        "importConfirmOk": "覆盖并导入",
+        "cancel": "取消",
+        "importDoneTitle": "主密钥已导入",
+        "importDoneFingerprints": "指纹：{{oldFp}} → {{newFp}}",
+        "backupPathLabel": "已备份：{{path}}",
+        "reencrypted": "本机数据库密码已用新钥匙重加密",
+        "restartRequired": "必须重启应用后新钥匙才生效；重启前请勿保存新的密钥类数据。",
+        "importNoop": "导入的钥匙与本机当前钥匙相同（指纹 {{fp}}），未做任何修改。"
+      }
     },
     "defaultConversationModel": "默认对话模型",
     "defaultConversationModelDesc": "新建对话时默认选择的模型，未设置时将沿用上个活跃对话的模型",
@@ -17366,12 +17391,6 @@
       "styleOnlySynthetic": "该风格暂无真实命中（{{count}} 条兜底候选已隐藏）",
       "horizonFailed": "该档位（{{horizon}}）本轮扫描失败：{{reason}}；其余档位不受影响",
       "bannerPoolFallbackOnly": "本次候选池 {{fallback}} 只全部来自内置样本池，未取到热股榜/行业龙头榜——结果不代表市场真实热门。",
-      "bannerGateBlocked": "长线门已拦截 {{count}} 只候选（财报首亏/连降 或 30 天内分析判卖出/减持）",
-      "gateReason": {
-        "firstLoss": "首亏：最新一期归母净利 ≤ 0",
-        "twoPeriodDecline": "连续两期净利同比下滑",
-        "analysisVeto": "分析端{{period}}档判「{{action}}」（30 天内）"
-      },
       "backtestWinrate": "胜率",
       "bannerDegraded": "资料风格 {{styles}} 因 as-of {{date}} 截断,已以降级模式输出,请低于非降级风格的可信度处理。",
       "boardScopeTip": "扫描板块范围：选具体板块（沪/深/创业/科创）时，候选池只保留该板块的股票；自动=按日轮动扫描一个板块、不限制候选池；全部=一次扫描四个板块（约 138 个请求）",

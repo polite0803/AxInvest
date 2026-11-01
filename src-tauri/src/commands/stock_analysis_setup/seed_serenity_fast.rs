@@ -120,7 +120,15 @@ const TEMPLATE_ID: &str = "serenity-screening-fast";
 // v3 (2026-10-30): 信封对齐 —— 本链共用的 scanner-brief / candidate-pool / strategy-scorer /
 // bottleneck-calc 的 `to_array` 已补 `{status,data,detail}` 解包（10-28 起 get_industry_ranking /
 // get_cls_flash / search_news 改发信封）。脚本经 include_str! 嵌入 CodeNode.code ⇒ 必须升版重建。
-const TEMPLATE_VERSION: i32 = 3;
+// v4 (2026-10-31): 阶段 2「候选池改趋势→全关联股票」—— 新增 t-constituents（
+// get_industry_constituents，按 brief.hot_industries 拉全成分股），c-candidate-pool 输入加
+// constituents、来源改「行业全成分股为主 / search_stock 降兜底」，pool 上限 20→1000、
+// labels 行业桶轮转截断 120。工具经 tools::register_all 注册 ⇒ 工作流 ToolResolver 即刻可达。
+// v5 (2026-11-01): 阶段 3「打分重构」—— 新增 t-factors（get_stock_factor 逐票 1 月涨跌幅）
+// + c-factor-score（rev_1m 横截面百分位，阶段 1 IC 普查唯一稳定有效因子）；
+// j-candidate-pick 改吃 labels_ranked（因子分降序）；c-data-verifier 注入 factor_scores
+// （verifier 内把 serenity_score 覆盖为因子分、质地分转存 quality_score、按分降序出票）。
+const TEMPLATE_VERSION: i32 = 5;
 
 pub(crate) async fn seed_serenity_fast_workflow_template(
     db: &sea_orm::DatabaseConnection,
@@ -327,14 +335,37 @@ pub(crate) async fn seed_serenity_fast_workflow_template(
     }
     nodes.push(search_node);
 
+    // t-constituents：各热门行业**全部成分股**（阶段 2「候选池改趋势→全关联股票」主体）。
+    // 输入整取 brief.hot_industries 数组（元素 {name, changePct, mainInflow, leader_name,
+    // leader_code}，工具端 serde alias 兼容两种键名）；工具按 精确→去Ⅱ归一→领涨股反查
+    // 三档对齐宇宙表词表，缺席组显式 matchMode=missing。检索失败不该阻断（continue_on_fail）
+    // —— 行业成分与 search_stock 互为冗余，池子还有领涨股一路。
+    let mut constituents_node = tool_node(
+        "t-constituents",
+        "行业成分股",
+        "get_industry_constituents",
+        "t-constituents",
+        680.0,
+        320.0,
+    );
+    if let WorkflowNode::Tool(t) = &mut constituents_node {
+        t.config
+            .input_mapping
+            .insert("industries".to_string(), "c-scanner-brief.result.hot_industries".to_string());
+        t.base.description = Some("按简报热门行业拉取全部成分股（确定性）".to_string());
+        t.base.continue_on_fail = true;
+    }
+    nodes.push(constituents_node);
+
     let pool_code = include_str!("../candidate-pool.rhai").to_string();
     let mut pool_map = HashMap::new();
     pool_map.insert("search_results".to_string(), "t-candidate-search.result".to_string());
     pool_map.insert("scanner_brief".to_string(), "c-scanner-brief.result".to_string());
+    pool_map.insert("constituents".to_string(), "t-constituents.result".to_string());
     nodes.push(code_node(
         "c-candidate-pool",
         "候选池",
-        "确定性候选池：检索命中 + 行业领涨股，去 ST/退市并截断",
+        "确定性候选池：行业全成分股 + 领涨股 + 检索兜底，去 ST/退市",
         &pool_code,
         pool_map,
         520.0,
@@ -351,19 +382,57 @@ pub(crate) async fn seed_serenity_fast_workflow_template(
         "t-candidate-search",
         "c-candidate-pool",
     ));
+    // 行业成分股通路：brief → t-constituents → c-candidate-pool
+    edges.push(edge("e-c-scanner-brief-t-constituents", "c-scanner-brief", "t-constituents"));
+    edges.push(edge("e-t-constituents-c-candidate-pool", "t-constituents", "c-candidate-pool"));
     // 直连边：满足端口公理（候选池另需 brief 的 hot_industries 领涨股）并确立调度依赖
     edges.push(edge("e-c-scanner-brief-c-candidate-pool", "c-scanner-brief", "c-candidate-pool"));
 
-    // 候选首选：`categories_var` 从候选池动态读 labels（空/读取失败时回落静态兜底项）。
-    // labels 不带序号 —— LlmClassifierExecutor 会自己加 "N. " 前缀
+    // ── 阶段 3（打分重构）：1 月反转因子取数 + 横截面打分 ──
+    // t-factors 输入整取池对象数组（get_stock_factor 的宽容归一兼容 {code,…} 形态）；
+    // c-factor-score 输出 score_map（verifier 覆盖 serenity_score 用）与 labels_ranked
+    // （j-candidate-pick 按「跌多分高」的重排序清单选首选）。
+    let mut factors_node =
+        tool_node("t-factors", "1月反转因子", "get_stock_factor", "t-factors", 680.0, 430.0);
+    if let WorkflowNode::Tool(t) = &mut factors_node {
+        t.config
+            .input_mapping
+            .insert("stock_codes".to_string(), "c-candidate-pool.result.stocks".to_string());
+        t.base.description =
+            Some("按候选池逐票取 1 月涨跌幅（rev_1m 因子原料，确定性）".to_string());
+        t.base.continue_on_fail = true;
+    }
+    nodes.push(factors_node);
+    let fscore_code = include_str!("../factor-score.rhai").to_string();
+    let mut fscore_map = HashMap::new();
+    fscore_map.insert("stocks".to_string(), "c-candidate-pool.result.stocks".to_string());
+    fscore_map.insert("factors".to_string(), "t-factors.result".to_string());
+    fscore_map.insert("labels".to_string(), "c-candidate-pool.result.labels".to_string());
+    nodes.push(code_node(
+        "c-factor-score",
+        "因子打分",
+        "1 月反转横截面百分位（阶段 1 IC 普查唯一稳定有效因子）",
+        &fscore_code,
+        fscore_map,
+        680.0,
+        540.0,
+        15,
+    ));
+    edges.push(edge("e-c-candidate-pool-t-factors", "c-candidate-pool", "t-factors"));
+    edges.push(edge("e-t-factors-c-factor-score", "t-factors", "c-factor-score"));
+    edges.push(edge("e-c-candidate-pool-c-factor-score", "c-candidate-pool", "c-factor-score"));
+
+    // 候选首选：`categories_var` 改吃因子重排序清单（阶段 3）——labels 按「跌多分高」降序，
+    // 缺席因子票殿后；labels 不带序号 —— LlmClassifierExecutor 会自己加 "N. " 前缀
     // （llm_classifier_executor.rs:80），脚本再带序号会出现双重编号。
     nodes.push(classifier_node(
         "j-candidate-pick",
         "候选首选",
         "从候选列表中选出与当前产业趋势最匹配、且最可能处于瓶颈环节的一只标的。\
+         列表已按 1 月反转因子分降序排列（跌得多靠前），趋势匹配度相近时优先选靠前的候选。\
          只输出候选项原文（形如 `600036 招商银行`），不要输出任何其它内容。",
         vec!["无候选".to_string()],
-        Some("c-candidate-pool.result.labels"),
+        Some("c-factor-score.result.labels_ranked"),
         "c-candidate-pool.result.pool_text",
         Some("无候选"),
         None,
@@ -371,7 +440,7 @@ pub(crate) async fn seed_serenity_fast_workflow_template(
         520.0,
         540.0,
     ));
-    edges.push(edge("e-c-candidate-pool-j-candidate-pick", "c-candidate-pool", "j-candidate-pick"));
+    edges.push(edge("e-c-factor-score-j-candidate-pick", "c-factor-score", "j-candidate-pick"));
 
     // ═══════════════════════════════════════════════
     // 段 E：唯一生成 Agent（趋势识别 + 产业链拆解 + 候选筛选 一次完成）
@@ -670,6 +739,8 @@ pub(crate) async fn seed_serenity_fast_workflow_template(
         "a-candidate-mapper.result.candidates".to_string(),
     );
     dv_map.insert("candidates_raw".to_string(), "a-candidate-mapper.result".to_string());
+    // 阶段 3：因子分覆盖 serenity_score（verifier 内单点权威）+ 出票按因子分降序
+    dv_map.insert("factor_scores".to_string(), "c-factor-score.result.score_map".to_string());
     nodes.push(code_node(
         "c-data-verifier",
         "候选校验",

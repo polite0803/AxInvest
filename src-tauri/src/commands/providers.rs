@@ -24,9 +24,12 @@ fn active_key_error(e: AxAgentError) -> String {
     }
 }
 
-/// 解密提供商密钥行 —— 失败必须报 `PROVIDER_KEY_DECRYPT_FAILED`，不许塌进 `COMMON_INTERNAL`：
-/// 「内部错误」指不到凭证，而这类失败重试也不会变好（master key 与密文都不随重试改变），
-/// 用户唯一能做的动作是重新录入那一把密钥。
+/// 解密提供商密钥行 —— 失败必须按因归码，不许塌进 `COMMON_INTERNAL`：
+/// - v2 密文头指纹 ≠ 本机钥匙（密文由其他设备写入，多机共享库场景）⇒ `KEY_FROM_OTHER_DEVICE`，
+///   携带双方指纹参数；指引是「导入加密方设备的主密钥」（设置 → 数据库 → 主密钥），
+///   重试无意义、笼统的「重录」也不是唯一出路；
+/// - 其余（v1 遗留坏行 / 钥匙被换过 / 密文损坏）⇒ `PROVIDER_KEY_DECRYPT_FAILED`，
+///   这类失败重试也不会变好，用户唯一能做的动作是重新录入那一把密钥。
 ///
 /// 日志带 provider_id / key_id / 密文长度 / 当前 master key 指纹：2026-10-28 与 10-31 两次
 /// 现场都因为「不知道是哪一行、被哪把 key 加密」而无法结案（10-31 那次坏行在报错后被人重存覆盖）。
@@ -40,10 +43,19 @@ fn decrypt_provider_key(key_row: &ProviderKey, master_key: &[u8; 32]) -> Result<
             master_key_fp = %axagent_crypto::master_key_fingerprint(master_key),
             "提供商密钥解密失败: {e}"
         );
-        String::from(
-            ErrorResponse::new(provider_err::KEY_DECRYPT_FAILED)
-                .with_detail(format!("密钥行 {} 解密失败: {e}", key_row.id)),
-        )
+        if matches!(&e, AxAgentError::KeyFromOtherDevice { .. }) {
+            // 跨设备归因走统一映射（error.rs 的 from_axagent_error）：专属码 + 指纹翻译参数。
+            // 不许塌进 KEY_DECRYPT_FAILED —— 那个码的指引是「重录这一把」，对共享库场景是错的路标。
+            String::from(ErrorResponse::from_axagent_error(
+                e,
+                crate::commands::error::ErrorCategory::Unrecoverable,
+            ))
+        } else {
+            String::from(
+                ErrorResponse::new(provider_err::KEY_DECRYPT_FAILED)
+                    .with_detail(format!("密钥行 {} 解密失败: {e}", key_row.id)),
+            )
+        }
     })
 }
 
@@ -797,6 +809,13 @@ mod key_error_code_gate_tests {
         if src.matches("map_err(active_key_error)?").count() != 2 {
             gaps.push("取密钥的两站没都按码分支（fetch_remote_models / test_model）".to_string());
         }
+        // 跨设备密钥错误必须经统一映射分码（专属码 + 双方指纹翻译参数），
+        // 不许被改回笼统的 KEY_DECRYPT_FAILED —— 那个码的指引对共享库场景是错的路标。
+        if src.matches("ErrorResponse::from_axagent_error(").count() != 1 {
+            gaps.push(
+                "跨设备密钥错误必须经 from_axagent_error 分码（专属码 + 指纹参数）".to_string(),
+            );
+        }
         gaps
     }
 
@@ -828,6 +847,19 @@ mod key_error_code_gate_tests {
             "map_err(active_key_error)?",
             "map_err(|e| String::from(crate::commands::error::ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)))?",
         );
+        assert_ne!(
+            broken,
+            include_str!("providers.rs"),
+            "负控锚点腐烂：替换没生效，本用例等于没通电"
+        );
+        assert_eq!(decrypt_sites_lose_their_codes(&broken).len(), 1);
+    }
+
+    /// 负控 C：把跨设备分支的统一映射改回就地 new ⇒ 只有第四条守卫翻红（证明四条各管各的）。
+    #[test]
+    fn gate_is_live_for_foreign_key_mapping() {
+        let broken = include_str!("providers.rs")
+            .replace("ErrorResponse::from_axagent_error(", "ErrorResponse::new(");
         assert_ne!(
             broken,
             include_str!("providers.rs"),

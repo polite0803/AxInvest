@@ -412,7 +412,7 @@ const NEUTRAL_VERDICT_PATTERN = /中性|中立|震荡|横盘|观望|持平|不�
 
 /**
  * 逐档 VERDICT 契约因子键 —— 值域严格对齐后端唯一权威
- * `src-tauri/crates/harness/src/holding_period.rs` 的 `VERDICT_COMMON_FIELDS`
+ * `axagent-core/crates/harness/src/holding_period.rs` 的 `VERDICT_COMMON_FIELDS`
  * （去掉 direction/confidence 两个结论字段）+ `VERDICT_FACTORS`（11 个逐档因子）。
  *
  * 此处只做「契约键 → 展示标签」映射，**不新造因子定义**（禁区 12）；后端调整因子集时

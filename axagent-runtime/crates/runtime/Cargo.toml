@@ -1,0 +1,85 @@
+[package]
+name = "axagent-runtime"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axagent-agent = { version = "3.0.0", path = "../../../axagent-ai/crates/agent" }
+axagent-cache = { version = "3.0.0", path = "../../../axagent-infra/crates/cache" }
+axagent-crypto = { version = "3.0.0", path = "../../../axagent-infra/crates/crypto" }
+axagent-dao = { version = "3.0.0", path = "../../../axagent-infra/crates/dao" }
+axagent-disk-cache = { version = "3.0.0", path = "../../../axagent-core/crates/disk-cache" }
+axagent-document-parser = { version = "3.0.0", path = "../../../axagent-infra/crates/document-parser" }
+axagent-entities = { version = "3.0.0", path = "../../../axagent-core/crates/entities" }
+axagent-gateway = { path = "../gateway" }
+axagent-harness = { version = "3.0.0", path = "../../../axagent-core/crates/harness" }
+axagent-kit = { version = "3.0.0", path = "../../../axagent-kit/crates/kit" }
+axagent-mcp = { version = "3.0.0", path = "../../../axagent-ai/crates/mcp" }
+axagent-migration = { version = "3.0.0", path = "../../../axagent-infra/crates/migration" }
+axagent-orchestrator = { version = "3.0.0", path = "../../../axagent-ai/crates/orchestrator" }
+axagent-plugins = { version = "3.0.0", path = "../../../axagent-plugins/crates/plugins" }
+axagent-prompt-guard = { version = "3.0.0", path = "../../../axagent-ai/crates/prompt-guard" }
+axagent-providers = { version = "3.0.0", path = "../../../axagent-ai/crates/providers" }
+axagent-rt-messaging = { path = "../rt-messaging" }
+axagent-rt-theme = { version = "3.0.0", path = "../../../axagent-core/crates/rt-theme" }
+axagent-rt-webhook = { version = "3.0.0", path = "../../../axagent-infra/crates/rt-webhook" }
+axagent-rt-workflow = { path = "../rt-workflow" }
+axagent-runtime-core = { path = "../runtime-core" }
+axagent-search = { version = "3.0.0", path = "../../../axagent-infra/crates/search" }
+axagent-storage = { version = "3.0.0", path = "../../../axagent-infra/crates/storage" }
+axagent-telemetry = { version = "3.0.0", path = "../../../axagent-infra/crates/telemetry" }
+axagent-tools = { path = "../tools" }
+axagent-trajectory = { version = "3.0.0", path = "../../../axagent-ai/crates/trajectory" }
+axum = "0.8"
+chrono = { workspace = true }
+dirs = "6"
+futures = "0.3"
+glob = "0.3"
+hex = { workspace = true }
+parking_lot = "0.12"
+regex = "1"
+reqwest = { workspace = true }
+sea-orm = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.11"
+sysinfo = "0.39"
+thiserror = { workspace = true }
+tokio = { version = "1", features = [
+  "io-std",
+  "io-util",
+  "macros",
+  "process",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+# 信任锚用系统信任库：webpki-roots 0.26 线已无该判据的修复版（RUSTSEC-2026-0381，0.26.11 是该线最后一版）
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tower-http = { version = "0.7", features = ["cors"] }
+tracing = "0.1"
+urlencoding = "2"
+uuid = { version = "1.6.1", features = ["v4"] }
+walkdir = "2"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+portable-pty = "0.8"
+
+[[bin]]
+name = "mcp-test-server"
+path = "src/bin/mcp_test_server.rs"
+test = false
+doctest = false
+
+[dev-dependencies]
+axagent-search = { version = "3.0.0", path = "../../../axagent-infra/crates/search" }
+tempfile = "3"
+
+[lints]
+workspace = true

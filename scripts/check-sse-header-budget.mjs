@@ -12,7 +12,7 @@
  * 还在按老短语匹配」。
  *
  * ── 权威是谁 ──
- * `src-tauri/crates/providers/src/stream_budget.rs` —— 首字节预算（软/硬两档）
+ * `axagent-ai/crates/providers/src/stream_budget.rs` —— 首字节预算（软/硬两档）
  * 的**唯一**定义处（AGENTS.md 规则 12：共享契约的权威定义在 harness/implementor
  * 一侧，其余面一律被对账）。默认值常量与 `resolve_header_budget` 都只此一份。
  *
@@ -42,10 +42,13 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { discoverWorkspaceRoots } from "./lib/workspace-roots.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
-const SRC_TAURI = resolve(root, "src-tauri");
+// crate 已分散到多个 Cargo workspace：权威唯一性（B1）与消费点（B4）都要覆盖全部根，
+// 键按各自 workspace 根取相对路径（`crates/providers/...` 仍与 CONSUMERS 同型）。
+const WORKSPACE_ROOTS = discoverWorkspaceRoots(root);
 
 const SKIP_DIRS = new Set([
   "target",
@@ -101,8 +104,10 @@ function walk(dir, out = []) {
 
 function loadSources() {
   const sources = new Map();
-  for (const file of walk(SRC_TAURI)) {
-    sources.set(relative(SRC_TAURI, file).replace(/\\/g, "/"), readFileSync(file, "utf8"));
+  for (const rootDir of WORKSPACE_ROOTS) {
+    for (const file of walk(rootDir)) {
+      sources.set(relative(rootDir, file).replace(/\\/g, "/"), readFileSync(file, "utf8"));
+    }
   }
   return sources;
 }

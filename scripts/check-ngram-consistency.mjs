@@ -47,22 +47,25 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import crypto from "node:crypto";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
 // ⚠ 这两个路径在 2026-09-16 变过：定义原先住在 migrations/v227_cjk_fts.rs，
 // 后来提取到 dao 根的 cjk_ngram.rs（否则 reconcile 会反向依赖 migrations/，
 // 导致「删除版本化迁移」这件事做不成）。改路径时别只改一处。
 const RUST_NGRAM_DEF = join(
   ROOT,
-  "src-tauri/crates/dao/src/cjk_ngram.rs",
+  `${crateRel("dao", "src/cjk_ngram.rs")}`,
 );
 const SQL_TEMPLATE = join(
   ROOT,
-  "src-tauri/crates/dao/src/sql/ax_cjk_ngram.sql",
+  `${crateRel("dao", "src/sql/ax_cjk_ngram.sql")}`,
 );
 const FIXTURE = join(
   ROOT,
-  "src-tauri/crates/search/tests/fixtures/ngram_cases.json",
+  `${crateRel("search", "tests/fixtures/ngram_cases.json")}`,
 );
 
 /** 与 Rust 侧 `ngram_consistency.rs` 保持同样的下限，防 fixture 被清空后假绿。 */

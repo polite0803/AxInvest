@@ -70,7 +70,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LOCALE_DIR = path.join(ROOT, "src/i18n/locales");
-const HOLDING = path.join(ROOT, "src-tauri/crates/harness/src/holding_period.rs");
+const HOLDING = path.join(ROOT, "axagent-core/crates/harness/src/holding_period.rs");
 const E2E_SPEC = path.join(ROOT, "e2e/stock-reflection-four-horizon.spec.ts");
 
 /** **唯一**档名键族的四条完整路径（超短 / 短 / 中 / 长）。

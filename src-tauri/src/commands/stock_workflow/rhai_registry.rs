@@ -162,7 +162,7 @@ mod tests {
     ///
     /// 孤儿脚本（无 seed / 无 DB 节点，如 `bottleneck-calc.rhai`）同样纳入：
     /// 它们仍会被测试或手工路径加载，函数集必须同样完整。
-    const PRODUCTION_SCRIPTS: [(&str, &str); 24] = [
+    const PRODUCTION_SCRIPTS: [(&str, &str); 27] = [
         ("analyst-brief", include_str!("../analyst-brief.rhai")),
         ("bottleneck-calc", include_str!("../bottleneck-calc.rhai")),
         // 快速趋势智选的两条确定性脚本（2026-10-24 纳入本清单）：
@@ -170,6 +170,13 @@ mod tests {
         // 漏登记会让「脚本调了没注册的函数」在这两条上回到运行期才报错的原点。
         ("candidate-assembler", include_str!("../candidate-assembler.rhai")),
         ("trend-split", include_str!("../trend-split.rhai")),
+        // 阶段 2「候选池改趋势→全关联股票」（2026-10-31 纳入）：
+        // candidate-pool（快速链候选池）、industry-tags（原链趋势行业标签聚合）。
+        // 两条都是纯确定性脚本，零宿主函数依赖 —— 纳入清单让判据面完整覆盖两链。
+        ("candidate-pool", include_str!("../candidate-pool.rhai")),
+        ("industry-tags", include_str!("../industry-tags.rhai")),
+        // 阶段 3「打分重构」（2026-11-01 纳入）：rev_1m 横截面打分，两链共用。
+        ("factor-score", include_str!("../factor-score.rhai")),
         ("consistency-check", include_str!("../consistency-check.rhai")),
         ("data-quality", include_str!("../data-quality.rhai")),
         ("data-verifier", include_str!("../data-verifier.rhai")),
@@ -214,7 +221,10 @@ mod tests {
     ///
     /// ⚠ 新增「服务 AxInvest 脚本」的注册点时**必须加到本清单**，否则又成盲区。
     const AXINVEST_REGISTRATION_SOURCES: [(&str, &str); 3] = [
-        ("harness::rhai_engine", include_str!("../../../crates/harness/src/rhai_engine.rs")),
+        (
+            "harness::rhai_engine",
+            include_str!("../../../../axagent-core/crates/harness/src/rhai_engine.rs"),
+        ),
         ("rhai_pm", include_str!("rhai_pm.rs")),
         ("rhai_bottleneck", include_str!("rhai_bottleneck.rs")),
     ];
@@ -228,11 +238,16 @@ mod tests {
     /// `tools::rhai_engine` —— 这一格（「识别为宿主函数，但不在 AxInvest 注册点里」）
     /// 正是修复前缺陷的本体形态，判据必须能落在它上面。
     const OTHER_REGISTRATION_SOURCES: [(&str, &str); 3] = [
-        ("tools::rhai_engine", include_str!("../../../crates/tools/src/rhai_engine.rs")),
-        ("quant::script", include_str!("../../../crates/quant/src/script.rs")),
+        (
+            "tools::rhai_engine",
+            include_str!("../../../../axagent-runtime/crates/tools/src/rhai_engine.rs"),
+        ),
+        ("quant::script", include_str!("../../../../axagent-quant/crates/quant/src/script.rs")),
         (
             "rt-workflow::engine",
-            include_str!("../../../crates/rt-workflow/src/work_engine/engine/mod.rs"),
+            include_str!(
+                "../../../../axagent-runtime/crates/rt-workflow/src/work_engine/engine/mod.rs"
+            ),
         ),
     ];
 
@@ -2338,6 +2353,7 @@ mod tests {
                 ("tool_calls_made", serde_json::json!(null)),
                 ("industry_pe_mean", serde_json::json!(null)),
                 ("industry_pe_std", serde_json::json!(null)),
+                ("factor_scores", serde_json::json!(null)),
             ],
         );
         let arr = out.as_array().expect("data-verifier 必须返回数组");
@@ -2350,6 +2366,286 @@ mod tests {
         let y = arr.iter().find(|c| c["stock_code"] == "Y").expect("缺 Y");
         assert_eq!(y["serenity_score"].as_f64(), Some(70.0), "bottleneck 分支同样不得丢分");
         assert_eq!(y["data_verification"]["status"], "no_data");
+    }
+
+    /// 2026-10-31 阶段0：`bottleneck_composite`（未折价的原始复合分）必须与 `serenity_score`
+    ///（折价后最终分）分列透传 —— 分层报表与因子 IC 要拿复合分当第二个 x 轴。
+    /// 回归锁：若有人删掉 candidate-assembler 的 `bottleneck_composite` 输出，本测试红。
+    #[test]
+    fn candidate_assembler_persists_bottleneck_composite_alongside_serenity_score() {
+        let empty = serde_json::json!({"computed_nodes": []});
+        let out = run_production_script(
+            "candidate-assembler",
+            &[
+                (
+                    "scanner_raw",
+                    serde_json::json!({"trends": [{
+                        "trend_name": "t", "strategy_type": "bottleneck", "confidence": 50.0,
+                        "candidates": [
+                            {"stock_code": "DET", "stock_name": "det", "serenity_score": 90},
+                            {"stock_code": "LLM", "stock_name": "llm"}
+                        ]
+                    }]}),
+                ),
+                (
+                    "strategy_trend1",
+                    serde_json::json!({"computed_nodes": [{
+                        "stock_code": "DET", "stock_name": "det", "node_name": "det",
+                        "bottleneck_composite": 72.0, "strategy_type": "bottleneck",
+                        "data_reliability": "partially_verified"
+                    }]}),
+                ),
+                ("strategy_trend2", empty.clone()),
+                ("strategy_trend3", empty.clone()),
+                ("strategy_trend4", empty.clone()),
+                ("strategy_trend5", empty.clone()),
+                ("consistency", serde_json::json!({"consistency_score": 100.0})),
+                ("strategy_type", serde_json::json!("bottleneck")),
+            ],
+        );
+        let arr = out["candidates"].as_array().expect("candidates 必须是数组");
+        let det = arr.iter().find(|c| c["stock_code"] == "DET").expect("缺 DET");
+        let llm = arr.iter().find(|c| c["stock_code"] == "LLM").expect("缺 LLM");
+        // 确定性评分：复合分 72 原样落库（serenity_score 是折价后分，partially_verified 不折价 ⇒ 也是 72）
+        assert_eq!(
+            det["bottleneck_composite"].as_f64(),
+            Some(72.0),
+            "复合分必须原样透传，不得用 serenity_score 顶替"
+        );
+        // 无确定性评分：复合分缺席（不得用 serenity_score 填 0 冒充）
+        assert!(llm["bottleneck_composite"].as_f64().is_none(), "无复合分应缺席而非填 0: {llm}");
+    }
+
+    /// 2026-10-31 阶段0：`data-verifier` 两个分支都必须透传 `bottleneck_composite`，
+    /// 否则候选组装端补的字段在验证节点被丢弃 ⇒ 落库 pick_data 仍无该键。
+    #[test]
+    fn data_verifier_passes_bottleneck_composite_through() {
+        let out = run_production_script(
+            "data-verifier",
+            &[
+                (
+                    "candidates",
+                    serde_json::json!([
+                        {"stock_code": "B", "stock_name": "B", "strategy_type": "bottleneck",
+                         "serenity_score": 72.0, "confidence": 60.0,
+                         "bottleneck_composite": 80.0, "data_reliability": "partially_verified"},
+                        {"stock_code": "P", "stock_name": "P", "strategy_type": "policy",
+                         "serenity_score": 77.0, "confidence": 66.0,
+                         "bottleneck_composite": 70.0, "data_reliability": "llm_estimated"}
+                    ]),
+                ),
+                ("candidates_direct", serde_json::json!(null)),
+                ("candidates_raw", serde_json::json!(null)),
+                ("tool_calls_made", serde_json::json!(null)),
+                ("industry_pe_mean", serde_json::json!(null)),
+                ("industry_pe_std", serde_json::json!(null)),
+                ("factor_scores", serde_json::json!(null)),
+            ],
+        );
+        let arr = out.as_array().expect("data-verifier 必须返回数组");
+        let b = arr.iter().find(|c| c["stock_code"] == "B").expect("缺 B");
+        assert_eq!(
+            b["bottleneck_composite"].as_f64(),
+            Some(80.0),
+            "bottleneck 分支必须透传复合分: {b}"
+        );
+        let p = arr.iter().find(|c| c["stock_code"] == "P").expect("缺 P");
+        assert_eq!(
+            p["bottleneck_composite"].as_f64(),
+            Some(70.0),
+            "非 bottleneck 分支也必须透传: {p}"
+        );
+    }
+
+    // ═══ 阶段 3「打分重构」（2026-11-01）：factor-score + data-verifier 因子覆盖 ═══
+
+    /// factor-score：横截面反转方向 —— chg1m 最小（跌最多）者分最高、秩 1、labels_ranked 首位；
+    /// 因子缺席票不进 score_map、殿后保原序。
+    #[test]
+    fn factor_score_cross_sectional_ranking_direction() {
+        let pool = serde_json::json!([
+            {"code": "600001", "name": "甲"},
+            {"code": "600002", "name": "乙"},
+            {"code": "600003", "name": "丙"},
+            {"code": "600004", "name": "丁"}
+        ]);
+        // 丁不在 factors 里（新股不足 22 行）——缺席票。
+        let factors = serde_json::json!({
+            "status": "ok",
+            "data": [
+                {"stockCode": "600001", "chg1m": 0.05},
+                {"stockCode": "600002", "chg1m": -0.12},
+                {"stockCode": "600003", "chg1m": 0.05}
+            ],
+            "missing": ["600004"]
+        });
+        let labels = serde_json::json!(["600001 甲", "600002 乙", "600003 丙", "600004 丁"]);
+        let out = run_production_script(
+            "factor-score",
+            &[("stocks", pool), ("factors", factors), ("labels", labels)],
+        );
+
+        let sm = out["score_map"].as_object().expect("缺 score_map");
+        // 600002 跌最多 ⇒ 秩 1、满分 100；600001 与 600003 并列（同为 +5%）按池序取秩。
+        // 百分位公式 n>1 时最末秩 = 0 分（n=1 才中性 50）——600001=50、600003=0。
+        assert_eq!(sm["600002"]["score"].as_f64(), Some(100.0), "{sm:?}");
+        assert_eq!(sm["600002"]["rank"].as_i64(), Some(1), "{sm:?}");
+        assert_eq!(sm["600001"]["score"].as_f64(), Some(50.0), "{sm:?}");
+        assert_eq!(sm["600001"]["rank"].as_i64(), Some(2), "{sm:?}");
+        assert_eq!(sm["600003"]["score"].as_f64(), Some(0.0), "{sm:?}");
+        assert_eq!(sm["600003"]["rank"].as_i64(), Some(3), "{sm:?}");
+        assert!(
+            !sm.contains_key("600004"),
+            "缺席票不得进 score_map（不得给中性分冒充已打分）: {sm:?}"
+        );
+
+        let ranked = out["ranked_stocks"].as_array().expect("缺 ranked_stocks");
+        let codes: Vec<&str> = ranked.iter().map(|s| s["code"].as_str().unwrap_or("")).collect();
+        assert_eq!(codes.first(), Some(&"600002"), "跌最多者必须殿前: {codes:?}");
+        assert_eq!(codes.last(), Some(&"600004"), "缺席票必须殿后: {codes:?}");
+
+        let lr = out["labels_ranked"].as_array().expect("缺 labels_ranked");
+        assert_eq!(lr[0], "600002 乙", "labels_ranked 首位必须是因子分最高者: {lr:?}");
+        assert_eq!(
+            lr.last().and_then(|v| v.as_str()),
+            Some("600004 丁"),
+            "缺席 label 必须殿后: {lr:?}"
+        );
+
+        let stats = &out["stats"];
+        assert_eq!(stats["scored"].as_i64(), Some(3));
+        assert_eq!(stats["absent"].as_i64(), Some(1), "{stats}");
+        assert_eq!(stats["factor"].as_str(), Some("rev_1m"));
+    }
+
+    /// factor-score：池/因子皆为信封包装（原链 t-constituents 分组嵌套 + t-factors 信封）也能归一。
+    #[test]
+    fn factor_score_normalizes_envelope_wrapped_inputs() {
+        let stocks = serde_json::json!({
+            "status": "ok",
+            "data": [
+                {"industry": "半导体", "stocks": [{"stockCode": "300001", "stockName": "A"}]},
+                {"industry": "医药", "stocks": [{"stockCode": "600001", "stockName": "B"}]}
+            ]
+        });
+        let factors = serde_json::json!({
+            "status": "ok",
+            "data": [
+                {"stockCode": "300001", "chg1m": -0.03},
+                {"stockCode": "600001", "chg1m": 0.08}
+            ],
+            "missing": []
+        });
+        let out = run_production_script(
+            "factor-score",
+            &[("stocks", stocks), ("factors", factors), ("labels", serde_json::json!(null))],
+        );
+        let sm = out["score_map"].as_object().expect("缺 score_map");
+        assert_eq!(sm.len(), 2, "分组嵌套信封必须下钻 stocks: {sm:?}");
+        assert_eq!(sm["300001"]["score"].as_f64(), Some(100.0), "{sm:?}");
+        // n=2 百分位：末秩 0 分（跌得少者垫底），不是中性 50。
+        assert_eq!(sm["600001"]["score"].as_f64(), Some(0.0), "{sm:?}");
+    }
+
+    /// data-verifier 阶段 3：有 factor_scores 时 serenity_score 被因子分覆盖（原值转存
+    /// quality_score）、缺席票封顶 54 + factor_absent 标记、输出按最终分降序。
+    #[test]
+    fn data_verifier_factor_scores_override_and_rank() {
+        let out = run_production_script(
+            "data-verifier",
+            &[
+                (
+                    "candidates",
+                    serde_json::json!([
+                        {"stock_code": "F", "stock_name": "F", "strategy_type": "bottleneck",
+                         "serenity_score": 90.0, "confidence": 80.0,
+                         "bottleneck_composite": 90.0, "data_reliability": "partially_verified"},
+                        {"stock_code": "A", "stock_name": "A", "strategy_type": "bottleneck",
+                         "serenity_score": 85.0, "confidence": 70.0,
+                         "bottleneck_composite": 85.0, "data_reliability": "partially_verified"},
+                        {"stock_code": "X", "stock_name": "X", "strategy_type": "policy",
+                         "serenity_score": 70.0, "confidence": 60.0,
+                         "bottleneck_composite": 70.0, "data_reliability": "llm_estimated"}
+                    ]),
+                ),
+                ("candidates_direct", serde_json::json!(null)),
+                ("candidates_raw", serde_json::json!(null)),
+                ("tool_calls_made", serde_json::json!(null)),
+                ("industry_pe_mean", serde_json::json!(null)),
+                ("industry_pe_std", serde_json::json!(null)),
+                (
+                    "factor_scores",
+                    serde_json::json!({
+                        "A": {"score": 100.0, "chg1m": -0.12, "rank": 1},
+                        "F": {"score": 40.0, "chg1m": 0.05, "rank": 2}
+                    }),
+                ),
+            ],
+        );
+        let arr = out.as_array().expect("data-verifier 必须返回数组");
+        assert_eq!(arr.len(), 3, "{arr:?}");
+        // 出票顺序 = 因子分降序：A(100) → F(40) → X(缺席封顶 54)。
+        let codes: Vec<&str> = arr.iter().map(|c| c["stock_code"].as_str().unwrap_or("")).collect();
+        assert_eq!(codes, vec!["A", "X", "F"], "因子分降序、缺席沉底: {codes:?}");
+
+        let a = &arr[0];
+        assert_eq!(a["serenity_score"].as_f64(), Some(100.0), "{a}");
+        assert_eq!(a["factor_score"].as_f64(), Some(100.0), "{a}");
+        assert_eq!(a["quality_score"].as_f64(), Some(85.0), "原分必须转存参考字段: {a}");
+
+        let f = &arr[2];
+        assert_eq!(f["serenity_score"].as_f64(), Some(40.0), "{f}");
+        assert_eq!(f["quality_score"].as_f64(), Some(90.0), "{f}");
+
+        let x = &arr[1];
+        assert_eq!(
+            x["serenity_score"].as_f64(),
+            Some(54.0),
+            "缺席票 70 必须被封顶 54（不得冒充已打分票）: {x}"
+        );
+        assert_eq!(x["factor_absent"], serde_json::json!(true), "{x}");
+        assert_eq!(x["quality_score"].as_f64(), Some(70.0), "{x}");
+    }
+
+    /// data-verifier：factor_scores 缺席（null / 空 map / 解析失败）时输出与旧版一致
+    /// ——不覆盖、不封顶、不重排。
+    #[test]
+    fn data_verifier_without_factor_scores_unchanged() {
+        let candidates = serde_json::json!([
+            {"stock_code": "L", "stock_name": "L", "strategy_type": "bottleneck",
+             "serenity_score": 85.0, "confidence": 70.0,
+             "bottleneck_composite": 85.0, "data_reliability": "partially_verified"},
+            {"stock_code": "H", "stock_name": "H", "strategy_type": "policy",
+             "serenity_score": 60.0, "confidence": 50.0,
+             "bottleneck_composite": 60.0, "data_reliability": "llm_estimated"}
+        ]);
+        let base_vars = |fs: serde_json::Value| {
+            vec![
+                ("candidates", candidates.clone()),
+                ("candidates_direct", serde_json::json!(null)),
+                ("candidates_raw", serde_json::json!(null)),
+                ("tool_calls_made", serde_json::json!(null)),
+                ("industry_pe_mean", serde_json::json!(null)),
+                ("industry_pe_std", serde_json::json!(null)),
+                ("factor_scores", fs),
+            ]
+        };
+        for fs in
+            [serde_json::json!(null), serde_json::json!({}), serde_json::json!("not-a-json-map")]
+        {
+            let out = run_production_script("data-verifier", &base_vars(fs.clone()));
+            let arr = out.as_array().expect("data-verifier 必须返回数组");
+            let l = arr.iter().find(|c| c["stock_code"] == "L").expect("缺 L");
+            let h = arr.iter().find(|c| c["stock_code"] == "H").expect("缺 H");
+            assert_eq!(l["serenity_score"].as_f64(), Some(85.0), "fs={fs:?}");
+            assert_eq!(h["serenity_score"].as_f64(), Some(60.0), "fs={fs:?}");
+            assert!(
+                l["quality_score"].is_null()
+                    && l["factor_absent"].is_null()
+                    && l["factor_score"].is_null(),
+                "缺席口径不得写入任何新字段: {l}"
+            );
+        }
     }
 
     /// P1-4③：RSI>75 且动量腿为负 ⇒ f12 有效权重升为 0.15（下限），并留 R-F12-OVERBOUGHT 痕。
@@ -2382,5 +2678,177 @@ mod tests {
             hit["detail"].as_str().unwrap_or_default().contains("0.15"),
             "留痕须给出升后的权重: {hit}"
         );
+    }
+
+    // ══════════ 2026-10-31 阶段 2「候选池改趋势→全关联股票」══════════
+
+    /// 快速链候选池：行业全成分股为主体来源、search_stock 降兜底、
+    /// 领涨股去重并入、missing 行业显式进 unmatched_industries。
+    #[test]
+    fn candidate_pool_constituents_dominate_and_sources_are_honest() {
+        let constituents = serde_json::json!({
+            "status": "ok",
+            "data": [
+                {"industry": "半导体", "matchedIndustry": "半导体", "matchMode": "exact",
+                 "stocks": [
+                     {"stockCode": "002049", "stockName": "紫光国微"},
+                     {"stockCode": "688981", "stockName": "中芯国际"}
+                 ]},
+                {"industry": "银行", "matchedIndustry": null, "matchMode": "missing",
+                 "stocks": []}
+            ],
+            "detail": "universe_total=6165 universe_with_industry=4491"
+        })
+        .to_string();
+        let search_results = serde_json::json!({
+            "status": "ok",
+            "data": [{"code": "600519", "name": "贵州茅台"}]
+        })
+        .to_string();
+        let scanner_brief = serde_json::json!({
+            "hot_industries": [
+                {"name": "半导体", "changePct": 3.2, "mainInflow": 1.0e8,
+                 "leader_name": "紫光国微", "leader_code": "002049"}
+            ]
+        });
+
+        let out = run_production_script(
+            "candidate-pool",
+            &[
+                ("constituents", serde_json::json!(constituents)),
+                ("search_results", serde_json::json!(search_results)),
+                ("scanner_brief", scanner_brief),
+            ],
+        );
+
+        assert_eq!(
+            out["count"].as_i64(),
+            Some(3),
+            "成分2 + 检索1（领涨股002049与成分去重并入）: {out}"
+        );
+        assert_eq!(out["total_after_clean"].as_i64(), Some(3), "1000 上限内不得截断");
+        assert_eq!(out["label_truncated"].as_bool(), Some(false));
+
+        let sources = out["sources"].as_array().expect("sources 必须是数组");
+        for s in ["industry_constituents", "industry_leader", "search_stock"] {
+            assert!(
+                sources.iter().any(|v| v.as_str() == Some(s)),
+                "sources 必须如实含 {s}: {sources:?}"
+            );
+        }
+
+        let unmatched = out["unmatched_industries"].as_array().expect("缺席行业必须显式列出");
+        assert_eq!(unmatched.len(), 1, "missing 行业必须缺席声明: {unmatched:?}");
+        assert_eq!(unmatched[0].as_str(), Some("银行"));
+
+        let stocks = out["stocks"].as_array().expect("stocks 必须是数组");
+        assert_eq!(stocks[0]["code"].as_str(), Some("002049"));
+        assert_eq!(stocks[0]["industry"].as_str(), Some("半导体"), "成分股必须带行业出处");
+
+        let pool_text = out["pool_text"].as_str().unwrap_or_default();
+        assert!(pool_text.contains("【半导体】"), "pool_text 须按行业分组: {pool_text}");
+        assert!(pool_text.contains("银行"), "缺席行业也须在 pool_text 点出: {pool_text}");
+        assert!(pool_text.contains("600519"), "兜底来源须入池: {pool_text}");
+    }
+
+    /// 快速链候选池：ST/退市清洗、labels 行业桶轮转交错（截断时保行业多样性）。
+    #[test]
+    fn candidate_pool_filters_st_and_interleaves_labels_across_industries() {
+        // 三个行业各 2 只 + 1 只 ST（清洗掉）。LABELS_CAP=120 内不触发截断，
+        // 但轮转序必须成立：首个 label 依次来自 A/B/C 桶而非 A 桶独占头部。
+        let mut semis = vec![
+            serde_json::json!({"stockCode": "002049", "stockName": "紫光国微"}),
+            serde_json::json!({"stockCode": "688981", "stockName": "中芯国际"}),
+        ];
+        semis.push(serde_json::json!({"stockCode": "300001", "stockName": "ST特检"}));
+        let mk = |codes: &[(&str, &str)]| {
+            serde_json::Value::Array(
+                codes
+                    .iter()
+                    .map(|(c, n)| serde_json::json!({"stockCode": c, "stockName": n}))
+                    .collect(),
+            )
+        };
+        let constituents = serde_json::json!({
+            "status": "ok",
+            "data": [
+                {"industry": "半导体", "matchedIndustry": "半导体", "matchMode": "exact",
+                 "stocks": semis},
+                {"industry": "电池", "matchedIndustry": "电池", "matchMode": "exact",
+                 "stocks": mk(&[("300750", "宁德时代"), ("300014", "亿纬锂能")])},
+                {"industry": "证券", "matchedIndustry": "证券Ⅱ", "matchMode": "normalized",
+                 "stocks": mk(&[("300059", "东方财富"), ("600837", "海通证券")])}
+            ]
+        })
+        .to_string();
+
+        let out = run_production_script(
+            "candidate-pool",
+            &[
+                ("constituents", serde_json::json!(constituents)),
+                ("search_results", serde_json::json!(null)),
+                ("scanner_brief", serde_json::json!(null)),
+            ],
+        );
+
+        // ST 被清洗：池内不得出现 300001
+        let stocks = out["stocks"].as_array().unwrap();
+        assert_eq!(stocks.len(), 6, "ST 必须被清洗掉: {stocks:?}");
+        assert!(!stocks.iter().any(|s| s["code"] == "300001"), "ST 特检不得入池: {stocks:?}");
+
+        // 轮转交错：labels[0..3] 应分别来自三个行业桶（A1,B1,C1），labels[3..6] 是 A2,B2,C2
+        let labels = out["labels"].as_array().unwrap();
+        let first_three: Vec<&str> =
+            labels[..3].iter().map(|l| l.as_str().unwrap_or_default()).collect();
+        for (idx, expect) in ["002049", "300750", "300059"].iter().enumerate() {
+            assert!(
+                first_three[idx].starts_with(expect),
+                "labels 必须行业桶轮转（第{}位应为 {} 开头）: {first_three:?}",
+                idx + 1,
+                expect
+            );
+        }
+        assert_eq!(out["count"].as_i64(), Some(6));
+    }
+
+    /// 快速链候选池：三路全空 ⇒ 空池 + 明确空池文案（缺席如实呈现，不伪装）。
+    #[test]
+    fn candidate_pool_all_sources_empty_yields_explicit_empty_pool() {
+        let out = run_production_script(
+            "candidate-pool",
+            &[
+                ("constituents", serde_json::json!(null)),
+                ("search_results", serde_json::json!(null)),
+                ("scanner_brief", serde_json::json!(null)),
+            ],
+        );
+        assert_eq!(out["count"].as_i64(), Some(0));
+        assert!(out["stocks"].as_array().unwrap().is_empty());
+        let pool_text = out["pool_text"].as_str().unwrap_or_default();
+        assert!(pool_text.contains("候选池为空"), "空池必须显式声明而非静默: {pool_text}");
+    }
+
+    /// 原链 industry-tags：聚合 5 个槽位的 industry_tags 并去重保序；
+    /// 缺槽位（trend3..5 占位对象无 industry_tags）不 panic、聚合结果如实。
+    #[test]
+    fn industry_tags_aggregate_dedup_across_slots() {
+        let slot = |tags: serde_json::Value| serde_json::json!({"trend_name": "t", "industry_tags": tags, "chain_nodes": []});
+        let out = run_production_script(
+            "industry-tags",
+            &[
+                ("trend1", slot(serde_json::json!(["半导体", "电池"]))),
+                ("trend2", slot(serde_json::json!(["半导体"]))),
+                ("trend3", slot(serde_json::json!(null))),
+                ("trend4", serde_json::json!(null)),
+                ("trend5", serde_json::json!(null)),
+            ],
+        );
+        let tags = out["tags"].as_array().expect("tags 必须是数组");
+        let got: Vec<&str> = tags.iter().filter_map(|t| t.as_str()).collect();
+        assert_eq!(got, vec!["半导体", "电池"], "去重保序: {got:?}");
+        assert_eq!(out["tag_count"].as_i64(), Some(2));
+        assert_eq!(out["tags_text"].as_str(), Some("半导体、电池"));
+        let states = out["slot_states"].as_array().unwrap();
+        assert_eq!(states.len(), 5, "五个槽位逐一带状态（缺席也登记）");
     }
 }

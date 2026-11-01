@@ -31,8 +31,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { discoverWorkspaceRoots } from "./lib/workspace-roots.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const WORKSPACE_ROOTS = discoverWorkspaceRoots(ROOT);
 const SERVICES = "src-tauri/src/init/services.rs";
 const CONST_RE = /pub\(crate\) const BUILTIN_VAR_KEYS: \[&str; \d+\] =\s*\[([^\]]*)\]/;
 const INSERT_RE = /vars\.insert\(\s*"([a-z_]+)"\.to_string\(\)/g;
@@ -115,7 +117,12 @@ export function copycatLists(fileText, keys) {
 
 /** R4 的模板槽消费面：扫 `{{key}}`。 */
 function slotConsumers(keys) {
-  const dirs = ["src-tauri/agency_experts", "src-tauri/src/commands", "src-tauri/crates"];
+  // crate 分散在多个 workspace：`crates/` 面按自动探测的根展开。
+  const dirs = [
+    "src-tauri/agency_experts",
+    "src-tauri/src/commands",
+    ...WORKSPACE_ROOTS.map((r) => path.join(r, "crates")),
+  ];
   const found = new Map(keys.map((k) => [k, []]));
   const walk = (p) => {
     if (!fs.existsSync(p)) return;
@@ -141,7 +148,7 @@ function slotConsumers(keys) {
       }
     }
   };
-  for (const d of dirs) walk(path.join(ROOT, d));
+  for (const d of dirs) walk(path.isAbsolute(d) ? d : path.join(ROOT, d));
   return found;
 }
 
@@ -180,7 +187,7 @@ export function check() {
 
   // R2：手抄清单（只看注释行，且要求同一文件并列 ≥2 个）
   const copycats = [];
-  for (const file of listRustFiles(path.join(ROOT, "src-tauri"))) {
+  for (const file of WORKSPACE_ROOTS.flatMap((r) => listRustFiles(r))) {
     // 路径归一：Windows 下 path.relative 给反斜杠，与 SERVICES 的正斜杠字面不等 ⇒
     // 不归一就会把权威文件自己报成手抄（本门第一版踩过）。
     const rel = path.relative(ROOT, file).split(path.sep).join("/");

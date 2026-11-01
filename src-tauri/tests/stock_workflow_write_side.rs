@@ -242,7 +242,7 @@ fn single_stock_channel_persists_diagnostic_columns() {
 #[test]
 fn trade_intent_rows_keep_generation_null() {
     // 名目边界：交易意图行不是分析结论 ⇒ 不得被焊上分析模板版本号（禁区 12）。
-    let intent_src = include_str!("../crates/analysis-engine/src/trade_intent.rs");
+    let intent_src = include_str!("../../axagent-quant/crates/analysis-engine/src/trade_intent.rs");
     assert!(
         !intent_src.contains("template_version: Set(Some("),
         "trade_intent.rs 给交易意图行写了分析代际 ⇒ 两个名目被焊成一个；\

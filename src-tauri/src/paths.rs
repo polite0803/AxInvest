@@ -107,3 +107,14 @@ pub fn axagent_home() -> PathBuf {
 pub fn app_user_model_id() -> &'static str {
     "top.axagent.desktop"
 }
+
+/// `db_config.json` 的落盘路径 —— **唯一权威**。
+///
+/// 为什么在 `paths` 而不是 `commands::db_config`：这份配置被两个 commands 模块读写
+/// （`db_config` 负责存取，`master_key` 在换钥时要用旧钥解、新钥重加密
+/// `pg_password_enc`），路径必须同源、不许各写一份；但 helper 若留在 `commands::db_config`，
+/// 另一个模块来取它就是一笔跨模块横向互调，踩的是分层门禁 `commands-no-sibling-call` 的红线
+/// （见 `check-layer-discipline.mjs` 规则 2）。放在 `paths` 同时满足「同源」与「不横向」。
+pub fn db_config_path() -> PathBuf {
+    axagent_home().join("db_config.json")
+}

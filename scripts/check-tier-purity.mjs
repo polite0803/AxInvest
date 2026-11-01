@@ -46,7 +46,7 @@ const SEED_REL = "src-tauri/src/commands/stock_analysis_setup/seed_stock_analysi
 // B-2b（PLAN §九十一/§九十三）：四档分支正在从主图搬进这张档模板 builder。
 // 过渡期两侧都有 ⇒ 由 `transitionDrift()` 钉逐字一致；改图后只剩这一侧 ⇒ 扫描面不塌。
 const BUILDER_REL = "src-tauri/src/commands/stock_analysis_setup/horizon_tier_template.rs";
-const HARNESS_REL = "src-tauri/crates/harness/src/holding_period.rs";
+const HARNESS_REL = "axagent-core/crates/harness/src/holding_period.rs";
 const COMMANDS_REL = "src-tauri/src/commands";
 // 点号算断符：否则 `horizon_branch_json.ultra_short` 是整 token，尾部 `_short` 会被 short 抢走（最长命中失效）
 const TOKEN_BREAK = "\t\r\n(){}[]<>,.;:\"'`=+*/%&|^?!~#@$\\{}";

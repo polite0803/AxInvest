@@ -1675,19 +1675,6 @@ export interface RecoResponse {
   mode: string;
   /** 数据获取错误详情(picks 为空时的具体原因)。后端填充,前端据此显示具体错误文本而非泛化的"连接失败" */
   errorDetail?: string;
-  /**
-   * mid/long 档被出票门拦截的候选(P0 财报门 / P1 分析回环门,2026-10-18)。
-   * 后端 `RecoResponse.gate_blocked`(camelCase)。空数组 = 本批无拦截,字段可能缺省。
-   * 展示建议:与 picks 并列呈现「已拦截」分组,理由码 first_loss / two_period_decline /
-   * analysis_veto_<档>:<动作> 直接透出,不再靠日志反查「为什么候选少了」。
-   */
-  gateBlocked?: Array<{
-    stockCode: string;
-    stockName: string;
-    style: StyleKey;
-    confidence: number;
-    reasons: string[];
-  }>;
 }
 
 /**

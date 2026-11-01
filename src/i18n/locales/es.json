@@ -2975,7 +2975,9 @@
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "Dentro de la ventana del pipeline en vivo (23:50–02:10 / 17:50–18:10); inicie fuera de ella.",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "El lote de cobertura falló; revise los detalles del lote.",
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Falló la consulta del historial de lotes de cobertura; reintente más tarde.",
-    "TRADING_DISABLED": "La función de trading está desactivada. Actívela antes de registrar operaciones."
+    "TRADING_DISABLED": "La función de trading está desactivada. Actívela antes de registrar operaciones.",
+    "KEY_FROM_OTHER_DEVICE": "Este cifrado fue creado con la clave maestra de otro dispositivo (huella del cifrado {{cipherFingerprint}}, huella local {{localFingerprint}}): exporta la clave en ese dispositivo (Ajustes → Base de datos → Clave maestra) e impórtala aquí.",
+    "MASTER_KEY_NOT_FOUND": "No hay archivo master.key en este dispositivo; no se puede exportar/importar la clave maestra."
   },
   "errorBoundary": {
     "copied": "Copiado",
@@ -5333,7 +5335,30 @@
       "schemaRepairRunning": "Reparando...",
       "schemaRepairSuccess": "Reparación completada: {{columns}} columnas añadidas, {{types}} tipos corregidos",
       "schemaRepairFailed": "Error al reparar el esquema: {{error}}",
-      "schemaRepairPartial": "Reparación incompleta: no se pudieron comparar {{count}} tablas (detalles abajo)"
+      "schemaRepairPartial": "Reparación incompleta: no se pudieron comparar {{count}} tablas (detalles abajo)",
+      "masterKey": {
+        "title": "Clave maestra (base de datos compartida entre dispositivos)",
+        "fingerprintLabel": "Huella de la clave maestra local: {{fingerprint}} (debe coincidir con la huella de la cabecera del cifrado en la BD compartida)",
+        "noKeyWarning": "No hay master.key en este dispositivo; exportar/importar no está disponible. Para los cifrados de la BD compartida creados por otro dispositivo, expórtalos allí (Ajustes → Base de datos → Clave maestra) e impórtalos aquí.",
+        "loadFailed": "Error al cargar la información de la clave maestra: {{error}}",
+        "exportButton": "Exportar",
+        "importButton": "Importar",
+        "exportModalTitle": "Exportar clave maestra",
+        "exportWarning": "Esto es la clave maestra en sí (hex de 64 caracteres). Transmítela por un canal seguro y guárdala con cuidado; quien la posea puede descifrar todo lo cifrado por este dispositivo.",
+        "exportHexLabel": "Huella de la clave maestra {{fp}}. Haz clic en el icono de la derecha para copiar:",
+        "importModalTitle": "Importar clave maestra",
+        "importWarning": "Sobrescribirá la master.key local y volverá a cifrar la contraseña de la base de datos en la configuración local; la clave antigua y la configuración se respaldan automáticamente. Debes reiniciar la aplicación después; no guardes datos confidenciales nuevos antes de reiniciar.",
+        "importPlaceholder": "Pega la clave maestra hex de 64 caracteres exportada del otro dispositivo",
+        "importEmpty": "Pega primero la clave maestra en hex",
+        "importConfirmOk": "Sobrescribir e importar",
+        "cancel": "Cancelar",
+        "importDoneTitle": "Clave maestra importada",
+        "importDoneFingerprints": "Huella: {{oldFp}} → {{newFp}}",
+        "backupPathLabel": "Copia de seguridad en: {{path}}",
+        "reencrypted": "Contraseña local de la BD recifrada con la nueva clave",
+        "restartRequired": "La nueva clave solo surte efecto tras reiniciar la aplicación; no guardes datos confidenciales nuevos antes de reiniciar.",
+        "importNoop": "La clave importada es idéntica a la actual (huella {{fp}}); no se cambió nada."
+      }
     },
     "defaultConversationModel": "Modelo de conversación predeterminado",
     "defaultConversationModelDesc": "Modelo predeterminado para nuevas conversaciones. Vuelve al último modelo de conversación activo si no se configura",
@@ -17033,12 +17058,6 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "Este horizonte temporal ({{horizon}}) no se pudo analizar en esta ronda: {{reason}}; los demás horizontes no se ven afectados",
       "bannerPoolFallbackOnly": "Los {{fallback}} candidatos proceden del pool de muestra integrado; no se obtuvo ningún ranking de valores destacados ni de sectores líderes, por lo que el resultado no refleja los líderes reales del mercado.",
-      "bannerGateBlocked": "El filtro de largo plazo bloqueó {{count}} candidatas (primera pérdida / caída en 2 periodos / veredicto de venta en 30 días)",
-      "gateReason": {
-        "firstLoss": "Primera pérdida: beneficio neto atribuible ≤ 0",
-        "twoPeriodDecline": "Beneficio neto a la baja dos periodos consecutivos",
-        "analysisVeto": "Análisis {{period}}: \"{{action}}\" (en 30 días)"
-      },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",

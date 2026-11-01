@@ -2335,7 +2335,7 @@ let evidence_scale = pm_evidence_scale(total_weight, max_weight);
 	// ⚠ 用 `is_empty()` 而非 `has_key()`：后者未在共享 Rhai 引擎注册（实测 Function not found）。
 	let horizon_const = |h, field| {
 	    if type_of(horizon_consts_json) != "map" || horizon_consts_json.is_empty() {
-	        throw "决策中止：缺少工作流变量 horizon_consts_json（周期常量表，权威源 crates/harness/src/holding_period.rs 的 Period::decision_consts_map，由 stock_workflow/hooks.rs 注入）";
+	        throw "决策中止：缺少工作流变量 horizon_consts_json（周期常量表，权威源 axagent-core/crates/harness/src/holding_period.rs 的 Period::decision_consts_map，由 stock_workflow/hooks.rs 注入）";
 	    }
 	    let found = false;
 	    for tier_key in horizon_consts_json.keys() {

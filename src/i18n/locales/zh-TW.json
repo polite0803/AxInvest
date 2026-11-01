@@ -2975,7 +2975,9 @@
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "當前處於即時流水線時間窗（23:50–02:10 / 17:50–18:10），請避開後再發起。",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "漏檢補分析批次執行失敗，請查看批次明細。",
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "查詢漏檢補分析批次歷史失敗，請稍後重試。",
-    "TRADING_DISABLED": "交易功能未啟用，請先開啟後再記錄交易"
+    "TRADING_DISABLED": "交易功能未啟用，請先開啟後再記錄交易",
+    "KEY_FROM_OTHER_DEVICE": "這段密文由其他裝置的主金鑰加密（密文指紋 {{cipherFingerprint}}，本機指紋 {{localFingerprint}}）—— 請到該裝置「設定 → 資料庫 → 主金鑰」匯出，再於本機匯入。",
+    "MASTER_KEY_NOT_FOUND": "本機沒有 master.key 檔案，無法匯出 / 匯入主金鑰。"
   },
   "errorBoundary": {
     "copied": "已複製",
@@ -5333,7 +5335,30 @@
       "schemaRepairRunning": "修復中...",
       "schemaRepairSuccess": "修復完成：補欄位 {{columns}} 個，修型別 {{types}} 個",
       "schemaRepairFailed": "資料庫結構修復失敗：{{error}}",
-      "schemaRepairPartial": "修復未完整：{{count}} 張表未對照成功（明細見下方）"
+      "schemaRepairPartial": "修復未完整：{{count}} 張表未對照成功（明細見下方）",
+      "masterKey": {
+        "title": "主金鑰（跨裝置共用資料庫）",
+        "fingerprintLabel": "本機主金鑰指紋：{{fingerprint}}（與共用庫密文頭的指紋一致才能解密）",
+        "noKeyWarning": "本機沒有 master.key，無法匯出 / 匯入。共用資料庫中由其他裝置加密的密文，請在其「設定 → 資料庫 → 主金鑰」匯出後於本機匯入。",
+        "loadFailed": "主金鑰資訊載入失敗：{{error}}",
+        "exportButton": "匯出",
+        "importButton": "匯入",
+        "exportModalTitle": "匯出主金鑰",
+        "exportWarning": "以下為主金鑰本體（64 位元 hex），請透過安全渠道傳遞並妥善保管；持有它即可解密由本機加密的全部資料。",
+        "exportHexLabel": "主金鑰指紋 {{fp}}，點擊右側圖示複製：",
+        "importModalTitle": "匯入主金鑰",
+        "importWarning": "將覆蓋本機 master.key，並重新加密本機資料庫設定中的密碼；舊金鑰與設定會自動備份。完成後必須重新啟動應用程式，重啟前請勿儲存新的金鑰類資料。",
+        "importPlaceholder": "貼上對方匯出的 64 位元 hex 主金鑰",
+        "importEmpty": "請先貼上主金鑰 hex",
+        "importConfirmOk": "覆蓋並匯入",
+        "cancel": "取消",
+        "importDoneTitle": "主金鑰已匯入",
+        "importDoneFingerprints": "指紋：{{oldFp}} → {{newFp}}",
+        "backupPathLabel": "已備份：{{path}}",
+        "reencrypted": "本機資料庫密碼已用新金鑰重新加密",
+        "restartRequired": "必須重新啟動應用程式後新金鑰才生效；重啟前請勿儲存新的金鑰類資料。",
+        "importNoop": "匯入的金鑰與本機目前金鑰相同（指紋 {{fp}}），未做任何修改。"
+      }
     },
     "defaultConversationModel": "預設對話模型",
     "defaultConversationModelDesc": "新建對話時預設選擇的模型，未設定時將沿用上個活躍對話的模型",
@@ -17282,12 +17307,6 @@
       "styleOnlySynthetic": "該風格暫無真實命中（{{count}} 條兜底候選已隱藏）",
       "horizonFailed": "該檔位（{{horizon}}）本輪掃描失敗：{{reason}}；其餘檔位不受影響",
       "bannerPoolFallbackOnly": "本次候選池 {{fallback}} 只全部來自內建樣本池，未取到熱股榜／行業龍頭榜——結果不代表市場真實熱門。",
-      "bannerGateBlocked": "長線門已攔截 {{count}} 只候選（財報首虧/連降 或 30 天內分析判賣出/減持）",
-      "gateReason": {
-        "firstLoss": "首虧：最新一期歸母淨利 ≤ 0",
-        "twoPeriodDecline": "連續兩期淨利同比下滑",
-        "analysisVeto": "分析端{{period}}檔判「{{action}}」（30 天內）"
-      },
       "backtestWinrate": "胜率",
       "bannerDegraded": "资料风格 {{styles}} 因 as-of {{date}} 截断,已以降级模式输出,请低于非降级风格的可信度处理。",
       "boardScopeTip": "扫描板块范围：选具体板块（沪/深/创业/科创）时，候选池只保留该板块的股票；自动=按日轮动扫描一个板块、不限制候选池；全部=一次扫描四个板块（约 138 个请求）",

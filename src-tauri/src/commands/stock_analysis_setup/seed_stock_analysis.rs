@@ -3409,7 +3409,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // `LLM_CALL_FAILED … 429` 收场（09:07 批量里 71 条取数正常的运行
                     // 就是这么全线 0 决策的）。5 次 = 3+6+12+24+48 = **93 秒**，
                     // 首次覆盖住 30s+ 窗口再加一倍余量。
-                    // ⚠ 这是**工作流路径唯一真正生效的退避**：`crates/harness/src/retry_policy.rs`
+                    // ⚠ 这是**工作流路径唯一真正生效的退避**：`axagent-core/crates/harness/src/retry_policy.rs`
                     //   的 `default_llm()`（含 429 名单）只被 react_engine / init 消费，
                     //   模型级 `request_delay_ms` 在工作流侧零消费点（它长在
                     //   `AxAgentApiClient::stream` 这一层，工作流不经那里）。把节流接进
@@ -5217,7 +5217,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // ⚠️ 曾经写错、且错了也**没有任何报错**（V79 首次实现，同批修）：
     //   初版把这个工具名当成了**命令层**的同名函数
     //   `commands::stock_analysis::compute_valuation_band`。但 `#[agent_command]` 宏
-    //   （`crates/axagent-agent-macro/src/lib.rs:45-64`）只生成 `CommandMetadata` 并注册元数据，
+    //   （`axagent-core/crates/axagent-agent-macro/src/lib.rs:45-64`）只生成 `CommandMetadata` 并注册元数据，
     //   其唯一消费者是命令文档生成测试 —— **全仓不存在「命令 → 工具」的桥**。
     //   而 ToolNode 走 `ToolRegistry`（`rt-workflow/.../tool_executor.rs:122-140`），
     //   表内条目由 `crates/tools/src/tools/astock_data.rs:118` 从 `stock_mcp_tools()`

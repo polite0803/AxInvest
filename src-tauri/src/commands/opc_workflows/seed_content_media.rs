@@ -862,7 +862,7 @@ fn build_ip_building() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>, String, String,
 /// 故按 output_var 名读天然覆盖两条路径。
 ///
 /// 失败语义：**显式 throw**，绝不回退成整段 JSON 或空字符串。
-/// `json_parse` 是"失败返回 () 不报错"的软实现（`crates/harness/src/rhai_engine.rs:73-98`），
+/// `json_parse` 是"失败返回 () 不报错"的软实现（`axagent-core/crates/harness/src/rhai_engine.rs:73-98`），
 /// 所以这里必须自己复核形态，否则就变成 fail-open → fail-open 的静默降级。
 ///
 /// ## 输出契约（真值化，2026-09-15 第二批）
@@ -934,7 +934,7 @@ out
 /// 失败语义：**显式 throw**（本仓 lock 的 rhai 1.26.0 里 `throw` 是 `Token::Throw`
 /// → `Stmt::Return` + `ASTFlags::BREAK`，非 map 返回路径一律转 `NodeError`），
 /// 绝不静默返回空数组冒充「0 章」——那正是 loop_executor 会当成「正常运行 0 轮」
-/// 的形态（`json_parse` 是失败返回 `()` 的软实现，见 `crates/harness/src/rhai_engine.rs:73-98`）。
+/// 的形态（`json_parse` 是失败返回 `()` 的软实现，见 `axagent-core/crates/harness/src/rhai_engine.rs:73-98`）。
 const LC_CHAPTERS_RHAI: &str = r#"
 let raw = chapters_raw;
 if type_of(raw) != "string" {

@@ -82,7 +82,7 @@ const EPS = 1e-9;
 const near = (a, b) => Math.abs(a - b) < EPS;
 
 // ── 权威源 ────────────────────────────────────────────────────────────
-const AUTHORITY_REL = "src-tauri/crates/harness/src/domain_ontology.rs";
+const AUTHORITY_REL = "axagent-core/crates/harness/src/domain_ontology.rs";
 
 // ── 副本站点清单（**契约**：抓不到 ⇒ 失败，不是通过）──────────────────────
 /**

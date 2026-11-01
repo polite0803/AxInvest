@@ -26,11 +26,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { discoverWorkspaceRoots } from "./lib/workspace-roots.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
-const SRC = path.join(ROOT, "src-tauri/crates/harness/src/knowledge_graph.rs");
-const REPO = path.join(ROOT, "src-tauri");
+const SRC = path.join(ROOT, "axagent-core/crates/harness/src/knowledge_graph.rs");
+const WORKSPACE_ROOTS = discoverWorkspaceRoots(ROOT);
 
 const CI_MODE = process.argv.includes("--ci");
 // ⚠ 这张表**必须与 `harness/src/knowledge_graph.rs` 里实际存在的声明表一一对应**：
@@ -255,7 +256,11 @@ if (unregistered.length > 0 || emptyTables.length > 0) {
 const cache = new Map();
 const readFile = (rel) => {
   if (!cache.has(rel)) {
-    const cands = [path.join(REPO, rel), path.join(REPO, "crates", rel), path.join(ROOT, rel)];
+    // crate 分散到多个 workspace：每个根的根目录与 `crates/` 都作为解析基。
+    const cands = [
+      path.join(ROOT, rel),
+      ...WORKSPACE_ROOTS.flatMap((r) => [path.join(r, rel), path.join(r, "crates", rel)]),
+    ];
     const hit = cands.find((c) => fs.existsSync(c));
     cache.set(rel, hit ? fs.readFileSync(hit, "utf8") : null);
   }

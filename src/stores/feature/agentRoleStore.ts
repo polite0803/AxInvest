@@ -13,7 +13,7 @@ import { create } from "zustand";
 
 /**
  * 后端 AgentRoleDto 的原始形态。
- * 字段对齐 `src-tauri/crates/harness/src/repo_dtos.rs::AgentRoleDto`。
+ * 字段对齐 `axagent-core/crates/harness/src/repo_dtos.rs::AgentRoleDto`。
  * 后端 serde 使用 rename_all = "camelCase"，前端接收即 camelCase。
  */
 interface AgentRoleDtoRow {

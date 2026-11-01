@@ -25,7 +25,7 @@ const CODE_RE = /^[A-Z][A-Z0-9]+(?:_[A-Z0-9]+)+$/;
 // 1. 收集后端码（取定义值，而非 const 名）
 const backendFiles = [
   join(root, "src-tauri", "src", "commands", "error_code.rs"),
-  join(root, "src-tauri", "crates", "harness", "src", "error_codes.rs"),
+  join(root, "axagent-core", "crates", "harness", "src", "error_codes.rs"),
 ];
 const backend = new Set();
 for (const f of backendFiles) {

@@ -32,12 +32,15 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
 const read = (rel) => readFileSync(resolve(ROOT, rel), "utf8");
 
 const PANEL_REL = "src/components/settings/StockAnalysisConfigPanel.tsx";
-const CFG_REL = "src-tauri/crates/astock-data/src/indicators.rs";
+const CFG_REL = `${crateRel("astock-data", "src/indicators.rs")}`;
 const SEED_REL = "src-tauri/src/commands/stock_analysis_setup/seed_stock_analysis.rs";
 const BUILDER_REL = "src-tauri/src/commands/stock_analysis_setup/horizon_tier_template.rs";
 

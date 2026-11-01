@@ -6,7 +6,7 @@
 // 于是整页被 PageErrorBoundary 兜成「页面错误：Cannot read properties of undefined
 // (reading 'price')」，且行情监视器每 2s 推一次 ⇒ 刷新必现。
 // 现已改为直接序列化 `QuoteChangeEvent`
-// （`src-tauri/crates/astock-data/src/realtime_quote.rs`），本测试锁的就是那份 camelCase 投影。
+// （`axagent-quant/crates/astock-data/src/realtime_quote.rs`），本测试锁的就是那份 camelCase 投影。
 
 import { act, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";

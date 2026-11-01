@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# axagent-kit workspace 的 Cargo 配置：与 src-tauri 共享同一个 target 目录，
+# 让多个 workspace 复用同一份增量编译缓存，避免重复全量构建。
+[build]
+target-dir = "../src-tauri/target"

@@ -43,15 +43,19 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { discoverWorkspaceRoots } from "./lib/workspace-roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC_TAURI = join(ROOT, "src-tauri");
+// 逻辑拆分后 crate 分散在多个 Cargo workspace：扫描面按「含 [workspace] 的目录」自动探测。
+// 硬编码根会在搬移后静默漏扫（未检查 ≠ 通过）—— 新增 workspace 必须无需改本文件。
+const WORKSPACE_ROOTS = discoverWorkspaceRoots(ROOT);
 const COMMANDS_DIR = join(SRC_TAURI, "src", "commands");
-const HARNESS_SRC = join(SRC_TAURI, "crates", "harness", "src");
-const CRATES_DIR = join(SRC_TAURI, "crates");
+const HARNESS_SRCS = WORKSPACE_ROOTS.map((r) => join(r, "crates", "harness", "src"));
+const CRATES_DIRS = WORKSPACE_ROOTS.map((r) => join(r, "crates"));
 const STORES_DOMAIN = join(ROOT, "src", "stores", "domain");
 const BASELINE_PATH = join(ROOT, "scripts", "layer-discipline-allowlist.json");
-const ROOT_CARGO = join(SRC_TAURI, "Cargo.toml");
+const ROOT_CARGOS = WORKSPACE_ROOTS.map((r) => join(r, "Cargo.toml"));
 
 const argv = process.argv.slice(2);
 const ARG = (f) => argv.includes(`--${f}`);
@@ -282,7 +286,7 @@ const RULES = [
   },
   {
     id: "crate-has-consumer",
-    title: "每个 **workspace 成员** crate 必须被 ≥1 个 Cargo.toml 引用（FFI 产物除外）",
+    title: "每个 **workspace 成员** crate 必须被 ≥1 个 Cargo.toml 引用（FFI 产物 / 纯可执行包除外）",
     level: "ratchet",
     filesOf: () => [], // 非行级规则：自己解析 Cargo.toml
     hitsInLines() {
@@ -290,21 +294,27 @@ const RULES = [
     },
     hitsInContext(ctx) {
       const hits = [];
-      const allCargos = [ROOT_CARGO, ...ctx.cargos].filter((p) => existsSync(p));
+      const allCargos = [...ROOT_CARGOS, ...ctx.cargos].filter((p) => existsSync(p));
       const texts = allCargos.map((p) => ({ path: p, text: readFileSync(p, "utf8") }));
-      for (const { name, dir, isMember, ffiOnly } of ctx.crateNames) {
+      for (const { name, dir, isMember, ffiOnly, binaryOnly } of ctx.crateNames) {
         // ① 非成员目录由 crate-dir-not-orphan 负责，避免同一件事报两遍
         if (!isMember) continue;
         // ② `crate-type = ["staticlib"]` / cdylib 是**移动端/动态库产物**：
         //    由构建工具链消费，**本来就不会有 Cargo 消费方** ⇒ 不算缺陷。
         //    （实证：`crates/axagent-mobile` 是 staticlib，供 Android/iOS 链接。）
         if (ffiOnly) continue;
+        // ③ 纯可执行包（只有 `src/main.rs`）由 `cargo run -p` / 脚本消费，
+        //    同样没有 Cargo 依赖方（实证：`crates/schema-gen`）。
+        //    带 lib 的包（可同时被依赖）不在豁免内，仍须有消费方。
+        if (binaryOnly) continue;
         // 依赖可能写成 `axagent-foo = { path = … }` 或 `axagent-foo.workspace = true`
         const re = new RegExp(`^[ \\t]*${escapeRe(name)}[ \\t]*[.=]`, "m");
         const ok = texts.some((t) => dirname(t.path) !== dir && re.test(t.text));
         if (!ok) {
           hits.push({
-            file: rel(dir),
+            // 键用 crate 的稳定标识（`crates/<name>`），不随 workspace 归属变化 ——
+            // 否则每次搬移都会把「已知零消费方」变成"新越界文件"（假红）或丢失基线（假绿）。
+            file: `crates/${name}`,
             line: 1,
             text: `${name} 是 workspace 成员，但无任何 Cargo.toml 引用它`,
             tag: "零消费方",
@@ -371,35 +381,65 @@ export function ownCommandModule(file) {
 }
 
 // ── 扫描 ──────────────────────────────────────────────────────────────
-function buildContext() {
-  const cargos = walk(CRATES_DIR, ["Cargo.toml"]);
-  // workspace members ⇒ 用于「孤儿目录」判定（不采信目录存在 = 成员）
+/** 解析某个 workspace 根 Cargo.toml 的 members（不采信目录存在 = 成员）。 */
+function parseMembers(rootCargo) {
   const members = new Set();
-  if (existsSync(ROOT_CARGO)) {
-    const m = /^[ \t]*members[ \t]*=[ \t]*\[([\s\S]*?)\]/m.exec(readFileSync(ROOT_CARGO, "utf8"));
-    if (m) {
-      for (const s of m[1].matchAll(/"([^"]+)"/g)) members.add(s[1].replace(/\\/g, "/"));
-    }
+  if (!existsSync(rootCargo)) return members;
+  const m = /^[ \t]*members[ \t]*=[ \t]*\[([\s\S]*?)\]/m.exec(readFileSync(rootCargo, "utf8"));
+  if (m) {
+    for (const s of m[1].matchAll(/"([^"]+)"/g)) members.add(s[1].replace(/\\/g, "/"));
   }
+  return members;
+}
+
+function buildContext() {
+  // 每个 workspace 的成员表（自动探测，含应用壳层 src-tauri 与各拆分 workspace）。
+  const membersByRoot = new Map(
+    WORKSPACE_ROOTS.map((r) => [r, parseMembers(join(r, "Cargo.toml"))]),
+  );
+  // crates/* 实际目录：用于发现「不在 members 的孤儿目录」；成员判定按各自 workspace 根。
+  const cargos = CRATES_DIRS.flatMap((d) => walk(d, ["Cargo.toml"]));
   const crateNames = [];
   for (const c of cargos) {
     const text = readFileSync(c, "utf8");
     const m = /^[ \t]*name[ \t]*=[ \t]*"([^"]+)"/m.exec(text);
     if (!m) continue;
     const dir = dirname(c);
+    const wsRoot = WORKSPACE_ROOTS.find((r) => dir === r || dir.startsWith(r + sep));
+    if (!wsRoot) continue;
     // 路径成员写法有两种：`crates/foo` 与 `crates/foo/`（含尾斜杠）
-    const relDir = relative(SRC_TAURI, dir).split(sep).join("/");
+    const relDir = relative(wsRoot, dir).split(sep).join("/");
     // `crate-type = ["staticlib", …]` / cdylib ⇒ 由 FFI 工具链消费，无 Cargo 消费方是设计
     const ct = /^[ \t]*crate-type[ \t]*=[ \t]*\[([^\]]*)\]/m.exec(text);
     const ffiOnly = !!ct && /"(staticlib|cdylib)"/.test(ct[1]);
-    crateNames.push({ name: m[1], dir, isMember: members.has(relDir), ffiOnly });
+    // 纯可执行包（只有 `src/main.rs`、没有 `src/lib.rs`）由 `cargo run -p` / 脚本消费，
+    // 同样不存在 Cargo 依赖方 ⇒ 与 FFI 产物同理。
+    // （实证：`crates/schema-gen` 由 package.json 与 CI 以 `cargo run -p schema-gen` 调用；
+    //   L2 拆分前它在 `src-tauri/schema-gen`，不在任何 `crates/*` 下，本规则从未覆盖它。）
+    const binaryOnly =
+      existsSync(join(dir, "src", "main.rs")) && !existsSync(join(dir, "src", "lib.rs"));
+    const members = membersByRoot.get(wsRoot);
+    crateNames.push({
+      name: m[1],
+      dir,
+      isMember: members.has(relDir) || members.has(`${relDir}/`),
+      ffiOnly,
+      binaryOnly,
+    });
   }
+  // workspace 成员总数（排除根包 "."）：全部探测到的 workspace 之和。
+  // L1 基线 42 = 35（src-tauri）+ 7（axagent-core）；L2 搬移后总数不变（成员换了归属根）。
+  const workspaceMemberCount = [...membersByRoot.values()].reduce(
+    (n, set) => n + [...set].filter((m) => m !== ".").length,
+    0,
+  );
   return {
     commandFiles: walk(COMMANDS_DIR, [".rs"]),
-    harnessFiles: walk(HARNESS_SRC, [".rs"]),
+    harnessFiles: HARNESS_SRCS.flatMap((d) => walk(d, [".rs"])),
     storeFiles: walk(STORES_DOMAIN, [".ts", ".tsx"]),
     cargos,
     crateNames,
+    workspaceMemberCount,
     currentFile: "",
   };
 }
@@ -582,7 +622,7 @@ function main() {
 
   console.log("═══ 模块级分层护栏（L1）═══\n");
   console.log(
-    `扫描面  : commands ${ctx.commandFiles.length} / harness ${ctx.harnessFiles.length} / stores-domain ${ctx.storeFiles.length} 个源文件｜crates ${ctx.crateNames.length} 个`,
+    `扫描面  : commands ${ctx.commandFiles.length} / harness ${ctx.harnessFiles.length} / stores-domain ${ctx.storeFiles.length} 个源文件｜crate 目录 ${ctx.crateNames.length} 个（workspace 成员 ${ctx.workspaceMemberCount} 个，共 ${WORKSPACE_ROOTS.length} 个 workspace 根）`,
   );
 
   const over = [];
@@ -638,6 +678,7 @@ function main() {
   console.log(`6. **人工决定**：规则 2 豁免 ${SHARED_INFRA_MODULES.size} 个共享基础设施模块（${[...SHARED_INFRA_MODULES].join(" / ")}）——`);
   console.log("   判据是「它们被当公共库用」；新增此类模块须同步加进 `SHARED_INFRA_MODULES` 并写明理由。");
   console.log("7. **人工决定**：规则 4 豁免 `crate-type` 含 `staticlib`/`cdylib` 的 FFI 产物（无 Cargo 消费方是设计）。");
+  console.log("7b. **人工决定**：规则 4 同时豁免纯可执行包（有 `src/main.rs`、无 `src/lib.rs`）——由 `cargo run -p` / 脚本消费，同样无 Cargo 消费方（实证：`crates/schema-gen`）。");
   console.log("8. 规则 4 只统计 **workspace 成员**；非成员目录由规则 4b（孤儿目录）单独报。");
 
   const exit = gateExit(over, hardTotal, scanned);

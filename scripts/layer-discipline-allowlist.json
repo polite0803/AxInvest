@@ -180,7 +180,7 @@
     "crate-has-consumer": {
       "total": 1,
       "files": {
-        "src-tauri/crates/crdt": 1
+        "crates/axagent-crdt": 1
       }
     },
     "crate-dir-not-orphan": {

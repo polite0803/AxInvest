@@ -34,10 +34,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const VENDOR_DIR = path.join(ROOT, "src-tauri/crates/astock-data/src/vendors");
-const LIST_FILE = path.join(ROOT, "src-tauri/crates/astock-data/src/daily_snapshot.rs");
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
+const VENDOR_DIR = path.join(ROOT, `${crateRel("astock-data", "src/vendors")}`);
+const LIST_FILE = path.join(ROOT, `${crateRel("astock-data", "src/daily_snapshot.rs")}`);
 
 /**
  * 逐条豁免：**带日期 + 理由**，每次运行都打印。

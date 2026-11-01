@@ -25,12 +25,17 @@
  * 退出码: 任何 error 级问题 -> 1; 仅 warning -> 0
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sanitize, testModuleRanges } from "./lib/rust-source-scan.mjs";
+import { crateFile, discoverWorkspaceRoots } from "./lib/workspace-roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC_TAURI = join(ROOT, "src-tauri");
+// crate 已分散到多个 Cargo workspace，Rust 扫描面必须覆盖全部根，
+// 否则错误码 / 事件枚举 / 字段消费点会因路径不存在而静默漏检。
+const CORE_ROOT = join(ROOT, "axagent-core");
+const RUST_ROOTS = discoverWorkspaceRoots(ROOT);
 const FRONTEND = join(ROOT, "src");
 const LOCALES_DIR = join(FRONTEND, "i18n", "locales");
 const ZH = join(LOCALES_DIR, "zh-CN.json");
@@ -119,7 +124,7 @@ function checkCommandRegistration() {
 // ---------- B. 错误码 ↔ i18n 翻译 ----------
 function extractErrorCodes() {
   const files = [
-    join(SRC_TAURI, "crates", "harness", "src", "error_codes.rs"),
+    join(CORE_ROOT, "crates", "harness", "src", "error_codes.rs"),
     join(SRC_TAURI, "src", "commands", "error_code.rs"),
   ];
   const codes = new Set();
@@ -187,8 +192,10 @@ function checkI18nKeys() {
 // ---------- D. Harness 依赖方向 ----------
 function checkHarnessDirection() {
   for (const name of CONSUMER_CRATES) {
-    const toml = join(SRC_TAURI, "crates", name, "Cargo.toml");
-    if (!existsSync(toml)) {
+    // consumer crate 可能已被拆到任意 workspace ⇒ 按 crate 目录名定位 manifest。
+    // 注意沿用原语义：按 `crates/<name>` 目录名，而不是 Cargo.toml 的 package name。
+    const toml = crateFile(ROOT, name, "Cargo.toml");
+    if (!toml || !existsSync(toml)) {
       warn(`[D] consumer crate 不存在: ${name}`);
       continue;
     }
@@ -259,7 +266,7 @@ function checkDto() {
  * 加白名单或直接禁用，比没有更糟（「声明了不生效的机制」正是这么来的）。
  * 登记制零误报，代价是新增关键字段时手写一行。
  *
- * 判据：字段名在 `src-tauri` 内**除声明文件外**至少出现 1 次。
+ * 判据：字段名在全部 workspace 根（自动探测）内**除声明文件外**至少出现 1 次。
  * Rust 侧消费必然写作 `x.field` / `.field` / `field:`，都含裸字段名，
  * 故「裸名跨文件出现」是可靠的下界；反之不出现则一定是死字段。
  */
@@ -267,19 +274,19 @@ const FIELD_CONTRACTS = [
   {
     field: "max_steps",
     container: "AgentExecuteRequest",
-    declaredIn: "crates/harness/src/agent.rs",
+    declaredIn: "axagent-core/crates/harness/src/agent.rs",
     rationale: "MCP agent_run 的调用级迭代预算，须被 HarnessAgentAdapter 消费",
   },
   {
     field: "execution_authorized",
     container: "plans::ActiveModel",
-    declaredIn: "crates/entities/src/plans.rs",
+    declaredIn: "axagent-core/crates/entities/src/plans.rs",
     rationale: "Plan 执行授权位（P0-A），须有写入点与执行前校验点",
   },
   {
     field: "horizon_results_json",
     container: "stock_reflections::Model",
-    declaredIn: "crates/entities/src/stock_reflections.rs",
+    declaredIn: "axagent-core/crates/entities/src/stock_reflections.rs",
     rationale:
       "四周期反思结果 JSON（PLAN-stock-reflection-four-horizon）—— 反思写入点须落库、统计展开点须读它，"
       + "不得只声明；两侧任一缺失都会退化成「四周期面板恒空」而无人察觉",
@@ -287,11 +294,11 @@ const FIELD_CONTRACTS = [
 ];
 
 function checkFieldConsumption() {
-  const rsFiles = walk(SRC_TAURI, ".rs");
+  const rsFiles = RUST_ROOTS.flatMap((r) => walk(r, ".rs"));
   const cache = new Map(rsFiles.map((f) => [f, read(f)]));
 
   for (const c of FIELD_CONTRACTS) {
-    const declPath = join(SRC_TAURI, c.declaredIn);
+    const declPath = join(ROOT, c.declaredIn);
     if (!existsSync(declPath)) {
       fail(`[F] 登记项 ${c.field} 的声明文件不存在: ${c.declaredIn} —— 登记表已过期，请修正`);
       continue;
@@ -309,7 +316,7 @@ function checkFieldConsumption() {
     for (const [p, src] of cache) {
       if (p === declPath) { continue; }
       const n = (src.match(new RegExp(`\\b${c.field}\\b`, "g")) || []).length;
-      if (n > 0) { consumers.push(`${p.slice(SRC_TAURI.length + 1)}×${n}`); }
+      if (n > 0) { consumers.push(`${relative(ROOT, p).replace(/\\/g, "/")}×${n}`); }
     }
     if (consumers.length === 0) {
       fail(`[F] ${c.container}.${c.field} 无任何消费点 —— ${c.rationale}`);
@@ -338,7 +345,7 @@ function checkFieldConsumption() {
  *   G4 `src/types/generated/events.ts` 与枚举逐项一致 —— 生成物腐烂时
  *      前端会继续接受已被删除的事件名（typecheck 假绿）。
  */
-const EVENT_NAME_ENUM = join(SRC_TAURI, "crates", "harness", "src", "event_names.rs");
+const EVENT_NAME_ENUM = join(CORE_ROOT, "crates", "harness", "src", "event_names.rs");
 const EVENT_NAMES_TS = join(FRONTEND, "types", "generated", "events.ts");
 
 /**
@@ -365,7 +372,7 @@ const KNOWN_DEAD_EVENTS = new Set([
 /** 解析 `event_names.rs` 的 `as_str()`，返回 variant 名 → 事件通道名 */
 function readEventNameEnum() {
   if (!existsSync(EVENT_NAME_ENUM)) {
-    fail("[G] 事件名枚举文件不存在: crates/harness/src/event_names.rs —— 本段失去判据来源");
+    fail("[G] 事件名枚举文件不存在: axagent-core/crates/harness/src/event_names.rs —— 本段失去判据来源");
     return new Map();
   }
   const src = read(EVENT_NAME_ENUM).replace(/\/\/.*$/gm, "");
@@ -388,8 +395,8 @@ function checkEventSymmetry() {
   const nameToVariant = new Map([...variantToName].map(([v, n]) => [n, v]));
   const enumNames = new Set(nameToVariant.keys());
 
-  // 发射引用统计口径：src-tauri 下全部 .rs（去行注释），排除枚举定义文件本身。
-  const bodies = walk(SRC_TAURI, ".rs")
+  // 发射引用统计口径：两个 workspace 下全部 .rs（去行注释），排除枚举定义文件本身。
+  const bodies = RUST_ROOTS.flatMap((r) => walk(r, ".rs"))
     .filter((f) => f !== EVENT_NAME_ENUM)
     .map((f) => read(f).replace(/\/\/.*$/gm, ""));
   const refCount = (variant) => {
@@ -544,8 +551,8 @@ function checkEventSymmetry() {
  *   `let _ = socket.read/write_all/flush().await`，测试替身不关心返回值，不是生产出口。
  *   真缺陷在本段的**取源口径漏了一格**：只按路径排除测试面（`/tests/`、`_test.rs`），
  *   内联 `#[cfg(test)] mod` 从没被排除过 —— 于是同一份判据里已经躺着 14 处测试丢弃
- *   被当成生产出口计进了基线（`src-tauri/crates/agent/src/steer_manager.rs` 等），
- *   再加 2 处**注释里抄写的旧代码形态**（`src-tauri/crates/trajectory/src/storage.rs:1568`
+ *   被当成生产出口计进了基线（`axagent-ai/crates/agent/src/steer_manager.rs` 等），
+ *   再加 2 处**注释里抄写的旧代码形态**（`axagent-ai/crates/trajectory/src/storage.rs:1568`
  *   文档注释、`src-tauri/src/indexing.rs:950` 行注释「此前 `let _ =` 丢掉错误」）。
  *   259 这个数里 16 处是假的。
  *   修法：逐文件先 `sanitize`（注释与字符串按**等长空白**剥，行号不变），再用
@@ -553,7 +560,7 @@ function checkEventSymmetry() {
  *   与 `check-port-axiom-wiring.mjs` 共用同一份剥离器（禁区 12）。
  *   ⚠ 途中踩到一个更狠的坑：`testModuleRanges` 原写法「属性往后找最近的 `mod X {`」，
  *   会把**贴在 `use` 上的** `#[cfg(test)]`（全仓 1018 处属性里 67 处不紧贴 `mod X {`）
- *   一路圈到那个模块闭合 —— 实测在 `src-tauri/crates/rt-workflow/src/work_engine/engine/mod.rs`
+ *   一路圈到那个模块闭合 —— 实测在 `axagent-runtime/crates/rt-workflow/src/work_engine/engine/mod.rs`
  *   圈出 38–7365、在 `src-tauri/src/commands/conversations/mod.rs` 圈出 11–1800。
  *   照它出数会得到 235，即**静默豁免 11 处生产丢弃**（`resolve_approval_for_timeout` ×2、
  *   `update_document_status_with_error`、`delete_by_id` ×2 等）、把棘轮一次放松 24 格。
@@ -623,7 +630,7 @@ function checkSilentResultDiscard() {
   let total = 0;
   let excluded = 0;
 
-  for (const f of walk(SRC_TAURI, ".rs")) {
+  for (const f of RUST_ROOTS.flatMap((r) => walk(r, ".rs"))) {
     const norm = f.replace(/\\/g, "/");
     // 测试文件里的 `let _ =` 多为「不关心返回值」，不属生产出口
     if (norm.includes("/tests/") || norm.endsWith("_test.rs")) { continue; }

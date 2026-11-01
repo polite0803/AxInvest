@@ -87,7 +87,7 @@
     "check:types": "node scripts/type-consistency.mjs",
     "check:paired": "node scripts/check-paired-fields.ts",
     "check:serde": "node scripts/check-serde-annotations.ts",
-    "check:schema-gen": "cd src-tauri && cargo run -q -p schema-gen -- check",
+    "check:schema-gen": "cd axagent-plugins && cargo run -q -p schema-gen -- check",
     "docs": "typedoc --out docs src",
     "docs:watch": "typedoc --out docs --watch src",
     "ci:check": "node scripts/ci-check.mjs",
@@ -237,7 +237,7 @@
     "vitest": "4.1.12"
   },
   "simple-git-hooks": {
-    "pre-commit": "npm run check:eol && npx dprint check && npx tsc --noEmit && node scripts/check-i18n-placeholder-usage.mjs && cd src-tauri && cargo fmt --check",
+    "pre-commit": "npm run check:eol && npx dprint check && npx tsc --noEmit && node scripts/check-i18n-placeholder-usage.mjs && node scripts/cargo-all-workspaces.mjs fmt-check",
     "pre-push": "npm run ci:check:quick"
   }
 }

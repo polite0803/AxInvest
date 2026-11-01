@@ -1,0 +1,39 @@
+[package]
+name = "axagent-gateway"
+version.workspace = true
+build = "build.rs"
+edition.workspace = true
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+axagent-harness = { version = "3.0.0", path = "../../../axagent-core/crates/harness" }
+axum = { version = "0.8", features = ["ws"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
+base64 = { workspace = true }
+chrono = { workspace = true }
+futures = "0.3"
+governor = "0.10"
+hex = { workspace = true }
+hmac = "0.13"
+http = "1"
+parking_lot = "0.12"
+prometheus = "0.14"
+reqwest = { workspace = true, features = ["stream"] }
+sea-orm = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+subtle = "2"
+tokio = { workspace = true }
+tokio-stream = "0.1"
+# 信任锚用系统信任库：webpki-roots 0.26 线已无该判据的修复版（RUSTSEC-2026-0381，0.26.11 是该线最后一版）
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
+tower = "0.5"
+tower-http = { version = "0.7", features = ["cors"] }
+tracing = { workspace = true }
+url = "2"
+uuid = { workspace = true }
+
+[dev-dependencies]
+async-trait = "0.1"

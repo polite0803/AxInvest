@@ -9,10 +9,10 @@
  *
  * | 载体 | 位置 | 机制 |
  * |---|---|---|
- * | **单一真相源** | `src-tauri/crates/astock-data/src/mcp_tools.rs` | `pub const` |
+ * | **单一真相源** | `axagent-quant/crates/astock-data/src/mcp_tools.rs` | `pub const` |
  * | 设置页 DTO 缺省 | `src-tauri/src/commands/stock_analysis.rs` | `ValuationParams::default()` **派生** |
  * | 模板变量默认值 | `.../stock_analysis_setup/seed_variables.rs` | `DEFAULT_DCF_*_PCT` **派生**×100 |
- * | 决策层估值配置 | `src-tauri/crates/analysis-engine/src/decision.rs` | `ValueConfig::{default_dcf_*,Default}` **派生**×100（**2026-09-23 新增为第 5 处**） |
+ * | 决策层估值配置 | `axagent-quant/crates/analysis-engine/src/decision.rs` | `ValueConfig::{default_dcf_*,Default}` **派生**×100（**2026-09-23 新增为第 5 处**） |
  * | 前端兜底显示 | `src/components/settings/StockAnalysisConfigPanel.tsx` | **手抄**（引用不到 Rust） |
  *
  * ### 第 5 处（`decision.rs`）的由来 —— 它曾是一个「无消费方」的漂移地雷
@@ -63,14 +63,17 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { resolveConstsToFixedPoint } from "./lib/rust-const-expr.mjs";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
 
-const SRC_OF_TRUTH = "src-tauri/crates/astock-data/src/mcp_tools.rs";
+const SRC_OF_TRUTH = `${crateRel("astock-data", "src/mcp_tools.rs")}`;
 const MAIN_CRATE = "src-tauri/src/commands/stock_analysis.rs";
 const SEED_VARS = "src-tauri/src/commands/stock_analysis_setup/seed_variables.rs";
 const FRONTEND = "src/components/settings/StockAnalysisConfigPanel.tsx";
-const DECISION_CRATE = "src-tauri/crates/analysis-engine/src/decision.rs";
+const DECISION_CRATE = `${crateRel("analysis-engine", "src/decision.rs")}`;
 
 /**
  * `decision.rs` 的三个派生函数 ↔ 真相源常量。

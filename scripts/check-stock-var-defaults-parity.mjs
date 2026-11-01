@@ -56,6 +56,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { evalConstExpr, resolveConstsToFixedPoint } from "./lib/rust-const-expr.mjs";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -81,16 +82,23 @@ const constFileCache = new Map();
 /** 跨 crate 常量路径：`axagent_astock_data::mcp_tools::DISCOUNT_RATE` */
 const QUALIFIED_RE = /\b(axagent_[a-z0-9_]+(?:::[A-Za-z0-9_]+)+::[A-Z][A-Z0-9_]*)/g;
 
-/** `axagent_analysis_engine::horizon_prior` → `src-tauri/crates/analysis-engine/src/horizon_prior.rs` */
+/** `axagent_analysis_engine::horizon_prior` → `axagent-quant/crates/analysis-engine/src/horizon_prior.rs` */
 function crateFileForModule(pkg, modPath) {
   if (!pkg.startsWith("axagent_")) {
     return null;
   }
   const crateDir = pkg.slice("axagent_".length).replace(/_/g, "-");
   const modFile = modPath.replace(/::/g, "/");
+  // crate 可能位于任意 workspace：先按目录名定位；自检的 fake-pkg 不存在于树上，
+  // 保留「crates/<dir>」形态作为回退，让注入的样本仍能命中 FAKE_DEP_FILES。
+  const resolved = [
+    crateRepoRel(ROOT, crateDir, `src/${modFile}.rs`),
+    crateRepoRel(ROOT, crateDir, `src/${modFile}/mod.rs`),
+  ].filter(Boolean);
   for (const rel of [
-    `src-tauri/crates/${crateDir}/src/${modFile}.rs`,
-    `src-tauri/crates/${crateDir}/src/${modFile}/mod.rs`,
+    ...resolved,
+    `crates/${crateDir}/src/${modFile}.rs`,
+    `crates/${crateDir}/src/${modFile}/mod.rs`,
   ]) {
     try {
       readDep(rel);
@@ -484,7 +492,7 @@ function selftest() {
   /** 注入的跨 crate 依赖文件：`0.077 * 100.0` 在 IEEE754 下是 7.700000000000001，
    *  正是 V1 容差要放行、而严格 `===` 会误判的那一类。 */
   const FAKE_DEP_FILES = {
-    "src-tauri/crates/fake-pkg/src/fake_mod.rs": "pub const DISCOUNT_RATE: f64 = 0.077;",
+    "crates/fake-pkg/src/fake_mod.rs": "pub const DISCOUNT_RATE: f64 = 0.077;",
   };
   const readFake = (rel) => {
     if (FAKE_DEP_FILES[rel]) {

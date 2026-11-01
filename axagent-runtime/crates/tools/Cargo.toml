@@ -1,0 +1,80 @@
+[package]
+name = "axagent-tools"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+axagent-analysis-engine = { version = "3.0.0", path = "../../../axagent-quant/crates/analysis-engine" }
+axagent-astock-data = { version = "3.0.0", path = "../../../axagent-quant/crates/astock-data" }
+axagent-dao = { version = "3.0.0", path = "../../../axagent-infra/crates/dao" }
+axagent-document-parser = { version = "3.0.0", path = "../../../axagent-infra/crates/document-parser" }
+axagent-harness = { version = "3.0.0", path = "../../../axagent-core/crates/harness" }
+axagent-kit = { version = "3.0.0", path = "../../../axagent-kit/crates/kit" }
+axagent-mcp = { version = "3.0.0", path = "../../../axagent-ai/crates/mcp" }
+axagent-providers = { version = "3.0.0", path = "../../../axagent-ai/crates/providers" }
+axagent-search = { version = "3.0.0", path = "../../../axagent-infra/crates/search" }
+base64 = "0.22"
+chrono = { workspace = true }
+diff = "0.1"
+dirs = "6"
+docx-rs = "0.4"
+encoding_rs = "0.8"
+futures = "0.3"
+glob = "0.3"
+image = { workspace = true }
+infer = "0.19"
+lopdf = "0.44"
+minijinja = { version = "2.21", default-features = false, features = ["json", "loader", "serde"] }
+parking_lot = "0.12"
+pdf-extract = "0.12"
+pulldown-cmark = "0.13"
+regex = "1"
+reqwest = { workspace = true, features = ["multipart", "cookies"] }
+rhai = { version = "1", features = ["sync"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
+rust_xlsxwriter = "0.100"
+sea-orm = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+tokio = { workspace = true }
+tracing = { workspace = true }
+ttf-parser = "0.25"
+url = "2"
+urlencoding = "2"
+uuid = { version = "1", features = ["v4"] }
+walkdir = "2"
+which = "8"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = ["computer-use"]
+# 桌面控制（ComputerUseTool）：真实 enigo/xcap 实现，由 axagent-kit 提供
+computer-use = ["axagent-kit/computer-use"]
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_System_JobObjects",
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Security_AppLocker",
+  "Win32_System_Threading",
+  "Win32_System_Pipes",
+  "Win32_System_StationsAndDesktops",
+  "Win32_System_Rpc",
+  "Win32_NetworkManagement_WindowsFilteringPlatform",
+  "Win32_Graphics_Gdi",
+  "Win32_Globalization",
+] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("computer-use"))'] }

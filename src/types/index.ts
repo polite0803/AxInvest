@@ -1508,6 +1508,7 @@ export * from "./expert";
 export * from "./knowledge";
 export * from "./llmWiki";
 export * from "./localTool";
+export * from "./masterKey";
 export * from "./mcp";
 export * from "./memory";
 export * from "./multi-agent";

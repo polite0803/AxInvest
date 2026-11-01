@@ -24,7 +24,7 @@ import { join, relative } from "node:path";
 
 // 扫描的目录
 const SCAN_DIRS = [
-  "src-tauri/crates/harness/src",
+  "axagent-core/crates/harness/src",
   "src-tauri/src/commands",
 ];
 
@@ -32,23 +32,23 @@ const SCAN_DIRS = [
 // 格式："文件路径::结构体名"
 const ALLOWED_EXCEPTIONS = new Set<string>([
   // 内部错误类型，不跨 FFI 边界
-  "src-tauri/crates/harness/src/session_log_invariant.rs::InvariantViolation",
+  "axagent-core/crates/harness/src/session_log_invariant.rs::InvariantViolation",
 
   // ── harness 层纯 Rust 内部流转类型，不过 IPC（前端无对应 TS 类型、未出现在任何 Tauri 命令签名）──
   // 判定依据：grep 前端 src/types/ 无定义 && grep src-tauri/src/commands/ 无引用。
   // 注意 route_engine.rs 的 RouteDecision 与 commands/cognitive.rs 的 LastRouteDecision、
   // commands/smart_router.rs 的 crate::smart_router::RouteDecision 是三个不同的类型，勿混淆。
-  "src-tauri/crates/harness/src/assembly_builder.rs::DefaultAssemblyBuilder",
-  "src-tauri/crates/harness/src/code_verifier.rs::CodeChange",
-  "src-tauri/crates/harness/src/code_verifier.rs::CodeVerificationResult",
-  "src-tauri/crates/harness/src/code_verifier.rs::VerificationIssue",
-  "src-tauri/crates/harness/src/route_engine.rs::RouteDecision",
-  "src-tauri/crates/harness/src/route_engine.rs::HardGateCriteria",
-  "src-tauri/crates/harness/src/route_engine.rs::HardGate",
-  "src-tauri/crates/harness/src/route_engine.rs::RouteContext",
-  "src-tauri/crates/harness/src/route_engine.rs::NodeExecutionResult",
-  "src-tauri/crates/harness/src/route_engine.rs::RouteRule",
-  "src-tauri/crates/harness/src/template_patch.rs::TemplatePatch",
+  "axagent-core/crates/harness/src/assembly_builder.rs::DefaultAssemblyBuilder",
+  "axagent-core/crates/harness/src/code_verifier.rs::CodeChange",
+  "axagent-core/crates/harness/src/code_verifier.rs::CodeVerificationResult",
+  "axagent-core/crates/harness/src/code_verifier.rs::VerificationIssue",
+  "axagent-core/crates/harness/src/route_engine.rs::RouteDecision",
+  "axagent-core/crates/harness/src/route_engine.rs::HardGateCriteria",
+  "axagent-core/crates/harness/src/route_engine.rs::HardGate",
+  "axagent-core/crates/harness/src/route_engine.rs::RouteContext",
+  "axagent-core/crates/harness/src/route_engine.rs::NodeExecutionResult",
+  "axagent-core/crates/harness/src/route_engine.rs::RouteRule",
+  "axagent-core/crates/harness/src/template_patch.rs::TemplatePatch",
 ]);
 
 // 已知使用手动 rename 的结构体（不需要 rename_all）

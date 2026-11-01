@@ -29,8 +29,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
 const p = (...a) => path.join(ROOT, ...a);
 
 // ── 扫描面：股票分析链的分析师 id 载体（**不含 opc_* 域包**，那套 `a-` 是别的子系统的
@@ -40,14 +43,14 @@ const SCOPE = [
   "src-tauri/src/commands/stock_analysis_setup/seed_consistency_tests.rs",
   "src-tauri/src/commands/stock_workflow/decision.rs",
   "src-tauri/src/commands/stock_workflow/rhai_registry.rs",
-  "src-tauri/crates/analysis-engine/src/evidence_weight.rs",
-  "src-tauri/crates/analysis-engine/src/evidence_citation.rs",
-  "src-tauri/crates/analysis-engine/src/blackboard.rs",
-  "src-tauri/crates/astock-data/src/quality.rs",
-  "src-tauri/crates/entities/src/analyst_feedback.rs",
-  "src-tauri/crates/harness/src/holding_period.rs",
-  "src-tauri/crates/rt-workflow/src/work_engine/executors/code_executor.rs",
-  "src-tauri/crates/rt-workflow/src/work_engine/executors/var_filter.rs",
+  `${crateRel("analysis-engine", "src/evidence_weight.rs")}`,
+  `${crateRel("analysis-engine", "src/evidence_citation.rs")}`,
+  `${crateRel("analysis-engine", "src/blackboard.rs")}`,
+  `${crateRel("astock-data", "src/quality.rs")}`,
+  "axagent-core/crates/entities/src/analyst_feedback.rs",
+  "axagent-core/crates/harness/src/holding_period.rs",
+  `${crateRel("rt-workflow", "src/work_engine/executors/code_executor.rs")}`,
+  `${crateRel("rt-workflow", "src/work_engine/executors/var_filter.rs")}`,
   "src/lib/stock-analysis-utils.ts",
   "src/lib/dataQualityDiagnosis.ts",
   "src/lib/decisionInputDiagnosis.ts",
@@ -66,7 +69,7 @@ const SCOPE = [
 // 修好后删掉条目，R1 立刻接管。
 const KNOWN_FINDINGS = [
   {
-    file: "src-tauri/crates/analysis-engine/src/evidence_citation.rs",
+    file: `${crateRel("analysis-engine", "src/evidence_citation.rs")}`,
     ids: ["a-technical", "a-macro", "a-news"],
     // 本门首读实测（2026-10-05）：这两个 id **不在**种子权威 base 表（10 个）里，
     // 表里对应名目是 `a-market-analyst` / `a-policy`；它们与专家短名写在同一个 match 的或侧
@@ -86,7 +89,7 @@ const KNOWN_FINDINGS = [
 
 // helper 自身 + 夹具：R1/R2 豁免（理由见文件头），但仍**计入 R3**（它们也该改走 base）。
 const HELPER_OR_FIXTURE = new Set([
-  "src-tauri/crates/harness/src/holding_period.rs",
+  "axagent-core/crates/harness/src/holding_period.rs",
   "src/lib/stock-analysis-utils.ts",
 ]);
 

@@ -230,6 +230,10 @@ for t in trends {
             "strategy_type": strategy_type,
             "data_reliability": reliability,
             "relevance": if field_str(c, "relevance") != "" { field_str(c, "relevance") } else { "core" },
+            // 原始确定评分（未做可靠度折价）——serenity_score 是折价后的最终分，
+            // 两者要分列落库：分层报表与因子 IC 要拿「未经折价的复合分」当第二个 x 轴
+            // （折价是「数据不确定性代价」，混进复合分会把「证据弱」读成「得分低」）。
+            "bottleneck_composite": if has_det { picked["score"] } else { () },
             "serenity_score": clamp100(score),
             "confidence": clamp100(conf),
             "bottleneck_product": field_str(c, "bottleneck_product"),

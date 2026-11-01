@@ -179,5 +179,91 @@ pub async fn persist_reco_scan_audit(
     .await
 }
 
+/// `stock_code → 行业名`（`market_stock_universe.industry`，现网覆盖 4,491/6,165）。
+///
+/// 三个候选来源共用它（全市场快照、用户标的、涨幅榜），行业判据才只有一套词表。
+/// 读失败 ⇒ 空表（行业缺席 ≠ 候选作废；`attach_industries` 保持 `None`，可分辨）。
+pub(crate) async fn universe_industries(
+    db: &DatabaseConnection,
+) -> std::collections::HashMap<String, String> {
+    use axagent_dao::repo::reco_seed;
+    match reco_seed::load_universe_industries(db).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("[reco] 行业映射读取失败（候选按无行业处理）: {e}");
+            Default::default()
+        },
+    }
+}
+
+/// 全市场快照 → 引擎（W3，2026-11-01）。
+///
+/// 放在共享模块而不是 `stock_analysis`：`mover_recall_analysis` 的 as-of 回放也要用，
+/// 命令模块之间直接互调会命中分层门禁的 `commands-no-sibling-call`。
+/// 本模块已在 `check-layer-discipline.mjs` 的 `SHARED_INFRA_MODULES` 内。
+///
+/// 只读 DB 的 `market_daily_close`（最近 30 个交易日 + 截止日那天的估值两列）与
+/// `market_stock_universe.industry`，不增加网络请求；实盘取最新交易日、as-of 取
+/// `generation` 截止日（包含当日）。失败 ⇒ 返回空表（调用方回落基础池），绝不保留上一轮快照。
+///
+/// 估值与历史**同一个交易日**：日期由历史查询返回后显式传给估值查询，不在估值侧再反查
+/// 截止日 —— 两次独立反查之间若落了新一天，快照与估值截面就会跨代。
+pub(crate) async fn build_universe_seed_items(
+    db: &DatabaseConnection,
+    generation: Option<&str>,
+) -> Vec<recommender::universe::UniverseItem> {
+    use axagent_dao::repo::reco_seed;
+
+    const TRADE_DAYS: usize = 30;
+    let (latest, rows) =
+        match reco_seed::load_close_history_on_or_before(db, generation, TRADE_DAYS).await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("[reco] 全市场快照读取失败（回落基础池）: {e}");
+                return Vec::new();
+            },
+        };
+    let row_count = rows.len();
+    let industries = universe_industries(db).await;
+    // 估值缺失不阻断快照：价值桶自己按覆盖率作废并声明降级（其余三桶照常建）。
+    let valuations = match latest.as_deref() {
+        Some(day) => match reco_seed::load_valuations_on_date(db, day).await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("[reco] 估值列读取失败（价值桶将声明缺席）: {e}");
+                Default::default()
+            },
+        },
+        None => Default::default(),
+    };
+    let valued = valuations.len();
+    let close_rows: Vec<recommender::universe::CloseRow> = rows
+        .into_iter()
+        .map(|(code, name, trade_date, close, amount, change_pct)| {
+            recommender::universe::CloseRow { code, name, trade_date, close, amount, change_pct }
+        })
+        .collect();
+    let items = recommender::universe::build_universe(&close_rows, &industries, &valuations);
+    tracing::info!(
+        "[reco] 全市场快照（日 {:?}）：{} 行 → {} 只可用于分桶；带估值 {} 只",
+        latest,
+        row_count,
+        items.len(),
+        valued
+    );
+    items
+}
+
+/// 构建并**写入进程级快照**（live 单档/定时入口的回落来源），返回 `(条数, 条目)`。
+pub(crate) async fn refresh_universe_seed_db(
+    db: &DatabaseConnection,
+    generation: Option<&str>,
+) -> (usize, Vec<recommender::universe::UniverseItem>) {
+    let items = build_universe_seed_items(db, generation).await;
+    let n = items.len();
+    recommender::set_universe_seed(items.clone());
+    (n, items)
+}
+
 /// 用途值域的唯一权威（dao 侧定义，命令层转出给引擎/批次复用）。
 pub use axagent_dao::repo::reco_pool::purpose;

@@ -2975,7 +2975,9 @@
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "실시간 파이프라인 시간대(23:50–02:10 / 17:50–18:10)입니다. 해당 시간대를 피해 다시 시작하세요.",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "누락 보완 분석 배치 실행에 실패했습니다. 배치 상세를 확인하세요.",
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "누락 보완 분석 배치 기록 조회에 실패했습니다. 나중에 다시 시도하세요.",
-    "TRADING_DISABLED": "거래 기능이 비활성화되었습니다. 거래를 기록하기 전에 활성화하세요"
+    "TRADING_DISABLED": "거래 기능이 비활성화되었습니다. 거래를 기록하기 전에 활성화하세요",
+    "KEY_FROM_OTHER_DEVICE": "이 암문은 다른 기기의 마스터 키로 암호화되었습니다(암문 지문 {{cipherFingerprint}}, 로컬 지문 {{localFingerprint}}). 해당 기기의 '설정 → 데이터베이스 → 마스터 키'에서 내보낸 뒤 여기서 가져오세요.",
+    "MASTER_KEY_NOT_FOUND": "이 기기에 master.key 파일이 없어 마스터 키를 내보내거나 가져올 수 없습니다."
   },
   "errorBoundary": {
     "copied": "복사됨",
@@ -5333,7 +5335,30 @@
       "schemaRepairRunning": "복구 중...",
       "schemaRepairSuccess": "복구 완료: 열 {{columns}}개 추가, 타입 {{types}}개 수정",
       "schemaRepairFailed": "데이터베이스 구조 복구 실패: {{error}}",
-      "schemaRepairPartial": "복구가 완료되지 않았습니다: {{count}}개 테이블을 대조하지 못했습니다(세부 내용은 아래)"
+      "schemaRepairPartial": "복구가 완료되지 않았습니다: {{count}}개 테이블을 대조하지 못했습니다(세부 내용은 아래)",
+      "masterKey": {
+        "title": "마스터 키(기기 간 공유 데이터베이스)",
+        "fingerprintLabel": "로컬 마스터 키 지문: {{fingerprint}} (공유 DB 암문 헤더의 지문과 일치해야 복호화 가능)",
+        "noKeyWarning": "이 기기에 master.key가 없어 내보내기/가져오기를 할 수 없습니다. 공유 데이터베이스에서 다른 기기가 암호화한 데이터는 해당 기기의 '설정 → 데이터베이스 → 마스터 키'에서 내보낸 뒤 여기서 가져오세요.",
+        "loadFailed": "마스터 키 정보 로드 실패: {{error}}",
+        "exportButton": "내보내기",
+        "importButton": "가져오기",
+        "exportModalTitle": "마스터 키 내보내기",
+        "exportWarning": "아래는 마스터 키 그 자체(64자 hex)입니다. 안전한 경로로 전달하고 안전하게 보관하세요. 소지자는 이 기기가 암호화한 모든 데이터를 복호화할 수 있습니다.",
+        "exportHexLabel": "마스터 키 지문 {{fp}}. 오른쪽 아이콘을 클릭해 복사:",
+        "importModalTitle": "마스터 키 가져오기",
+        "importWarning": "로컬 master.key를 덮어쓰고 로컬 DB 설정의 비밀번호를 재암호화합니다. 기존 키와 설정은 자동 백업됩니다. 완료 후 반드시 앱을 재시작하세요. 재시작 전에는 새 기밀 데이터를 저장하지 마세요.",
+        "importPlaceholder": "상대 기기에서 내보낸 64자 hex 마스터 키를 붙여넣기",
+        "importEmpty": "먼저 마스터 키 hex를 붙여넣으세요",
+        "importConfirmOk": "덮어쓰고 가져오기",
+        "cancel": "취소",
+        "importDoneTitle": "마스터 키를 가져왔습니다",
+        "importDoneFingerprints": "지문: {{oldFp}} → {{newFp}}",
+        "backupPathLabel": "백업 위치: {{path}}",
+        "reencrypted": "로컬 DB 비밀번호를 새 키로 재암호화했습니다",
+        "restartRequired": "새 키는 앱 재시작 후에 적용됩니다. 재시작 전에는 새 기밀 데이터를 저장하지 마세요.",
+        "importNoop": "가져온 키는 현재 키와 동일합니다(지문 {{fp}}). 변경 사항이 없습니다."
+      }
     },
     "defaultConversationModel": "기본 대화 모델",
     "defaultConversationModelDesc": "새 대화의 기본 모델. 설정되지 않은 경우 마지막 활성 대화 모델로 폴백",
@@ -17033,12 +17058,6 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "이번 라운드에서 이 기간({{horizon}}) 스캔에 실패했습니다: {{reason}}; 다른 기간은 영향을 받지 않습니다",
       "bannerPoolFallbackOnly": "후보 {{fallback}}개가 모두 내장 샘플 풀에서 왔습니다. 인기 종목/업종 리더 랭킹을 가져오지 못해 결과가 시장의 실제 인기 종목을 반영하지 않습니다.",
-      "bannerGateBlocked": "장기 게이트가 {{count}} 종목 차단 (첫 적자/2기 연속 감소/30일 내 매도 판정)",
-      "gateReason": {
-        "firstLoss": "첫 적자: 최근 지배기업 순이익 ≤ 0",
-        "twoPeriodDecline": "순이익 2기 연속 전년 대비 하락",
-        "analysisVeto": "분석 {{period}} 판정 \"{{action}}\" (30일 내)"
-      },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",

@@ -53,10 +53,10 @@ describe("Phase A feedback regressions", () => {
     );
     const typeSource = readSource("src/types/index.ts");
     const rustTypeSource = readSource(
-      "src-tauri/crates/harness/src/types/conversation.rs",
+      "axagent-core/crates/harness/src/types/conversation.rs",
     );
     const repoSource = readSource(
-      "src-tauri/crates/dao/src/repo/conversation.rs",
+      "axagent-infra/crates/dao/src/repo/conversation.rs",
     );
 
     expect(modalSource).toContain("maxTokens,");

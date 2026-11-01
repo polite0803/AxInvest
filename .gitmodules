@@ -1,0 +1,51 @@
+# AxAgent 子仓库配置（按技术层拆分，Plan A）
+#
+# 创建时间：2026-10-31
+# 拆分方案：docs/plans/PLAN-repo-split.md
+# 依赖图：docs/architecture/dependency-graph.md
+#
+# 使用方式：
+#   git submodule update --init --recursive
+#   ./scripts/setup-submodules.sh   # 一键初始化
+#
+# 注意：以下子仓库路径为占位符，实际仓库创建后替换为真实 URL。
+
+[submodule "axagent-core"]
+    path = axagent-core
+    url = https://github.com/polite0803/axagent-core.git
+    branch = main
+
+[submodule "axagent-kit"]
+    path = axagent-kit
+    url = https://github.com/polite0803/axagent-kit.git
+    branch = main
+
+[submodule "axagent-infra"]
+    path = axagent-infra
+    url = https://github.com/polite0803/axagent-infra.git
+    branch = main
+
+[submodule "axagent-runtime"]
+    path = axagent-runtime
+    url = https://github.com/polite0803/axagent-runtime.git
+    branch = main
+
+[submodule "axagent-ai"]
+    path = axagent-ai
+    url = https://github.com/polite0803/axagent-ai.git
+    branch = main
+
+[submodule "axagent-quant"]
+    path = axagent-quant
+    url = https://github.com/polite0803/axagent-quant.git
+    branch = main
+
+[submodule "axagent-plugins"]
+    path = axagent-plugins
+    url = https://github.com/polite0803/axagent-plugins.git
+    branch = main
+
+[submodule "axagent-frontend"]
+    path = axagent-frontend
+    url = https://github.com/polite0803/axagent-frontend.git
+    branch = main

@@ -19,7 +19,7 @@
 //! 理由:这些常量是后端↔前端的错误码 API 契约。即便当前无后端命令直接引用，
 //! 前端 11 语言均有 `error.CONSTANT` 翻译键,且 crates/插件可动态构建这些错误码。
 //! 删除会破坏契约对齐、使前端翻译成为孤儿码(被 check-errorcode-alignment.mjs 捕获)。
-//! 详见 src-tauri/src/commands/error_code.rs / crates/harness/src/error_codes.rs 的模块设计。
+//! 详见 src-tauri/src/commands/error_code.rs / axagent-core/crates/harness/src/error_codes.rs 的模块设计。
 //!
 //! 关于 `unused_imports` 的说明（与上面的 `dead_code` 同源，理由相同）：
 //! 与基座域共享的错误码已改为 `pub use axagent_harness::error_codes::<域>;`（禁止重复定义，
@@ -136,6 +136,10 @@ pub mod onboarding {
 /// 提供商相关错误码
 // ── 权威源：axagent_harness::error_codes::provider（此处仅 re-export，禁止重复定义）──
 pub use axagent_harness::error_codes::provider;
+
+/// 主密钥（master.key）相关错误码
+// ── 权威源：axagent_harness::error_codes::master_key（此处仅 re-export，禁止重复定义）──
+pub use axagent_harness::error_codes::master_key;
 
 /// 本地模型（llama.cpp）服务管理错误码
 pub mod local_model {
@@ -831,7 +835,7 @@ pub mod db {
 //
 // P0 阶段：任务形态分类器（原则三标尺：上下文保留成本 × 安全隔离需求）。
 // 与前端 `error.UNITY_P0_CLASSIFIER_FAILED` 翻译键对齐。
-// 镜像 `crates/harness/src/error_codes.rs::unity`，两处定义值必须一致。
+// 镜像 `axagent-core/crates/harness/src/error_codes.rs::unity`，两处定义值必须一致。
 // 权威源：`axagent_harness::error_codes::unity`。此处不再 re-export（零消费者 ⇒
 // `unused_imports`，说明见上方 `voice` 处）。需要时直接从 harness 导入。
 

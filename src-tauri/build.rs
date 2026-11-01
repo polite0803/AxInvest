@@ -28,7 +28,21 @@ fn main() {
     //              不会嵌入 manifest。
     //   参考: https://github.com/tauri-apps/tauri/issues/11028
     let ws_val = env::var("__TAURI_WORKSPACE__").unwrap_or_default();
+    let out_dir = env::var("OUT_DIR").unwrap();
     let manifest_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("common-controls.manifest");
+    // manifest 先复制到 OUT_DIR 再交给链接器/tauri-build：
+    // CARGO_MANIFEST_DIR 在共享目录、映射盘上会被 cargo 规范化成 UNC（\\host\share\...），
+    // 而 mt.exe 不接受 UNC 与含空格的路径，链接期报
+    // `general error c1010070: Failed to load and parse the manifest` ⇒ 测试 exe 链不出来。
+    // OUT_DIR 在本地 target 目录下，路径一定可被 mt.exe 解析。
+    let staged_manifest = PathBuf::from(&out_dir).join("common-controls.manifest");
+    fs::copy(&manifest_path, &staged_manifest).unwrap_or_else(|e| {
+        panic!(
+            "复制 manifest {} → {} 失败: {e}",
+            manifest_path.display(),
+            staged_manifest.display()
+        )
+    });
     println!("cargo:rerun-if-changed={}", manifest_path.display());
     // 必须显式声明：本脚本按该变量决定走「嵌入 manifest」还是「tauri_build::build()」分支，
     // 只监听 manifest 文件的话，cargo build 与 cargo test 来回切换会复用上一次的产物，
@@ -43,16 +57,16 @@ fn main() {
         eprintln!("[build.rs] 测试模式 (__TAURI_WORKSPACE__=true)，跳过 tauri_build::build()");
         #[cfg(all(target_os = "windows", target_env = "msvc"))]
         {
-            eprintln!("[build.rs] 嵌入 manifest: {}", manifest_path.display());
+            eprintln!("[build.rs] 嵌入 manifest: {}", staged_manifest.display());
             println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
-            println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest_path.display());
+            println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", staged_manifest.display());
             println!("cargo:rustc-link-arg=/STACK:8388608");
         }
     } else {
         // 主程序构建：使用 tauri-build
         eprintln!("[build.rs] 主程序构建模式，使用 tauri_build::build()");
         unsafe {
-            env::set_var("TAURI_MANIFEST", &manifest_path);
+            env::set_var("TAURI_MANIFEST", &staged_manifest);
         }
         tauri_build::build();
 
@@ -64,7 +78,6 @@ fn main() {
         }
     }
 
-    let out_dir = env::var("OUT_DIR").unwrap();
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let commands_dir = PathBuf::from(&manifest_dir).join("src").join("commands");
 

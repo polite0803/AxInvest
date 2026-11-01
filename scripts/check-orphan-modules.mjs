@@ -21,15 +21,20 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import {
+  crateRepoRel,
+  discoverWorkspaceRoots,
+  listCrateDirs,
+} from "./lib/workspace-roots.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const PKG_DIRS = [
-  path.join(ROOT, "src-tauri"),
-  ...fs
-    .readdirSync(path.join(ROOT, "src-tauri", "crates"), { withFileTypes: true })
-    .filter((d) => d.isDirectory())
-    .map((d) => path.join(ROOT, "src-tauri", "crates", d.name)),
-];
+/** crate 换 workspace 后基线键仍要指向同一文件 ⇒ 按目录名定位。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
+// crate 已分散到多个 Cargo workspace：根按「含 [workspace] 的目录」自动探测，
+// 每个根自身（根包）与其 `crates/*` 都是 package 扫描面。
+// 硬编码根会让搬走的 crate 里新增的未声明 .rs 完全逃过本门（未检查 ≠ 通过）。
+const WORKSPACE_ROOTS = discoverWorkspaceRoots(ROOT);
+const PKG_DIRS = [...WORKSPACE_ROOTS, ...WORKSPACE_ROOTS.flatMap((r) => listCrateDirs(r))];
 
 /** 显式豁免：{ 相对路径, 理由, 日期 }。空表是目标状态。 */
 const EXEMPT = [
@@ -48,18 +53,29 @@ const EXEMPT = [
  *    清单只减不增；减一条就把日期与处置提交号写进本注释。
  */
 const BASELINE = [
-  "src-tauri/crates/agent/src/fine_tune/candle_trainer.rs",
-  "src-tauri/crates/agent/src/proactive_mode_20260706_170316_620.rs",
-  "src-tauri/crates/kit/src/harness_impls.rs",
-  "src-tauri/crates/runtime/src/message_gateway/platforms/dingtalk.rs",
-  "src-tauri/crates/runtime/src/message_gateway/platforms/discord.rs",
-  "src-tauri/crates/runtime/src/message_gateway/platforms/feishu.rs",
-  "src-tauri/crates/runtime/src/message_gateway/platforms/qq.rs",
-  "src-tauri/crates/runtime/src/message_gateway/platforms/slack.rs",
-  "src-tauri/crates/runtime/src/message_gateway/platforms/telegram.rs",
-  "src-tauri/crates/runtime/src/message_gateway/platforms/wechat.rs",
-  "src-tauri/crates/runtime/src/message_gateway/platforms/whatsapp.rs",
+  crateRel("agent", "src/fine_tune/candle_trainer.rs"),
+  crateRel("agent", "src/proactive_mode_20260706_170316_620.rs"),
+  "axagent-kit/crates/kit/src/harness_impls.rs",
+  crateRel("runtime", "src/message_gateway/platforms/dingtalk.rs"),
+  crateRel("runtime", "src/message_gateway/platforms/discord.rs"),
+  crateRel("runtime", "src/message_gateway/platforms/feishu.rs"),
+  crateRel("runtime", "src/message_gateway/platforms/qq.rs"),
+  crateRel("runtime", "src/message_gateway/platforms/slack.rs"),
+  crateRel("runtime", "src/message_gateway/platforms/telegram.rs"),
+  crateRel("runtime", "src/message_gateway/platforms/wechat.rs"),
+  crateRel("runtime", "src/message_gateway/platforms/whatsapp.rs"),
 ];
+
+// 基线键必须能解析到真实文件：搬 workspace 后最容易出现的失守形态是
+// 「键仍指旧路径 ⇒ 豁免悬空」——既可能掩盖新违规，也会让基线虚高。
+{
+  const missing = BASELINE.filter((rel) => !fs.existsSync(path.join(ROOT, rel)));
+  if (missing.length > 0) {
+    console.error("❌ 基线键失效（文件不存在，豁免悬空）:");
+    for (const rel of missing) console.error(`  - ${rel}`);
+    process.exit(2);
+  }
+}
 
 const SKIP_DIR_NAMES = new Set(["tests", "examples", "benches"]);
 const MOD_RE = /^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z0-9_]+)\s*;/gm;
@@ -214,7 +230,7 @@ console.log(
 {
   const inBaseline = (rel) => EXEMPT.some((e) => e.file === rel) || BASELINE.includes(rel);
   // 类案例：本轮收编的智选胜率线文件（曾被查出、现已声明，绝不允许进基线）
-  if (inBaseline("src-tauri/crates/analysis-engine/src/serenity_hit_rate_backtest.rs")) {
+  if (inBaseline(crateRel("analysis-engine", "src/serenity_hit_rate_backtest.rs"))) {
     console.error("自测失败：serenity 胜率线被放进了基线/豁免 —— 那等于本门对它永久失明");
     process.exit(1);
   }

@@ -18,7 +18,7 @@ export type SeniorityLevel = "junior" | "mid" | "senior" | "expert";
 
 /**
  * 角色/岗位 DTO，字段对齐后端 `AgentRoleDto`
- * （`src-tauri/crates/harness/src/repo_dtos.rs`）。
+ * （`axagent-core/crates/harness/src/repo_dtos.rs`）。
  *
  * 注意：后端 responsibilities / decision_authority / managed_expert_ids /
  * required_certifications / active_domains 均以 JSON 字符串形式存储，

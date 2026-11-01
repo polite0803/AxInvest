@@ -35,9 +35,15 @@ import { fileURLToPath } from "node:url";
 
 // 复用 as-of 接线门的剥注释与分段实现（禁区 12：不另造一份状态机）
 import { normalize, splitTopLevelFns, stripRustComments } from "./check-asof-node-scope.mjs";
+import { crateRepoRel, discoverWorkspaceRoots, repoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SCAN_DIRS = ["src-tauri/src", "src-tauri/crates"];
+/** crate 换 workspace 后按目录名定位（返回仓库相对路径，键与读文件同名）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
+const SCAN_DIRS = [
+  "src-tauri/src",
+  ...discoverWorkspaceRoots(ROOT).map((r) => `${repoRel(ROOT, r)}/crates`),
+];
 const SKIP_DIRS = new Set([
   "node_modules",
   "dist",
@@ -160,7 +166,7 @@ function purposeCheck(body) {
 
 /** 从 dao 源码取 purpose 值域（登记表必须与它逐值相等）。 */
 function readPurposeDomain() {
-  const file = path.join(ROOT, "src-tauri/crates/dao/src/repo/reco_pool.rs");
+  const file = path.join(ROOT, crateRel("dao", "src/repo/reco_pool.rs"));
   if (!fs.existsSync(file)) return [];
   const src = fs.readFileSync(file, "utf8");
   const block = src.match(/pub mod purpose \{([\s\S]*?)\n\}/);
@@ -188,7 +194,7 @@ const EXEMPT = new Map([
     "R1：同上，删除按批次键",
   ],
   [
-    "src-tauri/crates/analysis-engine/src/recommender/reco_loop.rs|load_pick_versions",
+    `${crateRel("analysis-engine", "src/recommender/reco_loop.rs")}|load_pick_versions`,
     "R1：按 pick 主键集合回查 `reco_version` —— 本函数读的就是代际列本身（供 IC 筛样），再加代际谓词是把同一判据写两遍",
   ],
   [
@@ -305,13 +311,13 @@ const POOL_A = new Map([
 ]);
 const POOL_B = new Map([
   [
-    "src-tauri/crates/analysis-engine/src/mover_recall.rs|load_picks_in_range",
+    `${crateRel("analysis-engine", "src/mover_recall.rs")}|load_picks_in_range`,
     "池覆盖证据：排除降级会把「进过池」读成「没进池」",
   ],
 ]);
 const POOL_C = new Map([
   [
-    "src-tauri/crates/analysis-engine/src/recommender/reco_loop.rs|load_pick_versions",
+    `${crateRel("analysis-engine", "src/recommender/reco_loop.rs")}|load_pick_versions`,
     "按 pick_id 主键回查 reco_version，与降级无关",
   ],
   ["src-tauri/src/commands/backtest_validation.rs|compute_validation_report", "报告侧主键回查"],
@@ -319,11 +325,11 @@ const POOL_C = new Map([
   ["src-tauri/src/commands/stock_workflow/reco_history.rs|batch_delete_reco_history", "按批次键删除"],
   ["src-tauri/src/commands/stock_workflow/reco_history.rs|delete_serenity_pick", "按主键删单行"],
   [
-    "src-tauri/crates/dao/src/repo/reco_pool.rs|latest_seed_pool_codes",
+    `${crateRel("dao", "src/repo/reco_pool.rs")}|latest_seed_pool_codes`,
     "按批次读 seed_pool_json（扫描阶段的输入池快照），与该行自身是否降级产物无关 ⇒ 排除降级只会让收盘归档多一条「池快照为空，跳过」，不提升选码质量",
   ],
   [
-    "src-tauri/crates/dao/src/repo/reco_pool.rs|find_existing_pick_id",
+    `${crateRel("dao", "src/repo/reco_pool.rs")}|find_existing_pick_id`,
     "幂等键（as_of_date/period/stock_code/style/purpose）查重回查既有行 id，用途是覆盖写而非分母 ⇒" +
       "与 synthetic 降级无关；加谓词会把既有行判成「不存在」⇒ 覆盖写变新增、id 换新致下游引用悬空",
   ],
@@ -610,7 +616,7 @@ async fn start_cron_scheduler_big(db: &Db) -> usize {
   }
   // ── R6/R7/R8（2026-10-18，PLAN §P-g）：键级归类是纯函数，负控拆在它自己的守卫上 ──
   const A_KEY = "src-tauri/src/commands/pool_scan.rs|load_pool_selection";
-  const B_KEY = "src-tauri/crates/analysis-engine/src/mover_recall.rs|load_picks_in_range";
+  const B_KEY = `${crateRel("analysis-engine", "src/mover_recall.rs")}|load_picks_in_range`;
   const FIND = "reco_picks::Entity::find()";
   const PRED = "reco_picks::Column::Synthetic.eq(0)";
   const pcChecks = [

@@ -2975,7 +2975,9 @@
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "أنت داخل نافذة خط المعالجة المباشر (23:50–02:10 / 17:50–18:10)؛ ابدأ خارجها.",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "فشل تنفيذ دفعة التحليل التكميلي؛ راجع تفاصيل الدفعة.",
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "فشل الاستعلام عن سجل دفعات التحليل التكميلي؛ حاول لاحقًا.",
-    "TRADING_DISABLED": "وظيفة التداول معطّلة. فعّلها قبل تسجيل الصفقات."
+    "TRADING_DISABLED": "وظيفة التداول معطّلة. فعّلها قبل تسجيل الصفقات.",
+    "KEY_FROM_OTHER_DEVICE": "هذا النص المشفر شُفّر بمفتاح رئيسي لجهاز آخر (بصمة النص المشفر {{cipherFingerprint}}، البصمة المحلية {{localFingerprint}}) — صدّر المفتاح من ذلك الجهاز (الإعدادات → قاعدة البيانات → المفتاح الرئيسي) ثم استورده هنا.",
+    "MASTER_KEY_NOT_FOUND": "لا يوجد ملف master.key على هذا الجهاز؛ لا يمكن تصدير/استيراد المفتاح الرئيسي."
   },
   "errorBoundary": {
     "copied": "تم النسخ",
@@ -5333,7 +5335,30 @@
       "schemaRepairRunning": "جارٍ الإصلاح...",
       "schemaRepairSuccess": "اكتمل الإصلاح: أُضيفت {{columns}} عمودًا، وصُحّحت {{types}} أنواع",
       "schemaRepairFailed": "فشل إصلاح البنية: {{error}}",
-      "schemaRepairPartial": "الإصلاح غير مكتمل: تعذّرت مقابلة {{count}} جدولًا (التفاصيل أدناه)"
+      "schemaRepairPartial": "الإصلاح غير مكتمل: تعذّرت مقابلة {{count}} جدولًا (التفاصيل أدناه)",
+      "masterKey": {
+        "title": "المفتاح الرئيسي (قاعدة بيانات مشتركة عبر الأجهزة)",
+        "fingerprintLabel": "بصمة المفتاح الرئيسي المحلي: {{fingerprint}} (يجب أن تطابق بصمة رأس النص المشفر في قاعدة البيانات المشتركة)",
+        "noKeyWarning": "لا يوجد master.key على هذا الجهاز؛ التصدير/الاستيراد غير متاحين. بالنسبة للنصوص المشفرة بواسطة جهاز آخر في قاعدة البيانات المشتركة، صدّر المفتاح من هناك (الإعدادات → قاعدة البيانات → المفتاح الرئيسي) ثم استورده هنا.",
+        "loadFailed": "فشل تحميل معلومات المفتاح الرئيسي: {{error}}",
+        "exportButton": "تصدير",
+        "importButton": "استيراد",
+        "exportModalTitle": "تصدير المفتاح الرئيسي",
+        "exportWarning": "هذا هو المفتاح الرئيسي نفسه (64 حرفًا سداسيًا عشريًا). انقله عبر قناة آمنة واحفظه بعناية؛ حائزه يستطيع فك تشفير كل ما شفّره هذا الجهاز.",
+        "exportHexLabel": "بصمة المفتاح الرئيسي {{fp}}. انقر على الأيقونة على اليمين للنسخ:",
+        "importModalTitle": "استيراد المفتاح الرئيسي",
+        "importWarning": "سيتم استبدال master.key المحلي وإعادة تشفير كلمة مرور قاعدة البيانات في الإعداد المحلي؛ يُعمل نسخ احتياطي تلقائي للمفتاح القديم والإعداد. يجب إعادة تشغيل التطبيق بعد الانتهاء؛ لا تحفظ بيانات سرية جديدة قبل إعادة التشغيل.",
+        "importPlaceholder": "الصق المفتاح الرئيسي السداسي (64 حرفًا) المُصدَّر من الجهاز الآخر",
+        "importEmpty": "الصق المفتاح الرئيسي السداسي أولاً",
+        "importConfirmOk": "استبدال واستيراد",
+        "cancel": "إلغاء",
+        "importDoneTitle": "تم استيراد المفتاح الرئيسي",
+        "importDoneFingerprints": "البصمة: {{oldFp}} → {{newFp}}",
+        "backupPathLabel": "النسخة الاحتياطية: {{path}}",
+        "reencrypted": "أُعيد تشفير كلمة مرور قاعدة البيانات المحلية بالمفتاح الجديد",
+        "restartRequired": "لا يسري المفتاح الجديد إلا بعد إعادة تشغيل التطبيق؛ لا تحفظ بيانات سرية جديدة قبل إعادة التشغيل.",
+        "importNoop": "المفتاح المستورد مطابق للحالي (البصمة {{fp}})؛ لم يتغير شيء."
+      }
     },
     "defaultConversationModel": "نموذج المحادثة الافتراضي",
     "defaultConversationModelDesc": "النموذج الافتراضي للمحادثات الجديدة. يعود إلى النموذج النشط الأخير إن لم يتم التعيين",
@@ -17033,12 +17058,6 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "تعذّر فحص هذا الأفق الزمني ({{horizon}}) في هذه الجولة: {{reason}}؛ لا تتأثر الآفاق الأخرى",
       "bannerPoolFallbackOnly": "جميع المرشحين وعددهم {{fallback}} مأخوذون من مجموعة العينات المدمجة؛ لم يتم جلب تصنيف الأسهم الشائعة أو القطاعات الرائدة، لذا لا تعكس النتيجة القادة الحقيقيين للسوق.",
-      "bannerGateBlocked": "بوابة المدى الطويل حظرت {{count}} مرشحا (أول خسارة / انخفاض لفترتين / حكم بيع خلال 30 يوما)",
-      "gateReason": {
-        "firstLoss": "أول خسارة: صافي ربح الشركة الأم ≤ 0",
-        "twoPeriodDecline": "صافي الربح ينخفض لفترتين متتاليتين",
-        "analysisVeto": "تحليل {{period}}: \"{{action}}\" (خلال 30 يوما)"
-      },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",

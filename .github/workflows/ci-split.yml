@@ -1,0 +1,167 @@
+name: CI (Split Repos)
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: read
+
+jobs:
+  core-check:
+    name: Core Checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.0"
+          components: rustfmt, clippy
+      - name: Cargo fmt
+        run: cargo fmt --all --check --manifest-path axagent-core/Cargo.toml
+      - name: Clippy
+        run: cargo clippy --manifest-path axagent-core/Cargo.toml -- -D warnings
+      - name: Cargo check
+        run: cargo check --manifest-path axagent-core/Cargo.toml
+
+  kit-check:
+    name: Kit Checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.0"
+          components: rustfmt, clippy
+      - name: Cargo fmt
+        run: cargo fmt --all --check --manifest-path axagent-kit/Cargo.toml
+      - name: Clippy
+        run: cargo clippy --manifest-path axagent-kit/Cargo.toml -- -D warnings
+      - name: Cargo check
+        run: cargo check --manifest-path axagent-kit/Cargo.toml
+
+  infra-check:
+    name: Infra Checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.0"
+          components: rustfmt, clippy
+      - name: Cargo fmt
+        run: cargo fmt --all --check --manifest-path axagent-infra/Cargo.toml
+      - name: Clippy
+        run: cargo clippy --manifest-path axagent-infra/Cargo.toml -- -D warnings
+      - name: Cargo check
+        run: cargo check --manifest-path axagent-infra/Cargo.toml
+
+  runtime-check:
+    name: Runtime Checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.0"
+          components: rustfmt, clippy
+      - name: Cargo fmt
+        run: cargo fmt --all --check --manifest-path axagent-runtime/Cargo.toml
+      - name: Clippy
+        run: cargo clippy --manifest-path axagent-runtime/Cargo.toml -- -D warnings
+      - name: Cargo check
+        run: cargo check --manifest-path axagent-runtime/Cargo.toml
+
+  ai-check:
+    name: AI Checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.0"
+          components: rustfmt, clippy
+      - name: Cargo fmt
+        run: cargo fmt --all --check --manifest-path axagent-ai/Cargo.toml
+      - name: Clippy
+        run: cargo clippy --manifest-path axagent-ai/Cargo.toml -- -D warnings
+      - name: Cargo check
+        run: cargo check --manifest-path axagent-ai/Cargo.toml
+
+  quant-check:
+    name: Quant Checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.0"
+          components: rustfmt, clippy
+      - name: Cargo fmt
+        run: cargo fmt --all --check --manifest-path axagent-quant/Cargo.toml
+      - name: Clippy
+        run: cargo clippy --manifest-path axagent-quant/Cargo.toml -- -D warnings
+      - name: Cargo check
+        run: cargo check --manifest-path axagent-quant/Cargo.toml
+
+  plugins-check:
+    name: Plugins Checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.0"
+          components: rustfmt, clippy
+      - name: Cargo fmt
+        run: cargo fmt --all --check --manifest-path axagent-plugins/Cargo.toml
+      - name: Clippy
+        run: cargo clippy --manifest-path axagent-plugins/Cargo.toml -- -D warnings
+      - name: Cargo check
+        run: cargo check --manifest-path axagent-plugins/Cargo.toml
+
+  frontend-check:
+    name: Frontend Checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci --prefix axagent-frontend --legacy-peer-deps
+      - name: Typecheck
+        run: npm run typecheck --prefix axagent-frontend
+      - name: Lint
+        run: npx oxlint axagent-frontend/src --max-warnings=0
+      - name: Build
+        run: npm run build --prefix axagent-frontend

@@ -166,7 +166,7 @@ agency-agents-src/
 data/
 
 # 微调模型运行时数据（按 UUID 目录生成，不入库）
-/src-tauri/crates/agent/fine_tuned_models/
+/axagent-ai/crates/agent/fine_tuned_models/
 
 # Rust 临时测试文件
 temp_test.exe

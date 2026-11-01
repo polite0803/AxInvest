@@ -397,7 +397,7 @@ describe("readDecisionProvenance", () => {
  */
 const MOVER_RS_PATH = path.resolve(
   __dirname,
-  "../../../src-tauri/crates/analysis-engine/src/mover_recall.rs",
+  "../../../axagent-quant/crates/analysis-engine/src/mover_recall.rs",
 );
 
 describe("moverLabelPresentation（妖股标签四分句）", () => {

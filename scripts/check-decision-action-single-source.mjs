@@ -9,7 +9,7 @@
 // 不认 ⇒ 同一条记录后端有档、界面显示「不确定」。
 //
 // ── 权威是谁 ──
-// `src-tauri/crates/harness/src/decision_action.rs` 的 `ActionKind`（AGENTS.md 规则 12：
+// `axagent-core/crates/harness/src/decision_action.rs` 的 `ActionKind`（AGENTS.md 规则 12：
 // 共享契约的权威定义在 axagent-harness）。其余七面一律**被对账**，不得自带清单：
 // 前端 `StockAction` / `STOCK_ACTION_LABELS` / `getActionTKey`、前端 `STOCK_ACTION_CANONICAL_LABELS`
 // （第二份「枚举→中文」表）、前端 `ACTION_PALETTE`（档位→强度配色）、LLM 输出 schema、
@@ -53,15 +53,17 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { crateRepoRel, discoverWorkspaceRoots, repoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const WORKSPACE_ROOTS = discoverWorkspaceRoots(ROOT);
 const read = (rel) => readFileSync(resolve(ROOT, rel), "utf8");
 
-const AUTHORITY_RS = "src-tauri/crates/harness/src/decision_action.rs";
+const AUTHORITY_RS = "axagent-core/crates/harness/src/decision_action.rs";
 /** 记录来历（`live` / `replay`）的权威 —— 与 action 是两个值域，各自一处定义 */
-const AUTHORITY_KIND_RS = "src-tauri/crates/harness/src/analysis_kind.rs";
+const AUTHORITY_KIND_RS = "axagent-core/crates/harness/src/analysis_kind.rs";
 /** DB 侧值域 `CHECK` 声明（第三处表达，靠 R14 与两个权威逐档对账） */
-const EXTRAS_RS = "src-tauri/crates/dao/src/reconcile/extras.rs";
+const EXTRAS_RS = crateRepoRel(ROOT, "dao", "src/reconcile/extras.rs") ?? "crates/dao/src/reconcile/extras.rs";
 const FRONTEND_TS = "src/lib/stock-analysis-utils.ts";
 const LLM_SCHEMA_JSON = "src-tauri/config/llm-output-schemas.json";
 const ZH_LOCALE = "src/i18n/locales/zh-CN.json";
@@ -617,7 +619,7 @@ function loadConsumers() {
 }
 
 /**
- * R13 的 Rust 消费面：`src-tauri/src` 与 `src-tauri/crates` 下全部 `.rs`。
+ * R13 的 Rust 消费面：全部 workspace 根（自动探测）下的 `.rs`（含 `src/` 与 `crates/<crate>/src/`）。
  * 排除副本目录（`target` / `output` —— 本仓有整棵树的备份副本，算进扫描面会把引用判成零命中）
  * 与权威文件本身。
  */
@@ -644,8 +646,11 @@ function loadRustSources() {
         }
       }
     };
-    walk("src-tauri/src");
-    walk("src-tauri/crates");
+    // 消费面覆盖每个 workspace 的 `src` 与 `crates`（与拆分前口径一致，不扩大壳层扫描面）。
+    for (const r of WORKSPACE_ROOTS) {
+      walk(`${repoRel(ROOT, r)}/src`);
+      walk(`${repoRel(ROOT, r)}/crates`);
+    }
     rustCache = out;
   }
   return { ...rustCache };

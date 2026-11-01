@@ -4,7 +4,7 @@
  * Fleet（多办公室 AI 团队）类型定义。
  *
  * 与后端 `axagent_harness::fleet` DTO 一一对应。
- * 后端权威定义：src-tauri/crates/harness/src/fleet.rs
+ * 后端权威定义：axagent-core/crates/harness/src/fleet.rs
  */
 
 /** 舰队（办公室）状态 */

@@ -25,9 +25,12 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const DAO_REL = "src-tauri/crates/dao/src/repo/mover_recall_events.rs";
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
+const DAO_REL = `${crateRel("dao", "src/repo/mover_recall_events.rs")}`;
 const CMD_REL = "src-tauri/src/commands/mover_recall_analysis.rs";
 
 const read = (rel) => readFileSync(resolve(ROOT, rel), "utf8");

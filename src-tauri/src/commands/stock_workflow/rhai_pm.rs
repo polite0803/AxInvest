@@ -468,7 +468,7 @@ pub fn register_pm_functions(engine: &mut Engine) {
 /// 从 K 线数组提取收盘价序列（兼容 `close` 为 f64 / i64 / 数字字符串三种上游形态）。
 ///
 /// 解析不出来的 bar 直接跳过 —— 口径**比引擎侧 `num_of` 更宽**：`num_of`
-/// （权威源 `crates/harness/src/rhai_engine.rs` 的 `register_common_functions`）只收 JSON Number
+/// （权威源 `axagent-core/crates/harness/src/rhai_engine.rs` 的 `register_common_functions`）只收 JSON Number
 /// （f64 / 嵌层 i64），这里额外收「数字字符串」，因为工具节点的 K 线历史上就以字符串透出过 close。
 /// 但**样本总数不足**时 `realized_vol_pct` 会返回 `None`（不是拿残缺序列硬算一个数）。
 fn closes_from_bars(bars: &[rhai::Dynamic]) -> Vec<f64> {

@@ -32,8 +32,12 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { crateRepoRel, discoverWorkspaceRoots } from "./lib/workspace-roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
+const WORKSPACE_ROOTS = discoverWorkspaceRoots(ROOT);
 const read = (rel) => readFileSync(resolve(ROOT, rel), "utf8");
 
 const SEED_REL = "src-tauri/src/commands/stock_analysis_setup/seed_variables.rs";
@@ -222,9 +226,9 @@ export function panelExposes(panelSrc, name) {
 
 /** 反向读取面：`read_*(vars, "key", 兜底)` 形态的键（现役只有这两处文件）。 */
 const READER_REL = [
-  "src-tauri/crates/analysis-engine/src/recommender/strategies/reversion.rs",
-  "src-tauri/crates/analysis-engine/src/recommender/strategies/trend.rs",
-  "src-tauri/crates/analysis-engine/src/backtest_strategy.rs",
+  `${crateRel("analysis-engine", "src/recommender/strategies/reversion.rs")}`,
+  `${crateRel("analysis-engine", "src/recommender/strategies/trend.rs")}`,
+  `${crateRel("analysis-engine", "src/backtest_strategy.rs")}`,
 ];
 
 /**
@@ -381,7 +385,7 @@ function main() {
   const panelSrc = read(PANEL_REL);
   const names = declaredNames(seedSrc);
   const surf = buildCorpus([
-    ...walk(join(ROOT, "src-tauri"), ["target", "node_modules"], []),
+    ...WORKSPACE_ROOTS.flatMap((r) => walk(r, ["target", "node_modules"], [])),
     ...walk(join(ROOT, "src"), ["node_modules"], []),
   ]);
 
@@ -410,7 +414,7 @@ function selftest() {
   const panelSrc = read(PANEL_REL);
   const names = declaredNames(seedSrc);
   const surf = buildCorpus([
-    ...walk(join(ROOT, "src-tauri"), ["target", "node_modules"], []),
+    ...WORKSPACE_ROOTS.flatMap((r) => walk(r, ["target", "node_modules"], [])),
     ...walk(join(ROOT, "src"), ["node_modules"], []),
   ]);
   const base = checkAll(names, surf, panelSrc);

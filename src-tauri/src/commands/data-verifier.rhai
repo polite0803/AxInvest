@@ -2,11 +2,18 @@
 // 输入:
 //   candidates       — 来自 a-candidate-mapper 的候选股列表
 //   tool_calls_made  — 来自 a-candidate-mapper 的工具调用记录（可选）
+//   factor_scores    — c-factor-score.result.score_map（可选，阶段 3 打分重构）：
+//                      {code: {score, chg1m, rank}}，1 月反转横截面百分位。
+//                      存在时 serenity_score 被因子分**覆盖**（原值转存 quality_score），
+//                      因子缺席的票封顶 54 并标 factor_absent ——「没算过的票不得冒充高分」
+//                      与组装端对 LLM 自报分的既有封顶同口径。缺席时输出与旧版完全一致。
 // 功能:
 //   1. 对每个候选股的 financial_snapshot 做基本合理性验证（范围检查）
 //   2. 交叉验证：检查 LLM 是否调用了 get_stock_financials，
 //      若有调用，比对 LLM 输出的财务数据与工具返回的真实数据是否一致
 //   3. 标记数据来源可信度
+//   4. 阶段 3：有 factor_scores 时按因子分覆盖 serenity_score 并整体降序排序
+//      （候选顺序即出票顺序，serenity.rs 按序去重落库）
 // 输出: 同结构 candidates 数组，每项增加 data_verification 字段
 
 fn present(x) { type_of(x) != "()" }
@@ -158,6 +165,7 @@ for candidate in effective_candidates {
             "data_reliability": candidate.data_reliability,
             "relevance": candidate.relevance,
             "serenity_score": candidate.serenity_score,
+            "bottleneck_composite": candidate.bottleneck_composite,
             "confidence": candidate.confidence,
             "bottleneck_product": candidate.bottleneck_product,
             "primary_risk": candidate.primary_risk,
@@ -418,6 +426,7 @@ for candidate in effective_candidates {
         "data_reliability": candidate.data_reliability,
         "relevance": candidate.relevance,
         "serenity_score": candidate.serenity_score,
+        "bottleneck_composite": candidate.bottleneck_composite,
         "confidence": candidate.confidence,
         "bottleneck_product": candidate.bottleneck_product,
         "primary_risk": candidate.primary_risk,
@@ -429,6 +438,63 @@ for candidate in effective_candidates {
     };
 
     verified_candidates += verified;
+}
+
+// ── 阶段 3（2026-11-01）：1 月反转因子分覆盖 + 出票排序 ──
+// 单点权威：两链共用本脚本，serenity_score 的「最终分 = 因子分」裁定只在这里落一次。
+// 质地/瓶颈复合分不进排序键（阶段 1 普查：动量方向整体为负或不显著，
+// 复合分与后市无已证关联），转存 quality_score 作参考。
+let has_factors = present(factor_scores);
+let fs = #{};
+if has_factors {
+    if type_of(factor_scores) == "string" {
+        let p = json_parse(factor_scores.to_string());
+        if present(p) && type_of(p) == "map" { fs = p; } else { has_factors = false; }
+    } else if type_of(factor_scores) == "map" { fs = factor_scores; }
+    else { has_factors = false; };
+};
+if has_factors && fs.len() == 0 { has_factors = false; };
+
+if has_factors {
+    for i in range(0, verified_candidates.len()) {
+        let c = verified_candidates[i];
+        let code = if present(c.stock_code) { c.stock_code.to_string() } else { "" };
+        if code == "" { continue; }
+        if present(c.serenity_score) { c["quality_score"] = c.serenity_score; }
+        if code in fs {
+            let entry = fs[code];
+            let fsc = entry["score"];
+            if present(fsc) && (type_of(fsc) == "f64" || type_of(fsc) == "i64") {
+                c["factor_score"] = fsc;
+                c["serenity_score"] = fsc;
+            }
+        } else {
+            // 缺席票：不参与横截面 ⇒ 不得冒充高分，封顶 54 + 显式标记
+            let old = if present(c.serenity_score) && (type_of(c.serenity_score) == "f64" || type_of(c.serenity_score) == "i64") {
+                c.serenity_score.to_float()
+            } else { 50.0 };
+            c["factor_absent"] = true;
+            c["serenity_score"] = if old > 54.0 { 54.0 } else { old };
+        }
+        verified_candidates[i] = c;
+    };
+    // 出票顺序 = 因子分降序（serenity.rs 按序去重落库）；缺席已封顶 ≤54，自然沉底
+    let n2 = verified_candidates.len();
+    for k in range(0, n2) {
+        let mut_best = k;
+        for i in range(k + 1, n2) {
+            let si = verified_candidates[i]["serenity_score"];
+            let sb = verified_candidates[mut_best]["serenity_score"];
+            let vi = if present(si) && (type_of(si) == "f64" || type_of(si) == "i64") { si.to_float() } else { 50.0 };
+            let vb = if present(sb) && (type_of(sb) == "f64" || type_of(sb) == "i64") { sb.to_float() } else { 50.0 };
+            if vi > vb { mut_best = i; }
+        };
+        if mut_best != k {
+            let tmp = verified_candidates[k];
+            verified_candidates[k] = verified_candidates[mut_best];
+            verified_candidates[mut_best] = tmp;
+        }
+    };
 }
 
 // 输出: 验证后的候选列表

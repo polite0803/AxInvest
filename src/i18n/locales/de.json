@@ -2975,7 +2975,9 @@
     "MOVER_RECALL_ANALYSIS_LIVE_WINDOW": "Innerhalb des Live-Pipeline-Zeitfensters (23:50–02:10 / 17:50–18:10); bitte außerhalb starten.",
     "MOVER_RECALL_ANALYSIS_EXEC_FAILED": "Der Rally-Lücken-Nachanalyse-Stapel ist fehlgeschlagen; Details prüfen.",
     "MOVER_RECALL_ANALYSIS_QUERY_FAILED": "Abfrage des Rally-Lücken-Stapelverlaufs fehlgeschlagen; später erneut versuchen.",
-    "TRADING_DISABLED": "Handelsfunktion ist deaktiviert. Aktivieren Sie sie vor der Erfassung von Trades."
+    "TRADING_DISABLED": "Handelsfunktion ist deaktiviert. Aktivieren Sie sie vor der Erfassung von Trades.",
+    "KEY_FROM_OTHER_DEVICE": "Dieses Chiffrat wurde mit dem Hauptschlüssel eines anderen Geräts verschlüsselt (Chiffrat-Fingerabdruck {{cipherFingerprint}}, lokaler Fingerabdruck {{localFingerprint}}) — exportieren Sie den Schlüssel auf dem anderen Gerät (Einstellungen → Datenbank → Hauptschlüssel) und importieren Sie ihn hier.",
+    "MASTER_KEY_NOT_FOUND": "Keine master.key-Datei auf diesem Gerät; der Hauptschlüssel kann nicht exportiert/importiert werden."
   },
   "errorBoundary": {
     "copied": "Kopiert",
@@ -5333,7 +5335,30 @@
       "schemaRepairRunning": "Reparatur läuft...",
       "schemaRepairSuccess": "Reparatur abgeschlossen: {{columns}} Spalten ergänzt, {{types}} Typen korrigiert",
       "schemaRepairFailed": "Schema-Reparatur fehlgeschlagen: {{error}}",
-      "schemaRepairPartial": "Reparatur unvollständig: {{count}} Tabellen konnten nicht abgeglichen werden (Details unten)"
+      "schemaRepairPartial": "Reparatur unvollständig: {{count}} Tabellen konnten nicht abgeglichen werden (Details unten)",
+      "masterKey": {
+        "title": "Hauptschlüssel (geräteübergreifende gemeinsame Datenbank)",
+        "fingerprintLabel": "Fingerabdruck des lokalen Hauptschlüssels: {{fingerprint}} (muss mit dem Fingerabdruck im Chiffrat-Header der gemeinsamen DB übereinstimmen)",
+        "noKeyWarning": "Keine master.key auf diesem Gerät; Export/Import nicht möglich. Chiffrate, die von einem anderen Gerät in der gemeinsamen Datenbank verschlüsselt wurden, bitte dort exportieren (Einstellungen → Datenbank → Hauptschlüssel) und hier importieren.",
+        "loadFailed": "Laden der Hauptschlüssel-Informationen fehlgeschlagen: {{error}}",
+        "exportButton": "Exportieren",
+        "importButton": "Importieren",
+        "exportModalTitle": "Hauptschlüssel exportieren",
+        "exportWarning": "Dies ist der Hauptschlüssel selbst (64-stelliger Hex-Code). Über einen sicheren Kanal übertragen und sicher aufbewahren; jeder Inhaber kann alles entschlüsseln, was von diesem Gerät verschlüsselt wurde.",
+        "exportHexLabel": "Hauptschlüssel-Fingerabdruck {{fp}}. Zum Kopieren auf das Symbol rechts klicken:",
+        "importModalTitle": "Hauptschlüssel importieren",
+        "importWarning": "Überschreibt die lokale master.key und verschlüsselt das Datenbankpasswort in der lokalen Konfiguration neu; der alte Schlüssel und die Konfiguration werden automatisch gesichert. Danach muss die App neu gestartet werden; vor dem Neustart keine neuen Geheimdaten speichern.",
+        "importPlaceholder": "64-stelligen Hex-Hauptschlüssel vom anderen Gerät einfügen",
+        "importEmpty": "Bitte zuerst den Hex-Hauptschlüssel einfügen",
+        "importConfirmOk": "Überschreiben und importieren",
+        "cancel": "Abbrechen",
+        "importDoneTitle": "Hauptschlüssel importiert",
+        "importDoneFingerprints": "Fingerabdruck: {{oldFp}} → {{newFp}}",
+        "backupPathLabel": "Gesichert unter: {{path}}",
+        "reencrypted": "Lokales Datenbankpasswort mit dem neuen Schlüssel neu verschlüsselt",
+        "restartRequired": "Der neue Schlüssel wird erst nach einem Neustart der App wirksam; vor dem Neustart keine neuen Geheimdaten speichern.",
+        "importNoop": "Der importierte Schlüssel ist identisch mit dem aktuellen (Fingerabdruck {{fp}}); es wurde nichts geändert."
+      }
     },
     "defaultConversationModel": "Standard-Gesprächsmodell",
     "defaultConversationModelDesc": "Standardmodell für neue Gespräche. Fällt auf das zuletzt aktive Gesprächsmodell zurück, wenn nicht festgelegt",
@@ -17033,12 +17058,6 @@
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "horizonFailed": "Dieser Zeithorizont ({{horizon}}) konnte in dieser Runde nicht gescannt werden: {{reason}}; andere Horizonte sind nicht betroffen",
       "bannerPoolFallbackOnly": "Alle {{fallback}} Kandidaten stammen aus dem integrierten Beispiel-Pool; kein Ranking beliebter Aktien oder Sektor-Anführer verfügbar – die Ergebnisse bilden nicht die tatsächlichen Marktführer ab.",
-      "bannerGateBlocked": "Langfrist-Gate hat {{count}} Kandidaten blockiert (Erstverlust / zwei Perioden rückläufig / Verkaufsurteil innerhalb 30 Tagen)",
-      "gateReason": {
-        "firstLoss": "Erstverlust: Konzernergebnis ≤ 0",
-        "twoPeriodDecline": "Nettogewinn zwei Perioden in Folge rückläufig",
-        "analysisVeto": "Analyse {{period}}: \"{{action}}\" (innerhalb 30 Tagen)"
-      },
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "boardScopeTip": "Board scope: picking a board (Shanghai/Shenzhen main, ChiNext, STAR) limits the whole candidate pool to that board; Auto rotates the scanned board daily without limiting the pool; All scans four boards at once (~138 requests)",

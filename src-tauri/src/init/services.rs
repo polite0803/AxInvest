@@ -2117,7 +2117,7 @@ pub async fn start_cron_scheduler_headless(state: &AppState) {
 ///   ③ `cron_leader_lease` **库表**（PG 模式下该表就在共享 PG 库里）。
 ///
 /// 租约对 holder_id 的全部要求只有两条：**进程内唯一** + **可诊断**
-/// （`crates/entities/src/cron_leader_lease.rs` 的列注释原文：「持有者标识
+/// （`axagent-core/crates/entities/src/cron_leader_lease.rs` 的列注释原文：「持有者标识
 /// （本进程启动时生成，进程内唯一）」）。dao 层对它只做**相等比较**
 /// （`row.holder_id != holder_id` / `Column::HolderId.eq(holder_id)`），
 /// **从不解析**其内容 ⇒ 改格式不影响租约语义。
@@ -2585,12 +2585,13 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
                 )
                 .await;
                 tracing::info!(
-                    "[CronScheduler] 荐股任务 '{}' 候选种子已刷新：用户 {} / 涨幅榜 {} / 漏检 {} / 回灌 {}",
+                    "[CronScheduler] 荐股任务 '{}' 候选种子已刷新：用户 {} / 涨幅榜 {} / 漏检 {} / 回灌 {} / 全市场快照 {}",
                     job_name,
                     seed_counts.user,
                     seed_counts.mover,
                     seed_counts.miss,
-                    seed_counts.reflow
+                    seed_counts.reflow,
+                    seed_counts.universe
                 );
                 let prior =
                     crate::commands::stock_analysis::reco_horizon_prior(&db, &vars).await;

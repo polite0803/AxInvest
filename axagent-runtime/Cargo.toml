@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# AxAgent Runtime —— 运行时层独立 Cargo workspace。
+#
+# 承载 crdt / gateway / notification / rt-messaging / rt-workflow / runtime /
+# runtime-core / tools。
+# 应用壳层 src-tauri 通过「version + path」依赖本 workspace 的成员
+# （见 PLAN-repo-split §12/§13）。
+
+[workspace]
+resolver = "2"
+members = [
+  "crates/crdt",
+  "crates/gateway",
+  "crates/notification",
+  "crates/rt-messaging",
+  "crates/rt-workflow",
+  "crates/runtime",
+  "crates/runtime-core",
+  "crates/tools",
+]
+
+[workspace.package]
+version = "3.0.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+
+[workspace.dependencies]
+# 统一第三方依赖版本：与 src-tauri/Cargo.toml 逐字同源，避免多个 workspace 解析出不同版本。
+anyhow = "1"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+dashmap = "6"
+hex = "0.4"
+image = { version = "0.25", features = ["png"] }
+insta = { version = "1.48", features = ["yaml", "json", "redactions"] }
+# gzip 特性有踩坑实证（见 src-tauri/Cargo.toml 注释），不得精简。
+reqwest = { version = "0.13", features = ["json", "gzip"] }
+sea-orm = { version = "2.0.1", features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio-rustls", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.11"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+# 统一 lint 基线（与 src-tauri 保持一致）。
+[workspace.lints.clippy]
+# 禁用 std::sync 锁类型（铁律 #8），由 clippy.toml 的 disallowed-types 列表配合。
+disallowed_types = "deny"
+# axagent- 前缀导致模块名天然重复，允许 module_name_repetitions。
+module_name_repetitions = "allow"
+
+# ⚠ 与 `../src-tauri/Cargo.toml` 的 `[profile.dev]` / `[profile.dev.build-override]` 逐字同源。
+# 为什么必须每个根各写一份：`[profile.*]` **只在「发起构建的那个 workspace 根」生效**，写在成员里 cargo 会忽略。
+# 子根缺它 ⇒ 退回默认 `debug = true` / `incremental = true` / 默认 codegen-units ⇒
+#   ① 同一份第三方依赖在子根与 src-tauri 各编一遍（profile 不同 ⇒ fingerprint 目录不同 ⇒ 增量缓存互不认账）；
+#   ② 踩回 src-tauri 那段注释记录的坑：os error 5 僵尸增量会话（实测 55G / 415 目录）与 20 万 .o 链接灾难。
+# 实测代价（2026-11-01）：8 根串行全量 `clippy --workspace --all-targets --all-features` = 67m53s，
+# 而拆分前单根同一命令 = 9m24s。改这里之前先确认两边仍逐字一致，否则又变成「两边打架」。
+
+[profile.dev]
+opt-level = 0
+# line-tables-only: 仅生成行号表，保留 panic 回溯的源文件+行号。
+# 相比 debug = true（完整符号表），编译时间降 30-50%，链接时间降 50%+。
+# 代价：调试器里看不到局部变量值；
+#       需要完整调试时执行 `CARGO_PROFILE_DEV_DEBUG=true cargo build` 覆盖。
+debug = "line-tables-only"
+# Windows 本机关闭增量编译（2026-08-31 实测）：
+# rustc 的增量会话目录 target/debug/incremental/* 在本机受文件占用（EDR/监视器）影响，
+# 每次构建恒定报 `failed to garbage collect ... 拒绝访问。(os error 5)`，
+# 且 GC 失败 → 僵尸会话只增不减，实测累积 **55G / 415 个目录**，缓存复用率极低
+# （415 个会话 = 反复失效重建，未起到增量收益）。
+# 已有 sccache + build-override 提供缓存层，关闭后重编耗时无明显劣化。
+# 需临时开启调试：CARGO_INCREMENTAL=1 cargo build（env 优先级高于此处配置）。
+incremental = false
+# Windows MSVC 关键优化：split-debuginfo="unpacked" 将 PDB 拆分到 .pdb 文件，
+# 避免链接器把 debug info 打包进 .dll/.exe，每次链接减少数分钟
+split-debuginfo = "unpacked"
+
+# 第三方依赖：codegen-units 从 64 降至 16
+# 64 → 每个 dep crate 产出 64 个 .o 文件 → 3200 crate × 64 = 204800 目标文件
+#     链接器需处理 20 万文件（I/O 灾难），并行编译收益被完全抵消
+# 16 → 总目标文件数降至 51200，链接加速 3-5x，编译并行度仍足够 16 核满载
+[profile.dev.build-override]
+opt-level = 0
+codegen-units = 16
+debug = false
+# 同 [profile.dev]：build script 的增量会话目录同样 GC 不掉，一并关闭
+incremental = false

@@ -1168,6 +1168,41 @@ pub(crate) async fn run_serenity_screening_inner(
         "[serenity] 档位口径: {serenity_tier_desc}          止损/目标=k·σ_daily·√h（k1={reco_stop_k1} k2={reco_target_k2}），σ 不可得退 stop×{serenity_stop_mult}/target×{serenity_target_mult}          建仓带=该档止损距离一半（Q1=B）          （短/超短档不适用：serenity 行按设计不做）"
     );
 
+    // W2b（2026-11-01）：趋势智选工作流也消费闭环权重。
+    //
+    // 在此之前只有推荐器的 `SerenityStrategy` 读权重，而工作流链直接落库 ⇒ 同名为
+    // 「serenity」的两条路，一条受约束、一条不受约束。现在：
+    //   · live：权重 0 ⇒ 本档不落库/不呈现；>0 ⇒ 只缩放 positionPct；
+    //   · as-of：**不消费** live 权重（防前视），基线 1.0 并留日志。
+    let serenity_loop_weights = if as_of_ctx.is_none() {
+        match axagent_analysis_engine::evolution_drift::load_current_weights_by_trigger(
+            db,
+            Some(axagent_analysis_engine::recommender::reco_loop::RECO_LOOP_TRIGGER),
+        )
+        .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!("[serenity] 闭环权重读取失败（按基线 1.0）: {e}");
+                Default::default()
+            },
+        }
+    } else {
+        tracing::info!("[serenity] as-of 回放不消费 live 闭环权重（防前视），基线 1.0");
+        Default::default()
+    };
+    let serenity_tier_weight = |tier: &str| -> f64 {
+        // 闭环写的是矩阵名目 `serenity`；历史行可能仍是落库写法 `bottleneck`，两种都认。
+        let key = |style: &str| (style.to_string(), tier.to_string());
+        serenity_loop_weights
+            .get(&key("serenity"))
+            .or_else(|| serenity_loop_weights.get(&key("bottleneck")))
+            .copied()
+            .unwrap_or(1.0)
+    };
+    let all_tiers_disabled = as_of_ctx.is_none()
+        && serenity_tiers.iter().all(|t| serenity_tier_weight(t.as_str()) <= 0.0);
+
     // 3. 进度回调
     let progress_app = app.clone();
     let progress_wf_id = wf_id.clone();
@@ -1695,6 +1730,15 @@ pub(crate) async fn run_serenity_screening_inner(
                         let tier_period = tier.as_str();
                         let tier_days = tier.default_holding_days() as i64;
                         let h_days = tier_days as usize;
+                        // W2b：负期望硬停的格不落库、不呈现（全档都被停时下面返回空数组，
+                        // 不再回退到未经闭环约束的原始候选）。
+                        let tier_weight = serenity_tier_weight(tier_period);
+                        if tier_weight <= 0.0 {
+                            tracing::warn!(
+                                "[serenity] {code} {tier_period}: 闭环权重 0（负期望硬停）⇒ 本档不落库/不呈现"
+                            );
+                            continue;
+                        }
                         // ── 口径统一（2026-10-02）：候选评分 → 该档上涨胜率 ──
                         // 与荐股策略链（`recommender/mod.rs` 的 R-C 段）、分析决策链
                         // （`portfolio-mgr.rhai` 的 `pm_snr_confidence`）**同一份实现**：
@@ -1759,10 +1803,10 @@ pub(crate) async fn run_serenity_screening_inner(
                             used_target_pct,
                             reco_round_trip_cost_pct,
                         );
-                        let position_pct = (pos_before_drag * drag).clamp(0.0, 95.0);
+                        let position_pct = (pos_before_drag * drag * tier_weight).clamp(0.0, 95.0);
                         let mut pick_reasons = reasons_base.clone();
                         pick_reasons.push(format!(
-                            "风控({tier_period} {h_days} 天): 止损 {used_stop_pct:.2}% ({stop_src}) · 目标 {used_target_pct:.2}% · 建仓带 ±{entry_half_pct:.2}% ({entry_src}) · 仓位上限 {cap_position:.1}% → 风险预算 {:.1}% × 成本拖累 {drag:.2}",
+                            "风控({tier_period} {h_days} 天): 止损 {used_stop_pct:.2}% ({stop_src}) · 目标 {used_target_pct:.2}% · 建仓带 ±{entry_half_pct:.2}% ({entry_src}) · 仓位上限 {cap_position:.1}% → 风险预算 {:.1}% × 成本拖累 {drag:.2} × 闭环权重 {tier_weight:.2}",
                             budget.unwrap_or(0.0)
                         ));
                         // 逐档先验只在荐股策略链合成（`mod.rs` 的 R-C 段）；本链 confidence 是工作流
@@ -1812,6 +1856,12 @@ pub(crate) async fn run_serenity_screening_inner(
                             // 2026-10-02 前此处硬编码 `absent`，与另外两条链的词表脱节。
                             "priorSource": prior_source,
                             "synthetic": false,
+                            // 智选诊断三键（2026-10-31 阶段0）：此前 pick_data 不带这三个键 ⇒
+                            // `serenity_metrics`（backtest_validation.rs）读不到 ⇒ 分层报表恒
+                            // `not_persisted`、因子 IC 恒空观测。这里落库后分层/IC 自动有数。
+                            "serenityScore": c["serenity_score"],
+                            "bottleneckComposite": c["bottleneck_composite"],
+                            "dataReliability": c["data_reliability"],
                         });
                         // 逐档展开的实时候选：克隆原始候选 + 覆盖逐档字段，与前端
                         // `restoreCandidate`（`seed_pool_json` 铺底 + `pick_data` 覆盖）
@@ -1884,42 +1934,16 @@ pub(crate) async fn run_serenity_screening_inner(
                             }
                         }
                     }
-                    // 构建全量数据缓存
-                    detail_cache.insert(
-                        code.to_string(),
-                        serde_json::json!({
-                            "serenity_score": c["serenity_score"],
-                            "strategy_type": c.get("strategy_type").and_then(|v| v.as_str()).unwrap_or("bottleneck"),
-                            "catalysts": c["catalysts"],
-                            "exit_signals": c["exit_signals"],
-                            "attention_metrics": c["attention_metrics"],
-                            "bottleneck_product": c["bottleneck_product"],
-                            "primary_risk": c["primary_risk"],
-                            "relevance": c["relevance"],
-                            // 这里是**候选本身**的原始评分（不是该档胜率）：该缓存描述
-                            // 「这个候选有多符合瓶颈策略」，供策略链/展示读取，故不折算。
-                            "confidence": conf_input,
-                        }),
-                    );
-                    // 构建种子列表
-                    serenity_seed.push((code.to_string(), name.to_string(), None));
-                }
-                // 同步到全局种子 + 全量数据缓存
-                // 全局 serenity 种子会被**智能荐股的 live 扫描**消费（`recommender` 的
-                // `get_serenity_seed`）⇒ 回放写入会把历史候选带进下一次实盘池，只在 live 同步。
-                // 注意这与上面的落库裁定不冲突：落库是「持久化 + 代际标记」，这里是**进程内
-                // 可变状态**，没有代际可打，一旦被回放写过就分不回来，所以继续只在 live 写。
-                if !serenity_seed.is_empty() && as_of_ctx.is_none() {
-                    axagent_analysis_engine::recommender::set_serenity_seed(serenity_seed);
-                    axagent_analysis_engine::recommender::set_serenity_candidate_cache(
-                        detail_cache,
-                    );
                 }
             }
 
             // 逐档展开后的对外候选：展开为空（无候选 / 无有效行）时退回原始数组，
             // 不让「落库 best-effort」的异常连带把候选呈现清空。
-            let live_candidate_array = if live_candidates.is_empty() {
+            // 全档都被闭环硬停时返回空数组，**不能**回退到未经闭环约束的原始候选
+            // （那会让「权重 0 = 不出票」在面板上重新出现）。
+            let live_candidate_array = if all_tiers_disabled {
+                serde_json::Value::Array(Vec::new())
+            } else if live_candidates.is_empty() {
                 candidate_array.clone()
             } else {
                 serde_json::Value::Array(live_candidates)

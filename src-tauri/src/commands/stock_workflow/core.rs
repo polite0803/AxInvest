@@ -106,7 +106,7 @@ async fn record_dqi_observation(
 /// 把 `WorkflowError` 的**具体变体**映射成对外错误码 + 分类。
 ///
 /// 为什么必须按变体映射、而不是 `e.to_string()` 透传：
-/// `WorkflowError` 的 `Display`（`crates/harness/src/workflow_types.rs:2585/2587`）
+/// `WorkflowError` 的 `Display`（`axagent-core/crates/harness/src/workflow_types.rs:2585/2587`）
 /// 里 `InvalidStateTransition` 与 `LifecycleHookFailed` 两个变体本身输出**中文**，
 /// 直接透传要么漏中文到非中文界面、要么依赖前端做文本嗅探。
 ///

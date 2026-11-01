@@ -45,10 +45,15 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative, sep } from "node:path";
 import { matchBraceEnd, sanitize, testModuleRanges } from "./lib/rust-source-scan.mjs";
+import { discoverWorkspaceRoots } from "./lib/workspace-roots.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..");
-const SCAN_ROOTS = [join(REPO, "src-tauri", "src"), join(REPO, "src-tauri", "crates")];
+// crate 分散到多个 workspace：`crates/` 面按自动探测的根展开；应用壳层 src 保持不变。
+const SCAN_ROOTS = [
+  join(REPO, "src-tauri", "src"),
+  ...discoverWorkspaceRoots(REPO).map((r) => join(r, "crates")),
+];
 
 const WRITE_PATTERNS = [
   {

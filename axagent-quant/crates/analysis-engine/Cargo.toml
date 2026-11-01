@@ -1,0 +1,29 @@
+[package]
+name = "axagent-analysis-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = "0.1"
+axagent-astock-data = { path = "../astock-data" }
+axagent-dao = { version = "3.0.0", path = "../../../axagent-infra/crates/dao" }
+axagent-entities = { version = "3.0.0", path = "../../../axagent-core/crates/entities" }
+axagent-harness = { version = "3.0.0", path = "../../../axagent-core/crates/harness" }
+axagent-trajectory = { version = "3.0.0", path = "../../../axagent-ai/crates/trajectory" }
+chrono = { workspace = true }
+csv = "1"
+futures = "0.3"
+parking_lot = "0.12"
+regex = "1"
+sea-orm = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+zip = { version = "9", default-features = false, features = ["deflate"] }

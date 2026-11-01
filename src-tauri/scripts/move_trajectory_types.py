@@ -7,7 +7,7 @@ import re
 import pathlib
 _PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
-HARNESS_SRC = str(_PROJECT_ROOT / "src-tauri/crates/harness/src")
+HARNESS_SRC = str(_PROJECT_ROOT / "axagent-core/crates/harness/src")
 TRAJECTORY_SRC = str(_PROJECT_ROOT / "src-tauri/crates/trajectory/src")
 TRAJECTORY_RS = os.path.join(TRAJECTORY_SRC, "trajectory.rs")
 

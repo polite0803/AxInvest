@@ -33,11 +33,14 @@ import { fileURLToPath } from "node:url";
 
 // 复用 as-of 接线门的剥注释实现（禁区 12：不另造一份状态机）
 import { stripRustComments } from "./check-asof-node-scope.mjs";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
 
-const LEG_SIGNAL_FILE = "src-tauri/crates/analysis-engine/src/leg_signal.rs";
-const SOURCE_TABLE_FILE = "src-tauri/crates/analysis-engine/src/evidence_weight.rs";
+const LEG_SIGNAL_FILE = `${crateRel("analysis-engine", "src/leg_signal.rs")}`;
+const SOURCE_TABLE_FILE = `${crateRel("analysis-engine", "src/evidence_weight.rs")}`;
 const WIRING_FILE = "src-tauri/src/commands/stock_workflow/hooks.rs";
 const BRANCH_SCRIPTS = [
   "src-tauri/src/commands/portfolio-mgr-h-ultra-short.rhai",

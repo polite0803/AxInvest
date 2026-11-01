@@ -33,9 +33,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
 
 // ── 登记表：产物 → 生产锚点 → 消费锚点 ──────────────────────────────────────
 // 每条都要能一句话说清「哪段代码读它」；说不出来的条目不该登记在这里。
@@ -44,12 +47,12 @@ const ENTRIES = [
     key: "reco_strategy_weights",
     why: "荐股 IC 闭环产出的逐格权重，必须被荐股/智选出票评分读取",
     producer: {
-      file: "src-tauri/crates/analysis-engine/src/recommender/reco_loop.rs",
+      file: `${crateRel("analysis-engine", "src/recommender/reco_loop.rs")}`,
       literal: "reco_strategy_weights",
     },
     consumers: [
       {
-        file: "src-tauri/crates/analysis-engine/src/recommender/mod.rs",
+        file: `${crateRel("analysis-engine", "src/recommender/mod.rs")}`,
         literal: "reco_strategy_weights",
         note: "按 key 解析 served vars 里被闭环覆盖后的权重表",
       },
@@ -146,7 +149,7 @@ const ENTRIES = [
     key: "mover_recall_runs.asof_diff_summary",
     why: "轮级差异摘要是荐股闭环的数值信号来源（C-1/C-5），必须被命令与面板同时读到",
     producer: {
-      file: "src-tauri/crates/dao/src/repo/mover_recall_runs.rs",
+      file: `${crateRel("dao", "src/repo/mover_recall_runs.rs")}`,
       literal: "asof_diff_summary_json",
     },
     consumers: [
@@ -171,7 +174,7 @@ const ENTRIES = [
     },
     consumers: [
       {
-        file: "src-tauri/crates/dao/src/repo/stock_lesson_queries.rs",
+        file: `${crateRel("dao", "src/repo/stock_lesson_queries.rs")}`,
         literal: "asofLayer",
         note: "反思行投影带上 as-of 层与批次键",
       },
@@ -186,7 +189,7 @@ const ENTRIES = [
     key: "historical_weights",
     why: "进化/闭环学到的权重必须进个股证据共识",
     producer: {
-      file: "src-tauri/crates/analysis-engine/src/evidence_weight.rs",
+      file: `${crateRel("analysis-engine", "src/evidence_weight.rs")}`,
       literal: "historical_weights",
     },
     consumers: [
@@ -271,12 +274,12 @@ const ENTRIES = [
     key: "MoverCellSignal",
     why: "漏检降权信号是荐股闭环「只降不升」的输入；不消费则 `l3_scored_out` 的账永远不落到权重上",
     producer: {
-      file: "src-tauri/crates/analysis-engine/src/mover_recall.rs",
+      file: `${crateRel("analysis-engine", "src/mover_recall.rs")}`,
       literal: "pub async fn load_mover_cell_signal",
     },
     consumers: [
       {
-        file: "src-tauri/crates/analysis-engine/src/recommender/reco_loop.rs",
+        file: `${crateRel("analysis-engine", "src/recommender/reco_loop.rs")}`,
         literal: "MoverCellSignal",
         note: "compute_loop_cell_weights 逐格取 penalty（按 (style, period) 累加分子分母）",
       },
@@ -352,7 +355,7 @@ function splitArgs(block) {
  * R5 语义断言（2026-10-24，PLAN G-6）：登记表管「谁读它」，这里管「读法对不对」的三条
  * 曾被实际踩到过的形态 —— 它们都不是「少一个调用」而是「接上了但语义被覆盖」。
  */
-const EVENTS_DAO = "src-tauri/crates/dao/src/repo/mover_recall_events.rs";
+const EVENTS_DAO = `${crateRel("dao", "src/repo/mover_recall_events.rs")}`;
 const REFLECTION = "src-tauri/src/commands/stock_workflow/reflection.rs";
 const SEMANTIC_CHECKS = [
   {
@@ -505,7 +508,7 @@ function synthetic(mutate) {
 
 const PANEL = "src/components/stock-analysis/SerenityValidationPanel.tsx";
 const STORE = "src/stores/feature/stockAnalysisStore.ts";
-const MOD = "src-tauri/crates/analysis-engine/src/recommender/mod.rs";
+const MOD = `${crateRel("analysis-engine", "src/recommender/mod.rs")}`;
 const SEEDVARS = "src-tauri/src/commands/stock_analysis_setup/seed_variables.rs";
 const TRADER = "src-tauri/agency_experts/stock-analysis/trader.md";
 const MR_PANEL = "src/components/stock-analysis/MoverRecallPanel.tsx";

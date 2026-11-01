@@ -4,7 +4,7 @@
  *
  * ## 为什么需要它
  *
- * 荐股链（`src-tauri/crates/analysis-engine/src/recommender/`）的四档口径此前有四处
+ * 荐股链（`axagent-quant/crates/analysis-engine/src/recommender/`）的四档口径此前有四处
  * 「两处各自都自洽、两边打架」的形态，`cargo check` / `typecheck` 全绿也照样存在：
  *
  * | 门 | 锁什么 | 修复前的真实形态（本门必须对它报红） |
@@ -28,15 +28,18 @@ import process from "node:process";
 
 // 复用 as-of 接线门的剥注释与分段实现（禁区 12：不另造一份状态机）
 import { splitTopLevelFns, stripRustComments } from "./check-asof-node-scope.mjs";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const STRATEGIES_DIR = "src-tauri/crates/analysis-engine/src/recommender/strategies";
-const SCORING = "src-tauri/crates/analysis-engine/src/recommender/scoring.rs";
-const RECO_MOD = "src-tauri/crates/analysis-engine/src/recommender/mod.rs";
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
+const STRATEGIES_DIR = `${crateRel("analysis-engine", "src/recommender/strategies")}`;
+const SCORING = `${crateRel("analysis-engine", "src/recommender/scoring.rs")}`;
+const RECO_MOD = `${crateRel("analysis-engine", "src/recommender/mod.rs")}`;
 /** 荐股链尺度层 —— 门 n 要它**转发** harness 的档→尺度权威，而不是自带四臂表。 */
-const RECO_SCALE = "src-tauri/crates/analysis-engine/src/recommender/scale.rs";
-const MATRIX_SRC = "src-tauri/crates/analysis-engine/src/recommender/style_matrix.rs";
-const HOLDING = "src-tauri/crates/harness/src/holding_period.rs";
+const RECO_SCALE = `${crateRel("analysis-engine", "src/recommender/scale.rs")}`;
+const MATRIX_SRC = `${crateRel("analysis-engine", "src/recommender/style_matrix.rs")}`;
+const HOLDING = "axagent-core/crates/harness/src/holding_period.rs";
 const PANEL = "src/components/stock-analysis/RecommendationPanel.tsx";
 const MATRIX = "src/components/stock-analysis/RecoStrategyMatrix.tsx";
 
@@ -289,7 +292,7 @@ function checkAbsenceReasonTranslated(src) {
 
 const SERENITY_WORKFLOW = "src-tauri/src/commands/stock_workflow/serenity.rs";
 const SERENITY_STRATEGY = `${STRATEGIES_DIR}/serenity.rs`;
-const RECO_RISK = "src-tauri/crates/analysis-engine/src/recommender/risk.rs";
+const RECO_RISK = `${crateRel("analysis-engine", "src/recommender/risk.rs")}`;
 
 /**
  * 门 h：趋势智选**两条链**的风控口径必须同源（`PLAN-serenity-horizon-adaptation.md` S1/S2）。
@@ -450,7 +453,7 @@ function checkSerenityCardTierDisplay(cardSrc) {
 const SERENITY_CARD = "src/components/stock-analysis/SerenityCandidateCard.tsx";
 
 // ── 窗口涨幅达标漏检核查（`PLAN-mover-recall-attribution.md`）──
-const MOVER_ENGINE = "src-tauri/crates/analysis-engine/src/mover_recall.rs";
+const MOVER_ENGINE = `${crateRel("analysis-engine", "src/mover_recall.rs")}`;
 const MOVER_CMD = "src-tauri/src/commands/mover_recall.rs";
 const MOVER_PANEL = "src/components/stock-analysis/MoverRecallPanel.tsx";
 // #10 P7：妖股标签的消费端（逐档反思行）—— 同归入口径边界与「判据单源」两条门。

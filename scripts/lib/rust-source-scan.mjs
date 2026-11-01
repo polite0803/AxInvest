@@ -128,7 +128,7 @@ export function sanitize(text) {
  * 那样会把那个 mod 的整段区间当成测试面，**静默豁免其间成百行生产代码**。
  * 现网读数（2026-10-28 实测，全仓 1018 处 `#[cfg(test)]`）：**67 处不紧贴 `mod X {`**，
  * 如 `src-tauri/src/commands/conversations/mod.rs:11` 的 `#[cfg(test)] pub use …`。
- * 按「往后找」的旧写法出数，实测在 `src-tauri/crates/rt-workflow/src/work_engine/engine/mod.rs`
+ * 按「往后找」的旧写法出数，实测在 `axagent-runtime/crates/rt-workflow/src/work_engine/engine/mod.rs`
  * 圈出 38–7365、在 `src-tauri/src/commands/conversations/mod.rs` 圈出 11–1800 ——
  * [H] 段会因此把 11 处生产丢弃一起藏掉，棘轮从 259 假降到 235（等于放松 24 格）。
  */

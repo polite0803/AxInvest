@@ -67,7 +67,7 @@ const DEFAULTS = {
 // 于是 `scanSeed` 定位失败。本脚本的失败模式恰恰是「定位失败不许静默退化成全文匹配」
 // （开发史第 ② 次自打就是这个），所以宁可在脚本内部拼锚，也不让 shell 参与引号。
 const TIER_BUILDER_SEED = "src-tauri/src/commands/stock_analysis_setup/horizon_tier_template.rs";
-const HARNESS_REL = "src-tauri/crates/harness/src/holding_period.rs";
+const HARNESS_REL = "axagent-core/crates/harness/src/holding_period.rs";
 
 /** 读仓内相对路径（审计与自证共用同一种取法，避免两处拼 ROOT 漂移）。 */
 const readRel = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");

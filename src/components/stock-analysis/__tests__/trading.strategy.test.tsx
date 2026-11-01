@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 describe("trading.rs — trades::ActiveModel 必须设置 strategy 字段", () => {
   it("execute_trade 函数体的 trades::ActiveModel 初始化必须含 strategy 字段", () => {
     const projectRoot = process.cwd();
-    const srcPath = resolve(projectRoot, "src-tauri/crates/analysis-engine/src/trading.rs");
+    const srcPath = resolve(projectRoot, "axagent-quant/crates/analysis-engine/src/trading.rs");
     const src = readFileSync(srcPath, "utf8");
 
     // 定位到 execute_trade 函数体的 trades::ActiveModel 块

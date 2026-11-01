@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // ! 能力发现系统前端类型定义
 //
-// 以后端 DTO 为权威来源对齐（见 src-tauri/crates/harness/src/capability*.rs）。
+// 以后端 DTO 为权威来源对齐（见 axagent-core/crates/harness/src/capability*.rs）。
 // - 后端枚举使用 `#[serde(rename_all = "snake_case")]`，前端用 snake_case 字面量
 // - 后端 struct 字段保持 snake_case，通过 `#[serde(rename_all = "camelCase")]`
 //   序列化输出 camelCase，前端消费 camelCase

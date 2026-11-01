@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# AxAgent 仓库根级 Cargo 配置。
+#
+# 注意：
+#   1. `.cargo/config.toml` 只支持 build / target / registries(自定义) / env / alias 等键；
+#      **不支持 [profile]**（profile 必须写在 Cargo.toml 清单里），也不可覆盖内置
+#      crates-io 的 index —— 因此这里不做那两件事。
+#   2. 本项目实际的 Rust 工程根是 `src-tauri/`，其 `.cargo/config.toml` 已配置
+#      rust-lld 链接器与 `jobs`。Cargo 从 cwd 向上查找时会同时读取本文件，
+#      故本文件必须保持「最小且合法」，只放跨 workspace 共享的通用设置。
+
+# 与 src-tauri/.cargo/config.toml 逐字一致：两个 workspace 共享 target-dir 时 rustflags 必须一致，
+# 否则同一份增量缓存会因编译参数不同而互相失效。
+[target.x86_64-pc-windows-msvc]
+# 使用 rustc 自带的 rust-lld 作为 MSVC 链接器（Rust 1.71+ 原生支持，自动按 msvc flavor 调用）。
+# 相比 MSVC link.exe，链接速度提升数倍，直击"3200+ crate 全量链接"这一核心瓶颈（主 bin 每次改动都要全量 relink）。
+# 已用临时 crate 以 `-C linker=rust-lld -C target-feature=+crt-static` 验证可正常链接出 exe。
+# 如需回退 link.exe，删除下面 linker 一行并恢复 rustflags 即可。
+linker = "rust-lld"
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[build]
+# 与 src-tauri 保持一致；若本机核数不同可被环境变量 CARGO_BUILD_JOBS 覆盖。
+jobs = 16

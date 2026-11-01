@@ -54,10 +54,12 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { discoverWorkspaceRoots } from "./lib/workspace-roots.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
-const SCAN_DIRS = [resolve(root, "src-tauri")];
+// crate 分散到多个 workspace：扫描面按「含 [workspace] 的目录」自动展开。
+const SCAN_DIRS = discoverWorkspaceRoots(root);
 const ALLOWLIST_PATH = resolve(__dirname, "sql-dialect-allowlist.json");
 
 const ARGV = (name) => (process.argv.includes(`--${name}`) ? true : undefined);
@@ -237,6 +239,18 @@ function isTestPath(rel) {
   return /\/tests\/|\/examples\//.test(rel) || /(^|\/)test[_-]/.test(rel) || /_test\.rs$/.test(rel);
 }
 
+/**
+ * 豁免匹配键：仓库相对路径 + 「从第一个 `crates/` 起」的 workspace 内相对写法。
+ * 例：`axagent-infra/crates/dao/src/integrity.rs` ⇒ 也尝试 `crates/dao/src/integrity.rs`。
+ */
+function allowKeys(rel) {
+  const keys = [rel];
+  const parts = rel.split("/");
+  const i = parts.indexOf("crates");
+  if (i > 0) keys.push(parts.slice(i).join("/"));
+  return keys;
+}
+
 function loadAllowlist() {
   if (!existsSync(ALLOWLIST_PATH)) return { files: {}, sites: {} };
   try {
@@ -313,7 +327,12 @@ export function scanText(rel, rawText, allow) {
   }
 
   // 文件级豁免对 A/B 两段都生效 —— 同一模块「合法单方言」的性质对两段都成立。
-  const kept = hits.filter((h) => !allow.files[rel] && !allow.sites[`${rel}:${h.line}`]);
+  // crate 换 workspace 后仓库相对路径会变；豁免键同时按「workspace 内相对写法」
+  // （`crates/dao/src/x.rs`）匹配，避免每次拆 workspace 都改 JSON。
+  const keys = allowKeys(rel);
+  const kept = hits.filter(
+    (h) => !keys.some((k) => allow.files[k]) && !keys.some((k) => allow.sites[`${k}:${h.line}`]),
+  );
   return { hits: kept, raw: hits };
 }
 
@@ -387,7 +406,7 @@ function runSelftest() {
 
   bad += t("负向：tests/ 目录下的方言写死 ⇒ 不报", () => {
     const src = `fn helper() {\n    let sql = "PRAGMA x";\n}\n`;
-    const r = scanText("src-tauri/crates/dao/tests/x.rs", src, empty);
+    const r = scanText("axagent-infra/crates/dao/tests/x.rs", src, empty);
     if (r.hits.length !== 0) throw new Error(`期望 0 条，实际 ${r.hits.length}`);
   });
 

@@ -72,7 +72,7 @@ jobs:
         run: bash scripts/check-line-endings.sh
 
       # 领域语义（量纲）门禁 —— 权威源是 harness 的 CONCEPTS 注册表
-      # （src-tauri/crates/harness/src/domain_semantics.rs），脚本不自带清单。
+      # （axagent-core/crates/harness/src/domain_semantics.rs），脚本不自带清单。
       #
       # 为什么放这么前：与行尾检查同理 —— 纯 Node、不依赖 npm ci、几秒内出结果。
       # 为什么先跑 --selftest：扫描器自身会撒谎（v1 曾把 33 处「同一名字下的
@@ -596,22 +596,24 @@ jobs:
             libwayland-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libgbm-dev \
             libjavascriptcoregtk-4.1-dev protobuf-compiler
 
-      - name: Check formatting
-        # 2026-09-21 补 `--all`：不带它时 cargo 只格式化**根 package**，
-        # `crates/*`（36 个 workspace 成员，本仓大部分逻辑在此）**完全不被检查**。
-        # 实测：当时 `--check` 为 `EXIT=0`（绿），而 `--all --check` 报 4 处 diff，
-        # 且**全在 `crates/` 下** —— 即这条门禁对多数改动文件是**盲**的。
-        # 加 `--all` 后两者口径一致，不再有「改了 crates/ 却查不到格式问题」的盲区。
-        run: cargo fmt --all --check --manifest-path src-tauri/Cargo.toml
+      # L2 逻辑拆分后仓库根下有 **8 个 workspace**（core / kit / ai / infra / quant /
+      # plugins / runtime / src-tauri）。只在 `src-tauri` 里跑 fmt / clippy / check，
+      # 只覆盖根包 + axagent-mobile，其余 34 个 crate **完全不检查** ⇒ 门禁照样绿。
+      # 统一交给 `scripts/cargo-all-workspaces.mjs`：根列表由
+      # `scripts/lib/workspace-roots.mjs` 自动探测（与静态门禁同源），新 workspace 自动纳入。
+      - name: Setup Node.js (for cross-workspace cargo gate scripts)
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
 
-      - name: Clippy
-        run: |
-          cargo clippy --workspace --all-targets --all-features \
-            --manifest-path src-tauri/Cargo.toml \
-            -- -D warnings
+      - name: Check formatting (all workspaces)
+        run: node scripts/cargo-all-workspaces.mjs fmt-check
 
-      - name: Check build
-        run: cargo check --workspace --manifest-path src-tauri/Cargo.toml
+      - name: Clippy (all workspaces)
+        run: node scripts/cargo-all-workspaces.mjs clippy
+
+      - name: Check build (all workspaces)
+        run: node scripts/cargo-all-workspaces.mjs check
 
       # 生成物漂移门：`src/types/generated/ipc.ts` / `events.ts` 由 schema-gen 生成，
       # 但 `run_check` 此前**从不非零退出** —— 「检查」只是打印，CI 里等于没有这道门。
@@ -619,16 +621,13 @@ jobs:
       # Rust 侧对齐、**字节级比对**（重新生成到临时目录再 diff）。实测负控：把已提交的
       # 旧 `ipc.ts` 喂进去 ⇒ `EXIT=1`，报「ipc.ts 与生成器输出不一致（首个差异在第 12 行；
       # 在库 4090 字节 vs 重跑 3805 字节）」。
-      # 工作目录取 `src-tauri`（与本地读数逐字同口径，且吃到 `rust-toolchain.toml` 的 1.97 钉版）；
-      # 产物路径由 `CARGO_MANIFEST_DIR` 编译期推出，与 CWD 无关。
+      # L2 拆分后 schema-gen 已从 `src-tauri/schema-gen` 搬到
+      # `axagent-plugins/crates/schema-gen`，不再属于 src-tauri workspace ⇒ 工作目录改为
+      # `axagent-plugins`（吃到该 workspace 的 rust-toolchain 1.97 钉版）；
+      # 产物路径由 `CARGO_MANIFEST_DIR` 上溯三级到仓库根推出，与 CWD 无关。
       - name: Check generated IPC types drift
         run: cargo run -q -p schema-gen -- check
-        working-directory: src-tauri
-
-      - name: Setup Node.js (for Rust lint scripts)
-        uses: actions/setup-node@v5
-        with:
-          node-version: 24
+        working-directory: axagent-plugins
 
       - name: Lint backend error codes (forbid raw map_err)
         run: |
@@ -722,8 +721,15 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev libgtk-3-dev libpipewire-0.3-dev libwayland-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libgbm-dev libjavascriptcoregtk-4.1-dev protobuf-compiler
 
-      - name: Run Rust tests
-        run: cargo nextest run --workspace --manifest-path src-tauri/Cargo.toml
+      - name: Setup Node.js (for cross-workspace cargo gate scripts)
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      # L2 拆分后 8 个 workspace 各有自己的测试面；只跑 src-tauri 会漏掉其余 34 个 crate
+      # （与 fmt / clippy / check 同一种假绿形态）。
+      - name: Run Rust tests (all workspaces)
+        run: node scripts/cargo-all-workspaces.mjs nextest
 
       # 真机 PostgreSQL 集成测试 —— **串行**执行，并与上面的 nextest 步骤隔离。
       #
@@ -784,10 +790,11 @@ jobs:
           #   `reconcile::apply::bootstrap_schema` 真跑一轮收敛，只是它的断言面只覆盖
           #   CJK 子集（函数/生成列/GIN 索引/查询命中），全量表集合不属于它。
           #   缺口说明与补法见上方的步骤注释 + `PLAN-declarative-schema-sync.md` §十一·十一⑨。）
+          # L2 拆分后 dao / search 都在 axagent-infra workspace
           cargo test -p axagent-dao --test pg_cjk_fts \
-            --manifest-path src-tauri/Cargo.toml -- --test-threads=1
+            --manifest-path axagent-infra/Cargo.toml -- --test-threads=1
           cargo test -p axagent-search --test pg_integration \
-            --manifest-path src-tauri/Cargo.toml -- --test-threads=1
+            --manifest-path axagent-infra/Cargo.toml -- --test-threads=1
 
           # ⚠ 2026-09-18 补：本目标此前**在 CI 里从未被执行过** —— 全仓 3 个 env-gated
           # PG 测试，这里原先只点了 2 个（本步骤的注释把 4 当成现状也是同一处漏项）。
@@ -831,7 +838,7 @@ jobs:
           # （不带 schema 限定），强度仅够证明「有这么一张表」，**不能**用来顶替上方
           # 登记的「真 PG 上全量 schema 表集合无断言」那个缺口。
           cargo test -p axagent-dao --test pg_upsert_bare_column \
-            --manifest-path src-tauri/Cargo.toml -- --test-threads=1 --nocapture 2>&1 \
+            --manifest-path axagent-infra/Cargo.toml -- --test-threads=1 --nocapture 2>&1 \
             | tee /tmp/pg-upsert-bare-column.log
           if grep -qE '^[[:space:]]*SKIP:' /tmp/pg-upsert-bare-column.log; then
             echo "::error::pg_upsert_bare_column 跳过了 —— 前置（wiki_graph_cache 表）不成立。本目标未通过，也未被验证。"
@@ -925,11 +932,19 @@ jobs:
         run: cargo install cargo-audit
         continue-on-error: false
 
-      - name: Run cargo audit
-        working-directory: src-tauri
+      - name: Run cargo audit (all workspaces)
         continue-on-error: false
         run: |
-          if cargo audit --version &>/dev/null; then
+          if ! cargo audit --version &>/dev/null; then
+            echo "cargo-audit not available, skipping"
+            exit 0
+          fi
+          # L2 拆分后每个 workspace 有独立 Cargo.lock（新锁文件尚未入库 ⇒ 现场生成）。
+          # 只审 src-tauri 的 lock 会漏掉其余 34 个 crate 的依赖。
+          for manifest in src-tauri/Cargo.toml axagent-*/Cargo.toml; do
+            if ! grep -q '^\[workspace\]' "$manifest"; then continue; fi
+            echo "== cargo audit: $manifest =="
+            cargo generate-lockfile --manifest-path "$manifest"
             # RUSTSEC-2026-0235 (rkyv 0.7.46): 上游 rust_decimal 1.42.1 依赖 rkyv 0.7.x。
             # rkyv 0.8.x 为 breaking change，rust_decimal 尚未适配。
             # 影响范围：仅 Linux 平台，sqlx-postgres/mysql 的 rust_decimal → rkyv 链。
@@ -955,15 +970,13 @@ jobs:
             #     **零 `extract()` 调用** ⇒ 漏洞接口不可达。
             # 退役条件：任一来源升级到 zip >=9、或 C/D 阶段替换 docx-rs/candle 后，删除
             # 对应 ignore；若 updater 真正启用且解包前不再验签，本豁免立即失效并重新评估。
-            cargo audit \
+            cargo audit --file "$(dirname "$manifest")/Cargo.lock" \
               --ignore RUSTSEC-2026-0235 \
               --ignore RUSTSEC-2024-0429 \
               --ignore RUSTSEC-2026-0367 \
               --ignore RUSTSEC-2026-0368 \
               --ignore RUSTSEC-2026-0369
-          else
-            echo "cargo-audit not available, skipping"
-          fi
+          done
 
   cargo-deny:
     name: License Check
@@ -981,6 +994,58 @@ jobs:
       - name: Install cargo-deny
         run: cargo install cargo-deny
 
-      - name: Run cargo deny check
-        working-directory: src-tauri
-        run: cargo deny check licenses bans sources
+      - name: Run cargo deny check (all workspaces)
+        # L2 拆分后每个 workspace 有独立 lock；配置仍取唯一的 `src-tauri/deny.toml`。
+        # 新锁文件尚未入库 ⇒ 现场生成（与 cargo audit 步骤同口径）。
+        run: |
+          for manifest in src-tauri/Cargo.toml axagent-*/Cargo.toml; do
+            if ! grep -q '^\[workspace\]' "$manifest"; then continue; fi
+            echo "== cargo deny: $manifest =="
+            cargo generate-lockfile --manifest-path "$manifest"
+            cargo deny --config src-tauri/deny.toml check --manifest-path "$manifest" licenses bans sources
+          done
+
+  # ── 多 workspace 构建配置同源（8 根的 profile / lints / 三份工具配置）──
+  # 为什么需要这道门：L2 拆分后 crate 分布在 8 个 Cargo workspace，而
+  #   `[profile.*]` 与 `[workspace.lints.*]` **只在发起构建的那个根生效**（写进成员被
+  #   cargo 静默忽略）。少写一段 ⇒ 该根退回 `debug = true` + `incremental = true`
+  #   （实测 879 个 GC 不掉的僵尸增量会话 / 68G），且各根 profile 不同 ⇒ metadata hash
+  #   不同 ⇒ 同一份第三方依赖在各根**重复编译**（全量 clippy 实测 9m24s → 67m53s）。
+  #   这类配置漂移**不会让任何既有门禁变红** —— 只表现为「构建变慢」，故必须单独设门。
+  # 判据四条：① 8 根 `[profile.dev]` / `[profile.dev.build-override]` 逐字一致，且
+  #   `incremental` 显式 false、`debug` 不得退回默认；② `[workspace.lints.clippy]` 必含
+  #   `disallowed_types` / `module_name_repetitions` 且跨根同值；③ `clippy.toml` /
+  #   `rustfmt.toml` / `rust-toolchain.toml` 每根都存在且内容一致（按「最近的清单目录」
+  #   解析 ⇒ 缺哪根哪根就用另一套白名单/行宽/工具链）；④ 各根 `.cargo/config.toml` 的
+  #   `target-dir` 不得互相冲突。
+  # 为什么是独立 job 而不是并入 frontend-check：本文件被仓内 18+ 处 `ci.yml:<行号>` 引用，
+  #   任何**中段插入**都会让其后全部引用整体移位、制造新的一整桶 BROKEN（假信号）。
+  #   追加到文件末尾 ⇒ 零行号漂移，而这道门与 frontend-check 并行跑，早失败性质不变。
+  # 命令行与 scripts/ci-check.mjs 对应 step **逐字同源**（由 src/__tests__/ci.workflow.test.ts
+  #   的对称差集护栏自动校验）。纯 Node 读清单文件，无需 npm ci，也无需 Rust 工具链。
+  workspace-config-parity:
+    name: Workspace Config Parity (8 roots profile/lints/toolchain)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Check workspace config parity selftest (8 roots)
+        run: node scripts/check-workspace-config-parity.mjs --selftest
+
+      - name: Check workspace config parity (8 roots must be byte-identical)
+        run: node scripts/check-workspace-config-parity.mjs
+
+      # 多 workspace cargo 命令组装自检（纯 Node，不起 cargo）。
+      # 为什么要单列：`--manifest-path` 若落到 `--` 之后，rustc/clippy-driver 会报
+      # `Unrecognized option: 'manifest-path'` —— 而**已缓存的 crate 根本不调 rustc ⇒ 不报错**，
+      # 于是暖缓存机器上「跑绿」，空缓存的 runner 第一个 crate 就编译 ⇒ 8 根 clippy 全红，
+      # 且红的原因是参数位置而非代码。这条不变量只有该脚本自己知道，所以由它自检。
+      # 放在本 job 末尾仍是「零行号漂移」的考虑：本文件被 18+ 处 `ci.yml:<行号>` 引用，
+      # 中段插入（比如挪到 rust-check 的那三条 cargo step 之前）会把其后每一行整体移走。
+      # 命令行与 scripts/ci-check.mjs 对应 step 逐字同源（由对称差集护栏自动校验）。
+      - name: Check cargo-all-workspaces argv assembly selftest
+        run: node scripts/cargo-all-workspaces.mjs --selftest

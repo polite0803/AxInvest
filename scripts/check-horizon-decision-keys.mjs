@@ -38,8 +38,11 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
 const read = (rel) => readFileSync(resolve(ROOT, rel), "utf8");
 
 const TIERS = ["ultra-short", "short", "mid", "long"];
@@ -52,12 +55,12 @@ const TS_PATH = "src/types/stock-analysis.ts";
 // 只是四个源换了一批，所以扩进本门而不是另起一炉（禁区 12：判据也只留这一处）。
 const LLM_SCHEMA_PATH = "src-tauri/config/llm-output-schemas.json";
 const LLM_PROMPT_PATH = "src-tauri/agency_experts/stock-analysis/trader.md";
-const LLM_CAMEL_AUTH_PATH = "src-tauri/crates/harness/src/holding_period.rs";
+const LLM_CAMEL_AUTH_PATH = "axagent-core/crates/harness/src/holding_period.rs";
 const LLM_RUST_PARSE_PATH = "src-tauri/src/commands/stock_workflow/decision.rs";
 const LLM_TS_READER_PATH = "src/lib/agentOutput.ts";
 const LLM_CORE_PATH = "src-tauri/src/commands/stock_workflow/core.rs";
 /** B4：逐档结局 2×2 的 DTO 权威（Rust 结构体在 engine 里，TS 镜像在同一份 `stock-analysis.ts`） */
-const REFLECTION_STATS_RS_PATH = "src-tauri/crates/analysis-engine/src/reflection_stats.rs";
+const REFLECTION_STATS_RS_PATH = `${crateRel("analysis-engine", "src/reflection_stats.rs")}`;
 /** 代际标记的键名（判「键在不在」，不判值 ⇒ Rust 与 TS 只共享这一个串） */
 const LLM_CONTRACT_KEY = "horizonDecisionContract";
 

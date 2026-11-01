@@ -15,11 +15,11 @@
  *   已知**未覆盖**的 CI 步骤（改脚本前请先读 `scripts/ci-check.mjs` 与 ci.yml 的对账）：
  *     · `npm run build`（ci.yml:442，= `tsc && vite build`）—— 本地只有 `npx tsc --noEmit`，
  *       ⇒ vite 构建期问题（如禁区 11 的 removeCrossorigin、SHIKI_ALLOWED_LANGS 白名单）本地看不见
- *     · `npm run contracts -- --only=a,c,d,f,g,h`（ci.yml:515）—— 本地完全没有
+ *     · `npm run contracts -- --only=a,c,d,f,g,h`（ci.yml:562）—— 本地完全没有
  *     · 行尾检查（ci.yml:72 的 `bash scripts/check-line-endings.sh`）—— 本地镜像没有；
  *       本机无 bash 时请改用 `node scripts/check-line-endings.mjs`（同一检测核心）
- *     · `cargo check --workspace`（ci.yml:567）、`cargo nextest run --workspace`（ci.yml:679，
- *       本地用 `cargo test -p …` 裁剪版）、PG 集成三目标、E2E、`npm audit`、cargo deny
+ *     · PG 集成三目标、E2E、`npm audit`、cargo audit / cargo deny（8 根 `cargo check` 与
+ *       `nextest` 已于 2026-11-01 接入本脚本 ⇒ 不再属未覆盖项；nextest 缺工具链时记 skipped）
  *   若要把本脚本当验收证据，上述各项须**另行手动跑**。
  *
  * ⚠ 关于「跳过」的记账口径（**2026-10-31 起的语义，此前不成立**）：
@@ -182,6 +182,16 @@ if (canRunFrontend) {
   step("分层护栏（依赖方向 / 越层）", "node scripts/check-layer-discipline.mjs");
   step("领域本体（权威源↔副本）自检", "node scripts/check-ontology-consistency.mjs --selftest");
   step("领域本体（权威源↔副本）一致性", "node scripts/check-ontology-consistency.mjs");
+
+  // ── 多 workspace 根「构建配置逐字同源」门禁（PLAN-repo-split L2）──
+  // 为什么需要：`[profile.*]` 只在「发起构建的那个 workspace 根」生效，写在成员里 cargo 忽略。
+  //   L2 搬 crate 时 7 个子根没复制 `[profile.dev*]` ⇒ 退回 `debug = true` / `incremental = true`
+  //   ⇒ 同一依赖按 metadata hash 在各根各编一遍（`axagent_harness` 实测 36 个增量会话），
+  //   僵尸增量会话涨到 879 个 / 68G，全量 clippy 从单根 9m24s 变成 8 根串行 67m53s。
+  //   **少一段配置不会让编译、clippy、任何既有门禁变红** —— 只能单独立门。
+  // 命令行与 `.github/workflows/ci.yml` 对应步骤逐字同源。
+  step("多 workspace 构建配置同源自检（8 条正负对照）", "node scripts/check-workspace-config-parity.mjs --selftest");
+  step("多 workspace 构建配置逐字同源（profile / lints / clippy.toml / rustfmt / toolchain）", "node scripts/check-workspace-config-parity.mjs");
 
   // ── 能力域单一真相源门禁（权威枚举 ↔ 前端 / prompt / i18n 副本）──
   // 为什么需要：`CapabilityDomain`（`harness/src/capability.rs`）是唯一权威，
@@ -659,24 +669,42 @@ if (canRunRust && !quick) {
   );
   step("内置 task_type 白名单跨语言对账", "node scripts/check-task-type-whitelist.mjs");
 
+  // ⚠ L2 逻辑拆分后仓库根下有 **8 个 workspace**（core / kit / ai / infra / quant /
+  //   plugins / runtime / src-tauri）。只在 `src-tauri` 里跑 fmt / clippy / check，只覆盖
+  //   根包 + axagent-mobile，**其余 34 个 crate 完全不被检查** —— 门禁照样绿。
+  //   统一交给 `scripts/cargo-all-workspaces.mjs`：根列表与各静态门禁同源自动探测，
+  //   新拆出的 workspace 自动纳入（不手抄名单）。
+  // 组装自检紧贴在三条 cargo step 之前：它纯 Node、毫秒级，只验「拼出来的 argv 是否守
+  //   `--manifest-path` 落在 `--` 之前」这条不变量（失效形态见该脚本里的注释：暖缓存不报错、
+  //   空缓存 CI 必红 ⇒ 40 分钟的 clippy 跑在一套坏参数上）。自检不过就没必要再花那 40 分钟。
+  //   不挪去 `--quick`：quick 段的步骤全在本块（`if (canRunRust && !quick)`）上面，往那儿插
+  //   4 行会把本文件里被文档按行号定位的锚点整体下移 ⇒ 为省一次推送后反馈，不值得制造
+  //   一整桶 BROKEN（被引用的最大行号在本块之内，改下面不动它）。
   step(
-    "cargo fmt 格式化检查",
-    "cargo fmt --check --all",
-    { cwd: srcTauri, env: { ...process.env } },
+    "多 workspace cargo 命令组装自检（参数顺序 / 负控自证）",
+    "node scripts/cargo-all-workspaces.mjs --selftest",
+  );
+  step(
+    "cargo fmt 格式化检查（全部 workspace）",
+    "node scripts/cargo-all-workspaces.mjs fmt-check",
   );
 
-  // 覆盖面必须与 `.github/workflows/ci.yml:562-564` 逐字同源：`--workspace` 不可省。
-  //
-  // 为什么补 `--workspace`：本仓 `src-tauri` 是「根 package + 43 个 member」的 workspace
-  // （`src-tauri/Cargo.toml:1-46`：`.` = axagent + 42 个 `crates/*` + `schema-gen`）。
-  // 在 workspace 根不带 `--workspace` 执行 clippy 时，cargo 的默认包选择**只覆盖当前
-  // package**（根 `axagent`）⇒ `crates/` 下 42 个成员逐个不被 lint。而本仓大部分逻辑
-  // 正在 crates/ 里 ⇒ 「本地 clippy 绿」完全不能推出「CI clippy 绿」。
-  // 判据来源：AGENTS.md「⚠ Rust 验证门禁」第 1 条 —— 三条全量命令必须与 ci.yml 逐字一致。
+  // 覆盖面：每个 workspace 都跑 `--workspace --all-targets --all-features`。
+  // 不带 `--workspace` 时 cargo 默认只选当前 package ⇒ `crates/*` 全部不被 lint；
+  // 现在还要 ×8 个根（见 scripts/cargo-all-workspaces.mjs）。
   step(
-    "cargo clippy (deny warnings)",
-    "cargo clippy --workspace --all-targets --all-features -- -D warnings",
-    { cwd: srcTauri, timeout: 10 * 60 * 1000, env: { ...process.env } },
+    "cargo clippy (deny warnings，全部 workspace)",
+    "node scripts/cargo-all-workspaces.mjs clippy",
+    { timeout: 60 * 60 * 1000, env: { ...process.env } },
+  );
+
+  // `cargo check` 8 个根：CI 单列一步（`Check build (all workspaces)`），本地必须逐字同源。
+  // clippy 在语义上覆盖了类型检查，但**这一步缺失时本地镜像少一道**，只能推送后由 CI 告知；
+  // 且护栏按命令文本比对，条目缺失即判漂移。
+  step(
+    "cargo check 构建检查（全部 workspace）",
+    "node scripts/cargo-all-workspaces.mjs check",
+    { timeout: 60 * 60 * 1000, env: { ...process.env } },
   );
 
   // ⚠ 这里**不得**再写 `cmdA || cmdB` 这种兜底。
@@ -692,24 +720,74 @@ if (canRunRust && !quick) {
   // ② 本仓测试 exe 未嵌入 Common Controls v6 manifest 时，链接 tauri 的测试启动即报
   //    `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)`，见 AGENTS.md 与 tauri issue #11028
   //    ⇒ Windows 上这个变量是**必需**的，不能只写在文档里。
+  // L2 拆分后这四个包分属 3 个 workspace，必须在各自根下执行（跨 workspace 的
+  // `-p` 会直接报「package not found」）：
+  //   · axagent-quant / axagent-analysis-engine → axagent-quant
+  //   · axagent-harness                        → axagent-core
+  //   · axagent-tools                          → axagent-runtime
   step(
-    "cargo test 单元测试 (quant + analysis-engine + harness + tools)",
-    "cargo test -p axagent-quant -p axagent-analysis-engine -p axagent-harness -p axagent-tools --lib",
+    "cargo test 单元测试 (quant + analysis-engine)",
+    "cargo test -p axagent-quant -p axagent-analysis-engine --lib",
     {
-      cwd: srcTauri,
+      cwd: resolve(root, "axagent-quant"),
+      timeout: 10 * 60 * 1000,
+      env: { ...process.env, __TAURI_WORKSPACE__: "true" },
+    },
+  );
+  step(
+    "cargo test 单元测试 (harness)",
+    "cargo test -p axagent-harness --lib",
+    {
+      cwd: resolve(root, "axagent-core"),
+      timeout: 10 * 60 * 1000,
+      env: { ...process.env, __TAURI_WORKSPACE__: "true" },
+    },
+  );
+  step(
+    "cargo test 单元测试 (tools)",
+    "cargo test -p axagent-tools --lib",
+    {
+      cwd: resolve(root, "axagent-runtime"),
       timeout: 10 * 60 * 1000,
       env: { ...process.env, __TAURI_WORKSPACE__: "true" },
     },
   );
 
+  // 全量测试面：CI 跑 `node scripts/cargo-all-workspaces.mjs nextest`（8 根 × `--workspace`）。
+  // 上面三条 `cargo test -p` 只是裁剪版（quant / harness / tools），覆盖面远小于它 ——
+  // 所以命令必须逐字进本地镜像，否则「本地绿」冒充「CI 绿」（护栏按命令文本比对，缺条目即漂移）。
+  // ⚠ 本机未装 cargo-nextest 时**诚实记进 skipped**（跳过 ≠ 通过：结果段打黄色并逐条列出，
+  //   `--strict-skip` 判失败），**不是**把这条 step 从镜像里删掉。
+  let hasCargoNextest = false;
+  try {
+    execSync("cargo nextest --version", { stdio: "pipe", cwd: root });
+    hasCargoNextest = true;
+  } catch {
+    hasCargoNextest = false;
+  }
+  if (hasCargoNextest) {
+    step(
+      "cargo nextest 单元测试（全部 workspace）",
+      "node scripts/cargo-all-workspaces.mjs nextest",
+      { timeout: 60 * 60 * 1000, env: { ...process.env, __TAURI_WORKSPACE__: "true" } },
+    );
+  } else {
+    skipStep(
+      "cargo nextest 单元测试（全部 workspace）",
+      "本机未装 cargo-nextest（cargo install cargo-nextest --locked）⇒ CI 会跑，本地没跑",
+    );
+  }
+
   // 生成物漂移门（与 ci.yml 的对应 step 逐字同源）：`src/types/generated/ipc.ts` /
   // `events.ts` 由 schema-gen 生成，但 `run_check` 此前从不非零退出 —— 只打印，等于没有门。
   // 现在注册表 18 个 DTO 缺一个、事件名联合不对齐、产物与重新生成结果**字节级**不一致，
   // 三者任一都红。
+  // schema-gen 已随 L2 拆到 `axagent-plugins/crates/schema-gen`，不属于 src-tauri
+  // workspace ⇒ 必须在该 workspace 根下跑（产物路径由 CARGO_MANIFEST_DIR 推出，与 CWD 无关）。
   step(
     "生成 IPC 类型与权威一致 (schema-gen check)",
     "cargo run -q -p schema-gen -- check",
-    { cwd: srcTauri, timeout: 10 * 60 * 1000, env: { ...process.env } },
+    { cwd: resolve(root, "axagent-plugins"), timeout: 10 * 60 * 1000, env: { ...process.env } },
   );
 
   // 中文全文检索的「两侧同构」校验：索引侧由 PG 生成列算（ax_cjk_ngram），
@@ -728,9 +806,8 @@ if (canRunRust && !quick) {
 if (canRunRust && quick) {
   console.log(`\n${c.bold}[Rust 快速检查]${c.reset}`);
   step(
-    "cargo fmt 格式化检查",
-    "cargo fmt --check --all",
-    { cwd: srcTauri, env: { ...process.env } },
+    "cargo fmt 格式化检查（全部 workspace）",
+    "node scripts/cargo-all-workspaces.mjs fmt-check",
   );
 }
 

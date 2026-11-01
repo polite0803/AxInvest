@@ -10,7 +10,7 @@ function readSource(...segments: string[]) {
 
 describe("Phase D reasoning control regressions", () => {
   it("preserves explicit zero thinking budgets for Gemini requests so the provider sees a disable signal", () => {
-    const source = readSource("src-tauri/crates/providers/src/gemini.rs");
+    const source = readSource("axagent-ai/crates/providers/src/gemini.rs");
     const normalized = source.replace(/\s+/g, "");
 
     expect(normalized).toContain(

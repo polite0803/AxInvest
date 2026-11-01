@@ -78,7 +78,16 @@ GROUP BY day
 ORDER BY day;
 `;
 
-// 入场价要单独取（上面的 paired 里没带价格列，改用第二个查询更清楚）
+// 入场价要单独取（上面的 paired 里没带价格列，改用第二个查询更清楚）。
+//
+// ⚠ 为什么要有 comparable_pairs：实盘 picks 里存在 `pick_data.price = 0` 的行
+//   （2026-11-01 现网：回放当日的 804 行实盘票里 8 行为 0）。旧写法直接
+//   `abs(r.px - l.px) / l.px` ⇒ PostgreSQL 报 division by zero ⇒ **整个门崩溃**，
+//   既不是 PASS 也不是「样本不足」，是「门看着在、实际一行没跑」的第三种形态。
+//   现在把「不可比」单列计数：它既不进一致率分母（不算不一致），也不静默通过
+//   （一条都比不了 ⇒ 门报「未判定」）。
+// ⚠ 该 SQL 里的注释必须是 ASCII：脚本经 execFileSync 把 SQL 当 argv 传给 node，
+//   Windows 上中文会被本地代码页转成非法 UTF-8 字节（实测 0xc5 0xcc ⇒ PG 直接报错）。
 const sql2 = `
 WITH live_px AS (
   SELECT left(created_at,10) AS day, stock_code, period,
@@ -96,8 +105,10 @@ replay_px AS (
 )
 SELECT r.day,
        count(*) AS priced_pairs,
-       count(*) FILTER (WHERE abs(r.px - l.px) / l.px <= ${MAX_PX_DEVIATION}) AS px_ok,
-       round(max(abs(r.px - l.px) / l.px)::numeric, 4) AS max_px_dev
+       -- live px <= 0 is NOT COMPARABLE (see the JS comment above for why), never "mismatch".
+       count(*) FILTER (WHERE l.px > 0) AS comparable_pairs,
+       count(*) FILTER (WHERE l.px > 0 AND abs(r.px - l.px) / l.px <= ${MAX_PX_DEVIATION}) AS px_ok,
+       round(max(abs(r.px - l.px) / nullif(l.px, 0))::numeric, 4) AS max_px_dev
 FROM replay_px r JOIN live_px l
   ON l.day=r.day AND l.stock_code=r.stock_code AND l.period=r.period
 GROUP BY r.day ORDER BY r.day;
@@ -136,20 +147,28 @@ if (styleRows.length === 0) {
   process.exit(1);
 }
 
-console.log('day\tpaired\tstyle_in_set\tstyle_pct\tpx_ok\tmax_px_dev\tlive(真/总)\treplay(真/总)');
+console.log('day\tpaired\tstyle_in_set\tstyle_pct\tpx_ok(可比)\t不可比\tmax_px_dev\tlive(真/总)\treplay(真/总)');
 let totalPaired = 0;
 let totalStyleOk = 0;
 let totalPxOk = 0;
 let totalPx = 0;
+let totalIncomparable = 0;
 let maxDev = 0;
 for (const r of styleRows) {
-  const px = pxByDay.get(r.day) || { px_ok: '0', max_px_dev: '0' };
+  const px =
+    pxByDay.get(r.day) || { priced_pairs: '0', comparable_pairs: '0', px_ok: '0', max_px_dev: '0' };
   const paired = Number(r.paired_tickets);
   const styleOk = Number(r.style_in_set);
+  const comparable = Number(px.comparable_pairs || 0);
+  const priced = Number(px.priced_pairs || 0);
+  const incomparable = priced - comparable;
   totalPaired += paired;
   totalStyleOk += styleOk;
   totalPxOk += Number(px.px_ok);
-  totalPx += Number(px.priced_pairs || 0);
+  totalPx += comparable;
+  totalIncomparable += incomparable;
+  // max_px_dev 在「当日全是 0 价」时是 SQL NULL（空串）⇒ 按 0 处理，但它同时进了
+  // 「不可比」列，不会被当成「偏差为 0 = 完美一致」。
   maxDev = Math.max(maxDev, Number(px.max_px_dev || 0));
   console.log(
     [
@@ -157,7 +176,8 @@ for (const r of styleRows) {
       paired,
       styleOk,
       `${((100 * styleOk) / paired).toFixed(1)}%`,
-      `${px.px_ok}/${px.priced_pairs || 0}`,
+      `${px.px_ok}/${comparable}`,
+      incomparable || '',
       px.max_px_dev,
       `${r.live_real_rows}/${r.live_rows}`,
       `${r.replay_real_rows}/${r.replay_rows}`,
@@ -169,7 +189,7 @@ const stylePct = totalPaired ? (100 * totalStyleOk) / totalPaired : 0;
 const pxPct = totalPx ? (100 * totalPxOk) / totalPx : 0;
 console.log('---');
 console.log(
-  `合计：配对 ${totalPaired} 票 | style 一致 ${stylePct.toFixed(1)}% | 入场价在 ${(MAX_PX_DEVIATION * 100).toFixed(0)}% 内 ${pxPct.toFixed(1)}% | 最大价偏差 ${(maxDev * 100).toFixed(2)}%`,
+  `合计：配对 ${totalPaired} 票 | style 一致 ${stylePct.toFixed(1)}% | 入场价在 ${(MAX_PX_DEVIATION * 100).toFixed(0)}% 内 ${pxPct.toFixed(1)}%（可比 ${totalPx} 对）| 不可比 ${totalIncomparable} 对（实盘价 ≤0）| 最大价偏差 ${(maxDev * 100).toFixed(2)}%`,
 );
 
 const problems = [];
@@ -178,6 +198,10 @@ if (totalPaired < MIN_PAIRED_TICKETS) {
 }
 if (totalPaired >= MIN_PAIRED_TICKETS && stylePct < 100) {
   problems.push(`style 一致率 ${stylePct.toFixed(1)}% < 100%`);
+}
+if (totalPx === 0 && totalIncomparable > 0) {
+  // 「一条都比不了」不能由门绿着过去 —— 那正是「门看着在、实际一行没跑」的形态。
+  problems.push(`入场价无可比对（${totalIncomparable} 对的实盘价为 0）⇒ 本门未判定，不等于通过`);
 }
 if (totalPx > 0 && pxPct < 100) {
   problems.push(`入场价一致率 ${pxPct.toFixed(1)}% < 100%`);

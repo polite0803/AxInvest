@@ -38,8 +38,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { crateRepoRel } from "./lib/workspace-roots.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+/** crate 换 workspace 后按目录名定位；找不到回退旧写法（由读文件报错主动暴露）。 */
+const crateRel = (crate, rel) => crateRepoRel(ROOT, crate, rel) ?? `crates/${crate}/${rel}`;
 /** 默认 = **工作流域**起算代（权威 `harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR`）。 */
 const MARKER = "HORIZON_BRANCH_GENERATION_FLOOR";
 /**
@@ -57,19 +60,19 @@ const ALL_MARKERS = [MARKER, MARKER_RECO];
 const REGISTRY = [
   // ── 统计（分母类）：该筛 ──
   {
-    file: "src-tauri/crates/analysis-engine/src/reflection_stats.rs",
+    file: `${crateRel("analysis-engine", "src/reflection_stats.rs")}`,
     fn: "build_hitrate_stats",
     class: "statistics",
     note: "命中率/IC/半衰期的主分母（§七十三）",
   },
   {
-    file: "src-tauri/crates/analysis-engine/src/evolution_drift.rs",
+    file: `${crateRel("analysis-engine", "src/evolution_drift.rs")}`,
     fn: "load_performance_window",
     class: "statistics",
     note: "权重线的样本窗口（§七十五）",
   },
   {
-    file: "src-tauri/crates/analysis-engine/src/backtest.rs",
+    file: `${crateRel("analysis-engine", "src/backtest.rs")}`,
     fn: "optimize_weights",
     class: "statistics",
     note: "自适应评分权重；计数与取数同条件（§七十七）",
@@ -98,7 +101,7 @@ const REGISTRY = [
   //   它被 `fetch_stock_lessons`/`fetch_rule_lessons` 覆盖（那两个入口必须引用常量）。
   // ── 呈现：不该筛（筛了藏数据） ──
   {
-    file: "src-tauri/crates/analysis-engine/src/monthly_report.rs",
+    file: `${crateRel("analysis-engine", "src/monthly_report.rs")}`,
     fn: "generate_monthly_report",
     class: "presentation",
     note: "月度报告：按日期区间列分析，代际应标注而不是过滤",
@@ -117,7 +120,7 @@ const REGISTRY = [
   },
   // ── 单条取数：不该筛（筛了制造缺席） ──
   {
-    file: "src-tauri/crates/analysis-engine/src/trade_review.rs",
+    file: `${crateRel("analysis-engine", "src/trade_review.rs")}`,
     fn: "get_trade_review",
     class: "single_lookup",
     note: "取卖出前最近一条分析当事前预测",
@@ -130,7 +133,7 @@ const REGISTRY = [
     note: "逐条验证记录回写 stock_analyses.outcome —— 按代筛它等于把旧代样本说成「未验证」",
   },
   {
-    file: "src-tauri/crates/dao/src/repo/reco_pool.rs",
+    file: `${crateRel("dao", "src/repo/reco_pool.rs")}`,
     fn: "find_existing_pick_id",
     class: "single_lookup",
     note:
@@ -170,7 +173,7 @@ const REGISTRY = [
       "本函数体不引用常量属预期，pending 状态留给「源表仍无代际列、每次都要 join 回查」这笔债",
   },
   {
-    file: "src-tauri/crates/analysis-engine/src/recommender/ic.rs",
+    file: `${crateRel("analysis-engine", "src/recommender/ic.rs")}`,
     fn: "aggregate_reco_ic",
     class: "statistics",
     marker: MARKER_RECO,
@@ -179,7 +182,7 @@ const REGISTRY = [
       "跨代与代际未知**分列计数**；这是 `reco_ic_gate` 能翻 on 的前提（依赖锁见 seed_consistency_tests）",
   },
   {
-    file: "src-tauri/crates/analysis-engine/src/recommender/reco_loop.rs",
+    file: `${crateRel("analysis-engine", "src/recommender/reco_loop.rs")}`,
     fn: "load_reco_loop_samples",
     class: "pending",
     marker: MARKER_RECO,

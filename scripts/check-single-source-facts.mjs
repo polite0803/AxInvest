@@ -48,8 +48,8 @@
 // 退出码：0 全好 ｜ 1 客观错（真失败）｜ 2 脚本自身失效 ｜ 3 只有「疑似腐烂」需人判
 //
 // 覆盖范围（自陈，判据 #16）：
-//   扫 `src-tauri/src/**/*.rs`、`src-tauri/crates/*/src/**/*.rs` 与
-//   **`src-tauri/crates/*/tests/**/*.rs`**（2026-09-17 扩容，用户裁决；排除 `target/`）。
+//   扫每个 workspace 根的 `src/**/*.rs` 与 `crates/*/src/**/*.rs`，以及
+//   **`crates/*/tests/**/*.rs`**（2026-09-17 扩容，用户裁决；根列表由 `workspace-roots.mjs` 自动探测，排除 `target/`）。
 //   `tests/` 面加进来的理由：那里同样写着「此声明的出处是 `文件:行`」，不扫就是**未检查**；
 //   而「未检查」在输出里与「检查且通过」长得一样（判据 #7：`0 命中 ≠ 没问题`）。
 //   扩容成本已量化：该面 48 个 `.rs`、只有 2 条引用且**全红**（指向已删迁移文件），
@@ -110,10 +110,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { discoverWorkspaceRoots, resolveRepoFile } from "./lib/workspace-roots.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
 const SRC = path.join(ROOT, "src-tauri");
+// crate 已分散到多个 Cargo workspace：扫描面与解析基必须覆盖全部根，
+// 否则「搬走的文件」会从扫描面消失 ⇒ 引用检查静默降级（未检查 ≠ 通过）。
+const CORE = path.join(ROOT, "axagent-core");
+const RUST_ROOTS = discoverWorkspaceRoots(ROOT);
 const BASELINE_PATH = path.join(HERE, "single-source-facts-allowlist.json");
 
 const CI_MODE = process.argv.includes("--ci");
@@ -154,7 +159,7 @@ const FILE_ANCHOR = new RegExp(
 // 时刻的 `:` 前面是数字，而引用写法的 `:` 前面是标点 / 空白 / 文件名。
 const BARE_ANCHOR = new RegExp(String.raw`(?<![A-Za-z0-9]):\s*(${LINE_LIST})`, "g");
 
-/** 扫描面：src-tauri 下所有 .rs，排除 target/ 与 node_modules/ */
+/** 扫描面：全部 workspace 根（自动探测）下的 .rs，排除 target/ 与 node_modules/ */
 function collectRustFiles() {
   const out = [];
   const skip = new Set(["target", "node_modules", ".git"]);
@@ -172,33 +177,36 @@ function collectRustFiles() {
       else if (e.isFile() && e.name.endsWith(".rs")) out.push(p);
     }
   };
-  walk(path.join(SRC, "src"));
-  for (const c of fs.readdirSync(path.join(SRC, "crates"), { withFileTypes: true })) {
-    if (!c.isDirectory()) continue;
-    walk(path.join(SRC, "crates", c.name, "src"));
-    // ── 2026-09-17 扩容（用户裁决）：纳入 `crates/*/tests/` ────────────────
-    // 理由：`src/` 之外同样有「此声明的出处是 `文件:行`」的注释，不扫它们就是**未检查**；
-    // 而「未检查」在输出里与「检查且通过」长得一样（判据 #7：`0 命中 ≠ 没问题`）。
-    // 扩容前已量化成本：该面 48 个 `.rs`、只有 **2 条**引用且**全红**
-    // （`knowledge_graph_search.rs:21` 指向已删迁移文件）—— 那条已按「裸版本号」范式修掉
-    // ⇒ 扩容后 0 条引用、0 条新红（零成本）。
-    // 目标文件侧的候选索引不受影响：`getBasenameIndex()` 本就 walk 整个 ROOT。
-    walk(path.join(SRC, "crates", c.name, "tests"));
-    // ── 2026-09-17 第八轮扩容（用户裁决：按建议值处置「剩余未动项」）────────────
-    // 纳入 `crates/*/examples` + `crates/*/benches`。成本**先量后扩**，且按判据 #487
-    // 用**本门禁自己的 `extractRefs`** 量（面一改，下面那次主流程运行就是那个量）：
-    //   · `benches/` 3 个 `.rs` ⇒ **0 条**引用（纳入是为封住整类，成本为 0）；
-    //   · `examples/` 7 个 `.rs` ⇒ **4 条**引用，逐条核过 **4/4 可定位且语义正确**。
-    // 收尾读数见本文件运行输出与报告 §4.2 收口行（扩容前后差值是唯一判据）。
-    walk(path.join(SRC, "crates", c.name, "examples"));
-    walk(path.join(SRC, "crates", c.name, "benches"));
+  for (const root of RUST_ROOTS) {
+    walk(path.join(root, "src"));
+    if (!fs.existsSync(path.join(root, "crates"))) continue;
+    for (const c of fs.readdirSync(path.join(root, "crates"), { withFileTypes: true })) {
+      if (!c.isDirectory()) continue;
+      walk(path.join(root, "crates", c.name, "src"));
+      // ── 2026-09-17 扩容（用户裁决）：纳入 `crates/*/tests/` ────────────────
+      // 理由：`src/` 之外同样有「此声明的出处是 `文件:行`」的注释，不扫它们就是**未检查**；
+      // 而「未检查」在输出里与「检查且通过」长得一样（判据 #7：`0 命中 ≠ 没问题`）。
+      // 扩容前已量化成本：该面 48 个 `.rs`、只有 **2 条**引用且**全红**
+      // （`knowledge_graph_search.rs:21` 指向已删迁移文件）—— 那条已按「裸版本号」范式修掉
+      // ⇒ 扩容后 0 条引用、0 条新红（零成本）。
+      // 目标文件侧的候选索引不受影响：`getBasenameIndex()` 本就 walk 整个 ROOT。
+      walk(path.join(root, "crates", c.name, "tests"));
+      // ── 2026-09-17 第八轮扩容（用户裁决：按建议值处置「剩余未动项」）────────────
+      // 纳入 `crates/*/examples` + `crates/*/benches`。成本**先量后扩**，且按判据 #487
+      // 用**本门禁自己的 `extractRefs`** 量（面一改，下面那次主流程运行就是那个量）：
+      //   · `benches/` 3 个 `.rs` ⇒ **0 条**引用（纳入是为封住整类，成本为 0）；
+      //   · `examples/` 7 个 `.rs` ⇒ **4 条**引用，逐条核过 **4/4 可定位且语义正确**。
+      // 收尾读数见本文件运行输出与报告 §4.2 收口行（扩容前后差值是唯一判据）。
+      walk(path.join(root, "crates", c.name, "examples"));
+      walk(path.join(root, "crates", c.name, "benches"));
+    }
+    // 顶层集成测试面。当前不存在，但 walk 对缺失目录是**安全 no-op** ——
+    // 写在这里是为了「路径约定变化时被覆盖」，而不是静默漏掉一整类引用来源。
+    walk(path.join(root, "tests"));
+    // 顶层 `examples/` + `benches/`（同样安全 no-op：`src-tauri/examples` 实测不存在）。
+    walk(path.join(root, "examples"));
+    walk(path.join(root, "benches"));
   }
-  // 顶层集成测试面。当前不存在，但 walk 对缺失目录是**安全 no-op** ——
-  // 写在这里是为了「路径约定变化时被覆盖」，而不是静默漏掉一整类引用来源。
-  walk(path.join(SRC, "tests"));
-  // 顶层 `examples/` + `benches/`（同样安全 no-op：`src-tauri/examples` 实测不存在）。
-  walk(path.join(SRC, "examples"));
-  walk(path.join(SRC, "benches"));
   return out.sort();
 }
 
@@ -533,13 +541,18 @@ let lockIndex = null; // Map<name, Set<version>>；null=未读；false=读不到
 function getLockIndex() {
   if (lockIndex !== null) return lockIndex;
   try {
-    const txt = fs.readFileSync(path.join(SRC, "Cargo.lock"), "utf8");
+    // 两个 workspace 各有一份 Cargo.lock：版本核对必须合并两侧，否则只看 src-tauri
+    // 会把 foundation crate 的第三方版本一起漏掉。
     const m = new Map();
-    for (const p of txt.matchAll(
-      /\[\[package\]\]\s*\nname\s*=\s*"([^"]+)"\s*\nversion\s*=\s*"([^"]+)"/g,
-    )) {
-      if (!m.has(p[1])) m.set(p[1], new Set());
-      m.get(p[1]).add(p[2]);
+    for (const lockFile of RUST_ROOTS.map((r) => path.join(r, "Cargo.lock"))) {
+      if (!fs.existsSync(lockFile)) continue;
+      const txt = fs.readFileSync(lockFile, "utf8");
+      for (const p of txt.matchAll(
+        /\[\[package\]\]\s*\nname\s*=\s*"([^"]+)"\s*\nversion\s*=\s*"([^"]+)"/g,
+      )) {
+        if (!m.has(p[1])) m.set(p[1], new Set());
+        m.get(p[1]).add(p[2]);
+      }
     }
     lockIndex = m;
   } catch {
@@ -629,13 +642,12 @@ export const CONTROL_FLOW_LINE = /^(?:continue|break|return|continue\s+'[A-Za-z_
 export const CLOSING_LINE = /^(?:[)\]};,]*[)\]};][)\]};,]*|\}\s*else\s*\{?)$/;
 
 
-/** 把一个仓库内引用解析成真实文件（引用写法可能是 `src/…` 或 `crates/…` 或 `src-tauri/…`） */
+/**
+ * 把一个仓库内引用解析成真实文件（引用写法可能是 `src/…`、`crates/…`、`src-tauri/…`
+ * 或新 workspace 前缀）。多根解析统一交给 lib，避免每次拆 workspace 都要改本函数。
+ */
 function resolveRef(relPath) {
-  for (const base of [ROOT, SRC, path.join(SRC, "crates")]) {
-    const p = path.join(base, relPath);
-    if (fs.existsSync(p) && fs.statSync(p).isFile()) return p;
-  }
-  return null;
+  return resolveRepoFile(ROOT, relPath);
 }
 
 // ── 仓库文件索引（按 basename → 全部同名文件）─────────────────────────
@@ -650,8 +662,8 @@ function resolveRef(relPath) {
 //
 // ⚠ 本集合是**覆盖面**的直接决定因素，改动前必须量（2026-09-15 实测）：
 //   环境里 `.worktrees/` 有 **4 个完整检出副本**（`v297`/`v299`/`upstream`/`pre992947df`）。
-//   它们**不在** `collectRustFiles()` 的扫描面内（那只走 `src-tauri/src` 与
-//   `src-tauri/crates/*/src`；2026-09-17 起另含 `crates/*/tests/` + 顶层 `tests/` ——
+//   它们**不在** `collectRustFiles()` 的扫描面内（那只走各 workspace 根的 `src` 与
+//   `crates/*/src`；2026-09-17 起另含 `crates/*/tests/` + 顶层 `tests/` ——
 //   三者都不走 `.worktrees/`，故本条结论不变），但 `getBasenameIndex()` 走的是**整个 ROOT**
 //   ⇒ 几乎每个 basename 都变成「同名 5 份」⇒ **裸文件名引用一律判 NONLOC = 未检查**。
 //   实测（同一棵树，只改这一行）：
@@ -930,7 +942,7 @@ export function quotedTokensOwnedBy(lineText, peers, self) {
 }
 
 // ── ② reranker 模型文件名 ─────────────────────────────────────────────
-const RAG_CONFIG = path.join(SRC, "crates/harness/src/rag_config.rs");
+const RAG_CONFIG = path.join(CORE, "crates/harness/src/rag_config.rs");
 const CONST_NAME = "RERANKER_MODEL_FILENAME";
 
 /** 真源：从 `rag_config.rs` 读常量值。读不到 ⇒ 脚本自身失效（退出 2） */

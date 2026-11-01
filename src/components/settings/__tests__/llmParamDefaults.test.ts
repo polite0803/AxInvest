@@ -10,7 +10,7 @@ function readSource(...segments: string[]) {
 
 describe("LLM 采样参数默认值单一权威", () => {
   it("标题摘要/压缩默认值前后端一致", () => {
-    const rust = readSource("src-tauri/crates/harness/src/constants.rs");
+    const rust = readSource("axagent-core/crates/harness/src/constants.rs");
     const ui = readSource("src/components/settings/DefaultModelSettings.tsx");
 
     expect(rust).toMatch(/TITLE_SUMMARY_MAX_TOKENS: u32 = 256;/);

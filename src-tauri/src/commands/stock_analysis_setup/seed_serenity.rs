@@ -111,7 +111,7 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     //   scanner-brief / candidate-pool 的 to_array 只认裸数组 ⇒ 行业动量腿与候选池静默降级成
     //   「今天没数据」（to_array 返回 [] 与真空数据不可区分，零告警）。四脚本的 string 分支
     //   已补 data 下钻；脚本经 include_str! 嵌入 CodeNode.code ⇒ **不升版旧库照跑旧脚本**。
-    const TEMPLATE_VERSION: i32 = 65; // v65: 阶段3「打分重构」——新增 t-factors/c-factor-score（rev_1m 横截面打分），data-verifier 注入 factor_scores 覆盖 serenity_score，mapper 注入 factor_ranking
+    const TEMPLATE_VERSION: i32 = 66; // v66: data-verifier 嵌层数值守卫收编到 harness 的 num_of 桥（门 a 命中该行）。v65（阶段3「打分重构」——新增 t-factors/c-factor-score（rev_1m 横截面打分），data-verifier 注入 factor_scores 覆盖 serenity_score，mapper 注入 factor_ranking）
 
     let now = chrono::Utc::now().timestamp_millis();
 
@@ -1867,7 +1867,7 @@ mod serenity_version_gate_tests {
     //   scanner-brief / candidate-pool 的 to_array 只认裸数组 ⇒ 行业动量腿与候选池静默降级成
     //   「今天没数据」（to_array 返回 [] 与真空数据不可区分，零告警）。四脚本的 string 分支
     //   已补 data 下钻；脚本经 include_str! 嵌入 CodeNode.code ⇒ **不升版旧库照跑旧脚本**。
-    const TEMPLATE_VERSION: i32 = 65; // v65: 阶段3「打分重构」——新增 t-factors/c-factor-score（rev_1m 横截面打分），data-verifier 注入 factor_scores 覆盖 serenity_score，mapper 注入 factor_ranking
+    const TEMPLATE_VERSION: i32 = 66; // v66: data-verifier 嵌层数值守卫收编到 harness 的 num_of 桥（门 a 命中该行）。v65（阶段3「打分重构」——新增 t-factors/c-factor-score（rev_1m 横截面打分），data-verifier 注入 factor_scores 覆盖 serenity_score，mapper 注入 factor_ranking）
 
     async fn fresh_db() -> axagent_dao::db::DbHandle {
         axagent_dao::db::create_test_pool().await.expect("建临时测试库失败")

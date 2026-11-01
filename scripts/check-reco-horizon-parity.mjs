@@ -368,9 +368,8 @@ function checkTierScopeHint(hint) {
   return { violations, scanned };
 }
 
-function checkSerenityRiskParity(workflowSrcRaw, strategySrcRaw, riskSrc) {
+function checkSerenityRiskParity(workflowSrcRaw, riskSrc, strategyFileExists) {
   const workflowSrc = stripFullLineComments(workflowSrcRaw);
-  const strategySrc = stripFullLineComments(strategySrcRaw);
   const violations = [];
   let scanned = 0;
   const require = (src, needle, why, label) => {
@@ -392,14 +391,16 @@ function checkSerenityRiskParity(workflowSrcRaw, strategySrcRaw, riskSrc) {
   for (const key of ["reco_stop_vol_mult", "reco_target_vol_mult", "reco_risk_budget_pct", "reco_round_trip_cost_pct"]) {
     require(workflowSrc, `"${key}"`, "风控参数键与荐股链不同源 ⇒ 同一票两链算出不同的 k1/k2/R", "工作流链");
   }
-  require(strategySrc, "bars < 252", "近12月过滤缺长度守卫 ⇒ 次新股按「上市以来涨幅」比 12 月阈值", "策略链");
-  require(strategySrc, "gain_filter_skips", "过滤未执行没有状态记录 ⇒ 静默放行", "策略链");
-  require(strategySrc, "涨幅过滤未生效", "未生效时未成句声明 ⇒ 卡片冒充「验证通过」", "策略链");
+  // 2026-11-01 裁定：荐股侧**不再**内置 Serenity 策略（智选候选是 LLM 工作流产物，不是荐股
+  // 的市场数据来源）。原来这三条断言钉「两链同一套涨幅过滤口径」，两链塌成一条 ⇒ 判据换成
+  // 更硬的一条：那个文件若在，就是耦合复活。
+  scanned += 1;
+  if (strategyFileExists) {
+    violations.push("荐股侧: strategies/serenity.rs 又出现了 ⇒ 违反 2026-11-01 裁定（智选候选不得作为荐股风格/入池来源）");
+  }
   // Q1 裁定 B：建仓带 = 该档止损距离的一半，且**两链调同一个函数**（各自写一遍公式就是两套口径）
   require(workflowSrc, "risk::entry_band_pct(", "工作流链建仓带没走 Q1=B 的唯一推导", "工作流链");
-  require(strategySrc, "risk::entry_band_pct(", "策略链建仓带没走 Q1=B 的唯一推导", "策略链");
   forbid(workflowSrc, "price * (1.0 - serenity_entry_range)", "固定 ±range 建仓带又回来了", "工作流链");
-  forbid(strategySrc, "price * (1.0 - entry_range)", "固定 ±range 建仓带又回来了", "策略链");
   require(workflowSrc, `"entrySource"`, "落库缺建仓带来源键 ⇒ 退化时无从声明", "工作流链");
   // Q2 裁定：工作流链按 serenity 的出票档（mid + long）各落一行，与 style_matrix 的 serenity 行一致
   require(workflowSrc, "for tier in serenity_tiers", "工作流链仍只出单档 ⇒ Q2 的双档没落地", "工作流链");
@@ -418,7 +419,6 @@ function checkSerenityRiskParity(workflowSrcRaw, strategySrcRaw, riskSrc) {
   // 建仓带公式的**唯一性**：定义一处、两链调用，链文件里不得再内联 `/ 2.0`
   require(riskSrc, "pub fn entry_band_pct(", "建仓带没有唯一实现 ⇒ 两链必然各写一套", "risk 层");
   forbid(workflowSrc, "stop_pct / 2.0", "工作流链内联推导建仓带（应调 risk::entry_band_pct）", "工作流链");
-  forbid(strategySrc, "stop_pct / 2.0", "策略链内联推导建仓带（应调 risk::entry_band_pct）", "策略链");
   return { violations, scanned };
 }
 
@@ -1215,43 +1215,39 @@ pub fn attribute(tier_active: bool, ev: &Evidence) -> MissLayer {
       want: 0,
     },
     {
-      // 修复前的工作流链真实形态：固定乘数出止损/目标 + 落库无来源键（策略链用现盘文件，0 违规）
+      // 修复前的工作流链真实形态：固定乘数出止损/目标 + 落库无来源键
       name: "h 负控（工作流链仍用固定乘数）应红",
       got: checkSerenityRiskParity(
         '        let (entry_low, entry_high, stop_loss, target_price) = if price > 0.0 {\n'
           + "            (price * (1.0 - serenity_entry_range), price * serenity_stop_mult, price * serenity_target_mult)\n"
           + '        };\n                        "positionPct": 5.0,\n                        "riskNotes": [],\n',
-        read(SERENITY_STRATEGY),
         read(RECO_RISK),
+        false,
       ).violations.length,
-      min: 15,
+      min: 8,
     },
     {
-      name: "h 负控（策略链静默放行涨幅过滤）应红",
-      got: checkSerenityRiskParity(
-        read(SERENITY_WORKFLOW),
-        '        if let Ok(klines) = client.get_klines_with_adj(code, "daily", 252, None).await {\n'
-          + "            if let Some(first) = klines.first() {\n                let gain = (latest - first.close) / first.close;\n            }\n        }\n",
-        read(RECO_RISK),
-      ).violations.length,
-      min: 3,
+      // 2026-11-01 裁定：荐股侧若重新出现 Serenity 策略文件 ⇒ 耦合复活，必须红
+      name: "h 负控（荐股侧策略文件复活）应红",
+      got: checkSerenityRiskParity(read(SERENITY_WORKFLOW), read(RECO_RISK), true).violations.length,
+      min: 1,
     },
     {
       // 建仓带公式被抄回链文件（Q1=B 的「一处实现」塌成两处）⇒ 必须红
-      name: "h 负控（两链各自内联建仓带公式）应红",
+      name: "h 负控（工作流链内联建仓带公式）应红",
       got: checkSerenityRiskParity(
         '                        let (entry_low, entry_high) = (price * (1.0 - used_stop_pct / 2.0), price * (1.0 + used_stop_pct / 2.0));\n',
-        '        let (entry_low, entry_high) = (price * (1.0 - entry_half_pct / 2.0), price);\n',
         "",
+        false,
       ).violations.length,
       min: 2,
     },
     {
-      name: "h 正控（当前两链形态）应绿",
+      name: "h 正控（当前形态）应绿",
       got: checkSerenityRiskParity(
         read(SERENITY_WORKFLOW),
-        read(SERENITY_STRATEGY),
         read(RECO_RISK),
+        fs.existsSync(path.join(ROOT, SERENITY_STRATEGY)),
       ).violations.length,
       want: 0,
     },
@@ -1544,19 +1540,25 @@ pub fn attribute(tier_active: bool, ev: &Evidence) -> MissLayer {
     console.log(`PASS d 扫描面=${d.scanned}`);
   }
   // 门 f 的**真文件扫描面**断言：夹具绿不代表门看得见生产代码。
-  // 旧判据对 `.get_klines_with_adj(` 恒不命中 ⇒ 假绿，正是靠这两条断言才暴露：
-  //  ① scanned 必须 ≥5（五策略的 scale::fetch + serenity 的日历窗口取数）；
-  //  ② serenity 那行必须落在「已豁免」桶里（exempted ≥1），而不是根本没被扫到。
-  const f = checkScaleSingleSource(readStrategyFiles());
-  if (f.scanned < 5) {
+  // 旧判据对 `.get_klines_with_adj(` 恒不命中 ⇒ 假绿，正是靠这条断言才暴露：
+  //  ① scanned 必须 ≥ 策略模块支数（每支策略至少贡献一行取数）。按目录现数推，不写死 5 ——
+  //    加第六支策略时这条不该反过来红。
+  //  ⚠ 退役记录（2026-11-01）：这里原有第二条断言 `f.exempted ≥ 1`，要求真实文件里
+  //    存在一条 `reco-scale-exempt: calendar-window` 登记 —— 它唯一的载体是
+  //    `strategies/serenity.rs` 里那行 `get_klines_with_adj(code, "daily", 252)`，而该
+  //    文件已随「智选候选不得作为荐股风格/入池来源」裁定删除（全仓 grep 该豁免码
+  //    在真实策略文件里 0 命中）。保留这条等于**要求生产代码留着一个缺陷形状**才肯绿。
+  //    豁免通路本身仍有电，由合成对照锁住：「f 负控（豁免码未登记）应红」+
+  //    「f 正控（登记过的日历窗口豁免）应绿」。
+  const fFiles = readStrategyFiles();
+  // mod.rs 只做导出声明，本身不取数 ⇒ 下限按「策略模块支数」现推，别把 6 个文件当成 6 行取数。
+  const strategyModuleCount = fFiles.filter((x) => !x.name.endsWith("/mod.rs")).length;
+  const f = checkScaleSingleSource(fFiles);
+  if (f.scanned < strategyModuleCount) {
     bad += 1;
-    console.log(`FAIL f 真文件扫描面=${f.scanned}（<5 ⇒ 同族取数方法名又漏了）`);
+    console.log(`FAIL f 真文件扫描面=${f.scanned}（<${strategyModuleCount} ⇒ 同族取数方法名又漏了）`);
   } else {
     console.log(`PASS f 真文件扫描面=${f.scanned} 已豁免=${f.exempted}`);
-  }
-  if (f.exempted < 1) {
-    bad += 1;
-    console.log("FAIL f 没有任何日历窗口豁免登记 ⇒ serenity 的日线取数不在门视野内");
   }
   // 门 g 的**真文件判定面**断言：3 个不成立码 + 漏格兜底码 + 1 个错配码 = 5 码 × 11 语言。
   // 面不足 ⇒ 理由码解析退化（历史上 `[^;]*` 会先吃到类型标注 `[(&str, &str, &str); 1]`，
@@ -1599,14 +1601,14 @@ function main() {
         : { violations: [], scanned: 0 },
     ],
     [
-      "h 趋势智选两链风控同源",
-      fs.existsSync(path.join(ROOT, SERENITY_WORKFLOW)) && fs.existsSync(path.join(ROOT, SERENITY_STRATEGY))
+      "h 趋势智选风控单源（荐股侧不再复制一份）",
+      fs.existsSync(path.join(ROOT, SERENITY_WORKFLOW))
         ? checkSerenityRiskParity(
             read(SERENITY_WORKFLOW),
-            read(SERENITY_STRATEGY),
             read(RECO_RISK),
+            fs.existsSync(path.join(ROOT, SERENITY_STRATEGY)),
           )
-        : { violations: [`${SERENITY_WORKFLOW} 或 策略链文件不存在 ⇒ 无从比对`], scanned: 0 },
+        : { violations: [`${SERENITY_WORKFLOW} 不存在 ⇒ 无从比对`], scanned: 0 },
     ],
     ["i 面板档位口径文案与代码一致", checkTierScopeHint(serenityTierScopeHint())],
     [

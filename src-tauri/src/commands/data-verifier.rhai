@@ -470,9 +470,8 @@ if has_factors {
             }
         } else {
             // 缺席票：不参与横截面 ⇒ 不得冒充高分，封顶 54 + 显式标记
-            let old = if present(c.serenity_score) && (type_of(c.serenity_score) == "f64" || type_of(c.serenity_score) == "i64") {
-                c.serenity_score.to_float()
-            } else { 50.0 };
+            // 非数值（含嵌层整数误型、缺席）一律落 50.0，与旧的 type_of 双型守卫逐情形等价。
+            let old = num_of(c.serenity_score, 50.0);
             c["factor_absent"] = true;
             c["serenity_score"] = if old > 54.0 { 54.0 } else { old };
         }

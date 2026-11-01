@@ -467,11 +467,38 @@ pub struct PluginToolDefinition {
     pub input_schema: Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// 插件声明的命名命令（`plugin.json` 的 `commands[]`）。
+///
+/// `input_schema` / `required_permission` 是**宿主侧授权门槛的声明面**，不是执行隔离能力
+/// （见 `manager.rs::execute_plugin_command` 的文档：沙箱只做 `subprocess_execution`
+/// 门槛 + ENV 白名单，不约束子进程实际能写什么）。两者都是**加法**且带 serde 默认值：
+/// 老清单里没有这两个键时按「未声明」处理，行为与添加本字段之前逐字节一致。
+///
+/// `required_permission` 故意用 `Option<String>` 而非 `PluginToolPermission`：
+/// 非法值必须走**清单校验错误**（`InvalidCommandRequiredPermission`），
+/// 不能让整份 `plugin.json` 反序列化失败 —— 照抄 tool 侧 `RawPluginToolManifest`
+/// 同名字段的先例（见本文件 `RawPluginToolManifest::required_permission`）。
+///
+/// ⚠ `input_schema` 是 `serde_json::Value`（非 `Eq`），故本结构只能 derive `PartialEq`；
+/// 连带 `core::PluginSummary` 也必须去掉 `Eq`。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginCommandManifest {
     pub name: String,
     pub description: String,
     pub command: String,
+    /// 命令输入的 JSON Schema（宿主侧只做最小形状校验：input 必须是 object，
+    /// `required` 列出的键必须存在；其余关键字不校验）。
+    ///
+    /// 未声明 ⇒ 空 object `{}`，等价于「不约束输入形状」（今天的既有行为）。
+    #[serde(rename = "inputSchema", default)]
+    pub input_schema: Option<Value>,
+    /// 执行该命令要求的宿主侧授权档位标签（`read-only` / `workspace-write` / `danger-full-access`）。
+    ///
+    /// 未声明 ⇒ `ReadOnly`。判定用**具体权限名**（`write` / `file_system_write` / `execute`），
+    /// 不走 `PluginPermission::implies_*` —— 后者把 `SubprocessExecution` 判为满足，
+    /// 用它做门槛必然恒过（详见 `manager.rs::check_command_gate`）。
+    #[serde(rename = "requiredPermission", default)]
+    pub required_permission: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

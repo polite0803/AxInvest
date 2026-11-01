@@ -477,9 +477,14 @@ pub async fn plugin_update(
 
 /// 执行插件声明的命名命令（阶段3-① 分发入口，`PLAN-plugin-gap-closure.md` §2）。
 ///
-/// 走 [`axagent_plugins::PluginManager::execute_plugin_command`]：与 tool 同一
-/// ENV 白名单沙箱 + `subprocess_execution` 权限门槛；输入 JSON 经 stdin /
-/// `CLAWD_TOOL_INPUT` 注入（复用工具执行链），stdout 原样返回。
+/// 走 [`axagent_plugins::PluginManager::execute_plugin_command`]，以下为该链路的**实测事实**，
+/// 前端/调用方据此判断风险，不要按字面「沙箱」理解成隔离：
+/// 命令串整团作为程序名交给 `Command::new`（**没有**按空白切分成程序 + 参数，`args` 恒空），
+/// 输入 JSON 经 stdin 与 `CLAWD_TOOL_INPUT` 注入，stdout 原样返回。
+/// 沙箱只做 `subprocess_execution` 门槛 + ENV 白名单（`env_clear` 后回填白名单），
+/// **不对子进程做任何路径或写权限限制**。
+/// 命令声明的 `requiredPermission` 档位是**宿主侧授权门槛（authorization gate）**，
+/// 不是执行隔离（containment）：档位不满足时后端返回 `PermissionDenied` 且不启动子进程。
 #[agent_command(domain = plugin, safety = Caution, call_mode = StateInput, description = "执行插件命名命令")]
 #[command]
 pub async fn plugin_execute_command(

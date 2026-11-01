@@ -329,12 +329,10 @@ pub use plugin_hook::{
     ApiCallContext, ApiCallResult, HookContext, HookDecision, LlmCallContext, LlmCallResult,
     PluginHook, SharedHook, ToolCallContext, ToolCallResult,
 };
-// G16: DojoExtension Protocol — 扩展接入契约（health/tool_specs/execute_command/dashboard_cards/prompt_context）
-pub mod dojo_extension;
-pub use dojo_extension::{
-    DojoCommandSpec, DojoDashboardCard, DojoDashboardCardType, DojoExtension, DojoExtensionHealth,
-    DojoExtensionRegistry, DojoPromptContext, DojoToolSpec,
-};
+// G16 扩展接入协议（原 harness::dojo_extension 模块）已废弃并整文件删除，裁定见 docs/plans/PLAN-shell-plus-plugins.md §0.12.1：
+// 全仓生产实现者 0（唯一 impl 是同文件测试替身），注册 API 无生产注册方。
+// 其 command_specs / execute_command 形状由 CLI 型插件命令通道承接：
+// axagent-plugins/crates/plugins/src/manager.rs 的 build_manifest_commands + execute_plugin_command。
 // G17: Cron delivery → gateway 闭环 — 投递配置 DTO + Sink trait
 pub mod cron_delivery;
 pub use cron_delivery::{

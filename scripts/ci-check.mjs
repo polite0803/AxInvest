@@ -466,6 +466,16 @@ if (canRunFrontend) {
   step("增量孤儿 i18n 键（删码须同步删 11 语言）自检", "node scripts/check-i18n-orphan-diff.mjs --selftest");
   step("增量孤儿 i18n 键（删码须同步删 11 语言）", "node scripts/check-i18n-orphan-diff.mjs");
 
+  // ── 能力接缝登记表对账（第五道门，2026-11-01，PLAN §0.12.4 裁定「建」/ 任务 #38）──
+  // 为什么需要：`PLAN-shell-plus-plugins.md` §0.7 登记表是 P5/P6 全部判据的分母，此前只靠
+  //   人工复扫 —— §0.12.4 实测抓出 15 处数字漂移 + 2 套并行口径（1534/1541、124/83 等）。
+  //   本门复跑两份 audit 口径 + §0.7.1 扫描面，对机器镜像 capability-register.json 逐行对账。
+  //   镜像表是唯一权威：无基线、无 --update-* 洗白路径；hard:false / manual 只报告不判红。
+  // 不加 `if (!quick)`：纯 Node 静态门必须走 pre-push 快速档（AGENTS.md「CI 接线」）。
+  // 命令行与 `.github/workflows/ci.yml` 对应步骤**逐字同源**。
+  step("能力接缝登记表对账自检", "node scripts/check-capability-register.mjs --selftest");
+  step("能力接缝登记表对账（镜像表 vs 盘上实测）", "node scripts/check-capability-register.mjs");
+
   step("dprint 格式化检查", "npx dprint check --incremental=false");
 
   // OxLint 检查 —— 命令与 `.github/workflows/ci.yml:436` **逐字同源**。

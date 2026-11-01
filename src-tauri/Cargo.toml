@@ -191,7 +191,7 @@ sha2 = { workspace = true }
 sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "mysql", "sqlite"] }
 sysinfo = "0.39"
 tar = "0.4"
-tauri = { version = "2.11.5", features = ["tray-icon", "image-png"] }
+tauri = { version = "2.11.5", features = ["tray-icon", "image-png", "protocol-asset"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2.7"

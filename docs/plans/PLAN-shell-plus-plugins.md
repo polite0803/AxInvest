@@ -244,8 +244,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 
 | 口径 | 命中 | 备注 |
 |---|---|---|
-| K1：`pub trait` 总数（8 根 2005 个 `.rs`） | **316** | 含引擎内部变化点、测试替身、serde 派生面 |
-| K1 + 有非 harness、非测试实现者 | **232** | ⚠ 这一档**不能**当能力数 |
+| K1：`pub trait` 总数（8 根 2004 个 `.rs`） | **315** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 由 2005/316 降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits` |
+| K1 + 有非 harness、非测试实现者 | **232** | ⚠ 这一档**不能**当能力数。**2026-11-01 第五道门复算得 269，表内另自记 210 —— 三数并存**：232 出自一次性 census 工件（`.tmp/traits-full.json`，未入库 ⇒ 谓词无法从仓内代码复现）；210 是单趟扫描缺陷（同谓词两趟 = 232，差值恰 22）；269 是本门最严格读法（不要求 trait 声明面、不排 std/派生噪声名）。**处置次序不能反**：先把 232 的谓词入库为 `k1DeclaredExternalImplTraitCount`、`--dump-readings` 验出 232，再把该锚点升 `hard:true`；反向必先假红 |
 | K1 + K2（键控站点，四次扫描合并去漏报） | **51** 个 trait 面 | 含 15 条已建接缝的 trait |
 | 51 → 同族合并 + K3/K4 判定 | **26 条能力** | ⇒ 本节表格 A+B+C 三组 |
 | （对照）今天就能远程跑的接缝 | **13** | `axagent-plugins/crates/plugins/src/worker.rs:110` `SUPPORTED_REMOTE_SEAMS` |
@@ -295,11 +295,11 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 
 ### 0.7.6 机制合流，不是能力 —— 1 条（必须处理，但不计入 26）
 
-`axagent-core/crates/harness/src/dojo_extension.rs:215 DojoExtension` —— 自带 `extensions: RwLock<HashMap<String, Arc<dyn DojoExtension>>>`
-（`:282`）、11 个方法（`extension_id/version/health/tool_specs/command_specs/execute_command`），
-**这是一套与 capability 接缝并行的第二插件协议**：它自己声明工具与命令、自己带健康探针，却不在 15 条接缝里，也不在 `SUPPORTED_REMOTE_SEAMS`。
-⇒ **已裁定（§0.12.1）：废弃 trait 本体，把 `command_specs/execute_command` 的形状吸收进 L1 命令通道 T2**（生产实现者 0，唯一实现是测试替身）。
-   顺带要修的两条既有通道缺陷也在 §0.12.1：CLI 派发口 `plugins/src/manager.rs:551` 无 `input_schema` 且权限**写死 `ReadOnly`**（声明只读、执行却是任意子进程）。
+**已执行（2026-11-01，`#30`）**：`harness/src/dojo_extension.rs` 整文件删除（**−460 行**），`harness/src/lib.rs:332-337` 换成 4 行墓碑注释（337 是 `pub use` 收尾 `};`，按 332–336 删必编译不过）。删除门禁：8 个 `DojoExtension*` 符号在两文件之外命中 0（`.tmp/t30-dojo-gate.mjs`，20441 文件面；排除 `.tmp/`、`output/`、`docs/`、`.workbuddy/`）；翻案检索 `git log --all -S"impl DojoExtension for"` = 4 提交，`git grep` 到 `origin/master`/`upstream/master` 的 18 处命中全落在被删文件自身 ⇒ **历史与其它分支均无生产实现者，翻案条件未触发**。
+它原来「是一套与 capability 接缝并行的第二插件协议」这一判据不变：自带键控注册表、自己声明工具与命令、自己带健康探针，却不在 15 条接缝里，也不在 `SUPPORTED_REMOTE_SEAMS`。
+⇒ **已裁定并执行（§0.12.1）：废弃 trait 本体，把 `command_specs/execute_command` 的形状吸收进 L1 命令通道 T2**（生产实现者 0，唯一实现是测试替身）——不给零实现者的第二协议上「权限模型 + 对账 + 兼容窗口」三套成本。
+   原记「CLI 派发口无 `input_schema` 且权限写死 `ReadOnly`」**判据低估了实情**：`PluginTool::check_permission`（`plugins/src/types.rs:645-684`）全仓零调用方，唯一引用它的 `execute_with_permission_check` 也零调用方 ⇒ 档位在 tools 与 commands **两条路上都是纯装饰**；本批只把命令通道改成真授权（按具体权限名判定，`implies_*` 一字未改），**tool 侧依旧是装饰**，另立批次。
+   同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:583`**（原 `:551`，因 +544 行改动而下移；镜像表同批改）。
 
 ### 0.7.7 判为内核，明确不拆（每条都给不过哪道判据）
 
@@ -478,7 +478,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | 功能域 | **19 个**：4 个判 **L0 公共底座**（智能体引擎与编排 15 · 对话与消息 11 · 设置/安全/外壳 10 · 工作流引擎与编辑器 10；括号为跨面共享消费方数），15 个判 L1 功能包 |
 | `pub trait` | **316**：L2 已建接缝 **14** · L2 待建接缝 **19** · **有外部实现者但无键控分发点 198** · L3 策略位 **56**（壳层全局持有 4 + 仅内置实现 52） · **全仓零实现的空接口 29** |
 
-⇒ 「项目里已有功能点非常多」现在有数：**19 域 / 164 模块 / 1541 命令 / 316 trait**。
+⇒ 「项目里已有功能点非常多」现在有数：**19 域 / 164 模块 / 1541 命令 / 315 trait**（trait 数 2026-11-01 起为 315，原 316 含已删的 `DojoExtension`；口径同 §0.7.2）。
 ⚠ **上表「L0 公共底座」是按跨面共享消费方数得出的，它只度量拆分的顺序成本，不度量可行性**（`AUDIT-capability-inventory-2026-11-01.md` §5 第 0 条）：
  「工作流引擎与编辑器」判 L0 ≠ 股票分析拆不成插件 —— 依赖方向是「域 → 引擎」，真因与改判见 §0.8.5。
 而真正符合可插拔判据的只有 **14 + 19 = 33** 条接缝面；**198 个 trait 是「多实现者但编译期选死」的分层解耦**，29 个是零实现的空接口债。
@@ -1112,3 +1112,10 @@ ci.yml 侧一律**追加在文件末尾**（本文件被 18+ 处 `ci.yml:<行号
    而非同文件另一处冗余的 `Docs/`——后者在 `core.ignorecase=true` 下也命中 `docs/`，属叠加而非独立成因。
    2026-11-01 已移除 `docs/` 排除项：`docs/` 下 176 份文件（175 `.md` + 1 `.json`，共 7 MB）此前**零入库**，现全部转为
    untracked 可提交状态。剩余未达成：批量导入需单独一次提交，本文与两份 AUDIT 随本轮提交。
+8. **本批已落地并让第五道门转绿（2026-11-01 收口读数）**：`#30` 删 `dojo_extension.rs`（−460）+ 命令通道改真授权；`#39` 交付配置面 + 共享桥（`pluginSandboxBridge.ts`，page/panel 同一份白名单）；主代理开 `protocol-asset` feature 解除主 crate 编译阻塞。⇒ 权威读数 **2004 个 `.rs` / 315 个 `pub trait`**（原 2005/316），镜像表与 PLAN §0.7.2 同批改，`node scripts/check-capability-register.mjs` **EXIT=0**。
+9. **tool 侧权限档位仍是装饰**：`#30` 只把**命令通道**改成真授权。`PluginTool::check_permission`（`plugins/src/types.rs:645-684`）与唯一引用它的 `execute_with_permission_check` **至今零调用方** ⇒ 「插件工具能碰什么」这条线仍未执法，是 §2 缺陷表里独立的一条，不是本批已完成项。
+10. **相对路径声明的插件命令今天根本跑不通**（`#30` 端到端实测）：命令串整团交 `Command::new`、可执行文件查找按宿主 cwd（子进程 `current_dir` 不参与）⇒ Windows `OS error 3`、POSIX 同理。修法二选一未定（走 tool 侧同款 `resolve_hook_entry` vs 真按空白切分），任务 #47。
+11. **A 通道端到端仍未通**，四份额外输入：`#43` 资产绝对路径解析命令、`#44` `PluginManifest.pages[]` 逐页声明、`#46` 插件侧桥客户端运行时（`asset` 装载的第三方 bundle 够得着桥），以及一次 `npm run tauri dev` 的运行期实测（Windows 上确认 origin 是 `https://asset.localhost`）。§0.12.5 那句「工程量小：一条配置 + CSP 一段 + 白名单测试」**已被实测推翻**，且它当时的判断「`enable: true` 只是惰性生效」也错——缺 feature 时 tauri `build.rs` 直接**硬失败**，不是静默不生效。
+12. **本地 `npm run typecheck` / `tsc --noEmit` 在 UNC 共享目录静默空跑**（退 0、`--listFiles` 列 0 个文件；主代理与 `#39` 各独立复现一次）⇒ **本文与历史会话里所有「typecheck 通过」的记录都不算证据**。CI 在本地盘跑，仍有效。固化绕过 = 任务 #45。
+13. **`docs/` 仍有 173 份文档未入库**（`.gitignore` 已解除排除，全部转 untracked 可提交）；批量导入前需处置 `docs/plans/PLAN-asof-gaps.md:558` 的一条 `Acs-Token: …` 签名串（全仓密钥扫描唯一命中）。
+14. **本文的行号已被机器钉死**：镜像表用 `planLine` / `planPinned.mustContain` 锚 PLAN 具体行（实测本轮我少写 1 行 ⇒ 8 处钉句假红，补回同数行才转绿）。⇒ **今后编辑本文必须「行数中性」**，或给第五道门加 `--repin-plan` 重锚模式（否则正常的文档演进会持续制造假红，而假红的代价是训练人去忽略红）。

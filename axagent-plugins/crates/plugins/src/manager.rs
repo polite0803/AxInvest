@@ -130,6 +130,18 @@ pub enum PluginManifestValidationError {
         tool_name: String,
         permission: String,
     },
+    /// 命名命令声明了 `inputSchema` 但不是 JSON object。
+    ///
+    /// 与 tool 侧 `InvalidToolInputSchema` **分开两个变体**：Display 文案里的
+    /// `plugin tool` / `plugin command` 是写死的，复用会让用户去改错的那一份声明。
+    InvalidCommandInputSchema {
+        command_name: String,
+    },
+    /// 命名命令声明了 `requiredPermission`，但值不在三档标签之内。
+    InvalidCommandRequiredPermission {
+        command_name: String,
+        permission: String,
+    },
     UnsupportedManifestContract {
         detail: String,
     },
@@ -185,6 +197,13 @@ impl Display for PluginManifestValidationError {
             Self::InvalidToolRequiredPermission { tool_name, permission } => write!(
                 f,
                 "plugin tool `{tool_name}` requiredPermission `{permission}` must be read-only, workspace-write, or danger-full-access"
+            ),
+            Self::InvalidCommandInputSchema { command_name } => {
+                write!(f, "plugin command `{command_name}` inputSchema must be a JSON object")
+            },
+            Self::InvalidCommandRequiredPermission { command_name, permission } => write!(
+                f,
+                "plugin command `{command_name}` requiredPermission `{permission}` must be read-only, workspace-write, or danger-full-access"
             ),
             Self::UnsupportedManifestContract { detail } => f.write_str(detail),
             Self::DependencyNotSatisfied { plugin_name, min_version } => match min_version {
@@ -543,11 +562,24 @@ impl PluginManager {
 
     /// 执行插件声明的命名命令（阶段3-① 分发入口，`PLAN-plugin-gap-closure.md` §2）。
     ///
-    /// **复用工具执行链**（`PluginTool::execute_sandboxed`）：manifest 的
-    /// `commands[].command` 按空白切分为程序 + 参数直接 exec（不经 shell 解析，防注入），
-    /// ENV 白名单沙箱 + `subprocess_execution` 权限门槛与 tools 完全同形。
-    /// 权限档位取 `ReadOnly`（命令输入走 stdin / `CLAWD_TOOL_INPUT`，复用工具执行链）；
-    /// 需要写权限的复杂操作应声明为 tool 而非 command。
+    /// 执行形状（以下为**实测事实**，改注释前本段写的是「按空白切分为程序 + 参数」，那是假的）：
+    /// manifest 的 `commands[].command` **整团作为程序名**交给 `Command::new`，
+    /// `args` 恒为空 `Vec` —— 没有任何按空白切分，也不经 shell 解析。
+    /// 声明里写成 `prog a b` 时，Windows / POSIX 都会把整个字符串当作可执行文件名找，
+    /// 找不到即 `Io` 错误；带参数需求请声明成 tool（`tools[].command` + `tools[].args`）。
+    ///
+    /// 沙箱（[`PluginTool::execute_sandboxed`]）只做两件事：`subprocess_execution`
+    /// 权限门槛 + ENV 白名单（`env_clear` 后回填白名单变量）。它**不调用**
+    /// `check_path_permission`，因此对子进程实际能读写什么**没有任何限制**。
+    ///
+    /// 所以本函数的权限档位语义是**宿主侧授权门槛（authorization gate）**，
+    /// 不是执行隔离（containment）：档位只决定「宿主是否允许这个插件把这条命令跑起来」，
+    /// 跑起来之后能干什么是子进程自己的事。输入 JSON 经 stdin 与 `CLAWD_TOOL_INPUT` 注入，
+    /// stdout 原样返回。
+    ///
+    /// 判定顺序是先授权、后形状，两者都在 spawn 之前。授权门槛见
+    /// [`Self::check_command_gate`]；声明了 `inputSchema` 时再做最小形状校验
+    /// （[`Self::check_command_input_shape`]），未声明 ⇒ 不约束输入形状，与加字段前一致。
     pub fn execute_plugin_command(
         &self,
         plugin_id: &str,
@@ -566,6 +598,12 @@ impl PluginManager {
         let entry = plugin.commands().iter().find(|c| c.name == command_name).ok_or_else(|| {
             PluginError::NotFound(format!("插件 `{plugin_id}` 没有声明命令 `{command_name}`"))
         })?;
+        // 授权门槛先于输入形状校验：档位不满足时连「输入是否合规」都不该告知调用方。
+        let required_permission = command_required_permission(entry)?;
+        Self::check_command_gate(required_permission, &entry.name, plugin.permissions())?;
+        if let Some(schema) = &entry.input_schema {
+            Self::check_command_input_shape(&entry.name, schema, input)?;
+        }
         let metadata = plugin.metadata();
         let tool = PluginTool::new(
             plugin_id,
@@ -573,15 +611,100 @@ impl PluginManager {
             PluginToolDefinition {
                 name: entry.name.clone(),
                 description: Some(entry.description.clone()),
-                input_schema: Value::Object(Default::default()),
+                input_schema: resolved_command_input_schema(entry),
             },
             entry.command.clone(),
             Vec::new(),
-            PluginToolPermission::ReadOnly,
+            required_permission,
             metadata.root.clone(),
         );
         let sandbox = build_sandbox_from_permissions(plugin.permissions());
         tool.execute_sandboxed(input, &sandbox)
+    }
+
+    /// 命名命令的授权门槛：档位需要哪个**具体权限名**，插件声明里就必须有哪个。
+    ///
+    /// 刻意不调 `PluginPermission::implies_read/implies_write/implies_execute`
+    /// （`types.rs`）：那三个函数都把 `SubprocessExecution` 判为满足，而「能起子进程」
+    /// 本来就是命令执行的前提交（`sandbox.rs::build_sandbox_from_permissions`）
+    /// ⇒ 用 `implies_*` 做门槛必然恒过，零安全增益。
+    ///
+    /// 也不改 `implies_*` 本身：那是 tool 侧在用的语义，动它会破坏现有插件。
+    ///
+    /// 真值表（未声明档位按 `ReadOnly` 处理，与加字段前一致）：
+    /// `ReadOnly` 无额外要求，只受沙箱 `subprocess_execution` 门槛约束。
+    /// `WorkspaceWrite` 需要 `write` 或 `file_system_write`；`execute` 与
+    /// `subprocess_execution` 都不算。
+    /// `DangerFullAccess` 需要 `execute`；`subprocess_execution` 不算。
+    fn check_command_gate(
+        required_permission: PluginToolPermission,
+        command_name: &str,
+        declared: &[PluginPermission],
+    ) -> Result<(), PluginError> {
+        let declared_labels: Vec<&str> = declared.iter().map(|p| p.as_str()).collect();
+        let satisfied = match required_permission {
+            PluginToolPermission::ReadOnly => true,
+            PluginToolPermission::WorkspaceWrite => declared.iter().any(|permission| {
+                matches!(permission, PluginPermission::Write | PluginPermission::FileSystemWrite)
+            }),
+            PluginToolPermission::DangerFullAccess => {
+                declared.iter().any(|permission| matches!(permission, PluginPermission::Execute))
+            },
+        };
+        if satisfied {
+            return Ok(());
+        }
+        Err(PluginError::PermissionDenied(format!(
+            "插件命令 `{command_name}` 要求档位 `{}`，但插件声明权限 {declared_labels:?} 中没有该档位要求的具体权限名（`subprocess_execution` 不能顶上），拒绝启动子进程",
+            required_permission.as_str()
+        )))
+    }
+
+    /// 命名命令输入的最小形状校验（自建，**不引第三方 JSON Schema 校验器**）。
+    ///
+    /// 校验范围到此为止，别把它当 JSON Schema 实现。只做两件事：`input` 必须是 JSON
+    /// object；`schema["required"]` 若存在，其中每个字符串键都必须在 `input` 里出现。
+    ///
+    /// `type` / `properties` / `enum` 等其余 JSON Schema 关键字不校验（要约束值形态请声明
+    /// 成 tool 并在实现侧自证）。`required` 写成非数组是声明方的 bug，按「无法判定即拒绝」
+    /// 处理，不静默放行。不满足时返回错误且**不启动子进程**。
+    fn check_command_input_shape(
+        command_name: &str,
+        schema: &Value,
+        input: &Value,
+    ) -> Result<(), PluginError> {
+        let reject = |detail: String| {
+            PluginError::CommandFailed(format!(
+                "插件命令 `{command_name}` 输入校验未通过：{detail}（未启动子进程）"
+            ))
+        };
+        let Some(input_object) = input.as_object() else {
+            return Err(reject(format!(
+                "input 必须是 JSON object，实际是 {}",
+                json_value_kind(input)
+            )));
+        };
+        let Some(required) = schema.get("required") else {
+            return Ok(());
+        };
+        let Some(required_keys) = required.as_array() else {
+            return Err(reject(format!(
+                "inputSchema.required 必须是数组，实际是 {}",
+                json_value_kind(required)
+            )));
+        };
+        for key in required_keys {
+            let Some(key) = key.as_str() else {
+                return Err(reject(format!(
+                    "inputSchema.required 数组元素必须是字符串，实际是 {}",
+                    json_value_kind(key)
+                )));
+            };
+            if !input_object.contains_key(key) {
+                return Err(reject(format!("缺少必填字段 `{key}`")));
+            }
+        }
+        Ok(())
     }
 
     pub fn validate_plugin_source(&self, source: &str) -> Result<PluginManifest, PluginError> {
@@ -2187,6 +2310,46 @@ fn build_manifest_tools(
     validated
 }
 
+/// 命令声明的 `requiredPermission` 落定值。
+///
+/// 未声明 ⇒ `ReadOnly`（与加字段前逐字节一致，现有插件照常加载与执行）。
+/// 声明了但解析不出 ⇒ 报错：清单加载链上 `build_manifest_commands` 已拦过一遍，
+/// 走到这里还拿到非法值说明绕过了校验（如手工构造的 registry），fail-closed 而不是
+/// 静默降成 `ReadOnly` —— 静默降档等于把「写权限命令」当只读放行。
+fn command_required_permission(
+    entry: &PluginCommandManifest,
+) -> Result<PluginToolPermission, PluginError> {
+    match entry.required_permission.as_deref() {
+        // 未声明 ⇒ ReadOnly，与加字段前逐字节一致（现有插件照常执行）。
+        None => Ok(PluginToolPermission::ReadOnly),
+        Some(label) => PluginToolPermission::parse(label.trim()).ok_or_else(|| {
+            PluginError::InvalidManifest(format!(
+                "插件命令 `{}` 的 requiredPermission `{label}` 非法（须为 read-only / workspace-write / danger-full-access）",
+                entry.name
+            ))
+        }),
+    }
+}
+
+/// 命令声明的 `inputSchema` 落定值（用于构造执行链上的 `PluginToolDefinition`）。
+///
+/// 未声明 ⇒ 空 object，与加字段前写死的 `Value::Object(Default::default())` 同一个值。
+fn resolved_command_input_schema(entry: &PluginCommandManifest) -> Value {
+    entry.input_schema.clone().unwrap_or_else(|| Value::Object(Map::new()))
+}
+
+/// JSON 值的类型名，只用于报错文案（`serde_json::Value::type_str` 的等价简写）。
+fn json_value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
 fn build_manifest_commands(
     root: &Path,
     commands: Vec<PluginCommandManifest>,
@@ -2225,6 +2388,26 @@ fn build_manifest_commands(
         } else {
             validate_command_entry(root, &command.command, "command", errors);
         }
+        // 以下两项**只对「声明了」的插件生效**：缺省键不报错，保证现有插件照常加载
+        // （与 tool 侧不同 —— tool 的 inputSchema/requiredPermission 一直是必填）。
+        // 显式声明成空串/空白也算「声明了非法值」，与 tool 侧口径一致。
+        if command.input_schema.as_ref().is_some_and(|schema| !schema.is_object()) {
+            errors.push(PluginManifestValidationError::InvalidCommandInputSchema {
+                command_name: name.clone(),
+            });
+        }
+        let invalid_permission = command
+            .required_permission
+            .as_deref()
+            .filter(|label| PluginToolPermission::parse(label.trim()).is_none());
+        if let Some(permission) = invalid_permission {
+            errors.push(PluginManifestValidationError::InvalidCommandRequiredPermission {
+                command_name: name.clone(),
+                permission: permission.trim().to_string(),
+            });
+            continue;
+        }
+
         validated.push(command);
     }
 
@@ -3448,5 +3631,359 @@ mod tests {
         assert!(!manager.active_passport_ids.contains_key("external:demo"));
         // 重复回滚为空（幂等）
         assert!(manager.take_plugin_passport_ids("external:demo").is_empty());
+    }
+
+    // ==== 命名命令通道（inputSchema / requiredPermission 声明面 + 执行门禁）====
+
+    /// 构造清单条目。`command` 用 `echo` 这类**字面命令**（`is_literal_command` 为真），
+    /// 好让 `build_manifest_commands` 里的路径存在性校验不干扰本组断言。
+    fn command_manifest_entry(
+        name: &str,
+        input_schema: Option<Value>,
+        required_permission: Option<&str>,
+    ) -> PluginCommandManifest {
+        PluginCommandManifest {
+            name: name.to_string(),
+            description: "test command".to_string(),
+            command: "echo".to_string(),
+            input_schema,
+            required_permission: required_permission.map(str::to_string),
+        }
+    }
+
+    fn permissions_of(labels: &[&str]) -> Vec<PluginPermission> {
+        labels.iter().filter_map(|label| PluginPermission::parse(label)).collect()
+    }
+
+    /// 命令脚本的文件名（随平台变）。
+    fn command_script_name() -> &'static str {
+        if cfg!(windows) { "greet.cmd" } else { "greet.sh" }
+    }
+
+    /// 拼一条 `commands[]` 声明 JSON：脚本用**源目录里的绝对路径**声明。
+    ///
+    /// 为什么不能用相对路径（夹具的自然写法）：命令通道把 `commands[].command` **整团**
+    /// 交给 `Command::new`，而可执行文件查找发生在**宿主进程的 cwd**、不受子进程
+    /// `current_dir` 影响 ⇒ `./commands/greet.cmd` 在 Windows（实测
+    /// `OS error 3 = 系统找不到指定的路径`）与 POSIX 上都必然 spawn 失败。
+    /// 这是既有缺陷、本批按任务书**不改 exec 形状**，故端到端用例只能走绝对路径；
+    /// 缺陷与修法建议写进交付报告。
+    fn command_decl_json(source: &Path, extra_fields_json: &str) -> String {
+        let script = source.join("commands").join(command_script_name());
+        let command_json =
+            serde_json::to_string(&script.display().to_string()).expect("脚本路径应可 JSON 化");
+        if extra_fields_json.is_empty() {
+            format!(r#"{{ "name": "greet", "description": "Greet", "command": {command_json} }}"#)
+        } else {
+            format!(
+                r#"{{ "name": "greet", "description": "Greet", "command": {command_json}, {extra_fields_json} }}"#
+            )
+        }
+    }
+
+    /// 写一个只声明命名命令的插件源目录。
+    ///
+    /// 脚本会在工作目录（= 插件安装目录）落一个 `ran.marker`，用来**客观证明**
+    /// 「拒绝发生在 spawn 之前」而不是只靠错误类型推断。
+    fn write_command_plugin_source(
+        root: &Path,
+        name: &str,
+        permissions_json: &str,
+        command_decl_json: &str,
+    ) {
+        let script_content = if cfg!(windows) {
+            "@echo off\r\necho ran> ran.marker\r\necho command=%CLAWD_TOOL_NAME%\r\n"
+        } else {
+            "#!/bin/sh\ncat >/dev/null\nprintf 'ran' > ran.marker\nprintf 'command=%s\\n' \"$CLAWD_TOOL_NAME\"\n"
+        };
+
+        let script_path = root.join("commands").join(command_script_name());
+        std::fs::create_dir_all(root.join("commands")).expect("创建 commands 目录");
+        std::fs::write(&script_path, script_content).expect("写入命令脚本");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&script_path).expect("metadata").permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script_path, perms).expect("chmod");
+        }
+        let manifest_path = root.join(MANIFEST_RELATIVE_PATH);
+        std::fs::create_dir_all(
+            manifest_path.parent().expect("manifest 声明的目录路径应有父级"),
+        )
+        .expect("创建 manifest 目录");
+        std::fs::write(
+            &manifest_path,
+            format!(
+                "{{\n  \"name\": \"{name}\",\n  \"version\": \"1.0.0\",\n  \
+                 \"description\": \"command gate plugin\",\n  \"defaultEnabled\": true,\n  \
+                 \"permissions\": {permissions_json},\n  \
+                 \"commands\": [ {command_decl_json} ]\n}}"
+            ),
+        )
+        .expect("写入 manifest");
+    }
+
+    /// 命令通道端到端夹具：已安装的插件 + 需要清理的临时目录。
+    struct CommandPluginFixture {
+        manager: PluginManager,
+        config_home: PathBuf,
+        source: PathBuf,
+        install_path: PathBuf,
+        plugin_id: String,
+    }
+
+    impl CommandPluginFixture {
+        /// 装一个只声明命名命令的插件。`extra_fields_json` 是 `commands[]` 条目的附加声明
+        /// （`requiredPermission` / `inputSchema`），传空串即「未声明」的老清单形状。
+        fn new(label: &str, permissions_json: &str, extra_fields_json: &str) -> Self {
+            let source = temp_dir(&format!("{label}-source"));
+            let config_home = temp_dir(&format!("{label}-home"));
+            let decl = command_decl_json(&source, extra_fields_json);
+            write_command_plugin_source(
+                &source,
+                &format!("{label}-demo"),
+                permissions_json,
+                &decl,
+            );
+            let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+            let outcome = manager
+                .install(source.to_str().expect("utf8 path"))
+                .unwrap_or_else(|e| panic!("install 应成功: {e}"));
+            Self {
+                manager,
+                config_home,
+                source,
+                install_path: outcome.install_path.clone(),
+                plugin_id: outcome.plugin_id,
+            }
+        }
+
+        /// 脚本自报的「真的跑过」标记落在插件安装目录（执行链把 cwd 设成安装根）。
+        fn marker(&self) -> PathBuf {
+            self.install_path.join("ran.marker")
+        }
+
+        fn cleanup(self) {
+            let _ = std::fs::remove_dir_all(&self.config_home);
+            let _ = std::fs::remove_dir_all(&self.source);
+        }
+    }
+
+    /// 契约 E-1：老清单（两个新键都不存在）照常加载，且落定值与加字段前逐字节一致。
+    #[test]
+    fn undeclared_command_declarations_keep_todays_defaults() {
+        let raw = vec![command_manifest_entry("greet", None, None)];
+        let mut errors = Vec::new();
+
+        let validated = build_manifest_commands(Path::new("."), raw, &mut errors);
+
+        assert!(errors.is_empty(), "未声明新字段不得报错，实际 {errors:?}");
+        assert_eq!(validated.len(), 1);
+        // schema 落定 = 空 object（今天写死的那个值）；档位落定 = ReadOnly。
+        assert_eq!(resolved_command_input_schema(&validated[0]), Value::Object(Map::new()));
+        assert_eq!(
+            command_required_permission(&validated[0]).expect("默认档位应可解析"),
+            PluginToolPermission::ReadOnly
+        );
+        // 未声明 ⇒ 执行链**跳过**形状校验；一旦声明，非 object 输入即拒（对照断言）。
+        let declared_schema = serde_json::json!({ "type": "object" });
+        assert!(matches!(
+            PluginManager::check_command_input_shape("greet", &declared_schema, &Value::Null),
+            Err(PluginError::CommandFailed(_))
+        ));
+
+        // 同形状走完整加载链（真实 manifest JSON 里没有新键）也必须能装、能分发。
+        let fixture = CommandPluginFixture::new("cmd-default", r#"["read"]"#, "");
+        let summaries = fixture.manager.list_plugins().expect("清单应可枚举");
+        let summary = summaries
+            .iter()
+            .find(|s| s.metadata.id == fixture.plugin_id)
+            .expect("已安装插件应出现在清单");
+        assert_eq!(summary.commands.len(), 1);
+        assert_eq!(summary.commands[0].input_schema, None);
+        assert_eq!(summary.commands[0].required_permission, None);
+        // 未声明 schema 的 `null` 输入必须一路走到沙箱门槛（= 加字段前的行为），
+        // 不能被新增的形状校验半路拦成 CommandFailed。
+        let err = fixture
+            .manager
+            .execute_plugin_command(&fixture.plugin_id, "greet", &Value::Null)
+            .expect_err("缺 subprocess_execution 应被沙箱拒绝");
+        assert!(
+            matches!(&err, PluginError::PermissionDenied(msg) if msg.contains("subprocess_execution")),
+            "期望沙箱的 PermissionDenied（证明形状关未介入），实际 {err:?}"
+        );
+        assert!(!fixture.marker().exists(), "被拒绝的命令不该跑过脚本");
+        fixture.cleanup();
+    }
+
+    /// 契约 E-2：声明了非 object 的 `inputSchema` ⇒ 清单校验报 InvalidCommandInputSchema。
+    #[test]
+    fn non_object_command_input_schema_is_a_manifest_error() {
+        let raw = vec![command_manifest_entry("greet", Some(serde_json::json!("type=object")), None)];
+        let mut errors = Vec::new();
+
+        let validated = build_manifest_commands(Path::new("."), raw, &mut errors);
+
+        assert!(
+            errors.contains(&PluginManifestValidationError::InvalidCommandInputSchema {
+                command_name: "greet".to_string()
+            }),
+            "应报 InvalidCommandInputSchema，实际 {errors:?}"
+        );
+        // 档位非法才 continue，schema 非法仍保留条目（与 tool 侧只 continue 档位一致）。
+        assert_eq!(validated.len(), 1);
+    }
+
+    /// 契约 E-3：声明了不在三档之内的 `requiredPermission` ⇒ InvalidCommandRequiredPermission。
+    #[test]
+    fn unknown_command_required_permission_is_a_manifest_error() {
+        let raw = vec![command_manifest_entry("greet", None, Some("yolo-all-access"))];
+        let mut errors = Vec::new();
+
+        let validated = build_manifest_commands(Path::new("."), raw, &mut errors);
+
+        assert!(
+            errors.contains(&PluginManifestValidationError::InvalidCommandRequiredPermission {
+                command_name: "greet".to_string(),
+                permission: "yolo-all-access".to_string()
+            }),
+            "应报 InvalidCommandRequiredPermission，实际 {errors:?}"
+        );
+        assert!(validated.is_empty(), "非法档位的条目不得进入已校验清单");
+        // 文案必须是 `plugin command`，不能误报成 tool。
+        let message = errors
+            .iter()
+            .find(|e| {
+                matches!(e, PluginManifestValidationError::InvalidCommandRequiredPermission { .. })
+            })
+            .expect("变体应在 errors 里")
+            .to_string();
+        assert!(message.contains("plugin command"), "文案应指向 command，实际 {message}");
+        assert!(!message.contains("plugin tool"), "不得复用 tool 侧文案：{message}");
+    }
+
+    /// 契约 C 的真值表：档位按**具体权限名**判定，`subprocess_execution` 不得顶上。
+    #[test]
+    fn command_gate_requires_specific_permission_names() {
+        let read_only = PluginToolPermission::ReadOnly;
+        let write = PluginToolPermission::WorkspaceWrite;
+        let full = PluginToolPermission::DangerFullAccess;
+        let gate = |level: PluginToolPermission, labels: &[&str]| {
+            PluginManager::check_command_gate(level, "greet", &permissions_of(labels))
+        };
+
+        // ReadOnly：与今天一致，只要沙箱允许起进程就放行。
+        assert!(gate(read_only, &["subprocess_execution"]).is_ok());
+        assert!(gate(read_only, &[]).is_ok());
+
+        // WorkspaceWrite：write / file_system_write 都算。
+        assert!(gate(write, &["write"]).is_ok());
+        assert!(gate(write, &["file_system_write"]).is_ok());
+        // ……但 execute 与 subprocess_execution 不算（用 implies_* 会恒过）。
+        assert!(matches!(
+            gate(write, &["subprocess_execution"]),
+            Err(PluginError::PermissionDenied(_))
+        ));
+        assert!(matches!(gate(write, &["execute"]), Err(PluginError::PermissionDenied(_))));
+        assert!(matches!(gate(write, &["read"]), Err(PluginError::PermissionDenied(_))));
+
+        // DangerFullAccess：只有 execute 算，subprocess_execution + write 也不算。
+        assert!(gate(full, &["execute"]).is_ok());
+        assert!(matches!(
+            gate(full, &["subprocess_execution", "write"]),
+            Err(PluginError::PermissionDenied(_))
+        ));
+    }
+
+    /// 契约 C 的最小形状校验：只认 object + `required` 键存在性。
+    #[test]
+    fn command_input_shape_check_is_minimal() {
+        let schema = serde_json::json!({ "type": "object", "required": ["who"] });
+        let shape = |input: Value| PluginManager::check_command_input_shape("greet", &schema, &input);
+
+        assert!(shape(serde_json::json!({ "who": "world" })).is_ok());
+        assert!(matches!(shape(serde_json::json!({})), Err(PluginError::CommandFailed(_))));
+        assert!(matches!(shape(Value::Null), Err(PluginError::CommandFailed(_))));
+        assert!(matches!(
+            shape(serde_json::json!([1, 2])),
+            Err(PluginError::CommandFailed(_))
+        ));
+        // 只校验键存在，不校验值形态：null 也算「在」。
+        assert!(shape(serde_json::json!({ "who": null })).is_ok());
+        // `required` 非数组 ⇒ 无法判定即拒绝。
+        let broken = serde_json::json!({ "required": "who" });
+        assert!(matches!(
+            PluginManager::check_command_input_shape("greet", &broken, &serde_json::json!({ "who": 1 })),
+            Err(PluginError::CommandFailed(_))
+        ));
+    }
+
+    /// 契约 E-4：命令声明 `workspace-write`、插件只声明 `subprocess_execution`
+    /// ⇒ `PermissionDenied`，且**确实没起子进程**（marker 文件不存在）。
+    #[test]
+    fn workspace_write_command_is_denied_when_backed_only_by_subprocess_execution() {
+        let fixture = CommandPluginFixture::new(
+            "cmd-deny",
+            r#"["subprocess_execution"]"#,
+            r#""requiredPermission": "workspace-write""#,
+        );
+
+        let err = fixture
+            .manager
+            .execute_plugin_command(&fixture.plugin_id, "greet", &serde_json::json!({}))
+            .expect_err("subprocess_execution 不能顶替 workspace-write");
+        assert!(matches!(err, PluginError::PermissionDenied(_)), "期望 PermissionDenied，实际 {err:?}");
+        assert!(!fixture.marker().exists(), "拒绝必须发生在 spawn 之前：marker 文件不该存在");
+
+        fixture.cleanup();
+    }
+
+    /// 契约 E-5：命令声明 `workspace-write`、插件声明 `write` ⇒ 放行到执行链。
+    ///
+    /// 门禁本身永远断言（不起进程）；端到端真跑沿用既有门控
+    /// `AXAGENT_TEST_PLUGIN_SUBPROCESS=1`，缺环境时显式跳过、不伪造通过。
+    #[test]
+    fn workspace_write_command_is_allowed_when_plugin_declares_write() {
+        assert!(
+            PluginManager::check_command_gate(
+                PluginToolPermission::WorkspaceWrite,
+                "greet",
+                &permissions_of(&["read", "write", "subprocess_execution"])
+            )
+            .is_ok(),
+            "声明了 write 应放行到执行链"
+        );
+
+        if std::env::var("AXAGENT_TEST_PLUGIN_SUBPROCESS").as_deref() != Ok("1") {
+            eprintln!(
+                "SKIP: 未设置 AXAGENT_TEST_PLUGIN_SUBPROCESS=1，跳过真实 spawn 的端到端断言。\
+                 \n      本用例的后半段**未通过，也未被验证** —— 前半段的门禁断言已执行。"
+            );
+            return;
+        }
+
+        let fixture = CommandPluginFixture::new(
+            "cmd-allow",
+            r#"["read", "write", "subprocess_execution"]"#,
+            r#""requiredPermission": "workspace-write", "inputSchema": { "type": "object", "required": ["who"] }"#,
+        );
+
+        let output = fixture
+            .manager
+            .execute_plugin_command(&fixture.plugin_id, "greet", &serde_json::json!({ "who": "world" }))
+            .expect("放行后命令应执行成功");
+        assert!(output.contains("command=greet"), "命令名应注入执行环境：{output}");
+        assert!(fixture.marker().exists(), "脚本应真的跑过");
+
+        // 声明了 schema ⇒ 缺必填字段被挡在 spawn 之前（marker 不新增）。
+        let err = fixture
+            .manager
+            .execute_plugin_command(&fixture.plugin_id, "greet", &serde_json::json!({}))
+            .expect_err("声明 required 后缺字段必须拒绝");
+        assert!(matches!(err, PluginError::CommandFailed(_)), "期望 CommandFailed，实际 {err:?}");
+        assert!(err.to_string().contains("who"), "错误应点出缺失字段：{err}");
+
+        fixture.cleanup();
     }
 }

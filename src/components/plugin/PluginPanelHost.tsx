@@ -8,6 +8,14 @@
  * 插件代码因此**不进入主 origin**：它读不到 localStorage 里的 provider key 与会话 token。
  * 作为交换，theme token 与业务数据只能经宿主显式下发（`panel.props` + 两条通道）。
  *
+ * 装载粒度的分工（任务 #39 / `PLAN-shell-plus-plugins.md` §0.12.5 裁定 A）：
+ * - **panel（本文件）**：文本资产 → `srcdoc`，桥 = `pluginSandboxBridge.ts` 的那一条。
+ * - **page（尚未落地，见 §0.12.5 代价条）**：插件 bundle → asset 协议 URL 取子资源，
+ *   入口 HTML 仍由宿主读出后包进沙箱文档，**桥与白名单不变**；
+ *   它需要两样本批拿不到的输入（后端给出条目绝对路径/asset URL、manifest 逐页声明通道），
+ *   所以本文件不预留占位分支 —— 空转的 `if` 会让「通道已可用」这句话失去判据。
+ * - 表单 / 看板类继续走 `DynamicPageViewer` 的 UISchema 通道，与本文件无关。
+ *
  * 见 `PLAN-dashboard-consolidation.md` §6.4 / §6.6。
  */
 
@@ -17,40 +25,22 @@ import { Card, Space, Tag, Typography } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { createPluginBridgeApi, createPluginBridgePermissions } from "@/components/plugin/pluginSandboxBridge";
 import { SkillSandboxContainer } from "@/components/skill/SkillSandboxContainer";
-import type { SkillHostApi, SkillPermissions } from "@/sdk/types";
+import type { SkillPermissions } from "@/sdk/types";
 import type { DashboardPluginInfoDto, PluginDashboardPanelDto } from "@/types";
 
 const { Text } = Typography;
 
 /**
- * 面板沙箱仅有的两条通道。**不含通用 invoke 白名单** —— 面板能要求的后端能力到此为止，
- * 想多一条都得回来改这里。
+ * 桥与命令白名单住在 `pluginSandboxBridge.ts` —— 那里是 panel 与 page 两种装载粒度**共用**的
+ * 唯一定义点。本文件保留旧名字只是为了不断既有调用面（含 `__tests__/PluginPanelHost.bridge.test.ts`）：
+ * 这两个别名与源模块是同一个对象，不是第二份清单，改不动也扩不了。
  */
-export const PANEL_ALLOWED_COMMANDS = ["plugin_ui_action", "plugin_execute_command"] as const;
-
-type DeniedTranslator = (command: string) => string;
-
-/**
- * 面板侧的宿主 API。单独导出是为了让「绑定 pluginId」这条能被测试钉住：
- * iframe 传来的 `pluginId` **一律丢弃**，否则一个面板就能驱动另一个插件的 worker。
- */
-export function createPanelHostApi(
-  pluginId: string,
-  deny: DeniedTranslator,
-): SkillHostApi {
-  return {
-    invoke: async <T = unknown>(command: string, args?: Record<string, unknown>): Promise<T> => {
-      if (!(PANEL_ALLOWED_COMMANDS as readonly string[]).includes(command)) {
-        throw new Error(deny(command));
-      }
-      const { pluginId: _ignored, ...rest } = args ?? {};
-      return invoke<T>(command, { ...rest, pluginId });
-    },
-    // 面板不接宿主事件总线：`emit` 存在只是为了满足 SkillHostApi 形状
-    emit: (): void => {},
-  };
-}
+export {
+  createPluginBridgeApi as createPanelHostApi,
+  PLUGIN_BRIDGE_COMMANDS as PANEL_ALLOWED_COMMANDS,
+} from "@/components/plugin/pluginSandboxBridge";
 
 function PluginPanelCard({
   plugin,
@@ -66,7 +56,7 @@ function PluginPanelCard({
     [t],
   );
   const hostApi = useMemo(
-    () => createPanelHostApi(plugin.id, translateDeny),
+    () => createPluginBridgeApi(plugin.id, translateDeny),
     [plugin.id, translateDeny],
   );
 
@@ -85,8 +75,10 @@ function PluginPanelCard({
     }
   }, [plugin.id, panel.id]);
 
+  // 权限面与 page 粒度共用同一个构造函数：想在这里另写一份 commands 即是违规
+  // （不变量①），只能回到 `pluginSandboxBridge.ts` 改。
   const permissions = useMemo<SkillPermissions>(
-    () => ({ commands: [...PANEL_ALLOWED_COMMANDS] }),
+    () => createPluginBridgePermissions(),
     [],
   );
 

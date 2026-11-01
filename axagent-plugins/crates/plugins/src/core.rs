@@ -380,7 +380,11 @@ impl RegisteredPlugin {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// 插件摘要（`plugin_list` 的可见面）。
+///
+/// ⚠ 不带 `Eq`：`commands` 的元素 [`PluginCommandManifest`] 含 `serde_json::Value`
+/// （只 `PartialEq`），加回 `Eq` 会直接编译失败。
+#[derive(Debug, Clone, PartialEq)]
 pub struct PluginSummary {
     pub metadata: PluginMetadata,
     pub enabled: bool,

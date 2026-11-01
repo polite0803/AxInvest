@@ -1049,3 +1049,14 @@ jobs:
       # 命令行与 scripts/ci-check.mjs 对应 step 逐字同源（由对称差集护栏自动校验）。
       - name: Check cargo-all-workspaces argv assembly selftest
         run: node scripts/cargo-all-workspaces.mjs --selftest
+
+      # 能力接缝登记表对账（第五道门，2026-11-01，PLAN §0.12.4 裁定「建」/ 任务 #38）。
+      # 为什么追加在文件末尾：本文件被 18+ 处 `ci.yml:<行号>` 引用，中段插入会让引用成批腐烂。
+      # 判据/口径/正负对照见 scripts/check-capability-register.mjs 头注释（实测 15 处数字漂移 +
+      #   2 套并行口径 ⇒ 镜像表 capability-register.json 与盘上读数逐行对账，hard:false/manual 只报告）。
+      # 命令行与 scripts/ci-check.mjs 对应 step 逐字同源（由对称差集护栏自动校验）。纯 Node，无需 Rust。
+      - name: Check capability register reconciliation selftest
+        run: node scripts/check-capability-register.mjs --selftest
+
+      - name: Check capability register reconciliation (mirror table vs disk)
+        run: node scripts/check-capability-register.mjs

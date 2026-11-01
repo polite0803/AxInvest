@@ -53,8 +53,9 @@ task_plan.md
 findings.md
 progress.md
 
-# Docs directory
-docs/
+# Report / temp output directories
+# ⚠ docs/ 曾被整目录忽略（原 `docs/` 一行），导致 AGENTS.md 强制存放的审计/计划文档
+#   （docs/plans、docs/audits 共 173 份 .md、7 MB）从未进版本控制。2026-11-01 移除。
 playwright-report/
 .workbuddy/
 artifacts/
@@ -100,7 +101,10 @@ eslint-out.log
 *.orig
 
 # Documentation (local)
-Docs/
+# 原先这里的 `Docs/` 一行已移除。⚠ 但它**不是** docs/ 不进版本控制的原因——
+# 真凶是上面「Report / temp output directories」段的小写 `docs/`（`git check-ignore -v`
+# 指向该行）。本机 core.ignorecase=true 会让 `Docs/` 也命中 `docs/`，属**冗余叠加**而非
+# 独立成因；把它写成因果是 2026-11-01 的一次误判，留此更正。
 
 # Worktrees
 .worktrees/test_backup_page*.py

@@ -19,6 +19,8 @@
 //   「合法化」，本门失去意义）；--dump-readings 只读调试，不落任何盘。
 //
 // 数据文件格式（capability-register.json）：note / caliber / sources / countRule / anchors / pipeline / entries。
+//   entries[].planAnchorText / planAnchorTextRange = 该登记项 planLine（含区间端点）**登记当时的整行逐字**，
+//   只作 --repin-plan 的定位键，**不参与判定档**（判据仍然只认行号 + token ⇒ 加它不会放松任何红）。
 //   anchors[].check ∈ registryCommandCount registryModuleCount registryUnassigned registryFileLineCount
 //     registryBoundaryCount registryDomainCount frontendVolume frontendDirVolume l1ForeignBlockers
 //     k1RsFileCount k1PubTraitCount remoteSeamRegistryCount registerGroupSum manual
@@ -64,8 +66,37 @@
 //   node scripts/check-capability-register.mjs                  # 门禁：复算全部实测读数并与镜像表逐行对账
 //   node scripts/check-capability-register.mjs --selftest       # 内建正负对照（纯函数、零盘扫描、先于任何 IO 短路）
 //   node scripts/check-capability-register.mjs --dump-readings  # 只读调试：打印实测读数（不写盘）
+//   node scripts/check-capability-register.mjs --repin-plan     # 维护模式：按定位键把 PLAN 行号引用重锚到当前文本（写盘前先备份）
 //
-// 退出码：0 = hard:true 判据全部一致（或 selftest 全过）；1 = 任一 hard:true 不一致 / 镜像表缺失 / selftest 失败。
+// ── --repin-plan 的由来与判据（任务 #48，2026-11-02）─────────────────────
+// 本门用**绝对行号**钉 PLAN（`anchors[].planPinned[].line` + `mustContain`、`entries[].planLine` /
+// `planLineRange`）。已实测的代价：主代理把 §0.7.6 从 5 行改成 4 行 ⇒ 全文少 1 行 ⇒ 8 处钉句**同时假红**
+// （352/515/500/939/508/507/502/320），补回同数行才转绿 ⇒ 门禁事实上给一个**活文档**施加了一条
+// 没写在任何地方的约束「编辑必须行数中性」。假红的代价是训练人去忽略红，所以把它变成一条**可执行的工序**：
+// 改 PLAN ⇒ 普通运行红 ⇒ 跑 `--repin-plan` ⇒ 表回写 ⇒ 再跑普通运行。
+//
+// 判据（三档，全部 fail-closed）：
+//   ① **定位键唯一才回写**：钉句按 `mustContain` 全部 token 同行命中；指针按 `planAnchorText`
+//      （登记时的整行逐字，仅折叠行内连续空白）全等。命中 1 行 ⇒ 回写该行号；命中 0 或多行 ⇒
+//      **整次拒绝写盘**并逐条报告（不许猜行、不许插值、不许「取最近的一个」）。
+//   ② **红线：绝不用模糊匹配代替行号锚点**。判定跑（`checkPlan`）仍按「第 N 行是否含该句」逐行核 ——
+//      句子漂到别的行、或整句被改写，仍是红。重锚只改**表里的数字**，不改判据形态。
+//      这条由负控㉑g 机械锁定：把钉句指到「同一句话出现的另一行」必须照样判红。
+//   ③ **缺定位键即拒绝**：钉句无 token、登记项无 `planAnchorText` ⇒ 判 blocker（逼着「新增行号引用
+//      必须同批带定位键」，否则重锚能力会随表增长而静默腐烂）。
+//
+// 写盘工序：先把整份表**逐字节备份**到 `.tmp/capability-register.<UTC 时间戳>.bak.json`，再按定点
+// 文本补丁回写（不整体重新序列化 ⇒ 未涉及的字节逐字不动，与并行编辑者的表不互相打散格式），
+// 回写后**从盘上重读**并复跑 `checkSelfConsistency` + `checkAnchorConsistency` + `checkPlan`
+// 作为复检；复检不过 ⇒ 用备份**回滚**并以非零退出。全程逐条打印「哪个引用 · 旧行号 → 新行号」，
+// 未变动的引用给计数、覆盖不到的引用（`caliber.basisLines` / `pipeline.lines` 是纯文档指针，
+// 无定位键 ⇒ 本模式不重锚）单独点名，不装作覆盖到了。
+//
+// ⚠ 本模式**不接进 CI**（`ci-check.mjs` / `ci.yml` 都只有 `--selftest` + 判定两步）：
+//   门禁的意义是「漂了就红、由人确认后再改表」，把自动回写挂进 CI 等于让漂移自我合法化。
+//
+// 退出码：0 = hard:true 判据全部一致（或 selftest 全过 / 重锚写盘并复检通过 / 无需重锚）；
+//   1 = 任一 hard:true 不一致 / 镜像表缺失 / selftest 失败 / 重锚被歧义或零命中阻断（未写盘）。
 //   hard:false 与 manual 一律不影响退出码（但必须印出来 —— 「未机器复检」不是「通过」）。
 //
 // main guard（2026-11-11 阻断 2）：本模块的判据**全是 export 的纯函数**，主流程收在 `main()` 里，
@@ -83,7 +114,7 @@
 //   「本轮不判」必须显式可见（跳过 ≠ 通过）。代价上界：稳定路径只多一次**纯目录枚举**（不读文件内容），
 //   抖动路径最多再跑一轮复算；`--selftest` 零盘扫描，不受影响。
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { REG_PATH, parseRegistry, domainOf, unassigned } from "./lib/command-domains.mjs";
@@ -92,6 +123,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const SELFTEST = args.includes("--selftest");
 const DUMP = args.includes("--dump-readings");
+const REPIN = args.includes("--repin-plan");
 
 const REGISTER_PATH = join(ROOT, "scripts", "capability-register.json");
 
@@ -542,6 +574,187 @@ export function reconcile(register, readings, planText) {
   return { hardFails, reports, manualLines, anchorResults, entryResults, planPassed: plan.passed, counts: { total: register.entries.length, machine: machineRows, report: reports.length, manual: manualRows } };
 }
 
+// ── --repin-plan（任务 #48）：按定位键把「PLAN 行号引用」重锚到当前文本 ──────────
+// 判据与红线见文件头「--repin-plan 的由来与判据」段。以下四个是**纯函数**（selftest 与正式跑共用同一实现）：
+// 定位（pinHitLines / textHitLines）⇒ 汇总（collectPlanLineRefs）⇒ 计算（computeRepin，只给方案不写盘）
+// ⇒ 回写（applyRepinToRegister 内存版 + planRepinPatches 文本版）。
+
+/** 整行归一：去首尾空白、行内连续空白折叠成一个空格 —— 只容排版差异，不容内容差异。 */
+export function normPlanLine(s) {
+  return String(s ?? "").trim().replace(/[\t ]+/g, " ");
+}
+
+/** 钉句候选行：mustContain 的**全部** token 落在同一行才算命中（与 checkPlan 同一判据形态）。 */
+export function pinHitLines(planLines, mustContain) {
+  const toks = (mustContain ?? []).filter((t) => String(t).length > 0);
+  if (!toks.length) { return []; }
+  return planLines.map((l, i) => (toks.every((t) => l.includes(t)) ? i + 1 : 0)).filter(Boolean);
+}
+
+/** 指针候选行：整行逐字（归一后）全等才算命中。 */
+export function textHitLines(planLines, anchorText) {
+  const t = normPlanLine(anchorText);
+  if (!t) { return []; }
+  return planLines.map((l, i) => (normPlanLine(l) === t ? i + 1 : 0)).filter(Boolean);
+}
+
+/** 全部「受行号约束」的 PLAN 引用（三类），各带自己的定位键与写回坐标。 */
+export function collectPlanLineRefs(register) {
+  const refs = [];
+  for (const a of register.anchors ?? []) {
+    (a.planPinned ?? []).forEach((p, i) => {
+      refs.push({ kind: "planPinned", owner: a.id, idx: i, line: p.line, mustContain: p.mustContain ?? [], anchorText: null, path: `anchors[${a.id}].planPinned[${i}].line` });
+    });
+  }
+  for (const e of register.entries ?? []) {
+    if (e.planLine !== undefined && e.planLine !== null) {
+      refs.push({ kind: "planLine", owner: e.seamId, idx: null, line: e.planLine, mustContain: null, anchorText: e.planAnchorText ?? null, path: `entries[${e.seamId}].planLine` });
+    }
+    (e.planLineRange ?? []).forEach((n, i) => {
+      refs.push({ kind: "planLineRange", owner: e.seamId, idx: i, line: n, mustContain: null, anchorText: (e.planAnchorTextRange ?? [])[i] ?? null, path: `entries[${e.seamId}].planLineRange[${i}]` });
+    });
+  }
+  return refs;
+}
+
+/** 计算重锚方案（零写盘）。changes=可回写项 · blockers=歧义/零命中（整次拒绝）· noKey=缺定位键（同拒）。 */
+export function computeRepin(register, planText) {
+  const planLines = String(planText ?? "").split("\n");
+  const changes = [];
+  const blockers = [];
+  const noKey = [];
+  let kept = 0;
+  const refs = collectPlanLineRefs(register);
+  for (const r of refs) {
+    const cur = planLines[r.line - 1] ?? "";
+    let curOk;
+    let hits;
+    if (r.kind === "planPinned") {
+      if (!r.mustContain.length) { noKey.push(`${r.path} = ${r.line}：无 mustContain token ⇒ 无定位键`); continue; }
+      curOk = r.mustContain.every((t) => cur.includes(t));
+      hits = curOk ? [r.line] : pinHitLines(planLines, r.mustContain);
+    } else {
+      if (!r.anchorText) { noKey.push(`${r.path} = ${r.line}：无 planAnchorText 定位键（新增行号引用必须同批带键，否则重锚能力随表腐烂）`); continue; }
+      curOk = normPlanLine(cur) === normPlanLine(r.anchorText);
+      hits = curOk ? [r.line] : textHitLines(planLines, r.anchorText);
+    }
+    if (curOk) { kept++; continue; }
+    if (hits.length === 1) { changes.push({ ...r, to: hits[0] }); continue; }
+    if (hits.length === 0) {
+      blockers.push(`${r.path} = ${r.line}：定位键在 PLAN 内**零命中**（该句已被改写或删除）⇒ 不许猜行、不许插值，请先人工核对该项`);
+      continue;
+    }
+    blockers.push(`${r.path} = ${r.line}：定位键**非唯一命中** ${hits.length} 行 [${hits.join(", ")}] ⇒ 请先收紧 mustContain / 用更长的整行文本，不许从里面挑一个`);
+  }
+  return { changes, blockers, noKey, kept, total: refs.length };
+}
+
+/** 内存版回写（也是文本版补丁的对照物：两者必须逐字段一致才允许落盘）。 */
+export function applyRepinToRegister(register, changes) {
+  const next = JSON.parse(JSON.stringify(register));
+  for (const c of changes) {
+    if (c.kind === "planPinned") {
+      const a = next.anchors.find((x) => x.id === c.owner);
+      a.planPinned[c.idx].line = c.to;
+    } else {
+      const e = next.entries.find((x) => x.seamId === c.owner);
+      if (c.kind === "planLine") { e.planLine = c.to; } else { e.planLineRange[c.idx] = c.to; }
+    }
+  }
+  return next;
+}
+
+function countOcc(hay, needle) {
+  let n = 0;
+  let i = 0;
+  while ((i = hay.indexOf(needle, i)) >= 0) { n++; i += needle.length; }
+  return n;
+}
+
+const rangeLiteral = (arr) => `[${arr.join(", ")}]`;
+const rangeLiteralPretty = (arr) => `[\n        ${arr.join(",\n        ")}\n      ]`;
+
+/**
+ * 文本版回写：对每条 change 用「候选 needle 里第一个在全文**恰好出现一次**的」做定点替换
+ * （不整体重新序列化 ⇒ 未涉及的字节逐字不动，与并行编辑者互不打散格式）。
+ * 任一 change 找不到唯一 needle ⇒ {ok:false, problems}，调用方**不得写盘**。
+ * `planLineRange` 的两个端点合并按整个数组字面量替换（否则改完端点 0 后端点 1 的原文就变了）。
+ */
+export function planRepinPatches(srcText, register, changes) {
+  const problems = [];
+  const patches = [];
+  const groups = new Map();
+  for (const c of changes) {
+    const key = c.kind === "planLineRange" ? `planLineRange|${c.owner}` : `${c.kind}|${c.owner}|${c.idx}`;
+    if (!groups.has(key)) { groups.set(key, []); }
+    groups.get(key).push(c);
+  }
+  const lineNumRe = (n) => new RegExp(`"line": ${n}(?!\\d)`, "g");
+  const planLineRe = (n) => new RegExp(`"planLine": ${n}(?!\\d)`, "g");
+  for (const [key, list] of groups) {
+    const kind = key.split("|")[0];
+    const owner = list[0].owner;
+    let needles;
+    let sub;
+    if (kind === "planPinned") {
+      const c = list[0];
+      const items = c.mustContain.map((t) => JSON.stringify(t)).join(", ");
+      needles = [`{ "line": ${c.line}, "mustContain": [${items}] }`, `"line": ${c.line}, "mustContain": [${items}]`];
+      sub = { re: lineNumRe(c.line), to: `"line": ${c.to}` };
+    } else if (kind === "planLine") {
+      const c = list[0];
+      const at = JSON.stringify(c.anchorText);
+      needles = [`"planAnchorText": ${at}, "planLine": ${c.line}`, `"planAnchorText": ${at},\n      "planLine": ${c.line}`, `"planLine": ${c.line}`];
+      sub = { re: planLineRe(c.line), to: `"planLine": ${c.to}` };
+    } else {
+      const e = (register.entries ?? []).find((x) => x.seamId === owner);
+      const oldArr = [...(e?.planLineRange ?? [])];
+      const newArr = oldArr.map((n, i) => list.find((c) => c.idx === i)?.to ?? n);
+      if (!list.length || !oldArr.length) { problems.push(`${owner} planLineRange：登记表里没有该区间，无法定点替换`); continue; }
+      if (rangeLiteral(oldArr) === rangeLiteral(newArr)) { continue; }
+      needles = [`"planLineRange": ${rangeLiteral(oldArr)}`, `"planLineRange": ${rangeLiteralPretty(oldArr)}`];
+      sub = { literal: rangeLiteral(oldArr), to: rangeLiteral(newArr), literalPretty: rangeLiteralPretty(oldArr), toPretty: rangeLiteralPretty(newArr) };
+    }
+    const hit = needles.find((n) => countOcc(srcText, n) === 1);
+    if (!hit) {
+      problems.push(`${list.map((c) => `${c.path} ${c.line}→${c.to}`).join(" / ")}：镜像表原文里找不到唯一的替换锚（排版被重排过、或该引用不止一处）⇒ 拒绝定点写盘，请人工改表`);
+      continue;
+    }
+    let replacement;
+    if (sub.literal !== undefined) { replacement = hit.includes(sub.literal) ? hit.replace(sub.literal, sub.to) : hit.replace(sub.literalPretty, sub.toPretty); } else { replacement = hit.replace(sub.re, sub.to); }
+    if (replacement === hit) { problems.push(`${list.map((c) => c.path).join(" / ")}：替换锚命中但行号没被改动（判据落空）⇒ 拒绝写盘`); continue; }
+    patches.push({ needle: hit, replacement, paths: list.map((c) => c.path) });
+  }
+  if (problems.length) { return { ok: false, problems, patches: [], text: null }; }
+  let out = srcText;
+  for (const p of patches) {
+    const at = out.indexOf(p.needle);
+    out = `${out.slice(0, at)}${p.replacement}${out.slice(at + p.needle.length)}`;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(out);
+  } catch (e) {
+    return { ok: false, problems: [`定点替换后 JSON 解析失败（说明替换落到了字符串字面量里）：${e.message}`], patches, text: null };
+  }
+  const expect = applyRepinToRegister(register, changes);
+  if (JSON.stringify(parsed) !== JSON.stringify(expect)) {
+    return { ok: false, problems: ["文本版回写与内存版回写结果不一致 ⇒ 定点替换的把握不足，拒绝写盘（宁可人工改表）"], patches, text: null };
+  }
+  return { ok: true, text: out, problems: [], patches };
+}
+
+/** 只保留「非行号」字段 —— 用于断言重锚**只改行号**，判据（token/读数/分组）一个字都没松。 */
+export function stripRepinEditableFields(register) {
+  const clone = JSON.parse(JSON.stringify(register));
+  for (const a of clone.anchors ?? []) { for (const p of a.planPinned ?? []) { p.line = null; } }
+  for (const e of clone.entries ?? []) {
+    if (e.planLine !== undefined) { e.planLine = null; }
+    if (e.planLineRange) { e.planLineRange = e.planLineRange.map(() => null); }
+  }
+  return clone;
+}
+
 // ── selftest（纯函数、零盘；负控+正控成对）──────────────────────────────
 function fixture() {
   const register = {
@@ -568,9 +781,9 @@ function fixture() {
       { id: "k1Ext", label: "外部实现者", value: 99, check: "manual", hard: false, implementorsMechanical: 7 },
     ],
     entries: [
-      { seamId: "a.one", group: "A", trait: "TraitOne", expect: { implementors: 2, seam: "已建", remote: true }, check: "implementorCount", planLine: 5, evidence: [{ ref: "f.rs:3", file: "f.rs", line: 3, token: "pub trait TraitOne" }] },
-      { seamId: "b.two", group: "B", trait: null, expect: { implementors: null, seam: "待建", remote: false }, expectMissing: true, expectMissingFields: ["implementors"], check: "seamExists", faces: ["b.two"], planLine: 6, evidence: [] },
-      { seamId: "k.three", group: "K", expect: { implementors: null, seam: null, remote: null }, check: "manual", reason: "无可机械复检判据", planLine: 7, evidence: [] },
+      { seamId: "a.one", group: "A", trait: "TraitOne", expect: { implementors: 2, seam: "已建", remote: true }, check: "implementorCount", planAnchorText: "登记项一 a.one 已建。", planLine: 5, evidence: [{ ref: "f.rs:3", file: "f.rs", line: 3, token: "pub trait TraitOne" }] },
+      { seamId: "b.two", group: "B", trait: null, expect: { implementors: null, seam: "待建", remote: false }, expectMissing: true, expectMissingFields: ["implementors"], check: "seamExists", faces: ["b.two"], planAnchorText: "登记项二 b.two 待建。", planLine: 6, evidence: [], planLineRange: [5, 6], planAnchorTextRange: ["登记项一 a.one 已建。", "登记项二 b.two 待建。"] },
+      { seamId: "k.three", group: "K", expect: { implementors: null, seam: null, remote: null }, check: "manual", reason: "无可机械复检判据", planAnchorText: "登记项三 k.three 人工。", planLine: 7, evidence: [] },
     ],
     pipeline: {},
   };
@@ -587,7 +800,8 @@ function fixture() {
     seamRegistryText: 'const X = "a.one";',
     contentFor: (p) => (p === "f.rs" ? "ln1\nln2\npub trait TraitOne {" : null),
   };
-  const plan = "前言：能力面 10 条 / 3 模块。\n\n### 0.12.4 漂移列举\n本轮抓出 9 → 10 的数字漂移。\n\n### 0.13 下一节\n别的事。\n";
+  // 5/6/7 三行是「登记项 planLine 的落点」，供 --repin-plan 的正负对照使用（见 ㉑ 系列）。
+  const plan = "前言：能力面 10 条 / 3 模块。\n\n### 0.12.4 漂移列举\n本轮抓出 9 → 10 的数字漂移。\n登记项一 a.one 已建。\n登记项二 b.two 待建。\n登记项三 k.three 人工。\n\n### 0.13 下一节\n别的事。\n";
   return { register, readings, plan };
 }
 
@@ -784,8 +998,122 @@ function runSelftest() {
   const missing = [...usedChecks].filter((k) => !covered.has(k));
   console.log(`SELFTEST 覆盖度：已覆盖 check 种类 ${covered.size} / 表内实际使用 ${usedChecks.size}${coverageNote}${missing.length ? ` —— 缺 [${missing.join(", ")}]` : " —— 无空洞"}`);
 
+  // ㉑系列（任务 #48，--repin-plan）：定位键唯一才回写 · 歧义 / 零命中 / 缺键一律拒绝写盘 ·
+  //   回写后 PLAN 对账必归零 · 只改行号不动判据 · 行号锚点**不得**被全文模糊匹配替代（主代理红线）。
+  {
+    // 正控㉑d：PLAN 未变 ⇒ 无需重锚（幂等，绝不无谓写盘）
+    const f = fixture();
+    const rp = computeRepin(f.register, f.plan);
+    check(rp.changes.length === 0 && rp.blockers.length === 0 && rp.noKey.length === 0, `正控㉑d：干净读数不得产生任何回写（实得 changes=${rp.changes.length} blockers=[${rp.blockers.join(" | ")}] noKey=[${rp.noKey.join(" | ")}]`);
+    check(rp.total === 6 && rp.kept === 6, `正控㉑d2：受行号约束引用应 6 条全相符（1 钉句 + 3 planLine + 2 区间端点；实得 total=${rp.total} kept=${rp.kept}）`);
+  }
+  {
+    // 负控㉑a：删 PLAN 一行（实测过的真实形态）⇒ 其后的引用各 -1，钉句在第 1 行不受影响
+    const f = fixture();
+    const arr = f.plan.split("\n");
+    arr.splice(1, 1);
+    const shifted = arr.join("\n");
+    const rp = computeRepin(f.register, shifted);
+    check(rp.blockers.length === 0 && rp.noKey.length === 0, `负控㉑a：删一行后每条引用都应唯一定位（实得 blockers=[${rp.blockers.join(" | ")}]）`);
+    check(rp.changes.length === 5 && rp.kept === 1, `负控㉑a2：应恰好 5 条待回写 + 1 条不动（实得 changes=${rp.changes.length} kept=${rp.kept}）`);
+    const to = Object.fromEntries(rp.changes.map((c) => [c.path, c.to]));
+    check(to["entries[a.one].planLine"] === 4 && to["entries[k.three].planLine"] === 6, `负控㉑a3：planLine 必须按定位键逐条重算（实得 ${JSON.stringify(to)}）`);
+    check(to["entries[b.two].planLineRange[0]"] === 4 && to["entries[b.two].planLineRange[1]"] === 5, "负控㉑a4：planLineRange 两端点各自按定位键回写（不许整段 -1 猜）");
+    // 正控㉑e：回写后 PLAN 对账归零 —— 这就是验收条「跑完 --repin-plan，普通运行不再报 PLAN 红」的等价断言
+    const next = applyRepinToRegister(f.register, rp.changes);
+    const after = checkPlan(next, shifted);
+    check(after.fails.length === 0 && after.soft.length === 0, `正控㉑e：回写后 checkPlan 必须零差异（实得 hard=[${after.fails.join(" | ")}] soft=[${after.soft.join(" | ")}]）`);
+    // 正控㉑h：重锚**只改行号** —— token / 读数 / 分组等判据字段必须逐字未动
+    check(JSON.stringify(stripRepinEditableFields(next)) === JSON.stringify(stripRepinEditableFields(f.register)), "正控㉑h：除行号外的任何字段被改动即违反本模式的前提（判据不许顺手放宽）");
+    // 负控㉑i：回写后的表若再被指错行，判定照样红（与 ㉑g 同族，防「重锚把锚点洗成摆设」）
+    const mis = JSON.parse(JSON.stringify(next));
+    mis.anchors[0].planPinned[0].line = mis.anchors[0].planPinned[0].line + 1;
+    const misRes = checkPlan(mis, shifted);
+    check(misRes.fails.some((x) => /钉句 PLAN:\d+ 不符/.test(x)), "负控㉑i：行号再指错一行必须照样红（重锚不改变判据形态）");
+  }
+  {
+    // 负控㉑b：定位键**非唯一命中** ⇒ 阻断该项、绝不进 changes（不许从多命中里挑一个）
+    const f = fixture();
+    const dup = `${f.plan}\n另一处也写 10 条 / 3 模块。\n`; // 第 11 行与第 1 行同命中同一 token 组
+    const g = fixture();
+    g.register.anchors[0].planPinned[0].line = 4; // 表里的行号漂到别处 ⇒ 需要重锚
+    const rp = computeRepin(g.register, dup);
+    check(rp.blockers.some((b) => /anchors\[commandTotal\]\.planPinned\[0\]\.line = 4.*非唯一命中.*\[1, 12\]/.test(b)), `负控㉑b：钉句两处命中必须报阻断并列出候选行（实得 blockers=[${rp.blockers.join(" | ")}]）`);
+    check(!rp.changes.some((c) => c.path === "anchors[commandTotal].planPinned[0].line"), "负控㉑b2：歧义项不得进 changes");
+  }
+  {
+    // 负控㉑c：**零命中**（句子被改写）⇒ 同样阻断，报「不许猜行、不许插值」
+    const f = fixture();
+    const g = fixture();
+    g.register.anchors[0].planPinned[0].mustContain = ["这句盘上不存在的话"];
+    const rp = computeRepin(g.register, f.plan);
+    check(rp.blockers.some((b) => /零命中/.test(b)), `负控㉑c：改写后的钉句必须报零命中并阻断（实得 blockers=[${rp.blockers.join(" | ")}]）`);
+    const h = fixture();
+    h.register.entries[2].planAnchorText = "整行已被改写";
+    const rp2 = computeRepin(h.register, h.plan);
+    check(rp2.blockers.some((b) => /entries\[k\.three\]\.planLine = 7.*零命中/.test(b)), `负控㉑c2：整行文本键失配必须阻断（实得 blockers=[${rp2.blockers.join(" | ")}]）`);
+  }
+  {
+    // 负控㉑f：**缺定位键** ⇒ 阻断（新增行号引用必须同批带键，否则重锚能力随表增长静默腐烂）
+    const f = fixture();
+    const g = JSON.parse(JSON.stringify(f.register));
+    delete g.entries[1].planAnchorText;
+    g.entries[0].planPinned = [{ line: 9, mustContain: [] }];
+    g.anchors.push({ id: "noTok", label: "无 token 钉句", value: 1, check: "manual", hard: false, planPinned: [{ line: 3, mustContain: [] }] });
+    const rp = computeRepin(g, f.plan);
+    check(rp.noKey.some((x) => /entries\[b\.two\]\.planLine/.test(x)), `负控㉑f：登记项缺 planAnchorText 必须记「缺定位键」（实得 noKey=[${rp.noKey.join(" | ")}]）`);
+    check(rp.noKey.some((x) => /anchors\[noTok\]\.planPinned\[0\]/.test(x)), "负控㉑f2：钉句无 mustContain token ⇒ 同样缺键（b.two 的 planLineRange[0] 也因缺 planAnchorTextRange 落同一档）");
+    check(!rp.changes.some((c) => c.path.startsWith("entries[b.two]")), "负控㉑f3：缺键项绝不进 changes");
+  }
+  {
+    // 负控㉑g（**红线**）：判据仍是「第 N 行含该句」，不是「该句在 PLAN 某处出现」——
+    //   把锚点指到同一文档的另一行、句子仍在别处存在时，checkPlan 必须照样红。
+    //   这条锁的是「不许改成用模糊匹配代替行号锚点」：一旦有人把 checkPlan 换成全文 includes，
+    //   本断言立刻红（真漂移就放掉了）。
+    const g = fixture();
+    g.register.anchors[0].planPinned[0].line = 6; // 「10 条 / 3 模块」实际在第 1 行
+    const rp = checkPlan(g.register, g.plan);
+    check(rp.fails.some((x) => /钉句 PLAN:6 不符/.test(x)), "负控㉑g：行号错而句子仍在文档别处 ⇒ 必须判红（行号锚点没被降成全文模糊匹配）");
+    const rpRepin = computeRepin(g.register, g.plan);
+    check(rpRepin.changes.some((c) => c.path === "anchors[commandTotal].planPinned[0].line" && c.to === 1), "正控㉑g2：同一形态下 --repin-plan 能按 token 唯一定位回第 1 行（重锚治的是行号漂，不是判据）");
+  }
+  {
+    // 负控㉑j：文本版定点回写（真正落盘的那条路径）——needle 唯一才改，不唯一就整次拒绝
+    const entry = (seamId, anchorText, planLine, extra = "") => `    { "seamId": "${seamId}", "group": "A", "planAnchorText": ${JSON.stringify(anchorText)}, "planLine": ${planLine}${extra} },`;
+    const pinObj = (line) => `    { "id": "commandTotal", "planPinned": [ { "line": ${line}, "mustContain": ["10", "3"] } ] }`;
+    const mkTable = (pinLine, rows) => `{\n  "anchors": [\n${pinObj(pinLine)}\n  ],\n  "entries": [\n${rows.join("\n")}\n  ]\n}\n`;
+    const arr0 = fixture().plan.split("\n");
+    arr0.splice(1, 1);
+    const shifted = arr0.join("\n");
+    const inline = mkTable(1, [
+      entry("a.one", "登记项一 a.one 已建。", 5),
+      entry("b.two", "登记项二 b.two 待建。", 6, `, "planLineRange": [5, 6], "planAnchorTextRange": ${JSON.stringify(["登记项一 a.one 已建。", "登记项二 b.two 待建。"])}`),
+      entry("k.three", "登记项三 k.three 人工。", 7).replace(/,$/, ""),
+    ]);
+    const regInline = JSON.parse(inline);
+    const rp = computeRepin(regInline, shifted);
+    check(rp.blockers.length === 0 && rp.noKey.length === 0, `正控㉑j0：内联表应无阻断（实得 blockers=[${rp.blockers.join(" | ")}] noKey=[${rp.noKey.join(" | ")}]）`);
+    const patched = planRepinPatches(inline, regInline, rp.changes);
+    check(patched.ok, `正控㉑j：内联排版的表必须能定点替换（实得 problems=[${patched.problems.join(" | ")}]）`);
+    const after = patched.text ? JSON.parse(patched.text) : { entries: [] };
+    const aOne = after.entries?.find((e) => e.seamId === "a.one");
+    const bTwo = after.entries?.find((e) => e.seamId === "b.two");
+    check(aOne?.planLine === 4 && bTwo?.planLine === 5 && (bTwo?.planLineRange ?? []).join(",") === "4,5", `正控㉑j2：定点替换后的行号必须与内存版一致（含区间两端点；实得 ${JSON.stringify((after.entries ?? []).map((e) => [e.planLine, e.planLineRange]))}）`);
+    check((patched.text ?? "").includes('"mustContain": ["10", "3"]') && (patched.text ?? "").includes('"group": "A"'), "正控㉑j3：判据与其它字段逐字未动（只动行号）");
+    // 负控㉑j4：兜底 needle `"planLine": 5` 在表里出现两次（另一条登记项同行号、且它的整行键被拆行排版
+    //   ⇒ 带 planAnchorText 的精确 needle 也失效）⇒ **整次拒绝写盘**，不许只改能定位的那一半。
+    const twinRow = (seamId, anchorText) => `    {\n    "seamId": "${seamId}",\n    "group": "A",\n    "planAnchorText": ${JSON.stringify(anchorText)},\n    "planLine": 5\n    }`;
+    const twin = mkTable(1, [`${twinRow("a.one", "登记项一 a.one 已建。")},`, twinRow("k.three", "登记项三 k.three 人工。")]);
+    const regTwin = JSON.parse(twin);
+    const rpTwin = computeRepin(regTwin, shifted);
+    check(rpTwin.changes.length > 0, `负控㉑j4 前提：夹具必须真的产生待回写项（实得 ${rpTwin.changes.length}）`);
+    const bad = planRepinPatches(twin, regTwin, rpTwin.changes);
+    check(!bad.ok && bad.problems.some((p) => /找不到唯一的替换锚/.test(p)), `负控㉑j4：替换锚不唯一时必须拒绝定点写盘并给原因（实得 ok=${bad.ok} problems=[${bad.problems.join(" | ")}]）`);
+    check(bad.text === null, "负控㉑j5：拒绝写盘时不得返回任何可落盘文本");
+  }
+
   if (fail > 0) { return false; }
-  console.log("SELFTEST OK：命令数改红 · 分组漂移红 · 证据行号漂移红 · 未归属非空红 · 旧读数出段红 · 禁语红 · manual 不算通过 · 接缝/远程/实现者负控 · 逐类 anchor check 负控+正控 · 锚点内部自洽（value/planNumber/mustContain）· 藏数进 hard:false/manual 锚点必红（跨锚点宽容只认 hard:true 且机器复检的锚点数）· planNumber 数字边界 · 干净读数零假阳性 全部通过");
+  console.log("SELFTEST OK：命令数改红 · 分组漂移红 · 证据行号漂移红 · 未归属非空红 · 旧读数出段红 · 禁语红 · manual 不算通过 · 接缝/远程/实现者负控 · 逐类 anchor check 负控+正控 · 锚点内部自洽（value/planNumber/mustContain）· 藏数进 hard:false/manual 锚点必红（跨锚点宽容只认 hard:true 且机器复检的锚点数）· planNumber 数字边界 · --repin-plan 重锚（唯一命中才回写 / 歧义与零命中与缺键一律拒写 / 回写后 PLAN 对账归零 / 只改行号不动判据 / 行号锚点没被降成全文模糊匹配 / 定点替换不唯一就整次拒绝）· 干净读数零假阳性 全部通过");
   return true;
 }
 
@@ -936,9 +1264,93 @@ function collectReadings(register) {
   return rd;
 }
 
+// ── --repin-plan 的正式跑（本门**唯一**会写盘的分支：写盘前逐字节备份，写完从盘上复检，复检不过即回滚）──
+function runRepin() {
+  const register = loadRegister();
+  if (register === null || register === "BAD") {
+    console.error(`FAIL: 镜像表 ${REGISTER_PATH} ${register === null ? "缺失" : "JSON 解析失败"} —— 没有表就没有可重锚的东西。`);
+    return 1;
+  }
+  const planRel = register.sources?.plan;
+  const planAbs = planRel ? join(ROOT, planRel) : null;
+  if (!planAbs || !existsSync(planAbs)) {
+    console.error(`FAIL: PLAN 缺失（${planRel ?? "sources.plan 未声明"}）—— 无文本可定位 ⇒ 不重锚、不写盘。`);
+    return 1;
+  }
+  const planText = readFileSync(planAbs, "utf8");
+  const srcText = readFileSync(REGISTER_PATH, "utf8");
+  const { changes, blockers, noKey, kept, total } = computeRepin(register, planText);
+  const planLineCount = planText.split("\n").length;
+
+  console.log("\n=== --repin-plan：按定位键把 PLAN 行号引用重锚到当前文本 ===");
+  console.log(`受行号约束的引用 ${total} 条 · 已与 PLAN 现状逐行相符 ${kept} · 待回写 ${changes.length} · 阻断 ${blockers.length} · 缺定位键 ${noKey.length}（PLAN 现 ${planLineCount} 行）`);
+  for (const c of changes) {
+    const d = c.to - c.line;
+    console.log(`  重锚 ${c.path}：${c.line} → ${c.to}（${d >= 0 ? "+" : ""}${d} 行）`);
+  }
+  for (const b of blockers) { console.log(`  阻断 ${b}`); }
+  for (const k of noKey) { console.log(`  缺键 ${k}`); }
+  const uncovered = [];
+  if (register.caliber?.basisLines?.length) { uncovered.push(`caliber.basisLines = [${register.caliber.basisLines.join(", ")}]`); }
+  if (register.pipeline?.lines?.length) { uncovered.push(`pipeline.lines = [${register.pipeline.lines.join(", ")}]`); }
+  if (uncovered.length) {
+    console.log(`  ⚠ 本模式**不重锚**（无定位键的纯文档指针，行号漂了不会红也不会被改写）：${uncovered.join(" · ")} —— PLAN 行数变动后请人工核对这些数字。`);
+  }
+
+  if (blockers.length || noKey.length) {
+    console.error(`\n拒绝写盘：${blockers.length + noKey.length} 条引用无法**唯一**定位 —— 不许猜行、不许插值、不许从多命中里挑一个。`);
+    console.error("修法：把该项的 mustContain 补到只命中一行（或给登记项补 planAnchorText 整行文本键），再重跑本模式。");
+    return 1;
+  }
+  if (!changes.length) {
+    console.log("\nPASS: 无需重锚 —— 全部行号引用与 PLAN 现状逐行相符（未写盘、未备份）。");
+    return 0;
+  }
+
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "");
+  const bakPath = join(ROOT, ".tmp", `capability-register.${stamp}.bak.json`);
+  if (!existsSync(dirname(bakPath))) { mkdirSync(dirname(bakPath), { recursive: true }); }
+  writeFileSync(bakPath, srcText, "utf8");
+  console.log(`\n备份：${bakPath.split(sep).join("/")}（${srcText.length} 字符，逐字节）`);
+
+  const patched = planRepinPatches(srcText, register, changes);
+  if (!patched.ok) {
+    console.error(`\n拒绝写盘（定点替换把握不足）：\n  - ${patched.problems.join("\n  - ")}`);
+    console.error(`备份仍在 ${bakPath}，原表未动。`);
+    return 1;
+  }
+  writeFileSync(REGISTER_PATH, patched.text, "utf8");
+  console.log(`已回写 ${REGISTER_PATH.split(sep).join("/")}：${changes.length} 处行号（只改行号，判据一字未动）`);
+
+  // 从盘上重读复检：表自身一致性 + 锚点自洽 + PLAN 对账（hard 与 soft 都必须为空才算「重锚成功」）
+  const reread = loadRegister();
+  if (reread === null || reread === "BAD") {
+    writeFileSync(REGISTER_PATH, srcText, "utf8");
+    console.error(`复检失败：写盘后的表无法解析 ⇒ 已从备份回滚。`);
+    return 1;
+  }
+  if (JSON.stringify(stripRepinEditableFields(reread)) !== JSON.stringify(stripRepinEditableFields(register))) {
+    writeFileSync(REGISTER_PATH, srcText, "utf8");
+    console.error("复检失败：除行号外的任何字段被改动（判据被动过）⇒ 已从备份回滚。");
+    return 1;
+  }
+  const cons = [...checkSelfConsistency(reread), ...checkAnchorConsistency(reread)];
+  const plan = checkPlan(reread, planText);
+  if (cons.length || plan.fails.length || plan.soft.length) {
+    writeFileSync(REGISTER_PATH, srcText, "utf8");
+    console.error(`复检失败：回写后 PLAN 对账仍有差异 ⇒ 已从备份回滚。\n  - ${[...cons, ...plan.fails, ...plan.soft].join("\n  - ")}`);
+    return 1;
+  }
+  console.log(`\nPASS: 回写后复检通过 —— 钉句 ${reread.anchors.reduce((n, a) => n + (a.planPinned?.length ?? 0), 0)} 处、登记项 planLine ${reread.entries.filter((e) => e.planLine != null).length} 条全部逐行命中；`);
+  console.log("      PLAN 侧判据已归零 ⇒ 再跑 `node scripts/check-capability-register.mjs` 时，planPinned / planLine 一族不应再报红。");
+  console.log("      ⚠ 本模式只重锚 PLAN 行号，**不碰 evidence（源码 文件:行）** —— 代码侧漂移是该抓的缺陷，自动改写等于洗白。");
+  return 0;
+}
+
 function main() {
   if (SELFTEST) { process.exit(runSelftest() ? 0 : 1); }
   const T0 = Date.now();
+  if (REPIN) { process.exit(runRepin()); }
   const register = loadRegister();
   if (register === null || register === "BAD") {
     console.error(`FAIL: 镜像表 ${REGISTER_PATH} ${register === null ? "缺失" : "JSON 解析失败"} —— 本门唯一权威就是它，跳过 ≠ 通过。`);

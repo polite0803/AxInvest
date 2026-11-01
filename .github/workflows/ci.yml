@@ -1060,3 +1060,36 @@ jobs:
 
       - name: Check capability register reconciliation (mirror table vs disk)
         run: node scripts/check-capability-register.mjs
+
+  # ── UNC 安全的 TypeScript 全量类型检查（任务 #45，2026-11-02）──
+  # 为什么需要这道门：`tsc --noEmit` 走 `tsconfig.json` 的 `include: ["src"]` 目录 glob，
+  #   在 VMware 共享目录（UNC）上**枚举不到任何输入** ⇒ 退 0 却一个文件都不查
+  #   （实测 `--listFiles` 列 0 个文件；往 src 里塞一处故意类型错误照样退 0）。
+  #   `node_modules/.bin/tsc.cmd` 从 UNC 启动还会被 cmd.exe 以「UNC 路径不支持」拒绝并退化成打印帮助。
+  #   ⇒ 本地历史上所有「typecheck 通过」的记录都不算证据；本门改用 fs 遍历把 `src/**` 的
+  #   1433 个 .ts/.tsx/.d.ts **逐条写进临时 tsconfig 的 `files`**，并三档 fail-closed
+  #   （枚举 0 输入即红 · 输出命中 tsc 帮助横幅即红 · 生成配置里混回目录 glob 即红）。
+  # 为什么是独立 job 而不是并进 frontend-check：本文件被仓内 18+ 处 `ci.yml:<行号>` 引用，
+  #   **中段插入会让其后全部引用整体移位**（又一桶 BROKEN 假信号）⇒ 一律追加在文件末尾。
+  #   它需要 `node_modules/typescript` ⇒ 自带一次 npm ci（与 frontend-check 同参数，缓存复用）。
+  # 命令行与 scripts/ci-check.mjs 对应 step **逐字同源**（由 src/__tests__/ci.workflow.test.ts
+  #   的对称差集护栏自动校验）。
+  typecheck-unc:
+    name: Typecheck via per-file enumeration (UNC-safe)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install frontend dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Check UNC-safe typecheck gate selftest (0-input red + planted error)
+        run: node scripts/typecheck-unc.mjs --selftest
+
+      - name: Check TypeScript types via per-file enumeration (UNC-safe)
+        run: node scripts/typecheck-unc.mjs

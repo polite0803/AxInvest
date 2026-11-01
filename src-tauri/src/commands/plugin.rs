@@ -449,6 +449,56 @@ pub fn plugin_read_panel_asset(
     })
 }
 
+/// 解析插件逐页声明（`manifest.pages[]`，§0.10.2 T3）条目的**绝对资产路径**。
+///
+/// 这是「通道 A = 插件自带 bundle 经 asset 协议装载」缺的那块输入（任务 #43）：
+/// 前端把宿主绑定的 `(pluginId, pageId)` 交给后端，后端按清单解析出绝对路径，
+/// 前端再交给 Tauri 的 `convertFileSrc` 换成 asset URL 给沙箱容器。
+///
+/// 与 [`plugin_read_panel_asset`] 的分工：那条把文本资产**读进内存**给 iframe `srcdoc`
+/// （兜底通道 B，有大小上限）；本条只回答「内容在磁盘哪儿」，不读文件。两者共用
+/// `PluginManager` 里同一套防线（清单形状 → 安装锚点 → canonicalize 包含性），
+/// 且**都不接收前端传来的路径** —— 前端串改 `entry` 探测目录在此无处下手。
+///
+/// ⚠ 返回的 `absolutePath` 已额外校验「落在安装根内」：`tauri.conf.json` 的
+/// `assetProtocol.scope` 只放行 `$HOME/.axagent/plugins/installed/*/**`，
+/// 而 `external_dirs` 发现形态的插件不在该根里 —— 那种页面只能继续走 srcdoc 兜底，
+/// 由本命令显式拒绝，比 webview 里一条 403 更可定位。
+/// ⚠ 错误码暂时**复用面板那四个**（`PLUGIN_PANEL_ASSET_*`）：本批禁止改 11 份 locale
+/// （新增码会全语言显示原始串，比措辞偏面板更糟）。待 locale 空出来应补
+/// `PLUGIN_PAGE_ASSET_*` 一组并把这里换过去；精确原因在 `detail` 里。
+#[agent_command(
+    domain = plugin,
+    safety = Safe,
+    call_mode = StateInput,
+    description = "解析插件页面声明的资产绝对路径"
+)]
+#[command]
+pub fn plugin_resolve_page_asset(
+    state: State<'_, AppState>,
+    plugin_id: String,
+    page_id: String,
+) -> Result<axagent_plugins::PluginPageAssetLocation, String> {
+    let plugin_manager = state.plugin_manager.clone();
+    let manager = plugin_manager.blocking_read();
+    manager.resolve_page_asset(&plugin_id, &page_id).map_err(|e| {
+        use crate::commands::error::ErrorCategory as Cat;
+        let (code, category) = match &e {
+            axagent_plugins::PluginError::PermissionDenied(_) => {
+                (plugin_err::PANEL_ASSET_BLOCKED, Cat::PermissionDenied)
+            },
+            axagent_plugins::PluginError::IntegrityUnpinned(_) => {
+                (plugin_err::PANEL_ASSET_UNPINNED, Cat::Validation)
+            },
+            axagent_plugins::PluginError::IntegrityMismatch(_) => {
+                (plugin_err::PANEL_ASSET_TAMPERED, Cat::Unrecoverable)
+            },
+            _ => (plugin_err::PANEL_ASSET_UNAVAILABLE, Cat::Validation),
+        };
+        String::from(ErrorResponse::from_error_with_code(code, e, category))
+    })
+}
+
 #[agent_command(domain = plugin, safety = Caution, call_mode = StateInput, description = "更新指定插件")]
 #[command]
 pub async fn plugin_update(
@@ -481,6 +531,9 @@ pub async fn plugin_update(
 /// 前端/调用方据此判断风险，不要按字面「沙箱」理解成隔离：
 /// 命令串整团作为程序名交给 `Command::new`（**没有**按空白切分成程序 + 参数，`args` 恒空），
 /// 输入 JSON 经 stdin 与 `CLAWD_TOOL_INPUT` 注入，stdout 原样返回。
+/// 程序名解析与 tool 侧同源（任务 #47）：带 `./`、`../` 前缀的相对路径声明先按插件安装目录
+/// 拼成绝对路径（可执行文件查找只看宿主 cwd，原样传下去必然 spawn 失败），绝对路径逐字保留，
+/// **不带前缀的串仍按字面命令交给 PATH 查找**。
 /// 沙箱只做 `subprocess_execution` 门槛 + ENV 白名单（`env_clear` 后回填白名单），
 /// **不对子进程做任何路径或写权限限制**。
 /// 命令声明的 `requiredPermission` 档位是**宿主侧授权门槛（authorization gate）**，

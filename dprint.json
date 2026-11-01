@@ -15,6 +15,7 @@
     "target/**/*",
     "public/**/*",
     "output/**/*",
+    "docs/**/*",
     "**/CHANGELOG.md",
     "axagent-plugins/crates/schema-gen/**/*",
     "**/crates/*/bindings/**/*",
@@ -23,6 +24,11 @@
     "src-tauri/scripts/**/*",
     "knowledge-sources/**/*"
   ],
+  // ⚠ `docs/**/*` 必须排除（2026-11-01 补）：`docs/` 此前被 `.gitignore` 整目录忽略 ⇒ 176 份文档从未入库，
+  // 也从未受 dprint 管辖；解除忽略后 CI 的 `dprint check`（ci.yml:430）立刻报 167 个文件未格式化。
+  // 不能靠「跑一次 dprint fmt」消解：`docs/plans/PLAN-shell-plus-plugins.md` 的行号被
+  // `scripts/capability-register.json` 逐行钉住，格式化会整体重排表格 ⇒ 镜像表锚点成批腐烂。
+  // 故 docs/ 一律不参与格式化检查；新增文档同样不受管辖。
   // 行尾必须与 .gitattributes 的 `* text=auto eol=lf` 一致。
   // 缺省值为 auto（跟随操作系统），Windows 上会产出 CRLF，与 .gitattributes 冲突，
   // 导致 `dprint check` 周期性报 "Text differed by line endings"。显式锁死为 lf。

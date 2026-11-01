@@ -159,6 +159,19 @@ pub enum PluginManifestValidationError {
         panel: String,
         detail: String,
     },
+    /// 页面声明的 `loading` 缺失或不在词汇表（`bundle` / `schema`）内。
+    ///
+    /// 与 [`Self::InvalidCommandRequiredPermission`] 同族：都是「枚举型声明字段必须走清单
+    /// 校验错误、而不是让整份 manifest 反序列化失败」的先例，错误文案指到**具体页 id**。
+    InvalidPageLoading {
+        page: String,
+        loading: String,
+    },
+    /// 页面声明的前端资产（`loading = "bundle"` 时的 `entry`）形状非法。
+    InvalidPageAsset {
+        page: String,
+        detail: String,
+    },
 }
 
 impl Display for PluginManifestValidationError {
@@ -221,6 +234,14 @@ impl Display for PluginManifestValidationError {
             },
             Self::InvalidPanelAsset { panel, detail } => {
                 write!(f, "plugin dashboard panel `{panel}` has an invalid frontendEntry: {detail}")
+            },
+            Self::InvalidPageLoading { page, loading } => write!(
+                f,
+                "plugin page `{page}` loading `{loading}` must be one of {}",
+                crate::types::PluginPageLoading::LABELS.join(", ")
+            ),
+            Self::InvalidPageAsset { page, detail } => {
+                write!(f, "plugin page `{page}` has an invalid entry: {detail}")
             },
         }
     }
@@ -454,30 +475,12 @@ impl PluginManager {
                 "dashboard panel `{panel_id}` declares no frontendEntry (metadata-only panel)"
             ))
         })?;
-        if let Some(detail) = panel_asset_shape_error(entry) {
+        if let Some(detail) = asset_entry_shape_error(entry, "frontendEntry") {
             return Err(PluginError::PermissionDenied(detail));
         }
         // 完整性核对（锚点在 registry，不在 manifest —— 后者自指不成立）
-        let pinned = record.integrity.as_ref().ok_or_else(|| {
-            PluginError::IntegrityUnpinned(format!(
-                "plugin `{plugin_id}` has no pinned install hash; reinstall it to enable dashboard panel assets"
-            ))
-        })?;
-        verify_declared_integrity(&record.install_path, pinned).map_err(|error| {
-            PluginError::IntegrityMismatch(format!(
-                "plugin `{plugin_id}` install directory no longer matches its pinned hash: {error}"
-            ))
-        })?;
-        let install_dir = record.install_path.canonicalize()?;
-        let requested = install_dir.join(entry);
-        let canonical = requested.canonicalize().map_err(|_| {
-            PluginError::NotFound(format!("panel asset not found: {}", requested.display()))
-        })?;
-        if !canonical.starts_with(&install_dir) {
-            return Err(PluginError::PermissionDenied(format!(
-                "Access denied: panel asset is outside plugin directory ({entry})"
-            )));
-        }
+        verify_install_anchor(record, plugin_id, "dashboard panel assets")?;
+        let canonical = canonical_asset_in_dir(&record.install_path, entry, "panel")?;
         let size_bytes = fs::metadata(&canonical)?.len();
         if size_bytes > PANEL_ASSET_MAX_BYTES {
             return Err(PluginError::PermissionDenied(format!(
@@ -489,6 +492,67 @@ impl PluginManager {
             panel_id: panel_id.to_string(),
             entry: entry.to_string(),
             source: fs::read_to_string(&canonical)?,
+        })
+    }
+
+    /// 解析某个逐页声明条目（`pages[]`，§0.10.2 T3）的**绝对资产路径**。
+    ///
+    /// 与 [`Self::read_panel_asset`] 的分工：那条读**内容**（文本资产 → iframe `srcdoc`），
+    /// 本条只给**位置**（不读文件，故没有大小上限那一层；bundle 的子资源由 asset 协议
+    /// 在作用域内自取）。两条共用同一套防线，且**都不接收前端传来的路径**：
+    /// 入参只有宿主绑定的 `(plugin_id, page_id)`，路径一律在此按清单解析 ——
+    /// 让前端自己拼 `~/.axagent/plugins/installed/<id>` 会与 `external_dirs` 的发现形态
+    /// 打架（那条链上的插件根本不在安装根里），等于给页面容器开第二条寻址链。
+    ///
+    /// 防线与面板同口径，另加一道作用域校验：清单载入期的形状校验（坏声明进仓）→
+    /// registry 钉死哈希核对（安装后被改动）→ canonicalize 包含性（符号链接逃逸）→
+    /// **解析结果必须落在 [`Self::install_root`] 内**，因为 `tauri.conf.json` 的
+    /// `assetProtocol.scope` 只放行安装根；手写 registry 或改过 `install_root` 时，
+    /// 宁可在这里报出原因，也不给前端一个「路径合法但 webview 必拒」的串。
+    ///
+    /// `loading = "schema"` 的页面**没有文件资产**（`entry` 是动态 UI Schema 的 id），
+    /// 属契约误用，报错而不返回空路径。
+    pub fn resolve_page_asset(
+        &self,
+        plugin_id: &str,
+        page_id: &str,
+    ) -> Result<PluginPageAssetLocation, PluginError> {
+        let registry = self.load_registry()?;
+        let record = registry.plugins.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(format!("plugin `{plugin_id}` is not installed"))
+        })?;
+        // 走完整载入链而非直接读盘：清单校验与完整性核对都无法被绕过（同 read_panel_asset）。
+        let manifest = load_plugin_from_directory(&record.install_path)?;
+        let page = manifest.pages.iter().find(|p| p.id == page_id).ok_or_else(|| {
+            PluginError::NotFound(format!("plugin `{plugin_id}` has no page `{page_id}`"))
+        })?;
+        if page.loading != PluginPageLoading::Bundle {
+            return Err(PluginError::NotFound(format!(
+                "page `{page_id}` 走 UI Schema 通道（loading = `{}`），没有可解析的文件资产",
+                page.loading.as_str()
+            )));
+        }
+        if let Some(detail) = asset_entry_shape_error(&page.entry, "entry") {
+            return Err(PluginError::PermissionDenied(detail));
+        }
+        verify_install_anchor(record, plugin_id, "page assets")?;
+        let canonical = canonical_asset_in_dir(&record.install_path, &page.entry, "page")?;
+        // 安装根不存在时退回未规范化路径继续比对：比对不过就是「不在作用域内」，
+        // 结论仍然正确，只是少了那次符号链接归一。
+        let install_root = self.install_root();
+        let asset_root = install_root.canonicalize().unwrap_or_else(|_| install_root.clone());
+        if !canonical.starts_with(&asset_root) {
+            return Err(PluginError::PermissionDenied(format!(
+                "Access denied: page asset is outside the asset-scoped install root ({})",
+                asset_root.display()
+            )));
+        }
+        Ok(PluginPageAssetLocation {
+            plugin_id: plugin_id.to_string(),
+            page_id: page_id.to_string(),
+            entry: page.entry.clone(),
+            loading: page.loading,
+            absolute_path: path_for_asset_protocol(&canonical),
         })
     }
 
@@ -568,6 +632,13 @@ impl PluginManager {
     /// 声明里写成 `prog a b` 时，Windows / POSIX 都会把整个字符串当作可执行文件名找，
     /// 找不到即 `Io` 错误；带参数需求请声明成 tool（`tools[].command` + `tools[].args`）。
     ///
+    /// 程序名的**解析**与 tool 侧共用 [`resolve_hook_entry`]（任务 #47 修的既存缺陷）：
+    /// 相对路径声明（`./` 或 `../` 前缀）先按插件安装目录拼成绝对路径再 spawn，
+    /// 因为可执行文件查找只看宿主进程的 cwd、不看子进程 `current_dir`，原样传下去必然失败。
+    /// ⚠ **不带 `./` 前缀的串仍按字面命令交给 PATH 查找**（`commands/greet.sh` 不会被当成
+    /// 目录内文件）—— 那是 tool 侧既有语义，本次刻意不扩，否则老插件里同名的 PATH 命令
+    /// 会静默改指向安装目录。绝对路径声明逐字保留，不回归。
+    ///
     /// 沙箱（[`PluginTool::execute_sandboxed`]）只做两件事：`subprocess_execution`
     /// 权限门槛 + ENV 白名单（`env_clear` 后回填白名单变量）。它**不调用**
     /// `check_path_permission`，因此对子进程实际能读写什么**没有任何限制**。
@@ -605,6 +676,18 @@ impl PluginManager {
             Self::check_command_input_shape(&entry.name, schema, input)?;
         }
         let metadata = plugin.metadata();
+        // 相对路径声明必须在这里解析成绝对路径，不能原样交给 `Command::new`：
+        // 可执行文件查找发生在**宿主进程的 cwd**，子进程的 `current_dir` 不参与
+        // （Windows 报 `OS error 3`、POSIX 报 ENOENT）⇒ `./bin/greet.cmd` 这类声明
+        // 在修复前必然 spawn 失败。解析复用 tool 侧的同一条 [`resolve_hook_entry`]
+        // （禁区 12：不造第二套解析），三条语义因此与 tool 声明逐字同形：
+        // 字面命令（`node` 等：不带 `./`、`../` 且非绝对）原样交给 PATH 查找；
+        // 绝对路径原样保留（老插件不回归）；`./`、`../` 前缀按安装根 join。
+        // `root` 为 `None`（无安装目录的来源，如内置插件）时不解析 —— 与修复前一致。
+        let program = match metadata.root.as_deref() {
+            Some(root) => resolve_hook_entry(root, &entry.command),
+            None => entry.command.clone(),
+        };
         let tool = PluginTool::new(
             plugin_id,
             metadata.name.clone(),
@@ -613,7 +696,7 @@ impl PluginManager {
                 description: Some(entry.description.clone()),
                 input_schema: resolved_command_input_schema(entry),
             },
-            entry.command.clone(),
+            program,
             Vec::new(),
             required_permission,
             metadata.root.clone(),
@@ -1898,6 +1981,8 @@ fn load_manifest_from_skill_md(
         skills: Vec::new(),
         agents: Vec::new(),
         dashboard_panels: Vec::new(),
+        // SKILL.md 派生的清单同样没有页面声明（该声明只能来自 plugin.json）。
+        pages: Vec::new(),
         dependencies: Vec::new(),
         integrity: None,
         capabilities: Vec::new(),
@@ -2146,6 +2231,7 @@ fn build_plugin_manifest(
     let tools = build_manifest_tools(root, raw.tools, &mut errors);
     let commands = build_manifest_commands(root, raw.commands, &mut errors);
     validate_dashboard_panels(&raw.dashboard_panels, &mut errors);
+    let pages = build_manifest_pages(raw.pages, &mut errors);
 
     if !errors.is_empty() {
         return Err(PluginError::ManifestValidation(errors));
@@ -2193,6 +2279,7 @@ fn build_plugin_manifest(
             })
             .collect(),
         dashboard_panels: raw.dashboard_panels,
+        pages,
         dependencies: raw.dependencies,
         integrity: raw.integrity,
         capabilities: raw.capabilities,
@@ -2409,6 +2496,91 @@ fn build_manifest_commands(
         }
 
         validated.push(command);
+    }
+
+    validated
+}
+
+/// 逐页声明（`pages[]`）的校验与转写。
+///
+/// 形状照抄 [`build_manifest_tools`]：raw 收字符串 → 校验 → 转成强类型清单，
+/// 于是「装载形态缺失 / 非法」都是**带页 id 的清单校验错误**，而不是 serde 的行列号。
+///
+/// 与面板声明（[`validate_dashboard_panels`]）刻意保持同一口径：**不做 I/O** ——
+/// `entry` 只验形状不验存在性，存在性由读取期的 canonicalize + 包含性把关
+/// （见 [`PluginManager::resolve_page_asset`]）。两边若一边验存在、一边不验，
+/// 同一份资产声明就会出现「面板能装、页面不能装」这种无法解释的分叉。
+fn build_manifest_pages(
+    pages: Vec<RawPluginPage>,
+    errors: &mut Vec<PluginManifestValidationError>,
+) -> Vec<PluginPage> {
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut validated = Vec::new();
+
+    for page in pages {
+        let id = page.id.trim().to_string();
+        if id.is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "page",
+                field: "id",
+                name: None,
+            });
+            continue;
+        }
+        if !seen.insert(id.clone()) {
+            errors.push(PluginManifestValidationError::DuplicateEntry { kind: "page", name: id });
+            continue;
+        }
+        if page.title.trim().is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "page",
+                field: "title",
+                name: Some(id.clone()),
+            });
+        }
+        let entry_missing = page.entry.trim().is_empty();
+        if entry_missing {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "page",
+                field: "entry",
+                name: Some(id.clone()),
+            });
+        }
+        // 装载形态是 §0.12.5 裁定 3「不许混用却不声明」的落点：空白串与缺键同判「未声明」。
+        let declared = page.loading.as_deref().map(str::trim).filter(|value| !value.is_empty());
+        let loading = match declared {
+            None => {
+                errors.push(PluginManifestValidationError::EmptyEntryField {
+                    kind: "page",
+                    field: "loading",
+                    name: Some(id.clone()),
+                });
+                continue;
+            },
+            Some(value) => match PluginPageLoading::parse(value) {
+                Some(loading) => loading,
+                None => {
+                    errors.push(PluginManifestValidationError::InvalidPageLoading {
+                        page: id.clone(),
+                        loading: value.to_string(),
+                    });
+                    continue;
+                },
+            },
+        };
+        // 资产形状白名单**只适用于 bundle**：schema 页的 `entry` 是动态 UI Schema 的 id
+        // （形如 `opc.order-form`），按文件路径去验它必然被判成「缺扩展名」。
+        // 空 `entry` 已单独报过（上面那条），这里不再叠报同一个缺陷 —— 与
+        // `build_manifest_commands` 的「空值只报 EmptyEntryField」保持一致。
+        if !entry_missing
+            && loading == PluginPageLoading::Bundle
+            && let Some(detail) = asset_entry_shape_error(&page.entry, "entry")
+        {
+            errors
+                .push(PluginManifestValidationError::InvalidPageAsset { page: id.clone(), detail });
+        }
+
+        validated.push(PluginPage { id, title: page.title, entry: page.entry, loading });
     }
 
     validated
@@ -3069,30 +3241,102 @@ pub(crate) const PANEL_ASSET_ALLOWED_EXTS: &[&str] = &["html", "htm", "js", "css
 /// 读的是第三方代码，巨型文件既无正当用途又是内存放大面。
 pub(crate) const PANEL_ASSET_MAX_BYTES: u64 = 2 * 1024 * 1024;
 
-/// manifest 侧的**形状**校验（不做 I/O）：绝对路径 / 逃逸 / 扩展名。
-/// 真正的越界防线在 `read_panel_asset` 的 canonicalize 校验，这里是加载期的第一道。
-fn panel_asset_shape_error(entry: &str) -> Option<String> {
+/// 资产声明的**形状**校验（不做 I/O）：绝对路径 / 逃逸 / 扩展名。
+///
+/// `field` 是清单里的键名（面板是 `frontendEntry`、页面是 `entry`），**只用于错误文案**：
+/// 判定口径由面板与页面两条通道共用同一份，不许各写一套 —— 否则同一份产物会出现
+/// 「面板能装、页面不能装」这类无法解释的分叉。
+///
+/// 真正的越界防线在读取期的 canonicalize + 包含性校验（[`canonical_asset_in_dir`]），
+/// 这里是加载期的第一道。
+fn asset_entry_shape_error(entry: &str, field: &str) -> Option<String> {
     if entry.trim().is_empty() {
-        return Some("frontendEntry cannot be empty".to_string());
+        return Some(format!("{field} cannot be empty"));
     }
     if entry.starts_with('/') || entry.starts_with('\\') {
-        return Some(format!("frontendEntry must be relative to the plugin directory: {entry}"));
+        return Some(format!("{field} must be relative to the plugin directory: {entry}"));
     }
     let bytes = entry.as_bytes();
     if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        return Some(format!("frontendEntry must not be an absolute path: {entry}"));
+        return Some(format!("{field} must not be an absolute path: {entry}"));
     }
     if entry.split(['/', '\\']).any(|seg| seg == "..") {
-        return Some(format!("frontendEntry must not escape the plugin directory: {entry}"));
+        return Some(format!("{field} must not escape the plugin directory: {entry}"));
     }
     match Path::new(entry).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase) {
         Some(ext) if PANEL_ASSET_ALLOWED_EXTS.contains(&ext.as_str()) => None,
         Some(ext) => Some(format!(
-            "frontendEntry extension `.{ext}` is not allowed (expected one of {})",
+            "{field} extension `.{ext}` is not allowed (expected one of {})",
             PANEL_ASSET_ALLOWED_EXTS.join(", ")
         )),
-        None => Some(format!("frontendEntry must have a file extension: {entry}")),
+        None => Some(format!("{field} must have a file extension: {entry}")),
     }
+}
+
+/// 读取期共用的完整性防线：安装期锚点存在 + 目录内容与锚点一致。
+///
+/// 面板与页面两条通道**必须走同一条**：锚点缺失（[`PluginError::IntegrityUnpinned`]）与
+/// 内容被改（[`PluginError::IntegrityMismatch`]）的用户动作不同（重装 vs 移除），
+/// 塌成一个提示就等于把安全事件说成配置缺失。`purpose` 只进文案。
+fn verify_install_anchor(
+    record: &InstalledPluginRecord,
+    plugin_id: &str,
+    purpose: &str,
+) -> Result<(), PluginError> {
+    let pinned = record.integrity.as_ref().ok_or_else(|| {
+        PluginError::IntegrityUnpinned(format!(
+            "plugin `{plugin_id}` has no pinned install hash; reinstall it to enable {purpose}"
+        ))
+    })?;
+    verify_declared_integrity(&record.install_path, pinned).map_err(|error| {
+        PluginError::IntegrityMismatch(format!(
+            "plugin `{plugin_id}` install directory no longer matches its pinned hash: {error}"
+        ))
+    })
+}
+
+/// 把「已按形状校验过的相对资产路径」解析成**安装目录内**的规范路径。
+///
+/// `canonicalize` 之后再判包含性，因此符号链接指向目录外同样被拒；`kind` 只进错误文案
+/// （`panel` / `page`）。本函数**不读文件**，故不判大小上限（那是内容通道
+/// [`PluginManager::read_panel_asset`] 的防线），也不判扩展名（那是
+/// [`asset_entry_shape_error`] 的职责）。
+fn canonical_asset_in_dir(
+    install_dir: &Path,
+    entry: &str,
+    kind: &str,
+) -> Result<PathBuf, PluginError> {
+    let install_dir = install_dir.canonicalize()?;
+    let requested = install_dir.join(entry);
+    let canonical = requested.canonicalize().map_err(|_| {
+        PluginError::NotFound(format!("{kind} asset not found: {}", requested.display()))
+    })?;
+    if !canonical.starts_with(&install_dir) {
+        return Err(PluginError::PermissionDenied(format!(
+            "Access denied: {kind} asset is outside plugin directory ({entry})"
+        )));
+    }
+    Ok(canonical)
+}
+
+/// 把 canonicalize 结果转成可交给 asset 协议的**普通**绝对路径。
+///
+/// Windows 的 `std::fs::canonicalize` 会给路径加 `\\?\`（网络路径是 `\\?\UNC\server\share`）
+/// verbatim 前缀，而 tauri 的 `assetProtocol.scope` 按**普通路径**做 glob 匹配 ⇒
+/// 前缀不去掉就会变成「后端给了路径、前端 `convertFileSrc` 之后被作用域拒绝」这种
+/// 只在运行期出现且极难定位的故障。非 Windows 原样返回。
+fn path_for_asset_protocol(path: &Path) -> String {
+    let raw = path.display().to_string();
+    #[cfg(windows)]
+    {
+        if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{rest}");
+        }
+        if let Some(rest) = raw.strip_prefix(r"\\?\") {
+            return rest.to_string();
+        }
+    }
+    raw
 }
 
 fn validate_dashboard_panels(
@@ -3116,7 +3360,7 @@ fn validate_dashboard_panels(
             });
         }
         if let Some(entry) = &panel.frontend_entry
-            && let Some(detail) = panel_asset_shape_error(entry)
+            && let Some(detail) = asset_entry_shape_error(entry, "frontendEntry")
         {
             errors.push(PluginManifestValidationError::InvalidPanelAsset {
                 panel: panel.id.clone(),
@@ -3220,6 +3464,7 @@ mod tests {
             skills: Vec::new(),
             agents: Vec::new(),
             dashboard_panels: Vec::new(),
+            pages: Vec::new(),
             dependencies: Vec::new(),
             integrity: None,
             capabilities: vec![PluginCapabilityDecl {
@@ -3660,18 +3905,22 @@ mod tests {
         if cfg!(windows) { "greet.cmd" } else { "greet.sh" }
     }
 
-    /// 拼一条 `commands[]` 声明 JSON：脚本用**源目录里的绝对路径**声明。
+    /// 拼一条 `commands[]` 声明 JSON。
     ///
-    /// 为什么不能用相对路径（夹具的自然写法）：命令通道把 `commands[].command` **整团**
-    /// 交给 `Command::new`，而可执行文件查找发生在**宿主进程的 cwd**、不受子进程
-    /// `current_dir` 影响 ⇒ `./commands/greet.cmd` 在 Windows（实测
-    /// `OS error 3 = 系统找不到指定的路径`）与 POSIX 上都必然 spawn 失败。
-    /// 这是既有缺陷、本批按任务书**不改 exec 形状**，故端到端用例只能走绝对路径；
-    /// 缺陷与修法建议写进交付报告。
-    fn command_decl_json(source: &Path, extra_fields_json: &str) -> String {
+    /// `relative = false` ⇒ 脚本按**源目录里的绝对路径**声明。这是任务 #47 修复前唯一跑得通的
+    /// 形态，保留作**回归**用例（绝对路径声明必须继续原样交给 `Command::new`）。
+    /// `relative = true` ⇒ 声明成 `./commands/<脚本>`，即相对插件安装目录的形态。修复前这种声明
+    /// 必然 spawn 失败：命令串整团交给 `Command::new`，可执行文件查找只看**宿主进程的 cwd**
+    /// （子进程 `current_dir` 不参与）⇒ Windows `OS error 3`、POSIX ENOENT。
+    /// ⚠ 相对形态必须带 `./` 前缀 —— 不带前缀的串按字面命令交给 PATH 查找（tool 侧既有语义）。
+    fn command_decl_json(source: &Path, extra_fields_json: &str, relative: bool) -> String {
         let script = source.join("commands").join(command_script_name());
-        let command_json =
-            serde_json::to_string(&script.display().to_string()).expect("脚本路径应可 JSON 化");
+        let declared = if relative {
+            format!("./commands/{}", command_script_name())
+        } else {
+            script.display().to_string()
+        };
+        let command_json = serde_json::to_string(&declared).expect("脚本路径应可 JSON 化");
         if extra_fields_json.is_empty() {
             format!(r#"{{ "name": "greet", "description": "Greet", "command": {command_json} }}"#)
         } else {
@@ -3736,10 +3985,16 @@ mod tests {
     impl CommandPluginFixture {
         /// 装一个只声明命名命令的插件。`extra_fields_json` 是 `commands[]` 条目的附加声明
         /// （`requiredPermission` / `inputSchema`），传空串即「未声明」的老清单形状。
-        fn new(label: &str, permissions_json: &str, extra_fields_json: &str) -> Self {
+        /// `relative` 决定 `command` 声明成相对安装目录还是绝对路径（见 [`command_decl_json`]）。
+        fn new(
+            label: &str,
+            permissions_json: &str,
+            extra_fields_json: &str,
+            relative: bool,
+        ) -> Self {
             let source = temp_dir(&format!("{label}-source"));
             let config_home = temp_dir(&format!("{label}-home"));
-            let decl = command_decl_json(&source, extra_fields_json);
+            let decl = command_decl_json(&source, extra_fields_json, relative);
             write_command_plugin_source(
                 &source,
                 &format!("{label}-demo"),
@@ -3794,7 +4049,7 @@ mod tests {
         ));
 
         // 同形状走完整加载链（真实 manifest JSON 里没有新键）也必须能装、能分发。
-        let fixture = CommandPluginFixture::new("cmd-default", r#"["read"]"#, "");
+        let fixture = CommandPluginFixture::new("cmd-default", r#"["read"]"#, "", false);
         let summaries = fixture.manager.list_plugins().expect("清单应可枚举");
         let summary = summaries
             .iter()
@@ -3927,6 +4182,7 @@ mod tests {
             "cmd-deny",
             r#"["subprocess_execution"]"#,
             r#""requiredPermission": "workspace-write""#,
+            false,
         );
 
         let err = fixture
@@ -3943,6 +4199,9 @@ mod tests {
     ///
     /// 门禁本身永远断言（不起进程）；端到端真跑沿用既有门控
     /// `AXAGENT_TEST_PLUGIN_SUBPROCESS=1`，缺环境时显式跳过、不伪造通过。
+    ///
+    /// 夹具声明的是**绝对路径**命令，于是本用例同时是「任务 #47 修复不破坏绝对路径声明」
+    /// 的端到端回归锁；相对路径的正例见同批新增的 `relative_command_declaration_runs_after_fix`。
     #[test]
     fn workspace_write_command_is_allowed_when_plugin_declares_write() {
         assert!(
@@ -3967,6 +4226,7 @@ mod tests {
             "cmd-allow",
             r#"["read", "write", "subprocess_execution"]"#,
             r#""requiredPermission": "workspace-write", "inputSchema": { "type": "object", "required": ["who"] }"#,
+            false,
         );
 
         let output = fixture
@@ -3985,5 +4245,417 @@ mod tests {
         assert!(err.to_string().contains("who"), "错误应点出缺失字段：{err}");
 
         fixture.cleanup();
+    }
+
+    // ==== 任务 #47：命令声明的相对路径解析（与 tool 侧共用 resolve_hook_entry）====
+
+    /// 解析语义逐情形锁定。断言对象是 tool 侧那条 `resolve_hook_entry` —— 命令通道修复后
+    /// 复用的就是它，故这里成立即等于两条通道的解析语义不分叉（禁区 12）。
+    ///
+    /// 安装根用系统临时目录、绝对用例也在其内构造：Windows 上「有根无盘」的串
+    /// （`/usr/bin/node`）经 `Path::push` 只替换盘符之后的部分，跨平台结论不同，不能拿来断言。
+    #[test]
+    fn command_program_resolution_matches_tool_side_semantics() {
+        let root = std::env::temp_dir();
+        let absolute = root.join("bin").join("greet.sh");
+        // 绝对路径声明原样保留（老插件不回归）。
+        assert_eq!(
+            resolve_hook_entry(&root, &absolute.display().to_string()),
+            absolute.display().to_string()
+        );
+        // 相对形态（带 `./` 前缀）按安装根解析 —— 本次修复的正是这一支。
+        assert_eq!(
+            resolve_hook_entry(&root, "./bin/greet.sh"),
+            root.join("./bin/greet.sh").display().to_string()
+        );
+        // 字面命令交给 PATH 查找；**不带 `./` 前缀的相对串也走这一支**（tool 侧既有语义，
+        // 本修复刻意不扩，否则老插件里同名的 PATH 命令会静默改指向安装目录）。
+        assert_eq!(resolve_hook_entry(&root, "node"), "node");
+        assert_eq!(resolve_hook_entry(&root, "bin/greet.sh"), "bin/greet.sh");
+    }
+
+    /// 正例：`./commands/<脚本>` 形态的命名命令在修复后**真的能跑**（修复前必然 spawn 失败）。
+    ///
+    /// 沿用既有门控 `AXAGENT_TEST_PLUGIN_SUBPROCESS=1`：不设该变量时显式跳过并写明「未验证」，
+    /// 不伪造通过（与 `workspace_write_command_is_allowed_when_plugin_declares_write` 同一口径）。
+    #[test]
+    fn relative_command_declaration_runs_after_fix() {
+        if std::env::var("AXAGENT_TEST_PLUGIN_SUBPROCESS").as_deref() != Ok("1") {
+            eprintln!(
+                "SKIP: 未设置 AXAGENT_TEST_PLUGIN_SUBPROCESS=1，跳过相对路径命令的真 spawn 断言。\
+                 \n      本用例的后半段**未通过，也未被验证**。"
+            );
+            return;
+        }
+
+        let fixture = CommandPluginFixture::new(
+            "cmd-relative",
+            r#"["read", "write", "subprocess_execution"]"#,
+            r#""requiredPermission": "workspace-write""#,
+            true,
+        );
+
+        let output = fixture
+            .manager
+            .execute_plugin_command(
+                &fixture.plugin_id,
+                "greet",
+                &serde_json::json!({ "who": "world" }),
+            )
+            .expect("相对路径声明修复后应执行成功");
+        assert!(output.contains("command=greet"), "命令名应注入执行环境：{output}");
+        assert!(fixture.marker().exists(), "脚本应真的跑过（marker 落在安装目录）");
+
+        fixture.cleanup();
+    }
+
+    // ==== 任务 #44：逐页声明 `pages[]` 的清单校验 ====
+
+    /// 一份合法的 bundle 页声明，供各用例复用。
+    const BUNDLE_PAGE_JSON: &str =
+        r#"[{ "id": "main", "title": "Main", "entry": "pages/index.html", "loading": "bundle" }]"#;
+
+    /// 写一份只声明 `pages[]` 的已安装插件目录 + registry（可选钉下安装期哈希）。
+    ///
+    /// 形状照 `manager_with_panel_pack`：manifest 与资产**先**落盘、再算目录哈希，
+    /// 否则锚点与内容对不上，夹具会把「未建立锚点」误验成「资产解析本身不可用」。
+    /// `installed_dir` 允许落在安装根之外，用来验 asset 作用域那道防线。
+    fn manager_with_page_pack_at(
+        temp: &Path,
+        installed_dir: &Path,
+        plugin_id: &str,
+        pages_json: &str,
+        pinned: bool,
+    ) -> PluginManager {
+        std::fs::create_dir_all(installed_dir.join("pages")).expect("创建页面目录");
+        std::fs::write(installed_dir.join("pages").join("index.html"), "<html>page</html>")
+            .expect("写入页面资产");
+        std::fs::write(
+            installed_dir.join(MANIFEST_FILE_NAME),
+            format!(
+                r#"{{ "name": "{plugin_id}", "version": "1.0.0", "description": "pages ui",
+                     "pages": {pages_json} }}"#
+            ),
+        )
+        .expect("写入 manifest");
+
+        let manager = PluginManager::new(PluginManagerConfig::new(temp.to_path_buf()));
+        let integrity = if pinned {
+            hash_plugin_directory(installed_dir)
+                .ok()
+                .map(|hash| PluginIntegrity { algorithm: "sha256".to_string(), hash })
+        } else {
+            None
+        };
+        let mut registry = InstalledPluginRegistry::default();
+        registry.plugins.insert(
+            plugin_id.to_string(),
+            InstalledPluginRecord {
+                kind: PluginKind::External,
+                id: plugin_id.to_string(),
+                name: plugin_id.to_string(),
+                version: "1.0.0".to_string(),
+                description: "pages ui".to_string(),
+                install_path: installed_dir.to_path_buf(),
+                source: PluginInstallSource::LocalPath { path: installed_dir.to_path_buf() },
+                installed_at_unix_ms: 1,
+                updated_at_unix_ms: 1,
+                integrity,
+            },
+        );
+        manager.store_registry(&registry).expect("写 registry");
+        manager
+    }
+
+    /// 默认形态：插件落在安装根内、锚点已钉死（即 `plugin_install` 之后的真实状态）。
+    fn manager_with_page_pack(temp: &Path, pages_json: &str) -> PluginManager {
+        let installed = temp.join("plugins").join("installed").join("ui-pages");
+        manager_with_page_pack_at(temp, &installed, "ui-pages", pages_json, true)
+    }
+
+    /// 未声明 `loading` ⇒ 清单校验错误并指到具体页 —— §0.12.5 裁定 3「不许混用却不声明」。
+    ///
+    /// 这是任务 #43/#46 的前置判据：装载形态不声明就只能靠猜，而猜出来的通道
+    /// 一旦和产物不符，故障会落在 webview 里（asset 403 或空白 srcdoc），无从归因。
+    #[test]
+    fn load_rejects_page_without_declared_loading() {
+        let temp = temp_dir("page-noloading");
+        let dir = temp.join("plugins").join("installed").join("ui-pages");
+        std::fs::create_dir_all(dir.join("pages")).expect("创建页面目录");
+        std::fs::write(
+            dir.join(MANIFEST_FILE_NAME),
+            r#"{ "name": "ui-pages", "version": "1.0.0", "description": "d",
+                "pages": [ { "id": "main", "title": "Main", "entry": "pages/index.html" } ] }"#,
+        )
+        .expect("写入 manifest");
+
+        let err = load_plugin_from_directory(&dir).expect_err("未声明 loading 的页面必须被拒");
+        let text = err.to_string();
+        assert!(
+            text.contains("plugin page `main` loading cannot be empty"),
+            "应指到页 id 与缺失字段，实际 = {text}"
+        );
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// 声明了不在词汇表内的 `loading` ⇒ `InvalidPageLoading`，且文案列出两个合法值。
+    #[test]
+    fn load_rejects_unknown_page_loading() {
+        let temp = temp_dir("page-badloading");
+        let dir = temp.join("plugins").join("installed").join("ui-pages");
+        std::fs::create_dir_all(dir.join("pages")).expect("创建页面目录");
+        std::fs::write(
+            dir.join(MANIFEST_FILE_NAME),
+            r#"{ "name": "ui-pages", "version": "1.0.0", "description": "d",
+                "pages": [ { "id": "main", "title": "Main", "entry": "pages/index.html",
+                             "loading": "webview" } ] }"#,
+        )
+        .expect("写入 manifest");
+
+        let text = load_plugin_from_directory(&dir).expect_err("非法 loading 必须被拒").to_string();
+        assert!(text.contains("plugin page `main` loading `webview`"), "实际 = {text}");
+        assert!(text.contains("bundle, schema"), "文案应列出合法词汇，实际 = {text}");
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// 空 id / 重复 id 在载入期即拒 —— 前端渲染与资产寻址都以 `page.id` 为键（面板同口径）。
+    #[test]
+    fn load_rejects_duplicate_or_empty_page_id() {
+        for (label, pages_json, expect) in [
+            (
+                "dup",
+                r#"[
+                    { "id": "a", "title": "A", "entry": "pages/index.html", "loading": "bundle" },
+                    { "id": "a", "title": "B", "entry": "pages/index.html", "loading": "bundle" }
+                ]"#,
+                "is duplicated",
+            ),
+            (
+                "empty",
+                r#"[{ "id": "  ", "title": "A", "entry": "pages/index.html", "loading": "bundle" }]"#,
+                "cannot be empty",
+            ),
+        ] {
+            let temp = temp_dir(&format!("page-{label}"));
+            manager_with_page_pack(&temp, pages_json);
+            let dir = temp.join("plugins").join("installed").join("ui-pages");
+            let text = load_plugin_from_directory(&dir)
+                .expect_err(&format!("{label} 应被拒绝"))
+                .to_string();
+            assert!(
+                text.contains("plugin page") && text.contains(expect),
+                "{label}: 实际 = {text}"
+            );
+            let _ = std::fs::remove_dir_all(&temp);
+        }
+    }
+
+    /// `entry` 的资产形状校验**只适用于 bundle**；schema 页的 `entry` 是动态 UI Schema 的 id。
+    ///
+    /// 两个方向都要断言：把 schema id 按文件路径验 ⇒ 合法声明被拒（`opc.order-form` 会被
+    /// 判成「缺扩展名」）；bundle 的越界声明不验 ⇒ 坏声明进仓。后者与面板共用
+    /// [`asset_entry_shape_error`]，故合法值与拒因都应与面板逐字同源。
+    #[test]
+    fn page_entry_validation_follows_declared_loading() {
+        let temp = temp_dir("page-schema-ok");
+        let manager = manager_with_page_pack(
+            &temp,
+            r#"[{ "id": "order", "title": "Order", "entry": "opc.order-form", "loading": "schema" }]"#,
+        );
+        let dir = temp.join("plugins").join("installed").join("ui-pages");
+        let manifest =
+            load_plugin_from_directory(&dir).expect("schema 页的 entry 不得按文件路径校验");
+        assert_eq!(manifest.pages.len(), 1);
+        assert_eq!(manifest.pages[0].loading, PluginPageLoading::Schema);
+        assert_eq!(manifest.pages[0].entry, "opc.order-form");
+        // schema 页没有文件资产，解析命令必须拒绝（见 resolve_page_asset_refuses_schema_page）。
+        assert!(manager.resolve_page_asset("ui-pages", "order").is_err());
+        let _ = std::fs::remove_dir_all(&temp);
+
+        for (label, entry, expect) in [
+            ("escape", "../outside.html", "must not escape the plugin directory"),
+            ("absolute", "/etc/passwd.html", "must be relative to the plugin directory"),
+            ("drive", "C:/Windows/x.html", "must not be an absolute path"),
+            ("ext", "page.exe", "is not allowed"),
+        ] {
+            let temp = temp_dir(&format!("page-{label}"));
+            let dir = temp.join("plugins").join("installed").join("ui-pages");
+            std::fs::create_dir_all(dir.join("pages")).expect("创建页面目录");
+            std::fs::write(
+                dir.join(MANIFEST_FILE_NAME),
+                format!(
+                    r#"{{ "name": "ui-pages", "version": "1.0.0", "description": "d",
+                         "pages": [ {{ "id": "main", "title": "Main", "entry": "{entry}",
+                                       "loading": "bundle" }} ] }}"#
+                ),
+            )
+            .expect("写入 manifest");
+
+            let text = load_plugin_from_directory(&dir)
+                .expect_err(&format!("{label} 形态的 entry 应被拒"))
+                .to_string();
+            assert!(text.contains("plugin page `main` has an invalid entry"), "{label}: {text}");
+            assert!(text.contains(expect), "{label}: 期望含 `{expect}`，实际 = {text}");
+            let _ = std::fs::remove_dir_all(&temp);
+        }
+    }
+
+    // ==== 任务 #43：(pluginId, pageId) → 绝对资产路径 ====
+
+    /// 正例：宿主绑定的 `(pluginId, pageId)` 解析出**安装目录内**的绝对路径。
+    ///
+    /// `absolutePath` 必须能直接打开（这就是给前端 `convertFileSrc` 用的那个值），
+    /// 且 Windows 上不得带 `\\?\` verbatim 前缀 —— tauri 的 `assetProtocol.scope` 按
+    /// 普通路径做 glob 匹配，带着前缀会退化成一个只在运行期出现、极难定位的 403。
+    #[test]
+    fn resolve_page_asset_returns_canonical_path_inside_install_root() {
+        let temp = temp_dir("page-resolve");
+        let manager = manager_with_page_pack(&temp, BUNDLE_PAGE_JSON);
+
+        let located = manager.resolve_page_asset("ui-pages", "main").expect("应解析出页面资产路径");
+        assert_eq!(located.plugin_id, "ui-pages");
+        assert_eq!(located.page_id, "main");
+        // entry 原样回带，仅供展示与排错；路径不来自它，而来自后端解析。
+        assert_eq!(located.entry, "pages/index.html");
+        assert_eq!(located.loading, PluginPageLoading::Bundle);
+        assert!(
+            !located.absolute_path.starts_with(r"\\?\"),
+            "verbatim 前缀应已剥掉：{}",
+            located.absolute_path
+        );
+
+        let path = Path::new(&located.absolute_path);
+        assert!(path.is_absolute(), "必须是绝对路径：{}", located.absolute_path);
+        assert_eq!(
+            std::fs::read_to_string(path).expect("解析出的路径应可直接打开"),
+            "<html>page</html>"
+        );
+        // 与解析结果同形比对：两边都要经 `path_for_asset_protocol` 剥掉 verbatim 前缀，
+        // 否则「已剥」的路径永远不是「未剥」的安装根的子路径，断言会假失败。
+        let install_root = path_for_asset_protocol(
+            &temp.join("plugins").join("installed").canonicalize().expect("规范化安装根"),
+        );
+        assert!(
+            located.absolute_path.starts_with(&install_root),
+            "解析结果应落在安装根内（asset 协议作用域）：{} 不在 {install_root} 内",
+            located.absolute_path
+        );
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// schema 页**没有文件资产** ⇒ 报错而不是返回空路径。
+    /// 空串会被前端当成合法 `absolutePath` 拼进 asset URL，故障又回到运行期。
+    #[test]
+    fn resolve_page_asset_refuses_schema_page() {
+        let temp = temp_dir("page-schema-resolve");
+        let manager = manager_with_page_pack(
+            &temp,
+            r#"[{ "id": "order", "title": "Order", "entry": "opc.order-form", "loading": "schema" }]"#,
+        );
+
+        let err = manager
+            .resolve_page_asset("ui-pages", "order")
+            .expect_err("schema 页没有可解析的文件资产");
+        assert!(matches!(err, PluginError::NotFound(_)), "期望 NotFound，实际 = {err:?}");
+        assert!(err.to_string().contains("UI Schema"), "应说明走的是 schema 通道：{err}");
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// asset 作用域防线：registry 记录的安装目录落在 `install_root` 之外
+    /// （`external_dirs` 发现形态、或手写 registry）⇒ 解析当场拒绝。
+    ///
+    /// 这一条是「不许前端自己拼 `~/.axagent/plugins/installed/<id>`」的另一半：
+    /// 后端也不认安装根之外的路径，否则前端拿到一个 webview 必拒的串，
+    /// 而唯一的线索是一条没有上下文的网络错误。
+    #[test]
+    fn resolve_page_asset_refuses_install_outside_asset_scope() {
+        let temp = temp_dir("page-scope");
+        let outside = temp.join("external-dev").join("ui-pages");
+        let manager =
+            manager_with_page_pack_at(&temp, &outside, "ui-pages", BUNDLE_PAGE_JSON, true);
+
+        let err =
+            manager.resolve_page_asset("ui-pages", "main").expect_err("安装根外的资产应被拒绝");
+        assert!(matches!(err, PluginError::PermissionDenied(_)), "实际 = {err:?}");
+        assert!(err.to_string().contains("install root"), "应点出作用域，实际 = {err}");
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// 篡改与「没锚点」不得塌成一个提示（与面板共用 [`verify_install_anchor`]）。
+    ///
+    /// 两者的用户动作相反：锚点缺失是「重装一次就好」，内容被改是「移除或重装」；
+    /// 面板那条已经分了两个错误码，页面这条复用同一份实现，不允许在此处合并。
+    #[test]
+    fn resolve_page_asset_distinguishes_tampered_and_unpinned() {
+        let temp = temp_dir("page-tamper");
+        let manager = manager_with_page_pack(&temp, BUNDLE_PAGE_JSON);
+        let installed = temp.join("plugins").join("installed").join("ui-pages");
+        std::fs::write(installed.join("pages").join("index.html"), "<html>tampered</html>")
+            .expect("改写资产");
+        let err = manager.resolve_page_asset("ui-pages", "main").expect_err("篡改后应拒绝");
+        assert!(matches!(err, PluginError::IntegrityMismatch(_)), "实际 = {err:?}");
+        let _ = std::fs::remove_dir_all(&temp);
+
+        let temp = temp_dir("page-unpinned");
+        let manager = manager_with_page_pack(&temp, BUNDLE_PAGE_JSON);
+        // 直接把锚点抹掉：等价于「早于此机制安装」的插件状态。
+        let mut registry = manager.load_registry().expect("读 registry");
+        let record = registry.plugins.get_mut("ui-pages").expect("夹具应有 ui-pages 记录");
+        record.integrity = None;
+        manager.store_registry(&registry).expect("改写 registry");
+        let err = manager.resolve_page_asset("ui-pages", "main").expect_err("无锚点应 fail-closed");
+        assert!(matches!(err, PluginError::IntegrityUnpinned(_)), "实际 = {err:?}");
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// 词汇表与序列化形状的自证（禁区 13 的 Rust 半边；TS 半边由比对脚本覆盖）。
+    #[test]
+    fn page_loading_vocabulary_and_dto_shape_are_self_consistent() {
+        for label in PluginPageLoading::LABELS {
+            let parsed =
+                PluginPageLoading::parse(label).unwrap_or_else(|| panic!("`{label}` 应可解析"));
+            assert_eq!(parsed.as_str(), label, "`{label}` 的 as_str 与词汇表分叉");
+            assert_eq!(
+                serde_json::to_value(parsed).expect("应可序列化"),
+                serde_json::Value::String(label.to_string()),
+                "serde 输出必须与 LABELS 一致"
+            );
+        }
+        // 大小写与空串都不在词汇表内：不做宽容，宽容处即分叉处。
+        assert!(PluginPageLoading::parse("Bundle").is_none());
+        assert!(PluginPageLoading::parse("").is_none());
+
+        let page = PluginPage {
+            id: "main".to_string(),
+            title: "Main".to_string(),
+            entry: "pages/index.html".to_string(),
+            loading: PluginPageLoading::Bundle,
+        };
+        let json = serde_json::to_value(&page).expect("页面声明应可序列化");
+        assert_eq!(sorted_keys(&json), ["entry", "id", "loading", "title"]);
+        assert_eq!(json["loading"], serde_json::json!("bundle"));
+
+        let located = PluginPageAssetLocation {
+            plugin_id: "ui-pages".to_string(),
+            page_id: "main".to_string(),
+            entry: page.entry.clone(),
+            loading: PluginPageLoading::Bundle,
+            absolute_path: "C:\\plugins\\installed\\ui-pages\\pages\\index.html".to_string(),
+        };
+        let json = serde_json::to_value(&located).expect("解析结果应可序列化");
+        assert_eq!(sorted_keys(&json), ["absolutePath", "entry", "loading", "pageId", "pluginId"]);
+
+        // `PluginManifest` 结构体**没有** rename_all ⇒ 清单键就是字段名 `pages`（与
+        // `dashboard_panels` 同形）；前端投影 DTO 才用 camelCase。这条不对称写在这里，
+        // 是为了让「给 manifest 加 rename_all」这种改动必须经过本断言。
+        let manifest = demo_manifest_with_capabilities();
+        let json = serde_json::to_value(&manifest).expect("manifest 应可序列化");
+        assert_eq!(json["pages"], serde_json::json!([]), "未声明 pages 应序列化成空数组");
+        assert!(json.get("dashboard_panels").is_some(), "清单键应保持 snake_case");
+    }
+
+    /// 取 JSON object 的键并排序（`serde_json::Map` 默认按序，显式排序以免 feature 变化）。
+    fn sorted_keys(value: &Value) -> Vec<&str> {
+        value.as_object().expect("应是 JSON object").keys().map(String::as_str).collect()
     }
 }

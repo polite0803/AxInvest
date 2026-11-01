@@ -492,6 +492,19 @@ if (canRunFrontend) {
   // 代价可忽略；一旦加门控，pre-push 的快速档又会退回零 lint —— 那正是本次要修的缺口。
   step("OxLint 检查", "npx oxlint src --max-warnings=0");
 
+  // ── UNC 安全的 TypeScript 全量类型检查（任务 #45，2026-11-02）──
+  // 为什么需要：`npx tsc --noEmit` / `npm run typecheck` 在 VMware 共享目录上是**静默空跑** ——
+  //   实测 `node node_modules/typescript/bin/tsc --noEmit --listFiles` 退 0 却列出 **0 个文件**
+  //   （`tsconfig.json` 的 `include: ["src"]` 这条目录 glob 在 UNC 上枚举不到输入），
+  //   往 `src/` 塞一处故意类型错误它照样退 0 ⇒ 「typecheck 通过」在本机历史上不构证据。
+  //   本门改用 fs 遍历把 `src/**` 的 1433 个 .ts/.tsx/.d.ts **逐条写进临时 tsconfig 的 `files`**，
+  //   并三档 fail-closed：枚举 0 输入即红 / 输出命中 tsc 帮助横幅即红 / 生成配置里混回目录 glob 即红。
+  // 为什么仍保留下面那条 `npx tsc --noEmit`：它在本地盘（CI）上是原生口径，删了会少一道；
+  //   两条并跑 = 「同口径两份证据」，而本门是其中**在 UNC 上也有效**的那一份。
+  // 命令行与 `.github/workflows/ci.yml` 末尾对应步骤**逐字同源**（由对称差集护栏自动校验）。
+  step("UNC 安全 typecheck 自检（0 输入判红 + 夹具植入错误必被抓）", "node scripts/typecheck-unc.mjs --selftest");
+  step("UNC 安全 typecheck（src/** 逐条进 files，不退化成空跑）", "node scripts/typecheck-unc.mjs");
+
   step("TypeScript 类型检查", "npx tsc --noEmit");
 
   if (!quick && !frontendOnly) {

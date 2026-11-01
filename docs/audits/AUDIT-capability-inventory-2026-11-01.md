@@ -9,7 +9,7 @@
 
 | 面 | 数量 |
 |---|---|
-| Tauri 命令（注册表逐条） | **1541** |
+| Tauri 命令（注册表逐条） | **1542** |
 | 命令模块 | **164** |
 | 功能域（下表） | **19** |
 | `pub trait`（全仓） | **316**（harness 233） |
@@ -36,7 +36,7 @@
 | 9 | 终端 / 桌面控制 / 多媒体 | 12 个（共 92 条命令） | 92 | 3,096 | agent_macro kit harness providers dao device tools credential +4 | lib、store:deviceSyncStore、store:screenshotDiagnosisStore、store:terminalStore、ui:chat、ui:layout、ui:settings、ui:terminal | 4 | 28 | L1 功能包 · 深耦合（跨面共享消费方 4） |
 | 10 | 模型提供方 | 5 个（共 71 条命令） | 71 | 4,464 | agent agent_macro crypto dao entities harness kit providers +2 | page:QuickBarPage、store:llmWikiStore、store:proactiveStore、store:providerStore、ui:llm-wiki、ui:settings、ui:wiki | 4 | 28 | L1 功能包 · 深耦合（跨面共享消费方 4） |
 | 11 | 轨迹 / 反思 / 进化 / RL | 10 个（共 86 条命令） | 86 | 4,540 | agent_macro harness trajectory agent crypto dao runtime tools +3 | page:LearningGraphPage、store:evaluatorStore、store:evolutionStore、store:fineTuneStore、store:rlTrainingStore、store:tracerStore、ui:chat、ui:layout | 3 | 16 | L1 功能包 · 深耦合（跨面共享消费方 3） |
-| 12 | MCP 与插件体系 | 4 个（共 49 条命令） | 49 | 2,187 | agent_macro dao harness mcp tools runtime plugins | store:agentStore、store:mcpStore、store:platformStore、store:pluginStore、ui:plugin、ui:settings | 3 | 6 | L1 功能包 · 深耦合（跨面共享消费方 3） |
+| 12 | MCP 与插件体系 | 4 个（共 50 条命令） | 50 | 2,245 | agent_macro dao harness mcp tools runtime plugins | store:agentStore、store:mcpStore、store:platformStore、store:pluginStore、ui:plugin、ui:settings | 3 | 6 | L1 功能包 · 深耦合（跨面共享消费方 3） |
 | 13 | OPC 公司运行时（口径已废，盘上未收口） | 10 个（共 117 条命令） | 117 | 7,575 | agent agent_macro analysis_engine company_runtime entities harness trajectory dao +5 | lib、page:DemandDiscoveryPage | 2 | 79 | L1 功能包 · 浅耦合（2） |
 | 14 | 任务调度与后台执行 | 4 个（共 22 条命令） | 22 | 1,474 | agent_macro astock_data dao entities harness kit trajectory | lib、store:schedulerStore、ui:chat | 2 | 4 | L1 功能包 · 浅耦合（2） |
 | 15 | 通知与定时 | 3 个（共 21 条命令） | 21 | 1,027 | agent_macro entities runtime runtime_core | lib、ui:settings | 2 | 16 | L1 功能包 · 浅耦合（2） |
@@ -87,9 +87,9 @@
 | `opc_capability_pack_runtime` | 14 | 747 | src-tauri/src/commands/opc_capability_pack_runtime.rs | agent_macro analysis_engine dao | lib |
 | `scheduled_task` | 14 | 675 | src-tauri/src/commands/scheduled_task.rs | agent_macro entities runtime runtime_core | lib、ui:settings |
 | `desktop` | 13 | 299 | src-tauri/src/commands/desktop.rs | agent_macro dao | lib、ui:layout、ui:settings |
+| `plugin` | 13 | 653 | src-tauri/src/commands/plugin.rs | agent_macro harness plugins | store:pluginStore、ui:plugin、ui:settings |
 | `agent_nudge` | 12 | 230 | src-tauri/src/commands/agent_nudge.rs | agent_macro trajectory | store:nudgeStore、store:proactiveStore |
 | `parallel_execution` | 12 | 161 | src-tauri/src/commands/parallel_execution.rs | agent_macro trajectory | — |
-| `plugin` | 12 | 595 | src-tauri/src/commands/plugin.rs | agent_macro harness plugins | store:pluginStore、ui:plugin、ui:settings |
 | `prompt_templates` | 12 | 211 | src-tauri/src/commands/prompt_templates.rs | agent_macro dao harness | store:promptTemplateStore |
 | `browser` | 11 | 355 | src-tauri/src/commands/browser.rs | agent_macro kit | ui:chat |
 | `demand_discovery` | 11 | 937 | src-tauri/src/commands/demand_discovery.rs | agent_macro analysis_engine dao entities harness | page:DemandDiscoveryPage |
@@ -256,8 +256,8 @@
    `:1232-1246` 从上下文取 `stock_code` 预取、`:854` prompt 文本写死 `search_stock`；另有一条空壳执行器
    `document_parser_executor.rs`（59 行，只回显 `"status":"parsed"`，不接 `DocumentParser` 接缝）。
 1. 命令模块的「代码行」按该模块目录内全部 `.rs` 求和，含注释与测试外的内联 `#[cfg(test)]`。
-2. 域簇用命令模块名的正则归并（脚本内 `DOMAIN_RULES`，逐条可见）。**归并是命名级的，命名不规范者会落「其它」**，
-   那张表的行需要人工认领，但**不影响命令数总量闭合**（1541 条已分配）。
+2. 域簇用命令模块名的正则归并（规则在 **`scripts/lib/command-domains.mjs`** 的 `DOMAIN_RULES`，两份清点脚本共用同一份，逐条可见）。**归并是命名级的，命名不规范者会落「其它」**，
+   那张表的行需要人工认领，但**不影响命令数总量闭合**（1542 条已分配）。
 3. trait 分类里「L2 候选（无键控点）」是**中间态**：它有外部实现者，但我没找到按字符串键选实现的站点 ⇒ 只能算分层解耦，不能算可插拔。
 4. 「空接口」= 全仓零实现 ⇒ 属债不属能力，不得计入插件数。
 5. `domain.pack`／OPC 已按产品口径从能力清单剔除，但盘上仍在（见 PLAN §0.8.4 / 任务 #32），故本清点仍如实列出其体量。

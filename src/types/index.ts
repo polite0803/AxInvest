@@ -2066,6 +2066,52 @@ export interface DashboardPluginInfoDto {
   panels: PluginDashboardPanelDto[];
 }
 
+/**
+ * 逐页声明的装载形态 —— 后端 `plugins::types::PluginPageLoading`，serde `rename_all = "lowercase"`。
+ *
+ * 两条通道各自的承接点（`PLAN-shell-plus-plugins.md` §0.12.5 裁定 3：一页只许走一条，
+ * **未声明即清单校验错误**，插件装载不出来）：
+ * - `bundle`：插件自带的前端产物。`entry` 是相对插件安装目录的资产路径，
+ *   由后端解析成绝对路径后经 asset 协议装载（允许根 = `tauri.conf.json` 的 `assetProtocol.scope`）。
+ * - `schema`：页面内容是一张动态 UI Schema。`entry` 是 **schema id**（不是文件路径），
+ *   走 `DynamicPageViewer` + `dynamicUIStore`（schema 由插件以 `origin="plugin"` 注入）。
+ */
+export type PluginPageLoadingDto = "bundle" | "schema";
+
+/**
+ * 插件贡献的页面声明（`manifest.pages[]`，页面声明的唯一权威结构）。
+ *
+ * 命名口径与 [`PluginDashboardPanelDto`] 同族：后端 Rust 字段 snake_case +
+ * `#[serde(rename_all = "camelCase")]` ⇒ 本类型 camelCase（禁区 13）。本结构四个字段
+ * 都是单词，`entry` / `id` / `title` / `loading` 序列化后键名与 Rust 侧逐字一致。
+ *
+ * ⚠ 寻址不变量：前端只拿 `(pluginId, pageId)` 向后端要路径
+ * （`plugin_resolve_page_asset`），**不得**用 `entry` 自行拼接安装目录 ——
+ * 与 `PluginPanelHost.tsx` 里面板粒度那条是同一条不变量。
+ */
+export interface PluginPageDto {
+  id: string;
+  title: string;
+  /** `bundle` ⇒ 安装目录内的相对资产路径；`schema` ⇒ 动态 UI Schema 的 id。 */
+  entry: string;
+  loading: PluginPageLoadingDto;
+}
+
+/**
+ * `plugin_resolve_page_asset` 的返回形状（后端 `plugins::types::PluginPageAssetLocation`）。
+ *
+ * `absolutePath` 由后端 canonicalize 并校验「在安装目录内 + 在安装根内」后给出，
+ * Windows 侧已去掉 `\\?\` verbatim 前缀，可直接交给 `convertFileSrc` 换 asset URL。
+ * `entry` 只是原样回带的清单值，供展示与排错，**不参与**路径构造。
+ */
+export interface PluginPageAssetLocationDto {
+  pluginId: string;
+  pageId: string;
+  entry: string;
+  loading: PluginPageLoadingDto;
+  absolutePath: string;
+}
+
 export interface UpdateOutcomeDto {
   pluginId: string;
   oldVersion: string;

@@ -184,6 +184,111 @@ pub struct PluginPanelAsset {
     pub source: String,
 }
 
+/// L1 功能包逐页声明的装载形态 —— `PLAN-shell-plus-plugins.md` §0.12.5 裁定 3 的载体。
+///
+/// 两个取值各自对应一条**已在仓里**的装载通道，本批不新造第三条：
+/// - `bundle`：插件自带的前端产物（打包 JS/HTML）。`entry` 是**相对插件安装目录**的资产路径，
+///   由宿主解析成绝对路径后经 asset 协议装载（允许根见 `tauri.conf.json` 的
+///   `assetProtocol.scope`，只放行插件安装目录）。适合重交互页（股票图表类）。
+/// - `schema`：页面内容是一张动态 UI Schema。`entry` 是 **schema id**，不是文件路径，
+///   走 `DynamicPageViewer` + `dynamicUIStore`（schema 由插件以 `origin="plugin"`、
+///   `owner_id = pluginId` 注入，卸载撤销面见 `commands/dynamic_ui.rs::revoke_schemas_owned_by`）。
+///   适合表单 / 列表类页面。
+///
+/// serde `rename_all = "lowercase"` 与 [`PluginDashboardPanelPosition`] 同形。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginPageLoading {
+    Bundle,
+    Schema,
+}
+
+impl PluginPageLoading {
+    /// 清单词汇表（错误文案与 [`Self::parse`] 同源，勿在别处另写字面串）。
+    pub const LABELS: [&'static str; 2] = ["bundle", "schema"];
+
+    /// 本变体的清单字面量（与 serde `rename_all = "lowercase"` 的序列化值一致）。
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bundle => "bundle",
+            Self::Schema => "schema",
+        }
+    }
+
+    /// 解析 `plugin.json` 声明的 `loading` 值。
+    ///
+    /// 只接受精确小写（与 [`PluginPermission::parse`]、[`PluginToolPermission::parse`] 同口径，
+    /// 不做大小写宽容）；不在词汇表内返回 `None`，由 `build_manifest_pages` 报清单校验错误。
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "bundle" => Some(Self::Bundle),
+            "schema" => Some(Self::Schema),
+            _ => None,
+        }
+    }
+}
+
+/// L1 功能包逐页声明的清单条目（`plugin.json` 的 `pages[]`，§0.10.2 T3）。
+///
+/// 形状与 `dashboard_panels` 的 [`PluginDashboardPanel`] 同族，共用两条既有约定：
+/// 1. **宿主绑定寻址** —— 前端只传 `(pluginId, pageId)`，路径一律由后端按清单解析
+///    （见 `PluginManager::resolve_page_asset`）；声明里的 `entry` 是相对定位符，
+///    前端拿它拼路径即为违规。
+/// 2. **声明面只此一份** —— `plugins` 是面板/页面声明的唯一权威（AGENTS.md 附登记区），
+///    不得另建平行 manifest 或第二份路由表。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginPage {
+    /// 页面标识（宿主 tab / 路由的键），在同一插件内必须唯一。
+    pub id: String,
+    /// 显示标题。**不做宿主侧 i18n** —— 页面文案归插件产物自己负责。
+    pub title: String,
+    /// 内容定位符，语义由 [`Self::loading`] 决定：
+    /// `bundle` ⇒ 相对插件安装目录的资产路径（扩展名走资产白名单）；
+    /// `schema` ⇒ 动态 UI Schema 的 id（不做资产形状校验）。
+    pub entry: String,
+    /// 装载形态。**必填**：未声明即清单校验错误 —— §0.12.5 裁定 3「不许混用却不声明」的落点。
+    pub loading: PluginPageLoading,
+}
+
+/// `plugin.json` 中 `pages[]` 的**未校验**形态。
+///
+/// 照抄 [`RawPluginToolManifest`] 的先例：枚举字段在载入期收成字符串，好让
+/// 「缺失 / 非法值」都走**清单校验错误**（`EmptyEntryField` / `InvalidPageLoading`），
+/// 而不是让整份 `plugin.json` 反序列化失败 —— 后者只能报出 serde 的行列号，
+/// 指不出是哪一页、哪个键。校验与转写见 `manager.rs::build_manifest_pages`。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawPluginPage {
+    pub id: String,
+    pub title: String,
+    pub entry: String,
+    /// `None` = 键缺失（未声明）；`Some("")` = 声明了空值。两者都按「未声明」处理。
+    #[serde(default)]
+    pub loading: Option<String>,
+}
+
+/// `plugin_resolve_page_asset` 的返回形状：宿主绑定的 `(pluginId, pageId)` 解析出的
+/// **绝对资产路径**（canonicalize 过，且已校验落在插件安装目录与 asset 协议作用域之内）。
+///
+/// ⚠ 本结构只回答「这个页面声明的内容在哪」，`loading = "schema"` 的页面**没有**文件资产，
+/// 解析时直接报错，不返回空路径。前端拿到 `absolute_path` 后应交给 Tauri 的
+/// `convertFileSrc` 生成 asset URL，**不得**自行拼接 `~/.axagent/plugins/installed/…`
+/// （那条链与 `external_dirs` 发现形态对不上，见 `manager.rs::resolve_page_asset` 文档）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginPageAssetLocation {
+    pub plugin_id: String,
+    pub page_id: String,
+    /// 清单里声明的相对定位符，原样回带**仅供展示与排错**，不参与路径构造。
+    pub entry: String,
+    pub loading: PluginPageLoading,
+    /// canonicalize 后的绝对路径（Windows 已去掉 `\\?\` verbatim 前缀，见
+    /// `manager.rs::path_for_asset_protocol`）。
+    pub absolute_path: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginManifest {
     pub name: String,
@@ -210,6 +315,12 @@ pub struct PluginManifest {
     pub agents: Vec<PluginAgentDefInternal>,
     #[serde(default)]
     pub dashboard_panels: Vec<PluginDashboardPanel>,
+    /// L1 功能包逐页声明（§0.10.2 T3）；缺省 = 该包不贡献页面。
+    ///
+    /// 与 `dashboard_panels` 一样是本 crate 内该表面的**唯一**声明权威：
+    /// 前端只做只读投影，不得另建路由表或平行 manifest。
+    #[serde(default)]
+    pub pages: Vec<PluginPage>,
     #[serde(default)]
     pub dependencies: Vec<PluginDependency>,
     #[serde(default)]
@@ -594,6 +705,10 @@ pub(crate) struct RawPluginManifest {
     pub agents: Vec<RawPluginAgentDef>,
     #[serde(default)]
     pub dashboard_panels: Vec<PluginDashboardPanel>,
+    /// 逐页声明的未校验形态；必须显式转写进 [`PluginManifest::pages`] ——
+    /// serde 默认忽略未知字段，漏了这一步清单里的 `pages` 会被静默丢弃。
+    #[serde(default)]
+    pub pages: Vec<RawPluginPage>,
     #[serde(default)]
     pub dependencies: Vec<PluginDependency>,
     #[serde(default)]

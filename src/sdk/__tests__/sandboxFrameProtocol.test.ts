@@ -21,6 +21,8 @@
  *   与两个客户端运行时的 RPC 方法集合做差集。宿主多一个 / 客户端多一个 ⇒ 红。
  *   srcdoc 侧自任务 #78 起从产物里**解析 `AX_RPC_OPS` 数据块**（`SANDBOX_SRCDOC_RPC_OPS`），
  *   不再扫 `M.<key>` 的别名文本；提取不到 / 条数不等即红。
+ *   bundle 侧自任务 #79 起改为**行为探测**：实例化客户端收请求帧读 `method`，不再扫源码文本；
+ *   一帧都没收到 / 帧里没有 `method` ⇒ 抛错，不落成空集。
  * - **门 D（分母非零 + 边界形状）**：每条提取都断言最小条数；响应帧的成功/失败边界由
  *   `isFailureFrame` 单点定义，空串是失败。提取器写坏 ⇒ 差集恒空 = 空转守卫，
  *   这是 `pr-ci.workflow.test.ts` 的教训，绝不复用。
@@ -41,8 +43,9 @@ import {
   PLUGIN_BRIDGE_CLIENT_METHODS,
   PLUGIN_BRIDGE_COMMAND_NAMES,
   PLUGIN_BRIDGE_COMMANDS,
+  type PluginBridgeCommand,
 } from "@/sdk/pluginBridgeProtocol";
-import { AX_AGENT_PLUGIN_BRIDGE_COMMANDS } from "@/sdk/pluginClientBridge";
+import { AX_AGENT_PLUGIN_BRIDGE_COMMANDS, createAxAgentPluginClient } from "@/sdk/pluginClientBridge";
 import { createHostApiBridge, createHostRpcBridge } from "@/sdk/rpcBridge";
 import {
   buildRpcErrorFrame,
@@ -413,21 +416,96 @@ describe("门 C：宿主接受集 ↔ 两个客户端引用集 的对称差集�
     expect(emptyOps.length, "空 op 集被当成通过 ⇒ 分母断言失效").not.toBe(Object.keys(SANDBOX_RPC_METHODS).length);
   });
 
-  /** 从 bundle 客户端源码提取它引用的 RPC 方法键（`SANDBOX_RPC_METHODS.<key>` 形态）。 */
-  function methodsUsedByBundleClient(): string[] {
-    const code = stripComments(sourceOf("src/sdk/pluginClientBridge.ts"));
-    const keys = new Set<string>();
-    const re = /SANDBOX_RPC_METHODS\.([A-Za-z][A-Za-z0-9]*)/g;
-    let match: RegExpExecArray | null;
-    while ((match = re.exec(code)) !== null) {
-      keys.add(match[1]);
+  /** 行为探测可切换的调用面（只为负例自证存在，正常路径用缺省全开）。 */
+  interface BundleProbeSurface {
+    readonly invoke?: boolean;
+    readonly uiAction?: boolean;
+    readonly executeCommand?: boolean;
+    readonly announceReady?: boolean;
+    /** 覆盖 `invoke` 的命令名（负例用白名单外命令构造「客户端在投递前就拒」）。 */
+    readonly invokeCommand?: string;
+  }
+
+  /**
+   * **行为探测** bundle 客户端实际发出的请求帧方法（任务 #79），不读源码写法。
+   *
+   * 为什么不再扫 `SANDBOX_RPC_METHODS.<key>` 文本：客户端一旦把方法名解构、起别名、提到常量，
+   * 文本提取就**静默少算**（分母非零只能挡住「零个」，挡不住「少一个」）。这里用
+   * `createAxAgentPluginClient` 的测试注入点实例化真客户端，`postTarget` 收帧，逐个调用
+   * 公开方法，读帧上的 `method` —— 客户端怎么组织代码都改变不了它发出什么。
+   *
+   * 提取不到**一律抛错**，不许返回空集：空集进对称差集等于「两边都空 ⇒ 静默通过」。
+   * 三层判据：① 一帧都没收到；② 帧里没有 `method`（ready 帧必须被过滤掉）；
+   * ③ 某个被启用的 RPC 调用自己没发帧（否则集合仍可能凑齐，掩盖漏调）。
+   */
+  function methodsUsedByBundleClient(surface: BundleProbeSurface = {}): string[] {
+    const frames: Array<Record<string, unknown>> = [];
+    const calls: Array<{ name: string; start: number; end: number }> = [];
+    /** 宿主文档：只作为入向期望来源；本用例不回帧，故请求全部在途到 dispose。 */
+    const hostWindow = { postMessage: (): void => {} };
+    const client = createAxAgentPluginClient({
+      postTarget: {
+        postMessage: (message: unknown): void => {
+          frames.push(message as Record<string, unknown>);
+        },
+      },
+      // 空实现：本用例只看出向帧，不注入任何入向事件。
+      messageSource: { addEventListener: (): void => {}, removeEventListener: (): void => {} },
+      hostWindow,
+    });
+
+    /** 记录一次调用产生了哪几帧（`postMessage` 同步，调用返回时边界即定）。 */
+    function record(name: string, call: () => Promise<unknown> | void): void {
+      const start = frames.length;
+      const result = call();
+      if (result) {
+        // 没有宿主回帧 ⇒ 永不 resolve；dispose 会以「已释放」拒绝，这里先兜住未处理拒绝。
+        void result.catch((): undefined => undefined);
+      }
+      calls.push({ name, start, end: frames.length });
     }
-    expect(keys.size, "bundle 客户端没引用任何 RPC 方法 ⇒ 提取器写偏").toBeGreaterThan(0);
-    const tableKeys = Object.keys(SANDBOX_RPC_METHODS) as Array<keyof typeof SANDBOX_RPC_METHODS>;
-    for (const key of keys) {
-      expect(tableKeys, `bundle 客户端引用了协议表里没有的方法键 ${key}`).toContain(key);
+
+    try {
+      if (surface.invoke ?? true) {
+        const command = (surface.invokeCommand ?? PLUGIN_BRIDGE_COMMANDS[0]) as PluginBridgeCommand;
+        record("invoke", () => client.invoke(command));
+      }
+      if (surface.uiAction ?? true) {
+        record("uiAction", () => client.uiAction({ type: "probe" }));
+      }
+      if (surface.executeCommand ?? true) {
+        record("executeCommand", () => client.executeCommand({ name: "probe" }));
+      }
+      if (surface.announceReady ?? true) {
+        record("announceReady", () => client.announceReady());
+      }
+    } finally {
+      client.dispose();
     }
-    return [...keys].map((key) => SANDBOX_RPC_METHODS[key as keyof typeof SANDBOX_RPC_METHODS]);
+
+    if (frames.length === 0) {
+      throw new Error("bundle 客户端行为探测：一个请求帧都没收到 ⇒ 探测失效（不得当通过）");
+    }
+    const hasMethod = (frame: Record<string, unknown>): boolean => typeof frame.method === "string";
+    const methods = frames.filter(hasMethod).map((frame) => frame.method as string);
+    if (methods.length === 0) {
+      throw new Error("bundle 客户端行为探测：收到的帧里都没有 method 字段 ⇒ 探测失效（不得当通过）");
+    }
+    for (const call of calls) {
+      if (call.name === "announceReady") {
+        continue;
+      }
+      if (!frames.slice(call.start, call.end).some(hasMethod)) {
+        throw new Error(`bundle 客户端行为探测：${call.name} 没有发出带 method 的请求帧 ⇒ 探测失效`);
+      }
+    }
+    const known: readonly string[] = Object.values(SANDBOX_RPC_METHODS);
+    for (const method of methods) {
+      if (!known.includes(method)) {
+        throw new Error(`bundle 客户端发出了协议表里没有的方法「${method}」`);
+      }
+    }
+    return methods;
   }
 
   const ALL_METHODS = Object.values(SANDBOX_RPC_METHODS);
@@ -449,8 +527,36 @@ describe("门 C：宿主接受集 ↔ 两个客户端引用集 的对称差集�
     ).toEqual({ hostOnly: [], clientOnly: [] });
   });
 
-  it("bundle 客户端只被允许引用 api.invoke（刻意收窄，扩面需显式改这条）", () => {
+  it("bundle 客户端只被允许引用 api.invoke（三个公开方法都走同一个 RPC 方法；扩面需显式改这条）", () => {
+    // 探测面包含 invoke / uiAction / executeCommand 三个公开方法（各自至少发一帧，见探测器内断言），
+    // 所以这条集合相等**同时**证明三者共用同一个 RPC 方法 —— 不是只探到其中一个。
     expect([...new Set(methodsUsedByBundleClient())].sort()).toEqual([...PLUGIN_BRIDGE_CLIENT_METHODS].sort());
+  });
+
+  /**
+   * 行为探测本身的自证（任务 #79）：探测失败必须**抛错**，不许返回空集。
+   *
+   * 复用同一个探测器，只切换调用面：
+   * ① 只调 `invoke` 且传白名单外命令 —— 客户端在投递前就拒，一帧都没有；
+   * ② 只调 `announceReady` —— 有帧（ready），但帧里没有 `method`，必须被过滤成「提取不到」。
+   */
+  it("探测失败即抛错：白名单外命令不发帧 / ready 帧没有 method，都不得落成空集", () => {
+    expect(() =>
+      methodsUsedByBundleClient({
+        invokeCommand: "plugin_read_panel_asset",
+        uiAction: false,
+        executeCommand: false,
+        announceReady: false,
+      })
+    ).toThrow(/一个请求帧都没收到/);
+    expect(() =>
+      methodsUsedByBundleClient({
+        invoke: false,
+        uiAction: false,
+        executeCommand: false,
+        announceReady: true,
+      })
+    ).toThrow(/都没有 method 字段/);
   });
 });
 

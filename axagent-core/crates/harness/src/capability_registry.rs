@@ -122,6 +122,20 @@ impl ServiceDefinition {
         )
     }
 
+    /// 预置 workflow-run 接缝（工作流执行，异步 job 形态）。
+    ///
+    /// 宿主独持 `WorkEngine`，插件只持 `execution_id`：`start` 立即返回句柄，
+    /// `status` / `cancel` / `list_active` 按 owner（发起插件）隔离查询。
+    /// 执行进度走 `event.dispatch`（宿主在 provider 内装进度回调），不进本契约。
+    pub fn workflow_run() -> Self {
+        Self::new(
+            "workflow.run",
+            "1.0",
+            "axagent_harness::WorkflowRunProvider",
+            "工作流执行：start 受理返回 execution_id，status / cancel / list_active 按 owner 查询",
+        )
+    }
+
     /// 预置 model-provider 接缝（LLM Provider 适配器，按 provider 类型名注册多实例）。
     ///
     /// 注册 ID 为 `model.provider.{provider_type}`（如 `model.provider.deepseek`）。
@@ -928,6 +942,25 @@ impl CapabilityRegistry {
     /// 取回 jobs.store 接缝上的定时任务查询提供者（若已注册）。
     pub fn get_jobs_store(&self) -> Option<Arc<dyn crate::JobStoreProvider>> {
         self.provider_as::<dyn crate::JobStoreProvider>("jobs.store")
+    }
+
+    // ── workflow.run 接缝（工作流执行提供者，单实例，异步 job） ─────────────
+
+    /// 注册一个工作流执行提供者（`workflow.run` 接缝）。
+    ///
+    /// 宿主把独持的 `WorkEngine` 经本接缝以「受理即返回 id」的形态暴露给插件侧；
+    /// 进度由宿主在 provider 内装进度回调后走 `event.dispatch` 外发，不经本接缝。
+    /// 外部实现注册同一接缝即可整体替换（但 `start` 的执行体仍须宿主独占）。
+    pub fn register_workflow_run(
+        &self,
+        provider: Arc<dyn crate::WorkflowRunProvider>,
+    ) -> Result<EffectHandle, CapabilityError> {
+        self.register_seam(ServiceDefinition::workflow_run(), Arc::new(provider), "workflow-run")
+    }
+
+    /// 取回 workflow.run 接缝上的工作流执行提供者（若已注册）。
+    pub fn get_workflow_run(&self) -> Option<Arc<dyn crate::WorkflowRunProvider>> {
+        self.provider_as::<dyn crate::WorkflowRunProvider>("workflow.run")
     }
 
     // ── system.prompt 接缝（多实例，按段名注册） ────────────────────────────

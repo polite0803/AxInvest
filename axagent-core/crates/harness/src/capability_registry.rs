@@ -95,6 +95,19 @@ impl ServiceDefinition {
         )
     }
 
+    /// 预置 market-quote 接缝（行情数据提供者）。
+    ///
+    /// 宿主把已有行情能力（`astock-data` 的 `AStockClient`）经本接缝暴露给插件侧；
+    /// 插件通过 `call_seam("market.quote", op, args)` 按 op 调用行情 / K 线 / 股票搜索。
+    pub fn market_quote() -> Self {
+        Self::new(
+            "market.quote",
+            "1.0",
+            "axagent_harness::MarketDataProvider",
+            "行情查询：实现 MarketDataProvider，向宿主贡献行情 / K 线 / 股票搜索能力",
+        )
+    }
+
     /// 预置 model-provider 接缝（LLM Provider 适配器，按 provider 类型名注册多实例）。
     ///
     /// 注册 ID 为 `model.provider.{provider_type}`（如 `model.provider.deepseek`）。
@@ -864,6 +877,24 @@ impl CapabilityRegistry {
     /// 取回 tool.set 接缝上的工具集贡献者（若已注册）。
     pub fn get_tool_set(&self) -> Option<Arc<dyn crate::ToolSetProvider>> {
         self.provider_as::<dyn crate::ToolSetProvider>("tool.set")
+    }
+
+    // ── market.quote 接缝（行情数据提供者，单实例） ─────────────────────────
+
+    /// 注册一个行情数据提供者（`market.quote` 接缝）。
+    ///
+    /// 宿主把内置行情能力注入本接缝后，插件可经 `call_seam` 的 `market.quote` 分支
+    /// 按 op 读取行情 / K 线 / 股票搜索；外部实现注册同一接缝即可整体替换。
+    pub fn register_market_data(
+        &self,
+        provider: Arc<dyn crate::MarketDataProvider>,
+    ) -> Result<EffectHandle, CapabilityError> {
+        self.register_seam(ServiceDefinition::market_quote(), Arc::new(provider), "market-quote")
+    }
+
+    /// 取回 market.quote 接缝上的行情数据提供者（若已注册）。
+    pub fn get_market_data(&self) -> Option<Arc<dyn crate::MarketDataProvider>> {
+        self.provider_as::<dyn crate::MarketDataProvider>("market.quote")
     }
 
     // ── system.prompt 接缝（多实例，按段名注册） ────────────────────────────

@@ -1707,6 +1707,18 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // 经 tools::global_state 取客户端，AppState 构造时注入一次。
     axagent_tools::global_state::set_astock_client(astock_client.clone());
 
+    // ── market.quote 接缝：把宿主**已有**行情能力暴露给插件 ──
+    // 插件经 `call_seam("market.quote", op, args)` 读取行情 / K 线 / 股票搜索；
+    // 此处把具体类型 `AStockClient` 擦除为 harness 契约，worker 入站分派只认 trait 对象，
+    // 外部实现注册同一接缝即可整体替换（与其它接缝一样平权）。
+    {
+        let market_data: Arc<dyn axagent_harness::MarketDataProvider> = astock_client.clone();
+        match axagent_harness::get_capability_registry().register_market_data(market_data) {
+            Ok(_) => tracing::info!("market.quote 接缝已注册 (BuiltIn)"),
+            Err(e) => tracing::warn!("market.quote 注册失败: {e}"),
+        }
+    }
+
     // C3（2026-09-27，301302 t-risk 超时根因）：交易日历「上证日 K 自证」接线。
     // 原远程源 `RPTA_WEB_TRADE_CALENDAR` 报表已下线（9501），且 `init_holiday_calendar`
     // 此前**从未被启动流程调用** ⇒ is_trading_day 一直走硬编码兜底，缺 2026-09-25 中秋

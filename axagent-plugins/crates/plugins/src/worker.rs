@@ -740,6 +740,74 @@ impl HostPeer {
                     Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
                 }
             },
+            // ── market.quote 接缝：宿主把**已有**行情能力暴露给插件（方向与前几条相反） ──
+            // `market.quote` 不在 `SUPPORTED_REMOTE_SEAMS`：那份清单是「插件提供给宿主」
+            // 的接缝，本接缝是「宿主提供给插件」，只走入站分派、不参与远程门面注册。
+            "market.quote" if op == "get_quote" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_quote(&stock_code)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(quote) => to_value("StockQuote", &quote),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_klines" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let period: String = match deserialize_arg(&args, "period", seam) {
+                    Ok(period) => period,
+                    Err(response) => return response,
+                };
+                // `limit` 缺省 100 根；`adj_type` 缺省 / `null` 都等于「不复权」。
+                let limit: u32 = match deserialize_optional_arg(&args, "limit", seam) {
+                    Ok(Some(limit)) => limit,
+                    Ok(None) => 100,
+                    Err(response) => return response,
+                };
+                let adj_type: Option<axagent_harness::AdjType> =
+                    match deserialize_optional_arg(&args, "adj_type", seam) {
+                        Ok(adj_type) => adj_type,
+                        Err(response) => return response,
+                    };
+                let Some(result) =
+                    self.block_on(provider.get_klines(&stock_code, &period, limit, adj_type))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(klines) => to_value("Vec<KLine>", &klines),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "search_stock" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let keyword: String = match deserialize_arg(&args, "keyword", seam) {
+                    Ok(keyword) => keyword,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.search_stock(&keyword)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(results) => to_value("Vec<StockSearchResult>", &results),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
             // `platform.adapter.{平台名}` 的 seam ID 是**动态**的，只能用前缀守卫。
             other if platform_name_from_seam(other).is_some() => {
                 let platform = platform_name_from_seam(other).unwrap_or_default();
@@ -5275,5 +5343,221 @@ mod tests {
         with_watchdog(Duration::from_secs(5), "写者解阻后的停机", move || {
             invoker.shutdown();
         });
+    }
+
+    // ─────────────────── 任务 #80：market.quote 入站分派 ───────────────────
+
+    /// `get_klines` 实际收到的参数（用来锁「缺省值」而不是只锁「没报错」）。
+    #[derive(Debug, Clone, Default)]
+    struct CapturedKlinesArgs {
+        stock_code: String,
+        period: String,
+        limit: u32,
+        adj_type: Option<axagent_harness::AdjType>,
+    }
+
+    /// 假行情提供者：三方法返回固定 DTO，并记下 `get_klines` 收到的参数。
+    struct FixedMarketDataProvider {
+        klines_args: Mutex<Option<CapturedKlinesArgs>>,
+    }
+
+    impl FixedMarketDataProvider {
+        fn new() -> Self {
+            Self { klines_args: Mutex::new(None) }
+        }
+    }
+
+    #[async_trait]
+    impl axagent_harness::MarketDataProvider for FixedMarketDataProvider {
+        async fn get_quote(
+            &self,
+            stock_code: &str,
+        ) -> axagent_harness::core_error::Result<axagent_harness::StockQuote> {
+            Ok(axagent_harness::StockQuote {
+                code: stock_code.to_string(),
+                name: "浦发银行".to_string(),
+                price: 10.5,
+                pre_close: 10.4,
+                open: 10.45,
+                high: 10.6,
+                low: 10.3,
+                volume: 1_000_000.0,
+                amount: 10_500_000.0,
+                change_pct: 0.96,
+                turnover_rate: 0.5,
+                pe: Some(6.1),
+                pb: Some(0.6),
+                total_mv: Some(300_000_000_000.0),
+                circulating_mv: Some(300_000_000_000.0),
+                limit_up: Some(11.44),
+                limit_down: Some(9.36),
+                is_st: false,
+                timestamp: "2026-11-02 15:00:00".to_string(),
+            })
+        }
+
+        async fn get_klines(
+            &self,
+            stock_code: &str,
+            period: &str,
+            limit: u32,
+            adj_type: Option<axagent_harness::AdjType>,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::KLine>> {
+            *self.klines_args.lock() = Some(CapturedKlinesArgs {
+                stock_code: stock_code.to_string(),
+                period: period.to_string(),
+                limit,
+                adj_type,
+            });
+            Ok(vec![axagent_harness::KLine {
+                date: "2026-11-02".to_string(),
+                open: 10.45,
+                high: 10.6,
+                low: 10.3,
+                close: 10.5,
+                volume: 1_000_000.0,
+                amount: 10_500_000.0,
+                turnover_rate: Some(0.5),
+                adj_factor: None,
+            }])
+        }
+
+        async fn search_stock(
+            &self,
+            keyword: &str,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::StockSearchResult>> {
+            Ok(vec![axagent_harness::StockSearchResult {
+                code: "600000".to_string(),
+                name: keyword.to_string(),
+                market: "main_sh".to_string(),
+            }])
+        }
+    }
+
+    /// 装了假行情提供者的局部注册表 + 可在 watchdog 线程里跑 async 接缝的 peer。
+    fn market_peer(
+        provider: Arc<FixedMarketDataProvider>,
+        registry: Arc<CapabilityRegistry>,
+        runtime: Option<tokio::runtime::Handle>,
+    ) -> HostPeer {
+        let provider: Arc<dyn axagent_harness::MarketDataProvider> = provider;
+        registry.register_market_data(provider).expect("market.quote 接缝应注册成功");
+        HostPeer {
+            plugin_id: "plugin.market".to_string(),
+            declared_capabilities: Vec::new(),
+            declared_calls: vec!["market.quote".to_string()],
+            registry,
+            runtime,
+        }
+    }
+
+    /// 已注册 ⇒ `get_quote` 成功，返回值就是 provider 的 DTO（`code` 即入参）。
+    #[test]
+    fn market_quote_get_quote_returns_provider_dto() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("async 接缝用例需要 runtime");
+        let peer = market_peer(
+            Arc::new(FixedMarketDataProvider::new()),
+            Arc::new(CapabilityRegistry::new()),
+            Some(runtime.handle().clone()),
+        );
+        let response = with_watchdog(Duration::from_secs(5), "market.quote get_quote", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "market.quote",
+                    "op": "get_quote",
+                    "args": { "stock_code": "600000" },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        let value = response.value.expect("成功响应必须带 value");
+        assert_eq!(value["code"], json!("600000"), "返回值应是 provider 的 StockQuote：{value}");
+        assert_eq!(value["price"], json!(10.5));
+    }
+
+    /// 未注册 ⇒ 与 `unavailable(seam)` 同码（不猜字符串，直接比同一函数的产出）。
+    #[test]
+    fn market_quote_without_provider_matches_unavailable_code() {
+        let peer = HostPeer {
+            plugin_id: "plugin.market".to_string(),
+            declared_capabilities: Vec::new(),
+            declared_calls: vec!["market.quote".to_string()],
+            registry: Arc::new(CapabilityRegistry::new()),
+            runtime: None,
+        };
+        let expected = peer.unavailable("market.quote");
+        let response = with_watchdog(Duration::from_secs(2), "market.quote 缺 provider", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "market.quote",
+                    "op": "get_quote",
+                    "args": { "stock_code": "600000" },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, expected.code, "缺 provider 必须走 unavailable 的码");
+        assert_eq!(response.code.as_deref(), Some(error_codes::SEAM_PROVIDER_UNAVAILABLE));
+    }
+
+    /// 参数缺失 ⇒ `invalid_args` 同码，且不得 panic（provider 不会被调用）。
+    #[test]
+    fn market_quote_missing_args_is_invalid_without_panic() {
+        let peer = market_peer(
+            Arc::new(FixedMarketDataProvider::new()),
+            Arc::new(CapabilityRegistry::new()),
+            None,
+        );
+        assert_eq!(
+            invalid_args("x").code,
+            Some(error_codes::SEAM_CALL_INVALID_ARGS.to_string())
+        );
+        let response = with_watchdog(Duration::from_secs(2), "market.quote 缺参", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "market.quote",
+                    "op": "get_klines",
+                    "args": { "period": "daily" },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(response.code.as_deref(), Some(error_codes::SEAM_CALL_INVALID_ARGS));
+    }
+
+    /// `get_klines` 的缺省值：`limit` 缺省 100、`adj_type` 缺省 `None`，其余照传。
+    #[test]
+    fn market_quote_get_klines_applies_default_limit_and_adj() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("async 接缝用例需要 runtime");
+        let provider = Arc::new(FixedMarketDataProvider::new());
+        let captured = provider.clone();
+        let peer = market_peer(
+            provider,
+            Arc::new(CapabilityRegistry::new()),
+            Some(runtime.handle().clone()),
+        );
+        let response = with_watchdog(Duration::from_secs(5), "market.quote get_klines", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "market.quote",
+                    "op": "get_klines",
+                    "args": { "stock_code": "600000", "period": "daily" },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        let seen = captured.klines_args.lock().clone().expect("provider 应被调用");
+        assert_eq!(seen.stock_code, "600000");
+        assert_eq!(seen.period, "daily");
+        assert_eq!(seen.limit, 100, "`limit` 缺省应为 100");
+        assert_eq!(seen.adj_type, None, "`adj_type` 缺省应为不复权");
     }
 }

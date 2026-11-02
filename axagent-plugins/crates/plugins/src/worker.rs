@@ -232,11 +232,7 @@ pub enum WorkerError {
     /// 旧判据按 `reason` 首个 `:` 取段，任何人改动信封成形的文案都会**静默关掉回退**
     /// （审查稿 A2.3 / PLAN §26.2 第 3 条点名的正是这一行）。
     #[error("与插件 `{plugin_id}` 的通道错误：{reason}")]
-    Transport {
-        plugin_id: String,
-        reason: String,
-        code: Option<String>,
-    },
+    Transport { plugin_id: String, reason: String, code: Option<String> },
     /// 请求帧**从未送达** worker（任务 #73 M-1）：进程已退出、管道已断，或写帧本身失败。
     ///
     /// 它与 [`Self::Transport`] 的全部区别就是「**零副作用**」这一件事 —— 对端根本没收到
@@ -265,7 +261,6 @@ impl WorkerError {
         }
     }
 }
-
 
 /// worker 载入配置。
 pub struct PluginWorkerConfig {
@@ -1539,8 +1534,11 @@ impl WorkerInvoker {
                 // 醒来的粒度：对端被宿主占用时按 [`INBOUND_PAUSE_POLL`] 复查计数，
                 // 不被占用时一口气等到预算耗尽（不多花一次唤醒）。
                 let host_owes_answer = self.inner.inbound_inflight.load(Ordering::Acquire) > 0;
-                let slice =
-                    if host_owes_answer { remaining.min(INBOUND_PAUSE_POLL) } else { remaining };
+                let slice = if host_owes_answer {
+                    remaining.min(INBOUND_PAUSE_POLL)
+                } else {
+                    remaining
+                };
                 match receiver.recv_timeout(slice) {
                     Ok(response) => break response,
                     Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -1666,9 +1664,9 @@ impl WorkerInvoker {
             CommandOutcome::Reply(reply) => Ok(reply),
             // exchange 已把 kind=Error 的错误信封转成 Transport；能解出 Fault 只可能是
             // 「成功信封里装着 Fault」的对端违例，保守按命令失败报，绝不当成功返回。
-            CommandOutcome::Fault(fault) => Err(
-                self.transport_error_with_code(fault.code.clone(), fault.message.clone()),
-            ),
+            CommandOutcome::Fault(fault) => {
+                Err(self.transport_error_with_code(fault.code.clone(), fault.message.clone()))
+            },
         }
     }
 
@@ -4925,9 +4923,7 @@ mod tests {
                     request.call_chain.clone(),
                 ) {
                     Ok(response) => FrameResponse::success(json!({ "nested": response.value })),
-                    Err(e) => {
-                        FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string())
-                    },
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
                 },
                 // 不嵌套的快调用：用来验「外层误杀之后，新接缝调用是否被终局闸永久拒绝」。
                 "ping" => FrameResponse::success(json!({ "pong": true })),

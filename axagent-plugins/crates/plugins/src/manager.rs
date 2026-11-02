@@ -4144,7 +4144,11 @@ mod tests {
 
     /// 命令脚本的文件名（随平台变）。
     fn command_script_name() -> &'static str {
-        if cfg!(windows) { "greet.cmd" } else { "greet.sh" }
+        if cfg!(windows) {
+            "greet.cmd"
+        } else {
+            "greet.sh"
+        }
     }
 
     /// 拼一条 `commands[]` 声明 JSON。
@@ -4199,10 +4203,8 @@ mod tests {
             std::fs::set_permissions(&script_path, perms).expect("chmod");
         }
         let manifest_path = root.join(MANIFEST_RELATIVE_PATH);
-        std::fs::create_dir_all(
-            manifest_path.parent().expect("manifest 声明的目录路径应有父级"),
-        )
-        .expect("创建 manifest 目录");
+        std::fs::create_dir_all(manifest_path.parent().expect("manifest 声明的目录路径应有父级"))
+            .expect("创建 manifest 目录");
         std::fs::write(
             &manifest_path,
             format!(
@@ -4237,12 +4239,7 @@ mod tests {
             let source = temp_dir(&format!("{label}-source"));
             let config_home = temp_dir(&format!("{label}-home"));
             let decl = command_decl_json(&source, extra_fields_json, relative);
-            write_command_plugin_source(
-                &source,
-                &format!("{label}-demo"),
-                permissions_json,
-                &decl,
-            );
+            write_command_plugin_source(&source, &format!("{label}-demo"), permissions_json, &decl);
             let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
             let outcome = manager
                 .install(source.to_str().expect("utf8 path"))
@@ -4317,7 +4314,8 @@ mod tests {
     /// 契约 E-2：声明了非 object 的 `inputSchema` ⇒ 清单校验报 InvalidCommandInputSchema。
     #[test]
     fn non_object_command_input_schema_is_a_manifest_error() {
-        let raw = vec![command_manifest_entry("greet", Some(serde_json::json!("type=object")), None)];
+        let raw =
+            vec![command_manifest_entry("greet", Some(serde_json::json!("type=object")), None)];
         let mut errors = Vec::new();
 
         let validated = build_manifest_commands(Path::new("."), raw, &mut errors);
@@ -4397,21 +4395,23 @@ mod tests {
     #[test]
     fn command_input_shape_check_is_minimal() {
         let schema = serde_json::json!({ "type": "object", "required": ["who"] });
-        let shape = |input: Value| PluginManager::check_command_input_shape("greet", &schema, &input);
+        let shape =
+            |input: Value| PluginManager::check_command_input_shape("greet", &schema, &input);
 
         assert!(shape(serde_json::json!({ "who": "world" })).is_ok());
         assert!(matches!(shape(serde_json::json!({})), Err(PluginError::CommandFailed(_))));
         assert!(matches!(shape(Value::Null), Err(PluginError::CommandFailed(_))));
-        assert!(matches!(
-            shape(serde_json::json!([1, 2])),
-            Err(PluginError::CommandFailed(_))
-        ));
+        assert!(matches!(shape(serde_json::json!([1, 2])), Err(PluginError::CommandFailed(_))));
         // 只校验键存在，不校验值形态：null 也算「在」。
         assert!(shape(serde_json::json!({ "who": null })).is_ok());
         // `required` 非数组 ⇒ 无法判定即拒绝。
         let broken = serde_json::json!({ "required": "who" });
         assert!(matches!(
-            PluginManager::check_command_input_shape("greet", &broken, &serde_json::json!({ "who": 1 })),
+            PluginManager::check_command_input_shape(
+                "greet",
+                &broken,
+                &serde_json::json!({ "who": 1 })
+            ),
             Err(PluginError::CommandFailed(_))
         ));
     }
@@ -4431,7 +4431,10 @@ mod tests {
             .manager
             .execute_plugin_command(&fixture.plugin_id, "greet", &serde_json::json!({}))
             .expect_err("subprocess_execution 不能顶替 workspace-write");
-        assert!(matches!(err, PluginError::PermissionDenied(_)), "期望 PermissionDenied，实际 {err:?}");
+        assert!(
+            matches!(err, PluginError::PermissionDenied(_)),
+            "期望 PermissionDenied，实际 {err:?}"
+        );
         assert!(!fixture.marker().exists(), "拒绝必须发生在 spawn 之前：marker 文件不该存在");
 
         fixture.cleanup();
@@ -4473,7 +4476,11 @@ mod tests {
 
         let output = fixture
             .manager
-            .execute_plugin_command(&fixture.plugin_id, "greet", &serde_json::json!({ "who": "world" }))
+            .execute_plugin_command(
+                &fixture.plugin_id,
+                "greet",
+                &serde_json::json!({ "who": "world" }),
+            )
             .expect("放行后命令应执行成功");
         assert!(output.contains("command=greet"), "命令名应注入执行环境：{output}");
         assert!(fixture.marker().exists(), "脚本应真的跑过");
@@ -4950,7 +4957,8 @@ mod tests {
     #[test]
     fn reason_text_drift_does_not_disable_the_fallback() {
         let unknown_op = error_codes::PLUGIN_UNKNOWN_OP;
-        for reason_prefix in ["", "通道错误：", "与插件 `legacy@external` 的通道错误："] {
+        for reason_prefix in ["", "通道错误：", "与插件 `legacy@external` 的通道错误："]
+        {
             let error = WorkerError::Transport {
                 plugin_id: "legacy@external".to_string(),
                 reason: format!("{reason_prefix}{unknown_op}: 未知操作：command"),

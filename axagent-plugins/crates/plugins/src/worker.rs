@@ -38,7 +38,8 @@
 //!
 //! - 一把**专用读线程**消费 stdout，按 `request_id` 把响应投递到 `pending` 表里的等待者；
 //! - 收到**请求**帧（worker 主动发起）就交给 [`HostPeer`] 落地并回帧（回填 `request_id`）；
-//! - 发起方写帧时**只持写锁**，等响应期间**不持任何锁** —— 否则会与读线程互等。
+//! - 一把**专用写线程**独占 stdin（任务 #56），调用方只**投递帧 + 带预算等写回执**，
+//!   等响应期间**不持任何锁** —— 否则会与读线程互等。
 //!
 //! ## L2 接缝调用与三条死锁缓解（PLAN §15.4 / §15.5）
 //!
@@ -58,14 +59,12 @@
 //!    （拒后续接缝调用、停机走急停）；预算默认 [`DEFAULT_SEAM_TIMEOUT_MS`]，长跑型接缝
 //!    （`run_turn`）按 plugin-proto 的 `SEAM_OP_TIMEOUT_OVERRIDES` 逐接缝覆盖，连接级可用
 //!    [`PluginWorkerConfig::with_seam_wait_timeout`] 显式改默认。
-//!    ⚠ **本批只覆盖收侧**：写帧持锁卡死（对端僵死不读 stdin 且管道满）另立案 #56。
 //! ⑤ **握手等待预算**（任务 #63 补 D1 边角）：`ops::DESCRIBE` 不经接缝公共入口，
 //!    故④对它不生效；[`WorkerInvoker::handshake`] 用独立的
 //!    [`DEFAULT_HANDSHAKE_TIMEOUT_MS`]（[`PluginWorkerConfig::with_handshake_timeout`] 可覆盖），
 //!    超时同样置「连接可疑」闸 —— 不是为了拒后续接缝调用（这条连接根本不会交付出去），
 //!    而是为了让 [`LoadedPlugin::load`] 失败路径上的 `shutdown()` 跳过「等 shutdown 回执」，
 //!    否则「不回 describe 的 worker」会把装载从「挂握手」改成「挂停机」。
-//!    ⚠ 同样**只覆盖收侧**，写侧仍归 #56。
 //! ⑥ **嵌套调用的计时挂起**（任务 #73 修 M-3，D1 的另一半）：入站请求（`emit` /
 //!    `call_seam`）改由**独立任务**处理，读线程不再被宿主侧那一跳占住；同时出向等待预算
 //!    **只在对端不被宿主占用时消耗**。两者合起来才让「④ 到点 = 对端装死」这条推论成立 ——
@@ -74,6 +73,12 @@
 //!    ⚠ 代价如实声明：外层 15 s 这道闸在嵌套期间不生效，若宿主替插件跑的那一跳自己卡死，
 //!    外层跟着没有上界 —— 那是入站服务侧**既存**的无界（审查稿 A4.2：宿主服务 `call_seam`
 //!    时没有任何等待上限），本批没有给它加闸，登记在交回清单。
+//! ⑦ **写侧解阻**（任务 #56，D1 的另一半）：stdin 由**专用写线程**独占，调用方只投递帧并
+//!    **带预算**等写回执 ⇒ 对端僵死不读 stdin 且管道满时，阻塞落在写线程上，调用方在自己的
+//!    预算内拿到三态回执之一（`Written` / `Failed` / `NoAck`）。只有 `Failed` 且确认
+//!    **一个字节都没写出** 才可报 `NotDelivered`（零副作用 ⇒ 允许上层回退）；
+//!    `NoAck` 与「已写出部分字节」一律判连接不可用（毒化 + 杀进程关闭管道以解阻写者）
+//!    并报 `Transport`。`shutdown()` / `Drop` 的关管道与回收也全部有界。
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -1022,11 +1027,144 @@ const COMMAND_FRAME_GRACE_MS: u64 = 1_000;
 /// 最多多等一个粒度的墙钟；20 ms 相对毫秒~秒级的帧往返可以忽略。
 const INBOUND_PAUSE_POLL: Duration = Duration::from_millis(20);
 
+/// 写线程在「子进程已被杀」之后留给自己的退出宽限（任务 #56）。
+///
+/// 杀进程会关掉管道读端 ⇒ 阻塞中的 `write` 立刻返回错误 ⇒ 写线程处理完关闭命令即退出。
+/// 这个宽限**只兜异常**（OS 迟迟不解除阻塞 / 测试用的无进程夹具），不是等待窗口：
+/// 超时后调用方放弃回收（detach）并留 warn，绝不为了 join 一个线程把停机拖成无界。
+const WRITER_EXIT_GRACE: Duration = Duration::from_millis(200);
+
+// ───────────────────────── 出向写线程（任务 #56） ─────────────────────────
+
+/// 一帧出向数据：宿主发起的请求，或宿主对入站请求的回写响应。
+///
+/// 两者共用同一条 stdin，且都必须「整帧写出或不写」；写线程按投递顺序串行写，
+/// 帧完整性不再依赖调用方持锁。
+enum OutboundFrame {
+    Request(FrameRequest),
+    Response(FrameResponse),
+}
+
+impl OutboundFrame {
+    /// `W` 保持泛型而不是 `dyn Write`：`write_json_frame` 的泛型参数隐含 `Sized`，
+    /// 传 `&mut dyn Write` 无法满足（会撞 `the size for values of type dyn Write
+    /// cannot be known`）。实际调用方是 [`CountingWriter`]。
+    fn write_to<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        match self {
+            Self::Request(frame) => write_json_frame(writer, frame),
+            Self::Response(frame) => write_json_frame(writer, frame),
+        }
+    }
+}
+
+/// 写回执三态（任务 #56 的验收判据）。
+///
+/// **`NotDelivered` 只允许由 [`Self::Failed`] 且 `wrote_any == false` 推出**：
+/// 那一刻一个字节都没进管道，帧不可能被对端读到 ⇒ 零副作用 ⇒ 命名命令可回退。
+/// 其余两种状态都**不能**报 `NotDelivered`：
+///
+/// - [`Self::NoAck`]：写线程仍阻塞在 `write` 里，帧可能已写出部分字节；此时即使立刻杀进程，
+///   也无法追溯「截止那一刻到底写出了多少」—— 「未送达」是不可证明的陈述。
+/// - `Failed { wrote_any: true }`：已经有字节被管道接受，对端可能已读到半帧，
+///   流就此损坏（后续帧的边界不再可信）。
+/// - `Failed { wrote_any: false }` + [`Self::Written`] 才是两个确定的端点。
+#[derive(Debug)]
+enum WriteAck {
+    /// 整帧已写出并 flush（对端至少能读到完整帧）。
+    Written,
+    /// 写没完成。`wrote_any = false` ⇒ 确定整帧未写出（零副作用）；
+    /// `true` ⇒ 已有字节进入管道（流可能损坏，禁止判「未送达」）。
+    Failed { reason: String, wrote_any: bool },
+    /// 预算耗尽：写线程仍阻塞，**无法确定**是否已写出（可能已写出部分字节）。
+    NoAck,
+}
+
+/// 写线程命令：写一帧（带回执口）或关闭管道退出。
+enum WriterCommand {
+    Frame { frame: OutboundFrame, ack: mpsc::Sender<WriteAck> },
+    Close,
+}
+
+/// 写线程句柄：投递口 + 退出信号 + join 句柄。
+///
+/// `done` 是「线程已退出」的有界等待口 —— 标准库的 `JoinHandle` 没有带超时的 join，
+/// 而停机不允许为了回收一个可能卡死的线程把上层拖挂。
+struct WriterThread {
+    tx: mpsc::Sender<WriterCommand>,
+    done: mpsc::Receiver<()>,
+    handle: JoinHandle<()>,
+}
+
+/// 计数写层：包住真实管道，记录**已被管道接受**的字节数（含 flush 之前的全部写入）。
+///
+/// 复用 plugin-proto 的 [`write_json_frame`]（长度前缀分帧 + flush），只在外层数数：
+/// 写失败时据此区分「一个字节都没出去」（可判未送达）与「已写出部分字节」。
+struct CountingWriter<'a> {
+    inner: &'a mut (dyn Write + Send),
+    written: usize,
+}
+
+impl Write for CountingWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.written += written;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// 写线程主循环：**独占** stdin，串行写帧（帧完整性的唯一保证点）。
+///
+/// 它永不调用宿主逻辑、永不持任何共享锁，因此「对端僵死不读管道」只会卡住它自己；
+/// 调用方各自带预算等回执，互不牵连。收到 [`WriterCommand::Close`] 或投递口断开即退出，
+/// 退出时 drop 掉管道写端 —— 对端读到 EOF，`serve` 形态的 worker 自行退出（防线①）。
+fn run_writer(
+    mut stdin: Option<Box<dyn Write + Send>>,
+    commands: mpsc::Receiver<WriterCommand>,
+    done: mpsc::Sender<()>,
+) {
+    while let Ok(command) = commands.recv() {
+        match command {
+            WriterCommand::Frame { frame, ack } => {
+                let ack_state = match stdin.as_mut() {
+                    Some(writer) => {
+                        let mut counting = CountingWriter { inner: writer.as_mut(), written: 0 };
+                        match frame.write_to(&mut counting) {
+                            Ok(()) => WriteAck::Written,
+                            Err(e) => WriteAck::Failed {
+                                reason: format!("写帧失败：{e}"),
+                                wrote_any: counting.written > 0,
+                            },
+                        }
+                    },
+                    // 与停机竞争：管道已被本线程自己关掉（只可能在 Close 之后，理论不可达）。
+                    None => WriteAck::Failed {
+                        reason: "通道已关闭（stdin 已释放）".to_string(),
+                        wrote_any: false,
+                    },
+                };
+                let _ = ack.send(ack_state);
+            },
+            WriterCommand::Close => break,
+        }
+    }
+    // 关管道：`stdin` 在此 drop ⇒ 对端读到 EOF。
+    drop(stdin);
+    // 接收端可能已随连接的 drop 消失：那是正常收尾，不报错。
+    let _ = done.send(());
+}
+
 /// 宿主侧 worker 连接的共享状态：读线程与调用方共用。
 struct WorkerInner {
     plugin_id: String,
-    /// `None` = 已关闭（停机时 `take()` 掉，真正关管道 → 对端读到 EOF）。
-    stdin: Mutex<Option<Box<dyn Write + Send>>>,
+    /// 出向写线程（任务 #56）：stdin 由它独占，调用方**永不**持锁做阻塞写。
+    ///
+    /// `None` = 写线程已关停（停机 `take()` 掉 / 启动失败）。此时投递一律得到
+    /// [`WriteAck::Failed`]（零字节写出 ⇒ 可判未送达）。
+    writer: Mutex<Option<WriterThread>>,
     /// 等待中的请求：`request_id` → 响应投递口。读线程按 ID 投递，调用方按 ID 取。
     pending: Mutex<HashMap<String, mpsc::Sender<FrameResponse>>>,
     /// worker 子进程；`None` 仅出现在测试用的流式构造里（无进程可管）。
@@ -1138,7 +1276,7 @@ impl WorkerInvoker {
 
         let inner = Arc::new(WorkerInner {
             plugin_id: plugin_id.clone(),
-            stdin: Mutex::new(Some(Box::new(stdin))),
+            writer: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
             child: Mutex::new(Some(child)),
             shutdown_timeout: config.shutdown_timeout,
@@ -1151,7 +1289,25 @@ impl WorkerInvoker {
             inbound_inflight: AtomicUsize::new(0),
             connection_closed: AtomicBool::new(false),
         });
-        let reader = Self::spawn_reader(inner.clone(), Box::new(stdout), &plugin_id)?;
+        // 写线程先起：它接管 stdin，之后的所有写帧都只经这条串行写者。
+        // 起不来 ⇒ 进程已 spawn，必须杀掉，不能留孤儿（与读线程失败的处置一致）。
+        let writer = match Self::spawn_writer(Box::new(stdin), &plugin_id) {
+            Ok(writer) => writer,
+            Err(e) => {
+                inner.kill_child();
+                return Err(e);
+            },
+        };
+        // 立刻入槽：读线程一起来就可能收到入站请求并回写，不能出现「写者还没挂上」的空窗。
+        *inner.writer.lock() = Some(writer);
+        let reader = match Self::spawn_reader(inner.clone(), Box::new(stdout), &plugin_id) {
+            Ok(reader) => reader,
+            Err(e) => {
+                inner.close_writer(Instant::now() + WRITER_EXIT_GRACE);
+                inner.kill_child();
+                return Err(e);
+            },
+        };
         Ok(Self { inner, reader: Mutex::new(Some(reader)) })
     }
 
@@ -1185,7 +1341,7 @@ impl WorkerInvoker {
         let plugin_id = plugin_id.into();
         let inner = Arc::new(WorkerInner {
             plugin_id: plugin_id.clone(),
-            stdin: Mutex::new(Some(writer)),
+            writer: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
             child: Mutex::new(None),
             shutdown_timeout: Duration::from_millis(200),
@@ -1198,9 +1354,29 @@ impl WorkerInvoker {
             inbound_inflight: AtomicUsize::new(0),
             connection_closed: AtomicBool::new(false),
         });
+        // 与生产同一条写路径：测试也经写线程，避免「测的是另一套写逻辑」。
+        let writer = Self::spawn_writer(writer, &plugin_id).expect("测试用写线程应能启动");
+        *inner.writer.lock() = Some(writer);
         let thread =
             Self::spawn_reader(inner.clone(), reader, &plugin_id).expect("测试用读线程应能启动");
         Self { inner, reader: Mutex::new(Some(thread)) }
+    }
+
+    /// 启动专用写线程（stdin → 帧流；串行写，帧完整性由「单写者」保证）。
+    fn spawn_writer(
+        stdin: Box<dyn Write + Send>,
+        plugin_id: &str,
+    ) -> Result<WriterThread, WorkerError> {
+        let (tx, commands) = mpsc::channel();
+        let (done_tx, done) = mpsc::channel();
+        let handle = std::thread::Builder::new()
+            .name(format!("plugin-worker-writer-{plugin_id}"))
+            .spawn(move || run_writer(Some(stdin), commands, done_tx))
+            .map_err(|e| WorkerError::Spawn {
+                plugin_id: plugin_id.to_string(),
+                reason: format!("无法启动 worker 写线程：{e}"),
+            })?;
+        Ok(WriterThread { tx, done, handle })
     }
 
     /// 启动专用读线程（stdout → 配对表 / 入站处理器）。
@@ -1247,7 +1423,7 @@ impl WorkerInvoker {
             .call_typed(
                 ops::DESCRIBE,
                 json!({ "proto_version": AXAGENT_PLUGIN_PROTO_VERSION }),
-                Some(self.inner.handshake_timeout),
+                self.inner.handshake_timeout,
             )
             .map_err(|e| {
                 // 超时 ⇒ 置「连接可疑」闸，让调用方兜底的 `shutdown()` 跳过等待 shutdown
@@ -1269,34 +1445,19 @@ impl WorkerInvoker {
         Ok(declaration)
     }
 
-    /// 发一帧请求并等回**配对**的响应（`wait = None` 时**不设**等待上限 —— 停机帧专用）。
+    /// 发一帧请求并等回**配对**的响应，写侧与收侧**各自**带预算（任务 #56 起）。
     ///
-    /// 任务 #53/#63 之后接缝与握手都不再走无限预算：接缝经
+    /// 任务 #53/#63 之后接缝与握手都不再有无限预算：接缝经
     /// [`Self::invoke_with_chain`]（`seam_wait_timeout` 与逐接缝表）、握手经
-    /// [`Self::handshake`]（`handshake_timeout`），本入口只保留**停机帧**这一个无限等待
-    /// 调用点，理由是它只在连接**未被标脏**时发出（见 [`Self::shutdown`]），
-    /// 握手失败则由 [`LoadedPlugin::load`] 的调用方兜底停机。
+    /// [`Self::handshake`]（`handshake_timeout`）、停机帧经 [`Self::shutdown`]（总预算的一半）。
+    /// `wait` 是**这个调用**的预算：写回执最多等 `wait`，写成功后收配对响应再等 `wait`
+    /// （两者不会同时消耗，正常路径下写回执是毫秒级）。
     ///
-    /// 三个「不」是这套并发模型的关键：
-    /// - 写帧时**只持写锁**（写完即放）：对端可能正等我们处理它的请求，持锁等待会一起卡死；
+    /// 并发模型的三条硬约束：
+    /// - 写帧**由写线程串行完成**，调用方只投递帧并等回执：对端可能正等我们处理它的请求，
+    ///   在调用线程上阻塞写会让整条连接（含入站回写）一起卡死（任务 #56）；
     /// - 等响应期间**不持任何锁**：读线程要能并发把响应投进配对表；
     /// - 读线程退出时清空配对表：等待者拿到 `Err` 而不是永久挂起。
-    fn exchange(
-        &self,
-        op: &str,
-        args: Value,
-        call_chain: Vec<String>,
-    ) -> Result<FrameResponse, WorkerError> {
-        self.exchange_with_timeout(op, args, call_chain, None)
-    }
-
-    /// [`Self::exchange`] 的超时变体：`wait = Some(limit)` 时宿主最多等 `limit`，
-    /// 到点**撤掉配对槽位并放弃在途调用**。三个使用者：
-    /// - 接缝公共入口（任务 #53，D1 修复本体）：预算 = `seam_wait_timeout`（逐 op 表优先），
-    ///   超时另置「连接可疑」闸（见 [`Self::invoke_with_chain`]）；
-    /// - 握手帧（任务 #63，D1 边角）：预算 = `handshake_timeout`，超时另置同一闸
-    ///   （见 [`Self::handshake`]），目的只是让停机走急停；
-    /// - 命令帧（任务 #49）：预算 = 帧 `timeout_ms` + 收帧宽限，**不**置可疑闸。
     ///
     /// 语义边界（如实声明）：
     /// - 超时**不等价于取消** —— 对端 worker 可能仍在执行，其迟到的响应帧会被读线程
@@ -1304,21 +1465,18 @@ impl WorkerInvoker {
     /// - **预算按「对端不被宿主占用」的时长消耗**（任务 #73 M-3）：本连接有入站请求正在
     ///   宿主手里处理时，等待只按 [`INBOUND_PAUSE_POLL`] 的粒度醒来复查、计时挂起。
     ///   代价如实写明：若宿主替插件跑的那一跳**自己**卡死，外层这一等也跟着没有上界 ——
-    ///   那不是本批新引入的无界（入站服务侧今天本就没有等待上限，审查稿 A4.2 原文），
-    ///   但本批把「外层 15 s」这道闸从嵌套路径上摘了下来，登记进交回清单。
-    /// - **本批只覆盖收侧等待**；写帧侧的卡死触发条件（逐字）：「对端僵死不读 stdin
-    ///   且管道满 ⇒ 写方持 `stdin` 锁阻塞在 `write_json_frame`，`recv_timeout` 覆盖不到」
-    ///   —— 那是「单读线程」既存缺陷的另一半，修它需 writer 线程 / 异步写的接缝栈重构，
-    ///   另立案 #56，不在本批范围。
-    /// - **写帧失败**报 [`WorkerError::NotDelivered`]（帧未送达 ⇒ 零副作用），
-    ///   与「帧已送达之后才坏」的 `Transport` 分开 —— 命令通道的回退判据依赖这条区别
-    ///   （任务 #73 M-1）。
+    ///   那是入站服务侧**既存**的无界（审查稿 A4.2：宿主服务 `call_seam` 时没有等待上限），
+    ///   本批没有给它加闸，登记进交回清单。
+    /// - **写帧结果的判据**（任务 #56）见 [`WriteAck`]：只有「整帧确定未写出」
+    ///   （`Failed { wrote_any: false }`）才报 [`WorkerError::NotDelivered`]（零副作用 ⇒
+    ///   命令通道可回退）；写回执超时（`NoAck`）与「已写出部分字节」一律判连接不可用并报
+    ///   `Transport` —— 那时帧**可能已被对端读到半截**，「未送达」不可证明。
     fn exchange_with_timeout(
         &self,
         op: &str,
         args: Value,
         call_chain: Vec<String>,
-        wait: Option<Duration>,
+        wait: Duration,
     ) -> Result<FrameResponse, WorkerError> {
         let sequence = self.inner.next_request_id.fetch_add(1, Ordering::Relaxed) + 1;
         let request_id = format!("h{sequence}");
@@ -1327,77 +1485,90 @@ impl WorkerInvoker {
         let request =
             FrameRequest::new(op, args).with_id(request_id.clone()).with_chain(call_chain);
 
-        let write_result = {
-            let mut guard = self.inner.stdin.lock();
-            match guard.as_mut() {
-                Some(stdin) => {
-                    write_json_frame(stdin, &request).map_err(|e| format!("写帧失败：{e}"))
-                },
-                None => Err("通道已关闭（stdin 已释放）".to_string()),
-            }
-        };
-        if let Err(reason) = write_result {
-            // 帧没出去 ⇒ 不会有响应 ⇒ 必须自己清掉槽位，否则配对表残留。
-            // 报 [`WorkerError::NotDelivered`] 而不是 `Transport`（任务 #73 M-1）：
-            // 「对端从未收到这一帧」是**零副作用**的机械证据，命名命令的回退判据要的正是它。
-            self.inner.pending.lock().remove(&request_id);
-            return Err(WorkerError::NotDelivered {
-                plugin_id: self.inner.plugin_id.clone(),
-                op: op.to_string(),
-                reason,
-            });
-        }
-        let response = match wait {
-            None => receiver.recv().map_err(|_| {
-                // 投递口消失 = 读线程已退出（对端关闭 / 崩溃）。清槽位后明确报错。
+        // ─── 写侧（任务 #56）：投递 + 带预算等回执，调用方**不持锁**做阻塞写 ───
+        let write_result = self.inner.submit_frame(OutboundFrame::Request(request), wait);
+        match write_result {
+            Err(reason) => {
+                // 未尝试写、且连接已被判不可用（可疑闸）⇒ 拒绝口径，**不得**报未送达
+                // （可疑连接的回退口径是「拒绝」，与进程不在时的「回退」方向相反）。
                 self.inner.pending.lock().remove(&request_id);
-                self.transport_error("worker 连接已关闭，未收到配对响应")
-            })?,
-            Some(limit) => {
-                // 预算 `limit` **只在对端不被宿主占用时消耗**（任务 #73 M-3 的第二半）。
-                //
-                // 为什么必须暂停：worker 的 handler 里嵌套一次 `peer.call_seam(...)`（SDK
-                // 文档示范的形态）时，它回自己那一帧的前提是**宿主先答完那一跳**。这段
-                // 时间对端既没装死也没崩，是宿主欠着它的答案 —— 按墙钟扣预算就会把外层
-                // 调用确定性误杀，并顺带把健康连接标脏（审查稿 A4.3 的六步链）。
-                // 暂停之后「到点收不到回帧」重新成为**装了死**的有效证据，
-                // 置可疑闸的推论才成立（见 [`Self::invoke_with_chain`]）。
-                let mut remaining = limit;
-                loop {
-                    // 醒来的粒度：对端被宿主占用时按 [`INBOUND_PAUSE_POLL`] 复查计数，
-                    // 不被占用时一口气等到预算耗尽（不多花一次唤醒）。
-                    let host_owes_answer = self.inner.inbound_inflight.load(Ordering::Acquire) > 0;
-                    let slice =
-                        if host_owes_answer { remaining.min(INBOUND_PAUSE_POLL) } else { remaining };
-                    match receiver.recv_timeout(slice) {
-                        Ok(response) => break response,
-                        Err(mpsc::RecvTimeoutError::Disconnected) => {
-                            self.inner.pending.lock().remove(&request_id);
-                            return Err(self.transport_error("worker 连接已关闭，未收到配对响应"));
-                        },
-                        Err(mpsc::RecvTimeoutError::Timeout) => {
-                            // **到点重新读一次**闸：判定「是不是装死」看的是此刻还有没有入站
-                            // 请求压在宿主手里 —— 进 `recv_timeout` 之前读的那一次只决定醒来
-                            // 粒度，拿它当扣不扣预算的依据会把嵌套形态照旧误杀（实测：外层
-                            // 150ms 那一格正是在对端开始 `call_seam` 之后才走完的）。
-                            if self.inner.inbound_inflight.load(Ordering::Acquire) > 0 {
-                                // 这一格整格不计（保守方向 = 多给对端时间，不是误杀它）。
-                                continue;
-                            }
-                            remaining = remaining.saturating_sub(slice);
-                            if remaining.is_zero() {
-                                // 撤槽位：本次调用不再有人等。迟到的响应由读线程按无等待者丢弃。
-                                self.inner.pending.lock().remove(&request_id);
-                                return Err(WorkerError::Timeout {
-                                    plugin_id: self.inner.plugin_id.clone(),
-                                    op: op.to_string(),
-                                    timeout_ms: limit.as_millis() as u64,
-                                });
-                            }
-                        },
-                    }
-                }
+                return Err(self.transport_error(format!("连接已判不可用，拒绝写帧：{reason}")));
             },
+            Ok(WriteAck::Written) => {},
+            Ok(WriteAck::Failed { reason, wrote_any: false }) => {
+                // 帧一个字节都没出去 ⇒ 不会有响应 ⇒ 必须自己清掉槽位，否则配对表残留。
+                // 报 [`WorkerError::NotDelivered`]（任务 #73 M-1）：
+                // 「对端从未收到这一帧」是**零副作用**的机械证据，命名命令的回退判据要的正是它。
+                self.inner.pending.lock().remove(&request_id);
+                return Err(WorkerError::NotDelivered {
+                    plugin_id: self.inner.plugin_id.clone(),
+                    op: op.to_string(),
+                    reason,
+                });
+            },
+            Ok(WriteAck::Failed { reason, wrote_any: true }) => {
+                // 已有字节进入管道：对端可能读到半帧，流边界不再可信 ⇒ 连接判不可用。
+                self.inner.pending.lock().remove(&request_id);
+                self.inner.poison();
+                return Err(self.transport_error(format!(
+                    "写帧中途失败（已写出部分字节，帧可能被对端部分接收，连接判不可用）：{reason}"
+                )));
+            },
+            Ok(WriteAck::NoAck) => {
+                // 写者仍阻塞 ⇒ 可能已写出部分字节，且无法追溯 ⇒ 同样判不可用。
+                // `submit_frame` 已置可疑闸并杀进程（关管道读端解阻写者）。
+                self.inner.pending.lock().remove(&request_id);
+                return Err(self.transport_error(format!(
+                    "写帧回执在预算 {} ms 内未到达（写线程仍阻塞，无法确认帧是否写出）；\
+                     连接已判不可用",
+                    wait.as_millis()
+                )));
+            },
+        }
+        let response = {
+            // 预算 `wait` **只在对端不被宿主占用时消耗**（任务 #73 M-3 的第二半）。
+            //
+            // 为什么必须暂停：worker 的 handler 里嵌套一次 `peer.call_seam(...)`（SDK
+            // 文档示范的形态）时，它回自己那一帧的前提是**宿主先答完那一跳**。这段
+            // 时间对端既没装死也没崩，是宿主欠着它的答案 —— 按墙钟扣预算就会把外层
+            // 调用确定性误杀，并顺带把健康连接标脏（审查稿 A4.3 的六步链）。
+            // 暂停之后「到点收不到回帧」重新成为**装了死**的有效证据，
+            // 置可疑闸的推论才成立（见 [`Self::invoke_with_chain`]）。
+            let mut remaining = wait;
+            loop {
+                // 醒来的粒度：对端被宿主占用时按 [`INBOUND_PAUSE_POLL`] 复查计数，
+                // 不被占用时一口气等到预算耗尽（不多花一次唤醒）。
+                let host_owes_answer = self.inner.inbound_inflight.load(Ordering::Acquire) > 0;
+                let slice =
+                    if host_owes_answer { remaining.min(INBOUND_PAUSE_POLL) } else { remaining };
+                match receiver.recv_timeout(slice) {
+                    Ok(response) => break response,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        self.inner.pending.lock().remove(&request_id);
+                        return Err(self.transport_error("worker 连接已关闭，未收到配对响应"));
+                    },
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        // **到点重新读一次**闸：判定「是不是装死」看的是此刻还有没有入站
+                        // 请求压在宿主手里 —— 进 `recv_timeout` 之前读的那一次只决定醒来
+                        // 粒度，拿它当扣不扣预算的依据会把嵌套形态照旧误杀（实测：外层
+                        // 150ms 那一格正是在对端开始 `call_seam` 之后才走完的）。
+                        if self.inner.inbound_inflight.load(Ordering::Acquire) > 0 {
+                            // 这一格整格不计（保守方向 = 多给对端时间，不是误杀它）。
+                            continue;
+                        }
+                        remaining = remaining.saturating_sub(slice);
+                        if remaining.is_zero() {
+                            // 撤槽位：本次调用不再有人等。迟到的响应由读线程按无等待者丢弃。
+                            self.inner.pending.lock().remove(&request_id);
+                            return Err(WorkerError::Timeout {
+                                plugin_id: self.inner.plugin_id.clone(),
+                                op: op.to_string(),
+                                timeout_ms: wait.as_millis() as u64,
+                            });
+                        }
+                    },
+                }
+            }
         };
 
         match response.kind {
@@ -1413,12 +1584,12 @@ impl WorkerInvoker {
     }
 
     /// 发一帧并从响应的 `value` 反序列化出强类型结果（`wait` 语义同
-    /// [`Self::exchange_with_timeout`]：`None` = 无限等，仅供停机一类收尾帧）。
+    /// [`Self::exchange_with_timeout`]：写侧与收侧各自以它为上限）。
     fn call_typed<T: serde::de::DeserializeOwned>(
         &self,
         op: &str,
         args: Value,
-        wait: Option<Duration>,
+        wait: Duration,
     ) -> Result<T, WorkerError> {
         let response = self.exchange_with_timeout(op, args, current_call_chain(), wait)?;
         let value = response.value.unwrap_or(Value::Null);
@@ -1445,6 +1616,8 @@ impl WorkerInvoker {
     /// ⑤ 等待上限 = 帧预算 `timeout_ms` + [`COMMAND_FRAME_GRACE_MS`] 收帧宽限：
     ///    预算边界上算完并回帧的 worker 不该被误杀，超过上限则放弃在途调用并报
     ///    [`WorkerError::Timeout`]（边界语义见 [`Self::exchange_with_timeout`]）。
+    ///    任务 #56 起同一预算也约束**写回执**：写线程卡在 `write` 里时本命令在预算内拿到
+    ///    `Transport`（`NotDelivered` 只留给「整帧确定未写出」，见 [`WriteAck`]）。
     ///
     /// 调用链传空：命令是宿主发起的**顶层**调用，按协议定义 `call_chain` 不含接收方，
     /// 且此时没有任何插件参与发起（worker 在命令内再发 `call_seam` 时自行携带该链）。
@@ -1486,7 +1659,7 @@ impl WorkerInvoker {
         let args = serde_json::to_value(frame)
             .map_err(|e| self.transport_error(format!("命令帧序列化失败：{e}")))?;
         let wait = Duration::from_millis(frame.timeout_ms.saturating_add(COMMAND_FRAME_GRACE_MS));
-        let response = self.exchange_with_timeout(ops::COMMAND, args, Vec::new(), Some(wait))?;
+        let response = self.exchange_with_timeout(ops::COMMAND, args, Vec::new(), wait)?;
         match CommandOutcome::from_frame_response(&response)
             .map_err(|e| self.transport_error(format!("命令回执形状不合法：{e}")))?
         {
@@ -1556,8 +1729,8 @@ impl WorkerInvoker {
     ///
     /// 返回 `true` = 配对表已清空**且**入站处理任务已排空；`false` = 超时仍有悬挂
     /// （调用方可继续停机，悬挂者会经读线程退出路径拿到 `Err`，不会永久等待）。
-    /// 入站侧也要等（任务 #73 M-3）：独立入站任务收尾时会向 `stdin` 回写响应帧，
-    /// 不等它就进急停路径，回写会撞上已 `take()` 的管道 —— 结果只是少一条日志，
+    /// 入站侧也要等（任务 #73 M-3）：独立入站任务收尾时会经写线程回写响应帧（带预算），
+    /// 不等它就进急停路径，回写会撞上已关停的写线程 —— 结果只是少一条日志，
     /// 但「停机把对端的请求吞了」这件事必须可见，故排空条件写进本函数而不是留给 warn。
     /// 只由 [`LoadedPlugin::unload`] 调用；`shutdown` / `Drop` 路径不 drain（急停语义）。
     pub fn drain(&self, timeout: Duration) -> bool {
@@ -1599,28 +1772,38 @@ impl WorkerInvoker {
     /// 优雅停机：发 shutdown 帧 → 关 stdin → 限时等退出 → 超时强杀 → 收读线程。
     ///
     /// 两条**跳过礼貌帧**的例外，去向相同（直接进急停）但理由不同，判据也分开写：
-    /// - 连接已被标脏（任务 #53）：对端被实证「收到帧也不回」，而这里的等待走的是
-    ///   **无限预算**的 [`Self::exchange`] ⇒ 等 shutdown 回执会把卸载一起拖挂（D1 的卸载侧变体）。
+    /// - 连接已被标脏（任务 #53）：对端被实证「收到帧也不回」，等 shutdown 回执只会
+    ///   把卸载一起拖挂（D1 的卸载侧变体）。任务 #56 后这条等待本身已有界，
+    ///   但「已实证不回帧」的连接不值得再付一次预算，故仍跳过。
     /// - **worker 进程已不在**（任务 #73 M-1）：读线程已退出 ⇒ 配对表被 `clear()`，
-    ///   此后再 `insert` 的槽位没有任何人投递或清空 ⇒ `recv()` 会**永久挂起**。
+    ///   此后再 `insert` 的槽位没有任何人投递或清空 ⇒ 只会在预算到点时以超时收场。
     ///   写帧本身通常先失败（管道已关），但那是 OS 的时序、不是不变式，不能当护栏。
+    ///
+    /// **整体有界**（任务 #56）：礼貌帧只拿总预算的一半，剩下的给「关管道 + 等退出」；
+    /// 写线程若卡在某个写调用上，先杀子进程断开管道把它解阻，再短暂等它退出 ——
+    /// 绝不为了 join 一个线程把停机拖成无界。
     fn shutdown(&self) {
+        let deadline = Instant::now() + self.inner.shutdown_timeout;
+
         // ① 先发 shutdown 帧（此刻读线程还活着，能收下这次响应）。
+        //    预算 = 剩余的一半：礼貌帧失败（含写侧回执超时）只是提前进急停，不是错误。
         if !self.inner.seam_suspect.load(Ordering::Acquire) && self.worker_is_running() {
-            let _ = self.exchange(ops::SHUTDOWN, Value::Null, Vec::new());
+            let budget = deadline.saturating_duration_since(Instant::now()) / 2;
+            if !budget.is_zero() {
+                let _ = self.exchange_with_timeout(ops::SHUTDOWN, Value::Null, Vec::new(), budget);
+            }
         }
 
-        // ② **真正关闭 stdin**（`take()` + drop）：worker 侧若用 `serve` 实现，
-        //    读到 EOF 即正常返回并退出 —— 这是孤儿进程自退的主防线①。
-        self.inner.stdin.lock().take();
-        self.wait_or_kill();
+        // ② **真正关闭 stdin**：写线程收到 Close 即 drop 管道写端 ⇒ 对端读到 EOF，
+        //    `serve` 形态的 worker 自行退出（防线①）。写线程卡住时先杀进程解阻。
+        self.inner.close_writer(deadline);
+        self.wait_or_kill_until(deadline);
         // ③ 进程已死 ⇒ 管道 EOF ⇒ 读线程自然退出，这里只是回收它。
         self.join_reader();
     }
 
-    /// 限时等待子进程退出；超时或已僵死则强杀。
-    fn wait_or_kill(&self) {
-        let deadline = Instant::now() + self.inner.shutdown_timeout;
+    /// 限时等待子进程退出（截止 `deadline`）；超时或已僵死则强杀。
+    fn wait_or_kill_until(&self, deadline: Instant) {
         loop {
             let exited = {
                 let mut guard = self.inner.child.lock();
@@ -1638,16 +1821,7 @@ impl WorkerInvoker {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
-        self.kill_child();
-    }
-
-    /// 强杀子进程（幂等：无子进程时什么也不做）。
-    fn kill_child(&self) {
-        let mut guard = self.inner.child.lock();
-        if let Some(child) = guard.as_mut() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+        self.inner.kill_child();
     }
 
     /// 回收读线程（`join`。读线程只在读线程自己的栈上工作，不会持 `inner` 的锁等待，
@@ -1655,6 +1829,105 @@ impl WorkerInvoker {
     fn join_reader(&self) {
         if let Some(handle) = self.reader.lock().take() {
             let _ = handle.join();
+        }
+    }
+}
+
+impl WorkerInner {
+    /// 投递一帧给写线程并**带预算**等回执（任务 #56 的核心入口）。
+    ///
+    /// 返回 `Err` 表示**未尝试写**且连接已被判不可用（可疑闸）—— 调用方必须报
+    /// [`WorkerError::Transport`]，不得报 `NotDelivered`：可疑连接的口径是「拒绝」，
+    /// 不是「回退」（两者去向相反，见 [`Self::seam_suspect`] 与 `worker_gone_reason`）。
+    ///
+    /// 返回 `Ok(ack)` 表示帧已进入写流程，结果由三态回执给出。**持锁范围只有「克隆
+    /// 投递口」这一步**：等回执期间不持任何锁 —— 否则一个卡住的写会让其它调用在锁上
+    /// 无限排队，预算形同虚设。
+    fn submit_frame(&self, frame: OutboundFrame, budget: Duration) -> Result<WriteAck, String> {
+        if self.seam_suspect.load(Ordering::Acquire) {
+            return Err("连接已视为不可用（可疑），写侧拒绝新帧".to_string());
+        }
+        // 写线程已关停 ⇒ 等价于「stdin 已释放」：这一帧确定一个字节都没写出去，
+        // 交给调用方按 `Failed { wrote_any: false }` 判 NotDelivered（允许回退）。
+        let Some(tx) = self.writer.lock().as_ref().map(|writer| writer.tx.clone()) else {
+            return Ok(WriteAck::Failed {
+                reason: "通道已关闭（stdin 已释放）".to_string(),
+                wrote_any: false,
+            });
+        };
+        let (ack_tx, ack_rx) = mpsc::channel();
+        if tx.send(WriterCommand::Frame { frame, ack: ack_tx }).is_err() {
+            // 投递口断开 = 写线程已退出且**帧未入队** ⇒ 确定未写出。
+            return Ok(WriteAck::Failed {
+                reason: "写线程已退出（帧未入队）".to_string(),
+                wrote_any: false,
+            });
+        }
+        match ack_rx.recv_timeout(budget) {
+            Ok(ack) => Ok(ack),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // 写者仍阻塞在某个写调用上：帧可能已写出部分字节，**不能**判「未送达」。
+                // 连接就此判不可用：毒化（拒绝后续） + 杀进程（关管道读端，解阻写者）。
+                self.poison();
+                Ok(WriteAck::NoAck)
+            },
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                // 写线程在给出回执前就没了（panic / 被放弃回收）：写出进度不可知。
+                self.poison();
+                Ok(WriteAck::NoAck)
+            },
+        }
+    }
+
+    /// 把连接判为不可用：置可疑闸 + 杀子进程（关管道读端是**解阻写者**的唯一手段）。
+    ///
+    /// 幂等。杀进程之后 [`WorkerInvoker::worker_gone_reason`] 的 `try_wait` 分支会给出
+    /// 「进程已退出」，命名命令的下一次调用因此重新回到「未送达 ⇒ 可回退」的口径。
+    fn poison(&self) {
+        self.seam_suspect.store(true, Ordering::Release);
+        self.kill_child();
+    }
+
+    /// 关停写线程并**有界**回收它（任务 #56）。
+    ///
+    /// 顺序（卡死时）：先杀子进程让管道断开 → 写者的阻塞写返回错误 → 写者处理 `Close`
+    /// 并 drop 管道写端 → 投递退出信号。只有在杀掉进程之后写者才可能解阻，
+    /// 所以被杀路径的等待放在后面；绝不先无限 join。
+    ///
+    /// `deadline` 只约束**正常**收尾（写者空闲时 Close 是即时的）；被杀后的宽限固定为
+    /// [`WRITER_EXIT_GRACE`]，故整体上界 = `deadline` + 一个很小常量。
+    fn close_writer(&self, deadline: Instant) {
+        let Some(writer) = self.writer.lock().take() else {
+            return;
+        };
+        let _ = writer.tx.send(WriterCommand::Close);
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if writer.done.recv_timeout(remaining).is_ok() {
+            let _ = writer.handle.join();
+            return;
+        }
+        // 写者仍卡在某个 write 调用上：唯一解阻手段是断开管道那一头。
+        tracing::warn!(
+            plugin_id = %self.plugin_id,
+            "worker 写线程未在停机预算内退出（对端可能僵死且管道已满），强制杀进程以解阻"
+        );
+        self.kill_child();
+        if writer.done.recv_timeout(WRITER_EXIT_GRACE).is_ok() {
+            let _ = writer.handle.join();
+        } else {
+            tracing::warn!(
+                plugin_id = %self.plugin_id,
+                "worker 写线程在杀进程后仍未退出，放弃回收（detach；不得因此拖挂停机）"
+            );
+        }
+    }
+
+    /// 强杀子进程（幂等：无子进程时什么也不做）。
+    fn kill_child(&self) {
+        let mut guard = self.child.lock();
+        if let Some(child) = guard.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
         }
     }
 }
@@ -1715,7 +1988,8 @@ fn run_reader(inner: Arc<WorkerInner>, mut stdout: Box<dyn Read + Send>) {
                 // SDK 文档亲自示范的 `peer.call_seam(...)` 形态必踩（审查稿 A4.3）。
                 //
                 // 现在的分工：读线程**只**做「分流 + 投递 + 派生活任务」，永不进入宿主逻辑；
-                // 入站任务的回写经 `stdin` 锁与出向写帧互斥，帧完整性由锁保证。
+                // 入站任务的回写与出向写帧共用**同一条写线程**（串行写，帧完整性由
+                // 「单写者」保证；各自的等待都带预算，见任务 #56）。
                 spawn_inbound_handler(inner.clone(), request);
             },
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
@@ -1743,16 +2017,17 @@ fn run_reader(inner: Arc<WorkerInner>, mut stdout: Box<dyn Read + Send>) {
 /// - **帧序保证**：worker→host 的请求帧与 host→worker 的响应帧共用同一条管道，但每个响应
 ///   都带**回填的 `request_id`**（`plugin-proto::Peer` 按 ID 配对，ID 不匹配立即 `Err`，
 ///   不猜不兜底）。因此并发回写的**先后**不改变语义：唯一硬要求是「一帧要么完整写出去、
-///   要么不写」，这由 [`WorkerInner::stdin`] 的锁 + [`write_json_frame`] 的单次写入保证。
-///   写侧仍持锁阻塞的风险（对端僵死且管道满）属 #56，本批不动。
+///   要么不写」，这由**写线程串行写**（[`WorkerInner::submit_frame`] → [`run_writer`]）保证。
+///   写侧阻塞（对端僵死且管道满）不再落到调用方线程上，见任务 #56 的回执三态。
 /// - **重入安全**：入站任务里宿主可能反过来调本插件的接缝门面 ⇒ 那是**出向**帧 +
 ///   出向等待，与入站任务不在一条线程上，不再有「自己等自己」的环；跨插件的
 ///   `A→宿主→B` 链照旧由 [`check_chain`] 的环/深度检测在写帧前拦下。
 /// - **资源上界**：并发度 = 该 worker 自己发在途请求的数量（插件侧 `Peer` 是单线程同步的，
 ///   真并发只来自插件自己的多线程实现），没有宿主侧的队列放大。
-/// - **停机**：任务收尾时经 `stdin` 锁回写；若管道已被 `shutdown()` `take()`，只留一条
-///   warn（原形态是 `break` 掉读线程 —— 那是把「一次回写失败」升级成「整条连接判死」，
-///   在并发形态下没有依据）。[`WorkerInvoker::drain`] 会等在途入站任务排空。
+/// - **停机**：任务收尾时经写线程回写（带预算）；若写线程已关停（停机进行中），投递得到
+///   [`WriteAck::Failed`]，只留一条 warn（原形态是 `break` 掉读线程 —— 那是把「一次回写
+///   失败」升级成「整条连接判死」，在并发形态下没有依据）。[`WorkerInvoker::drain`] 会等
+///   在途入站任务排空。
 fn spawn_inbound_handler(inner: Arc<WorkerInner>, request: FrameRequest) {
     // 计数在**派生之前**自增：出向等待者复查时，宁可早看见「宿主欠着答案」，
     // 也不能出现「任务已排队但计数还是 0」那种会被误杀的空窗。
@@ -1778,20 +2053,20 @@ fn spawn_inbound_handler(inner: Arc<WorkerInner>, request: FrameRequest) {
             };
             // 回填配对 ID：否则对端无法把这一帧与它发出的请求对上。
             response.request_id = request.request_id.clone();
-            let mut guard = inner.stdin.lock();
-            match guard.as_mut() {
-                Some(stdin) => {
-                    if let Err(e) = write_json_frame(stdin, &response) {
-                        tracing::warn!(
-                            plugin_id = %inner.plugin_id,
-                            error = %e,
-                            "回写插件请求的响应失败（管道可能已随停机关闭）"
-                        );
-                    }
-                },
-                None => tracing::warn!(
+            // 回写同样经写线程、同样**带预算**（任务 #56）：出向写卡住时这里不会跟着
+            // 无限阻塞 —— 到点按 [`WriteAck::NoAck`] 收场（连接同时被判不可用），
+            // 只留一条 warn，不把「一次回写失败」升级成「整条连接判死」之外的连锁等待。
+            match inner.submit_frame(OutboundFrame::Response(response), inner.seam_wait_timeout) {
+                Ok(WriteAck::Written) => {},
+                Ok(ack) => tracing::warn!(
                     plugin_id = %inner.plugin_id,
-                    "停机已开始（stdin 已释放），丢弃插件主动发起的 `{}` 请求的响应",
+                    ack = ?ack,
+                    "回写插件请求的响应未确认写出（出向写可能正卡在对端僵死上）"
+                ),
+                Err(reason) => tracing::warn!(
+                    plugin_id = %inner.plugin_id,
+                    reason = %reason,
+                    "连接已判不可用，丢弃插件主动发起的 `{}` 请求的响应",
                     request.op
                 ),
             }
@@ -1864,7 +2139,7 @@ impl SeamInvoker for WorkerInvoker {
         // 嵌套 `call_seam` 期间计时挂起（见 `exchange_with_timeout`）⇒ 到点意味着
         // **真的装死**，而不是「宿主自己正占着它」。
         let wait = self.seam_wait_for_op(op);
-        let response = self.exchange_with_timeout(op, args, chain, Some(wait)).map_err(|e| {
+        let response = self.exchange_with_timeout(op, args, chain, wait).map_err(|e| {
             if matches!(e, WorkerError::Timeout { .. }) {
                 self.inner.seam_suspect.store(true, Ordering::Release);
             }
@@ -1877,9 +2152,8 @@ impl SeamInvoker for WorkerInvoker {
 impl WorkerInvoker {
     /// 该 op 的接缝等待预算：覆盖表命中用表值，否则用连接缺省预算。
     ///
-    /// 本批**只覆盖收侧**（等回帧的 `recv_timeout`）；写侧卡死的触发条件（逐字）：
-    /// 「对端僵死不读 stdin 且管道满 ⇒ 写方持 `stdin` 锁阻塞在 `write_json_frame`，
-    /// `recv_timeout` 覆盖不到」—— 修它需 writer 线程 / 异步写的接缝栈重构，另立案 #56。
+    /// 任务 #56 起这个预算同时约束写侧（写回执）与收侧（等配对响应）：两者都不会
+    /// 无限等待，也不再互相牵连（写线程卡住时调用方在自己的预算处收口）。
     fn seam_wait_for_op(&self, op: &str) -> Duration {
         seam_timeout_ms_for_op(op).map_or(self.inner.seam_wait_timeout, Duration::from_millis)
     }
@@ -1888,10 +2162,11 @@ impl WorkerInvoker {
 impl Drop for WorkerInvoker {
     fn drop(&mut self) {
         // 兜底：调用方忘了 `unload` 也不留常驻子进程。
-        // 顺序：先杀进程（管道那头一关，读线程的阻塞读立刻返回 EOF）→ 再关 stdin
-        //（防线①）→ 最后回收读线程。
-        self.kill_child();
-        self.inner.stdin.lock().take();
+        // 顺序（任务 #56 定死）：先杀进程（管道那头一关，写线程的阻塞写立刻返回错误、
+        // 读线程的阻塞读立刻返回 EOF）→ 再有界回收写线程（关 stdin，防线①）→ 最后
+        // 回收读线程。三步都不得因为「写者卡死」而变成无界等待。
+        self.inner.kill_child();
+        self.inner.close_writer(Instant::now() + self.inner.shutdown_timeout);
         self.join_reader();
     }
 }
@@ -4700,5 +4975,309 @@ mod tests {
             value["nested"].is_object(),
             "内层宿主侧接缝的返回值必须被带回，否则嵌套链等于白跑：{value}"
         );
+    }
+
+    // ─────────────────── 任务 #56：写侧解阻（写线程 + 三态写回执） ───────────────────
+
+    /// 写到一半就阻塞的管道替身：首个 `write` 只接受一半字节，其后阻塞到 gate 放行。
+    ///
+    /// 造的正是「`write_all` 中途阻塞」的形态（长度前缀只写出一半）—— 真实世界里
+    /// 「对端僵死不读 stdin 且管道满」时写者的状态。`writes` 供用例断言「毒化之后的
+    /// 调用根本没有进入写线程」。
+    struct HalfThenBlockWriter {
+        gate: Arc<(parking_lot::Mutex<bool>, parking_lot::Condvar)>,
+        writes: Arc<AtomicUsize>,
+    }
+
+    impl Write for HalfThenBlockWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let call = self.writes.fetch_add(1, Ordering::Relaxed);
+            if call == 0 {
+                // 只接受一半：剩余字节留在 `write_all` 的下一轮，那一轮会永久阻塞。
+                return Ok(buf.len() / 2);
+            }
+            let (released, condvar) = &*self.gate;
+            let mut released = released.lock();
+            while !*released {
+                condvar.wait(&mut released);
+            }
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// 放行 [`HalfThenBlockWriter`]（用例收尾必须调用，否则测试自己会留下一个阻塞线程）。
+    fn release_gate(gate: &Arc<(parking_lot::Mutex<bool>, parking_lot::Condvar)>) {
+        let (released, condvar) = &**gate;
+        *released.lock() = true;
+        condvar.notify_all();
+    }
+
+    /// 写回执超时（任务 #56 主判据）：写线程卡在 `write_all` 中途时，调用方必须在**自己
+    /// 的预算**内拿到 `Transport`，**不得**报 `NotDelivered`（那时可能已写出部分字节，
+    /// 「未送达」不可证明）；连接同时被毒化，后续调用毫秒级拒绝、不进入写。
+    #[test]
+    fn write_ack_timeout_is_bounded_and_never_reports_not_delivered() {
+        const BUDGET: Duration = Duration::from_millis(120);
+        let (host_side, worker_side) = tcp_pair();
+        let host_reader = host_side.try_clone().expect("克隆回环连接（读端）");
+        let gate = Arc::new((parking_lot::Mutex::new(false), parking_lot::Condvar::new()));
+        let writes = Arc::new(AtomicUsize::new(0));
+        let writer = HalfThenBlockWriter { gate: Arc::clone(&gate), writes: Arc::clone(&writes) };
+        let invoker = WorkerInvoker::from_streams_with_timeouts(
+            "write-hang@external",
+            Box::new(host_reader),
+            Box::new(writer),
+            BUDGET,
+            Duration::from_millis(100),
+        );
+
+        // ① 写线程卡死 ⇒ 调用方在预算内收口（外层 recv_timeout 看门狗 + Instant 上下界）。
+        let (err, elapsed, invoker) =
+            with_watchdog(Duration::from_secs(5), "写回执超时收口", move || {
+                let started = Instant::now();
+                let err = invoker
+                    .exchange_with_timeout(ops::COMMAND, json!({ "q": 1 }), Vec::new(), BUDGET)
+                    .expect_err("写线程阻塞时必须返回错误，而不是永久等待");
+                (err, started.elapsed(), invoker)
+            });
+        assert!(
+            !matches!(err, WorkerError::NotDelivered { .. }),
+            "写可能已写出部分字节 ⇒ 不得报 NotDelivered（那会允许上层回退、造成二次执行），\
+             实际 {err:?}"
+        );
+        assert!(
+            matches!(err, WorkerError::Transport { .. }),
+            "写回执超时必须是 Transport（连接判不可用），实际 {err:?}"
+        );
+        assert!(err.to_string().contains("写帧回执"), "错误应点明失败在写侧回执，实际：{err}");
+        assert!(
+            elapsed >= BUDGET && elapsed < Duration::from_secs(2),
+            "收口应落在写回执预算附近，实际 {elapsed:?}"
+        );
+        assert!(
+            invoker.inner.seam_suspect.load(Ordering::Acquire),
+            "写回执超时必须毒化连接（否则后续每笔调用都会再等一个预算）"
+        );
+        // 写者被排到后，确认夹具确实卡在 write_all 中途（首个 write 只接受一半）。
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while writes.load(Ordering::Relaxed) < 2 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            writes.load(Ordering::Relaxed) >= 2,
+            "夹具应确实卡在 write_all 中途（首个 write 只接受一半）"
+        );
+
+        // ② 毒化后第二次调用：毫秒级拒绝，且**不进入写**（写计数不增）。
+        let writes_before = writes.load(Ordering::Relaxed);
+        let started = Instant::now();
+        let err2 = invoker
+            .exchange_with_timeout(ops::COMMAND, json!({}), Vec::new(), BUDGET)
+            .expect_err("毒化后新调用必须快速失败");
+        let refused_in = started.elapsed();
+        assert!(
+            matches!(err2, WorkerError::Transport { .. }),
+            "毒化后的口径是「拒绝」（Transport），不是「回退」，实际 {err2:?}"
+        );
+        assert!(
+            !matches!(err2, WorkerError::NotDelivered { .. }),
+            "毒化拒绝不得退化成 NotDelivered，实际 {err2:?}"
+        );
+        assert!(refused_in < Duration::from_millis(50), "毒化拒绝应毫秒级，实际 {refused_in:?}");
+        assert_eq!(
+            writes.load(Ordering::Relaxed),
+            writes_before,
+            "毒化后的调用不得再把帧投进写线程"
+        );
+
+        // ③ 写者卡死时的 `shutdown()` 也必须**有界**返回（不得为了 join 写线程拖挂卸载）。
+        let _ = worker_side.shutdown(Shutdown::Both);
+        let shutdown_elapsed =
+            with_watchdog(Duration::from_secs(5), "写者卡死时的 shutdown", move || {
+                let started = Instant::now();
+                invoker.shutdown();
+                started.elapsed()
+            });
+        assert!(
+            shutdown_elapsed < Duration::from_secs(1),
+            "shutdown 必须在 shutdown_timeout 量级内返回（夹具 200ms），实际 {shutdown_elapsed:?}"
+        );
+        // 收尾：放行夹具，避免测试自身留下永久阻塞的写线程。
+        release_gate(&gate);
+    }
+
+    /// 健康路径不回归（任务 #56）：写线程逐字节原样写出帧；写线程关停后（stdin 已释放）
+    /// 投递仍报 `NotDelivered` —— 那是「确定整帧未写出」的唯一合法来源之一。
+    #[test]
+    fn healthy_writer_delivers_the_exact_frame_and_closed_stdin_reports_not_delivered() {
+        let (host_side, worker_side) = tcp_pair();
+        let host_reader = host_side.try_clone().expect("克隆回环连接（读端）");
+        let mut worker_reader = worker_side.try_clone().expect("克隆回环连接（worker 读端）");
+        let (frame_tx, frame_rx) = mpsc::channel();
+        let _worker = std::thread::spawn(move || {
+            // 直接读原始字节：既验证分帧（4 字节大端长度），也验证载荷与预期帧逐字节一致。
+            let mut len_buf = [0u8; 4];
+            worker_reader.read_exact(&mut len_buf).expect("假 worker 应读到长度前缀");
+            let len = u32::from_be_bytes(len_buf) as usize;
+            let mut payload = vec![0u8; len];
+            worker_reader.read_exact(&mut payload).expect("假 worker 应读到完整载荷");
+            let request: FrameRequest =
+                serde_json::from_slice(&payload).expect("载荷必须是合法请求帧");
+            let response = FrameResponse::success(json!({ "pong": true }))
+                .with_id(request.request_id.clone().unwrap_or_default());
+            let _ = frame_tx.send((request, payload));
+            write_json_frame(&mut worker_reader, &response).expect("假 worker 应能回帧");
+        });
+
+        let invoker = WorkerInvoker::from_streams(
+            "healthy-writer@external",
+            Box::new(host_reader),
+            // 宿主写端必须是**本端** socket（与 `command_transport` 同形）：写 `worker_side`
+            // 会把帧发回本端自己，假 worker 永远收不到。
+            Box::new(host_side),
+        );
+        // 看门狗：本用例末段要验「停机后 NotDelivered」。若实现回归成永久等待，失败形态会是
+        // `Drop` 里的 `join_reader` 挂住（进程不退出、也没有 FAILED 行）—— 看门狗把它变成明确失败。
+        let (response, request, payload, err, invoker) =
+            with_watchdog(Duration::from_secs(10), "健康写者往返与停机", move || {
+                let response = invoker
+                    .exchange_with_timeout(
+                        "ping",
+                        json!({ "q": 7 }),
+                        Vec::new(),
+                        Duration::from_secs(5),
+                    )
+                    .expect("健康写者必须正常往返");
+                let (request, payload) =
+                    frame_rx.recv_timeout(Duration::from_secs(2)).expect("应收到宿主写出的帧");
+
+                // 对端关闭 ⇒ 读线程登记死讯；停机 ⇒ 写线程关停（stdin 已释放）。
+                let _ = worker_side.shutdown(Shutdown::Both);
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !invoker.inner.connection_closed.load(Ordering::Acquire)
+                    && Instant::now() < deadline
+                {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                invoker.shutdown();
+                let err = invoker
+                    .exchange_with_timeout(
+                        "ping",
+                        Value::Null,
+                        Vec::new(),
+                        Duration::from_millis(200),
+                    )
+                    .expect_err("写线程关停后投递必须报错");
+                (response, request, payload, err, invoker)
+            });
+        assert_eq!(response.value, Some(json!({ "pong": true })), "响应值必须原样带回");
+        assert_eq!(request.op, "ping");
+        assert_eq!(request.args, json!({ "q": 7 }), "参数必须原样承载");
+        assert!(request.request_id.is_some(), "出向帧必须带配对 ID");
+        assert!(request.call_chain.is_empty(), "顶层调用的链不带接收方");
+        assert_eq!(
+            payload,
+            serde_json::to_vec(&request).expect("请求帧应可序列化"),
+            "写线程必须原样写出帧字节（长度前缀 + JSON 载荷，无额外改动）"
+        );
+        assert!(
+            matches!(err, WorkerError::NotDelivered { .. }),
+            "stdin 已释放 ⇒ 确定整帧未写出 ⇒ NotDelivered（回退判据的输入），实际 {err:?}"
+        );
+        assert!(err.to_string().contains("stdin 已释放"), "死因应指向写通道已关闭，实际：{err}");
+        assert!(invoker.inner.pending.lock().is_empty(), "未写出的帧不得在配对表里留槽位");
+    }
+
+    /// 入站总闸**未加**（PLAN §32.3-1 裁定）—— 但入站回写与出向写现在共用一条写线程，
+    /// 必须锁住「一个卡住的出向写不会让入站回写无限等」：两边各自按预算收口。
+    #[test]
+    fn inbound_writeback_is_bounded_while_an_outbound_write_is_stuck() {
+        let (host_side, mut worker_side) = tcp_pair();
+        let host_reader = host_side.try_clone().expect("克隆回环连接（读端）");
+        let gate = Arc::new((parking_lot::Mutex::new(false), parking_lot::Condvar::new()));
+        let writes = Arc::new(AtomicUsize::new(0));
+        let writer = HalfThenBlockWriter { gate: Arc::clone(&gate), writes: Arc::clone(&writes) };
+        let inbound_budget = Duration::from_millis(120);
+        let invoker = Arc::new(WorkerInvoker::from_streams_with_timeouts(
+            "write-stuck@external",
+            Box::new(host_reader),
+            Box::new(writer),
+            inbound_budget,
+            Duration::from_millis(100),
+        ));
+
+        // 出向写先卡住（它自己也在预算内失败）。
+        let outbound = {
+            let invoker = Arc::clone(&invoker);
+            std::thread::spawn(move || {
+                let started = Instant::now();
+                let err = invoker
+                    .exchange_with_timeout(
+                        ops::COMMAND,
+                        json!({}),
+                        Vec::new(),
+                        Duration::from_millis(150),
+                    )
+                    .expect_err("写者阻塞必须报错");
+                (err, started.elapsed())
+            })
+        };
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while writes.load(Ordering::Relaxed) < 2 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(writes.load(Ordering::Relaxed) >= 2, "写线程应已卡在 write_all 中途");
+
+        // 对端此时主动发一条请求：宿主的回写排在同一条写者后面，必须按自己的预算收口。
+        write_json_frame(&mut worker_side, &FrameRequest::new(ops::EMIT, json!({})))
+            .expect("假 worker 应能向宿主发请求");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while invoker.inner.inbound_inflight.load(Ordering::Acquire) == 0
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            invoker.inner.inbound_inflight.load(Ordering::Acquire) > 0,
+            "入站任务应已被派发（读线程不被写侧阻塞）"
+        );
+        let inbound_started = Instant::now();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while invoker.inner.inbound_inflight.load(Ordering::Acquire) > 0
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let inbound_elapsed = inbound_started.elapsed();
+        assert_eq!(
+            invoker.inner.inbound_inflight.load(Ordering::Acquire),
+            0,
+            "入站回写不得无限等卡住的出向写（必须有界收场）"
+        );
+        assert!(
+            inbound_elapsed < Duration::from_secs(1),
+            "入站回写应在自己的预算量级内收口，实际 {inbound_elapsed:?}"
+        );
+
+        let (outbound_err, outbound_elapsed) = outbound.join().expect("出向调用线程应正常结束");
+        assert!(
+            !matches!(outbound_err, WorkerError::NotDelivered { .. }),
+            "两个方向的写都没确认写出时不得报 NotDelivered，实际 {outbound_err:?}"
+        );
+        assert!(
+            outbound_elapsed < Duration::from_secs(2),
+            "出向调用应落在自己的预算附近，实际 {outbound_elapsed:?}"
+        );
+
+        // 收尾：放行写者 → 关对端 → 有界停机（顺序与生产 Drop 一致）。
+        release_gate(&gate);
+        let _ = worker_side.shutdown(Shutdown::Both);
+        with_watchdog(Duration::from_secs(5), "写者解阻后的停机", move || {
+            invoker.shutdown();
+        });
     }
 }

@@ -244,7 +244,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 
 | 口径 | 命中 | 备注 |
 |---|---|---|
-| K1：`pub trait` 总数（8 根 2009 个 `.rs`） | **317** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。 |
+| K1：`pub trait` 总数（8 根 2010 个 `.rs`） | **317** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。**2026-11-02 `#81` 再升 1（2009→2010）**：行情 DTO 上收新增 `harness/src/stock_market_types.rs`；`astock-data/src/types.rs` 保留为垫片（未删文件），故只 +1。 |
 | K1 + 有非 harness、非测试实现者 | **233** | ⚠ 这一档**不能**当能力数。~~232 出自一次性 census 工件（`.tmp/traits-full.json`，未入库 ⇒ 谓词无法从仓内代码复现）~~ ⇒ **该说法已作废（`#61` + `#66` 落地后）**：谓词已入库为 `k1DeclaredExternalImplTraitCount`，`--dump-readings` 在现树复现 = **233**（`#62` 后：ToT 拆成两名、两端都仍有生产 impl ⇒ +1），且与本门 audit 侧输出**排序名单逐字相等**（`#66` 的 4.2 档，差分探针 + 两条命令背靠背 + 扫描面常量逐项对照，三条同源性证据齐）⇒ **233 现在是可复算值**，锚点**具备升 `hard:true` 的条件**（升不升、用哪个数由我在收口时一次定）。另两个历史数**只留作解释、不再与 233 并列**：**210** = 单趟扫描缺陷（当时同谓词**两趟交并** = 232，差值恰 **22**；`#62` 后未重测单趟读数）；**269** = 门里最严格的读法（不要求 trait 声明面、不排 std/派生噪声名），**不作文档该锚点值**。⚠ 处置次序仍不能反：**先让谓词可复算，再升 hard** —— 反向必先假红 |
 | K1 + K2（键控站点，四次扫描合并去漏报） | **51** 个 trait 面 | 含 15 条已建接缝的 trait。⚠ **2026-11-02 `#33` 实测：这一档不可作论据** —— 谓词真身是**未入库的一次性工件** `.tmp/capability-register3.cjs:44-82`（仓内无处复跑，与 §0.7.2 的 232 同病根），且它要求签名/块内出现 `dyn T` ⇒ 198 条里 **21 条假阴性**，把 PLAN B/C 组落入该桶的 **13 条契约全部吞掉** ⇒ **不许**用「无键控点」论证「这些 trait 只是分层解耦」。谓词入库 = 任务 **#57**；逐条分桶结论见 **§14** |
 | 51 → 同族合并 + K3/K4 判定 | **23 条能力**（另有 3 条移入 §0.7.9 债档，只登记不计数） | ⇒ 本节表格 A+B+C 三组 |
@@ -2071,3 +2071,54 @@ cargo fmt --check -p axagent-plugin-proto        # 在 axagent-plugins/ 根下�
 1. **trait 方法集未扩**：行情/K线/搜索 3 条只是 `MarketDataProvider` 的现有面；调研实测股票域实际用到 **16 类操作**（基本面、指数、涨停/热股/行业/龙虎榜/北向、概念板块、研报/一致预期、公告/解禁/分红/财报日历、资讯与情绪、同业/期权PCR/行业归属、跨市场、批量、MCP 工具直通、数据源运维、凭证注入）⇒ 第二阶段扩 trait + DTO。
 2. **插件侧 SDK 封装未做**：插件今天要手写 `call_seam("market.quote", op, args)`；是否在 `plugin-proto` / SDK 提供类型化助手，等第二阶段定。
 3. **记账口径：能力面保持 23 / totalRows 37 不变**。理由：§0.7 登记表统计的是「L2 提供方接缝」（插件 → 宿主）。`market.quote` 是宿主 → 插件的**查询面**，与 `event.dispatch`（订阅面）同族，不在这 23 条里。⇒ 第五道门判定档未因本次改动变红；**不新增登记行**，但本节的 op 表就是它的权威文档。
+
+## 44. `#81` + `#82` 交付账与 `market.quote` 扩面终局裁定（2026-11-02）
+
+### 44.1 `#81`：行情 DTO 上收 harness（提交 `e45649bd3`）
+
+| 项 | 事实 |
+|---|---|
+| 新文件 | `axagent-core/crates/harness/src/stock_market_types.rs`（740 行） |
+| 迁入 | **40 个 `pub struct` + 1 个 `pub enum`（`KLinePeriod`）** + 2 个 inherent impl（`KLinePeriod::to_em_code`、`LimitUpPool::is_for_requested_date`） |
+| 原文件 | `axagent-quant/crates/astock-data/src/types.rs` **895 → 192 行**，变 `pub use axagent_harness::stock_market_types::*;` 垫片；`estimated_financial_report` 留原处（依赖 `crate::as_of`） |
+| 导出 | 仅在 **模块路径** 提供，harness 根**不做** glob —— 根已有 `dashboard_report::IndexQuote`（字段 name/price/change_pct），与迁入的 `IndexQuote`（code/name/price/pre_close/...）同名异义 |
+| 逐字保真 | 三段区间 sha1 与原文件一致；零语义变化 |
+| 验证 | harness check/clippy、astock-data check、analysis-engine check、双包 clippy 全 EXIT=0（39s / 57s / 13s / 31s / 40s），日志均含 `Checking <目标包>`；类型身份用例 `test_dto_type_identity_with_harness` 实跑 1 passed |
+| 未验证 | `src-tauri/**`（34 个文件引用 astock-data）、`tools` / `rt-workflow` 未实编 —— 由 #83 的窗口顺带覆盖 |
+
+**口径纠正（执行者推翻我）**：我派单写「41 struct + 2 enum」，盘上实为 **40 struct + 1 enum**；`AdjType` 原本就已在 harness `market_data` 并被 astock-data re-export，不是本文件定义。
+
+### 44.2 `#82`：op 映射全表（报告 `.tmp/res82-op-map.md`，317 行）
+
+**计数闭合**：并集 **54** = 数据面 **42** + 运维/凭证面 **12** + 不可走接缝 **0**。数据面 42 行合并两组「薄壳/委托」后 = **40 个 op**：`get_klines_with_adj` 并入既有 `get_klines`（trait impl 内部已委托）、`get_index_quotes` 并入 `get_index_quotes_outcome`（`into_data()` 薄壳）。扣除已上线 3 个 ⇒ **需新增 37 个数据 op**。
+
+**最大的语义缺口（本批最重要的发现）**：42 个数据方法**全部**读进程内 `AS_OF`（`task_local` + 进程级 `GLOBAL_AS_OF` 双存）。插件进程读不到宿主 task_local；宿主代执行时若不在 `with_optional_asof` 作用域内，会经全局栈**读到别的请求残留的 as-of（串味）**。⇒ 不是「退化成 live」这么简单，而是**同一请求的语义取决于宿主并发时序**。
+
+**三类专项判定**：
+- 凭证 4 字段（`neodata_token` / `xq_token` / `iwencai_key` / `health_tracker`）是 **pub 字段**不是方法，**永不跨进程**；
+- 运维面 8 个方法（`check_vendor_health` / `set_enabled_vendors` / `set_eastmoney_proxy` / `interface_health_history` / `has_daily_snapshot` / `daily_snapshot_enabled` / `set_daily_snapshot` / `set_stock_daily_snapshot`）**不混入 `market.quote`**；
+- `get_index_quotes_outcome` 返回非 `Result` 的 `DataOutcome`（在 **astock-data** `outcome.rs`），`market_list_page` 返回 tuple ⇒ 推迟到第二小批（先上收 `DataOutcome` / 定义命名对象返回）。
+
+**执行者对我种子数据的纠错（同批采信）**：① 主壳直调名单是 35 项（31 方法 + 4 字段），不是 33；② 4 个「方法」实为字段；③ 我只统计字面量 `astock_client.`，漏掉 `let client = ...clone()` 后的 `client.` 与跨行链式（实测主壳 `get_quote` 16 次而非 5、`get_klines` 10 次而非 2）；④ 漏方法 11 个（含 `get_klines_with_adj`、`get_margin_data`、`get_pledge_data`、`get_sector_info`、`get_news` 等）；⑤ 「16 类」括号里实际只有 14 个标签；⑥ **op/args 线上是 snake_case**（我派单写成 camelCase 会破坏 #80 已交付协议）；⑦ PLAN §13.2 只有 89 处的直方图，不构成逐类清单。
+
+### 44.3 六项裁定（leader 定，不再留选择题）
+
+1. **命名**：op 名与 args 键**沿用 snake_case**（`stock_code` / `period` / `limit` / `adj_type` / `keyword`），DTO 字段保持 camelCase。改 camelCase 属破坏性，不做。
+2. **as-of**：新增数据 op 一律带 `as_of?: string | object` —— 字符串按 `YYYY-MM-DD` 解析（`AsOfSource::UserReplay` + `AsOfDataScope::All`），对象按完整 `AsOfContext` 反序列化（保住 `data_scope` / `source`）。宿主分派用 `with_optional_asof` 包住本次调用；**禁止**依赖全局栈兜底。trait 侧参数类型 `Option<AsOfContext>`。
+3. **`get_index_quotes`**：不单列，只保留 outcome 形态；等 `DataOutcome` 上收 harness 后随第二小批交付。
+4. **`market_list_page`**：**新 op 从一开始就返回命名对象** `{"items":[{"code","name","industry"}],"total":n}`，不照抄内部 tuple（无既有插件客户端，零兼容成本）。
+5. **运维/凭证面**：另立接缝（暂名 `market.ops`，只读诊断 + 显式写操作分开），凭证 4 字段**永不暴露**；本批不做。
+6. **MCP 直通**：单独立项 —— 先数 `stock_mcp_tools()` 工具数与 `execute_mcp_tool` 分支，再决定「逐工具」还是「单条 `mcp_tool_call{tool_name,arguments}`」。
+
+### 44.4 `#83` 分批（本段执行中）
+
+| 批次 | 范围 | 文件 |
+|---|---|---|
+| **A** | harness `MarketDataProvider` 扩 **12 个引擎强需求方法**（默认「不支持」实现）+ `AStockClient` 逐条委托（`with_optional_asof` 包裹） | `harness/src/market_data.rs`、`astock-data/src/lib.rs` |
+| **B** | `worker.rs` 12 个入站分支 + `as_of` 双形态解析 + 用例 | `plugins/src/worker.rs` |
+| **第二小批（未开）** | 余 **25 个数据 op**（含 `get_index_quotes_outcome`、`market_list_page`）+ `DataOutcome` 上收 | harness / astock-data / worker |
+| **另立（未开）** | `market.ops` 运维接缝、MCP 直通、插件侧 SDK 类型化助手 | 待定 |
+
+12 个 A 批方法：`get_financials` · `get_money_flow` · `get_north_bound_holding` · `get_dragon_tiger` · `get_margin_balance_trend` · `get_margin_data` · `get_holder_count` · `get_block_trades` · `get_pledge_data` · `get_sector_info` · `get_news` · `market_snapshot_batch`。
+
+**既有 3 个 op 的 as-of 债（登记，不在本批改）**：`get_quote` / `get_klines` / `search_stock` 的 trait 签名不带 `as_of`；改它们会牵动 analysis-engine 中大量 `dyn MarketDataProvider` 调用点。等插件侧 SDK 适配器落地时一并收口（届时 analysis-engine 在插件进程内通过 SDK 实现同一 trait）。本批新增方法**全部带 as_of**，不扩大该债。

@@ -679,7 +679,12 @@ pub struct UpdateOutcomeDto {
 /// 禁止裸字符串：所有分支都产出「码 + 分类 + 详情」三元组，前端按 `category` 做
 /// 重试/授权/放弃分支，按 `code` 走 i18n。原先所有失败塌进
 /// `from_error(.., Unrecoverable)`（`COMMON_INTERNAL`），命令超时与「插件没跑出来」
-/// 无法区分 —— 现在超时是 `COMMON_TIMEOUT` / `retryable`。
+/// 无法区分 —— 现在超时是 `COMMON_TIMEOUT` / `general`。
+///
+/// ⚠ **超时不得标记为 `Retryable`**：宿主只是「没等到」结果，worker 侧的调用可能
+/// 仍在执行并已产生副作用（见 `worker.rs:1463` 的「超时不等价于取消」说明）。若归为
+/// `Retryable`，前端按分类自动/引导重试即构成**二次执行**。故归默认的 `general`：
+/// 仍按 error 级展示，但不进自动重试分支。调用方若确需重试，必须先确认该命令幂等。
 ///
 /// ⚠ **本批刻意不新增错误码**：11 份 locale 文件当前是他会话未提交改动，而
 /// `check-errorcode-alignment.mjs` 要求「后端码 ⊆ zh-CN error 段」，只加码不补译 CI
@@ -695,10 +700,13 @@ fn plugin_command_error_response(
     use axagent_plugins::PluginError;
     let detail = error.to_string();
     match error {
-        // 预算耗尽、结果未回：调用方可原样重试（或提示用户插件卡死）。
+        // 预算耗尽、结果未回：**不等于取消**，worker 可能仍在跑完（副作用已发生），
+        // 故归默认 `general`，不引导自动重试；仅在调用方确认命令幂等后才可重试。
         PluginError::CommandTimeout(_) => ErrorResponse::new(common::TIMEOUT)
-            .with_category(ErrorCategory::Retryable)
-            .with_detail(detail),
+            .with_category(ErrorCategory::General)
+            .with_detail(format!(
+                "{detail}；超时不等于取消：插件可能仍在执行，重试可能导致副作用重复"
+            )),
         // 授权门槛拒绝：引导用户核对插件权限声明，不重试。
         PluginError::PermissionDenied(_) => ErrorResponse::new(common::INTERNAL)
             .with_category(ErrorCategory::PermissionDenied)
@@ -732,14 +740,22 @@ mod tests {
     }
 
     #[test]
-    fn command_timeout_maps_to_retryable_common_timeout() {
+    fn command_timeout_is_not_marked_retryable() {
         let err = axagent_plugins::PluginError::CommandTimeout(
             "插件 `demo@external` 的 `command` 超过宿主等待上限 1200 ms，调用已放弃".to_string(),
         );
         let (code, category, detail) = mapped(&err);
         assert_eq!(code, "COMMON_TIMEOUT");
-        assert_eq!(category, "retryable");
-        assert!(detail.expect("超时必须有详情").contains("超过宿主等待上限"));
+        assert_eq!(
+            category, "general",
+            "超时不是「可重试」：worker 可能仍在执行，自动重试会造成副作用重复"
+        );
+        let detail = detail.expect("超时必须有详情");
+        assert!(detail.contains("超过宿主等待上限"));
+        assert!(
+            detail.contains("超时不等于取消"),
+            "detail 必须显式提示超时≠取消，实际为：{detail}"
+        );
     }
 
     #[test]

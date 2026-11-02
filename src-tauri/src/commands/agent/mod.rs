@@ -2243,7 +2243,7 @@ pub async fn agent_query(
     // 将精选分析注入 augmented_input 的 <tot_analysis> 块，供 LLM 在回答时参考。
     // 开销：~4-6 次额外 LLM 调用（branching=2, depth=2, threshold=0.3）。
     if settings.tot_enabled {
-        let tot_provider: Arc<dyn axagent_agent::LlmReasoningProvider> =
+        let tot_provider: Arc<dyn axagent_agent::TotReasoningProvider> =
             Arc::new(DefaultToTReasoningProvider::from_provider_adapter(
                 tot_adapter,
                 tot_ctx,

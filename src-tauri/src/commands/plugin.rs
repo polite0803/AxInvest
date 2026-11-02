@@ -529,6 +529,10 @@ pub async fn plugin_update(
 ///
 /// 走 [`axagent_plugins::PluginManager::execute_plugin_command`]，以下为该链路的**实测事实**，
 /// 前端/调用方据此判断风险，不要按字面「沙箱」理解成隔离：
+/// **已长驻 worker 的插件（manifest 声明 `worker` 且启用成功）走命令帧通道**（任务 #49）：
+/// 复用启用时的常驻子进程、一次调用一帧往返、宿主强制「预算 + 收帧宽限」的等待上限
+/// （超时映射 `COMMON_TIMEOUT`，前端可按重试分支处置），输出为命令回执的 JSON 文本。
+/// **未长驻 worker 的插件维持 spawn-on-call 通道**，语义逐字节不变，以下为该通道的实测事实：
 /// 命令串整团作为程序名交给 `Command::new`（**没有**按空白切分成程序 + 参数，`args` 恒空），
 /// 输入 JSON 经 stdin 与 `CLAWD_TOOL_INPUT` 注入，stdout 原样返回。
 /// 程序名解析与 tool 侧同源（任务 #47）：带 `./`、`../` 前缀的相对路径声明先按插件安装目录
@@ -555,12 +559,7 @@ pub async fn plugin_execute_command(
                 &name,
                 &input.unwrap_or_else(|| serde_json::json!({})),
             )
-            .map_err(|e| {
-                String::from(crate::commands::error::ErrorResponse::from_error(
-                    e,
-                    crate::commands::error::ErrorCategory::Unrecoverable,
-                ))
-            })
+            .map_err(|e| String::from(plugin_command_error_response(&e)))
     })
     .await
     .map_err(|e| format!("plugin execute_command task panicked: {e}"))?
@@ -649,4 +648,101 @@ pub struct UpdateOutcomeDto {
     pub old_version: String,
     pub new_version: String,
     pub install_path: String,
+}
+
+/// 命名命令派发口的错误归类（任务 #49）：`PluginError` → 结构化 `ErrorResponse`。
+///
+/// 禁止裸字符串：所有分支都产出「码 + 分类 + 详情」三元组，前端按 `category` 做
+/// 重试/授权/放弃分支，按 `code` 走 i18n。原先所有失败塌进
+/// `from_error(.., Unrecoverable)`（`COMMON_INTERNAL`），命令超时与「插件没跑出来」
+/// 无法区分 —— 现在超时是 `COMMON_TIMEOUT` / `retryable`。
+///
+/// ⚠ **本批刻意不新增错误码**：11 份 locale 文件当前是他会话未提交改动，而
+/// `check-errorcode-alignment.mjs` 要求「后端码 ⊆ zh-CN error 段」，只加码不补译 CI
+/// 直接红。故复用既有已译码；待 locale 解冻应补 `PLUGIN_COMMAND_TIMEOUT` /
+/// `PLUGIN_COMMAND_FAILED` / `PLUGIN_COMMAND_NOT_FOUND` /
+/// `PLUGIN_COMMAND_PERMISSION_DENIED` 专码族（清单见任务 #49 交接报告），
+/// 只需把下面的常量换成 `error_code::plugin::*`，分类逻辑不动。
+fn plugin_command_error_response(
+    error: &axagent_plugins::PluginError,
+) -> crate::commands::error::ErrorResponse {
+    use crate::commands::error::ErrorCategory;
+    use crate::commands::error_code::common;
+    use axagent_plugins::PluginError;
+    let detail = error.to_string();
+    match error {
+        // 预算耗尽、结果未回：调用方可原样重试（或提示用户插件卡死）。
+        PluginError::CommandTimeout(_) => ErrorResponse::new(common::TIMEOUT)
+            .with_category(ErrorCategory::Retryable)
+            .with_detail(detail),
+        // 授权门槛拒绝：引导用户核对插件权限声明，不重试。
+        PluginError::PermissionDenied(_) => ErrorResponse::new(common::INTERNAL)
+            .with_category(ErrorCategory::PermissionDenied)
+            .with_detail(detail),
+        // 插件/命令不存在：输入侧可修正（改名、重装、换插件）。
+        PluginError::NotFound(_) => ErrorResponse::new(common::INVALID_INPUT)
+            .with_category(ErrorCategory::Validation)
+            .with_detail(detail),
+        // 其余（worker 帧往返失败、worker 自报协议码、形状校验……）：命令跑出了错，
+        // 协议码保留在 detail 原文里（如 `PLUGIN_COMMAND_FAILED: …`），不吞。
+        other => ErrorResponse::new(common::INTERNAL)
+            .with_category(ErrorCategory::Unrecoverable)
+            .with_detail(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 映射结果必须能按 `ErrorResponse` 解析回来（不是裸字符串），并返回 (code, category)。
+    fn mapped(error: &axagent_plugins::PluginError) -> (String, String, Option<String>) {
+        let text = String::from(plugin_command_error_response(error));
+        let value: serde_json::Value =
+            serde_json::from_str(&text).expect("错误串必须是可解析的 ErrorResponse JSON");
+        (
+            value["code"].as_str().unwrap_or_default().to_string(),
+            value["category"].as_str().unwrap_or_default().to_string(),
+            value["detail"].as_str().map(str::to_string),
+        )
+    }
+
+    #[test]
+    fn command_timeout_maps_to_retryable_common_timeout() {
+        let err = axagent_plugins::PluginError::CommandTimeout(
+            "插件 `demo@external` 的 `command` 超过宿主等待上限 1200 ms，调用已放弃".to_string(),
+        );
+        let (code, category, detail) = mapped(&err);
+        assert_eq!(code, "COMMON_TIMEOUT");
+        assert_eq!(category, "retryable");
+        assert!(detail.expect("超时必须有详情").contains("超过宿主等待上限"));
+    }
+
+    #[test]
+    fn command_failure_keeps_protocol_code_in_detail() {
+        let err = axagent_plugins::PluginError::CommandFailed(
+            "与插件 `demo@external` 的通道错误：PLUGIN_COMMAND_FAILED: worker 侧故意失败"
+                .to_string(),
+        );
+        let (code, category, detail) = mapped(&err);
+        assert_eq!(code, "COMMON_INTERNAL");
+        assert_eq!(category, "unrecoverable");
+        assert!(
+            detail.expect("失败必须有详情").contains("PLUGIN_COMMAND_FAILED"),
+            "协议码必须留在 detail，不得吞掉"
+        );
+    }
+
+    #[test]
+    fn not_found_and_permission_denied_get_distinct_categories() {
+        let (code, category, _) =
+            mapped(&axagent_plugins::PluginError::NotFound("没有声明命令 x".to_string()));
+        assert_eq!(code, "COMMON_INVALID_INPUT");
+        assert_eq!(category, "validation");
+
+        let (code, category, _) =
+            mapped(&axagent_plugins::PluginError::PermissionDenied("档位不足".to_string()));
+        assert_eq!(code, "COMMON_INTERNAL");
+        assert_eq!(category, "permission_denied");
+    }
 }

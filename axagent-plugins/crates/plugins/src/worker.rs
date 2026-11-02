@@ -53,6 +53,27 @@
 //!    走默认实现，不做自检）。
 //! ③ **跨插件优先用 L1 事件**：`emit` 不等待派发结果，见 [`HostPeer::handle_emit`] 的注释
 //!    （同步等待会把「事件回投给发起者」变成自锁）。
+//! ④ **接缝等待预算**（任务 #53 修 D1）：`invoke` / `invoke_with_chain` / UI action
+//!    回流共用同一传输层入口，写帧后到点收不到回帧 ⇒ 放弃等待并报超时，连接随即标脏
+//!    （拒后续接缝调用、停机走急停）；预算默认 [`DEFAULT_SEAM_TIMEOUT_MS`]，长跑型接缝
+//!    （`run_turn`）按 plugin-proto 的 `SEAM_OP_TIMEOUT_OVERRIDES` 逐接缝覆盖，连接级可用
+//!    [`PluginWorkerConfig::with_seam_wait_timeout`] 显式改默认。
+//!    ⚠ **本批只覆盖收侧**：写帧持锁卡死（对端僵死不读 stdin 且管道满）另立案 #56。
+//! ⑤ **握手等待预算**（任务 #63 补 D1 边角）：`ops::DESCRIBE` 不经接缝公共入口，
+//!    故④对它不生效；[`WorkerInvoker::handshake`] 用独立的
+//!    [`DEFAULT_HANDSHAKE_TIMEOUT_MS`]（[`PluginWorkerConfig::with_handshake_timeout`] 可覆盖），
+//!    超时同样置「连接可疑」闸 —— 不是为了拒后续接缝调用（这条连接根本不会交付出去），
+//!    而是为了让 [`LoadedPlugin::load`] 失败路径上的 `shutdown()` 跳过「等 shutdown 回执」，
+//!    否则「不回 describe 的 worker」会把装载从「挂握手」改成「挂停机」。
+//!    ⚠ 同样**只覆盖收侧**，写侧仍归 #56。
+//! ⑥ **嵌套调用的计时挂起**（任务 #73 修 M-3，D1 的另一半）：入站请求（`emit` /
+//!    `call_seam`）改由**独立任务**处理，读线程不再被宿主侧那一跳占住；同时出向等待预算
+//!    **只在对端不被宿主占用时消耗**。两者合起来才让「④ 到点 = 对端装死」这条推论成立 ——
+//!    修复前只要插件 handler 里嵌套一次耗时 ≥ 外层预算的宿主侧调用（SDK 文档亲自示范的
+//!    `peer.call_seam` 形态），外层就**必然**被误杀并把健康连接打到终局闸（审查稿 A4.3）。
+//!    ⚠ 代价如实声明：外层 15 s 这道闸在嵌套期间不生效，若宿主替插件跑的那一跳自己卡死，
+//!    外层跟着没有上界 —— 那是入站服务侧**既存**的无界（审查稿 A4.2：宿主服务 `call_seam`
+//!    时没有任何等待上限），本批没有给它加闸，登记在交回清单。
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -62,7 +83,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -87,8 +108,10 @@ use axagent_harness::{
     get_capability_registry,
 };
 use axagent_plugin_proto::{
-    AXAGENT_PLUGIN_PROTO_VERSION, FrameRequest, FrameResponse, Inbound, MAX_SEAM_CALL_DEPTH,
-    PluginDeclaration, ResponseKind, error_codes, ops, read_inbound, write_json_frame,
+    AXAGENT_PLUGIN_PROTO_VERSION, CommandFrame, CommandOutcome, CommandReply,
+    DEFAULT_HANDSHAKE_TIMEOUT_MS, DEFAULT_SEAM_TIMEOUT_MS, FrameRequest, FrameResponse, Inbound,
+    MAX_SEAM_CALL_DEPTH, PluginDeclaration, ResponseKind, error_codes, ops, read_inbound,
+    seam_timeout_ms_for_op, write_json_frame,
 };
 use parking_lot::Mutex;
 use serde_json::{Value, json};
@@ -172,7 +195,19 @@ pub enum WorkerError {
     #[error("插件 `{plugin_id}` 的 worker 进程未提供 stdin/stdout 管道")]
     MissingPipe { plugin_id: String },
     /// 握手（取声明 / 校验协议版本）失败。
-    #[error("插件 `{plugin_id}` 握手失败：{reason}")]
+    ///
+    /// 三类原因都走本变体：进程没起来之后的管道错、worker 回了错信封、以及**握手帧超时**
+    /// （任务 #63）。超时不另立错误码也不新增变体 —— [`Self::Timeout`] 的 Display 已带
+    /// `op` 与预算毫秒数，被本变体的 `reason` 原样嵌入后即「握手失败 + describe + 上限」，
+    /// 足以定位；新增码要同步 11 语言译文（AGENTS.md 禁区 2 / 后端错误码规范），成本不对。
+    ///
+    /// **处置指引与「连接可疑」闸同源**（任务 #73 M-2）：握手超时同样会置
+    /// `WorkerInner::seam_suspect`，但那条连接**不会被交付**（`load` 返回 `Err`、随实例丢弃），
+    /// 因此用户永远看不到闸的拒次文案，只能看到本条。若只给闸文案加「禁用再启用」，
+    /// 握手这条置脏路径就少了同一句处置指引 —— 两条路径的**用户可见出口**都要说到，
+    /// 否则「已经告诉你怎么办」只在半边成立。码位保持 #63 的选择（**不加码**），
+    /// 与接缝/命令路径的 `SEAM_PROVIDER_UNAVAILABLE` 不是同一个可观测错误，不构成同路径双码。
+    #[error("插件 `{plugin_id}` 握手失败：{reason}；请在设置中禁用再启用该插件以重试装载")]
     Handshake { plugin_id: String, reason: String },
     /// 插件声明的协议版本 / 能力项非法。
     #[error("插件 `{plugin_id}` 的声明无效：{reason}")]
@@ -184,9 +219,48 @@ pub enum WorkerError {
     #[error("插件 `{plugin_id}` 的接缝 `{seam}` 注册失败：{reason}")]
     Register { plugin_id: String, seam: String, reason: String },
     /// 通道读写 / 对端返回错误。
+    ///
+    /// `code` 是**结构化错误码**（任务 #73 S-1）：值即对端错误信封里的 `code` 字段
+    /// （[`error_codes::PLUGIN_UNKNOWN_OP`] 一类），由 [`Self::transport_error_with_code`]
+    /// 在成形处填入；纯 I/O 断裂、形状非法这类没有协议码的失败为 `None`。
+    /// ⚠ 消费方（`manager.rs` 的回退判据）**读这个字段，不读 `reason` 文本** ——
+    /// 旧判据按 `reason` 首个 `:` 取段，任何人改动信封成形的文案都会**静默关掉回退**
+    /// （审查稿 A2.3 / PLAN §26.2 第 3 条点名的正是这一行）。
     #[error("与插件 `{plugin_id}` 的通道错误：{reason}")]
-    Transport { plugin_id: String, reason: String },
+    Transport {
+        plugin_id: String,
+        reason: String,
+        code: Option<String>,
+    },
+    /// 请求帧**从未送达** worker（任务 #73 M-1）：进程已退出、管道已断，或写帧本身失败。
+    ///
+    /// 它与 [`Self::Transport`] 的全部区别就是「**零副作用**」这一件事 —— 对端根本没收到
+    /// 这一帧，因此不可能已经执行过任何东西，重发（命名命令回退到 spawn-on-call 通道）
+    /// 不构成二次执行。反过来，帧一旦写出去就不再是本变体：此后连接才断、回执才坏，
+    /// 命令**可能已执行完**，一律按 `Transport` 处理且**不回退**。
+    #[error("插件 `{plugin_id}` 的 worker 未收到 `{op}` 帧：{reason}")]
+    NotDelivered { plugin_id: String, op: String, reason: String },
+    /// 调用超过宿主强制的等待上限，等待已被放弃（对端随后回来的响应帧按「无等待者」
+    /// 由读线程丢弃并留警告）。三个使用者各带自己的预算：命令帧（任务 #49，
+    /// 帧 `timeout_ms` + 收帧宽限）、接缝公共入口（任务 #53，`seam_wait_timeout` 与
+    /// 逐接缝覆盖表）、握手 `describe`（任务 #63，`handshake_timeout`）。
+    #[error("插件 `{plugin_id}` 的 `{op}` 超过宿主等待上限 {timeout_ms} ms，调用已放弃")]
+    Timeout { plugin_id: String, op: String, timeout_ms: u64 },
 }
+
+impl WorkerError {
+    /// 协议错误码（若该次失败由对端的错误信封 / Fault 成形而来）。
+    ///
+    /// 任务 #73 S-1：回退判据的唯一输入。文本匹配（旧写法取 `reason` 首段）已删除，
+    /// 不留双判据 —— 文案怎么改都不会影响回退与否，码位由构造点负责。
+    pub fn error_code(&self) -> Option<&str> {
+        match self {
+            Self::Transport { code, .. } => code.as_deref(),
+            _ => None,
+        }
+    }
+}
+
 
 /// worker 载入配置。
 pub struct PluginWorkerConfig {
@@ -202,6 +276,22 @@ pub struct PluginWorkerConfig {
     pub sandbox: SandboxConfig,
     /// shutdown 帧后等待 worker 自行退出的上限，超时则强杀。
     pub shutdown_timeout: Duration,
+    /// 接缝调用（宿主经 [`SeamInvoker`] 门面 / worker 发起的 `call_seam` 分派）等待
+    /// worker 回帧的预算上限（任务 #53 修 D1）。
+    ///
+    /// 缺省取协议常量 [`DEFAULT_SEAM_TIMEOUT_MS`]；到点未收到配对响应 ⇒ 放弃等待、
+    /// 报 [`WorkerError::Timeout`]，并把该连接标为「可疑」（`WorkerInner` 的 `seam_suspect`）。
+    /// 进表 op（plugin-proto `SEAM_OP_TIMEOUT_OVERRIDES`，如 `run_turn`）用表值，本字段只管未进表 op。
+    /// 命令通道与 spawn-on-call 路径**不读本字段**（#49 语义不变）。
+    pub seam_wait_timeout: Duration,
+    /// 握手帧 `describe` 等待 worker 回帧的预算上限（任务 #63 补 D1 边角）。
+    ///
+    /// 缺省取协议常量 [`DEFAULT_HANDSHAKE_TIMEOUT_MS`]。**与 [`Self::seam_wait_timeout`]
+    /// 分开设**：握手是装载前置（spawn 之后的第一帧，不经接缝公共入口），接缝预算是用户
+    /// 发起的调用；两者取值口径与失败代价都不同（详见 plugin-proto 该常量的文档）。
+    /// 超时 ⇒ [`WorkerError::Handshake`]（reason 内嵌 [`WorkerError::Timeout`] 的文本），
+    /// 并置「连接可疑」闸，使 [`LoadedPlugin::load`] 失败路径的 `shutdown()` 走急停。
+    pub handshake_timeout: Duration,
 }
 
 impl PluginWorkerConfig {
@@ -214,6 +304,8 @@ impl PluginWorkerConfig {
             working_dir: None,
             sandbox: SandboxConfig::default(),
             shutdown_timeout: Duration::from_secs(5),
+            seam_wait_timeout: Duration::from_millis(DEFAULT_SEAM_TIMEOUT_MS),
+            handshake_timeout: Duration::from_millis(DEFAULT_HANDSHAKE_TIMEOUT_MS),
         }
     }
 
@@ -226,6 +318,24 @@ impl PluginWorkerConfig {
     /// 指定 worker 进程工作目录。
     pub fn with_working_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.working_dir = Some(dir.into());
+        self
+    }
+
+    /// 指定接缝调用等待预算（缺省为 [`DEFAULT_SEAM_TIMEOUT_MS`]）。
+    ///
+    /// 面向「慢接缝显式覆盖」的接线口（任务 #53 交接报告待办）：本轮**调用方一律用缺省值**，
+    /// 但预算有明确覆盖去处，就不需要散落的 `exchange(.., None)`。
+    pub fn with_seam_wait_timeout(mut self, wait: Duration) -> Self {
+        self.seam_wait_timeout = wait;
+        self
+    }
+
+    /// 指定握手 `describe` 帧的等待预算（缺省为 [`DEFAULT_HANDSHAKE_TIMEOUT_MS`]）。
+    ///
+    /// 面向「慢启动插件显式放宽」的接线口；与 [`Self::with_seam_wait_timeout`] 是两个
+    /// 独立旋钮（握手预算不会被接缝预算改写，反之亦然）。
+    pub fn with_handshake_timeout(mut self, wait: Duration) -> Self {
+        self.handshake_timeout = wait;
         self
     }
 }
@@ -896,6 +1006,22 @@ fn no_runtime(seam: &str) -> FrameResponse {
 
 // ───────────────────────── 传输层（读线程 + 配对表） ─────────────────────────
 
+/// 命令帧宿主侧「收帧宽限」（毫秒）：等待上限 = 帧预算 `timeout_ms` + 本宽限。
+///
+/// 为什么要宽限：`timeout_ms` 是给 **worker 的执行预算**；worker 恰在预算边界上算完、
+/// 再序列化回帧到达宿主，总要多花一点点。没有宽限就会把「压线完成」误杀成超时，
+/// 而误杀后 worker 其实已经把命令跑完了（副作用已发生）。宽限只保护宿主调用线程
+/// 的等待上界，不改变「预算归 worker」的分层语义。
+const COMMAND_FRAME_GRACE_MS: u64 = 1_000;
+
+/// 「宿主正占用对端」期间的出向等待复查粒度（任务 #73 M-3）。
+///
+/// 这**不是**一个预算，也不是宽限：它只决定「对端什么时候不再欠着宿主的答案」这件事
+/// 多快被发现（`recv_timeout` 没有「条件等待」接口，只能按粒度醒来复查计数）。
+/// 预算本身在这段墙钟里一格不扣，所以粒度取值不影响超时判定的语义，只影响嵌套结束后
+/// 最多多等一个粒度的墙钟；20 ms 相对毫秒~秒级的帧往返可以忽略。
+const INBOUND_PAUSE_POLL: Duration = Duration::from_millis(20);
+
 /// 宿主侧 worker 连接的共享状态：读线程与调用方共用。
 struct WorkerInner {
     plugin_id: String,
@@ -913,6 +1039,54 @@ struct WorkerInner {
     /// drain 标志（PLAN §13.3 优雅停机）：置位后 [`SeamInvoker::invoke_with_chain`]
     /// 拒绝**新**调用，等在途帧自然收尾 —— 停机不再掐死进行中的请求。
     draining: AtomicBool,
+    /// 接缝调用的宿主等待预算（来自 [`PluginWorkerConfig::seam_wait_timeout`]，
+    /// 缺省即协议常量 [`DEFAULT_SEAM_TIMEOUT_MS`]）。
+    seam_wait_timeout: Duration,
+    /// 握手 `describe` 帧的宿主等待预算（来自 [`PluginWorkerConfig::handshake_timeout`]，
+    /// 缺省即协议常量 [`DEFAULT_HANDSHAKE_TIMEOUT_MS`]）。
+    ///
+    /// 单独一份而非复用 `seam_wait_timeout`：握手不经接缝公共入口，取值口径也不同
+    /// —— 见 plugin-proto 两个常量的文档。
+    handshake_timeout: Duration,
+    /// 「连接可疑」闸（任务 #53 修 D1 的处置半边）：接缝调用**写帧后**到点仍收不到
+    /// 配对响应 ⇒ 置位。此后接缝公共入口拒绝新调用（不再排队等一个新预算），停机
+    /// 跳过等待 shutdown 回执（装死的 worker 回不了帧，礼貌等待会把卸载一起拖挂）。
+    /// 任务 #63 起**握手超时同样置位**：那条连接本就不会交付出去，置位的唯一作用是让
+    /// [`LoadedPlugin::load`] 失败路径的 `shutdown()` 走急停（否则「不回 describe」会变成
+    /// 「卡在等 shutdown 回执」—— 同一病灶换了个位置）。
+    ///
+    /// **复位口**（任务 #73 M-2 补，原注释「无复位口（有意）」作废）：闸的生命周期 =
+    /// **一个 [`LoadedPlugin`] 的生命周期**，显式 `unload` / `disable` 即清（见
+    /// [`LoadedPlugin::unload`]）。刻意**不是**「下次调用自动清」：自动清等于把
+    /// 「对端已实证不回帧」这条信息每笔重新付一遍预算，正是 D1 要止的血。
+    /// 复位之所以必要：`Arc<WorkerInvoker>` 会被能力门面与
+    /// [`crate::manager::PluginManager::plugin_invoker`] 持有并可能活过本实例；不清的话
+    /// 「停用再启用」之后仍可能被上一轮的脏标记拒绝。
+    ///
+    /// 装载失败那条路**不需要**复位：握手超时置脏的连接随实例整体丢弃（`load` 返回 `Err`
+    /// ⇒ `Arc<WorkerInvoker>` 被 drop ⇒ 进程被强杀），下一次 `load` 是新 `WorkerInner`、
+    /// 新实例（闸=false），故 #63 新增的握手置位点不构成需要复位的存量。
+    ///
+    /// 为什么「拒后续」而不是「自动重启」：重启要重建进程、重放握手、重新注册全部
+    /// 能力句柄，并让插件的进程内状态（游标/缓存）凭空消失——那是错误恢复策略，
+    /// 超出「超时处置」的本分；标脏后由**调用方决定**停机重启，处置权留在上层。
+    /// 为什么不是只「标脏但继续接受调用」：对端已实证不回帧，后续每笔调用都要白等
+    /// 一个完整预算才失败，僵死会沿着回合级联变慢。
+    seam_suspect: AtomicBool,
+    /// 宿主**正在替本插件处理**的入站请求数（任务 #73 M-3）。
+    ///
+    /// worker 主动发来的 `emit` / `call_seam` 交独立任务落地（不再占读线程），处理期间
+    /// 本计数 > 0。它是出向等待预算的**暂停条件**：对端此刻在等宿主的答案，这段墙钟
+    /// 不是「worker 装死」的证据 —— 按墙钟扣预算会把 SDK 示范的嵌套形态确定性误杀，
+    /// 并把健康连接判死（审查稿 A4.3 的六步链）。
+    inbound_inflight: AtomicUsize,
+    /// 读线程已退出（stdout EOF 或读错误）⇒ 对端进程已不存在（任务 #73 M-1）。
+    ///
+    /// ⚠ 与 [`Self::seam_suspect`] 是**两件事**，判据必须分开写：本闸 = 「进程不在」
+    /// ⇒ 命名命令**回退**原通道（`manager.rs` 契约里「worker 中途异常退出也退回原通道」
+    /// 那半句的落地）；`seam_suspect` = 「进程在、但曾超时未回帧」⇒ **拒绝**并等显式卸载
+    /// 复位。两者混在一个 bool 里就是 M-2 / M-3 的根（PLAN §26.3 对 S-3 的裁定）。
+    connection_closed: AtomicBool,
 }
 
 /// 长驻 worker 子进程的传输实现（[`SeamInvoker`] 的主路径实现）。
@@ -971,6 +1145,11 @@ impl WorkerInvoker {
             host_peer: Mutex::new(None),
             next_request_id: AtomicU64::new(0),
             draining: AtomicBool::new(false),
+            seam_wait_timeout: config.seam_wait_timeout,
+            handshake_timeout: config.handshake_timeout,
+            seam_suspect: AtomicBool::new(false),
+            inbound_inflight: AtomicUsize::new(0),
+            connection_closed: AtomicBool::new(false),
         });
         let reader = Self::spawn_reader(inner.clone(), Box::new(stdout), &plugin_id)?;
         Ok(Self { inner, reader: Mutex::new(Some(reader)) })
@@ -984,6 +1163,25 @@ impl WorkerInvoker {
         reader: Box<dyn Read + Send>,
         writer: Box<dyn Write + Send>,
     ) -> Self {
+        // 缺省预算取协议常量：与生产 spawn 完全同源（测试不注入第二份默认值）。
+        Self::from_streams_with_timeouts(
+            plugin_id,
+            reader,
+            writer,
+            Duration::from_millis(DEFAULT_SEAM_TIMEOUT_MS),
+            Duration::from_millis(DEFAULT_HANDSHAKE_TIMEOUT_MS),
+        )
+    }
+
+    /// [`Self::from_streams`] 的可注入预算变体（仅测试用：装死用例不能真等 15s / 10s）。
+    #[cfg(test)]
+    fn from_streams_with_timeouts(
+        plugin_id: impl Into<String>,
+        reader: Box<dyn Read + Send>,
+        writer: Box<dyn Write + Send>,
+        seam_wait_timeout: Duration,
+        handshake_timeout: Duration,
+    ) -> Self {
         let plugin_id = plugin_id.into();
         let inner = Arc::new(WorkerInner {
             plugin_id: plugin_id.clone(),
@@ -994,6 +1192,11 @@ impl WorkerInvoker {
             host_peer: Mutex::new(None),
             next_request_id: AtomicU64::new(0),
             draining: AtomicBool::new(false),
+            seam_wait_timeout,
+            handshake_timeout,
+            seam_suspect: AtomicBool::new(false),
+            inbound_inflight: AtomicUsize::new(0),
+            connection_closed: AtomicBool::new(false),
         });
         let thread =
             Self::spawn_reader(inner.clone(), reader, &plugin_id).expect("测试用读线程应能启动");
@@ -1033,14 +1236,31 @@ impl WorkerInvoker {
     }
 
     /// 握手：取插件声明并校验协议版本与能力项。
+    ///
+    /// 等待预算 = [`WorkerInner::handshake_timeout`]（任务 #63）：**不经**接缝公共入口
+    /// [`SeamInvoker::invoke_with_chain`]，因此不读逐接缝覆盖表、也不受连接级
+    /// `seam_wait_timeout` 支配 —— 握手是装载前置，不是用户发起的调用。
     fn handshake(&self) -> Result<PluginDeclaration, WorkerError> {
-        // 取声明失败 → Handshake（进程起没起来 / 是否实现了 describe）；
+        // 取声明失败 → Handshake（进程起没起来 / 是否实现了 describe / 握手帧超时）；
         // 声明拿到了但不合法 → Declaration（版本不符、字段为空）。两类失败分开报，便于定位。
         let declaration: PluginDeclaration = self
-            .call_typed(ops::DESCRIBE, json!({ "proto_version": AXAGENT_PLUGIN_PROTO_VERSION }))
-            .map_err(|e| WorkerError::Handshake {
-                plugin_id: self.inner.plugin_id.clone(),
-                reason: e.to_string(),
+            .call_typed(
+                ops::DESCRIBE,
+                json!({ "proto_version": AXAGENT_PLUGIN_PROTO_VERSION }),
+                Some(self.inner.handshake_timeout),
+            )
+            .map_err(|e| {
+                // 超时 ⇒ 置「连接可疑」闸，让调用方兜底的 `shutdown()` 跳过等待 shutdown
+                // 回执（否则装死的 worker 会把装载从「挂握手」改成「挂停机」）。
+                // 只认 Timeout，其余错误不置闸 —— 与 [`Self::invoke_with_chain`] 同一判据：
+                // 「对端明确回了错」与「对端装死」是两种可观测性，不能混为一谈。
+                if matches!(e, WorkerError::Timeout { .. }) {
+                    self.inner.seam_suspect.store(true, Ordering::Release);
+                }
+                WorkerError::Handshake {
+                    plugin_id: self.inner.plugin_id.clone(),
+                    reason: e.to_string(),
+                }
             })?;
         declaration.validate().map_err(|e| WorkerError::Declaration {
             plugin_id: self.inner.plugin_id.clone(),
@@ -1049,7 +1269,13 @@ impl WorkerInvoker {
         Ok(declaration)
     }
 
-    /// 发一帧请求并等回**配对**的响应。
+    /// 发一帧请求并等回**配对**的响应（`wait = None` 时**不设**等待上限 —— 停机帧专用）。
+    ///
+    /// 任务 #53/#63 之后接缝与握手都不再走无限预算：接缝经
+    /// [`Self::invoke_with_chain`]（`seam_wait_timeout` 与逐接缝表）、握手经
+    /// [`Self::handshake`]（`handshake_timeout`），本入口只保留**停机帧**这一个无限等待
+    /// 调用点，理由是它只在连接**未被标脏**时发出（见 [`Self::shutdown`]），
+    /// 握手失败则由 [`LoadedPlugin::load`] 的调用方兜底停机。
     ///
     /// 三个「不」是这套并发模型的关键：
     /// - 写帧时**只持写锁**（写完即放）：对端可能正等我们处理它的请求，持锁等待会一起卡死；
@@ -1060,6 +1286,39 @@ impl WorkerInvoker {
         op: &str,
         args: Value,
         call_chain: Vec<String>,
+    ) -> Result<FrameResponse, WorkerError> {
+        self.exchange_with_timeout(op, args, call_chain, None)
+    }
+
+    /// [`Self::exchange`] 的超时变体：`wait = Some(limit)` 时宿主最多等 `limit`，
+    /// 到点**撤掉配对槽位并放弃在途调用**。三个使用者：
+    /// - 接缝公共入口（任务 #53，D1 修复本体）：预算 = `seam_wait_timeout`（逐 op 表优先），
+    ///   超时另置「连接可疑」闸（见 [`Self::invoke_with_chain`]）；
+    /// - 握手帧（任务 #63，D1 边角）：预算 = `handshake_timeout`，超时另置同一闸
+    ///   （见 [`Self::handshake`]），目的只是让停机走急停；
+    /// - 命令帧（任务 #49）：预算 = 帧 `timeout_ms` + 收帧宽限，**不**置可疑闸。
+    ///
+    /// 语义边界（如实声明）：
+    /// - 超时**不等价于取消** —— 对端 worker 可能仍在执行，其迟到的响应帧会被读线程
+    ///   按「无等待者」丢弃并留警告日志；本批不做跨帧取消协议。
+    /// - **预算按「对端不被宿主占用」的时长消耗**（任务 #73 M-3）：本连接有入站请求正在
+    ///   宿主手里处理时，等待只按 [`INBOUND_PAUSE_POLL`] 的粒度醒来复查、计时挂起。
+    ///   代价如实写明：若宿主替插件跑的那一跳**自己**卡死，外层这一等也跟着没有上界 ——
+    ///   那不是本批新引入的无界（入站服务侧今天本就没有等待上限，审查稿 A4.2 原文），
+    ///   但本批把「外层 15 s」这道闸从嵌套路径上摘了下来，登记进交回清单。
+    /// - **本批只覆盖收侧等待**；写帧侧的卡死触发条件（逐字）：「对端僵死不读 stdin
+    ///   且管道满 ⇒ 写方持 `stdin` 锁阻塞在 `write_json_frame`，`recv_timeout` 覆盖不到」
+    ///   —— 那是「单读线程」既存缺陷的另一半，修它需 writer 线程 / 异步写的接缝栈重构，
+    ///   另立案 #56，不在本批范围。
+    /// - **写帧失败**报 [`WorkerError::NotDelivered`]（帧未送达 ⇒ 零副作用），
+    ///   与「帧已送达之后才坏」的 `Transport` 分开 —— 命令通道的回退判据依赖这条区别
+    ///   （任务 #73 M-1）。
+    fn exchange_with_timeout(
+        &self,
+        op: &str,
+        args: Value,
+        call_chain: Vec<String>,
+        wait: Option<Duration>,
     ) -> Result<FrameResponse, WorkerError> {
         let sequence = self.inner.next_request_id.fetch_add(1, Ordering::Relaxed) + 1;
         let request_id = format!("h{sequence}");
@@ -1079,15 +1338,65 @@ impl WorkerInvoker {
         };
         if let Err(reason) = write_result {
             // 帧没出去 ⇒ 不会有响应 ⇒ 必须自己清掉槽位，否则配对表残留。
+            // 报 [`WorkerError::NotDelivered`] 而不是 `Transport`（任务 #73 M-1）：
+            // 「对端从未收到这一帧」是**零副作用**的机械证据，命名命令的回退判据要的正是它。
             self.inner.pending.lock().remove(&request_id);
-            return Err(self.transport_error(reason));
+            return Err(WorkerError::NotDelivered {
+                plugin_id: self.inner.plugin_id.clone(),
+                op: op.to_string(),
+                reason,
+            });
         }
-        let response = match receiver.recv() {
-            Ok(response) => response,
-            Err(_) => {
+        let response = match wait {
+            None => receiver.recv().map_err(|_| {
                 // 投递口消失 = 读线程已退出（对端关闭 / 崩溃）。清槽位后明确报错。
                 self.inner.pending.lock().remove(&request_id);
-                return Err(self.transport_error("worker 连接已关闭，未收到配对响应"));
+                self.transport_error("worker 连接已关闭，未收到配对响应")
+            })?,
+            Some(limit) => {
+                // 预算 `limit` **只在对端不被宿主占用时消耗**（任务 #73 M-3 的第二半）。
+                //
+                // 为什么必须暂停：worker 的 handler 里嵌套一次 `peer.call_seam(...)`（SDK
+                // 文档示范的形态）时，它回自己那一帧的前提是**宿主先答完那一跳**。这段
+                // 时间对端既没装死也没崩，是宿主欠着它的答案 —— 按墙钟扣预算就会把外层
+                // 调用确定性误杀，并顺带把健康连接标脏（审查稿 A4.3 的六步链）。
+                // 暂停之后「到点收不到回帧」重新成为**装了死**的有效证据，
+                // 置可疑闸的推论才成立（见 [`Self::invoke_with_chain`]）。
+                let mut remaining = limit;
+                loop {
+                    // 醒来的粒度：对端被宿主占用时按 [`INBOUND_PAUSE_POLL`] 复查计数，
+                    // 不被占用时一口气等到预算耗尽（不多花一次唤醒）。
+                    let host_owes_answer = self.inner.inbound_inflight.load(Ordering::Acquire) > 0;
+                    let slice =
+                        if host_owes_answer { remaining.min(INBOUND_PAUSE_POLL) } else { remaining };
+                    match receiver.recv_timeout(slice) {
+                        Ok(response) => break response,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => {
+                            self.inner.pending.lock().remove(&request_id);
+                            return Err(self.transport_error("worker 连接已关闭，未收到配对响应"));
+                        },
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            // **到点重新读一次**闸：判定「是不是装死」看的是此刻还有没有入站
+                            // 请求压在宿主手里 —— 进 `recv_timeout` 之前读的那一次只决定醒来
+                            // 粒度，拿它当扣不扣预算的依据会把嵌套形态照旧误杀（实测：外层
+                            // 150ms 那一格正是在对端开始 `call_seam` 之后才走完的）。
+                            if self.inner.inbound_inflight.load(Ordering::Acquire) > 0 {
+                                // 这一格整格不计（保守方向 = 多给对端时间，不是误杀它）。
+                                continue;
+                            }
+                            remaining = remaining.saturating_sub(slice);
+                            if remaining.is_zero() {
+                                // 撤槽位：本次调用不再有人等。迟到的响应由读线程按无等待者丢弃。
+                                self.inner.pending.lock().remove(&request_id);
+                                return Err(WorkerError::Timeout {
+                                    plugin_id: self.inner.plugin_id.clone(),
+                                    op: op.to_string(),
+                                    timeout_ms: limit.as_millis() as u64,
+                                });
+                            }
+                        },
+                    }
+                }
             },
         };
 
@@ -1096,37 +1405,168 @@ impl WorkerInvoker {
             ResponseKind::Error => {
                 let code = response.code.unwrap_or_else(|| "SEAM_EXECUTE_FAILED".to_string());
                 let message = response.message.unwrap_or_else(|| "插件未提供错误信息".to_string());
-                Err(self.transport_error(format!("{code}: {message}")))
+                // 码与文本**同时**成形（任务 #73 S-1）：`reason` 保持 `{code}: {message}`
+                // 的既有 Display 形态不破坏可读性，判据改读 `code` 字段本体。
+                Err(self.transport_error_with_code(code, message))
             },
         }
     }
 
-    /// 发一帧并从响应的 `value` 反序列化出强类型结果。
+    /// 发一帧并从响应的 `value` 反序列化出强类型结果（`wait` 语义同
+    /// [`Self::exchange_with_timeout`]：`None` = 无限等，仅供停机一类收尾帧）。
     fn call_typed<T: serde::de::DeserializeOwned>(
         &self,
         op: &str,
         args: Value,
+        wait: Option<Duration>,
     ) -> Result<T, WorkerError> {
-        let response = self.exchange(op, args, current_call_chain())?;
+        let response = self.exchange_with_timeout(op, args, current_call_chain(), wait)?;
         let value = response.value.unwrap_or(Value::Null);
         serde_json::from_value(value)
             .map_err(|e| self.transport_error(format!("响应无法反序列化为目标类型：{e}")))
     }
 
+    /// 向长驻 worker 派发一条**命令帧**（任务 #49，T2 命令通道；由
+    /// [`crate::manager::PluginManager::execute_plugin_command_with_timeout`] 调用）。
+    ///
+    /// 五道宿主侧防线，全部落在**写帧之前**（除等待上限外没有任何「先挂起再判错」路径）：
+    /// ① drain 闸门：停机窗口内拒新命令，语义与 [`SeamInvoker::invoke_with_chain`] 一致；
+    /// ② pluginId 绑定校验：帧上的 `plugin_id` 必须等于本连接身份（注册表权威键），
+    ///    不符 ⇒ [`error_codes::PLUGIN_COMMAND_ID_MISMATCH`]，帧不发出去 ——
+    ///    「派发口发错插件」在这里就被掐死，不靠 worker 侧兜底；
+    /// ③ **进程存活预检**（任务 #73 M-1）：worker 进程已退出、或读线程已因 EOF/读错误退出
+    ///    ⇒ 报 [`WorkerError::NotDelivered`]（帧不可能送达 ⇒ 零副作用 ⇒ 上层据此把命令
+    ///    退回 spawn-on-call 通道，兑现 `manager.rs` 契约里「worker 中途异常退出也退回
+    ///    原通道」那半句）。这一条排在脏闸**之前**：「进程不在」= 回退，
+    ///    「进程在但曾超时」= 拒绝，两件事的判据不许合用一个 bool（PLAN §26.3）；
+    /// ④ **接缝脏闸**（任务 #73 S-3）：连接已被实证「写帧后到点不回帧」时，命令帧**立即**
+    ///    被拒，不再每条各自等满 `timeout_ms + 1 s`（默认 31 s）—— 此前 #53 的止血只覆盖
+    ///    接缝入口，命令通道在同一具死连接上可以无限重复地白等；
+    /// ⑤ 等待上限 = 帧预算 `timeout_ms` + [`COMMAND_FRAME_GRACE_MS`] 收帧宽限：
+    ///    预算边界上算完并回帧的 worker 不该被误杀，超过上限则放弃在途调用并报
+    ///    [`WorkerError::Timeout`]（边界语义见 [`Self::exchange_with_timeout`]）。
+    ///
+    /// 调用链传空：命令是宿主发起的**顶层**调用，按协议定义 `call_chain` 不含接收方，
+    /// 且此时没有任何插件参与发起（worker 在命令内再发 `call_seam` 时自行携带该链）。
+    pub(crate) fn execute_command(
+        &self,
+        frame: &CommandFrame,
+    ) -> Result<CommandReply, WorkerError> {
+        if self.inner.draining.load(Ordering::Acquire) {
+            return Err(self.transport_error("插件正在停机（drain），拒绝新命令帧"));
+        }
+        if frame.plugin_id != self.inner.plugin_id {
+            return Err(self.transport_error_with_code(
+                error_codes::PLUGIN_COMMAND_ID_MISMATCH,
+                format!(
+                    "命令帧绑定插件 `{}`，但本连接身份为 `{}`（宿主绑定不符，未发出帧）",
+                    frame.plugin_id, self.inner.plugin_id
+                ),
+            ));
+        }
+        // ③ 先判「进程不在」再判「进程在但脏」：两者去向相反（回退 vs 拒绝）。
+        if let Some(reason) = self.worker_gone_reason() {
+            return Err(WorkerError::NotDelivered {
+                plugin_id: self.inner.plugin_id.clone(),
+                op: ops::COMMAND.to_string(),
+                reason,
+            });
+        }
+        // ④ 脏闸：只**读**不写（命令帧自己超时不置闸，#49 语义不变）。
+        if self.inner.seam_suspect.load(Ordering::Acquire) {
+            return Err(self.transport_error_with_code(
+                error_codes::SEAM_PROVIDER_UNAVAILABLE,
+                format!(
+                    "插件 `{}` 的 worker 曾超时未回帧，连接已视为不可用（可疑），拒绝新命令帧；\
+                     请在设置中禁用再启用该插件以重建连接",
+                    self.inner.plugin_id
+                ),
+            ));
+        }
+        let args = serde_json::to_value(frame)
+            .map_err(|e| self.transport_error(format!("命令帧序列化失败：{e}")))?;
+        let wait = Duration::from_millis(frame.timeout_ms.saturating_add(COMMAND_FRAME_GRACE_MS));
+        let response = self.exchange_with_timeout(ops::COMMAND, args, Vec::new(), Some(wait))?;
+        match CommandOutcome::from_frame_response(&response)
+            .map_err(|e| self.transport_error(format!("命令回执形状不合法：{e}")))?
+        {
+            CommandOutcome::Reply(reply) => Ok(reply),
+            // exchange 已把 kind=Error 的错误信封转成 Transport；能解出 Fault 只可能是
+            // 「成功信封里装着 Fault」的对端违例，保守按命令失败报，绝不当成功返回。
+            CommandOutcome::Fault(fault) => Err(
+                self.transport_error_with_code(fault.code.clone(), fault.message.clone()),
+            ),
+        }
+    }
+
     fn transport_error(&self, reason: impl Into<String>) -> WorkerError {
-        WorkerError::Transport { plugin_id: self.inner.plugin_id.clone(), reason: reason.into() }
+        WorkerError::Transport {
+            plugin_id: self.inner.plugin_id.clone(),
+            reason: reason.into(),
+            code: None,
+        }
+    }
+
+    /// 带**协议错误码**的通道错误（任务 #73 S-1）。
+    ///
+    /// `reason` 维持既有的 `{code}: {message}` 形态（Display 逐字不变，可读性与历史日志
+    /// 口径不破坏），同时把码放进结构化字段 —— 判据读字段，从此与文案的拼装方式解耦：
+    /// 任何人改 `message`、改分隔符、加前缀都不会再**静默关掉回退**（旧写法的失效形态，
+    /// 审查稿 A2.3）。
+    fn transport_error_with_code(
+        &self,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> WorkerError {
+        let code = code.into();
+        let message = message.into();
+        WorkerError::Transport {
+            plugin_id: self.inner.plugin_id.clone(),
+            reason: format!("{code}: {message}"),
+            code: Some(code),
+        }
+    }
+
+    /// 「worker 进程已不在」的判据（任务 #73 M-1）：给出死因，`None` = 活着。
+    ///
+    /// 两条独立证据，任一成立即判死，且**都在写帧之前**取，因此结论永远是
+    /// 「这一帧不可能被执行过」：
+    /// ① `try_wait` 拿到退出码（顺带回收，不给系统留僵尸）；
+    /// ② 读线程已退出 —— 子进程一死，它的 stdout 管道必关，读侧的 EOF 比父进程的
+    ///    回收动作更早可见，且这是**无子进程可管**的测试夹具（`from_streams`）唯一的
+    ///    死讯来源。
+    ///
+    /// ⚠ 与 `seam_suspect`（「进程在、但曾超时未回帧」）是两件事：本判据 ⇒ 命令**回退**，
+    /// 脏闸 ⇒ 命令**拒绝**。刻意不合并成一个标记 —— 合并就是 M-1/M-2/M-3 的共同根。
+    fn worker_gone_reason(&self) -> Option<String> {
+        // let 链（Edition 2024）：`lock()` 的临时 guard 在整个 if 体内有效，
+        // 拆成嵌套 `if` 会被 clippy 的 `collapsible_if` 判红。
+        if let Some(child) = self.inner.child.lock().as_mut()
+            && let Ok(Some(status)) = child.try_wait()
+        {
+            return Some(format!("worker 进程已退出（{status}）"));
+        }
+        if self.inner.connection_closed.load(Ordering::Acquire) {
+            return Some("与 worker 的管道已断开（读线程已收到 EOF 或读错误）".to_string());
+        }
+        None
     }
 
     /// 进入 drain：置位拒新单，限时等在途帧自然收尾。
     ///
-    /// 返回 `true` = 配对表已清空；`false` = 超时仍有悬挂（调用方可继续停机，
-    /// 悬挂者会经读线程退出路径拿到 `Err`，不会永久等待）。
+    /// 返回 `true` = 配对表已清空**且**入站处理任务已排空；`false` = 超时仍有悬挂
+    /// （调用方可继续停机，悬挂者会经读线程退出路径拿到 `Err`，不会永久等待）。
+    /// 入站侧也要等（任务 #73 M-3）：独立入站任务收尾时会向 `stdin` 回写响应帧，
+    /// 不等它就进急停路径，回写会撞上已 `take()` 的管道 —— 结果只是少一条日志，
+    /// 但「停机把对端的请求吞了」这件事必须可见，故排空条件写进本函数而不是留给 warn。
     /// 只由 [`LoadedPlugin::unload`] 调用；`shutdown` / `Drop` 路径不 drain（急停语义）。
     pub fn drain(&self, timeout: Duration) -> bool {
         self.inner.draining.store(true, Ordering::Release);
         let deadline = Instant::now() + timeout;
         loop {
-            if self.inner.pending.lock().is_empty() {
+            if self.inner.pending.lock().is_empty()
+                && self.inner.inbound_inflight.load(Ordering::Acquire) == 0
+            {
                 return true;
             }
             if Instant::now() >= deadline {
@@ -1140,10 +1580,35 @@ impl WorkerInvoker {
         }
     }
 
+    /// 显式复位「连接可疑」闸（任务 #73 M-2）。
+    ///
+    /// 唯一调用点是 [`LoadedPlugin::unload`] —— 即口径「闸随 `LoadedPlugin` 生命周期，
+    /// 显式 `unload`/`disable` 即清」。刻意**不提供**任何自动复位路径（下一次调用不清、
+    /// 超时不清、错误不清）：自动清等于每笔重新付一遍预算，正是 D1 要止的血。
+    /// 调用时机在 `shutdown()` **之后**：停机流程自己要用脏闸走急停（见
+    /// [`Self::shutdown`]），先清会把急停变成礼貌等待。
+    pub(crate) fn reset_seam_suspect(&self) {
+        self.inner.seam_suspect.store(false, Ordering::Release);
+    }
+
+    /// worker 侧是否还有一个活着的进程/管道（任务 #73 M-1 的判据，供上层诊断）。
+    pub(crate) fn worker_is_running(&self) -> bool {
+        self.worker_gone_reason().is_none()
+    }
+
     /// 优雅停机：发 shutdown 帧 → 关 stdin → 限时等退出 → 超时强杀 → 收读线程。
+    ///
+    /// 两条**跳过礼貌帧**的例外，去向相同（直接进急停）但理由不同，判据也分开写：
+    /// - 连接已被标脏（任务 #53）：对端被实证「收到帧也不回」，而这里的等待走的是
+    ///   **无限预算**的 [`Self::exchange`] ⇒ 等 shutdown 回执会把卸载一起拖挂（D1 的卸载侧变体）。
+    /// - **worker 进程已不在**（任务 #73 M-1）：读线程已退出 ⇒ 配对表被 `clear()`，
+    ///   此后再 `insert` 的槽位没有任何人投递或清空 ⇒ `recv()` 会**永久挂起**。
+    ///   写帧本身通常先失败（管道已关），但那是 OS 的时序、不是不变式，不能当护栏。
     fn shutdown(&self) {
         // ① 先发 shutdown 帧（此刻读线程还活着，能收下这次响应）。
-        let _ = self.exchange(ops::SHUTDOWN, Value::Null, Vec::new());
+        if !self.inner.seam_suspect.load(Ordering::Acquire) && self.worker_is_running() {
+            let _ = self.exchange(ops::SHUTDOWN, Value::Null, Vec::new());
+        }
 
         // ② **真正关闭 stdin**（`take()` + drop）：worker 侧若用 `serve` 实现，
         //    读到 EOF 即正常返回并退出 —— 这是孤儿进程自退的主防线①。
@@ -1217,8 +1682,10 @@ fn check_chain(plugin_id: &str, call_chain: &[String]) -> Result<(), String> {
 /// 读线程主循环：消费 stdout 上的每一帧。
 ///
 /// - **响应** → 按 `request_id` 投递给等待者（无配对者 ⇒ 警告 + 丢弃，不打断循环）；
-/// - **请求** → 交给 [`HostPeer`] 落地，回帧时**回填 `request_id`**；
-/// - EOF / 读错误 → 退出，并**清空配对表**（让所有等待者拿到 `Err`，而不是永久挂起）。
+/// - **请求** → **交独立入站任务**落地并回帧（回填 `request_id`），读线程自己**不等处理结果**
+///   （任务 #73 M-3，理由见 [`spawn_inbound_handler`]）；
+/// - EOF / 读错误 → 退出，置 `connection_closed`（M-1 的死讯来源之一），并**清空配对表**
+///   （让所有等待者拿到 `Err`，而不是永久挂起）。
 fn run_reader(inner: Arc<WorkerInner>, mut stdout: Box<dyn Read + Send>) {
     let plugin_id = inner.plugin_id.clone();
     loop {
@@ -1238,32 +1705,18 @@ fn run_reader(inner: Arc<WorkerInner>, mut stdout: Box<dyn Read + Send>) {
                 }
             },
             Ok(Inbound::Request(request)) => {
-                // 先把 handler 取出来（`clone` 出 `Arc`）再调：不要握着 `host_peer` 的锁
-                // 执行分派，那样会在嵌套调用时自锁。
-                let host_peer = inner.host_peer.lock().clone();
-                let mut response = match host_peer {
-                    Some(host_peer) => host_peer.handle_inbound(&request),
-                    None => FrameResponse::error(
-                        error_codes::PLUGIN_UNKNOWN_OP,
-                        "宿主尚未完成握手，暂不接受插件主动发起的请求",
-                    ),
-                };
-                // 回填配对 ID：否则对端无法把这一帧与它发出的请求对上。
-                response.request_id = request.request_id.clone();
-                let mut guard = inner.stdin.lock();
-                match guard.as_mut() {
-                    Some(stdin) => {
-                        if let Err(e) = write_json_frame(stdin, &response) {
-                            tracing::warn!(
-                                plugin_id = %plugin_id,
-                                error = %e,
-                                "回写插件请求的响应失败，读线程退出"
-                            );
-                            break;
-                        }
-                    },
-                    None => break,
-                }
+                // 入站请求**不在读线程上处理**（任务 #73 M-3 的修复本体）。
+                //
+                // 原形态是在这里 `handle_inbound` + 就地回写：宿主替插件跑一跳（`block_on`
+                // 一个 async 接缝，宿主自己的 LLM 单请求上限 300 s）期间，这条连接的读线程
+                // 被整段占住 —— 于是①任何出向响应都投不出去、任何后续入站都排队，
+                // ②外层出向调用按墙钟到点 ⇒ 误杀 + 置**终局**闸，③内层答案回来后插件的
+                // 迟到回帧按「无等待者」丢弃 ⇒ 该插件此后所有新接缝调用被永久拒绝。
+                // SDK 文档亲自示范的 `peer.call_seam(...)` 形态必踩（审查稿 A4.3）。
+                //
+                // 现在的分工：读线程**只**做「分流 + 投递 + 派生活任务」，永不进入宿主逻辑；
+                // 入站任务的回写经 `stdin` 锁与出向写帧互斥，帧完整性由锁保证。
+                spawn_inbound_handler(inner.clone(), request);
             },
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
             Err(e) => {
@@ -1272,8 +1725,93 @@ fn run_reader(inner: Arc<WorkerInner>, mut stdout: Box<dyn Read + Send>) {
             },
         }
     }
-    // 让所有等待者拿到 `Err`（`recv` 因发送端被 drop 而失败），而不是永久挂起。
+    // 死讯先登记（M-1 的判据②），再让所有等待者拿到 `Err`
+    // （`recv` 因发送端被 drop 而失败），而不是永久挂起。
+    inner.connection_closed.store(true, Ordering::Release);
     inner.pending.lock().clear();
+}
+
+/// 把一条入站请求交给**独立任务**处理并回写响应（任务 #73 M-3）。
+///
+/// ## 保序口径（正面交代，不留给读者猜）
+///
+/// - **不跨请求全局串行**，也**不在本连接内串行**：同一连接的多条入站请求各起一个任务并发
+///   处理。串行正是 M-3 的病根（一条慢的宿主侧调用把整条连接的读侧堵死）。
+///   派单要求的「只在同插件 + 同 peer 内串行」这里**刻意不采纳**，理由是判据而不是偏好：
+///   一条连接的两个端点就是「本插件 + 该 worker」，按它串 = 按连接串 = 保留 head-of-line
+///   阻塞 ⇒ 嵌套链照样误杀。协议侧不需要跨请求顺序 —— 见下。
+/// - **帧序保证**：worker→host 的请求帧与 host→worker 的响应帧共用同一条管道，但每个响应
+///   都带**回填的 `request_id`**（`plugin-proto::Peer` 按 ID 配对，ID 不匹配立即 `Err`，
+///   不猜不兜底）。因此并发回写的**先后**不改变语义：唯一硬要求是「一帧要么完整写出去、
+///   要么不写」，这由 [`WorkerInner::stdin`] 的锁 + [`write_json_frame`] 的单次写入保证。
+///   写侧仍持锁阻塞的风险（对端僵死且管道满）属 #56，本批不动。
+/// - **重入安全**：入站任务里宿主可能反过来调本插件的接缝门面 ⇒ 那是**出向**帧 +
+///   出向等待，与入站任务不在一条线程上，不再有「自己等自己」的环；跨插件的
+///   `A→宿主→B` 链照旧由 [`check_chain`] 的环/深度检测在写帧前拦下。
+/// - **资源上界**：并发度 = 该 worker 自己发在途请求的数量（插件侧 `Peer` 是单线程同步的，
+///   真并发只来自插件自己的多线程实现），没有宿主侧的队列放大。
+/// - **停机**：任务收尾时经 `stdin` 锁回写；若管道已被 `shutdown()` `take()`，只留一条
+///   warn（原形态是 `break` 掉读线程 —— 那是把「一次回写失败」升级成「整条连接判死」，
+///   在并发形态下没有依据）。[`WorkerInvoker::drain`] 会等在途入站任务排空。
+fn spawn_inbound_handler(inner: Arc<WorkerInner>, request: FrameRequest) {
+    // 计数在**派生之前**自增：出向等待者复查时，宁可早看见「宿主欠着答案」，
+    // 也不能出现「任务已排队但计数还是 0」那种会被误杀的空窗。
+    inner.inbound_inflight.fetch_add(1, Ordering::AcqRel);
+    let plugin_id = inner.plugin_id.clone();
+    let task_inner = Arc::clone(&inner);
+    let thread_result = std::thread::Builder::new()
+        .name(format!("plugin-worker-inbound-{plugin_id}"))
+        .spawn(move || {
+            // `move` 之后任务自己持有这份 `Arc<WorkerInner>`：连接被 drop 也得让这条请求
+            // 有始有终（计数归还、响应回写或明确留 warn），不能悬在半路。
+            let inner = task_inner;
+            // 计数归还写在 guard 的 Drop 里：`handle_inbound` panic 时也必须把这一格还回去，
+            // 否则出向预算会被一个已不存在的入站请求永久挂起（计数泄漏比误杀更难查）。
+            let _guard = InboundGuard { inner: Arc::clone(&inner) };
+            let host_peer = inner.host_peer.lock().clone();
+            let mut response = match host_peer {
+                Some(host_peer) => host_peer.handle_inbound(&request),
+                None => FrameResponse::error(
+                    error_codes::PLUGIN_UNKNOWN_OP,
+                    "宿主尚未完成握手，暂不接受插件主动发起的请求",
+                ),
+            };
+            // 回填配对 ID：否则对端无法把这一帧与它发出的请求对上。
+            response.request_id = request.request_id.clone();
+            let mut guard = inner.stdin.lock();
+            match guard.as_mut() {
+                Some(stdin) => {
+                    if let Err(e) = write_json_frame(stdin, &response) {
+                        tracing::warn!(
+                            plugin_id = %inner.plugin_id,
+                            error = %e,
+                            "回写插件请求的响应失败（管道可能已随停机关闭）"
+                        );
+                    }
+                },
+                None => tracing::warn!(
+                    plugin_id = %inner.plugin_id,
+                    "停机已开始（stdin 已释放），丢弃插件主动发起的 `{}` 请求的响应",
+                    request.op
+                ),
+            }
+        });
+    if thread_result.is_err() {
+        // 起不了线程（系统资源）⇒ 计数必须自己还，且给对端一个明确失败而不是沉默。
+        inner.inbound_inflight.fetch_sub(1, Ordering::AcqRel);
+        tracing::warn!(plugin_id = %plugin_id, "无法启动入站处理任务，该请求被丢弃");
+    }
+}
+
+/// 入站任务的计数守卫：Drop 时递减 [`WorkerInner::inbound_inflight`]。
+struct InboundGuard {
+    inner: Arc<WorkerInner>,
+}
+
+impl Drop for InboundGuard {
+    fn drop(&mut self) {
+        self.inner.inbound_inflight.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 impl SeamInvoker for WorkerInvoker {
@@ -1292,14 +1830,58 @@ impl SeamInvoker for WorkerInvoker {
         if self.inner.draining.load(Ordering::Acquire) {
             return Err(format!("插件 `{}` 正在停机（drain），拒绝新调用", self.inner.plugin_id));
         }
+        // 「连接可疑」闸（任务 #53 修 D1）：此前已有接缝调用写帧后到点收不到回帧。
+        // 对端被实证不回帧 ⇒ 不再把新调用排进同一死通道（否则每笔都要白等一个预算，
+        // 僵死沿调用链级联放大）。处置=拒后续 + 停机走急停，不自动重启（理由见
+        // `WorkerInner::seam_suspect` 注释）。
+        //
+        // 文案两件事（任务 #73 M-2）：① 带**既有协议码**
+        // [`error_codes::SEAM_PROVIDER_UNAVAILABLE`] —— 「提供方当前不可用」正是本闸的语义，
+        // 复用现成码 ⇒ 免 11 语言译文成本（AGENTS.md 禁区 2）；② 给**处置指引**：本闸只在
+        // 显式 `unload`/`disable` 时复位，用户能做的就一件事，必须写在文案里。
+        if self.inner.seam_suspect.load(Ordering::Acquire) {
+            return Err(format!(
+                "{}: 插件 `{}` 的 worker 曾超时未回帧，连接已视为不可用（可疑），拒绝新接缝调用；\
+                 请在设置中禁用再启用该插件以重建连接",
+                error_codes::SEAM_PROVIDER_UNAVAILABLE,
+                self.inner.plugin_id
+            ));
+        }
         // 目标端自检（环 + 深度）：在**写帧之前**判定 —— 命中即拒绝、不进入等待。
         let plugin_id = self.inner.plugin_id.clone();
         check_chain(&plugin_id, &call_chain)?;
         // 通过自检 ⇒ 把自身追加到链尾，随帧一起传下去（接收方据此继续判环）。
         let mut chain = call_chain;
         chain.push(plugin_id);
-        let response = self.exchange(op, args, chain).map_err(|e| e.to_string())?;
+        // 等待预算（D1 修复本体）：**逐接缝预算表优先**（plugin-proto
+        // `SEAM_OP_TIMEOUT_OVERRIDES`，按证据定，如 `run_turn` 的 180s LLM 回合），
+        // 未进表的 op 回落实 `seam_wait_timeout`（缺省即协议常量
+        // [`DEFAULT_SEAM_TIMEOUT_MS`]）。写帧后收不到配对响应 ⇒ `WorkerError::Timeout`
+        // 并置可疑闸；其余错误（Transport 等）不置闸 ——
+        // 「对端明确回了错」与「对端装死」是两种可观测性，不能混为一谈。
+        //
+        // ⚠ 任务 #73 M-3 之后这条推论才成立：预算按「对端不被宿主占用」的时长消耗，
+        // 嵌套 `call_seam` 期间计时挂起（见 `exchange_with_timeout`）⇒ 到点意味着
+        // **真的装死**，而不是「宿主自己正占着它」。
+        let wait = self.seam_wait_for_op(op);
+        let response = self.exchange_with_timeout(op, args, chain, Some(wait)).map_err(|e| {
+            if matches!(e, WorkerError::Timeout { .. }) {
+                self.inner.seam_suspect.store(true, Ordering::Release);
+            }
+            e.to_string()
+        })?;
         Ok(response.value.unwrap_or(Value::Null))
+    }
+}
+
+impl WorkerInvoker {
+    /// 该 op 的接缝等待预算：覆盖表命中用表值，否则用连接缺省预算。
+    ///
+    /// 本批**只覆盖收侧**（等回帧的 `recv_timeout`）；写侧卡死的触发条件（逐字）：
+    /// 「对端僵死不读 stdin 且管道满 ⇒ 写方持 `stdin` 锁阻塞在 `write_json_frame`，
+    /// `recv_timeout` 覆盖不到」—— 修它需 writer 线程 / 异步写的接缝栈重构，另立案 #56。
+    fn seam_wait_for_op(&self, op: &str) -> Duration {
+        seam_timeout_ms_for_op(op).map_or(self.inner.seam_wait_timeout, Duration::from_millis)
     }
 }
 
@@ -2240,6 +2822,8 @@ impl LoadedPlugin {
         let invoker = Arc::new(WorkerInvoker::spawn(&config)?);
 
         // 握手失败也要停掉已 spawn 的进程 —— 不能只返回错误把子进程留下。
+        // 握手**超时**时 invoker 已被标脏，故下面的 `shutdown()` 跳过等待 shutdown 回执，
+        // 直接进「关管道 + 限时等退出 + 强杀」急停（任务 #63：否则挂握手会变成挂停机）。
         let declaration = match invoker.handshake() {
             Ok(declaration) => declaration,
             Err(e) => {
@@ -2300,6 +2884,22 @@ impl LoadedPlugin {
         self.invoker.clone()
     }
 
+    /// 经长驻 worker 执行一条命名命令（任务 #49，T2 命令通道）。
+    ///
+    /// 宿主侧防线（drain / pluginId 绑定 / 进程存活预检 / 接缝脏闸 / 等待上限）全部在
+    /// [`WorkerInvoker::execute_command`]，此处只是转发；授权门槛与 `inputSchema` 形状校验在
+    /// 调用方 [`crate::manager::PluginManager::execute_plugin_command_with_timeout`] 里、
+    /// 发帧之前完成。
+    pub fn execute_command(&self, frame: &CommandFrame) -> Result<CommandReply, WorkerError> {
+        self.invoker.execute_command(frame)
+    }
+
+    /// worker 侧是否还活着（进程在跑且管道未断）—— 任务 #73 M-1 判据的对外投影，
+    /// 供 [`crate::manager::PluginManager::plugin_worker_is_running`] 做诊断与测试探针。
+    pub(crate) fn worker_is_running(&self) -> bool {
+        self.invoker.worker_is_running()
+    }
+
     /// 构造 L1 事件订阅句柄（声明里含 `event.dispatch` 时才返回 `Some`）。
     fn event_subscription(&self, registry: &CapabilityRegistry) -> Option<EffectHandle> {
         if !self.declaration.subscribe.iter().any(|s| s == "event.dispatch") {
@@ -2319,10 +2919,17 @@ impl LoadedPlugin {
     }
 
     /// 卸载：drain 优雅收尾（PLAN §13.3）→ **逆序**撤销全部可逆句柄（LIFO，见模块头注释）
-    /// → 停 worker。
+    /// → 停 worker → **清接缝脏闸**。
     ///
     /// 顺序即语义：先关闸拒新单并等在途帧回完，再摘注册（门面摘除后新消费者取不到），
     /// 最后停进程 —— 原「直接掐死在途调用」的停机窗口不复存在。
+    ///
+    /// 清闸排在停机**之后**（任务 #73 M-2 的复位口）：停机自己要用脏闸走急停（见
+    /// [`WorkerInvoker::shutdown`]），先清会把急停变成对死连接的礼貌等待。清的动作本身
+    /// 是「显式 `unload`/`disable` 即清」的落地点 —— 闸的存续范围 = 一个 `LoadedPlugin`
+    /// 的生命周期，`Arc<WorkerInvoker>` 若被门面或
+    /// [`crate::manager::PluginManager::plugin_invoker`] 持有
+    /// 得比本实例久，停用之后也不该再被上一轮的脏标记拒绝。
     pub fn unload(mut self) {
         let drained = self.invoker.drain(self.invoker.inner.shutdown_timeout);
         if !drained {
@@ -2330,6 +2937,7 @@ impl LoadedPlugin {
         }
         self.rollback();
         self.invoker.shutdown();
+        self.invoker.reset_seam_suspect();
     }
 
     /// 仅回滚注册（不涉及进程），用于载入中途失败的清理。
@@ -2460,7 +3068,7 @@ fn register_remote_seam(
 mod tests {
     use super::*;
     use axagent_harness::{DispatchMode, EventCategory, EventDispatchBus};
-    use axagent_plugin_proto::Peer;
+    use axagent_plugin_proto::{CommandFault, Peer};
     use std::net::{Shutdown, TcpListener, TcpStream};
 
     #[test]
@@ -3450,5 +4058,647 @@ mod tests {
                 reason: "测试替身固定返回违规".to_owned(),
             }
         }
+    }
+
+    // ─────────────────── 任务 #49：命令帧派发（传输层单测） ───────────────────
+
+    /// 命令帧用例的统一插件 ID。
+    const CMD_PLUGIN_ID: &str = "cmd-demo@external";
+
+    /// 用回环 socket 造一个「宿主侧 invoker + 假 worker 端」连接对。
+    ///
+    /// 假 worker 端**不会自发回帧**：回什么、何时回，完全由用例经 `worker_side` 操纵，
+    /// 这样才能分别构造「回成功回执」「回错误帧」「装死不回」三种世界。
+    fn command_transport() -> (WorkerInvoker, TcpStream) {
+        let (host_side, worker_side) = tcp_pair();
+        let host_reader = host_side.try_clone().expect("克隆回环连接（读端）");
+        let invoker =
+            WorkerInvoker::from_streams(CMD_PLUGIN_ID, Box::new(host_reader), Box::new(host_side));
+        (invoker, worker_side)
+    }
+
+    /// 命令帧往返全链：宿主发出的帧必须带注册表绑定的 `plugin_id` / 命令名 / 预算，
+    /// 对端回的成功回执必须被解回强类型 [`CommandReply`]。
+    #[test]
+    fn execute_command_sends_host_bound_frame_and_returns_reply() {
+        let (invoker, mut worker_side) = command_transport();
+        let (sender, receiver) = mpsc::channel();
+        // 假 worker：收下命令帧 ⇒ 转写给主线程 ⇒ 按请求 ID 回成功回执。
+        std::thread::spawn(move || {
+            let inbound = read_inbound(&mut worker_side).expect("假 worker 应读到命令帧");
+            let request = inbound.as_request().expect("入站必须是请求帧").clone();
+            let frame = CommandFrame::from_frame_request(&request).expect("args 必须是命令帧");
+            let reply = CommandReply::for_frame(&frame, json!({ "pong": true }));
+            let response = reply
+                .into_frame_response()
+                .expect("回执编码应成功")
+                .with_id(request.request_id.clone().unwrap_or_default());
+            let _ = sender.send(frame);
+            write_json_frame(&mut worker_side, &response).expect("假 worker 应能回帧");
+        });
+
+        let frame = CommandFrame::new(CMD_PLUGIN_ID, "ping", json!({ "q": 1 }), 5_000);
+        let reply = invoker.execute_command(&frame).expect("命令帧往返应成功");
+        assert_eq!(reply.plugin_id, CMD_PLUGIN_ID, "回执绑定必须原样带回");
+        assert_eq!(reply.command, "ping");
+        assert_eq!(reply.value, json!({ "pong": true }));
+
+        let sent = receiver.recv().expect("假 worker 应观察到宿主发出的命令帧");
+        assert_eq!(sent.plugin_id, CMD_PLUGIN_ID, "宿主必须以注册表权威键绑定 pluginId");
+        assert_eq!(sent.command, "ping");
+        assert_eq!(sent.input, json!({ "q": 1 }), "输入必须原样承载");
+        assert_eq!(sent.timeout_ms, 5_000, "执行预算必须随帧下发");
+    }
+
+    /// pluginId 绑定不符 ⇒ **写帧之前**就拒绝（不靠 worker 兜底），错误信息带协议码。
+    #[test]
+    fn execute_command_rejects_plugin_id_mismatch_before_writing() {
+        // 无进程、无网络：守卫在 exchange 之前，任何通道形态都只应报错不回挂。
+        let invoker =
+            WorkerInvoker::from_streams(CMD_PLUGIN_ID, Box::new(&b""[..]), Box::new(Vec::new()));
+        let frame = CommandFrame::new("evil@external", "ping", Value::Null, 1_000);
+        let err = invoker.execute_command(&frame).expect_err("绑定不符必须拒绝");
+        let text = err.to_string();
+        assert!(
+            text.contains(error_codes::PLUGIN_COMMAND_ID_MISMATCH),
+            "错误需点明协议码，实际：{text}"
+        );
+        assert!(text.contains("未发出帧"), "语义必须写明帧未发出，实际：{text}");
+    }
+
+    /// 对端装死不回 ⇒ 宿主在「预算 + 收帧宽限」处拿 [`WorkerError::Timeout`]，
+    /// **不得**永久挂起（D1 修复的判据）。
+    #[test]
+    fn execute_command_times_out_when_worker_hangs() {
+        let (invoker, worker_side) = command_transport();
+        let started = Instant::now();
+        let outcome = with_watchdog(Duration::from_secs(10), "命令帧超时收口", move || {
+            let frame = CommandFrame::new(CMD_PLUGIN_ID, "hang", Value::Null, 100);
+            let outcome = invoker.execute_command(&frame);
+            // 先制造 EOF 再随闭包析构 invoker：否则 join_reader 会等一个仍活着的 socket。
+            let _ = worker_side.shutdown(Shutdown::Both);
+            outcome
+        });
+        let elapsed = started.elapsed();
+        let err = match outcome {
+            Ok(reply) => panic!("装死 worker 不应有回执，实际 {:?}", reply),
+            Err(err) => err,
+        };
+        assert!(
+            matches!(err, WorkerError::Timeout { timeout_ms, .. } if timeout_ms == 1_100),
+            "期望 Timeout(预算 100ms + 宽限 1000ms)，实际 {err:?}"
+        );
+        assert!(elapsed < Duration::from_secs(5), "超时收口不得迟于预算数量级，实际 {elapsed:?}");
+    }
+
+    /// worker 回错误帧（自带协议码）⇒ 宿主报错必须携带该码（映射 ErrorResponse 的输入）。
+    #[test]
+    fn execute_command_surfaces_worker_fault_code() {
+        let (invoker, mut worker_side) = command_transport();
+        std::thread::spawn(move || {
+            let inbound = read_inbound(&mut worker_side).expect("假 worker 应读到命令帧");
+            let request = inbound.as_request().expect("入站必须是请求帧").clone();
+            let fault = CommandFrame::from_frame_request(&request)
+                .map(|frame| {
+                    CommandFault::for_frame(
+                        &frame,
+                        error_codes::PLUGIN_COMMAND_UNKNOWN,
+                        "worker 没有该命令实现",
+                    )
+                })
+                .expect("解码应成功")
+                .into_frame_response()
+                .with_id(request.request_id.clone().unwrap_or_default());
+            write_json_frame(&mut worker_side, &fault).expect("假 worker 应能回错误帧");
+        });
+
+        let frame = CommandFrame::new(CMD_PLUGIN_ID, "nope", Value::Null, 5_000);
+        let err = invoker.execute_command(&frame).expect_err("错误帧必须报 Err");
+        let text = err.to_string();
+        assert!(
+            text.contains(error_codes::PLUGIN_COMMAND_UNKNOWN),
+            "协议码必须透传到宿主侧错误，实际：{text}"
+        );
+    }
+
+    /// drain 停机窗口内，新命令帧与接缝调用同口径被拒。
+    #[test]
+    fn execute_command_refused_while_draining() {
+        let (invoker, worker_side) = command_transport();
+        assert!(invoker.drain(Duration::ZERO), "无在途调用时 drain 应立即放行");
+        let frame = CommandFrame::new(CMD_PLUGIN_ID, "ping", Value::Null, 1_000);
+        let err = invoker.execute_command(&frame).expect_err("drain 后应拒绝新命令");
+        assert!(err.to_string().contains("drain"), "错误应点明停机窗口，实际：{err}");
+        // 让读线程尽快收尾（invoker 随本测试析构时 join_reader 依赖 EOF）。
+        let _ = worker_side.shutdown(Shutdown::Both);
+    }
+
+    // ─────────────────── 任务 #53：D1（接缝调用预算 + 超时标脏） ───────────────────
+
+    /// 接缝超时用例的统一插件 ID。
+    const SEAM_HANG_PLUGIN_ID: &str = "seam-hang@external";
+
+    /// 回环 socket 上的「装死假 worker」：读走**第一帧**后睡 `hang`，**永不回帧**。
+    ///
+    /// 它不看 op ⇒ 同一夹具两用：发接缝帧（op=`hang`）演 D1 的接缝装死（任务 #53），
+    /// 直接调 [`WorkerInvoker::handshake`]（op=`describe`）演握手装死（任务 #63）。
+    ///
+    /// 返回宿主侧 invoker（两类预算分别注入 `wait` / `handshake_wait`）与 worker 侧
+    /// socket 句柄：用例收尾时对后者 `shutdown(Both)` 制造 EOF，读线程才收得掉
+    /// （假 worker 不是子进程，`kill_child()` 无进程可杀 —— 与 [`command_transport`]
+    /// 同一套收尾约定）。
+    fn seam_hang_transport(
+        wait: Duration,
+        handshake_wait: Duration,
+        hang: Duration,
+    ) -> (WorkerInvoker, TcpStream) {
+        let (host_side, worker_side) = tcp_pair();
+        let host_reader = host_side.try_clone().expect("克隆回环连接（读端）");
+        let mut worker_reader = worker_side.try_clone().expect("克隆回环连接（worker 读端）");
+        std::thread::spawn(move || {
+            let _ = read_inbound(&mut worker_reader).expect("假 worker 应读到请求帧");
+            std::thread::sleep(hang);
+            // 句柄随线程结束 drop；测试主线程另持 worker_side 负责收尾。
+        });
+        let invoker = WorkerInvoker::from_streams_with_timeouts(
+            SEAM_HANG_PLUGIN_ID,
+            Box::new(host_reader),
+            Box::new(host_side),
+            wait,
+            handshake_wait,
+        );
+        (invoker, worker_side)
+    }
+
+    /// D1 修复本体：worker 装死 ⇒ 接缝调用在预算内拿超时错误（而非永久挂起），
+    /// 并且**连接被标脏**：第二次接缝调用立即被拒（不再排队等一个新预算），
+    /// 标脏后的 `shutdown()` 也必须在看门狗内收口（卸载不被拖挂）。
+    #[test]
+    fn seam_call_times_out_within_budget_and_poisons_the_connection() {
+        let wait = Duration::from_millis(150);
+        let (invoker, worker_side) =
+            seam_hang_transport(wait, Duration::from_millis(150), Duration::from_secs(2));
+
+        // ① 首次调用：预算内报超时（文本来自 WorkerError::Timeout 的 Display）。
+        let started = Instant::now();
+        let err = invoker
+            .invoke_with_chain("hang", json!({}), Vec::new())
+            .expect_err("worker 装死必须被接缝预算拦下（D1 判据）");
+        let elapsed = started.elapsed();
+        assert!(err.contains("超过宿主等待上限"), "错误应点明超时，实际：{err}");
+        assert!(err.contains("150 ms"), "预算应随错误带回，实际：{err}");
+        assert!(
+            elapsed >= wait && elapsed < Duration::from_secs(2),
+            "收口应落在预算附近，实际 {elapsed:?}"
+        );
+
+        // ② 二次调用：被「可疑」闸拒，耗时必须显著小于一个预算（证明是拒、不是再等）。
+        let started = Instant::now();
+        let err2 = invoker
+            .invoke_with_chain("hang", json!({}), Vec::new())
+            .expect_err("标脏后新接缝调用必须被拒");
+        let refused_in = started.elapsed();
+        assert!(err2.contains("可疑"), "错误应点明连接可疑，实际：{err2}");
+        assert!(refused_in < wait, "闸拒不得再等一个预算，实际 {refused_in:?}");
+
+        // ③ 停机：装死的连接上「等 shutdown 回执」就是 D1 的卸载侧变体 ——
+        //    标脏路径必须跳过礼貌帧并在看门狗内收口（真子进程形态另有 e2e 用例）。
+        let _ = worker_side.shutdown(Shutdown::Both);
+        with_watchdog(Duration::from_secs(5), "标脏后的 shutdown", move || {
+            invoker.shutdown();
+        });
+    }
+
+    /// 处置边界（任务 #73 S-3 改口径，原用例名
+    /// `seam_poison_does_not_change_command_channel_behavior`）：接缝脏闸**也拦命令通道**。
+    ///
+    /// 修复前命令通道完全不读脏闸 ⇒ 已被实证装死的连接上，每条命名命令仍各自等满
+    /// `timeout_ms + 1 s`（默认 31 s）且可无限重复，#53 的止血少覆盖一条通道。
+    /// 现在必须**立即**被拒（耗时显著小于一个预算），且：
+    /// - 错误带既有协议码 [`error_codes::SEAM_PROVIDER_UNAVAILABLE`] + 处置指引（M-2）；
+    /// - 命令帧自己超时**不**置脏（#49 语义保留）—— 这条由
+    ///   [`WorkerError::Timeout`] 只在 `invoke_with_chain` 的映射里置闸的结构保证。
+    #[test]
+    fn seam_poison_refuses_command_frames_immediately() {
+        let (invoker, worker_side) = seam_hang_transport(
+            Duration::from_millis(100),
+            Duration::from_millis(100),
+            Duration::from_secs(3),
+        );
+        assert!(
+            invoker.invoke_with_chain("hang", json!({}), Vec::new()).is_err(),
+            "先经接缝超时置脏"
+        );
+
+        let started = Instant::now();
+        let frame = CommandFrame::new(SEAM_HANG_PLUGIN_ID, "ping", Value::Null, 100);
+        let err = invoker.execute_command(&frame).expect_err("脏连接上的命令帧必须被拒");
+        let refused_in = started.elapsed();
+        assert!(
+            !matches!(err, WorkerError::Timeout { .. }),
+            "不得再走「等满预算」的老路，实际 {err:?}"
+        );
+        assert!(
+            refused_in < Duration::from_millis(1_100),
+            "脏闸拒命令不得等一个帧预算 + 宽限（100ms+1s），实际 {refused_in:?}"
+        );
+        let text = err.to_string();
+        assert!(
+            text.contains(error_codes::SEAM_PROVIDER_UNAVAILABLE),
+            "命令侧的拒绝也要带可映射的错误码，实际：{text}"
+        );
+        assert!(text.contains("禁用再启用"), "拒绝文案必须给处置指引，实际：{text}");
+        // 结构化码位（S-1）：判据读的字段必须真的有值，不是只写在文本里。
+        assert_eq!(
+            err.error_code(),
+            Some(error_codes::SEAM_PROVIDER_UNAVAILABLE),
+            "脏闸拒绝必须带结构化码位 ⇒ 回退判据据此判定「不回退」"
+        );
+        let _ = worker_side.shutdown(Shutdown::Both);
+    }
+
+    /// M-1（worker 进程已死 ⇒ 命令帧判「未送达」）之**管道已断**这一支，无门控可跑。
+    ///
+    /// 复现的正是审查稿 A1.5 的形态：表项还在、对端已没了。判定来自读线程登记的死讯
+    /// （`connection_closed`），因此它**不需要**子进程也能观测 —— 这也是
+    /// [`WorkerInvoker::worker_gone_reason`] 判据②存在的理由（真子进程那一支见
+    /// 门控 e2e `e2e_dead_worker_command_falls_back_to_spawn_once`）。
+    #[test]
+    fn execute_command_reports_not_delivered_when_the_pipe_is_gone() {
+        let (invoker, worker_side) = command_transport();
+        // 关掉对端 ⇒ 读线程读到 EOF ⇒ 置 `connection_closed` 并清空配对表。
+        let _ = worker_side.shutdown(Shutdown::Both);
+        // 自带截止的轮询（不用看门狗：不移动 `invoker`，也不会让用例永挂）。
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while invoker.worker_gone_reason().is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let gone_reason =
+            invoker.worker_gone_reason().expect("读线程应在 5s 内登记死讯（EOF 即刻可得）");
+        assert!(gone_reason.contains("管道已断开"), "死因应指向读线程已退出，实际：{gone_reason}");
+
+        let started = Instant::now();
+        let frame = CommandFrame::new(CMD_PLUGIN_ID, "ping", Value::Null, 1_000);
+        let err = invoker.execute_command(&frame).expect_err("对端已死必须报错而不是静默成功");
+        assert!(
+            matches!(err, WorkerError::NotDelivered { .. }),
+            "期望 NotDelivered（帧未送达 ⇒ 零副作用 ⇒ 上层可回退），实际 {err:?}"
+        );
+        // 关键区别：不是「等满预算」，预检在写帧**之前**就判死。
+        assert!(started.elapsed() < Duration::from_millis(1_000), "预检不得等一个帧预算");
+        let _ = worker_side.shutdown(Shutdown::Both);
+    }
+
+    /// M-1 的另一支：进程看着还活着（读线程未退出），但**写帧本身失败** ⇒ 同样报
+    /// [`WorkerError::NotDelivered`]。这一支是回退判据「帧从未送达」的字面依据。
+    #[test]
+    fn execute_command_reports_not_delivered_when_the_frame_write_fails() {
+        /// 恒失败的写侧替身：等价于对进程已消失的管道写帧（EPIPE / ERROR_BAD_DEVICE）。
+        struct FailingWriter;
+
+        impl Write for FailingWriter {
+            fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "模拟写帧失败"))
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "模拟写帧失败"))
+            }
+        }
+
+        // 读侧用一条**保持活跃**的回环（对端不关 ⇒ `connection_closed` 不会被置位），
+        // 写侧换成恒失败替身 ⇒ 预检放行、写帧失败，落进本支。
+        let (host_side, worker_side) = tcp_pair();
+        let host_reader = host_side.try_clone().expect("克隆回环连接（读端）");
+        let invoker = WorkerInvoker::from_streams(
+            CMD_PLUGIN_ID,
+            Box::new(host_reader),
+            Box::new(FailingWriter),
+        );
+
+        let frame = CommandFrame::new(CMD_PLUGIN_ID, "ping", Value::Null, 1_000);
+        let err = invoker.execute_command(&frame).expect_err("写帧失败必须报错");
+        assert!(
+            matches!(err, WorkerError::NotDelivered { ref op, .. } if op == ops::COMMAND),
+            "帧没出去 ⇒ 必须是 NotDelivered（回退判据的输入），实际 {err:?}"
+        );
+        assert!(err.to_string().contains("写帧失败"), "死因要能定位，实际：{err}");
+        // 配对表不得残留（帧没出去就没有等待者）。
+        assert!(invoker.inner.pending.lock().is_empty(), "写失败后必须自己清掉槽位");
+        let _ = worker_side.shutdown(Shutdown::Both);
+    }
+
+    /// M-2 复位口：闸**只有显式复位才清**（`LoadedPlugin::unload` / disable 的落地点），
+    /// 连续调用不会自己清；复位之后同一连接重新接受接缝调用，且拒绝文案带处置指引。
+    #[test]
+    fn seam_suspect_reset_is_explicit_only() {
+        let (host_side, worker_side) = tcp_pair();
+        let host_reader = host_side.try_clone().expect("克隆回环连接（读端）");
+        let host_teardown = host_side.try_clone().expect("克隆回环连接（收尾）");
+        let worker_reader = worker_side.try_clone().expect("克隆回环连接（worker 读端）");
+
+        // 一个**会正常应答**的假 worker：闸只由测试手工置位，测的是闸本身而非对端行为。
+        let _worker = std::thread::spawn(move || {
+            let mut peer = Peer::new(worker_reader, worker_side);
+            let _ = peer.run(|request, _peer| match request.op.as_str() {
+                "ping" => FrameResponse::success(json!({ "pong": true })),
+                other => FrameResponse::error("PLUGIN_UNKNOWN_OP", format!("未知 op：{other}")),
+            });
+        });
+
+        let invoker = WorkerInvoker::from_streams_with_timeouts(
+            "reset@external",
+            Box::new(host_reader),
+            Box::new(host_side),
+            Duration::from_millis(100),
+            Duration::from_millis(100),
+        );
+        invoker.set_declaration(
+            &PluginDeclaration {
+                proto_version: AXAGENT_PLUGIN_PROTO_VERSION,
+                subscribe: Vec::new(),
+                calls: Vec::new(),
+                capabilities: Vec::new(),
+            },
+            Arc::new(CapabilityRegistry::new()),
+        );
+
+        let outcome = with_watchdog(Duration::from_secs(5), "脏闸复位", move || {
+            // 白盒置脏：等价于「曾有一次接缝超时」（写帧后到点没回帧）。
+            invoker.inner.seam_suspect.store(true, Ordering::Release);
+            let first = invoker.invoke_with_chain("ping", json!({}), Vec::new());
+            // 第二次仍被拒 ⇒ 证明**没有**「下次调用自动清」这种复位路径（派单禁止项）。
+            let second = invoker.invoke_with_chain("ping", json!({}), Vec::new());
+            invoker.reset_seam_suspect();
+            let after_reset = invoker.invoke_with_chain("ping", json!({}), Vec::new());
+            let _ = host_teardown.shutdown(Shutdown::Both);
+            (first, second, after_reset)
+        });
+        let (first, second, after_reset) = outcome;
+
+        let err = first.expect_err("脏闸必须拒绝新接缝调用");
+        assert!(err.contains("可疑"), "错误应点明连接可疑，实际：{err}");
+        assert!(
+            err.contains(error_codes::SEAM_PROVIDER_UNAVAILABLE),
+            "拒绝要带可映射的错误码（M-2 复用既有码，不新增 ⇒ 免 11 语言成本），实际：{err}"
+        );
+        assert!(err.contains("禁用再启用"), "拒绝要给用户处置指引，实际：{err}");
+        let second_err = second.expect_err("第二次不得自动复位");
+        assert!(second_err.contains("可疑"), "闸必须是显式复位型，实际：{second_err}");
+        assert_eq!(
+            after_reset.expect("显式复位后同一连接应重新接受接缝调用"),
+            json!({ "pong": true }),
+            "复位口必须真的放行后续调用"
+        );
+    }
+
+    /// 「默认值能从常量读到、不是散落的魔数」：配置缺省逐字来自协议常量，
+    /// 且接缝预算严格小于命令帧预算（对话回合口径）；逐接缝预算表的选取规则
+    /// （表值优先、未进表用连接值）也在纯函数层面钉死。
+    #[test]
+    fn seam_wait_default_is_the_protocol_constant_not_a_local_number() {
+        // 编译期钉「接缝默认 < 命令预算」（assertions_on_constants 不许运行期比较两常量）。
+        const _: () = assert!(
+            axagent_plugin_proto::DEFAULT_SEAM_TIMEOUT_MS
+                < axagent_plugin_proto::DEFAULT_COMMAND_TIMEOUT_MS
+        );
+        let config = PluginWorkerConfig::new("default-budget@external", "unused-program");
+        assert_eq!(
+            config.seam_wait_timeout,
+            Duration::from_millis(axagent_plugin_proto::DEFAULT_SEAM_TIMEOUT_MS),
+            "缺省预算必须直接来自 plugin-proto 常量"
+        );
+        assert_eq!(axagent_plugin_proto::DEFAULT_SEAM_TIMEOUT_MS, 15_000);
+        // 握手预算（任务 #63）同为协议常量、且与接缝预算**分开**：两条通道口径不同。
+        assert_eq!(
+            config.handshake_timeout,
+            Duration::from_millis(axagent_plugin_proto::DEFAULT_HANDSHAKE_TIMEOUT_MS),
+            "缺省握手预算必须直接来自 plugin-proto 常量"
+        );
+        assert_eq!(axagent_plugin_proto::DEFAULT_HANDSHAKE_TIMEOUT_MS, 10_000);
+        let tuned_config = PluginWorkerConfig::new("tuned-budget@external", "unused-program")
+            .with_seam_wait_timeout(Duration::from_millis(300))
+            .with_handshake_timeout(Duration::from_millis(700));
+        assert_eq!(
+            (tuned_config.seam_wait_timeout, tuned_config.handshake_timeout),
+            (Duration::from_millis(300), Duration::from_millis(700)),
+            "两个预算旋钮必须互不串写（接缝覆盖不得改到握手，反之亦然）"
+        );
+
+        // 逐接缝预算表（任务 #53 裁定）：长跑型 op 用表值，其余用连接缺省值。
+        let invoker = WorkerInvoker::from_streams_with_timeouts(
+            "budget-table@external",
+            Box::new(&b""[..]),
+            Box::new(Vec::new()),
+            Duration::from_millis(axagent_plugin_proto::DEFAULT_SEAM_TIMEOUT_MS),
+            Duration::from_millis(axagent_plugin_proto::DEFAULT_HANDSHAKE_TIMEOUT_MS),
+        );
+        assert_eq!(
+            invoker.seam_wait_for_op("run_turn"),
+            Duration::from_millis(axagent_plugin_proto::AGENT_LOOP_RUN_TURN_TIMEOUT_MS),
+            "分钟级 LLM 回合必须走显式大额预算，不得被默认 15s 误杀"
+        );
+        assert_eq!(
+            invoker.seam_wait_for_op("evaluate"),
+            Duration::from_millis(axagent_plugin_proto::DEFAULT_SEAM_TIMEOUT_MS),
+            "未进表 op 必须回落连接预算"
+        );
+        // 连接级覆盖只改「未进表」的回落值；UI action 回流与 seam 同入口，同样受预算。
+        let tuned = WorkerInvoker::from_streams_with_timeouts(
+            "budget-tuned@external",
+            Box::new(&b""[..]),
+            Box::new(Vec::new()),
+            Duration::from_millis(300),
+            Duration::from_millis(axagent_plugin_proto::DEFAULT_HANDSHAKE_TIMEOUT_MS),
+        );
+        assert_eq!(tuned.seam_wait_for_op("evaluate"), Duration::from_millis(300));
+        assert_eq!(tuned.seam_wait_for_op(crate::worker::OP_UI_ACTION), Duration::from_millis(300));
+        assert_eq!(
+            tuned.seam_wait_for_op("run_turn"),
+            Duration::from_millis(axagent_plugin_proto::AGENT_LOOP_RUN_TURN_TIMEOUT_MS),
+            "进表 op 不受连接级回落值影响（表优先规则）"
+        );
+        // 握手**不**查这张表：`describe` 未进表，若哪天有人拿表凑数（假修复），
+        // 本行会随 seam_timeout_ms_for_op 的语义变化一起红。
+        assert_eq!(
+            axagent_plugin_proto::seam_timeout_ms_for_op(axagent_plugin_proto::ops::DESCRIBE),
+            None,
+            "握手预算独立于逐接缝覆盖表"
+        );
+    }
+
+    /// 任务 #63（D1 的握手边角）：worker 起来了但**不回 `describe`** ⇒ 握手必须在
+    /// 预算内失败（宁可误杀不可永挂），错误可定位到「握手 + op + 预算」，且这条连接
+    /// 被标脏 —— 标脏在这里的价值不是「拒后续接缝调用」（连接根本不交付出去），
+    /// 而是让 [`LoadedPlugin::load`] 失败路径上的 `shutdown()` 跳过等待 shutdown 回执，
+    /// 否则病灶只是从「挂握手」挪成「挂停机」。
+    #[test]
+    fn handshake_times_out_within_budget_and_poisons_the_connection() {
+        let wait = Duration::from_millis(150);
+        // 接缝预算给 5s：用于反证「闸拒」不是「又等了一个接缝预算」。
+        let (invoker, worker_side) =
+            seam_hang_transport(Duration::from_secs(5), wait, Duration::from_secs(2));
+
+        // ① 握手在预算内失败（真挂死时本行永不返回，故另有用例③的看门狗兜住停机）。
+        let started = Instant::now();
+        let err =
+            invoker.handshake().expect_err("worker 不回 describe 必须被握手预算拦下（#63 判据）");
+        let elapsed = started.elapsed();
+        let text = err.to_string();
+        assert!(text.contains("握手失败"), "错误应点明失败发生在握手阶段，实际：{text}");
+        assert!(text.contains("describe"), "错误应点名未回帧的 op，实际：{text}");
+        assert!(
+            text.contains("超过宿主等待上限 150 ms"),
+            "错误应带握手预算毫秒数（不得退化成笼统 transport error），实际：{text}"
+        );
+        // 任务 #73 M-2 下半：握手是**第二条置脏路径**，它的用户可见出口（本条）也必须带
+        // 与闸文案同一句处置指引 —— 否则「已经告诉用户怎么办」只在接缝那半边成立。
+        assert!(
+            text.contains("禁用再启用"),
+            "握手失败同样要给出处置指引（该连接随实例丢弃，用户看不到闸文案），实际：{text}"
+        );
+        assert!(
+            elapsed >= wait && elapsed < Duration::from_secs(2),
+            "收口应落在预算附近（夹具装死 2 s），实际 {elapsed:?}"
+        );
+
+        // ② 连接已标脏：后续接缝调用被**立即**拒绝，不再等一个 5s 接缝预算。
+        let started = Instant::now();
+        let err2 =
+            invoker.invoke_with_chain("hang", json!({}), Vec::new()).expect_err("握手超时应置脏");
+        let refused_in = started.elapsed();
+        assert!(err2.contains("可疑"), "错误应点明连接可疑，实际：{err2}");
+        assert!(refused_in < wait, "闸拒不得再等一个预算，实际 {refused_in:?}");
+
+        // ③ 停机：装死的连接上「等 shutdown 回执」就是 D1 的停机侧变体 ——
+        //    标脏路径必须跳过礼貌帧并在看门狗内收口（真子进程形态另有 e2e 用例）。
+        let _ = worker_side.shutdown(Shutdown::Both);
+        with_watchdog(Duration::from_secs(5), "握手超时后的 shutdown", move || {
+            invoker.shutdown();
+        });
+    }
+
+    // ─────────────── 任务 #73：M-3（嵌套 call_seam 的确定性误杀 + 永久标脏） ───────────────
+
+    /// 宿主侧「慢」的 `webhook.dispatch` 实现 —— 嵌套用例里内层那一跳的耗时来源。
+    ///
+    /// 刻意选 `webhook.dispatch`：① 它是 **async** 接缝，宿主服务入站 `call_seam` 时
+    /// 走 [`HostPeer::block_on`]（正是 M-3 占住读线程的那一步）；② 该 trait 只有一个
+    /// 必需方法，夹具面最小（与既有的 `NativeWebhookDispatch` 同形）。
+    struct SlowWebhookDispatch {
+        delay: Duration,
+    }
+
+    #[async_trait]
+    impl WebhookDispatch for SlowWebhookDispatch {
+        async fn dispatch(
+            &self,
+            _event: WebhookEvent,
+            _data: HashMap<String, Value>,
+        ) -> DispatchResult {
+            tokio::time::sleep(self.delay).await;
+            DispatchResult { success_count: 1, failure_count: 0, errors: Vec::new() }
+        }
+    }
+
+    /// 只装了慢 `webhook.dispatch` 的局部注册表（嵌套用例的宿主侧落地）。
+    fn slow_webhook_registry(delay: Duration) -> CapabilityRegistry {
+        let registry = CapabilityRegistry::new();
+        registry
+            .register_webhook_dispatch(Arc::new(SlowWebhookDispatch { delay }))
+            .expect("慢 webhook 实现应注册成功");
+        registry
+    }
+
+    /// M-3 主判据（审查稿 A4.3 的六步链）：插件 handler 里嵌套一次 `peer.call_seam(...)`，
+    /// 而**宿主替它跑的那一跳耗时 > 外层出向预算** ⇒ 修复前必然：
+    /// 外层先超时 → 撤配对槽位 + 置终局闸 → 内层答案回来后插件的迟到回帧被丢弃 →
+    /// **此后该插件全部新接缝调用永久被拒**（§26.1 表 M-3、§26.5 `N-3` 的补证）。
+    ///
+    /// 夹具形态逐字对齐 plugin-proto 模块文档示范的 `peer.call_seam` 用法，走回环
+    /// socket + 真实 `Peer`（插件侧 SDK），**不起子进程** ⇒ 不受
+    /// `AXAGENT_TEST_PLUGIN_SUBPROCESS` 门控，是无门控恒跑的端到端形态锁。
+    #[test]
+    fn nested_call_seam_beyond_outer_budget_does_not_poison_the_connection() {
+        // 外层预算 150ms、内层宿主侧真实耗时 600ms —— 内层 > 外层，正是 M-3 的触发条件。
+        const OUTER_BUDGET: Duration = Duration::from_millis(150);
+        const INNER_WORK: Duration = Duration::from_millis(600);
+
+        // 先进入 runtime 再 `set_declaration`：句柄由 `Handle::try_current()` 捕获，
+        // 捕获不到时 async 接缝只能返回 `no_runtime`，这条嵌套链就碰不到 `block_on`。
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_time()
+            .build()
+            .expect("嵌套用例需要多线程 runtime");
+        let _runtime_guard = runtime.enter();
+
+        let (host_side, worker_side) = tcp_pair();
+        let host_reader = host_side.try_clone().expect("克隆回环连接（读端）");
+        let host_teardown = host_side.try_clone().expect("克隆回环连接（收尾）");
+        let worker_reader = worker_side.try_clone().expect("克隆回环连接（worker 读端）");
+
+        // 假 worker：收到 `nest` 先向宿主发一条 `call_seam`（内层），**拿到宿主结果之后**
+        // 才回 `nest` 那一帧 —— 单线程 `Peer` 的语义决定了「内层耗时必然计入外层等待」。
+        let _worker = std::thread::spawn(move || {
+            let mut peer = Peer::new(worker_reader, worker_side);
+            let _ = peer.run(|request, peer| match request.op.as_str() {
+                "nest" => match peer.call_seam(
+                    "webhook.dispatch",
+                    "dispatch",
+                    json!({ "event": "ToolComplete", "data": {} }),
+                    request.call_chain.clone(),
+                ) {
+                    Ok(response) => FrameResponse::success(json!({ "nested": response.value })),
+                    Err(e) => {
+                        FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string())
+                    },
+                },
+                // 不嵌套的快调用：用来验「外层误杀之后，新接缝调用是否被终局闸永久拒绝」。
+                "ping" => FrameResponse::success(json!({ "pong": true })),
+                other => FrameResponse::error("PLUGIN_UNKNOWN_OP", format!("未知 op：{other}")),
+            });
+        });
+
+        let invoker = Arc::new(WorkerInvoker::from_streams_with_timeouts(
+            "nested@external",
+            Box::new(host_reader),
+            Box::new(host_side),
+            OUTER_BUDGET,
+            Duration::from_millis(100),
+        ));
+        // 声明：不提供任何接缝（避免自调判环），只声明要调用 `webhook.dispatch`。
+        invoker.set_declaration(
+            &PluginDeclaration {
+                proto_version: AXAGENT_PLUGIN_PROTO_VERSION,
+                subscribe: Vec::new(),
+                calls: vec!["webhook.dispatch".to_owned()],
+                capabilities: Vec::new(),
+            },
+            Arc::new(slow_webhook_registry(INNER_WORK)),
+        );
+
+        let (outer, follow_up, invoker) =
+            with_watchdog(Duration::from_secs(10), "嵌套链收口", move || {
+                let outer = invoker.invoke_with_chain("nest", json!({}), Vec::new());
+                let follow_up = invoker.invoke_with_chain("ping", json!({}), Vec::new());
+                // 先制造 EOF 再随闭包析构 invoker（同既有配对用例的收尾约定，否则 join_reader 互等）。
+                let _ = host_teardown.shutdown(Shutdown::Both);
+                (outer, follow_up, invoker)
+            });
+        drop(invoker);
+
+        // ① 终局闸不得因「一次嵌套」落下：健康连接上的后续调用必须照常工作。
+        assert!(
+            follow_up.is_ok(),
+            "嵌套超时把整条连接永久标脏，后续新接缝调用被拒（M-3 的「永久被拒」本体）；\
+             后续调用 = {follow_up:?}，外层嵌套调用 = {outer:?}"
+        );
+        // ② 外层嵌套调用本身不得被误杀（§18 订正后的「只要嵌套一次就必然误杀」）。
+        let value = outer.expect("内层宿主侧调用期间，外层出向等待不得按预算误杀（M-3）");
+        assert!(
+            value["nested"].is_object(),
+            "内层宿主侧接缝的返回值必须被带回，否则嵌套链等于白跑：{value}"
+        );
     }
 }

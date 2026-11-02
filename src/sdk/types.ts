@@ -10,6 +10,8 @@
  * @module sdk/types
  */
 
+import type { SandboxFrameToContent, SandboxToHostFrame } from "./sandboxFrameProtocol";
+
 // ── 基础类型 ─────────────────────────────────────────────────────────
 
 /** Skill 清单（skill.json 顶层结构） */
@@ -281,26 +283,18 @@ export interface SkillLifecycleHooks {
 
 // ── RPC 协议消息类型 ──────────────────────────────────────────────
 
-/** 宿主 → Skill（请求或响应） */
-export type HostToSkillMessage =
-  | { type: "rpc:response"; callId: string; result?: unknown; error?: string }
-  | { type: "host:event"; event: string; payload?: unknown }
-  | {
-    type: "host:lifecycle";
-    phase: "mount" | "unmount";
-    props?: Record<string, unknown>;
-  };
+/**
+ * 帧形状的唯一来源在 `./sandboxFrameProtocol`（任务 #46 的收敛点）。
+ * 这两个名字此前在本文件里**逐字写着** `"rpc:response"` / `"rpc:request"` 等判别串，
+ * 等于协议的第三份副本：宿主 handler 表与沙箱模板各自改名时，这里不会跟着红。
+ * 现在只做同名转出，既有调用面（`import type { HostToSkillMessage } from "@/sdk/types"`）不受影响。
+ */
 
-/** Skill → 宿主（请求或事件） */
-export type SkillToHostMessage =
-  | {
-    type: "rpc:request";
-    callId: string;
-    method: string;
-    args?: Record<string, unknown>;
-  }
-  | { type: "skill:ready" }
-  | { type: "skill:error"; error: string };
+/** 宿主 → 沙箱（响应与宿主主动推送） */
+export type HostToSkillMessage = SandboxFrameToContent;
+
+/** 沙箱 → 宿主（RPC 请求与就绪/错误上报） */
+export type SkillToHostMessage = SandboxToHostFrame;
 
 // ── 宿主 API 类型（ctx 对象的类型约束） ─────────────────────────
 

@@ -13,6 +13,7 @@ use sea_orm::{
 };
 
 use axagent_harness::core_error::{AxAgentError, Result};
+use axagent_harness::vector_store::{VectorCollectionAdmin, VectorReader, VectorWriter};
 
 fn validate_collection_name(name: &str) -> Result<()> {
     if name.is_empty() {
@@ -87,59 +88,12 @@ pub fn register_sqlite_vec_extension() {
     }
 }
 
-/// A single embedding record for storage in the vector database.
-#[derive(Debug, Clone)]
-pub struct EmbeddingRecord {
-    /// Unique chunk identifier
-    pub id: String,
-    /// Parent document identifier
-    pub document_id: String,
-    /// Position of this chunk within the document
-    pub chunk_index: i32,
-    /// Text content of the chunk
-    pub content: String,
-    /// Embedding vector
-    pub embedding: Vec<f32>,
-}
-
-/// A result returned from vector similarity search.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct VectorSearchResult {
-    pub id: String,
-    pub document_id: String,
-    pub chunk_index: i32,
-    pub content: String,
-    /// Distance score (lower is more similar for L2 distance)
-    pub score: f32,
-    /// Whether this chunk has an embedding in vec0
-    pub has_embedding: bool,
-}
-
-/// Configuration for HNSW (Hierarchical Navigable Small World) index.
-/// HNSW provides faster approximate nearest neighbor search for large collections.
-///
-/// Default values are suitable for most use cases:
-/// - Small collections (< 10k vectors): Use default k-NN (exact search)
-/// - Medium collections (10k-100k): ef_search=50, m=12, ef_construction=100
-/// - Large collections (> 100k): ef_search=100, m=16, ef_construction=200
-#[derive(Debug, Clone)]
-pub struct HnswConfig {
-    /// Construction time search width (higher = slower build, better graph quality)
-    /// Default: 100
-    pub ef_construction: usize,
-    /// Max connections per node (higher = better recall, more memory)
-    /// Default: 16
-    pub m: usize,
-    /// Search width (higher = slower search, better recall)
-    /// Default: 50
-    pub ef_search: usize,
-}
-
-impl Default for HnswConfig {
-    fn default() -> Self {
-        Self { ef_construction: 100, m: 16, ef_search: 50 }
-    }
-}
+// 三个向量存储 DTO 的权威定义已下沉到 `axagent-harness`（任务 #40，
+// `PLAN-shell-plus-plugins.md` §0.12.1 ① 预留接口），以便出现在 harness trait 方法签名里。
+// 原位置保留 `pub use` 不断链 —— `axagent_search::vector_store::EmbeddingRecord` 等
+// 既有路径（tools / src-tauri 共 20+ 处）继续可用，照抄先例见本 crate 兄弟模块与
+// agent crate 的 `retry_policy.rs`。
+pub use axagent_harness::vector_store::{EmbeddingRecord, HnswConfig, VectorSearchResult};
 
 /// Vector store for knowledge base embeddings.
 ///
@@ -275,7 +229,16 @@ impl VectorStore {
     /// Ensure the pgvector ANN index exists (PostgreSQL only). Tries HNSW, then
     /// ivfflat, then silently proceeds without an index (exact scan) — index is
     /// a performance optimization, never a correctness requirement.
-    async fn ensure_vector_index(&self, name: &str, _dimensions: usize, hnsw: Option<&HnswConfig>) {
+    ///
+    /// 注：更名为 `ensure_pg_vector_index` 是为了给 harness 契约里方言无关的同名方法
+    /// `VectorCollectionAdmin::ensure_vector_index`（原 `ensure_collection_hnsw`）让位，
+    /// 避免 inherent 私有方法与 trait 方法同名造成解析歧义。纯改名，零行为变更。
+    async fn ensure_pg_vector_index(
+        &self,
+        name: &str,
+        _dimensions: usize,
+        hnsw: Option<&HnswConfig>,
+    ) {
         if !self.is_pg() {
             return;
         }
@@ -503,7 +466,7 @@ impl VectorStore {
             }
         } else {
             self.exec(&self.vec_table_ddl(&name, dimensions, None)).await?;
-            self.ensure_vector_index(&name, dimensions, None).await;
+            self.ensure_pg_vector_index(&name, dimensions, None).await;
             self.registry_upsert_collection(collection_id, dimensions, "flat", None).await;
         }
 
@@ -565,7 +528,7 @@ impl VectorStore {
                     // PostgreSQL：直接 DROP + 重建向量表（content_tsv 由生成列维护）
                     let _ = self.exec(&format!("DROP TABLE IF EXISTS {name}")).await;
                     self.exec(&self.vec_table_ddl(&name, dimensions, None)).await?;
-                    self.ensure_vector_index(&name, dimensions, None).await;
+                    self.ensure_pg_vector_index(&name, dimensions, None).await;
                     self.registry_delete_collection(collection_id).await;
                     Ok(())
                 } else {
@@ -646,7 +609,7 @@ impl VectorStore {
                 .await;
         } else {
             self.exec(&self.vec_table_ddl(&name, dimensions, Some(&hnsw_config))).await?;
-            self.ensure_vector_index(&name, dimensions, Some(&hnsw_config)).await;
+            self.ensure_pg_vector_index(&name, dimensions, Some(&hnsw_config)).await;
             self.registry_upsert_collection(collection_id, dimensions, "hnsw", Some(&hnsw_config))
                 .await;
         }
@@ -1185,7 +1148,7 @@ impl VectorStore {
             if let Some(d) = dim {
                 let _ = self.exec(&format!("DROP TABLE IF EXISTS {name}")).await;
                 self.exec(&self.vec_table_ddl(&name, d, None)).await?;
-                self.ensure_vector_index(&name, d, None).await;
+                self.ensure_pg_vector_index(&name, d, None).await;
             } else {
                 self.registry_mark_disabled(collection_id).await;
             }
@@ -1929,6 +1892,205 @@ impl VectorStore {
 
     fn wrap(e: DbErr) -> AxAgentError {
         AxAgentError::Provider(format!("Vector store error: {e}"))
+    }
+}
+
+// ── harness 预留接口实现（任务 #40，`PLAN-shell-plus-plugins.md` §0.12.1 ①）──────
+//
+// 纯转接：三个 trait 的方法面逐条照 PLAN 表格归属，体内只做 one-line 转发，
+// 不加不减任何逻辑。两处「去方言」改名在此桥接：
+//   trait `VectorCollectionAdmin::ensure_vector_index` → 宿主 `ensure_collection_hnsw`
+//   trait `VectorReader::ensure_keyword_index`         → 宿主 `ensure_fts5_index`
+// 宿主原方法名一律保留，src-tauri / tests 的全部既有调用点不动。
+// 同名的 trait 方法显式写成 `VectorStore::x(self, ..)` 走 inherent（inherent 优先于
+// trait，不写也不会递归，但显式限定可杜绝后续误读）；仅 trait 私有名（上两个）直调宿主旧名。
+
+#[async_trait::async_trait]
+impl VectorCollectionAdmin for VectorStore {
+    async fn ensure_collection(&self, collection_id: &str, dimensions: usize) -> Result<()> {
+        VectorStore::ensure_collection(self, collection_id, dimensions).await
+    }
+
+    async fn get_collection_dimensions(&self, collection_id: &str) -> Result<Option<usize>> {
+        VectorStore::get_collection_dimensions(self, collection_id).await
+    }
+
+    async fn prepare_collection_for_indexing(
+        &self,
+        collection_id: &str,
+        dimensions: usize,
+    ) -> Result<()> {
+        VectorStore::prepare_collection_for_indexing(self, collection_id, dimensions).await
+    }
+
+    async fn ensure_vector_index(
+        &self,
+        collection_id: &str,
+        dimensions: usize,
+        hnsw_config: HnswConfig,
+    ) -> Result<()> {
+        self.ensure_collection_hnsw(collection_id, dimensions, hnsw_config).await
+    }
+
+    async fn delete_collection(&self, knowledge_base_id: &str) -> Result<()> {
+        VectorStore::delete_collection(self, knowledge_base_id).await
+    }
+
+    async fn clear_embeddings(&self, collection_id: &str) -> Result<()> {
+        VectorStore::clear_embeddings(self, collection_id).await
+    }
+
+    async fn set_collection_embedding_model(
+        &self,
+        collection_id: &str,
+        model: Option<&str>,
+    ) -> Result<()> {
+        VectorStore::set_collection_embedding_model(self, collection_id, model).await
+    }
+}
+
+#[async_trait::async_trait]
+impl VectorWriter for VectorStore {
+    async fn upsert_embeddings(
+        &self,
+        collection_id: &str,
+        records: Vec<EmbeddingRecord>,
+    ) -> Result<()> {
+        VectorStore::upsert_embeddings(self, collection_id, records).await
+    }
+
+    async fn add_single_chunk(
+        &self,
+        collection_id: &str,
+        document_id: &str,
+        content: &str,
+        embedding: &[f32],
+    ) -> Result<String> {
+        VectorStore::add_single_chunk(self, collection_id, document_id, content, embedding).await
+    }
+
+    async fn delete_document_embeddings(
+        &self,
+        knowledge_base_id: &str,
+        document_id: &str,
+    ) -> Result<()> {
+        VectorStore::delete_document_embeddings(self, knowledge_base_id, document_id).await
+    }
+
+    async fn insert_metadata_only_chunk(
+        &self,
+        collection_id: &str,
+        document_id: &str,
+        chunk_id: &str,
+        content: &str,
+    ) -> Result<()> {
+        VectorStore::insert_metadata_only_chunk(self, collection_id, document_id, chunk_id, content)
+            .await
+    }
+
+    async fn reinsert_embeddings(
+        &self,
+        collection_id: &str,
+        entries: Vec<(i64, Vec<f32>)>,
+    ) -> Result<()> {
+        VectorStore::reinsert_embeddings(self, collection_id, entries).await
+    }
+
+    async fn upsert_document_embeddings(
+        &self,
+        collection_id: &str,
+        entries: Vec<(i64, Vec<f32>)>,
+    ) -> Result<()> {
+        VectorStore::upsert_document_embeddings(self, collection_id, entries).await
+    }
+
+    async fn delete_chunk(&self, collection_id: &str, chunk_id: &str) -> Result<()> {
+        VectorStore::delete_chunk(self, collection_id, chunk_id).await
+    }
+
+    async fn update_chunk_content(
+        &self,
+        collection_id: &str,
+        chunk_id: &str,
+        new_content: &str,
+    ) -> Result<()> {
+        VectorStore::update_chunk_content(self, collection_id, chunk_id, new_content).await
+    }
+
+    async fn update_chunk_embedding(
+        &self,
+        collection_id: &str,
+        chunk_id: &str,
+        embedding: &[f32],
+    ) -> Result<()> {
+        VectorStore::update_chunk_embedding(self, collection_id, chunk_id, embedding).await
+    }
+}
+
+#[async_trait::async_trait]
+impl VectorReader for VectorStore {
+    async fn search(
+        &self,
+        knowledge_base_id: &str,
+        query_embedding: Vec<f32>,
+        top_k: usize,
+    ) -> Result<Vec<VectorSearchResult>> {
+        VectorStore::search(self, knowledge_base_id, query_embedding, top_k).await
+    }
+
+    async fn search_with_filter(
+        &self,
+        knowledge_base_id: &str,
+        query_embedding: Vec<f32>,
+        top_k: usize,
+        doc_ids: Option<&[String]>,
+    ) -> Result<Vec<VectorSearchResult>> {
+        VectorStore::search_with_filter(self, knowledge_base_id, query_embedding, top_k, doc_ids)
+            .await
+    }
+
+    async fn list_all_chunks(&self, collection_id: &str) -> Result<Vec<(i64, String, String)>> {
+        VectorStore::list_all_chunks(self, collection_id).await
+    }
+
+    async fn list_document_chunks_raw(
+        &self,
+        collection_id: &str,
+        document_id: &str,
+    ) -> Result<Vec<(i64, String, String)>> {
+        VectorStore::list_document_chunks_raw(self, collection_id, document_id).await
+    }
+
+    async fn list_all_metadata_rows(
+        &self,
+        collection_id: &str,
+    ) -> Result<Vec<(i64, String, String, String)>> {
+        VectorStore::list_all_metadata_rows(self, collection_id).await
+    }
+
+    async fn ensure_keyword_index(&self, collection_id: &str) -> Result<()> {
+        self.ensure_fts5_index(collection_id).await
+    }
+
+    async fn rebuild_fts_index(&self, collection_id: &str) {
+        VectorStore::rebuild_fts_index(self, collection_id).await
+    }
+
+    async fn fts_search(
+        &self,
+        collection_id: &str,
+        query: &str,
+        top_k: usize,
+    ) -> Result<Vec<VectorSearchResult>> {
+        VectorStore::fts_search(self, collection_id, query, top_k).await
+    }
+
+    async fn list_document_chunks(
+        &self,
+        collection_id: &str,
+        document_id: &str,
+    ) -> Result<Vec<VectorSearchResult>> {
+        VectorStore::list_document_chunks(self, collection_id, document_id).await
     }
 }
 

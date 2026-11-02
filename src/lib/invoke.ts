@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { AutoLearnResult, IpcEventName, Personality, PersonalityInfo } from "@/types";
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 import { onBrowserEvent } from "./browserEvents";
 import { handleCommand } from "./browserMock";
@@ -842,4 +842,26 @@ export function agentSessionCancel(sessionId: string): Promise<void> {
 /** 列出所有已知 agent 会话 ID (含 DB 中已完成的历史会话)。 */
 export function agentSessionList(): Promise<string[]> {
   return invoke<string[]>("agent_session_list");
+}
+
+/**
+ * 把宿主文件系统上的**绝对路径**换成沙箱可装载的 asset URL（`convertFileSrc` 的收口出口）。
+ *
+ * 为什么住在 `@/lib/invoke` 而不是让业务侧 `import { convertFileSrc } from "@tauri-apps/api/core"`：
+ * 禁区 1 要求全站碰 Tauri API 的口子只有这一个（`invoke` / `listen` 都从这里出）。换 URL 看着只是
+ * 拼字符串，但它拼的是**装载面** —— 多开一条 import 面就等于给「哪些路径能进 webview」留了第二个答案。
+ *
+ * ⚠ 入参必须是后端解析出来的绝对路径（如 `plugin_resolve_page_asset` 的 `absolutePath`），
+ * **不得**由前端拿 manifest 的 `entry` 自行拼接：安装目录包含性与 `assetProtocol.scope` 两道防线
+ * 都只在后端解析那一步成立，前端拼串会把它们绕过去。
+ *
+ * ⚠ 只在 Tauri 环境有解：浏览器模式（`npm run dev`）没有 asset 协议，`convertFileSrc` 会去读
+ * 不存在的 `window.__TAURI_INTERNALS__`。这里明确报错，而不是回一个装不出内容的半截 URL ——
+ * 后者的症状是「iframe 空白 + 30 s 后报超时」，与「忘记 announceReady」无法区分。
+ */
+export function assetUrl(absolutePath: string): string {
+  if (!isTauri()) {
+    throw new Error("assetUrl: 需要 Tauri 环境（浏览器模式没有 asset 协议）");
+  }
+  return convertFileSrc(absolutePath);
 }

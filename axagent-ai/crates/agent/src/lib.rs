@@ -24,7 +24,6 @@ pub mod cycle_detector;
 pub mod deep_research;
 pub mod environment_probe;
 pub mod harness_adapter;
-pub mod ir_renderer;
 pub mod multi_agent_hook;
 pub mod shared_blackboard;
 // error_classifier merged into recovery_strategies

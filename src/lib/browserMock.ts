@@ -5212,6 +5212,20 @@ async function executeCommand<T>(
       }
       return null as T;
     }
+    case "plugin_resolve_page_asset": {
+      // 页面（bundle 粒度）通道的解析命令在浏览器模式下**无对应能力**：mock 侧没有插件安装目录，
+      // 也没有 asset 协议可把绝对路径换成可装载 URL（`@/lib/invoke` 的 `assetUrl()` 同样只在
+      // Tauri 有解）。这里给的是**与后端同码的结构化错误**，而不是 default 兜底的 `undefined` ——
+      // 后者会让页面容器在读 `absolutePath` 时才炸（TypeError，无可定位性）；给码则让
+      // `npm run dev` 下走的就是真机那条按错误码分支（该码 11 语言已有译文，禁新增）。
+      throw new Error(
+        JSON.stringify({
+          code: "PLUGIN_PANEL_ASSET_UNAVAILABLE",
+          category: "validation",
+          detail: "browser mock has no plugin install root and no asset protocol",
+        }),
+      );
+    }
 
     // ── Agent Profiles (mock) ──────────────────────────────────────
     case "list_agent_profiles":

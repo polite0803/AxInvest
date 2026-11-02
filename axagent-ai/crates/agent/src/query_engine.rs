@@ -42,15 +42,10 @@ pub struct QueryEngine {
     vector_store: Option<Arc<dyn VectorSearch>>,
 }
 
-#[async_trait::async_trait]
-pub trait VectorSearch: Send + Sync {
-    async fn search(
-        &self,
-        wiki_id: &str,
-        query_embedding: &[f32],
-        top_k: usize,
-    ) -> Result<Vec<(String, f64)>, String>;
-}
+// 任务 #37（`PLAN-shell-plus-plugins.md` §0.12.3 ① 随附前置）：trait 权威定义已下沉
+// 到 foundation 层 `axagent_harness::vector_search`，原位置保留 `pub use` 不断链
+// （`axagent_harness::VectorSearch` 的照抄先例见本 crate `retry_policy.rs:22`）。
+pub use axagent_harness::VectorSearch;
 
 impl QueryEngine {
     pub fn new(

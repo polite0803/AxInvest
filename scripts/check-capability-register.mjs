@@ -19,11 +19,16 @@
 //   「合法化」，本门失去意义）；--dump-readings 只读调试，不落任何盘。
 //
 // 数据文件格式（capability-register.json）：note / caliber / sources / countRule / anchors / pipeline / entries。
+//   anchors[].planOld[] = 旧读数白名单 `{ number, note, alsoAt? }`；`alsoAt[]` = 该旧读数**另外**允许出现的
+//   PLAN 区段 `{ startLine, endLine, mustContain }`（可选，缺省=零放宽；语义与腐烂判据见下方「planOld[].alsoAt」段）。
 //   entries[].planAnchorText / planAnchorTextRange = 该登记项 planLine（含区间端点）**登记当时的整行逐字**，
 //   只作 --repin-plan 的定位键，**不参与判定档**（判据仍然只认行号 + token ⇒ 加它不会放松任何红）。
+//   entries[].evidence[].anchorText = 该代码证据锚点**登记当时的整行逐字**（口径同上，仅折叠行内连续空白），
+//   只作 --repin-code 的定位键，同样**不参与判定档**（判据仍然只认「第 line 行含 token」）。
 //   anchors[].check ∈ registryCommandCount registryModuleCount registryUnassigned registryFileLineCount
 //     registryBoundaryCount registryDomainCount frontendVolume frontendDirVolume l1ForeignBlockers
-//     k1RsFileCount k1PubTraitCount remoteSeamRegistryCount registerGroupSum manual
+//     k1RsFileCount k1PubTraitCount k1DeclaredExternalImplTraitCount remoteSeamRegistryCount registerGroupSum manual
+//     k2KeyedHits commandNameSetCount      ← #57 / #58（2026-11-02 同批新增，声明清单见 ANCHOR_CHECK_KINDS_DECLARED）
 //   entries[].check ∈ implementorCount seamExists evidenceOnly manual。
 //   ⚠ 为什么登记项的**身份键是 seamId / trait 名而不含行号**，行号只出现在 evidence 锚点里：
 //   `.i18n-allowlist.json` 拿行号当键、随编辑整体腐烂是前车之鉴（见 check-i18n-exemption-budget.mjs 头注）。
@@ -40,11 +45,37 @@
 //     dist gen build coverage .workbuddy examples）。两份忽略集**不同**（tests 只属 K1 侧，
 //     examples/build 等只属 audit 侧），故目录树只走一遍（仅剪体积目录），按路径段分类选边。
 //
+// K1 侧的三档读数（#61 定案，全部出自 `collectReadings` 的**同一趟**扫描，禁另起一遍遍历）：
+//   · `k1.pubTraits` = 扫描面内 `pub trait X` 的**唯一名**数（锚点 `k1PubTraitCount`）。
+//   · `k1.externalImplTraits` = A 档：非 harness、非测试替身文件里的 `impl … for …` 目标名集合，
+//     **不要求**该名在扫描面有声明面 ⇒ 逐条实现者数（§0.7.3–0.7.7）用它，改这一档会打穿实现者对账。
+//   · `k1.declaredExternalTraits` = 定案档 `k1DeclaredExternalImplTraitCount` = A 档站点面 ∩ 声明面，
+//     **两趟**语义（交并在遍历收齐之后做，见 `declaredExternalTraitNames`）⇒ 与
+//     `scripts/audit-capability-inventory.mjs` 的 `scanK1Traits().declaredExternalCount` 同一集合。
+//   ⚠ 两档**不可互换**：差集就是「impl 了但扫描面内没有 `pub trait` 声明」的名字（std/派生宏/外部 crate 名）。
+//   ⚠ 单趟写法（就地查声明集）不是第三档口径，是 #61 归因的**缺陷**（当前树恒少 22 条），自检 ㉖ 钉住。
+//
 // 旧读数（planOld：1534、124）的合法出现位置 —— **显式判定规则（非隐性约定）**：
 //   定位 §0.12.4 标题行（/^#{1,4}…0\.12\.4/）到下一个同级或更高一级标题之间的**区段**，
 //   且该区段文本含「漂移」字样；旧读数的每次数字命中必须落在该区段内（数字按「非行号引用」
 //   边界匹配：前后不接数字，左侧不接 `: . / #`，以免 `PLAN:124` 这类行号引用误判）。
 //   区段外的任何出现 ⇒ 红。这就是「漂移列举段」的机械定义，勿在别处再发明第二套。
+//
+// planOld[].alsoAt（任务 #65，2026-11-02）：上一条规则的**已知缺陷是「只能登记一个区段」**，不是 PLAN 写错。
+//   PLAN 里对 **HEAD 提交态**的事实陈述（如 §15.1「HEAD 产物 = 1540 条、HEAD 源码按算法应生成 1541」）
+//   必然重述旧读数，而它是「干净检出必红」结论的**可复算证据**，删掉等于毁证据 ⇒ 给这类条目开一个
+//   **白名单区段数组** `alsoAt: [{ startLine, endLine, mustContain }]`：
+//     · 判据只加不改：出现行落在 §0.12.4 漂移段 **或** 任一**健康**的 alsoAt 段 ⇒ 合法；段外照旧红。
+//     · **健康 = 段内命中 mustContain 的每个 token**（口径同 planPinned 的 token `includes`，只是从
+//       「同一行」换成「同一段」——区段天然跨行，这是定位形态差异，不是放松）。任一 token 不命中
+//       ⇒ 单独报 `[区段腐烂 ALSOAT-STALE]`（与「旧读数出段」是两回事：前者说行号锚已不可信，
+//       后者说旧数用错了地方），**且该段内的出现仍判红** —— 腐烂的重锚不得默默放行旧数。
+//     · 不登记 alsoAt ⇒ 行为与旧版**逐字一致**（零放宽）；空数组同样零放宽。
+//     · `alsoAt[].mustContain` 里的**纯数字 token** 一并纳入锚点内部自洽检查（见 checkAnchorConsistency
+//       ⑥ 档）：alsoAt 不是藏数口子 —— 允许的数字只有「本锚点 value/value2」「hard:true 且机器复检的
+//       兄弟锚点数」「**本条 planOld 自己声明的旧读数**」三档；非纯数字 token（`"HEAD 产物"`、`"1540 条"`）
+//       按既有 ③ 档惯例不做数字比对。**重锚**由 `--repin-plan` 负责（同口径：唯一定位才回写，
+//       零命中 / 歧义 / 缺 token 一律拒写），不许留一个不能重锚的钉（#48 修的就是这个病）。
 //
 // planMustAppear 的命中口径（2026-11-02 收紧，见 planNumberHits）：**数字边界匹配**，不是裸子串 ——
 //   千位空格写法算命中（`84 873`），日期/时刻串整串涂白，前后紧邻数字/小数点不算，左侧紧邻
@@ -67,10 +98,13 @@
 //   node scripts/check-capability-register.mjs --selftest       # 内建正负对照（纯函数、零盘扫描、先于任何 IO 短路）
 //   node scripts/check-capability-register.mjs --dump-readings  # 只读调试：打印实测读数（不写盘）
 //   node scripts/check-capability-register.mjs --repin-plan     # 维护模式：按定位键把 PLAN 行号引用重锚到当前文本（写盘前先备份）
+//   node scripts/check-capability-register.mjs --repin-code     # 维护模式：按定位键把代码证据锚点 evidence[].line 重锚到当前文本（默认 dry-run，--apply 才写盘）
+//   node scripts/check-capability-register.mjs --repin-code --apply  # 同上，真正回写（备份 → 定点补丁 → 从盘上复检 → 不过即回滚）
 //
 // ── --repin-plan 的由来与判据（任务 #48，2026-11-02）─────────────────────
 // 本门用**绝对行号**钉 PLAN（`anchors[].planPinned[].line` + `mustContain`、`entries[].planLine` /
-// `planLineRange`）。已实测的代价：主代理把 §0.7.6 从 5 行改成 4 行 ⇒ 全文少 1 行 ⇒ 8 处钉句**同时假红**
+// `planLineRange`、`anchors[].planOld[].alsoAt[].startLine/endLine` —— #65 起也算 PLAN 行号引用）。
+// 已实测的代价：主代理把 §0.7.6 从 5 行改成 4 行 ⇒ 全文少 1 行 ⇒ 8 处钉句**同时假红**
 // （352/515/500/939/508/507/502/320），补回同数行才转绿 ⇒ 门禁事实上给一个**活文档**施加了一条
 // 没写在任何地方的约束「编辑必须行数中性」。假红的代价是训练人去忽略红，所以把它变成一条**可执行的工序**：
 // 改 PLAN ⇒ 普通运行红 ⇒ 跑 `--repin-plan` ⇒ 表回写 ⇒ 再跑普通运行。
@@ -79,6 +113,16 @@
 //   ① **定位键唯一才回写**：钉句按 `mustContain` 全部 token 同行命中；指针按 `planAnchorText`
 //      （登记时的整行逐字，仅折叠行内连续空白）全等。命中 1 行 ⇒ 回写该行号；命中 0 或多行 ⇒
 //      **整次拒绝写盘**并逐条报告（不许猜行、不许插值、不许「取最近的一个」）。
+//      ⚠ **任务 #65 补：`planOld[].alsoAt[]` 区段同样在本模式覆盖范围内**（否则又造一个不能重锚的钉，
+//      正是上面这段讲的病）。区段的定位键 = `mustContain` 的**最小包络窗口**（窗口内含全部 token，
+//      且首行、末行各携带一个「窗口内别处没有」的 token ⇒ 按包含关系不可再缩）：命中 1 个 ⇒ 成对回写
+//      startLine/endLine；0 个 ⇒ 零命中拒写；≥2 个 ⇒ 歧义拒写并列出全部候选（修法同 planPinned：
+//      收紧 mustContain，补一条只有该段才有的句子）。
+//      ⚠ 为什么**不**用「保持段高」：位移之后段高是**不可知**的冗余（登记的那几行此刻坐着上一段的
+//      尾巴），而 token 仍在盘上。实测现盘 §15.1 把 `1540 / 1541 / HEAD` 挤在**同一行** ⇒ 「同高且含全部
+//      token」的候选恒有 段高+1 = 8 个（探针 `.tmp/res65-alsoAt-probe.mjs`，+5/+9/+40/−9/−40 五个位移
+//      全部歧义）⇒ 每次位移都拒写，区段就成了不能重锚的钉。改成按包络重划边界后，重锚只会把段**收紧**
+//      到 token 所在的最小范围（判据只朝更严的方向动，`mustContain` 一字未动），并逐条打印段高变化。
 //   ② **红线：绝不用模糊匹配代替行号锚点**。判定跑（`checkPlan`）仍按「第 N 行是否含该句」逐行核 ——
 //      句子漂到别的行、或整句被改写，仍是红。重锚只改**表里的数字**，不改判据形态。
 //      这条由负控㉑g 机械锁定：把钉句指到「同一句话出现的另一行」必须照样判红。
@@ -95,8 +139,49 @@
 // ⚠ 本模式**不接进 CI**（`ci-check.mjs` / `ci.yml` 都只有 `--selftest` + 判定两步）：
 //   门禁的意义是「漂了就红、由人确认后再改表」，把自动回写挂进 CI 等于让漂移自我合法化。
 //
-// 退出码：0 = hard:true 判据全部一致（或 selftest 全过 / 重锚写盘并复检通过 / 无需重锚）；
-//   1 = 任一 hard:true 不一致 / 镜像表缺失 / selftest 失败 / 重锚被歧义或零命中阻断（未写盘）。
+// ── --repin-code 的由来与判据（任务 #55，2026-11-02）─────────────────────
+// 本门还有一族**代码**行号锚点：`entries[].evidence[]` = `{ ref, file, line, token, endLine? }`，
+// 判定档的判据是「该文件的第 `line` 行必须含 `token`」（见 adjudicateEvidence）。它和 PLAN 行号锚
+// 同一种病，而且更常犯：**多会话并行改同一个 Rust 文件**时，函数只要整体往下位移，这条门就成批假红。
+// 实测触发样本（2026-11-02）：并发编辑 `axagent-plugins/crates/plugins/src/worker.rs` 与 `manager.rs`
+// ⇒ `workflow.reflector`（worker.rs:1527）、`workflow.evolver`（worker.rs:1551 与 :1714）、
+// `dojo.extension`（manager.rs:654）三条同时红，红的却是「行号不在了」而不是「语义变了」。
+//
+// 与 --repin-plan 的分工（勿混）：--repin-plan 只重锚 PLAN 行号引用（`planPinned` / `planLine` /
+//   `planLineRange` / `planOld[].alsoAt[]` 区段），--repin-code 只重锚 evidence 行号；两者都不碰判据形态。runRepin 结尾那句
+//   「本模式只重锚 PLAN 行号，不碰 evidence」依然成立 —— evidence 的位移由**本模式**处理，
+//   语义变化（零命中）仍旧两边都不许改写、判定档照旧红。
+//
+// 判据（三档，全部 fail-closed；与 --repin-plan 同形，但**定位键换成 evidence 自己的键**）：
+//   ① **定位键唯一才回写**：新增可选字段 `entries[].evidence[].anchorText` = 该 evidence 登记当时的
+//      **整行逐字**（仅折叠行内连续空白，口径同 `normPlanLine`）。重锚时在该 evidence 的**原文件**内
+//      按「整行归一后全等」检索：命中 1 行 ⇒ 把 `line` 改成新行号（并同步 `ref` 末尾的 `:行号`）；
+//      命中 0 行 ⇒ 该行已被改写/删除 = **语义变化不是位移** ⇒ 拒写并逐条点名；
+//      命中多行 ⇒ 歧义 ⇒ **整次运行拒绝写盘**并逐条打印全部候选行号（不许挑一个、不许插值）。
+//      ⚠ 为什么不能只拿 `token` 当键：现盘 `workflow.evolver` 两条 evidence 用**同一个 token**
+//      （`remote_method_not_supported`）指向同文件的 :1551 与 :1714，按 token 全文检索**必然多命中** ⇒
+//      它是判据（"第 N 行含该串"），不是身份键。token 命中情况在报告里**只作诊断信息打印**，不参与放行。
+//   ② **红线：绝不放宽判定档**。`adjudicateEvidence` 一行没改 —— 本模式只改**表里的数字**，
+//      「第 N 行含 token」的逐行核法照旧；行号再指错一行仍判红（负控㉒b2 / ㉒h 锁这条）。
+//   ③ **缺定位键即拒绝**：evidence 需要回写（判定档已红）但没有 `anchorText` ⇒ 落「缺定位键」档，
+//      **不退回用 token 猜**，拒写并点名（报告里给出该 token 当前在文件内的命中行号，便于人工补键）。
+//      行号仍与盘上相符的 evidence 不需要回写 ⇒ 不计缺键（否则现盘 66 条全无 anchorText，本模式永远
+//      不可用）；缺键只在「真要改这一行」时才咬人。
+//   ⚠ 不重锚的 evidence（逐条点名，不装作覆盖到了）：**文件级**（无 `line`）、**区间锚点**（带 `endLine`，
+//   两端位移量要人判）、**无 token**（判定档本就不检查该行 ⇒ 无键可定位）。
+//
+// 写盘工序（与 --repin-plan 同，但**默认 dry-run**）：不带 `--apply` 只打印「旧→新」计划与统计，
+//   一个字都不写；带 `--apply` 才逐字节备份到 `.tmp/capability-register.<UTC 时间戳>.bak.json`，
+//   再走**定点文本补丁**（不整体 `JSON.stringify` 重写 ⇒ 未涉及的字节逐字不动，另有会话正在编辑同一张表，
+//   整体重排会互相打散），补丁完成后先比对**内存版 vs 文本版**（不一致即拒写），落盘后**从盘上重读**并复检
+//   （除行号外一字未动 + 复跑 computeCodeRepin 必须归零），不过 ⇒ 用备份回滚并以非零退出。
+//
+// ⚠ 本模式同样**不接进 CI**：理由与上面那条逐字相同 —— 自动回写挂进 CI = 让漂移自我合法化。
+//   本模式的存在也不改判定档：普通运行仍照旧红（验收时须同时看到「--repin-code 默认档不写盘」
+//   与「判定档仍 EXIT=1」两件事）。
+//
+// 退出码：0 = hard:true 判据全部一致（或 selftest 全过 / 重锚写盘并复检通过 / 无需重锚 / --repin-code 默认 dry-run 无阻断）；
+//   1 = 任一 hard:true 不一致 / 镜像表缺失 / selftest 失败 / 重锚被歧义或零命中或缺定位键阻断（未写盘）/ 复检不过已回滚。
 //   hard:false 与 manual 一律不影响退出码（但必须印出来 —— 「未机器复检」不是「通过」）。
 //
 // main guard（2026-11-11 阻断 2）：本模块的判据**全是 export 的纯函数**，主流程收在 `main()` 里，
@@ -124,6 +209,8 @@ const args = process.argv.slice(2);
 const SELFTEST = args.includes("--selftest");
 const DUMP = args.includes("--dump-readings");
 const REPIN = args.includes("--repin-plan");
+const REPIN_CODE = args.includes("--repin-code");
+const APPLY = args.includes("--apply");
 
 const REGISTER_PATH = join(ROOT, "scripts", "capability-register.json");
 
@@ -133,6 +220,10 @@ const K1_IGNORE = new Set(["target", "node_modules", "gen", "tests"]); // PLAN �
 const AUDIT_SKIP = new Set(["target", "node_modules", "output", ".git", ".tmp", "dist", "gen", "build", "coverage", ".workbuddy", "examples"]); // audit-l1-blockers.mjs:17
 const WALK_PRUNE = new Set(["target", "node_modules", "gen", ".git"]); // 一次遍历：只剪「体积/必然无料」目录，其余按路径段分类
 const HARNESS_PREFIX = "axagent-core/crates/harness/";
+// `pub trait X` 的声明面正则。**逐字等于** `scripts/audit-capability-inventory.mjs:60` 的 `PUB_TRAIT_RE`
+// （#61 定案档 `k1DeclaredExternalImplTraitCount` = 本正则的声明面 ∩ `implTraitOf` 的站点面，两边必须
+// 同一份判据 ⇒ 改这里必须同改那边，与 DOMAINS 的抄录同步点同一处置）。
+const PUB_TRAIT_RE = /^pub trait\s+([A-Za-z_][A-Za-z0-9_]*)/;
 
 // 锚点 check 种类的**声明清单**（与文件头 data-format 行同源，逐字一致）。
 // --selftest 用它兜底并反向校验镜像表：表里出现本清单之外的新 check 种类 ⇒ 自检红，
@@ -142,6 +233,9 @@ const ANCHOR_CHECK_KINDS_DECLARED = [
   "registryBoundaryCount", "registryDomainCount", "frontendVolume", "frontendDirVolume",
   "l1ForeignBlockers", "k1RsFileCount", "k1PubTraitCount", "remoteSeamRegistryCount",
   "registerGroupSum", "manual",
+  "k2KeyedHits", // #57：K2 键控面读数（value=强档 trait 数 / value2=弱档）——登记必须 hard:false
+  "commandNameSetCount", // #58：契约 A 名集合数 == 产物条目数 == 登记值（三方对齐）
+  "k1DeclaredExternalImplTraitCount", // #61：K1 + **有声明面**的外部实现者 trait 数（两趟法，与 audit 脚本 scanK1Traits 同源）
 ];
 
 // DOMAINS 逐字抄自 scripts/audit-l1-blockers.mjs:36-51（152/28 与 293/84 873 的基线出处）
@@ -214,6 +308,10 @@ export function checkSelfConsistency(register) {
  *      `commandTotal` 钉句里的 `164` ← `commandModules`（check=registryModuleCount）、
  *      `k1RsFileCount` 钉句里的 `316` ← `k1PubTraitCount`（check=k1PubTraitCount）。
  *   ③ 非纯数字 token（`"28 文件"`、`"A 11 + B 10 + C 5"`）不做数字比对，仍只由 checkPlan 的存在性把关。
+ *   ④（任务 #65）`planOld[].alsoAt[].mustContain` 的纯数字 token **同样**受 ② 管辖，另给一档窄宽容：
+ *      允许等于「本条 planOld 自己声明的旧读数」（alsoAt 的用途就是给这个旧读数开合法出现处，
+ *      要求它反过来等于登记值会自相矛盾）。除此之外不得放宽 —— 这是「把脱节数字从钉句挪进区段」
+ *      这条洗白路径的封堵点。
  *  分档：本判据是「表自身散架」，与 checkSelfConsistency 同档 ⇒ **一律计入硬失败，不看 anchor.hard**
  *  （否则 hard:false 的 232/51 可以自说自话，判据分档只适用于「登记 vs 实测」那一类差异）。 */
 export function checkAnchorConsistency(register) {
@@ -240,6 +338,21 @@ export function checkAnchorConsistency(register) {
         problems.push(`锚点 ${a.id} 自相矛盾：value=${a.value} / planNumber=${a.planNumber ?? "—"} / mustContain=${t} —— PLAN:${pin.line} 钉句里的这个数字既非本锚点登记数、也不属于「hard:true 且机器复检」锚点的登记数（②：一侧被改、一侧留旧数；藏进软锚点不算宽容）`);
       }
     }
+    // ⑥ 档（任务 #65）：`planOld[].alsoAt[].mustContain` 的纯数字 token 同受本判据管辖 —— alsoAt 是新开的
+    // 口子，若不纳入，「把与登记脱节的数字从 planPinned 挪进 alsoAt」就是现成的洗白路径。
+    // 第四档宽容是**且仅是**「本条 planOld 自己声明的那个旧读数」：alsoAt 的用途正是给旧读数的合法出现处
+    // 开门，这个数字必然不是登记值，要求它等于登记值会自相矛盾；除此之外一律按②/⑮ 的原口径判。
+    for (const old of a.planOld ?? []) {
+      const declaredOld = old.number === undefined || old.number === null ? null : norm(old.number);
+      for (const rg of old.alsoAt ?? []) {
+        for (const t of rg.mustContain ?? []) {
+          if (!pureNum(t)) { continue; } // ③ 档惯例：非纯数字 token（`"HEAD 产物"`、`"1540 条"`）不做数字比对
+          const d = norm(t);
+          if (own.has(d) || tableNumbers.has(d) || (declaredOld !== null && d === declaredOld)) { continue; }
+          problems.push(`锚点 ${a.id} 自相矛盾：value=${a.value} / planNumber=${a.planNumber ?? "—"} / alsoAt.mustContain=${t} —— planOld「${old.number}」的重锚区段 PLAN:${rg.startLine ?? "?"}–${rg.endLine ?? "?"} 钉了这个数字，它既非本锚点登记数、不是该条 planOld 声明的旧读数、也不属于「hard:true 且机器复检」锚点的登记数（⑥：alsoAt 不是藏数口子；要把段内其它数字当自证键，请写成非纯数字 token，如「${t} 条」）`);
+        }
+      }
+    }
   }
   return problems;
 }
@@ -255,17 +368,83 @@ export function isTestDoublePath(rel) {
  *  被实现类型允许以 `$` 开头 —— 宏臂内的 `impl ProviderAdapter for $t`（providers/src/compat.rs:112/198）与
  *  `impl Tool for $name`（tools/src/tools/{browser,finance,obsidian}.rs 共 6 处）**计入站点**：
  *  这正是镜像表 note「实现者 14/199 由宏展开的 impl 站点构成」所声明的同一口径（14=12+2、199=193+6）。 */
-const IMPL_LINE_RE = /^\s*(?:unsafe\s+)?impl(?:\s*<[^;{]*?>)?\s+([A-Za-z_][\w:]*(?:<[^>]*>)?)\s+for\s+[A-Za-z_$(]/;
+const IMPL_LINE_RE = /^\s*(?:unsafe\s+)?impl(?:\s*<[^;{]*?>)?\s+([A-Za-z_][\w:]*(?:<[^>]*>)?)\s+for\s+([A-Za-z_$(][\w:]*)/;
 export function implTraitOf(line) {
   const m = IMPL_LINE_RE.exec(line);
   if (!m) { return null; }
   return m[1].replace(/<.*$/, "").split("::").pop();
 }
 
+/** 同一行的**被实现类型**侧（group 2）——K2 形态⑧ 的 impl→trait 反查表用（#57）。
+ *  与 implTraitOf 共用 IMPL_LINE_RE（禁区 12：一条 impl 形态只许有一套正则）；
+ *  group 2 只是把已有匹配的右半边取出来，**不改变命中集合**。宏臂 `for $t` 无具体类型名 ⇒ 返回 null。 */
+export function implTypeOf(line) {
+  const m = IMPL_LINE_RE.exec(line);
+  if (!m || m[2].startsWith("$")) { return null; }
+  return m[2].replace(/<.*$/, "").split("::").pop();
+}
+
+/** 内联 `#[cfg(test)] mod` 块的行区间（PLAN §24.5 / 任务 #54 的「其中在 test 块内」列）。
+ *  判据（机械、可复核）：属性行 `^\s*#\[cfg\(test\)\]`（同一行或**紧邻下一个非空行**必须跟着
+ *  `mod 名 … {`），从该 `mod` 行起按**花括号配平**到块闭合为止 ⇒ 「最近一个未闭合的 `#[cfg(test)] mod`」。
+ *  ⚠ 三条刻意的边界：
+ *   ① `#[cfg(test)]` 后跟 `fn` / `use` / `const` **不开区间** —— 那是被门控的单个条目，误开会把后续
+ *      生产站点整段吞进 test 列（方向上比「少计」更危险）；
+ *   ② 嵌套在已识别块里的属性不重复开区间（外层区间已覆盖）；
+ *   ③ 花括号按字符计数，不剥字符串/注释 —— 与本文件既有的块体定位（`k2TraitDefs`、④/⑧ 的 match 块）
+ *      同一套粗粒度做法，**不许**在这里另发明第二套「块边界」。
+ *  纯函数（输入整份文件文本）⇒ collectReadings 与 selftest 共用同一实现。 */
+export function cfgTestRanges(text) {
+  const ranges = [];
+  if (!text || !text.includes("#[cfg(test)]")) { return ranges; }
+  const lines = text.split("\n");
+  const ATTR_RE = /^\s*#\[cfg\(test\)\]/;
+  const MOD_RE = /^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+[A-Za-z_][A-Za-z0-9_]*\b/;
+  for (let i = 0; i < lines.length; i++) {
+    if (!ATTR_RE.test(lines[i])) { continue; }
+    let head = -1;
+    if (MOD_RE.test(lines[i].replace(ATTR_RE, "").trim())) { head = i; } else {
+      for (let j = i + 1; j <= Math.min(i + 2, lines.length - 1); j++) {
+        if (!lines[j].trim()) { continue; }
+        if (MOD_RE.test(lines[j])) { head = j; }
+        break; // 紧邻的非空行不是 `mod` ⇒ 这个属性不属于测试块
+      }
+    }
+    if (head < 0) { continue; }
+    let depth = 0, opened = false, end = lines.length;
+    for (let k = head; k < lines.length; k++) {
+      for (const ch of lines[k]) {
+        if (ch === "{") { depth++; opened = true; } else if (ch === "}") { depth--; }
+      }
+      if (opened && depth <= 0) { end = k + 1; break; }
+    }
+    ranges.push({ start: head + 1, end });
+    i = end - 1; // 块内不重复开区间（边界 ②）
+  }
+  return ranges;
+}
+
+/** 行号（1 基）是否落在某个 test 块区间内（**两端闭合**：块头行与块尾行都算）。 */
+export function lineInRanges(ranges, n) {
+  return ranges.some((r) => n >= r.start && n <= r.end);
+}
+
 /** seamDeclared（countRule.seamDeclared）：seamId 字面量相等或以 `seamId.` 为前缀。text=null 表示文件缺失。 */
 export function seamDeclared(seamId, text) {
   if (text === null || text === undefined) { return null; }
   return text.includes(`"${seamId}"`) || text.includes(`"${seamId}.`);
+}
+
+/** `k1DeclaredExternalImplTraitCount`（#61 定案档）的交并步，**纯函数**：
+ *  「扫描面内有 `pub trait X` 声明」∩「X 有非 harness、非测试替身的 impl 站点」的 trait 名。
+ *  = `scripts/audit-capability-inventory.mjs` 的 `scanK1Traits().declaredExternalTraits` 同一定义。
+ *  ⚠ 本函数**只能在两批名字都收齐之后调用**（两趟法）。在遍历中途逐行调用，等价于把
+ *  「impl 站点早于其声明文件出现」的 trait 静默丢掉 ⇒ 顺序相关读数（audit 脚本里命名为 `singlePass`，
+ *  当前树恒少 22 条）—— 那是 #61 复现并归因的**缺陷**，不是另一档口径，禁止用它出数。
+ *  返回排序后的名单（自检与 dump 可逐条点名）。 */
+export function declaredExternalTraitNames(siteNames, declaredNames) {
+  const declared = new Set(declaredNames);
+  return [...new Set(siteNames)].filter((t) => declared.has(t)).sort();
 }
 
 /** 证据锚点判据：文件存在 + 行号存在 + 有 token 时该行（或 [line,endLine] 区间）含该 token。 */
@@ -355,6 +534,27 @@ export function driftRegionLines(planText) {
   return { start: start + 1, end };
 }
 
+/** `planOld[].alsoAt[]` 区段是否**健康**（任务 #65，判据见文件头「planOld[].alsoAt」段）。
+ *  健康 = 区段行号合法（1 ≤ startLine ≤ endLine ≤ 文末）且段内命中 mustContain 的每个 token。
+ *  token 比对口径逐字复用 planPinned 的那一套（`String.includes`，见 pinHitLines），差别只在
+ *  planPinned 要求全部 token **同一行**、alsoAt 要求全部 token **同一段** —— 区段描述的是跨行的
+ *  事实陈述，这是定位形态的差异，不是把 `includes` 换成模糊匹配。
+ *  返回 { ok, start, end, missing, reason }；`missing` 为缺失 token 列表，`reason` 用于结构性失配
+ *  （行号非法 / 无自证 token），两者互斥地给出「为什么这段不可信」。 */
+export function alsoAtRegionStatus(planLines, region) {
+  const start = Number(region?.startLine);
+  const end = Number(region?.endLine);
+  const raw = region?.mustContain ?? [];
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
+    return { ok: false, start, end, missing: [], reason: `区段行号缺失或非法（startLine=${region?.startLine ?? "缺"} / endLine=${region?.endLine ?? "缺"}，须 1 ≤ start ≤ end）` };
+  }
+  if (!raw.some((t) => String(t).length > 0)) {
+    return { ok: false, start, end, missing: [], reason: "段内无 mustContain 自证 token ⇒ 只剩裸行号，无据放行（缺定位键即拒，与 planPinned 同口径）" };
+  }
+  const missing = raw.filter((t) => String(t).length > 0 && !planLines.slice(start - 1, end).some((l) => l.includes(t)));
+  return { ok: !missing.length, start, end, missing, reason: "" };
+}
+
 /** PLAN 正文对账（只读 docs/**，绝不写）：planMustAppear / planPinned / planOld / bannedPlanPhrases。
  *  分级与锚点自身一致：hard:false 锚点（如 manual 档 232/51）的 planNumber/钉句缺失进 soft（只报告），
  *  与「manual ⇒ 不判红」的总分档一致；禁语属 caliber 级判据，一律 hard。 */
@@ -368,6 +568,8 @@ export function checkPlan(register, planText) {
   }
   const lines = planText.split("\n");
   let appears = 0;
+  let healthyRegions = 0;
+  let rottenRegions = 0;
   for (const a of register.anchors) {
     const sink = a.hard === false ? soft : fails;
     if (a.planMustAppear && a.planNumber) {
@@ -387,17 +589,35 @@ export function checkPlan(register, planText) {
     for (const old of a.planOld ?? []) {
       const region = driftRegionLines(planText);
       const hits = numberOccurrences(planText, old.number);
+      const alsoList = old.alsoAt ?? [];
+      const healthy = [];
+      const rotten = [];
+      // ① 先验段自身（与出现行无关：段腐烂是**独立**一条缺陷，段内一次旧读数没有也要报）
+      alsoList.forEach((rg, j) => {
+        const st = alsoAtRegionStatus(lines, rg);
+        if (st.ok) { healthyRegions++; healthy.push(st); return; }
+        rottenRegions++;
+        rotten.push(st);
+        sink.push(`[区段腐烂 ALSOAT-STALE] 锚点 ${a.id} 旧读数 ${old.number} 的第 ${j + 1} 个 alsoAt 区段 PLAN:${rg?.startLine ?? "?"}–${rg?.endLine ?? "?"} 已不可信 —— ${st.missing.length ? `段内缺自证 token [${st.missing.join(" / ")}]` : st.reason} ⇒ 缺陷类型是**行号锚腐烂**（段被改写/搬走/没带键），与「旧读数出段」不是同一件事；该段内的旧读数出现一律照旧判红 —— 腐烂的重锚不得默默放行旧数。修法：跑 \`--repin-plan\` 重锚或直接收紧 mustContain${old.note ? ` —— ${old.note}` : ""}`);
+      });
+      const inSeg = (ln, s) => s !== null && ln >= s.start && ln <= s.end;
+      const segLabel = (s) => `${s.start}–${s.end}`;
       for (const ln of hits) {
-        if (!region || ln < region.start || ln > region.end) {
-          sink.push(`旧读数 ${old.number} 出现在漂移列举段之外（PLAN:${ln}${region ? `，合法区段仅 ${region.start}–${region.end}` : "，且找不到含「漂移」的 §0.12.4 区段"}）—— ${old.note}`);
-        }
+        if (inSeg(ln, region) || healthy.some((s) => inSeg(ln, s))) { continue; }
+        const parts = region ? [region, ...healthy].map(segLabel) : healthy.map(segLabel);
+        const where = region
+          ? `，合法区段仅 ${parts.join(" / ")}`
+          : (healthy.length ? `，且找不到含「漂移」的 §0.12.4 区段（合法区段仅剩 alsoAt ${parts.join(" / ")}）` : "，且找不到含「漂移」的 §0.12.4 区段");
+        const inside = rotten.filter((s) => inSeg(ln, s));
+        sink.push(`旧读数 ${old.number} 出现在漂移列举段之外（PLAN:${ln}${where}）—— ${old.note}${inside.length ? `；⚠ 该行落在**已腐烂**的 alsoAt 区段 ${inside.map(segLabel).join(" / ")} 内 ⇒ 腐烂区段不作放行，缺陷定性见同锚点的 ALSOAT-STALE 专码行` : ""}`);
       }
     }
   }
   for (const ph of register.caliber.bannedPlanPhrases ?? []) {
     if (planText.includes(ph)) { fails.push(`并行口径禁语「${ph}」出现在 PLAN 正文（定案口径见 caliber.statement）`); }
   }
-  passed.push(`PLAN 对账：planMustAppear ${appears} 项 · planPinned ${register.anchors.reduce((n, a) => n + (a.planPinned?.length ?? 0), 0)} 处 · planOld ${register.anchors.reduce((n, a) => n + (a.planOld?.length ?? 0), 0)} 项 · 禁语 ${(register.caliber.bannedPlanPhrases ?? []).length} 条`);
+  const alsoAtCount = register.anchors.reduce((n, a) => n + (a.planOld ?? []).reduce((m, o) => m + (o.alsoAt?.length ?? 0), 0), 0);
+  passed.push(`PLAN 对账：planMustAppear ${appears} 项 · planPinned ${register.anchors.reduce((n, a) => n + (a.planPinned?.length ?? 0), 0)} 处 · planOld ${register.anchors.reduce((n, a) => n + (a.planOld?.length ?? 0), 0)} 项${alsoAtCount ? `（另有 ${alsoAtCount} 个 alsoAt 重锚区段，健康 ${healthyRegions} / 腐烂 ${rottenRegions}）` : ""} · 禁语 ${(register.caliber.bannedPlanPhrases ?? []).length} 条`);
   return { fails, soft, passed };
 }
 
@@ -444,9 +664,29 @@ export function reconcile(register, readings, planText) {
       return null;
     };
     switch (a.check) {
-      case "registryCommandCount":
-        mismatch = !readings.registry ? "注册表缺失 —— 跳过 ≠ 通过" : cmpNum(readings.registry.commandTotal, a.value, " 条");
+      case "registryCommandCount": {
+        if (!readings.registry) { mismatch = "注册表缺失 —— 跳过 ≠ 通过"; break; }
+        const base = cmpNum(readings.registry.commandTotal, a.value, " 条");
+        if (!base) { mismatch = null; break; }
+        // #58：比登记值之前先跑**仓内已有**的契约 A 名字集合谓词，分流「产物滞后」与「真漂移」。
+        // 两档**都判红**（专码只买到诊断正确性，CI 里非零即中断）—— 不许借分流把红洗成绿或降成只报告。
+        const cls = classifyCommandCountDrift(readings.commandNames);
+        mismatch = `${cls.code}${base} —— ${cls.note}`;
         break;
+      }
+      case "commandNameSetCount": {
+        // #58 加强档：三方对齐（登记值 == 产物条目数 == 契约 A 名集合数）。
+        // 存在理由：`defined ⊆ registered` 用的是**名字集合**，同名跨模块只注册一个时名集合会**静默低估**
+        // （今天 0 例，且无编译期保证）⇒ 只有把「名集合数 == 产物条目数」也钉住，A 档的绿才等于「产物与源码一致」。
+        const n = readings.commandNames;
+        if (!n) { mismatch = "契约 A 名字集合读数缺失（扫描面未产出 src-tauri/src）"; break; }
+        const base = cmpNum(n.entriesCount, a.value, " 条（产物条目数）") ?? cmpNum(n.definedCount, a.value, " 个（契约 A 名集合数）");
+        if (base) {
+          const cls = classifyCommandCountDrift(n);
+          mismatch = `${base}${n.definedCount !== n.entriesCount ? ` / **名集合与产物条目数不等（${n.definedCount} ≠ ${n.entriesCount}）⇒ 名集合静默低估或有同名跨模块未注册**` : ""} —— ${cls.code}${cls.note}`;
+        }
+        break;
+      }
       case "registryModuleCount":
         mismatch = !readings.registry ? "注册表缺失 —— 跳过 ≠ 通过" : cmpNum(readings.registry.commandModules, a.value, " 模块");
         break;
@@ -487,6 +727,23 @@ export function reconcile(register, readings, planText) {
       case "k1PubTraitCount":
         mismatch = !readings.k1 ? "K1 扫描面缺失" : cmpNum(readings.k1.pubTraits, a.value, " trait");
         break;
+      case "k1DeclaredExternalImplTraitCount":
+        // #61：定案档 = 「扫描面内有 `pub trait X` 声明」∩「X 有非 harness、非测试替身的 impl 站点」。
+        // 读数由 collectReadings 的两趟交并给出，口径与 `scripts/audit-capability-inventory.mjs`
+        // 的 `scanK1Traits().declaredExternalCount` **逐字同源**（谓词 implTraitOf / isTestDoublePath
+        // 本就被该脚本 import 本门，见禁区 12）。它与 k1.externalImplTraits（不要求声明面，A 档）
+        // 是两档不同的数，**不许互换**：实现者逐条对账用 A 档，锚点用本档。
+        mismatch = !readings.k1 ? "K1 扫描面缺失" : (readings.k1.declaredExternalTraits === undefined
+          ? "读数缺字段 declaredExternalTraits（本门 K1 块未产出 ⇒ 不是登记错，是判据没落地）"
+          : cmpNum(readings.k1.declaredExternalTraits, a.value, " trait"));
+        break;
+      case "k2KeyedHits": {
+        // #57：**只出数不判红** —— 本锚点在镜像表必须以 `hard:false` 登记（下方 reports 档），
+        // 它不改 `k2TraitFaces`（51 / manual / hard:false）的现值与口径，升 hard 属 #54。
+        const k = readings.k2;
+        mismatch = !k ? "K2 读数缺失（扫描面未产出）" : (cmpNum(k.strongHits, a.value, " 强") ?? cmpNum(k.weakHits, a.value2, " 弱"));
+        break;
+      }
       case "remoteSeamRegistryCount":
         mismatch = readings.remoteSeams === null ? "worker.rs 缺失 —— 跳过 ≠ 通过（数量与封闭集合均无法核对）"
           : (remoteCountIssue ?? remoteClosureIssue);
@@ -516,6 +773,16 @@ export function reconcile(register, readings, planText) {
     status: anchorConsistency.length ? "FAIL" : "PASS",
     txt: `内部自洽（value/planNumber/mustContain 三对齐）：${register.anchors.length} 项${anchorConsistency.length ? ` —— ${anchorConsistency.length} 项矛盾` : ""}`,
   });
+
+  // 出数不判红（#57 / #58）：即使镜像表还没登记这两类锚点，读数与分流诊断也必须每轮印出来 ——
+  // 「口径工件不落库 / 数字不印出来」正是 #50 三读数案的病根。这两行进 reports 档，**不参与退出码**。
+  if (readings.k2) {
+    reports.push(`[只报告] K2 键控面（#57 新入库谓词，不决定退出码）：强 ${readings.k2.strongHits} / 弱 ${readings.k2.weakHits} —— 扫描面 ${readings.k2.scannedTraits} 个 pub trait、⑧ impl→trait 反查表 ${readings.k2.implTypesKnown} 个实现类型 · 形态命中 ${JSON.stringify(readings.k2.formCounts)}。⚠ 与软锚点 k2TraitFaces（51 / check:manual）不是同一口径：本读数**不判红、不改 51**（升 hard 与重算 51 属 #54 同批）。`);
+  }
+  if (readings.commandNames) {
+    const n = readings.commandNames;
+    reports.push(`[只报告] 契约 A 名字集合（#58 分流依据，复用 check-contracts 判据 ⇒ 零新解析器）：defined ${n.definedCount} / 已注册名 ${n.registeredNameCount} / 产物条目 ${n.entriesCount} · 已定义未注册 ${n.unregistered.length}${n.unregistered.length ? `（首条 ${n.unregistered[0]}）⇒ commandTotal 不符时判**产物滞后**，跑 \`cargo check\` 重生成后复跑本门` : "（⇒ 不符时按**真漂移**判）"} · 孤儿注册 ${n.orphanRegistered.length}${n.orphanRegistered.length ? `（首条 ${n.orphanRegistered[0]}；check-contracts 判 warning，不改分流）` : ""}`);
+  }
 
   // ③ 逐条登记项
   let machineRows = 0;
@@ -574,12 +841,265 @@ export function reconcile(register, readings, planText) {
   return { hardFails, reports, manualLines, anchorResults, entryResults, planPassed: plan.passed, counts: { total: register.entries.length, machine: machineRows, report: reports.length, manual: manualRows } };
 }
 
+// ── K2 键控分发谓词（任务 #57，2026-11-02）─────────────────────────────────
+// 存在理由：PLAN §0.7.2 派生流水里「K1 + K2 = 51 个 trait 面」用的谓词真身在
+//   `.tmp/capability-register3.cjs:44-82`（一次性工件，**仓内无处可复跑**）⇒ 数字不可核对，
+//   与 #50「三读数无法复现」同病根。本节把它的 4 形态（①keyed-register ②self-id-register
+//   ③keyed-get ④factory-match-dyn）逐字入库，并按 `.tmp/res33-trait-adjudication.md` §5.2
+//   补 ⑤–⑧ 四类新形态。**①–④ 的正则逐字抄自该工件 ⇒ 与 res33 冻结读数（md5 见其 §6.3）同口径**；
+//   未剥注释（与冻结读数一致），这是**已知的高估面**，不在本批改口径（改口径=重算 51 的前置，属 #54）。
+// ⚠ 本节的产物**只出数不判红**：读数进 `--dump-readings` 的 `k2.strongHits / k2.weakHits`，
+//   对应锚点以 `hard:false` 登记；`k2TraitFaces`（51 / check:manual / hard:false）在本门**一字未动**
+//   —— 严禁用新谓词静默重算 51 ⇒ 26（PLAN §0.7.2 明令，升 hard 与改 51 是 #54 与镜像表同批的活）。
+// 判据全是**纯函数**：输入 =「相对路径 → 文件内容」的注入映射，零盘 IO ⇒ selftest（合成源码）
+//   与 198 对账探针（.tmp/res57-k2-vs-198.mjs，import 本节）都能原地复跑同一套实现。
+//
+// 形态与档位（res33 §5.2 的四条建议，强弱分档不得合并）：
+//   ① keyed-register   `fn register|install|mount|attach*` 的参数窗口含 `dyn T` 且含键参数（KEYARG）⇒ **强**
+//   ② self-id-register 同上但无键参数、trait 自带 v1 identity 方法 ⇒ **强**
+//   ③ keyed-get        `fn get|lookup|resolve|find*` 签名窗口含 `dyn T` 且含 `&str/String` 形参 ⇒ **强**
+//   ④ factory-match-dyn match 块 ≥3 分支且 ≥3 构造点，块内/回溯 14 行出现 `dyn T` ⇒ **强**
+//                      ⚠ 与工件的**唯一有意差异**：原 ④ 把 `-> Box<T>` 里的 T 不加校验就记成证据（T 可以不是
+//                      trait）；本节按 traitDefs 过滤 ⇒ 非 trait 名不再冒充强档命中。51 的现值本来就不是本节的
+//                      产物（本节的强/弱两档只出数），这一刀只会让新读数**更保守**，不改判据形态。
+//   ⑤ container-*      容器字段声明 `C<…(Arc|Box|Rc)<dyn T>>`：映射型（HashMap/BTreeMap/DashMap/IndexMap）⇒ **强**；
+//                      顺序型（Vec/VecDeque）⇒ **弱**，须与「自述键方法或按 key 迭代筛选」同现才升强
+//   ⑥ push-register    `push|add_[a-z_]+|set_[a-z_]+|insert` 动词面的参数窗口（**3 行**）含 `dyn T`，
+//                      **且接收者是集合类型** ⇒ **强**（#54 收窄，PLAN §24.4：站点行及其后 5 行内必须出现
+//                      `.insert(` / `.push(` / `.push_back(` / `.push_front(` / `.extend(` / `.entry(` /
+//                      `vec![` 之一；写进单个结构体字段 / `Option` / `OnceLock` 一律**不计** —— 本仓全局 DI
+//                      恰好写成 `set_xxx(Arc<dyn T>)`，动词表命中它但那是**构造期注入口**，不是键控位点）
+//   ⑦ self-key-filter  trait 自带 identity 方法（name/id/platform/source_type/transport_type/provider_name）
+//                      且存在对 dyn 集合按该键 `.iter()/.find()/.any()` 筛选 ⇒ **弱键控**（可插位点在、键未外提），
+//                      **不直接进 51**
+//   ⑧ factory-match-impl match 块 ≥3 分支且块内构造 **≥2 个该 trait 的已知实现类型**（impl→trait 反查表），
+//                      不再要求块内出现 `dyn` ⇒ **强**
+const K2_IDENTITY_V1_METHODS = ["name", "id", "kind", "provider_type", "channel_type", "platform"]; // 逐字 = capability-register3.cjs:29
+const K2_SELFKEY_METHODS = ["name", "id", "platform", "source_type", "transport_type", "provider_name"]; // #57 ⑦ 口径
+/** identity 方法检测器（v1 与 ⑦ 共用同一构造器 ⇒ 只有一套 `fn X(&self) -> &str/String` 形态，禁区 12）。 */
+const k2IdentityRe = (names) => new RegExp(`fn\\s+(${names.join("|")})\\s*\\(\\s*&self\\s*\\)\\s*->\\s*(?:&'?\\s*(?:\\[?]str|\\?)|String)`, "g");
+const K2_REGISTER_FN_RE = /\bfn\s+(?:register|install|mount|attach)[a-z0-9_]*\s*[<(]/;
+const K2_KEYARG_RE = /(?:name|key|id|provider_type|platform|channel|vendor|engine|kind|backend|r#type|domain_pack_id|kb_id)\s*:\s*(&str|String|&\s*str)/; // 逐字 = :45
+const K2_GETFN_RE = /\bfn\s+(?:get|lookup|resolve|find)[a-z0-9_]*\s*[<(]/;
+const K2_GETKEY_RE = /:\s*(&str|&\s*str|String)/;
+const K2_CONTAINER_RE = /(HashMap|BTreeMap|DashMap|Vec|VecDeque|IndexMap)<[^;]{0,80}?(?:Arc|Box|Rc)<\s*dyn\s+(?:(?:[A-Za-z_][A-Za-z0-9_]*|crate|self|super)::)*([A-Za-z_][A-Za-z0-9_]*)/; // 逐字 = res33-regen.mjs:73 ⇒ 复现冻结的 15 条
+const K2_MAP_CONTAINERS = new Set(["HashMap", "BTreeMap", "DashMap", "IndexMap"]);
+const K2_PUSH_RE = /\b(?:push|push_back|push_front|add_[a-z_]+|set_[a-z_]+|insert)\s*\(/;
+/** ⑥ 的**接收者**判据（PLAN §24.4 定死，token 表勿增删）：集合类型才会同时出现这些标记；
+ *  写进 `OnceLock` / `Option` / 单个结构体字段 ⇒ 无此标记 ⇒ 不算键控位点。
+ *  ⚠ 它**不改** `K2_PUSH_RE`（动词表）也不改参数窗口行数（仍 3 行）—— #54 的「92 → 36」推算正是
+ *  以这两者不变为前提；动了就没法用「推算 vs 真值」的差反判实现与口径是否一致。 */
+const K2_COLLECTION_RECV_RE = /\.(?:insert|push|push_back|push_front|extend|entry)\s*\(|\bvec!\[/;
+const K2_FILTER_RE = /\.(?:iter|iter_mut|into_iter|find|any)\s*\(/;
+const K2_MATCH_HEAD_RE = /^\s*(?:let\s+[a-z_]+\s*:\s*[^=]{0,60}=\s*)?match\s+[^{]{0,80}\{\s*$/;
+const K2_ARM_RE = /^\s*(?:"[^"]*"|'[A-Za-z]'|[A-Za-z0-9_]+(?:::[A-Za-z0-9_]+)*(?:\([^\)]*\))?)(\s*,)?\s*=>/; // 与工件 :68 同一条，**唯一修正**：把 `(\s*,)?\s*` 从「只作用于第三个候选」提到候选之外 ⇒ `"pdf" =>` 这类字符串臂（工厂分派最常见写法）不再漏计；命中的是**更多**分支，不是更松的档位
+const K2_BUILT_RE = /(Box|Arc)::new\(|create_|build_|new\(/;
+const K2_CONSTRUCT_RE = /(?:\b(?:Box|Arc|Rc)::new\(\s*|\b)([A-Z][A-Za-z0-9_]*)\s*(?:::\s*new\s*\(|\s*\{)/g;
+/** 判为「强键控」的形态集（⑦ 与顺序型 ⑤ 一律不在其中）。 */
+const K2_STRONG_FORMS = new Set(["keyed-register", "self-id-register", "keyed-get", "factory-match-dyn", "container-map", "push-register", "factory-match-impl"]);
+
+/** `dyn T` 的机械口径（逐字 = capability-register3.cjs:44）：只认**本表已定义的 trait**。 */
+export function k2DynIn(txt, traitDefs) {
+  return [...new Set([...txt.matchAll(/\bdyn\s+([A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[1]).filter((t) => traitDefs[t]))];
+}
+
+/** trait 定义面：`pub trait` + 块体 ⇒ identity 方法（v1 与 ⑦ 两套名单）与方法名。纯函数。 */
+export function k2TraitDefs(sources) {
+  const defs = {};
+  for (const [rel, s] of Object.entries(sources)) {
+    for (const m of s.matchAll(/^pub trait ([A-Za-z0-9_]+)([^{]*)\{/gm)) {
+      if (defs[m[1]]) { continue; }
+      let depth = 0, end = m.index + m[0].length - 1;
+      for (; end < s.length; end++) { if (s[end] === "{") { depth++; } else if (s[end] === "}") { depth--; if (!depth) { break; } } }
+      const body = s.slice(m.index + m[0].length, end);
+      const idV1 = [...body.matchAll(k2IdentityRe(K2_IDENTITY_V1_METHODS))].map((x) => x[1]);
+      const selfKeys = [...body.matchAll(k2IdentityRe(K2_SELFKEY_METHODS))].map((x) => x[1]);
+      defs[m[1]] = {
+        def: `${rel}:${s.slice(0, m.index).split("\n").length}`,
+        hasIdentityV1: idV1.length > 0, identityV1: [...new Set(idV1)],
+        hasSelfKey: selfKeys.length > 0, selfKeys: [...new Set(selfKeys)],
+      };
+    }
+  }
+  return defs;
+}
+
+/** impl→trait 反查表（⑧ 的前提）。测试替身/产物路径按 `countRule.implementors` 口径剔除
+ *  （复用本门已有的 isTestDoublePath，不另发明第二套「非生产实现」判据）。 */
+export function k2ImplPairs(sources, traitDefs) {
+  const traitOfImplType = {};
+  const implsByTrait = {};
+  for (const [rel, s] of Object.entries(sources)) {
+    if (isTestDoublePath(rel)) { continue; }
+    s.split("\n").forEach((l, i) => {
+      const t = implTraitOf(l);
+      if (!t || !traitDefs[t]) { return; }
+      const ty = implTypeOf(l);
+      if (!ty) { return; }
+      traitOfImplType[ty] = t;
+      (implsByTrait[t] = implsByTrait[t] || []).push({ type: ty, at: `${rel}:${i + 1}` });
+    });
+  }
+  return { traitOfImplType, implsByTrait };
+}
+
+/** 逐行证据扫描（①–⑧ 一趟）。返回 `{ trait: [{form, at}] }`。纯函数，输入注入。 */
+export function k2Evidence(sources, traitDefs, traitOfImplType) {
+  const ev = {};
+  const add = (t, form, at) => { (ev[t] = ev[t] || []).push({ form, at }); };
+  for (const [rel, s] of Object.entries(sources)) {
+    const lines = s.split("\n");
+    const win = (from, n) => lines.slice(from, from + n).join(" ").replace(/\s+/g, " ");
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      if (K2_REGISTER_FN_RE.test(l)) {
+        const arg = win(i, 6);
+        for (const t of k2DynIn(arg, traitDefs)) {
+          if (K2_KEYARG_RE.test(arg)) { add(t, "keyed-register", `${rel}:${i + 1}`); } else if (traitDefs[t].hasIdentityV1) { add(t, "self-id-register", `${rel}:${i + 1}`); }
+        }
+      }
+      if (K2_GETFN_RE.test(l)) {
+        const sig = win(i, 5);
+        for (const t of k2DynIn(sig, traitDefs)) { if (K2_GETKEY_RE.test(sig)) { add(t, "keyed-get", `${rel}:${i + 1}`); } }
+      }
+      const cm = l.match(K2_CONTAINER_RE);
+      if (cm && traitDefs[cm[2]]) { add(cm[2], K2_MAP_CONTAINERS.has(cm[1]) ? "container-map" : "container-seq", `${rel}:${i + 1}`); }
+      if (K2_PUSH_RE.test(l)) {
+        const arg = win(i, 3); // 参数窗口**保持 3 行**（收窄只加接收者判据，不动窗口与动词表，理由见 K2_COLLECTION_RECV_RE 头注）
+        if (K2_COLLECTION_RECV_RE.test(win(i, 6))) { // 接收者判据：站点行 + 其后 5 行
+          for (const t of k2DynIn(arg, traitDefs)) { add(t, "push-register", `${rel}:${i + 1}`); }
+        }
+      }
+      if (K2_FILTER_RE.test(l)) {
+        // ⑦ 的窗口**向前也向后**（前 6 后 3）：真实的「按自述键筛选」常写成
+        // 「上面几行声明 `Vec<Arc<dyn T>>` / 参数 `&[Box<dyn T>]`，下面 `.iter().find(|x| x.platform()==k)`」，
+        // 只看当前行会把 ⑦ 判成 0 命中（res33 §5.1 的 MarketplaceScanner 形态正是这种跨行写法）。
+        const w = lines.slice(Math.max(0, i - 6), i + 4).join(" ").replace(/\s+/g, " ");
+        for (const t of k2DynIn(w, traitDefs)) {
+          const d = traitDefs[t];
+          if (d.hasSelfKey && d.selfKeys.some((k) => new RegExp(`\\.\\s*${k}\\s*\\(`).test(w))) { add(t, "self-key-filter", `${rel}:${i + 1}`); }
+        }
+      }
+      if (K2_MATCH_HEAD_RE.test(l)) {
+        let depth = 0, j = i, arms = 0, built = 0;
+        const constructed = new Set();
+        for (; j < Math.min(i + 130, lines.length); j++) {
+          depth += (lines[j].match(/[{(]/g) || []).length - (lines[j].match(/[})]/g) || []).length;
+          if (K2_ARM_RE.test(lines[j])) { arms++; }
+          if (K2_BUILT_RE.test(lines[j])) { built++; }
+          for (const c of lines[j].matchAll(K2_CONSTRUCT_RE)) { if (traitOfImplType[c[1]]) { constructed.add(c[1]); } }
+          if (j > i && depth <= 0) { break; }
+        }
+        if (arms >= 3 && built >= 3) { // ④ 原文形态（含 `-> Box<T>` 具体返回型这一支），逐字保留
+          const block = lines.slice(i, j + 1).join(" ");
+          const head = lines.slice(Math.max(0, i - 14), i + 1).join(" ");
+          const cands = [...new Set([...k2DynIn(block, traitDefs), ...k2DynIn(head, traitDefs),
+            ...[...(block + " " + head).matchAll(/->\s*(?:anyhow::Result<\s*)?(?:Box|Arc|Rc)<\s*([A-Z][A-Za-z0-9_]*)\s*>/g)].map((x) => x[1]).filter((t) => traitDefs[t])])];
+          for (const t of cands) { add(t, "factory-match-dyn", `${rel}:${i + 1}`); }
+        }
+        if (arms >= 3 && constructed.size >= 2) { // ⑧ 新形态：块内构造 ≥2 个同一 trait 的已知实现类型
+          const byTrait = {};
+          for (const ty of constructed) { (byTrait[traitOfImplType[ty]] = byTrait[traitOfImplType[ty]] || new Set()).add(ty); }
+          for (const [t, set] of Object.entries(byTrait)) { if (set.size >= 2) { add(t, "factory-match-impl", `${rel}:${i + 1}(构造 ${set.size} 个实现类型/${arms} 分支)`); } }
+        }
+        i = Math.max(i, j - 1);
+      }
+    }
+  }
+  return ev;
+}
+
+/** 分档裁决：强弱两档互斥（同一 trait 有强证据即只计强档），⑦ 永不单独进强档。纯函数。 */
+export function adjudicateK2(evByTrait, traitDefs) {
+  const strong = [];
+  const weak = [];
+  const formsOf = {};
+  for (const [t, list] of Object.entries(evByTrait)) {
+    if (!traitDefs[t]) { continue; } // 证据表的键必须是 trait（非 trait 名不配占档位，见上方 ④ 的 traitDefs 过滤）
+    const forms = new Set(list.map((e) => e.form));
+    formsOf[t] = [...forms].sort().join("+");
+    const selfKeyFilter = forms.has("self-key-filter");
+    let isStrong = [...forms].some((f) => K2_STRONG_FORMS.has(f));
+    // ⑤ 顺序型容器：单飞算弱；与「自述键方法」或「按 key 迭代筛选」同现才升强
+    if (!isStrong && forms.has("container-seq") && (selfKeyFilter || (traitDefs[t] && traitDefs[t].hasSelfKey))) { isStrong = true; }
+    if (isStrong) { strong.push(t); } else if (forms.has("container-seq") || selfKeyFilter) { weak.push(t); }
+  }
+  return { strongTraits: strong.sort(), weakTraits: weak.sort(), formsOf };
+}
+
+/** K2 读数总入口（collectReadings / 对账探针 / selftest 共用同一实现）。纯函数，零盘 IO。 */
+export function computeK2Readings(sources) {
+  const traitDefs = k2TraitDefs(sources);
+  const { traitOfImplType, implsByTrait } = k2ImplPairs(sources, traitDefs);
+  const evByTrait = k2Evidence(sources, traitDefs, traitOfImplType);
+  const { strongTraits, weakTraits, formsOf } = adjudicateK2(evByTrait, traitDefs);
+  const formCounts = {};
+  for (const list of Object.values(evByTrait)) { for (const e of list) { formCounts[e.form] = (formCounts[e.form] || 0) + 1; } }
+  return {
+    strongHits: strongTraits.length, weakHits: weakTraits.length,
+    strongTraits, weakTraits, formCounts,
+    scannedTraits: Object.keys(traitDefs).length,
+    implTypesKnown: Object.keys(traitOfImplType).length,
+    detail: { traitDefs, traitOfImplType, implsByTrait, evByTrait, formsOf },
+  };
+}
+
+// ── 产物滞后 vs 真漂移（任务 #58，2026-11-02）─────────────────────────────
+// 背景：本门跑在 CI job `workspace-config-parity`（`.github/workflows/ci.yml:1026`），**该 job 不装
+//   Rust 工具链、前面没有任何重生成步骤** ⇒ 干净检出读到的是**提交态构建产物** `register_commands.rs`。
+//   HEAD 树 `git archive` 复跑实测 = 5 条硬失败，首条 `commandTotal 登记 1542 / 实测 1540 / 差 −2`，
+//   而工作区产物是 1542 ⇒ 同一份表「本机绿 / CI 红」。根因不是登记错，是**产物没跟着源码重生成**。
+// 判据（零新解析器）：比 commandTotal 之前，先跑**仓内已有、已接线的**契约 A 名字集合谓词
+//   （`scripts/check-contracts.mjs:95-121` 的 `defined ⊆ registered`）——
+//   · defined 侧正则逐字抄自该处（禁区 12：与 DOMAINS 抄 audit-l1-blockers 同一形态的**唯一合法同步点**，
+//     改那边必须同改这里；不 import 该脚本是因为它顶层即扫描 + `process.exit`，import 会破坏本模块
+//     「被 import 时零副作用」的规矩）；
+//   · registered 侧**强制复用** `lib/command-domains.parseRegistry`（本门已有的唯一注册表解析口径）。
+// 分档（诚实边界）：专码只买到**诊断正确性**，**仍是红** —— `ci-check.mjs:114-137` 的 `step()`
+//   非零即中断，GitHub Actions 里一样红。不伪装成绿、不放宽 commandTotal 的现值/现口径。
+const CONTRACT_A_DEF_RE = /#\[(?:tauri::)?command\][\s\S]*?(?:pub(?:\s*\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)/g; // 逐字 = check-contracts.mjs:106
+
+/** 契约 A 名字集合（纯函数）：`regEntries` 来自 parseRegistry，`sourceTexts` = [[rel, 原文], …]。
+ *  与 check-contracts 的 A 档同口径：先剥行注释再找 `#[tauri::command] … fn 名`。 */
+export function commandNameSets(regEntries, sourceTexts) {
+  const registered = new Set(regEntries.map((e) => e.cmd));
+  const defined = new Set();
+  for (const [, raw] of sourceTexts) {
+    const srcClean = raw.replace(/\/\/.*$/gm, "");
+    for (const m of srcClean.matchAll(CONTRACT_A_DEF_RE)) { defined.add(m[1]); }
+  }
+  const unregistered = [...defined].filter((n) => !registered.has(n)).sort();
+  const orphanRegistered = [...registered].filter((n) => !defined.has(n)).sort();
+  return { definedCount: defined.size, registeredNameCount: registered.size, entriesCount: regEntries.length, unregistered, orphanRegistered };
+}
+
+/** 命令数不符时的分流（纯函数）：**只有**「已定义但未注册」非空才判产物滞后（fail-closed）；
+ *  孤儿注册（注册了但源码无定义）按 check-contracts 的既有分档只算 warning ⇒ 不足以推翻「真漂移」。 */
+export function classifyCommandCountDrift(names) {
+  if (!names) { return { kind: "unknown", code: "", note: "契约 A 名字集合读数缺失 ⇒ 无法分流，按原口径判" }; }
+  if (names.unregistered.length) {
+    return {
+      kind: "artifact-stale",
+      code: "[产物滞后 ARTIFACT-STALE] ",
+      note: `契约 A 名集合谓词（与 check-contracts.mjs:105-116 同口径）测出 ${names.unregistered.length} 条 \`#[tauri::command]\` 已在源码定义、却不在 register_commands.rs 里（未注册首条：${names.unregistered[0]}）⇒ 判为**构建产物滞后**，不是登记值漂移。修法：跑 \`cargo check\`（build.rs 重生成 src/register_commands.rs）后复跑本门。`,
+      hint: "cargo check",
+    };
+  }
+  return {
+    kind: "true-drift",
+    code: "[真漂移 TRUE-DRIFT] ",
+    note: `契约 A 名集合与产物一致（defined ${names.definedCount} / 已注册名 ${names.registeredNameCount} / 未注册 0${names.orphanRegistered.length ? ` / 孤儿注册 ${names.orphanRegistered.length}（check-contracts 判 warning，不改变本分流）` : ""}）⇒ 差额按**登记值漂移**处理：改代码或同批改表 + PLAN §0.7。`,
+    hint: null,
+  };
+}
+
 // ── --repin-plan（任务 #48）：按定位键把「PLAN 行号引用」重锚到当前文本 ──────────
 // 判据与红线见文件头「--repin-plan 的由来与判据」段。以下四个是**纯函数**（selftest 与正式跑共用同一实现）：
 // 定位（pinHitLines / textHitLines）⇒ 汇总（collectPlanLineRefs）⇒ 计算（computeRepin，只给方案不写盘）
 // ⇒ 回写（applyRepinToRegister 内存版 + planRepinPatches 文本版）。
 
-/** 整行归一：去首尾空白、行内连续空白折叠成一个空格 —— 只容排版差异，不容内容差异。 */
+/** 整行归一：去首尾空白、行内连续空白折叠成一个空格 —— 只容排版差异，不容内容差异。
+ *  （--repin-plan 的 planAnchorText 与 --repin-code 的 evidence.anchorText **共用这一口径**）*/
 export function normPlanLine(s) {
   return String(s ?? "").trim().replace(/[\t ]+/g, " ");
 }
@@ -591,7 +1111,7 @@ export function pinHitLines(planLines, mustContain) {
   return planLines.map((l, i) => (toks.every((t) => l.includes(t)) ? i + 1 : 0)).filter(Boolean);
 }
 
-/** 指针候选行：整行逐字（归一后）全等才算命中。 */
+/** 整行逐字（归一后）全等才算命中 —— 名字里的 planLines 指「被检索那份文本的行数组」，PLAN 与源码文件同用。 */
 export function textHitLines(planLines, anchorText) {
   const t = normPlanLine(anchorText);
   if (!t) { return []; }
@@ -604,6 +1124,13 @@ export function collectPlanLineRefs(register) {
   for (const a of register.anchors ?? []) {
     (a.planPinned ?? []).forEach((p, i) => {
       refs.push({ kind: "planPinned", owner: a.id, idx: i, line: p.line, mustContain: p.mustContain ?? [], anchorText: null, path: `anchors[${a.id}].planPinned[${i}].line` });
+    });
+    // alsoAt 区段是**成对**的两个行号（一个区间），随文档整体位移一起走 ⇒ 一个引用一次回写，
+    // 不拆成两条独立的 planLine（拆开会允许「只挪对一半」，那是新造的假绿面）。
+    (a.planOld ?? []).forEach((o, i) => {
+      (o.alsoAt ?? []).forEach((rg, j) => {
+        refs.push({ kind: "alsoAtRegion", owner: a.id, oldIdx: i, idx: j, line: rg.startLine, endLine: rg.endLine, mustContain: rg.mustContain ?? [], anchorText: null, path: `anchors[${a.id}].planOld[${i}].alsoAt[${j}].startLine/endLine` });
+      });
     });
   }
   for (const e of register.entries ?? []) {
@@ -626,6 +1153,50 @@ export function computeRepin(register, planText) {
   let kept = 0;
   const refs = collectPlanLineRefs(register);
   for (const r of refs) {
+    if (r.kind === "alsoAtRegion") {
+      // 区段重锚（任务 #65）：与 planPinned 同口径的三档 fail-closed（唯一定位才回写 · 零命中与歧义拒写 ·
+      // 缺定位键拒写），差别只在定位键是**整段**的 token 集合而不是单行 —— 判据形态（写哪些数字）见下面
+      // 「最小包络」注释与文件头 --repin-plan 段。
+      if (!r.mustContain.length) { noKey.push(`${r.path} = ${r.line}–${r.endLine}：alsoAt 区段无 mustContain 自证 token ⇒ 无定位键（新增区段必须同批带键，否则重锚能力随表腐烂）`); continue; }
+      const st = alsoAtRegionStatus(planLines, { startLine: r.line, endLine: r.endLine, mustContain: r.mustContain });
+      if (st.ok) { kept++; continue; }
+      const hOK = Number.isInteger(r.line) && Number.isInteger(r.endLine) && r.endLine >= r.line;
+      if (!hOK) { blockers.push(`${r.path} = ${r.line}–${r.endLine}：${st.reason} ⇒ 原区段连行号都不成立 ⇒ 不许猜边界，请人工改表`); continue; }
+      // 定位键 = mustContain 的**最小包络窗口**（含全部 token，且首行/末行各携带一个「窗口内别处没有」的
+      // token ⇒ 按包含关系不可再缩）。为什么不是「保持段高」：位移之后，段高是**不可知**的冗余信息
+      // （登记行号上此刻坐着上一段的尾巴），而 token 集合仍在盘上；实测现盘 §15.1 把 `1540/1541/HEAD`
+      // 挤在同一行 ⇒ 「同高且含全部 token」的窗口恒有 段高+1 个（贴着该行的每一个窗口都算），
+      // 必然歧义、必然拒写 ⇒ 区段成了一个不能重锚的钉（#48 修的正是这个病）。
+      // 代价：重锚会把段**收紧到 token 的最小包络**（只朝更严的方向动，且 mustContain 一字未动），
+      // 回写时逐条打印「旧段→新段 + 段高变化」，由人过目。
+      const hitLines = r.mustContain.map((t) => planLines.map((l, i) => (l.includes(t) ? i + 1 : 0)).filter(Boolean));
+      const dead = r.mustContain.filter((_, k) => !hitLines[k].length);
+      if (dead.length) { blockers.push(`${r.path} = ${r.line}–${r.endLine}：自证 token [${dead.join(" / ")}] 在 PLAN 全文**零命中**（该句已被改写或删除 ⇒ 语义变化不是位移）⇒ 不许猜行、不许插值，请先人工核对该项`); continue; }
+      const inRange = (arr, lo, hi) => arr.some((n) => n >= lo && n <= hi);
+      const firstAtLeast = (arr, x) => arr.find((n) => n >= x);
+      const starts = [...new Set(hitLines.flat())].sort((a, b) => a - b);
+      const cands = [];
+      const seen = new Set();
+      for (const i of starts) {
+        const js = hitLines.map((arr) => firstAtLeast(arr, i));
+        if (js.some((n) => n === undefined)) { continue; }
+        const j = Math.max(...js);
+        const necStart = r.mustContain.some((_, k) => inRange(hitLines[k], i, i) && !inRange(hitLines[k], i + 1, j));
+        const necEnd = r.mustContain.some((_, k) => inRange(hitLines[k], j, j) && !inRange(hitLines[k], i, j - 1));
+        if (!necStart || !necEnd) { continue; }
+        const key = `${i}–${j}`;
+        if (seen.has(key)) { continue; }
+        seen.add(key);
+        cands.push({ start: i, end: j });
+      }
+      if (cands.length === 1) { changes.push({ ...r, to: cands[0].start, toEnd: cands[0].end }); continue; }
+      if (cands.length === 0) {
+        blockers.push(`${r.path} = ${r.line}–${r.endLine}：PLAN 内**零命中**能同时含自证 token [${r.mustContain.join(" / ")}] 的最小包络（段被改写、或 token 被拆散到多处 ⇒ 无法确定边界）⇒ 不许猜行、不许插值，请先人工核对该项`);
+        continue;
+      }
+      blockers.push(`${r.path} = ${r.line}–${r.endLine}：区段定位键**非唯一命中** ${cands.length} 个最小包络 [${cands.map((c) => `${c.start}–${c.end}`).join(", ")}] ⇒ 请先收紧 mustContain（补一条只有该段才有的句子），不许从里面挑一个`);
+      continue;
+    }
     const cur = planLines[r.line - 1] ?? "";
     let curOk;
     let hits;
@@ -656,6 +1227,11 @@ export function applyRepinToRegister(register, changes) {
     if (c.kind === "planPinned") {
       const a = next.anchors.find((x) => x.id === c.owner);
       a.planPinned[c.idx].line = c.to;
+    } else if (c.kind === "alsoAtRegion") {
+      const a = next.anchors.find((x) => x.id === c.owner);
+      const rg = a.planOld[c.oldIdx].alsoAt[c.idx];
+      rg.startLine = c.to;
+      rg.endLine = c.toEnd;
     } else {
       const e = next.entries.find((x) => x.seamId === c.owner);
       if (c.kind === "planLine") { e.planLine = c.to; } else { e.planLineRange[c.idx] = c.to; }
@@ -685,7 +1261,9 @@ export function planRepinPatches(srcText, register, changes) {
   const patches = [];
   const groups = new Map();
   for (const c of changes) {
-    const key = c.kind === "planLineRange" ? `planLineRange|${c.owner}` : `${c.kind}|${c.owner}|${c.idx}`;
+    const key = c.kind === "planLineRange" ? `planLineRange|${c.owner}`
+      : c.kind === "alsoAtRegion" ? `alsoAtRegion|${c.owner}|${c.oldIdx}|${c.idx}`
+        : `${c.kind}|${c.owner}|${c.idx}`;
     if (!groups.has(key)) { groups.set(key, []); }
     groups.get(key).push(c);
   }
@@ -696,6 +1274,26 @@ export function planRepinPatches(srcText, register, changes) {
     const owner = list[0].owner;
     let needles;
     let sub;
+    if (kind === "alsoAtRegion") {
+      // 成对回写：`"startLine": X, "endLine": Y`（`\s` 覆盖换行与缩进 ⇒ 排版怎么排都能定点）。
+      // 找不到**恰好一处**就整次拒写 —— 与其它两类行号锚同一口径，宁可人工改表。
+      const c = list[0];
+      const pairRe = new RegExp(`"startLine":\\s*${c.line}(?!\\d)(\\s*,\\s*)"endLine":\\s*${c.endLine}(?!\\d)`, "g");
+      const pair = [...srcText.matchAll(pairRe)];
+      if (pair.length === 1) {
+        patches.push({ needle: pair[0][0], replacement: `"startLine": ${c.to}${pair[0][1]}"endLine": ${c.toEnd}`, paths: [c.path] });
+        continue;
+      }
+      const sOnly = [...srcText.matchAll(new RegExp(`"startLine":\\s*${c.line}(?!\\d)`, "g"))];
+      const eOnly = [...srcText.matchAll(new RegExp(`"endLine":\\s*${c.endLine}(?!\\d)`, "g"))];
+      if (sOnly.length === 1 && eOnly.length === 1) {
+        patches.push({ needle: sOnly[0][0], replacement: `"startLine": ${c.to}`, paths: [`${c.path}（startLine）`] });
+        patches.push({ needle: eOnly[0][0], replacement: `"endLine": ${c.toEnd}`, paths: [`${c.path}（endLine）`] });
+        continue;
+      }
+      problems.push(`${c.path} ${c.line}–${c.endLine}→${c.to}–${c.toEnd}：镜像表原文里找不到唯一的替换锚（排版被重排过、或该引用不止一处）⇒ 拒绝定点写盘，请人工改表`);
+      continue;
+    }
     if (kind === "planPinned") {
       const c = list[0];
       const items = c.mustContain.map((t) => JSON.stringify(t)).join(", ");
@@ -747,12 +1345,237 @@ export function planRepinPatches(srcText, register, changes) {
 /** 只保留「非行号」字段 —— 用于断言重锚**只改行号**，判据（token/读数/分组）一个字都没松。 */
 export function stripRepinEditableFields(register) {
   const clone = JSON.parse(JSON.stringify(register));
-  for (const a of clone.anchors ?? []) { for (const p of a.planPinned ?? []) { p.line = null; } }
+  for (const a of clone.anchors ?? []) {
+    for (const p of a.planPinned ?? []) { p.line = null; }
+    for (const o of a.planOld ?? []) { for (const rg of o.alsoAt ?? []) { rg.startLine = null; rg.endLine = null; } }
+  }
   for (const e of clone.entries ?? []) {
     if (e.planLine !== undefined) { e.planLine = null; }
     if (e.planLineRange) { e.planLineRange = e.planLineRange.map(() => null); }
   }
   return clone;
+}
+
+// ── --repin-code（任务 #55）：按整行定位键把「代码证据锚点 evidence[].line」重锚到当前文本 ──────
+// 判据与红线见文件头「--repin-code 的由来与判据」段。以下全是**纯函数**（--selftest 与正式跑共用同一实现，
+// 禁止两套）：收集（collectCodeLineRefs）⇒ 计算（computeCodeRepin，只给方案不写盘）⇒ 回写
+// （applyCodeRepinToRegister 内存版 + codeRepinPatches 文本版）⇒ 落盘工序（executeCodeRepin，IO 注入 ⇒
+// 自检在内存假盘上跑完整的「备份 / 写盘 / 复检 / 回滚」，零真盘）。
+// ⚠ 定位键是 `evidence[].anchorText`（登记当时的整行逐字，仅折叠行内连续空白，归一口径同 normPlanLine），
+//   **不是 token**：现盘 `workflow.evolver` 两条 evidence 用同一个 token 指向同文件的 :1551 与 :1714 ⇒
+//   按 token 全文检索必然多命中；token 是**判据**（「第 N 行含该串」），不是身份键。
+//   token 的命中行号在报告里只作**诊断信息**打印（告诉人该补哪一行的整行文本），永不参与放行。
+// ⚠ 本模式**只重锚 line 与 ref 末尾的 :行号**，其它字段（token / file / endLine / role / anchorText）
+//   一个字都不动 —— 由 stripCodeRepinEditableFields + 写盘后从盘上复检双重锁定。
+
+/** 受行号约束的 evidence 清单 + 本模式覆盖不到的条目（逐条给理由，不装作覆盖到了）。 */
+export function collectCodeLineRefs(register) {
+  const refs = [];
+  const skipped = [];
+  for (const e of register.entries ?? []) {
+    (e.evidence ?? []).forEach((ev, i) => {
+      const path = `entries[${e.seamId}].evidence[${i}].line`;
+      if (!ev || !ev.line) { skipped.push({ path, reason: "文件级证据（无 line，走 fileLevel 判据）⇒ 不受行号约束，本模式不动" }); return; }
+      if (ev.endLine) { skipped.push({ path, reason: `区间锚点 ${ev.line}–${ev.endLine}：两端位移量要人工判定（区间内任一行含 token 即算绿）⇒ 本模式不重锚` }); return; }
+      if (!ev.token) { skipped.push({ path, reason: "无 token ⇒ 判定档本就不检查该行内容，没有任何键可定位" }); return; }
+      refs.push({ kind: "evidence", owner: e.seamId, idx: i, path, file: ev.file, line: ev.line, token: ev.token, ref: ev.ref ?? null, anchorText: ev.anchorText ?? null });
+    });
+  }
+  return { refs, skipped };
+}
+
+/** token 在该文件内的命中行号（子串口径，与 adjudicateEvidence 逐字一致；只用于诊断打印，不参与放行）。 */
+export function tokenHitLines(fileLines, token) {
+  const t = String(token ?? "");
+  if (!t) { return []; }
+  return fileLines.map((l, i) => (l.includes(t) ? i + 1 : 0)).filter(Boolean);
+}
+
+/** 计算代码锚点重锚方案（零写盘）。changes=可回写 · blockers=零命中/歧义/文件缺失（整次拒绝）· noKey=缺定位键（同拒）。 */
+export function computeCodeRepin(register, fileTextFor) {
+  const { refs, skipped } = collectCodeLineRefs(register);
+  const linesCache = new Map();
+  const linesOf = (rel) => {
+    if (!linesCache.has(rel)) {
+      const txt = fileTextFor(rel);
+      linesCache.set(rel, txt === null || txt === undefined ? null : String(txt).split("\n"));
+    }
+    return linesCache.get(rel);
+  };
+  const changes = [];
+  const blockers = [];
+  const noKey = [];
+  let kept = 0;
+  for (const r of refs) {
+    const lines = linesOf(r.file);
+    if (lines === null) { blockers.push(`${r.path} = ${r.line}：文件 ${r.file} 读不出（缺失或不可读）⇒ 无文本可定位，拒绝重锚 —— 先核对文件是否被移动/删除`); continue; }
+    const cur = lines[r.line - 1] ?? "";
+    // 「相符」的口径与判定档逐字一致（第 line 行含 token）⇒ 相符的条目一律不动，也不因缺 anchorText 而报错。
+    if (r.line <= lines.length && cur.includes(r.token)) { kept++; continue; }
+    const hits = tokenHitLines(lines, r.token);
+    const diag = `token「${r.token}」在 ${r.file} 内命中 ${hits.length} 行${hits.length <= 12 ? ` [${hits.join(", ")}]` : "（过多，未列出）"}`;
+    if (!r.anchorText) {
+      noKey.push(`${r.path} = ${r.line}（${r.file}）：判定档已红（第 ${r.line} 行「${normPlanLine(cur).slice(0, 60) || "<空行>"}」不含 token）+ **无 anchorText 定位键** ⇒ 拒写。诊断：${diag}`);
+      continue;
+    }
+    const found = textHitLines(lines, r.anchorText);
+    if (found.length === 1) { changes.push({ ...r, to: found[0] }); continue; }
+    if (found.length === 0) { blockers.push(`${r.path} = ${r.line}（${r.file}）：anchorText 整行定位键在文件内**零命中** ⇒ 该行已被改写或删除（语义变化，不是位移），不许猜行、不许插值。诊断：${diag}`); continue; }
+    blockers.push(`${r.path} = ${r.line}（${r.file}）：anchorText **非唯一命中** ${found.length} 行 [${found.join(", ")}] ⇒ 请用更长的整行文本作键，不许从里面挑一个。诊断：${diag}`);
+  }
+  return { changes, blockers, noKey, skipped, kept, total: refs.length };
+}
+
+/** evidence.ref 末尾的 `:行号` 尾巴跟着 line 一起走；尾部数字与旧行号不符（区间写法 / 无行号）时**原样不动**。 */
+export function evidenceRefAfterRepin(ref, from, to) {
+  const s = String(ref ?? "");
+  const m = /(\d+)$/.exec(s);
+  return m && m[1] === String(from) ? `${s.slice(0, m.index)}${to}` : s;
+}
+
+/** 内存版回写（也是文本版补丁的对照物：两者必须逐字段一致才允许落盘）。 */
+export function applyCodeRepinToRegister(register, changes) {
+  const next = JSON.parse(JSON.stringify(register));
+  for (const c of changes) {
+    const e = (next.entries ?? []).find((x) => x.seamId === c.owner);
+    const ev = e?.evidence?.[c.idx];
+    if (!ev) { continue; } // 表里没有该坐标 ⇒ 不改；文本版若真改了什么，下面的逐字段比对会拦住
+    ev.ref = evidenceRefAfterRepin(ev.ref, c.line, c.to);
+    ev.line = c.to;
+  }
+  return next;
+}
+
+/** 只把「本模式有权改动的东西」抹平 —— 用于断言重锚**只改行号**（含 ref 的 :行号 尾巴），判据一字未松。 */
+export function stripCodeRepinEditableFields(register) {
+  const clone = JSON.parse(JSON.stringify(register));
+  for (const e of clone.entries ?? []) {
+    for (const ev of e.evidence ?? []) {
+      if (ev.line !== undefined) { ev.line = null; }
+      if (typeof ev.ref === "string") { ev.ref = ev.ref.replace(/:\d+$/, ":<行号>"); }
+    }
+  }
+  return clone;
+}
+
+/** 替换锚的定位：命中且**其后不接数字**（防 `"line": 5` 落进 `"line": 55` 里）。≥0 = 唯一位置，-1 = 多处，-2 = 没有。 */
+function findUniqueNeedleAt(src, needle) {
+  const at = (from) => {
+    let i = src.indexOf(needle, from);
+    while (i >= 0) {
+      const after = src[i + needle.length];
+      if (after === undefined || !/\d/.test(after)) { return i; }
+      i = src.indexOf(needle, i + needle.length);
+    }
+    return -1;
+  };
+  const first = at(0);
+  if (first < 0) { return -2; }
+  return at(first + needle.length) >= 0 ? -1 : first;
+}
+
+/**
+ * 文本版回写：对每条 change 取「候选替换锚里第一个在全文**恰好出现一次**的」做定点补丁
+ * （不整体 `JSON.stringify` 重写 ⇒ 未涉及的字节逐字不动；另有会话正在编辑同一张表，整体重排会互相打散）。
+ * 任一 change 找不到唯一锚 ⇒ {ok:false}，调用方**不得写盘**（不许只改能定位的那一半）。
+ * 候选按精确度降序：ref+file+line 三段相邻（同一行 / 换行 + 8·6·10 空格缩进）⇒ 兜底 `"line": N`；
+ * 兜底档不动 ref，会让文本版与内存版不一致 ⇒ 由最后的逐字段比对拦下（负控㉒f 锁这条）。
+ */
+export function codeRepinPatches(srcText, register, changes) {
+  const problems = [];
+  const patches = [];
+  const groups = new Map();
+  for (const c of changes) {
+    const key = c.path ?? `entries[${c.owner}].evidence[${c.idx}].line`;
+    if (!groups.has(key)) { groups.set(key, []); }
+    groups.get(key).push(c);
+  }
+  for (const [path, list] of groups) {
+    if (list.length > 1) { problems.push(`${path}：同一坐标出现 ${list.length} 条回写（${list.map((c) => `${c.line}→${c.to}`).join(" / ")}）⇒ 方案自身不自洽，拒绝写盘`); continue; }
+    const c = list[0];
+    const refJson = JSON.stringify(String(c.ref ?? ""));
+    const refToJson = JSON.stringify(evidenceRefAfterRepin(String(c.ref ?? ""), c.line, c.to));
+    const fileJson = JSON.stringify(c.file);
+    const cand = [];
+    for (const sep of [" ", "\n        ", "\n      ", "\n          "]) {
+      cand.push({ needle: `"ref": ${refJson},${sep}"file": ${fileJson},${sep}"line": ${c.line}`, replacement: `"ref": ${refToJson},${sep}"file": ${fileJson},${sep}"line": ${c.to}` });
+    }
+    cand.push({ needle: `"line": ${c.line}`, replacement: `"line": ${c.to}` });
+    const scored = cand.map((x) => ({ ...x, at: findUniqueNeedleAt(srcText, x.needle) }));
+    const hit = scored.find((x) => x.at >= 0);
+    if (!hit) { problems.push(`${path} ${c.line}→${c.to}：镜像表原文里找不到唯一的替换锚（排版被重排过、或该引用不止一处）⇒ 拒绝定点写盘，请人工改表`); continue; }
+    if (hit.replacement === hit.needle) { problems.push(`${path}：替换锚命中但行号没被改动（判据落空）⇒ 拒绝写盘`); continue; }
+    patches.push({ ...hit, paths: [path] });
+  }
+  if (problems.length) { return { ok: false, problems, patches: [], text: null }; }
+  const sorted = [...patches].sort((a, b) => a.at - b.at);
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].at < sorted[i - 1].at + sorted[i - 1].needle.length) { problems.push(`${sorted[i].paths.join(" / ")}：两个替换锚在原文里重叠 ⇒ 定点补丁无法互不干扰落位，拒绝写盘`); }
+  }
+  if (problems.length) { return { ok: false, problems, patches: [], text: null }; }
+  let out = srcText;
+  for (const p of [...sorted].reverse()) { out = `${out.slice(0, p.at)}${p.replacement}${out.slice(p.at + p.needle.length)}`; }
+  let parsed;
+  try {
+    parsed = JSON.parse(out);
+  } catch (e) {
+    return { ok: false, problems: [`定点替换后 JSON 解析失败（说明替换落到了字符串字面量里）：${e.message}`], patches, text: null };
+  }
+  const expect = applyCodeRepinToRegister(register, changes);
+  if (JSON.stringify(parsed) !== JSON.stringify(expect)) {
+    return { ok: false, problems: ["文本版回写与内存版回写结果不一致（含 ref 末尾的 :行号）⇒ 定点替换把握不足，拒绝写盘（宁可人工改表）"], patches, text: null };
+  }
+  return { ok: true, text: out, problems: [], patches };
+}
+
+/**
+ * 落盘工序（IO 注入 ⇒ --selftest 用内存假盘跑完整流程，零真盘；正式跑与自检共用同一实现）。
+ * rp = computeCodeRepin 的结果：**阻断或缺定位键任一条 ⇒ 整次运行拒绝写盘**（规则只写在这里一份）。
+ * io = { backup(text)→标签, write(text), reread()→表|"BAD"|null, restore(text), fileTextFor(rel) }
+ * status：refused-locate（定位不唯一/缺键，未写盘）· refused-patch（定点补丁把握不足，未写盘）
+ *   · dry-run（未写盘）· rolled-back（写过但复检不过，已回滚）· written。
+ */
+export function executeCodeRepin({ register, srcText, rp, apply, io, emit = (s) => console.log(s) }) {
+  const changes = rp.changes;
+  if (rp.blockers.length || rp.noKey.length) {
+    return { status: "refused-locate", problems: [...rp.blockers, ...rp.noKey], wrote: false, backup: null, patches: [], changes };
+  }
+  if (!changes.length) { return { status: "nothing-to-write", problems: [], wrote: false, backup: null, patches: [], changes }; }
+  const patched = codeRepinPatches(srcText, register, changes);
+  if (!patched.ok) { return { status: "refused-patch", problems: patched.problems, wrote: false, backup: null, patches: patched.patches, changes }; }
+  if (!apply) { return { status: "dry-run", problems: [], wrote: false, backup: null, patches: patched.patches, changes }; }
+  const backup = io.backup(srcText);
+  io.write(patched.text);
+  const reread = io.reread();
+  const problems = [];
+  if (reread === null || reread === undefined || reread === "BAD") {
+    problems.push("写盘后的表无法解析（JSON 坏在盘上）");
+  } else {
+    if (JSON.stringify(stripCodeRepinEditableFields(reread)) !== JSON.stringify(stripCodeRepinEditableFields(register))) {
+      problems.push("除行号（evidence 的 line 与 ref 末尾 :行号）外有字段被改动 ⇒ 违反本模式前提，判据不许顺手放宽");
+    }
+    const after = computeCodeRepin(reread, io.fileTextFor);
+    if (after.changes.length) { problems.push(`回写后仍有 ${after.changes.length} 条待重锚：${after.changes.map((x) => `${x.path} ${x.line}→${x.to}`).join(" / ")}`); }
+    if (after.blockers.length) { problems.push(`回写后仍有 ${after.blockers.length} 条阻断：${after.blockers.join(" | ")}`); }
+    if (after.noKey.length) { problems.push(`回写后仍有 ${after.noKey.length} 条缺定位键：${after.noKey.join(" | ")}`); }
+  }
+  if (problems.length) {
+    emit(`复检失败：${problems.join("；")} —— 用备份回滚。`);
+    io.restore(srcText);
+    return { status: "rolled-back", problems, wrote: true, backup, patches: patched.patches, changes };
+  }
+  return { status: "written", problems: [], wrote: true, backup, patches: patched.patches, changes };
+}
+
+/** 表内正文（note 等）仍引用旧行号的地方 —— 本模式**不改正文**，只点名，交人工同批核对。 */
+function codeRepinProseMentions(srcText, c) {
+  const base = String(c.file).split("/").pop();
+  const out = [];
+  srcText.split("\n").forEach((l, i) => {
+    if (l.includes(`"line": ${c.line}`)) { return; } // 该 evidence 对象自身（ref + line 同一行），不是正文引用
+    if (l.includes(`${base}:${c.line}`) || l.includes(`${c.file}:${c.line}`)) { out.push(i + 1); }
+  });
+  return out;
 }
 
 // ── selftest（纯函数、零盘；负控+正控成对）──────────────────────────────
@@ -776,9 +1599,14 @@ function fixture() {
       { id: "l1Stock", label: "L1 股票阻塞", value: 6, value2: 2, value2Label: "文件", check: "l1ForeignBlockers", domainKey: "STOCK", hard: true },
       { id: "k1Files", label: "K1 .rs 文件数", value: 12, check: "k1RsFileCount", hard: true },
       { id: "k1Traits", label: "K1 pub trait 总数", value: 4, check: "k1PubTraitCount", hard: true },
+      // #61 定案档（fixture 侧刻意取 3 ≤ pubTraits 4 ≤ 外部站点面 7，让三条闭合恒等式在合成读数上也成立）
+      { id: "k1DeclaredExt", label: "K1 + 有声明面的外部实现者", value: 3, check: "k1DeclaredExternalImplTraitCount", hard: true },
       { id: "remoteSeamCount", label: "远程清单", value: 1, check: "remoteSeamRegistryCount", hard: true },
       { id: "capacityRegister", label: "能力面", value: 2, check: "registerGroupSum", hard: true },
       { id: "k1Ext", label: "外部实现者", value: 99, check: "manual", hard: false, implementorsMechanical: 7 },
+      // #57 / #58 新增的两类 check（fixture 侧必须与真实表同档：k2KeyedHits=hard:false、commandNameSetCount=hard:true）
+      { id: "k2Keyed", label: "K2 键控面（强/弱）", value: 3, value2: 1, check: "k2KeyedHits", hard: false },
+      { id: "commandNameSet", label: "契约 A 名集合=产物条目数", value: 10, check: "commandNameSetCount", hard: true },
     ],
     entries: [
       { seamId: "a.one", group: "A", trait: "TraitOne", expect: { implementors: 2, seam: "已建", remote: true }, check: "implementorCount", planAnchorText: "登记项一 a.one 已建。", planLine: 5, evidence: [{ ref: "f.rs:3", file: "f.rs", line: 3, token: "pub trait TraitOne" }] },
@@ -794,7 +1622,9 @@ function fixture() {
     frontend: { lines: 100, files: 4 },
     frontendDir: { "src/x": { lines: 40, files: 2 } },
     l1: { STOCK: { hits: 6, files: 2 } },
-    k1: { rsFiles: 12, pubTraits: 4, externalImplTraits: 7 },
+    k1: { rsFiles: 12, pubTraits: 4, externalImplTraits: 7, declaredExternalTraits: 3 },
+    k2: { strongHits: 3, weakHits: 1, strongTraits: ["TraitOne", "TraitTwo", "TraitThree"], weakTraits: ["TraitFour"], formCounts: { "container-map": 2, "container-seq": 1, "self-key-filter": 1 }, scannedTraits: 4, implTypesKnown: 2 },
+    commandNames: { definedCount: 10, registeredNameCount: 10, entriesCount: 10, unregistered: [], orphanRegistered: [], scannedFiles: 3 },
     implementors: { TraitOne: 2 },
     remoteSeams: ["a.one"],
     seamRegistryText: 'const X = "a.one";',
@@ -825,10 +1655,24 @@ const ANCHOR_CHECK_NEGATIVE_CASES = [
   { check: "l1ForeignBlockers", id: "l1Stock", tier: "hard", mutate: (f) => { f.readings.l1.STOCK.files = 3; } },
   { check: "k1RsFileCount", id: "k1Files", tier: "hard", mutate: (f) => { f.readings.k1.rsFiles = 13; } },
   { check: "k1PubTraitCount", id: "k1Traits", tier: "hard", mutate: (f) => { f.readings.k1.pubTraits = 5; } },
+  // #61 定案档：登记≠实测必红（hard:true 机器复检锚点）· 整份 K1 读数缺失必红 · 读数**缺新字段**也必红
+  //（后者锁的是「门内没出数却把 check 改成机器种类」这种半落地状态 ⇒ 不许静默按 undefined 比出绿）
+  { check: "k1DeclaredExternalImplTraitCount", id: "k1DeclaredExt", tier: "hard", mutate: (f) => { f.readings.k1.declaredExternalTraits = 4; } },
+  { check: "k1DeclaredExternalImplTraitCount", id: "k1DeclaredExt", tier: "hard", mutate: (f) => { delete f.readings.k1.declaredExternalTraits; } },
+  { check: "k1DeclaredExternalImplTraitCount", id: "k1DeclaredExt", tier: "hard", mutate: (f) => { f.readings.k1 = null; } },
   { check: "k1RsFileCount", id: "k1Files", tier: "hard", mutate: (f) => { f.readings.k1 = null; } },
   { check: "remoteSeamRegistryCount", id: "remoteSeamCount", tier: "hard", mutate: (f) => { f.readings.remoteSeams = ["a.one", "x.extra"]; } },
   { check: "registerGroupSum", id: "capacityRegister", tier: "hard", mutate: (f) => { f.register.anchors.find((a) => a.id === "capacityRegister").value = 3; } },
   { check: "manual", id: "k1Ext", tier: "report", mutate: (f) => { f.readings.k1.externalImplTraits = 99; } },
+  // #57 新增 check 种类必须同批带负控+正控（覆盖度反向校验镜像表）；k2KeyedHits 在真实表是 hard:false
+  // ⇒ 两档差异只许进「只报告」，**不得**升成硬失败（这正是「只出数不判红」的机械锁）。
+  { check: "k2KeyedHits", id: "k2Keyed", tier: "report", mutate: (f) => { f.readings.k2.strongHits = 4; } },
+  { check: "k2KeyedHits", id: "k2Keyed", tier: "report", mutate: (f) => { f.readings.k2.weakHits = 2; } },
+  { check: "k2KeyedHits", id: "k2Keyed", tier: "report", mutate: (f) => { f.readings.k2 = null; } },
+  // #58 新增 check 种类：名集合数 ≠ 产物条目数 ⇒ 硬失败（这条钉的是「A 档的绿等于产物与源码一致」）
+  { check: "commandNameSetCount", id: "commandNameSet", tier: "hard", mutate: (f) => { f.readings.commandNames.definedCount = 9; } },
+  { check: "commandNameSetCount", id: "commandNameSet", tier: "hard", mutate: (f) => { f.readings.commandNames.entriesCount = 11; } },
+  { check: "commandNameSetCount", id: "commandNameSet", tier: "hard", mutate: (f) => { f.readings.commandNames = null; } },
 ];
 
 function runSelftest() {
@@ -1112,8 +1956,480 @@ function runSelftest() {
     check(bad.text === null, "负控㉑j5：拒绝写盘时不得返回任何可落盘文本");
   }
 
+  // ㉒系列（任务 #55，--repin-code）：代码证据锚点按**整行定位键**重锚 —— 唯一命中才回写 ·
+  //   零命中 / 歧义 / 缺键 / 补丁不唯一 / 内存版与文本版不一致 ⇒ **整次拒绝写盘** ·
+  //   默认 dry-run 不落盘 · 写盘后从盘上复检不过 ⇒ 回滚。IO 注入内存假盘 ⇒ 与正式跑共用
+  //   executeCodeRepin 同一实现，但零真盘（不碰 scripts/capability-register.json）。
+  {
+    const A_SRC = "impl Worker {\n  fn one() { remote_method_not_supported(); }\n  fn two() { remote_method_not_supported(); }\nfn remote_method_not_supported() -> String {\n    String::new()\n}\n";
+    const DUP_SRC = `${A_SRC}  fn one() { remote_method_not_supported(); }\n`; // 第 7 行与第 2 行整行逐字相同 ⇒ anchorText 歧义
+    const srcs = { "a.rs": A_SRC, "d.rs": DUP_SRC };
+    const ftf = (rel) => (Object.prototype.hasOwnProperty.call(srcs, rel) ? srcs[rel] : null);
+    const evLit = (o) => `      { ${["ref", "file", "line", "endLine", "token", "anchorText", "role"].filter((k) => o[k] !== undefined).map((k) => `${JSON.stringify(k)}: ${JSON.stringify(o[k])}`).join(", ")} }`;
+    const mkTable = (rows) => {
+      const text = `{\n  "entries": [\n${rows.map((r) => `    { "seamId": "${r.seamId}", "group": "A", "evidence": [\n${r.evs.map(evLit).join(",\n")}\n      ] }`).join(",\n")}\n  ]\n}\n`;
+      return { text, register: JSON.parse(text) };
+    };
+    const mkIo = (text, opts = {}) => {
+      const st = { register: text, backups: [], writes: 0 };
+      const io = {
+        backup: (t) => { st.backups.push(t); return ".tmp/fake.bak.json"; },
+        write: (t) => { st.writes++; st.register = t; },
+        reread: () => { try { const parsed = JSON.parse(st.register); return opts.tamper ? opts.tamper(parsed) : parsed; } catch { return "BAD"; } },
+        restore: (t) => { st.register = t; },
+        fileTextFor: ftf,
+      };
+      return { st, io };
+    };
+    const emitOff = () => {};
+    const brief = (rp) => `changes=${rp.changes.map((c) => `${c.path} ${c.line}→${c.to}`).join(",") || "-"} blockers=[${rp.blockers.join(" | ") || "-"}] noKey=[${rp.noKey.join(" | ") || "-"}]`;
+
+    // ㉒a 正控：anchorText 整行唯一命中 ⇒ 可回写，且回写后判定档转绿、只动行号
+    const t1 = mkTable([{ seamId: "s.one", evs: [{ ref: "a.rs:1", file: "a.rs", line: 1, token: "fn remote_method_not_supported", anchorText: "fn remote_method_not_supported() -> String {", role: "实现" }] }]);
+    const rp1 = computeCodeRepin(t1.register, ftf);
+    check(rp1.total === 1 && rp1.kept === 0 && rp1.changes.length === 1 && rp1.changes[0].to === 4 && !rp1.blockers.length && !rp1.noKey.length, `正控㉒a：整行键唯一命中第 4 行应给出一条回写（实得 ${brief(rp1)}）`);
+    const n1 = applyCodeRepinToRegister(t1.register, rp1.changes);
+    check(adjudicateEvidence(n1.entries[0].evidence[0], ftf) === null, "正控㉒a2：唯一命中回写后 evidence 判据必须转绿（= 验收条「跑完 --repin-code 代码锚点不再假红」的等价断言）");
+    check(n1.entries[0].evidence[0].ref === "a.rs:4", `正控㉒a3：ref 末尾的 :行号 与 line 同步回写，表内不许自相矛盾（实得 ${n1.entries[0].evidence[0].ref}）`);
+    check(JSON.stringify(stripCodeRepinEditableFields(n1)) === JSON.stringify(stripCodeRepinEditableFields(t1.register)), "正控㉒a4：除行号外任何字段被改动即违反本模式前提（token/file/role/anchorText 一字未松）");
+    const mis1 = JSON.parse(JSON.stringify(n1));
+    mis1.entries[0].evidence[0].line = 5;
+    check(adjudicateEvidence(mis1.entries[0].evidence[0], ftf) !== null, "负控㉒a5：**红线** —— 回写后行号再指错一行，判定档照样红（重锚治行号漂，不改判据形态）");
+
+    // ㉒e 正控：默认 dry-run 一个字都不写、连备份都不做
+    const d1 = mkIo(t1.text);
+    const dry = executeCodeRepin({ register: t1.register, srcText: t1.text, rp: rp1, apply: false, io: d1.io, emit: emitOff });
+    check(dry.status === "dry-run" && dry.wrote === false && d1.st.writes === 0 && d1.st.backups.length === 0 && d1.st.register === t1.text, `正控㉒e：不带 --apply 必须零写盘（实得 status=${dry.status} writes=${d1.st.writes} backups=${d1.st.backups.length}）`);
+
+    // ㉒h 正控：--apply 全流程（备份 → 定点补丁 → 写盘 → 从盘上复检通过）
+    const w1 = mkIo(t1.text);
+    const wr = executeCodeRepin({ register: t1.register, srcText: t1.text, rp: rp1, apply: true, io: w1.io, emit: emitOff });
+    check(wr.status === "written" && w1.st.writes === 1 && w1.st.backups.length === 1 && w1.st.backups[0] === t1.text, `正控㉒h：--apply 应写一次盘且写前先留逐字节备份（实得 status=${wr.status} writes=${w1.st.writes}）`);
+    check(w1.st.register.includes('"ref": "a.rs:4"') && w1.st.register.includes('"line": 4') && !w1.st.register.includes('"ref": "a.rs:1"'), `正控㉒h2：落盘的必须是定点补丁后的原文（未涉及字节逐字不动；实得 ${JSON.stringify(w1.st.register)}）`);
+    check(JSON.parse(w1.st.register).entries[0].evidence[0].anchorText === "fn remote_method_not_supported() -> String {", "正控㉒h3：定位键本身逐字保留（下次重锚还要用）");
+    const afterH = computeCodeRepin(JSON.parse(w1.st.register), ftf);
+    check(afterH.changes.length === 0 && afterH.blockers.length === 0 && afterH.noKey.length === 0 && afterH.kept === 1, `正控㉒h4：从盘上的表复算 ⇒ 待回写/阻断/缺键全归零（实得 ${brief(afterH)}）`);
+
+    // ㉒b 负控：anchorText 在文件内**零命中**（语义变了，不是位移）⇒ 拒写并点名
+    const t2 = mkTable([{ seamId: "s.one", evs: [{ ref: "a.rs:1", file: "a.rs", line: 1, token: "fn remote_method_not_supported", anchorText: "fn remote_method_not_supported() -> Result<String> {", role: "实现" }] }]);
+    const rp2 = computeCodeRepin(t2.register, ftf);
+    check(rp2.changes.length === 0 && rp2.blockers.length === 1 && /零命中/.test(rp2.blockers[0]), `负控㉒b：整行键零命中必须报阻断、绝不猜行（实得 ${brief(rp2)}）`);
+    check(/命中 1 行 \[4\]/.test(rp2.blockers[0]), `负控㉒b2：阻断里要带 token 命中行号诊断（只诊断，不参与放行；实得 ${rp2.blockers[0]}）`);
+    const b1 = mkIo(t2.text);
+    const rb = executeCodeRepin({ register: t2.register, srcText: t2.text, rp: rp2, apply: true, io: b1.io, emit: emitOff });
+    check(rb.status === "refused-locate" && b1.st.writes === 0 && b1.st.register === t2.text, `负控㉒b3：零命中 ⇒ 即使带 --apply 也整次拒绝写盘（实得 status=${rb.status}）`);
+    check(adjudicateEvidence(t2.register.entries[0].evidence[0], ftf) !== null, "负控㉒b4：同一条 evidence 在判定档照样红 —— 新增模式没给判定档开后门");
+
+    // ㉒c 负控：anchorText **非唯一命中** ⇒ 列出全部候选行 + 整次拒绝（另一条能定位的不许被单独回写）
+    const t3 = mkTable([
+      { seamId: "s.amb", evs: [{ ref: "d.rs:1", file: "d.rs", line: 1, token: "fn one() { remote_method_not_supported(); }", anchorText: "fn one() { remote_method_not_supported(); }", role: "歧义键" }] },
+      { seamId: "s.ok", evs: [{ ref: "d.rs:6", file: "d.rs", line: 6, token: "fn two() { remote_method_not_supported(); }", anchorText: "fn two() { remote_method_not_supported(); }", role: "可定位" }] },
+    ]);
+    const rp3 = computeCodeRepin(t3.register, ftf);
+    check(rp3.changes.length === 1 && rp3.blockers.length === 1 && /非唯一命中/.test(rp3.blockers[0]) && rp3.blockers[0].includes("2 行 [2, 7]"), `负控㉒c：两处逐字相同的行 ⇒ 报「非唯一命中」并**逐条打印所有命中行号**（实得 ${brief(rp3)}）`);
+    const c1 = mkIo(t3.text);
+    const rc = executeCodeRepin({ register: t3.register, srcText: t3.text, rp: rp3, apply: true, io: c1.io, emit: emitOff });
+    check(rc.status === "refused-locate" && c1.st.writes === 0 && c1.st.register === t3.text, "负控㉒c2：一条歧义 ⇒ 整次运行拒绝写盘，不许只回写能定位的那一半");
+
+    // ㉒c3 正控：现盘 workflow.evolver 的真实形态 —— **同一个 token** 的两条 evidence 各带整行键 ⇒ 各自唯一定位
+    const t4 = mkTable([{ seamId: "s.twin", evs: [{ ref: "a.rs:11", file: "a.rs", line: 11, token: "remote_method_not_supported", anchorText: "fn one() { remote_method_not_supported(); }", role: "区间起点" }, { ref: "a.rs:22", file: "a.rs", line: 22, token: "remote_method_not_supported", anchorText: "fn two() { remote_method_not_supported(); }", role: "区间止点" }] }]);
+    const rp4 = computeCodeRepin(t4.register, ftf);
+    check(rp4.changes.length === 2 && !rp4.blockers.length && !rp4.noKey.length, `正控㉒c3：同 token 双条目必须靠 anchorText 各自解歧（实得 ${brief(rp4)}）`);
+    const twinTo = rp4.changes.map((c) => `${c.idx}:${c.line}→${c.to}`).join(",");
+    check(twinTo === "0:11→2,1:22→3", `正控㉒c4：两条各回自己那一行，不许合并成一个数（实得 ${twinTo}）`);
+    // 同形态但**没有** anchorText ⇒ 落缺定位键档（证明「按 token 检索」正是本模式拒绝采用的键）
+    const t4b = mkTable([{ seamId: "s.twin", evs: [{ ref: "a.rs:11", file: "a.rs", line: 11, token: "remote_method_not_supported", role: "区间起点" }, { ref: "a.rs:22", file: "a.rs", line: 22, token: "remote_method_not_supported", role: "区间止点" }] }]);
+    const rp4b = computeCodeRepin(t4b.register, ftf);
+    check(rp4b.changes.length === 0 && rp4b.noKey.length === 2 && /命中 3 行 \[2, 3, 4\]/.test(rp4b.noKey[0]), `负控㉒c5：无整行键的同 token 双条目 ⇒ 两条都拒写，诊断给出 token 命中的 3 行（实得 ${brief(rp4b)}）`);
+
+    // ㉒d 负控：缺定位键 ⇒ 拒写并点名，**不退回**用 token 猜行
+    const t5 = mkTable([{ seamId: "s.nokey", evs: [{ ref: "a.rs:1", file: "a.rs", line: 1, token: "fn remote_method_not_supported", role: "没带键" }] }]);
+    const rp5 = computeCodeRepin(t5.register, ftf);
+    check(rp5.changes.length === 0 && rp5.noKey.length === 1 && /无 anchorText 定位键/.test(rp5.noKey[0]), `负控㉒d：已红但缺整行键 ⇒ 落「缺定位键」档（实得 ${brief(rp5)}）`);
+    const d2 = mkIo(t5.text);
+    const rk = executeCodeRepin({ register: t5.register, srcText: t5.text, rp: rp5, apply: true, io: d2.io, emit: emitOff });
+    check(rk.status === "refused-locate" && d2.st.writes === 0, `负控㉒d2：缺键条目即使诊断里 token 唯一命中第 4 行也不许自动回写（实得 status=${rk.status}）`);
+    // 正控㉒d3：行号仍相符的条目**不**算缺键（否则现盘 66 条全无 anchorText ⇒ 本模式永远不可用）
+    const t6 = mkTable([{ seamId: "s.ok", evs: [{ ref: "a.rs:4", file: "a.rs", line: 4, token: "fn remote_method_not_supported", role: "未漂" }] }]);
+    const rp6 = computeCodeRepin(t6.register, ftf);
+    check(rp6.kept === 1 && rp6.changes.length === 0 && rp6.noKey.length === 0 && rp6.blockers.length === 0, `正控㉒d3：未漂移的 evidence 无键也不报错、不回写（实得 ${brief(rp6)}）`);
+    const n6 = mkIo(t6.text);
+    const rn = executeCodeRepin({ register: t6.register, srcText: t6.text, rp: rp6, apply: true, io: n6.io, emit: emitOff });
+    check(rn.status === "nothing-to-write" && n6.st.writes === 0 && n6.st.backups.length === 0, "正控㉒d4：无需重锚 ⇒ 不写盘也不备份（幂等）");
+
+    // ㉒d5 正控：本模式覆盖不到的形态 ⇒ 逐条点名「不重锚」，不当缺键、也不当已处理
+    const t7 = mkTable([{ seamId: "s.skip", evs: [{ ref: "a.rs", file: "a.rs", line: 0, token: "fn remote_method_not_supported", role: "文件级" }, { ref: "a.rs:1", file: "a.rs", line: 1, endLine: 3, token: "impl Worker", role: "区间锚点" }, { ref: "a.rs:2", file: "a.rs", line: 2, role: "无 token" }] }]);
+    const rp7 = computeCodeRepin(t7.register, ftf);
+    check(rp7.total === 0 && rp7.skipped.length === 3 && rp7.skipped.some((x) => /文件级/.test(x.reason)) && rp7.skipped.some((x) => /区间锚点/.test(x.reason)) && rp7.skipped.some((x) => /无 token/.test(x.reason)), `正控㉒d5：文件级 / 区间 / 无 token 三类一律「不重锚」并给出理由（实得 ${JSON.stringify(rp7.skipped.map((x) => x.reason))}）`);
+
+    // ㉒i 负控：登记的文件读不出（被移动/删除）⇒ 无文本可定位 ⇒ 拒写点名
+    const t8 = mkTable([{ seamId: "s.gone", evs: [{ ref: "zz.rs:3", file: "zz.rs", line: 3, token: "whatever", anchorText: "whatever", role: "文件已搬走" }] }]);
+    const rp8 = computeCodeRepin(t8.register, ftf);
+    check(rp8.changes.length === 0 && rp8.blockers.length === 1 && /读不出/.test(rp8.blockers[0]), `负控㉒i：文件缺失 ⇒ 拒绝重锚（跳过 ≠ 通过；实得 ${brief(rp8)}）`);
+
+    // ㉒f 负控：兜底替换锚只动 line、内存版还要同步 ref ⇒ **文本版与内存版不一致 ⇒ 拒写**
+    const prettyText = `{\n  "entries": [\n    {\n      "seamId": "s.pretty",\n      "group": "A",\n      "evidence": [\n        {\n          "ref": "a.rs:1",\n          "note": "ref 与 file 之间隔了一个键，三段相邻的替换锚都够不着，只能落到兜底的 line 数字，于是 ref 不会同步",\n          "file": "a.rs",\n          "line": 1,\n          "token": "fn remote_method_not_supported",\n          "anchorText": "fn remote_method_not_supported() -> String {"\n        }\n      ]\n    }\n  ]\n}\n`;
+    const t9 = { text: prettyText, register: JSON.parse(prettyText) };
+    const rp9 = computeCodeRepin(t9.register, ftf);
+    check(rp9.changes.length === 1 && rp9.changes[0].to === 4, `负控㉒f 前提：换排版的表仍要能算出 1→4（实得 ${brief(rp9)}）`);
+    const p9 = codeRepinPatches(t9.text, t9.register, rp9.changes);
+    check(!p9.ok && p9.problems.some((x) => /文本版回写与内存版回写结果不一致/.test(x)), `负控㉒f：内存版与文本版任一处不一致就必须拒写（实得 ok=${p9.ok} problems=${JSON.stringify(p9.problems)}）`);
+    check(p9.text === null, "负控㉒f2：拒写时不得返回任何可落盘文本");
+    const f1 = mkIo(t9.text);
+    const rf = executeCodeRepin({ register: t9.register, srcText: t9.text, rp: rp9, apply: true, io: f1.io, emit: emitOff });
+    check(rf.status === "refused-patch" && f1.st.writes === 0 && f1.st.backups.length === 0 && f1.st.register === t9.text, `负控㉒f3：补丁把握不足 ⇒ 不写盘、不备份（实得 status=${rf.status}）`);
+
+    // ㉒j 负控：同一字面在表里出现两次 ⇒ 定点替换锚不唯一 ⇒ 整次拒绝（不许只改第一处）
+    const dupEv = { ref: "a.rs:1", file: "a.rs", line: 1, token: "fn remote_method_not_supported", anchorText: "fn remote_method_not_supported() -> String {", role: "同字面" };
+    const t10 = mkTable([{ seamId: "s.dup1", evs: [dupEv] }, { seamId: "s.dup2", evs: [dupEv] }]);
+    const rp10 = computeCodeRepin(t10.register, ftf);
+    check(rp10.changes.length === 2, `负控㉒j 前提：两处同字面各自都要回写（实得 ${rp10.changes.length}）`);
+    const p10 = codeRepinPatches(t10.text, t10.register, rp10.changes);
+    check(!p10.ok && p10.problems.some((x) => /找不到唯一的替换锚/.test(x)), `负控㉒j：替换锚在原文里不唯一 ⇒ 拒绝定点写盘并给原因（实得 ok=${p10.ok} problems=${JSON.stringify(p10.problems)}）`);
+    const j1 = mkIo(t10.text);
+    const rj = executeCodeRepin({ register: t10.register, srcText: t10.text, rp: rp10, apply: true, io: j1.io, emit: emitOff });
+    check(rj.status === "refused-patch" && j1.st.writes === 0 && j1.st.register === t10.text, "负控㉒j2：不唯一时一律不落盘");
+
+    // ㉒g 负控：写盘后从盘上复检发现「除行号外还有字段变了」⇒ 用备份回滚到原字节
+    const g1 = mkIo(t1.text, { tamper: (reg) => { reg.entries[0].evidence[0].token = "并发写把判据改了"; return reg; } });
+    const rg = executeCodeRepin({ register: t1.register, srcText: t1.text, rp: rp1, apply: true, io: g1.io, emit: emitOff });
+    check(rg.status === "rolled-back" && rg.wrote === true && rg.problems.some((x) => /除行号/.test(x)), `负控㉒g：复检不过必须回滚并给原因（实得 status=${rg.status} problems=${JSON.stringify(rg.problems)}）`);
+    check(g1.st.register === t1.text && g1.st.backups.length === 1 && g1.st.backups[0] === t1.text && g1.st.writes === 1, "负控㉒g2：回滚后表逐字节回到本次读取的原样（备份先于写盘存在）");
+    // 同一形态但判据字段没动、只是行号还没落对 ⇒ 也回滚（复检复算归零这一条真在起作用）
+    const g2 = mkIo(t1.text, { tamper: (reg) => { reg.entries[0].evidence[0].line = 1; return reg; } });
+    const rg2 = executeCodeRepin({ register: t1.register, srcText: t1.text, rp: rp1, apply: true, io: g2.io, emit: emitOff });
+    check(rg2.status === "rolled-back" && g2.st.register === t1.text, `负控㉒g3：盘上行号仍是旧值（= 从盘上复检不复算归零）⇒ 照样回滚（实得 status=${rg2.status}）`);
+  }
+
+  // ㉓系列（任务 #57，K2 键控谓词入库）：八形态各配**合成源码**的正负对照，零盘扫描。
+  //   锁三件事：① 强弱分档不许合并（顺序型容器单飞算弱、⑦ 永不单独进强档）；
+  //   ② ⑧ 没有 impl→trait 反查表时**不得**命中（不许把「match 里出现大写字母开头的标识符」当工厂）；
+  //   ③ 本节只出数 —— k2KeyedHits 的差异一律进「只报告」，绝不进 hardFails（⑭ 系列已锁，这里再锁一次分档形态）。
+  {
+    const k2 = (src) => { const r = computeK2Readings(src); return { s: r.strongTraits, w: r.weakTraits, f: r.detail.formsOf }; };
+    const inList = (arr, t) => arr.includes(t);
+    const form = (f, t) => (f[t] ?? "").split("+");
+
+    // ① keyed-register：动词 + 键参数 + dyn ⇒ 强
+    const reg = { "r.rs": "pub trait Reg1 { fn go(&self) -> String; }\nimpl Hub { fn register_handler(&mut self, name: &str, h: Arc<dyn Reg1>) { self.m.insert(name, h); } }\n" };
+    check(inList(k2(reg).s, "Reg1"), `负控㉓a：①（register 动词 + name: &str 键参数 + dyn）必须判强档（实得 ${JSON.stringify(k2(reg))}）`);
+    check(form(k2(reg).f, "Reg1").includes("keyed-register"), "正控㉓a2：① 的证据形态必须点名 keyed-register（分档可追溯，不许只给结论）");
+    // ①的负控：有 `register + dyn` 但**既无键参数、trait 也无 v1 identity** ⇒ 一档都不许命中
+    const regNeg = { "r.rs": "pub trait Reg2 { fn go(&self) -> String; }\nimpl Hub { fn register_handler(&mut self, h: Arc<dyn Reg2>) { self.count += 1; } }\n" };
+    const rn = k2(regNeg);
+    check(!inList(rn.s, "Reg2") && !inList(rn.w, "Reg2"), `负控㉓a3：①缺键参数 ⇒ 不得凭「register 动词 + dyn」升强（实得 强=${JSON.stringify(rn.s)} 弱=${JSON.stringify(rn.w)}）`);
+    // ② self-id-register：无键参数但 trait 自带 **v1** identity 方法（kind）⇒ 强（v1 名单与 ⑦ 名单不同，这里锁 v1 分支）
+    const sid = { "r.rs": "pub trait Sid1 { fn kind(&self) -> String; fn go(&self) -> String; }\nimpl Hub { fn register_thing(&mut self, h: Arc<dyn Sid1>) { self.v.push(h); } }\n" };
+    check(form(k2(sid).f, "Sid1").includes("self-id-register"), `正控㉓b：②（v1 identity 方法 kind + register 动词）必须记 self-id-register（实得 ${JSON.stringify(k2(sid).f.Sid1)}）`);
+    // ③ keyed-get：get/lookup/resolve/find + dyn + &str/String 形参 ⇒ 强
+    const get = { "r.rs": "pub trait Get3 { fn go(&self) -> String; }\nimpl Hub { fn lookup_item(&self, id: &str) -> Arc<dyn Get3> { self.m.get(id).unwrap().clone() } }\n" };
+    check(form(k2(get).f, "Get3").includes("keyed-get"), `正控㉓c：③（lookup + id: &str + dyn 返回）必须记 keyed-get（实得 ${JSON.stringify(k2(get).f.Get3)}）`);
+    const getNeg = { "r.rs": "pub trait Get4 { fn go(&self) -> String; }\nimpl Hub { fn lookup_item(&self) -> Arc<dyn Get4> { self.first.clone() } }\n" };
+    check(!inList(k2(getNeg).s, "Get4"), "负控㉓c2：③无键形参 ⇒ 不得命中（否则任何返回 dyn 的 getter 都算键控）");
+    // ④ factory-match（dyn 形态）：≥3 分支 + ≥3 构造点 + 块内 dyn ⇒ 强
+    const fac = { "r.rs": "pub trait Fac1 { fn go(&self) -> String; }\nfn build(k: &str) -> Box<dyn Fac1> {\n    match k {\n        \"a\" => Box::new(Arc::new(Alpha::new())),\n        \"b\" => Box::new(Arc::new(Beta::new())),\n        _ => Box::new(Arc::new(Gamma::new())),\n    }\n}\n" };
+    check(form(k2(fac).f, "Fac1").includes("factory-match-dyn"), `正控㉓d：④（match ≥3 分支 + 块内 dyn）必须记 factory-match-dyn（实得 ${JSON.stringify(k2(fac).f.Fac1)}）`);
+    const facNeg = { "r.rs": "pub trait Fac2 { fn go(&self) -> String; }\nfn build(k: &str) -> Box<dyn Fac2> {\n    match k {\n        \"a\" => Box::new(Arc::new(Alpha::new())),\n        _ => Box::new(Arc::new(Beta::new())),\n    }\n}\n" };
+    check(!inList(k2(facNeg).s, "Fac2"), "负控㉓d2：④只有 2 个分支 ⇒ 不算工厂分派（阈值 arms≥3 是形态定义的一部分）");
+    // ⑤ 容器：映射型=强
+    const cmap = { "r.rs": "pub trait MapC { fn go(&self) -> String; }\nstruct Reg { m: HashMap<String, Arc<dyn MapC>> }\n" };
+    check(inList(k2(cmap).s, "MapC") && form(k2(cmap).f, "MapC").includes("container-map"), `正控㉓e：⑤映射型容器（HashMap<String, Arc<dyn T>>）判**强**（实得 ${JSON.stringify(k2(cmap))}）`);
+    // ⑤ 容器：顺序型单飞=弱，**不得**升强
+    const cseq = { "r.rs": "pub trait SeqC { fn go(&self) -> String; }\nstruct Reg { v: Vec<Arc<dyn SeqC>> }\n" };
+    const cs = k2(cseq);
+    check(!inList(cs.s, "SeqC") && inList(cs.w, "SeqC"), `负控㉓e2：⑤顺序型容器（Vec<Arc<dyn T>>）无自述键/无按键筛选时**不得**升强（实得 强=${JSON.stringify(cs.s)} 弱=${JSON.stringify(cs.w)}）`);
+    // ⑤ 升强：顺序型 + trait 自带自述键 ⇒ 强（res33 §5.2.1 的「同现才升强」）
+    const cup = { "r.rs": "pub trait SeqU { fn name(&self) -> String; fn go(&self) -> String; }\nstruct Reg { v: Vec<Arc<dyn SeqU>> }\n" };
+    check(inList(k2(cup).s, "SeqU"), "正控㉓e3：顺序型容器与自述键方法同现 ⇒ 升强（两档分界必须可双向移动，不许只紧不松）");
+    // ⑥ push 注册口：add_* 动词 + 参数含 dyn ⇒ 强
+    const push = { "r.rs": "pub trait Stg6 { fn go(&self) -> String; }\nimpl Hub { fn add_stage(&mut self, s: Box<dyn Stg6>) { self.stages.push(s); } }\n" };
+    check(form(k2(push).f, "Stg6").includes("push-register"), `正控㉓f：⑥（add_stage 参数含 dyn）必须记 push-register（实得 ${JSON.stringify(k2(push).f.Stg6)}）`);
+    const pushNeg = { "r.rs": "pub trait Stg7 { fn go(&self) -> String; }\nimpl Hub { fn add_stage(&mut self, s: Box<RuleStage>) { self.stages.push(s); } }\n" };
+    check(!inList(k2(pushNeg).s, "Stg7") && !inList(k2(pushNeg).w, "Stg7"), "负控㉓f2：⑥参数不含 dyn ⇒ 不得命中（否则任何 push 都算注册口）");
+    // ⑦ 自述键 + 集合筛选：**弱键控**，单独出现时绝不进强档（= 不直接进 51）
+    const skey = { "r.rs": "pub trait Src7 { fn platform(&self) -> String; fn fetch(&self) -> String; }\nfn pick(list: &[Box<dyn Src7>], key: &str) -> bool {\n    list.iter().find(|x| x.platform() == key).is_some()\n}\n" };
+    const sk = k2(skey);
+    check(!inList(sk.s, "Src7") && inList(sk.w, "Src7") && form(sk.f, "Src7").includes("self-key-filter"), `正控㉓g：⑦（自述键 + 按 key 迭代筛选）只判**弱键控**，不进强档（实得 强=${JSON.stringify(sk.s)} 弱=${JSON.stringify(sk.w)} 形态=${JSON.stringify(sk.f.Src7)}）`);
+    const skeyNeg = { "r.rs": "pub trait Src8 { fn fetch(&self) -> String; }\nfn pick(list: &[Box<dyn Src8>], key: &str) -> bool {\n    list.iter().find(|x| x.tag() == key).is_some()\n}\n" };
+    check(!inList(k2(skeyNeg).w, "Src8"), "负控㉓g2：⑦trait 无自述键方法 ⇒ 不得命中（筛选的键必须来自 trait 自己）");
+    // ⑧ factory-match 构造**已知实现类型**：需要 impl→trait 反查表
+    const ctor = { "r.rs": "pub trait Ctor9 { fn go(&self) -> String; }\nimpl Ctor9 for Gamma { fn go(&self) -> String { \"g\".into() } }\nimpl Ctor9 for Delta { fn go(&self) -> String { \"d\".into() } }\nfn build9(k: &str) -> String {\n    match k {\n        \"a\" => { let _ = Gamma::new(); \"x\".into() }\n        \"b\" => { let _ = Delta::new(); \"y\".into() }\n        _ => \"z\".into(),\n    }\n}\n" };
+    const ck = k2(ctor);
+    check(inList(ck.s, "Ctor9") && form(ck.f, "Ctor9").includes("factory-match-impl"), `正控㉓h：⑧（match 块内构造同一 trait 的 ≥2 个已知实现类型、块内无 dyn）必须判强（DocumentParser 型盲点的修法；实得 ${JSON.stringify(ck)}）`);
+    const ctorNeg = { "r.rs": "pub trait CtorA { fn go(&self) -> String; }\nfn build9(k: &str) -> String {\n    match k {\n        \"a\" => { let _ = Gamma::new(); \"x\".into() }\n        \"b\" => { let _ = Delta::new(); \"y\".into() }\n        _ => \"z\".into(),\n    }\n}\n" };
+    const cn = k2(ctorNeg);
+    check(!inList(cn.s, "CtorA") && !inList(cn.w, "CtorA") && cn.f.CtorA === undefined, `负控㉓h2：**无 impl→trait 反查表时 ⑧ 不得命中**（块内出现大写标识符 ≠ 构造该 trait 的实现类型；实得 ${JSON.stringify(cn)}）`);
+    // 分档互斥 + 只出数：强档 trait 不重复计入弱档；k2 读数差异永远不进 hardFails
+    const both = { "r.rs": "pub trait B1 { fn name(&self) -> String; fn go(&self) -> String; }\nstruct R { m: HashMap<String, Arc<dyn B1>>, v: Vec<Arc<dyn B1>> }\n" };
+    const bk = k2(both);
+    check(inList(bk.s, "B1") && !inList(bk.w, "B1"), `正控㉓i：同 trait 同时有强/弱证据 ⇒ 只计强档一次（两档互斥，否则 strongHits+weakHits 会重复计数）`);
+    const fk = fixture(); fk.readings.k2 = null;
+    const rk2 = reconcile(fk.register, fk.readings, fk.plan);
+    check(!rk2.hardFails.some((x) => /锚点 k2Keyed/.test(x)) && rk2.reports.some((x) => x.includes("锚点 k2Keyed")), "正控㉓j：K2 读数缺失/不符时 k2KeyedHits（hard:false）**只报告**，绝不升成硬失败（「只出数不判红」的机械锁）");
+  }
+
+  // ㉔系列（任务 #58，产物滞后 vs 真漂移）：分流**只买到诊断正确性**，两档都照旧判红。
+  //   锁四件事：① 未注册非空 ⇒ 专码 ARTIFACT-STALE + 点名 cargo check；② 名集合一致 ⇒ TRUE-DRIFT 且文案不变；
+  //   ③ 专码**不得**把红洗成绿/降成只报告（CI 里 step() 非零即中断，伪装绿是本任务明令禁止的）；
+  //   ④ 名集合数 ≠ 产物条目数 ⇒ 新不变量点名「名集合静默低估」。全部走合成输入，零盘扫描。
+  {
+    const mkSrc = (cmds, extra = "") => ({ "m.rs": cmds.map((c) => `#[tauri::command]\npub async fn ${c}() -> String { String::new() }`).join("\n") + extra });
+    const mkReg = (cmds) => cmds.map((c) => ({ mod: "m", cmd: c }));
+    // 正控㉔a：源码与产物逐条对上 ⇒ 未注册 0 / 孤儿 0 / 名集合数 == 条目数
+    const ok = commandNameSets(mkReg(["a1", "a2", "a3"]), Object.entries(mkSrc(["a1", "a2", "a3"])));
+    check(ok.unregistered.length === 0 && ok.orphanRegistered.length === 0 && ok.definedCount === 3 && ok.entriesCount === 3, `正控㉔a：一致时三个读数必须全等（实得 ${JSON.stringify(ok)}）`);
+    check(classifyCommandCountDrift(ok).kind === "true-drift" && classifyCommandCountDrift(ok).code.includes("真漂移"), "正控㉔b：名字集合一致 ⇒ 分流为真漂移（按登记值判，口径不变）");
+    // 负控㉔c：定义了两条、产物只有一条 ⇒ 未注册非空 ⇒ 判产物滞后 + 点名 cargo check
+    const stale = commandNameSets(mkReg(["b1"]), Object.entries(mkSrc(["b1", "b2"])));
+    const cls = classifyCommandCountDrift(stale);
+    check(stale.unregistered.join(",") === "b2", `负控㉔c：已定义未注册必须逐条点名（实得 ${JSON.stringify(stale.unregistered)}）`);
+    check(cls.kind === "artifact-stale" && cls.code === "[产物滞后 ARTIFACT-STALE] " && /cargo check/.test(cls.note) && cls.note.includes("b2"), `负控㉔c2：产物滞后档必须给专码 + 首条未注册名 + 直指「跑 cargo check 重生成后复跑本门」（实得 ${cls.code}${cls.note.slice(0, 60)}…）`);
+    // 负控㉔d：注释里的 #[tauri::command] 不算定义（沿用 check-contracts 的剥注释口径）
+    const cmt = commandNameSets(mkReg(["c1"]), Object.entries({ "m.rs": "// #[tauri::command]\n// pub fn c1() {}\npub fn helper() {}\n" }));
+    check(cmt.definedCount === 0 && cmt.unregistered.length === 0, `负控㉔d：注释掉的命令不得进名集合（否则分流会把「没写」判成「产物滞后」；实得 ${JSON.stringify(cmt)}）`);
+    // 负控㉔e：专码不得洗白 —— 产物滞后档**仍是一条硬失败**，且不进「只报告」
+    const f1 = fixture();
+    f1.readings.registry.commandTotal = 9; // 登记 10 / 实测 9
+    f1.readings.commandNames.entriesCount = 9;
+    f1.readings.commandNames.definedCount = 10;
+    f1.readings.commandNames.unregistered = ["zz_new_command"];
+    const r1 = reconcile(f1.register, f1.readings, f1.plan);
+    const staleHard = r1.hardFails.filter((x) => /产物滞后 ARTIFACT-STALE/.test(x));
+    check(staleHard.length >= 1 && staleHard.every((x) => x.startsWith("FAIL:")), `负控㉔e：产物滞后分流**必须仍判红**（本仓 CI 的 step() 非零即中断，专码只改诊断不改档位；不许伪装成绿）`);
+    check(staleHard.some((x) => /cargo check/.test(x) && x.includes("登记 10 条 / 实测 9 条")), `负控㉔e2：红行里同时给出差值与修法（实得 ${staleHard[0] ?? "无"}）`);
+    check(!r1.reports.some((x) => /锚点 commandTotal/.test(x)), "负控㉔e3：分流后的 commandTotal 差异不得同时出现在「只报告」档（同一差异不许既红又报告，档位必须唯一）");
+    // 负控㉔f：名字集合一致时的差额 ⇒ 文案保持真漂移口径，且照样红
+    const f2 = fixture();
+    f2.readings.registry.commandTotal = 9;
+    f2.readings.commandNames.entriesCount = 9;
+    f2.readings.commandNames.definedCount = 9;
+    const r2 = reconcile(f2.register, f2.readings, f2.plan);
+    check(r2.hardFails.some((x) => /真漂移 TRUE-DRIFT/.test(x) && /锚点 commandTotal/.test(x)), `负控㉔f：名字集合一致 ⇒ [真漂移] 专码 + 原口径文案（登记/实测/差值一个不少；实得 ${JSON.stringify(r2.hardFails.filter((x) => /commandTotal/.test(x)))}）`);
+    // 负控㉔g：新不变量 —— 同名跨模块只注册一个 ⇒ 名集合静默低估必须被点名
+    const f3 = fixture();
+    f3.readings.commandNames.definedCount = 9; // 名集合 9 / 产物条目 10（锚点登记 10）
+    const r3 = reconcile(f3.register, f3.readings, f3.plan);
+    check(r3.hardFails.some((x) => /锚点 commandNameSet/.test(x) && /名集合与产物条目数不等/.test(x)), `负控㉔g：名集合数 ≠ 产物条目数 ⇒ commandNameSetCount 硬失败并说明「静默低估/同名未注册」（实得 ${JSON.stringify(r3.hardFails.filter((x) => /commandNameSet/.test(x)))}）`);
+    const f4 = fixture();
+    check(reconcile(f4.register, f4.readings, f4.plan).hardFails.every((x) => !/commandNameSet|commandTotal/.test(x)), "正控㉔h：干净读数下两个新锚点均不假阳性（专码不得变成新的常驻红）");
+    // 正控㉔i：commandTotal 的现值/现口径未动 —— 分流不引入对 registryFileLines 的依赖（±1 是口径错配，PLAN §15.1）
+    check(/split\("\\n"\)\.length/.test(String(collectReadings.toString())), "正控㉔i1：registryFileLines 仍用 split 口径（未把它的 ±1 拉进滞后证据）");
+    check(!/registryFileLines/.test(String(classifyCommandCountDrift)), "正控㉔i2：分流判据只看契约 A 名字集合，不引用产物行数读数");
+  }
+
+  // ㉕系列（任务 #65，`planOld[].alsoAt` 重锚区段）：区段内放行 · 段外仍红 · 段腐烂双报 ·
+  //   不填 alsoAt 与旧行为逐字一致 · --repin-plan 能重锚区段（唯一才回写 / 歧义与零命中与缺键拒写）·
+  //   alsoAt 的纯数字 token 仍受锚点内部自洽管辖（不得成为藏数口子）。全部零盘扫描。
+  {
+    const P15 = `${fixture().plan}### 15.1 HEAD 事实\nHEAD 产物 = 1540 条、按算法应生成 9 条 ⇒ 登记值 10 比 HEAD 源码多 1。\n### 15.9 段外\n这里在两个合法区段之外又提了一次 9 条。\n`;
+    const PL = P15.split("\n");
+    // 夹具行号自证：漂移段=3–8，段内出现=4，alsoAt 目标段=11–12（旧读数在 12），段外出现=14
+    check(PL[2].startsWith("### 0.12.4") && PL[8].startsWith("### 0.13") && PL[10] === "### 15.1 HEAD 事实" && PL[11].includes("HEAD 产物") && PL[13].includes("9 条"), `㉕ 前提：P15 行号与断言一致（实得 11=${PL[10]} / 12=${PL[11].slice(0, 20)} / 14=${PL[13].slice(0, 20)}）`);
+    const oldRow = (reg) => reg.anchors.find((a) => a.id === "commandTotal").planOld[0];
+    const outLines = (res) => res.fails.filter((x) => /旧读数 9 出现在漂移列举段之外/.test(x));
+    const rotLines = (res) => res.fails.filter((x) => x.startsWith("[区段腐烂 ALSOAT-STALE]"));
+
+    // ㉕a 正控：出现落在登记过的健康区段内 ⇒ 不红；同一次运行里段外的出现仍红（一条都不许漏）
+    const g1 = fixture();
+    oldRow(g1.register).alsoAt = [{ startLine: 11, endLine: 12, mustContain: ["HEAD 产物", "9 条"] }];
+    const r1 = checkPlan(g1.register, P15);
+    check(rotLines(r1).length === 0, `㉕a1 正控：mustContain 全命中 ⇒ 不得报区段腐烂（实得 ${JSON.stringify(rotLines(r1))}）`);
+    check(outLines(r1).length === 1 && /PLAN:14/.test(outLines(r1)[0]), `㉕a2 正控+负控：段内 PLAN:12 不红、段外 PLAN:14 仍红（实得 ${JSON.stringify(outLines(r1))}）`);
+    check(/合法区段仅 3–8 \/ 11–12/.test(outLines(r1)[0] ?? ""), `㉕a3：红行的合法区段清单必须同时列出漂移段与 alsoAt 段（实得 ${outLines(r1)[0] ?? "无"}）`);
+    check(r1.fails.length === 1 && r1.soft.length === 0, `㉕a4：本例 PLAN 侧只该有这一条红（实得 hard=${JSON.stringify(r1.fails)} soft=${JSON.stringify(r1.soft)}）`);
+    const rr1 = reconcile(g1.register, g1.readings, P15);
+    check(rr1.hardFails.length === 1 && /PLAN:14/.test(rr1.hardFails[0]), `㉕a5：经 reconcile 也是 1 条硬失败（commandTotal 是 hard:true ⇒ 段外出现不得只报告）（实得 ${JSON.stringify(rr1.hardFails)}）`);
+
+    // ㉕b 负控：区段 mustContain 不满足 ⇒ ①单独一条「重锚腐烂」专码 ②段内出现**仍**判红 ③两类措辞可区分
+    const g2 = fixture();
+    oldRow(g2.register).alsoAt = [{ startLine: 11, endLine: 12, mustContain: ["HEAD 产物", "9 条", "这句盘上不存在"] }];
+    const r2 = checkPlan(g2.register, P15);
+    check(rotLines(r2).length === 1 && /这句盘上不存在/.test(rotLines(r2)[0]) && /PLAN:11[–-]12 已不可信/.test(rotLines(r2)[0]), `㉕b1：腐烂专码必须点名区段行号与缺失 token（实得 ${JSON.stringify(rotLines(r2))}）`);
+    check(outLines(r2).length === 2 && outLines(r2).some((x) => /PLAN:12/.test(x)), `㉕b2：腐烂段内的 PLAN:12 出现**仍判红**，不得默默放行（实得 ${JSON.stringify(outLines(r2))}）`);
+    check(/已腐烂.*11–12/.test(outLines(r2).find((x) => /PLAN:12/.test(x)) ?? ""), `㉕b3：段内那条红必须写明它落在腐烂段内（实得 ${outLines(r2).find((x) => /PLAN:12/.test(x)) ?? "无"}）`);
+    check(!rotLines(r2).some((x) => /出现在漂移列举段之外/.test(x)) && !outLines(r2).some((x) => /^\[区段腐烂/.test(x)), "㉕b4：两类措辞互斥 ⇒ 「区段重锚腐烂」与「旧读数出段」在报告里分得开（腐烂专码只出现在它自己那一行）");
+    check(!outLines(r2).some((x) => /PLAN:4/.test(x)), "㉕b5：腐烂的是 alsoAt 段，漂移段内的出现照常放行（一条腐烂不牵连另一条）");
+
+    // ㉕c 负控：不填 alsoAt ⇒ 与改造前**逐字**一致（零放宽）
+    const LEGACY_ONE = "旧读数 9 出现在漂移列举段之外（PLAN:1，且找不到含「漂移」的 §0.12.4 区段）—— 旧读数，只许在漂移段";
+    const legacyFails = checkPlan(fixture().register, "正文里出现旧读数 9 条（无任何漂移字样）。\n").fails.filter((x) => /旧读数/.test(x));
+    check(JSON.stringify(legacyFails) === JSON.stringify([LEGACY_ONE]), `㉕c1：未登记 alsoAt 的红行文案必须逐字等于改造前（实得 ${JSON.stringify(legacyFails)}）`);
+    const ge = fixture(); oldRow(ge.register).alsoAt = [];
+    const gn = fixture();
+    check(JSON.stringify(checkPlan(ge.register, P15)) === JSON.stringify(checkPlan(gn.register, P15)), "㉕c2：alsoAt: [] 与不填 alsoAt 的 PLAN 对账结果逐字相同（空数组零放宽）");
+    check(outLines(checkPlan(gn.register, P15)).length === 2, "㉕c3：不填 alsoAt ⇒ P15 里段外两次出现（12/14）全红（放宽前后差 2 条，正是本字段买到的唯一自由度）");
+
+    // ㉕d 负控：段腐烂但**结构**失配（行号缺失 / 无 token）⇒ 同样给腐烂码，不放行
+    const g4 = fixture();
+    oldRow(g4.register).alsoAt = [{ startLine: 11 }];
+    check(/\[区段腐烂 ALSOAT-STALE\]/.test(checkPlan(g4.register, P15).fails.join(" | ")), "㉕d1：区段只有行号、没有 mustContain ⇒ 无据放行，判腐烂");
+    const g4b = fixture();
+    oldRow(g4b.register).alsoAt = [{ startLine: 99999, endLine: 99999, mustContain: ["HEAD 产物"] }];
+    const r4b = checkPlan(g4b.register, P15);
+    check(rotLines(r4b).length === 1 && outLines(r4b).some((x) => /PLAN:12/.test(x)), "㉕d2：区段行号越界（PLAN 里没有那段）⇒ 报腐烂，段内出现的判定退回「段外」口径仍红");
+
+    // ㉕e 正控：--repin-plan 能按 mustContain 把区段重锚到新行号（文档删一行 ⇒ 段跟着走）
+    const arr = P15.split("\n"); arr.splice(1, 1); const shifted = arr.join("\n");
+    const g5 = fixture();
+    oldRow(g5.register).alsoAt = [{ startLine: 13, endLine: 14, mustContain: ["HEAD 产物", "9 条"] }]; // 表里的段指错了位置（等价 ㉑b 的漂移动手形态）
+    const rp5 = computeRepin(g5.register, shifted);
+    const ch5 = rp5.changes.find((x) => x.kind === "alsoAtRegion");
+    check(!!ch5 && ch5.to === 11 && ch5.toEnd === 11, `㉕e1 正控：唯一最小包络 ⇒ 回写 13–14 → 11–11（实得 ${JSON.stringify(ch5 ?? null)} blockers=${JSON.stringify(rp5.blockers)}）`);
+    check(!rp5.blockers.some((x) => /alsoAt/.test(x)) && !rp5.noKey.some((x) => /alsoAt/.test(x)), `㉕e2：可定位的区段不得落阻断/缺键档（实得 blockers=${JSON.stringify(rp5.blockers)} noKey=${JSON.stringify(rp5.noKey)}）`);
+    const n5 = applyRepinToRegister(g5.register, rp5.changes);
+    const reg5 = n5.anchors.find((a) => a.id === "commandTotal").planOld[0].alsoAt[0];
+    check(reg5.startLine === 11 && reg5.endLine === 11, `㉕e3：内存版成对回写 startLine/endLine（实得 ${JSON.stringify(reg5)}）`);
+    check(JSON.stringify(stripRepinEditableFields(n5)) === JSON.stringify(stripRepinEditableFields(g5.register)), "㉕e4：重锚只改行号，mustContain / note / 判据字段一字未动");
+    const after5 = checkPlan(n5, shifted);
+    check(after5.fails.length === 1 && /PLAN:13/.test(after5.fails[0]) && rotLines(after5).length === 0, `㉕e5：回写后腐烂归零，只剩「段外出现」这一条真红（实得 ${JSON.stringify(after5.fails)}）`);
+    const mis5 = JSON.parse(JSON.stringify(n5));
+    mis5.anchors.find((a) => a.id === "commandTotal").planOld[0].alsoAt[0] = { startLine: 5, endLine: 6, mustContain: ["HEAD 产物", "9 条"] };
+    check(/\[区段腐烂 ALSOAT-STALE\]/.test(checkPlan(mis5, shifted).fails.join(" | ")), "㉕e6：**红线** —— 回写后再指错一行 ⇒ 判定照样红（重锚治行号漂，没把区段洗成摆设）");
+
+    // ㉕f 负控：歧义 / 零命中 / 缺键 ⇒ 一律拒写（与 planPinned 同口径）
+    const dupP15 = `${P15}### 15.8 重复\nHEAD 产物 = 1540 条、按算法应生成 9 条 ⇒ 登记值 10 比 HEAD 源码多 1。\n`;
+    const g6 = fixture();
+    oldRow(g6.register).alsoAt = [{ startLine: 8, endLine: 9, mustContain: ["HEAD 产物", "9 条"] }];
+    const rp6 = computeRepin(g6.register, dupP15);
+    check(!rp6.changes.some((x) => x.kind === "alsoAtRegion") && rp6.blockers.some((x) => /alsoAt.*非唯一命中.*\[12–12, 16–16\]/.test(x)), `㉕f1：两处同形事实句 ⇒ 两个最小包络 ⇒ 报「非唯一命中」并列出候选，绝不进 changes（实得 ${JSON.stringify(rp6.blockers)}）`);
+    const g7 = fixture();
+    oldRow(g7.register).alsoAt = [{ startLine: 8, endLine: 9, mustContain: ["这句盘上不存在", "9 条"] }];
+    const rp7 = computeRepin(g7.register, P15);
+    check(!rp7.changes.some((x) => x.kind === "alsoAtRegion") && rp7.blockers.some((x) => /alsoAt.*全文\*\*零命中\*\*/.test(x) && x.includes("这句盘上不存在")), `㉕f2：token 在 PLAN 全文零命中（句子被改写=语义变化）⇒ 拒写并点名失效 token（实得 ${JSON.stringify(rp7.blockers)}）`);
+    const g8 = fixture();
+    oldRow(g8.register).alsoAt = [{ startLine: 11, endLine: 12, mustContain: [] }];
+    const rp8 = computeRepin(g8.register, P15);
+    check(rp8.noKey.some((x) => /alsoAt.*无 mustContain 自证 token/.test(x)) && !rp8.changes.some((x) => x.kind === "alsoAtRegion"), `㉕f3：区段不带定位键 ⇒ 落「缺定位键」档并拒写（实得 ${JSON.stringify(rp8.noKey)}）`);
+
+    // ㉕g 正控：文本版定点回写（真正落盘那条路径）——needle 唯一才改，成对改，其它字节不动
+    const tableText = `{\n  "anchors": [\n    { "id": "commandTotal", "planOld": [{ "number": "9", "note": "n", "alsoAt": [{ "startLine": 13, "endLine": 14, "mustContain": ["HEAD 产物", "9 条"] }] }] }\n  ]\n}\n`;
+    const regG = JSON.parse(tableText);
+    const rpG = computeRepin({ ...regG, caliber: { groupCounts: { A: 0, B: 0, C: 0, H: 0, K: 0 }, totalRows: 0, capacityRegister: 0 }, entries: [] }, shifted);
+    const chG = rpG.changes.filter((x) => x.kind === "alsoAtRegion");
+    check(chG.length === 1 && chG[0].to === 11 && chG[0].toEnd === 11, `㉕g1 前提：文本版同样应算出 13–14→11–11（实得 ${JSON.stringify(chG)}）`);
+    const gp = planRepinPatches(tableText, regG, chG);
+    check(gp.ok && gp.text?.includes('"startLine": 11, "endLine": 11') && gp.text?.includes('"mustContain": ["HEAD 产物", "9 条"]'), `㉕g2：定点替换成对回写行号、token 原样保留（实得 ok=${gp.ok} problems=${JSON.stringify(gp.problems)}）`);
+    check(gp.ok && gp.text.includes('"note": "n"'), "㉕g3：未涉及的字节逐字不动（note / 结构 / 缩进没被整体重排）");
+    const twinTable = `{\n  "anchors": [\n    { "id": "commandTotal", "planOld": [{ "number": "9", "note": "n", "alsoAt": [{ "startLine": 13, "endLine": 14, "mustContain": ["HEAD 产物", "9 条"] }] }, { "number": "8", "note": "n2", "alsoAt": [{ "startLine": 13, "endLine": 14, "mustContain": ["HEAD 产物", "8 条"] }] }] }\n  ]\n}\n`;
+    const regT = JSON.parse(twinTable);
+    const rpT = computeRepin({ ...regT, caliber: { groupCounts: { A: 0, B: 0, C: 0, H: 0, K: 0 }, totalRows: 0, capacityRegister: 0 }, entries: [] }, shifted);
+    const bad = planRepinPatches(twinTable, regT, rpT.changes.filter((x) => x.kind === "alsoAtRegion"));
+    check(!bad.ok && bad.problems.some((x) => /找不到唯一的替换锚/.test(x)) && bad.text === null, `㉕g4：两段行号字面相同 ⇒ 替换锚不唯一 ⇒ 整次拒绝写盘（实得 ok=${bad.ok} problems=${JSON.stringify(bad.problems)}）`);
+
+    // ㉕h 判据 6：alsoAt 的纯数字 token 同受锚点内部自洽管辖（挪数字不等于拆判据）
+    const consReg2 = (anchors) => ({ caliber: { groupCounts: { A: 1, B: 0, C: 0, H: 0, K: 0 }, totalRows: 1, capacityRegister: 1 }, anchors, entries: [] });
+    const alsoAnchor = (mustContain) => consReg2([{ id: "x", hard: true, check: "registryCommandCount", value: 1542, planNumber: "1542", planOld: [{ number: "1541", alsoAt: [{ startLine: 1, endLine: 3, mustContain }] }] }]);
+    check(checkAnchorConsistency(alsoAnchor(["HEAD 产物", "1541"])).length === 0, "㉕h1 正控：alsoAt 钉本条 planOld 自己声明的旧读数（1541）⇒ 不算矛盾（这就是该字段的用途）");
+    check(checkAnchorConsistency(alsoAnchor(["HEAD 产物", "7777"])).length === 1, `㉕h2 负控：alsoAt 钉谁都不撞的数字 ⇒ 必须硬失败（实得 ${JSON.stringify(checkAnchorConsistency(alsoAnchor(["HEAD 产物", "7777"])))}）`);
+    check(checkAnchorConsistency(alsoAnchor(["HEAD 产物", "7777"])).join(" | ").includes("alsoAt"), "㉕h3：矛盾行的定位必须指到 alsoAt（不能只报 planPinned）");
+    check(checkAnchorConsistency(alsoAnchor(["HEAD 产物", "1540 条"])).length === 0, "㉕h4：非纯数字 token（「1540 条」）按既有 ③ 档惯例不做数字比对 ⇒ 登记方用句子片段自证即可");
+    const launder1541 = consReg2([
+      { id: "hard", hard: true, check: "registryCommandCount", value: 1542, planNumber: "1542", planPinned: [{ line: 1, mustContain: ["1542", "164"] }] },
+      { id: "mod", hard: true, check: "registryModuleCount", value: 164 },
+    ]);
+    check(checkAnchorConsistency(launder1541).length === 0, "㉕h5：现盘形态（钉句只含 1542/164）在纳入 alsoAt 检查后仍不红（零新增红）");
+    const moved = JSON.parse(JSON.stringify(launder1541));
+    moved.anchors[0].planOld = [{ number: "1534", alsoAt: [{ startLine: 2, endLine: 4, mustContain: ["9999"] }] }];
+    check(checkAnchorConsistency(moved).length === 1, "㉕h6：**藏数路径封堵** —— 把与登记脱节的数字从钉句挪进 alsoAt ⇒ 照样硬失败（alsoAt 不是判据 ②/⑮ 的新豁口）");
+  }
+
+  // ㉖系列（任务 #61，`k1DeclaredExternalImplTraitCount` 的两趟语义）：锁「定案档 = 站点面 ∩ 声明面，
+  //   且交并必须在收齐之后做」。单趟那种「看到 impl 时就地查声明集」的写法会随遍历次序丢条目，
+  //   它是 #61 复现并归因的**缺陷**（当前树恒少 22 条），本系列把「不许退回单趟」钉成断言。
+  {
+    const singlePassLike = (files) => { // 缺陷复现器：def 随遍历就地累积 ⇒ 顺序相关
+      const def = new Set(); const got = new Set();
+      for (const f of files) { for (const l of f) { if (l.kind === "def") { def.add(l.t); } else if (def.has(l.t)) { got.add(l.t); } } }
+      return got.size;
+    };
+    const EARLY = [{ kind: "impl", t: "Widget" }]; // 站点文件先被扫到
+    const LATE = [{ kind: "def", t: "Widget" }]; // 声明文件后被扫到
+    check(singlePassLike([EARLY, LATE]) === 0 && singlePassLike([LATE, EARLY]) === 1, `负控㉖a：就地查声明集 ⇒ 同一棵树换次序就少 1 条（实得 ${singlePassLike([EARLY, LATE])}/${singlePassLike([LATE, EARLY])}）= audit 的 singlePass 缺陷，**禁止当口径**`);
+    check(declaredExternalTraitNames(["Widget"], ["Widget"]).length === 1 && declaredExternalTraitNames(["Widget"], ["Widget", "Other"]).length === 1, "正控㉖b：两趟交并与遍历次序无关（站点面/声明面谁先收齐都一样）");
+    const s6 = declaredExternalTraitNames(["C", "A", "B", "Std", "A"], ["A", "C", "D"]);
+    check(JSON.stringify(s6) === JSON.stringify(["A", "C"]), `㉖c：定案档 = 站点面 ∩ 声明面，**去重 + 排序**逐条可点名；未声明名（Std/B）不得计入 ⇒ 与 A 档 externalImplTraits 的差就是它（实得 ${JSON.stringify(s6)}）`);
+    const d6 = ["X", "Y", "Z", "W"];
+    const g6 = declaredExternalTraitNames(["X", "Y", "Z"], d6);
+    check(g6.length === 3 && g6.every((t) => d6.includes(t)), `㉖d：闭合恒等式 declaredExternal ⊆ pubTraitNames（#61 的 234 ≤ 318 那一档在纯函数侧同形；实得 ${JSON.stringify(g6)}）`);
+    // 门内谓词侧的两趟锁（与 audit 的 `scanK1Traits` fixture 同形）：站点文件**先**被扫到仍必须计入
+    const EARLY_SRC = "impl Widget for A { fn go(&self) -> String { String::new() } }\n";
+    const LATE_SRC = "pub trait Widget { fn go(&self) -> String; }\n";
+    const scanGateStyle = (srcs) => { // 与 collectReadings 的 K1 块同形：先收齐，遍历结束后再交并
+      const def = new Set(); const site = new Set();
+      for (const s of srcs) {
+        for (const l of s.split("\n")) {
+          const m = PUB_TRAIT_RE.exec(l); if (m) { def.add(m[1]); }
+          const t = implTraitOf(l); if (t) { site.add(t); }
+        }
+      }
+      return declaredExternalTraitNames(site, def).length;
+    };
+    const scanInPlace = (srcs) => { // 就地判定（单趟缺陷形态）：看到 impl 时声明集还没收齐 ⇒ 静默丢
+      const def = new Set(); const got = new Set();
+      for (const s of srcs) {
+        for (const l of s.split("\n")) {
+          const m = PUB_TRAIT_RE.exec(l); if (m) { def.add(m[1]); }
+          const t = implTraitOf(l); if (t && def.has(t)) { got.add(t); }
+        }
+      }
+      return got.size;
+    };
+    check(scanGateStyle([EARLY_SRC, LATE_SRC]) === 1 && scanGateStyle([LATE_SRC, EARLY_SRC]) === 1, `㉖e：门内谓词侧两趟 ⇒ impl 站点早于声明文件仍计入、换序不变（与 audit fixture 同形；实得 ${scanGateStyle([EARLY_SRC, LATE_SRC])}/${scanGateStyle([LATE_SRC, EARLY_SRC])}）`);
+    check(scanInPlace([EARLY_SRC, LATE_SRC]) === 0 && scanInPlace([LATE_SRC, EARLY_SRC]) === 1, `㉖f：同一对源文件改成就地判定 ⇒ 次序一换就少 1 条（实得 ${scanInPlace([EARLY_SRC, LATE_SRC])}/${scanInPlace([LATE_SRC, EARLY_SRC])}）⇒ 两趟不可省，红线：不许把 K1 块的交并挪回循环内`);
+    // 门内接线正向锁：干净读数下新锚点必须 PASS 且读数被对账（负控由 ⑭ 系列的三条 mutate 承担）
+    const f6 = fixture();
+    const r6 = reconcile(f6.register, f6.readings, f6.plan);
+    check(r6.hardFails.length === 0 && r6.anchorResults.some((x) => x.txt.startsWith("k1DeclaredExt（") && x.status === "PASS"), `正控㉖g：fixture 干净读数下 k1DeclaredExternalImplTraitCount 必须 PASS（实得 hard=[${r6.hardFails.join(" | ")}]）`);
+    const f6b = fixture(); delete f6b.readings.k1.declaredExternalTraits;
+    const r6b = reconcile(f6b.register, f6b.readings, f6b.plan);
+    check(r6b.hardFails.some((x) => /k1DeclaredExt.*读数缺字段 declaredExternalTraits/.test(x)), `负控㉖h：门内没出数却登记成机器种类 ⇒ 报「读数缺字段」并硬失败，不许按 undefined 静默比绿（实得 ${JSON.stringify(r6b.hardFails)}）`);
+  }
+
+  // ㉗系列（任务 #54，两处门内改动）：⑥ 收窄到「接收者是集合类型」（PLAN §24.4）+
+  //   实现者读数加一列「其中在 `#[cfg(test)]` 块内」（PLAN §24.5，**只分列不改判**）。
+  {
+    const forms = (src) => computeK2Readings(src).detail.formsOf;
+    const strong = (src) => computeK2Readings(src).strongTraits;
+    const weak = (src) => computeK2Readings(src).weakTraits;
+    const COLL = "pub trait StgW { fn go(&self) -> String; }\nimpl Hub { fn add_stage(&mut self, s: Box<dyn StgW>) { self.stages.push(s); } }\n";
+    const SLOT = "pub trait ParsW { fn go(&self) -> String; }\nimpl Hub { fn set_parser(&mut self, p: Arc<dyn ParsW>) { SELF_PARSER.set(p).ok(); } }\n";
+    const OPT = "pub trait GdW { fn go(&self) -> String; }\nimpl Hub { fn set_gd(&mut self, p: Arc<dyn GdW>) { *self.guard.write().unwrap() = Some(p); } }\n";
+    const NEAR = "pub trait LtW { fn go(&self) -> String; }\nimpl Hub { fn add_thing(&mut self, s: Box<dyn LtW>) {\n  let n = self.count + 1;\n  self.items.push(s);\n  self.count = n;\n} }\n";
+    const FAR = "pub trait FtW { fn go(&self) -> String; }\nimpl Hub { fn add_thing(&mut self, s: Box<dyn FtW>) {\n  let a = 1;\n  let b = 2;\n  let c = 3;\n  let d = 4;\n  let e = 5;\n  self.items.push(s);\n} }\n";
+    check(strong({ "c.rs": COLL }).includes("StgW") && forms({ "c.rs": COLL }).StgW.includes("push-register"), `正控㉗a：集合接收者（同行「.push(」）⇒ ⑥ 仍进强档（动词表与 3 行参数窗口一字未动；实得 ${JSON.stringify(forms({ "c.rs": COLL }).StgW)}）`);
+    check(!strong({ "s.rs": SLOT }).includes("ParsW") && !weak({ "s.rs": SLOT }).includes("ParsW") && forms({ "s.rs": SLOT }).ParsW === undefined, `负控㉗b：单槽 DI 注入口（OnceLock::set）⇒ ⑥ 不计，且不留任何形态（收窄前它会带 push-register ⇒ 这条是收窄本身的机制证据；实得 ${JSON.stringify(forms({ "s.rs": SLOT }))}）`);
+    check(!strong({ "g.rs": OPT }).includes("GdW"), `负控㉗c：写进 Option / 结构体字段（「*guard = Some(x)」）⇒ 不计（实得 强=${JSON.stringify(strong({ "g.rs": OPT }))}）`);
+    check(strong({ "n.rs": NEAR }).includes("LtW"), `正控㉗d：集合接收者在站点行**之后第 3 行** ⇒ 仍在「站点行 + 其后 5 行」窗口内 ⇒ 计（口径的字面边界，不外扩也不收窄）`);
+    check(!strong({ "f.rs": FAR }).includes("FtW") && !weak({ "f.rs": FAR }).includes("FtW"), `负控㉗e：集合接收者在站点行之后第 7 行 ⇒ 出窗 ⇒ 不计（不许悄悄把 5 行改成 7 行；实得 强=${JSON.stringify(strong({ "f.rs": FAR }))} 弱=${JSON.stringify(weak({ "f.rs": FAR }))}）`);
+    // vec![ 与 .insert(/.entry( 三个接收者标记各自可用（token 表是判据的一部分，少一个就会误降档位）
+    const VEC = "pub trait VcW { fn go(&self) -> String; }\nimpl Hub { fn add_one(&mut self, s: Box<dyn VcW>) { let v = vec![s]; } }\n";
+    check(strong({ "v.rs": VEC }).includes("VcW"), `正控㉗f：「vec![」算集合接收者 ⇒ 计（实得 ${JSON.stringify(forms({ "v.rs": VEC }).VcW)}）`);
+    const MAP = "pub trait MpW { fn go(&self) -> String; }\nimpl Hub { fn set_entry(&mut self, k: &str, s: Arc<dyn MpW>) { self.m.insert(k.to_string(), s); } }\n";
+    check(strong({ "m.rs": MAP }).includes("MpW") && forms({ "m.rs": MAP }).MpW.includes("push-register"), `正控㉗g：「.insert(」算集合接收者 ⇒ 计（单槽措辞的 setter 名不改判据，看的是接收者）`);
+
+    // —— #54 §24.5 的 test mod 列（纯函数侧）——
+    const T1 = "pub trait SvcW {}\nstruct A {}\nimpl SvcW for A {}\n#[cfg(test)]\nmod tests {\n  struct B {}\n  impl SvcW for B {}\n}\nstruct C {}\nimpl SvcW for C {}\n";
+    const r1 = cfgTestRanges(T1);
+    check(r1.length === 1 && r1[0].start === 5 && r1[0].end === 8, `㉗h：test 块区间 = mod 头行到闭合行（两端都含；属性行本身不算）（实得 ${JSON.stringify(r1)}）`);
+    check(lineInRanges(r1, 7) && !lineInRanges(r1, 3) && !lineInRanges(r1, 10), "正控㉗i：块内站点计入、块外（前与后）计入生产账 ⇒ 两本账不串");
+    // 同文件多个 test mod ⇒ 各自独立区间，中间的生产行不算 test
+    const T2 = "#[cfg(test)]\nmod a {\n  impl X for A {}\n}\nimpl X for PROD {}\n#[cfg(test)]\nmod b {\n  impl X for B {}\n}\n";
+    const r2 = cfgTestRanges(T2);
+    check(r2.length === 2 && r2[0].start === 2 && r2[0].end === 4 && r2[1].start === 7 && r2[1].end === 9, `负控㉗j：同文件两个 test mod 的边界必须各自闭合（实得 ${JSON.stringify(r2)}）`);
+    check(!lineInRanges(r2, 5) && lineInRanges(r2, 3) && lineInRanges(r2, 8), "负控㉗j2：夹在两个 test mod 之间的生产行**不得**被判进 test 列（边界不串）");
+    // `#[cfg(test)]` 后跟 fn（不是 mod）⇒ 不开区间，否则后续生产站点整段被吞
+    const T3 = "#[cfg(test)]\npub fn test_only_helper() {}\nimpl X for PROD {}\n#[cfg(test)]\nmod real { impl X for T {}\n}\n";
+    const r3 = cfgTestRanges(T3);
+    check(r3.length === 1 && r3[0].start === 5 && r3[0].end === 6 && lineInRanges(r3, 3) === false, `负控㉗k：属性后跟「fn」不开区间（那是门控的单条目，误开会把生产站点整段吞进 test 列）；紧随其后的真 test mod 仍被识别（实得 ${JSON.stringify(r3)}）`);
+    // 嵌套花括号：块内的内层括号不影响闭合判定
+    const T4 = "mod prod { fn f() { let _ = 1; } }\n#[cfg(test)]\nmod t {\n  fn g() { if true { let _ = 1; } }\n  impl X for T {}\n}\nimpl X for PROD {}\n";
+    const r4 = cfgTestRanges(T4);
+    check(r4.length === 1 && r4[0].start === 3 && r4[0].end === 6 && lineInRanges(r4, 5) && !lineInRanges(r4, 7), `㉗l：块体按花括号配平闭合（嵌套内层括号不提前截断、也不越界吞后续生产行）（实得 ${JSON.stringify(r4)}）`);
+    check(cfgTestRanges("").length === 0 && cfgTestRanges("fn a() {}\n").length === 0, "正控㉗m：无 `#[cfg(test)]` 的文件 ⇒ 零区间（空文件也算），且 collectReadings 侧有 includes 短路 ⇒ 不给全树加无谓扫描");
+  }
+
   if (fail > 0) { return false; }
-  console.log("SELFTEST OK：命令数改红 · 分组漂移红 · 证据行号漂移红 · 未归属非空红 · 旧读数出段红 · 禁语红 · manual 不算通过 · 接缝/远程/实现者负控 · 逐类 anchor check 负控+正控 · 锚点内部自洽（value/planNumber/mustContain）· 藏数进 hard:false/manual 锚点必红（跨锚点宽容只认 hard:true 且机器复检的锚点数）· planNumber 数字边界 · --repin-plan 重锚（唯一命中才回写 / 歧义与零命中与缺键一律拒写 / 回写后 PLAN 对账归零 / 只改行号不动判据 / 行号锚点没被降成全文模糊匹配 / 定点替换不唯一就整次拒绝）· 干净读数零假阳性 全部通过");
+  console.log("SELFTEST OK：命令数改红 · 分组漂移红 · 证据行号漂移红 · 未归属非空红 · 旧读数出段红 · 禁语红 · manual 不算通过 · 接缝/远程/实现者负控 · 逐类 anchor check 负控+正控 · 锚点内部自洽（value/planNumber/mustContain）· 藏数进 hard:false/manual 锚点必红（跨锚点宽容只认 hard:true 且机器复检的锚点数）· planNumber 数字边界 · --repin-plan 重锚（唯一命中才回写 / 歧义与零命中与缺键一律拒写 / 回写后 PLAN 对账归零 / 只改行号不动判据 / 行号锚点没被降成全文模糊匹配 / 定点替换不唯一就整次拒绝）· --repin-code 代码锚点重锚（整行定位键唯一才回写 / 零命中与歧义与缺键一律拒写 / 同 token 双条目靠整行键各自解歧 / 默认 dry-run 零写盘 / 内存版与文本版不一致拒写 / 从盘上复检不过回滚 / 判定档照样红）· K2 八形态正负对照（映射型容器强 / 顺序型容器无自述键不升强 / ⑦ 只判弱键控 / ⑧ 无 impl→trait 反查不命中 / k2KeyedHits 永不升硬）· 契约 A 分流（产物滞后专码仍判红且点名 cargo check / 名集合一致才按真漂移 / 名集合低估点名 / 判据不引用产物行数）· planOld.alsoAt（段内放行 / 段外仍红 / 腐烂双报且专码可区分 / 不填该字段逐字等价旧行为 / 越界与无键判腐烂 / --repin-plan 按最小包络重锚且歧义零命中缺键拒写 / 文本版成对定点替换不唯一即整次拒写 / alsoAt 数字 token 同受锚点自洽管辖、挪数字不能拆判据）· k1DeclaredExternalImplTraitCount 两趟语义（站点面 ∩ 声明面、与遍历次序无关、未声明名不计、单趟就地判定必丢条目、读数缺字段不许按 undefined 静默比绿）· K2 ⑥ 接收者收窄（集合接收者进强 / 单槽 setter 与 Option·字段写入不计且不留形态 / 集合标记在窗口内计、出窗不计 / vec![ 与 .insert( 也算集合接收者 / 动词表与 3 行参数窗口未动）· test 块内实现单列（区间 = mod 头行到闭合行两端都含 / 块内外两本账不串 / 同文件多 test mod 边界各自闭合 / 属性后跟 fn 不开区间 / 花括号配平闭合 / 无属性零区间）· 干净读数零假阳性 全部通过");
   return true;
 }
 
@@ -1164,8 +2480,10 @@ function collectReadings(register) {
 
   // 注册表（lib/command-domains 强制复用，禁止另写正则）
   const regText = contentFor(REG_PATH);
+  let regEntries = null;
   if (regText !== null) {
     const entries = parseRegistry(regText);
+    regEntries = entries;
     rd.registry = { commandTotal: entries.length, commandModules: new Set(entries.map((e) => e.mod)).size, unassigned: unassigned(entries), registryFileLines: regText.split("\n").length };
     const modNames = entries.map((e) => e.mod);
     rd.boundary = {};
@@ -1227,24 +2545,60 @@ function collectReadings(register) {
     }
   }
 
-  // K1 扫描面：8 根全部 .rs（忽略 target/node_modules/gen/tests）；实现者站点 + pub trait 一次遍历
+  // K1 扫描面：8 根全部 .rs（忽略 target/node_modules/gen/tests）；实现者站点 + pub trait 一次遍历。
+  // ⚠ #61 的定案档必须**两趟**（先收齐、后交并）⇒ 见下方 `declaredExternalTraits`：集合的交并放在
+  //   遍历**之后**做，就是两趟语义；若在循环里就地判 `pubTraits.has(t)`，会退化成「impl 早于其声明
+  //   文件出现的站点被静默丢弃」的顺序相关读数（= audit 脚本里的 `singlePass`，当前树恒少 22 条），
+  //   那是 #61 明确复现并归因的**缺陷**，不是口径。
   const k1Files = files.filter((p) => p.endsWith(".rs") && K1_ROOTS.includes(p.split("/")[0]) && !p.split("/").some((s) => K1_IGNORE.has(s)));
   const pubTraits = new Set();
   const externalTraits = new Set();
   const implementors = {};
+  const implementorsTestMod = {}; // #54 §24.5 新列：**只分列**「其中在 `#[cfg(test)]` 块内」，一不并入
+  //   `implementors`、二不参与任何判据与退出码（升判据是另一批）；路径口径（`isTestDoublePath`）照旧剔文件，
+  //   本列管的是**内联** test mod ⇒ 两本账各记各的，不许互相折算。
+  const k2Sources = {}; // #57：K2 谓词与 K1 共用**同一份扫描面 + 同一份内容缓存**（禁另起一遍遍历）
   for (const x of k1Files) {
     const s = contentFor(x) ?? "";
+    k2Sources[x] = s;
     const harness = x.startsWith(HARNESS_PREFIX);
     const dbl = isTestDoublePath(x);
-    for (const l of s.split("\n")) {
-      const pt = /^pub trait\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(l);
+    const testMod = !harness && !dbl && s.includes("#[cfg(test)]") ? cfgTestRanges(s) : null;
+    const k1Lines = s.split("\n");
+    for (let li = 0; li < k1Lines.length; li++) {
+      const l = k1Lines[li];
+      const pt = PUB_TRAIT_RE.exec(l);
       if (pt) { pubTraits.add(pt[1]); }
       const t = implTraitOf(l);
-      if (t && !harness && !dbl) { externalTraits.add(t); implementors[t] = (implementors[t] || 0) + 1; }
+      if (t && !harness && !dbl) {
+        externalTraits.add(t);
+        implementors[t] = (implementors[t] || 0) + 1; // 既有读数与形状一字未动
+        if (testMod && lineInRanges(testMod, li + 1)) { implementorsTestMod[t] = (implementorsTestMod[t] || 0) + 1; }
+      }
     }
   }
-  rd.k1 = { rsFiles: k1Files.length, pubTraits: pubTraits.size, externalImplTraits: externalTraits.size };
+  // 声明面 ∩ 站点面（遍历收齐之后）⇒ 与 `scanK1Traits().declaredExternalCount` 同一集合（#61 定案档）。
+  const declaredExternal = declaredExternalTraitNames(externalTraits, pubTraits);
+  rd.k1 = { rsFiles: k1Files.length, pubTraits: pubTraits.size, externalImplTraits: externalTraits.size, declaredExternalTraits: declaredExternal.length };
   rd.implementors = implementors;
+  rd.implementorsTestMod = implementorsTestMod; // #54 §24.5：进 `--dump-readings`，**不进**任何判据分支
+
+  // K2 键控面读数（#57）：只出数。`computeK2Readings` 的 `detail`（trait 定义面 / impl 反查表 /
+  // 逐条证据）刻意**不进 readings/dump**（否则 dump 从 9 KB 涨到数百 KB，噪声淹没判据行）；
+  // 需要逐条证据的对账探针自行 import 该纯函数复算（.tmp/res57-k2-vs-198.mjs 就是这么跑的）。
+  const { detail: _k2Detail, ...k2Plain } = computeK2Readings(k2Sources);
+  rd.k2 = k2Plain;
+
+  // 契约 A 名字集合（#58）：defined 侧口径逐字抄 check-contracts.mjs:105-116，registered 侧复用
+  // 已有 parseRegistry ⇒ 分流「产物滞后 / 真漂移」不引入第二套解析器。文件面 = check-contracts 的
+  // `walk(src-tauri/src, ".rs")`，本门已有遍历直接选边（内容走同一缓存，不额外开 IO）。
+  if (regEntries) {
+    const cmdSources = files.filter((p) => p.startsWith("src-tauri/src/") && p.endsWith(".rs")).map((p) => [p, contentFor(p) ?? ""]);
+    rd.commandNames = commandNameSets(regEntries, cmdSources);
+    rd.commandNames.scannedFiles = cmdSources.length;
+  } else {
+    rd.commandNames = null;
+  }
 
   // 远程接缝清单（worker.rs:110 SUPPORTED_REMOTE_SEAMS）
   const wk = contentFor(register.sources.remoteSeamFile);
@@ -1286,6 +2640,10 @@ function runRepin() {
   console.log(`受行号约束的引用 ${total} 条 · 已与 PLAN 现状逐行相符 ${kept} · 待回写 ${changes.length} · 阻断 ${blockers.length} · 缺定位键 ${noKey.length}（PLAN 现 ${planLineCount} 行）`);
   for (const c of changes) {
     const d = c.to - c.line;
+    if (c.kind === "alsoAtRegion") {
+      console.log(`  重锚 ${c.path}：${c.line}–${c.endLine} → ${c.to}–${c.toEnd}（起点 ${d >= 0 ? "+" : ""}${d} 行 · 段高 ${c.endLine - c.line + 1} → ${c.toEnd - c.to + 1}${c.endLine - c.line === c.toEnd - c.to ? "（未变）" : "（按 mustContain 最小包络重划边界，token 一字未动；只会朝更严的方向收紧，请过目）"}）`);
+      continue;
+    }
     console.log(`  重锚 ${c.path}：${c.line} → ${c.to}（${d >= 0 ? "+" : ""}${d} 行）`);
   }
   for (const b of blockers) { console.log(`  阻断 ${b}`); }
@@ -1341,16 +2699,102 @@ function runRepin() {
     console.error(`复检失败：回写后 PLAN 对账仍有差异 ⇒ 已从备份回滚。\n  - ${[...cons, ...plan.fails, ...plan.soft].join("\n  - ")}`);
     return 1;
   }
-  console.log(`\nPASS: 回写后复检通过 —— 钉句 ${reread.anchors.reduce((n, a) => n + (a.planPinned?.length ?? 0), 0)} 处、登记项 planLine ${reread.entries.filter((e) => e.planLine != null).length} 条全部逐行命中；`);
-  console.log("      PLAN 侧判据已归零 ⇒ 再跑 `node scripts/check-capability-register.mjs` 时，planPinned / planLine 一族不应再报红。");
+  console.log(`\nPASS: 回写后复检通过 —— 钉句 ${reread.anchors.reduce((n, a) => n + (a.planPinned?.length ?? 0), 0)} 处、登记项 planLine ${reread.entries.filter((e) => e.planLine != null).length} 条全部逐行命中、planOld.alsoAt 区段 ${reread.anchors.reduce((n, a) => n + (a.planOld ?? []).reduce((m, o) => m + (o.alsoAt?.length ?? 0), 0), 0)} 段全部段内自证命中；`);
+  console.log("      PLAN 侧判据已归零 ⇒ 再跑 `node scripts/check-capability-register.mjs` 时，planPinned / planLine / alsoAt 一族不应再报红。");
   console.log("      ⚠ 本模式只重锚 PLAN 行号，**不碰 evidence（源码 文件:行）** —— 代码侧漂移是该抓的缺陷，自动改写等于洗白。");
+  return 0;
+}
+
+function runRepinCode() {
+  const register = loadRegister();
+  if (register === null || register === "BAD") {
+    console.error(`FAIL: 镜像表 ${REGISTER_PATH} ${register === null ? "缺失" : "JSON 解析失败"} —— 没有表就没有可重锚的东西。`);
+    return 1;
+  }
+  const srcText = readFileSync(REGISTER_PATH, "utf8");
+  const cache = new Map();
+  const fileTextFor = (rel) => { // 只读 evidence 涉及的源文件（不做全仓遍历 ⇒ 与 --repin-plan 一样廉价）
+    if (!cache.has(rel)) {
+      try { cache.set(rel, readFileSync(join(ROOT, rel), "utf8")); } catch { cache.set(rel, null); }
+    }
+    return cache.get(rel);
+  };
+  const rp = computeCodeRepin(register, fileTextFor);
+
+  console.log("\n=== --repin-code：按整行定位键（evidence.anchorText）把代码证据锚点 evidence[].line 重锚到当前文本 ===");
+  console.log(`受行号约束的 evidence ${rp.total} 条 · 与盘上逐行相符 ${rp.kept} · 待回写 ${rp.changes.length} · 阻断 ${rp.blockers.length} · 缺定位键 ${rp.noKey.length} · 本模式不重锚 ${rp.skipped.length}（默认 dry-run，--apply 才写盘）`);
+  for (const c of rp.changes) {
+    const d = c.to - c.line;
+    console.log(`  重锚 ${c.path}（${c.file}）：${c.line} → ${c.to}（${d >= 0 ? "+" : ""}${d} 行）· token「${c.token}」整行键唯一命中`);
+    const prose = codeRepinProseMentions(srcText, c);
+    if (prose.length) {
+      console.log(`    ⚠ 表内正文（note 等）另有 ${prose.length} 处仍写旧行号 ${String(c.file).split("/").pop()}:${c.line}（镜像表第 ${prose.join(", ")} 行）⇒ 本模式**不改正文**，请人工同批核对`);
+    }
+  }
+  for (const b of rp.blockers) { console.log(`  阻断 ${b}`); }
+  for (const k of rp.noKey) { console.log(`  缺键 ${k}`); }
+  for (const s of rp.skipped) { console.log(`  不重锚 ${s.path}：${s.reason}`); }
+
+  if (rp.blockers.length || rp.noKey.length) {
+    console.error(`\n${APPLY ? "拒绝写盘" : "以下条目即使 --apply 也不会写盘"}：${rp.blockers.length + rp.noKey.length} 条 evidence 无法**唯一**定位 —— 不许猜行、不许插值、不许从多命中里挑一个。`);
+    console.error("修法：给该条 evidence 补 anchorText = 登记当时那一行的**整行逐字**（仅折叠行内连续空白）；");
+    console.error("     上面报「零命中」的那些是代码语义真的改了（不是位移）⇒ 只能人工重写 token，本模式永不代劳。");
+    return 1;
+  }
+  if (!rp.changes.length) {
+    console.log("\nPASS: 无需重锚 —— 全部代码证据锚点与盘上逐行相符（未写盘、未备份）。");
+    return 0;
+  }
+  if (!APPLY) {
+    console.log(`\nDRY-RUN：以上 ${rp.changes.length} 条就是「旧→新」计划，一个字都没写。`);
+    console.log("确认无误后再跑 `node scripts/check-capability-register.mjs --repin-code --apply`（备份 → 定点补丁 → 写盘 → 从盘上复检 → 不过即回滚）。");
+    return 0;
+  }
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "");
+  const bakPath = join(ROOT, ".tmp", `capability-register.${stamp}.bak.json`);
+  console.log(`\n⚠ --apply 覆盖的是**本次读到的原文**：若另一会话在「读取 → 写盘」之间改过这张表，复检会拦下并回滚到我读到的版本 ⇒ 对方的改动会丢。`);
+  console.log("   因此 --apply 只应在**没有其它会话正在写这张表**时使用；本模式不接 CI。");
+  const res = executeCodeRepin({
+    register,
+    srcText,
+    rp,
+    apply: true,
+    io: {
+      backup: (t) => { if (!existsSync(dirname(bakPath))) { mkdirSync(dirname(bakPath), { recursive: true }); } writeFileSync(bakPath, t, "utf8"); return bakPath; },
+      write: (t) => { writeFileSync(REGISTER_PATH, t, "utf8"); },
+      reread: () => loadRegister(),
+      restore: (t) => { writeFileSync(REGISTER_PATH, t, "utf8"); },
+      fileTextFor,
+    },
+    emit: (s) => console.log(s),
+  });
+  if (res.status === "refused-patch") {
+    console.error(`\n拒绝写盘（定点替换把握不足）：\n  - ${res.problems.join("\n  - ")}`);
+    console.error("原表未动、未备份（补丁先在内存里算，算不拢就不碰盘）。");
+    return 1;
+  }
+  if (res.status === "rolled-back") {
+    console.error(`\n写盘后复检不过 ⇒ 已从备份回滚（备份仍在 ${bakPath.split(sep).join("/")}）：`);
+    console.error(`  - ${res.problems.join("\n  - ")}`);
+    return 1;
+  }
+  console.log(`\n备份：${bakPath.split(sep).join("/")}（${srcText.length} 字符，逐字节）`);
+  console.log(`已回写 ${REGISTER_PATH.split(sep).join("/")}：${res.changes.length} 处 evidence 行号（含 ref 末尾 :行号 同步；token / file / anchorText 一字未动）`);
+  console.log("PASS: 从盘上重读复检通过 —— 复算 computeCodeRepin 已无待回写、无阻断、无缺键。");
+  console.log("      再跑 `node scripts/check-capability-register.mjs` 时，evidence 一族不应再因**位移**报红；");
+  console.log("      仍报红的是语义变化，那是该抓的缺陷，不许用本模式洗白。");
   return 0;
 }
 
 function main() {
   if (SELFTEST) { process.exit(runSelftest() ? 0 : 1); }
   const T0 = Date.now();
+  if (REPIN && REPIN_CODE) {
+    console.error("FAIL: --repin-plan（PLAN 行号）与 --repin-code（代码证据行号）互斥，请分开跑 —— 两条判据链各有自己的定位键，合跑无法逐条归因。");
+    process.exit(1);
+  }
   if (REPIN) { process.exit(runRepin()); }
+  if (REPIN_CODE) { process.exit(runRepinCode()); }
   const register = loadRegister();
   if (register === null || register === "BAD") {
     console.error(`FAIL: 镜像表 ${REGISTER_PATH} ${register === null ? "缺失" : "JSON 解析失败"} —— 本门唯一权威就是它，跳过 ≠ 通过。`);

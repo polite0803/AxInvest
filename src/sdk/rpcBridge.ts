@@ -6,23 +6,59 @@
  * 负责管理宿主与 Skill iframe 沙箱之间的 postMessage 通信。
  * 提供请求-响应模式（Promise-based）的 RPC 调用。
  *
+ * ⚠ 帧词汇（类型串、方法名、参数字段名、超时、错误承载形状）**不在本文件**，
+ * 一律取自 `./sandboxFrameProtocol`（任务 #46 的单一来源收敛）。本文件只负责
+ * 「宿主收到帧后做什么」：来源判定、权限判定、handler 分派、响应回发。
+ * 两个方向各用哪个值判「这帧可以收 / 该投给谁」也只在那个字面定义处写：
+ * 出向 targetOrigin 恒取 `SANDBOX_MESSAGE_TARGET_ORIGIN`，入向身份只认
+ * `isFrameFromSandboxSource(event, 本桥的 contentWindow)`。
+ * 插件内容（panel / page 两种粒度）在这条桥上能调哪两条命令，白名单住在
+ * `@/components/plugin/pluginSandboxBridge.ts` + `@/sdk/pluginBridgeProtocol.ts`。
+ *
  * @module sdk/rpcBridge
  */
 
 import { logIpcError } from "@/lib/invoke";
 import { isStoreReadCovered, isStoreWriteCovered, isWildcardMatch } from "@/lib/skillPermissions";
+import {
+  buildHostEventFrame,
+  buildHostLifecycleFrame,
+  buildRpcErrorFrame,
+  buildRpcRequestFrame,
+  buildRpcResultFrame,
+  formatCallId,
+  isFailureFrame,
+  isFrameFromSandboxSource,
+  isRpcRequestFrame,
+  isRpcResponseFrame,
+  isSandboxContentErrorFrame,
+  isSandboxReadyFrame,
+  readRpcResponseCallId,
+  rpcErrorText,
+  SANDBOX_CALL_ID_PREFIX,
+  SANDBOX_FRAME_PROTOCOL_TABLE,
+  SANDBOX_MESSAGE_TARGET_ORIGIN,
+  SANDBOX_RPC_METHODS,
+  SANDBOX_RPC_TIMEOUT_MS,
+  type SandboxInboundMessageEvent,
+} from "./sandboxFrameProtocol";
 import type { HostToSkillMessage, SkillHostApi, SkillHostStore, SkillHostUi, SkillToHostMessage } from "./types";
 
-/** RPC 调用超时时间（毫秒） */
-const RPC_TIMEOUT_MS = 15000;
+/**
+ * RPC 调用超时时间（毫秒）—— 取自帧协议的单一来源。
+ *
+ * 宿主与沙箱两侧此前各写一份 `15000`：数值巧合不等于语义同源，收成一条之后
+ * 「宿主等 15s、沙箱等 20s」这类口径差无处再长出来。
+ */
+const RPC_TIMEOUT_MS = SANDBOX_RPC_TIMEOUT_MS;
 
-/** 允许的 postMessage 来源（Tauri 自定义协议下仅自身） */
-function defaultAllowedOrigin(): string {
-  if (typeof window !== "undefined" && window.location.protocol === "tauri:") {
-    return window.location.origin;
-  }
-  return "*";
-}
+/**
+ * 方法参数帧的键名表（宿主 handler 逐个按这些键读参数，沙箱侧按同一张表构造）。
+ *
+ * 帧本体的字段名由 `Sandbox*Frame` 接口钉住，**参数帧没有接口保护**，是漂移概率最高的一层，
+ * 故一律走常量取键。
+ */
+const ARG = SANDBOX_FRAME_PROTOCOL_TABLE.a;
 
 // ── 宿主侧 RPC 注册表 ──
 
@@ -49,15 +85,13 @@ export interface HostRpcBridge {
 /**
  * 创建宿主侧 RPC 桥接
  *
- * @param contentWindow Skill iframe 的 contentWindow
- * @param origin 允许的来源，生产环境用 Tauri 自定义协议
+ * @param contentWindow Skill iframe 的 contentWindow —— 它同时是**入向帧的身份判据**
+ *   （只有 `event.source` 就是它的帧才被认，见 `isFrameFromSandboxSource`）
  * @returns RPC 桥接实例
  */
 export function createHostRpcBridge(
   contentWindow: Window | null,
-  origin?: string,
 ): HostRpcBridge {
-  const resolvedOrigin = origin ?? defaultAllowedOrigin();
   const pendingCalls = new Map<
     string,
     {
@@ -73,15 +107,16 @@ export function createHostRpcBridge(
     if (destroyed) {
       return;
     }
-
-    const msg = event.data;
-    if (!msg || typeof msg.type !== "string") {
+    // 身份先于内容：别的 iframe（HtmlPreview / ChartPreview / 已导航到远端的沙箱）同样能把帧
+    // 投到宿主 window，来源不符直接不看它写了什么。
+    if (!isFrameFromSandboxSource(event, contentWindow)) {
       return;
     }
 
-    if (msg.type === "skill:ready") {
+    const msg = event.data;
+    if (isSandboxReadyFrame(msg)) {
       // no-op in production; DEV-only logging removed
-    } else if (msg.type === "skill:error") {
+    } else if (isSandboxContentErrorFrame(msg)) {
       logIpcError("HostRpcBridge skill error")(msg.error);
     }
   }
@@ -97,7 +132,7 @@ export function createHostRpcBridge(
         return;
       }
       try {
-        contentWindow.postMessage(message, resolvedOrigin);
+        contentWindow.postMessage(message, SANDBOX_MESSAGE_TARGET_ORIGIN);
       } catch (e) {
         logIpcError("HostRpcBridge send message failed")(e);
       }
@@ -114,12 +149,17 @@ export function createHostRpcBridge(
         throw new Error("No content window");
       }
 
-      const callId = `host_${++callIdCounter}_${Date.now()}`;
+      const callId = formatCallId(SANDBOX_CALL_ID_PREFIX.host, ++callIdCounter);
 
       return new Promise<unknown>((resolve, reject) => {
         const responseHandler = (event: MessageEvent<HostToSkillMessage>) => {
+          // 响应帧的 callId 是关联键，但「谁发的」仍要判：陌生 source 带着猜得到的 callId
+          // 就能把在途 Promise 提前 settle 掉（宿主→沙箱方向的注入面就这一条）。
+          if (!isFrameFromSandboxSource(event, contentWindow)) {
+            return;
+          }
           const msg = event.data;
-          if (msg?.type === "rpc:response" && msg.callId === callId) {
+          if (isRpcResponseFrame(msg) && readRpcResponseCallId(msg) === callId) {
             window.removeEventListener("message", responseHandler);
             const pending = pendingCalls.get(callId);
             if (!pending) {
@@ -127,7 +167,8 @@ export function createHostRpcBridge(
             }
             clearTimeout(pending.timer);
             pendingCalls.delete(callId);
-            if (msg.error) {
+            // 成功/失败只问协议层的唯一判据（空串错误同样是失败）
+            if (isFailureFrame(msg)) {
               pending.reject(new Error(msg.error));
             } else {
               pending.resolve(msg.result);
@@ -147,15 +188,10 @@ export function createHostRpcBridge(
 
         pendingCalls.set(callId, { resolve, reject, timer });
 
-        // 发送 rpc:request 到 Skill
-        const requestMsg: SkillToHostMessage = {
-          type: "rpc:request",
-          callId,
-          method,
-          args,
-        };
+        // 向沙箱发起一次 RPC（与沙箱→宿主方向共用同一个请求帧构造器）
+        const requestMsg = buildRpcRequestFrame(callId, method, args);
         try {
-          contentWindow.postMessage(requestMsg, resolvedOrigin);
+          contentWindow.postMessage(requestMsg, SANDBOX_MESSAGE_TARGET_ORIGIN);
         } catch (e) {
           window.removeEventListener("message", responseHandler);
           clearTimeout(timer);
@@ -166,14 +202,14 @@ export function createHostRpcBridge(
     },
 
     emitEvent(event: string, payload?: unknown): void {
-      this.sendMessage({ type: "host:event", event, payload });
+      this.sendMessage(buildHostEventFrame(event, payload));
     },
 
     sendLifecycle(
       phase: "mount" | "unmount",
       props?: Record<string, unknown>,
     ): void {
-      this.sendMessage({ type: "host:lifecycle", phase, props });
+      this.sendMessage(buildHostLifecycleFrame(phase, props));
     },
 
     destroy(): void {
@@ -194,8 +230,14 @@ export function createHostRpcBridge(
 // ── 宿主 API 桥接（Skill 调用宿主方法时使用） ──
 
 export interface HostApiBridge {
-  /** 处理来自 Skill 的 RPC 方法调用 */
-  handleRpcRequest(msg: SkillToHostMessage): void;
+  /**
+   * 处理来自沙箱的一次 `message` 事件。
+   *
+   * ⚠ 入参是**整个事件**而不是裸帧：宿主必须能判「这帧来自哪块文档」，
+   * 判据与校验点见 `isFrameFromSandboxSource`。来源不符 ⇒ 丢弃且**不回包**
+   * （回包本身就是「外来帧拿到了宿主的应答」这一条信息）。
+   */
+  handleRpcRequest(event: SandboxInboundMessageEvent): void;
   /** 获取上下文对象（传给沙箱模板使用） */
   getContext(): {
     api: SkillHostApi;
@@ -221,10 +263,11 @@ export interface HostApiBridgeOptions {
     storeWrite?: string[];
     navigate?: string[];
   };
-  /** Skill 的 contentWindow（用于发送响应） */
+  /**
+   * Skill 的 contentWindow：既用于发送响应，也是**入向帧的身份判据**
+   * （`event.source` 必须就是它）。传 `null` 即「还没接上沙箱」，此时一帧都不认。
+   */
   contentWindow: Window | null;
-  /** 允许的来源 */
-  allowedOrigin?: string;
 }
 
 /**
@@ -234,7 +277,6 @@ export function createHostApiBridge(
   options: HostApiBridgeOptions,
 ): HostApiBridge {
   const { api, ui, store, permissions, contentWindow } = options;
-  const resolvedOrigin = options.allowedOrigin ?? defaultAllowedOrigin();
   let destroyed = false;
 
   function sendResponse(
@@ -245,15 +287,15 @@ export function createHostApiBridge(
     if (destroyed || !contentWindow) {
       return;
     }
-    contentWindow.postMessage(
-      {
-        type: "rpc:response",
-        callId,
-        result,
-        error,
-      } satisfies HostToSkillMessage,
-      resolvedOrigin,
-    );
+    // 成功与失败分别走协议里唯一的构造函数：「error 缺省即成功」这条边界只有一处定义
+    // （旧写法把两个键同时塞进一帧、靠真值判断，`error: ""` 与 `error: undefined` 语义不同，
+    //  但没人写得出来 —— 因为构造入口只有这两个）。
+    const frame = error === undefined
+      ? buildRpcResultFrame(callId, result)
+      : buildRpcErrorFrame(callId, error);
+    // 出向 targetOrigin 恒取协议常量；投递对象已经由 contentWindow + 来源判定钉死，
+    // 判据本体见 sandboxFrameProtocol 的 SANDBOX_MESSAGE_TARGET_ORIGIN。
+    contentWindow.postMessage(frame, SANDBOX_MESSAGE_TARGET_ORIGIN);
   }
 
   function checkCommand(command: string): boolean {
@@ -280,13 +322,20 @@ export function createHostApiBridge(
     return isWildcardMatch(path, permissions.navigate ?? []);
   }
 
+  /**
+   * 宿主接受的 RPC 方法表。
+   *
+   * ⚠ 键一律从 `SANDBOX_RPC_METHODS` 取，**不写方法名字面量**：字面量住在这里就是第二份协议，
+   * 沙箱侧改名的时候这里不会跟着红。测试拿 `Object.keys` 与实际收到的帧做对称差集
+   * （`src/sdk/__tests__/sandboxFrameProtocol.test.ts`），本表即「宿主侧能力面」的唯一答案。
+   */
   const rpcHandlers: Record<
     string,
     (args?: Record<string, unknown>) => Promise<unknown>
   > = {
     // ctx.api
-    "api.invoke": async (args) => {
-      const command = args?.command as string;
+    [SANDBOX_RPC_METHODS.apiInvoke]: async (args) => {
+      const command = args?.[ARG.command] as string;
       if (!command) {
         throw new Error("Command name is required");
       }
@@ -297,24 +346,24 @@ export function createHostApiBridge(
       }
       return api.invoke(
         command,
-        args?.args as Record<string, unknown> | undefined,
+        args?.[ARG.args] as Record<string, unknown> | undefined,
       );
     },
-    "api.emit": async (args) => {
-      const event = args?.event as string;
+    [SANDBOX_RPC_METHODS.apiEmit]: async (args) => {
+      const event = args?.[ARG.event] as string;
       if (!event) {
         throw new Error("Event name is required");
       }
       if (!checkEvent(event)) {
         throw new Error(`Permission denied: event "${event}" is not allowed`);
       }
-      api.emit(event, args?.payload);
+      api.emit(event, args?.[ARG.payload]);
       return undefined;
     },
 
     // ctx.ui
-    "ui.navigate": async (args) => {
-      const path = args?.path as string;
+    [SANDBOX_RPC_METHODS.uiNavigate]: async (args) => {
+      const path = args?.[ARG.path] as string;
       if (!path) {
         throw new Error("Path is required");
       }
@@ -324,27 +373,27 @@ export function createHostApiBridge(
       ui.navigate(path);
       return undefined;
     },
-    "ui.notify": async (args) => {
+    [SANDBOX_RPC_METHODS.uiNotify]: async (args) => {
       ui.notify(
-        (args?.message as string) ?? "",
-        (args?.type as "info" | "success" | "warning" | "error") ?? "info",
+        (args?.[ARG.message] as string) ?? "",
+        (args?.[ARG.type] as "info" | "success" | "warning" | "error") ?? "info",
       );
       return undefined;
     },
-    "ui.getTheme": async () => {
+    [SANDBOX_RPC_METHODS.uiGetTheme]: async () => {
       return ui.getTheme();
     },
-    "ui.getLocale": async () => {
+    [SANDBOX_RPC_METHODS.uiGetLocale]: async () => {
       return ui.getLocale();
     },
 
     // ctx.store
-    "store.read": async (args) => {
-      const storeName = args?.storeName as string;
+    [SANDBOX_RPC_METHODS.storeRead]: async (args) => {
+      const storeName = args?.[ARG.storeName] as string;
       if (!storeName) {
         throw new Error("Store name is required");
       }
-      const selector = args?.selector as string | undefined;
+      const selector = args?.[ARG.selector] as string | undefined;
       if (!checkStoreRead(storeName, selector)) {
         const hint = selector
           ? `cannot read store "${storeName}" field "${selector}"`
@@ -353,30 +402,37 @@ export function createHostApiBridge(
       }
       return store.read(storeName, selector);
     },
-    "store.write": async (args) => {
-      const storeName = args?.storeName as string;
+    [SANDBOX_RPC_METHODS.storeWrite]: async (args) => {
+      const storeName = args?.[ARG.storeName] as string;
       if (!storeName) {
         throw new Error("Store name is required");
       }
-      const selector = args?.selector as string | undefined;
+      const selector = args?.[ARG.selector] as string | undefined;
       if (!checkStoreWrite(storeName, selector)) {
         const hint = selector
           ? `cannot write store "${storeName}" field "${selector}"`
           : `cannot write store "${storeName}" (field-level permission required)`;
         throw new Error(`Permission denied: ${hint}`);
       }
-      await store.write(storeName, args?.value, selector);
+      await store.write(storeName, args?.[ARG.value], selector);
       return undefined;
     },
   };
 
   return {
-    handleRpcRequest(msg: SkillToHostMessage): void {
+    handleRpcRequest(event: SandboxInboundMessageEvent): void {
       if (destroyed) {
         return;
       }
-      // 类型收窄：只处理 rpc:request 消息
-      if (msg.type !== "rpc:request") {
+      // 身份先于内容：来源不是本桥对接的那块沙箱 ⇒ 丢弃，且不回包（判据见 isFrameFromSandboxSource）。
+      // 这一判据长在宿主自己身上，不依赖调用方先筛过 —— 应用内任何可脚本化的 iframe
+      // 都能对宿主 window 发一帧看起来完全合法的 rpc:request。
+      if (!isFrameFromSandboxSource(event, contentWindow)) {
+        return;
+      }
+      const msg = event.data;
+      // 类型收窄由协议 guard 负责（不在这里比对帧类型字面量）
+      if (!isRpcRequestFrame(msg)) {
         return;
       }
       const handler = rpcHandlers[msg.method];
@@ -386,7 +442,7 @@ export function createHostApiBridge(
       }
       handler(msg.args)
         .then((result) => sendResponse(msg.callId, result))
-        .catch((e) => sendResponse(msg.callId, undefined, String(e)));
+        .catch((e) => sendResponse(msg.callId, undefined, rpcErrorText(e)));
     },
 
     getContext() {

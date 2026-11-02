@@ -15,15 +15,19 @@ import i18n from "@/i18n";
 import { invoke, logIpcError } from "@/lib/invoke";
 import { createHostApiBridge, createHostRpcBridge } from "@/sdk/rpcBridge";
 import type { HostApiBridge, HostRpcBridge } from "@/sdk/rpcBridge";
+import {
+  isFrameFromSandboxSource,
+  isRpcRequestFrame,
+  isSandboxContentErrorFrame,
+  isSandboxReadyFrame,
+  SANDBOX_LOAD_TIMEOUT_MS,
+} from "@/sdk/sandboxFrameProtocol";
 import { generateSandboxHtml } from "@/sdk/sandboxTemplate";
 import type { SkillHostApi, SkillHostStore, SkillHostUi, SkillPermissions } from "@/sdk/types";
 import { App as AntdApp, theme as antdTheme } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { SkillErrorFallback, SkillLoadingSkeleton } from "./SkillErrorFallback";
-
-/** 沙箱加载超时（毫秒） */
-const SANDBOX_LOAD_TIMEOUT_MS = 30000;
 
 export interface SkillSandboxContainerProps {
   skillName: string;
@@ -66,6 +70,9 @@ export function SkillSandboxContainer({
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 重试计数：作为 iframe 的 key。同一块 iframe 重复赋同一个 srcdoc 不会重新导航，
+  // 只改 state 等下一次 render 会表现为「点了重试毫无反应，又等满 30 s」。
+  const [loadNonce, setLoadNonce] = useState(0);
 
   const { token: themeToken } = antdTheme.useToken();
   const currentTheme: "light" | "dark" = themeToken.colorBgBase === "#ffffff" ? "light" : "dark";
@@ -263,8 +270,13 @@ export function SkillSandboxContainer({
 
       // 注册 message 监听器
       const messageHandler = (event: MessageEvent) => {
+        // 身份先于内容：ready 帧会创建两条桥、撤掉 30s 加载超时并切到接请求的模式，
+        // 这些副作用不能由别的 iframe（HtmlPreview / ChartPreview / 已导航到远端的沙箱）触发。
+        if (!isFrameFromSandboxSource(event, iframe.contentWindow)) {
+          return;
+        }
         const msg = event.data;
-        if (msg?.type === "skill:ready") {
+        if (isSandboxReadyFrame(msg)) {
           // iframe 加载完成，发送 mount 生命周期
           const bridge = createHostRpcBridge(iframe.contentWindow!);
           bridgeRef.current = bridge;
@@ -288,20 +300,25 @@ export function SkillSandboxContainer({
           setLoading(false);
           retryCountRef.current = 0;
 
-          // 切换到处理 rpc:request 的模式
+          // 切换到处理请求帧的模式
           window.removeEventListener("message", messageHandler);
           window.addEventListener("message", handleRpc);
-        } else if (msg?.type === "skill:error") {
+        } else if (isSandboxContentErrorFrame(msg)) {
           logIpcError(i18n.t("skill.runtimeError", { name: skillName }))(msg.error);
         }
       };
       messageHandlerRef.current = messageHandler;
 
       const handleRpc = (event: MessageEvent) => {
+        // 来源不符 ⇒ 丢弃（请求帧那一半 `handleRpcRequest` 自己还会判一次：它是安全边界，
+        // 容器这一层是为了让 contentError 的日志也不被外来帧刷）
+        if (!isFrameFromSandboxSource(event, iframe.contentWindow)) {
+          return;
+        }
         const msg = event.data;
-        if (msg?.type === "rpc:request" && apiBridgeRef.current) {
-          apiBridgeRef.current.handleRpcRequest(msg);
-        } else if (msg?.type === "skill:error") {
+        if (isRpcRequestFrame(msg) && apiBridgeRef.current) {
+          apiBridgeRef.current.handleRpcRequest(event);
+        } else if (isSandboxContentErrorFrame(msg)) {
           logIpcError(i18n.t("skill.runtimeError", { name: skillName }))(msg.error);
         }
       };
@@ -330,6 +347,11 @@ export function SkillSandboxContainer({
   ]);
 
   useEffect(() => {
+    // iframe 从第一次提交起就一直在 DOM 里（见文件末尾 render 的注释）：ready 帧只能由
+    // 那块文档发出，「加载完才渲染 iframe」会让开闸信号永远不可能到达（#77）。
+    // 捕获元素供 cleanup 回收：retry 换 key 时旧 effect 的 cleanup 在新 DOM 提交之后才跑，
+    // 那时 iframeRef.current 已经指向新元素，只有闭包里的引用还能清掉旧文档。
+    const iframe = iframeRef.current;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadSandbox();
     return () => {
@@ -349,9 +371,16 @@ export function SkillSandboxContainer({
       }
       if (loadTimerRef.current) {
         clearTimeout(loadTimerRef.current);
+        loadTimerRef.current = null;
+      }
+      // 卸载路径 = 沙箱侧文档的回收：先摘监听/拆桥（上面几步），再清内容。
+      // 只把 iframe 从 React 树里摘掉不够 —— 某些引擎在元素脱离文档后仍会继续跑旧文档的脚本与定时器。
+      if (iframe) {
+        iframe.srcdoc = "";
+        iframe.removeAttribute("srcdoc");
       }
     };
-  }, [loadSandbox]);
+  }, [loadSandbox, loadNonce]);
 
   useEffect(() => {
     if (bridgeRef.current) {
@@ -359,36 +388,55 @@ export function SkillSandboxContainer({
     }
   }, [currentTheme]);
 
-  if (error) {
-    return (
-      <SkillErrorFallback
-        error={error}
-        skillName={skillName}
-        onRetry={() => {
-          retryCountRef.current += 1;
-          loadSandbox();
+  const overlayStyle: React.CSSProperties = {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "column",
+    gap: 12,
+    backgroundColor: "var(--color-bg-container, transparent)",
+  };
+
+  // iframe **无条件**渲染：ready 帧只能由它内部那块文档发出，条件挂载 = 开闸信号永远到不了。
+  // loading / error 因此只能是叠在它上面的覆盖层，而不是早退替换整棵树（#77）。
+  // iframe 绝对铺满外层：尺寸语义收归外层（`...style` 落在那里，面板的 minHeight:160/280 才生效），
+  // 覆盖层与 iframe 共用同一个定位盒，不会出现「骨架按外层尺寸、iframe 按自己的 minHeight」两套。
+  return (
+    <div style={{ position: "relative", width: "100%", minHeight: 400, ...style }}>
+      <iframe
+        ref={iframeRef}
+        // key = 重试计数：换 nonce 就重挂一块新 iframe，srcdoc 在 effect 里重新注入 ⇒ 真正重新导航。
+        key={loadNonce}
+        title={`Skill: ${skillName}`}
+        sandbox="allow-scripts"
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          border: "none",
+          backgroundColor: "transparent",
         }}
       />
-    );
-  }
-
-  if (loading) {
-    return <SkillLoadingSkeleton />;
-  }
-
-  return (
-    <iframe
-      ref={iframeRef}
-      title={`Skill: ${skillName}`}
-      sandbox="allow-scripts"
-      style={{
-        width: "100%",
-        height: "100%",
-        minHeight: 400,
-        border: "none",
-        backgroundColor: "transparent",
-        ...style,
-      }}
-    />
+      {error && (
+        <div style={overlayStyle}>
+          <SkillErrorFallback
+            error={error}
+            skillName={skillName}
+            onRetry={() => {
+              retryCountRef.current += 1;
+              setLoadNonce((n) => n + 1);
+            }}
+          />
+        </div>
+      )}
+      {loading && !error && (
+        <div style={overlayStyle}>
+          <SkillLoadingSkeleton />
+        </div>
+      )}
+    </div>
   );
 }

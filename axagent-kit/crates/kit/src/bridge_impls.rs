@@ -3,9 +3,8 @@
 //! Harness bridge trait implementations for kit service structs.
 
 use axagent_harness::kit_bridge::{
-    KitHtmlCleaner, KitMarkdownParser, KitSkillDirs, KitSlashCommandProcessor,
-    KitTokenBudgetDecision, KitTokenBudgetTracker, MdParsedFrontmatter, MdParsedLink, MdParsedNote,
-    SlashCommandAction,
+    KitHtmlCleaner, KitMarkdownParser, KitSkillDirs, KitTokenBudgetDecision,
+    KitTokenBudgetTracker, MdParsedFrontmatter, MdParsedLink, MdParsedNote,
 };
 
 // ── MarkdownParser ────────────────────────────────────────────
@@ -113,38 +112,5 @@ impl KitSkillDirs for KitSkillDirsImpl {
     }
     fn all_skills_dirs(&self) -> Vec<std::path::PathBuf> {
         crate::skill_dirs::all_skills_dirs()
-    }
-}
-
-// ── SlashCommand ──────────────────────────────────────────────
-
-/// Wraps kit's slash_command module as a trait implementation.
-pub struct KitSlashCommandProcessorImpl;
-
-impl KitSlashCommandProcessor for KitSlashCommandProcessorImpl {
-    fn process(&self, text: &str) -> Option<SlashCommandAction> {
-        crate::slash_command::process_slash_command(text).map(|a| match a {
-            crate::slash_command::SlashCommandAction::LoadBundle { name, args } => {
-                SlashCommandAction::LoadBundle { name, args }
-            },
-            crate::slash_command::SlashCommandAction::LoadSkill { name, args } => {
-                SlashCommandAction::LoadSkill { name, args }
-            },
-            crate::slash_command::SlashCommandAction::SwitchPersonality { name } => {
-                SlashCommandAction::SwitchPersonality { name }
-            },
-            crate::slash_command::SlashCommandAction::BuiltIn { command, args } => {
-                SlashCommandAction::BuiltIn { command, args }
-            },
-            crate::slash_command::SlashCommandAction::Unknown => SlashCommandAction::Unknown,
-        })
-    }
-
-    fn load_bundle_content(&self, name: &str, args: &str) -> Option<String> {
-        crate::slash_command::load_bundle_content(name, args)
-    }
-
-    fn load_skill_content(&self, name: &str, args: &str) -> Option<String> {
-        crate::slash_command::load_skill_content(name, args)
     }
 }

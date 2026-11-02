@@ -39,7 +39,6 @@ pub use cache_interceptor::{HarnessCache, LlmCacheKey};
 pub mod confidence;
 pub use confidence::{ConfidenceAction, ConfidenceConfig, ConfidenceOutput};
 pub mod channel_adapter;
-pub mod ir_renderer;
 pub mod narrative;
 pub mod notification_channel;
 pub use notification_channel::{
@@ -724,6 +723,19 @@ pub use knowledge_graph::{
 };
 pub mod indexer;
 pub use indexer::{ChunkProvider, DocumentChunk, DocumentIndexer, IndexConfig, IndexJobStatus};
+
+// ── 向量检索抽象契约（任务 #37：从 consumer crate agent/query_engine.rs 下沉，
+//    原位置保留 `pub use axagent_harness::VectorSearch;` 不断链）──
+pub mod vector_search;
+pub use vector_search::VectorSearch;
+
+// ── 向量存储预留接口（任务 #40，PLAN-shell-plus-plugins.md §0.12.1 ①：本轮只
+//    接口化 + 占接缝位 `rag.vector.store`，唯一实现者是 search 的 VectorStore）──
+pub mod vector_store;
+pub use vector_store::{
+    EmbeddingRecord, HnswConfig, VectorCollectionAdmin, VectorReader, VectorSearchResult,
+    VectorWriter,
+};
 
 // ── 能力发现契约（Capability Discovery Pipeline） ──
 pub mod capability;

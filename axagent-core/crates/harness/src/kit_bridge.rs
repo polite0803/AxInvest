@@ -117,9 +117,3 @@ pub struct SlashCommandPreprocessed {
     pub personality_prompt: Option<String>,
     pub is_builtin: bool,
 }
-
-pub trait KitSlashCommandProcessor: Send + Sync {
-    fn process(&self, text: &str) -> Option<SlashCommandAction>;
-    fn load_bundle_content(&self, name: &str, args: &str) -> Option<String>;
-    fn load_skill_content(&self, name: &str, args: &str) -> Option<String>;
-}

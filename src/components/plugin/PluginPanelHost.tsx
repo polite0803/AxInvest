@@ -8,12 +8,15 @@
  * 插件代码因此**不进入主 origin**：它读不到 localStorage 里的 provider key 与会话 token。
  * 作为交换，theme token 与业务数据只能经宿主显式下发（`panel.props` + 两条通道）。
  *
- * 装载粒度的分工（任务 #39 / `PLAN-shell-plus-plugins.md` §0.12.5 裁定 A）：
- * - **panel（本文件）**：文本资产 → `srcdoc`，桥 = `pluginSandboxBridge.ts` 的那一条。
- * - **page（尚未落地，见 §0.12.5 代价条）**：插件 bundle → asset 协议 URL 取子资源，
- *   入口 HTML 仍由宿主读出后包进沙箱文档，**桥与白名单不变**；
- *   它需要两样本批拿不到的输入（后端给出条目绝对路径/asset URL、manifest 逐页声明通道），
- *   所以本文件不预留占位分支 —— 空转的 `if` 会让「通道已可用」这句话失去判据。
+ * 装载粒度的分工（任务 #39 / `PLAN-shell-plus-plugins.md` §0.12.5 裁定 A，客户端运行时由 #46 补齐）：
+ * - **panel（本文件）**：文本资产 → `srcdoc`，桥 = `pluginSandboxBridge.ts` 的那一条；
+ *   客户端运行时由宿主注入（`sdk/sandboxTemplate.ts` 生成的内联脚本）。
+ * - **page（asset 协议装插件自带 bundle）**：入口由后端 `plugin_resolve_page_asset` 给出绝对路径，
+ *   前端 `convertFileSrc` 换 asset URL 交给沙箱容器；**桥与白名单不变**（同一个
+ *   `createPluginBridgeApi` + 同一个 `createPluginBridgePermissions`）。
+ *   宿主不再包 `srcdoc` ⇒ 第三方 bundle 里必须自带客户端运行时
+ *   （`@/sdk/pluginClientBridge.ts`，零依赖、可原样 vendored），否则那条桥对插件产物不可用。
+ *   容器本身还缺一个「列出某包 pages[]」的投影面，需求已随 #46 交付报告移交（不动 Rust 故本批不建）。
  * - 表单 / 看板类继续走 `DynamicPageViewer` 的 UISchema 通道，与本文件无关。
  *
  * 见 `PLAN-dashboard-consolidation.md` §6.4 / §6.6。

@@ -50,6 +50,22 @@
 //!     })
 //! }
 //! ```
+//!
+//! ## 命令帧（任务 #49，T2 派发口形态）
+//!
+//! 命名命令（manifest `commands[]`）的执行通道从「spawn-on-call」升级为**复用长驻 worker**
+//! 后，命令通过一个新的框架 op [`ops::COMMAND`] 投递。它是**加法式**扩展，复用现有
+//! [`FrameRequest`] / [`FrameResponse`] 信封与配对机制，**不改握手版本**
+//! [`AXAGENT_PLUGIN_PROTO_VERSION`]：
+//!
+//! - 旧 worker 收到未实现的 `command` op ⇒ 按既有约定回 [`error_codes::PLUGIN_UNKNOWN_OP`]
+//!   错误帧，宿主把它归一成命令失败响应，**不会**误当成功；
+//! - 新 worker 与宿主共用本节的帧形（[`CommandFrame`] 请求 / [`CommandReply`] 成功回执 /
+//!   [`CommandFault`] 失败回执），两侧不再各写一份 JSON 形状。
+//!
+//! 命令帧承载宿主绑定的 `plugin_id`（宿主按注册表权威键填写，worker 应校验它等于自己的
+//! 身份），执行预算 `timeout_ms` 由宿主强制：宿主等待「预算 + 收帧宽限」后放弃在途调用并
+//! 报超时；worker 若自觉预算也允许提前回 [`error_codes::PLUGIN_COMMAND_TIMEOUT`]。
 
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
@@ -244,6 +260,12 @@ pub mod ops {
     pub const CALL_SEAM: &str = "call_seam";
     /// 卸载时的优雅停机请求。
     pub const SHUTDOWN: &str = "shutdown";
+    /// 宿主把一条**命名命令**派发给长驻 worker 执行（任务 #49，T2 命令通道）。
+    ///
+    /// 载荷形状见 [`super::CommandFrame`]；回执见 [`super::CommandOutcome`]。
+    /// 与 `event` / `ui.action` 同属「宿主 → worker」方向的框架 op，插件不在声明里
+    /// 提供它，但 worker 的 `serve` 处理器需要实现它才能承接命令。
+    pub const COMMAND: &str = "command";
     /// 宿主把动态 UI 里触发的 action 回流给**该插件自己**（`PLAN-everything-is-plugin.md` §10.5-2）。
     ///
     /// 方向与 `EMIT` / `CALL_SEAM` 相反（那两者是插件 → 宿主），故也不是一条「接缝」：
@@ -273,6 +295,18 @@ pub mod error_codes {
     pub const PLUGIN_UNKNOWN_OP: &str = "PLUGIN_UNKNOWN_OP";
     /// 插件侧主动发起的调用失败（I/O、对端退出等）时的兜底码。
     pub const PLUGIN_CALL_FAILED: &str = "PLUGIN_CALL_FAILED";
+    /// worker 未实现命令帧（老 worker 会把 `command` op 报成 `PLUGIN_UNKNOWN_OP`；
+    /// 本码用于 worker **认识命令帧但没有该命令实现**的情形）。
+    pub const PLUGIN_COMMAND_UNKNOWN: &str = "PLUGIN_COMMAND_UNKNOWN";
+    /// 命令帧本身形状非法（worker 解码 [`super::CommandFrame`] 失败的兜底码）。
+    pub const PLUGIN_COMMAND_INVALID_ARGS: &str = "PLUGIN_COMMAND_INVALID_ARGS";
+    /// 命令帧携带的 `plugin_id` 与 worker 自身身份不符（宿主绑定被篡改/错配）。
+    pub const PLUGIN_COMMAND_ID_MISMATCH: &str = "PLUGIN_COMMAND_ID_MISMATCH";
+    /// worker 自觉超出执行预算（`CommandFrame::timeout_ms`）主动回错；
+    /// 宿主侧强制超时不走本码，由宿主直接以 [`super::CommandFrame::timeout_ms`] 为界放弃等待。
+    pub const PLUGIN_COMMAND_TIMEOUT: &str = "PLUGIN_COMMAND_TIMEOUT";
+    /// 命令在 worker 内执行失败的兜底码（worker 未给出更具体分类时使用）。
+    pub const PLUGIN_COMMAND_FAILED: &str = "PLUGIN_COMMAND_FAILED";
 }
 
 /// 调用链长度上限（`PLAN-everything-is-plugin.md` §15.5）：不含本帧接收方。
@@ -280,6 +314,361 @@ pub mod error_codes {
 /// 与环检测互补 —— 环检测挡「同一条链上重复出现」，深度上限挡「无环但极深」的长链
 /// （每层跨插件调用都要占一份栈 + 一份子进程等待，深链会耗尽资源）。
 pub const MAX_SEAM_CALL_DEPTH: usize = 8;
+
+// ───────────────────────────── 命令帧（任务 #49，T2） ─────────────────────────────
+
+/// 宿主派发单条命名命令的默认执行预算（毫秒）。
+///
+/// 命令走长驻 worker（[`ops::COMMAND`]）时，宿主以「预算 + 收帧宽限」为等待上限强制收尾，
+/// 插件僵死不再级联卡死宿主调用线程（D1）。调用方可按命令耗时特征显式覆盖。
+pub const DEFAULT_COMMAND_TIMEOUT_MS: u64 = 30_000;
+
+/// 宿主等待 worker 回帧的**接缝调用**预算上限（毫秒，任务 #53 修 D1）。
+///
+/// 适用对象：宿主经接缝公共入口（[`ops::CALL_SEAM`] 分派、远程门面、UI action 回流）向
+/// worker 发帧后等待配对响应的时间。与命令帧预算 [`DEFAULT_COMMAND_TIMEOUT_MS`]
+/// 分开、且**必须更小**，理由是两条通道的等待位置不同：
+///
+/// - 命令帧是用户动作的**终执行**，预算可由调用方显式覆盖（[`CommandFrame::timeout_ms`]
+///   必填），30s 是给「worker 真的在算」的宽预算；
+/// - 接缝调用是**同步夹在对话回合中间**的依赖调用 —— 单条依赖僵死若按 30s 收口，
+///   一个回合内多条接缝叠加最坏会按调用链深度（[`MAX_SEAM_CALL_DEPTH`]）成倍放大，
+///   用户感知即「整个应用没反应」。
+///
+/// 取值判据：15s 对占绝大多数的毫秒~秒级接缝操作（规则评估 / 沙箱校验 / 工具清单 /
+/// webhook 派发）是正常延迟的一个数量级余量，又把「回合被一条僵死依赖拖住」的上界
+/// 压在半分钟以内。长跑型接缝不靠调大本常量解决，走 [`SEAM_OP_TIMEOUT_OVERRIDES`]
+/// 的逐接缝预算表（均按证据定，不许拍脑袋）。
+///
+/// 两项如实声明（任务 #53 裁定）：
+/// - **预算不进帧**（不给 [`FrameRequest`] 加字段）：预算是宿主策略，不是插件可
+///   协商的东西；协议面零变化优先级高于「可配置」。
+/// - **本批只覆盖收侧**（等回帧的 `recv_timeout`）：写帧侧的卡死（对端僵死不读
+///   stdin 且管道满 ⇒ 写方持锁阻塞，`recv_timeout` 覆盖不到）另立案 #56，
+///   修它需要 writer 线程 / 异步写的接缝栈重构。读侧超时后在途调用的处置沿用
+///   既有语义：撤配对槽位、迟到帧由读线程按「无等待者」丢弃（宿主侧另有
+///   「标脏拒后续」，见 `axagent-plugins` 的 `WorkerInvoker::invoke_with_chain`）。
+pub const DEFAULT_SEAM_TIMEOUT_MS: u64 = 15_000;
+
+/// `agent.loop` 长跑型接缝的专用预算（毫秒）。
+///
+/// 适用对象：`run_turn` 是一次**完整 LLM Agent 回合**（多轮模型调用 + 工具执行，
+/// `harness::AgentTurnRunner::run_turn`，PLAN §5.4 行 `agent.loop` ⇒ op
+/// `run_turn`），耗时特征为分钟级；15s 默认预算必误杀。
+///
+/// **取值规则 = `max(宿主 LLM 单请求上限, 生产工作流给 Agent 节点的预算)`**，两个来源都取
+/// 盘上现存的宿主预算，本值不另立数字：
+/// - 宿主 LLM 客户端单请求上限 **300 s** —— `axagent-ai/crates/providers/src/lib.rs:278`
+///   的 `build_http_client`：`.timeout(std::time::Duration::from_secs(300))`；
+/// - 生产工作流给一个 Agent 节点的预算 **900 s** ——
+///   `src-tauri/src/commands/stock_analysis_setup/seed_stock_analysis.rs:4515` 对
+///   `WorkflowNode::Agent`（debate-convergence）写死 `a.base.timeout = Some(900)`，取舍
+///   理由的实证在同文件 `:4509`「大上下文 LLM 的 TTFB 偶发 >120s」；同族节点预算还有多智能体节点 900 s
+///   （`axagent-core/crates/harness/src/capability_pack_orchestration/subgraph.rs:145`）、
+///   OPC 子 Agent 节点 600 s（同文件 `:94`）、模板变量 `agent_timeout_secs` 的现网缺省
+///   600 s（`src-tauri/src/commands/stock_analysis_setup/seed_variables.rs:202`，消费点
+///   钳位 [10, 3600]）。⇒ 该族里的最大值即 900 s。
+///
+/// ⇒ `max(300, 900) = 900`。取 max 而非取小的理由：一个回合含**多轮**模型调用，300 s 只是
+/// 单轮上限；而宿主已愿意为这个节点等 900 s，接缝侧若低于它就成了「宿主还在等、依赖侧先撤」。
+///
+/// 为什么这条必须有上界（而不只是「比 15s 大」）：`run_turn` 的真实消费方就在生产 ——
+/// `axagent-runtime/crates/rt-workflow/src/work_engine/executors/agent_executor.rs:270`
+/// 的 `runner.run_turn(request).await`（runner 取自同函数 `:433` 的能力注册表，注册表缺
+/// 则回退字段注入）。该路径**不按 `max_tool_rounds` 收口回合长度**：它是
+/// `Option<u32>`（`agent_executor.rs:266` 透传节点配置），多个生产种子点直接给 `None`
+/// （`axagent-core/crates/harness/src/assembly_builder.rs:201`、
+/// `axagent-core/crates/harness/src/plan_compiler.rs:142`、
+/// `axagent-core/crates/harness/src/capability_pack_orchestration/subgraph.rs:118`），
+/// 回合的兜底来自 `runtime-core` 的迭代数（缺省 50，
+/// `axagent-runtime/crates/runtime-core/src/conversation.rs:262`）× 单请求 300 s ⇒
+/// **没有秒级上界**。故本值按「与宿主既有预算同源」定档，不做「猜一个够用的数」。
+///
+/// ⚠ 如实口径：本值是**宿主侧两份既存预算的 max**（出处见上），不再是无出处的裁定值；
+/// 但 `run_turn` 自身耗时的实测分布盘上仍然**没有**，真插件接入后应按回合耗时分布复核。
+pub const AGENT_LOOP_RUN_TURN_TIMEOUT_MS: u64 = 900_000;
+
+/// `tool.set` 的 op `exec` 专用预算（毫秒）。
+///
+/// 依据（§26.3 S-6 的对齐方向：**远程接缝对齐 spawn 通道**，不是反过来削 spawn）：同一个
+/// 插件工具在宿主侧有**两条通道**，本批之前预算差 4 倍 ——
+/// - per-call spawn 通道 **60 s**：`axagent-plugins/crates/plugins/src/types.rs:837` 的
+///   `const DEFAULT_TOOL_TIMEOUT_SECS: u64 = 60`，用于同文件 `:867` 与 `:955` 的两处轮询；
+///   这是**既存产品行为**，本批不动它（也不许有人拿本常量去改它 —— 那是另一个任务）；
+/// - 远程长驻 worker 通道：op `exec` 经 [`seam_timeout_ms_for_op`] 取预算（取预算位点 =
+///   `axagent-plugins/crates/plugins/src/worker.rs` 的 `seam_wait_for_op`，转发点 = 同文件
+///   `forward_remote::<ToolExecReply>` 的 `"exec"`；该文件正被改造，**只认符号不认行号**），
+///   未进表时回落 [`DEFAULT_SEAM_TIMEOUT_MS`] = 15 s。
+///
+/// ⇒ 同一个工具「换个装载形态就要快 4 倍才判死」没有判据支撑，故对齐到 spawn 侧的 60 s。
+/// 与 [`AGENT_LOOP_RUN_TURN_TIMEOUT_MS`] 的区别要说清：那条有**宿主预算出处**（两份取 max），
+/// 本条的出处是**宿主另一条通道对自己设的超时**（`types.rs:837`）—— 二者都是「盘上已有的
+/// 宿主数字」，不是 op 级耗时实测；`exec` 自身耗时的实测分布盘上仍**没有**。
+pub const TOOL_SET_EXEC_TIMEOUT_MS: u64 = 60_000;
+
+/// 逐接缝预算**覆盖表**（任务 #53）：键 = PLAN §5.4 约定的 op 名，值 = 等待预算毫秒。
+///
+/// 为什么键是 op 而不是 seam：宿主传输层（`WorkerInvoker::invoke_with_chain`）在写帧
+/// 时只见得到 op 字符串，接缝 ID 已消失在门面路由之后；op 词汇由 §5.4 映射表固定
+/// （单 op 接缝取声明 op 名，多 op 接缝由门面硬编码，全表见 `PLAN-everything-is-plugin.md`
+/// §5.4 + worker.rs 门面）。若插件声明漂移出表 ⇒ 落回默认预算 —— 失败方向是「长跑
+/// 调用被更早放弃」而非协议错配，可接受。
+///
+/// **收录判据（逐接缝过证据；证据 = 盘上实测或有出处的宿主预算，「看起来快」不算）**：
+/// - `run_turn`：分钟级 LLM 回合，§5.4 + 两份盘上宿主预算取 max ⇒ **已进表**，理由与出处见
+///   [`AGENT_LOOP_RUN_TURN_TIMEOUT_MS`]；
+/// - `exec`（`tool.set`）：**已进表** = 60_000，与宿主 spawn 通道同源
+///   （`axagent-plugins/crates/plugins/src/types.rs:837` 的 `DEFAULT_TOOL_TIMEOUT_SECS = 60`），
+///   对齐理由、两通道取预算的位点与「这不是 op 级实测」的如实口径见
+///   [`TOOL_SET_EXEC_TIMEOUT_MS`]（§26.3 S-6）；
+/// - `chat` / `embed`（`model.provider`）：走的是宿主同一个 LLM 客户端，文档口径「0.5–30 s」
+///   （`PLAN-everything-is-plugin.md:274`），单请求上限同 `run_turn` 那条 300 s ⇒ 15 s 默认
+///   在高端会误杀，但**没有 op 级耗时实测** ⇒ 暂留默认，标「预算待实证」；
+/// - `reflect`（reflector）、`suggest`（optimizer）、`evolve`（evolver，§5.4 原注「种群可能
+///   极大，唯一工程项」）、`on_message`（message.callback）：都可能走到 LLM / 外网，**无实测
+///   分布亦无盘上预算出处** ⇒ 暂留默认，标「预算待实证」；
+/// - `evaluate`（business_rule）：**有实测** —— 长驻 `pipe` 往返 18.9 µs
+///   （`PLAN-everything-is-plugin.md:274` / `:670`，§11 基准表）⇒ 15 s 余量充足，不进表；
+/// - `execute`（sandbox）、`record` / `assert`、`start` / `stop` / `send` / `is_*`、
+///   `dispatch`、`list`：**只有形态推断（毫秒~秒级），盘上无实测、无出处** ⇒ 留默认，
+///   其中 `send` / `dispatch` 触外网，属「无证据但存疑」，需要实测才能裁定。
+pub const SEAM_OP_TIMEOUT_OVERRIDES: &[(&str, u64)] =
+    &[("run_turn", AGENT_LOOP_RUN_TURN_TIMEOUT_MS), ("exec", TOOL_SET_EXEC_TIMEOUT_MS)];
+
+/// 查 op 的接缝预算覆盖：命中 [`SEAM_OP_TIMEOUT_OVERRIDES`] 返回专用预算，否则 `None`
+/// （调用方回落到宿主默认 —— 通常是 [`DEFAULT_SEAM_TIMEOUT_MS`]）。
+#[must_use]
+pub fn seam_timeout_ms_for_op(op: &str) -> Option<u64> {
+    SEAM_OP_TIMEOUT_OVERRIDES
+        .iter()
+        .find(|(override_op, _)| *override_op == op)
+        .map(|(_, timeout_ms)| *timeout_ms)
+}
+
+/// 宿主等待 worker 回 **`ops::DESCRIBE` 握手帧** 的预算上限（毫秒，任务 #63 补 D1 边角）。
+///
+/// 与 [`DEFAULT_SEAM_TIMEOUT_MS`] 是**两条不同通道的预算**，不许互相借用：
+///
+/// - **接缝预算**服务的是「用户发起的调用」—— 对话回合中间的一次依赖调用，会沿调用链
+///   深度（[`MAX_SEAM_CALL_DEPTH`]）成倍放大，故取 15s 并把长跑型 op 逐条放进
+///   [`SEAM_OP_TIMEOUT_OVERRIDES`]；
+/// - **握手预算**服务的是「装载前置」—— `LoadedPlugin::load` 里 spawn 之后的第一帧，
+///   不在接缝公共入口（`SeamInvoker::invoke_with_chain`）的控制流内，因此**不经**
+///   [`seam_timeout_ms_for_op`]，也不进那张表（表按「op ⇒ 接缝预算」的语义组织，把
+///   `describe` 塞进去会让「表只给 seam op」的既有不变量失效，见本模块测试
+///   `seam_timeout_override_table_is_evidence_bounded`）。
+///
+/// 取值判据：握手**没有任何业务计算**，只需要 worker 把进程/解释器起来并回一帧声明，
+/// 正常形态是毫秒级；但它发生在「装载」这条串行路径上（宿主逐个插件启用，一个装死的
+/// worker 会把它后面的全部插件一起堵住），所以预算必须**有界**；同时不能收得过紧 ——
+/// 解释器型插件（Python/Node）冷启动时的 import 与运行时初始化是秒级量级，误杀会让
+/// 插件「看起来装不上」。10s = 秒级冷启动的一个数量级余量，且严格小于接缝预算
+/// （握手的等待位置更靠前、更不该占着一大段）。⚠ 该数为**判断值、非实测分布**，
+/// 与 [`AGENT_LOOP_RUN_TURN_TIMEOUT_MS`] 一样**缺实测分布**（那边已有宿主预算出处，本数仍是
+/// 判断值）；真插件接入后应按握手耗时分布复核。
+///
+/// 线格式**零变化**：预算是宿主侧等待策略，不进帧，故 [`AXAGENT_PLUGIN_PROTO_VERSION`] 保持 1。
+pub const DEFAULT_HANDSHAKE_TIMEOUT_MS: u64 = 10_000;
+
+/// 命令帧三型之一：**请求**（宿主 → worker）。
+///
+/// 信封复用 [`FrameRequest`]：`op` 固定 [`ops::COMMAND`]，本结构序列化后放 `args`。
+/// `request_id` 配对、`call_chain` 等框架语义完全沿用，故**不需要**协议版本 bump ——
+/// 旧 worker 读得懂信封，只是把没实现的 op 回成 [`error_codes::PLUGIN_UNKNOWN_OP`]。
+///
+/// 字段命名与 [`FrameRequest`] 同口径（Rust↔Rust 进程内协议，snake_case，不加 camelCase）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CommandFrame {
+    /// 宿主绑定的插件 ID（**注册表权威键**，由宿主填写，不是调用方入参的透传）。
+    ///
+    /// worker 侧应校验它等于自身身份（spawn 时注入的 `AXAGENT_PLUGIN_ID` 环境变量），
+    /// 不符必须回 [`error_codes::PLUGIN_COMMAND_ID_MISMATCH`] 并拒绝执行。
+    pub plugin_id: String,
+    /// 命令名（manifest `commands[].name`；声明真相在宿主侧，worker 只按名分发）。
+    pub command: String,
+    /// 命令输入 JSON（宿主已按 `inputSchema` 做过授权门槛 + 最小形状校验才发帧）。
+    /// 缺省为 `null`。
+    #[serde(default)]
+    pub input: serde_json::Value,
+    /// 执行预算（毫秒）。**必填、无缺省**：预算语义是「宿主对超时负责」的载体，
+    /// 缺了它帧就不完整，宁可解码报错也不给「无限预算」的静默形态。
+    pub timeout_ms: u64,
+}
+
+impl CommandFrame {
+    /// 构造命令帧请求体（`plugin_id` 必须传宿主注册表键，见字段注释）。
+    pub fn new(
+        plugin_id: impl Into<String>,
+        command: impl Into<String>,
+        input: serde_json::Value,
+        timeout_ms: u64,
+    ) -> Self {
+        Self { plugin_id: plugin_id.into(), command: command.into(), input, timeout_ms }
+    }
+
+    /// 编成 [`FrameRequest`] 信封（不带配对 ID —— 由发起方经传输层补填）。
+    pub fn to_frame_request(&self) -> io::Result<FrameRequest> {
+        let args = serde_json::to_value(self).map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("命令帧序列化失败：{e}"))
+        })?;
+        Ok(FrameRequest::new(ops::COMMAND, args))
+    }
+
+    /// 从 [`FrameRequest`] 解出命令帧；非 `command` op 或形状非法都返回 `Err`。
+    pub fn from_frame_request(request: &FrameRequest) -> Result<Self, CommandFrameError> {
+        if request.op != ops::COMMAND {
+            return Err(CommandFrameError::NotCommand { op: request.op.clone() });
+        }
+        serde_json::from_value(request.args.clone())
+            .map_err(|e| CommandFrameError::InvalidShape { reason: e.to_string() })
+    }
+}
+
+/// 命令帧三型之二：**成功回执**（worker → 宿主，或回执解码后的成功形态）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CommandReply {
+    /// 回填请求帧的插件 ID 绑定（与 [`CommandFrame::plugin_id`] 一致，防错配）。
+    pub plugin_id: String,
+    /// 回填命令名（与 [`CommandFrame::command`] 一致）。
+    pub command: String,
+    /// 命令输出 JSON；缺省为 `null`。
+    #[serde(default)]
+    pub value: serde_json::Value,
+}
+
+impl CommandReply {
+    /// 按请求帧回填绑定字段（worker 侧便捷构造）。
+    pub fn for_frame(frame: &CommandFrame, value: serde_json::Value) -> Self {
+        Self { plugin_id: frame.plugin_id.clone(), command: frame.command.clone(), value }
+    }
+
+    /// 编成 [`FrameResponse`] 成功帧（`value` 字段承载本结构的 JSON）。
+    pub fn into_frame_response(self) -> io::Result<FrameResponse> {
+        let value = serde_json::to_value(&self).map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("回执序列化失败：{e}"))
+        })?;
+        Ok(FrameResponse::success(value))
+    }
+}
+
+/// 命令帧三型之三：**失败回执**（worker → 宿主，或回执解码后的失败形态）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CommandFault {
+    /// 请求帧绑定的插件 ID（对端未回填绑定时为空串 —— 解码不因此失败，但绑定信息缺失）。
+    #[serde(default)]
+    pub plugin_id: String,
+    /// 命令名（同上，缺绑定为空串）。
+    #[serde(default)]
+    pub command: String,
+    /// 协议错误码（见 [`error_codes`]；缺省兜底 [`error_codes::PLUGIN_COMMAND_FAILED`]）。
+    pub code: String,
+    /// 人类可读说明。
+    #[serde(default)]
+    pub message: String,
+}
+
+impl CommandFault {
+    /// 按请求帧回填绑定字段（worker 侧便捷构造）。
+    pub fn for_frame(
+        frame: &CommandFrame,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            plugin_id: frame.plugin_id.clone(),
+            command: frame.command.clone(),
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    /// 编成 [`FrameResponse`] 错误帧（绑定字段随 `value` 透传，供发起方核对）。
+    pub fn into_frame_response(self) -> FrameResponse {
+        FrameResponse {
+            kind: ResponseKind::Error,
+            value: Some(serde_json::json!(
+                { "plugin_id": self.plugin_id, "command": self.command }
+            )),
+            message: Some(self.message),
+            code: Some(self.code),
+            request_id: None,
+        }
+    }
+}
+
+/// 命令帧回执的两型判别（发起方按 [`FrameResponse::kind`] 解码后的强类型形态）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum CommandOutcome {
+    /// 成功回执。
+    Reply(CommandReply),
+    /// 失败回执（含错误码）。
+    Fault(CommandFault),
+}
+
+impl CommandOutcome {
+    /// 编成 [`FrameResponse`] 写回对端。
+    pub fn into_frame_response(self) -> io::Result<FrameResponse> {
+        match self {
+            Self::Reply(reply) => reply.into_frame_response(),
+            Self::Fault(fault) => Ok(fault.into_frame_response()),
+        }
+    }
+
+    /// 从 [`FrameResponse`] 解码回执。
+    ///
+    /// 成功帧的 `value` 必须是 [`CommandReply`] 形状（裸输出 ⇒ [`CommandFrameError::InvalidShape`]，
+    /// 不猜）；错误帧容忍缺失绑定字段（`plugin_id` / `command` 落空串），
+    /// 缺 `code` 兜底 [`error_codes::PLUGIN_COMMAND_FAILED`]。
+    /// 「对端是旧 worker」的降级路径也走这里：它把 `command` op 回成
+    /// [`error_codes::PLUGIN_UNKNOWN_OP`] 错误帧 ⇒ 解码为 Fault，**无需版本 bump**。
+    pub fn from_frame_response(response: &FrameResponse) -> Result<Self, CommandFrameError> {
+        match response.kind {
+            ResponseKind::Success => {
+                serde_json::from_value(response.value.clone().unwrap_or(serde_json::Value::Null))
+                    .map(Self::Reply)
+                    .map_err(|e| CommandFrameError::InvalidShape { reason: e.to_string() })
+            },
+            ResponseKind::Error => {
+                let binding = response.value.clone().unwrap_or(serde_json::Value::Null);
+                let fault = CommandFault {
+                    plugin_id: binding
+                        .get("plugin_id")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    command: binding
+                        .get("command")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    code: response
+                        .code
+                        .clone()
+                        .unwrap_or_else(|| error_codes::PLUGIN_COMMAND_FAILED.to_string()),
+                    message: response.message.clone().unwrap_or_default(),
+                };
+                Ok(Self::Fault(fault))
+            },
+        }
+    }
+}
+
+/// 命令帧编解码错误（协议内部判别用，非用户可见错误）。
+#[derive(Debug, thiserror::Error)]
+pub enum CommandFrameError {
+    /// 帧不是命令帧（op 不匹配）。
+    #[error("不是命令帧：op 为 `{op}`，期望 `command`")]
+    NotCommand {
+        /// 实际收到的 op。
+        op: String,
+    },
+    /// 形状不合法（缺必填字段 / 类型不符 / JSON 非法）。
+    #[error("命令帧形状不合法：{reason}")]
+    InvalidShape {
+        /// 具体原因（serde 报错原文）。
+        reason: String,
+    },
+}
 
 // ───────────────────────────── 插件声明 ─────────────────────────────
 
@@ -1063,5 +1452,294 @@ mod tests {
         assert_eq!(error_codes::SEAM_CALL_CYCLE_DETECTED, "SEAM_CALL_CYCLE_DETECTED");
         assert_eq!(error_codes::SEAM_CALL_DEPTH_EXCEEDED, "SEAM_CALL_DEPTH_EXCEEDED");
         assert_eq!(error_codes::SEAM_PROVIDER_UNAVAILABLE, "SEAM_PROVIDER_UNAVAILABLE");
+    }
+
+    // ─────────────────── 任务 #49：命令帧（T2 派发口） ───────────────────
+
+    /// 命令帧**请求型**经传输层往返：编码 → 帧字节 → 解码 → 逐字段一致；
+    /// 并锁定线格式为 snake_case（进程内协议口径，与 [`FrameRequest`] 同族）。
+    #[test]
+    fn command_frame_request_roundtrip_over_wire() {
+        let frame = CommandFrame::new(
+            "demo@external",
+            "parse_analysis_intent",
+            serde_json::json!({ "input": "调研茅台短线" }),
+            12_345,
+        );
+        let request = frame.to_frame_request().expect("命令帧编码应成功");
+        assert_eq!(request.op, ops::COMMAND);
+        let text = serde_json::to_string(&request.args).expect("args 应可序列化");
+        assert!(text.contains("\"plugin_id\""), "线格式必须 snake_case：{text}");
+        assert!(text.contains("\"timeout_ms\""), "超时字段必填：{text}");
+        assert!(!text.contains("pluginId"), "不得出现 camelCase：{text}");
+
+        let mut buf = Vec::new();
+        write_json_frame(&mut buf, &request).expect("写帧应成功");
+        let mut r: &[u8] = &buf;
+        let back: FrameRequest = read_json_frame(&mut r).expect("读帧应成功");
+        let decoded = CommandFrame::from_frame_request(&back).expect("命令帧解码应成功");
+        assert_eq!(decoded, frame, "往返必须逐字段一致");
+    }
+
+    /// 命令帧请求体的畸形输入：非 command op、缺 `timeout_ms`、input 缺省三类形态。
+    #[test]
+    fn command_frame_request_rejects_malformed_or_foreign() {
+        // ① 别的 op ⇒ NotCommand（绝不按命令帧猜）。
+        let foreign = FrameRequest::new(ops::EVENT, serde_json::json!({ "plugin_id": "a" }));
+        let err = CommandFrame::from_frame_request(&foreign).unwrap_err();
+        assert!(matches!(err, CommandFrameError::NotCommand { op } if op == ops::EVENT));
+
+        // ② 缺必填 timeout_ms ⇒ InvalidShape（不给「无限预算」的静默形态）。
+        let no_budget = FrameRequest::new(
+            ops::COMMAND,
+            serde_json::json!({
+                "plugin_id": "a@external", "command": "x"
+            }),
+        );
+        let err = CommandFrame::from_frame_request(&no_budget).unwrap_err();
+        assert!(matches!(err, CommandFrameError::InvalidShape { .. }), "实际 {err}");
+
+        // ③ input 缺省合法（`#[serde(default)]` ⇒ null）。
+        let no_input = FrameRequest::new(
+            ops::COMMAND,
+            serde_json::json!({
+                "plugin_id": "a@external", "command": "x", "timeout_ms": 1000
+            }),
+        );
+        let frame = CommandFrame::from_frame_request(&no_input).expect("input 可缺省");
+        assert_eq!(frame.input, serde_json::Value::Null);
+    }
+
+    /// 命令帧**成功回执型**经传输层往返，且宿主绑定字段随回执透传。
+    #[test]
+    fn command_frame_reply_roundtrip_over_wire() {
+        let frame = CommandFrame::new("demo@external", "ping", serde_json::json!(null), 1000);
+        let reply = CommandReply::for_frame(&frame, serde_json::json!({ "pong": true }));
+        let response = CommandOutcome::Reply(reply.clone())
+            .into_frame_response()
+            .expect("回执编码应成功")
+            .with_id("h3");
+        assert_eq!(response.kind, ResponseKind::Success);
+
+        let mut buf = Vec::new();
+        write_json_frame(&mut buf, &response).expect("写回执帧应成功");
+        let mut r: &[u8] = &buf;
+        let back: FrameResponse = read_json_frame(&mut r).expect("读回执帧应成功");
+        assert_eq!(back.request_id.as_deref(), Some("h3"), "配对 ID 必须随信封往返");
+        let outcome = CommandOutcome::from_frame_response(&back).expect("回执解码应成功");
+        assert_eq!(outcome, CommandOutcome::Reply(reply));
+        let CommandOutcome::Reply(parsed) = outcome else {
+            panic!("成功帧必须解为 Reply");
+        };
+        assert_eq!(parsed.plugin_id, "demo@external", "回执必须携带宿主绑定");
+        assert_eq!(parsed.command, "ping");
+    }
+
+    /// 命令帧**失败回执型**往返：错误码、说明与绑定字段都要存活。
+    #[test]
+    fn command_frame_fault_roundtrip_over_wire() {
+        let frame = CommandFrame::new("demo@external", "boom", serde_json::json!(null), 1000);
+        let fault =
+            CommandFault::for_frame(&frame, error_codes::PLUGIN_COMMAND_FAILED, "worker 自报失败");
+        let response =
+            CommandOutcome::Fault(fault.clone()).into_frame_response().expect("失败回执编码应成功");
+        assert_eq!(response.kind, ResponseKind::Error);
+
+        let mut buf = Vec::new();
+        write_json_frame(&mut buf, &response).expect("写失败帧应成功");
+        let mut r: &[u8] = &buf;
+        let back: FrameResponse = read_json_frame(&mut r).expect("读失败帧应成功");
+        let outcome = CommandOutcome::from_frame_response(&back).expect("失败回执解码应成功");
+        assert_eq!(outcome, CommandOutcome::Fault(fault));
+    }
+
+    /// 加法式兼容（**版本不 bump** 的依据）：
+    /// ① 命令帧仍带 `op` ⇒ [`classify_inbound`] 判为请求，入站分流逻辑零改动；
+    /// ② 旧 worker 对未实现 op 回 `PLUGIN_UNKNOWN_OP` 错误帧 ⇒ 新宿主解码为 Fault（降级为失败，
+    ///    不会误成功）；缺 `code` 的裸错误帧也兜底成 `PLUGIN_COMMAND_FAILED`。
+    #[test]
+    fn command_frame_is_additive_no_proto_bump_required() {
+        assert_eq!(
+            AXAGENT_PLUGIN_PROTO_VERSION, 1,
+            "命令帧是加法式 op：握手版本必须保持 1，bump 会拒载全部已装插件"
+        );
+
+        let frame = CommandFrame::new("demo@external", "x", serde_json::json!(null), 1000);
+        let request = frame.to_frame_request().expect("编码应成功");
+        let inbound = classify_inbound(serde_json::to_value(&request).expect("转 Value"))
+            .expect("命令帧必须仍按 op 判为请求");
+        assert!(inbound.as_request().is_some(), "入站分流零改动");
+
+        // 旧 worker 的降级错误帧。
+        let legacy =
+            FrameResponse::error(error_codes::PLUGIN_UNKNOWN_OP, "未知操作：command").with_id("h1");
+        let outcome = CommandOutcome::from_frame_response(&legacy).expect("错误帧解码应成功");
+        let CommandOutcome::Fault(fault) = outcome else {
+            panic!("错误帧必须解为 Fault");
+        };
+        assert_eq!(fault.code, error_codes::PLUGIN_UNKNOWN_OP);
+        assert!(fault.plugin_id.is_empty(), "旧 worker 无绑定字段，允许为空");
+
+        // 连 code 都没有的裸错误帧 ⇒ 兜底码，不 panic 也不当成成功。
+        let bare = FrameResponse {
+            kind: ResponseKind::Error,
+            value: None,
+            message: Some("对端异常".to_string()),
+            code: None,
+            request_id: None,
+        };
+        let outcome = CommandOutcome::from_frame_response(&bare).expect("兜底解码应成功");
+        let CommandOutcome::Fault(fault) = outcome else {
+            panic!("错误帧必须解为 Fault");
+        };
+        assert_eq!(fault.code, error_codes::PLUGIN_COMMAND_FAILED);
+    }
+
+    /// 成功帧 `value` 不是 CommandReply 形状（裸输出）⇒ InvalidShape，**不猜**。
+    #[test]
+    fn command_reply_shape_is_strict_on_success() {
+        let bare = FrameResponse::success(serde_json::json!("直接一段文本"));
+        let err = CommandOutcome::from_frame_response(&bare).unwrap_err();
+        assert!(matches!(err, CommandFrameError::InvalidShape { .. }), "实际 {err}");
+    }
+
+    /// 命令帧相关协议常量与错误码逐字自洽（宿主与 worker 共用同一份）。
+    #[test]
+    fn command_frame_protocol_constants_are_shared_shape() {
+        assert_eq!(ops::COMMAND, "command");
+        assert_eq!(DEFAULT_COMMAND_TIMEOUT_MS, 30_000);
+        assert_eq!(error_codes::PLUGIN_COMMAND_UNKNOWN, "PLUGIN_COMMAND_UNKNOWN");
+        assert_eq!(error_codes::PLUGIN_COMMAND_INVALID_ARGS, "PLUGIN_COMMAND_INVALID_ARGS");
+        assert_eq!(error_codes::PLUGIN_COMMAND_ID_MISMATCH, "PLUGIN_COMMAND_ID_MISMATCH");
+        assert_eq!(error_codes::PLUGIN_COMMAND_TIMEOUT, "PLUGIN_COMMAND_TIMEOUT");
+        assert_eq!(error_codes::PLUGIN_COMMAND_FAILED, "PLUGIN_COMMAND_FAILED");
+    }
+
+    /// 任务 #53（D1）：接缝调用预算是**协议常量**，宿主默认值从这里读、不散落魔数；
+    /// 且必须严格小于命令帧预算（「同步夹在对话回合里」的口径），并**不**伴随版本 bump。
+    #[test]
+    fn seam_timeout_default_is_protocol_constant_below_command_budget() {
+        // 编译期钉大小关系（`assertions_on_constants` 不许运行期比较两常量，
+        // 而 const 断言更强：违反即在构建期红，不用等测试跑到）。
+        const _: () = assert!(DEFAULT_SEAM_TIMEOUT_MS < DEFAULT_COMMAND_TIMEOUT_MS);
+        assert_eq!(DEFAULT_SEAM_TIMEOUT_MS, 15_000);
+        assert_eq!(
+            AXAGENT_PLUGIN_PROTO_VERSION, 1,
+            "接缝预算常量是宿主侧等待语义，不改线格式：握手版本必须保持 1"
+        );
+    }
+
+    /// 任务 #53 立、任务 #76 升级：逐接缝预算表按证据收录，锁成**双向** ——
+    /// - **(i) 表内每一项必须带盘上出处**（`文件:行` 原文），且查表必须命中该预算；
+    /// - **(ii) 名单外的 op 才断言 `None`**（未进表即走默认，这是「不许拍脑袋」的机械锁）。
+    ///
+    /// ⚠ **这不是放宽，别读成「为了过测试改测试」**：旧形态是「23 个 op 恒断言 `None`，另把
+    /// `run_turn` 单独断言 `Some`」；新形态是「22 个 op 断言 `None`，表内 2 项各断言 `Some`
+    /// 且逐项带出处」⇒ **被断言的 op 名总数仍是 24（22 + 2），一个没少**。变的只是判据：
+    /// 从「未进表者恒 `None`」改成「按有无盘上证据分两档，进表必须自证出处」。
+    /// 于是「加一条**有**证据的表项」不再需要动本用例的口径（任务 #74 §7.1 抓到的「表被
+    /// 冻死」形态），而「加一条**没**证据的表项」反而更早红 —— 见下面对
+    /// [`SEAM_OP_TIMEOUT_OVERRIDES`] 的反向自检，旧形态缺的正是这一半。
+    #[test]
+    fn seam_timeout_override_table_is_evidence_bounded() {
+        // ── (i) 表内每一项：出处 + 命中 ──
+        // 出处一律写「文件:行」原文：改值必须连带改掉出处，抹掉或写成空话当场红
+        // （判据只问「像不像一个源文件行」，真伪由注释里那串路径承担复核成本）。
+        const EVIDENCED: &[(&str, u64, &str)] = &[
+            (
+                "run_turn",
+                AGENT_LOOP_RUN_TURN_TIMEOUT_MS,
+                "max(300s: axagent-ai/crates/providers/src/lib.rs:278, 900s: src-tauri/src/commands/stock_analysis_setup/seed_stock_analysis.rs:4515)",
+            ),
+            (
+                "exec",
+                TOOL_SET_EXEC_TIMEOUT_MS,
+                "axagent-plugins/crates/plugins/src/types.rs:837 DEFAULT_TOOL_TIMEOUT_SECS = 60（用于同文件 :867 / :955）",
+            ),
+        ];
+        for (op, timeout_ms, source) in EVIDENCED {
+            assert!(source.contains(".rs:"), "表项 `{op}` 的出处必须指到源文件行：{source}");
+            assert!(
+                SEAM_OP_TIMEOUT_OVERRIDES.iter().any(|(key, _)| key == op),
+                "表项 `{op}`（出处 {source}）应真的在覆盖表里，不许只在测试里自说自话"
+            );
+            assert_eq!(
+                seam_timeout_ms_for_op(op),
+                Some(*timeout_ms),
+                "`{op}` 已获证据进表，必须命中表值"
+            );
+        }
+        // 反向自检（本批新增的那一半）：表里不得出现未登记出处的 op ⇒ 进表即必须自证。
+        for (table_op, _) in SEAM_OP_TIMEOUT_OVERRIDES {
+            assert!(
+                EVIDENCED.iter().any(|(op, _, _)| op == table_op),
+                "覆盖表项 `{table_op}` 没有盘上出处登记 ⇒ 按判据不许进表"
+            );
+        }
+        // 取值锁：run_turn = max(宿主 LLM 单请求上限 300 s, 生产 Agent 节点预算 900 s)；
+        // exec = 宿主 spawn 通道的 60 s（§26.3 S-6 的对齐方向）。改这些数必须连带改掉上面的出处。
+        const _: () = assert!(AGENT_LOOP_RUN_TURN_TIMEOUT_MS > DEFAULT_SEAM_TIMEOUT_MS);
+        const _: () = assert!(TOOL_SET_EXEC_TIMEOUT_MS > DEFAULT_SEAM_TIMEOUT_MS);
+        assert_eq!(AGENT_LOOP_RUN_TURN_TIMEOUT_MS, 900_000);
+        assert_eq!(TOOL_SET_EXEC_TIMEOUT_MS, 60_000);
+
+        // ── (ii) 名单外的 op 才断言 None ──
+        // 这份名单逐条来自 §5.4 op 词汇 + worker.rs 门面硬编码词表；相对旧形态**只移出
+        // `exec`**（它已按 (i) 带出处进表），其余 22 项逐字未动。
+        for op in [
+            "evaluate",
+            "execute",
+            "reflect",
+            "evolve",
+            "suggest",
+            "on_message",
+            "dispatch",
+            "record",
+            "assert",
+            "start",
+            "stop",
+            "send",
+            "is_enabled",
+            "is_connected",
+            "list",
+            "chat",
+            "embed",
+            "ui.action",
+            "call_seam",
+            "event",
+            "describe",
+            "shutdown",
+        ] {
+            assert_eq!(seam_timeout_ms_for_op(op), None, "`{op}` 未获证据进表，必须走默认预算");
+        }
+        // 表自身一致性：键不得重复（重复即后键失效，静默漂移）。
+        for (index, (left, _)) in SEAM_OP_TIMEOUT_OVERRIDES.iter().enumerate() {
+            for (right, _) in SEAM_OP_TIMEOUT_OVERRIDES.iter().skip(index + 1) {
+                assert_ne!(left, right, "覆盖表键重复：{left}");
+            }
+        }
+    }
+
+    /// 任务 #63（D1 边角）：握手预算是**独立的协议常量**，不复用接缝预算、
+    /// 更不进逐接缝覆盖表 —— 本用例钉的就是「不许拿 seam 表凑数」这条口径。
+    #[test]
+    fn handshake_budget_is_a_separate_constant_and_not_a_seam_table_entry() {
+        // 编译期钉关系：握手比接缝更该早收口（装载串行路径），且远小于命令预算。
+        const _: () = assert!(DEFAULT_HANDSHAKE_TIMEOUT_MS < DEFAULT_SEAM_TIMEOUT_MS);
+        const _: () = assert!(DEFAULT_HANDSHAKE_TIMEOUT_MS < DEFAULT_COMMAND_TIMEOUT_MS);
+        assert_eq!(DEFAULT_HANDSHAKE_TIMEOUT_MS, 10_000);
+        assert_eq!(
+            AXAGENT_PLUGIN_PROTO_VERSION, 1,
+            "握手预算是宿主侧等待语义，不改线格式：握手版本必须保持 1"
+        );
+
+        // `describe` **不得**进接缝覆盖表：握手不走接缝公共入口，进表既是假修复也会
+        // 碎掉「表只给 seam op」的不变量（与 seam_timeout_override_table_is_evidence_bounded
+        // 的名单互为佐证，这里单独点名是因为 #63 的诱惑正是「拿表包住 describe」）。
+        assert_eq!(
+            seam_timeout_ms_for_op(ops::DESCRIBE),
+            None,
+            "握手预算与接缝预算分通道：`describe` 不得出现在 seam 覆盖表里"
+        );
     }
 }

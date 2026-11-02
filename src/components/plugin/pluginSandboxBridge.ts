@@ -14,6 +14,13 @@
  * ① 命令集就是这两条，且 panel 与 page 用的是同一份（要加通道必须回来改这里）；
  * ② `pluginId` 由宿主绑定 —— iframe 传来的值一律丢弃，否则一个页面/面板能驱动另一个插件的 worker；
  * ③ 白名单外的命令当场拒绝，且**不发出 IPC**（不是"发了再被后端拒"）。
+ * 页面（asset bundle）粒度上这三条的独立证据在 `__tests__/pluginPageBridge.test.ts`：
+ * 那里从**第三方 bundle 发出的一帧**起步，逐帧打到本模块，再断言 IPC 有没有发生。
+ *
+ * ⚠ 本模块只做「宿主侧执行」，不持有命令名与字段名的**字面量**（任务 #46 的收敛）：
+ * 那两处住在 `@/sdk/pluginBridgeProtocol` 与 `@/sdk/sandboxFrameProtocol`，
+ * 因为走 asset 协议装载的插件自带产物要带上同一份契约，却不能依赖本模块（本模块 import
+ * `@/lib/invoke`，即 Tauri IPC）。同源由 `src/sdk/__tests__/sandboxFrameProtocol.test.ts` 机械校验。
  *
  * 刻意不做的事：**不按 page/panel 拆权限子集**。两条命令都是「动作回流到本插件自己的 worker」
  * 这一种形态（`plugin_ui_action` 走 UI 动作、`plugin_execute_command` 走命名命令），面板与页面
@@ -25,16 +32,25 @@
  */
 
 import { invoke } from "@/lib/invoke";
+import {
+  isPluginBridgeCommand,
+  omitHostBoundPluginId,
+  PLUGIN_BRIDGE_COMMANDS,
+  type PluginBridgeCommand,
+} from "@/sdk/pluginBridgeProtocol";
 import type { SkillHostApi, SkillPermissions } from "@/sdk/types";
 
 /**
  * 插件沙箱仅有的两条通道。**不含通用 invoke 白名单** —— 插件内容能要求的后端能力到此为止，
  * 想多一条都得回来改这里（并且同步 `__tests__/pluginSandboxBridge.test.ts` 的不变量①）。
+ *
+ * ⚠ 这里是从 `@/sdk/pluginBridgeProtocol` **再导出同一个数组对象**，不是第二份清单：
+ * 字面量住在 SDK 侧的唯一原因是依赖面 —— 第三方 bundle 不能 import 本模块（那会把
+ * `@/lib/invoke` 与 Tauri API 拖进插件产物），但它必须与宿主用同一条命令集。
+ * 「谁能动哪条命令」的答案仍然只有一份，改名/加名只能发生在协议模块里。
  */
-export const PLUGIN_BRIDGE_COMMANDS = ["plugin_ui_action", "plugin_execute_command"] as const;
-
-/** 白名单里的命令字面量类型；调用方用它约束自己转发时的命令名。 */
-export type PluginBridgeCommand = (typeof PLUGIN_BRIDGE_COMMANDS)[number];
+export { isPluginBridgeCommand, PLUGIN_BRIDGE_COMMANDS };
+export type { PluginBridgeCommand };
 
 /** 拒绝原因的构造函数（由宿主按粒度注入文案），入参是被拒绝的命令名。 */
 export type BridgeDeniedTranslator = (command: string) => string;
@@ -53,8 +69,8 @@ export function createPluginBridgeApi(
       if (!isPluginBridgeCommand(command)) {
         throw new Error(deny(command));
       }
-      const { pluginId: _ignored, ...rest } = args ?? {};
-      return invoke<T>(command, { ...rest, pluginId });
+      // 不变量②：剥掉 iframe 传来的 pluginId（剥的逻辑与 bundle 侧同一条函数），再注入宿主绑定的归属。
+      return invoke<T>(command, { ...omitHostBoundPluginId(args), pluginId });
     },
     // 沙箱不接宿主事件总线：`emit` 存在只是为了满足 SkillHostApi 形状。
     // 若将来要开事件，得先给它一条独立的白名单（events 面），不要顺手扩 commands。
@@ -68,9 +84,4 @@ export function createPluginBridgeApi(
  */
 export function createPluginBridgePermissions(): SkillPermissions {
   return { commands: [...PLUGIN_BRIDGE_COMMANDS] };
-}
-
-/** 命令是否在桥的白名单内（供宿主在装载前做前置校验；判定与本模块的清单同源）。 */
-export function isPluginBridgeCommand(command: string): command is PluginBridgeCommand {
-  return (PLUGIN_BRIDGE_COMMANDS as readonly string[]).includes(command);
 }

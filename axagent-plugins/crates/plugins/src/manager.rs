@@ -21,6 +21,7 @@ use tracing;
 use axagent_harness::{
     CapabilityPassportDto, EffectHandle, NpmRegistryService, parse_npm_package_spec,
 };
+use axagent_plugin_proto::{CommandFrame, DEFAULT_COMMAND_TIMEOUT_MS, error_codes};
 
 // 插件市场常量不再本地定义：由下方 `use crate::core::*;` 统一引入（core.rs 为唯一定义点）。
 // ⚠ 此处原先的本地定义会**静默遮蔽** glob 导入（编译器不报错），故必须删除才能真正复用同一来源。
@@ -33,7 +34,7 @@ use crate::sandbox::{
 };
 use crate::skill_installer::SkillInstaller;
 use crate::types::*;
-use crate::worker::{LoadedPlugin, PluginWorkerConfig};
+use crate::worker::{LoadedPlugin, PluginWorkerConfig, WorkerError};
 
 #[derive(Debug, Clone)]
 pub struct PluginManagerConfig {
@@ -256,6 +257,12 @@ pub enum PluginError {
     InvalidManifest(String),
     NotFound(String),
     CommandFailed(String),
+    /// 插件命令超过宿主等待上限（帧预算 + 收帧宽限）后被放弃等待（任务 #49）。
+    ///
+    /// 命令帧走**长驻 worker**：插件僵死不再级联卡死宿主调用线程。与 `CommandFailed`
+    /// 分开是必须的 —— 前者「没等到」（调用方可按预算重试），后者「跑出了错」
+    /// （重试大概率复现），前端对两者的处置相反。
+    CommandTimeout(String),
     /// 沙箱权限拦截：插件执行前 capability 检查未通过（路径越权 / 缺少
     /// `subprocess_execution` 权限等）。与 `CommandFailed` 区分以便上层
     /// 做权限引导而非通用错误处理。
@@ -297,6 +304,7 @@ impl Display for PluginError {
             Self::InvalidManifest(message)
             | Self::NotFound(message)
             | Self::CommandFailed(message)
+            | Self::CommandTimeout(message)
             | Self::PermissionDenied(message)
             | Self::IntegrityUnpinned(message)
             | Self::IntegrityMismatch(message)
@@ -624,9 +632,59 @@ impl PluginManager {
         self.plugin_registry()?.aggregated_tools()
     }
 
-    /// 执行插件声明的命名命令（阶段3-① 分发入口，`PLAN-plugin-gap-closure.md` §2）。
+    /// 执行插件声明的命名命令（阶段3-① 分发入口，`PLAN-plugin-gap-closure.md` §2；
+    /// 任务 #49 升级为**双通道**）。
     ///
-    /// 执行形状（以下为**实测事实**，改注释前本段写的是「按空白切分为程序 + 参数」，那是假的）：
+    /// ## 通道选择（本次改动的全部增量）
+    ///
+    /// 插件**已长驻 worker**（manifest 声明 `worker` 且启用成功，见 `loaded_workers`）时，
+    /// 命令改走**命令帧**派发（[`axagent_plugin_proto::ops::COMMAND`]）：复用启用时已 spawn 的
+    /// worker 进程，一次调用 = 一次帧往返，且带宿主强制的等待上限（预算 + 收帧宽限），
+    /// 插件僵死不再级联卡死宿主调用线程（D1）。**未长驻 worker 的插件维持原
+    /// spawn-on-call 通道，行为逐字节不变**。
+    ///
+    /// ## 回退面（任务 #73 S-4：穷举式，不给原则化措辞留想象空间）
+    ///
+    /// **只有下面三类**错误会退回通道二，且每一类都以「worker 从未执行过这条命令」为判据：
+    /// 1. worker 对命令帧回**能力拒绝** —— 错误码 [`error_codes::PLUGIN_UNKNOWN_OP`]
+    ///    （未实现 `ops::COMMAND` 的存量旧二进制，任务 #59 修 M1）；
+    /// 2. **worker 进程已不在** ⇒ 命令帧**未送达**（[`WorkerError::NotDelivered`]，
+    ///    任务 #73 修 M-1：进程已退出 / 管道已断 / 写帧失败）—— 这是契约
+    ///    「worker 中途异常退出也退回原通道」的落地，此前盘上没有这条路；
+    /// 3. （隐含）插件根本没长驻 worker —— `loaded_workers` 无表项，直接走通道二，
+    ///    与加本通道前的行为逐字节相同，不算「回退」。
+    ///
+    /// **明确不回退的也是三类**，方向都是「报错而不是重跑」：
+    /// a. **超时**（[`WorkerError::Timeout`]）：超时不等于取消，worker 可能仍在执行，
+    ///    重发 = 并发二次执行副作用；
+    /// b. **帧已送达之后**才坏（连接断裂、回执解不开、成功信封装 Fault、worker 自报命令级
+    ///    失败）：同样无法排除命令已被执行；
+    /// c. **drain 窗口拒绝** 与 **pluginId 绑定不符**：两者也是「派发前 + 零副作用」，
+    ///    但刻意**不**纳入回退 —— drain 说明本插件正在停用（回退等于绕过停机语义），
+    ///    绑定不符说明宿主自己的选通道逻辑有缺陷（回退会把它掩盖成「插件旧」）。
+    ///    原则化措辞「派发前被拒、无副作用 ⇒ 回退」**宽于实现**（审查稿 S-4），
+    ///    以本清单为准；反过来也不许为了对齐原则去放宽回退面。
+    ///
+    /// 回退**只发生一次**：回退臂是通道一的唯一出口，走出 `if let` 后直落通道二并返回，
+    /// 结构上不存在「帧 ⇄ spawn」回路（锁：三臂穷举 + e2e 的三个计数）。
+    ///
+    /// ## 两条通道共享的前置（判定顺序：先授权、后形状、再选通道，全部在派发之前）
+    ///
+    /// 授权门槛见 [`Self::check_command_gate`]；声明了 `inputSchema` 时再做最小形状校验
+    /// （[`Self::check_command_input_shape`]），未声明 ⇒ 不约束输入形状，与加字段前一致。
+    /// 命令帧路径的 pluginId 绑定 / drain 闸门 / 超时收口在
+    /// [`crate::worker::WorkerInvoker::execute_command`]（写帧前拒绝不合规请求）。
+    ///
+    /// ## 输出契约
+    ///
+    /// spawn 通道：stdout 原文（见下方「实测事实」）。
+    /// 命令帧通道：worker 成功回执的 `value` 转字符串 —— JSON 文本块原样返回，
+    /// 其余（对象/数组/数字等）序列化为 JSON 文本。**与 spawn 通道不同，这是新语义**
+    /// （worker 形态的命名命令此前不存在，无既有消费方）。
+    ///
+    /// ## spawn-on-call 通道的实测事实（未长驻 worker 时；改注释前本段写的是
+    /// 「按空白切分为程序 + 参数」，那是假的）
+    ///
     /// manifest 的 `commands[].command` **整团作为程序名**交给 `Command::new`，
     /// `args` 恒为空 `Vec` —— 没有任何按空白切分，也不经 shell 解析。
     /// 声明里写成 `prog a b` 时，Windows / POSIX 都会把整个字符串当作可执行文件名找，
@@ -645,17 +703,34 @@ impl PluginManager {
     ///
     /// 所以本函数的权限档位语义是**宿主侧授权门槛（authorization gate）**，
     /// 不是执行隔离（containment）：档位只决定「宿主是否允许这个插件把这条命令跑起来」，
-    /// 跑起来之后能干什么是子进程自己的事。输入 JSON 经 stdin 与 `CLAWD_TOOL_INPUT` 注入，
-    /// stdout 原样返回。
-    ///
-    /// 判定顺序是先授权、后形状，两者都在 spawn 之前。授权门槛见
-    /// [`Self::check_command_gate`]；声明了 `inputSchema` 时再做最小形状校验
-    /// （[`Self::check_command_input_shape`]），未声明 ⇒ 不约束输入形状，与加字段前一致。
+    /// 跑起来之后能干什么是子进程/worker 自己的事。spawn 通道输入 JSON 经 stdin 与
+    /// `CLAWD_TOOL_INPUT` 注入；命令帧通道输入装在 [`CommandFrame::input`] 里经帧注入。
     pub fn execute_plugin_command(
         &self,
         plugin_id: &str,
         command_name: &str,
         input: &Value,
+    ) -> Result<String, PluginError> {
+        self.execute_plugin_command_with_timeout(
+            plugin_id,
+            command_name,
+            input,
+            Duration::from_millis(DEFAULT_COMMAND_TIMEOUT_MS),
+        )
+    }
+
+    /// [`Self::execute_plugin_command`] 的显式预算变体（任务 #49）。
+    ///
+    /// `timeout` 只作用于**命令帧通道**（worker 执行预算随帧下发，宿主等待 =
+    /// 预算 + 1s 收帧宽限，见 `worker.rs::COMMAND_FRAME_GRACE_MS`）；
+    /// spawn-on-call 通道维持既存语义（**无超时**，进程自己跑完才返回）—— 给旧通道
+    /// 补超时属于改造既存行为，不在本批范围，已在交接报告里列为遗留项。
+    pub fn execute_plugin_command_with_timeout(
+        &self,
+        plugin_id: &str,
+        command_name: &str,
+        input: &Value,
+        timeout: Duration,
     ) -> Result<String, PluginError> {
         let registry = self.plugin_registry()?;
         let plugin = registry
@@ -675,6 +750,62 @@ impl PluginManager {
         if let Some(schema) = &entry.input_schema {
             Self::check_command_input_shape(&entry.name, schema, input)?;
         }
+        // ── 通道一：长驻 worker（命令帧，任务 #49 新增） ──
+        // 绑定语义：`plugin_id` 用注册表权威键（上面查到的就是它），worker 侧还会拿
+        // 自身身份二次校验（`execute_command` 的防线②），双向都对不上才放行不了。
+        if let Some(loaded) = self.loaded_workers.get(plugin_id) {
+            let frame = CommandFrame::new(
+                plugin_id,
+                entry.name.clone(),
+                input.clone(),
+                timeout.as_millis().min(u64::MAX as u128) as u64,
+            );
+            match loaded.execute_command(&frame) {
+                Ok(reply) => return Ok(command_value_to_text(&reply.value)),
+                // 只有「worker 从未执行过这条命令」的两类错误才回退（穷举见本函数文档的
+                // 「回退面」三类 + 「明确不回退」三类）：① 旧 worker 对命令帧的能力拒绝
+                // `PLUGIN_UNKNOWN_OP`；② worker 进程已不在 ⇒ 帧**未送达**（`NotDelivered`，
+                // 任务 #73 修 M-1 —— 此前契约文档承诺了这条但盘上没有，命令凭空失败）。
+                // 其余（超时 / 帧送达后断裂 / drain 拒绝 / 绑定不符 / worker 自报命令级失败 /
+                // 脏连接上的立即拒绝）一律原样上抛，**不回退**。
+                Err(error) if !command_error_allows_fallback(&error) => {
+                    return Err(command_worker_error_to_plugin_error(error));
+                },
+                // 回退只发生一次：本分支是通道一的**唯一**回退出口，走出 `if let` 后一路走
+                // spawn 并直接 return，既不会再回到通道一（不存在「帧失败 ⇒ spawn ⇒ 又帧」的
+                // 双跑循环），也不会把回退后的 spawn 失败再喂回命令帧。
+                Err(error) => {
+                    // 为什么敢重发这条命令：两类命中的「零副作用」依据不同，分开写 ——
+                    // 判据合并成一个 bool 就是审查稿 M-1/M-2 的共同根。
+                    // ① `PLUGIN_UNKNOWN_OP` 来自 worker 的 handler 兜底分支（plugin-proto
+                    //    handler 模板），即 worker **还没进入任何命令逻辑**就回了能力拒绝；
+                    // ② [`WorkerError::NotDelivered`] 连帧都没出去（进程已退出 / 管道已断 /
+                    //    写帧失败）⇒ 对端不可能执行过任何东西。
+                    // 命令**已开始执行**之后的失败一律带别的码位或是 `Transport`，不会落进
+                    // 本分支。判据读**结构化 `code` 字段**（任务 #73 S-1；旧的「取 `reason`
+                    // 文本首段」已删，不留双判据）⇒ 任何人改错误文案都不会再静默关掉回退。
+                    // 锁住该边界的用例：`unknown_op_in_the_message_text_does_not_fall_back`
+                    // （单元，反向锁）+ `e2e_legacy_worker_falls_back_to_spawn_once`（端到端
+                    // 三标计数）+ `e2e_dead_worker_command_falls_back_to_spawn_once`（M-1）。
+                    let fallback_reason = if command_error_is_unknown_op(&error) {
+                        "未实现命令帧 op"
+                    } else {
+                        "进程已不在，命令帧未送达"
+                    };
+                    tracing::warn!(
+                        plugin_id = %plugin_id,
+                        // 结构化码位：能力拒绝时是 `PLUGIN_UNKNOWN_OP`；进程不在时没有协议码
+                        // ⇒ 空串。本字段是判据的输入本体（S-1），不是文案的副产品。
+                        error_code = %error.error_code().unwrap_or_default(),
+                        "插件 `{plugin_id}` 的长驻 worker {fallback_reason}，命名命令 `{}` 回退到 \
+                         spawn-on-call 通道执行；worker 错误原文：{}",
+                        entry.name,
+                        error,
+                    );
+                },
+            }
+        }
+        // ── 通道二：spawn-on-call（未长驻 worker 的既存路径，逐字保留） ──
         let metadata = plugin.metadata();
         // 相对路径声明必须在这里解析成绝对路径，不能原样交给 `Command::new`：
         // 可执行文件查找发生在**宿主进程的 cwd**，子进程的 `current_dir` 不参与
@@ -758,7 +889,7 @@ impl PluginManager {
     ) -> Result<(), PluginError> {
         let reject = |detail: String| {
             PluginError::CommandFailed(format!(
-                "插件命令 `{command_name}` 输入校验未通过：{detail}（未启动子进程）"
+                "插件命令 `{command_name}` 输入校验未通过：{detail}（未启动子进程、未派发命令帧）"
             ))
         };
         let Some(input_object) = input.as_object() else {
@@ -979,6 +1110,17 @@ impl PluginManager {
     #[must_use]
     pub fn plugin_invoker(&self, plugin_id: &str) -> Option<Arc<dyn axagent_harness::SeamInvoker>> {
         self.loaded_workers.get(plugin_id).map(LoadedPlugin::invoker)
+    }
+
+    /// 该插件当前是否有一个**活着**的长驻 worker（任务 #73 M-1 判据的对外投影）。
+    ///
+    /// `false` 的三种形态：未声明 worker / 未启用成功（`loaded_workers` 无表项）、
+    /// 表项还在但子进程已退出或管道已断（正是 M-1 要回退的那种状态）。
+    /// 本方法**不改状态**，判据与 `execute_command` 的存活预检逐字同源
+    /// （都走 [`LoadedPlugin::worker_is_running`]），不会出现「探针说活着、派发说死了」。
+    #[must_use]
+    pub fn plugin_worker_is_running(&self, plugin_id: &str) -> bool {
+        self.loaded_workers.get(plugin_id).is_some_and(LoadedPlugin::worker_is_running)
     }
 
     /// 把插件声明的能力注册进能力注册表（P3 外部插件注册）。
@@ -2395,6 +2537,76 @@ fn build_manifest_tools(
     }
 
     validated
+}
+
+/// 命令帧通道错误 → 宿主错误的归类（任务 #49）。
+///
+/// 只分两档：[`WorkerError::Timeout`]（等待被放弃，调用方可按预算重试）落
+/// [`PluginError::CommandTimeout`]；其余（传输断裂、worker 错误帧自带协议码、回执形状
+/// 非法等）统一 [`PluginError::CommandFailed`] —— WorkerError 的 Display 原文保留
+/// `code: message` 前缀（`exchange_with_timeout` 的既有格式），上层据此归类错误码。
+fn command_worker_error_to_plugin_error(error: WorkerError) -> PluginError {
+    match error {
+        WorkerError::Timeout { .. } => PluginError::CommandTimeout(error.to_string()),
+        other => PluginError::CommandFailed(other.to_string()),
+    }
+}
+
+/// 命令帧错误是否为「worker **未实现** `ops::COMMAND`」的派发前能力拒绝（任务 #59 修 M1）。
+///
+/// 判据**只读结构化错误码字段** [`WorkerError::error_code`]（任务 #73 S-1）——
+/// 旧写法取 `WorkerError::Transport.reason` 文本首个 `:` 之前的段，任何人在信封成形处
+/// 加前缀 / 换分隔符 / 把码挪到尾部都会让首段变成中文句子 ⇒ **回退整条静默消失**
+/// （= M1 原病复发），而唯一会红的锁在子进程门控内、CI 恒 SKIP（审查稿 A2.3 / S-2）。
+/// 文本判据已删除，不留双判据。
+fn command_error_is_unknown_op(error: &WorkerError) -> bool {
+    error.error_code() == Some(error_codes::PLUGIN_UNKNOWN_OP)
+}
+
+/// 命令帧错误是否为「**worker 进程已不在** ⇒ 帧从未送达」（任务 #73 修 M-1）。
+///
+/// 兑现 [`PluginManager::execute_plugin_command`] 契约里「worker 中途异常退出也退回原通道」
+/// 那半句 —— 此前盘上没有这条路：`loaded_workers` 的表项只在 enable/unload 时增删，
+/// 子进程自己死了表项还在，命令走通道一拿到 transport 错误、不命中 `UNKNOWN_OP` ⇒
+/// **凭空失败**（= M1 换了触发条件）。
+///
+/// ⚠ 与 [`command_error_is_seam_suspect`] **分开判**（派单硬约束）：
+/// 「进程不在」= 帧没出去 = 零副作用 = **回退**；
+/// 「进程在但曾超时」= 连接被实证装死 = **拒绝**（不回退，等显式 unload/disable 复位）。
+/// 把两者塞进同一个 bool 正是 M-1/M-2/M-3 的共同根（PLAN §26.3）。
+fn command_error_is_worker_gone(error: &WorkerError) -> bool {
+    matches!(error, WorkerError::NotDelivered { .. })
+}
+
+/// 该次失败是否出自「接缝脏闸」（进程还活着，只是曾被实证装死）。
+///
+/// 单列出来是为了**负向**锁定：`command_error_allows_fallback` 必须对它返回 `false`，
+/// 否则「脏连接上的命令」会被回退成 spawn，等于把 D1 的止血又换回「两条通道各等一轮」。
+/// 生产路径不读它（拒绝发生在 `worker.rs::execute_command` 里，压根不会走到判据），
+/// 故只在测试构建里编译 —— 不加 `cfg(test)` 会成为 dead_code。
+#[cfg(test)]
+fn command_error_is_seam_suspect(error: &WorkerError) -> bool {
+    error.error_code() == Some(error_codes::SEAM_PROVIDER_UNAVAILABLE)
+}
+
+/// 命名命令能否从通道一回退到通道二（任务 #73 收口后的**唯一**回退判据入口）。
+///
+/// = 「旧 worker 明确回了能力拒绝」∪「worker 进程已不在、帧未送达」，两条各自有独立的
+/// 零副作用依据（见上面两个函数），其余一律不回退。
+fn command_error_allows_fallback(error: &WorkerError) -> bool {
+    command_error_is_unknown_op(error) || command_error_is_worker_gone(error)
+}
+
+/// 命令回执 `value` 的字符串输出口径（与 spawn 通道的 stdout 原文区分开）。
+///
+/// JSON 文本块（worker 侧把「纯文本输出」用字符串值承载时）原样返回，其余一律
+/// 序列化为 JSON 文本。序列化对来自帧内的 [`Value`] 不会失败（无环、键均为字符串），
+/// 兜底分支仅防御性存在。
+fn command_value_to_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        other => serde_json::to_string(other).unwrap_or_else(|_| "null".to_string()),
+    }
 }
 
 /// 命令声明的 `requiredPermission` 落定值。
@@ -4657,5 +4869,138 @@ mod tests {
     /// 取 JSON object 的键并排序（`serde_json::Map` 默认按序，显式排序以免 feature 变化）。
     fn sorted_keys(value: &Value) -> Vec<&str> {
         value.as_object().expect("应是 JSON object").keys().map(String::as_str).collect()
+    }
+
+    // ==== 任务 #59 + #73：命名命令回退判据（S-1 起判据读**结构化码字段**）====
+
+    /// 命令帧在宿主侧成形的错误。
+    ///
+    /// `reason` 与 `code` 的关系逐字照 `worker.rs::transport_error_with_code`：带码时
+    /// `reason` 形如 `{code}: {message}`，纯 I/O 断裂没有码 ⇒ `reason` 是中文句子本体。
+    /// 任务 #73 S-1 之后判据**只读 `code`**，`reason` 的形态不再参与判定。
+    fn command_transport(code: Option<&str>, message: &str) -> WorkerError {
+        WorkerError::Transport {
+            plugin_id: "legacy@external".to_string(),
+            reason: match code {
+                Some(code) => format!("{code}: {message}"),
+                None => message.to_string(),
+            },
+            code: code.map(str::to_string),
+        }
+    }
+
+    /// 正例：错误码为 `PLUGIN_UNKNOWN_OP` ⇒ 允许回退到 spawn-on-call（存量旧 worker 不回归）。
+    #[test]
+    fn unknown_op_error_code_allows_legacy_fallback() {
+        assert!(
+            command_error_allows_fallback(&command_transport(
+                Some(error_codes::PLUGIN_UNKNOWN_OP),
+                "未知操作：command"
+            )),
+            "旧 worker 的派发前能力拒绝必须触发回退"
+        );
+        // 只有裸码、没有说明文本同样命中：判据读字段，与 `reason` 的拼接形态无关。
+        assert!(command_error_allows_fallback(&command_transport(
+            Some(error_codes::PLUGIN_UNKNOWN_OP),
+            ""
+        )));
+        // 没有码的错误（纯 I/O）不参与本判据。
+        assert!(!command_error_allows_fallback(&command_transport(None, "")));
+        assert!(!command_error_allows_fallback(&command_transport(
+            None,
+            "worker 连接已关闭，未收到配对响应"
+        )));
+    }
+
+    /// S-1 的核心锁：**改文案不会静默关掉回退**。
+    ///
+    /// 旧判据取 `reason` 首个 `:` 之前的段，在信封成形处加任何前缀（本地化、插件名、
+    /// 「通道错误：」）都会让首段变成中文句子 ⇒ 回退整条静默消失（M1 原病复发，且不红不响）。
+    /// 现在三种漂移形态都必须照旧回退 —— 这条断言就是「读字段」这句话的可执行版本。
+    #[test]
+    fn reason_text_drift_does_not_disable_the_fallback() {
+        let unknown_op = error_codes::PLUGIN_UNKNOWN_OP;
+        for reason_prefix in ["", "通道错误：", "与插件 `legacy@external` 的通道错误："] {
+            let error = WorkerError::Transport {
+                plugin_id: "legacy@external".to_string(),
+                reason: format!("{reason_prefix}{unknown_op}: 未知操作：command"),
+                code: Some(unknown_op.to_string()),
+            };
+            assert!(
+                command_error_allows_fallback(&error),
+                "文案加了前缀 `{reason_prefix}` 后回退不得失效（判据读字段不读文本）"
+            );
+        }
+        // 反向：码位不是 UNKNOWN_OP 时，**即便整串就是旧的可命中形态**也不回退 ——
+        // 证明文本已从判据里彻底退出，不存在「字段 + 文本」双判据。
+        let text_only = WorkerError::Transport {
+            plugin_id: "legacy@external".to_string(),
+            reason: format!("{unknown_op}: 未知操作：command"),
+            code: Some(error_codes::PLUGIN_COMMAND_FAILED.to_string()),
+        };
+        assert!(
+            !command_error_allows_fallback(&text_only),
+            "码位是命令级失败 ⇒ 文本再像也不回退（否则二次执行已跑过的命令）"
+        );
+    }
+
+    /// 反例（守护「不回退已执行的命令」）：`PLUGIN_UNKNOWN_OP` 只出现在**说明文本**里，
+    /// 错误码是命令级 ⇒ 不回退。命令进了 worker 逻辑之后才失败时，worker 可能把下游插件
+    /// `call_seam` 的错误原文抄进 message，此时按子串匹配回退等于**二次执行**同一条命令。
+    #[test]
+    fn unknown_op_in_the_message_text_does_not_fall_back() {
+        assert!(
+            !command_error_allows_fallback(&command_transport(
+                Some(error_codes::PLUGIN_COMMAND_FAILED),
+                "下游插件回了 PLUGIN_UNKNOWN_OP，本命令已执行一半"
+            )),
+            "错误码不是 PLUGIN_UNKNOWN_OP 时，即便文本含该串也不得回退"
+        );
+        // 命令名恰好叫 PLUGIN_UNKNOWN_OP 之类的干扰形态同样不回退。
+        assert!(!command_error_allows_fallback(&command_transport(
+            Some(error_codes::PLUGIN_COMMAND_UNKNOWN),
+            "没有该命令"
+        )));
+    }
+
+    /// M-1 与 M-2/S-3 的判据**必须分开**（派单硬约束）：
+    /// 「worker 进程不在」⇒ 回退；「worker 在、但曾被实证装死」⇒ 拒绝且等显式复位。
+    /// 两者塞进同一个 bool 就是 M-1/M-2/M-3 的共同根（PLAN §26.3）。
+    #[test]
+    fn worker_gone_falls_back_but_suspect_rejection_does_not() {
+        // ① 帧未送达（进程退出 / 管道已断 / 写失败）⇒ 零副作用 ⇒ 回退。
+        let gone = WorkerError::NotDelivered {
+            plugin_id: "dead@external".to_string(),
+            op: axagent_plugin_proto::ops::COMMAND.to_string(),
+            reason: "worker 进程已退出（exit code: 0xc0000005）".to_string(),
+        };
+        assert!(command_error_allows_fallback(&gone), "worker 已死必须退回原通道（M-1 契约）");
+        assert!(command_error_is_worker_gone(&gone));
+        assert!(!command_error_is_unknown_op(&gone), "两类回退理由各走各的判据，不许互相顶");
+
+        // ② 脏闸拒绝（任务 #73 S-3 在 `execute_command` 里读 `seam_suspect` 后报的错）⇒ 不回退。
+        let suspect = command_transport(Some(error_codes::SEAM_PROVIDER_UNAVAILABLE), "连接可疑");
+        assert!(
+            !command_error_allows_fallback(&suspect),
+            "进程还在、只是曾被实证装死 ⇒ 拒绝，不能靠回退把预算再付一遍"
+        );
+        assert!(command_error_is_seam_suspect(&suspect), "该错误须被识别为脏闸拒绝（负向锁）");
+
+        // ③ 超时同样不回退（超时不等于取消，worker 可能仍在跑）。
+        let timeout = WorkerError::Timeout {
+            plugin_id: "legacy@external".to_string(),
+            op: "command".to_string(),
+            timeout_ms: 30_000,
+        };
+        assert!(!command_error_allows_fallback(&timeout), "超时不得回退（可能仍在执行）");
+
+        // ④ 非命令帧通道的错误不参与回退（形态再像也不命中：判据只认 Transport 的码字段）。
+        assert!(
+            !command_error_allows_fallback(&WorkerError::Handshake {
+                plugin_id: "legacy@external".to_string(),
+                reason: "PLUGIN_UNKNOWN_OP: 未知操作：describe".to_string(),
+            }),
+            "非命令帧通道错误不参与回退"
+        );
     }
 }

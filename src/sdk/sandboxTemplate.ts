@@ -9,12 +9,27 @@
  * 2. ctx 对象（api, ui, store）
  * 3. Skill 组件代码占位
  * 4. 全局错误上报
+ *
+ * ⚠ 协议词汇不在本文件：生成的运行时是**不能 import 的那一侧**（内联在 `srcdoc` 里），
+ * 所以协议表由 `SANDBOX_FRAME_PROTOCOL_TABLE` 序列化后注入，脚本内只允许引用 `AX_PROTOCOL.*`。
+ * 这条约束由 `src/sdk/__tests__/sandboxFrameProtocol.test.ts` 机械校验（本文件出现任何协议
+ * 字面量即红；渲染结果内嵌的表与协议表深相等即绿）。
+ * 走 asset 协议装载的第三方 bundle 用的是另一份客户端运行时（`pluginClientBridge.ts`），
+ * 它 import 同一张表 —— 两条投递路径、一份协议，不存在第二套桥。
+ *
+ * ⚠ 入向**身份判据**同样不在本文件写第二份：宿主侧用的是
+ * `sandboxFrameProtocol.ts` 的 `isFrameFromSandboxSource(event, 本桥的 contentWindow)`，
+ * 沙箱这一侧的期望来源是宿主文档 = `window.parent`。这段不能 import 的运行时靠
+ * **原样内联该函数的实现**（`Function.prototype.toString()` 取的就是协议模块里那一条）
+ * 来保证「两侧同一个谓词、同一套词汇」—— 任务 #72 的落点。判据本体（为什么 origin 在这里
+ * 分不出「谁的帧」）只写在 `SANDBOX_MESSAGE_TARGET_ORIGIN` 与 `isFrameFromSandboxSource` 两处。
  */
 
+import { isFrameFromSandboxSource, SANDBOX_FRAME_PROTOCOL_TABLE, SANDBOX_RPC_TIMEOUT_MS } from "./sandboxFrameProtocol";
 import type { SkillPermissions } from "./types";
 
-/** RPC 调用默认超时（毫秒） */
-export const DEFAULT_RPC_TIMEOUT_MS = 15000;
+/** RPC 调用默认超时（毫秒）—— 取自帧协议单一来源，此处保留历史名供既有调用面使用。 */
+export const DEFAULT_RPC_TIMEOUT_MS = SANDBOX_RPC_TIMEOUT_MS;
 
 export interface SandboxTemplateOptions {
   skillName: string;
@@ -123,17 +138,54 @@ ${runtimeScript}
  * - 双向 RPC：skill→host 和 host→skill（callSkillMethod）
  * - 宿主消息监听（host:event, host:lifecycle, rpc:request）
  * - 全局错误上报
+ *
+ * ⚠ 这段字符串是「第三方插件作者看不到、也改不动」的那份客户端运行时（panel 粒度）。
+ * 里面**一个协议字面量都不许出现**：帧类型、方法名、字段名全部来自注入的 `AX_PROTOCOL` 表，
+ * 表来自 `sandboxFrameProtocol.ts`。要改协议，改那张表，然后 panel 与 page 两条通道一起变。
  */
 function generateRuntimeScript(rpcTimeoutMs: number): string {
+  // 注入整张协议表（编译期值，运行期只读）。JSON.stringify 保证与来源逐字一致，
+  // 不需要在这里再写一遍任何一项。
+  const protocolJson = JSON.stringify(SANDBOX_FRAME_PROTOCOL_TABLE);
+
+  // 入向身份判据：把协议模块里**那一条**函数的实现原样内联（任务 #72）。
+  // 为什么用 toString 而不是在模板里再写一次 `event.source === window.parent`：
+  // 写第二次就不是「同一个谓词」了 —— 宿主侧那条函数改了边界（例如再补一条「空期望一律拒」的
+  // 变体），模板这一份不会跟着红，正是审查应修 4 要消灭的形态。
+  // ⚠ 代价（已知并锁定）：该函数必须是**自包含**的（不引用模块作用域的常量），否则内联体在
+  // 沙箱文档里 ReferenceError。这条由门 E 的行为用例兜住 —— 它真跑产物文本，一跑就红。
+  const sourceGuardSource = isFrameFromSandboxSource.toString();
+
   return `
 // ── AxAgent Skill Sandbox Runtime ──────────────────────────────────
 (function() {
   "use strict";
 
+  // 协议表（唯一来源：宿主 src/sdk/sandboxFrameProtocol.ts，生成本文档时注入）。
+  // t = 帧类型 / m = RPC 方法名 / f = 帧本体字段 / a = 方法参数字段。
+  var AX_PROTOCOL = ${protocolJson};
+  var T = AX_PROTOCOL.t;
+  var M = AX_PROTOCOL.m;
+  var F = AX_PROTOCOL.f;
+  var A = AX_PROTOCOL.a;
+
+  // 入向身份判据（唯一来源：宿主 src/sdk/sandboxFrameProtocol.ts 的 isFrameFromSandboxSource，
+  // 生成本文档时整条函数原样内联）。沙箱这一侧的期望来源 = 宿主文档 = window.parent。
+  // 与宿主接收侧共用同一条谓词，也共用它的边界语义：**期望来源为空 ⇒ 一帧都不认**。
+  var AX_IS_FRAME_FROM_SOURCE = ${sourceGuardSource};
+  var HOST_SOURCE_WINDOW = window.parent;
+
+  /** 这一帧是不是宿主文档发来的（不是 ⇒ 不执行、不回包）。 */
+  function axIsFromHost(event) {
+    return AX_IS_FRAME_FROM_SOURCE(event, HOST_SOURCE_WINDOW);
+  }
+
   var SKILL_NAME = ${JSON.stringify("__SKILL_NAME__")};
   var SKILL_ID = ${JSON.stringify("__SKILL_ID__")};
   var INITIAL_PROPS = __INITIAL_PROPS__;
   var PERMISSIONS = __PERMISSIONS__;
+  // 超时是**按实例**传入的（generateSandboxHtml 的 rpcTimeoutMs，缺省取协议的 SANDBOX_RPC_TIMEOUT_MS），
+  // 所以协议表里没有 timeoutMs —— 表里再放一份就是第二个答案。
   var RPC_TIMEOUT_MS = ${rpcTimeoutMs};
 
   // ── 注册的 RPC 方法（供宿主通过 callSkillMethod 调用） ──
@@ -147,36 +199,70 @@ function generateRuntimeScript(rpcTimeoutMs: number): string {
   var callIdCounter = 0;
 
   function isValidOrigin(origin) {
-    // Tauri WebView sandbox iframe 中 window.location.origin 为 "null"
-    // 此时放宽 origin 检查，接受宿主发来的任何 origin
-    // 纵深防御：sandbox 属性 + CSP + fetch/XHR 禁用已提供多层保护
+    // ⚠ 这条**不是**身份判据：opaque 沙箱文档的 location.origin 恒为字符串 "null"，此处一律放行；
+    // 而应用内任何 iframe 的 origin 也是同一个 "null" ⇒ origin 分不出「这帧是谁发的」。
+    // 身份判据是上面那条 axIsFromHost（任务 #72：与宿主接收侧同一个谓词、同一套词汇）。
+    // origin 只在文档非 opaque 时多留一层，纵深防御另有 sandbox 属性 + CSP + fetch/XHR 禁用。
     if (TARGET_ORIGIN === "null") {
       return true;
     }
     return origin === TARGET_ORIGIN;
   }
 
+  /** 组装 { [字段名]: 值 } 的键值对表（生成的 ES5 风格代码里代替计算属性名）。 */
+  function axObj(pairs) {
+    var o = {};
+    for (var i = 0; i < pairs.length; i++) { o[pairs[i][0]] = pairs[i][1]; }
+    return o;
+  }
+
+  /** 组装一帧：判别字段 + 若干字段对。字段名一律取自协议表。 */
+  function axFrame(typeValue, pairs) {
+    var frame = axObj(pairs || []);
+    frame[F.type] = typeValue;
+    return frame;
+  }
+
+  /**
+   * 失败判定：**唯一判据**是协议表的 failureErrorType（= 宿主 src/sdk/sandboxFrameProtocol.ts
+   * 的 SANDBOX_RPC_FAILURE_ERROR_TYPE）。「error 是不是那个类型」而不是「error 真不真」——
+   * 空串是失败，与宿主 callSkillMethod / bundle 客户端两通道同口径。
+   * 这里不许写 typeof 的比较值本身，也不许退回收成「只看 error 真值」那种判定。
+   * ⚠ 本注释在生成的模板字符串**内部**，所以整段不许出现反引号。
+   */
+  function axIsFailure(msg) {
+    return typeof msg[F.error] === AX_PROTOCOL.failureErrorType;
+  }
+
+  /** 交给宿主。targetOrigin 用协议表的值：沙箱文档是 opaque origin，自身 origin 打不进宿主。 */
+  function axSend(frame) {
+    window.parent.postMessage(frame, AX_PROTOCOL.origin);
+  }
+
   function callHost(method, args) {
     return new Promise(function(resolve, reject) {
-      var callId = "skill_" + (++callIdCounter) + "_" + Date.now();
+      var callId = AX_PROTOCOL.callIdPrefix.sandbox + (++callIdCounter) + "_" + Date.now();
       var timer = setTimeout(function() {
         pendingCalls.delete(callId);
         reject(new Error('RPC call "' + method + '" timed out'));
       }, RPC_TIMEOUT_MS);
 
       var responseHandler = function(event) {
+        // 身份先于内容（#72，与宿主接收侧同一条谓词）：应用内任何别的文档都能对本沙箱 window
+        // 投一帧带猜得到的 callId 的 rpc:response，把在途 Promise 提前 settle 掉。
+        if (!axIsFromHost(event)) { return; }
         if (!isValidOrigin(event.origin)) { return; }
         var msg = event.data;
-        if (msg && msg.type === "rpc:response" && msg.callId === callId) {
+        if (msg && msg[F.type] === T.response && msg[F.callId] === callId) {
           window.removeEventListener("message", responseHandler);
           var pending = pendingCalls.get(callId);
           if (!pending) { return; }
           clearTimeout(pending.timer);
           pendingCalls.delete(callId);
-          if (msg.error) {
-            pending.reject(new Error(msg.error));
+          if (axIsFailure(msg)) {
+            pending.reject(new Error(msg[F.error]));
           } else {
-            pending.resolve(msg.result);
+            pending.resolve(msg[F.result]);
           }
         }
       };
@@ -185,12 +271,7 @@ function generateRuntimeScript(rpcTimeoutMs: number): string {
       pendingCalls.set(callId, { resolve: resolve, reject: reject, timer: timer });
 
       try {
-        window.parent.postMessage({
-          type: "rpc:request",
-          callId: callId,
-          method: method,
-          args: args
-        }, TARGET_ORIGIN);
+        axSend(axFrame(T.request, [[F.callId, callId], [F.method, method], [F.args, args]]));
       } catch (e) {
         window.removeEventListener("message", responseHandler);
         clearTimeout(timer);
@@ -202,12 +283,7 @@ function generateRuntimeScript(rpcTimeoutMs: number): string {
 
   function sendResponse(callId, result, error) {
     try {
-      window.parent.postMessage({
-        type: "rpc:response",
-        callId: callId,
-        result: result,
-        error: error
-      }, TARGET_ORIGIN);
+      axSend(axFrame(T.response, [[F.callId, callId], [F.result, result], [F.error, error]]));
     } catch(e) { /* postMessage to parent may fail if iframe is detached */ }
   }
 
@@ -220,25 +296,25 @@ function generateRuntimeScript(rpcTimeoutMs: number): string {
 
     api: Object.freeze({
       invoke: function(command, args) {
-        return callHost("api.invoke", { command: command, args: args });
+        return callHost(M.apiInvoke, axObj([[A.command, command], [A.args, args]]));
       },
       emit: function(event, payload) {
-        return callHost("api.emit", { event: event, payload: payload });
+        return callHost(M.apiEmit, axObj([[A.event, event], [A.payload, payload]]));
       }
     }),
 
     ui: Object.freeze({
       navigate: function(path) {
-        return callHost("ui.navigate", { path: path });
+        return callHost(M.uiNavigate, axObj([[A.path, path]]));
       },
       notify: function(message, type) {
-        return callHost("ui.notify", { message: message, type: type || "info" });
+        return callHost(M.uiNotify, axObj([[A.message, message], [A.type, type || "info"]]));
       },
       getTheme: function() {
-        return callHost("ui.getTheme");
+        return callHost(M.uiGetTheme);
       },
       getLocale: function() {
-        return callHost("ui.getLocale");
+        return callHost(M.uiGetLocale);
       },
       onThemeChange: function(callback) {
         if (typeof callback === "function") {
@@ -249,10 +325,10 @@ function generateRuntimeScript(rpcTimeoutMs: number): string {
 
     store: Object.freeze({
       read: function(storeName, selector) {
-        return callHost("store.read", { storeName: storeName, selector: selector });
+        return callHost(M.storeRead, axObj([[A.storeName, storeName], [A.selector, selector]]));
       },
       write: function(storeName, value, selector) {
-        return callHost("store.write", { storeName: storeName, value: value, selector: selector });
+        return callHost(M.storeWrite, axObj([[A.storeName, storeName], [A.value, value], [A.selector, selector]]));
       }
     })
   });
@@ -268,83 +344,79 @@ function generateRuntimeScript(rpcTimeoutMs: number): string {
   // ── 宿主消息监听 ──
 
   window.addEventListener("message", function(event) {
+    // 身份先于内容（#72）：来源不是宿主文档 ⇒ 事件帧 / 生命周期帧 / 请求帧一律不执行、不回包。
+    if (!axIsFromHost(event)) { return; }
     if (!isValidOrigin(event.origin)) { return; }
     var msg = event.data;
-    if (!msg || typeof msg.type !== "string") { return; }
+    if (!msg || typeof msg[F.type] !== "string") { return; }
+    var frameType = msg[F.type];
 
-    switch (msg.type) {
-      case "host:event":
-        if (window.dispatchEvent) {
-          window.dispatchEvent(new CustomEvent("ax:" + msg.event, { detail: msg.payload }));
+    if (frameType === T.hostEvent) {
+      var eventName = msg[F.event];
+      var eventPayload = msg[F.payload];
+      if (window.dispatchEvent) {
+        window.dispatchEvent(new CustomEvent("ax:" + eventName, { detail: eventPayload }));
+      }
+      if (eventName === "theme-change" && eventPayload && eventPayload.theme) {
+        document.documentElement.setAttribute("data-theme", eventPayload.theme);
+        for (var ti = 0; ti < themeChangeCallbacks.length; ti++) {
+          try { themeChangeCallbacks[ti](eventPayload.theme); } catch(e) { try { axSend(axFrame(T.contentError, [[F.error, "Theme callback error: " + String(e)]])); } catch(e2) {} }
         }
-        if (msg.event === "theme-change" && msg.payload && msg.payload.theme) {
-          document.documentElement.setAttribute("data-theme", msg.payload.theme);
-          for (var ti = 0; ti < themeChangeCallbacks.length; ti++) {
-            try { themeChangeCallbacks[ti](msg.payload.theme); } catch(e) { try { window.parent.postMessage({ type: "skill:error", error: "Theme callback error: " + String(e) }, TARGET_ORIGIN); } catch(e2) {} }
-          }
+      }
+    } else if (frameType === T.hostLifecycle) {
+      if (msg[F.phase] === "mount" && typeof window.onSkillMount === "function") {
+        window.onSkillMount(window.ctx, msg[F.props] || {});
+      } else if (msg[F.phase] === "unmount" && typeof window.onSkillUnmount === "function") {
+        window.onSkillUnmount();
+      }
+    } else if (frameType === T.request) {
+      // 处理宿主对 skill 的 RPC 调用（callSkillMethod）
+      var method = registeredMethods[msg[F.method]];
+      var reqCallId = msg[F.callId];
+      if (!method) {
+        sendResponse(reqCallId, undefined, "Unknown method: " + msg[F.method]);
+        return;
+      }
+      try {
+        var result = method(msg[F.args] || {});
+        if (result && typeof result.then === "function") {
+          result.then(
+            function(v) { sendResponse(reqCallId, v); },
+            function(e) { sendResponse(reqCallId, undefined, String(e)); }
+          );
+        } else {
+          sendResponse(reqCallId, result);
         }
-        break;
-
-      case "host:lifecycle":
-        if (msg.phase === "mount" && typeof window.onSkillMount === "function") {
-          window.onSkillMount(window.ctx, msg.props || {});
-        } else if (msg.phase === "unmount" && typeof window.onSkillUnmount === "function") {
-          window.onSkillUnmount();
-        }
-        break;
-
-      case "rpc:request":
-        // 处理宿主对 skill 的 RPC 调用（callSkillMethod）
-        var method = registeredMethods[msg.method];
-        if (!method) {
-          sendResponse(msg.callId, undefined, "Unknown method: " + msg.method);
-          return;
-        }
-        try {
-          var result = method(msg.args || {});
-          if (result && typeof result.then === "function") {
-            result.then(
-              function(v) { sendResponse(msg.callId, v); },
-              function(e) { sendResponse(msg.callId, undefined, String(e)); }
-            );
-          } else {
-            sendResponse(msg.callId, result);
-          }
-        } catch (e) {
-          sendResponse(msg.callId, undefined, String(e));
-        }
-        break;
+      } catch (e) {
+        sendResponse(reqCallId, undefined, String(e));
+      }
     }
   });
 
   // ── 全局错误上报 ──
   window.addEventListener("error", function(event) {
     try {
-      window.parent.postMessage({
-        type: "skill:error",
-        error: event.message || "Unhandled error",
-        source: event.filename,
-        line: event.lineno,
-        col: event.colno
-      }, TARGET_ORIGIN);
+      axSend(axFrame(T.contentError, [
+        [F.error, event.message || "Unhandled error"],
+        [F.source, event.filename],
+        [F.line, event.lineno],
+        [F.col, event.colno]
+      ]));
     } catch(e) { /* error reporting postMessage failed, nothing we can do */ }
   });
 
   window.addEventListener("unhandledrejection", function(event) {
     try {
-      window.parent.postMessage({
-        type: "skill:error",
-        error: "Unhandled rejection: " + String(event.reason)
-      }, TARGET_ORIGIN);
+      axSend(axFrame(T.contentError, [[F.error, "Unhandled rejection: " + String(event.reason)]]));
     } catch(e) { /* error reporting postMessage failed, nothing we can do */ }
   });
 
   // ── 向宿主报告就绪 ──
   try {
-    window.parent.postMessage({ type: "skill:ready" }, TARGET_ORIGIN);
+    axSend(axFrame(T.ready));
   } catch(e) { /* skill:ready postMessage failed */ }
 
-  callHost("ui.getTheme").then(function(theme) {
+  callHost(M.uiGetTheme).then(function(theme) {
     if (theme) {
       document.documentElement.setAttribute("data-theme", theme);
     }
@@ -355,7 +427,7 @@ function generateRuntimeScript(rpcTimeoutMs: number): string {
       window.onSkillInit(window.ctx);
     } catch(e) {
       try {
-        window.parent.postMessage({ type: "skill:error", error: String(e) }, TARGET_ORIGIN);
+        axSend(axFrame(T.contentError, [[F.error, String(e)]]));
       } catch(e2) { /* nested error report postMessage failed */ }
     }
   }

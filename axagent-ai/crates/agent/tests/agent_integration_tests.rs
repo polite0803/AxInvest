@@ -15,7 +15,7 @@ use axagent_agent::recovery_strategies::{RecoveryAttempt, RecoveryResult, Recove
 use axagent_agent::thought_chain::Action;
 use axagent_agent::thought_chain::ThoughtChain;
 use axagent_agent::tree_of_thoughts::{
-    LlmReasoningProvider as ToTLlmReasoningProvider, ThoughtStatus, TreeOfThoughtsEngine,
+    TotReasoningProvider, ThoughtStatus, TreeOfThoughtsEngine,
 };
 use axagent_harness::core_error::AxAgentError;
 use std::sync::Arc;
@@ -204,7 +204,7 @@ impl MockToTProvider {
 }
 
 #[async_trait]
-impl ToTLlmReasoningProvider for MockToTProvider {
+impl TotReasoningProvider for MockToTProvider {
     async fn think_branch(&self, _prompt: &str) -> Result<String, AxAgentError> {
         if self.should_fail {
             return Err(AxAgentError::Agent {
@@ -829,7 +829,7 @@ mod test_tree_of_thoughts_reasoning {
         let mut engine = TreeOfThoughtsEngine::new(3, 3, 0.3);
         let root_id = engine.root_id.clone();
 
-        let provider: Arc<dyn ToTLlmReasoningProvider> = Arc::new(MockToTProvider::new());
+        let provider: Arc<dyn TotReasoningProvider> = Arc::new(MockToTProvider::new());
         let children = engine
             .generate_branching_options(root_id.clone(), "Test reasoning context", &provider)
             .await
@@ -849,7 +849,7 @@ mod test_tree_of_thoughts_reasoning {
         let mut engine = TreeOfThoughtsEngine::new(3, 3, 0.3);
         let root_id = engine.root_id.clone();
 
-        let provider: Arc<dyn ToTLlmReasoningProvider> = Arc::new(MockToTProvider::new());
+        let provider: Arc<dyn TotReasoningProvider> = Arc::new(MockToTProvider::new());
         let children = engine
             .generate_branching_options(root_id, "Test context", &provider)
             .await
@@ -878,7 +878,7 @@ mod test_tree_of_thoughts_reasoning {
         let mut engine = TreeOfThoughtsEngine::new(3, 3, 0.3);
         let root_id = engine.root_id.clone();
 
-        let provider: Arc<dyn ToTLlmReasoningProvider> = Arc::new(MockToTProvider::new());
+        let provider: Arc<dyn TotReasoningProvider> = Arc::new(MockToTProvider::new());
         let children = engine
             .generate_branching_options(root_id, "Test context", &provider)
             .await
@@ -901,7 +901,7 @@ mod test_tree_of_thoughts_reasoning {
         let mut engine = TreeOfThoughtsEngine::new(3, 3, 0.3);
         let root_id = engine.root_id.clone();
 
-        let provider: Arc<dyn ToTLlmReasoningProvider> = Arc::new(MockToTProvider::new());
+        let provider: Arc<dyn TotReasoningProvider> = Arc::new(MockToTProvider::new());
         let children = engine
             .generate_branching_options(root_id.clone(), "Test context", &provider)
             .await
@@ -930,7 +930,7 @@ mod test_tree_of_thoughts_reasoning {
         let mut engine = TreeOfThoughtsEngine::new(3, 3, 0.3);
         let root_id = engine.root_id.clone();
 
-        let provider: Arc<dyn ToTLlmReasoningProvider> = Arc::new(MockToTProvider::new());
+        let provider: Arc<dyn TotReasoningProvider> = Arc::new(MockToTProvider::new());
         let level1_children = engine
             .generate_branching_options(root_id.clone(), "Level 1 context", &provider)
             .await
@@ -975,7 +975,7 @@ mod test_tree_of_thoughts_reasoning {
         let mut engine = TreeOfThoughtsEngine::new(3, 3, 0.3);
         let root_id = engine.root_id.clone();
 
-        let provider: Arc<dyn ToTLlmReasoningProvider> =
+        let provider: Arc<dyn TotReasoningProvider> =
             Arc::new(MockToTProvider::new().with_eval_scores(vec![0.2, 0.8, 0.5]));
         let children = engine
             .generate_branching_options(root_id, "Scored context", &provider)
@@ -999,7 +999,7 @@ mod test_tree_of_thoughts_reasoning {
         let mut engine = TreeOfThoughtsEngine::new(2, 2, 0.3);
         let root_id = engine.root_id.clone();
 
-        let provider: Arc<dyn ToTLlmReasoningProvider> = Arc::new(MockToTProvider::new());
+        let provider: Arc<dyn TotReasoningProvider> = Arc::new(MockToTProvider::new());
 
         let level1 = engine
             .generate_branching_options(root_id.clone(), "Level 1", &provider)
@@ -1025,7 +1025,7 @@ mod test_tree_of_thoughts_reasoning {
         let mut engine = TreeOfThoughtsEngine::new(3, 3, 0.3);
         let root_id = engine.root_id.clone();
 
-        let provider: Arc<dyn ToTLlmReasoningProvider> = Arc::new(MockToTProvider::new());
+        let provider: Arc<dyn TotReasoningProvider> = Arc::new(MockToTProvider::new());
         let children = engine
             .generate_branching_options(root_id, "State test", &provider)
             .await
@@ -1059,7 +1059,7 @@ mod test_tree_of_thoughts_reasoning {
         let mut engine = TreeOfThoughtsEngine::new(3, 3, 0.3);
         let root_id = engine.root_id.clone();
 
-        let provider: Arc<dyn ToTLlmReasoningProvider> =
+        let provider: Arc<dyn TotReasoningProvider> =
             Arc::new(MockToTProvider::new().with_failure());
 
         let children = engine

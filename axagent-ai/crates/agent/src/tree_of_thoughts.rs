@@ -148,7 +148,7 @@ impl TreeOfThoughtsEngine {
         &mut self,
         parent_id: String,
         context: &str,
-        llm_client: &Arc<dyn LlmReasoningProvider>,
+        llm_client: &Arc<dyn TotReasoningProvider>,
     ) -> Result<Vec<String>, AxAgentError> {
         let (parent_content, parent_status, _parent_children, parent_depth) = {
             let parent = self.tree.get(&parent_id).ok_or_else(|| AxAgentError::Agent {
@@ -237,7 +237,7 @@ approach, perspective, or sub-problem decomposition. Be concise and focused.",
         &self,
         node_id: &str,
         context: &str,
-        llm_client: &Arc<dyn LlmReasoningProvider>,
+        llm_client: &Arc<dyn TotReasoningProvider>,
     ) -> Result<f64, AxAgentError> {
         let node = self.tree.get(node_id).ok_or_else(|| AxAgentError::Agent {
             source: None,
@@ -319,7 +319,7 @@ Respond with only a number between 0.0 and 1.0.",
         &mut self,
         node_id: &str,
         context: &str,
-        llm_client: &Arc<dyn LlmReasoningProvider>,
+        llm_client: &Arc<dyn TotReasoningProvider>,
     ) -> Result<f64, AxAgentError> {
         let score = self.evaluate_thought(node_id, context, llm_client).await?;
 
@@ -547,7 +547,7 @@ Respond with only a number between 0.0 and 1.0.",
     ///
     /// ## 参数
     /// - `context`：原始用户输入/问题描述
-    /// - `llm_client`：实现了 `LlmReasoningProvider` 的 LLM 客户端
+    /// - `llm_client`：实现了 `TotReasoningProvider` 的 LLM 客户端
     ///
     /// ## 开销
     /// 本方法会发起 `branching_factor * (1 + max_depth)` 次 LLM 调用（生成 + 评估）。
@@ -555,7 +555,7 @@ Respond with only a number between 0.0 and 1.0.",
     pub async fn solve(
         &mut self,
         context: &str,
-        llm_client: &Arc<dyn LlmReasoningProvider>,
+        llm_client: &Arc<dyn TotReasoningProvider>,
     ) -> Result<String, AxAgentError> {
         use tracing::info;
 
@@ -623,7 +623,7 @@ Respond with only a number between 0.0 and 1.0.",
 }
 
 #[async_trait::async_trait]
-pub trait LlmReasoningProvider: Send + Sync {
+pub trait TotReasoningProvider: Send + Sync {
     async fn think_branch(&self, prompt: &str) -> Result<String, AxAgentError>;
     async fn evaluate_thought(&self, prompt: &str) -> Result<String, AxAgentError>;
 }
@@ -768,7 +768,7 @@ impl Default for DefaultToTReasoningProvider {
 }
 
 #[async_trait::async_trait]
-impl LlmReasoningProvider for DefaultToTReasoningProvider {
+impl TotReasoningProvider for DefaultToTReasoningProvider {
     async fn think_branch(&self, prompt: &str) -> Result<String, AxAgentError> {
         let system_prompt = "You are a reasoning engine exploring multiple paths. Generate a distinct \
         reasoning step that takes a different approach or perspective from other branches. Be concise, \
@@ -824,7 +824,7 @@ impl ProviderAdapterBridge {
 }
 
 #[async_trait::async_trait]
-impl LlmReasoningProvider for ProviderAdapterBridge {
+impl TotReasoningProvider for ProviderAdapterBridge {
     async fn think_branch(&self, prompt: &str) -> Result<String, AxAgentError> {
         let request = ChatRequest {
             model: self.model.clone(),
@@ -1434,7 +1434,7 @@ mod tests {
         engine.tree.insert(child_id.clone(), child);
 
         let rt = tokio::runtime::Runtime::new().expect("测试：创建Tokio Runtime应成功");
-        let provider: Arc<dyn LlmReasoningProvider> = Arc::new(DefaultToTReasoningProvider::new());
+        let provider: Arc<dyn TotReasoningProvider> = Arc::new(DefaultToTReasoningProvider::new());
         let result = rt.block_on(engine.generate_branching_options(child_id, "test", &provider));
         assert!(result.is_ok());
         assert!(result.expect("测试应成功").is_empty());
@@ -1448,7 +1448,7 @@ mod tests {
         let root = engine.tree.get_mut(&root_id).expect("测试：键应存在");
         root.status = ThoughtStatus::Pruned;
 
-        let provider: Arc<dyn LlmReasoningProvider> = Arc::new(DefaultToTReasoningProvider::new());
+        let provider: Arc<dyn TotReasoningProvider> = Arc::new(DefaultToTReasoningProvider::new());
         let result = engine.generate_branching_options(root_id, "test", &provider).await;
         assert!(result.is_ok());
         assert!(result.expect("测试应成功").is_empty());
@@ -1457,7 +1457,7 @@ mod tests {
     #[tokio::test]
     async fn test_evaluate_thought_nonexistent_node() {
         let engine = TreeOfThoughtsEngine::new(3, 5, 0.3);
-        let provider: Arc<dyn LlmReasoningProvider> = Arc::new(DefaultToTReasoningProvider::new());
+        let provider: Arc<dyn TotReasoningProvider> = Arc::new(DefaultToTReasoningProvider::new());
         let result = engine.evaluate_thought("nonexistent", "test", &provider).await;
         assert!(result.is_err());
     }
@@ -1516,7 +1516,7 @@ mod tests {
         let mut engine = TreeOfThoughtsEngine::new(3, 5, 0.3);
         let root_id = engine.root_id.clone();
 
-        let provider: Arc<dyn LlmReasoningProvider> = Arc::new(DefaultToTReasoningProvider::new());
+        let provider: Arc<dyn TotReasoningProvider> = Arc::new(DefaultToTReasoningProvider::new());
         let score = engine.evaluate_and_score_node(&root_id, "test context", &provider).await;
         assert!(score.is_ok());
         let s = score.expect("测试应成功");

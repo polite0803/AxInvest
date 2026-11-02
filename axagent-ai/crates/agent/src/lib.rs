@@ -204,8 +204,12 @@ pub use think_scrubber::{ScrubberConfig, ThinkScrubber};
 
 // tree_of_thoughts — 外部引用：commands/agent（ToT 求解器）
 pub use tree_of_thoughts::{
-    DefaultToTReasoningProvider, LlmReasoningProvider, TreeOfThoughtsEngine,
+    DefaultToTReasoningProvider, TotReasoningProvider, TreeOfThoughtsEngine,
 };
+// 兼容别名：src-tauri/commands/agent 仍按旧名引用 ToT 侧 trait（ReAct 侧同名 trait
+// 只经 `react_engine` 模块导出，不受影响）。待 src-tauri 迁移到 `TotReasoningProvider`
+// 后删除此行；不得借此再新增第二份 trait 定义。
+pub use tree_of_thoughts::TotReasoningProvider as LlmReasoningProvider;
 
 // self_improvement_executor — 外部引用：agent_round_adapter / reasoning_state / harness 自改进循环
 pub use self_improvement_executor::{FinalOutput, SelfImprovementConfig, SelfImprovementExecutor};

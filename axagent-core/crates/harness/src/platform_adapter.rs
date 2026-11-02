@@ -19,6 +19,11 @@ pub struct ChatCompletionParams {
 }
 
 // ── 1. ProviderRepository ──
+//
+// 唯一权威定义（`repositories.rs` 仅 re-export，不得再出现第二份同名定义）。
+// 方法集是原两处定义的并集：`report_key_failure` 来自 gateway 侧；`get_provider` /
+// `resolve_model_for_node` 原为 DI 侧必需方法，此处保留为带默认实现的兼容入口
+//（默认返回 NotFound，与原 platform 侧默认行为一致）。错误类型统一为 `AxAgentError`。
 
 #[async_trait]
 pub trait ProviderRepository: Send + Sync {
@@ -47,9 +52,29 @@ pub trait ProviderRepository: Send + Sync {
 }
 
 // ── 2. SettingsRepository ──
+//
+// 唯一权威定义（`repositories.rs` 仅 re-export）。方法集是原两处定义的并集：
+// `get_setting` / `set_setting` 原为 DI 侧必需方法，此处以默认实现保留（默认返回
+// NotFound，gateway 侧实现方无需覆盖）；`get_settings` 两侧均必需，保持必需。
 
 #[async_trait]
 pub trait SettingsRepository: Send + Sync {
+    /// 读取单个配置项。DI 侧实现方（`DaoSettingsRepository`）覆盖此方法；
+    /// gateway 侧实现方不覆盖时返回 NotFound。
+    async fn get_setting(&self, _key: &str) -> Result<Option<String>> {
+        Err(crate::core_error::AxAgentError::NotFound(
+            "get_setting not implemented by this repository".into(),
+        ))
+    }
+
+    /// 写入单个配置项。DI 侧实现方（`DaoSettingsRepository`）覆盖此方法；
+    /// gateway 侧实现方不覆盖时返回 NotFound。
+    async fn set_setting(&self, _key: &str, _value: &str) -> Result<()> {
+        Err(crate::core_error::AxAgentError::NotFound(
+            "set_setting not implemented by this repository".into(),
+        ))
+    }
+
     async fn get_settings(&self) -> Result<AppSettings>;
 }
 

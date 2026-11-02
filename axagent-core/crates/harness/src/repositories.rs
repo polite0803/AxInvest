@@ -12,13 +12,15 @@ use async_trait::async_trait;
 use crate::repo_dtos::*;
 // wiki 域 repository trait 以 wiki_dtos 为唯一权威定义（dao 实现、agent 消费、test_support 替身均认它），
 // 此处仅 re-export，避免与内联重复定义造成两套不兼容类型。
+//
+// ProviderRepository / SettingsRepository 同样只有一份权威定义，位于
+// `crate::platform_adapter`（gateway 契约侧，方法集为两侧并集，错误类型 `AxAgentError`）。
+// 此处仅 re-export，保证 DI 注册表、gateway 适配器与所有实现方认的是同一个 trait。
+pub use crate::platform_adapter::{ProviderRepository, SettingsRepository};
 use crate::service_registry::get_service_registry;
-use crate::types::AppSettings;
 use crate::types::Conversation;
 use crate::types::Message;
 use crate::types::MessageRole;
-use crate::types::ProviderConfig;
-use crate::types::ProviderKey;
 pub use crate::wiki_dtos::{
     NoteBacklinkRepository, NoteRepository, WikiOperationRepository, WikiPageRepository,
     WikiRepository, WikiSourceRepository,
@@ -76,20 +78,8 @@ pub fn wiki_operation_repository() -> Arc<dyn WikiOperationRepository> {
 }
 
 // ── ProviderRepository ────────────────────────
-
-#[async_trait]
-pub trait ProviderRepository: Send + Sync {
-    async fn list_providers(&self) -> Result<Vec<ProviderConfig>, String>;
-    async fn get_provider(&self, id: &str) -> Result<ProviderConfig, String>;
-    async fn get_active_key(&self, provider_id: &str) -> Result<ProviderKey, String>;
-    async fn resolve_model_for_node(
-        &self,
-        node_model: Option<&str>,
-        session_model: Option<&str>,
-        session_provider_id: Option<&str>,
-        profile_suggested_provider: Option<&str>,
-    ) -> Result<(ProviderConfig, ProviderKey, String), String>;
-}
+//
+// trait 定义见 `crate::platform_adapter`（文件头已 re-export）。此段只保留全局 DI 访问器。
 
 pub fn set_provider_repository(repo: Arc<dyn ProviderRepository>) {
     get_service_registry().read().set_provider_repository(repo);
@@ -203,13 +193,8 @@ pub fn generated_tool_repository() -> Arc<dyn GeneratedToolRepository> {
 }
 
 // ── SettingsRepository ─────────────────────────
-
-#[async_trait]
-pub trait SettingsRepository: Send + Sync {
-    async fn get_setting(&self, key: &str) -> Result<Option<String>, String>;
-    async fn set_setting(&self, key: &str, value: &str) -> Result<(), String>;
-    async fn get_settings(&self) -> Result<AppSettings, String>;
-}
+//
+// trait 定义见 `crate::platform_adapter`（文件头已 re-export）。此段只保留全局 DI 访问器。
 
 pub fn set_settings_repository(repo: Arc<dyn SettingsRepository>) {
     get_service_registry().read().set_settings_repository(repo);

@@ -566,6 +566,7 @@ fn extract_category_from_thinking(thinking: &str, categories: &[String]) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axagent_harness::core_error::AxAgentError;
     use axagent_harness::repositories::{
         ProviderRepository as RepoProviderRepo, set_provider_repository,
     };
@@ -580,14 +581,14 @@ mod tests {
     struct MockProviderRepo;
     #[async_trait]
     impl RepoProviderRepo for MockProviderRepo {
-        async fn list_providers(&self) -> Result<Vec<ProviderConfig>, String> {
+        async fn list_providers(&self) -> Result<Vec<ProviderConfig>, AxAgentError> {
             Ok(vec![])
         }
-        async fn get_provider(&self, _id: &str) -> Result<ProviderConfig, String> {
-            Err("mock".into())
+        async fn get_provider(&self, _id: &str) -> Result<ProviderConfig, AxAgentError> {
+            Err(AxAgentError::NotFound("mock".into()))
         }
-        async fn get_active_key(&self, _id: &str) -> Result<ProviderKey, String> {
-            Err("mock".into())
+        async fn get_active_key(&self, _id: &str) -> Result<ProviderKey, AxAgentError> {
+            Err(AxAgentError::NotFound("mock".into()))
         }
         async fn resolve_model_for_node(
             &self,
@@ -595,8 +596,8 @@ mod tests {
             _b: Option<&str>,
             _c: Option<&str>,
             _d: Option<&str>,
-        ) -> Result<(ProviderConfig, ProviderKey, String), String> {
-            Err("mock: no provider".to_string())
+        ) -> Result<(ProviderConfig, ProviderKey, String), AxAgentError> {
+            Err(AxAgentError::NotFound("mock: no provider".into()))
         }
     }
 

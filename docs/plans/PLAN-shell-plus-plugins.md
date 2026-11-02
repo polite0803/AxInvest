@@ -244,8 +244,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 
 | 口径 | 命中 | 备注 |
 |---|---|---|
-| K1：`pub trait` 总数（8 根 2009 个 `.rs`） | **316** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 316**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1）。 |
-| K1 + 有非 harness、非测试实现者 | **232** | ⚠ 这一档**不能**当能力数。~~232 出自一次性 census 工件（`.tmp/traits-full.json`，未入库 ⇒ 谓词无法从仓内代码复现）~~ ⇒ **该说法已作废（`#61` + `#66` 落地后）**：谓词已入库为 `k1DeclaredExternalImplTraitCount`，`--dump-readings` 在现树复现 = **232**，且与本门 audit 侧输出**排序名单逐字相等**（`#66` 的 4.2 档，差分探针 + 两条命令背靠背 + 扫描面常量逐项对照，三条同源性证据齐）⇒ **232 现在是可复算值**，锚点**具备升 `hard:true` 的条件**（升不升、用哪个数由我在收口时一次定）。另两个历史数**只留作解释、不再与 232 并列**：**210** = 单趟扫描缺陷（同谓词**两趟交并** = 232，差值恰 **22** —— 这同时就是「为什么必须两趟」的反证）；**269** = 门里最严格的读法（不要求 trait 声明面、不排 std/派生噪声名），**不作文档该锚点值**。⚠ 处置次序仍不能反：**先让谓词可复算，再升 hard** —— 反向必先假红 |
+| K1：`pub trait` 总数（8 根 2009 个 `.rs`） | **317** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。 |
+| K1 + 有非 harness、非测试实现者 | **233** | ⚠ 这一档**不能**当能力数。~~232 出自一次性 census 工件（`.tmp/traits-full.json`，未入库 ⇒ 谓词无法从仓内代码复现）~~ ⇒ **该说法已作废（`#61` + `#66` 落地后）**：谓词已入库为 `k1DeclaredExternalImplTraitCount`，`--dump-readings` 在现树复现 = **233**（`#62` 后：ToT 拆成两名、两端都仍有生产 impl ⇒ +1），且与本门 audit 侧输出**排序名单逐字相等**（`#66` 的 4.2 档，差分探针 + 两条命令背靠背 + 扫描面常量逐项对照，三条同源性证据齐）⇒ **233 现在是可复算值**，锚点**具备升 `hard:true` 的条件**（升不升、用哪个数由我在收口时一次定）。另两个历史数**只留作解释、不再与 233 并列**：**210** = 单趟扫描缺陷（当时同谓词**两趟交并** = 232，差值恰 **22**；`#62` 后未重测单趟读数）；**269** = 门里最严格的读法（不要求 trait 声明面、不排 std/派生噪声名），**不作文档该锚点值**。⚠ 处置次序仍不能反：**先让谓词可复算，再升 hard** —— 反向必先假红 |
 | K1 + K2（键控站点，四次扫描合并去漏报） | **51** 个 trait 面 | 含 15 条已建接缝的 trait。⚠ **2026-11-02 `#33` 实测：这一档不可作论据** —— 谓词真身是**未入库的一次性工件** `.tmp/capability-register3.cjs:44-82`（仓内无处复跑，与 §0.7.2 的 232 同病根），且它要求签名/块内出现 `dyn T` ⇒ 198 条里 **21 条假阴性**，把 PLAN B/C 组落入该桶的 **13 条契约全部吞掉** ⇒ **不许**用「无键控点」论证「这些 trait 只是分层解耦」。谓词入库 = 任务 **#57**；逐条分桶结论见 **§14** |
 | 51 → 同族合并 + K3/K4 判定 | **23 条能力**（另有 3 条移入 §0.7.9 债档，只登记不计数） | ⇒ 本节表格 A+B+C 三组 |
 | （对照）今天就能远程跑的接缝 | **13** | `axagent-plugins/crates/plugins/src/worker.rs:133` `SUPPORTED_REMOTE_SEAMS` |
@@ -1865,3 +1865,58 @@ cargo fmt --check -p axagent-plugin-proto        # 在 axagent-plugins/ 根下�
 - 登记表 `totalRows` 36 → **37**（36 + 1 条占位）；镜像表 `caliber.groupCounts` 增 `D: 3`，门的分组表同步增 D 档（自检 17/17 仍通过）。
 - 原 §24.1 写的 `totalRows` 38 是算术笔误（移出不增减总行数：36 + 1 = 37），本处就地订正；其余仍写 26/24/13/15 的段落分两类：① 本批已改的当前态（§0.7.2 / §0.7.4 / §0.7.5 / §0.7.8 / §0.9 / §11 / §13.1）；② **历史快照**（§12.x / §13.x / §24.1 的推理过程），保留原数并就地标注「已被 §24.1/§0.7.9 取代」，不重写历史。
 - 判据：`node scripts/check-capability-register.mjs` = EXIT 0 · `hard:true 判据全部一致（登记 37 = A11/B8/C4/H1/K10/D3；能力面 Σ=23；锚点 21 项）`；`--selftest` EXIT 0。
+- **`#71` 一并结案**：`MockPlatformAdapter@src-tauri/src/init/notification_adapters.rs:150` 已被新 test 列机械指认（`platform.adapter` 的 10 里唯一落在 `#[cfg(test)] mod` 的站点），**不剔除**（剔除会重算全表实现者数，收益未被证明）；「改判直接接 test 列」的原意已落地。
+
+## 37. `#78` 交付账：bundle 客户端三件同批（2026-11-02；报告 `.tmp/res78-report.md`，10 902 B）
+
+- **来源校验**：`pluginClientBridge.handleMessage` 第一层改为身份判据（复用 `sandboxFrameProtocol.ts` 的 `isFrameFromSandboxSource`，与宿主接收侧/srcdoc 运行时**同一条谓词**）；期望来源为空 ⇒ 一帧都不认。对抗用例：外来来源用猜到的 `callId` 伪造响应 ⇒ 不 settle（修前红：`expected 'resolve:stolen' to be ''`）。
+- **dispose 不可复用**：新调用立即拒绝且不发帧、在途 Promise 立即以「已释放」拒绝、`handleMessage` 首行 `if (disposed) return;` 兜住被捕获 listener 的迟到帧。三态各一条用例（(a)(b) 修前已绿，(c) 为新增兜底）。
+- **门 C 去文本耦合**：`sandboxFrameProtocol.ts` 新增 `SANDBOX_SRCDOC_RPC_OPS`（方法/参数只存键，值仍单点定义）；`sandboxTemplate.ts` 产物注入 `/* AX_RPC_OPS_BEGIN */ var AX_RPC_OPS = <JSON>; /* AX_RPC_OPS_END */`，`window.ctx` 由该表生成（表即行为，不是旁挂说明）；测试改为解析数据，保留分母断言「op 数 == 协议方法数」且标记缺失/数据清空即红。
+- **偏离派单并报备**：表放在 `sandboxFrameProtocol.ts` 而非 `pluginBridgeProtocol.ts` —— 后者已 import 前者，反向放会成环；单一定义点要求已满足。
+- 验证：修前红 1 例（客户端）+ 4 例（门 C/E）；修后 `3 files / 76 passed`，相关组件回归 `4 files / 46 passed`；`tsc --extendedDiagnostics` EXIT=0（7479 files，error TS 0）、`oxlint` 0 警告（1442 files）、`dprint check` 7 文件 EXIT=0。
+- 未做：真机 WebView2 验证（假 window 证据）；生成式 `ctx` 的 `Function.length` 由 2 变 0（仓内无消费点，未加兼容垫片）；门 C 的 bundle 侧仍是源码文本提取（另立任务）。
+
+## 38. `#62` 交付账：两组重复 trait 合流 + ToT 改名，K1 读数 317 / 233 已重钉（2026-11-02；报告 `.tmp/res62-report.md`，18 453 B / 204 行）
+
+### 38.1 改动面（8 文件，全部在职责内）与「每名 1 份定义」
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `axagent-core/crates/harness/src/platform_adapter.rs` | `ProviderRepository` / `SettingsRepository` 保留为**唯一权威**；后者补并集方法 `get_setting` / `set_setting`（默认实现返 `NotFound`） |
+| 2 | `axagent-core/crates/harness/src/repositories.rs` | 删两份内联定义，改 `pub use crate::platform_adapter::{ProviderRepository, SettingsRepository};` |
+| 3-4 | `axagent-infra/crates/dao/src/{provider_repository,settings_repository}.rs` | 实现方错误类型 `String` → `AxAgentError` |
+| 5 | `axagent-runtime/crates/rt-workflow/src/work_engine/executors/llm_classifier_executor.rs` | 测试替身错误类型适配 |
+| 6 | `axagent-ai/crates/agent/src/tree_of_thoughts.rs` | ToT trait 改名 `LlmReasoningProvider` → `TotReasoningProvider`（本文件 12 处） |
+| 7 | `axagent-ai/crates/agent/src/lib.rs` | 根导出改名 + **兼容别名** `TotReasoningProvider as LlmReasoningProvider`（见 38.3） |
+| 8 | `axagent-ai/crates/agent/tests/agent_integration_tests.rs` | 导入与 10 处使用点改名 |
+
+**取证（全仓 8 根 `^pub trait` 四名逐个跑）**：`ProviderRepository`=1（platform_adapter.rs:29）、`SettingsRepository`=1（:61）、`LlmReasoningProvider`=1（react_engine.rs:88，ReAct 侧，语义不动）、`TotReasoningProvider`=1（tree_of_thoughts.rs:626）⇒ 原始命中 **6 → 4**。其余 6 根零命中。**选 platform 侧保留的依据是方法集超集 + 实现方 6:3 + 契约面已是根导出**，报告 §2 逐条列出（不是「先到先得」）。
+
+### 38.2 我采纳它的两处裁定（含一处任务文本自相矛盾）
+
+1. **`resolve_model_for_node` 的 Display 前缀变化（`xxx` → `Internal error: xxx`）⇒ 接受，不追改**。依据是报告 §3.3 的**零文本匹配**核查：调用点全是 `.map_err(|e| anyhow!("{}", e))` / `.ok()?` / `format!("{e}")`，`is_non_retryable_error` 走错误码不走文本。⚠ 但**保留一条代价**：这是**用户可见错误串的变化**，若日后有 UI 直接展示该路径的错误，会多出一个英文前缀 ⇒ 归错误码 i18n 规范处理（`AGENTS.md`「后端错误码 i18n 规范」），不属本批。
+2. **任务文本里「原始命中 319 → 317」与「ToT 改名…仍 318」自相矛盾 ⇒ 按实测 317 记**。319 − 2（删两份重复定义）= 317，改名不增删定义行；`--dump-readings` 一次运行复现 317，故 318 那条口径**作废**（不是「两个都对」，是派单写错了一位）。
+
+### 38.3 兼容别名：接受，且**必须**在同批写下来龙去脉
+
+`agent/src/lib.rs:212` 的 `pub use tree_of_thoughts::TotReasoningProvider as LlmReasoningProvider;` 是**别名不是第二份定义**（`^pub trait` 仍 1 处），存在理由 = 禁改面 `src-tauri/src/commands/agent/mod.rs:2246` 仍写 `Arc<dyn axagent_agent::LlmReasoningProvider>` 且语义是 ToT。⇒ **不改禁改面**是铁律优先；别名保证该路径解析到 ToT trait，与改前同义。
+⚠ **删除窗口已钉死**：#68 把该行改为 `TotReasoningProvider` 后**同一批**删别名（已在 #68 派单清单里写明）。**不许**在没有改 src-tauri 消费点的情况下单独删 —— 那会直接击穿主 crate 编译。
+
+### 38.4 读数重钉：317 / 233，且 §31 第 3 条的「先查是不是 #62」已应验
+
+`--dump-readings` 实测 `{"rsFiles":2009,"pubTraits":317,"externalImplTraits":272,"declaredExternalTraits":233}`，于是同批改三处：
+
+| 位置 | 旧 | 新 | 归因 |
+|---|---|---|---|
+| PLAN:247 / 镜像 `k1RsFileCount.planPinned` | 2009 | **2009**（不动） | 无文件增删 |
+| PLAN:247 / 镜像 `k1PubTraitCount` | 316 | **317** | −2（删两份重复定义）+1（ToT 产生新唯一名）= 净 +1 |
+| PLAN:248 / 镜像 `k1ExternalImplTraitCount` | 232 | **233** | ToT 一分为二，两端仍各有非 harness 生产实现（`tree_of_thoughts.rs:771/827`、`react_engine.rs:135/392`）⇒ 交并集 +1 |
+| 镜像 `k2KeyedFaces` / `k2TraitFaces` / `pipeline` 的扫描面 | 316 / 232 | **317 / 233** | 同上，仅换分母 |
+| 镜像 `k2TraitFaces.note` 流水线 | `316 → 232 → 51 → 23` | **`317 → 233 → 51 → 23`** | 51 与 23 不动（K2 强 37 / 弱 8 实测不变） |
+
+⇒ **§31 第 3 条「收口时若 232 与现树不符，先查是不是 #62」应验**：差值正是 #62 的 +1，不是并发会话或谓词漂移。**重钉后判定档 `node scripts/check-capability-register.mjs` EXIT=0**（`登记 37 = A11/B8/C4/H1/K10/D3；能力面 Σ=23；锚点 21 项`）—— 232 的 `hard:true` 没被回退，也没被洗绿。
+
+### 38.5 验证与未做
+
+- 定点：harness 831 passed · agent 1936 passed · `agent_integration_tests test_tot` 11 passed · rt-workflow `llm_classifier` 18 passed；check 含 `--all-targets` 与 **src-tauri 主 crate 18m28s 实编**（37 个 axagent crate，warning/error 计数 0）。日志均在 `.tmp/res62-check-*.log` / `.tmp/res62-test-*.log`，编译前 `touch` 过目标文件（排除「只吐 Finished」假绿）。
+- **未做**：`cargo fmt` / 全量 clippy / 全量 test（分层门禁约定，留给阶段末）；删兼容别名（#68）；把 `repo::provider::resolve_model_for_node` 本身改成 `AxAgentError`（Display 前缀要逐字不变时的备选，改动面更大，不取）。

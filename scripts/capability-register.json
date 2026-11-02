@@ -208,31 +208,31 @@
       "hard": true,
       "planNumber": "2009",
       "planMustAppear": true,
-      "planPinned": [{ "line": 247, "mustContain": ["2009", "316", "K1：`pub trait` 总数"] }],
+      "planPinned": [{ "line": 247, "mustContain": ["2009", "317", "K1：`pub trait` 总数"] }],
       "planOld": [],
       "note": "PLAN:247 括号里的扫描面数字，可逐字复算。2026-11-01 降 1（删 `harness/src/dojo_extension.rs` 整文件）；2026-11-02 升 1（`#49` 新增 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批的 `crates/plugins/tests/e2e_command_frame_test.rs` 被扫描面 `K1_IGNORE` 的 `tests` 排除 ⇒ 加 2 文件只升 1 读数）。**2026-11-02 收口重测 2009**：对 HEAD 2004 净 +5 = +7 新增（harness `vector_search.rs` / `vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`）−2 删除（两份 `ir_renderer.rs`）。⚠ **不登记 planOld**：旧读数会与 §0.12.4 之外的合法引用打架，且 316/315 本身是「口径分叉」而非单纯漂移（见 trait 总数三读数任务）。"
     },
     {
       "id": "k1PubTraitCount",
       "label": "K1：全仓 pub trait 总数",
-      "value": 316,
+      "value": 317,
       "check": "k1PubTraitCount",
       "hard": true,
-      "planNumber": "316",
+      "planNumber": "317",
       "planMustAppear": true,
       "planOld": [],
-      "note": "PLAN §0.7.2 派生流水第一档（K1）。判据 = `^pub trait NAME` 命中（同名多定义按去重后的 trait 名计数）。**2026-11-02 收口重测 316**（原始命中 319 / 去重 316；重名仍是 `LlmReasoningProvider`、`ProviderRepository`、`SettingsRepository` 各两次）。对 HEAD 315 的净 +1 溯源：+3（`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`，harness `vector_store.rs`）−2（`IrRenderer` / `KitSlashCommandProcessor` 随文件移除，全仓零引用）。"
+      "note": "PLAN §0.7.2 派生流水第一档（K1）。判据 = `^pub trait NAME` 命中（同名多定义按去重后的 trait 名计数）。**2026-11-02 收口重测 317**（原始命中 319；重名仍是 `LlmReasoningProvider`、`ProviderRepository`、`SettingsRepository` 各两次）。对 HEAD 315 的净 +2 溯源：+3（`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`，harness `vector_store.rs`）−2（`IrRenderer` / `KitSlashCommandProcessor` 随文件移除，全仓零引用）+1（`#62`：ToT 侧改名 `TotReasoningProvider`；`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处 ⇒ 原始命中 −2、唯一名数不变）。"
     },
     {
       "id": "k1ExternalImplTraitCount",
       "label": "K1 + 有非 harness、非测试实现者",
-      "value": 232,
+      "value": 233,
       "check": "k1DeclaredExternalImplTraitCount",
       "hard": true,
-      "planNumber": "232",
+      "planNumber": "233",
       "planMustAppear": true,
-      "reason": "**232 现在是可复算值（`#61` 落地谓词 + `#66` 验收）**：`check` 走 `k1DeclaredExternalImplTraitCount`（= A 档 impl 站点面 ∩ 声明面，**两趟交并**），`--dump-readings` 在现树复现 = 232，且与 `scripts/audit-capability-inventory.mjs` 的 `scanK1Traits().declaredExternalTraits` **排序名单逐字相等**（`#66` 三条同源性证据：差分探针 / 两条命令背靠背 / 扫描面常量逐项对照）。⚠ 已删 `implementorsMechanical: 210`：它是**单趟扫描**的缺陷读数（同谓词两趟交并 = 232，差值恰 22），并列会诱使下一个人拿 210 当基线。",
-      "note": "本锚点由 `hard:false` **升 `hard:true`**（任务 `#70`）：判据已入库、可复现、与 audit 侧名单同源 ⇒ 不再是「登记值不可机械复现」的例外。数字自洽：`value` / `planNumber` / PLAN:248 的 232 三者同值。"
+      "reason": "**233 现在是可复算值（`#61` 落地谓词 + `#66` 验收 + `#62` 后重测）**：`check` 走 `k1DeclaredExternalImplTraitCount`（= A 档 impl 站点面 ∩ 声明面，**两趟交并**），`--dump-readings` 在现树复现 = 233，且与 `scripts/audit-capability-inventory.mjs` 的 `scanK1Traits().declaredExternalTraits` **排序名单逐字相等**（`#66` 三条同源性证据：差分探针 / 两条命令背靠背 / 扫描面常量逐项对照）。`#62` 后 +1：ToT 拆成 `TotReasoningProvider` 两名、两端都仍有生产 impl ⇒ 交并集 +1。⚠ 已删 `implementorsMechanical: 210`：它是**单趟扫描**的缺陷读数（#62 前同谓词两趟交并 = 232，差值恰 22），并列会诱使下一个人拿 210 当基线。",
+      "note": "本锚点由 `hard:false` **升 `hard:true`**（任务 `#70`）：判据已入库、可复现、与 audit 侧名单同源 ⇒ 不再是「登记值不可机械复现」的例外。数字自洽：`value` / `planNumber` / PLAN:248 的 233 三者同值。"
     },
     {
       "id": "k2TraitFaces",
@@ -242,8 +242,8 @@
       "hard": false,
       "planNumber": "51",
       "planMustAppear": true,
-      "reason": "K2 判据（PLAN:236）原为四类启发式的合并去重（HashMap 字段 / register(key) / get(key) / match 且 ≥3 构造分支），扫描器出自一次性工件、未入库 ⇒ 51 至今**无法机械复算**，只报告。⚠ 2026-11-02 状态变化：**入库版八形态谓词已进 `scripts/check-capability-register.mjs` 的 K2 段**并由同文件锚点 `k2KeyedFaces` 出数（#66 收窄 ⑥ 后为强 37 / 弱 8），但**两者不是同一口径**（扫描面从 198 条样本扩到全树 316 trait、且新增 ⑥ push/set 与 ⑧ impl 反查两形态）⇒ 本锚点现值 51、`check: manual`、`hard: false` 一字未动；用入库版重算 51 并升 hard 属 #54 同批，不许借新读数把旧读数洗成绿。",
-      "note": "派生流水 316 → 232 → 51 → 26 中只有 316 与 26 可机械复算；本门据此把「流水后两档」列为人工核对待办。（316 是 2026-11-02 收口实测；其间曾降为 315，后又因 harness 新增 3 个 vector trait 净升 1）"
+      "reason": "K2 判据（PLAN:236）原为四类启发式的合并去重（HashMap 字段 / register(key) / get(key) / match 且 ≥3 构造分支），扫描器出自一次性工件、未入库 ⇒ 51 至今**无法机械复算**，只报告。⚠ 2026-11-02 状态变化：**入库版八形态谓词已进 `scripts/check-capability-register.mjs` 的 K2 段**并由同文件锚点 `k2KeyedFaces` 出数（#66 收窄 ⑥ 后为强 37 / 弱 8），但**两者不是同一口径**（扫描面从 198 条样本扩到全树 317 trait、且新增 ⑥ push/set 与 ⑧ impl 反查两形态）⇒ 本锚点现值 51、`check: manual`、`hard: false` 一字未动；用入库版重算 51 并升 hard 属 #54 同批，不许借新读数把旧读数洗成绿。",
+      "note": "派生流水 317 → 233 → 51 → 23 中只有 317 与 23 可机械复算；本门据此把「流水后两档」列为人工核对待办。（317 是 2026-11-02 收口实测：316 + `#62` 的 ToT 改名 1；其间曾为 315）"
     },
     {
       "id": "k2KeyedFaces",
@@ -253,7 +253,7 @@
       "check": "k2KeyedHits",
       "hard": false,
       "planMustAppear": false,
-      "reason": "入库版 K2 键控谓词的实测读数（强档 trait 面 37 / 弱档 8），八形态判据原文见 `scripts/check-capability-register.mjs` 的 K2 段（①–④ 沿用一次性工件、⑤–⑧ 为 #57 新入库，#66 收窄 ⑥ = 接收者必须是集合）。**只出数**：不改软锚点 `k2TraitFaces`（51 / manual）的现值与口径，也不决定退出码 ⇒ 必须 `hard: false`。扫描面 = 8 根全部 .rs 剪 target/node_modules/gen/tests，实测 316 个 `pub trait`、⑧ 的 impl→trait 反查表 743 个实现类型。",
+      "reason": "入库版 K2 键控谓词的实测读数（强档 trait 面 37 / 弱档 8），八形态判据原文见 `scripts/check-capability-register.mjs` 的 K2 段（①–④ 沿用一次性工件、⑤–⑧ 为 #57 新入库，#66 收窄 ⑥ = 接收者必须是集合）。**只出数**：不改软锚点 `k2TraitFaces`（51 / manual）的现值与口径，也不决定退出码 ⇒ 必须 `hard: false`。扫描面 = 8 根全部 .rs 剪 target/node_modules/gen/tests，实测 317 个 `pub trait`、⑧ 的 impl→trait 反查表 743 个实现类型。",
       "note": "#57 于 2026-11-02 入库；**2026-11-02 #66 收窄 ⑥ 后重测 = 强 37 / 弱 8**（原 92 / 7 是未收窄读数：⑥ 把 `set_*(Arc<dyn T>)` 全局 DI 注入当注册口，198 样本内 48 条假阳性，收窄后剔除）。**不给 planNumber**（PLAN §0.7 原文无此数，给就是编造锚点）。已知高估面：未剥注释（与冻结读数同口径）；keyed-get 变体（getter 返具体 DTO、块内不含 dyn，实测漏 EmbeddingProvider / McpClientService）未入形态。反向外溢：全树 13 条容器命中在 #33 的 198 样本之外 ⇒ 是 #54 的候选增量，不是本条的错。"
     },
     {
@@ -282,7 +282,7 @@
     }
   ],
   "pipeline": {
-    "statement": "§0.7.2 派生流水：316 pub trait → 232 有外部实现者 → 51 K1+K2 trait 面 → 23 条能力（同族合并 + K3/K4 判定；#54 前为 26，三条移入 §0.7.9 债档）；对照 13 条今天就能远程。（316 为 2026-11-02 收口实测：+3 vector trait −2 已删 trait；其间曾为 315）",
+    "statement": "§0.7.2 派生流水：317 pub trait → 233 有外部实现者 → 51 K1+K2 trait 面 → 23 条能力（同族合并 + K3/K4 判定；#54 前为 26，三条移入 §0.7.9 债档）；对照 13 条今天就能远程。（317 / 233 为 2026-11-02 收口实测：#62 ToT 改名 +1，重复定义 −2 原始命中）",
     "lines": [250, 251],
     "mechanicallyReproducible": ["k1RsFileCount", "k1PubTraitCount", "remoteSeamCount", "capacityRegister"],
     "manual": ["k1ExternalImplTraitCount", "k2TraitFaces"]

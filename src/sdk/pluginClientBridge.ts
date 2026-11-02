@@ -31,8 +31,12 @@
  *   一个「看起来能指定归属」的假接口 —— 会写错代码的接口比报错的接口危险。
  * - **出向投递**的 targetOrigin 取 `SANDBOX_MESSAGE_TARGET_ORIGIN`：判据本体（为什么恒是 `"*"`、
  *   以及为什么「入向身份」不归 origin 管）只在那一处定义，本文件只引用、不复述。
- *   入向帧的身份判据长在**宿主接收侧**（`isFrameFromSandboxSource`）；沙箱这一侧认领响应的
- *   键是 `callId` —— 只认自己发出去过的，陌生 callId 一律丢弃。
+ *   **入向身份两侧同一条谓词**：宿主接收侧判 `event.source === 沙箱 contentWindow`，
+ *   本客户端判 `event.source === 宿主文档 window.parent`，都走
+ *   `sandboxFrameProtocol.ts` 的 `isFrameFromSandboxSource`（任务 #78：此前这里只按 `callId`
+ *   认领 —— 沙箱文档里若再嵌一块可脚本化文档，猜一个 callId 就能提前 settle 在途 Promise）。
+ *   来源判定之后才按 `callId` 认领，且只认自己发出去过的；陌生 callId 一律丢弃。
+ * - **`dispose()` 之后不可复用**：新调用立即拒绝、在途调用以「已释放」拒绝、迟到消息不再 settle。
  * - 只暴露 `api.invoke` 一条 RPC 方法：`ui.*` / `store.*` / `api.emit` 对第三方 bundle 不开放
  *   （事件面要独立的白名单，宿主状态是明确的不可越边界）。
  *
@@ -56,6 +60,7 @@ import {
   buildSandboxReadyFrame,
   formatCallId,
   isFailureFrame,
+  isFrameFromSandboxSource,
   isRpcResponseFrame,
   readRpcResponseCallId,
   SANDBOX_CALL_ID_PREFIX,
@@ -70,18 +75,19 @@ import {
 // ── 投递面（宿主文档 = 父窗口） ─────────────────────────────────────
 
 /**
- * 沙箱收到的消息事件（只声明用到的 `data`）。
+ * 沙箱收到的消息事件（只声明用到的 `data` / `source`）。
  *
  * 刻意不写成 DOM 的 `MessageEvent`：本文件要能被原样 vendored 进任何编译目标，
  * 结构化最小面既贴合真实事件对象，也让测试可以直接喂对象而不必造真事件。
  *
- * ⚠ 与宿主接收侧不同，这里**不声明 `source`**：宿主回帧的认领键是 `callId`
- * （本客户端只认自己发出去过的 callId，见 `handleMessage`）。沙箱文档是 opaque origin，
- * 「谁发的」在沙箱侧只能靠 `event.origin` —— 那是宿主自己的 origin，与别的 iframe 分不开；
- * 真正的身份判据长在宿主接收侧（`sandboxFrameProtocol.ts` 的 `isFrameFromSandboxSource`）。
+ * `source` 是**发送方文档的 WindowProxy**（`MessageEvent.source`）。它是沙箱侧唯一可用的
+ * 身份判据 —— opaque 文档的 `event.origin` 恒为 `"null"`，与任何别的 iframe 分不开。
+ * 实测缺口（任务 #78）：只按 `callId` 认领时，沙箱文档里若再嵌一块可脚本化文档，
+ * 它凭猜到的 callId 就能把本客户端的在途 Promise 提前 settle。
  */
 export interface PluginClientMessageEvent {
   readonly data: unknown;
+  readonly source?: unknown;
 }
 
 /** 沙箱内容把帧交给宿主的最小面（生产环境即 `window.parent`）。 */
@@ -100,6 +106,14 @@ export interface AxAgentPluginClientOptions {
   postTarget?: PluginClientPostTarget;
   /** 宿主帧的接收源；缺省 `window`。同上。 */
   messageSource?: PluginClientMessageSource;
+  /**
+   * 入向帧的**期望来源**（生产环境即 `window.parent`）。同上：只为测试注入。
+   *
+   * 与 `postTarget` 不是一回事：前者是「把帧投给谁」，这里是「只认谁发来的」。
+   * 缺省取 `window.parent`；取不到（离开文档环境）时一律不认帧 —— 与
+   * `isFrameFromSandboxSource` 的「期望来源为空 ⇒ 一帧都不认」同一条边界。
+   */
+  hostWindow?: unknown;
   /** targetOrigin；缺省见 {@link SANDBOX_MESSAGE_TARGET_ORIGIN}。 */
   targetOrigin?: string;
   /** 单次 RPC 往返超时；缺省见 {@link SANDBOX_RPC_TIMEOUT_MS}。 */
@@ -130,7 +144,13 @@ export interface AxAgentPluginClient {
    * `pluginBridgeProtocol.ts` 里 `PLUGIN_UI_ACTION_ARG_KEY` 的注释。
    */
   executeCommand(args?: PluginSandboxArgs): Promise<unknown>;
-  /** 解绑监听并拒绝所有在途调用（组件卸载时调用，避免帧回调打在已卸载的产物上）。 */
+  /**
+   * 解绑监听并拒绝所有在途调用（组件卸载时调用，避免帧回调打在已卸载的产物上）。
+   *
+   * **之后不可复用**（任务 #78 的口径）：后续 `invoke` / `uiAction` / `executeCommand`
+   * 立即以「已释放」拒绝、在途 Promise 以「已释放」拒绝、迟到消息不再 settle。
+   * 需要继续用就新建一个客户端 —— 不提供「reset / 复活」语义。
+   */
   dispose(): void;
   /**
    * 向宿主播报「内容已就绪」（`skill:ready` 帧）。
@@ -207,11 +227,26 @@ export function createAxAgentPluginClient(options: AxAgentPluginClientOptions = 
 
   const targetOrigin = options.targetOrigin ?? SANDBOX_MESSAGE_TARGET_ORIGIN;
   const timeoutMs = options.timeoutMs ?? SANDBOX_RPC_TIMEOUT_MS;
+  // 入向期望来源：生产环境恒为宿主文档 = window.parent（与 srcdoc 运行时的
+  // HOST_SOURCE_WINDOW 同一个对象身份）。注入点只为测试与 SSR 侧，容器/插件不要传。
+  const hostWindow: unknown = options.hostWindow ?? (globalWindow ? globalWindow.parent : undefined);
   const pending = new Map<string, PendingCall>();
   let sequence = 0;
   let disposed = false;
 
   function handleMessage(event: PluginClientMessageEvent): void {
+    // dispose 之后一律拒绝（任务 #78）。监听器此刻通常已被摘掉，但摘监听不是唯一通路：
+    // 宿主/浏览器仍可能把已排队的消息递给被捕获的 listener 引用 —— 这一层兜住它，
+    // 在途 Promise 已在 dispose 时以「已释放」拒绝，迟到帧不得再 settle 任何东西。
+    if (disposed) {
+      return;
+    }
+    // 身份先于内容：与宿主接收侧、srcdoc 运行时同一条谓词（sandboxFrameProtocol.ts）。
+    // 沙箱内再嵌一块可脚本化文档时，它伪造的同 callId 响应帧在这里被丢弃，
+    // 不会提前 settle 本客户端的在途 Promise。
+    if (!isFrameFromSandboxSource({ data: event.data, source: event.source }, hostWindow)) {
+      return;
+    }
     const frame = event.data;
     if (!isRpcResponseFrame(frame)) {
       return;

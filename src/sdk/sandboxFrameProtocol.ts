@@ -126,6 +126,71 @@ export const SANDBOX_RPC_ARG_KEYS = {
   value: "value",
 } as const;
 
+// ── srcdoc 运行时的 ctx 方法面（数据形态；门 C 的提取源） ────────────
+
+/**
+ * `srcdoc` 运行时挂到 `window.ctx` 上的 **RPC 方法面**：一行 = 一个 ctx 方法。
+ *
+ * 为什么是数据（任务 #78）：门 C 原先从产物文本里扫 `M.<key>` 推断「srcdoc 用了哪些 RPC 方法」，
+ * 依赖 `var M = AX_PROTOCOL.m` 这个别名写法 —— 改个变量名提取就失效（虽被分母断言拦成红，
+ * 但那是文本耦合而不是结构）。改成这张表之后：
+ * - `sandboxTemplate.ts` 把本表整份序列化进产物（`AX_RPC_OPS` 标记块），
+ *   **并且 `window.ctx` 的 api/ui/store 分组由它生成** ⇒ 表就是运行时的行为，不是旁挂的说明；
+ * - 门 C 从产物里解析这张表（提取不到 / 条数不等于协议方法表长度即红），不再读别名文本。
+ *
+ * 三个字段各自的身份：
+ * - `method` 是 {@link SANDBOX_RPC_METHODS} 的**键**（不是值）—— 运行时经 `M[key]` 取值，
+ *   方法名仍只有协议表一处定义；键改名由 `satisfies` 在编译期拦。
+ * - `args` 是 {@link SANDBOX_RPC_ARG_KEYS} 的**键**，按位置映射实参；
+ *   字段值仍只有协议表一处定义（运行时经 `A[key]` 取）。
+ * - `lastDefault` 是 ctx 这一层的 UI 缺省值（仅 `ui.notify` 的 `type`），不是协议值。
+ *
+ * ⚠ 为什么放本模块而不放 `pluginBridgeProtocol.ts`：本表描述的是 **srcdoc 沙箱运行时**的方法面，
+ * 与插件桥白名单无关；且 `pluginBridgeProtocol.ts` 已经 import 本模块（{@link SANDBOX_RPC_METHODS}），
+ * 放过去会反向依赖成环。协议值仍然只有本模块与 `pluginBridgeProtocol.ts` 两处定义。
+ */
+export interface SandboxCtxRpcOp {
+  /** ctx 上的分组名。 */
+  readonly group: "api" | "ui" | "store";
+  /** ctx 分组上的方法名。 */
+  readonly name: string;
+  /** 协议方法表的键（运行时经 `AX_PROTOCOL.m[key]` 取方法名）。 */
+  readonly method: keyof typeof SANDBOX_RPC_METHODS;
+  /** 参数键表的键，按位置对应实参（运行时经 `AX_PROTOCOL.a[key]` 取字段名）。 */
+  readonly args: readonly (keyof typeof SANDBOX_RPC_ARG_KEYS)[];
+  /** 末位实参的缺省值（仅 `ui.notify` 的 `type` 用）。 */
+  readonly lastDefault?: string;
+}
+
+/**
+ * srcdoc 运行时的 ctx 方法面（顺序只影响 `window.ctx` 属性的定义顺序，无业务语义）。
+ *
+ * 这张表是「运行时调用了哪些 RPC 方法」的**唯一**清单：模板据此生成 ctx，门 C 据此对账宿主。
+ * 新增一个 ctx 方法 = 在这里加一行（并确认宿主 handler 表接得住，门 C 会红）。
+ */
+export const SANDBOX_SRCDOC_RPC_OPS = [
+  { group: "api", name: "invoke", method: "apiInvoke", args: ["command", "args"] },
+  { group: "api", name: "emit", method: "apiEmit", args: ["event", "payload"] },
+  { group: "ui", name: "navigate", method: "uiNavigate", args: ["path"] },
+  {
+    group: "ui",
+    name: "notify",
+    method: "uiNotify",
+    args: ["message", "type"],
+    lastDefault: "info",
+  },
+  { group: "ui", name: "getTheme", method: "uiGetTheme", args: [] },
+  { group: "ui", name: "getLocale", method: "uiGetLocale", args: [] },
+  // ⚠ `ui.onThemeChange` 刻意不在表里：它是本地回调注册，不发帧，不是 RPC 方法面。
+  { group: "store", name: "read", method: "storeRead", args: ["storeName", "selector"] },
+  {
+    group: "store",
+    name: "write",
+    method: "storeWrite",
+    args: ["storeName", "value", "selector"],
+  },
+] as const satisfies readonly SandboxCtxRpcOp[];
+
 // ── 超时与 origin ───────────────────────────────────────────────────
 
 /**

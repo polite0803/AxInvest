@@ -18,7 +18,9 @@
  *   产物文本还断言「错误判定只引用共享判据」（`AX_PROTOCOL.failureErrorType`），
  *   真值判定 `if (msg[F.error])` 与写死 `"string"` 都算第二份判据 ⇒ 红。
  * - **门 C（能力面对称差集）**：宿主实际接受的 RPC 方法集合（行为探测，不看源码怎么写）
- *   与两个客户端运行时实际引用的方法集合做差集。宿主多一个 / 客户端多一个 ⇒ 红。
+ *   与两个客户端运行时的 RPC 方法集合做差集。宿主多一个 / 客户端多一个 ⇒ 红。
+ *   srcdoc 侧自任务 #78 起从产物里**解析 `AX_RPC_OPS` 数据块**（`SANDBOX_SRCDOC_RPC_OPS`），
+ *   不再扫 `M.<key>` 的别名文本；提取不到 / 条数不等即红。
  * - **门 D（分母非零 + 边界形状）**：每条提取都断言最小条数；响应帧的成功/失败边界由
  *   `isFailureFrame` 单点定义，空串是失败。提取器写坏 ⇒ 差集恒空 = 空转守卫，
  *   这是 `pr-ci.workflow.test.ts` 的教训，绝不复用。
@@ -59,6 +61,7 @@ import {
   SANDBOX_RPC_FAILURE_ERROR_TYPE,
   SANDBOX_RPC_METHODS,
   SANDBOX_RPC_TIMEOUT_MS,
+  SANDBOX_SRCDOC_RPC_OPS,
   type SandboxRpcResponseFrame,
 } from "@/sdk/sandboxFrameProtocol";
 import { DEFAULT_RPC_TIMEOUT_MS, generateSandboxHtml } from "@/sdk/sandboxTemplate";
@@ -171,6 +174,39 @@ function embeddedTableFrom(html: string): unknown {
   const match = /var AX_PROTOCOL = (\{[\s\S]*?\});\n/.exec(html);
   expect(match, "渲染出的沙箱运行时里没有 AX_PROTOCOL 注入点 ⇒ 模板不再从协议表取词汇（空转守卫）").not.toBeNull();
   return JSON.parse((match as RegExpExecArray)[1]);
+}
+
+/** 产物里 ctx 方法面数据块的两端标记（与 `sandboxTemplate.ts` 的生成点逐字一致）。 */
+const RPC_OPS_BEGIN = "/* AX_RPC_OPS_BEGIN */";
+const RPC_OPS_END = "/* AX_RPC_OPS_END */";
+
+/** 产物里解析出的 op 行（与 `sandboxFrameProtocol.ts` 的 `SandboxCtxRpcOp` 同形）。 */
+interface SrcdocRpcOp {
+  readonly group: "api" | "ui" | "store";
+  readonly name: string;
+  readonly method: string;
+  readonly args: readonly string[];
+  readonly lastDefault?: string;
+}
+
+/**
+ * 从渲染产物里解析 ctx 方法面数据（门 C 的唯一提取方式，任务 #78）。
+ *
+ * 提取失败一律抛断言错误，**不许返回空集**：空集进入对称差集等于「宿主多出的方法全算漂移」
+ * 或（两边都空）静默通过。所以标记缺失、标记之间没有数据字面量、解析结果不是数组，
+ * 三处都当场红；条数是否等于协议方法表长度由调用方再断言一次。
+ */
+function srcdocRpcOpsFrom(html: string): SrcdocRpcOp[] {
+  const start = html.indexOf(RPC_OPS_BEGIN);
+  const end = html.indexOf(RPC_OPS_END);
+  expect(start, `渲染产物里没有 ${RPC_OPS_BEGIN} 标记 ⇒ 数据形态提取点丢了`).toBeGreaterThanOrEqual(0);
+  expect(end, `渲染产物里没有 ${RPC_OPS_END} 标记（或顺序颠倒）`).toBeGreaterThan(start);
+  const block = html.slice(start + RPC_OPS_BEGIN.length, end);
+  const assign = /=\s*(\[[\s\S]*?\]);/.exec(block);
+  expect(assign, "AX_RPC_OPS 标记之间没有 `= [ ... ];` 数据字面量 ⇒ 提取失败").not.toBeNull();
+  const parsed: unknown = JSON.parse((assign as RegExpExecArray)[1]);
+  expect(Array.isArray(parsed), "AX_RPC_OPS 不是数组 ⇒ 数据形态不成立").toBe(true);
+  return parsed as SrcdocRpcOp[];
 }
 
 describe("门 A：协议字面量只允许住在两个协议模块", () => {
@@ -328,7 +364,13 @@ describe("门 C：宿主接受集 ↔ 两个客户端引用集 的对称差集�
     return accepted;
   }
 
-  /** 从渲染出的 srcdoc 运行时提取它引用的 RPC 方法键（`M.<key>` 形态）。 */
+  /**
+   * 从渲染出的 srcdoc 产物里**解析数据块**，得到它调用的 RPC 方法（任务 #78）。
+   *
+   * 与旧版（扫 `M.<key>` + 断言 `var M = AX_PROTOCOL.m` 别名）的区别：现在不读运行时的
+   * 代码写法，只读 `sandboxTemplate.ts` 注入的那份 op 数据（表本身就是生成 ctx 的源）。
+   * 提取失败 / 条数不等 ⇒ 在下两处断言里红，不会落成空集。
+   */
   function methodsUsedBySrcdoc(): string[] {
     const html = generateSandboxHtml({
       skillName: "probe",
@@ -337,21 +379,39 @@ describe("门 C：宿主接受集 ↔ 两个客户端引用集 的对称差集�
       permissions: {},
       htmlContent: "",
     });
-    const runtime = html.replace(/var AX_PROTOCOL = \{[\s\S]*?\};\n/, "");
-    const aliasDecl = /\bvar M = AX_PROTOCOL\.m;/.test(runtime);
-    expect(aliasDecl, "生成的运行时没有 `var M = AX_PROTOCOL.m` 别名 ⇒ 提取器已失效，别把空集当通过").toBe(true);
-    const keys = new Set<string>();
-    const re = /\bM\.([A-Za-z][A-Za-z0-9]*)/g;
-    let match: RegExpExecArray | null;
-    while ((match = re.exec(runtime)) !== null) {
-      keys.add(match[1]);
-    }
+    const ops = srcdocRpcOpsFrom(html);
     const tableKeys = Object.keys(SANDBOX_RPC_METHODS) as Array<keyof typeof SANDBOX_RPC_METHODS>;
-    for (const key of keys) {
-      expect(tableKeys, `srcdoc 引用了协议表里没有的方法键 ${key}`).toContain(key);
-    }
-    return [...keys].map((key) => SANDBOX_RPC_METHODS[key as keyof typeof SANDBOX_RPC_METHODS]);
+    expect(
+      ops.length,
+      "从 srcdoc 运行时提取到的 op 数 ≠ 协议方法表长度 ⇒ 提取失效（空集不得当通过）",
+    ).toBe(tableKeys.length);
+    return ops.map((op) => {
+      expect(tableKeys, `srcdoc 的 op 引用了协议表里没有的方法键 ${op.method}`).toContain(op.method);
+      return SANDBOX_RPC_METHODS[op.method as keyof typeof SANDBOX_RPC_METHODS];
+    });
   }
+
+  /**
+   * 数据形态本身的自证（任务 #78 的硬要求）：源表 == 产物里的数据；标记缺失 / 数据被清空
+   * **必须**让提取失败或让条数断言不成立 —— 反过来证明上面的分母不是装饰。
+   */
+  it("srcdoc 的 op 表是数据形态：源表 == 产物数据；标记缺失或数据清空即红", () => {
+    const html = generateSandboxHtml({
+      skillName: "ops-probe",
+      skillId: "ops-probe:main",
+      props: {},
+      permissions: {},
+      htmlContent: "",
+    });
+    expect(srcdocRpcOpsFrom(html)).toEqual(SANDBOX_SRCDOC_RPC_OPS);
+    // 标记被拿掉：提取器必须失败，而不是静默返回空集
+    expect(() => srcdocRpcOpsFrom(html.replace(RPC_OPS_BEGIN, "/* marker-removed */"))).toThrow();
+    // 数据被清成空数组：解析得到空集，但条数断言必须不成立（空集 ≠ 通过）
+    const emptied = html.replace(/var AX_RPC_OPS = \[[\s\S]*?\];/, "var AX_RPC_OPS = [];");
+    const emptyOps = srcdocRpcOpsFrom(emptied);
+    expect(emptyOps).toHaveLength(0);
+    expect(emptyOps.length, "空 op 集被当成通过 ⇒ 分母断言失效").not.toBe(Object.keys(SANDBOX_RPC_METHODS).length);
+  });
 
   /** 从 bundle 客户端源码提取它引用的 RPC 方法键（`SANDBOX_RPC_METHODS.<key>` 形态）。 */
   function methodsUsedByBundleClient(): string[] {
@@ -450,9 +510,13 @@ describe("门 E：srcdoc 运行时的真实行为", () => {
    * 二者不是同一对象就等于「宿主自己发的帧被沙箱当成外来帧」—— 那是攻击形态，不是正常通路。
    */
   function instantiateSrcdocRuntime(): {
+    /** 未替换占位符的渲染产物（数据形态提取用；与运行时同一份模板）。 */
+    html: string;
     posted: Array<{ message: unknown; targetOrigin: string }>;
     deliver: (frame: unknown, source?: unknown) => void;
     ctxApi: { invoke: (command: string, args?: unknown) => Promise<unknown> };
+    /** 运行时挂出的完整 ctx（api / ui / store 三个分组）。 */
+    ctx: Record<"api" | "ui" | "store", Record<string, (...args: unknown[]) => unknown>>;
     /** 把方法注册进沙箱（宿主 `callSkillMethod` 的那一侧），供「伪造来源 ⇒ 不执行」用例使用。 */
     registerMethod: (name: string, fn: (args: unknown) => unknown) => void;
     /** 与 `hostWindow` 不是同一对象的一块「别的文档」，即伪造来源用例要用的那个 source。 */
@@ -464,7 +528,8 @@ describe("门 E：srcdoc 运行时的真实行为", () => {
       props: {},
       permissions: {},
       htmlContent: "",
-    })
+    });
+    const rendered = html
       .replace('"__SKILL_NAME__"', '"behavior-probe"')
       .replace('"__SKILL_ID__"', '"behavior-probe:main"')
       .replace("__INITIAL_PROPS__", "{}")
@@ -472,12 +537,12 @@ describe("门 E：srcdoc 运行时的真实行为", () => {
     // 产物里有**两个** script 块（head 里禁 fetch/XHR 的那个 + body 末尾的运行时）。
     // 取「最后一个 <script> 到最后一个 </script>」是确定性的；正则的非贪婪会从第一个块起匹配，
     // 把中间的 HTML 一起吞进来得到的脚本（实测 SyntaxError: Unexpected token '<'）。
-    const scriptOpen = html.lastIndexOf("<script>");
+    const scriptOpen = rendered.lastIndexOf("<script>");
     const scriptStart = scriptOpen + "<script>".length;
-    const scriptEnd = html.lastIndexOf("</script>");
+    const scriptEnd = rendered.lastIndexOf("</script>");
     expect(scriptOpen, "产物里没有 script 块 ⇒ 模板结构变了，这条行为证据失效").toBeGreaterThan(0);
     expect(scriptEnd, "产物里的 script 块没有闭合").toBeGreaterThan(scriptStart);
-    const scriptText = html.slice(scriptStart, scriptEnd);
+    const scriptText = rendered.slice(scriptStart, scriptEnd);
     expect(scriptText, "取到的不是运行时那段（模板结构变了）").toContain("AxAgent Skill Sandbox Runtime");
 
     const posted: Array<{ message: unknown; targetOrigin: string }> = [];
@@ -520,7 +585,11 @@ describe("门 E：srcdoc 运行时的真实行为", () => {
     // 产物文本交给 Function 执行；window / document 由参数注入，其余（Promise/Date/setTimeout）用宿主全局
     new Function("window", "document", scriptText)(fakeWindow, fakeDocument);
 
-    const ctxApi = (fakeWindow.ctx as { api: { invoke: (c: string, a?: unknown) => Promise<unknown> } }).api;
+    const ctx = fakeWindow.ctx as Record<
+      "api" | "ui" | "store",
+      Record<string, (...args: unknown[]) => unknown>
+    >;
+    const ctxApi = ctx.api as { invoke: (command: string, args?: unknown) => Promise<unknown> };
     expect(ctxApi, "运行时没挂出 window.ctx.api ⇒ 模板产物结构变了").toBeTruthy();
 
     /** 宿主 → 沙箱投一帧：`source` 缺省是宿主自己，传 `foreignWindow` 即「别的文档伪造的一帧」。 */
@@ -536,9 +605,11 @@ describe("门 E：srcdoc 运行时的真实行为", () => {
     deliver(buildRpcResultFrame(themeRequest.callId as string, "light"));
 
     return {
+      html,
       posted,
       deliver,
       ctxApi,
+      ctx,
       registerMethod: (name: string, fn: (args: unknown) => unknown): void => {
         (fakeWindow.registerSkillMethod as (n: string, f: (a: unknown) => unknown) => void)(name, fn);
       },
@@ -581,6 +652,78 @@ describe("门 E：srcdoc 运行时的真实行为", () => {
     for (const frame of sandbox.posted) {
       expect(frame.targetOrigin).toBe(SANDBOX_MESSAGE_TARGET_ORIGIN);
     }
+  });
+
+  /**
+   * 数据即行为（任务 #78）：`AX_RPC_OPS` 若不是「运行时真正会调用的方法面」，
+   * 门 C 的数据提取就成了装饰（与已删的 `timeoutMs` 装饰值同类）。逐条调用 ctx 方法，
+   * 核对发出的 method 与参数字段 —— 表 = 生成源 ⇒ 这一条按构造成立，但仍要在**产物**上证一次。
+   */
+  it("AX_RPC_OPS 每一行都真的落到 ctx 上：method / 参数字段与表逐条一致", async () => {
+    const sandbox = instantiateSrcdocRuntime();
+    const ops = srcdocRpcOpsFrom(sandbox.html);
+    expect(ops.length, "op 表解析为空 ⇒ 本用例失去判据").toBe(Object.keys(SANDBOX_RPC_METHODS).length);
+
+    for (const op of ops) {
+      const fn = sandbox.ctx[op.group][op.name];
+      expect(typeof fn, `ctx.${op.group}.${op.name} 不存在 ⇒ 数据表与运行时行为脱节`).toBe("function");
+
+      const before = sandbox.posted.length;
+      const probeArgs = ["a0", "a1", "a2"].slice(0, op.args.length);
+      const pending = fn(...probeArgs) as Promise<unknown>;
+      expect(sandbox.posted.length, `ctx.${op.group}.${op.name} 没有发出帧`).toBe(before + 1);
+
+      const frame = sandbox.posted[before]!.message as {
+        type: string;
+        callId: string;
+        method: string;
+        args?: Record<string, unknown>;
+      };
+      expect(frame.type).toBe(SANDBOX_FRAME_TYPES.request);
+      expect(frame.method, `ctx.${op.group}.${op.name} 发出的方法名与 op 表不符`).toBe(
+        SANDBOX_RPC_METHODS[op.method as keyof typeof SANDBOX_RPC_METHODS],
+      );
+
+      if (op.args.length === 0) {
+        // 无参方法不带 args —— 与协议构造器（buildRpcRequestFrame 缺省不带 args）同口径
+        expect(frame.args, `ctx.${op.group}.${op.name} 无参却带了 args 字段`).toBeUndefined();
+      } else {
+        const expectedArgs = Object.fromEntries(
+          op.args.map((key, index) => [
+            SANDBOX_RPC_ARG_KEYS[key as keyof typeof SANDBOX_RPC_ARG_KEYS],
+            probeArgs[index],
+          ]),
+        );
+        expect(frame.args, `ctx.${op.group}.${op.name} 的参数字段与 op 表不符`).toEqual(expectedArgs);
+      }
+
+      sandbox.deliver(buildRpcResultFrame(frame.callId, null));
+      await expect(pending).resolves.toBeNull();
+    }
+
+    // 反向：ctx 上不许有表外的隐藏 RPC 方法（否则「表 = 方法面」只覆盖了一个方向）
+    for (const group of ["api", "ui", "store"] as const) {
+      const expected = ops.filter((op) => op.group === group).map((op) => op.name);
+      if (group === "ui") {
+        // 唯一的非 RPC 成员：本地回调注册（不发帧，故不在 op 表里）
+        expected.push("onThemeChange");
+      }
+      expect(Object.keys(sandbox.ctx[group]).sort(), `ctx.${group} 的方法面与 op 表不一致`).toEqual(expected.sort());
+    }
+
+    // 末位缺省值（op.lastDefault）仍按原样生效：ui.notify(message) 的 type 缺省 "info"
+    const beforeNotify = sandbox.posted.length;
+    const notify = sandbox.ctx.ui.notify("hello") as Promise<unknown>;
+    const notifyFrame = sandbox.posted[beforeNotify]!.message as {
+      callId: string;
+      args?: Record<string, unknown>;
+    };
+    expect(notifyFrame.args).toEqual({
+      [SANDBOX_RPC_ARG_KEYS.message]: "hello",
+      [SANDBOX_RPC_ARG_KEYS.type]: "info",
+    });
+    sandbox.deliver(buildRpcResultFrame(notifyFrame.callId, null));
+    await notify;
   });
 
   /**

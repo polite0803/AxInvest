@@ -172,10 +172,15 @@ plugin.dispose();
 | 卸载时没调 `dispose()`     | 该文档内的 `message` 监听器与在途 `setTimeout` 不回收                                                                                                               | 「一次没什么影响」    | 泄漏**按重试次数累计**：宿主的重试是重挂一块新 iframe（旧文档随卸载回收），但同一个文档里反复建客户端而不释放就会堆起来       |
 
 - **生产用法就是无参**：`createAxAgentPluginClient()` —— 缺省投递面是 `window.parent` / `window`。
-  `postTarget` / `messageSource` / `timeoutMs` / `targetOrigin` 四个键**是测试注入点**，
+  `postTarget` / `messageSource` / `hostWindow` / `timeoutMs` / `targetOrigin` 五个键**是测试注入点**，
   产物里传它们等于把测试替身投进真实投递面（宿主容器也不传，见该文件的 A/B 注释）。
+  `hostWindow` 是入向帧的**期望来源**（缺省 `window.parent`，与 srcdoc 运行时同一条
+  `isFrameFromSandboxSource` 谓词）：来源不对的响应帧一律丢弃 —— 沙箱文档里再嵌一块可脚本化文档，
+  也无法用猜到的 `callId` 提前结算在途调用。
 - **时机**：入口模块顶层求值即创建、随即调一次 `announceReady()`。重复调用无害（宿主对就绪帧是幂等的，
   只会建一座桥）。
+- **`dispose()` 之后不可复用**：新调用、在途 Promise、迟到消息三条一律以「已释放」收口；
+  需要继续用请新建客户端（不提供 reset / 复活语义）。
 - **对称的那一半在宿主**：容器卸载路径拆桥 + 摘监听 + 清超时，与产物侧的 `dispose()` 是同一处的两半，
   缺任一半都会留下一侧不回收的监听或在途 Promise。
 

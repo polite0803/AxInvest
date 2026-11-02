@@ -18,6 +18,7 @@ import { describe, expect, it, vi } from "vitest";
 import { HOST_BOUND_PLUGIN_ID_FIELD, PLUGIN_BRIDGE_COMMAND_NAMES } from "@/sdk/pluginBridgeProtocol";
 import {
   AX_AGENT_PLUGIN_BRIDGE_COMMANDS,
+  type AxAgentPluginClientOptions,
   createAxAgentPluginClient,
   type PluginClientMessageEvent,
   type PluginClientMessageSource,
@@ -35,6 +36,10 @@ import {
 function createFakeHost() {
   const posted: unknown[] = [];
   const listeners: Array<(event: PluginClientMessageEvent) => void> = [];
+  /** 沙箱眼里的「宿主文档」：既是客户端期望的来源，也是宿主回帧的 `event.source`。 */
+  const hostWindow = { postMessage: (): void => {} };
+  /** 应用里另一块可脚本化文档 —— 与 `hostWindow` 不是同一对象，即 #78 要拒的伪造来源。 */
+  const foreignWindow = { postMessage: (): void => {} };
   const postTarget: PluginClientPostTarget = {
     postMessage: (message: unknown): void => {
       posted.push(message);
@@ -55,14 +60,31 @@ function createFakeHost() {
     postTarget,
     messageSource,
     posted,
-    /** 宿主回发一帧给沙箱。 */
-    deliver: (frame: unknown): void => {
+    hostWindow,
+    foreignWindow,
+    /** 宿主回发一帧给沙箱；`source` 缺省是宿主自己，传 `foreignWindow` 即伪造来源。 */
+    deliver: (frame: unknown, source: unknown = hostWindow): void => {
       for (const listener of listeners.slice()) {
-        listener({ data: frame });
+        listener({ data: frame, source });
       }
     },
+    /** dispose 之后仍能拿到监听器引用（模拟宿主/浏览器把已排队消息递进来的通路）。 */
+    captureListener: (): ((event: PluginClientMessageEvent) => void) | undefined => listeners[0],
     listenerCount: (): number => listeners.length,
   };
+}
+
+/** 用假宿主创建客户端：三处注入面（投递/接收/期望来源）一起给，生产用法不传参。 */
+function createClient(
+  host: ReturnType<typeof createFakeHost>,
+  options: AxAgentPluginClientOptions = {},
+) {
+  return createAxAgentPluginClient({
+    postTarget: host.postTarget,
+    messageSource: host.messageSource,
+    hostWindow: host.hostWindow,
+    ...options,
+  });
 }
 
 /** 最近一次发出的帧（断言用）。 */
@@ -75,7 +97,7 @@ function lastFrame(host: ReturnType<typeof createFakeHost>): Record<string, unkn
 describe("客户端发出的帧形状", () => {
   it("uiAction 走 api.invoke 请求帧，业务参数原样带上且不包含 pluginId", async () => {
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
 
     const promise = client.uiAction({ type: "refresh" });
     host.deliver(buildRpcResultFrame(lastFrame(host).callId as string, { handled: true }));
@@ -95,7 +117,7 @@ describe("客户端发出的帧形状", () => {
 
   it("调用方硬塞 pluginId 时，客户端就把它剥掉（不给插件「能指定归属」的假接口）", async () => {
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
 
     // 类型上 pluginId 是 never（编译期挡 TS 调用方），这里用 cast 模拟纯 JS 的第三方产物
     const promise = client.invoke(
@@ -114,7 +136,7 @@ describe("客户端发出的帧形状", () => {
 
   it("executeCommand 除 pluginId 外一律透传（业务键名不在此钉死，归后端 schema）", async () => {
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
 
     const promise = client.executeCommand({ name: "greet", input: { a: 1, b: [2, 3] } } as never);
     const frame = lastFrame(host);
@@ -129,7 +151,7 @@ describe("客户端发出的帧形状", () => {
 
   it("调用方不传业务参数时，信封里只有 command（不带空 args）", async () => {
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
     const promise = client.executeCommand();
     const frame = lastFrame(host);
     host.deliver(buildRpcResultFrame(frame.callId as string, null));
@@ -145,7 +167,7 @@ describe("客户端发出的帧形状", () => {
 describe("白名单：客户端这一层就不放行", () => {
   it("白名单外的命令名被拒绝，且**一帧都不发**", async () => {
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
 
     // 类型面写不出这个命令名，cast 模拟运行期被擦除后的纯 JS 调用
     await expect(client.invoke("plugin_read_panel_asset" as never, { panelId: "x" }))
@@ -157,7 +179,7 @@ describe("白名单：客户端这一层就不放行", () => {
 
   it("空串与 undefined 命令名同样被拒且不发帧", async () => {
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
     await expect(client.invoke("" as never)).rejects.toThrow(/白名单外/);
     await expect(client.invoke(undefined as never)).rejects.toThrow(/白名单外/);
     expect(host.posted).toHaveLength(0);
@@ -175,7 +197,7 @@ describe("白名单：客户端这一层就不放行", () => {
 describe("响应处理", () => {
   it("宿主回错误帧 → 以 Error 拒绝，消息就是宿主给的文本", async () => {
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
 
     const promise = client.uiAction({ type: "boom" });
     const callId = lastFrame(host).callId as string;
@@ -187,7 +209,7 @@ describe("响应处理", () => {
   it("宿主回**空串**错误帧 → 仍然 reject（审查应修 2：判据不是真值，三通道同口径）", async () => {
     // 触发条件是真实存在的：handler 抛空串、后端 Err(String) 空消息都会给出 ""
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
 
     const promise = client.uiAction({ type: "empty-error" });
     const callId = lastFrame(host).callId as string;
@@ -201,7 +223,7 @@ describe("响应处理", () => {
 
   it("成功帧带 result: undefined 仍判成功（error 键不在 ⇒ 不是失败）", async () => {
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
 
     const promise = client.executeCommand({ name: "noop" } as never);
     const callId = lastFrame(host).callId as string;
@@ -212,7 +234,7 @@ describe("响应处理", () => {
 
   it("陌生 callId 的响应帧被忽略（不影响在途调用）", async () => {
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
 
     const promise = client.executeCommand({ name: "slow" } as never);
     host.deliver(buildRpcResultFrame("plugin_9999_0000", "不该被认领"));
@@ -222,9 +244,42 @@ describe("响应处理", () => {
     client.dispose();
   });
 
+  /**
+   * #78：来源身份先于内容。
+   *
+   * 攻击形态：沙箱文档里再嵌一块可脚本化文档，它对沙箱 window 投一帧带**猜得到的 callId**
+   * 的合法响应 —— 内容层（帧类型 + callId 全对）过得去，只有来源不对。
+   * 断言打在行为上：这一帧不得 settle 在途 Promise；同一帧换回宿主来源才结算。
+   */
+  it("外来来源用猜到的 callId 伪造响应 ⇒ 不 settle 在途调用；换回宿主来源才结算", async () => {
+    const host = createFakeHost();
+    const client = createClient(host);
+
+    const promise = client.executeCommand({ name: "victim" } as never);
+    const callId = lastFrame(host).callId as string;
+    let settledBy = "";
+    const tracked = promise.then(
+      (value) => {
+        settledBy = `resolve:${String(value)}`;
+      },
+      (error: unknown) => {
+        settledBy = `reject:${String((error as Error).message)}`;
+      },
+    );
+
+    host.deliver(buildRpcResultFrame(callId, "stolen"), host.foreignWindow);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settledBy, "陌生来源用猜得到的 callId 结算了在途调用").toBe("");
+
+    host.deliver(buildRpcResultFrame(callId, "from-host"));
+    await expect(promise).resolves.toBe("from-host");
+    await tracked;
+    client.dispose();
+  });
+
   it("非帧消息（宿主外的其它 postMessage）被忽略", async () => {
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
     expect(() => host.deliver({ hello: "world" })).not.toThrow();
     expect(() => host.deliver("string-frame")).not.toThrow();
     expect(() => host.deliver(null)).not.toThrow();
@@ -235,11 +290,7 @@ describe("响应处理", () => {
     // 用真定时器 + 极短超时：vi.useFakeTimers() 会连带影响 vitest 自己的用例超时器，
     // 这里只关心「到点必拒」，不值得为省 20ms 引入一条环境耦合。
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({
-      postTarget: host.postTarget,
-      messageSource: host.messageSource,
-      timeoutMs: 20,
-    });
+    const client = createClient(host, { timeoutMs: 20 });
     const promise = client.uiAction({ type: "never-answered" });
     let settledBeforeTimer = false;
     promise.catch(() => {
@@ -258,7 +309,7 @@ describe("响应处理", () => {
 describe("就绪上报（page 粒度复用容器生命周期的前提）", () => {
   it("announceReady 发一帧只带类型判别字段的内容", () => {
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
 
     client.announceReady();
     expect(host.posted).toHaveLength(1);
@@ -268,7 +319,7 @@ describe("就绪上报（page 粒度复用容器生命周期的前提）", () =>
 
   it("dispose 之后不再上报，也不抛错", () => {
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
     client.dispose();
     expect(() => client.announceReady()).not.toThrow();
     expect(host.posted).toHaveLength(0);
@@ -276,13 +327,12 @@ describe("就绪上报（page 粒度复用容器生命周期的前提）", () =>
 
   it("投递面已脱离文档时静默（后续请求各自报错，不在这里炸）", () => {
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({
+    const client = createClient(host, {
       postTarget: {
         postMessage: (): void => {
           throw new Error("detached");
         },
       },
-      messageSource: host.messageSource,
     });
     expect(() => client.announceReady()).not.toThrow();
     client.dispose();
@@ -292,7 +342,7 @@ describe("就绪上报（page 粒度复用容器生命周期的前提）", () =>
 describe("生命周期", () => {
   it("dispose 解绑监听并拒绝所有在途调用", async () => {
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
     expect(host.listenerCount()).toBe(1);
 
     const pending = client.executeCommand({ name: "in-flight" } as never);
@@ -314,7 +364,7 @@ describe("生命周期", () => {
       },
     };
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: throwing, messageSource: host.messageSource });
+    const client = createClient(host, { postTarget: throwing });
     await expect(client.uiAction({ type: "x" })).rejects.toThrow("detached");
     client.dispose();
   });
@@ -329,9 +379,81 @@ describe("生命周期", () => {
     }
     // 显式注入两侧投递面时不依赖 window（测试与 SSR 侧的用法）
     const host = createFakeHost();
-    const client = createAxAgentPluginClient({ postTarget: host.postTarget, messageSource: host.messageSource });
+    const client = createClient(host);
     expect(typeof client.invoke).toBe("function");
     client.dispose();
+  });
+});
+
+/**
+ * #78 的口径：**dispose 之后不可复用**（不提供 reset / 复活）。
+ * 三条各一个用例：新调用立即拒绝、在途调用不悬挂、迟到消息不再 settle。
+ */
+describe("dispose 后不可复用（任务 #78）", () => {
+  it("(a) dispose 之后的新调用立即拒绝，且一帧都不发", async () => {
+    const host = createFakeHost();
+    const client = createClient(host);
+    client.dispose();
+    const before = host.posted.length;
+
+    await expect(client.invoke(PLUGIN_BRIDGE_COMMAND_NAMES.uiAction, { action: { type: "x" } } as never))
+      .rejects.toThrow(/已释放（dispose 后不可再调用）/);
+    await expect(client.uiAction({ type: "x" })).rejects.toThrow(/已释放/);
+    await expect(client.executeCommand({ name: "x" } as never)).rejects.toThrow(/已释放/);
+    expect(host.posted.length, "dispose 之后仍发出了帧").toBe(before);
+  });
+
+  it("(b) dispose 时在途调用立即以「已释放」拒绝，不永久挂起", async () => {
+    const host = createFakeHost();
+    const client = createClient(host);
+    const pending = client.executeCommand({ name: "in-flight" } as never);
+    expect(lastFrame(host).callId).toBeTruthy();
+
+    const outcome = pending.then(
+      (): null => null,
+      (error: unknown) => error,
+    );
+    client.dispose();
+
+    // 与「悬挂」竞速：50ms 内必须已拒绝，否则视为永久挂起
+    const settled = await Promise.race([
+      outcome,
+      new Promise<string>((resolve) => setTimeout(() => resolve("still-pending"), 50)),
+    ]);
+    expect(settled, "dispose 之后在途调用仍在悬挂").not.toBe("still-pending");
+    expect(settled).toBeInstanceOf(Error);
+    expect((settled as Error).message).toMatch(/已释放/);
+  });
+
+  it("(c) dispose 之后到达的响应帧不得再 settle（含被捕获的监听器引用）", async () => {
+    const host = createFakeHost();
+    const client = createClient(host);
+    const listener = host.captureListener();
+    expect(listener, "客户端没有注册 message 监听器").toBeTruthy();
+
+    const pending = client.executeCommand({ name: "late" } as never);
+    const callId = lastFrame(host).callId as string;
+    let settlements = 0;
+    const tracked = pending.then(
+      () => {
+        settlements += 1;
+      },
+      () => {
+        settlements += 1;
+      },
+    );
+
+    client.dispose();
+    await expect(pending).rejects.toThrow(/已释放/);
+    await tracked;
+    expect(settlements).toBe(1);
+
+    // 摘监听不是唯一通路：宿主/浏览器仍可能把已排队的消息递给被捕获的 listener 引用。
+    // 同一 callId、来源也正确 —— 唯一挡住它的是 dispose 这一层。
+    expect(() => listener!({ data: buildRpcResultFrame(callId, "late-result"), source: host.hostWindow })).not
+      .toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settlements, "dispose 之后迟到帧又 settle 了一次").toBe(1);
   });
 });
 

@@ -74,12 +74,17 @@ function createWire() {
   const listeners: Array<(event: PluginClientMessageEvent) => void> = [];
 
   let bridge: HostApiBridge | null = null;
+  /**
+   * 沙箱眼里的「宿主文档」：`createAxAgentPluginClient` 的期望来源（生产即 `window.parent`），
+   * 也是宿主回帧时 `event.source` 的取值。与下面的 `contentWindow` / `foreignWindow` 都不是同一对象。
+   */
+  const hostWindow = { postMessage: (): void => {} } as unknown as Window;
   const contentWindow = {
     postMessage: (message: unknown): void => {
       responseLog.push(message);
       // 宿主回包投给沙箱（沙箱侧的 message 监听器据此 resolve/reject）
       for (const listener of listeners.slice()) {
-        listener({ data: message });
+        listener({ data: message, source: hostWindow });
       }
     },
   } as unknown as Window;
@@ -122,7 +127,7 @@ function createWire() {
     contentWindow,
   });
 
-  const client = createAxAgentPluginClient({ postTarget, messageSource });
+  const client = createAxAgentPluginClient({ postTarget, messageSource, hostWindow });
 
   return {
     client,

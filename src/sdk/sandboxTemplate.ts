@@ -25,7 +25,12 @@
  * 分不出「谁的帧」）只写在 `SANDBOX_MESSAGE_TARGET_ORIGIN` 与 `isFrameFromSandboxSource` 两处。
  */
 
-import { isFrameFromSandboxSource, SANDBOX_FRAME_PROTOCOL_TABLE, SANDBOX_RPC_TIMEOUT_MS } from "./sandboxFrameProtocol";
+import {
+  isFrameFromSandboxSource,
+  SANDBOX_FRAME_PROTOCOL_TABLE,
+  SANDBOX_RPC_TIMEOUT_MS,
+  SANDBOX_SRCDOC_RPC_OPS,
+} from "./sandboxFrameProtocol";
 import type { SkillPermissions } from "./types";
 
 /** RPC 调用默认超时（毫秒）—— 取自帧协议单一来源，此处保留历史名供既有调用面使用。 */
@@ -148,6 +153,10 @@ function generateRuntimeScript(rpcTimeoutMs: number): string {
   // 不需要在这里再写一遍任何一项。
   const protocolJson = JSON.stringify(SANDBOX_FRAME_PROTOCOL_TABLE);
 
+  // ctx 方法面（任务 #78）：与协议表同一来源模块，作为**数据**注入并生成下面的 window.ctx。
+  // 门 C 从产物里解析这份数据对账宿主 —— 不再依赖 `var M = AX_PROTOCOL.m` 的文本别名。
+  const rpcOpsJson = JSON.stringify(SANDBOX_SRCDOC_RPC_OPS);
+
   // 入向身份判据：把协议模块里**那一条**函数的实现原样内联（任务 #72）。
   // 为什么用 toString 而不是在模板里再写一次 `event.source === window.parent`：
   // 写第二次就不是「同一个谓词」了 —— 宿主侧那条函数改了边界（例如再补一条「空期望一律拒」的
@@ -168,6 +177,14 @@ function generateRuntimeScript(rpcTimeoutMs: number): string {
   var M = AX_PROTOCOL.m;
   var F = AX_PROTOCOL.f;
   var A = AX_PROTOCOL.a;
+
+  // ctx 的 RPC 方法面（**数据形态**，唯一来源：宿主 src/sdk/sandboxFrameProtocol.ts 的
+  // SANDBOX_SRCDOC_RPC_OPS）。下面的 api / ui / store 分组由这张表生成 ⇒
+  // 「运行时调用了哪些方法」只有这一份清单，不再靠手写 M.xxx 调用点表达。
+  // 门 C 从这段标记之间解析数据（提取不到即红），标记本身是产物与测试之间的稳定契约。
+  /* AX_RPC_OPS_BEGIN */
+  var AX_RPC_OPS = ${rpcOpsJson};
+  /* AX_RPC_OPS_END */
 
   // 入向身份判据（唯一来源：宿主 src/sdk/sandboxFrameProtocol.ts 的 isFrameFromSandboxSource，
   // 生成本文档时整条函数原样内联）。沙箱这一侧的期望来源 = 宿主文档 = window.parent。
@@ -287,50 +304,58 @@ function generateRuntimeScript(rpcTimeoutMs: number): string {
     } catch(e) { /* postMessage to parent may fail if iframe is detached */ }
   }
 
-  // ── ctx 对象 ──
+  // ── ctx 对象（api / ui / store 三个分组由 AX_RPC_OPS 生成，不手写调用点） ──
+
+  /** 由一条 op 生成一个 RPC 方法：实参按 op.args 的顺序映射成参数字典。 */
+  function axMakeRpc(op) {
+    var methodName = M[op.method];
+    var argKeys = op.args;
+    var lastDefault = op.lastDefault;
+    return function() {
+      // 无参方法（ui.getTheme / ui.getLocale）不带 args —— 与协议构造器同口径。
+      if (argKeys.length === 0) {
+        return callHost(methodName);
+      }
+      var pairs = [];
+      for (var i = 0; i < argKeys.length; i++) {
+        var value = arguments[i];
+        if (i === argKeys.length - 1 && lastDefault !== undefined && !value) {
+          value = lastDefault;
+        }
+        pairs.push([A[argKeys[i]], value]);
+      }
+      return callHost(methodName, axObj(pairs));
+    };
+  }
+
+  /** 生成一个 ctx 分组；是否冻结由调用方决定（ui 还要追加本地回调 onThemeChange）。 */
+  function axRpcGroup(groupName) {
+    var group = {};
+    for (var i = 0; i < AX_RPC_OPS.length; i++) {
+      var op = AX_RPC_OPS[i];
+      if (op.group === groupName) {
+        group[op.name] = axMakeRpc(op);
+      }
+    }
+    return group;
+  }
+
+  // onThemeChange 不是 RPC 方法（不发帧），故不在 AX_RPC_OPS 里，单独追加。
+  var uiGroup = axRpcGroup("ui");
+  uiGroup.onThemeChange = function(callback) {
+    if (typeof callback === "function") {
+      themeChangeCallbacks.push(callback);
+    }
+  };
 
   window.ctx = Object.freeze({
     get skillName() { return SKILL_NAME; },
     get skillId()   { return SKILL_ID; },
     get props()     { return INITIAL_PROPS; },
 
-    api: Object.freeze({
-      invoke: function(command, args) {
-        return callHost(M.apiInvoke, axObj([[A.command, command], [A.args, args]]));
-      },
-      emit: function(event, payload) {
-        return callHost(M.apiEmit, axObj([[A.event, event], [A.payload, payload]]));
-      }
-    }),
-
-    ui: Object.freeze({
-      navigate: function(path) {
-        return callHost(M.uiNavigate, axObj([[A.path, path]]));
-      },
-      notify: function(message, type) {
-        return callHost(M.uiNotify, axObj([[A.message, message], [A.type, type || "info"]]));
-      },
-      getTheme: function() {
-        return callHost(M.uiGetTheme);
-      },
-      getLocale: function() {
-        return callHost(M.uiGetLocale);
-      },
-      onThemeChange: function(callback) {
-        if (typeof callback === "function") {
-          themeChangeCallbacks.push(callback);
-        }
-      }
-    }),
-
-    store: Object.freeze({
-      read: function(storeName, selector) {
-        return callHost(M.storeRead, axObj([[A.storeName, storeName], [A.selector, selector]]));
-      },
-      write: function(storeName, value, selector) {
-        return callHost(M.storeWrite, axObj([[A.storeName, storeName], [A.value, value], [A.selector, selector]]));
-      }
-    })
+    api: Object.freeze(axRpcGroup("api")),
+    ui: Object.freeze(uiGroup),
+    store: Object.freeze(axRpcGroup("store"))
   });
 
   // ── 供 Skill 注册 RPC 方法的 API ──

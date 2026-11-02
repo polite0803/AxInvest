@@ -244,7 +244,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 
 | 口径 | 命中 | 备注 |
 |---|---|---|
-| K1：`pub trait` 总数（8 根 2016 个 `.rs`） | **320** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。**2026-11-02 `#81` 再升 1（2009→2010）**：行情 DTO 上收新增 `harness/src/stock_market_types.rs`；`astock-data/src/types.rs` 保留为垫片（未删文件），故只 +1。**同日 C 批再升 1（2010→2011）**：`DataOutcome` 上收新增 `harness/src/data_outcome.rs`；`astock-data/src/outcome.rs` 保留为垫片。**同日 `jobs.store` 接缝再升 2 项**：新增 `harness/src/jobs_store.rs`（文件 +1）与 `JobStoreProvider`（trait +1）⇒ **2012 / 318**。**同日 `workflow.run` 再升 2 项**：新增 `harness/src/workflow_run.rs`（文件 +1）与 `WorkflowRunProvider`（trait +1）⇒ **2013 / 319**。**同日宿主服务再升 1（2013→2014）**：新增 `src-tauri/src/commands/stock_workflow/workflow_run_service.rs`。**同日 `trading.engine` 再升 2 项**：新增 `harness/src/trading_engine.rs`（文件 +1）与 `TradingEngineProvider`（trait +1）⇒ **2015 / 320**。**同日宿主服务再升 1（2015→2016）**：新增 `src-tauri/src/commands/stock_workflow/trading_engine_service.rs`。 |
+| K1：`pub trait` 总数（8 根 2018 个 `.rs`） | **322** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。**2026-11-02 `#81` 再升 1（2009→2010）**：行情 DTO 上收新增 `harness/src/stock_market_types.rs`；`astock-data/src/types.rs` 保留为垫片（未删文件），故只 +1。**同日 C 批再升 1（2010→2011）**：`DataOutcome` 上收新增 `harness/src/data_outcome.rs`；`astock-data/src/outcome.rs` 保留为垫片。**同日 `jobs.store` 接缝再升 2 项**：新增 `harness/src/jobs_store.rs`（文件 +1）与 `JobStoreProvider`（trait +1）⇒ **2012 / 318**。**同日 `workflow.run` 再升 2 项**：新增 `harness/src/workflow_run.rs`（文件 +1）与 `WorkflowRunProvider`（trait +1）⇒ **2013 / 319**。**同日宿主服务再升 1（2013→2014）**：新增 `src-tauri/src/commands/stock_workflow/workflow_run_service.rs`。**同日 `trading.engine` 再升 2 项**：新增 `harness/src/trading_engine.rs`（文件 +1）与 `TradingEngineProvider`（trait +1）⇒ **2015 / 320**。**同日宿主服务再升 1（2015→2016）**：新增 `src-tauri/src/commands/stock_workflow/trading_engine_service.rs`。**2026-11-03 `stock.monitor` + `quote.watcher` 契约再升 4 项**：新增 `harness/src/stock_monitor.rs`、`harness/src/quote_watcher.rs`（文件 +2）与 `StockMonitorProvider`、`QuoteWatcherProvider`（trait +2）⇒ **2018 / 322**；同批从 `analysis-engine/src/monitor.rs`、`cross_stock_aggregator.rs`、`astock-data/src/realtime_quote.rs` 删定义改 `pub use`，垫片文件保留不删 ⇒ 文件数不降。 |
 | K1 + 有非 harness、非测试实现者 | **236** | ⚠ 这一档**不能**当能力数。~~232 出自一次性 census 工件（`.tmp/traits-full.json`，未入库 ⇒ 谓词无法从仓内代码复现）~~ ⇒ **该说法已作废（`#61` + `#66` 落地后）**：谓词已入库为 `k1DeclaredExternalImplTraitCount`，`--dump-readings` 在现树复现 = **233**（`#62` 后：ToT 拆成两名、两端都仍有生产 impl ⇒ +1），且与本门 audit 侧输出**排序名单逐字相等**（`#66` 的 4.2 档，差分探针 + 两条命令背靠背 + 扫描面常量逐项对照，三条同源性证据齐）⇒ **233 现在是可复算值**，锚点**具备升 `hard:true` 的条件**（升不升、用哪个数由我在收口时一次定）。另两个历史数**只留作解释、不再与 233 并列**：**210** = 单趟扫描缺陷（当时同谓词**两趟交并** = 232，差值恰 **22**；`#62` 后未重测单趟读数）；**269** = 门里最严格的读法（不要求 trait 声明面、不排 std/派生噪声名），**不作文档该锚点值**。⚠ 处置次序仍不能反：**先让谓词可复算，再升 hard** —— 反向必先假红。**同日 `jobs.store` 再 +1（233→234）**：`JobStoreProvider` 在 `runtime-core` 有生产 impl。**同日 `workflow.run` 再 +1（234→235）**：`WorkflowRunProvider` 在 `src-tauri/src/init/workflow_run.rs` 有生产 impl（后迁 `commands/stock_workflow/workflow_run_service.rs`，读数不变）；**同日 `trading.engine` 再 +1（235→236）**：`TradingEngineProvider` 在 `src-tauri/src/commands/stock_workflow/trading_engine_service.rs` 有生产 impl。 |
 | K1 + K2（键控站点，四次扫描合并去漏报） | **51** 个 trait 面 | 含 15 条已建接缝的 trait。⚠ **2026-11-02 `#33` 实测：这一档不可作论据** —— 谓词真身是**未入库的一次性工件** `.tmp/capability-register3.cjs:44-82`（仓内无处复跑，与 §0.7.2 的 232 同病根），且它要求签名/块内出现 `dyn T` ⇒ 198 条里 **21 条假阴性**，把 PLAN B/C 组落入该桶的 **13 条契约全部吞掉** ⇒ **不许**用「无键控点」论证「这些 trait 只是分层解耦」。谓词入库 = 任务 **#57**；逐条分桶结论见 **§14** |
 | 51 → 同族合并 + K3/K4 判定 | **23 条能力**（另有 3 条移入 §0.7.9 债档，只登记不计数） | ⇒ 本节表格 A+B+C 三组 |
@@ -2489,8 +2489,8 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 | `jobs.store` | 6（3 读 + 3 写） | `add`/`remove`/`set_status` 需 `write` | 已交付 |
 | `workflow.run` | 4 | `start`/`cancel` 需 `write` | 已交付 |
 | `trading.engine` | 6 | `execute_trade` 需 `write` | 已交付 |
-| `stock.monitor`（并入 aggregator） | 待设计 | 写面需 `write`（复合 DB+内存） | 调研中 |
-| `quote.watcher` | 待设计 | 写面需 `write` | 调研中 |
+| `stock.monitor`（并入 aggregator） | 9（5 读 + 4 写） | `set_t0_config`/`upsert_alert`/`remove_alert`/`set_aggregator_config` 需 `write` | **契约已交付**（§55），宿主 provider 与分派待做 |
+| `quote.watcher` | 3（1 读 + 2 写） | `watch`/`unwatch` 需 `write` | **契约已交付**（§55），宿主 provider 与分派待做 |
 | `knowledge.vector` / `trajectory.store` | 待设计 | 待定 | 调研中 |
 
 ### 53.4 主 crate 测试目标实跑（2026-11-03）
@@ -2546,3 +2546,71 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 - 注册表命令总数 **1543**；股票迁完后 **1543 − 304 = 1239**（⚠ 其中已含 `screenshot_diagnosis` 8 + `decision_gates` 3 + `workflow_template` 16 三类跨域命令，**不得二次扣**）。
 - 本体体量：域自有 Rust 引用 **450 处 / 39 文件**；前端域自有 **293 文件 / 84,873 行**。
 - res104 的 `monitor.rs` 行号有漂移（`apply_panel_runtime_vars` 记 `:432`，盘上实测 `:348` 起）⇒ 实现批以盘上为准。
+
+---
+
+## 55. `stock.monitor` + `quote.watcher` 契约批交付账（2026-11-03；设计 `.tmp/res104-monitor-design.md` 423 行，交付报告 `.tmp/res108-report.md` 259 行，提交 `366ff9c04`）
+
+### 55.1 交付面（L1 契约层，本批**不含**宿主 provider 与 worker 分派）
+
+| 文件 | 行 | 内容 |
+|---|---|---|
+| **新建** `axagent-core/crates/harness/src/stock_monitor.rs` | **855** | `StockMonitorProvider`（9 op，`:469`，全默认 `Err(Provider)`）+ 新类型 `MonitorStatusView :367` / `AlertUpsertRequest :383` / `PriceAlertView :408`（**12 列**镜像 `price_alerts`，`isTriggered` 保持 `i32`）/ `AlertUpsertOutcome :435` / `RemoveAlertOutcome :451` + clamp 常量 `:342-348` |
+| **新建** `axagent-core/crates/harness/src/quote_watcher.rs` | **243** | `QuoteWatcherProvider`（3 op，`:104`）+ `WatchOutcome{requested,applied}` + `WATCH_BATCH_LIMIT=200 :50` / `WATCH_SET_LIMIT=1000 :52`，配 `const _: () = assert!(BATCH <= SET)` 编译期不变式 |
+| **上收 + `pub use` 垫片** | — | `MonitorConfig` / `TZeroConfig :90` / `MonitorAlert` / `PollRoundStats` ← `analysis-engine/src/monitor.rs`；`SignalType`/`SignalDirection`/`StockSignal`/`PortfolioSignal`/`PortfolioSnapshot`/`AggregatorConfig` ← `cross_stock_aggregator.rs`；`WatchPriority :64` ← `astock-data/src/realtime_quote.rs` |
+| `harness/src/event_bus.rs` | `:103` | **`EventCategory::Stock`**（+ `as_str()`），kind 前缀 `stock/` |
+| `harness/src/capability_registry.rs` | `:164` / `:178` / `:1044-1070` | `ServiceDefinition::stock_monitor()` / `quote_watcher()` + 四个 register/get（走既有 `register_seam` / `provider_as`） |
+| `scripts/check-monitor-event-authority.mjs` | +168 −6 | 新判据 **R18**：`TZeroConfig` 的 Rust serde 注解（`rustStructSerdeAttrs :189`）与前端 `invoke` 读侧形状（`tsInvokeShapeKeys :208`）逐键对 `TZERO_CAMEL_KEYS :103` 相等；`ruleTZeroConfigCamel :513`。自检 71 → **79** 条 |
+
+⚠ 上收时**随体 inherent impl 必须一起搬**（Rust 不允许跨 crate 给 foreign 类型写 inherent impl）：实删 **9 处**定义而非 res104 记的 6 处；`WatchPriority::interval_ms` 原**私有**、被宿主轮询循环调用 ⇒ 升 `pub`，数值逐字不变。
+
+### 55.2 本批修掉的两条既存缺陷
+
+1. **`TZeroConfig` 的 camelCase 漂移**（res104 §0-3，即「T+0 面板写了不生效」的静态判据）：Rust 侧补 `#[serde(rename_all = "camelCase")]`，**故意不加 `serde(default)`** 以保留「缺字段即报错」的防线。两处前端单测的 mock 原本用 camelCase（`PriceAlertPanel.t0.test.tsx:35-37` / `.alertRow.test.tsx:98-100`）而真后端吐 snake_case ⇒ mock 比被测代码更早假设了修复后的形状，这正是「单测全绿却看不见缺陷」的成因；修后 mock 变成真话。
+2. **告警类型白名单**：`alert_mapping.rs:96-104` 实际接受 **5 个** legacy 写法（`above`/`below`/`change_up`/`change_down`/`volume_spike`，归一后落 4 类），res104 记的「4 个」不准。契约文档按 5 个写，provider 白名单照抄不许少一个（`normalize_alert_type` 对认不出的串静默回落 `take_profit`，插件侧一条拼错的串就会落成反方向的单）。
+
+### 55.3 验收（工作根 × 命令 × EXIT × 日志，全部为独占写入的终态）
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| A1/A2 | `cargo check` / `clippy -p axagent-harness --all-targets -- -D warnings`（axagent-core） | 0 / 0 | `Checking axagent-harness` |
+| A3/A4 | `__TAURI_WORKSPACE__=true cargo test -p axagent-harness --lib stock_monitor` / `--lib quote_watcher` | 0 / 0 | **10 passed** / **6 passed** |
+| A5/A6 | `cargo check` / `clippy -p axagent-analysis-engine`（axagent-quant） | 0 / 0 | 含 harness 全链 |
+| A7/A8 | `cargo check` / `clippy -p axagent-astock-data` | 0 / 0 | — |
+| B1/B2 | `node scripts/check-monitor-event-authority.mjs --selftest` / 判定 | 0 / 0 | **79/79**；R1–R18 全绿，含 `✓ R18 …（4 键逐项相等且带 camelCase 注解）` |
+| B3 | `cargo fmt -p axagent-harness -- --check` | **1** | 仅剩**非本批**文件 `market_data.rs` 4 处 diff（本机 rustfmt 1.9.0 与仓内基线的工具链差）；本批 4 个 Rust 文件零 diff ⇒ 仓级 fmt 既不由本批引入也不由本批修复 |
+| B4 | `cargo check -p axagent-plugins --all-targets` | 0 | 契约面对下游零破坏 |
+
+### 55.4 我对 res104 §J 八条的裁定
+
+| # | 事项 | 裁定 |
+|---|---|---|
+| J1 | DTO 落点 | **上收 harness + `pub use` 垫片**（纯数据类型不建镜像）；只对「需拼多源」的建 `MonitorStatusView`。✅ 本批已执行 |
+| J2 | camelCase 漂移是否本批修 | **是，且作为接缝前置**（否则两个 op 上线即继承同一个 bug）+ 补 R18 防漂。✅ 已执行 |
+| J3 | `price_alert` 用哪个 `EventCategory` | **新增 `EventCategory::Stock`**，kind = `stock/price_alert` / `stock/portfolio_signal` / `stock/quote_change`。✅ 枚举已加；⚠ kind 常量尚未落地（见 §55.5-N6） |
+| J4 | `set_t0_config` 给不给插件 | **给**。要求 `write` 权限 + provider 侧 clamp（`minIntervalMinutes ≥ 1`、两阈值 > 0），文档注释点名「开启后影响所有告警的宿主行为」。trait 已这样写，闸在分派批 |
+| J5 | `watch` 数量闸 | **单次 ≤200、集合 ≤1000，超限截断不报错**，响应给 `requested`/`applied`。常量已在 `:50/:52`，行为在宿主批 |
+| J6 | `list_watched` 带不带 priority | **第一批不带**（零引擎改动），但 provider 侧**必须 `sort`**（`HashMap` 键无序，不排序则断言不可写） |
+| J7 | `aggregator_stats` 进不进首批 | **不进**（需新引擎方法，`last_triggered` 无公开读口）；插件要「窗口内几只同向」用 `aggregator_buffer` 自数 |
+| J8 | 注册时机 | **`init/services.rs` 装配成功后就地注册**（`stock_monitor.set` 成功后、`quote_watcher.set` 成功后两处），不在 `state.rs` 靠 `AppHandle` 每次取 ⇒ 少一个 None 分支 |
+
+### 55.5 我对 res108 §6 七条口子的裁定（宿主批 / 分派批必须照此执行）
+
+| # | 事项 | 裁定 |
+|---|---|---|
+| N1 | J2 缺陷只有静态判据 | **接受**。宿主批收口前须在真机走一次 T+0 开关并回填结论；静态门绿 ≠ 现象消失 |
+| N2 | `upsert_alert` 入参形态（平铺 vs 嵌一层） | **嵌一层**：`{"request": {...}}`，照 `worker.rs:2031-2035` 的 `deserialize_arg(&args, "request", seam)` 先例。分派批只能按这一种写，否则报 `missing field` |
+| N3 | `PriceAlertView` 是否第二套真相 | **算必要的镜像**：`entities` 依赖 `harness`，ORM `Model` 反向过线即成环 ⇒ 只能建视图，先例 `trading_engine.rs:57-87` 的 `TradeView`。按 **12 列**逐字镜像 |
+| N4 | 两组 clamp 常量可能漂移 | **不新增形态锁**（门禁钉形态、钉不了数值）。改为：宿主 provider **只准引用 harness 常量**，`analysis-engine` 里那组 `POLL_INTERVAL_RANGE`（现 `monitor.rs:20`）与冷却守卫改引同源常量；宿主批 provider 单测加一条 `assert_eq!` 锁区间，比再加一条 R19 更省 |
+| N5 | `aggregator_buffer` 无序 | **宿主 provider 侧 `sort`**（零引擎改动，一行），与 J6 同口径 |
+| N6 | stock 域 kind 的权威落点 | **进 harness 常量表**（三条 `pub const`，紧邻 `EventCategory`），发射点**只准引用常量、禁止字面量**；**不复用 `IpcEventName`**（那是 Tauri 事件名，与 `DomainEvent.kind` 不同域）。否则复刻 R7/R14 管的「两头各抄一遍」 |
+| N7 | 存量 JSON 是否 snake_case | **删死代码消掉这个问题**：`RealtimeMonitor::subscribe`、`serialize_configs`、`deserialize_configs` 三处全仓零引用（grep 已确认），宿主批一并删除 ⇒ 不再有「按 camelCase 重序列化历史串」的可能 |
+| N8 | `MonitorStatusDto` 与 `MonitorStatusView` 两份定义 | 宿主批把 `commands/stock_analysis.rs:2334-2347` 改为 harness 类型的 `pub use`（线上形状不变），并**同批**把门禁 R12 的 Rust 读源从 `stock_analysis.rs` 改指 harness（做法同本批对 R4/R16 的改线）——否则 R12 会因抽不到类型判「判据没电」而红 |
+
+⚠ 另两条留给分派批的陷阱：① **op 名 ≠ 方法名** —— trait 方法叫 `t0_config`，发布的 op 叫 `get_t0_config`（其余 8 个一一对应）；② `WatchPriority` 命令层历史上还认 `bg` 别名（`stock_analysis.rs:2400-2403`/`:2462-2465`），serde 只产出 `background` ⇒ **接缝不继承这个宽容**，`bg` 一律 `SEAM_CALL_INVALID_ARGS`，要给别名必须在 provider 里显式映射。
+
+### 55.6 K1 与剩余批次
+
+- K1：**2016/320 → 2018/322**（+2 文件 = 两个 harness 新契约文件；垫片未删 ⇒ 不降）。`declaredExternalTraits` **保持 236** —— 两个新 trait 此刻**还没有生产实现者**，宿主批注册后应为 **238**。
+- 下一批（宿主）：新建 `commands/stock_workflow/monitor_seam_service.rs` + `quote_watcher_service.rs`，`upsert_alert` **直接调** `price_alert_upsert::upsert_price_alert_and_wire`（不抄第二遍），`monitor_emitter.rs` 加第四跳 `dispatch_event` 并多带一个 `Arc<EventDispatchBus>`。⚠ 新文件必须落在 `commands/stock_workflow/`（ownedRe 桶），落 `init/` 会把反向阻塞读数从 152 抬到 154（§53 的同一课）。
+- 再下一批（分派）：`worker.rs` 新增 12 个分支（`stock.monitor` 9 + `quote.watcher` 3，形态照 `trading.engine` 分支 `:1990-2106`）+ 6 条 `required_permission_for` 登记 + 单测（基线 **86 passed**）；**不进** `SUPPORTED_REMOTE_SEAMS`（方向相反）。

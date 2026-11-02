@@ -422,11 +422,18 @@ struct HostPeer {
 /// 宿主侧运行态（占用并发额度、触发引擎 `cancel`），故要求 `write`；`status` /
 /// `list_active` 只读，不设闸。
 ///
+/// 再登记 **`trading.engine` 的唯一写 op**（`execute_trade`）：它写用户交易账本。其余五个
+/// op（`get_positions` / `get_trades` / `validate_trade` / `compare_trade` /
+/// `trading_enabled`）全为只读，不设闸。⚠ `execute_trade` 被放行后返回的
+/// `accepted = false`（开关关闭 / 校验不过 / 重复提交）是**正常业务结果**（走 payload 的
+/// `reason`，不借用错误码）——权限闸只管「能不能调」，不管「单子接没接」。
+///
 /// 纯函数（无 `self`、无全局状态），便于单测直接枚举判定。
 fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
     match (seam, op) {
         ("jobs.store", "add" | "remove" | "set_status" | "update") => Some(PluginPermission::Write),
         ("workflow.run", "start" | "cancel") => Some(PluginPermission::Write),
+        ("trading.engine", "execute_trade") => Some(PluginPermission::Write),
         _ => None,
     }
 }
@@ -1696,8 +1703,7 @@ impl HostPeer {
                         Err(response) => return response,
                     };
                 // `active_only` 缺省 `false`：省略即「不按状态过滤」。
-                let active_only: bool = match deserialize_optional_arg(&args, "active_only", seam)
-                {
+                let active_only: bool = match deserialize_optional_arg(&args, "active_only", seam) {
                     Ok(active_only) => active_only.unwrap_or(false),
                     Err(response) => return response,
                 };
@@ -1972,6 +1978,132 @@ impl HostPeer {
                     Err(e) => workflow_run_error(e),
                 }
             },
+            // ── trading.engine 接缝：宿主把独持的交易引擎暴露给插件（ORM 视图不出线） ──
+            // op 参数一律 **snake_case**；嵌套 DTO（`TradeValidationRequest` /
+            // `TradeExecutionRequest`）的线上键是 **camelCase**（全站约定），在本层
+            // **对象原样反序列化**，分派层不做任何键名映射。
+            // `execute_trade` 是唯一写 op，`write` 权限闸由 `dispatch_seam` 开头统一把关；
+            // 其 `accepted = false`（开关关闭 / 校验不过 / 重复提交）是**正常业务结果**，
+            // 原样透出 `reason`，不借用错误码（契约见 harness `trading_engine.rs`）。
+            // `as_of` 只出现在会触发行情取数的三个 op（get_positions / validate_trade /
+            // execute_trade）上，全部复用 `deserialize_as_of_arg`（含未来日期校验）。
+            "trading.engine" if op == "get_positions" => {
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_trading_engine() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_positions(as_of)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(positions) => to_value("PositionSummary", &positions),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "trading.engine" if op == "get_trades" => {
+                let stock_code: Option<String> =
+                    match deserialize_optional_arg(&args, "stock_code", seam) {
+                        Ok(stock_code) => stock_code,
+                        Err(response) => return response,
+                    };
+                // `limit` 缺省 50；本层**不夹上限** —— 宿主 provider 统一 clamp 到
+                // 1..=500（两处各夹一份必然漂移），插件传超大值由宿主收口。
+                let limit: u32 = match deserialize_optional_arg(&args, "limit", seam) {
+                    Ok(limit) => limit.unwrap_or(50),
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_trading_engine() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.get_trades(stock_code.as_deref(), limit))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(trades) => to_value("TradeView", &trades),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "trading.engine" if op == "validate_trade" => {
+                let request: axagent_harness::TradeValidationRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_trading_engine() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.validate_trade(request, as_of)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 校验不过（`valid = false`）是正常结果，不是错误。
+                    Ok(validation) => to_value("TradeValidation", &validation),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "trading.engine" if op == "execute_trade" => {
+                let request: axagent_harness::TradeExecutionRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_trading_engine() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.execute_trade(request, as_of)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 业务拒绝（`accepted = false` + `reason`）原样透出，不借用错误码；
+                    // 宿主已把 DB 写失败收敛为 `Err` ⇒ 这里的 `reason` 不再有 `"write_failed"`。
+                    Ok(outcome) => to_value("TradeExecutionOutcome", &outcome),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "trading.engine" if op == "compare_trade" => {
+                let trade_id: String = match deserialize_arg(&args, "trade_id", seam) {
+                    Ok(trade_id) => trade_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_trading_engine() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.compare_trade(&trade_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 查无（`Ok(None)`：交易不存在 / 交易前无已完成分析）⇒ JSON `null`，
+                    // **不是错误**（与 `jobs.store get` 同口径）。
+                    Ok(comparison) => to_value("TradePredictionComparison", &comparison),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "trading.engine" if op == "trading_enabled" => {
+                let Some(provider) = self.registry.get_trading_engine() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.trading_enabled()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 具名对象 `{ "enabled": bool }`（照 `jobs.store count` 的 `{"count":n}`
+                    // 风格），不返回裸数字/裸布尔。
+                    Ok(enabled) => FrameResponse::success(json!({ "enabled": enabled })),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
             // `platform.adapter.{平台名}` 的 seam ID 是**动态**的，只能用前缀守卫。
             other if platform_name_from_seam(other).is_some() => {
                 let platform = platform_name_from_seam(other).unwrap_or_default();
@@ -2233,10 +2365,8 @@ fn deserialize_as_of_arg(
             .map(Some)
             .map_err(|e| invalid_args(format!("接缝 `{seam}` 的 `as_of` 解析失败：{e}"))),
         Some(raw @ Value::Object(_)) => {
-            let ctx: axagent_harness::as_of::AsOfContext =
-                serde_json::from_value(raw.clone()).map_err(|e| {
-                    invalid_args(format!("接缝 `{seam}` 的 `as_of` 反序列化失败：{e}"))
-                })?;
+            let ctx: axagent_harness::as_of::AsOfContext = serde_json::from_value(raw.clone())
+                .map_err(|e| invalid_args(format!("接缝 `{seam}` 的 `as_of` 反序列化失败：{e}")))?;
             // 对象形态绕过了 AsOfContext::new 的未来日期校验，这里补回同一契约。
             axagent_harness::as_of::AsOfContext::new(ctx.as_of_date, ctx.source)
                 .map(|validated| validated.with_data_scope(ctx.data_scope))
@@ -6839,16 +6969,17 @@ mod tests {
             permissions: Vec::new(),
         };
         let expected = peer.unavailable("market.quote");
-        let response = with_watchdog(Duration::from_secs(2), "market.quote 缺 provider", move || {
-            peer.handle_call_seam(
-                &json!({
-                    "seam": "market.quote",
-                    "op": "get_quote",
-                    "args": { "stock_code": "600000" },
-                }),
-                &[],
-            )
-        });
+        let response =
+            with_watchdog(Duration::from_secs(2), "market.quote 缺 provider", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "get_quote",
+                        "args": { "stock_code": "600000" },
+                    }),
+                    &[],
+                )
+            });
         assert_eq!(response.code, expected.code, "缺 provider 必须走 unavailable 的码");
         assert_eq!(response.code.as_deref(), Some(error_codes::SEAM_PROVIDER_UNAVAILABLE));
     }
@@ -6861,10 +6992,7 @@ mod tests {
             Arc::new(CapabilityRegistry::new()),
             None,
         );
-        assert_eq!(
-            invalid_args("x").code,
-            Some(error_codes::SEAM_CALL_INVALID_ARGS.to_string())
-        );
+        assert_eq!(invalid_args("x").code, Some(error_codes::SEAM_CALL_INVALID_ARGS.to_string()));
         let response = with_watchdog(Duration::from_secs(2), "market.quote 缺参", move || {
             peer.handle_call_seam(
                 &json!({
@@ -6892,16 +7020,17 @@ mod tests {
             Arc::new(CapabilityRegistry::new()),
             Some(runtime.handle().clone()),
         );
-        let response = with_watchdog(Duration::from_secs(5), "market.quote get_klines", move || {
-            peer.handle_call_seam(
-                &json!({
-                    "seam": "market.quote",
-                    "op": "get_klines",
-                    "args": { "stock_code": "600000", "period": "daily" },
-                }),
-                &[],
-            )
-        });
+        let response =
+            with_watchdog(Duration::from_secs(5), "market.quote get_klines", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "get_klines",
+                        "args": { "stock_code": "600000", "period": "daily" },
+                    }),
+                    &[],
+                )
+            });
         assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
         let seen = captured.klines_args.lock().clone().expect("provider 应被调用");
         assert_eq!(seen.stock_code, "600000");
@@ -7079,8 +7208,10 @@ mod tests {
         let provider = Arc::new(FixedMarketDataProvider::new());
         let captured = provider.clone();
         let (peer, _runtime) = market_peer_with_runtime(provider);
-        let response =
-            with_watchdog(Duration::from_secs(2), "market.quote 对象 as_of 未来日期", move || {
+        let response = with_watchdog(
+            Duration::from_secs(2),
+            "market.quote 对象 as_of 未来日期",
+            move || {
                 peer.handle_call_seam(
                     &json!({
                         "seam": "market.quote",
@@ -7096,7 +7227,8 @@ mod tests {
                     }),
                     &[],
                 )
-            });
+            },
+        );
         assert_eq!(response.code.as_deref(), Some(error_codes::SEAM_CALL_INVALID_ARGS));
         assert!(
             response.message.as_deref().is_some_and(|d| d.contains("as_of")),
@@ -7455,10 +7587,7 @@ mod tests {
         let captured = provider.clone();
         let (peer, _runtime) = jobs_peer_with_runtime(provider);
         let response = with_watchdog(Duration::from_secs(5), "jobs.store list 缺省", move || {
-            peer.handle_call_seam(
-                &json!({ "seam": "jobs.store", "op": "list", "args": {} }),
-                &[],
-            )
+            peer.handle_call_seam(&json!({ "seam": "jobs.store", "op": "list", "args": {} }), &[])
         });
         assert_eq!(response.code, None, "省略可选参数应成功，实际 {response:?}");
         let seen = captured.list_args.lock().clone().expect("provider 应被调用");
@@ -7484,10 +7613,7 @@ mod tests {
     fn jobs_store_count_returns_named_object() {
         let (peer, _runtime) = jobs_peer_with_runtime(Arc::new(FixedJobStoreProvider::new()));
         let response = with_watchdog(Duration::from_secs(5), "jobs.store count", move || {
-            peer.handle_call_seam(
-                &json!({ "seam": "jobs.store", "op": "count", "args": {} }),
-                &[],
-            )
+            peer.handle_call_seam(&json!({ "seam": "jobs.store", "op": "count", "args": {} }), &[])
         });
         assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
         assert_eq!(response.value, Some(json!({ "count": 7 })));
@@ -7498,10 +7624,7 @@ mod tests {
     fn jobs_store_get_missing_id_is_invalid() {
         let (peer, _runtime) = jobs_peer_with_runtime(Arc::new(FixedJobStoreProvider::new()));
         let response = with_watchdog(Duration::from_secs(2), "jobs.store get 缺 id", move || {
-            peer.handle_call_seam(
-                &json!({ "seam": "jobs.store", "op": "get", "args": {} }),
-                &[],
-            )
+            peer.handle_call_seam(&json!({ "seam": "jobs.store", "op": "get", "args": {} }), &[])
         });
         assert_eq!(response.code.as_deref(), Some(error_codes::SEAM_CALL_INVALID_ARGS));
     }
@@ -7966,12 +8089,13 @@ mod tests {
         let provider = Arc::new(FixedWorkflowRunProvider::new());
         let captured = Arc::clone(&provider);
         let (peer, _runtime) = workflow_run_peer(provider);
-        let missing = with_watchdog(Duration::from_secs(2), "workflow.run start 缺参", move || {
-            peer.handle_call_seam(
-                &json!({ "seam": "workflow.run", "op": "start", "args": {} }),
-                &[],
-            )
-        });
+        let missing =
+            with_watchdog(Duration::from_secs(2), "workflow.run start 缺参", move || {
+                peer.handle_call_seam(
+                    &json!({ "seam": "workflow.run", "op": "start", "args": {} }),
+                    &[],
+                )
+            });
         assert_eq!(
             missing.code.as_deref(),
             Some(error_codes::SEAM_CALL_INVALID_ARGS),
@@ -8060,16 +8184,17 @@ mod tests {
         let provider = Arc::new(FixedWorkflowRunProvider::new());
         let captured = Arc::clone(&provider);
         let (peer, _runtime) = workflow_run_peer_with_permissions(provider, Vec::new());
-        let response = with_watchdog(Duration::from_secs(5), "workflow.run list_active", move || {
-            peer.handle_call_seam(
-                &json!({
-                    "seam": "workflow.run",
-                    "op": "list_active",
-                    "args": { "limit": 9999, "workflow_id": "wf-1" },
-                }),
-                &[],
-            )
-        });
+        let response =
+            with_watchdog(Duration::from_secs(5), "workflow.run list_active", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "workflow.run",
+                        "op": "list_active",
+                        "args": { "limit": 9999, "workflow_id": "wf-1" },
+                    }),
+                    &[],
+                )
+            });
         assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
         let value = response.value.expect("成功响应必须带 value");
         assert_eq!(value["total"], json!(1));
@@ -8078,12 +8203,13 @@ mod tests {
         let provider = Arc::new(FixedWorkflowRunProvider::new());
         let captured_default = Arc::clone(&provider);
         let (peer, _runtime) = workflow_run_peer_with_permissions(provider, Vec::new());
-        let response = with_watchdog(Duration::from_secs(5), "workflow.run list_active 缺省", move || {
-            peer.handle_call_seam(
-                &json!({ "seam": "workflow.run", "op": "list_active", "args": {} }),
-                &[],
-            )
-        });
+        let response =
+            with_watchdog(Duration::from_secs(5), "workflow.run list_active 缺省", move || {
+                peer.handle_call_seam(
+                    &json!({ "seam": "workflow.run", "op": "list_active", "args": {} }),
+                    &[],
+                )
+            });
         assert_eq!(response.code, None, "省略可选参数应成功，实际 {response:?}");
 
         assert_eq!(
@@ -8144,16 +8270,17 @@ mod tests {
         let (peer, _runtime) = workflow_run_peer(Arc::new(FixedWorkflowRunProvider::rejecting(
             "模板 `stock-analysis` 不在白名单",
         )));
-        let response = with_watchdog(Duration::from_secs(5), "workflow.run start 被拒", move || {
-            peer.handle_call_seam(
-                &json!({
-                    "seam": "workflow.run",
-                    "op": "start",
-                    "args": { "template_id": "stock-analysis" },
-                }),
-                &[],
-            )
-        });
+        let response =
+            with_watchdog(Duration::from_secs(5), "workflow.run start 被拒", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "workflow.run",
+                        "op": "start",
+                        "args": { "template_id": "stock-analysis" },
+                    }),
+                    &[],
+                )
+            });
         assert_eq!(
             response.code.as_deref(),
             Some(error_codes::WORKFLOW_RUN_REJECTED),
@@ -8164,5 +8291,426 @@ mod tests {
             Some("模板 `stock-analysis` 不在白名单"),
             "拒绝原因应原样透出"
         );
+    }
+
+    // ───── trading.engine 接缝（读：get_positions / get_trades / validate_trade /
+    //        compare_trade / trading_enabled；写：execute_trade） ─────
+
+    /// 假交易引擎提供者：记录各方法收到的入参，返回固定 / 可控结果。
+    ///
+    /// 返回值的选取刻意覆盖契约的三种「非错误」形态：`validate` 回 `valid = true`、
+    /// `execute` 回 `accepted = false`（业务拒绝）、`compare` 回 `Ok(None)`（查无）。
+    struct FixedTradingEngineProvider {
+        /// `get_positions` 收到的 `as_of` 序列（保留次数与顺序）。
+        positions_as_of: Mutex<Vec<Option<axagent_harness::AsOfContext>>>,
+        /// `get_trades` 收到的 `(stock_code, limit)` 序列。
+        trades_calls: Mutex<Vec<(Option<String>, u32)>>,
+        /// `validate_trade` 收到的 `(request, as_of)` 序列。
+        validate_calls: Mutex<
+            Vec<(axagent_harness::TradeValidationRequest, Option<axagent_harness::AsOfContext>)>,
+        >,
+        /// `execute_trade` 收到的 `(request, as_of)` 序列。
+        execute_calls: Mutex<
+            Vec<(axagent_harness::TradeExecutionRequest, Option<axagent_harness::AsOfContext>)>,
+        >,
+        /// `compare_trade` 收到的 `trade_id` 序列。
+        compare_calls: Mutex<Vec<String>>,
+        /// `trading_enabled` 的调用次数（该方法无参数，计数即取证）。
+        enabled_calls: Mutex<usize>,
+    }
+
+    impl FixedTradingEngineProvider {
+        fn new() -> Self {
+            Self {
+                positions_as_of: Mutex::new(Vec::new()),
+                trades_calls: Mutex::new(Vec::new()),
+                validate_calls: Mutex::new(Vec::new()),
+                execute_calls: Mutex::new(Vec::new()),
+                compare_calls: Mutex::new(Vec::new()),
+                enabled_calls: Mutex::new(0),
+            }
+        }
+
+        /// 契约里 `get_positions` 的固定持仓视图（字段值供断言整体比对）。
+        fn sample_position() -> axagent_harness::PositionSummary {
+            axagent_harness::PositionSummary {
+                stock_code: "600519".to_string(),
+                stock_name: "贵州茅台".to_string(),
+                total_shares: 100,
+                avg_cost: 1_480.0,
+                current_price: Some(1_500.0),
+                market_value: Some(150_000.0),
+                unrealized_pnl: Some(2_000.0),
+                unrealized_pnl_pct: Some(1.35),
+                total_realized_pnl: 500.0,
+                sector_name: Some("白酒".to_string()),
+            }
+        }
+
+        /// 契约里 `get_trades` 的固定交易视图（与 harness 测试样本同字段值）。
+        fn sample_trade_view() -> axagent_harness::TradeView {
+            axagent_harness::TradeView {
+                id: "trade-1".to_string(),
+                stock_code: "600519".to_string(),
+                stock_name: "贵州茅台".to_string(),
+                direction: "buy".to_string(),
+                price: 1_500.0,
+                quantity: 100,
+                trade_date: "2026-11-02".to_string(),
+                trade_time: "14:30".to_string(),
+                fee: None,
+                realized_pnl: None,
+                strategy: None,
+                notes: Some("测试".to_string()),
+                created_at: 1_700_000_000_000,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl axagent_harness::TradingEngineProvider for FixedTradingEngineProvider {
+        async fn get_positions(
+            &self,
+            as_of: Option<axagent_harness::AsOfContext>,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::PositionSummary>> {
+            self.positions_as_of.lock().push(as_of);
+            Ok(vec![Self::sample_position()])
+        }
+
+        async fn get_trades(
+            &self,
+            stock_code: Option<&str>,
+            limit: u32,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::TradeView>> {
+            self.trades_calls.lock().push((stock_code.map(str::to_string), limit));
+            Ok(vec![Self::sample_trade_view()])
+        }
+
+        async fn validate_trade(
+            &self,
+            request: axagent_harness::TradeValidationRequest,
+            as_of: Option<axagent_harness::AsOfContext>,
+        ) -> axagent_harness::core_error::Result<axagent_harness::TradeValidation> {
+            self.validate_calls.lock().push((request, as_of));
+            Ok(axagent_harness::TradeValidation {
+                valid: true,
+                errors: Vec::new(),
+                warnings: Vec::new(),
+            })
+        }
+
+        async fn execute_trade(
+            &self,
+            request: axagent_harness::TradeExecutionRequest,
+            as_of: Option<axagent_harness::AsOfContext>,
+        ) -> axagent_harness::core_error::Result<axagent_harness::TradeExecutionOutcome> {
+            self.execute_calls.lock().push((request, as_of));
+            // 固定回「校验不过被拒」：分派层必须把它当**正常结果**透出，不得转错误帧。
+            Ok(axagent_harness::TradeExecutionOutcome {
+                accepted: false,
+                reason: Some("validation_failed".to_string()),
+                trade: None,
+                errors: vec!["入场价偏离分析目标价超过 5%".to_string()],
+                warnings: vec!["当前非交易日".to_string()],
+            })
+        }
+
+        async fn compare_trade(
+            &self,
+            trade_id: &str,
+        ) -> axagent_harness::core_error::Result<Option<axagent_harness::TradePredictionComparison>>
+        {
+            self.compare_calls.lock().push(trade_id.to_string());
+            // 固定回 `None`：分派层必须翻成 JSON `null` 而非错误。
+            Ok(None)
+        }
+
+        async fn trading_enabled(&self) -> axagent_harness::core_error::Result<bool> {
+            *self.enabled_calls.lock() += 1;
+            Ok(true)
+        }
+    }
+
+    /// 装假 trading.engine 提供者的 peer + 保活到用例结束的 runtime。
+    ///
+    /// 缺省带 `write` 权限（`execute_trade` 的准入需要）；只读 op 用例请传空权限表，
+    /// 以证明它们不设闸。
+    fn trading_peer_with_permissions(
+        provider: Arc<FixedTradingEngineProvider>,
+        permissions: Vec<PluginPermission>,
+    ) -> (HostPeer, tokio::runtime::Runtime) {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("async 接缝用例需要 runtime");
+        let registry = Arc::new(CapabilityRegistry::new());
+        let provider: Arc<dyn axagent_harness::TradingEngineProvider> = provider;
+        registry.register_trading_engine(provider).expect("trading.engine 接缝应注册成功");
+        let peer = HostPeer {
+            plugin_id: "plugin.trading".to_string(),
+            declared_capabilities: Vec::new(),
+            declared_calls: vec!["trading.engine".to_string()],
+            registry,
+            runtime: Some(runtime.handle().clone()),
+            permissions,
+        };
+        (peer, runtime)
+    }
+
+    fn trading_peer(
+        provider: Arc<FixedTradingEngineProvider>,
+    ) -> (HostPeer, tokio::runtime::Runtime) {
+        trading_peer_with_permissions(provider, vec![PluginPermission::Write])
+    }
+
+    /// `as_of`（字符串形态）必须解析成 `AsOfContext` 透传；省略 ⇒ provider 收到 `None`。
+    ///
+    /// peer 不带任何权限：`get_positions` 是只读 op，不得被权限闸拦。
+    #[test]
+    fn trading_engine_get_positions_forwards_as_of() {
+        let provider = Arc::new(FixedTradingEngineProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = trading_peer_with_permissions(provider, Vec::new());
+        let (with_date, without_date) =
+            with_watchdog(Duration::from_secs(5), "trading.engine get_positions", move || {
+                let with_date = peer.handle_call_seam(
+                    &json!({
+                        "seam": "trading.engine",
+                        "op": "get_positions",
+                        "args": { "as_of": "2026-10-30" },
+                    }),
+                    &[],
+                );
+                let without_date = peer.handle_call_seam(
+                    &json!({ "seam": "trading.engine", "op": "get_positions", "args": {} }),
+                    &[],
+                );
+                (with_date, without_date)
+            });
+        assert_eq!(with_date.code, None, "带 as_of 应成功，实际 {with_date:?}");
+        let value = with_date.value.expect("成功响应必须带 value");
+        assert_eq!(
+            value[0]["stockCode"],
+            json!("600519"),
+            "持仓视图必须按 DTO 的 camelCase 线上键透出"
+        );
+        assert_eq!(without_date.code, None, "省略 as_of 应成功，实际 {without_date:?}");
+
+        let seen = captured.positions_as_of.lock().clone();
+        assert_eq!(seen.len(), 2, "两次调用都应触达 provider");
+        assert_eq!(
+            seen[0].as_ref().map(axagent_harness::AsOfContext::as_string).as_deref(),
+            Some("2026-10-30"),
+            "`as_of` 字符串应解析成同日期 AsOfContext 透传"
+        );
+        assert_eq!(seen[1], None, "省略 `as_of` 时 provider 必须收到 None（实盘口径）");
+    }
+
+    /// `{}` ⇒ provider 收到 `(None, 50)`：`limit` 缺省 50 由分派层填充，且**不夹上限**。
+    #[test]
+    fn trading_engine_get_trades_defaults_limit() {
+        let provider = Arc::new(FixedTradingEngineProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = trading_peer_with_permissions(provider, Vec::new());
+        let response =
+            with_watchdog(Duration::from_secs(5), "trading.engine get_trades 缺省", move || {
+                peer.handle_call_seam(
+                    &json!({ "seam": "trading.engine", "op": "get_trades", "args": {} }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code, None, "省略可选参数应成功，实际 {response:?}");
+        assert_eq!(
+            captured.trades_calls.lock().clone(),
+            vec![(None, 50)],
+            "`stock_code` 缺省必须为 None、`limit` 缺省必须为 50"
+        );
+        let value = response.value.expect("成功响应必须带 value");
+        assert_eq!(value[0]["tradeDate"], json!("2026-11-02"), "视图应按 camelCase 透出");
+    }
+
+    /// 嵌套 `request` 是 camelCase 对象，分派层**原样反序列化**（不做键名映射）：
+    /// `priceDeviationLimit` ⇒ `price_deviation_limit = Some(5.0)`。缺 `request` ⇒ 参数错误且零调用。
+    #[test]
+    fn trading_engine_validate_forwards_camel_request() {
+        let provider = Arc::new(FixedTradingEngineProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = trading_peer(provider);
+        let response =
+            with_watchdog(Duration::from_secs(5), "trading.engine validate", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "trading.engine",
+                        "op": "validate_trade",
+                        "args": {
+                            "request": {
+                                "stockCode": "600519",
+                                "direction": "buy",
+                                "quantity": 100,
+                                "price": 1500.0,
+                                "priceDeviationLimit": 5.0,
+                            },
+                        },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        assert_eq!(response.value, Some(json!({ "valid": true, "errors": [], "warnings": [] })));
+        let calls = captured.validate_calls.lock().clone();
+        assert_eq!(calls.len(), 1, "validate_trade 应恰被调用一次");
+        let (request, as_of) = &calls[0];
+        assert_eq!(request.stock_code, "600519", "camelCase `stockCode` 应落进 snake_case 字段");
+        assert_eq!(request.price_deviation_limit, Some(5.0), "`priceDeviationLimit` 应原样透传");
+        assert_eq!(*as_of, None, "省略 `as_of` 时 provider 必须收到 None");
+
+        // 缺必填 `request` ⇒ 参数错误，且不触达 provider（另一个全新替身取证零调用）。
+        let provider = Arc::new(FixedTradingEngineProvider::new());
+        let captured_missing = Arc::clone(&provider);
+        let (peer, _runtime) = trading_peer(provider);
+        let missing =
+            with_watchdog(Duration::from_secs(2), "trading.engine validate 缺参", move || {
+                peer.handle_call_seam(
+                    &json!({ "seam": "trading.engine", "op": "validate_trade", "args": {} }),
+                    &[],
+                )
+            });
+        assert_eq!(
+            missing.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "缺 `request` 必须走参数错误，实际 {missing:?}"
+        );
+        assert!(captured_missing.validate_calls.lock().is_empty(), "缺参不得触达 provider");
+    }
+
+    /// `accepted = false` 的业务拒绝是**正常结果**：响应为成功帧（`code = None`），
+    /// outcome 原样透出，不借用错误码。
+    #[test]
+    fn trading_engine_execute_reports_outcome_not_error() {
+        let provider = Arc::new(FixedTradingEngineProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = trading_peer(provider);
+        let response = with_watchdog(Duration::from_secs(5), "trading.engine execute", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "trading.engine",
+                    "op": "execute_trade",
+                    "args": {
+                        "request": {
+                            "stockCode": "600519",
+                            "stockName": "贵州茅台",
+                            "direction": "buy",
+                            "price": 1500.0,
+                            "quantity": 100,
+                            "tradeDate": "2026-11-02",
+                            "tradeTime": "14:30",
+                        },
+                    },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "业务拒绝不是错误，实际 {response:?}");
+        let value = response.value.expect("成功响应必须带 value");
+        assert_eq!(value["accepted"], json!(false));
+        assert_eq!(value["reason"], json!("validation_failed"));
+        assert_eq!(value["trade"], json!(null));
+        assert_eq!(value["errors"].as_array().map(Vec::len), Some(1));
+        assert_eq!(value["warnings"].as_array().map(Vec::len), Some(1));
+        assert_eq!(captured.execute_calls.lock().len(), 1, "已授权应触达 provider 恰一次");
+    }
+
+    /// 查无（`Ok(None)`）⇒ JSON `null`，**不是错误**（与 `jobs.store get` 同口径）。
+    #[test]
+    fn trading_engine_compare_missing_is_null() {
+        let provider = Arc::new(FixedTradingEngineProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = trading_peer_with_permissions(provider, Vec::new());
+        let response = with_watchdog(Duration::from_secs(5), "trading.engine compare", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "trading.engine",
+                    "op": "compare_trade",
+                    "args": { "trade_id": "t-404" },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "查无不是错误，实际 {response:?}");
+        assert_eq!(response.value, Some(Value::Null), "返回值应为 JSON null");
+        assert_eq!(
+            captured.compare_calls.lock().clone(),
+            vec!["t-404".to_string()],
+            "`trade_id` 应原样透传"
+        );
+    }
+
+    /// `trading_enabled` 返回**具名对象** `{ "enabled": bool }`，不是裸布尔。
+    #[test]
+    fn trading_engine_enabled_is_named_object() {
+        let provider = Arc::new(FixedTradingEngineProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = trading_peer_with_permissions(provider, Vec::new());
+        let response = with_watchdog(Duration::from_secs(5), "trading.engine enabled", move || {
+            peer.handle_call_seam(
+                &json!({ "seam": "trading.engine", "op": "trading_enabled", "args": {} }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        assert_eq!(response.value, Some(json!({ "enabled": true })));
+        assert_eq!(*captured.enabled_calls.lock(), 1, "trading_enabled 应恰被调用一次");
+    }
+
+    /// 无 `write` 权限 ⇒ `execute_trade` 在分派前被拒（`PLUGIN_PERMISSION_DENIED`），
+    /// 且不触达 provider；其余五个只读 op 不受影响（权限表只登记这一个写 op）。
+    #[test]
+    fn trading_engine_execute_requires_write() {
+        let provider = Arc::new(FixedTradingEngineProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = trading_peer_with_permissions(provider, Vec::new());
+        let response =
+            with_watchdog(Duration::from_secs(5), "trading.engine execute 无权限", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "trading.engine",
+                        "op": "execute_trade",
+                        "args": {
+                            "request": {
+                                "stockCode": "600519",
+                                "stockName": "贵州茅台",
+                                "direction": "buy",
+                                "price": 1500.0,
+                                "quantity": 100,
+                                "tradeDate": "2026-11-02",
+                                "tradeTime": "14:30",
+                            },
+                        },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(
+            response.code.as_deref(),
+            Some(error_codes::PLUGIN_PERMISSION_DENIED),
+            "无 write 权限必须被拒，实际 {response:?}"
+        );
+        let detail = response.message.clone().unwrap_or_default();
+        assert!(detail.contains("write"), "文案应点明缺失的权限，实际：{detail}");
+        assert!(detail.contains("trading.engine"), "文案应点明接缝，实际：{detail}");
+        assert!(captured.execute_calls.lock().is_empty(), "被拒的 execute 不得触达 provider");
+
+        // 权限表枚举锁：trading.engine 只有 `execute_trade` 一个写 op，其余五个不设闸。
+        let writes = required_permission_for("trading.engine", "execute_trade");
+        assert_eq!(writes, Some(PluginPermission::Write), "execute_trade 必须要求 write");
+        for read_op in
+            ["get_positions", "get_trades", "validate_trade", "compare_trade", "trading_enabled"]
+        {
+            assert_eq!(
+                required_permission_for("trading.engine", read_op),
+                None,
+                "只读 op `{read_op}` 不得设权限闸"
+            );
+        }
     }
 }

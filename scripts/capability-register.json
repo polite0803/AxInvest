@@ -186,7 +186,7 @@
       "planNumber": "152",
       "planMustAppear": true,
       "planPinned": [{ "line": 513, "mustContain": ["152", "28 文件", "主壳反向阻塞"] }],
-      "note": "剥注释只处理 // 与 ///（audit-l1-blockers.mjs:66-69 原口径）；无旧读数残留。"
+      "note": "剥注释只处理 // 与 ///（audit-l1-blockers.mjs:87-90 原口径）；无旧读数残留。"
     },
     {
       "id": "l1ForeignOpc",

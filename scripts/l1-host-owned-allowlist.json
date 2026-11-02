@@ -1,0 +1,60 @@
+{
+  "note": "L1 反向阻塞的 H 桶（宿主永久持有）白名单。消费方 = scripts/audit-l1-blockers.mjs；复扫命令 = node scripts/audit-l1-blockers.mjs --check-allowlist。",
+  "why": "PLAN §54 R5：终态判据不并入 ownedRe（并入会让所有 init/ 装配代码变成不计入阻塞，读数失去意义 —— services.rs 28 处里有 9 处是 M 桶、该被看见），改成「待改写归零 + H 桶等于本名单」。名单可逐条拿 anchorText 回盘上原文复核，正则扩面不可复核。",
+  "schema": "entries[] = { file: 仓库相对路径, anchorText: 该行原文的**连续子串**（不存行号，行号随编辑漂移）, reason: 为什么必须留宿主 }",
+  "seed": "2026-11-03 首批 10 条。只收 .tmp/res109-migration-plan.md §A2 里**整文件判 H** 的六个文件；M / P / X / O 桶以及 P/H 混合行（decision_gates、daily_snapshot_store、screenshot_diagnosis）与 services.rs / state.rs 的行**一律不入** —— 那两处 res109 只给了桶计数没给逐行归属，没有逐行证据就不许写进豁免名单。",
+  "todo": "H 桶在 res109 的机械归桶里读数是 35 处 / 9 文件，本名单只点到 10 处 / 4 文件 ⇒ 余 25 处等 B2/B6 批次按行落名（同批必须补 anchorText，不许只补文件）。",
+  "entries": [
+    {
+      "file": "src-tauri/src/commands/gateway.rs",
+      "anchorText": "Option<std::sync::Arc<axagent_astock_data::AStockClient>>",
+      "reason": "OpenAI 兼容网关的行情发布口 = 宿主对外的数据面（res109 A2 判「不可消」，§E-7）。迁股票插件时这条读的是宿主持有的 client，不是插件内部件。"
+    },
+    {
+      "file": "src-tauri/src/commands/gateway.rs",
+      "anchorText": "axagent_astock_data::HttpPollingStreamer::new(c)",
+      "reason": "同上：网关侧自建轮询流，属宿主对外数据面的实现细节（res109 A2 gateway 行 :609）。"
+    },
+    {
+      "file": "src-tauri/src/init/monitor_emitter.rs",
+      "anchorText": "use axagent_analysis_engine::monitor::MonitorEventEmitter;",
+      "reason": "宿主事件出口。硬口径：告警触发后的工作流回写留在宿主（PLAN §47.2 主权条），接缝只把它补发到 EventDispatchBus，不把发射器交给插件。"
+    },
+    {
+      "file": "src-tauri/src/init/browser_fetcher.rs",
+      "anchorText": "use axagent_astock_data::vendors::browser_eastmoney::BrowserHttpFetch;",
+      "reason": "宿主为 vendor 提供 HTTP 能力的注入口（res109 A2 判「不可消」，§E-6）；MCP / 取数重试扇出同族，属宿主取数设施。"
+    },
+    {
+      "file": "src-tauri/src/app_state.rs",
+      "anchorText": "Arc<axagent_astock_data::AStockClient>",
+      "reason": "字段类型即「宿主持有引擎」的证据（res109 A2 标 H→X）。B6 摘字段后该行消失，豁免随之失效并由 --check-allowlist 报「文件缺失/锚点腐烂」⇒ 那时删条目，不是现在。"
+    },
+    {
+      "file": "src-tauri/src/app_state.rs",
+      "anchorText": "std::sync::Arc<axagent_analysis_engine::monitor::RealtimeMonitor>>",
+      "reason": "同上：监控引擎的宿主持有位。stock.monitor 接缝是**加法式**暴露读/写面，不改变宿主持有该 Arc 这一事实（PLAN §55.6）。"
+    },
+    {
+      "file": "src-tauri/src/app_state.rs",
+      "anchorText": "std::sync::Arc<axagent_astock_data::RealTimeQuoteWatcher>>",
+      "reason": "同上：行情订阅集合的宿主持有位（数据主权在宿主，插件只经 quote.watcher 的 watch/unwatch 改集合内容）。"
+    },
+    {
+      "file": "src-tauri/src/app_state.rs",
+      "anchorText": "Arc<tokio::sync::RwLock<axagent_analysis_engine::trading::TradingEngine>>",
+      "reason": "同上：交易引擎的宿主持有位（trading.engine 接缝 §51 已交付，执行权仍在宿主）。"
+    },
+    {
+      "file": "src-tauri/src/app_state.rs",
+      "anchorText": "std::sync::Arc<axagent_analysis_engine::cross_stock_aggregator::CrossStockSignalAggregator>",
+      "reason": "同上：组合信号聚合器的宿主持有位，已并入 stock.monitor 契约面（§55.1），持有关系不变。"
+    },
+    {
+      "file": "src-tauri/src/app_state.rs",
+      "anchorText": "Arc<axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine>",
+      "reason": "同上：自适应引擎的宿主持有位（res109 把 stock_adaptive_engine 4 处归 P 桶的是**调用点**，本行是 AppState 字段，属持有证据）。"
+    }
+  ],
+  "anchorRule": "锚点取「限定类型名 + 其包装」里最长的**单行不变**片段。rustfmt 在 >100 列处按逗号折行 ⇒ 以 `pub 字段名:` 起手的整行锚点会假报腐烂（2026-11-03 实测：app_state.rs 的 quote_watcher 被 #103 会话升成 Arc 后折成两行）；`std::sync::Arc<包::类型>` 这段不被拆开，锚点取它。"
+}

@@ -2644,3 +2644,30 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 - **宿主批**：+2 文件（`commands/knowledge_vector_service.rs`、`commands/trajectory_store_service.rs`）⇒ **2022 / 324**，`declaredExternalTraits` **236→238**。⚠ 分两批改镜像表，批 1 就改 238 会判红。
 - 不受影响、**别顺手改**：`capacityRegister 23`、`groupCounts`（`totalRows 37`）、`remoteSeamRegistryCount 13`（两条新接缝都**不进** `SUPPORTED_REMOTE_SEAMS`，方向相反）。唯一例外是 §0.7.7 的 `rag.vector.store` 预留行（`json:956-973`，`planLine 317`）——按 Q1 改名并改写 `reason`（「capability_registry 命中 0 ⇒ 判未建」交付后会变成**过期的真话反面**）。
 - res105 §5 风险 2（「复用 #40 三 trait 当契约会不会让 236 意外跳变」）**随 Q1–Q3 的裁决自动消解**：不复用、新建 provider trait ⇒ 交并集只在宿主批才成立。
+
+---
+
+## 57. `#101` 落地：H 桶白名单入盘 + 审计快照改用本地日（2026-11-03；承 §54 R5/R8）
+
+### 57.1 判据改动（`scripts/audit-l1-blockers.mjs`）
+
+1. **H 桶从「桶计数」变成「名单」**：新增 `scripts/l1-host-owned-allowlist.json`，条目 = `{file, anchorText, reason}` —— **不存行号**（行号随编辑漂移，本仓已反复为此重锚）。审计时逐行命中锚点即计入 H 桶，其余仍是「待改写」。
+2. 反向阻塞读数拆成三行，**合计与旧口径逐字可比**：
+
+| 口径 | 股票 STOCK | OPC |
+|---|---|---|
+| 待改写（H 桶除外） | **142 处 / 24 文件** | 0 |
+| H 桶（本批点名豁免） | 10 处 / 4 文件 | 0 |
+| **合计（= 旧 152 口径，镜像表锚点仍指这一行）** | **152 处 / 28 文件** | **0 处 / 0 文件** |
+
+3. **腐烂复扫三判据**（`--check-allowlist` 模式，任一即 EXIT=1）：① 锚点在文件原文里找不到；② 同 `(file, anchorText)` 重复；③ 锚点还在但那一行今天不再计入 H 桶（文件被划成域自有 / 行成注释 / 不再 import 域 crate）= **豁免空转**。⇒ 白名单不会在迁完后继续「豁免」已经不存在的行。本模式**只读**，不写快照。
+4. **R8 已修**：快照文件名从 `toISOString()`（UTC 日）改为**本地日**，同日二次跑追加 `-HHMM` 不覆盖既有快照。⚠ 实证代价：本轮第一次跑（04:54 本地 = UTC 前一日 20:54）把 `AUDIT-l1-blockers-2026-11-02.md` 覆盖了 —— 该文件未入库（`?? ` 状态），读数与 res109 完全一致（152/28、304/20）⇒ **无数据损失，但归属日确实错了**，正是 R5/R8 要点名的形态。改后当日重跑正确落 `AUDIT-l1-blockers-2026-11-03.md`。
+5. **CI 接线（两处同源）**：`scripts/ci-check.mjs` 的 `step("L1 反向阻塞 H 桶白名单逐条锚点复扫", …)` 与 `.github/workflows/ci.yml` 的 `Check L1 blocker host-owned allowlist anchors` 命令行逐字同源；不加 `if (!quick)` 门控（AGENTS「CI 接线」：纯 Node 静态门必须走 pre-push 档）。
+
+### 57.2 首批名单只点 10 处，**故意不点满 35 处**
+
+res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `services.rs`（H 15）与 `state.rs`（H 6）**只给了桶计数、没给逐行归属**，`app_state.rs` 标 H→X、`daily_snapshot_store`/`decision_gates`/`screenshot_diagnosis` 是 M 或 P/H 混合。⇒ 本批只收**整文件判 H 且行号已点名**的四处文件共 **10 处**（gateway 2 + monitor_emitter 1 + browser_fetcher 1 + app_state 6）。**没有逐行证据就不写进豁免名单** —— 名单宁可短，短了只是读数不好看，写长了就是假话。余 **25 处**（含 `services.rs`/`state.rs` 的装配段）等 B2/B6 按行落名，同批必须补 `anchorText`。
+
+### 57.3 顺带纠出的既存引用腐烂（同批改指）
+
+审计脚本头部注释加了 11 行 ⇒ 内部段落整体下移，`check-capability-register.mjs` 与镜像表里**四处按行号抄的引用**当场失效，已重指：`DOMAINS 36-51 → 48-63`（两处）、`SKIP 17 → 29`、`注释剥离 66-69 → 87-90`、`foreign 判据 55-77 → 65-126`。⇒ 又一次实证「按行号的同源引用必须与判据同批改」，与 §54 R5「白名单可审、正则不可审」是同一件事的两面。

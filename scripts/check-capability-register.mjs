@@ -36,7 +36,7 @@
 //
 // 强制复用：`scripts/lib/command-domains.mjs` 的 REG_PATH / parseRegistry / domainOf / unassigned
 //   （AGENTS.md 禁区 12 —— 注册表解析规则全仓唯一，禁止另写第二套正则）。
-//   边界口径的 DOMAINS（cmdRe/feRe/useRe/ownedRe）**逐字抄自** `scripts/audit-l1-blockers.mjs:36-51`
+//   边界口径的 DOMAINS（cmdRe/feRe/useRe/ownedRe）**逐字抄自** `scripts/audit-l1-blockers.mjs:48-63`
 //   —— 该审计脚本不导出符号且禁改，抄录是本门与其唯一合法的同步点；改那边正则必须同改这里。
 //
 // 扫描面（按 sources.scanSurface 显式选边；**一次目录遍历 + 内容按需缓存**，否则共享目录上不可用）：
@@ -217,7 +217,7 @@ const REGISTER_PATH = join(ROOT, "scripts", "capability-register.json");
 // ── 口径常量（与数据文件/审计脚本的同步点都在注释里钉死）────────────────
 const K1_ROOTS = ["axagent-ai", "axagent-core", "axagent-infra", "axagent-kit", "axagent-plugins", "axagent-quant", "axagent-runtime", "src-tauri"];
 const K1_IGNORE = new Set(["target", "node_modules", "gen", "tests"]); // PLAN §0.7.1 扫描面（= .tmp/capability-census.cjs）
-const AUDIT_SKIP = new Set(["target", "node_modules", "output", ".git", ".tmp", "dist", "gen", "build", "coverage", ".workbuddy", "examples"]); // audit-l1-blockers.mjs:17
+const AUDIT_SKIP = new Set(["target", "node_modules", "output", ".git", ".tmp", "dist", "gen", "build", "coverage", ".workbuddy", "examples"]); // audit-l1-blockers.mjs:29
 const WALK_PRUNE = new Set(["target", "node_modules", "gen", ".git"]); // 一次遍历：只剪「体积/必然无料」目录，其余按路径段分类
 const HARNESS_PREFIX = "axagent-core/crates/harness/";
 // `pub trait X` 的声明面正则。**逐字等于** `scripts/audit-capability-inventory.mjs:60` 的 `PUB_TRAIT_RE`
@@ -238,7 +238,7 @@ const ANCHOR_CHECK_KINDS_DECLARED = [
   "k1DeclaredExternalImplTraitCount", // #61：K1 + **有声明面**的外部实现者 trait 数（两趟法，与 audit 脚本 scanK1Traits 同源）
 ];
 
-// DOMAINS 逐字抄自 scripts/audit-l1-blockers.mjs:36-51（152/28 与 293/84 873 的基线出处）
+// DOMAINS 逐字抄自 scripts/audit-l1-blockers.mjs:48-63（152/28 与 293/84 873 的基线出处）
 const DOMAINS = {
   STOCK: {
     crates: ["axagent-astock-data", "axagent-analysis-engine", "axagent-quant", "axagent-market-sim"],
@@ -2525,7 +2525,7 @@ function collectReadings(register) {
     }
   }
 
-  // L1 反向阻塞（audit-l1-blockers.mjs:55-77 原口径：foreign = 无任何域 owner 的文件）
+  // L1 反向阻塞（audit-l1-blockers.mjs:65-126 原口径：foreign = 无任何域 owner 的文件）
   {
     const ownedByAny = (x) => Object.entries(DOMAINS).find(([, d]) => d.ownedRe.test(x))?.[0] || null;
     rd.l1 = {};

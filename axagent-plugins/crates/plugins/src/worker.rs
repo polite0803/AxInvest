@@ -1618,6 +1618,68 @@ impl HostPeer {
                     Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
                 }
             },
+            // ── jobs.store 接缝：宿主把**已有** cron 任务查询能力暴露给插件（只读） ──
+            // 方向与 `market.quote` 相同（宿主提供给插件），故只走入站分派、不进远程门面
+            // 清单。本接缝**只读**：不发布创建 / 修改 / 删除 / 触发等写 op。
+            "jobs.store" if op == "list" => {
+                let Some(provider) = self.registry.get_jobs_store() else {
+                    return self.unavailable(seam);
+                };
+                let task_type: Option<String> =
+                    match deserialize_optional_arg(&args, "task_type", seam) {
+                        Ok(task_type) => task_type,
+                        Err(response) => return response,
+                    };
+                // `active_only` 缺省 `false`：省略即「不按状态过滤」。
+                let active_only: bool = match deserialize_optional_arg(&args, "active_only", seam)
+                {
+                    Ok(active_only) => active_only.unwrap_or(false),
+                    Err(response) => return response,
+                };
+                let Some(result) =
+                    self.block_on(provider.list_jobs(task_type.as_deref(), active_only))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(jobs) => to_value("CronJobView", &jobs),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "jobs.store" if op == "get" => {
+                let Some(provider) = self.registry.get_jobs_store() else {
+                    return self.unavailable(seam);
+                };
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_job(&id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 不存在 ⇒ `null`，**不是错误**：调用方按「查无此任务」处理。
+                    Ok(job) => to_value("CronJobView", &job),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "jobs.store" if op == "count" => {
+                let Some(provider) = self.registry.get_jobs_store() else {
+                    return self.unavailable(seam);
+                };
+                let task_type: Option<String> =
+                    match deserialize_optional_arg(&args, "task_type", seam) {
+                        Ok(task_type) => task_type,
+                        Err(response) => return response,
+                    };
+                let Some(result) = self.block_on(provider.count_jobs(task_type.as_deref())) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(count) => FrameResponse::success(json!({ "count": count })),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
             // `platform.adapter.{平台名}` 的 seam ID 是**动态**的，只能用前缀守卫。
             other if platform_name_from_seam(other).is_some() => {
                 let platform = platform_name_from_seam(other).unwrap_or_default();
@@ -6894,5 +6956,181 @@ mod tests {
             "错误文案应指明 keyword：{:?}",
             response.message
         );
+    }
+
+    // ───────────────────── jobs.store：只读查询接缝（list / get / count） ─────────────────────
+
+    /// 假定时任务提供者：记录 `list_jobs` 收到的过滤参数，返回固定视图。
+    struct FixedJobStoreProvider {
+        /// 外层 `None` = 尚未调用；内层是 `(task_type, active_only)`。
+        list_args: Mutex<Option<(Option<String>, bool)>>,
+    }
+
+    impl FixedJobStoreProvider {
+        fn new() -> Self {
+            Self {
+                list_args: Mutex::new(None),
+            }
+        }
+
+        /// 按契约为出一条字段齐全的视图（仅 `status` 随用例变化）。
+        fn sample_job(id: &str, status: &str) -> axagent_harness::CronJobView {
+            axagent_harness::CronJobView {
+                id: id.to_string(),
+                name: format!("任务 {id}"),
+                description: "jobs.store 测试替身".to_string(),
+                schedule: "0 9 * * *".to_string(),
+                prompt: "复盘今日持仓".to_string(),
+                workflow_id: None,
+                task_type: Some("stock-analysis".to_string()),
+                platform: None,
+                enabled_toolsets: None,
+                status: status.to_string(),
+                recurring: true,
+                run_count: 3,
+                last_run_at: Some(1_730_000_000),
+                last_result: None,
+                last_trigger: Some("schedule".to_string()),
+                next_run_at: Some(1_730_086_400),
+                priority: "normal".to_string(),
+                created_at: 1_729_000_000,
+                updated_at: 1_729_900_000,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl axagent_harness::JobStoreProvider for FixedJobStoreProvider {
+        async fn list_jobs(
+            &self,
+            task_type: Option<&str>,
+            active_only: bool,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::CronJobView>> {
+            *self.list_args.lock() = Some((task_type.map(str::to_string), active_only));
+            Ok(vec![
+                Self::sample_job("job-active", "active"),
+                Self::sample_job("job-paused", "paused"),
+            ])
+        }
+
+        async fn get_job(
+            &self,
+            id: &str,
+        ) -> axagent_harness::core_error::Result<Option<axagent_harness::CronJobView>> {
+            if id == "exists" {
+                Ok(Some(Self::sample_job("exists", "active")))
+            } else {
+                Ok(None)
+            }
+        }
+
+        async fn count_jobs(
+            &self,
+            _task_type: Option<&str>,
+        ) -> axagent_harness::core_error::Result<u64> {
+            Ok(7)
+        }
+    }
+
+    /// 装假 jobs 提供者的 peer + 保活到用例结束的 runtime。
+    fn jobs_peer_with_runtime(
+        provider: Arc<FixedJobStoreProvider>,
+    ) -> (HostPeer, tokio::runtime::Runtime) {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("async 接缝用例需要 runtime");
+        let registry = Arc::new(CapabilityRegistry::new());
+        let provider: Arc<dyn axagent_harness::JobStoreProvider> = provider;
+        registry.register_jobs_store(provider).expect("jobs.store 接缝应注册成功");
+        let peer = HostPeer {
+            plugin_id: "plugin.jobs".to_string(),
+            declared_capabilities: Vec::new(),
+            declared_calls: vec!["jobs.store".to_string()],
+            registry,
+            runtime: Some(runtime.handle().clone()),
+        };
+        (peer, runtime)
+    }
+
+    /// `task_type` / `active_only` 必须原样透传给 provider，返回值是视图数组。
+    #[test]
+    fn jobs_store_list_forwards_filters() {
+        let provider = Arc::new(FixedJobStoreProvider::new());
+        let captured = provider.clone();
+        let (peer, _runtime) = jobs_peer_with_runtime(provider);
+        let response = with_watchdog(Duration::from_secs(5), "jobs.store list", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "jobs.store",
+                    "op": "list",
+                    "args": { "task_type": "stock-analysis", "active_only": true },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        let seen = captured.list_args.lock().clone().expect("provider 应被调用");
+        assert_eq!(seen, (Some("stock-analysis".to_string()), true), "过滤参数应原样透传");
+        let value = response.value.expect("成功响应必须带 value");
+        assert_eq!(value.as_array().map(Vec::len), Some(2), "应返回 2 条任务：{value}");
+    }
+
+    /// 省略可选参数：`task_type` ⇒ `None`，`active_only` ⇒ `false`（不得报缺参）。
+    #[test]
+    fn jobs_store_list_defaults_active_only_false() {
+        let provider = Arc::new(FixedJobStoreProvider::new());
+        let captured = provider.clone();
+        let (peer, _runtime) = jobs_peer_with_runtime(provider);
+        let response = with_watchdog(Duration::from_secs(5), "jobs.store list 缺省", move || {
+            peer.handle_call_seam(
+                &json!({ "seam": "jobs.store", "op": "list", "args": {} }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "省略可选参数应成功，实际 {response:?}");
+        let seen = captured.list_args.lock().clone().expect("provider 应被调用");
+        assert_eq!(seen, (None, false), "`active_only` 缺省必须为 false");
+    }
+
+    /// 查无此任务 ⇒ `null`，**不是错误**（不得借用错误码表达「没有」）。
+    #[test]
+    fn jobs_store_get_missing_returns_null_not_error() {
+        let (peer, _runtime) = jobs_peer_with_runtime(Arc::new(FixedJobStoreProvider::new()));
+        let response = with_watchdog(Duration::from_secs(5), "jobs.store get 缺失", move || {
+            peer.handle_call_seam(
+                &json!({ "seam": "jobs.store", "op": "get", "args": { "id": "nope" } }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "不存在不是错误，实际 {response:?}");
+        assert_eq!(response.value, Some(Value::Null), "返回值应为 JSON null");
+    }
+
+    /// `count` 返回具名对象 `{ "count": n }`（不是裸数字）——与返回值形状契约一致。
+    #[test]
+    fn jobs_store_count_returns_named_object() {
+        let (peer, _runtime) = jobs_peer_with_runtime(Arc::new(FixedJobStoreProvider::new()));
+        let response = with_watchdog(Duration::from_secs(5), "jobs.store count", move || {
+            peer.handle_call_seam(
+                &json!({ "seam": "jobs.store", "op": "count", "args": {} }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        assert_eq!(response.value, Some(json!({ "count": 7 })));
+    }
+
+    /// 缺必填 `id` ⇒ invalid args，且不得触达 provider（peer 无 runtime 亦可证明）。
+    #[test]
+    fn jobs_store_get_missing_id_is_invalid() {
+        let (peer, _runtime) = jobs_peer_with_runtime(Arc::new(FixedJobStoreProvider::new()));
+        let response = with_watchdog(Duration::from_secs(2), "jobs.store get 缺 id", move || {
+            peer.handle_call_seam(
+                &json!({ "seam": "jobs.store", "op": "get", "args": {} }),
+                &[],
+            )
+        });
+        assert_eq!(response.code.as_deref(), Some(error_codes::SEAM_CALL_INVALID_ARGS));
     }
 }

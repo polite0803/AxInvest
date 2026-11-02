@@ -428,12 +428,25 @@ struct HostPeer {
 /// `accepted = false`（开关关闭 / 校验不过 / 重复提交）是**正常业务结果**（走 payload 的
 /// `reason`，不借用错误码）——权限闸只管「能不能调」，不管「单子接没接」。
 ///
+/// 又登记 **`stock.monitor` 的四个写 op**（`set_t0_config` / `upsert_alert` /
+/// `remove_alert` / `set_aggregator_config`）：告警落库、T+0 全局开关、聚合器阈值都改宿主
+/// 监控运行态，其中后两个**无 owner 隔离**、影响所有插件与前端；其余五个 op（`status` /
+/// `list_configs` / `get_t0_config` / `aggregator_config` / `aggregator_buffer`）只读，不设闸。
+///
+/// 最后登记 **`quote.watcher` 的两个写 op**（`watch` / `unwatch`）：推送集合是所有插件与
+/// 前端共享的一格，`watch` 直接放大对 vendor 的取数请求数；`list_watched` 只读，不设闸。
+///
 /// 纯函数（无 `self`、无全局状态），便于单测直接枚举判定。
 fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
     match (seam, op) {
         ("jobs.store", "add" | "remove" | "set_status" | "update") => Some(PluginPermission::Write),
         ("workflow.run", "start" | "cancel") => Some(PluginPermission::Write),
         ("trading.engine", "execute_trade") => Some(PluginPermission::Write),
+        (
+            "stock.monitor",
+            "set_t0_config" | "upsert_alert" | "remove_alert" | "set_aggregator_config",
+        ) => Some(PluginPermission::Write),
+        ("quote.watcher", "watch" | "unwatch") => Some(PluginPermission::Write),
         _ => None,
     }
 }
@@ -2101,6 +2114,230 @@ impl HostPeer {
                     // 具名对象 `{ "enabled": bool }`（照 `jobs.store count` 的 `{"count":n}`
                     // 风格），不返回裸数字/裸布尔。
                     Ok(enabled) => FrameResponse::success(json!({ "enabled": enabled })),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            // ── stock.monitor 接缝：宿主把独持的 RealtimeMonitor + CrossStockSignalAggregator
+            // 暴露给插件（方向与 market.quote 同类：宿主 → 插件，见上方先例注释） ──
+            // op 参数一律 **snake_case**；嵌套 DTO（`AlertUpsertRequest` / `TZeroConfig` /
+            // `AggregatorConfig`）的线上键是 **camelCase**（全站约定），在本层**对象原样
+            // 反序列化**，分派层不做任何键名映射。
+            // 全部 op **不收 `as_of`**：读写的是内存 / DB / 宿主轮询循环已有的读数（契约见
+            // harness `stock_monitor.rs` 模块文档）。
+            // ⚠ **op 名 ≠ 方法名**：发布的 op 叫 `get_t0_config`，trait 方法叫 `t0_config`；
+            // 其余 8 个一一对应。四个写 op（set_t0_config / upsert_alert / remove_alert /
+            // set_aggregator_config）的 `write` 权限闸由 `dispatch_seam` 开头统一把关。
+            "stock.monitor" if op == "status" => {
+                let Some(provider) = self.registry.get_stock_monitor() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.status()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 「引擎未装配」是**正常响应**（`assembled = false`，计数全 0），不报
+                    // `SEAM_PROVIDER_UNAVAILABLE` —— 缺席本身是要如实暴露的状态。
+                    Ok(view) => to_value("MonitorStatusView", &view),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "stock.monitor" if op == "list_configs" => {
+                let Some(provider) = self.registry.get_stock_monitor() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.list_configs()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 「引擎实际在盯哪些条」的真相；`Option` 阈值按 serde 声明透出 `null`。
+                    Ok(configs) => to_value("MonitorConfig", &configs),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "stock.monitor" if op == "get_t0_config" => {
+                let Some(provider) = self.registry.get_stock_monitor() else {
+                    return self.unavailable(seam);
+                };
+                // op 叫 `get_t0_config`，方法叫 `t0_config`（见本段开头 ⚠ 注释）。
+                let Some(result) = self.block_on(provider.t0_config()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(config) => to_value("TZeroConfig", &config),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            // 写 op 的取参顺序照 trading.engine `validate_trade` 先例：先反序列化、后取
+            // provider —— 非法入参是调用方的错误，不该被「provider 暂不可用」掩盖。
+            "stock.monitor" if op == "set_t0_config" => {
+                // 全量结构体（照命令层 `set_t0_config`），不是 patch；缺任一字段 ⇒ serde
+                // reject ⇒ `SEAM_CALL_INVALID_ARGS`（`TZeroConfig` 刻意不带 `serde(default)`）。
+                let config: axagent_harness::TZeroConfig =
+                    match deserialize_arg(&args, "config", seam) {
+                        Ok(config) => config,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_stock_monitor() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.set_t0_config(config)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // clamp（阈值 > 0、`minIntervalMinutes ≥ 1`）在宿主 provider 侧（裁定 J4/N4），
+                    // 分派层不重复实现一套数字。
+                    Ok(()) => FrameResponse::success(Value::Null),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "stock.monitor" if op == "upsert_alert" => {
+                // ⚠ 裁定 N2：args 是**嵌一层**的 `{ "request": {stockCode, stockName, alertType,
+                // threshold} }` 形态（照 trading.engine `deserialize_arg(&args, "request", seam)`
+                // 先例），**不支持平铺四个字段** —— 平铺时缺 `request` 键即 invalid_args。
+                let request: axagent_harness::AlertUpsertRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_stock_monitor() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.upsert_alert(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 三判据原样透出：`wired = false`（库里有行但不会被盯）是**正常结果**，
+                    // 不借用错误码；`alert_type` 白名单拒绝在宿主 provider 侧（先拒后归一）。
+                    Ok(outcome) => to_value("AlertUpsertOutcome", &outcome),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "stock.monitor" if op == "remove_alert" => {
+                let alert_id: String = match deserialize_arg(&args, "alert_id", seam) {
+                    Ok(alert_id) => alert_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_stock_monitor() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.remove_alert(&alert_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 行不存在 ⇒ `{dbDeleted:false, memoryRemoved:false}`，**不是错误**
+                    // （照 jobs.store get 的「查无即 null」口径）。
+                    Ok(outcome) => to_value("RemoveAlertOutcome", &outcome),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "stock.monitor" if op == "aggregator_config" => {
+                let Some(provider) = self.registry.get_stock_monitor() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.aggregator_config()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(config) => to_value("AggregatorConfig", &config),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "stock.monitor" if op == "set_aggregator_config" => {
+                let config: axagent_harness::AggregatorConfig =
+                    match deserialize_arg(&args, "config", seam) {
+                        Ok(config) => config,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_stock_monitor() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.set_aggregator_config(config)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 全量结构体；越界拒收、不静默夹取，clamp 区间以 harness
+                    // `AGGREGATOR_*` 常量为唯一权威（宿主 provider 侧执行）。
+                    Ok(()) => FrameResponse::success(Value::Null),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "stock.monitor" if op == "aggregator_buffer" => {
+                let Some(provider) = self.registry.get_stock_monitor() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.aggregator_buffer()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 「窗口内几只同向」由消费方用 `SignalType::direction()` 自数（裁定 J7，
+                    // 首批不发 aggregator_stats）。
+                    Ok(signals) => to_value("StockSignal", &signals),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            // ── quote.watcher 接缝：宿主把 RealTimeQuoteWatcher 的推送集合管理面暴露给插件 ──
+            // 轮询本体（start / stop）不过线（跨插件 DoS 面 + 句柄跨不过帧协议，契约见
+            // harness `quote_watcher.rs` 模块文档）；`watch` / `unwatch` 的 `write` 权限闸
+            // 由 `dispatch_seam` 开头统一把关。同样不收 `as_of`。
+            "quote.watcher" if op == "list_watched" => {
+                let Some(provider) = self.registry.get_quote_watcher() else {
+                    return self.unavailable(seam);
+                };
+                // op 叫 `list_watched`，方法叫 `watched_codes`（provider 侧须 sort，裁定 J6）。
+                let Some(result) = self.block_on(provider.watched_codes()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 具名对象 `{ "codes": [...] }`（照 jobs.store count 的 `{"count":n}`
+                    // 风格），不返回裸数组。
+                    Ok(codes) => FrameResponse::success(json!({ "codes": codes })),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "quote.watcher" if op == "watch" => {
+                let codes: Vec<String> = match deserialize_arg(&args, "codes", seam) {
+                    Ok(codes) => codes,
+                    Err(response) => return response,
+                };
+                // ⚠ `priority` **严格解析**（必填）：serde 只认 `active` / `background`。
+                // 命令层历史上还认 `bg` 别名并把未知串静默回落高频档 —— 接缝**不继承**这个
+                // 宽容（插件侧没有「人看着面板选」兜底），`bg` 一律落 `SEAM_CALL_INVALID_ARGS`。
+                let priority: axagent_harness::WatchPriority =
+                    match deserialize_arg(&args, "priority", seam) {
+                        Ok(priority) => priority,
+                        Err(response) => return response,
+                    };
+                let replace: bool = match deserialize_optional_arg(&args, "replace", seam) {
+                    Ok(replace) => replace.unwrap_or(false),
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_quote_watcher() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.watch(&codes, priority, replace)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 数量闸（单次 ≤ WATCH_BATCH_LIMIT、总量 ≤ WATCH_SET_LIMIT）超限**截断
+                    // 不报错**：`applied < requested` 是合法结果，两个数原样暴露（裁定 J5）。
+                    Ok(outcome) => to_value("WatchOutcome", &outcome),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "quote.watcher" if op == "unwatch" => {
+                let codes: Vec<String> = match deserialize_arg(&args, "codes", seam) {
+                    Ok(codes) => codes,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_quote_watcher() else {
+                    return self.unavailable(seam);
+                };
+                // `unwatch` 不受单次闸约束（退订只让集合变小），`applied` 只数真摘掉的。
+                let Some(result) = self.block_on(provider.unwatch(&codes)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(outcome) => to_value("WatchOutcome", &outcome),
                     Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
                 }
             },
@@ -8710,6 +8947,637 @@ mod tests {
                 required_permission_for("trading.engine", read_op),
                 None,
                 "只读 op `{read_op}` 不得设权限闸"
+            );
+        }
+    }
+
+    // ───── stock.monitor 接缝（9 op）+ quote.watcher 接缝（3 op）─────
+
+    /// 假股票监控提供者：**刻意只实现部分 op**，其余吃 trait 默认实现
+    /// （`Err(Provider("…未实现…"))` ⇒ 分派落 `PLUGIN_CALL_FAILED`）。契约明说外部实现
+    /// 「只覆盖关心的 op」，下面的用例顺带把这条链路也钉住。
+    struct FixedMonitorProvider {
+        /// `status` 调用次数（该方法无参数，计数即取证）。
+        status_calls: Mutex<usize>,
+        /// `set_t0_config` 收到的配置序列。
+        t0_calls: Mutex<Vec<axagent_harness::TZeroConfig>>,
+        /// `upsert_alert` 收到的请求序列。
+        upsert_calls: Mutex<Vec<axagent_harness::AlertUpsertRequest>>,
+        /// `remove_alert` 收到的 alert_id 序列。
+        remove_calls: Mutex<Vec<String>>,
+    }
+
+    impl FixedMonitorProvider {
+        fn new() -> Self {
+            Self {
+                status_calls: Mutex::new(0),
+                t0_calls: Mutex::new(Vec::new()),
+                upsert_calls: Mutex::new(Vec::new()),
+                remove_calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        /// 测试用运行读数：计数取非零值，便于验证 camelCase 线上键原样透出。
+        fn sample_status() -> axagent_harness::MonitorStatusView {
+            axagent_harness::MonitorStatusView {
+                assembled: true,
+                session: "intraday".to_string(),
+                trading_now: true,
+                poll_interval_secs: 30,
+                configs_active: 2,
+                round_codes_total: 2,
+                round_codes_failed: 1,
+                consecutive_all_failed_rounds: 0,
+                round_finished_at_ms: 1_700_000_000_000,
+            }
+        }
+
+        /// `price_alerts` 行的 12 列 camelCase 投影（与 harness 测试样本同字段风格）。
+        fn sample_alert_view() -> axagent_harness::PriceAlertView {
+            axagent_harness::PriceAlertView {
+                id: "alert-uuid-1".to_string(),
+                stock_code: "600519".to_string(),
+                stock_name: "贵州茅台".to_string(),
+                condition: "below".to_string(),
+                target_price: 1_400.0,
+                alert_type: Some("stop_loss".to_string()),
+                condition_type: Some("price".to_string()),
+                threshold: Some(1_400.0),
+                is_triggered: 0,
+                triggered_at: None,
+                created_at: 1_700_000_000_000,
+                updated_at: 1_700_000_000_001,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl axagent_harness::StockMonitorProvider for FixedMonitorProvider {
+        async fn status(
+            &self,
+        ) -> axagent_harness::core_error::Result<axagent_harness::MonitorStatusView> {
+            *self.status_calls.lock() += 1;
+            Ok(Self::sample_status())
+        }
+
+        async fn set_t0_config(
+            &self,
+            config: axagent_harness::TZeroConfig,
+        ) -> axagent_harness::core_error::Result<()> {
+            self.t0_calls.lock().push(config);
+            Ok(())
+        }
+
+        async fn upsert_alert(
+            &self,
+            request: axagent_harness::AlertUpsertRequest,
+        ) -> axagent_harness::core_error::Result<axagent_harness::AlertUpsertOutcome> {
+            self.upsert_calls.lock().push(request);
+            // `wired = false` 刻意回 false：分派层必须原样透出「库里有行但不会被盯」，
+            // 不得当成功抹平、也不得转成错误帧。
+            Ok(axagent_harness::AlertUpsertOutcome {
+                alert: Self::sample_alert_view(),
+                reused: true,
+                wired: false,
+            })
+        }
+
+        async fn remove_alert(
+            &self,
+            alert_id: &str,
+        ) -> axagent_harness::core_error::Result<axagent_harness::RemoveAlertOutcome> {
+            self.remove_calls.lock().push(alert_id.to_string());
+            // 两个计数域并列（摘内存失败但删库成功，也是合法结果）。
+            Ok(axagent_harness::RemoveAlertOutcome { db_deleted: true, memory_removed: false })
+        }
+        // `list_configs` / `t0_config` / `aggregator_config` / `set_aggregator_config` /
+        // `aggregator_buffer` 不覆盖 ⇒ 吃 trait 默认 `Err(Provider)`。
+    }
+
+    /// 假推送集合提供者：只实现 `watched_codes` / `watch`，`unwatch` 吃 trait 默认实现
+    /// （由 `watcher_unwatch_default_is_call_failed` 取证）。
+    struct FixedQuoteWatcher {
+        /// `watched_codes` 调用次数。
+        list_calls: Mutex<usize>,
+        /// `watch` 收到的 `(codes, priority, replace)` 序列。
+        watch_calls: Mutex<Vec<(Vec<String>, axagent_harness::WatchPriority, bool)>>,
+    }
+
+    impl FixedQuoteWatcher {
+        fn new() -> Self {
+            Self { list_calls: Mutex::new(0), watch_calls: Mutex::new(Vec::new()) }
+        }
+    }
+
+    #[async_trait]
+    impl axagent_harness::QuoteWatcherProvider for FixedQuoteWatcher {
+        async fn watched_codes(&self) -> axagent_harness::core_error::Result<Vec<String>> {
+            *self.list_calls.lock() += 1;
+            // 契约 J6：provider 侧 sort ⇒ 替身给升序结果。
+            Ok(vec!["000001".to_string(), "600519".to_string()])
+        }
+
+        async fn watch(
+            &self,
+            codes: &[String],
+            priority: axagent_harness::WatchPriority,
+            replace: bool,
+        ) -> axagent_harness::core_error::Result<axagent_harness::WatchOutcome> {
+            self.watch_calls.lock().push((codes.to_vec(), priority, replace));
+            // 模拟数量闸截断：固定只应用 2 只 ⇒ `applied < requested` 是合法结果，
+            // 分派层必须原样透出两个数、不得报错。
+            Ok(axagent_harness::WatchOutcome { requested: codes.len() as u32, applied: 2 })
+        }
+        // `unwatch` 不覆盖 ⇒ 吃 trait 默认 `Err(Provider)`。
+    }
+
+    /// 装假 stock.monitor + quote.watcher 提供者的 peer + 保活到用例结束的 runtime。
+    ///
+    /// 缺省带 `write` 权限（写 op 准入需要）；只读 op 用例传空权限表，以证明它们不设闸。
+    fn monitor_peer_with_permissions(
+        monitor: Arc<FixedMonitorProvider>,
+        watcher: Arc<FixedQuoteWatcher>,
+        permissions: Vec<PluginPermission>,
+    ) -> (HostPeer, tokio::runtime::Runtime) {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("async 接缝用例需要 runtime");
+        let registry = Arc::new(CapabilityRegistry::new());
+        let provider: Arc<dyn axagent_harness::StockMonitorProvider> = monitor;
+        registry.register_stock_monitor(provider).expect("stock.monitor 接缝应注册成功");
+        let watcher: Arc<dyn axagent_harness::QuoteWatcherProvider> = watcher;
+        registry.register_quote_watcher(watcher).expect("quote.watcher 接缝应注册成功");
+        let peer = HostPeer {
+            plugin_id: "plugin.monitor".to_string(),
+            declared_capabilities: Vec::new(),
+            declared_calls: vec!["stock.monitor".to_string(), "quote.watcher".to_string()],
+            registry,
+            runtime: Some(runtime.handle().clone()),
+            permissions,
+        };
+        (peer, runtime)
+    }
+
+    /// 无 `write` 权限 ⇒ 六条写 op 全部在取参 / 取 provider 之前被拒
+    /// （`PLUGIN_PERMISSION_DENIED`、零副作用）；权限表枚举锁同时钉住「6 写 + 6 读」的口径。
+    #[test]
+    fn monitor_watcher_write_ops_require_write() {
+        let monitor = Arc::new(FixedMonitorProvider::new());
+        let watcher = Arc::new(FixedQuoteWatcher::new());
+        let captured_monitor = Arc::clone(&monitor);
+        let captured_watcher = Arc::clone(&watcher);
+        let (peer, _runtime) = monitor_peer_with_permissions(monitor, watcher, Vec::new());
+
+        let (denied, denied_watch) =
+            with_watchdog(Duration::from_secs(5), "写 op 无权限", move || {
+                let denied = peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.monitor",
+                        "op": "upsert_alert",
+                        "args": {
+                            "request": {
+                                "stockCode": "600519",
+                                "stockName": "贵州茅台",
+                                "alertType": "stop_loss",
+                                "threshold": 1400.0,
+                            },
+                        },
+                    }),
+                    &[],
+                );
+                let denied_watch = peer.handle_call_seam(
+                    &json!({
+                        "seam": "quote.watcher",
+                        "op": "watch",
+                        "args": { "codes": ["600519"], "priority": "active" },
+                    }),
+                    &[],
+                );
+                (denied, denied_watch)
+            });
+        assert_eq!(
+            denied.code.as_deref(),
+            Some(error_codes::PLUGIN_PERMISSION_DENIED),
+            "无 write 权限的 upsert_alert 必须被拒，实际 {denied:?}"
+        );
+        let detail = denied.message.clone().unwrap_or_default();
+        assert!(detail.contains("write"), "文案应点明缺失的权限，实际：{detail}");
+        assert!(detail.contains("stock.monitor"), "文案应点明接缝，实际：{detail}");
+        assert_eq!(
+            denied_watch.code.as_deref(),
+            Some(error_codes::PLUGIN_PERMISSION_DENIED),
+            "无 write 权限的 watch 必须被拒，实际 {denied_watch:?}"
+        );
+        assert!(captured_monitor.upsert_calls.lock().is_empty(), "被拒的写 op 不得触达 provider");
+        assert!(captured_watcher.watch_calls.lock().is_empty(), "被拒的 watch 不得触达 provider");
+
+        // 权限表枚举锁：两条接缝共 6 个写 op 要求 write，6 个只读 op 一律不设闸。
+        for (seam, write_op) in [
+            ("stock.monitor", "set_t0_config"),
+            ("stock.monitor", "upsert_alert"),
+            ("stock.monitor", "remove_alert"),
+            ("stock.monitor", "set_aggregator_config"),
+            ("quote.watcher", "watch"),
+            ("quote.watcher", "unwatch"),
+        ] {
+            assert_eq!(
+                required_permission_for(seam, write_op),
+                Some(PluginPermission::Write),
+                "写 op `{seam}`/`{write_op}` 必须要求 write"
+            );
+        }
+        for (seam, read_op) in [
+            ("stock.monitor", "status"),
+            ("stock.monitor", "list_configs"),
+            ("stock.monitor", "get_t0_config"),
+            ("stock.monitor", "aggregator_config"),
+            ("stock.monitor", "aggregator_buffer"),
+            ("quote.watcher", "list_watched"),
+        ] {
+            assert_eq!(
+                required_permission_for(seam, read_op),
+                None,
+                "只读 op `{seam}`/`{read_op}` 不得设权限闸"
+            );
+        }
+    }
+
+    /// 裁定 N2 的两种反面形态都必须落 `SEAM_CALL_INVALID_ARGS` 且零调用：
+    /// ① 完全缺参；② **平铺四字段**（不嵌 `request` 层）—— 分派层只认嵌一层形态。
+    #[test]
+    fn monitor_upsert_alert_missing_request_is_invalid_args() {
+        let monitor = Arc::new(FixedMonitorProvider::new());
+        let watcher = Arc::new(FixedQuoteWatcher::new());
+        let captured = Arc::clone(&monitor);
+        let (peer, _runtime) =
+            monitor_peer_with_permissions(monitor, watcher, vec![PluginPermission::Write]);
+
+        let (missing, flat) =
+            with_watchdog(Duration::from_secs(2), "upsert_alert 反例", move || {
+                let missing = peer.handle_call_seam(
+                    &json!({ "seam": "stock.monitor", "op": "upsert_alert", "args": {} }),
+                    &[],
+                );
+                // 平铺形态：键都在、只是没套 `request` 外层 ⇒ 同样必须拒（禁止分派层兼容平铺）。
+                let flat = peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.monitor",
+                        "op": "upsert_alert",
+                        "args": {
+                            "stockCode": "600519",
+                            "stockName": "贵州茅台",
+                            "alertType": "stop_loss",
+                            "threshold": 1400.0,
+                        },
+                    }),
+                    &[],
+                );
+                (missing, flat)
+            });
+        assert_eq!(
+            missing.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "缺 `request` 必须走参数错误，实际 {missing:?}"
+        );
+        assert!(
+            missing.message.as_deref().unwrap_or_default().contains("request"),
+            "文案应点名缺失的 `request`，实际：{missing:?}"
+        );
+        assert_eq!(
+            flat.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "平铺四字段不被支持，必须落参数错误，实际 {flat:?}"
+        );
+        assert!(captured.upsert_calls.lock().is_empty(), "参数错误不得触达 provider");
+    }
+
+    /// 嵌一层 `request`（camelCase）⇒ 原样反序列化为 `AlertUpsertRequest` 透传；响应里
+    /// `alert` 是 12 列 camelCase 投影（`isTriggered` 保持 `i32`），`reused` / `wired`
+    /// 三判据并列原样透出（`wired = false` 不得被抹平成成功语义）。
+    #[test]
+    fn monitor_upsert_alert_forwards_nested_camel_request() {
+        let monitor = Arc::new(FixedMonitorProvider::new());
+        let watcher = Arc::new(FixedQuoteWatcher::new());
+        let captured = Arc::clone(&monitor);
+        let (peer, _runtime) =
+            monitor_peer_with_permissions(monitor, watcher, vec![PluginPermission::Write]);
+        let response = with_watchdog(Duration::from_secs(5), "upsert_alert 正例", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "stock.monitor",
+                    "op": "upsert_alert",
+                    "args": {
+                        "request": {
+                            "stockCode": "600519",
+                            "stockName": "贵州茅台",
+                            "alertType": "stop_loss",
+                            "threshold": 1400.0,
+                        },
+                    },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "已授权且参数齐备应成功，实际 {response:?}");
+        let calls = captured.upsert_calls.lock().clone();
+        assert_eq!(calls.len(), 1, "upsert_alert 应恰被调用一次");
+        assert_eq!(calls[0].stock_code, "600519", "camelCase `stockCode` 应落进 snake_case 字段");
+        assert_eq!(calls[0].alert_type, "stop_loss");
+        assert_eq!(calls[0].threshold, 1400.0);
+        let value = response.value.expect("成功响应必须带 value");
+        assert_eq!(value["reused"], json!(true));
+        assert_eq!(value["wired"], json!(false), "`wired = false` 必须原样透出");
+        assert_eq!(value["alert"]["alertType"], json!("stop_loss"));
+        assert_eq!(
+            value["alert"]["isTriggered"],
+            json!(0),
+            "`isTriggered` 是 i32，不得收敛成 bool"
+        );
+        assert!(value["alert"].get("is_triggered").is_none(), "不得残留 snake_case 键");
+    }
+
+    /// `status` 是只读 op（空权限表也应放行）且返回 camelCase 九键；未被替身覆盖的
+    /// `list_configs` 吃 trait 默认实现 ⇒ `PLUGIN_CALL_FAILED`，文案点名该 op「未实现」。
+    #[test]
+    fn monitor_status_camel_and_default_unimplemented_op_is_call_failed() {
+        let monitor = Arc::new(FixedMonitorProvider::new());
+        let watcher = Arc::new(FixedQuoteWatcher::new());
+        let captured = Arc::clone(&monitor);
+        let (peer, _runtime) = monitor_peer_with_permissions(monitor, watcher, Vec::new());
+
+        let (ok, unimplemented) =
+            with_watchdog(Duration::from_secs(5), "stock.monitor 读面", move || {
+                let ok = peer.handle_call_seam(
+                    &json!({ "seam": "stock.monitor", "op": "status", "args": {} }),
+                    &[],
+                );
+                let unimplemented = peer.handle_call_seam(
+                    &json!({ "seam": "stock.monitor", "op": "list_configs", "args": {} }),
+                    &[],
+                );
+                (ok, unimplemented)
+            });
+        assert_eq!(ok.code, None, "只读 op 不得被权限闸拦，实际 {ok:?}");
+        let value = ok.value.expect("status 必须带 value");
+        assert_eq!(value["assembled"], json!(true));
+        assert_eq!(value["tradingNow"], json!(true));
+        assert_eq!(value["pollIntervalSecs"], json!(30));
+        assert_eq!(value["roundCodesFailed"], json!(1));
+        assert_eq!(value["roundFinishedAtMs"], json!(1_700_000_000_000_i64));
+        assert!(value.get("poll_interval_secs").is_none(), "不得残留 snake_case 键");
+        assert_eq!(*captured.status_calls.lock(), 1, "status 应恰被调用一次");
+        assert_eq!(
+            unimplemented.code.as_deref(),
+            Some(error_codes::PLUGIN_CALL_FAILED),
+            "trait 默认 Err(Provider) 应落成 PLUGIN_CALL_FAILED，实际 {unimplemented:?}"
+        );
+        let detail = unimplemented.message.clone().unwrap_or_default();
+        assert!(detail.contains("list_configs"), "文案应点名未实现的 op，实际：{detail}");
+        assert!(detail.contains("未实现"), "文案应说明未实现，实际：{detail}");
+    }
+
+    /// `set_t0_config` 全量结构体（缺 `minIntervalMinutes` ⇒ 整条 reject —— 该 DTO 刻意
+    /// 不带 `serde(default)`）；`remove_alert` 透出 `{dbDeleted, memoryRemoved}` camel 两数。
+    #[test]
+    fn monitor_write_ops_roundtrip_and_missing_field_rejected() {
+        let monitor = Arc::new(FixedMonitorProvider::new());
+        let watcher = Arc::new(FixedQuoteWatcher::new());
+        let captured = Arc::clone(&monitor);
+        let (peer, _runtime) =
+            monitor_peer_with_permissions(monitor, watcher, vec![PluginPermission::Write]);
+
+        let (ok, partial, no_config, removed) =
+            with_watchdog(Duration::from_secs(5), "stock.monitor 写面", move || {
+                let ok = peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.monitor",
+                        "op": "set_t0_config",
+                        "args": {
+                            "config": {
+                                "enabled": true,
+                                "changePctThreshold": 3.0,
+                                "minIntervalMinutes": 30,
+                            },
+                        },
+                    }),
+                    &[],
+                );
+                // 缺必填 `minIntervalMinutes` ⇒ 整条 reject（保留「缺字段即报错」防线；
+                // 两个阈值是 Option，省略是合法的，不能拿来当缺参反例）。
+                let partial = peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.monitor",
+                        "op": "set_t0_config",
+                        "args": { "config": { "enabled": false } },
+                    }),
+                    &[],
+                );
+                // `turnoverRateThreshold` 这类 Option 字段可以省略（正例已证 None 兜住）；
+                // 这里验证真正「缺 config 外层键」同样是 invalid_args。
+                let no_config = peer.handle_call_seam(
+                    &json!({ "seam": "stock.monitor", "op": "set_t0_config", "args": {} }),
+                    &[],
+                );
+                let removed = peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.monitor",
+                        "op": "remove_alert",
+                        "args": { "alert_id": "alert-uuid-1" },
+                    }),
+                    &[],
+                );
+                (ok, partial, no_config, removed)
+            });
+        assert_eq!(ok.code, None, "全量 camelCase 配置应成功，实际 {ok:?}");
+        assert_eq!(ok.value, Some(Value::Null), "`Result<()>` 成功应回 JSON null");
+        let seen = captured.t0_calls.lock().clone();
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].enabled);
+        assert_eq!(seen[0].change_pct_threshold, Some(3.0));
+        assert_eq!(seen[0].turnover_rate_threshold, None, "缺省 Option 字段应落 None");
+        assert_eq!(seen[0].min_interval_minutes, 30);
+        assert_eq!(
+            partial.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "缺 `minIntervalMinutes` 必须整条拒绝，实际 {partial:?}"
+        );
+        assert_eq!(
+            no_config.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "缺 `config` 必须走参数错误，实际 {no_config:?}"
+        );
+        assert_eq!(captured.t0_calls.lock().len(), 1, "两次参数错误都不得触达 provider");
+        assert_eq!(removed.code, None, "删告警应成功，实际 {removed:?}");
+        assert_eq!(
+            removed.value,
+            Some(json!({ "dbDeleted": true, "memoryRemoved": false })),
+            "两个计数域必须并列 camelCase 透出"
+        );
+        assert_eq!(captured.remove_calls.lock().clone(), vec!["alert-uuid-1".to_string()]);
+    }
+
+    /// 已知接缝 + 未知 op ⇒ `SEAM_CALL_UNSUPPORTED`（不猜、不兜底）：
+    /// `aggregator_stats`（裁定 J7 首批不发）与 `set_priority`（裁定 K-6 并入 watch）。
+    #[test]
+    fn monitor_watcher_unknown_ops_are_unsupported() {
+        let monitor = Arc::new(FixedMonitorProvider::new());
+        let watcher = Arc::new(FixedQuoteWatcher::new());
+        let (peer, _runtime) =
+            monitor_peer_with_permissions(monitor, watcher, vec![PluginPermission::Write]);
+        let responses = with_watchdog(Duration::from_secs(2), "未知 op", move || {
+            [("stock.monitor", "aggregator_stats"), ("quote.watcher", "set_priority")].map(
+                |(seam, op)| {
+                    peer.handle_call_seam(&json!({ "seam": seam, "op": op, "args": {} }), &[])
+                },
+            )
+        });
+        for response in responses {
+            assert_eq!(
+                response.code.as_deref(),
+                Some(error_codes::SEAM_CALL_UNSUPPORTED),
+                "已知接缝的未知 op 必须落 SEAM_CALL_UNSUPPORTED，实际 {response:?}"
+            );
+        }
+    }
+
+    /// `watch` 三格：`priority` **严格解析**（`bg` / 缺失 ⇒ `SEAM_CALL_INVALID_ARGS`，
+    /// 不继承命令层的静默回落）；正例透传 `(codes, priority, replace)` 且截断两数原样暴露；
+    /// `list_watched` 返回**具名对象**；`unwatch` 吃替身默认实现 ⇒ `PLUGIN_CALL_FAILED`。
+    #[test]
+    fn watcher_watch_priority_is_strict_and_rejects_bg() {
+        let monitor = Arc::new(FixedMonitorProvider::new());
+        let watcher = Arc::new(FixedQuoteWatcher::new());
+        let captured = Arc::clone(&watcher);
+        let (peer, _runtime) =
+            monitor_peer_with_permissions(monitor, watcher, vec![PluginPermission::Write]);
+
+        let inside = Arc::clone(&captured);
+        let (bg, no_priority, ok, defaulted, listed, unwatch, rejected_calls) =
+            with_watchdog(Duration::from_secs(5), "quote.watcher 全 op", move || {
+                // `bg` 是命令层的历史别名：接缝必须拒，而不是静默当 background、更不是回落 active。
+                let bg = peer.handle_call_seam(
+                    &json!({
+                        "seam": "quote.watcher",
+                        "op": "watch",
+                        "args": { "codes": ["600519"], "priority": "bg" },
+                    }),
+                    &[],
+                );
+                let no_priority = peer.handle_call_seam(
+                    &json!({
+                        "seam": "quote.watcher",
+                        "op": "watch",
+                        "args": { "codes": ["600519"] },
+                    }),
+                    &[],
+                );
+                // 拒绝时刻的快照：两次参数错误都不得触达 provider（其后的合法调用会让
+                // 计数上升，跨调用断言必须在闭包内取数才有意义）。
+                let rejected_calls = inside.watch_calls.lock().len();
+                let ok = peer.handle_call_seam(
+                    &json!({
+                        "seam": "quote.watcher",
+                        "op": "watch",
+                        "args": {
+                            "codes": ["600519", "000001", "300750"],
+                            "priority": "background",
+                            "replace": true,
+                        },
+                    }),
+                    &[],
+                );
+                // `replace` 缺省 false（可选参数走 deserialize_optional_arg）。
+                let defaulted = peer.handle_call_seam(
+                    &json!({
+                        "seam": "quote.watcher",
+                        "op": "watch",
+                        "args": { "codes": ["600519"], "priority": "active" },
+                    }),
+                    &[],
+                );
+                let listed = peer.handle_call_seam(
+                    &json!({ "seam": "quote.watcher", "op": "list_watched", "args": {} }),
+                    &[],
+                );
+                let unwatch = peer.handle_call_seam(
+                    &json!({
+                        "seam": "quote.watcher",
+                        "op": "unwatch",
+                        "args": { "codes": ["600519"] },
+                    }),
+                    &[],
+                );
+                (bg, no_priority, ok, defaulted, listed, unwatch, rejected_calls)
+            });
+        assert_eq!(
+            bg.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "`bg` 别名不得继承，必须落参数错误，实际 {bg:?}"
+        );
+        assert_eq!(rejected_calls, 0, "被拒的 `bg` / 缺参调用不得触达 provider");
+        assert_eq!(
+            no_priority.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "`priority` 必填，缺失必须落参数错误，实际 {no_priority:?}"
+        );
+        assert_eq!(ok.code, None, "合法 watch 应成功，实际 {ok:?}");
+        let calls = captured.watch_calls.lock().clone();
+        assert_eq!(calls.len(), 2, "两次合法 watch 应触达 provider");
+        assert_eq!(
+            calls[0],
+            (
+                vec!["600519".to_string(), "000001".to_string(), "300750".to_string()],
+                axagent_harness::WatchPriority::Background,
+                true,
+            ),
+            "codes / priority / replace 三参必须原样透传"
+        );
+        // 替身固定 applied=2（模拟被闸截断）：requested=3 ⇒ 两数并列原样透出。
+        assert_eq!(ok.value, Some(json!({ "requested": 3, "applied": 2 })));
+        assert_eq!(defaulted.code, None, "省略 replace 应成功，实际 {defaulted:?}");
+        assert!(!calls[1].2, "`replace` 缺省必须为 false");
+        assert_eq!(listed.code, None, "只读 op 应成功，实际 {listed:?}");
+        assert_eq!(
+            listed.value,
+            Some(json!({ "codes": ["000001", "600519"] })),
+            "必须返回具名对象 `codes`，不返回裸数组"
+        );
+        assert_eq!(*captured.list_calls.lock(), 1);
+        assert_eq!(
+            unwatch.code.as_deref(),
+            Some(error_codes::PLUGIN_CALL_FAILED),
+            "替身未实现 unwatch ⇒ 吃 trait 默认 Err(Provider)，实际 {unwatch:?}"
+        );
+        assert!(
+            unwatch
+                .message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("QuoteWatcherProvider::unwatch"),
+            "文案应点名 trait 方法，实际：{unwatch:?}"
+        );
+    }
+
+    /// 注册表取不到 provider（启动窗口内 / 提供方卸载后）⇒ `SEAM_PROVIDER_UNAVAILABLE`，
+    /// 明确失败不挂起。`test_host_peer` 的 `runtime: None` 同时证明取 provider 失败发生在
+    /// `block_on` 之前（无 runtime 也拿得到该码，而不是 `PLUGIN_CALL_FAILED`）。
+    #[test]
+    fn monitor_watcher_unregistered_provider_is_unavailable() {
+        let empty_registry = Arc::new(CapabilityRegistry::new());
+        let peer =
+            test_host_peer("plugin.none", &[], &["stock.monitor", "quote.watcher"], empty_registry);
+        let responses = with_watchdog(Duration::from_secs(2), "provider 缺位", move || {
+            [("stock.monitor", "status"), ("quote.watcher", "list_watched")].map(|(seam, op)| {
+                peer.handle_call_seam(&json!({ "seam": seam, "op": op, "args": {} }), &[])
+            })
+        });
+        for (seam, response) in [("stock.monitor", &responses[0]), ("quote.watcher", &responses[1])]
+        {
+            assert_eq!(
+                response.code.as_deref(),
+                Some(error_codes::SEAM_PROVIDER_UNAVAILABLE),
+                "`{seam}` 未注册 provider 必须落 SEAM_PROVIDER_UNAVAILABLE，实际 {response:?}"
             );
         }
     }

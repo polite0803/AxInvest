@@ -2008,3 +2008,24 @@ cargo fmt --check -p axagent-plugin-proto        # 在 axagent-plugins/ 根下�
 1. **写回执预算按「投递→回执」计，含排队时间**：若写者前面压着一帧接近 64 MiB 上限的大帧，后面预算最小的命令帧可能在健康连接上提前 `NoAck` ⇒ 毒化+杀进程（假阳性）。触发条件苛刻，本仓现有载荷远小于此；缓解选项（写预算下限 / 写者回报「开始写」）都会改「预算只归 worker」的口径，留裁。
 2. **`join_reader()` 仍无界**：其有界性依赖「进程已死 ⇒ stdout EOF」；纯流式夹具必须由用例自行关对端。若要连读线程 join 也带 deadline，需给读线程加退出信号通道，未做。
 3. **入站总闸未加**（按 §32.3-1 裁定）：入站服务侧本就没有等待上限，本批没有新增无界；互饿评估结论是「单写者 FIFO，不互等；唯一延迟是 head-of-line」，加闸会重新引入 M-3 误杀。
+
+## 42. `#60` + `#68` 交付账：超时不再引导重试、ToT 别名已删、主 crate `--all-targets` 窗口补齐（2026-11-02；报告 `.tmp/res60-68-report.md`；提交 77af74ed8）
+
+### 42.1 `#60`：`CommandTimeout` 从 `Retryable` 改 `General`
+
+| 面 | 改前 | 改后 |
+|---|---|---|
+| 分类 | `ErrorCategory::Retryable` | **`General`**（默认档：仍按 error 展示，但不进前端自动重试分支） |
+| `detail` | 原样错误串 | 追加「；超时不等于取消：插件可能仍在执行，重试可能导致副作用重复」 |
+| 文档 | 「调用方可原样重试」 | 「重试前必须确认命令幂等」——**旧句是假话**，因为 `worker.rs` 同文件就写着「超时 ≠ 取消」 |
+| 用例 | `command_timeout_maps_to_retryable_common_timeout` | `command_timeout_is_not_marked_retryable`：code 仍 `COMMON_TIMEOUT`、category=`general`、detail 含「超时不等于取消」 |
+
+⇒ 判据：**「没等到结果」不等于「没发生副作用」**。凡是可能已执行的操作，分类只能表达「可诊断」而不能表达「可自动重试」；`Retryable` 的语义是「重试是安全的」，这里不成立。
+
+### 42.2 `#68`：兼容别名删除 + 主 crate 定点窗口
+
+- `src-tauri/src/commands/agent/mod.rs:2246` 改用 `axagent_agent::TotReasoningProvider`；`axagent-ai/crates/agent/src/lib.rs` 删除 `#62` 留的 `TotReasoningProvider as LlmReasoningProvider` 别名。
+- **全仓命中分类**：活源码里 ToT 旧名残留 **0**；其余 `LlmReasoningProvider` 全部属于 ReAct 侧自有 trait（`react_engine.rs` 及其测试、`init/llm_providers.rs` 的显式 `react_engine::` 导入）⇒ 保留。两个同名 trait 从「靠别名共存」变成「各在各的模块里」，这正是 `#62` 想要但当时被禁改面挡住的状态。
+- **窗口结果**：`cargo check -p axagent --all-targets` **EXIT=0 / 23m08s**（此前 #37/#40 之后主 crate 只编过默认 target，测试 target 从未编过）；`cargo check -p axagent-agent` EXIT=0；`cargo test -p axagent --lib commands::plugin` **EXIT=0 / 27m52s / 5 passed**（测试 exe mtime 晚于源码，非旧产物）。
+- 口径备注：任务原文写「四条命令」，实际是 **3 条 cargo 命令 + 1 条全仓 grep 取证**（UNC 下 `grep -rn` 超时，改 Grep 工具分根复查，结论一致）——**不要**把「条目数」当成「命令数」，这类计数错误在本 PLAN 已出现过（§31.4 的 7≠6）。
+- 编译耗时新基线：主 crate **单编 23–28 min**（check `--all-targets` 23m08s / test 27m52s）⇒ 后续涉及 `src-tauri` 的任务排期按 25 min 量级估，不要再按 16m47s 估。

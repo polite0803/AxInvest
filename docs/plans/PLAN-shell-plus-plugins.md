@@ -2458,3 +2458,37 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 | CI | `Swatinem/rust-cache` 只缓存 `src-tauri -> target`，而 CI 用 `--manifest-path` 从仓库根跑 ⇒ **7/8 根零缓存** |
 
 **后续动作（未做，按风险排序）**：① 仓库根补 `rust-toolchain.toml`；② 统一访问视图（全树固定 `D:\` 本地路径，不再混用 UNC）；③ lock 收敛门（不是合并 lock）；④ CI 缓存覆盖 8 根；⑤ target 内 ≈16.6 GiB 冗余产物的定向清理。⚠ 硬约束：共享 target 下不带 `-p` 的 `cargo clean` 会清掉 **8 根共用整份 target**。
+
+## 53. `trading.engine` × 股票模板的并发交叉，与 #25 门红结案（2026-11-03；报告 `.tmp/res106-dataverifier.md`）
+
+### 53.1 #25「data-verifier.rhai 阶段3 数值判据门」结案：归因纠正
+
+- 门 **`scripts/check-rhai-numeric-typing.mjs`**：`--selftest` 与判定实跑均 **EXIT=0**（扫描面 86/21/2，非零排除假绿）。
+- **红因不是「他人未提交改动」**：未桥守卫由 v65 阶段3 写进 HEAD，修复同样在 HEAD（`2f9bfec23`，`data-verifier.rhai:474` 收编 `num_of` 桥，`seed_serenity.rs:114` 的 `TEMPLATE_VERSION` 65→66 并在注释里点名本次事件）。当前 24 项未提交改动**没有一个**落在该门扫描面或其输入里。
+- `NaN` / `±INF` 已按铁律逐情形推演：旧 `type_of` 守卫与新 `num_of(x, 50.0)` **完全等价**（+INF→封顶 54、-INF 原样、NaN 两侧同）。
+- 已接 CI 两处同源：`scripts/ci-check.mjs:344-345` ↔ `.github/workflows/ci.yml:259-262`（自检先于判定）。
+- 残余待确认（不影响结案）：两条 cargo 测试 `data_verifier_factor_scores_override_and_rank` / `data_verifier_without_factor_scores_unchanged` 需一次 cargo 窗口；判据本身**没有 NaN/嵌层整数用例**（防回归目前只靠静态扫描）。
+- ⚠ 方法论教训：**pending 登记必须留当时的门禁输出留档**。本轮多条「卡他人改动」的 pending 需要按同样方式复验（#25 复验结果是误归因）。
+
+### 53.2 接缝 × 股票模板：写面无交集，但读面单向交叉
+
+- **写面交集：0**。serenity 模板（`stock_analysis_setup/seed_serenity.rs`）全文无 `execute_trade` / `get_trades`，落库走 `reco_pool`，不写 `trades` / `portfolio_holdings`。
+- **共享读面**：接缝写 `portfolio_holdings`（`analysis-engine/src/trading.rs:437-475`、`:694-731`），而模板在 `stock_workflow/hooks.rs:860-862`（`portfolio-risk-gate` 注入全表持仓）与 `stock_workflow/core.rs:1575-1590`（退出判定）读它。
+- 四条并发风险（按严重度）：
+  1. **锁不跨面**：`trading_engine_service.rs:173-196` 的 per-`stock_code` 串行锁只约束接缝自身；模板两处读**不经该锁** ⇒ run 中点读到旧持仓/旧市值。
+  2. **无事务多表写**（`trading.rs:372` 注释自证「先 trades 后 holdings」）⇒ 半态窗口内并发读会拿到不一致组合。
+  3. **as_of 与实时写交叉**：接缝只对引擎调用套 `with_optional_asof`（`:199-202`），但同函数 `:176` 的查重读的是当前表 ⇒ 回放 run 叠加 live 下单时，查重与行情读数分属两个时间态。
+  4. **锁是进程本地**：不约束 gateway 等其它写入口，跨入口并发写同股时「锁内查重」失效（设计边界，非新缺陷）。
+- **当前评级：中低**（前提：不在 serenity run 进行中触发 `execute_trade`）。若要放开并发，需先做「risk-gate 持仓快照一致性」测试或文档化互斥约束。
+
+### 53.3 能力面进度（截至本轮）
+
+| 接缝 | op 数 | 写 op 权限闸 | 状态 |
+|---|---|---|---|
+| `market.quote` | 40 | 无（全只读） | 已交付 |
+| `jobs.store` | 6（3 读 + 3 写） | `add`/`remove`/`set_status` 需 `write` | 已交付 |
+| `workflow.run` | 4 | `start`/`cancel` 需 `write` | 已交付 |
+| `trading.engine` | 6 | `execute_trade` 需 `write` | 已交付 |
+| `stock.monitor`（并入 aggregator） | 待设计 | 写面需 `write`（复合 DB+内存） | 调研中 |
+| `quote.watcher` | 待设计 | 写面需 `write` | 调研中 |
+| `knowledge.vector` / `trajectory.store` | 待设计 | 待定 | 调研中 |

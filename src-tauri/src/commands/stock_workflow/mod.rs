@@ -28,6 +28,9 @@ pub mod sim_hook;
 /// `workflow.run` 接缝的宿主服务（白名单只放行 `stock-*`，故随股票域归档）。
 pub(crate) mod workflow_run_service;
 
+/// `trading.engine` 接缝的宿主服务（交易账本属股票域，故随股票域归档）。
+pub(crate) mod trading_engine_service;
+
 /// 构造严格模式工具权限：激活 AgentExecutor 的严格输出契约三道防线
 /// （4f 尾部约束注入 / VERDICT 缺失兜底重试 / VERDICT tag 重构 + strict JSON 校验与降级）。
 ///

@@ -1786,6 +1786,35 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         }
     }
 
+    // ── trading.engine 接缝：把宿主**独持**的交易引擎以「ORM 视图不出线」的形态暴露给插件 ──
+    // 契约已冻结（`axagent-core/crates/harness/src/trading_engine.rs`）：六个 op 中
+    // `get_positions` / `validate_trade` / `execute_trade` 会触发行情取数 ⇒ 收 `as_of`，
+    // 其余三个（get_trades / compare_trade / trading_enabled）是纯 DB 读。
+    // 引擎此前直接内联在下方 `AppState` 字面量里（注册块拿不到它）⇒ 先在此上提构造：
+    // 注册用 `engine.clone()`，同一个 `Arc` 随后按值 move 进 AppState
+    // （与 jobs.store / workflow.run 同款「clone 注册、按值 move」）。
+    // 失败只 warn，不阻断启动（与 market.quote / jobs.store / workflow.run 同策略）。
+    let trading_engine = {
+        let engine = Arc::new(tokio::sync::RwLock::new(
+            axagent_analysis_engine::trading::TradingEngine::new(
+                Arc::new(sea_db.clone()),
+                // ⚠ 下方 AppState 字面量里 `astock_client` 会被 move，这里必须 clone
+                astock_client.clone(),
+            ),
+        ));
+        let provider: Arc<dyn axagent_harness::TradingEngineProvider> = Arc::new(
+            crate::commands::stock_workflow::trading_engine_service::HostTradingEngine::new(
+                engine.clone(),
+                Arc::new(sea_db.clone()),
+            ),
+        );
+        match axagent_harness::get_capability_registry().register_trading_engine(provider) {
+            Ok(_) => tracing::info!("trading.engine 接缝已注册 (BuiltIn)"),
+            Err(e) => tracing::warn!("trading.engine 注册失败: {e}"),
+        }
+        engine
+    };
+
     // C3（2026-09-27，301302 t-risk 超时根因）：交易日历「上证日 K 自证」接线。
     // 原远程源 `RPTA_WEB_TRADE_CALENDAR` 报表已下线（9501），且 `init_holiday_calendar`
     // 此前**从未被启动流程调用** ⇒ is_trading_day 一直走硬编码兜底，缺 2026-09-25 中秋
@@ -1862,12 +1891,8 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
             std::collections::HashMap::new(),
         )),
         quote_watcher: std::sync::OnceLock::new(),
-        trading_engine: Arc::new(tokio::sync::RwLock::new(
-            axagent_analysis_engine::trading::TradingEngine::new(
-                std::sync::Arc::new(sea_db.clone()),
-                astock_client,
-            ),
-        )),
+        // 构造已上提到上方 trading.engine 注册块（注册需要同一个 Arc）
+        trading_engine,
         cross_stock_aggregator: std::sync::OnceLock::new(),
         stock_adaptive_engine: Arc::new(
             axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine::new()

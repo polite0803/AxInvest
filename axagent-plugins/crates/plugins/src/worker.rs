@@ -98,7 +98,7 @@ use axagent_harness::platform_config::PlatformConfig;
 use axagent_harness::types::{
     ChatRequest, ChatResponse, ChatStreamChunk, EmbedRequest, EmbedResponse, Model,
 };
-use axagent_harness::workflow_types::{NodeKind, WorkflowTemplateData};
+use axagent_harness::workflow_types::{NodeKind, Variable, WorkflowTemplateData};
 use axagent_harness::{
     AgentTurnRequest, AgentTurnResult, AgentTurnRunner, AxAgentError, BusinessRuleEvaluator,
     CapabilityRegistry, ContextContributor, ContextRequest, DispatchMode, DispatchResult,
@@ -418,10 +418,15 @@ struct HostPeer {
 /// 其余接缝或 op 一律 `None`（不设权限闸）。其中 `add` / `remove` / `set_status` 已有分派
 /// 分支，`update` 仅登记、尚无实现（会落到「未知 op」的 `SEAM_CALL_UNSUPPORTED`）。
 ///
+/// 同时登记 **`workflow.run` 的两个写 op**（`start` / `cancel`）：发起与取消执行都会改变
+/// 宿主侧运行态（占用并发额度、触发引擎 `cancel`），故要求 `write`；`status` /
+/// `list_active` 只读，不设闸。
+///
 /// 纯函数（无 `self`、无全局状态），便于单测直接枚举判定。
 fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
     match (seam, op) {
         ("jobs.store", "add" | "remove" | "set_status" | "update") => Some(PluginPermission::Write),
+        ("workflow.run", "start" | "cancel") => Some(PluginPermission::Write),
         _ => None,
     }
 }
@@ -1807,6 +1812,166 @@ impl HostPeer {
                     Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
                 }
             },
+            // ── workflow.run 接缝：异步 job（start 受理 + status / cancel / list_active） ──
+            // op 参数一律 **snake_case**（与 jobs.store / market.quote 的入站约定一致），而
+            // `WorkflowRunRequest` 的线上 DTO 是 **camelCase** —— 故这里逐字段解析后在本层
+            // 用结构体字面量构造，**不能**整体把 `args` 反序列化成 `WorkflowRunRequest`
+            // （否则 `template_id` 被静默丢成空串，宿主只会报「模板不存在」）。
+            // `owner` 不接收插件参数：一律用连接身份（[`Self::plugin_id`]）注入。
+            "workflow.run" if op == "start" => {
+                let template_id: String = match deserialize_arg(&args, "template_id", seam) {
+                    Ok(template_id) => template_id,
+                    Err(response) => return response,
+                };
+                // 空白模板 id 等于没给：在取 provider 之前判掉，免得送进宿主白名单查询。
+                let template_id = template_id.trim().to_string();
+                if template_id.is_empty() {
+                    return invalid_args(format!(
+                        "接缝 `{seam}` 的 `template_id` 不能为空白字符串"
+                    ));
+                }
+                let input: Option<Value> = match deserialize_optional_arg(&args, "input", seam) {
+                    Ok(input) => input,
+                    Err(response) => return response,
+                };
+                let variables: Vec<Variable> =
+                    match deserialize_optional_arg(&args, "variables", seam) {
+                        Ok(variables) => variables.unwrap_or_default(),
+                        Err(response) => return response,
+                    };
+                let model_id: Option<String> =
+                    match deserialize_optional_arg(&args, "model_id", seam) {
+                        Ok(model_id) => model_id,
+                        Err(response) => return response,
+                    };
+                let provider_id: Option<String> =
+                    match deserialize_optional_arg(&args, "provider_id", seam) {
+                        Ok(provider_id) => provider_id,
+                        Err(response) => return response,
+                    };
+                let max_concurrent: Option<u32> =
+                    match deserialize_optional_arg(&args, "max_concurrent", seam) {
+                        Ok(max_concurrent) => max_concurrent,
+                        Err(response) => return response,
+                    };
+                let step_timeout_secs: Option<u64> =
+                    match deserialize_optional_arg(&args, "step_timeout_secs", seam) {
+                        Ok(step_timeout_secs) => step_timeout_secs,
+                        Err(response) => return response,
+                    };
+                let tool_timeout_secs: Option<u64> =
+                    match deserialize_optional_arg(&args, "tool_timeout_secs", seam) {
+                        Ok(tool_timeout_secs) => tool_timeout_secs,
+                        Err(response) => return response,
+                    };
+                let total_timeout_secs: Option<u64> =
+                    match deserialize_optional_arg(&args, "total_timeout_secs", seam) {
+                        Ok(total_timeout_secs) => total_timeout_secs,
+                        Err(response) => return response,
+                    };
+                let dry_run: bool = match deserialize_optional_arg(&args, "dry_run", seam) {
+                    Ok(dry_run) => dry_run.unwrap_or(false),
+                    Err(response) => return response,
+                };
+                let as_of_date: Option<String> =
+                    match deserialize_optional_arg(&args, "as_of_date", seam) {
+                        Ok(as_of_date) => as_of_date,
+                        Err(response) => return response,
+                    };
+                let request = axagent_harness::WorkflowRunRequest {
+                    template_id,
+                    input,
+                    variables,
+                    model_id,
+                    provider_id,
+                    max_concurrent,
+                    step_timeout_secs,
+                    tool_timeout_secs,
+                    total_timeout_secs,
+                    dry_run,
+                    as_of_date,
+                };
+                let Some(provider) = self.registry.get_workflow_run() else {
+                    return self.unavailable(seam);
+                };
+                let owner = self.plugin_id.clone();
+                let Some(result) = self.block_on(provider.start(&owner, request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(handle) => to_value("WorkflowRunHandle", &handle),
+                    Err(e) => workflow_run_error(e),
+                }
+            },
+            "workflow.run" if op == "status" => {
+                let execution_id: String = match deserialize_arg(&args, "execution_id", seam) {
+                    Ok(execution_id) => execution_id,
+                    Err(response) => return response,
+                };
+                let include_output: bool =
+                    match deserialize_optional_arg(&args, "include_output", seam) {
+                        Ok(include_output) => include_output.unwrap_or(false),
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_workflow_run() else {
+                    return self.unavailable(seam);
+                };
+                let owner = self.plugin_id.clone();
+                let Some(result) =
+                    self.block_on(provider.status(&owner, &execution_id, include_output))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 查无（含跨 owner、宿主已重启）⇒ JSON `null`，**不是错误**。
+                    Ok(view) => to_value("ExecutionView", &view),
+                    Err(e) => workflow_run_error(e),
+                }
+            },
+            "workflow.run" if op == "cancel" => {
+                let execution_id: String = match deserialize_arg(&args, "execution_id", seam) {
+                    Ok(execution_id) => execution_id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_workflow_run() else {
+                    return self.unavailable(seam);
+                };
+                let owner = self.plugin_id.clone();
+                let Some(result) = self.block_on(provider.cancel(&owner, &execution_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 三态结果**原样**透出：真取消 / 终态幂等 / 查无都正常，不借用错误码。
+                    Ok(outcome) => to_value("WorkflowRunCancelOutcome", &outcome),
+                    Err(e) => workflow_run_error(e),
+                }
+            },
+            "workflow.run" if op == "list_active" => {
+                // `limit` 缺省 50，并夹在 1..=200：插件传超大值不得让宿主一次吐全表。
+                let limit: u32 = match deserialize_optional_arg(&args, "limit", seam) {
+                    Ok(limit) => limit.unwrap_or(50).clamp(1, 200),
+                    Err(response) => return response,
+                };
+                let workflow_id: Option<String> =
+                    match deserialize_optional_arg(&args, "workflow_id", seam) {
+                        Ok(workflow_id) => workflow_id,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_workflow_run() else {
+                    return self.unavailable(seam);
+                };
+                let owner = self.plugin_id.clone();
+                let page_limit = limit as usize;
+                let Some(result) =
+                    self.block_on(provider.list_active(&owner, workflow_id.as_deref(), page_limit))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(page) => to_value("WorkflowRunActivePage", &page),
+                    Err(e) => workflow_run_error(e),
+                }
+            },
             // `platform.adapter.{平台名}` 的 seam ID 是**动态**的，只能用前缀守卫。
             other if platform_name_from_seam(other).is_some() => {
                 let platform = platform_name_from_seam(other).unwrap_or_default();
@@ -2100,6 +2265,20 @@ fn no_runtime(seam: &str) -> FrameResponse {
         error_codes::PLUGIN_CALL_FAILED,
         format!("宿主缺少 tokio runtime，无法调用 async 接缝 `{seam}`"),
     )
+}
+
+/// `workflow.run` 提供者的错误 → 帧错误码。
+///
+/// [`AxAgentError::Validation`] 是契约里对「宿主拒绝受理」（模板不在白名单 / 准入并发超限）
+/// 的表达，映射为 [`error_codes::WORKFLOW_RUN_REJECTED`]，让插件能与宿主内部故障区分开；
+/// 其余错误一律 [`error_codes::PLUGIN_CALL_FAILED`]。
+fn workflow_run_error(error: AxAgentError) -> FrameResponse {
+    match error {
+        AxAgentError::Validation(message) => {
+            FrameResponse::error(error_codes::WORKFLOW_RUN_REJECTED, message)
+        },
+        other => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, other.to_string()),
+    }
 }
 
 // ───────────────────────── 传输层（读线程 + 配对表） ─────────────────────────
@@ -4448,7 +4627,9 @@ fn register_remote_seam(
 mod tests {
     use super::*;
     use axagent_harness::{
-        AsOfDataScope, AsOfSource, DispatchMode, EventCategory, EventDispatchBus,
+        AsOfDataScope, AsOfSource, DispatchMode, EventCategory, EventDispatchBus, ExecutionView,
+        WorkflowRunActivePage, WorkflowRunActiveView, WorkflowRunCancelOutcome, WorkflowRunHandle,
+        WorkflowRunProvider, WorkflowRunRequest,
     };
     use axagent_plugin_proto::{CommandFault, Peer};
     use std::net::{Shutdown, TcpListener, TcpStream};
@@ -7592,5 +7773,396 @@ mod tests {
             "缺 `job` 必须走参数错误，实际 {response:?}"
         );
         assert!(captured.added_job.lock().is_none(), "缺参不得触达 provider");
+    }
+
+    // ───── workflow.run 接缝（start / status / cancel / list_active） ─────
+
+    /// 假工作流执行提供者：记录每次调用的 `owner` 与参数，返回可控结果。
+    struct FixedWorkflowRunProvider {
+        /// `start` 收到的 `(owner, request)` 序列。
+        start_calls: Mutex<Vec<(String, WorkflowRunRequest)>>,
+        /// `status` 收到的 `(owner, execution_id, include_output)` 序列。
+        status_calls: Mutex<Vec<(String, String, bool)>>,
+        /// `cancel` 收到的 `(owner, execution_id)` 序列。
+        cancel_calls: Mutex<Vec<(String, String)>>,
+        /// `list_active` 收到的 `(owner, workflow_id, limit)` 序列。
+        list_calls: Mutex<Vec<(String, Option<String>, usize)>>,
+        /// `Some(msg)` ⇒ `start` 返回 `Err(AxAgentError::Validation(msg))`（模拟宿主拒绝受理）。
+        start_rejection: Option<String>,
+    }
+
+    impl FixedWorkflowRunProvider {
+        fn new() -> Self {
+            Self {
+                start_calls: Mutex::new(Vec::new()),
+                status_calls: Mutex::new(Vec::new()),
+                cancel_calls: Mutex::new(Vec::new()),
+                list_calls: Mutex::new(Vec::new()),
+                start_rejection: None,
+            }
+        }
+
+        /// 让 `start` 按「宿主拒绝受理」（模板不在白名单 / 准入并发超限）失败。
+        fn rejecting(reason: &str) -> Self {
+            Self { start_rejection: Some(reason.to_string()), ..Self::new() }
+        }
+
+        /// 契约里 `start` 的受理回执（字段值固定，供断言整体比对）。
+        fn handle() -> WorkflowRunHandle {
+            WorkflowRunHandle {
+                execution_id: "exec-1".to_string(),
+                workflow_id: "wf-1".to_string(),
+                accepted_at: 1_700_000_000_000,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl WorkflowRunProvider for FixedWorkflowRunProvider {
+        async fn start(
+            &self,
+            owner: &str,
+            request: WorkflowRunRequest,
+        ) -> axagent_harness::core_error::Result<WorkflowRunHandle> {
+            self.start_calls.lock().push((owner.to_string(), request));
+            match &self.start_rejection {
+                Some(reason) => Err(AxAgentError::Validation(reason.clone())),
+                None => Ok(Self::handle()),
+            }
+        }
+
+        async fn status(
+            &self,
+            owner: &str,
+            execution_id: &str,
+            include_output: bool,
+        ) -> axagent_harness::core_error::Result<Option<ExecutionView>> {
+            self.status_calls.lock().push((
+                owner.to_string(),
+                execution_id.to_string(),
+                include_output,
+            ));
+            // 查无固定回 `None`：分派层必须把它翻成 JSON `null` 而非错误。
+            Ok(None)
+        }
+
+        async fn cancel(
+            &self,
+            owner: &str,
+            execution_id: &str,
+        ) -> axagent_harness::core_error::Result<WorkflowRunCancelOutcome> {
+            self.cancel_calls.lock().push((owner.to_string(), execution_id.to_string()));
+            Ok(WorkflowRunCancelOutcome {
+                cancelled: true,
+                status: Some(axagent_harness::workflow_types::ExecutionStatus::Cancelled),
+            })
+        }
+
+        async fn list_active(
+            &self,
+            owner: &str,
+            workflow_id: Option<&str>,
+            limit: usize,
+        ) -> axagent_harness::core_error::Result<WorkflowRunActivePage> {
+            self.list_calls.lock().push((
+                owner.to_string(),
+                workflow_id.map(str::to_string),
+                limit,
+            ));
+            Ok(WorkflowRunActivePage {
+                executions: vec![WorkflowRunActiveView {
+                    execution_id: "exec-1".to_string(),
+                    workflow_id: "wf-1".to_string(),
+                    status: axagent_harness::workflow_types::ExecutionStatus::Running,
+                    current_node_id: Some("node-2".to_string()),
+                    owner_plugin_id: owner.to_string(),
+                    created_at: 1_700_000_000_000,
+                    updated_at: 1_700_000_001_000,
+                }],
+                total: 1,
+            })
+        }
+    }
+
+    /// 装假 workflow.run 提供者的 peer + 保活到用例结束的 runtime。
+    ///
+    /// 缺省带 `write` 权限（`start` / `cancel` 的准入需要）；只读 op 请用
+    /// [`Self::workflow_run_peer_with_permissions`] 传空表，以证明它们不设闸。
+    fn workflow_run_peer(
+        provider: Arc<FixedWorkflowRunProvider>,
+    ) -> (HostPeer, tokio::runtime::Runtime) {
+        workflow_run_peer_with_permissions(provider, vec![PluginPermission::Write])
+    }
+
+    /// 同 [`Self::workflow_run_peer`]，但显式注入清单权限。
+    fn workflow_run_peer_with_permissions(
+        provider: Arc<FixedWorkflowRunProvider>,
+        permissions: Vec<PluginPermission>,
+    ) -> (HostPeer, tokio::runtime::Runtime) {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("async 接缝用例需要 runtime");
+        let registry = Arc::new(CapabilityRegistry::new());
+        let provider: Arc<dyn axagent_harness::WorkflowRunProvider> = provider;
+        registry.register_workflow_run(provider).expect("workflow.run 接缝应注册成功");
+        let peer = HostPeer {
+            plugin_id: "plugin.workflow".to_string(),
+            declared_capabilities: Vec::new(),
+            declared_calls: vec!["workflow.run".to_string()],
+            registry,
+            runtime: Some(runtime.handle().clone()),
+            permissions,
+        };
+        (peer, runtime)
+    }
+
+    /// `start` 逐字段解析入站（snake_case）并构造 camelCase DTO；owner 取连接身份。
+    #[test]
+    fn workflow_run_start_forwards_request_and_owner() {
+        let provider = Arc::new(FixedWorkflowRunProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = workflow_run_peer(provider);
+        let response = with_watchdog(Duration::from_secs(5), "workflow.run start", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "workflow.run",
+                    "op": "start",
+                    "args": {
+                        "template_id": "stock-analysis",
+                        "input": { "codes": ["600519"] },
+                        "max_concurrent": 3,
+                        "dry_run": true,
+                        "as_of_date": "2024-06-28",
+                    },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "已注册且已授权时应成功，实际 {response:?}");
+        let calls = captured.start_calls.lock().clone();
+        assert_eq!(calls.len(), 1, "start 应恰被调用一次");
+        let (owner, request) = &calls[0];
+        assert_eq!(owner, "plugin.workflow", "owner 必须由连接身份注入，不得取自参数");
+        assert_eq!(request.template_id, "stock-analysis", "`template_id` 应原样透传");
+        assert_eq!(request.input, Some(json!({ "codes": ["600519"] })));
+        assert_eq!(request.max_concurrent, Some(3));
+        assert!(request.dry_run, "`dry_run` 应原样透传");
+        assert_eq!(request.as_of_date.as_deref(), Some("2024-06-28"));
+        assert!(request.variables.is_empty(), "`variables` 缺省必须为空 vec");
+        assert_eq!(
+            response.value,
+            Some(json!({
+                "executionId": "exec-1",
+                "workflowId": "wf-1",
+                "acceptedAt": 1_700_000_000_000_i64,
+            }))
+        );
+    }
+
+    /// 缺 `template_id` / 空白 `template_id` ⇒ 参数错误，且不触达 provider。
+    #[test]
+    fn workflow_run_start_requires_template_id() {
+        let provider = Arc::new(FixedWorkflowRunProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = workflow_run_peer(provider);
+        let missing = with_watchdog(Duration::from_secs(2), "workflow.run start 缺参", move || {
+            peer.handle_call_seam(
+                &json!({ "seam": "workflow.run", "op": "start", "args": {} }),
+                &[],
+            )
+        });
+        assert_eq!(
+            missing.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "缺 `template_id` 必须走参数错误，实际 {missing:?}"
+        );
+
+        let provider = Arc::new(FixedWorkflowRunProvider::new());
+        let captured_blank = Arc::clone(&provider);
+        let (peer, _runtime) = workflow_run_peer(provider);
+        let blank = with_watchdog(Duration::from_secs(2), "workflow.run start 空白", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "workflow.run",
+                    "op": "start",
+                    "args": { "template_id": "   " },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(
+            blank.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "空白 `template_id` 必须走参数错误，实际 {blank:?}"
+        );
+
+        assert!(captured.start_calls.lock().is_empty(), "缺参不得触达 provider");
+        assert!(captured_blank.start_calls.lock().is_empty(), "空白参数不得触达 provider");
+    }
+
+    /// 查无（`Ok(None)`）⇒ JSON `null`，**不是错误**；`include_output` 缺省 false 透传。
+    ///
+    /// peer 不带任何权限：`status` 是只读 op，不得被权限闸拦。
+    #[test]
+    fn workflow_run_status_missing_returns_null() {
+        let provider = Arc::new(FixedWorkflowRunProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = workflow_run_peer_with_permissions(provider, Vec::new());
+        let response = with_watchdog(Duration::from_secs(5), "workflow.run status", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "workflow.run",
+                    "op": "status",
+                    "args": { "execution_id": "exec-404" },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "查无可不是错误，实际 {response:?}");
+        assert_eq!(response.value, Some(Value::Null), "返回值应为 JSON null");
+        assert_eq!(
+            captured.status_calls.lock().clone(),
+            vec![("plugin.workflow".to_string(), "exec-404".to_string(), false)],
+            "`include_output` 缺省必须为 false 并原样透传"
+        );
+    }
+
+    /// `cancel` 的三态结果原样透出（真取消 + 现值），owner 取连接身份。
+    #[test]
+    fn workflow_run_cancel_reports_outcome() {
+        let provider = Arc::new(FixedWorkflowRunProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = workflow_run_peer(provider);
+        let response = with_watchdog(Duration::from_secs(5), "workflow.run cancel", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "workflow.run",
+                    "op": "cancel",
+                    "args": { "execution_id": "exec-1" },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "已授权时应成功，实际 {response:?}");
+        assert_eq!(response.value, Some(json!({ "cancelled": true, "status": "cancelled" })));
+        assert_eq!(
+            captured.cancel_calls.lock().clone(),
+            vec![("plugin.workflow".to_string(), "exec-1".to_string())]
+        );
+    }
+
+    /// `limit` 夹在 1..=200：9999 ⇒ 200，缺省 ⇒ 50；`workflow_id` 缺省 ⇒ `None`。
+    ///
+    /// peer 不带任何权限：`list_active` 是只读 op，不得被权限闸拦。
+    #[test]
+    fn workflow_run_list_active_clamps_limit() {
+        let provider = Arc::new(FixedWorkflowRunProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = workflow_run_peer_with_permissions(provider, Vec::new());
+        let response = with_watchdog(Duration::from_secs(5), "workflow.run list_active", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "workflow.run",
+                    "op": "list_active",
+                    "args": { "limit": 9999, "workflow_id": "wf-1" },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        let value = response.value.expect("成功响应必须带 value");
+        assert_eq!(value["total"], json!(1));
+        assert_eq!(value["executions"][0]["ownerPluginId"], json!("plugin.workflow"));
+
+        let provider = Arc::new(FixedWorkflowRunProvider::new());
+        let captured_default = Arc::clone(&provider);
+        let (peer, _runtime) = workflow_run_peer_with_permissions(provider, Vec::new());
+        let response = with_watchdog(Duration::from_secs(5), "workflow.run list_active 缺省", move || {
+            peer.handle_call_seam(
+                &json!({ "seam": "workflow.run", "op": "list_active", "args": {} }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "省略可选参数应成功，实际 {response:?}");
+
+        assert_eq!(
+            captured.list_calls.lock().clone(),
+            vec![("plugin.workflow".to_string(), Some("wf-1".to_string()), 200)],
+            "limit=9999 必须被夹到 200"
+        );
+        assert_eq!(
+            captured_default.list_calls.lock().clone(),
+            vec![("plugin.workflow".to_string(), None, 50)],
+            "`limit` 缺省必须为 50，`workflow_id` 缺省必须为 None"
+        );
+    }
+
+    /// 无 `write` 权限 ⇒ `start` / `cancel` 在分派前被拒，且不触达 provider。
+    #[test]
+    fn workflow_run_start_requires_write_permission() {
+        let provider = Arc::new(FixedWorkflowRunProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = workflow_run_peer_with_permissions(provider, Vec::new());
+        let (start, cancel) =
+            with_watchdog(Duration::from_secs(5), "workflow.run 无权限", move || {
+                let start = peer.handle_call_seam(
+                    &json!({
+                        "seam": "workflow.run",
+                        "op": "start",
+                        "args": { "template_id": "stock-analysis" },
+                    }),
+                    &[],
+                );
+                let cancel = peer.handle_call_seam(
+                    &json!({
+                        "seam": "workflow.run",
+                        "op": "cancel",
+                        "args": { "execution_id": "exec-1" },
+                    }),
+                    &[],
+                );
+                (start, cancel)
+            });
+        for response in [&start, &cancel] {
+            assert_eq!(
+                response.code.as_deref(),
+                Some(error_codes::PLUGIN_PERMISSION_DENIED),
+                "无 write 权限必须被拒，实际 {response:?}"
+            );
+            let detail = response.message.clone().unwrap_or_default();
+            assert!(detail.contains("write"), "文案应点明缺失的权限，实际：{detail}");
+            assert!(detail.contains("workflow.run"), "文案应点明接缝，实际：{detail}");
+        }
+        assert!(captured.start_calls.lock().is_empty(), "被拒的 start 不得触达 provider");
+        assert!(captured.cancel_calls.lock().is_empty(), "被拒的 cancel 不得触达 provider");
+    }
+
+    /// 宿主拒绝受理（`AxAgentError::Validation`）⇒ `WORKFLOW_RUN_REJECTED`，并保留原因。
+    #[test]
+    fn workflow_run_start_maps_validation_to_rejected() {
+        let (peer, _runtime) = workflow_run_peer(Arc::new(FixedWorkflowRunProvider::rejecting(
+            "模板 `stock-analysis` 不在白名单",
+        )));
+        let response = with_watchdog(Duration::from_secs(5), "workflow.run start 被拒", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "workflow.run",
+                    "op": "start",
+                    "args": { "template_id": "stock-analysis" },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(
+            response.code.as_deref(),
+            Some(error_codes::WORKFLOW_RUN_REJECTED),
+            "宿主拒绝受理必须映射为 WORKFLOW_RUN_REJECTED，实际 {response:?}"
+        );
+        assert_eq!(
+            response.message.as_deref(),
+            Some("模板 `stock-analysis` 不在白名单"),
+            "拒绝原因应原样透出"
+        );
     }
 }

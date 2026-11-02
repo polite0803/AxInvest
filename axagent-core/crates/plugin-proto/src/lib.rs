@@ -312,6 +312,8 @@ pub mod error_codes {
     /// 内部诊断码：只在宿主与插件之间的接缝分派里出现，**不进** 11 语言 UI 词表
     /// （与同模块其余码一致，见模块头注释）。
     pub const PLUGIN_PERMISSION_DENIED: &str = "PLUGIN_PERMISSION_DENIED";
+    /// 宿主拒绝受理工作流执行（模板不在白名单 / 准入并发超限）。内部诊断码，不进 11 语言 UI 词表。
+    pub const WORKFLOW_RUN_REJECTED: &str = "WORKFLOW_RUN_REJECTED";
 }
 
 /// 调用链长度上限（`PLAN-everything-is-plugin.md` §15.5）：不含本帧接收方。

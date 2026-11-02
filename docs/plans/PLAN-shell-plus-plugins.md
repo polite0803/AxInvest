@@ -2399,7 +2399,7 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 2. **总超时后 DB 终态可能是 `cancelled`**（引擎写），宿主视图与事件为 `failed`；不额外写 DB 以免与引擎收尾竞写。是否必须一致待裁定。
 3. **stock-* 生命周期钩子副作用**：插件发起执行若不传 `analysis_id`，会走 precheck/persist 分支并写 `stock_analyses`。插件迁移（#35）前需裁定：注入 `analysis_id` 跳过，或契约增业务标记。
 4. **未实现**：卸载即取消、跨重启查询（`NotFound` ⇒ `null`）、`plan_callbacks` / `heartbeat` / `timeout_warning` / `system_capability_callback`（契约无字段）、`stock-*` 之外模板（白名单当前只开 `stock-`）。
-5. **`src-tauri` 单测未编译**：`cargo check -p axagent` 只查 lib/bin，`workflow_run.rs` 内 4 条 `#[test]` 未经编译验证；需一次 `__TAURI_WORKSPACE__=true cargo test -p axagent --lib init::workflow_run --no-run` 窗口。
+5. ~~`src-tauri` 单测未编译~~ ⇒ **已确认（2026-11-03）**：`cargo test -p axagent --lib stock_workflow::workflow_run_service` ⇒ EXIT=0、**5 passed; 833 filtered**（`.tmp/res110-wfsvc-test.log`）；同法 `trading_engine_service` ⇒ **1 passed**（`.tmp/res111-tdesvc-test.log`）。测试目标已在真机上编译并跑通。
 6. **双拼写**：`variables` 元素是 harness `Variable`（snake_case 字段），外层请求 DTO 是 camelCase；`input: null` 与缺失在插件侧不可区分。均已在契约注释写明，插件 SDK 文档需同步。
 
 ## 51. `trading.engine` 接缝交付账（2026-11-03；报告 `.tmp/res92-trading-design.md` / `.tmp/res98-report.md` / `.tmp/res99-report.md` / `.tmp/res102-report.md`）
@@ -2467,7 +2467,7 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 - **红因不是「他人未提交改动」**：未桥守卫由 v65 阶段3 写进 HEAD，修复同样在 HEAD（`2f9bfec23`，`data-verifier.rhai:474` 收编 `num_of` 桥，`seed_serenity.rs:114` 的 `TEMPLATE_VERSION` 65→66 并在注释里点名本次事件）。当前 24 项未提交改动**没有一个**落在该门扫描面或其输入里。
 - `NaN` / `±INF` 已按铁律逐情形推演：旧 `type_of` 守卫与新 `num_of(x, 50.0)` **完全等价**（+INF→封顶 54、-INF 原样、NaN 两侧同）。
 - 已接 CI 两处同源：`scripts/ci-check.mjs:344-345` ↔ `.github/workflows/ci.yml:259-262`（自检先于判定）。
-- 残余待确认（不影响结案）：两条 cargo 测试 `data_verifier_factor_scores_override_and_rank` / `data_verifier_without_factor_scores_unchanged` 需一次 cargo 窗口；判据本身**没有 NaN/嵌层整数用例**（防回归目前只靠静态扫描）。
+- **cargo 侧已确认（2026-11-03）**：`__TAURI_WORKSPACE__=true cargo test -p axagent --lib stock_workflow::rhai_registry::tests::data_verifier` ⇒ **EXIT=0，4 passed; 834 filtered**（`.tmp/res107-dv-test.log`）。D 类残余消除，#25 彻底结案。判据本身仍**没有 NaN/嵌层整数用例**（防回归只靠静态扫描），列为可选加固项。
 - ⚠ 方法论教训：**pending 登记必须留当时的门禁输出留档**。本轮多条「卡他人改动」的 pending 需要按同样方式复验（#25 复验结果是误归因）。
 
 ### 53.2 接缝 × 股票模板：写面无交集，但读面单向交叉
@@ -2492,3 +2492,13 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 | `stock.monitor`（并入 aggregator） | 待设计 | 写面需 `write`（复合 DB+内存） | 调研中 |
 | `quote.watcher` | 待设计 | 写面需 `write` | 调研中 |
 | `knowledge.vector` / `trajectory.store` | 待设计 | 待定 | 调研中 |
+
+### 53.4 主 crate 测试目标实跑（2026-11-03）
+
+| 命令（`src-tauri` 根，`__TAURI_WORKSPACE__=true`） | EXIT | 结果 |
+|---|---|---|
+| `cargo test -p axagent --lib stock_workflow::rhai_registry::tests::data_verifier` | 0 | `4 passed; 0 failed; 834 filtered out`（`.tmp/res107-dv-test.log`） |
+| `cargo test -p axagent --lib stock_workflow::workflow_run_service` | 0 | `5 passed; 0 failed; 833 filtered out`（`.tmp/res110-wfsvc-test.log`） |
+| `cargo test -p axagent --lib stock_workflow::trading_engine_service` | 0 | `1 passed; 0 failed; 837 filtered out`（`.tmp/res111-tdesvc-test.log`） |
+
+⇒ 两条接缝的宿主服务与 `data-verifier` 判据都已在**真测试二进制**上跑通（不是 `--no-run`）。⚠ 遗留可选加固：`data_verifier_factor_scores_override_and_rank` 无「嵌层整数 + NaN」用例（res106 §5 处置 3）。

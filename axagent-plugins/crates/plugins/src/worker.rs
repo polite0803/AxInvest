@@ -808,6 +808,271 @@ impl HostPeer {
                     Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
                 }
             },
+            // ── 个股数据面（P6.1 B 批）：A 批扩的 12 个 `MarketDataProvider` 方法 ──
+            // 全部方法末参 `as_of` 由 args 显式透传（跨进程读不到宿主 task_local）；
+            // 参数键保持 snake_case（与 #80 一致），DTO 字段才是 camelCase。
+            "market.quote" if op == "get_financials" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_financials(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(reports) => to_value("FinancialReport", &reports),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_money_flow" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_money_flow(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(flow) => to_value("MoneyFlow", &flow),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_north_bound_holding" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) =
+                    self.block_on(provider.get_north_bound_holding(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(holding) => to_value("NorthBoundHolding", &holding),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_dragon_tiger" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_dragon_tiger(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(entries) => to_value("DragonTigerEntry", &entries),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_margin_balance_trend" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let days: u32 = match deserialize_arg(&args, "days", seam) {
+                    Ok(days) => days,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) =
+                    self.block_on(provider.get_margin_balance_trend(&stock_code, days, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(trend) => to_value("MarginData", &trend),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_margin_data" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_margin_data(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(data) => to_value("MarginData", &data),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_holder_count" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_holder_count(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(count) => to_value("HolderCount", &count),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_block_trades" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_block_trades(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(trades) => to_value("BlockTrade", &trades),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_pledge_data" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_pledge_data(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(pledge) => to_value("PledgeData", &pledge),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_sector_info" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_sector_info(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(sector) => to_value("SectorInfo", &sector),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_news" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let limit: u32 = match deserialize_arg(&args, "limit", seam) {
+                    Ok(limit) => limit,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_news(&stock_code, limit, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(news) => to_value("NewsItem", &news),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "market_snapshot_batch" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let codes: Vec<String> = match deserialize_arg(&args, "codes", seam) {
+                    Ok(codes) => codes,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.market_snapshot_batch(&codes, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(quotes) => to_value("StockQuote", &quotes),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
             // `platform.adapter.{平台名}` 的 seam ID 是**动态**的，只能用前缀守卫。
             other if platform_name_from_seam(other).is_some() => {
                 let platform = platform_name_from_seam(other).unwrap_or_default();
@@ -1051,6 +1316,37 @@ fn deserialize_optional_arg<T: serde::de::DeserializeOwned>(
         Some(raw) => serde_json::from_value(raw.clone())
             .map(Some)
             .map_err(|e| invalid_args(format!("接缝 `{seam}` 的 `{key}` 反序列化失败：{e}"))),
+    }
+}
+
+/// 解析 `as_of` 参数：跨进程**显式透传** as-of，不依赖宿主 `task_local`。
+///
+/// 支持两种形态：`"YYYY-MM-DD"` 字符串（走 `AsOfContext::parse`，内部拒绝未来日期）
+/// 与 `{ as_of_date, source, data_scope }` 对象（回放调度方原样透传）。
+/// 键缺失或 `null` 表示实盘，返回 `Ok(None)`。
+fn deserialize_as_of_arg(
+    args: &Value,
+    seam: &str,
+) -> Result<Option<axagent_harness::as_of::AsOfContext>, FrameResponse> {
+    match args.get("as_of") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(raw)) => axagent_harness::as_of::AsOfContext::parse(raw)
+            .map(Some)
+            .map_err(|e| invalid_args(format!("接缝 `{seam}` 的 `as_of` 解析失败：{e}"))),
+        Some(raw @ Value::Object(_)) => {
+            let ctx: axagent_harness::as_of::AsOfContext =
+                serde_json::from_value(raw.clone()).map_err(|e| {
+                    invalid_args(format!("接缝 `{seam}` 的 `as_of` 反序列化失败：{e}"))
+                })?;
+            // 对象形态绕过了 AsOfContext::new 的未来日期校验，这里补回同一契约。
+            axagent_harness::as_of::AsOfContext::new(ctx.as_of_date, ctx.source)
+                .map(|validated| validated.with_data_scope(ctx.data_scope))
+                .map(Some)
+                .map_err(|e| invalid_args(format!("接缝 `{seam}` 的 `as_of` 解析失败：{e}")))
+        },
+        Some(other) => Err(invalid_args(format!(
+            "接缝 `{seam}` 的 `as_of` 只接受 `YYYY-MM-DD` 字符串或对象，实际收到：{other}"
+        ))),
     }
 }
 
@@ -3408,7 +3704,9 @@ fn register_remote_seam(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axagent_harness::{DispatchMode, EventCategory, EventDispatchBus};
+    use axagent_harness::{
+        AsOfDataScope, AsOfSource, DispatchMode, EventCategory, EventDispatchBus,
+    };
     use axagent_plugin_proto::{CommandFault, Peer};
     use std::net::{Shutdown, TcpListener, TcpStream};
 
@@ -5359,11 +5657,13 @@ mod tests {
     /// 假行情提供者：三方法返回固定 DTO，并记下 `get_klines` 收到的参数。
     struct FixedMarketDataProvider {
         klines_args: Mutex<Option<CapturedKlinesArgs>>,
+        /// 记录 `get_financials` 收到的 `as_of`（外层 `None` = 尚未调用）。
+        financials_as_of: Mutex<Option<Option<axagent_harness::AsOfContext>>>,
     }
 
     impl FixedMarketDataProvider {
         fn new() -> Self {
-            Self { klines_args: Mutex::new(None) }
+            Self { klines_args: Mutex::new(None), financials_as_of: Mutex::new(None) }
         }
     }
 
@@ -5431,6 +5731,48 @@ mod tests {
                 name: keyword.to_string(),
                 market: "main_sh".to_string(),
             }])
+        }
+
+        async fn get_financials(
+            &self,
+            _stock_code: &str,
+            as_of: Option<axagent_harness::AsOfContext>,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::FinancialReport>> {
+            *self.financials_as_of.lock() = Some(as_of);
+            Ok(Vec::new())
+        }
+
+        async fn market_snapshot_batch(
+            &self,
+            codes: &[String],
+            _as_of: Option<axagent_harness::AsOfContext>,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::StockQuote>> {
+            Ok(codes.iter().map(|code| fixed_quote(code)).collect())
+        }
+    }
+
+    /// 固定行情快照：`code` 回填入参，其余字段与 `get_quote` 一致。
+    fn fixed_quote(code: &str) -> axagent_harness::StockQuote {
+        axagent_harness::StockQuote {
+            code: code.to_string(),
+            name: "浦发银行".to_string(),
+            price: 10.5,
+            pre_close: 10.4,
+            open: 10.45,
+            high: 10.6,
+            low: 10.3,
+            volume: 1_000_000.0,
+            amount: 10_500_000.0,
+            change_pct: 0.96,
+            turnover_rate: 0.5,
+            pe: Some(6.1),
+            pb: Some(0.6),
+            total_mv: Some(300_000_000_000.0),
+            circulating_mv: Some(300_000_000_000.0),
+            limit_up: Some(11.44),
+            limit_down: Some(9.36),
+            is_st: false,
+            timestamp: "2026-11-02 15:00:00".to_string(),
         }
     }
 
@@ -5559,5 +5901,201 @@ mod tests {
         assert_eq!(seen.period, "daily");
         assert_eq!(seen.limit, 100, "`limit` 缺省应为 100");
         assert_eq!(seen.adj_type, None, "`adj_type` 缺省应为不复权");
+    }
+
+    // ─────────────── P6.1-B：12 个个股数据面的 `as_of` 显式透传 ───────────────
+
+    /// 装假 provider 的 peer + 保活到用例结束的 runtime。
+    fn market_peer_with_runtime(
+        provider: Arc<FixedMarketDataProvider>,
+    ) -> (HostPeer, tokio::runtime::Runtime) {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("async 接缝用例需要 runtime");
+        let peer = market_peer(
+            provider,
+            Arc::new(CapabilityRegistry::new()),
+            Some(runtime.handle().clone()),
+        );
+        (peer, runtime)
+    }
+
+    /// `as_of` 字符串形态：`AsOfContext::parse` ⇒ `UserReplay` + `All`，返回值是空报告列表。
+    #[test]
+    fn market_quote_get_financials_passes_as_of_string() {
+        let provider = Arc::new(FixedMarketDataProvider::new());
+        let captured = provider.clone();
+        let (peer, _runtime) = market_peer_with_runtime(provider);
+        let response =
+            with_watchdog(Duration::from_secs(5), "market.quote get_financials", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "get_financials",
+                        "args": { "stock_code": "600519", "as_of": "2024-01-02" },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        assert_eq!(response.value, Some(json!([])), "替身返回空报告列表");
+        let seen = (*captured.financials_as_of.lock()).expect("provider 应被调用");
+        let ctx = seen.expect("字符串形态必须解析为 Some(ctx)");
+        assert_eq!(ctx.as_of_date.to_string(), "2024-01-02");
+        assert_eq!(ctx.source, AsOfSource::UserReplay);
+        assert_eq!(ctx.data_scope, AsOfDataScope::All);
+    }
+
+    /// `as_of` 对象形态：`source` / `data_scope` 原样透传，不得被重置成缺省。
+    #[test]
+    fn market_quote_get_financials_passes_as_of_object_verbatim() {
+        let provider = Arc::new(FixedMarketDataProvider::new());
+        let captured = provider.clone();
+        let (peer, _runtime) = market_peer_with_runtime(provider);
+        let response = with_watchdog(
+            Duration::from_secs(5),
+            "market.quote get_financials 对象",
+            move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "get_financials",
+                        "args": {
+                            "stock_code": "600519",
+                            "as_of": {
+                                "as_of_date": "2024-01-02",
+                                "source": "scheduled_replay",
+                                "data_scope": "structured",
+                            },
+                        },
+                    }),
+                    &[],
+                )
+            },
+        );
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        let seen = (*captured.financials_as_of.lock()).expect("provider 应被调用");
+        let ctx = seen.expect("对象形态必须解析为 Some(ctx)");
+        assert_eq!(ctx.as_of_date.to_string(), "2024-01-02");
+        assert_eq!(ctx.source, AsOfSource::ScheduledReplay, "source 不得丢失");
+        assert_eq!(ctx.data_scope, AsOfDataScope::Structured, "data_scope 不得丢失");
+    }
+
+    /// 缺 `stock_code` ⇒ 既有 invalid-args 错误码，provider 不被调用。
+    #[test]
+    fn market_quote_get_financials_missing_stock_code_is_invalid() {
+        let provider = Arc::new(FixedMarketDataProvider::new());
+        let captured = provider.clone();
+        let (peer, _runtime) = market_peer_with_runtime(provider);
+        let response =
+            with_watchdog(Duration::from_secs(2), "market.quote 缺 stock_code", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "get_financials",
+                        "args": { "as_of": "2024-01-02" },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code.as_deref(), Some(error_codes::SEAM_CALL_INVALID_ARGS));
+        assert!(captured.financials_as_of.lock().is_none(), "参数非法时不应调用 provider");
+    }
+
+    /// 未覆写的方法走 trait 默认实现 ⇒ `PLUGIN_CALL_FAILED`，错误文本含「未实现」。
+    #[test]
+    fn market_quote_unsupported_data_face_reports_not_implemented() {
+        let (peer, _runtime) = market_peer_with_runtime(Arc::new(FixedMarketDataProvider::new()));
+        let response =
+            with_watchdog(Duration::from_secs(5), "market.quote get_money_flow", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "get_money_flow",
+                        "args": { "stock_code": "600519" },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_CALL_FAILED));
+        let detail = response.message.unwrap_or_default();
+        assert!(detail.contains("未实现"), "默认实现应报未实现，实际：{detail}");
+    }
+
+    /// `market_snapshot_batch` 的 `codes` 原样下传，返回条数与 `code` 与入参一致。
+    #[test]
+    fn market_quote_snapshot_batch_returns_one_quote_per_code() {
+        let (peer, _runtime) = market_peer_with_runtime(Arc::new(FixedMarketDataProvider::new()));
+        let response =
+            with_watchdog(Duration::from_secs(5), "market.quote snapshot_batch", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "market_snapshot_batch",
+                        "args": { "codes": ["600519", "000001"] },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        let value = response.value.expect("成功响应必须带 value");
+        let quotes = value.as_array().expect("返回值应是行情数组");
+        assert_eq!(quotes.len(), 2, "每个入参 code 一条：{value}");
+        assert_eq!(quotes[0]["code"], json!("600519"));
+        assert_eq!(quotes[1]["code"], json!("000001"));
+    }
+
+    /// `as_of` 非法字符串 ⇒ invalid args，且不得 panic / 不得触达 provider。
+    #[test]
+    fn market_quote_invalid_as_of_is_invalid_args_without_panic() {
+        let provider = Arc::new(FixedMarketDataProvider::new());
+        let captured = provider.clone();
+        let (peer, _runtime) = market_peer_with_runtime(provider);
+        let response =
+            with_watchdog(Duration::from_secs(2), "market.quote 非法 as_of", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "get_financials",
+                        "args": { "stock_code": "600519", "as_of": "not-a-date" },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code.as_deref(), Some(error_codes::SEAM_CALL_INVALID_ARGS));
+        assert!(captured.financials_as_of.lock().is_none(), "非法 as_of 不应调用 provider");
+    }
+
+    #[test]
+    fn market_quote_object_as_of_rejects_future_date() {
+        let provider = Arc::new(FixedMarketDataProvider::new());
+        let captured = provider.clone();
+        let (peer, _runtime) = market_peer_with_runtime(provider);
+        let response =
+            with_watchdog(Duration::from_secs(2), "market.quote 对象 as_of 未来日期", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "get_financials",
+                        "args": {
+                            "stock_code": "600519",
+                            "as_of": {
+                                "as_of_date": "2099-01-01",
+                                "source": "user_replay",
+                                "data_scope": "all",
+                            },
+                        },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code.as_deref(), Some(error_codes::SEAM_CALL_INVALID_ARGS));
+        assert!(
+            response.message.as_deref().is_some_and(|d| d.contains("as_of")),
+            "错误文案应指明 as_of：{:?}",
+            response.message
+        );
+        assert!(captured.financials_as_of.lock().is_none(), "未来日期不应调用 provider");
     }
 }

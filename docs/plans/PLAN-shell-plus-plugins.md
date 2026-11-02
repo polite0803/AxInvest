@@ -2215,3 +2215,39 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 
 - 既有 3 个 op（`get_quote` / `get_klines` / `search_stock`）的 as-of 债未收口（签名为兼容 analysis-engine 保持不带 `as_of`）。
 - `market.ops` 运维/凭证接缝、MCP 直通、插件侧 SDK 类型化助手、剩余查询接缝（`jobs.store` 等，调研中）均未开工。
+
+## 47. `#85` 其余查询面调研与五项裁定（2026-11-02；报告 `.tmp/res85-seams.md`，488 行）
+
+### 47.1 计数与结论（以报告原文为准）
+
+- 8 个字段全部存在；种子 22/10/8/6/4/3/3/2 可逐项复现（同日 `state.<field>` 口径，合计 58）。
+- **真实访问点 ≠ 同行出现**：24 文件内 **66**（+7 多行链、+1 `s.stock_monitor` 别名）；业务域补扫再加 **12**（`pool_scan.rs` cron +4、`backtest_validation.rs` cron +4、`time_travel_batch.rs` work/vector/traj 各 +1、`workflow_template.rs` monitor +1）⇒ **同口径 68 / 真实访问点 78**。
+- **K4 直接成立 3 条**：`jobs.store`（`update` 的闭包改 patch DTO 后）、`knowledge.vector`、`trajectory.store`；`trading.engine` / `stock.monitor` / `quote.watcher` / `stock.aggregator` 改造后可成立但本体留宿主；**`work_engine` 直接暴露不成立**（`RunOptions` 含 7 类闭包/句柄）。
+- **最大风险不是字段，是执行权**：`CronExecutor` 在宿主按 `task_type` 执行且启动时播种 11+ 条内置股票任务；`WorkEngine` 是宿主唯一实例。只建 CRUD 接缝 = 半条链。
+
+### 47.2 五项裁定
+
+1. **cron 执行主权：宿主保留执行，插件只拿 CRUD。** 理由：把 `stock-*` task_type 路由到 worker 需要重写 `CronExecutor` 的 11+ 个 handler（它们捕获 `state`/`db`/`work_engine`/`trading_engine`），且 cron 触发时插件不一定已启动。内置播种任务（`init/stock_automation_cron_seed.rs` 的固定 id）**归宿主所有**：`jobs.store.remove` 对保留 id 一律拒绝；`set_status` 允许（用户可暂停）。插件新建任务走同一 `jobs.store`，宿主继续执行。**双向路由留到插件稳定后另立**，不在 P6.1 首批。
+2. **workflow 执行主权：批准 `workflow.run` 异步 job 形态**（`start` 立即返回 `execution_id`；`status` / `cancel` / `list_active`；进度走 `event.dispatch`）。宿主独占 `WorkEngine`；插件只持 `execution_id`。**`RunOptions` 永不进 harness**。实现排在 `jobs.store` 之后。
+3. **写面权限：必须 op 级校验，不许「声明 write 就能调全部写 op」。** 每条 seam 的每个 op 标注 `read` / `write`；`dispatch_seam` 在调 provider 前按插件 `permissions` 校验，写 op 要求 `write`。**在该校验落地前，不发布任何写 op**（jobs 首批先只上 read + 受校验的写）。
+4. **DTO 落点**：新建 `harness/src/stock_seam_types.rs` 集中放跨进程视图（`CronJobView` / `TradeView` / `PositionView` / `MonitorConfigView` / `AggregatorConfigView` 等）；`Trajectory` / `QueryTrajectory` / `Workflow` / `VectorSearchResult` 已有 harness 定义，**直接复用**；ORM `Model` 与 `RunOptions` 一律不过线。
+5. **`as_of` 约定**：凡会触发行情取数的 op（`trading.get_positions` / `validate_trade` / `execute_trade`）显式收 `as_of`，宿主包 `with_optional_asof`；纯 DB/内存 op（jobs / trajectory / vector 索引）不收。与 `market.quote` 口径一致。
+
+### 47.3 实施顺序（按阻塞 #35 的强度）
+
+| 顺序 | seam | 理由 | 依赖 |
+|---|---|---|---|
+| 1 | `jobs.store` | 股票自动化入口几乎全是 cron；纯数据最易过线 | 无（contract + impl + dispatch） |
+| 2 | `workflow.run` | 分析/反思/Serenity/管道都跑在 WorkEngine；没有它股票业务只是壳 | 需要异步 job + 事件 |
+| 3 | `trading.engine` | 交易面板/组合风险/仓位限制；读面大、写面最高风险 | 需 `as_of` + op 级权限 |
+| 4 | `stock.monitor`（并入 aggregator） | 告警闭环；必须 DB+内存复合写 | 需复合 op |
+| 5 | `quote.watcher` | 仅管理推送集合；缺了宿主仍推送 | 需补 serde |
+| 6 | `knowledge.vector` | 只影响决策/反思入 RAG | 只传文本，宿主管 embedding |
+| 7 | `trajectory.store` | 成本最低、DTO 现成，可随手带上 | 无 |
+
+### 47.4 报告自报的未决/未做（登记）
+
+- 24 文件清单是从 8 个总数反推的，不能证明「恰好这 24 个」；其余候选文件命中为 0，不影响总数。
+- `PoolScan` / `BacktestValidation` / `TimeTravel` 是否属本次迁移范围无明文；本 PLAN 按**业务域**纳入。
+- `trading.get_positions` 内部 N+1 次取数、可能超 15s 默认预算：实测前不设 override。
+- 报告未审计 `stock_analysis_setup/**` 的 DTO 前端消费与 `market.quote` 40 op 的完整实现（只抽样）。

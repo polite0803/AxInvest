@@ -2341,6 +2341,6 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 1. **`update` 未实现**：仍只登记 `write` 权限；有权限时落 `SEAM_CALL_UNSUPPORTED`。需先裁定 patch DTO 的「null = 清空 vs 缺省 = 不改」语义。
 2. **`add_job` 查重→写非原子**：并发同名 add 理论可同时通过 `get()` 检查。契约未要求严格唯一；要严格需在 `CronJobStore` 内加写锁包住「查 + 加」。
 3. **受保护 id 可被「先删后建」绕过**：种子任务被删后，同 id 新建会被接受；下次宿主播种因「已存在即跳过」不再覆盖它。该路径是否允许待裁定。
-4. **`src-tauri` 主 crate 仍未实编**（`state.rs` 自 #86 起三处改动：market.quote 注册、jobs.store 注册、`protect_ids`），待一次 23–28min 后台窗口验证。
+4. **主 crate 已实编（2026-11-02 19:53）**：`cargo check -p axagent` **EXIT=0**，16m13s，日志 `.tmp/res91-maincheck.log`（4535 B）命中 `Checking axagent v3.0.0` ⇒ `state.rs` 三处改动（market.quote 注册、jobs.store 注册、`protect_ids(...).await`）类型检查通过。注：该次编译包含工作树中他人未提交的 stock-analysis 改动；若有错需按归属分流。
 5. **`worker.rs` 既有 rustfmt 漂移 9 处**（1691 / 2068 / 6658 / 6680 / 6711 / 6898 / 7274 / 7303 / 7317），非本批引入，本批新增代码 0 差异；未修（属其它批次改动面）。
 6. 未跑全量 workspace 门禁；未推送。

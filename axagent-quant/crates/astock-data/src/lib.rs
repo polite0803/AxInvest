@@ -6899,6 +6899,423 @@ impl axagent_harness::market_data::MarketDataProvider for AStockClient {
         })
         .await
     }
+
+    // ── 剩余数据面（P6.1 C 批）：显式透传 as_of 并委托固有方法 ──────────
+
+    async fn search_news(
+        &self,
+        keyword: &str,
+        limit: u32,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::stock_market_types::NewsItem>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::search_news(self, keyword, limit)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn search_concept_boards(
+        &self,
+        keyword: &str,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::stock_market_types::ConceptBoard>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::search_concept_boards(self, keyword)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_social_sentiment(
+        &self,
+        stock_code: &str,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::stock_market_types::SocialSentiment>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_social_sentiment(self, stock_code)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_research_reports(
+        &self,
+        stock_code: &str,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::stock_market_types::ResearchReport>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_research_reports(self, stock_code)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_peers(
+        &self,
+        stock_code: &str,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::stock_market_types::PeerComparison>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_peers(self, stock_code)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_option_pcr(
+        &self,
+        stock_code: &str,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Option<axagent_harness::stock_market_types::OptionPCR>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_option_pcr(self, stock_code)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_north_bound_flow(
+        &self,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Option<axagent_harness::stock_market_types::NorthBoundFlow>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_north_bound_flow(self)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_market_dragon_tiger(
+        &self,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::stock_market_types::MarketDragonTiger>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_market_dragon_tiger(self)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_lockup_schedule(
+        &self,
+        stock_code: &str,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::stock_market_types::LockupSchedule>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_lockup_schedule(self, stock_code)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_limit_up_pool(
+        &self,
+        requested_date: Option<&str>,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Option<axagent_harness::stock_market_types::LimitUpPool>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_limit_up_pool(self, requested_date)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_international_quote(
+        &self,
+        stock_code: &str,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        axagent_harness::market_data::StockQuote,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_international_quote(self, stock_code)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_international_klines(
+        &self,
+        stock_code: &str,
+        period: &str,
+        limit: u32,
+        adj_type: Option<axagent_harness::market_data::AdjType>,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::market_data::KLine>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_international_klines(self, stock_code, period, limit, adj_type)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_industry_ranking(
+        &self,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::stock_market_types::IndustryRank>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_industry_ranking(self)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_index_quotes_outcome(
+        &self,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        axagent_harness::data_outcome::DataOutcome<
+            Vec<axagent_harness::stock_market_types::IndexQuote>,
+        >,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            Ok(AStockClient::get_index_quotes_outcome(self).await)
+        })
+        .await
+    }
+
+    async fn get_hot_stocks(
+        &self,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::stock_market_types::HotStock>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_hot_stocks(self)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_forex_klines(
+        &self,
+        pair: &str,
+        period: &str,
+        limit: u32,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::market_data::KLine>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_forex_klines(self, pair, period, limit)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_earnings_calendar(
+        &self,
+        stock_code: &str,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::stock_market_types::EarningsEvent>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_earnings_calendar(self, stock_code)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_dividend_records(
+        &self,
+        stock_code: &str,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::stock_market_types::DividendRecord>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_dividend_records(self, stock_code)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_consensus_eps(
+        &self,
+        stock_code: &str,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Option<axagent_harness::stock_market_types::ConsensusEPS>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_consensus_eps(self, stock_code)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_concept_board_members(
+        &self,
+        board_code: &str,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::stock_market_types::BoardMember>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_concept_board_members(self, board_code)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_concept_blocks(
+        &self,
+        stock_code: &str,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Option<axagent_harness::stock_market_types::ConceptBlocks>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_concept_blocks(self, stock_code)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_cls_flash(
+        &self,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::stock_market_types::ClsFlashItem>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_cls_flash(self)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_benchmark_klines(
+        &self,
+        benchmark_code: &str,
+        period: &str,
+        limit: u32,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::market_data::KLine>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_benchmark_klines(self, benchmark_code, period, limit)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn get_announcements(
+        &self,
+        stock_code: &str,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        Vec<axagent_harness::stock_market_types::Announcement>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            AStockClient::get_announcements(self, stock_code)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))
+        })
+        .await
+    }
+
+    async fn market_list_page(
+        &self,
+        page: u32,
+        as_of: Option<axagent_harness::as_of::AsOfContext>,
+    ) -> std::result::Result<
+        axagent_harness::stock_market_types::MarketListPage,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        crate::as_of::with_optional_asof(as_of, async {
+            let (rows, total) = AStockClient::market_list_page(self, page)
+                .await
+                .map_err(|e| axagent_harness::core_error::AxAgentError::Provider(e.to_string()))?;
+            Ok(axagent_harness::stock_market_types::MarketListPage {
+                items: rows
+                    .into_iter()
+                    .map(|(code, name, industry)| {
+                        axagent_harness::stock_market_types::MarketListItem {
+                            code,
+                            name,
+                            industry,
+                        }
+                    })
+                    .collect(),
+                total,
+            })
+        })
+        .await
+    }
 }
 
 /// 提取新闻 publish_time 的 YYYY-MM-DD 前缀；无法解析时返回空串（截断时会被过滤掉）

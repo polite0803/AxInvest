@@ -116,6 +116,8 @@ pub mod market_data;
 // ── 股票行情 DTO（自 astock-data 上收；仅按模块路径提供，不在根 glob 重导出，
 //    避免与 dashboard_report::IndexQuote 等既有导出撞名）──
 pub mod stock_market_types;
+// ── 取数结果信封（自 astock-data 上收；同样只按模块路径提供）──
+pub mod data_outcome;
 pub use market_data::{
     AdjType, FinancialReport, KLine, MarketDataProvider, StockQuote, StockSearchResult,
     detect_market_type, get_price_limit_pct, get_st_price_limit_pct,

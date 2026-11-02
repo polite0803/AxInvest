@@ -738,3 +738,25 @@ impl LimitUpPool {
         }
     }
 }
+
+/// 全市场清单单页的一行（东财 `push2 clist`：`f12` / `f14` / `f100`）。
+///
+/// 2026-11-02 为插件 worker 的 `market_list_page` 契约上收：实现侧固有方法返回
+/// `(Vec<(String, String, Option<String>)>, i64)` 元组，本 DTO 是该元组在 harness
+/// 侧的**命名形态**，f100（行业）缺失时为 `None`。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketListItem {
+    pub code: String,
+    pub name: String,
+    pub industry: Option<String>,
+}
+
+/// 全市场清单单页结果：`items` 保持实现侧返回顺序（服务端已按 `f12` 排序），
+/// `total` 为服务端自报的全市场总数（判断是否已爬完，不做本地推算）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketListPage {
+    pub items: Vec<MarketListItem>,
+    pub total: i64,
+}

@@ -10,9 +10,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::as_of::AsOfContext;
 use crate::core_error::{AxAgentError, Result};
+use crate::data_outcome::DataOutcome;
 use crate::stock_market_types::{
-    BlockTrade, DragonTigerEntry, HolderCount, MarginData, MoneyFlow, NewsItem, NorthBoundHolding,
-    PledgeData, SectorInfo,
+    Announcement, BlockTrade, BoardMember, ClsFlashItem, ConceptBoard, ConceptBlocks, ConsensusEPS,
+    DividendRecord, DragonTigerEntry, EarningsEvent, HolderCount, HotStock, IndexQuote,
+    IndustryRank, LimitUpPool, LockupSchedule, MarginData, MarketDragonTiger, MarketListPage,
+    MoneyFlow, NewsItem, NorthBoundFlow, NorthBoundHolding, OptionPCR, PeerComparison, PledgeData,
+    ResearchReport, SectorInfo, SocialSentiment,
 };
 
 // ── DTOs ─────────────────────────────────────────────────────────────────
@@ -372,6 +376,279 @@ pub trait MarketDataProvider: Send + Sync {
     ) -> Result<Vec<StockQuote>> {
         Err(AxAgentError::Provider(
             "MarketDataProvider::market_snapshot_batch 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    // ── 剩余数据面（P6.1 C 批：全部带默认「不支持」实现）────────────────
+    // 与 A 批同口径：末参 `as_of` 显式透传（`None` = 实盘，`Some` = 按该日截止回放）。
+
+    /// 按关键词搜索新闻，最多 `limit` 条。
+    async fn search_news(
+        &self,
+        _keyword: &str,
+        _limit: u32,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<NewsItem>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::search_news 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 按关键词搜索概念板块。
+    async fn search_concept_boards(
+        &self,
+        _keyword: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<ConceptBoard>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::search_concept_boards 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取个股社交舆情（股吧/雪球热度）。
+    async fn get_social_sentiment(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<SocialSentiment>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_social_sentiment 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取个股研报列表。
+    async fn get_research_reports(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<ResearchReport>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_research_reports 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取同行业可比公司估值。
+    async fn get_peers(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<PeerComparison>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_peers 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取期权 PCR（看跌/看涨比率）；`Ok(None)` 表示非期权标的或无数据。
+    async fn get_option_pcr(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Option<OptionPCR>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_option_pcr 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取北向资金分钟级流向；`Ok(None)` 表示无数据。
+    async fn get_north_bound_flow(
+        &self,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Option<NorthBoundFlow>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_north_bound_flow 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取全市场龙虎榜。
+    async fn get_market_dragon_tiger(
+        &self,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<MarketDragonTiger>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_market_dragon_tiger 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取个股限售解禁安排。
+    async fn get_lockup_schedule(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<LockupSchedule>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_lockup_schedule 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取涨停池；`requested_date = None` 表示取当下（回放时按截止日）。
+    async fn get_limit_up_pool(
+        &self,
+        _requested_date: Option<&str>,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Option<LimitUpPool>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_limit_up_pool 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取港股/美股行情。
+    async fn get_international_quote(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<StockQuote> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_international_quote 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取港股/美股 K 线。
+    async fn get_international_klines(
+        &self,
+        _stock_code: &str,
+        _period: &str,
+        _limit: u32,
+        _adj_type: Option<AdjType>,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<KLine>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_international_klines 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取行业涨跌排名。
+    async fn get_industry_ranking(&self, _as_of: Option<AsOfContext>) -> Result<Vec<IndustryRank>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_industry_ranking 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取大盘指数行情（带成因信封）。
+    async fn get_index_quotes_outcome(
+        &self,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<DataOutcome<Vec<IndexQuote>>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_index_quotes_outcome 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 获取热股榜。
+    async fn get_hot_stocks(&self, _as_of: Option<AsOfContext>) -> Result<Vec<HotStock>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_hot_stocks 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取外汇 K 线。
+    async fn get_forex_klines(
+        &self,
+        _pair: &str,
+        _period: &str,
+        _limit: u32,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<KLine>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_forex_klines 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取个股财报披露日历。
+    async fn get_earnings_calendar(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<EarningsEvent>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_earnings_calendar 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取个股除权除息记录。
+    async fn get_dividend_records(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<DividendRecord>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_dividend_records 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取机构一致预期 EPS；`Ok(None)` 表示无数据。
+    async fn get_consensus_eps(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Option<ConsensusEPS>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_consensus_eps 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取概念板块成分股。
+    async fn get_concept_board_members(
+        &self,
+        _board_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<BoardMember>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_concept_board_members 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 获取个股概念板块三维归属；`Ok(None)` 表示无归属数据。
+    async fn get_concept_blocks(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Option<ConceptBlocks>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_concept_blocks 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取财联社快讯。
+    async fn get_cls_flash(&self, _as_of: Option<AsOfContext>) -> Result<Vec<ClsFlashItem>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_cls_flash 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取基准指数 K 线（标普 500 / 纳指 / 恒生 / 上证等）。
+    async fn get_benchmark_klines(
+        &self,
+        _benchmark_code: &str,
+        _period: &str,
+        _limit: u32,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<KLine>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_benchmark_klines 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取个股公告。
+    async fn get_announcements(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<Announcement>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_announcements 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取全市场清单单页（100 只/页，`total` 为服务端自报总数）。
+    async fn market_list_page(
+        &self,
+        _page: u32,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<MarketListPage> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::market_list_page 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 }

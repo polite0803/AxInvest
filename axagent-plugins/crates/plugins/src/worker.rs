@@ -1073,6 +1073,551 @@ impl HostPeer {
                     Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
                 }
             },
+            // ── 剩余数据面（P6.1 D 批）：C 批补齐的 25 个 `MarketDataProvider` 方法 ──
+            // 与 B 批同口径：参数键 snake_case、DTO 走 camelCase 序列化；
+            // 无参 op 不读任何键，但**仍须**解析并透传 `as_of`（跨进程读不到宿主 task_local）。
+            "market.quote" if op == "search_news" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let keyword: String = match deserialize_arg(&args, "keyword", seam) {
+                    Ok(keyword) => keyword,
+                    Err(response) => return response,
+                };
+                let limit: u32 = match deserialize_arg(&args, "limit", seam) {
+                    Ok(limit) => limit,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.search_news(&keyword, limit, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(news) => to_value("NewsItem", &news),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "search_concept_boards" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let keyword: String = match deserialize_arg(&args, "keyword", seam) {
+                    Ok(keyword) => keyword,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.search_concept_boards(&keyword, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(boards) => to_value("ConceptBoard", &boards),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_social_sentiment" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_social_sentiment(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(sentiment) => to_value("SocialSentiment", &sentiment),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_research_reports" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_research_reports(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(reports) => to_value("ResearchReport", &reports),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_peers" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_peers(&stock_code, as_of)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(peers) => to_value("PeerComparison", &peers),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_option_pcr" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_option_pcr(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(pcr) => to_value("OptionPCR", &pcr),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_north_bound_flow" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_north_bound_flow(as_of)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(flow) => to_value("NorthBoundFlow", &flow),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_market_dragon_tiger" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_market_dragon_tiger(as_of)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(entries) => to_value("MarketDragonTiger", &entries),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_lockup_schedule" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_lockup_schedule(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(schedule) => to_value("LockupSchedule", &schedule),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_limit_up_pool" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                // `requested_date` 缺省 / `null` 都表示「取当下」（回放时按截止日）。
+                let requested_date: Option<String> =
+                    match deserialize_optional_arg(&args, "requested_date", seam) {
+                        Ok(requested_date) => requested_date,
+                        Err(response) => return response,
+                    };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) =
+                    self.block_on(provider.get_limit_up_pool(requested_date.as_deref(), as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(pool) => to_value("LimitUpPool", &pool),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_international_quote" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) =
+                    self.block_on(provider.get_international_quote(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(quote) => to_value("StockQuote", &quote),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_international_klines" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let period: String = match deserialize_arg(&args, "period", seam) {
+                    Ok(period) => period,
+                    Err(response) => return response,
+                };
+                let limit: u32 = match deserialize_arg(&args, "limit", seam) {
+                    Ok(limit) => limit,
+                    Err(response) => return response,
+                };
+                let adj_type: Option<axagent_harness::AdjType> =
+                    match deserialize_optional_arg(&args, "adj_type", seam) {
+                        Ok(adj_type) => adj_type,
+                        Err(response) => return response,
+                    };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_international_klines(
+                    &stock_code,
+                    &period,
+                    limit,
+                    adj_type,
+                    as_of,
+                )) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(klines) => to_value("KLine", &klines),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_industry_ranking" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_industry_ranking(as_of)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(ranking) => to_value("IndustryRank", &ranking),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_index_quotes_outcome" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_index_quotes_outcome(as_of)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(outcome) => to_value("DataOutcome", &outcome),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_hot_stocks" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_hot_stocks(as_of)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(stocks) => to_value("HotStock", &stocks),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_forex_klines" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let pair: String = match deserialize_arg(&args, "pair", seam) {
+                    Ok(pair) => pair,
+                    Err(response) => return response,
+                };
+                let period: String = match deserialize_arg(&args, "period", seam) {
+                    Ok(period) => period,
+                    Err(response) => return response,
+                };
+                let limit: u32 = match deserialize_arg(&args, "limit", seam) {
+                    Ok(limit) => limit,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) =
+                    self.block_on(provider.get_forex_klines(&pair, &period, limit, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(klines) => to_value("KLine", &klines),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_earnings_calendar" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) =
+                    self.block_on(provider.get_earnings_calendar(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(events) => to_value("EarningsEvent", &events),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_dividend_records" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_dividend_records(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(records) => to_value("DividendRecord", &records),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_consensus_eps" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_consensus_eps(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(eps) => to_value("ConsensusEPS", &eps),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_concept_board_members" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let board_code: String = match deserialize_arg(&args, "board_code", seam) {
+                    Ok(board_code) => board_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) =
+                    self.block_on(provider.get_concept_board_members(&board_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(members) => to_value("BoardMember", &members),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_concept_blocks" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_concept_blocks(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(blocks) => to_value("ConceptBlocks", &blocks),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_cls_flash" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_cls_flash(as_of)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(items) => to_value("ClsFlashItem", &items),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_benchmark_klines" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let benchmark_code: String = match deserialize_arg(&args, "benchmark_code", seam) {
+                    Ok(benchmark_code) => benchmark_code,
+                    Err(response) => return response,
+                };
+                let period: String = match deserialize_arg(&args, "period", seam) {
+                    Ok(period) => period,
+                    Err(response) => return response,
+                };
+                let limit: u32 = match deserialize_arg(&args, "limit", seam) {
+                    Ok(limit) => limit,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_benchmark_klines(
+                    &benchmark_code,
+                    &period,
+                    limit,
+                    as_of,
+                )) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(klines) => to_value("KLine", &klines),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "get_announcements" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let stock_code: String = match deserialize_arg(&args, "stock_code", seam) {
+                    Ok(stock_code) => stock_code,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get_announcements(&stock_code, as_of))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(announcements) => to_value("Announcement", &announcements),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "market.quote" if op == "market_list_page" => {
+                let Some(provider) = self.registry.get_market_data() else {
+                    return self.unavailable(seam);
+                };
+                let page: u32 = match deserialize_arg(&args, "page", seam) {
+                    Ok(page) => page,
+                    Err(response) => return response,
+                };
+                let as_of = match deserialize_as_of_arg(&args, seam) {
+                    Ok(as_of) => as_of,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.market_list_page(page, as_of)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(list_page) => to_value("MarketListPage", &list_page),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
             // `platform.adapter.{平台名}` 的 seam ID 是**动态**的，只能用前缀守卫。
             other if platform_name_from_seam(other).is_some() => {
                 let platform = platform_name_from_seam(other).unwrap_or_default();
@@ -5659,11 +6204,23 @@ mod tests {
         klines_args: Mutex<Option<CapturedKlinesArgs>>,
         /// 记录 `get_financials` 收到的 `as_of`（外层 `None` = 尚未调用）。
         financials_as_of: Mutex<Option<Option<axagent_harness::AsOfContext>>>,
+        /// 记录 `get_hot_stocks` 收到的 `as_of`（证明无参 op 也透传 as_of）。
+        hot_stocks_as_of: Mutex<Option<Option<axagent_harness::AsOfContext>>>,
+        /// 记录 `get_limit_up_pool` 收到的 `requested_date`。
+        limit_up_requested: Mutex<Option<Option<String>>>,
+        /// 记录 `get_international_klines` 收到的 `adj_type`。
+        intl_klines_adj: Mutex<Option<Option<axagent_harness::AdjType>>>,
     }
 
     impl FixedMarketDataProvider {
         fn new() -> Self {
-            Self { klines_args: Mutex::new(None), financials_as_of: Mutex::new(None) }
+            Self {
+                klines_args: Mutex::new(None),
+                financials_as_of: Mutex::new(None),
+                hot_stocks_as_of: Mutex::new(None),
+                limit_up_requested: Mutex::new(None),
+                intl_klines_adj: Mutex::new(None),
+            }
         }
     }
 
@@ -5748,6 +6305,73 @@ mod tests {
             _as_of: Option<axagent_harness::AsOfContext>,
         ) -> axagent_harness::core_error::Result<Vec<axagent_harness::StockQuote>> {
             Ok(codes.iter().map(|code| fixed_quote(code)).collect())
+        }
+
+        async fn get_hot_stocks(
+            &self,
+            as_of: Option<axagent_harness::AsOfContext>,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::stock_market_types::HotStock>>
+        {
+            *self.hot_stocks_as_of.lock() = Some(as_of);
+            Ok(Vec::new())
+        }
+
+        async fn get_limit_up_pool(
+            &self,
+            requested_date: Option<&str>,
+            _as_of: Option<axagent_harness::AsOfContext>,
+        ) -> axagent_harness::core_error::Result<
+            Option<axagent_harness::stock_market_types::LimitUpPool>,
+        > {
+            *self.limit_up_requested.lock() = Some(requested_date.map(str::to_string));
+            Ok(None)
+        }
+
+        async fn get_international_klines(
+            &self,
+            _stock_code: &str,
+            _period: &str,
+            _limit: u32,
+            adj_type: Option<axagent_harness::AdjType>,
+            _as_of: Option<axagent_harness::AsOfContext>,
+        ) -> axagent_harness::core_error::Result<Vec<axagent_harness::KLine>> {
+            *self.intl_klines_adj.lock() = Some(adj_type);
+            Ok(Vec::new())
+        }
+
+        async fn market_list_page(
+            &self,
+            _page: u32,
+            _as_of: Option<axagent_harness::AsOfContext>,
+        ) -> axagent_harness::core_error::Result<axagent_harness::stock_market_types::MarketListPage>
+        {
+            use axagent_harness::stock_market_types::{MarketListItem, MarketListPage};
+            Ok(MarketListPage {
+                items: vec![
+                    MarketListItem {
+                        code: "600000".to_string(),
+                        name: "浦发银行".to_string(),
+                        industry: Some("银行".to_string()),
+                    },
+                    MarketListItem {
+                        code: "000001".to_string(),
+                        name: "平安银行".to_string(),
+                        industry: Some("银行".to_string()),
+                    },
+                ],
+                total: 123,
+            })
+        }
+
+        async fn get_index_quotes_outcome(
+            &self,
+            _as_of: Option<axagent_harness::AsOfContext>,
+        ) -> axagent_harness::core_error::Result<
+            axagent_harness::data_outcome::DataOutcome<
+                Vec<axagent_harness::stock_market_types::IndexQuote>,
+            >,
+        > {
+            Ok(axagent_harness::data_outcome::DataOutcome::schema_changed(vec![], "field renamed"))
         }
     }
 
@@ -6097,5 +6721,178 @@ mod tests {
             response.message
         );
         assert!(captured.financials_as_of.lock().is_none(), "未来日期不应调用 provider");
+    }
+
+    // ─────────────── P6.1-D：剩余 25 个数据面的接线 ───────────────
+
+    /// 无参 op 也必须解析并透传 `as_of`（不读任何业务键）。
+    #[test]
+    fn market_quote_get_hot_stocks_passes_as_of_without_args() {
+        let provider = Arc::new(FixedMarketDataProvider::new());
+        let captured = provider.clone();
+        let (peer, _runtime) = market_peer_with_runtime(provider);
+        let response =
+            with_watchdog(Duration::from_secs(5), "market.quote get_hot_stocks", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "get_hot_stocks",
+                        "args": { "as_of": "2024-01-02" },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        assert_eq!(response.value, Some(json!([])), "替身返回空热股列表");
+        let seen = (*captured.hot_stocks_as_of.lock()).expect("provider 应被调用");
+        let ctx = seen.expect("无参 op 也必须收到 Some(ctx)");
+        assert_eq!(ctx.as_of_date.to_string(), "2024-01-02");
+    }
+
+    /// `requested_date` 是可选项：带键透传 `Some(&str)`，缺键传 `None`。
+    #[test]
+    fn market_quote_limit_up_pool_forwards_optional_requested_date() {
+        let provider = Arc::new(FixedMarketDataProvider::new());
+        let captured = provider.clone();
+        let (peer, _runtime) = market_peer_with_runtime(provider);
+        let (with_date, without_date, seen_with, seen_without) =
+            with_watchdog(Duration::from_secs(5), "market.quote get_limit_up_pool", move || {
+                let with_date = peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "get_limit_up_pool",
+                        "args": { "requested_date": "2024-01-02" },
+                    }),
+                    &[],
+                );
+                let seen_with = (*captured.limit_up_requested.lock()).clone();
+                let without_date = peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "get_limit_up_pool",
+                        "args": {},
+                    }),
+                    &[],
+                );
+                let seen_without = (*captured.limit_up_requested.lock()).clone();
+                (with_date, without_date, seen_with, seen_without)
+            });
+        assert_eq!(with_date.code, None, "带 requested_date 应成功：{with_date:?}");
+        assert_eq!(with_date.value, Some(Value::Null), "替身返回 Ok(None) ⇒ null");
+        assert_eq!(seen_with, Some(Some("2024-01-02".to_string())));
+        assert_eq!(without_date.code, None, "缺 requested_date 应成功：{without_date:?}");
+        assert_eq!(seen_without, Some(None), "缺键应传 None，而不是空串");
+    }
+
+    /// `market_list_page` 的 DTO 走 camelCase，`total` 原样保留。
+    #[test]
+    fn market_quote_market_list_page_returns_items_and_total() {
+        let (peer, _runtime) = market_peer_with_runtime(Arc::new(FixedMarketDataProvider::new()));
+        let response =
+            with_watchdog(Duration::from_secs(5), "market.quote market_list_page", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "market_list_page",
+                        "args": { "page": 3 },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        let value = response.value.expect("成功响应必须带 value");
+        let items = value["items"].as_array().expect("items 应是数组");
+        assert_eq!(items.len(), 2, "替身返回两条：{value}");
+        assert_eq!(items[0]["code"], json!("600000"));
+        assert_eq!(items[0]["name"], json!("浦发银行"));
+        assert_eq!(items[0]["industry"], json!("银行"));
+        assert_eq!(value["total"], json!(123));
+    }
+
+    /// `DataOutcome` 信封原样透出：`status` 与 `detail` 都不得丢失。
+    #[test]
+    fn market_quote_index_quotes_outcome_keeps_schema_changed_detail() {
+        let (peer, _runtime) = market_peer_with_runtime(Arc::new(FixedMarketDataProvider::new()));
+        let response = with_watchdog(
+            Duration::from_secs(5),
+            "market.quote get_index_quotes_outcome",
+            move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "get_index_quotes_outcome",
+                        "args": {},
+                    }),
+                    &[],
+                )
+            },
+        );
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        let value = response.value.expect("成功响应必须带 value");
+        assert_eq!(value["status"], json!("schema_changed"));
+        assert_eq!(value["detail"], json!("field renamed"));
+        assert_eq!(value["data"], json!([]));
+    }
+
+    /// `adj_type` 复用 `AdjType` 反序列化：`"forward"` ⇒ `Some(Forward)`。
+    #[test]
+    fn market_quote_international_klines_forwards_adj_type() {
+        let provider = Arc::new(FixedMarketDataProvider::new());
+        let captured = provider.clone();
+        let (peer, _runtime) = market_peer_with_runtime(provider);
+        let response = with_watchdog(
+            Duration::from_secs(5),
+            "market.quote get_international_klines",
+            move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "get_international_klines",
+                        "args": {
+                            "stock_code": "AAPL",
+                            "period": "daily",
+                            "limit": 20,
+                            "adj_type": "forward",
+                        },
+                    }),
+                    &[],
+                )
+            },
+        );
+        assert_eq!(response.code, None, "已注册时应成功，实际 {response:?}");
+        assert_eq!(response.value, Some(json!([])), "替身返回空 K 线");
+        let seen = (*captured.intl_klines_adj.lock()).expect("provider 应被调用");
+        assert_eq!(seen, Some(axagent_harness::AdjType::Forward));
+    }
+
+    /// 缺必填 `keyword` ⇒ invalid args；此时 provider 不会被触达
+    /// （peer 无 runtime：若走到 provider 会先报 `no_runtime` 而非 invalid args）。
+    #[test]
+    fn market_quote_search_news_missing_keyword_is_invalid() {
+        let peer = market_peer(
+            Arc::new(FixedMarketDataProvider::new()),
+            Arc::new(CapabilityRegistry::new()),
+            None,
+        );
+        let response = with_watchdog(
+            Duration::from_secs(2),
+            "market.quote search_news 缺 keyword",
+            move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "market.quote",
+                        "op": "search_news",
+                        "args": { "limit": 5 },
+                    }),
+                    &[],
+                )
+            },
+        );
+        assert_eq!(response.code.as_deref(), Some(error_codes::SEAM_CALL_INVALID_ARGS));
+        assert!(
+            response.message.as_deref().is_some_and(|d| d.contains("keyword")),
+            "错误文案应指明 keyword：{:?}",
+            response.message
+        );
     }
 }

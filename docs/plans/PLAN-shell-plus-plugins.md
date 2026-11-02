@@ -262,8 +262,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | `message.callback` | `axagent-core/crates/harness/src/platform_callback.rs:21` | 接缝 `message.callback`（内置与插件同入口） | 2 | — |
 | `webhook.dispatch` | `axagent-core/crates/harness/src/webhook_subscription.rs:154` | 接缝 + `axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9` | 4 | — |
 | `system.prompt` | `axagent-core/crates/harness/src/context_contributor.rs:22` | 接缝 `system.prompt.{段名}` | 3 | — |
-| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:3291` 起 `remote_method_not_supported` |
-| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:3383`–`:3431` 一批 `remote_method_not_supported`） |
+| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:3353` 起 `remote_method_not_supported` |
+| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:3445`–`:3493` 一批 `remote_method_not_supported`） |
 | `workflow.optimizer` | `axagent-core/crates/harness/src/workflow_optimization.rs:80` | 接缝 | 2 | 同上 |
 | `workflow.sandbox` | `axagent-core/crates/harness/src/workflow_evolution.rs:263` | 接缝 | 4 | — |
 | `workflow.business_rule` | `axagent-core/crates/harness/src/business_rules.rs:71` | 接缝（已有 e2e worker 产物） | 3 | — |
@@ -2251,3 +2251,40 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 - `PoolScan` / `BacktestValidation` / `TimeTravel` 是否属本次迁移范围无明文；本 PLAN 按**业务域**纳入。
 - `trading.get_positions` 内部 N+1 次取数、可能超 15s 默认预算：实测前不设 override。
 - 报告未审计 `stock_analysis_setup/**` 的 DTO 前端消费与 `market.quote` 40 op 的完整实现（只抽样）。
+
+## 48. `#86` 交付账：`jobs.store` 只读接缝（2026-11-02；报告 `.tmp/res86-report.md` / `.tmp/res86b-report.md`）
+
+### 48.1 落点与提交
+
+| 批 | 提交 | 文件 | 内容 |
+|---|---|---|---|
+| E1a | `f6ed72853` | 新建 `harness/src/jobs_store.rs`（+94）；`harness/src/lib.rs`（+3）；`harness/src/capability_registry.rs`（+33）；`runtime-core/src/cron_job.rs`（+93）；`src-tauri/src/init/state.rs`（+12） | `CronJobView` / `CronJobRunView` + `JobStoreProvider`（3 方法默认「不支持」）；`CronJobStore` 实现；`jobs.store` 注册/取回；宿主注册（失败只 warn） |
+| E1b | `30765577d` | `plugins/src/worker.rs`（+238） | 三个**只读**分支 `list` / `get` / `count` + 5 条用例 |
+
+### 48.2 契约形状（线上 snake_case）
+
+| op | args | 返回 |
+|---|---|---|
+| `list` | `task_type?`(string)、`active_only?`(bool，缺省 false) | `Vec<CronJobView>` |
+| `get` | `id`(必填) | `CronJobView \| null`（**查无即 `null`，不是错误**） |
+| `count` | `task_type?` | `{ "count": n }`（具名对象） |
+
+`CronJobView` 刻意**不暴露**：`config` / `delivery` / `epoch_cost_estimate` / `params` / `last_result.output` / 进程内 `running` 登记。`last_result` 保留 `success/skipped/partial/error/durationMs/executedAt`（`partial` 由 leader 本批补入，避免 DTO 二次改）。`count_jobs` 不提供 `active_only`（插件可用 `list(task_type, true)`）。
+
+### 48.3 验证与状态
+
+- harness check 101s / clippy 45s；runtime-core check 87s / clippy 53s；全 EXIT=0 且出现 `Checking <目标包>`。
+- leader 补 `partial` 后复跑 harness / runtime-core check：EXIT=0（各命中 1 次 `Checking`）。
+- plugins 三条命令（执行者先 `cargo clean -p axagent-plugins` 清 2.1 GiB 旧产物）：check 3s / clippy 5s / test ⇒ **64 passed**（59 基线 + 5 新增）。
+- **未验证**：`src-tauri` 主 crate 仍未实编；`init/state.rs` 的注册块按「`Arc<CronJobStore>` → `Arc<dyn JobStoreProvider>` 标准 unsized coercion + clone 后按值 move」静态核对，留给下一次主 crate 窗口。
+
+### 48.4 记账
+
+- K1：`rsFiles 2011→2012`（新增 `jobs_store.rs`）、`pubTraits 317→318`（`JobStoreProvider`）、`declaredExternalTraits 233→234`（runtime-core 有生产 impl）。已随提交 `6083a1fc1` 同步镜像表与 PLAN:247/248。
+- `worker.rs` evidence 再后移 **+62 行**：`remote_method_not_supported` 3291→**3353**，evolver 区间 3383/3431→**3445/3493**。
+
+### 48.5 本批未做（写面按裁定暂缓）
+
+- 未发布 `add` / `remove` / `set_status` / `update` 任何写 op。
+- op 级权限校验未落地：`dispatch_seam` 目前**完全没有权限面**，`PluginWorkerConfig` 也不携带 `PluginPermission`。
+- 写 op 及权限门作为下一批（E2）：先做 `PluginWorkerConfig.permissions` + `dispatch_seam` 的 op→permission 表 + `write` 门，再上 `jobs.store` 写面（含保留 id 防误删、`update` 用 patch DTO 不转发闭包）。

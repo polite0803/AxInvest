@@ -2614,3 +2614,33 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 - K1：**2016/320 → 2018/322**（+2 文件 = 两个 harness 新契约文件；垫片未删 ⇒ 不降）。`declaredExternalTraits` **保持 236** —— 两个新 trait 此刻**还没有生产实现者**，宿主批注册后应为 **238**。
 - 下一批（宿主）：新建 `commands/stock_workflow/monitor_seam_service.rs` + `quote_watcher_service.rs`，`upsert_alert` **直接调** `price_alert_upsert::upsert_price_alert_and_wire`（不抄第二遍），`monitor_emitter.rs` 加第四跳 `dispatch_event` 并多带一个 `Arc<EventDispatchBus>`。⚠ 新文件必须落在 `commands/stock_workflow/`（ownedRe 桶），落 `init/` 会把反向阻塞读数从 152 抬到 154（§53 的同一课）。
 - 再下一批（分派）：`worker.rs` 新增 12 个分支（`stock.monitor` 9 + `quote.watcher` 3，形态照 `trading.engine` 分支 `:1990-2106`）+ 6 条 `required_permission_for` 登记 + 单测（基线 **86 passed**）；**不进** `SUPPORTED_REMOTE_SEAMS`（方向相反）。
+
+---
+
+## 56. `knowledge.vector` + `trajectory.store` 的裁定（2026-11-03；调研报告 `.tmp/res105-vector-trajectory-design.md`，390 行）
+
+### 56.1 六条待裁定的裁决
+
+| # | 事项 | 裁决 |
+|---|---|---|
+| Q1 | 接缝 ID 取 `knowledge.vector` 还是 `rag.vector.store` | **`knowledge.vector`**。§47.3 顺序表（`PLAN:2245`）用的就是它，且首批 op 面（检索 / 关键词检索 / 入库 / 集合信息）**不止 RAG 存储**。代价我认：交付批必须**同批**改 `harness/src/vector_store.rs:12` 模块头、`PLAN:317` 组 K 预留行、`scripts/capability-register.json:956` 行的 `seamId`/`faces`/`evidence`/`planAnchorText`（锚点文本要与 PLAN:317 逐字一致，否则 repin 判错）。**历史章节里的 `rag.vector.store` 提法一律不改**（§704/1460/1499/1571/1864 是时点记录）⇒ 两名的关系只在**本节**说明一次：预留名 → 交付名。**两名并存地写进新代码是最坏解**，判据只认 `capability_registry.rs` 里那一个字面量。 |
+| Q2 | 首批开几个写 op | **只开 `index_text` 一个**（`write` 闸 + 硬上限）。**`delete_document` 不开** —— 比 res105 的理由更硬的一条：`delete_document_embeddings`（search `:990`）**只清向量、不删文档行**，宿主侧删文档走 `knowledge.rs:982` 的「先清旧向量再删行」同事务路径 ⇒ 插件拿到这个 op 只能造成**半截删除**（库里留孤儿行）。删除权留在宿主命令面。 |
+| Q3 | 为 `list_collections` 扩 #40 的 trait 面？ | **不扩**。#40 三 trait 共 25 方法、宿主 `VectorStore` 28 个 pub 方法**零列举能力**，扩面属改冻结契约。首批以 `get_collection_info`（trait 已有 `get_collection_dimensions`，harness `:84`）替代。 |
+| Q4 | `trajectory.store` 开不开 `append` | **首批只读**（`list`/`get`/`query`/`count` 四个 op）。res105 B9 的五条判据全部成立，尤其：`outcome`/`quality`/`value_score` 是**可写字段**（`trajectory_types.rs:105-108`）而进化门槛读它们（`reflection.rs:4515` 取 30 条、<10 条拒进化）⇒ 插件伪造一条 `Success` 就能抬分母。**若将来必开**，走「最小写子集」（单 op + 插件前缀 `agentName` + 入参禁带 `steps`/`rewards`/`quality`/`valueScore` + 速率闸 + 先补 `TRAJECTORY_*` 码族与 11 语言译键）。 |
+| Q5 | 业务错误码透出到帧 `code`？ | **不改协议**。分派层继续 `PLUGIN_CALL_FAILED` 兜底，`KNOWLEDGE_*`/`VECTOR_*` 放进 payload 的 `code` 字段（与 `trading.engine` 的「业务结果走 payload `reason`、不借错误码」同源）。反向选择会让每个新码都欠 11 语言译键（AGENTS「后端错误码 i18n 规范」第 7 条）⇒ **首批零新增码**。 |
+| Q6 | `TrajectoryQuery` 加 `rename_all` 还是新建视图 | **新建 `TrajectoryQueryView`**（camelCase + `sinceMs`/`untilMs: i64` epoch），**不动** `harness/src/trajectory_types.rs:288` 原形：它被宿主 `storage.rs:409` 与 proactive/dream/closed-loop 消费，改注解会同时改落库与既有 IPC 的键形态。 |
+
+### 56.2 我在裁决之外补的四条（res105 没问，但会决定形状）
+
+1. **`index_text` 的 args 只收 `{collection_id, document_id, content}`** —— 删掉 res105 op 表里的 `embedding_provider` 与 `dimensions` 两个入参。理由：**插件不得指定 provider**（那是宿主配置与计费主权，`indexing.rs:618 build_embed_context(db, master_key, &provider_id)` 需要 `master_key` 解密），维度必须由宿主按所选 embedding 模型决定；让外部传 provider 名等于把「任意触发模型计费」的口交给插件。
+2. **`index_text` 不许隐式建集合**：写前必须先读 `get_collection_dimensions`，集合不存在 ⇒ 落 `Err`（分派层映射 `SEAM_CALL_INVALID_ARGS`），**禁止**顺手 `ensure_collection`。否则插件可无限造命名空间，而删除权在上一行已被收归宿主 ⇒ 造完没人能清。这条是 Q2「不开 delete」的**配套前提**，两条必须同时成立。
+3. **硬上限写进 provider 而不是文档**：`content ≤ 64 KB`、`search.top_k ≤ 50`、`list.limit ≤ 200`，超限即截断或 `Err`（照 `jobs_store.rs` 把校验放在实现方的做法）。**速率闸首批不做**（协议层只有 `write` 一档权限，`types.rs:474-484` 无粒度；挪用 `SECURITY_RATE_LIMIT_EXCEEDED` 属跨域借码，不做）—— 代价如实登记：**一个乱调 `index_text` 的插件能把宿主 embedding 花费推高**，这是已知未修风险，不是已解决。
+4. **provider 落 `src-tauri/src/commands/` 根**（res105 §4 批 2 的推荐，我采纳）：`audit-l1-blockers.mjs:38-40` 的计数只看 `useRe` 是否 import STOCK 那 4 个 crate，本两条 provider 只 import `axagent_search` / `axagent_trajectory` ⇒ 落哪个目录都不抬 152/28；能力本身跨域（知识库 + 轨迹服务多条业务线），**不随股票插件迁出**。⚠ 这条与 §55.6 给 `stock.monitor` 的口径相反且都正确 —— 差别就在 import 面：`monitor_seam_service.rs` import `axagent_analysis_engine`，必须在 ownedRe 覆盖的 `commands/stock_workflow/` 下。
+
+### 56.3 基线与记账（res105 §5 的预告表按新基线重算）
+
+- 现值 **2018 / 322 / 236**（§55.6，res105 报的 2016/320 已被契约批 `366ff9c04` 抬过）。
+- **契约批**：+2 文件（`harness/src/knowledge_vector.rs`、`harness/src/trajectory_store.rs`）、+2 trait（`KnowledgeVectorProvider`、`TrajectoryStoreProvider`）⇒ **2020 / 324**；`declaredExternalTraits` **必须仍 236**（声明有、非 harness 实现无 ⇒ 交并不进）。
+- **宿主批**：+2 文件（`commands/knowledge_vector_service.rs`、`commands/trajectory_store_service.rs`）⇒ **2022 / 324**，`declaredExternalTraits` **236→238**。⚠ 分两批改镜像表，批 1 就改 238 会判红。
+- 不受影响、**别顺手改**：`capacityRegister 23`、`groupCounts`（`totalRows 37`）、`remoteSeamRegistryCount 13`（两条新接缝都**不进** `SUPPORTED_REMOTE_SEAMS`，方向相反）。唯一例外是 §0.7.7 的 `rag.vector.store` 预留行（`json:956-973`，`planLine 317`）——按 Q1 改名并改写 `reason`（「capability_registry 命中 0 ⇒ 判未建」交付后会变成**过期的真话反面**）。
+- res105 §5 风险 2（「复用 #40 三 trait 当契约会不会让 236 意外跳变」）**随 Q1–Q3 的裁决自动消解**：不复用、新建 provider trait ⇒ 交并集只在宿主批才成立。

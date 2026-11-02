@@ -170,7 +170,10 @@ agency-agents-src/
 data/
 
 # 微调模型运行时数据（按 UUID 目录生成，不入库）
+# ⚠ `trainer.rs:39` 的 output_dir 是相对路径 `./fine_tuned_models` ⇒ 落点随进程 CWD 漂，
+#    下面两条分别对应「crate 目录为 CWD」与「axagent-ai/ 为 CWD」两种实证落点（2026-11-03 盘上两处都在）。
 /axagent-ai/crates/agent/fine_tuned_models/
+/axagent-ai/fine_tuned_models/
 
 # Rust 临时测试文件
 temp_test.exe

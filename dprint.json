@@ -22,8 +22,14 @@
     "src/types/generated/**/*",
     "scripts/**/*",
     "src-tauri/scripts/**/*",
-    "knowledge-sources/**/*"
+    "knowledge-sources/**/*",
+    "axagent-ai/fine_tuned_models/**/*",
+    "axagent-ai/crates/agent/fine_tuned_models/**/*"
   ],
+  // ⚠ 两个 fine_tuned_models 必须排除（2026-11-03 补）：微调产物按 UUID 目录落盘，`axagent-ai/crates/agent/src/fine_tune/trainer.rs:39`
+  // 的 `output_dir` 是**相对路径** `./fine_tuned_models` ⇒ 落点随进程 CWD 漂，盘上已有两处目录（345 个 + 3 个 UUID）。
+  // 这些是运行时数据不是源码，却落在 dprint 的扫描面里 ⇒ 任何人提交都会被 pre-commit 的 `dprint check` 撞红。
+  // 根因（相对路径 + 3 份产物已被 git 跟踪）另立任务，不在本配置改动里修。
   // ⚠ `docs/**/*` 必须排除（2026-11-01 补）：`docs/` 此前被 `.gitignore` 整目录忽略 ⇒ 176 份文档从未入库，
   // 也从未受 dprint 管辖；解除忽略后 CI 的 `dprint check`（ci.yml:430）立刻报 167 个文件未格式化。
   // 不能靠「跑一次 dprint fmt」消解：`docs/plans/PLAN-shell-plus-plugins.md` 的行号被

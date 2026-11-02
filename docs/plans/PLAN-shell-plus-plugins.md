@@ -244,8 +244,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 
 | 口径 | 命中 | 备注 |
 |---|---|---|
-| K1：`pub trait` 总数（8 根 2014 个 `.rs`） | **319** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。**2026-11-02 `#81` 再升 1（2009→2010）**：行情 DTO 上收新增 `harness/src/stock_market_types.rs`；`astock-data/src/types.rs` 保留为垫片（未删文件），故只 +1。**同日 C 批再升 1（2010→2011）**：`DataOutcome` 上收新增 `harness/src/data_outcome.rs`；`astock-data/src/outcome.rs` 保留为垫片。**同日 `jobs.store` 接缝再升 2 项**：新增 `harness/src/jobs_store.rs`（文件 +1）与 `JobStoreProvider`（trait +1）⇒ **2012 / 318**。**同日 `workflow.run` 再升 2 项**：新增 `harness/src/workflow_run.rs`（文件 +1）与 `WorkflowRunProvider`（trait +1）⇒ **2013 / 319**。**同日宿主服务再升 1（2013→2014）**：新增 `src-tauri/src/commands/stock_workflow/workflow_run_service.rs`。 |
-| K1 + 有非 harness、非测试实现者 | **235** | ⚠ 这一档**不能**当能力数。~~232 出自一次性 census 工件（`.tmp/traits-full.json`，未入库 ⇒ 谓词无法从仓内代码复现）~~ ⇒ **该说法已作废（`#61` + `#66` 落地后）**：谓词已入库为 `k1DeclaredExternalImplTraitCount`，`--dump-readings` 在现树复现 = **233**（`#62` 后：ToT 拆成两名、两端都仍有生产 impl ⇒ +1），且与本门 audit 侧输出**排序名单逐字相等**（`#66` 的 4.2 档，差分探针 + 两条命令背靠背 + 扫描面常量逐项对照，三条同源性证据齐）⇒ **233 现在是可复算值**，锚点**具备升 `hard:true` 的条件**（升不升、用哪个数由我在收口时一次定）。另两个历史数**只留作解释、不再与 233 并列**：**210** = 单趟扫描缺陷（当时同谓词**两趟交并** = 232，差值恰 **22**；`#62` 后未重测单趟读数）；**269** = 门里最严格的读法（不要求 trait 声明面、不排 std/派生噪声名），**不作文档该锚点值**。⚠ 处置次序仍不能反：**先让谓词可复算，再升 hard** —— 反向必先假红。**同日 `jobs.store` 再 +1（233→234）**：`JobStoreProvider` 在 `runtime-core` 有生产 impl。**同日 `workflow.run` 再 +1（234→235）**：`WorkflowRunProvider` 在 `src-tauri/src/init/workflow_run.rs` 有生产 impl。 |
+| K1：`pub trait` 总数（8 根 2016 个 `.rs`） | **320** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。**2026-11-02 `#81` 再升 1（2009→2010）**：行情 DTO 上收新增 `harness/src/stock_market_types.rs`；`astock-data/src/types.rs` 保留为垫片（未删文件），故只 +1。**同日 C 批再升 1（2010→2011）**：`DataOutcome` 上收新增 `harness/src/data_outcome.rs`；`astock-data/src/outcome.rs` 保留为垫片。**同日 `jobs.store` 接缝再升 2 项**：新增 `harness/src/jobs_store.rs`（文件 +1）与 `JobStoreProvider`（trait +1）⇒ **2012 / 318**。**同日 `workflow.run` 再升 2 项**：新增 `harness/src/workflow_run.rs`（文件 +1）与 `WorkflowRunProvider`（trait +1）⇒ **2013 / 319**。**同日宿主服务再升 1（2013→2014）**：新增 `src-tauri/src/commands/stock_workflow/workflow_run_service.rs`。**同日 `trading.engine` 再升 2 项**：新增 `harness/src/trading_engine.rs`（文件 +1）与 `TradingEngineProvider`（trait +1）⇒ **2015 / 320**。**同日宿主服务再升 1（2015→2016）**：新增 `src-tauri/src/commands/stock_workflow/trading_engine_service.rs`。 |
+| K1 + 有非 harness、非测试实现者 | **236** | ⚠ 这一档**不能**当能力数。~~232 出自一次性 census 工件（`.tmp/traits-full.json`，未入库 ⇒ 谓词无法从仓内代码复现）~~ ⇒ **该说法已作废（`#61` + `#66` 落地后）**：谓词已入库为 `k1DeclaredExternalImplTraitCount`，`--dump-readings` 在现树复现 = **233**（`#62` 后：ToT 拆成两名、两端都仍有生产 impl ⇒ +1），且与本门 audit 侧输出**排序名单逐字相等**（`#66` 的 4.2 档，差分探针 + 两条命令背靠背 + 扫描面常量逐项对照，三条同源性证据齐）⇒ **233 现在是可复算值**，锚点**具备升 `hard:true` 的条件**（升不升、用哪个数由我在收口时一次定）。另两个历史数**只留作解释、不再与 233 并列**：**210** = 单趟扫描缺陷（当时同谓词**两趟交并** = 232，差值恰 **22**；`#62` 后未重测单趟读数）；**269** = 门里最严格的读法（不要求 trait 声明面、不排 std/派生噪声名），**不作文档该锚点值**。⚠ 处置次序仍不能反：**先让谓词可复算，再升 hard** —— 反向必先假红。**同日 `jobs.store` 再 +1（233→234）**：`JobStoreProvider` 在 `runtime-core` 有生产 impl。**同日 `workflow.run` 再 +1（234→235）**：`WorkflowRunProvider` 在 `src-tauri/src/init/workflow_run.rs` 有生产 impl（后迁 `commands/stock_workflow/workflow_run_service.rs`，读数不变）；**同日 `trading.engine` 再 +1（235→236）**：`TradingEngineProvider` 在 `src-tauri/src/commands/stock_workflow/trading_engine_service.rs` 有生产 impl。 |
 | K1 + K2（键控站点，四次扫描合并去漏报） | **51** 个 trait 面 | 含 15 条已建接缝的 trait。⚠ **2026-11-02 `#33` 实测：这一档不可作论据** —— 谓词真身是**未入库的一次性工件** `.tmp/capability-register3.cjs:44-82`（仓内无处复跑，与 §0.7.2 的 232 同病根），且它要求签名/块内出现 `dyn T` ⇒ 198 条里 **21 条假阴性**，把 PLAN B/C 组落入该桶的 **13 条契约全部吞掉** ⇒ **不许**用「无键控点」论证「这些 trait 只是分层解耦」。谓词入库 = 任务 **#57**；逐条分桶结论见 **§14** |
 | 51 → 同族合并 + K3/K4 判定 | **23 条能力**（另有 3 条移入 §0.7.9 债档，只登记不计数） | ⇒ 本节表格 A+B+C 三组 |
 | （对照）今天就能远程跑的接缝 | **13** | `axagent-plugins/crates/plugins/src/worker.rs:133` `SUPPORTED_REMOTE_SEAMS` |
@@ -262,8 +262,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | `message.callback` | `axagent-core/crates/harness/src/platform_callback.rs:21` | 接缝 `message.callback`（内置与插件同入口） | 2 | — |
 | `webhook.dispatch` | `axagent-core/crates/harness/src/webhook_subscription.rs:154` | 接缝 + `axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9` | 4 | — |
 | `system.prompt` | `axagent-core/crates/harness/src/context_contributor.rs:22` | 接缝 `system.prompt.{段名}` | 3 | — |
-| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:3668` 起 `remote_method_not_supported` |
-| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:3760`–`:3808` 一批 `remote_method_not_supported`） |
+| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:3798` 起 `remote_method_not_supported` |
+| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:3890`–`:3938` 一批 `remote_method_not_supported`） |
 | `workflow.optimizer` | `axagent-core/crates/harness/src/workflow_optimization.rs:80` | 接缝 | 2 | 同上 |
 | `workflow.sandbox` | `axagent-core/crates/harness/src/workflow_evolution.rs:263` | 接缝 | 4 | — |
 | `workflow.business_rule` | `axagent-core/crates/harness/src/business_rules.rs:71` | 接缝（已有 e2e worker 产物） | 3 | — |
@@ -2401,3 +2401,60 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 4. **未实现**：卸载即取消、跨重启查询（`NotFound` ⇒ `null`）、`plan_callbacks` / `heartbeat` / `timeout_warning` / `system_capability_callback`（契约无字段）、`stock-*` 之外模板（白名单当前只开 `stock-`）。
 5. **`src-tauri` 单测未编译**：`cargo check -p axagent` 只查 lib/bin，`workflow_run.rs` 内 4 条 `#[test]` 未经编译验证；需一次 `__TAURI_WORKSPACE__=true cargo test -p axagent --lib init::workflow_run --no-run` 窗口。
 6. **双拼写**：`variables` 元素是 harness `Variable`（snake_case 字段），外层请求 DTO 是 camelCase；`input: null` 与缺失在插件侧不可区分。均已在契约注释写明，插件 SDK 文档需同步。
+
+## 51. `trading.engine` 接缝交付账（2026-11-03；报告 `.tmp/res92-trading-design.md` / `.tmp/res98-report.md` / `.tmp/res99-report.md` / `.tmp/res102-report.md`）
+
+### 51.1 落点与提交
+
+| 批 | 提交 | 文件与增删 | 内容 |
+|---|---|---|---|
+| E4a 契约 | `2ca8730dc` | 新建 `harness/src/trading_engine.rs`（407 行）；`lib.rs` +6；`capability_registry.rs` +38；`analysis-engine/src/trading.rs` +5/−34 | `PositionSummary` / `TradeValidation` / `TradePredictionComparison` **上收 harness**（analysis-engine 改 `pub use`，调用点零改动）；新增 `TradeView` / `TradeValidationRequest` / `TradeExecutionRequest` / `TradeExecutionOutcome`；`TradingEngineProvider` 六方法 |
+| E4b 宿主 | `8eeaedb90` | `analysis-engine/src/trading.rs` +308/−30；新建 `commands/stock_workflow/trading_engine_service.rs`（256 行）；`stock_workflow/mod.rs` +3；`init/state.rs` +31/−6 | 引擎新增 `execute_trade_outcome`（开关闸 + **只校验一次** + 结构化拒绝）与 `compare_trade_vs_prediction_opt`（查无分析 ⇒ `Ok(None)`），旧方法签名与文案不变；`HostTradingEngine` 六 op；`state.rs` 引擎构造上提 + 注册 |
+| E4c 分派 | `26823e2d5` | `plugins/src/worker.rs` +625/−77 | 六 op 分支；`execute_trade` 需 `write`；as_of 复用 `deserialize_as_of_arg`；7 条用例（79→86） |
+
+### 51.2 op 形状（args snake_case；嵌套 DTO 原样 camelCase）
+
+| op | args | 成功返回 | 权限 |
+|---|---|---|---|
+| `get_positions` | `as_of?` | `[PositionSummary]`（camelCase） | 无 |
+| `get_trades` | `stock_code?`、`limit?`（缺省 50，宿主再 clamp ≤500） | `[TradeView]` | 无 |
+| `validate_trade` | `request`（对象）、`as_of?` | `TradeValidation` | 无 |
+| `execute_trade` | `request`（对象）、`as_of?` | `TradeExecutionOutcome` | **`write`** |
+| `compare_trade` | `trade_id` | `TradePredictionComparison \| null` | 无 |
+| `trading_enabled` | 无 | `{"enabled": bool}` | 无 |
+
+**语义要点**：
+- `execute_trade` 的 `accepted=false` 是**正常业务结果**（`reason ∈ trading_disabled / validation_failed / duplicate`），不借用错误码；**DB 写失败**（`write_failed`）由宿主映射成 `Err(Provider)`，不混进 outcome（leader 在 E4b 复核时改判并复编验证）。
+- **同键查重**在 provider 的 per-`stock_code` 串行锁**内**执行（否则两次并发同单同时判「不重复」）；键口径照 CSV 导入的 6 字段。
+- 开关唯一权威是 settings 的 `trading_enabled`；引擎的 `enabled` 是死字段，**禁读禁写**。
+- `get_positions` 内埋 `tracing::info!` 计时（持仓数 / 总耗 / 单只均耗）。**未加** `SEAM_OP_TIMEOUT_OVERRIDES` 条目（表要求「文件:行」实测出处，且 22 个未进表 op 有断言 ⇒ 无实测不得进表）。
+
+### 51.3 验证
+
+| 批 | 命令 | EXIT | 证据 |
+|---|---|---|---|
+| E4a | harness check / clippy / `test trading_engine`；analysis-engine check / clippy | 全 0 | 均命中 `Checking <目标包>`；`4 passed; 836 filtered` |
+| E4b | quant check 34.31s / clippy 37.42s；主 crate check 16m27s；**改动后复编 14m27s** | 全 0 | `Checking axagent-analysis-engine` / `Checking axagent v3.0.0`；引擎 2 条新测试 passed |
+| E4c | plugins check 1m02s / clippy 7.87s / `test --lib worker::tests` | 全 0 | `Checking axagent-plugins` ×2；**`86 passed; 113 filtered`**（79 基线 + 7） |
+
+⚠ E4c 顺带把 `worker.rs` 既存的 14 处 rustfmt 漂移归位（≈64 行格式 churn，随单文件 `rustfmt` 发生，非 `cargo fmt --all`）。
+
+### 51.4 记账
+
+- K1：`rsFiles 2014→2016`（`harness/src/trading_engine.rs` + `src-tauri/src/commands/stock_workflow/trading_engine_service.rs`）、`pubTraits 319→320`（`TradingEngineProvider`）、`declaredExternalTraits 235→236`（宿主生产 impl）。
+- `worker.rs` evidence 再后移 **+130 行**：reflector 3668→**3798**；evolver 区间 3760/3808→**3890/3938**。
+- **L1 反向阻塞保持 152 处 / 28 文件**：两个宿主服务都落在 `commands/stock_workflow/` 域内路径（`workflow_run_service.rs` 从 `init/` 迁过来就是为了这条，见 §50.6 补记）。
+
+## 52. 构建环境实测与清理（任务 #27 / #21；报告 `.tmp/res97-target-research.md`，490 行）
+
+| 事项 | 实测（2026-11-03） |
+|---|---|
+| 生效 target | `CARGO_TARGET_DIR=C:\Users\刘小平\.cargo\target-axagent`（User + Process 两级），**覆盖**仓内 7 个子根 `.cargo/config.toml` 的 `../src-tauri/target` |
+| `src-tauri/target` | 101.27 GiB / 98,447 文件，最后写入 2026-11-01 18:34 ⇒ **死重**。经确认后已删除（`.tmp/res101-cleanup.log`：`RM_EXIT=0`、目录不存在）；删除后 `cargo check -p axagent` 复编 EXIT=0（14m27s）⇒ 真实 target 未受影响 |
+| D 盘 | `DriveType=4 / HGFS`（VMware 共享），元数据操作比 C 慢 160–370 倍 ⇒ **#21「target 迁 D」否决**；C 盘删后剩 214 GB |
+| lock 漂移 | 8 份 lock 并集 1,061 包，303 包多版本；公共 360 包中 **159 个版本不一致**（旧簇 `{src-tauri, axagent-core}` vs 新簇其余 6 根） |
+| 重复编译 | live target 内 831 crate / 5,639 编译单元（均 6.8 份）；`axagent_harness` 仍 36 份；fingerprint 里 `tokio` hash 24 种、`sea_orm` 28 种 ⇒ 根因是**依赖图哈希沿根分裂**，不是 profile 未对齐 |
+| 额外分裂源 | 两套 rustc（1.97.0 / 1.97.1）：`rust-toolchain.toml` 只在 8 个根内，仓库根没有 ⇒ 从仓库根起 cargo 用默认工具链，同 target 写两套产物 |
+| CI | `Swatinem/rust-cache` 只缓存 `src-tauri -> target`，而 CI 用 `--manifest-path` 从仓库根跑 ⇒ **7/8 根零缓存** |
+
+**后续动作（未做，按风险排序）**：① 仓库根补 `rust-toolchain.toml`；② 统一访问视图（全树固定 `D:\` 本地路径，不再混用 UNC）；③ lock 收敛门（不是合并 lock）；④ CI 缓存覆盖 8 根；⑤ target 内 ≈16.6 GiB 冗余产物的定向清理。⚠ 硬约束：共享 target 下不带 `-p` 的 `cargo clean` 会清掉 **8 根共用整份 target**。

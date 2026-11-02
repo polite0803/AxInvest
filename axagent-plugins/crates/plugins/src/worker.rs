@@ -414,9 +414,9 @@ struct HostPeer {
 
 /// 接缝写 op → 所需权限的登记表。
 ///
-/// **本批只登记 `jobs.store` 的四个写 op**（`add` / `remove` / `set_status` / `update`）；
-/// 其余接缝或 op 一律 `None`（不设权限闸）。登记与「实现」是两件事：本批**没有**任何
-/// 写 op 的分派分支，登记的唯一作用是让未声明 `write` 的插件在触达 provider 之前被拒。
+/// **本批登记 `jobs.store` 的四个写 op**（`add` / `remove` / `set_status` / `update`）；
+/// 其余接缝或 op 一律 `None`（不设权限闸）。其中 `add` / `remove` / `set_status` 已有分派
+/// 分支，`update` 仅登记、尚无实现（会落到「未知 op」的 `SEAM_CALL_UNSUPPORTED`）。
 ///
 /// 纯函数（无 `self`、无全局状态），便于单测直接枚举判定。
 fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
@@ -1676,9 +1676,11 @@ impl HostPeer {
                     Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
                 }
             },
-            // ── jobs.store 接缝：宿主把**已有** cron 任务查询能力暴露给插件（只读） ──
+            // ── jobs.store 接缝：宿主把 cron 任务读写能力暴露给插件 ──
             // 方向与 `market.quote` 相同（宿主提供给插件），故只走入站分派、不进远程门面
-            // 清单。本接缝**只读**：不发布创建 / 修改 / 删除 / 触发等写 op。
+            // 清单。只读 op：`list` / `get` / `count`；写 op：`add` / `remove` / `set_status`
+            // （`update` 不在本批）。写 op 的 `write` 权限闸已由 `dispatch_seam` 开头统一
+            // 把关，分支内不重复判断。
             "jobs.store" if op == "list" => {
                 let Some(provider) = self.registry.get_jobs_store() else {
                     return self.unavailable(seam);
@@ -1735,6 +1737,73 @@ impl HostPeer {
                 };
                 match result {
                     Ok(count) => FrameResponse::success(json!({ "count": count })),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            // ── jobs.store 写面：`add` / `remove` / `set_status` ──
+            // `add` 的 `job` 直接按 harness 的 [`axagent_harness::NewCronJob`] 反序列化：
+            // 可选字段与 `recurring = true` / `priority = "medium"` 的缺省值全部由该 DTO
+            // 的 serde 声明提供，分派层不再另填一套默认值（两处各写一份必然漂移）。
+            "jobs.store" if op == "add" => {
+                let job: axagent_harness::NewCronJob = match deserialize_arg(&args, "job", seam) {
+                    Ok(job) => job,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_jobs_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.add_job(job)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(id) => FrameResponse::success(json!({ "id": id })),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "jobs.store" if op == "remove" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let Some(provider) = self.registry.get_jobs_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.remove_job(&id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 三态结果**原样**透出：`"removed"` / `"not_found"` / `"protected"`。
+                    // 「受保护」「不存在」都是正常结果，不借用错误码表达。
+                    Ok(outcome) => to_value("RemoveJobOutcome", &outcome),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "jobs.store" if op == "set_status" => {
+                let id: String = match deserialize_arg(&args, "id", seam) {
+                    Ok(id) => id,
+                    Err(response) => return response,
+                };
+                let status: String = match deserialize_arg(&args, "status", seam) {
+                    Ok(status) => status,
+                    Err(response) => return response,
+                };
+                // 先校验字面量、后取 provider：非法取值是调用方的参数错误，不该被
+                // 「provider 暂不可用」掩盖，更不该送进 provider。
+                if !matches!(status.as_str(), "active" | "paused" | "disabled") {
+                    return invalid_args(format!(
+                        "接缝 `{seam}` 的 `status` 只接受 `active` / `paused` / `disabled`，\
+                         实际收到：`{status}`"
+                    ));
+                }
+                let Some(provider) = self.registry.get_jobs_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.set_job_status(&id, &status)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // `false` = 任务不存在（正常结果，不是错误）。
+                    Ok(found) => FrameResponse::success(json!({ "found": found })),
                     Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
                 }
             },
@@ -7029,18 +7098,27 @@ mod tests {
         );
     }
 
-    // ───────────────────── jobs.store：只读查询接缝（list / get / count） ─────────────────────
+    // ───── jobs.store 读写接缝（读：list / get / count；写：add / remove / set_status） ─────
 
-    /// 假定时任务提供者：记录 `list_jobs` 收到的过滤参数，返回固定视图。
+    /// 假定时任务提供者：记录读 / 写调用收到的参数，返回固定结果。
     struct FixedJobStoreProvider {
         /// 外层 `None` = 尚未调用；内层是 `(task_type, active_only)`。
         list_args: Mutex<Option<(Option<String>, bool)>>,
+        /// `add_job` 收到的任务（外层 `None` = 尚未调用）。
+        added_job: Mutex<Option<axagent_harness::NewCronJob>>,
+        /// `remove_job` 收到的 id 序列（保留次数与顺序）。
+        removed_ids: Mutex<Vec<String>>,
+        /// `set_job_status` 收到的 `(id, status)` 序列（保留次数与顺序）。
+        status_calls: Mutex<Vec<(String, String)>>,
     }
 
     impl FixedJobStoreProvider {
         fn new() -> Self {
             Self {
                 list_args: Mutex::new(None),
+                added_job: Mutex::new(None),
+                removed_ids: Mutex::new(Vec::new()),
+                status_calls: Mutex::new(Vec::new()),
             }
         }
 
@@ -7100,6 +7178,36 @@ mod tests {
             _task_type: Option<&str>,
         ) -> axagent_harness::core_error::Result<u64> {
             Ok(7)
+        }
+
+        async fn add_job(
+            &self,
+            job: axagent_harness::NewCronJob,
+        ) -> axagent_harness::core_error::Result<String> {
+            let id = job.id.clone();
+            *self.added_job.lock() = Some(job);
+            Ok(id)
+        }
+
+        async fn remove_job(
+            &self,
+            id: &str,
+        ) -> axagent_harness::core_error::Result<axagent_harness::RemoveJobOutcome> {
+            self.removed_ids.lock().push(id.to_string());
+            Ok(match id {
+                "protected-id" => axagent_harness::RemoveJobOutcome::Protected,
+                "gone" => axagent_harness::RemoveJobOutcome::NotFound,
+                _ => axagent_harness::RemoveJobOutcome::Removed,
+            })
+        }
+
+        async fn set_job_status(
+            &self,
+            id: &str,
+            status: &str,
+        ) -> axagent_harness::core_error::Result<bool> {
+            self.status_calls.lock().push((id.to_string(), status.to_string()));
+            Ok(id != "missing")
         }
     }
 
@@ -7294,11 +7402,11 @@ mod tests {
         );
     }
 
-    /// 已声明 `write` ⇒ 不再被权限闸拦；本批未实现写分支，故落到「未知 op」的既有错误码。
+    /// 已声明 `write` ⇒ 不再被权限闸拦；`update` 本批未实现，故落到「未知 op」的既有错误码。
     ///
     /// ⚠ 盘上口径：**已知接缝的未知 op** 走 `dispatch_seam` 末尾的 `SEAM_CALL_UNSUPPORTED`
     /// （`PLUGIN_UNKNOWN_OP` 只用于未知**帧** op，见 `HostPeer::handle_inbound`）。本用例按
-    /// 盘上断言，未为写 op 新增任何分派分支。
+    /// 盘上断言，未为 `update` 新增分派分支。
     #[test]
     fn jobs_store_write_with_permission_falls_through_to_unknown_op() {
         let (peer, _runtime) = jobs_peer_with_runtime_and_permissions(
@@ -7306,9 +7414,9 @@ mod tests {
             vec![PluginPermission::Write],
         );
         let response =
-            with_watchdog(Duration::from_secs(5), "jobs.store remove 有权限", move || {
+            with_watchdog(Duration::from_secs(5), "jobs.store update 有权限", move || {
                 peer.handle_call_seam(
-                    &json!({ "seam": "jobs.store", "op": "remove", "args": { "id": "job-x" } }),
+                    &json!({ "seam": "jobs.store", "op": "update", "args": {} }),
                     &[],
                 )
             });
@@ -7320,7 +7428,169 @@ mod tests {
         assert_eq!(
             response.code.as_deref(),
             Some(error_codes::SEAM_CALL_UNSUPPORTED),
-            "本批未实现写分支 ⇒ 落入未知 op 的既有错误码，实际 {response:?}"
+            "`update` 尚未实现 ⇒ 落入未知 op 的既有错误码，实际 {response:?}"
         );
+    }
+
+    // ───────────────────── jobs.store 写面：add / remove / set_status ─────────────────────
+
+    /// `add` 把任务原样交给 provider；可选字段缺省由 harness DTO 提供
+    /// （`recurring = true` / `priority = "medium"`），分派层不得另填一套默认值。
+    #[test]
+    fn jobs_store_add_forwards_new_job_and_defaults() {
+        let provider = Arc::new(FixedJobStoreProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) =
+            jobs_peer_with_runtime_and_permissions(provider, vec![PluginPermission::Write]);
+        let response = with_watchdog(Duration::from_secs(5), "jobs.store add", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "jobs.store",
+                    "op": "add",
+                    "args": {
+                        "job": {
+                            "id": "job-new",
+                            "name": "晨间复盘",
+                            "description": "开盘前检查持仓",
+                            "schedule": "0 9 * * *",
+                            "prompt": "复盘今日持仓",
+                        },
+                    },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "已注册且已授权时应成功，实际 {response:?}");
+        let job = captured.added_job.lock().clone().expect("provider 应收到 add_job");
+        assert_eq!(job.id, "job-new", "id 应原样透传");
+        assert_eq!(job.schedule, "0 9 * * *", "schedule 应原样透传");
+        assert!(job.recurring, "`recurring` 缺省必须为 true");
+        assert_eq!(job.priority, "medium", "`priority` 缺省必须为 medium");
+        assert_eq!(response.value, Some(json!({ "id": "job-new" })));
+    }
+
+    /// 内置种子任务受保护：`remove` 的三态结果原样透出，`protected` 是**字符串**。
+    #[test]
+    fn jobs_store_remove_reports_protected() {
+        let provider = Arc::new(FixedJobStoreProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) =
+            jobs_peer_with_runtime_and_permissions(provider, vec![PluginPermission::Write]);
+        let response =
+            with_watchdog(Duration::from_secs(5), "jobs.store remove 受保护", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "jobs.store",
+                        "op": "remove",
+                        "args": { "id": "protected-id" },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code, None, "受保护未删除不是错误，实际 {response:?}");
+        assert_eq!(response.value, Some(json!("protected")));
+        assert_eq!(
+            captured.removed_ids.lock().clone(),
+            vec!["protected-id".to_string()],
+            "id 应原样透传给 remove_job"
+        );
+    }
+
+    /// `set_status` 原样转发 `(id, status)`，并用 `found` 区分「不存在」。
+    #[test]
+    fn jobs_store_set_status_forwards_and_reports_found() {
+        let provider = Arc::new(FixedJobStoreProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = jobs_peer_with_runtime_and_permissions(
+            Arc::clone(&provider),
+            vec![PluginPermission::Write],
+        );
+        let response =
+            with_watchdog(Duration::from_secs(5), "jobs.store set_status 暂停", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "jobs.store",
+                        "op": "set_status",
+                        "args": { "id": "x", "status": "paused" },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code, None, "已授权时应成功，实际 {response:?}");
+        assert_eq!(response.value, Some(json!({ "found": true })));
+
+        // 不存在 ⇒ `found: false`，仍不是错误（同一个替身继续记录调用）。
+        let (peer_missing, _runtime_missing) =
+            jobs_peer_with_runtime_and_permissions(provider, vec![PluginPermission::Write]);
+        let missing =
+            with_watchdog(Duration::from_secs(5), "jobs.store set_status 缺失", move || {
+                peer_missing.handle_call_seam(
+                    &json!({
+                        "seam": "jobs.store",
+                        "op": "set_status",
+                        "args": { "id": "missing", "status": "paused" },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(missing.code, None, "任务不存在不是错误，实际 {missing:?}");
+        assert_eq!(missing.value, Some(json!({ "found": false })));
+
+        assert_eq!(
+            captured.status_calls.lock().clone(),
+            vec![
+                ("x".to_string(), "paused".to_string()),
+                ("missing".to_string(), "paused".to_string()),
+            ],
+            "两次调用都应原样透传 (id, status)"
+        );
+    }
+
+    /// 非法状态字面量必须在分派层拒绝：`SEAM_CALL_INVALID_ARGS`，且不触达 provider。
+    #[test]
+    fn jobs_store_set_status_rejects_unknown_literal() {
+        let provider = Arc::new(FixedJobStoreProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) =
+            jobs_peer_with_runtime_and_permissions(provider, vec![PluginPermission::Write]);
+        let response =
+            with_watchdog(Duration::from_secs(2), "jobs.store set_status 非法", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "jobs.store",
+                        "op": "set_status",
+                        "args": { "id": "x", "status": "running" },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(
+            response.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "非法字面量必须走参数错误，实际 {response:?}"
+        );
+        let message = response.message.unwrap_or_default();
+        for allowed in ["active", "paused", "disabled"] {
+            assert!(message.contains(allowed), "文案应列出允许值 `{allowed}`，实际：{message}");
+        }
+        assert!(captured.status_calls.lock().is_empty(), "非法字面量不得送进 provider");
+    }
+
+    /// 缺必填 `job` ⇒ 参数错误，且不触达 provider。
+    #[test]
+    fn jobs_store_add_missing_job_is_invalid() {
+        let provider = Arc::new(FixedJobStoreProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) =
+            jobs_peer_with_runtime_and_permissions(provider, vec![PluginPermission::Write]);
+        let response = with_watchdog(Duration::from_secs(2), "jobs.store add 缺 job", move || {
+            peer.handle_call_seam(&json!({ "seam": "jobs.store", "op": "add", "args": {} }), &[])
+        });
+        assert_eq!(
+            response.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "缺 `job` 必须走参数错误，实际 {response:?}"
+        );
+        assert!(captured.added_job.lock().is_none(), "缺参不得触达 provider");
     }
 }

@@ -2,11 +2,29 @@
   "note": "本表是 docs/plans/PLAN-shell-plus-plugins.md §0.7「提供方接缝（L2）登记表」的**机器镜像**：改本表必须同批改 PLAN §0.7，反之亦然；不同批改动由 scripts/check-capability-register.mjs 判红。**定案口径 = 能力面 23 条 = A 11 + B 8 + C 4**（依据 PLAN:90 与 PLAN:321 两处逐字组成式；§0.7.6 机制合流 1 条、§0.7.7 内核 10 行、§0.7.9 债档 3 条各自独立登记、**不计入 23**，依据 PLAN:296 原文「必须处理，但不计入 23」）。**登记表总行数 = 37**（A11 + B8 + C4 + H1 + K10 + 债档3）。`#54` 级联前为 26 / 36，旧写法已作废但保留在 §24 历史节。盘上不存在「27 条 / B 11」写法（PLAN 全文零命中）⇒ 本表分组计数是唯一权威，禁止再并行第二套 B11/27 口径。字段缺省（null）一律是 PLAN 原文就缺，禁止脑补数值；缺省处记入 expectMissingFields 并进「未机器复检」摘要，不算通过。",
   "caliber": {
     "capacityRegister": 23,
-    "groupCounts": { "A": 11, "B": 8, "C": 4, "H": 1, "K": 10, "D": 3 },
+    "groupCounts": {
+      "A": 11,
+      "B": 8,
+      "C": 4,
+      "H": 1,
+      "K": 10,
+      "D": 3
+    },
     "totalRows": 37,
     "statement": "能力面 23 = A(接缝已建) 11 + B(无接缝待建) 8 + C(钩子族先验 K4) 4；H(§0.7.6 机制合流) 1、K(§0.7.7 内核) 10 与 D(§0.7.9 债档) 3 只登记不计数。",
-    "bannedPlanPhrases": ["B 11", "B11", "A 11 + B 11", "27 条（A 11", "登记 27"],
-    "basisLines": [90, 250, 296, 321]
+    "bannedPlanPhrases": [
+      "B 11",
+      "B11",
+      "A 11 + B 11",
+      "27 条（A 11",
+      "登记 27"
+    ],
+    "basisLines": [
+      90,
+      250,
+      296,
+      321
+    ]
   },
   "sources": {
     "plan": "docs/plans/PLAN-shell-plus-plugins.md",
@@ -29,13 +47,51 @@
     {
       "id": "commandTotal",
       "label": "Tauri 命令总数（parseRegistry 逐行条目）",
-      "value": 1542,
+      "value": 1543,
       "check": "registryCommandCount",
       "hard": true,
-      "planNumber": "1542",
+      "planNumber": "1543",
       "planMustAppear": true,
-      "planPinned": [{ "line": 363, "mustContain": ["1542", "164", "`register_commands.rs` 共"] }],
-      "planOld": [{ "number": "1534", "note": "漂移前旧读数，仅允许出现在 §0.12.4 漂移列举段（PLAN:704）" }, { "number": "1541", "note": "2026-11-01 起被 1542 取代（新增 `plugin_resolve_page_asset`）。合法出现位 = §0.12.4 的「1534/1541」漂移列举段 **+ 下面 `alsoAt` 登记的两段**（#66 加的字段；这两段是 PLAN §15.1/§15.4 对 **HEAD 提交态**的可复算事实陈述，不是「旧数当现值」⇒ 不能靠删句子过门，也不能放弃监管）", "alsoAt": [{ "startLine": 1260, "endLine": 1260, "mustContain": ["HEAD 产物", "按算法应生成", "1541"] }, { "startLine": 1280, "endLine": 1280, "mustContain": ["重生成后是 1541", "对本批红无效", "1541"] }] }],
+      "planPinned": [
+        {
+          "line": 363,
+          "mustContain": [
+            "1543",
+            "164",
+            "`register_commands.rs` 共"
+          ]
+        }
+      ],
+      "planOld": [
+        {
+          "number": "1534",
+          "note": "漂移前旧读数，仅允许出现在 §0.12.4 漂移列举段（PLAN:704）"
+        },
+        {
+          "number": "1541",
+          "note": "2026-11-01 起被 1542 取代（新增 `plugin_resolve_page_asset`）。合法出现位 = §0.12.4 的「1534/1541」漂移列举段 **+ 下面 `alsoAt` 登记的两段**（#66 加的字段；这两段是 PLAN §15.1/§15.4 对 **HEAD 提交态**的可复算事实陈述，不是「旧数当现值」⇒ 不能靠删句子过门，也不能放弃监管）",
+          "alsoAt": [
+            {
+              "startLine": 1260,
+              "endLine": 1260,
+              "mustContain": [
+                "HEAD 产物",
+                "按算法应生成",
+                "1541"
+              ]
+            },
+            {
+              "startLine": 1280,
+              "endLine": 1280,
+              "mustContain": [
+                "重生成后是 1541",
+                "对本批红无效",
+                "1541"
+              ]
+            }
+          ]
+        }
+      ],
       "note": "口径 = scripts/lib/command-domains.mjs 的 parseRegistry，与两份 AUDIT 同源；旧数 1534 在盘上任何寄存器里都不存在。"
     },
     {
@@ -60,7 +116,7 @@
     {
       "id": "registryFileLines",
       "label": "register_commands.rs 行数（口径 = split(\"\\n\").length，含末行空元素）",
-      "value": 1609,
+      "value": 1610,
       "check": "registryFileLineCount",
       "hard": false,
       "planMustAppear": false,
@@ -69,11 +125,11 @@
     {
       "id": "commandNameSetParity",
       "label": "不变量：契约 A 名集合数 == 产物条目数 == 登记值",
-      "value": 1542,
+      "value": 1543,
       "check": "commandNameSetCount",
       "hard": true,
       "planMustAppear": false,
-      "note": "#58 的加强档。存在理由：契约 A 的 `defined ⊆ registered` 比的是**名字集合**，同名跨模块只注册一个时名集合会**静默低估**（今天 0 例，且无编译期保证）⇒ 只有把「名集合数 == 产物条目数」也钉住，A 档的绿才等于「产物与源码一致」。三方现值 1542/1542/1542 全等。**不给 planNumber/planMustAppear**：同一个数已由 `commandTotal` 钉在 PLAN 上，二次钉数只会在 PLAN 改写时多造一条假红；本锚点守的是**盘上不变量**，不是 PLAN 措辞。⚠ HEAD 提交态下它与 `commandTotal` 会**同时**报「产物滞后」（同因两条，专码一致），不是两个独立缺陷。"
+      "note": "#58 的加强档。存在理由：契约 A 的 `defined ⊆ registered` 比的是**名字集合**，同名跨模块只注册一个时名集合会**静默低估**（今天 0 例，且无编译期保证）⇒ 只有把「名集合数 == 产物条目数」也钉住，A 档的绿才等于「产物与源码一致」。三方现值 1543/1543/1543 全等（#75 后）。**不给 planNumber/planMustAppear**：同一个数已由 `commandTotal` 钉在 PLAN 上，二次钉数只会在 PLAN 改写时多造一条假红；本锚点守的是**盘上不变量**，不是 PLAN 措辞。⚠ HEAD 提交态下它与 `commandTotal` 会**同时**报「产物滞后」（同因两条，专码一致），不是两个独立缺陷。"
     },
     {
       "id": "stockBoundaryCommands",
@@ -86,7 +142,15 @@
       "hard": true,
       "planNumber": "304",
       "planMustAppear": true,
-      "planPinned": [{ "line": 526, "mustContain": ["两个数都是真的", "边界口径"] }],
+      "planPinned": [
+        {
+          "line": 526,
+          "mustContain": [
+            "两个数都是真的",
+            "边界口径"
+          ]
+        }
+      ],
       "note": "定案判据口径（PLAN:515 明写 P6.1/P6.2 一律用边界口径）；与审计域口径 306 并存合法、不是漂移。"
     },
     {
@@ -113,7 +177,12 @@
       "hard": true,
       "planNumber": "83",
       "planMustAppear": true,
-      "planOld": [{ "number": "124", "note": "漂移前旧读数，仅允许出现在 §0.12.4 漂移列举段（PLAN:704）" }],
+      "planOld": [
+        {
+          "number": "124",
+          "note": "漂移前旧读数，仅允许出现在 §0.12.4 漂移列举段（PLAN:704）"
+        }
+      ],
       "note": "stock_workflow 28 条归股票域、不计入本域（PLAN:352）。"
     },
     {
@@ -128,8 +197,20 @@
       "planNumber": "138",
       "planMustAppear": true,
       "planPinned": [
-        { "line": 511, "mustContain": ["138", "13 模块"] },
-        { "line": 950, "mustContain": ["138", "依赖声明"] }
+        {
+          "line": 511,
+          "mustContain": [
+            "138",
+            "13 模块"
+          ]
+        },
+        {
+          "line": 950,
+          "mustContain": [
+            "138",
+            "依赖声明"
+          ]
+        }
       ],
       "note": "⚠ 撞车数字：PLAN:939 的「138 行 axagent-* 依赖声明」是 Cargo.toml 行数、与 OPC 命令无关 ⇒ 本门用 939 行钉住该撞车句仍在那儿，防止将来有人把 138 从命令口径里删掉后误读。并行读数 117（审计口径）另立条目。"
     },
@@ -157,7 +238,16 @@
       "hard": true,
       "planNumber": "84 873",
       "planMustAppear": true,
-      "planPinned": [{ "line": 519, "mustContain": ["293", "84 873", "脚本文件名口径"] }],
+      "planPinned": [
+        {
+          "line": 519,
+          "mustContain": [
+            "293",
+            "84 873",
+            "脚本文件名口径"
+          ]
+        }
+      ],
       "note": "PLAN:508 的「脚本文件名口径」读数；行数按 split('\\n') 计数（与 audit-l1-blockers 一致，含末行空元素）。"
     },
     {
@@ -171,7 +261,16 @@
       "hard": true,
       "planNumber": "60 757",
       "planMustAppear": true,
-      "planPinned": [{ "line": 518, "mustContain": ["211", "60 757", "目录口径"] }],
+      "planPinned": [
+        {
+          "line": 518,
+          "mustContain": [
+            "211",
+            "60 757",
+            "目录口径"
+          ]
+        }
+      ],
       "note": "与 84 873 是**两套并行口径**（PLAN:507/508/515），不是旧读数、不是漂移 ⇒ 两条都钉住；旧说法「60 757 是 84 873 的过期值」是误读，本门的 planOld 名单里刻意不含它。"
     },
     {
@@ -185,7 +284,16 @@
       "hard": true,
       "planNumber": "152",
       "planMustAppear": true,
-      "planPinned": [{ "line": 513, "mustContain": ["152", "28 文件", "主壳反向阻塞"] }],
+      "planPinned": [
+        {
+          "line": 513,
+          "mustContain": [
+            "152",
+            "28 文件",
+            "主壳反向阻塞"
+          ]
+        }
+      ],
       "note": "剥注释只处理 // 与 ///（audit-l1-blockers.mjs:66-69 原口径）；无旧读数残留。"
     },
     {
@@ -208,7 +316,16 @@
       "hard": true,
       "planNumber": "2009",
       "planMustAppear": true,
-      "planPinned": [{ "line": 247, "mustContain": ["2009", "317", "K1：`pub trait` 总数"] }],
+      "planPinned": [
+        {
+          "line": 247,
+          "mustContain": [
+            "2009",
+            "317",
+            "K1：`pub trait` 总数"
+          ]
+        }
+      ],
       "planOld": [],
       "note": "PLAN:247 括号里的扫描面数字，可逐字复算。2026-11-01 降 1（删 `harness/src/dojo_extension.rs` 整文件）；2026-11-02 升 1（`#49` 新增 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批的 `crates/plugins/tests/e2e_command_frame_test.rs` 被扫描面 `K1_IGNORE` 的 `tests` 排除 ⇒ 加 2 文件只升 1 读数）。**2026-11-02 收口重测 2009**：对 HEAD 2004 净 +5 = +7 新增（harness `vector_search.rs` / `vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`）−2 删除（两份 `ir_renderer.rs`）。⚠ **不登记 planOld**：旧读数会与 §0.12.4 之外的合法引用打架，且 316/315 本身是「口径分叉」而非单纯漂移（见 trait 总数三读数任务）。"
     },
@@ -274,18 +391,48 @@
       "planNumber": "23",
       "planMustAppear": true,
       "planPinned": [
-        { "line": 90, "mustContain": ["23", "A 11 + B 8 + C 4", "登记 23 条"] },
-        { "line": 321, "mustContain": ["23", "A 11 + B 8 + C 4", "能力数曾锁为"] },
-        { "line": 296, "mustContain": ["不计入 23"] }
+        {
+          "line": 90,
+          "mustContain": [
+            "23",
+            "A 11 + B 8 + C 4",
+            "登记 23 条"
+          ]
+        },
+        {
+          "line": 321,
+          "mustContain": [
+            "23",
+            "A 11 + B 8 + C 4",
+            "能力数曾锁为"
+          ]
+        },
+        {
+          "line": 296,
+          "mustContain": [
+            "不计入 23"
+          ]
+        }
       ],
       "note": "由本表分组计数直接得出（表自身即判据）；PLAN:90 与 321 是仅有的两处逐字组成式。`#54` 级联前为 26（A11+B10+C5），三条移入 §0.7.9 债档后为 23（A11+B8+C4）。"
     }
   ],
   "pipeline": {
     "statement": "§0.7.2 派生流水：317 pub trait → 233 有外部实现者 → 51 K1+K2 trait 面 → 23 条能力（同族合并 + K3/K4 判定；#54 前为 26，三条移入 §0.7.9 债档）；对照 13 条今天就能远程。（317 / 233 为 2026-11-02 收口实测：#62 ToT 改名 +1，重复定义 −2 原始命中）",
-    "lines": [250, 251],
-    "mechanicallyReproducible": ["k1RsFileCount", "k1PubTraitCount", "remoteSeamCount", "capacityRegister"],
-    "manual": ["k1ExternalImplTraitCount", "k2TraitFaces"]
+    "lines": [
+      250,
+      251
+    ],
+    "mechanicallyReproducible": [
+      "k1RsFileCount",
+      "k1PubTraitCount",
+      "remoteSeamCount",
+      "capacityRegister"
+    ],
+    "manual": [
+      "k1ExternalImplTraitCount",
+      "k2TraitFaces"
+    ]
   },
   "entries": [
     {
@@ -294,18 +441,51 @@
       "k": null,
       "kNote": "PLAN §0.7.3 无逐条 K 档列；组标题(255)语义 = K1–K4 已通过且接缝已建。",
       "trait": "ProviderAdapter",
-      "expect": { "implementors": 14, "seam": "已建", "remote": true, "reading": null },
+      "expect": {
+        "implementors": 14,
+        "seam": "已建",
+        "remote": true,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/provider.rs:25", "file": "axagent-core/crates/harness/src/provider.rs", "line": 25, "token": "pub trait ProviderAdapter", "role": "契约" },
-        { "ref": "axagent-ai/crates/providers/src/registry.rs:24", "file": "axagent-ai/crates/providers/src/registry.rs", "line": 24, "token": "HashMap<String, Arc<dyn ProviderAdapter>>", "role": "键控分发点" },
-        { "ref": "axagent-ai/crates/providers/src/registry.rs:33", "file": "axagent-ai/crates/providers/src/registry.rs", "line": 33, "token": "pub fn register", "role": "键控注册" },
-        { "ref": "axagent-ai/crates/providers/src/registry.rs:44", "file": "axagent-ai/crates/providers/src/registry.rs", "line": 44, "token": "pub fn get", "role": "键控取回" }
+        {
+          "ref": "axagent-core/crates/harness/src/provider.rs:25",
+          "file": "axagent-core/crates/harness/src/provider.rs",
+          "line": 25,
+          "token": "pub trait ProviderAdapter",
+          "role": "契约"
+        },
+        {
+          "ref": "axagent-ai/crates/providers/src/registry.rs:24",
+          "file": "axagent-ai/crates/providers/src/registry.rs",
+          "line": 24,
+          "token": "HashMap<String, Arc<dyn ProviderAdapter>>",
+          "role": "键控分发点"
+        },
+        {
+          "ref": "axagent-ai/crates/providers/src/registry.rs:33",
+          "file": "axagent-ai/crates/providers/src/registry.rs",
+          "line": 33,
+          "token": "pub fn register",
+          "role": "键控注册"
+        },
+        {
+          "ref": "axagent-ai/crates/providers/src/registry.rs:44",
+          "file": "axagent-ai/crates/providers/src/registry.rs",
+          "line": 44,
+          "token": "pub fn get",
+          "role": "键控取回"
+        }
       ],
       "note": "拆分阻塞 **D2** 流式：chat_stream/speech_stream 首帧即错。实现者 14 由宏展开的 impl 站点构成 ⇒ 机械 impl 站点计数可复现（14）。",
-      "planAnchorText": "| `model.provider` | `axagent-core/crates/harness/src/provider.rs:25` | `axagent-ai/crates/providers/src/registry.rs:24`（`HashMap<String, Arc<dyn ProviderAdapter>>`）+ `:33 register` + `:44 get` | 14 | **D2** 流式：`chat_stream`/`speech_stream` 首帧即错 |", "planLine": 259
+      "planAnchorText": "| `model.provider` | `axagent-core/crates/harness/src/provider.rs:25` | `axagent-ai/crates/providers/src/registry.rs:24`（`HashMap<String, Arc<dyn ProviderAdapter>>`）+ `:33 register` + `:44 get` | 14 | **D2** 流式：`chat_stream`/`speech_stream` 首帧即错 |",
+      "planLine": 259
     },
     {
       "seamId": "tool.set",
@@ -314,17 +494,44 @@
       "kNote": "组级语义 = K1–K4 已通过；逐条档位原文缺省。",
       "trait": "Tool",
       "countTraitNote": "契约面是 Tool（harness/src/tool.rs:424），登记值 199 = `impl … for Tool` 站点数；ToolSetProvider 另有两个实现者，不计入本行。",
-      "expect": { "implementors": 199, "seam": "已建", "remote": true, "reading": null },
+      "expect": {
+        "implementors": 199,
+        "seam": "已建",
+        "remote": true,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/registry.rs:130", "file": "axagent-core/crates/harness/src/registry.rs", "line": 130, "token": "pub trait ToolSetProvider", "role": "契约（工具集面）" },
-        { "ref": "axagent-core/crates/harness/src/tool.rs:424", "file": "axagent-core/crates/harness/src/tool.rs", "line": 424, "token": "pub trait Tool", "role": "契约面" },
-        { "ref": "axagent-runtime/crates/tools/src/registry.rs:183", "file": "axagent-runtime/crates/tools/src/registry.rs", "line": 183, "token": "HashMap<String, Arc<dyn Tool>>", "role": "键控分发点" }
+        {
+          "ref": "axagent-core/crates/harness/src/registry.rs:130",
+          "file": "axagent-core/crates/harness/src/registry.rs",
+          "line": 130,
+          "token": "pub trait ToolSetProvider",
+          "role": "契约（工具集面）"
+        },
+        {
+          "ref": "axagent-core/crates/harness/src/tool.rs:424",
+          "file": "axagent-core/crates/harness/src/tool.rs",
+          "line": 424,
+          "token": "pub trait Tool",
+          "role": "契约面"
+        },
+        {
+          "ref": "axagent-runtime/crates/tools/src/registry.rs:183",
+          "file": "axagent-runtime/crates/tools/src/registry.rs",
+          "line": 183,
+          "token": "HashMap<String, Arc<dyn Tool>>",
+          "role": "键控分发点"
+        }
       ],
       "note": "拆分阻塞 **D4**：ToolContext 被丢弃（安全，必须先修）。",
-      "planAnchorText": "| `tool.set` | `axagent-core/crates/harness/src/registry.rs:130`（契约面 `harness/src/tool.rs:424 Tool`） | `axagent-runtime/crates/tools/src/registry.rs:183` | Tool impl **199** | **D4** `ToolContext` 被丢弃（安全，必须先修） |", "planLine": 260
+      "planAnchorText": "| `tool.set` | `axagent-core/crates/harness/src/registry.rs:130`（契约面 `harness/src/tool.rs:424 Tool`） | `axagent-runtime/crates/tools/src/registry.rs:183` | Tool impl **199** | **D4** `ToolContext` 被丢弃（安全，必须先修） |",
+      "planLine": 260
     },
     {
       "seamId": "platform.adapter",
@@ -332,18 +539,51 @@
       "k": null,
       "kNote": "组级语义 = K1–K4 已通过；逐条档位原文缺省。",
       "trait": "MessagePlatformAdapter",
-      "expect": { "implementors": 10, "seam": "已建", "remote": true, "reading": null },
+      "expect": {
+        "implementors": 10,
+        "seam": "已建",
+        "remote": true,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/message_adapter.rs:83", "file": "axagent-core/crates/harness/src/message_adapter.rs", "line": 83, "token": "pub trait MessagePlatformAdapter", "role": "契约" },
-        { "ref": "axagent-core/crates/harness/src/channel_adapter.rs:25", "file": "axagent-core/crates/harness/src/channel_adapter.rs", "line": 25, "token": "pub trait ChannelAdapter", "role": "契约（伴随 trait，不计入实现者）" },
-        { "ref": "axagent-runtime/crates/rt-messaging/src/message_gateway/platform_manager.rs:16", "file": "axagent-runtime/crates/rt-messaging/src/message_gateway/platform_manager.rs", "line": 16, "token": "RwLock<HashMap<String, Arc<dyn MessagePlatformAdapter>>>", "role": "键控分发点" },
-        { "ref": "axagent-runtime/crates/rt-messaging/src/message_gateway/platform_manager.rs:104", "file": "axagent-runtime/crates/rt-messaging/src/message_gateway/platform_manager.rs", "line": 104, "token": "pub async fn get_adapter", "role": "键控取回" }
+        {
+          "ref": "axagent-core/crates/harness/src/message_adapter.rs:83",
+          "file": "axagent-core/crates/harness/src/message_adapter.rs",
+          "line": 83,
+          "token": "pub trait MessagePlatformAdapter",
+          "role": "契约"
+        },
+        {
+          "ref": "axagent-core/crates/harness/src/channel_adapter.rs:25",
+          "file": "axagent-core/crates/harness/src/channel_adapter.rs",
+          "line": 25,
+          "token": "pub trait ChannelAdapter",
+          "role": "契约（伴随 trait，不计入实现者）"
+        },
+        {
+          "ref": "axagent-runtime/crates/rt-messaging/src/message_gateway/platform_manager.rs:16",
+          "file": "axagent-runtime/crates/rt-messaging/src/message_gateway/platform_manager.rs",
+          "line": 16,
+          "token": "RwLock<HashMap<String, Arc<dyn MessagePlatformAdapter>>>",
+          "role": "键控分发点"
+        },
+        {
+          "ref": "axagent-runtime/crates/rt-messaging/src/message_gateway/platform_manager.rs:104",
+          "file": "axagent-runtime/crates/rt-messaging/src/message_gateway/platform_manager.rs",
+          "line": 104,
+          "token": "pub async fn get_adapter",
+          "role": "键控取回"
+        }
       ],
       "note": "拆分阻塞 = —（原文为破折号，无阻塞项）。ChannelAdapter 是同一行的伴随契约，登记值 10 只对应 MessagePlatformAdapter。",
-      "planAnchorText": "| `platform.adapter` | `axagent-core/crates/harness/src/message_adapter.rs:83` + `channel_adapter.rs:25` | `axagent-runtime/crates/rt-messaging/src/message_gateway/platform_manager.rs:16` + `:104 get_adapter(&str)` | 10 | — |", "planLine": 261
+      "planAnchorText": "| `platform.adapter` | `axagent-core/crates/harness/src/message_adapter.rs:83` + `channel_adapter.rs:25` | `axagent-runtime/crates/rt-messaging/src/message_gateway/platform_manager.rs:16` + `:104 get_adapter(&str)` | 10 | — |",
+      "planLine": 261
     },
     {
       "seamId": "message.callback",
@@ -351,15 +591,31 @@
       "k": null,
       "kNote": "组级语义 = K1–K4 已通过；逐条档位原文缺省。",
       "trait": "PlatformMessageCallback",
-      "expect": { "implementors": 2, "seam": "已建", "remote": true, "reading": null },
+      "expect": {
+        "implementors": 2,
+        "seam": "已建",
+        "remote": true,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading", "键控分发点行号"],
+      "expectMissingFields": [
+        "k",
+        "reading",
+        "键控分发点行号"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/platform_callback.rs:21", "file": "axagent-core/crates/harness/src/platform_callback.rs", "line": 21, "token": "pub trait PlatformMessageCallback", "role": "契约" }
+        {
+          "ref": "axagent-core/crates/harness/src/platform_callback.rs:21",
+          "file": "axagent-core/crates/harness/src/platform_callback.rs",
+          "line": 21,
+          "token": "pub trait PlatformMessageCallback",
+          "role": "契约"
+        }
       ],
       "note": "键控列原文 = 「接缝 message.callback（内置与插件同入口）」**无文件:行** ⇒ 键控证据原文缺省，本门只硬检契约锚点 + 接缝登记（capability_registry.rs）+ 远程清单。拆分阻塞 = —。",
-      "planAnchorText": "| `message.callback` | `axagent-core/crates/harness/src/platform_callback.rs:21` | 接缝 `message.callback`（内置与插件同入口） | 2 | — |", "planLine": 262
+      "planAnchorText": "| `message.callback` | `axagent-core/crates/harness/src/platform_callback.rs:21` | 接缝 `message.callback`（内置与插件同入口） | 2 | — |",
+      "planLine": 262
     },
     {
       "seamId": "webhook.dispatch",
@@ -367,17 +623,38 @@
       "k": null,
       "kNote": "组级语义 = K1–K4 已通过；逐条档位原文缺省。",
       "trait": "WebhookDispatch",
-      "expect": { "implementors": 4, "seam": "已建", "remote": true, "reading": null },
+      "expect": {
+        "implementors": 4,
+        "seam": "已建",
+        "remote": true,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/webhook_subscription.rs:154", "file": "axagent-core/crates/harness/src/webhook_subscription.rs", "line": 154, "token": "pub trait WebhookDispatch", "role": "契约" },
-        { "ref": "axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9", "file": "axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs", "line": 9, "token": "Arc<dyn WebhookSubscriptionService>", "role": "键控分发点（弱）" }
+        {
+          "ref": "axagent-core/crates/harness/src/webhook_subscription.rs:154",
+          "file": "axagent-core/crates/harness/src/webhook_subscription.rs",
+          "line": 154,
+          "token": "pub trait WebhookDispatch",
+          "role": "契约"
+        },
+        {
+          "ref": "axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9",
+          "file": "axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs",
+          "line": 9,
+          "token": "Arc<dyn WebhookSubscriptionService>",
+          "role": "键控分发点（弱）"
+        }
       ],
       "evidenceWeakness": "见 note",
       "note": "⚠ 已知弱点（登记时写明，不算漂移）：webhook_dispatcher.rs:9 实为 `subscription_manager: Arc<dyn WebhookSubscriptionService>,`（dispatcher 结构体字段行），不是 match 站点 ⇒ 行号有效但**内容一致性弱**。拆分阻塞 = —。**2026-11-02 #73 后实测 4（PLAN:263 同值）**：生产 2（`WebhookDispatcher` @ rt-webhook、`RemoteWebhookDispatch` @ worker.rs:2003）+ test 块内 2（`NativeWebhookDispatch`、`SlowWebhookDispatch`）⇒ 本表「内置实现者」列沿用机械口径（含测试替身），与 model.provider 14 等行同源。",
-      "planAnchorText": "| `webhook.dispatch` | `axagent-core/crates/harness/src/webhook_subscription.rs:154` | 接缝 + `axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9` | 4 | — |", "planLine": 263
+      "planAnchorText": "| `webhook.dispatch` | `axagent-core/crates/harness/src/webhook_subscription.rs:154` | 接缝 + `axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9` | 4 | — |",
+      "planLine": 263
     },
     {
       "seamId": "system.prompt",
@@ -385,15 +662,31 @@
       "k": null,
       "kNote": "组级语义 = K1–K4 已通过；逐条档位原文缺省。",
       "trait": "ContextContributor",
-      "expect": { "implementors": 3, "seam": "已建", "remote": true, "reading": null },
+      "expect": {
+        "implementors": 3,
+        "seam": "已建",
+        "remote": true,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading", "键控分发点行号"],
+      "expectMissingFields": [
+        "k",
+        "reading",
+        "键控分发点行号"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/context_contributor.rs:22", "file": "axagent-core/crates/harness/src/context_contributor.rs", "line": 22, "token": "pub trait ContextContributor", "role": "契约" }
+        {
+          "ref": "axagent-core/crates/harness/src/context_contributor.rs:22",
+          "file": "axagent-core/crates/harness/src/context_contributor.rs",
+          "line": 22,
+          "token": "pub trait ContextContributor",
+          "role": "契约"
+        }
       ],
       "note": "键控列原文 = 「接缝 system.prompt.{段名}」无行号 ⇒ 原文缺省。拆分阻塞 = —。capability_registry.rs 里该接缝以 `\"system.prompt.\"` 前缀形态出现，本门的 seamDeclared 判据允许前缀匹配。",
-      "planAnchorText": "| `system.prompt` | `axagent-core/crates/harness/src/context_contributor.rs:22` | 接缝 `system.prompt.{段名}` | 3 | — |", "planLine": 264
+      "planAnchorText": "| `system.prompt` | `axagent-core/crates/harness/src/context_contributor.rs:22` | 接缝 `system.prompt.{段名}` | 3 | — |",
+      "planLine": 264
     },
     {
       "seamId": "workflow.reflector",
@@ -401,16 +694,39 @@
       "k": null,
       "kNote": "组级语义 = K1–K4 已通过；逐条档位原文缺省。",
       "trait": "WorkflowReflector",
-      "expect": { "implementors": 3, "seam": "已建", "remote": true, "reading": null },
+      "expect": {
+        "implementors": 3,
+        "seam": "已建",
+        "remote": true,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading", "键控分发点行号"],
+      "expectMissingFields": [
+        "k",
+        "reading",
+        "键控分发点行号"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/workflow_reflection.rs:190", "file": "axagent-core/crates/harness/src/workflow_reflection.rs", "line": 190, "token": "pub trait WorkflowReflector", "role": "契约" },
-        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:2109", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 2109, "token": "fn remote_method_not_supported", "anchorText": "fn remote_method_not_supported(seam: &str, method: &str) -> String {", "role": "拆分阻塞 D2 证据" }
+        {
+          "ref": "axagent-core/crates/harness/src/workflow_reflection.rs:190",
+          "file": "axagent-core/crates/harness/src/workflow_reflection.rs",
+          "line": 190,
+          "token": "pub trait WorkflowReflector",
+          "role": "契约"
+        },
+        {
+          "ref": "axagent-plugins/crates/plugins/src/worker.rs:2109",
+          "file": "axagent-plugins/crates/plugins/src/worker.rs",
+          "line": 2109,
+          "token": "fn remote_method_not_supported",
+          "anchorText": "fn remote_method_not_supported(seam: &str, method: &str) -> String {",
+          "role": "拆分阻塞 D2 证据"
+        }
       ],
       "note": "拆分阻塞 **D2**：worker.rs:2109 起 `remote_method_not_supported` ⇒ 接缝已建但远程侧方法未通。键控列原文仅「接缝」二字 ⇒ 行号缺省。",
-      "planAnchorText": "| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:2109` 起 `remote_method_not_supported` |", "planLine": 265
+      "planAnchorText": "| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:2109` 起 `remote_method_not_supported` |",
+      "planLine": 265
     },
     {
       "seamId": "workflow.evolver",
@@ -418,17 +734,47 @@
       "k": null,
       "kNote": "组级语义 = K1–K4 已通过；逐条档位原文缺省。",
       "trait": "WorkflowEvolver",
-      "expect": { "implementors": 3, "seam": "已建", "remote": true, "reading": null },
+      "expect": {
+        "implementors": 3,
+        "seam": "已建",
+        "remote": true,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading", "键控分发点行号"],
+      "expectMissingFields": [
+        "k",
+        "reading",
+        "键控分发点行号"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/workflow_evolution.rs:172", "file": "axagent-core/crates/harness/src/workflow_evolution.rs", "line": 172, "token": "pub trait WorkflowEvolver", "role": "契约" },
-        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:2201", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 2201, "token": "remote_method_not_supported", "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"run\"))", "role": "拆分阻塞 D2 证据（区间起点）" },
-        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:2249", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 2249, "token": "remote_method_not_supported", "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"is_running\"))", "role": "拆分阻塞 D2 证据（区间止点）" }
+        {
+          "ref": "axagent-core/crates/harness/src/workflow_evolution.rs:172",
+          "file": "axagent-core/crates/harness/src/workflow_evolution.rs",
+          "line": 172,
+          "token": "pub trait WorkflowEvolver",
+          "role": "契约"
+        },
+        {
+          "ref": "axagent-plugins/crates/plugins/src/worker.rs:2201",
+          "file": "axagent-plugins/crates/plugins/src/worker.rs",
+          "line": 2201,
+          "token": "remote_method_not_supported",
+          "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"run\"))",
+          "role": "拆分阻塞 D2 证据（区间起点）"
+        },
+        {
+          "ref": "axagent-plugins/crates/plugins/src/worker.rs:2249",
+          "file": "axagent-plugins/crates/plugins/src/worker.rs",
+          "line": 2249,
+          "token": "remote_method_not_supported",
+          "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"is_running\"))",
+          "role": "拆分阻塞 D2 证据（区间止点）"
+        }
       ],
       "note": "备注「同上（worker.rs:2201–:2249 一批 remote_method_not_supported）」⇒ 该区间两端都入锚点，端点漂移即红。键控列原文仅「接缝」。",
-      "planAnchorText": "| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:2201`–`:2249` 一批 `remote_method_not_supported`） |", "planLine": 266
+      "planAnchorText": "| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:2201`–`:2249` 一批 `remote_method_not_supported`） |",
+      "planLine": 266
     },
     {
       "seamId": "workflow.optimizer",
@@ -436,15 +782,31 @@
       "k": null,
       "kNote": "组级语义 = K1–K4 已通过；逐条档位原文缺省。",
       "trait": "WorkflowOptimizer",
-      "expect": { "implementors": 2, "seam": "已建", "remote": true, "reading": null },
+      "expect": {
+        "implementors": 2,
+        "seam": "已建",
+        "remote": true,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading", "键控分发点行号"],
+      "expectMissingFields": [
+        "k",
+        "reading",
+        "键控分发点行号"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/workflow_optimization.rs:80", "file": "axagent-core/crates/harness/src/workflow_optimization.rs", "line": 80, "token": "pub trait WorkflowOptimizer", "role": "契约" }
+        {
+          "ref": "axagent-core/crates/harness/src/workflow_optimization.rs:80",
+          "file": "axagent-core/crates/harness/src/workflow_optimization.rs",
+          "line": 80,
+          "token": "pub trait WorkflowOptimizer",
+          "role": "契约"
+        }
       ],
       "note": "备注「同上」（remote_method_not_supported 一批）；键控列原文仅「接缝」。",
-      "planAnchorText": "| `workflow.optimizer` | `axagent-core/crates/harness/src/workflow_optimization.rs:80` | 接缝 | 2 | 同上 |", "planLine": 267
+      "planAnchorText": "| `workflow.optimizer` | `axagent-core/crates/harness/src/workflow_optimization.rs:80` | 接缝 | 2 | 同上 |",
+      "planLine": 267
     },
     {
       "seamId": "workflow.sandbox",
@@ -452,15 +814,31 @@
       "k": null,
       "kNote": "组级语义 = K1–K4 已通过；逐条档位原文缺省。",
       "trait": "WorkflowSandbox",
-      "expect": { "implementors": 4, "seam": "已建", "remote": true, "reading": null },
+      "expect": {
+        "implementors": 4,
+        "seam": "已建",
+        "remote": true,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading", "键控分发点行号"],
+      "expectMissingFields": [
+        "k",
+        "reading",
+        "键控分发点行号"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/workflow_evolution.rs:263", "file": "axagent-core/crates/harness/src/workflow_evolution.rs", "line": 263, "token": "pub trait WorkflowSandbox", "role": "契约" }
+        {
+          "ref": "axagent-core/crates/harness/src/workflow_evolution.rs:263",
+          "file": "axagent-core/crates/harness/src/workflow_evolution.rs",
+          "line": 263,
+          "token": "pub trait WorkflowSandbox",
+          "role": "契约"
+        }
       ],
       "note": "与 workflow.evolver 同文件不同 trait（263 行 vs 172 行）⇒ 两条锚点各查各行的 token。拆分阻塞 = —。",
-      "planAnchorText": "| `workflow.sandbox` | `axagent-core/crates/harness/src/workflow_evolution.rs:263` | 接缝 | 4 | — |", "planLine": 268
+      "planAnchorText": "| `workflow.sandbox` | `axagent-core/crates/harness/src/workflow_evolution.rs:263` | 接缝 | 4 | — |",
+      "planLine": 268
     },
     {
       "seamId": "workflow.business_rule",
@@ -468,15 +846,30 @@
       "k": null,
       "kNote": "组级语义 = K1–K4 已通过；逐条档位原文缺省。",
       "trait": "BusinessRuleEvaluator",
-      "expect": { "implementors": 3, "seam": "已建", "remote": true, "reading": null },
+      "expect": {
+        "implementors": 3,
+        "seam": "已建",
+        "remote": true,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/business_rules.rs:71", "file": "axagent-core/crates/harness/src/business_rules.rs", "line": 71, "token": "pub trait BusinessRuleEvaluator", "role": "契约" }
+        {
+          "ref": "axagent-core/crates/harness/src/business_rules.rs:71",
+          "file": "axagent-core/crates/harness/src/business_rules.rs",
+          "line": 71,
+          "token": "pub trait BusinessRuleEvaluator",
+          "role": "契约"
+        }
       ],
       "note": "键控列原文 = 「接缝（已有 e2e worker 产物）」⇒ 行号缺省。拆分阻塞 = —。与 C 组 rule.custom 不同域，PLAN 明写不并条。",
-      "planAnchorText": "| `workflow.business_rule` | `axagent-core/crates/harness/src/business_rules.rs:71` | 接缝（已有 e2e worker 产物） | 3 | — |", "planLine": 269
+      "planAnchorText": "| `workflow.business_rule` | `axagent-core/crates/harness/src/business_rules.rs:71` | 接缝（已有 e2e worker 产物） | 3 | — |",
+      "planLine": 269
     },
     {
       "seamId": "notify.channel",
@@ -484,18 +877,51 @@
       "k": null,
       "kNote": "组标题(271)原文 = 「K1+K2 成立但没有接缝——10 条，P5.0a 必须新建」；逐条 K 档原文缺省（K4 代价列 ≠ 档位判定）。",
       "trait": "NotificationChannel",
-      "expect": { "implementors": 6, "seam": "待建", "remote": false, "reading": null },
+      "expect": {
+        "implementors": 6,
+        "seam": "待建",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/notification_channel.rs:195", "file": "axagent-core/crates/harness/src/notification_channel.rs", "line": 195, "token": "pub trait NotificationChannel", "role": "契约" },
-        { "ref": "axagent-runtime/crates/notification/src/dispatcher.rs:114", "file": "axagent-runtime/crates/notification/src/dispatcher.rs", "line": 114, "token": "RwLock<HashMap<String, Arc<dyn NotificationChannel>>>", "role": "键控分发点" },
-        { "ref": "axagent-runtime/crates/notification/src/dispatcher.rs:143", "file": "axagent-runtime/crates/notification/src/dispatcher.rs", "line": 143, "token": "pub async fn register_channel", "role": "键控注册" },
-        { "ref": "axagent-runtime/crates/notification/src/dispatcher.rs:149", "file": "axagent-runtime/crates/notification/src/dispatcher.rs", "line": 149, "token": "pub async fn unregister_channel", "role": "键控注销" }
+        {
+          "ref": "axagent-core/crates/harness/src/notification_channel.rs:195",
+          "file": "axagent-core/crates/harness/src/notification_channel.rs",
+          "line": 195,
+          "token": "pub trait NotificationChannel",
+          "role": "契约"
+        },
+        {
+          "ref": "axagent-runtime/crates/notification/src/dispatcher.rs:114",
+          "file": "axagent-runtime/crates/notification/src/dispatcher.rs",
+          "line": 114,
+          "token": "RwLock<HashMap<String, Arc<dyn NotificationChannel>>>",
+          "role": "键控分发点"
+        },
+        {
+          "ref": "axagent-runtime/crates/notification/src/dispatcher.rs:143",
+          "file": "axagent-runtime/crates/notification/src/dispatcher.rs",
+          "line": 143,
+          "token": "pub async fn register_channel",
+          "role": "键控注册"
+        },
+        {
+          "ref": "axagent-runtime/crates/notification/src/dispatcher.rs:149",
+          "file": "axagent-runtime/crates/notification/src/dispatcher.rs",
+          "line": 149,
+          "token": "pub async fn unregister_channel",
+          "role": "键控注销"
+        }
       ],
       "note": "K4 代价原文 = 「**最低**：DTO 全可序列化；去重/冷却留宿主」。",
-      "planAnchorText": "| `notify.channel` | `axagent-core/crates/harness/src/notification_channel.rs:195` | `axagent-runtime/crates/notification/src/dispatcher.rs:114` + `:143 register_channel` + `:149 unregister(&str)` | 6 | **最低**：DTO 全可序列化；去重/冷却留宿主 |", "planLine": 275
+      "planAnchorText": "| `notify.channel` | `axagent-core/crates/harness/src/notification_channel.rs:195` | `axagent-runtime/crates/notification/src/dispatcher.rs:114` + `:143 register_channel` + `:149 unregister(&str)` | 6 | **最低**：DTO 全可序列化；去重/冷却留宿主 |",
+      "planLine": 275
     },
     {
       "seamId": "market.vendor",
@@ -503,18 +929,51 @@
       "k": null,
       "kNote": "组级 K1+K2 成立；逐条档位原文缺省。",
       "trait": "StockVendor",
-      "expect": { "implementors": 16, "seam": "待建", "remote": false, "reading": null },
+      "expect": {
+        "implementors": 16,
+        "seam": "待建",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-quant/crates/astock-data/src/vendors/mod.rs:7", "file": "axagent-quant/crates/astock-data/src/vendors/mod.rs", "line": 7, "token": "pub trait StockVendor", "role": "契约" },
-        { "ref": "axagent-quant/crates/astock-data/src/lib.rs:863", "file": "axagent-quant/crates/astock-data/src/lib.rs", "line": 863, "token": "pub fn register_vendor", "role": "键控注册" },
-        { "ref": "axagent-quant/crates/astock-data/src/lib.rs:1672", "file": "axagent-quant/crates/astock-data/src/lib.rs", "line": 1672, "token": "fn find_vendor", "role": "键控取回" },
-        { "ref": "axagent-core/crates/harness/src/market_data.rs:192", "file": "axagent-core/crates/harness/src/market_data.rs", "line": 192, "token": "pub trait MarketDataProvider", "role": "门面（原文注明不单列）" }
+        {
+          "ref": "axagent-quant/crates/astock-data/src/vendors/mod.rs:7",
+          "file": "axagent-quant/crates/astock-data/src/vendors/mod.rs",
+          "line": 7,
+          "token": "pub trait StockVendor",
+          "role": "契约"
+        },
+        {
+          "ref": "axagent-quant/crates/astock-data/src/lib.rs:863",
+          "file": "axagent-quant/crates/astock-data/src/lib.rs",
+          "line": 863,
+          "token": "pub fn register_vendor",
+          "role": "键控注册"
+        },
+        {
+          "ref": "axagent-quant/crates/astock-data/src/lib.rs:1672",
+          "file": "axagent-quant/crates/astock-data/src/lib.rs",
+          "line": 1672,
+          "token": "fn find_vendor",
+          "role": "键控取回"
+        },
+        {
+          "ref": "axagent-core/crates/harness/src/market_data.rs:192",
+          "file": "axagent-core/crates/harness/src/market_data.rs",
+          "line": 192,
+          "token": "pub trait MarketDataProvider",
+          "role": "门面（原文注明不单列）"
+        }
       ],
       "note": "原文「AS_OF task-local 必须改显式入参；门面 MarketDataProvider（harness/src/market_data.rs:192）**不单列**」⇒ 实现者 16 只对应 StockVendor，门面锚点仅登记不计数。",
-      "planAnchorText": "| `market.vendor` | `axagent-quant/crates/astock-data/src/vendors/mod.rs:7 StockVendor` | `astock-data/src/lib.rs:863 register_vendor(&str)` + `:1672` 键控取回 | 16 | `AS_OF` task-local 必须改显式入参；门面 `MarketDataProvider`（`harness/src/market_data.rs:192`）不单列 |", "planLine": 276
+      "planAnchorText": "| `market.vendor` | `axagent-quant/crates/astock-data/src/vendors/mod.rs:7 StockVendor` | `astock-data/src/lib.rs:863 register_vendor(&str)` + `:1672` 键控取回 | 16 | `AS_OF` task-local 必须改显式入参；门面 `MarketDataProvider`（`harness/src/market_data.rs:192`）不单列 |",
+      "planLine": 276
     },
     {
       "seamId": "search.source",
@@ -522,16 +981,37 @@
       "k": null,
       "kNote": "组级 K1+K2 成立；逐条档位原文缺省。",
       "trait": "SearchProvider",
-      "expect": { "implementors": 4, "seam": "待建", "remote": false, "reading": null },
+      "expect": {
+        "implementors": 4,
+        "seam": "待建",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-ai/crates/agent/src/search_provider.rs:95", "file": "axagent-ai/crates/agent/src/search_provider.rs", "line": 95, "token": "pub trait SearchProvider", "role": "契约" },
-        { "ref": "axagent-ai/crates/agent/src/search_orchestrator.rs:28", "file": "axagent-ai/crates/agent/src/search_orchestrator.rs", "line": 28, "token": "HashMap<SourceType, Arc<dyn SearchProvider>>", "role": "键控分发点" }
+        {
+          "ref": "axagent-ai/crates/agent/src/search_provider.rs:95",
+          "file": "axagent-ai/crates/agent/src/search_provider.rs",
+          "line": 95,
+          "token": "pub trait SearchProvider",
+          "role": "契约"
+        },
+        {
+          "ref": "axagent-ai/crates/agent/src/search_orchestrator.rs:28",
+          "file": "axagent-ai/crates/agent/src/search_orchestrator.rs",
+          "line": 28,
+          "token": "HashMap<SourceType, Arc<dyn SearchProvider>>",
+          "role": "键控分发点"
+        }
       ],
       "note": "原文「rate_limit()/计费属宿主；extract_content(url) 返回大文本 ⇒ 需分块」。 ⇒ ⚠ 本 note 的「原文」引文是 **2026-11-02 #29 K4 转录前**的判词，现值以 `planAnchorText`（该行逐字）为准；勿按本引文回写 PLAN。",
-      "planAnchorText": "| `search.source` | `axagent-ai/crates/agent/src/search_provider.rs:95` | `axagent-ai/crates/agent/src/search_orchestrator.rs:28`（`HashMap<SourceType, Arc<dyn SearchProvider>>`） | 4 | `rate_limit()`/计费属宿主。**2026-11-02 实测分档**：`search()` 侧结果 400–600 B × 默认 `max_results` 10 ⇒ **①，可直接走接缝**；`extract_content(url)` 返回大文本（今天 50 KB 截断）⇒ **②**，需**分页/游标**而非分块。DTO（`search_provider.rs:38-57`、`research_state.rs:416,76`）全 serde✓。前置 **D1** |", "planLine": 277
+      "planAnchorText": "| `search.source` | `axagent-ai/crates/agent/src/search_provider.rs:95` | `axagent-ai/crates/agent/src/search_orchestrator.rs:28`（`HashMap<SourceType, Arc<dyn SearchProvider>>`） | 4 | `rate_limit()`/计费属宿主。**2026-11-02 实测分档**：`search()` 侧结果 400–600 B × 默认 `max_results` 10 ⇒ **①，可直接走接缝**；`extract_content(url)` 返回大文本（今天 50 KB 截断）⇒ **②**，需**分页/游标**而非分块。DTO（`search_provider.rs:38-57`、`research_state.rs:416,76`）全 serde✓。前置 **D1** |",
+      "planLine": 277
     },
     {
       "seamId": "image.gen",
@@ -539,15 +1019,31 @@
       "k": null,
       "kNote": "组级 K1+K2 成立；逐条档位原文缺省。",
       "trait": "ImageGenProvider",
-      "expect": { "implementors": 2, "seam": "待建", "remote": false, "reading": null },
+      "expect": {
+        "implementors": 2,
+        "seam": "待建",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading", "键控分发点行号"],
+      "expectMissingFields": [
+        "k",
+        "reading",
+        "键控分发点行号"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-ai/crates/providers/src/image_gen.rs:64", "file": "axagent-ai/crates/providers/src/image_gen.rs", "line": 64, "token": "pub trait ImageGenProvider", "role": "契约" }
+        {
+          "ref": "axagent-ai/crates/providers/src/image_gen.rs:64",
+          "file": "axagent-ai/crates/providers/src/image_gen.rs",
+          "line": 64,
+          "token": "pub trait ImageGenProvider",
+          "role": "契约"
+        }
       ],
       "note": "键控列原文 = 「name() 自述键 + providers 注册面」⇒ 无文件:行，行号缺省。原文「字节流属 ②，要走产物落盘或分块」。 ⇒ ⚠ 本 note 的「原文」引文是 **2026-11-02 #29 K4 转录前**的判词，现值以 `planAnchorText`（该行逐字）为准；勿按本引文回写 PLAN。",
-      "planAnchorText": "| `image.gen` | `axagent-ai/crates/providers/src/image_gen.rs:64` | `name()` 自述键 + providers 注册面 | 2 | **2026-11-02 实测**：`url` 形态 ≈200 B ⇒ **①**；`base64` 形态 **1.3–4 MB × n** ⇒ ②（接近 `MAX_FRAME_LEN = 64 MiB` 的 `plugin-proto/src/lib.rs` 的 `pub const MAX_FRAME_LEN`，但 n 张累加会顶穿）⇒ 裁定取「只回 url / 宿主侧落盘引用」形态，**保 b64 才需要 D2 分块**。DTO（`image_gen.rs:24-36,45-54`）全 serde✓；provider 凭证 scope 留宿主 |", "planLine": 278
+      "planAnchorText": "| `image.gen` | `axagent-ai/crates/providers/src/image_gen.rs:64` | `name()` 自述键 + providers 注册面 | 2 | **2026-11-02 实测**：`url` 形态 ≈200 B ⇒ **①**；`base64` 形态 **1.3–4 MB × n** ⇒ ②（接近 `MAX_FRAME_LEN = 64 MiB` 的 `plugin-proto/src/lib.rs` 的 `pub const MAX_FRAME_LEN`，但 n 张累加会顶穿）⇒ 裁定取「只回 url / 宿主侧落盘引用」形态，**保 b64 才需要 D2 分块**。DTO（`image_gen.rs:24-36,45-54`）全 serde✓；provider 凭证 scope 留宿主 |",
+      "planLine": 278
     },
     {
       "seamId": "document.parser",
@@ -555,19 +1051,58 @@
       "k": null,
       "kNote": "组级 K1+K2 成立；逐条档位原文缺省（原文另注明 K3 今天不成立）。⚠ **本条按 §24.2 改判：准入 = K1 成立（外部实现者 1）+ K3 成立；K2 检测器不命中，属漏检族第 4 例（见 `countRule.k2Caveat` 第 (4) 条）⇒ 不许因 ⑧ 不命中而降桶**（§19.4 已立「登记表不跟着检测器走」的同方向禁令）。",
       "trait": "DocumentParser",
-      "expect": { "implementors": 1, "seam": "待建", "remote": false, "reading": null },
+      "expect": {
+        "implementors": 1,
+        "seam": "待建",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/search_sources.rs:62", "file": "axagent-core/crates/harness/src/search_sources.rs", "line": 62, "token": "pub trait DocumentParser", "role": "契约" },
-        { "ref": "axagent-infra/crates/document-parser/src/lib.rs:533", "file": "axagent-infra/crates/document-parser/src/lib.rs", "line": 533, "token": "match ext", "role": "ext→MIME 字符串映射表（§14.4 + §24.2 裁定：**不是键控分发点** —— 块内不构造实现类型；真正的行为选择点是同文件 `lib.rs:61` 的 `match mime_type`，同样无构造分支 ⇒ ⑧ 在结构上不命中，见 `countRule.k2Caveat` 第 (4) 条）" },
-        { "ref": "axagent-infra/crates/search/src/sources.rs:22", "file": "axagent-infra/crates/search/src/sources.rs", "line": 22, "token": "OnceLock<Arc<dyn DocumentParser>>", "role": "旁路全局 ①" },
-        { "ref": "axagent-runtime/crates/tools/src/parser.rs:13", "file": "axagent-runtime/crates/tools/src/parser.rs", "line": 13, "token": "OnceLock<Arc<dyn DocumentParser>>", "role": "旁路全局 ②" },
-        { "ref": "src-tauri/src/commands/knowledge.rs:1169", "file": "src-tauri/src/commands/knowledge.rs", "line": 1169, "token": "axagent_document_parser::extract_text", "role": "硬编码绕过" }
+        {
+          "ref": "axagent-core/crates/harness/src/search_sources.rs:62",
+          "file": "axagent-core/crates/harness/src/search_sources.rs",
+          "line": 62,
+          "token": "pub trait DocumentParser",
+          "role": "契约"
+        },
+        {
+          "ref": "axagent-infra/crates/document-parser/src/lib.rs:533",
+          "file": "axagent-infra/crates/document-parser/src/lib.rs",
+          "line": 533,
+          "token": "match ext",
+          "role": "ext→MIME 字符串映射表（§14.4 + §24.2 裁定：**不是键控分发点** —— 块内不构造实现类型；真正的行为选择点是同文件 `lib.rs:61` 的 `match mime_type`，同样无构造分支 ⇒ ⑧ 在结构上不命中，见 `countRule.k2Caveat` 第 (4) 条）"
+        },
+        {
+          "ref": "axagent-infra/crates/search/src/sources.rs:22",
+          "file": "axagent-infra/crates/search/src/sources.rs",
+          "line": 22,
+          "token": "OnceLock<Arc<dyn DocumentParser>>",
+          "role": "旁路全局 ①"
+        },
+        {
+          "ref": "axagent-runtime/crates/tools/src/parser.rs:13",
+          "file": "axagent-runtime/crates/tools/src/parser.rs",
+          "line": 13,
+          "token": "OnceLock<Arc<dyn DocumentParser>>",
+          "role": "旁路全局 ②"
+        },
+        {
+          "ref": "src-tauri/src/commands/knowledge.rs:1169",
+          "file": "src-tauri/src/commands/knowledge.rs",
+          "line": 1169,
+          "token": "axagent_document_parser::extract_text",
+          "role": "硬编码绕过"
+        }
       ],
       "note": "原文「37 分支是编译期穷举 ⇒ K3 今天要改主壳」+ 两套 OnceLock 全局 + 一处硬编码绕过，四处旁路全部锚定。",
-      "planAnchorText": "| `document.parser` | `axagent-core/crates/harness/src/search_sources.rs:62` | **证据行改定（§14.4 + §24.2 两次裁定；本行此前仍是旧行）**：`axagent-infra/crates/document-parser/src/lib.rs:533` 只是 ext→MIME 的**字符串映射表**、块内**不构造实现类型** ⇒ 真正的行为选择点是同文件 `:61` 的 `match mime_type`，而该块**同样无构造分支** ⇒ **K2 的 ⑧（factory-match）在结构上永不命中 = 已知漏检族第 4 例**（该形态「按字符串 `match` 选行为、但不构造实现类型」已补进镜像表 `countRule.k2Caveat`）。⇒ **本行准入判据改写为：K1 成立（外部实现者 1）+ K3 成立；不以 K2 命中为准**（`#54` 已裁「检测器跟着登记表走」是禁止方向，见 §24.2 第 1 条） | 1 | 37 分支是**编译期穷举** ⇒ K3 今天要改主壳，正是本条要拆的理由；另有两套 `OnceLock` 全局（`search/src/sources.rs:22`、`tools/src/parser.rs:13`）和一处硬编码绕过（`commands/knowledge.rs:1169`） |", "planLine": 279
+      "planAnchorText": "| `document.parser` | `axagent-core/crates/harness/src/search_sources.rs:62` | **证据行改定（§14.4 + §24.2 两次裁定；本行此前仍是旧行）**：`axagent-infra/crates/document-parser/src/lib.rs:533` 只是 ext→MIME 的**字符串映射表**、块内**不构造实现类型** ⇒ 真正的行为选择点是同文件 `:61` 的 `match mime_type`，而该块**同样无构造分支** ⇒ **K2 的 ⑧（factory-match）在结构上永不命中 = 已知漏检族第 4 例**（该形态「按字符串 `match` 选行为、但不构造实现类型」已补进镜像表 `countRule.k2Caveat`）。⇒ **本行准入判据改写为：K1 成立（外部实现者 1）+ K3 成立；不以 K2 命中为准**（`#54` 已裁「检测器跟着登记表走」是禁止方向，见 §24.2 第 1 条） | 1 | 37 分支是**编译期穷举** ⇒ K3 今天要改主壳，正是本条要拆的理由；另有两套 `OnceLock` 全局（`search/src/sources.rs:22`、`tools/src/parser.rs:13`）和一处硬编码绕过（`commands/knowledge.rs:1169`） |",
+      "planLine": 279
     },
     {
       "seamId": "rag.source",
@@ -576,19 +1111,59 @@
       "kNote": "组级 K1+K2 成立；逐条档位原文缺省。",
       "trait": "RAGSource",
       "countTraitNote": "登记值 4 对应 RAGSource 的实现者；同锚点的 EmbeddingProvider(3)/RerankProvider(1) 属契约面的一部分，不并入计数。",
-      "expect": { "implementors": 4, "seam": "待建", "remote": false, "reading": null },
+      "expect": {
+        "implementors": 4,
+        "seam": "待建",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/rag_provider.rs:7", "file": "axagent-core/crates/harness/src/rag_provider.rs", "line": 7, "token": "pub trait EmbeddingProvider", "role": "契约（Embedding）" },
-        { "ref": "axagent-core/crates/harness/src/rag_provider.rs:40", "file": "axagent-core/crates/harness/src/rag_provider.rs", "line": 40, "token": "pub trait RerankProvider", "role": "契约（Rerank）" },
-        { "ref": "axagent-infra/crates/search/src/rag.rs:45", "file": "axagent-infra/crates/search/src/rag.rs", "line": 45, "token": "pub trait RAGSource", "role": "契约" },
-        { "ref": "axagent-infra/crates/search/src/rag.rs:941", "file": "axagent-infra/crates/search/src/rag.rs", "line": 941, "token": "match self.source_type", "role": "键控分发点（3 分支工厂）" },
-        { "ref": "axagent-infra/crates/search/src/vector_store.rs:114", "file": "axagent-infra/crates/search/src/vector_store.rs", "line": 114, "token": "pub struct VectorStore", "role": "K4 风险锚点", "anchorText": "pub struct VectorStore {" }
+        {
+          "ref": "axagent-core/crates/harness/src/rag_provider.rs:7",
+          "file": "axagent-core/crates/harness/src/rag_provider.rs",
+          "line": 7,
+          "token": "pub trait EmbeddingProvider",
+          "role": "契约（Embedding）"
+        },
+        {
+          "ref": "axagent-core/crates/harness/src/rag_provider.rs:40",
+          "file": "axagent-core/crates/harness/src/rag_provider.rs",
+          "line": 40,
+          "token": "pub trait RerankProvider",
+          "role": "契约（Rerank）"
+        },
+        {
+          "ref": "axagent-infra/crates/search/src/rag.rs:45",
+          "file": "axagent-infra/crates/search/src/rag.rs",
+          "line": 45,
+          "token": "pub trait RAGSource",
+          "role": "契约"
+        },
+        {
+          "ref": "axagent-infra/crates/search/src/rag.rs:941",
+          "file": "axagent-infra/crates/search/src/rag.rs",
+          "line": 941,
+          "token": "match self.source_type",
+          "role": "键控分发点（3 分支工厂）"
+        },
+        {
+          "ref": "axagent-infra/crates/search/src/vector_store.rs:114",
+          "file": "axagent-infra/crates/search/src/vector_store.rs",
+          "line": 114,
+          "token": "pub struct VectorStore",
+          "role": "K4 风险锚点",
+          "anchorText": "pub struct VectorStore {"
+        }
       ],
       "note": "原文「§0.6.3 未拍」，交接物注明 §0.12.3 已拍解 1（不反填进行内读数）；VectorStore 持 DatabaseConnection ⇒ sqlite-vec 进程内扩展出进程即失效。预留接缝位 rag.vector.store 在 PLAN:326 登记但不实现，**不在本表 36 行内**。",
-      "planAnchorText": "| `rag.source` | `axagent-core/crates/harness/src/rag_provider.rs:7/40`（Embedding/Rerank）+ `axagent-infra/crates/search/src/rag.rs:45 RAGSource` | `search/src/rag.rs:941`（3 分支工厂） | 4 | **§0.6.3 未拍**；`VectorStore` 是持 `DatabaseConnection` 的 struct（`search/src/vector_store.rs:114`），sqlite-vec 进程内扩展 ⇒ 出进程即失效 |", "planLine": 280
+      "planAnchorText": "| `rag.source` | `axagent-core/crates/harness/src/rag_provider.rs:7/40`（Embedding/Rerank）+ `axagent-infra/crates/search/src/rag.rs:45 RAGSource` | `search/src/rag.rs:941`（3 分支工厂） | 4 | **§0.6.3 未拍**；`VectorStore` 是持 `DatabaseConnection` 的 struct（`search/src/vector_store.rs:114`），sqlite-vec 进程内扩展 ⇒ 出进程即失效 |",
+      "planLine": 280
     },
     {
       "seamId": "mcp.server",
@@ -596,17 +1171,44 @@
       "k": null,
       "kNote": "组级 K1+K2 成立；逐条档位原文缺省。",
       "trait": "McpClientService",
-      "expect": { "implementors": 1, "seam": "待建", "remote": false, "reading": null },
+      "expect": {
+        "implementors": 1,
+        "seam": "待建",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/mcp_service.rs:54", "file": "axagent-core/crates/harness/src/mcp_service.rs", "line": 54, "token": "pub trait McpClientService", "role": "契约" },
-        { "ref": "axagent-core/crates/harness/src/mcp_service.rs:48", "file": "axagent-core/crates/harness/src/mcp_service.rs", "line": 48, "token": "pub trait McpServerStore", "role": "契约（伴随）" },
-        { "ref": "axagent-ai/crates/mcp/src/client_service_impl.rs:155", "file": "axagent-ai/crates/mcp/src/client_service_impl.rs", "line": 155, "token": "pub fn build_mcp_client_service", "role": "键控/构造站点" }
+        {
+          "ref": "axagent-core/crates/harness/src/mcp_service.rs:54",
+          "file": "axagent-core/crates/harness/src/mcp_service.rs",
+          "line": 54,
+          "token": "pub trait McpClientService",
+          "role": "契约"
+        },
+        {
+          "ref": "axagent-core/crates/harness/src/mcp_service.rs:48",
+          "file": "axagent-core/crates/harness/src/mcp_service.rs",
+          "line": 48,
+          "token": "pub trait McpServerStore",
+          "role": "契约（伴随）"
+        },
+        {
+          "ref": "axagent-ai/crates/mcp/src/client_service_impl.rs:155",
+          "file": "axagent-ai/crates/mcp/src/client_service_impl.rs",
+          "line": 155,
+          "token": "pub fn build_mcp_client_service",
+          "role": "键控/构造站点"
+        }
       ],
       "note": "原文「长连接 + 子进程句柄 ⇒ K4 属会话式 op，与 strategy 同批」。计数 trait 取 McpClientService（登记值 1）。 ⇒ ⚠ 本 note 的「原文」引文是 **2026-11-02 #29 K4 转录前**的判词，现值以 `planAnchorText`（该行逐字）为准；勿按本引文回写 PLAN。",
-      "planAnchorText": "| `mcp.server` | `axagent-core/crates/harness/src/mcp_service.rs:54 McpClientService` + `:48 McpServerStore` | `axagent-ai/crates/mcp/src/client_service_impl.rs:155 build_*` | 1 | **订正（2026-11-02 实测）**：句柄**不过帧** ⇒ 门面 `McpClientService` 是零字段单元结构（`client_service_impl.rs:21-22`），连接池在实现侧进程内全局（`mcp_client.rs:661` / `:434` / `:2407`）；桥今天即 one-shot（`mcp_tool_bridge.rs:197-202`）⇒ **可直接走请求-响应接缝**，「会话式 op」是**延迟优化而非 K4 前置**。需另补两条生命周期 op（`evict_by_server_id` `mcp_client.rs:547`、`probe_and_evict` `mcp_health.rs:100`）⇒ 可与 `notify.channel` 同批。入参 300–800 B、每工具 500 B–2 KB ⇒ ①；`callTool`/`readResource` 返回值**无上界** ⇒ ②。拟接缝 id = `mcp.client`（`McpServerStore` 留内核：配置面不是能力面）。前置 **D1** |", "planLine": 281
+      "planAnchorText": "| `mcp.server` | `axagent-core/crates/harness/src/mcp_service.rs:54 McpClientService` + `:48 McpServerStore` | `axagent-ai/crates/mcp/src/client_service_impl.rs:155 build_*` | 1 | **订正（2026-11-02 实测）**：句柄**不过帧** ⇒ 门面 `McpClientService` 是零字段单元结构（`client_service_impl.rs:21-22`），连接池在实现侧进程内全局（`mcp_client.rs:661` / `:434` / `:2407`）；桥今天即 one-shot（`mcp_tool_bridge.rs:197-202`）⇒ **可直接走请求-响应接缝**，「会话式 op」是**延迟优化而非 K4 前置**。需另补两条生命周期 op（`evict_by_server_id` `mcp_client.rs:547`、`probe_and_evict` `mcp_health.rs:100`）⇒ 可与 `notify.channel` 同批。入参 300–800 B、每工具 500 B–2 KB ⇒ ①；`callTool`/`readResource` 返回值**无上界** ⇒ ②。拟接缝 id = `mcp.client`（`McpServerStore` 留内核：配置面不是能力面）。前置 **D1** |",
+      "planLine": 281
     },
     {
       "seamId": "strategy.quant",
@@ -614,17 +1216,39 @@
       "k": null,
       "kNote": "组级 K1+K2 成立；逐条档位原文缺省。",
       "trait": "Strategy",
-      "expect": { "implementors": 7, "seam": "待建", "remote": false, "reading": null },
+      "expect": {
+        "implementors": 7,
+        "seam": "待建",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/strategy_contract.rs:440", "file": "axagent-core/crates/harness/src/strategy_contract.rs", "line": 440, "token": "pub trait Strategy", "role": "契约" },
-        { "ref": "src-tauri/src/commands/quant_backtest.rs:363-430", "file": "src-tauri/src/commands/quant_backtest.rs", "line": 363, "endLine": 430, "token": "match model.strategy_type.as_str()", "role": "键控分发点（区间锚点）" }
+        {
+          "ref": "axagent-core/crates/harness/src/strategy_contract.rs:440",
+          "file": "axagent-core/crates/harness/src/strategy_contract.rs",
+          "line": 440,
+          "token": "pub trait Strategy",
+          "role": "契约"
+        },
+        {
+          "ref": "src-tauri/src/commands/quant_backtest.rs:363-430",
+          "file": "src-tauri/src/commands/quant_backtest.rs",
+          "line": 363,
+          "endLine": 430,
+          "token": "match model.strategy_type.as_str()",
+          "role": "键控分发点（区间锚点）"
+        }
       ],
       "evidenceWeakness": "见 note",
       "note": "⚠ 已知弱点（登记时写明，不算漂移）：区间 363–430 成立（363 行是 `fn build_strategy(`、闭合于 430），但关键 token `match model.strategy_type.as_str()` 实际在 **374** 行 ⇒ 本行按**区间锚点**存：token 落在 [363,430] 内任一行为合格，区间端点变动即红。原文 K4 代价「最高：&mut self + &mut StrategyCtx 的 bar 级热循环」。",
-      "planAnchorText": "| `strategy.quant` | `axagent-core/crates/harness/src/strategy_contract.rs:440` | `src-tauri/src/commands/quant_backtest.rs:363-430`（`match strategy_type` 硬构造） | 7 | **最高**：`&mut self` + `&mut StrategyCtx` 的 bar 级热循环 ⇒ 会话式批量 op（spawn/setParam/onBarBatch/drop） |", "planLine": 282
+      "planAnchorText": "| `strategy.quant` | `axagent-core/crates/harness/src/strategy_contract.rs:440` | `src-tauri/src/commands/quant_backtest.rs:363-430`（`match strategy_type` 硬构造） | 7 | **最高**：`&mut self` + `&mut StrategyCtx` 的 bar 级热循环 ⇒ 会话式批量 op（spawn/setParam/onBarBatch/drop） |",
+      "planLine": 282
     },
     {
       "seamId": "workflow.node",
@@ -634,17 +1258,44 @@
       "k": null,
       "kNote": "组级 K1+K2 成立；逐条档位原文缺省（原文注明 K3 今天不成立）。",
       "trait": "NodeExecutorTrait",
-      "expect": { "implementors": 33, "seam": "待建", "remote": false, "reading": null },
+      "expect": {
+        "implementors": 33,
+        "seam": "待建",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs:224", "file": "axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs", "line": 224, "token": "pub trait NodeExecutorTrait", "role": "契约" },
-        { "ref": "axagent-runtime/crates/rt-workflow/src/work_engine/dispatcher.rs:31", "file": "axagent-runtime/crates/rt-workflow/src/work_engine/dispatcher.rs", "line": 31, "token": "HashMap<&'static str, Arc<dyn NodeExecutorTrait>>", "role": "键控分发点" },
-        { "ref": "axagent-runtime/crates/rt-workflow/src/work_engine/dispatcher.rs:397", "file": "axagent-runtime/crates/rt-workflow/src/work_engine/dispatcher.rs", "line": 397, "token": "pub async fn get_executor", "role": "键控取回" }
+        {
+          "ref": "axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs:224",
+          "file": "axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs",
+          "line": 224,
+          "token": "pub trait NodeExecutorTrait",
+          "role": "契约"
+        },
+        {
+          "ref": "axagent-runtime/crates/rt-workflow/src/work_engine/dispatcher.rs:31",
+          "file": "axagent-runtime/crates/rt-workflow/src/work_engine/dispatcher.rs",
+          "line": 31,
+          "token": "HashMap<&'static str, Arc<dyn NodeExecutorTrait>>",
+          "role": "键控分发点"
+        },
+        {
+          "ref": "axagent-runtime/crates/rt-workflow/src/work_engine/dispatcher.rs:397",
+          "file": "axagent-runtime/crates/rt-workflow/src/work_engine/dispatcher.rs",
+          "line": 397,
+          "token": "pub async fn get_executor",
+          "role": "键控取回"
+        }
       ],
       "note": "原文「键是 'static 字面量 ⇒ K3 今天不成立；粒度必须是节点包而非单节点」。接缝状态原文限定：待建，但 §0.8.4 判须先由 P6-① 解锁，**不属 P5.0a**。 ⇒ ⚠ 本 note 的「原文」引文是 **2026-11-02 #29 K4 转录前**的判词，现值以 `planAnchorText`（该行逐字）为准；勿按本引文回写 PLAN。",
-      "planAnchorText": "| `workflow.node` | `axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs:224` | `work_engine/dispatcher.rs:31`（`HashMap<&'static str, Arc<dyn NodeExecutorTrait>>`）+ `:397 get_executor(&str)` | 33 | 键是 `'static` 字面量 ⇒ K3 今天不成立；**粒度必须是「节点包」而非单节点**，否则每个节点一次 IPC。**2026-11-02 K4 实测判不过**：`ExecutionState`（`execution_state.rs:213`）含 **≥8 个 skip 句柄位** ⇒ ③；node 入参 0.5–3 KB 但 context 10 KB–数 MB ⇒ 需 snapshot 化才勉强到 ②（snapshot 形态 `:491` **已存在**）⇒ 移入内核桶属 #54，本条真正的归属是 **P6.0-①（节点包协议批次④，与 `strategy.quant` 共用 spawn/feed/close）**，**不入 P5.0a**；**2026-11-02 `#54` 已移入 §0.7.9 债档（不计数）** |", "planLine": 283
+      "planAnchorText": "| `workflow.node` | `axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs:224` | `work_engine/dispatcher.rs:31`（`HashMap<&'static str, Arc<dyn NodeExecutorTrait>>`）+ `:397 get_executor(&str)` | 33 | 键是 `'static` 字面量 ⇒ K3 今天不成立；**粒度必须是「节点包」而非单节点**，否则每个节点一次 IPC。**2026-11-02 K4 实测判不过**：`ExecutionState`（`execution_state.rs:213`）含 **≥8 个 skip 句柄位** ⇒ ③；node 入参 0.5–3 KB 但 context 10 KB–数 MB ⇒ 需 snapshot 化才勉强到 ②（snapshot 形态 `:491` **已存在**）⇒ 移入内核桶属 #54，本条真正的归属是 **P6.0-①（节点包协议批次④，与 `strategy.quant` 共用 spawn/feed/close）**，**不入 P5.0a**；**2026-11-02 `#54` 已移入 §0.7.9 债档（不计数）** |",
+      "planLine": 283
     },
     {
       "seamId": "memory.provider",
@@ -654,15 +1305,31 @@
       "k": null,
       "kNote": "组级 K1+K2 成立；逐条档位原文缺省。",
       "trait": "MemoryProvider",
-      "expect": { "implementors": 2, "seam": "待建", "remote": false, "reading": null },
+      "expect": {
+        "implementors": 2,
+        "seam": "待建",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading", "键控分发点行号"],
+      "expectMissingFields": [
+        "k",
+        "reading",
+        "键控分发点行号"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-ai/crates/trajectory/src/memory_provider.rs:63", "file": "axagent-ai/crates/trajectory/src/memory_provider.rs", "line": 63, "token": "pub trait MemoryProvider", "role": "契约" }
+        {
+          "ref": "axagent-ai/crates/trajectory/src/memory_provider.rs:63",
+          "file": "axagent-ai/crates/trajectory/src/memory_provider.rs",
+          "line": 63,
+          "token": "pub trait MemoryProvider",
+          "role": "契约"
+        }
       ],
       "note": "键控列原文 = 「provider_name()/provider_version() 自述键」⇒ 无文件:行，行号缺省。原文「sync_turn(entries) 可序列化；预取语义要与会话生命周期对齐」。⚠ **键控列现文本已按 §24.1 + §14.6 改写**（自述键 ≠ 分发点：`MemoryProviderRegistry` 不存在、`Arc<dyn MemoryProvider` 4 处全是单字段/参数、无键控集合 ⇒ 建接缝 = 建接缝 + 建键表）⇒ 本 note 引的是**改写前原文**，它是本次改写的判定依据，故保留不删；`planAnchorText` 已重钉为 PLAN:284 现整行并逐字核验相等（2026-11-02 06:4x，node 比对 `=== true`）。",
-      "planAnchorText": "| `memory.provider` | `axagent-ai/crates/trajectory/src/memory_provider.rs:63` | **自述键 ≠ 分发点（本行的原病，§14.6 + §24.1 已裁）**：`provider_name()/provider_version()` 只是实现者的自述字段，仓内**没有**按它取实现的容器 —— `MemoryProviderRegistry` **不存在**（全树 2 处命中都是「它不存在」的注释），`Arc<dyn MemoryProvider` 的 4 处位点**全是单字段 / 函数参数**、无键控集合 ⇒ **「建接缝」= 建接缝 + 建键表**（成本 6+1）。它**留 B** 的依据是 **K1 + 第三方贡献故事**（§14.6），不是「键控位点已存在」；**2026-11-02 `#54` 已移入 §0.7.9 债档（不计数）** | 2 | `sync_turn(entries)` 可序列化；预取语义要与会话生命周期对齐 |", "planLine": 284
+      "planAnchorText": "| `memory.provider` | `axagent-ai/crates/trajectory/src/memory_provider.rs:63` | **自述键 ≠ 分发点（本行的原病，§14.6 + §24.1 已裁）**：`provider_name()/provider_version()` 只是实现者的自述字段，仓内**没有**按它取实现的容器 —— `MemoryProviderRegistry` **不存在**（全树 2 处命中都是「它不存在」的注释），`Arc<dyn MemoryProvider` 的 4 处位点**全是单字段 / 函数参数**、无键控集合 ⇒ **「建接缝」= 建接缝 + 建键表**（成本 6+1）。它**留 B** 的依据是 **K1 + 第三方贡献故事**（§14.6），不是「键控位点已存在」；**2026-11-02 `#54` 已移入 §0.7.9 债档（不计数）** | 2 | `sync_turn(entries)` 可序列化；预取语义要与会话生命周期对齐 |",
+      "planLine": 284
     },
     {
       "seamId": "lifecycle.hook",
@@ -670,15 +1337,30 @@
       "k": null,
       "kNote": "组标题(286) = 「判可拆但先验 K4——5 条（其中 2 条证据不足）」；逐条档位原文缺省。",
       "trait": "WorkflowLifecycleHook",
-      "expect": { "implementors": 4, "seam": "待建（先验 K4）", "remote": false, "reading": null },
+      "expect": {
+        "implementors": 4,
+        "seam": "待建（先验 K4）",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/workflow_lifecycle.rs:33", "file": "axagent-core/crates/harness/src/workflow_lifecycle.rs", "line": 33, "token": "pub trait WorkflowLifecycleHook", "role": "契约" }
+        {
+          "ref": "axagent-core/crates/harness/src/workflow_lifecycle.rs:33",
+          "file": "axagent-core/crates/harness/src/workflow_lifecycle.rs",
+          "line": 33,
+          "token": "pub trait WorkflowLifecycleHook",
+          "role": "契约"
+        }
       ],
       "note": "C 组列头只有 4 列（能力 ID | 契约 | 证据 | 判定理由），**无独立实现者列** ⇒ 本行 4 取自证据列原文「4 实现者」。原文待验：HookExecContext 是否可序列化。 ⇒ ⚠ 本 note 的「原文」引文是 **2026-11-02 #29 K4 转录前**的判词，现值以 `planAnchorText`（该行逐字）为准；勿按本引文回写 PLAN。",
-      "planAnchorText": "| `lifecycle.hook` | `axagent-core/crates/harness/src/workflow_lifecycle.rs:33` | 4 实现者；文档自述「业务侧实现 + 注册，WorkEngine 按模板声明调用」 | 天然第三方面。实测（2026-11-02）：`HookExecContext`（`:51`）与 `HookOutcome`（`:64`）**无 serde** ⇒ 今天属 **③**，补 derive 后即 ②/①；`postExec.results` 是全 DAG 输出 ⇒ 需引用化（ctx 20 KB–400 KB 为推断）。频率每次工作流执行 1+1 次（低频）⇒ 可走接缝，前置 **D1** |", "planLine": 290
+      "planAnchorText": "| `lifecycle.hook` | `axagent-core/crates/harness/src/workflow_lifecycle.rs:33` | 4 实现者；文档自述「业务侧实现 + 注册，WorkEngine 按模板声明调用」 | 天然第三方面。实测（2026-11-02）：`HookExecContext`（`:51`）与 `HookOutcome`（`:64`）**无 serde** ⇒ 今天属 **③**，补 derive 后即 ②/①；`postExec.results` 是全 DAG 输出 ⇒ 需引用化（ctx 20 KB–400 KB 为推断）。频率每次工作流执行 1+1 次（低频）⇒ 可走接缝，前置 **D1** |",
+      "planLine": 290
     },
     {
       "seamId": "plugin.hook",
@@ -686,17 +1368,33 @@
       "k": null,
       "kNote": "组级「判可拆但先验 K4」；逐条档位原文缺省。",
       "trait": "PluginHook",
-      "expect": { "implementors": null, "seam": "待建（先验 K4）", "remote": false, "reading": null },
+      "expect": {
+        "implementors": null,
+        "seam": "待建（先验 K4）",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": true,
-      "expectMissingFields": ["k", "implementors", "reading"],
+      "expectMissingFields": [
+        "k",
+        "implementors",
+        "reading"
+      ],
       "implementorsMechanical": 3,
       "check": "evidenceOnly",
       "reason": "证据列原文「14 方法（pre_tool_call/post_tool_call/on_session_*）」是**方法数不是实现者数** ⇒ 期望实现者数原文缺省，本门只硬检契约锚点与接缝登记状态，不判实现者数。",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/plugin_hook.rs:159", "file": "axagent-core/crates/harness/src/plugin_hook.rs", "line": 159, "token": "pub trait PluginHook", "role": "契约" }
+        {
+          "ref": "axagent-core/crates/harness/src/plugin_hook.rs:159",
+          "file": "axagent-core/crates/harness/src/plugin_hook.rs",
+          "line": 159,
+          "token": "pub trait PluginHook",
+          "role": "契约"
+        }
       ],
       "note": "原文「与 D4 同域：ToolCallContext 走白名单投影后才可拆；否则等于把守卫钩子外置成哑铃」。机械读数 3（impl 站点）一并印出但无登记值可比。 ⇒ ⚠ 本 note 的「原文」引文是 **2026-11-02 #29 K4 转录前**的判词，现值以 `planAnchorText`（该行逐字）为准；勿按本引文回写 PLAN。",
-      "planAnchorText": "| `plugin.hook` | `axagent-core/crates/harness/src/plugin_hook.rs:159` | 14 方法（`pre_tool_call`/`post_tool_call`/`on_session_*`） | **与 D4 无关（2026-11-02 订正）**：`ToolCallContext` 的真实位置是 `plugin_hook.rs:14-19`，**本就是 4 字段纯 serde DTO**；D4 丢弃的是宿主可执行上下文 `ToolContext`（`harness/src/tool.rs:142`；**tools 侧只是 re-export 同一份，不是第二份定义** ⇒ 它与 `ToolCallContext` 是**近名不同物**，不构成铁律 4 违规，`#50` 实测订正）⇒ **不需要等白名单投影改造**。真阻塞是**频率**（每工具调用 + 每出站请求 ⇒ 一轮数十~数百次）与守卫语义外置 ⇒ 一格拆三：`on_session_*` 今天即可直连、`pre_*` 留内核待 **D1 + 权限模型**、`post_*`/`transform_*`（体量 = 工具输出/HTTP body，②）需**批量帧**（「一次帧多条事件」即可，不强制绑 D2 的 token 流语义）。DTO 面 `:14-156` 已全 serde✓ |", "planLine": 291
+      "planAnchorText": "| `plugin.hook` | `axagent-core/crates/harness/src/plugin_hook.rs:159` | 14 方法（`pre_tool_call`/`post_tool_call`/`on_session_*`） | **与 D4 无关（2026-11-02 订正）**：`ToolCallContext` 的真实位置是 `plugin_hook.rs:14-19`，**本就是 4 字段纯 serde DTO**；D4 丢弃的是宿主可执行上下文 `ToolContext`（`harness/src/tool.rs:142`；**tools 侧只是 re-export 同一份，不是第二份定义** ⇒ 它与 `ToolCallContext` 是**近名不同物**，不构成铁律 4 违规，`#50` 实测订正）⇒ **不需要等白名单投影改造**。真阻塞是**频率**（每工具调用 + 每出站请求 ⇒ 一轮数十~数百次）与守卫语义外置 ⇒ 一格拆三：`on_session_*` 今天即可直连、`pre_*` 留内核待 **D1 + 权限模型**、`post_*`/`transform_*`（体量 = 工具输出/HTTP body，②）需**批量帧**（「一次帧多条事件」即可，不强制绑 D2 的 token 流语义）。DTO 面 `:14-156` 已全 serde✓ |",
+      "planLine": 291
     },
     {
       "seamId": "context.engine",
@@ -706,17 +1404,33 @@
       "k": null,
       "kNote": "组级「判可拆但先验 K4」；逐条档位原文缺省。",
       "trait": "ContextEngine",
-      "expect": { "implementors": null, "seam": "待建（先验 K4）", "remote": false, "reading": null },
+      "expect": {
+        "implementors": null,
+        "seam": "待建（先验 K4）",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": true,
-      "expectMissingFields": ["k", "implementors", "reading"],
+      "expectMissingFields": [
+        "k",
+        "implementors",
+        "reading"
+      ],
       "expectImplementorZero": true,
       "implementorZeroBasis": "PLAN:90 与 PLAN:320（§0.7.8）逐字「context.engine / rule.custom 经核为**零外部实现者** ⇒ 降级待证」⇒ 机械判据 = harness 外非测试 impl 站点 == 0。",
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/context_engine.rs:24", "file": "axagent-core/crates/harness/src/context_engine.rs", "line": 24, "token": "pub trait ContextEngine", "role": "契约" }
+        {
+          "ref": "axagent-core/crates/harness/src/context_engine.rs:24",
+          "file": "axagent-core/crates/harness/src/context_engine.rs",
+          "line": 24,
+          "token": "pub trait ContextEngine",
+          "role": "契约"
+        }
       ],
       "note": "证据列原文 = 「compact()/name()/supports(&Session)」方法签名描述，**无文件:行** ⇒ 证据行号缺省（组标题注「2 条证据不足」之一）。行内实现者数缺省，但 0 值判据由 PLAN:90/320 提供。 ⇒ ⚠ 本 note 的「原文」引文是 **2026-11-02 #29 K4 转录前**的判词，现值以 `planAnchorText`（该行逐字）为准；勿按本引文回写 PLAN。",
-      "planAnchorText": "| `context.engine` | `axagent-core/crates/harness/src/context_engine.rs:24` | `compact()/name()/supports(&Session)` | 压缩策略可拆（LLM 摘要 / 记忆 / 混合）；`supports(&Session)` 是借用入参 ⇒ 需投影成 DTO。**2026-11-02 判债**：0 实现者 + **0 派发点**（全仓扫无 `dyn ContextEngine`，生产压缩走 `compact_session` 自由函数 `harness/compact_session.rs:67`，被 `agent/session_manager.rs:781` 直调）+ 签名与在用路径不符（`Session` 仅 `Serialize`、无 `Deserialize` `session.rs:51`）⇒ 连 K2 都不成立 ⇒ **不进待建数**，P5.0a **不许为它预留协议面**。体量 ≈0.4–0.7 MB/次（80 000 token×4 B 反推）、每会话 1 次；**2026-11-02 `#54` 已移入 §0.7.9 债档（不计数）** |", "planLine": 292
+      "planAnchorText": "| `context.engine` | `axagent-core/crates/harness/src/context_engine.rs:24` | `compact()/name()/supports(&Session)` | 压缩策略可拆（LLM 摘要 / 记忆 / 混合）；`supports(&Session)` 是借用入参 ⇒ 需投影成 DTO。**2026-11-02 判债**：0 实现者 + **0 派发点**（全仓扫无 `dyn ContextEngine`，生产压缩走 `compact_session` 自由函数 `harness/compact_session.rs:67`，被 `agent/session_manager.rs:781` 直调）+ 签名与在用路径不符（`Session` 仅 `Serialize`、无 `Deserialize` `session.rs:51`）⇒ 连 K2 都不成立 ⇒ **不进待建数**，P5.0a **不许为它预留协议面**。体量 ≈0.4–0.7 MB/次（80 000 token×4 B 反推）、每会话 1 次；**2026-11-02 `#54` 已移入 §0.7.9 债档（不计数）** |",
+      "planLine": 292
     },
     {
       "seamId": "rule.custom",
@@ -724,18 +1438,40 @@
       "k": null,
       "kNote": "组级「判可拆但先验 K4」；逐条档位原文缺省。",
       "trait": "CustomRuleChecker",
-      "expect": { "implementors": null, "seam": "待建（先验 K4）", "remote": false, "reading": null },
+      "expect": {
+        "implementors": null,
+        "seam": "待建（先验 K4）",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": true,
-      "expectMissingFields": ["k", "implementors", "reading"],
+      "expectMissingFields": [
+        "k",
+        "implementors",
+        "reading"
+      ],
       "expectImplementorZero": true,
       "implementorZeroBasis": "同上：PLAN:90 与 PLAN:320 明写 rule.custom 零外部实现者 ⇒ 机械判据 = impl 站点 == 0。",
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-ai/crates/trajectory/src/constitution.rs:102", "file": "axagent-ai/crates/trajectory/src/constitution.rs", "line": 102, "token": "pub trait CustomRuleChecker", "role": "契约" },
-        { "ref": "axagent-ai/crates/trajectory/src/constitution.rs:118", "file": "axagent-ai/crates/trajectory/src/constitution.rs", "line": 118, "token": "HashMap<String, Arc<dyn CustomRuleChecker>>", "role": "键控分发点" }
+        {
+          "ref": "axagent-ai/crates/trajectory/src/constitution.rs:102",
+          "file": "axagent-ai/crates/trajectory/src/constitution.rs",
+          "line": 102,
+          "token": "pub trait CustomRuleChecker",
+          "role": "契约"
+        },
+        {
+          "ref": "axagent-ai/crates/trajectory/src/constitution.rs:118",
+          "file": "axagent-ai/crates/trajectory/src/constitution.rs",
+          "line": 118,
+          "token": "HashMap<String, Arc<dyn CustomRuleChecker>>",
+          "role": "键控分发点"
+        }
       ],
       "note": "行内实现者数原文缺省（组标题注「2 条证据不足」之二）。原文「与 workflow.business_rule 不同域，不并条」。 ⇒ ⚠ 本 note 的「原文」引文是 **2026-11-02 #29 K4 转录前**的判词，现值以 `planAnchorText`（该行逐字）为准；勿按本引文回写 PLAN。",
-      "planAnchorText": "| `rule.custom` | `axagent-ai/crates/trajectory/src/constitution.rs:102` | `:118 HashMap<String, Arc<dyn CustomRuleChecker>>` | 自我改进宪法的自定义校验；与 `workflow.business_rule` 不同域，不并条。**2026-11-02 实测：K4 完全成立**（① + 低频 + 纯 DTO，**无 D1/D2 依赖**，2–80 KB 一次），但缺口不在帧而在「没人实现、没人注册」：门口径实现者 0，内核消费逻辑是活的（`ImmutableConstitution.custom_registry` `:158`、`with_custom_registry` `:170`、三个调用点）但外部调用 0 ⇒ 登记为「**K4 通过 · 待第一个实现者再建接缝**」，与 `context.engine`（K4 也不过）**分档处置** |", "planLine": 293
+      "planAnchorText": "| `rule.custom` | `axagent-ai/crates/trajectory/src/constitution.rs:102` | `:118 HashMap<String, Arc<dyn CustomRuleChecker>>` | 自我改进宪法的自定义校验；与 `workflow.business_rule` 不同域，不并条。**2026-11-02 实测：K4 完全成立**（① + 低频 + 纯 DTO，**无 D1/D2 依赖**，2–80 KB 一次），但缺口不在帧而在「没人实现、没人注册」：门口径实现者 0，内核消费逻辑是活的（`ImmutableConstitution.custom_registry` `:158`、`with_custom_registry` `:170`、三个调用点）但外部调用 0 ⇒ 登记为「**K4 通过 · 待第一个实现者再建接缝**」，与 `context.engine`（K4 也不过）**分档处置** |",
+      "planLine": 293
     },
     {
       "seamId": "transport.kind",
@@ -743,16 +1479,37 @@
       "k": null,
       "kNote": "组级「判可拆但先验 K4」；逐条档位原文缺省（原文标 ⚠ 可能不过 K4）。",
       "trait": "TransportHandler",
-      "expect": { "implementors": 4, "seam": "待建（先验 K4）", "remote": false, "reading": null },
+      "expect": {
+        "implementors": 4,
+        "seam": "待建（先验 K4）",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-runtime/crates/rt-messaging/src/message_gateway.rs:168", "file": "axagent-runtime/crates/rt-messaging/src/message_gateway.rs", "line": 168, "token": "pub trait TransportHandler", "role": "契约" },
-        { "ref": "axagent-runtime/crates/rt-messaging/src/message_gateway.rs:164", "file": "axagent-runtime/crates/rt-messaging/src/message_gateway.rs", "line": 164, "token": "HashMap<TransportType, Arc<dyn TransportHandler>>", "role": "键控分发点" }
+        {
+          "ref": "axagent-runtime/crates/rt-messaging/src/message_gateway.rs:168",
+          "file": "axagent-runtime/crates/rt-messaging/src/message_gateway.rs",
+          "line": 168,
+          "token": "pub trait TransportHandler",
+          "role": "契约"
+        },
+        {
+          "ref": "axagent-runtime/crates/rt-messaging/src/message_gateway.rs:164",
+          "file": "axagent-runtime/crates/rt-messaging/src/message_gateway.rs",
+          "line": 164,
+          "token": "HashMap<TransportType, Arc<dyn TransportHandler>>",
+          "role": "键控分发点"
+        }
       ],
       "note": "原文「⚠ 可能不过 K4：connect(endpoint) 后持有长连接状态 ⇒ 除非改会话式 op 否则判留内核」。4 取自证据列「4 实现者」。 ⇒ ⚠ 本 note 的「原文」引文是 **2026-11-02 #29 K4 转录前**的判词，现值以 `planAnchorText`（该行逐字）为准；勿按本引文回写 PLAN。",
-      "planAnchorText": "| `transport.kind` | `axagent-runtime/crates/rt-messaging/src/message_gateway.rs:168` | `:164 HashMap<TransportType, Arc<dyn TransportHandler>>`，4 实现者 | ✅ **原判据在盘上不成立（2026-11-02 实测）**：体量**全 ①** ⇒ `AgentEndpoint`（`:143-152`）只缺 serde derive（字段类型全 serde-able，补 derive 即 ①）、`MediaAttachment`（`harness/src/message_adapter.rs:67-73`）**只带 `path`**（传宿主侧文件引用，不是字节流）⇒ 无 4× 膨胀、无分块需求。连接生命周期归实现侧、出进程自洽（同 `mcp.server`），`get_state()` 同步方法远程化即请求-响应。代价换成另一类约束：**worker 须与宿主同文件视图**（与 `document.parser` 同一病灶，不是新病灶）。⚠ 真缺口是**今天无入站消费路径**：`transport_handlers.rs:155-171` 的 `Message::Text` 落 `_ => {}` 丢弃 ⇒ 将来补入站才需要 `ops::EMIT`（`plugin-proto/src/lib.rs` 的 `pub const EMIT`）扩展。前置 **D1**；优先级低于 `notify.channel` |", "planLine": 294
+      "planAnchorText": "| `transport.kind` | `axagent-runtime/crates/rt-messaging/src/message_gateway.rs:168` | `:164 HashMap<TransportType, Arc<dyn TransportHandler>>`，4 实现者 | ✅ **原判据在盘上不成立（2026-11-02 实测）**：体量**全 ①** ⇒ `AgentEndpoint`（`:143-152`）只缺 serde derive（字段类型全 serde-able，补 derive 即 ①）、`MediaAttachment`（`harness/src/message_adapter.rs:67-73`）**只带 `path`**（传宿主侧文件引用，不是字节流）⇒ 无 4× 膨胀、无分块需求。连接生命周期归实现侧、出进程自洽（同 `mcp.server`），`get_state()` 同步方法远程化即请求-响应。代价换成另一类约束：**worker 须与宿主同文件视图**（与 `document.parser` 同一病灶，不是新病灶）。⚠ 真缺口是**今天无入站消费路径**：`transport_handlers.rs:155-171` 的 `Message::Text` 落 `_ => {}` 丢弃 ⇒ 将来补入站才需要 `ops::EMIT`（`plugin-proto/src/lib.rs` 的 `pub const EMIT`）扩展。前置 **D1**；优先级低于 `notify.channel` |",
+      "planLine": 294
     },
     {
       "seamId": "dojo.extension",
@@ -762,16 +1519,40 @@
       "kNote": "§0.7.6 为散文体、无档位列；正文自述「自带 RwLock<HashMap<…>> 键控注册表 + 11 方法 ⇒ 事实具备 K1+K2 形状」，PLAN 未给档位判定 ⇒ 原文缺省。",
       "trait": "DojoExtension",
       "countedInRegister26": false,
-      "expect": { "implementors": 0, "seam": "第二插件协议（不在接缝体系）", "remote": false, "reading": null },
+      "expect": {
+        "implementors": 0,
+        "seam": "第二插件协议（不在接缝体系）",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading", "seamId（原文无反引号能力 ID）"],
+      "expectMissingFields": [
+        "k",
+        "reading",
+        "seamId（原文无反引号能力 ID）"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-plugins/crates/plugins/src/manager.rs:708", "file": "axagent-plugins/crates/plugins/src/manager.rs", "line": 708, "token": "pub fn execute_plugin_command", "anchorText": "pub fn execute_plugin_command(", "role": "CLI 派发口（本批已改成真授权门槛）" }
+        {
+          "ref": "axagent-plugins/crates/plugins/src/manager.rs:708",
+          "file": "axagent-plugins/crates/plugins/src/manager.rs",
+          "line": 708,
+          "token": "pub fn execute_plugin_command",
+          "anchorText": "pub fn execute_plugin_command(",
+          "role": "CLI 派发口（本批已改成真授权门槛）"
+        }
       ],
       "note": "登记值 0 = PLAN:301 原文「生产实现者 0，唯一实现是测试替身」⇒ 机械判据 harness 外非测试 impl 站点 == 0。原文称 11 个方法但只列 6 个方法名 ⇒ 方法数登记为原文缺省，不判。PLAN:296 明文「不计入 23」；已裁定（§0.12.1）废弃 trait 本体、command_specs/execute_command 形状吸收进 L1 命令通道 T2。**2026-11-01 已执行**：`harness/src/dojo_extension.rs` 整文件删除（−460 行）+ `lib.rs:332-337` 墓碑注释 ⇒ 本行原两条指向该文件的 evidence 已摘除（文件不存在），`manager.rs` 派发口因多轮改动下移（:551 → :583 → :654 → **:708**，最终态由 `--repin-code --apply` 定锚）；翻案条件仍未触发（`git log --all -S` + `git grep` 到 origin/upstream：18 处命中全落在被删文件自身）。",
-      "planAnchorText": "原记「CLI 派发口无 `input_schema` 且权限写死 `ReadOnly`」**判据低估了实情**：`PluginTool::check_permission`（`plugins/src/types.rs:787-826`）全仓零调用方，唯一引用它的 `execute_with_permission_check` 也零调用方 ⇒ 档位在 tools 与 commands **两条路上都是纯装饰**；本批只把命令通道改成真授权（按具体权限名判定，`implies_*` 一字未改），**tool 侧依旧是装饰**，另立批次。", "planLine": 301,
-      "planLineRange": [296, 302], "planAnchorTextRange": ["### 0.7.6 机制合流，不是能力 —— 1 条（必须处理，但不计入 23）", "同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:708`**（原 `:551`，因多次改动下移；镜像表同批改）。"]
+      "planAnchorText": "原记「CLI 派发口无 `input_schema` 且权限写死 `ReadOnly`」**判据低估了实情**：`PluginTool::check_permission`（`plugins/src/types.rs:787-826`）全仓零调用方，唯一引用它的 `execute_with_permission_check` 也零调用方 ⇒ 档位在 tools 与 commands **两条路上都是纯装饰**；本批只把命令通道改成真授权（按具体权限名判定，`implies_*` 一字未改），**tool 侧依旧是装饰**，另立批次。",
+      "planLine": 301,
+      "planLineRange": [
+        296,
+        302
+      ],
+      "planAnchorTextRange": [
+        "### 0.7.6 机制合流，不是能力 —— 1 条（必须处理，但不计入 23）",
+        "同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:708`**（原 `:551`，因多次改动下移；镜像表同批改）。"
+      ]
     },
     {
       "seamId": "agent.loop",
@@ -781,15 +1562,27 @@
       "kNote": "§0.7.7 列头 = 面 | 不过的判据 | 理由，**无实现者列、无接缝列**；「不过的判据」填 kFailedCriterion（语义 = 被哪条判据挡下，非通过档位）。",
       "trait": "AgentTurnRunner",
       "countedInRegister26": false,
-      "faces": ["agent.loop"],
-      "expect": { "implementors": null, "seam": "已建（实现永远内置）", "remote": true, "reading": null },
+      "faces": [
+        "agent.loop"
+      ],
+      "expect": {
+        "implementors": null,
+        "seam": "已建（实现永远内置）",
+        "remote": true,
+        "reading": null
+      },
       "expectMissing": true,
-      "expectMissingFields": ["k", "implementors", "reading"],
+      "expectMissingFields": [
+        "k",
+        "implementors",
+        "reading"
+      ],
       "check": "seamExists",
       "evidence": [],
       "reason": "原文无 `文件:行` 锚点（列头无证据列）⇒ 本行只能机械复检「接缝是否已登记 + 是否在远程清单」，契约 trait AgentTurnRunner 的定义行未登记，不判实现者数。",
       "note": "理由原文「引擎本体，拆掉就没有主壳，与 §0.5.6 主壳不是插件冲突 ⇒ 接缝留着、实现永远内置」。盘上 SUPPORTED_REMOTE_SEAMS 含 agent.loop ⇒ 与本行「已建 + 可远程但留内核」一致。",
-      "planAnchorText": "| `agent.loop`（`AgentTurnRunner`，已建接缝） | 语义 | 引擎本体。拆掉它就没有主壳，与 §0.5.6「主壳不是插件」直接冲突 ⇒ **接缝留着，实现永远内置** |", "planLine": 308
+      "planAnchorText": "| `agent.loop`（`AgentTurnRunner`，已建接缝） | 语义 | 引擎本体。拆掉它就没有主壳，与 §0.5.6「主壳不是插件」直接冲突 ⇒ **接缝留着，实现永远内置** |",
+      "planLine": 308
     },
     {
       "seamId": "session.store",
@@ -799,16 +1592,29 @@
       "kNote": "同组列头缺省说明。",
       "trait": null,
       "countedInRegister26": false,
-      "faces": ["session.store", "event.dispatch"],
+      "faces": [
+        "session.store",
+        "event.dispatch"
+      ],
       "multiFaceRow": true,
-      "expect": { "implementors": null, "seam": "已建（提供面不远程化）", "remote": false, "reading": null },
+      "expect": {
+        "implementors": null,
+        "seam": "已建（提供面不远程化）",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": true,
-      "expectMissingFields": ["k", "implementors", "reading"],
+      "expectMissingFields": [
+        "k",
+        "implementors",
+        "reading"
+      ],
       "check": "seamExists",
       "evidence": [],
       "reason": "原文无 `文件:行` 锚点 ⇒ 只机械复检两个面的登记/远程状态；实现者数与契约行未登记。",
       "note": "本行含 2 个面（session.store / event.dispatch），按行计数=1、按面计数=2 ⇒ 本表以**行**为单位保持 K=9 / 总 36 的口径，面清单记在 faces 字段，展开面会把总数推到 15（交接物 §9.2 的口径提醒）。原文「§9 已定：提供面不远程化（插件是订阅方）」；worker.rs:106-109 注释逐字复述同一裁定。",
-      "planAnchorText": "| `session.store` / `event.dispatch` | 既定口径 | §9 已定：提供面不远程化（插件是订阅方） |", "planLine": 309
+      "planAnchorText": "| `session.store` / `event.dispatch` | 既定口径 | §9 已定：提供面不远程化（插件是订阅方） |",
+      "planLine": 309
     },
     {
       "seamId": "session.log.invariant",
@@ -818,15 +1624,27 @@
       "kNote": "同组列头缺省说明。",
       "trait": null,
       "countedInRegister26": false,
-      "faces": ["session.log.invariant"],
-      "expect": { "implementors": null, "seam": "有接缝且可远程（仍留内核）", "remote": true, "reading": null },
+      "faces": [
+        "session.log.invariant"
+      ],
+      "expect": {
+        "implementors": null,
+        "seam": "有接缝且可远程（仍留内核）",
+        "remote": true,
+        "reading": null
+      },
       "expectMissing": true,
-      "expectMissingFields": ["k", "implementors", "reading"],
+      "expectMissingFields": [
+        "k",
+        "implementors",
+        "reading"
+      ],
       "check": "seamExists",
       "evidence": [],
       "reason": "原文无 `文件:行` 锚点 ⇒ 只机械复检登记/远程清单成员身份。",
       "note": "原文「『模型所见可重建』是宿主对插件的审计约束；被审计者不能自己出证」。它是 SUPPORTED_REMOTE_SEAMS 13 条里除 A 组 11 条之外的一条（另一条是 agent.loop），构成封闭集对账。",
-      "planAnchorText": "| `session.log.invariant`（有接缝且可远程） | 语义 | 「模型所见可重建」是宿主对插件的**审计约束**；让被审计者自己出证不成立 ⇒ 留内核 |", "planLine": 310
+      "planAnchorText": "| `session.log.invariant`（有接缝且可远程） | 语义 | 「模型所见可重建」是宿主对插件的**审计约束**；让被审计者自己出证不成立 ⇒ 留内核 |",
+      "planLine": 310
     },
     {
       "seamId": "market-sim DES（SimAgent / Oracle，原文无 capability ID）",
@@ -837,19 +1655,37 @@
       "kNote": "同组列头缺省说明。",
       "trait": "SimAgent",
       "countedInRegister26": false,
-      "faces": ["market-sim DES：SimAgent / Oracle"],
-      "expect": { "implementors": 27, "seam": "不拆", "remote": false, "reading": null },
+      "faces": [
+        "market-sim DES：SimAgent / Oracle"
+      ],
+      "expect": {
+        "implementors": 27,
+        "seam": "不拆",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading", "seamId（原文无能力 ID）"],
+      "expectMissingFields": [
+        "k",
+        "reading",
+        "seamId（原文无能力 ID）"
+      ],
       "implementorsHard": false,
       "implementorsMechanical": 15,
       "check": "evidenceOnly",
       "reason": "登记值 27 的口径是「同一内核 crate 内的 agent 变体（含 Oracle 及其它 kernel 内 impl）」，本门的实现者口径是「harness 外的 impl 站点」⇒ 两者不可比，判红只会制造假信号 ⇒ 只报告（SimAgent 12 + Oracle 3 = 15；market-sim crate 内去噪 impl 站点合计 22）。锚点与接缝身份照常硬检。",
       "evidence": [
-        { "ref": "axagent-quant/crates/market-sim/src/kernel.rs:703", "file": "axagent-quant/crates/market-sim/src/kernel.rs", "line": 703, "token": "for entry in self.agents.values()", "role": "每 tick 遍历全部 agents" }
+        {
+          "ref": "axagent-quant/crates/market-sim/src/kernel.rs:703",
+          "file": "axagent-quant/crates/market-sim/src/kernel.rs",
+          "line": 703,
+          "token": "for entry in self.agents.values()",
+          "role": "每 tick 遍历全部 agents"
+        }
       ],
       "note": "⚠ 已知弱点（登记时写明，不算漂移）：PLAN:311 原文写 `kernel.rs:703` **无 crate 前缀**，盘上全路径 = axagent-quant/crates/market-sim/src/kernel.rs:703（该行内容 `for entry in self.agents.values() {` 与原文描述逐字吻合）⇒ 镜像表存全路径。已裁定维持内核（§0.12.2），可插部分下放「策略数据」层。",
-      "planAnchorText": "| DES 仿真（`market-sim` `SimAgent`/`Oracle`，**27 个实现**，全在 crate 内） | K4 + 语义 | 实现者是同一内核内的 agent 变体；`kernel.rs:703` 每 tick 遍历全部 agents ⇒ 出进程即 tick × agent 次 IPC。**已裁定维持内核**，可插部分下放到「策略数据」层（场景 / 参数 / 脚本）—— 见 §0.12.2 |", "planLine": 311
+      "planAnchorText": "| DES 仿真（`market-sim` `SimAgent`/`Oracle`，**27 个实现**，全在 crate 内） | K4 + 语义 | 实现者是同一内核内的 agent 变体；`kernel.rs:703` 每 tick 遍历全部 agents ⇒ 出进程即 tick × agent 次 IPC。**已裁定维持内核**，可插部分下放到「策略数据」层（场景 / 参数 / 脚本）—— 见 §0.12.2 |",
+      "planLine": 311
     },
     {
       "seamId": "command.handler",
@@ -859,16 +1695,33 @@
       "kNote": "同组列头缺省说明。",
       "trait": "CommandHandler",
       "countedInRegister26": false,
-      "faces": ["command.handler"],
-      "expect": { "implementors": 15, "seam": "不拆（主壳 IPC 路由机制本身）", "remote": null, "reading": null },
+      "faces": [
+        "command.handler"
+      ],
+      "expect": {
+        "implementors": 15,
+        "seam": "不拆（主壳 IPC 路由机制本身）",
+        "remote": null,
+        "reading": null
+      },
       "expectMissing": false,
-      "expectMissingFields": ["k", "reading"],
+      "expectMissingFields": [
+        "k",
+        "reading"
+      ],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "src-tauri/src/commands/agent/command_bridge.rs:1125", "file": "src-tauri/src/commands/agent/command_bridge.rs", "line": 1125, "token": "pub trait CommandHandler", "role": "契约" }
+        {
+          "ref": "src-tauri/src/commands/agent/command_bridge.rs:1125",
+          "file": "src-tauri/src/commands/agent/command_bridge.rs",
+          "line": 1125,
+          "token": "pub trait CommandHandler",
+          "role": "契约"
+        }
       ],
       "note": "实现者 15 写在行内括号里（§0.7.7 无实现者列，此处属行内自述）⇒ 可机械复算并硬拦。原文「命令注册已由 build.rs 自动生成（禁区 7）」。本行不判接缝登记状态：command.handler 是主壳 IPC 路由，PLAN 未声明它在 capability_registry / SUPPORTED_REMOTE_SEAMS 的任何一侧。",
-      "planAnchorText": "| `command.handler`（`src-tauri/src/commands/agent/command_bridge.rs:1125`，15 实现者） | K3 | 主壳 IPC 路由机制本身；命令注册已由 `build.rs` 自动生成（禁区 7） |", "planLine": 312
+      "planAnchorText": "| `command.handler`（`src-tauri/src/commands/agent/command_bridge.rs:1125`，15 实现者） | K3 | 主壳 IPC 路由机制本身；命令注册已由 `build.rs` 自动生成（禁区 7） |",
+      "planLine": 312
     },
     {
       "seamId": "harness.interceptor / reversible.effect",
@@ -878,16 +1731,30 @@
       "kNote": "同组列头缺省说明。",
       "trait": null,
       "countedInRegister26": false,
-      "faces": ["harness.interceptor", "reversible.effect"],
+      "faces": [
+        "harness.interceptor",
+        "reversible.effect"
+      ],
       "multiFaceRow": true,
-      "expect": { "implementors": null, "seam": null, "remote": null, "reading": null },
+      "expect": {
+        "implementors": null,
+        "seam": null,
+        "remote": null,
+        "reading": null
+      },
       "expectMissing": true,
-      "expectMissingFields": ["k", "implementors", "seam", "reading"],
+      "expectMissingFields": [
+        "k",
+        "implementors",
+        "seam",
+        "reading"
+      ],
       "check": "manual",
       "reason": "原文三个字段皆缺：无 `文件:行` 锚点、无实现者数、未声明接缝状态 ⇒ 本行**没有任何可机械复检的判据**，计入「未机器复检」摘要，不算通过。",
       "evidence": [],
       "note": "原文「拦截链与回滚栈依赖执行上下文（&mut、闭包、EffectHandle）；D4 修完才有讨论资格」。2 个面记在 faces（按行计数=1）。",
-      "planAnchorText": "| `harness.interceptor` / `reversible.effect` | K4 + 语义 | 拦截链与回滚栈依赖执行上下文（`&mut`、闭包、`EffectHandle`）；D4 修完才有讨论资格 |", "planLine": 313
+      "planAnchorText": "| `harness.interceptor` / `reversible.effect` | K4 + 语义 | 拦截链与回滚栈依赖执行上下文（`&mut`、闭包、`EffectHandle`）；D4 修完才有讨论资格 |",
+      "planLine": 313
     },
     {
       "seamId": "数据访问层 / migration / storage / credential / crypto（原文无 capability ID）",
@@ -898,18 +1765,41 @@
       "kNote": "同组列头缺省说明。",
       "trait": null,
       "countedInRegister26": false,
-      "faces": ["数据访问层（*Repository trait）", "migration", "storage", "credential", "crypto"],
+      "faces": [
+        "数据访问层（*Repository trait）",
+        "migration",
+        "storage",
+        "credential",
+        "crypto"
+      ],
       "multiFaceRow": true,
-      "expect": { "implementors": null, "seam": "不拆", "remote": null, "reading": null },
+      "expect": {
+        "implementors": null,
+        "seam": "不拆",
+        "remote": null,
+        "reading": null
+      },
       "expectMissing": true,
-      "expectMissingFields": ["k", "implementors", "reading", "行号"],
+      "expectMissingFields": [
+        "k",
+        "implementors",
+        "reading",
+        "行号"
+      ],
       "check": "evidenceOnly",
       "reason": "证据是**文件级锚点**（原文只给路径 harness/src/repositories.rs，无行号）⇒ 只能判存在性，不能判行；「20+ 个 *Repository trait」是描述性数量，不是可复算读数。",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/repositories.rs", "file": "axagent-core/crates/harness/src/repositories.rs", "token": "Repository", "fileLevel": true, "role": "数据访问层契约面" }
+        {
+          "ref": "axagent-core/crates/harness/src/repositories.rs",
+          "file": "axagent-core/crates/harness/src/repositories.rs",
+          "token": "Repository",
+          "fileLevel": true,
+          "role": "数据访问层契约面"
+        }
       ],
       "note": "原文「只有 DI 站点、无键控选择；且凭证/加密是数据主权落点（口径 2）」。本行含 5 个面。",
-      "planAnchorText": "| 数据访问层（`harness/src/repositories.rs` 20+ 个 `*Repository` trait）、`migration`、`storage`、`credential`、`crypto` | K2 | 只有 DI 站点、无键控选择；且凭证/加密是数据主权落点（口径 2） |", "planLine": 314
+      "planAnchorText": "| 数据访问层（`harness/src/repositories.rs` 20+ 个 `*Repository` trait）、`migration`、`storage`、`credential`、`crypto` | K2 | 只有 DI 站点、无键控选择；且凭证/加密是数据主权落点（口径 2） |",
+      "planLine": 314
     },
     {
       "seamId": "prompt.template / health.check / agent.def / vault.source",
@@ -919,19 +1809,46 @@
       "kNote": "同组列头缺省说明。",
       "trait": "PromptProvider",
       "countedInRegister26": false,
-      "faces": ["prompt.template", "health.check", "agent.def", "vault.source"],
+      "faces": [
+        "prompt.template",
+        "health.check",
+        "agent.def",
+        "vault.source"
+      ],
       "multiFaceRow": true,
-      "expect": { "implementors": null, "seam": "不拆（已可经配置/Markdown 贡献，属数据驱动）", "remote": null, "reading": null },
+      "expect": {
+        "implementors": null,
+        "seam": "不拆（已可经配置/Markdown 贡献，属数据驱动）",
+        "remote": null,
+        "reading": null
+      },
       "expectMissing": true,
-      "expectMissingFields": ["k", "implementors", "reading"],
+      "expectMissingFields": [
+        "k",
+        "implementors",
+        "reading"
+      ],
       "check": "evidenceOnly",
       "reason": "只有 prompt.template 与 agent.def 两面带行号锚点；health.check 与 vault.source 原文无行号 ⇒ 面级实现者数与接缝状态一律缺省。",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/prompt_provider.rs:29", "file": "axagent-core/crates/harness/src/prompt_provider.rs", "line": 29, "token": "pub trait PromptProvider", "role": "契约（prompt.template）" },
-        { "ref": "axagent-core/crates/harness/src/agent.rs:61", "file": "axagent-core/crates/harness/src/agent.rs", "line": 61, "token": "pub trait Agent", "role": "契约（agent.def）" }
+        {
+          "ref": "axagent-core/crates/harness/src/prompt_provider.rs:29",
+          "file": "axagent-core/crates/harness/src/prompt_provider.rs",
+          "line": 29,
+          "token": "pub trait PromptProvider",
+          "role": "契约（prompt.template）"
+        },
+        {
+          "ref": "axagent-core/crates/harness/src/agent.rs:61",
+          "file": "axagent-core/crates/harness/src/agent.rs",
+          "line": 61,
+          "token": "pub trait Agent",
+          "role": "契约（agent.def）"
+        }
       ],
       "note": "原文「健康探针应作为插件清单自带的自检面并入 §0.6.2 权限面，而不是独立能力」。本行含 4 个面。",
-      "planAnchorText": "| `prompt.template`（`harness/src/prompt_provider.rs:29`）、`health.check`、`agent.def`（`harness/src/agent.rs:61`）、`vault.source` | K3 / 语义 | 模板取词与内置 Agent 定义属数据驱动（已可经配置/Markdown 贡献，不是产物插件）；健康探针应作为**插件清单自带**的自检面并入 §0.6.2 权限面，而不是独立能力 |", "planLine": 315
+      "planAnchorText": "| `prompt.template`（`harness/src/prompt_provider.rs:29`）、`health.check`、`agent.def`（`harness/src/agent.rs:61`）、`vault.source` | K3 / 语义 | 模板取词与内置 Agent 定义属数据驱动（已可经配置/Markdown 贡献，不是产物插件）；健康探针应作为**插件清单自带**的自检面并入 §0.6.2 权限面，而不是独立能力 |",
+      "planLine": 315
     },
     {
       "seamId": "SeamInvoker / PluginManager / worker.rs 帧协议本体",
@@ -941,16 +1858,30 @@
       "kNote": "同组列头缺省说明。",
       "trait": null,
       "countedInRegister26": false,
-      "faces": ["SeamInvoker", "PluginManager", "worker.rs 帧协议本体"],
+      "faces": [
+        "SeamInvoker",
+        "PluginManager",
+        "worker.rs 帧协议本体"
+      ],
       "multiFaceRow": true,
-      "expect": { "implementors": null, "seam": "不适用（插件机制自身）", "remote": null, "reading": null },
+      "expect": {
+        "implementors": null,
+        "seam": "不适用（插件机制自身）",
+        "remote": null,
+        "reading": null
+      },
       "expectMissing": true,
-      "expectMissingFields": ["k", "implementors", "reading"],
+      "expectMissingFields": [
+        "k",
+        "implementors",
+        "reading"
+      ],
       "check": "manual",
       "reason": "原文无 `文件:行`、无实现者数；「装载器不能装载自己」是结构论证 ⇒ 无可机械复检的判据，计入「未机器复检」摘要，不算通过。",
       "evidence": [],
       "note": "本行含 3 个面。§0.7.6 的 Dojo 行与本行共同构成「机制」而非「能力」的两处登记。",
-      "planAnchorText": "| `SeamInvoker`、`PluginManager`、`worker.rs` 帧协议本体 | 语义 | 插件机制自身 = 装载器，不能装载自己 |", "planLine": 316
+      "planAnchorText": "| `SeamInvoker`、`PluginManager`、`worker.rs` 帧协议本体 | 语义 | 插件机制自身 = 装载器，不能装载自己 |",
+      "planLine": 316
     },
     {
       "seamId": "rag.vector.store",
@@ -960,17 +1891,35 @@
       "kNote": "§0.7.7 列头 = 面 | 不过的判据 | 理由；本行为预留接缝位，不计能力面。",
       "trait": null,
       "countedInRegister": false,
-      "faces": ["rag.vector.store"],
-      "expect": { "implementors": null, "seam": "预留（占位不实现）", "remote": false, "reading": null },
+      "faces": [
+        "rag.vector.store"
+      ],
+      "expect": {
+        "implementors": null,
+        "seam": "预留（占位不实现）",
+        "remote": false,
+        "reading": null
+      },
       "expectMissing": true,
-      "expectMissingFields": ["k", "implementors", "reading"],
+      "expectMissingFields": [
+        "k",
+        "implementors",
+        "reading"
+      ],
       "check": "manual",
       "reason": "预留接缝位：#40 已落地 3 个方言无关 trait（VectorCollectionAdmin / VectorWriter / VectorReader），但宿主注入点仍是 Arc<VectorStore> 具体类型、capability_registry 命中 0 ⇒ 今天 seamDeclared 判「未建」是正确读数；本条只登记，不计能力面。",
       "evidence": [
-        { "ref": "axagent-core/crates/harness/src/vector_store.rs:12", "file": "axagent-core/crates/harness/src/vector_store.rs", "line": 12, "token": "rag.vector.store", "role": "预留接缝 id（模块头文档）" }
+        {
+          "ref": "axagent-core/crates/harness/src/vector_store.rs:12",
+          "file": "axagent-core/crates/harness/src/vector_store.rs",
+          "line": 12,
+          "token": "rag.vector.store",
+          "role": "预留接缝 id（模块头文档）"
+        }
       ],
       "note": "PLAN §22.5 / §0.7.7 与 #54 要求补登：totalRows +1、groupCounts.K 9→10，capacityRegister 不变。",
-      "planAnchorText": "| `rag.vector.store`（预留接缝位，`axagent-core/crates/harness/src/vector_store.rs:12` 模块头） | K3 / K4 待兑现 | 本轮只占位不实现：方言无关三 trait（`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`）已就位，但宿主注入点仍是 `Arc<VectorStore>` 具体类型 ⇒ 不计能力面、不进 P5 批次 |", "planLine": 317
+      "planAnchorText": "| `rag.vector.store`（预留接缝位，`axagent-core/crates/harness/src/vector_store.rs:12` 模块头） | K3 / K4 待兑现 | 本轮只占位不实现：方言无关三 trait（`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`）已就位，但宿主注入点仍是 `Arc<VectorStore>` 具体类型 ⇒ 不计能力面、不进 P5 批次 |",
+      "planLine": 317
     }
   ]
 }

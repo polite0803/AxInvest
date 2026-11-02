@@ -184,6 +184,40 @@ impl ServiceDefinition {
         )
     }
 
+    /// 预置 knowledge-vector 接缝（知识库向量检索与入库，宿主独占实现）。
+    ///
+    /// 宿主把 `axagent-search` 的 `VectorStore` + `indexing` 的 embedding 链经本接缝以
+    /// 「文本进、文本出」的形态暴露给插件侧：语义检索 / 关键词检索 / 文本入库 / 集合信息。
+    /// embedding 计算（要 `master_key` 解密 provider 配置）、集合生命周期、**任何删除权**
+    /// 全部留宿主 ⇒ 首批唯一写 op 是 `index_text`，且它**不得隐式建集合**。
+    /// 曾用名 `rag.vector.store` 是任务 #40 的预留位，交付名按 PLAN §56.1-Q1 定为
+    /// `knowledge.vector`（判据只认本函数里这个字面量）。
+    /// 读 op 不设闸；`index_text` 由 worker 分派层按 `write` 校验。
+    pub fn knowledge_vector() -> Self {
+        Self::new(
+            "knowledge.vector",
+            "1.0",
+            "axagent_harness::KnowledgeVectorProvider",
+            "知识库向量：语义检索 / 关键词检索 / 文本入库（写）/ 集合信息",
+        )
+    }
+
+    /// 预置 trajectory-store 接缝（轨迹库只读查询，宿主独占实现）。
+    ///
+    /// 宿主把 `axagent-trajectory` 的 `TrajectoryStorage` 读面经本接缝以**摘要视图**暴露
+    /// （`list` / `get` / `query` / `count` 四个 op）。轨迹是 RL 训练与技能进化的唯一样本源，
+    /// 且 `outcome` / `quality` / `valueScore` 是可写字段 ⇒ 首批**无写 op**（PLAN §56.1-Q4）；
+    /// `steps` / `rewards` / 会话原文整族不过线（裁剪清单见 `trajectory_store` 模块头）。
+    /// 四个 op 全是读面，不设权限闸。
+    pub fn trajectory_store() -> Self {
+        Self::new(
+            "trajectory.store",
+            "1.0",
+            "axagent_harness::TrajectoryStoreProvider",
+            "轨迹库只读：list / get / query / count（返回摘要视图，不含 steps / rewards）",
+        )
+    }
+
     /// 预置 model-provider 接缝（LLM Provider 适配器，按 provider 类型名注册多实例）。
     ///
     /// 注册 ID 为 `model.provider.{provider_type}`（如 `model.provider.deepseek`）。
@@ -1069,6 +1103,52 @@ impl CapabilityRegistry {
     /// 取回 quote.watcher 接缝上的推送集合提供者（若已注册）。
     pub fn get_quote_watcher(&self) -> Option<Arc<dyn crate::QuoteWatcherProvider>> {
         self.provider_as::<dyn crate::QuoteWatcherProvider>("quote.watcher")
+    }
+
+    // ── knowledge.vector 接缝（知识库向量提供者，单实例；唯一写 op index_text 需 write 权限） ──
+
+    /// 注册一个知识库向量提供者（`knowledge.vector` 接缝）。
+    ///
+    /// 宿主把 `VectorStore`（连带 `master_key` 解密出的 embedding provider）经本接缝暴露；
+    /// 外部实现注册同一接缝可整体替换读面，但 embedding 与删除链**不在契约里**
+    /// （`index_text` 须按 PLAN §56.2-2「集合不存在即 Err」实现，不得隐式建集合）。
+    pub fn register_knowledge_vector(
+        &self,
+        provider: Arc<dyn crate::KnowledgeVectorProvider>,
+    ) -> Result<EffectHandle, CapabilityError> {
+        self.register_seam(
+            ServiceDefinition::knowledge_vector(),
+            Arc::new(provider),
+            "knowledge-vector",
+        )
+    }
+
+    /// 取回 knowledge.vector 接缝上的知识库向量提供者（若已注册）。
+    pub fn get_knowledge_vector(&self) -> Option<Arc<dyn crate::KnowledgeVectorProvider>> {
+        self.provider_as::<dyn crate::KnowledgeVectorProvider>("knowledge.vector")
+    }
+
+    // ── trajectory.store 接缝（轨迹库只读提供者，单实例；首批四个 op 全是读面） ──────
+
+    /// 注册一个轨迹库提供者（`trajectory.store` 接缝）。
+    ///
+    /// 宿主把独持的 `TrajectoryStorage` 的读面经本接缝以摘要视图暴露；`Trajectory` →
+    /// `TrajectorySummaryView` 的转换点必须**唯一**（在宿主 provider 内），否则字段裁剪清单
+    /// 会在多处各写一遍并各自漂移。外部实现注册同一接缝即可整体替换。
+    pub fn register_trajectory_store(
+        &self,
+        provider: Arc<dyn crate::TrajectoryStoreProvider>,
+    ) -> Result<EffectHandle, CapabilityError> {
+        self.register_seam(
+            ServiceDefinition::trajectory_store(),
+            Arc::new(provider),
+            "trajectory-store",
+        )
+    }
+
+    /// 取回 trajectory.store 接缝上的轨迹库提供者（若已注册）。
+    pub fn get_trajectory_store(&self) -> Option<Arc<dyn crate::TrajectoryStoreProvider>> {
+        self.provider_as::<dyn crate::TrajectoryStoreProvider>("trajectory.store")
     }
 
     // ── system.prompt 接缝（多实例，按段名注册） ────────────────────────────

@@ -371,6 +371,18 @@ pub use stock_monitor::{
 // ── 实时行情推送集合接缝（`quote.watcher`；WatchPriority 由 astock-data 上收）──
 pub mod quote_watcher;
 pub use quote_watcher::{QuoteWatcherProvider, WatchOutcome, WatchPriority};
+// ── 知识库向量接缝（`knowledge.vector`，曾用名 `rag.vector.store`；只传文本，embedding 归宿主）──
+pub mod knowledge_vector;
+pub use knowledge_vector::{
+    CollectionInfoView, KeywordSearchRequest, KnowledgeChunkView, KnowledgeVectorProvider,
+    VectorIndexOutcome, VectorIndexRequest, VectorSearchOutcome, VectorSearchRequest,
+};
+// ── 轨迹库只读接缝（`trajectory.store`，首批无写 op；视图裁剪与 limit 闸见模块头）──
+pub mod trajectory_store;
+pub use trajectory_store::{
+    TrajectoryCountOutcome, TrajectoryListOutcome, TrajectoryQueryOutcome, TrajectoryQueryView,
+    TrajectoryStoreProvider, TrajectorySummaryView,
+};
 pub mod prompt_guard;
 pub mod provider;
 pub mod provider_continuation;

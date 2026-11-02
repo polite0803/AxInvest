@@ -9,7 +9,10 @@
 //! - **本轮只做「接口化 + 占接缝位」**：唯一实现者是 `VectorStore` 本身（持
 //!   `DatabaseConnection` 的 struct，sqlite-vec 是进程内扩展，出进程即失效）；
 //!   不实现任何外部后端，不把它变成可远程。
-//! - 接缝 id 预留为 `rag.vector.store`（登记进 PLAN §0.7，不进 P5 批次）。
+//! - 接缝 id 当初预留为 `rag.vector.store`，**交付名已改为 `knowledge.vector`**（曾用名与本行
+//!   的预留名只保留在历史登记里；改名裁定见 `PLAN-shell-plus-plugins.md` §56.1-Q1）。判据只有
+//!   一处：`capability_registry.rs` 中 `ServiceDefinition::knowledge_vector()` 的那个字面量。
+//!   登记口径不变（PLAN §0.7 的预留位，不进 P5 批次）。
 //! - 命名去方言：`ensure_fts5_index` / `ensure_collection_hnsw` 带 SQLite 专属特性，
 //!   契约里改名为 `ensure_keyword_index` / `ensure_vector_index`；宿主原方法名保留，
 //!   由 search crate 的 trait impl 纯转接桥接。

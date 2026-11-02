@@ -499,6 +499,30 @@ pub fn plugin_resolve_page_asset(
     })
 }
 
+/// 插件页面清单 —— 逐页声明（`manifest.pages[]`）的只读投影（任务 #75）。
+///
+/// 真相源是 `PluginManifest.pages`，每次调用实时扫描已安装插件清单；**不缓存、不建
+/// 第二套路由表**（禁区 4、`PLAN-shell-plus-plugins.md` §0.7.6）。安装 / 启停 / 卸载
+/// 仍走既有 `plugin_*` 命令（自带护照索引同步与 UI 贡献撤销），此处不造第二套生命周期。
+#[agent_command(domain = plugin, safety = Safe, call_mode = StateOnly, description = "列出插件页面")]
+#[command]
+pub async fn plugin_list_pages(
+    state: State<'_, AppState>,
+) -> Result<Vec<axagent_plugins::types::PluginPagesInfo>, String> {
+    let plugin_manager = state.plugin_manager.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager = plugin_manager.blocking_read();
+        manager.list_plugin_pages().map_err(|e| {
+            String::from(ErrorResponse::from_error(
+                e,
+                crate::commands::error::ErrorCategory::Unrecoverable,
+            ))
+        })
+    })
+    .await
+    .map_err(|e| format!("plugin list pages task panicked: {e}"))?
+}
+
 #[agent_command(domain = plugin, safety = Caution, call_mode = StateInput, description = "更新指定插件")]
 #[command]
 pub async fn plugin_update(

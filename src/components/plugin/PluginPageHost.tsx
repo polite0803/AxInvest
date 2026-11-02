@@ -53,10 +53,9 @@
  *   装载超时 `SANDBOX_LOAD_TIMEOUT_MS`（本批新收的单点，panel 与 page 共用）。
  *   剩下的只有 React 侧的监听/计时接线 —— **改了 srcdoc 容器那两处，请回来复核本文件同名段落**。
  *
- * ⚠ 列表侧（「某包有哪些 pages[]」）本轮**没有**枚举面可用：`list_plugin_pages()` /
- * `plugin_list_pages` 属任务 #75（要改 `manager.rs`，等 #73 交锁）。本容器因此只接
- * 「调用方已经拿着 `PluginPageDto`」的形态，**不**自建 registry / 平行 manifest / 路由表
- * （禁区 4、§0.7.6 的教训）。
+ * ⚠ 列表侧（「某包有哪些 pages[]」）由 `plugin_list_pages` 提供（任务 #75）：该投影实时扫描
+ * `PluginManifest.pages`，本容器只接「调用方已经拿着 `PluginPageDto`」的形态，**不**自建
+ * registry / 平行 manifest / 路由表（禁区 4、§0.7.6 的教训）。
  */
 
 import { DynamicUIStandalone } from "@/components/dynamicUI/DynamicUIStandalone";

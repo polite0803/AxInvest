@@ -2112,6 +2112,24 @@ export interface PluginPageAssetLocationDto {
   absolutePath: string;
 }
 
+/**
+ * `plugin_list_pages` 的返回形状（后端 `plugins::types::PluginPagesInfo`，任务 #75）。
+ *
+ * PluginManager 是权威，本结构只是其清单的只读投影：`pages` 来自 `manifest.pages[]`，
+ * 每次调用实时扫描；前端**不得**据此另建路由表 / 平行 manifest（禁区 4）。
+ * 字段口径与 [`DashboardPluginInfoDto`] 同族：Rust snake_case +
+ * `#[serde(rename_all = "camelCase")]` ⇒ 本类型 camelCase（禁区 13）。
+ */
+export interface PluginPagesInfoDto {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string | null;
+  enabled: boolean;
+  pages: PluginPageDto[];
+}
+
 export interface UpdateOutcomeDto {
   pluginId: string;
   oldVersion: string;

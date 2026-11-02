@@ -170,6 +170,24 @@ pub struct DashboardPluginInfo {
     pub panels: Vec<PluginDashboardPanel>,
 }
 
+/// 插件页面清单条目 —— `plugin_list_pages` 门面的返回形状
+/// （PluginManager 是权威，本结构只是其清单的只读投影，任务 #75）。
+///
+/// 真相源是 `PluginManifest.pages`：逐次调用实时扫描已安装插件清单，
+/// **不存在**第二套 registry / 平行 manifest / 清单缓存
+/// （AGENTS.md 禁区 4、`PLAN-shell-plus-plugins.md` §0.7.6）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginPagesInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub author: Option<String>,
+    pub enabled: bool,
+    pub pages: Vec<PluginPage>,
+}
+
 /// `plugin_read_panel_asset` 的返回形状：面板沙箱 iframe 的内容文本。
 ///
 /// 只应交给 `sandbox="allow-scripts"` 的 iframe，**不得**进主文档执行

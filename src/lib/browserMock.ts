@@ -5227,6 +5227,11 @@ async function executeCommand<T>(
       );
     }
 
+    case "plugin_list_pages":
+      // 列表侧在浏览器模式没有插件安装根 ⇒ 返回空清单（UI 上合法 =「没有页面」）。
+      // 不抛错：这里抛错会让 `npm run dev` 下整个插件页列表报错，与 dashboard_list_plugins 同口径。
+      return [] as T;
+
     // ── Agent Profiles (mock) ──────────────────────────────────────
     case "list_agent_profiles":
     case "list_agent_roles":

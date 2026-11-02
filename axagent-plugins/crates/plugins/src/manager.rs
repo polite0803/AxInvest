@@ -620,6 +620,36 @@ impl PluginManager {
         Ok(out)
     }
 
+    /// 插件页面清单 —— 逐页声明（`manifest.pages[]`，§0.10.2 T3）的只读投影（任务 #75）。
+    ///
+    /// 真相源是 `PluginManifest.pages`：声明了非空页面的插件进入清单，启停位跟随
+    /// PluginManager；清单每次调用实时扫描，不缓存、不建第二份路由表 —— 与
+    /// [`Self::list_dashboard_plugins`] 同形（禁区 4、§0.7.6 的教训）。
+    pub fn list_plugin_pages(&self) -> Result<Vec<crate::types::PluginPagesInfo>, PluginError> {
+        let mut out = Vec::new();
+        for summary in self.list_plugins()? {
+            let Some(root) = summary.metadata.root.as_deref() else { continue };
+            // 单个插件清单读取失败不影响整体列表（与 registry 容错加载同口径）。
+            let Ok(manifest) = load_plugin_from_directory(root) else {
+                tracing::warn!(root = %root.display(), "插件页面清单：插件 manifest 读取失败，跳过");
+                continue;
+            };
+            if manifest.pages.is_empty() {
+                continue;
+            }
+            out.push(crate::types::PluginPagesInfo {
+                id: summary.metadata.id,
+                name: summary.metadata.name,
+                version: summary.metadata.version,
+                description: summary.metadata.description,
+                author: manifest.author,
+                enabled: summary.enabled,
+                pages: manifest.pages,
+            });
+        }
+        Ok(out)
+    }
+
     pub fn discover_plugins(&self) -> Result<Vec<PluginDefinition>, PluginError> {
         Ok(self.plugin_registry()?.plugins.into_iter().map(|plugin| plugin.definition).collect())
     }
@@ -5002,5 +5032,121 @@ mod tests {
             }),
             "非命令帧通道错误不参与回退"
         );
+    }
+
+    /// 任务 #75：`manifest.pages[]` 由已安装插件实时投影进 `list_plugin_pages` ——
+    /// 与 `list_dashboard_plugins` 同形，没有第二套 registry / 清单缓存。
+    #[test]
+    fn list_plugin_pages_projects_installed_manifest_pages() {
+        let temp = temp_dir("pageproj");
+        let installed_root = temp.join("plugins").join("installed");
+
+        // ① 声明了 pages 的插件（bundle + schema 各一页）。
+        let page_pack = installed_root.join("page-pack");
+        std::fs::create_dir_all(page_pack.join("web")).expect("创建插件目录");
+        std::fs::write(page_pack.join("web").join("index.html"), "<html></html>")
+            .expect("写入页面资产");
+        std::fs::write(
+            page_pack.join(MANIFEST_FILE_NAME),
+            r#"{
+                "name": "page-pack",
+                "version": "2.3.4",
+                "description": "pages",
+                "author": "ax",
+                "pages": [
+                    {
+                        "id": "chart",
+                        "title": "Chart",
+                        "entry": "web/index.html",
+                        "loading": "bundle"
+                    },
+                    {
+                        "id": "order",
+                        "title": "Order",
+                        "entry": "opc.order-form",
+                        "loading": "schema"
+                    }
+                ]
+            }"#,
+        )
+        .expect("写入 manifest");
+
+        // ② 未声明 pages 的插件：即使有 dashboard_panels 也不得混入页面清单。
+        let panel_pack = installed_root.join("panel-pack");
+        std::fs::create_dir_all(&panel_pack).expect("创建插件目录");
+        std::fs::write(
+            panel_pack.join(MANIFEST_FILE_NAME),
+            r#"{
+                "name": "panel-pack",
+                "version": "1.0.0",
+                "description": "panels",
+                "dashboard_panels": [
+                    { "id": "p1", "title": "P1", "componentName": "panel-pack.p1" }
+                ]
+            }"#,
+        )
+        .expect("写入 manifest");
+
+        // ③ 坏插件：registry 里登记了记录，但安装目录已不存在 ⇒ 发现期按陈旧记录剔除，
+        // 不产生加载失败，其余插件照常返回（单个坏插件不拖垮整份清单）。
+        let manager = PluginManager::new(PluginManagerConfig::new(temp.clone()));
+        let ghost_root = installed_root.join("ghost-pack");
+        let mut registry = InstalledPluginRegistry::default();
+        registry.plugins.insert(
+            "ghost-pack".to_string(),
+            InstalledPluginRecord {
+                kind: PluginKind::External,
+                id: "ghost-pack".to_string(),
+                name: "ghost-pack".to_string(),
+                version: "0.0.1".to_string(),
+                description: "ghost".to_string(),
+                install_path: ghost_root.clone(),
+                source: PluginInstallSource::LocalPath { path: ghost_root },
+                installed_at_unix_ms: 1,
+                updated_at_unix_ms: 1,
+                integrity: None,
+            },
+        );
+        manager.store_registry(&registry).expect("写 registry");
+
+        let list = manager.list_plugin_pages().expect("页面清单投影应成功");
+
+        // ① 声明了 pages 的插件进入清单，`pages` 逐字段相等。
+        let entry = list
+            .iter()
+            .find(|plugin| plugin.name == "page-pack")
+            .expect("声明了页面的已安装插件应进入清单");
+        assert_eq!(entry.version, "2.3.4");
+        assert_eq!(entry.description, "pages");
+        assert_eq!(entry.author.as_deref(), Some("ax"));
+        assert_eq!(entry.pages.len(), 2);
+        assert_eq!(
+            entry.pages[0],
+            crate::types::PluginPage {
+                id: "chart".to_string(),
+                title: "Chart".to_string(),
+                entry: "web/index.html".to_string(),
+                loading: crate::types::PluginPageLoading::Bundle,
+            }
+        );
+        assert_eq!(
+            entry.pages[1],
+            crate::types::PluginPage {
+                id: "order".to_string(),
+                title: "Order".to_string(),
+                entry: "opc.order-form".to_string(),
+                loading: crate::types::PluginPageLoading::Schema,
+            }
+        );
+
+        // ② 未声明 pages 的插件不出现；无页面声明的条目不得混入投影。
+        assert!(list.iter().all(|plugin| !plugin.pages.is_empty()));
+        assert!(!list.iter().any(|plugin| plugin.name == "panel-pack"));
+
+        // ③ 坏插件被跳过，其余插件照常返回。
+        assert!(!list.iter().any(|plugin| plugin.name == "ghost-pack"));
+        assert!(!list.is_empty(), "坏插件不得拖垮其余插件的页面投影");
+
+        let _ = std::fs::remove_dir_all(&temp);
     }
 }

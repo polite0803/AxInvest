@@ -262,8 +262,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | `message.callback` | `axagent-core/crates/harness/src/platform_callback.rs:21` | 接缝 `message.callback`（内置与插件同入口） | 2 | — |
 | `webhook.dispatch` | `axagent-core/crates/harness/src/webhook_subscription.rs:154` | 接缝 + `axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9` | 4 | — |
 | `system.prompt` | `axagent-core/crates/harness/src/context_contributor.rs:22` | 接缝 `system.prompt.{段名}` | 3 | — |
-| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:2450` 起 `remote_method_not_supported` |
-| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:2542`–`:2590` 一批 `remote_method_not_supported`） |
+| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:2746` 起 `remote_method_not_supported` |
+| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:2838`–`:2886` 一批 `remote_method_not_supported`） |
 | `workflow.optimizer` | `axagent-core/crates/harness/src/workflow_optimization.rs:80` | 接缝 | 2 | 同上 |
 | `workflow.sandbox` | `axagent-core/crates/harness/src/workflow_evolution.rs:263` | 接缝 | 4 | — |
 | `workflow.business_rule` | `axagent-core/crates/harness/src/business_rules.rs:71` | 接缝（已有 e2e worker 产物） | 3 | — |
@@ -273,7 +273,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | 建议能力 ID | 契约 | 键控分发点 | 内置实现者 | K4 代价（帧协议/主权） |
 |---|---|---|---|---|
 | `notify.channel` | `axagent-core/crates/harness/src/notification_channel.rs:195` | `axagent-runtime/crates/notification/src/dispatcher.rs:114` + `:143 register_channel` + `:149 unregister(&str)` | 6 | **最低**：DTO 全可序列化；去重/冷却留宿主 |
-| `market.vendor` | `axagent-quant/crates/astock-data/src/vendors/mod.rs:7 StockVendor` | `astock-data/src/lib.rs:863 register_vendor(&str)` + `:1672` 键控取回 | 16 | `AS_OF` task-local 必须改显式入参；门面 `MarketDataProvider`（`harness/src/market_data.rs:192`）不单列 |
+| `market.vendor` | `axagent-quant/crates/astock-data/src/vendors/mod.rs:7 StockVendor` | `astock-data/src/lib.rs:863 register_vendor(&str)` + `:1672` 键控取回 | 16 | `AS_OF` task-local 必须改显式入参；门面 `MarketDataProvider`（`harness/src/market_data.rs:197`）不单列 |
 | `search.source` | `axagent-ai/crates/agent/src/search_provider.rs:95` | `axagent-ai/crates/agent/src/search_orchestrator.rs:28`（`HashMap<SourceType, Arc<dyn SearchProvider>>`） | 4 | `rate_limit()`/计费属宿主。**2026-11-02 实测分档**：`search()` 侧结果 400–600 B × 默认 `max_results` 10 ⇒ **①，可直接走接缝**；`extract_content(url)` 返回大文本（今天 50 KB 截断）⇒ **②**，需**分页/游标**而非分块。DTO（`search_provider.rs:38-57`、`research_state.rs:416,76`）全 serde✓。前置 **D1** |
 | `image.gen` | `axagent-ai/crates/providers/src/image_gen.rs:64` | `name()` 自述键 + providers 注册面 | 2 | **2026-11-02 实测**：`url` 形态 ≈200 B ⇒ **①**；`base64` 形态 **1.3–4 MB × n** ⇒ ②（接近 `MAX_FRAME_LEN = 64 MiB` 的 `plugin-proto/src/lib.rs` 的 `pub const MAX_FRAME_LEN`，但 n 张累加会顶穿）⇒ 裁定取「只回 url / 宿主侧落盘引用」形态，**保 b64 才需要 D2 分块**。DTO（`image_gen.rs:24-36,45-54`）全 serde✓；provider 凭证 scope 留宿主 |
 | `document.parser` | `axagent-core/crates/harness/src/search_sources.rs:62` | **证据行改定（§14.4 + §24.2 两次裁定；本行此前仍是旧行）**：`axagent-infra/crates/document-parser/src/lib.rs:533` 只是 ext→MIME 的**字符串映射表**、块内**不构造实现类型** ⇒ 真正的行为选择点是同文件 `:61` 的 `match mime_type`，而该块**同样无构造分支** ⇒ **K2 的 ⑧（factory-match）在结构上永不命中 = 已知漏检族第 4 例**（该形态「按字符串 `match` 选行为、但不构造实现类型」已补进镜像表 `countRule.k2Caveat`）。⇒ **本行准入判据改写为：K1 成立（外部实现者 1）+ K3 成立；不以 K2 命中为准**（`#54` 已裁「检测器跟着登记表走」是禁止方向，见 §24.2 第 1 条） | 1 | 37 分支是**编译期穷举** ⇒ K3 今天要改主壳，正是本条要拆的理由；另有两套 `OnceLock` 全局（`search/src/sources.rs:22`、`tools/src/parser.rs:13`）和一处硬编码绕过（`commands/knowledge.rs:1169`） |
@@ -2122,3 +2122,52 @@ cargo fmt --check -p axagent-plugin-proto        # 在 axagent-plugins/ 根下�
 12 个 A 批方法：`get_financials` · `get_money_flow` · `get_north_bound_holding` · `get_dragon_tiger` · `get_margin_balance_trend` · `get_margin_data` · `get_holder_count` · `get_block_trades` · `get_pledge_data` · `get_sector_info` · `get_news` · `market_snapshot_batch`。
 
 **既有 3 个 op 的 as-of 债（登记，不在本批改）**：`get_quote` / `get_klines` / `search_stock` 的 trait 签名不带 `as_of`；改它们会牵动 analysis-engine 中大量 `dyn MarketDataProvider` 调用点。等插件侧 SDK 适配器落地时一并收口（届时 analysis-engine 在插件进程内通过 SDK 实现同一 trait）。本批新增方法**全部带 as_of**，不扩大该债。
+
+## 45. `#83` A/B 批交付账：`market.quote` 首批 12 个个股数据 op（2026-11-02；报告 `.tmp/res83a-report.md` / `.tmp/res83b-report.md`）
+
+### 45.1 两批落点与提交
+
+| 批 | 提交 | 文件 | 内容 |
+|---|---|---|---|
+| A | `0e55104b8` | `harness/src/market_data.rs`（+169/−1）、`astock-data/src/lib.rs`（+196） | trait 追加 **12 个方法**（带默认「不支持」实现，末参 `as_of: Option<AsOfContext>`）；`AStockClient` 逐条用 `with_optional_asof` 包裹固有方法（全限定调用防同名递归） |
+| B | `f38e295ac` | `plugins/src/worker.rs`（+540/−2） | `dispatch_seam` 的 `market.quote` 追加 **12 个分支** + `deserialize_as_of_arg` + 7 条新用例 |
+
+12 个 op：`get_financials` · `get_money_flow` · `get_north_bound_holding` · `get_dragon_tiger` · `get_margin_balance_trend` · `get_margin_data` · `get_holder_count` · `get_block_trades` · `get_pledge_data` · `get_sector_info` · `get_news` · `market_snapshot_batch`。args 键沿用 **snake_case**；`days` / `limit` 必填（不设缺省）。
+
+### 45.2 `as_of` 双形态（跨进程显式透传）
+
+| 输入 | 行为 |
+|---|---|
+| 键缺失 / `null` | `None`（实盘） |
+| `"YYYY-MM-DD"` | `AsOfContext::parse`（拒未来日期） |
+| 对象 | 反序列化 `AsOfContext`，再用 `AsOfContext::new(date, source)` **补回未来日期校验**，最后 `.with_data_scope(scope)` 保留范围 |
+| 其它类型 | `SEAM_CALL_INVALID_ARGS`，说清只接受字符串或对象 |
+
+**未来日期补校验是 leader 补的**（B 批执行者按「对象走 `from_value`」实现，绕过了 `AsOfContext::new` 的契约校验）：新增用例 `market_quote_object_as_of_rejects_future_date`，断言 `2099-01-01` 对象被 `SEAM_CALL_INVALID_ARGS` 拒绝且**不触达 provider**。补丁后 `cargo clippy -p axagent-plugins --all-targets -D warnings` EXIT=0，`worker::tests` **53 passed**（46 基线 + 6 新增 + 1 leader 补例）。
+
+### 45.3 验证
+
+| 命令 | EXIT | 结果 |
+|---|---|---|
+| `cargo check -p axagent-harness` / `clippy --all-targets` | 0 / 0 | `Checking axagent-harness` 命中 |
+| `cargo check -p axagent-astock-data` / `-p axagent-analysis-engine` | 0 / 0 | 均命中 `Checking`；analysis-engine 110s |
+| `clippy -p axagent-astock-data -p axagent-analysis-engine --all-targets` | 0 | 42s |
+| `cargo check -p axagent-plugins` / `clippy --all-targets` | 0 / 0 | 3s / 5s |
+| `cargo test -p axagent-plugins --lib worker::tests` | 0 | **53 passed**；`cargo test` 用 `Compiling` 而非 `Checking` 证明真实重编 |
+
+A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` 升 error）⇒ 参数改 `_` 前缀后全绿；B 批首轮 clippy 曾报 2 处 `clone_on_copy` ⇒ 改 `(*guard)` 后全绿。两次都不是签名的语义变化。
+
+### 45.4 B 批提出的六项，leader 裁定
+
+1. **对象形态未来日期**：已修（见 45.2）。
+2. **`to_value` 的 DTO 名风格不统一**（元素名 vs `Vec<X>`）：只出现在「序列化失败」的不可达文案里，**不统一**，避免无收益 churn。
+3. **`limit` / `days` 必填**：**保持必填**。缺省值会把调用方漏参静默成「默认窗口」，与「缺失不得兜底」的口径冲突。
+4. **新 op 的接缝预算**：暂落 `DEFAULT_SEAM_TIMEOUT_MS = 15s`；实跑股票插件后再按实测补 `SEAM_OP_TIMEOUT_OVERRIDES`（不在本批猜）。
+5. **`codes` 无上限/去重**：属接缝契约层，随 P6.1 迁移批量裁定。
+6. **`get_news` 在 `data_scope=structured` 下是否截断**：由实现方（`AStockClient`）决定；分派层只透传，不二次判断。
+
+### 45.5 重锚与遗留
+
+- `worker.rs` 的 evidence 整段后移 **+296 行**（`remote_method_not_supported` 2450→2746、evolver 区间 2542/2590→2838/2886）；`harness/src/market_data.rs` 的 `pub trait MarketDataProvider` **192→197**（A 批在 trait 前加了 import/文档行）。已 `--repin-code --apply` 并同批改正文与 PLAN:265/266/276。
+- **未验证**：主 crate（`src-tauri`）未实编。本批只改 harness/astock-data/plugins，`MarketDataProvider` 是既有 trait 的增量默认方法，主壳不引用新方法；风险面在「trait 对象体积/编译」，留给下一次主 crate 窗口。
+- **剩余 25 个数据 op**（含 `get_index_quotes_outcome` 需先上收 `DataOutcome`、`market_list_page` 改命名对象返回）、`market.ops` 运维接缝、插件侧 SDK 类型化助手 —— 均未开工。

@@ -2502,3 +2502,47 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 | `cargo test -p axagent --lib stock_workflow::trading_engine_service` | 0 | `1 passed; 0 failed; 837 filtered out`（`.tmp/res111-tdesvc-test.log`） |
 
 ⇒ 两条接缝的宿主服务与 `data-verifier` 判据都已在**真测试二进制**上跑通（不是 `--no-run`）。⚠ 遗留可选加固：`data_verifier_factor_scores_override_and_rank` 无「嵌层整数 + NaN」用例（res106 §5 处置 3）。
+
+## 54. #35 股票迁出的可执行分解与八条裁定（2026-11-03；报告 `.tmp/res109-migration-plan.md`，454 行）
+
+### 54.1 判据纠偏（最重要）
+
+- **152 不是「152 个待补接缝」**。按被引用模块符号归桶（加总闭合）：**O=45**（`tools/opc.rs` 41 + `fleet/mod.rs` 4，import 的是 `analysis_engine::opc::`，因审计按 crate 名归到股票名下）⇒ **股票迁移一条不许动**；**H=35**（宿主自有：`services.rs` 装配与 cron callback 15 + `state.rs` 6 + `app_state.rs` 6 + `gateway` 2 + 其余各 1）⇒ 按现 `ownedRe` 口径**结构性不可消减**；**M=34**；**U=21**；**X=8**；**P=9**。
+- ⇒ **迁移可消减上限 = 107 处**；B1–B7 全做完的现实终态 **≈96 处 / ≈18 文件**；**下界锁死 ≈83**。
+- ⚠ 原来写的「改写 152 处主壳引用」当验收，**永远不可能通过**。判据改为：**U/M/X/P 四桶按名单归零；H 桶 = 一份逐条点名的白名单；O 桶随 #32 另收**。
+- 两条审计脚本瑕疵（登记，暂不改判据口径）：① `audit-l1-blockers.mjs:67-68` 只剔行首注释 ⇒ `background_tasks.rs:266` 的 `///` 行内文档被计入 ⇒ **152 里含 1 处假阳性（真实 151）**；② 28 文件按行号回读只有 **78 处**能在该行匹配到 `axagent_<域crate>::<模块>`，余 74 处是多行 `use {…}` 续行 / 裸前缀 / `AppState` 字段类型行 ⇒ **桶边界有 ±5 不确定**。因此**逐行点名只用于 B1 的 13 处**，其余批次一律按**文件级**承诺。
+
+### 54.2 八条裁定
+
+| # | 事项 | 裁定 |
+|---|---|---|
+| R1 | 域数据落库通道（`state.harness.db()` 在 `stock_analysis.rs` 单文件 **100 处**，涉及 ≥14 张表） | **方向采纳但分两批，不许一步做成 KV 大桶**：第一批先处置既存半截工程 `session.store`（注册口 `capability_registry.rs:1036`，但 `dispatch_seam` **0 处**分支 ⇒ 插件根本调不到）——要么补分派支、要么显式摘除；第二批再设计 `domain.store`：**命名空间白名单 + 每命名空间声明 DTO 类型名与 `schema_version` + 宿主按注册类型校验后才落库**（守住「ORM 不过线」与表级类型约束）。未裁定完之前 **#35 视为不可开工** |
+| R2 | 凭证 4 字段跨进程 | **不过线**（沿用 §44.2「pub 字段不是方法，永不跨进程」）。走宿主 secret 注入 + 清单 `config`；`market.ops` 只暴露「已注入与否」的只读诊断。理由：op 参数会落进 `trajectory` 记录 |
+| R3 | 插件任务路由（`jobs.execution`） | **开**，但只对 `stock-` 前缀 `task_type` 生效，14 个种子 id 仍走宿主 handler；**排在 B2 之后**（不开 ⇒ 插件建的任务能列能删不能跑，是第二条「半条链」）。执行**触发权**仍在宿主，不与 §47.2 裁定 1 冲突 |
+| R4 | `workflow.hook`（宿主→插件回调） | 排 **B4 之后、B6 之前**；首批只 `pre_run` + `on_end`；`post_step` 在热路径（每步一次）默认关，等 B3 的每订阅者超时/丢弃计数落地再谈 |
+| R5 | 审计口径 | **不扩 `ownedRe`**，改为 `audit-l1-blockers.mjs` 加 `hostOwnedAllowlist`（键 = file + 锚文本，**不含行号**，与 `component-neutrality-allowlist.json` 同族）。白名单**可审**，正则扩面**不可审** |
+| R6 | 前端 barrel | **拆，不留垫片**；宿主侧域类型一律走 `src/types/generated/` 生成物。留 `export *` = 宿主仍编译期依赖域文件 ⇒ 54 处只降不零 |
+| R7 | B5 的 41 处 `tools/opc.rs` | **归 #32（OPC）**。B5 消减承诺从 −49 改为 **−8**（`audit` 4 + `astock_data` 3 + `capability_pack_defs` 1），不许虚报终态 |
+| R8 | 审计产物日期命名 | 现状用 UTC ⇒ 同日重跑覆盖既有快照，且 git 里表现为 modify 而非 add，与「审计报告 = 时点快照」语义冲突。改为本地日（`Intl.DateTimeFormat('sv')`）+ 同日二次跑加 `-HHMM` |
+
+### 54.3 批次表与首刀（B1 不是接缝批）
+
+| 批次 | 名称 | 前置 | 消减反向阻塞 |
+|---|---|---|---|
+| **B1** | **公用件上收（首刀）**：`trading_calendar` / `task_cancel` / `as_of` 运行层 / K 线与风险数学 / `NewsItem` 五族 → harness，原处变 `pub use` 垫片 | 无 | **−13 处 / −4 文件**（可逐行点名：`finance.rs:9/13/1180/1192`、`background_tasks.rs:8/350/916`、`batch-rerun.rs:44/418/716`、`news_archive_sink.rs:12/13`、`validate-backfill.rs:1301`） |
+| B2 | `market.ops` + `stock.monitor` + `quote.watcher` 三接缝 | B1 | −6～−9 |
+| B3 | 事件面补强（第四跳 + 每订阅者超时 + 丢弃计数） | B2 | 0（但它是 B6 的安全前提） |
+| B4 | L1 插件打包（本体搬迁，`plugins/stock/`） | B1+B2 | 0（走 ownedRe 桶） |
+| B5 | MCP 直通 + 运维面收口 | B4 | **−8**（R7） |
+| B6 | `AppState` 摘 6 个域字段 + 测试替身同步 | B1–B5 | −14 |
+| B7 | 算法接缝 + P 桶随本体 | B4 + **R1 已裁定** | −9 |
+| B8 | 前端收口（54 处） | B4 | 前端桶（与 152 不同轴） |
+
+**为什么首刀是 B1 而不是接缝批**：B1 零接缝依赖、零语义变更、能**当场把 152 降到 ≈139** 且 13 处点得到行号（逐字保真法沿用 §44.1 的三段区间 sha1 对照）；而 `stock.monitor` / `quote.watcher` 落在域内路径，**按设计就不降读数**（只保证不抬高）——把它们当首刀会造成「交付了但读数没动、判据看着像失败」的假进展。B1 同时是 B2 的前置（否则 B2 会在 `commands/stock_workflow/` 里再造一份日历，违反禁区 12）。
+
+### 54.4 其它实跑事实
+
+- 主 crate 测试目标已实跑：`data_verifier` 4 passed、`workflow_run_service` 5 passed、`trading_engine_service` 1 passed（§53.4）。
+- 注册表命令总数 **1543**；股票迁完后 **1543 − 304 = 1239**（⚠ 其中已含 `screenshot_diagnosis` 8 + `decision_gates` 3 + `workflow_template` 16 三类跨域命令，**不得二次扣**）。
+- 本体体量：域自有 Rust 引用 **450 处 / 39 文件**；前端域自有 **293 文件 / 84,873 行**。
+- res104 的 `monitor.rs` 行号有漂移（`apply_panel_runtime_vars` 记 `:432`，盘上实测 `:348` 起）⇒ 实现批以盘上为准。

@@ -8,7 +8,12 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::core_error::Result;
+use crate::as_of::AsOfContext;
+use crate::core_error::{AxAgentError, Result};
+use crate::stock_market_types::{
+    BlockTrade, DragonTigerEntry, HolderCount, MarginData, MoneyFlow, NewsItem, NorthBoundHolding,
+    PledgeData, SectorInfo,
+};
 
 // ── DTOs ─────────────────────────────────────────────────────────────────
 
@@ -206,6 +211,169 @@ pub trait MarketDataProvider: Send + Sync {
 
     /// 搜索股票
     async fn search_stock(&self, keyword: &str) -> Result<Vec<StockSearchResult>>;
+
+    // ── 个股数据面（P6.1 A 批：全部带默认「不支持」实现）────────────────
+    // 每个方法的末参 `as_of`：`None` 表示实盘（live）；`Some` 表示按该日期
+    // 截止（as-of 回放）。跨进程后插件读不到宿主 task_local，必须显式透传。
+
+    /// 获取个股财务报告序列（按报告期倒序由实现方决定）。
+    ///
+    /// `as_of = None` 为实盘，`Some` 则按披露日截止回放；空 `Vec` 表示无报告数据。
+    async fn get_financials(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<FinancialReport>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_financials 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取个股最近一日资金流。
+    ///
+    /// `as_of = None` 为实盘，`Some` 按该日截止回放；`Ok(None)` 表示业务上无该数据，非错误。
+    async fn get_money_flow(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Option<MoneyFlow>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_money_flow 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取个股北向持股快照。
+    ///
+    /// `as_of = None` 为实盘，`Some` 按该日截止回放；`Ok(None)` 表示无持仓数据，非错误。
+    async fn get_north_bound_holding(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Option<NorthBoundHolding>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_north_bound_holding 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取**个股**龙虎榜记录（全市场榜单不在此接口内）。
+    ///
+    /// `as_of = None` 为实盘，`Some` 按该日截止回放；空 `Vec` 表示未上榜或无数据。
+    async fn get_dragon_tiger(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<DragonTigerEntry>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_dragon_tiger 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取个股近 `days` 个交易日的融资融券余额序列。
+    ///
+    /// `as_of = None` 为实盘，`Some` 按该日截止回放；空 `Vec` 表示无序列数据。
+    async fn get_margin_balance_trend(
+        &self,
+        _stock_code: &str,
+        _days: u32,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<MarginData>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_margin_balance_trend 未实现（该提供者不支持此数据面）"
+                .into(),
+        ))
+    }
+
+    /// 获取个股最新一期融资融券数据。
+    ///
+    /// `as_of = None` 为实盘，`Some` 按该日截止回放；`Ok(None)` 表示非两融标的或无数据，非错误。
+    async fn get_margin_data(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Option<MarginData>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_margin_data 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取个股股东户数（最新一期）。
+    ///
+    /// `as_of = None` 为实盘，`Some` 按公告日截止回放；`Ok(None)` 表示截止日前无披露，非错误。
+    async fn get_holder_count(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Option<HolderCount>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_holder_count 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取个股大宗交易记录。
+    ///
+    /// `as_of = None` 为实盘，`Some` 按该日截止回放；空 `Vec` 表示无大宗交易数据。
+    async fn get_block_trades(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<BlockTrade>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_block_trades 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取个股股权质押数据。
+    ///
+    /// `as_of = None` 为实盘，`Some` 按该日截止回放；`Ok(None)` 表示无质押数据，非错误。
+    async fn get_pledge_data(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Option<PledgeData>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_pledge_data 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取个股所属板块/行业信息。
+    ///
+    /// `as_of = None` 为实盘，`Some` 按该日截止回放；`Ok(None)` 表示无板块归属，非错误。
+    async fn get_sector_info(
+        &self,
+        _stock_code: &str,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Option<SectorInfo>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_sector_info 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 获取个股新闻，最多 `limit` 条。
+    ///
+    /// `as_of = None` 为实盘，`Some` 按发布时间截止回放；空 `Vec` 表示无新闻数据。
+    async fn get_news(
+        &self,
+        _stock_code: &str,
+        _limit: u32,
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<NewsItem>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::get_news 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 批量获取多只股票的最新行情快照。
+    ///
+    /// `as_of = None` 为实盘，`Some` 按该日截止回放；空 `Vec` 表示无可用快照（不保证与入参等长）。
+    async fn market_snapshot_batch(
+        &self,
+        _codes: &[String],
+        _as_of: Option<AsOfContext>,
+    ) -> Result<Vec<StockQuote>> {
+        Err(AxAgentError::Provider(
+            "MarketDataProvider::market_snapshot_batch 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
 }
 
 // ── MarketDataStreamer Trait (P3: WebSocket 升级架构占位) ────────────────

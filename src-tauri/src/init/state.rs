@@ -1769,7 +1769,7 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         match axagent_harness::get_capability_registry().get_event_dispatcher() {
             Some(dispatcher) => {
                 let workflow_run: Arc<dyn axagent_harness::WorkflowRunProvider> =
-                    Arc::new(crate::init::workflow_run::WorkflowRunService::new(
+                    Arc::new(crate::commands::stock_workflow::workflow_run_service::WorkflowRunService::new(
                         work_engine.clone(),
                         Arc::new(sea_db.clone()),
                         dispatcher,

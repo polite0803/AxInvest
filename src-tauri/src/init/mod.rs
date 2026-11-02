@@ -20,7 +20,6 @@ pub mod state;
 pub mod stock_automation_cron_seed;
 pub mod trigger_recovery;
 pub mod workflow_injections;
-pub mod workflow_run;
 
 pub use cognitive_router_init::{
     COGNITIVE_L1_DOMAIN_ROUTER_ID, COGNITIVE_L2_CLUSTER_ROUTER_ID,

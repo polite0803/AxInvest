@@ -244,8 +244,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 
 | 口径 | 命中 | 备注 |
 |---|---|---|
-| K1：`pub trait` 总数（8 根 2012 个 `.rs`） | **318** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。**2026-11-02 `#81` 再升 1（2009→2010）**：行情 DTO 上收新增 `harness/src/stock_market_types.rs`；`astock-data/src/types.rs` 保留为垫片（未删文件），故只 +1。**同日 C 批再升 1（2010→2011）**：`DataOutcome` 上收新增 `harness/src/data_outcome.rs`；`astock-data/src/outcome.rs` 保留为垫片。**同日 `jobs.store` 接缝再升 2 项**：新增 `harness/src/jobs_store.rs`（文件 +1）与 `JobStoreProvider`（trait +1）⇒ **2012 / 318**。 |
-| K1 + 有非 harness、非测试实现者 | **234** | ⚠ 这一档**不能**当能力数。~~232 出自一次性 census 工件（`.tmp/traits-full.json`，未入库 ⇒ 谓词无法从仓内代码复现）~~ ⇒ **该说法已作废（`#61` + `#66` 落地后）**：谓词已入库为 `k1DeclaredExternalImplTraitCount`，`--dump-readings` 在现树复现 = **233**（`#62` 后：ToT 拆成两名、两端都仍有生产 impl ⇒ +1），且与本门 audit 侧输出**排序名单逐字相等**（`#66` 的 4.2 档，差分探针 + 两条命令背靠背 + 扫描面常量逐项对照，三条同源性证据齐）⇒ **233 现在是可复算值**，锚点**具备升 `hard:true` 的条件**（升不升、用哪个数由我在收口时一次定）。另两个历史数**只留作解释、不再与 233 并列**：**210** = 单趟扫描缺陷（当时同谓词**两趟交并** = 232，差值恰 **22**；`#62` 后未重测单趟读数）；**269** = 门里最严格的读法（不要求 trait 声明面、不排 std/派生噪声名），**不作文档该锚点值**。⚠ 处置次序仍不能反：**先让谓词可复算，再升 hard** —— 反向必先假红。**同日 `jobs.store` 再 +1（233→234）**：`JobStoreProvider` 在 `runtime-core` 有生产 impl。 |
+| K1：`pub trait` 总数（8 根 2014 个 `.rs`） | **319** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。**2026-11-02 `#81` 再升 1（2009→2010）**：行情 DTO 上收新增 `harness/src/stock_market_types.rs`；`astock-data/src/types.rs` 保留为垫片（未删文件），故只 +1。**同日 C 批再升 1（2010→2011）**：`DataOutcome` 上收新增 `harness/src/data_outcome.rs`；`astock-data/src/outcome.rs` 保留为垫片。**同日 `jobs.store` 接缝再升 2 项**：新增 `harness/src/jobs_store.rs`（文件 +1）与 `JobStoreProvider`（trait +1）⇒ **2012 / 318**。**同日 `workflow.run` 再升 2 项**：新增 `harness/src/workflow_run.rs`（文件 +1）与 `WorkflowRunProvider`（trait +1）⇒ **2013 / 319**。**同日宿主服务再升 1（2013→2014）**：新增 `src-tauri/src/commands/stock_workflow/workflow_run_service.rs`。 |
+| K1 + 有非 harness、非测试实现者 | **235** | ⚠ 这一档**不能**当能力数。~~232 出自一次性 census 工件（`.tmp/traits-full.json`，未入库 ⇒ 谓词无法从仓内代码复现）~~ ⇒ **该说法已作废（`#61` + `#66` 落地后）**：谓词已入库为 `k1DeclaredExternalImplTraitCount`，`--dump-readings` 在现树复现 = **233**（`#62` 后：ToT 拆成两名、两端都仍有生产 impl ⇒ +1），且与本门 audit 侧输出**排序名单逐字相等**（`#66` 的 4.2 档，差分探针 + 两条命令背靠背 + 扫描面常量逐项对照，三条同源性证据齐）⇒ **233 现在是可复算值**，锚点**具备升 `hard:true` 的条件**（升不升、用哪个数由我在收口时一次定）。另两个历史数**只留作解释、不再与 233 并列**：**210** = 单趟扫描缺陷（当时同谓词**两趟交并** = 232，差值恰 **22**；`#62` 后未重测单趟读数）；**269** = 门里最严格的读法（不要求 trait 声明面、不排 std/派生噪声名），**不作文档该锚点值**。⚠ 处置次序仍不能反：**先让谓词可复算，再升 hard** —— 反向必先假红。**同日 `jobs.store` 再 +1（233→234）**：`JobStoreProvider` 在 `runtime-core` 有生产 impl。**同日 `workflow.run` 再 +1（234→235）**：`WorkflowRunProvider` 在 `src-tauri/src/init/workflow_run.rs` 有生产 impl。 |
 | K1 + K2（键控站点，四次扫描合并去漏报） | **51** 个 trait 面 | 含 15 条已建接缝的 trait。⚠ **2026-11-02 `#33` 实测：这一档不可作论据** —— 谓词真身是**未入库的一次性工件** `.tmp/capability-register3.cjs:44-82`（仓内无处复跑，与 §0.7.2 的 232 同病根），且它要求签名/块内出现 `dyn T` ⇒ 198 条里 **21 条假阴性**，把 PLAN B/C 组落入该桶的 **13 条契约全部吞掉** ⇒ **不许**用「无键控点」论证「这些 trait 只是分层解耦」。谓词入库 = 任务 **#57**；逐条分桶结论见 **§14** |
 | 51 → 同族合并 + K3/K4 判定 | **23 条能力**（另有 3 条移入 §0.7.9 债档，只登记不计数） | ⇒ 本节表格 A+B+C 三组 |
 | （对照）今天就能远程跑的接缝 | **13** | `axagent-plugins/crates/plugins/src/worker.rs:133` `SUPPORTED_REMOTE_SEAMS` |
@@ -262,8 +262,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | `message.callback` | `axagent-core/crates/harness/src/platform_callback.rs:21` | 接缝 `message.callback`（内置与插件同入口） | 2 | — |
 | `webhook.dispatch` | `axagent-core/crates/harness/src/webhook_subscription.rs:154` | 接缝 + `axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9` | 4 | — |
 | `system.prompt` | `axagent-core/crates/harness/src/context_contributor.rs:22` | 接缝 `system.prompt.{段名}` | 3 | — |
-| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:3489` 起 `remote_method_not_supported` |
-| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:3581`–`:3629` 一批 `remote_method_not_supported`） |
+| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:3668` 起 `remote_method_not_supported` |
+| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:3760`–`:3808` 一批 `remote_method_not_supported`） |
 | `workflow.optimizer` | `axagent-core/crates/harness/src/workflow_optimization.rs:80` | 接缝 | 2 | 同上 |
 | `workflow.sandbox` | `axagent-core/crates/harness/src/workflow_evolution.rs:263` | 接缝 | 4 | — |
 | `workflow.business_rule` | `axagent-core/crates/harness/src/business_rules.rs:71` | 接缝（已有 e2e worker 产物） | 3 | — |
@@ -2344,3 +2344,60 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 4. **主 crate 已实编（2026-11-02 19:53）**：`cargo check -p axagent` **EXIT=0**，16m13s，日志 `.tmp/res91-maincheck.log`（4535 B）命中 `Checking axagent v3.0.0` ⇒ `state.rs` 三处改动（market.quote 注册、jobs.store 注册、`protect_ids(...).await`）类型检查通过。注：该次编译包含工作树中他人未提交的 stock-analysis 改动；若有错需按归属分流。
 5. **`worker.rs` 既有 rustfmt 漂移 9 处**（1691 / 2068 / 6658 / 6680 / 6711 / 6898 / 7274 / 7303 / 7317），非本批引入，本批新增代码 0 差异；未修（属其它批次改动面）。
 6. 未跑全量 workspace 门禁；未推送。
+
+## 50. `workflow.run` 接缝交付账（2026-11-02；报告 `.tmp/res90-workflow-design.md` / `.tmp/res93-report.md` / `.tmp/res94-report.md` / `.tmp/res95-report.md`）
+
+### 50.1 落点与提交
+
+| 批 | 提交 | 文件与增删 | 内容 |
+|---|---|---|---|
+| E3a 契约 | `6a79ecea9` | 新建 `harness/src/workflow_run.rs`（332 行）；`lib.rs` +6；`capability_registry.rs` +33 | 6 个 camelCase DTO + `WorkflowRunProvider`（4 方法全默认「未实现」）；`workflow_run()` / `register_workflow_run` / `get_workflow_run` |
+| E3b 宿主 | `35db96406` | `rt-workflow/engine/mod.rs` +58；新建 `src-tauri/src/init/workflow_run.rs`（813 行）；`init/mod.rs` +1；`init/state.rs` +30 | 引擎 `get_execution_output`；`WorkflowRunService`（受理/spawn/owner/准入/总超时/进度桥）；`state.rs` 注册 |
+| E3c 分派 | `b62d5ddcf` | `plugins/src/worker.rs` +574/−2；`plugin-proto/src/lib.rs` +2 | 四 op 分派；`start`/`cancel` 需 `write`；新码 `WORKFLOW_RUN_REJECTED`；7 条用例（72→79） |
+
+决策依据：`.tmp/res90-workflow-design.md`（397 行，只读调研）。**真实执行点 5 处**（不是 9 处）：`stock_workflow/core.rs:1036`、`core.rs:2269`、`stock_pipeline/core.rs:353`、`reflection.rs:1112`、`serenity.rs:1288`；其余 `state.work_engine` 访问是透传 / `trigger_manager` / `cancel_workflow`。
+
+### 50.2 契约形状（op args snake_case；DTO 响应 camelCase）
+
+| op | args | 成功返回 |
+|---|---|---|
+| `start` | `template_id`(必填)、`input`(JSON)、`variables`(数组)、`model_id` / `provider_id`、`max_concurrent`(u32)、`step_timeout_secs` / `tool_timeout_secs` / `total_timeout_secs`(u64)、`dry_run`(bool)、`as_of_date`("YYYY-MM-DD") | `{"executionId","workflowId","acceptedAt"}` |
+| `status` | `execution_id`(必填)、`include_output`(bool，缺省 **false**) | `ExecutionView \| null`（`executionId/workflowId/status/currentNodeId/totalTimeMs/createdAt/updatedAt`，`output` 仅 `include_output=true`） |
+| `cancel` | `execution_id` | `{"cancelled": bool, "status": <ExecutionStatus\|null>}` |
+| `list_active` | `workflow_id?`、`limit?`(缺省 50，clamp 1..=200) | `{"executions":[...],"total":n}`（项含 `ownerPluginId`） |
+
+- **owner 隔离**：owner 取自分派层连接身份（插件不可伪造）。`status` 跨 owner / 查无 ⇒ `null`；`cancel` 跨 owner / 查无 ⇒ `{false,null}`；`list_active` 只列本插件。
+- **取消幂等**：仅 `running|paused` 才调引擎 `cancel(execution_id)`；终态一律 `{cancelled:false,status:<现值>}`，**绝不调引擎**（引擎 `cancel` 会无条件把终态覆写成 `cancelled`）。
+- **模板白名单**：仅 `stock-*` 前缀（常量 `ALLOWED_TEMPLATE_PREFIXES`）；不在白名单 ⇒ `WORKFLOW_RUN_REJECTED`。
+- **准入**：per-owner 2 / 全局 8（`RunLimits`，同一把写锁内判上限+计数+登记）；超限 ⇒ `WORKFLOW_RUN_REJECTED`。
+- **总超时**：`total_timeout_secs` 缺省 **1800s**，clamp 1..=7200；到点调引擎 cancel，宿主视图/事件标 failed。
+- **进度（不走契约）**：宿主自带 `ProgressCallback` → `DomainEvent`：`workflow/step`（`executionId/workflowId/seq/event`，**丢弃 streaming**）、`workflow/end`（`executionId/workflowId/seq/status/error`）；fire-and-forget，先 `would_dispatch` 短路。外层键 camelCase，内嵌 `event` 是引擎原生 DTO（snake_case）。
+- **as_of 双包裹**：`RunOptions.node_task_scope`（逐节点 spawn 兜底）+ 执行体 `with_optional_asof`；`as_of_date` 同时补进 `input` 供 enhance 钩子读取。
+
+### 50.3 宿主实现要点
+
+- `start` 12 步：白名单 → as_of 解析 → `input.stock_code` → mint `execution_id` → 准入登记 → 载图（`stock-*` 复用 `load_and_inject_template` + `inject_vendor_state`；通用走 `load_workflow_template`）→ `create_workflow_with_hooks`（**必须带 hooks**）→ 回填 workflow_id → 变量合并 → 组装 `RunOptions` → `tokio::spawn` → 立即返回。
+- **变量合并口径（执行者推翻「整表替换」并已采纳）**：模板 variables 为底 + 请求按 `name` 覆盖 + 新增追加。理由：模板 variables 承载 `max_concurrent` / `agent_timeout_secs` / `tool_timeout_secs` 与各 `input_mapping` 兜底值，整表替换会让未传参数静默退回模块常量。
+- `get_execution_output` 只 clone 单个 `Value`，不 clone 整个 `Workflow`（20+ 节点可达 MB 级）。
+
+### 50.4 验证
+
+| 批 | 命令 | EXIT | 证据 |
+|---|---|---|---|
+| E3a | harness check / clippy / `test workflow_run` | 0 / 0 / 0 | 均命中 `Checking axagent-harness`；`4 passed; 832 filtered` |
+| E3b | `check -p axagent-rt-workflow` 3m55s / clippy 46.9s / `test get_execution_output` / `check -p axagent` 13m05s | 全 0 | 前三条命中 `Checking axagent-rt-workflow`；主 crate 命中 `Checking axagent v3.0.0`；`1 passed; 343 filtered` |
+| E3c | plugins check 49.9s / clippy 6.4s / `test --lib worker::tests` | 全 0 | 均命中 `Checking axagent-plugins`；`79 passed; 113 filtered`（72 基线 + 7） |
+
+### 50.5 记账
+
+- K1：`rsFiles 2012→2013`（`workflow_run.rs`）、`pubTraits 318→319`（`WorkflowRunProvider`）、`declaredExternalTraits 234→235`（`src-tauri/src/init/workflow_run.rs` 生产 impl）。
+- `worker.rs` evidence 再后移 **+179 行**：`remote_method_not_supported` 3489→**3668**；evolver 区间 3581/3629→**3760/3808**（已 repin + 人工同步 note / planAnchorText / PLAN:265/266）。
+
+### 50.6 未做与已登记风险
+
+1. **`ExecutionView` 无节点计数/失败详情**：进度只能靠 `workflow/step` 事件；要 status 里也有 `nodeTotal/nodeDone/failedNode` 须扩契约。
+2. **总超时后 DB 终态可能是 `cancelled`**（引擎写），宿主视图与事件为 `failed`；不额外写 DB 以免与引擎收尾竞写。是否必须一致待裁定。
+3. **stock-* 生命周期钩子副作用**：插件发起执行若不传 `analysis_id`，会走 precheck/persist 分支并写 `stock_analyses`。插件迁移（#35）前需裁定：注入 `analysis_id` 跳过，或契约增业务标记。
+4. **未实现**：卸载即取消、跨重启查询（`NotFound` ⇒ `null`）、`plan_callbacks` / `heartbeat` / `timeout_warning` / `system_capability_callback`（契约无字段）、`stock-*` 之外模板（白名单当前只开 `stock-`）。
+5. **`src-tauri` 单测未编译**：`cargo check -p axagent` 只查 lib/bin，`workflow_run.rs` 内 4 条 `#[test]` 未经编译验证；需一次 `__TAURI_WORKSPACE__=true cargo test -p axagent --lib init::workflow_run --no-run` 窗口。
+6. **双拼写**：`variables` 元素是 harness `Variable`（snake_case 字段），外层请求 DTO 是 camelCase；`input: null` 与缺失在插件侧不可区分。均已在契约注释写明，插件 SDK 文档需同步。

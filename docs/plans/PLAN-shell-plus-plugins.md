@@ -262,8 +262,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | `message.callback` | `axagent-core/crates/harness/src/platform_callback.rs:21` | 接缝 `message.callback`（内置与插件同入口） | 2 | — |
 | `webhook.dispatch` | `axagent-core/crates/harness/src/webhook_subscription.rs:154` | 接缝 + `axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9` | 4 | — |
 | `system.prompt` | `axagent-core/crates/harness/src/context_contributor.rs:22` | 接缝 `system.prompt.{段名}` | 3 | — |
-| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:3353` 起 `remote_method_not_supported` |
-| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:3445`–`:3493` 一批 `remote_method_not_supported`） |
+| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:3489` 起 `remote_method_not_supported` |
+| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:3581`–`:3629` 一批 `remote_method_not_supported`） |
 | `workflow.optimizer` | `axagent-core/crates/harness/src/workflow_optimization.rs:80` | 接缝 | 2 | 同上 |
 | `workflow.sandbox` | `axagent-core/crates/harness/src/workflow_evolution.rs:263` | 接缝 | 4 | — |
 | `workflow.business_rule` | `axagent-core/crates/harness/src/business_rules.rs:71` | 接缝（已有 e2e worker 产物） | 3 | — |
@@ -2288,3 +2288,59 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 - 未发布 `add` / `remove` / `set_status` / `update` 任何写 op。
 - op 级权限校验未落地：`dispatch_seam` 目前**完全没有权限面**，`PluginWorkerConfig` 也不携带 `PluginPermission`。
 - 写 op 及权限门作为下一批（E2）：先做 `PluginWorkerConfig.permissions` + `dispatch_seam` 的 op→permission 表 + `write` 门，再上 `jobs.store` 写面（含保留 id 防误删、`update` 用 patch DTO 不转发闭包）。
+
+## 49. `#87`/`#88` 交付账：op 级写权限闸 + `jobs.store` 写面（2026-11-02；报告 `.tmp/res87-report.md` / `.tmp/res88-report.md` / `.tmp/res89-report.md`）
+
+### 49.1 落点与提交
+
+| 批 | 提交 | 文件与增删 | 内容 |
+|---|---|---|---|
+| #87 权限闸 | `ac89e1606` | `plugin-proto/src/lib.rs` +5；`plugins/src/worker.rs` +190；`plugins/src/manager.rs` +3 | `PLUGIN_PERMISSION_DENIED` 内部诊断码；`PluginWorkerConfig.permissions` / `with_permissions`；`HostPeer.permissions` + `has_permission`；纯函数 `required_permission_for(seam, op)`；`dispatch_seam` **match 之前**的统一准入闸；`start_plugin_worker` 从 manifest 注入 |
+| #88 E2b1 契约+宿主 | `25fbcf9df` | `harness/src/jobs_store.rs` +87/−5；`harness/src/lib.rs` +2/−2；`runtime-core/src/cron_job.rs` +193/−2；`src-tauri/src/init/state.rs` +26/−1（合计 +308/−10） | `NewCronJob`、`RemoveJobOutcome`；`JobStoreProvider` 增 `add_job` / `remove_job` / `set_job_status`（trait 默认「未实现」）；`CronJobStore` 三方法实现 + 14 个种子 id 保护；`state.rs` 注册块内 `protect_ids(...).await` |
+| #88 E2b2 分派 | `2916a16fb` | `plugins/src/worker.rs` +282/−12 | `add` / `remove` / `set_status` 三个写分支；`FixedJobStoreProvider` 扩展；5 条新用例；旧「未知 op」用例改锚 `update` |
+
+### 49.2 op 级权限闸（#87）
+
+| seam | op | 需要权限 |
+|---|---|---|
+| `jobs.store` | `add` / `remove` / `set_status` / `update` | `write` |
+| `jobs.store` | `list` / `get` / `count` | 无 |
+| 其它任何接缝（含 `market.quote` 全部 40 op） | 任意 | 无 |
+
+- 闸在 `dispatch_seam` 第一段、任何 `match seam` arm / `registry.get_*()` / 参数反序列化之前；命中即回 `PLUGIN_PERMISSION_DENIED`，**代码路径上不可能触达 provider**（用例用空注册表验证：仍回权限码而非 `SEAM_PROVIDER_UNAVAILABLE`）。
+- **精确匹配**，不套 `PluginPermission::implies_*`：声明 `execute` / `subprocess_execution` 不会自动获得 `write`。口径与 #30「必须声明对应权限」一致；若产品口径改为「宽权限可顶」，只需改 `HostPeer::has_permission` 并补用例。
+- 权限是**连接级不可变快照**：spawn 时从 `WorkerInner.permissions` 克隆给 `HostPeer`；清单变更需重新启用插件生效（运行期不协商）。
+
+### 49.3 写面契约（#88，线上 snake_case 的 op args）
+
+| op | args | 成功返回 | 关键失败 |
+|---|---|---|---|
+| `add` | `job`（`NewCronJob` 对象） | `{"id": "<新 id>"}` | 缺 `job` / 类型不符 ⇒ `SEAM_CALL_INVALID_ARGS`；id 为空 / schedule 为空 / id 已存在 / 非法 priority ⇒ `PLUGIN_CALL_FAILED`（宿主校验，原任务不被覆盖） |
+| `remove` | `id` | **裸字符串** `"removed"` / `"not_found"` / `"protected"` | 缺 `id` ⇒ `SEAM_CALL_INVALID_ARGS` |
+| `set_status` | `id`、`status` | `{"found": bool}`（`false` = 不存在，不是错误） | 非 `active` / `paused` / `disabled` ⇒ `SEAM_CALL_INVALID_ARGS`，且**先验字面量再取 provider**，非法值零触达 |
+
+- `NewCronJob` 缺省：`recurring=true`、`priority="medium"` 由 harness DTO 的 serde 提供，分派层**不另填一份**；`id/name/description/schedule/prompt` 必填。宿主 `add_job` 另校验 `priority ∈ {low, medium, high, batch}`（`cron_job.rs:1008`），非法值拒绝且不落库。
+- **入参键名口径**：op 级参数（`task_type` / `active_only` / `as_of`）是 snake_case；`job` 内层是 DTO，按 AGENTS 规则 13 线上为 **camelCase**（`workflowId` / `taskType` / `enabledToolsets`）。写成蛇形**不会报错**，会被 serde 静默丢弃为 `None` —— 本 PLAN 以此为准；若将来插件 SDK 文档需要蛇形，只能在 harness 加 `serde(alias)`，不得在分派层做键名映射。
+- **受保护 id 语义**：14 个内置种子 id 只对 `remove_job` 生效（返回 `protected`，不删除）；`set_status` **允许**（用户可暂停/恢复）；`seed_stock_automation_crons(..., overwrite=true)` 的宿主内部重置路径不受保护限制（保护只作用于接缝）。名单是进程内 `HashSet`，依赖 `init/state.rs` 每次启动登记；当前全仓只有一处生产构造（`state.rs:579`）。
+
+### 49.4 验证
+
+| 批 | 命令 | EXIT | 证据 |
+|---|---|---|---|
+| #87 | plugins check / clippy / `cargo test --lib worker::tests` | 0 / 0 / 0 | check、clippy 各命中 1 次 `Checking axagent-plugins`；`67 passed` |
+| #88 E2b1 | harness check+clippy；runtime-core check+clippy；`cargo test -p axagent-runtime-core job_store_write` | 全 0 | 四个包均命中 `Checking`；`4 passed; 272 filtered out` |
+| #88 E2b2 | plugins check 59s / clippy 7s / test | 0 / 0 / 0 | `.tmp/res89-check.log` 命中 `Checking axagent-plugins`；`72 passed; 113 filtered out`（67 基线 + 5） |
+
+### 49.5 记账
+
+- **K1 不变**：`2012 / 318 / 234`（本批无新增 harness 文件、无新增 pub trait —— `JobStoreProvider` 与 `NewCronJob` 已在 #86 计入）。
+- `worker.rs` evidence 因写分支前移 **+136 行**：`remote_method_not_supported` 3353→**3489**；evolver 区间 3445/3493→**3581/3629**。已 `--repin-code --apply` 并人工同步 JSON note / planAnchorText 与 PLAN:265/266（repin 模式不改正文）。
+
+### 49.6 本批未做与已登记风险
+
+1. **`update` 未实现**：仍只登记 `write` 权限；有权限时落 `SEAM_CALL_UNSUPPORTED`。需先裁定 patch DTO 的「null = 清空 vs 缺省 = 不改」语义。
+2. **`add_job` 查重→写非原子**：并发同名 add 理论可同时通过 `get()` 检查。契约未要求严格唯一；要严格需在 `CronJobStore` 内加写锁包住「查 + 加」。
+3. **受保护 id 可被「先删后建」绕过**：种子任务被删后，同 id 新建会被接受；下次宿主播种因「已存在即跳过」不再覆盖它。该路径是否允许待裁定。
+4. **`src-tauri` 主 crate 仍未实编**（`state.rs` 自 #86 起三处改动：market.quote 注册、jobs.store 注册、`protect_ids`），待一次 23–28min 后台窗口验证。
+5. **`worker.rs` 既有 rustfmt 漂移 9 处**（1691 / 2068 / 6658 / 6680 / 6711 / 6898 / 7274 / 7303 / 7317），非本批引入，本批新增代码 0 差异；未修（属其它批次改动面）。
+6. 未跑全量 workspace 门禁；未推送。

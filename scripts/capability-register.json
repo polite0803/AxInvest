@@ -407,10 +407,10 @@
       "check": "implementorCount",
       "evidence": [
         { "ref": "axagent-core/crates/harness/src/workflow_reflection.rs:190", "file": "axagent-core/crates/harness/src/workflow_reflection.rs", "line": 190, "token": "pub trait WorkflowReflector", "role": "契约" },
-        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:2382", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 2382, "token": "fn remote_method_not_supported", "anchorText": "fn remote_method_not_supported(seam: &str, method: &str) -> String {", "role": "拆分阻塞 D2 证据" }
+        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:2450", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 2450, "token": "fn remote_method_not_supported", "anchorText": "fn remote_method_not_supported(seam: &str, method: &str) -> String {", "role": "拆分阻塞 D2 证据" }
       ],
-      "note": "拆分阻塞 **D2**：worker.rs:2382 起 `remote_method_not_supported` ⇒ 接缝已建但远程侧方法未通。键控列原文仅「接缝」二字 ⇒ 行号缺省。",
-      "planAnchorText": "| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:2382` 起 `remote_method_not_supported` |", "planLine": 265
+      "note": "拆分阻塞 **D2**：worker.rs:2450 起 `remote_method_not_supported` ⇒ 接缝已建但远程侧方法未通。键控列原文仅「接缝」二字 ⇒ 行号缺省。",
+      "planAnchorText": "| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:2450` 起 `remote_method_not_supported` |", "planLine": 265
     },
     {
       "seamId": "workflow.evolver",
@@ -424,11 +424,11 @@
       "check": "implementorCount",
       "evidence": [
         { "ref": "axagent-core/crates/harness/src/workflow_evolution.rs:172", "file": "axagent-core/crates/harness/src/workflow_evolution.rs", "line": 172, "token": "pub trait WorkflowEvolver", "role": "契约" },
-        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:2474", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 2474, "token": "remote_method_not_supported", "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"run\"))", "role": "拆分阻塞 D2 证据（区间起点）" },
-        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:2522", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 2522, "token": "remote_method_not_supported", "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"is_running\"))", "role": "拆分阻塞 D2 证据（区间止点）" }
+        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:2542", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 2542, "token": "remote_method_not_supported", "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"run\"))", "role": "拆分阻塞 D2 证据（区间起点）" },
+        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:2590", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 2590, "token": "remote_method_not_supported", "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"is_running\"))", "role": "拆分阻塞 D2 证据（区间止点）" }
       ],
-      "note": "备注「同上（worker.rs:2474–:2522 一批 remote_method_not_supported）」⇒ 该区间两端都入锚点，端点漂移即红。键控列原文仅「接缝」。",
-      "planAnchorText": "| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:2474`–`:2249` 一批 `remote_method_not_supported`） |", "planLine": 266
+      "note": "备注「同上（worker.rs:2542–:2590 一批 remote_method_not_supported）」⇒ 该区间两端都入锚点，端点漂移即红。键控列原文仅「接缝」。",
+      "planAnchorText": "| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:2542`–`:2590` 一批 `remote_method_not_supported`） |", "planLine": 266
     },
     {
       "seamId": "workflow.optimizer",

@@ -262,8 +262,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | `message.callback` | `axagent-core/crates/harness/src/platform_callback.rs:21` | 接缝 `message.callback`（内置与插件同入口） | 2 | — |
 | `webhook.dispatch` | `axagent-core/crates/harness/src/webhook_subscription.rs:154` | 接缝 + `axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9` | 4 | — |
 | `system.prompt` | `axagent-core/crates/harness/src/context_contributor.rs:22` | 接缝 `system.prompt.{段名}` | 3 | — |
-| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:2382` 起 `remote_method_not_supported` |
-| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:2474`–`:2522` 一批 `remote_method_not_supported`） |
+| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:2450` 起 `remote_method_not_supported` |
+| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:2542`–`:2590` 一批 `remote_method_not_supported`） |
 | `workflow.optimizer` | `axagent-core/crates/harness/src/workflow_optimization.rs:80` | 接缝 | 2 | 同上 |
 | `workflow.sandbox` | `axagent-core/crates/harness/src/workflow_evolution.rs:263` | 接缝 | 4 | — |
 | `workflow.business_rule` | `axagent-core/crates/harness/src/business_rules.rs:71` | 接缝（已有 e2e worker 产物） | 3 | — |
@@ -784,7 +784,7 @@ CLI 通道保留给既有"外部 CLI 插件"品类，但必须补 `input_schema`
 | ID | 现象 | 证据 | 影响面 | 最小修法 |
 |---|---|---|---|---|
 | **D1** | 宿主调插件**无调用超时**：对端僵死（进程活着但不回帧）时 `receiver.recv()` **无限阻塞**；只有对端关闭/崩溃才 `Err` | `worker.rs:1085-1091`；`PluginWorkerConfig` 只有 `shutdown_timeout`（`worker.rs:192-218`），**无 per-call 超时、无重启策略** | 任一插件卡住 ⇒ 宿主调用方卡住 ⇒ UI 卡死，且「拔不掉」 | `invoke` 外包 `tokio::time::timeout`，超时返回 `SEAM_CALL_TIMEOUT`（新错误码，需同步 11 语言 `error` 段）；worker 崩溃后的重启策略显式化（不重启也要写明） |
-| **D2** | **无流式**：远程 provider 的 `chat_stream` 第一帧即错误 | `worker.rs:2625-2626`（注释自述「帧协议为一请求一响应，无流式分片复用」）、实现 `:2656-2670`；`reflector.aggregate_patterns/get_history`、`evolver.*`、`optimizer.*` 返回 `remote_method_not_supported`（`worker.rs:2382`、`:2474-2522`） | **provider 试点的硬前置**：聊天应用不能失去逐 token 输出 | 协议加流式分片（同一 `request_id` 多帧 + `final` 哨兵），是 `PLAN-everything-is-plugin.md` §15.4 那套扩展的自然延伸；**不做则 provider 不许插件化** |
+| **D2** | **无流式**：远程 provider 的 `chat_stream` 第一帧即错误 | `worker.rs:2966-2967`（注释自述「帧协议一请求一响应，无流式分片复用」）、实现 `:2997-3010`；`reflector.aggregate_patterns/get_history`、`evolver.*`、`optimizer.*` 返回 `remote_method_not_supported`（`worker.rs:2450`、`:2542-2590`） | **provider 试点的硬前置**：聊天应用不能失去逐 token 输出 | 协议加流式分片（同一 `request_id` 多帧 + `final` 哨兵），是 `PLAN-everything-is-plugin.md` §15.4 那套扩展的自然延伸；**不做则 provider 不许插件化** |
 | **D3** | 两套注册路径且无一致性校验：`manifest.capabilities` 只写 `declarations` 表**不挂 provider**；可调用门面只来自 describe 自述 | `plugins/src/manager.rs:705-713`→`:783-821`；`capability_registry.rs:484-510`；测试名自证 `records_declaration_only_and_rolls_back`（`:1370`）；真正挂门面在 `worker.rs:2262-2279` | 清单声明 ≠ 运行时能力 ⇒ UI 显示「插件提供 X」而运行时拿不到（既有方案缺陷 1 的变体，仍在） | 握手后做 `manifest.capabilities` ↔ `declaration.capabilities` 双向对账：声明未实现 ⇒ 拒绝注册并计入可见失败（不许静默） |
 | **D4** | **远程工具丢弃宿主 `ToolContext`** | `worker.rs:624` 构造 `ToolContext::new(".")` 最小上下文；`worker.rs:1881` `RemoteTool::call` 直接忽略 `_ctx` | 插件工具的**宿主权限校验、输出脱敏、审批规则、Guardian、ask-user、回滚栈全部失效**（安全相关，非风格问题） | ctx 走「可序列化白名单投影」出境（策略/开关/IDs），宿主侧保留句柄类对象（`Arc<Notify>`、审批栈）不下发；需复用反向 `call_seam` / `UI_ACTION` 通道做 ask-user 与审批回环 |
 | **D5** | worker 启动失败**只 warn**，插件仍显示「已启用」 | `plugins/src/manager.rs:722-730` | 「启用了却一个远程能力都没有」只能靠翻日志 | 启用结果区分三态：A 层资产可用 / B 层 worker 可用 / B 层失败（可见状态 + 前端提示） |
@@ -955,7 +955,7 @@ SDK                  harness + plugin-proto + plugin-testkit（脚手架 / 契�
 | **P5.6** | market-data（前置 = `astock-data/src/as_of.rs:36` 的 task-local `AS_OF` 改显式入参 + 缓存/凭证主权决策 + `market.provider.{源名}` 新接缝） | 回测与推荐链路在插件形态下读数一致；`app_state.rs:244` 的 `Arc<AStockClient>` 具体类型字段消失 |
 | **P5.7** | strategy（前置 = P5.0a 的会话式 op）—— **(a) 已定全覆盖，不再复核「值不值得做」** | 单回测不爆帧（分批 onBarBatch）、与进程内策略逐 bar 结果等价；`commands/quant_backtest.rs:363-430` 的 `match strategy_type` 硬构造消失 |
 | **P5.8** | RAG 后端接缝 —— **切法待拍（§0.6.3：解 1「嵌入+重排」/ 解 2「服务端向量库」）** | 按所选解：解 1 ⇒ 插件提供嵌入源与重排、向量存储留内核；解 2 ⇒ 插件提供向量库客户端、内核存储路径重写。两者共同判据：`rag_provider.rs:13` 的 `VectorQueryResult` 补上 serde 且过帧 |
-| **P5.9** | **其余 11 条接缝收尾**（§0.7.4 未进 P5.2–P5.8 的：`search.source` / `image.gen` / `mcp.server` + §0.7.5 的 4 条钩子族），另含已建接缝但卡 D2 的反思/进化/优化器（`worker.rs:2382`、`:2474-2522` 那批 `remote_method_not_supported` 逐条补）、工具集投影层（D4）、平台适配器、业务规则、webhook / message.callback；**以及 §0.7.6 的 `DojoExtension` 第二协议合流（合流或废弃，二选一）** | 23 条逐条对照 §0.5.3 三条判据（宿主侧无具体类型 / 新增同族不改主壳 / 卸载明确失败），**逐条打勾表进 `docs/audits/`**；接缝四方对账门（§7-1）在 11 条新接缝全绿后才允许摘 `--ratchet` |
+| **P5.9** | **其余 11 条接缝收尾**（§0.7.4 未进 P5.2–P5.8 的：`search.source` / `image.gen` / `mcp.server` + §0.7.5 的 4 条钩子族），另含已建接缝但卡 D2 的反思/进化/优化器（`worker.rs:2450`、`:2542-2590` 那批 `remote_method_not_supported` 逐条补）、工具集投影层（D4）、平台适配器、业务规则、webhook / message.callback；**以及 §0.7.6 的 `DojoExtension` 第二协议合流（合流或废弃，二选一）** | 23 条逐条对照 §0.5.3 三条判据（宿主侧无具体类型 / 新增同族不改主壳 / 卸载明确失败），**逐条打勾表进 `docs/audits/`**；接缝四方对账门（§7-1）在 11 条新接缝全绿后才允许摘 `--ratchet` |
 | **P5.10** | 装配收敛：把 1.25 万行手工 new 中的「可插拔能力」部分改为注册表驱动 | 新增一个同类能力只需：插件仓产物 + manifest 声明 + 权限申请；**不改主壳代码**（最终判据） |
 | **P5.11** | **全面出仓**：满足 §0.5.2 退出判据的插件逐个挪出主仓（主仓删除源码，只留主壳 + 内核 + SDK） | 主仓 `grep axagent-plugin-` 命中为 0；每仓 CI 不依赖主仓源码；兼容矩阵记录老壳 × 新插件的行为 |
 | **P6.0** | **功能包层前置**（§0.8.4/§0.8.5 六项，排在 P5.11 之后、不与 L2 的 23 条混排）：① `WorkflowNode` 封闭 enum 开放化（`harness/src/workflow_types.rs:1366`）② `WorkEngine` 角色定性（底座 or 功能包，`app_state.rs:345` 证明它今天当底座用；依赖方向已核实为「域 → 引擎」，故换轨可行）③ 插件命令贡献通道（升格 `DojoExtension`，或给 `build.rs` 的注册面加运行期入口）④ 前端 tab/route/menu 数据驱动（复用已有 DynamicPageViewer 机制，改 `WorkspaceHub.tsx:166-173` 与 `workspaceTabs.tsx:28/70`）⑤ **引擎去域化**（`agent_executor.rs:4385` `PREFETCHABLE_TOOLS`、`:1232-1246` `stock_code` 预取、`:854` prompt 文本 —— 一律改为节点配置或接缝贡献）⑥ **节点执行器与接缝单轨化**（executor 只能是接缝薄壳、禁止自带实现；`document_parser_executor.rs` 空壳接真接缝，`notification_executor.rs` 的四平台 webhook 并入 `notify.channel`） | 判据：**新增一个工作流节点类型不改主壳代码**（今天需 8 处，见 §0.8.3-1）；**引擎内 `grep -i stock` 生产区命中为 0**（今天 32 行）；**每个节点执行器都能指到一条接缝**（今天 32 个执行器 0 个走能力注册表）；把一个功能包的页面 + 命令 + store 移出主仓后，其余功能编译与运行均不红 |
@@ -2029,3 +2029,45 @@ cargo fmt --check -p axagent-plugin-proto        # 在 axagent-plugins/ 根下�
 - **窗口结果**：`cargo check -p axagent --all-targets` **EXIT=0 / 23m08s**（此前 #37/#40 之后主 crate 只编过默认 target，测试 target 从未编过）；`cargo check -p axagent-agent` EXIT=0；`cargo test -p axagent --lib commands::plugin` **EXIT=0 / 27m52s / 5 passed**（测试 exe mtime 晚于源码，非旧产物）。
 - 口径备注：任务原文写「四条命令」，实际是 **3 条 cargo 命令 + 1 条全仓 grep 取证**（UNC 下 `grep -rn` 超时，改 Grep 工具分根复查，结论一致）——**不要**把「条目数」当成「命令数」，这类计数错误在本 PLAN 已出现过（§31.4 的 7≠6）。
 - 编译耗时新基线：主 crate **单编 23–28 min**（check `--all-targets` 23m08s / test 27m52s）⇒ 后续涉及 `src-tauri` 的任务排期按 25 min 量级估，不要再按 16m47s 估。
+
+## 43. `#80` 交付账：`market.quote` 宿主→插件接缝（2026-11-02；报告 `.tmp/res80-report.md`；提交 4bbbeabbe）
+
+### 43.1 方向必须写清楚（这是最容易混的一条）
+
+本仓有两类接缝，**方向相反、挂载点不同**：
+
+| 类别 | 清单 | 含义 | 本次 |
+|---|---|---|---|
+| 插件**提供**给宿主 | `worker.rs:138 SUPPORTED_REMOTE_SEAMS`（13 条） | 插件实现、宿主调用；进门面注册 | **未动**（`diff` 284 行全新增、0 删除） |
+| 宿主**提供**给插件 | `capability_registry` 的注册项 + `dispatch_seam` 的入站分支 | 宿主实现、插件经 `call_seam` 调用 | **本次新增 `market.quote`** |
+
+⇒ `market.quote` **不进** `SUPPORTED_REMOTE_SEAMS`。把它加进那份清单会翻转语义：那会声称「插件可以提供行情数据给宿主」，而本次要的是相反方向。
+
+### 43.2 落点与 op 形状（下一阶段写插件 SDK 时按这张表）
+
+| 位置 | 内容 |
+|---|---|
+| `harness/src/capability_registry.rs:102` | `ServiceDefinition::market_quote()`：ID `market.quote` / v1.0 / contract `axagent_harness::MarketDataProvider` |
+| 同文件 `:888` | `register_market_data` / `get_market_data`（逐形对标 `register_agent_loop`） |
+| `worker.rs:506` | `dispatch_seam` 本体；`:744` 起 `market.quote` 三个分支 |
+| `src-tauri/src/init/state.rs:1715` | `let market_data: Arc<dyn MarketDataProvider> = astock_client.clone();` 注册（失败只 warn，不阻断启动） |
+
+| op | args | 返回 |
+|---|---|---|
+| `get_quote` | `{ "stock_code": string }` | `StockQuote`（字段是 `code`，**不是** `stockCode`——任务书写错过一次，执行者按真实 DTO 断言） |
+| `get_klines` | `{ "stock_code": string, "period": string, "limit"?: u32=100, "adj_type"?: "forward"\|"backward"\|null }` | `Vec<KLine>` |
+| `search_stock` | `{ "keyword": string }` | `Vec<StockSearchResult>` |
+
+**契约复用而非新造**：`MarketDataProvider` 早在 harness（`market_data.rs:192`），本次只把它接上注册表与入站分派。`astock-data` 的实现（`lib.rs:6667`）零改动 —— 这正是「扩展而非重定义」（禁区 12）的形态。
+
+### 43.3 验证与一条**新的假绿形态**
+
+- `axagent-harness` check 43.95s / `axagent-plugins` check 36.67s / `worker::tests` **46 passed**（基线 42，+4）/ `clippy --all-targets -D warnings` 17.25s —— 全 EXIT=0。
+- 主 crate 首次 `cargo check -p axagent` **退 0 但日志里没有 `Checking axagent` 行**（cargo 判 Fresh 只打印 `Compiling axagent`，那是 build script）。执行者没把它当绿，补跑 `--lib` 强制重查，出现真实 `Checking axagent v3.0.0`，10m55s EXIT=0。
+⇒ **新假绿形态（并入本 PLAN 的假绿族）**：**`cargo check -p <pkg>` 退出 0 + 只有 build script 的 `Compiling <pkg>`、没有 `Checking <pkg>`** = 目标包可能根本没被检查。判据：日志里必须出现 `Checking <目标包>`；否则补 `--lib` / `touch` 主源文件强制重查。⚠ 与既有「只吐 Finished」「退 0 + 0 字节日志」是同族，但**日志非空、有 Compiling、却仍不代表目标包被检查**是本族第一次被点名。
+
+### 43.4 未做与本 PLAN 的记账口径
+
+1. **trait 方法集未扩**：行情/K线/搜索 3 条只是 `MarketDataProvider` 的现有面；调研实测股票域实际用到 **16 类操作**（基本面、指数、涨停/热股/行业/龙虎榜/北向、概念板块、研报/一致预期、公告/解禁/分红/财报日历、资讯与情绪、同业/期权PCR/行业归属、跨市场、批量、MCP 工具直通、数据源运维、凭证注入）⇒ 第二阶段扩 trait + DTO。
+2. **插件侧 SDK 封装未做**：插件今天要手写 `call_seam("market.quote", op, args)`；是否在 `plugin-proto` / SDK 提供类型化助手，等第二阶段定。
+3. **记账口径：能力面保持 23 / totalRows 37 不变**。理由：§0.7 登记表统计的是「L2 提供方接缝」（插件 → 宿主）。`market.quote` 是宿主 → 插件的**查询面**，与 `event.dispatch`（订阅面）同族，不在这 23 条里。⇒ 第五道门判定档未因本次改动变红；**不新增登记行**，但本节的 op 表就是它的权威文档。

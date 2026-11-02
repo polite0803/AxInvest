@@ -28,23 +28,11 @@ use tokio::sync::RwLock;
 
 use crate::{AStockClient, StockQuote};
 
-/// 监控优先级
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum WatchPriority {
-    /// 主动监控（~2s 轮询）
-    Active,
-    /// 背景监控（~10s 轮询）
-    Background,
-}
-
-impl WatchPriority {
-    fn interval_ms(&self) -> u64 {
-        match self {
-            WatchPriority::Active => 2000,
-            WatchPriority::Background => 10000,
-        }
-    }
-}
+// `WatchPriority` 已**上收 harness**（`quote.watcher` 接缝的线上契约，见 harness `quote_watcher.rs`）：
+// 原先它完全没有 serde，接缝只能收裸串。此处只 re-export，不重定义（AGENTS 禁区 12）；
+// 档位间隔 `interval_ms` 随类型一起上收（Rust 不允许在别的 crate 给 foreign 类型写 inherent impl），
+// 数值逐字不变 —— Active 2000ms / Background 10000ms。
+pub use axagent_harness::WatchPriority;
 
 /// 行情变更事件
 ///

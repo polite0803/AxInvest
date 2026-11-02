@@ -8,6 +8,10 @@ use tokio::time::{Duration, interval, interval_at};
 
 use axagent_harness::market_data::{MarketDataProvider, StockQuote};
 
+// 四个纯数据 DTO 已**上收 harness**（`stock.monitor` 接缝的线上契约，见 harness `stock_monitor.rs`）。
+// 此处只 re-export，不重定义（AGENTS 禁区 12）—— 引擎与接缝共用同一份类型，字段增删只有一处真相。
+pub use axagent_harness::{MonitorAlert, MonitorConfig, PollRoundStats, TZeroConfig};
+
 /// 面板键：监控轮询间隔（秒）。权威在 `seed_variables.rs` / 设置面板，落点在本模块。
 const PANEL_POLL_INTERVAL_KEY: &str = "monitor_poll_interval_secs";
 /// 面板键：同一告警条目的冷却窗口（秒）。
@@ -24,82 +28,10 @@ pub trait MonitorEventEmitter: Send + Sync {
     fn emit(&self, event: &str, payload: serde_json::Value);
 }
 
-/// T+0 自动重跑配置 (P2-6)
-///
-/// 当 RealtimeMonitor 检测到异常行情时,除了发告警,还会触发 T+0 工作流重跑
-/// (即在交易时段内立即用最新行情重新跑一次 stock analysis workflow)。
-/// - `enabled`: 全局开关
-/// - `change_pct_threshold`: 涨跌幅超过 N% 触发 (None 表示不按此条件触发)
-/// - `turnover_rate_threshold`: 换手率超过 N% 触发 (None 表示不按此条件触发)
-/// - `min_interval_minutes`: 同一只股票两次 T+0 触发的最小间隔 (默认 30 分钟),
-///   避免短时间内连续触发造成工作流风暴
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TZeroConfig {
-    pub enabled: bool,
-    pub change_pct_threshold: Option<f64>,
-    pub turnover_rate_threshold: Option<f64>,
-    pub min_interval_minutes: i64,
-}
-
-impl Default for TZeroConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false, // 默认关闭 — 用户需在设置里显式开启
-            change_pct_threshold: Some(3.0),
-            turnover_rate_threshold: Some(8.0),
-            min_interval_minutes: 30,
-        }
-    }
-}
-
 /// T+0 触发回调: 接收 stock_code,异步启动工作流重跑
 pub type TZeroCallback = Arc<
     dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send>> + Send + Sync,
 >;
-
-/// 监控条件
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct MonitorConfig {
-    /// `price_alerts.id` —— 一条告警一行配置。
-    ///
-    /// 此前配置按 `stock_code` 存 `HashMap`，同一只股票的第二条告警会静默顶掉第一条
-    /// （现网 56 行 / 16 只股票 ⇒ 实际生效上限 16 条），且触发后无法只摘掉这一条。
-    pub alert_id: String,
-    pub stock_code: String,
-    pub stock_name: String,
-    /// 止损价（跌破告警）
-    pub stop_loss: Option<f64>,
-    /// 止盈价（突破告警）
-    pub take_profit: Option<f64>,
-    /// 突破压力位告警
-    pub resistance_break: Option<f64>,
-    /// 跌破支撑位告警
-    pub support_break: Option<f64>,
-    /// 涨跌幅超过N%告警
-    pub change_pct_alert: Option<f64>,
-    /// 成交量异常（换手率>N告警）
-    pub turnover_rate_alert: Option<f64>,
-    /// 是否启用
-    pub enabled: bool,
-}
-
-/// 告警事件
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MonitorAlert {
-    /// `price_alerts.id` —— 回写触发状态时精确定位这一行（同股同类型可能有重复行）
-    pub alert_id: String,
-    pub stock_code: String,
-    pub stock_name: String,
-    /// "stop_loss" | "take_profit" | "resistance" | "support" | "change" | "volume"
-    pub alert_type: String,
-    pub alert_message: String,
-    pub current_price: f64,
-    pub change_pct: f64,
-    pub timestamp: String,
-    /// 操作建议（如 "考虑减仓50%，现价低于止损"）
-    pub suggested_action: Option<String>,
-}
 
 /// 封板状态（阶段 E-2，裁定 6 = 加标注不抑制告警）。
 ///
@@ -130,22 +62,6 @@ pub fn limit_state_of(quote: &StockQuote) -> LimitState {
         return LimitState::LimitDown;
     }
     LimitState::NotLimited
-}
-
-/// 一轮轮询的取数读数（裁定 12 ①：「监控实际未在取数」必须是能被面板消费的聚合面）。
-///
-/// 改造前只有逐只 `tracing::warn!`：整条链路长期全挂时，唯一发现方式是人工翻日志，
-/// 而监控面板仍显示「监控运行中」。三条数各自只说一件事，不并排成可比的两个计数：
-/// - [`Self::codes_total`] / [`Self::codes_failed`]：**本轮**应取数的股票数与其中失败数；
-/// - [`Self::consecutive_all_failed_rounds`]：连续「整轮全失败」的轮数，用于判「通道挂了」；
-/// - [`Self::finished_at_ms`]：本轮落数时刻。非交易时段整轮跳过时**不更新**，
-///   所以它是「最后一次真取数的时刻」，不是「上一次心跳」。
-#[derive(Debug, Clone, Default)]
-pub struct PollRoundStats {
-    pub codes_total: u32,
-    pub codes_failed: u32,
-    pub consecutive_all_failed_rounds: u32,
-    pub finished_at_ms: i64,
 }
 
 /// 连续「整轮全失败」轮数的转移函数（纯函数，判据直接打在这一格上）。

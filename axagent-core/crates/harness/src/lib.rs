@@ -358,6 +358,19 @@ pub use trading_engine::{
     PositionSummary, TradeExecutionOutcome, TradeExecutionRequest, TradePredictionComparison,
     TradeValidation, TradeValidationRequest, TradeView, TradingEngineProvider,
 };
+// ── 股票监控接缝（`stock.monitor`，含跨股聚合器面）──
+// MonitorConfig / TZeroConfig / PollRoundStats / MonitorAlert 与聚合器 6 类由
+// analysis-engine **上收**至此，原处改 `pub use axagent_harness::{…}`（禁区 12：不留第二套真相）。
+pub mod stock_monitor;
+pub use stock_monitor::{
+    AggregatorConfig, AlertUpsertOutcome, AlertUpsertRequest, MonitorAlert, MonitorConfig,
+    MonitorStatusView, PollRoundStats, PortfolioSignal, PortfolioSnapshot, PriceAlertView,
+    RemoveAlertOutcome, SignalDirection, SignalType, StockMonitorProvider, StockSignal,
+    TZeroConfig,
+};
+// ── 实时行情推送集合接缝（`quote.watcher`；WatchPriority 由 astock-data 上收）──
+pub mod quote_watcher;
+pub use quote_watcher::{QuoteWatcherProvider, WatchOutcome, WatchPriority};
 pub mod prompt_guard;
 pub mod provider;
 pub mod provider_continuation;

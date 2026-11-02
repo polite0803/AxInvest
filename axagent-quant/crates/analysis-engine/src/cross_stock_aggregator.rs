@@ -33,159 +33,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+// 聚合器的六个 DTO 与两个枚举已**上收 harness**（`stock.monitor` 接缝的 `aggregator_*` 三 op
+// 直接把它们的 camelCase 投影当线上契约，见 harness `stock_monitor.rs`）。
+// 此处只 re-export，不重定义（AGENTS 禁区 12）；`SignalType::direction/label`、
+// `SignalDirection::from_i8`、`AggregatorConfig` 的 `Default` 与 clamp 区间常量随类型一起上收
+// —— Rust 不允许在别的 crate 给 foreign 类型写 inherent impl。
+pub use axagent_harness::{
+    AggregatorConfig, PortfolioSignal, PortfolioSnapshot, SignalDirection, SignalType, StockSignal,
+};
+
 /// 组合快照回调类型别名（避免 clippy::type_complexity 警告）
 pub type SnapshotProvider = Arc<dyn Fn() -> Option<PortfolioSnapshot> + Send + Sync>;
-
-/// 统一信号类型枚举。
-///
-/// 替代 `signals.rs` 中 `MACrossResult.signal: String` 和 `BreakoutResult.breakout_type: String`
-/// 的字符串字面量，提供类型安全。新增信号类型时在此扩展。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SignalType {
-    /// 金叉（短期均线上穿长期均线）
-    GoldenCross,
-    /// 死叉（短期均线下穿长期均线）
-    DeathCross,
-    /// 突破压力位
-    ResistanceBreak,
-    /// 跌破支撑位
-    SupportBreak,
-    /// 涨跌幅异常
-    ChangeSpike,
-    /// 换手率异常（量能异动）
-    VolumeSpike,
-    /// 触及止损
-    StopLossHit,
-    /// 触及止盈
-    TakeProfitHit,
-}
-
-impl SignalType {
-    /// 信号方向：+1 = 多头/看涨，-1 = 空头/看跌，0 = 中性
-    pub fn direction(&self) -> i8 {
-        match self {
-            SignalType::GoldenCross | SignalType::ResistanceBreak | SignalType::TakeProfitHit => 1,
-            SignalType::DeathCross
-            | SignalType::SupportBreak
-            | SignalType::StopLossHit
-            | SignalType::ChangeSpike
-            | SignalType::VolumeSpike => -1,
-        }
-    }
-
-    /// 人类可读名称（用于告警消息）
-    pub fn label(&self) -> &'static str {
-        match self {
-            SignalType::GoldenCross => "金叉",
-            SignalType::DeathCross => "死叉",
-            SignalType::ResistanceBreak => "突破压力位",
-            SignalType::SupportBreak => "跌破支撑位",
-            SignalType::ChangeSpike => "涨跌幅异常",
-            SignalType::VolumeSpike => "换手率异常",
-            SignalType::StopLossHit => "触及止损",
-            SignalType::TakeProfitHit => "触及止盈",
-        }
-    }
-}
-
-/// 信号方向枚举（用于组合级聚合时的同向判定）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SignalDirection {
-    Bullish,
-    Bearish,
-    Neutral,
-}
-
-impl SignalDirection {
-    pub fn from_i8(d: i8) -> Self {
-        if d > 0 {
-            SignalDirection::Bullish
-        } else if d < 0 {
-            SignalDirection::Bearish
-        } else {
-            SignalDirection::Neutral
-        }
-    }
-}
-
-/// 单股信号载体。
-///
-/// 由 `RealtimeMonitor` 在每次轮询时构造，喂给 `CrossStockSignalAggregator`。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StockSignal {
-    pub stock_code: String,
-    pub stock_name: String,
-    pub signal_type: SignalType,
-    /// 信号强度 [0.0, 1.0]，由调用方根据价格偏离度 / 量能放大倍数等估算
-    pub strength: f64,
-    /// 信号来源（"monitor" / "signals.detect_ma_cross" / "signals.detect_breakout"）
-    pub source: String,
-    /// Unix 时间戳（秒）
-    pub timestamp: i64,
-    /// 触发信号时的当前价（可选，便于前端展示）
-    pub current_price: Option<f64>,
-    /// 触发信号时的涨跌幅（可选）
-    pub change_pct: Option<f64>,
-}
-
-/// 组合级信号（聚合后输出）。
-///
-/// 当多只股票在时间窗内同方向触发信号时生成。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PortfolioSignal {
-    /// 组合信号方向（多头聚集 / 空头聚集 / 中性）
-    pub direction: SignalDirection,
-    /// 触发该组合信号的股票集合
-    pub stocks: Vec<String>,
-    /// 主导信号类型（多数派）
-    pub dominant_signal: SignalType,
-    /// 组合信号强度 [0.0, 1.0]
-    pub strength: f64,
-    /// 触发时的市场快照（可选，便于前端展示）
-    pub snapshot: Option<PortfolioSnapshot>,
-    /// 建议操作（如 "组合集中度风险升高，建议减仓 20%"）
-    pub suggested_action: String,
-    /// Unix 时间戳（秒）
-    pub timestamp: i64,
-}
-
-/// 组合快照（聚合时记录的持仓上下文）
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PortfolioSnapshot {
-    /// 持仓股票数
-    pub position_count: usize,
-    /// 头部集中度（top1 市值占比）
-    pub top_concentration_pct: Option<f64>,
-    /// 行业最大集中度
-    pub max_sector_pct: Option<f64>,
-    /// 风险等级
-    pub risk_level: Option<String>,
-}
-
-/// 聚合器配置
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AggregatorConfig {
-    /// 时间窗口（秒），默认 300（5 分钟）
-    pub window_secs: i64,
-    /// 触发组合信号的最小同向信号数，默认 3
-    pub min_signal_count: usize,
-    /// 同类组合信号冷却时间（秒），默认 600（10 分钟）
-    pub cooldown_secs: i64,
-    /// 最小强度阈值（单股强度低于此值不参与聚合），默认 0.3
-    pub min_strength: f64,
-}
-
-impl Default for AggregatorConfig {
-    fn default() -> Self {
-        Self { window_secs: 300, min_signal_count: 3, cooldown_secs: 600, min_strength: 0.3 }
-    }
-}
 
 /// 跨股票信号聚合器。
 ///

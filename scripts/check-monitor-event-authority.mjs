@@ -11,14 +11,16 @@
 //   `cargo check` / `cargo test` / `tsc` 全绿。这类缺陷的形态是「跨层契约靠两边各抄一遍」，
 //   所以本门不看运行期，只看两侧源文能否逐项对上。
 //
-// ── 判据（十七条：R1–R6 价格告警链，R7–R10 条件单链，R11 告警写库唯一入口，R12/R13 跨语言边界的键集合逐项相等，
-//    R14–R16 组合级信号链，R17 轮询间隔的生效通路）──
+// ── 判据（十八条：R1–R6 价格告警链，R7–R10 条件单链，R11 告警写库唯一入口，R12/R13 跨语言边界的键集合逐项相等，
+//    R14–R16 组合级信号链，R17 轮询间隔的生效通路，R18 T+0 配置的 camelCase 注解 + 键集合）──
 //   R1 退役证明：旧字面量在**剥注释后的**生产 `.rs` 源文里必须零出现。
 //   R2 权威在用：告警发射点必须以 `IpcEventName::PriceAlertTriggered.as_str()` 的形态发起（≥1 处）。
 //   R3 两头同名：面板 `listen("…")` 的实参必须等于权威表里 `PriceAlertTriggered` 现场推导出的
 //      字符串（不手抄），且该串必须已进生成物 `src/types/generated/events.ts`。
 //   R4 载荷对齐：后端 `struct MonitorAlert` 的字段（snake→camel）与前端
 //      `interface MonitorAlertPayload` 的键集合逐项相等，两侧各断言条数下限。
+//      ⚠ 该结构体已随 `stock.monitor` 接缝上收 harness（`stock_monitor.rs`），本条的 Rust 侧
+//      读源随之改指 harness 文件 —— 判据语义不变（仍是「后端字段 vs 前端键集合逐项相等」）。
 //   R5 装配存在：每个 `impl … MonitorEventEmitter for X` 的 X 都必须有构造点 ——
 //      「有实现没人构造」正是本轮缺陷的另一半。构造点认两种合法写法
 //      （`X::new(` 与处在实参/赋值位的 `X {`），但不裸按 `X {` 数
@@ -28,6 +30,10 @@
 //      integer，PG 实测报「操作符不存在: integer = boolean」，而调用方把错误吞成「今天没有告警」。
 //   R17 轮询间隔生效通路（阶段 D-2）：`start()` 的 `loop {` 之后必须仍能读到 `poll_interval_secs`
 //      —— 只在循环前读一次时一切都编译、setter 也有调用者，唯独面板改了没反应。
+//   R18 T+0 配置两端对齐：harness 的 `TZeroConfig` 必须**真的带** `#[serde(rename_all = "camelCase")]`，
+//      且其字段（snake→camel）与前端 `invoke<{…}>("get_t0_config")` 的键集合逐项相等。
+//      为什么注解也要单独钉：`rustStructFields` 会把 snake 字段名机械转成 camel，抽出的键集合
+//      与 serde 实际吐的键**无关** —— 只比键名会让「删掉注解」这一模一样的回归照样绿。
 //
 // ── 本门**看不见**的三件事（读数别过度解读）──
 //   ① 扫描面按域限定：只查告警 / 条件单 / 组合级信号三条链的生产 `.rs`，不按 token 前缀全仓扫
@@ -61,13 +67,16 @@ const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
 const prod = (rel) => (rel.endsWith(".rs") ? stripTestModules(stripComments(read(rel))) : read(rel));
 
 const MONITOR_RS = crateRel("analysis-engine", "src/monitor.rs");
+/** `MonitorAlert` / `PortfolioSignal` / `TZeroConfig` 的权威已随 `stock.monitor` 接缝上收 harness。 */
+const HARNESS_STOCK_RS = crateRel("harness", "src/stock_monitor.rs");
 const EVENT_NAMES_RS = "axagent-core/crates/harness/src/event_names.rs";
 const PANEL_TSX = "src/components/stock-analysis/PriceAlertPanel.tsx";
 const TYPES_TS = "src/types/stock-analysis.ts";
 const EVENTS_TS = "src/types/generated/events.ts";
 const STOCK_ANALYSIS_RS = "src-tauri/src/commands/stock_analysis.rs";
-// 阶段 G 的第三条链：组合级信号（跨股聚合器 → `RealtimeMonitor` → 组合看板）
-const AGGREGATOR_RS = crateRel("analysis-engine", "src/cross_stock_aggregator.rs");
+// 阶段 G 的第三条链：组合级信号（跨股聚合器 → `RealtimeMonitor` → 组合看板）。
+// 聚合器的 `PortfolioSignal` 定义已随 `stock.monitor` 接缝上收 harness（见上方
+// `HARNESS_STOCK_RS`），故本门不再直接读 `cross_stock_aggregator.rs`（它现在只是 re-export）。
 const PORTFOLIO_PANEL_TSX = "src/components/stock-analysis/PortfolioDashboard.tsx";
 const SIGNAL_KEYS_MIN = 7;
 const DASHBOARD_RS = crateRel("analysis-engine", "src/portfolio_monitor.rs");
@@ -85,6 +94,13 @@ const PAYLOAD_KEYS_MIN = 8;
 // 阶段 F 的第二条链：条件单触发（`conditional_orders` 表 → 行情回调 → 同一个发射器 trait）
 const CONDITION_ENGINE_RS = crateRel("analysis-engine", "src/conditional_order.rs");
 const CONDITION_PAYLOAD_KEYS_MIN = 9;
+
+/**
+ * R18 的 T+0 配置键集合（camelCase）—— 后端 serde 实际吐的键必须正好是这四个。
+ * 前端那份住在 store 的 `invoke<{…}>("get_t0_config")` 内联类型里（没有独立 interface，
+ * 见 `STORE_TS` 的 `t0Config` / `fetchT0Config`）。
+ */
+const TZERO_CAMEL_KEYS = ["enabled", "changePctThreshold", "turnoverRateThreshold", "minIntervalMinutes"];
 
 /**
  * R1/R5 的扫描面：`src-tauri/src` 与全部 workspace 的 `crates/` 下生产 `.rs`（根自动探测）。
@@ -161,6 +177,43 @@ export function rustStructFields(src, structName) {
     if (m) { fields.push(m[1].replace(/_([a-z0-9])/g, (_s, c) => c.toUpperCase())); }
   }
   return fields;
+}
+
+/**
+ * `pub struct <name>` 之前的注解区（从最近一个 `#[derive` 到结构体名之间）。
+ *
+ * 为什么单独抽这一份：`rustStructFields` 只看字段名，**看不到 serde 注解**。
+ * `#[serde(rename_all = …)]` 才是决定线上键名的那一格 —— 只比字段名时「删掉注解」这种
+ * 一模一样的回归抽出来还是同一份键集合。R18 需要它。
+ */
+export function rustStructSerdeAttrs(src, structName) {
+  const at = src.search(new RegExp(`pub struct ${structName}\\b`));
+  if (at === -1) { return null; }
+  const head = src.lastIndexOf("#[derive", at);
+  if (head === -1) { return null; }
+  return src.slice(head, at);
+}
+
+/**
+ * 前端 `invoke<{ … }>("get_t0_config")` 内联类型里的键名。
+ *
+ * T+0 配置在 TS 侧**没有**独立 interface（住在 store 的内联类型里），故 `tsInterfaceKeys`
+ * 那条路抽不到；读侧这一格才是「面板实际按哪些键取值」的真相。
+ *
+ * ⚠ 类型体必须用 `[^{}]` 而不是 `[\s\S]`：store 里有几十个 `invoke<{…}>("…")`，
+ * 惰性跨字符类会从**第一个** `invoke<` 一路吞到目标命令，把中间所有接口的键都抽进来
+ * （实测 2026-11-03：那样抽出的键集合是 150+ 个，判据当场失去意义）。
+ * 代价是「内联类型里再嵌一层对象」抽不到 —— 那种形态出现时本条报「判据没电」而不是误判对齐。
+ */
+export function tsInvokeShapeKeys(src, command) {
+  const m = new RegExp(`invoke<\\s*\\{\\s*([^{}]*?)\\s*\\}>\\s*\\(\\s*"${command}"`).exec(src);
+  if (!m) { return null; }
+  const keys = [];
+  for (const line of m[1].split("\n")) {
+    const k = /^\s*(?:readonly\s+)?([A-Za-z0-9_]+)\??\s*:/.exec(line);
+    if (k) { keys.push(k[1]); }
+  }
+  return keys;
 }
 
 /** TS `export interface <name> { … }` 的键名。 */
@@ -442,6 +495,43 @@ function rulePollIntervalRereadInLoop(src) {
   return { ok: true, n: "loop 内重读" };
 }
 
+/**
+ * R18：T+0 配置的 camelCase 注解 + 两端键集合逐项相等（`res104-monitor-design.md` §0-3 的形态锁）。
+ *
+ * 钉住的缺陷形态（改造前静态对账得出，res104 已声明未实机跑过）：`TZeroConfig` 没有
+ * `#[serde(rename_all = "camelCase")]`，而前端按 camelCase 读写 ⇒ ① `get_t0_config` 的
+ * `changePctThreshold` / `turnoverRateThreshold` 恒 `undefined`（面板显示空，用户以为没设）；
+ * ② `set_t0_config` 因 JSON 里没有 `min_interval_minutes` 这一键而**整条反序列化失败**
+ * （`enabled` 同名侥幸命中、两个 `Option` 被当缺省 `None`，必填 `i64` 缺席即 reject）。
+ *
+ * 三格各管一段：
+ * ① 注解必须在结构体上 —— 只比字段名拦不住「把注解删掉」，那是同一个缺陷的复发形态。
+ * ② 后端字段（snake→camel）与前端读侧键集合逐项相等。
+ * ③ 键集合本身钉死为那四个名字：两侧同步改名也会红，逼消费方一起改而不是静默漂移。
+ * 抽不到任一侧 ⇒ 判据没电 ⇒ 红（不许由「抽不到」推成「对齐」）。
+ */
+export function ruleTZeroConfigCamel(rustFields, serdeAttrs, tsKeys) {
+  if (!serdeAttrs) { return { ok: false, why: "取不到 TZeroConfig 的 serde 注解区（判据没电）" }; }
+  if (!/rename_all\s*=\s*"camelCase"/.test(serdeAttrs)) {
+    return {
+      ok: false,
+      why: 'TZeroConfig 缺 #[serde(rename_all = "camelCase")] ⇒ 线上是 snake_case，前端两个阈值恒 undefined 且 set_t0_config 整条反序列化失败',
+    };
+  }
+  if (!rustFields || rustFields.length === 0) { return { ok: false, why: "取不到 struct TZeroConfig 的字段（判据没电）" }; }
+  if (!tsKeys || tsKeys.length === 0) { return { ok: false, why: '取不到前端 invoke<{…}>("get_t0_config") 的键集合（判据没电）' }; }
+  const onlyRust = rustFields.filter((k) => !tsKeys.includes(k));
+  const onlyTs = tsKeys.filter((k) => !rustFields.includes(k));
+  if (onlyRust.length || onlyTs.length) {
+    return { ok: false, why: `键集合不等：仅后端有 ${JSON.stringify(onlyRust)}，仅前端有 ${JSON.stringify(onlyTs)}` };
+  }
+  const missing = TZERO_CAMEL_KEYS.filter((k) => !rustFields.includes(k));
+  if (missing.length) {
+    return { ok: false, why: `后端键缺 ${JSON.stringify(missing)}（键集合被改 ⇒ 前端与接缝要同步）` };
+  }
+  return { ok: true, n: `${rustFields.length} 键逐项相等且带 camelCase 注解` };
+}
+
 // ── 跑真源文 ──
 
 function collect() {
@@ -459,7 +549,7 @@ function collect() {
     r2: ruleEmitUsesAuthority(prod(MONITOR_RS)),
     r3: ruleNamesMatch(authorityName, read(PANEL_TSX), generatedEventNames(read(EVENTS_TS))),
     r4: rulePayloadKeysMatch(
-      rustStructFields(prod(MONITOR_RS), "MonitorAlert"),
+      rustStructFields(prod(HARNESS_STOCK_RS), "MonitorAlert"),
       tsInterfaceKeys(read(TYPES_TS), "MonitorAlertPayload"),
     ),
     r5: ruleEveryEmitterConstructed(impls, entries),
@@ -501,13 +591,19 @@ function collect() {
       PORTFOLIO_PANEL_TSX,
     ),
     r16: rulePayloadKeysMatch(
-      rustStructFields(prod(AGGREGATOR_RS), "PortfolioSignal"),
+      rustStructFields(prod(HARNESS_STOCK_RS), "PortfolioSignal"),
       tsInterfaceKeys(read(TYPES_TS), "PortfolioSignalPayload"),
       SIGNAL_KEYS_MIN,
       "PortfolioSignal",
     ),
     // ── 阶段 D-2：轮询间隔的生效通路（形态锁）──
     r17: rulePollIntervalRereadInLoop(prod(MONITOR_RS)),
+    // ── T+0 配置：camelCase 注解 + 两端键集合（res104 §0-3 既存缺陷）──
+    r18: ruleTZeroConfigCamel(
+      rustStructFields(prod(HARNESS_STOCK_RS), "TZeroConfig"),
+      rustStructSerdeAttrs(prod(HARNESS_STOCK_RS), "TZeroConfig"),
+      tsInvokeShapeKeys(read(STORE_TS), "get_t0_config"),
+    ),
   };
 }
 
@@ -529,6 +625,7 @@ const RULES = [
   ["R15 组合级信号两头同名且已进生成物", "r15"],
   ["R16 组合级信号 payload 键集合逐项相等", "r16"],
   ["R17 轮询间隔在循环体内重读（D-2 形态锁）", "r17"],
+  ["R18 T+0 配置带 camelCase 注解且两端键集合逐项相等", "r18"],
 ];
 
 function report(state) {
@@ -1012,6 +1109,71 @@ function selftest() {
   push(
     "负控 R17 锚点失效（start 被改名）⇒ 判据没电也算红",
     rulePollIntervalRereadInLoop(OK_POLL_REREAD.replace("pub async fn start(&self)", "pub async fn start_renamed(&self)")),
+    false,
+  );
+
+  // ── R18：T+0 配置（camelCase 注解 + 两端键集合逐项相等）──
+  const OK_TZERO_RS = [
+    "#[derive(Debug, Clone, Serialize, Deserialize)]",
+    '#[serde(rename_all = "camelCase")]',
+    "pub struct TZeroConfig {",
+    "  pub enabled: bool,",
+    "  pub change_pct_threshold: Option<f64>,",
+    "  pub turnover_rate_threshold: Option<f64>,",
+    "  pub min_interval_minutes: i64,",
+    "}",
+  ].join("\n");
+  const OK_TZERO_TS = [
+    "const cfg = await invoke<{",
+    "  enabled: boolean;",
+    "  changePctThreshold: number | null;",
+    "  turnoverRateThreshold: number | null;",
+    "  minIntervalMinutes: number;",
+    '}>("get_t0_config");',
+  ].join("\n");
+  const tzero = (rs, ts) => ruleTZeroConfigCamel(
+    rustStructFields(rs, "TZeroConfig"),
+    rustStructSerdeAttrs(rs, "TZeroConfig"),
+    tsInvokeShapeKeys(ts, "get_t0_config"),
+  );
+  push("正控 R18 齐备", tzero(OK_TZERO_RS, OK_TZERO_TS), true);
+  push(
+    "正控 R18 前序还有别的 invoke<{…}>(…) ⇒ 只许抽目标那一条（惰性跨字符类会吞进整文件的键）",
+    tzero(OK_TZERO_RS, 'const a = await invoke<{ notT0Key: string }>("other_cmd");\n' + OK_TZERO_TS),
+    true,
+  );
+  push(
+    "负控 R18 注解被删（正是本轮修掉的缺陷复发：字段名不变，只比键集合拦不住）",
+    tzero(OK_TZERO_RS.replace('#[serde(rename_all = "camelCase")]\n', ""), OK_TZERO_TS),
+    false,
+  );
+  push(
+    "负控 R18 注解改成 snake_case",
+    tzero(OK_TZERO_RS.replace('"camelCase"', '"snake_case"'), OK_TZERO_TS),
+    false,
+  );
+  push(
+    "负控 R18 前端读 snake_case（后端发了 camel，面板那一格永远空）",
+    tzero(OK_TZERO_RS, OK_TZERO_TS.replace("  changePctThreshold: number | null;", "  change_pct_threshold: number | null;")),
+    false,
+  );
+  push(
+    "负控 R18 后端加字段、前端没跟",
+    tzero(OK_TZERO_RS.replace("  pub min_interval_minutes: i64,", "  pub min_interval_minutes: i64,\n  pub cooldown_secs: i64,"), OK_TZERO_TS),
+    false,
+  );
+  push(
+    "负控 R18 命令名对不上 ⇒ 判据没电（不许由「抽不到」推成「对齐」）",
+    tzero(OK_TZERO_RS, OK_TZERO_TS.replace('"get_t0_config"', '"get_t0_config_x"')),
+    false,
+  );
+  push(
+    "负控 R18 结构体名抄错 ⇒ 判据没电",
+    ruleTZeroConfigCamel(
+      rustStructFields(OK_TZERO_RS, "TZeroConf"),
+      rustStructSerdeAttrs(OK_TZERO_RS, "TZeroConf"),
+      tsInvokeShapeKeys(OK_TZERO_TS, "get_t0_config"),
+    ),
     false,
   );
 

@@ -151,6 +151,39 @@ impl ServiceDefinition {
         )
     }
 
+    /// 预置 stock-monitor 接缝（实时监控 + 跨股聚合器，宿主独占实现）。
+    ///
+    /// 宿主把独持的 `RealtimeMonitor` 与 `CrossStockSignalAggregator` 经本接缝以
+    /// 「配置读写 + 运行读数 + 聚合器视图」的形态暴露给插件侧；轮询循环、交易时段闸门、
+    /// 边沿/冷却判据、触发回写、通知外推、T+0 启动工作流、聚合喂入这七件事**留宿主**。
+    /// 读 op（`status` / `list_configs` / `get_t0_config` / `aggregator_config` /
+    /// `aggregator_buffer`）不设闸；写 op（`upsert_alert` / `remove_alert` /
+    /// `set_t0_config` / `set_aggregator_config`）由 worker 分派层按 `write` 校验。
+    /// ⚠ 注册时机与其他四条不同：monitor / aggregator 在 `init/services.rs` 装配成功**之后**
+    /// 才构造，故注册块落在 services.rs 而非 state.rs（判据见 `res104-monitor-design.md` §0-7）。
+    pub fn stock_monitor() -> Self {
+        Self::new(
+            "stock.monitor",
+            "1.0",
+            "axagent_harness::StockMonitorProvider",
+            "股票监控：运行读数 / 告警配置读写 / T+0 开关 / 跨股聚合器配置与缓冲",
+        )
+    }
+
+    /// 预置 quote-watcher 接缝（实时行情推送集合，宿主独占实现）。
+    ///
+    /// 只暴露集合管理面（`list_watched` / `watch` / `unwatch`）：轮询循环本体返回
+    /// `JoinHandle` 且不幂等，`stop` 是全局停摆 ⇒ 都不过线；行情变化推送走 `event.dispatch`。
+    /// `watch` / `unwatch` 是写 op，由 worker 分派层按 `write` 校验。
+    pub fn quote_watcher() -> Self {
+        Self::new(
+            "quote.watcher",
+            "1.0",
+            "axagent_harness::QuoteWatcherProvider",
+            "行情推送集合：list_watched / watch（含 replace 与数量闸）/ unwatch",
+        )
+    }
+
     /// 预置 model-provider 接缝（LLM Provider 适配器，按 provider 类型名注册多实例）。
     ///
     /// 注册 ID 为 `model.provider.{provider_type}`（如 `model.provider.deepseek`）。
@@ -999,6 +1032,43 @@ impl CapabilityRegistry {
     /// 取回 trading.engine 接缝上的交易引擎提供者（若已注册）。
     pub fn get_trading_engine(&self) -> Option<Arc<dyn crate::TradingEngineProvider>> {
         self.provider_as::<dyn crate::TradingEngineProvider>("trading.engine")
+    }
+
+    // ── stock.monitor 接缝（监控 + 聚合器提供者，单实例；四个写 op 需 write 权限） ──
+
+    /// 注册一个股票监控提供者（`stock.monitor` 接缝）。
+    ///
+    /// 宿主把独持的 `RealtimeMonitor` + `CrossStockSignalAggregator`（+ db）经本接缝暴露；
+    /// 外部实现注册同一接缝即可整体替换（但 `upsert_alert` 的落库 + 进引擎两步必须**同源**，
+    /// 只写一半就会造出「重启即丢」或「有行没盯」的告警）。
+    pub fn register_stock_monitor(
+        &self,
+        provider: Arc<dyn crate::StockMonitorProvider>,
+    ) -> Result<EffectHandle, CapabilityError> {
+        self.register_seam(ServiceDefinition::stock_monitor(), Arc::new(provider), "stock-monitor")
+    }
+
+    /// 取回 stock.monitor 接缝上的股票监控提供者（若已注册）。
+    pub fn get_stock_monitor(&self) -> Option<Arc<dyn crate::StockMonitorProvider>> {
+        self.provider_as::<dyn crate::StockMonitorProvider>("stock.monitor")
+    }
+
+    // ── quote.watcher 接缝（推送集合提供者，单实例；watch / unwatch 需 write 权限） ──
+
+    /// 注册一个实时行情推送集合提供者（`quote.watcher` 接缝）。
+    ///
+    /// 宿主把独持的 `RealTimeQuoteWatcher` 的集合管理面经本接缝暴露；轮询本体（`start` /
+    /// `stop`）不在契约里，外部实现替换本接缝只换「谁被监听」这一层。
+    pub fn register_quote_watcher(
+        &self,
+        provider: Arc<dyn crate::QuoteWatcherProvider>,
+    ) -> Result<EffectHandle, CapabilityError> {
+        self.register_seam(ServiceDefinition::quote_watcher(), Arc::new(provider), "quote-watcher")
+    }
+
+    /// 取回 quote.watcher 接缝上的推送集合提供者（若已注册）。
+    pub fn get_quote_watcher(&self) -> Option<Arc<dyn crate::QuoteWatcherProvider>> {
+        self.provider_as::<dyn crate::QuoteWatcherProvider>("quote.watcher")
     }
 
     // ── system.prompt 接缝（多实例，按段名注册） ────────────────────────────

@@ -11,7 +11,7 @@
 //! - harness 是 foundation 层,**禁止依赖任何 axagent-* crate**(铁律 1)。
 //!   因此 `DomainEvent` 不能直接引用 agent 的 `AgentEventType` 或
 //!   rt-workflow 的事件枚举,改用 `category + kind + payload` 三元组:
-//!   - `category`:粗粒度事件来源(agent / workflow / orchestration / system)
+//!   - `category`:粗粒度事件来源(agent / workflow / orchestration / system / stock)
 //!   - `kind`:细粒度事件类型字符串(如 `"TurnStarted"`、`"DecompositionStarted"`)
 //!   - `payload`:`serde_json::Value`,三方各自把自己的事件结构序列化填入
 //! - `EventBus` trait 使用 `#[async_trait]` 以支持 `Arc<dyn EventBus>` 动态分发,
@@ -25,6 +25,7 @@
 //! | agent            | `EventCategory::Agent` | `AgentEventType::to_string()`              |
 //! | rt-workflow      | `EventCategory::Workflow` | 触发器 `event_type` 字符串               |
 //! | orchestrator     | `EventCategory::Orchestration` | `OrchestrationEvent` 变体名           |
+//! | 宿主 stock 域     | `EventCategory::Stock` | `stock/price_alert`、`stock/portfolio_signal`、`stock/quote_change` |
 //!
 //! 三方"原有 event_bus 保留,统一总线是额外桥接":每次内部 emit 时,
 //! 若 `event_bus` 字段非 None,额外 `publish` 一份 `DomainEvent` 到统一总线。
@@ -98,6 +99,8 @@ pub enum EventCategory {
     Orchestration,
     /// 系统级事件(初始化 / 关闭 / 跨 crate 桥接控制等)
     System,
+    /// 股票域事件(价格告警 / 组合级信号 / 行情变化),kind 前缀为 `stock/`
+    Stock,
 }
 
 impl EventCategory {
@@ -108,6 +111,7 @@ impl EventCategory {
             Self::Workflow => "workflow",
             Self::Orchestration => "orchestration",
             Self::System => "system",
+            Self::Stock => "stock",
         }
     }
 }
@@ -180,6 +184,8 @@ mod tests {
         assert_eq!(EventCategory::Workflow.as_str(), "workflow");
         assert_eq!(EventCategory::Orchestration.as_str(), "orchestration");
         assert_eq!(EventCategory::System.as_str(), "system");
+        // kind 的前缀惯例等于 category.as_str() ⇒ `stock/price_alert` 依赖这一格
+        assert_eq!(EventCategory::Stock.as_str(), "stock");
     }
 
     #[test]

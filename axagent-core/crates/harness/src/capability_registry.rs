@@ -136,6 +136,21 @@ impl ServiceDefinition {
         )
     }
 
+    /// 预置 trading-engine 接缝（交易引擎，宿主独占实现）。
+    ///
+    /// 宿主独持 `TradingEngine`，插件经 `call_seam("trading.engine", op, args)` 读持仓 /
+    /// 交易历史 / 交易开关，并做交易校验、下单（写 op）与「交易 vs 分析」对比。
+    /// 交易账本属于用户而非插件 ⇒ 本接缝**无 owner 隔离**；`execute_trade` 的写权限由
+    /// worker 分派层按 `write` 校验。
+    pub fn trading_engine() -> Self {
+        Self::new(
+            "trading.engine",
+            "1.0",
+            "axagent_harness::TradingEngineProvider",
+            "交易引擎：持仓 / 交易历史 / 交易校验 / 下单 / 交易 vs 分析对比 / 交易开关",
+        )
+    }
+
     /// 预置 model-provider 接缝（LLM Provider 适配器，按 provider 类型名注册多实例）。
     ///
     /// 注册 ID 为 `model.provider.{provider_type}`（如 `model.provider.deepseek`）。
@@ -961,6 +976,29 @@ impl CapabilityRegistry {
     /// 取回 workflow.run 接缝上的工作流执行提供者（若已注册）。
     pub fn get_workflow_run(&self) -> Option<Arc<dyn crate::WorkflowRunProvider>> {
         self.provider_as::<dyn crate::WorkflowRunProvider>("workflow.run")
+    }
+
+    // ── trading.engine 接缝（交易引擎提供者，单实例；写 op execute_trade 需 write 权限） ──
+
+    /// 注册一个交易引擎提供者（`trading.engine` 接缝）。
+    ///
+    /// 宿主把独持的 `TradingEngine` 经本接缝以「ORM 视图不出线」的形态暴露给插件侧；
+    /// 外部实现注册同一接缝即可整体替换（但开关口径必须是 settings 的 `trading_enabled`，
+    /// 引擎结构体上的 `enabled` 是死字段）。
+    pub fn register_trading_engine(
+        &self,
+        provider: Arc<dyn crate::TradingEngineProvider>,
+    ) -> Result<EffectHandle, CapabilityError> {
+        self.register_seam(
+            ServiceDefinition::trading_engine(),
+            Arc::new(provider),
+            "trading-engine",
+        )
+    }
+
+    /// 取回 trading.engine 接缝上的交易引擎提供者（若已注册）。
+    pub fn get_trading_engine(&self) -> Option<Arc<dyn crate::TradingEngineProvider>> {
+        self.provider_as::<dyn crate::TradingEngineProvider>("trading.engine")
     }
 
     // ── system.prompt 接缝（多实例，按段名注册） ────────────────────────────

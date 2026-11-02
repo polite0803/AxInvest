@@ -352,6 +352,12 @@ pub use workflow_run::{
     ExecutionView, WorkflowRunActivePage, WorkflowRunActiveView, WorkflowRunCancelOutcome,
     WorkflowRunHandle, WorkflowRunProvider, WorkflowRunRequest,
 };
+// ── 交易引擎接缝（DTO + Trait，实现由宿主 wiring 注入；ORM 类型不过线）──
+pub mod trading_engine;
+pub use trading_engine::{
+    PositionSummary, TradeExecutionOutcome, TradeExecutionRequest, TradePredictionComparison,
+    TradeValidation, TradeValidationRequest, TradeView, TradingEngineProvider,
+};
 pub mod prompt_guard;
 pub mod provider;
 pub mod provider_continuation;

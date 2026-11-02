@@ -17,16 +17,11 @@ use axagent_astock_data::AStockClient;
 use axagent_astock_data::{detect_market_type, get_st_price_limit_pct};
 use axagent_entities::{portfolio_holdings, stock_analyses, trades};
 
-/// 实际交易 vs 分析预测对比
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TradePredictionComparison {
-    pub analysis_action: String,
-    pub analysis_target: Option<f64>,
-    pub analysis_stop: Option<f64>,
-    pub actual_price: f64,
-    pub target_deviation_pct: f64,
-}
+// DTO 权威定义已上收 `axagent-harness`（`harness/src/trading_engine.rs`，接缝
+// `trading.engine`）。此处 re-export 保留既有引用路径
+// （`crate::trading::PositionSummary` / `axagent_analysis_engine::trading::*`），
+// 避免改调用点；**禁止**在本文件重新定义（AGENTS 12：禁止重复定义）。
+pub use axagent_harness::{PositionSummary, TradePredictionComparison, TradeValidation};
 
 /// 手动交易引擎
 pub struct TradingEngine {
@@ -46,30 +41,6 @@ pub async fn is_trading_enabled(db: &DatabaseConnection) -> bool {
         .unwrap_or_default()
         .map(|s| s == "true")
         .unwrap_or(false)
-}
-
-/// 交易校验结果
-#[derive(Debug, Clone)]
-pub struct TradeValidation {
-    pub valid: bool,
-    pub errors: Vec<String>,
-    pub warnings: Vec<String>,
-}
-
-/// 持仓汇总（含实时盈亏）
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PositionSummary {
-    pub stock_code: String,
-    pub stock_name: String,
-    pub total_shares: i32,
-    pub avg_cost: f64,
-    pub current_price: Option<f64>,
-    pub market_value: Option<f64>,
-    pub unrealized_pnl: Option<f64>,
-    pub unrealized_pnl_pct: Option<f64>,
-    pub total_realized_pnl: f64,
-    pub sector_name: Option<String>,
 }
 
 impl TradingEngine {

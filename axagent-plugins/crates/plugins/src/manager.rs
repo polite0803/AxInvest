@@ -1117,6 +1117,9 @@ impl PluginManager {
             ..PluginWorkerConfig::new(plugin_id, program)
                 .with_sandbox(build_sandbox_from_manifest(manifest))
                 .with_working_dir(install_path.to_path_buf())
+                // 清单权限原样交给 worker 连接：接缝写 op 的准入闸读它（见
+                // `worker::required_permission_for`）。不在运行期协商。
+                .with_permissions(manifest.permissions.clone())
         };
         let loaded =
             LoadedPlugin::load(config).map_err(|e| PluginError::CommandFailed(e.to_string()))?;

@@ -307,6 +307,11 @@ pub mod error_codes {
     pub const PLUGIN_COMMAND_TIMEOUT: &str = "PLUGIN_COMMAND_TIMEOUT";
     /// 命令在 worker 内执行失败的兜底码（worker 未给出更具体分类时使用）。
     pub const PLUGIN_COMMAND_FAILED: &str = "PLUGIN_COMMAND_FAILED";
+    /// 插件未在清单 `permissions` 中声明目标写操作所需的权限 ⇒ 宿主拒绝接缝写 op。
+    ///
+    /// 内部诊断码：只在宿主与插件之间的接缝分派里出现，**不进** 11 语言 UI 词表
+    /// （与同模块其余码一致，见模块头注释）。
+    pub const PLUGIN_PERMISSION_DENIED: &str = "PLUGIN_PERMISSION_DENIED";
 }
 
 /// 调用链长度上限（`PLAN-everything-is-plugin.md` §15.5）：不含本帧接收方。

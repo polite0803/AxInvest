@@ -122,6 +122,7 @@ use parking_lot::Mutex;
 use serde_json::{Value, json};
 
 use crate::sandbox::{SandboxConfig, apply_env_to_command, check_subprocess_permission};
+use crate::types::PluginPermission;
 
 /// 已支持远程化的接缝 ID 清单（与 PLAN §5.4 的 op 映射表一致）。
 ///
@@ -292,6 +293,11 @@ pub struct PluginWorkerConfig {
     /// 超时 ⇒ [`WorkerError::Handshake`]（reason 内嵌 [`WorkerError::Timeout`] 的文本），
     /// 并置「连接可疑」闸，使 [`LoadedPlugin::load`] 失败路径的 `shutdown()` 走急停。
     pub handshake_timeout: Duration,
+    /// 插件清单声明的权限集（`PluginManifest::permissions` 的克隆）。
+    ///
+    /// 接缝分派只用它做**写 op 准入**（见 [`required_permission_for`]）；空表 = 未声明任何
+    /// 权限，所有登记为需要 `write` 的 op 一律拒绝。本批只读：不随运行期变动。
+    pub permissions: Vec<PluginPermission>,
 }
 
 impl PluginWorkerConfig {
@@ -306,6 +312,7 @@ impl PluginWorkerConfig {
             shutdown_timeout: Duration::from_secs(5),
             seam_wait_timeout: Duration::from_millis(DEFAULT_SEAM_TIMEOUT_MS),
             handshake_timeout: Duration::from_millis(DEFAULT_HANDSHAKE_TIMEOUT_MS),
+            permissions: Vec::new(),
         }
     }
 
@@ -336,6 +343,15 @@ impl PluginWorkerConfig {
     /// 独立旋钮（握手预算不会被接缝预算改写，反之亦然）。
     pub fn with_handshake_timeout(mut self, wait: Duration) -> Self {
         self.handshake_timeout = wait;
+        self
+    }
+
+    /// 指定插件已声明的权限集（缺省空表 ⇒ 所有写 op 一律拒绝）。
+    ///
+    /// 通常由 [`crate::manager::PluginManager`] 从 `PluginManifest::permissions` 原样传入；
+    /// 权限是**准入前提**，故只在装载时确定、运行期不变。
+    pub fn with_permissions(mut self, permissions: Vec<PluginPermission>) -> Self {
+        self.permissions = permissions;
         self
     }
 }
@@ -389,9 +405,38 @@ struct HostPeer {
     ///
     /// 为 `None` 时：async 接缝的 `call_seam`/`emit` 返回明确错误，而不是 panic 或静默失败。
     runtime: Option<tokio::runtime::Handle>,
+    /// 本插件清单声明的权限集（构造时从 [`WorkerInner::permissions`] 克隆，运行期不变）。
+    ///
+    /// 用途只有一个：[`Self::dispatch_seam`] 的写 op 准入闸。与 `declared_calls` 是两道
+    /// 独立的闸 —— 前者管「能调哪些接缝」，本字段管「能写哪些接缝」。
+    permissions: Vec<PluginPermission>,
+}
+
+/// 接缝写 op → 所需权限的登记表。
+///
+/// **本批只登记 `jobs.store` 的四个写 op**（`add` / `remove` / `set_status` / `update`）；
+/// 其余接缝或 op 一律 `None`（不设权限闸）。登记与「实现」是两件事：本批**没有**任何
+/// 写 op 的分派分支，登记的唯一作用是让未声明 `write` 的插件在触达 provider 之前被拒。
+///
+/// 纯函数（无 `self`、无全局状态），便于单测直接枚举判定。
+fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
+    match (seam, op) {
+        ("jobs.store", "add" | "remove" | "set_status" | "update") => Some(PluginPermission::Write),
+        _ => None,
+    }
 }
 
 impl HostPeer {
+    /// 本插件的声明权限是否覆盖 `permission`。
+    ///
+    /// 只做**精确匹配**（不套 `PluginPermission::implies_*`）：登记表要求哪个权限，清单里就
+    /// 必须出现哪个 —— 避免 `execute` / `subprocess_execution` 之类宽权限悄悄补齐 `write`
+    /// 的准入面。要放宽口径必须显式改这里并补用例。
+    #[must_use]
+    fn has_permission(&self, permission: PluginPermission) -> bool {
+        self.permissions.contains(&permission)
+    }
+
     /// 处理一帧入站请求，返回**未回填 `request_id`** 的响应（由读线程统一回填）。
     fn handle_inbound(&self, request: &FrameRequest) -> FrameResponse {
         match request.op.as_str() {
@@ -504,6 +549,19 @@ impl HostPeer {
     ///
     /// 返回值形状与同接缝的门面**逐字对称**（门面把 `value` 反序列化为该方法的结果类型）。
     fn dispatch_seam(&self, seam: &str, op: &str, args: Value) -> FrameResponse {
+        // 准入闸（**在 match 之前**）：写 op 要求清单已声明对应权限。
+        // 拒绝发生在取 provider / 反序列化参数之前 ⇒ 不触达 provider、零副作用。
+        if let Some(permission) = required_permission_for(seam, op)
+            && !self.has_permission(permission)
+        {
+            return FrameResponse::error(
+                error_codes::PLUGIN_PERMISSION_DENIED,
+                format!(
+                    "插件未声明 `{}` 权限，拒绝接缝 `{seam}` 的写操作 `{op}`",
+                    permission.as_str()
+                ),
+            );
+        }
         match seam {
             "agent.loop" if op == "run_turn" => {
                 let Some(runner) = self.registry.get_agent_turn_runner() else {
@@ -2191,6 +2249,11 @@ struct WorkerInner {
     /// 那半句的落地）；`seam_suspect` = 「进程在、但曾超时未回帧」⇒ **拒绝**并等显式卸载
     /// 复位。两者混在一个 bool 里就是 M-2 / M-3 的根（PLAN §26.3 对 S-3 的裁定）。
     connection_closed: AtomicBool,
+    /// 插件清单声明的权限集（来自 [`PluginWorkerConfig::permissions`]）。
+    ///
+    /// 连接级不可变快照：装载时克隆一次，运行期不再改。入站接缝分派的门面
+    /// （[`HostPeer`]）在注入声明时从这里再克隆一份，二者同源。
+    permissions: Vec<PluginPermission>,
 }
 
 /// 长驻 worker 子进程的传输实现（[`SeamInvoker`] 的主路径实现）。
@@ -2254,6 +2317,7 @@ impl WorkerInvoker {
             seam_suspect: AtomicBool::new(false),
             inbound_inflight: AtomicUsize::new(0),
             connection_closed: AtomicBool::new(false),
+            permissions: config.permissions.clone(),
         });
         // 写线程先起：它接管 stdin，之后的所有写帧都只经这条串行写者。
         // 起不来 ⇒ 进程已 spawn，必须杀掉，不能留孤儿（与读线程失败的处置一致）。
@@ -2319,6 +2383,8 @@ impl WorkerInvoker {
             seam_suspect: AtomicBool::new(false),
             inbound_inflight: AtomicUsize::new(0),
             connection_closed: AtomicBool::new(false),
+            // 流式构造（仅测试）不带清单权限：写 op 一律被拒，与「未声明」同口径。
+            permissions: Vec::new(),
         });
         // 与生产同一条写路径：测试也经写线程，避免「测的是另一套写逻辑」。
         let writer = Self::spawn_writer(writer, &plugin_id).expect("测试用写线程应能启动");
@@ -2373,6 +2439,7 @@ impl WorkerInvoker {
             registry,
             // 载入点若不在 async 上下文中，这里为 None：async 接缝的 call_seam 会明确报错。
             runtime: tokio::runtime::Handle::try_current().ok(),
+            permissions: self.inner.permissions.clone(),
         };
         *self.inner.host_peer.lock() = Some(Arc::new(host_peer));
     }
@@ -4850,6 +4917,7 @@ mod tests {
             declared_calls: calls.iter().map(|s| (*s).to_string()).collect(),
             registry,
             runtime: None,
+            permissions: Vec::new(),
         }
     }
 
@@ -6476,6 +6544,8 @@ mod tests {
             declared_calls: vec!["market.quote".to_string()],
             registry,
             runtime,
+            // market.quote 的 op 全部只读：不需要任何写权限。
+            permissions: Vec::new(),
         }
     }
 
@@ -6516,6 +6586,7 @@ mod tests {
             declared_calls: vec!["market.quote".to_string()],
             registry: Arc::new(CapabilityRegistry::new()),
             runtime: None,
+            permissions: Vec::new(),
         };
         let expected = peer.unavailable("market.quote");
         let response = with_watchdog(Duration::from_secs(2), "market.quote 缺 provider", move || {
@@ -7033,8 +7104,19 @@ mod tests {
     }
 
     /// 装假 jobs 提供者的 peer + 保活到用例结束的 runtime。
+    ///
+    /// 缺省**不带任何权限**：只读 op 不受权限闸影响；写 op 用例请用
+    /// [`Self::jobs_peer_with_runtime_and_permissions`]。
     fn jobs_peer_with_runtime(
         provider: Arc<FixedJobStoreProvider>,
+    ) -> (HostPeer, tokio::runtime::Runtime) {
+        jobs_peer_with_runtime_and_permissions(provider, Vec::new())
+    }
+
+    /// 同 [`Self::jobs_peer_with_runtime`]，但显式注入清单权限（写 op 准入用例）。
+    fn jobs_peer_with_runtime_and_permissions(
+        provider: Arc<FixedJobStoreProvider>,
+        permissions: Vec<PluginPermission>,
     ) -> (HostPeer, tokio::runtime::Runtime) {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
@@ -7049,6 +7131,7 @@ mod tests {
             declared_calls: vec!["jobs.store".to_string()],
             registry,
             runtime: Some(runtime.handle().clone()),
+            permissions,
         };
         (peer, runtime)
     }
@@ -7132,5 +7215,112 @@ mod tests {
             )
         });
         assert_eq!(response.code.as_deref(), Some(error_codes::SEAM_CALL_INVALID_ARGS));
+    }
+
+    // ─────────────── 任务 #87：接缝写 op 的权限闸（本批只登记 `jobs.store` 四个写 op） ───────────────
+
+    /// 登记表：只有 `jobs.store` 的四个写 op 需要 `write`；只读 op 与其它接缝一律不设闸。
+    #[test]
+    fn required_permission_for_jobs_writes_requires_write() {
+        let verdict = with_watchdog(Duration::from_secs(2), "required_permission_for 表", || {
+            let writes: Vec<Option<PluginPermission>> = ["add", "remove", "set_status", "update"]
+                .into_iter()
+                .map(|op| required_permission_for("jobs.store", op))
+                .collect();
+            let reads: Vec<Option<PluginPermission>> = ["list", "get", "count"]
+                .into_iter()
+                .map(|op| required_permission_for("jobs.store", op))
+                .collect();
+            // 接缝维度必须参与判定：同名 op 换到 market.quote 不得再要求 write。
+            let market: Vec<Option<PluginPermission>> = ["add", "remove", "set_status", "update"]
+                .into_iter()
+                .map(|op| required_permission_for("market.quote", op))
+                .collect();
+            (writes, reads, market)
+        });
+        assert_eq!(verdict.0, [Some(PluginPermission::Write); 4], "四个写 op 都必须要求 write");
+        assert_eq!(verdict.1, [None, None, None], "list / get / count 不得设权限闸");
+        assert_eq!(verdict.2, [None; 4], "market.quote 任意 op 都不得设权限闸");
+    }
+
+    /// 未声明 `write` ⇒ 写 op 在分派前被拒（`PLUGIN_PERMISSION_DENIED`），文案点明权限与接缝。
+    #[test]
+    fn jobs_store_write_without_permission_is_denied() {
+        // 权限来自「缺省配置」：`PluginWorkerConfig::new` 的 permissions 是空表。
+        let denied_config_permissions =
+            PluginWorkerConfig::new("plugin.jobs", "plugin.exe").permissions;
+        assert!(denied_config_permissions.is_empty(), "缺省配置必须不带任何权限");
+
+        let provider = Arc::new(FixedJobStoreProvider::new());
+        let (peer, _runtime) =
+            jobs_peer_with_runtime_and_permissions(provider, denied_config_permissions);
+        let response =
+            with_watchdog(Duration::from_secs(5), "jobs.store remove 无权限", move || {
+                peer.handle_call_seam(
+                    &json!({ "seam": "jobs.store", "op": "remove", "args": { "id": "job-x" } }),
+                    &[],
+                )
+            });
+        assert_eq!(
+            response.code.as_deref(),
+            Some(error_codes::PLUGIN_PERMISSION_DENIED),
+            "无 write 权限必须被拒，实际 {response:?}"
+        );
+        let detail = response.message.unwrap_or_default();
+        assert!(detail.contains("write"), "文案应点明缺失的权限，实际：{detail}");
+        assert!(detail.contains("jobs.store"), "文案应点明接缝，实际：{detail}");
+
+        // 不触达 provider 的取证：注册表**空**（无 jobs provider）时仍是权限拒绝，
+        // 而不是 `SEAM_PROVIDER_UNAVAILABLE` —— 说明闸在取 provider 之前就返回了。
+        let bare = HostPeer {
+            plugin_id: "plugin.jobs".to_string(),
+            declared_capabilities: Vec::new(),
+            declared_calls: vec!["jobs.store".to_string()],
+            registry: Arc::new(CapabilityRegistry::new()),
+            runtime: None,
+            permissions: Vec::new(),
+        };
+        let bare_response =
+            with_watchdog(Duration::from_secs(2), "jobs.store remove 无 provider", move || {
+                bare.handle_call_seam(
+                    &json!({ "seam": "jobs.store", "op": "remove", "args": { "id": "job-x" } }),
+                    &[],
+                )
+            });
+        assert_eq!(
+            bare_response.code.as_deref(),
+            Some(error_codes::PLUGIN_PERMISSION_DENIED),
+            "权限闸必须先于 provider 查找，实际 {bare_response:?}"
+        );
+    }
+
+    /// 已声明 `write` ⇒ 不再被权限闸拦；本批未实现写分支，故落到「未知 op」的既有错误码。
+    ///
+    /// ⚠ 盘上口径：**已知接缝的未知 op** 走 `dispatch_seam` 末尾的 `SEAM_CALL_UNSUPPORTED`
+    /// （`PLUGIN_UNKNOWN_OP` 只用于未知**帧** op，见 `HostPeer::handle_inbound`）。本用例按
+    /// 盘上断言，未为写 op 新增任何分派分支。
+    #[test]
+    fn jobs_store_write_with_permission_falls_through_to_unknown_op() {
+        let (peer, _runtime) = jobs_peer_with_runtime_and_permissions(
+            Arc::new(FixedJobStoreProvider::new()),
+            vec![PluginPermission::Write],
+        );
+        let response =
+            with_watchdog(Duration::from_secs(5), "jobs.store remove 有权限", move || {
+                peer.handle_call_seam(
+                    &json!({ "seam": "jobs.store", "op": "remove", "args": { "id": "job-x" } }),
+                    &[],
+                )
+            });
+        assert_ne!(
+            response.code.as_deref(),
+            Some(error_codes::PLUGIN_PERMISSION_DENIED),
+            "已声明 write 时不得再被权限闸拦，实际 {response:?}"
+        );
+        assert_eq!(
+            response.code.as_deref(),
+            Some(error_codes::SEAM_CALL_UNSUPPORTED),
+            "本批未实现写分支 ⇒ 落入未知 op 的既有错误码，实际 {response:?}"
+        );
     }
 }

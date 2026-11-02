@@ -262,7 +262,7 @@ const DOMAINS = {
 export function checkSelfConsistency(register) {
   const problems = [];
   const { caliber } = register;
-  const groups = { A: 0, B: 0, C: 0, H: 0, K: 0 };
+  const groups = { A: 0, B: 0, C: 0, H: 0, K: 0, D: 0 };
   for (const e of register.entries) {
     if (!(e.group in groups)) { problems.push(`未知分组「${e.group}」（seamId=${e.seamId}）`); continue; }
     groups[e.group]++;
@@ -1582,7 +1582,7 @@ function codeRepinProseMentions(srcText, c) {
 function fixture() {
   const register = {
     note: "fixture",
-    caliber: { capacityRegister: 2, groupCounts: { A: 1, B: 1, C: 0, H: 0, K: 1 }, totalRows: 3, bannedPlanPhrases: ["B 11", "登记 27"] },
+    caliber: { capacityRegister: 2, groupCounts: { A: 1, B: 1, C: 0, H: 0, K: 1, D: 0 }, totalRows: 3, bannedPlanPhrases: ["B 11", "登记 27"] },
     sources: { plan: "docs/PLAN-x.md" },
     countRule: {},
     // 每种 anchor check 各配一个锚点（与真实表同档：registryFileLineCount 在真实表是 hard:false）⇒
@@ -1771,7 +1771,7 @@ function runSelftest() {
   r = reconcile(f12.register, f12.readings, f12.plan);
   check(has(r, /锚点 commandTotal 自相矛盾：.*mustContain=5555/), "负控⑫b：planPinned 纯数字 token 与表内登记数脱节必须硬失败");
   // 正控：跨锚点宽容不得放松「兄弟读数」这一档 —— 用直调把「撞别锚点的数」与「谁都不撞」分开验
-  const consReg = (anchors) => ({ caliber: { groupCounts: { A: 1, B: 0, C: 0, H: 0, K: 0 }, totalRows: 1, capacityRegister: 1 }, anchors, entries: [] });
+  const consReg = (anchors) => ({ caliber: { groupCounts: { A: 1, B: 0, C: 0, H: 0, K: 0, D: 0 }, totalRows: 1, capacityRegister: 1 }, anchors, entries: [] });
   check(checkAnchorConsistency(consReg([
     { id: "x", value: 84873, planNumber: "84 873", planPinned: [{ line: 1, mustContain: ["84 873", "293"] }], value2: 293 },
     { id: "y", value: 3, planNumber: "3" },
@@ -2304,7 +2304,7 @@ function runSelftest() {
     // ㉕g 正控：文本版定点回写（真正落盘那条路径）——needle 唯一才改，成对改，其它字节不动
     const tableText = `{\n  "anchors": [\n    { "id": "commandTotal", "planOld": [{ "number": "9", "note": "n", "alsoAt": [{ "startLine": 13, "endLine": 14, "mustContain": ["HEAD 产物", "9 条"] }] }] }\n  ]\n}\n`;
     const regG = JSON.parse(tableText);
-    const rpG = computeRepin({ ...regG, caliber: { groupCounts: { A: 0, B: 0, C: 0, H: 0, K: 0 }, totalRows: 0, capacityRegister: 0 }, entries: [] }, shifted);
+    const rpG = computeRepin({ ...regG, caliber: { groupCounts: { A: 0, B: 0, C: 0, H: 0, K: 0, D: 0 }, totalRows: 0, capacityRegister: 0 }, entries: [] }, shifted);
     const chG = rpG.changes.filter((x) => x.kind === "alsoAtRegion");
     check(chG.length === 1 && chG[0].to === 11 && chG[0].toEnd === 11, `㉕g1 前提：文本版同样应算出 13–14→11–11（实得 ${JSON.stringify(chG)}）`);
     const gp = planRepinPatches(tableText, regG, chG);
@@ -2312,12 +2312,12 @@ function runSelftest() {
     check(gp.ok && gp.text.includes('"note": "n"'), "㉕g3：未涉及的字节逐字不动（note / 结构 / 缩进没被整体重排）");
     const twinTable = `{\n  "anchors": [\n    { "id": "commandTotal", "planOld": [{ "number": "9", "note": "n", "alsoAt": [{ "startLine": 13, "endLine": 14, "mustContain": ["HEAD 产物", "9 条"] }] }, { "number": "8", "note": "n2", "alsoAt": [{ "startLine": 13, "endLine": 14, "mustContain": ["HEAD 产物", "8 条"] }] }] }\n  ]\n}\n`;
     const regT = JSON.parse(twinTable);
-    const rpT = computeRepin({ ...regT, caliber: { groupCounts: { A: 0, B: 0, C: 0, H: 0, K: 0 }, totalRows: 0, capacityRegister: 0 }, entries: [] }, shifted);
+    const rpT = computeRepin({ ...regT, caliber: { groupCounts: { A: 0, B: 0, C: 0, H: 0, K: 0, D: 0 }, totalRows: 0, capacityRegister: 0 }, entries: [] }, shifted);
     const bad = planRepinPatches(twinTable, regT, rpT.changes.filter((x) => x.kind === "alsoAtRegion"));
     check(!bad.ok && bad.problems.some((x) => /找不到唯一的替换锚/.test(x)) && bad.text === null, `㉕g4：两段行号字面相同 ⇒ 替换锚不唯一 ⇒ 整次拒绝写盘（实得 ok=${bad.ok} problems=${JSON.stringify(bad.problems)}）`);
 
     // ㉕h 判据 6：alsoAt 的纯数字 token 同受锚点内部自洽管辖（挪数字不等于拆判据）
-    const consReg2 = (anchors) => ({ caliber: { groupCounts: { A: 1, B: 0, C: 0, H: 0, K: 0 }, totalRows: 1, capacityRegister: 1 }, anchors, entries: [] });
+    const consReg2 = (anchors) => ({ caliber: { groupCounts: { A: 1, B: 0, C: 0, H: 0, K: 0, D: 0 }, totalRows: 1, capacityRegister: 1 }, anchors, entries: [] });
     const alsoAnchor = (mustContain) => consReg2([{ id: "x", hard: true, check: "registryCommandCount", value: 1542, planNumber: "1542", planOld: [{ number: "1541", alsoAt: [{ startLine: 1, endLine: 3, mustContain }] }] }]);
     check(checkAnchorConsistency(alsoAnchor(["HEAD 产物", "1541"])).length === 0, "㉕h1 正控：alsoAt 钉本条 planOld 自己声明的旧读数（1541）⇒ 不算矛盾（这就是该字段的用途）");
     check(checkAnchorConsistency(alsoAnchor(["HEAD 产物", "7777"])).length === 1, `㉕h2 负控：alsoAt 钉谁都不撞的数字 ⇒ 必须硬失败（实得 ${JSON.stringify(checkAnchorConsistency(alsoAnchor(["HEAD 产物", "7777"])))}）`);

@@ -87,7 +87,7 @@
 3. 卸载该插件后，宿主在**下一次调用**时明确失败（`SEAM_PROVIDER_UNAVAILABLE` / `SEAM_CALL_TIMEOUT`），
    不挂起、不静默降级、不让 UI 卡死。
 
-按这三条判，终局的**能力全集**以 **§0.7 的登记表**为准（**登记 26 条** = A 11 + B 10 + C 5，逐条带行号证据；其中 **24 条有实证**，`context.engine` / `rule.custom` 经核为零外部实现者 ⇒ 降级待证，权威读数见 §0.9.4）。
+按这三条判，终局的**能力全集**以 **§0.7 的登记表**为准（**登记 23 条** = A 11 + B 8 + C 4，逐条带行号证据；另有 3 条移入 §0.7.9 债档、只登记不计数；其中 **22 条有实证**，`rule.custom` 经核为零外部实现者 ⇒ 降级待证，权威读数见 §0.9.4）。
 本节原先列的那份按名字点出来的 12 条（LLM provider · 行情数据源 · 量化策略 · 市场仿真 · 通知渠道 · 文档解析 ·
 RAG 向量后端 · MCP 服务器 · 工具集 · 平台适配器 · 反思/进化/优化器 · 业务规则）是**手工挑选、未经清点，已作废**；
 其中「市场仿真」按 K2/K3 落进 §0.7.7 的**内核**桶（DES 每 tick 调用的 agent 变体，出进程即每步一次 IPC）——
@@ -135,7 +135,7 @@ RAG 向量后端 · MCP 服务器 · 工具集 · 平台适配器 · 反思/进�
 ### 0.5.8 三个产品决定 —— **已于 2026-11-01 拍定，见 §0.6**
 
 - **(a) 能力覆盖范围 → 「全部能力面覆盖」**。拍板当时的措辞是「12 类全覆盖」，但 **12 是我手工挑的族，不是扫出来的**；
-  机器核准后的范围见 **§0.7 登记表（登记 26 条 / 有实证 24 条）**，本节只锁「不许有豁免」这一意志。原「策略与 RAG 代价高于收益，可只覆盖前 8 类」的建议**未被采纳**，
+  机器核准后的范围见 **§0.7 登记表（登记 23 条 / 有实证 22 条）**，本节只锁「不许有豁免」这一意志。原「策略与 RAG 代价高于收益，可只覆盖前 8 类」的建议**未被采纳**，
   因此 §9 里对应的两条豁免作废，P5.7 / P5.8 变成必做项（RAG 的**切法**仍待单独拍，§0.6.3）。
 - **(b) 谁能写插件 → 「第三方」**。签名、兼容窗口、权限模型、审核与分发通道全部升级为硬前置；
   并且它顶穿了「握手严格相等」与「清单无权限字段」两处现存设计 —— 逐条见 **§0.6.1 / §0.6.2**。
@@ -149,7 +149,7 @@ RAG 向量后端 · MCP 服务器 · 工具集 · 平台适配器 · 反思/进�
 
 | 决定 | 拍板 | 立刻变成终局要件的东西 |
 |---|---|---|
-| (a) 能力覆盖 | **全覆盖（范围 = §0.7 登记的 26 条、其中有实证 24 条；拍板时写作「12 类」，那是我手工挑的口径，已由机械登记表替代）** | 需新建接缝 **13 条**（§0.7.4 的 10 + §0.7.5 有实证 3；两条待证成立则 15）+ 策略会话式批量 op + RAG 后端接缝 + MCP/工具集投影层 + Dojo 第二协议合流（§0.7.6）。**§9 里任何「某类不做」的豁免作废** |
+| (a) 能力覆盖 | **全覆盖（范围 = §0.7 登记的 23 条、其中有实证 22 条；拍板时写作「12 类」，那是我手工挑的口径，已由机械登记表替代）** | 需新建接缝 **11 条**（§0.7.4 的 8 + §0.7.5 有实证 3；一条待证成立则 12）+ 策略会话式批量 op + RAG 后端接缝 + MCP/工具集投影层 + Dojo 第二协议合流（§0.7.6）。**§9 里任何「某类不做」的豁免作废** |
 | (b) 谁能写插件 | **第三方** | 签名（D6）、SDK 兼容窗口、审核与分发通道、权限模型 —— 全部从「登记/可推迟」升级为**硬前置**。§0.5.7 六件事一件不能省 |
 | (c) provider | **进** | D2 流式分片协议改动，且因为它打破兼容 ⇒ 必须与 (b) 的兼容窗口**同时**落地，不能先改协议再补窗口 |
 
@@ -247,7 +247,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | K1：`pub trait` 总数（8 根 2009 个 `.rs`） | **316** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 316**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1）。 |
 | K1 + 有非 harness、非测试实现者 | **232** | ⚠ 这一档**不能**当能力数。~~232 出自一次性 census 工件（`.tmp/traits-full.json`，未入库 ⇒ 谓词无法从仓内代码复现）~~ ⇒ **该说法已作废（`#61` + `#66` 落地后）**：谓词已入库为 `k1DeclaredExternalImplTraitCount`，`--dump-readings` 在现树复现 = **232**，且与本门 audit 侧输出**排序名单逐字相等**（`#66` 的 4.2 档，差分探针 + 两条命令背靠背 + 扫描面常量逐项对照，三条同源性证据齐）⇒ **232 现在是可复算值**，锚点**具备升 `hard:true` 的条件**（升不升、用哪个数由我在收口时一次定）。另两个历史数**只留作解释、不再与 232 并列**：**210** = 单趟扫描缺陷（同谓词**两趟交并** = 232，差值恰 **22** —— 这同时就是「为什么必须两趟」的反证）；**269** = 门里最严格的读法（不要求 trait 声明面、不排 std/派生噪声名），**不作文档该锚点值**。⚠ 处置次序仍不能反：**先让谓词可复算，再升 hard** —— 反向必先假红 |
 | K1 + K2（键控站点，四次扫描合并去漏报） | **51** 个 trait 面 | 含 15 条已建接缝的 trait。⚠ **2026-11-02 `#33` 实测：这一档不可作论据** —— 谓词真身是**未入库的一次性工件** `.tmp/capability-register3.cjs:44-82`（仓内无处复跑，与 §0.7.2 的 232 同病根），且它要求签名/块内出现 `dyn T` ⇒ 198 条里 **21 条假阴性**，把 PLAN B/C 组落入该桶的 **13 条契约全部吞掉** ⇒ **不许**用「无键控点」论证「这些 trait 只是分层解耦」。谓词入库 = 任务 **#57**；逐条分桶结论见 **§14** |
-| 51 → 同族合并 + K3/K4 判定 | **26 条能力** | ⇒ 本节表格 A+B+C 三组 |
+| 51 → 同族合并 + K3/K4 判定 | **23 条能力**（另有 3 条移入 §0.7.9 债档，只登记不计数） | ⇒ 本节表格 A+B+C 三组 |
 | （对照）今天就能远程跑的接缝 | **13** | `axagent-plugins/crates/plugins/src/worker.rs:133` `SUPPORTED_REMOTE_SEAMS` |
 
 > 报数纪律：以后凡是「能力数」，必须连带给出它用的是哪一档口径。单说「26」「27」「12」而不说口径，三者同样不可核对。
@@ -268,7 +268,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | `workflow.sandbox` | `axagent-core/crates/harness/src/workflow_evolution.rs:263` | 接缝 | 4 | — |
 | `workflow.business_rule` | `axagent-core/crates/harness/src/business_rules.rs:71` | 接缝（已有 e2e worker 产物） | 3 | — |
 
-### 0.7.4 B 组：K1+K2 成立但**没有接缝** —— 10 条，P5.0a 必须新建（⚠ K4 分级后 `workflow.node` 判**不过留内核**，移桶属 #54，本表暂保分组）
+### 0.7.4 B 组：K1+K2 成立但**没有接缝** —— 8 条，P5.0a 必须新建（另 2 条 `workflow.node` / `memory.provider` 已按 #54 移入 §0.7.9 债档；本表仍保留原行作判据与历史，不计数）
 
 | 建议能力 ID | 契约 | 键控分发点 | 内置实现者 | K4 代价（帧协议/主权） |
 |---|---|---|---|---|
@@ -280,28 +280,28 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | `rag.source` | `axagent-core/crates/harness/src/rag_provider.rs:7/40`（Embedding/Rerank）+ `axagent-infra/crates/search/src/rag.rs:45 RAGSource` | `search/src/rag.rs:941`（3 分支工厂） | 4 | **§0.6.3 未拍**；`VectorStore` 是持 `DatabaseConnection` 的 struct（`search/src/vector_store.rs:114`），sqlite-vec 进程内扩展 ⇒ 出进程即失效 |
 | `mcp.server` | `axagent-core/crates/harness/src/mcp_service.rs:54 McpClientService` + `:48 McpServerStore` | `axagent-ai/crates/mcp/src/client_service_impl.rs:155 build_*` | 1 | **订正（2026-11-02 实测）**：句柄**不过帧** ⇒ 门面 `McpClientService` 是零字段单元结构（`client_service_impl.rs:21-22`），连接池在实现侧进程内全局（`mcp_client.rs:661` / `:434` / `:2407`）；桥今天即 one-shot（`mcp_tool_bridge.rs:197-202`）⇒ **可直接走请求-响应接缝**，「会话式 op」是**延迟优化而非 K4 前置**。需另补两条生命周期 op（`evict_by_server_id` `mcp_client.rs:547`、`probe_and_evict` `mcp_health.rs:100`）⇒ 可与 `notify.channel` 同批。入参 300–800 B、每工具 500 B–2 KB ⇒ ①；`callTool`/`readResource` 返回值**无上界** ⇒ ②。拟接缝 id = `mcp.client`（`McpServerStore` 留内核：配置面不是能力面）。前置 **D1** |
 | `strategy.quant` | `axagent-core/crates/harness/src/strategy_contract.rs:440` | `src-tauri/src/commands/quant_backtest.rs:363-430`（`match strategy_type` 硬构造） | 7 | **最高**：`&mut self` + `&mut StrategyCtx` 的 bar 级热循环 ⇒ 会话式批量 op（spawn/setParam/onBarBatch/drop） |
-| `workflow.node` | `axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs:224` | `work_engine/dispatcher.rs:31`（`HashMap<&'static str, Arc<dyn NodeExecutorTrait>>`）+ `:397 get_executor(&str)` | 33 | 键是 `'static` 字面量 ⇒ K3 今天不成立；**粒度必须是「节点包」而非单节点**，否则每个节点一次 IPC。**2026-11-02 K4 实测判不过**：`ExecutionState`（`execution_state.rs:213`）含 **≥8 个 skip 句柄位** ⇒ ③；node 入参 0.5–3 KB 但 context 10 KB–数 MB ⇒ 需 snapshot 化才勉强到 ②（snapshot 形态 `:491` **已存在**）⇒ 移入内核桶属 #54，本条真正的归属是 **P6.0-①（节点包协议批次④，与 `strategy.quant` 共用 spawn/feed/close）**，**不入 P5.0a** |
-| `memory.provider` | `axagent-ai/crates/trajectory/src/memory_provider.rs:63` | **自述键 ≠ 分发点（本行的原病，§14.6 + §24.1 已裁）**：`provider_name()/provider_version()` 只是实现者的自述字段，仓内**没有**按它取实现的容器 —— `MemoryProviderRegistry` **不存在**（全树 2 处命中都是「它不存在」的注释），`Arc<dyn MemoryProvider` 的 4 处位点**全是单字段 / 函数参数**、无键控集合 ⇒ **「建接缝」= 建接缝 + 建键表**（成本 6+1）。它**留 B** 的依据是 **K1 + 第三方贡献故事**（§14.6），不是「键控位点已存在」 | 2 | `sync_turn(entries)` 可序列化；预取语义要与会话生命周期对齐 |
+| `workflow.node` | `axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs:224` | `work_engine/dispatcher.rs:31`（`HashMap<&'static str, Arc<dyn NodeExecutorTrait>>`）+ `:397 get_executor(&str)` | 33 | 键是 `'static` 字面量 ⇒ K3 今天不成立；**粒度必须是「节点包」而非单节点**，否则每个节点一次 IPC。**2026-11-02 K4 实测判不过**：`ExecutionState`（`execution_state.rs:213`）含 **≥8 个 skip 句柄位** ⇒ ③；node 入参 0.5–3 KB 但 context 10 KB–数 MB ⇒ 需 snapshot 化才勉强到 ②（snapshot 形态 `:491` **已存在**）⇒ 移入内核桶属 #54，本条真正的归属是 **P6.0-①（节点包协议批次④，与 `strategy.quant` 共用 spawn/feed/close）**，**不入 P5.0a**；**2026-11-02 `#54` 已移入 §0.7.9 债档（不计数）** |
+| `memory.provider` | `axagent-ai/crates/trajectory/src/memory_provider.rs:63` | **自述键 ≠ 分发点（本行的原病，§14.6 + §24.1 已裁）**：`provider_name()/provider_version()` 只是实现者的自述字段，仓内**没有**按它取实现的容器 —— `MemoryProviderRegistry` **不存在**（全树 2 处命中都是「它不存在」的注释），`Arc<dyn MemoryProvider` 的 4 处位点**全是单字段 / 函数参数**、无键控集合 ⇒ **「建接缝」= 建接缝 + 建键表**（成本 6+1）。它**留 B** 的依据是 **K1 + 第三方贡献故事**（§14.6），不是「键控位点已存在」；**2026-11-02 `#54` 已移入 §0.7.9 债档（不计数）** | 2 | `sync_turn(entries)` 可序列化；预取语义要与会话生命周期对齐 |
 
-### 0.7.5 C 组：钩子/会话族，判可拆但先验 K4 —— 5 条（⚠ K4 实测订正 2026-11-02：`transport.kind` 体量**全 ①**，原判「必须留内核」在盘上**不成立**；`rule.custom` **K4 通过**但全仓无生产注册点 ⇒ 待第一个实现者；唯 `context.engine` **判债**（零实现者 + 零派发点）⇒ P5.0a 不许为它预留协议面。移桶属 #54：本表 B 少 1（`workflow.node`）+ C 少 1（`context.engine`）⇒ 能力面 26 → 24）
+### 0.7.5 C 组：钩子/会话族，判可拆但先验 K4 —— 4 条（⚠ K4 实测订正 2026-11-02：`transport.kind` 体量**全 ①**，原判「必须留内核」在盘上**不成立**；`rule.custom` **K4 通过**但全仓无生产注册点 ⇒ 待第一个实现者；`context.engine` **判债**（零实现者 + 零派发点）⇒ 已按 #54 移入 §0.7.9 债档，本表保留原行但不计数）
 
 | 能力 ID | 契约 | 证据 | 判定理由 / 待验 |
 |---|---|---|---|
 | `lifecycle.hook` | `axagent-core/crates/harness/src/workflow_lifecycle.rs:33` | 4 实现者；文档自述「业务侧实现 + 注册，WorkEngine 按模板声明调用」 | 天然第三方面。实测（2026-11-02）：`HookExecContext`（`:51`）与 `HookOutcome`（`:64`）**无 serde** ⇒ 今天属 **③**，补 derive 后即 ②/①；`postExec.results` 是全 DAG 输出 ⇒ 需引用化（ctx 20 KB–400 KB 为推断）。频率每次工作流执行 1+1 次（低频）⇒ 可走接缝，前置 **D1** |
 | `plugin.hook` | `axagent-core/crates/harness/src/plugin_hook.rs:159` | 14 方法（`pre_tool_call`/`post_tool_call`/`on_session_*`） | **与 D4 无关（2026-11-02 订正）**：`ToolCallContext` 的真实位置是 `plugin_hook.rs:14-19`，**本就是 4 字段纯 serde DTO**；D4 丢弃的是宿主可执行上下文 `ToolContext`（`harness/src/tool.rs:142`；**tools 侧只是 re-export 同一份，不是第二份定义** ⇒ 它与 `ToolCallContext` 是**近名不同物**，不构成铁律 4 违规，`#50` 实测订正）⇒ **不需要等白名单投影改造**。真阻塞是**频率**（每工具调用 + 每出站请求 ⇒ 一轮数十~数百次）与守卫语义外置 ⇒ 一格拆三：`on_session_*` 今天即可直连、`pre_*` 留内核待 **D1 + 权限模型**、`post_*`/`transform_*`（体量 = 工具输出/HTTP body，②）需**批量帧**（「一次帧多条事件」即可，不强制绑 D2 的 token 流语义）。DTO 面 `:14-156` 已全 serde✓ |
-| `context.engine` | `axagent-core/crates/harness/src/context_engine.rs:24` | `compact()/name()/supports(&Session)` | 压缩策略可拆（LLM 摘要 / 记忆 / 混合）；`supports(&Session)` 是借用入参 ⇒ 需投影成 DTO。**2026-11-02 判债**：0 实现者 + **0 派发点**（全仓扫无 `dyn ContextEngine`，生产压缩走 `compact_session` 自由函数 `harness/compact_session.rs:67`，被 `agent/session_manager.rs:781` 直调）+ 签名与在用路径不符（`Session` 仅 `Serialize`、无 `Deserialize` `session.rs:51`）⇒ 连 K2 都不成立 ⇒ **不进待建数**，P5.0a **不许为它预留协议面**。体量 ≈0.4–0.7 MB/次（80 000 token×4 B 反推）、每会话 1 次 |
+| `context.engine` | `axagent-core/crates/harness/src/context_engine.rs:24` | `compact()/name()/supports(&Session)` | 压缩策略可拆（LLM 摘要 / 记忆 / 混合）；`supports(&Session)` 是借用入参 ⇒ 需投影成 DTO。**2026-11-02 判债**：0 实现者 + **0 派发点**（全仓扫无 `dyn ContextEngine`，生产压缩走 `compact_session` 自由函数 `harness/compact_session.rs:67`，被 `agent/session_manager.rs:781` 直调）+ 签名与在用路径不符（`Session` 仅 `Serialize`、无 `Deserialize` `session.rs:51`）⇒ 连 K2 都不成立 ⇒ **不进待建数**，P5.0a **不许为它预留协议面**。体量 ≈0.4–0.7 MB/次（80 000 token×4 B 反推）、每会话 1 次；**2026-11-02 `#54` 已移入 §0.7.9 债档（不计数）** |
 | `rule.custom` | `axagent-ai/crates/trajectory/src/constitution.rs:102` | `:118 HashMap<String, Arc<dyn CustomRuleChecker>>` | 自我改进宪法的自定义校验；与 `workflow.business_rule` 不同域，不并条。**2026-11-02 实测：K4 完全成立**（① + 低频 + 纯 DTO，**无 D1/D2 依赖**，2–80 KB 一次），但缺口不在帧而在「没人实现、没人注册」：门口径实现者 0，内核消费逻辑是活的（`ImmutableConstitution.custom_registry` `:158`、`with_custom_registry` `:170`、三个调用点）但外部调用 0 ⇒ 登记为「**K4 通过 · 待第一个实现者再建接缝**」，与 `context.engine`（K4 也不过）**分档处置** |
 | `transport.kind` | `axagent-runtime/crates/rt-messaging/src/message_gateway.rs:168` | `:164 HashMap<TransportType, Arc<dyn TransportHandler>>`，4 实现者 | ✅ **原判据在盘上不成立（2026-11-02 实测）**：体量**全 ①** ⇒ `AgentEndpoint`（`:143-152`）只缺 serde derive（字段类型全 serde-able，补 derive 即 ①）、`MediaAttachment`（`harness/src/message_adapter.rs:67-73`）**只带 `path`**（传宿主侧文件引用，不是字节流）⇒ 无 4× 膨胀、无分块需求。连接生命周期归实现侧、出进程自洽（同 `mcp.server`），`get_state()` 同步方法远程化即请求-响应。代价换成另一类约束：**worker 须与宿主同文件视图**（与 `document.parser` 同一病灶，不是新病灶）。⚠ 真缺口是**今天无入站消费路径**：`transport_handlers.rs:155-171` 的 `Message::Text` 落 `_ => {}` 丢弃 ⇒ 将来补入站才需要 `ops::EMIT`（`plugin-proto/src/lib.rs` 的 `pub const EMIT`）扩展。前置 **D1**；优先级低于 `notify.channel` |
 
-### 0.7.6 机制合流，不是能力 —— 1 条（必须处理，但不计入 26）
+### 0.7.6 机制合流，不是能力 —— 1 条（必须处理，但不计入 23）
 
 **已执行（2026-11-01，`#30`）**：`harness/src/dojo_extension.rs` 整文件删除（**−460 行**），`harness/src/lib.rs:332-337` 换成 4 行墓碑注释（337 是 `pub use` 收尾 `};`，按 332–336 删必编译不过）。删除门禁：8 个 `DojoExtension*` 符号在两文件之外命中 0（`.tmp/t30-dojo-gate.mjs`，20441 文件面；排除 `.tmp/`、`output/`、`docs/`、`.workbuddy/`）；翻案检索 `git log --all -S"impl DojoExtension for"` = 4 提交，`git grep` 到 `origin/master`/`upstream/master` 的 18 处命中全落在被删文件自身 ⇒ **历史与其它分支均无生产实现者，翻案条件未触发**。
 它原来「是一套与 capability 接缝并行的第二插件协议」这一判据不变：自带键控注册表、自己声明工具与命令、自己带健康探针，却不在 15 条接缝里，也不在 `SUPPORTED_REMOTE_SEAMS`。
 ⇒ **已裁定并执行（§0.12.1）：废弃 trait 本体，把 `command_specs/execute_command` 的形状吸收进 L1 命令通道 T2**（生产实现者 0，唯一实现是测试替身）——不给零实现者的第二协议上「权限模型 + 对账 + 兼容窗口」三套成本。
    原记「CLI 派发口无 `input_schema` 且权限写死 `ReadOnly`」**判据低估了实情**：`PluginTool::check_permission`（`plugins/src/types.rs:787-826`）全仓零调用方，唯一引用它的 `execute_with_permission_check` 也零调用方 ⇒ 档位在 tools 与 commands **两条路上都是纯装饰**；本批只把命令通道改成真授权（按具体权限名判定，`implies_*` 一字未改），**tool 侧依旧是装饰**，另立批次。
-   同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:583`**（原 `:551`，因 +544 行改动而下移；镜像表同批改）。
+   同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:708`**（原 `:551`，因多次改动下移；镜像表同批改）。
 
-### 0.7.7 判为内核，明确不拆（每条都给不过哪道判据）
+### 0.7.7 判为内核，明确不拆 —— 10 条（每条都给不过哪道判据）
 
 | 面 | 不过的判据 | 理由 |
 |---|---|---|
@@ -314,17 +314,28 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | 数据访问层（`harness/src/repositories.rs` 20+ 个 `*Repository` trait）、`migration`、`storage`、`credential`、`crypto` | K2 | 只有 DI 站点、无键控选择；且凭证/加密是数据主权落点（口径 2） |
 | `prompt.template`（`harness/src/prompt_provider.rs:29`）、`health.check`、`agent.def`（`harness/src/agent.rs:61`）、`vault.source` | K3 / 语义 | 模板取词与内置 Agent 定义属数据驱动（已可经配置/Markdown 贡献，不是产物插件）；健康探针应作为**插件清单自带**的自检面并入 §0.6.2 权限面，而不是独立能力 |
 | `SeamInvoker`、`PluginManager`、`worker.rs` 帧协议本体 | 语义 | 插件机制自身 = 装载器，不能装载自己 |
+| `rag.vector.store`（预留接缝位，`axagent-core/crates/harness/src/vector_store.rs:12` 模块头） | K3 / K4 待兑现 | 本轮只占位不实现：方言无关三 trait（`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`）已就位，但宿主注入点仍是 `Arc<VectorStore>` 具体类型 ⇒ 不计能力面、不进 P5 批次 |
 
 ### 0.7.8 这版登记表推翻 / 锁死了什么
 
-- **锁死（后被 §0.9.4 修正）**：能力数曾锁为 **26**（A 11 + B 10 + C 5）。C 组里 `context.engine` / `rule.custom` 经核为**零外部实现者**（我引错了证据等级）⇒ 有实证的提供方接缝为 **24**，权威口径见 §0.9.4。
+- **锁死（后被 §0.9.4 修正）**：能力数曾锁为 **26**（A 11 + B 10 + C 5；**2026-11-02 `#54` 级联后 = 23（A 11 + B 8 + C 4）**，三条移入 §0.7.9 债档）。C 组里 `context.engine` 已移债档、`rule.custom` 经核为**零外部实现者**（我引错了证据等级）⇒ 有实证的提供方接缝为 **22**，权威口径见 §0.9.4。
 - **`domain.pack`（域包 / OPC 能力包）不登记为 L2 接缝，理由 = 层级归属（L1 功能包 ≠ L2 提供方接缝），不是「已从产品移除」**：本行原写「本轮剔除 `domain.pack`……用户口径为『域包已从产品移除』」——**该措辞由 §24.2 第 2 条推翻并就地改掉**，理由必须是可复述的层级口径而不是产品状态，否则它会成为下一个人手里的假证据。**盘上反证在案**：仍有 14 个顶层 `opc_*` / `capability_pack_*` 命令文件共 **9887 行**（最大 `opc_capability_pack_actions.rs` 3486 行）、`analysis-engine/src/opc/` **26 个模块**、`company-runtime` **2064 行**，且 `harness/src/capability_pack_orchestration/mod.rs:38` 的 `CapabilityPackAdapter` **仍被注册**（3 个实现者 + `mod.rs:97` 按 `domain_pack_id` **键控 get** ⇒ 它活着，只是不归 L2）。⇒ 它现在不是插件，是**一条待迁出的 L1 功能包**（P6.2 / §0.10.5：原「删除」口径已作废，OPC 与股票同属插件化刚需）。
 - **推翻**：§0.5.3 末尾那句按名字列举的 12 条是手工挑选，已作废（正文保留划线注，防止又有人引用它）。
-- **新增工作量**：需新建接缝 **13 条**（B 10 + C 3 有实证，另有 2 条待证 ⇒ 上限 15），按 §3 反推的 6 处固定成本 ⇒ **约 78–90 处改动点**；
-  另加 §0.7.6 的 Dojo 协议合流一项。**§3 的 DTO 分级只覆盖了 7 条能力，15 条待建接缝（两条待证成立的上限；主口径 13 条）里还有 10 条未做 K4 分级**（§0.7.4 余 5 条 + §0.7.5 钩子族 5 条）⇒ P5.0a 的输入补齐项（任务 #29）。
+- **新增工作量**：需新建接缝 **11 条**（B 8 + C 3 有实证，另有 1 条待证 ⇒ 上限 12），按 §3 反推的 6 处固定成本 ⇒ **约 78–90 处改动点**；
+  另加 §0.7.6 的 Dojo 协议合流一项。**§3 的 DTO 分级只覆盖了 7 条能力，12 条待建接缝（一条待证成立的上限；主口径 11 条）里还有 7 条未做 K4 分级**（§0.7.4 余 3 条 + §0.7.5 的 4 条）⇒ P5.0a 的输入补齐项（任务 #29）。
 - **登记但不实现**：第五道门 `scripts/check-capability-register.mjs`（复跑本节扫描、与本表逐行对账，能力数变化必须显式改表）—— **已裁定要建（§0.12.4 / 任务 #38）**。
-  同批登记一条**预留接缝位** `rag.vector.store`（§0.12.3 的 3 个方言无关 trait 就是它的 op 面）：本轮**只占位不实现**，不进 P5 批次、不计入 13/15 的待建数。
+  同批登记一条**预留接缝位** `rag.vector.store`（§0.12.3 的 3 个方言无关 trait 就是它的 op 面）：本轮**只占位不实现**，不进 P5 批次、不计入 11/12 的待建数。
   接线代价 = 两处同源注册 + 一次 `--selftest`；**这条要点头才做**，不擅自开工。
+
+### 0.7.9 债档：只登记不计数（3 条，2026-11-02 `#54`）
+
+| 能力 ID | 原档 | 裁决 | 盘上判据（摘要；全文见 §24.1） |
+|---|---|---|---|
+| `workflow.node` | B | 移出计数，留内核 | K3 不成立（`&'static str` 键 + `WorkflowNode` enum 穷举 + `init_builtin` 编译期写死）；实现者 33 中 1 个是 test 块内 `TestExecutor` ⇒ **生产 32**；归属 P6.0-①，不入 P5.0a |
+| `memory.provider` | B | 移出计数（建接缝 = 建接缝 + 建键表，但今天无生产消费） | 2 个「外部实现者」均不可达：`CountingProvider` 在 test mod 内、`SkillSummaryProvider` 零构造且自述未接线；`MemoryProviderRegistry` 不存在；`MemoryHookProvider` 5 个构造点全在测试 ⇒ **生产 1**（且零构造） |
+| `context.engine` | C | 移出计数（trait 本体判债） | 0 实现者 + 0 派发点；同文件活的工具函数（`generate_skill_injection` / `extract_injected_skills` / `should_reinject` / `CompactionRecord`）**不是这条 trait** ⇒ 判债 ≠ 该文件可删 |
+
+⇒ 三条仍计入 `totalRows`（可盘点），但**不进 `capacityRegister`、不进「待建接缝」数、不进 P5 批次**。能力面 = A 11 + B 8 + C 4 = **23**（`totalRows` = 23 + H 1 + K 10 + 债档 3 = **37**）。
 
 ---
 
@@ -338,7 +349,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 |---|---|---|---|
 | **L0 内核** | 装载器、帧协议、会话/DB/迁移、凭证、权限模型 | 拆了就没有「宿主」 | ✖ 永不拆 |
 | **L1 功能包** | 一个用户可见入口 + 它的页面/store/命令面/crate（工作流编辑器、股票分析在这一层） | 能不能整体关掉而产品不崩 | ⚠ **今天拆不干净**：六项前置未做（§0.8.3 + §0.8.5），不是原理上不可拆 |
-| **L2 提供方接缝** | 同一功能的多实现可替换槽 | K1–K4 ⇒ §0.7 的 **26 条** | ✔ 唯一已成立的插件单元 |
+| **L2 提供方接缝** | 同一功能的多实现可替换槽 | K1–K4 ⇒ §0.7 的 **23 条**（另有 §0.7.9 债档 3 条不计入） | ✔ 唯一已成立的插件单元 |
 
 **撤回声明**：我曾在本轮给出「L1 20 个功能包 + L2 26 = 46 个可拆单元」。**46 作废**——它把两层并列计数，等于凭空造第二种插件单元，与 §0.5.3 冲突。
 L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」。本会话三次改数（12 → 27 → 46）的根因是同一个：
@@ -451,7 +462,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 
 | 单元 | 装的是什么 | 受口径 1（「插拔的都是已编译好的产品」）约束 | 今天的状态 |
 |---|---|---|---|
-| 提供方接缝（§0.7） | worker 可执行 + DTO | ✔ 受 | 24 条有实证 |
+| 提供方接缝（§0.7） | worker 可执行 + DTO | ✔ 受 | 22 条有实证（另 3 条债档） |
 | 功能包（§0.8） | 页面 + 命令 + store + crate | ✔ 受，但六个前置未做 | **可拆**，前置未备（见 §0.8.5 改判） |
 | **策略数据（本节）** | `workflow_templates` 行、tier 映射、规则表 | ✘ **不受**（它是内容，不是代码） | **已经在用，只是从没被这么称呼** |
 
@@ -461,7 +472,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
    ② 每轮对话热路径，出进程即每轮一次 IPC。③ ~~执行依赖进程内 `WorkEngine`~~ **作废（§0.8.5：依赖方向是「域 → 引擎」，引擎不认识域）** ⇒ 本判定只剩两条实证，但结论不变：路由是「决定哪个插件被使用」的**裁决位**，裁决位归主壳，与它是否耦合引擎无关。
    其中 `RouteEngine`（唯一实现名 `NoopRouteEngine`）、`RouterSelfUpdateManager`、`WorkflowGraphRouter`（后两个**无任何实现**）是**空接口**，属债不属能力。
 2. **§0.7 的 C 组有 2 条证据不足，降级待证**：`context.engine`（`harness/src/context_engine.rs:24`）与 `rule.custom`（`trajectory/src/constitution.rs:102`）
-   外部实现者 = **0** —— 我当初引的是「trait 自带 `name()` 方法」名单，不是实现者证据，那是证据等级不够。⇒ **有实证的提供方接缝 = 24 条（A 11 + B 10 + C 3）**，待建接缝 13 条（若两条待证成立则 15）。
+   外部实现者 = **0** —— 我当初引的是「trait 自带 `name()` 方法」名单，不是实现者证据，那是证据等级不够。⇒ **有实证的提供方接缝 = 22 条（A 11 + B 8 + C 3）**，待建接缝 11 条（若一条待证成立则 12）。
    同批的 `DojoExtension` 也是 0 外部实现者 ⇒ 它「没人实现」不是因为不重要，是因为它是**第二协议**（§0.7.6）。
 3. **候选集定义从此改为两层**，本 PLAN 的权威计数以本节为准：
    **提供方接缝 24（+2 待证）· 策略位 79 个 trait 待逐条判（路由族 9 个已判内核）· 功能包 20 个但需 P6.0 前置**。
@@ -786,8 +797,8 @@ D2 只在 provider 试点前才需要；D3 在任何一个插件真正投放前�
 
 ## 3. 逐能力接缝补齐清单（量化「新增一条 seam 的代价」）
 
-> ⚠ **本表只覆盖 §0.7 的 26 条能力里的 7 条**（`model.provider` / `tool.set` 两条已有接缝，加 notify / doc-parser / market / strategy / RAG 五条待建）。
-> **15 条待建新接缝（主口径 13 条，此为两条待证成立时的上限）里还有 10 条没做 K4 分级**：§0.7.4 余下 5 条（`search.source` / `image.gen` / `mcp.server` / `workflow.node` / `memory.provider`）
+> ⚠ **本表只覆盖 §0.7 的 23 条能力里的 7 条**（`model.provider` / `tool.set` 两条已有接缝，加 notify / doc-parser / market / strategy / RAG 五条待建）。
+> **12 条待建新接缝（主口径 11 条，此为一条待证成立时的上限）里还有 8 条没做 K4 分级**：§0.7.4 余下 3 条（`search.source` / `image.gen` / `mcp.server`）
 > + §0.7.5 全部 5 条钩子族。分级没做完就不许签协议版本号 ⇒ 它们是 P5.0a 的**输入缺口**（任务 #29）。
 
 DTO 障碍分级：**①** 纯 serde DTO 可直接过帧；**②** 可序列化但含大对象/字节流；**③** 不可序列化（借用 / `Arc` / 闭包 / DB 类型 / `&mut`）。
@@ -944,10 +955,10 @@ SDK                  harness + plugin-proto + plugin-testkit（脚手架 / 契�
 | **P5.6** | market-data（前置 = `astock-data/src/as_of.rs:36` 的 task-local `AS_OF` 改显式入参 + 缓存/凭证主权决策 + `market.provider.{源名}` 新接缝） | 回测与推荐链路在插件形态下读数一致；`app_state.rs:244` 的 `Arc<AStockClient>` 具体类型字段消失 |
 | **P5.7** | strategy（前置 = P5.0a 的会话式 op）—— **(a) 已定全覆盖，不再复核「值不值得做」** | 单回测不爆帧（分批 onBarBatch）、与进程内策略逐 bar 结果等价；`commands/quant_backtest.rs:363-430` 的 `match strategy_type` 硬构造消失 |
 | **P5.8** | RAG 后端接缝 —— **切法待拍（§0.6.3：解 1「嵌入+重排」/ 解 2「服务端向量库」）** | 按所选解：解 1 ⇒ 插件提供嵌入源与重排、向量存储留内核；解 2 ⇒ 插件提供向量库客户端、内核存储路径重写。两者共同判据：`rag_provider.rs:13` 的 `VectorQueryResult` 补上 serde 且过帧 |
-| **P5.9** | **其余 15 条接缝收尾**（§0.7.4 未进 P5.2–P5.8 的：`search.source` / `image.gen` / `workflow.node` / `memory.provider` / `mcp.server` + §0.7.5 的 5 条钩子族），另含已建接缝但卡 D2 的反思/进化/优化器（`worker.rs:2109`、`:2201-2249` 那批 `remote_method_not_supported` 逐条补）、工具集投影层（D4）、平台适配器、业务规则、webhook / message.callback；**以及 §0.7.6 的 `DojoExtension` 第二协议合流（合流或废弃，二选一）** | 26 条逐条对照 §0.5.3 三条判据（宿主侧无具体类型 / 新增同族不改主壳 / 卸载明确失败），**逐条打勾表进 `docs/audits/`**；接缝四方对账门（§7-1）在 15 条新接缝全绿后才允许摘 `--ratchet` |
+| **P5.9** | **其余 11 条接缝收尾**（§0.7.4 未进 P5.2–P5.8 的：`search.source` / `image.gen` / `mcp.server` + §0.7.5 的 4 条钩子族），另含已建接缝但卡 D2 的反思/进化/优化器（`worker.rs:2109`、`:2201-2249` 那批 `remote_method_not_supported` 逐条补）、工具集投影层（D4）、平台适配器、业务规则、webhook / message.callback；**以及 §0.7.6 的 `DojoExtension` 第二协议合流（合流或废弃，二选一）** | 23 条逐条对照 §0.5.3 三条判据（宿主侧无具体类型 / 新增同族不改主壳 / 卸载明确失败），**逐条打勾表进 `docs/audits/`**；接缝四方对账门（§7-1）在 11 条新接缝全绿后才允许摘 `--ratchet` |
 | **P5.10** | 装配收敛：把 1.25 万行手工 new 中的「可插拔能力」部分改为注册表驱动 | 新增一个同类能力只需：插件仓产物 + manifest 声明 + 权限申请；**不改主壳代码**（最终判据） |
 | **P5.11** | **全面出仓**：满足 §0.5.2 退出判据的插件逐个挪出主仓（主仓删除源码，只留主壳 + 内核 + SDK） | 主仓 `grep axagent-plugin-` 命中为 0；每仓 CI 不依赖主仓源码；兼容矩阵记录老壳 × 新插件的行为 |
-| **P6.0** | **功能包层前置**（§0.8.4/§0.8.5 六项，排在 P5.11 之后、不与 L2 的 26 条混排）：① `WorkflowNode` 封闭 enum 开放化（`harness/src/workflow_types.rs:1366`）② `WorkEngine` 角色定性（底座 or 功能包，`app_state.rs:345` 证明它今天当底座用；依赖方向已核实为「域 → 引擎」，故换轨可行）③ 插件命令贡献通道（升格 `DojoExtension`，或给 `build.rs` 的注册面加运行期入口）④ 前端 tab/route/menu 数据驱动（复用已有 DynamicPageViewer 机制，改 `WorkspaceHub.tsx:166-173` 与 `workspaceTabs.tsx:28/70`）⑤ **引擎去域化**（`agent_executor.rs:4385` `PREFETCHABLE_TOOLS`、`:1232-1246` `stock_code` 预取、`:854` prompt 文本 —— 一律改为节点配置或接缝贡献）⑥ **节点执行器与接缝单轨化**（executor 只能是接缝薄壳、禁止自带实现；`document_parser_executor.rs` 空壳接真接缝，`notification_executor.rs` 的四平台 webhook 并入 `notify.channel`） | 判据：**新增一个工作流节点类型不改主壳代码**（今天需 8 处，见 §0.8.3-1）；**引擎内 `grep -i stock` 生产区命中为 0**（今天 32 行）；**每个节点执行器都能指到一条接缝**（今天 32 个执行器 0 个走能力注册表）；把一个功能包的页面 + 命令 + store 移出主仓后，其余功能编译与运行均不红 |
+| **P6.0** | **功能包层前置**（§0.8.4/§0.8.5 六项，排在 P5.11 之后、不与 L2 的 23 条混排）：① `WorkflowNode` 封闭 enum 开放化（`harness/src/workflow_types.rs:1366`）② `WorkEngine` 角色定性（底座 or 功能包，`app_state.rs:345` 证明它今天当底座用；依赖方向已核实为「域 → 引擎」，故换轨可行）③ 插件命令贡献通道（升格 `DojoExtension`，或给 `build.rs` 的注册面加运行期入口）④ 前端 tab/route/menu 数据驱动（复用已有 DynamicPageViewer 机制，改 `WorkspaceHub.tsx:166-173` 与 `workspaceTabs.tsx:28/70`）⑤ **引擎去域化**（`agent_executor.rs:4385` `PREFETCHABLE_TOOLS`、`:1232-1246` `stock_code` 预取、`:854` prompt 文本 —— 一律改为节点配置或接缝贡献）⑥ **节点执行器与接缝单轨化**（executor 只能是接缝薄壳、禁止自带实现；`document_parser_executor.rs` 空壳接真接缝，`notification_executor.rs` 的四平台 webhook 并入 `notify.channel`） | 判据：**新增一个工作流节点类型不改主壳代码**（今天需 8 处，见 §0.8.3-1）；**引擎内 `grep -i stock` 生产区命中为 0**（今天 32 行）；**每个节点执行器都能指到一条接缝**（今天 32 个执行器 0 个走能力注册表）；把一个功能包的页面 + 命令 + store 移出主仓后，其余功能编译与运行均不红 |
 
 ### 6.1 P6 估工与排期（2026-11-01；先说清这不是待定项，是我给的数与可打回的清单）
 
@@ -1082,7 +1093,7 @@ ci.yml 侧一律**追加在文件末尾**（本文件被 18+ 处 `ci.yml:<行号
   ⚠ 但 **L1 功能包所需的 tab/route/menu 数据驱动 + 页面产物装载（P6.0 ④ + §0.10.2 T3）不在此列** ——
   它是股票/OPC 迁出的硬前置（§0.10.3 的 54 + 28 处前端反向阻塞只能靠它消化），**不属于「不做」**。
 - ~~不在本轮做插件签名~~ —— **作废**。(b)=第三方 ⇒ 签名与发布者身份是终局要件（§0.6.2 第 3 条）。
-- ~~能力清单里的策略 / RAG 可以缓做~~ —— **作废**（(a) 全覆盖，范围以 **§0.7 登记表**为准（登记 26 / 有实证 24），不再是手工的 12 条）。RAG 的切法**已裁定解 1**（§0.12.3）。
+- ~~能力清单里的策略 / RAG 可以缓做~~ —— **作废**（(a) 全覆盖，范围以 **§0.7 登记表**为准（登记 23 / 有实证 22），不再是手工的 12 条）。RAG 的切法**已裁定解 1**（§0.12.3）。
 - ~~「市场仿真」是能力面，要出仓~~ —— **我判为内核**（§0.7.7：DES 每 tick 的 agent 变体，出进程即每步一次 IPC）。这条与拍板措辞有出入，需你确认或拉回。
 - **新增一条明确不做**：不做 **OS 级强隔离沙箱**（容器 / Job Object / seccomp 一类）。
   终局给到的是「声明式权限 + 宿主侧执法 + 用户显式同意」，**不许把它称作沙箱**；
@@ -1093,7 +1104,7 @@ ci.yml 侧一律**追加在文件末尾**（本文件被 18+ 处 `ci.yml:<行号
 ## 10. 一句话总计
 
 **机制已建，分解未做**：接缝注册表、帧协议、投放已编译产物、环检测与优雅卸载都在，
-缺的是 ①「新接缝」（**13 条，上限 15** = §0.7.4 的 10 + §0.7.5 的 5 减去两条待证；按 §3 的 6 处固定成本外推约 **78–90** 个改动点）
+缺的是 ①「新接缝」（**11 条，上限 12** = §0.7.4 的 8 + §0.7.5 的 5 减去一条待证；按 §3 的 6 处固定成本外推约 **78–90** 个改动点）
 ②**「SDK 可被仓外解析」**（§4.4，独立仓的第一块石头）
 ③「脚手架与参考插件仓模板」④「D1/D2/D4 三个协议与语义缺口」⑤「依赖面与主壳图门禁」
 ⑥「主壳构建图收拢」（把今天 7 个子根（实现层）收回成员）⑦「Dojo 第二插件协议合流」（§0.7.6，不定它范围就永远不平）
@@ -1185,7 +1196,7 @@ ci.yml 侧一律**追加在文件末尾**（本文件被 18+ 处 `ci.yml:<行号
 
 ### 12.3 与镜像表的关系（#54 的输入）
 
-本节「建 5 / 缓 1 / 待实现者 1 / 拆三 1 / 不过 1 / 判债 1」是 **#54 移桶的直接输入**：B 少 `workflow.node`（10→9）、C 少 `context.engine`（5→4）⇒ 能力面 Σ **26 → 24**（与 §0.9.4「有实证 24 条」撞数但**不同义**，改表同批必须写明措辞）。⇒ 分组改动的执行**等 #33 的 198 条分桶结论一并收口**，避免两次级联；在此之前 §0.7.4/§0.7.5 保原分组，只在标题与本节标注判定。
+本节「建 5 / 缓 1 / 待实现者 1 / 拆三 1 / 不过 1 / 判债 1」是 **#54 移桶的直接输入**：B 少 `workflow.node`（10→9）、C 少 `context.engine`（5→4）⇒ 能力面 Σ **26 → 24**（与 §0.9.4「有实证 24 条」撞数但**不同义**，改表同批必须写明措辞）。⇒ 分组改动的执行**等 #33 的 198 条分桶结论一并收口**，避免两次级联；在此之前 §0.7.4/§0.7.5 保原分组，只在标题与本节标注判定。⚠ **已执行（§24.1 + §0.7.9，`#54`）：最终为 23（B 8 / C 4；`memory.provider` 也移债档）——本节 24 是中间态，勿再引用为现值。**
 
 ## 13. `#49` 交付的两张下游弹药（2026-11-02 转录，报告全文在其会话）
 
@@ -1234,7 +1245,7 @@ P6.1 的先决（T2 命令帧）**已落地** ⇒ `#35` 的阻塞从「等派发
 次序硬约束：新谓词先以 `--dump-readings` 的 `k2.strongHits / k2.weakHits`（`hard:false`）出数并与本表 198 逐条对账跑顺，**才**谈升 `hard:true` 与改 51/26 锚点；**严禁静默重算 51 ⇒ 26**。
 
 ### 14.6 对 #54 的裁定输入（结论：能力面 Σ 不变，成员换进换出各 2）
-~~B 组 −1 +2（两条新证）= 11；C 组 −1 = 4 ⇒ Σ 仍 26~~ ⇒ **复核推翻两条新证后：B 组 −1（`workflow.node` 移内核，§12.2）= 9；C 组 −1（`context.engine` 判债）= 4；A 组 11 不变 ⇒ Σ 26 → 24**，且 `MemoryProvider` 虽改判桶3 但它是 **B 组已登记条目**（`memory.provider` 留在 B，只是「建之前必须先建注册表」）⇒ 不动分组。**为什么它留 B、`MarketplaceScanner` 却出表（判据必须可复述，不能像临时豁免）**：B 组的准入条件是 **K1（有非 harness、非测试实现者）+ 有第三方贡献故事**，键控位点**缺失是「待建」的内容之一**，不是出局理由 —— `memory.provider` 有 2 个真外部实现者（`CountingProvider`/`SkillSummaryProvider`）与会话首尾的触发面 ⇒ 故事成立，只是`provider_name()` 自述键**不等于**分发点、注册中心不存在 ⇒ 建接缝=建接缝+建键表（成本 6+1）。而 `MarketplaceScanner` 的 21 个实现者**全在 tools crate 内部**、`platform()` 由调用方自填 ⇒ **K1 与故事双双不成立**，与「键表待建」是两种缺陷。⇒ #54 落地时 `memory.provider` 的 §0.7.4「键控分发点」列必须照此改写（现写「`provider_name()/provider_version()` 自述键」，是把自述键当分发点的原病）。⇒ **与 §0.9.4 的「有实证 24 条」重新撞数**：改表同批必须写明两者措辞不同义（本文的 24 = 能力面登记数，§0.9.4 的 24 = 有实证的可插条目数），否则读者会当成同一个数被重复声明。
+~~B 组 −1 +2（两条新证）= 11；C 组 −1 = 4 ⇒ Σ 仍 26~~ ⇒ **复核推翻两条新证后：B 组 −1（`workflow.node` 移内核，§12.2）= 9；C 组 −1（`context.engine` 判债）= 4；A 组 11 不变 ⇒ Σ 26 → 24**，且 `MemoryProvider` 虽改判桶3 但它是 **B 组已登记条目**（`memory.provider` 留在 B，只是「建之前必须先建注册表」）⇒ 不动分组。**为什么它留 B、`MarketplaceScanner` 却出表（判据必须可复述，不能像临时豁免）**：B 组的准入条件是 **K1（有非 harness、非测试实现者）+ 有第三方贡献故事**，键控位点**缺失是「待建」的内容之一**，不是出局理由 —— `memory.provider` 有 2 个真外部实现者（`CountingProvider`/`SkillSummaryProvider`）与会话首尾的触发面 ⇒ 故事成立，只是`provider_name()` 自述键**不等于**分发点、注册中心不存在 ⇒ 建接缝=建接缝+建键表（成本 6+1）。而 `MarketplaceScanner` 的 21 个实现者**全在 tools crate 内部**、`platform()` 由调用方自填 ⇒ **K1 与故事双双不成立**，与「键表待建」是两种缺陷。⇒ #54 落地时 `memory.provider` 的 §0.7.4「键控分发点」列必须照此改写（现写「`provider_name()/provider_version()` 自述键」，是把自述键当分发点的原病）。⇒ **与 §0.9.4 的「有实证 24 条」重新撞数**：改表同批必须写明两者措辞不同义（本文的 24 = 能力面登记数，§0.9.4 的 24 = 有实证的可插条目数），否则读者会当成同一个数被重复声明。⚠ **已被 §24.1 推翻（`#54`）：`memory.provider` 移入 §0.7.9 债档 ⇒ 最终 23；「留 B」这段保留作判据史，勿再引用为现值。**
 一处必须裁的冲突：`TransportHandler` 在 #33 按任务既定样本留 3a（「必须留内核」），而 #29 实测判「全 ①、可走接缝、原判据不成立」⇒ **以盘上实测为准（跟 #29）**，但它不进 P5.0a、排 P5.2（§12.2）。⇒ 两判不矛盾的根源是**「能不能走接缝」与「现在该不该建」被混成一列**，登记表与 §0.7 表都要拆成两列。
 
 ### 14.7 ⚠ 污染事件（读数可信度的前提，必须留档）
@@ -1369,7 +1380,7 @@ P6.1 的先决（T2 命令帧）**已落地** ⇒ `#35` 的阻塞从「等派发
 
 ### 19.5 `#54` 的输入齐了 ⇒ 范围现在就钉（不是待议项）
 
-⑥ 收窄 → 重跑入库版读数 → 与 26 条双向对账（含 13 条外溢、3 条 keyed-get 漏检）→ 按 `#33` 复核后的净结论做**分组级联 26 → 24（换成员，不是减成员）**→ 同批改 PLAN §0.7.2–§0.7.7 + 镜像表 `groupCounts` / `capacityRegister` / `capacityPlanPinned` + `memory.provider` 键控列改写 + 新增「裁决列」+ **补登 `rag.vector.store` 一行进 §0.7.7 的 K 组**（§0.12.1 第 693 行的既有义务，至今未执行；`totalRows` 36→37、`groupCounts.K` 9→10、`capacityRegister` **仍 26**）。
+⑥ 收窄 → 重跑入库版读数 → 与 23 条双向对账（含 13 条外溢、3 条 keyed-get 漏检）→ 按 `#33` 复核后的净结论做**分组级联 26 → 23（换成员，不是减成员）**→ 同批改 PLAN §0.7.2–§0.7.7 + 镜像表 `groupCounts` / `capacityRegister` / `capacityPlanPinned` + `memory.provider` 键控列改写 + 新增「裁决列」+ **补登 `rag.vector.store` 一行进 §0.7.7 的 K 组**（§0.12.1 第 693 行的既有义务，至今未执行；`totalRows` 36→37、`groupCounts.K` 9→10、`capacityRegister` **仍 26**）。
 **在 #54 出数之前，§0.7 的现分组与 `capacityRegister=26` 一律不动** —— 现盘那三项仍判绿，提前改会造出第二个假红，且会让「改表」与「改判据」两件事在同一批里互相掩护。
 
 ## 20. `#46` 的独立审查裁定 + 交 `#64` 的接口需求（2026-11-02；审查稿 `.tmp/rev46-findings.md`，工程师 §6–§7 交回全文在会话 `ff4a6678`）
@@ -1830,3 +1841,27 @@ cargo fmt --check -p axagent-plugin-proto        # 在 axagent-plugins/ 根下�
 2. **`check-i18n-orphan-diff.mjs` 在本机是「跳过」而非「通过」**：其 `execSync("git …")` 在 UNC 工作树下取不到 git，脚本自己打印「跳过 ≠ 通过」但**退出码仍 0** ⇒ **又一条「退 0 ≠ 检查跑了」**（记进 §28.7 族）。它的结构性替代取证成立：`git diff -U0 HEAD -- <4 文件> | grep "^-" | grep -E "\bt\(|i18n\.t\("` = **`GREP_EXIT=1` 零命中** ⇒ 本批**没删任何 `t()` 调用点**。⇒ 正式通过仍需在 CI 或 git 可用的工作树跑一次（与 S-2 同笔债）。
 3. **`list_plugin_pages`（E1 的 Rust 侧）未做** ⇒ 已拆 **#75**（要改 `plugins/src/manager.rs`，等 `#73` 交锁；现 `#73` 已交锁 ⇒ 可派）。
 4. **没有改 `#73`/`#74`/`#76` 的文件**（`plugins/**`、`plugin-proto/**` 零改动）⇒ 与三批无覆盖冲突，这一点它主动核过。
+
+## 34. `#76`（#74 续批）交付账：`exec` 进表 + 超时表测试升级为双向锁（2026-11-02；报告 `.tmp/res74-report.md` §9，37 612 B）
+
+改动面唯一文件 `axagent-core/crates/plugin-proto/src/lib.rs`（1 686 → **1 745** 行，净 +59）。
+- §5.4 超时表新增 `("exec", TOOL_SET_EXEC_TIMEOUT_MS = 60_000)`，出处写死 = `plugins/src/types.rs:837 DEFAULT_TOOL_TIMEOUT_SECS = 60`（用于 `:867` / `:955`），与 spawn/沙箱通道同源；`run_turn` 保持 900_000。
+- 测试 `seam_timeout_override_table_is_evidence_bounded` 改为**双向锁**：表内每一项必须指到盘上出处且返 `Some`；名单外 22 项仍逐字断言 `None` ⇒ 总覆盖面不降（23 个 op 仍全部被断言，只是判据从「恒 None」变成「按有无证据分两档」）。
+- 握手注释按裁定二改写（「与 `AGENT_LOOP_RUN_TURN_TIMEOUT_MS` 一样缺实测分布」），常量值 / 语义 / describe 不进表均未动。
+- 未做：`chat` / `embed` / `send` / `dispatch` 仍无 op 级实测 ⇒ 留在表外（注释保留「15 s 在高端会误杀、预算待实证」）。
+
+## 35. `#77` 交付账：srcdoc 容器首挂载必挂（功能不可用）已修（2026-11-02；报告 `.tmp/res77-report.md`，11 272 B）
+
+根因（#64 取证）：`loading` 初值 true 时早退 `<SkillLoadingSkeleton/>` ⇒ iframe 不在 DOM ⇒ `loadSandbox()` 读 `iframeRef.current` 恒 null ⇒ `skill.iframeNotReady`。
+- `SkillSandboxContainer.tsx` 408 → **442** 行：iframe **无条件渲染**；`loading` / `error` 改 `absolute; inset:0` 覆盖层；新增 `loadNonce` 作 `key` 强制重导航；cleanup 清 `srcdoc` + 摘监听 + 拆桥 + 清定时器。
+- 保留语义：`skill.timeoutError` 30 s 闸、`skill.iframeNotReady` 文案/错误码、`SkillErrorFallback` 展示条件均未改；i18n 0 新增。
+- 测试：新增 5 条（首挂载 iframe 在 DOM、骨架覆盖层、错误+重试换 key、30 s 闸、卸载回收）。**先红后绿**：修前 EXIT=1 / `Tests 5 failed (5)`（首条 `expected length 1 got 0`）；修后 EXIT=0 / `Tests 5 passed (5)`；#64/#67 相关 7 文件回归 116 passed。
+- 未做：真机 WebView2 像素复核（jsdom 证据）；build / e2e / 全量 vitest 按约定未跑。
+
+## 36. `#54` 交付账：能力面 26 → 23 + 债档 + 预留行（2026-11-02）
+
+- 出组三条：`workflow.node` / `memory.provider`（B 10→8）、`context.engine`（C 5→4）⇒ **能力面 23 = A 11 + B 8 + C 4**；三条移入 **§0.7.9 债档**（只登记不计数，裁决列逐条写明；生产实现者 32 / 1 / 0）。
+- `rag.vector.store` 占位行进 §0.7.7 K 组（K 9→10），`capacityRegister` 不变。
+- 登记表 `totalRows` 36 → **37**（36 + 1 条占位）；镜像表 `caliber.groupCounts` 增 `D: 3`，门的分组表同步增 D 档（自检 17/17 仍通过）。
+- 原 §24.1 写的 `totalRows` 38 是算术笔误（移出不增减总行数：36 + 1 = 37），本处就地订正；其余仍写 26/24/13/15 的段落分两类：① 本批已改的当前态（§0.7.2 / §0.7.4 / §0.7.5 / §0.7.8 / §0.9 / §11 / §13.1）；② **历史快照**（§12.x / §13.x / §24.1 的推理过程），保留原数并就地标注「已被 §24.1/§0.7.9 取代」，不重写历史。
+- 判据：`node scripts/check-capability-register.mjs` = EXIT 0 · `hard:true 判据全部一致（登记 37 = A11/B8/C4/H1/K10/D3；能力面 Σ=23；锚点 21 项）`；`--selftest` EXIT 0。

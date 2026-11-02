@@ -1,12 +1,12 @@
 {
-  "note": "本表是 docs/plans/PLAN-shell-plus-plugins.md §0.7「提供方接缝（L2）登记表」的**机器镜像**：改本表必须同批改 PLAN §0.7，反之亦然；不同批改动由 scripts/check-capability-register.mjs 判红。**定案口径 = 能力面 26 条 = A 11 + B 10 + C 5**（依据 PLAN:90 与 PLAN:320 两处逐字组成式；§0.7.6 机制合流 1 条与 §0.7.7 内核 9 行各自独立登记、**不计入 26**，依据 PLAN:296 原文「必须处理，但不计入 26」）。**登记表总行数 = 36**（A11 + B10 + C5 + H1 + K9）。盘上不存在「27 条 / B 11」写法（PLAN 全文零命中）⇒ 本表分组计数是唯一权威，禁止再并行第二套 B11/27 口径。字段缺省（null）一律是 PLAN 原文就缺，禁止脑补数值；缺省处记入 expectMissingFields 并进「未机器复检」摘要，不算通过。",
+  "note": "本表是 docs/plans/PLAN-shell-plus-plugins.md §0.7「提供方接缝（L2）登记表」的**机器镜像**：改本表必须同批改 PLAN §0.7，反之亦然；不同批改动由 scripts/check-capability-register.mjs 判红。**定案口径 = 能力面 23 条 = A 11 + B 8 + C 4**（依据 PLAN:90 与 PLAN:321 两处逐字组成式；§0.7.6 机制合流 1 条、§0.7.7 内核 10 行、§0.7.9 债档 3 条各自独立登记、**不计入 23**，依据 PLAN:296 原文「必须处理，但不计入 23」）。**登记表总行数 = 37**（A11 + B8 + C4 + H1 + K10 + 债档3）。`#54` 级联前为 26 / 36，旧写法已作废但保留在 §24 历史节。盘上不存在「27 条 / B 11」写法（PLAN 全文零命中）⇒ 本表分组计数是唯一权威，禁止再并行第二套 B11/27 口径。字段缺省（null）一律是 PLAN 原文就缺，禁止脑补数值；缺省处记入 expectMissingFields 并进「未机器复检」摘要，不算通过。",
   "caliber": {
-    "capacityRegister": 26,
-    "groupCounts": { "A": 11, "B": 10, "C": 5, "H": 1, "K": 9 },
-    "totalRows": 36,
-    "statement": "能力面 26 = A(接缝已建) 11 + B(无接缝待建) 10 + C(钩子族先验 K4) 5；H(§0.7.6 机制合流) 1 与 K(§0.7.7 内核) 9 只登记不计数。",
+    "capacityRegister": 23,
+    "groupCounts": { "A": 11, "B": 8, "C": 4, "H": 1, "K": 10, "D": 3 },
+    "totalRows": 37,
+    "statement": "能力面 23 = A(接缝已建) 11 + B(无接缝待建) 8 + C(钩子族先验 K4) 4；H(§0.7.6 机制合流) 1、K(§0.7.7 内核) 10 与 D(§0.7.9 债档) 3 只登记不计数。",
     "bannedPlanPhrases": ["B 11", "B11", "A 11 + B 11", "27 条（A 11", "登记 27"],
-    "basisLines": [90, 250, 296, 320]
+    "basisLines": [90, 250, 296, 321]
   },
   "sources": {
     "plan": "docs/plans/PLAN-shell-plus-plugins.md",
@@ -14,7 +14,7 @@
     "lib": "scripts/lib/command-domains.mjs",
     "seamRegistryFile": "axagent-core/crates/harness/src/capability_registry.rs",
     "remoteSeamFile": "axagent-plugins/crates/plugins/src/worker.rs",
-    "extract": ".tmp/cap-register-extract.md（36 条交接物，逐字转录来源）",
+    "extract": ".tmp/cap-register-extract.md（36 条交接物，逐字转录来源；#54 另补 rag.vector.store 预留行）",
     "scanSurface": "K1/实现者计数用 PLAN §0.7.1 声明的扫描面：8 个 workspace 根（axagent-ai/-core/-infra/-kit/-plugins/-quant/-runtime + src-tauri）的全部 .rs，忽略目录 = target / node_modules / gen / tests（与 .tmp/capability-census.cjs 一致；⚠ 与 scripts/audit-capability-inventory.mjs 的忽略集不同——那边还排除 __tests__，这边不排除）。命令/域/前端/L1 四类读数一律用 scripts/audit-l1-blockers.mjs 的忽略集（target, node_modules, output, .git, .tmp, dist, gen, build, coverage, .workbuddy, examples），因为 152/28 与 293/84 873 的基线就出自该脚本；两份 audit 的忽略集不一致是既有事实，本门显式选边并在此声明。"
   },
   "countRule": {
@@ -34,8 +34,8 @@
       "hard": true,
       "planNumber": "1542",
       "planMustAppear": true,
-      "planPinned": [{ "line": 352, "mustContain": ["1542", "164", "`register_commands.rs` 共"] }],
-      "planOld": [{ "number": "1534", "note": "漂移前旧读数，仅允许出现在 §0.12.4 漂移列举段（PLAN:704）" }, { "number": "1541", "note": "2026-11-01 起被 1542 取代（新增 `plugin_resolve_page_asset`）。合法出现位 = §0.12.4 的「1534/1541」漂移列举段 **+ 下面 `alsoAt` 登记的两段**（#66 加的字段；这两段是 PLAN §15.1/§15.4 对 **HEAD 提交态**的可复算事实陈述，不是「旧数当现值」⇒ 不能靠删句子过门，也不能放弃监管）", "alsoAt": [{ "startLine": 1245, "endLine": 1252, "mustContain": ["HEAD 产物", "按算法应生成", "1541"] }, { "startLine": 1265, "endLine": 1269, "mustContain": ["重生成后是 1541", "对本批红无效", "1541"] }] }],
+      "planPinned": [{ "line": 363, "mustContain": ["1542", "164", "`register_commands.rs` 共"] }],
+      "planOld": [{ "number": "1534", "note": "漂移前旧读数，仅允许出现在 §0.12.4 漂移列举段（PLAN:704）" }, { "number": "1541", "note": "2026-11-01 起被 1542 取代（新增 `plugin_resolve_page_asset`）。合法出现位 = §0.12.4 的「1534/1541」漂移列举段 **+ 下面 `alsoAt` 登记的两段**（#66 加的字段；这两段是 PLAN §15.1/§15.4 对 **HEAD 提交态**的可复算事实陈述，不是「旧数当现值」⇒ 不能靠删句子过门，也不能放弃监管）", "alsoAt": [{ "startLine": 1260, "endLine": 1260, "mustContain": ["HEAD 产物", "按算法应生成", "1541"] }, { "startLine": 1280, "endLine": 1280, "mustContain": ["重生成后是 1541", "对本批红无效", "1541"] }] }],
       "note": "口径 = scripts/lib/command-domains.mjs 的 parseRegistry，与两份 AUDIT 同源；旧数 1534 在盘上任何寄存器里都不存在。"
     },
     {
@@ -86,7 +86,7 @@
       "hard": true,
       "planNumber": "304",
       "planMustAppear": true,
-      "planPinned": [{ "line": 515, "mustContain": ["两个数都是真的", "边界口径"] }],
+      "planPinned": [{ "line": 526, "mustContain": ["两个数都是真的", "边界口径"] }],
       "note": "定案判据口径（PLAN:515 明写 P6.1/P6.2 一律用边界口径）；与审计域口径 306 并存合法、不是漂移。"
     },
     {
@@ -128,8 +128,8 @@
       "planNumber": "138",
       "planMustAppear": true,
       "planPinned": [
-        { "line": 500, "mustContain": ["138", "13 模块"] },
-        { "line": 939, "mustContain": ["138", "依赖声明"] }
+        { "line": 511, "mustContain": ["138", "13 模块"] },
+        { "line": 950, "mustContain": ["138", "依赖声明"] }
       ],
       "note": "⚠ 撞车数字：PLAN:939 的「138 行 axagent-* 依赖声明」是 Cargo.toml 行数、与 OPC 命令无关 ⇒ 本门用 939 行钉住该撞车句仍在那儿，防止将来有人把 138 从命令口径里删掉后误读。并行读数 117（审计口径）另立条目。"
     },
@@ -157,7 +157,7 @@
       "hard": true,
       "planNumber": "84 873",
       "planMustAppear": true,
-      "planPinned": [{ "line": 508, "mustContain": ["293", "84 873", "脚本文件名口径"] }],
+      "planPinned": [{ "line": 519, "mustContain": ["293", "84 873", "脚本文件名口径"] }],
       "note": "PLAN:508 的「脚本文件名口径」读数；行数按 split('\\n') 计数（与 audit-l1-blockers 一致，含末行空元素）。"
     },
     {
@@ -171,7 +171,7 @@
       "hard": true,
       "planNumber": "60 757",
       "planMustAppear": true,
-      "planPinned": [{ "line": 507, "mustContain": ["211", "60 757", "目录口径"] }],
+      "planPinned": [{ "line": 518, "mustContain": ["211", "60 757", "目录口径"] }],
       "note": "与 84 873 是**两套并行口径**（PLAN:507/508/515），不是旧读数、不是漂移 ⇒ 两条都钉住；旧说法「60 757 是 84 873 的过期值」是误读，本门的 planOld 名单里刻意不含它。"
     },
     {
@@ -185,7 +185,7 @@
       "hard": true,
       "planNumber": "152",
       "planMustAppear": true,
-      "planPinned": [{ "line": 502, "mustContain": ["152", "28 文件", "主壳反向阻塞"] }],
+      "planPinned": [{ "line": 513, "mustContain": ["152", "28 文件", "主壳反向阻塞"] }],
       "note": "剥注释只处理 // 与 ///（audit-l1-blockers.mjs:66-69 原口径）；无旧读数残留。"
     },
     {
@@ -268,22 +268,22 @@
     {
       "id": "capacityRegister",
       "label": "能力面登记数（A + B + C）",
-      "value": 26,
+      "value": 23,
       "check": "registerGroupSum",
       "hard": true,
-      "planNumber": "26",
+      "planNumber": "23",
       "planMustAppear": true,
       "planPinned": [
-        { "line": 90, "mustContain": ["26", "A 11 + B 10 + C 5", "登记 26 条"] },
-        { "line": 320, "mustContain": ["26", "A 11 + B 10 + C 5", "能力数曾锁为"] },
-        { "line": 296, "mustContain": ["不计入 26"] }
+        { "line": 90, "mustContain": ["23", "A 11 + B 8 + C 4", "登记 23 条"] },
+        { "line": 321, "mustContain": ["23", "A 11 + B 8 + C 4", "能力数曾锁为"] },
+        { "line": 296, "mustContain": ["不计入 23"] }
       ],
-      "note": "由本表分组计数直接得出（表自身即判据）；PLAN:90 与 320 是仅有的两处逐字组成式。"
+      "note": "由本表分组计数直接得出（表自身即判据）；PLAN:90 与 321 是仅有的两处逐字组成式。`#54` 级联前为 26（A11+B10+C5），三条移入 §0.7.9 债档后为 23（A11+B8+C4）。"
     }
   ],
   "pipeline": {
-    "statement": "§0.7.2 派生流水：315 pub trait → 232 有外部实现者 → 51 K1+K2 trait 面 → 26 条能力（同族合并 + K3/K4 判定）；对照 13 条今天就能远程。（315 起算于 2026-11-01 删除 `DojoExtension` 之后，原为 316）",
-    "lines": [245, 251],
+    "statement": "§0.7.2 派生流水：316 pub trait → 232 有外部实现者 → 51 K1+K2 trait 面 → 23 条能力（同族合并 + K3/K4 判定；#54 前为 26，三条移入 §0.7.9 债档）；对照 13 条今天就能远程。（316 为 2026-11-02 收口实测：+3 vector trait −2 已删 trait；其间曾为 315）",
+    "lines": [250, 251],
     "mechanicallyReproducible": ["k1RsFileCount", "k1PubTraitCount", "remoteSeamCount", "capacityRegister"],
     "manual": ["k1ExternalImplTraitCount", "k2TraitFaces"]
   },
@@ -628,7 +628,9 @@
     },
     {
       "seamId": "workflow.node",
-      "group": "B",
+      "group": "D",
+      "countedInRegister": false,
+      "verdict": "移出计数，留内核（§24.1 / §0.7.9）；生产实现者 32（33 中 1 个 test 块内 TestExecutor）",
       "k": null,
       "kNote": "组级 K1+K2 成立；逐条档位原文缺省（原文注明 K3 今天不成立）。",
       "trait": "NodeExecutorTrait",
@@ -642,11 +644,13 @@
         { "ref": "axagent-runtime/crates/rt-workflow/src/work_engine/dispatcher.rs:397", "file": "axagent-runtime/crates/rt-workflow/src/work_engine/dispatcher.rs", "line": 397, "token": "pub async fn get_executor", "role": "键控取回" }
       ],
       "note": "原文「键是 'static 字面量 ⇒ K3 今天不成立；粒度必须是节点包而非单节点」。接缝状态原文限定：待建，但 §0.8.4 判须先由 P6-① 解锁，**不属 P5.0a**。 ⇒ ⚠ 本 note 的「原文」引文是 **2026-11-02 #29 K4 转录前**的判词，现值以 `planAnchorText`（该行逐字）为准；勿按本引文回写 PLAN。",
-      "planAnchorText": "| `workflow.node` | `axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs:224` | `work_engine/dispatcher.rs:31`（`HashMap<&'static str, Arc<dyn NodeExecutorTrait>>`）+ `:397 get_executor(&str)` | 33 | 键是 `'static` 字面量 ⇒ K3 今天不成立；**粒度必须是「节点包」而非单节点**，否则每个节点一次 IPC。**2026-11-02 K4 实测判不过**：`ExecutionState`（`execution_state.rs:213`）含 **≥8 个 skip 句柄位** ⇒ ③；node 入参 0.5–3 KB 但 context 10 KB–数 MB ⇒ 需 snapshot 化才勉强到 ②（snapshot 形态 `:491` **已存在**）⇒ 移入内核桶属 #54，本条真正的归属是 **P6.0-①（节点包协议批次④，与 `strategy.quant` 共用 spawn/feed/close）**，**不入 P5.0a** |", "planLine": 283
+      "planAnchorText": "| `workflow.node` | `axagent-runtime/crates/rt-workflow/src/work_engine/node_executor_trait.rs:224` | `work_engine/dispatcher.rs:31`（`HashMap<&'static str, Arc<dyn NodeExecutorTrait>>`）+ `:397 get_executor(&str)` | 33 | 键是 `'static` 字面量 ⇒ K3 今天不成立；**粒度必须是「节点包」而非单节点**，否则每个节点一次 IPC。**2026-11-02 K4 实测判不过**：`ExecutionState`（`execution_state.rs:213`）含 **≥8 个 skip 句柄位** ⇒ ③；node 入参 0.5–3 KB 但 context 10 KB–数 MB ⇒ 需 snapshot 化才勉强到 ②（snapshot 形态 `:491` **已存在**）⇒ 移入内核桶属 #54，本条真正的归属是 **P6.0-①（节点包协议批次④，与 `strategy.quant` 共用 spawn/feed/close）**，**不入 P5.0a**；**2026-11-02 `#54` 已移入 §0.7.9 债档（不计数）** |", "planLine": 283
     },
     {
       "seamId": "memory.provider",
-      "group": "B",
+      "group": "D",
+      "countedInRegister": false,
+      "verdict": "移出计数（建接缝=建接缝+建键表，但今天无生产消费，§24.1 / §0.7.9）；生产实现者 1（且零构造）",
       "k": null,
       "kNote": "组级 K1+K2 成立；逐条档位原文缺省。",
       "trait": "MemoryProvider",
@@ -658,7 +662,7 @@
         { "ref": "axagent-ai/crates/trajectory/src/memory_provider.rs:63", "file": "axagent-ai/crates/trajectory/src/memory_provider.rs", "line": 63, "token": "pub trait MemoryProvider", "role": "契约" }
       ],
       "note": "键控列原文 = 「provider_name()/provider_version() 自述键」⇒ 无文件:行，行号缺省。原文「sync_turn(entries) 可序列化；预取语义要与会话生命周期对齐」。⚠ **键控列现文本已按 §24.1 + §14.6 改写**（自述键 ≠ 分发点：`MemoryProviderRegistry` 不存在、`Arc<dyn MemoryProvider` 4 处全是单字段/参数、无键控集合 ⇒ 建接缝 = 建接缝 + 建键表）⇒ 本 note 引的是**改写前原文**，它是本次改写的判定依据，故保留不删；`planAnchorText` 已重钉为 PLAN:284 现整行并逐字核验相等（2026-11-02 06:4x，node 比对 `=== true`）。",
-      "planAnchorText": "| `memory.provider` | `axagent-ai/crates/trajectory/src/memory_provider.rs:63` | **自述键 ≠ 分发点（本行的原病，§14.6 + §24.1 已裁）**：`provider_name()/provider_version()` 只是实现者的自述字段，仓内**没有**按它取实现的容器 —— `MemoryProviderRegistry` **不存在**（全树 2 处命中都是「它不存在」的注释），`Arc<dyn MemoryProvider` 的 4 处位点**全是单字段 / 函数参数**、无键控集合 ⇒ **「建接缝」= 建接缝 + 建键表**（成本 6+1）。它**留 B** 的依据是 **K1 + 第三方贡献故事**（§14.6），不是「键控位点已存在」 | 2 | `sync_turn(entries)` 可序列化；预取语义要与会话生命周期对齐 |", "planLine": 284
+      "planAnchorText": "| `memory.provider` | `axagent-ai/crates/trajectory/src/memory_provider.rs:63` | **自述键 ≠ 分发点（本行的原病，§14.6 + §24.1 已裁）**：`provider_name()/provider_version()` 只是实现者的自述字段，仓内**没有**按它取实现的容器 —— `MemoryProviderRegistry` **不存在**（全树 2 处命中都是「它不存在」的注释），`Arc<dyn MemoryProvider` 的 4 处位点**全是单字段 / 函数参数**、无键控集合 ⇒ **「建接缝」= 建接缝 + 建键表**（成本 6+1）。它**留 B** 的依据是 **K1 + 第三方贡献故事**（§14.6），不是「键控位点已存在」；**2026-11-02 `#54` 已移入 §0.7.9 债档（不计数）** | 2 | `sync_turn(entries)` 可序列化；预取语义要与会话生命周期对齐 |", "planLine": 284
     },
     {
       "seamId": "lifecycle.hook",
@@ -696,7 +700,9 @@
     },
     {
       "seamId": "context.engine",
-      "group": "C",
+      "group": "D",
+      "countedInRegister": false,
+      "verdict": "移出计数（trait 本体判债：0 实现者 + 0 派发点；同文件工具函数仍活），§24.1 / §0.7.9",
       "k": null,
       "kNote": "组级「判可拆但先验 K4」；逐条档位原文缺省。",
       "trait": "ContextEngine",
@@ -710,7 +716,7 @@
         { "ref": "axagent-core/crates/harness/src/context_engine.rs:24", "file": "axagent-core/crates/harness/src/context_engine.rs", "line": 24, "token": "pub trait ContextEngine", "role": "契约" }
       ],
       "note": "证据列原文 = 「compact()/name()/supports(&Session)」方法签名描述，**无文件:行** ⇒ 证据行号缺省（组标题注「2 条证据不足」之一）。行内实现者数缺省，但 0 值判据由 PLAN:90/320 提供。 ⇒ ⚠ 本 note 的「原文」引文是 **2026-11-02 #29 K4 转录前**的判词，现值以 `planAnchorText`（该行逐字）为准；勿按本引文回写 PLAN。",
-      "planAnchorText": "| `context.engine` | `axagent-core/crates/harness/src/context_engine.rs:24` | `compact()/name()/supports(&Session)` | 压缩策略可拆（LLM 摘要 / 记忆 / 混合）；`supports(&Session)` 是借用入参 ⇒ 需投影成 DTO。**2026-11-02 判债**：0 实现者 + **0 派发点**（全仓扫无 `dyn ContextEngine`，生产压缩走 `compact_session` 自由函数 `harness/compact_session.rs:67`，被 `agent/session_manager.rs:781` 直调）+ 签名与在用路径不符（`Session` 仅 `Serialize`、无 `Deserialize` `session.rs:51`）⇒ 连 K2 都不成立 ⇒ **不进待建数**，P5.0a **不许为它预留协议面**。体量 ≈0.4–0.7 MB/次（80 000 token×4 B 反推）、每会话 1 次 |", "planLine": 292
+      "planAnchorText": "| `context.engine` | `axagent-core/crates/harness/src/context_engine.rs:24` | `compact()/name()/supports(&Session)` | 压缩策略可拆（LLM 摘要 / 记忆 / 混合）；`supports(&Session)` 是借用入参 ⇒ 需投影成 DTO。**2026-11-02 判债**：0 实现者 + **0 派发点**（全仓扫无 `dyn ContextEngine`，生产压缩走 `compact_session` 自由函数 `harness/compact_session.rs:67`，被 `agent/session_manager.rs:781` 直调）+ 签名与在用路径不符（`Session` 仅 `Serialize`、无 `Deserialize` `session.rs:51`）⇒ 连 K2 都不成立 ⇒ **不进待建数**，P5.0a **不许为它预留协议面**。体量 ≈0.4–0.7 MB/次（80 000 token×4 B 反推）、每会话 1 次；**2026-11-02 `#54` 已移入 §0.7.9 债档（不计数）** |", "planLine": 292
     },
     {
       "seamId": "rule.custom",
@@ -763,9 +769,9 @@
       "evidence": [
         { "ref": "axagent-plugins/crates/plugins/src/manager.rs:708", "file": "axagent-plugins/crates/plugins/src/manager.rs", "line": 708, "token": "pub fn execute_plugin_command", "anchorText": "pub fn execute_plugin_command(", "role": "CLI 派发口（本批已改成真授权门槛）" }
       ],
-      "note": "登记值 0 = PLAN:301 原文「生产实现者 0，唯一实现是测试替身」⇒ 机械判据 harness 外非测试 impl 站点 == 0。原文称 11 个方法但只列 6 个方法名 ⇒ 方法数登记为原文缺省，不判。PLAN:296 明文「不计入 26」；已裁定（§0.12.1）废弃 trait 本体、command_specs/execute_command 形状吸收进 L1 命令通道 T2。**2026-11-01 已执行**：`harness/src/dojo_extension.rs` 整文件删除（−460 行）+ `lib.rs:332-337` 墓碑注释 ⇒ 本行原两条指向该文件的 evidence 已摘除（文件不存在），`manager.rs` 派发口因上批 +544 行与并行会话 #43 的改动两次下移（:551 → :583 → **:654**，并发编辑期间不稳，落定后需重锚）；翻案条件仍未触发（`git log --all -S` + `git grep` 到 origin/upstream：18 处命中全落在被删文件自身）。",
+      "note": "登记值 0 = PLAN:301 原文「生产实现者 0，唯一实现是测试替身」⇒ 机械判据 harness 外非测试 impl 站点 == 0。原文称 11 个方法但只列 6 个方法名 ⇒ 方法数登记为原文缺省，不判。PLAN:296 明文「不计入 23」；已裁定（§0.12.1）废弃 trait 本体、command_specs/execute_command 形状吸收进 L1 命令通道 T2。**2026-11-01 已执行**：`harness/src/dojo_extension.rs` 整文件删除（−460 行）+ `lib.rs:332-337` 墓碑注释 ⇒ 本行原两条指向该文件的 evidence 已摘除（文件不存在），`manager.rs` 派发口因多轮改动下移（:551 → :583 → :654 → **:708**，最终态由 `--repin-code --apply` 定锚）；翻案条件仍未触发（`git log --all -S` + `git grep` 到 origin/upstream：18 处命中全落在被删文件自身）。",
       "planAnchorText": "原记「CLI 派发口无 `input_schema` 且权限写死 `ReadOnly`」**判据低估了实情**：`PluginTool::check_permission`（`plugins/src/types.rs:787-826`）全仓零调用方，唯一引用它的 `execute_with_permission_check` 也零调用方 ⇒ 档位在 tools 与 commands **两条路上都是纯装饰**；本批只把命令通道改成真授权（按具体权限名判定，`implies_*` 一字未改），**tool 侧依旧是装饰**，另立批次。", "planLine": 301,
-      "planLineRange": [296, 302], "planAnchorTextRange": ["### 0.7.6 机制合流，不是能力 —— 1 条（必须处理，但不计入 26）", "同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:583`**（原 `:551`，因 +544 行改动而下移；镜像表同批改）。"]
+      "planLineRange": [296, 302], "planAnchorTextRange": ["### 0.7.6 机制合流，不是能力 —— 1 条（必须处理，但不计入 23）", "同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:708`**（原 `:551`，因多次改动下移；镜像表同批改）。"]
     },
     {
       "seamId": "agent.loop",
@@ -945,6 +951,26 @@
       "evidence": [],
       "note": "本行含 3 个面。§0.7.6 的 Dojo 行与本行共同构成「机制」而非「能力」的两处登记。",
       "planAnchorText": "| `SeamInvoker`、`PluginManager`、`worker.rs` 帧协议本体 | 语义 | 插件机制自身 = 装载器，不能装载自己 |", "planLine": 316
+    },
+    {
+      "seamId": "rag.vector.store",
+      "group": "K",
+      "k": null,
+      "kFailedCriterion": "K3 / K4 待兑现",
+      "kNote": "§0.7.7 列头 = 面 | 不过的判据 | 理由；本行为预留接缝位，不计能力面。",
+      "trait": null,
+      "countedInRegister": false,
+      "faces": ["rag.vector.store"],
+      "expect": { "implementors": null, "seam": "预留（占位不实现）", "remote": false, "reading": null },
+      "expectMissing": true,
+      "expectMissingFields": ["k", "implementors", "reading"],
+      "check": "manual",
+      "reason": "预留接缝位：#40 已落地 3 个方言无关 trait（VectorCollectionAdmin / VectorWriter / VectorReader），但宿主注入点仍是 Arc<VectorStore> 具体类型、capability_registry 命中 0 ⇒ 今天 seamDeclared 判「未建」是正确读数；本条只登记，不计能力面。",
+      "evidence": [
+        { "ref": "axagent-core/crates/harness/src/vector_store.rs:12", "file": "axagent-core/crates/harness/src/vector_store.rs", "line": 12, "token": "rag.vector.store", "role": "预留接缝 id（模块头文档）" }
+      ],
+      "note": "PLAN §22.5 / §0.7.7 与 #54 要求补登：totalRows +1、groupCounts.K 9→10，capacityRegister 不变。",
+      "planAnchorText": "| `rag.vector.store`（预留接缝位，`axagent-core/crates/harness/src/vector_store.rs:12` 模块头） | K3 / K4 待兑现 | 本轮只占位不实现：方言无关三 trait（`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`）已就位，但宿主注入点仍是 `Arc<VectorStore>` 具体类型 ⇒ 不计能力面、不进 P5 批次 |", "planLine": 317
     }
   ]
 }

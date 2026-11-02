@@ -1719,6 +1719,18 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         }
     }
 
+    // ── jobs.store 接缝：把宿主**已有** cron 任务查询能力以只读视图暴露给插件 ──
+    // 本批只发布读面（列表 / 单条 / 计数）；写 op 待 op 级权限校验落地后再开。
+    // 用 `clone()` 注册：`cron_job_store` 随后按值移入 AppState，所有权不变。
+    // 失败只 warn，不阻断启动（与 market.quote 同策略）。
+    {
+        let jobs_store: Arc<dyn axagent_harness::JobStoreProvider> = cron_job_store.clone();
+        match axagent_harness::get_capability_registry().register_jobs_store(jobs_store) {
+            Ok(_) => tracing::info!("jobs.store 接缝已注册 (BuiltIn)"),
+            Err(e) => tracing::warn!("jobs.store 注册失败: {e}"),
+        }
+    }
+
     // C3（2026-09-27，301302 t-risk 超时根因）：交易日历「上证日 K 自证」接线。
     // 原远程源 `RPTA_WEB_TRADE_CALENDAR` 报表已下线（9501），且 `init_holiday_calendar`
     // 此前**从未被启动流程调用** ⇒ is_trading_day 一直走硬编码兜底，缺 2026-09-25 中秋

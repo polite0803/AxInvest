@@ -108,6 +108,20 @@ impl ServiceDefinition {
         )
     }
 
+    /// 预置 jobs-store 接缝（cron 任务只读查询提供者）。
+    ///
+    /// 宿主把 `runtime-core` 的 `CronJobStore` 经本接缝以只读视图暴露给插件侧；
+    /// 插件通过 `call_seam("jobs.store", op, args)` 查询任务列表 / 单条 / 计数。
+    /// 本接缝只发布读面，写 op 待 op 级权限校验落地后再开。
+    pub fn jobs_store() -> Self {
+        Self::new(
+            "jobs.store",
+            "1.0",
+            "axagent_harness::JobStoreProvider",
+            "cron 任务只读查询：列表 / 单条 / 计数",
+        )
+    }
+
     /// 预置 model-provider 接缝（LLM Provider 适配器，按 provider 类型名注册多实例）。
     ///
     /// 注册 ID 为 `model.provider.{provider_type}`（如 `model.provider.deepseek`）。
@@ -895,6 +909,25 @@ impl CapabilityRegistry {
     /// 取回 market.quote 接缝上的行情数据提供者（若已注册）。
     pub fn get_market_data(&self) -> Option<Arc<dyn crate::MarketDataProvider>> {
         self.provider_as::<dyn crate::MarketDataProvider>("market.quote")
+    }
+
+    // ── jobs.store 接缝（cron 任务只读查询提供者，单实例） ───────────────────
+
+    /// 注册一个定时任务查询提供者（`jobs.store` 接缝）。
+    ///
+    /// 宿主把 `runtime-core` 的 `CronJobStore` 以只读视图注入本接缝后，插件可经
+    /// `call_seam` 的 `jobs.store` 分支查询任务列表 / 单条 / 计数；外部实现注册
+    /// 同一接缝即可整体替换。本接缝**只读**，不提供任何写 op。
+    pub fn register_jobs_store(
+        &self,
+        provider: Arc<dyn crate::JobStoreProvider>,
+    ) -> Result<EffectHandle, CapabilityError> {
+        self.register_seam(ServiceDefinition::jobs_store(), Arc::new(provider), "jobs-store")
+    }
+
+    /// 取回 jobs.store 接缝上的定时任务查询提供者（若已注册）。
+    pub fn get_jobs_store(&self) -> Option<Arc<dyn crate::JobStoreProvider>> {
+        self.provider_as::<dyn crate::JobStoreProvider>("jobs.store")
     }
 
     // ── system.prompt 接缝（多实例，按段名注册） ────────────────────────────

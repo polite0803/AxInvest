@@ -15,6 +15,7 @@
 //   `axagent-dao::repo::cron_job_persistence` —— 与本 crate 的 `cron_delivery.rs`
 //   （「DTO + Trait 在 harness，具体实现在 wiring 层」）同一套 port/adapter 设计。
 use axagent_harness::cron_persistence::{CronHistoryRecord, CronJobPersistence};
+use axagent_harness::jobs_store::{CronJobRunView, CronJobView, JobStoreProvider};
 use chrono::{Datelike, Timelike};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -880,6 +881,98 @@ impl CronJobStore {
                 trigger: m.trigger,
             })
             .collect()
+    }
+}
+
+// ── jobs.store 接缝：CronJobStore 的只读视图适配 ─────────────────────────
+//
+// 只映射查询需要的字段：`config` / `delivery` / `epoch_cost_estimate` / `params`
+// 属宿主内部执行参数，进程内在跑登记（`running`）跨边界无意义，均不返回；
+// `last_result.output` 可能很大，只返回状态字段（见 `CronJobRunView`）。
+
+/// `CronJobStatus` → 持久化字面量（与 `#[serde(rename_all = "snake_case")]` 一致）。
+fn status_literal(status: CronJobStatus) -> String {
+    match status {
+        CronJobStatus::Active => "active",
+        CronJobStatus::Paused => "paused",
+        CronJobStatus::Disabled => "disabled",
+    }
+    .to_string()
+}
+
+/// `CronJob` → 跨边界只读视图。
+fn view_of(job: &CronJob) -> CronJobView {
+    CronJobView {
+        id: job.id.clone(),
+        name: job.name.clone(),
+        description: job.description.clone(),
+        schedule: job.schedule.clone(),
+        prompt: job.prompt.clone(),
+        workflow_id: job.workflow_id.clone(),
+        task_type: job.task_type.clone(),
+        platform: job.platform.clone(),
+        enabled_toolsets: job.enabled_toolsets.clone(),
+        status: status_literal(job.status),
+        recurring: job.recurring,
+        run_count: job.run_count,
+        last_run_at: job.last_run_at,
+        last_result: job.last_result.as_ref().map(|r| CronJobRunView {
+            success: r.success,
+            skipped: r.skipped,
+            partial: r.partial,
+            error: r.error.clone(),
+            duration_ms: r.duration_ms,
+            executed_at: r.executed_at,
+        }),
+        last_trigger: job.last_trigger.clone(),
+        next_run_at: job.next_run_at,
+        priority: job.priority.clone(),
+        created_at: job.created_at,
+        updated_at: job.updated_at,
+    }
+}
+
+#[async_trait::async_trait]
+impl JobStoreProvider for CronJobStore {
+    /// 列表在宿主内按 `task_type` / `status == Active` 过滤（`list()` 返回全量快照）。
+    async fn list_jobs(
+        &self,
+        task_type: Option<&str>,
+        active_only: bool,
+    ) -> axagent_harness::core_error::Result<Vec<CronJobView>> {
+        let matches_type = |job: &CronJob| match task_type {
+            None => true,
+            Some(t) => job.task_type.as_deref() == Some(t),
+        };
+        let jobs = self
+            .list()
+            .await
+            .into_iter()
+            .filter(|j| matches_type(j) && (!active_only || j.is_active()))
+            .map(|j| view_of(&j))
+            .collect();
+        Ok(jobs)
+    }
+
+    async fn get_job(
+        &self,
+        id: &str,
+    ) -> axagent_harness::core_error::Result<Option<CronJobView>> {
+        Ok(self.get(id).await.as_ref().map(view_of))
+    }
+
+    /// 计数基于 `list()` 快照，与 `list_jobs(task_type, false)` 的口径一致。
+    async fn count_jobs(&self, task_type: Option<&str>) -> axagent_harness::core_error::Result<u64> {
+        let count = self
+            .list()
+            .await
+            .iter()
+            .filter(|j| match task_type {
+                None => true,
+                Some(t) => j.task_type.as_deref() == Some(t),
+            })
+            .count();
+        Ok(count as u64)
     }
 }
 

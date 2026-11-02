@@ -1756,6 +1756,36 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         }
     }
 
+    // ── workflow.run 接缝：把宿主**独持**的 WorkEngine 以「异步 job」形态暴露给插件 ──
+    // 契约已冻结（`axagent-core/crates/harness/src/workflow_run.rs`）：`start` 只受理并
+    // 立即返回 `execution_id`（接缝预算 15s，绝不能 await DAG）；执行体在 provider 内
+    // `tokio::spawn`，进度/终态经 `event.dispatch`（`workflow/step` / `workflow/end`）外发。
+    // 四条前置在此处均已就绪：`work_engine`（:741-775）、event.dispatch 总线、`sea_db`、
+    // 以及 `stock_workflow::decision::load_and_inject_template`（stock-* 业务注入）。
+    // 失败只 warn，不阻断启动（与 market.quote / jobs.store 同策略）。
+    {
+        // event.dispatch 总线在上方块内创建（块外不可见），故经注册表取回**同一个 Arc**：
+        // 插件订阅者挂的就是它。另造一个 bus 会「注册成功但插件永远收不到事件」。
+        match axagent_harness::get_capability_registry().get_event_dispatcher() {
+            Some(dispatcher) => {
+                let workflow_run: Arc<dyn axagent_harness::WorkflowRunProvider> =
+                    Arc::new(crate::init::workflow_run::WorkflowRunService::new(
+                        work_engine.clone(),
+                        Arc::new(sea_db.clone()),
+                        dispatcher,
+                    ));
+                match axagent_harness::get_capability_registry().register_workflow_run(workflow_run)
+                {
+                    Ok(_) => tracing::info!("workflow.run 接缝已注册 (BuiltIn)"),
+                    Err(e) => tracing::warn!("workflow.run 注册失败: {e}"),
+                }
+            },
+            None => tracing::warn!(
+                "workflow.run 未注册：event.dispatch 总线不可用（插件将收不到执行进度事件）"
+            ),
+        }
+    }
+
     // C3（2026-09-27，301302 t-risk 超时根因）：交易日历「上证日 K 自证」接线。
     // 原远程源 `RPTA_WEB_TRADE_CALENDAR` 报表已下线（9501），且 `init_holiday_calendar`
     // 此前**从未被启动流程调用** ⇒ is_trading_day 一直走硬编码兜底，缺 2026-09-25 中秋

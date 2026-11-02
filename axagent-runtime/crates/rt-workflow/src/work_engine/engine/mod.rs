@@ -5550,6 +5550,20 @@ impl WorkEngine {
             .ok_or_else(|| WorkEngineError::NotFound(execution_id.to_string()))
     }
 
+    /// 取某次执行的最终输出（**仅供接缝查询**，如 `workflow.run.status`）。
+    ///
+    /// 只 clone `execution_workflows[execution_id].output` 这一个 `Value`，
+    /// 刻意**不** clone 整个 `Workflow`：后者的 `nodes`/`edges`/`results`/
+    /// `node_states` 在 20+ 节点的股票链上可达 MB 级，而 `output` 是经
+    /// `output_schema` 过滤 / EndNode 聚合后的精简结果。
+    ///
+    /// `None` 的两种来源不区分：未知 `execution_id`（宿主重启后失效），
+    /// 或该执行尚未产出 output（`run_workflow` 收尾时才写回，见 :5054-5062）。
+    pub async fn get_execution_output(&self, execution_id: &str) -> Option<serde_json::Value> {
+        let workflows = self.execution_workflows.read().await;
+        workflows.get(execution_id).and_then(|wf| wf.output.clone())
+    }
+
     /// 列出当前内存中所有活跃的执行（status = Running / Paused）。
     ///
     /// 可观测性用途：前端可轮询此接口渲染"正在执行的工作流"列表，
@@ -7361,5 +7375,49 @@ mod tests {
         assert_eq!(by_type.get("fileOperation"), Some(&super::IO_NODE_CONCURRENCY));
         // 死项不得复活：`"file"` 不是 `node_type_name` 给出的名字。
         assert!(!by_type.contains_key("file"), "按类型表里不得有引擎取不到的键");
+    }
+
+    /// `get_execution_output` 只读 `execution_workflows[execution_id].output`
+    /// （接缝 `workflow.run.status(include_output=true)` 的唯一数据源）。
+    #[tokio::test]
+    async fn get_execution_output_reads_runtime_instance() {
+        let engine = make_test_engine();
+
+        // ① 负控：未知 execution_id ⇒ None（不 panic，也不回落 DB）
+        assert!(engine.get_execution_output("exec-missing").await.is_none());
+
+        let wf = Workflow {
+            id: "wf-1".into(),
+            name: "gateway-test".into(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            status: WorkflowStatus::Completed,
+            created_at: 0,
+            completed_at: Some(1),
+            results: std::collections::HashMap::from([(
+                "n1".to_string(),
+                serde_json::json!({"node": "out"}),
+            )]),
+            node_states: std::collections::HashMap::new(),
+            output: Some(serde_json::json!({"decision": "hold"})),
+            error_config: None,
+            error_workflow_id: None,
+            hooks_config: None,
+        };
+        engine.execution_workflows.write().await.insert("exec-1".into(), wf);
+
+        // ② 命中：返回的是 `output`，不是整个 Workflow（results 不随之外泄）
+        let out = engine.get_execution_output("exec-1").await.expect("应取到 output");
+        assert_eq!(out, serde_json::json!({"decision": "hold"}));
+        assert!(out.get("results").is_none(), "只应 clone output 单个字段: {out}");
+
+        // ③ 执行存在但尚未产出 output ⇒ 同样 None（与「查无此执行」同语义）
+        let mut bare = {
+            let wfs = engine.execution_workflows.read().await;
+            wfs.get("exec-1").cloned().expect("刚写入的实例应存在")
+        };
+        bare.output = None;
+        engine.execution_workflows.write().await.insert("exec-2".into(), bare);
+        assert!(engine.get_execution_output("exec-2").await.is_none());
     }
 }

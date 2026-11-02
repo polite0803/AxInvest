@@ -262,8 +262,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | `message.callback` | `axagent-core/crates/harness/src/platform_callback.rs:21` | 接缝 `message.callback`（内置与插件同入口） | 2 | — |
 | `webhook.dispatch` | `axagent-core/crates/harness/src/webhook_subscription.rs:154` | 接缝 + `axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9` | 4 | — |
 | `system.prompt` | `axagent-core/crates/harness/src/context_contributor.rs:22` | 接缝 `system.prompt.{段名}` | 3 | — |
-| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:2109` 起 `remote_method_not_supported` |
-| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:2201`–`:2249` 一批 `remote_method_not_supported`） |
+| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:2384` 起 `remote_method_not_supported` |
+| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:2476`–`:2524` 一批 `remote_method_not_supported`） |
 | `workflow.optimizer` | `axagent-core/crates/harness/src/workflow_optimization.rs:80` | 接缝 | 2 | 同上 |
 | `workflow.sandbox` | `axagent-core/crates/harness/src/workflow_evolution.rs:263` | 接缝 | 4 | — |
 | `workflow.business_rule` | `axagent-core/crates/harness/src/business_rules.rs:71` | 接缝（已有 e2e worker 产物） | 3 | — |
@@ -299,7 +299,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 它原来「是一套与 capability 接缝并行的第二插件协议」这一判据不变：自带键控注册表、自己声明工具与命令、自己带健康探针，却不在 15 条接缝里，也不在 `SUPPORTED_REMOTE_SEAMS`。
 ⇒ **已裁定并执行（§0.12.1）：废弃 trait 本体，把 `command_specs/execute_command` 的形状吸收进 L1 命令通道 T2**（生产实现者 0，唯一实现是测试替身）——不给零实现者的第二协议上「权限模型 + 对账 + 兼容窗口」三套成本。
    原记「CLI 派发口无 `input_schema` 且权限写死 `ReadOnly`」**判据低估了实情**：`PluginTool::check_permission`（`plugins/src/types.rs:787-826`）全仓零调用方，唯一引用它的 `execute_with_permission_check` 也零调用方 ⇒ 档位在 tools 与 commands **两条路上都是纯装饰**；本批只把命令通道改成真授权（按具体权限名判定，`implies_*` 一字未改），**tool 侧依旧是装饰**，另立批次。
-   同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:708`**（原 `:551`，因多次改动下移；镜像表同批改）。
+   同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:738`**（原 `:708`；#75 加 `list_plugin_pages` 后再下移 30 行；镜像表同批改）。
 
 ### 0.7.7 判为内核，明确不拆 —— 10 条（每条都给不过哪道判据）
 
@@ -784,7 +784,7 @@ CLI 通道保留给既有"外部 CLI 插件"品类，但必须补 `input_schema`
 | ID | 现象 | 证据 | 影响面 | 最小修法 |
 |---|---|---|---|---|
 | **D1** | 宿主调插件**无调用超时**：对端僵死（进程活着但不回帧）时 `receiver.recv()` **无限阻塞**；只有对端关闭/崩溃才 `Err` | `worker.rs:1085-1091`；`PluginWorkerConfig` 只有 `shutdown_timeout`（`worker.rs:192-218`），**无 per-call 超时、无重启策略** | 任一插件卡住 ⇒ 宿主调用方卡住 ⇒ UI 卡死，且「拔不掉」 | `invoke` 外包 `tokio::time::timeout`，超时返回 `SEAM_CALL_TIMEOUT`（新错误码，需同步 11 语言 `error` 段）；worker 崩溃后的重启策略显式化（不重启也要写明） |
-| **D2** | **无流式**：远程 provider 的 `chat_stream` 第一帧即错误 | `worker.rs:2625-2626`（注释自述「帧协议为一请求一响应，无流式分片复用」）、实现 `:2656-2670`；`reflector.aggregate_patterns/get_history`、`evolver.*`、`optimizer.*` 返回 `remote_method_not_supported`（`worker.rs:2109`、`:2201-2249`） | **provider 试点的硬前置**：聊天应用不能失去逐 token 输出 | 协议加流式分片（同一 `request_id` 多帧 + `final` 哨兵），是 `PLAN-everything-is-plugin.md` §15.4 那套扩展的自然延伸；**不做则 provider 不许插件化** |
+| **D2** | **无流式**：远程 provider 的 `chat_stream` 第一帧即错误 | `worker.rs:2625-2626`（注释自述「帧协议为一请求一响应，无流式分片复用」）、实现 `:2656-2670`；`reflector.aggregate_patterns/get_history`、`evolver.*`、`optimizer.*` 返回 `remote_method_not_supported`（`worker.rs:2384`、`:2476-2524`） | **provider 试点的硬前置**：聊天应用不能失去逐 token 输出 | 协议加流式分片（同一 `request_id` 多帧 + `final` 哨兵），是 `PLAN-everything-is-plugin.md` §15.4 那套扩展的自然延伸；**不做则 provider 不许插件化** |
 | **D3** | 两套注册路径且无一致性校验：`manifest.capabilities` 只写 `declarations` 表**不挂 provider**；可调用门面只来自 describe 自述 | `plugins/src/manager.rs:705-713`→`:783-821`；`capability_registry.rs:484-510`；测试名自证 `records_declaration_only_and_rolls_back`（`:1370`）；真正挂门面在 `worker.rs:2262-2279` | 清单声明 ≠ 运行时能力 ⇒ UI 显示「插件提供 X」而运行时拿不到（既有方案缺陷 1 的变体，仍在） | 握手后做 `manifest.capabilities` ↔ `declaration.capabilities` 双向对账：声明未实现 ⇒ 拒绝注册并计入可见失败（不许静默） |
 | **D4** | **远程工具丢弃宿主 `ToolContext`** | `worker.rs:624` 构造 `ToolContext::new(".")` 最小上下文；`worker.rs:1881` `RemoteTool::call` 直接忽略 `_ctx` | 插件工具的**宿主权限校验、输出脱敏、审批规则、Guardian、ask-user、回滚栈全部失效**（安全相关，非风格问题） | ctx 走「可序列化白名单投影」出境（策略/开关/IDs），宿主侧保留句柄类对象（`Arc<Notify>`、审批栈）不下发；需复用反向 `call_seam` / `UI_ACTION` 通道做 ask-user 与审批回环 |
 | **D5** | worker 启动失败**只 warn**，插件仍显示「已启用」 | `plugins/src/manager.rs:722-730` | 「启用了却一个远程能力都没有」只能靠翻日志 | 启用结果区分三态：A 层资产可用 / B 层 worker 可用 / B 层失败（可见状态 + 前端提示） |
@@ -955,7 +955,7 @@ SDK                  harness + plugin-proto + plugin-testkit（脚手架 / 契�
 | **P5.6** | market-data（前置 = `astock-data/src/as_of.rs:36` 的 task-local `AS_OF` 改显式入参 + 缓存/凭证主权决策 + `market.provider.{源名}` 新接缝） | 回测与推荐链路在插件形态下读数一致；`app_state.rs:244` 的 `Arc<AStockClient>` 具体类型字段消失 |
 | **P5.7** | strategy（前置 = P5.0a 的会话式 op）—— **(a) 已定全覆盖，不再复核「值不值得做」** | 单回测不爆帧（分批 onBarBatch）、与进程内策略逐 bar 结果等价；`commands/quant_backtest.rs:363-430` 的 `match strategy_type` 硬构造消失 |
 | **P5.8** | RAG 后端接缝 —— **切法待拍（§0.6.3：解 1「嵌入+重排」/ 解 2「服务端向量库」）** | 按所选解：解 1 ⇒ 插件提供嵌入源与重排、向量存储留内核；解 2 ⇒ 插件提供向量库客户端、内核存储路径重写。两者共同判据：`rag_provider.rs:13` 的 `VectorQueryResult` 补上 serde 且过帧 |
-| **P5.9** | **其余 11 条接缝收尾**（§0.7.4 未进 P5.2–P5.8 的：`search.source` / `image.gen` / `mcp.server` + §0.7.5 的 4 条钩子族），另含已建接缝但卡 D2 的反思/进化/优化器（`worker.rs:2109`、`:2201-2249` 那批 `remote_method_not_supported` 逐条补）、工具集投影层（D4）、平台适配器、业务规则、webhook / message.callback；**以及 §0.7.6 的 `DojoExtension` 第二协议合流（合流或废弃，二选一）** | 23 条逐条对照 §0.5.3 三条判据（宿主侧无具体类型 / 新增同族不改主壳 / 卸载明确失败），**逐条打勾表进 `docs/audits/`**；接缝四方对账门（§7-1）在 11 条新接缝全绿后才允许摘 `--ratchet` |
+| **P5.9** | **其余 11 条接缝收尾**（§0.7.4 未进 P5.2–P5.8 的：`search.source` / `image.gen` / `mcp.server` + §0.7.5 的 4 条钩子族），另含已建接缝但卡 D2 的反思/进化/优化器（`worker.rs:2384`、`:2476-2524` 那批 `remote_method_not_supported` 逐条补）、工具集投影层（D4）、平台适配器、业务规则、webhook / message.callback；**以及 §0.7.6 的 `DojoExtension` 第二协议合流（合流或废弃，二选一）** | 23 条逐条对照 §0.5.3 三条判据（宿主侧无具体类型 / 新增同族不改主壳 / 卸载明确失败），**逐条打勾表进 `docs/audits/`**；接缝四方对账门（§7-1）在 11 条新接缝全绿后才允许摘 `--ratchet` |
 | **P5.10** | 装配收敛：把 1.25 万行手工 new 中的「可插拔能力」部分改为注册表驱动 | 新增一个同类能力只需：插件仓产物 + manifest 声明 + 权限申请；**不改主壳代码**（最终判据） |
 | **P5.11** | **全面出仓**：满足 §0.5.2 退出判据的插件逐个挪出主仓（主仓删除源码，只留主壳 + 内核 + SDK） | 主仓 `grep axagent-plugin-` 命中为 0；每仓 CI 不依赖主仓源码；兼容矩阵记录老壳 × 新插件的行为 |
 | **P6.0** | **功能包层前置**（§0.8.4/§0.8.5 六项，排在 P5.11 之后、不与 L2 的 23 条混排）：① `WorkflowNode` 封闭 enum 开放化（`harness/src/workflow_types.rs:1366`）② `WorkEngine` 角色定性（底座 or 功能包，`app_state.rs:345` 证明它今天当底座用；依赖方向已核实为「域 → 引擎」，故换轨可行）③ 插件命令贡献通道（升格 `DojoExtension`，或给 `build.rs` 的注册面加运行期入口）④ 前端 tab/route/menu 数据驱动（复用已有 DynamicPageViewer 机制，改 `WorkspaceHub.tsx:166-173` 与 `workspaceTabs.tsx:28/70`）⑤ **引擎去域化**（`agent_executor.rs:4385` `PREFETCHABLE_TOOLS`、`:1232-1246` `stock_code` 预取、`:854` prompt 文本 —— 一律改为节点配置或接缝贡献）⑥ **节点执行器与接缝单轨化**（executor 只能是接缝薄壳、禁止自带实现；`document_parser_executor.rs` 空壳接真接缝，`notification_executor.rs` 的四平台 webhook 并入 `notify.channel`） | 判据：**新增一个工作流节点类型不改主壳代码**（今天需 8 处，见 §0.8.3-1）；**引擎内 `grep -i stock` 生产区命中为 0**（今天 32 行）；**每个节点执行器都能指到一条接缝**（今天 32 个执行器 0 个走能力注册表）；把一个功能包的页面 + 命令 + store 移出主仓后，其余功能编译与运行均不红 |
@@ -1964,3 +1964,47 @@ cargo fmt --check -p axagent-plugin-proto        # 在 axagent-plugins/ 根下�
 - 最终：`sandboxFrameProtocol` 36 passed / EXIT=0、`pluginClientBridge` 28 passed / EXIT=0、tsc `Files: 7479` / error 0、dprint / oxlint EXIT=0。**我独立在 `C:\Users\Public\axinvest-vitest` 镜像复跑**：md5 与仓库逐字一致，`36 passed / EXIT=0`。
 - `stripComments` / `sourceOf` 仍被门 A/E/F 使用 ⇒ 保留；生产代码零改动。
 - 执行者报的偏离（记下来免得下一个人踩）：`node_modules/.bin/*` 是 bash shim，`node` 直接执行会 `SyntaxError` ⇒ 前端工具要用包真实入口（`dprint/bin.cjs`、`oxlint/bin/oxlint`）。
+
+## 41. `#56` 交付账：写 worker stdin 不再持锁阻塞（2026-11-02；报告 `.tmp/res56-report.md`；提交 3b4c5c58c）
+
+### 41.1 改动面（唯一文件 `worker.rs`，+741 / −162）
+
+| 落点 | 内容 |
+|---|---|
+| `WRITER_EXIT_GRACE = 200ms` | 杀进程后写线程的退出宽限；超时**detach**并 warn，绝不为了 join 把停机拖成无界 |
+| `OutboundFrame` + `run_writer` | 专用写线程**独占** stdin，请求帧与入站回写共用一条 FIFO 串行写者 ⇒ 帧完整性由「单写者」保证，不再由调用方持锁保证 |
+| `WriteAck { Written, Failed{wrote_any}, NoAck }` | 三态写回执；`WorkerInner.stdin: Mutex<...>` 删除，换成 `writer: Mutex<Option<WriterThread>>` |
+| `WorkerInner::submit_frame` | 调用方只克隆投递口（持锁极短），随后**不持任何锁**做带预算的等待 |
+| `poison()` / `close_writer(deadline)` | 超时或部分写出 ⇒ 置可疑闸 + `kill_child()`（关管道读端是解阻写者的唯一手段）；停机先 Close、宽限内不退则杀进程再收 |
+| `exchange_with_timeout(wait: Duration)` | `wait: Option<Duration>` 直接改 `Duration`，**删除无限 `exchange()`** —— 把「无限等」从类型里去掉，而不是留一个分支等人复用 |
+| `shutdown()` / `Drop` | 礼貌帧预算 = 剩余预算的一半；整体落在 `shutdown_timeout` 量级；Drop 顺序 kill → close_writer → join_reader |
+
+### 41.2 判据表（这是本任务的核心，别的都可以重构，这张表不能变）
+
+| 情形 | 报什么 | 为什么 |
+|---|---|---|
+| 可疑闸拒投（**未尝试写**） | `Transport` | 毒化连接的口径是「拒绝」，与「进程不在 ⇒ 回退」方向相反 |
+| 写回执 `Failed { wrote_any: false }` | **`NotDelivered`** | 零字节进管道 ⇒ 帧不可能被执行 ⇒ 零副作用 ⇒ 命名命令可回退（#73 M-1） |
+| 写回执 `Failed { wrote_any: true }` | `Transport` + `poison()` | 已有字节被接受，对端可能读到半帧，流边界不再可信 |
+| 写回执 `NoAck`（预算耗尽） | `Transport`（`submit_frame` 已毒化+杀进程） | **「未送达」不可证明**：写者还阻塞在 `write` 里，写出进度不可追溯 |
+| `Written` 后收侧到点 | `Timeout` | 「超时不等于取消」原样保留 |
+
+⇒ `NotDelivered` 从此**只出现一格**。这条比「修好卡死」更重要：把回退判据从「写失败」收紧成「确定零字节」，否则一次半帧写出就会让上层误以为可以重跑命令（二次副作用）。
+
+### 41.3 用例（3 条新增，`worker::tests` 42 例全绿）
+
+1. `write_ack_timeout_is_bounded_and_never_reports_not_delivered`：阻塞写夹具下调用方在预算内返回、错误非 `NotDelivered`、`seam_suspect == true`、第二次调用毫秒级拒绝且**写计数不增**、`shutdown()` 在写者仍卡死时 < 1s。
+2. `healthy_writer_delivers_the_exact_frame_and_closed_stdin_reports_not_delivered`：健康往返帧**逐字节**等于 `serde_json::to_vec(&request)`；对端关闭后投递 ⇒ `NotDelivered` 且文本含「stdin 已释放」；配对表无残留。
+3. `inbound_writeback_is_bounded_while_an_outbound_write_is_stuck`：出向写卡住期间读线程照常派发入站任务（读侧不被写侧阻塞），入站回写在自己的预算内收口，出向调用同样在预算内失败且非 `NotDelivered`。
+
+### 41.4 一次测试挂死：根因是夹具，不是生产死锁（必须记，因为它是**误判高发形态**）
+
+首轮 `cargo test` 在 `healthy_writer_...` 上**挂死 5 分钟**（日志停在 `test ... ---`，无 ok/FAILED）。根因：夹具把**对端 socket** 当宿主写端 ⇒ 帧回到宿主自己、假 worker 收不到 ⇒ 5 s `Timeout` panic；而 panic 展开时 `Drop for WorkerInvoker` 的 `join_reader()` 对端尚未关闭 ⇒ 读线程永不 EOF ⇒ **进程挂死而不是 FAILED**。
+处置：写端改回 `Box::new(host_side)`（与 `command_transport` 同形）、用例体包 `with_watchdog(10s)`（未来回归表现为明确失败而不是挂死），保留「先关对端再 shutdown」。**生产逻辑在编译/测试期零修正**：首轮 `check` / `clippy --all-targets -D warnings` 即 EXIT=0。
+⇒ 判据：**测试挂死先查夹具的方向与收尾，再怀疑生产死锁**；同时「panic 展开路径里有无界 join」本身是既存风险（纯流式夹具没有子进程可杀）—— 本次未改 `join_reader`，由每个用例的 watchdog 兜住，登记为残余。
+
+### 41.5 两条残余（登记，不假装已解决）
+
+1. **写回执预算按「投递→回执」计，含排队时间**：若写者前面压着一帧接近 64 MiB 上限的大帧，后面预算最小的命令帧可能在健康连接上提前 `NoAck` ⇒ 毒化+杀进程（假阳性）。触发条件苛刻，本仓现有载荷远小于此；缓解选项（写预算下限 / 写者回报「开始写」）都会改「预算只归 worker」的口径，留裁。
+2. **`join_reader()` 仍无界**：其有界性依赖「进程已死 ⇒ stdout EOF」；纯流式夹具必须由用例自行关对端。若要连读线程 join 也带 deadline，需给读线程加退出信号通道，未做。
+3. **入站总闸未加**（按 §32.3-1 裁定）：入站服务侧本就没有等待上限，本批没有新增无界；互饿评估结论是「单写者 FIFO，不互等；唯一延迟是 head-of-line」，加闸会重新引入 M-3 误杀。

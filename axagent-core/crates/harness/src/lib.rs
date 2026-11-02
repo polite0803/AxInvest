@@ -343,9 +343,9 @@ pub use cron_delivery::{
     CronDeliveryChannel, CronDeliveryConfig, CronDeliveryPayload, CronDeliverySink,
     NoopDeliverySink,
 };
-// ── cron 任务只读查询接缝（DTO + Trait，实现由 runtime-core 注入）──
+// ── cron 任务查询 / 写面接缝（DTO + Trait，实现由 runtime-core 注入）──
 pub mod jobs_store;
-pub use jobs_store::{CronJobRunView, CronJobView, JobStoreProvider};
+pub use jobs_store::{CronJobRunView, CronJobView, JobStoreProvider, NewCronJob, RemoveJobOutcome};
 pub mod prompt_guard;
 pub mod provider;
 pub mod provider_continuation;

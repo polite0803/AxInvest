@@ -14,11 +14,14 @@
 //   DB 访问改走 harness 里的持久化**端口** `CronJobPersistence`，实现落在
 //   `axagent-dao::repo::cron_job_persistence` —— 与本 crate 的 `cron_delivery.rs`
 //   （「DTO + Trait 在 harness，具体实现在 wiring 层」）同一套 port/adapter 设计。
+use axagent_harness::core_error::AxAgentError;
 use axagent_harness::cron_persistence::{CronHistoryRecord, CronJobPersistence};
-use axagent_harness::jobs_store::{CronJobRunView, CronJobView, JobStoreProvider};
+use axagent_harness::jobs_store::{
+    CronJobRunView, CronJobView, JobStoreProvider, NewCronJob, RemoveJobOutcome,
+};
 use chrono::{Datelike, Timelike};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
@@ -440,6 +443,10 @@ pub struct CronJobStore {
     /// `DatabaseConnection::default()`，而 sea-orm 在构建 SQL 时会直接 panic，
     /// 且该 panic **不可被 Result 捕获**）。这里让「没有持久化」在类型上不可绕过。
     persistence: Option<Arc<dyn CronJobPersistence>>,
+    /// 受保护的任务 id：内置种子任务，`jobs.store` 写面的 `remove` 对它们返回
+    /// `Protected` 且**不删除**（改状态不受限）。由 wiring 层（`src/init/state.rs`）
+    /// 在启动时经 [`CronJobStore::protect_ids`] 登记。
+    protected: Arc<RwLock<HashSet<String>>>,
 }
 
 impl CronJobStore {
@@ -449,6 +456,7 @@ impl CronJobStore {
             jobs: Arc::new(RwLock::new(Vec::new())),
             running: Arc::new(RwLock::new(HashMap::new())),
             persistence: None,
+            protected: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
@@ -475,6 +483,7 @@ impl CronJobStore {
             jobs: Arc::new(RwLock::new(jobs)),
             running: Arc::new(RwLock::new(HashMap::new())),
             persistence: Some(persistence),
+            protected: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
@@ -679,6 +688,18 @@ impl CronJobStore {
             job.status = status;
         })
         .await
+    }
+
+    /// 登记受保护的任务 id（内置种子任务）。
+    ///
+    /// 幂等：重复登记同一 id 无副作用；只增不减（保护名单随进程生命周期固定）。
+    pub async fn protect_ids(&self, ids: impl IntoIterator<Item = String>) {
+        self.protected.write().await.extend(ids);
+    }
+
+    /// 该 id 是否受保护（`jobs.store` 的 `remove` 据此返回 `Protected`）。
+    pub async fn is_protected(&self, id: &str) -> bool {
+        self.protected.read().await.contains(id)
     }
 
     /// 登记「本进程正在执行」：调度器在定时派发与手动 `trigger_now` 两处调用。
@@ -973,6 +994,88 @@ impl JobStoreProvider for CronJobStore {
             })
             .count();
         Ok(count as u64)
+    }
+
+    /// 新增任务：校验 id / schedule 非空与 id 唯一，初始 `active`、`run_count = 0`，
+    /// 时间戳取当前时刻；下次触发档期由既有 `add()` 编排（不改其语义）。
+    async fn add_job(&self, job: NewCronJob) -> axagent_harness::core_error::Result<String> {
+        if job.id.trim().is_empty() {
+            return Err(AxAgentError::Provider("任务 id 不能为空".into()));
+        }
+        if job.schedule.trim().is_empty() {
+            return Err(AxAgentError::Provider("任务 schedule（cron 表达式）不能为空".into()));
+        }
+        if !matches!(job.priority.as_str(), "low" | "medium" | "high" | "batch") {
+            return Err(AxAgentError::Provider(format!(
+                "非法任务优先级：{}（允许 low / medium / high / batch）",
+                job.priority
+            )));
+        }
+        if self.get(&job.id).await.is_some() {
+            return Err(AxAgentError::Provider(format!("任务 id 已存在：{}", job.id)));
+        }
+
+        let now = now_millis();
+        let cron_job = CronJob {
+            id: job.id.clone(),
+            name: job.name,
+            description: job.description,
+            schedule: job.schedule,
+            prompt: job.prompt,
+            workflow_id: job.workflow_id,
+            task_type: job.task_type,
+            platform: job.platform,
+            enabled_toolsets: job.enabled_toolsets,
+            status: CronJobStatus::Active,
+            recurring: job.recurring,
+            run_count: 0,
+            last_run_at: None,
+            last_result: None,
+            last_trigger: None,
+            next_run_at: None,
+            config: TaskConfig::default(),
+            delivery: None,
+            priority: job.priority,
+            epoch_cost_estimate: None,
+            params: job.params,
+            created_at: now,
+            updated_at: now,
+        };
+        Ok(self.add(cron_job).await)
+    }
+
+    /// 删除任务：受保护 id 直接返回 `Protected`（不删除）；否则按内存删除结果区分
+    /// `Removed` / `NotFound`。
+    async fn remove_job(&self, id: &str) -> axagent_harness::core_error::Result<RemoveJobOutcome> {
+        if self.is_protected(id).await {
+            return Ok(RemoveJobOutcome::Protected);
+        }
+        let removed = self.remove(id).await;
+        Ok(if removed {
+            RemoveJobOutcome::Removed
+        } else {
+            RemoveJobOutcome::NotFound
+        })
+    }
+
+    /// 修改状态：只接受 `active` / `paused` / `disabled`，其余返回 `Provider` 错误。
+    /// 返回 `false` 表示任务不存在；受保护 id 允许改状态。
+    async fn set_job_status(
+        &self,
+        id: &str,
+        status: &str,
+    ) -> axagent_harness::core_error::Result<bool> {
+        let status = match status {
+            "active" => CronJobStatus::Active,
+            "paused" => CronJobStatus::Paused,
+            "disabled" => CronJobStatus::Disabled,
+            other => {
+                return Err(AxAgentError::Provider(format!(
+                    "非法任务状态：{other}（允许 active / paused / disabled）"
+                )));
+            },
+        };
+        Ok(self.set_status(id, status).await)
     }
 }
 
@@ -1322,5 +1425,105 @@ mod running_registry_tests {
         assert!(store.list_running().await.is_empty(), "record_run 必须摘除在跑登记");
         let job = store.get(&id).await.expect("任务应仍在");
         assert_eq!(job.last_trigger.as_deref(), Some("manual"), "触发来源随结果落盘");
+    }
+}
+
+#[cfg(test)]
+mod job_store_write_tests {
+    use super::{CronJobStore, JobStoreProvider, NewCronJob, RemoveJobOutcome};
+
+    fn new_job(id: &str) -> NewCronJob {
+        NewCronJob {
+            id: id.to_string(),
+            name: "seam-job".to_string(),
+            description: "d".to_string(),
+            schedule: "0 9 * * *".to_string(),
+            prompt: "p".to_string(),
+            workflow_id: None,
+            task_type: None,
+            platform: None,
+            enabled_toolsets: None,
+            recurring: true,
+            priority: "medium".to_string(),
+            params: None,
+        }
+    }
+
+    /// `add_job` 固定初始 `active` / `run_count = 0`，并像 `add()` 一样编排档期。
+    #[tokio::test]
+    async fn add_job_sets_active_and_schedules_next_run() {
+        let store = CronJobStore::new_ephemeral();
+        let id = store.add_job(new_job("seam-a")).await.expect("新增应成功");
+        assert_eq!(id, "seam-a");
+        let job = store.get(&id).await.expect("任务应存在");
+        assert_eq!(job.status, super::CronJobStatus::Active);
+        assert_eq!(job.run_count, 0);
+        assert!(job.next_run_at.is_some(), "活跃新任务应编排下次档期");
+    }
+
+    /// 重复 id 与空 id / 空 schedule 一律拒绝，且不落库。
+    #[tokio::test]
+    async fn add_job_rejects_duplicate_and_blank_fields() {
+        let store = CronJobStore::new_ephemeral();
+        store.add_job(new_job("dup")).await.expect("首次新增应成功");
+
+        let err = store.add_job(new_job("dup")).await.expect_err("重复 id 应拒绝");
+        assert!(err.to_string().contains("已存在"), "错误须点明 id 已存在: {err}");
+
+        let mut blank_id = new_job("b1");
+        blank_id.id = "  ".to_string();
+        assert!(store.add_job(blank_id).await.is_err(), "空 id 应拒绝");
+
+        let mut blank_schedule = new_job("b2");
+        blank_schedule.schedule = "".to_string();
+        assert!(store.add_job(blank_schedule).await.is_err(), "空 schedule 应拒绝");
+
+        let mut bad_priority = new_job("b3");
+        bad_priority.priority = "urgent".to_string();
+        let err = store.add_job(bad_priority).await.expect_err("非法 priority 应拒绝");
+        assert!(err.to_string().contains("非法任务优先级"), "错误须点明优先级: {err}");
+        assert!(store.get("b1").await.is_none(), "空 id 不得落库");
+        assert!(store.get("b2").await.is_none(), "空 schedule 不得落库");
+        assert!(store.get("b3").await.is_none(), "非法 priority 不得落库");
+    }
+
+    /// 受保护 id：删除返回 `Protected` 且任务仍在；改状态不受保护限制。
+    #[tokio::test]
+    async fn remove_protected_is_noop_but_status_change_allowed() {
+        let store = CronJobStore::new_ephemeral();
+        store.add_job(new_job("seed-1")).await.expect("新增应成功");
+        store.protect_ids(["seed-1".to_string()]).await;
+        assert!(store.is_protected("seed-1").await);
+
+        let outcome = store.remove_job("seed-1").await.expect("删除应返回结果");
+        assert_eq!(outcome, RemoveJobOutcome::Protected);
+        assert!(store.get("seed-1").await.is_some(), "受保护任务不得被删除");
+
+        assert!(store.set_job_status("seed-1", "paused").await.expect("改状态应成功"));
+        assert_eq!(
+            store.get("seed-1").await.expect("任务应仍在").status,
+            super::CronJobStatus::Paused
+        );
+
+        let outcome = store.remove_job("missing").await.expect("删除应返回结果");
+        assert_eq!(outcome, RemoveJobOutcome::NotFound);
+        assert!(
+            !store.set_job_status("missing", "active").await.expect("不存在不算错误"),
+            "不存在的任务改状态应返回 false"
+        );
+    }
+
+    /// 非法状态字面量 ⇒ `Provider` 错误；未登记的 id 删除返回 `Removed`。
+    #[tokio::test]
+    async fn set_status_rejects_unknown_literal_and_remove_reports_removed() {
+        let store = CronJobStore::new_ephemeral();
+        store.add_job(new_job("plain")).await.expect("新增应成功");
+
+        let err = store.set_job_status("plain", "running").await.expect_err("非法状态应拒绝");
+        assert!(err.to_string().contains("非法任务状态"), "错误须点明非法状态: {err}");
+
+        let outcome = store.remove_job("plain").await.expect("删除应返回结果");
+        assert_eq!(outcome, RemoveJobOutcome::Removed);
+        assert!(store.get("plain").await.is_none(), "未受保护任务应被删除");
     }
 }

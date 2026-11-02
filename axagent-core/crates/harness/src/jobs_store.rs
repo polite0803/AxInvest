@@ -2,11 +2,15 @@
 
 //! 定时任务（cron job）查询接缝 — DTO + Trait。
 //!
-//! 宿主把 `runtime-core` 的 `CronJobStore` 经本接缝以**只读视图**暴露给插件侧；
-//! 插件经 `call_seam("jobs.store", op, args)` 按 op 查询任务列表 / 单条 / 计数。
+//! 宿主把 `runtime-core` 的 `CronJobStore` 经本接缝暴露给插件侧；
+//! 插件经 `call_seam("jobs.store", op, args)` 按 op 查询 / 新增 / 删除 / 改状态。
 //!
-//! **只读**：本接缝不提供创建、修改、删除、触发等写面 —— op 级权限校验落地前
-//! 不发布任何写 op。视图也刻意**不暴露**以下内容：
+//! **写面权限**：`add` / `remove` / `set_status` 要求插件已声明 `write` 权限
+//! （由 worker 分派层强制；本层只提供契约，不自行校验）。`update`（patch）不在本批。
+//! 内置种子任务受保护：`remove` 对保护 id 返回 [`RemoveJobOutcome::Protected`]，
+//! **不删除**；改状态不受保护限制（允许用户暂停内置任务）。
+//!
+//! 查询视图刻意**不暴露**以下内容：
 //! - `config`（重试/超时配置）与 `delivery`（投递配置）：属宿主内部执行参数；
 //! - 进程内在跑登记（`running`）：纯内存且随进程退出清空，跨边界无意义；
 //! - `last_result.output`：单次执行输出可能很大，不过帧（见 [`CronJobRunView`]）。
@@ -60,10 +64,57 @@ pub struct CronJobView {
     pub updated_at: i64,
 }
 
-/// 定时任务查询提供者（只读）。
+/// 新建定时任务的入参（`jobs.store` 的 `add` op）。
+///
+/// `id` 由调用方指定：须非空且在宿主内唯一（重复由实现方拒绝，避免静默覆盖）。
+/// 宿主侧固定初始状态为 `active`、`run_count = 0`，时间戳由宿主生成。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewCronJob {
+    /// 调用方指定的任务 id：非空、唯一。
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    /// cron 表达式（如 `"0 9 * * *"`），非空。
+    pub schedule: String,
+    pub prompt: String,
+    pub workflow_id: Option<String>,
+    pub task_type: Option<String>,
+    pub platform: Option<String>,
+    pub enabled_toolsets: Option<Vec<String>>,
+    #[serde(default = "default_true")]
+    pub recurring: bool,
+    /// 优先级字面量：`low` / `medium` / `high` / `batch`，缺省 `medium`。
+    #[serde(default = "default_priority")]
+    pub priority: String,
+    pub params: Option<serde_json::Value>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_priority() -> String {
+    "medium".to_string()
+}
+
+/// `remove` 的结果：区分「已删除」「不存在」「受保护未删除」。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoveJobOutcome {
+    Removed,
+    NotFound,
+    /// 内置种子任务：受保护，**未删除**。
+    Protected,
+}
+
+/// 定时任务查询提供者（读面 + 写面）。
 ///
 /// 实现方：宿主 `runtime-core` 的 `CronJobStore`（wiring 在 `src/init/state.rs`）。
 /// 默认实现统一返回「不支持此数据面」，便于外部实现只覆盖关心的 op。
+///
+/// 写方法（`add_job` / `remove_job` / `set_job_status`）要求插件已声明 `write`
+/// 权限；该检查在 worker 分派层完成（返回 `PLUGIN_PERMISSION_DENIED`），本 trait 不重复校验。
 #[async_trait]
 pub trait JobStoreProvider: Send + Sync {
     /// 列出任务。`task_type = None` 返回全部；`active_only = true` 只返回
@@ -89,6 +140,37 @@ pub trait JobStoreProvider: Send + Sync {
     async fn count_jobs(&self, _task_type: Option<&str>) -> Result<u64> {
         Err(AxAgentError::Provider(
             "JobStoreProvider::count_jobs 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 新增任务，返回任务 id。要求插件已声明 `write` 权限（分派层强制）。
+    ///
+    /// 实现方须校验 `id` / `schedule` 非空、`id` 未重复；宿主固定初始状态为
+    /// `active`，并立即编排下次触发时刻。
+    async fn add_job(&self, _job: NewCronJob) -> Result<String> {
+        Err(AxAgentError::Provider(
+            "JobStoreProvider::add_job 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 删除任务。要求插件已声明 `write` 权限（分派层强制）。
+    ///
+    /// 内置种子任务 id 返回 [`RemoveJobOutcome::Protected`] 且**不删除**；
+    /// 不存在返回 [`RemoveJobOutcome::NotFound`]。
+    async fn remove_job(&self, _id: &str) -> Result<RemoveJobOutcome> {
+        Err(AxAgentError::Provider(
+            "JobStoreProvider::remove_job 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 修改任务状态：仅接受 `"active"` / `"paused"` / `"disabled"`。
+    ///
+    /// 要求插件已声明 `write` 权限（分派层强制）。非法状态返回
+    /// `Provider` 错误（跨层后无法区分参数错误与提供者错误，故不走 `invalid_args`）。
+    /// 返回 `false` 表示任务不存在。受保护 id **允许**改状态。
+    async fn set_job_status(&self, _id: &str, _status: &str) -> Result<bool> {
+        Err(AxAgentError::Provider(
+            "JobStoreProvider::set_job_status 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 }

@@ -1719,11 +1719,36 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         }
     }
 
-    // ── jobs.store 接缝：把宿主**已有** cron 任务查询能力以只读视图暴露给插件 ──
-    // 本批只发布读面（列表 / 单条 / 计数）；写 op 待 op 级权限校验落地后再开。
+    // ── jobs.store 接缝：把宿主**已有** cron 任务能力以视图暴露给插件（读面 + 写面） ──
+    // 查询（列表 / 单条 / 计数）已发布；写面（add / remove / set_status）的 op 级
+    // `write` 权限闸已在 worker 落地，分派分支随后接入。
     // 用 `clone()` 注册：`cron_job_store` 随后按值移入 AppState，所有权不变。
     // 失败只 warn，不阻断启动（与 market.quote 同策略）。
     {
+        // 内置股票种子任务受保护：插件 `remove` 对它们返回 `Protected` 且不删除；
+        // 改状态不受限（用户可以暂停/禁用）。名单以 seed 模块常量为唯一来源。
+        cron_job_store
+            .protect_ids(
+                [
+                    crate::init::stock_automation_cron_seed::RECO_JOB_ID,
+                    crate::init::stock_automation_cron_seed::TREND_JOB_ID,
+                    crate::init::stock_automation_cron_seed::POOL_SCAN_JOB_ID,
+                    crate::init::stock_automation_cron_seed::REFLECTION_JOB_ID,
+                    crate::init::stock_automation_cron_seed::DECISION_BACKTEST_JOB_ID,
+                    crate::init::stock_automation_cron_seed::MOVER_RECALL_JOB_ID,
+                    crate::init::stock_automation_cron_seed::MOVER_RECALL_ANALYSIS_JOB_ID,
+                    crate::init::stock_automation_cron_seed::TIME_TRAVEL_BATCH_JOB_ID,
+                    crate::init::stock_automation_cron_seed::UNIVERSE_SCAN_JOB_ID,
+                    crate::init::stock_automation_cron_seed::EVOLUTION_PROPOSAL_JOB_ID,
+                    crate::init::stock_automation_cron_seed::LESSON_JOB_ID,
+                    crate::init::stock_automation_cron_seed::PORTFOLIO_METRICS_JOB_ID,
+                    crate::init::stock_automation_cron_seed::INTENT_EXPIRY_JOB_ID,
+                    crate::init::stock_automation_cron_seed::STOCK_ANALYSIS_RERUN_JOB_ID,
+                ]
+                .into_iter()
+                .map(str::to_string),
+            )
+            .await;
         let jobs_store: Arc<dyn axagent_harness::JobStoreProvider> = cron_job_store.clone();
         match axagent_harness::get_capability_registry().register_jobs_store(jobs_store) {
             Ok(_) => tracing::info!("jobs.store 接缝已注册 (BuiltIn)"),

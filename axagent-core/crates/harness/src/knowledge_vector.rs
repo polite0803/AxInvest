@@ -330,13 +330,8 @@ mod tests {
         // 与 `json!(0.35)`（f64 字面量）**逐位不等** ⇒ 不许写 `assert_eq!(val[...], json!(0.35))`
         // （本仓已记过「浮点判据不是纯等价改写」那一族坑，这里是它的 serde 侧同型）。
         // 键形态与非零性在这里钉，**数值保真**由下面的类型化往返断言负责。
-        let min_sim = val["minSimilarity"]
-            .as_f64()
-            .expect("minSimilarity 应为数值");
-        assert!(
-            (min_sim - 0.35).abs() < 1e-6,
-            "minSimilarity 序列化值应≈ 0.35，实测 {min_sim}"
-        );
+        let min_sim = val["minSimilarity"].as_f64().expect("minSimilarity 应为数值");
+        assert!((min_sim - 0.35).abs() < 1e-6, "minSimilarity 序列化值应≈ 0.35，实测 {min_sim}");
         assert_eq!(val["docIds"], json!(["doc-1", "doc-2"]));
         // 不得残留 snake_case 键
         assert!(val.get("knowledge_base_id").is_none());

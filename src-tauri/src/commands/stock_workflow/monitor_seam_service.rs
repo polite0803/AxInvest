@@ -268,8 +268,8 @@ impl StockMonitorProvider for HostStockMonitor {
         // `stock_code` / `stock_name` 来自人在选控件里挑中的那一行，本来就有值；接缝是插件自动化写，
         // 放过空串就会落出一行核对不到标的的告警 —— 它每轮求值都在引擎里占位、在 `status` 里计数，
         // 却永远不会被人看见。「面板能建、插件不能建」是本条刻意的分叉，不是遗漏。
-        // ⚠ 变体必须是 `Validation`：**#112 落地后**分派层才把它映成 `SEAM_CALL_INVALID_ARGS`；
-        //   本批没碰 worker.rs，所以此刻插件帧里拿到的仍是兜底的 `PLUGIN_CALL_FAILED`。
+        // ⚠ 变体必须是 `Validation`：分派层的 `seam_provider_error`（#112，`7d48768c0`）**只**把
+        //   `Validation` 升 `SEAM_CALL_INVALID_ARGS`，其余变体仍是它兜底的 `PLUGIN_CALL_FAILED`。
         if request.stock_code.trim().is_empty() || request.stock_name.trim().is_empty() {
             return Err(AxAgentError::Validation(format!(
                 "stockCode={:?} / stockName={:?} 有空标识（trim 后是空串），已拒绝落库：接缝侧不建无标的的告警行（命令层仍按面板口径放行）",
@@ -641,8 +641,8 @@ mod tests {
 
     /// 共同判据：空标识 ⇒ 拒收，且**拒绝的那一刻零触达**（内存引擎没进配置、真库没落这一行）。
     /// 只断言「返回 Err」是不够的 —— 那样把闸后移到落库之后，测试照样绿。
-    /// ⚠ 变体断言到 `Validation` 为止：分派层要 **#112 落地后**才把它映成
-    ///   `SEAM_CALL_INVALID_ARGS`，本批没碰 `worker.rs`，此刻插件帧里仍是兜底的 `PLUGIN_CALL_FAILED`。
+    /// ⚠ 变体断言到 `Validation` 为止：分派层的 `seam_provider_error`（#112，`7d48768c0`）正把它映成
+    ///   `SEAM_CALL_INVALID_ARGS`；只有其余变体才落它兜底的 `PLUGIN_CALL_FAILED`。
     async fn assert_blank_identity_is_rejected(stock_code: &str, stock_name: &str) {
         let db = Arc::new(db().await);
         let provider = HostStockMonitor::new(monitor(), aggregator(), db.clone());
@@ -658,7 +658,7 @@ mod tests {
         };
         assert!(
             matches!(err, AxAgentError::Validation(_)),
-            "空标识应落成 Validation（#112 落地后映 SEAM_CALL_INVALID_ARGS），实际 {err:?}"
+            "空标识应落成 Validation（分派层 seam_provider_error ⇒ SEAM_CALL_INVALID_ARGS），实际 {err:?}"
         );
         assert!(
             provider.list_configs().await.expect("读内存引擎配置").is_empty(),

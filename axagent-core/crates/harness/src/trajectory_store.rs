@@ -62,12 +62,12 @@
 //! ## 写面权限
 //!
 //! 本接缝首批**全部是读 op** ⇒ 无写权限闸；宿主 provider 内部按 [`TRAJECTORY_LIST_LIMIT_RANGE`]
-//! 钳位即可。
+//! 校验：`None` ⇒ 取宿主原形缺省，显式值越界 ⇒ `Err(Validation)` 拒收（不夹取）。
 //!
 //! ## 错误语义
 //!
-//! 形状 / 准入 / 无 provider 类错误走协议码；provider 内部任何 `Err` 由分派层兜底成
-//! `PLUGIN_CALL_FAILED` + message。harness **没有** `TRAJECTORY_*` 码族（首批只读 ⇒ 零新增码，
+//! 形状 / 准入 / 无 provider 类错误走协议码；provider 的 `Err` **只有** `Validation` 升
+//! `SEAM_CALL_INVALID_ARGS`（#112 的 `seam_provider_error`），其余变体（含 trait 默认的 `Provider("…未实现…")`）仍兜底成 `PLUGIN_CALL_FAILED` + message。harness **没有** `TRAJECTORY_*` 码族（首批只读 ⇒ 零新增码，
 //! 也就零 11 语言译键负担；PLAN §56.1-Q5）。
 //! **「查无此轨迹」= `null`，不是错误**（协议层没有通用 NOT_FOUND，先例 `jobs.store` 的 `get`）。
 //!
@@ -179,8 +179,8 @@ pub struct TrajectoryQueryView {
     /// 时间窗终点（epoch 毫秒，含）；`None` = 不设上界。
     #[serde(default)]
     pub until_ms: Option<i64>,
-    /// 返回条数上界，合法区间 [`TRAJECTORY_LIST_LIMIT_RANGE`]；`None` 由宿主按原形缺省
-    /// （`TrajectoryQuery::default()` 的 100）取值并钳位到上界。
+    /// 返回条数上界 [`TRAJECTORY_LIST_LIMIT_RANGE`]；`None` ⇒ 宿主取原形缺省
+    /// （`TrajectoryQuery::default()` 的 100），显式值越界 ⇒ `Err(Validation)` 拒收（不夹取）。
     #[serde(default)]
     pub limit: Option<usize>,
 }
@@ -221,7 +221,7 @@ pub struct TrajectoryCountOutcome {
 pub trait TrajectoryStoreProvider: Send + Sync {
     /// 列表（`list` op）。落点是宿主 `get_trajectories(Option<usize>)`。
     ///
-    /// `limit = None` ⇒ 由实现方取缺省并钳位到 [`TRAJECTORY_LIST_LIMIT_RANGE`]。
+    /// `limit = None` ⇒ 取宿主原形缺省；显式值越出 [`TRAJECTORY_LIST_LIMIT_RANGE`] ⇒ `Err(Validation)` 拒收（不夹取）。
     /// 排序须**确定**（宿主按 `created_at` 倒序），否则插件侧断言不可复现。
     async fn list(&self, _limit: Option<usize>) -> Result<TrajectoryListOutcome> {
         Err(AxAgentError::Provider(

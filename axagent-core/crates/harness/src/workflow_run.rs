@@ -18,7 +18,7 @@
 //! **权限由分派层强制**：`start` / `cancel` 要求插件已声明 `write` 权限
 //! （`PLUGIN_PERMISSION_DENIED`）；`status` / `list_active` 只读不设闸。
 //! 模板白名单与准入拒绝也在宿主侧判断，provider 用
-//! [`AxAgentError::Validation`] 表达（分派层将来映射为 `WORKFLOW_RUN_REJECTED`）；
+//! [`AxAgentError::Validation`] 表达（分派层的 `workflow_run_error` 把它映射为 `WORKFLOW_RUN_REJECTED`）；
 //! 本层只提供契约，不自行校验任何一项。
 //!
 //! **首版不支持跨宿主重启**：`execution_id` 登记在宿主内存里，宿主进程重启即失效

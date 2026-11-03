@@ -53,7 +53,7 @@
 //! |---|---|
 //! | `SEAM_CALL_INVALID_ARGS` | 必填缺失 / 类型不符 / `alert_type` 不在白名单 / 阈值越界 |
 //! | `SEAM_PROVIDER_UNAVAILABLE` | 注册表取不到 provider（启动窗口内 / 提供方卸载后） |
-//! | `PLUGIN_CALL_FAILED` | provider 返回 `Err` 或响应序列化失败 |
+//! | `PLUGIN_CALL_FAILED` | provider 返回**非 `Validation` 变体**的 `Err`，或响应序列化失败 |
 //!
 //! ⚠ `status` 的「引擎未装配」**不是**错误：照 `commands/stock_analysis.rs` 的
 //! `monitor_status`，返回 `assembled = false` 的正常响应（计数全 0，由 `assembled` 告诉

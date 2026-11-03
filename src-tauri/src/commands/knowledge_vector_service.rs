@@ -167,7 +167,7 @@ fn check_min_similarity(min_similarity: Option<f32>, op: &str) -> Result<()> {
     }
     if !(KNOWLEDGE_SIMILARITY_RANGE.0..=KNOWLEDGE_SIMILARITY_RANGE.1).contains(&value) {
         return Err(AxAgentError::Validation(format!(
-            "knowledge.vector::{op} 的 min_similarity={value} 越出宿主量纲 [0, 1]（它是**相关度**\
+            "knowledge.vector::{op} 的 min_similarity={value} 越出宿主量纲 [`KNOWLEDGE_SIMILARITY_RANGE`]（它是**相关度**\
              下限，与视图里那个距离分互为补数，越界的阈值没有可解释语义）"
         )));
     }

@@ -57,8 +57,8 @@
 //! ## 错误语义
 //!
 //! 形状 / 准入 / 无 provider 类错误走协议码（`SEAM_CALL_INVALID_ARGS`、`SEAM_CALL_NOT_DECLARED`、
-//! `SEAM_PROVIDER_UNAVAILABLE`、`PLUGIN_PERMISSION_DENIED`）；provider 内部任何 `Err` 由分派层
-//! 兜底成 `PLUGIN_CALL_FAILED` + message。业务码（`KNOWLEDGE_*` / `VECTOR_*`）若要透出，放
+//! `SEAM_PROVIDER_UNAVAILABLE`、`PLUGIN_PERMISSION_DENIED`）；provider 的 `Err` **只有** `Validation`
+//! 升 `SEAM_CALL_INVALID_ARGS`（#112 的 `seam_provider_error`），其余变体（含 trait 默认的 `Provider("…未实现…")`）仍兜底成 `PLUGIN_CALL_FAILED` + message。业务码（`KNOWLEDGE_*` / `VECTOR_*`）若要透出，放
 //! payload 的 `code` 字段，**不改协议、不新增码**（PLAN §56.1-Q5：零新增码 ⇒ 零 11 语言译键
 //! 负担）。**「查无结果」不是错误**：[`VectorSearchOutcome::results`] 返空数组。
 //!
@@ -130,7 +130,7 @@ const _: () = assert!(KNOWLEDGE_SIMILARITY_RANGE.0 <= KNOWLEDGE_SIMILARITY_RANGE
 /// `search` op 的入参（语义检索，文本进）。
 ///
 /// `query` 是自然语言文本，**不是**向量：provider 负责在宿主侧算出 `query` 的 embedding。
-/// `top_k` 越出 [`KNOWLEDGE_TOP_K_RANGE`] ⇒ 宿主 provider 拒收（`Err(Validation)`，不夹取；分派层随 #112 落成 `SEAM_CALL_INVALID_ARGS`）。
+/// `top_k` 越出 [`KNOWLEDGE_TOP_K_RANGE`] ⇒ 宿主 provider 拒收（`Err(Validation)`，不夹取；分派层的 `seam_provider_error` 把它映成 `SEAM_CALL_INVALID_ARGS`）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VectorSearchRequest {
@@ -138,7 +138,7 @@ pub struct VectorSearchRequest {
     pub knowledge_base_id: String,
     /// 查询文本。
     pub query: String,
-    /// 返回条数上界，合法区间 [`KNOWLEDGE_TOP_K_RANGE`]。
+    /// 返回条数上界 [`KNOWLEDGE_TOP_K_RANGE`]；越界 ⇒ `Err(Validation)` 拒收（不夹取）。
     pub top_k: usize,
     /// 相似度下限；`None` 表示不过滤。口径同宿主 `indexing.rs:1244` 的
     /// 「过滤 → 排序 → 截断」，**不是**「先截断再过滤」。
@@ -158,7 +158,7 @@ pub struct VectorSearchRequest {
 pub struct KeywordSearchRequest {
     pub collection_id: String,
     pub query: String,
-    /// 合法区间 [`KNOWLEDGE_TOP_K_RANGE`]。
+    /// [`KNOWLEDGE_TOP_K_RANGE`]；越界 ⇒ `Err(Validation)` 拒收（不夹取）。
     pub top_k: usize,
 }
 
@@ -222,7 +222,7 @@ pub struct VectorIndexOutcome {
 
 /// `get_collection_info` op 的返回。
 ///
-/// 落点是宿主已有的 `get_collection_dimensions`（`vector_store.rs:87`），故本接缝**不需要**
+/// 落点是宿主已有的 `get_collection_dimensions`（`crates/harness/src/vector_store.rs:87`），故本接缝**不需要**
 /// 「列举集合」的能力（PLAN §56.1-Q3）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

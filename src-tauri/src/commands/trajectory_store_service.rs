@@ -137,7 +137,7 @@ fn check_ratio(field: &str, value: Option<f64>) -> Result<()> {
     }
     if !(TRAJECTORY_RATIO_RANGE.0..=TRAJECTORY_RATIO_RANGE.1).contains(&ratio) {
         return Err(AxAgentError::Validation(format!(
-            "trajectory.store 的 {field}={ratio} 越出宿主量纲 [0, 1]（它是评分阈值，越界的阈值没有\
+            "trajectory.store 的 {field}={ratio} 越出宿主量纲 [`TRAJECTORY_RATIO_RANGE`]（它是评分阈值，越界的阈值没有\
              可解释语义 ⇒ 拒收，不静默变成空集）"
         )));
     }

@@ -3166,3 +3166,20 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 **Vitest 处置**：UNC 下 root 被规范成 `Z: Folders/D/...` ⇒ `No test files found`（换映射盘 / `--root` / 绝对 include 均无效）⇒ **显式失败**（`failStep`），指向 `#111`；`--quick` 不含该门。
 
 **验证**：`node scripts/ci-check.mjs --quick` 从 UNC **52 门全绿、EXIT=0、1486.3s**（`.tmp/129-quick-recheck.log`）；`ci.workflow.test.ts` 25/25；hook 与 package.json 命令 MATCH。**顺带**：`i18n-scan` 报的 8 条既有硬编码（插件桥 / 插件页的诊断错误）登记进 `.i18n-allowlist.json`（reason 写明「开发者诊断、不进入宿主 UI」），8 根 fmt 债已在 `093915bfb` 清空 —— 这两条原本会让「真正跑起来的 pre-push」仍然红。
+
+### 64.9 `#19` L2-g 全量门禁终验（2026-11-03）
+
+**判据与 CI 逐字同源**（`.github/workflows/ci.yml:616/619/738` 的三条 cargo 命令），逐根跑、遇锁排队、日志逐根独立：
+
+| 门 | 命令 | 结果 | 日志 |
+|---|---|---|---|
+| fmt | `cargo fmt --all --check` ×8 根 | **8/8 EXIT=0**（既有债已在 `093915bfb` 清空） | `.tmp/fmt-*.log` |
+| clippy | `cargo clippy --workspace --all-targets --all-features -- -D warnings` ×8 根 | **8/8 EXIT=0**（src-tauri 单根 21m03s） | `.tmp/full-clippy-<root>.log` / `full-clippy-summary.log` |
+| test | `__TAURI_WORKSPACE__=true cargo test --workspace --no-fail-fast` ×8 根 | **8/8 EXIT=0**：**9447 passed / 0 failed / 57 ignored** | `.tmp/full-test-<root>.log` / `full-test-summary.log` |
+
+逐根用例数（binaries · passed/failed/ignored）：core 15·1036/0/7、kit 2·112/0/3、ai 24·2713/0/9、infra 35·816/0/1、quant 14·1720/0/24、runtime 43·1879/0/8、plugins 17·250/0/0、src-tauri 11·921/0/5。
+
+**口径说明（不许当全绿洗白）**：
+- 本轮是在**含并行批未提交工作区**的状态下跑的（`stock_analysis.rs` 等 21 个文件）。它们既参与编译也被测到 ⇒ 「红/绿」是**联合态**，不能单独归因给本批已提交的改动；反过来也说明这些未提交文件在门禁口径下可编译、可测。
+- CI 的 `pg_migrations` / `pg_integration` / `pg_upsert_bare_column` 是**独立 Postgres job**，本机无 PG 实例 ⇒ 不在本次终验范围（沿用 CI 跑）。
+- `nextest` 本机未安装，用 CI 同义命令 `cargo test --workspace --no-fail-fast` 跑同一测试面；`--no-fail-fast` 保证一次暴露全部失败而非首错短路。

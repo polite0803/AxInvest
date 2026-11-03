@@ -17113,7 +17113,12 @@
       "stylePolicy": "Policy Driven",
       "styleTechnical": "Technical",
       "bannerAsOf": "Datos hasta {{date}}",
-      "degradedStylesTitle": "Estilo de estrategia degradada"
+      "degradedStylesTitle": "Estilo de estrategia degradada",
+      "batchAgeDays": "hace {{days}} días",
+      "poolBatchCount": "Conjunto de candidatos: {{size}} acciones",
+      "poolBatchEmpty": "El conjunto de candidatos de este lote está vacío",
+      "poolBatchNoSnapshot": "Sin instantánea del conjunto en este lote (≠ conjunto vacío)",
+      "poolBatchNone": "Esta cadena aún no tiene lotes de candidatos en real"
     },
     "recoLoop": {
       "title": "Bucle de reflexión de recomendaciones",

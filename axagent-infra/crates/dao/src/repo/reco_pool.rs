@@ -27,7 +27,10 @@
 //! 分代 ⇒ 只读实盘的下游必须显式带 `as_of_date IS NULL`。
 //! 读侧漏加谓词由 `scripts/check-reco-generation.mjs` 拦。
 
-use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
+    QuerySelect, Set,
+};
 
 use axagent_entities::{reco_picks, reco_pool_batches, reco_scan_audit};
 use axagent_harness::DatabaseConnection;
@@ -450,6 +453,73 @@ pub async fn load_pool_batches(
         .await
 }
 
+/// 面板用的**最近一批**候选池留痕（只读实盘代）。
+///
+/// 与 [`latest_seed_pool_codes`] 不是重复实现：那条读的是 `reco_picks` 出票行上的快照、
+/// 服务收盘估值归档（要的是代码清单），0 票批次在那张表里根本不存在；本条读
+/// `reco_pool_batches`（每批一行、0 票也写），服务面板「这一批到底扫了什么」。
+/// 与 [`load_pool_batches`]（漏检核查按时间窗取**全部**批次、并把 `seed_pool_json` 原文
+/// 端出去做 `in_pool` 判定）也不是一条读：那条要的是成员关系的证据，本条只要一行摘要，
+/// 所以刻意不投影原文列 —— 同一次面板加载里挂 15 KB 池原文没有消费者。
+///
+/// 投影刻意排除 `seed_pool_json` 原文（现网一条 3.8 KB，分桶改造后约 15 KB），但**保留它的
+/// 存在性**：`None` = 取数侧没给池，`Some("[]")` = 池子真的空 —— 两者含义相反，
+/// 折成一个值就把一次取数缺痕写成一条「该批没有候选」的结论（同 `stock_analysis.rs` 的 0-C 裁定）。
+///
+/// 代际谓词写死 `as_of_date IS NULL`：回放批的池是历史截面，当成「今天的候选池」显示就是前视。
+pub async fn latest_live_pool_batch(
+    db: &DatabaseConnection,
+    chain: &str,
+) -> Result<Option<PoolBatchLite>, DbErr> {
+    #[derive(Debug, FromQueryResult)]
+    struct Row {
+        generated_at: String,
+        period: String,
+        stock_count: i32,
+        degraded: bool,
+        purpose: Option<String>,
+        seed_pool_json: Option<String>,
+    }
+
+    let row = reco_pool_batches::Entity::find()
+        .select_only()
+        .column(reco_pool_batches::Column::GeneratedAt)
+        .column(reco_pool_batches::Column::Period)
+        .column(reco_pool_batches::Column::StockCount)
+        .column(reco_pool_batches::Column::Degraded)
+        .column(reco_pool_batches::Column::Purpose)
+        .column(reco_pool_batches::Column::SeedPoolJson)
+        .filter(reco_pool_batches::Column::Chain.eq(chain.to_string()))
+        .filter(reco_pool_batches::Column::AsOfDate.is_null())
+        .order_by_desc(reco_pool_batches::Column::GeneratedAt)
+        .limit(1)
+        .into_model::<Row>()
+        .one(db)
+        .await?;
+    Ok(row.map(|r| PoolBatchLite {
+        generated_at: r.generated_at,
+        period: r.period,
+        stock_count: r.stock_count,
+        degraded: r.degraded,
+        purpose: r.purpose,
+        has_snapshot: r.seed_pool_json.is_some(),
+    }))
+}
+
+/// 面板的一行候选池留痕 —— 刻意不含池原文，只含「有没有池原文」。
+#[derive(Debug, Clone)]
+pub struct PoolBatchLite {
+    pub generated_at: String,
+    /// 该批的档位（手动/回放逐档各一行；cron 与时间旅行写 `all` = 四档共用一份池）
+    pub period: String,
+    pub stock_count: i32,
+    /// 写侧判定：池快照缺失**或**为空
+    pub degraded: bool,
+    pub purpose: Option<String>,
+    /// `false` = `seed_pool_json IS NULL`（取数侧没给池），与「池是空的」不是一件事
+    pub has_snapshot: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,6 +623,124 @@ mod tests {
         assert_eq!(replay_rows.len(), 1);
         assert_eq!(replay_rows[0].id, "rpb-replay");
         assert!(!replay_rows[0].degraded);
+    }
+
+    /// 面板窄读用的批次行夹具（`seed_json` 传 `None` 就是「取数侧没给池」，与 `Some("[]")` 不同）。
+    fn batch_row(
+        id: &str,
+        generated_at: &str,
+        as_of: Option<&str>,
+        seed_json: Option<&str>,
+        count: i32,
+    ) -> NewPoolBatch {
+        NewPoolBatch {
+            id: id.to_string(),
+            chain: "reco".to_string(),
+            period: "mid".to_string(),
+            generated_at: generated_at.to_string(),
+            as_of_date: as_of.map(str::to_string),
+            purpose: if as_of.is_some() {
+                purpose::MOVER_REPLAY.to_string()
+            } else {
+                purpose::LIVE.to_string()
+            },
+            seed_pool_json: seed_json.map(str::to_string),
+            stock_count: count,
+            degraded: count == 0,
+            created_at_ms: 1,
+        }
+    }
+
+    /// 只认实盘代：回放批即使**更晚**，也不得被面板当成「今天扫的池」。
+    #[tokio::test]
+    async fn latest_live_pool_batch_skips_newer_replay_generation() {
+        let db = setup().await;
+        insert_pool_batch(
+            &db,
+            &batch_row(
+                "live-1",
+                "2026-10-05T15:00:00",
+                None,
+                Some(r#"[["600000","n"],["000001","m"]]"#),
+                2,
+            ),
+        )
+        .await
+        .expect("实盘批应写入");
+        insert_pool_batch(
+            &db,
+            &batch_row(
+                "replay-newer",
+                "2026-10-09T15:00:00",
+                Some("2026-07-21"),
+                Some(r#"[["300001","x"]]"#),
+                1,
+            ),
+        )
+        .await
+        .expect("回放批应写入");
+
+        let got = latest_live_pool_batch(&db, "reco").await.expect("读取应成功");
+        let Some(row) = got else { panic!("有实盘批时不得读成空") };
+        assert_eq!(row.generated_at, "2026-10-05T15:00:00", "不得把更晚的回放批当最近一批");
+        assert_eq!(row.stock_count, 2);
+        assert!(row.has_snapshot);
+    }
+
+    /// 「池未留痕」与「池是空的」必须分得开 —— 两者都 `degraded=true`，靠 `has_snapshot` 分辨。
+    #[tokio::test]
+    async fn latest_live_pool_batch_separates_missing_snapshot_from_empty_pool() {
+        let db = setup().await;
+        insert_pool_batch(
+            &db,
+            &batch_row("empty-pool", "2026-10-01T15:00:00", None, Some("[]"), 0),
+        )
+        .await
+        .expect("空池批应写入");
+        insert_pool_batch(&db, &batch_row("no-snapshot", "2026-10-08T15:00:00", None, None, 0))
+            .await
+            .expect("未留痕批应写入");
+
+        let row =
+            latest_live_pool_batch(&db, "reco").await.expect("读取应成功").expect("最近一批应存在");
+        assert_eq!(row.generated_at, "2026-10-08T15:00:00");
+        assert!(!row.has_snapshot, "seed_pool_json IS NULL ⇒ 未留痕");
+        assert!(row.degraded, "未留痕同样是降级批");
+    }
+
+    /// 链切片：智选（`chain='serenity'`）的批次不得顶掉荐股面板的读结果，反之亦然。
+    #[tokio::test]
+    async fn latest_live_pool_batch_is_chain_scoped() {
+        let db = setup().await;
+        insert_pool_batch(
+            &db,
+            &batch_row("reco-older", "2026-10-10T15:00:00", None, Some(r#"[["600000","n"]]"#), 1),
+        )
+        .await
+        .expect("reco 批应写入");
+        // 智选那一批**更晚**：漏掉 chain 谓词时面板会读到它（票数不同，断言能抓到）
+        let mut serenity = batch_row(
+            "serenity-newer",
+            "2026-10-20T15:00:00",
+            None,
+            Some(r#"[["600111","s"],["600112","t"],["600113","u"]]"#),
+            3,
+        );
+        serenity.chain = "serenity".to_string();
+        insert_pool_batch(&db, &serenity).await.expect("智选批应写入");
+
+        let row = latest_live_pool_batch(&db, "reco")
+            .await
+            .expect("读取应成功")
+            .expect("reco 链最近一批应存在");
+        assert_eq!(row.generated_at, "2026-10-10T15:00:00", "不得把智选链的批次读成荐股的");
+        assert_eq!(row.stock_count, 1);
+
+        let other = latest_live_pool_batch(&db, "serenity")
+            .await
+            .expect("读取应成功")
+            .expect("serenity 链最近一批应存在");
+        assert_eq!(other.stock_count, 3, "按链取数是双向的");
     }
 
     /// 回归（2026-10-29）：同业务键重跑必须**覆盖**，不得再插一行。

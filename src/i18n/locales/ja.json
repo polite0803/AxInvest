@@ -17113,7 +17113,12 @@
       "stylePolicy": "Policy Driven",
       "styleTechnical": "Technical",
       "bannerAsOf": "数据截至 {{date}}",
-      "degradedStylesTitle": "降级策略风格"
+      "degradedStylesTitle": "降级策略风格",
+      "batchAgeDays": "{{days}} 日前",
+      "poolBatchCount": "候補プール {{size}} 銘柄",
+      "poolBatchEmpty": "このバッチの候補プールは空です",
+      "poolBatchNoSnapshot": "このバッチの候補プールスナップショット未記録（空とは別）",
+      "poolBatchNone": "実運用の候補プールバッチはまだありません"
     },
     "recoLoop": {
       "title": "銘柄推奨リフレクションループ",

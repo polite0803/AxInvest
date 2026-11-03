@@ -374,7 +374,7 @@ pub const CONCEPTS: &[ConceptDecl] = &[
         min: 0.0,
         max: 100.0,
         meaning: "荐股条目给出的建议仓位百分比",
-        evidence: "axagent-quant/crates/analysis-engine/src/recommender/mod.rs:1333",
+        evidence: "axagent-quant/crates/analysis-engine/src/recommender/mod.rs:1384",
     },
     ConceptDecl {
         id: "axinvest.risk.final_position_pct",

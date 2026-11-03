@@ -17113,7 +17113,12 @@
       "stylePolicy": "Policy Driven",
       "styleTechnical": "Technical",
       "bannerAsOf": "Datenstand {{date}}",
-      "degradedStylesTitle": "Degradierte Strategie"
+      "degradedStylesTitle": "Degradierte Strategie",
+      "batchAgeDays": "vor {{days}} Tagen",
+      "poolBatchCount": "Kandidatenpool: {{size}} Aktien",
+      "poolBatchEmpty": "Kandidatenpool in diesem Durchlauf ist leer",
+      "poolBatchNoSnapshot": "Kein Pool-Snapshot für diesen Durchlauf (≠ leerer Pool)",
+      "poolBatchNone": "Für diese Kette ist noch kein Live-Pool-Durchlauf gespeichert"
     },
     "recoLoop": {
       "title": "Reflexionsschleife für Aktienempfehlungen",

@@ -1640,6 +1640,35 @@ export interface SeedPoolOrigin {
    * 域外个股这条来源也发现不了 —— 面板不得把它读成「已覆盖全市场」。
    */
   mover: number;
+  /**
+   * 来自回灌清单（反思判定「本应入池」的漏检票，D-4）。
+   * 与 mover 分列：一个是当日最强，一个是事后反思的判断，混列就读不出池子被谁推动。
+   */
+  reflow: number;
+  /** 来自漏检核查直供（窗口达标但该链没推荐，事实而非判断）。 */
+  moverMiss: number;
+}
+
+/**
+ * 最近一批**实盘**候选池留痕（后端命令 `get_reco_pool_batch`，W4-3 2026-11-01）。
+ *
+ * 与 `seedPoolOrigin` 的分工：那边是「本次响应里各来源并入几条」，这边是「落库那一批
+ * 实际扫了多少只、池快照有没有留痕」—— W3 之后四个主策略扫的是全市场分桶，
+ * 那部分不在 `seedPoolOrigin` 里，只能从批次留痕读。
+ */
+export interface RecoPoolBatchInfo {
+  /** 批次时间（ISO 文本，与 `reco_pool_batches.generated_at` 同形） */
+  generatedAt: string;
+  /** 该批档位；cron 与时间旅行批写 "all" = 四档共用一份池 */
+  period: string;
+  /** 池内候选数（并集去重后） */
+  stockCount: number;
+  /** 写侧判定：池快照缺失或为空 */
+  degraded: boolean;
+  /** 用途（`live` 等），旧行可能为 null */
+  purpose: string | null;
+  /** false = 没有池快照原文（取数侧没给），与「池子是空的」不是同一件事 */
+  hasSnapshot: boolean;
 }
 
 /** 荐股接口响应 — 完整字段版 */

@@ -17362,7 +17362,12 @@
       "stylePolicy": "政策驅動",
       "styleTechnical": "技術面",
       "bannerAsOf": "数据截至 {{date}}",
-      "degradedStylesTitle": "降级策略风格"
+      "degradedStylesTitle": "降级策略风格",
+      "batchAgeDays": "{{days}} 天前",
+      "poolBatchCount": "本批候選池 {{size}} 檔",
+      "poolBatchEmpty": "本批候選池為空（確實沒有候選）",
+      "poolBatchNoSnapshot": "本批未留候選池快照（取數側沒給，不等於池為空）",
+      "poolBatchNone": "該鏈還沒有實盤候選池批次"
     },
     "recoLoop": {
       "title": "薦股反思閉環",

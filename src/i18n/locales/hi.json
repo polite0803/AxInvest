@@ -17113,7 +17113,12 @@
       "stylePolicy": "Policy Driven",
       "styleTechnical": "Technical",
       "bannerAsOf": "डेटा {{date}} तक",
-      "degradedStylesTitle": "डाउनग्रेड रणनीति शैली"
+      "degradedStylesTitle": "डाउनग्रेड रणनीति शैली",
+      "batchAgeDays": "{{days}} दिन पहले",
+      "poolBatchCount": "उम्मीदवार पूल: {{size}} स्टॉक",
+      "poolBatchEmpty": "इस बैच का उम्मीदवार पूल खाली है",
+      "poolBatchNoSnapshot": "इस बैच का पूल स्नैपशॉट दर्ज नहीं (खाली होने बराबर नहीं)",
+      "poolBatchNone": "इस श्रृंखला का कोई लाइव पूल बैच दर्ज नहीं"
     },
     "recoLoop": {
       "title": "स्टॉक-पिक रिफ्लेक्शन लूप",

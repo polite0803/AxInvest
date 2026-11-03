@@ -1630,9 +1630,6 @@ pub(crate) async fn run_serenity_screening_inner(
                     )
                     .await;
                 }
-                let mut detail_cache: std::collections::HashMap<String, serde_json::Value> =
-                    std::collections::HashMap::new();
-                let mut serenity_seed: Vec<(String, String, Option<String>)> = Vec::new();
                 // ── 逐档先验 + 置信灵敏度（口径统一，2026-10-02）──
                 // 本链原先把工作流 LLM 给的候选评分**直接落库**、`priorSource` 硬编码
                 // `absent` ⇒ 那个 confidence 是「候选有多符合瓶颈策略」的**评分**，不是

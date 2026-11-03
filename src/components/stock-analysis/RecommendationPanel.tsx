@@ -20,6 +20,7 @@ import type {
   PeriodKey,
   RecoBatchResponse,
   RecoPick,
+  RecoPoolBatchInfo,
   RecoResponse,
   StockConsensus,
   StyleKey,
@@ -71,12 +72,76 @@ function fmt(value: unknown, decimals = 2, fallback = FALLBACK): string {
   return value.toFixed(decimals);
 }
 
-/** 扫描时刻显示（load / loadCache / 同批切档共用，避免两处各写一份时区与精度） */
-function formatGeneratedAtText(generatedAtMs: number, lang: string): string {
-  return new Date(generatedAtMs).toLocaleTimeString(lang === "zh-CN" ? "zh-CN" : "en-US", {
+/**
+ * 批次时刻 = 日期 + 时分（W4-3，2026-11-01）。
+ *
+ * 为什么不再是「只有时分」：`03:49` 这种写法让**上一周的批次看着像刚刷新的**，而 PLAN W4
+ * 的验收点正是「面板不会把 10-31 的批次显示成 11-01」。年份带上而不是省略：跨年时
+ * `11-01` 与 `12-31` 谁新谁旧读不出来。
+ */
+function formatBatchTimeText(generatedAtMs: number, lang: string): string {
+  const d = new Date(generatedAtMs);
+  if (Number.isNaN(d.getTime())) { return ""; }
+  return d.toLocaleString(lang === "zh-CN" ? "zh-CN" : "en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/**
+ * 批次年龄（整天）。`<1 天` 与「未来时刻」（时钟偏差）都给 `null` ⇒ 不显示「0 天前」，
+ * 也不给负数；年龄只在「同一屏里这就是那批旧结果」时才添信息，同一天里它是噪声。
+ */
+function batchAgeDays(generatedAtMs: number, nowMs: number): number | null {
+  if (!Number.isFinite(generatedAtMs) || !Number.isFinite(nowMs)) { return null; }
+  const days = Math.floor((nowMs - generatedAtMs) / 86400000);
+  return days >= 1 ? days : null;
+}
+
+/** 候选池留痕的读结果三态：命令失败/形状不符 ⇒ `unknown`（不渲染任何声明，不伪装成「没有批次」）。 */
+type PoolBatchState =
+  | { kind: "unknown" }
+  | { kind: "none" }
+  | { kind: "row"; row: RecoPoolBatchInfo };
+
+function isPoolBatchRow(v: unknown): v is RecoPoolBatchInfo {
+  if (typeof v !== "object" || v === null) { return false; }
+  const o = v as Record<string, unknown>;
+  return typeof o.generatedAt === "string" && typeof o.stockCount === "number";
+}
+
+/** 候选池那一格要说的四句话（键名 = locales 里 `stockAnalysis.recommendation.*` 的后段）。 */
+type PoolBatchLineKind = "none" | "empty" | "noSnapshot" | "count";
+const POOL_BATCH_KEYS: Record<PoolBatchLineKind, string> = {
+  none: "poolBatchNone",
+  empty: "poolBatchEmpty",
+  noSnapshot: "poolBatchNoSnapshot",
+  count: "poolBatchCount",
+};
+
+/**
+ * 那一格到底说什么（纯函数，判据只此一处）。`null` = 什么都不显示。
+ *
+ * 为什么抽出来而不是内联在 JSX：回放态必须抑制这一格 —— 它读的是 `as_of_date IS NULL`
+ * 的最近一批，而回放态整屏讲的是某一天那一代的结果，不加限定并排就是把今天的池说成那天的池。
+ * 内联写法要验这条就得把整个面板渲染一遍，而渲染需要先把时间锚 store 摆成回放态 ⇒
+ * 测试文件会因此直接依赖别的 feature store（组件中立性门记成一条新的跨域耦合）。
+ * 判据落在纯函数上，四种缺席、契约漂移与回放抑制才能各自打在**同一个守卫**上做负控。
+ */
+export function poolBatchLineFor(state: PoolBatchState, isReplay: boolean):
+  | { kind: PoolBatchLineKind; size?: number }
+  | null
+{
+  // 读失败/形状不符 ⇒ 不下任何声明（面板不替后端编造「这个链还没有批次」）
+  if (state.kind === "unknown") { return null; }
+  if (isReplay) { return null; }
+  if (state.kind === "none") { return { kind: "none" }; }
+  if (!state.row.hasSnapshot) { return { kind: "noSnapshot" }; }
+  if (state.row.stockCount > 0) { return { kind: "count", size: state.row.stockCount }; }
+  return { kind: "empty" };
 }
 
 export function RecommendationPanel({ onOpenDataSourceSettings }: RecommendationPanelProps = {}) {
@@ -104,7 +169,10 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const [loading, setLoading] = useState(false);
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
-  const [generatedAtText, setGeneratedAtText] = useState<string>("");
+  // 批次时刻存**原始毫秒**而不是已格式化的串：年龄要按渲染时刻算，格式化只该发生在输出侧。
+  const [generatedAtMs, setGeneratedAtMs] = useState<number | null>(null);
+  // 最近一批实盘候选池留痕（W4-3）；`unknown` 是「还没读到/读失败」，不是「没有批次」。
+  const [poolBatch, setPoolBatch] = useState<PoolBatchState>({ kind: "unknown" });
   // 显示策略：挂载 + 切 period 时优先读缓存(上一次的荐股结果),
   // 只有用户点击"刷新"按钮才走 recommend_stocks 拉新数据
   const [isCached, setIsCached] = useState(false);
@@ -132,6 +200,27 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     backtestTriggeredRef.current = true;
     await startBacktestTask(() => invoke<TaskAccepted>("backtest_reco_strategies"));
   }, [startBacktestTask]);
+
+  // W4-3（2026-11-01）：候选池留痕的读路径。此前 `reco_pool_batches` 写了 307 行而荐股面板
+  // 一行都没读过 ⇒ 「这一批到底扫了多少只」在界面上无处可查，用户只能问「为什么老是那几个票」。
+  const fetchPoolBatch = useCallback(async () => {
+    try {
+      const v = await invoke<RecoPoolBatchInfo | null>("get_reco_pool_batch");
+      if (v === null || v === undefined) {
+        setPoolBatch({ kind: "none" });
+      } else {
+        // 形状不符 ⇒ unknown（不渲染声明）：把一次契约漂移读成「这个链还没有批次」是编故事
+        setPoolBatch(isPoolBatchRow(v) ? { kind: "row", row: v } : { kind: "unknown" });
+      }
+    } catch (e) {
+      console.warn("[RecommendationPanel] 候选池批次留痕读取失败（不显示该条）:", e);
+      setPoolBatch({ kind: "unknown" });
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchPoolBatch();
+  }, [fetchPoolBatch]);
 
   useEffect(() => {
     if (!backtestTaskResult) { return; }
@@ -176,6 +265,9 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       const batchResp = await invoke<RecoBatchResponse>("recommend_stocks_all_periods", { asOfDate });
       if (myToken !== reqTokenRef.current) { return; }
       setBatch(batchResp ?? null);
+      // 扫描命令内部先落库再返回 ⇒ 这一刻读到的批次留痕就是这一批的（放在任何提前返回
+      // 之前：出票为 0 恰恰是最需要「池子是什么」的一句）
+      void fetchPoolBatch();
       const r = batchResp?.byHorizon?.[period] ?? null;
       if (!r || !r.picks || Object.keys(r.picks).length === 0) {
         setData(r ?? null);
@@ -192,7 +284,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
         return;
       }
       setData(r);
-      setGeneratedAtText(formatGeneratedAtText(r.generatedAt, i18n.language));
+      setGeneratedAtMs(r.generatedAt);
       // 荐股成功后异步触发策略回测统计（fire-and-forget，不阻塞 UI）
       void triggerBacktest();
 
@@ -225,7 +317,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       setEmptyKind("connectionFailed");
     }
     if (myToken === reqTokenRef.current) { setLoading(false); }
-  }, [period, asOfDate, i18n.language, triggerBacktest]);
+  }, [period, asOfDate, i18n.language, triggerBacktest, fetchPoolBatch]);
 
   /**
    * 缓存加载入口。打开页面 / 切换 period 时调用,优先展示上一次的荐股结果
@@ -255,7 +347,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       setEmptyKind(null);
       setErrorDetail(null);
       setIsCached(false);
-      setGeneratedAtText(formatGeneratedAtText(inBatch.generatedAt, i18n.language));
+      setGeneratedAtMs(inBatch.generatedAt);
       return;
     }
     // 回放态**也有**可回读的代际：2026-10-13 裁定「回放候选同表落库、靠 as_of_date 分池」，
@@ -297,7 +389,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       setData(r);
       // 回放态读的是库里那一代，不是「上一次实盘」⇒ 不打缓存标签，只标该批的产生时刻
       setIsCached(anchorMode === "live");
-      setGeneratedAtText(formatGeneratedAtText(r.generatedAt, i18n.language));
+      setGeneratedAtMs(r.generatedAt);
     } catch (e: unknown) {
       console.error("[RecommendationPanel] loadCache failed:", e);
       if (myToken !== reqTokenRef.current) { return; }
@@ -458,6 +550,12 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
 
   const isReplay = anchorMode === "replay" && asOfDate !== null;
 
+  // 批次时刻 + 年龄在渲染期算：`Date.now()` 不进 state，每次重渲染自然刷新（切档/刷新都会重渲染）。
+  const batchTimeText = generatedAtMs === null ? "" : formatBatchTimeText(generatedAtMs, i18n.language);
+  const batchAge = generatedAtMs === null ? null : batchAgeDays(generatedAtMs, Date.now());
+  // 候选池那一格说什么，全部由纯函数判（四种缺席 + 契约漂移 + 回放抑制）
+  const poolLine = poolBatchLineFor(poolBatch, isReplay);
+
   return (
     <Card
       size="small"
@@ -470,11 +568,14 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       styles={{ body: { padding: "8px 10px" } }}
       extra={
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          {generatedAtText && (
-            <span className="text-[10px] text-gray-400">
+          {batchTimeText && (
+            <span className="text-[10px] text-gray-400" data-testid="reco-batch-time">
               {isCached
-                ? t("stockAnalysis.recommendation.cachedAt", { time: generatedAtText })
-                : t("stockAnalysis.recommendation.generatedAt", { time: generatedAtText })}
+                ? t("stockAnalysis.recommendation.cachedAt", { time: batchTimeText })
+                : t("stockAnalysis.recommendation.generatedAt", { time: batchTimeText })}
+              {batchAge !== null
+                ? ` · ${t("stockAnalysis.recommendation.batchAgeDays", { days: batchAge })}`
+                : ""}
             </span>
           )}
           {isCached && (
@@ -515,6 +616,26 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
         items={periodItems}
         style={{ marginBottom: 8 }}
       />
+
+      {
+        /* W4-3：候选池留痕。四种缺席各占一句 —— 「没跑过」「跑了但池未留痕」「池真的空」
+          「池 N 只」是四件事，折成两句就会把取数缺痕说成「那天没有候选」（同 0-C 裁定）。
+          `unknown`（读失败/形状不符）刻意什么都不显示：面板不替后端编造结论。
+          ⚠ 只在实盘态显示：这条读的是 `as_of_date IS NULL` 的最近一批，而回放态整屏讲的是
+          某一天那一代的结果 —— 并排而不加限定，就是把今天的池说成那天的池。
+          回放那一批的池视图在漏检核查面板（`load_pool_batches` 自带代际），不在这格。 */
+      }
+      {poolLine && (
+        <div
+          className="text-[10px] text-gray-400"
+          style={{ marginBottom: 6 }}
+          data-testid="reco-pool-batch"
+        >
+          {t(`stockAnalysis.recommendation.${POOL_BATCH_KEYS[poolLine.kind]}`, {
+            size: poolLine.size ?? 0,
+          })}
+        </div>
+      )}
 
       {/* 荐股反思闭环：数值回写权重的唯一入口（之前只在「回测 → 策略」矩阵底部）。 */}
       <div style={{ marginBottom: 8 }}>

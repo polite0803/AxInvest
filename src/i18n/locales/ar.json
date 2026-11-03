@@ -17113,7 +17113,12 @@
       "stylePolicy": "Policy Driven",
       "styleTechnical": "Technical",
       "bannerAsOf": "البيانات حتى {{date}}",
-      "degradedStylesTitle": "نمط استراتيجية التخفيض"
+      "degradedStylesTitle": "نمط استراتيجية التخفيض",
+      "batchAgeDays": "قبل {{days}} يومًا",
+      "poolBatchCount": "مجموعة المرشحين: {{size}} سهم",
+      "poolBatchEmpty": "مجموعة المرشحين في هذه الدفعة فارغة",
+      "poolBatchNoSnapshot": "لا لقطة للمجموعة في هذه الدفعة (لا تعني أنها فارغة)",
+      "poolBatchNone": "لم تُسجل أي دفعة مرشحين حقيقية لهذه السلسلة"
     },
     "recoLoop": {
       "title": "حلقة تأمل توصيات الأسهم",

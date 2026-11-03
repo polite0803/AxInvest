@@ -17113,7 +17113,12 @@
       "stylePolicy": "Policy Driven",
       "styleTechnical": "Technical",
       "bannerAsOf": "데이터 기준일 {{date}}",
-      "degradedStylesTitle": "폴백 전략 스타일"
+      "degradedStylesTitle": "폴백 전략 스타일",
+      "batchAgeDays": "{{days}}일 전",
+      "poolBatchCount": "후보 풀 {{size}} 종목",
+      "poolBatchEmpty": "이 배치의 후보 풀이 비어 있습니다",
+      "poolBatchNoSnapshot": "이 배치의 후보 풀 스냅샷이 기록되지 않았습니다(비움과는 다름)",
+      "poolBatchNone": "실거래 후보 풀 배치가 아직 없습니다"
     },
     "recoLoop": {
       "title": "종목 추천 성찰 루프",

@@ -17113,7 +17113,12 @@
       "stylePolicy": "Policy Driven",
       "styleTechnical": "Technical",
       "bannerAsOf": "Données arrêtées au {{date}}",
-      "degradedStylesTitle": "Style de stratégie dégradé"
+      "degradedStylesTitle": "Style de stratégie dégradé",
+      "batchAgeDays": "il y a {{days}} jours",
+      "poolBatchCount": "Pool de candidats : {{size}} actions",
+      "poolBatchEmpty": "Le pool de candidats est vide pour ce lot",
+      "poolBatchNoSnapshot": "Aucun instantané du pool pour ce lot (≠ pool vide)",
+      "poolBatchNone": "Aucun lot de candidats en réel enregistré pour cette chaîne"
     },
     "recoLoop": {
       "title": "Boucle de réflexion des recommandations",

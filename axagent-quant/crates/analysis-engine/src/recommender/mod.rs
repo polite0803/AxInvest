@@ -645,6 +645,10 @@ struct PreparedScan {
     /// W3b（2026-11-01）：价值桶的可用性判定。与 `strategy_seeds[&Value]` 分开存，因为
     /// 「回落基础池」这件事必须能被单独声明出来（`None` = 没有快照，连总体都没有）。
     value_bucket: Option<universe::ValueBucket>,
+    /// 本轮各策略输入的**并集**留痕（四档共用同一份，W4-3 2026-11-01）。
+    /// 在准备阶段算一次而不是逐档拼：四档必须留同一个池，且 `strategy_seeds` 是 HashMap，
+    /// 逐档重拼会让同批四行的 `seed_pool_json` 因迭代序而字节不同。
+    pool_snapshot: String,
     seed_pool_origin: SeedPoolOrigin,
     raw_seed_pool_size: usize,
     vars_map: HashMap<String, serde_json::Value>,
@@ -970,6 +974,9 @@ async fn prepare_scan(
         strategy_seeds.get(&Style::Capital).map_or(0, Vec::len),
         value_desc,
     );
+    // W4-3（2026-11-01）：并集留痕在**准备阶段**算一次 —— 四档共用同一个池，且桶来自 HashMap，
+    // 逐档重拼会让同批四行的 `seed_pool_json` 只因迭代序而字节不同（口径见 [`pool_snapshot_of`]）。
+    let pool_snapshot = pool_snapshot_of(&raw_seed, &seed, &strategy_seeds);
 
     // 3. 选定该 period 下的所有子策略（不再做 vendor 禁用检查——
     //    原本要求 "enabled_vendors" 至少覆盖一个 required vendor，但生产环境
@@ -1014,6 +1021,7 @@ async fn prepare_scan(
         raw_seed,
         strategy_seeds,
         value_bucket,
+        pool_snapshot,
         seed_pool_origin,
         raw_seed_pool_size,
         vars_map: template_vars.iter().cloned().collect(),
@@ -1030,6 +1038,45 @@ async fn prepare_scan(
         regime_bars,
         regime_mult,
     }
+}
+
+/// 候选池留痕 JSON 的**唯一构造点**：`[[code,name],…]`，按代码升序、去重。
+///
+/// 排序是判据的一部分，不是美化：调用方给的各段里含 HashMap 派生的桶（迭代序不稳定），
+/// 而这份串要进库参与「本批池子与上批是否相同」的比对 ⇒ 让它随迭代序抖会把
+/// 「池子真的变了」和「同一份池子换了个顺序」混成一件事。
+fn pool_snapshot_json(parts: &[&[SeedItem]]) -> String {
+    let mut pairs: Vec<(&str, &str)> = Vec::new();
+    for part in parts {
+        for (code, name, _) in part.iter() {
+            pairs.push((code.as_str(), name.as_str()));
+        }
+    }
+    pairs.sort();
+    pairs.dedup();
+    serde_json::to_string(&pairs.iter().map(|(c, n)| vec![*c, *n]).collect::<Vec<_>>())
+        .unwrap_or_default()
+}
+
+/// 本轮**实际扫过的候选并集**（落 `reco_picks.seed_pool_json` / `reco_pool_batches`）。
+///
+/// 为什么不再是 `seed`：W3（2026-11-01）之后 Trend/Reversion/Capital/Value 四个主策略各扫
+/// 自己的桶（`strategy_seeds`，来自全市场快照分桶），`seed` 只剩热榜/行业/用户标的合出的基础池。
+/// 继续只序列化 `seed` 会把「在桶里、被策略扫过并出了票」的票留痕成「不在池」，而漏检归因
+/// 正是拿这份 JSON 判 `in_pool`（`mover_recall::code_in_pool_snapshot`）。改造前的现网基线：
+/// 近 30 天 461 条真实 pick（`synthetic=0 AND as_of_date IS NULL`）**全部**落在自己的快照内
+/// （越界 0 行）⇒ 破坏这个性质的是 W3，所以这条并集是 W3 的配套修正，不是新特性。
+///
+/// 三段都要进来而不是只取桶：`raw_seed` 是 Watchlist 与合成兜底的输入，`seed` 是没配到桶时
+/// 风格的回落输入，桶是四个主策略的真实输入 —— 留痕要说的是「这一批扫过什么」。
+fn pool_snapshot_of(
+    raw_seed: &[SeedItem],
+    seed: &[SeedItem],
+    buckets: &HashMap<Style, Vec<SeedItem>>,
+) -> String {
+    let mut parts: Vec<&[SeedItem]> = vec![raw_seed, seed];
+    parts.extend(buckets.values().map(Vec::as_slice));
+    pool_snapshot_json(&parts)
 }
 
 /// 对**单个档位**执行策略扫描（消费已准备好的 [`PreparedScan`]）。
@@ -1547,14 +1594,10 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
             .map(|c| c.source.to_string())
             .unwrap_or_else(|| "live".to_string()),
         error_detail: None,
-        // P3 修复(2026-08-01): 落库快照用扫描实际使用的池（流动性过滤后 seed），
-        // command 层不再二次 build_seed_pool（避免快照与真实扫描不一致 + 浪费请求）。
-        seed_pool_snapshot: Some(
-            serde_json::to_string(
-                &seed.iter().map(|(c, n, _)| vec![c.as_str(), n.as_str()]).collect::<Vec<_>>(),
-            )
-            .unwrap_or_default(),
-        ),
+        // P3 修复(2026-08-01): 落库快照用扫描实际使用的池，command 层不再二次 build_seed_pool
+        // （避免快照与真实扫描不一致 + 浪费请求）。W4-3(2026-11-01)：口径从「流动性过滤后的
+        // seed」改为「本轮各策略输入的并集」，理由见 [`scanned_pool_snapshot`]。
+        seed_pool_snapshot: Some(prepared.pool_snapshot.clone()),
         scan_audit,
     };
     if use_cache {
@@ -1877,6 +1920,63 @@ mod tests {
         let m = parse_strategy_weights(&vars);
         assert!(m.is_empty());
     }
+
+    fn item(code: &str, name: &str) -> SeedItem {
+        (code.to_string(), name.to_string(), None)
+    }
+
+    /// W4-3 主判据：留痕必须是**并集**。只序列化 `seed` 的那版实现会把「只在桶里」的票
+    /// 留成「不在池」，而漏检归因正是拿这份 JSON 判 `in_pool`（W3 之后桶才是四个主策略的输入）。
+    #[test]
+    fn pool_snapshot_includes_bucket_only_candidates() {
+        let base = vec![item("600000", "浦发银行")];
+        let mut buckets: HashMap<Style, Vec<SeedItem>> = HashMap::new();
+        buckets.insert(Style::Trend, vec![item("300999", "桶内票")]);
+        let json = pool_snapshot_of(&base, &base, &buckets);
+        assert!(json.contains("300999"), "桶里的票必须进留痕，实际={json}");
+        assert!(json.contains("600000"), "基础池的票也要在，实际={json}");
+
+        // 消费侧闭环：漏检归因判 `in_pool` 用的就是这份 JSON（`mover_recall::code_in_pool_snapshot`）。
+        // 只断言「串里含该码」不够 —— 形态若与解析侧错开（键序/数组 vs 对象），归因会整批
+        // 读成「不在池」，而门与上面的断言都还是绿的。
+        assert_eq!(
+            crate::mover_recall::code_in_pool_snapshot_opt(Some(json.as_str()), "300999"),
+            Some(true),
+            "桶内票必须被归因判成在池"
+        );
+        assert_eq!(
+            crate::mover_recall::code_in_pool_snapshot_opt(Some(json.as_str()), "900000"),
+            Some(false),
+            "既不在池也不在桶的票才是不在池"
+        );
+    }
+
+    /// 升序 + 去重是判据的一部分而不是美化：`strategy_seeds` 是 HashMap，迭代序不稳定，
+    /// 而这份串进库参与「本批池子与上批是否相同」的比对 —— 让它随迭代序抖，就等于把
+    /// 「池子真的变了」和「同一份池子换了个顺序」混成一件事。
+    #[test]
+    fn pool_snapshot_is_sorted_deduped_and_order_independent() {
+        let overlap = vec![item("600000", "甲"), item("000001", "乙")];
+        let bucket = vec![item("300999", "丙")];
+        let mut m1: HashMap<Style, Vec<SeedItem>> = HashMap::new();
+        m1.insert(Style::Trend, bucket.clone());
+        m1.insert(Style::Capital, overlap.clone());
+        let mut m2: HashMap<Style, Vec<SeedItem>> = HashMap::new();
+        m2.insert(Style::Capital, overlap.clone());
+        m2.insert(Style::Trend, bucket.clone());
+        assert_eq!(
+            pool_snapshot_of(&[], &overlap, &m1),
+            pool_snapshot_of(&[], &overlap, &m2),
+            "同一份池子不得因桶的插入序不同而产出两份留痕"
+        );
+
+        let v: serde_json::Value =
+            serde_json::from_str(&pool_snapshot_of(&overlap, &overlap, &m1)).unwrap();
+        let rows = v.as_array().unwrap();
+        assert_eq!(rows.len(), 3, "raw_seed 与 seed 重叠，去重后应剩 3 只，实际={json}", json = v);
+        let codes: Vec<&str> = rows.iter().map(|r| r[0].as_str().unwrap()).collect();
+        assert_eq!(codes, vec!["000001", "300999", "600000"], "留痕必须按代码升序");
+    }
 }
 
 #[cfg(test)]
@@ -1898,9 +1998,7 @@ mod style_matrix_wiring_tests {
             let style = style_matrix::style_from_str(name)
                 .unwrap_or_else(|| panic!("排除名单里的 {name} 不是矩阵认识的风格名目"));
             assert!(
-                Period::ALL
-                    .iter()
-                    .any(|p| style_matrix::styles_for(*p).contains(&style)),
+                Period::ALL.iter().any(|p| style_matrix::styles_for(*p).contains(&style)),
                 "{name} 在矩阵里一格都没有，不该出现在排除名单里（幽灵排除项）"
             );
         }
@@ -1918,7 +2016,8 @@ mod style_matrix_wiring_tests {
                 v.sort();
                 v
             };
-            // 两侧同名目比较：矩阵里 `serenity` 映射到 `Style::Bottleneck`（SerenityStrategy::style() 同值）
+            // 两侧都取 `recommender_styles_for` ⇒ 排除项（serenity，2026-11-01 裁定）在同一条
+            // 判据的两边各只出现一次：不会出现「矩阵里剔了、构造表还留着」的半边绿。
             let mut built: Vec<String> = strategies_for_period(period)
                 .iter()
                 .map(|s| s.style().as_str().to_string())

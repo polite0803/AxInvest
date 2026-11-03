@@ -17113,7 +17113,12 @@
       "stylePolicy": "Policy Driven",
       "styleTechnical": "Technical",
       "bannerAsOf": "Данные на {{date}}",
-      "degradedStylesTitle": "Стиль стратегии деградации"
+      "degradedStylesTitle": "Стиль стратегии деградации",
+      "batchAgeDays": "{{days}} дн. назад",
+      "poolBatchCount": "Пул кандидатов: {{size}} бумаг",
+      "poolBatchEmpty": "Пул кандидатов в этом прогоне пуст",
+      "poolBatchNoSnapshot": "Снимок пула для этого прогона не записан (≠ пустой пул)",
+      "poolBatchNone": "У этой цепочки ещё нет прогона пула в реальном режиме"
     },
     "recoLoop": {
       "title": "Контур рефлексии рекомендаций",

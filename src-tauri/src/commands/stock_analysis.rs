@@ -4894,6 +4894,53 @@ pub async fn set_reco_board_scope(state: State<'_, AppState>, scope: String) -> 
         .map_err(|e| format!("保存扫描板块设置失败: {e}"))
 }
 
+/// 最近一批**实盘**候选池留痕（荐股面板用，W4-3 2026-11-01）。字段与 dao 的
+/// `reco_pool::PoolBatchLite` 一一对应，序列化走全站 camelCase。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoPoolBatchInfo {
+    pub generated_at: String,
+    /// 该批的档位；cron 与时间旅行写 `all`（四档共用一份池）
+    pub period: String,
+    pub stock_count: i32,
+    pub degraded: bool,
+    pub purpose: Option<String>,
+    /// `false` = 该批没有池快照原文（取数侧没给），与「池子是空的」不是同一件事
+    pub has_snapshot: bool,
+}
+
+/// 面板读「这一批候选池到底扫了多少只、有没有留痕」的唯一入口。
+///
+/// 为什么必须单独有一条读路径：`RecoResponse.seedPoolOrigin` 只给热榜/行业/用户标的/涨幅榜
+/// 各并入几条，而 W3（2026-11-01）之后四个主策略真正扫的是全市场**分桶** —— 那部分不在响应里。
+/// 于是面板能显示的只有「上次扫描 16:03」，用户问「为什么老是那几个票」时界面上没有任何一格
+/// 能回答；`reco_pool_batches` 写了 307 行、荐股面板一行都没读过。
+///
+/// 无入参：消费者就是荐股面板，链由 `RecoChain::Reco` 定死（值域唯一权威在 engine，
+/// 这里不抄字符串）。智选链自己有面板与归因入口，不经这条读。
+///
+/// 返回 `None` = 该链还没有实盘批次留痕 —— 与「有批次但 `hasSnapshot=false`（未留痕）」
+/// 「`stockCount=0`（池真的空）」是三种不同的缺席，面板必须各占一句（同 0-C 裁定）。
+#[tauri::command]
+pub async fn get_reco_pool_batch(
+    state: State<'_, AppState>,
+) -> Result<Option<RecoPoolBatchInfo>, ErrorResponse> {
+    let chain = axagent_analysis_engine::mover_recall::RecoChain::Reco.as_str();
+    let row = axagent_dao::repo::reco_pool::latest_live_pool_batch(state.harness.db(), chain)
+        .await
+        .map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("读取候选池批次留痕失败: {e}"))
+        })?;
+    Ok(row.map(|r| RecoPoolBatchInfo {
+        generated_at: r.generated_at,
+        period: r.period,
+        stock_count: r.stock_count,
+        degraded: r.degraded,
+        purpose: r.purpose,
+        has_snapshot: r.has_snapshot,
+    }))
+}
+
 /// 当日涨幅榜来源（第五来源，2026-10-20）：从 `market_daily_close` 取该交易日涨幅前 N 只。
 ///
 /// 为什么需要：候选池原本只有「热股 top50 ∪ 行业龙头 30 ∪ 内置样本 ∪ 用户标的」四源，

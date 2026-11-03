@@ -17446,7 +17446,12 @@
         "detailEmpty": "该轮暂无荐股记录"
       },
       "bannerAsOf": "数据截至 {{date}}",
-      "degradedStylesTitle": "降级策略风格"
+      "degradedStylesTitle": "降级策略风格",
+      "batchAgeDays": "{{days}} 天前",
+      "poolBatchCount": "本批候选池 {{size}} 只",
+      "poolBatchEmpty": "本批候选池为空（确实没有候选）",
+      "poolBatchNoSnapshot": "本批未留候选池快照（取数侧没给，不等于池为空）",
+      "poolBatchNone": "该链还没有实盘候选池批次"
     },
     "recoLoop": {
       "title": "荐股反思闭环",

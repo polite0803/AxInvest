@@ -1318,7 +1318,8 @@ fn build_asof_diff(input: &AsOfDiffInput<'_>) -> (mover_core::MissLayer, serde_j
         "pickedOtherPeriods": input.other_periods,
         "trimmedStyles": input.trimmed_styles,
         "degradedStyles": input.degraded_styles,
-        // 显式声明：本轮 as-of 回放刻意未含「分析定档」来源（防把已知漏检清单喂回池）。
+        // 结构性声明（2026-11-01 撤耦合裁定之后）：荐股链已**不存在**「分析定档」这条来源，
+        // 不再是「本轮刻意未喂」。留这个键是为了让落库的差异 JSON 自己说清那一代的池由什么构成。
         "analysisTierSourceIncluded": false,
         "liveLayer": input.live_layer,
         "divergedFromLive": layer.as_str() != input.live_layer,

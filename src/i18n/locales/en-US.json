@@ -17374,7 +17374,12 @@
         "detailEmpty": "No stock records for this round"
       },
       "bannerAsOf": "Data as of {{date}}",
-      "degradedStylesTitle": "Degraded Strategy Styles"
+      "degradedStylesTitle": "Degraded Strategy Styles",
+      "batchAgeDays": "{{days}} days ago",
+      "poolBatchCount": "Candidate pool: {{size}} stocks",
+      "poolBatchEmpty": "Candidate pool is empty for this batch",
+      "poolBatchNoSnapshot": "No pool snapshot recorded for this batch (not the same as an empty pool)",
+      "poolBatchNone": "No live candidate-pool batch recorded yet"
     },
     "recoLoop": {
       "title": "Stock-pick reflection loop",

@@ -49,10 +49,19 @@ function makePick(code: string, name: string) {
 function mockResponse(
   // `user`/`mover` 是后加的第四、第五来源（自选股 ∪ 本机标的 / 当日涨幅榜）。夹具缺它们
   // 会造出「undefined === 0 为假 ⇒ 预警不显示」的假失败，所以这里按生产形态补默认 0。
-  seedPoolOrigin: { hot: number; industry: number; fallback: number; user?: number; mover?: number },
+  seedPoolOrigin: {
+    hot: number;
+    industry: number;
+    fallback: number;
+    user?: number;
+    mover?: number;
+    reflow?: number;
+    moverMiss?: number;
+  },
   asofDegradations: Array<{ vendor: string; method: string; reason: string; kind: string }> = [],
 ) {
-  const origin = { user: 0, mover: 0, ...seedPoolOrigin };
+  // 默认值补齐 = 后端真实 serde 形状（`SeedPoolOrigin` 七个计数域全部必送，无 skip_serializing_if）
+  const origin = { user: 0, mover: 0, reflow: 0, moverMiss: 0, ...seedPoolOrigin };
   invokeMock.mockResolvedValue({
     period: "short",
     picks: { trend: [makePick("600001", "候选甲")] },

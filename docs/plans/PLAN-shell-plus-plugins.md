@@ -2977,3 +2977,49 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 3. **R4**：不得在 #113/#114 入库前跑 cargo；不得改 `harness/src/market_data.rs`（#113 正在改）。cargo 一律后台、日志独占 `.tmp/res100b1-*`；**禁止按镜像名杀进程**。
 4. 垫片一律 `pub use axagent_harness::<mod>::*;`（原文件保留不删，沿 #81 先例）；`astock-data/src/lib.rs` 只删 `NewsArchiveSink` 定义、`:430` 字段与 `with_news_archive_sink` 不动。
 5. 账（`scripts/capability-register.json` / `PLAN:513` / `PLAN:247`）由**我**在实现落地后同批重锚，执行者不许改 `scripts/**` 与 `docs/**`。
+
+## 62. #113 + #114 交付账（2026-11-03，报告 `.tmp/res113-114-debt-report.md`）
+
+> 执行：软件开发专家团 · 项目经理会话（委派通道三次被 hook 改写 ⇒ 自做自证，**无成员复核**）。我随后独立复扫了下表全部数字。
+
+### 62.1 交付面（`git diff --numstat` 由我复取）
+
+| 文件 | +/− | 关键锚点（`grep -n`） |
+|---|---|---|
+| `axagent-core/crates/harness/src/market_data.rs` | 4 / 7 | 4 个 fmt hunk（`:15` 导入字母序 + 三条「未实现」文案合一）；**文案逐字未动** |
+| `axagent-infra/crates/dao/src/repo.rs` | 1 / 0 | `pub mod trade;`（字母序位） |
+| `axagent-infra/crates/dao/src/repo/trade.rs` | 新增 55 行 / 2799 B | `exists_same_key :35`（六字段等值 + `.one()`，无 `order_by`/`limit`） |
+| `src-tauri/.../trading_engine_service.rs` | 16 / 13 | 调用点 `:247`；错误映射文案逐字不变 |
+| `src-tauri/.../workflow_run_service.rs` | 5 / 1 | 只换 `DatabaseConnection` 导入源（`axagent_dao` 根 `pub use sea_orm::DatabaseConnection`，类型不变） |
+
+提交：`f89b8994e`（代码）· `76bf55cfd`（PLAN §61 + K1 重锚）· `1dafdb354`（#127 引用修复）。
+
+### 62.2 我独立复扫的结果（不转述执行者）
+
+| 判据 | 命令 | 结果 |
+|---|---|---|
+| #113 格式 | `rustfmt --edition 2024 --check crates/harness/src/market_data.rs` | **EXIT=0 / 日志 0 字节** |
+| 其余四文件格式 | 逐 workspace `rustfmt --check` | 两个双文件调用均 **EXIT=0 / 0 字节** |
+| 分层门禁 | `node scripts/check-layer-discipline.mjs` | **EXIT=0**；`commands-no-direct-db 625（基线 628）`、`harness-fanout-zero 0` |
+| 语义等价 | 读 `trade.rs` + 两处 diff | 六列、六值、`.one()`、错误文案均与改前逐字一致；`TradeExecutionRequest` 六字段类型为 `String`/`f64`/`i32` ⇒ `&String→&str` 无隐式转换风险 |
+| 行尾 | `tr -cd '\r' \| wc -c` | 五文件全 0 |
+| 第五道门 | `check-capability-register.mjs` | **EXIT=0**（`k1RsFileCount = 2025` 已重锚） |
+| 单源事实门 | `check-single-source-facts.mjs` | **BROKEN/越界/空行/控制流 0**（原唯一一条 = `quote_watcher_service.rs` 引用 `workflow_run_service.rs:249` 空行，已按符号改指） |
+
+### 62.3 执行者纠正我的四条（全部成立）
+
+1. `dao/src/repo/mod.rs` **不存在**：dao 是 edition 2024 的 `repo.rs` + 同名目录；注册只能改 `repo.rs` 一行。**我追加授权**（原派单「`repo/` 下对应文件」写窄了）。
+2. `workflow_run_service.rs` 的 1 处命中是 `use sea_orm::DatabaseConnection;`，**不是查询**，无处可沉。执行者改从 `axagent_dao` 再导出点导入 —— 我复核 `dao/src/lib.rs:12` 确为 `pub use sea_orm::DatabaseConnection;` ⇒ **接受**，但登记为「规则 1 的字面量口径 ≠ 真实直连」的样本：该文件本就不发 SQL。
+3. `market_data.rs:12` 的字母序方向：rustfmt 要 `ConceptBlocks` 在前（`l` < `o`），我派单说反了。**接受**。
+4. `--update-baseline` 不影响退出码（`gateExit(over, …)`，`below` 只打印）⇒ 不改基线也能拿到 EXIT=0。**接受**，但见 62.4。
+
+### 62.4 我撤回了执行者没做、我自己试过的基线下调
+
+我跑了一次 `--update-baseline`，diff 除了 `commands-no-direct-db 628→625`，还把**并行批未提交**的 `serenity.rs 4→3`、`reflection.rs 35→33` 一起吃进基线 ⇒ 若那批回退就会造成假红。**已用 `git show HEAD:…` 还原**（未用 checkout），基线维持 628，下调债登记为 **#128**，等所有在飞批次提交后重做。
+
+### 62.5 未覆盖项（不许读成「已验证」）
+
+- `exists_same_key` **没有单测**：行为等价只有编译期与逐字对照证据，无运行时证据。
+- 未跑 `clippy -p axagent-dao`（它只作为依赖被 `Checking`，自身 lint 未过 `-D warnings`）。
+- 未跑全量 `cargo fmt --all --check` ⇒ **#19 是否整体解锁无结论**，只证明 `market_data.rs` 一个文件。
+- 主 crate clippy 那 18m58s 是**联合状态**的绿：同批并行修改的 `stock_analysis.rs` / `reco_pool.rs` / `recommender/mod.rs` / `register_commands.rs` 同在 `-p axagent` 编译面，不能归因为本批隔离绿。

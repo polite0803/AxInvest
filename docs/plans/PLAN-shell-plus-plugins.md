@@ -3251,3 +3251,10 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 **`#110`（半程）**：`git rm --cached` 移除 3 份已入库的 `adapter_model.json`，**工作区文件保留**，`.gitignore:175` 的目录规则自此生效（`git check-ignore` 已验证）。另一半（把 `output_dir` 从相对路径改成宿主 app-data 固定路径）是**写盘行为变更**，本轮未做，仍待微调面确认。提交 `e729d1455`。
 
 **W4-3 荐股池批次留痕（并行批，用户授权单独入库）**：`f57c76c22`（21 文件）。要点：池快照改为四档并集、按代码排序去重后在准备阶段算一次；`dao::reco_pool::latest_live_pool_batch` 只取实盘代且不投影池原文、保留 `has_snapshot`；宿主新增 `get_reco_pool_batch`；面板区分「无批次 / 无快照 / 池为空 / 有只数」四态；i18n 11 语言同步。**验证**：该批 clippy/test 已随 §64.9 全量面全绿；前端两条用例 16/16。另 `register_commands.rs` 的 `plugin_list_pages` 滞后单独提交 `710694efa`（生成物重新生成，与 W4-3 无关）。
+
+### 64.13 B2 开工前的现况读数（2026-11-04，`docs/audits/AUDIT-l1-blockers-2026-11-04.md`）
+
+- 股票反向阻塞 **124 处 / 22 文件**（H 桶 10 / 4 文件，合计 134 / 26 与旧 152 口径可比）；OPC 直接 Rust 阻塞 **0**；跨包口 **29 / 9**（全在 `opc_*`，归 #32/#36）。
+- **124 里有 13 处落在 `#[cfg(test)]` 块内**（审计脚本只剔行首注释、不剥测试块 —— 与 `check-*` 门的口径不同）：`conversations/compress.rs` 4、`conversations/mod.rs` 4、`tools/audit.rs` 2、`init/services.rs` 1、`fleet/mod.rs` 1、`tools/astock_data.rs` 1。这些是 **`AppState` 测试构造器**，要等 B6 摘六字段时随之消失，**不属于 B2 的改写面**。⇒ B2 的生产改写面 = **111 处**（不是 124）。
+- 审计仍按「124」出数（不剥测试块），本节只登记差集，**不改脚本口径**；B6 完成后测试构造器会自然消失，届时读数一次性下降，不需要「洗绿」动作。
+- B2 可直接换 harness 的候选（B1 已 `pub use` 垫片）：`init/services.rs:5047` 的 `MonitorConfig`、`:5059` 的 `AggregatorConfig`；其余同文件引用是 `RealtimeMonitor` / `TZeroCallback` / `TradingEngine` / `StockAdaptiveEngine` / `AStockClient` 等**实现类型**，换接缝属于 B4/B6（持有关系先改），不是单纯改 import。

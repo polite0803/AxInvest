@@ -2842,3 +2842,6 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 
 - 本轮把最后两条（`knowledge.vector` / `trajectory.store`）补齐三段 ⇒ 这八条入站查询接缝（`market.quote` / `jobs.store` / `workflow.run` / `trading.engine` / `stock.monitor` / `quote.watcher` / `knowledge.vector` / `trajectory.store`）的「契约 / 宿主 / 分派」**全部到位**，插件侧可调用面从六条涨到八条。
 - 已实测：#109 的 108 passed、#108 的 15 + 10 passed、#103 欠的 harness 双证。**未实测**：真实 embedding 链、FTS5 检索链、真库有数据时的读回形状、端到端「插件调接缝拿数据」（要跑起来的宿主 + 凭证）。⇒ 「编译过 + 单测绿」不等于「端到端通」，这四格在 #120/#121/#124 之前不许对外说成已验证。
+### 59.7 我自己造的一处险情（如实记账，别学）
+
+落 K1 账时用 `JSON.stringify(j, null, 2)` 重写镜像表 ⇒ 文件从 **976 行涨到 1926 行**：原表把 `planPinned` / `alsoAt` 这类对象**内联**写在一行，`stringify` 把它们全展开成多行。后果不是「难看」而是**按行引用当场腐烂** —— `PLAN:2626` 就明写「必须同批改 `scripts/capability-register.json:956` 行的 `seamId`/`faces`/`evidence`/`planAnchorText`」，展开后那一行不再在 `:956`。⇒ 已回退到旧格式（`git show HEAD~1:` 取原文覆盖）再改用**逐字符串替换**，改动全部「一行换一行」⇒ 净 diff `11/11`，`:956` 仍在原位（已复扫），锚点回写改用 `--repin-code --apply`（它本就是外科式改法）。判据与 §58.5-1 同族：**重写整份序列化 ≠ 最小改动**，凡有人按行引用这张表，就只能做等行数替换。

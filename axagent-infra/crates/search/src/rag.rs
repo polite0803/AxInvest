@@ -2760,6 +2760,8 @@ pub async fn collect_rag_context_with_pipeline_from_refs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // 显式引入（glob 已能带进来，但这里用它写 `impl AsyncEmbedFn`，写明来源更稳）。
+    use async_trait::async_trait;
 
     #[test]
     fn test_extract_surrounding_lines() {
@@ -3153,5 +3155,158 @@ mod tests {
         let out = fold_entity_graph_context(&graph, &[]);
         assert_eq!(out.len(), 1, "空白 context_text 必须被过滤");
         assert!(out[0].contains("宁德时代"), "有内容的 context_text 必须原样透出");
+    }
+
+    // ── B-1（仓库 #120）：`min_score` 的检索级回归 ──────────────────────────
+    //
+    // 接缝侧的单测只钉「`min_similarity` 原样透传」，钉不住「检索层真的按阈值筛」。
+    // 下面这条测试走宿主 `search_knowledge_with_doc_filter` **同一条**函数
+    // （[`search_with_filter`]）：真实 sqlite-vec 表 + 真实 L2 距离，只有 embedding
+    // 由固定函数代替（测试里没有模型凭证）。
+    //
+    // 四条向量到查询向量 `[0, 0]` 的 L2 距离是 2/4/6/8 ⇒ 相关度 0.9/0.8/0.7/0.6
+    // （`DEFAULT_MAX_L2_DISTANCE = 20`）。融合算法取 weighted + `bm25_weight = 0`，
+    // 让 `combined_score` 落在**绝对标尺**上，断言不会被 RRF 的排名派生分掩盖。
+
+    /// 固定 query embedding = `[0, 0]`：让 sqlite-vec 的 L2 距离等于记录向量的首维。
+    #[derive(Clone)]
+    struct FixedQueryEmbed;
+
+    #[async_trait]
+    impl AsyncEmbedFn for FixedQueryEmbed {
+        async fn generate(
+            &self,
+            _db: &DatabaseConnection,
+            _master_key: &[u8; 32],
+            _embedding_provider: &str,
+            texts: Vec<String>,
+            _dimensions: Option<usize>,
+        ) -> Result<axagent_harness::types::EmbedResponse> {
+            Ok(axagent_harness::types::EmbedResponse {
+                embeddings: texts.iter().map(|_| vec![0.0f32, 0.0f32]).collect(),
+                dimensions: 2,
+            })
+        }
+    }
+
+    /// 最小 RAG 源：只给集合前缀与固定 provider 名，不读任何宿主表。
+    struct FixedSource;
+
+    #[async_trait]
+    impl RAGSource for FixedSource {
+        fn collection_prefix(&self) -> &'static str {
+            "t"
+        }
+
+        fn context_label(&self) -> &'static str {
+            "Test"
+        }
+
+        async fn resolve_embedding_provider(
+            &self,
+            _db: &DatabaseConnection,
+            _container_id: &str,
+        ) -> Result<String> {
+            Ok("test::fixed".into())
+        }
+    }
+
+    async fn memory_db() -> DatabaseConnection {
+        // ⚠ 同 `ast_index.rs` 的测试约定：`sqlite::memory:` 必须 `max_connections(1)`，
+        // sqlx 每条池连接各持一份内存库。
+        let mut opt = sea_orm::ConnectOptions::new("sqlite::memory:");
+        opt.max_connections(1).min_connections(1).sqlx_logging(false);
+        sea_orm::Database::connect(opt).await.expect("测试：打开内存数据库应成功")
+    }
+
+    async fn search_with_min_score(
+        db: &DatabaseConnection,
+        store: &VectorStore,
+        cfg: &axagent_harness::rag_config::HybridConfig,
+        min_similarity: Option<f32>,
+    ) -> Vec<VectorSearchResult> {
+        search_with_filter(
+            &FixedSource,
+            db,
+            &[0u8; 32],
+            store,
+            "kb1",
+            // 关键词侧不打中任何正文（正文是中文），把结果集限定在向量召回这一路。
+            "zzzzquery",
+            10,
+            Some(2),
+            FixedQueryEmbed,
+            None,
+            None,
+            Some(cfg),
+            min_similarity,
+        )
+        .await
+        .expect("检索应成功")
+    }
+
+    #[tokio::test]
+    async fn min_similarity_really_filters_results_on_the_retrieval_path() {
+        crate::vector_store::register_sqlite_vec_for_tests();
+        let db = memory_db().await;
+        let store = VectorStore::new(db.clone());
+        let collection = collection_id(FixedSource.collection_prefix(), "kb1");
+
+        store.ensure_collection(&collection, 2).await.expect("建集合应成功");
+        for (i, distance) in [2.0f32, 4.0, 6.0, 8.0].into_iter().enumerate() {
+            store
+                .add_single_chunk(
+                    &collection,
+                    &format!("doc-{i}"),
+                    &format!("第{i}条正文"),
+                    &[distance, 0.0],
+                )
+                .await
+                .expect("写入向量应成功");
+        }
+
+        let cfg = axagent_harness::rag_config::HybridConfig {
+            enabled: true,
+            vector_weight: 1.0,
+            bm25_weight: 0.0,
+            sparse_weight: 0.0,
+            fusion: "weighted".into(),
+            rrf_k: 60.0,
+        };
+
+        // 基线：阈值缺省 ⇒ 不过滤（四条按距离升序回来）。
+        let unfiltered = search_with_min_score(&db, &store, &cfg, None).await;
+        assert_eq!(unfiltered.len(), 4, "min_similarity=None 不得过滤");
+        assert!(
+            unfiltered.windows(2).all(|w| w[0].score <= w[1].score),
+            "检索层应保持「距离小的在前」：{:?}",
+            unfiltered.iter().map(|r| r.score).collect::<Vec<_>>()
+        );
+
+        // ① 全部高于阈值：0.55 < 最低相关度 0.6 ⇒ 四条全留。
+        let all_above = search_with_min_score(&db, &store, &cfg, Some(0.55)).await;
+        assert_eq!(all_above.len(), 4, "阈值低于全部相关度时不得丢结果");
+
+        // ② 全部低于阈值：0.95 > 最高相关度 0.9 ⇒ 空数组，**不是错误**。
+        let all_below = search_with_min_score(&db, &store, &cfg, Some(0.95)).await;
+        assert!(all_below.is_empty(), "阈值高于全部相关度时必须返回空集");
+
+        // ③ min_score = 0 等价于不过滤：量纲下界就是「全留」。
+        let zero_floor = search_with_min_score(&db, &store, &cfg, Some(0.0)).await;
+        assert_eq!(zero_floor.len(), 4, "下限 0 不得过滤（曾出现 None/0 语义倒置）");
+
+        // ④ 真的筛得动：0.75 恰好把 0.7 / 0.6 挡在外面，留下 0.9 / 0.8。
+        let split = search_with_min_score(&db, &store, &cfg, Some(0.75)).await;
+        let ids: Vec<&str> = split.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, ["doc-0_0", "doc-1_0"], "阈值必须按相关度切，且保留者按距离升序");
+        for hit in &split {
+            // 视图里的 `score` 是距离（`1 - combined_score`），阈值比的是相关度。
+            assert!(
+                (1.0 - hit.score) >= 0.75 - 1e-6,
+                "留下的命中相关度必须 >= 阈值，实得 {}（id={}）",
+                1.0 - hit.score,
+                hit.id
+            );
+        }
     }
 }

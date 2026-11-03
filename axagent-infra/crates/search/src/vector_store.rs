@@ -95,6 +95,19 @@ pub fn register_sqlite_vec_extension() {
 // agent crate 的 `retry_policy.rs`。
 pub use axagent_harness::vector_store::{EmbeddingRecord, HnswConfig, VectorSearchResult};
 
+/// 测试专用：进程内**只注册一次** sqlite-vec 自动扩展。
+///
+/// `sqlite3_auto_extension` 是进程级全局状态，只在「注册之后打开」的连接上生效；
+/// 同一测试二进制里多个测试模块都要用 vec0 时必须共用这一个 `Once`，否则重复注册会让
+/// 后续连接的扩展初始化跑两遍。生产路径不走这里（由 `init/database.rs` 在开池前调用
+/// [`register_sqlite_vec_extension`]）。
+#[cfg(test)]
+pub(crate) fn register_sqlite_vec_for_tests() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(register_sqlite_vec_extension);
+}
+
 /// Vector store for knowledge base embeddings.
 ///
 /// Backend-agnostic facade over two implementations selected at runtime by the
@@ -490,6 +503,31 @@ impl VectorStore {
         }
 
         self.registry_get_dimensions_pragma(collection_id).await
+    }
+
+    /// 集合是否存在的**权威读口**（与 [`Self::get_collection_dimensions`] 解耦）。
+    ///
+    /// 为什么需要独立读口：维度读口返回 `None` 有两种来源 ——
+    /// ①集合根本不存在；②集合存在但维度读不出来（注册表行缺失且 SQLite pragma 解析失败，
+    /// 或 `clear_embeddings` 在维度未知时只把旧 vec0 表改名、`_meta` 与注册表行仍在）。
+    /// 接缝 `get_collection_info` 的 `exists` 与 `dimensions` 是两个独立字段，必须把这两格
+    /// 分开报；此前的「有维度即存在」会让 ② 被误报成 ①。
+    ///
+    /// 判据取「任一证据存在」：注册表行 / vec0 物理表 / `_meta` 物理表。三者都不在才是
+    /// 「不存在」。只看物理 vec 表会漏掉 `clear_embeddings` 失败后「元数据仍在」的那一格，
+    /// 只看注册表会漏掉注册表之前就存在的旧集合（`ensure_collection` 的兼容分支）。
+    pub async fn collection_exists(&self, collection_id: &str) -> Result<bool> {
+        validate_collection_name(collection_id)?;
+
+        if self.registry_get_collection(collection_id).await.is_some() {
+            return Ok(true);
+        }
+
+        let name = Self::validated_collection_name(collection_id)?;
+        if self.table_exists(&name).await? {
+            return Ok(true);
+        }
+        self.table_exists(&format!("{name}_meta")).await
     }
 
     /// Prepare collection for (re)indexing: if dimensions match, does nothing;
@@ -2123,5 +2161,82 @@ mod tests {
         assert!(VectorStore::is_valid_collection_id("mem_namespace_1"));
         assert!(!VectorStore::is_valid_collection_id("kb'; DROP TABLE--"));
         assert!(!VectorStore::is_valid_collection_id(""));
+    }
+
+    // ── B-2（仓库 #122）：集合存在性与维度解耦 ──────────────────────────────
+
+    async fn memory_db() -> DatabaseConnection {
+        // ⚠ 与同 crate 其它测试同一约定：`sqlite::memory:` 必须 `max_connections(1)`。
+        let mut opt = sea_orm::ConnectOptions::new("sqlite::memory:");
+        opt.max_connections(1).min_connections(1).sqlx_logging(false);
+        let db = sea_orm::Database::connect(opt).await.expect("测试：打开内存数据库应成功");
+        // 生产库的 `vec_collections` 注册表由 dao 迁移建；本 crate 不依赖 dao，
+        // 这里按注册表读写用到的列补一份最小 DDL（否则 `ensure_collection` 的注册写入
+        // 会被静默跳过，维度读口恒 None —— 那是「前提不成立」，不是被测行为）。
+        exec(
+            &db,
+            "CREATE TABLE vec_collections (\n  \
+             collection_id TEXT PRIMARY KEY,\n  \
+             dimensions INTEGER NOT NULL DEFAULT 0,\n  \
+             embedding_model TEXT,\n  \
+             index_type TEXT NOT NULL DEFAULT 'flat',\n  \
+             hnsw_ef_construction INTEGER,\n  \
+             hnsw_m INTEGER,\n  \
+             hnsw_ef_search INTEGER,\n  \
+             vector_count INTEGER NOT NULL DEFAULT 0,\n  \
+             created_at INTEGER NOT NULL DEFAULT 0,\n  \
+             updated_at INTEGER NOT NULL DEFAULT 0,\n  \
+             last_indexed_at INTEGER,\n  \
+             metadata TEXT\n)",
+        )
+        .await;
+        db
+    }
+
+    async fn exec(db: &DatabaseConnection, sql: &str) {
+        use sea_orm::{ConnectionTrait, DbBackend, Statement};
+        db.execute_raw(Statement::from_string(DbBackend::Sqlite, sql.to_string()))
+            .await
+            .expect("测试：DDL 应成功");
+    }
+
+    #[tokio::test]
+    async fn collection_exists_separates_absent_from_unknown_dimensions() {
+        register_sqlite_vec_for_tests();
+        let db = memory_db().await;
+        let store = VectorStore::new(db.clone());
+
+        // ① 查无 ⇒ false；维度读口同样是 None（两者在这一格一致）。
+        assert!(!store.collection_exists("kb-absent").await.expect("空库读存在性应成功"));
+        assert!(
+            store.get_collection_dimensions("kb-absent").await.expect("读维度应成功").is_none()
+        );
+
+        // ② 正常集合 ⇒ exists true + dims Some。
+        store.ensure_collection("kb-1", 2).await.expect("建集合应成功");
+        assert!(store.collection_exists("kb-1").await.expect("读存在性应成功"));
+        assert_eq!(store.get_collection_dimensions("kb-1").await.expect("读维度应成功"), Some(2));
+
+        // ③ 「存在但维度未知」：把 vec0 表与注册表行都去掉，只留 `_meta`
+        // （等价于 `clear_embeddings` 在维度读不出来时改名旧表后的形态）。
+        exec(&db, "DROP TABLE vec_kb_1").await;
+        exec(&db, "DELETE FROM vec_collections WHERE collection_id = 'kb-1'").await;
+        assert!(
+            store.get_collection_dimensions("kb-1").await.expect("读维度应成功").is_none(),
+            "前提：这一格维度确实读不出来（否则下面的断言没意义）"
+        );
+        assert!(
+            store.collection_exists("kb-1").await.expect("读存在性应成功"),
+            "元数据表还在 ⇒ 集合存在，不能被报成不存在"
+        );
+
+        // ④ 只有 vec0 表、没有 `_meta`（部分写入的残缺态）也应算存在 —— 任一证据即可。
+        store.ensure_collection("kb-2", 2).await.expect("建第二个集合应成功");
+        exec(&db, "DROP TABLE vec_kb_2_meta").await;
+        assert!(store.collection_exists("kb-2").await.expect("读存在性应成功"));
+
+        // ⑤ 非法集合名与维度读口同口径：`Err(Validation)`，不静默返 false。
+        let err = store.collection_exists("kb'; DROP TABLE--").await.expect_err("非法名应拒收");
+        assert!(matches!(err, AxAgentError::Validation(_)), "应为 Validation：{err:?}");
     }
 }

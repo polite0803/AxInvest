@@ -409,20 +409,22 @@ impl KnowledgeVectorProvider for HostKnowledgeVector {
     /// 集合不存在 ⇒ `Ok` + `exists = false` + `dimensions = null`，**不是错误**（契约「查无即
     /// null」口径，插件据此先探再写）。
     ///
-    /// ⚠ 宿主只有一把尺子：`get_collection_dimensions` 返 `Option<usize>`，「集合不存在」与
-    /// 「集合存在但没绑定 embedding 模型」在它身上**不可区分**。本批按「有维度即存在」判，
-    /// 于是后者那一格会被读成 `exists = false`（一个保守的假阴，不会让插件误写）—— 已在交回
-    /// 报告里点名请 leader 裁定是否接受，或另给一个「集合存在」的权威读口。
+    /// ⚠ 宿主有**两把尺子**，本层不许把它们合成一把：
+    /// - `exists` 取 [`VectorStore::collection_exists`]（注册表行 / vec0 表 / `_meta` 表任一存在）；
+    /// - `dimensions` 取 `get_collection_dimensions`（注册表或 pragma 能读出维度时才有值）。
+    ///
+    /// 此前按「有维度即存在」判，会把「集合存在但维度未知」（注册表行缺失且 pragma 解析失败，
+    /// 或 `clear_embeddings` 在维度未知时只改名旧 vec0 表）误报成 `exists = false` —— 这正是
+    /// 仓库 #122 的缺口。契约形状不变：`exists` / `dimensions` 本来就是两个字段。
     async fn collection_info(&self, collection_id: &str) -> Result<CollectionInfoView> {
-        let dimensions = self
-            .vector_store
-            .get_collection_dimensions(&physical_collection_id(collection_id))
-            .await?;
+        let physical = physical_collection_id(collection_id);
+        let dimensions = self.vector_store.get_collection_dimensions(&physical).await?;
+        let exists = self.vector_store.collection_exists(&physical).await?;
         Ok(CollectionInfoView {
             collection_id: collection_id.to_string(),
             // 契约保持 `u32`（PLAN §58.3-2：不收宽），这一次 `as u32` 是预期转换不是缺陷。
             dimensions: dimensions.map(|dims| dims as u32),
-            exists: dimensions.is_some(),
+            exists,
         })
     }
 }
@@ -729,5 +731,29 @@ mod tests {
             .await
             .expect_err("NaN 阈值应被显式拒掉");
         assert!(matches!(err, AxAgentError::Validation(_)));
+    }
+
+    /// sqlite-vec 是进程级自动扩展，且必须在打开连接之前注册（生产由 `init/database.rs` 做）。
+    fn register_sqlite_vec_once() {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(axagent_search::vector_store::register_sqlite_vec_extension);
+    }
+
+    /// #122 的线级判据：物理集合在 ⇒ `exists=true`，且 `dimensions` 独立读数。
+    #[tokio::test]
+    async fn collection_info_reports_present_collection_with_dimensions() {
+        register_sqlite_vec_once();
+        let provider = provider_on_empty_db().await;
+        let physical = physical_collection_id("kb-present");
+        provider.vector_store.ensure_collection(&physical, 2).await.expect("建集合应成功");
+
+        let view = provider.collection_info("kb-present").await.expect("集合在，不该 Err");
+        assert!(view.exists, "物理表在 ⇒ exists 必须为 true");
+        assert_eq!(view.dimensions, Some(2));
+
+        // 反向：查无仍是 false + null —— 同一条读口不能把「不存在」也说成存在。
+        let absent = provider.collection_info("kb-absent").await.expect("查无不是错误");
+        assert!(!absent.exists);
+        assert_eq!(absent.dimensions, None);
     }
 }

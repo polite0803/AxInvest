@@ -3183,3 +3183,23 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 - 本轮是在**含并行批未提交工作区**的状态下跑的（`stock_analysis.rs` 等 21 个文件）。它们既参与编译也被测到 ⇒ 「红/绿」是**联合态**，不能单独归因给本批已提交的改动；反过来也说明这些未提交文件在门禁口径下可编译、可测。
 - CI 的 `pg_migrations` / `pg_integration` / `pg_upsert_bare_column` 是**独立 Postgres job**，本机无 PG 实例 ⇒ 不在本次终验范围（沿用 CI 跑）。
 - `nextest` 本机未安装，用 CI 同义命令 `cargo test --workspace --no-fail-fast` 跑同一测试面；`--no-fail-fast` 保证一次暴露全部失败而非首错短路。
+
+### 64.10 §54.2 R1 第二批裁定：不做通用 `domain.store` KV（2026-11-03，解除 #35 的「不可开工」闸门）
+
+**背景**：§54.2 R1 把域数据落库通道拆成两批，第一批（`session.store` 半截接缝）已由 #102 收口为 **host-internal**；第二批 `domain.store` 一直没有裁定，而 R1 原文写明「未裁定完之前 #35 视为不可开工」。
+
+**机械读数（`commands/stock_analysis.rs`，2026-11-03）**：
+- `state.harness.db()` **100 处**；写操作（`insert` / `update` / `delete_by_id`）**42 处**、读（`::Entity::find`）**43 处**，其余为传 `&db` 给 repo / 引擎函数。
+- 直连实体 **13 张**：`stock_analyses` · `watchlist_items` · `portfolio_holdings` · `trades` · `price_alerts` · `stock_reflections` · `stock_evolution_history` · `strategy_performance` · `financial_snapshots` · `reco_picks` · `decision_validations` · `settings` · `workflow_template`。
+- **仅经 `axagent_dao::repo` 访问另有 7 张**（3 张与上面重合）：`mover_recall_runs` · `mover_recall_events` · `reco_pool` · `reco_seed` · `stock_execution_reflections` · `stock_lesson_queries` · `workflow_param_changes`。
+- ⇒ 并集**实测 20 张表**（§54.2 R1 原文写「≥14 张」偏保守，按上表更正）；台面比原估更宽，正是不该做通用 KV 的直接理由。
+
+**裁定**：
+1. **不建通用 `domain.store` KV 桶，也不做「按表名 + 任意 JSON」的 CRUD 通道。** 20 张表里有外键/同成约束（`portfolio_holdings` → `trades`、`stock_analyses` → `stock_reflections`/`strategy_performance`）与增量语义（`reco_pool` 批次、`workflow_param_changes` 状态机），通用桶只能表达「按主键存取一行」，既守不住同成性，也会把表结构变成插件可猜的隐式协议。
+2. **域数据通道 = 按域命名的显式类型化 op 接缝**（与既有 6 条同形：`market.quote` 37 op / `jobs.store` / `trading.engine` 6 op / `stock.monitor` 9 op / `quote.watcher` 3 op / `knowledge.vector` / `trajectory.store`）。每个 op 满足三条硬约束：① 入参/出参 DTO 定义在 `axagent-harness`（ORM 不过线）；② 装在每个 op 的分派支上带 **op 级权限**（#87 的机制，不新造）；③ 只暴露 B4 清点出的**必需 op**，不按表做 CRUD 全展开 —— 需要哪几个动作就声明哪几个（`upsert_alert` 先例）。
+3. **数据仍留在宿主那一个 DB 文件里，插件卸载不删域数据。** 理由：用户的分析/自选/持仓历史不能随插件卸载蒸发；单文件仍是备份与迁移的单位；拆成「插件自有 DB」会引出跨库 join 与存量数据搬迁，收益不抵成本。`schema_version` 校验收敛为**每个域接缝一个版本常量**（随 DTO 演进递增，宿主拒收未知版本），不做「每命名空间一张版本表」。
+4. **B4 必须先产出「op 清单」再动手搬本体**：以本节的 20 张表为底，逐条标「宿主继续持有（`settings` / `workflow_template` 这类宿主也要读的）/ 走域接缝 / 随插件整体迁出后不再被宿主读」三档；清单未出之前，B5/B6/B7 不得开工（避免又出现「接缝建了但没人调」的半条链）。
+
+**与 §54.2 R1 原文的关系**：R1 原文的方向是「命名空间白名单 + 每命名空间声明 DTO 类型名与 schema_version + 宿主按注册类型校验后才落库」。本节保留「白名单 / DTO 类型 / 版本校验」三项实质，但把载体从**一张通用 KV**改成**显式类型化 op**：白名单退化为「接缝 op 表」（本来就必须登记，见 §38 第五道门），DTO 类型即 op 的入参/出参，版本校验落在接缝常量上。R1 原文担心的「ORM 不过线」与「表级类型约束」因此由编译器与门禁两侧保证，而不是靠运行时嗅探 JSON。
+
+**状态**：R1 第一、二批均已裁定 ⇒ **#35 的「不可开工」闸门解除**。⚠ 但 #35 的 B2 实际执行仍卡在 `commands/stock_analysis.rs`（并行批未提交的 W4-3 改动占用该文件，逐行改写会与他人未提交工作混提交）——**闸门解除 ≠ 现在可改那个文件**。

@@ -3238,3 +3238,16 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 5. **六处跨表同成性必须合成单个 op**（拆开就会丢原子性）：`mover_recall_runs+events`（已有事务）、`financial_snapshots` 删窗+插、`price_alert` 查改写、`stock_evolution_approval` 取 latest→CAS→插 accepted→驳旧 accepted、`reco_picks+reco_scan_audit+reco_pool_batches`（现状已非原子，op 化至少别再加宽窗口）、`reflection` 抢占 running + 建行。
 
 **未做**：未改任何代码（B2 仍卡 `commands/stock_analysis.rs` 的并行批未提交改动）；未跑 `audit-l1-blockers.mjs`（本节只做归属与 op 清单，不重算桶读数）；`stock_management`/`reco_scan_audit` 等未被 §64.10 列出的表未纳入（待 B4 全量扫描再补）。
+
+### 64.12 `#105` / `#110`（半程）/ `#111` 与 W4-3 批次入库（2026-11-04）
+
+**`#105` 监控读数收口 harness**：删掉命令层本地 `MonitorStatusDto`，改 `use axagent_harness::stock_monitor::MonitorStatusView as MonitorStatusDto;` —— 九个键与 camelCase 序列化逐字不变，前端零改动（类型注释同步改指 harness）。**R12 同时收紧**：原判据只比「当前那一份」的键，命令层若再抄一份结构体会静默通过；新判据三条一起判：① harness `MonitorStatusView` 键 = 前端 `MonitorStatus` 键；② 命令层不得再出现 `pub struct MonitorStatusDto`；③ 命令层必须出现 `MonitorStatusView as MonitorStatusDto` 别名引用。**验证**：`check-monitor-event-authority.mjs --selftest` **81/81**（新增两条负控：重抄结构体 / 未切别名）；判定 **R12（9）** 绿；`cargo clippy -p axagent --all-targets --all-features -- -D warnings` **EXIT=0（13m48s）**；`rustfmt --check` 与 `dprint check` 均 0。提交 `e4fa74fa3`。
+
+**`#111` 本机 Vitest（根因与修复，不是「换本地副本」）**：两处叠加 ——
+① **vite 8 默认 `bundle`（rolldown）配置加载器**在 VMware 共享目录上把配置里的 `root` / `import.meta.dirname` 解析成畸形串 `Z: Folders/D/OneManager/AxInvest`。二分判据：0–1 个真实插件正常、**≥2 个真实插件必现**；`--root` 显式指定也压不住；`--configLoader native` 正常。
+② `scripts/vitest-run.mjs` 的 `realpathSync.native` 把网络映射盘 D: 解析成 UNC 再 `chdir`，root 变 `//vmware-host/...`，同样收集不到用例。
+**修复**：vitest-run 只在盘符大小写上规范化（不跟随 UNC），并强制注入 `--configLoader native`；`ci-check.mjs` 的 Vitest 门从「UNC 显式失败」改为走同一入口（UNC 与本地盘同一条路）。**验证（全部从 D: 共享盘实跑）**：`ci.workflow.test.ts` 25/25；W4-3 两条面板用例 16/16；`ScreenerToWorkspace.integration` 5/5；全量套件跑通第一部分后仍受本机 I/O 影响出现集成用例超时（同一用例单独复跑 5/5 通过）⇒ **路径问题已解，剩余是并行负载下的超时 flake**，不作为门禁结论。提交 `31e60d21d`。
+
+**`#110`（半程）**：`git rm --cached` 移除 3 份已入库的 `adapter_model.json`，**工作区文件保留**，`.gitignore:175` 的目录规则自此生效（`git check-ignore` 已验证）。另一半（把 `output_dir` 从相对路径改成宿主 app-data 固定路径）是**写盘行为变更**，本轮未做，仍待微调面确认。提交 `e729d1455`。
+
+**W4-3 荐股池批次留痕（并行批，用户授权单独入库）**：`f57c76c22`（21 文件）。要点：池快照改为四档并集、按代码排序去重后在准备阶段算一次；`dao::reco_pool::latest_live_pool_batch` 只取实盘代且不投影池原文、保留 `has_snapshot`；宿主新增 `get_reco_pool_batch`；面板区分「无批次 / 无快照 / 池为空 / 有只数」四态；i18n 11 语言同步。**验证**：该批 clippy/test 已随 §64.9 全量面全绿；前端两条用例 16/16。另 `register_commands.rs` 的 `plugin_list_pages` 滞后单独提交 `710694efa`（生成物重新生成，与 W4-3 无关）。

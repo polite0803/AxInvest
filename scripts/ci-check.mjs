@@ -645,23 +645,15 @@ if (canRunFrontend) {
     step("TypeScript 类型检查", "node node_modules/typescript/bin/tsc --noEmit");
   }
 
-  // ── Vitest（任务 #111 / #129 处置：(b) UNC 下显式失败）──
-  // 实测 vitest 4.1.12 在 UNC 下把 root 规范化成 `Z: Folders/D/...` ⇒ `No test files found`；
-  // 从盘符镜像 cwd + 仓库完整 `vite.config.ts` 起也同样是该 root（换映射盘 / --root / 绝对
-  // include 三种绕法均实测无效）。**不跳过、不 || true**：UNC 下无法证明测试真的跑过 ⇒
-  // 拒绝判通过，并指向 #111。`--quick`（pre-push）本来就不含本门，不受影响。
-  // 非 UNC 时直调 `node node_modules/vitest/vitest.mjs`（不用 npx，理由同 dprint/oxlint）。
+  // ── Vitest（任务 #111 已修：走 scripts/vitest-run.mjs）──
+  // 根因（2026-11-03 定位）：vite 8 默认 `bundle`（rolldown）配置加载器在 VMware 共享目录上
+  // 把配置里的 root/`import.meta.dirname` 解析成畸形串 `Z: Folders/D/...` ⇒ 收集阶段
+  // `No test files found`。判据：0–1 个真实插件正常、≥2 个必现；`--configLoader native`
+  // 后正常。另一处是 `realpathSync.native` 把映射盘 D: 解析成 UNC 再作 cwd（root 变
+  // `//vmware-host/...`）⇒ vitest-run.mjs 改为只在盘符大小写上规范化。
+  // 统一入口 `node scripts/vitest-run.mjs run`：UNC 与本地盘都走同一条路，不再 fail-closed。
   if (!quick && !frontendOnly) {
-    if (isUncRoot) {
-      failStep(
-        "Vitest 单元测试",
-        "UNC 共享目录下 vitest 无法发现测试（任务 #111）：root 被规范化为 `Z: Folders/D/...`，报 `No test files found`；\n" +
-          "  换映射盘 / --root / 绝对 include 均实测无效。本门**显式失败**（不跳过）：UNC 下无法证明测试真跑过，拒绝判通过。\n" +
-          "  处理: 在本地盘路径或 CI 上执行 `node scripts/ci-check.mjs`；pre-push 的 --quick 档不包含本门。",
-      );
-    } else {
-      step("Vitest 单元测试", "node node_modules/vitest/vitest.mjs run");
-    }
+    step("Vitest 单元测试", "node scripts/vitest-run.mjs run");
   }
 }
 

@@ -238,6 +238,6 @@
   },
   "simple-git-hooks": {
     "pre-commit": "bash scripts/check-line-endings.sh && node node_modules/dprint/bin.cjs check && node scripts/check-tsc.mjs && node scripts/check-i18n-placeholder-usage.mjs && node scripts/cargo-all-workspaces.mjs fmt-check",
-    "pre-push": "npm run ci:check:quick"
+    "pre-push": "node scripts/ci-check.mjs --quick"
   }
 }

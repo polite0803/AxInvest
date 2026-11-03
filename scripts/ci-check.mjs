@@ -13,9 +13,10 @@
  *
  * ⚠ 本脚本是 CI 的**近似**，不是等价物。跑绿只代表「没踩到它覆盖的那部分」。
  *   已知**未覆盖**的 CI 步骤（改脚本前请先读 `scripts/ci-check.mjs` 与 ci.yml 的对账）：
- *     · `npm run build`（ci.yml:442，= `tsc && vite build`）—— 本地只有 `npx tsc --noEmit`，
+ *     · `npm run build`（ci.yml:448，= `tsc && vite build`）—— 本地只有
+ *       `node node_modules/typescript/bin/tsc --noEmit`（UNC 下经盘符镜像），
  *       ⇒ vite 构建期问题（如禁区 11 的 removeCrossorigin、SHIKI_ALLOWED_LANGS 白名单）本地看不见
- *     · `npm run contracts -- --only=a,c,d,f,g,h`（ci.yml:562）—— 本地完全没有
+ *     · `npm run contracts -- --only=a,c,d,f,g,h`（ci.yml:568）—— 本地完全没有
  *     · 行尾检查（ci.yml:72 的 `bash scripts/check-line-endings.sh`）—— 本地镜像没有；
  *       本机无 bash 时请改用 `node scripts/check-line-endings.mjs`（同一检测核心）
  *     · PG 集成三目标、E2E、`npm audit`、cargo audit / cargo deny（8 根 `cargo check` 与
@@ -32,14 +33,23 @@
  *   `--frontend-only` / `--rust-only` / `--quick`）不计入 `skipped` —— 那是明确意图。
  */
 
-import { execSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { execSync, spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const srcTauri = resolve(root, "src-tauri");
+
+// ── UNC 检测（任务 #129）──────────────────────────────────────────────
+// 从虚拟机共享目录（`\\host\share\...`）执行时，`execSync(cmd)` 在 Windows 上会经
+// cmd.exe 拉起子进程：cmd.exe **拒绝 UNC cwd**，打印「UNC 路径不支持」并把工作目录
+// 退回 `C:\Windows` ⇒ 所有相对路径（`scripts/...`、`node_modules/...`）当场失效，
+// `npx` 更会落到系统目录里去找包。实测 `execSync('node -e …')` 子进程的 cwd 是
+// `C:\Windows`（不是仓库）—— 这就是 #129「从 UNC 推送时命令实际不跑」的根因。
+// 对策：UNC 下改走 spawnSync（CreateProcess **支持** UNC cwd，实测可用），不经 shell。
+const isUncRoot = process.platform === "win32" && /^\\\\/.test(root);
 
 // 参数解析
 const args = process.argv.slice(2);
@@ -111,11 +121,100 @@ function skipStep(label, reason, bannerText) {
   skipped.push({ label, reason });
 }
 
+/**
+ * 仓库在 UNC 时，找到指向同一仓库根的盘符等价路径（如 `D:\...`）。
+ * 判据与 `scripts/check-tsc.mjs` 的 `findDriveMirror` 相同：逐层后缀 × 现存盘符，
+ * 用 `package.json` 逐字相等确认是同一个仓库（不是同名空目录）。
+ * 为什么要单独留在这里：本任务不允许改 `check-tsc.mjs`，而 tsc 在 UNC cwd 下会
+ * 「发现 0 个文件仍退 0」（任务 #45）⇒ 必须换到盘符路径上跑，判据才真实。
+ */
+function findDriveMirror(uncRoot) {
+  const uncPkg = resolve(uncRoot, "package.json");
+  if (!existsSync(uncPkg)) { return undefined; }
+  const parts = uncRoot.replace(/^\\\\/, "").split("\\").filter(Boolean);
+  const drives = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"].filter((letter) => existsSync(`${letter}:\\`));
+  // 从最深后缀往前找：优先取「映射得离仓库最近」的盘符，得到最短路径。
+  for (let i = parts.length - 1; i >= 1; i -= 1) {
+    const suffix = parts.slice(i).join("\\");
+    for (const letter of drives) {
+      const candidate = `${letter}:\\${suffix}`;
+      try {
+        const candidatePkg = resolve(candidate, "package.json");
+        if (existsSync(candidatePkg) && readFileSync(candidatePkg, "utf8") === readFileSync(uncPkg, "utf8")) {
+          return candidate;
+        }
+      } catch {
+        // 不可读的候选盘符直接跳过
+      }
+    }
+  }
+  return undefined;
+}
+
+const driveMirror = isUncRoot ? findDriveMirror(root) : undefined;
+// UNC 下子进程一律改在**盘符镜像**上跑：不仅 cmd.exe 需要，`tsgo`（目录 glob 0 文件）
+// 与门禁脚本内部的 `execSync("git …")` 也都只在非 UNC cwd 上可靠。镜像与原路径是同一份文件
+// （package.json 逐字相等确认），只是换了个 Windows 能当作 cwd 的写法。
+const stepCwd = isUncRoot ? driveMirror ?? root : root;
+
+/** 把 step 的显式 cwd（可能落在 UNC 仓库内）映射到盘符镜像的同一相对位置。 */
+function resolveStepCwd(cwd) {
+  if (!cwd) { return stepCwd; }
+  if (!isUncRoot || !driveMirror) { return cwd; }
+  const rel = relative(root, cwd);
+  return rel.startsWith("..") ? cwd : resolve(driveMirror, rel);
+}
+
+/**
+ * 执行一条 step 命令。
+ * - 非 UNC：与历史行为完全一致（execSync，经 cmd.exe / sh）。
+ * - UNC：cmd.exe 会退到 `C:\Windows`，故改为 spawnSync **直接拉起解释器**（不经 shell）；
+ *   cwd 默认用盘符镜像（`stepCwd`），既避开 cmd.exe，也让 tsgo / 脚本内部 `execSync("git …")`
+ *   落在 Windows 能当作 cwd 的路径上。step 命令刻意只写「解释器 + 空格分隔参数」，
+ *   不含引号 / shell 运算符；遇到这类形态直接抛错（fail-closed），不做半吊子解析 ——
+ *   静默跑歪比不跑更危险。
+ */
+function execStepCommand(cmd, opts) {
+  const { continueOnError: _continueOnError, cwd, env, timeout } = opts;
+  const runCwd = resolveStepCwd(cwd);
+  if (!isUncRoot) {
+    return execSync(cmd, { stdio: "pipe", cwd: runCwd, ...opts });
+  }
+  const reject = (message) => {
+    throw Object.assign(new Error(message), { stdout: "", stderr: message });
+  };
+  if (/["']/.test(cmd)) { reject(`UNC 直调不支持带引号的命令（没有 shell 可解释）：${cmd}`); }
+  const argv = cmd.trim().split(/\s+/);
+  if (argv.some((a) => /^(?:&&|\|\||[;&|<>])$/.test(a))) {
+    reject(`UNC 直调不支持 shell 运算符（${cmd}）—— 请拆成独立 step`);
+  }
+  const r = spawnSync(argv[0] === "node" ? process.execPath : argv[0], argv.slice(1), {
+    cwd: runCwd,
+    env: env || process.env,
+    timeout: timeout ?? 0,
+    stdio: "pipe",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  const stdout = r.stdout?.toString() ?? "";
+  const stderr = r.stderr?.toString() ?? "";
+  if (r.error) {
+    throw Object.assign(new Error(`${r.error.message}\n${cmd}`), { stdout, stderr: stderr || r.error.message });
+  }
+  if (r.status !== 0) {
+    throw Object.assign(new Error(`Command failed (exit ${r.status}): ${cmd}`), {
+      stdout,
+      stderr,
+      status: r.status,
+    });
+  }
+  return stdout;
+}
+
 function step(label, cmd, opts = {}) {
   const displayLabel = label.padEnd(52);
   process.stdout.write(`  ${displayLabel}`);
   try {
-    execSync(cmd, { stdio: "pipe", cwd: opts.cwd || root, ...opts });
+    execStepCommand(cmd, { stdio: "pipe", cwd: opts.cwd || root, ...opts });
     console.log(`${ok}`);
     passed++;
     return true;
@@ -137,6 +236,19 @@ function step(label, cmd, opts = {}) {
   }
 }
 
+/**
+ * 显式失败（不是「跳过」）。用于**判据本身在此环境无法成立、又绝不接受假绿**的步骤。
+ * 与 step() 的失败路径同形：打 ✗、退 1，中断执行。
+ */
+function failStep(label, reason) {
+  process.stdout.write(`  ${label.padEnd(52)}`);
+  console.log(`${fail}`);
+  console.log(`\n${c.red}${reason}${c.reset}\n`);
+  failures++;
+  console.log(`${c.bold}${c.red}→ 检查失败，中断执行。请修复上述错误后重新运行。${c.reset}`);
+  process.exit(1);
+}
+
 // ── 入口 ────────────────────────────────────────────────
 console.log(`\n${c.bold}AxAgent CI 本地检查${c.reset}`);
 console.log(
@@ -149,6 +261,14 @@ console.log(
   }${c.reset}`,
 );
 console.log(`${c.cyan}平台: ${process.platform} | Node: ${process.version}${c.reset}`);
+if (isUncRoot) {
+  console.log(`${c.cyan}UNC 路径: ${root}${c.reset}`);
+  console.log(
+    driveMirror
+      ? `${c.cyan}子进程 cwd: ${driveMirror}（盘符镜像 — cmd.exe / tsgo / 内部 git 都不支持 UNC cwd）${c.reset}`
+      : `${c.yellow}未找到盘符镜像：子进程 cwd 保持 UNC；依赖 cmd.exe / 内部 git 的门禁可能自报「跳过 ≠ 通过」${c.reset}`,
+  );
+}
 if (!hasRust) {
   // 「排除意图」优先：--skip-rust / --frontend-only 本就不打算跑 Rust ⇒ 不算环境缺失跳过，
   // 只保留原有黄字（措辞与回归前一致），不进 skipped。
@@ -476,21 +596,27 @@ if (canRunFrontend) {
   step("能力接缝登记表对账自检", "node scripts/check-capability-register.mjs --selftest");
   step("能力接缝登记表对账（镜像表 vs 盘上实测）", "node scripts/check-capability-register.mjs");
 
-  step("dprint 格式化检查", "npx dprint check --incremental=false");
+  // ⚠ 调用形态：直调 `node node_modules/dprint/bin.cjs`，**不用 `npx dprint`**。
+  //   `npx` 是 `.cmd` 包装器，从 UNC cwd 经 cmd.exe 启动会退到 `C:\Windows`（任务 #129）
+  //   ⇒ 命令静默不跑。参数与判据不变（CI 侧是 `npm run format:check`，见 ci.yml:437，同一 dprint check）。
+  step("dprint 格式化检查", "node node_modules/dprint/bin.cjs check --incremental=false");
 
-  // OxLint 检查 —— 命令与 `.github/workflows/ci.yml:436` **逐字同源**。
+  // OxLint 检查 —— 参数与 `.github/workflows/ci.yml:442` **逐字同源**（`src --max-warnings=0`）；
+  // 本地调用形态改为直调 `node node_modules/oxlint/bin/oxlint`：`npx` 在 UNC cwd 下经
+  // cmd.exe 会退到 `C:\Windows`（任务 #129），命令静默不跑。判据不变（仍是 max-warnings=0）。
   //
   // 为什么是 oxlint 而不是 eslint：项目已升到 TypeScript 7.0.2，而 typescript-eslint
   // 全版本 peer 上限是 `typescript <6.1.0` ⇒ eslint 一启动就崩（退出码 2，报
   // 「does not support TS 7」），那是**工具链不兼容、不是代码问题**。CI 已换成 oxlint。
   //
   // 为什么本步此前是「假绿」：整段被注释掉 ⇒ 本地**零 lint**，而 `pre-push` 跑的正是
-  // `npm run ci:check:quick` ⇒ lint 违规只会在 push 之后由 CI 告知。
+  // `node scripts/ci-check.mjs --quick`（2026-11-03 前是 `npm run ci:check:quick`）
+  // ⇒ lint 违规只会在 push 之后由 CI 告知。
   // 这是「本地绿冒充 CI 绿」里最典型的一处（门禁看起来在，实际一行都没跑）。
   //
   // 为什么**不加** `if (!quick)` 门控：oxlint 实测全仓 87ms（1421 文件 / 96 规则），
   // 代价可忽略；一旦加门控，pre-push 的快速档又会退回零 lint —— 那正是本次要修的缺口。
-  step("OxLint 检查", "npx oxlint src --max-warnings=0");
+  step("OxLint 检查", "node node_modules/oxlint/bin/oxlint src --max-warnings=0");
 
   // ── UNC 安全的 TypeScript 全量类型检查（任务 #45，2026-11-02）──
   // 为什么需要：`npx tsc --noEmit` / `npm run typecheck` 在 VMware 共享目录上是**静默空跑** ——
@@ -499,16 +625,43 @@ if (canRunFrontend) {
   //   往 `src/` 塞一处故意类型错误它照样退 0 ⇒ 「typecheck 通过」在本机历史上不构证据。
   //   本门改用 fs 遍历把 `src/**` 的 1433 个 .ts/.tsx/.d.ts **逐条写进临时 tsconfig 的 `files`**，
   //   并三档 fail-closed：枚举 0 输入即红 / 输出命中 tsc 帮助横幅即红 / 生成配置里混回目录 glob 即红。
-  // 为什么仍保留下面那条 `npx tsc --noEmit`：它在本地盘（CI）上是原生口径，删了会少一道；
+  // 为什么仍保留下面那条原生 tsc：它在本地盘（CI）上是原生口径，删了会少一道；
   //   两条并跑 = 「同口径两份证据」，而本门是其中**在 UNC 上也有效**的那一份。
+  // 调用形态（任务 #129）：`npx tsc` 在 UNC 下经 cmd.exe 退到 `C:\Windows`，必须直调
+  //   `node node_modules/typescript/bin/tsc`。但直调后仍会在 UNC cwd 下「0 文件退 0」
+  //   （任务 #45 实测）⇒ UNC 下子进程统一在**盘符镜像 cwd** 上跑（`stepCwd`，与 check-tsc
+  //   同一绕法），判据仍是 `tsc --noEmit` 的退出码。找不到镜像时**不空跑**，记 skipped
+  //   （跳过 ≠ 通过），其等价证据是上一门已用同一 tsc 做的全量 typecheck。
   // 命令行与 `.github/workflows/ci.yml` 末尾对应步骤**逐字同源**（由对称差集护栏自动校验）。
   step("UNC 安全 typecheck 自检（0 输入判红 + 夹具植入错误必被抓）", "node scripts/typecheck-unc.mjs --selftest");
   step("UNC 安全 typecheck（src/** 逐条进 files，不退化成空跑）", "node scripts/typecheck-unc.mjs");
 
-  step("TypeScript 类型检查", "npx tsc --noEmit");
+  if (isUncRoot && !driveMirror) {
+    skipStep(
+      "TypeScript 类型检查",
+      "UNC 下 tsgo 恒发现 0 文件（任务 #45），且未找到盘符镜像可绕 ⇒ 跳过 ≠ 通过；上一门 UNC 安全 typecheck 已全量检查",
+    );
+  } else {
+    step("TypeScript 类型检查", "node node_modules/typescript/bin/tsc --noEmit");
+  }
 
+  // ── Vitest（任务 #111 / #129 处置：(b) UNC 下显式失败）──
+  // 实测 vitest 4.1.12 在 UNC 下把 root 规范化成 `Z: Folders/D/...` ⇒ `No test files found`；
+  // 从盘符镜像 cwd + 仓库完整 `vite.config.ts` 起也同样是该 root（换映射盘 / --root / 绝对
+  // include 三种绕法均实测无效）。**不跳过、不 || true**：UNC 下无法证明测试真的跑过 ⇒
+  // 拒绝判通过，并指向 #111。`--quick`（pre-push）本来就不含本门，不受影响。
+  // 非 UNC 时直调 `node node_modules/vitest/vitest.mjs`（不用 npx，理由同 dprint/oxlint）。
   if (!quick && !frontendOnly) {
-    step("Vitest 单元测试", "npx vitest run");
+    if (isUncRoot) {
+      failStep(
+        "Vitest 单元测试",
+        "UNC 共享目录下 vitest 无法发现测试（任务 #111）：root 被规范化为 `Z: Folders/D/...`，报 `No test files found`；\n" +
+          "  换映射盘 / --root / 绝对 include 均实测无效。本门**显式失败**（不跳过）：UNC 下无法证明测试真跑过，拒绝判通过。\n" +
+          "  处理: 在本地盘路径或 CI 上执行 `node scripts/ci-check.mjs`；pre-push 的 --quick 档不包含本门。",
+      );
+    } else {
+      step("Vitest 单元测试", "node node_modules/vitest/vitest.mjs run");
+    }
   }
 }
 

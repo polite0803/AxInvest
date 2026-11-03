@@ -3158,3 +3158,11 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 ### 64.7 `#131` 第五道门 evidence 判据收紧（2026-11-03）
 
 **缺陷**：`adjudicateEvidence` 与 `computeCodeRepin` 的「相符」只看「该行含 token」。`worker.rs` 位移后 `workflow.evolver` 区间止点（anchorText=`is_running`）落到同 token 的另一处调用（`set_llm_provider`），判据仍绿 ⇒ 端点静默指向错误语义。**改法**（`check-capability-register.mjs`）：有 `anchorText` 时要求整行（空白归一）相等；重锚模式的「相符」同口径 —— 不符则按 anchorText 重新定位，零 / 多命中照旧拒写。**验证**：全量 8 条 anchorText 锚点整行相符 0 例外（`.tmp/ev-anchor-audit.mjs`）；`--selftest` 全绿；判定跑 EXIT=0（`.tmp/gate-20261103-2115.log`）。
+
+### 64.8 `#129` pre-push 的 UNC 失效（2026-11-03）
+
+**根因比 `npx` 更宽**：`ci-check.mjs` 的 `step()` 用 `execSync(cmd)`，Windows 下经 cmd.exe 拉起子进程；cmd.exe 拒绝 UNC cwd ⇒ 退回 `C:\Windows`，所有相对路径失效（改前 `npm run ci:check:quick` 实测报 `Cannot find module 'C:\Windows\scripts\ci-check.mjs'`）。**改法**：① `package.json` 与 `.git/hooks/pre-push` 改直调 `node scripts/ci-check.mjs --quick`；② UNC 下 `step()` 改 `spawnSync` 直拉解释器（不经 shell；带引号 / shell 运算符直接 fail-closed），子进程 cwd 统一换成**盘符镜像**（`findDriveMirror`，与 `check-tsc.mjs` 同判据）—— 因为 tsgo 在 UNC cwd 下 0 文件、门禁脚本内部 `execSync("git …")` 也不支持 UNC；③ `npx dprint / oxlint / tsc / vitest` 全部改 `node node_modules/...` 直调。
+
+**Vitest 处置**：UNC 下 root 被规范成 `Z: Folders/D/...` ⇒ `No test files found`（换映射盘 / `--root` / 绝对 include 均无效）⇒ **显式失败**（`failStep`），指向 `#111`；`--quick` 不含该门。
+
+**验证**：`node scripts/ci-check.mjs --quick` 从 UNC **52 门全绿、EXIT=0、1486.3s**（`.tmp/129-quick-recheck.log`）；`ci.workflow.test.ts` 25/25；hook 与 package.json 命令 MATCH。**顺带**：`i18n-scan` 报的 8 条既有硬编码（插件桥 / 插件页的诊断错误）登记进 `.i18n-allowlist.json`（reason 写明「开发者诊断、不进入宿主 UI」），8 根 fmt 债已在 `093915bfb` 清空 —— 这两条原本会让「真正跑起来的 pre-push」仍然红。

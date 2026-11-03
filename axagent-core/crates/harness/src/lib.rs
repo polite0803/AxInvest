@@ -144,6 +144,13 @@ pub use as_of::{
     AsOfContext, AsOfDataKind, AsOfDataScope, AsOfError, AsOfSource, DegradationEntry,
 };
 
+// ── 自 astock-data 上收的公用件（B1 首刀；原路径保留兼容垫片）──
+pub mod task_cancel;
+pub mod trading_calendar;
+pub mod candlestick_pattern;
+pub mod divergence;
+pub mod news_archive;
+
 // ── 高级股票数据服务契约已迁出至 axagent-stock-analysis（stock_data_service）──
 pub mod speech;
 pub use speech::{

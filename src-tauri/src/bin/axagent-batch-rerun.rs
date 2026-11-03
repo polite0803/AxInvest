@@ -415,7 +415,10 @@ async fn ensure_pending_reflection(
     // 必须同口径（交易日）—— 旧实现此处是自然日，会与建点的交易日算法分叉出两种到期日。
     let hindsight = chrono::NaiveDate::parse_from_str(&anchor, "%Y-%m-%d")
         .map(|d| {
-            axagent_astock_data::calendar::nth_trading_day(d, hold_days.saturating_add(1) as i32)
+            axagent_harness::trading_calendar::nth_trading_day(
+                d,
+                hold_days.saturating_add(1) as i32,
+            )
         })
         .map_err(|e| format!("锚点 {anchor} 解析失败: {e}"))?
         .format("%Y-%m-%d")
@@ -712,10 +715,12 @@ async fn recompute_pending_hindsight(
             decision_cache.get(&r.original_analysis_id).and_then(|v| v.as_deref()),
             &horizon,
         );
-        let new_hd =
-            axagent_astock_data::calendar::nth_trading_day(as_of_nd, days.saturating_add(1) as i32)
-                .format("%Y-%m-%d")
-                .to_string();
+        let new_hd = axagent_harness::trading_calendar::nth_trading_day(
+            as_of_nd,
+            days.saturating_add(1) as i32,
+        )
+        .format("%Y-%m-%d")
+        .to_string();
         if new_hd == r.hindsight_date {
             unchanged += 1;
             continue;

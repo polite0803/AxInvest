@@ -10,7 +10,7 @@ use axagent_analysis_engine::risk::{
     kelly_criterion_with_thresholds, pe_percentile, peg_ratio as engine_peg_ratio,
     value_at_risk as engine_value_at_risk,
 };
-use axagent_astock_data::indicators::sma;
+use axagent_harness::indicators::sma;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -1175,9 +1175,9 @@ calc_tool!(DetectLimitUpTool, limit_up, "detect_limit_up_potential", "涨停潜�
 /// K 线形态检测包装函数
 fn detect_candlestick_patterns(input: &Value) -> Result<String, String> {
     let kj = input.get("klines_json").and_then(|v| v.as_str()).unwrap_or("[]");
-    let klines: Vec<axagent_astock_data::KLine> =
+    let klines: Vec<axagent_harness::market_data::KLine> =
         serde_json::from_str(kj).map_err(|e| format!("解析 K 线数据失败: {e}"))?;
-    let patterns = axagent_astock_data::candlestick_pattern::detect_all_patterns(&klines);
+    let patterns = axagent_harness::candlestick_pattern::detect_all_patterns(&klines);
     serde_json::to_string(&patterns).map_err(|e| format!("序列化形态结果失败: {e}"))
 }
 
@@ -1186,10 +1186,10 @@ fn detect_divergence(input: &Value) -> Result<String, String> {
     let kj = input.get("klines_json").and_then(|v| v.as_str()).unwrap_or("[]");
     let rsi_period = input.get("rsi_period").and_then(|v| v.as_f64()).unwrap_or(14.0) as usize;
     let lookback = input.get("lookback").and_then(|v| v.as_f64()).unwrap_or(14.0) as usize;
-    let klines: Vec<axagent_astock_data::KLine> =
+    let klines: Vec<axagent_harness::market_data::KLine> =
         serde_json::from_str(kj).map_err(|e| format!("解析 K 线数据失败: {e}"))?;
     let results =
-        axagent_astock_data::divergence::detect_all_divergences(&klines, rsi_period, lookback);
+        axagent_harness::divergence::detect_all_divergences(&klines, rsi_period, lookback);
     serde_json::to_string(&results).map_err(|e| format!("序列化背离结果失败: {e}"))
 }
 

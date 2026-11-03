@@ -5,10 +5,10 @@ use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::task as task_err;
 use crate::commands::spawn_guard::panic_message;
 use axagent_agent_macro::agent_command;
-use axagent_astock_data::task_cancel::CancelToken;
 use axagent_dao::task_ledger::{TransitionRequest, record_task_created, transition_task};
 use axagent_entities::background_tasks;
 use axagent_harness::IpcEventName;
+use axagent_harness::task_cancel::CancelToken;
 use axagent_harness::task_state::{TaskSource, TaskStatus};
 use chrono::Utc;
 use futures::FutureExt;
@@ -347,7 +347,7 @@ where
         }
         emit_task_event(app.as_ref(), IpcEventName::BackgroundTaskUpdated, &task_id);
 
-        let outcome = axagent_astock_data::task_cancel::with_cancel(
+        let outcome = axagent_harness::task_cancel::with_cancel(
             token.clone(),
             AssertUnwindSafe(work).catch_unwind(),
         )
@@ -913,7 +913,7 @@ mod spawn_tracked_tests {
 
     #[tokio::test]
     async fn cancel_records_stopped_with_partial_report() {
-        use axagent_astock_data::task_cancel::is_cancelled;
+        use axagent_harness::task_cancel::is_cancelled;
 
         let h = axagent_dao::db::create_test_pool().await.expect("测试库应创建成功");
         let db = &h.conn;

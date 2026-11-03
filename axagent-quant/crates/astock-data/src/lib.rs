@@ -80,35 +80,9 @@ use vendors::tencent::TencentVendor;
 use vendors::ths::ThsVendor;
 use vendors::xueqiu::XueqiuVendor;
 
-/// P6: 新闻入库 sink 抽象。
-///
-/// astock-data 不直接依赖 dao/entities,所以用 trait 抽象把"入库"延迟到
-/// main crate 实现并通过 `with_news_archive_sink` 注入。这样:
-/// - 保持 astock-data 轻量(避免引入 sea-orm 等大依赖)
-/// - 实现可替换(测试时可换 in-memory mock)
-/// - 即使 sink 未注入也能正常工作(降级为不写库)
-#[async_trait::async_trait]
-pub trait NewsArchiveSink: Send + Sync {
-    /// 批量 upsert NewsItem。失败仅记录日志,不影响主流程。
-    async fn upsert(
-        &self,
-        source: &str,
-        stock_code: Option<&str>,
-        keyword: Option<&str>,
-        items: &[NewsItem],
-    );
-
-    /// as-of 模式查询:`publish_time_ms <= as_of_ts` 的最新 limit 条,
-    /// 关键词匹配 title/summary 子串,stock_code 给定时额外过滤。
-    /// 返回空 vec 表示无数据(由调用方决定是否降级)。
-    async fn search_asof(
-        &self,
-        keyword: &str,
-        stock_code: Option<&str>,
-        as_of_ts_ms: i64,
-        limit: u32,
-    ) -> Vec<NewsItem>;
-}
+// 本端口已上收至 harness；实现仍由宿主（src-tauri）注入，astock-data 只持有
+// `Arc<dyn NewsArchiveSink>` 并调用，依赖方向不变。
+pub use axagent_harness::news_archive::NewsArchiveSink;
 
 /// 把 NewsItem.publish_time(String) 解析为 unix 毫秒。
 ///

@@ -1298,7 +1298,7 @@ async fn time_travel_mode(
     timeout_secs: u64,
     analyze: bool,
 ) -> Result<(), String> {
-    use axagent_astock_data::calendar;
+    use axagent_harness::trading_calendar as calendar;
     use axagent_lib::{TimeTravelBatchRequest, run_time_travel_batch_inner};
 
     let db = state.harness.db();

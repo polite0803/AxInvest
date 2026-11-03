@@ -183,6 +183,17 @@ pub struct DegradationEntry {
     pub kind: DegradationKind,
 }
 
+/// 落库时的**实盘**代际实参。
+///
+/// 用具名常量而不是裸 `None`：`None` 与「忘了传代际」在源码里完全同形，代际门
+/// （`scripts/check-reco-generation.mjs`）读不出这里是想过代际的；具名常量强制每个
+/// 实盘入口显式表态。
+///
+/// 本常量只是「实盘 = 不按代际过滤」的语义标记，不含运行时状态，故随 B1 首刀
+/// 上收到 harness，与 `AsOfContext` 等纯 DTO 同层；`as_of` 运行层（task_local、
+/// 全局降级日志等）仍留在 astock-data。
+pub const LIVE_GENERATION: Option<&str> = None;
+
 #[cfg(test)]
 mod tests {
     use super::*;

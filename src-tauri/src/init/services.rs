@@ -2365,7 +2365,7 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
             );
             if gated {
                 let today = chrono::Local::now().date_naive();
-                if !axagent_astock_data::calendar::is_trading_day(&today) {
+                if !axagent_harness::trading_calendar::is_trading_day(&today) {
                     tracing::info!("[CronScheduler] 非交易日，跳过任务 '{}' ({})", job.name, job.id);
                     let store = cron_store.clone();
                     let job_id = job.id.clone();
@@ -2629,7 +2629,7 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
                             // 代际 = 实盘：本分支整体包在 `cron_live` 里（task_local 被压成
                             // None），不可能产出回放行。用具名常量而非裸 None，让代际门读得出
                             // 这里是**想过**代际的，而不是漏传。
-                            as_of_date: axagent_astock_data::as_of::LIVE_GENERATION,
+                            as_of_date: axagent_harness::as_of::LIVE_GENERATION,
                             purpose: crate::commands::_shared_reco_pool::purpose::LIVE,
                         },
                     )
@@ -2679,7 +2679,7 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
                     "all",
                     scan.seed_pool_snapshot.as_deref(),
                     &generated_at,
-                    axagent_astock_data::as_of::LIVE_GENERATION,
+                    axagent_harness::as_of::LIVE_GENERATION,
                     crate::commands::_shared_reco_pool::purpose::LIVE,
                 )
                 .await;

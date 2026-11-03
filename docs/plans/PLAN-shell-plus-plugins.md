@@ -244,7 +244,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 
 | 口径 | 命中 | 备注 |
 |---|---|---|
-| K1：`pub trait` 总数（8 根 2025 个 `.rs`） | **324** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。**2026-11-02 `#81` 再升 1（2009→2010）**：行情 DTO 上收新增 `harness/src/stock_market_types.rs`；`astock-data/src/types.rs` 保留为垫片（未删文件），故只 +1。**同日 C 批再升 1（2010→2011）**：`DataOutcome` 上收新增 `harness/src/data_outcome.rs`；`astock-data/src/outcome.rs` 保留为垫片。**同日 `jobs.store` 接缝再升 2 项**：新增 `harness/src/jobs_store.rs`（文件 +1）与 `JobStoreProvider`（trait +1）⇒ **2012 / 318**。**同日 `workflow.run` 再升 2 项**：新增 `harness/src/workflow_run.rs`（文件 +1）与 `WorkflowRunProvider`（trait +1）⇒ **2013 / 319**。**同日宿主服务再升 1（2013→2014）**：新增 `src-tauri/src/commands/stock_workflow/workflow_run_service.rs`。**同日 `trading.engine` 再升 2 项**：新增 `harness/src/trading_engine.rs`（文件 +1）与 `TradingEngineProvider`（trait +1）⇒ **2015 / 320**。**同日宿主服务再升 1（2015→2016）**：新增 `src-tauri/src/commands/stock_workflow/trading_engine_service.rs`。**2026-11-03 `stock.monitor` + `quote.watcher` 契约再升 4 项**：新增 `harness/src/stock_monitor.rs`、`harness/src/quote_watcher.rs`（文件 +2）与 `StockMonitorProvider`、`QuoteWatcherProvider`（trait +2）⇒ **2018 / 322**；同批从 `analysis-engine/src/monitor.rs`、`cross_stock_aggregator.rs`、`astock-data/src/realtime_quote.rs` 删定义改 `pub use`，垫片文件保留不删 ⇒ 文件数不降。**同日 `#107` 契约 + `#103` 宿主再升 4 项文件 / 2 项 trait**：`harness/src/knowledge_vector.rs`、`harness/src/trajectory_store.rs`（+2 文件 +2 trait ⇒ 324）与 `commands/stock_workflow/monitor_seam_service.rs`、`quote_watcher_service.rs`（+2 文件）⇒ **2022 / 324**。**同日 `#114` 再升 1（2024→2025）**：新增 `axagent-infra/crates/dao/src/repo/trade.rs`（`exists_same_key` 下沉），同批 `market_data.rs` 只做格式、`workflow_run_service.rs` 只换 `DatabaseConnection` 导入源 ⇒ 其余读数不动。 |
+| K1：`pub trait` 总数（8 根 2030 个 `.rs`） | **324** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。**2026-11-02 `#81` 再升 1（2009→2010）**：行情 DTO 上收新增 `harness/src/stock_market_types.rs`；`astock-data/src/types.rs` 保留为垫片（未删文件），故只 +1。**同日 C 批再升 1（2010→2011）**：`DataOutcome` 上收新增 `harness/src/data_outcome.rs`；`astock-data/src/outcome.rs` 保留为垫片。**同日 `jobs.store` 接缝再升 2 项**：新增 `harness/src/jobs_store.rs`（文件 +1）与 `JobStoreProvider`（trait +1）⇒ **2012 / 318**。**同日 `workflow.run` 再升 2 项**：新增 `harness/src/workflow_run.rs`（文件 +1）与 `WorkflowRunProvider`（trait +1）⇒ **2013 / 319**。**同日宿主服务再升 1（2013→2014）**：新增 `src-tauri/src/commands/stock_workflow/workflow_run_service.rs`。**同日 `trading.engine` 再升 2 项**：新增 `harness/src/trading_engine.rs`（文件 +1）与 `TradingEngineProvider`（trait +1）⇒ **2015 / 320**。**同日宿主服务再升 1（2015→2016）**：新增 `src-tauri/src/commands/stock_workflow/trading_engine_service.rs`。**2026-11-03 `stock.monitor` + `quote.watcher` 契约再升 4 项**：新增 `harness/src/stock_monitor.rs`、`harness/src/quote_watcher.rs`（文件 +2）与 `StockMonitorProvider`、`QuoteWatcherProvider`（trait +2）⇒ **2018 / 322**；同批从 `analysis-engine/src/monitor.rs`、`cross_stock_aggregator.rs`、`astock-data/src/realtime_quote.rs` 删定义改 `pub use`，垫片文件保留不删 ⇒ 文件数不降。**同日 `#107` 契约 + `#103` 宿主再升 4 项文件 / 2 项 trait**：`harness/src/knowledge_vector.rs`、`harness/src/trajectory_store.rs`（+2 文件 +2 trait ⇒ 324）与 `commands/stock_workflow/monitor_seam_service.rs`、`quote_watcher_service.rs`（+2 文件）⇒ **2022 / 324**。**同日 `#114` 再升 1（2024→2025）**：新增 `axagent-infra/crates/dao/src/repo/trade.rs`（`exists_same_key` 下沉），同批 `market_data.rs` 只做格式、`workflow_run_service.rs` 只换 `DatabaseConnection` 导入源 ⇒ 其余读数不动。**2026-11-03 B1（`#100`）再升 5（2025→2030）**：`harness` 新增 `task_cancel.rs` / `trading_calendar.rs` / `candlestick_pattern.rs` / `divergence.rs` / `news_archive.rs` 五个模块，`astock-data` 原文件全部保留为 `pub use` 垫片（未删文件）⇒ 只 +5；`pub trait` 唯一名不动（324，`NewsArchiveSink` 只是换文件）。 |
 | K1 + 有非 harness、非测试实现者 | **240** | ⚠ 这一档**不能**当能力数。~~232 出自一次性 census 工件（`.tmp/traits-full.json`，未入库 ⇒ 谓词无法从仓内代码复现）~~ ⇒ **该说法已作废（`#61` + `#66` 落地后）**：谓词已入库为 `k1DeclaredExternalImplTraitCount`，`--dump-readings` 在现树复现 = **233**（`#62` 后：ToT 拆成两名、两端都仍有生产 impl ⇒ +1），且与本门 audit 侧输出**排序名单逐字相等**（`#66` 的 4.2 档，差分探针 + 两条命令背靠背 + 扫描面常量逐项对照，三条同源性证据齐）⇒ **233 现在是可复算值**，锚点**具备升 `hard:true` 的条件**（升不升、用哪个数由我在收口时一次定）。另两个历史数**只留作解释、不再与 233 并列**：**210** = 单趟扫描缺陷（当时同谓词**两趟交并** = 232，差值恰 **22**；`#62` 后未重测单趟读数）；**269** = 门里最严格的读法（不要求 trait 声明面、不排 std/派生噪声名），**不作文档该锚点值**。⚠ 处置次序仍不能反：**先让谓词可复算，再升 hard** —— 反向必先假红。**同日 `jobs.store` 再 +1（233→234）**：`JobStoreProvider` 在 `runtime-core` 有生产 impl。**同日 `workflow.run` 再 +1（234→235）**：`WorkflowRunProvider` 在 `src-tauri/src/init/workflow_run.rs` 有生产 impl（后迁 `commands/stock_workflow/workflow_run_service.rs`，读数不变）；**同日 `trading.engine` 再 +1（235→236）**：`TradingEngineProvider` 在 `src-tauri/src/commands/stock_workflow/trading_engine_service.rs` 有生产 impl；**同日 `#103` 宿主批再 +2（236→238）**：`StockMonitorProvider` 在 `commands/stock_workflow/monitor_seam_service.rs`、`QuoteWatcherProvider` 在 `quote_watcher_service.rs` 各有生产 impl（`KnowledgeVectorProvider` / `TrajectoryStoreProvider` 仍只有声明 ⇒ 不计，等 `#108`）。 |
 | K1 + K2（键控站点，四次扫描合并去漏报） | **51** 个 trait 面 | 含 15 条已建接缝的 trait。⚠ **2026-11-02 `#33` 实测：这一档不可作论据** —— 谓词真身是**未入库的一次性工件** `.tmp/capability-register3.cjs:44-82`（仓内无处复跑，与 §0.7.2 的 232 同病根），且它要求签名/块内出现 `dyn T` ⇒ 198 条里 **21 条假阴性**，把 PLAN B/C 组落入该桶的 **13 条契约全部吞掉** ⇒ **不许**用「无键控点」论证「这些 trait 只是分层解耦」。谓词入库 = 任务 **#57**；逐条分桶结论见 **§14** |
 | 51 → 同族合并 + K3/K4 判定 | **23 条能力**（另有 3 条移入 §0.7.9 债档，只登记不计数） | ⇒ 本节表格 A+B+C 三组 |
@@ -273,7 +273,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | 建议能力 ID | 契约 | 键控分发点 | 内置实现者 | K4 代价（帧协议/主权） |
 |---|---|---|---|---|
 | `notify.channel` | `axagent-core/crates/harness/src/notification_channel.rs:195` | `axagent-runtime/crates/notification/src/dispatcher.rs:114` + `:143 register_channel` + `:149 unregister(&str)` | 6 | **最低**：DTO 全可序列化；去重/冷却留宿主 |
-| `market.vendor` | `axagent-quant/crates/astock-data/src/vendors/mod.rs:7 StockVendor` | `astock-data/src/lib.rs:863 register_vendor(&str)` + `:1672` 键控取回 | 16 | `AS_OF` task-local 必须改显式入参；门面 `MarketDataProvider`（`harness/src/market_data.rs:201`）不单列 |
+| `market.vendor` | `axagent-quant/crates/astock-data/src/vendors/mod.rs:7 StockVendor` | `astock-data/src/lib.rs:837 register_vendor(&str)` + `:1646` 键控取回 | 16 | `AS_OF` task-local 必须改显式入参；门面 `MarketDataProvider`（`harness/src/market_data.rs:201`）不单列 |
 | `search.source` | `axagent-ai/crates/agent/src/search_provider.rs:95` | `axagent-ai/crates/agent/src/search_orchestrator.rs:28`（`HashMap<SourceType, Arc<dyn SearchProvider>>`） | 4 | `rate_limit()`/计费属宿主。**2026-11-02 实测分档**：`search()` 侧结果 400–600 B × 默认 `max_results` 10 ⇒ **①，可直接走接缝**；`extract_content(url)` 返回大文本（今天 50 KB 截断）⇒ **②**，需**分页/游标**而非分块。DTO（`search_provider.rs:38-57`、`research_state.rs:416,76`）全 serde✓。前置 **D1** |
 | `image.gen` | `axagent-ai/crates/providers/src/image_gen.rs:64` | `name()` 自述键 + providers 注册面 | 2 | **2026-11-02 实测**：`url` 形态 ≈200 B ⇒ **①**；`base64` 形态 **1.3–4 MB × n** ⇒ ②（接近 `MAX_FRAME_LEN = 64 MiB` 的 `plugin-proto/src/lib.rs` 的 `pub const MAX_FRAME_LEN`，但 n 张累加会顶穿）⇒ 裁定取「只回 url / 宿主侧落盘引用」形态，**保 b64 才需要 D2 分块**。DTO（`image_gen.rs:24-36,45-54`）全 serde✓；provider 凭证 scope 留宿主 |
 | `document.parser` | `axagent-core/crates/harness/src/search_sources.rs:62` | **证据行改定（§14.4 + §24.2 两次裁定；本行此前仍是旧行）**：`axagent-infra/crates/document-parser/src/lib.rs:533` 只是 ext→MIME 的**字符串映射表**、块内**不构造实现类型** ⇒ 真正的行为选择点是同文件 `:61` 的 `match mime_type`，而该块**同样无构造分支** ⇒ **K2 的 ⑧（factory-match）在结构上永不命中 = 已知漏检族第 4 例**（该形态「按字符串 `match` 选行为、但不构造实现类型」已补进镜像表 `countRule.k2Caveat`）。⇒ **本行准入判据改写为：K1 成立（外部实现者 1）+ K3 成立；不以 K2 命中为准**（`#54` 已裁「检测器跟着登记表走」是禁止方向，见 §24.2 第 1 条） | 1 | 37 分支是**编译期穷举** ⇒ K3 今天要改主壳，正是本条要拆的理由；另有两套 `OnceLock` 全局（`search/src/sources.rs:22`、`tools/src/parser.rs:13`）和一处硬编码绕过（`commands/knowledge.rs:1169`） |
@@ -510,7 +510,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 |---|---|---|
 | Tauri 命令条数 / 命令模块数（**插件边界口径**） | **304 条 / 20 模块**（`stock_analysis` 172、`stock_workflow` 24、`paper` 20） | **138 条 / 13 模块**（`opc` 57、`opc_capability_pack_actions` 20、`_runtime` 14） |
 | — 同一注册表在**审计 19 域口径**下的读数 | 306 条 / 19 模块（域「股票分析与管线」） | 117 条 / 10 模块（域「OPC 公司运行时」） |
-| **① 主壳反向阻塞**（主壳非域文件引用域 crate ⇒ **必须逐条改写**） | **152 处 / 28 文件** | **0 处** |
+| **① 主壳反向阻塞**（主壳非域文件引用域 crate ⇒ **必须逐条改写**） | **134 处 / 26 文件** | **0 处** |
 | **② 跨包口**（一个功能包的文件调另一个功能包的 crate ⇒ 走 `call_seam`） | **29 处 / 9 文件**，且**全部是 OPC 的文件在调股票 crate** | 0 处 |
 | ③ 域自有文件内引用（随插件整体迁走，**不是障碍**） | 444 处 / 37 文件 | 16 处 / 2 文件 |
 | Cargo.toml 构建边 | 8 条（`src-tauri` 4 + `tools` 2 + 域内 2） | 1 条（`src-tauri → axagent-company-runtime`） |
@@ -520,7 +520,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | entities 表文件 | 20 个 | 28 个 |
 | zh-CN i18n key | 3 527（`stockAnalysis`/`invest`/`quant`/`trade` 是**整段**） | 1 897（`opc` 整段） |
 
-① 的 152 处里，前 7 个文件吃掉 **106** 处：`tools/src/tools/opc.rs` **41**、`init/services.rs` **28**、`init/state.rs` **10**、`bin/axagent-validate-backfill.rs` **8**、`commands/evolution_proposal.rs` **7**、`tools/src/tools/finance.rs` **6**、`app_state.rs` **6**（41+28+10+8+7+6+6=106，旧记 103 是加错）；其余 21 个文件各 ≤4 处。
+① 的 134 处（含 H 桶 10 处 / 4 文件）里，待改写 124 处的前 5 个文件吃掉 **88** 处：`tools/src/tools/opc.rs` **41**、`init/services.rs` **25**、`init/state.rs` **8**、`bin/axagent-validate-backfill.rs` **7**、`commands/evolution_proposal.rs` **7**（41+25+8+7+7=88）；其后 `tools/src/audit.rs`、`commands/conversations/compress.rs`、`commands/conversations/mod.rs`、`commands/fleet/mod.rs` 各 4 处；其余 13 个文件各 ≤3 处。（B1 首刀前口径为 152 / 28，前 7 文件 106 处，见 §63。）
 ⚠ **为什么同一张表里有两个命令数 / 两个前端体量**：两套**归属规则**不同 —— 「插件边界口径」按迁出后归哪个包，「审计 19 域口径」按模块名正则；
 差集 11 个模块逐条列在 `AUDIT-l1-blockers-2026-11-01.md` 判读口径第 6 条（例：`demand_discovery` 审计归股票、边界归 OPC；`mover_recall`/`narrative` 反之）。
 **两个数都是真的，引用时必须带口径**；本节与 P6.1/P6.2 的判据一律用**边界口径**。
@@ -555,7 +555,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 ### 0.10.4 落地顺序与验收判据
 
 **P6.0 五通道机制**（T1 的 D4 投影 + T2 命令派发口 + T3 tab 数据驱动 + T4 外部 schema 声明 + ⑤⑥ 引擎侧）
-→ **P6.1 股票迁出**（改写 152 处 + 前端 54 处、304 条命令、6 万行页面）
+→ **P6.1 股票迁出**（改写 134 处 + 前端 54 处、304 条命令、6 万行页面）
 → **P6.2 OPC 迁出**（改写 0 处 Rust + 前端 28 处，但要把 §0.10.1 的 **29 处跨包口改成 `call_seam`**、138 条命令、8 859 行页面）
 → **P6.3** 其余功能包按同一模板批量。
 **顺序不能反**：OPC 的 29 处引用指向股票 crate ⇒ 股票先成为插件，OPC 才有接缝可调。
@@ -565,7 +565,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 1. **主壳残留文件里 `grep axagent_(astock_data|analysis_engine|company_runtime|quant|market_sim)::` 命中 0。**
  今天该作用域（`src-tauri/src` + `axagent-runtime/crates`，去注释、去 `examples/`、去 `.workbuddy`）**总命中 625 处 / 74 文件**，
  其中 **444 处随域自有文件（`stock_analysis.rs` 209、`stock_workflow/*` 69、`opc.rs` 18…）一起搬走**、**29 处是跨包口**（改 `call_seam`），
- **真正要改写的只有 152 处 / 28 个主壳文件**，且前 7 个文件吃掉 **106** 处（2026-11-01 订正：旧记 103 是列项加错，见 §0.10.1）。
+ **真正要改写的只有 134 处 / 26 个主壳文件**（B1 后，含 H 桶 10 处 / 4 文件），且前 5 个文件吃掉 **88** 处（2026-11-01 订正：旧记 103 是列项加错；2026-11-03 B1 首刀再降 18 处，见 §63）。
 2. `src-tauri/Cargo.toml` 不再声明 4 个股票 crate + `company-runtime`；`axagent-runtime/crates/tools/Cargo.toml` 两条边归零（今天 8 + 1 条）
 3. 主壳 `register_commands.rs` 里股票 / OPC 模块 **0**（今天 304 + 138 条，注册表总 1 542 条 ⇒ 迁完剩 1 100 条）
 4. 前端 `src/**` import 股票 / OPC 文件命中 **0**（今天 54 + 28），tab 表由插件清单生成
@@ -808,7 +808,7 @@ DTO 障碍分级：**①** 纯 serde DTO 可直接过帧；**②** 可序列化�
 | 通知渠道 | `harness/src/notification_channel.rs:195` | ✘ 无 | 6（`LogChannel` / ServerChan / PushPlus / Ntfy / Gotify / 宿主包装的 `PlatformNotificationChannel`） | `name()/display_name()` 返回借用 ⇒ 照 `tool.set` 补一个 `list` 发现面 | `notification.channel.{渠道名}` | **最低**（DTO 全 ①，去重/冷却属宿主分发器，渠道自身只读 config） |
 | 文档解析 | `search_sources.rs:62` | ✘ 无 | 1（`DefaultDocumentParser`，零字段单元结构） | 按绝对路径读盘 ⇒ worker 须与宿主同文件视图，否则要走字节流分块（PDF/EML 属 ②）；另有两套同名 `OnceLock` 全局（`search/src/sources.rs:22`、`tools/src/parser.rs:13`）和一处硬编码绕过（`commands/knowledge.rs:1169` 直调具体函数） | `document.parser.{格式族}` | 低（唯一无状态、纯进出的能力） |
 | LLM provider | `ProviderAdapter` | ✅ `model.provider.{类型}` | 内置 14 家 | **D2 流式**（`chat_stream` 首帧即错）；`speech_stream` 同类 | 已有 | 中（机制全在，卡在协议） |
-| 行情数据源 | `market_data.rs:192` | ✘ 无 | 1 生产（`AStockClient`，`astock-data/src/lib.rs:6667`）+ 2 测试替身 | `astock-data/src/as_of.rs:36` 的 `tokio::task_local! AS_OF` 是**隐式上下文**，跨进程必丢 ⇒ 必须改成显式入参 `asOfDate`；客户端自带 Moka L1 / `DiskCache` L2 / health tracker / token 热更新 ⇒ 缓存与凭证主权要选边 | `market.provider.{源名}` | 中高（签名可原样走，状态主权难） |
+| 行情数据源 | `market_data.rs:192` | ✘ 无 | 1 生产（`AStockClient`，`astock-data/src/lib.rs:6641`）+ 2 测试替身 | `astock-data/src/as_of.rs:36` 的 `tokio::task_local! AS_OF` 是**隐式上下文**，跨进程必丢 ⇒ 必须改成显式入参 `asOfDate`；客户端自带 Moka L1 / `DiskCache` L2 / health tracker / token 热更新 ⇒ 缓存与凭证主权要选边 | `market.provider.{源名}` | 中高（签名可原样走，状态主权难） |
 | 量化策略 | `strategy_contract.rs:440` | ✘ 无 | 7（MA/ MACD/RSI/BOLL/Turtle + `RhaiStrategy` + 仿真替身） | `&mut self` + `&mut StrategyCtx` 的 **bar 级热循环**不适合 request/response；`StrategyCtx` 含 `bar_history`/`trades`/`equity_curve` ⇒ 每 bar 全量传输直接爆帧；消费者用工厂闭包（`param_optimizer.rs:72`，③）；主壳 `commands/quant_backtest.rs:363-430` 用 `match strategy_type` + `name.contains("rsi")` 硬构造 | `strategy.{策略名}` | **最高**（需会话式批量 op：spawn / setParam / onBarBatch / drop + ctx 差分） |
 | RAG 向量库 | `rag_provider.rs:21` | ✘ 无 | **生产实现未找到**（仅 `NoopVectorStoreProvider`，`test_support.rs:1079`） | `VectorQueryResult:13` **无 serde**；`&[f32]` 大向量；真实后端 `search/src/vector_store.rs:114 VectorStore{db: DatabaseConnection}` 绑 DB 且以 `Arc<VectorStore>` 直注（`state.rs:72`、`capability_retriever_impl.rs:57`、`knowledge_integration.rs:168`），sqlite-vec 是**进程内扩展** ⇒ 出进程即失效 | `rag.vector_store.{后端名}` | 高（trait 目前是空壳；先补 DTO derive 再谈远程化） |
 | 工具集 | `harness/src/registry.rs:29` / `ToolSetProvider:130` | ✅ `tool.set` | 多 | **D4**：`ToolContext:142-197` 大面积 ③（abort/permissions/sanitizer/ask_user/rollback/sandbox/approval/guardian），代码两处注释自述「不可跨进程传输」 | 已有 | 中（协议已通，缺投影层，缺的是安全正确性而非可行性） |
@@ -973,7 +973,7 @@ SDK                  harness + plugin-proto + plugin-testkit（脚手架 / 契�
 | **P6.0-④ 页面贡献通道 T3** | 见 §0.12.5 三选一：选 A 是**配置 + CSP + 桥扩到 page**（3–5）；选 C 另加 10+ | **3–5**（选 A） | ②的选择由你定，不影响其它项 |
 | **P6.0-⑤ 引擎去域化** | `agent_executor.rs:4385` `PREFETCHABLE_TOOLS`、`:1232-1246` `stock_code` 预取、`:854` prompt 文本 ⇒ 改节点配置/接缝贡献；生产区股票词 32 行 | **5–8** | ③④ 之后（要有贡献通道才能把知识挪出去） |
 | **P6.0-⑥ 执行器与接缝单轨化** | 32 个执行器 0 个走注册表；`document_parser_executor.rs`(59 行空壳) 接真接缝、`notification_executor.rs`(165 行自带四平台 webhook) 并入 `notify.channel` | **10–15** | ⑤ 同批（都是引擎侧） |
-| **P6.1 股票迁出** | 改写 152 处 / 28 文件 + 54 处前端反向 + 304 条命令挂 T2 + 20 表转 `schema.json` + 84 873 行前端出包 + 3 527 key | **45–60** | P6.0 全部（③④⑤⑥ 是关键路径） |
+| **P6.1 股票迁出** | 改写 134 处 / 26 文件 + 54 处前端反向 + 304 条命令挂 T2 + 20 表转 `schema.json` + 84 873 行前端出包 + 3 527 key | **45–60** | P6.0 全部（③④⑤⑥ 是关键路径） |
 | **P6.2 OPC 迁出** | 0 处主壳改写 + 28 处前端 + 138 条命令 + **29 处跨包口改 `call_seam`** + 28 表 + 12 797 行前端 | **20–28** | P6.1（跨包口指向股票 crate）+ D1 超时先修 |
 
 **合计：P6.0 ≈ 39–59 人日，P6.1 ≈ 45–60，P6.2 ≈ 20–28 ⇒ 全段 ≈ 105–147 人日**（单人 5–7 个月，3 人并行受限于关键路径约 2.5–3.5 个月）。
@@ -993,7 +993,7 @@ SDK                  harness + plugin-proto + plugin-testkit（脚手架 / 契�
 股票还在主壳里时，OPC 迁出后只能反向依赖主壳 = 不是插件。顺序由这条决定，不由工作量决定。
 阶段收口才跑全量（CI 口径三条，见 AGENTS.md）；阶段内用 `cargo check` + 定点 clippy。
 
-| **P6.1** | **股票业务迁出为 L1 插件**（任务 #35）：改写 §0.10.1 桶① 的 152 处 / 28 文件（前 7 个文件占 **106** 处），304 条命令走 T2 通道，54 处前端反向 import 清 0，20 张表改由包内 `schema.json` 声明 | 主壳 `grep` 域 crate = 0；`src-tauri/Cargo.toml` 无股票 crate；卸载股票插件后其余 1 099 条命令可用、`stock_*` 表与数据保留 |
+| **P6.1** | **股票业务迁出为 L1 插件**（任务 #35）：改写 §0.10.1 桶① 的 134 处 / 26 文件（B1 后；前 5 个文件占 **88** 处），304 条命令走 T2 通道，54 处前端反向 import 清 0，20 张表改由包内 `schema.json` 声明 | 主壳 `grep` 域 crate = 0；`src-tauri/Cargo.toml` 无股票 crate；卸载股票插件后其余 1 099 条命令可用、`stock_*` 表与数据保留 |
 | **P6.2** | **OPC 业务迁出为 L1 插件**（任务 #36，**不得先于 P6.1**：OPC 的 29 处引用指向股票 crate）：138 条命令走 T2，28 处前端 import 清 0，29 处跨包口改 `call_seam` 并在 §0.6.2 权限面登记 `declared_calls` | 同上判据；且 OPC 停用不影响股票包 |
 | **P6.3** | 其余功能包按 P6.1/P6.2 模板批量迁出：工作流编辑器（83 条命令）、**知识库/Wiki 业务功能面**（131 条命令 / 11 827 行，阻塞面 72 处 / 25 文件，见 §0.6.3 C 层；它与 RAG 解 1/解 2 的取舍无关，可独立排期）等 | 每包一条 `grep 域 crate = 0` 的门禁记录，进 `docs/audits/` |
 ---
@@ -1131,7 +1131,7 @@ ci.yml 侧一律**追加在文件末尾**（本文件被 18+ 处 `ci.yml:<行号
 1. **是否引入服务端部署形态**（解 2 的产品前提）——与桌面单机定位相关，只影响将来，**不阻塞任何阶段**。
 2. ~~CSP / asset 协议的安全评审口径~~ → **已定 A**（§0.12.5）：开 `assetProtocol`、CSP 加 `asset:`、允许根只限插件安装目录。
    仍开着的一小条：现 CSP 里的 `'unsafe-eval'` 何时收 —— 已剥出插件化批次单独排期（与插件装载无关，不该混评）。
-3. **P6 的排期与人力**：P6.1 股票（152 处改写 + 304 条命令 + 84 873 行前端）与 P6.2 OPC 谁先投入、投多少人 —— 这是项目计划，不是架构判据能裁的。
+3. **P6 的排期与人力**：P6.1 股票（134 处改写 + 304 条命令 + 84 873 行前端）与 P6.2 OPC 谁先投入、投多少人 —— 这是项目计划，不是架构判据能裁的。
 
 ---
 
@@ -3023,3 +3023,64 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 - 未跑 `clippy -p axagent-dao`（它只作为依赖被 `Checking`，自身 lint 未过 `-D warnings`）。
 - 未跑全量 `cargo fmt --all --check` ⇒ **#19 是否整体解锁无结论**，只证明 `market_data.rs` 一个文件。
 - 主 crate clippy 那 18m58s 是**联合状态**的绿：同批并行修改的 `stock_analysis.rs` / `reco_pool.rs` / `recommender/mod.rs` / `register_commands.rs` 同在 `-p axagent` 编译面，不能归因为本批隔离绿。
+
+## 63. B1 首刀交付账（2026-11-03；`#100`；执行者报告 `.tmp/res100-b1-impl-report.md` 17 676 B）
+
+### 63.1 交付面（leader 逐项独立复核，非转述）
+
+- **新增 5 个 harness 模块**（untracked → 本批提交）：`task_cancel.rs` 103 行、`trading_calendar.rs` 969 行、`candlestick_pattern.rs` 558 行、`divergence.rs` 494 行、`news_archive.rs` 39 行；`harness/src/lib.rs:148-152` 五条 `pub mod` 注册。
+- **常量并入**：`harness/src/as_of.rs:195` `pub const LIVE_GENERATION: Option<&str> = None;`；`astock-data/src/as_of.rs:513` 改 `pub use`（运行层原样留在本文件）。
+- **5 个垫片**：`astock-data/src/{task_cancel,calendar,candlestick_pattern,divergence}.rs` 变为 3–5 行 `pub use axagent_harness::<mod>::*;`；`astock-data/src/lib.rs:85` 改 `pub use axagent_harness::news_archive::NewsArchiveSink;`（`:430` 字段与 `with_news_archive_sink` 未动）。
+- **18 处消费方改指 harness**：`finance.rs:13/1178/1180/1189/1192`、`background_tasks.rs:11/350/916`、`news_archive_sink.rs:13/14`、`axagent-batch-rerun.rs:418/718`、`axagent-validate-backfill.rs:1301`、`services.rs:2368/2632/2682`、`state.rs:1828/1830`（逐条改前/改后见执行者报告 §2，行号 `grep -n` 现取）。
+- **零扩面**：`git status` 中本批 15 个修改文件 + 5 个新文件，与报告 numstat 逐字一致；**`Cargo.toml` 零改动**（R3 已作废）；`as_of` 运行层 5 处与 `analysis_engine::risk` 均未动（§61.2 J2/J3）；`src/**` 前端与 i18n 未动；全部改动文件 CR 计数 0。
+
+### 63.2 读数兑现 §61.4 的预测（逐数复核）
+
+| 度量 | B1 前 | B1 后 | 预测（§61.4） | 对账 |
+|---|---|---|---|---|
+| 待改写（H 桶除外） | 142 处 / 24 文件 | **124 处 / 22 文件** | 124 / 22 | 兑现 |
+| H 桶 | 10 处 / 4 文件 | **10 处 / 4 文件** | 不变 | 兑现 |
+| 合计（与旧口径可比） | 152 处 / 28 文件 | **134 处 / 26 文件** | 134 / 26 | 兑现 |
+| K1 `.rs` 文件数 | 2025 | **2030** | 2030 | 兑现 |
+| K1 `pub trait` 唯一名 | 324 | **324** | 324 | 兑现（`NewsArchiveSink` 只换文件） |
+
+- 逐文件 delta（B1 前后两份审计快照对比，`AUDIT-l1-blockers-2026-11-03.md` → `…-1557.md`）：`finance.rs` 6→1（−5）、`services.rs` 28→25（−3）、`state.rs` 10→8（−2）、`axagent-batch-rerun.rs` 3→1（−2）、`axagent-validate-backfill.rs` 8→7（−1）、**`background_tasks.rs` 3→0**、**`init/news_archive_sink.rs` 2→0**；合计 **−18 处 / −2 文件** ✓。
+- 审计快照 `…-1557.md` 与 `…-1632.md` 字节完全相同（14 396 B），两次重跑读数一致。
+
+### 63.3 验证门（全部实跑，日志在仓根 `.tmp/res100b1-*`）
+
+| 门 | EXIT | 关键原文 |
+|---|---:|---|
+| `cargo check -p axagent-harness --all-targets` | 0 | `Checking axagent-harness v3.0.0` · `Finished … 1m 21s` |
+| `cargo test -p axagent-harness --lib` | 0 | `test result: ok. 927 passed; 0 failed; 1 ignored`（搬迁测试确在 harness 内跑：`trading_calendar::tests` 20 / `task_cancel::tests` 3 / `candlestick_pattern::tests` 16 / `divergence::tests` 8） |
+| `cargo clippy -p axagent-harness --all-targets -- -D warnings` | 0 | `Finished … 1m 12s` |
+| `cargo check -p axagent-astock-data -p axagent-analysis-engine --all-targets` | 0 | 两 crate 均 `Checking` · `Finished … 3m 00s` |
+| `cargo check -p axagent-tools --all-targets` | 0 | `Checking axagent-tools v3.0.0` · `Finished … 3m 14s` |
+| `cargo check -p axagent --all-targets` | 0 | `Compiling axagent v3.0.0 (src-tauri)` · `Finished … 18m 15s` |
+| `audit-l1-blockers` / `--check-allowlist` | 0 / 0 | 124/22 + 10/4 = 134/26；白名单 PASS |
+| `check-layer-discipline` | 0 | `harness-fanout-zero 0 处（基线 0）`；无超基线 |
+| `check-capability-register` | **0**（重锚后） | 三条红全部消解，见 63.4 |
+| `check-single-source-facts`（`.rs` 面） | 3（软判据） | BROKEN/越界/空行/控制流 **0**；12 条「疑似腐烂」全为既存整段引用，无一条由本批引入 |
+
+⚠ 主 crate 那 18m15s 仍是**联合状态**的绿：并行批的 `stock_analysis.rs` / `reco_pool.rs` / `recommender/mod.rs` / `register_commands.rs` 同在 `-p axagent` 编译面 ⇒ 不能归因为 B1 隔离绿。
+
+### 63.4 本批重锚（leader 做，执行者按纪律未碰）
+
+1. `l1ForeignStock`：value 152→**134**、value2 28→**26**、planNumber `"152"`→`"134"`、`planPinned` PLAN:513 mustContain 同步；PLAN:513/523/558/568/976/996/1134 的 live 陈述同步（523 的重算：前 5 文件 88 处 = 41+25+8+7+7，其后 4 文件各 4，其余 13 文件各 ≤3）。
+2. `k1RsFileCount`：2025→**2030**，PLAN:247 括号数字与 `planPinned` 同步。
+3. **执行者 §6.3 指出的第三条漂移已确认并重锚**：删 `NewsArchiveSink` 定义使 `astock-data/src/lib.rs` 后移 −26 行 ⇒ `market.vendor` 证据 `register_vendor` **863→837**、`find_vendor` **1672→1646**；两条 evidence 补 `anchorText`（整行逐字），`planAnchorText`（PLAN:276）同步。
+4. `workflowAuditDomainCommands` 的 `planOld` 124 新增第 2 个 `alsoAt`（PLAN:523–523），理由：该行的 124 是 B1 后的反向阻塞待改写数，与工作流命令数的历史读数**同形不同物**；自证 token = `134 处（含 H 桶 10 处 / 4 文件）` + `待改写 124 处` + `B1 首刀前口径为 152 / 28`。
+5. 门禁结果：`check-capability-register` **EXIT=0**（21 项 hard 判据全一致，能力面 Σ=23）。
+
+### 63.5 附带修掉的 docs 引用（B1 直接造成）
+
+- `docs/plans/PLAN-four-horizon-workflow-alignment.md:6876-6878`：原文断言「`NewsArchiveSink` 由 astock-data 自己声明」已被 B1 推翻 ⇒ 就地改指 `axagent-core/crates/harness/src/news_archive.rs:19`，并注明 `lib.rs:85` 现为 `pub use` 垫片、注入点现号 `lib.rs:922`（原记 `:914` 在 HEAD 已是 `:948`，属**既存**漂移，一并纠正）；「端口不进实现层、实现留 wiring」的原则不变。
+- **未改**：`docs/audits/AUDIT-capability-inventory-2026-11-01.md:228` 仍写 `NewsArchiveSink`（`crates/astock-data/src/lib.rs:91`）—— 审计是**时点快照**，按纪律不改历史报告；现指映射为 `harness/src/news_archive.rs:19`。
+
+### 63.6 未做 / 未覆盖（不许读成「已验证」）
+
+- **无成员独立复核、无第二人复扫**：委派通道当日被 hook 改写（`team-task delegate` 零返回），执行者按 §119 提示停止重试并自做自证；本报告 §63.1–63.3 的数字是 leader 本人在盘上重取，但**评审视角仍只有一人**。
+- 未跑 `check-single-source-facts --dump-doc-refs` 的完整人判（扫描仍在后台跑；本批只确认无 BROKEN/ABORT）。
+- 未跑主 crate 测试（派单只要求 `cargo check`）；未跑全量 `cargo fmt --all --check` / 全量 clippy（#19 属终验批）。
+- `#128` 的棘轮下调（`commands-no-direct-db 628→625`）仍未做，等全部在飞批次提交后一次性重算；本批未跑 `--update-baseline`。
+- §0.10 的历史分解段（PLAN:1167 的 152 分桶、§50.6 的 2446 行、§54.1 的 2512 行、§57 的 2661 行三行表）保留 B1 前口径原样，属**历史交付账**，不再回写。

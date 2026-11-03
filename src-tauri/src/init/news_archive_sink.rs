@@ -9,9 +9,9 @@
 //! C5.2: `article_code` 始终用 url 的 sha256 hash 兜底，
 //! 确保 NOT NULL 约束满足，UNIQUE(source, article_code) 不会因 NULL 失效。
 
-use axagent_astock_data::NewsArchiveSink;
-use axagent_astock_data::types::NewsItem;
 use axagent_dao::repo::news_archive::{self, ArchivedNews, NewsArchiveEntry};
+use axagent_harness::news_archive::NewsArchiveSink;
+use axagent_harness::stock_market_types::NewsItem;
 use sea_orm::DatabaseConnection;
 use sha2::{Digest, Sha256};
 

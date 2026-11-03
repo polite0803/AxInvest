@@ -3144,7 +3144,7 @@ cap 与 `pm_risk_veto` 一起按档。
 等价性主张补成实测 —— 记在这里，免得它继续停在「看起来会这样」：
 
 1. **K 线尾切方向**（决定 `GLOBAL_LOOKBACK=60` 切出来的是不是同一批 60 根）：
-   `get_klines_with_adj` 的缓存命中路径 `crates/astock-data/src/lib.rs:2415` 就是
+   `get_klines_with_adj` 的缓存命中路径 `crates/astock-data/src/lib.rs:2389` 就是
    `let start = klines.len().saturating_sub(limit); klines[start..]` ⇒ **升序、尾部=最新**是既有口径。
    本轮把 fetch 从 60 提到 120、再取尾 60 根喂全局三量 ⇒ 落到的仍是同批 60 根，
    `ann_vol_pct` / `max_dd_pct` / `sharpe` 与退役前逐位一致（不是「近似一致」）。
@@ -6873,9 +6873,9 @@ zh-CN 追加原文：`MACD 慢线必须大于快线，否则工具显式报错�
 ①给 `astock-data` 加数据库依赖；②定一个 trait 再改异步。**裁定走②形，但 trait 不住 harness** ——
 现场有一条一模一样的先例，不必新造分层：
 
-- `crates/astock-data/src/lib.rs:85` `pub trait NewsArchiveSink: Send + Sync`（**async 方法**：`upsert` / `search_asof`）
-  由 **astock-data 自己声明**，实现落在 `src-tauri/src/init/news_archive_sink.rs:105`（wiring 层，看得见 dao/entities），
-  注入点 `AStockClient::with_news_archive_sink(sink: Arc<dyn NewsArchiveSink>)`（`lib.rs:914`）。
+- `axagent-core/crates/harness/src/news_archive.rs:19` `pub trait NewsArchiveSink: Send + Sync`（**async 方法**：`upsert` / `search_asof`）——**2026-11-03 B1（`#100`）起定义已上收 harness**：原定义在 `crates/astock-data/src/lib.rs:91`（写本条时记作 `:85`，当时已漂），现该处改为 `pub use axagent_harness::news_archive::NewsArchiveSink;`（`lib.rs:85`）⇒ 本条「由 astock-data 自己声明」的结论作废；「端口不进实现层、实现留 wiring」的原则不变（harness 是 foundation，仍无 entities/dao 依赖）。
+  由 `axagent-harness` 声明（B1 前为 astock-data 自己声明），实现落在 `src-tauri/src/init/news_archive_sink.rs:105`（wiring 层，看得见 dao/entities），
+  注入点 `AStockClient::with_news_archive_sink(sink: Arc<dyn NewsArchiveSink>)`（`lib.rs:922`）。
 - ⇒ B-3 的正解是**同形复制**：端口在 astock-data（下层声明需求），适配器在 `src/init/`（上层用 sea-orm 实现）。
   **禁止**路①：①会让 `astock-data` 反向依赖 `entities/dao`，而 `analysis-engine → astock-data` 已经存在，
   `dao` 那一侧又依赖 entities ⇒ 直接把 implementor 层拧成环（禁区 1）。

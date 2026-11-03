@@ -510,7 +510,7 @@ pub fn reset_global_degradation_log() {
 /// 用具名常量而不是裸 `None`：`None` 与「忘了传代际」在源码里完全同形，代际门
 /// （`scripts/check-reco-generation.mjs`）读不出这里是想过代际的；具名常量强制每个
 /// 实盘入口显式表态。
-pub const LIVE_GENERATION: Option<&str> = None;
+pub use axagent_harness::as_of::LIVE_GENERATION;
 
 /// 代际参数形状：`YYYY-MM-DD` = 某次回放的截止日；留空 = 实盘口径。
 ///

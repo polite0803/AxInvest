@@ -1825,9 +1825,9 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
             match client_for_calendar.get_klines("sh000001", "daily", 60).await {
                 Ok(klines) => {
                     let dates: Vec<String> = klines.iter().map(|k| k.date.clone()).collect();
-                    let n = axagent_astock_data::calendar::populate_holidays_from_kline_dates(
+                    let n = axagent_harness::trading_calendar::populate_holidays_from_kline_dates(
                         &dates,
-                        axagent_astock_data::calendar::beijing_today(),
+                        axagent_harness::trading_calendar::beijing_today(),
                     );
                     tracing::info!(
                         "[init] 交易日历指数K自证完成: {} 根K线, 新增休市日 {n}",

@@ -3084,3 +3084,41 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 - 未跑主 crate 测试（派单只要求 `cargo check`）；未跑全量 `cargo fmt --all --check` / 全量 clippy（#19 属终验批）。
 - `#128` 的棘轮下调（`commands-no-direct-db 628→625`）仍未做，等全部在飞批次提交后一次性重算；本批未跑 `--update-baseline`。
 - §0.10 的历史分解段（PLAN:1167 的 152 分桶、§50.6 的 2446 行、§54.1 的 2512 行、§57 的 2661 行三行表）保留 B1 前口径原样，属**历史交付账**，不再回写。
+
+## 64. 两条延期裁定收口（2026-11-03；`#125` 工具出参 key 政策 / `#126` as_of 运行层）
+
+### 64.1 `#125`：工具出参 key 政策 = **逐工具冻结，不按分层改名**
+
+**裁定**：工具出参 JSON 是**LLM 可见契约**，不是 IPC/frontend DTO。政策三条：
+
+1. **按工具现状冻结**：既有工具的 key 原样保留（`snake_case`、短名、中文值都算契约的一部分），不许以「统一命名」「分层上收」为由批量改名。
+2. **新增 key 跟随该工具既有风格**，不强制 camelCase；跨进程（Tauri 命令 / 接缝 op）的 DTO 才受禁区 13 的 camelCase 约束。
+3. **上收的前置判据 = JSON key 零变化**：领域结果结构体只有在「逐字段同名、同型、同序」时才可整删本地类型；字段超集必须留适配层（本文件 `finance.rs:140-149` 的 `PegR` 就是先例，`VarResult` 整删是另一侧的实证）。
+
+**对 J3 的处置**：`analysis_engine::risk` 的 6 个结果结构体**不因分层而上收 harness**。理由：它们的字段名（`var_pct` / `mean_return` / `cvar_pct` …）直接就是 `calc_var` / `calc_sharpe` 等工具的输出 key（`finance.rs:117-118`、`:1443`）；上收时若补 `rename_all = "camelCase"` 即改 LLM 可见 JSON，属语义变更；原样上收则把 6 个 snake_case 结构体塞进 foundation，与禁区 13 的示范相反。它们留在 `analysis-engine`（implementor），由 `tools`（hybrid）按既有依赖方向使用 —— 分层上没有违规，只有「读数不动」这一条代价，接受。
+
+### 64.2 `#126`：as_of 运行层**不进 harness**，维持 `harness/src/as_of.rs:8` 的边界声明
+
+**裁定**：不上收，`#126` 关闭（不做）。三条依据：
+
+1. **定位**：harness 是「纯契约 + 纯 DTO」的 foundation；`harness/src/as_of.rs:8` 明写「不含运行时状态（task_local、全局 Mutex 等实现在 astock-data 中）」。这条边界是当前 foundation 零 `axagent-*` 依赖之外的第二条硬约束。
+2. **形态**：运行层不是几个函数，而是一套**进程级状态机** —— `tokio::task_local! AS_OF`（`astock-data/src/as_of.rs:36`）+ `static GLOBAL_AS_OF: OnceLock<Mutex<AsOfScopeStack>>` 作用域栈（`:82`，含 `next_token`）+ 降级日志双缓冲（`:280-291`）。把它搬进 foundation 会让 7 个 workspace 共享一个隐式可变单例，测试隔离、插件沙箱与「数据主权在宿主」三条都变难。
+3. **归属**：它服务的对象是 vendor 调用（数据源实现层），正确归属是 implementor（`astock-data`）；#35 股票迁出时随域 crate 一起走，不由 harness 承接。
+
+**残留的 5 处读数**（`batch-rerun.rs:44`、`validate-backfill.rs:533`、`services.rs:2283/5764/5787`）是宿主装配对域运行层的合法引用；要彻底消掉，方向是 `market.vendor` 接缝已声明的「`AS_OF` task-local 必须改显式入参」，不是搬进 harness。该改造归 B2/B7，不在本裁定内。
+
+### 64.3 `#102`：`session.store` 是**宿主内部注入通道**，不对插件开放（半截状态改为显式契约）
+
+**盘上事实**（本轮复核，纠正 R1 的行号）：
+
+- 注册口现为 `capability_registry.rs:1186-1200`（R1 写的 `:1036` 已漂移），预置声明在 `:248-260`；注释自陈用途是「工具侧原先经 `OnceLock` + setter 各自注入同一实例，现统一从本接缝取回（缺口 G4）」。
+- `get_session_state_store()` 的真实调用方是两个**宿主内**工具：`capability_load.rs:54`、`save_as_workflow.rs:53` —— 走的都是注册表直取，不是 worker 帧。
+- `dispatch_seam`（`axagent-plugins/crates/plugins/src/worker.rs:586`）确实 **0 处** `session.store` 分支 ⇒ 插件发起 `call_seam` 会落到末尾 `SEAM_CALL_UNSUPPORTED`。
+
+**裁定：不补分派支（不向插件暴露）**。依据：
+
+1. **数据主权判据未定**，PLAN 既有口径是「`session.store` 提供面不远程化」（本文件 :309、:1091）；`PLAN-plugin-gap-closure.md` 明写「本期不做（数据主权判据未定）」。
+2. 它的现存价值是 **G4 宿主内注入**（替换 OnceLock 双注入），已在生产使用；「插件调不到」不是缺陷，是边界。
+3. 会话状态是跨会话 / 跨 agent 的宿主自有 KV（含 `NS_SKILL_LOADED` 等命名空间键），一旦对插件开放 `list_by_prefix` 就等于开放全量读取；要开放必须先有 §54.2 R1 第二段设计的「命名空间白名单 + DTO/`schema_version` 校验」，那是 `domain.store` 批的事。
+
+**落地（归第二波，未做）**：① 在 `dispatch_seam` 前加一张显式的宿主内部接缝表（当前仅 `session.store`），命中即返回带说明的拒绝，而不是让它落到通用「未知 op」分支；② 补一条测试锁住「插件调用 `session.store` → 明确拒绝且不触达 provider」；③ 在预置声明注释里写明「宿主内部，不远程」。本裁定之前，`#102` 保持 pending。

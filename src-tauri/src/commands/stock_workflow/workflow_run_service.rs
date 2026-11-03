@@ -28,6 +28,10 @@
 //! 派发**一律 fire-and-forget**（`Emit` 是串行 await，见 `typed_event.rs:207-212`，
 //! 直接 await 会把插件 RTT 塞进节点调度热路径）。
 //!
+//! 本文件只做 wiring、不直接发 SQL，故连 `DatabaseConnection` 也取自
+//! `axagent_dao`（分层门禁规则 1：`src/commands/**` 不得出现 `sea_orm::` 字面量，
+//! 本文件基线为 0；dao 根已 `pub use` 同一类型，换导入源不改类型与行为）。
+//!
 //! ## 首版刻意不做（对齐契约注释）
 //!
 //! - 不做跨宿主重启的 `status` 兜底（DB 里可能残留 `running` 幽灵行）；
@@ -40,6 +44,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use axagent_dao::DatabaseConnection;
 use axagent_harness::workflow_types::{ExecutionStatus, Variable, WorkflowStatus};
 use axagent_harness::{
     AsOfContext, AxAgentError, DispatchMode, DomainEvent, EventCategory, EventDispatchBus,
@@ -50,7 +55,6 @@ use axagent_rt_workflow::work_engine::engine::node_task_scope_hook;
 use axagent_rt_workflow::work_engine::{
     ProgressCallback, RunOptions, StepProgressEvent, WorkEngine, WorkEngineError,
 };
-use sea_orm::DatabaseConnection;
 use serde_json::json;
 use tokio::sync::RwLock;
 

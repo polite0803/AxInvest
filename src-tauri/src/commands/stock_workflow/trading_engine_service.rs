@@ -8,6 +8,9 @@
 //! ORM 类型（`trades::Model`）**不过线** —— 统一经 `axagent_analysis_engine::trading::trade_view`
 //! 转 `TradeView`（该函数是唯一转换点，本文件不重写字段映射）。
 //!
+//! 同键查重的 SQL 收在 `axagent_dao::repo::trade`（分层门禁规则 1：本文件基线 0，
+//! 不得出现 ORM 字面量）；本文件只保留「命中 ⇒ 按 `duplicate` 拒绝」的编排与错误映射。
+//!
 //! ## 六 op 的宿主侧处理
 //!
 //! | op | 串行锁 | `as_of` | 计时 | 去重 | 错误映射 |
@@ -34,13 +37,13 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use axagent_analysis_engine::trading::{TradingEngine, is_trading_enabled, trade_view};
-use axagent_entities::trades;
+use axagent_dao::DatabaseConnection;
+use axagent_dao::repo::trade as trade_dao;
 use axagent_harness::{
     AsOfContext, AxAgentError, PositionSummary, TradeExecutionOutcome, TradeExecutionRequest,
     TradePredictionComparison, TradeValidation, TradeValidationRequest, TradeView,
     TradingEngineProvider,
 };
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::{Mutex, RwLock};
 
 /// 交易历史单次返回上限（分派层缺省 50；这里再夹一层，防插件一次拉爆内存）。
@@ -241,17 +244,17 @@ async fn is_duplicate_trade(
     db: &DatabaseConnection,
     request: &TradeExecutionRequest,
 ) -> Result<bool, AxAgentError> {
-    trades::Entity::find()
-        .filter(trades::Column::StockCode.eq(&request.stock_code))
-        .filter(trades::Column::Direction.eq(&request.direction))
-        .filter(trades::Column::TradeDate.eq(&request.trade_date))
-        .filter(trades::Column::TradeTime.eq(&request.trade_time))
-        .filter(trades::Column::Price.eq(request.price))
-        .filter(trades::Column::Quantity.eq(request.quantity))
-        .one(db)
-        .await
-        .map(|row| row.is_some())
-        .map_err(|e| AxAgentError::Provider(format!("交易查重失败（trades 查询）: {e}")))
+    trade_dao::exists_same_key(
+        db,
+        &request.stock_code,
+        &request.direction,
+        &request.trade_date,
+        &request.trade_time,
+        request.price,
+        request.quantity,
+    )
+    .await
+    .map_err(|e| AxAgentError::Provider(format!("交易查重失败（trades 查询）: {e}")))
 }
 
 #[cfg(test)]

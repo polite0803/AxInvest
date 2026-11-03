@@ -12,7 +12,7 @@ use crate::as_of::AsOfContext;
 use crate::core_error::{AxAgentError, Result};
 use crate::data_outcome::DataOutcome;
 use crate::stock_market_types::{
-    Announcement, BlockTrade, BoardMember, ClsFlashItem, ConceptBoard, ConceptBlocks, ConsensusEPS,
+    Announcement, BlockTrade, BoardMember, ClsFlashItem, ConceptBlocks, ConceptBoard, ConsensusEPS,
     DividendRecord, DragonTigerEntry, EarningsEvent, HolderCount, HotStock, IndexQuote,
     IndustryRank, LimitUpPool, LockupSchedule, MarginData, MarketDragonTiger, MarketListPage,
     MoneyFlow, NewsItem, NorthBoundFlow, NorthBoundHolding, OptionPCR, PeerComparison, PledgeData,
@@ -282,8 +282,7 @@ pub trait MarketDataProvider: Send + Sync {
         _as_of: Option<AsOfContext>,
     ) -> Result<Vec<MarginData>> {
         Err(AxAgentError::Provider(
-            "MarketDataProvider::get_margin_balance_trend 未实现（该提供者不支持此数据面）"
-                .into(),
+            "MarketDataProvider::get_margin_balance_trend 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 
@@ -529,8 +528,7 @@ pub trait MarketDataProvider: Send + Sync {
         _as_of: Option<AsOfContext>,
     ) -> Result<DataOutcome<Vec<IndexQuote>>> {
         Err(AxAgentError::Provider(
-            "MarketDataProvider::get_index_quotes_outcome 未实现（该提供者不支持此数据面）"
-                .into(),
+            "MarketDataProvider::get_index_quotes_outcome 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 
@@ -594,8 +592,7 @@ pub trait MarketDataProvider: Send + Sync {
         _as_of: Option<AsOfContext>,
     ) -> Result<Vec<BoardMember>> {
         Err(AxAgentError::Provider(
-            "MarketDataProvider::get_concept_board_members 未实现（该提供者不支持此数据面）"
-                .into(),
+            "MarketDataProvider::get_concept_board_members 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 

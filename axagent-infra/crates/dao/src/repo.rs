@@ -82,6 +82,7 @@ pub mod sync_permission;
 pub mod sync_policy;
 pub mod time_travel_batch_runs;
 pub mod tool_execution;
+pub mod trade;
 pub mod vec_collection;
 pub mod workflow_approval;
 pub mod workflow_execution;

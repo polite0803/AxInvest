@@ -69,7 +69,7 @@
 ### 0.5.3 一个「能力」的终局定义（可机械检验，不再凭感觉切）
 
 > ⚠ **本节原定义只覆盖了一类单元，2026-11-01 由 §0.10 逼出修正**。「一条接缝族」判得住 LLM provider，
-判不住股票包（304 条命令 + 57 个工具 + 293 个前端文件 + 20 张表）。终局有**两类可插单元**，判据不同：
+判不住股票包（304 条命令 + 57 个工具 + 294 个前端文件 + 20 张表）。终局有**两类可插单元**，判据不同：
 
 | 单元 | 边界 | 贡献面 | 判据 |
 |---|---|---|---|
@@ -516,7 +516,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | Cargo.toml 构建边 | 8 条（`src-tauri` 4 + `tools` 2 + 域内 2） | 1 条（`src-tauri → axagent-company-runtime`） |
 | 前端反向 import（非域 import 域文件） | 54 处 / 39 文件 | 28 处 / 11 文件（15 处集中在 `ContentArea.tsx`） |
 | 前端体量（**目录口径**：`components/stock-analysis` / `pages/opc`） | `components/stock-analysis` 211 文件 / 60 757 行 + store 6 文件 / 4 514 行 | `pages/opc` 20 文件 / 8 859 行 + `OpcPage.tsx` 134 行 |
-| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 293 文件 / 84 874 行 | 40 文件 / 12 797 行 |
+| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 294 文件 / 85 009 行 | 40 文件 / 12 797 行 |
 | entities 表文件 | 20 个 | 28 个 |
 | zh-CN i18n key | 3 527（`stockAnalysis`/`invest`/`quant`/`trade` 是**整段**） | 1 897（`opc` 整段） |
 
@@ -608,7 +608,7 @@ plugin-stock/
 ├─ src/commands/         # T2：304 条股票命令的实现（不再进主壳 build.rs 的注册表）
 ├─ src/tools/            # T1：57 个 stock_mcp_tools（清单是 Vec<serde_json::Value>，纯 JSON 过帧）
 ├─ crates/               # astock-data · analysis-engine · quant · market-sim 随包出仓
-├─ web/                  # T3：293 文件 / 84 874 行前端源码 → 打包 bundle
+├─ web/                  # T3：294 文件 / 85 009 行前端源码 → 打包 bundle
 ├─ schema/tables.json    # T4：20 张表的声明，宿主按 additive-only 建表
 ├─ i18n/*.json           # T5：11 语言 / 3 527 key
 ├─ plugin.json           # 清单：id · 协议兼容窗口 · requires 权限 · pages · commands · tools · seams
@@ -712,7 +712,7 @@ CLI 通道保留给既有"外部 CLI 插件"品类，但必须补 `input_schema`
 
 ### 0.12.4 第五道门 `check-capability-register.mjs` → **建**
 
-**判据**：今天这轮自查就抓出 **15 处数字漂移 + 2 套并行口径**（1534/1541、工作流 124/83、股票 304/306、前端 60 757/84 874），**2026-11-01 本批再记三对漂移（旧/新）：命令 1541/1542、`.rs` 文件 2005/2004、`pub trait` 316/315**；**2026-11-02 `#75` 再记一对：命令 1542/1543（新增 `plugin_list_pages`）**——本段是这些旧读数的唯一合法出现处，写在别处由第五道门判红。
+**判据**：今天这轮自查就抓出 **15 处数字漂移 + 2 套并行口径**（1534/1541、工作流 124/83、股票 304/306、前端 60 757/85 009），**2026-11-01 本批再记三对漂移（旧/新）：命令 1541/1542、`.rs` 文件 2005/2004、`pub trait` 316/315**；**2026-11-02 `#75` 再记一对：命令 1542/1543（新增 `plugin_list_pages`）**——本段是这些旧读数的唯一合法出现处，写在别处由第五道门判红。
 全靠人工复扫才发现 —— 没有机器对账，这些数字**一定会再漂**，而它们是 P5/P6 全部判据的分母。
 **成本（可复用件已在）**：`scripts/audit-capability-inventory.mjs` + `scripts/audit-l1-blockers.mjs` + 共享规则 `scripts/lib/command-domains.mjs` 都已落地，
 第五道门只需「复跑两份 audit → 与 §0.7 登记表逐行 diff → 条数变化未显式改表即红」。
@@ -727,7 +727,7 @@ CLI 通道保留给既有"外部 CLI 插件"品类，但必须补 `input_schema`
  CSP 是 `default-src 'self' tauri: ipc: data:` ⇒ 加载插件自带 bundle 需要**开 asset 协议 + CSP 加一条源**。
 
 **裁定**：
-1. **业务域主页面**（股票 293 文件 / 84 874 行的自绘图表与多面板交互）→ 走「插件 bundle + 宿主通用容器页」，
+1. **业务域主页面**（股票 294 文件 / 85 009 行的自绘图表与多面板交互）→ 走「插件 bundle + 宿主通用容器页」，
  **复用 `PluginPanelHost` 的桥与白名单扩到 page 粒度**，不新造一套 IPC 桥。
 2. **表单 / 看板类**贡献（OPC 的 12 797 行里多数是列表与表单）→ 继续走 DynamicPage 的 UISchema 通道。
 3. 每个 L1 包在 `plugin.json` 里逐页声明用哪条，**不许一个包混用两条却不声明**。
@@ -740,7 +740,7 @@ CLI 通道保留给既有"外部 CLI 插件"品类，但必须补 `input_schema`
 | 选项 | 做法 | 安全面代价 | 工程量 | 我的评价 |
 |---|---|---|---|---|
 | **A ✅ 已选（2026-11-01）** | 开 `assetProtocol`，只把**插件安装目录**列进允许根；CSP 的 `default-src` 加一条 `asset:`；`'unsafe-eval'` **本批不动**，单独立项收 | 中：新增一个可被插件写入的静态源；但 origin 仍是 asset 协议、不获得宿主 invoke（桥仍走 `PluginPanelHost.tsx:30` 白名单） | 小：`tauri.conf.json` 一条配置 + CSP 一段 + 白名单测试扩到 page | 一次到位，股票 bundle 有唯一现实载体；风险由已有白名单兜住 |
-| **B（零安全变更）** | 不开 asset 协议，插件页面继续用现有 `manifest.dashboardPanels[].frontendEntry` **文本资产 + iframe `srcdoc`**（`ArtifactPreview/ChartPreview.tsx:33` 已有同款用法） | **零**：不新增源，CSP 不动 | 中：bundle 必须内联成单文件 HTML | 适合 OPC 的表单类页面；**股票 84 874 行内联不现实**（首屏解析与图表库体积会炸），只能当兜底 |
+| **B（零安全变更）** | 不开 asset 协议，插件页面继续用现有 `manifest.dashboardPanels[].frontendEntry` **文本资产 + iframe `srcdoc`**（`ArtifactPreview/ChartPreview.tsx:33` 已有同款用法） | **零**：不新增源，CSP 不动 | 中：bundle 必须内联成单文件 HTML | 适合 OPC 的表单类页面；**股票 85 009 行内联不现实**（首屏解析与图表库体积会炸），只能当兜底 |
 | **C（最隔离）** | 插件页面开**独立 WebviewWindow**，origin 完全隔离，宿主只发事件 | 低（隔离最强），但**多窗口生命周期/主题同步/i18n 全要新写** | 大：新增一条 UI 体系 | 过度。与"业务包看起来像主壳功能"这个产品目标相反 |
 
 ⇒ **裁定（2026-11-01 选定 A）**：开 `assetProtocol` + CSP 加 `asset:` 一条 + 桥扩到 page 粒度（任务 #39，3–5 人日）。
@@ -973,12 +973,12 @@ SDK                  harness + plugin-proto + plugin-testkit（脚手架 / 契�
 | **P6.0-④ 页面贡献通道 T3** | 见 §0.12.5 三选一：选 A 是**配置 + CSP + 桥扩到 page**（3–5）；选 C 另加 10+ | **3–5**（选 A） | ②的选择由你定，不影响其它项 |
 | **P6.0-⑤ 引擎去域化** | `agent_executor.rs:4385` `PREFETCHABLE_TOOLS`、`:1232-1246` `stock_code` 预取、`:854` prompt 文本 ⇒ 改节点配置/接缝贡献；生产区股票词 32 行 | **5–8** | ③④ 之后（要有贡献通道才能把知识挪出去） |
 | **P6.0-⑥ 执行器与接缝单轨化** | 32 个执行器 0 个走注册表；`document_parser_executor.rs`(59 行空壳) 接真接缝、`notification_executor.rs`(165 行自带四平台 webhook) 并入 `notify.channel` | **10–15** | ⑤ 同批（都是引擎侧） |
-| **P6.1 股票迁出** | 改写 133 处 / 26 文件 + 54 处前端反向 + 304 条命令挂 T2 + 20 表转 `schema.json` + 84 874 行前端出包 + 3 527 key | **45–60** | P6.0 全部（③④⑤⑥ 是关键路径） |
+| **P6.1 股票迁出** | 改写 133 处 / 26 文件 + 54 处前端反向 + 304 条命令挂 T2 + 20 表转 `schema.json` + 85 009 行前端出包 + 3 527 key | **45–60** | P6.0 全部（③④⑤⑥ 是关键路径） |
 | **P6.2 OPC 迁出** | 0 处主壳改写 + 28 处前端 + 138 条命令 + **29 处跨包口改 `call_seam`** + 28 表 + 12 797 行前端 | **20–28** | P6.1（跨包口指向股票 crate）+ D1 超时先修 |
 
 **合计：P6.0 ≈ 39–59 人日，P6.1 ≈ 45–60，P6.2 ≈ 20–28 ⇒ 全段 ≈ 105–147 人日**（单人 5–7 个月，3 人并行受限于关键路径约 2.5–3.5 个月）。
 误差来源先说清：① 这些是**改动点数 × 单点成本**的外推，不是实测 —— 仓内唯一的实测锚点是 §3 的「新增一条接缝 6 处固定成本 ⇒ 13 条约 78–90 处改动点」；
-② 前端 84 874 行的出包成本没有先例，估工里 **±30% 的不确定性最大**；
+② 前端 85 009 行的出包成本没有先例，估工里 **±30% 的不确定性最大**；
 ③ 未含 D1/D2/D4 三个协议缺口的修复工时（在 P5.0a，另算）。
 
 **推荐排期（按依赖，不按难度）**：
@@ -1124,14 +1124,14 @@ ci.yml 侧一律**追加在文件末尾**（本文件被 18+ 处 `ci.yml:<行号
 - ~~**§0.7.6** DojoExtension~~ → **裁定：废弃 trait，形状吸收进 L1 命令通道 T2**（生产实现者 0，唯一实现是 `dojo_extension.rs:414` 的测试替身）；顺带修掉 CLI 通道里写死的 `ReadOnly`。
 - ~~**§0.7.7** 市场仿真~~ → **裁定：维持内核**，可插部分下放到「策略数据」层（场景/参数/脚本）；`kernel.rs:703` 每 tick 遍历全部 agent，出进程即 tick × agent 次 IPC。
 - ~~**§0.7.8** 第五道门~~ → **裁定：建**（本轮自查就抓出 15 处数字漂移，分母不可信则全部判据失效）；可复用件已在，接线约 1 人日。
-- ~~**§0.10.2 T3** 前端装载形态~~ → **裁定：两条都要，按页面复杂度分流**（`PluginPanelHost.tsx:30` 的受限 IPC 桥已存在，扩到 page 粒度即可；股票 84 874 行走 bundle，OPC 表单类走 DynamicPage）。
+- ~~**§0.10.2 T3** 前端装载形态~~ → **裁定：两条都要，按页面复杂度分流**（`PluginPanelHost.tsx:30` 的受限 IPC 桥已存在，扩到 page 粒度即可；股票 85 009 行走 bundle，OPC 表单类走 DynamicPage）。
 
 **真正还开着的（都不是架构问题，我裁不了）：**
 
 1. **是否引入服务端部署形态**（解 2 的产品前提）——与桌面单机定位相关，只影响将来，**不阻塞任何阶段**。
 2. ~~CSP / asset 协议的安全评审口径~~ → **已定 A**（§0.12.5）：开 `assetProtocol`、CSP 加 `asset:`、允许根只限插件安装目录。
    仍开着的一小条：现 CSP 里的 `'unsafe-eval'` 何时收 —— 已剥出插件化批次单独排期（与插件装载无关，不该混评）。
-3. **P6 的排期与人力**：P6.1 股票（133 处改写 + 304 条命令 + 84 874 行前端）与 P6.2 OPC 谁先投入、投多少人 —— 这是项目计划，不是架构判据能裁的。
+3. **P6 的排期与人力**：P6.1 股票（133 处改写 + 304 条命令 + 85 009 行前端）与 P6.2 OPC 谁先投入、投多少人 —— 这是项目计划，不是架构判据能裁的。
 
 ---
 
@@ -3376,3 +3376,47 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 1. **`③ 域自有 456 处 / 41 文件` 没有锚点** ⇒ 门不检它，本批只同步 PLAN:515 那一格。要不要建硬锚点属 #54 那批「先出数再升 hard」的节奏，不借本批偷偷升。
 2. **625 与 456 + 29 + 133 = 618 差 7 处未对账**：前者是分层棘轮 `scripts/layer-discipline-allowlist.json:6` 的 `total`，后者是审计脚本按「域自有 / 跨包口 / 反向阻塞」三分法的合计 —— **两套扫描面不同源**（棘轮含 `bin/` 与离线工具）。不许把它当「有 7 处漏计」来算，也不许顺手抹平；归 **#128**（下调棘轮基线那批）一并裁。
 3. **未跑 `--repin-plan`**：本批之后登记表与 HEAD 自洽（CI 与干净检出绿），而工作区里他人未提交的 +3 行文档头已在批末**原样交回**；那批落地时由它自己重锚，本批不替它把坐标钉到一个尚未存在的状态上。
+
+---
+
+## 67. 本机前端验证两条腿：`#137` vitest 坐标与过滤器 + B3-c 面板渲染（2026-11-04）
+
+### 67.1 `#137`：UNC cwd 下 vitest 的定点过滤器恒 0 命中（已修）
+
+**两层现象，都是「坐标不对」而不是「没有测试」**：
+
+- 从 `\\vmware-host\...` 调 `run <文件或目录>`，位置过滤按**相对 root** 匹配；UNC root 与映射盘 root 不是同一串 ⇒ 恒 0 命中，vitest 只报 `No test files found`（退 1，但理由看不出来）。
+- 坐标修好后还有第二层：网络盘上 fork worker 启动就慢到撞 vitest 的 60 s `Timeout waiting for worker to respond`（并行时 4 个 worker 全灭；串行时 4 个里能起 2 个）。
+
+**改法**（`scripts/vitest-run.mjs` —— 只动这个本地入口，不动 vitest 配置、不动 CI）：
+
+1. UNC → 扫 A–Z 用 `realpathSync.native("X:\\")` 找映射，取**最长**匹配的盘符根拼回盘符路径；**跳过「项目目录就是盘根」的塌缩别名**（本机 `X:` 恰指向本仓目录 ⇒ 别名塌成 `X:\`，vitest root 变 `X:/`，四个 worker 全 60 s 超时）。
+2. 映射不到又带位置过滤 ⇒ **当场退 2 并说明怎么调**，不再让它沉成一句 `No test files found`。
+3. root 落在网络共享 ⇒ 默认追加 `--no-file-parallelism`（调用方显式给并行开关时尊重它），实测依据写进注释。
+
+**验收（cwd 一律 = UNC 根）**：
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| G1 | `node scripts/vitest-run.mjs run src/components/plugin`（修前） | 1 | `No test files found, exiting with code 1` |
+| G2 | 同上（修后，串行） | 1 | 两次样本：**4 文件 / 54 passed**（628 s）与 **2 文件 / 23 passed + 2 个 worker 启动超时**（505 s）⇒ 过滤器已修；worker 启动超时是**另一层**（未做 1） |
+| G3 | 同上加 `--no-file-parallelism` 之前（并行对照） | 1 | 并行时 **4 个 worker 全部启动超时**，两次样本一致 |
+| G4 | `node scripts/vitest-run.mjs run src/components/chat/__tests__/PluginMarketplace.eventStats.test.tsx` | 0 | **3 passed**（即 §67.2 的用例，同时验证「新文件路径也能被过滤命中」） |
+
+⚠ **这条腿顺带抓出一条门禁假绿**：`npm run typecheck`（= `tsc --noEmit`）从 UNC cwd 调时，npm 用 cmd.exe 起进程，而 **cmd.exe 不支持 UNC 作 cwd** ⇒ cwd 回退 `C:\Windows`、tsc 找不到 tsconfig、**打印帮助并退 1**（列 0 个文件）。本批改用手工等价命令取证：`cd D:\... && node node_modules/typescript/bin/tsc --noEmit`（同一条 tsc，只是不经 cmd.exe），并加 `--listFiles` **自证真扫了 1455 个项目文件**、两份改动都在列。与 #45 同族但不同因（#45 修的是直接调用；这次是 `npm run` 的 cmd.exe 中转）⇒ 见未做 2。
+
+### 67.2 B3-c：插件面板渲染 `eventStats`（含 11 语言文案）
+
+**改动面**：`src/components/chat/PluginMarketplace.tsx` 每张卡片底部加一行「事件投递 / 丢弃」；`eventStats === null` 显示「未订阅事件」而不是 0 —— 两种状态处置不同，合并会把「没订阅」显示成「零丢弃」。悬停列出三桶明细，并写明 `unavailable` 是 `invoke` 的子集、不重复计入。文案 3 条 × **11 个 locale**（块内按行插入、保序、LF；写盘后逐文件 `JSON.parse` 复核 + CR 字节 0）。
+
+**新增测试**（`src/components/chat/__tests__/PluginMarketplace.eventStats.test.tsx`，3 条）：null ⇒ 未订阅；有值 ⇒ `delivered / droppedTotal` 原样透出；`unavailable` **不加进总数**（若重复相加，`0,2` 会变 `0,4`，用例转红）。
+
+**验收**：dprint 0（两条新/改文件）；oxlint `0 warnings / 0 errors`；tsc 0；`check-jsx-text-i18n` 基线外 0；`check-i18n-exemption-budget` 基线外 0；vitest 见 G4。⚠ `check-i18n-orphan-diff` 本轮**自报跳过**（「取不到 git」）⇒ 增量孤儿 key 未验证，不当通过。
+
+**⚠ 同批回写第五道门**：本批给被 `feRe` 命中的前端文件净加 **135 行 / 1 个文件**（`PluginMarketplace.tsx` +29 行、新测试 106 行）⇒ `frontendFileCaliber` 从 84 874 / 293 涨到 **85 009 / 294**。按判据「改代码必须同批改表」，登记表 `value` / `value2` / `planNumber` / `planPinned[519]` 与 PLAN 的 9 处「85 009 行」、4 处「294 文件」全部同步；§65 未做 5 与 §66 表格里那两个 84 874 **刻意保留**（它们记的是 #136 当天的现值，不是今天的）。⚠ **+1 文件是 `feRe` 的既有假阳性，不是股票域扩面**：正则的 `market` 分支命中文件名里的 `Marketplace`（`src/components/chat/PluginMarketplace.tsx` 在 #139 之前就已落在该口径里）⇒ 本批动的是插件市场面板。不改正则：`feRe` 与 `audit-l1-blockers.mjs:48-63` 逐字同源，改它必须两处同批，属另案。这一条也说明该锚点每碰一次前端就要重锚一次：它钉的是**按路径正则筛出的全仓体量**，不是某个模块的行数。
+
+**未做（逐条点名）**：
+1. **worker 启动超时未解**：本机 SMB 上单文件 worker 启动可 >60 s，该超时硬编码在 vitest 的 pool-runner 里、CLI 无开关；`--poolOptions.forks.singleFork` 是**配置项**不是 CLI 参数（实测 `CACError: Unknown option --poolOptions`）。解法要么本地盘检出、要么给本机加一份不被仓库接管的本地 vitest 配置 —— 另立任务，本批不擅自改仓库测试配置（会改 CI 语义）。
+2. **`npm run typecheck` 在 UNC 下退 1 且一个文件都不查**（见 §67.1）；本批只用手工等价命令取证，没改 `package.json`。
+3. **dprint 在 UNC 下空跑**（`No files found ... at \\?\UNC\...`，退 14；加 `--allow-no-files` 反而退 0，更危险）：本批用「本地盘临时目录 + 指向仓内 wasm 的探针 dprint.json + 逐文件 copy」取证。要不要做成 `scripts/dprint-check.mjs` 另裁。
+4. **UI 未在浏览器里目视**：类型 / 格式化 / 单测三关已过，但没起 dev server 看实际排版（本轮无可驱动的 Tauri 实例）。

@@ -149,16 +149,16 @@
     {
       "id": "frontendFileCaliber",
       "label": "前端体量（脚本文件名口径 feRe 匹配 src/** 全部 .ts/.tsx）",
-      "value": 84874,
-      "value2": 293,
+      "value": 85009,
+      "value2": 294,
       "value2Label": "文件",
       "check": "frontendVolume",
       "domainKey": "STOCK",
       "hard": true,
-      "planNumber": "84 874",
+      "planNumber": "85 009",
       "planMustAppear": true,
-      "planPinned": [{ "line": 519, "mustContain": ["293", "84 874", "脚本文件名口径"] }],
-      "note": "PLAN:508 的「脚本文件名口径」读数；行数按 split('\\n') 计数（与 audit-l1-blockers 一致，含末行空元素）。"
+      "planPinned": [{ "line": 519, "mustContain": ["294", "85 009", "脚本文件名口径"] }],
+      "note": "PLAN:508 的「脚本文件名口径」读数；行数按 split('\\n') 计数（与 audit-l1-blockers 一致，含末行空元素）。**2026-11-04 #139 再涨 135 行 / 1 文件 ⇒ 85 009 / 294**（`PluginMarketplace.tsx` 渲染 eventStats +29 行、新测试 `PluginMarketplace.eventStats.test.tsx` 106 行）。⚠ **+1 文件是 `feRe` 的既有假阳性**：该正则的 `market` 分支会命中文件名里的 `Marketplace`（`src/components/chat/PluginMarketplace.tsx` 从 #139 之前就在这个口径里）⇒ 本批动的是**插件市场面板**，股票域文件数没变；读数变了是口径定义所致，不改口径（`feRe` 与 `audit-l1-blockers.mjs:48-63` 逐字同源，改它要两处同批）。旧读数 84 874 / 293 只留在 §65 未做 5 与 §66 的交付记录里 —— 那两处记的是 #136 当时的现值。"
     },
     {
       "id": "frontendDirCaliber",
@@ -172,7 +172,7 @@
       "planNumber": "60 757",
       "planMustAppear": true,
       "planPinned": [{ "line": 518, "mustContain": ["211", "60 757", "目录口径"] }],
-      "note": "与 84 874 是**两套并行口径**（PLAN:507/508/515），不是旧读数、不是漂移 ⇒ 两条都钉住；旧说法「60 757 是 84 873 的过期值」是误读，本门的 planOld 名单里刻意不含它。"
+      "note": "与 85 009 是**两套并行口径**（PLAN:507/508/515），不是旧读数、不是漂移 ⇒ 两条都钉住；旧说法「60 757 是 84 873 的过期值」是误读，本门的 planOld 名单里刻意不含它。"
     },
     {
       "id": "l1ForeignStock",

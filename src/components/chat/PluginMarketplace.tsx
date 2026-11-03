@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { Tooltip } from "@/components/layout/Tooltip";
 import { message } from "@/lib/toast";
 import { useCapabilityStore, usePluginStore } from "@/stores";
 import type { PluginManifestDto } from "@/types";
@@ -208,6 +209,33 @@ export function PluginMarketplace() {
                   )}
                 </div>
               )}
+
+              {/* `eventStats === null` = 没挂订阅；`{0,0}` = 挂着但没来一条 —— 两种状态不许合并显示。 */}
+              <div className="mt-2">
+                {plugin.eventStats
+                  ? (
+                    <Tooltip
+                      title={t("chat.plugins.marketplace.eventStatsDetail", {
+                        serialize: plugin.eventStats.droppedSerialize,
+                        invoke: plugin.eventStats.droppedInvoke,
+                        unavailable: plugin.eventStats.droppedUnavailable,
+                        wait: plugin.eventStats.droppedWait,
+                      })}
+                    >
+                      <span className="text-xs text-text-quaternary cursor-help">
+                        {t("chat.plugins.marketplace.eventStats", {
+                          delivered: plugin.eventStats.delivered,
+                          dropped: plugin.eventStats.droppedTotal,
+                        })}
+                      </span>
+                    </Tooltip>
+                  )
+                  : (
+                    <Text type="secondary" className="text-xs">
+                      {t("chat.plugins.marketplace.eventStatsNone")}
+                    </Text>
+                  )}
+              </div>
             </Card>
           ))}
         </div>

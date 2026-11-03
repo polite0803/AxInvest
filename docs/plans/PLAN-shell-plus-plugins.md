@@ -2763,3 +2763,9 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 | `cargo test -p axagent-harness --lib stock_monitor` / `quote_watcher` | **未跑**（同上原因）⇒ #103 合入后补跑，三条 kind 常量目前只有 lib 级 lint 证、没有测试级证 |
 | 全量三件套（`fmt --all --check` / `clippy --workspace --all-targets --all-features` / `test --workspace`） | 未跑（AGENTS：全部阶段完成后一次）；已知两处会红：`market_data.rs` 4 处 rustfmt 漂移（#113）、分层门禁 3 处既存（#114） |
 | 前端 / Playwright | 未跑（本批零 TS/JSON 改动） |
+### 58.5 #108 宿主批执行侧推翻我的两条（记入账，别在下一批重犯）
+
+1. **`od -c | grep -c '\r'` 在这台机器上是假判据**（实测：对已提交的干净文件 `monitor_seam_service.rs` 报 1106 个「CR」）。真因不是 SMB 也不是 CRLF，是 **grep 的 BRE 把 `\r` 当字母 `r`** —— `od -c` 的输出里满是 `r` 这个词字母（`Arc` / `axagent` / 每个路径）。⇒ 数 CR 的唯一可信口径是 `tr -cd '\r' | wc -c`（先把非 CR 字节全删掉再数）。这条订正**覆盖** §58.1 与既往派单里「行尾用 `od -c` 判」那句的读法：`od -c` 只能**肉眼看**某一行的字节，不能拿去 `grep` 计数。
+2. **`search` 的 `min_similarity` 不在 provider 复筛**（判据 4 的「过滤 → 排序 → 截断」措辞是我写的，Literal 执行会造出第二把尺子）：宿主检索层已经在 `combined_score >= min_score` 上筛过、并产出 `score = 1 - combined_score`，provider 再按距离筛一道 = 复刻 `rag.rs` 里那段「两把尺子」的原案缺陷。⇒ 改判为**透传 + 方向锁**：单测钉「距离小的排前」+「分值逐位不变（`to_bits` 比，避开浮点 `==`）」。契约侧「L2 越小越相似」那句仍然成立（`1 - combined_score` 就是越小越相似），但**方向由宿主单点决定**，接缝不重算。
+3. 装配点选择：注册段落在 `start_background_services`（`:97`/`:99`）而非我给的 `start_realtime_monitor` 先例段 —— 判据是「必须早于 `start_plugins`，否则插件初始化时接缝还没注册」。这条比先例更重要，照它。待 #108 报告交回时验：`grep -n "start_plugins\|register_knowledge_vector\|register_trajectory_store" src-tauri/src/init/*.rs` 的先后关系。
+4. 本批**没有独立复核环节**（专家团在本启动路径下两条委派通道都不可用：CLI delegate 被 hook 改写零返回、内置建会话被宿主以递归限制拒），执行者如实上报而非静默自审 ⇒ 复核由我做；下一派单要么写明「leader 复核」，要么先修委派通道（并入 #106 同族的本机缺陷账）。

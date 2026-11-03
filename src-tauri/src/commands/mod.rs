@@ -77,6 +77,10 @@ pub mod index_jobs;
 pub mod knowledge;
 pub mod knowledge_graph;
 pub mod knowledge_source;
+/// `knowledge.vector` 接缝的宿主 provider（四 op：检索 / 关键词检索 / 文本入库 / 集合信息）。
+/// 本模块不含 `#[tauri::command]`：它只被 `init/services.rs` 的装配点注册进 capability_registry，
+/// 消费方是插件侧的 `call_seam`，不是前端 invoke。硬闸数字全部只引用 harness 契约常量。
+pub mod knowledge_vector_service;
 pub mod learning_graph;
 pub mod llm_wiki;
 pub mod local_model;
@@ -158,6 +162,10 @@ pub mod terminal;
 pub mod theme;
 pub mod tool_recommender;
 pub mod tracer;
+/// `trajectory.store` 接缝的宿主 provider（首批只读四 op：list / get / query / count）。
+/// 本模块不含 `#[tauri::command]`：只由 `init/services.rs` 的装配点注册进 capability_registry，
+/// 消费方是插件侧 `call_seam`。视图裁剪与 limit 闸的唯一落点在这里，数字只引用 harness 契约常量。
+pub mod trajectory_store_service;
 pub mod unified_knowledge;
 pub mod user_profile;
 pub mod webdav;

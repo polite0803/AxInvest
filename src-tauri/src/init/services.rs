@@ -4791,6 +4791,22 @@ fn start_approval_event_bridge(app: &tauri::AppHandle, state: &AppState) {
 
 fn start_trajectory_cleanup(state: &AppState) {
     let trajectory_storage = state.trajectory_storage.clone();
+    // ── trajectory.store 接缝：宿主存储已在手边 ⇒ **就地注册**（裁定 J8）──
+    // 与 `knowledge.vector` 同策：`AppState.trajectory_storage` 是非 `Option` 字段，装配到这里必然
+    // 在场 ⇒ 不写「拿不到依赖」的伪装分支，也不注册一个「四个方法全返空」的 provider（那会把
+    // 未就绪伪装成空库）。未注册的真表现是分派层取不到 provider ⇒ `SEAM_PROVIDER_UNAVAILABLE`。
+    // 失败只 warn，不阻断启动。
+    {
+        let provider: Arc<dyn axagent_harness::TrajectoryStoreProvider> = Arc::new(
+            crate::commands::trajectory_store_service::HostTrajectoryStore::new(
+                trajectory_storage.clone(),
+            ),
+        );
+        match axagent_harness::get_capability_registry().register_trajectory_store(provider) {
+            Ok(_) => tracing::info!("trajectory.store 接缝已注册 (BuiltIn)"),
+            Err(e) => tracing::warn!("trajectory.store 注册失败: {e}"),
+        }
+    }
     let handle = state.trajectory_cleanup_handle.clone();
     let shutdown_token = state.shutdown_token.clone();
     let config = axagent_trajectory::TrajectoryCleanupConfig::default();
@@ -4891,6 +4907,25 @@ fn start_index_job_service(app: &tauri::AppHandle, state: &AppState) {
     let master_key = state.harness.master_key_owned();
     let shutdown_token = state.shutdown_token.clone();
     let app_handle = app.clone();
+    // ── knowledge.vector 接缝：四个句柄此刻都在手边 ⇒ **就地注册**（裁定 J8）──
+    // 本装配点拿不到「未就绪」这一支：DB 连接 / VectorStore / master key / provider registry 都是
+    // AppState 的非 `Option` 字段（不为凑那一格把字段改成 `Option`，PLAN §58.2-② 明令禁止）。
+    // 真没注册上时，接缝上的表现是分派层取不到 provider ⇒ `SEAM_PROVIDER_UNAVAILABLE`。
+    // 失败只 warn，不阻断启动（与 jobs.store / workflow.run / trading.engine 同策略）。
+    {
+        let provider: Arc<dyn axagent_harness::KnowledgeVectorProvider> = Arc::new(
+            crate::commands::knowledge_vector_service::HostKnowledgeVector::new(
+                Arc::new(db.clone()),
+                vector_store.clone(),
+                master_key,
+                state.harness.provider_registry().clone(),
+            ),
+        );
+        match axagent_harness::get_capability_registry().register_knowledge_vector(provider) {
+            Ok(_) => tracing::info!("knowledge.vector 接缝已注册 (BuiltIn)"),
+            Err(e) => tracing::warn!("knowledge.vector 注册失败: {e}"),
+        }
+    }
 
     tauri::async_runtime::spawn(async move {
         let service = std::sync::Arc::new(IndexJobService::new(

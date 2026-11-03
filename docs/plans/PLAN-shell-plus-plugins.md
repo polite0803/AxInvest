@@ -2699,7 +2699,7 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 
 **① 契约文档「非法值 ⇒ `SEAM_CALL_INVALID_ARGS`」与分派层现状不符（res115 §4.1-1）——判执行者对，收口点是我欠的。**
 `worker.rs` 那 12 个分支把 provider 的一切 `Err` 一律落成 `PLUGIN_CALL_FAILED`，`SEAM_CALL_INVALID_ARGS` 只由 `deserialize_arg` 在反序列化失败时产出。执行者把越界建成 `AxAgentError::Validation`（与 `workflow.run` 同族）是**当前唯一不越权的做法**。裁定：**不改契约文档的措辞**（那是承诺，不是笔误），由 **#112** 在分派层补 `Validation ⇒ SEAM_CALL_INVALID_ARGS` 的四行映射兑现它；映射加在分派层而**不是** provider 侧，因为 provider 回 `AxAgentError`、专用码只有分派层能发（先例 `workflow_run_error`）。**在 #112 落地前，插件侧文档不得写「越界能拿到 INVALID_ARGS」。
-   ⚠ **#112 的覆盖面不止 stock.monitor**：契约里同形的承诺还有 `knowledge_vector.rs:266` 上方那句「集合不存在 ⇒ 分派层映射 `SEAM_CALL_INVALID_ARGS`」（§56.2-2 的配套口径）。⇒ 那条映射是**两条接缝共用**的 `AxAgentError::Validation ⇒ 专用码` 函数，一次落地；#108 的 provider 必须同样用 `Validation` 抛「集合不存在」，否则映射无从命中。**
+   ⚠ **#112 的覆盖面不止 stock.monitor**：契约里同形的承诺还有 `knowledge_vector.rs` 中 `index_text` 的文档（现 `:280`）那句「集合不存在 ⇒ 分派层映射 `SEAM_CALL_INVALID_ARGS`」（§56.2-2 的配套口径）。⇒ 那条映射是**两条接缝共用**的 `AxAgentError::Validation ⇒ 专用码` 函数，一次落地；#108 的 provider 必须同样用 `Validation` 抛「集合不存在」，否则映射无从命中。**
 
 **② `status` 的 `assembled` 恒 `true`（§4.1-2）——接受纯函数解法。**
 裁定 J8「装配成功后就地注册」与「provider 能返回 `assembled=false`」结构上互斥：本 provider 持非 `Option` 的 `Arc`，「未装配」在接缝上的**真实表现是注册表取不到 provider ⇒ `SEAM_PROVIDER_UNAVAILABLE`**。执行者没有为了凑那一格把字段改回 `Option`（正是 J8 否掉的形态），而是把九键映射抽成 `status_view(assembled, …)` 并给 `assembled=false` 写单测 —— 契约形态完整、运行语义诚实。**不许**后续批次以「让 `assembled` 能用」为由再引 `Option`。
@@ -2794,7 +2794,7 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 
 1. **任务书写的取 provider 形态是错的，执行者纠正为 `self.registry.get_*()`**（盘上入站分派面零处用全局注册表；`HostPeer` 持 `Arc<CapabilityRegistry>` 就是为了替身注入）。⇒ **接受**，且我这份任务书如果照盘上写会直接废掉「空注册表 ⇒ `SEAM_PROVIDER_UNAVAILABLE`」和全部替身用例。订正入 59.3-①。
 2. 任务书给的「最近三次提交」过期（HEAD 被推进）。⇒ 接受；它同时证明 `worker.rs` 自 `47955bb19` 起未被任何后续提交碰过 ⇒ 基线归因不成立即不成立，没被它拿去充数。
-3. **契约承诺 `SEAM_CALL_INVALID_ARGS` 的位置是两处不是一处**（`knowledge_vector.rs:85` 正文超 64 KB、`:261` 集合不存在）。⇒ 裁定 **(a)**：由 **#112** 一次性收口，映射函数是 `AxAgentError::Validation ⇒ SEAM_CALL_INVALID_ARGS` 单点，覆盖面 = `stock.monitor`（白名单/阈值 clamp）+ `knowledge.vector`（这两格）。**不改契约文档措辞**（那是承诺不是笔误），#112 落地前插件侧文档不得写「越界拿得到 INVALID_ARGS」。
+3. **契约承诺 `SEAM_CALL_INVALID_ARGS` 的位置是两处不是一处**（`knowledge_vector.rs:85` 正文超 64 KB、`index_text` 文档现 `:275` 集合不存在）。⇒ 裁定 **(a)**：由 **#112** 一次性收口，映射函数是 `AxAgentError::Validation ⇒ SEAM_CALL_INVALID_ARGS` 单点，覆盖面 = `stock.monitor`（白名单/阈值 clamp）+ `knowledge.vector`（这两格）。**不改契约文档措辞**（那是承诺不是笔误），#112 落地前插件侧文档不得写「越界拿得到 INVALID_ARGS」。
 4. 任务书引用的锚点逐条复核为真。⇒ 收下，不重述。
 5. **「先跑改前基线」与「只允许一个 cargo 会话」在本机不可同时满足**，它选了「写完再排队」，并给了四段间接取证（改后 108 实测 + 本批 12 实测 + 上一批终态日志 + `git log -- worker.rs` 证明版本同一）。⇒ **接受**（换我也不会为了一个数字去做 UNC 上的 A/B 摆渡）；同时把它点出的 PLAN §55.6「基线 86 passed」**就地订正**为实测链条 88 → 96 → 108。
 6. **团内 res 编号与任务号不同源，且已经撞名**（`.tmp/res109-migration-plan.md` 是 #35 的调研产物，同前缀不同归属）。⇒ 接受批评，59.4 挂对照表；后续派单一律「任务号前缀 + 用途后缀」（如 `res108-host-*`、`res117-host-*`）。
@@ -2804,9 +2804,9 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 
 8. **必答 A：宿主没有「按集合 + 文档」幂等重建入口**（四个候选逐条否掉：整集合 `clear_embeddings` 越权、`delete_document_embeddings` 是 §56.1-Q2 点名的半截删除原语、`index_knowledge_document` 收不了裸文本、`upsert_document_embeddings` 要调用方持 rowid 与向量本体 ⇒ 违反 K4）。⇒ 幂等语义定为**按块覆盖**（块 id `{document_id}_{chunk_index}` + `upsert_embeddings`），已知不完全 = 新正文变短时尾部旧块残留 ⇒ 登记 **#125**（需要「删块 + 删向量」同成的宿主原语），本批在模块头声明、不藏。
 9. **它给 `index_text` 加了一条任务书没有的前置闸**：文档行必须已存在且 `knowledge_base_id` 与请求的 `collection_id` 一致。⇒ **接受**。这正是 §56.1-Q2「不开 delete」的同一判据的正面用法：放陌生 id 进去只会造出「检索得到、面板删不掉」的孤儿块。**代价如实说**：插件不能凭接缝建文档行 ⇒ 「先建文档再入库」的两步得走宿主命令面，这条要写进插件侧文档，不许让插件以为 `index_text` 能凭空造文档。
-10. **必答 B：`query` 八个过滤字段宿主支持七个，不支持「半边时间窗」**（原形 `time_range` 是闭区间元组）。它落成 `Err(Validation)`，而契约 `trajectory_store.rs:145-146` 承诺「None 端点按开区间处理」。⇒ 裁定 **改契约措辞**（与原形落不了地的承诺比，诚实的契约更有价值），连同 `:85/:127` 的「钳位」旧措辞一起收进 **#118 扩展后的 harness 契约批**。同一批它还拦了 `untilMs < sinceMs`（恒零命中，属「阈值尺度写反」同型）⇒ **接受**。
+10. **必答 B：`query` 八个过滤字段宿主支持七个，不支持「半边时间窗」**（原形 `time_range` 是闭区间元组）。它落成 `Err(Validation)`，而契约 `trajectory_store.rs` 的 `since_ms`/`until_ms` 文档（原 `:145-146`，现 `:159-160`）承诺「None 端点按开区间处理」——该承诺已由 #118 改为「只给一端 ⇒ `Err(Validation)`」，故本句今后只成立为裁定记录。⇒ 裁定 **改契约措辞**（与原形落不了地的承诺比，诚实的契约更有价值），「钳位」旧措辞实际只有 `:119` 一处（`:127`/`:147` 写的是「合法区间」）⇒ 一并收进 #118 扩展后的 harness 契约批，两处「合法区间」也显式改写成拒收。同一批它还拦了 `untilMs < sinceMs`（恒零命中，属「阈值尺度写反」同型）⇒ **接受**。
 11. **判据 4 的字面写法它偏离了**（详见 59.3-②）。⇒ **接受替代方案**（阈值原样透传 + 不重排 + `to_bits` 逐位比），并登记 **#120**：在 `axagent-search` 侧给 `min_score` 补**带数据**的检索级单测，那才是「筛得动」的证。
-12. **`[0,1]` 量纲数字（两处生产点：`knowledge_vector_service.rs:167`、`trajectory_store_service.rs:138`）算不算第二套权威**？⇒ 我的判法：**现在不算缺陷、但算债务** —— 它是量纲定义（相关度/评分的定义域）而非可调区间，且宿主侧无可引用的常量；但两处两个文件已经是事实上的重复。⇒ 随 **#118** 上收 harness（`KNOWLEDGE_SIMILARITY_RANGE` / `TRAJECTORY_RATIO_RANGE`），provider 改引；越界的后果是**静默空集**而不是静默夹取，所以「拒收」的判法保留。
+12. **`[0,1]` 量纲数字（两处生产点：`knowledge_vector_service.rs:168`（原 `:167`，#118 r2 漂 +1）、`trajectory_store_service.rs:138` 零漂移）算不算第二套权威**？⇒ 我的判法：**现在不算缺陷、但算债务** —— 它是量纲定义（相关度/评分的定义域）而非可调区间，且宿主侧无可引用的常量；但两处两个文件已经是事实上的重复。⇒ 随 **#118** 上收 harness（`KNOWLEDGE_SIMILARITY_RANGE` / `TRAJECTORY_RATIO_RANGE`），provider 改引；越界的后果是**静默空集**而不是静默夹取，所以「拒收」的判法保留。
 13. **`collection_info` 的两种 `dimensions: None` 宿主不可区分**（`get_collection_dimensions` 只返 `Option<usize>`，`table_exists` 私有）。它按「有维度即存在」判 ⇒ 「存在但未绑模型」被读成 `exists=false`（保守假阴，不会诱导读，但不诚实）。⇒ **接受现状 + 登记 #122**（search crate 出一个集合存在性读口）。不许为凑这一格在接缝侧造猜测。
 14. **`list`/`query` 的读放大**：`≤200` 限的是**返回**条数，宿主是「全表取出后内存截断」且每条轨迹再做两次子查询取 steps/rewards ⇒ 十万行库上一次 `list(Some(200))` 就是十万行扫描 + 200 次额外查询。⇒ **登记 #121**，优先级高于一般重构：这条是**接缝开放给插件后才会被踩到**的成本面，判据 1 的上界挡不住宿主自己的读放大。
 15. **A2 的第一条红是它自己写的单测**（`assert!(!(nan < 0.0 \|\| nan > 1.0))` 触 `manual_range_contains`），而且它识别出「按 clippy 建议机械改成 `contains` 会让 NaN 那一支失去区分力」⇒ 改成断言 `Validation` 文案含 "NaN"。⇒ **接受**，这是「测试数据须自证区分力」的正确形态，与我此前记的「lint 的机械建议会改语义」同族，只是这次发生在测试里。
@@ -2845,3 +2845,66 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 ### 59.7 我自己造的一处险情（如实记账，别学）
 
 落 K1 账时用 `JSON.stringify(j, null, 2)` 重写镜像表 ⇒ 文件从 **976 行涨到 1926 行**：原表把 `planPinned` / `alsoAt` 这类对象**内联**写在一行，`stringify` 把它们全展开成多行。后果不是「难看」而是**按行引用当场腐烂** —— `PLAN:2626` 就明写「必须同批改 `scripts/capability-register.json:956` 行的 `seamId`/`faces`/`evidence`/`planAnchorText`」，展开后那一行不再在 `:956`。⇒ 已回退到旧格式（`git show HEAD~1:` 取原文覆盖）再改用**逐字符串替换**，改动全部「一行换一行」⇒ 净 diff `11/11`，`:956` 仍在原位（已复扫），锚点回写改用 `--repin-code --apply`（它本就是外科式改法）。判据与 §58.5-1 同族：**重写整份序列化 ≠ 最小改动**，凡有人按行引用这张表，就只能做等行数替换。
+
+## 60. #112 / #116 / #118(r2+r3) 交付账与我对执行者的裁定（含「按行引用」政策的收口）
+
+> 日期：2026-11-03｜提交链：`7d48768c0`（#112 映射）→ `60d4638ba`（#118 r2 + #116）→ `efe7c399e`（#118 r3 追加）｜报告：`.tmp/res112-mapping-report.md`、`.tmp/res118-116-harness-report.md`（§⑥ 为追加轮）
+
+### 60.1 三条接缝的错误码语义就此定形
+
+`worker.rs:2854` 新增 `seam_provider_error`（结构逐字照 `workflow_run_error`）：
+
+| provider 回的变体 | 帧码 | 覆盖面 |
+|---|---|---|
+| `AxAgentError::Validation` | **`SEAM_CALL_INVALID_ARGS`** | `stock.monitor` 9 + `quote.watcher` 3 + `knowledge.vector` 4 + `trajectory.store` 4 = **20 处**分支 |
+| 其余（含 trait 默认 `Provider("…未实现…")`） | `PLUGIN_CALL_FAILED` + `to_string()` | 同一批 20 处的另一半 |
+| 入参反序列化失败 | `SEAM_CALL_INVALID_ARGS`（`deserialize_arg` 自己产出，与本函数无关） | 全部入站接缝 |
+
+数量对账我自己复扫过：改前 `Err(e) => …PLUGIN_CALL_FAILED` 形态 **79** 处 ⇒ 改后 **59** 处（79 − 20 = 59，零溢出），`=> seam_provider_error(e),` **20** 处。`trading.engine` / `jobs.store` / `market.quote` **不改**（三份契约里 `SEAM_CALL_INVALID_ARGS` 零命中 ⇒ 无同形承诺）。
+
+### 60.2 我对四条「契约 vs 实现」互斥的裁定（#118 r3 的 E1–E5 已落）
+
+1. `stock_monitor.rs:56`「provider 返回 `Err` 一律 `PLUGIN_CALL_FAILED`」与 `:54`「白名单/越界 ⇒ `SEAM_CALL_INVALID_ARGS`」**覆盖同一事件给两个码** ⇒ `:56` 改「**非 `Validation` 变体**」。执行者**只改这一句**，`:54`/`:55` 与类型、默认实现一字未动。
+2. `trajectory_store.rs:69-70` 与 `knowledge_vector.rs:61-62` 同族反话 ⇒ 都改成「只有 `Validation` 升专用码」。**E4 那处（`knowledge_vector.rs:61-62`）不在我的清单里**，是执行者用 `grep -rnE "兜底成|一律 .PLUGIN_CALL_FAILED." harness/src/*.rs` 扫全族后自加的，并在报告里写明「若判越界，回退 = 恢复这 2 行原文，零风险」⇒ **我接受**：同一文件内两条契约陈述互斥时，留旧那句就是留假话；而且它把回退路径一起交了，这才是「越界自纠」的正确形态。
+3. `workflow_run.rs:21`「分派层**将来**映射为 `WORKFLOW_RUN_REJECTED`」⇒ 现在时（早已落地，#112 一字未动那条接缝）。
+4. **`quote_watcher.rs` 不补承诺**（我已裁两次）：宿主 provider 今天零处抛 `Validation`（`grep -c` = 0）。为了让契约「有承诺」去造一个校验是反向动机 —— 契约的每句承诺都必须有一个产生它的代码路径。
+
+### 60.3 我推翻自己的三条 + 执行者推翻我的一次性纠正
+
+| 我的原写法 | 盘上事实 | 出处 |
+|---|---|---|
+| 「`knowledge_vector.rs:85` 与 `:127` 都写着钳位」 | `grep -n "钳位"` 改前**只命中一行**（`:119`，现 `:133`）；`:85` 讲的是正文超限（本来就拒收），`:141`/`:161` 写的是「合法区间」 | #118 ④-1 |
+| 派单没给工作根 | 本仓**无根 `Cargo.toml`**（八个一级 workspace），从仓根跑三条 ⇒ 三条全 `EXIT=101`、日志各 87 字节 | #112 ④-1 |
+| 「市场报价契约 `market_quote.rs`」 | 实名为 **`market_data.rs`**（执行者另确认这个错名没进过它任何注释） | #112 ④-9 |
+| 「NaN 阈值越界 ⇒ 由映射收口」 | `serde_json` **不承载 NaN**（`json!` 把 `f64::NAN` 写成 `null`）⇒ NaN 在反序列化阶段就落 `invalid_args`；结论仍是 `SEAM_CALL_INVALID_ARGS`，但**不是**由 `seam_provider_error` 收口，宿主侧 `is_finite()` 在帧协议上不可达 | #112 ④-7，已从我给 #112 的 §1 表格里摘掉那一格 |
+
+### 60.4 「按行引用」政策收口（本会话内第三次腐烂，改判我自己的写法）
+
+实测三轮漂移：#109 让 `worker.rs` 漂 +1132、#112 再漂 +682（镜像表 3 条 evidence 各 +21，已 `--repin-code --apply` 回写，`GATE_EXIT=0`）；#118 r2 让两个契约文件漂 +14。⇒ **PLAN 与镜像表今后对我的正文引用一律改用符号形态**（「`index_text` 的文档」「`seam_provider_error`」），行号只保留给**编译期可复算**的锚点（`anchorText` 整行键）。本轮我自己在 PLAN 里引用的 harness 行号已就地改指现号，并在 §60.5 记下原号 ⇒ 不再制造「读到一个错号就去改代码」的诱导。
+
+### 60.5 我改掉的 PLAN 内部引用（原号 → 现号，同批改指）
+
+| PLAN 位置 | 原引 | 现引 |
+|---|---|---|
+| §58.2-① | `knowledge_vector.rs:266` | 该文件 `index_text` 的文档，现 `:280` |
+| §59.2-3 / §59.2-10 | `knowledge_vector.rs:85` / `:261` | `:85`（未漂）/ `:275` |
+| §59.2-10 | `trajectory_store.rs:145-146`（承诺 `None` 端点按开区间） | `:159-160`，**且该承诺已被 #118 改掉**（⇒ 本句今后只成立为裁定记录） |
+| §59.2-12 | `knowledge_vector_service.rs:167` / `trajectory_store_service.rs:138` | `:168` / `:138`（后者零漂移） |
+
+### 60.6 验收（逐条我自己开日志读过，不是转述）
+
+| 批 | 取证 |
+|---|---|
+| #112 | `res112-clippy-r4.log`：`Blocking waiting for file lock`（真排队）+ `Checking axagent-plugins` + `Finished … 16m43s`，`EXIT=0`；`res112-test-r4.log`：**`test result: ok. 112 passed`**（基线 108 + 4，`111 filtered out` 与上批逐字同）；`res112-check-r4.log` `EXIT=0`；被测 sha `6d7d15884e8fd28c` 与四个依赖契约文件的**起/止哈希逐字相同** |
+| #118 r2 | harness clippy `Checking axagent-harness` + 1m22s；harness `11 / 12 passed`；主 crate `Compiling axagent v3.0.0` + clippy `EXIT=0`（23m04s，与墙钟吻合）；`monitor_seam_service` **18 passed**（含两条新格）、`knowledge_vector` 15、`trajectory_store` 10；五个文件 md5 在四个检查点相同 ⇒ 交付版本 == 被测版本 |
+| #118 r3 | 四条全 `EXIT=0`（harness clippy 1m11s 含 `Checking`、11/12 passed、主 crate `Compiling` + 15 passed）；**零行漂移**由 `wc -l` 七文件前后逐字相同自证 ⇒ 我不用再重锚一次 |
+| **我补的那格** | r3 未跑 `--lib trajectory_store`（它改了那处用户可见文案）。我判定无覆盖缺口后又**亲自跑了一遍**：`.tmp/res118pm-r4-leader-trajectory.log` ⇒ **`test result: ok. 10 passed; 0 failed` + `EXIT=0`** |
+
+### 60.7 一条必须留在账上的操作纪律（本轮新踩）
+
+#112 的执行者为终止自己被作废的轮次跑了 **`taskkill //F //IM cargo.exe`（按镜像名杀，自报终止 3 个）**，连带杀掉并行批正在排队的编译。⇒ 派单模板加一条硬规：**本机八个根共用一把 target 锁，禁止按镜像名杀进程**；要终止只按自己记录的 PID 树。受影响轮次的处理已当场做完（#118 判掉三条 0 字节假绿并整轮重跑，结果见 60.6）。
+
+### 60.8 未覆盖项（不许读成「已验证」）
+
+- 真实 embedding 链、FTS5 检索链、真库有数据时的读回形状、端到端「插件调接缝拿到数据」——四格仍未走（依赖凭证与真机，见 #120/#121/#124）。
+- 主 crate 全量 `clippy --all-targets` 未在 r3 之后重跑（r3 只动注释与两处文案，且 `cargo test -p axagent --lib knowledge_vector` 连带做了全 crate `Compiling`）。⇒ 这条并入 **#19** 的终验一次收。

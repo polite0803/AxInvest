@@ -407,7 +407,7 @@
       "check": "implementorCount",
       "evidence": [
         { "ref": "axagent-core/crates/harness/src/workflow_reflection.rs:190", "file": "axagent-core/crates/harness/src/workflow_reflection.rs", "line": 190, "token": "pub trait WorkflowReflector", "role": "契约" },
-        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:4247", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 4247, "token": "fn remote_method_not_supported", "anchorText": "fn remote_method_not_supported(seam: &str, method: &str) -> String {", "role": "拆分阻塞 D2 证据" }
+        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:4266", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 4266, "token": "fn remote_method_not_supported", "anchorText": "fn remote_method_not_supported(seam: &str, method: &str) -> String {", "role": "拆分阻塞 D2 证据" }
       ],
       "note": "拆分阻塞 **D2**：worker.rs:3798 起 `remote_method_not_supported` ⇒ 接缝已建但远程侧方法未通。键控列原文仅「接缝」二字 ⇒ 行号缺省。",
       "planAnchorText": "| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:3798` 起 `remote_method_not_supported` |", "planLine": 265
@@ -424,8 +424,8 @@
       "check": "implementorCount",
       "evidence": [
         { "ref": "axagent-core/crates/harness/src/workflow_evolution.rs:172", "file": "axagent-core/crates/harness/src/workflow_evolution.rs", "line": 172, "token": "pub trait WorkflowEvolver", "role": "契约" },
-        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:4339", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 4339, "token": "remote_method_not_supported", "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"run\"))", "role": "拆分阻塞 D2 证据（区间起点）" },
-        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:4387", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 4387, "token": "remote_method_not_supported", "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"is_running\"))", "role": "拆分阻塞 D2 证据（区间止点）" }
+        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:4358", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 4358, "token": "remote_method_not_supported", "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"run\"))", "role": "拆分阻塞 D2 证据（区间起点）" },
+        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:4406", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 4406, "token": "remote_method_not_supported", "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"is_running\"))", "role": "拆分阻塞 D2 证据（区间止点）" }
       ],
       "note": "备注「同上（worker.rs:3890–:3938 一批 remote_method_not_supported）」⇒ 该区间两端都入锚点，端点漂移即红。键控列原文仅「接缝」。",
       "planAnchorText": "| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:3890`–`:3938` 一批 `remote_method_not_supported`） |", "planLine": 266
@@ -575,8 +575,8 @@
       "k": null,
       "kNote": "组级 K1+K2 成立；逐条档位原文缺省。",
       "trait": "RAGSource",
-      "countTraitNote": "登记值 4 对应 RAGSource 的实现者；同锚点的 EmbeddingProvider(3)/RerankProvider(1) 属契约面的一部分，不并入计数。",
-      "expect": { "implementors": 4, "seam": "待建", "remote": false, "reading": null },
+      "countTraitNote": "登记值 5 = 4 个生产实现者（KnowledgeRAG / MemoryRAG / WikiVaultRAG / WikiRAG）+ 1 个 `#[cfg(test)]` 内联测试替身（#120 的 FixedSource）。本门实现者读数的机械口径包含内联 test mod（#54 §24.5 的 implementorsTestMod 只单列、不扣减，webhook.dispatch 同源）⇒ 镜像表按 5 登记。同锚点的 EmbeddingProvider(3)/RerankProvider(1) 属契约面的一部分，不并入计数。",
+      "expect": { "implementors": 5, "seam": "待建", "remote": false, "reading": null },
       "expectMissing": false,
       "expectMissingFields": ["k", "reading"],
       "check": "implementorCount",
@@ -585,10 +585,10 @@
         { "ref": "axagent-core/crates/harness/src/rag_provider.rs:40", "file": "axagent-core/crates/harness/src/rag_provider.rs", "line": 40, "token": "pub trait RerankProvider", "role": "契约（Rerank）" },
         { "ref": "axagent-infra/crates/search/src/rag.rs:45", "file": "axagent-infra/crates/search/src/rag.rs", "line": 45, "token": "pub trait RAGSource", "role": "契约" },
         { "ref": "axagent-infra/crates/search/src/rag.rs:941", "file": "axagent-infra/crates/search/src/rag.rs", "line": 941, "token": "match self.source_type", "role": "键控分发点（3 分支工厂）" },
-        { "ref": "axagent-infra/crates/search/src/vector_store.rs:114", "file": "axagent-infra/crates/search/src/vector_store.rs", "line": 114, "token": "pub struct VectorStore", "role": "K4 风险锚点", "anchorText": "pub struct VectorStore {" }
+        { "ref": "axagent-infra/crates/search/src/vector_store.rs:127", "file": "axagent-infra/crates/search/src/vector_store.rs", "line": 127, "token": "pub struct VectorStore", "role": "K4 风险锚点", "anchorText": "pub struct VectorStore {" }
       ],
-      "note": "原文「§0.6.3 未拍」，交接物注明 §0.12.3 已拍解 1（不反填进行内读数）；VectorStore 持 DatabaseConnection ⇒ sqlite-vec 进程内扩展出进程即失效。预留接缝位 rag.vector.store 在 PLAN:326 登记但不实现，**不在本表 36 行内**。",
-      "planAnchorText": "| `rag.source` | `axagent-core/crates/harness/src/rag_provider.rs:7/40`（Embedding/Rerank）+ `axagent-infra/crates/search/src/rag.rs:45 RAGSource` | `search/src/rag.rs:941`（3 分支工厂） | 4 | **§0.6.3 未拍**；`VectorStore` 是持 `DatabaseConnection` 的 struct（`search/src/vector_store.rs:114`），sqlite-vec 进程内扩展 ⇒ 出进程即失效 |", "planLine": 280
+      "note": "原文「§0.6.3 未拍」，交接物注明 §0.12.3 已拍解 1（不反填进行内读数）；VectorStore 持 DatabaseConnection ⇒ sqlite-vec 进程内扩展出进程即失效。预留接缝位 rag.vector.store 在 PLAN:326 登记但不实现，**不在本表 36 行内**。实现者 5 的构成见 countTraitNote（#120 的测试替身计入机械口径）；VectorStore 行号随 #122 的改动由 114 → 127 重锚。",
+      "planAnchorText": "| `rag.source` | `axagent-core/crates/harness/src/rag_provider.rs:7/40`（Embedding/Rerank）+ `axagent-infra/crates/search/src/rag.rs:45 RAGSource` | `search/src/rag.rs:941`（3 分支工厂） | 5（4 生产 + 1 测试替身） | **§0.6.3 未拍**；`VectorStore` 是持 `DatabaseConnection` 的 struct（`search/src/vector_store.rs:127`），sqlite-vec 进程内扩展 ⇒ 出进程即失效 |", "planLine": 280
     },
     {
       "seamId": "mcp.server",

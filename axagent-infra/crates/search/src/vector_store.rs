@@ -417,7 +417,15 @@ impl VectorStore {
             .await;
     }
 
-    async fn registry_get_dimensions_pragma(&self, collection_id: &str) -> Result<Option<usize>> {
+    /// 注册表缺失时从物理表结构读维度。
+    ///
+    /// 不能走 `pragma_table_info`：sqlite-vec 的 vec0 虚拟表把列类型报成空串（实测
+    /// `name=embedding type=""`），而且 pragma 的列里从来就没有 `dimensions`。
+    /// vec0 的维度只保留在 `sqlite_master.sql` 的建表语句里（`embedding float[N]`）。
+    async fn registry_get_dimensions_from_schema(
+        &self,
+        collection_id: &str,
+    ) -> Result<Option<usize>> {
         if self.is_pg() {
             // PostgreSQL 维度以 vec_collections 注册表为准，无需解析列类型
             return Ok(None);
@@ -431,16 +439,23 @@ impl VectorStore {
             .db
             .query_one_raw(Statement::from_string(
                 DbBackend::Sqlite,
-                format!(
-                    "SELECT dimensions FROM pragma_table_info('{name}') WHERE name = 'embedding'"
-                ),
+                format!("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = '{name}'"),
             ))
             .await
             .ok()
             .flatten();
-        Ok(row.and_then(|r| r.try_get::<String>("", "type").ok()).and_then(|t| {
-            t.trim_start_matches("float[").trim_end_matches(']').parse::<usize>().ok()
-        }))
+        Ok(row
+            .and_then(|r| r.try_get::<String>("", "sql").ok())
+            .and_then(|ddl| Self::parse_vec_dimensions(&ddl)))
+    }
+
+    /// 从 `CREATE VIRTUAL TABLE … USING vec0(embedding float[N])` 里取 N。
+    fn parse_vec_dimensions(ddl: &str) -> Option<usize> {
+        const MARKER: &str = "float[";
+        let lower = ddl.to_ascii_lowercase();
+        let start = lower.find(MARKER)? + MARKER.len();
+        let end = start + lower[start..].find(']')?;
+        ddl[start..end].trim().parse::<usize>().ok()
     }
 
     /// Ensure both the metadata and embedding tables exist for a collection.
@@ -465,7 +480,7 @@ impl VectorStore {
         .await?;
 
         let registry_dim = self.registry_get_dimensions(collection_id).await;
-        let pragma_dim = self.registry_get_dimensions_pragma(collection_id).await?;
+        let pragma_dim = self.registry_get_dimensions_from_schema(collection_id).await?;
 
         if let Some(existing) = registry_dim.or(pragma_dim) {
             if existing != dimensions {
@@ -493,7 +508,7 @@ impl VectorStore {
     }
 
     /// Query the current embedding dimensions of a collection.
-    /// First checks the vec_collections registry, then falls back to pragma parsing.
+    /// First checks the vec_collections registry, then falls back to the vec0 table DDL.
     /// Returns None if the table does not exist.
     pub async fn get_collection_dimensions(&self, collection_id: &str) -> Result<Option<usize>> {
         validate_collection_name(collection_id)?;
@@ -502,13 +517,13 @@ impl VectorStore {
             return Ok(Some(dim));
         }
 
-        self.registry_get_dimensions_pragma(collection_id).await
+        self.registry_get_dimensions_from_schema(collection_id).await
     }
 
     /// 集合是否存在的**权威读口**（与 [`Self::get_collection_dimensions`] 解耦）。
     ///
     /// 为什么需要独立读口：维度读口返回 `None` 有两种来源 ——
-    /// ①集合根本不存在；②集合存在但维度读不出来（注册表行缺失且 SQLite pragma 解析失败，
+    /// ①集合根本不存在；②集合存在但维度读不出来（注册表行缺失且 SQLite 建表语句解析失败，
     /// 或 `clear_embeddings` 在维度未知时只把旧 vec0 表改名、`_meta` 与注册表行仍在）。
     /// 接缝 `get_collection_info` 的 `exists` 与 `dimensions` 是两个独立字段，必须把这两格
     /// 分开报；此前的「有维度即存在」会让 ② 被误报成 ①。
@@ -634,7 +649,7 @@ impl VectorStore {
         .await?;
 
         let registry_dim = self.registry_get_dimensions(collection_id).await;
-        let pragma_dim = self.registry_get_dimensions_pragma(collection_id).await?;
+        let pragma_dim = self.registry_get_dimensions_from_schema(collection_id).await?;
 
         if let Some(existing) = registry_dim.or(pragma_dim) {
             if existing != dimensions {
@@ -2238,5 +2253,24 @@ mod tests {
         // ⑤ 非法集合名与维度读口同口径：`Err(Validation)`，不静默返 false。
         let err = store.collection_exists("kb'; DROP TABLE--").await.expect_err("非法名应拒收");
         assert!(matches!(err, AxAgentError::Validation(_)), "应为 Validation：{err:?}");
+    }
+
+    /// 注册表行缺失时的维度回退：维度只存在于 vec0 建表语句的 `float[N]` 里。
+    /// `pragma_table_info` 对 vec0 把列类型报成空串（实测），旧实现还选了不存在的
+    /// `dimensions` 列 ⇒ 回退路径恒 `None`。
+    #[tokio::test]
+    async fn dimensions_fall_back_to_schema_when_registry_row_missing() {
+        register_sqlite_vec_for_tests();
+        let db = memory_db().await;
+        let store = VectorStore::new(db.clone());
+
+        store.ensure_collection("kb-pragma", 3).await.expect("建集合应成功");
+        exec(&db, "DELETE FROM vec_collections WHERE collection_id = 'kb-pragma'").await;
+
+        assert_eq!(
+            store.get_collection_dimensions("kb-pragma").await.expect("读维度应成功"),
+            Some(3),
+            "注册表行缺失时必须能从 vec0 建表语句的 float[N] 解析出维度"
+        );
     }
 }

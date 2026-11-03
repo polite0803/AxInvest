@@ -237,7 +237,7 @@
     "vitest": "4.1.12"
   },
   "simple-git-hooks": {
-    "pre-commit": "npm run check:eol && npx dprint check && npx tsc --noEmit && node scripts/check-i18n-placeholder-usage.mjs && node scripts/cargo-all-workspaces.mjs fmt-check",
+    "pre-commit": "bash scripts/check-line-endings.sh && node node_modules/dprint/bin.cjs check && node scripts/check-tsc.mjs && node scripts/check-i18n-placeholder-usage.mjs && node scripts/cargo-all-workspaces.mjs fmt-check",
     "pre-push": "npm run ci:check:quick"
   }
 }

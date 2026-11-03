@@ -2148,7 +2148,7 @@ impl HostPeer {
                     // 「引擎未装配」是**正常响应**（`assembled = false`，计数全 0），不报
                     // `SEAM_PROVIDER_UNAVAILABLE` —— 缺席本身是要如实暴露的状态。
                     Ok(view) => to_value("MonitorStatusView", &view),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             "stock.monitor" if op == "list_configs" => {
@@ -2161,7 +2161,7 @@ impl HostPeer {
                 match result {
                     // 「引擎实际在盯哪些条」的真相；`Option` 阈值按 serde 声明透出 `null`。
                     Ok(configs) => to_value("MonitorConfig", &configs),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             "stock.monitor" if op == "get_t0_config" => {
@@ -2174,7 +2174,7 @@ impl HostPeer {
                 };
                 match result {
                     Ok(config) => to_value("TZeroConfig", &config),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             // 写 op 的取参顺序照 trading.engine `validate_trade` 先例：先反序列化、后取
@@ -2197,7 +2197,7 @@ impl HostPeer {
                     // clamp（阈值 > 0、`minIntervalMinutes ≥ 1`）在宿主 provider 侧（裁定 J4/N4），
                     // 分派层不重复实现一套数字。
                     Ok(()) => FrameResponse::success(Value::Null),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             "stock.monitor" if op == "upsert_alert" => {
@@ -2219,7 +2219,7 @@ impl HostPeer {
                     // 三判据原样透出：`wired = false`（库里有行但不会被盯）是**正常结果**，
                     // 不借用错误码；`alert_type` 白名单拒绝在宿主 provider 侧（先拒后归一）。
                     Ok(outcome) => to_value("AlertUpsertOutcome", &outcome),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             "stock.monitor" if op == "remove_alert" => {
@@ -2237,7 +2237,7 @@ impl HostPeer {
                     // 行不存在 ⇒ `{dbDeleted:false, memoryRemoved:false}`，**不是错误**
                     // （照 jobs.store get 的「查无即 null」口径）。
                     Ok(outcome) => to_value("RemoveAlertOutcome", &outcome),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             "stock.monitor" if op == "aggregator_config" => {
@@ -2249,7 +2249,7 @@ impl HostPeer {
                 };
                 match result {
                     Ok(config) => to_value("AggregatorConfig", &config),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             "stock.monitor" if op == "set_aggregator_config" => {
@@ -2268,7 +2268,7 @@ impl HostPeer {
                     // 全量结构体；越界拒收、不静默夹取，clamp 区间以 harness
                     // `AGGREGATOR_*` 常量为唯一权威（宿主 provider 侧执行）。
                     Ok(()) => FrameResponse::success(Value::Null),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             "stock.monitor" if op == "aggregator_buffer" => {
@@ -2282,7 +2282,7 @@ impl HostPeer {
                     // 「窗口内几只同向」由消费方用 `SignalType::direction()` 自数（裁定 J7，
                     // 首批不发 aggregator_stats）。
                     Ok(signals) => to_value("StockSignal", &signals),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             // ── quote.watcher 接缝：宿主把 RealTimeQuoteWatcher 的推送集合管理面暴露给插件 ──
@@ -2301,7 +2301,7 @@ impl HostPeer {
                     // 具名对象 `{ "codes": [...] }`（照 jobs.store count 的 `{"count":n}`
                     // 风格），不返回裸数组。
                     Ok(codes) => FrameResponse::success(json!({ "codes": codes })),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             "quote.watcher" if op == "watch" => {
@@ -2331,7 +2331,7 @@ impl HostPeer {
                     // 数量闸（单次 ≤ WATCH_BATCH_LIMIT、总量 ≤ WATCH_SET_LIMIT）超限**截断
                     // 不报错**：`applied < requested` 是合法结果，两个数原样暴露（裁定 J5）。
                     Ok(outcome) => to_value("WatchOutcome", &outcome),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             "quote.watcher" if op == "unwatch" => {
@@ -2348,7 +2348,7 @@ impl HostPeer {
                 };
                 match result {
                     Ok(outcome) => to_value("WatchOutcome", &outcome),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             // ── knowledge.vector 接缝：宿主把独持的 VectorStore + embedding 链暴露给插件 ──
@@ -2360,8 +2360,9 @@ impl HostPeer {
             // ⚠ 硬闸数字（`KNOWLEDGE_CONTENT_MAX_BYTES` / `KNOWLEDGE_TOP_K_RANGE` /
             // `KNOWLEDGE_SNIPPET_MAX_CHARS`）与 snippet 裁剪、`score` 方向（L2 距离，越小越
             // 相似）全在契约层 + 宿主 provider 侧，**分派层一个数字都不写**（裁定 N4：两处各夹
-            // 一份必然漂移）；provider 回的任何 `Err` 一律 `PLUGIN_CALL_FAILED`，本层不做
-            // `Validation ⇒ SEAM_CALL_INVALID_ARGS` 映射（那是后续单独收口的活）。
+            // 一份必然漂移）；provider 回的 `Err` 走 `seam_provider_error` 单点映射：
+            // `Validation ⇒ SEAM_CALL_INVALID_ARGS`（契约按符号承诺；跨批行号会漂，故不引号），
+            // 其余变体（含 trait 默认的 `Provider("…未实现…")`）仍 `PLUGIN_CALL_FAILED`。
             // ⚠ **op 名 ≠ 方法名**：发布的 op 叫 `get_collection_info`，trait 方法叫
             // `collection_info()`（PLAN §58.3-6 定案，先例 `get_t0_config` → `t0_config`、
             // `list_watched` → `watched_codes`）；其余三个 op 与方法名一一对应。
@@ -2384,7 +2385,7 @@ impl HostPeer {
                     // 具名 Outcome 直接序列化（`{"results": [...]}`）；命中 0 条 ⇒ 空数组，
                     // **不是错误**（协议层无通用 NOT_FOUND，先例 `jobs.store`）。
                     Ok(outcome) => to_value("VectorSearchOutcome", &outcome),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             "knowledge.vector" if op == "keyword_search" => {
@@ -2405,7 +2406,7 @@ impl HostPeer {
                     // 与 `search` 共用 `VectorSearchOutcome`；`score` 口径同 `fts_search`，
                     // 消费方不得按 op 分别假设方向。
                     Ok(outcome) => to_value("VectorSearchOutcome", &outcome),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             // 本接缝**唯一**的写 op：`write` 权限闸由 `dispatch_seam` 开头统一把关（§58.3-4）。
@@ -2428,7 +2429,7 @@ impl HostPeer {
                     // `chunk_count = 0`（正文切不出块）是**合法结果**，不是错误；正文超限、
                     // 集合不存在（§56.2-2「不得隐式建集合」）都在宿主 provider 侧拒收。
                     Ok(outcome) => to_value("VectorIndexOutcome", &outcome),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             "knowledge.vector" if op == "get_collection_info" => {
@@ -2448,7 +2449,7 @@ impl HostPeer {
                     // 集合不存在 ⇒ `Ok` + `{exists:false, dimensions:null}`，**不是错误**
                     // （照 `jobs.store get` 的「查无即 null」口径；插件据此先探再写）。
                     Ok(view) => to_value("CollectionInfoView", &view),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             // ── trajectory.store 接缝：宿主把独持的 TrajectoryStorage 的**读面**暴露给插件 ──
@@ -2475,7 +2476,7 @@ impl HostPeer {
                     // 具名对象 `{"trajectories": [...]}`，不返回裸数组（契约已给 Outcome，
                     // 本层不再自己包一层 json）。
                     Ok(outcome) => to_value("TrajectoryListOutcome", &outcome),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             "trajectory.store" if op == "get" => {
@@ -2494,7 +2495,7 @@ impl HostPeer {
                     // 查无 ⇒ `Ok(None)` ⇒ 帧里是 `null`，**不是错误**、不借错误码（协议层无
                     // 通用 NOT_FOUND，先例 `jobs.store` 的 `get`）。
                     Ok(view) => to_value("TrajectorySummaryView", &view),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             "trajectory.store" if op == "query" => {
@@ -2515,7 +2516,7 @@ impl HostPeer {
                 match result {
                     // 零命中 ⇒ `trajectories` 空数组，**不是错误**。
                     Ok(outcome) => to_value("TrajectoryQueryOutcome", &outcome),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             "trajectory.store" if op == "count" => {
@@ -2529,7 +2530,7 @@ impl HostPeer {
                     // 具名对象 `{"count": n}`，不返裸值（空库的 `0` 是合法值）；区间校验、
                     // `limit` 钳位一律由 provider 侧用 `TRAJECTORY_LIST_LIMIT_RANGE` 执行。
                     Ok(outcome) => to_value("TrajectoryCountOutcome", &outcome),
-                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                    Err(e) => seam_provider_error(e),
                 }
             },
             // `platform.adapter.{平台名}` 的 seam ID 是**动态**的，只能用前缀守卫。
@@ -2834,6 +2835,26 @@ fn workflow_run_error(error: AxAgentError) -> FrameResponse {
     match error {
         AxAgentError::Validation(message) => {
             FrameResponse::error(error_codes::WORKFLOW_RUN_REJECTED, message)
+        },
+        other => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, other.to_string()),
+    }
+}
+
+/// 四条「宿主 → 插件」查询接缝（`stock.monitor` / `quote.watcher` / `knowledge.vector` /
+/// `trajectory.store`）提供者的错误 → 帧错误码。
+///
+/// [`AxAgentError::Validation`] 是契约里对「宿主拒收入参」的表达（阈值 / 引擎节拍 / 聚合区间
+/// 越界或 NaN、`alert_type` 不在白名单、集合不存在、正文超限、`top_k` 与时间窗非法），映射为
+/// [`error_codes::SEAM_CALL_INVALID_ARGS`] —— 与分派层在反序列化阶段自己给的 [`invalid_args`]
+/// **同码**，插件侧只需认一个参数错误码；其余错误一律 [`error_codes::PLUGIN_CALL_FAILED`]，
+/// 含 trait 默认实现的 `Err(Provider("…未实现…"))`（那条链路不许被本函数升码）。
+///
+/// 形态照 [`workflow_run_error`]：那条接缝的 `Validation` 已定形为
+/// [`error_codes::WORKFLOW_RUN_REJECTED`]（属回归面），不并入本函数、也不改它。
+fn seam_provider_error(error: AxAgentError) -> FrameResponse {
+    match error {
+        AxAgentError::Validation(message) => {
+            FrameResponse::error(error_codes::SEAM_CALL_INVALID_ARGS, message)
         },
         other => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, other.to_string()),
     }
@@ -10363,10 +10384,10 @@ mod tests {
         assert_eq!(rejected_calls, 1, "参数错误不得新增 provider 触达");
     }
 
-    /// ⑥：替身未覆盖的 op 吃 trait 默认 `Err(Provider("…未实现…"))` ⇒ 分派层一律
-    /// `PLUGIN_CALL_FAILED`（**本批不做** `Validation ⇒ SEAM_CALL_INVALID_ARGS` 映射），
-    /// 文案点名 trait 方法名与「未实现」。同批钉住：`list_collections`（PLAN §56.1-Q3 已裁定
-    /// 首批不开）仍是 `SEAM_CALL_UNSUPPORTED`，两类「做不到」不许混成一个码。
+    /// ⑥：**反面锁**。替身未覆盖的 op 吃 trait 默认 `Err(Provider("…未实现…"))` ⇒ 分派层
+    /// 一律 `PLUGIN_CALL_FAILED`（`seam_provider_error` 只动 `Validation` 那一格，其余变体
+    /// 不升级）。文案点名 trait 方法名与「未实现」。同批钉住：`list_collections`（PLAN
+    /// §56.1-Q3 已裁定首批不开）仍是 `SEAM_CALL_UNSUPPORTED`，两类「做不到」不许混成一个码。
     #[test]
     fn knowledge_keyword_search_default_unimplemented_is_call_failed() {
         let knowledge = Arc::new(FixedKnowledgeVector::new());
@@ -10712,5 +10733,640 @@ mod tests {
     /// 写 op 被权限闸拒掉时的「零触达」取证助手（避免在闭包内散落锁读取）。
     fn denied_index_calls(provider: &Arc<FixedKnowledgeVector>) -> usize {
         provider.index_calls.lock().len()
+    }
+
+    // ─────────── 任务 #112：Validation ⇒ SEAM_CALL_INVALID_ARGS 单点映射 ───────────
+
+    /// 替身回**哪一类**错误由这一格控制，好让「该升码的那一支」和「不许升码的其余变体」
+    /// 在同一条接缝、同一个 op、同一句 reason 上做严格 A/B —— 唯一变量是错误变体。
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum StubReject {
+        /// 契约里「宿主拒收入参」的表达 ⇒ 必须落 `SEAM_CALL_INVALID_ARGS`。
+        Validation,
+        /// 宿主内部故障 ⇒ **不许**被误升成参数错误，必须仍 `PLUGIN_CALL_FAILED`。
+        Internal,
+    }
+
+    impl StubReject {
+        /// 造错点唯一：两批用例共用同一句 reason，断言才能证明「变的只有码，不是文案」。
+        fn err(self, reason: &str) -> AxAgentError {
+            match self {
+                Self::Validation => AxAgentError::Validation(reason.to_string()),
+                Self::Internal => AxAgentError::Internal(reason.to_string()),
+            }
+        }
+    }
+
+    /// 会拒收入参的 `stock.monitor` 替身：三个越界写 op 一律回 [`StubReject`] 指定的错。
+    ///
+    /// **刻意不复用 `FixedMonitorProvider`**：那批用例钉的是「成功透传」，往同一替身塞条件
+    /// 分支会改掉它们的语义。`status` / `list_configs` 等不覆盖 ⇒ 吃 trait 默认
+    /// `Err(Provider("…未实现…"))`，顺带当 ④ 反面锁的素材。
+    struct RejectingMonitorProvider {
+        reject: Mutex<StubReject>,
+        t0_calls: Mutex<Vec<axagent_harness::TZeroConfig>>,
+        upsert_calls: Mutex<Vec<axagent_harness::AlertUpsertRequest>>,
+        aggregator_calls: Mutex<Vec<axagent_harness::AggregatorConfig>>,
+    }
+
+    impl RejectingMonitorProvider {
+        fn new(reject: StubReject) -> Self {
+            Self {
+                reject: Mutex::new(reject),
+                t0_calls: Mutex::new(Vec::new()),
+                upsert_calls: Mutex::new(Vec::new()),
+                aggregator_calls: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl axagent_harness::StockMonitorProvider for RejectingMonitorProvider {
+        async fn set_t0_config(
+            &self,
+            config: axagent_harness::TZeroConfig,
+        ) -> axagent_harness::core_error::Result<()> {
+            self.t0_calls.lock().push(config);
+            Err(self.reject.lock().err("阈值 / 引擎节拍越界：minIntervalMinutes=0"))
+        }
+
+        async fn upsert_alert(
+            &self,
+            request: axagent_harness::AlertUpsertRequest,
+        ) -> axagent_harness::core_error::Result<axagent_harness::AlertUpsertOutcome> {
+            self.upsert_calls.lock().push(request);
+            Err(self.reject.lock().err("alert_type 不在白名单：`stop_lostt`"))
+        }
+
+        async fn set_aggregator_config(
+            &self,
+            config: axagent_harness::AggregatorConfig,
+        ) -> axagent_harness::core_error::Result<()> {
+            self.aggregator_calls.lock().push(config);
+            Err(self.reject.lock().err("聚合四区间越界：minSignalCount=0"))
+        }
+    }
+
+    /// 会拒收入参的 `quote.watcher` 替身：`watch` / `unwatch` 回指定错；
+    /// `watched_codes` 不覆盖 ⇒ 吃 trait 默认 `Err(Provider)`。
+    struct RejectingWatcherProvider {
+        reject: Mutex<StubReject>,
+        watch_calls: Mutex<usize>,
+        unwatch_calls: Mutex<usize>,
+    }
+
+    impl RejectingWatcherProvider {
+        fn new(reject: StubReject) -> Self {
+            Self {
+                reject: Mutex::new(reject),
+                watch_calls: Mutex::new(0),
+                unwatch_calls: Mutex::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl axagent_harness::QuoteWatcherProvider for RejectingWatcherProvider {
+        async fn watch(
+            &self,
+            _codes: &[String],
+            _priority: axagent_harness::WatchPriority,
+            _replace: bool,
+        ) -> axagent_harness::core_error::Result<axagent_harness::WatchOutcome> {
+            // 计数记**调用次数**而不是 codes 长度：空集合那一格也要能证明真触达了 provider。
+            *self.watch_calls.lock() += 1;
+            Err(self.reject.lock().err("订阅集合越界：codes 为空"))
+        }
+
+        async fn unwatch(
+            &self,
+            _codes: &[String],
+        ) -> axagent_harness::core_error::Result<axagent_harness::WatchOutcome> {
+            *self.unwatch_calls.lock() += 1;
+            Err(self.reject.lock().err("退订集合越界：codes 为空"))
+        }
+    }
+
+    /// 会拒收入参的 `knowledge.vector` 替身：`search`（`top_k` 越界）与 `index_text`
+    /// （集合不存在 / 正文超 `KNOWLEDGE_CONTENT_MAX_BYTES`）回指定错；
+    /// `keyword_search` / `collection_info` 不覆盖 ⇒ 吃 trait 默认 `Err(Provider)`。
+    struct RejectingKnowledgeVector {
+        reject: Mutex<StubReject>,
+        search_calls: Mutex<Vec<axagent_harness::VectorSearchRequest>>,
+        index_calls: Mutex<Vec<axagent_harness::VectorIndexRequest>>,
+    }
+
+    impl RejectingKnowledgeVector {
+        fn new(reject: StubReject) -> Self {
+            Self {
+                reject: Mutex::new(reject),
+                search_calls: Mutex::new(Vec::new()),
+                index_calls: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl axagent_harness::KnowledgeVectorProvider for RejectingKnowledgeVector {
+        async fn search(
+            &self,
+            request: axagent_harness::VectorSearchRequest,
+        ) -> axagent_harness::core_error::Result<axagent_harness::VectorSearchOutcome> {
+            self.search_calls.lock().push(request.clone());
+            Err(self.reject.lock().err("top_k 越界：0 不在 KNOWLEDGE_TOP_K_RANGE"))
+        }
+
+        async fn index_text(
+            &self,
+            request: axagent_harness::VectorIndexRequest,
+        ) -> axagent_harness::core_error::Result<axagent_harness::VectorIndexOutcome> {
+            self.index_calls.lock().push(request.clone());
+            Err(self.reject.lock().err("目标集合不存在：`kb-missing`（禁止隐式建集合）"))
+        }
+    }
+
+    /// 会拒收入参的 `trajectory.store` 替身：`query`（半边时间窗 / `untilMs < sinceMs`）与
+    /// `list`（`limit` 越界）回指定错；`get` / `count` 不覆盖 ⇒ 吃 trait 默认 `Err(Provider)`。
+    struct RejectingTrajectoryStore {
+        reject: Mutex<StubReject>,
+        query_calls: Mutex<Vec<axagent_harness::TrajectoryQueryView>>,
+        list_calls: Mutex<Vec<Option<usize>>>,
+    }
+
+    impl RejectingTrajectoryStore {
+        fn new(reject: StubReject) -> Self {
+            Self {
+                reject: Mutex::new(reject),
+                query_calls: Mutex::new(Vec::new()),
+                list_calls: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl axagent_harness::TrajectoryStoreProvider for RejectingTrajectoryStore {
+        async fn query(
+            &self,
+            filter: axagent_harness::TrajectoryQueryView,
+        ) -> axagent_harness::core_error::Result<axagent_harness::TrajectoryQueryOutcome> {
+            self.query_calls.lock().push(filter);
+            Err(self.reject.lock().err("半边时间窗：给了 untilMs 却没给 sinceMs"))
+        }
+
+        async fn list(
+            &self,
+            limit: Option<usize>,
+        ) -> axagent_harness::core_error::Result<axagent_harness::TrajectoryListOutcome> {
+            self.list_calls.lock().push(limit);
+            Err(self.reject.lock().err("limit 越界：9999999 超 TRAJECTORY_LIST_LIMIT_RANGE"))
+        }
+    }
+
+    /// 四条接缝共用一个 peer：四个 provider 一次装齐，`declared_calls` 同批给全
+    /// （少声明一条就先吃 `SEAM_CALL_NOT_DECLARED`，根本到不了分派分支）。
+    /// 形态照 `monitor_peer_with_permissions` / `knowledge_trajectory_peer`。
+    fn seam_error_peer(
+        monitor: Arc<RejectingMonitorProvider>,
+        watcher: Arc<RejectingWatcherProvider>,
+        knowledge: Arc<RejectingKnowledgeVector>,
+        store: Arc<RejectingTrajectoryStore>,
+        permissions: Vec<PluginPermission>,
+    ) -> (HostPeer, tokio::runtime::Runtime) {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("async 接缝用例需要 runtime");
+        let registry = Arc::new(CapabilityRegistry::new());
+        let provider: Arc<dyn axagent_harness::StockMonitorProvider> = monitor;
+        registry.register_stock_monitor(provider).expect("stock.monitor 接缝应注册成功");
+        let provider: Arc<dyn axagent_harness::QuoteWatcherProvider> = watcher;
+        registry.register_quote_watcher(provider).expect("quote.watcher 接缝应注册成功");
+        let provider: Arc<dyn axagent_harness::KnowledgeVectorProvider> = knowledge;
+        registry.register_knowledge_vector(provider).expect("knowledge.vector 接缝应注册成功");
+        let provider: Arc<dyn axagent_harness::TrajectoryStoreProvider> = store;
+        registry.register_trajectory_store(provider).expect("trajectory.store 接缝应注册成功");
+        let peer = HostPeer {
+            plugin_id: "plugin.seam_error".to_string(),
+            declared_capabilities: Vec::new(),
+            declared_calls: vec![
+                "stock.monitor".to_string(),
+                "quote.watcher".to_string(),
+                "knowledge.vector".to_string(),
+                "trajectory.store".to_string(),
+            ],
+            registry,
+            runtime: Some(runtime.handle().clone()),
+            permissions,
+        };
+        (peer, runtime)
+    }
+
+    /// ①②③：四条接缝的越界入参由 provider 回 `Err(Validation)`，分派层必须落成
+    /// `SEAM_CALL_INVALID_ARGS`（改前一律 `PLUGIN_CALL_FAILED` ⇒ 契约那几句是假话）。
+    ///
+    /// 断言两件事：帧码升对了 **且** 文案是 `Validation` 的**内层** reason（不带 `Display`
+    /// 前缀 `Validation error:`）—— 后者才证明走的是新映射、不是 `other.to_string()` 兜底。
+    #[test]
+    fn seam_validation_maps_to_invalid_args_across_four_seams() {
+        let monitor = Arc::new(RejectingMonitorProvider::new(StubReject::Validation));
+        let watcher = Arc::new(RejectingWatcherProvider::new(StubReject::Validation));
+        let knowledge = Arc::new(RejectingKnowledgeVector::new(StubReject::Validation));
+        let store = Arc::new(RejectingTrajectoryStore::new(StubReject::Validation));
+        let (peer, _runtime) = seam_error_peer(
+            Arc::clone(&monitor),
+            Arc::clone(&watcher),
+            Arc::clone(&knowledge),
+            Arc::clone(&store),
+            vec![PluginPermission::Write],
+        );
+        let responses =
+            with_watchdog(Duration::from_secs(5), "Validation 升码九格", move || {
+                vec![
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.monitor",
+                        "op": "set_t0_config",
+                        "args": {
+                            "config": {
+                                "enabled": true,
+                                "changePctThreshold": 3.0,
+                                "minIntervalMinutes": 0,
+                            },
+                        },
+                    }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.monitor",
+                        "op": "upsert_alert",
+                        "args": {
+                            "request": {
+                                "stockCode": "600519",
+                                "stockName": "贵州茅台",
+                                "alertType": "stop_lostt",
+                                "threshold": 1400.0,
+                            },
+                        },
+                    }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.monitor",
+                        "op": "set_aggregator_config",
+                        "args": {
+                            "config": {
+                                "windowSecs": 300,
+                                "minSignalCount": 0,
+                                "cooldownSecs": 600,
+                                "minStrength": 0.3,
+                            },
+                        },
+                    }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "quote.watcher",
+                        "op": "watch",
+                        "args": { "codes": [], "priority": "active" },
+                    }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "quote.watcher",
+                        "op": "unwatch",
+                        "args": { "codes": [] },
+                    }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "knowledge.vector",
+                        "op": "search",
+                        "args": {
+                            "request": { "knowledgeBaseId": "kb-1", "query": "筹码", "topK": 0 },
+                        },
+                    }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "knowledge.vector",
+                        "op": "index_text",
+                        "args": {
+                            "request": {
+                                "collectionId": "kb-missing",
+                                "documentId": "doc-1",
+                                "content": "正文",
+                            },
+                        },
+                    }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "trajectory.store",
+                        "op": "query",
+                        "args": { "request": { "untilMs": 1_700_000_000_000_i64 } },
+                    }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "trajectory.store",
+                        "op": "list",
+                        "args": { "limit": 9_999_999 },
+                    }),
+                    &[],
+                ),
+            ]
+            });
+        let expected = [
+            ("stock.monitor", "set_t0_config"),
+            ("stock.monitor", "upsert_alert"),
+            ("stock.monitor", "set_aggregator_config"),
+            ("quote.watcher", "watch"),
+            ("quote.watcher", "unwatch"),
+            ("knowledge.vector", "search"),
+            ("knowledge.vector", "index_text"),
+            ("trajectory.store", "query"),
+            ("trajectory.store", "list"),
+        ];
+        for ((seam, op), response) in expected.iter().zip(responses.iter()) {
+            assert_eq!(
+                response.code.as_deref(),
+                Some(error_codes::SEAM_CALL_INVALID_ARGS),
+                "`{seam}`/`{op}` 的 Validation 必须升码为 SEAM_CALL_INVALID_ARGS，实际 {response:?}"
+            );
+            let detail = response.message.clone().unwrap_or_default();
+            assert!(
+                !detail.starts_with("Validation error:"),
+                "`{seam}`/`{op}` 应透出内层 reason，不该带 Display 前缀，实际：{detail}"
+            );
+            assert!(!detail.is_empty(), "`{seam}`/`{op}` 的拒因文案不得被抹平");
+        }
+        // 九格都真触达了 provider（否则「升码」可能来自参数解析阶段的同码，取证会失真）。
+        assert_eq!(responses.len(), expected.len(), "取证格数与断言表不符");
+        assert_eq!(monitor.t0_calls.lock().len(), 1, "set_t0_config 应被转发");
+        assert_eq!(monitor.upsert_calls.lock().len(), 1, "upsert_alert 应被转发");
+        assert_eq!(monitor.aggregator_calls.lock().len(), 1, "set_aggregator_config 应被转发");
+        assert_eq!(*watcher.watch_calls.lock(), 1, "空 codes 也应转发到 provider");
+        assert_eq!(*watcher.unwatch_calls.lock(), 1, "unwatch 应被转发");
+        assert_eq!(knowledge.search_calls.lock().len(), 1, "search 应被转发");
+        assert_eq!(knowledge.index_calls.lock().len(), 1, "index_text 应被转发");
+        assert_eq!(store.query_calls.lock().len(), 1, "query 应被转发");
+        assert_eq!(store.list_calls.lock().len(), 1, "list 应被转发");
+        // 越界数字的分寸归 provider，本层一个都不写（裁定 N4）：替身收到的就是原样入参。
+        assert_eq!(monitor.t0_calls.lock()[0].min_interval_minutes, 0, "越界值不得被夹取");
+        assert_eq!(store.list_calls.lock()[0], Some(9_999_999), "limit 越界值不得被夹取");
+    }
+
+    /// 映射规则的**另一半**：同一批 op、同一句造错入口，只要变体不是 `Validation`
+    /// （这里用 `Internal`）就**不许**升码，必须仍 `PLUGIN_CALL_FAILED`，且走
+    /// `other.to_string()` 兜底（文案带 `Display` 前缀）。
+    #[test]
+    fn seam_non_validation_error_stays_call_failed() {
+        let (peer, _runtime) = seam_error_peer(
+            Arc::new(RejectingMonitorProvider::new(StubReject::Internal)),
+            Arc::new(RejectingWatcherProvider::new(StubReject::Internal)),
+            Arc::new(RejectingKnowledgeVector::new(StubReject::Internal)),
+            Arc::new(RejectingTrajectoryStore::new(StubReject::Internal)),
+            vec![PluginPermission::Write],
+        );
+        let responses =
+            with_watchdog(Duration::from_secs(5), "非 Validation 不升码", move || {
+                vec![
+                    peer.handle_call_seam(
+                        &json!({
+                            "seam": "stock.monitor",
+                            "op": "upsert_alert",
+                            "args": {
+                                "request": {
+                                    "stockCode": "600519",
+                                    "stockName": "贵州茅台",
+                                    "alertType": "stop_loss",
+                                    "threshold": 1400.0,
+                                },
+                            },
+                        }),
+                        &[],
+                    ),
+                    peer.handle_call_seam(
+                        &json!({
+                            "seam": "knowledge.vector",
+                            "op": "index_text",
+                            "args": {
+                                "request": {
+                                    "collectionId": "kb-1",
+                                    "documentId": "doc-1",
+                                    "content": "正文",
+                                },
+                            },
+                        }),
+                        &[],
+                    ),
+                    peer.handle_call_seam(
+                        &json!({
+                            "seam": "trajectory.store",
+                            "op": "query",
+                            "args": {
+                                "request": {
+                                    "sinceMs": 1_700_000_000_000_i64,
+                                    "untilMs": 1_600_000_000_000_i64,
+                                },
+                            },
+                        }),
+                        &[],
+                    ),
+                ]
+            });
+        assert_eq!(responses.len(), 3);
+        for response in &responses {
+            assert_eq!(
+                response.code.as_deref(),
+                Some(error_codes::PLUGIN_CALL_FAILED),
+                "非 Validation 变体不得升码，实际 {response:?}"
+            );
+            let detail = response.message.clone().unwrap_or_default();
+            assert!(
+                detail.starts_with("Internal error:"),
+                "应走 `other.to_string()` 兜底（带 Display 前缀），实际：{detail}"
+            );
+        }
+    }
+
+    /// ④ **反面锁**：本批改的是错码映射，不许把 trait 默认实现的
+    /// `Err(Provider("…未实现…"))` 一起升码 —— 必须仍 `PLUGIN_CALL_FAILED` 且文案含「未实现」。
+    ///
+    /// 选的四格都是**本批改过的那 20 行**里的分支（四条接缝各一格），直接证明
+    /// 「只动 `Validation` 那一格」这条规则落在改过的面上。
+    #[test]
+    fn seam_trait_default_unimplemented_stays_call_failed() {
+        let (peer, _runtime) = seam_error_peer(
+            Arc::new(RejectingMonitorProvider::new(StubReject::Validation)),
+            Arc::new(RejectingWatcherProvider::new(StubReject::Validation)),
+            Arc::new(RejectingKnowledgeVector::new(StubReject::Validation)),
+            Arc::new(RejectingTrajectoryStore::new(StubReject::Validation)),
+            vec![PluginPermission::Write],
+        );
+        let responses =
+            with_watchdog(Duration::from_secs(5), "默认未实现不升码", move || {
+                vec![
+                peer.handle_call_seam(
+                    &json!({ "seam": "stock.monitor", "op": "list_configs", "args": {} }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({ "seam": "quote.watcher", "op": "list_watched", "args": {} }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "knowledge.vector",
+                        "op": "keyword_search",
+                        "args": {
+                            "request": { "collectionId": "kb-1", "query": "主力净流入", "topK": 8 },
+                        },
+                    }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "trajectory.store",
+                        "op": "get",
+                        "args": { "trajectory_id": "traj-1" },
+                    }),
+                    &[],
+                ),
+            ]
+            });
+        let expected = [
+            ("stock.monitor", "list_configs"),
+            ("quote.watcher", "list_watched"),
+            ("knowledge.vector", "keyword_search"),
+            ("trajectory.store", "get"),
+        ];
+        assert_eq!(responses.len(), expected.len(), "反面锁格数与断言表不符");
+        for ((seam, op), response) in expected.iter().zip(responses.iter()) {
+            assert_eq!(
+                response.code.as_deref(),
+                Some(error_codes::PLUGIN_CALL_FAILED),
+                "`{seam}`/`{op}` 的 trait 默认 Err(Provider) 必须仍 PLUGIN_CALL_FAILED，实际 {response:?}"
+            );
+            let detail = response.message.clone().unwrap_or_default();
+            assert!(detail.contains("未实现"), "`{seam}`/`{op}` 文案应说明未实现，实际：{detail}");
+        }
+    }
+
+    /// ⑥ **闸位锁**：权限闸必须在错码映射**之前**。无 `write` 权限时即使 provider 会回
+    /// `Validation`，帧码也必须仍是 `PLUGIN_PERMISSION_DENIED` 且零触达 provider ——
+    /// 不许因为本批改了错码，就把无权限调用放进 provider。
+    #[test]
+    fn seam_validation_mapping_still_behind_permission_gate() {
+        let monitor = Arc::new(RejectingMonitorProvider::new(StubReject::Validation));
+        let watcher = Arc::new(RejectingWatcherProvider::new(StubReject::Validation));
+        let knowledge = Arc::new(RejectingKnowledgeVector::new(StubReject::Validation));
+        let store = Arc::new(RejectingTrajectoryStore::new(StubReject::Validation));
+        let (peer, _runtime) = seam_error_peer(
+            Arc::clone(&monitor),
+            Arc::clone(&watcher),
+            Arc::clone(&knowledge),
+            store,
+            Vec::new(),
+        );
+        let responses = with_watchdog(Duration::from_secs(5), "闸在映射之前", move || {
+            vec![
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.monitor",
+                        "op": "set_t0_config",
+                        "args": {
+                            "config": {
+                                "enabled": true,
+                                "changePctThreshold": 3.0,
+                                "minIntervalMinutes": 0,
+                            },
+                        },
+                    }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.monitor",
+                        "op": "upsert_alert",
+                        "args": {
+                            "request": {
+                                "stockCode": "600519",
+                                "stockName": "贵州茅台",
+                                "alertType": "stop_lostt",
+                                "threshold": 1400.0,
+                            },
+                        },
+                    }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "stock.monitor",
+                        "op": "set_aggregator_config",
+                        "args": {
+                            "config": {
+                                "windowSecs": 300,
+                                "minSignalCount": 0,
+                                "cooldownSecs": 600,
+                                "minStrength": 0.3,
+                            },
+                        },
+                    }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "quote.watcher",
+                        "op": "watch",
+                        "args": { "codes": ["600519"], "priority": "active" },
+                    }),
+                    &[],
+                ),
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "knowledge.vector",
+                        "op": "index_text",
+                        "args": {
+                            "request": {
+                                "collectionId": "kb-missing",
+                                "documentId": "doc-1",
+                                "content": "正文",
+                            },
+                        },
+                    }),
+                    &[],
+                ),
+            ]
+        });
+        assert_eq!(responses.len(), 5);
+        for response in &responses {
+            assert_eq!(
+                response.code.as_deref(),
+                Some(error_codes::PLUGIN_PERMISSION_DENIED),
+                "闸必须早于映射：无 write 权限不得落到任何参数码 / 故障码，实际 {response:?}"
+            );
+            assert!(
+                response.message.clone().unwrap_or_default().contains("write"),
+                "文案应点明缺失的权限，实际：{response:?}"
+            );
+        }
+        // 闸在映射之前 ⇒ 五格都该零触达；一旦有触达，就说明升码路径绕过了准入。
+        assert!(monitor.t0_calls.lock().is_empty(), "set_t0_config 不得触达 provider");
+        assert!(monitor.upsert_calls.lock().is_empty(), "upsert_alert 不得触达 provider");
+        assert!(
+            monitor.aggregator_calls.lock().is_empty(),
+            "set_aggregator_config 不得触达 provider"
+        );
+        assert_eq!(*watcher.watch_calls.lock(), 0, "watch 不得触达 provider");
+        assert!(knowledge.index_calls.lock().is_empty(), "index_text 不得触达 provider");
     }
 }

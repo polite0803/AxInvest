@@ -324,6 +324,31 @@ export function rulePayloadKeysMatch(rustFields, tsKeys, minKeys = PAYLOAD_KEYS_
   return { ok: true, n: rs.size };
 }
 
+/**
+ * R12：监控读数的权威在 harness（`MonitorStatusView`），命令层只能以别名引用。
+ *
+ * 为什么不能只比键集合：`MonitorStatusDto` 曾在命令层有一份本地定义，若只对「当前那份」
+ * 做键比对，「命令层又抄一份」会静默通过 —— 两边各自维护时，改一边另一边不动照样绿。
+ * 因此三条一起判：① harness 那份的键 = 前端键；② 命令层不得再出现 `struct MonitorStatusDto`；
+ * ③ 命令层必须出现 `MonitorStatusView as MonitorStatusDto` 的别名引用（改造已落地）。
+ */
+export function ruleStatusAuthorityMigrated(harnessSrc, cmdSrc, tsKeys, minKeys = MONITOR_STATUS_KEYS_MIN) {
+  const base = rulePayloadKeysMatch(
+    rustStructFields(harnessSrc, "MonitorStatusView"),
+    tsKeys,
+    minKeys,
+    "MonitorStatusView",
+  );
+  if (!base.ok) { return base; }
+  if (/pub\s+struct\s+MonitorStatusDto\b/.test(cmdSrc)) {
+    return { ok: false, why: "命令层又定义了本地 `struct MonitorStatusDto` —— 权威只能有 harness 那一份（改用别名引用）" };
+  }
+  if (!/MonitorStatusView\s+as\s+MonitorStatusDto/.test(cmdSrc)) {
+    return { ok: false, why: "命令层没有 `MonitorStatusView as MonitorStatusDto` 别名引用（读数类型未真正切到 harness）" };
+  }
+  return base;
+}
+
 /** R5：每个发射器实现都必须有构造点。 */
 export function ruleEveryEmitterConstructed(impls, entries) {
   if (impls.length === 0) { return { ok: false, why: "扫描面抽不到任何 impl MonitorEventEmitter（判据没电）" }; }
@@ -569,11 +594,11 @@ function collect() {
     ),
     r10: ruleRetiredProducersGone(entries),
     r11: ruleSingleAlertConstructor(entries),
-    r12: rulePayloadKeysMatch(
-      rustStructFields(prod(STOCK_ANALYSIS_RS), "MonitorStatusDto"),
+    r12: ruleStatusAuthorityMigrated(
+      prod(HARNESS_STOCK_RS),
+      prod(STOCK_ANALYSIS_RS),
       tsInterfaceKeys(read(TYPES_TS), "MonitorStatus"),
       MONITOR_STATUS_KEYS_MIN,
-      "MonitorStatusDto",
     ),
     r13: rulePayloadKeysMatch(
       rustStructFields(prod(DASHBOARD_RS), "PortfolioDashboard"),
@@ -619,7 +644,7 @@ const RULES = [
   ["R9 条件单 payload 键集合逐项相等", "r9"],
   ["R10 退役生产者计数为 0", "r10"],
   ["R11 price_alerts 新行构造点唯一且与去重谓词同文件", "r11"],
-  ["R12 monitor_status 两侧键集合逐项相等", "r12"],
+  ["R12 monitor_status 权威在 harness 且命令层只别名引用、键集合逐项相等", "r12"],
   ["R13 组合 dashboard 两侧键集合逐项相等", "r13"],
   ["R14 组合级信号发射点用权威枚举且无字面量", "r14"],
   ["R15 组合级信号两头同名且已进生成物", "r15"],
@@ -880,9 +905,9 @@ function selftest() {
     entry("f.rs", "fn make() -> price_alerts::ActiveModel {\n  todo!()\n}"),
   ]), true);
 
-  // ── R12：monitor_status 两头键集合（裁定 12 的新命令）──
+  // ── R12：monitor_status 权威在 harness（命令层只别名引用）──
   const OK_STATUS_RS = [
-    "pub struct MonitorStatusDto {",
+    "pub struct MonitorStatusView {",
     "  pub assembled: bool,",
     "  pub session: String,",
     "  pub trading_now: bool,",
@@ -893,6 +918,10 @@ function selftest() {
     "  pub consecutive_all_failed_rounds: u32,",
     "  pub round_finished_at_ms: i64,",
     "}",
+  ].join("\n");
+  const OK_STATUS_CMD = [
+    "use axagent_harness::stock_monitor::MonitorStatusView as MonitorStatusDto;",
+    "pub async fn monitor_status() -> Result<MonitorStatusDto, String> { todo!() }",
   ].join("\n");
   const OK_STATUS_TS = [
     "export interface MonitorStatus {",
@@ -908,42 +937,62 @@ function selftest() {
     "}",
   ].join("\n");
   push(
-    "正控 R12 snake→camel 逐项相等",
-    rulePayloadKeysMatch(
-      rustStructFields(OK_STATUS_RS, "MonitorStatusDto"),
+    "正控 R12 权威在 harness、命令层别名引用、键逐项相等",
+    ruleStatusAuthorityMigrated(
+      OK_STATUS_RS,
+      OK_STATUS_CMD,
       tsInterfaceKeys(OK_STATUS_TS, "MonitorStatus"),
       MONITOR_STATUS_KEYS_MIN,
-      "MonitorStatusDto",
     ),
     true,
   );
   push(
     "负控 R12 前端漏一条键（后端发了、面板读的是旧键 ⇒ 那一句永远不出）",
-    rulePayloadKeysMatch(
-      rustStructFields(OK_STATUS_RS, "MonitorStatusDto"),
+    ruleStatusAuthorityMigrated(
+      OK_STATUS_RS,
+      OK_STATUS_CMD,
       tsInterfaceKeys(OK_STATUS_TS.replace("  consecutiveAllFailedRounds: number;", ""), "MonitorStatus"),
       MONITOR_STATUS_KEYS_MIN,
-      "MonitorStatusDto",
     ),
     false,
   );
   push(
     "负控 R12 前端写成 snake_case（消费端拿不到值，正是本轮根因家族）",
-    rulePayloadKeysMatch(
-      rustStructFields(OK_STATUS_RS, "MonitorStatusDto"),
+    ruleStatusAuthorityMigrated(
+      OK_STATUS_RS,
+      OK_STATUS_CMD,
       tsInterfaceKeys(OK_STATUS_TS.replace("  tradingNow: boolean;", "  trading_now: boolean;"), "MonitorStatus"),
       MONITOR_STATUS_KEYS_MIN,
-      "MonitorStatusDto",
     ),
     false,
   );
   push(
-    "负控 R12 结构体名抄错 ⇒ 判据没电（不许由「抽不到」推成「对齐」）",
-    rulePayloadKeysMatch(
-      rustStructFields(OK_STATUS_RS, "MonitorStatus"),
+    "负控 R12 harness 结构体名抄错 ⇒ 判据没电（不许由「抽不到」推成「对齐」）",
+    ruleStatusAuthorityMigrated(
+      OK_STATUS_RS.replace("pub struct MonitorStatusView", "pub struct MonitorStatus"),
+      OK_STATUS_CMD,
       tsInterfaceKeys(OK_STATUS_TS, "MonitorStatus"),
       MONITOR_STATUS_KEYS_MIN,
-      "MonitorStatusDto",
+    ),
+    false,
+  );
+  push(
+    "负控 R12 命令层又抄一份 struct（键对得上也要红：两边各自维护会静默漂移）",
+    ruleStatusAuthorityMigrated(
+      OK_STATUS_RS,
+      `${OK_STATUS_CMD}\npub struct MonitorStatusDto {\n  pub assembled: bool,\n}`,
+      tsInterfaceKeys(OK_STATUS_TS, "MonitorStatus"),
+      MONITOR_STATUS_KEYS_MIN,
+    ),
+    false,
+  );
+  push(
+    "负控 R12 命令层没切到 harness（无别名引用）",
+    ruleStatusAuthorityMigrated(
+      OK_STATUS_RS,
+      "pub async fn monitor_status() -> Result<MonitorStatusDto, String> { todo!() }",
+      tsInterfaceKeys(OK_STATUS_TS, "MonitorStatus"),
+      MONITOR_STATUS_KEYS_MIN,
     ),
     false,
   );

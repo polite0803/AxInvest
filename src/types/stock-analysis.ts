@@ -947,7 +947,8 @@ export interface ConditionalOrderListView {
 // ── 监控引擎运行读数（裁定 12：「监控实际未在取数」必须是可消费的聚合面，不是日志）──
 
 /**
- * 后端 `commands/stock_analysis.rs::MonitorStatusDto` 的投影。
+ * 后端 `axagent_harness::stock_monitor::MonitorStatusView` 的投影（命令层以
+ * `MonitorStatusDto` 别名导出，九个键与 camelCase 序列化逐字不变）。
  *
  * 每个键只说一件事，消费侧不得把它们收敛成一句：`assembled=false` 时其余计数**全是 0**，
  * 那些 0 的含义是「没人在取数」，不是「没有失败」；`tradingNow=false` 时轮次计数是

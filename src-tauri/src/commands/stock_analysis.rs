@@ -41,6 +41,9 @@ use axagent_entities::{
 };
 use axagent_harness::AnalysisKind;
 use axagent_harness::market_data::KLine;
+// 监控读数结构的权威已随 `stock.monitor` 接缝上收 harness；命令层沿用旧名，
+// 九个键与 camelCase 序列化逐字不变（R12 已改指 harness 那一份）。
+use axagent_harness::stock_monitor::MonitorStatusView as MonitorStatusDto;
 use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -2321,29 +2324,6 @@ pub async fn delete_price_alert(state: State<'_, AppState>, id: String) -> Resul
     }
 
     Ok(())
-}
-
-/// 监控引擎的运行读数（裁定 12 ①：「监控实际未在取数」必须是可被面板消费的聚合面）。
-///
-/// 每个键只说一件事，前端不得把它们收敛成一句（H-4）：
-/// - `assembled=false` ⇒ 引擎没装配，**此时其余计数一律不得渲染**（0 不是「没有失败」，是「没人在取数」）
-/// - `tradingNow=false` ⇒ 非交易时段整轮跳过，轮次计数是上一盘的旧值
-/// - `roundCodesFailed/roundCodesTotal` ⇒ 本轮取数失败的股票数 / 应取数的股票数
-/// - `consecutiveAllFailedRounds` ⇒ 连续「整轮全失败」轮数（面板据此说「监控实际未在产出告警」）
-/// - `roundFinishedAtMs=0` ⇒ 装配好了但还没跑完第一轮，不能读成「本轮 0/0 失败」
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MonitorStatusDto {
-    pub assembled: bool,
-    /// 时段档位码（`TradingSession::code()`），前端按它查 i18n，不在这里出中文
-    pub session: String,
-    pub trading_now: bool,
-    pub poll_interval_secs: u64,
-    pub configs_active: u32,
-    pub round_codes_total: u32,
-    pub round_codes_failed: u32,
-    pub consecutive_all_failed_rounds: u32,
-    pub round_finished_at_ms: i64,
 }
 
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "查询实时监控运行读数")]

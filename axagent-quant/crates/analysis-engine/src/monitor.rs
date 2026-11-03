@@ -32,7 +32,7 @@ const ALERT_COOLDOWN_MIN_SECS: i64 = 0;
 ///
 /// 由 wiring 层（如 Tauri AppHandle 包装）注入具体实现，
 /// 使 stock-analysis crate 不直接依赖 Tauri 框架。
-/// 未注入时（None）告警仅走内部 broadcast channel。
+/// 未注入时（None）告警**不外推**：没有事件桥接就没有消费面（内部 broadcast 已于 `#115` 退役）。
 pub trait MonitorEventEmitter: Send + Sync {
     fn emit(&self, event: &str, payload: serde_json::Value);
 }
@@ -101,7 +101,6 @@ pub struct RealtimeMonitor {
     client: Arc<dyn MarketDataProvider>,
     /// 键 = `MonitorConfig::alert_id`（一条 `price_alerts` 行一个键）
     configs: RwLock<HashMap<String, MonitorConfig>>,
-    alert_tx: tokio::sync::broadcast::Sender<MonitorAlert>,
     running: RwLock<bool>,
     event_emitter: RwLock<Option<Arc<dyn MonitorEventEmitter>>>,
     last_alerts: RwLock<HashMap<String, i64>>,
@@ -123,11 +122,9 @@ pub struct RealtimeMonitor {
 
 impl RealtimeMonitor {
     pub fn new(client: Arc<dyn MarketDataProvider>) -> Self {
-        let (alert_tx, _) = tokio::sync::broadcast::channel(128);
         Self {
             client,
             configs: RwLock::new(HashMap::new()),
-            alert_tx,
             running: RwLock::new(false),
             event_emitter: RwLock::new(None),
             last_alerts: RwLock::new(HashMap::new()),
@@ -618,19 +615,18 @@ impl RealtimeMonitor {
             true
         });
 
-        // 发送告警 — 内部 broadcast channel + 前端事件桥接
+        // 发送告警 — 只剩前端事件桥接。
+        // 内部 broadcast 已于 #115 退役：`subscribe` 移除后接收端恒为空（`send` 恒失败）、
+        // 真正送达的是下面的 `event_emitter`，留着 channel 只会让读者以为还有第二个消费面。
         let emitter = self.event_emitter.read().await.clone();
         for alert in &alerts {
-            let _ = self.alert_tx.send(alert.clone());
             if let Some(ref e) = emitter {
                 // payload 直接由 `MonitorAlert` 序列化得到（其 `rename_all = "camelCase"`）——
                 // 不再手写 `json!` 摊平字段：那份手抄副本与前端消费端的漂移正是这一层造出来的，
                 // 且后续给 `MonitorAlert` 加字段时，手抄副本会静默少一键。
                 match serde_json::to_value(alert) {
                     Ok(payload) => e.emit(IpcEventName::PriceAlertTriggered.as_str(), payload),
-                    Err(err) => tracing::warn!(
-                        "[monitor] 告警序列化失败，该条不外推（已进内部 broadcast）: {err}"
-                    ),
+                    Err(err) => tracing::warn!("[monitor] 告警序列化失败，该条不外推: {err}"),
                 }
             }
         }

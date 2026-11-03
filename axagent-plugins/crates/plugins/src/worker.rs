@@ -436,6 +436,15 @@ struct HostPeer {
 /// 最后登记 **`quote.watcher` 的两个写 op**（`watch` / `unwatch`）：推送集合是所有插件与
 /// 前端共享的一格，`watch` 直接放大对 vendor 的取数请求数；`list_watched` 只读，不设闸。
 ///
+/// 本批只新增 **`knowledge.vector` 的唯一写 op**（`index_text`）一条：它会在宿主侧触发 chunk
+/// 切分 + embedding 调用（按 token 计费，而 PLAN §56.2-3 明示「速率闸首批不做」⇒ `write` 一档
+/// 权限是当前唯一防线）。其余三个 op（`search` / `keyword_search` / `get_collection_info`）
+/// 只读，不设闸。
+///
+/// `trajectory.store` **一条条目都不加**：首批四个 op（`list` / `get` / `query` / `count`）
+/// 全是读面（PLAN §56.1-Q4 裁定 `append` 不给 —— 写入口会污染进化门槛读的分母）⇒ 一律落
+/// 下面的 `_ => None`。将来若开写 op，必须**同批**在这里补登记，不许靠分派分支自查权限。
+///
 /// 纯函数（无 `self`、无全局状态），便于单测直接枚举判定。
 fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
     match (seam, op) {
@@ -447,6 +456,7 @@ fn required_permission_for(seam: &str, op: &str) -> Option<PluginPermission> {
             "set_t0_config" | "upsert_alert" | "remove_alert" | "set_aggregator_config",
         ) => Some(PluginPermission::Write),
         ("quote.watcher", "watch" | "unwatch") => Some(PluginPermission::Write),
+        ("knowledge.vector", "index_text") => Some(PluginPermission::Write),
         _ => None,
     }
 }
@@ -2338,6 +2348,187 @@ impl HostPeer {
                 };
                 match result {
                     Ok(outcome) => to_value("WatchOutcome", &outcome),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            // ── knowledge.vector 接缝：宿主把独持的 VectorStore + embedding 链暴露给插件 ──
+            // 方向与 market.quote / stock.monitor 同类（宿主 → 插件，见上方先例注释）：只走入站
+            // 分派，**不进** `SUPPORTED_REMOTE_SEAMS`（那是「插件提供给宿主」的清单）。
+            // 边界总则「只传文本，embedding 归宿主」：`VectorIndexRequest` 只有三字段，
+            // `embeddingProvider` / `dimensions` 都不是入参（PLAN §56.2-1，契约见 harness
+            // `knowledge_vector.rs` 模块头）；四个 op **一律不收 `as_of`**。
+            // ⚠ 硬闸数字（`KNOWLEDGE_CONTENT_MAX_BYTES` / `KNOWLEDGE_TOP_K_RANGE` /
+            // `KNOWLEDGE_SNIPPET_MAX_CHARS`）与 snippet 裁剪、`score` 方向（L2 距离，越小越
+            // 相似）全在契约层 + 宿主 provider 侧，**分派层一个数字都不写**（裁定 N4：两处各夹
+            // 一份必然漂移）；provider 回的任何 `Err` 一律 `PLUGIN_CALL_FAILED`，本层不做
+            // `Validation ⇒ SEAM_CALL_INVALID_ARGS` 映射（那是后续单独收口的活）。
+            // ⚠ **op 名 ≠ 方法名**：发布的 op 叫 `get_collection_info`，trait 方法叫
+            // `collection_info()`（PLAN §58.3-6 定案，先例 `get_t0_config` → `t0_config`、
+            // `list_watched` → `watched_codes`）；其余三个 op 与方法名一一对应。
+            "knowledge.vector" if op == "search" => {
+                let Some(provider) = self.registry.get_knowledge_vector() else {
+                    return self.unavailable(seam);
+                };
+                // ⚠ 裁定 N2 / §58.3-3：args 是**嵌一层**的 `{ "request": {knowledgeBaseId,
+                // query, topK, minSimilarity?, docIds?} }`，**不支持平铺** —— 平铺时缺
+                // `request` 键即 `SEAM_CALL_INVALID_ARGS`。
+                let request: axagent_harness::VectorSearchRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(result) = self.block_on(provider.search(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 具名 Outcome 直接序列化（`{"results": [...]}`）；命中 0 条 ⇒ 空数组，
+                    // **不是错误**（协议层无通用 NOT_FOUND，先例 `jobs.store`）。
+                    Ok(outcome) => to_value("VectorSearchOutcome", &outcome),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "knowledge.vector" if op == "keyword_search" => {
+                let Some(provider) = self.registry.get_knowledge_vector() else {
+                    return self.unavailable(seam);
+                };
+                // 同样嵌一层（键名 `request`）；`KeywordSearchRequest` 是「宿主唯一的原生
+                // 收文本的检索口」，零模型成本 ⇒ 插件想省钱得**显式**选这个 op，本层不替它猜。
+                let request: axagent_harness::KeywordSearchRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(result) = self.block_on(provider.keyword_search(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 与 `search` 共用 `VectorSearchOutcome`；`score` 口径同 `fts_search`，
+                    // 消费方不得按 op 分别假设方向。
+                    Ok(outcome) => to_value("VectorSearchOutcome", &outcome),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            // 本接缝**唯一**的写 op：`write` 权限闸由 `dispatch_seam` 开头统一把关（§58.3-4）。
+            "knowledge.vector" if op == "index_text" => {
+                // 取参顺序照 stock.monitor `upsert_alert` / trading.engine `validate_trade`
+                // 先例：先反序列化、后取 provider —— 非法入参是调用方的错误，不该被
+                // 「provider 暂不可用」掩盖。
+                let request: axagent_harness::VectorIndexRequest =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(request) => request,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_knowledge_vector() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.index_text(request)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // `chunk_count = 0`（正文切不出块）是**合法结果**，不是错误；正文超限、
+                    // 集合不存在（§56.2-2「不得隐式建集合」）都在宿主 provider 侧拒收。
+                    Ok(outcome) => to_value("VectorIndexOutcome", &outcome),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "knowledge.vector" if op == "get_collection_info" => {
+                let Some(provider) = self.registry.get_knowledge_vector() else {
+                    return self.unavailable(seam);
+                };
+                // 标量键（不是嵌一层）：JSON 侧 `collection_id`，trait 形参同名 `collection_id`。
+                let collection_id: String = match deserialize_arg(&args, "collection_id", seam) {
+                    Ok(collection_id) => collection_id,
+                    Err(response) => return response,
+                };
+                // op 叫 `get_collection_info`，方法叫 `collection_info`（见本段开头 ⚠ 注释）。
+                let Some(result) = self.block_on(provider.collection_info(&collection_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 集合不存在 ⇒ `Ok` + `{exists:false, dimensions:null}`，**不是错误**
+                    // （照 `jobs.store get` 的「查无即 null」口径；插件据此先探再写）。
+                    Ok(view) => to_value("CollectionInfoView", &view),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            // ── trajectory.store 接缝：宿主把独持的 TrajectoryStorage 的**读面**暴露给插件 ──
+            // 首批四个 op 全是读（PLAN §56.1-Q4：`append` 不给）⇒ `required_permission_for`
+            // 里一条条目都没有；四个 op 同样**不收 `as_of`**。
+            // 视图裁剪（`steps` / `rewards` / `patterns` / 会话原文整族不过线）与
+            // `TRAJECTORY_LIST_LIMIT_RANGE` 钳位、`summary_snippet` 截断都在宿主 provider 侧，
+            // `Trajectory` → `TrajectorySummaryView` 的映射点**唯一**（禁区 12），本层只透传
+            // 契约已经给好的具名 Outcome / View。
+            "trajectory.store" if op == "list" => {
+                let Some(provider) = self.registry.get_trajectory_store() else {
+                    return self.unavailable(seam);
+                };
+                // `limit` 是**可选标量**：缺失 / `null` 都合法（=「由宿主取缺省并钳位」），
+                // 故走 `deserialize_optional_arg`；给了非数字才落 `SEAM_CALL_INVALID_ARGS`。
+                let limit: Option<usize> = match deserialize_optional_arg(&args, "limit", seam) {
+                    Ok(limit) => limit,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.list(limit)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 具名对象 `{"trajectories": [...]}`，不返回裸数组（契约已给 Outcome，
+                    // 本层不再自己包一层 json）。
+                    Ok(outcome) => to_value("TrajectoryListOutcome", &outcome),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "trajectory.store" if op == "get" => {
+                let Some(provider) = self.registry.get_trajectory_store() else {
+                    return self.unavailable(seam);
+                };
+                // JSON 侧键名 `trajectory_id`；trait 形参名是 `id`（Rust 侧标识符，不是线上键）。
+                let trajectory_id: String = match deserialize_arg(&args, "trajectory_id", seam) {
+                    Ok(trajectory_id) => trajectory_id,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.get(&trajectory_id)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 查无 ⇒ `Ok(None)` ⇒ 帧里是 `null`，**不是错误**、不借错误码（协议层无
+                    // 通用 NOT_FOUND，先例 `jobs.store` 的 `get`）。
+                    Ok(view) => to_value("TrajectorySummaryView", &view),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "trajectory.store" if op == "query" => {
+                let Some(provider) = self.registry.get_trajectory_store() else {
+                    return self.unavailable(seam);
+                };
+                // 嵌一层（键名 `request`）：DTO 是 `TrajectoryQueryView`（camelCase +
+                // `sinceMs` / `untilMs` epoch 毫秒），**不是** `trajectory_types::TrajectoryQuery`
+                // 原形（§56.1-Q6：原形无 `rename_all`、`time_range` 是元组，一字不动）。
+                let filter: axagent_harness::TrajectoryQueryView =
+                    match deserialize_arg(&args, "request", seam) {
+                        Ok(filter) => filter,
+                        Err(response) => return response,
+                    };
+                let Some(result) = self.block_on(provider.query(filter)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 零命中 ⇒ `trajectories` 空数组，**不是错误**。
+                    Ok(outcome) => to_value("TrajectoryQueryOutcome", &outcome),
+                    Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
+                }
+            },
+            "trajectory.store" if op == "count" => {
+                let Some(provider) = self.registry.get_trajectory_store() else {
+                    return self.unavailable(seam);
+                };
+                let Some(result) = self.block_on(provider.count()) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 具名对象 `{"count": n}`，不返裸值（空库的 `0` 是合法值）；区间校验、
+                    // `limit` 钳位一律由 provider 侧用 `TRAJECTORY_LIST_LIMIT_RANGE` 执行。
+                    Ok(outcome) => to_value("TrajectoryCountOutcome", &outcome),
                     Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
                 }
             },
@@ -9580,5 +9771,946 @@ mod tests {
                 "`{seam}` 未注册 provider 必须落 SEAM_PROVIDER_UNAVAILABLE，实际 {response:?}"
             );
         }
+    }
+
+    // ───── knowledge.vector 接缝（4 op）+ trajectory.store 接缝（4 op）─────
+
+    /// 假知识库向量提供者：**刻意不覆盖 `keyword_search`**，让它吃 trait 默认实现
+    /// （`Err(Provider("…未实现…"))` ⇒ 分派落 `PLUGIN_CALL_FAILED`），顺带钉住「外部实现只覆盖
+    /// 关心的 op」这条契约口径（先例 `FixedMonitorProvider` / `FixedQuoteWatcher`）。
+    ///
+    /// 记账一律用 `parking_lot::Mutex`（本文件既有替身同源做法）：`clippy.toml` 的
+    /// `disallowed-types` 禁的是 `std::sync` 锁，且这里的临界区内不跨任何 `await`。
+    struct FixedKnowledgeVector {
+        /// `search` 收到的请求序列（取证「camelCase 线上键 → snake_case Rust 字段」落点）。
+        search_calls: Mutex<Vec<axagent_harness::VectorSearchRequest>>,
+        /// `index_text` 收到的请求序列（唯一写 op 的触达取证）。
+        index_calls: Mutex<Vec<axagent_harness::VectorIndexRequest>>,
+        /// `collection_info` 收到的集合 id 序列（⚠ op 名 `get_collection_info` ≠ 方法名）。
+        collection_info_calls: Mutex<Vec<String>>,
+    }
+
+    impl FixedKnowledgeVector {
+        fn new() -> Self {
+            Self {
+                search_calls: Mutex::new(Vec::new()),
+                index_calls: Mutex::new(Vec::new()),
+                collection_info_calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        /// 命中块样本：`score` 是 **f32**（L2 距离，越小越相似，方向由宿主 provider 侧权威）。
+        ///
+        /// ⚠ 断言侧不许写 `assert_eq!(val["score"], json!(0.21))` —— `f32` 经 `serde_json::Value`
+        /// 读出的是 f64，与 f64 字面量**逐位不等**；只能 `.as_f64()` 后按容差比。
+        fn sample_chunk() -> axagent_harness::KnowledgeChunkView {
+            axagent_harness::KnowledgeChunkView {
+                id: "chunk-1".to_string(),
+                document_id: "doc-1".to_string(),
+                chunk_index: 3,
+                snippet: "贵州茅台三季度营收……（截断预览）".to_string(),
+                score: 0.21,
+                has_embedding: true,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl axagent_harness::KnowledgeVectorProvider for FixedKnowledgeVector {
+        async fn search(
+            &self,
+            request: axagent_harness::VectorSearchRequest,
+        ) -> axagent_harness::core_error::Result<axagent_harness::VectorSearchOutcome> {
+            self.search_calls.lock().push(request.clone());
+            // 「查无结果」的形态由替身按查询文本决定：空数组而不是错误（分派层不预判）。
+            if request.query == "无命中" {
+                return Ok(axagent_harness::VectorSearchOutcome { results: Vec::new() });
+            }
+            Ok(axagent_harness::VectorSearchOutcome { results: vec![Self::sample_chunk()] })
+        }
+
+        async fn index_text(
+            &self,
+            request: axagent_harness::VectorIndexRequest,
+        ) -> axagent_harness::core_error::Result<axagent_harness::VectorIndexOutcome> {
+            self.index_calls.lock().push(request.clone());
+            // 回射 id 便于取证透传无损；`chunk_count` 给非零样本，`0`（切不出块）同样合法。
+            Ok(axagent_harness::VectorIndexOutcome {
+                chunk_count: 7,
+                document_id: request.document_id.clone(),
+                collection_id: request.collection_id.clone(),
+            })
+        }
+
+        async fn collection_info(
+            &self,
+            collection_id: &str,
+        ) -> axagent_harness::core_error::Result<axagent_harness::CollectionInfoView> {
+            self.collection_info_calls.lock().push(collection_id.to_string());
+            // 集合不存在 ⇒ `Ok` + `exists = false` + `dimensions = null`，**不是错误**。
+            Ok(axagent_harness::CollectionInfoView {
+                collection_id: collection_id.to_string(),
+                dimensions: None,
+                exists: false,
+            })
+        }
+        // `keyword_search` 不覆盖 ⇒ 吃 trait 默认 `Err(Provider)`。
+    }
+
+    /// 假轨迹库提供者：四个读方法全覆盖（首批无写 op ⇒ 没有需要 `write` 的替身方法）。
+    struct FixedTrajectoryStore {
+        /// `list` 收到的 `limit` 序列（`None` = 缺省，合法）。
+        list_calls: Mutex<Vec<Option<usize>>>,
+        /// `get` 收到的 id 序列。
+        get_calls: Mutex<Vec<String>>,
+        /// `query` 收到的视图序列。
+        query_calls: Mutex<Vec<axagent_harness::TrajectoryQueryView>>,
+        /// `count` 调用次数。
+        count_calls: Mutex<usize>,
+    }
+
+    impl FixedTrajectoryStore {
+        fn new() -> Self {
+            Self {
+                list_calls: Mutex::new(Vec::new()),
+                get_calls: Mutex::new(Vec::new()),
+                query_calls: Mutex::new(Vec::new()),
+                count_calls: Mutex::new(0),
+            }
+        }
+
+        /// 摘要视图样本：字段裁剪（无 `steps` / `rewards` / `summary` 原文）由契约层负责，
+        /// 本替身只给出「已经裁好的」视图，分派层原样透出。
+        fn sample_view() -> axagent_harness::TrajectorySummaryView {
+            axagent_harness::TrajectorySummaryView {
+                id: "traj-1".to_string(),
+                session_id: "sess-1".to_string(),
+                user_id: "user-1".to_string(),
+                agent_name: Some("股票分析师".to_string()),
+                topic: "贵州茅台建仓".to_string(),
+                summary_snippet: "先观察再小仓试买……（截断预览）".to_string(),
+                outcome: axagent_harness::trajectory_types::TrajectoryOutcome::Success,
+                duration_ms: 4200,
+                quality: axagent_harness::trajectory_types::TrajectoryQuality::default(),
+                value_score: 0.62,
+                created_at_ms: 1_700_000_000_000,
+                replay_count: 3,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl axagent_harness::TrajectoryStoreProvider for FixedTrajectoryStore {
+        async fn list(
+            &self,
+            limit: Option<usize>,
+        ) -> axagent_harness::core_error::Result<axagent_harness::TrajectoryListOutcome> {
+            self.list_calls.lock().push(limit);
+            Ok(axagent_harness::TrajectoryListOutcome { trajectories: vec![Self::sample_view()] })
+        }
+
+        async fn get(
+            &self,
+            id: &str,
+        ) -> axagent_harness::core_error::Result<Option<axagent_harness::TrajectorySummaryView>>
+        {
+            self.get_calls.lock().push(id.to_string());
+            // 查无 ⇒ `Ok(None)`（帧里 `null`），不是错误、不借错误码。
+            if id == "traj-1" {
+                Ok(Some(Self::sample_view()))
+            } else {
+                Ok(None)
+            }
+        }
+
+        async fn query(
+            &self,
+            filter: axagent_harness::TrajectoryQueryView,
+        ) -> axagent_harness::core_error::Result<axagent_harness::TrajectoryQueryOutcome> {
+            self.query_calls.lock().push(filter);
+            Ok(axagent_harness::TrajectoryQueryOutcome { trajectories: vec![Self::sample_view()] })
+        }
+
+        async fn count(
+            &self,
+        ) -> axagent_harness::core_error::Result<axagent_harness::TrajectoryCountOutcome> {
+            *self.count_calls.lock() += 1;
+            // 空库的 `0` 是合法值，不是错误。
+            Ok(axagent_harness::TrajectoryCountOutcome { count: 0 })
+        }
+    }
+
+    /// 一个方法都不覆盖的轨迹提供者：四个 op 全吃 trait 默认 `Err(Provider("…未实现…"))`
+    /// ⇒ 用来取证「默认未实现」在分派层落成 `PLUGIN_CALL_FAILED`（与 `FixedKnowledgeVector`
+    /// 刻意留空的 `keyword_search` 同一条链路，两条接缝各钉一格）。
+    struct BareTrajectoryStore;
+
+    #[async_trait]
+    impl axagent_harness::TrajectoryStoreProvider for BareTrajectoryStore {}
+
+    /// 装 knowledge.vector + trajectory.store 提供者的 peer + 保活到用例结束的 runtime。
+    ///
+    /// 形参收 **trait 对象**，好让上面三种替身（全覆盖 / 留空 / 全空）都能塞进来。
+    /// 权限表由调用方给：`index_text` 的 `write` 准入需要它，只读 op 用例传空表以证明不设闸。
+    fn knowledge_trajectory_peer(
+        knowledge: Arc<dyn axagent_harness::KnowledgeVectorProvider>,
+        store: Arc<dyn axagent_harness::TrajectoryStoreProvider>,
+        permissions: Vec<PluginPermission>,
+    ) -> (HostPeer, tokio::runtime::Runtime) {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("async 接缝用例需要 runtime");
+        let registry = Arc::new(CapabilityRegistry::new());
+        registry.register_knowledge_vector(knowledge).expect("knowledge.vector 接缝应注册成功");
+        registry.register_trajectory_store(store).expect("trajectory.store 接缝应注册成功");
+        let peer = HostPeer {
+            plugin_id: "plugin.knowledge".to_string(),
+            declared_capabilities: Vec::new(),
+            declared_calls: vec!["knowledge.vector".to_string(), "trajectory.store".to_string()],
+            registry,
+            runtime: Some(runtime.handle().clone()),
+            permissions,
+        };
+        (peer, runtime)
+    }
+
+    /// ①（+ 裁定 §58.3-4）：两条接缝共 8 个 op 的权限表逐条枚举锁 ——
+    /// `knowledge.vector` 只有 `index_text` 一个写 op，`trajectory.store` 首批四个 op 全读
+    /// ⇒ **一条条目都不许加**（多登记一条 = 无 write 权限的插件被无端拒掉）。
+    #[test]
+    fn knowledge_trajectory_permission_table_is_eight_ops_one_write() {
+        assert_eq!(
+            required_permission_for("knowledge.vector", "index_text"),
+            Some(PluginPermission::Write),
+            "index_text 是本接缝唯一写 op"
+        );
+        for read_op in ["search", "keyword_search", "get_collection_info"] {
+            assert_eq!(
+                required_permission_for("knowledge.vector", read_op),
+                None,
+                "只读 op `knowledge.vector`/`{read_op}` 不得设权限闸"
+            );
+        }
+        for read_op in ["list", "get", "query", "count"] {
+            assert_eq!(
+                required_permission_for("trajectory.store", read_op),
+                None,
+                "首批只读：`trajectory.store`/`{read_op}` 不得设权限闸"
+            );
+        }
+        // 平铺/别名的缺省形态：写权限只在 `(knowledge.vector, index_text)` 这一格出现。
+        assert_eq!(required_permission_for("knowledge.vector", "index"), None);
+        assert_eq!(required_permission_for("trajectory", "index_text"), None);
+    }
+
+    /// 裁定 N2 / §58.3-3 的反面两格（knowledge.vector）：① 缺 `request` 外层键；
+    /// ② **平铺 DTO 字段**（键都在、只是没套一层）—— 分派层不留任何平铺兼容代码，
+    /// 两者都必须 `SEAM_CALL_INVALID_ARGS`，且**拒绝时刻**的快照零触达 provider。
+    #[test]
+    fn knowledge_vector_nested_request_missing_and_flat_are_invalid_args() {
+        let knowledge = Arc::new(FixedKnowledgeVector::new());
+        let captured = Arc::clone(&knowledge);
+        let store = Arc::new(FixedTrajectoryStore::new());
+        // 带 write 权限：让 `index_text` 越过准入闸，拒因才是「入参形态」而不是权限。
+        let (peer, _runtime) =
+            knowledge_trajectory_peer(knowledge, store, vec![PluginPermission::Write]);
+        let inside = Arc::clone(&captured);
+        let (missing, flat, flat_index, after_rejections) =
+            with_watchdog(Duration::from_secs(2), "knowledge.vector 反例", move || {
+                let missing = peer.handle_call_seam(
+                    &json!({ "seam": "knowledge.vector", "op": "search", "args": {} }),
+                    &[],
+                );
+                // 平铺形态：`VectorSearchRequest` 的三字段直接挂在 args 上。
+                let flat = peer.handle_call_seam(
+                    &json!({
+                        "seam": "knowledge.vector",
+                        "op": "search",
+                        "args": { "knowledgeBaseId": "kb-1", "query": "筹码集中度", "topK": 8 },
+                    }),
+                    &[],
+                );
+                let flat_index = peer.handle_call_seam(
+                    &json!({
+                        "seam": "knowledge.vector",
+                        "op": "index_text",
+                        "args": {
+                            "collectionId": "kb-1",
+                            "documentId": "doc-1",
+                            "content": "正文",
+                        },
+                    }),
+                    &[],
+                );
+                // 拒绝时刻取快照（后续合法调用会让计数上升）。
+                let after_rejections =
+                    (inside.search_calls.lock().len(), inside.index_calls.lock().len());
+                (missing, flat, flat_index, after_rejections)
+            });
+        for (what, response) in [("缺 request", &missing), ("平铺 request", &flat)] {
+            assert_eq!(
+                response.code.as_deref(),
+                Some(error_codes::SEAM_CALL_INVALID_ARGS),
+                "{what} 形态必须落参数错误，实际 {response:?}"
+            );
+            assert!(
+                response.message.as_deref().unwrap_or_default().contains("request"),
+                "{what} 的文案应点名缺失的 `request` 键，实际：{response:?}"
+            );
+        }
+        assert_eq!(
+            flat_index.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "写 op 的平铺形态同样拒，实际 {flat_index:?}"
+        );
+        assert_eq!(after_rejections, (0, 0), "三次参数错误都不得触达 provider");
+    }
+
+    /// 裁定 N2 的反面两格（trajectory.store 的 `query`）：缺 `request` 与平铺 `request`。
+    #[test]
+    fn trajectory_store_query_missing_and_flat_request_are_invalid_args() {
+        let knowledge = Arc::new(FixedKnowledgeVector::new());
+        let store = Arc::new(FixedTrajectoryStore::new());
+        let captured = Arc::clone(&store);
+        let (peer, _runtime) = knowledge_trajectory_peer(knowledge, store, Vec::new());
+        let inside = Arc::clone(&captured);
+        let (missing, flat, rejected_calls) =
+            with_watchdog(Duration::from_secs(2), "trajectory.store 反例", move || {
+                let missing = peer.handle_call_seam(
+                    &json!({ "seam": "trajectory.store", "op": "query", "args": {} }),
+                    &[],
+                );
+                let flat = peer.handle_call_seam(
+                    &json!({
+                        "seam": "trajectory.store",
+                        "op": "query",
+                        "args": { "sessionId": "sess-1", "limit": 20 },
+                    }),
+                    &[],
+                );
+                let rejected_calls = inside.query_calls.lock().len();
+                (missing, flat, rejected_calls)
+            });
+        assert_eq!(
+            missing.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "缺 `request` 必须走参数错误，实际 {missing:?}"
+        );
+        assert_eq!(
+            flat.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "平铺形态不被支持，必须落参数错误，实际 {flat:?}"
+        );
+        assert_eq!(rejected_calls, 0, "被拒的 query 不得触达 provider");
+    }
+
+    /// ③ + ④（写 op）：无 `write` 权限 ⇒ `PLUGIN_PERMISSION_DENIED` 且**零触达**；
+    /// 有 `write` ⇒ 嵌一层的 camelCase `request` 原样落进 `VectorIndexRequest` 的
+    /// snake_case 字段，响应是 `VectorIndexOutcome`（`chunkCount` / `documentId` /
+    /// `collectionId` 三键，无 snake_case 残留）。
+    #[test]
+    fn knowledge_index_text_requires_write_and_forwards_nested_request() {
+        // 反面：权限闸在取 provider / 反序列化之前拒绝（零副作用）。
+        let denied_knowledge = Arc::new(FixedKnowledgeVector::new());
+        let captured_denied = Arc::clone(&denied_knowledge);
+        let (denied_peer, _denied_runtime) = knowledge_trajectory_peer(
+            denied_knowledge,
+            Arc::new(FixedTrajectoryStore::new()),
+            Vec::new(),
+        );
+        let inside = Arc::clone(&captured_denied);
+        let (denied, touched) =
+            with_watchdog(Duration::from_secs(2), "index_text 无权限", move || {
+                let denied = denied_peer.handle_call_seam(
+                    &json!({
+                        "seam": "knowledge.vector",
+                        "op": "index_text",
+                        "args": {
+                            "request": {
+                                "collectionId": "kb-1",
+                                "documentId": "doc-1",
+                                "content": "正文",
+                            },
+                        },
+                    }),
+                    &[],
+                );
+                let touched = denied_index_calls(&inside);
+                (denied, touched)
+            });
+        assert_eq!(
+            denied.code.as_deref(),
+            Some(error_codes::PLUGIN_PERMISSION_DENIED),
+            "无 write 权限的 index_text 必须被拒，实际 {denied:?}"
+        );
+        let detail = denied.message.clone().unwrap_or_default();
+        assert!(detail.contains("write"), "文案应点明缺失的权限，实际：{detail}");
+        assert!(detail.contains("knowledge.vector"), "文案应点明接缝，实际：{detail}");
+        assert_eq!(touched, 0, "被拒的写 op 不得触达 provider");
+
+        // 正面：带 write 权限 + 嵌一层 camelCase。
+        let knowledge = Arc::new(FixedKnowledgeVector::new());
+        let captured = Arc::clone(&knowledge);
+        let (peer, _runtime) = knowledge_trajectory_peer(
+            knowledge,
+            Arc::new(FixedTrajectoryStore::new()),
+            vec![PluginPermission::Write],
+        );
+        let response = with_watchdog(Duration::from_secs(5), "index_text 正例", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "knowledge.vector",
+                    "op": "index_text",
+                    "args": {
+                        "request": {
+                            "collectionId": "kb-1",
+                            "documentId": "doc-1",
+                            "content": "贵州茅台三季度营收……",
+                        },
+                    },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(response.code, None, "已授权且参数齐备应成功，实际 {response:?}");
+        let calls = captured.index_calls.lock().clone();
+        assert_eq!(calls.len(), 1, "index_text 应恰被调用一次");
+        assert_eq!(calls[0].collection_id, "kb-1", "camelCase `collectionId` 应落 snake 字段");
+        assert_eq!(calls[0].document_id, "doc-1");
+        assert_eq!(calls[0].content, "贵州茅台三季度营收……");
+        assert_eq!(
+            response.value,
+            Some(json!({
+                "chunkCount": 7,
+                "documentId": "doc-1",
+                "collectionId": "kb-1",
+            })),
+            "必须直接透出 `VectorIndexOutcome`，不再自己包一层"
+        );
+        let value = response.value.clone().unwrap_or_default();
+        assert!(value.get("chunk_count").is_none(), "不得残留 snake_case 键");
+    }
+
+    /// ④ + ⑤（search）：camelCase 入参落 `VectorSearchRequest` 的 snake_case 字段；
+    /// 两个可选字段整体省略 ⇒ `None`（不是「阈值 0」/「空集合」）；响应 `VectorSearchOutcome`
+    /// 的 `results` 是 camelCase 六键视图、`score` 按 f64 容差比；**命中 0 条 = 空数组不是错误**。
+    ///
+    /// ⚠ 浮点坑：`score` / `minSimilarity` 是 `f32`，不许与 `json!(0.35)` 逐位断言。
+    #[test]
+    fn knowledge_search_forwards_camel_request_and_empty_hit_is_not_error() {
+        let knowledge = Arc::new(FixedKnowledgeVector::new());
+        let captured = Arc::clone(&knowledge);
+        let store = Arc::new(FixedTrajectoryStore::new());
+        let (peer, _runtime) = knowledge_trajectory_peer(knowledge, store, Vec::new());
+        let (ok, minimal, snake_input, empty) =
+            with_watchdog(Duration::from_secs(5), "knowledge.search", move || {
+                let ok = peer.handle_call_seam(
+                    &json!({
+                        "seam": "knowledge.vector",
+                        "op": "search",
+                        "args": {
+                            "request": {
+                                "knowledgeBaseId": "kb-1",
+                                "query": "筹码集中度",
+                                "topK": 8,
+                                "minSimilarity": 0.35,
+                                "docIds": ["doc-1", "doc-2"],
+                            },
+                        },
+                    }),
+                    &[],
+                );
+                // 两个可选字段整体省略是合法的（契约 `#[serde(default)]`），故此处只给三字段。
+                let minimal = peer.handle_call_seam(
+                    &json!({
+                        "seam": "knowledge.vector",
+                        "op": "search",
+                        "args": {
+                            "request": {
+                                "knowledgeBaseId": "kb-1",
+                                "query": "主力净流入",
+                                "topK": 5,
+                            },
+                        },
+                    }),
+                    &[],
+                );
+                // snake_case 入参必须**不被接受**（DTO 是 camelCase，无别名兼容）。
+                let snake_input = peer.handle_call_seam(
+                    &json!({
+                        "seam": "knowledge.vector",
+                        "op": "search",
+                        "args": {
+                            "request": {
+                                "knowledge_base_id": "kb-1",
+                                "query": "筹码集中度",
+                                "top_k": 8,
+                            },
+                        },
+                    }),
+                    &[],
+                );
+                let empty = peer.handle_call_seam(
+                    &json!({
+                        "seam": "knowledge.vector",
+                        "op": "search",
+                        "args": {
+                            "request": {
+                                "knowledgeBaseId": "kb-1",
+                                "query": "无命中",
+                                "topK": 8,
+                            },
+                        },
+                    }),
+                    &[],
+                );
+                (ok, minimal, snake_input, empty)
+            });
+        assert_eq!(ok.code, None, "只读 op 不得被权限闸拦，实际 {ok:?}");
+        let calls = captured.search_calls.lock().clone();
+        assert_eq!(calls.len(), 3, "三次合法调用应触达 provider（snake 反例不算）");
+        assert_eq!(calls[0].knowledge_base_id, "kb-1");
+        assert_eq!(calls[0].top_k, 8);
+        let min_similarity = calls[0].min_similarity.expect("camelCase minSimilarity 应落字段");
+        assert!(
+            (min_similarity - 0.35f32).abs() < 1e-6,
+            "minSimilarity 应≈ 0.35，实际 {min_similarity}"
+        );
+        assert_eq!(calls[0].doc_ids.clone().unwrap_or_default().len(), 2);
+        assert!(calls[1].min_similarity.is_none(), "省略可选字段必须是 None（不是阈值 0）");
+        assert!(calls[1].doc_ids.is_none(), "省略 docIds 必须是 None（不是空集合）");
+        assert_eq!(minimal.code, None, "两个可选字段整体省略是合法入参，实际 {minimal:?}");
+        assert_eq!(
+            minimal.value.clone().expect("省略可选字段仍要带结果")["results"]
+                .as_array()
+                .expect("results 应为数组")
+                .len(),
+            1,
+            "缺省可选字段不得改变结果形态"
+        );
+
+        let value = ok.value.clone().expect("成功响应必须带 value");
+        assert!(value.get("results").is_some(), "必须直接透出 Outcome 的 `results`");
+        let hits = value["results"].as_array().expect("results 应为数组").clone();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["documentId"], json!("doc-1"));
+        assert_eq!(hits[0]["chunkIndex"], json!(3));
+        assert_eq!(hits[0]["hasEmbedding"], json!(true));
+        assert_eq!(hits[0]["id"], json!("chunk-1"));
+        let score = hits[0]["score"].as_f64().expect("score 应为数值");
+        assert!((score - 0.21).abs() < 1e-6, "score 应≈ 0.21，实际 {score}");
+        assert!(hits[0].get("document_id").is_none(), "不得残留 snake_case 键");
+        assert!(hits[0].get("chunk_index").is_none());
+        assert!(hits[0].get("has_embedding").is_none());
+        assert!(hits[0].get("content").is_none(), "整块原文不过线");
+        assert!(hits[0].get("embedding").is_none(), "向量本体不过线");
+
+        assert_eq!(
+            snake_input.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "snake_case 入参键不被兼容，实际 {snake_input:?}"
+        );
+        assert_eq!(captured.search_calls.lock().len(), 3, "snake 反例不得触达 provider");
+
+        assert_eq!(empty.code, None, "命中 0 条不是错误，实际 {empty:?}");
+        assert_eq!(empty.value, Some(json!({ "results": [] })), "查无结果 = 空数组");
+    }
+
+    /// ④ + op 名 ≠ 方法名：`get_collection_info` 走标量键 `collection_id`，落到 trait 的
+    /// `collection_info()`；集合不存在 ⇒ `{exists:false, dimensions:null}` **不是错误**。
+    /// 反面：缺标量键 ⇒ `SEAM_CALL_INVALID_ARGS`。
+    #[test]
+    fn knowledge_collection_info_absent_collection_is_not_error() {
+        let knowledge = Arc::new(FixedKnowledgeVector::new());
+        let captured = Arc::clone(&knowledge);
+        let store = Arc::new(FixedTrajectoryStore::new());
+        let (peer, _runtime) = knowledge_trajectory_peer(knowledge, store, Vec::new());
+        let inside = Arc::clone(&captured);
+        let (ok, missing, rejected_calls) =
+            with_watchdog(Duration::from_secs(5), "get_collection_info", move || {
+                let ok = peer.handle_call_seam(
+                    &json!({
+                        "seam": "knowledge.vector",
+                        "op": "get_collection_info",
+                        "args": { "collection_id": "kb-x" },
+                    }),
+                    &[],
+                );
+                let missing = peer.handle_call_seam(
+                    &json!({ "seam": "knowledge.vector", "op": "get_collection_info", "args": {} }),
+                    &[],
+                );
+                let rejected_calls = inside.collection_info_calls.lock().len();
+                (ok, missing, rejected_calls)
+            });
+        assert_eq!(ok.code, None, "集合不存在是正常响应，实际 {ok:?}");
+        assert_eq!(
+            ok.value,
+            Some(json!({ "collectionId": "kb-x", "dimensions": null, "exists": false })),
+            "三键 camelCase 透出 `CollectionInfoView`"
+        );
+        assert_eq!(
+            captured.collection_info_calls.lock().clone(),
+            vec!["kb-x".to_string()],
+            "op `get_collection_info` 必须落到 trait 方法 `collection_info()`"
+        );
+        assert_eq!(
+            missing.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "缺 `collection_id` 必须走参数错误，实际 {missing:?}"
+        );
+        assert_eq!(rejected_calls, 1, "参数错误不得新增 provider 触达");
+    }
+
+    /// ⑥：替身未覆盖的 op 吃 trait 默认 `Err(Provider("…未实现…"))` ⇒ 分派层一律
+    /// `PLUGIN_CALL_FAILED`（**本批不做** `Validation ⇒ SEAM_CALL_INVALID_ARGS` 映射），
+    /// 文案点名 trait 方法名与「未实现」。同批钉住：`list_collections`（PLAN §56.1-Q3 已裁定
+    /// 首批不开）仍是 `SEAM_CALL_UNSUPPORTED`，两类「做不到」不许混成一个码。
+    #[test]
+    fn knowledge_keyword_search_default_unimplemented_is_call_failed() {
+        let knowledge = Arc::new(FixedKnowledgeVector::new());
+        let captured = Arc::clone(&knowledge);
+        let store = Arc::new(FixedTrajectoryStore::new());
+        let (peer, _runtime) = knowledge_trajectory_peer(knowledge, store, Vec::new());
+        let (unimplemented, covered_ok) =
+            with_watchdog(Duration::from_secs(5), "keyword_search 默认实现", move || {
+                let unimplemented = peer.handle_call_seam(
+                    &json!({
+                        "seam": "knowledge.vector",
+                        "op": "keyword_search",
+                        "args": {
+                            "request": { "collectionId": "kb-1", "query": "主力净流入", "topK": 8 },
+                        },
+                    }),
+                    &[],
+                );
+                let covered_ok = peer.handle_call_seam(
+                    &json!({ "seam": "knowledge.vector", "op": "list_collections", "args": {} }),
+                    &[],
+                );
+                (unimplemented, covered_ok)
+            });
+        assert_eq!(
+            unimplemented.code.as_deref(),
+            Some(error_codes::PLUGIN_CALL_FAILED),
+            "trait 默认 Err(Provider) 应落成 PLUGIN_CALL_FAILED，实际 {unimplemented:?}"
+        );
+        let detail = unimplemented.message.clone().unwrap_or_default();
+        assert!(detail.contains("未实现"), "文案应说明未实现，实际：{detail}");
+        assert!(
+            detail.contains("KnowledgeVectorProvider::keyword_search"),
+            "文案应点名 trait 方法，实际：{detail}"
+        );
+        // 合法的 keyword_search 入参也不该被「猜」到别的 op 上：默认实现被真调到了。
+        assert!(captured.search_calls.lock().is_empty(), "未覆盖的 op 不得转投别的方法");
+        assert_eq!(
+            covered_ok.code.as_deref(),
+            Some(error_codes::SEAM_CALL_UNSUPPORTED),
+            "同接缝的未知 op 仍是 SEAM_CALL_UNSUPPORTED，实际 {covered_ok:?}"
+        );
+    }
+
+    /// ⑤ + ④（trajectory 读面三格）：`list` 的 `limit` **可选**（缺失 = `None` 合法、
+    /// 非数字 = 参数错误）；`get` 查无 ⇒ 帧里 `null` 且 `code` 为空；`count` 的 `0` 是合法值；
+    /// 摘要视图 12 键 camelCase（含嵌套 `quality` 的五键），无 snake_case 残留、无原文字段。
+    #[test]
+    fn trajectory_store_list_get_count_shapes_are_conform() {
+        let knowledge = Arc::new(FixedKnowledgeVector::new());
+        let store = Arc::new(FixedTrajectoryStore::new());
+        let captured = Arc::clone(&store);
+        let (peer, _runtime) = knowledge_trajectory_peer(knowledge, store, Vec::new());
+        let inside = Arc::clone(&captured);
+        let (no_limit, with_limit, bad_limit, hit, absent, no_id, counted, list_calls, get_calls) =
+            with_watchdog(Duration::from_secs(5), "trajectory.store 读面", move || {
+                let no_limit = peer.handle_call_seam(
+                    &json!({ "seam": "trajectory.store", "op": "list", "args": {} }),
+                    &[],
+                );
+                let with_limit = peer.handle_call_seam(
+                    &json!({
+                        "seam": "trajectory.store",
+                        "op": "list",
+                        "args": { "limit": 20 },
+                    }),
+                    &[],
+                );
+                let bad_limit = peer.handle_call_seam(
+                    &json!({
+                        "seam": "trajectory.store",
+                        "op": "list",
+                        "args": { "limit": "20" },
+                    }),
+                    &[],
+                );
+                // 拒绝时刻取快照：两次 bad/missing 之后仍应只有上面两次合法调用。
+                let list_calls = inside.list_calls.lock().len();
+                let hit = peer.handle_call_seam(
+                    &json!({
+                        "seam": "trajectory.store",
+                        "op": "get",
+                        "args": { "trajectory_id": "traj-1" },
+                    }),
+                    &[],
+                );
+                let absent = peer.handle_call_seam(
+                    &json!({
+                        "seam": "trajectory.store",
+                        "op": "get",
+                        "args": { "trajectory_id": "traj-404" },
+                    }),
+                    &[],
+                );
+                let no_id = peer.handle_call_seam(
+                    &json!({ "seam": "trajectory.store", "op": "get", "args": {} }),
+                    &[],
+                );
+                let get_calls = inside.get_calls.lock().len();
+                let counted = peer.handle_call_seam(
+                    &json!({ "seam": "trajectory.store", "op": "count", "args": {} }),
+                    &[],
+                );
+                (
+                    no_limit, with_limit, bad_limit, hit, absent, no_id, counted, list_calls,
+                    get_calls,
+                )
+            });
+        assert_eq!(no_limit.code, None, "`limit` 缺失是合法的「由宿主取缺省」，实际 {no_limit:?}");
+        assert_eq!(with_limit.code, None, "带 `limit` 应成功，实际 {with_limit:?}");
+        assert_eq!(
+            captured.list_calls.lock().clone(),
+            vec![None, Some(20)],
+            "`limit` 必须原样透传（本层不钳位、不写数字）"
+        );
+        assert_eq!(list_calls, 2, "非数字 `limit` 不得触达 provider");
+        assert_eq!(
+            bad_limit.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "`limit` 传字符串必须落参数错误，实际 {bad_limit:?}"
+        );
+        let value = no_limit.value.clone().expect("list 必须带具名对象");
+        assert!(value.get("trajectories").is_some(), "必须透出 TrajectoryListOutcome，不返裸数组");
+        assert_eq!(value["trajectories"].as_array().expect("应为数组").len(), 1);
+        assert_eq!(value["trajectories"][0]["sessionId"], json!("sess-1"));
+        assert_eq!(value["trajectories"][0]["durationMs"], json!(4200));
+        assert_eq!(value["trajectories"][0]["createdAtMs"], json!(1_700_000_000_000_i64));
+        assert_eq!(value["trajectories"][0]["replayCount"], json!(3));
+        assert_eq!(value["trajectories"][0]["outcome"], json!("success"));
+        let value_score = value["trajectories"][0]["valueScore"].as_f64().expect("应为数值");
+        assert!((value_score - 0.62).abs() < 1e-6, "valueScore 应≈ 0.62，实际 {value_score}");
+        for bad in ["session_id", "summary_snippet", "duration_ms", "value_score", "created_at_ms"]
+        {
+            assert!(value["trajectories"][0].get(bad).is_none(), "不得残留 snake_case 键 {bad}");
+        }
+        for forbidden in ["steps", "rewards", "patterns", "content", "reasoning", "summary"] {
+            assert!(
+                value["trajectories"][0].get(forbidden).is_none(),
+                "{forbidden} 属大文本/会话原文，不过线"
+            );
+        }
+
+        assert_eq!(hit.code, None, "命中应成功，实际 {hit:?}");
+        assert_eq!(hit.value.clone().expect("命中带视图")["id"], json!("traj-1"));
+        assert_eq!(absent.code, None, "查无此轨迹**不是错误**，实际 {absent:?}");
+        assert_eq!(absent.value, Some(Value::Null), "`Ok(None)` ⇒ 帧里是 null");
+        assert_eq!(get_calls, 2, "缺 `trajectory_id` 不得触达 provider");
+        assert_eq!(
+            no_id.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "缺 `trajectory_id` 必须走参数错误，实际 {no_id:?}"
+        );
+        assert_eq!(counted.code, None, "空库的 0 是合法值，实际 {counted:?}");
+        assert_eq!(counted.value, Some(json!({ "count": 0 })), "具名对象，不返裸值");
+        assert_eq!(*captured.count_calls.lock(), 1);
+    }
+
+    /// ④（query）：嵌一层的 camelCase `request` 落 `TrajectoryQueryView` 的 snake_case 字段
+    /// （`sinceMs` / `untilMs` 是 epoch 毫秒，不是 `time_range` 元组）；响应透出
+    /// `TrajectoryQueryOutcome`。反面：未知 `outcome` 字面量 ⇒ 参数错误、零触达。
+    #[test]
+    fn trajectory_store_query_forwards_nested_camel_request() {
+        let knowledge = Arc::new(FixedKnowledgeVector::new());
+        let store = Arc::new(FixedTrajectoryStore::new());
+        let captured = Arc::clone(&store);
+        let (peer, _runtime) = knowledge_trajectory_peer(knowledge, store, Vec::new());
+        let inside = Arc::clone(&captured);
+        let (ok, bad_outcome, rejected_calls) =
+            with_watchdog(Duration::from_secs(5), "trajectory.query", move || {
+                let ok = peer.handle_call_seam(
+                    &json!({
+                        "seam": "trajectory.store",
+                        "op": "query",
+                        "args": {
+                            "request": {
+                                "sessionId": "sess-1",
+                                "outcome": "partial",
+                                "minQuality": 0.7,
+                                "sinceMs": 1_600_000_000_000_i64,
+                                "untilMs": 1_700_000_000_000_i64,
+                                "limit": 20,
+                            },
+                        },
+                    }),
+                    &[],
+                );
+                let bad_outcome = peer.handle_call_seam(
+                    &json!({
+                        "seam": "trajectory.store",
+                        "op": "query",
+                        "args": { "request": { "outcome": "weird" } },
+                    }),
+                    &[],
+                );
+                let rejected_calls = inside.query_calls.lock().len();
+                (ok, bad_outcome, rejected_calls)
+            });
+        assert_eq!(ok.code, None, "合法 query 应成功，实际 {ok:?}");
+        let calls = captured.query_calls.lock().clone();
+        assert_eq!(calls.len(), 1, "query 应恰被调用一次");
+        assert_eq!(calls[0].session_id.as_deref(), Some("sess-1"));
+        assert_eq!(
+            calls[0].outcome,
+            Some(axagent_harness::trajectory_types::TrajectoryOutcome::Partial),
+            "camelCase 小写字面量 `partial` 应落进既有 harness 枚举"
+        );
+        assert_eq!(calls[0].since_ms, Some(1_600_000_000_000));
+        assert_eq!(calls[0].until_ms, Some(1_700_000_000_000));
+        assert_eq!(calls[0].limit, Some(20));
+        assert_eq!(calls[0].user_id, None, "省略的可选字段必须是 None");
+        let min_quality = calls[0].min_quality.expect("camelCase minQuality 应落字段");
+        assert!((min_quality - 0.7).abs() < 1e-6, "minQuality 应≈ 0.7，实际 {min_quality}");
+        let value = ok.value.clone().expect("query 必须带具名对象");
+        assert!(value.get("trajectories").is_some(), "透出 TrajectoryQueryOutcome");
+        assert_eq!(value["trajectories"][0]["agentName"], json!("股票分析师"));
+        assert!(value["trajectories"][0].get("agent_name").is_none(), "不得残留 snake_case 键");
+
+        assert_eq!(
+            bad_outcome.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "未知 `outcome` 字面量必须拒（不继承命令层的静默回落），实际 {bad_outcome:?}"
+        );
+        assert_eq!(rejected_calls, 1, "被拒的 query 不得触达 provider");
+    }
+
+    /// ⑥（trajectory 侧）：一个方法都不覆盖的实现 ⇒ 四个 op 全吃 trait 默认 `Err(Provider)`，
+    /// 分派层一律 `PLUGIN_CALL_FAILED` + 「未实现」，**不**借用 NOT_FOUND / INVALID_ARGS。
+    /// 正面同批钉：同接缝的未知 op（`append`，PLAN §56.1-Q4 明确不给）落 UNSUPPORTED。
+    #[test]
+    fn trajectory_bare_store_default_unimplemented_is_call_failed() {
+        let knowledge = Arc::new(FixedKnowledgeVector::new());
+        let (peer, _runtime) =
+            knowledge_trajectory_peer(knowledge, Arc::new(BareTrajectoryStore), Vec::new());
+        let responses = with_watchdog(Duration::from_secs(5), "轨迹库默认实现", move || {
+            [
+                ("list", json!({})),
+                ("get", json!({ "trajectory_id": "traj-1" })),
+                ("count", json!({})),
+                ("append", json!({})),
+            ]
+            .map(|(op, args)| {
+                peer.handle_call_seam(
+                    &json!({ "seam": "trajectory.store", "op": op, "args": args }),
+                    &[],
+                )
+            })
+        });
+        for (index, op) in ["list", "get", "count"].into_iter().enumerate() {
+            let response = &responses[index];
+            assert_eq!(
+                response.code.as_deref(),
+                Some(error_codes::PLUGIN_CALL_FAILED),
+                "默认未实现的 `{op}` 应落 PLUGIN_CALL_FAILED，实际 {response:?}"
+            );
+            let detail = response.message.clone().unwrap_or_default();
+            assert!(detail.contains("未实现"), "`{op}` 文案应说明未实现，实际：{detail}");
+            assert!(
+                detail.contains(&format!("TrajectoryStoreProvider::{op}")),
+                "`{op}` 文案应点名 trait 方法，实际：{detail}"
+            );
+        }
+        assert_eq!(
+            responses[3].code.as_deref(),
+            Some(error_codes::SEAM_CALL_UNSUPPORTED),
+            "`append` 不在契约里，必须落 UNSUPPORTED 而不是「未实现」，实际 {:?}",
+            responses[3]
+        );
+    }
+
+    /// ⑦：已知接缝 + 契约里没有的 op ⇒ `SEAM_CALL_UNSUPPORTED`（不猜、不兜底到别的方法）。
+    /// 两个反例都取自被明确砍掉的写面：`delete_document`（PLAN §56.1-Q2 不开）、
+    /// `append`（§56.1-Q4 不开）。
+    #[test]
+    fn knowledge_trajectory_unknown_ops_are_unsupported() {
+        let knowledge = Arc::new(FixedKnowledgeVector::new());
+        let captured_knowledge = Arc::clone(&knowledge);
+        let store = Arc::new(FixedTrajectoryStore::new());
+        let captured_store = Arc::clone(&store);
+        let (peer, _runtime) = knowledge_trajectory_peer(knowledge, store, Vec::new());
+        let inside_knowledge = Arc::clone(&captured_knowledge);
+        let inside_store = Arc::clone(&captured_store);
+        let responses = with_watchdog(Duration::from_secs(2), "未知 op", move || {
+            let responses =
+                [("knowledge.vector", "delete_document"), ("trajectory.store", "remove")].map(
+                    |(seam, op)| {
+                        peer.handle_call_seam(&json!({ "seam": seam, "op": op, "args": {} }), &[])
+                    },
+                );
+            (
+                responses,
+                inside_knowledge.search_calls.lock().len(),
+                inside_store.get_calls.lock().len(),
+            )
+        });
+        for response in &responses.0 {
+            assert_eq!(
+                response.code.as_deref(),
+                Some(error_codes::SEAM_CALL_UNSUPPORTED),
+                "已知接缝的未知 op 必须落 SEAM_CALL_UNSUPPORTED，实际 {response:?}"
+            );
+        }
+        assert_eq!((responses.1, responses.2), (0, 0), "未知 op 不得触达 provider");
+    }
+
+    /// ⑧：注册表取不到 provider ⇒ `SEAM_PROVIDER_UNAVAILABLE`（明确失败、不挂起）。
+    /// `test_host_peer` 的 `runtime: None` 同时证明**取 provider 失败先于 `block_on`**
+    /// （无 runtime 也拿不到 `PLUGIN_CALL_FAILED`），且带合法 args 也一样 —— 拒因是接缝没装配。
+    #[test]
+    fn knowledge_trajectory_unregistered_provider_is_unavailable() {
+        let empty_registry = Arc::new(CapabilityRegistry::new());
+        let peer = test_host_peer(
+            "plugin.none",
+            &[],
+            &["knowledge.vector", "trajectory.store"],
+            empty_registry,
+        );
+        let responses = with_watchdog(Duration::from_secs(2), "provider 缺位", move || {
+            let knowledge = peer.handle_call_seam(
+                &json!({
+                    "seam": "knowledge.vector",
+                    "op": "get_collection_info",
+                    "args": { "collection_id": "kb-1" },
+                }),
+                &[],
+            );
+            let trajectory = peer.handle_call_seam(
+                &json!({ "seam": "trajectory.store", "op": "count", "args": {} }),
+                &[],
+            );
+            (knowledge, trajectory)
+        });
+        for (seam, response) in
+            [("knowledge.vector", &responses.0), ("trajectory.store", &responses.1)]
+        {
+            assert_eq!(
+                response.code.as_deref(),
+                Some(error_codes::SEAM_PROVIDER_UNAVAILABLE),
+                "`{seam}` 未注册 provider 必须落 SEAM_PROVIDER_UNAVAILABLE，实际 {response:?}"
+            );
+        }
+    }
+
+    /// 写 op 被权限闸拒掉时的「零触达」取证助手（避免在闭包内散落锁读取）。
+    fn denied_index_calls(provider: &Arc<FixedKnowledgeVector>) -> usize {
+        provider.index_calls.lock().len()
     }
 }

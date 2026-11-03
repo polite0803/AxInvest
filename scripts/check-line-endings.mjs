@@ -42,6 +42,12 @@ const EXCLUDED_DIRS = new Set([
   ".workbuddy",
   ".codeartsdoer",
   "knowledge-sources",
+  // `.tmp/` 是 gitignore 的临时区（`.gitignore:141` 的 `/.tmp/`），**永远不会进版本库**
+  // ⇒ 它的行尾不可能污染仓库，本门的判据对象是「被提交的文本」。
+  // 实证（2026-11-04）：并行会话在 `.tmp/` 落了 `refs-dump.txt`（纯 CRLF）与
+  // `ingest-upstream.ps1`（LF），把一笔与本目录毫无关系的提交拦在 pre-commit 门外；
+  // 更要紧的是 `--fix` 会去改写**别人正在用**的脚本。排除它不是放宽，是划回职责边界。
+  ".tmp",
 ]);
 
 // 二进制：按 .gitattributes 的 binary 段

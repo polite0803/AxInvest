@@ -1,16 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! P0: RealtimeMonitor → Tauri 前端 + DB 持久化 + 通知推送 桥接器
+//! P0: RealtimeMonitor → Tauri 前端 + DB 持久化 + 通知推送 + 插件总线 桥接器
 //!
 //! 实现 `MonitorEventEmitter` trait，把 monitor.rs 的告警分发到四条通道：
 //!   1. Tauri `app.emit(事件名原文, ...)` — 前端实时弹窗，事件名由发射点给（权威枚举成员）
 //!   2. 告警类（`IpcEventName::PriceAlertTriggered`）额外写 `price_alerts` 表
 //!      `is_triggered=1` + `triggered_at=now` — 持久化触发历史
 //!   3. 调用 `NotificationDispatcher::dispatch_alert` — 推送到 PushPlus/ServerChan/Ntfy/Gotify
-//!   4. 其余事件（T+0 重跑请求等）只转发，不落库
+//!   4. 插件总线 `event.dispatch` —— 价格告警与组合信号各补发一条 `DomainEvent`
+//!      （kind 只引用 harness 常量，裁定 N6；派发 fire-and-forget，形态照
+//!      `commands/stock_workflow/workflow_run_service.rs` 的 `dispatch_event`）；
+//!      其余事件（T+0 重跑请求等）只转发，不落库
 //!
 //! ⚠ 通道 3 的现状：**分发器在生产里尚未装配任何渠道**（注册点与配置来源归里程碑 M-NOTIF），
 //! 渠道数为 0 时本文件会显式 warn「通知不外推」，不把「没渠道」压成「没告警」。
+//!
+//! ⚠ 通道 4 的前置：总线 `Arc` 由装配点经 `get_capability_registry().get_event_dispatcher()`
+//! 取回**同一个对象**（插件订阅者挂的就是它）。取不到时本桥照跑前三条，只在构造点 warn 一次
+//! 「插件侧收不到 stock 域事件」—— 另造一个 bus 会「发射成功但插件永远收不到」。
 //!
 //! 设计要点：
 //! - monitor.rs 的 `MonitorEventEmitter::emit(event, payload)` 是同步 trait，
@@ -25,6 +32,11 @@ use std::sync::Arc;
 use axagent_analysis_engine::monitor::MonitorEventEmitter;
 use axagent_harness::AlertPayload;
 use axagent_harness::AlertSeverity;
+use axagent_harness::DispatchMode;
+use axagent_harness::DomainEvent;
+use axagent_harness::EventCategory;
+use axagent_harness::EventDispatchBus;
+use axagent_harness::stock_monitor::{STOCK_PORTFOLIO_SIGNAL_KIND, STOCK_PRICE_ALERT_KIND};
 use chrono::Utc;
 use sea_orm::ActiveModelTrait;
 use sea_orm::ColumnTrait;
@@ -38,11 +50,13 @@ use tracing::warn;
 
 use axagent_entities::price_alerts;
 
-/// 桥接 RealtimeMonitor 告警到 Tauri 前端 / DB / 通知推送
+/// 桥接 RealtimeMonitor 告警到 Tauri 前端 / DB / 通知推送 / 插件总线
 pub struct TauriMonitorEmitter {
     app: tauri::AppHandle,
     db: DatabaseConnection,
     notification_dispatcher: Arc<axagent_notification::NotificationDispatcher>,
+    /// `event.dispatch` 内置总线（与插件订阅者同一个 `Arc`）；取不到时第四跳跳过。
+    plugin_event_bus: Option<Arc<EventDispatchBus>>,
 }
 
 impl TauriMonitorEmitter {
@@ -50,9 +64,49 @@ impl TauriMonitorEmitter {
         app: tauri::AppHandle,
         db: DatabaseConnection,
         notification_dispatcher: Arc<axagent_notification::NotificationDispatcher>,
+        plugin_event_bus: Option<Arc<EventDispatchBus>>,
     ) -> Self {
-        Self { app, db, notification_dispatcher }
+        Self { app, db, notification_dispatcher, plugin_event_bus }
     }
+}
+
+/// 第四跳的登记表：Tauri IPC 事件名 → 插件总线 `DomainEvent.kind`。
+///
+/// 只登记这两条：`StockMonitorT0RerunRequested` 是宿主内部的工作流重跑提示，契约的 stock 域
+/// 只有「价格告警 / 组合信号 / 行情变化」三条 kind（行情变化那一条发射在
+/// `commands/stock_workflow/quote_watcher_service.rs` 的 `dispatch_quote_change`，
+/// 由 `init/services.rs` 的行情回调调用，不在本桥里）。
+/// 比较与产出都用**权威串**：事件名取 `IpcEventName`，kind 取 harness 常量（裁定 N6）
+/// ⇒ 本函数不出现任何字面量。
+fn plugin_kind_of(event: &str) -> Option<&'static str> {
+    if event == IpcEventName::PriceAlertTriggered.as_str() {
+        Some(STOCK_PRICE_ALERT_KIND)
+    } else if event == IpcEventName::PortfolioSignal.as_str() {
+        Some(STOCK_PORTFOLIO_SIGNAL_KIND)
+    } else {
+        None
+    }
+}
+
+/// 向插件总线补发一条领域事件（fire-and-forget）。
+///
+/// 无匹配订阅者时直接返回（`would_dispatch` 短路，不为空总线白 spawn）；
+/// `DispatchMode::Emit` 内部是串行 await，**不能**在 `emit` 这个同步 trait 方法里等它 ——
+/// 那会把插件 RTT 塞进 monitor 的轮询热路径。
+fn dispatch_domain_event(bus: &Arc<EventDispatchBus>, kind: &'static str, payload: Value) {
+    let mut event = DomainEvent::new(EventCategory::Stock, kind, payload, "stock.monitor");
+    if !bus.would_dispatch(&event) {
+        return;
+    }
+    let bus = Arc::clone(bus);
+    tokio::spawn(async move {
+        let outcome = bus.dispatch(&mut event, DispatchMode::Emit).await;
+        tracing::trace!(
+            invoked = outcome.invoked,
+            rejected = outcome.rejected,
+            "[monitor_emitter] stock 域事件已派发: kind={kind}"
+        );
+    });
 }
 
 impl MonitorEventEmitter for TauriMonitorEmitter {
@@ -62,6 +116,11 @@ impl MonitorEventEmitter for TauriMonitorEmitter {
         // 即时 emit 到前端（非阻塞，失败仅 warn）
         if let Err(e) = app.emit(event, payload.clone()) {
             warn!("[monitor_emitter] emit {} 失败: {e}", event);
+        }
+
+        // 第四跳：同一条告警/组合信号补发给插件订阅者（前端与插件各拿一份，互不替代）
+        if let (Some(kind), Some(bus)) = (plugin_kind_of(event), self.plugin_event_bus.as_ref()) {
+            dispatch_domain_event(bus, kind, payload.clone());
         }
 
         // 2026-10-14 收口：告警事件名由唯一权威 `IpcEventName::PriceAlertTriggered` 发起，
@@ -318,5 +377,31 @@ mod tests {
             0,
             "查不到目标 id 时不得顺手改到别的行"
         );
+    }
+
+    /// 第四跳的登记表：两条要过线、T+0 重跑提示不要过线。
+    ///
+    /// 这条钉的是「桥接面」而不是总线本身：漏登记 = 插件静默收不到（正是本仓反复出现的
+    /// 「写了但没人装配」形态），多登记 = 把宿主内部提示卖给插件。
+    #[test]
+    fn only_alert_and_portfolio_events_cross_into_the_plugin_bus() {
+        assert_eq!(
+            plugin_kind_of(IpcEventName::PriceAlertTriggered.as_str()),
+            Some(STOCK_PRICE_ALERT_KIND)
+        );
+        assert_eq!(
+            plugin_kind_of(IpcEventName::PortfolioSignal.as_str()),
+            Some(STOCK_PORTFOLIO_SIGNAL_KIND)
+        );
+        // 未登记的（T+0 重跑请求、行情推送）一律 None ⇒ 不冒充 stock 域事件
+        assert_eq!(plugin_kind_of(IpcEventName::StockMonitorT0RerunRequested.as_str()), None);
+        assert_eq!(plugin_kind_of(IpcEventName::StockQuoteUpdate.as_str()), None);
+        assert_eq!(plugin_kind_of(""), None);
+
+        // kind 前缀必须等于 `EventCategory::Stock`（裁定 N6 的「不发散新前缀」在这一格）
+        let prefix = format!("{}/", EventCategory::Stock.as_str());
+        for kind in [STOCK_PRICE_ALERT_KIND, STOCK_PORTFOLIO_SIGNAL_KIND] {
+            assert!(kind.starts_with(&prefix), "kind {kind} 的前缀不是 {prefix}");
+        }
     }
 }

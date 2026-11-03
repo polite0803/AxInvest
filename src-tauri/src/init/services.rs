@@ -5042,20 +5042,33 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
                 state.harness.db().clone()
             };
 
-            // 事件桥接：告警 → 前端事件 + `price_alerts` 触发回写 + 通知外推。
+            // 事件桥接：告警 → 前端事件 + `price_alerts` 触发回写 + 通知外推 + 插件总线。
             // 分发器此刻没有任何已注册渠道（装配归里程碑 M-NOTIF），外推侧会如实 warn，
             // 不会把「没渠道」压成「没告警」。
+            // 第四跳（`event.dispatch`）用的总线必须经注册表取回**同一个 `Arc`** —— 插件的
+            // 订阅者挂的就是它（同 `init/state.rs` 的 workflow.run 注册块）。另造一个会
+            // 「发射成功但插件永远收不到」。取不到时照跑前三条，只在这里点名一次。
+            let plugin_event_bus =
+                axagent_harness::get_capability_registry().get_event_dispatcher();
+            if plugin_event_bus.is_none() {
+                tracing::warn!(
+                    "[startup] event.dispatch 总线不可用 ⇒ 插件侧收不到 stock 域告警/组合信号\
+                     （前端事件、触发回写与通知外推不受影响）"
+                );
+            }
             monitor
                 .set_event_emitter(std::sync::Arc::new(
                     crate::init::monitor_emitter::TauriMonitorEmitter::new(
                         app_for_spawn.clone(),
                         db.clone(),
                         std::sync::Arc::new(axagent_notification::NotificationDispatcher::new()),
+                        plugin_event_bus,
                     ),
                 ))
                 .await;
-            // 组合级告警
-            monitor.set_aggregator(aggregator).await;
+            // 组合级告警。⚠ 这里 clone 而不是 move：同一份聚合器还要交给 `stock.monitor`
+            // 接缝的宿主 provider（两个持有者读的是同一格配置与缓冲，不许有第二份真相）。
+            monitor.set_aggregator(aggregator.clone()).await;
 
             // P2-6: T+0 自动重跑回调（异常行情 → 重跑股票分析工作流）
             let app_for_t0 = app_for_spawn.clone();
@@ -5157,6 +5170,25 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
                 tracing::warn!("[startup] stock_monitor 已初始化，跳过重复注入");
                 return;
             }
+            // ── stock.monitor 接缝：装配成功后**就地注册**宿主 provider（裁定 J8）──
+            // 三个句柄此刻都在手边：monitor（刚 set 成功）、aggregator（同一份 `Arc`）、
+            // db（块顶短借 state 克隆的那份）。注册点落在 services.rs 而不是 state.rs 的原因：
+            // monitor 与 aggregator 在 `state.rs` 那段装配顺序里**还没构造**
+            // （判据 `.tmp/res104-monitor-design.md` §0-7 / §I2）。
+            // 失败只 warn，不阻断启动（与 market.quote / jobs.store / workflow.run 同策略）。
+            {
+                let provider: Arc<dyn axagent_harness::StockMonitorProvider> = Arc::new(
+                    crate::commands::stock_workflow::monitor_seam_service::HostStockMonitor::new(
+                        monitor_arc.clone(),
+                        aggregator.clone(),
+                        Arc::new(db.clone()),
+                    ),
+                );
+                match axagent_harness::get_capability_registry().register_stock_monitor(provider) {
+                    Ok(_) => tracing::info!("stock.monitor 接缝已注册 (BuiltIn)"),
+                    Err(e) => tracing::warn!("stock.monitor 注册失败: {e}"),
+                }
+            }
             // 启动轮询（内部永久循环，进程退出即结束）。
             //
             // 轮询间隔与告警冷却都走面板变量，**回灌走同一个方法**（阶段 D，2026-10-15）：
@@ -5190,13 +5222,29 @@ fn start_realtime_quote_watcher(app: &tauri::AppHandle, state: &AppState) {
     let callback: QuoteCallback = {
         let app = app.clone();
         let db = state.harness.db().clone();
+        // 第四跳（`event.dispatch`）：行情变化经插件总线推给订阅者，本接缝**不新增流式 op**。
+        // 总线同样要取回**同一个 `Arc`**（插件订阅者挂的那一个）；取不到时前端事件与条件单
+        // 评估照跑，只在装配点点名一次，不把「没有总线」压成「没有行情变化」。
+        let plugin_event_bus = axagent_harness::get_capability_registry().get_event_dispatcher();
+        if plugin_event_bus.is_none() {
+            tracing::warn!(
+                "[startup] event.dispatch 总线不可用 ⇒ 插件侧收不到 stock/quote_change（前端事件与条件单评估不受影响）"
+            );
+        }
         std::sync::Arc::new(move |event: axagent_astock_data::realtime_quote::QuoteChangeEvent| {
             let app = app.clone();
             let db = db.clone();
+            let plugin_event_bus = plugin_event_bus.clone();
             // payload 即 `QuoteChangeEvent` 自身（`rename_all = "camelCase"`）——
             // 这里不再手写 `json!` 摊平字段，那份副本与前端消费端的漂移是整页崩的根因。
             Box::pin(async move {
                 let _ = app.emit(IpcEventName::StockQuoteUpdate.as_str(), &event);
+                // 同一条变化补发到插件总线（fire-and-forget；kind 串只引用 harness 常量）
+                if let Some(bus) = plugin_event_bus {
+                    crate::commands::stock_workflow::quote_watcher_service::dispatch_quote_change(
+                        &bus, &event,
+                    );
+                }
                 use axagent_analysis_engine::conditional_order_bridge::ConditionalOrderBridge;
                 match ConditionalOrderBridge::handle_quote_event(&db, &event).await {
                     Ok(triggers) => {
@@ -5220,10 +5268,26 @@ fn start_realtime_quote_watcher(app: &tauri::AppHandle, state: &AppState) {
         })
     };
 
-    let watcher = RealTimeQuoteWatcher::new(state.astock_client.clone(), Some(callback));
-    if state.quote_watcher.set(watcher).is_err() {
+    // `Arc` 是接缝的前置：`RealTimeQuoteWatcher` 本身不是 `Clone`，而宿主 provider 必须与
+    // 下面的轮询循环共用**同一个**推送集合（两份实例就有两份「谁被监听」的真相）。
+    let watcher = Arc::new(RealTimeQuoteWatcher::new(state.astock_client.clone(), Some(callback)));
+    if state.quote_watcher.set(watcher.clone()).is_err() {
         tracing::warn!("[startup] quote_watcher 已初始化，跳过重复注入");
         return;
+    }
+    // ── quote.watcher 接缝：注入成功后**就地注册**宿主 provider（裁定 J8）──
+    // 与 `stock.monitor` 同策：`RealTimeQuoteWatcher` 在 services.rs 的这一段才构造，
+    // `state.rs` 的注册块拿不到它。失败只 warn，不阻断启动。
+    {
+        let provider: Arc<dyn axagent_harness::QuoteWatcherProvider> = Arc::new(
+            crate::commands::stock_workflow::quote_watcher_service::HostQuoteWatcher::new(
+                watcher.clone(),
+            ),
+        );
+        match axagent_harness::get_capability_registry().register_quote_watcher(provider) {
+            Ok(_) => tracing::info!("quote.watcher 接缝已注册 (BuiltIn)"),
+            Err(e) => tracing::warn!("quote.watcher 注册失败: {e}"),
+        }
     }
     if let Some(w) = state.quote_watcher.get() {
         w.start();

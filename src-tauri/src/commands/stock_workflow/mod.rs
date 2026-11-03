@@ -31,6 +31,13 @@ pub(crate) mod workflow_run_service;
 /// `trading.engine` 接缝的宿主服务（交易账本属股票域，故随股票域归档）。
 pub(crate) mod trading_engine_service;
 
+/// `stock.monitor` 接缝的宿主服务（监控引擎 + 跨股聚合器的配置读写与运行读数）。
+/// 没有 `#[tauri::command]`：只提供 trait 实现，注册在 `init/services.rs` 装配点之后。
+pub(crate) mod monitor_seam_service;
+
+/// `quote.watcher` 接缝的宿主服务（实时行情推送集合管理面 + 行情变化事件补发）。
+pub(crate) mod quote_watcher_service;
+
 /// 构造严格模式工具权限：激活 AgentExecutor 的严格输出契约三道防线
 /// （4f 尾部约束注入 / VERDICT 缺失兜底重试 / VERDICT tag 重构 + strict JSON 校验与降级）。
 ///

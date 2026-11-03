@@ -18,6 +18,15 @@ const PANEL_POLL_INTERVAL_KEY: &str = "monitor_poll_interval_secs";
 const PANEL_ALERT_COOLDOWN_KEY: &str = "monitor_alert_cooldown_secs";
 /// 轮询间隔可采纳区间：下界 1 秒（0 会让 `tokio::time::interval` panic），上界 1 小时。
 const POLL_INTERVAL_RANGE: (u64, u64) = (1, 3600);
+/// 告警冷却可采纳的下界（秒）：负值等于**关掉去重**（每轮重复报同一只）。
+///
+/// 与 [`POLL_INTERVAL_RANGE`] 合起来是引擎侧运行参数的唯一一组数字，由单测
+/// `runtime_var_ranges_are_pinned` 钉住（裁定 N4）。
+/// ⚠ 为什么**不**改引 harness 的 `AGGREGATOR_COOLDOWN_SECS` / `AGGREGATOR_WINDOW_SECS`：
+/// 那两组管的是「跨股聚合窗口 / 组合信号去重」，与本处「单条告警的冷却」「轮询节拍」是
+/// 四件不同的事，数值相同纯属巧合；借同一份常量会把两处判定假性绑死（调聚合窗口即误伤轮询）。
+/// 接缝侧的聚合器区间另有那一份权威，两者若必须调整要**同批改**。
+const ALERT_COOLDOWN_MIN_SECS: i64 = 0;
 
 /// 前端事件推送桥接 trait
 ///
@@ -155,10 +164,6 @@ impl RealtimeMonitor {
         *self.event_emitter.write().await = Some(emitter);
     }
 
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<MonitorAlert> {
-        self.alert_tx.subscribe()
-    }
-
     /// P3-3: 注入跨股票信号聚合器，启用组合级告警。
     ///
     /// 不调用此方法时，RealtimeMonitor 仅产出单股告警；
@@ -193,14 +198,6 @@ impl RealtimeMonitor {
         let prefix = format!("{alert_id}:");
         let mut states = self.alert_states.write().await;
         states.retain(|k, _| !k.starts_with(&prefix));
-    }
-
-    pub fn serialize_configs(configs: &HashMap<String, MonitorConfig>) -> String {
-        serde_json::to_string(&configs.values().collect::<Vec<_>>()).unwrap_or_default()
-    }
-
-    pub fn deserialize_configs(json: &str) -> Vec<MonitorConfig> {
-        serde_json::from_str::<Vec<MonitorConfig>>(json).unwrap_or_default()
     }
 
     /// 获取所有监控配置
@@ -366,7 +363,7 @@ impl RealtimeMonitor {
             None => {},
         }
         match axagent_harness::panel_variables::integer_in(vars, PANEL_ALERT_COOLDOWN_KEY) {
-            Some(v) if v >= 0 => self.set_alert_cooldown_secs(v).await,
+            Some(v) if v >= ALERT_COOLDOWN_MIN_SECS => self.set_alert_cooldown_secs(v).await,
             Some(v) => tracing::warn!(
                 "[monitor] 面板 {PANEL_ALERT_COOLDOWN_KEY} = {v} 为负 ⇒ 拒绝覆盖（负冷却等于关掉去重）"
             ),
@@ -1220,5 +1217,25 @@ mod tests {
         monitor.apply_runtime_vars(&HashMap::new()).await;
         assert_eq!(monitor.poll_interval_secs().await, 3600);
         assert_eq!(monitor.alert_cooldown_secs().await, 0);
+    }
+
+    /// 运行参数区间的**数字**形态锁（裁定 N4：不新增门禁判据，改用单测钉住）。
+    ///
+    /// 上面那条测的是行为（采纳 / 拒绝），这一条钉的是常量本身：面板改数值的人一旦把区间
+    /// 挪动，这里先红，而不是等现网「面板设了却没生效」。
+    /// ⚠ 接缝侧的聚合器区间是**另一组**权威（harness `AGGREGATOR_*`，钉在
+    /// `src-tauri/src/commands/stock_workflow/monitor_seam_service.rs` 的同名形态锁里）；
+    /// 两处数值相近纯属语义交叉，不许合并成一份（理由见 `ALERT_COOLDOWN_MIN_SECS` 的注释）。
+    #[test]
+    fn runtime_var_ranges_are_pinned() {
+        assert_eq!(POLL_INTERVAL_RANGE, (1, 3600));
+        assert_eq!(ALERT_COOLDOWN_MIN_SECS, 0);
+        // 区间自洽 + 引擎默认值落在自己的区间内（`new()` 装的是 30s / 300s）：
+        // 写成 `contains` 而不是 `a <= b`，后者是恒真式，会撞 `assertions_on_constants`。
+        assert!(
+            (POLL_INTERVAL_RANGE.0..=POLL_INTERVAL_RANGE.1).contains(&30),
+            "默认轮询间隔 30s 必须在可采纳区间内"
+        );
+        assert!((ALERT_COOLDOWN_MIN_SECS..=86_400).contains(&300), "默认冷却 300s 必须不低于下界");
     }
 }

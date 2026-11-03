@@ -80,6 +80,27 @@ pub async fn reuse_open_alert(
     active.update(db).await
 }
 
+/// 按主键读一行 —— `stock.monitor` 接缝 `remove_alert` 的「先查」那一步。
+///
+/// 为什么要在 dao 而不是命令层：`scripts/check-layer-discipline.mjs` 规则 1 禁止
+/// `src/commands/**` 出现 `sea_orm::` / `axagent_entities::` 字面量（新文件基线为 0），
+/// 本文件的 [`find_open_untriggered`] 只按 `(stock_code, alert_type)` 查，拿不到「这一 id 在不在」。
+pub async fn find_by_id(
+    db: &DatabaseConnection,
+    id: &str,
+) -> Result<Option<AlertRow>, sea_orm::DbErr> {
+    price_alerts::Entity::find_by_id(id.to_string()).one(db).await
+}
+
+/// 按主键删一行，返回**真正被删掉的行数**（`0` = 行不存在）。
+///
+/// 返回计数而不是 `()`：契约的 `RemoveAlertOutcome.db_deleted` 要区分「删成」与「查无此行」，
+/// 而「查无」按 `jobs.store get` 的口径是**正常结果**，不能靠抛错来表达。
+pub async fn delete_by_id(db: &DatabaseConnection, id: &str) -> Result<u64, sea_orm::DbErr> {
+    let result = price_alerts::Entity::delete_by_id(id.to_string()).exec(db).await?;
+    Ok(result.rows_affected)
+}
+
 /// 新建一条未触发告警行（新一轮监控周期的起点）。
 ///
 /// `target_price` 与 `threshold` 同源同值：老列继续写以兼容仍在读它的代码。

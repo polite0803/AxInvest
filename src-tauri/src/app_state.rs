@@ -254,7 +254,14 @@ pub struct AppState {
         >,
     >,
     /// 实时行情流监视器（OnceLock 惰性初始化）
-    pub quote_watcher: std::sync::OnceLock<axagent_astock_data::RealTimeQuoteWatcher>,
+    ///
+    /// 与 `stock_monitor` 同形改成 `Arc<…>`：`quote.watcher` 接缝的宿主 provider 必须与
+    /// 宿主轮询循环共用**同一个**集合（`RealTimeQuoteWatcher` 的内部状态是 `Arc<RwLock<…>>`，
+    /// 但结构体本身不是 `Clone`，`OnceLock<T>` 也拿不出第二个 owning 句柄）。
+    /// 消费方按方法名调用（`watch` / `unwatch` / `watched_stocks` / `start`）经 deref 自动
+    /// 落到内层类型，无需改动。
+    pub quote_watcher:
+        std::sync::OnceLock<std::sync::Arc<axagent_astock_data::RealTimeQuoteWatcher>>,
     /// 模拟交易引擎（依赖 DB + astock_client，启动时构造）
     pub trading_engine: Arc<tokio::sync::RwLock<axagent_analysis_engine::trading::TradingEngine>>,
     /// 跨股聚合器（OnceLock 惰性初始化）

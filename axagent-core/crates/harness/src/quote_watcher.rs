@@ -146,6 +146,19 @@ pub trait QuoteWatcherProvider: Send + Sync {
     }
 }
 
+// ── 事件 kind（裁定 N6：发射点只准引用常量，禁止再抄一遍字面量）───────────
+
+/// 行情变化推送的 `DomainEvent.kind`。
+///
+/// 本接缝**不新增流式 op**：轮询本体留在宿主，变化经 `event.dispatch` 推给订阅者，用的就是
+/// 这一串。前缀必须等于 `EventCategory::Stock::as_str()`（由本模块单测在运行期钉住 ——
+/// `&str` 常量拼不出方法调用的结果，而把前缀抄成字面量正是本裁定要消灭的那件事）。
+///
+/// ⚠ payload 是 `astock_data::QuoteChangeEvent` 的 camelCase 序列化本体（与前端
+/// `stock-quote-update` 同一份真相），宿主侧**不得**再摊平一遍字段 —— 那份手工 `json!`
+/// 副本漂移过一次，直接把面板打成整页错误。
+pub const STOCK_QUOTE_CHANGE_KIND: &str = "stock/quote_change";
+
 // ── 测试 ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -239,5 +252,24 @@ mod tests {
     fn trait_is_object_safe() {
         let provider: std::sync::Arc<dyn QuoteWatcherProvider> = std::sync::Arc::new(BareWatcher);
         assert!(futures::executor::block_on(provider.watched_codes()).is_err());
+    }
+
+    /// 裁定 N6 的形态锁：行情 kind 的前缀必须等于 `EventCategory::Stock::as_str()`，
+    /// 且与 `stock_monitor.rs` 那两条同源（三条串都挂在同一个 category 名下，插件按前缀筛）。
+    #[test]
+    fn stock_quote_change_kind_prefix_matches_category() {
+        use crate::EventCategory;
+
+        let prefix = format!("{}/", EventCategory::Stock.as_str());
+        assert!(
+            STOCK_QUOTE_CHANGE_KIND.starts_with(&prefix),
+            "kind `{STOCK_QUOTE_CHANGE_KIND}` 的前缀不是 `{prefix}`"
+        );
+        assert!(
+            STOCK_QUOTE_CHANGE_KIND.len() > prefix.len(),
+            "kind 只有前缀 ⇒ 订阅端会当成空事件名"
+        );
+        assert_ne!(STOCK_QUOTE_CHANGE_KIND, crate::stock_monitor::STOCK_PRICE_ALERT_KIND);
+        assert_ne!(STOCK_QUOTE_CHANGE_KIND, crate::stock_monitor::STOCK_PORTFOLIO_SIGNAL_KIND);
     }
 }

@@ -717,7 +717,7 @@ impl WorkflowRunProvider for WorkflowRunService {
         };
 
         // 按 `updated_at` 降序（契约：本页按最近更新优先）
-        views.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        views.sort_by_key(|view| std::cmp::Reverse(view.updated_at));
         let total = views.len();
         views.truncate(limit);
         Ok(WorkflowRunActivePage { executions: views, total })

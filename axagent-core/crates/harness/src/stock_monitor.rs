@@ -564,6 +564,24 @@ pub trait StockMonitorProvider: Send + Sync {
     }
 }
 
+// ── 事件 kind（裁定 N6：发射点只准引用常量，禁止再抄一遍字面量）───────────
+
+/// 价格告警触发时经 `event.dispatch` 推给插件的 `DomainEvent.kind`。
+///
+/// 前缀必须等于 `EventCategory::Stock::as_str()`：`&str` 常量无法在编译期拼一个方法调用的
+/// 结果，故这一格由本模块单测 `stock_event_kind_prefix_matches_category` 在运行期钉住。
+/// 发射点（`src-tauri/src/init/monitor_emitter.rs` 的第四跳）**只引用本常量**。
+///
+/// ⚠ 与 Tauri 事件名 `IpcEventName::PriceAlertTriggered`（`"price-alert-triggered"`）**不同域**：
+/// 那一份是前端 `listen()` 的 IPC 名，这一份是插件总线 `event.dispatch` 的订阅匹配串；
+/// 同一条告警两头各发一次，但键空间互不替代（裁定 N6 明确「不复用 `IpcEventName`」）。
+pub const STOCK_PRICE_ALERT_KIND: &str = "stock/price_alert";
+
+/// 组合级信号（跨股聚合器产出）的 `DomainEvent.kind`，前缀同上。
+///
+/// 与 `IpcEventName::PortfolioSignal` 的关系同 [`STOCK_PRICE_ALERT_KIND`]。
+pub const STOCK_PORTFOLIO_SIGNAL_KIND: &str = "stock/portfolio_signal";
+
 // ── 测试 ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -851,5 +869,22 @@ mod tests {
         let provider: std::sync::Arc<dyn StockMonitorProvider> = std::sync::Arc::new(BareMonitor);
         let outcome = futures::executor::block_on(provider.aggregator_buffer());
         assert!(outcome.is_err());
+    }
+
+    /// 裁定 N6 的形态锁：两条 stock 域 kind 的前缀必须等于 `EventCategory::Stock::as_str()`。
+    ///
+    /// 为什么不是编译期断言：`as_str()` 是方法调用，`&str` 常量拼不出它；把前缀抄成字面量
+    /// 又正是本裁定要消灭的「两头各抄一遍」。故落在运行期，红得比漂移传出去更早。
+    #[test]
+    fn stock_event_kind_prefix_matches_category() {
+        use crate::EventCategory;
+
+        let prefix = format!("{}/", EventCategory::Stock.as_str());
+        for kind in [STOCK_PRICE_ALERT_KIND, STOCK_PORTFOLIO_SIGNAL_KIND] {
+            assert!(kind.starts_with(&prefix), "kind `{kind}` 的前缀不是 `{prefix}`");
+            // 前缀之后必须还有内容：`"stock/"` 这种空 kind 会被订阅端当「全匹配」误收
+            assert!(kind.len() > prefix.len(), "kind `{kind}` 只有前缀，没有具体事件名");
+        }
+        assert_ne!(STOCK_PRICE_ALERT_KIND, STOCK_PORTFOLIO_SIGNAL_KIND, "两条 kind 必须可区分");
     }
 }

@@ -2698,7 +2698,8 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 ### 58.2 对 res115 §④ 的逐条裁定（17 条，一条不并）
 
 **① 契约文档「非法值 ⇒ `SEAM_CALL_INVALID_ARGS`」与分派层现状不符（res115 §4.1-1）——判执行者对，收口点是我欠的。**
-`worker.rs` 那 12 个分支把 provider 的一切 `Err` 一律落成 `PLUGIN_CALL_FAILED`，`SEAM_CALL_INVALID_ARGS` 只由 `deserialize_arg` 在反序列化失败时产出。执行者把越界建成 `AxAgentError::Validation`（与 `workflow.run` 同族）是**当前唯一不越权的做法**。裁定：**不改契约文档的措辞**（那是承诺，不是笔误），由 **#112** 在分派层补 `Validation ⇒ SEAM_CALL_INVALID_ARGS` 的四行映射兑现它；映射加在分派层而**不是** provider 侧，因为 provider 回 `AxAgentError`、专用码只有分派层能发（先例 `workflow_run_error`）。**在 #112 落地前，插件侧文档不得写「越界能拿到 INVALID_ARGS」。**
+`worker.rs` 那 12 个分支把 provider 的一切 `Err` 一律落成 `PLUGIN_CALL_FAILED`，`SEAM_CALL_INVALID_ARGS` 只由 `deserialize_arg` 在反序列化失败时产出。执行者把越界建成 `AxAgentError::Validation`（与 `workflow.run` 同族）是**当前唯一不越权的做法**。裁定：**不改契约文档的措辞**（那是承诺，不是笔误），由 **#112** 在分派层补 `Validation ⇒ SEAM_CALL_INVALID_ARGS` 的四行映射兑现它；映射加在分派层而**不是** provider 侧，因为 provider 回 `AxAgentError`、专用码只有分派层能发（先例 `workflow_run_error`）。**在 #112 落地前，插件侧文档不得写「越界能拿到 INVALID_ARGS」。
+   ⚠ **#112 的覆盖面不止 stock.monitor**：契约里同形的承诺还有 `knowledge_vector.rs:266` 上方那句「集合不存在 ⇒ 分派层映射 `SEAM_CALL_INVALID_ARGS`」（§56.2-2 的配套口径）。⇒ 那条映射是**两条接缝共用**的 `AxAgentError::Validation ⇒ 专用码` 函数，一次落地；#108 的 provider 必须同样用 `Validation` 抛「集合不存在」，否则映射无从命中。**
 
 **② `status` 的 `assembled` 恒 `true`（§4.1-2）——接受纯函数解法。**
 裁定 J8「装配成功后就地注册」与「provider 能返回 `assembled=false`」结构上互斥：本 provider 持非 `Option` 的 `Arc`，「未装配」在接缝上的**真实表现是注册表取不到 provider ⇒ `SEAM_PROVIDER_UNAVAILABLE`**。执行者没有为了凑那一格把字段改回 `Option`（正是 J8 否掉的形态），而是把九键映射抽成 `status_view(assembled, …)` 并给 `assembled=false` 写单测 —— 契约形态完整、运行语义诚实。**不许**后续批次以「让 `assembled` 能用」为由再引 `Option`。
@@ -2748,13 +2749,16 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 4. `required_permission_for` 在 #109 **只加一条**：`("knowledge.vector", "index_text") => Some(PluginPermission::Write)`；`trajectory.store` 首批只读 ⇒ 不加条目（落 `_ => None`）。res105 批 3 表里那行 `delete_document` **不存在**，别照抄（§56.1-Q2 已砍）。
 5. `score` 方向（L2 距离，越小越相似）契约层钉不住 ⇒ **#108 宿主 provider 的单测必须锁比较方向**，与 `indexing.rs` 的「过滤 → 排序 → 截断」口径对齐。
 6. **op 名 ≠ 方法名就此定案**（res117 §④-12 待裁）：knowledge.vector 的第四个 op 用 **`get_collection_info`**，方法名保持 `collection_info()` 不动。理由：本仓入站面的既有形态就是「op 名带 `get_`/`list_` 前缀、trait 方法名是名词」（`get_t0_config`→`t0_config`、`list_watched`→`watched_codes`），改方法名要重启 K1 记账与已交付的契约文档，收益只有「少一条映射」；而映射成本已在 §55.5 的两条先例里被吸收。⇒ #109 按 op 名匹配分支，`#108` 不动 trait。
+7. **入站 args 是双形态，不是笔误**：外层键 **snake_case**（盘上先例 `"request"` / `"alert_id"` / `"codes"` / `"priority"` / `"replace"`），嵌进去的 DTO 字段 **camelCase**（禁区 13 管的是 DTO 与 Tauri invoke 参数，帧协议外层键另有这套先例）。⇒ #108/#109 与插件侧文档一律照此写，不许「统一成 camelCase」把既有 12 条分支的入参键形改一遍。
+8. **方法签名以盘上为准**（#109 执行者纠正我任务书里的写错处）：knowledge 四个方法**按值**收 Request（`search(VectorSearchRequest)` 等，`:239/:249/:266`），`collection_info(&str) :276` 是唯一带引用的；trajectory 四个是 `list(Option<usize>) :212` / `get(&str) :221` / `query(TrajectoryQueryView) :231` / `count() :240`。⇒ 我在派单里写的 `&VectorSearchRequest` 与「`query` 参数名 request」都按盘上改；分派层因此是 `deserialize_arg::<DTO>(&args, "request", seam)` 后**移动**进去，不存在借用问题。
 
 ### 58.4 本批验收状态（诚实口径：绿的是**跑过的**，不是写过的）
 
 | 项 | 状态 |
 |---|---|
 | `cargo clippy -p axagent --all-targets -- -D warnings`（主 crate，含 58.1 全部改动 + `:720` 那处修复） | **EXIT=0**，`.tmp/res123-E1-axagent-clippy.log`（322 B / `Compiling axagent v3.0.0` + `Checking axagent-runtime` + `Finished dev … in 16m 14s` + `E1_EXIT=0`） |
-| 被测版本归因 | 该轮起点 07:52:00，最后一个源文件 mtime 07:51:51 ⇒ 读到的是修好的版本；另起 `.tmp/res103-E1b-axagent-clippy-recheck.log` 复跑做 no-op 自证 |
+| 被测版本归因 | 该轮起点 07:52:00 > 末次源写入 07:51:51 ⇒ 读到的是修好的版本 |
+| 同命令复跑 | `.tmp/res103-E1b-axagent-clippy-recheck.log`（327 B / `Finished dev … in 17m 33s` / `RECHECK_EXIT=0`）。⚠ 这一轮**不是 no-op**：我在起跑后约 36 s（08:11:19）改了 `monitor.rs:22` 的一句**假注释**（把单测名写成 `runtime_var_ranges_are_the_single_source_numbers`，盘上真名 `runtime_var_ranges_are_pinned`）⇒ 级联重编。那一处另起定点取证：`.tmp/res126-F1-engine-clippy.log` 首行 `Checking axagent-analysis-engine` + `Finished … in 40.61s` + `F1_EXIT=0` ⇒ 现号内容确有 lint 级证，不是「改完就说绿」 |
 | harness `--all-targets` clippy | 因 58.2-⑨ 那条真错曾被挡；`71e6f88a4` 修后需复跑（执行者只交回 `--lib` 口径绿证） |
 | `cargo test -p axagent-harness --lib stock_monitor` / `quote_watcher` | **未跑**（同上原因）⇒ #103 合入后补跑，三条 kind 常量目前只有 lib 级 lint 证、没有测试级证 |
 | 全量三件套（`fmt --all --check` / `clippy --workspace --all-targets --all-features` / `test --workspace`） | 未跑（AGENTS：全部阶段完成后一次）；已知两处会红：`market_data.rs` 4 处 rustfmt 漂移（#113）、分层门禁 3 处既存（#114） |

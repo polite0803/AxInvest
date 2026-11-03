@@ -2625,7 +2625,7 @@ A 批首轮 clippy 曾 EXIT=101（默认实现参数未使用，`-D warnings` �
 |---|---|---|
 | Q1 | 接缝 ID 取 `knowledge.vector` 还是 `rag.vector.store` | **`knowledge.vector`**。§47.3 顺序表（`PLAN:2245`）用的就是它，且首批 op 面（检索 / 关键词检索 / 入库 / 集合信息）**不止 RAG 存储**。代价我认：交付批必须**同批**改 `harness/src/vector_store.rs:12` 模块头、`PLAN:317` 组 K 预留行、`scripts/capability-register.json:956` 行的 `seamId`/`faces`/`evidence`/`planAnchorText`（锚点文本要与 PLAN:317 逐字一致，否则 repin 判错）。**历史章节里的 `rag.vector.store` 提法一律不改**（§704/1460/1499/1571/1864 是时点记录）⇒ 两名的关系只在**本节**说明一次：预留名 → 交付名。**两名并存地写进新代码是最坏解**，判据只认 `capability_registry.rs` 里那一个字面量。 |
 | Q2 | 首批开几个写 op | **只开 `index_text` 一个**（`write` 闸 + 硬上限）。**`delete_document` 不开** —— 比 res105 的理由更硬的一条：`delete_document_embeddings`（search `:990`）**只清向量、不删文档行**，宿主侧删文档走 `knowledge.rs:982` 的「先清旧向量再删行」同事务路径 ⇒ 插件拿到这个 op 只能造成**半截删除**（库里留孤儿行）。删除权留在宿主命令面。 |
-| Q3 | 为 `list_collections` 扩 #40 的 trait 面？ | **不扩**。#40 三 trait 共 25 方法、宿主 `VectorStore` 28 个 pub 方法**零列举能力**，扩面属改冻结契约。首批以 `get_collection_info`（trait 已有 `get_collection_dimensions`，harness `:84`）替代。 |
+| Q3 | 为 `list_collections` 扩 #40 的 trait 面？ | **不扩**。#40 三 trait 共 25 方法、宿主 `VectorStore` 28 个 pub 方法**零列举能力**，扩面属改冻结契约。首批以 `get_collection_info`（trait 已有 `get_collection_dimensions`，harness `:87`）替代。 |
 | Q4 | `trajectory.store` 开不开 `append` | **首批只读**（`list`/`get`/`query`/`count` 四个 op）。res105 B9 的五条判据全部成立，尤其：`outcome`/`quality`/`value_score` 是**可写字段**（`trajectory_types.rs:105-108`）而进化门槛读它们（`reflection.rs:4515` 取 30 条、<10 条拒进化）⇒ 插件伪造一条 `Success` 就能抬分母。**若将来必开**，走「最小写子集」（单 op + 插件前缀 `agentName` + 入参禁带 `steps`/`rewards`/`quality`/`valueScore` + 速率闸 + 先补 `TRAJECTORY_*` 码族与 11 语言译键）。 |
 | Q5 | 业务错误码透出到帧 `code`？ | **不改协议**。分派层继续 `PLUGIN_CALL_FAILED` 兜底，`KNOWLEDGE_*`/`VECTOR_*` 放进 payload 的 `code` 字段（与 `trading.engine` 的「业务结果走 payload `reason`、不借错误码」同源）。反向选择会让每个新码都欠 11 语言译键（AGENTS「后端错误码 i18n 规范」第 7 条）⇒ **首批零新增码**。 |
 | Q6 | `TrajectoryQuery` 加 `rename_all` 还是新建视图 | **新建 `TrajectoryQueryView`**（camelCase + `sinceMs`/`untilMs: i64` epoch），**不动** `harness/src/trajectory_types.rs:288` 原形：它被宿主 `storage.rs:409` 与 proactive/dream/closed-loop 消费，改注解会同时改落库与既有 IPC 的键形态。 |
@@ -2671,3 +2671,91 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 ### 57.3 顺带纠出的既存引用腐烂（同批改指）
 
 审计脚本头部注释加了 11 行 ⇒ 内部段落整体下移，`check-capability-register.mjs` 与镜像表里**四处按行号抄的引用**当场失效，已重指：`DOMAINS 36-51 → 48-63`（两处）、`SKIP 17 → 29`、`注释剥离 66-69 → 87-90`、`foreign 判据 55-77 → 65-126`。⇒ 又一次实证「按行号的同源引用必须与判据同批改」，与 §54 R5「白名单可审、正则不可审」是同一件事的两面。
+
+## 58. `stock.monitor` + `quote.watcher` 宿主批（#103）交付与对执行者 17 条「判据不足」的逐条裁定
+
+> 执行：软件开发专家团 · 宿主批（res115）｜日期：2026-11-03｜范围：`src-tauri` 宿主 provider + 注册 + 第四跳，harness 只追加 kind 常量，dao 加两个函数，引擎删死代码
+> 上位：§55（契约与分派）· 调研 `.tmp/res104-monitor-design.md` §H/§I · 交付报告 `.tmp/res115-host-report.md`
+
+### 58.1 交付面（落盘行号一律 `grep -n` 现取，非报告自陈）
+
+| 文件 | 形态 | 关键锚点（现号） |
+|---|---|---|
+| `src-tauri/src/commands/stock_workflow/monitor_seam_service.rs` | 新建 715 行（res115 自陈 718，差 3 行是收尾格式收敛；本表一律取盘上号） | `HostStockMonitor :72`；纯函数 `is_allowed_alert_type :98` / `status_view :106` / `validate_t0_config :130` / `validate_aggregator_config :156` / `price_alert_view :190`；`impl StockMonitorProvider` 九方法 `:212` 起 |
+| `src-tauri/src/commands/stock_workflow/quote_watcher_service.rs` | 新建 336 行 | `HostQuoteWatcher :51`；`dedup_preserve_order :65` / `plan_watch_batch :82` / `sorted_codes :94`；第四跳 `dispatch_quote_change :105`；`impl QuoteWatcherProvider` `:126` 起 |
+| `src-tauri/src/init/services.rs` | +69/−5 | 装配点取回 `event.dispatch` **同一个** `Arc` 给 emitter（`get_event_dispatcher()` 在 `:5052`）；`set_aggregator` `:5071`；`stock.monitor` 就地注册（`HostStockMonitor::new :5181`、`register_stock_monitor :5187`）；行情回调第四跳（取总线 `:5228`、`dispatch_quote_change` 调用点 `:5244`）；watcher 改 `Arc` 构造 `:5273` + `quote.watcher` 注册（`HostQuoteWatcher::new :5283`、`register_quote_watcher :5287`） |
+| `src-tauri/src/init/monitor_emitter.rs` | +89/−4 | `plugin_event_bus :59`、登记表 `plugin_kind_of :81`、发射体 `dispatch_domain_event :96`、`emit` 内第四跳分支 `:122`、新增单测 `only_alert_and_portfolio_events_cross_into_the_plugin_bus :387` |
+| `src-tauri/src/app_state.rs` | +8/−1 | `quote_watcher: OnceLock<Arc<RealTimeQuoteWatcher>> :263`（越界批准，见 58.2-③） |
+| `src-tauri/src/commands/stock_workflow/mod.rs` | +7 | 两条 `pub(crate) mod`（零 `#[tauri::command]` ⇒ `register_commands.rs` 生成物不受本批影响） |
+| `axagent-core/crates/harness/src/stock_monitor.rs` | +35 | `STOCK_PRICE_ALERT_KIND :578`、`STOCK_PORTFOLIO_SIGNAL_KIND :583`、前缀形态锁单测 `:879` |
+| `axagent-core/crates/harness/src/quote_watcher.rs` | +32 | `STOCK_QUOTE_CHANGE_KIND :160`、前缀/互异单测 `:260` |
+| `axagent-quant/crates/analysis-engine/src/monitor.rs` | +30/−13 | 删 `RealtimeMonitor::subscribe` / `serialize_configs` / `deserialize_configs`（三处零引用，删前检索留证在 res115 §1.4）；`POLL_INTERVAL_RANGE :20`、新增 `ALERT_COOLDOWN_MIN_SECS :29`、守卫 `:366`、区间形态锁单测 `runtime_var_ranges_are_pinned :1230` |
+| `axagent-infra/crates/dao/src/repo/price_alert.rs` | +21 | `find_by_id :88`、`delete_by_id :99`（返 `rows_affected`，因为 `RemoveAlertOutcome.db_deleted` 要区分「删成」与「查无此行」，而「查无」按 `jobs.store get` 口径是**正常结果**） |
+| `src-tauri/src/commands/stock_workflow/workflow_run_service.rs` | 1 行 | `:720` `sort_by(|a,b| b.cmp(a))` → `sort_by_key(Reverse)`：这是 #90 落地时我造成的既存 clippy 红（`clippy::unnecessary_sort_by`），本批主 crate `-D warnings` 的唯一阻塞项，同批修掉并在本条留账 |
+
+注册口现号（§55.5-N8 报的 `:1044/:1052/:1062/:1070` 已被 #107 再推）：`register_stock_monitor :1078` · `get_stock_monitor :1086` · `register_quote_watcher :1096` · `get_quote_watcher :1104`；`ServiceDefinition::stock_monitor() :164` / `quote_watcher() :178` 未漂。
+
+### 58.2 对 res115 §④ 的逐条裁定（17 条，一条不并）
+
+**① 契约文档「非法值 ⇒ `SEAM_CALL_INVALID_ARGS`」与分派层现状不符（res115 §4.1-1）——判执行者对，收口点是我欠的。**
+`worker.rs` 那 12 个分支把 provider 的一切 `Err` 一律落成 `PLUGIN_CALL_FAILED`，`SEAM_CALL_INVALID_ARGS` 只由 `deserialize_arg` 在反序列化失败时产出。执行者把越界建成 `AxAgentError::Validation`（与 `workflow.run` 同族）是**当前唯一不越权的做法**。裁定：**不改契约文档的措辞**（那是承诺，不是笔误），由 **#112** 在分派层补 `Validation ⇒ SEAM_CALL_INVALID_ARGS` 的四行映射兑现它；映射加在分派层而**不是** provider 侧，因为 provider 回 `AxAgentError`、专用码只有分派层能发（先例 `workflow_run_error`）。**在 #112 落地前，插件侧文档不得写「越界能拿到 INVALID_ARGS」。**
+
+**② `status` 的 `assembled` 恒 `true`（§4.1-2）——接受纯函数解法。**
+裁定 J8「装配成功后就地注册」与「provider 能返回 `assembled=false`」结构上互斥：本 provider 持非 `Option` 的 `Arc`，「未装配」在接缝上的**真实表现是注册表取不到 provider ⇒ `SEAM_PROVIDER_UNAVAILABLE`**。执行者没有为了凑那一格把字段改回 `Option`（正是 J8 否掉的形态），而是把九键映射抽成 `status_view(assembled, …)` 并给 `assembled=false` 写单测 —— 契约形态完整、运行语义诚实。**不许**后续批次以「让 `assembled` 能用」为由再引 `Option`。
+
+**③ 两处越出任务书文件清单（§1.3 / §4.5-18）——两处都批准。**
+- `app_state.rs` 那一行：`RealTimeQuoteWatcher` 不是 `Clone`，`OnceLock<T>` 拿不出第二个 owning 句柄 ⇒ 不改这行就只有「provider 另造一份集合」（两份「谁被监听」的真相，违反单源）或「provider 持 `AppHandle` 每次 `try_state`」（provider 单测全部写不出来）。消费方四处调用点按方法名调用，经 deref 自动落内层 ⇒ 一字未改，符合「禁改 `stock_analysis.rs`」。
+- dao 两个函数：命令层不许直连 SQL（`check-layer-discipline.mjs` 规则 1 对新文件基线 0），而 dao 原先没有按主键的查/删。这正是 #114 想要的**正确方向**（下沉 dao），不是越界。
+
+**④ clamp 单一源：我撤回对裁定 N4 的过度要求（§4.2-6）。**
+执行者拒绝「借 `AGGREGATOR_WINDOW_SECS (1,3600)` 当轮询间隔权威」是对的：harness 那组管「跨股聚合窗口 / 组合信号去重」，引擎那组管「轮询节拍 / 单条告警冷却」，**四件不同的事，数值相同纯属巧合**，合并会把两处判定假性绑死（调聚合窗口即误伤轮询）。落地形态就此定案：聚合器四区间 provider 只引用 harness `AGGREGATOR_*`（真同源）；引擎两个数字用具名常量 + 单测 `runtime_var_ranges_are_pinned` 钉住。**不加** `MONITOR_POLL_INTERVAL_SECS` / `MONITOR_ALERT_COOLDOWN_SECS` 到 harness（那会超出「只追加 kind 常量」，且造出第三份名义同源、实则不同义的常量）。
+
+**⑤ 行数与锚点订正照单收下（§4.1-3/4/5）：`trading_engine_service.rs` 268 行（非 256）；`capability_registry` 四锚现号见 58.1 末；res104 §G15/§I2 的 `:5154` / `:5224` 复核为真。**
+
+**⑥ `alert_tx` 现在是没有接收端的 `Sender`（§4.3-8）——本批不退役，已登记 #115。**
+删 `subscribe` 后 `:627` 的 `send` 恒 `Err`、被 `let _ =` 吞；留着不影响正确性（告警真相走 `event_emitter` + 前端 IPC + DB + 通知四跳），但它是「写进一条没人听的频道」，与阶段 D/G 退役的那批同形。属**行为面**改动，超出「删三处零引用死代码」的授权 ⇒ 执行者不动是对的。
+
+**⑦ K1 三档读数已收口（§4.4-9）：`2022 / 324 / 238` 已在镜像表与 `PLAN:247` 落账（提交 `a0521d583`），`--repin-code` 顺带把 `worker.rs` 三个锚点 +237 重锚。**
+
+**⑧ 分层门禁既存红（§4.4-10）——判为我的债，登记在 #114，不折进本批。**
+`trading_engine_service.rs` 2 处、`workflow_run_service.rs` 1 处 `use sea_orm::{…}` 在 HEAD 就红（两文件 `git status` 当时干净）。本批两个新文件 0 命中。**修法**：把 `trades` / `price_alerts` 的查询下沉 dao，而不是把违规加进基线（基线是棘轮，只减不增）。
+
+**⑨ harness 测试目标被 `knowledge_vector.rs` 挡住（§4.4-11）——已解，且欠的取证要补。**
+那条 `error: invalid format string`（`{hits[0]:?}`）是 #107 交付里的真错，我已修并随 `71e6f88a4` 提交。⇒ 执行者因它没跑成的 A3/A4（`cargo test -p axagent-harness --lib stock_monitor` / `quote_watcher`，钉住三条 kind 常量与前缀形态锁）**现在必须复跑**，否则 58.1 表里那两条单测只是「写过」而不是「跑过」。
+
+**⑩ `memory_removed` 口径采纳执行者的判法（§4.5-13），并作为插件侧文档的**唯一**措辞**：语义是「引擎内存里确有这一条、且被摘掉」（先 `list_configs` 判存在，再 `remove_config_by_id`（引擎 `monitor.rs:193`）），**不是**「调用没报错」。⇒ 删一条已触发 / 落不成配置的行会是 `dbDeleted=true, memoryRemoved=false`，与 `wired=false` 同族，都是合法读数。命令层 `delete_price_alert` 返 `()`，没有对应读数 ⇒ 这条口径**只在接缝上成立**。
+
+**⑪ 空 `stock_code` / `stock_name`（§4.5-14）——裁定加严，且这是一处尚未落地的代码改动。**
+执行者与命令层 `create_price_alert` 同口径「都不拒」，本批我没拦。改判理由：命令层是**人在面板上点**（空股票名当场看得见），接缝是**插件自动化写**（无人复核，会往告警表灌空名行，而面板按股票名展示 ⇒ 删都找不到）。代价是「面板能建、插件不能建」的分叉，**接受** —— 接缝是收紧面，不是放宽面。落点：`monitor_seam_service.rs` 的 `upsert_alert` 校验段 + 一条反面单测。
+
+**⑫ `is_finite()` 拒 NaN / ±INF 保留（§4.5-15）**：契约「阈值越界 ⇒ 拒」不区分是哪种越界；`RangeInclusive::contains` 对 NaN 恒 `false` 是**fail-closed**，但阈值判的是 `<= 0`（对 NaN 恒 `false` = fail-open），所以这层显式判不可省。与 AGENTS「浮点判据套用 lint 建议不是纯等价改写」那条实证同源。
+
+**⑬ `watch` 的 `applied` = 截断后、去重后「本次真的提交给引擎的数量」（§4.5-16）——采纳可复算的那种读法**，不含「集合因此涨了几只」（已在集合里的代码 `watch` 是覆盖优先级，仍计入 `applied`）。契约与插件文档都按这句写，别用「实际生效的数量」这种两可措辞。
+
+**⑭ 第四跳发射点留在 `init/services.rs` 的行情回调（§4.5-17）——接受这处越界**：不改 `RealTimeQuoteWatcher`（不在可改面）就没有别的发射位置；执行者已把逻辑封成 `quote_watcher_service.rs::dispatch_quote_change`，services.rs 只留一行调用 `:5244` ⇒ 主权与形态都在 provider 侧，注册段之外只多一个调用点，可审。
+
+**⑮ 未做项里三条是**流程纪律**，本批背书，不改判**：① 阶段边界不跑全量门禁（AGENTS 口径）；② 只对新改文件逐个 `rustfmt --edition 2024`，**不**对 `mod.rs` 跑（实测 rustfmt 顺 `mod` 声明会把子模块整文件重写，包括他人正在改的 `serenity.rs` —— 这是「单文件 rustfmt 顺 mod 树」的已知坑）；③ 前端 / i18n / `src/types` 零改动（接缝消费方是插件，不是前端）。
+
+**⑯ `register_commands.rs` 此刻的 diff（`plugin_list_pages` 一行）是并行批次产物，本批提交不含它。**
+
+**⑰ `TRAJECTORY_/KNOWLEDGE_` 与 #107 相关的四条待裁（res117 §④ 6/7/9/11）已在 §58 之外单独裁定，见 58.3。**
+
+### 58.3 #107 契约批四条待裁的收口（一并落账，避免 #108/#109 各猜一次）
+
+1. **补 `KNOWLEDGE_SNIPPET_MAX_CHARS = 200`**（res117 §④-6 的缺口）：与 trajectory 同值、理由同源（帧预算 = `top_k × snippet 上限`）。已落 `knowledge_vector.rs` + `const _: () = assert!(… > 0)` + 形态锁，随 `71e6f88a4` 之后的提交入库 ⇒ #108 provider 侧裁剪必须引用它，不许随手取 500/2000。
+2. `chunk_count` / `dimensions` 保持 **`u32`**（不收宽成 `usize`）：>4G 块数 / >4G 维度不成立，收窄安全；#108 provider 里那一次 `as u32` 是预期的，不是缺陷。
+3. **args 键形态就此钉死**：#109 分派层用 `deserialize_arg::<VectorSearchRequest>(&args, "request", seam)`（嵌一层，照 §55.5-N2）；`index_text` 用 `VectorIndexRequest` 整体反序列化。插件侧文档不得写 snake_case 入参。
+4. `required_permission_for` 在 #109 **只加一条**：`("knowledge.vector", "index_text") => Some(PluginPermission::Write)`；`trajectory.store` 首批只读 ⇒ 不加条目（落 `_ => None`）。res105 批 3 表里那行 `delete_document` **不存在**，别照抄（§56.1-Q2 已砍）。
+5. `score` 方向（L2 距离，越小越相似）契约层钉不住 ⇒ **#108 宿主 provider 的单测必须锁比较方向**，与 `indexing.rs` 的「过滤 → 排序 → 截断」口径对齐。
+6. **op 名 ≠ 方法名就此定案**（res117 §④-12 待裁）：knowledge.vector 的第四个 op 用 **`get_collection_info`**，方法名保持 `collection_info()` 不动。理由：本仓入站面的既有形态就是「op 名带 `get_`/`list_` 前缀、trait 方法名是名词」（`get_t0_config`→`t0_config`、`list_watched`→`watched_codes`），改方法名要重启 K1 记账与已交付的契约文档，收益只有「少一条映射」；而映射成本已在 §55.5 的两条先例里被吸收。⇒ #109 按 op 名匹配分支，`#108` 不动 trait。
+
+### 58.4 本批验收状态（诚实口径：绿的是**跑过的**，不是写过的）
+
+| 项 | 状态 |
+|---|---|
+| `cargo clippy -p axagent --all-targets -- -D warnings`（主 crate，含 58.1 全部改动 + `:720` 那处修复） | **EXIT=0**，`.tmp/res123-E1-axagent-clippy.log`（322 B / `Compiling axagent v3.0.0` + `Checking axagent-runtime` + `Finished dev … in 16m 14s` + `E1_EXIT=0`） |
+| 被测版本归因 | 该轮起点 07:52:00，最后一个源文件 mtime 07:51:51 ⇒ 读到的是修好的版本；另起 `.tmp/res103-E1b-axagent-clippy-recheck.log` 复跑做 no-op 自证 |
+| harness `--all-targets` clippy | 因 58.2-⑨ 那条真错曾被挡；`71e6f88a4` 修后需复跑（执行者只交回 `--lib` 口径绿证） |
+| `cargo test -p axagent-harness --lib stock_monitor` / `quote_watcher` | **未跑**（同上原因）⇒ #103 合入后补跑，三条 kind 常量目前只有 lib 级 lint 证、没有测试级证 |
+| 全量三件套（`fmt --all --check` / `clippy --workspace --all-targets --all-features` / `test --workspace`） | 未跑（AGENTS：全部阶段完成后一次）；已知两处会红：`market_data.rs` 4 处 rustfmt 漂移（#113）、分层门禁 3 处既存（#114） |
+| 前端 / Playwright | 未跑（本批零 TS/JSON 改动） |

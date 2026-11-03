@@ -3203,3 +3203,38 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 **与 §54.2 R1 原文的关系**：R1 原文的方向是「命名空间白名单 + 每命名空间声明 DTO 类型名与 schema_version + 宿主按注册类型校验后才落库」。本节保留「白名单 / DTO 类型 / 版本校验」三项实质，但把载体从**一张通用 KV**改成**显式类型化 op**：白名单退化为「接缝 op 表」（本来就必须登记，见 §38 第五道门），DTO 类型即 op 的入参/出参，版本校验落在接缝常量上。R1 原文担心的「ORM 不过线」与「表级类型约束」因此由编译器与门禁两侧保证，而不是靠运行时嗅探 JSON。
 
 **状态**：R1 第一、二批均已裁定 ⇒ **#35 的「不可开工」闸门解除**。⚠ 但 #35 的 B2 实际执行仍卡在 `commands/stock_analysis.rs`（并行批未提交的 W4-3 改动占用该文件，逐行改写会与他人未提交工作混提交）——**闸门解除 ≠ 现在可改那个文件**。
+
+### 64.11 §54.3 B4 开工前置：股票域 17 张表的归属与 op 清单（2026-11-03）
+
+本节是 §64.10 第 4 条要求的「B4 先出 op 清单」的产物。扫描面 `src-tauri/src`，读= `Entity::find*` / dao 读函数 / 读 SQL，写= `insert` / `update` / `delete*` / `ActiveModel` / 写 SQL；已剔除注释与 `#[cfg(test)]` 段。
+
+**先纠三处清单错误**（§64.10 的 20 项里有 3 项不是表）：`reco_seed` 无建表（`dao/src/repo/reco_seed.rs:14` 只读 `watchlist_items` + `market_*`，全仓零 `"reco_seed"` 建表）⇒ 按 `watchlist_items` 读口处理；`stock_lesson_queries` 是查询组（`dao/src/repo/stock_lesson_queries.rs:8`，落 `stock_reflections`/`reflection_lessons`/`stock_analyses`，`:659/672` 写 `strategy_performance`）⇒ op 直接镜像其函数名；`reco_pool` 是 dao 模块，真表 `reco_pool_batches`。另 `workflow_template` 真表名 `workflow_templates`。⇒ **实际 17 张表**。
+
+| 表 | 档 | 读/写 | 需要的 op（S 档） |
+|---|---|---|---|
+| `stock_analyses` | **H** | 30 / 20 | 宿主 gateway(`gateway_stock_store.rs:34/47`)、`scheduler/restore.rs:179`、两个离线 bin 都在读/写 ⇒ 宿主继续持有 |
+| `watchlist_items` | **H** | 8 / 7 | 宿主 gateway 直写（`:64/77`）、`init/services.rs:2775` 读；⚠ 增删现有 **三份实现**（命令 / agent 桥 / gateway）应收口到 dao 一处 |
+| `settings` | **H** | 8 / 8 | 全仓 61 文件共用；域内只碰 6 个具名键 ⇒ 即便 H 也按具名设置 op 暴露，不做通用 KV |
+| `workflow_templates` | **H** | 44 / 22（含内联测试与 seed，只作量级） | 非域 49 文件也在写；域内 seed 建/删模板，插件起来前模板必须在库 ⇒ 种子改宿主具名 op |
+| `price_alerts` | **S** | 9 / 6 | `upsert_by_key`（必须一个 op：`price_alert_upsert.rs:52→61/80` 是查未触发同键行再复用/新建）/ `list_all` / `get_by_id` / `delete_by_id` / `list_triggered_in_range` / `mark_triggered_by_id` / `mark_triggered_by_stock_type` |
+| `stock_reflections` | **S** | 19 / 14 | `list_page` / `get_by_id` / `insert` / `delete_by_id` / `update_status_batch` / `list_pending` / `delete_completed_before` / `requeue_failed` / `retire_orphan_pending` |
+| `stock_evolution_history` | **S** | 11 / 6 | `insert_pending` / `count_pending_since` / `list_pending` / `get_by_id` / `approve_pending`(CAS) / `reject_pending` / `insert_accepted` / `reject_accepted` / `latest_accepted` |
+| `strategy_performance` | **S** | 3 / 3 | `insert_sample` / `has_sample` / `delete_by_code_strategy` / `list_by_agreement` |
+| `financial_snapshots` | **S** | 3 / 2 | `list_by_code_range` / `replace_code_range`（删窗+逐条插必须同 op，`stock_analysis.rs:3868/3899` 无事务）/ `codes_with_snapshot_since` |
+| `reco_picks` | **S** | 18 / 8 | `upsert_pick` / `insert_batch` / `list_latest_by_style` / `list_by_generated_at` / `delete_by_generated_at` / `get_by_id` / `history_aggregate`（`reco_history.rs:57/63` 裸 SQL） |
+| `decision_validations` | **S** | 8 / 2 | `insert_if_absent`（`backtest_validation.rs:764→783/814` 判重后跳写）/ `list` / `list_shadow_replay_samples` / `update_factor_snapshot` |
+| `mover_recall_runs` | **S** | 4 / 2 | `insert_run_snapshot`（**与 events 同事务**，`dao/src/repo/mover_recall_runs.rs:91`）/ `list_recent` / `fetch_run` / `update_asof_summary` / `latest_reco_run_asof` / `list_runs_since` |
+| `reco_pool_batches` | **S** | 2 / 5 | `insert_pool_batch` / `load_pool_batches` / `latest_live_pool_batch` |
+| `portfolio_holdings` | **M** | 3 / 5 | 宿主零引用；写点在 `analysis-engine/src/trading.rs`、`trade_import.rs`、`exit_recommend.rs` |
+| `trades` | **M** | 2 / 0 | `src-tauri` 内零写；真实写在 `analysis-engine/src/trading.rs:403`、`trade_import.rs:394` |
+| `mover_recall_events` | **M** | 14 / 9 | 宿主零引用（`init/services.rs` 仅注释命中） |
+| `workflow_param_changes` | **M** | 3 / 3 | 唯一文件就是 `stock_analysis.rs` |
+
+**五条配套裁定**（与 §64.10 同批，B4 直接照此实施）：
+1. **`astock-data` 留宿主**：它自己实现 `MarketDataProvider`（`axagent-quant/crates/astock-data/src/lib.rs:6641`）并由宿主注册为 `market.quote`；凭证不过线（§54.2 R2）⇒ 插件内的 `analysis-engine` 一律经 `MarketDataProvider` trait 取数，不得直接构造 `AStockClient`（B7 的活）。
+2. **`analysis-engine` 随股票插件**，其 `db()` 写口按 1:1 改接缝：`trades` 已有 `trading.engine` 六 op 承接；`portfolio_holdings` 的增删改需在 `trading.engine` 下补 `portfolio_*` op（不新开接缝名）。
+3. **`commands/evolution_proposal.rs` 判域内**（证据：`use axagent_analysis_engine::…` ×3 + `stock_evolution_history` / `stock_lesson_queries`，纯股票进化闭环）。⚠ **但不改 `audit-l1-blockers.mjs` 的 `ownedRe`** —— §54.2 R5 明令「不扩 ownedRe」；该文件随 B4 迁出后，指向它的反向阻塞引用会自然消失，届时读数再降。
+4. **宿主 cron → 域函数的两处反向调用**（`init/services.rs:2622` 荐股批次、`:5715` 财务快照回填）改为**插件自持调度**：manifest 声明 schedule，宿主定时器只发 tick 到 worker，不在宿主保留对域函数的调用。
+5. **六处跨表同成性必须合成单个 op**（拆开就会丢原子性）：`mover_recall_runs+events`（已有事务）、`financial_snapshots` 删窗+插、`price_alert` 查改写、`stock_evolution_approval` 取 latest→CAS→插 accepted→驳旧 accepted、`reco_picks+reco_scan_audit+reco_pool_batches`（现状已非原子，op 化至少别再加宽窗口）、`reflection` 抢占 running + 建行。
+
+**未做**：未改任何代码（B2 仍卡 `commands/stock_analysis.rs` 的并行批未提交改动）；未跑 `audit-l1-blockers.mjs`（本节只做归属与 op 清单，不重算桶读数）；`stock_management`/`reco_scan_audit` 等未被 §64.10 列出的表未纳入（待 B4 全量扫描再补）。

@@ -1156,6 +1156,17 @@ impl PluginManager {
         self.loaded_workers.get(plugin_id).is_some_and(LoadedPlugin::worker_is_running)
     }
 
+    /// 该插件的事件投递计数（任务 #135，B3「丢弃计数」的宿主侧读口）。
+    ///
+    /// 与 [`Self::plugin_worker_is_running`] 同一条取数链（都从 `loaded_workers` 现取，
+    /// 不另存一份），所以不会出现「探针说有、派发说没」。
+    /// `None` = 这个插件当前没有挂着的事件订阅（判据见
+    /// [`LoadedPlugin::event_stats`]）；未启用的插件同样返回 `None`。
+    #[must_use]
+    pub fn plugin_event_stats(&self, plugin_id: &str) -> Option<crate::worker::EventDeliveryStats> {
+        self.loaded_workers.get(plugin_id).and_then(LoadedPlugin::event_stats)
+    }
+
     /// 把插件声明的能力注册进能力注册表（P3 外部插件注册）。
     ///
     /// 以 `CapabilityOrigin::ExternalPlugin` 来源注册，返回失败的能力接缝列表

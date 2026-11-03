@@ -80,6 +80,8 @@ export const usePluginStore = create<PluginState>((set, get) => ({
             mcpServers: [],
             skills: [],
             commands: [],
+            // 刚装上、还没走一遍后端投影 ⇒ 计数未知（null），别拿 0 冒充「一条都没丢」。
+            eventStats: null,
           },
         ],
       }));

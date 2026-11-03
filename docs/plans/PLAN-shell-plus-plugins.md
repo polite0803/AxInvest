@@ -3275,3 +3275,63 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 **结论写死，不给后人留乐观数**：#35 的读数从「124 待改写」修正为「**45（O）+ 12（测试）+ 12（随本体迁出）+ 55（宿主真面）**」，而 55 里今天可机械换成 harness 垫片的**只有 1 处，已交付**。后续批次的验收应按这个拆法记，不再引用「B2 −6～−9」。
 
 **未做**：`plugins/stock/` 打包骨架（B4）未建；`screenshot_diagnosis` / `decision_gates` / `_shared_reco_pool` 的域归属只在文档裁定，`audit-l1-blockers.mjs` 与 `l1-host-owned-allowlist.json` 均未改（改了会让 124 这个可比读数失去连续性）。
+
+## 65. B3 交完剩余半：每订阅者超时兜底 + 两级丢弃计数（2026-11-04）
+
+§54.3 的 B3 = 「第四跳 + 每订阅者超时 + 丢弃计数」。第四跳已随宿主批交付（§55 / §57），本批补后两件。**先记一条被单测抓出来的缺陷**：第一轮 harness 单测 13 passed / 1 failed —— `waterfall_timeout_keeps_the_chain_running` 红，实测 `outcome.timed_out = 0`，根因是我在 Waterfall 分支只给订阅者计数（`entered/completed/timed_out`）加了账，**漏加派发汇总的 `timed_out`**；这一支漏了，调用方只看 `DispatchOutcome` 时「插件装死」与「插件表态继续」就不可区分。修在 `axagent-core/crates/harness/src/typed_event.rs:360`（`None => outcome.timed_out += 1`），复跑 14 passed / 0 failed。
+
+**交付面**（行号取盘上 `grep -n`，只认这一个给号引擎）：
+
+| 文件 | 行 | 内容 |
+|---|---|---|
+| `harness/src/typed_event.rs` | `:188` | `DEFAULT_SUBSCRIBER_TIMEOUT_MS = 60_000`（定位=**兜底**，见下「为什么不是 15 s」） |
+| 同上 | `:214` | `with_subscriber_timeout(Duration)`：测试与「宿主知道某条链更紧」的构造口 |
+| 同上 | `:237` | `subscribe_named(label, …)`：归因标签（插件事件桥用 plugin_id）；`subscribe()` 委派它，标签退化为 `sub-{id}` |
+| 同上 | `:280` | `subscriber_stats() -> Vec<SubscriberStats>`：`entered / completed / timed_out` + `label`，读口按当前订阅列 |
+| 同上 | `:307` | `invoke_one()`：进入前加 `entered`，返回后二选一加 `completed` / `timed_out` ⇒ `entered == completed + timed_out` 可对账 |
+| 同上 | `:346–383` | 四模式全部套超时；Emit/Serial 计 `timed_out`，Waterfall 超时按 `Continue` 继续问下一条，Parallel 逐条独立界定 |
+| `plugins/src/worker.rs` | `:4911` | `EventDeliveryCounters`：`delivered / dropped_serialize / dropped_invoke / dropped_unavailable / dropped_wait` |
+| 同上 | `:4942` / `:4958` | `EventDeliveryStats`（快照）+ `dropped_total()` |
+| 同上 | `:4967` / `:4983` | `WorkerEventSubscriber` 持计数句柄；投递失败**仍返回 `Continue`**（沿用「不因插件异常阻断宿主」的既有口径），但账记在桥侧 |
+| 同上 | `:5124` / `:5163` | `LoadedPlugin::event_stats()` 读口 + 订阅改走 `subscribe_named(plugin_id,…)`；计数由持有方留活口（总线快照随撤销句柄消失） |
+| `plugins/src/manager.rs` | `:1166` | `plugin_event_stats(plugin_id)`：与 `plugin_worker_is_running` 同一条取数链（都从 `loaded_workers` 现取） |
+| `src-tauri/src/commands/plugin.rs` | `:619` / `:629` / `:639` | `PluginSummaryDto.eventStats`（camelCase）+ `PluginEventStatsDto` + `From<EventDeliveryStats>` |
+| `src/types/index.ts` | `:2005` / `:2012` | `eventStats: PluginEventStatsDto | null` 与接口；`pluginStore` 乐观插入处补 `eventStats: null` |
+
+**两级计数为什么必须都有（本批的核心判据）**：总线那一层的 `timed_out` 只回答「订阅者连降级返回都没给」；插件投递失败时桥**照旧返回 `Continue`**，于是总线看到 `completed +1` 而事件其实没送达插件 ⇒ 只看总线会**高估投递成功**。所以按原因分桶的账记在桥侧，`bus_sees_completed_while_bridge_records_a_drop` 这条单测把两个数的差（completed=1 而 delivered=0）钉成断言。
+
+**为什么兜底取 60 s 而不是 15 s**：总线预算若**早于**内层预算到点，内层还在等帧、外层已判死 ⇒ `timed_out` 把「正常返回」与「仍在跑」混成一坨，两级计数从此不可对账。盘上内层事件帧的预算是 `DEFAULT_SEAM_TIMEOUT_MS = 15 s`，且任务 #73 M-3 之后「嵌套 `call_seam` 期间计时挂起」⇒ 一条事件合法地可能跑过 15 s。取 60 s 与宿主既有 `TOOL_SET_EXEC_TIMEOUT_MS` 同量级，并由单测 `subscriber_budget_is_a_backstop_above_the_inner_frame_budget` 锁住「必须 > 15 000」。
+
+**⚠ 刻意没做的事：不给 `ops::EVENT` 进 `SEAM_OP_TIMEOUT_OVERRIDES` 覆盖表。** 该表的收录判据写在 `axagent-core/crates/plugin-proto/src/lib.rs:424` 上方：「证据 = 盘上实测或有出处的宿主预算，『看起来快』不算」，且 `describe` 那条注释点名了不许为凑数进表。我手上**没有**事件投递的 op 级耗时实测，硬进表就是往判据里塞假证据 ⇒ EVENT 继续走 15 s 默认，状态与 `chat`/`embed`/`reflect` 那批一样标「预算待实证」。
+
+**验收（工作根 × 命令 × EXIT × 日志）**：
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| A1 | `cargo check -p axagent-harness --all-targets`（axagent-core） | 0 | `Finished` 1m14s |
+| A2 | `cargo clippy -p axagent-harness --all-targets -- -D warnings` | 0 | 首轮 1m43s；Waterfall 那行修完后复跑 **21m08s 仍 0**（`.tmp/b3-harness-clippy2.log`） |
+| A3 | `__TAURI_WORKSPACE__=true cargo test -p axagent-harness --lib typed_event` | 0 | 修前 **13 passed / 1 failed**，修后 **14 passed / 0 failed**（`.tmp/b3-harness-test2.log`） |
+| B1 | `cargo check -p axagent-plugins --all-targets`（axagent-plugins） | 0 | 1m27s |
+| B2 | `cargo clippy -p axagent-plugins --all-targets -- -D warnings` | 0 | Finished 9.79s |
+| B3 | `__TAURI_WORKSPACE__=true cargo test -p axagent-plugins --lib worker::` | 0 | **113 passed / 0 failed**，含新增 `event_bridge_counts_drops_by_reason`、`bus_sees_completed_while_bridge_records_a_drop` |
+| C1 | `cargo check -p axagent --lib`（src-tauri） | 0 | Finished **20m42s**（含 harness→plugins→主壳全链） |
+| C2 | `cargo clippy -p axagent --lib -- -D warnings` | **101（首轮红）** | `src\commands\plugin.rs:618` `doc_lazy_continuation`：`/// -` 列表项后的收束句没缩进 ⇒ 空一行成独立段落修掉；AGENTS.md 早就写过「改注释也会触发 lint」，这次是我自己撞的 |
+| D1 | `node scripts/check-monitor-event-authority.mjs --selftest` / 判定 | 0 / 0 | **81/81**，R1–R18 全绿（本批动的是派发总线，不在该门扫描面上，跑它是为了确认没顺手改坏事件权威） |
+| D2 | `rustfmt --edition 2024 --check`（4 个 Rust 文件） | 0 | 零 diff |
+| E0 | `node node_modules/oxlint/bin/oxlint src/types/index.ts src/stores/feature/pluginStore.ts --max-warnings=0` | 0 | 0 warnings / 0 errors（96 规则） |
+| E1 | `node scripts/check-contracts.mjs` | 0 | errors=0 warnings=0 ⇒ `plugin_list` 的 DTO 扩字段未破命令契约 |
+| E2 | `node scripts/vitest-run.mjs run src/components/plugin`（**cwd 必须是盘符路径** `/d/OneManager/AxInvest`） | 0 | **4 文件 / 54 passed**，含 `PluginPageHost` 19 条 |
+| E3 | 股票反向阻塞读数 | — | `node scripts/audit-l1-blockers.mjs` ⇒ **123 处 / 22 文件**，与 §64.14 交付后逐字相同 ⇒ 本批不触域 crate；快照 `AUDIT-l1-blockers-2026-11-04-0422.md` |
+
+⚠ **`#111` 的修复还差一角，本批实测到**：从 UNC 目录（`//vmware-host/…`）起 `node scripts/vitest-run.mjs run <某文件>` 会报 `No test files found` —— root 落在 UNC 坐标、filter 按相对路径匹配不上；把 cwd 换成盘符镜像（`/d/OneManager/AxInvest`）后同一命令立刻命中。**全量跑（不带过滤器）两种 cwd 都能过**，所以这条只在「定点跑某个测试文件」时咬人 ⇒ 记 **#137**。
+
+**#35 的批次状态**：B1 ✅ / B2 ✅（三接缝 + 权威收口）/ **B3 ✅（本批，含第四跳）** ⇒ 下一个可开工的是 **B4 打包骨架**；B3 是 §54.3 明写的 B6 安全前提，现已解除。
+
+**一条与本批无关但挡住提交的环境缺陷（已修）**：pre-commit 的 `check-line-endings.mjs` 把 **gitignore 的 `.tmp/` 也扫了**，并行会话刚在 `.tmp/` 落了 `refs-dump.txt`（纯 CRLF）与 `ingest-upstream.ps1`（LF）⇒ 一笔与它们毫无关系的提交被拒（`git add` 的九个文件逐字节数 CR 全为 0，实测见 `ALL_LF=0`）。修法不是绕钩子，是把 `.tmp` 加进脚本的 `EXCLUDED_DIRS`（`.gitignore:141` 已声明 `/.tmp/` 不入库 ⇒ 它的行尾不可能污染仓库；且原状下 `--fix` 会去改写**别人正在用**的脚本）。顺手记一条纪律：**数 CR 用 `node` 读字节，不要用 `grep -c $'\r'`**（SMB/UNC 下会给假值，本仓已栽过）。
+
+**未做（逐条点名，不写「后续再议」）**：
+1. **UI 未渲染 `eventStats`**：数据链已接到宿主命令与 TS 类型，插件列表页看不见这六个数 ⇒ 需要 11 语言文案 + 面板改动，记 **B3-c**。
+2. **脏闸后的历史计数不保留**：`subscriber_stats()` 只列当前订阅；插件停用后「生前吞了多少事件」要靠 `plugin_event_stats` 在卸载前取走，今天没有做「卸载时落一份历史」的动作。
+3. **panic 不在管辖内**：`tokio::time::timeout` 不接 panic；订阅者 panic 会击穿派发任务（本批既不修也不假装修，判据写在 `SubscriptionCounters` 注释里）。
+4. **EVENT 的 op 级耗时实测**：没有实测 ⇒ 覆盖表不进（见上），需要一次真帧往返测量再裁。
+5. **第五道门的两条读数漂移未登记**（本批不混做，另立）：`l1ForeignStock` 登记 134 / 实测 **133**（差 −1 = §64.14 那刀 `services.rs`）、`frontendFileCaliber` 登记 84 873 / 实测 **84 874**（差 +1 = #105 在 `src/types/stock-analysis.ts` 加的注释行）。另有 9 条 `钉句 PLAN:n 不符` 与 1 条 `[ALSOAT-STALE]` 是**并行的文档打标批**在 `docs/plans/PLAN-shell-plus-plugins.md` 头部插了 3 行导致的全局行号漂移，不是内容错，归该批落地后统一 `--repin-plan`。⚠ 本批的 PLAN 追加**不含**那 3 行头部（提交只带我自己的 hunk），所以这些行号按 HEAD 坐标对账。

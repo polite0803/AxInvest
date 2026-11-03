@@ -1000,8 +1000,8 @@ pub use event_bus::{DomainEvent, EventBus, EventBusSubscription, EventCategory};
 // P2 类型化事件派发总线（四派发模式 + 订阅裁决，见 typed_event.rs）。
 pub mod typed_event;
 pub use typed_event::{
-    DispatchMode, DispatchOutcome, EventDispatchBus, EventMatcher, EventSubscriber,
-    SubscriberVerdict,
+    DEFAULT_SUBSCRIBER_TIMEOUT_MS, DispatchMode, DispatchOutcome, EventDispatchBus, EventMatcher,
+    EventSubscriber, SubscriberStats, SubscriberVerdict,
 };
 
 // ── Fleet 多办公室 AI 团队契约 ──

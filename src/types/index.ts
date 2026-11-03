@@ -1998,6 +1998,24 @@ export interface PluginSummaryDto {
   skills: string[];
   /** 插件声明的命名命令（阶段3-① 执行分发的可见面）。 */
   commands: { name: string; description: string }[];
+  /**
+   * 事件投递计数（B3「丢弃计数」）。
+   * `null` = 该插件当前没有挂着的事件订阅；与「全零」不同义（零 = 挂着但一条事件都没来）。
+   */
+  eventStats: PluginEventStatsDto | null;
+}
+
+/**
+ * 插件事件投递计数，与 `axagent_plugins::worker::EventDeliveryStats` 对齐。
+ * `droppedUnavailable` 是 `droppedInvoke` 的**子集**（脏闸拒单那一类），不参与 `droppedTotal` 求和。
+ */
+export interface PluginEventStatsDto {
+  delivered: number;
+  droppedTotal: number;
+  droppedSerialize: number;
+  droppedInvoke: number;
+  droppedUnavailable: number;
+  droppedWait: number;
 }
 
 export interface PluginManifestDto {

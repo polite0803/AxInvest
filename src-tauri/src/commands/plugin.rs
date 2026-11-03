@@ -21,21 +21,30 @@ pub async fn plugin_list(state: State<'_, AppState>) -> Result<Vec<PluginSummary
             .map(|plugins| {
                 plugins
                     .into_iter()
-                    .map(|p| PluginSummaryDto {
-                        id: p.metadata.id,
-                        name: p.metadata.name,
-                        version: p.metadata.version,
-                        description: p.metadata.description,
-                        kind: p.metadata.kind.to_string(),
-                        enabled: p.enabled,
-                        tools: p.tool_names,
-                        mcp_servers: p.mcp_server_names,
-                        skills: p.skill_names,
-                        commands: p
-                            .commands
-                            .into_iter()
-                            .map(|c| PluginCommandDto { name: c.name, description: c.description })
-                            .collect(),
+                    .map(|p| {
+                        let id = p.metadata.id.clone();
+                        let event_stats =
+                            manager.plugin_event_stats(&id).map(PluginEventStatsDto::from);
+                        PluginSummaryDto {
+                            id,
+                            name: p.metadata.name,
+                            version: p.metadata.version,
+                            description: p.metadata.description,
+                            kind: p.metadata.kind.to_string(),
+                            enabled: p.enabled,
+                            tools: p.tool_names,
+                            mcp_servers: p.mcp_server_names,
+                            skills: p.skill_names,
+                            commands: p
+                                .commands
+                                .into_iter()
+                                .map(|c| PluginCommandDto {
+                                    name: c.name,
+                                    description: c.description,
+                                })
+                                .collect(),
+                            event_stats,
+                        }
                     })
                     .collect()
             })
@@ -603,6 +612,45 @@ pub struct PluginSummaryDto {
     pub skills: Vec<String>,
     /// 插件声明的命名命令（阶段3-① 执行分发的可见面，`PLAN-plugin-gap-closure.md` §2）。
     pub commands: Vec<PluginCommandDto>,
+    /// 事件投递计数（任务 #135，B3「丢弃计数」的可见面）。
+    ///
+    /// `None` 与「全零」是两种状态，处置动作不同：
+    /// - `None` ⇒ 这个插件**当前没有挂着的事件订阅**（未声明 `event.dispatch`、
+    ///   声明了但装载时总线尚未注册、或插件根本没启用）；
+    /// - `Some{delivered:0, 各 dropped:0}` ⇒ 订阅挂着，只是一条事件还没来。
+    ///
+    /// 判据与 `PluginManager::plugin_event_stats` 逐字同源，不在命令层另立。
+    pub event_stats: Option<PluginEventStatsDto>,
+}
+
+/// [`axagent_plugins::worker::EventDeliveryStats`] 的线上形状。
+///
+/// `dropped_total` 是 `serialize + invoke + wait` 三桶之和；`dropped_unavailable`
+/// 是 `dropped_invoke` 的**子集**（脏闸拒单那一类），所以它**不参与**求和，
+/// 前端把它加进总数会算出两倍丢弃。
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginEventStatsDto {
+    pub delivered: u64,
+    pub dropped_total: u64,
+    pub dropped_serialize: u64,
+    pub dropped_invoke: u64,
+    /// `dropped_invoke` 的子集：连接脏闸拒单（处置=禁用再启用该插件）。
+    pub dropped_unavailable: u64,
+    pub dropped_wait: u64,
+}
+
+impl From<axagent_plugins::worker::EventDeliveryStats> for PluginEventStatsDto {
+    fn from(s: axagent_plugins::worker::EventDeliveryStats) -> Self {
+        Self {
+            delivered: s.delivered,
+            dropped_total: s.dropped_total(),
+            dropped_serialize: s.dropped_serialize,
+            dropped_invoke: s.dropped_invoke,
+            dropped_unavailable: s.dropped_unavailable,
+            dropped_wait: s.dropped_wait,
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize)]

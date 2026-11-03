@@ -4899,6 +4899,67 @@ impl ContextContributor for RemoteContextContributor {
 
 // ───────────────────────── L1 事件桥 ─────────────────────────
 
+/// 一个插件的**事件投递计数**（内部可变体，B3「丢弃计数」的插件侧落点）。
+///
+/// 为什么计在桥这一侧而不是只靠总线：总线看到的「订阅者正常返回 `Continue`」在这里
+/// 可能是「帧没发出去 / 对端回了错 / 内层预算到点」——桥一律降级成 `Continue`
+/// （「不因插件异常阻断宿主」的既有口径），于是**总线的 `completed` 会 +1，而事件其实没送达插件**。
+/// 两级计数各管一段，缺一个就会互相指错：
+/// - 总线 `timed_out`：订阅者连降级返回都没给（真装死）；
+/// - 本结构 `dropped_*`：给了返回，但返回是假的 `Continue`（投递失败）。
+#[derive(Debug, Default)]
+struct EventDeliveryCounters {
+    /// 事件过帧成功且拿到裁决。
+    delivered: AtomicU64,
+    /// payload 序列化失败 ⇒ 没发帧。
+    dropped_serialize: AtomicU64,
+    /// 调用面返回 `Err`（对端回错、transport、drain 拒单等）。
+    dropped_invoke: AtomicU64,
+    /// 其中「连接已被脏闸拒」的那些（`SEAM_PROVIDER_UNAVAILABLE` 前缀）。
+    ///
+    /// 单列一个数而不是并进 `dropped_invoke`：脏闸一旦落下，**后续每一条事件都会
+    /// 走到这里**，读数会一路疯涨。看到 `dropped_unavailable` 在涨就知道处置动作是
+    /// 「禁用再启用该插件」，而不是「插件最近老出错」。
+    dropped_unavailable: AtomicU64,
+    /// 等待裁决本身失败（`spawn_blocking` 的 join 错误，如任务被拒）。
+    dropped_wait: AtomicU64,
+}
+
+impl EventDeliveryCounters {
+    fn snapshot(&self) -> EventDeliveryStats {
+        EventDeliveryStats {
+            delivered: self.delivered.load(Ordering::Acquire),
+            dropped_serialize: self.dropped_serialize.load(Ordering::Acquire),
+            dropped_invoke: self.dropped_invoke.load(Ordering::Acquire),
+            dropped_unavailable: self.dropped_unavailable.load(Ordering::Acquire),
+            dropped_wait: self.dropped_wait.load(Ordering::Acquire),
+        }
+    }
+}
+
+/// 事件投递计数快照（对外可读形态，供诊断面 / 测试断言用）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct EventDeliveryStats {
+    /// 成功投递并拿到裁决的条数。
+    pub delivered: u64,
+    /// 因 payload 序列化失败丢弃的条数（没发帧）。
+    pub dropped_serialize: u64,
+    /// 因调用面返回错误丢弃的条数（含 [`Self::dropped_unavailable`]）。
+    pub dropped_invoke: u64,
+    /// 其中因连接脏闸被拒的条数。
+    pub dropped_unavailable: u64,
+    /// 因等待任务本身失败丢弃的条数。
+    pub dropped_wait: u64,
+}
+
+impl EventDeliveryStats {
+    /// 丢弃总数 —— 判据面上「这个插件吞了多少事件」的那一个数。
+    #[must_use]
+    pub fn dropped_total(&self) -> u64 {
+        self.dropped_serialize + self.dropped_invoke + self.dropped_wait
+    }
+}
+
 /// 把 worker 接上 `EventDispatchBus`：宿主收到事件时转发给插件，并把插件裁决送回总线。
 ///
 /// 插件因此可以**订阅并改写 / 拒绝**事件（`DispatchMode::Waterfall`），
@@ -4906,11 +4967,21 @@ impl ContextContributor for RemoteContextContributor {
 struct WorkerEventSubscriber {
     plugin_id: String,
     invoker: Arc<dyn SeamInvoker>,
+    counters: Arc<EventDeliveryCounters>,
 }
 
 impl WorkerEventSubscriber {
     fn new(plugin_id: impl Into<String>, invoker: Arc<dyn SeamInvoker>) -> Self {
-        Self { plugin_id: plugin_id.into(), invoker }
+        Self {
+            plugin_id: plugin_id.into(),
+            invoker,
+            counters: Arc::new(EventDeliveryCounters::default()),
+        }
+    }
+
+    /// 计数句柄（与 [`Self::counters`] 字段同名，但本方法给的是可克隆的 `Arc`）。
+    fn delivery_counters(&self) -> Arc<EventDeliveryCounters> {
+        self.counters.clone()
     }
 }
 
@@ -4920,6 +4991,7 @@ impl EventSubscriber for WorkerEventSubscriber {
         let args = match serde_json::to_value(event) {
             Ok(value) => value,
             Err(e) => {
+                self.counters.dropped_serialize.fetch_add(1, Ordering::AcqRel);
                 tracing::warn!(plugin_id = %self.plugin_id, error = %e, "事件序列化失败，跳过该订阅者");
                 return SubscriberVerdict::Continue;
             },
@@ -4931,12 +5003,21 @@ impl EventSubscriber for WorkerEventSubscriber {
         let chain = current_call_chain();
         match tokio::task::spawn_blocking(move || invoker.invoke_with_chain(&op, args, chain)).await
         {
-            Ok(Ok(value)) => verdict_from_value(&value),
+            Ok(Ok(value)) => {
+                self.counters.delivered.fetch_add(1, Ordering::AcqRel);
+                verdict_from_value(&value)
+            },
             Ok(Err(e)) => {
+                // 脏闸拒单（前缀即协议码）与「插件真回了错」是两种处置，分开记。
+                if e.starts_with(error_codes::SEAM_PROVIDER_UNAVAILABLE) {
+                    self.counters.dropped_unavailable.fetch_add(1, Ordering::AcqRel);
+                }
+                self.counters.dropped_invoke.fetch_add(1, Ordering::AcqRel);
                 tracing::warn!(%plugin_id, error = %e, "插件事件处理失败，按继续处理");
                 SubscriberVerdict::Continue
             },
             Err(e) => {
+                self.counters.dropped_wait.fetch_add(1, Ordering::AcqRel);
                 tracing::warn!(%plugin_id, error = %e, "等待插件事件裁决失败，按继续处理");
                 SubscriberVerdict::Continue
             },
@@ -4967,6 +5048,12 @@ pub struct LoadedPlugin {
     declaration: PluginDeclaration,
     invoker: Arc<WorkerInvoker>,
     handles: Vec<EffectHandle>,
+    /// 事件投递计数（仅当事件订阅真的挂上了才非 `None`）。
+    ///
+    /// 为什么由 `LoadedPlugin` 持有而不是只留在订阅者里：总线快照随撤销句柄一起消失，
+    /// 卸载后「这个插件生前吞了多少事件」就读不到了。计数活口归持有方，
+    /// 由 [`Self::event_stats`] 在卸载前取走。
+    event_counters: Option<Arc<EventDeliveryCounters>>,
 }
 
 impl LoadedPlugin {
@@ -5019,11 +5106,23 @@ impl LoadedPlugin {
             }
         }
 
-        let mut loaded = Self { plugin_id, declaration, invoker, handles };
-        if let Some(handle) = loaded.event_subscription(registry) {
+        let mut loaded = Self { plugin_id, declaration, invoker, handles, event_counters: None };
+        if let Some((handle, counters)) = loaded.event_subscription(registry) {
             loaded.handles.push(handle);
+            loaded.event_counters = Some(counters);
         }
         Ok(loaded)
+    }
+
+    /// 该插件的事件投递计数快照（B3「丢弃计数」的对外读口）。
+    ///
+    /// `None` 的两种形态与 [`Self::event_subscription`] 的返回条件逐字一致：
+    /// 没声明 `event.dispatch`，或声明了但装载时总线还没注册。
+    /// **不是**「计数为零」—— 零投递是 `Some(EventDeliveryStats::default())`，
+    /// 读侧要能把「没挂订阅」与「挂了但一条没收到」分开说，这两个数的处置动作不同。
+    #[must_use]
+    pub fn event_stats(&self) -> Option<EventDeliveryStats> {
+        self.event_counters.as_ref().map(|c| c.snapshot())
     }
 
     /// 插件声明（握手所得）。
@@ -5058,7 +5157,13 @@ impl LoadedPlugin {
     }
 
     /// 构造 L1 事件订阅句柄（声明里含 `event.dispatch` 时才返回 `Some`）。
-    fn event_subscription(&self, registry: &CapabilityRegistry) -> Option<EffectHandle> {
+    ///
+    /// 一并返回计数句柄：订阅者本体随 `Arc<dyn EventSubscriber>` 交给总线，
+    /// 宿主这边若不留 `Arc<EventDeliveryCounters>`，卸载后就再没人能读出「吞了多少」。
+    fn event_subscription(
+        &self,
+        registry: &CapabilityRegistry,
+    ) -> Option<(EffectHandle, Arc<EventDeliveryCounters>)> {
         if !self.declaration.subscribe.iter().any(|s| s == "event.dispatch") {
             return None;
         }
@@ -5070,9 +5175,14 @@ impl LoadedPlugin {
             );
             return None;
         };
-        let subscriber: Arc<dyn EventSubscriber> =
-            Arc::new(WorkerEventSubscriber::new(self.plugin_id.clone(), self.invoker.clone()));
-        Some(bus.subscribe(EventMatcher::any(), subscriber))
+        let subscriber = WorkerEventSubscriber::new(self.plugin_id.clone(), self.invoker.clone());
+        let counters = subscriber.delivery_counters();
+        let handle = bus.subscribe_named(
+            &self.plugin_id,
+            EventMatcher::any(),
+            Arc::new(subscriber) as Arc<dyn EventSubscriber>,
+        );
+        Some((handle, counters))
     }
 
     /// 卸载：drain 优雅收尾（PLAN §13.3）→ **逆序**撤销全部可逆句柄（LIFO，见模块头注释）
@@ -5120,6 +5230,7 @@ impl std::fmt::Debug for LoadedPlugin {
             .field("plugin_id", &self.plugin_id)
             .field("capabilities", &self.declaration.capabilities.len())
             .field("handles", &self.handles.len())
+            .field("event_stats", &self.event_stats())
             .finish()
     }
 }
@@ -5725,6 +5836,90 @@ mod tests {
             "插件裁决的 payload 应被总线采纳"
         );
         assert!(!outcome.rejected);
+    }
+
+    /// 固定回错的测试替身：`message` 原样作为 `Err` 返回（用来分reason计数）。
+    struct FailingInvoker {
+        message: String,
+    }
+
+    impl SeamInvoker for FailingInvoker {
+        fn invoke(&self, _op: &str, _args: Value) -> Result<Value, String> {
+            Err(self.message.clone())
+        }
+    }
+
+    fn bridge_event() -> DomainEvent {
+        DomainEvent::new(EventCategory::Workflow, "NodeStarted", json!({ "n": 1 }), "rt-workflow")
+    }
+
+    /// 桥按**原因**分桶计数：成功投递 / 调用回错 / 脏闸拒单，三者不能混成一个数。
+    #[tokio::test]
+    async fn event_bridge_counts_drops_by_reason() {
+        // ① 正常投递。
+        let ok = WorkerEventSubscriber::new(
+            "demo@external",
+            Arc::new(ScriptedInvoker::new(&[(ops::EVENT, json!({ "verdict": "continue" }))])),
+        );
+        ok.handle(&bridge_event()).await;
+        assert_eq!(
+            ok.delivery_counters().snapshot(),
+            EventDeliveryStats { delivered: 1, ..Default::default() },
+            "过帧成功只该动 delivered"
+        );
+
+        // ② 调用面回错（未脚本化）。
+        let failed =
+            WorkerEventSubscriber::new("demo@external", Arc::new(ScriptedInvoker::new(&[])));
+        failed.handle(&bridge_event()).await;
+        let s = failed.delivery_counters().snapshot();
+        assert_eq!((s.delivered, s.dropped_invoke, s.dropped_unavailable), (0, 1, 0));
+        assert_eq!(s.dropped_total(), 1, "丢弃总数按 reason 桶相加");
+
+        // ③ 脏闸拒单：既进 `dropped_invoke`（它确实是一次 invoke 失败），
+        //    也进 `dropped_unavailable`（子集，用于指认处置动作）—— 口径要在测试里钉住，
+        //    否则读侧会把两个桶相加算出「两倍丢弃」。
+        let gated = WorkerEventSubscriber::new(
+            "demo@external",
+            Arc::new(FailingInvoker {
+                message: format!("{}: 连接已视为不可用", error_codes::SEAM_PROVIDER_UNAVAILABLE),
+            }),
+        );
+        gated.handle(&bridge_event()).await;
+        let s = gated.delivery_counters().snapshot();
+        assert_eq!(
+            (s.dropped_invoke, s.dropped_unavailable, s.dropped_total()),
+            (1, 1, 1),
+            "dropped_unavailable 是 dropped_invoke 的子集，不是第四路丢弃"
+        );
+    }
+
+    /// 两级计数的分工（本批改动的核心判据）：
+    /// 插件侧投递失败时，桥**仍要返回 `Continue`**（不因插件异常阻断宿主），
+    /// 于是总线那侧看到的是「正常完成」，`timed_out` 为 0。
+    ///
+    /// 反过来说明为什么两级都要有：**只看总线会把投递成功高估**（这里 completed=1 而
+    /// delivered=0），**只看桥则不知道订阅者是否真装死**。
+    #[tokio::test]
+    async fn bus_sees_completed_while_bridge_records_a_drop() {
+        let bus = EventDispatchBus::new();
+        let subscriber =
+            WorkerEventSubscriber::new("demo@external", Arc::new(ScriptedInvoker::new(&[])));
+        let counters = subscriber.delivery_counters();
+        let _h = bus.subscribe_named("demo@external", EventMatcher::any(), Arc::new(subscriber));
+
+        let mut event = bridge_event();
+        let outcome = bus.dispatch(&mut event, DispatchMode::Emit).await;
+
+        assert_eq!((outcome.invoked, outcome.timed_out), (1, 0), "总线视角：订阅者正常返回了");
+        let stats = bus.subscriber_stats();
+        assert_eq!(
+            (stats[0].completed, stats[0].timed_out, stats[0].label.as_str()),
+            (1, 0, "demo@external"),
+            "归因标签取 plugin_id，计数按条累加"
+        );
+        assert_eq!(counters.snapshot().delivered, 0, "桥视角：一条也没真送到插件");
+        assert_eq!(counters.snapshot().dropped_invoke, 1);
     }
 
     // ─────────────────── P4：环检测 / 深度 / 声明 / 配对 ───────────────────

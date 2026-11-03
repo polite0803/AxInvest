@@ -14,9 +14,7 @@ use axagent_agent::recovery_strategies::{ClassifiedError, ErrorClassifier, Error
 use axagent_agent::recovery_strategies::{RecoveryAttempt, RecoveryResult, RecoveryStrategy};
 use axagent_agent::thought_chain::Action;
 use axagent_agent::thought_chain::ThoughtChain;
-use axagent_agent::tree_of_thoughts::{
-    TotReasoningProvider, ThoughtStatus, TreeOfThoughtsEngine,
-};
+use axagent_agent::tree_of_thoughts::{ThoughtStatus, TotReasoningProvider, TreeOfThoughtsEngine};
 use axagent_harness::core_error::AxAgentError;
 use std::sync::Arc;
 use std::time::Duration;

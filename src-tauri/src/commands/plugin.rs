@@ -702,11 +702,11 @@ fn plugin_command_error_response(
     match error {
         // 预算耗尽、结果未回：**不等于取消**，worker 可能仍在跑完（副作用已发生），
         // 故归默认 `general`，不引导自动重试；仅在调用方确认命令幂等后才可重试。
-        PluginError::CommandTimeout(_) => ErrorResponse::new(common::TIMEOUT)
-            .with_category(ErrorCategory::General)
-            .with_detail(format!(
-                "{detail}；超时不等于取消：插件可能仍在执行，重试可能导致副作用重复"
-            )),
+        PluginError::CommandTimeout(_) => {
+            ErrorResponse::new(common::TIMEOUT).with_category(ErrorCategory::General).with_detail(
+                format!("{detail}；超时不等于取消：插件可能仍在执行，重试可能导致副作用重复"),
+            )
+        },
         // 授权门槛拒绝：引导用户核对插件权限声明，不重试。
         PluginError::PermissionDenied(_) => ErrorResponse::new(common::INTERNAL)
             .with_category(ErrorCategory::PermissionDenied)

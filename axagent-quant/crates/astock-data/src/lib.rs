@@ -7278,11 +7278,7 @@ impl axagent_harness::market_data::MarketDataProvider for AStockClient {
                 items: rows
                     .into_iter()
                     .map(|(code, name, industry)| {
-                        axagent_harness::stock_market_types::MarketListItem {
-                            code,
-                            name,
-                            industry,
-                        }
+                        axagent_harness::stock_market_types::MarketListItem { code, name, industry }
                     })
                     .collect(),
                 total,

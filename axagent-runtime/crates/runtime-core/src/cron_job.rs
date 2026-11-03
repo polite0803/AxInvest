@@ -975,15 +975,15 @@ impl JobStoreProvider for CronJobStore {
         Ok(jobs)
     }
 
-    async fn get_job(
-        &self,
-        id: &str,
-    ) -> axagent_harness::core_error::Result<Option<CronJobView>> {
+    async fn get_job(&self, id: &str) -> axagent_harness::core_error::Result<Option<CronJobView>> {
         Ok(self.get(id).await.as_ref().map(view_of))
     }
 
     /// 计数基于 `list()` 快照，与 `list_jobs(task_type, false)` 的口径一致。
-    async fn count_jobs(&self, task_type: Option<&str>) -> axagent_harness::core_error::Result<u64> {
+    async fn count_jobs(
+        &self,
+        task_type: Option<&str>,
+    ) -> axagent_harness::core_error::Result<u64> {
         let count = self
             .list()
             .await

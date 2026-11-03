@@ -1768,12 +1768,13 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         // 插件订阅者挂的就是它。另造一个 bus 会「注册成功但插件永远收不到事件」。
         match axagent_harness::get_capability_registry().get_event_dispatcher() {
             Some(dispatcher) => {
-                let workflow_run: Arc<dyn axagent_harness::WorkflowRunProvider> =
-                    Arc::new(crate::commands::stock_workflow::workflow_run_service::WorkflowRunService::new(
+                let workflow_run: Arc<dyn axagent_harness::WorkflowRunProvider> = Arc::new(
+                    crate::commands::stock_workflow::workflow_run_service::WorkflowRunService::new(
                         work_engine.clone(),
                         Arc::new(sea_db.clone()),
                         dispatcher,
-                    ));
+                    ),
+                );
                 match axagent_harness::get_capability_registry().register_workflow_run(workflow_run)
                 {
                     Ok(_) => tracing::info!("workflow.run 接缝已注册 (BuiltIn)"),

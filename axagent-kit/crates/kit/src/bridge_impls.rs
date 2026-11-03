@@ -3,8 +3,8 @@
 //! Harness bridge trait implementations for kit service structs.
 
 use axagent_harness::kit_bridge::{
-    KitHtmlCleaner, KitMarkdownParser, KitSkillDirs, KitTokenBudgetDecision,
-    KitTokenBudgetTracker, MdParsedFrontmatter, MdParsedLink, MdParsedNote,
+    KitHtmlCleaner, KitMarkdownParser, KitSkillDirs, KitTokenBudgetDecision, KitTokenBudgetTracker,
+    MdParsedFrontmatter, MdParsedLink, MdParsedNote,
 };
 
 // ── MarkdownParser ────────────────────────────────────────────

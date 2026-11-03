@@ -4797,11 +4797,10 @@ fn start_trajectory_cleanup(state: &AppState) {
     // 未就绪伪装成空库）。未注册的真表现是分派层取不到 provider ⇒ `SEAM_PROVIDER_UNAVAILABLE`。
     // 失败只 warn，不阻断启动。
     {
-        let provider: Arc<dyn axagent_harness::TrajectoryStoreProvider> = Arc::new(
-            crate::commands::trajectory_store_service::HostTrajectoryStore::new(
+        let provider: Arc<dyn axagent_harness::TrajectoryStoreProvider> =
+            Arc::new(crate::commands::trajectory_store_service::HostTrajectoryStore::new(
                 trajectory_storage.clone(),
-            ),
-        );
+            ));
         match axagent_harness::get_capability_registry().register_trajectory_store(provider) {
             Ok(_) => tracing::info!("trajectory.store 接缝已注册 (BuiltIn)"),
             Err(e) => tracing::warn!("trajectory.store 注册失败: {e}"),
@@ -4913,14 +4912,13 @@ fn start_index_job_service(app: &tauri::AppHandle, state: &AppState) {
     // 真没注册上时，接缝上的表现是分派层取不到 provider ⇒ `SEAM_PROVIDER_UNAVAILABLE`。
     // 失败只 warn，不阻断启动（与 jobs.store / workflow.run / trading.engine 同策略）。
     {
-        let provider: Arc<dyn axagent_harness::KnowledgeVectorProvider> = Arc::new(
-            crate::commands::knowledge_vector_service::HostKnowledgeVector::new(
+        let provider: Arc<dyn axagent_harness::KnowledgeVectorProvider> =
+            Arc::new(crate::commands::knowledge_vector_service::HostKnowledgeVector::new(
                 Arc::new(db.clone()),
                 vector_store.clone(),
                 master_key,
                 state.harness.provider_registry().clone(),
-            ),
-        );
+            ));
         match axagent_harness::get_capability_registry().register_knowledge_vector(provider) {
             Ok(_) => tracing::info!("knowledge.vector 接缝已注册 (BuiltIn)"),
             Err(e) => tracing::warn!("knowledge.vector 注册失败: {e}"),

@@ -950,6 +950,7 @@ macro_rules! register_all_commands {
             commands::plugin::plugin_execute_command,
             commands::plugin::plugin_install,
             commands::plugin::plugin_list,
+            commands::plugin::plugin_list_pages,
             commands::plugin::plugin_read_panel_asset,
             commands::plugin::plugin_resolve_page_asset,
             commands::plugin::plugin_source_audit,

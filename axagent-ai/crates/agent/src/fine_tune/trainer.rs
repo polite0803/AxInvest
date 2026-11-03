@@ -27,7 +27,21 @@ pub struct BuiltInTrainingConfig {
     /// Validation frequency (every N steps).
     pub val_every_n_steps: u32,
     /// Output directory for trained LoRA weights.
+    ///
+    /// ⚠ 落点必须与进程 CWD 无关：这里曾写成 `./fine_tuned_models`，同一个仓库里因此
+    /// 撞到过两个产物目录（`crates/agent/fine_tuned_models/` 345 批与仓库根的 3 批），
+    /// 且与宿主 `commands/fine_tune.rs` 的 `~/.axagent/fine_tune/adapters` 不是同一处。
     pub output_dir: PathBuf,
+}
+
+/// 默认产物目录 = `~/.axagent/fine_tune/models`，与宿主 `FINE_TUNE_DIR` 同根；
+/// 回退形态与 `personality.rs` 的 `PERSONALITIES_DIR` 逐字一致（无 home 时落在 `./.axagent/…`）。
+fn default_output_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".axagent")
+        .join("fine_tune")
+        .join("models")
 }
 
 impl Default for BuiltInTrainingConfig {
@@ -36,7 +50,7 @@ impl Default for BuiltInTrainingConfig {
             steps_per_epoch: 100,
             warmup_steps: 10,
             val_every_n_steps: 20,
-            output_dir: PathBuf::from("./fine_tuned_models"),
+            output_dir: default_output_dir(),
         }
     }
 }
@@ -925,6 +939,19 @@ mod tests {
     use super::*;
     use crate::fine_tune::dataset::{FineTuneSample, SampleMetadata};
 
+    /// 测试专用：把产物目录显式钉到临时目录。
+    ///
+    /// 默认落点改成 `~/.axagent/fine_tune/models` 之后，测试若继续吃默认值，
+    /// 每跑一次就往用户数据目录写一批 adapter ⇒ 必须自带隔离目录。
+    fn trainer_with_temp_output() -> (FineTuneTrainer, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("axagent_ft_out_{}", uuid::Uuid::new_v4()));
+        let trainer = FineTuneTrainer::new().with_built_in_config(BuiltInTrainingConfig {
+            output_dir: dir.clone(),
+            ..BuiltInTrainingConfig::default()
+        });
+        (trainer, dir)
+    }
+
     fn make_sample(id: &str, input: &str, output: &str) -> FineTuneSample {
         FineTuneSample {
             id: id.to_string(),
@@ -976,7 +1003,7 @@ mod tests {
 
     #[test]
     fn test_fine_tune_trainer_start_training_does_full_pipeline() {
-        let mut trainer = FineTuneTrainer::new();
+        let (mut trainer, out_dir) = trainer_with_temp_output();
         let job =
             trainer.create_job("ds1".to_string(), "model1".to_string(), LoRAConfig::default());
         let result = trainer.start_training(&job.id);
@@ -989,16 +1016,23 @@ mod tests {
         assert_eq!(found.status, JobStatus::Completed);
         assert!(found.metrics.final_loss.is_some());
         assert!(found.metrics.best_loss.is_some());
+        assert!(
+            std::path::Path::new(&training_result.output_lora_path).starts_with(&out_dir),
+            "产物必须落进配置的 output_dir，实测：{}",
+            training_result.output_lora_path
+        );
+        let _ = std::fs::remove_dir_all(&out_dir);
     }
 
     #[test]
     fn test_fine_tune_trainer_start_training_non_pending() {
-        let mut trainer = FineTuneTrainer::new();
+        let (mut trainer, out_dir) = trainer_with_temp_output();
         let job =
             trainer.create_job("ds1".to_string(), "model1".to_string(), LoRAConfig::default());
         trainer.start_training(&job.id).expect("测试：start_training 应成功");
         // Job is now Completed — restart should fail
         let result = trainer.start_training(&job.id);
+        let _ = std::fs::remove_dir_all(&out_dir);
         assert!(result.is_err());
     }
 
@@ -1164,7 +1198,7 @@ mod tests {
 
     #[test]
     fn test_training_callback_fires() {
-        let mut trainer = FineTuneTrainer::new();
+        let (mut trainer, out_dir) = trainer_with_temp_output();
         let called = std::sync::Arc::new(parking_lot::Mutex::new(false));
         let called_clone = called.clone();
         trainer.set_callback(Box::new(move |status| {
@@ -1178,5 +1212,24 @@ mod tests {
             trainer.create_job("ds1".to_string(), "model1".to_string(), LoRAConfig::default());
         trainer.start_training(&job.id).expect("测试：start_training 应成功");
         assert!(*called.lock(), "callback should have been called during training");
+        let _ = std::fs::remove_dir_all(&out_dir);
+    }
+
+    /// 默认落点必须钉死在宿主数据目录：写成相对路径时它会随进程 CWD 漂，
+    /// 同一仓库里因此同时存在过两个 `fine_tuned_models` 目录。
+    #[test]
+    fn default_output_dir_lands_under_axagent_data_dir() {
+        let dir = BuiltInTrainingConfig::default().output_dir;
+        let tail: Vec<String> = dir
+            .components()
+            .rev()
+            .take(3)
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(
+            tail,
+            vec!["models".to_string(), "fine_tune".to_string(), ".axagent".to_string()],
+            "默认 output_dir 应以 .axagent/fine_tune/models 结尾，实测：{dir:?}"
+        );
     }
 }

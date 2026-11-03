@@ -3136,3 +3136,13 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 **裁定：不加截断**。理由：① topic 由模型生成，正常长度 <200 字符，334 KiB/条没有真实来源；② 截断会**静默改 LLM 可见内容**，违反「工具出参 key/内容按现状冻结」（§64.1）的同族原则；③ 越限路径本身就是 fail-closed（无半帧）。记为**已知边界**并入契约注释；若未来真出现越限，再按 §56 的契约演进流程加 `MAX_TOPIC_CHARS` 与兼容测试，不现在预防性加。
 
 **未覆盖（如实）**：宿主测试 `collection_info_reports_present_collection_with_dimensions` 已随 `--all-targets` 编译通过，但本机测试 exe 启动报 `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)`（需 `__TAURI_WORKSPACE__=true` 重建），运行时未验证 ⇒ 并入 `#130` 的验收。
+
+### 64.5 `#121` 轨迹读口读放大（2026-11-03）
+
+**病灶**：`get_session_trajectories` / `query_trajectories` 原实现先 `.all()` 拉回全部命中行（`query_trajectories` 的 `limit` 是内存 `take`），再对每条轨迹各发 2 条子查询（`get_trajectory_steps` / `get_trajectory_rewards`）⇒ 一次读 = **1 + 2N** 条 SQL，且 `LIMIT` 根本没下推。
+
+**改法（`axagent-ai/crates/trajectory/src/storage.rs`）**：① `query_trajectories`（:402）把 `query.limit` 直接交给 SQL `.limit()`（`ORDER BY created_at DESC` 已定序，前 N 行与原内存截取同义；`Some(0)` 两边都为空）；② 新增 `attach_steps_and_rewards`（:446）/ `load_steps_and_rewards`（:477）：steps 与 rewards 各一条 `IN (...)` 批查，按 `trajectory_id` 分组后回填，整条读路径固定为 **3 条** SQL，步骤顺序仍由全局 `ORDER BY step_index` 保证；③ 读端映射抽成 `model_to_step` / `model_to_reward`，单查与批查共用同一份。
+
+**验证**：`cargo test -p axagent-trajectory --lib storage::tests` = **11 passed**（`.tmp/v121-recheck.log`，leader 独立复跑）；新增三测 `query_limit_returns_newest_n_in_desc_order`（:2112，含 limit > 总数 / limit=0 边界）、`query_limit_applies_after_filters`（:2154，LIMIT 在过滤之后）、`batched_steps_and_rewards_match_single_row_queries`（:2188，逐项与单查结果比对）；`cargo clippy -p axagent-trajectory --all-targets -- -D warnings` EXIT=0（`.tmp/v121-clippy.log`）；`rustfmt --edition 2024 --check` EXIT=0。
+
+**未做 / 新发现**：① 批量装配的 rewards 沿袭原查询「无 ORDER BY」的物理行序，若将来给 rewards 引入显式顺序需同改两处；② 发现既有读写不对称 —— 写端 `storage.rs:227` 用 `format!("{:?}", …)` 存 `TaskCompletion`，读端只认 `task_completion` ⇒ 所有 reward_type 读回都落到 `UserFeedback`（两条读路径彼此一致，测试掩盖了它），另立 `#132`。

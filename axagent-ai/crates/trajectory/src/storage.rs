@@ -20,8 +20,9 @@ use chrono::Utc;
 use futures::FutureExt;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ExprTrait, IntoActiveModel,
-    PaginatorTrait, QueryFilter, QueryOrder, Set, TransactionTrait,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
 };
+use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -395,15 +396,7 @@ impl TrajectoryStorage {
             .order_by_asc(trajectories::Column::CreatedAt)
             .all(self.db.as_ref())
             .await?;
-        let mut r = Vec::new();
-        for m in models {
-            r.push(model_to_trajectory(
-                &m,
-                self.get_trajectory_steps(&m.id).await?,
-                self.get_trajectory_rewards(&m.id).await?,
-            ));
-        }
-        Ok(r)
+        self.attach_steps_and_rewards(models).await
     }
 
     pub async fn query_trajectories(&self, query: &TrajectoryQuery) -> Result<Vec<Trajectory>> {
@@ -434,17 +427,81 @@ impl TrajectoryStorage {
                 .filter(trajectories::Column::CreatedAt.lte(end.to_rfc3339()));
         }
         q = q.order_by_desc(trajectories::Column::CreatedAt);
-        let models = q.all(self.db.as_ref()).await?;
-        let end = query.limit.unwrap_or(models.len()).min(models.len());
-        let mut r = Vec::new();
-        for m in models.into_iter().take(end) {
-            r.push(model_to_trajectory(
-                &m,
-                self.get_trajectory_steps(&m.id).await?,
-                self.get_trajectory_rewards(&m.id).await?,
-            ));
+        // LIMIT 下推：原实现先 `.all()` 拉回**全部**命中行，再在内存里 `take(end)` ——
+        // 一份 `limit: 10` 的查询会扫全表。改为交给 SQL：ORDER BY 已定序，
+        // SQL 的前 N 行与「全量拉回后取前 N 行」是同一结果。
+        // `TrajectoryQuery.limit` 是 `Option<usize>`，sea-orm `.limit()` 收 `u64`；
+        // 本 crate 只构建 64 位目标，`as u64` 无损。`Some(0)` 两边都返回空表。
+        if let Some(limit) = query.limit {
+            q = q.limit(limit as u64);
         }
-        Ok(r)
+        let models = q.all(self.db.as_ref()).await?;
+        self.attach_steps_and_rewards(models).await
+    }
+
+    /// 给一批已定序的轨迹模型批量装配 steps / rewards，保持入参顺序。
+    ///
+    /// 读放大：无论 `models` 有多少条，只发 **2 条** SQL（steps 一次、rewards 一次），
+    /// 而不是每条轨迹各 2 条 —— 整条读路径固定为「1 条主查询 + 2 条批查」，不再是 1 + 2N。
+    async fn attach_steps_and_rewards(
+        &self,
+        models: Vec<trajectories::Model>,
+    ) -> Result<Vec<Trajectory>> {
+        let ids: Vec<String> = models.iter().map(|m| m.id.clone()).collect();
+        let (mut steps_by_traj, mut rewards_by_traj) = self.load_steps_and_rewards(&ids).await?;
+        Ok(models
+            .into_iter()
+            .map(|m| {
+                let steps = steps_by_traj.remove(&m.id).unwrap_or_default();
+                let rewards = rewards_by_traj.remove(&m.id).unwrap_or_default();
+                model_to_trajectory(&m, steps, rewards)
+            })
+            .collect())
+    }
+
+    /// 批量装载多条轨迹的 steps / rewards，按 `trajectory_id` 分组。
+    ///
+    /// 空集合直接短路 —— 不能把空 `ids` 送去拼 `IN ()`（非法 SQL；且 sea-orm 的
+    /// `is_in` 对空迭代器行为依赖版本，显式短路才稳定）。
+    ///
+    /// 顺序语义（必须与改造前的单条查询逐项一致）：
+    /// - **steps**：原 `get_trajectory_steps` 用 `order_by_asc(StepIndex)`。批查保留同名
+    ///   全局 `ORDER BY step_index` —— 同一排序键的全局有序蕴含「每个分组内部有序」，
+    ///   因此不依赖 `IN` 查询的返回行序，也不需要二次排序。
+    /// - **rewards**：原 `get_trajectory_rewards` **没有** ORDER BY，其顺序本就只是物理
+    ///   扫描序（SQLite 全表 rowid 序 / PG 无保证）。批查同样不加 ORDER BY，让两条路径
+    ///   走同一种扫描：`trajectory_rewards` 上不存在 `trajectory_id` 索引
+    ///   （`reconcile/extras.rs` 的索引声明里只有 `trajectory_steps`），单查与批查都是
+    ///   全表扫描后按行过滤，故每条轨迹内的相对顺序与单条查询一致。
+    ///   若将来给 rewards 引入显式顺序，必须同时改这里与 `get_trajectory_rewards`。
+    async fn load_steps_and_rewards(
+        &self,
+        ids: &[String],
+    ) -> Result<(HashMap<String, Vec<TrajectoryStep>>, HashMap<String, Vec<RewardSignal>>)> {
+        let mut steps_by_traj: HashMap<String, Vec<TrajectoryStep>> = HashMap::new();
+        let mut rewards_by_traj: HashMap<String, Vec<RewardSignal>> = HashMap::new();
+        if ids.is_empty() {
+            return Ok((steps_by_traj, rewards_by_traj));
+        }
+
+        let step_rows = trajectory_steps::Entity::find()
+            .filter(trajectory_steps::Column::TrajectoryId.is_in(ids.to_vec()))
+            .order_by_asc(trajectory_steps::Column::StepIndex)
+            .all(self.db.as_ref())
+            .await?;
+        for s in &step_rows {
+            steps_by_traj.entry(s.trajectory_id.clone()).or_default().push(model_to_step(s));
+        }
+
+        let reward_rows = trajectory_rewards::Entity::find()
+            .filter(trajectory_rewards::Column::TrajectoryId.is_in(ids.to_vec()))
+            .all(self.db.as_ref())
+            .await?;
+        for r in &reward_rows {
+            rewards_by_traj.entry(r.trajectory_id.clone()).or_default().push(model_to_reward(r));
+        }
+
+        Ok((steps_by_traj, rewards_by_traj))
     }
 
     async fn get_trajectory_steps(&self, trajectory_id: &str) -> Result<Vec<TrajectoryStep>> {
@@ -453,16 +510,8 @@ impl TrajectoryStorage {
             .order_by_asc(trajectory_steps::Column::StepIndex)
             .all(self.db.as_ref())
             .await?
-            .into_iter()
-            .map(|s| TrajectoryStep {
-                timestamp_ms: s.timestamp_ms as u64,
-                role: serde_json::from_str(&format!("\"{}\"", s.role))
-                    .unwrap_or(MessageRole::Assistant),
-                content: s.content,
-                reasoning: s.reasoning,
-                tool_calls: s.tool_calls.and_then(|c| serde_json::from_str(&c).ok()),
-                tool_results: s.tool_results.and_then(|r| serde_json::from_str(&r).ok()),
-            })
+            .iter()
+            .map(model_to_step)
             .collect())
     }
 
@@ -471,38 +520,8 @@ impl TrajectoryStorage {
             .filter(trajectory_rewards::Column::TrajectoryId.eq(trajectory_id))
             .all(self.db.as_ref())
             .await?
-            .into_iter()
-            .map(|r| {
-                let rt = match r.reward_type.as_str() {
-                    "task_completion" => crate::trajectory::RewardType::TaskCompletion,
-                    "tool_efficiency" => crate::trajectory::RewardType::ToolEfficiency,
-                    "reasoning_quality" => crate::trajectory::RewardType::ReasoningQuality,
-                    _ => crate::trajectory::RewardType::UserFeedback,
-                };
-                // `created_at` 双向前兼容：新行为存十进制毫秒（= `timestamp_ms` 原样），
-                // 旧行为存 `from_timestamp_millis` 产出的 RFC3339 —— 两者还原成同一个毫秒数。
-                // 刻意**不**用「解析失败 ⇒ `Utc::now()`」兜底：那会在读不出时**静默伪造一个当前
-                // 时刻**，让「没读到」看起来像「读到了」（同族：静默降级 / 兜底档永不触发）。
-                // 改为告警 + `0` —— 在本字段的语义（相对轨迹起点的偏移）里 0 是诚实的缺省。
-                let timestamp_ms = match parse_reward_timestamp_ms(&r.created_at) {
-                    Some(ms) => ms,
-                    None => {
-                        tracing::warn!(
-                            "trajectory_rewards.created_at 既非毫秒数也非 RFC3339 ⇒ timestamp_ms 取 0（id={}, value={:?}）",
-                            r.id,
-                            r.created_at
-                        );
-                        0
-                    },
-                };
-                RewardSignal {
-                    reward_type: rt,
-                    value: r.value,
-                    step_index: r.step_index as usize,
-                    timestamp_ms,
-                    metadata: serde_json::Value::Null,
-                }
-            })
+            .iter()
+            .map(model_to_reward)
             .collect())
     }
 
@@ -1644,6 +1663,49 @@ impl TrajectoryStorage {
 
 // ── Model conversion helpers ──
 
+fn model_to_step(s: &trajectory_steps::Model) -> TrajectoryStep {
+    TrajectoryStep {
+        timestamp_ms: s.timestamp_ms as u64,
+        role: serde_json::from_str(&format!("\"{}\"", s.role)).unwrap_or(MessageRole::Assistant),
+        content: s.content.clone(),
+        reasoning: s.reasoning.clone(),
+        tool_calls: s.tool_calls.as_ref().and_then(|c| serde_json::from_str(c).ok()),
+        tool_results: s.tool_results.as_ref().and_then(|r| serde_json::from_str(r).ok()),
+    }
+}
+
+fn model_to_reward(r: &trajectory_rewards::Model) -> RewardSignal {
+    let rt = match r.reward_type.as_str() {
+        "task_completion" => crate::trajectory::RewardType::TaskCompletion,
+        "tool_efficiency" => crate::trajectory::RewardType::ToolEfficiency,
+        "reasoning_quality" => crate::trajectory::RewardType::ReasoningQuality,
+        _ => crate::trajectory::RewardType::UserFeedback,
+    };
+    // `created_at` 双向前兼容：新行为存十进制毫秒（= `timestamp_ms` 原样），
+    // 旧行为存 `from_timestamp_millis` 产出的 RFC3339 —— 两者还原成同一个毫秒数。
+    // 刻意**不**用「解析失败 ⇒ `Utc::now()`」兜底：那会在读不出时**静默伪造一个当前
+    // 时刻**，让「没读到」看起来像「读到了」（同族：静默降级 / 兜底档永不触发）。
+    // 改为告警 + `0` —— 在本字段的语义（相对轨迹起点的偏移）里 0 是诚实的缺省。
+    let timestamp_ms = match parse_reward_timestamp_ms(&r.created_at) {
+        Some(ms) => ms,
+        None => {
+            tracing::warn!(
+                "trajectory_rewards.created_at 既非毫秒数也非 RFC3339 ⇒ timestamp_ms 取 0（id={}, value={:?}）",
+                r.id,
+                r.created_at
+            );
+            0
+        },
+    };
+    RewardSignal {
+        reward_type: rt,
+        value: r.value,
+        step_index: r.step_index as usize,
+        timestamp_ms,
+        metadata: serde_json::Value::Null,
+    }
+}
+
 fn model_to_trajectory(
     m: &trajectories::Model,
     steps: Vec<TrajectoryStep>,
@@ -1756,7 +1818,9 @@ fn model_to_traj_pattern(p: &trajectory_patterns::Model) -> TrajectoryPattern {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trajectory::{Trajectory, TrajectoryOutcome, TrajectoryStep};
+    use crate::trajectory::{
+        RewardSignal, RewardType, Trajectory, TrajectoryOutcome, TrajectoryStep,
+    };
 
     /// 构造最小 `Trajectory`（内部自动生成 uuid 主键）。
     fn sample_trajectory(session: &str) -> Trajectory {
@@ -1981,6 +2045,272 @@ mod tests {
         assert_eq!(strip_json_quotes("董事"), "董事");
         // 首尾虽为引号但中间含多字节字符：切片点仍是 ASCII 字节边界 ⇒ 安全
         assert_eq!(strip_json_quotes("\"a董事b\""), "a董事b");
+    }
+
+    // ── 读口修复（仓库 #121）：LIMIT 下推 + steps/rewards 批量装载 ──
+
+    /// 构造一条 `created_at` 指定的轨迹 —— 排序断言必须可控，不能靠 `Utc::now()` 的撞车概率。
+    fn trajectory_at(session: &str, topic: &str, created_at: chrono::DateTime<Utc>) -> Trajectory {
+        let mut t = sample_trajectory(session);
+        t.topic = topic.to_string();
+        t.created_at = created_at;
+        t
+    }
+
+    fn step(content: &str, timestamp_ms: u64) -> TrajectoryStep {
+        TrajectoryStep {
+            timestamp_ms,
+            role: MessageRole::Assistant,
+            content: content.to_string(),
+            reasoning: None,
+            tool_calls: None,
+            tool_results: None,
+        }
+    }
+
+    fn reward(
+        reward_type: RewardType,
+        value: f64,
+        step_index: usize,
+        timestamp_ms: u64,
+    ) -> RewardSignal {
+        RewardSignal {
+            reward_type,
+            value,
+            step_index,
+            timestamp_ms,
+            metadata: serde_json::Value::Null,
+        }
+    }
+
+    fn step_contents(t: &Trajectory) -> Vec<String> {
+        t.steps.iter().map(|s| s.content.clone()).collect()
+    }
+
+    /// rewards 没有主键暴露给领域对象，用全部可观测字段当身份做逐项比对。
+    ///
+    /// `reward_type` 一并纳入，锁定的是「批查与单查的读端映射一致」——**不是**
+    /// 「写端原值能原样读回」：`save_trajectory` 落的是 `Debug` 形态（`TaskCompletion`），
+    /// 读端只认 snake_case，该不对称是既有问题、不在本次范围内（见报告「未做/未覆盖」）。
+    fn reward_keys(t: &Trajectory) -> Vec<(RewardType, f64, usize, u64)> {
+        t.rewards.iter().map(|r| (r.reward_type, r.value, r.step_index, r.timestamp_ms)).collect()
+    }
+
+    fn query_for_session(session: &str, limit: Option<usize>) -> TrajectoryQuery {
+        TrajectoryQuery {
+            session_id: Some(session.to_string()),
+            limit,
+            ..TrajectoryQuery::default()
+        }
+    }
+
+    /// 读口修复 1a：`query.limit` 取 `CreatedAt` 最新的 N 条（倒序）。
+    ///
+    /// 「LIMIT 是否下推到 SQL」无法从结果区分（内存 `take` 结果相同），但**顺序端点**
+    /// 可以：若误用 `order_by_asc` 或截错方向，这里立刻红。
+    #[tokio::test]
+    async fn query_limit_returns_newest_n_in_desc_order() {
+        let db = axagent_dao::db::create_test_pool().await.expect("测试：创建连接池应成功").conn;
+        let storage = TrajectoryStorage::new(Arc::new(db.clone()));
+        let base = Utc::now();
+        for i in 0..5 {
+            let t = trajectory_at(
+                "s-limit",
+                &format!("topic-{i}"),
+                base + chrono::Duration::minutes(i),
+            );
+            storage.save_trajectory(&t).await.expect("测试：保存轨迹应成功");
+        }
+
+        let newest2 = storage
+            .query_trajectories(&query_for_session("s-limit", Some(2)))
+            .await
+            .expect("测试：查询应成功");
+        assert_eq!(newest2.len(), 2, "limit=2 必须只返回 2 条");
+        assert_eq!(
+            newest2.iter().map(|t| t.topic.as_str()).collect::<Vec<_>>(),
+            vec!["topic-4", "topic-3"],
+            "必须是 CreatedAt 最新的 2 条且按倒序"
+        );
+
+        // 边界：limit 大于总数 ⇒ 全量，不报错
+        let all = storage
+            .query_trajectories(&query_for_session("s-limit", Some(10)))
+            .await
+            .expect("测试：查询应成功");
+        assert_eq!(all.len(), 5, "limit 大于总数时必须返回全部命中行");
+        assert_eq!(all[0].topic, "topic-4", "全量结果同样保持倒序");
+
+        // 边界：limit=0 ⇒ 空表（SQL LIMIT 0 与旧的内存 take(0) 同义）
+        let none = storage
+            .query_trajectories(&query_for_session("s-limit", Some(0)))
+            .await
+            .expect("测试：查询应成功");
+        assert!(none.is_empty(), "limit=0 必须返回空表");
+    }
+
+    /// 读口修复 1b：过滤条件与 LIMIT 同时生效 —— LIMIT 不能把别的 session 的行挤进结果。
+    #[tokio::test]
+    async fn query_limit_applies_after_filters() {
+        let db = axagent_dao::db::create_test_pool().await.expect("测试：创建连接池应成功").conn;
+        let storage = TrajectoryStorage::new(Arc::new(db.clone()));
+        let base = Utc::now();
+        // 交替写入两个 session，且另一 session 的 CreatedAt 更新
+        for i in 0..3 {
+            let a =
+                trajectory_at("s-a", &format!("a-{i}"), base + chrono::Duration::minutes(i * 2));
+            storage.save_trajectory(&a).await.expect("测试：保存轨迹应成功");
+            let b = trajectory_at(
+                "s-b",
+                &format!("b-{i}"),
+                base + chrono::Duration::minutes(i * 2 + 1),
+            );
+            storage.save_trajectory(&b).await.expect("测试：保存轨迹应成功");
+        }
+
+        let got = storage
+            .query_trajectories(&query_for_session("s-a", Some(2)))
+            .await
+            .expect("测试：查询应成功");
+        assert_eq!(got.len(), 2);
+        assert!(got.iter().all(|t| t.session_id == "s-a"), "LIMIT 必须在过滤之后生效");
+        assert_eq!(got.iter().map(|t| t.topic.as_str()).collect::<Vec<_>>(), vec!["a-2", "a-1"]);
+    }
+
+    /// 读口修复 2：批量装载后 steps/rewards 的归属与顺序，必须与单条查询逐项一致。
+    ///
+    /// 这条同时守住两件事：
+    /// ① **不串**：每条轨迹只拿到自己的 steps/rewards（用内容前缀当身份）；
+    /// ② **顺序不变**：steps 按 `step_index` 升序（原 `order_by_asc`），rewards 按
+    ///    「该轨迹的物理行序」（原查询无 ORDER BY）—— 直接与单条查询的产物逐项比对，
+    ///    不靠测试自行假设顺序。
+    #[tokio::test]
+    async fn batched_steps_and_rewards_match_single_row_queries() {
+        let db = axagent_dao::db::create_test_pool().await.expect("测试：创建连接池应成功").conn;
+        let storage = TrajectoryStorage::new(Arc::new(db.clone()));
+        let base = Utc::now();
+
+        let mut t0 = trajectory_at("s-batch", "topic-0", base);
+        t0.steps = vec![step("t0-s0", 0), step("t0-s1", 1), step("t0-s2", 2)];
+        t0.rewards = vec![
+            reward(RewardType::TaskCompletion, 1.5, 0, 100),
+            reward(RewardType::ToolEfficiency, 2.5, 1, 200),
+        ];
+
+        let mut t1 = trajectory_at("s-batch", "topic-1", base + chrono::Duration::minutes(1));
+        t1.steps = vec![step("t1-s0", 10), step("t1-s1", 11)];
+        t1.rewards = vec![reward(RewardType::ReasoningQuality, 3.5, 1, 300)];
+
+        // t2 无 steps / 无 rewards：批量分组时不得凭空造出条目
+        let t2 = trajectory_at("s-batch", "topic-2", base + chrono::Duration::minutes(2));
+
+        // 故意按 t2 / t0 / t1 顺序写入：结果顺序只能来自 SQL 的 CreatedAt，而非插入序
+        for t in [&t2, &t0, &t1] {
+            storage.save_trajectory(t).await.expect("测试：保存轨迹应成功");
+        }
+
+        let via_query = storage
+            .query_trajectories(&query_for_session("s-batch", None))
+            .await
+            .expect("测试：查询应成功");
+        let via_session =
+            storage.get_session_trajectories("s-batch").await.expect("测试：会话查询应成功");
+        assert_eq!(via_query.len(), 3);
+        assert_eq!(via_session.len(), 3);
+        assert_eq!(
+            via_query.iter().map(|t| t.topic.as_str()).collect::<Vec<_>>(),
+            vec!["topic-2", "topic-1", "topic-0"],
+            "query_trajectories 保持 CreatedAt 倒序"
+        );
+        assert_eq!(
+            via_session.iter().map(|t| t.topic.as_str()).collect::<Vec<_>>(),
+            vec!["topic-0", "topic-1", "topic-2"],
+            "get_session_trajectories 保持 CreatedAt 升序"
+        );
+
+        for expected in [&t0, &t1, &t2] {
+            let single_steps = storage
+                .get_trajectory_steps(&expected.id)
+                .await
+                .expect("测试：单条查 steps 应成功");
+            let single_rewards = storage
+                .get_trajectory_rewards(&expected.id)
+                .await
+                .expect("测试：单条查 rewards 应成功");
+
+            for got in [
+                via_query.iter().find(|t| t.id == expected.id).expect("query 结果应包含该轨迹"),
+                via_session.iter().find(|t| t.id == expected.id).expect("会话结果应包含该轨迹"),
+            ] {
+                let contents = step_contents(got);
+                assert_eq!(
+                    contents,
+                    single_steps.iter().map(|s| s.content.clone()).collect::<Vec<_>>(),
+                    "steps 的组内顺序必须与单条查询一致（轨迹 {}）",
+                    expected.topic
+                );
+                let prefix = format!("t{}-", expected.topic.trim_start_matches("topic-"));
+                assert!(
+                    contents.iter().all(|c| c.starts_with(&prefix)),
+                    "steps 不得串到别的轨迹：期望前缀 {prefix}，实际 {contents:?}"
+                );
+                assert_eq!(
+                    reward_keys(got),
+                    single_rewards
+                        .iter()
+                        .map(|r| (r.reward_type, r.value, r.step_index, r.timestamp_ms))
+                        .collect::<Vec<_>>(),
+                    "rewards 的组内顺序必须与单条查询一致（轨迹 {}）",
+                    expected.topic
+                );
+            }
+        }
+    }
+
+    /// 读口修复 2 的边界：空库 / 无命中都必须返回空 vec，不报错。
+    ///
+    /// 「无命中」单独构造（库里有数据但过滤不中），否则「空库返回空」会掩盖
+    /// 「过滤条件写错也能过」这一类失败。
+    #[tokio::test]
+    async fn empty_and_no_match_queries_return_empty_vec() {
+        let db = axagent_dao::db::create_test_pool().await.expect("测试：创建连接池应成功").conn;
+        let storage = TrajectoryStorage::new(Arc::new(db.clone()));
+
+        // ① 空库：steps/rewards 批查的 `ids` 为空 ⇒ 必须短路而不是拼非法 `IN ()`
+        assert!(
+            storage
+                .query_trajectories(&TrajectoryQuery::default())
+                .await
+                .expect("测试：空库查询不应报错")
+                .is_empty(),
+            "空库必须返回空 vec"
+        );
+        assert!(
+            storage
+                .get_session_trajectories("no-such-session")
+                .await
+                .expect("测试：空库会话查询不应报错")
+                .is_empty()
+        );
+
+        // ② 有数据但无命中
+        let t = trajectory_at("s-present", "topic-present", Utc::now());
+        storage.save_trajectory(&t).await.expect("测试：保存轨迹应成功");
+        assert!(
+            storage
+                .query_trajectories(&query_for_session("s-absent", None))
+                .await
+                .expect("测试：无命中查询不应报错")
+                .is_empty(),
+            "过滤无命中必须返回空 vec"
+        );
+        assert!(
+            storage
+                .get_session_trajectories("s-absent")
+                .await
+                .expect("测试：无命中会话查询不应报错")
+                .is_empty()
+        );
     }
 }
 

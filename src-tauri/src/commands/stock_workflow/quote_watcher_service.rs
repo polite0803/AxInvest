@@ -97,7 +97,7 @@ fn sorted_codes(codes: Vec<String>) -> Vec<String> {
     sorted
 }
 
-/// 把一条行情变化补发到插件总线（fire-and-forget，形态照 `workflow_run_service.rs:249-263`）。
+/// 把一条行情变化补发到插件总线（fire-and-forget，形态照 `workflow_run_service.rs` 的 `dispatch_event`）。
 ///
 /// 无匹配订阅者时直接返回（`would_dispatch` 短路，避免白做 JSON 序列化与 spawn）。
 /// 派发**一律不 await**：`DispatchMode::Emit` 是串行 await，把它接进行情回调就等于把

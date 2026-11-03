@@ -5044,8 +5044,9 @@ fn start_retrieval_feedback_tick(state: &AppState) {
 /// 而完整实现住在 `init/monitor_emitter.rs` 且全仓零构造点 —— 两份实现并存，正是「写了但没人装配」。
 fn start_realtime_monitor(app: &tauri::AppHandle) {
     use axagent_analysis_engine::alert_mapping::{alert_types, db_model_to_config_field};
-    use axagent_analysis_engine::monitor::{MonitorConfig, RealtimeMonitor, TZeroCallback};
+    use axagent_analysis_engine::monitor::{RealtimeMonitor, TZeroCallback};
     use axagent_harness::market_data::MarketDataProvider;
+    use axagent_harness::stock_monitor::MonitorConfig;
 
     // astock_client 依赖 AppState，但在同步段通过 Manager::state 拿引用克隆即可
     {
@@ -5056,7 +5057,7 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
         // P3-3: 跨股票聚合器（OnceLock 注入，组合级告警）——同步段完成
         let aggregator = std::sync::Arc::new(
             axagent_analysis_engine::cross_stock_aggregator::CrossStockSignalAggregator::new(
-                axagent_analysis_engine::cross_stock_aggregator::AggregatorConfig::default(),
+                axagent_harness::stock_monitor::AggregatorConfig::default(),
             ),
         );
         if state.cross_stock_aggregator.set(aggregator.clone()).is_err() {

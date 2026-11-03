@@ -3258,3 +3258,20 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 - **124 里有 13 处落在 `#[cfg(test)]` 块内**（审计脚本只剔行首注释、不剥测试块 —— 与 `check-*` 门的口径不同）：`conversations/compress.rs` 4、`conversations/mod.rs` 4、`tools/audit.rs` 2、`init/services.rs` 1、`fleet/mod.rs` 1、`tools/astock_data.rs` 1。这些是 **`AppState` 测试构造器**，要等 B6 摘六字段时随之消失，**不属于 B2 的改写面**。⇒ B2 的生产改写面 = **111 处**（不是 124）。
 - 审计仍按「124」出数（不剥测试块），本节只登记差集，**不改脚本口径**；B6 完成后测试构造器会自然消失，届时读数一次性下降，不需要「洗绿」动作。
 - B2 可直接换 harness 的候选（B1 已 `pub use` 垫片）：`init/services.rs:5047` 的 `MonitorConfig`、`:5059` 的 `AggregatorConfig`；其余同文件引用是 `RealtimeMonitor` / `TZeroCallback` / `TradingEngine` / `StockAdaptiveEngine` / `AStockClient` 等**实现类型**，换接缝属于 B4/B6（持有关系先改），不是单纯改 import。
+
+### 64.14 B2 交了一刀，同时把「−6～−9」这个数推翻（2026-11-04）
+
+**已交付**：`init/services.rs` 装配段两处切到 harness 权威 —— `MonitorConfig`（`use axagent_harness::stock_monitor::MonitorConfig`）与 `AggregatorConfig::default()`。反向阻塞读数 **124 → 123**（`AUDIT-l1-blockers-2026-11-04-0322.md`，与 `-0000` 那份同日两份快照是 §54.2 R8 的预期行为）。`cargo check -p axagent --lib` **Finished 14m17s / 0 error**、`rustfmt --check` 0、`cargo clippy -p axagent-agent --all-targets -D warnings` 0（同批的 #110 也在此窗口验）。
+
+**⚠ §54.3 的「B2 消减 −6～−9」不成立，按证据改判为「B2 实际只有 −1；其余分属 B4/B6/B7 或随本体迁出」**。逐桶拆 124 处（`scripts/audit-l1-blockers.mjs` 的 foreign 桶 + 盘上 `grep -n` 复核）：
+
+| 桶 | 处数 | 为什么不是 B2 的活 |
+|---|---|---|
+| O 桶（`tools/opc.rs` 41 + `fleet/mod.rs` 4） | 45 | §54.1 已裁「股票迁移一条不许动」，归 #32 |
+| `#[cfg(test)]` 内的 `AppState` 测试构造器 | 12（`conversations/{compress,mod}.rs` 各 4、`tools/audit.rs` 2、`tools/astock_data.rs` 1、`init/services.rs` 1；`fleet/mod.rs` 那 1 处与 O 桶重叠，不重复计） | 消失条件是 **B6 摘 AppState 六个域字段**，改 import 改不掉 |
+| 路径判 foreign、**功能属股票**的文件 | 12（`evolution_proposal.rs` 7 + `screenshot_diagnosis.rs` 3 + `decision_gates.rs` 1 + `_shared_reco_pool.rs` 1） | 随 B4 本体一起迁出；⚠ 同 §64.11 第 3 条，**不改 `ownedRe`**（R5 禁扩面） |
+| 真·宿主待处置面 | **55**（`services.rs` 23 + `state.rs` 8 + 两个离线 bin 8 + `market_sim_service.rs` 2 + `tools/*` 9 + `daily_snapshot_store.rs` 1 + 其余 4） | 里面绝大多数是**实现类型**（`TradingEngine` / `RealtimeMonitor` / `AStockClient` / `CrossStockSignalAggregator`）与引擎函数调用 ⇒ 要等 B4 打包 + B7 算法接缝；单纯改 import 无处可改（本批能改的两处已改完） |
+
+**结论写死，不给后人留乐观数**：#35 的读数从「124 待改写」修正为「**45（O）+ 12（测试）+ 12（随本体迁出）+ 55（宿主真面）**」，而 55 里今天可机械换成 harness 垫片的**只有 1 处，已交付**。后续批次的验收应按这个拆法记，不再引用「B2 −6～−9」。
+
+**未做**：`plugins/stock/` 打包骨架（B4）未建；`screenshot_diagnosis` / `decision_gates` / `_shared_reco_pool` 的域归属只在文档裁定，`audit-l1-blockers.mjs` 与 `l1-host-owned-allowlist.json` 均未改（改了会让 124 这个可比读数失去连续性）。

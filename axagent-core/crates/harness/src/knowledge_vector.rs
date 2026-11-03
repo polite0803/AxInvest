@@ -111,12 +111,26 @@ const _: () = assert!(KNOWLEDGE_TOP_K_RANGE.1 == KNOWLEDGE_SEARCH_TOP_K_MAX);
 // snippet 上限为 0 等于悄悄关掉读面的展示价值（命中列表只剩 id），故编译期钉住非零。
 const _: () = assert!(KNOWLEDGE_SNIPPET_MAX_CHARS > 0);
 
+/// [`VectorSearchRequest::min_similarity`] 的量纲闭区间 —— 定义域，不是可调预算。
+///
+/// **为什么是量纲而不是可调区间**：上面那族数字（`KNOWLEDGE_TOP_K_RANGE` /
+/// `KNOWLEDGE_CONTENT_MAX_BYTES`）是**预算** —— 值可以谈，改数就是改成本口径，所以才有
+/// 「上界取 50 够不够」这类论证。而 `min_similarity` 的合法域由它的定义给出：宿主把相似度
+/// 统一归一到 `[0, 1]` 的相关度，越界的阈值**没有可解释语义**（`> 1` 恒全通过、`< 0` 恒全拒，
+/// 等于把过滤闸悄悄关掉）。这里没有「取多少合适」可调，只有「定义域在哪」。
+/// 单源纪律同前：宿主 provider 的闸只准引用本常量，不得在落点再抄一遍 `0.0..=1.0`
+/// （先例 `stock_monitor.rs:348` 的 `AGGREGATOR_MIN_STRENGTH`，同为 f64 的 `[0, 1]` 量纲）。
+pub const KNOWLEDGE_SIMILARITY_RANGE: (f32, f32) = (0.0, 1.0);
+
+// 定义域自洽：下界若大于上界，`RangeInclusive::contains` 对任何入参恒 false ⇒ 读面被整体拒空。
+const _: () = assert!(KNOWLEDGE_SIMILARITY_RANGE.0 <= KNOWLEDGE_SIMILARITY_RANGE.1);
+
 // ── DTO（跨边界视图；宿主内部类型不过线）────────────────────────────────
 
 /// `search` op 的入参（语义检索，文本进）。
 ///
 /// `query` 是自然语言文本，**不是**向量：provider 负责在宿主侧算出 `query` 的 embedding。
-/// `top_k` 由宿主 provider 钳位到 [`KNOWLEDGE_TOP_K_RANGE`]。
+/// `top_k` 越出 [`KNOWLEDGE_TOP_K_RANGE`] ⇒ 宿主 provider 拒收（`Err(Validation)`，不夹取；分派层随 #112 落成 `SEAM_CALL_INVALID_ARGS`）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VectorSearchRequest {
@@ -208,7 +222,7 @@ pub struct VectorIndexOutcome {
 
 /// `get_collection_info` op 的返回。
 ///
-/// 落点是宿主已有的 `get_collection_dimensions`（`vector_store.rs:84`），故本接缝**不需要**
+/// 落点是宿主已有的 `get_collection_dimensions`（`vector_store.rs:87`），故本接缝**不需要**
 /// 「列举集合」的能力（PLAN §56.1-Q3）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

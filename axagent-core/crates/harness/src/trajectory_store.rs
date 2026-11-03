@@ -106,6 +106,20 @@ pub const TRAJECTORY_SUMMARY_SNIPPET_MAX_CHARS: usize = 200;
 const _: () = assert!(TRAJECTORY_LIST_LIMIT_RANGE.0 <= TRAJECTORY_LIST_LIMIT_RANGE.1);
 const _: () = assert!(TRAJECTORY_SUMMARY_SNIPPET_MAX_CHARS > 0);
 
+/// [`TrajectoryQueryView::min_quality`] 与 [`TrajectoryQueryView::min_value_score`] 的量纲闭区间
+/// —— 定义域，不是可调预算。
+///
+/// **为什么是量纲而不是可调区间**：[`TRAJECTORY_LIST_LIMIT_RANGE`] 是**预算**（一帧拉多少条，值可谈，
+/// 受帧体积约束）；而宿主的 `quality` 五项评分与 `value_score` 本来就是归一到 `[0, 1]` 的**比例**，
+/// 越界的阈值没有可解释语义（`> 1` 恒零命中、`< 0` 恒全通过 —— 后者等于把过滤悄悄关掉），且宿主把
+/// 它原样交给 SQL 的 `gte`：越界值不报错，只给出一张错集。这里没有「取多少合适」可调，只有定义域。
+/// 单源纪律同前：宿主 provider 的闸只准引用本常量，不得在落点再抄一遍 `0.0..=1.0`
+/// （先例 `stock_monitor.rs:348` 的 `AGGREGATOR_MIN_STRENGTH`，同为 `[0, 1]` 量纲）。
+pub const TRAJECTORY_RATIO_RANGE: (f64, f64) = (0.0, 1.0);
+
+// 定义域自洽：下界若大于上界，`RangeInclusive::contains` 对任何入参恒 false ⇒ 两个阈值全被拒。
+const _: () = assert!(TRAJECTORY_RATIO_RANGE.0 <= TRAJECTORY_RATIO_RANGE.1);
+
 // ── DTO（跨边界视图；宿主内部类型与原文不过线）──────────────────────────
 
 /// 轨迹摘要视图 —— `Trajectory` 的**跨边界形态**，字段裁剪见模块头。
@@ -143,7 +157,7 @@ pub struct TrajectorySummaryView {
 ///
 /// 与原形的两处差别：① 键为 camelCase（原形无 `rename_all`）；② `time_range` 元组换成
 /// `sinceMs` / `untilMs` 两个 epoch 毫秒。宿主 provider 把它映射回 `TrajectoryQuery` 时，
-/// `None` 端点须按原形语义处理（只给 `sinceMs` ⇒ 另一端开区间），映射点同样**唯一**。
+/// **只给一端 ⇒ `Err(Validation)`**：原形 `time_range` 是闭区间元组，开区间表达不了 ⇒ 拒收，不静默当无界（映射点同样**唯一**）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrajectoryQueryView {

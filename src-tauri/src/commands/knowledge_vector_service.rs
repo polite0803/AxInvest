@@ -89,9 +89,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::knowledge_vector::{
-    CollectionInfoView, KNOWLEDGE_CONTENT_MAX_BYTES, KNOWLEDGE_SNIPPET_MAX_CHARS,
-    KNOWLEDGE_TOP_K_RANGE, KeywordSearchRequest, KnowledgeChunkView, KnowledgeVectorProvider,
-    VectorIndexOutcome, VectorIndexRequest, VectorSearchOutcome, VectorSearchRequest,
+    CollectionInfoView, KNOWLEDGE_CONTENT_MAX_BYTES, KNOWLEDGE_SIMILARITY_RANGE,
+    KNOWLEDGE_SNIPPET_MAX_CHARS, KNOWLEDGE_TOP_K_RANGE, KeywordSearchRequest, KnowledgeChunkView,
+    KnowledgeVectorProvider, VectorIndexOutcome, VectorIndexRequest, VectorSearchOutcome,
+    VectorSearchRequest,
 };
 use axagent_harness::vector_store::VectorSearchResult;
 use axagent_search::rag::{self, ChunkStrategy, KnowledgeRAG, RAGSource};
@@ -148,7 +149,7 @@ fn check_top_k(top_k: usize, op: &str) -> Result<()> {
     )))
 }
 
-/// `min_similarity` 闸：NaN 单判 + 量纲 `[0, 1]`（相关度，不是距离）。
+/// `min_similarity` 闸：NaN 单判 + 量纲 [`KNOWLEDGE_SIMILARITY_RANGE`]（相关度，不是距离）。
 ///
 /// `None` = 不过滤（契约 `VectorSearchRequest::min_similarity` 的缺省语义），照传。
 fn check_min_similarity(min_similarity: Option<f32>, op: &str) -> Result<()> {
@@ -164,7 +165,7 @@ fn check_min_similarity(min_similarity: Option<f32>, op: &str) -> Result<()> {
             "knowledge.vector::{op} 的 min_similarity={value} 不是有限数（±∞ 会把合格集变成空集或全集）"
         )));
     }
-    if !(0.0f32..=1.0f32).contains(&value) {
+    if !(KNOWLEDGE_SIMILARITY_RANGE.0..=KNOWLEDGE_SIMILARITY_RANGE.1).contains(&value) {
         return Err(AxAgentError::Validation(format!(
             "knowledge.vector::{op} 的 min_similarity={value} 越出宿主量纲 [0, 1]（它是**相关度**\
              下限，与视图里那个距离分互为补数，越界的阈值没有可解释语义）"
@@ -477,6 +478,9 @@ mod tests {
 
     #[test]
     fn min_similarity_rejects_nan_before_any_comparison() {
+        // 量纲数字住在契约层，provider 只引用它；本条把它钉在测试里 —— 契约改数即红
+        // （先例 `monitor_seam_service.rs` 的 `aggregator_ranges_are_the_harness_numbers`）。
+        assert_eq!(KNOWLEDGE_SIMILARITY_RANGE, (0.0f32, 1.0f32));
         // NaN 与 `0.0..=1.0`：`contains` 对 NaN 恒 false 是 fail-closed，但 `is_nan()` 这一支
         // 必须存在 —— 任何 `v <= 1.0` 形式的改写都会把 NaN 放过去（fail-open）。
         assert!(matches!(

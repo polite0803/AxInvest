@@ -77,9 +77,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::trajectory_store::{
-    TRAJECTORY_LIST_LIMIT_RANGE, TRAJECTORY_SUMMARY_SNIPPET_MAX_CHARS, TrajectoryCountOutcome,
-    TrajectoryListOutcome, TrajectoryQueryOutcome, TrajectoryQueryView, TrajectoryStoreProvider,
-    TrajectorySummaryView,
+    TRAJECTORY_LIST_LIMIT_RANGE, TRAJECTORY_RATIO_RANGE, TRAJECTORY_SUMMARY_SNIPPET_MAX_CHARS,
+    TrajectoryCountOutcome, TrajectoryListOutcome, TrajectoryQueryOutcome, TrajectoryQueryView,
+    TrajectoryStoreProvider, TrajectorySummaryView,
 };
 use axagent_harness::trajectory_types::{Trajectory, TrajectoryQuery};
 use axagent_trajectory::TrajectoryStorage;
@@ -121,7 +121,7 @@ fn resolve_limit(limit: Option<usize>, op: &str) -> Result<usize> {
     )))
 }
 
-/// 评分阈值闸：NaN 单判 + 量纲 `[0, 1]`。
+/// 评分阈值闸：NaN 单判 + 量纲 [`TRAJECTORY_RATIO_RANGE`]。
 fn check_ratio(field: &str, value: Option<f64>) -> Result<()> {
     let Some(ratio) = value else { return Ok(()) };
     if ratio.is_nan() {
@@ -135,7 +135,7 @@ fn check_ratio(field: &str, value: Option<f64>) -> Result<()> {
             "trajectory.store 的 {field}={ratio} 不是有限数（±∞ 会让条件恒真或恒假）"
         )));
     }
-    if !(0.0f64..=1.0f64).contains(&ratio) {
+    if !(TRAJECTORY_RATIO_RANGE.0..=TRAJECTORY_RATIO_RANGE.1).contains(&ratio) {
         return Err(AxAgentError::Validation(format!(
             "trajectory.store 的 {field}={ratio} 越出宿主量纲 [0, 1]（它是评分阈值，越界的阈值没有\
              可解释语义 ⇒ 拒收，不静默变成空集）"
@@ -333,6 +333,9 @@ mod tests {
 
     #[test]
     fn ratio_gates_reject_nan_and_out_of_scale() {
+        // 量纲数字住在契约层，provider 只引用它；本条把它钉在测试里 —— 契约改数即红
+        // （先例 `monitor_seam_service.rs` 的 `aggregator_ranges_are_the_harness_numbers`）。
+        assert_eq!(TRAJECTORY_RATIO_RANGE, (0.0f64, 1.0f64));
         for bad in [f64::INFINITY, f64::NEG_INFINITY, -0.5, 1.5] {
             assert!(
                 matches!(check_ratio("minQuality", Some(bad)), Err(AxAgentError::Validation(_))),

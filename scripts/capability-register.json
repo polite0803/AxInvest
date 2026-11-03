@@ -113,7 +113,7 @@
       "hard": true,
       "planNumber": "83",
       "planMustAppear": true,
-      "planOld": [{ "number": "124", "note": "漂移前旧读数，仅允许出现在 §0.12.4 漂移列举段（PLAN:704）；另经 alsoAt 允许 §61.4 的 B1 预期读数表（同形不同物：124 在那里是 l1ForeignStock 的首刀后预测，与本锚点的历史工作流数无关）；第三个 alsoAt 是 §0.10.1 的桶①分解段 PLAN:523（同形不同物：124 是 B1 后「待改写、H 桶除外」的反向阻塞处数，与工作流命令数无关）；第四个 alsoAt 是 §63 的 B1 交付账（PLAN:3027–3086，同一个反向阻塞读数）", "alsoAt": [{ "startLine": 2950, "endLine": 2962, "mustContain": ["61.4 预期读数", "142 − 18 = 124", "首刀后"] }, { "startLine": 523, "endLine": 523, "mustContain": ["134 处（含 H 桶 10 处 / 4 文件）", "待改写 124 处", "B1 首刀前口径为 152 / 28"] }, { "startLine": 3027, "endLine": 3086, "mustContain": ["B1 首刀交付账", "124 处 / 22 文件", "K1 `.rs` 文件数"] }] }],
+      "planOld": [{ "number": "124", "note": "漂移前旧读数，仅允许出现在 §0.12.4 漂移列举段（PLAN:704）；另经 alsoAt 允许 §61.4 的 B1 预期读数表（同形不同物：124 在那里是 l1ForeignStock 的首刀后预测，与本锚点的历史工作流数无关）；第三个 alsoAt 是 §0.10.1 的桶①分解段 PLAN:523（同形不同物：124 是 B1 后「待改写、H 桶除外」的反向阻塞处数，与工作流命令数无关；2026-11-04 B2 那段再降 1 到 123，523 已改写为历史括注形态「B1 首刀后为 134 / 待改写 124，…再降 1 到 133 / 123」）；第四个 alsoAt 是 §63 的 B1 交付账（PLAN:3027–3086，同一个反向阻塞读数）；第五个 alsoAt 是 §64.13–64.14（PLAN:3255–3278，B2 开工前的现况读数 + 把「−6～−9」推翻为「只有 −1」的那段，同一个反向阻塞读数）", "alsoAt": [{ "startLine": 2950, "endLine": 2962, "mustContain": ["61.4 预期读数", "142 − 18 = 124", "首刀后"] }, { "startLine": 523, "endLine": 523, "mustContain": ["待改写 123 处", "B1 首刀后为 134 / 待改写 124", "B1 首刀前口径为 152 / 28"] }, { "startLine": 3027, "endLine": 3086, "mustContain": ["B1 首刀交付账", "124 处 / 22 文件", "K1 `.rs` 文件数"] }, { "startLine": 3255, "endLine": 3278, "mustContain": ["B2 开工前的现况读数", "结论写死，不给后人留乐观数", "不改脚本口径", "124 处 / 22 文件"] }, { "startLine": 3341, "endLine": 3378, "mustContain": ["第五道门回写", "planOld` 124 的第 2 段", "124 处 / 22 文件"] }] }],
       "note": "stock_workflow 28 条归股票域、不计入本域（PLAN:352）。"
     },
     {
@@ -149,15 +149,15 @@
     {
       "id": "frontendFileCaliber",
       "label": "前端体量（脚本文件名口径 feRe 匹配 src/** 全部 .ts/.tsx）",
-      "value": 84873,
+      "value": 84874,
       "value2": 293,
       "value2Label": "文件",
       "check": "frontendVolume",
       "domainKey": "STOCK",
       "hard": true,
-      "planNumber": "84 873",
+      "planNumber": "84 874",
       "planMustAppear": true,
-      "planPinned": [{ "line": 519, "mustContain": ["293", "84 873", "脚本文件名口径"] }],
+      "planPinned": [{ "line": 519, "mustContain": ["293", "84 874", "脚本文件名口径"] }],
       "note": "PLAN:508 的「脚本文件名口径」读数；行数按 split('\\n') 计数（与 audit-l1-blockers 一致，含末行空元素）。"
     },
     {
@@ -172,21 +172,22 @@
       "planNumber": "60 757",
       "planMustAppear": true,
       "planPinned": [{ "line": 518, "mustContain": ["211", "60 757", "目录口径"] }],
-      "note": "与 84 873 是**两套并行口径**（PLAN:507/508/515），不是旧读数、不是漂移 ⇒ 两条都钉住；旧说法「60 757 是 84 873 的过期值」是误读，本门的 planOld 名单里刻意不含它。"
+      "note": "与 84 874 是**两套并行口径**（PLAN:507/508/515），不是旧读数、不是漂移 ⇒ 两条都钉住；旧说法「60 757 是 84 873 的过期值」是误读，本门的 planOld 名单里刻意不含它。"
     },
     {
       "id": "l1ForeignStock",
       "label": "L1 主壳反向阻塞（股票：非域 .rs 引用域 crate）",
-      "value": 134,
+      "value": 133,
       "value2": 26,
       "value2Label": "文件",
       "check": "l1ForeignBlockers",
       "domainKey": "STOCK",
       "hard": true,
-      "planNumber": "134",
+      "planNumber": "133",
       "planMustAppear": true,
-      "planPinned": [{ "line": 513, "mustContain": ["134", "26 文件", "主壳反向阻塞"] }],
-      "note": "剥注释只处理 // 与 ///（audit-l1-blockers.mjs:87-90 原口径）；无旧读数残留。**2026-11-03 B1（#100）重锚 152→134 / 28→26 文件**：首批 18 处改指 `axagent_harness::*`（5 个公用件上收，原处留 `pub use` 垫片）⇒ 待改写 142→124 处 / 24→22 文件，H 桶 10 处 / 4 文件不动。旧读数 152/28 只保留在 §54/§57/§61 等历史交付账与 §0.10 的 B1 前分解段（§63 已逐条点名）。"
+      "planPinned": [{ "line": 513, "mustContain": ["133", "26 文件", "主壳反向阻塞"] }],
+      "planOld": [{ "number": "134", "note": "B1 首刀（2026-11-03 #100）后、B2 那刀（2026-11-04 §64.14，`init/services.rs` 两处切 harness）前的读数；文件数 26 未变（只减处数不减文件）。**历史账**四段：§0.10.1 桶①分解段 PLAN:523 的括注、§61.4 的 B1 预期读数表（2950–2962）、§63 的 B1 交付账（3027–3086）、§64.13–64.14 的 B2 开工前现况与「−6～−9」推翻段（3255–3278）。**同形不同物**三段（134 在那里与反向阻塞处数无关）：PLAN:518 是 `OpcPage.tsx` 的行数、PLAN:1224 是 198 拆分里「3b 只有 DI·构造期选择」的桶内计数、PLAN:1332 是 `generated_tool.rs:15/116/127/134` 的行号引用清单（本档旧读数判据走 `numberOccurrences`，其左界只剔 `: . #` 不剔 `/` ⇒ 斜杠后的行号引用会命中，与 planNumberHits 的②不同口径，此处按同形不同物登记而非改判据）。段外出现一律判红。", "alsoAt": [{ "startLine": 523, "endLine": 523, "mustContain": ["B1 首刀后为 134 / 待改写 124", "B1 首刀前口径为 152 / 28"] }, { "startLine": 2950, "endLine": 2962, "mustContain": ["61.4 预期读数", "124 + 10；22 + 4", "首刀后"] }, { "startLine": 3027, "endLine": 3086, "mustContain": ["B1 首刀交付账", "134 处 / 26 文件", "124 处 / 22 文件", "兑现"] }, { "startLine": 3255, "endLine": 3278, "mustContain": ["B2 开工前的现况读数", "结论写死，不给后人留乐观数", "不改脚本口径", "124 处 / 22 文件"] }, { "startLine": 518, "endLine": 518, "mustContain": ["目录口径", "OpcPage.tsx"] }, { "startLine": 1224, "endLine": 1224, "mustContain": ["桶3 必须留内核 175", "构造期选择"] }, { "startLine": 1332, "endLine": 1332, "mustContain": ["pub struct ToolContext", "generated_tool.rs"] }, { "startLine": 3341, "endLine": 3378, "mustContain": ["第五道门回写", "generated_tool.rs:15/116/127/134", "同形不同物"] }]}],
+      "note": "剥注释只处理 // 与 ///（audit-l1-blockers.mjs:87-90 原口径）。**2026-11-03 B1（#100）重锚 152→134 / 28→26 文件**：首批 18 处改指 `axagent_harness::*`（5 个公用件上收，原处留 `pub use` 垫片）⇒ 待改写 142→124 处 / 24→22 文件，H 桶 10 处 / 4 文件不动。旧读数 152/28 只保留在 §54/§57/§61 等历史交付账与 §0.10 的 B1 前分解段（§63 已逐条点名）。**2026-11-04 B2（§64.14）再降 1 处 ⇒ 133 / 26**（`init/services.rs` 的 `MonitorConfig` + `AggregatorConfig::default()` 两处切 harness，同文件尚有 23 处 ⇒ 文件数不动）；152 之后本锚点首次有 planOld（134），四段 alsoAt 逐条自证。⚠ 同批 §64.14 推翻了 §54.3 的「B2 消减 −6～−9」：剩余 123 处 = O 桶 45 + 测试块 12 + 随本体迁出 12 + 宿主真面 55，B2 的口径只兑现 −1。"
     },
     {
       "id": "l1ForeignOpc",

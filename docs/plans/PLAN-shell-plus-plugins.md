@@ -3154,3 +3154,7 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 **`#133` SQLite 写路径被 `md5()` 打死**：上述测试第一次运行即暴露 `no such function: md5` —— 内容级去重 SQL 无条件用 PG 内置函数，SQLite 上 `upsert_embeddings` 首块即失败。已按方言分流（`vector_store.rs:759`）：PG 保留 `md5(content)=md5($1)`（规避历史乱码行的 UTF8 校验），SQLite 改 `content = $1`（SQLite 不做 UTF-8 校验）。验证：`vector_store::tests` **6 passed**、`cargo clippy -p axagent-search --all-targets -- -D warnings` EXIT=0（`.tmp/v123-verify.log`）。
 
 **`#132` reward_type 读写口径**：写端 `format!("{:?}")` 落 `TaskCompletion`，旧读端只匹配 3 个 snake_case 变体、其余 4 个全塌成 `UserFeedback`。改为读端按大写字母边界归一化后交给权威 `RewardType::try_from_str`（`storage.rs:1680` `reward_type_from_db`，不再在 storage 抄变体表）；新增 `reward_type_roundtrips_for_all_variants`（`storage.rs:2333`，8 变体逐一往返）。写端暂保留 Debug 形态以兼容存量行，统一格式留给迁移批。验证：`storage::tests` **12 passed**、clippy EXIT=0、rustfmt EXIT=0（`.tmp/v132-verify.log`）。
+
+### 64.7 `#131` 第五道门 evidence 判据收紧（2026-11-03）
+
+**缺陷**：`adjudicateEvidence` 与 `computeCodeRepin` 的「相符」只看「该行含 token」。`worker.rs` 位移后 `workflow.evolver` 区间止点（anchorText=`is_running`）落到同 token 的另一处调用（`set_llm_provider`），判据仍绿 ⇒ 端点静默指向错误语义。**改法**（`check-capability-register.mjs`）：有 `anchorText` 时要求整行（空白归一）相等；重锚模式的「相符」同口径 —— 不符则按 anchorText 重新定位，零 / 多命中照旧拒写。**验证**：全量 8 条 anchorText 锚点整行相符 0 例外（`.tmp/ev-anchor-audit.mjs`）；`--selftest` 全绿；判定跑 EXIT=0（`.tmp/gate-20261103-2115.log`）。

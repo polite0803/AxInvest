@@ -467,6 +467,12 @@ export function adjudicateEvidence(ev, contentFor) {
   if (ev.token && !l.includes(ev.token)) {
     return `登记 token「${ev.token}」/ 实测 第 ${ev.line} 行「${l.trim().slice(0, 80)}」`;
   }
+  // 有 anchorText 时必须整行相符：只看 token 会让「同一 token 的另一处调用」冒充原锚点。
+  // 实测样本（#131）：workflow.evolver 区间止点原指 `is_running`，行位移后该行变成
+  // `set_llm_provider` —— token 仍在，判据却绿，端点已指向别的语义。
+  if (ev.anchorText && normPlanLine(l) !== normPlanLine(ev.anchorText)) {
+    return `登记 anchorText「${normPlanLine(ev.anchorText).slice(0, 80)}」/ 实测 第 ${ev.line} 行「${normPlanLine(l).slice(0, 80)}」`;
+  }
   return null;
 }
 
@@ -1410,8 +1416,12 @@ export function computeCodeRepin(register, fileTextFor) {
     const lines = linesOf(r.file);
     if (lines === null) { blockers.push(`${r.path} = ${r.line}：文件 ${r.file} 读不出（缺失或不可读）⇒ 无文本可定位，拒绝重锚 —— 先核对文件是否被移动/删除`); continue; }
     const cur = lines[r.line - 1] ?? "";
-    // 「相符」的口径与判定档逐字一致（第 line 行含 token）⇒ 相符的条目一律不动，也不因缺 anchorText 而报错。
-    if (r.line <= lines.length && cur.includes(r.token)) { kept++; continue; }
+    // 「相符」的口径与判定档逐字一致：行含 token，且**有 anchorText 时整行相符**。
+    // 只判 token 会把「同一 token 的另一处调用」当成原锚点（#131 的端点静默错指）。
+    if (
+      r.line <= lines.length && cur.includes(r.token) &&
+      (!r.anchorText || normPlanLine(cur) === normPlanLine(r.anchorText))
+    ) { kept++; continue; }
     const hits = tokenHitLines(lines, r.token);
     const diag = `token「${r.token}」在 ${r.file} 内命中 ${hits.length} 行${hits.length <= 12 ? ` [${hits.join(", ")}]` : "（过多，未列出）"}`;
     if (!r.anchorText) {

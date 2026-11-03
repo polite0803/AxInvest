@@ -152,6 +152,15 @@ pub const SUPPORTED_REMOTE_SEAMS: &[&str] = &[
     "system.prompt",
 ];
 
+/// 宿主内部注入通道：注册表里**有 provider**，但不允许插件经 `call_seam` 调用。
+///
+/// 与 [`SUPPORTED_REMOTE_SEAMS`] 是两个方向的两张表：那张是「插件提供给宿主」的清单；
+/// 这张是「宿主自己用、不对外」。`session.store` 是宿主工具取会话状态实例的注入通道
+/// （`capability_load` / `save_as_workflow` 经 `CapabilityRegistry::get_session_state_store`
+/// 直取），数据主权判据未定（PLAN §64.3）⇒ 保持注册，但插件调用必须在**取 provider 之前**
+/// 拒绝 —— 否则 `list_by_prefix` 等于把全量会话状态读走。
+pub const HOST_INTERNAL_SEAMS: &[&str] = &["session.store"];
+
 /// UI action 回流的 op（宿主 → 插件方向，PLAN §10.5-2）。
 ///
 /// **不在** [`SUPPORTED_REMOTE_SEAMS`] 里：那份清单是「插件**提供**的接缝」，
@@ -594,6 +603,16 @@ impl HostPeer {
                 format!(
                     "插件未声明 `{}` 权限，拒绝接缝 `{seam}` 的写操作 `{op}`",
                     permission.as_str()
+                ),
+            );
+        }
+        // 宿主内部接缝（`HOST_INTERNAL_SEAMS`）：注册表里有 provider，但**不向插件开放**。
+        // 闸放在取 provider / 反序列化之前 ⇒ 拒绝路径零触达。
+        if HOST_INTERNAL_SEAMS.contains(&seam) {
+            return FrameResponse::error(
+                error_codes::SEAM_CALL_UNSUPPORTED,
+                format!(
+                    "接缝 `{seam}` 是宿主内部注入通道，不对插件开放（会话状态数据主权在宿主，PLAN §64.3）"
                 ),
             );
         }
@@ -11368,5 +11387,57 @@ mod tests {
         );
         assert_eq!(*watcher.watch_calls.lock(), 0, "watch 不得触达 provider");
         assert!(knowledge.index_calls.lock().is_empty(), "index_text 不得触达 provider");
+    }
+
+    /// `session.store` 是**宿主内部注入通道**：注册在案，但插件调用必须在取 provider 前被拒。
+    ///
+    /// 判据两点：① 错误码是 `SEAM_CALL_UNSUPPORTED`（不是「没有 provider」）；
+    /// ② 拒绝路径零触达 —— 即使插件有 `write` 权限，被拒的 `set` 也不得落库。
+    #[test]
+    fn session_store_is_host_internal_and_rejects_plugin_calls() {
+        use axagent_harness::SessionStateStore as _;
+
+        let memory = Arc::new(axagent_harness::test_support::MemorySessionStateStore::new());
+        let registry = Arc::new(CapabilityRegistry::new());
+        registry
+            .register_session_state_store(memory.clone())
+            .expect("session.store 接缝应注册成功");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("session.store 用例需要 runtime");
+        runtime.block_on(memory.set("k", "before", None)).expect("预置应成功");
+        let peer = HostPeer {
+            plugin_id: "plugin.session".to_string(),
+            declared_capabilities: Vec::new(),
+            declared_calls: vec!["session.store".to_string()],
+            registry,
+            runtime: Some(runtime.handle().clone()),
+            permissions: vec![PluginPermission::Write],
+        };
+        let response = with_watchdog(Duration::from_secs(5), "session.store 拒绝", move || {
+            peer.handle_call_seam(
+                &json!({
+                    "seam": "session.store",
+                    "op": "set",
+                    "args": { "key": "k", "value": "after" },
+                }),
+                &[],
+            )
+        });
+        assert_eq!(
+            response.code.as_deref(),
+            Some(error_codes::SEAM_CALL_UNSUPPORTED),
+            "宿主内部接缝必须显式拒绝，实际 {response:?}"
+        );
+        assert!(
+            response.message.clone().unwrap_or_default().contains("宿主内部"),
+            "文案要点明边界，实际：{response:?}"
+        );
+        assert_eq!(
+            runtime.block_on(memory.get("k")).expect("读回应成功"),
+            Some("before".to_string()),
+            "被拒的写不得落库"
+        );
     }
 }

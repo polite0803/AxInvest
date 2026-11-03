@@ -3121,4 +3121,4 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 2. 它的现存价值是 **G4 宿主内注入**（替换 OnceLock 双注入），已在生产使用；「插件调不到」不是缺陷，是边界。
 3. 会话状态是跨会话 / 跨 agent 的宿主自有 KV（含 `NS_SKILL_LOADED` 等命名空间键），一旦对插件开放 `list_by_prefix` 就等于开放全量读取；要开放必须先有 §54.2 R1 第二段设计的「命名空间白名单 + DTO/`schema_version` 校验」，那是 `domain.store` 批的事。
 
-**落地（归第二波，未做）**：① 在 `dispatch_seam` 前加一张显式的宿主内部接缝表（当前仅 `session.store`），命中即返回带说明的拒绝，而不是让它落到通用「未知 op」分支；② 补一条测试锁住「插件调用 `session.store` → 明确拒绝且不触达 provider」；③ 在预置声明注释里写明「宿主内部，不远程」。本裁定之前，`#102` 保持 pending。
+**落地（2026-11-03 已完成，`#102`）**：① `worker.rs:162` 新增 `HOST_INTERNAL_SEAMS = ["session.store"]`，`:611` 在权限闸之后、取 provider 之前显式拒绝（`SEAM_CALL_UNSUPPORTED`，文案点名「宿主内部注入通道」）；② 单测 `worker.rs:11397` 锁住「即使插件声明 `write`，被拒的 `set` 也不落库」；③ 预置声明注释 `capability_registry.rs:254` 写明宿主内部。测试 `cargo test -p axagent-plugins session_store_is_host_internal` = 1 passed（223 filtered out）；`rustfmt --edition 2024` 两文件均 0。

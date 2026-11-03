@@ -250,6 +250,9 @@ impl ServiceDefinition {
     /// 单实例接缝：实现 [`crate::SessionStateStore`]（会话作用域 KV，含 TTL），
     /// 由 `dao` 层提供（`DaoSessionStateStore`）。工具侧原先经 `OnceLock` + setter
     /// 各自注入同一实例，现统一从本接缝取回（「一切皆插件」缺口 G4）。
+    ///
+    /// ⚠ **宿主内部通道，对插件不开放**（PLAN §64.3）：会话状态的数据主权判据未定，
+    /// 插件侧 `call_seam` 会被 `worker.rs` 的 `HOST_INTERNAL_SEAMS` 闸显式拒绝。
     pub fn session_state_store() -> Self {
         Self::new(
             "session.store",

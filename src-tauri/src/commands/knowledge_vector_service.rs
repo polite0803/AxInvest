@@ -65,11 +65,12 @@
 //! ### 幂等语义（接缝不承诺，本层就此定案）
 //!
 //! 宿主两条 chunk 切分路径的块 id 都是 `{document_id}_{index}`（`rag::prepare_chunks`），而
-//! `rag::index` 落的是 `upsert_embeddings` ⇒ **同一 `document_id` 重复入库 = 按块覆盖**。
-//! 已知不完全：新正文切出的块数**少于**旧块数时，尾部多出来的旧块不会被清（要清就得调
-//! `delete_document_embeddings`，而那是 PLAN §56.1-Q2 点名的半截删除原语，且插件 supplied 的
-//! `document_id` 可以指向宿主自己的真实文档 ⇒ 给它删除面等于给插件一把覆写用户文档的枪）。
-//! 本批就此定为「覆盖到不减少为止」，并把这一残余风险与上面第 3 条一起交回 leader 复核。
+//! `rag::index` 落的是 `upsert_embeddings` —— 后者在**同一事务**内先按 `document_id` 删除该
+//! 文档的全部旧行（meta + vec0），再插入新块 ⇒ 同一 `document_id` 重复入库 = **整文档替换**，
+//! 正文变短也不会留尾块（`vector_store.rs` 的 `reindexing_shorter_document_drops_tail_chunks`
+//! 钉住该行为，#123）。删除只发生在「写入该文档」这条路径内部；接缝仍**不提供**独立 delete op
+//! （插件 supplied 的 `document_id` 可指向宿主的真实文档 ⇒ 独立删除面等于一把覆写用户文档的枪）。
+//! 另：该去重/删除路径原先在 SQLite 上会因 `md5()` 不存在而整条写入失败（#133，已按方言分流）。
 //!
 //! ## 未装配 / 注册时机（裁定 J8）
 //!

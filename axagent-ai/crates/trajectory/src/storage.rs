@@ -1674,13 +1674,26 @@ fn model_to_step(s: &trajectory_steps::Model) -> TrajectoryStep {
     }
 }
 
+/// 历史写入端存的是 `format!("{:?}")`（`TaskCompletion`），而权威解析器
+/// [`crate::trajectory::RewardType::try_from_str`] 只认 snake_case。按大写字母边界归一化后
+/// 交给它，避免在 storage 里再抄一份变体表 —— 抄的那份只有 4 个变体，其余 4 个会全塌成兜底。
+fn reward_type_from_db(raw: &str) -> crate::trajectory::RewardType {
+    let mut snake = String::with_capacity(raw.len() + 4);
+    for (i, c) in raw.char_indices() {
+        if c.is_ascii_uppercase() {
+            if i > 0 {
+                snake.push('_');
+            }
+            snake.push(c.to_ascii_lowercase());
+        } else {
+            snake.push(c);
+        }
+    }
+    crate::trajectory::RewardType::try_from_str(&snake)
+}
+
 fn model_to_reward(r: &trajectory_rewards::Model) -> RewardSignal {
-    let rt = match r.reward_type.as_str() {
-        "task_completion" => crate::trajectory::RewardType::TaskCompletion,
-        "tool_efficiency" => crate::trajectory::RewardType::ToolEfficiency,
-        "reasoning_quality" => crate::trajectory::RewardType::ReasoningQuality,
-        _ => crate::trajectory::RewardType::UserFeedback,
-    };
+    let rt = reward_type_from_db(&r.reward_type);
     // `created_at` 双向前兼容：新行为存十进制毫秒（= `timestamp_ms` 原样），
     // 旧行为存 `from_timestamp_millis` 产出的 RFC3339 —— 两者还原成同一个毫秒数。
     // 刻意**不**用「解析失败 ⇒ `Utc::now()`」兜底：那会在读不出时**静默伪造一个当前
@@ -2310,6 +2323,39 @@ mod tests {
                 .await
                 .expect("测试：无命中会话查询不应报错")
                 .is_empty()
+        );
+    }
+
+    /// #132：`reward_type` 落库是 Debug 形态（`TaskCompletion`），读端必须能还原全部 8 个变体。
+    ///
+    /// 旧读端只匹配 3 个 snake_case 变体、其余一律 `UserFeedback` ⇒ 本测试在修复前会红。
+    #[tokio::test]
+    async fn reward_type_roundtrips_for_all_variants() {
+        let db = axagent_dao::db::create_test_pool().await.expect("测试：创建连接池应成功").conn;
+        let storage = TrajectoryStorage::new(Arc::new(db.clone()));
+
+        let types = [
+            RewardType::TaskCompletion,
+            RewardType::ToolEfficiency,
+            RewardType::ReasoningQuality,
+            RewardType::ErrorRecovery,
+            RewardType::UserFeedback,
+            RewardType::PatternMatch,
+            RewardType::LlmReasoningQuality,
+            RewardType::LlmToolEfficiency,
+        ];
+        let mut t = trajectory_at("s-reward-type", "topic-reward-type", Utc::now());
+        t.rewards =
+            types.iter().enumerate().map(|(i, ty)| reward(*ty, i as f64, i, i as u64)).collect();
+        storage.save_trajectory(&t).await.expect("测试：保存轨迹应成功");
+
+        let got =
+            storage.get_session_trajectories("s-reward-type").await.expect("测试：读回轨迹应成功");
+        assert_eq!(got.len(), 1);
+        assert_eq!(
+            got[0].rewards.iter().map(|r| r.reward_type).collect::<Vec<_>>(),
+            types.to_vec(),
+            "8 个变体必须原样读回（Debug 形态落库不得塌成兜底变体）"
         );
     }
 }

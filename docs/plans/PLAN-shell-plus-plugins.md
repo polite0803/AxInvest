@@ -3145,4 +3145,12 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 
 **验证**：`cargo test -p axagent-trajectory --lib storage::tests` = **11 passed**（`.tmp/v121-recheck.log`，leader 独立复跑）；新增三测 `query_limit_returns_newest_n_in_desc_order`（:2112，含 limit > 总数 / limit=0 边界）、`query_limit_applies_after_filters`（:2154，LIMIT 在过滤之后）、`batched_steps_and_rewards_match_single_row_queries`（:2188，逐项与单查结果比对）；`cargo clippy -p axagent-trajectory --all-targets -- -D warnings` EXIT=0（`.tmp/v121-clippy.log`）；`rustfmt --edition 2024 --check` EXIT=0。
 
-**未做 / 新发现**：① 批量装配的 rewards 沿袭原查询「无 ORDER BY」的物理行序，若将来给 rewards 引入显式顺序需同改两处；② 发现既有读写不对称 —— 写端 `storage.rs:227` 用 `format!("{:?}", …)` 存 `TaskCompletion`，读端只认 `task_completion` ⇒ 所有 reward_type 读回都落到 `UserFeedback`（两条读路径彼此一致，测试掩盖了它），另立 `#132`。
+**未做 / 新发现**：① 批量装配的 rewards 沿袭原查询「无 ORDER BY」的物理行序，若将来给 rewards 引入显式顺序需同改两处；② 发现既有读写不对称 —— 写端 `storage.rs:227` 用 `format!("{:?}", …)` 存 `TaskCompletion`，读端只认 `task_completion` ⇒ 所有 reward_type 读回都落到 `UserFeedback`（两条读路径彼此一致，测试掩盖了它），另立 `#132`（§64.6 已修）。
+
+### 64.6 `#123` / `#133` / `#132` 交付账（2026-11-03）
+
+**`#123`「变短留尾块」结论修正**：`rag::index` → `upsert_embeddings` 在**同一事务**内先按 `document_id` 删旧行（meta + vec0）再插入 ⇒ 同一文档重复入库是**整文档替换**，不存在尾块残留；`knowledge_vector_service.rs:65` 模块头原「已知不完全」的陈述与实现不符。已补回归测试 `reindexing_shorter_document_drops_tail_chunks`（`vector_store.rs:2269`，5 块 → 2 块后 meta COUNT=2）并改写模块头。接缝仍**不提供**独立 delete op（理由不变：插件 supplied 的 `document_id` 可指向宿主真实文档）。
+
+**`#133` SQLite 写路径被 `md5()` 打死**：上述测试第一次运行即暴露 `no such function: md5` —— 内容级去重 SQL 无条件用 PG 内置函数，SQLite 上 `upsert_embeddings` 首块即失败。已按方言分流（`vector_store.rs:759`）：PG 保留 `md5(content)=md5($1)`（规避历史乱码行的 UTF8 校验），SQLite 改 `content = $1`（SQLite 不做 UTF-8 校验）。验证：`vector_store::tests` **6 passed**、`cargo clippy -p axagent-search --all-targets -- -D warnings` EXIT=0（`.tmp/v123-verify.log`）。
+
+**`#132` reward_type 读写口径**：写端 `format!("{:?}")` 落 `TaskCompletion`，旧读端只匹配 3 个 snake_case 变体、其余 4 个全塌成 `UserFeedback`。改为读端按大写字母边界归一化后交给权威 `RewardType::try_from_str`（`storage.rs:1680` `reward_type_from_db`，不再在 storage 抄变体表）；新增 `reward_type_roundtrips_for_all_variants`（`storage.rs:2333`，8 变体逐一往返）。写端暂保留 Debug 形态以兼容存量行，统一格式留给迁移批。验证：`storage::tests` **12 passed**、clippy EXIT=0、rustfmt EXIT=0（`.tmp/v132-verify.log`）。

@@ -753,12 +753,18 @@ impl VectorStore {
                     );
                     continue;
                 }
+                // md5() 是 PG 内置函数，SQLite 没有（实测 `no such function: md5`）。
+                // PG 侧用 md5 是为了绕开「历史乱码 chunk 用 text 等值比较触发 UTF8 校验失败」；
+                // SQLite 不做 UTF-8 校验，`content = $1` 即可，而且不会把整个写入路径打死。
+                let dup_sql = if self.is_pg() {
+                    format!("SELECT 1 AS x FROM {name}_meta WHERE md5(content) = md5($1) LIMIT 1")
+                } else {
+                    format!("SELECT 1 AS x FROM {name}_meta WHERE content = $1 LIMIT 1")
+                };
                 let dup = txn
                     .query_one_raw(Statement::from_sql_and_values(
                         self.be(),
-                        format!(
-                            "SELECT 1 AS x FROM {name}_meta WHERE md5(content) = md5($1) LIMIT 1"
-                        ),
+                        dup_sql,
                         vec![record.content.clone().into()],
                     ))
                     .await
@@ -2253,6 +2259,45 @@ mod tests {
         // ⑤ 非法集合名与维度读口同口径：`Err(Validation)`，不静默返 false。
         let err = store.collection_exists("kb'; DROP TABLE--").await.expect_err("非法名应拒收");
         assert!(matches!(err, AxAgentError::Validation(_)), "应为 Validation：{err:?}");
+    }
+
+    /// #123 现状核实：同一 document 用更短的内容重索引，尾部旧块不得残留。
+    ///
+    /// `upsert_embeddings` 在事务内先按 document_id 删掉旧行再插入，因此「变短留尾块」
+    /// 不应发生；这条测试把该行为钉住，避免将来把「按块 upsert」当成覆盖语义。
+    #[tokio::test]
+    async fn reindexing_shorter_document_drops_tail_chunks() {
+        register_sqlite_vec_for_tests();
+        let db = memory_db().await;
+        let store = VectorStore::new(db.clone());
+        store.ensure_collection("kb-short", 2).await.expect("建集合应成功");
+
+        let rec = |i: usize| EmbeddingRecord {
+            id: format!("d_{i}"),
+            document_id: "d".into(),
+            chunk_index: i as i32,
+            content: format!("旧块{i}"),
+            embedding: vec![1.0, 0.0],
+        };
+        store
+            .upsert_embeddings("kb-short", (0..5).map(rec).collect())
+            .await
+            .expect("首次索引应成功");
+        store
+            .upsert_embeddings("kb-short", (0..2).map(rec).collect())
+            .await
+            .expect("变短重索引应成功");
+
+        let row = db
+            .query_one_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT COUNT(*) AS n FROM vec_kb_short_meta WHERE document_id = 'd'".to_string(),
+            ))
+            .await
+            .expect("计数应成功")
+            .expect("COUNT 必有行");
+        let n: i64 = row.try_get("", "n").expect("读 n 应成功");
+        assert_eq!(n, 2, "变短重索引后必须只剩新块（尾块不得残留）");
     }
 
     /// 注册表行缺失时的维度回退：维度只存在于 vec0 建表语句的 `float[N]` 里。

@@ -5838,6 +5838,90 @@ mod tests {
         assert!(!outcome.rejected);
     }
 
+    /// `#140`：`ops::EVENT` 走**真实帧往返**（回环 socket + 与生产同源的 `WorkerInvoker`），
+    /// 实测「订阅回调 → 写帧 → 假 worker 回帧 → 裁决」的宿主侧耗时。
+    ///
+    /// 判据只钉「没有走错通道」级别：正常应远小于 1 ms，这里给 2 s 上界（≈2000× 余量）——
+    /// 既能在 CI 抖动下稳定，又能抓住「帧没发出去、一路等到默认预算」这类回归。
+    /// 实测值由 `--nocapture` 打印，供 `SEAM_OP_TIMEOUT_OVERRIDES` 的证据栏引用。
+    #[tokio::test]
+    async fn event_op_round_trip_is_measured_and_stays_under_default_budget() {
+        let (host_side, mut worker_side) = tcp_pair();
+        // 留下一个对端控制句柄：`host_side.try_clone()` 让写端/读端各持一个 handle，
+        // 只 drop 写端**不会**让对端读到 EOF ⇒ 收尾必须由本句柄显式 shutdown（见测试末尾）。
+        let worker_ctl = worker_side.try_clone().expect("克隆回环连接（对端控制）");
+        let host_reader = host_side.try_clone().expect("克隆回环连接（读端）");
+        let _worker = std::thread::spawn(move || {
+            loop {
+                let mut len_buf = [0u8; 4];
+                if worker_side.read_exact(&mut len_buf).is_err() {
+                    break;
+                }
+                let len = u32::from_be_bytes(len_buf) as usize;
+                let mut payload = vec![0u8; len];
+                if worker_side.read_exact(&mut payload).is_err() {
+                    break;
+                }
+                let Ok(request) = serde_json::from_slice::<FrameRequest>(&payload) else {
+                    break;
+                };
+                let response = FrameResponse::success(json!({ "verdict": "continue" }))
+                    .with_id(request.request_id.clone().unwrap_or_default());
+                if write_json_frame(&mut worker_side, &response).is_err() {
+                    break;
+                }
+            }
+        });
+
+        let invoker = Arc::new(WorkerInvoker::from_streams(
+            "event-measure@external",
+            Box::new(host_reader),
+            Box::new(host_side),
+        ));
+        let subscriber = WorkerEventSubscriber::new("event-measure@external", invoker.clone());
+        let event = bridge_event();
+
+        // 预热一次（首次会带着 spawn_blocking 线程池的建立成本）。
+        let _ = subscriber.handle(&event).await;
+        const N: usize = 200;
+        let mut samples = Vec::with_capacity(N);
+        for _ in 0..N {
+            let started = Instant::now();
+            let verdict = subscriber.handle(&event).await;
+            samples.push(started.elapsed());
+            assert!(matches!(verdict, SubscriberVerdict::Continue), "裁决应原样透传");
+        }
+        samples.sort_unstable();
+        let p50 = samples[N / 2];
+        let p99 = samples[N * 99 / 100];
+        let max = *samples.last().expect("N > 0");
+        eprintln!("#140 event 往返：n={N} p50={p50:?} p99={p99:?} max={max:?}");
+        assert_eq!(
+            subscriber.delivery_counters().snapshot().delivered,
+            (N + 1) as u64,
+            "每个事件都应记为一次成功投递（含预热）"
+        );
+        assert!(
+            max < Duration::from_secs(2),
+            "event 往返最大 {max:?} 超过 2s —— 疑似没走帧通道/一路等到默认预算"
+        );
+        assert!(
+            max < Duration::from_millis(DEFAULT_SEAM_TIMEOUT_MS),
+            "event 往返必须远低于默认接缝预算，实际 {max:?}"
+        );
+
+        // 收尾（否则读线程阻塞在关闭的连接上，测试会挂到超时）：
+        // 断对端 ⇒ 假 worker 读到 EOF 退出 ⇒ 读线程登记断连；随后才做 shutdown。
+        let _ = worker_ctl.shutdown(Shutdown::Both);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !invoker.inner.connection_closed.load(Ordering::Acquire) && Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        drop(subscriber);
+        invoker.shutdown();
+    }
+
     /// 固定回错的测试替身：`message` 原样作为 `Err` 返回（用来分reason计数）。
     struct FailingInvoker {
         message: String,

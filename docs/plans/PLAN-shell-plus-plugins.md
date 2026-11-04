@@ -3614,3 +3614,17 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 | L3 | 位移模拟（在文档头插 3 行后调 `checkPlan`） | 红 | **26 条硬失败 / 7 条 ALSOAT-STALE / 15 条旧读数出段**，无一条静默通过 |
 
 **未做**：锚定半径是固定 3 行；若某处合法旧读数天然离任何 token 都超过 3 行，必须为该处补一个自证 token（不接受把半径调大来迁就）。
+
+## 71. `#140`：EVENT op 帧往返实测与超时表裁定（2026-11-04）
+
+**测法**（`axagent-plugins/crates/plugins/src/worker.rs::tests`）：回环 socket 起一个假 worker（读一帧、原样回 `{"verdict":"continue"}`），宿主侧用**与生产同源**的 `WorkerInvoker::from_streams`，经 `WorkerEventSubscriber::handle` 走完整路径（序列化事件 → `spawn_blocking` → `invoke_with_chain` → 写帧 → 配对回帧 → 裁决）。预热 1 次后采样 200 次。
+
+**实测**（2026-11-04，本机，两轮各 200 次）：`p50 0.39–0.50 ms`、`p99 0.87–1.74 ms`、`max 1.5–2.1 ms`。
+
+**裁定**：**`event` 不进 `SEAM_OP_TIMEOUT_OVERRIDES`**。相对默认接缝预算（15 s）有四个数量级余量，调大只会掩盖真正的僵死；证据已回写 `plugin-proto` 的收录判据注释。
+
+**测试自带的两条防回归**：
+1. 上界固定为 **2 s**（≈2000× 余量）—— CI 抖动下稳定，同时能抓「帧没走通、一路等到默认预算」这类回归；
+2. 收尾必须先 `shutdown` 对端 socket 再 `invoker.shutdown()` —— 写端/读端各持一个 `try_clone` handle，只 drop 写端不会让读线程收到 EOF，否则测试会挂到进程超时（本片第一次跑就踩到，按 PID 终止自己的测试进程后修）。
+
+**本片未做**：`send` / `dispatch` / `chat` / `embed` 等触外网 op 仍无 op 级实测；它们的预算裁定要各自补实测，不借本条结论。

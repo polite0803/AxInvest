@@ -436,6 +436,11 @@ pub const TOOL_SET_EXEC_TIMEOUT_MS: u64 = 60_000;
 ///   分布亦无盘上预算出处** ⇒ 暂留默认，标「预算待实证」；
 /// - `evaluate`（business_rule）：**有实测** —— 长驻 `pipe` 往返 18.9 µs
 ///   （`PLAN-everything-is-plugin.md:274` / `:670`，§11 基准表）⇒ 15 s 余量充足，不进表；
+/// - `event`（L1 事件桥，`ops::EVENT`）：**有实测（任务 #140）** —— 回环 socket + 与生产同源的
+///   `WorkerInvoker` 走完整 `WorkerEventSubscriber::handle` 路径，每轮 200 次采样、两轮：
+///   **p50 0.39–0.50 ms / p99 0.87–1.74 ms / max 1.5–2.1 ms**（`worker.rs` 的
+///   `event_op_round_trip_is_measured_and_stays_under_default_budget`，2026-11-04）⇒
+///   相对默认预算有四个数量级余量，**不进表**；
 /// - `execute`（sandbox）、`record` / `assert`、`start` / `stop` / `send` / `is_*`、
 ///   `dispatch`、`list`：**只有形态推断（毫秒~秒级），盘上无实测、无出处** ⇒ 留默认，
 ///   其中 `send` / `dispatch` 触外网，属「无证据但存疑」，需要实测才能裁定。

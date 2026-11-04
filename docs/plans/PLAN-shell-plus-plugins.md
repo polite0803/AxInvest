@@ -4217,3 +4217,58 @@ FAIL: 锚点 frontendDirCaliber ：登记 60900 行 / 实测 60912 行 / 差 12
 3. **`finance.rs` 仍留 1 处 `analysis_engine::risk` 引用**（VaR/PEG/KELLY 的权威数学源）。把风险数学上收 harness 属 §125 裁定的 J3 延期项，不在 B7b。
 4. **`tools` crate 的 `domain_mcp.rs` 测试只覆盖「畸形跳过 + 同名保留」**：没有端到端验证「注册表里 5 个名字都能被 LLM 调用」——那需要真实客户端，留到集成测试。
 5. **`axagent-runtime/Cargo.lock` / `axagent-infra/Cargo.lock` 未随本批提交**：两个文件在本批开工前已被并发会话改动（同一份 lock 里有一行与本批无关的 `thiserror` 依赖增补），无法按行切分。本批的 lock 变化只有 `axagent-tools → axagent-astock-data` 一条，已落在 `src-tauri/Cargo.lock`（开工前干净）；其余两个 lock 待并发变更落地时一并提交。CI 未使用 `--locked`（已 grep 确认），不会因这一条产生红灯。
+
+## 91. `#35` B8：前端收口（54 处 / 39 文件）可执行分解 —— 先定终局，再分批（2026-11-04）
+
+**本批只做分解，不动代码。** 原因：B8 的 54 处不是同一类问题，其中 6 处是判据误报/跨域，48 处是**真实耦合**且分属四种不同终局；按 B1–B7 的经验，先混在一起改会把「改路径洗绿」当成进展。
+
+### 91.1 四条终局（R6 已定框架）
+
+| 类 | 终局 | 处数 | 前置 |
+|---|---|---|---|
+| ① 判据误报 | **不改代码、不改判据**（§64.13 先例：中途改 `feRe` 会让 54 失去连续性）；在审计判读口径里逐条登记 | **6** | 无 |
+| ② 共享基元下沉 | 搬到 `src/components/<neutral>/` 或 `src/lib/` **且目标本身中性**（组件中立性门禁要求搬入中性目录后不得再指向 feature 目录） | 20 | 需先证明目标无域语义 |
+| ③ 宿主生成 DTO | 域 DTO 进 `schema-gen` → `src/types/generated/`（R6 原文）；宿主只认生成物 | 6 | schema-gen 扩面（当前只生成 18 个 IPC DTO + event names） |
+| ④ 随插件迁出 | 页面 / 任务中心 / 聊天渲染器改走插件 `pages[]` 或**渲染器注册表** | 22 | 前端 bundle 通道（股票包目前只有 Rust worker + manifest，**没有前端资产**） |
+
+### 91.2 逐类拆解（盘上逐条解析，`.tmp/b8-classify.mjs` 可复算）
+
+**① 判据误报 / 跨域（6 处，不改代码）**
+- `chat/ChatViewMessages.tsx:87 → ./QuoteBlock`、`chat/InputArea.tsx:73 → ./QuotePreviewBar`：聊天**消息引用块**，与行情无关（`quote` 命中 feRe）。
+- `components/settings/index.ts:30`、`pages/SettingsPage.tsx:71 → chat/PluginMarketplace`：**插件市场**，与股市无关（`market` 命中 feRe）。
+- `pages/OpcPage.tsx:22,25 → ./opc/components/{MarketPackTab,TalentMarketTab}`：导入方与目标**都是 OPC 自有文件**；Rust 侧有 `cross` 桶处理这种情形，前端侧没有 —— 属**两域判据不同源**。
+
+**② 共享基元下沉（20 处）**
+- `@/lib/stock-analysis-utils` **13 处**（agentOutput / decision-agreement / dataQualityDiagnosis / decisionInputDiagnosis / MultiLlmVotePanel / time-travel ×3 / theme 与 utils 测试 ×2 等）。
+- `@/lib/investRoutes` **3 处**（office StrategyRoomMiniBar / time-travel ReplayWorkbench ×1 / DailyReviewPanel）→ 宿主需要「跳到投资页」的通用导航口。
+- `stock-analysis/_shared/PageHeader` 1、`stock-analysis/utils` 1、`stock-analysis/vendorCheck` 1、`office/phaser/investSceneTemplates` 2。
+- ⚠ 其中 `stock-analysis-utils` 的函数（`parseAction` / `getActionColor` / `analystBaseOf` / `horizonLabelKey`）是**股票语义**，单纯改名是洗绿 ⇒ 终局是「这些宿主 lib 本身属于域」或「把纯函数上收成参数化工具」，必须先逐函数判中性，不能整文件搬。
+
+**③ 宿主生成 DTO（6 处）**
+- `agentOutput.ts` / `TrajectoryPanel.tsx` / `agentOutput.test.ts` → `@/types/stock-analysis` 的 `StockDecision` / `TimelineNode` / `TimelinePhase`；`screenshotDiagnosisStore.ts` → `@/types/paper-portfolio` 的 `PaperPortfolio`。
+- 判据：这些类型若在 Rust 侧有 DTO（`PaperPortfolio` 有），走 schema-gen；若是**纯前端视图类型**（`TimelineNode` 的 `tabKey: "market"|"analyze"|"execute"`），则只能留在域文件里 ⇒ 宿主消费方必须改走渲染器或删除该依赖。
+
+**④ 随插件迁出（22 处）**
+- 页面：`ContentArea → InvestPage`（lazy 路由）、`ScreenerPage`、`ScreenshotDiagnosisPage`。
+- 任务中心：`adapters/registry.ts`、`TaskCreateModal`(2)、`OverviewTab`(3)、`RunDetailDrawer`、两个测试(4) —— 任务中心的 adapter 形态已是「按 run 类型分派」，终局是把股票 adapter 注册进插件贡献面。
+- 聊天渲染器：`WorkflowAgentCard`(2)、`MultiLlmVotePanel`(1) —— 宿主聊天渲染股票输出，需要**渲染器注册表**（宿主提供插槽，域提供实现）。
+- barrels：`stores/index.ts`(5)、`types/index.ts`(3) —— R6 已裁「拆，不留垫片」，但**必须先完成上面 ④ 的消费方改道**，否则拆 barrel 只会把隐藏依赖变成显式计数（读数会上升）。
+
+### 91.3 批次顺序（依赖决定）
+
+| 批次 | 内容 | 前置 | 预期读数 |
+|---|---|---|---|
+| **B8-0** | **前端 bundle 通道**：把股票前端（页面 + 渲染器）打进插件产物，宿主按 `pages[]` 装载 | 无（#44/#46/#64 已建，缺 vite 产物与 manifest 资产段） | 0（前置） |
+| **B8-1** | **渲染器注册表**：宿主聊天/任务中心只认「按类型注册的渲染器」，股票实现由插件注入 | B8-0 | −6～−9 |
+| **B8-2** | 页面与任务中心迁移（InvestPage / Screener / ScreenshotDiagnosis / TasksCenter adapter） | B8-0 | −10～−12 |
+| **B8-3** | 生成 DTO（schema-gen 扩面）或删除前端视图类型依赖 | 无（可与 B8-2 并行） | −4～−6 |
+| **B8-4** | 共享基元下沉（逐函数判中性后） | B8-1/B8-2 之后（避免先搬又改） | −8～−12 |
+| **B8-5** | barrel 拆除（`stores/index.ts` / `types/index.ts`） | B8-1～B8-4 全部完成 | 收尾，读数不变或略升后归零 |
+
+**终局判据**：B8 完成后，前端反向阻塞 = **6 处判据误报（登记不改）** + 0 真实耦合；若判据同源化（前端补 `cross` 桶）则读数为 **52 → 0**。**不得**为了数字去改 `feRe`。
+
+### 91.4 本批未做（如实列）
+
+1. B8-0 的前端打包方案未定稿：需要决定「页面产物用 iframe 容器（T3 现有形态）还是 host 内 module federation」——前者复用 #64 的 page 容器，后者要新机制；先用现有 `pages[]`。
+2. 20 处共享基元的「逐函数中性判定」未做（`stock-analysis-utils` 的 8 个导出需要一条条判）。
+3. `schema-gen` 扩面未做（当前只出 18 个 IPC DTO）。

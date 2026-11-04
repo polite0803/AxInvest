@@ -1199,7 +1199,6 @@ macro_rules! register_all_commands {
             commands::stock_analysis::check_vendor_health,
             commands::stock_analysis::clear_asof_degradation_log,
             commands::stock_analysis::compare_trade_with_analysis,
-            commands::stock_analysis::compute_evidence_weights,
             commands::stock_analysis::compute_valuation_band,
             commands::stock_analysis::compute_what_if,
             commands::stock_analysis::create_batch_reflection_cron,

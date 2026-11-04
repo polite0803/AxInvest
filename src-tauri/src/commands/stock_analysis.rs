@@ -20,7 +20,6 @@ use axagent_analysis_engine::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
 };
 use axagent_analysis_engine::backtest_feedback;
-use axagent_analysis_engine::evidence_weight::{self, EvidenceWeightReport, EvidenceWeightRequest};
 use axagent_analysis_engine::portfolio_monitor::{
     self, CorrelationCell, PortfolioDashboard, StressTestBundle,
 };
@@ -7678,20 +7677,6 @@ pub async fn set_t0_config(
     })?;
     monitor.set_t0_config(config).await;
     Ok(())
-}
-
-// ── P0-1: 证据质量驱动的决策权重 ──
-
-/// 计算证据质量驱动的分析师权重（结合市场环境、时间维度、历史表现）
-///
-/// 前端分析页面生成 consensus 时调用此命令替代简单阈值投票。
-/// 传入市场环境信息、分析师报告、历史权重，返回每个分析师的最终权重和共识结果。
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "计算证据质量权重")]
-#[tauri::command]
-pub fn compute_evidence_weights(
-    request: EvidenceWeightRequest,
-) -> Result<EvidenceWeightReport, String> {
-    Ok(evidence_weight::compute_evidence_weights(request))
 }
 
 // ── P0-2: 回测→Prompt 优化 ──

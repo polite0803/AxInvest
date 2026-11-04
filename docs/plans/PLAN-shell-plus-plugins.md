@@ -363,7 +363,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | 面 | 事实（全部指到行号） |
 |---|---|
 | 前端 | `src/pages/WorkflowPage.tsx:23`、`WorkflowMarketplace.tsx:186`；`src/components/workflow/` 132 文件（`WorkflowEditor.tsx` 2660 行、`Nodes/` 39 个）；store `workflowStore.ts` 1202 / `workflowEditorStore.ts` 3127 / `workEngineStore.ts` 542 |
-| 命令 | 前端 57 个 `invoke` 名（约 128 处）；Rust 侧 `register_commands.rs` 共 **1542 条 / 164 模块**（口径 = `scripts/lib/command-domains.mjs` 的 `parseRegistry`，与两份 AUDIT 同源），工作流域（审计 19 域口径）**83 条 / 11 模块**（`workflows`=10、`work_engine`=21、`workflow_template`=16、`workflow_reflection`=8、`workflow_ai`=8…；`stock_workflow` 28 条归股票域，不计入本域） |
+| 命令 | 前端 57 个 `invoke` 名（约 128 处）；Rust 侧 `register_commands.rs` 共 **1541 条 / 164 模块**（口径 = `scripts/lib/command-domains.mjs` 的 `parseRegistry`，与两份 AUDIT 同源），工作流域（审计 19 域口径）**83 条 / 11 模块**（`workflows`=10、`work_engine`=21、`workflow_template`=16、`workflow_reflection`=8、`workflow_ai`=8…；`stock_workflow` 28 条归股票域，不计入本域） |
 | 引擎 | `axagent-runtime/crates/rt-workflow/src/work_engine/engine/mod.rs` 7366 行；构造点 `src-tauri/src/init/state.rs:745`；句柄在 **`app_state.rs:345` `pub work_engine: Arc<WorkEngine>`** |
 | 节点 | `NodeExecutorTrait`（`node_executor_trait.rs:224`）实现者 **33** 个，`rt-workflow/src/work_engine/dispatcher.rs:80-109` `init_builtin` 注册 26 个 + `engine/mod.rs:1214-1231` pending 补齐 |
 
@@ -511,8 +511,8 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 
 | 度量 | 股票业务 | OPC 业务 |
 |---|---|---|
-| Tauri 命令条数 / 命令模块数（**插件边界口径**） | **303 条 / 20 模块**（`stock_analysis` 172、`stock_workflow` 24、`paper` 20） | **138 条 / 13 模块**（`opc` 57、`opc_capability_pack_actions` 20、`_runtime` 14） |
-| — 同一注册表在**审计 19 域口径**下的读数 | 305 条 / 19 模块（域「股票分析与管线」） | 117 条 / 10 模块（域「OPC 公司运行时」） |
+| Tauri 命令条数 / 命令模块数（**插件边界口径**） | **302 条 / 20 模块**（`stock_analysis` 171、`stock_workflow` 24、`paper` 20） | **138 条 / 13 模块**（`opc` 57、`opc_capability_pack_actions` 20、`_runtime` 14） |
+| — 同一注册表在**审计 19 域口径**下的读数 | 304 条 / 19 模块（域「股票分析与管线」） | 117 条 / 10 模块（域「OPC 公司运行时」） |
 | **① 主壳反向阻塞**（主壳非域文件引用域 crate ⇒ **必须逐条改写**） | **102 处 / 19 文件** | **0 处** |
 | **② 跨包口**（一个功能包的文件调另一个功能包的 crate ⇒ 走 `call_seam`） | **29 处 / 9 文件**，且**全部是 OPC 的文件在调股票 crate** | 0 处 |
 | ③ 域自有文件内引用（随插件整体迁走，**不是障碍**） | 456 处 / 41 文件（2026-11-04 复测：原 444 / 37 的增量来自并行批在域自有文件里加代码，**与 B1/B2 两刀无关** —— 那两刀只动主壳） | 16 处 / 2 文件 |
@@ -4372,3 +4372,37 @@ worker 二进制 **827,392 → 5,703,680 字节（debug）**：analysis-engine �
 2. **智能体命令面未接**：插件命令不进 `#[agent_command]` 的 inventory（`command_bridge.rs` 只读宏注册表）⇒ 删除宿主命令后，LLM 侧会少一条命令。与 B4-k 同口径，等「插件命令并入智能体命令面」立批解决。
 3. **桌面真机未验**：没有带插件的安装包，也没在 `tauri dev` 里跑「共识计算 → 权重报告」全链路；浏览器 mock 的 `plugin_execute_command` 返回空串 ⇒ 该模式下与改造前一样走离线兜底（改造前宿主命令在 mock 里也无实现）。
 4. **开发期需手工暂存**：`plugin:bundle:dev` 不进 `beforeDevCommand`（与 §84 未做 3 同因），本地不跑它就没有可解析的插件。
+
+## §95 B9-2：删宿主 `compute_evidence_weights` 并收口注册表（#35，2026-11-05）
+
+**这一批把 B9-1a 的切换收尾**：宿主 `stock_analysis.rs` 的 `compute_evidence_weights`（含 `#[agent_command]` 段、文档注释与专用 import）已删除，前端仍走插件通道 ⇒ 宿主不再提供第二条同名路径。
+
+### 95.1 改动（4 个文件）
+
+| 文件 | 改动 |
+|---|---|
+| `src-tauri/src/commands/stock_analysis.rs` | 删 `compute_evidence_weights` 命令块（`// ── P0-1 …` 小标题 + 文档注释 + `#[agent_command]` + `#[tauri::command]` + 函数），删第 23 行 `use axagent_analysis_engine::evidence_weight::{self, EvidenceWeightReport, EvidenceWeightRequest};`（全文件仅该命令使用）。 |
+| `src-tauri/src/register_commands.rs` | **build.rs 产物**，由 `cargo check -p axagent --lib` 重生成（禁区 7，不手改）：`split('\n')` **1609 → 1608**、`compute_evidence_weights` **零命中**。 |
+| `scripts/capability-register.json` | `commandTotal` 1542→**1541**、`commandNameSetParity` 1542→**1541**、`stockBoundaryCommands` 303→**302**、`stockAuditDomainCommands` 305→**304**、`registryFileLines` 1609→**1608**；`commandTotal.planPinned` 钉句同步；**移除** `planOld` 里 1541 那一条（它不再是旧读数；1542 转历史、不设 planOld，理由写进 note）。 |
+| `docs/plans/PLAN-shell-plus-plugins.md` | §0.8.2 的 `register_commands.rs` 现值、§0.10.1 两行命令读数（302/304、`stock_analysis` 171）同批改。 |
+
+### 95.2 验收（实跑）
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| K1 | `cargo check -p axagent --lib`（cwd=`src-tauri`） | 0 | Finished **15m59s**；产物行数 1608、`compute_evidence_weights` 零命中 |
+| K2 | `rustfmt --edition 2024 --check src-tauri/src/commands/stock_analysis.rs` | 0 | 零 diff |
+| K3 | `node scripts/check-capability-register.mjs`（驻留 PLAN 头部 3 行） | 0 | 硬判据全绿（37 = A11/B8/C4/H1/K10/D3） |
+| K4 | `node scripts/audit-l1-blockers.mjs` / `--check-allowlist` | 0 / 0 | 边界口径 **302 / 20**、审计域口径 **304 / 19**；H 桶 3 条锚点全在 |
+| K5 | 前端 | — | 本批零前端改动：`computeEvidenceWeights` 在 B9-1a 已走插件，宿主命令本无调用方 |
+
+### 95.3 已知行为变化（不是副作用，是裁定后的代价）
+
+**`#[agent_command]` 面少了 `compute_evidence_weights`**：`command_bridge.rs` 只读宏注册表（inventory），插件命令不在其中 ⇒ 删除宿主命令后，LLM 的可用命令清单里不再有它。这与 B4-k 删 `parse_analysis_intent` 同口径；**插件命令并入智能体命令面**仍未立项，是 #35 收尾前必须补的一条（否则每迁一条命令，智能体面就少一条）。前端不受影响。
+
+### 95.4 本批未做
+
+1. **主 crate clippy 未单跑**：本批对主 crate 只有「删一段」的改动，用 `cargo check` 兜底；真跑 `clippy -p axagent --all-targets` 需约 20 分钟独占构建窗口，留到 #35 收尾的全量门禁。
+2. **桌面真机 / 安装包未验**：与 §84/§94 同因（没有带插件的安装包）。
+3. **local dprint 在 UNC 下仍不可用**（#142 既有环境问题）：本批改了 `capability-register.json`，用 JSON 解析 + 第五道门（会完整解析该表）兜底；CI 在 Windows 本地磁盘上会正常跑 dprint。
+4. **智能体命令面并轨未做**：见 95.3，未在本批扩大。

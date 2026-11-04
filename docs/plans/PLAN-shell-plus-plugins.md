@@ -3818,3 +3818,35 @@ K1 不变（**2033**）：改的都是既有文件。
 2. **没有真实股票命令被迁移**：`stock_get_quote` 只是把已有 `market.quote` 能力以命令形态再暴露一次，不含任何域逻辑；304 条宿主股票命令一条未动。
 3. **未接前端**：没有页面/调用方使用这条命令 ⇒ 属于「通道可用」而非「功能上线」。
 4. **读数不降**（计划内）：ownedRe 桶仍 123 处 / 22 文件。
+
+## 79. `#35` B4-f：真安装链路（install → enable → 命令）+ 一个真缺陷（2026-11-04）
+
+**接的是 §75 未做 3 / §77 未做 1 / §78 未做 1**：此前所有验证都绕开了 `PluginManager` —— 用的是 `PluginWorkerConfig` + **绝对**路径，清单的 `worker.program` 相对路径、`permissions` 推沙箱、`commands[]` 授权门槛这三段没被走过。
+
+**本片查出的真缺陷**：§75 生成的清单写的是 `permissions: []`，而宿主 `build_sandbox_from_permissions` 从 **manifest** 推沙箱（不是 `PluginWorkerConfig::new` 的 permissive 默认值）⇒ 产物装得上、`enable` 也返回成功，**一执行就被子进程权限闸拒**：`PermissionDenied("插件未声明 subprocess_execution 权限…")`。已修：清单改为 `permissions: ["subprocess_execution"]`（worker 由宿主 spawn，这是必需项；网络仍不声明，取数走宿主接缝）。
+
+> 附带一条判据：**`enable` 绿 ≠ 能跑**。A/B 反证里 enable 是成功的，错误直到 `execute_plugin_command` 才出现 —— 装机后自检必须打一条命令，不能只看「已启用」。
+
+**交付**：
+1. `scripts/build-plugin-bundle.mjs`：清单 `permissions` 补 `subprocess_execution`（含注释说明为什么不能省）。
+2. 新测试 `axagent-plugins/crates/plugins/tests/e2e_stock_bundle_install_test.rs`：`PluginManager::install(<产物目录>)` → 断言安装目录里 `bin/` 被一起拷走 → `enable` → `execute_plugin_command("stock_get_quote")` → 断言 `price` / `code`。
+3. 行情替身下沉 `tests/common/mod.rs` 的 `FixedQuoteProvider`，两个 e2e 用例共用（不再各写一份）。
+
+**验收（2026-11-04 实测）**：
+
+| 标签 | 命令（cwd = `axagent-plugins`，除注明外） | EXIT | 取证 |
+|---|---|---|---|
+| F1 | `AXAGENT_STOCK_BUNDLE_DIR=<dist/plugins/stock> cargo test -p axagent-plugins --test e2e_stock_bundle_install_test` | 0 | **1 passed**（0.27s）：install（整目录拷贝含 `bin/`）→ enable（相对 `worker.program` 解析成功）→ 命令执行拿到 `price=1500.25` / `code=600519` |
+| F2 | 同上，但把产物复制到 `.tmp/stock-noperm` 并清空 `permissions` | 1（**预期红**） | 失败点 `execute_plugin_command`：`PermissionDenied("插件未声明 subprocess_execution 权限…")` ⇒ 证明该权限是硬前提，不是装饰 |
+| F3 | `AXAGENT_STOCK_WORKER_BIN=<dist 的 worker> cargo test -p axagent-plugins --test e2e_stock_tool_test` | 0 | **1 passed**（0.15s）：改用共享替身后原用例仍绿 |
+| F4 | `cargo clippy -p axagent-plugins --all-targets -- -D warnings` | 0 | Finished 1.52s，零告警 |
+| F5 | `rustfmt --edition 2024 --check`（3 个 `.rs`） | 0 | 零 diff |
+
+K1 不变（**2033**）：新文件在 `tests/`（被 `K1_IGNORE` 排除），其余为既有文件改动。
+
+**未做（逐条点名）**：
+1. **CI 仍跑不到**：F1/F3 依赖先打包的产物，CI 没有「先 `plugin:bundle` 再设环境变量」的步骤 ⇒ 这两个用例在 CI 走 SKIP（同 §77 未做 2）。
+2. **未验真实用户目录升级路径**：config home 用临时目录，没跑「旧版本已装 → 更新 → registry 迁移」。
+3. **清单 `integrity` 与宿主 trust-on-install 哈希不是同一值**：前者是打包脚本对 worker 单文件的 sha256，后者是宿主对**整个安装目录**算的（`hash_plugin_directory`），两者各自独立，本片未尝试对齐。
+4. **前端仍未接**（同 §78 未做 3）。
+5. **读数不降**（计划内）：ownedRe 桶仍 123 处 / 22 文件。

@@ -7,9 +7,57 @@
 
 #![allow(dead_code)]
 
+use axagent_harness::{
+    AdjType, KLine, MarketDataProvider, Result as HarnessResult, StockQuote, StockSearchResult,
+};
 use axagent_plugins::PluginManifest;
 use serde_json::json;
 use std::path::{Path, PathBuf};
+
+/// 固定行情替身：只验证「宿主 provider 的数据能经插件回到宿主」，不验证真实取数
+/// （真实 provider 要联网，不能进测试）。
+pub struct FixedQuoteProvider;
+
+#[async_trait::async_trait]
+impl MarketDataProvider for FixedQuoteProvider {
+    async fn get_quote(&self, stock_code: &str) -> HarnessResult<StockQuote> {
+        Ok(StockQuote {
+            code: stock_code.to_string(),
+            name: "测试股".to_string(),
+            price: 1500.25,
+            pre_close: 1490.0,
+            open: 1495.0,
+            high: 1510.0,
+            low: 1488.0,
+            volume: 1_000_000.0,
+            amount: 1_500_000_000.0,
+            change_pct: 0.68,
+            turnover_rate: 0.5,
+            pe: Some(12.3),
+            pb: Some(1.8),
+            total_mv: Some(1.0e11),
+            circulating_mv: None,
+            limit_up: None,
+            limit_down: None,
+            is_st: false,
+            timestamp: "2026-11-04T15:00:00+08:00".to_string(),
+        })
+    }
+
+    async fn get_klines(
+        &self,
+        _stock_code: &str,
+        _period: &str,
+        _limit: u32,
+        _adj_type: Option<AdjType>,
+    ) -> HarnessResult<Vec<KLine>> {
+        Ok(Vec::new())
+    }
+
+    async fn search_stock(&self, _keyword: &str) -> HarnessResult<Vec<StockSearchResult>> {
+        Ok(Vec::new())
+    }
+}
 
 /// 创建测试用临时目录并在 test 完成后自动清理。
 pub struct TempDir {

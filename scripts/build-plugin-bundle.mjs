@@ -80,7 +80,10 @@ const manifest = {
   name: "stock",
   version: workerPackage.version,
   description: "股票域功能包（当前贡献 1 个工具 get_stock_quote 与 1 条命令 stock_get_quote）",
-  permissions: [],
+  // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
+  // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
+  // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
+  permissions: ["subprocess_execution"],
   mcp_servers: [],
   skills: [],
   agents: [],

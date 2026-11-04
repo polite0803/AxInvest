@@ -1,5 +1,8 @@
 # PLAN · 主壳 + 按能力插件（= `PLAN-everything-is-plugin.md` 的 P5 阶段）
 
+> 状态：active ｜ 日期：2026-11-03 ｜ 对应版本：v3.0.0+（未定版，待确认）
+
+
 > **定位**：本文件**不另起架构**。组合模型（目标 A）与载入模型（目标 B）的判据、`PLAN-everything-is-plugin.md` §5.4 接缝 op 映射表、
 > 握手/降级/环检测语义、分发链（local / npm / git + sha256 + `source_audit` + `source_build`）
 > **全部沿用** `PLAN-everything-is-plugin.md` 与 `PLAN-plugin-gap-closure.md`。
@@ -3715,3 +3718,40 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 1. **宿主侧清单解析未在本片验证**：脚本按 `minimal_plugin_json`（`crates/plugins/tests/common/mod.rs`）的同形状给字段，但真跑一遍 `load_plugin_from_directory` 要等「从 bundle 目录走真实安装 + 启用」的批次；现在不造假门（没有 skip-if-absent 的伪测试）。
 2. **产物没接发布链路**：未进 `tauri.conf.json` 的 resources，装好的 App 里怎么带插件包仍空白 —— 属发布链路，与插件独立仓（#32 同族）一起裁。
 3. **`--check` 不验 `resolve_worker_program`**：它只在 **enable** 时调用（`manager.rs:1114`），本片产物 `defaultEnabled: false`，不会走到那里；启用路径的端到端验证留到 B4-c。
+
+## 76. `#35` B4-c：首个真实能力搬进 worker（`tool.set` + `get_stock_quote`）（2026-11-04）
+
+**首刀选择判据**（§64.11 op 清单里筛「宿主只读、不持 AppState、不碰凭证」那一档）：
+
+| 候选 | 裁定 |
+|---|---|
+| `compute_scoring` 等打分/分析 op | ✖ 域逻辑在 `astock-data`，而 §64.11 裁定 1 明确 `astock-data` **留宿主**；搬它等于先推翻该裁定 |
+| 新建一条只给插件用的只读域接缝 | ✖ 没有真实调用方 ⇒ 造出「接缝建了但没人调」的半条链 |
+| **`tool.set` + `get_stock_quote`** | ✔ 宿主侧 `RemoteToolSet::load` / `RemoteTool::call` 就是真实消费者；取数复用**既有** `market.quote.get_quote`；不改前端 |
+
+**线上格式（两侧均由既有代码锁定，本片不自造）**：
+- 宿主 → worker：`op="list"` 取 `RemoteToolDescriptor` 数组；`op="exec"` 入参 `{name, args}`，回参 `{content: String, metadata}`（`crates/plugins/src/worker.rs` 的 `RemoteToolSet` / `RemoteTool`）；
+- worker → 宿主：`op=call_seam`，`args={seam:"market.quote", op:"get_quote", args:{stock_code}}`，`call_chain` 原样带上入站链（否则宿主环检测收不到这条边）；
+- 权限闸：`required_permission_for("tool.set","exec")` 落在 `_ => None`（`worker.rs:458-471`）⇒ **无需 `permissions`**，§75 生成的空 `permissions` 数组是对的口径，不改 manifest。
+
+**交付**（只改既有 2 文件，无新增 `.rs`）：
+
+- `crates/plugin-stock/src/main.rs`：改用 `axagent_plugin_proto::serve(handle)` —— 插件一旦能主动调宿主，同一条管道上就同时挂着「我方请求的响应」与「对端新请求」，自写「读一帧写一帧」必然错配；`Peer` 把对端请求进 `deferred` 队列。`handle` 新增 `list` / `exec` 两支：`list` 回单工具描述（camelCase `inputSchema` / `category`），`exec` 校验工具名与 `stock_code`（空白按 `SEAM_CALL_INVALID_ARGS`），再 `peer.call_seam(MARKET_SEAM, "get_quote", …)`，成功把行情序列化进 `content` 字符串并带 `metadata.stock_code`，失败**原样透传**提供方的 `code` / `message`（不包装成成功）。`describe` 声明 `calls:["market.quote"]` + `capabilities:[{seam:"tool.set", op:"exec", version:"0.1.0"}]`。
+- `crates/plugin-stock/tests/protocol.rs`：真进程 + 真管道，测试自己扮演宿主。
+
+**验收（2026-11-04 实测，日志 `.tmp/t35b4c-{check,clippy,test}.log`）**：
+
+| 标签 | 命令（cwd = `axagent-plugins`） | EXIT | 取证 |
+|---|---|---|---|
+| C1 | `cargo check -p axagent-plugin-stock --all-targets` | 0 | Finished 3.55s |
+| C2 | `cargo clippy -p axagent-plugin-stock --all-targets -- -D warnings` | 0 | 零告警 |
+| C3 | `cargo test -p axagent-plugin-stock` | 0 | **6 passed / 0 failed**（0.10s）：①describe 声明 `tool.set/exec` + `calls=["market.quote"]` 且过宿主同一套 `validate()`；②`list` 露 `get_stock_quote` 且 `inputSchema.required` 正确；③`exec` 全链：worker 先发 `call_seam` → 测试回 `{price:1500.25}` → 工具回 `content` 为 JSON 字符串且 `metadata.stock_code` 一致；④提供方错误原样透传（`MARKET_PROVIDER_UNAVAILABLE` 不被吞）；⑤未知 op / 未知工具 / 空白 `stock_code` 三种显式错误码；⑥关 stdin 干净退出 |
+| C4 | `rustfmt --edition 2024 --check`（2 个文件） | 0 | 零 diff |
+
+K1 不变（**2033**）：本片只改既有 `main.rs` 与 `tests/protocol.rs`，无新增 `.rs`。
+
+**未做（逐条点名）**：
+1. **未用真实 Rust 宿主跑 `RemoteToolSet::load` → `exec`**：本片测试里「宿主」是测试进程自写的最小应答器，只锁定**帧形状**；真实 `HostPeer` 侧的 `declared_calls` 准入、`RemoteTool` 命名前缀与 `ToolExecReply` 组装未在本片执行。⇒ §75 未做 3 的「启用路径端到端验证」**仍未关闭**，不得由本片推定已通。
+2. **产物未重打**：`dist/plugins/stock/` 里仍是 §75 的骨架二进制（sha256 `97ac4c4e…c6cd`），重跑 `plugin:bundle` 后哈希必变；本片未重打也未入库（`dist/` 已忽略）。
+3. **未接 T2 命令面**：`commands[]` 仍为空数组，插件目前只贡献工具，不贡献命令。
+4. **读数不降**（计划内）：ownedRe 桶仍 123 处 / 22 文件，本片不动。

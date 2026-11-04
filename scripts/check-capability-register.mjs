@@ -65,11 +65,15 @@
 //   PLAN 里对 **HEAD 提交态**的事实陈述（如 §15.1「HEAD 产物 = 1540 条、HEAD 源码按算法应生成 1541」）
 //   必然重述旧读数，而它是「干净检出必红」结论的**可复算证据**，删掉等于毁证据 ⇒ 给这类条目开一个
 //   **白名单区段数组** `alsoAt: [{ startLine, endLine, mustContain }]`：
-//     · 判据只加不改：出现行落在 §0.12.4 漂移段 **或** 任一**健康**的 alsoAt 段 ⇒ 合法；段外照旧红。
-//     · **健康 = 段内命中 mustContain 的每个 token**（口径同 planPinned 的 token `includes`，只是从
-//       「同一行」换成「同一段」——区段天然跨行，这是定位形态差异，不是放松）。任一 token 不命中
-//       ⇒ 单独报 `[区段腐烂 ALSOAT-STALE]`（与「旧读数出段」是两回事：前者说行号锚已不可信，
-//       后者说旧数用错了地方），**且该段内的出现仍判红** —— 腐烂的重锚不得默默放行旧数。
+//     · 判据只加不改：出现行落在 §0.12.4 漂移段 **或** 任一**健康** alsoAt 段中**被自证锚定的那条出现行** ⇒ 合法；
+//       段外照旧红。⚠ `#138` 起放行按**出现行**，不按整个区间 —— 见下一条。
+//     · **健康 = 三条同时成立**：① 区间合法且带 key；② **段内仍有旧读数**（数字边界形态）——
+//       否则窗口已漂到与断言无关处，仅凭「token 还在段里」判健康就是一个永远放行的空洞；
+//       ③ 至少一个出现行的 **±`ALSOAT_ANCHOR_RADIUS`(=3) 行**内命中 mustContain token。
+//       放行集 = 这些 `anchored` 出现行；落在同区间但离 token 超过半径的行 ⇒ 判红（窗口不得吞掉
+//       无关同数出现）。任一 token 不命中 / 出现归不了因 ⇒ 报 `[区段腐烂 ALSOAT-STALE]`
+//       （与「旧读数出段」是两回事：前者说行号锚已不可信，后者说旧数用错了地方），
+//       **且该段内的出现仍判红** —— 腐烂的重锚不得默默放行旧数。
 //     · 不登记 alsoAt ⇒ 行为与旧版**逐字一致**（零放宽）；空数组同样零放宽。
 //     · `alsoAt[].mustContain` 里的**纯数字 token** 一并纳入锚点内部自洽检查（见 checkAnchorConsistency
 //       ⑥ 档）：alsoAt 不是藏数口子 —— 允许的数字只有「本锚点 value/value2」「hard:true 且机器复检的
@@ -540,25 +544,74 @@ export function driftRegionLines(planText) {
   return { start: start + 1, end };
 }
 
-/** `planOld[].alsoAt[]` 区段是否**健康**（任务 #65，判据见文件头「planOld[].alsoAt」段）。
- *  健康 = 区段行号合法（1 ≤ startLine ≤ endLine ≤ 文末）且段内命中 mustContain 的每个 token。
- *  token 比对口径逐字复用 planPinned 的那一套（`String.includes`，见 pinHitLines），差别只在
- *  planPinned 要求全部 token **同一行**、alsoAt 要求全部 token **同一段** —— 区段描述的是跨行的
- *  事实陈述，这是定位形态的差异，不是把 `includes` 换成模糊匹配。
- *  返回 { ok, start, end, missing, reason }；`missing` 为缺失 token 列表，`reason` 用于结构性失配
- *  （行号非法 / 无自证 token），两者互斥地给出「为什么这段不可信」。 */
-export function alsoAtRegionStatus(planLines, region) {
+/** 旧读数与自证 token 的允许距离（行）。见 [`alsoAtRegionStatus`] 的三条判据。 */
+export const ALSOAT_ANCHOR_RADIUS = 3;
+
+/** `planOld[].alsoAt[]` 区段是否**健康**（任务 #65 立，任务 `#138` 加严）。
+ *
+ *  ## 三条判据（缺一即腐烂）
+ *
+ *  1. **区间合法且带键**：1 ≤ startLine ≤ endLine ≤ 文末，`mustContain` 非空；
+ *  2. **段内仍有旧读数**：`number` 以数字边界形态出现在区段内 —— 否则窗口已经漂到与断言无关的位置，
+ *     仅凭「token 还在段里」判健康会让这个区段变成一个永远放行的空洞（`#138` 的假健康形态）；
+ *  3. **出现处有自证**：至少一个出现行的 **±`ALSOAT_ANCHOR_RADIUS` 行**内命中某个 mustContain token。
+ *     放行按**出现行**算（返回 `anchored`），不再按整个区段放行 —— 否则一个 60 行的窗口会把
+ *     漂进来的无关同数出现一起吞掉。
+ *
+ *  token 比对口径逐字复用 planPinned 的 `String.includes`；差别只在 planPinned 要求全部 token
+ *  **同一行**、alsoAt 允许 token 在出现行附近跨行（表格行 / 紧邻说明），这是定位形态的差异。
+ *
+ *  `number` 缺省（旧调用方）时跳过 2/3 两条 —— 只有 `--repin-plan` 的「原样是否仍可用」自检走这一档，
+ *  正式判红一律传 number。
+ *
+ *  返回 `{ ok, start, end, missing, reason, occurrences, anchored }`。 */
+export function alsoAtRegionStatus(planLines, region, number = null) {
   const start = Number(region?.startLine);
   const end = Number(region?.endLine);
   const raw = region?.mustContain ?? [];
   if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
-    return { ok: false, start, end, missing: [], reason: `区段行号缺失或非法（startLine=${region?.startLine ?? "缺"} / endLine=${region?.endLine ?? "缺"}，须 1 ≤ start ≤ end）` };
+    return { ok: false, start, end, missing: [], reason: `区段行号缺失或非法（startLine=${region?.startLine ?? "缺"} / endLine=${region?.endLine ?? "缺"}，须 1 ≤ start ≤ end）`, occurrences: [], anchored: [] };
   }
   if (!raw.some((t) => String(t).length > 0)) {
-    return { ok: false, start, end, missing: [], reason: "段内无 mustContain 自证 token ⇒ 只剩裸行号，无据放行（缺定位键即拒，与 planPinned 同口径）" };
+    return { ok: false, start, end, missing: [], reason: "段内无 mustContain 自证 token ⇒ 只剩裸行号，无据放行（缺定位键即拒，与 planPinned 同口径）", occurrences: [], anchored: [] };
   }
   const missing = raw.filter((t) => String(t).length > 0 && !planLines.slice(start - 1, end).some((l) => l.includes(t)));
-  return { ok: !missing.length, start, end, missing, reason: "" };
+  if (missing.length) {
+    return { ok: false, start, end, missing, reason: "", occurrences: [], anchored: [] };
+  }
+  if (number === null || number === undefined) {
+    return { ok: true, start, end, missing: [], reason: "", occurrences: [], anchored: [] };
+  }
+  const occurrences = String(number).split("").every((c) => /\d/.test(c))
+    ? numberHitLines(planLines, String(number)).filter((ln) => ln >= start && ln <= end)
+    : planLines.slice(start - 1, end).map((l, i) => (l.includes(String(number)) ? start + i : 0)).filter(Boolean);
+  if (!occurrences.length) {
+    return { ok: false, start, end, missing: [], reason: `段内已找不到旧读数 ${number} 的合法出现 ⇒ 窗口漂到了与断言无关的位置（token 还在段内也不作数）`, occurrences: [], anchored: [] };
+  }
+  const anchors = raw.filter((t) => String(t).length > 0);
+  const anchored = occurrences.filter((ln) => {
+    const lo = Math.max(start, ln - ALSOAT_ANCHOR_RADIUS);
+    const hi = Math.min(end, ln + ALSOAT_ANCHOR_RADIUS);
+    for (let i = lo; i <= hi; i++) {
+      if (anchors.some((t) => (planLines[i - 1] ?? "").includes(t))) return true;
+    }
+    return false;
+  });
+  if (!anchored.length) {
+    return { ok: false, start, end, missing: [], reason: `旧读数 ${number} 的出现行 ±${ALSOAT_ANCHOR_RADIUS} 行内没有任何自证 token ⇒ 段内的出现无法归因到本断言`, occurrences, anchored: [] };
+  }
+  return { ok: true, start, end, missing: [], reason: "", occurrences, anchored };
+}
+
+/** 按数字边界找旧读数的出现行（与 [`numberOccurrences`] 同一正则，只是输入换成分行数组）。 */
+export function numberHitLines(planLines, number) {
+  const re = new RegExp(`(^|[^\\d:.#])${number}(?!\\d)`);
+  const hits = [];
+  planLines.forEach((l, i) => {
+    re.lastIndex = 0;
+    if (re.test(l)) hits.push(i + 1);
+  });
+  return hits;
 }
 
 /** PLAN 正文对账（只读 docs/**，绝不写）：planMustAppear / planPinned / planOld / bannedPlanPhrases。
@@ -600,7 +653,7 @@ export function checkPlan(register, planText) {
       const rotten = [];
       // ① 先验段自身（与出现行无关：段腐烂是**独立**一条缺陷，段内一次旧读数没有也要报）
       alsoList.forEach((rg, j) => {
-        const st = alsoAtRegionStatus(lines, rg);
+        const st = alsoAtRegionStatus(lines, rg, old.number);
         if (st.ok) { healthyRegions++; healthy.push(st); return; }
         rottenRegions++;
         rotten.push(st);
@@ -609,13 +662,16 @@ export function checkPlan(register, planText) {
       const inSeg = (ln, s) => s !== null && ln >= s.start && ln <= s.end;
       const segLabel = (s) => `${s.start}–${s.end}`;
       for (const ln of hits) {
-        if (inSeg(ln, region) || healthy.some((s) => inSeg(ln, s))) { continue; }
+        if (inSeg(ln, region) || healthy.some((s) => s.anchored.includes(ln))) { continue; }
         const parts = region ? [region, ...healthy].map(segLabel) : healthy.map(segLabel);
         const where = region
           ? `，合法区段仅 ${parts.join(" / ")}`
           : (healthy.length ? `，且找不到含「漂移」的 §0.12.4 区段（合法区段仅剩 alsoAt ${parts.join(" / ")}）` : "，且找不到含「漂移」的 §0.12.4 区段");
         const inside = rotten.filter((s) => inSeg(ln, s));
-        sink.push(`旧读数 ${old.number} 出现在漂移列举段之外（PLAN:${ln}${where}）—— ${old.note}${inside.length ? `；⚠ 该行落在**已腐烂**的 alsoAt 区段 ${inside.map(segLabel).join(" / ")} 内 ⇒ 腐烂区段不作放行，缺陷定性见同锚点的 ALSOAT-STALE 专码行` : ""}`);
+        // `#138`：落在**健康**区段范围内、但该行离自证 token 超过 ±半径 ⇒ 不是本断言的合法出现。
+        // 放行必须按出现行（`anchored`），不能按窗口整段 —— 否则位移后漂进来的无关同数被一起吞掉。
+        const swallowed = healthy.filter((s) => inSeg(ln, s));
+        sink.push(`旧读数 ${old.number} 出现在漂移列举段之外（PLAN:${ln}${where}）—— ${old.note}${inside.length ? `；⚠ 该行落在**已腐烂**的 alsoAt 区段 ${inside.map(segLabel).join(" / ")} 内 ⇒ 腐烂区段不作放行，缺陷定性见同锚点的 ALSOAT-STALE 专码行` : ""}${swallowed.length ? `；⚠ 该行虽在健康 alsoAt 区段 ${swallowed.map(segLabel).join(" / ")} 的范围内，但 ±${ALSOAT_ANCHOR_RADIUS} 行内无自证 token ⇒ 窗口不得吞掉无关同数出现（#138），请收窄区段或把该处的自证 token 补进 mustContain` : ""}`);
       }
     }
   }
@@ -1135,7 +1191,7 @@ export function collectPlanLineRefs(register) {
     // 不拆成两条独立的 planLine（拆开会允许「只挪对一半」，那是新造的假绿面）。
     (a.planOld ?? []).forEach((o, i) => {
       (o.alsoAt ?? []).forEach((rg, j) => {
-        refs.push({ kind: "alsoAtRegion", owner: a.id, oldIdx: i, idx: j, line: rg.startLine, endLine: rg.endLine, mustContain: rg.mustContain ?? [], anchorText: null, path: `anchors[${a.id}].planOld[${i}].alsoAt[${j}].startLine/endLine` });
+        refs.push({ kind: "alsoAtRegion", owner: a.id, oldIdx: i, idx: j, number: o.number, line: rg.startLine, endLine: rg.endLine, mustContain: rg.mustContain ?? [], anchorText: null, path: `anchors[${a.id}].planOld[${i}].alsoAt[${j}].startLine/endLine` });
       });
     });
   }
@@ -1164,7 +1220,7 @@ export function computeRepin(register, planText) {
       // 缺定位键拒写），差别只在定位键是**整段**的 token 集合而不是单行 —— 判据形态（写哪些数字）见下面
       // 「最小包络」注释与文件头 --repin-plan 段。
       if (!r.mustContain.length) { noKey.push(`${r.path} = ${r.line}–${r.endLine}：alsoAt 区段无 mustContain 自证 token ⇒ 无定位键（新增区段必须同批带键，否则重锚能力随表腐烂）`); continue; }
-      const st = alsoAtRegionStatus(planLines, { startLine: r.line, endLine: r.endLine, mustContain: r.mustContain });
+      const st = alsoAtRegionStatus(planLines, { startLine: r.line, endLine: r.endLine, mustContain: r.mustContain }, r.number);
       if (st.ok) { kept++; continue; }
       const hOK = Number.isInteger(r.line) && Number.isInteger(r.endLine) && r.endLine >= r.line;
       if (!hOK) { blockers.push(`${r.path} = ${r.line}–${r.endLine}：${st.reason} ⇒ 原区段连行号都不成立 ⇒ 不许猜边界，请人工改表`); continue; }
@@ -1816,6 +1872,20 @@ function runSelftest() {
   check(planNumberHits("发布 2026-11-26，另有 1.26 与 PLAN:26 与 1534/26。", "26").length === 0, "负控⑬b：日期/小数点/行号引用/斜杠配对里的 26 一律不算命中");
   check(planNumberHits("股票 84 873 行前端出包。", "84 873").length === 1, "正控⑬c：千位空格写法仍算命中（不许误伤现盘 15 个锚点）");
   check(planNumberHits("终局能力全集登记 26 条。", "26").length === 1, "正控⑬d：独立成词的 26 算命中");
+
+  // 负控⑯（`#138`）：alsoAt 的「假健康」—— 只有 token 在段里不算健康，必须旧读数也在段里，
+  // 且出现行 ±3 行内能归因到某个 token；放行按出现行（anchored），不按整个窗口。
+  {
+    const far = ["### 段头（自证 token）", "填充 1", "填充 2", "填充 3", "填充 4", "填充 5", "无关段落里也写了 124 这个数"];
+    const st = alsoAtRegionStatus(far, { startLine: 1, endLine: 7, mustContain: ["段头（自证 token）"] }, "124");
+    check(!st.ok && /±3 行内没有任何自证 token/.test(st.reason), "负控⑯a：旧读数在段内但离 token 超过半径 ⇒ 不得判健康（窗口吞数的假健康）");
+    check(st.occurrences.includes(7) && st.anchored.length === 0, "负控⑯a2：出现行必须被识别、但不得进 anchored");
+    const near = ["# 事实：HEAD 产物 = 1540 条、按算法应生成 1541。", "填充"];
+    const st2 = alsoAtRegionStatus(near, { startLine: 1, endLine: 2, mustContain: ["HEAD 产物", "按算法应生成"] }, "1541");
+    check(st2.ok && st2.anchored.includes(1), "正控⑯b：出现行与 token 同行 ⇒ 健康且只放行该行");
+    const empty = alsoAtRegionStatus(["只有 token 没有数", "填充"], { startLine: 1, endLine: 2, mustContain: ["只有 token 没有数"] }, "1541");
+    check(!empty.ok && /段内已找不到旧读数/.test(empty.reason), "负控⑯c：段内没有旧读数 ⇒ 即使 token 齐也不得判健康");
+  }
 
   // 负控⑭（第 2 条修复）：逐类 anchor check 的「登记≠实测 必被抓出」+ 正控「登记=实测 不假阳性」。
   // 全部走合成读数（fixture），零盘扫描；覆盖度按**镜像表实际用到的 check 种类**核算并印出。

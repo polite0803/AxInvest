@@ -3584,3 +3584,33 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 1. **新增 `.rs` 文件会抬 K1 文件数**：2030→2032（`reconcile/external.rs` + `init/plugin_schema.rs`）。第五道门因此硬红，必须**同批**改登记表 `value` / `planNumber` / `planPinned` 与 PLAN:247 —— 这不是「放宽判据」，是镜像表跟上盘上事实。
 2. **他人未提交的文档头会让 `planPinned` 集体假红**：PLAN 头部多出 3 行未提交内容时，511–526 段整体下移 3 行 ⇒ 第五道门一次报出 **26 条**「钉句不符」。验证/提交前必须把那 3 行 park 回 HEAD 形态，门绿后再原样交回；**不能**跑 `--repin-plan` 去迁就别人的未提交改动（那会把行号永久钉到未提交状态）。
 3. **`spawn_blocking` 闭包改成「先绑定再继续用」会丢类型推断**：原先 `Ok(Dto{..})` 是函数尾表达式，返回类型由签名决定；绑定成 `let outcome = …??;` 后，闭包内部的 `E` 不再有上下文 ⇒ `E0282`。给闭包显式补 `-> Result<Dto, String>`，不要用 `Ok::<_, String>` 逐点标注（两处形态不一致时会再漂）。
+
+## 70. `#138`：alsoAt 区间的「假健康」判据（2026-11-04）
+
+**缺陷**：旧健康判据只要求 `mustContain` 的每个 token 出现在区段内。行号位移后可能出现两种假健康：① 旧读数已经移出区段，只剩 token 在段里 —— 区段变成一个永远放行的空洞；② 一个无关的同数出现漂进宽窗口，被整段放行（窗口「吞掉」了出段读数）。
+
+**新判据**（`scripts/check-capability-register.mjs` 的 `alsoAtRegionStatus`，三条同时成立才算健康）：
+
+1. 区间合法且带自证 token（原判据不变）；
+2. **段内仍有旧读数**（`planOld[].number` 的数字边界形态）—— 没有出现 ⇒ 段已漂离断言，报 `[区段腐烂 ALSOAT-STALE]`；
+3. **出现行 ±3 行内命中某个自证 token**（`ALSOAT_ANCHOR_RADIUS = 3`）。
+
+**放行口径同时收窄**：合法出现按 **`anchored` 出现行**判定，不再按整个区间判定。落在同区间但离 token 超过半径的旧读数，报「窗口不得吞掉无关同数出现」，并提示「收窄区段或补自证 token」。
+
+**登记表同批补键**（3 个区段，共 7 个 token；具体字面量见 `scripts/capability-register.json`，本段不复述数字以免自造旧读数出现）：
+
+- `workflowAuditDomainCommands` 的 §63 交付账区段：补「算式行」与「同一 `alsoAt` 段」两个 token；
+- 同锚点的 §64 区段：补「反向下修结论行」与「逐桶拆行」两个 token；
+- `l1ForeignStock` 的 §63 区段：补「算式行」「value 下修行」「同一 `alsoAt` 段」三个 token。
+
+**`--repin-plan` 同步**：重锚 ref 携带 `number`，因此「旧读数已移出区段」的段会判为不健康并被重锚（而不是原样保留）；token 最小包络的重锚语义未变。
+
+**验收**：
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| L1 | `node scripts/check-capability-register.mjs --selftest` | 0 | 新增负控 ⑯a/⑯a2/⑯c（远处同数、出现行识别、段内无出现）与正控 ⑯b（同行 token 放行）；覆盖度 **17 / 17**，无空洞 |
+| L2 | `node scripts/check-capability-register.mjs` | 0 | 15 个 alsoAt 区段 **健康 15 / 腐烂 0**；37 项 hard 判据全一致 |
+| L3 | 位移模拟（在文档头插 3 行后调 `checkPlan`） | 红 | **26 条硬失败 / 7 条 ALSOAT-STALE / 15 条旧读数出段**，无一条静默通过 |
+
+**未做**：锚定半径是固定 3 行；若某处合法旧读数天然离任何 token 都超过 3 行，必须为该处补一个自证 token（不接受把半径调大来迁就）。

@@ -1472,23 +1472,6 @@
     "yes": "是",
     "zoomIn": "放大",
     "zoomOut": "縮小",
-    "multiModelVote": {
-      "button": "聚合投票",
-      "title": "多模型决策投票",
-      "strategy": "聚合策略",
-      "strategyMajority": "多数票",
-      "strategyWeighted": "按置信度加权",
-      "strategyConsensus": "全员一致",
-      "modelCount": "参与模型数",
-      "validCount": "有效决策数",
-      "finalAction": "最终决策",
-      "winnerModel": "采用模型",
-      "avgConfidence": "平均置信度",
-      "voteBreakdown": "票数明细",
-      "allAgree": "所有模型一致",
-      "disagreement": "存在分歧",
-      "noDecision": "暂无可聚合的决策"
-    },
     "sources": {
       "title": "Knowledge Sources",
       "empty": "No sources available. Please add one in settings first",

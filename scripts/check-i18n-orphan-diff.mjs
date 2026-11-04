@@ -13,7 +13,7 @@
 //         排除 src/i18n/ 工具文件 —— compare_locales.js 等）
 //   2. P = 运行时扫描现存代码 t(`X${` 的动态前缀 X   ← 刻意**不**硬编码 top-N
 //   3. U = Σ 被删/改名/修改文件旧内容（git show HEAD:<old>）中的静态 t() key
-//   4. 候选 = U − K − {k|∃p∈P: k.startsWith(p)} − {k|k.startsWith("error.")}
+//   4. 候选 = U − K − {k|∃p∈P: k.startsWith(p)} − {k|k.startsWith("error.")} − {k|k 已从 11 语言删除}
 //   5. 候选非空 ⇒ exit 1（要求同步删除 11 语言 key）
 //
 // ⚠ 为什么 P 必须运行时抽取（**不许被「优化」回静态清单**）：
@@ -121,16 +121,39 @@ export function extractDynamicPrefixes(content) {
 }
 
 /**
- * 候选 = U − K − {k|∃p∈P: k.startsWith(p)} − {k|k.startsWith("error.")}
+ * 候选 = U − K − {k|∃p∈P: k.startsWith(p)} − {k|k.startsWith("error.")} − {k|k ∉ localeKeys}
  * 纯函数：selftest 与正式跑共用。
+ *
+ * `localeKeys` = 源语言（zh-CN）**当前**仍存在的 key 路径全集。这一维是必需的：
+ * 本门的整改动作是「同步删除 11 语言 key」，若调用方已经把 key 删掉，判据仍把它
+ * 列进候选 ⇒ 「删码同时删键」这一**正确做法**必然红（2026-11-05 实测：删
+ * `MultiLlmVotePanel.tsx` + 11 语言 15 键，门报 12 条「须同步删除 locale」）。
+ * 只筛「键还在」不放松任何真缺陷：键没删掉的照旧点名。
+ * ⚠ 传 `undefined` = 不做这一维过滤（旧调用方），selftest 用显式集合覆盖两档。
  */
-export function computeCandidates({ uKeys, kKeys, prefixes }) {
+export function computeCandidates({ uKeys, kKeys, prefixes, localeKeys }) {
   const prefixList = [...prefixes];
   return [...uKeys]
     .filter((k) => !kKeys.has(k))
     .filter((k) => !prefixList.some((p) => k.startsWith(p)))
     .filter((k) => !k.startsWith("error."))
+    .filter((k) => localeKeys === undefined || localeKeys.has(k))
     .sort();
+}
+
+/** 把 locale JSON 拍平成 key 路径集合（只收叶子对象的下钻路径，数组不参与 i18n 键空间）。 */
+export function flattenLocaleKeys(node, prefix = "", out = new Set()) {
+  if (node === null || typeof node !== "object" || Array.isArray(node)) { return out; }
+  for (const [name, value] of Object.entries(node)) {
+    const path = prefix ? `${prefix}.${name}` : name;
+    if (Array.isArray(value)) { continue; }
+    if (value !== null && typeof value === "object") {
+      flattenLocaleKeys(value, path, out);
+    } else {
+      out.add(path);
+    }
+  }
+  return out;
 }
 
 /** 解析 `git diff --name-status HEAD` 输出。R 行是 tab 分隔 3 列（R100\told\tnew）。 */
@@ -230,6 +253,7 @@ function runSelftest() {
     uKeys: new Set(["oldPage.title", "oldPage.desc"]),
     kKeys: new Set(["other.key"]),
     prefixes: new Set(),
+    localeKeys: new Set(["oldPage.title", "oldPage.desc"]),
   });
   check(cand.includes("oldPage.title") && cand.includes("oldPage.desc"), "负控：删引用留 key 必须红");
 
@@ -238,11 +262,17 @@ function runSelftest() {
     uKeys: new Set(["stockAnalysis.timeHorizon.short"]),
     kKeys: new Set(),
     prefixes: new Set(["stockAnalysis.timeHorizon."]),
+    localeKeys: new Set(["stockAnalysis.timeHorizon.short"]),
   });
   check(cand2.length === 0, "正控：动态前缀覆盖的 key 不得假阳性");
 
   // 6) 正控：error.* 豁免 ⇒ 不红
-  const cand3 = computeCandidates({ uKeys: new Set(["error.SOME_CODE"]), kKeys: new Set(), prefixes: new Set() });
+  const cand3 = computeCandidates({
+    uKeys: new Set(["error.SOME_CODE"]),
+    kKeys: new Set(),
+    prefixes: new Set(),
+    localeKeys: new Set(["error.SOME_CODE"]),
+  });
   check(cand3.length === 0, "正控：error.* 命名空间豁免");
 
   // 7) 正控：改名后仍被引用 ⇒ 留在 K、自动减掉
@@ -250,11 +280,32 @@ function runSelftest() {
     uKeys: new Set(["moved.key"]),
     kKeys: new Set(["moved.key"]),
     prefixes: new Set(),
+    localeKeys: new Set(["moved.key"]),
   });
   check(cand4.length === 0, "正控：改名后仍被引用的 key 不出候选");
 
+  // 8) 正控（2026-11-05 补）：**删码同时删键** ⇒ 不红。
+  //    本门的整改动作就是「同步删除 11 语言 key」，键已经不在了还点名，等于叫停正确做法
+  //    （实测触发：删 MultiLlmVotePanel.tsx + 11 语言 15 键后，门报 12 条「须同步删除 locale」）。
+  const cand5 = computeCandidates({
+    uKeys: new Set(["gone.page.title"]),
+    kKeys: new Set(),
+    prefixes: new Set(),
+    localeKeys: new Set(["something.else"]),
+  });
+  check(cand5.length === 0, "正控：locale 里已不存在的 key 不得再出候选");
+
+  // 9) 负控（同批）：localeKeys 缺省 = 不做这一维过滤（旧调用方语义不变）
+  const cand6 = computeCandidates({ uKeys: new Set(["legacy.key"]), kKeys: new Set(), prefixes: new Set() });
+  check(cand6.length === 1, "localeKeys 缺省时不得静默放行任何候选");
+
+  // 10) flattenLocaleKeys：拍平嵌套对象、只收叶子、数组不产键
+  const flat = flattenLocaleKeys({ chat: { a: { b: "文案" }, list: ["x"] }, top: "值" });
+  check(flat.has("chat.a.b") && flat.has("top"), "flattenLocaleKeys 必须产出点分叶子路径");
+  check(![...flat].some((k) => k.includes("list")), "数组不参与 i18n 键空间");
+
   if (fail > 0) { return false; }
-  console.log("SELFTEST OK：name-status 3 列解析 / K 三引号 + 噪声 / 动态前缀运行时抽取 / 负控红 / 前缀与 error.* 豁免正控 全部通过");
+  console.log("SELFTEST OK：name-status 3 列解析 / K 三引号 + 噪声 / 动态前缀运行时抽取 / 负控红 / 前缀与 error.* 与「已同步删键」三项正控 / localeKeys 缺省不放行 / flatten 口径 全部通过");
   return true;
 }
 
@@ -330,7 +381,29 @@ if (skippedOld.length > 0) {
   for (const f of skippedOld.slice(0, 10)) { console.log(`  - ${f}`); }
 }
 
-const candidates = computeCandidates({ uKeys, kKeys, prefixes });
+// localeKeys：11 语言**现存** key 的并集（取并集而非只看 zh-CN：任一语言还留着，
+// 就说明「同步删除」没做完，该报的照报）。读不到某个语言文件 ⇒ 显式降级为
+// 「不做这一维过滤」（宁可多报，不许静默放行）。
+let localeReadFailed = null;
+const localeKeys = new Set();
+for (const name of readdirSync(join(SRC_DIR, "i18n", "locales")).filter((f) => f.endsWith(".json"))) {
+  const text = readSafe(join(SRC_DIR, "i18n", "locales", name));
+  if (!text) {
+    localeReadFailed = name;
+    break;
+  }
+  try {
+    for (const k of flattenLocaleKeys(JSON.parse(text))) { localeKeys.add(k); }
+  } catch {
+    localeReadFailed = name;
+    break;
+  }
+}
+if (localeReadFailed) {
+  console.log(`⚠ locale 读取/解析失败（${localeReadFailed}）⇒ 本轮**不做**「键已删」豁免，跳过 ≠ 通过。`);
+}
+
+const candidates = computeCandidates({ uKeys, kKeys, prefixes, localeKeys: localeReadFailed ? undefined : localeKeys });
 
 console.log(`K（现存静态引用）${kKeys.size} · U（旧内容静态 key）${uKeys.size} · 动态前缀 ${prefixes.size}`);
 

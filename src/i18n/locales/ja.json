@@ -1375,23 +1375,6 @@
       "noServers": "Please add or enable connectors first",
       "goConfig": "Go to Settings →"
     },
-    "multiModelVote": {
-      "title": "Multi-Model Decision Vote",
-      "strategyMajority": "Majority Vote",
-      "strategyWeighted": "Confidence-Weighted",
-      "strategyConsensus": "Unanimous Consensus",
-      "modelCount": "Models Participated",
-      "finalAction": "Final Action",
-      "winnerModel": "Winner Model",
-      "avgConfidence": "Avg. Confidence",
-      "voteBreakdown": "Vote Breakdown",
-      "allAgree": "All models agree",
-      "disagreement": "Disagreement detected",
-      "noDecision": "No decision to aggregate",
-      "button": "聚合投票",
-      "strategy": "聚合策略",
-      "validCount": "有效决策数"
-    },
     "send": "发送",
     "welcomeSubtitle": "选择一个模型，开始你的 AI 对话之旅",
     "contextCompressionOn": "智能压缩已开启",

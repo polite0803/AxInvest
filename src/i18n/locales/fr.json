@@ -1375,23 +1375,6 @@
       "noServers": "Please add or enable connectors first",
       "goConfig": "Go to Settings →"
     },
-    "multiModelVote": {
-      "title": "Multi-Model Decision Vote",
-      "strategyMajority": "Majority Vote",
-      "strategyWeighted": "Confidence-Weighted",
-      "strategyConsensus": "Unanimous Consensus",
-      "modelCount": "Models Participated",
-      "finalAction": "Final Action",
-      "winnerModel": "Winner Model",
-      "avgConfidence": "Avg. Confidence",
-      "voteBreakdown": "Vote Breakdown",
-      "allAgree": "All models agree",
-      "disagreement": "Disagreement detected",
-      "noDecision": "No decision to aggregate",
-      "button": "Vote agrégé",
-      "strategy": "Stratégie d'agrégation",
-      "validCount": "Nombre de décisions valides"
-    },
     "send": "Envoyer",
     "welcomeSubtitle": "Sélectionnez un modèle pour commencer votre conversation IA",
     "contextCompressionOn": "Compression intelligente activée",

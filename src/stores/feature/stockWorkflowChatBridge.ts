@@ -1,4 +1,4 @@
-import { makeWorkflowContent, type WorkflowCardData } from "@/components/chat/WorkflowAgentCard";
+import { makeWorkflowContent, type WorkflowCardData } from "@/components/stock-analysis/workflowChatCard";
 import { extractContent, extractDecision } from "@/lib/agentOutput";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";

@@ -517,9 +517,9 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | **② 跨包口**（一个功能包的文件调另一个功能包的 crate ⇒ 走 `call_seam`） | **29 处 / 9 文件**，且**全部是 OPC 的文件在调股票 crate** | 0 处 |
 | ③ 域自有文件内引用（随插件整体迁走，**不是障碍**） | 456 处 / 41 文件（2026-11-04 复测：原 444 / 37 的增量来自并行批在域自有文件里加代码，**与 B1/B2 两刀无关** —— 那两刀只动主壳） | 16 处 / 2 文件 |
 | Cargo.toml 构建边 | 7 条（`src-tauri` 4 + `tools` 1 + 域内 2；B7b 前 `tools` 2） | 1 条（`src-tauri → axagent-company-runtime`） |
-| 前端反向 import（非域 import 域文件） | 54 处 / 39 文件 | 28 处 / 11 文件（15 处集中在 `ContentArea.tsx`） |
-| 前端体量（**目录口径**：`components/stock-analysis` / `pages/opc`） | `components/stock-analysis` 212 文件 / 60 912 行 + store 6 文件 / 4 514 行 | `pages/opc` 20 文件 / 8 859 行 + `OpcPage.tsx` 134 行 |
-| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 295 文件 / 85 181 行 | 40 文件 / 12 797 行 |
+| 前端反向 import（非域 import 域文件） | 52 处 / 38 文件（2026-11-05 B8-1a：删宿主死代码 `WorkflowAgentCard.tsx` 2 处 + `MultiLlmVotePanel.tsx` 1 处） | 28 处 / 11 文件（15 处集中在 `ContentArea.tsx`） |
+| 前端体量（**目录口径**：`components/stock-analysis` / `pages/opc`） | `components/stock-analysis` 213 文件 / 60 973 行 + store 6 文件 / 4 514 行 | `pages/opc` 20 文件 / 8 859 行 + `OpcPage.tsx` 134 行 |
+| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 296 文件 / 85 242 行 | 40 文件 / 12 797 行 |
 | entities 表文件 | 20 个 | 28 个 |
 | zh-CN i18n key | 3 527（`stockAnalysis`/`invest`/`quant`/`trade` 是**整段**） | 1 897（`opc` 整段） |
 
@@ -4239,7 +4239,7 @@ FAIL: 锚点 frontendDirCaliber ：登记 60900 行 / 实测 60912 行 / 差 12
 - `pages/OpcPage.tsx:22,25 → ./opc/components/{MarketPackTab,TalentMarketTab}`：导入方与目标**都是 OPC 自有文件**；Rust 侧有 `cross` 桶处理这种情形，前端侧没有 —— 属**两域判据不同源**。
 
 **② 共享基元下沉（20 处）**
-- `@/lib/stock-analysis-utils` **13 处**（agentOutput / decision-agreement / dataQualityDiagnosis / decisionInputDiagnosis / MultiLlmVotePanel / time-travel ×3 / theme 与 utils 测试 ×2 等）。
+- `@/lib/stock-analysis-utils` **13 处**（agentOutput / decision-agreement / dataQualityDiagnosis / decisionInputDiagnosis / ~~MultiLlmVotePanel~~（2026-11-05 §97 随死代码删除）/ time-travel ×3 / theme 与 utils 测试 ×2 等）。**2026-11-05 实测余 12 处**。
 - `@/lib/investRoutes` **3 处**（office StrategyRoomMiniBar / time-travel ReplayWorkbench ×1 / DailyReviewPanel）→ 宿主需要「跳到投资页」的通用导航口。
 - `stock-analysis/_shared/PageHeader` 1、`stock-analysis/utils` 1、`stock-analysis/vendorCheck` 1、`office/phaser/investSceneTemplates` 2。
 - ⚠ 其中 `stock-analysis-utils` 的函数（`parseAction` / `getActionColor` / `analystBaseOf` / `horizonLabelKey`）是**股票语义**，单纯改名是洗绿 ⇒ 终局是「这些宿主 lib 本身属于域」或「把纯函数上收成参数化工具」，必须先逐函数判中性，不能整文件搬。
@@ -4446,3 +4446,57 @@ worker 二进制 **827,392 → 5,703,680 字节（debug）**：analysis-engine �
 2. **`requiredPermission` 仍是插件自述**：`check_command_gate` 拿它与已授权权限比对，但声明为 `read-only` 的命令不会触发权限检查 —— 这是既有语义（§0.7.6 的「权限不执法」同族），本批不扩大。
 3. **主 crate clippy 未单跑**：与 §95.4 同因（20 分钟独占构建窗口），留 #35 收尾全量门禁。
 4. **桌面真机 / 安装包未验**：注册命令清单不变（本批零命令增删），`register_commands.rs` 未重生成。
+
+## §97 B8-1a：聊天侧股票卡片**复扫推翻试点**，死代码清零（#35，2026-11-05）
+
+**动手前先把 §93 的试点验了一遍，结论是试点对象不存在** —— §91.2 ④ 记的「聊天渲染器 `WorkflowAgentCard`(2)、`MultiLlmVotePanel`(1) 需要渲染器注册表」，实测是**死代码**，不是耦合：
+
+| 判据 | 实测 |
+|---|---|
+| 谁渲染 `WorkflowAgentCard` 组件 | **零渲染点**。聊天分派在 `ChatViewMessages.tsx` 的 `contentRender`（按 `msg.blocks[].type` 与 `CHAT_CUSTOM_HTML_TAGS` 的自定义 HTML 标签），该组件不在任何分派分支里，只有文件内 `:731` 自递归。 |
+| `parseWorkflowCard` 调用方 | **0**（全仓仅定义处）。 |
+| 生产端 | `stores/feature/stockWorkflowChatBridge.ts:85` 仍往消息正文写 `<!-- workflow-<type>:JSON -->` ⇒ **写了没人渲染**（HTML 注释在 Markdown 里不可见）。 |
+| `MultiLlmVotePanel` 外部引用 | **0**（组件、类型、测试、i18n 全无；`chat.multiModelVote.*` 15 个 key 只有它自己用）。 |
+
+**判据裁定**：不能为「注册表」新建一个今天没有任何渲染点的插槽 —— 那是给假想需求做设计。本批因此改成**死代码清零 + 试点改判**，注册表本体留到 §98 的真实试点上再建。
+
+### 97.1 改动（4 类）
+
+| 面 | 改动 |
+|---|---|
+| 域内新落点 | 新增 `src/components/stock-analysis/workflowChatCard.ts`（61 行）：只搬宿主那份文件里**真正被消费的股票语义** —— `WorkflowCardData` 类型 + `makeWorkflowContent`（拼 `<!-- workflow-*:JSON -->` 标记）。React 卡片实现与 `parseWorkflowCard` 随死代码删除（§93 已裁：卡片渲染只能走 schema 或 iframe，不再留第三方 React 骨架）。 |
+| 删除 | `src/components/chat/WorkflowAgentCard.tsx`（792 行，组件零渲染点）、`src/components/chat/MultiLlmVotePanel.tsx`（零外部引用）。 |
+| 改 import | `src/stores/feature/stockWorkflowChatBridge.ts:1` 改指 `@/components/stock-analysis/workflowChatCard`。 |
+| 11 语言清键 | 删 `chat.multiModelVote` 整块（每语言 15 键 / 17 行，共 11×17 行），逐语言 `JSON.parse` 校验后落盘，其余字节不动。 |
+
+### 97.2 顺带修的门禁缺陷（不是为数字放宽）
+
+`check-i18n-orphan-diff.mjs` 的候选式是 `U − K − 动态前缀 − error.*`，**没有「键还在不在 locale」这一维** ⇒ 「删码同时把 11 语言键删掉」这一**正确做法**必然红：本批删完 `MultiLlmVotePanel` + 11 语言 15 键后，门仍报 12 条「须同步删除 11 语言 locale」，而那 12 条已经不在 locale 里。修法 = 候选再减 `{k | k ∉ localeKeys}`，`localeKeys` 取 **11 语言现存键的并集**（任一语言还留着就照报，不做 zh-CN 单侧豁免）；读不到/解析失败某个 locale ⇒ 显式打印并**退回不做该维过滤**（宁可多报，不许静默放行）。selftest 同步补 3 条：「已同步删键」正控、`localeKeys` 缺省不放行负控、`flattenLocaleKeys` 数组不产键。
+
+### 97.3 验收（实跑）
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| K1 | `npm run typecheck`（`scripts/check-tsc.mjs`） | 0 | 扫到 **1463** 个 src 文件（非空跑），`--noEmit` 无错 |
+| K2 | `npm run test:run -- stockWorkflowChatBridge` | 0 | **2 passed**；⚠ 必须走包装器 `scripts/vitest-run.mjs` —— 直接 `npx vitest run <filter>` 在本机 UNC 根下把 root 解析成 `Z: Folders/D/...`，报「No test files found」（#111/#137 同族，本次实测复现） |
+| K3 | `node scripts/check-i18n-orphan-diff.mjs --selftest` / 正式跑 | 0 / 0 | 自检含 3 条新用例全过；正式跑 PASS |
+| K4 | 负控（往 zh-CN 塞回 `chat.multiModelVote.title` 再跑孤儿门） | 1 | 恰好报 **1** 条且就是那条键 ⇒ 新维度只豁免「已删干净」，没削弱原判据；随后 `cmp` 校验还原 `RESTORED_IDENTICAL` |
+| K5 | `node scripts/check-i18n-key-parity.mjs` | 0 | 11 语言各 **16 282** 条，路径集合一致 |
+| K6 | 中立性 / JSX 文案 / 豁免预算 三道门 | 0/0/0 | 中立性 225 条、基线外 0（并提示「本轮已修复 1 条」= 删掉的 `chat → stock-analysis` 那条，**未跑 `--update-baseline`**，等并行批落地再收紧）；JSX 基线外 0；豁免预算无基线外问题 |
+| K7 | `node scripts/audit-l1-blockers.mjs` + 第五道门（驻留 3 行） | 0 / 0 | 前端反向阻塞 **55 → 52 处 / 40 → 38 文件**；`frontendFileCaliber` **85 242 / 296**、`frontendDirCaliber` **60 973 / 213**（+61 行 / +1 文件，同批改表与 PLAN §0.10.1）；`zh-CN i18n key` 仍 3 527（删的是 `chat.*` 命名空间）；37 项硬判据全 PASS |
+
+### 97.4 试点改判（下一批 B8-1 的真实对象）
+
+聊天侧「今天真的在渲染」的股票耦合 = **0 处**，注册表没有试点。逐条扫剩余 52 处后，唯一同时满足「真实渲染 + 已有按类型分派的注册表 + 可数据化」的落点是**任务中心**：
+
+- `src/pages/TasksCenterPage/adapters/registry.ts` 已有 `REGISTRY` 数组 + `registerAdapter()`（运行时可追加），键 = `SourceId`；
+- 股票两个源 `stockAnalysis.adapter.ts` / `pipeline.adapter.ts` 由宿主静态注册，`SourceId` 是**闭合联合** ⇒ 插件源进不来；
+- 终局形态（待 §98 裁定后实现）：插件清单新增**任务源声明面**（`taskSources[]`：id / 标题 / 取数命令 / deepLink / 颜色），宿主用**泛型 adapter 工厂**按声明实例化，数据走 T2 命名命令返回 `UnifiedRun` 形态的行 ⇒ 不往主 origin 注入任何代码，与 §93 一致。
+- ⚠ 代价先摆明：现有股票 adapter 含映射逻辑（状态映射、根记录过滤、deepLink 拼装、名称拼接）⇒ 要么把逻辑上移到插件 worker（Rust，返回已映射的行），要么给声明面加一套映射 DSL。**前者是终局，后者会造出第二套声明语言**；`analysisRecordPath` 依赖前端路由表，须一并裁定宿主路由口。
+
+### 97.5 本批未做
+
+1. **`<!-- workflow-* -->` 标记仍写了没人渲染**：生产端照常写，本批不改行为（改就是「新增一张卡」，属新需求，不是迁出）。要恢复展示须走 §93 的 schema 卡片，另批裁定。
+2. **未跑 `--update-baseline`**（中立性少 1 条存量）：并行批仍在改前端，按既定纪律等全批落地再收紧棘轮。
+3. **全量 Vitest 未跑**：只定点跑了受影响的 1 个测试文件；`chat` 目录删掉两个文件后没有任何测试引用它们（已 grep 确认），全量留 #35 收尾。
+4. **注册表本体未建**：见 97.4，试点改判后下一批做。

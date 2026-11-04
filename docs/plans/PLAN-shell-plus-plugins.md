@@ -3755,3 +3755,37 @@ K1 不变（**2033**）：本片只改既有 `main.rs` 与 `tests/protocol.rs`�
 2. **产物未重打**：`dist/plugins/stock/` 里仍是 §75 的骨架二进制（sha256 `97ac4c4e…c6cd`），重跑 `plugin:bundle` 后哈希必变；本片未重打也未入库（`dist/` 已忽略）。
 3. **未接 T2 命令面**：`commands[]` 仍为空数组，插件目前只贡献工具，不贡献命令。
 4. **读数不降**（计划内）：ownedRe 桶仍 123 处 / 22 文件，本片不动。
+
+## 77. `#35` B4-d：首刀的真宿主端到端（关闭 §76 未做 1）（2026-11-04）
+
+**接的是 §76 未做 1**：§76 的 6 条测试里「宿主」是测试进程自写的最小应答器，只锁帧形状；本片补上**宿主侧真实实现**跑一遍。
+
+**交付**：新测试 `axagent-plugins/crates/plugins/tests/e2e_stock_tool_test.rs`（真 `LoadedPlugin` + 真 worker 进程 + 假行情 provider），一条用例覆盖全链：
+
+`LoadedPlugin::load`（spawn → describe → 校验 `calls` → 注册 `tool.set`）→ `registry.get_tool_set()` 取远程工具集 → 断言 `get_stock_quote` 的 `category` / `inputSchema.required` → `Tool::call({"stock_code":"600519"})` → worker `call_seam("market.quote","get_quote")` → 宿主 `HostPeer::dispatch_seam` → `FixedQuoteProvider.get_quote` → `content` / `metadata.stock_code` 回到宿主 → `drop(loaded)` 回滚 `tool.set`、`market.undo()` 回滚行情替身。
+
+**为什么行情用替身**：真实 provider 要联网取数，不能进单测；本片验的是**接线**（谁的 provider 被调到、数据是否原样回到宿主），取数正确性属 provider 自身测试。
+
+**门控与取路径**：`AXAGENT_STOCK_WORKER_BIN=<worker 可执行文件>`，未设则打印 SKIP 并说明「未通过、未被验证」（沿用 `AXAGENT_TEST_PLUGIN_SUBPROCESS` 口径）。不用 `CARGO_BIN_EXE_*` 的原因：`plugin-stock` 是另一个 package，该变量只对本 package 的 bin 生效；本机 `CARGO_TARGET_DIR` 又指向 `~/.cargo/target-axagent`，写死 `target/` 找不到 ⇒ 由调用方给路径（推荐指向 `dist/plugins/stock/bin/`）。
+
+**验收（2026-11-04 实测，日志 `.tmp/t35b4d-{e2e,clippy}.log`）**：
+
+| 标签 | 命令（cwd = `axagent-plugins`） | EXIT | 取证 |
+|---|---|---|---|
+| D1 | `AXAGENT_STOCK_WORKER_BIN=<dist 绝对路径> cargo test -p axagent-plugins --test e2e_stock_tool_test -- --nocapture` | 0 | **1 passed / 0 failed**（0.13–0.20s）：真实 `LoadedPlugin` + 真实子进程，`content.price=1500.25`、`code=600519`、`metadata.stock_code=600519`；卸载后两条接缝均回滚 |
+| D2 | 同上但不设环境变量 | 0 | 打印 SKIP 三行（明示未验证），不算通过 |
+| D3 | `cargo clippy -p axagent-plugins --all-targets -- -D warnings` | 0 | Finished 16.43s，零告警 |
+| D4 | `rustfmt --edition 2024 --check`（1 个文件） | 0 | 首轮 1 处 diff（`assert_eq!` 参数换行），`rustfmt` 修正后零 diff |
+
+K1 不变（**2033**）：新文件落在 `tests/`，被 `K1_IGNORE` 排除。
+
+**本片踩到的两个坑（写下来省下一次）**：
+1. **`EffectHandle` 没有 `Drop`**：`drop(handle)` 不会回滚，必须显式 `.undo()`。首版断言「drop 后应回滚」当场红，真因在测试写法而非产品代码。
+2. **装载必须在 tokio 运行时上下文内**：`set_declaration` 用 `Handle::try_current()` 取运行时，拿不到 ⇒ 装载照样成功，但 worker 回调 `market.quote` 会以「无运行时」失败（错误出现在调用期，不在装载期，容易误判成协议问题）。
+3. 顺带一条：bash 里 `\\\\vmware-host\\...` 传给环境变量会塌成单反斜杠 `\vmware-host\...`，Windows 上按 UNC 解析不了；用正斜杠 `//vmware-host/...` 或单引号原样传。
+
+**未做（逐条点名）**：
+1. **未走 `PluginManager` 的 enable 路径**：本片用 `PluginWorkerConfig` + **绝对** program 路径，没验「清单 `worker.program` 相对路径 → `resolve_worker_program` → 权限从 manifest 注入」这一段；那是 §75 未做 3，仍开着。
+2. **CI 跑不到**：CI 没有先跑 `plugin:bundle` 的步骤 ⇒ 该用例在 CI 上走 SKIP，**不是回归护栏**；要变成护栏得把「建产物 + 设环境变量」接进 CI，属发布链路（与 §75 未做 2 同族）。
+3. **产物已重打**：`node scripts/build-plugin-bundle.mjs` 重新打包（`dist/` 忽略不入库），sha256 由 `97ac4c4e…c6cd` 变为 `fcf24fe7…6111` —— 反映 B4-c 的代码变化，非新问题。
+4. **读数不降**（计划内）：ownedRe 桶仍 123 处 / 22 文件。

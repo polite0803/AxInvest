@@ -64,6 +64,7 @@
     "diag": "node scripts/diag-app.mjs",
     "tauri:build": "node scripts/tauri-build.mjs",
     "build:clean": "node scripts/sccache-clean-build.mjs",
+    "plugin:bundle": "node scripts/build-plugin-bundle.mjs",
     "tauri:android:init": "tauri android init",
     "tauri:android:dev": "tauri android dev",
     "tauri:android:build": "tauri android build",

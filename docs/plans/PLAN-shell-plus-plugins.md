@@ -3697,3 +3697,21 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 1. **`bundled/stock/plugin.json` 清单与产物分发未做**：`PluginWorkerDecl.program` 是「相对插件安装目录」的路径，而仓内**没有**「编译产物随 bundle 分发」的通道（现有 `bundled/` 两个样例都是 hooks/ui 资产）。这条要先定「worker 可执行怎么进包」（构建脚本拷贝 / 制品仓库 / 首次启用时现编），属 B4 下一批。
 2. **T2 命令声明与分派未做**：manifest `commands[]` + `ops::COMMAND` 分支一并留到域逻辑搬入时做，现在写空命令列表会制造「声明了但没实现」。
 3. **不降反向阻塞读数**（计划内）：B4 走 ownedRe 桶，读数 123 处 / 22 文件本片不动；下一次下降要等本体搬迁。
+
+## 75. `#35` B4-b：插件目录打包脚本 + 成品自检（2026-11-04）
+
+**接的是 §74 未做 1**：`PluginWorkerDecl.program` 只接受**相对插件安装目录**的路径（`resolve_worker_program` 拒绝对路径与 `..`），而 `cargo build` 的产物在 target 目录 —— 中间缺「把产物摆进插件目录」这一步，本片补的就是它。
+
+**交付**：`scripts/build-plugin-bundle.mjs`（npm script `plugin:bundle`），四步：
+
+1. `cargo build -p axagent-plugin-stock`（`--release` 可选）；
+2. 用 `cargo metadata` 取 `target_directory` 与包版本 —— **不猜 `target/`**（本机 `CARGO_TARGET_DIR` 指向 `~/.cargo/target-axagent`，写死 `target/` 会打出空包）；
+3. 拷到 `<out>/bin/<exe>`，写 `<out>/plugin.json`：`worker.program` = `bin/<exe>`（相对路径）、`permissions` / `mcp_servers` / `skills` / `agents` 按 `PluginManifest` 的**无 default 必填字段**给空数组、`defaultEnabled: false`、`integrity` 用现算的 sha256；
+4. `--check`：spawn **打包出来的那个文件**（不是 target 里的），按帧协议 `describe` → `shutdown`，核对 `request_id` 回填、`proto_version` = 1、退出码 0，并核对清单 `integrity.hash` 与盘上一致。
+
+**实测**（`node scripts/build-plugin-bundle.mjs --check`，EXIT=0）：产物 `dist/plugins/stock/{plugin.json, bin/axagent-plugin-stock.exe}`；sha256 `97ac4c4e…c6cd`；自检行 `describe 握手 + shutdown 回执 + 退出码 0 + sha256 一致`。`dist/` 已被 `.gitignore` 忽略 ⇒ 产物不入库。
+
+**未做（逐条点名）**：
+1. **宿主侧清单解析未在本片验证**：脚本按 `minimal_plugin_json`（`crates/plugins/tests/common/mod.rs`）的同形状给字段，但真跑一遍 `load_plugin_from_directory` 要等「从 bundle 目录走真实安装 + 启用」的批次；现在不造假门（没有 skip-if-absent 的伪测试）。
+2. **产物没接发布链路**：未进 `tauri.conf.json` 的 resources，装好的 App 里怎么带插件包仍空白 —— 属发布链路，与插件独立仓（#32 同族）一起裁。
+3. **`--check` 不验 `resolve_worker_program`**：它只在 **enable** 时调用（`manager.rs:1114`），本片产物 `defaultEnabled: false`，不会走到那里；启用路径的端到端验证留到 B4-c。

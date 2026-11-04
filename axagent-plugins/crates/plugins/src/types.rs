@@ -630,6 +630,23 @@ pub struct PluginCommandManifest {
     pub required_permission: Option<String>,
 }
 
+/// 插件命名命令在**智能体命令面**上的只读投影（B10-1）。
+///
+/// 为什么不让插件直接产出 `CommandMetadata`（`src-tauri/.../command_bridge.rs`）：
+/// 那边的类型是 `&'static str` + 宿主宏注册表的域/安全档位，属于**编译期**数据；
+/// 插件命令是运行期数据（启停、安装来源都会变），字段必须是拥有所有权的 `String`。
+/// 这里只投影「名称 / 描述 / 授权档位 / 归属插件」，安全级别由宿主桥按
+/// `required_permission` 映射 —— 插件不得自封 `Safe`。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginAgentCommand {
+    pub plugin_id: String,
+    pub name: String,
+    pub description: String,
+    /// 见 [`PluginCommandManifest::required_permission`]；`None` = 只读档。
+    pub required_permission: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawPluginMcpServer {
     pub name: String,

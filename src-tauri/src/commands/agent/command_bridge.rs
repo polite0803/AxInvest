@@ -176,11 +176,6 @@ impl CommandRegistry {
         &self.commands
     }
 
-    /// 检查命令是否存在
-    pub fn contains(&self, name: &str) -> bool {
-        self.name_index.contains_key(name)
-    }
-
     /// 获取命令总数
     pub fn len(&self) -> usize {
         self.commands.len()
@@ -227,6 +222,151 @@ impl Default for CommandRegistry {
     fn default() -> Self {
         Self::from_registry()
     }
+}
+
+// ── 插件命令并入智能体命令面（B10-1）──────────────────────────────────
+
+/// 插件命名命令在命令桥里的运行期形态。
+///
+/// 与 [`CommandMetadata`] 分开是**刻意的**：那边是 `&'static str` 的编译期宏数据，
+/// 插件命令是运行期数据（安装来源 / 启停都会变），强行合并只会把静态类型改成 `Cow`
+/// 并波及所有既有索引与测试。安全级别不取插件自述，而由
+/// [`plugin_command_safety`] 从清单的 `requiredPermission` 推导。
+#[derive(Debug, Clone)]
+pub struct PluginCommandSpec {
+    pub plugin_id: String,
+    pub name: String,
+    pub description: String,
+    pub safety: CommandSafety,
+}
+
+/// 插件声明的授权档位 → 智能体安全档位。
+///
+/// - 未声明 / `read-only` ⇒ [`CommandSafety::Safe`]（与 `PluginCommandManifest` 的
+///   「未声明即 ReadOnly」逐字同口径，见 `types.rs`）；
+/// - `workspace-write` ⇒ `Caution`（写入需用户确认）；
+/// - `danger-full-access` ⇒ `Dangerous`（需显式授权）；
+/// - **未知档位 ⇒ `Dangerous`（fail-closed）**：清单校验会拒未知值，但这里不依赖
+///   上游一定做过校验 —— 单独调用本函数的路径也必须安全侧倒。
+pub fn plugin_command_safety(required_permission: Option<&str>) -> CommandSafety {
+    match required_permission.map(str::trim).filter(|value| !value.is_empty()) {
+        None | Some("read-only") => CommandSafety::Safe,
+        Some("workspace-write") => CommandSafety::Caution,
+        Some("danger-full-access") => CommandSafety::Dangerous,
+        Some(other) => {
+            warn!(
+                required_permission = other,
+                "插件命令声明了未知授权档位，按 Dangerous 处理（fail-closed）"
+            );
+            CommandSafety::Dangerous
+        },
+    }
+}
+
+/// 把插件命令投影过滤成智能体可见集合：与宿主 `#[agent_command]` 重名的**宿主优先**。
+///
+/// 重名若两边都暴露，LLM 看到同名两条、执行走哪条取决于分支顺序 —— 那是最糟的
+/// 「看起来都能用」的接口。宿主实现优先是唯一可解释的裁决：宏命令是编译期注册、有
+/// 完整元数据与 Handler；插件命令是运行期数据，重名说明它在抢宿主的位置。
+pub fn merge_plugin_command_specs(
+    catalog: Vec<axagent_plugins::PluginAgentCommand>,
+    macro_names: &HashSet<&str>,
+) -> Vec<PluginCommandSpec> {
+    catalog
+        .into_iter()
+        .filter_map(|command| {
+            if macro_names.contains(command.name.as_str()) {
+                warn!(
+                    command = %command.name,
+                    plugin = %command.plugin_id,
+                    "插件命令与宿主命令重名，智能体命令面保留宿主实现"
+                );
+                return None;
+            }
+            Some(PluginCommandSpec {
+                plugin_id: command.plugin_id,
+                name: command.name,
+                description: command.description,
+                safety: plugin_command_safety(command.required_permission.as_deref()),
+            })
+        })
+        .collect()
+}
+
+/// 收集**已启用**插件贡献的命令（宿主重名已剔除）。
+pub async fn collect_plugin_command_specs(app_handle: &AppHandle) -> Vec<PluginCommandSpec> {
+    let manager = app_handle.state::<crate::AppState>().plugin_manager.clone();
+    let catalog =
+        tauri::async_runtime::spawn_blocking(move || manager.blocking_read().agent_command_specs())
+            .await;
+    let catalog = match catalog {
+        Ok(Ok(commands)) => commands,
+        Ok(Err(error)) => {
+            warn!(error = %error, "读取插件命令清单失败，按空清单处理");
+            Vec::new()
+        },
+        Err(error) => {
+            warn!(error = %error, "插件命令清单任务失败，按空清单处理");
+            Vec::new()
+        },
+    };
+    let macro_names: HashSet<&str> =
+        axagent_agent_command_types::registry::get_all().iter().map(|meta| meta.name).collect();
+    merge_plugin_command_specs(catalog, &macro_names)
+}
+
+/// 插件命令的索引片段（拼进 `<tauri-command-index>`）。
+///
+/// 公共纯函数 + 异步包装两层：索引文案的顺序/图标是可单测的纯行为，
+/// 不该为了测试去造一个 `AppHandle`。
+pub fn render_plugin_command_index(specs: &[PluginCommandSpec]) -> String {
+    if specs.is_empty() {
+        return String::new();
+    }
+    let mut index = String::from("\n[plugin]\n");
+    for spec in specs {
+        let safety_icon = match spec.safety {
+            CommandSafety::Safe => "✓",
+            CommandSafety::Caution => "⚠",
+            CommandSafety::Dangerous => "✗",
+        };
+        index.push_str(&format!(
+            "- {} {}: {}（插件 {}）\n",
+            safety_icon, spec.name, spec.description, spec.plugin_id
+        ));
+    }
+    index
+}
+
+/// 供 `agent_query` 注入系统提示的插件命令片段。
+pub async fn build_plugin_command_index(app_handle: &AppHandle) -> String {
+    let specs = collect_plugin_command_specs(app_handle).await;
+    render_plugin_command_index(&specs)
+}
+
+/// 执行一条插件命令（智能体面）。
+///
+/// 走与 `plugin_execute_command` 相同的 `spawn_blocking` + `blocking_read` 形态：
+/// `execute_plugin_command` 内含帧往返（最长 `DEFAULT_COMMAND_TIMEOUT_MS`），
+/// 直接在异步上下文里调会阻塞 runtime 工作线程。
+async fn execute_plugin_agent_command(
+    app_handle: &AppHandle,
+    plugin_id: &str,
+    command: &str,
+    args: &Value,
+) -> Result<String, String> {
+    let manager = app_handle.state::<crate::AppState>().plugin_manager.clone();
+    let plugin_id = plugin_id.to_string();
+    let command = command.to_string();
+    let args = args.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        manager
+            .blocking_read()
+            .execute_plugin_command(&plugin_id, &command, &args)
+            .map_err(|error| format!("插件命令执行失败：{error}"))
+    })
+    .await
+    .map_err(|error| format!("插件命令执行任务失败：{error}"))?
 }
 
 // ── Command Cache (Phase 3) ────────────────────────────────────────────
@@ -913,29 +1053,28 @@ async fn dispatch_command(
                 input["command"].as_str().ok_or_else(|| "缺少 command 参数".to_string())?;
             let args = input["args"].clone();
 
-            // 使用 CommandRegistry 查找命令元数据
+            // 宿主宏命令与「已启用插件贡献的命令」合并查表（B10-1）：
+            // 重名已在 `collect_plugin_command_specs` 里按宿主优先剔除，这里两者至多命中一个。
             let registry = CommandRegistry::default();
+            let plugin_specs = collect_plugin_command_specs(app_handle).await;
+            let macro_meta = registry.find_by_name(command).cloned();
+            let plugin_spec = plugin_specs.iter().find(|spec| spec.name == command);
 
-            // 检查命令是否存在
-            if !registry.contains(command) {
-                warn!(
-                    "Command not found in registry: {} (total commands: {})",
-                    command,
-                    registry.len()
-                );
-                return Err(format!(
-                    "命令 '{}' 不在可用命令列表中。请检查命令名称或使用 list_available_commands 查看可用命令。",
-                    command
-                ));
-            }
-
-            let cmd_meta = match registry.find_by_name(command) {
-                Some(meta) => meta,
-                None => {
-                    return Err(format!("命令 '{}' 在查找过程中不可用，请重试。", command));
+            let safety = match (macro_meta.as_ref(), plugin_spec) {
+                (Some(meta), _) => meta.safety.clone(),
+                (None, Some(spec)) => spec.safety.clone(),
+                (None, None) => {
+                    warn!(
+                        "Command not found in registry or enabled plugins: {} (host commands: {})",
+                        command,
+                        registry.len()
+                    );
+                    return Err(format!(
+                        "命令 '{}' 不在可用命令列表中。请检查命令名称或使用 list_available_commands 查看可用命令。",
+                        command
+                    ));
                 },
             };
-            let safety = &cmd_meta.safety;
             let permission_mode = input["permission_mode"].as_str().unwrap_or("default");
 
             // 检查是否在给定权限模式下允许执行
@@ -972,6 +1111,16 @@ async fn dispatch_command(
                     "args": args,
                 })
                 .to_string())
+            } else if macro_meta.is_none() {
+                // 只读插件命令：转发到 worker（归属由插件清单决定，不由 LLM 指定）。
+                let spec = plugin_spec.expect("命中分支已排除 None");
+                debug!(
+                    "Executing plugin command: {} (plugin={}, severity={})",
+                    command,
+                    spec.plugin_id,
+                    safety.severity()
+                );
+                execute_plugin_agent_command(app_handle, &spec.plugin_id, &spec.name, &args).await
             } else {
                 // 只读命令，直接执行
                 debug!("Executing safe command: {} (severity={})", command, safety.severity());
@@ -994,7 +1143,7 @@ async fn dispatch_command(
                 registry.all().iter().collect()
             };
 
-            let commands: Vec<_> = domain_commands
+            let mut commands: Vec<Value> = domain_commands
                 .iter()
                 .map(|cmd| {
                     serde_json::json!({
@@ -1002,9 +1151,27 @@ async fn dispatch_command(
                         "description": cmd.description,
                         "domain": cmd.domain.as_str(),
                         "safety": cmd.safety.as_str(),
+                        "source": "host",
                     })
                 })
                 .collect();
+
+            // 插件命令不属于任何宿主 `CapabilityDomain`，带 domain 过滤时按域语义不返回；
+            // 不带过滤时一并列出，否则 LLM 在索引里看到命令、用本工具二次核对时却查不到（B10-1）。
+            if domain_filter.is_none() {
+                commands.extend(collect_plugin_command_specs(app_handle).await.iter().map(
+                    |spec| {
+                        serde_json::json!({
+                            "name": spec.name,
+                            "description": spec.description,
+                            "domain": "plugin",
+                            "safety": spec.safety.as_str(),
+                            "source": "plugin",
+                            "pluginId": spec.plugin_id,
+                        })
+                    },
+                ));
+            }
 
             Ok(serde_json::json!({
                 "total": commands.len(),
@@ -2810,5 +2977,97 @@ mod tests {
         let index = build_command_index_string(&domains);
 
         assert!(index.contains("可用后端命令"));
+    }
+
+    // ==== B10-1：插件命令并入智能体命令面 ====
+
+    fn plugin_agent_command(
+        plugin_id: &str,
+        name: &str,
+        required_permission: Option<&str>,
+    ) -> axagent_plugins::PluginAgentCommand {
+        axagent_plugins::PluginAgentCommand {
+            plugin_id: plugin_id.to_string(),
+            name: name.to_string(),
+            description: format!("{name} 的描述"),
+            required_permission: required_permission.map(str::to_string),
+        }
+    }
+
+    /// 授权档位映射必须逐档对得上，且未知档位一律 fail-closed。
+    ///
+    /// `ReadOnly`（大小写不同）/ `write` 这类「看起来像档位」的拼写也要落到 Dangerous：
+    /// 清单校验会拒未知值，但本函数是公开的，调用方不保证先过校验。
+    #[test]
+    fn plugin_command_safety_maps_known_permissions_and_fails_closed() {
+        assert_eq!(plugin_command_safety(None), CommandSafety::Safe);
+        assert_eq!(plugin_command_safety(Some("")), CommandSafety::Safe);
+        assert_eq!(plugin_command_safety(Some("   ")), CommandSafety::Safe);
+        assert_eq!(plugin_command_safety(Some("read-only")), CommandSafety::Safe);
+        assert_eq!(plugin_command_safety(Some(" workspace-write ")), CommandSafety::Caution);
+        assert_eq!(plugin_command_safety(Some("danger-full-access")), CommandSafety::Dangerous);
+
+        for unknown in ["write", "ReadOnly", "workspace_write", "dangerous"] {
+            assert_eq!(
+                plugin_command_safety(Some(unknown)),
+                CommandSafety::Dangerous,
+                "未知档位 `{unknown}` 必须按 Dangerous 处理（fail-closed）"
+            );
+        }
+    }
+
+    /// 重名时保留宿主实现：插件侧同名条目整条剔除，不得同时暴露两条。
+    #[test]
+    fn merge_plugin_command_specs_keeps_host_implementation_on_name_clash() {
+        let catalog = vec![
+            plugin_agent_command("demo", "greet", None),
+            plugin_agent_command("demo", "host_owned", Some("workspace-write")),
+        ];
+        let macro_names: HashSet<&str> = ["host_owned"].into_iter().collect();
+
+        let specs = merge_plugin_command_specs(catalog, &macro_names);
+
+        assert_eq!(specs.len(), 1, "重名条目应被剔除，实际 {specs:?}");
+        assert_eq!(specs[0].name, "greet");
+        assert_eq!(specs[0].plugin_id, "demo");
+        assert_eq!(specs[0].safety, CommandSafety::Safe);
+    }
+
+    /// 无插件命令时索引片段必须是空串（否则 `<tauri-command-index>` 里会多一个空 `[plugin]` 段）。
+    #[test]
+    fn render_plugin_command_index_is_empty_without_specs() {
+        assert_eq!(render_plugin_command_index(&[]), "");
+    }
+
+    /// 索引用三档图标区分安全级别，并标出归属插件（LLM 需要知道命令来自哪个包）。
+    #[test]
+    fn render_plugin_command_index_marks_safety_and_owner() {
+        let specs = vec![
+            PluginCommandSpec {
+                plugin_id: "p-a".into(),
+                name: "safe_cmd".into(),
+                description: "只读查询".into(),
+                safety: CommandSafety::Safe,
+            },
+            PluginCommandSpec {
+                plugin_id: "p-b".into(),
+                name: "write_cmd".into(),
+                description: "写入".into(),
+                safety: CommandSafety::Caution,
+            },
+            PluginCommandSpec {
+                plugin_id: "p-c".into(),
+                name: "danger_cmd".into(),
+                description: "危险".into(),
+                safety: CommandSafety::Dangerous,
+            },
+        ];
+
+        let index = render_plugin_command_index(&specs);
+
+        assert!(index.starts_with("\n[plugin]\n"), "实际 {index}");
+        assert!(index.contains("- ✓ safe_cmd: 只读查询（插件 p-a）"), "实际 {index}");
+        assert!(index.contains("- ⚠ write_cmd: 写入（插件 p-b）"), "实际 {index}");
+        assert!(index.contains("- ✗ danger_cmd: 危险（插件 p-c）"), "实际 {index}");
     }
 }

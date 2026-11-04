@@ -667,6 +667,38 @@ impl PluginManager {
         Ok(out)
     }
 
+    /// 已启用插件贡献的**命名命令**在智能体命令面上的投影（B10-1）。
+    ///
+    /// 只收 `enabled` 的插件；清单读取失败按单插件跳过（与 [`Self::list_plugin_pages`]
+    /// 同口径）。**不做名称去重**：与宿主 `#[agent_command]` 重名时的处置在消费侧
+    /// （桥按「宿主优先」过滤），这里只如实投影声明面。
+    pub fn agent_command_specs(
+        &self,
+    ) -> Result<Vec<crate::types::PluginAgentCommand>, PluginError> {
+        let mut out = Vec::new();
+        for summary in self.list_plugins()? {
+            if !summary.enabled {
+                continue;
+            }
+            let Some(root) = summary.metadata.root.as_deref() else { continue };
+            let Ok(manifest) = load_plugin_from_directory(root) else {
+                tracing::warn!(root = %root.display(), "插件命令清单：插件 manifest 读取失败，跳过");
+                continue;
+            };
+            for command in manifest.commands {
+                out.push(crate::types::PluginAgentCommand {
+                    plugin_id: summary.metadata.id.clone(),
+                    name: command.name,
+                    description: command.description,
+                    required_permission: command.required_permission,
+                });
+            }
+        }
+        // 稳定顺序：清单枚举顺序随目录遍历变化，索引文案不该跟着抖。
+        out.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.plugin_id.cmp(&b.plugin_id)));
+        Ok(out)
+    }
+
     pub fn discover_plugins(&self) -> Result<Vec<PluginDefinition>, PluginError> {
         Ok(self.plugin_registry()?.plugins.into_iter().map(|plugin| plugin.definition).collect())
     }
@@ -5187,6 +5219,36 @@ mod tests {
         assert!(!list.is_empty(), "坏插件不得拖垮其余插件的页面投影");
 
         let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// B10-1：`agent_command_specs` 只投影**已启用**插件的命名命令，并原样带出
+    /// `requiredPermission`（安全档位换算由主壳 `plugin_command_safety` 负责，不在这里做）。
+    #[test]
+    fn agent_command_specs_projects_only_enabled_plugins() {
+        let fixture = CommandPluginFixture::new(
+            "agent-cmd",
+            r#"[ "read", "file_system_write" ]"#,
+            r#""requiredPermission": "workspace-write""#,
+            true,
+        );
+        let CommandPluginFixture { mut manager, plugin_id, config_home, source, .. } = fixture;
+
+        let specs = manager.agent_command_specs().expect("投影插件命令");
+        assert_eq!(specs.len(), 1, "实际 {specs:?}");
+        assert_eq!(specs[0].name, "greet");
+        assert_eq!(specs[0].plugin_id, plugin_id);
+        assert_eq!(specs[0].required_permission.as_deref(), Some("workspace-write"));
+        assert_eq!(specs[0].description, "Greet");
+
+        manager.disable(&plugin_id).expect("禁用插件");
+        assert!(
+            manager.agent_command_specs().expect("禁用后仍可投影").is_empty(),
+            "禁用插件不得再向智能体命令面贡献命令"
+        );
+
+        drop(manager);
+        let _ = std::fs::remove_dir_all(&config_home);
+        let _ = std::fs::remove_dir_all(&source);
     }
 }
 

@@ -312,7 +312,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | `session.store` / `event.dispatch` | 既定口径 | §9 已定：提供面不远程化（插件是订阅方） |
 | `session.log.invariant`（有接缝且可远程） | 语义 | 「模型所见可重建」是宿主对插件的**审计约束**；让被审计者自己出证不成立 ⇒ 留内核 |
 | DES 仿真（`market-sim` `SimAgent`/`Oracle`，**27 个实现**，全在 crate 内） | K4 + 语义 | 实现者是同一内核内的 agent 变体；`kernel.rs:703` 每 tick 遍历全部 agents ⇒ 出进程即 tick × agent 次 IPC。**已裁定维持内核**，可插部分下放到「策略数据」层（场景 / 参数 / 脚本）—— 见 §0.12.2 |
-| `command.handler`（`src-tauri/src/commands/agent/command_bridge.rs:1125`，15 实现者） | K3 | 主壳 IPC 路由机制本身；命令注册已由 `build.rs` 自动生成（禁区 7） |
+| `command.handler`（`src-tauri/src/commands/agent/command_bridge.rs:1292`，15 实现者） | K3 | 主壳 IPC 路由机制本身；命令注册已由 `build.rs` 自动生成（禁区 7） |
 | `harness.interceptor` / `reversible.effect` | K4 + 语义 | 拦截链与回滚栈依赖执行上下文（`&mut`、闭包、`EffectHandle`）；D4 修完才有讨论资格 |
 | 数据访问层（`harness/src/repositories.rs` 20+ 个 `*Repository` trait）、`migration`、`storage`、`credential`、`crypto` | K2 | 只有 DI 站点、无键控选择；且凭证/加密是数据主权落点（口径 2） |
 | `prompt.template`（`harness/src/prompt_provider.rs:29`）、`health.check`、`agent.def`（`harness/src/agent.rs:61`）、`vault.source` | K3 / 语义 | 模板取词与内置 Agent 定义属数据驱动（已可经配置/Markdown 贡献，不是产物插件）；健康探针应作为**插件清单自带**的自检面并入 §0.6.2 权限面，而不是独立能力 |
@@ -4406,3 +4406,43 @@ worker 二进制 **827,392 → 5,703,680 字节（debug）**：analysis-engine �
 2. **桌面真机 / 安装包未验**：与 §84/§94 同因（没有带插件的安装包）。
 3. **local dprint 在 UNC 下仍不可用**（#142 既有环境问题）：本批改了 `capability-register.json`，用 JSON 解析 + 第五道门（会完整解析该表）兜底；CI 在 Windows 本地磁盘上会正常跑 dprint。
 4. **智能体命令面并轨未做**：见 95.3，未在本批扩大。
+
+## §96 B10-1：插件命令并入智能体命令面（#35，2026-11-05）
+
+**兑现 §95.3 的欠账**：`#[agent_command]` 宏 inventory 里只有编译期宿主命令，插件贡献的命令不在其中 —— 每迁走一条宿主命令，智能体可用命令清单就静默少一条。本批把「已启用插件 manifest 的 `commands[]`」并入命令桥的**索引**与**执行**两个面，删宿主命令不再以智能体能力为代价。
+
+### 96.1 改动（5 个文件 + 登记表）
+
+| 文件 | 改动 |
+|---|---|
+| `axagent-plugins/crates/plugins/src/types.rs` | 新增 `PluginAgentCommand{plugin_id,name,description,required_permission}`：运行期数据，故用拥有所有权的 `String`，**不复用**编译期的 `CommandMetadata`（后者是 `&'static str` + 宏域）。 |
+| `axagent-plugins/crates/plugins/src/manager.rs` | 新增 `PluginManager::agent_command_specs()`：只收 `enabled` 插件；单插件 manifest 读失败按跳过（与 `list_plugin_pages` 同口径）；按 `name`/`plugin_id` 排序（目录遍历顺序不可当稳定序）。 |
+| `src-tauri/src/commands/agent/command_bridge.rs` | 新增 `PluginCommandSpec` + `plugin_command_safety`（None/`read-only`→Safe，`workspace-write`→Caution，`danger-full-access`→Dangerous，**未知档→Dangerous fail-closed**）、`merge_plugin_command_specs`（**宿主重名优先**）、`collect_plugin_command_specs`（`spawn_blocking` + `blocking_read`）、`render_plugin_command_index` / `build_plugin_command_index`、`execute_plugin_agent_command`；`execute_tauri_command` 改为「宏命令 + 插件命令」合并查表后走同一安全门（合并查表后 `CommandRegistry::contains` 失去唯一调用方 ⇒ 同批删除，编译警告 `dead_code` 归零）；`list_available_commands` 在**无 domain 过滤**时追加插件命令（`source:"plugin"` / `pluginId` / `domain:"plugin"`），宿主命令补 `source:"host"`。 |
+| `src-tauri/src/commands/agent/mod.rs` | 系统提示注入处把 `command_index` 改为可变，并在其后追加 `build_plugin_command_index(&app).await`。 |
+| `scripts/capability-register.json` | 代码 evidence 重锚：`dojo.extension` `manager.rs` **755→787**（`--repin-code --apply`，插 32 行所致，表内正文同步）；`command.handler` `command_bridge.rs` **1125→1297** 并**补 `anchorText`**（该条原无定位键，`--repin-code` 拒写 ⇒ 人工按唯一命中行补键）。 |
+| `docs/plans/PLAN-shell-plus-plugins.md` | §0.7 的 `command.handler` 行号 1125→1297（与登记表 `planAnchorText` 逐字同改）。 |
+
+### 96.2 判据（为什么是这几条）
+
+1. **安全档位由宿主推导，不由插件自封**：插件命令只能声明 `requiredPermission`，`Safe/Caution/Dangerous` 一律由 `plugin_command_safety` 换算；未知值走 Dangerous（清单校验会拒未知值，但该函数是 `pub` 的，不能依赖上游一定校验过）。
+2. **重名宿主优先**：两边都暴露同名命令时，LLM 看到两条、实际命中哪条取决于分支顺序 —— 合并时直接剔除插件侧并告警。
+3. **`list_available_commands` 与索引同口径**：索引里出现的插件命令，用本工具二次核对时必须查得到；带 domain 过滤时不返回（插件命令不属于任何宿主 `CapabilityDomain`，按域语义就该空）。
+4. **执行路径与 `plugin_execute_command` 同形**：`spawn_blocking` + `blocking_read`，帧往返最长 30 s，不得在异步上下文里同步阻塞。
+
+### 96.3 验收（实跑）
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| K1 | `cargo check -p axagent --lib`（cwd=`src-tauri`，首轮） | 0 | Finished **26m41s**；**1 条** `dead_code` 告警（`CommandRegistry::contains`）⇒ 当批删除该失效方法 |
+| K1b | 同上（删方法后增量复跑） | 0 | Finished **11m57s**；`grep -c warning` = **0** |
+| K2 | `cargo check -p axagent-plugins --tests` / `cargo test -p axagent-plugins --lib agent_command_specs` | 0 / 0 | Finished 1m02s；`agent_command_specs_projects_only_enabled_plugins` ok |
+| K3 | `cargo clippy -p axagent-plugins --all-targets -- -D warnings` | 0 | Finished 18.11s，零告警 |
+| K4 | `rustfmt --edition 2024 --check`（3 个改动文件） | 0 | 零 diff（改前有 3 处 diff，已 `rustfmt` 落盘）；CR 字节 = 0 |
+| K5 | `node scripts/check-capability-register.mjs`（驻留 PLAN 头部 3 行） | 0 | 37 项硬判据全 PASS；`cmp` 校验 `RESTORED_IDENTICAL`；`--repin-code --apply` 后复检无待回写 |
+
+### 96.4 已知代价 / 本批未做
+
+1. **每条命令执行都重扫一遍已启用插件的 manifest**（`list_plugins` + 逐插件 `load_plugin_from_directory`）：插件数少时可接受；不能用 `CommandCache` 缓存，因为清单会随安装/卸载/改文件变化。首个性能信号出现时再考虑「按目录 mtime 失效」。
+2. **`requiredPermission` 仍是插件自述**：`check_command_gate` 拿它与已授权权限比对，但声明为 `read-only` 的命令不会触发权限检查 —— 这是既有语义（§0.7.6 的「权限不执法」同族），本批不扩大。
+3. **主 crate clippy 未单跑**：与 §95.4 同因（20 分钟独占构建窗口），留 #35 收尾全量门禁。
+4. **桌面真机 / 安装包未验**：注册命令清单不变（本批零命令增删），`register_commands.rs` 未重生成。

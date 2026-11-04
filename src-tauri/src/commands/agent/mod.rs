@@ -63,8 +63,8 @@ mod capability_index;
 pub mod command_bridge;
 use command_bridge::{
     CommandCache, CommandRegistry, build_chat_tools as build_tauri_command_chat_tools,
-    build_command_handlers, build_command_index_string, preload_command_cache,
-    resolve_command_domains,
+    build_command_handlers, build_command_index_string, build_plugin_command_index,
+    preload_command_cache, resolve_command_domains,
 };
 
 /// AskUser 桥接器的具体实现，由 wiring 层注入到 UnifiedToolRegistry。
@@ -2027,6 +2027,9 @@ pub async fn agent_query(
     let command_registry = CommandRegistry::default();
     let mut command_cache = CommandCache::default();
     let command_index = command_cache.get(&command_domains, &command_registry);
+    // 插件贡献的命令不在编译期 registry 里，单独拼接（宿主重名已在收集时剔除）
+    let mut command_index = command_index;
+    command_index.push_str(&build_plugin_command_index(&app).await);
 
     // 验证 build_command_index_string 函数
     let _verified_index = build_command_index_string(&command_domains);

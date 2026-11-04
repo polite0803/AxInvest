@@ -12,6 +12,7 @@ axagent-astock-data = { path = "../astock-data" }
 axagent-dao = { version = "3.0.0", path = "../../../axagent-infra/crates/dao" }
 axagent-entities = { version = "3.0.0", path = "../../../axagent-core/crates/entities" }
 axagent-harness = { version = "3.0.0", path = "../../../axagent-core/crates/harness" }
+axagent-stock-core = { version = "3.0.0", path = "../../../axagent-plugins/crates/stock-core" }
 axagent-trajectory = { version = "3.0.0", path = "../../../axagent-ai/crates/trajectory" }
 chrono = { workspace = true }
 csv = "1"

@@ -33,6 +33,8 @@ use serde_json::{Value, json};
 const TOOL_NAME: &str = "get_stock_quote";
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致）。
 const COMMAND_GET_QUOTE: &str = "stock_get_quote";
+/// 自然语言意图解析命令：跑 `axagent-stock-core` 的**本体**（不是测试夹具的子集词表）。
+const COMMAND_PARSE_INTENT: &str = "parse_analysis_intent";
 /// `tool.set` 接缝的协议版本；随工具集形状变化时递增。
 const TOOL_SET_VERSION: &str = "0.1.0";
 /// 工具取数走的宿主接缝：宿主把已有行情能力以入站分派的方式暴露给插件。
@@ -101,6 +103,13 @@ fn handle_command(
             Ok((_stock_code, quote)) => {
                 CommandOutcome::Reply(CommandReply::for_frame(&frame, quote))
             },
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        // 纯函数命令：不查库、不调接缝，跑的是 `axagent-stock-core` 的权威实现。
+        COMMAND_PARSE_INTENT => match parse_intent(&frame.input) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
             Err((code, message)) => {
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
             },
@@ -177,6 +186,21 @@ fn exec_tool(
         },
         Err((code, message)) => FrameResponse::error(code, message),
     }
+}
+
+/// 纯函数命令：自然语言 → 结构化意图（`ParsedIntent` 的 camelCase JSON）。
+fn parse_intent(input: &Value) -> Result<Value, (String, String)> {
+    let Some(text) = input.get("input").and_then(Value::as_str) else {
+        return Err((
+            error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+            "`input` 必须是字符串".to_string(),
+        ));
+    };
+    serde_json::to_value(axagent_stock_core::intent_parser::parse_analysis_intent(text)).map_err(
+        |e| {
+            (error_codes::PLUGIN_COMMAND_FAILED.to_string(), format!("意图解析结果序列化失败：{e}"))
+        },
+    )
 }
 
 /// 取一条个股行情，返回 `(入参里的股票代码, 行情 JSON)`。

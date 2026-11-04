@@ -375,6 +375,7 @@ name = "axagent-plugin-stock"
 version = "3.0.0"
 dependencies = [
  "axagent-plugin-proto",
+ "axagent-stock-core",
  "serde_json",
 ]
 
@@ -396,6 +397,13 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "axagent-stock-core"
+version = "3.0.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

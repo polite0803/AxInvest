@@ -952,6 +952,7 @@ dependencies = [
  "axagent-dao",
  "axagent-entities",
  "axagent-harness",
+ "axagent-stock-core",
  "axagent-trajectory",
  "chrono",
  "csv",
@@ -1074,6 +1075,7 @@ dependencies = [
  "serde_yaml",
  "sha2 0.11.0",
  "subtle",
+ "thiserror 2.0.20",
  "tokio",
  "toml_edit 0.25.13+spec-1.1.0",
  "tracing",
@@ -1622,6 +1624,13 @@ dependencies = [
  "tracing",
  "urlencoding",
  "uuid",
+]
+
+[[package]]
+name = "axagent-stock-core"
+version = "3.0.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

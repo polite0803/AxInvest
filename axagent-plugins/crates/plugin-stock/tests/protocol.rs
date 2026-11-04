@@ -199,6 +199,32 @@ fn unknown_op_and_unknown_tool_are_explicit_errors() {
 }
 
 #[test]
+fn parse_analysis_intent_runs_the_real_implementation_without_any_seam_call() {
+    let mut worker = Worker::spawn();
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "parse_analysis_intent",
+            serde_json::json!({ "input": "分析宁德时代中线" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求"),
+    );
+    // 纯函数命令：不得向宿主发任何帧（若发了 call_seam，这里会读到请求而不是回执）。
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Success);
+    let reply = response.value.expect("命令回执必须带 value");
+    assert_eq!(reply["value"]["stockCode"], "300750");
+    assert_eq!(reply["value"]["timeHorizon"], "mid");
+    assert_eq!(reply["value"]["actionType"], "research");
+    assert_eq!(reply["value"]["success"], true);
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+}
+
+#[test]
 fn closing_stdin_is_a_clean_exit() {
     let mut worker = Worker::spawn();
     // 不发 shutdown，直接关 stdin：宿主停机时靠关管道收尾，worker 不得把它当作错误。

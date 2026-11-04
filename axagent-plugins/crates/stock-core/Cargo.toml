@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# 股票域纯逻辑（foundation）——宿主与插件过渡期共用。
+#
+# 角色：**foundation**。零 `axagent-*` 依赖（只有 serde）⇒ 插件侧 worker 可以直接链接，
+# 不必把 `analysis-engine`（implementor：dao / entities / astock-data）拖进插件进程。
+# 终局随插件独立仓走；宿主在完成本体搬迁后断开对本 crate 的依赖即可。
+#
+# ⚠ 这里只放**纯函数**：不查库、不读文件、不取时钟、不碰 AppState。
+# 需要宿主状态或外部数据的能力一律走接缝（§64.10/§64.11 的 op 清单），不进本 crate。
+
+[package]
+name = "axagent-stock-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "股票域纯逻辑（意图解析等）：零 axagent 依赖，插件与宿主过渡期共用"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[lints]
+workspace = true

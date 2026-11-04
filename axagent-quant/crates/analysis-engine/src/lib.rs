@@ -34,7 +34,10 @@ pub mod horizon_prior;
 pub mod industry_chain;
 // 阶段 2「候选池改趋势→全关联股票」：行业→全成分股确定性查询（三档词表对齐）
 pub mod industry_constituents;
-pub mod intent_parser;
+// 意图解析是**纯函数**，权威实现已迁到 foundation 层（`axagent-stock-core`）：插件侧
+// worker 只能依赖 foundation，放这里会让插件被迫拖入 dao / entities / astock-data。
+// 这里保留路径级 re-export ⇒ 宿主侧 `axagent_analysis_engine::intent_parser::…` 的引用不改。
+pub use axagent_stock_core::intent_parser;
 pub mod knowledge_loader;
 /// P4′-b：逐档分支的腿信号单一实现（因子原始量 → `[-1,1]`，缺失=None）
 pub mod leg_signal;

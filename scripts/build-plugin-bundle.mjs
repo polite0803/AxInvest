@@ -102,6 +102,16 @@ const manifest = {
         required: ["stock_code"],
       },
     },
+    {
+      name: "parse_analysis_intent",
+      description: "解析自然语言分析意图（纯函数，跑 axagent-stock-core 的权威实现）",
+      command: "worker://parse_analysis_intent",
+      inputSchema: {
+        type: "object",
+        properties: { input: { type: "string", description: "如「调研茅台短线」" } },
+        required: ["input"],
+      },
+    },
   ],
   integrity: { algorithm: "sha256", hash: sha256 },
 };

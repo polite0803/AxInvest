@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! NLU 意图解析 (P2-1)
 //!
 //! 将自然语言如"调研茅台短线"、"分析宁德时代中线"、"看看比亚迪"等
@@ -8,6 +9,14 @@
 //! 分两步：
 //! 1. **正则提取**：使用预定义模式从文本中提取股票名称、周期、动作
 //! 2. **搜索匹配**：提取的股票名称通过后端 vendor 搜索找代码
+//!
+//! ## 归属（2026-11-04 从 `analysis-engine` 迁入）
+//!
+//! 本模块是**纯函数**（只依赖 serde）。放在 foundation 层是为了让插件侧 worker 与
+//! 宿主链接**同一份实现**：`analysis-engine` 是 implementor，插件链接它会把
+//! `dao` / `entities` / `astock-data` 一起拖进插件进程（铁律 2）。
+//! `analysis-engine` 保留路径级 re-export（`pub use axagent_stock_core::intent_parser;`），
+//! 故宿主侧 `axagent_analysis_engine::intent_parser::…` 的引用一行未改。
 
 use serde::{Deserialize, Serialize};
 

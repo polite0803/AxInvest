@@ -21,6 +21,7 @@ path = "src/main.rs"
 
 [dependencies]
 axagent-plugin-proto = { version = "3.0.0", path = "../../../axagent-core/crates/plugin-proto" }
+axagent-stock-core = { version = "3.0.0", path = "../stock-core" }
 serde_json = "1"
 
 [lints]

@@ -2578,12 +2578,12 @@ pub async fn opc_execute_workflow(
         engine_config::get_config(&domain_pack_id_normalized, Some(&app_state.app_data_dir))
             .ok_or_else(|| format!("域包配置不存在: {capability_pack_id}"))?;
 
-    // 组合工具解析器
+    // 组合工具解析器（域工具定义来自启动时注入的 domain_tools 槽位）
     let tool_resolver = |names: &[String]| -> Vec<axagent_harness::workflow_types::ToolDef> {
         use axagent_tools::tools::capability_pack_defs::{
-            local_tool_defs, opc_tool_defs, stock_tool_defs,
+            domain_tool_defs, local_tool_defs, opc_tool_defs,
         };
-        let mut defs = stock_tool_defs(names);
+        let mut defs = domain_tool_defs(names);
         defs.extend(opc_tool_defs(names));
         defs.extend(local_tool_defs(names));
         defs

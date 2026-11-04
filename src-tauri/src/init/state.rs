@@ -368,6 +368,11 @@ pub async fn create_app_state_with_resource_dir(
             }
         }
 
+        // ── 业务域工具定义：注册进工具层槽位（**必须早于**工具注册表构建）──
+        // tools crate 只留通用槽位；股票域定义由域侧注入（PLAN §54.3 B5）。
+        // 放到这里而不是客户端构造之后：注册表按定义建实例，晚一步工具就静默缺席。
+        crate::init::stock_domain_tools::register_tool_definitions();
+
         // ── tool.set 接缝：注册内置工具集（P2 §4.2） ──
         // 工具注册表初始化（`UnifiedToolRegistry::init_all`）经本接缝取回工具清单；
         // 外部实现注册同一接缝即可整体替换内置工具集。
@@ -1719,6 +1724,8 @@ pub async fn create_app_state_with_resource_dir(
     // [2026-09-03 接线恢复] finance.rs 的 5 个 api_tool（研报/概念板块/北向资金/龙虎榜/财联社快讯）
     // 经 tools::global_state 取客户端，AppState 构造时注入一次。
     axagent_tools::global_state::set_astock_client(astock_client.clone());
+    // 域工具执行器：定义在启动早期已注册，执行需要客户端，故在客户端就绪后注入。
+    crate::init::stock_domain_tools::register_tool_executor(astock_client.clone());
 
     // ── market.quote 接缝：把宿主**已有**行情能力暴露给插件 ──
     // 插件经 `call_seam("market.quote", op, args)` 读取行情 / K 线 / 股票搜索；

@@ -9,7 +9,6 @@ pub mod agent;
 pub mod agent_memory;
 pub mod apply_patch;
 pub mod arxiv_scanner;
-pub mod astock_data;
 pub mod bash;
 pub mod batch_missing;
 pub mod browser;
@@ -27,6 +26,7 @@ pub mod database;
 pub mod demand_llm;
 pub mod devops;
 pub mod document;
+pub mod domain_mcp;
 pub mod export;
 pub mod file_edit;
 pub mod file_read;
@@ -361,11 +361,13 @@ pub fn builtin_tool_instances() -> Vec<std::sync::Arc<dyn crate::Tool>> {
         std::sync::Arc::new(finance::ClsFlashTool),
     ];
 
-    // ── astock 数据工具（L1）：并入内置清单 ──
+    // ── 业务域工具（L1）：并入内置清单 ──
+    // 定义由域侧经 `domain_tools::register_tool_definitions` 在启动早期注入；
+    // 本段只做通用包装，工具层不认识任何具体域（PLAN §54.3 B5）。
     // 注册后 register_all_capabilities 的通用逻辑自动派生 tool:{name} 护照
     // （domain=Finance + tool_ref），DiscoverSkills / extra_tools 注入链路即刻生效。
     // 内部跳过与 finance.rs 重名的 3 个工具，避免 HashMap 静默覆盖。
-    tools.extend(astock_data::stock_mcp_tool_instances());
+    tools.extend(domain_mcp::domain_mcp_tool_instances());
 
     // ── 市场主线工具（daily-market-events 模板的 persist 落地工具）──
     //

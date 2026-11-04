@@ -15,7 +15,7 @@ use axagent_dao::axagent_entities::audit_log;
 use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait, Schema, Set};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
+use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
@@ -125,13 +125,16 @@ pub struct RateLimitViolation {
 
 /// 名单里**不豁免**最小间隔的工具（写类 / 有副作用）。
 ///
-/// **评审单点**：两个只读数据源新增写类工具时，在此登记（有守护测试断言本表每个
+/// **评审单点**：只读数据源新增写类工具时，在此登记（有守护测试断言本表每个
 /// 名字都是**真实存在**的工具名，防「幽灵条目」，并为豁免集合做排除）。
+///
+/// 名字的真值校验在域侧（`src-tauri/src/init/stock_domain_tools.rs`）：定义来源已
+/// 经 `crate::domain_tools` 槽位倒置，本 crate 不再认识具体域，手抄不到真清单。
 ///
 /// - `dojo_create_plan` / `dojo_revise_plan` / `dojo_execute_plan`：计划状态机，
 ///   三者都会落库；
 /// - `optimize_attention_weights`：把优化后的权重写回。
-const MUTATING_DATA_TOOL_NAMES: &[&str] =
+pub const MUTATING_DATA_TOOL_NAMES: &[&str] =
     &["dojo_create_plan", "dojo_revise_plan", "dojo_execute_plan", "optimize_attention_weights"];
 
 /// 只读取数工具的**豁免集合**（P1-2, 2026-09-21）——单点派生，勿手抄。
@@ -153,30 +156,48 @@ const MUTATING_DATA_TOOL_NAMES: &[&str] =
 ///
 /// ## 名单来源（单点派生）
 ///
-/// 取两个只读数据源的 schema 清单函数 —— 与
-/// `seed_consistency_tests::resolvable_tool_names()` 用的是**同一对权威来源**
-/// （`tools` crate 已直接依赖这两个 crate，无需手抄、无需改 13 处
-/// `UnifiedToolRegistry::new()` 构造点）。手抄 58 个工具名会立刻腐烂。
+/// 域侧在启动早期把只读数据源的 schema 清单注册进 [`crate::domain_tools`]
+/// （股票 + 产业链见 `init/stock_domain_tools.rs`）。本 crate 只做通用派生，
+/// 不认识任何具体域 —— 域整体迁出为插件时这里无需改动。
+///
+/// ⚠ 按 `domain_tools::revision()` 记忆化而不是 `OnceLock` 一次定终身：注册早于
+/// 首次限流检查，但「首次读取」与「注册」的先后**不该由调用顺序决定正确性** ——
+/// 后者一旦在注册前被读过就永远读到空集，且没有任何报错。
 ///
 /// ⚠ **不是整包豁免**：清单内混有写类工具，由 [`MUTATING_DATA_TOOL_NAMES`] 逐个剔除
 /// （实测 58 个工具里有 4 个写类/有副作用）。
-fn read_only_data_tool_names() -> &'static HashSet<String> {
-    static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
-    NAMES.get_or_init(|| {
-        let mut set = HashSet::new();
-        for schema in axagent_astock_data::mcp_tools::stock_mcp_tools()
-            .into_iter()
-            .chain(axagent_analysis_engine::mcp_tools::industry_chain_mcp_tools())
-        {
-            if let Some(name) = schema.get("name").and_then(|v| v.as_str()) {
-                set.insert(name.to_string());
-            }
+fn read_only_data_tool_names() -> Arc<HashSet<String>> {
+    static CACHE: LazyLock<parking_lot::RwLock<(u64, Arc<HashSet<String>>)>> =
+        LazyLock::new(|| parking_lot::RwLock::new((u64::MAX, Arc::new(HashSet::new()))));
+    let revision = crate::domain_tools::revision();
+    {
+        let cached = CACHE.read();
+        if cached.0 == revision {
+            return cached.1.clone();
         }
-        for mutating in MUTATING_DATA_TOOL_NAMES {
-            set.remove(*mutating);
+    }
+    let names = Arc::new(data_tool_names(crate::domain_tools::all_definitions()));
+    *CACHE.write() = (revision, names.clone());
+    names
+}
+
+/// 从 `(域标识, schema)` 定义清单派生豁免集合（纯函数）。
+///
+/// 抽成纯函数是为了测试可注入夹具 —— 全局槽位是进程级的，测试直接改它
+/// 会与并发用例串扰（见模块内测试）。
+fn data_tool_names(
+    definitions: impl IntoIterator<Item = (String, serde_json::Value)>,
+) -> HashSet<String> {
+    let mut set = HashSet::new();
+    for (_, schema) in definitions {
+        if let Some(name) = schema.get("name").and_then(|v| v.as_str()) {
+            set.insert(name.to_string());
         }
-        set
-    })
+    }
+    for mutating in MUTATING_DATA_TOOL_NAMES {
+        set.remove(*mutating);
+    }
+    set
 }
 
 /// 该工具是否豁免最小间隔。
@@ -184,7 +205,9 @@ fn read_only_data_tool_names() -> &'static HashSet<String> {
 /// 除裸名外还认 `{server_id}/{tool_name}` 形态 —— MCP 工具在 `mcp_tools` 里就是按
 /// 这个 key 存的。**不处理这层会让豁免对某种调用形态静默失效**（与本轮修的
 /// `filter_map` 静默丢弃同族），故显式覆盖。
-fn is_min_interval_exempt(tool_name: &str) -> bool {
+///
+/// 公开是给域侧接线测试用（真实定义经槽位进来后，由域侧断言名单落地）。
+pub fn is_min_interval_exempt(tool_name: &str) -> bool {
     let names = read_only_data_tool_names();
     if names.contains(tool_name) {
         return true;
@@ -501,78 +524,57 @@ mod tests {
     // P1-2（2026-09-21）：只读取数工具豁免最小间隔
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// 正控：豁免集合必须**非空**，且必须**覆盖本轮真实撞限流的那只工具**。
+    /// 行为测试用的只读工具名（本 crate 不认识具体域，见 [`register_exempt_fixture`]）。
+    const EXEMPT_FIXTURE_TOOL: &str = "__fixture_readonly_tool__";
+
+    /// 向全局槽位注册一份**稳定夹具**：一个只读名字 + 一个写类名字。
     ///
-    /// 本断言的价值在于把门禁**锚在真实事件**上：若哪天 `stock_mcp_tools()` 改名、
-    /// 或派生逻辑写错（例如漏掉 astock-data 那一支），本测试立刻红 ——
-    /// 而不是让豁免集合静默变空、P1-2 悄悄退回修复前状态。
-    #[test]
-    fn read_only_exempt_set_covers_the_incident_tool() {
-        let names = read_only_data_tool_names();
-        assert!(
-            !names.is_empty(),
-            "豁免集合为空 ⇒ 派生逻辑失效（`stock_mcp_tools()` / \
-             `industry_chain_mcp_tools()` 的 `name` 字段抽取出问题？）"
-        );
-        // 本轮实测撞限流的那只（原文：`工具 'get_stock_margin_data' 调用过于频繁，
-        // 最小间隔 200ms（当前距上次调用 48ms）`），以及本轮新接线的质押工具。
-        for must_have in ["get_stock_margin_data", "get_stock_pledge_data", "get_stock_kline"] {
-            assert!(
-                names.contains(must_have),
-                "豁免集合里没有 `{must_have}` ⇒ P1-2 对真实碰撞场景**不生效**（假修复）。\
-                 当前集合 {n} 项：{names:?}",
-                n = names.len()
-            );
-        }
-        // 规模自证：两个数据源合计声明 60 项，剔除 4 个写类后应远多于 10。
-        // 下界只用来抓「只抽到一支数据源」这类静默退化，不追求精确值。
-        assert!(
-            names.len() >= 50,
-            "豁免集合只有 {} 项 —— 预期 ≥ 50（astock-data 58 + 产业链 2 − 写类 4）。\
-             先查是不是只抽到了其中一支数据源。",
-            names.len()
+    /// 生产路径由 wiring（`init/stock_domain_tools.rs`）注册真实定义；本 crate 的
+    /// 行为测试只需要「某个名字在豁免集合里」这一事实，用夹具就够，且不依赖域 crate。
+    fn register_exempt_fixture() {
+        crate::domain_tools::register_tool_definitions(
+            "__audit_exempt_fixture__",
+            vec![
+                serde_json::json!({"name": EXEMPT_FIXTURE_TOOL}),
+                serde_json::json!({"name": MUTATING_DATA_TOOL_NAMES[0]}),
+            ],
         );
     }
 
-    /// 豁免**不是整包**：写类/有副作用的工具必须仍受最小间隔约束。
+    /// 派生逻辑正控：`(域标识, schema)` 清单 → 豁免集合。
     ///
-    /// 同时反查「幽灵条目」：`MUTATING_DATA_TOOL_NAMES` 里每个名字都必须是
-    /// 数据源真声明过的工具名 —— 否则剔除动作打在了空气上（判据「幽灵码」同族）。
+    /// 真实定义的落地由域侧接线测试守（`src-tauri/src/init/stock_domain_tools.rs`）——
+    /// 定义来源倒置后本 crate 不再认识具体域，这里只验「按 name 派生 + 剔除写类」
+    /// 这段通用逻辑。把它抽成纯函数正是为了不靠全局槽位做断言（会与并发用例串扰）。
     #[test]
-    fn mutating_tools_are_excluded_and_all_names_are_real() {
-        let names = read_only_data_tool_names();
-        // 先造全量声明集（不剔除），用来验「剔除项确实存在于声明中」。
-        let declared: HashSet<String> = axagent_astock_data::mcp_tools::stock_mcp_tools()
-            .into_iter()
-            .chain(axagent_analysis_engine::mcp_tools::industry_chain_mcp_tools())
-            .filter_map(|t| t.get("name").and_then(|v| v.as_str()).map(String::from))
-            .collect();
-
+    fn exempt_set_derives_names_and_strips_mutating_tools() {
+        let definitions = vec![
+            ("stock".to_string(), serde_json::json!({"name": "readonly_a"})),
+            ("stock".to_string(), serde_json::json!({"name": "readonly_b"})),
+            ("stock".to_string(), serde_json::json!({"name": MUTATING_DATA_TOOL_NAMES[0]})),
+            ("stock".to_string(), serde_json::json!({"no_name": true})),
+        ];
+        let names = data_tool_names(definitions);
+        assert_eq!(names.len(), 2, "无名 schema 跳过、写类剔除后应剩 2 项：{names:?}");
+        assert!(names.contains("readonly_a") && names.contains("readonly_b"));
         for m in MUTATING_DATA_TOOL_NAMES {
-            assert!(
-                declared.contains(*m),
-                "`{m}` 被登记进 MUTATING_DATA_TOOL_NAMES，但它**不是**任何数据源声明的工具名 \
-                 ⇒ 幽灵条目（剔除打在空气上）。删掉它，或订正拼写。"
-            );
-            assert!(
-                !names.contains(*m),
-                "写类工具 `{m}` 出现在豁免集合里 ⇒ 整包豁免的 bug，它必须受最小间隔约束。"
-            );
+            assert!(!names.contains(*m), "写类工具 `{m}` 必须被剔除");
         }
     }
 
     /// 行为证明：同名的两次紧邻调用 —— 只读工具放行，非只读工具被拦。
     #[tokio::test]
     async fn min_interval_exempts_read_only_but_still_guards_others() {
+        register_exempt_fixture();
         let auditor = ToolAuditor::default(); // min_interval_ms = 200
 
         // 只读：连续两次紧邻调用都应放行（豁免最小间隔）。
         assert!(
-            auditor.check_rate_limit("get_stock_margin_data").await.is_ok(),
+            auditor.check_rate_limit(EXEMPT_FIXTURE_TOOL).await.is_ok(),
             "只读取数工具第一次调用不该被拦"
         );
         assert!(
-            auditor.check_rate_limit("get_stock_margin_data").await.is_ok(),
+            auditor.check_rate_limit(EXEMPT_FIXTURE_TOOL).await.is_ok(),
             "只读取数工具**紧邻第二次**调用必须放行 —— 这正是并行分析师节点互撞的场景（P1-2）"
         );
 
@@ -601,17 +603,18 @@ mod tests {
     /// 这条防的是「为了修 P1-2 把整道限流闸拆了」。
     #[tokio::test]
     async fn window_limit_still_applies_to_exempt_tools() {
+        register_exempt_fixture();
         let auditor = ToolAuditor::default(); // max_calls_per_window = 30
 
         for i in 0..30 {
             assert!(
-                auditor.check_rate_limit("get_stock_kline").await.is_ok(),
+                auditor.check_rate_limit(EXEMPT_FIXTURE_TOOL).await.is_ok(),
                 "第 {} 次调用不该被拦（窗口上限是 30）",
                 i + 1
             );
         }
         let violation = auditor
-            .check_rate_limit("get_stock_kline")
+            .check_rate_limit(EXEMPT_FIXTURE_TOOL)
             .await
             .expect_err("第 31 次调用必须被滑动窗口上限拦住 —— 豁免不得连带摘掉这道闸");
         assert_eq!(violation.kind, RateLimitViolationKind::WindowExceeded);
@@ -623,9 +626,12 @@ mod tests {
     /// **静默失效**（与 `filter_map` 静默丢弃同族），故显式断言。
     #[test]
     fn exempt_lookup_handles_server_qualified_names() {
-        assert!(is_min_interval_exempt("get_stock_margin_data"));
-        assert!(is_min_interval_exempt("stock/get_stock_margin_data"));
-        assert!(!is_min_interval_exempt("stock/dojo_create_plan"));
-        assert!(!is_min_interval_exempt("dojo_create_plan"));
+        register_exempt_fixture();
+        assert!(is_min_interval_exempt(EXEMPT_FIXTURE_TOOL));
+        assert!(is_min_interval_exempt(&format!("stock/{EXEMPT_FIXTURE_TOOL}")));
+        let mutating = MUTATING_DATA_TOOL_NAMES[0];
+        assert!(!is_min_interval_exempt(&format!("stock/{mutating}")));
+        assert!(!is_min_interval_exempt(mutating));
+        assert!(!is_min_interval_exempt("__not_a_registered_tool__"));
     }
 }

@@ -880,8 +880,9 @@ mod tests {
         // 边字符串应包含至少若干条连接
         assert!(!wf.edges.is_empty(), "边不应为空");
 
-        // stock_tool_defs 工具函数可正确匹配 astock 工具
-        let defs = axagent_tools::tools::capability_pack_defs::stock_tool_defs(&[
+        // domain_tool_defs 工具函数可正确匹配已注册的域工具（股票定义由域侧注入）
+        crate::init::stock_domain_tools::register_tool_definitions();
+        let defs = axagent_tools::tools::capability_pack_defs::domain_tool_defs(&[
             "get_stock_quote".to_string(),
             "search_stock".to_string(),
         ]);
@@ -889,9 +890,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stock_tool_defs_match_astock() {
-        // stock_tool_defs 从 astock-data 匹配工具名
-        let defs = axagent_tools::tools::capability_pack_defs::stock_tool_defs(&[
+    async fn domain_tool_defs_match_astock() {
+        // domain_tool_defs 从已注册的域定义匹配工具名
+        crate::init::stock_domain_tools::register_tool_definitions();
+        let defs = axagent_tools::tools::capability_pack_defs::domain_tool_defs(&[
             "get_stock_quote".to_string(),
             "get_stock_financials".to_string(),
         ]);
@@ -901,7 +903,7 @@ mod tests {
         assert!(defs[0].parameters.is_some(), "工具应有参数 schema");
 
         // 不存在的工具名 → 空
-        let none = axagent_tools::tools::capability_pack_defs::stock_tool_defs(&[
+        let none = axagent_tools::tools::capability_pack_defs::domain_tool_defs(&[
             "not_a_real_tool".to_string(),
         ]);
         assert!(none.is_empty());

@@ -275,7 +275,7 @@ pub fn make_loop_node(
 /// 创建工具调用节点（ToolNode）。
 ///
 /// input_mapping 引用上游节点输出（「节点 ID.字段」或 trigger 用户输入）。
-/// 工具名须与运行时注册的工具一致（stock_tool_defs / opc_tool_defs / local_tool_defs）。
+/// 工具名须与运行时注册的工具一致（domain_tool_defs / opc_tool_defs / local_tool_defs）。
 pub fn make_tool_node(
     id: &str,
     title: &str,

@@ -3,19 +3,27 @@
 //! 域包工具白名单映射（由 `commands/opc_workflows/capability_pack.rs` 下沉）
 //!
 //! 三个 `*_tool_defs` 把「域包声明的工具名」映射成 `ToolDef`（含 description / parameters）。
-//! 归位到 tools crate 的原因：它们依赖 `axagent_tools::tools::*` 的工具实现 ——
-//! 而 tools **已经依赖** analysis-engine，反向会成环（见 PLAN §12.3）。
+//! 归位到 tools crate 的原因：它们依赖 `axagent_tools::tools::*` 的工具实现。
+//!
+//! 业务域工具（股票 / 产业链）的定义来源已倒置到 [`crate::domain_tools`] 槽位 ——
+//! 本文件不再直接依赖域 crate（PLAN §54.3 B5）。
 
 use std::sync::Arc;
 
-// ── 股票工具白名单（P4-2：金融域包吃 astock-data 工具链）────────
+// ── 业务域工具白名单（P4-2：金融域包吃 astock-data 工具链）────────
 
-/// 从 astock-data stock_mcp_tools 匹配工具名 → ToolDef 列表。
-/// 工具已由 init/services.rs ToolResolver 接通执行路径（execute_mcp_tool），
-/// 工作流 AgentNode 只要 exposed_tools 含工具名即可调用。
-pub fn stock_tool_defs(names: &[String]) -> Vec<axagent_harness::workflow_types::ToolDef> {
+/// 从**已注册的域工具定义**匹配工具名 → ToolDef 列表。
+///
+/// 定义由域侧在启动早期经 [`crate::domain_tools::register_tool_definitions`] 注入
+/// （股票 + 产业链见 `src-tauri/src/init/stock_domain_tools.rs`）。本 crate 不再
+/// 直接依赖域 crate（PLAN §54.3 B5），只做「名字 → ToolDef」的通用映射。
+/// 工具已由 init/services.rs ToolResolver 接通执行路径，工作流 AgentNode
+/// 只要 exposed_tools 含工具名即可调用。
+///
+/// ⚠ 调用前提：该域的定义已注册。未注册时返回空 —— 与「域未安装」同义。
+pub fn domain_tool_defs(names: &[String]) -> Vec<axagent_harness::workflow_types::ToolDef> {
     let mut out = Vec::new();
-    for tool in axagent_astock_data::mcp_tools::stock_mcp_tools() {
+    for (_domain, tool) in crate::domain_tools::all_definitions() {
         let Some(name) = tool.get("name").and_then(|v| v.as_str()) else {
             continue;
         };
@@ -98,7 +106,7 @@ pub fn opc_tool_defs(names: &[String]) -> Vec<axagent_harness::workflow_types::T
 // ── 通用本机工具白名单（P1-1：software_dev 等域包声明 FileRead/Bash/Grep 等）──
 
 /// 从 tools crate 内置通用工具匹配工具名 → ToolDef 列表。
-/// 与 stock_tool_defs / opc_tool_defs 并列，构成完整工具注入白名单。
+/// 与 domain_tool_defs / opc_tool_defs 并列，构成完整工具注入白名单。
 pub fn local_tool_defs(names: &[String]) -> Vec<axagent_harness::workflow_types::ToolDef> {
     use crate::Tool;
     let candidates: Vec<Arc<dyn Tool>> = vec![

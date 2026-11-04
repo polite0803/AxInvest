@@ -18,6 +18,7 @@ pub mod capability_retriever_impl;
 pub mod capability_router_impl;
 pub mod cjk_font;
 pub mod context_keys;
+pub mod domain_tools;
 pub mod generated_tool;
 pub mod global_state;
 pub mod group_manager;

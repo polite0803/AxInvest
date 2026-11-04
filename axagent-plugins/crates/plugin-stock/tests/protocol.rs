@@ -8,8 +8,8 @@ use std::io::{BufReader, BufWriter};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use axagent_plugin_proto::{
-    AXAGENT_PLUGIN_PROTO_VERSION, FrameRequest, FrameResponse, PluginDeclaration, ResponseKind,
-    error_codes, ops, read_inbound, write_json_frame,
+    AXAGENT_PLUGIN_PROTO_VERSION, CommandFrame, FrameRequest, FrameResponse, PluginDeclaration,
+    ResponseKind, error_codes, ops, read_inbound, write_json_frame,
 };
 
 struct Worker {
@@ -19,9 +19,14 @@ struct Worker {
     stdout: BufReader<ChildStdout>,
 }
 
+/// 与宿主 `PluginWorkerConfig::plugin_id` 对齐的身份（命令帧的身份自检拿它比对）。
+const PLUGIN_ID: &str = "plugin.stock";
+
 impl Worker {
     fn spawn() -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_axagent-plugin-stock"))
+            // 宿主 spawn 时会注入自身身份；命令帧的身份自检依赖它（缺省即空串 ⇒ 任何帧都拒）。
+            .env("AXAGENT_PLUGIN_ID", PLUGIN_ID)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -200,4 +205,72 @@ fn closing_stdin_is_a_clean_exit() {
     worker.close_stdin();
     let status = worker.child.wait().expect("等待 worker 退出");
     assert!(status.success(), "EOF 应是干净退出，实际 {status:?}");
+}
+
+#[test]
+fn command_frame_runs_stock_get_quote_through_the_host_seam() {
+    let mut worker = Worker::spawn();
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "stock_get_quote",
+            serde_json::json!({ "stock_code": "600519" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-command"),
+    );
+
+    // 命令面与工具面共用同一条出站路径：worker 仍要回调宿主 market.quote 取数。
+    let call = worker.recv_request();
+    assert_eq!(call.op, ops::CALL_SEAM);
+    assert_eq!(call.args["seam"], "market.quote");
+    assert_eq!(call.args["op"], "get_quote");
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!({ "code": "600519", "price": 1500.25 }))
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Success);
+    assert_eq!(response.request_id.as_deref(), Some("req-command"));
+    let reply = response.value.expect("命令回执必须带 value");
+    // `CommandReply` 没有 `rename_all` ⇒ 线格式是 snake_case，与 `CommandFrame` 同形。
+    assert_eq!(reply["plugin_id"], PLUGIN_ID, "回执必须回填宿主绑定的身份");
+    assert_eq!(reply["command"], "stock_get_quote");
+    assert_eq!(reply["value"]["price"], 1500.25, "行情必须原样透出：{reply:?}");
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+    worker.close_stdin();
+    assert!(worker.child.wait().expect("等待 worker 退出").success());
+}
+
+#[test]
+fn command_frame_identity_mismatch_and_unknown_command_are_explicit_errors() {
+    let mut worker = Worker::spawn();
+
+    // 身份不符：帧绑定别的插件 ⇒ 拒执行，且**不得**发起行情调用。
+    worker.send(
+        &CommandFrame::new("plugin.other", "stock_get_quote", serde_json::json!({}), 5_000)
+            .to_frame_request()
+            .expect("命令帧应能编成请求"),
+    );
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Error);
+    assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_COMMAND_ID_MISMATCH));
+
+    // 未声明的命令名：显式报未知，不静默成功。
+    worker.send(
+        &CommandFrame::new(PLUGIN_ID, "stock_not_implemented", serde_json::json!({}), 5_000)
+            .to_frame_request()
+            .expect("命令帧应能编成请求"),
+    );
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Error);
+    assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_COMMAND_UNKNOWN));
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
 }

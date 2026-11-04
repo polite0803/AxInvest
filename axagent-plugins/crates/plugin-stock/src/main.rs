@@ -23,13 +23,16 @@ use std::io::{StdinLock, StdoutLock};
 use std::process::ExitCode;
 
 use axagent_plugin_proto::{
-    AXAGENT_PLUGIN_PROTO_VERSION, CapabilityDecl, FrameRequest, FrameResponse, Peer,
-    PluginDeclaration, ResponseKind, error_codes, ops, serve,
+    AXAGENT_PLUGIN_PROTO_VERSION, CapabilityDecl, CommandFault, CommandFrame, CommandOutcome,
+    CommandReply, FrameRequest, FrameResponse, Peer, PluginDeclaration, ResponseKind, error_codes,
+    ops, serve,
 };
 use serde_json::{Value, json};
 
 /// 本插件提供的工具名（与宿主登记的工具名逐字一致）。
 const TOOL_NAME: &str = "get_stock_quote";
+/// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致）。
+const COMMAND_GET_QUOTE: &str = "stock_get_quote";
 /// `tool.set` 接缝的协议版本；随工具集形状变化时递增。
 const TOOL_SET_VERSION: &str = "0.1.0";
 /// 工具取数走的宿主接缝：宿主把已有行情能力以入站分派的方式暴露给插件。
@@ -57,11 +60,60 @@ fn handle(
         "list" => FrameResponse::success(tools()),
         // `tool.set` 的执行面：宿主发 `{name, args}`，执行结果放 `content`（字符串）。
         "exec" => exec_tool(&request.args, &request.call_chain, peer),
+        // T2 命令面：宿主发 `CommandFrame`（`pluginId` 绑定 + 命令名 + 入参 + 预算）。
+        ops::COMMAND => handle_command(request, peer),
         other => FrameResponse::error(
             error_codes::PLUGIN_UNKNOWN_OP,
             format!("股票插件未实现该操作：{other}"),
         ),
     }
+}
+
+/// 处理一条命令帧：身份自检 → 按命令名分发。
+///
+/// 身份自检是**第二道防线**（第一道在宿主 `WorkerInvoker::execute_command` 写帧前）：
+/// 帧上的 `plugin_id` 必须等于 spawn 时注入的 `AXAGENT_PLUGIN_ID`，防宿主侧错配。
+fn handle_command(
+    request: &FrameRequest,
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> FrameResponse {
+    let frame = match CommandFrame::from_frame_request(request) {
+        Ok(frame) => frame,
+        Err(e) => {
+            return FrameResponse::error(
+                error_codes::PLUGIN_COMMAND_INVALID_ARGS,
+                format!("命令帧解码失败：{e}"),
+            );
+        },
+    };
+    let own_id = std::env::var("AXAGENT_PLUGIN_ID").unwrap_or_default();
+    if frame.plugin_id != own_id {
+        return CommandFault::for_frame(
+            &frame,
+            error_codes::PLUGIN_COMMAND_ID_MISMATCH,
+            format!("帧绑定 `{}` 与本 worker 身份 `{own_id}` 不符，拒绝执行", frame.plugin_id),
+        )
+        .into_frame_response();
+    }
+
+    let outcome = match frame.command.as_str() {
+        COMMAND_GET_QUOTE => match fetch_quote(&frame.input, &request.call_chain, peer) {
+            Ok((_stock_code, quote)) => {
+                CommandOutcome::Reply(CommandReply::for_frame(&frame, quote))
+            },
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        other => CommandOutcome::Fault(CommandFault::for_frame(
+            &frame,
+            error_codes::PLUGIN_COMMAND_UNKNOWN,
+            format!("股票插件没有命令 `{other}` 的实现"),
+        )),
+    };
+    outcome
+        .into_frame_response()
+        .unwrap_or_else(|e| FrameResponse::error(error_codes::PLUGIN_COMMAND_FAILED, e.to_string()))
 }
 
 /// 握手声明：只声明**真正实现**的东西 —— 空能力会让宿主注册一条调不通的接缝。
@@ -115,44 +167,53 @@ fn exec_tool(
     }
 
     let input = args.get("args").cloned().unwrap_or(Value::Null);
-    let Some(stock_code) =
-        input.get("stock_code").and_then(Value::as_str).map(str::trim).filter(|c| !c.is_empty())
-    else {
-        return FrameResponse::error(
-            error_codes::SEAM_CALL_INVALID_ARGS,
-            "`stock_code` 缺失或为空白",
-        );
-    };
-
-    // 出站走宿主接缝：凭证 / provider / 限流都在宿主侧，插件只传代码。
-    // `call_chain` 必须原样带上入站链，否则宿主侧的环检测收不到这条边。
-    let reply = match peer.call_seam(
-        MARKET_SEAM,
-        "get_quote",
-        json!({ "stock_code": stock_code }),
-        call_chain.to_vec(),
-    ) {
-        Ok(reply) => reply,
-        Err(e) => {
-            return FrameResponse::error(
-                error_codes::PLUGIN_CALL_FAILED,
-                format!("行情接缝调用失败：{e}"),
-            );
-        },
-    };
-
-    match reply.kind {
-        ResponseKind::Success => {
-            let quote = reply.value.unwrap_or(Value::Null);
+    match fetch_quote(&input, call_chain, peer) {
+        Ok((stock_code, quote)) => {
             // 工具出参按宿主 `ToolExecReply` 的约定：`content` 是字符串。
             FrameResponse::success(json!({
                 "content": serde_json::to_string(&quote).unwrap_or_else(|_| quote.to_string()),
                 "metadata": { "stock_code": stock_code }
             }))
         },
-        ResponseKind::Error => FrameResponse::error(
+        Err((code, message)) => FrameResponse::error(code, message),
+    }
+}
+
+/// 取一条个股行情，返回 `(入参里的股票代码, 行情 JSON)`。
+///
+/// 工具执行面与命令面共用的唯一实现（不写第二遍取数逻辑）。出站走宿主接缝：
+/// 凭证 / provider / 限流都在宿主侧，插件只传代码；`call_chain` 必须原样带上入站链，
+/// 否则宿主侧的环检测收不到这条边。
+fn fetch_quote(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<(String, Value), (String, String)> {
+    let Some(stock_code) =
+        input.get("stock_code").and_then(Value::as_str).map(str::trim).filter(|c| !c.is_empty())
+    else {
+        return Err((
+            error_codes::SEAM_CALL_INVALID_ARGS.to_string(),
+            "`stock_code` 缺失或为空白".to_string(),
+        ));
+    };
+
+    let reply = peer
+        .call_seam(
+            MARKET_SEAM,
+            "get_quote",
+            json!({ "stock_code": stock_code }),
+            call_chain.to_vec(),
+        )
+        .map_err(|e| {
+            (error_codes::PLUGIN_CALL_FAILED.to_string(), format!("行情接缝调用失败：{e}"))
+        })?;
+
+    match reply.kind {
+        ResponseKind::Success => Ok((stock_code.to_string(), reply.value.unwrap_or(Value::Null))),
+        ResponseKind::Error => Err((
             reply.code.unwrap_or_else(|| error_codes::PLUGIN_CALL_FAILED.to_string()),
             reply.message.unwrap_or_else(|| "行情接缝返回了错误但没有说明".to_string()),
-        ),
+        )),
     }
 }

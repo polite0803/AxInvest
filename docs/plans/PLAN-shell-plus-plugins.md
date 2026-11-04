@@ -3789,3 +3789,32 @@ K1 不变（**2033**）：新文件落在 `tests/`，被 `K1_IGNORE` 排除。
 2. **CI 跑不到**：CI 没有先跑 `plugin:bundle` 的步骤 ⇒ 该用例在 CI 上走 SKIP，**不是回归护栏**；要变成护栏得把「建产物 + 设环境变量」接进 CI，属发布链路（与 §75 未做 2 同族）。
 3. **产物已重打**：`node scripts/build-plugin-bundle.mjs` 重新打包（`dist/` 忽略不入库），sha256 由 `97ac4c4e…c6cd` 变为 `fcf24fe7…6111` —— 反映 B4-c 的代码变化，非新问题。
 4. **读数不降**（计划内）：ownedRe 桶仍 123 处 / 22 文件。
+
+## 78. `#35` B4-e：股票插件的 T2 命令面（`stock_get_quote`）（2026-11-04）
+
+**接的是 §76 未做 3**：插件此前只贡献工具，`commands[]` 为空 ⇒ 「命令能不能经 worker 跑」在真实插件上没验过。本片补上命令通道。
+
+**交付**（3 处改动，无新增 `.rs`）：
+1. `crates/plugin-stock/src/main.rs`：新增 `ops::COMMAND` 分支 —— 用 `CommandFrame::from_frame_request` 解码；**身份自检**（帧 `plugin_id` 必须等于 spawn 注入的 `AXAGENT_PLUGIN_ID`，不符回 `PLUGIN_COMMAND_ID_MISMATCH`）；按命令名分发，未声明名回 `PLUGIN_COMMAND_UNKNOWN`；成功回 `CommandReply`、失败回 `CommandFault`（都用 proto 的现成构造器，不自造 JSON 形状）。
+2. **取数逻辑不写第二遍**：抽出 `fetch_quote(input, call_chain, peer) -> (stock_code, quote)`，工具 `exec` 与命令面共用同一条 `market.quote.get_quote` 出站路径（入站 `call_chain` 原样透传，环检测才收得到这条边）。
+3. `scripts/build-plugin-bundle.mjs` 的清单补 `commands[]`：`name` / `description` / `inputSchema.required=["stock_code"]`，`command` 填 `worker://stock_get_quote` 占位（worker 通道按 `name` 发帧；占位串保证一旦意外退回 spawn 通道会立刻失败而不是跑别的东西）。
+
+**验收（2026-11-04 实测）**：
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| E1 | `cargo test -p axagent-plugin-stock`（cwd=`axagent-plugins`） | 0 | **8 passed / 0 failed**（0.03s）：原 6 条 + ①命令帧全链（先出 `call_seam` 再回 `CommandReply`，`plugin_id`/`command` 回填、行情原样透出）；②身份不符 → `PLUGIN_COMMAND_ID_MISMATCH` 且**未发起**行情调用、未知命令 → `PLUGIN_COMMAND_UNKNOWN` |
+| E2 | `AXAGENT_STOCK_WORKER_BIN=<dist 路径> cargo test -p axagent-plugins --test e2e_stock_tool_test` | 0 | **1 passed**（0.14s）：同一条 worker 连接上 `LoadedPlugin::execute_command` 跑通命令面，`reply.value.price=1500.25` |
+| E3 | `node scripts/build-plugin-bundle.mjs` | 0 | 清单含 1 条命令；sha256 `d43e6379…bdd8`（随代码变化，`dist/` 忽略不入库） |
+| E4 | `cargo clippy -p axagent-plugin-stock --all-targets -- -D warnings` / `-p axagent-plugins …` | 0 / 0 | 两个 crate 各自零告警 |
+| E5 | `rustfmt --edition 2024 --check`（3 个 `.rs`） | 0 | 零 diff（`scripts/**` 在 dprint 排除面内，本批 JS 不受 format:check 管辖 —— 这是既有配置，不是本片放宽） |
+
+K1 不变（**2033**）：改的都是既有文件。
+
+**踩坑（写下来省下一次）**：`CommandFrame` / `CommandReply` **没有 `rename_all`**，线格式是 **snake_case**（`plugin_id`），不是 camelCase。首版按 `pluginId` 断言，回读为 `Null` 当场红 —— 与 `ToolExecReply` / `RemoteToolDescriptor`（那两个是 camelCase）**不是同一套**，记混就会写出假断言。
+
+**未做（逐条点名）**：
+1. **未走 `PluginManager::execute_plugin_command`**：本片用 `LoadedPlugin::execute_command` 直连 worker，绕过了「manifest 授权门槛（`requiredPermission`）+ `inputSchema` 最小形状校验 + 命令超时预算」这一层；那层的端到端用例在 `e2e_command_frame_test.rs`（夹具 worker），**没用在真实股票插件上**。
+2. **没有真实股票命令被迁移**：`stock_get_quote` 只是把已有 `market.quote` 能力以命令形态再暴露一次，不含任何域逻辑；304 条宿主股票命令一条未动。
+3. **未接前端**：没有页面/调用方使用这条命令 ⇒ 属于「通道可用」而非「功能上线」。
+4. **读数不降**（计划内）：ownedRe 桶仍 123 处 / 22 文件。

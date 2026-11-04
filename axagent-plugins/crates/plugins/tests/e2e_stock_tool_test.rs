@@ -21,6 +21,7 @@ use axagent_harness::{
     AdjType, KLine, MarketDataProvider, Result as HarnessResult, StockQuote, StockSearchResult,
     ToolCategory, ToolContext, get_capability_registry,
 };
+use axagent_plugin_proto::CommandFrame;
 use axagent_plugins::{LoadedPlugin, PluginWorkerConfig};
 use serde_json::json;
 
@@ -135,6 +136,19 @@ fn host_loads_stock_worker_and_executes_the_tool_through_market_quote() {
         "metadata.stock_code 必须透出：{:?}",
         result.metadata
     );
+
+    // T2 命令面：同一条 worker 连接上再走一次命令帧（宿主侧真实入口）。
+    let reply = loaded
+        .execute_command(&CommandFrame::new(
+            "plugin.stock",
+            "stock_get_quote",
+            json!({ "stock_code": "000001" }),
+            5_000,
+        ))
+        .expect("命令帧全链路应成功");
+    assert_eq!(reply.plugin_id, "plugin.stock", "回执必须回填宿主绑定的身份");
+    assert_eq!(reply.command, "stock_get_quote");
+    assert_eq!(reply.value["price"], 1500.25, "命令面行情必须原样透出：{:?}", reply.value);
 
     // 卸载 = 可逆回滚：句柄撤销后接缝不得残留 provider。
     drop(loaded);

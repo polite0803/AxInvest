@@ -79,13 +79,27 @@ const sha256 = createHash("sha256").update(fs.readFileSync(stagedBinary)).digest
 const manifest = {
   name: "stock",
   version: workerPackage.version,
-  description: "股票域功能包（B4 骨架：当前只提供帧通道，未贡献任何命令/能力）",
+  description: "股票域功能包（当前贡献 1 个工具 get_stock_quote 与 1 条命令 stock_get_quote）",
   permissions: [],
   mcp_servers: [],
   skills: [],
   agents: [],
   defaultEnabled: false,
   worker: { program: path.posix.join("bin", binaryName) },
+  // `command` 用 `worker://<名>` 占位：worker 通道不读它（按 `name` 发帧），但若意外
+  // 退回 spawn 通道，这个不存在的程序名会当场失败而不是静默跑别的东西。
+  commands: [
+    {
+      name: "stock_get_quote",
+      description: "获取 A 股个股实时行情（经宿主 market.quote 取数）",
+      command: "worker://stock_get_quote",
+      inputSchema: {
+        type: "object",
+        properties: { stock_code: { type: "string", description: "6 位股票代码，如 600519" } },
+        required: ["stock_code"],
+      },
+    },
+  ],
   integrity: { algorithm: "sha256", hash: sha256 },
 };
 const manifestPath = path.join(outRoot, "plugin.json");

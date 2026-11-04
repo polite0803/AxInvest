@@ -3628,3 +3628,26 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 2. 收尾必须先 `shutdown` 对端 socket 再 `invoker.shutdown()` —— 写端/读端各持一个 `try_clone` handle，只 drop 写端不会让读线程收到 EOF，否则测试会挂到进程超时（本片第一次跑就踩到，按 PID 终止自己的测试进程后修）。
 
 **本片未做**：`send` / `dispatch` / `chat` / `embed` 等触外网 op 仍无 op 级实测；它们的预算裁定要各自补实测，不借本条结论。
+
+## 72. `#142`：本机 typecheck / dprint 的可用入口（2026-11-04）
+
+**结论先说**：`npm run *` 在 UNC cwd 下**修不了** —— npm 经 cmd.exe 拉起脚本，cmd.exe 拒绝 UNC cwd、退回 `C:\Windows`，**命令根本没进仓库**（不是 tsc / dprint 自身的问题）。可用入口 = 同一批 node 命令直调；npm scripts 已改成 node 入口，**盘符路径下**（`D:\OneManager\AxInvest`）可正常用，且与 CI / `ci-check.mjs` 的调用形态同源。
+
+**实测（2026-11-04，本机）**：
+
+| 入口 | cwd | 结果 |
+|---|---|---|
+| `npm run typecheck`（改前 = `tsc --noEmit`） | UNC | **EXIT=1** —— cmd.exe 打印「UNC 路径不支持…默认值设为 Windows 目录」，tsc 在 `C:\Windows` 下找不到项目 ⇒ 吐帮助横幅 |
+| `npm run format:check`（改前 = `dprint check`） | UNC | **EXIT=11** —— `No config file found at C:\Windows\dprint.json` |
+| `npm run check:routes:selftest`（任意 `node` 脚本） | UNC | **EXIT=1 / MODULE_NOT_FOUND** ⇒ 证明问题不在 tsc / dprint，而是**所有** npm script 都起不来 |
+| `node scripts/check-tsc.mjs` | UNC | EXIT=0，先报「发现 src 源文件 1460 个」再跑完 `--noEmit` |
+| `node node_modules/dprint/bin.cjs check --incremental=false` | UNC | EXIT=0；`output-file-paths` 列出 **1781** 个文件（绝对路径） |
+| `npm run format:check`（改后） | `D:\` | EXIT=0 |
+| `npm run lint:eslint`（改后） | `D:\` | EXIT=0（1436 文件 / 96 规则 / 3.9 s） |
+| `npm run typecheck`（改后） | `D:\` | EXIT=0（1460 文件） |
+
+**dprint 不是空跑的判据**：往 `src/__tests__/` 塞一个故意未格式化的探针（`export const    t142Probe=1`）⇒ `dprint check --incremental=false` **EXIT=20** 并点名该文件；探针当场删除、`src/__tests__` 恢复原样。空扫描面本来也会被 dprint 自己判红（无 `--allow-no-files`），本条只是把「它真在比内容」钉住。
+
+**改动**（`package.json`）：`typecheck` / `lint` → `node scripts/check-tsc.mjs`（带盘符镜像换算 + 文件发现数下限，比裸 `tsc --noEmit` 多两道 fail-closed）；`format` / `format:check` → `node node_modules/dprint/bin.cjs …`（check 带 `--incremental=false`，与 `ci-check.mjs` 的步骤同参）；`lint:eslint` → `node node_modules/oxlint/bin/oxlint src --max-warnings=0`（同属 `.bin` shim 一族，同一个坑）。`scripts/check-tsc.mjs` 头部同步改为「唯一入口」，npm scripts / pre-commit 三处指向对齐。
+
+**本片未做**：`build`（`tsc && vite build`）、`test:e2e`、`dev` / `preview` / `tauri*` 仍是 `.bin` shim 或复合命令，UNC cwd 下同样起不来 —— 但它们不在这条日常路径上（构建走 `node scripts/tauri-build.mjs`、E2E 在 CI 跑），未一并改，避免把「入口可用」扩成「重写全部脚本」。另外 `npm run` 在 UNC 下仍不可用，这是 npm + cmd.exe 的固有限制，本仓不做 `.npmrc` 级改法（`script-shell` 指向 Git Bash 会连带影响 Linux CI）。

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * pre-commit 专用的 TypeScript 类型检查入口（替代 `npx tsc --noEmit`）。
+ * TypeScript 类型检查的唯一入口：`npm run typecheck` / `npm run lint` / pre-commit 都指向这里
+ * （替代裸 `tsc --noEmit`）。
  *
  * 为什么不能直接用 npm/npx：
  *   从 UNC 路径（`\\host\share\...`）发起 git hook 时，npm/npx 经 cmd.exe 启动，

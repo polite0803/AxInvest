@@ -513,7 +513,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 |---|---|---|
 | Tauri 命令条数 / 命令模块数（**插件边界口径**） | **303 条 / 20 模块**（`stock_analysis` 172、`stock_workflow` 24、`paper` 20） | **138 条 / 13 模块**（`opc` 57、`opc_capability_pack_actions` 20、`_runtime` 14） |
 | — 同一注册表在**审计 19 域口径**下的读数 | 305 条 / 19 模块（域「股票分析与管线」） | 117 条 / 10 模块（域「OPC 公司运行时」） |
-| **① 主壳反向阻塞**（主壳非域文件引用域 crate ⇒ **必须逐条改写**） | **111 处 / 20 文件** | **0 处** |
+| **① 主壳反向阻塞**（主壳非域文件引用域 crate ⇒ **必须逐条改写**） | **106 处 / 20 文件** | **0 处** |
 | **② 跨包口**（一个功能包的文件调另一个功能包的 crate ⇒ 走 `call_seam`） | **29 处 / 9 文件**，且**全部是 OPC 的文件在调股票 crate** | 0 处 |
 | ③ 域自有文件内引用（随插件整体迁走，**不是障碍**） | 456 处 / 41 文件（2026-11-04 复测：原 444 / 37 的增量来自并行批在域自有文件里加代码，**与 B1/B2 两刀无关** —— 那两刀只动主壳） | 16 处 / 2 文件 |
 | Cargo.toml 构建边 | 8 条（`src-tauri` 4 + `tools` 2 + 域内 2） | 1 条（`src-tauri → axagent-company-runtime`） |
@@ -523,7 +523,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | entities 表文件 | 20 个 | 28 个 |
 | zh-CN i18n key | 3 527（`stockAnalysis`/`invest`/`quant`/`trade` 是**整段**） | 1 897（`opc` 整段） |
 
-① 的 111 处（含 H 桶 4 处 / 3 文件）里，待改写 107 处的前 5 个文件吃掉 **87** 处：`tools/src/tools/opc.rs` **41**、`init/services.rs` **24**、`init/state.rs` **8**、`bin/axagent-validate-backfill.rs` **7**、`commands/evolution_proposal.rs` **7**（41+24+8+7+7=87）；其后 `commands/fleet/mod.rs` 4 处，`tools/src/global_state.rs`、`commands/screenshot_diagnosis.rs` 各 3 处，`market_sim_service.rs` 2 处；其余 8 个文件各 1 处。（B1 首刀前口径为 152 / 28，前 7 文件 106 处，见 §63；B1 首刀后为 134 / 待改写 124，2026-11-04 B2 那刀再降 1 到 133 / 123，见 §64.14；B5 那刀再降 8 到 125 / 待改写 115、文件 26→23，见 §87；B6 那刀再降 14 到 111 / 待改写 107、文件 23→20，见 §88。）
+① 的 106 处（含 H 桶 4 处 / 3 文件）里，待改写 102 处的前 5 个文件吃掉 **82** 处：`tools/src/tools/opc.rs` **41**、`init/services.rs` **24**、`init/state.rs` **3**、`bin/axagent-validate-backfill.rs` **7**、`commands/evolution_proposal.rs` **7**（41+24+3+7+7=82）；其后 `commands/fleet/mod.rs` 4 处，`tools/src/global_state.rs`、`commands/screenshot_diagnosis.rs` 各 3 处，`market_sim_service.rs` 2 处；其余 8 个文件各 1 处。（B1 首刀前口径为 152 / 28，前 7 文件 106 处，见 §63；B1 首刀后为 134 / 待改写 124，2026-11-04 B2 那刀再降 1 到 133 / 123，见 §64.14；B5 那刀再降 8 到 125 / 待改写 115、文件 26→23，见 §87；B6 那刀再降 14 到 111 / 待改写 107、文件 23→20，见 §88；B7 那刀再降 5 到 106 / 待改写 102、文件 20 不变（`state.rs` 仍有 3 处 OPC 面引用），见 §89。）
 ⚠ **为什么同一张表里有两个命令数 / 两个前端体量**：两套**归属规则**不同 —— 「插件边界口径」按迁出后归哪个包，「审计 19 域口径」按模块名正则；
 差集 11 个模块逐条列在 `AUDIT-l1-blockers-2026-11-01.md` 判读口径第 6 条（例：`demand_discovery` 审计归股票、边界归 OPC；`mover_recall`/`narrative` 反之）。
 **两个数都是真的，引用时必须带口径**；本节与 P6.1/P6.2 的判据一律用**边界口径**。
@@ -4127,3 +4127,48 @@ FAIL: 锚点 frontendDirCaliber ：登记 60900 行 / 实测 60912 行 / 差 12
 4. **全量 clippy / test --workspace 未跑**：留到 #35 收尾。
 5. **真实 `tauri build` / 安装包行为回归未做**：与 §84/§85/§87 同因。
 6. **`AppState::stock()` 的 `panic` 分支无单测**：注入需要真实客户端，在单测里构造会污染进程级单例（同进程其它用例看到假 client）；该分支由编译期接线 + 启动路径保证，故障形态是「启动即 panic 并点名 init 调用」，不是静默。
+
+## 89. `#35` B7：算法引擎构造下沉 + 启动期域装配收口（−5，2026-11-04）
+
+**承诺口径（§54.3）**：算法接缝 + P 桶随本体 = **−9**。本批**兑现 −5**，差额与原因见 89.4（不虚报终态）。
+
+### 89.1 交付
+
+1. **`StockDomainState::new(client, db)`**（`src-tauri/src/init/stock_domain_state.rs`）：`TradingEngine::new` 与 `StockAdaptiveEngine::new().with_db` 两个**引擎构造**下沉到域自有模块。`state.rs` 只递「客户端 + DB」，接缝注册所需同一个 `Arc` 从 `stock_domain_state.trading_engine.clone()` 取（与 jobs.store / workflow.run 同款「clone 注册、按值持有」）。
+2. **`create_astock_client(l2_path)` + `DiskCacheFlush`**（同文件）：`AStockClient::new()` 与 `disk_cache::spawn_flush_loop` 收进域模块。flush 句柄包一层 newtype（只暴露 `shutdown_and_join`），主壳不再命名 `astock_data::disk_cache::FlushLoopHandle`；其余注入（browser fetcher / 快照归档 / 新闻归档）仍在装配层按原顺序链式完成。
+3. **`refresh_decision_gates(db)`**（同文件）：决策否决门开关的「读 settings + 四项日志口径」整体下沉；`state.rs` 只留一行调用。失败仍只 warn、不阻断启动（与原语义逐字一致）。
+4. **`state.rs` 装配段收口**：`let stock_domain_state = StockDomainState::new(...)` 上提到 `trading.engine` 注册块之前；注入点改为 `init_stock_domain_state(stock_domain_state)`，原字面量构造（含 `stock_adaptive_engine` 的 `with_db`）删除。
+
+### 89.2 验收读数
+
+| 项 | 前 | 后 |
+|---|---|---|
+| `l1ForeignStock.hits`（门禁口径 = 待改写 + H 桶） | 111 | **106**（−5：state.rs 8→3） |
+| `l1ForeignStock.files` | 20 | **20**（`state.rs` 仍有 3 处 OPC 面引用，文件不归零） |
+| 待改写（H 桶除外） | 107 / 17 | **102 / 17** |
+| H 桶 | 4 / 3 文件 | **4 / 3 文件**（未动） |
+| `state.rs` 域引用 | 8 | **3**（仅剩 `opc::capability_pack::` 三处，归 #36） |
+
+- `cargo check -p axagent --lib`：见 89.3 的运行记录。
+- `cargo fmt --all -- --check`（主 crate）：**EXIT=0**。
+- 第五道门（`check-capability-register.mjs`）：park 头部三行后跑，读数见 89.3。
+
+### 89.3 运行记录
+
+| 命令 | EXIT | 结果 |
+|---|---|---|
+| `cargo check -p axagent --lib`（`src-tauri` 根） | 0 | `Finished dev profile … in 10m 31s`，0 error（`.tmp/b7-check.log`） |
+| `cargo fmt -p axagent -- --check` | 0 | 无 diff |
+| `node scripts/audit-l1-blockers.mjs --check-allowlist` | 0 | 登记 4 条 / 实际豁免 4 处（STOCK 4 · OPC 0），锚点逐条复核通过 |
+| `node scripts/check-capability-register.mjs`（plan 头部三行 park 后） | 0 | `PASS: hard:true 判据全部一致（登记 37 = A11/B8/C4/H1/K10/D3；能力面 Σ=23；锚点 21 项）`；跑完 `cmp` 校验 `RESTORED_IDENTICAL` |
+
+读数复算用一次性脚本（`.tmp/b7-foreign.mjs`，判据与 `audit-l1-blockers.mjs` 逐字对齐）：`foreign total: 102 files: 17` + `hostOwned 4 / 3` ⇒ 门禁口径 106 / 20。⚠ 复算脚本首版漏了「OPC-owned 文件对股票 crate 的引用应进 cross 桶」⇒ 少算 4 处，与门禁 111 对不上；修正后才与盘上一致（同 §54.1 记录的桶边界陷阱）。
+
+### 89.4 未做（如实列，且解释 −9 → −5 的差额）
+
+1. **`_shared_reco_pool.rs` 1 处未搬**：该文件是「手动刷新 / 荐股 cron / 时间旅行批次」三入口共用的落库入口，文档已自述「被多个命令模块共用的基础设施」并登记在 `check-layer-discipline.mjs` 的 `SHARED_INFRA_MODULES`。把它改到 `commands/reco/` 下可以让它命中 `ownedRe`、当场 −1，但那是**改路径让判据变绿**（§54 R5 禁「扩面洗绿」的同族），真正的处置是随域本体整体迁出（B4 本体面），不在本批。
+2. **P 桶在 res109 时记 9 处的另外 3 处已被 B6 吸收**：res109 的 P 桶 = `stock_adaptive_engine` 4 + `trading` 4 + `_shared_reco_pool` 1，其中 `app_state.rs` 的两个字段类型行（adaptive 1 + trading 1）与 `state.rs` 里的一处（trading 1）已随 B6 的 −14 消失。⇒ B7 开工时的**可消减余额只有 6 处**（state.rs 5 + `_shared_reco_pool` 1），本批实拿 5。这不是「少做了」，是承诺数与实际余额在批次间重叠。
+3. **`state.rs` 剩余 3 处 `analysis_engine::opc::capability_pack::`**：属 **OPC 面**（O 桶同族：OPC 代码物理住在股票 crate 里），按 §54 R7「股票迁移一条不许动、归 #32/#36」未动。
+4. **`init/services.rs` 24 处**：实时监控启动、T+0、聚合器、荐股 cron 回调等**服务装配**，是 `services.rs` 的宿主主权段（M/H 桶），不是「引擎构造」；随 #36 的运维面接缝一并处置。
+5. **`tests`/真实启动路径未跑**：本批只做构造位置迁移，无行为改动；真实 `tauri build` 与移动端真机回归仍与 §84/§85/§87/§88 同因未做。
+6. **全量 `clippy --workspace --all-targets --all-features -- -D warnings` 与 `test --workspace`** 留到 #35 收尾（阶段内只跑定点 `cargo check` / `cargo fmt`）。

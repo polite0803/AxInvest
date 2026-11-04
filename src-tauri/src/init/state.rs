@@ -1619,27 +1619,9 @@ pub async fn create_app_state_with_resource_dir(
         // 回放却按原门否决」的双份真相。
         //
         // ⚠ 读失败**不阻断启动**：保持默认（全关 = 与引入前逐位一致）。
-        match axagent_analysis_engine::decision_gates::refresh_from_db(db).await {
-            Ok(states) => {
-                let names = ["风控门", "情绪门", "估值门", "顶层采纳档内买入"];
-                let opened: Vec<String> = states
-                    .iter()
-                    .zip(names.iter())
-                    .filter(|(open, _)| **open)
-                    .map(|(_, n)| (*n).to_string())
-                    .collect();
-                if opened.is_empty() {
-                    tracing::info!("[startup] 决策否决门：四门全关（保持原行为）");
-                } else {
-                    tracing::info!("[startup] 决策否决门：已放开 {}", opened.join(" / "));
-                }
-            },
-            Err(e) => {
-                tracing::warn!(
-                    "[startup] 决策否决门开关加载失败（保持默认全关，与引入前行为一致）: {e}"
-                );
-            },
-        }
+        // B7：读开关 + 日志口径整体下沉到域自有模块（`init/stock_domain_state.rs`），
+        // 主壳不再出现 `analysis_engine::decision_gates` 路径。
+        crate::init::stock_domain_state::refresh_decision_gates(db).await;
         if let Err(e) = crate::init::ensure_cognitive_router_templates(db).await {
             tracing::error!("[startup] 认知编排器模板初始化失败: {}", e);
         } else {
@@ -1693,8 +1675,11 @@ pub async fn create_app_state_with_resource_dir(
         // 文件名对齐 `disk_cache.rs` 头部文档声明的 `astock_l2_cache.json`
         // （此前写作 astock_l2.json，注释与实现两个名字）。
         let t_l2 = std::time::Instant::now();
-        let (client, l2) = axagent_astock_data::AStockClient::new()
-            .with_l2_cache(app_dir.join("astock_l2_cache.json"));
+        // B7：客户端构造 + L2 磁盘缓存接线下沉到域自有模块（`StockDomainState` 同文件），
+        // 主壳不再出现 `astock_data::AStockClient` / `disk_cache::spawn_flush_loop` 路径。
+        let (client, flush_l2) = crate::init::stock_domain_state::create_astock_client(
+            app_dir.join("astock_l2_cache.json"),
+        );
         crate::startup_timing::record("l2_disk_cache_load", t_l2.elapsed().as_millis());
         #[cfg(not(mobile))]
         let client = client.with_browser_fetcher(Arc::new(
@@ -1713,7 +1698,6 @@ pub async fn create_app_state_with_resource_dir(
         let client = client.with_news_archive_sink(news_archive_sink);
         // vendor L2 仍是 DiskCache（「写内存 + 30s 脏检查落盘」），必须有人持有它的 flush；
         // 随 shutdown_token 一起优雅退出，退出前做最后一次 flush。
-        let flush_l2 = axagent_astock_data::disk_cache::spawn_flush_loop(l2);
         let l2_shutdown = shutdown_token.clone();
         tokio::spawn(async move {
             l2_shutdown.cancelled().await;
@@ -1811,21 +1795,19 @@ pub async fn create_app_state_with_resource_dir(
     // 契约已冻结（`axagent-core/crates/harness/src/trading_engine.rs`）：六个 op 中
     // `get_positions` / `validate_trade` / `execute_trade` 会触发行情取数 ⇒ 收 `as_of`，
     // 其余三个（get_trades / compare_trade / trading_enabled）是纯 DB 读。
-    // 引擎此前直接内联在下方 `AppState` 字面量里（注册块拿不到它）⇒ 先在此上提构造：
-    // 注册用 `engine.clone()`，同一个 `Arc` 随后按值 move 进 AppState
-    // （与 jobs.store / workflow.run 同款「clone 注册、按值 move」）。
+    // B7：两个引擎（交易 + 自适应）的**构造**已下沉到域自有模块
+    // `StockDomainState::new`；主壳只在此上提状态并 clone 出接缝要的同一个 `Arc`
+    // （与 jobs.store / workflow.run 同款「clone 注册、按值持有」）。
     // 失败只 warn，不阻断启动（与 market.quote / jobs.store / workflow.run 同策略）。
-    let trading_engine = {
-        let engine = Arc::new(tokio::sync::RwLock::new(
-            axagent_analysis_engine::trading::TradingEngine::new(
-                Arc::new(sea_db.clone()),
-                // ⚠ 下方 AppState 字面量里 `astock_client` 会被 move，这里必须 clone
-                astock_client.clone(),
-            ),
-        ));
+    let stock_domain_state = crate::init::stock_domain_state::StockDomainState::new(
+        astock_client.clone(),
+        sea_db.clone(),
+    );
+    {
+        let trading_engine = stock_domain_state.trading_engine.clone();
         let provider: Arc<dyn axagent_harness::TradingEngineProvider> = Arc::new(
             crate::commands::stock_workflow::trading_engine_service::HostTradingEngine::new(
-                engine.clone(),
+                trading_engine,
                 Arc::new(sea_db.clone()),
             ),
         );
@@ -1833,8 +1815,7 @@ pub async fn create_app_state_with_resource_dir(
             Ok(_) => tracing::info!("trading.engine 接缝已注册 (BuiltIn)"),
             Err(e) => tracing::warn!("trading.engine 注册失败: {e}"),
         }
-        engine
-    };
+    }
 
     // C3（2026-09-27，301302 t-risk 超时根因）：交易日历「上证日 K 自证」接线。
     // 原远程源 `RPTA_WEB_TRADE_CALENDAR` 报表已下线（9501），且 `init_holiday_calendar`
@@ -1894,20 +1875,8 @@ pub async fn create_app_state_with_resource_dir(
     // ── 股票域运行时状态注入（B6：从 AppState 摘出的六个域字段）──
     // 域自有模块持有、装配期注入；命令层经 `AppState::stock()` 取用。
     // 放在 AppState 构造之前：构造之后立刻可能有服务（services.rs）读这几个槽位。
-    crate::init::stock_domain_state::init_stock_domain_state(
-        crate::init::stock_domain_state::StockDomainState {
-            astock_client: astock_client.clone(),
-            stock_monitor: std::sync::OnceLock::new(),
-            quote_watcher: std::sync::OnceLock::new(),
-            // 构造已上提到上方 trading.engine 注册块（注册需要同一个 Arc）
-            trading_engine,
-            cross_stock_aggregator: std::sync::OnceLock::new(),
-            stock_adaptive_engine: Arc::new(
-                axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine::new()
-                    .with_db(sea_db.clone()),
-            ),
-        },
-    );
+    // B7：状态与两个引擎均由 `StockDomainState::new` 构造，主壳不再出现域 crate 路径。
+    crate::init::stock_domain_state::init_stock_domain_state(stock_domain_state);
 
     Ok(AppState {
         harness,

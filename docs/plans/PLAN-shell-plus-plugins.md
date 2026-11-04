@@ -301,8 +301,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 **已执行（2026-11-01，`#30`）**：`harness/src/dojo_extension.rs` 整文件删除（**−460 行**），`harness/src/lib.rs:332-337` 换成 4 行墓碑注释（337 是 `pub use` 收尾 `};`，按 332–336 删必编译不过）。删除门禁：8 个 `DojoExtension*` 符号在两文件之外命中 0（`.tmp/t30-dojo-gate.mjs`，20441 文件面；排除 `.tmp/`、`output/`、`docs/`、`.workbuddy/`）；翻案检索 `git log --all -S"impl DojoExtension for"` = 4 提交，`git grep` 到 `origin/master`/`upstream/master` 的 18 处命中全落在被删文件自身 ⇒ **历史与其它分支均无生产实现者，翻案条件未触发**。
 它原来「是一套与 capability 接缝并行的第二插件协议」这一判据不变：自带键控注册表、自己声明工具与命令、自己带健康探针，却不在 15 条接缝里，也不在 `SUPPORTED_REMOTE_SEAMS`。
 ⇒ **已裁定并执行（§0.12.1）：废弃 trait 本体，把 `command_specs/execute_command` 的形状吸收进 L1 命令通道 T2**（生产实现者 0，唯一实现是测试替身）——不给零实现者的第二协议上「权限模型 + 对账 + 兼容窗口」三套成本。
-   原记「CLI 派发口无 `input_schema` 且权限写死 `ReadOnly`」**判据低估了实情**：`PluginTool::check_permission`（`plugins/src/types.rs:787-826`）全仓零调用方，唯一引用它的 `execute_with_permission_check` 也零调用方 ⇒ 档位在 tools 与 commands **两条路上都是纯装饰**；本批只把命令通道改成真授权（按具体权限名判定，`implies_*` 一字未改），**tool 侧依旧是装饰**，另立批次。
-   同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:738`**（原 `:708`；#75 加 `list_plugin_pages` 后再下移 30 行；镜像表同批改）。
+   原记「CLI 派发口无 `input_schema` 且权限写死 `ReadOnly`」**判据低估了实情**：`PluginTool::check_permission`（`plugins/src/types.rs:892`，fn 起点；原写 `:787-826` 在 HEAD 上就已错位 —— 787 是 `pub fn new(`、822 才是该 fn，区间尾也切在函数体里 ⇒ 改钉 fn 起点）全仓零调用方，唯一引用它的 `execute_with_permission_check` 也零调用方 ⇒ 档位在 tools 与 commands **两条路上都是纯装饰**；本批只把命令通道改成真授权（按具体权限名判定，`implies_*` 一字未改），**tool 侧依旧是装饰**，另立批次。
+   同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:838`**（`pub fn execute_plugin_command(`，`--repin-code --apply` 定锚）。行号链：`:708` → `:738`（#75 加 `list_plugin_pages`）→ `:755` → `:787`（B10-1 前插 `agent_command_specs`）→ `:838`（本批 B8-1b 在其前插 `list_plugin_task_sources` 一族）。⚠ 本句原先停在 `:738`，而镜像表登记已随 B10-1 重锚到 `:787` ⇒ **散文引用与镜像表各说一套、两边都不红**（散文不受 evidence 判据管辖），这一条是本批撞出来的既存缺陷，不是新引入的漂移。
 
 ### 0.7.7 判为内核，明确不拆 —— 10 条（每条都给不过哪道判据）
 
@@ -363,7 +363,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | 面 | 事实（全部指到行号） |
 |---|---|
 | 前端 | `src/pages/WorkflowPage.tsx:23`、`WorkflowMarketplace.tsx:186`；`src/components/workflow/` 132 文件（`WorkflowEditor.tsx` 2660 行、`Nodes/` 39 个）；store `workflowStore.ts` 1202 / `workflowEditorStore.ts` 3127 / `workEngineStore.ts` 542 |
-| 命令 | 前端 57 个 `invoke` 名（约 128 处）；Rust 侧 `register_commands.rs` 共 **1541 条 / 164 模块**（口径 = `scripts/lib/command-domains.mjs` 的 `parseRegistry`，与两份 AUDIT 同源），工作流域（审计 19 域口径）**83 条 / 11 模块**（`workflows`=10、`work_engine`=21、`workflow_template`=16、`workflow_reflection`=8、`workflow_ai`=8…；`stock_workflow` 28 条归股票域，不计入本域） |
+| 命令 | 前端 57 个 `invoke` 名（约 128 处）；Rust 侧 `register_commands.rs` 共 **1542 条 / 164 模块**（口径 = `scripts/lib/command-domains.mjs` 的 `parseRegistry`，与两份 AUDIT 同源），工作流域（审计 19 域口径）**83 条 / 11 模块**（`workflows`=10、`work_engine`=21、`workflow_template`=16、`workflow_reflection`=8、`workflow_ai`=8…；`stock_workflow` 28 条归股票域，不计入本域） |
 | 引擎 | `axagent-runtime/crates/rt-workflow/src/work_engine/engine/mod.rs` 7366 行；构造点 `src-tauri/src/init/state.rs:745`；句柄在 **`app_state.rs:345` `pub work_engine: Arc<WorkEngine>`** |
 | 节点 | `NodeExecutorTrait`（`node_executor_trait.rs:224`）实现者 **33** 个，`rt-workflow/src/work_engine/dispatcher.rs:80-109` `init_builtin` 注册 26 个 + `engine/mod.rs:1214-1231` pending 补齐 |
 
@@ -1159,7 +1159,7 @@ ci.yml 侧一律**追加在文件末尾**（本文件被 18+ 处 `ci.yml:<行号
    2026-11-01 已移除 `docs/` 排除项：`docs/` 下 176 份文件（175 `.md` + 1 `.json`，共 7 MB）此前**零入库**，现全部转为
    untracked 可提交状态。剩余未达成：批量导入需单独一次提交，本文与两份 AUDIT 随本轮提交。
 8. **本批已落地并让第五道门转绿（2026-11-01 收口读数）**：`#30` 删 `dojo_extension.rs`（−460）+ 命令通道改真授权；`#39` 交付配置面 + 共享桥（`pluginSandboxBridge.ts`，page/panel 同一份白名单）；主代理开 `protocol-asset` feature 解除主 crate 编译阻塞。⇒ 权威读数 **2004 个 `.rs` / 315 个 `pub trait`**（两档各降 1，旧读数按门禁规矩只记在 §0.12.4）。`node scripts/check-capability-register.mjs` **EXIT=0**。
-9. **tool 侧权限档位仍是装饰**：`#30` 只把**命令通道**改成真授权。`PluginTool::check_permission`（`plugins/src/types.rs:787-826`）与唯一引用它的 `execute_with_permission_check` **至今零调用方** ⇒ 「插件工具能碰什么」这条线仍未执法，是 §2 缺陷表里独立的一条，不是本批已完成项。
+9. **tool 侧权限档位仍是装饰**：`#30` 只把**命令通道**改成真授权。`PluginTool::check_permission`（`plugins/src/types.rs:892`）与唯一引用它的 `execute_with_permission_check` **至今零调用方** ⇒ 「插件工具能碰什么」这条线仍未执法，是 §2 缺陷表里独立的一条，不是本批已完成项。
 10. **相对路径声明的插件命令今天根本跑不通**（`#30` 端到端实测）：命令串整团交 `Command::new`、可执行文件查找按宿主 cwd（子进程 `current_dir` 不参与）⇒ Windows `OS error 3`、POSIX 同理。修法二选一未定（走 tool 侧同款 `resolve_hook_entry` vs 真按空白切分），任务 #47。
 11. **A 通道端到端仍未通**，四份额外输入：`#43` 资产绝对路径解析命令、`#44` `PluginManifest.pages[]` 逐页声明、`#46` 插件侧桥客户端运行时（`asset` 装载的第三方 bundle 够得着桥），以及一次 `npm run tauri dev` 的运行期实测（Windows 上确认 origin 是 `https://asset.localhost`）。§0.12.5 那句「工程量小：一条配置 + CSP 一段 + 白名单测试」**已被实测推翻**，且它当时的判断「`enable: true` 只是惰性生效」也错——缺 feature 时 tauri `build.rs` 直接**硬失败**，不是静默不生效。
 12. **本地 `npm run typecheck` / `tsc --noEmit` 在 UNC 共享目录静默空跑**（退 0、`--listFiles` 列 0 个文件；主代理与 `#39` 各独立复现一次）⇒ **本文与历史会话里所有「typecheck 通过」的记录都不算证据**。CI 在本地盘跑，仍有效。固化绕过 = 任务 #45。
@@ -4500,3 +4500,72 @@ worker 二进制 **827,392 → 5,703,680 字节（debug）**：analysis-engine �
 2. **未跑 `--update-baseline`**（中立性少 1 条存量）：并行批仍在改前端，按既定纪律等全批落地再收紧棘轮。
 3. **全量 Vitest 未跑**：只定点跑了受影响的 1 个测试文件；`chat` 目录删掉两个文件后没有任何测试引用它们（已 grep 确认），全量留 #35 收尾。
 4. **注册表本体未建**：见 97.4，试点改判后下一批做。
+
+---
+
+## §98 B8-1b：插件贡献任务源的**整条通道**（#35，2026-11-05）
+
+任务 #148。§97.4 把试点改判到任务中心后，本批把那条通道一次建穿：**声明面 → 清单校验 → 宿主投影命令 → 插件取数命令 → 行契约 → 前端泛型适配器 → 注册表 → 渲染口径**，七段全在盘上，端到端由真安装测试取证。
+
+### 98.1 终局口径（先钉死形态，再谈工序）
+
+| 段 | 落点 | 为什么在这 |
+|---|---|---|
+| 行契约 | `axagent-core/crates/plugin-proto/src/lib.rs` 的 `PluginTaskRunRow` + `PLUGIN_TASK_RUN_STATES`（7 态） | 插件 worker 唯一够得着的共享 crate；宿主 `UnifiedRun` 是前端视图类型（含 `capabilities`/`badges`），不该也不能过线 ⇒ 行形状只此一份（禁区 12） |
+| 声明面 | `plugins::types::PluginTaskSource` / `RawPluginTaskSource` / `PluginManifest.task_sources[]` | 与 `pages[]` 同族：**只声明数据面，不声明渲染**（§93 裁定：第三方 React 不得进主 origin） |
+| 清单校验 | `manager.rs` 的 `build_manifest_task_sources` + `is_task_source_id_shape` + 两条新错误码 | 三条硬判据全在**装载期**拦：id 形状（进 `SourceId` 与 `runIdOf` 拼接，脏 id 会破坏「全局唯一 run id」）、`command` 必须指向**同一份清单**已声明的命令、`title` 非空 |
+| 投影 | `PluginManager::list_plugin_task_sources()` + 宿主命令 `plugin_list_task_sources`（`src-tauri/src/commands/plugin.rs`，`#[agent_command(domain=plugin, safety=Safe, call_mode=StateOnly)]`） | 与 `plugin_list_pages` 逐字同形：实时扫描、不缓存、不建第二份源清单；`enabled` 位原样透出，启停过滤留给消费侧 |
+| 取数 | plugin-stock 的命名命令 `list_active_workflow_runs` → 出站接缝 `workflow.run` 的 `list_active` | 执行态在宿主引擎里，插件不复制登记表；插件只干两件宿主干不了的事：**状态词表翻译** + **形状收敛** |
+| 前端 | `adapters/pluginTaskSource.adapter.ts`（工厂）+ `registry.ts` 的 `registerPluginTaskSources` / `useTaskSourceRegistry` | 泛型工厂 ⇒ 新增一个插件任务源 = 改插件清单 + 实现一条命令，宿主前端零改动 |
+| 渲染口径 | `TaskSourceAdapter.name?` ⇒ 消费点统一 `adapter.name ?? t(adapter.nameKey)`（`SourceChip` / `RunsTab` 两处筛选与错误条） | 插件文案归产物自己负责（与 `PluginPage.title` 同口径），不占宿主 11 语言 key |
+
+### 98.2 四条裁定与它们的代价
+
+1. **不给 `deepLink`**：工作流执行今天没有独立站内路由（2026-10-28 已删 `/workflow` 一类旧链）⇒ 造一个指向 404 的深链比没有深链更坏。代价：这类 run 的 `openSource` 恒 false，「打开详情」按钮不出现。
+2. **`partially_completed` → `succeeded`**：它是终态且确有产出，判成 `failed` 会把「跑完但部分节点没成」的批次误标成失败；细分差异留在 `raw.status`，宿主不改口径。
+3. **表外状态一律落 `waiting`**（不猜 running/failed）：`waiting` 在中心的语义是「还没轮到」，既不会虚增「进行中」，也不会污染健康度。代价：一条状态不明的执行看起来像「排队中」，真值只在 `raw` 里。⚠ 前端镜像表用 `Record<RunState, RunState>` 写死七态：`model.ts` 加第八态会**编译不过**，不会静默落 `waiting`；Rust 侧那张表仍靠人工与 `PLUGIN_TASK_RUN_STATES` 对齐（B8-3 生成 DTO 才收口）。
+4. **`list_active` 只含 running / paused**（宿主侧过滤，`workflow_run_service.rs:697`）⇒ 本源**今天只会显示在跑与暂停的执行**；`completed`/`failed`/`cancelled` 三条翻译分支是防御性的，**当前不可达**，不许在记账里当成实测到达过的路径。同理 **不给 `finishedAt`**：`updatedAt` 是「最近一次推进」不是结束时刻，拿它当结束时间就是编读数 ⇒ 插件源的耗时列恒空。
+
+### 98.3 本批撞出并修掉的四个缺陷（前三条都不是「代码写错」这么简单）
+
+- **`RawPluginManifest` 没有 `rename_all` ⇒ `taskSources` 被 serde 静默丢成空表**。表现是「清单里有、任务中心里没有」，零报错、零日志。根因不是本批写的字段，是这张结构体的既有约定：多词字段必须逐条 `alias`（`mcpServers` 就是这么写的），而 `pages` 这类单词字段掩盖了这条规则。修法：`#[serde(default, alias = "taskSources")]`（两种写法都吃）。取证链：e2e 真安装测试 `install_enable_and_execute_a_command_from_the_staged_bundle` 先红（断言「股票包应出现在任务源列表里」），加 alias 后同一测试转绿。**教训写进口径**：清单级（走 serde）单测必须和纯函数级单测同批跑，否则「校验逻辑正确、装载链路断裂」这种形态只由 e2e 抓得到。
+- **散文引用与镜像表各说一套，两边都不红**：`--repin-code` 把 `dojo.extension` 的 evidence 从 `manager.rs:787` 重锚到 `:838`，同时点出表内正文还写着 `:787`；顺手核对发现 **PLAN §0.7.6 早就停在 `:738`**，与表内登记的 `:787` 已经差了两批。第五道门只管 `evidence[]`，散文里的 `文件:行` 不受管辖 ⇒ 这类腐烂是静默累积的。本批把三处（PLAN 两处 + 表内两处镜像文本）改成同一句话，并把行号链 `:708 → :738 → :755 → :787 → :838` 写进正文。**待立项**：给第五道门加一条「散文引用可定位」巡检（`check-single-source-facts.mjs` 的 `locate()` 已有这套判据，复用即可），否则下一次还是靠人撞。
+- **注册时序：源挂上了但列表是空的**。插件清单是页面挂载后异步取回并注册的，而 `RunsTab` 的首次聚合成效只依赖 `[loadRuns, locale]` ⇒ 新源进得了筛选器、进不了表格，且**关掉自动刷新后永不自愈**（轮询只在已有 `hasActive` 时起）。修法：把 `registryVersion` 加进该成效的依赖（不是加轮询、不是在建页时同步取清单）。这条是本批自己写的实现里的缺陷，由「先摆形态再写码」的复核抓出，不是测试红出来的。
+- **vitest 在本机会把「mock 直接 reject」的用例判成用例级未处理异常**（假红）。探针取证：`it("PROBE-A")` 里只 `invokeMock.mockImplementation(async () => { throw … })`、**用例内没有任何调用**，该用例仍失败并打印实现里新建的 Error ⇒ 实现被当场以空参试调了一次，那一次没人 await。绕法（已落测试）：实现按「有没有实参」分流，试调那次回 resolved，rejection 只在真实调用时产生。根因（vitest 4 + threads pool + SMB 的组合还是 mock 框架本身）**未查明**，记进 98.5。
+
+### 98.4 验证台账（本机，全部真跑）
+
+| # | 命令 | 退码 | 读数 |
+|---|---|---|---|
+| V1 | `cargo test -p axagent-plugin-proto`（axagent-core 根） | 0 | 本批新增 2 条（camelCase + 缺省项不进帧 / 七态词表精确小写）随全量绿 |
+| V2 | `cargo clippy -p axagent-plugins -p axagent-plugin-stock --all-targets -- -D warnings` | 0 | 首轮红在 `PluginManifest` 两处构造缺 `task_sources` 字段（编译器抓到，非 clippy 语义）⇒ 补齐后绿 |
+| V3 | `cargo test -p axagent-plugin-stock` | 0 | bin 单测 4 passed（行映射 / camelCase / 缺省端点不出现 / 状态词表）；`tests/protocol.rs` **11 passed**（新增帧级 `command_frame_lists_active_workflow_runs_as_task_center_rows`：camelCase 入参→snake_case 接缝参数翻译、缺省档 50、错误码原样透传不退化成空数组） |
+| V4 | `cargo fmt --all --check`（axagent-plugins 根） | 0 | 单文件 `rustfmt --check src/commands/plugin.rs` 亦 0 |
+| V5 | `npm run plugin:bundle -- --check` | 0 | 清单 4 条命令 + 1 个 taskSource + 1 个 bundle 页；`sha256 a908b260be5a…`；describe 握手 + shutdown 回执 + 退出码 0 |
+| V6 | `AXAGENT_STOCK_BUNDLE_DIR=… cargo test -p axagent-plugins --test e2e_stock_bundle_install_test` | 0 | 装真产物 ⇒ 投影出 `stock-workflow-runs` ⇒ 执行该命令 ⇒ 回传一行 `nativeId=exec-1` / `state=running` / 无 `finishedAt`/`deepLink` |
+| V7 | `cargo test -p axagent-plugins --lib` | 0 | **236 passed / 0 failed**（含本批 5 条清单级 + 反向「装不上」测试）。⚠ 这条是第一轮验证链**漏跑**的，正因漏跑 serde alias 缺陷才只由 V6 抓到 ⇒ 已把「库单测」写进链 |
+| V8 | `cargo check -p axagent --lib`（src-tauri 根） | 0 | 首轮 15m38s（serde alias 修正前），终态复跑 **12m48s** ⇒ 两轮都 0 告警 0 error；重生成 `src-tauri/src/register_commands.rs`（新命令落在第 954 行，产物 diff 恰 1 行）|
+| V9 | `npm run typecheck`（`scripts/check-tsc.mjs`） | 0 | 扫 1465 个 src 源文件，无诊断（98.3 第 4 条落地后又跑一次 = V13c） |
+| V10 | `npm run test:run -- pluginTaskSource` | 0 | 11 passed（映射七态/表外落 waiting、`durationMs` 端点相减与倒挂、`openSource` 仅在有 deepLink 时开、非数组抛错、命令失败上抛、只挂 enabled、宿主优先忽略同名、空清单不 bump、单源失败隔离成一条 `SourceFetchError`） |
+| V11 | `npm run test:run -- TasksCenterPage` | 1（本批已修） | 首轮 133 passed / 1 failed（即 98.3 的 vitest 假红）；修复后定点 V10 绿。**全目录复跑未做**（见 98.5），其余 9 个文件在该轮里全绿且此后未再改动 |
+| V12 | `node node_modules/oxlint/bin/oxlint src/pages/TasksCenterPage src/types/index.ts src/lib/browserMock.ts --max-warnings=0` | 0 | 42 文件 0 warning 0 error（与 CI 同源命令） |
+| V13 | `node node_modules/dprint/bin.cjs fmt <本批 9 个 TS 文件>` | 0 | 3 文件被重排；`scripts/**` 在 dprint excludes 里 ⇒ 打包脚本不受管辖 |
+| V14 | 第五道门：`check-capability-register.mjs --selftest` + 判定（按驻留规程摘 PLAN 头部 3 行跑，`cmp` 校验 `RESTORED_IDENTICAL`） | 0 | `PASS: hard:true 判据全部一致（登记 37 = A11/B8/C4/H1/K10/D3；能力面 Σ=23；锚点 21 项）`；`--repin-code --apply` 回写 1 处（787→838）后复检无待回写 |
+| V15 | `node scripts/audit-l1-blockers.mjs` + `--check-allowlist` | 0 / 0 | Rust 待改写 **99 处 / 16 文件**、+H 桶 3 处 = **102 处 / 19 文件**；前端反向阻塞 **52 处 / 38 文件** ⇒ **本批未动这两个数**（新增前端文件不 import 股票域）；H 桶白名单 3 条锚点全在 |
+| V13b | `node node_modules/dprint/bin.cjs check`（RunsTab / adapter / 新测试）+ 复跑 V12 oxlint | 0 / 0 | 98.3 第 4 条改完后复跑：40 文件 0 warning、格式无 diff |
+| V13c | `npm run typecheck`（改 RunsTab 依赖后复跑） | 0 | 1465 个源文件，无诊断 |
+| V16 | `node scripts/check-i18n-orphan-diff.mjs --selftest` + 判定 / `check-jsx-text-i18n.mjs` / `check-component-neutrality.mjs` | 0 / 0 / 0 | 变更条目 207（src/** 内 8）、K 10434 / U 69 / 动态前缀 111 ⇒ 无孤儿候选；JSX 基线外 0；中立性原始 228、豁免后 225、基线 212 ⇒ 无新增（存量少 1 条未收紧棘轮） |
+
+**镜像表与 PLAN 读数同批改**：`commandTotal` **1541→1542**、`commandNameSetParity` 1541→1542（三方 1542/1542/1542 全等）、`registryFileLines` 1608→1609（`split("\n")` 口径）、PLAN:366 的「`register_commands.rs` 共 1542 条 / 164 模块」、`commandModules.note` 的 PLAN 行引用 352→363。⚠ 只报告项 `k2KeyedFaces` 登记 37 强 / 实测 **38 强**：A/B 复扫（临时摘掉本批新增的 `tests/common` 替身 impl 后重跑 `--dump-readings`）读数**仍是 38** ⇒ 这 1 条不是本批引入，按纪律**不改登记值、不洗白**，等并行批落地后统一重算（该锚点 `hard:false`，不参与退出码）。
+
+### 98.5 本批未做
+
+1. **宿主股票两个源未删**（`stockAnalysis.adapter.ts` / `pipeline.adapter.ts` 仍是宿主实现）⇒ 本批只建通道、不做切换；切换批 = B8-1c，删完才是「插件源顶上了宿主源」。今天中心里同时有宿主 `stock-analysis` 与插件 `stock-workflow-runs`（后者只在装了插件并启用后出现）。
+2. **真机未验**：`npm run tauri dev` 里打开任务中心、看插件源出现在筛选器与源 chip 上这条**没在桌面上点过**。已验的是：浏览器 mock 走空清单桩（不报错）、Vitest 单元/注册表口径、Rust 侧端到端 V6。⚠ `RunsTab.tsx` / `SourceChip.tsx` **没有组件级测试**（仓内本来也没有），所以 98.3 第 4 条那类「钩子依赖漏项」缺陷**测试拦不住**，全目录 Vitest 复跑也未做（改动文件不在任何测试的渲染树里）。
+3. **插件源只有 `list`**：详情抽屉、步骤、日志、IO、历史、取消/重试全部未接（`RunCapabilities` 只给 `openSource`，且因 98.2-1 恒 false）⇒ 点开一条插件 run 没有抽屉。
+4. **无事件推送**：新执行开始不会自己刷新列表，要重进页面或手动刷新（B3 事件面尚未接到任务中心）。
+5. **卸载/禁用插件后**，已注册的源要等重进任务中心才消失（清单实时扫描，前端只在页面挂载期取一次）。本批刻意不做轮询，也不建第二份源清单。
+6. **`list_active` 之外的取数面未接**：终态批次/历史执行需要宿主新增 op（或在 `workflow.run` 上开「近期已结束」），属 #35 整域搬迁批。
+7. **`PLUGIN_TASK_RUN_STATES` 与前端七态仍是人工两份**（前端已用 `Record<RunState, RunState>` 锁住自己那一侧）；跨语言同源要等 B8-3 的生成 DTO。
+8. **vitest 假红的根因未查**：只在测试里绕开（98.3 第三条），没读 vitest mock 源码定论。若后续别的用例再撞，先查这条。
+9. **`--update-baseline` 未跑**（中立性少 1 条存量）、**全量 `clippy --workspace` / `test --workspace` 未跑**：并行批仍在改前端与 Rust，按纪律留到 #35 全部阶段完成后一次收。

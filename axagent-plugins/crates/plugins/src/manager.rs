@@ -190,6 +190,19 @@ pub enum PluginManifestValidationError {
         page: String,
         detail: String,
     },
+    /// 任务源声明的 `id` 形状非法（任务 #148）。
+    ///
+    /// 源 id 会进宿主 `SourceId` 与 `runIdOf(source, id)` 的拼接，带 `:` / 空格 / 大写
+    /// 都会破坏「run id 全局唯一」这条不变量 ⇒ 必须在装载期拒，而不是运行期拼出怪键。
+    InvalidTaskSourceId {
+        source: String,
+        detail: String,
+    },
+    /// 任务源声明的 `command` 不在同一份清单的 `commands[]` 里。
+    TaskSourceCommandUnknown {
+        source: String,
+        command: String,
+    },
 }
 
 impl Display for PluginManifestValidationError {
@@ -261,6 +274,13 @@ impl Display for PluginManifestValidationError {
             Self::InvalidPageAsset { page, detail } => {
                 write!(f, "plugin page `{page}` has an invalid entry: {detail}")
             },
+            Self::InvalidTaskSourceId { source, detail } => {
+                write!(f, "plugin task source `{source}` has an invalid id: {detail}")
+            },
+            Self::TaskSourceCommandUnknown { source, command } => write!(
+                f,
+                "plugin task source `{source}` references command `{command}`, which is not declared in this manifest's commands[]"
+            ),
         }
     }
 }
@@ -662,6 +682,37 @@ impl PluginManager {
                 author: manifest.author,
                 enabled: summary.enabled,
                 pages: manifest.pages,
+            });
+        }
+        Ok(out)
+    }
+
+    /// 任务中心任务源清单 —— `manifest.taskSources[]` 的只读投影（任务 #148）。
+    ///
+    /// 与 [`Self::list_plugin_pages`] 同形：每次调用实时扫描、不缓存、不建第二份注册表
+    /// （禁区 4 / §0.7.6），并带 `enabled` 位把启停过滤**留给消费侧**（任务中心只挂已启用
+    /// 插件的源）。单插件清单读失败按跳过处理，不拖垮整张清单。
+    pub fn list_plugin_task_sources(
+        &self,
+    ) -> Result<Vec<crate::types::PluginTaskSourcesInfo>, PluginError> {
+        let mut out = Vec::new();
+        for summary in self.list_plugins()? {
+            let Some(root) = summary.metadata.root.as_deref() else { continue };
+            let Ok(manifest) = load_plugin_from_directory(root) else {
+                tracing::warn!(root = %root.display(), "插件任务源清单：插件 manifest 读取失败，跳过");
+                continue;
+            };
+            if manifest.task_sources.is_empty() {
+                continue;
+            }
+            out.push(crate::types::PluginTaskSourcesInfo {
+                id: summary.metadata.id,
+                name: summary.metadata.name,
+                version: summary.metadata.version,
+                description: summary.metadata.description,
+                author: manifest.author,
+                enabled: summary.enabled,
+                task_sources: manifest.task_sources,
             });
         }
         Ok(out)
@@ -2216,8 +2267,9 @@ fn load_manifest_from_skill_md(
         skills: Vec::new(),
         agents: Vec::new(),
         dashboard_panels: Vec::new(),
-        // SKILL.md 派生的清单同样没有页面声明（该声明只能来自 plugin.json）。
+        // SKILL.md 派生的清单同样没有页面/任务源声明（二者只能来自 plugin.json）。
         pages: Vec::new(),
+        task_sources: Vec::new(),
         dependencies: Vec::new(),
         integrity: None,
         capabilities: Vec::new(),
@@ -2467,6 +2519,11 @@ fn build_plugin_manifest(
     let commands = build_manifest_commands(root, raw.commands, &mut errors);
     validate_dashboard_panels(&raw.dashboard_panels, &mut errors);
     let pages = build_manifest_pages(raw.pages, &mut errors);
+    // 任务源自洽性判据：`command` 必须指向**同一份清单**里已声明的命名命令。
+    // 用已校验的 `commands`（而非 raw）取名 ⇒ 指向一条本身非法的命令也算「不存在」，
+    // 不会出现「任务源指向一条装不出来的命令」这种只在运行期才暴露的形状。
+    let command_names: BTreeSet<&str> = commands.iter().map(|c| c.name.as_str()).collect();
+    let task_sources = build_manifest_task_sources(raw.task_sources, &command_names, &mut errors);
 
     if !errors.is_empty() {
         return Err(PluginError::ManifestValidation(errors));
@@ -2515,6 +2572,7 @@ fn build_plugin_manifest(
             .collect(),
         dashboard_panels: raw.dashboard_panels,
         pages,
+        task_sources,
         dependencies: raw.dependencies,
         integrity: raw.integrity,
         capabilities: raw.capabilities,
@@ -2889,6 +2947,93 @@ fn build_manifest_pages(
     }
 
     validated
+}
+
+/// 校验并转写 `plugin.json` 的 `taskSources[]`（任务 #148，PLAN §97.4）。
+///
+/// 三条硬判据，全部在**装载期**拦下，不留到任务中心点开才失败：
+/// 1. `id` 形状 = 小写字母数字与 `-`（首字符须是字母数字），且**同一清单内唯一**。
+///    源 id 会直接进宿主 `SourceId` 与 `runIdOf(source, id)` 的拼接，带 `:` / 空格 /
+///    大写都会让「全局唯一 run id」这条不变量失效。
+/// 2. `command` 必须是**同一份清单** `commands[]` 里已声明的命令（`command_names`）——
+///    指一条不存在的命令 = 声明一个永远为空的源，比报错更坏。
+/// 3. `title` 非空（纯文本，不走宿主 i18n；空标题会让任务中心源列表出现空标签）。
+///
+/// ⚠ **不与宿主源清单比名字**：宿主源是前端常量，清单校验期看不到 ⇒ 重名裁决在消费侧
+/// （`adapters/registry.ts::registerAdapter` 幂等，宿主先占位即胜出），与 B10-1 的
+/// 「宿主优先」同一条判据。
+fn build_manifest_task_sources(
+    sources: Vec<RawPluginTaskSource>,
+    command_names: &BTreeSet<&str>,
+    errors: &mut Vec<PluginManifestValidationError>,
+) -> Vec<PluginTaskSource> {
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut validated = Vec::new();
+
+    for source in sources {
+        let id = source.id.trim().to_string();
+        if id.is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "task source",
+                field: "id",
+                name: None,
+            });
+            continue;
+        }
+        if !is_task_source_id_shape(&id) {
+            errors.push(PluginManifestValidationError::InvalidTaskSourceId {
+                source: id.clone(),
+                detail: "只允许小写字母、数字与 `-`，且首字符须是字母或数字".to_string(),
+            });
+            continue;
+        }
+        if !seen.insert(id.clone()) {
+            errors.push(PluginManifestValidationError::DuplicateEntry {
+                kind: "task source",
+                name: id,
+            });
+            continue;
+        }
+        if source.title.trim().is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "task source",
+                field: "title",
+                name: Some(id.clone()),
+            });
+            continue;
+        }
+        let command = source.command.trim().to_string();
+        if command.is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "task source",
+                field: "command",
+                name: Some(id.clone()),
+            });
+            continue;
+        }
+        if !command_names.contains(command.as_str()) {
+            errors.push(PluginManifestValidationError::TaskSourceCommandUnknown {
+                source: id,
+                command,
+            });
+            continue;
+        }
+        // 空串色名按「未声明」处理：与 loading / requiredPermission 的空白同判。
+        let color = source.color.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
+        validated.push(PluginTaskSource { id, title: source.title, command, color });
+    }
+
+    validated
+}
+
+/// [`build_manifest_task_sources`] 的 id 形状判据（手写扫描，不引 regex 依赖）。
+fn is_task_source_id_shape(id: &str) -> bool {
+    let mut chars = id.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => {},
+        _ => return false,
+    }
+    id.len() <= 64 && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 fn validate_command_entries<'a>(
@@ -3770,6 +3915,7 @@ mod tests {
             agents: Vec::new(),
             dashboard_panels: Vec::new(),
             pages: Vec::new(),
+            task_sources: Vec::new(),
             dependencies: Vec::new(),
             integrity: None,
             capabilities: vec![PluginCapabilityDecl {
@@ -5244,6 +5390,210 @@ mod tests {
         assert!(
             manager.agent_command_specs().expect("禁用后仍可投影").is_empty(),
             "禁用插件不得再向智能体命令面贡献命令"
+        );
+
+        drop(manager);
+        let _ = std::fs::remove_dir_all(&config_home);
+        let _ = std::fs::remove_dir_all(&source);
+    }
+
+    // ==== B8-1b：插件贡献任务中心任务源（声明校验 + 只读投影）====
+
+    fn task_source_entry(
+        id: &str,
+        title: &str,
+        command: &str,
+        color: Option<&str>,
+    ) -> RawPluginTaskSource {
+        RawPluginTaskSource {
+            id: id.to_string(),
+            title: title.to_string(),
+            command: command.to_string(),
+            color: color.map(str::to_string),
+        }
+    }
+
+    /// 判据 1：`command` 必须指向**同一份清单**已声明的命令。
+    ///
+    /// 指一条不存在的命令 = 声明一个永远为空的源（任务中心多一个空标签，且没有任何
+    /// 报错指向真因）⇒ 装载期就必须拒，而不是等用户点开。
+    #[test]
+    fn task_sources_must_reference_declared_commands() {
+        let names: BTreeSet<&str> = ["rows"].into_iter().collect();
+        let mut errors = Vec::new();
+
+        let validated = build_manifest_task_sources(
+            vec![
+                task_source_entry("stock-runs", "股票在跑的执行", "rows", Some("gold")),
+                task_source_entry("ghost-runs", "指错命令", "not_declared", None),
+            ],
+            &names,
+            &mut errors,
+        );
+
+        assert_eq!(validated.len(), 1, "只有指向已声明命令的条目应通过");
+        assert_eq!(validated[0].id, "stock-runs");
+        assert_eq!(validated[0].color.as_deref(), Some("gold"));
+        assert_eq!(errors.len(), 1, "实际 {errors:?}");
+        assert!(
+            matches!(errors[0], PluginManifestValidationError::TaskSourceCommandUnknown { .. }),
+            "应报 TaskSourceCommandUnknown，实际 {:?}",
+            errors[0]
+        );
+        assert!(
+            errors[0].to_string().contains("not_declared"),
+            "文案必须点出那条不存在的命令，实际 {}",
+            errors[0]
+        );
+    }
+
+    /// 判据 2：id 形状 + 清单内唯一 + 标题非空，逐条指得出是哪一条源、哪个键。
+    #[test]
+    fn task_source_ids_are_shape_checked_and_unique() {
+        let names: BTreeSet<&str> = ["rows"].into_iter().collect();
+
+        // 形状：带 `:` / 空格 / 大写 / 前导 `-` / 超长一律拒（id 会进 runIdOf 的拼接）。
+        for bad_id in ["Stock-Runs", "has space", "with:colon", "-lead", "", "   "] {
+            let mut errors = Vec::new();
+            let validated = build_manifest_task_sources(
+                vec![task_source_entry(bad_id, "标题", "rows", None)],
+                &names,
+                &mut errors,
+            );
+            assert!(validated.is_empty(), "`{bad_id}` 不应通过，实际 {validated:?}");
+            assert_eq!(errors.len(), 1, "实际 {errors:?}");
+        }
+
+        // 同清单内重名 ⇒ DuplicateEntry（kind 必须写 "task source"，别指到 page/tool 上）。
+        let mut errors = Vec::new();
+        let validated = build_manifest_task_sources(
+            vec![
+                task_source_entry("dup", "第一份", "rows", None),
+                task_source_entry("dup", "第二份", "rows", None),
+            ],
+            &names,
+            &mut errors,
+        );
+        assert_eq!(validated.len(), 1);
+        assert!(
+            matches!(
+                errors[0],
+                PluginManifestValidationError::DuplicateEntry { kind: "task source", .. }
+            ),
+            "实际 {errors:?}"
+        );
+
+        // 空标题 ⇒ 指得出键。
+        let mut errors = Vec::new();
+        let validated = build_manifest_task_sources(
+            vec![task_source_entry("no-title", "  ", "rows", None)],
+            &names,
+            &mut errors,
+        );
+        assert!(validated.is_empty());
+        assert!(
+            matches!(
+                errors[0],
+                PluginManifestValidationError::EmptyEntryField { field: "title", .. }
+            ),
+            "实际 {errors:?}"
+        );
+    }
+
+    /// 空白色名按「未声明」处理 —— 与 `loading` / `requiredPermission` 的空白同判，
+    /// 不许留出一个 `color: ""` 让宿主 Tag 渲成无色的色块。
+    #[test]
+    fn task_source_blank_color_collapses_to_none() {
+        let names: BTreeSet<&str> = ["rows"].into_iter().collect();
+        let mut errors = Vec::new();
+
+        let validated = build_manifest_task_sources(
+            vec![task_source_entry("rows-src", "行", "rows", Some("   "))],
+            &names,
+            &mut errors,
+        );
+
+        assert!(errors.is_empty(), "实际 {errors:?}");
+        assert_eq!(validated.len(), 1);
+        assert_eq!(validated[0].color, None);
+    }
+
+    /// 端到端：装一个声明了任务源的插件 ⇒ 投影出该源；禁用后仍投影但带 `enabled = false`
+    /// （与 `list_plugin_pages` 同口径：启停过滤留给消费侧）。
+    #[test]
+    fn list_plugin_task_sources_projects_installed_declarations() {
+        let label = "task-src";
+        let source = temp_dir(&format!("{label}-source"));
+        let config_home = temp_dir(&format!("{label}-home"));
+        std::fs::create_dir_all(&source).expect("创建源目录");
+        let manifest_path = source.join(MANIFEST_RELATIVE_PATH);
+        std::fs::create_dir_all(manifest_path.parent().expect("manifest 有父目录"))
+            .expect("创建 manifest 目录");
+        std::fs::write(
+            &manifest_path,
+            r#"{
+  "name": "task-src-demo",
+  "version": "1.0.0",
+  "description": "task source projection plugin",
+  "defaultEnabled": true,
+  "permissions": ["read"],
+  "commands": [{ "name": "rows", "description": "rows", "command": "echo" }],
+  "taskSources": [{ "id": "task-src-demo-runs", "title": "Demo Runs", "command": "rows", "color": "gold" }]
+}"#,
+        )
+        .expect("写入 manifest");
+
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        manager.install(source.to_str().expect("utf8 path")).expect("装带任务源的插件应通过校验");
+
+        let list = manager.list_plugin_task_sources().expect("任务源投影应成功");
+        assert_eq!(list.len(), 1, "实际 {list:?}");
+        assert!(list[0].enabled, "defaultEnabled = true ⇒ 投影应带启用位");
+        assert_eq!(list[0].task_sources.len(), 1);
+        assert_eq!(list[0].task_sources[0].id, "task-src-demo-runs");
+        assert_eq!(list[0].task_sources[0].command, "rows");
+
+        manager.disable(&list[0].id).expect("禁用插件");
+        let after = manager.list_plugin_task_sources().expect("禁用后仍可投影");
+        assert_eq!(after.len(), 1, "启停过滤归消费侧，投影面不隐藏条目");
+        assert!(!after[0].enabled, "禁用位必须透出，否则任务中心会挂上一个死源");
+
+        drop(manager);
+        let _ = std::fs::remove_dir_all(&config_home);
+        let _ = std::fs::remove_dir_all(&source);
+    }
+
+    /// 反向：`taskSources[].command` 指到未声明的命令 ⇒ **装载期**就拒，插件装不上。
+    #[test]
+    fn install_rejects_task_source_referencing_unknown_command() {
+        let label = "task-src-bad";
+        let source = temp_dir(&format!("{label}-source"));
+        let config_home = temp_dir(&format!("{label}-home"));
+        std::fs::create_dir_all(&source).expect("创建源目录");
+        let manifest_path = source.join(MANIFEST_RELATIVE_PATH);
+        std::fs::create_dir_all(manifest_path.parent().expect("manifest 有父目录"))
+            .expect("创建 manifest 目录");
+        std::fs::write(
+            &manifest_path,
+            r#"{
+  "name": "task-src-bad-demo",
+  "version": "1.0.0",
+  "description": "bad task source plugin",
+  "defaultEnabled": true,
+  "permissions": ["read"],
+  "taskSources": [{ "id": "ghost-src", "title": "Ghost", "command": "never_declared" }]
+}"#,
+        )
+        .expect("写入 manifest");
+
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let error = manager
+            .install(source.to_str().expect("utf8 path"))
+            .expect_err("指向不存在命令的任务源必须被拒");
+        let text = error.to_string();
+        assert!(
+            text.contains("never_declared") || text.contains("task source"),
+            "错误要指得出缺陷所在，实际 {text}"
         );
 
         drop(manager);

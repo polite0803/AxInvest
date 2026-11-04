@@ -91,8 +91,8 @@ fn describe_declares_the_tool_seam_and_its_outbound_call() {
     assert!(caps.contains(&("tool.set", "exec")), "必须声明 tool.set 的执行面：{caps:?}");
     assert_eq!(
         declaration.calls,
-        vec!["market.quote".to_string()],
-        "出站接缝必须声明，否则宿主拒调"
+        vec!["market.quote".to_string(), "workflow.run".to_string()],
+        "出站接缝必须逐条声明，否则宿主 handle_call_seam 直接拒调（行情 + 任务源取数）"
     );
 
     worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
@@ -360,4 +360,103 @@ fn command_frame_identity_mismatch_and_unknown_command_are_explicit_errors() {
 
     worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
     assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+}
+
+/// B8-1b：任务源取数命令的帧级实证 —— 出站接缝的**参数名口径**与行形状都只有真管道能钉住。
+///
+/// 与 e2e 安装测试的分工：那边锁「清单 → 投影 → 命令能跑通」，这边锁
+/// 「camelCase 入参 → snake_case 接缝参数」的翻译与「引擎状态词 → 中心状态词」的翻译，
+/// 以及接缝出错时命令必须**失败**而不是静默回空数组（空数组在任务中心看起来像「今天没活」）。
+#[test]
+fn command_frame_lists_active_workflow_runs_as_task_center_rows() {
+    let mut worker = Worker::spawn();
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "list_active_workflow_runs",
+            serde_json::json!({ "limit": 20, "workflowId": "wf-daily" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-task-rows"),
+    );
+
+    let call = worker.recv_request();
+    assert_eq!(call.op, ops::CALL_SEAM);
+    assert_eq!(call.args["seam"], "workflow.run");
+    assert_eq!(call.args["op"], "list_active");
+    // 命令入参是 camelCase（全站约定），接缝入参是 snake_case（宿主 deserialize_optional_arg
+    // 按 `workflow_id` 取）⇒ 这层翻译发生在插件侧，写错只会让过滤条件静默失效。
+    assert_eq!(call.args["args"]["limit"], 20);
+    assert_eq!(
+        call.args["args"]["workflow_id"], "wf-daily",
+        "接缝参数必须是 workflow_id：{:?}",
+        call.args
+    );
+
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!({
+            "executions": [{
+                "executionId": "exec-9",
+                "workflowId": "wf-daily",
+                // 引擎用英式 `cancelled`，中心用美式 `canceled`
+                "status": "cancelled",
+                "currentNodeId": null,
+                "ownerPluginId": PLUGIN_ID,
+                "createdAt": 1_700_000_000_000_i64,
+                "updatedAt": 1_700_000_009_000_i64,
+            }],
+            "total": 1,
+        }))
+        .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Success);
+    assert_eq!(response.request_id.as_deref(), Some("req-task-rows"));
+    let reply = response.value.expect("命令回执必须带 value");
+    assert_eq!(reply["plugin_id"], PLUGIN_ID);
+    let rows = reply["value"].as_array().expect("任务源取数必须回数组");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["nativeId"], "exec-9");
+    assert_eq!(rows[0]["name"], "wf-daily · exec-9");
+    assert_eq!(rows[0]["state"], "canceled", "状态词表翻译必须发生在插件侧：{:?}", rows[0]);
+    assert_eq!(rows[0]["trigger"], "manual");
+    assert_eq!(rows[0]["startedAt"], 1_700_000_000_000_i64);
+    // 缺省项是「不出现」而不是 null：宿主泛型适配器按字段在不在决定耗时列与可否打开。
+    for absent in ["finishedAt", "durationMs", "deepLink"] {
+        assert!(rows[0].get(absent).is_none(), "缺省字段 `{absent}` 不得进帧：{}", rows[0]);
+    }
+    assert_eq!(rows[0]["raw"]["updatedAt"], 1_700_000_009_000_i64, "引擎视图原样留在 raw");
+
+    // 接缝报错 ⇒ 命令失败并**原样透传错误码**，不得退化成空列表。
+    worker.send(
+        &CommandFrame::new(PLUGIN_ID, "list_active_workflow_runs", serde_json::json!({}), 5_000)
+            .to_frame_request()
+            .expect("命令帧应能编成请求")
+            .with_id("req-task-rows-2"),
+    );
+    let second_call = worker.recv_request();
+    // 不传 limit ⇒ 插件用与宿主一致的缺省档 50
+    assert_eq!(second_call.args["args"]["limit"], 50, "缺省档应与宿主 list_active 的缺省一致");
+    assert!(
+        second_call.args["args"].get("workflow_id").is_none()
+            || second_call.args["args"]["workflow_id"].is_null(),
+        "未指定 workflowId ⇒ 原样不带过滤：{:?}",
+        second_call.args
+    );
+    worker.send_response(
+        &FrameResponse::error("TEST_WORKFLOW_RUN_UNAVAILABLE", "宿主引擎没起来")
+            .with_id(second_call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let failed = worker.recv_response();
+    assert_eq!(failed.kind, ResponseKind::Error);
+    assert_eq!(failed.code.as_deref(), Some("TEST_WORKFLOW_RUN_UNAVAILABLE"));
+    assert_eq!(failed.request_id.as_deref(), Some("req-task-rows-2"));
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+    worker.close_stdin();
+    assert!(worker.child.wait().expect("等待 worker 退出").success());
 }

@@ -270,6 +270,62 @@ pub struct PluginPage {
     pub loading: PluginPageLoading,
 }
 
+/// 插件贡献给**任务中心**的一个任务源声明（`plugin.json` 的 `taskSources[]`，PLAN §97.4）。
+///
+/// 与 [`PluginPage`] 同族的两条既有约定：
+/// 1. **只声明数据面，不声明渲染**（§93 裁定）：插件不给 React，只给「取数命令的名字」；
+///    行形状见 `axagent_plugin_proto::PluginTaskRunRow`，宿主用泛型适配器把它接进
+///    任务中心的 `UnifiedRun` 口径。
+/// 2. **`title` 不做宿主 i18n** —— 与 `PluginPage::title` 同口径，源名字归插件产物自己负责。
+///
+/// ⚠ 与宿主已占用源 id 重名时**宿主优先**：裁决发生在消费侧
+/// （`src/pages/TasksCenterPage/adapters/registry.ts` 的 `registerAdapter` 幂等），
+/// 因为宿主源清单是前端常量，插件清单校验期看不到它。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginTaskSource {
+    /// 源标识 = 任务中心 `SourceId`，跨插件必须唯一（同插件内唯一由清单校验保证）。
+    pub id: String,
+    /// 显示标题（纯文本，不走宿主 i18n）。
+    pub title: String,
+    /// 取数命令：必须是**同一份清单** `commands[]` 里已声明的命名命令，
+    /// 其返回体是 `PluginTaskRunRow[]` 的 JSON 数组。声明自洽性由 `build_manifest_task_sources` 硬拦。
+    pub command: String,
+    /// antd Tag 色板名（如 `gold`）；缺省 ⇒ 宿主用默认色。
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
+/// `plugin.json` 中 `taskSources[]` 的**未校验**形态。
+///
+/// 与 [`RawPluginPage`] 同理：字段缺失/空值一律走清单校验错误，指得出是哪一条源、哪个键。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawPluginTaskSource {
+    pub id: String,
+    pub title: String,
+    pub command: String,
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
+/// `plugin_list_task_sources` 的返回形状（任务 #148）：某插件贡献的任务源清单 + 启停位。
+///
+/// 真相源是 `PluginManifest.task_sources`，每次调用实时扫描；不缓存、不建第二份注册表
+/// （AGENTS.md 禁区 4、§0.7.6）。启停过滤由消费侧按 [`Self::enabled`] 决定，
+/// 与 [`PluginPagesInfo`] 同口径。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginTaskSourcesInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub author: Option<String>,
+    pub enabled: bool,
+    pub task_sources: Vec<PluginTaskSource>,
+}
+
 /// `plugin.json` 中 `pages[]` 的**未校验**形态。
 ///
 /// 照抄 [`RawPluginToolManifest`] 的先例：枚举字段在载入期收成字符串，好让
@@ -339,6 +395,12 @@ pub struct PluginManifest {
     /// 前端只做只读投影，不得另建路由表或平行 manifest。
     #[serde(default)]
     pub pages: Vec<PluginPage>,
+    /// L1 功能包贡献的任务中心任务源（PLAN §97.4）；缺省 = 该包不贡献任务源。
+    ///
+    /// 与 `pages` 一样是本 crate 内该表面的**唯一**声明权威：任务中心只做只读投影 +
+    /// 泛型适配器实例化，不得另建平行清单。
+    #[serde(default)]
+    pub task_sources: Vec<PluginTaskSource>,
     #[serde(default)]
     pub dependencies: Vec<PluginDependency>,
     #[serde(default)]
@@ -744,6 +806,14 @@ pub(crate) struct RawPluginManifest {
     /// serde 默认忽略未知字段，漏了这一步清单里的 `pages` 会被静默丢弃。
     #[serde(default)]
     pub pages: Vec<RawPluginPage>,
+    /// 任务源声明的未校验形态；必须显式转写进 [`PluginManifest::task_sources`] ——
+    /// serde 默认忽略未知字段，漏了这一步清单里的 `taskSources` 会被静默丢弃。
+    ///
+    /// ⚠ 本结构体**没有** `rename_all`（与 [`RawPluginMcpServer`] 的 `mcpServers` 同因）：
+    /// 多词字段必须逐条 `alias`，否则 `plugin.json` 写 `taskSources` 会解出空表 ——
+    /// 表现为「清单里有、任务中心里没有」，且零报错（e2e 安装测试就是这么抓到的）。
+    #[serde(default, alias = "taskSources")]
+    pub task_sources: Vec<RawPluginTaskSource>,
     #[serde(default)]
     pub dependencies: Vec<PluginDependency>,
     #[serde(default)]

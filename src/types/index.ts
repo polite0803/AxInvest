@@ -2148,6 +2148,58 @@ export interface PluginPagesInfoDto {
   pages: PluginPageDto[];
 }
 
+/**
+ * `plugin_list_task_sources` 的返回形状（后端 `plugins::types::PluginTaskSourcesInfo`，任务 #148）。
+ *
+ * 与 [`PluginPagesInfoDto`] 同族：真相源是 `manifest.taskSources[]`，每次调用实时扫描，
+ * 前端只做只读投影 + 泛型适配器实例化，**不得**另建第二份源清单（禁区 4）。
+ * `enabled = false` 的条目由消费侧过滤掉（投影面原样透出启停位，与页面清单同口径）。
+ */
+export interface PluginTaskSourcesInfoDto {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string | null;
+  enabled: boolean;
+  taskSources: PluginTaskSourceDto[];
+}
+
+/**
+ * 插件贡献的任务中心任务源声明（后端 `plugins::types::PluginTaskSource`）。
+ *
+ * 只声明**数据面**：`command` 是本包 `commands[]` 里已声明的命名命令，其返回体是
+ * [`PluginTaskRunRowDto`] 数组。渲染形态不在这里（PLAN §93 裁定：插件不给 React）。
+ * `title` 是纯文本、不走宿主 i18n —— 与 `PluginPageDto.title` 同口径。
+ */
+export interface PluginTaskSourceDto {
+  id: string;
+  title: string;
+  /** 取数命令名（同一份清单 `commands[].name`）。 */
+  command: string;
+  /** antd Tag 色板名；缺省由宿主泛型适配器兜底。 */
+  color?: string | null;
+}
+
+/**
+ * 插件任务源返回的一行运行记录（后端 `axagent_plugin_proto::PluginTaskRunRow`）。
+ *
+ * ⚠ `state` 的词汇表与 `TasksCenterPage/model.ts` 的 `RunState` **同源**（七态、精确小写）：
+ * 表外值由宿主泛型适配器按「未知」处理，不猜成某个具体状态。
+ * `nativeId` 不带源前缀 —— run id 由宿主按 `${source}:${nativeId}` 拼。
+ */
+export interface PluginTaskRunRowDto {
+  nativeId: string;
+  name: string;
+  state: string;
+  trigger?: string | null;
+  startedAt?: number | null;
+  finishedAt?: number | null;
+  durationMs?: number | null;
+  deepLink?: string | null;
+  raw?: unknown;
+}
+
 export interface UpdateOutcomeDto {
   pluginId: string;
   oldVersion: string;

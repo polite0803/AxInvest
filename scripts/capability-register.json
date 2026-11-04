@@ -29,14 +29,14 @@
     {
       "id": "commandTotal",
       "label": "Tauri 命令总数（parseRegistry 逐行条目）",
-      "value": 1541,
+      "value": 1542,
       "check": "registryCommandCount",
       "hard": true,
-      "planNumber": "1541",
+      "planNumber": "1542",
       "planMustAppear": true,
-      "planPinned": [{ "line": 363, "mustContain": ["1541", "164", "`register_commands.rs` 共"] }],
+      "planPinned": [{ "line": 363, "mustContain": ["1542", "164", "`register_commands.rs` 共"] }],
       "planOld": [{ "number": "1534", "note": "漂移前旧读数，仅允许出现在 §0.12.4 漂移列举段（PLAN:704）" }],
-      "note": "口径 = scripts/lib/command-domains.mjs 的 parseRegistry，与两份 AUDIT 同源；旧数 1534 在盘上任何寄存器里都不存在。**2026-11-05 B9-2 删宿主 `compute_evidence_weights` ⇒ 1542→1541**。原本挂在 `planOld` 上的 1541 条目随本批**移除**：它不是「旧读数」了，若留着会与现值钉句自相矛盾；1542 转为历史读数，**不设 planOld** —— 它大量出现在 §0.12.4 漂移列举段与 §15 各节的历史陈述里，加 planOld 只会逼着到处补 alsoAt（同一事实的两种写法不该受两套监管）。"
+      "note": "口径 = scripts/lib/command-domains.mjs 的 parseRegistry，与两份 AUDIT 同源；旧数 1534 在盘上任何寄存器里都不存在。**2026-11-05 B9-2 删宿主 `compute_evidence_weights` ⇒ 1542→1541**。原本挂在 `planOld` 上的 1541 条目随本批**移除**：它不是「旧读数」了，若留着会与现值钉句自相矛盾；1542 转为历史读数，**不设 planOld** —— 它大量出现在 §0.12.4 漂移列举段与 §15 各节的历史陈述里，加 planOld 只会逼着到处补 alsoAt（同一事实的两种写法不该受两套监管）。**2026-11-05 B8-1b 新增宿主 `plugin_list_task_sources` ⇒ 1541→1542**（1541 随之转历史读数，同不设 planOld：它只出现在 §15 记账段的本批对照行里，是「上一批的现值」而非漂移旧值）。"
     },
     {
       "id": "commandModules",
@@ -46,7 +46,7 @@
       "hard": true,
       "planNumber": "164",
       "planMustAppear": true,
-      "note": "与 commandTotal 同一份 parseRegistry 读数（PLAN:352「1542 条 / 164 模块」）。"
+      "note": "与 commandTotal 同一份 parseRegistry 读数（PLAN:363 驻留口径「… 共 1542 条 / 164 模块」；模块数不随单条命令增减而变）。"
     },
     {
       "id": "unassignedModules",
@@ -60,20 +60,20 @@
     {
       "id": "registryFileLines",
       "label": "register_commands.rs 行数（口径 = split(\"\\n\").length，含末行空元素）",
-      "value": 1608,
+      "value": 1609,
       "check": "registryFileLineCount",
       "hard": false,
       "planMustAppear": false,
-      "note": "只报告：它是 build.rs 产物（禁区 7），行数随新增命令自然变化，与能力登记无关 ⇒ 不参与退出码，但漂移会印出来提醒重算上面三条。⚠ **口径已对齐判据**：`check-capability-register.mjs:1169` 用 `split(\"\\n\").length`（含末行空元素），label 原自陈「纯 LF」= `wc -l` ⇒ 两者恒差 1（HEAD 报 −1、工作区报 +1 都是这一个 1）。#52 立案「一套脚本只许一套行数口径」，本条先把 label 改成判据的真实口径；`wc -l` 口径比本值小 1，属**同一事实的第二种数法**，不是数据漂移（PLAN §15.1 第 5 行留档）。**2026-11-05 B9-2 删 1 条命令 ⇒ split 口径 1609→1608**。"
+      "note": "只报告：它是 build.rs 产物（禁区 7），行数随新增命令自然变化，与能力登记无关 ⇒ 不参与退出码，但漂移会印出来提醒重算上面三条。⚠ **口径已对齐判据**：`check-capability-register.mjs:1169` 用 `split(\"\\n\").length`（含末行空元素），label 原自陈「纯 LF」= `wc -l` ⇒ 两者恒差 1（HEAD 报 −1、工作区报 +1 都是这一个 1）。#52 立案「一套脚本只许一套行数口径」，本条先把 label 改成判据的真实口径；`wc -l` 口径比本值小 1，属**同一事实的第二种数法**，不是数据漂移（PLAN §15.1 第 5 行留档）。**2026-11-05 B9-2 删 1 条命令 ⇒ split 口径 1609→1608**；同批 B8-1b 加 1 条命令 ⇒ **1608→1609**。"
     },
     {
       "id": "commandNameSetParity",
       "label": "不变量：契约 A 名集合数 == 产物条目数 == 登记值",
-      "value": 1541,
+      "value": 1542,
       "check": "commandNameSetCount",
       "hard": true,
       "planMustAppear": false,
-      "note": "#58 的加强档。存在理由：契约 A 的 `defined ⊆ registered` 比的是**名字集合**，同名跨模块只注册一个时名集合会**静默低估**（今天 0 例，且无编译期保证）⇒ 只有把「名集合数 == 产物条目数」也钉住，A 档的绿才等于「产物与源码一致」。三方现值 1541/1541/1541 全等（#75 后；B4-k 删宿主 `parse_analysis_intent` 后各降 1，B9-2 删 `compute_evidence_weights` 再降 1）。**不给 planNumber/planMustAppear**：同一个数已由 `commandTotal` 钉在 PLAN 上，二次钉数只会在 PLAN 改写时多造一条假红；本锚点守的是**盘上不变量**，不是 PLAN 措辞。⚠ HEAD 提交态下它与 `commandTotal` 会**同时**报「产物滞后」（同因两条，专码一致），不是两个独立缺陷。"
+      "note": "#58 的加强档。存在理由：契约 A 的 `defined ⊆ registered` 比的是**名字集合**，同名跨模块只注册一个时名集合会**静默低估**（今天 0 例，且无编译期保证）⇒ 只有把「名集合数 == 产物条目数」也钉住，A 档的绿才等于「产物与源码一致」。三方现值 1542/1542/1542 全等（#75 后；B4-k 删宿主 `parse_analysis_intent` 后各降 1，B9-2 删 `compute_evidence_weights` 再降 1，B8-1b 加 `plugin_list_task_sources` 回升 1）。**不给 planNumber/planMustAppear**：同一个数已由 `commandTotal` 钉在 PLAN 上，二次钉数只会在 PLAN 改写时多造一条假红；本锚点守的是**盘上不变量**，不是 PLAN 措辞。⚠ HEAD 提交态下它与 `commandTotal` 会**同时**报「产物滞后」（同因两条，专码一致），不是两个独立缺陷。"
     },
     {
       "id": "stockBoundaryCommands",
@@ -768,11 +768,11 @@
       "expectMissingFields": ["k", "reading", "seamId（原文无反引号能力 ID）"],
       "check": "implementorCount",
       "evidence": [
-        { "ref": "axagent-plugins/crates/plugins/src/manager.rs:787", "file": "axagent-plugins/crates/plugins/src/manager.rs", "line": 787, "token": "pub fn execute_plugin_command", "anchorText": "pub fn execute_plugin_command(", "role": "CLI 派发口（本批已改成真授权门槛）" }
+        { "ref": "axagent-plugins/crates/plugins/src/manager.rs:838", "file": "axagent-plugins/crates/plugins/src/manager.rs", "line": 838, "token": "pub fn execute_plugin_command", "anchorText": "pub fn execute_plugin_command(", "role": "CLI 派发口（本批已改成真授权门槛）" }
       ],
       "note": "登记值 0 = PLAN:301 原文「生产实现者 0，唯一实现是测试替身」⇒ 机械判据 harness 外非测试 impl 站点 == 0。原文称 11 个方法但只列 6 个方法名 ⇒ 方法数登记为原文缺省，不判。PLAN:296 明文「不计入 23」；已裁定（§0.12.1）废弃 trait 本体、command_specs/execute_command 形状吸收进 L1 命令通道 T2。**2026-11-01 已执行**：`harness/src/dojo_extension.rs` 整文件删除（−460 行）+ `lib.rs:332-337` 墓碑注释 ⇒ 本行原两条指向该文件的 evidence 已摘除（文件不存在），`manager.rs` 派发口因多轮改动下移（:551 → :583 → :654 → **:708**，最终态由 `--repin-code --apply` 定锚）；翻案条件仍未触发（`git log --all -S` + `git grep` 到 origin/upstream：18 处命中全落在被删文件自身）。",
-      "planAnchorText": "原记「CLI 派发口无 `input_schema` 且权限写死 `ReadOnly`」**判据低估了实情**：`PluginTool::check_permission`（`plugins/src/types.rs:787-826`）全仓零调用方，唯一引用它的 `execute_with_permission_check` 也零调用方 ⇒ 档位在 tools 与 commands **两条路上都是纯装饰**；本批只把命令通道改成真授权（按具体权限名判定，`implies_*` 一字未改），**tool 侧依旧是装饰**，另立批次。", "planLine": 301,
-      "planLineRange": [296, 302], "planAnchorTextRange": ["### 0.7.6 机制合流，不是能力 —— 1 条（必须处理，但不计入 23）", "同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:787`**（原 `:551`，因多次改动下移；2026-11-04 B4-h 插入 `resolve_bundled_root` 后再下移 17 行 ⇒ `:738` → `:755`；2026-11-05 B10-1 在其前插入 `agent_command_specs`（+32 行）⇒ `:755` → `:787`）。"]
+      "planAnchorText": "原记「CLI 派发口无 `input_schema` 且权限写死 `ReadOnly`」**判据低估了实情**：`PluginTool::check_permission`（`plugins/src/types.rs:892`，fn 起点；原写 `:787-826` 在 HEAD 上就已错位 —— 787 是 `pub fn new(`、822 才是该 fn，区间尾也切在函数体里 ⇒ 改钉 fn 起点）全仓零调用方，唯一引用它的 `execute_with_permission_check` 也零调用方 ⇒ 档位在 tools 与 commands **两条路上都是纯装饰**；本批只把命令通道改成真授权（按具体权限名判定，`implies_*` 一字未改），**tool 侧依旧是装饰**，另立批次。", "planLine": 301,
+      "planLineRange": [296, 302], "planAnchorTextRange": ["### 0.7.6 机制合流，不是能力 —— 1 条（必须处理，但不计入 23）", "同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:838`**（`pub fn execute_plugin_command(`，`--repin-code --apply` 定锚）。行号链：`:708` → `:738`（#75 加 `list_plugin_pages`）→ `:755` → `:787`（B10-1 前插 `agent_command_specs`）→ `:838`（本批 B8-1b 在其前插 `list_plugin_task_sources` 一族）。⚠ 本句原先停在 `:738`，而镜像表登记已随 B10-1 重锚到 `:787` ⇒ **散文引用与镜像表各说一套、两边都不红**（散文不受 evidence 判据管辖），这一条是本批撞出来的既存缺陷，不是新引入的漂移。"]
     },
     {
       "seamId": "agent.loop",

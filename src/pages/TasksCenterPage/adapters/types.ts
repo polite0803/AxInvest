@@ -18,6 +18,14 @@ export interface TaskSourceAdapter {
   readonly id: SourceId;
   /** i18n 键（tasksCenter.source.<id>） */
   readonly nameKey: string;
+  /**
+   * 纯文本源名 —— **插件贡献的源专用**（任务 #148）。
+   *
+   * 与 `PluginPageDto.title` 同口径：文案归插件产物自己负责，不占宿主 11 语言 key。
+   * 渲染侧唯一判据是 `adapter.name ?? t(adapter.nameKey)`（宿主源自带 `nameKey`，
+   * 插件源自带 `name`），不许出现「两个都有时看谁」的分支。
+   */
+  readonly name?: string;
   /** antd Tag 色板 */
   readonly color: string;
   list(query?: RunQuery): Promise<UnifiedRun[]>;

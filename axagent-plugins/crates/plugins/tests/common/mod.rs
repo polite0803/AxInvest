@@ -59,6 +59,37 @@ impl MarketDataProvider for FixedQuoteProvider {
     }
 }
 
+/// 固定工作流执行替身：只实现 `list_active`（任务源取数走它）。
+/// 其余三个方法**沿用 trait 默认实现**（回 `Provider("… 未实现")`），
+/// 测试若误用会立刻拿到错误，而不是拿到一份假回执。
+///
+/// 返回值固定（`exec-1` / `wf-1` / `running`），让端到端断言钉得住
+/// 「宿主引擎视图 → 插件行记录 → 回传宿主」这一整条链。
+pub struct FixedWorkflowRunProvider;
+
+#[async_trait::async_trait]
+impl axagent_harness::WorkflowRunProvider for FixedWorkflowRunProvider {
+    async fn list_active(
+        &self,
+        owner: &str,
+        _workflow_id: Option<&str>,
+        _limit: usize,
+    ) -> axagent_harness::core_error::Result<axagent_harness::WorkflowRunActivePage> {
+        Ok(axagent_harness::WorkflowRunActivePage {
+            executions: vec![axagent_harness::WorkflowRunActiveView {
+                execution_id: "exec-1".to_string(),
+                workflow_id: "wf-1".to_string(),
+                status: axagent_harness::workflow_types::ExecutionStatus::Running,
+                current_node_id: Some("node-2".to_string()),
+                owner_plugin_id: owner.to_string(),
+                created_at: 1_700_000_000_000,
+                updated_at: 1_700_000_001_000,
+            }],
+            total: 1,
+        })
+    }
+}
+
 /// 创建测试用临时目录并在 test 完成后自动清理。
 pub struct TempDir {
     pub path: PathBuf,

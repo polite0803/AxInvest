@@ -5232,6 +5232,11 @@ async function executeCommand<T>(
       // 不抛错：这里抛错会让 `npm run dev` 下整个插件页列表报错，与 dashboard_list_plugins 同口径。
       return [] as T;
 
+    case "plugin_list_task_sources":
+      // 同 plugin_list_pages：浏览器模式无安装根 ⇒ 空清单 =「没有插件任务源」，
+      // 任务中心照常显示宿主源，不因为离线路径报错。
+      return [] as T;
+
     // ── Agent Profiles (mock) ──────────────────────────────────────
     case "list_agent_profiles":
     case "list_agent_roles":

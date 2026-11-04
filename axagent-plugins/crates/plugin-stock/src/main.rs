@@ -24,8 +24,8 @@ use std::process::ExitCode;
 
 use axagent_plugin_proto::{
     AXAGENT_PLUGIN_PROTO_VERSION, CapabilityDecl, CommandFault, CommandFrame, CommandOutcome,
-    CommandReply, FrameRequest, FrameResponse, Peer, PluginDeclaration, ResponseKind, error_codes,
-    ops, serve,
+    CommandReply, FrameRequest, FrameResponse, Peer, PluginDeclaration, PluginTaskRunRow,
+    ResponseKind, error_codes, is_plugin_task_run_state, ops, serve,
 };
 use serde_json::{Value, json};
 
@@ -45,6 +45,13 @@ const COMMAND_EVIDENCE_WEIGHTS: &str = "compute_evidence_weights";
 const TOOL_SET_VERSION: &str = "0.1.0";
 /// 工具取数走的宿主接缝：宿主把已有行情能力以入站分派的方式暴露给插件。
 const MARKET_SEAM: &str = "market.quote";
+/// 任务源取数走的宿主接缝（B8-1b）：工作流执行的运行态只有宿主引擎知道。
+const WORKFLOW_RUN_SEAM: &str = "workflow.run";
+/// 插件贡献的命名命令（manifest `commands[].name` / `taskSources[].command` 必须逐字一致）。
+const COMMAND_ACTIVE_RUNS: &str = "list_active_workflow_runs";
+/// 一次任务源取数的默认上限：与宿主 `list_active` 的缺省值一致，
+/// 前端泛型适配器不传 limit 时也走这一档（不是插件自己拍的第二个数）。
+const DEFAULT_TASK_SOURCE_LIMIT: u32 = 50;
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -126,6 +133,17 @@ fn handle_command(
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
             },
         },
+        // 任务源取数：行数据来自宿主 `workflow.run` 的 `list_active`，插件只做状态词表翻译
+        // 与形状收敛（渲染与 run id 拼装归宿主泛型适配器，见 PLAN §97.4）。
+        COMMAND_ACTIVE_RUNS => {
+            let rows = active_workflow_runs(&frame.input, &request.call_chain, peer);
+            match rows {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
         other => CommandOutcome::Fault(CommandFault::for_frame(
             &frame,
             error_codes::PLUGIN_COMMAND_UNKNOWN,
@@ -146,7 +164,7 @@ fn declaration() -> FrameResponse {
         serde_json::to_value(PluginDeclaration {
             proto_version: AXAGENT_PLUGIN_PROTO_VERSION,
             subscribe: Vec::new(),
-            calls: vec![MARKET_SEAM.to_string()],
+            calls: vec![MARKET_SEAM.to_string(), WORKFLOW_RUN_SEAM.to_string()],
             capabilities: vec![CapabilityDecl {
                 seam: "tool.set".to_string(),
                 op: "exec".to_string(),
@@ -234,6 +252,110 @@ fn evidence_weights(input: &Value) -> Result<Value, (String, String)> {
     })
 }
 
+/// 任务源取数命令：`PluginTaskRunRow[]` 的 JSON 数组（契约见 plugin-proto）。
+///
+/// 数据一律经宿主 `workflow.run` 的 `list_active` op —— 执行态在宿主引擎里，插件不复制
+/// 一份登记表（禁区 12）。本函数只干两件宿主干不了/不该干的事：
+/// 1. **状态词表翻译**：引擎六态（`completed` / `partially_completed` / `cancelled` 英式拼法）
+///    → 任务中心七态（`succeeded` / `canceled` 美式拼法）。表外值一律落 `waiting`，
+///    **不猜**成某个具体终态（与宿主 `mapRunTrigger` 同一条纪律）。
+/// 2. **形状收敛**：只交宿主泛型适配器认得的字段，`raw` 原样带上引擎视图供详情抽屉。
+///
+/// ⚠ `partially_completed` 归 `succeeded`：它是终态且**确有产出**，判成 `failed` 会把
+/// 「跑完但部分节点没成」的批次误标成失败；细分差异留在 `raw.status` 里，宿主不改口径。
+fn active_workflow_runs(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    // `limit` 容忍缺省与非数字：非数字按缺省档处理并**说明**，不静默改成别的值。
+    let limit = input
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map(|v| v.clamp(1, 200) as u32)
+        .unwrap_or(DEFAULT_TASK_SOURCE_LIMIT);
+    let workflow_id = input.get("workflowId").and_then(Value::as_str).map(str::trim);
+
+    let reply = peer
+        .call_seam(
+            WORKFLOW_RUN_SEAM,
+            "list_active",
+            json!({ "limit": limit, "workflow_id": workflow_id }),
+            call_chain.to_vec(),
+        )
+        .map_err(|e| {
+            (error_codes::PLUGIN_COMMAND_FAILED.to_string(), format!("工作流执行接缝调用失败：{e}"))
+        })?;
+    match reply.kind {
+        ResponseKind::Success => {
+            let page = reply.value.unwrap_or(Value::Null);
+            let executions =
+                page.get("executions").and_then(Value::as_array).cloned().unwrap_or_default();
+            let rows: Vec<Value> = executions.iter().map(task_run_row_from_execution).collect();
+            Ok(Value::Array(rows))
+        },
+        ResponseKind::Error => Err((
+            reply.code.unwrap_or_else(|| error_codes::PLUGIN_COMMAND_FAILED.to_string()),
+            reply.message.unwrap_or_else(|| "工作流接缝返回错误但未说明".to_string()),
+        )),
+    }
+}
+
+/// 引擎执行视图（camelCase JSON）→ 任务中心一行。
+///
+/// 先收成 [`PluginTaskRunRow`] 再序列化，而不是手搓 `json!` 键名：行形状的唯一权威在
+/// plugin-proto，宿主前端按那份 camelCase 消费（禁区 12）—— 手搓键名漂一个字母不会报错，
+/// 只会让任务中心静默少一列。
+///
+/// ⚠ **不交 `deepLink`**：工作流执行详情今天没有独立站内路由
+/// （2026-10-28 已删 `/workflow` 一类旧链，见 `ContentArea.tsx:197`）⇒ 造一个指向 404 的
+/// 深链比没有深链更坏。宿主泛型适配器据此把该 run 的 `openSource` 能力关成 false。
+///
+/// ⚠ **不交 `finishedAt`**：`list_active` 只含 running / paused 执行（宿主侧过滤见
+/// `workflow_run_service.rs:697`），`updatedAt` 是「最近一次推进」而非结束时刻 ⇒ 拿它当
+/// 结束时间是编读数。耗时因此留空，由宿主按「未知」不显示。
+fn task_run_row_from_execution(execution: &Value) -> Value {
+    let status = execution.get("status").and_then(Value::as_str).unwrap_or_default();
+    let execution_id = execution.get("executionId").and_then(Value::as_str).unwrap_or_default();
+    let workflow_id = execution.get("workflowId").and_then(Value::as_str).unwrap_or_default();
+    let state = map_execution_state_to_run_state(status);
+    debug_assert!(
+        is_plugin_task_run_state(state),
+        "状态映射产出了表外值 `{state}`：宿主会静默按未知处理"
+    );
+    let row = PluginTaskRunRow {
+        native_id: execution_id.to_string(),
+        // 同一 workflow 会有多条执行 ⇒ 名字必须能区分开，不能只显示 workflow id。
+        name: format!("{workflow_id} · {execution_id}"),
+        state: state.to_string(),
+        // 工作流执行由插件受理，中心一律标 manual：引擎侧没有「定时/系统发起」的列，
+        // 猜成 schedule 就是把不知道伪装成读数。
+        trigger: Some("manual".to_string()),
+        started_at: execution.get("createdAt").and_then(Value::as_i64),
+        finished_at: None,
+        duration_ms: None,
+        deep_link: None,
+        raw: Some(execution.clone()),
+    };
+    serde_json::to_value(row).expect("任务源行记录是可序列化的纯数据")
+}
+
+/// 引擎六态 → 任务中心七态（词汇表 = `PLUGIN_TASK_RUN_STATES`，表外一律 `waiting`）。
+///
+/// ⚠ 今天 `list_active` 只吐 running / paused，终态那三条分支是**防御性**的：
+/// 宿主一旦把「近期已结束的批次」纳入同一接缝（B8-2 的候选口径），这里不必改也能翻对；
+/// 在那之前不要在 PLAN 里把它当成实测到达过的路径。
+fn map_execution_state_to_run_state(status: &str) -> &'static str {
+    match status {
+        "running" => "running",
+        "paused" => "paused",
+        "completed" | "partially_completed" => "succeeded",
+        "failed" => "failed",
+        "cancelled" => "canceled",
+        _ => "waiting",
+    }
+}
+
 /// 取一条个股行情，返回 `(入参里的股票代码, 行情 JSON)`。
 ///
 /// 工具执行面与命令面共用的唯一实现（不写第二遍取数逻辑）。出站走宿主接缝：
@@ -270,5 +392,90 @@ fn fetch_quote(
             reply.code.unwrap_or_else(|| error_codes::PLUGIN_CALL_FAILED.to_string()),
             reply.message.unwrap_or_else(|| "行情接缝返回了错误但没有说明".to_string()),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{map_execution_state_to_run_state, task_run_row_from_execution};
+    use axagent_plugin_proto::{PLUGIN_TASK_RUN_STATES, is_plugin_task_run_state};
+    use serde_json::{Value, json};
+
+    /// 引擎视图 → 行记录：键必须 camelCase，缺省端点必须**不出现**（不是 `null`）。
+    ///
+    /// 钉这条是因为宿主泛型适配器按「字段在不在」决定要不要显示耗时/是否可打开；
+    /// `null` 与「缺省」在 `Option` 反序列化上是两种形状，手搓 `json!` 极易写错。
+    #[test]
+    fn task_run_row_uses_camel_case_and_omits_absent_endpoints() {
+        let execution = json!({
+            "executionId": "exec-7",
+            "workflowId": "wf-daily",
+            "status": "running",
+            "currentNodeId": "node-2",
+            "ownerPluginId": "stock",
+            "createdAt": 1_700_000_000_000_i64,
+            "updatedAt": 1_700_000_005_000_i64,
+        });
+        let row = task_run_row_from_execution(&execution);
+
+        assert_eq!(row["nativeId"], "exec-7");
+        assert_eq!(row["name"], "wf-daily · exec-7", "同一 workflow 多条执行 ⇒ 名字必须可区分");
+        assert_eq!(row["state"], "running");
+        assert_eq!(row["trigger"], "manual");
+        assert_eq!(row["startedAt"], 1_700_000_000_000_i64);
+        assert_eq!(row["raw"]["currentNodeId"], "node-2", "引擎视图原样留在 raw 供详情");
+        for absent in ["started_at", "finishedAt", "durationMs", "deepLink"] {
+            // `started_at`（蛇形）在列是专门盯 `rename_all = "camelCase"` 漏掉的情形。
+            assert!(row.get(absent).is_none(), "缺省字段 / 蛇形键 `{absent}` 不得进帧：{row}");
+        }
+    }
+
+    /// `createdAt` 缺失 ⇒ `startedAt` 缺省而非 `null`；宿主按「未知」不显示，不编一个 0 点。
+    #[test]
+    fn task_run_row_drops_started_at_when_engine_view_lacks_created_at() {
+        let row = task_run_row_from_execution(&json!({ "executionId": "e", "workflowId": "w" }));
+        assert!(row.get("startedAt").is_none(), "缺 createdAt 应产出缺省而非 null：{row}");
+        // 表外状态（这里是「没有 status」）落 waiting，不猜成 running。
+        assert_eq!(row["state"], "waiting");
+        assert_eq!(row["nativeId"], "e", "有 id 时照常透出，不因缺其它字段而丢主键");
+    }
+
+    /// 状态翻译：六态逐条对齐七态词表，表外值不得被判成合法状态。
+    #[test]
+    fn execution_status_maps_into_task_center_vocabulary_only() {
+        let cases = [
+            ("running", "running"),
+            ("paused", "paused"),
+            ("completed", "succeeded"),
+            // 终态且确有产出 ⇒ 判成 succeeded；判 failed 会把「部分节点没成」误标成失败。
+            ("partially_completed", "succeeded"),
+            ("failed", "failed"),
+            // 引擎用英式 cancelled，中心用美式 canceled：拼法差异必须在插件侧翻掉。
+            ("cancelled", "canceled"),
+        ];
+        for (from, to) in cases {
+            let mapped = map_execution_state_to_run_state(from);
+            assert_eq!(mapped, to, "`{from}` 应翻成 `{to}`");
+            assert!(is_plugin_task_run_state(mapped), "映射产出 `{mapped}` 不在词表内");
+        }
+        // 表外值（含大小写/拼法漂移）一律 waiting，且词表本身没被改动。
+        for unknown in ["", "Running", "canceled ", "created", "unknown"] {
+            assert_eq!(map_execution_state_to_run_state(unknown), "waiting");
+        }
+        assert_eq!(PLUGIN_TASK_RUN_STATES.len(), 7);
+    }
+
+    /// 行记录必须是宿主可 `JSON.parse` 的纯数组元素：本测试锁住「命令返回数组」这一形状。
+    #[test]
+    fn task_run_rows_are_plain_json_objects_for_frontend_parsing() {
+        let rows: Vec<Value> =
+            [json!({ "executionId": "a", "workflowId": "w", "status": "paused" })]
+                .iter()
+                .map(task_run_row_from_execution)
+                .collect();
+        let text = serde_json::to_string(&rows).expect("行数组应可序列化");
+        let back: Vec<Value> = serde_json::from_str(&text).expect("宿主 JSON.parse 读得回");
+        assert_eq!(back[0]["state"], "paused");
+        assert!(back[0].is_object(), "元素必须是对象，宿主泛型适配器按字段取值");
     }
 }

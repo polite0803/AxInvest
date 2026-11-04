@@ -754,6 +754,58 @@ impl PluginDeclaration {
     }
 }
 
+// ─────────────────── 任务中心数据面（T2 命令通道的消费面 · PLAN §98）───────────────────
+
+/// 插件贡献的**任务源**一行运行记录（`manifest.taskSources[].command` 的返回元素）。
+///
+/// 为什么行契约定在本 crate，而不是宿主前端类型或 `axagent-harness`：
+/// - **权威只此一份**（AGENTS.md 铁律 4）。宿主任务中心的 `UnifiedRun` 是**前端视图类型**
+///   （含 `capabilities` / `badges` 等宿主才有的口径），插件 worker 既拿不到也不该拿；
+///   插件唯一够得着的共享面就是这个协议 crate ⇒ 两侧对同一形状各自序列化，不写第二遍。
+/// - **只给数据，不给渲染**（PLAN §93 裁定）：插件交回的是行，不是 React 组件；
+///   `deep_link` 是宿主路由的**字符串**，宿主只跳转、不解释其内容。
+///
+/// 线上键为 **camelCase**（全站约定，禁区 13）；除四个必填项外全部可缺省。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginTaskRunRow {
+    /// 源内原生 id。宿主按 `"<sourceId>:<nativeId>"` 拼全局唯一 id，插件**不得**自带前缀。
+    pub native_id: String,
+    /// 列表展示名（插件按自己的口径拼好，含股票代码/名称等）；**不经宿主 i18n**。
+    pub name: String,
+    /// 运行状态。词汇表与宿主 `RunState` 逐字一致：
+    /// `queued` / `running` / `waiting` / `paused` / `succeeded` / `failed` / `canceled`。
+    /// ⚠ 表外值宿主一律按「未知」处理，**不猜**成某个具体状态（与 `mapRunTrigger` 同一条纪律）。
+    pub state: String,
+    /// 触发来源；表外/缺省 ⇒ 宿主落 `unknown`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<String>,
+    /// 开始时刻（epoch 毫秒）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<i64>,
+    /// 结束时刻（epoch 毫秒）；未结束 ⇒ 缺省。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<i64>,
+    /// 耗时（毫秒）；缺省 ⇒ 宿主按 `finished_at - started_at` 算，算不出就不显示。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    /// 「打开详情」跳的站内路由；缺省 ⇒ 该 run 不可打开（宿主 `openSource` 能力关）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deep_link: Option<String>,
+    /// 源原生记录，原样透出给源专属抽屉；中心不解读。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw: Option<serde_json::Value>,
+}
+
+/// [`PluginTaskRunRow::state`] 的合法词汇表（与宿主 `RunState` 同源，改动必须两处同批）。
+pub const PLUGIN_TASK_RUN_STATES: [&str; 7] =
+    ["queued", "running", "waiting", "paused", "succeeded", "failed", "canceled"];
+
+/// 判断字符串是否为 [`PLUGIN_TASK_RUN_STATES`] 之一（精确小写，不做宽容）。
+pub fn is_plugin_task_run_state(value: &str) -> bool {
+    PLUGIN_TASK_RUN_STATES.contains(&value)
+}
+
 // ───────────────────────────── 入站帧判别 ─────────────────────────────
 
 /// 入站帧的两种可能方向（双向管道上「读到的这一帧是谁发的」）。
@@ -1753,5 +1805,51 @@ mod tests {
             None,
             "握手预算与接缝预算分通道：`describe` 不得出现在 seam 覆盖表里"
         );
+    }
+
+    /// 任务源行契约（PLAN §98）：线上键必须 camelCase，可缺省项缺省即不出现。
+    ///
+    /// 钉这条是因为宿主前端 `PluginTaskRunRowDto` 按 camelCase 逐字消费 —— 形状漂了
+    /// 不会编译报错，只会让任务中心静默少一列。
+    #[test]
+    fn task_run_row_serializes_camel_case_with_optional_fields_omitted() {
+        let row = PluginTaskRunRow {
+            native_id: "exec-7".to_string(),
+            name: "贵州茅台 600519 · 管线".to_string(),
+            state: "running".to_string(),
+            trigger: None,
+            started_at: Some(1_700_000_000_000),
+            finished_at: None,
+            duration_ms: None,
+            deep_link: Some("/invest/600519".to_string()),
+            raw: None,
+        };
+        let value = serde_json::to_value(&row).expect("行记录应可序列化");
+        assert_eq!(value["nativeId"], "exec-7");
+        assert_eq!(value["state"], "running");
+        assert_eq!(value["startedAt"], 1_700_000_000_000_i64);
+        assert_eq!(value["deepLink"], "/invest/600519");
+        for absent in ["trigger", "finishedAt", "durationMs", "raw", "native_id"] {
+            assert!(value.get(absent).is_none(), "缺省字段 `{absent}` 不得进帧：{value}");
+        }
+
+        let back: PluginTaskRunRow =
+            serde_json::from_value(value).expect("同一份 JSON 必须能解回原类型");
+        assert_eq!(back.native_id, "exec-7");
+        assert_eq!(back.trigger, None);
+    }
+
+    /// 状态词汇表是「表外值不猜」的判据来源，必须与宿主 `RunState` 七态逐字一致。
+    #[test]
+    fn task_run_state_vocabulary_is_exact_lowercase_seven_states() {
+        assert_eq!(
+            PLUGIN_TASK_RUN_STATES,
+            ["queued", "running", "waiting", "paused", "succeeded", "failed", "canceled"]
+        );
+        assert!(is_plugin_task_run_state("canceled"));
+        // 大小写宽容与美式拼法都不接受：静默接受就是把「不知道」伪装成可信读数。
+        for wrong in ["Canceled", "cancelled", "", "completed"] {
+            assert!(!is_plugin_task_run_state(wrong), "`{wrong}` 不得判成合法状态");
+        }
     }
 }

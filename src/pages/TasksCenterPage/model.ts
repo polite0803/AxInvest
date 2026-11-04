@@ -13,8 +13,13 @@
 
 import type { ScheduledTask } from "@/types";
 
-// ── 源标识：新增源时在此扩联合并注册适配器 ─────────────────────────────
-export type SourceId =
+// ── 源标识：宿主内置源是字面量联合；插件贡献的源在运行期注册（任务 #148）────────
+//
+// `(string & {})` 不是「放弃类型」：它保留内置 id 的自动补全与拼写检查（内置项仍是
+// 字面量），同时允许 `manifest.taskSources[].id` 这类编译期不可知的 id 进来。
+// 插件源能进中心的唯一前提是它已注册进 `adapters/registry.ts` —— 未注册的 id 拿不到
+// 适配器，`aggregateRuns` 根本不会去调它（不是「任意字符串都能渲染」）。
+export type HostSourceId =
   | "scheduled-cron"
   | "stock-pipeline"
   | "stock-analysis"
@@ -32,6 +37,9 @@ export type SourceId =
   | "fleet"
   | "evolution-engine"
   | "knowledge-import";
+
+/** 源标识 = 宿主内置源（上列字面量）∪ 插件贡献的源（运行期注册的任意 id，任务 #148）。 */
+export type SourceId = HostSourceId | (string & {});
 
 /** 统一运行状态机（中心唯一渲染口径，原生状态由适配器映射）。 */
 export type RunState =

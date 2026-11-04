@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { invoke } from "@/lib/invoke";
+import type { PluginTaskSourcesInfoDto } from "@/types";
 import { Tabs, Typography } from "antd";
 import { ListChecks } from "lucide-react";
-import { type ReactNode, useCallback } from "react";
+import { type ReactNode, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
+import { registerPluginTaskSources } from "./adapters/registry";
 import { CreateJobsMenu } from "./CreateJobsMenu";
 import { OverviewTab } from "./OverviewTab";
 import { RunDetailDrawer } from "./RunDetailDrawer";
@@ -55,6 +58,27 @@ function normalizeTab(value: string | null): TasksTabKey {
 export function TasksCenterPage() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // 插件贡献的任务源：打开任务中心时按清单注册进适配器表（任务 #148）。
+  //
+  // 只在挂载期做一次 —— 启停/卸载插件后重进本页即刷新；不在这里做轮询，也不建第二份
+  // 源清单（真相源始终是 `PluginManager`，`plugin_list_task_sources` 是实时扫描）。
+  // 失败按「没有插件源」处理：宿主源照常渲染，不让一个读不到的清单拖垮整页。
+  useEffect(() => {
+    let cancelled = false;
+    invoke<PluginTaskSourcesInfoDto[]>("plugin_list_task_sources")
+      .then((infos) => {
+        if (!cancelled) {
+          registerPluginTaskSources(infos);
+        }
+      })
+      .catch((error) => {
+        console.warn("[tasksCenter] 插件任务源清单读取失败，按无插件源处理", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const activeKey = normalizeTab(searchParams.get("tab"));
 

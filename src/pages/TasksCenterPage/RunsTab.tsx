@@ -20,7 +20,7 @@ import {
 import { RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { getAdapter, getAllAdapters } from "./adapters/registry";
+import { getAdapter, getAllAdapters, useTaskSourceRegistry } from "./adapters/registry";
 import { formatDateTime, formatDuration } from "./formatUtils";
 import { StartMoverRecallBatchButton } from "./jobs/StartMoverRecallBatchModal";
 import type { RunState, RunTrigger, SourceId, UnifiedRun } from "./model";
@@ -49,6 +49,8 @@ const TRIGGER_KEYS: RunTrigger[] = ["schedule", "manual", "system", "external", 
 export function RunsTab() {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
+  // 订阅「注册表多了源」：插件任务源是页面挂载后异步注册的，不订阅则筛选器要等整页刷新。
+  const registryVersion = useTaskSourceRegistry();
 
   const runs = useTaskCenterStore((s) => s.runs);
   const sourceErrors = useTaskCenterStore((s) => s.sourceErrors);
@@ -61,10 +63,12 @@ export function RunsTab() {
 
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  // 首次 + 过滤/语言变化时重新聚合
+  // 首次 + 过滤/语言变化 + **注册表多出源**时重新聚合。
+  // 版本号必须在依赖里：插件任务是页面挂载后才异步注册的，不重跑就会「筛选器里有这个源、
+  // 列表里一条都没有」，且关掉自动刷新后永远不会自愈（自动刷新只轮询已知的 `hasActive`）。
   useEffect(() => {
     void loadRuns(false);
-  }, [loadRuns, locale]);
+  }, [loadRuns, locale, registryVersion]);
 
   const hasActive = useMemo(
     () => runs.some((r) => r.state === "running" || r.state === "queued"),
@@ -80,8 +84,9 @@ export function RunsTab() {
   }, [autoRefresh, hasActive, loadRuns]);
 
   const sourceOptions = useMemo(
-    () => getAllAdapters().map((a) => ({ value: a.id, label: t(a.nameKey) })),
-    [t],
+    () => getAllAdapters().map((a) => ({ value: a.id, label: a.name ?? t(a.nameKey) })),
+    // 少了 `registryVersion` 这一项依赖，新注册的插件源要等整页刷新才会进筛选器。
+    [t, registryVersion],
   );
 
   const columns: TableColumnsType<UnifiedRun> = useMemo(
@@ -265,9 +270,12 @@ export function RunsTab() {
           showIcon
           message={t("tasksCenter.runs.someSourcesFailed")}
           description={sourceErrors
-            .map(
-              (e) => `${t(getAdapter(e.source)?.nameKey ?? `tasksCenter.source.${e.source}`)}: ${e.message}`,
-            )
+            .map((e) => {
+              const adapter = getAdapter(e.source);
+              // 插件源没有宿主 i18n key ⇒ 优先用声明里的纯文本；宿主源走 `t(nameKey)`。
+              const label = adapter?.name ?? t(adapter?.nameKey ?? `tasksCenter.source.${e.source}`);
+              return `${label}: ${e.message}`;
+            })
             .join("；")}
         />
       )}

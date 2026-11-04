@@ -111,7 +111,8 @@ if (!fs.existsSync(path.join(outRoot, ...PAGE_ENTRY.split("/")))) {
 const manifest = {
   name: "stock",
   version: workerPackage.version,
-  description: "股票域功能包（当前贡献 1 个工具 get_stock_quote 与 1 条命令 stock_get_quote）",
+  description:
+    "股票域功能包：行情工具 get_stock_quote + 4 条命名命令（行情/意图解析/证据权重/在跑执行）+ 1 个前端页面与 1 个任务中心任务源",
   // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
   // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
   // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -194,7 +195,25 @@ const manifest = {
         required: ["marketRegime", "timeHorizon", "analysts"],
       },
     },
+    {
+      // B8-1b：任务中心任务源的取数口。行数据全部来自宿主 `workflow.run` 的 `list_active`，
+      // 插件只做状态词表翻译（引擎六态 → 中心七态）与形状收敛。
+      name: "list_active_workflow_runs",
+      description: "列出本插件在跑的工作流执行（经宿主 workflow.run 接缝，返回任务中心行数组）",
+      command: "worker://list_active_workflow_runs",
+      inputSchema: {
+        type: "object",
+        properties: {
+          limit: { type: "integer", description: "取数上限，宿主夹在 1..=200，缺省 50" },
+          workflowId: { type: "string", description: "只看该 workflow 的执行；缺省 = 全部" },
+        },
+      },
+    },
   ],
+  // 任务中心任务源声明（PLAN §97.4）：只给「源标识 + 显示名 + 取数命令」，
+  // 不给渲染。`command` 必须是上面 commands[] 里已声明的名字 —— 宿主清单校验会硬拦，
+  // 这里 `--check` 再自证一次，免得产物装不上才发现。
+  taskSources: [{ id: "stock-workflow-runs", title: "股票工作流执行", command: "list_active_workflow_runs", color: "volcano" }],
   integrity: { algorithm: "sha256", hash: sha256 },
 };
 const manifestPath = path.join(outRoot, "plugin.json");
@@ -213,6 +232,7 @@ if (check) {
 /** 起一次成品 worker：describe 必须回合法声明，shutdown 必须回执并以 0 退出。 */
 async function checkStagedBundle(declared, root) {
   checkDeclaredPages(declared, root);
+  checkDeclaredTaskSources(declared);
 
   const program = path.join(root, declared.worker.program);
   if (!fs.existsSync(program)) fail(`--check：清单声明的 worker 不存在：${program}`);
@@ -255,6 +275,28 @@ async function checkStagedBundle(declared, root) {
   if (exitCode !== 0) fail(`--check：worker 退出码 ${exitCode}（应为 0）`);
 
   console.log("[plugin-bundle] --check ✅ describe 握手 + shutdown 回执 + 退出码 0 + sha256 一致");
+}
+
+/**
+ * 任务源声明的自证（B8-1b）：与宿主 `build_manifest_task_sources` 同判据，
+ * 目的是让「装不上才发现」提前到打包期。宿主侧是权威，这里只是提前一遍 ——
+ * 判据漂了会以 e2e 安装测试的形式暴露，不靠本函数兜底。
+ */
+function checkDeclaredTaskSources(declared) {
+  const sources = declared.taskSources ?? [];
+  const declaredCommands = new Set((declared.commands ?? []).map((c) => c.name));
+  const seenIds = new Set();
+  for (const source of sources) {
+    if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(source.id ?? "")) {
+      fail(`--check：任务源 id 形状非法（小写字母数字与 -）：${JSON.stringify(source.id)}`);
+    }
+    if (seenIds.has(source.id)) fail(`--check：任务源 id 在本包内重复：${source.id}`);
+    seenIds.add(source.id);
+    if (!source.title || !source.title.trim()) fail(`--check：任务源 ${source.id} 没有 title`);
+    if (!declaredCommands.has(source.command)) {
+      fail(`--check：任务源 ${source.id} 的 command「${source.command}」不在 commands[] 里`);
+    }
+  }
 }
 
 /**

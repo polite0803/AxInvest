@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use axagent_harness::get_capability_registry;
 use axagent_plugins::{PluginManager, PluginManagerConfig};
-use common::{FixedQuoteProvider, TempDir};
+use common::{FixedQuoteProvider, FixedWorkflowRunProvider, TempDir};
 use serde_json::{Value, json};
 
 fn bundle_dir() -> Option<std::path::PathBuf> {
@@ -48,6 +48,15 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
     let market = registry
         .register_market_data(Arc::new(FixedQuoteProvider))
         .expect("行情替身应能注册到 market.quote");
+    // 任务源取数走 `workflow.run` 的 `list_active`（B8-1b）⇒ 这条链要端到端跑通，
+    // 必须把执行接缝也换成替身；真实引擎在测试进程里不存在。
+    assert!(
+        registry.get_workflow_run().is_none(),
+        "测试进程起点：workflow.run 应为空（否则本文件与别的测试串了）"
+    );
+    let workflow_run = registry
+        .register_workflow_run(Arc::new(FixedWorkflowRunProvider))
+        .expect("工作流执行替身应能注册到 workflow.run");
 
     let home = TempDir::new("stock-bundle-home");
     let mut manager = PluginManager::new(PluginManagerConfig::new(&home.path));
@@ -127,7 +136,45 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
     let html = std::fs::read_to_string(&page_path).expect("页面资产应可读");
     assert!(html.contains("股票插件前端通道已打通"), "读到的不是探针页：{html}");
 
+    // B8-1b：任务中心任务源的**整条链** —— 清单声明 → 宿主投影 → 命名命令 → 宿主接缝取数 → 行记录。
+    // 这四步任一漂了都会在真实安装里静默少一个源，所以在这里一次锁穿。
+    let sources = manager.list_plugin_task_sources().expect("任务源列表投影应可读");
+    let stock_sources = sources
+        .iter()
+        .find(|s| s.id == outcome.plugin_id)
+        .expect("已安装且声明了 taskSources[] 的股票包应出现在任务源列表里");
+    assert!(stock_sources.enabled, "enable 之后任务源投影的 enabled 应为 true");
+    assert_eq!(
+        stock_sources.task_sources.len(),
+        1,
+        "清单声明的任务源数应与 taskSources[] 一致：{:?}",
+        stock_sources.task_sources
+    );
+    let declared = &stock_sources.task_sources[0];
+    assert_eq!(declared.id, "stock-workflow-runs");
+    assert_eq!(declared.command, "list_active_workflow_runs");
+
+    // 投影里的 `command` 必须真能执行 —— 否则任务中心会挂一个永远为空的标签。
+    let rows_output = manager
+        .execute_plugin_command(&outcome.plugin_id, &declared.command, &json!({}))
+        .expect("清单声明的任务源取数命令应能经 worker 通道执行");
+    let rows: Value = serde_json::from_str(&rows_output).expect("取数命令应返回 JSON 文本");
+    let rows = rows.as_array().expect("任务源取数必须回数组（宿主泛型适配器按数组消费）");
+    assert_eq!(rows.len(), 1, "替身给一条在跑执行 ⇒ 一行：{rows:?}");
+    assert_eq!(rows[0]["nativeId"], "exec-1");
+    assert_eq!(rows[0]["name"], "wf-1 · exec-1");
+    // 引擎 `running` → 中心 `running`；拼法翻译（cancelled→canceled）在纯函数单测里锁。
+    assert_eq!(rows[0]["state"], "running");
+    assert_eq!(rows[0]["trigger"], "manual");
+    assert_eq!(rows[0]["startedAt"], 1_700_000_000_000_i64);
+    // 缺省项必须是**不出现**而不是 null：宿主按「字段在不在」决定耗时列与可否打开。
+    for absent in ["finishedAt", "durationMs", "deepLink"] {
+        assert!(rows[0].get(absent).is_none(), "缺省字段 `{absent}` 不得进帧：{}", rows[0]);
+    }
+    assert_eq!(rows[0]["raw"]["currentNodeId"], "node-2", "引擎视图原样留在 raw");
+
     // 先放 manager（析构时停 worker），再删临时目录（Windows 上占用中的 exe 删不掉）。
     drop(manager);
     market.undo();
+    workflow_run.undo();
 }

@@ -553,6 +553,36 @@ pub async fn plugin_list_pages(
     .map_err(|e| format!("plugin list pages task panicked: {e}"))?
 }
 
+/// 任务中心任务源清单 —— `manifest.taskSources[]` 的只读投影（任务 #148，PLAN §97.4）。
+///
+/// 与 [`plugin_list_pages`] 同形：真相源是 `PluginManifest.task_sources`，每次调用实时扫描，
+/// **不缓存、不建第二份源注册表**（禁区 4）。`enabled` 位原样透出，
+/// 启停过滤与「与宿主源重名时宿主优先」的裁决都留给消费侧
+/// （`src/pages/TasksCenterPage/adapters/registry.ts`）。
+#[agent_command(
+    domain = plugin,
+    safety = Safe,
+    call_mode = StateOnly,
+    description = "列出插件贡献的任务源"
+)]
+#[command]
+pub async fn plugin_list_task_sources(
+    state: State<'_, AppState>,
+) -> Result<Vec<axagent_plugins::types::PluginTaskSourcesInfo>, String> {
+    let plugin_manager = state.plugin_manager.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager = plugin_manager.blocking_read();
+        manager.list_plugin_task_sources().map_err(|e| {
+            String::from(ErrorResponse::from_error(
+                e,
+                crate::commands::error::ErrorCategory::Unrecoverable,
+            ))
+        })
+    })
+    .await
+    .map_err(|e| format!("plugin list task sources task panicked: {e}"))?
+}
+
 #[agent_command(domain = plugin, safety = Caution, call_mode = StateInput, description = "更新指定插件")]
 #[command]
 pub async fn plugin_update(

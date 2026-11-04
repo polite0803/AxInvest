@@ -494,7 +494,12 @@ pub fn run() {
 
             android_utils::mark_startup_phase("state_init_start");
             let t_state = std::time::Instant::now();
-            let state = match tauri::async_runtime::block_on(init::state::create_app_state(db_result)) {
+            // 内置插件从**资源目录**找（发布版）；没有就退回源码树（开发期），
+            // 否则 `CARGO_MANIFEST_DIR/bundled` 在用户机器上不存在 ⇒ 内置插件恒为空。
+            let resource_dir = app.path().resource_dir().ok();
+            let state = match tauri::async_runtime::block_on(
+                init::state::create_app_state_with_resource_dir(db_result, resource_dir),
+            ) {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::error!("App state init returned error: {}", e);

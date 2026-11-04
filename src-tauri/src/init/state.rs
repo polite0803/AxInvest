@@ -32,6 +32,17 @@ use tokio_util::sync::CancellationToken;
 /// 失败时返回结构化错误，由调用方决定如何处理（错误展示 / 重试 / 退出）。
 /// 不再 `process::exit(1)`——harness 架构要求启动错误可被前端感知。
 pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, String> {
+    create_app_state_with_resource_dir(db_result, None).await
+}
+
+/// 同 [`create_app_state`]，但允许传入**应用资源目录**（发布版用它定位内置插件）。
+///
+/// 为什么单开一个入口而不是改签名：`create_app_state` 另有 3 个非 Tauri 调用方
+/// （两个离线 bin 与 `server_main`），它们没有 `app` 句柄，传 `None` 即可保持原语义。
+pub async fn create_app_state_with_resource_dir(
+    db_result: DatabaseInitResult,
+    resource_dir: Option<PathBuf>,
+) -> Result<AppState, String> {
     let t_start = std::time::Instant::now();
     tracing::info!("[startup] create_app_state begin");
 
@@ -397,6 +408,8 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
 
     let config_home = app_dir.clone();
     let mut plugin_config = PluginManagerConfig::new(config_home.clone());
+    plugin_config.bundled_root =
+        Some(PluginManagerConfig::resolve_bundled_root(resource_dir.as_deref()));
     plugin_config.external_dirs = axagent_kit::skill_dirs::all_skills_dirs();
     let npm_registry = Arc::new(axagent_npm::NpmRegistry::new());
     let plugin_manager = Arc::new(tokio::sync::RwLock::new(

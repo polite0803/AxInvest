@@ -3903,3 +3903,30 @@ K1 不变（**2033**）：新文件在 `tests/`（被 `K1_IGNORE` 排除），�
 2. **AGENTS.md 角色未登记**：该文件当前有**他人未提交改动**，本批不碰；已在 `axagent-plugins/crates/README.md` 登记（AGENTS 允许二者之一）。
 3. **夹具 worker 的子集词表未删**：`crates/plugins/src/bin/e2e_command_frame_worker.rs` 的移植副本仍在，属 #49 夹具；删它要同步改 `e2e_command_frame_test`，另批。
 4. **读数不降**（计划内）：ownedRe 桶仍 123 处 / 22 文件；宿主仍链接 `analysis-engine`。
+
+## 82. `#35` B4-h：内置插件交付的运行时一半（资源目录 + 暂存入口）（2026-11-04）
+
+**这一批为什么先做交付而不是切调用方**：要删宿主命令，就得先保证「用户机器上有插件可用」。而查下来发现一个**静默失效**：
+
+> `PluginManager::bundled_root()` 的默认值是 `env!("CARGO_MANIFEST_DIR")/bundled` —— 那是**编译机**的源码路径，被打进二进制后在用户机器上不存在；`discover_plugin_dirs` 对 `NotFound` 返回**空表**（不报错）⇒ **发布版的内置插件恒为零，且没有任何日志**。§75/§77 说的「产物没接发布链路」根因就在这里。
+
+**交付**（3 处）：
+1. `PluginManagerConfig::resolve_bundled_root(Option<&Path>)`：优先 `<resource_dir>/plugins/bundled`，不存在则退回源码树（开发期语义不变）；带 3 条单测（命中 / 资源目录无 plugins / 无资源目录）。
+2. 新入口 `create_app_state_with_resource_dir(db_result, Option<PathBuf>)`；原 `create_app_state` 改为**委托 None** —— 两个离线 bin 与 `server_main` 三个非 Tauri 调用方一行不改。`lib.rs` 的 `setup` 传 `app.path().resource_dir().ok()`。
+3. `npm run plugin:bundle:stage`：把 worker 产物摆到 `src-tauri/resources/plugins/bundled/stock`（`plugin.json` + `bin/<exe>`），该路径进 `.gitignore`（二进制不入库）。
+
+**验收（2026-11-04 实测）**：
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| H1 | `cargo test -p axagent-plugins --lib bundled_root` | 0 | **4 passed**（含既存同名用例），226 filtered out |
+| H2 | `cargo check -p axagent --lib`（cwd=`src-tauri`） | 0 | Finished **17m05s**（lib.rs + state.rs 改动） |
+| H3 | `cargo clippy -p axagent-plugins --all-targets -- -D warnings` | 0 | Finished 25.41s |
+| H4 | `rustfmt --edition 2024 --check`（3 个 `.rs`） | 0 | 首轮 state.rs 1 处换行 diff，修正后零 diff |
+| H5 | `node scripts/build-plugin-bundle.mjs --out src-tauri/resources/plugins/bundled/stock` | 0 | 产物落位；`git status` 命中 **0** 条（确认被忽略） |
+
+**未做（逐条点名）**：
+1. **`tauri.conf.json` 未接**：`bundle.resources` 没加 `resources/plugins`、`beforeBuildCommand` 也没跑暂存 ⇒ **发布版此刻仍不带插件**。为什么不顺手接：`beforeBuildCommand` 同时服务 `tauri android/ios build`，在桌面机上跑的 worker 产物对移动端是**错架构**，需要 target 守卫后再接 —— 属发布链路单独立项。
+2. **资源目录分辨率未在真打包产物里验**：只在单测里覆盖（临时目录造 `plugins/bundled`），真安装包验证要等第 1 条接上。
+3. **前端未切插件命令、宿主命令未删**：`StockSearchBar.tsx:118` 仍调 `parse_analysis_intent`，`commandTotal` 仍 1543。
+4. **读数不降**（计划内）：ownedRe 桶仍 123 处 / 22 文件。

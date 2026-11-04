@@ -58,6 +58,23 @@ impl PluginManagerConfig {
             bundled_root: None,
         }
     }
+
+    /// 解析「内置插件」根：优先用**应用资源目录**里的 `plugins/bundled`（发布版），
+    /// 不存在时退回源码树（开发期）。
+    ///
+    /// 为什么必须可覆盖：默认值来自 `env!("CARGO_MANIFEST_DIR")` —— 那是**编译机**的源码路径，
+    /// 被打进二进制后，用户机器上根本不存在 ⇒ 发布版默认「零内置插件」且不报错
+    /// （`discover_plugin_dirs` 对 `NotFound` 返回空表）。传 `resource_dir()` 即可修掉。
+    #[must_use]
+    pub fn resolve_bundled_root(resource_dir: Option<&Path>) -> PathBuf {
+        if let Some(dir) = resource_dir {
+            let candidate = dir.join("plugins").join("bundled");
+            if candidate.is_dir() {
+                return candidate;
+            }
+        }
+        PluginManager::bundled_root()
+    }
 }
 
 #[derive(Debug)]
@@ -5170,5 +5187,47 @@ mod tests {
         assert!(!list.is_empty(), "坏插件不得拖垮其余插件的页面投影");
 
         let _ = std::fs::remove_dir_all(&temp);
+    }
+}
+
+#[cfg(test)]
+mod bundled_root_tests {
+    use super::*;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("测试：系统时间应晚于 UNIX EPOCH")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("plugin-bundled-{label}-{nanos}"));
+        std::fs::create_dir_all(&dir).expect("创建临时目录");
+        dir
+    }
+
+    #[test]
+    fn prefers_the_resource_dir_when_it_contains_plugins_bundled() {
+        let resource = temp_dir("hit");
+        let expected = resource.join("plugins").join("bundled");
+        std::fs::create_dir_all(&expected).expect("创建 plugins/bundled");
+
+        assert_eq!(PluginManagerConfig::resolve_bundled_root(Some(&resource)), expected);
+
+        let _ = std::fs::remove_dir_all(&resource);
+    }
+
+    #[test]
+    fn falls_back_to_the_source_tree_when_the_resource_dir_has_no_plugins() {
+        let resource = temp_dir("miss");
+        assert_eq!(
+            PluginManagerConfig::resolve_bundled_root(Some(&resource)),
+            PluginManager::bundled_root(),
+            "资源目录里没有 plugins/bundled 时必须退回源码树（开发期语义不变）"
+        );
+        let _ = std::fs::remove_dir_all(&resource);
+    }
+
+    #[test]
+    fn falls_back_to_the_source_tree_without_any_resource_dir() {
+        assert_eq!(PluginManagerConfig::resolve_bundled_root(None), PluginManager::bundled_root());
     }
 }

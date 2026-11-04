@@ -36,6 +36,10 @@ next-env.d.ts
 
 # Build outputs
 dist/
+# 内置插件暂存区：`npm run plugin:bundle:stage` 把 worker 产物摆进
+# `src-tauri/resources/plugins/bundled/`，供**发布版**打包进 resources。
+# 二进制不入库（平台相关 + 体积），构建前由脚本生成。
+src-tauri/resources/plugins/
 # `target*/` 走 gitignore 语义（无前导斜杠）⇒ 匹配**任意层级**的 `target` 及
 # `target-<后缀>` 目录。2026-09-21 半天内两度踩同一个坑：dprint 会读 .gitignore
 # 决定扫描面，未被忽略的 target 目录会让它把 cargo 构建产物

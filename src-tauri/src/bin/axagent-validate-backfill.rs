@@ -367,7 +367,7 @@ async fn run() -> Result<(), String> {
     if args.backfill_history {
         return backfill_history_mode(
             state.harness.db(),
-            &state.astock_client,
+            &state.stock().astock_client,
             args.target_days,
             args.limit,
             args.apply,
@@ -412,9 +412,10 @@ async fn run() -> Result<(), String> {
         include_replay: Some(args.include_replay),
     };
 
-    let resp = run_decision_backtest_inner(state.harness.db(), &state.astock_client, request)
-        .await
-        .map_err(|e| format!("回测执行失败: {e}"))?;
+    let resp =
+        run_decision_backtest_inner(state.harness.db(), &state.stock().astock_client, request)
+            .await
+            .map_err(|e| format!("回测执行失败: {e}"))?;
 
     // ── 输出：先给「样本量」与「跳过量」，再给命中率 ──
     //
@@ -549,7 +550,7 @@ async fn run_reflection_mode(state: &AppState, per_round: u32) -> Result<(), Str
         }
         let r = axagent_lib::run_batch_reflection_inner(
             db,
-            state.astock_client.as_ref(),
+            state.stock().astock_client.as_ref(),
             &state.work_engine,
             state.vector_store.as_ref(),
             &master_key,
@@ -1352,7 +1353,7 @@ async fn time_travel_mode(
         let batch_id = loop {
             match run_time_travel_batch_inner(
                 state.harness.db(),
-                &state.astock_client,
+                &state.stock().astock_client,
                 &state.work_engine,
                 &state.vector_store,
                 &master_key,

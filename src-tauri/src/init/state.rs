@@ -1891,6 +1891,24 @@ pub async fn create_app_state_with_resource_dir(
     crate::startup_timing::record("state_wiring", t_wiring.elapsed().as_millis());
     crate::startup_timing::record("create_app_state_total", t_start.elapsed().as_millis());
 
+    // ── 股票域运行时状态注入（B6：从 AppState 摘出的六个域字段）──
+    // 域自有模块持有、装配期注入；命令层经 `AppState::stock()` 取用。
+    // 放在 AppState 构造之前：构造之后立刻可能有服务（services.rs）读这几个槽位。
+    crate::init::stock_domain_state::init_stock_domain_state(
+        crate::init::stock_domain_state::StockDomainState {
+            astock_client: astock_client.clone(),
+            stock_monitor: std::sync::OnceLock::new(),
+            quote_watcher: std::sync::OnceLock::new(),
+            // 构造已上提到上方 trading.engine 注册块（注册需要同一个 Arc）
+            trading_engine,
+            cross_stock_aggregator: std::sync::OnceLock::new(),
+            stock_adaptive_engine: Arc::new(
+                axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine::new()
+                    .with_db(sea_db.clone()),
+            ),
+        },
+    );
+
     Ok(AppState {
         harness,
         gateway: gateway_server,
@@ -1905,20 +1923,10 @@ pub async fn create_app_state_with_resource_dir(
         shutdown_token,
         vector_store: vector_store_arc,
         indexing_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
-        astock_client: astock_client.clone(),
-        stock_monitor: std::sync::OnceLock::new(),
         stock_workflow_t0_semaphore: Arc::new(tokio::sync::Semaphore::new(5)),
         stock_workflow_t0_per_stock_locks: Arc::new(tokio::sync::Mutex::new(
             std::collections::HashMap::new(),
         )),
-        quote_watcher: std::sync::OnceLock::new(),
-        // 构造已上提到上方 trading.engine 注册块（注册需要同一个 Arc）
-        trading_engine,
-        cross_stock_aggregator: std::sync::OnceLock::new(),
-        stock_adaptive_engine: Arc::new(
-            axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine::new()
-                .with_db(sea_db.clone()),
-        ),
         stream_cancel_flags,
         agent_permission_senders,
         agent_ask_senders,
@@ -3018,7 +3026,7 @@ pub async fn run_deferred_init(app_state: &crate::app_state::AppState) {
             // `StockSelfEvolutionEngine` 的 `WorkflowEvolverImpl`（该实例与全局
             // evolver 并非同一 Arc），让股票流程/参数进化从「数值爬山」升级为「语义改写」。
             let stock_mutator = super::workflow_injections::ProviderWorkflowLlmMutator::new(bridge);
-            let stock_engine = app_state.stock_adaptive_engine.evolution_engine();
+            let stock_engine = app_state.stock().stock_adaptive_engine.evolution_engine();
             if let Err(e) = axagent_harness::WorkflowEvolver::set_llm_provider(
                 stock_engine,
                 std::sync::Arc::new(stock_mutator)

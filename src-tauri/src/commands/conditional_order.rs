@@ -250,7 +250,7 @@ pub async fn manual_evaluate_conditions(
     stock_code: Option<String>,
 ) -> Result<ManualEvaluateReport, String> {
     let db = state.harness.db().clone();
-    let client = state.astock_client.clone();
+    let client = state.stock().astock_client.clone();
 
     // 先对齐表与内存引擎：调试命令判的必须是「表里现在这份定义」，
     // 否则外部改过表之后它会拿旧的内存镜像得出一个看起来正常的 0。

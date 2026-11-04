@@ -1159,7 +1159,7 @@ async fn run() -> Result<(), String> {
         if pending_before == 0 {
             println!("[batch-rerun] 无 pending 行，跳过反思。");
         } else {
-            let client = state.astock_client.clone();
+            let client = state.stock().astock_client.clone();
             let engine = state.work_engine.clone();
             let vector_store = state.vector_store.clone();
             let master_key = state.harness.master_key_owned();

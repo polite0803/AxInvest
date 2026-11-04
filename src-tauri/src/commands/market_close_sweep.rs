@@ -57,7 +57,7 @@ pub async fn sweep_market_close(
     // 命令本身只做登记与起任务；执行体在 spawn 里跑（130s 不冻 IPC，
     // 报告终态后落在 result_json，重载可回取）
     let db = state.harness.db().clone();
-    let client = state.astock_client.clone();
+    let client = state.stock().astock_client.clone();
     let title = format!("采集收盘快照 {date}");
     crate::commands::background_tasks::spawn_tracked(
         &app_handle,
@@ -100,7 +100,7 @@ pub async fn refresh_stock_universe(
     let db = state.harness.db();
     axagent_analysis_engine::market_close_store::refresh_universe_pages(
         db,
-        &state.astock_client,
+        &state.stock().astock_client,
         &pages,
     )
     .await
@@ -178,7 +178,7 @@ pub async fn backfill_market_close_history(
     let limit = limit.unwrap_or(500).clamp(1, 6000);
     // 命令本身只做登记与起任务；12 批 × 限速间隔的 2 分钟执行体在 spawn 里跑
     let db = state.harness.db().clone();
-    let client = state.astock_client.clone();
+    let client = state.stock().astock_client.clone();
     crate::commands::background_tasks::spawn_tracked(
         &app_handle,
         state.harness.db(),

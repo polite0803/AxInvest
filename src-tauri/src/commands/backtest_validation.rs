@@ -169,7 +169,7 @@ pub async fn run_decision_backtest(
     state: State<'_, AppState>,
     request: RunDecisionBacktestRequest,
 ) -> Result<RunDecisionBacktestResponse, String> {
-    run_decision_backtest_inner(state.harness.db(), &state.astock_client, request).await
+    run_decision_backtest_inner(state.harness.db(), &state.stock().astock_client, request).await
 }
 
 /// 决策回测的**实际实现** —— 命令层与 cron 层共用的**唯一入口**。
@@ -507,7 +507,7 @@ async fn fetch_window_series(
 /// 拉取 T+N 窗口日 K 线并构建 PickValidation
 ///
 /// 入参从 `&State<'_, AppState>` 改为 `&Arc<AStockClient>`：本函数原本只用到
-/// `state.astock_client`，取 `State` 会让它无法被 cron 路径复用（见
+/// `state.stock().astock_client`，取 `State` 会让它无法被 cron 路径复用（见
 /// `run_decision_backtest_inner` 的说明）。
 async fn fetch_and_validate(
     client: &std::sync::Arc<axagent_astock_data::AStockClient>,

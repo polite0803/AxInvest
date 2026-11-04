@@ -240,11 +240,6 @@ pub struct AppState {
     pub shutdown_token: CancellationToken,
     pub vector_store: Arc<axagent_search::vector_store::VectorStore>,
     pub indexing_semaphore: Arc<tokio::sync::Semaphore>,
-    /// A 股数据客户端（行情/K线/财报/自选等，axinvest 投资域命令使用）
-    pub astock_client: Arc<axagent_astock_data::AStockClient>,
-    /// 实时行情监视器（OnceLock 惰性初始化，未初始化时相关命令返回友好错误）
-    pub stock_monitor:
-        std::sync::OnceLock<std::sync::Arc<axagent_analysis_engine::monitor::RealtimeMonitor>>,
     /// T+0 重跑全局并发闸（最大并发 5）
     pub stock_workflow_t0_semaphore: Arc<tokio::sync::Semaphore>,
     /// T+0 重跑 per-stock 串行锁（同股票串行，不同股票并行）
@@ -255,22 +250,8 @@ pub struct AppState {
     >,
     /// 实时行情流监视器（OnceLock 惰性初始化）
     ///
-    /// 与 `stock_monitor` 同形改成 `Arc<…>`：`quote.watcher` 接缝的宿主 provider 必须与
-    /// 宿主轮询循环共用**同一个**集合（`RealTimeQuoteWatcher` 的内部状态是 `Arc<RwLock<…>>`，
-    /// 但结构体本身不是 `Clone`，`OnceLock<T>` 也拿不出第二个 owning 句柄）。
-    /// 消费方按方法名调用（`watch` / `unwatch` / `watched_stocks` / `start`）经 deref 自动
-    /// 落到内层类型，无需改动。
-    pub quote_watcher:
-        std::sync::OnceLock<std::sync::Arc<axagent_astock_data::RealTimeQuoteWatcher>>,
-    /// 模拟交易引擎（依赖 DB + astock_client，启动时构造）
-    pub trading_engine: Arc<tokio::sync::RwLock<axagent_analysis_engine::trading::TradingEngine>>,
-    /// 跨股聚合器（OnceLock 惰性初始化）
-    pub cross_stock_aggregator: std::sync::OnceLock<
-        std::sync::Arc<axagent_analysis_engine::cross_stock_aggregator::CrossStockSignalAggregator>,
-    >,
-    /// 股票自适应引擎（反思+进化+编排闭环）
-    pub stock_adaptive_engine:
-        Arc<axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine>,
+    /// 已随股票域六字段一起迁到 `init/stock_domain_state.rs`（B6）；
+    /// 消费方改经 `AppState::stock()` 取用，字段名不变。
     pub stream_cancel_flags: Arc<DashMap<String, Arc<AtomicBool>>>,
     pub agent_permission_senders:
         Arc<Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<String>>>>,

@@ -190,7 +190,7 @@ pub async fn quant_backtest_run(
     })?;
 
     // 3. 执行回测
-    match execute_backtest(&request, &strategy_model, &state.astock_client).await {
+    match execute_backtest(&request, &strategy_model, &state.stock().astock_client).await {
         Ok((result, metrics, walk_forward_rust)) => {
             let finished_at = Utc::now().timestamp();
             let result_json = serde_json::to_string(&result).map_err(|e| {

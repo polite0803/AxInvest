@@ -615,7 +615,7 @@ async fn dispatch_stock_command<R: tauri::Runtime>(
             //   就没 manage），而我们这里缺状态本来就是合法的「未装配」。
             let monitor = app_handle
                 .try_state::<crate::AppState>()
-                .and_then(|s| s.stock_monitor.get().cloned());
+                .and_then(|s| s.stock().stock_monitor.get().cloned());
             let (saved, _reused, wired) =
                 crate::commands::price_alert_upsert::upsert_price_alert_and_wire(
                     db,

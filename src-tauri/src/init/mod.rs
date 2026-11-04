@@ -19,6 +19,7 @@ pub mod plugins;
 pub mod services;
 pub mod state;
 pub mod stock_automation_cron_seed;
+pub mod stock_domain_state;
 pub mod stock_domain_tools;
 pub mod trigger_recovery;
 pub mod workflow_injections;

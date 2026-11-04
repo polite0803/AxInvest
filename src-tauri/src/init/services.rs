@@ -2254,7 +2254,7 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
     let work_engine = state.work_engine.clone();
     let cron_store = state.cron_job_store.clone();
     let sync_db = state.harness.db().clone();
-    let astock_client = state.astock_client.clone();
+    let astock_client = state.stock().astock_client.clone();
     // 漏检补分析与时间旅行批次共用这一把全局 as-of 锁（try_lock，不排队）
     let asof_lock = state.time_travel_batch_lock.clone();
     // [2026-09-13] 批量反思/决策校验分支需要这三个依赖（此前它们只在
@@ -2265,10 +2265,10 @@ async fn start_cron_scheduler_opt(app: Option<&tauri::AppHandle>, state: &AppSta
     // G17 delivery：此前 create_cron_delivery_sink 建好了 sink 却从未接进
     // executor，导致所有定时任务的 delivery 配置都是死配置。这里接上后，
     // 任务可通过 CronDeliveryConfig 把执行结果推送到 webhook / 文件 / 通知渠道。
-    let cron_stock_adaptive_engine = state.stock_adaptive_engine.clone();
+    let cron_stock_adaptive_engine = state.stock().stock_adaptive_engine.clone();
     // 组合指标日更（裁定 5 ①）需要持仓来源 = 交易引擎；此前 cron 分支拿不到它
     // （只有命令面的 `state` 能读），所以收盘刷新从来没有定时触发方。
-    let cron_trading_engine = state.trading_engine.clone();
+    let cron_trading_engine = state.stock().trading_engine.clone();
     let delivery_sink: std::sync::Arc<dyn axagent_harness::cron_delivery::CronDeliverySink> =
         create_cron_delivery_sink(state);
     /// 定时任务必须**显式声明自己的模式**，且只能用 **task_local**、不能用进程级压栈。
@@ -5062,7 +5062,7 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
     {
         use tauri::Manager;
         let state = app.state::<AppState>();
-        let client: std::sync::Arc<dyn MarketDataProvider> = state.astock_client.clone();
+        let client: std::sync::Arc<dyn MarketDataProvider> = state.stock().astock_client.clone();
 
         // P3-3: 跨股票聚合器（OnceLock 注入，组合级告警）——同步段完成
         let aggregator = std::sync::Arc::new(
@@ -5070,7 +5070,7 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
                 axagent_harness::stock_monitor::AggregatorConfig::default(),
             ),
         );
-        if state.cross_stock_aggregator.set(aggregator.clone()).is_err() {
+        if state.stock().cross_stock_aggregator.set(aggregator.clone()).is_err() {
             tracing::warn!("[startup] cross_stock_aggregator 已初始化，跳过重复注入");
         }
         // state 守卫（State<'_, AppState> 无 Drop）在本同步块结束时释放
@@ -5208,7 +5208,7 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
             let monitor_arc = std::sync::Arc::new(monitor);
             let injected = {
                 let state = app_for_spawn.state::<AppState>();
-                state.stock_monitor.set(monitor_arc.clone()).is_ok()
+                state.stock().stock_monitor.set(monitor_arc.clone()).is_ok()
             };
             if !injected {
                 tracing::warn!("[startup] stock_monitor 已初始化，跳过重复注入");
@@ -5314,8 +5314,9 @@ fn start_realtime_quote_watcher(app: &tauri::AppHandle, state: &AppState) {
 
     // `Arc` 是接缝的前置：`RealTimeQuoteWatcher` 本身不是 `Clone`，而宿主 provider 必须与
     // 下面的轮询循环共用**同一个**推送集合（两份实例就有两份「谁被监听」的真相）。
-    let watcher = Arc::new(RealTimeQuoteWatcher::new(state.astock_client.clone(), Some(callback)));
-    if state.quote_watcher.set(watcher.clone()).is_err() {
+    let watcher =
+        Arc::new(RealTimeQuoteWatcher::new(state.stock().astock_client.clone(), Some(callback)));
+    if state.stock().quote_watcher.set(watcher.clone()).is_err() {
         tracing::warn!("[startup] quote_watcher 已初始化，跳过重复注入");
         return;
     }
@@ -5333,7 +5334,7 @@ fn start_realtime_quote_watcher(app: &tauri::AppHandle, state: &AppState) {
             Err(e) => tracing::warn!("quote.watcher 注册失败: {e}"),
         }
     }
-    if let Some(w) = state.quote_watcher.get() {
+    if let Some(w) = state.stock().quote_watcher.get() {
         w.start();
         tracing::info!("[startup] 实时行情推送已启动（stock-quote-update 事件）");
     }
@@ -5355,7 +5356,7 @@ fn reflection_fallback_filter() -> crate::commands::stock_workflow::ReflectionFi
 /// （output 带「系统兜底轮」前缀），避免只进 tracing 日志、前端历史面板零可见性。
 fn start_batch_reflection(state: &AppState) {
     let db = state.harness.db().clone();
-    let client = state.astock_client.clone();
+    let client = state.stock().astock_client.clone();
     let engine = state.work_engine.clone();
     let vector_store = state.vector_store.clone();
     let master_key = state.harness.master_key_owned();
@@ -5475,7 +5476,7 @@ fn start_demand_discovery_cron(app: &tauri::AppHandle, state: &AppState) {
 /// 每小时 tick 一次只为覆盖"应用 15:00 之后才启动"的情形；当日已采过即跳过（幂等）。
 fn start_daily_snapshot_sweep(state: &AppState) {
     let db = state.harness.db().clone();
-    let client = state.astock_client.clone();
+    let client = state.stock().astock_client.clone();
     let shutdown = state.shutdown_token.clone();
 
     // 快照归档未启用时，采集只剩「打一遍 vendor 然后写进 no-op」⇒ 不再每小时空转网络。
@@ -5592,7 +5593,7 @@ fn start_market_close_sweep(state: &AppState) {
     use std::sync::atomic::{AtomicI64, Ordering};
 
     let db = state.harness.db().clone();
-    let client = state.astock_client.clone();
+    let client = state.stock().astock_client.clone();
     let shutdown = state.shutdown_token.clone();
 
     tauri::async_runtime::spawn(async move {

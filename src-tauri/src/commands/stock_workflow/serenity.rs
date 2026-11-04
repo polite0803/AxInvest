@@ -967,7 +967,7 @@ pub async fn run_serenity_screening(
 
     run_serenity_screening_inner(SerenityScreeningArgs {
         db: state.harness.db(),
-        client: &state.astock_client,
+        client: &state.stock().astock_client,
         engine: Arc::clone(&state.work_engine),
         app: Some(app),
         as_of_ctx,
@@ -2077,7 +2077,7 @@ async fn do_refresh_exit_signals(state: &State<'_, AppState>) -> Result<serde_js
     // 只取最近 50 条
     let picks: Vec<_> = picks.into_iter().take(50).collect();
 
-    let client = &state.astock_client;
+    let client = &state.stock().astock_client;
     let mut results = Vec::new();
 
     for pick in &picks {
@@ -2187,7 +2187,7 @@ async fn do_feedback_loop(state: &State<'_, AppState>) -> Result<serde_json::Val
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询 Serenity 候选失败: {e}"))
         })?;
 
-    let client = &state.astock_client;
+    let client = &state.stock().astock_client;
     let mut performances = Vec::new();
 
     for (idx, pick) in picks.iter().enumerate() {

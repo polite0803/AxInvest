@@ -1476,7 +1476,7 @@ pub async fn agent_query(
         let stock_tool_count = stock_tools.len();
         chat_tools.extend(stock_tools);
         let stock_handlers = crate::commands::stock_analysis_bridge::build_stock_command_handlers(
-            app_state.astock_client.clone(),
+            app_state.stock().astock_client.clone(),
             app_state.harness.db().clone(),
             app_state.cron_job_store.clone(),
             app.clone(),

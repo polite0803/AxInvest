@@ -736,7 +736,7 @@ pub async fn run_time_travel_batch(
     let master_key = state.harness.master_key_owned();
     run_time_travel_batch_inner(
         state.harness.db(),
-        &state.astock_client,
+        &state.stock().astock_client,
         &state.work_engine,
         &state.vector_store,
         &master_key,

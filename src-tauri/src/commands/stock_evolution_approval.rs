@@ -113,6 +113,7 @@ pub async fn approve_evolution_plan(
 
     // 执行进化（审批专用路径：不 insert 新 history 行，结果回写本行）。
     let result = state
+        .stock()
         .stock_adaptive_engine
         .evolution_engine()
         .execute_pending_plan(&plan)

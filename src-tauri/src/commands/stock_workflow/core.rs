@@ -443,7 +443,7 @@ pub async fn run_stock_workflow_inner(
     // PLAN-stock-analysis-fast-workflow.md）。
     template_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let quote = state.astock_client.get_quote(&stock_code).await.map_err(|e| {
+    let quote = state.stock().astock_client.get_quote(&stock_code).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("行情获取失败: {e}"))
     })?;
     let now_ms = chrono::Utc::now().timestamp_millis();
@@ -684,7 +684,7 @@ pub async fn run_stock_workflow_inner(
     // ── 数据质量预检：在发起 DAG 执行前检查关键数据是否完整 ──
     let stock_code_for_check = stock_code.clone();
     let quality_check =
-        data_quality_precheck(&state.astock_client, &stock_code_for_check, &quote).await;
+        data_quality_precheck(&state.stock().astock_client, &stock_code_for_check, &quote).await;
     match quality_check {
         QualityPrecheckResult::Insufficient { ref summary, ref missing_sources } => {
             tracing::warn!(
@@ -776,14 +776,14 @@ pub async fn run_stock_workflow_inner(
             if v.name == "vendor_iwencai_key" {
                 if let serde_json::Value::String(ref key) = v.value {
                     if !key.is_empty() {
-                        *state.astock_client.iwencai_key.write().await = key.clone();
+                        *state.stock().astock_client.iwencai_key.write().await = key.clone();
                     }
                 }
             }
             if v.name == "vendor_xueqiu_token" {
                 if let serde_json::Value::String(ref token) = v.value {
                     if !token.is_empty() {
-                        if let Some(ref xq) = state.astock_client.xq_token {
+                        if let Some(ref xq) = state.stock().astock_client.xq_token {
                             *xq.write().await = token.clone();
                         }
                     }
@@ -792,7 +792,7 @@ pub async fn run_stock_workflow_inner(
             if v.name == "vendor_neodata_token" {
                 if let serde_json::Value::String(ref token) = v.value {
                     if !token.is_empty() {
-                        if let Some(ref nd) = state.astock_client.neodata_token {
+                        if let Some(ref nd) = state.stock().astock_client.neodata_token {
                             *nd.write().await = token.clone();
                         }
                     }
@@ -802,6 +802,7 @@ pub async fn run_stock_workflow_inner(
                 if let serde_json::Value::String(ref url) = v.value {
                     // 空 = 显式清除代理回退直连；非空 = 校验并启用
                     state
+                        .stock()
                         .astock_client
                         .set_eastmoney_proxy(if url.is_empty() {
                             None
@@ -819,7 +820,7 @@ pub async fn run_stock_workflow_inner(
 
     // 从模板变量解析 vendor_* 布尔开关，注入到 astock_client 的启用状态过滤器
     // 未启用的 vendor 会在 find_vendor 中被跳过，避免无效调用和超时重试
-    super::decision::inject_vendor_state(&state.astock_client, loaded.variables.as_ref());
+    super::decision::inject_vendor_state(&state.stock().astock_client, loaded.variables.as_ref());
 
     let engine = Arc::clone(&state.work_engine);
 
@@ -965,11 +966,11 @@ pub async fn run_stock_workflow_inner(
     // 避免 AppState::drop 后后台任务仍阻塞 run_workflow 等待 LLM 响应。
     let shutdown_token = state.shutdown_token.clone();
     // P0: 克隆 RealtimeMonitor，供决策落库后自动创建价格告警
-    let monitor_for_spawn = state.stock_monitor.get().cloned();
+    let monitor_for_spawn = state.stock().stock_monitor.get().cloned();
     // P2-1: 克隆 TriggerManager，供决策落库后发布 decision.completed 事件
     let trigger_mgr_for_spawn = state.work_engine.trigger_manager.clone();
     // 克隆自适应引擎，供工作流完成后触发自适应闭环
-    let adaptive_engine_for_spawn = state.stock_adaptive_engine.clone();
+    let adaptive_engine_for_spawn = state.stock().stock_adaptive_engine.clone();
     tokio::spawn(async move {
         // P3 修复: 在 spawn 内恢复 AS_OF + DEGRADATION_LOG 作用域
         as_of::with_optional_asof(captured_asof, async {

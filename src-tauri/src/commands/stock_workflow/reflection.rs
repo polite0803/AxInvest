@@ -2100,7 +2100,7 @@ pub async fn run_batch_reflection(
         let call = perform_single_reflection(
             "D1",
             db,
-            &state.astock_client,
+            &state.stock().astock_client,
             &state.work_engine,
             &state.vector_store,
             state.harness.master_key(),

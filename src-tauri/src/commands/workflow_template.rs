@@ -378,7 +378,7 @@ pub async fn update_workflow_template(
         // 阶段 D（2026-10-15）：快照刷新只覆盖「落点读快照」的那些键。监控的两个运行期参数
         // （轮询间隔 / 告警冷却）不在快照读侧 —— 间隔在循环里读、冷却在每轮求值时读，
         // 装配点只在启动时喂一次 ⇒ 保存后必须显式回灌，否则面板改了要重启才生效。
-        if let Some(monitor) = state.stock_monitor.get() {
+        if let Some(monitor) = state.stock().stock_monitor.get() {
             monitor.apply_panel_runtime_vars().await;
         }
     }

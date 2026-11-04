@@ -486,7 +486,7 @@ pub async fn execute_scheduled_task(
         state.cron_job_store.mark_running(&task_id, started, "manual").await;
         let result = match crate::commands::mover_recall::run_mover_recall_check(
             state.harness.db(),
-            &state.astock_client,
+            &state.stock().astock_client,
             "manual",
         )
         .await

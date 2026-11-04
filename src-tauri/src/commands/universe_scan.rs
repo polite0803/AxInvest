@@ -84,5 +84,5 @@ pub async fn run_universe_code_scan(
     shard: Option<u32>,
     shards: Option<u32>,
 ) -> Result<axagent_analysis_engine::universe_scan::ScanStats, String> {
-    run_universe_scan_inner(state.harness.db(), &state.astock_client, shard, shards).await
+    run_universe_scan_inner(state.harness.db(), &state.stock().astock_client, shard, shards).await
 }

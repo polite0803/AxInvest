@@ -161,7 +161,7 @@ pub async fn query_decision_backtest(
 pub async fn get_cross_stock_aggregator_config(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let Some(agg) = state.cross_stock_aggregator.get() else {
+    let Some(agg) = state.stock().cross_stock_aggregator.get() else {
         return Err(ErrorResponse::new(wf_err::INTERNAL)
             .with_detail("跨股票信号聚合器未初始化")
             .to_string());
@@ -179,7 +179,7 @@ pub async fn set_cross_stock_aggregator_config(
     state: State<'_, AppState>,
     config: axagent_analysis_engine::cross_stock_aggregator::AggregatorConfig,
 ) -> Result<(), String> {
-    let Some(agg) = state.cross_stock_aggregator.get() else {
+    let Some(agg) = state.stock().cross_stock_aggregator.get() else {
         return Err(ErrorResponse::new(wf_err::INTERNAL)
             .with_detail("跨股票信号聚合器未初始化")
             .to_string());
@@ -194,7 +194,7 @@ pub async fn set_cross_stock_aggregator_config(
 pub async fn get_cross_stock_aggregator_buffer(
     state: State<'_, AppState>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let Some(agg) = state.cross_stock_aggregator.get() else {
+    let Some(agg) = state.stock().cross_stock_aggregator.get() else {
         return Err(ErrorResponse::new(wf_err::INTERNAL)
             .with_detail("跨股票信号聚合器未初始化")
             .to_string());
@@ -232,7 +232,7 @@ pub async fn get_sector_coherence_report(
     }
 
     // 批量拉取行情（直接走 astock_client，不依赖 monitor 是否启动）
-    let quotes = state.astock_client.clone();
+    let quotes = state.stock().astock_client.clone();
     let mut quote_list = Vec::with_capacity(members.len());
     for code in &members {
         if let Ok(q) = quotes.get_quote(code).await {
@@ -266,7 +266,7 @@ pub async fn scan_sector_coherence(
     let mut idx = build_sample_index();
     seed_ashare_ontology(&mut idx);
 
-    let quotes_client = state.astock_client.clone();
+    let quotes_client = state.stock().astock_client.clone();
     let mut quotes_by_concept: HashMap<String, Vec<_>> = HashMap::new();
     for cid in &concept_ids {
         let members = idx.members(cid);

@@ -59,14 +59,18 @@ pub async fn paper_portfolio_get(
     state: State<'_, AppState>,
     portfolio_id: String,
 ) -> Result<Option<PortfolioDetail>, String> {
-    paper_portfolio::get_portfolio_detail(state.harness.db(), &*state.astock_client, &portfolio_id)
-        .await
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })
+    paper_portfolio::get_portfolio_detail(
+        state.harness.db(),
+        &*state.stock().astock_client,
+        &portfolio_id,
+    )
+    .await
+    .map_err(|e| {
+        String::from(crate::commands::error::ErrorResponse::from_error(
+            e,
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })
 }
 
 /// 关闭组合（status=closed）
@@ -154,12 +158,15 @@ pub async fn paper_portfolio_close_all_positions(
 pub async fn paper_portfolio_list_active_details(
     state: State<'_, AppState>,
 ) -> Result<Vec<PortfolioDetail>, String> {
-    paper_portfolio::list_active_portfolios_detail(state.harness.db(), &*state.astock_client)
-        .await
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })
+    paper_portfolio::list_active_portfolios_detail(
+        state.harness.db(),
+        &*state.stock().astock_client,
+    )
+    .await
+    .map_err(|e| {
+        String::from(crate::commands::error::ErrorResponse::from_error(
+            e,
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })
 }

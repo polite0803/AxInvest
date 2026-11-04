@@ -367,7 +367,7 @@ pub async fn run_mover_recall_analysis(
     launch(
         &state.time_travel_batch_lock,
         state.harness.db().clone(),
-        state.astock_client.clone(),
+        state.stock().astock_client.clone(),
         state.work_engine.clone(),
         request,
         "manual",

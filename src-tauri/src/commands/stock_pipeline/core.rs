@@ -555,7 +555,7 @@ pub async fn run_stock_pipeline(
     as_of_date: Option<String>,
 ) -> Result<PipelineResult, String> {
     let db = state.harness.db().clone();
-    let client = state.astock_client.clone();
+    let client = state.stock().astock_client.clone();
     let engine = state.work_engine.clone();
     let config = PipelineConfig::default();
 

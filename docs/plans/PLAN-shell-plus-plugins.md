@@ -3420,3 +3420,40 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 2. **`npm run typecheck` 在 UNC 下退 1 且一个文件都不查**（见 §67.1）；本批只用手工等价命令取证，没改 `package.json`。
 3. **dprint 在 UNC 下空跑**（`No files found ... at \\?\UNC\...`，退 14；加 `--allow-no-files` 反而退 0，更危险）：本批用「本地盘临时目录 + 指向仓内 wasm 的探针 dprint.json + 逐文件 copy」取证。要不要做成 `scripts/dprint-check.mjs` 另裁。
 4. **UI 未在浏览器里目视**：类型 / 格式化 / 单测三关已过，但没起 dev server 看实际排版（本轮无可驱动的 Tauri 实例）。
+
+---
+
+## 68. `#134` 第一片：外部表声明入口 + 四条硬判据（2026-11-04）
+
+**交付**：`axagent-infra/crates/dao/src/reconcile/expected.rs` 新增 `build_with_external(dialect, &[TableModel])`；`build(dialect)` 原地委派（签名与行为不变）。
+
+**四条判据（全是硬失败，不是 warn）**：
+
+1. 外部表与实体/L2 已声明的表**重名 ⇒ 报错**（两份真源，拒绝静默覆盖 —— 与 `overlay_l2` 的「L2 认得、实体不认得 ⇒ 报错」互为反向）；
+2. 外部声明**之间**重名 ⇒ 报错；
+3. 外部表落到 `non_main_db` 表名上 ⇒ 报错（该方言下这张表不在主库）；
+4. **空切片与 `build` 逐位等价**（`canonical_json` 相等，PG / SQLite 各测一次）。
+
+**为什么先交入口、不一次交整条通道**（边界写死，不许把本片当「T4 已完成」）：
+
+- PLAN:541 已定挂载点；本片把它落成代码 + 判据，`plan` / `apply` **一行未改**。
+- 还缺两段，且都是**形状决策**而不是机械改写：
+  - ① **插件 `schema.json` 的最小形状**：`ColumnModel.sql_type` 存的是**归一后的方言类型名**（`canonical_type` 的产物），不是 `sea_query::ColumnType`；要从 JSON 反序列化，得先定「类型枚举 ↔ `canonical_type` 的双向映射」，否则插件写的 `TEXT` 与实体产出的 `text` 在 diff 里永远不相等。
+  - ② **宿主 hook**：`apply::cycle` 里 `expected::build(dialect)` 是硬编码（`apply.rs:808`），且闸 3 用 `want.tables.len()` 做基数 —— 装插件后再跑一轮会把基线抬高，必须先裁定「插件表如何计入基数」，否则一次装载就能让下一轮把**未声明**的插件表判成孤儿。
+- 结论：第二片开工前，先把 `schema.json` 形状与「闸 3 基数口径」写进本文件，**不在代码里先射箭**。
+
+**验收（cwd = `axagent-infra/`）**：
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| H1 | `cargo check -p axagent-dao --all-targets` | 0 | `Finished` 3m26s |
+| H2 | `cargo test -p axagent-dao --lib reconcile::expected` | 1 → **0** | 首轮 **18 passed / 1 failed**：内部重名用例先撞上「与实体重名」分支 —— 我把两个检查的顺序写反了，错误信息会把「两份插件声明打架」误报成「插件声明与实体打架」；调换顺序后 **19 passed / 0 failed** |
+| H3 | `cargo clippy -p axagent-dao --all-targets -- -D warnings` | 1 → **0** | 首轮 **2 条** `clippy::doc_lazy_continuation`（`expected.rs:96/97` —— 有序列表项的续行我只缩进 3 格，clippy 要 4 格）；纯注释改动就把门打红，正是 AGENTS「改注释也会触发 lint」那条的复现。改成 4 格后 **Finished 1m57s / 0 error** |
+| H4 | `rustfmt --edition 2024 --check`（单文件） | 1 → **0** | 一处超宽断言自动折行后通过 |
+
+**本片踩到的两个坑（都记下来，别再踩）**：
+
+1. **判据顺序会改错误语义**：内部重名用例首轮失败——因为我在 `upsert_table` 之后才查内部重名，第二份同名表先命中了「与实体重名」分支 ⇒ 报错文案把「两份插件声明打架」误报成「插件声明与实体打架」。查重必须**先查同批、再查存量**。
+2. **注释同样过 clippy**：`doc_lazy_continuation` 的有序列表续行缩进是 4 格（不是 3），写 3 格会红两条；`cargo check` / `cargo test` 都不跑这条（AGENTS 的「三条硬约束」第 1 条）。
+
+**未做（第二片，逐条点名）**：① `schema.json` 形状 + JSON→`TableModel` 反序列化；② `apply::cycle` 的外部声明注入口与闸 3 基数口径；③ 端到端「装插件即建表、卸载不删表」的真库测试（要等 ①② 落地）。

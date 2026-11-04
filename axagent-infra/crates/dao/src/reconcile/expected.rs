@@ -84,6 +84,29 @@ const RENAMED_FROM_PREFIX: &str = "renamed_from \"";
 ///
 /// 纯计算、无 IO、无数据库连接 —— 便于单测直接对账。
 pub fn build(dialect: Dialect) -> Result<SchemaModel, sea_orm::DbErr> {
+    build_with_external(dialect, &[])
+}
+
+/// 期望侧入口（外部声明版）：在 L1 实体 + L2 声明之上，再叠加**宿主传入的表声明**
+/// （任务 #134 的第一片；将来由插件产物里的 `schema.json` 供数，本片只定入口与语义）。
+///
+/// 四条判据，都是硬的：
+///
+/// 1. **只增不改**：外部表与实体/L2 已声明的表**重名 ⇒ 报错**，不许静默覆盖。方向与
+///    [`overlay_l2`] 正好相反 —— 那里是「L2 认得、实体不认得 ⇒ 报错」（引擎看不见的表
+///    可能被判孤儿 DROP）；这里是「实体已认得、外部又声明一次 ⇒ 报错」（两份声明必然
+///    漂移，谁覆盖谁都是在猜）。
+/// 2. **外部声明之间也不许重名** —— 两份插件声明同一张表，同样是两份真源。
+/// 3. **不许落到非主库表名**（`extras::NON_MAIN_DB`）—— 该方言下这张表不在主库，
+///    声明它只会把期望集搞脏。
+/// 4. **空切片与 [`build`] 逐位等价**（`canonical_json` 相等，测试锁住）。
+///
+/// 进期望集之后，`plan` 阶段仍受 `additive_only = true` 管辖 ⇒ 对插件表只会 ADD，
+/// 永不 DROP / RENAME；卸载插件不删表，与数据主权口径一致。
+pub fn build_with_external(
+    dialect: Dialect,
+    external: &[TableModel],
+) -> Result<SchemaModel, sea_orm::DbErr> {
     let schema = Schema::new(backend_of(dialect));
     let mut model = SchemaModel::new(dialect);
 
@@ -106,6 +129,30 @@ pub fn build(dialect: Dialect) -> Result<SchemaModel, sea_orm::DbErr> {
     entity_modules!(add_entities);
 
     overlay_l2(&mut model, dialect)?;
+
+    for (i, t) in external.iter().enumerate() {
+        // 先查「外部声明内部重名」：查在 `upsert_table` 之后会先命中下面那条「与实体重名」，
+        // 错误信息就把「两份插件声明打架」误报成「插件声明与实体打架」（实测踩到）。
+        if external[..i].iter().any(|prev| prev.name == t.name) {
+            return Err(sea_orm::DbErr::Custom(format!(
+                "外部表声明内部重名：`{}` —— 同一次装载里两份声明",
+                t.name
+            )));
+        }
+        if model.table(&t.name).is_some() {
+            return Err(sea_orm::DbErr::Custom(format!(
+                "外部表声明与实体/L2 声明重名：`{}` —— 两份真源，拒绝静默覆盖",
+                t.name
+            )));
+        }
+        if non_main_db_applies(&t.name, dialect) {
+            return Err(sea_orm::DbErr::Custom(format!(
+                "外部表声明落到了非主库表名上：`{}` —— 该方言下这张表不在主库",
+                t.name
+            )));
+        }
+        model.upsert_table(t.clone());
+    }
 
     model.finalize();
     Ok(model)
@@ -1091,5 +1138,54 @@ mod tests {
             orphan_exempt_decls().any(|d| orphan_exempt_applies(d, &sample, Dialect::Postgres)),
             "表 `{sample}` 会被 tsv 判据覆盖却不豁免孤儿 ⇒ plan 会自相矛盾"
         );
+    }
+
+    // ── #134 第一片：外部表声明入口的语义（只增不改 / 不许重名 / 空切片等价） ──
+
+    fn external_demo_table() -> TableModel {
+        let mut t = TableModel::new("plugin_demo_items");
+        t.columns.push(ColumnModel::new("id", "TEXT", false));
+        t.columns.push(ColumnModel::new("title", "TEXT", true));
+        t.primary_key.push("id".into());
+        t
+    }
+
+    #[test]
+    fn empty_external_slice_is_identical_to_build() {
+        for d in [Dialect::Postgres, Dialect::Sqlite] {
+            let a = build(d).expect("build");
+            let b = build_with_external(d, &[]).expect("build_with_external");
+            assert_eq!(
+                a.canonical_json(),
+                b.canonical_json(),
+                "{d:?}：空外部切片必须与 build 逐位等价"
+            );
+        }
+    }
+
+    #[test]
+    fn external_table_lands_in_expected_model() {
+        let d = Dialect::Sqlite;
+        let base = build(d).expect("build");
+        let with = build_with_external(d, &[external_demo_table()]).expect("build_with_external");
+        assert!(with.table("plugin_demo_items").is_some(), "外部表必须进期望集");
+        assert_eq!(with.table_names().len(), base.table_names().len() + 1, "外部声明只增一张");
+    }
+
+    #[test]
+    fn external_declaration_colliding_with_entity_is_rejected() {
+        let d = Dialect::Sqlite;
+        let mut t = TableModel::new("stock_analyses");
+        t.columns.push(ColumnModel::new("id", "TEXT", false));
+        let err = build_with_external(d, &[t]).expect_err("与实体重名必须报错，不许静默覆盖");
+        assert!(format!("{err}").contains("重名"), "错误信息要点名重名：{err}");
+    }
+
+    #[test]
+    fn duplicate_external_declarations_are_rejected() {
+        let d = Dialect::Sqlite;
+        let err = build_with_external(d, &[external_demo_table(), external_demo_table()])
+            .expect_err("外部声明内部重名必须报错");
+        assert!(format!("{err}").contains("内部重名"), "错误信息要点名内部重名：{err}");
     }
 }

@@ -119,11 +119,26 @@ const networkRoot = realpathSync.native(canonical).startsWith("\\\\");
 const hasParallelSwitch = passthrough.some((a) =>
   a === "--no-file-parallelism" || a.startsWith("--file-parallelism") || a.startsWith("--fileParallelism")
 );
+// 网络盘上 fork 池的**启动握手**慢到撞 vitest 内部常量（任务 #141）：`START_TIMEOUT = 6e4`
+// 硬编码在 `vitest/dist/chunks/cli-api.*.js`，CLI 无开关、`poolOptions` 也够不着 ⇒ 只能换池。
+// 实测 2026-11-04（本机 SMB，4 个 plugin 测试文件 = 54 tests，两次样本）：
+//   forks + 串行   ⇒ 628 s / 505 s，且 505 s 那次 2 个 worker 直接启动超时；
+//   threads + 串行 ⇒ **4 文件 54 tests 全过两次**（181.5 s / 199.1 s，EXIT=0）。
+// 为什么不是 `--no-isolate`（同轮试过）：它把单 worker 的启动次数降到 1，但四个测试文件共享
+// 模块表 ⇒ `vi.mocked(invoke)` 的 mock 跨文件互相污染，**3 文件 17 条断言当场转红**。
+// 故网络 root 默认 threads 池 + 串行；调用方显式给了 --pool / 并行开关就尊重它。
+// 本机 vitest 已是 4.1.12，配置注释里 4.1.4 时代的「threads 池在 Windows 上偶发崩溃」未复现。
+const hasPoolSwitch = passthrough.some((a) => a === "--pool" || a.startsWith("--pool="));
 const args = [
   ...(hasLoader ? [] : ["--configLoader", "native"]),
+  ...(networkRoot && !hasPoolSwitch ? ["--pool=threads"] : []),
   ...(networkRoot && !hasParallelSwitch ? ["--no-file-parallelism"] : []),
   ...passthrough,
 ];
+if (networkRoot) {
+  // 自证：本机排障时一眼能看出这次到底用哪个池、是不是串行（不靠读源码猜）。
+  console.error(`[vitest-run] 网络 root ⇒ ${args.filter((a) => a.startsWith("--pool") || a.includes("parallelism")).join(" ")}`);
+}
 
 const result = spawnSync(process.execPath, [vitestEntry, ...args], {
   stdio: "inherit",

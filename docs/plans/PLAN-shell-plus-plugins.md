@@ -3651,3 +3651,22 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 **改动**（`package.json`）：`typecheck` / `lint` → `node scripts/check-tsc.mjs`（带盘符镜像换算 + 文件发现数下限，比裸 `tsc --noEmit` 多两道 fail-closed）；`format` / `format:check` → `node node_modules/dprint/bin.cjs …`（check 带 `--incremental=false`，与 `ci-check.mjs` 的步骤同参）；`lint:eslint` → `node node_modules/oxlint/bin/oxlint src --max-warnings=0`（同属 `.bin` shim 一族，同一个坑）。`scripts/check-tsc.mjs` 头部同步改为「唯一入口」，npm scripts / pre-commit 三处指向对齐。
 
 **本片未做**：`build`（`tsc && vite build`）、`test:e2e`、`dev` / `preview` / `tauri*` 仍是 `.bin` shim 或复合命令，UNC cwd 下同样起不来 —— 但它们不在这条日常路径上（构建走 `node scripts/tauri-build.mjs`、E2E 在 CI 跑），未一并改，避免把「入口可用」扩成「重写全部脚本」。另外 `npm run` 在 UNC 下仍不可用，这是 npm + cmd.exe 的固有限制，本仓不做 `.npmrc` 级改法（`script-shell` 指向 Git Bash 会连带影响 Linux CI）。
+
+## 73. `#141`：SMB 上 vitest 的 fork worker 启动超时 → 网络 root 默认换 threads 池（2026-11-04）
+
+**根因不是配置**：`Timeout waiting for worker to respond` 的时限是 vitest 内部常量 `START_TIMEOUT = 6e4`（`node_modules/vitest/dist/chunks/cli-api.*.js`，本机 4.1.12），CLI 没有对应开关、`poolOptions.*` 也够不着；而 forks 池在 SMB 上**每个测试文件都要重起一次进程**，握手本身就能吃掉 60 s。
+
+**四条对照**（本机 SMB，4 个 plugin 测试文件 = 54 tests，统一走 `node scripts/vitest-run.mjs run …`）：
+
+| 变体 | 结果 |
+|---|---|
+| forks + 串行（改前默认） | 两次样本：628 s / 54 passed；505 s / 23 passed + **2 个 worker 启动超时** |
+| forks + `--no-isolate` | 48.6 s 跑完 4 文件，但 **3 文件 / 17 条断言转红** —— 单 worker 复用模块表，`vi.mocked(invoke)` 的 mock 跨文件污染 ⇒ **排除**（这是语义破坏，不是性能方案） |
+| threads + 串行 | **4 文件 / 54 passed，两次 EXIT=0**（181.5 s、199.1 s） |
+| threads + 串行（重型单文件 `WorkspaceHub.test.tsx` —— 配置注释里 4.1.4 时代 threads 池崩过的那个） | 14 passed / 76.6 s |
+
+**改法**（`scripts/vitest-run.mjs`，只动本地入口）：网络 root 且调用方没给 `--pool` ⇒ 追加 `--pool=threads`；原有 `--no-file-parallelism` 保留（SMB 上并行仍会撞同一个 60 s 握手常量）。显式 `--pool=…` 一律尊重（实测 `--pool=forks` 不再叠加 threads）。另加一行**自证输出**（仅网络 root）：`[vitest-run] 网络 root ⇒ --pool=threads --no-file-parallelism`，排障时不用读源码猜这次用的是哪个池。
+
+**未做（逐条点名）**：
+1. **没改 `vite.config.ts` 的 `pool: "forks"`**：CI 与本地盘仍走配置原值，本机差异只落在包装器。`threads` 在本机 4.1.12 上只复测了 5 个文件（4 plugin + WorkspaceHub），**没跑全量 280 个测试文件**；把全量默认池换掉要另立任务，且必须在 CI 之外单独验证。
+2. **没解决 SMB 本身慢**：单文件 import 28–37 s、environment 12–16 s 仍照旧。本片只让 worker 别撞 60 s 握手，不把网络盘变快。

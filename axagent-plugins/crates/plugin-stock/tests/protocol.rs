@@ -224,6 +224,67 @@ fn parse_analysis_intent_runs_the_real_implementation_without_any_seam_call() {
     assert_eq!(worker.recv_response().kind, ResponseKind::Success);
 }
 
+/// B9-1：证据质量权重是**纯函数命令** —— 与 `parse_analysis_intent` 同档，
+/// 不得向宿主发任何接缝帧（权重表是已校准的本地数值权威，不依赖行情/DB）。
+#[test]
+fn compute_evidence_weights_runs_without_any_seam_call() {
+    let mut worker = Worker::spawn();
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "compute_evidence_weights",
+            serde_json::json!({
+                "marketRegime": {
+                    "regime": "bull",
+                    "confidence": 0.8,
+                    "volatility": "normal",
+                    "description": "单测固定环境"
+                },
+                "timeHorizon": "mid",
+                "analysts": [{
+                    "analystId": "a-market-analyst",
+                    "stance": "看多",
+                    "bullScore": 70.0,
+                    "bearScore": 30.0
+                }]
+            }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求"),
+    );
+    // 纯函数：若向宿主发了 call_seam，这里读到的会是请求而不是回执。
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Success);
+    let reply = response.value.expect("命令回执必须带 value");
+    let report = &reply["value"];
+    assert_eq!(report["timeHorizon"], "mid");
+    let weights = report["analystWeights"].as_array().expect("分析师权重必须是数组");
+    assert_eq!(weights.len(), 1, "输入一个分析师 ⇒ 输出一个权重：{report:?}");
+    assert_eq!(weights[0]["analystId"], "a-market-analyst");
+    assert!(
+        weights[0]["finalWeight"].as_f64().is_some_and(|w| w > 0.0),
+        "最终权重必须是正数：{report:?}"
+    );
+    assert!(
+        report["recommendedAction"].as_str().is_some_and(|a| !a.is_empty()),
+        "建议动作不得为空：{report:?}"
+    );
+
+    // 缺字段必须显式报参数错误，不按默认值继续算。
+    worker.send(
+        &CommandFrame::new(PLUGIN_ID, "compute_evidence_weights", serde_json::json!({}), 5_000)
+            .to_frame_request()
+            .expect("命令帧应能编成请求"),
+    );
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Error);
+    assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS));
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+}
+
 #[test]
 fn closing_stdin_is_a_clean_exit() {
     let mut worker = Worker::spawn();

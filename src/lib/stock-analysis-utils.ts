@@ -9,6 +9,7 @@
 // ── 证据质量驱动权重 (P0-1) ──
 
 import { invoke } from "@/lib/invoke";
+import { resolvePluginForCommand } from "@/lib/pluginCommandResolve";
 import { antdTagPreset, type CategoricalHue, HUE_COLORS, hueVar } from "@/theme/categoricalColors";
 import type { CSSProperties } from "react";
 
@@ -275,11 +276,27 @@ export interface EvidenceWeightReport {
   overallConfidence: number;
 }
 
+/** 权重命令名（宿主与插件声明逐字一致；调用方不写第二份字面量）。 */
+const EVIDENCE_WEIGHTS_COMMAND = "compute_evidence_weights";
+
 /** 调用后端证据质量驱动权重计算 */
 export async function computeEvidenceWeights(
   request: EvidenceWeightRequest,
 ): Promise<EvidenceWeightReport> {
-  return invoke<EvidenceWeightReport>("compute_evidence_weights", { request });
+  // B9-1：实现已迁入股票插件（纯函数命令，跑 analysis-engine 权威实现）。
+  // 宿主同名 Tauri 命令在双声明期仍存在，但前端只走插件通道 —— 一处调用点若留两套
+  // 路由，插件停用时的行为就会随「哪套先命中」漂移。未装/未启用时抛错，
+  // `computeStockConsensus` 按既有离线兜底处置（ANALYST_TIME_HORIZON_WEIGHT）。
+  const pluginId = await resolvePluginForCommand(EVIDENCE_WEIGHTS_COMMAND);
+  if (!pluginId) {
+    throw new Error(`no enabled plugin provides command \`${EVIDENCE_WEIGHTS_COMMAND}\``);
+  }
+  const raw = await invoke<string>("plugin_execute_command", {
+    pluginId,
+    name: EVIDENCE_WEIGHTS_COMMAND,
+    input: request,
+  });
+  return JSON.parse(raw) as EvidenceWeightReport;
 }
 
 // ── 枚举常量 ──

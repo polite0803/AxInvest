@@ -35,6 +35,12 @@ const TOOL_NAME: &str = "get_stock_quote";
 const COMMAND_GET_QUOTE: &str = "stock_get_quote";
 /// 自然语言意图解析命令：跑 `axagent-stock-core` 的**本体**（不是测试夹具的子集词表）。
 const COMMAND_PARSE_INTENT: &str = "parse_analysis_intent";
+/// 证据质量驱动权重（B9-1）：纯函数，跑 `analysis-engine` 的权威实现。
+///
+/// 为什么不在插件里重写一份：权重表/阈值是 LLM 决策链的**数值权威**
+/// （`evidence_weight.rs` 的档位与 0.15 阈值都有历史校准记录，见 §86 系列），
+/// 复制一份就等于让「插件版」与「宿主历史产物」的算法分叉（禁区 12）。
+const COMMAND_EVIDENCE_WEIGHTS: &str = "compute_evidence_weights";
 /// `tool.set` 接缝的协议版本；随工具集形状变化时递增。
 const TOOL_SET_VERSION: &str = "0.1.0";
 /// 工具取数走的宿主接缝：宿主把已有行情能力以入站分派的方式暴露给插件。
@@ -109,6 +115,12 @@ fn handle_command(
         },
         // 纯函数命令：不查库、不调接缝，跑的是 `axagent-stock-core` 的权威实现。
         COMMAND_PARSE_INTENT => match parse_intent(&frame.input) {
+            Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+            Err((code, message)) => {
+                CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+            },
+        },
+        COMMAND_EVIDENCE_WEIGHTS => match evidence_weights(&frame.input) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
             Err((code, message)) => {
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
@@ -201,6 +213,25 @@ fn parse_intent(input: &Value) -> Result<Value, (String, String)> {
             (error_codes::PLUGIN_COMMAND_FAILED.to_string(), format!("意图解析结果序列化失败：{e}"))
         },
     )
+}
+
+/// 纯函数命令：`EvidenceWeightRequest`（camelCase）→ `EvidenceWeightReport`。
+///
+/// 入参解码严格：缺字段 / 类型不符报 `PLUGIN_COMMAND_INVALID_ARGS`，**不**用默认值兜底 ——
+/// 权重算错的后果是决策方向被改写，静默降级比报错危险得多（同 §86 的 v133 观察）。
+fn evidence_weights(input: &Value) -> Result<Value, (String, String)> {
+    use axagent_analysis_engine::evidence_weight::{
+        EvidenceWeightRequest, compute_evidence_weights,
+    };
+    let request: EvidenceWeightRequest = serde_json::from_value(input.clone()).map_err(|e| {
+        (
+            error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+            format!("`EvidenceWeightRequest` 解码失败：{e}"),
+        )
+    })?;
+    serde_json::to_value(compute_evidence_weights(request)).map_err(|e| {
+        (error_codes::PLUGIN_COMMAND_FAILED.to_string(), format!("权重报告序列化失败：{e}"))
+    })
 }
 
 /// 取一条个股行情，返回 `(入参里的股票代码, 行情 JSON)`。

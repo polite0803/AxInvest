@@ -150,6 +150,50 @@ const manifest = {
         required: ["input"],
       },
     },
+    {
+      // B9-1：宿主同名 Tauri 命令在双声明期仍保留；前端已切到本条，
+      // 删除宿主实现与计数收口走 B9-2（避免同批做「改路由 + 重生成注册表」两件不可回滚的事）。
+      name: "compute_evidence_weights",
+      description: "按市场环境/投资周期/分析师输入计算证据质量权重与共识（纯函数，跑 analysis-engine 权威实现）",
+      command: "worker://compute_evidence_weights",
+      inputSchema: {
+        type: "object",
+        properties: {
+          marketRegime: {
+            type: "object",
+            properties: {
+              regime: { type: "string", description: "bull | bear | sideways | volatile" },
+              confidence: { type: "number", description: "0-1" },
+              volatility: { type: "string", description: "high | low | normal" },
+              description: { type: "string" },
+              volatilityPct: { type: "number" },
+              consecutiveUp: { type: "integer" },
+              consecutiveDown: { type: "integer" },
+            },
+            required: ["regime", "confidence", "volatility", "description"],
+          },
+          timeHorizon: { type: "string", description: "ultra_short | short | mid | long" },
+          analysts: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                analystId: { type: "string" },
+                reportText: { type: "string" },
+                stance: { type: "string" },
+                bullScore: { type: "number" },
+                bearScore: { type: "number" },
+                positionPct: { type: "number" },
+                untrusted: { type: "boolean" },
+              },
+              required: ["analystId"],
+            },
+          },
+          historicalWeights: { type: "object", additionalProperties: { type: "number" } },
+        },
+        required: ["marketRegime", "timeHorizon", "analysts"],
+      },
+    },
   ],
   integrity: { algorithm: "sha256", hash: sha256 },
 };

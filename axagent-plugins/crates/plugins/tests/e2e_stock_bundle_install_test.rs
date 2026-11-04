@@ -78,6 +78,30 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
     assert_eq!(parsed["price"], 1500.25, "行情必须原样透出：{parsed:?}");
     assert_eq!(parsed["code"], "600519");
 
+    // B9-1：纯函数命令（证据权重）经同一 worker 通道执行，且**不依赖**行情接缝。
+    let weights_output = manager
+        .execute_plugin_command(
+            &outcome.plugin_id,
+            "compute_evidence_weights",
+            &json!({
+                "marketRegime": {
+                    "regime": "sideways",
+                    "confidence": 0.5,
+                    "volatility": "normal",
+                    "description": "e2e 固定环境"
+                },
+                "timeHorizon": "short",
+                "analysts": [{ "analystId": "a-market-analyst", "stance": "中性" }]
+            }),
+        )
+        .expect("权重命令应能经 worker 通道执行");
+    let weights: Value = serde_json::from_str(&weights_output).expect("权重输出应是 JSON 文本");
+    assert_eq!(weights["timeHorizon"], "short");
+    assert!(
+        weights["analystWeights"].as_array().is_some_and(|w| w.len() == 1),
+        "输入一个分析师 ⇒ 一个权重：{weights}"
+    );
+
     // B8-0：前端资产随包安装 —— `pages[]` 声明的 entry 必须解析成**安装目录内**的既有文件。
     // 这里锁的是「打包脚本写出的清单与盘上资产一致」，不是资产内容本身（内容归 B8-2）。
     let listed = manager.list_plugin_pages().expect("页面列表投影应可读");

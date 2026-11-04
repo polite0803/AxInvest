@@ -519,7 +519,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | Cargo.toml 构建边 | 7 条（`src-tauri` 4 + `tools` 1 + 域内 2；B7b 前 `tools` 2） | 1 条（`src-tauri → axagent-company-runtime`） |
 | 前端反向 import（非域 import 域文件） | 54 处 / 39 文件 | 28 处 / 11 文件（15 处集中在 `ContentArea.tsx`） |
 | 前端体量（**目录口径**：`components/stock-analysis` / `pages/opc`） | `components/stock-analysis` 212 文件 / 60 912 行 + store 6 文件 / 4 514 行 | `pages/opc` 20 文件 / 8 859 行 + `OpcPage.tsx` 134 行 |
-| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 295 文件 / 85 164 行 | 40 文件 / 12 797 行 |
+| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 295 文件 / 85 181 行 | 40 文件 / 12 797 行 |
 | entities 表文件 | 20 个 | 28 个 |
 | zh-CN i18n key | 3 527（`stockAnalysis`/`invest`/`quant`/`trade` 是**整段**） | 1 897（`opc` 整段） |
 
@@ -4329,3 +4329,46 @@ FAIL: 锚点 frontendDirCaliber ：登记 60900 行 / 实测 60912 行 / 差 12
 **复算口径修正（同批如实记）**：`.tmp/b8-classify.mjs` 2026-11-04 复算为 **52 处 / 39 文件**（`genuine(目标属域)` 桶），与 §91 记的 54 处差 2 —— 差额来自并行批的前端改动，§91 的分类结论（6 误报 / 20 基元 / 6 DTO / 22 随包迁出）与批次顺序不受影响；B8-1 开工时以**当日复算**为准，不把 54 当现值引用。
 
 **本批未做**：没有改任何前端代码；消息侧 schema/iframe 插槽、注册表本体、试点卡片均未实现（这是 B8-1 的实现批）。
+
+## §94 B9-1a：`compute_evidence_weights` 迁入股票插件（双声明期，2026-11-05）
+
+**批次定位**：P6.1 命令面迁出的**首个用例**，走 §13.2 的五步模板 ①输入 DTO（复用 analysis-engine 既有结构）②manifest 双声明 ④worker 实现；**不做 ⑤（删宿主命令）** —— 删命令要重生成 `register_commands.rs`（实测主 crate `cargo check` 21m30s）并同批改 5 个登记读数，与「改前端路由」放在同一批不可回滚。宿主同名 Tauri 命令**保留但已无调用方**，退役走 B9-2。
+
+### 94.1 改动（8 个文件 + 1 个锁文件）
+
+| 文件 | 改动 |
+|---|---|
+| `axagent-plugins/crates/plugin-stock/Cargo.toml` | 新增 `axagent-analysis-engine` 依赖（**域自有实现**，终局随 #32 进插件仓）；注释从「只允许 foundation」改为「可依赖域自有实现，不得反向依赖主壳/宿主插件运行时」。 |
+| `axagent-plugins/crates/plugin-stock/src/main.rs` | `COMMAND_EVIDENCE_WEIGHTS` 常量 + 命令分发 + `evidence_weights()`：`from_value::<EvidenceWeightRequest>` 严格解码（缺字段报 `PLUGIN_COMMAND_INVALID_ARGS`，不默认值兜底）、`to_value` 回执。 |
+| `axagent-plugins/crates/plugin-stock/tests/protocol.rs` | 新增 `compute_evidence_weights_runs_without_any_seam_call`：真进程帧往返，断言**不发任何接缝帧**、权重/建议动作非空、缺字段显式报错。 |
+| `scripts/build-plugin-bundle.mjs` | manifest `commands[]` 第 3 条：`compute_evidence_weights` + 完整 camelCase `inputSchema`（marketRegime / timeHorizon / analysts / historicalWeights）。 |
+| `src/lib/stock-analysis-utils.ts` | `computeEvidenceWeights()` 由宿主 `invoke("compute_evidence_weights")` 改为 `resolvePluginForCommand` → `invoke("plugin_execute_command", { pluginId, name, input })`；未装/未启用抛错，调用方走既有离线兜底（`ANALYST_TIME_HORIZON_WEIGHT`）。 |
+| `src/lib/__tests__/evidenceWeights.pluginRoute.test.ts`（新增） | 3 条：命令名经 resolver、入参原样透传、无插件/命令失败不吞错。 |
+| `axagent-plugins/crates/plugins/tests/e2e_stock_bundle_install_test.rs` | 安装 → 启用后追加执行权重命令，断言输出 `timeHorizon` 与 1 条分析师权重。 |
+| `scripts/audit-l1-blockers.mjs` + `scripts/check-capability-register.mjs` | `STOCK.ownedRe` 增加 `^axagent-plugins/crates/(plugin-stock\|stock-core)/`（**两份逐字同改**）：插件侧是迁出目的地、不是主壳，其链接域 crate 属预期方向；宿主侧运行时 `axagent-plugins/crates/plugins` 仍计入 foreign。**这不是为数字放宽** —— 原判据把「插件本体」算成「主壳反向阻塞」是归属错误；若不改，本批会凭空 +1。 |
+| `scripts/capability-register.json` | `frontendFileCaliber` 85 164→**85 181**（`stock-analysis-utils.ts` +17 行；文件数 295 不变，新测试不命中 `feRe`）。`l1ForeignStock` 保持 **102 / 19**。 |
+| `axagent-plugins/Cargo.lock` | 新增 analysis-engine 传递图（+1841 / −3 行），只增本工作区依赖。 |
+
+### 94.2 验收（全部实跑）
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| K1 | `cargo test -p axagent-plugin-stock`（cwd=`axagent-plugins`） | 0 | 首编 4m19s；**10 passed**（含新增权重用例） |
+| K2 | `node scripts/build-plugin-bundle.mjs --check --out .tmp/plugin-stock-check` | 0 | 前端页 1 个；清单 3 条命令；握手/回执/sha256/页面四项断言全过 |
+| K3 | `AXAGENT_STOCK_BUNDLE_DIR='…\.tmp\plugin-stock-check' cargo test -p axagent-plugins --test e2e_stock_bundle_install_test` | 0 | **1 passed**（安装→启用→行情命令→权重命令→页面解析） |
+| K4 | `cargo clippy -p axagent-plugin-stock --all-targets -- -D warnings` | 0 | Finished 3m07s |
+| K5 | `node scripts/check-tsc.mjs` | 0 | 1464 个源文件（+1 新测试） |
+| K6 | `vitest-run.mjs run src/lib/__tests__/evidenceWeights.pluginRoute.test.ts` | 0 | **3 passed** |
+| K7 | `npx dprint check`（2 个 TS 文件）+ `rustfmt --edition 2024 --check`（3 个 `.rs`） | 0 / 0 | 零 diff |
+| K8 | `node scripts/check-capability-register.mjs`（驻留 PLAN 头部 3 行后）+ `audit-l1-blockers.mjs --check-allowlist` | 0 / 0 | 门 PASS（37 = A11/B8/C4/H1/K10/D3）；H 桶 3 条锚点全在 |
+
+### 94.3 已量化的一项代价
+
+worker 二进制 **827,392 → 5,703,680 字节（debug）**：analysis-engine 的传递图（dao / entities / trajectory / astock-data，含 image/keyring 一族）随依赖整体链接。原因是本仓 `analysis-engine` 是**未拆分的整体 crate**，而这个命令只需要其中纯函数模块。终局随 #32 把股票域实现搬进插件仓后会重新评估；**release 体积未测**（不拿 debug 数当发布结论）。**不得**为了这个数在插件里复制一份权重算法（禁区 12）。
+
+### 94.4 本批未做（如实列）
+
+1. **宿主命令未删**（B9-2）：`src-tauri/src/commands/stock_analysis.rs` 的 `compute_evidence_weights` 与 `#[agent_command]` 段仍在，只是无人调用。删除需 `cargo check -p axagent --lib` 重生成 `register_commands.rs`，同批改 `commandTotal / commandNameSetParity / stockBoundaryCommands / stockAuditDomainCommands / registryFileLines` 五处 + PLAN 钉句。
+2. **智能体命令面未接**：插件命令不进 `#[agent_command]` 的 inventory（`command_bridge.rs` 只读宏注册表）⇒ 删除宿主命令后，LLM 侧会少一条命令。与 B4-k 同口径，等「插件命令并入智能体命令面」立批解决。
+3. **桌面真机未验**：没有带插件的安装包，也没在 `tauri dev` 里跑「共识计算 → 权重报告」全链路；浏览器 mock 的 `plugin_execute_command` 返回空串 ⇒ 该模式下与改造前一样走离线兜底（改造前宿主命令在 mock 里也无实现）。
+4. **开发期需手工暂存**：`plugin:bundle:dev` 不进 `beforeDevCommand`（与 §84 未做 3 同因），本地不跑它就没有可解析的插件。

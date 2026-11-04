@@ -149,16 +149,16 @@
     {
       "id": "frontendFileCaliber",
       "label": "前端体量（脚本文件名口径 feRe 匹配 src/** 全部 .ts/.tsx）",
-      "value": 85164,
+      "value": 85181,
       "value2": 295,
       "value2Label": "文件",
       "check": "frontendVolume",
       "domainKey": "STOCK",
       "hard": true,
-      "planNumber": "85 164",
+      "planNumber": "85 181",
       "planMustAppear": true,
-      "planPinned": [{ "line": 519, "mustContain": ["295", "85 164", "脚本文件名口径"] }],
-      "note": "PLAN:508 的「脚本文件名口径」读数；行数按 split('\\n') 计数（与 audit-l1-blockers 一致，含末行空元素）。**2026-11-04 #139 再涨 135 行 / 1 文件 ⇒ 85 009 / 294**（`PluginMarketplace.tsx` 渲染 eventStats +29 行、新测试 `PluginMarketplace.eventStats.test.tsx` 106 行）。⚠ **+1 文件是 `feRe` 的既有假阳性**：该正则的 `market` 分支会命中文件名里的 `Marketplace`（`src/components/chat/PluginMarketplace.tsx` 从 #139 之前就在这个口径里）⇒ 本批动的是**插件市场面板**，股票域文件数没变；读数变了是口径定义所致，不改口径（`feRe` 与 `audit-l1-blockers.mjs:48-63` 逐字同源，改它要两处同批）。旧读数 84 874 / 293 只留在 §65 未做 5 与 §66 的交付记录里 —— 那两处记的是 #136 当时的现值。**2026-11-04 B4-j 再涨 155 行 / 1 文件 ⇒ 85 164 / 295**（`StockSearchBar.tsx` 的 NL 解析改走插件命令 +13 行；新增回归 `StockSearchBar.pluginIntent.test.tsx` 142 行。新增的 `src/lib/pluginCommandResolve.ts` 及其单测不命中 `feRe`，不计入本口径）。"
+      "planPinned": [{ "line": 519, "mustContain": ["295", "85 181", "脚本文件名口径"] }],
+      "note": "PLAN:508 的「脚本文件名口径」读数；行数按 split('\\n') 计数（与 audit-l1-blockers 一致，含末行空元素）。**2026-11-04 #139 再涨 135 行 / 1 文件 ⇒ 85 009 / 294**（`PluginMarketplace.tsx` 渲染 eventStats +29 行、新测试 `PluginMarketplace.eventStats.test.tsx` 106 行）。⚠ **+1 文件是 `feRe` 的既有假阳性**：该正则的 `market` 分支会命中文件名里的 `Marketplace`（`src/components/chat/PluginMarketplace.tsx` 从 #139 之前就在这个口径里）⇒ 本批动的是**插件市场面板**，股票域文件数没变；读数变了是口径定义所致，不改口径（`feRe` 与 `audit-l1-blockers.mjs:48-63` 逐字同源，改它要两处同批）。旧读数 84 874 / 293 只留在 §65 未做 5 与 §66 的交付记录里 —— 那两处记的是 #136 当时的现值。**2026-11-04 B4-j 再涨 155 行 / 1 文件 ⇒ 85 164 / 295**（`StockSearchBar.tsx` 的 NL 解析改走插件命令 +13 行；新增回归 `StockSearchBar.pluginIntent.test.tsx` 142 行。新增的 `src/lib/pluginCommandResolve.ts` 及其单测不命中 `feRe`，不计入本口径）。**2026-11-05 B9-1 再涨 17 行、文件数不变 ⇒ 85 181 / 295**（`src/lib/stock-analysis-utils.ts` 的 `computeEvidenceWeights` 由宿主 invoke 改为「解析插件 → `plugin_execute_command`」，含退役期注释；新增的 `evidenceWeights.pluginRoute.test.ts` 不命中 `feRe`，不计入）。"
     },
     {
       "id": "frontendDirCaliber",

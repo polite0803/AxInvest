@@ -45,11 +45,14 @@ const files = [];
 })(repo);
 
 // ── 域归属：域自有文件（迁出时整体搬走）─────────────────────
+// ⚠ 插件侧是**迁出目的地**，不是主壳：`plugin-stock` / `stock-core` 随插件产物整体发布，
+//   它们引用域 crate 是预期方向（B9-1 起 worker 直接链接 analysis-engine 跑权威实现）。
+//   宿主侧运行时 `axagent-plugins/crates/plugins` 仍是主壳，照旧计入 foreign。
 const DOMAINS = {
   STOCK: {
     crates: ['axagent-astock-data', 'axagent-analysis-engine', 'axagent-quant', 'axagent-market-sim'],
     useRe: /axagent_(astock_data|analysis_engine|quant|market_sim)::/,
-    ownedRe: /^src-tauri\/src\/(commands|init|bin)\/(stock|market_|backtest|quant|pool_scan|universe_scan|time_travel|paper|trade|conditional_order|price_alert|analyst|recommendation_cron|mover_recall|limit_up|signal|reco|wf_des)/,
+    ownedRe: /^src-tauri\/src\/(commands|init|bin)\/(stock|market_|backtest|quant|pool_scan|universe_scan|time_travel|paper|trade|conditional_order|price_alert|analyst|recommendation_cron|mover_recall|limit_up|signal|reco|wf_des)|^axagent-plugins\/crates\/(plugin-stock|stock-core)\//,
     feRe: /stock|quote|kline|technical|portfolio|trading|advis|invest|quant|market/i,
     cmdRe: /^(stock|quote|kline|quant|backtest|portfolio|market_|pool|universe|reco|signal|north|margin|dragon|limit_up|time_travel|advis|paper|trade|conditional_order|price_alert|analyst|fundamental|techn|wf_des)/,
   },

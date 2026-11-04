@@ -5,7 +5,8 @@
 //! 与 `e2e_worker_test.rs`（接缝握手）互补：本文件证明**命名命令通道**从
 //! 「spawn-on-call」切到「复用长驻 worker 的命令帧」后全链路可用，逐条钉死验收口径：
 //! ① 命令帧往返（宿主绑定 pluginId 原样到达 worker 并带回）；
-//! ② 无状态股票命令 `parse_analysis_intent` 经新通道跑通；
+//! ② 无状态命令 `echo_input` 经新通道跑通（夹具不含业务逻辑，真股票的端到端在
+//!    `e2e_stock_tool_test.rs` / `e2e_stock_bundle_install_test.rs`）；
 //! ③ 输入形状不合法在**派发之前**被拒（worker 的落盘标记为零证明）；
 //! ④ 超时被宿主拦下（预算 + 收帧宽限内收口，不级联卡死）；
 //! ⑤ worker 自报失败透传协议错误码（上层据此映射 `ErrorResponse`）。
@@ -53,8 +54,8 @@ impl WorkerPluginFixture {
     ///
     /// manifest 要点：
     /// - `worker.program` 指向**拷贝进源目录**的夹具 exe（worker 路径只允许安装目录内相对路径）；
-    /// - `parse_analysis_intent` 声明 `inputSchema.required=["input"]`，与真实股票命令的
-    ///   单参形状同构；`sleep_too_long` / `fail_self` 不声明 schema；
+    /// - `echo_input` 声明 `inputSchema.required=["text"]`，用于证明「形状不合法在派发前被拒」；
+    ///   `sleep_too_long` / `fail_self` 不声明 schema；
     /// - `commands[].command` 用 `worker://<名>` 占位串：worker 通道不读它；一旦**意外**
     ///   退回 spawn 通道，这个不存在的程序名会立刻失败暴露，而不是静默跑别的东西。
     fn new(label: &str) -> Self {
@@ -76,10 +77,10 @@ impl WorkerPluginFixture {
             "worker": { "program": format!("./worker/{exe_name}") },
             "commands": [
                 {
-                    "name": "parse_analysis_intent",
-                    "description": "解析自然语言分析意图（无状态股票命令示证）",
-                    "command": "worker://parse_analysis_intent",
-                    "inputSchema": { "required": ["input"] }
+                    "name": "echo_input",
+                    "description": "回显 input.text（无状态命令示证）",
+                    "command": "worker://echo_input",
+                    "inputSchema": { "required": ["text"] }
                 },
                 {
                     "name": "sleep_too_long",
@@ -126,7 +127,7 @@ impl WorkerPluginFixture {
     }
 }
 
-/// 验收①+②：无状态股票命令 `parse_analysis_intent` 经命令帧跑通，且宿主绑定的
+/// 验收①+②：无状态命令 `echo_input` 经命令帧跑通，且宿主绑定的
 /// pluginId 原样到达 worker（落盘标记）与宿主（回执绑定字段随传输层往返）。
 #[test]
 fn e2e_command_frame_roundtrip_executes_stateless_stock_command() {
@@ -138,25 +139,21 @@ fn e2e_command_frame_roundtrip_executes_stateless_stock_command() {
         .manager
         .execute_plugin_command(
             &fixture.plugin_id,
-            "parse_analysis_intent",
-            &json!({ "input": "调研茅台短线" }),
+            "echo_input",
+            &json!({ "text": "调研茅台短线" }),
         )
         .expect("命令帧全链路应成功");
 
     let parsed: Value = serde_json::from_str(&output).expect("命令帧通道输出应为 JSON 文本");
-    assert_eq!(parsed["rawInput"], "调研茅台短线");
-    assert_eq!(parsed["stockCode"], "600519", "移植词表应与 intent_parser 同名同码");
-    assert_eq!(parsed["stockQuery"], "茅台");
-    assert_eq!(parsed["timeHorizon"], "short");
-    assert_eq!(parsed["actionType"], "research");
-    assert_eq!(parsed["success"], true);
+    assert_eq!(parsed["text"], "调研茅台短线");
+    assert_eq!(parsed["length"], 6, "字符数按 chars 计（中文 6 字，不是字节数）");
 
     let marker = fs::read_to_string(fixture.marker()).expect("worker 必须真的跑过这条命令");
     assert!(
         marker.contains(&format!("plugin_id={}", fixture.plugin_id)),
         "帧上的 pluginId 必须等于宿主注册表权威键，实际标记：{marker}"
     );
-    assert!(marker.contains("command=parse_analysis_intent"), "命令名必须原样到达 worker");
+    assert!(marker.contains("command=echo_input"), "命令名必须原样到达 worker");
     fixture.cleanup();
 }
 
@@ -170,11 +167,11 @@ fn e2e_command_frame_invalid_input_schema_rejected_before_dispatch() {
     let fixture = WorkerPluginFixture::new("frame-schema");
     let err = fixture
         .manager
-        .execute_plugin_command(&fixture.plugin_id, "parse_analysis_intent", &json!({}))
-        .expect_err("缺必填 input 必须在派发前被拒");
+        .execute_plugin_command(&fixture.plugin_id, "echo_input", &json!({}))
+        .expect_err("缺必填 text 必须在派发前被拒");
     assert!(matches!(&err, PluginError::CommandFailed(_)), "期望 CommandFailed，实际 {err:?}");
     let text = err.to_string();
-    assert!(text.contains("缺少必填字段 `input`"), "错误应点明缺失字段，实际：{text}");
+    assert!(text.contains("缺少必填字段 `text`"), "错误应点明缺失字段，实际：{text}");
     assert!(text.contains("未派发命令帧"), "语义应写明未派发，实际：{text}");
     assert!(!fixture.marker().exists(), "被拒的命令不得到达 worker（安装目录不应出现执行标记）");
     fixture.cleanup();

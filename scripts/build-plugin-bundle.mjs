@@ -87,7 +87,9 @@ const manifest = {
   mcp_servers: [],
   skills: [],
   agents: [],
-  defaultEnabled: false,
+  // 默认启用：前端 `StockSearchBar` 的 NL 意图解析已改走本插件的命名命令，
+  // 宿主同名命令（B4-j 后删除）不再兜底 ⇒ 内置包不默认启用就等于该功能静默失效。
+  defaultEnabled: true,
   worker: { program: path.posix.join("bin", binaryName) },
   // `command` 用 `worker://<名>` 占位：worker 通道不读它（按 `name` 发帧），但若意外
   // 退回 spawn 通道，这个不存在的程序名会当场失败而不是静默跑别的东西。
@@ -137,6 +139,8 @@ async function checkStagedBundle(declared, root) {
   }
 
   const child = spawn(program, [], { stdio: ["pipe", "pipe", "inherit"], windowsHide: true });
+  // 任何提前 `fail()` 都要带走子进程：`fail` 是 `process.exit(1)`，不会回收它。
+  process.on("exit", () => child.kill());
   const reader = frameReader(child.stdout);
 
   const describeId = "bundle-check-describe";
@@ -152,7 +156,19 @@ async function checkStagedBundle(declared, root) {
   const shutdown = await reader.next();
   if (shutdown.kind !== "success") fail(`--check：shutdown 回执失败：${JSON.stringify(shutdown)}`);
 
-  const exitCode = await new Promise((resolve) => child.on("exit", resolve));
+  // `shutdown` 在协议里只是**回执**，真正的停机信号是 stdin EOF（worker 的 `serve` 循环
+  // 靠对端关管道结束）。少这一步，自检会永远挂在 `child.on("exit")` 上 —— 2026-11-04 实测
+  // （worker 收到回执后仍在等下一帧，脚本却在等它退出，双方互等）。
+  child.stdin.end();
+  let timer;
+  const exitCode = await Promise.race([
+    new Promise((resolve) => child.on("exit", resolve)),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(null), 10000);
+    }),
+  ]);
+  clearTimeout(timer);
+  if (exitCode === null) fail("--check：stdin EOF 后 10 s 内未退出");
   if (exitCode !== 0) fail(`--check：worker 退出码 ${exitCode}（应为 0）`);
 
   console.log("[plugin-bundle] --check ✅ describe 握手 + shutdown 回执 + 退出码 0 + sha256 一致");

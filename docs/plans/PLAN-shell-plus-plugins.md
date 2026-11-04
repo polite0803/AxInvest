@@ -363,7 +363,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | 面 | 事实（全部指到行号） |
 |---|---|
 | 前端 | `src/pages/WorkflowPage.tsx:23`、`WorkflowMarketplace.tsx:186`；`src/components/workflow/` 132 文件（`WorkflowEditor.tsx` 2660 行、`Nodes/` 39 个）；store `workflowStore.ts` 1202 / `workflowEditorStore.ts` 3127 / `workEngineStore.ts` 542 |
-| 命令 | 前端 57 个 `invoke` 名（约 128 处）；Rust 侧 `register_commands.rs` 共 **1543 条 / 164 模块**（口径 = `scripts/lib/command-domains.mjs` 的 `parseRegistry`，与两份 AUDIT 同源），工作流域（审计 19 域口径）**83 条 / 11 模块**（`workflows`=10、`work_engine`=21、`workflow_template`=16、`workflow_reflection`=8、`workflow_ai`=8…；`stock_workflow` 28 条归股票域，不计入本域） |
+| 命令 | 前端 57 个 `invoke` 名（约 128 处）；Rust 侧 `register_commands.rs` 共 **1542 条 / 164 模块**（口径 = `scripts/lib/command-domains.mjs` 的 `parseRegistry`，与两份 AUDIT 同源），工作流域（审计 19 域口径）**83 条 / 11 模块**（`workflows`=10、`work_engine`=21、`workflow_template`=16、`workflow_reflection`=8、`workflow_ai`=8…；`stock_workflow` 28 条归股票域，不计入本域） |
 | 引擎 | `axagent-runtime/crates/rt-workflow/src/work_engine/engine/mod.rs` 7366 行；构造点 `src-tauri/src/init/state.rs:745`；句柄在 **`app_state.rs:345` `pub work_engine: Arc<WorkEngine>`** |
 | 节点 | `NodeExecutorTrait`（`node_executor_trait.rs:224`）实现者 **33** 个，`rt-workflow/src/work_engine/dispatcher.rs:80-109` `init_builtin` 注册 26 个 + `engine/mod.rs:1214-1231` pending 补齐 |
 
@@ -511,15 +511,15 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 
 | 度量 | 股票业务 | OPC 业务 |
 |---|---|---|
-| Tauri 命令条数 / 命令模块数（**插件边界口径**） | **304 条 / 20 模块**（`stock_analysis` 172、`stock_workflow` 24、`paper` 20） | **138 条 / 13 模块**（`opc` 57、`opc_capability_pack_actions` 20、`_runtime` 14） |
-| — 同一注册表在**审计 19 域口径**下的读数 | 306 条 / 19 模块（域「股票分析与管线」） | 117 条 / 10 模块（域「OPC 公司运行时」） |
+| Tauri 命令条数 / 命令模块数（**插件边界口径**） | **303 条 / 20 模块**（`stock_analysis` 172、`stock_workflow` 24、`paper` 20） | **138 条 / 13 模块**（`opc` 57、`opc_capability_pack_actions` 20、`_runtime` 14） |
+| — 同一注册表在**审计 19 域口径**下的读数 | 305 条 / 19 模块（域「股票分析与管线」） | 117 条 / 10 模块（域「OPC 公司运行时」） |
 | **① 主壳反向阻塞**（主壳非域文件引用域 crate ⇒ **必须逐条改写**） | **133 处 / 26 文件** | **0 处** |
 | **② 跨包口**（一个功能包的文件调另一个功能包的 crate ⇒ 走 `call_seam`） | **29 处 / 9 文件**，且**全部是 OPC 的文件在调股票 crate** | 0 处 |
 | ③ 域自有文件内引用（随插件整体迁走，**不是障碍**） | 456 处 / 41 文件（2026-11-04 复测：原 444 / 37 的增量来自并行批在域自有文件里加代码，**与 B1/B2 两刀无关** —— 那两刀只动主壳） | 16 处 / 2 文件 |
 | Cargo.toml 构建边 | 8 条（`src-tauri` 4 + `tools` 2 + 域内 2） | 1 条（`src-tauri → axagent-company-runtime`） |
 | 前端反向 import（非域 import 域文件） | 54 处 / 39 文件 | 28 处 / 11 文件（15 处集中在 `ContentArea.tsx`） |
-| 前端体量（**目录口径**：`components/stock-analysis` / `pages/opc`） | `components/stock-analysis` 211 文件 / 60 757 行 + store 6 文件 / 4 514 行 | `pages/opc` 20 文件 / 8 859 行 + `OpcPage.tsx` 134 行 |
-| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 294 文件 / 85 009 行 | 40 文件 / 12 797 行 |
+| 前端体量（**目录口径**：`components/stock-analysis` / `pages/opc`） | `components/stock-analysis` 212 文件 / 60 912 行 + store 6 文件 / 4 514 行 | `pages/opc` 20 文件 / 8 859 行 + `OpcPage.tsx` 134 行 |
+| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 295 文件 / 85 164 行 | 40 文件 / 12 797 行 |
 | entities 表文件 | 20 个 | 28 个 |
 | zh-CN i18n key | 3 527（`stockAnalysis`/`invest`/`quant`/`trade` 是**整段**） | 1 897（`opc` 整段） |
 
@@ -3930,3 +3930,111 @@ K1 不变（**2033**）：新文件在 `tests/`（被 `K1_IGNORE` 排除），�
 2. **资源目录分辨率未在真打包产物里验**：只在单测里覆盖（临时目录造 `plugins/bundled`），真安装包验证要等第 1 条接上。
 3. **前端未切插件命令、宿主命令未删**：`StockSearchBar.tsx:118` 仍调 `parse_analysis_intent`，`commandTotal` 仍 1543。
 4. **读数不降**（计划内）：ownedRe 桶仍 123 处 / 22 文件。
+
+## 83. `#35` B4-i：发布链路接通（暂存落点 + resources 声明 + 移动端守卫）（2026-11-04）
+
+**这一批关掉 §82 未做 1/2**：`bundle.resources` 与 `beforeBuildCommand` 接上，并证明落点与宿主解析路径逐字对齐。
+
+**落点为什么是 `src-tauri/plugins` 而不是 `src-tauri/resources/plugins`**（§82 H5 用的是后者，本批修正）：Tauri 打包 resources **保留相对 `tauri.conf.json` 的路径**。依据不是文档而是本机源码 `tauri-utils 2.9.3/src/resources.rs:17`（`resource_relpath` 逐段拼）与 `:228-231`（数组形态分支直接 `resource_relpath(&path)`）—— 声明 `"plugins"` ⇒ `$RESOURCE/plugins/...`；声明 `"resources/plugins"` ⇒ `$RESOURCE/resources/plugins/...`，比 `resolve_bundled_root` 期望的 `<resource_dir>/plugins/bundled` 多一层，宿主必然找不到。
+
+**交付（5 处）**：
+1. 新 `scripts/stage-plugin-bundles.mjs`：读 `TAURI_ENV_PLATFORM` / `TAURI_ENV_TARGET_TRIPLE`，命中 android/ios 打印跳过并退 0（桌面 `cargo build` 编出的是宿主架构，打进移动包无用且白增体积）；无 `TAURI_ENV_DEBUG` ⇒ `--release`（手工直跑按「想产出产物」处理）；落点 `src-tauri/plugins/bundled/stock`，转调 `build-plugin-bundle.mjs`。
+2. `tauri.conf.json`：`beforeBuildCommand` = `npm run build && node scripts/stage-plugin-bundles.mjs`；`bundle.resources` = `["pricing.toml", "plugins"]`。
+3. `.gitignore` 改 `src-tauri/plugins/`（二进制不入库，构建前生成）；`package.json` 的 `plugin:bundle:stage` 落点同步改。
+4. `scripts/build-plugin-bundle.mjs`：修 `--check` 自检的挂死（见踩坑）。
+5. 删掉本批早前按旧落点生成的 `src-tauri/resources/plugins/`（含一个 exe），旧目录不再有任何引用。
+
+**验收（2026-11-04 实测）**：
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| I1 | `node scripts/stage-plugin-bundles.mjs`（无 `TAURI_ENV_*`，按桌面处理） | 0 | release 构建 13.69s；产物 `src-tauri/plugins/bundled/stock/{plugin.json,bin/axagent-plugin-stock.exe}` |
+| I2 | `git status --porcelain src-tauri/plugins` + `git check-ignore -v …/plugin.json` | — | **0 条**；命中 `.gitignore:44:src-tauri/plugins/` |
+| I3 | `TAURI_ENV_PLATFORM=android node …` / `TAURI_ENV_TARGET_TRIPLE=aarch64-apple-ios node …` | 0 / 0 | 两条都打印移动端跳过，**未触发 cargo** |
+| I4 | `node scripts/build-plugin-bundle.mjs --out src-tauri/plugins/bundled/stock --release --check` | 0 | describe 握手 + shutdown 回执 + 退出码 0 + sha256 `e00d8e28…` 一致 |
+| I5 | `dprint.exe check --config <ABS> tauri.conf.json package.json scripts/stage-plugin-bundles.mjs` | 0 | 零 diff（UNC 下必须显式 `--config`，见 §72） |
+| I6 | `node -e` 读 `tauri.conf.json` | 0 | `resources=["pricing.toml","plugins"]`、`beforeBuildCommand` 含暂存脚本 |
+
+**踩坑（自检脚本自己挂死）**：`--check` 首跑永不返回 —— `shutdown` 在帧协议里只是**回执**，worker 的 `serve` 循环靠 **stdin EOF** 退出（`plugin-stock/src/main.rs:52` 注释逐字这么说），而脚本发完 `shutdown` 就 `await child.on("exit")`、不关 stdin ⇒ 双方互等（实测 worker 进程常驻、日志停在 sha256 那一行）。修法：收到回执后 `child.stdin.end()`，退出等待加 10 s 上限，并 `process.on("exit", () => child.kill())` 防 `fail()` 泄漏子进程。**判据：「自检通过」先得证明自检自己能退出**，否则它测的只是挂起。
+
+**未做（逐条点名）**：
+1. **未跑真 `tauri build`**：资源落位只在源码层对齐（I6 + 落盘），安装包里 `$RESOURCE/plugins/bundled` 尚未解包验证（Windows 上整包 >30 min，且需签名环境）。
+2. **移动端真机未验**：只验了守卫分支不跑 cargo，未验 `tauri android/ios build` 全链路。
+3. **前端未切插件命令、宿主命令未删**（B4-j / B4-k）：`StockSearchBar.tsx:118` 仍调宿主 `parse_analysis_intent`，`commandTotal` 仍 1543。
+
+## 84. `#35` B4-j：前端 NL 意图解析改走插件命令（2026-11-04）
+
+**为什么与 B4-k 同交付**：`StockSearchBar` 是宿主 `parse_analysis_intent` 的**唯一**调用方（全仓 grep 确认）。只切前端不删宿主 = 两份实现并存；只删宿主不切前端 = 功能直接消失。两批同提交，中间态不存在（关闭 §83 未做 3 的前半）。
+
+**交付（5 处）**：
+1. `src/lib/pluginCommandResolve.ts`：按命令名从 `plugin_list` 反查**启用中**插件的 id（不写死 `stock@bundled` —— 安装来源/改名都会让它静默失效）；结果按命令名缓存 —— `plugin_list` 每次都跑一轮内置插件落盘同步（`sync_bundled_plugins`），而这里在搜索框每次回车都会命中。枚举失败**不缓存**（宿主未就绪时下次重试）。
+2. `StockSearchBar.tsx`：`invoke("parse_analysis_intent")` → `plugin_execute_command{pluginId,name,input}`；插件未装 / 未启用 / 调用失败一律退回普通搜索（与「解析不出代码」同一处置，不新增提示文案）。
+3. 打包清单 `defaultEnabled: false → true`：切换后内置包不默认启用，发布版里这条功能就是**静默失效**（与 §79 的 `subprocess_execution` 同类：清单缺一项，enable 绿 ≠ 能用）。
+4. 开发期落点 `npm run plugin:bundle:dev` → `axagent-plugins/crates/plugins/bundled/stock`（`PluginManager::bundled_root()` 的编译期默认值）。`tauri dev` 的 resource 目录里没有插件，这是开发态唯一能加载到 worker 的路径；该目录进 `.gitignore`。
+5. 回归 6 条：`src/lib/__tests__/pluginCommandResolve.test.ts`（4 条：启用过滤 / 缓存 / 无命中 / 失败不缓存）+ `StockSearchBar.pluginIntent.test.tsx`（2 条：命中插件→填 store + 取行情；命令失败→退回普通搜索）。
+
+**验收（2026-11-04 实测）**：
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| J1 | `node scripts/vitest-run.mjs run src/lib/__tests__/pluginCommandResolve.test.ts` | 0 | **4 passed**（243 ms） |
+| J2 | `node scripts/vitest-run.mjs run src/components/stock-analysis/__tests__/StockSearchBar.pluginIntent.test.tsx` | 0 | **2 passed**：`plugin_execute_command` 收到 `{pluginId:"stock@bundled", name:"parse_analysis_intent", input:{input:…}}`，store 得到 `300750` 并取行情；失败分支退回 `searchStock("茅台", true)` |
+| J3 | `node scripts/check-tsc.mjs` | 0 | 文件发现数 **1463**（含新增 2 个） |
+| J4 | `node node_modules/dprint/bin.cjs check --incremental=false`（本批 8 个文件） | 0 | 零 diff |
+
+**踩坑（都是测试替身的问题，不是产品缺陷）**：
+- `userEvent.type(input, "…{enter}")` 在这个受控输入上**不触发** `onSearch`（实测两次调用数都是 0）⇒ 改 `fireEvent.change` + `fireEvent.keyDown(Enter)`（antd 的 `onPressEnter` 挂在 keyDown 上）。
+- `onChange` 本身会调 `searchStock(value)`（**单参**），所以「没走回退分支」只能用**双参**形态断言；按「完全没调用」断言必假红。
+- 空闲期之外跑 vitest 会撞 #141 的 SMB worker 启动超时（本轮首跑即 `Timeout waiting for worker to respond`，与代码无关；cargo 空闲后重跑即绿）。
+
+**未做（逐条点名）**：
+1. **桌面真机未验**：没有带插件的安装包，也没在 `tauri dev` 里跑过「启用插件 → 回车 → 解析」全链路。浏览器 mock 的 `plugin_execute_command` 返回空串 ⇒ 该模式下 NL 解析与改造前一样不可用（改造前它调的宿主命令在 mock 里也没有实现）。
+2. **反查缓存不感知运行期禁用**：会话内首次命中后，用户在插件页禁用该插件，下一次解析仍会拿旧 id → 命令报错 → 退回普通搜索（不崩、不误导），但不会自动重查。是否加失效广播，等真实反馈再定。
+3. **开发期需手工暂存**：`plugin:bundle:dev` 不进 `beforeDevCommand`（那会把 cargo 构建塞进每次 dev 启动）。
+
+## 85. `#35` B4-k：删宿主同名命令 + 断开 `analysis-engine → stock-core`（2026-11-04）
+
+**这一批把 B4-j 的切换收尾**：宿主 `parse_analysis_intent` 已无调用方（全仓 grep：只剩它自己的定义与 `register_commands.rs` 的产物行），删除后主壳不再借道 `analysis-engine` 链回股票域逻辑。
+
+**交付（4 处）**：
+1. 删 `src-tauri/src/commands/stock_analysis.rs` 的 `parse_analysis_intent`（含 `#[agent_command]` 段与 `── P2-1: NLU 意图解析 ──` 小标题，共 −13 行）。`register_commands.rs` 由 `build.rs` 重生成（**不手改**，禁区 7）：−1 条目、行数 1610 → 1609。
+2. `axagent-quant/crates/analysis-engine`：删 `pub use axagent_stock_core::intent_parser;` 与 `Cargo.toml` 的 `axagent-stock-core` 依赖。理由不是洁癖 —— 留 re-export 等于「主壳仍经 analysis-engine 链接股票域 foundation」，与迁出方向相反；消费方现在只剩 `plugin-stock`（同一 workspace，路径依赖照旧）。
+3. `axagent-plugins/crates/plugins` 的夹具 worker（#49 的 `e2e_command_frame_worker.rs`）：把移植的 `HOT_STOCKS` / `HORIZONS` / `extract_*` / `parse_intent`（**约 70 行重复词表**，禁区 12）整段删除，命令改为 `echo_input`（回显 `text` 与字符数）。夹具的职责是证明**帧通道**（pluginId 绑定、形状校验先于派发、超时、错误码透传），股票解析的端到端已由 §77/§79 的真插件用例覆盖 —— 两件事不该用一份复制词表粘在一起。同步改 `e2e_command_frame_test.rs` 的 manifest 与 4 条断言。
+4. 读数同批改：`commandTotal` 1543→**1542**、`commandNameSetParity` 1543→**1542**、`stockBoundaryCommands` 304→**303**、`stockAuditDomainCommands` 306→**305**、`registryFileLines` 1610→**1609**、`frontendFileCaliber` 85 009→**85 164 / 295 文件**、`frontendDirCaliber` 60 757→**60 912 / 212 文件**（后两条来自 B4-j 的前端改动；首轮估值 85 152 / 60 900 是拿改测试**之前**的 130 行算的，实测 142 行 ⇒ 门禁差 12 行当场抓出，见 §86）；PLAN §0.8.2 / §0.10.1 的现值句同批改。其余「304 条」是**包级口径**（宿主 303 + 插件 1 条已迁走的 `parse_analysis_intent`），不逐处改写。
+
+**验收（2026-11-04 实测）**：
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| K1 | `cargo check -p axagent --lib`（cwd=`src-tauri`） | 0 | Finished **21m30s**；`register_commands.rs` 已重生成：`split('\n')` 行数 **1609**、`parse_analysis_intent` **零命中** |
+| K2 | `AXAGENT_TEST_PLUGIN_SUBPROCESS=1 cargo test -p axagent-plugins`（cwd=`axagent-plugins`） | 0 | **230 passed**（lib）+ 夹具 e2e **4 passed**（`echo_input` 往返 / 缺 `text` 派发前被拒 / 超时 / 错误码透传） |
+| K3 | `cargo test -p axagent-plugin-stock` | 0 | **9 passed**（真插件命令面不受影响） |
+| K4 | `cargo check -p axagent-analysis-engine --all-targets`（cwd=`axagent-quant`） | 0 | Finished 1m42s（re-export 与依赖都删净） |
+| K5 | `rustfmt --edition 2024 --check`（3 个 `.rs`）+ `cargo fmt -p axagent-analysis-engine -- --check` | 0 | 零 diff |
+| K6 | `node scripts/check-tsc.mjs` / `dprint check --incremental=false` | 0 / 0 | 1463 文件；8 个本批文件零 diff |
+
+**踩坑**：`cargo check` 是**唯一**会重生成 `register_commands.rs` 的动作 —— 删命令后先跑门禁会得到「产物滞后」（`commandTotal` 与 `commandNameSetParity` 同时红、专码 `ARTIFACT-STALE`，见 §58），那不是读数写错。必须先 `cargo check` 再对账。
+
+**未做（逐条点名）**：
+1. **全量门禁未跑**：按 AGENTS「阶段内用 `cargo check` + 定点 clippy，全部阶段完成后跑一次全量」，本批只跑了定点（`cargo check` 主 crate、`analysis-engine`、插件两个 crate 的测试）；`clippy --workspace --all-targets --all-features -- -D warnings` 与 `test --workspace` 留到 #35 收尾。
+2. **主 crate clippy 未单跑**：本批对主 crate 只有「删一段」的改动，用 `cargo check` 兜底；真要 clippy 全绿需 ~20 min 独占构建窗口。
+3. **桌面真机 / 安装包未验**：与 §84 未做 1 同因（没有带插件的安装包）。
+4. **`AGENTS.md` 角色登记未做**：`stock-core` 的 foundation 登记已进 `axagent-plugins/crates/README.md`；`AGENTS.md` 当前有**他人未提交改动**，本批不碰。
+5. **ownedRe 读数不降**：123 处 / 22 文件是「主壳非域文件引用域 crate」，本批删的是域自有文件里的两行（不计入该读数）；真正的下降要等股票域文件整体搬迁（#35 后续 B 阶段）。
+
+## 86. `#35` B4-i/j/k 的交付门禁（2026-11-04）
+
+**第一轮：2 条硬失败，全部是「前端行数」这一族**：
+
+```
+FAIL: 锚点 frontendFileCaliber：登记 85152 行 / 实测 85164 行 / 差 12
+FAIL: 锚点 frontendDirCaliber ：登记 60900 行 / 实测 60912 行 / 差 12
+```
+
+**真因**：两条读数的增量是本批自己算的（`60757 + StockSearchBar 增量 13 + 新测试行数`），而新测试在「算完行数」之后又被改过一次（`userEvent.type` → `fireEvent.change + keyDown`，见 §84 踩坑），从 130 行涨到 **142** 行 ⇒ 少算 12 行。**不是判据错、不是盘上漂移**：其余锚点（commandTotal 1542 / stockBoundary 303 / stockAudit 305 / registryFileLines 1609 / 契约 A 三方 1542/1542/1542）第一轮就全绿。
+
+**修法（不放宽判据）**：只把两个登记值与 PLAN §0.10.1 的现值句改成实测值（85 164 / 60 912），`feRe` 与行数口径一字未动。
+
+**第二轮（修正后）**：`node scripts/check-capability-register.mjs` **EXIT=0** —— `PASS: hard:true 判据全部一致（登记 37 = A11/B8/C4/H1/K10/D3；能力面 Σ=23；锚点 21 项）`；`FAIL:` 行 **0** 条；PLAN 对账 `planMustAppear 15 项 · planPinned 11 处 · planOld 4 项（alsoAt 健康 15 / 腐烂 0）`。
+
+**判据（写下来防复发）**：前端体量这类「自己算出来的读数」，**必须在本批最后一次改文件之后再算**；算完到跑门禁之间若又碰了 `src/**`，重算而不是让门禁来纠。行数口径 = `split('\n').length`（含末行空元素），与 `audit-l1-blockers.mjs` 同源。

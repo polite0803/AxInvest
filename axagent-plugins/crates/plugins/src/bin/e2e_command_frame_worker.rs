@@ -2,16 +2,10 @@
 
 //! 任务 #49（T2 派发口）端到端夹具 worker：长驻 + 承接 `ops::COMMAND` 命令帧。
 //!
-//! 示证对象是一条**无状态**股票命名命令 `parse_analysis_intent`：真实实现在
-//! `axagent-quant/crates/analysis-engine/src/intent_parser.rs`，判据是它的命令入口
-//! （`stock_analysis.rs:7713`）签名不带 `State<'_, AppState>`，函数体只做
-//! 「字符串 → 结构化意图」的纯计算 —— 不查数据库、不读文件、不取时钟、不碰任何
-//! 宿主共享状态，所有输入由调用方传入。这正是 P6.1 迁出口要的形态。
-//!
-//! ⚠ 本夹具只移植了词表**子集**（6 位代码、贵州茅台/茅台/宁德时代、三档周期、
-//! 两类动作），目的是证明「可迁移的股票命令能以命令帧跑通全链路」，
-//! **不是**业务逻辑的最终落位；真迁移时 worker 直接依赖 `intent_parser` 本体，
-//! 不维持这份副本（迁移模板见任务 #49 交接报告）。
+//! 示证对象是一条**无状态**命令 `echo_input`：回显 `input.text` 与其字符数。
+//! 它只证明「命名命令能以命令帧跑通全链路」，**不含任何业务逻辑** —— 真实股票命令的
+//! 端到端在 `e2e_stock_tool_test.rs` / `e2e_stock_bundle_install_test.rs`（跑
+//! `plugin-stock` 本体），本夹具不复制那份词表（此前那版子集副本已删，2026-11-04）。
 //!
 //! 回执行：处理每条命令帧前在安装目录（= spawn 时的 cwd）追加一行
 //! `ran command=<命令名> plugin_id=<帧上绑定的插件ID>` —— 集成测试据此**客观证明**
@@ -35,79 +29,6 @@ fn declaration() -> PluginDeclaration {
         calls: Vec::new(),
         capabilities: Vec::new(),
     }
-}
-
-/// 热门词表子集（与 `intent_parser.rs` 的 `HOT_STOCK_MAP` 同名同码）。
-const HOT_STOCKS: &[(&str, &str)] =
-    &[("贵州茅台", "600519"), ("茅台", "600519"), ("宁德时代", "300750")];
-
-/// 周期词表子集（原表更长，见 `HORIZON_KEYWORDS`）。
-const HORIZONS: &[(&str, &str)] = &[("短线", "short"), ("中线", "mid"), ("长线", "long")];
-
-/// 与 `extract_stock_code` 同判据：纯 6 位数字或分词中的 6 位数字。
-fn extract_code(input: &str) -> Option<String> {
-    if input.len() == 6 && input.chars().all(|c| c.is_ascii_digit()) {
-        return Some(input.to_string());
-    }
-    input
-        .split_whitespace()
-        .find(|word| word.len() == 6 && word.chars().all(|c| c.is_ascii_digit()))
-        .map(str::to_string)
-}
-
-/// 与 `extract_horizon` 同判据（子集词表）。
-fn extract_horizon(input: &str) -> Option<&'static str> {
-    HORIZONS.iter().find(|(kw, _)| input.contains(kw)).map(|(_, h)| *h)
-}
-
-/// 与 `extract_action` 同判据：先「查看类」后「分析类」，兜底 `view`。
-fn extract_action(input: &str) -> &'static str {
-    if ["看看", "查看", "查", "关注"].iter().any(|kw| input.contains(kw)) {
-        return "view";
-    }
-    if ["调研", "分析", "研究", "评估"].iter().any(|kw| input.contains(kw)) {
-        return "research";
-    }
-    "view"
-}
-
-/// 移植版 `parse_analysis_intent`：输出与 `ParsedIntent` 的 serde 形态同构（camelCase）。
-fn parse_intent(input: &str) -> Value {
-    let trimmed = input.trim();
-    let horizon = extract_horizon(trimmed);
-    let action = extract_action(trimmed);
-    let horizon_json = horizon.map(Value::from).unwrap_or(Value::Null);
-    if let Some(code) = extract_code(trimmed) {
-        return json!({
-            "rawInput": trimmed,
-            "stockQuery": code.clone(),
-            "stockCode": code.clone(),
-            "timeHorizon": horizon_json,
-            "actionType": action,
-            "success": true,
-            "description": format!("代码识别: {code}"),
-        });
-    }
-    if let Some((name, code)) = HOT_STOCKS.iter().find(|(name, _)| trimmed.contains(name)) {
-        return json!({
-            "rawInput": trimmed,
-            "stockQuery": name,
-            "stockCode": code,
-            "timeHorizon": horizon_json,
-            "actionType": action,
-            "success": true,
-            "description": format!("热门词命中: {name} ({code})"),
-        });
-    }
-    json!({
-        "rawInput": trimmed,
-        "stockQuery": trimmed,
-        "stockCode": Value::Null,
-        "timeHorizon": Value::Null,
-        "actionType": action,
-        "success": false,
-        "description": "夹具词表未覆盖，无法解析",
-    })
 }
 
 /// 在安装目录（spawn 时的 cwd）追加一行执行标记。
@@ -143,16 +64,17 @@ fn handle_command(request: &FrameRequest) -> FrameResponse {
     note_ran(&frame.command, &frame.plugin_id);
 
     let outcome = match frame.command.as_str() {
-        "parse_analysis_intent" => {
-            let Some(Value::String(text)) = frame.input.get("input") else {
+        "echo_input" => {
+            let Some(Value::String(text)) = frame.input.get("text") else {
                 return CommandFault::for_frame(
                     &frame,
                     error_codes::PLUGIN_COMMAND_INVALID_ARGS,
-                    "input.input 必须是字符串",
+                    "input.text 必须是字符串",
                 )
                 .into_frame_response();
             };
-            CommandOutcome::Reply(CommandReply::for_frame(&frame, parse_intent(text.as_str())))
+            let reply = json!({ "text": text, "length": text.chars().count() });
+            CommandOutcome::Reply(CommandReply::for_frame(&frame, reply))
         },
         // 「装死」演示：睡过预算再回帧 —— 宿主必须先到点放弃（超时被拦的用例载体）。
         "sleep_too_long" => {

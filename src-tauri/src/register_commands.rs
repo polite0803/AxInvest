@@ -1301,7 +1301,6 @@ macro_rules! register_all_commands {
             commands::stock_analysis::manual_recalc_strategy_weights,
             commands::stock_analysis::monitor_status,
             commands::stock_analysis::optimize_scoring_weights,
-            commands::stock_analysis::parse_analysis_intent,
             commands::stock_analysis::parse_trades_csv,
             commands::stock_analysis::parse_vlm_portfolio_screenshot,
             commands::stock_analysis::portfolio_backtest_run,

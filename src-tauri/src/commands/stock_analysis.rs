@@ -7684,19 +7684,6 @@ pub fn analyze_backtest_feedback(
     Ok(backtest_feedback::analyze_backtest_feedback(input))
 }
 
-// ── P2-1: NLU 意图解析 ──
-
-/// 解析自然语言分析意图
-///
-/// 输入"调研茅台短线""分析宁德时代中线"等自然语言，返回结构化分析请求参数。
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "解析自然语言分析意图")]
-#[tauri::command]
-pub fn parse_analysis_intent(
-    input: String,
-) -> Result<axagent_analysis_engine::intent_parser::ParsedIntent, String> {
-    Ok(axagent_analysis_engine::intent_parser::parse_analysis_intent(&input))
-}
-
 // ── P1-2: VLM 截图导入持仓 ──
 
 /// 解析 VLM 截图识别结果，返回结构化持仓数据

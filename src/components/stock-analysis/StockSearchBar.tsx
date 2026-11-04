@@ -1,5 +1,6 @@
 import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
+import { resolvePluginForCommand } from "@/lib/pluginCommandResolve";
 import { FAST_TEMPLATE_ID, horizonLabelKey } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { App, Button, Input, Segmented, Tag, Tooltip } from "antd";
@@ -15,6 +16,9 @@ interface ParsedIntent {
   success: boolean;
   description: string;
 }
+
+/** 提供 NL 意图解析的插件命令名（与 `plugin-stock` 的 `COMMAND_PARSE_INTENT` 逐字一致）。 */
+const PARSE_INTENT_COMMAND = "parse_analysis_intent";
 
 /**
  * 从搜索框文本解析出股票代码。
@@ -113,21 +117,30 @@ export function StockSearchBar() {
   const handleSearch = useCallback(async (value: string) => {
     setIntent(null);
 
-    // 先尝试 NL 意图解析
+    // 先尝试 NL 意图解析。实现方是插件（`stock` 包的命名命令），宿主不再提供同名命令；
+    // 插件未装 / 未启用 / 调用失败都退回普通搜索，与「解析不出代码」同一处置。
     try {
-      const parsed = await invoke<ParsedIntent>("parse_analysis_intent", { input: value });
-      if (parsed.success && parsed.stockCode) {
-        setIntent(parsed);
-        // 直接填充分析参数
-        useStockAnalysisStore.setState({
-          stockCode: parsed.stockCode,
-          stockName: parsed.stockQuery || parsed.stockCode,
-          searchKeyword: value,
+      const pluginId = await resolvePluginForCommand(PARSE_INTENT_COMMAND);
+      if (pluginId) {
+        const raw = await invoke<string>("plugin_execute_command", {
+          pluginId,
+          name: PARSE_INTENT_COMMAND,
+          input: { input: value },
         });
-        // 如果查询词就是股票代码/名称，直接获取行情
-        getStockQuote(parsed.stockCode);
-        getStockKline(parsed.stockCode, "daily", 120);
-        return;
+        const parsed = JSON.parse(raw) as ParsedIntent;
+        if (parsed.success && parsed.stockCode) {
+          setIntent(parsed);
+          // 直接填充分析参数
+          useStockAnalysisStore.setState({
+            stockCode: parsed.stockCode,
+            stockName: parsed.stockQuery || parsed.stockCode,
+            searchKeyword: value,
+          });
+          // 如果查询词就是股票代码/名称，直接获取行情
+          getStockQuote(parsed.stockCode);
+          getStockKline(parsed.stockCode, "daily", 120);
+          return;
+        }
       }
     } catch {
       // NL 解析失败，回退到普通搜索

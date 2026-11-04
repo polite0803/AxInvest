@@ -1,0 +1,14 @@
+# axagent-plugins workspace 成员与角色
+
+> 本目录下 crate 都属「插件层」。harness 的那套角色（foundation / consumer / implementor /
+> hybrid / wiring）判的是 `axagent-*` 库 crate 之间的依赖方向；**插件侧可执行**不在其中，
+> 单列一行，判据是「只依赖 foundation + 协议 crate，不反向依赖主壳或宿主运行时」。
+
+| crate | 角色 | 允许依赖 | 说明 |
+|---|---|---|---|
+| `plugins` | 宿主侧插件运行时 | harness + 各 implementor（wiring 口径） | 清单发现、启停、长驻 worker 管理、T2 命令/接缝分派 |
+| `plugin-stock` | **插件侧可执行**（B4 骨架） | 仅 `axagent-plugin-proto` | 股票域 worker 进程；域逻辑随 B4 批次搬入，搬入前不声明任何能力 |
+| `schema-gen` | 构建期工具 | harness | IPC 类型生成器；无运行时消费方 |
+
+`plugin-proto` 本体在 `axagent-core/crates/plugin-proto`（foundation，零 `axagent-*` 依赖），
+是宿主与插件 worker 之间帧协议的**唯一权威**：两侧都 `use` 同一份类型，不得各写一套 JSON 形状。

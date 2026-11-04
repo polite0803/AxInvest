@@ -9,6 +9,7 @@
 resolver = "2"
 members = [
   "crates/plugins",
+  "crates/plugin-stock",
   "crates/schema-gen",
 ]
 

@@ -4258,7 +4258,7 @@ FAIL: 锚点 frontendDirCaliber ：登记 60900 行 / 实测 60912 行 / 差 12
 
 | 批次 | 内容 | 前置 | 预期读数 |
 |---|---|---|---|
-| **B8-0** | **前端 bundle 通道**：把股票前端（页面 + 渲染器）打进插件产物，宿主按 `pages[]` 装载 | 无（#44/#46/#64 已建，缺 vite 产物与 manifest 资产段） | 0（前置） |
+| **B8-0** | **前端 bundle 通道**：把股票前端（页面 + 渲染器）打进插件产物，宿主按 `pages[]` 装载 | 无（#44/#46/#64 已建，缺 vite 产物与 manifest 资产段） | 0（前置）；**B8-0a 通道已打通，见 §92** |
 | **B8-1** | **渲染器注册表**：宿主聊天/任务中心只认「按类型注册的渲染器」，股票实现由插件注入 | B8-0 | −6～−9 |
 | **B8-2** | 页面与任务中心迁移（InvestPage / Screener / ScreenshotDiagnosis / TasksCenter adapter） | B8-0 | −10～−12 |
 | **B8-3** | 生成 DTO（schema-gen 扩面）或删除前端视图类型依赖 | 无（可与 B8-2 并行） | −4～−6 |
@@ -4272,3 +4272,35 @@ FAIL: 锚点 frontendDirCaliber ：登记 60900 行 / 实测 60912 行 / 差 12
 1. B8-0 的前端打包方案未定稿：需要决定「页面产物用 iframe 容器（T3 现有形态）还是 host 内 module federation」——前者复用 #64 的 page 容器，后者要新机制；先用现有 `pages[]`。
 2. 20 处共享基元的「逐函数中性判定」未做（`stock-analysis-utils` 的 8 个导出需要一条条判）。
 3. `schema-gen` 扩面未做（当前只出 18 个 IPC DTO）。
+
+## §92 B8-0a 前端 bundle 通道打通（#35，2026-11-04）
+
+**目标**：把 `pages[]` 这条「插件自带前端资产 → 宿主解析 → 页面容器装载」的链从**只有宿主侧实现**补到**产物侧真的带资产**。§91 判定的缺口是「股票包只有 Rust worker + manifest，没有前端资产」；本批只打通通道，不搬 UI。
+
+### 92.1 改动（3 个文件，+114 行 / 新增 1 个资产文件）
+
+| 文件 | 改动 |
+|---|---|
+| `axagent-plugins/crates/plugin-stock/web/pages/index.html`（新增，31 行） | 通道探针页：静态 HTML，**刻意不含脚本** —— 桥客户端是 TS 源码模块（`src/sdk/pluginClientBridge.ts` 由插件作者 vendored 进构建图），静态页没有构建步骤，写内联 `postMessage` 只会成为协议的第二份副本（违反「协议值只住两个文件」的既有约束）。 |
+| `scripts/build-plugin-bundle.mjs`（+89 行） | ① `webRoot = axagent-plugins/crates/plugin-stock/web` 整树拷进产物，相对路径原样保留；拷贝前按**源目录顶层子目录**清同名目录（源里删掉的页面不会作为孤儿留在产物里）；② 扩展名按 `PANEL_ASSET_ALLOWED_EXTS` 的镜像白名单在**打包期**拒绝（不等安装期清单校验才失败）；③ 清单新增 `pages: [{ id: "stock-home", title: "股票", entry: "pages/index.html", loading: "bundle" }]`；④ `--check` 新增 `checkDeclaredPages()`：`entry` 必须是相对路径、不含 `..`、扩展名合规、解析后仍在产物根内且文件存在。 |
+| `axagent-plugins/crates/plugins/tests/e2e_stock_bundle_install_test.rs`（+25 行） | 安装链路末尾补断言：`list_plugin_pages()` 能看到 `stock-home`；`resolve_page_asset()` 返回的绝对路径**以 `outcome.install_path` 为前缀**、是既有文件、内容确为探针页。 |
+
+### 92.2 验证（全部实跑，读数可复算）
+
+| 命令 | 结果 |
+|---|---|
+| `node scripts/build-plugin-bundle.mjs --check --out .tmp/plugin-stock-check` | `EXIT=0`；产物 1 个前端文件；`--check ✅ 1 个 bundle 页的 entry 均存在且在白名单内`；`--check ✅ describe 握手 + shutdown 回执 + 退出码 0 + sha256 一致` |
+| 负例 A/B：把 `web/pages/index.html` 移走后重跑打包 | `EXIT=1`，报 `前端源目录为空` —— **缺资产不会产出只有清单没有页面的包**（跑完已原样移回） |
+| `AXAGENT_STOCK_BUNDLE_DIR='D:\OneManager\AxInvest\.tmp\plugin-stock-check' cargo test -p axagent-plugins --test e2e_stock_bundle_install_test` | `1 passed; 0 failed`（含新增的页面解析断言，0.49 s） |
+| `rustfmt --edition 2024 --check e2e_stock_bundle_install_test.rs` | `EXIT=0` |
+| `node --check scripts/build-plugin-bundle.mjs` | `SYNTAX_OK` |
+| `node scripts/check-capability-register.mjs`（按既有规程驻留 PLAN 头部 3 行后跑，`cmp` 校验 `RESTORED_IDENTICAL`） | `PASS: hard:true 判据全部一致（登记 37 = A11/B8/C4/H1/K10/D3；能力面 Σ=23；锚点 21 项）` |
+
+**读数不变**：`l1ForeignStock` 102 处 / 19 文件、`tool.set` 198、H 桶 3 条 / 3 文件、Cargo 边 7 条 —— 本批**不碰任何域 crate 引用**。前端体量口径（`feRe` 只扫 `src/**` 的 .ts/.tsx）同样不变：新增的 `.html` 在 `axagent-plugins/` 下，不入该口径。
+
+### 92.3 本批未做（如实列）
+
+1. **真实股票 UI 未迁**：探针页只证明通道；页面/任务中心/渲染器迁移仍按 §91.3 的 B8-1..B8-5 排队。插件前端仍**没有 vite 构建**（当前直拷静态资产；等 B8-1 落地后再决定是否引入构建步骤）。
+2. **整栈 UI 未跑**：没有启动 Tauri 应用做「安装包 → 页面容器渲染」的目视验收；本批验到的是宿主 `resolve_page_asset` 边界（e2e 安装测试）与产物自检，容器渲染归 #64 的既有测试覆盖。
+3. **`integrity` 语义未动**：`plugin.json` 里的 `integrity.hash` 仍是**worker 二进制**的哈希（打包脚本自检用）；宿主安装锚点是 `hash_plugin_directory()` 的**整目录**哈希，二者不同源。这是 B4 打包骨架遗留的措辞问题，不在本批扩大；页面资产受宿主目录哈希保护，不受此影响。
+4. 第五道门裸跑仍会因 PLAN 头部 3 行与钉死行号差 3 而报 26 条假红（**既有状态**，非本批引入）；本批按既定驻留规程取证。

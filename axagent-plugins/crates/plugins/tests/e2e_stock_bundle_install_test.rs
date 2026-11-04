@@ -78,6 +78,31 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
     assert_eq!(parsed["price"], 1500.25, "行情必须原样透出：{parsed:?}");
     assert_eq!(parsed["code"], "600519");
 
+    // B8-0：前端资产随包安装 —— `pages[]` 声明的 entry 必须解析成**安装目录内**的既有文件。
+    // 这里锁的是「打包脚本写出的清单与盘上资产一致」，不是资产内容本身（内容归 B8-2）。
+    let listed = manager.list_plugin_pages().expect("页面列表投影应可读");
+    let stock = listed
+        .iter()
+        .find(|p| p.id == outcome.plugin_id)
+        .expect("已安装的股票包应出现在页面列表里");
+    assert_eq!(stock.pages.len(), 1, "清单声明的页面数应与 pages[] 一致：{:?}", stock.pages);
+    assert_eq!(stock.pages[0].id, "stock-home");
+
+    let located = manager
+        .resolve_page_asset(&outcome.plugin_id, "stock-home")
+        .expect("bundle 页的 entry 应解析成安装根内的绝对路径");
+    assert_eq!(located.entry, "pages/index.html");
+    let page_path = std::path::PathBuf::from(&located.absolute_path);
+    assert!(
+        page_path.starts_with(&outcome.install_path),
+        "页面资产必须落在安装目录内：{} vs {}",
+        page_path.display(),
+        outcome.install_path.display()
+    );
+    assert!(page_path.is_file(), "页面资产不存在：{}", page_path.display());
+    let html = std::fs::read_to_string(&page_path).expect("页面资产应可读");
+    assert!(html.contains("股票插件前端通道已打通"), "读到的不是探针页：{html}");
+
     // 先放 manager（析构时停 worker），再删临时目录（Windows 上占用中的 exe 删不掉）。
     drop(manager);
     market.undo();

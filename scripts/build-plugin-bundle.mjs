@@ -31,6 +31,14 @@ const outRoot = path.resolve(
   outFlag >= 0 && argv[outFlag + 1] ? argv[outFlag + 1] : path.join(repoRoot, "dist", "plugins", "stock"),
 );
 
+// 前端贡献的源目录：`web/` 下的文件按**相对路径原样**进产物，`pages[].entry` 即这些相对路径。
+// 目前只有一页通道探针（B8-0）；真实股票 UI 随 B8-1..B8-5 才落进这里。
+const webRoot = path.join(workspaceRoot, "crates", "plugin-stock", "web");
+// 与宿主 `PANEL_ASSET_ALLOWED_EXTS`（axagent-plugins/crates/plugins/src/manager.rs）同口径：
+// 清单校验会拒掉白名单外的扩展名，产物自检必须在**打包期**就报出来，而不是等安装时才失败。
+const PAGE_ASSET_ALLOWED_EXTS = new Set(["html", "htm", "js", "css"]);
+const PAGE_ENTRY = "pages/index.html";
+
 function fail(message) {
   console.error(`[plugin-bundle] ${message}`);
   process.exit(1);
@@ -76,6 +84,30 @@ const stagedBinary = path.join(binDir, binaryName);
 fs.copyFileSync(builtBinary, stagedBinary);
 
 const sha256 = createHash("sha256").update(fs.readFileSync(stagedBinary)).digest("hex");
+
+// 3.5) 前端资产：源目录整树拷进安装根。
+//      先按源目录的**顶层子目录**清一遍同名目录 —— 否则源里删掉的页面会作为孤儿留在产物里，
+//      宿主按目录哈希钉锚也看不出「这份资产没有任何声明指向它」。
+if (!fs.existsSync(webRoot)) fail(`前端源目录不存在：${webRoot}`);
+for (const top of fs.readdirSync(webRoot, { withFileTypes: true })) {
+  if (top.isDirectory()) fs.rmSync(path.join(outRoot, top.name), { recursive: true, force: true });
+}
+const webFiles = listFilesRecursive(webRoot);
+if (webFiles.length === 0) fail(`前端源目录为空：${webRoot}`);
+for (const file of webFiles) {
+  const rel = path.relative(webRoot, file).split(path.sep).join("/");
+  const ext = path.extname(rel).slice(1).toLowerCase();
+  if (!PAGE_ASSET_ALLOWED_EXTS.has(ext)) {
+    fail(`前端资产扩展名不在白名单（${[...PAGE_ASSET_ALLOWED_EXTS].join(", ")}）：${rel}`);
+  }
+  const target = path.join(outRoot, ...rel.split("/"));
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(file, target);
+}
+if (!fs.existsSync(path.join(outRoot, ...PAGE_ENTRY.split("/")))) {
+  fail(`清单要声明的页面资产不在源目录里：${path.join(webRoot, ...PAGE_ENTRY.split("/"))}`);
+}
+
 const manifest = {
   name: "stock",
   version: workerPackage.version,
@@ -91,6 +123,10 @@ const manifest = {
   // 宿主同名命令（B4-j 后删除）不再兜底 ⇒ 内置包不默认启用就等于该功能静默失效。
   defaultEnabled: true,
   worker: { program: path.posix.join("bin", binaryName) },
+  // 前端页面声明：`entry` 相对安装目录（扩展名走宿主资产白名单），宿主
+  // `PluginManager::resolve_page_asset` 把它解析成安装根内的绝对路径；
+  // 前端只传 `(pluginId, pageId)`，不得自己拼路径。
+  pages: [{ id: "stock-home", title: "股票", entry: PAGE_ENTRY, loading: "bundle" }],
   // `command` 用 `worker://<名>` 占位：worker 通道不读它（按 `name` 发帧），但若意外
   // 退回 spawn 通道，这个不存在的程序名会当场失败而不是静默跑别的东西。
   commands: [
@@ -122,6 +158,7 @@ fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
 console.log(`[plugin-bundle] 产物目录：${outRoot}`);
 console.log(`[plugin-bundle] worker   ：${stagedBinary}`);
+console.log(`[plugin-bundle] 前端资产 ：${webFiles.length} 个文件（页面入口 ${PAGE_ENTRY}）`);
 console.log(`[plugin-bundle] 清单     ：${manifestPath}`);
 console.log(`[plugin-bundle] sha256   ：${sha256}`);
 
@@ -131,6 +168,8 @@ if (check) {
 
 /** 起一次成品 worker：describe 必须回合法声明，shutdown 必须回执并以 0 退出。 */
 async function checkStagedBundle(declared, root) {
+  checkDeclaredPages(declared, root);
+
   const program = path.join(root, declared.worker.program);
   if (!fs.existsSync(program)) fail(`--check：清单声明的 worker 不存在：${program}`);
   const onDisk = createHash("sha256").update(fs.readFileSync(program)).digest("hex");
@@ -172,6 +211,56 @@ async function checkStagedBundle(declared, root) {
   if (exitCode !== 0) fail(`--check：worker 退出码 ${exitCode}（应为 0）`);
 
   console.log("[plugin-bundle] --check ✅ describe 握手 + shutdown 回执 + 退出码 0 + sha256 一致");
+}
+
+/**
+ * 产物自检的前端一侧：`pages[]` 必须真能指向安装根内的既有资产。
+ *
+ * 校验口径照宿主 `PluginManager::resolve_page_asset` 的载入期防线，但**不替代**它 ——
+ * 宿主那边还有 registry 哈希锚与 canonicalize（符号链接逃逸）。这里只保证
+ * 「打包脚本写出的清单与盘上文件一致」，把那类缺陷挡在装机之前。
+ */
+function checkDeclaredPages(declared, root) {
+  const pages = declared.pages ?? [];
+  if (pages.length === 0) fail("--check：清单没有 pages[]，前端 bundle 通道无从验证");
+  let bundlePages = 0;
+  for (const page of pages) {
+    // `schema` 页的 entry 是动态 UI Schema 的 id，没有文件资产可查（宿主同样跳过形状校验）。
+    if (page.loading !== "bundle") continue;
+    bundlePages += 1;
+    if (!page.entry) fail(`--check：页面 ${page.id} 没有 entry`);
+    if (path.isAbsolute(page.entry) || page.entry.startsWith("/") || page.entry.startsWith("\\")) {
+      fail(`--check：页面 ${page.id} 的 entry 必须是相对安装目录的路径：${page.entry}`);
+    }
+    if (page.entry.split(/[\\/]/).includes("..")) {
+      fail(`--check：页面 ${page.id} 的 entry 不得逃出安装目录：${page.entry}`);
+    }
+    const ext = path.extname(page.entry).slice(1).toLowerCase();
+    if (!PAGE_ASSET_ALLOWED_EXTS.has(ext)) {
+      fail(`--check：页面 ${page.id} 的 entry 扩展名不在白名单：${page.entry}`);
+    }
+    const absolute = path.resolve(root, page.entry);
+    const relative = path.relative(root, absolute);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      fail(`--check：页面 ${page.id} 的资产落在安装根之外：${absolute}`);
+    }
+    if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
+      fail(`--check：清单声明的页面资产不存在：${absolute}`);
+    }
+  }
+  if (bundlePages === 0) fail("--check：pages[] 里没有任何 bundle 页，通道未被验证");
+  console.log(`[plugin-bundle] --check ✅ ${bundlePages} 个 bundle 页的 entry 均存在且在白名单内`);
+}
+
+/** 递归列出目录下的所有文件（保持不排序；调用方只按相对路径逐个处理）。 */
+function listFilesRecursive(dir) {
+  const files = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...listFilesRecursive(full));
+    else if (entry.isFile()) files.push(full);
+  }
+  return files;
 }
 
 function writeFrame(stream, value) {

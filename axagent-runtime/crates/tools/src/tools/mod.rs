@@ -354,11 +354,9 @@ pub fn builtin_tool_instances() -> Vec<std::sync::Arc<dyn crate::Tool>> {
         std::sync::Arc::new(finance::DetectLimitUpTool),
         std::sync::Arc::new(finance::DetectCandlestickPatternsTool),
         std::sync::Arc::new(finance::DetectDivergenceTool),
-        std::sync::Arc::new(finance::ResearchReportsTool),
-        std::sync::Arc::new(finance::ConceptBlocksTool),
-        std::sync::Arc::new(finance::NorthBoundFlowTool),
-        std::sync::Arc::new(finance::DragonTigerTool),
-        std::sync::Arc::new(finance::ClsFlashTool),
+        // B7b：五个数据 API 工具（get_research_reports / get_concept_blocks /
+        // get_north_bound_flow / get_market_dragon_tiger / get_cls_flash）已改为
+        // 域工具定义 + domain_tools 执行槽位，不再由 tools crate 注册（见 finance.rs 注释）。
     ];
 
     // ── 业务域工具（L1）：并入内置清单 ──

@@ -58,21 +58,11 @@ pub fn get_sea_db() -> Option<Arc<DatabaseConnection>> {
     GLOBAL_SEA_DB.read().clone()
 }
 
-// ── A 股行情客户端 ────────────────────────────────────────────────────────
-
-static GLOBAL_ASTOCK_CLIENT: LazyLock<RwLock<Option<Arc<axagent_astock_data::AStockClient>>>> =
-    LazyLock::new(|| RwLock::new(None));
-
-/// [2026-09-03 接线恢复] finance.rs 的 api_tool! 宏（研报/概念板块/北向资金/龙虎榜/财联社快讯）
-/// 依赖此客户端；由 init/state.rs 构造 AppState 时注入。
-pub fn set_astock_client(client: Arc<axagent_astock_data::AStockClient>) {
-    let mut guard = GLOBAL_ASTOCK_CLIENT.write();
-    *guard = Some(client);
-}
-
-pub fn get_astock_client() -> Option<Arc<axagent_astock_data::AStockClient>> {
-    GLOBAL_ASTOCK_CLIENT.read().clone()
-}
+// ── A 股行情客户端（B7b：槽位已退役）────────────────────────────────────
+//
+// 此前 finance.rs 的 5 个 `api_tool!` 经这里直连 `AStockClient`，让 tools crate
+// 反向依赖域 crate。B7b 把 5 个工具改为域工具定义 + `domain_tools` 执行槽位后，
+// 该槽位零调用方 ⇒ 删除（宿主侧消费方改走 `init/stock_domain_state`）。
 
 // ── 需求精评 LLM 桥 ──────────────────────────────────────────────────────
 

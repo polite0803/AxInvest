@@ -4,7 +4,7 @@
 //! 参数消费：所有可调参数从 `input["_template_vars"]` 读取（tool_executor.rs 自动注入），
 //! 缺失时回退到默认行为，保持向后兼容。
 
-use crate::{Tool, ToolCategory, ToolContext, ToolError, ToolResult, global_state};
+use crate::{Tool, ToolCategory, ToolContext, ToolError, ToolResult};
 use async_trait::async_trait;
 use axagent_analysis_engine::risk::{
     kelly_criterion_with_thresholds, pe_percentile, peg_ratio as engine_peg_ratio,
@@ -1206,74 +1206,13 @@ calc_tool!(
     "检测价量背离（RSI 顶底背离 + OBV 背离）"
 );
 
-// ═══════════ 数据 API 工具（需要 AStockClient）═══════════
-
-macro_rules! api_tool {
-    ($name:ident, $display:literal, $desc:literal, |$input:ident, $c:ident| $body:expr) => {
-        pub struct $name;
-        #[async_trait]
-        impl Tool for $name {
-            fn name(&self) -> &str {
-                $display
-            }
-            fn description(&self) -> &str {
-                $desc
-            }
-            fn input_schema(&self) -> Value {
-                json!({})
-            }
-            fn category(&self) -> ToolCategory {
-                ToolCategory::Finance
-            }
-            fn is_concurrency_safe(&self) -> bool {
-                true
-            }
-            async fn call(
-                &self,
-                $input: Value,
-                _ctx: &ToolContext,
-            ) -> Result<ToolResult, ToolError> {
-                let $c = global_state::get_astock_client().ok_or_else(|| {
-                    ToolError::execution_failed("AStockClient 未初始化".to_string())
-                })?;
-                $body
-            }
-        }
-    };
-}
-
-api_tool!(ResearchReportsTool, "get_research_reports", "获取券商研报", |input, c| {
-    let code = input.get("stock_code").and_then(|v| v.as_str()).unwrap_or("000001");
-    c.get_research_reports(code)
-        .await
-        .map(|v| ToolResult::success(serde_json::to_value(v).unwrap_or_default().to_string()))
-        .map_err(|e| ToolError::execution_failed(e.to_string()))
-});
-api_tool!(ConceptBlocksTool, "get_concept_blocks", "获取概念板块归属", |input, c| {
-    let code = input.get("stock_code").and_then(|v| v.as_str()).unwrap_or("000001");
-    c.get_concept_blocks(code)
-        .await
-        .map(|v| ToolResult::success(serde_json::to_value(v).unwrap_or_default().to_string()))
-        .map_err(|e| ToolError::execution_failed(e.to_string()))
-});
-api_tool!(NorthBoundFlowTool, "get_north_bound_flow", "获取北向资金流向", |_input, c| {
-    c.get_north_bound_flow()
-        .await
-        .map(|v| ToolResult::success(serde_json::to_value(v).unwrap_or_default().to_string()))
-        .map_err(|e| ToolError::execution_failed(e.to_string()))
-});
-api_tool!(DragonTigerTool, "get_market_dragon_tiger", "获取龙虎榜数据", |_input, c| {
-    c.get_market_dragon_tiger()
-        .await
-        .map(|v| ToolResult::success(serde_json::to_value(v).unwrap_or_default().to_string()))
-        .map_err(|e| ToolError::execution_failed(e.to_string()))
-});
-api_tool!(ClsFlashTool, "get_cls_flash", "获取财联社实时快讯", |_input, c| {
-    c.get_cls_flash()
-        .await
-        .map(|v| ToolResult::success(serde_json::to_value(v).unwrap_or_default().to_string()))
-        .map_err(|e| ToolError::execution_failed(e.to_string()))
-});
+// ═══════════ 数据 API 工具（已迁出）═══════════
+//
+// B7b：`get_research_reports` / `get_concept_blocks` / `get_north_bound_flow` /
+// `get_market_dragon_tiger` / `get_cls_flash` 五个 api_tool 原先在此经
+// `global_state::get_astock_client()` 直连 `AStockClient`，让 tools crate 反向依赖域 crate。
+// 现改为域工具定义（`astock-data/src/mcp_tools.rs` 的 `stock_mcp_tools()`）由域侧注入，
+// 执行走 `domain_tools` 槽位（与其余股票 MCP 工具同一条链）。
 
 // ═══════════ 单元测试 ═══════════
 //

@@ -260,7 +260,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | 能力 ID | 契约（定义行） | 键控分发点（证据行） | 内置实现者 | 拆分阻塞 |
 |---|---|---|---|---|
 | `model.provider` | `axagent-core/crates/harness/src/provider.rs:25` | `axagent-ai/crates/providers/src/registry.rs:24`（`HashMap<String, Arc<dyn ProviderAdapter>>`）+ `:33 register` + `:44 get` | 14 | **D2** 流式：`chat_stream`/`speech_stream` 首帧即错 |
-| `tool.set` | `axagent-core/crates/harness/src/registry.rs:130`（契约面 `harness/src/tool.rs:424 Tool`） | `axagent-runtime/crates/tools/src/registry.rs:183` | Tool impl **199** | **D4** `ToolContext` 被丢弃（安全，必须先修） |
+| `tool.set` | `axagent-core/crates/harness/src/registry.rs:130`（契约面 `harness/src/tool.rs:424 Tool`） | `axagent-runtime/crates/tools/src/registry.rs:183` | Tool impl **198** | **D4** `ToolContext` 被丢弃（安全，必须先修） |
 | `platform.adapter` | `axagent-core/crates/harness/src/message_adapter.rs:83` + `channel_adapter.rs:25` | `axagent-runtime/crates/rt-messaging/src/message_gateway/platform_manager.rs:16` + `:104 get_adapter(&str)` | 10 | — |
 | `message.callback` | `axagent-core/crates/harness/src/platform_callback.rs:21` | 接缝 `message.callback`（内置与插件同入口） | 2 | — |
 | `webhook.dispatch` | `axagent-core/crates/harness/src/webhook_subscription.rs:154` | 接缝 + `axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9` | 4 | — |
@@ -513,17 +513,17 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 |---|---|---|
 | Tauri 命令条数 / 命令模块数（**插件边界口径**） | **303 条 / 20 模块**（`stock_analysis` 172、`stock_workflow` 24、`paper` 20） | **138 条 / 13 模块**（`opc` 57、`opc_capability_pack_actions` 20、`_runtime` 14） |
 | — 同一注册表在**审计 19 域口径**下的读数 | 305 条 / 19 模块（域「股票分析与管线」） | 117 条 / 10 模块（域「OPC 公司运行时」） |
-| **① 主壳反向阻塞**（主壳非域文件引用域 crate ⇒ **必须逐条改写**） | **106 处 / 20 文件** | **0 处** |
+| **① 主壳反向阻塞**（主壳非域文件引用域 crate ⇒ **必须逐条改写**） | **102 处 / 19 文件** | **0 处** |
 | **② 跨包口**（一个功能包的文件调另一个功能包的 crate ⇒ 走 `call_seam`） | **29 处 / 9 文件**，且**全部是 OPC 的文件在调股票 crate** | 0 处 |
 | ③ 域自有文件内引用（随插件整体迁走，**不是障碍**） | 456 处 / 41 文件（2026-11-04 复测：原 444 / 37 的增量来自并行批在域自有文件里加代码，**与 B1/B2 两刀无关** —— 那两刀只动主壳） | 16 处 / 2 文件 |
-| Cargo.toml 构建边 | 8 条（`src-tauri` 4 + `tools` 2 + 域内 2） | 1 条（`src-tauri → axagent-company-runtime`） |
+| Cargo.toml 构建边 | 7 条（`src-tauri` 4 + `tools` 1 + 域内 2；B7b 前 `tools` 2） | 1 条（`src-tauri → axagent-company-runtime`） |
 | 前端反向 import（非域 import 域文件） | 54 处 / 39 文件 | 28 处 / 11 文件（15 处集中在 `ContentArea.tsx`） |
 | 前端体量（**目录口径**：`components/stock-analysis` / `pages/opc`） | `components/stock-analysis` 212 文件 / 60 912 行 + store 6 文件 / 4 514 行 | `pages/opc` 20 文件 / 8 859 行 + `OpcPage.tsx` 134 行 |
 | — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 295 文件 / 85 164 行 | 40 文件 / 12 797 行 |
 | entities 表文件 | 20 个 | 28 个 |
 | zh-CN i18n key | 3 527（`stockAnalysis`/`invest`/`quant`/`trade` 是**整段**） | 1 897（`opc` 整段） |
 
-① 的 106 处（含 H 桶 4 处 / 3 文件）里，待改写 102 处的前 5 个文件吃掉 **82** 处：`tools/src/tools/opc.rs` **41**、`init/services.rs` **24**、`init/state.rs` **3**、`bin/axagent-validate-backfill.rs` **7**、`commands/evolution_proposal.rs` **7**（41+24+3+7+7=82）；其后 `commands/fleet/mod.rs` 4 处，`tools/src/global_state.rs`、`commands/screenshot_diagnosis.rs` 各 3 处，`market_sim_service.rs` 2 处；其余 8 个文件各 1 处。（B1 首刀前口径为 152 / 28，前 7 文件 106 处，见 §63；B1 首刀后为 134 / 待改写 124，2026-11-04 B2 那刀再降 1 到 133 / 123，见 §64.14；B5 那刀再降 8 到 125 / 待改写 115、文件 26→23，见 §87；B6 那刀再降 14 到 111 / 待改写 107、文件 23→20，见 §88；B7 那刀再降 5 到 106 / 待改写 102、文件 20 不变（`state.rs` 仍有 3 处 OPC 面引用），见 §89。）
+① 的 102 处（含 H 桶 3 处 / 3 文件）里，待改写 99 处的前 5 个文件吃掉 **82** 处：`tools/src/tools/opc.rs` **41**、`init/services.rs` **24**、`init/state.rs` **3**、`bin/axagent-validate-backfill.rs` **7**、`commands/evolution_proposal.rs` **7**（41+24+3+7+7=82）；其后 `commands/fleet/mod.rs` 4 处，`commands/screenshot_diagnosis.rs` 3 处，`market_sim_service.rs` 2 处；其余 8 个文件各 1 处。（B1 首刀前口径为 152 / 28，前 7 文件 106 处，见 §63；B1 首刀后为 134 / 待改写 124，2026-11-04 B2 那刀再降 1 到 133 / 123，见 §64.14；B5 那刀再降 8 到 125 / 待改写 115、文件 26→23，见 §87；B6 那刀再降 14 到 111 / 待改写 107、文件 23→20，见 §88；B7 那刀再降 5 到 106 / 待改写 102、文件 20 不变（`state.rs` 仍有 3 处 OPC 面引用），见 §89；B7b 那刀再降 3 到 102 / 待改写 99、文件 19 —— `tools/global_state.rs` 的 AStockClient 槽位退役（3 处）+ gateway 的显式类型注解消失（H 桶 4→3），见 §90。）
 ⚠ **为什么同一张表里有两个命令数 / 两个前端体量**：两套**归属规则**不同 —— 「插件边界口径」按迁出后归哪个包，「审计 19 域口径」按模块名正则；
 差集 11 个模块逐条列在 `AUDIT-l1-blockers-2026-11-01.md` 判读口径第 6 条（例：`demand_discovery` 审计归股票、边界归 OPC；`mover_recall`/`narrative` 反之）。
 **两个数都是真的，引用时必须带口径**；本节与 P6.1/P6.2 的判据一律用**边界口径**。
@@ -4172,3 +4172,48 @@ FAIL: 锚点 frontendDirCaliber ：登记 60900 行 / 实测 60912 行 / 差 12
 4. **`init/services.rs` 24 处**：实时监控启动、T+0、聚合器、荐股 cron 回调等**服务装配**，是 `services.rs` 的宿主主权段（M/H 桶），不是「引擎构造」；随 #36 的运维面接缝一并处置。
 5. **`tests`/真实启动路径未跑**：本批只做构造位置迁移，无行为改动；真实 `tauri build` 与移动端真机回归仍与 §84/§85/§87/§88 同因未做。
 6. **全量 `clippy --workspace --all-targets --all-features -- -D warnings` 与 `test --workspace`** 留到 #35 收尾（阶段内只跑定点 `cargo check` / `cargo fmt`）。
+
+## 90. `#35` B7b：tools crate 最后三处域直连退役（−3 + H 桶 −1，2026-11-04）
+
+**背景**：§87 遗留第 4 条「`tools/global_state.rs` 的 3 处 `AStockClient` 直连未动」；§88 遗留第 1 条把 `finance.rs` 的 1 处列为「随域本体搬迁」。本批把这条尾巴收掉：`tools` crate **不再认识任何股票域类型**。
+
+### 90.1 交付
+
+1. **五个数据 API 工具改为域工具**：`finance.rs` 的 `api_tool!` 宏与实例（`get_research_reports` / `get_concept_blocks` / `get_north_bound_flow` / `get_market_dragon_tiger` / `get_cls_flash`）删除。其中 3 个与 MCP 工具同名（原先靠 `REGISTRY_DUPLICATE_TOOLS` 跳过域侧注册），2 个是旧名。
+2. **`astock-data/src/mcp_tools.rs`**：`stock_mcp_tools()` 新增 2 个旧名定义（带 `stock_code` schema，LLM 可见契约从「空 schema」升级为真 schema）；`execute_mcp_tool` 的执行分支对两对名字做别名（`get_stock_research_reports | get_research_reports`、`get_stock_concept_blocks | get_concept_blocks`）。旧名保留的硬理由：`data-quality.rhai` 判据表与历史工作流仍按旧名调用。
+3. **`domain_mcp.rs`**：删除 `REGISTRY_DUPLICATE_TOOLS` 与过滤分支 —— 那三个工具现在必须由域侧注册（跳过即「工具消失」）；单测改为 `malformed_definitions_are_skipped`（只跳畸形定义，并断言同名工具**必须**在）。
+4. **`global_state.rs`**：`GLOBAL_ASTOCK_CLIENT` / `set_astock_client` / `get_astock_client` 整段退役。
+5. **宿主消费方改走域状态**：`gateway.rs` → `state.stock().astock_client.clone()`；`workflow_run_service.rs` → 新增的非 panic 访问口 `stock_domain_state::try_stock_domain()`（单测不跑 `create_app_state` 时返回 `None`，与旧槽位未注入同义）；`init/state.rs` 的注入调用删除。
+6. **`tools/Cargo.toml` 摘掉 `axagent-astock-data` 依赖**：Cargo 构建边 8 → 7（`tools` 仅剩 `analysis-engine`，用于 `risk` 数学）。
+
+### 90.2 验收读数
+
+| 项 | 前 | 后 |
+|---|---|---|
+| `l1ForeignStock.hits`（门禁口径 = 待改写 + H 桶） | 106 | **102** |
+| `l1ForeignStock.files` | 20 | **19**（`tools/src/global_state.rs` 归零；gateway 仍在 H 桶） |
+| 待改写（H 桶除外） | 102 / 17 | **99 / 16** |
+| H 桶 | 4 / 3 文件 | **3 / 3 文件**（仅剩 gateway 的 `HttpPollingStreamer` + monitor_emitter + browser_fetcher） |
+| Cargo 构建边 | 8 | **7**（`tools → astock-data` 消失） |
+| 工具面（名称集合） | 5 个由 `tools` 注册 | 同 5 个由域侧注册（3 个解除跳过 + 2 个旧名新定义） |
+| `tool.set` Tool impl 站点数 | 199 | **198**（删掉 `api_tool!` 宏体内那一处文本 impl；5 个实例由 `DomainMcpTool` 承载，不新增站点） |
+
+### 90.3 运行记录
+
+| 命令 | EXIT | 结果 |
+|---|---|---|
+| `cargo check -p axagent-astock-data`（`axagent-quant` 根） | 0 | `Finished dev profile … in 1m 29s` |
+| `cargo check -p axagent-tools --all-targets`（`axagent-runtime` 根） | 0 | `Finished … in 1m 45s` |
+| `cargo test -p axagent-tools --lib` | 101（1 失败，既有联网用例） | `469 passed; 1 failed; 2 ignored`；唯一失败 `hacker_news_scanner::tests::test_fetch_latest_ids`（抓 HN API，与本批无交集，§87 同款） |
+| `cargo clippy -p axagent-tools --all-targets --all-features -- -D warnings` | 0 | `Finished … in 39.27s` |
+| `cargo check -p axagent --lib`（`src-tauri` 根） | 0 | `Finished dev profile … in 13m 18s`，0 error（`.tmp/b7b-main.log`） |
+| `node scripts/check-capability-register.mjs`（plan 头部三行 park 后） | 0 | `PASS: hard:true 判据全部一致（登记 37 = A11/B8/C4/H1/K10/D3；能力面 Σ=23；锚点 21 项）`；`cmp` 校验 `RESTORED_IDENTICAL` |
+| `node scripts/audit-l1-blockers.mjs --check-allowlist` | 0 | 登记 3 条 / 实际豁免 3 处（STOCK 3 · OPC 0） |
+
+### 90.4 未做 / 风险
+
+1. **域名与执行面的「双名」是刻意的**：`get_research_reports` / `get_concept_blocks` 与 `get_stock_*` 并存，且执行分支做别名。彻底收敛成一个名字要改 `data-quality.rhai` 判据与历史工作流模板，属行为面迁移，不在本批。
+2. **非 `create_app_state` 入口构造注册表时，5 个工具与其余域工具一并不在**（§87 遗留第 6 条同源）。它们本来就需要客户端，缺席只改变错误文本（从「AStockClient 未初始化」变成「工具不存在」），但这是**已知缺口**，不是本批修好的。
+3. **`finance.rs` 仍留 1 处 `analysis_engine::risk` 引用**（VaR/PEG/KELLY 的权威数学源）。把风险数学上收 harness 属 §125 裁定的 J3 延期项，不在 B7b。
+4. **`tools` crate 的 `domain_mcp.rs` 测试只覆盖「畸形跳过 + 同名保留」**：没有端到端验证「注册表里 5 个名字都能被 LLM 调用」——那需要真实客户端，留到集成测试。
+5. **`axagent-runtime/Cargo.lock` / `axagent-infra/Cargo.lock` 未随本批提交**：两个文件在本批开工前已被并发会话改动（同一份 lock 里有一行与本批无关的 `thiserror` 依赖增补），无法按行切分。本批的 lock 变化只有 `axagent-tools → axagent-astock-data` 一条，已落在 `src-tauri/Cargo.lock`（开工前干净）；其余两个 lock 待并发变更落地时一并提交。CI 未使用 `--locked`（已 grep 确认），不会因这一条产生红灯。

@@ -113,7 +113,7 @@
       "hard": true,
       "planNumber": "83",
       "planMustAppear": true,
-      "planOld": [{ "number": "124", "note": "漂移前旧读数，仅允许出现在 §0.12.4 漂移列举段（PLAN:704）；另经 alsoAt 允许 §61.4 的 B1 预期读数表（同形不同物：124 在那里是 l1ForeignStock 的首刀后预测，与本锚点的历史工作流数无关）；第三个 alsoAt 是 §0.10.1 的桶①分解段 PLAN:523（同形不同物：124 是 B1 后「待改写、H 桶除外」的反向阻塞处数，与工作流命令数无关；2026-11-04 B2 那段再降 1 到 123，523 已改写为历史括注形态「B1 首刀后为 134 / 待改写 124，…再降 1 到 133 / 123」）；第四个 alsoAt 是 §63 的 B1 交付账（PLAN:3027–3086，同一个反向阻塞读数）；第五个 alsoAt 是 §64.13–64.14（PLAN:3255–3278，B2 开工前的现况读数 + 把「−6～−9」推翻为「只有 −1」的那段，同一个反向阻塞读数）", "alsoAt": [{ "startLine": 2950, "endLine": 2962, "mustContain": ["61.4 预期读数", "142 − 18 = 124", "首刀后"] }, { "startLine": 523, "endLine": 523, "mustContain": ["待改写 102 处", "B1 首刀后为 134 / 待改写 124", "B1 首刀前口径为 152 / 28"] }, { "startLine": 3027, "endLine": 3086, "mustContain": ["B1 首刀交付账", "124 处 / 22 文件", "K1 `.rs` 文件数", "124/22 + 10/4 = 134/26", "新增第 2 个 `alsoAt`"] }, { "startLine": 3255, "endLine": 3278, "mustContain": ["B2 开工前的现况读数", "结论写死，不给后人留乐观数", "不改脚本口径", "124 处 / 22 文件", "反向阻塞读数 **124 → 123**", "逐桶拆 124 处"] }, { "startLine": 3341, "endLine": 3378, "mustContain": ["第五道门回写", "planOld` 124 的第 2 段", "124 处 / 22 文件"] }] }],
+      "planOld": [{ "number": "124", "note": "漂移前旧读数，仅允许出现在 §0.12.4 漂移列举段（PLAN:704）；另经 alsoAt 允许 §61.4 的 B1 预期读数表（同形不同物：124 在那里是 l1ForeignStock 的首刀后预测，与本锚点的历史工作流数无关）；第三个 alsoAt 是 §0.10.1 的桶①分解段 PLAN:523（同形不同物：124 是 B1 后「待改写、H 桶除外」的反向阻塞处数，与工作流命令数无关；2026-11-04 B2 那段再降 1 到 123，523 已改写为历史括注形态「B1 首刀后为 134 / 待改写 124，…再降 1 到 133 / 123」）；第四个 alsoAt 是 §63 的 B1 交付账（PLAN:3027–3086，同一个反向阻塞读数）；第五个 alsoAt 是 §64.13–64.14（PLAN:3255–3278，B2 开工前的现况读数 + 把「−6～−9」推翻为「只有 −1」的那段，同一个反向阻塞读数）", "alsoAt": [{ "startLine": 2950, "endLine": 2962, "mustContain": ["61.4 预期读数", "142 − 18 = 124", "首刀后"] }, { "startLine": 523, "endLine": 523, "mustContain": ["待改写 99 处", "B1 首刀后为 134 / 待改写 124", "B1 首刀前口径为 152 / 28"] }, { "startLine": 3027, "endLine": 3086, "mustContain": ["B1 首刀交付账", "124 处 / 22 文件", "K1 `.rs` 文件数", "124/22 + 10/4 = 134/26", "新增第 2 个 `alsoAt`"] }, { "startLine": 3255, "endLine": 3278, "mustContain": ["B2 开工前的现况读数", "结论写死，不给后人留乐观数", "不改脚本口径", "124 处 / 22 文件", "反向阻塞读数 **124 → 123**", "逐桶拆 124 处"] }, { "startLine": 3341, "endLine": 3378, "mustContain": ["第五道门回写", "planOld` 124 的第 2 段", "124 处 / 22 文件"] }] }],
       "note": "stock_workflow 28 条归股票域、不计入本域（PLAN:352）。"
     },
     {
@@ -177,17 +177,17 @@
     {
       "id": "l1ForeignStock",
       "label": "L1 主壳反向阻塞（股票：非域 .rs 引用域 crate）",
-      "value": 106,
-      "value2": 20,
+      "value": 102,
+      "value2": 19,
       "value2Label": "文件",
       "check": "l1ForeignBlockers",
       "domainKey": "STOCK",
       "hard": true,
-      "planNumber": "106",
+      "planNumber": "102",
       "planMustAppear": true,
-      "planPinned": [{ "line": 513, "mustContain": ["106", "20 文件", "主壳反向阻塞"] }],
+      "planPinned": [{ "line": 513, "mustContain": ["102", "19 文件", "主壳反向阻塞"] }],
       "planOld": [{ "number": "134", "note": "B1 首刀（2026-11-03 #100）后、B2 那刀（2026-11-04 §64.14，`init/services.rs` 两处切 harness）前的读数；文件数 26 未变（只减处数不减文件）。**历史账**四段：§0.10.1 桶①分解段 PLAN:523 的括注、§61.4 的 B1 预期读数表（2950–2962）、§63 的 B1 交付账（3027–3086）、§64.13–64.14 的 B2 开工前现况与「−6～−9」推翻段（3255–3278）。**同形不同物**三段（134 在那里与反向阻塞处数无关）：PLAN:518 是 `OpcPage.tsx` 的行数、PLAN:1224 是 198 拆分里「3b 只有 DI·构造期选择」的桶内计数、PLAN:1332 是 `generated_tool.rs:15/116/127/134` 的行号引用清单（本档旧读数判据走 `numberOccurrences`，其左界只剔 `: . #` 不剔 `/` ⇒ 斜杠后的行号引用会命中，与 planNumberHits 的②不同口径，此处按同形不同物登记而非改判据）。段外出现一律判红。", "alsoAt": [{ "startLine": 523, "endLine": 523, "mustContain": ["B1 首刀后为 134 / 待改写 124", "B1 首刀前口径为 152 / 28"] }, { "startLine": 2950, "endLine": 2962, "mustContain": ["61.4 预期读数", "124 + 10；22 + 4", "首刀后"] }, { "startLine": 3027, "endLine": 3086, "mustContain": ["B1 首刀交付账", "134 处 / 26 文件", "124 处 / 22 文件", "兑现", "124/22 + 10/4 = 134/26", "value 152→**134**", "新增第 2 个 `alsoAt`"] }, { "startLine": 3255, "endLine": 3278, "mustContain": ["B2 开工前的现况读数", "结论写死，不给后人留乐观数", "不改脚本口径", "124 处 / 22 文件"] }, { "startLine": 518, "endLine": 518, "mustContain": ["目录口径", "OpcPage.tsx"] }, { "startLine": 1224, "endLine": 1224, "mustContain": ["桶3 必须留内核 175", "构造期选择"] }, { "startLine": 1332, "endLine": 1332, "mustContain": ["pub struct ToolContext", "generated_tool.rs"] }, { "startLine": 3341, "endLine": 3378, "mustContain": ["第五道门回写", "generated_tool.rs:15/116/127/134", "同形不同物"] }]}],
-      "note": "剥注释只处理 // 与 ///（audit-l1-blockers.mjs:87-90 原口径）。**2026-11-03 B1（#100）重锚 152→134 / 28→26 文件**：首批 18 处改指 `axagent_harness::*`（5 个公用件上收，原处留 `pub use` 垫片）⇒ 待改写 142→124 处 / 24→22 文件，H 桶 10 处 / 4 文件不动。旧读数 152/28 只保留在 §54/§57/§61 等历史交付账与 §0.10 的 B1 前分解段（§63 已逐条点名）。**2026-11-04 B2（§64.14）再降 1 处 ⇒ 133 / 26**（`init/services.rs` 的 `MonitorConfig` + `AggregatorConfig::default()` 两处切 harness，同文件尚有 23 处 ⇒ 文件数不动）；152 之后本锚点首次有 planOld（134），四段 alsoAt 逐条自证。⚠ 同批 §64.14 推翻了 §54.3 的「B2 消减 −6～−9」：剩余 123 处 = O 桶 45 + 测试块 12 + 随本体迁出 12 + 宿主真面 55，B2 的口径只兑现 −1。**2026-11-04 B5（§87）再降 8 ⇒ 125 / 23 文件**：`tools/src/audit.rs` 4（豁免集合改由 `crate::domain_tools` 槽位派生）、`tools/src/tools/astock_data.rs` 3（整文件换成通用包装 `domain_mcp.rs`）、`capability_pack_defs.rs` 1（`stock_tool_defs` → 泛化 `domain_tool_defs`）⇒ 待改写 115 处 / 19 文件；H 桶 10 / 4 不动。⚠ 删的是**工具层对域 crate 的直连**，不是删除工具：定义与执行改由域侧（`src-tauri/src/init/stock_domain_tools.rs`）注入。**2026-11-04 B6（§88）再降 14 ⇒ 111 / 20 文件**：`app_state.rs` 6 处字段类型行随六字段摘出 AppState 而消失（改由 `init/stock_domain_state.rs` 持有、`AppState::stock()` 访问），`conversations/{compress,mod}.rs` 的 8 处测试构造器赋值同批删除 ⇒ 待改写 107 处 / 17 文件；H 桶 10→4（app_state 六条豁免同时删除，否则 `--check-allowlist` 报锚点腐烂）。**2026-11-04 B7（§89）再降 5 ⇒ 106 / 20 文件**：`init/state.rs` 8→3 —— `decision_gates::refresh_from_db` 1、`AStockClient::new` 1、`disk_cache::spawn_flush_loop` 1、`TradingEngine::new` 1、`StockAdaptiveEngine::new` 1 全部下沉到域自有模块 `init/stock_domain_state.rs`（构造 + 客户端工厂 + 启动期开关加载）⇒ 待改写 102 处 / 17 文件；H 桶 4 / 3 不动，文件数 20 不变（`state.rs` 仍有 3 处 `analysis_engine::opc::capability_pack::`，属 OPC 面、归 #36，不在本批改判据）。"
+      "note": "剥注释只处理 // 与 ///（audit-l1-blockers.mjs:87-90 原口径）。**2026-11-03 B1（#100）重锚 152→134 / 28→26 文件**：首批 18 处改指 `axagent_harness::*`（5 个公用件上收，原处留 `pub use` 垫片）⇒ 待改写 142→124 处 / 24→22 文件，H 桶 10 处 / 4 文件不动。旧读数 152/28 只保留在 §54/§57/§61 等历史交付账与 §0.10 的 B1 前分解段（§63 已逐条点名）。**2026-11-04 B2（§64.14）再降 1 处 ⇒ 133 / 26**（`init/services.rs` 的 `MonitorConfig` + `AggregatorConfig::default()` 两处切 harness，同文件尚有 23 处 ⇒ 文件数不动）；152 之后本锚点首次有 planOld（134），四段 alsoAt 逐条自证。⚠ 同批 §64.14 推翻了 §54.3 的「B2 消减 −6～−9」：剩余 123 处 = O 桶 45 + 测试块 12 + 随本体迁出 12 + 宿主真面 55，B2 的口径只兑现 −1。**2026-11-04 B5（§87）再降 8 ⇒ 125 / 23 文件**：`tools/src/audit.rs` 4（豁免集合改由 `crate::domain_tools` 槽位派生）、`tools/src/tools/astock_data.rs` 3（整文件换成通用包装 `domain_mcp.rs`）、`capability_pack_defs.rs` 1（`stock_tool_defs` → 泛化 `domain_tool_defs`）⇒ 待改写 115 处 / 19 文件；H 桶 10 / 4 不动。⚠ 删的是**工具层对域 crate 的直连**，不是删除工具：定义与执行改由域侧（`src-tauri/src/init/stock_domain_tools.rs`）注入。**2026-11-04 B6（§88）再降 14 ⇒ 111 / 20 文件**：`app_state.rs` 6 处字段类型行随六字段摘出 AppState 而消失（改由 `init/stock_domain_state.rs` 持有、`AppState::stock()` 访问），`conversations/{compress,mod}.rs` 的 8 处测试构造器赋值同批删除 ⇒ 待改写 107 处 / 17 文件；H 桶 10→4（app_state 六条豁免同时删除，否则 `--check-allowlist` 报锚点腐烂）。**2026-11-04 B7（§89）再降 5 ⇒ 106 / 20 文件**：`init/state.rs` 8→3 —— `decision_gates::refresh_from_db` 1、`AStockClient::new` 1、`disk_cache::spawn_flush_loop` 1、`TradingEngine::new` 1、`StockAdaptiveEngine::new` 1 全部下沉到域自有模块 `init/stock_domain_state.rs`（构造 + 客户端工厂 + 启动期开关加载）⇒ 待改写 102 处 / 17 文件；H 桶 4 / 3 不动，文件数 20 不变（`state.rs` 仍有 3 处 `analysis_engine::opc::capability_pack::`，属 OPC 面、归 #36，不在本批改判据）。**2026-11-04 B7b（§90）再降 3 处并摘 1 条 H ⇒ 102 / 19 文件**：`tools/src/global_state.rs` 的 `AStockClient` 全局槽位退役（3 处类型引用消失）—— finance.rs 的 5 个 `api_tool!`（研报/概念板块/北向资金/龙虎榜/财联社快讯）改为域工具定义（`astock-data::stock_mcp_tools()` 新增 2 个旧名别名定义 + 执行分支别名），执行走 `domain_tools` 槽位；`tools` crate 不再依赖 `axagent-astock-data`（Cargo 构建边 8→7）。gateway.rs 的 `Option<Arc<AStockClient>>` 显式注解改为 `state.stock().astock_client.clone()`，H 桶 4→3。⇒ 待改写 99 处 / 16 文件。"
     },
     {
       "id": "l1ForeignOpc",
@@ -314,8 +314,8 @@
       "k": null,
       "kNote": "组级语义 = K1–K4 已通过；逐条档位原文缺省。",
       "trait": "Tool",
-      "countTraitNote": "契约面是 Tool（harness/src/tool.rs:424），登记值 199 = `impl … for Tool` 站点数；ToolSetProvider 另有两个实现者，不计入本行。",
-      "expect": { "implementors": 199, "seam": "已建", "remote": true, "reading": null },
+      "countTraitNote": "契约面是 Tool（harness/src/tool.rs:424），登记值 198 = `impl … for Tool` 站点数（B7b 前 199）；ToolSetProvider 另有两个实现者，不计入本行。B7b 删掉 finance.rs 的 `api_tool!` 宏后，其宏体内那一处 `impl Tool for $name` 文本站点随之消失（5 个实例由域工具 `DomainMcpTool` 承载，不新增 impl 站点）⇒ 199 → 198，是**真实减少**而不是漏算。",
+      "expect": { "implementors": 198, "seam": "已建", "remote": true, "reading": null },
       "expectMissing": false,
       "expectMissingFields": ["k", "reading"],
       "check": "implementorCount",
@@ -325,7 +325,7 @@
         { "ref": "axagent-runtime/crates/tools/src/registry.rs:183", "file": "axagent-runtime/crates/tools/src/registry.rs", "line": 183, "token": "HashMap<String, Arc<dyn Tool>>", "role": "键控分发点" }
       ],
       "note": "拆分阻塞 **D4**：ToolContext 被丢弃（安全，必须先修）。",
-      "planAnchorText": "| `tool.set` | `axagent-core/crates/harness/src/registry.rs:130`（契约面 `harness/src/tool.rs:424 Tool`） | `axagent-runtime/crates/tools/src/registry.rs:183` | Tool impl **199** | **D4** `ToolContext` 被丢弃（安全，必须先修） |", "planLine": 260
+      "planAnchorText": "| `tool.set` | `axagent-core/crates/harness/src/registry.rs:130`（契约面 `harness/src/tool.rs:424 Tool`） | `axagent-runtime/crates/tools/src/registry.rs:183` | Tool impl **198** | **D4** `ToolContext` 被丢弃（安全，必须先修） |", "planLine": 260
     },
     {
       "seamId": "platform.adapter",

@@ -2,14 +2,9 @@
   "note": "L1 反向阻塞的 H 桶（宿主永久持有）白名单。消费方 = scripts/audit-l1-blockers.mjs；复扫命令 = node scripts/audit-l1-blockers.mjs --check-allowlist。",
   "why": "PLAN §54 R5：终态判据不并入 ownedRe（并入会让所有 init/ 装配代码变成不计入阻塞，读数失去意义 —— services.rs 28 处里有 9 处是 M 桶、该被看见），改成「待改写归零 + H 桶等于本名单」。名单可逐条拿 anchorText 回盘上原文复核，正则扩面不可复核。",
   "schema": "entries[] = { file: 仓库相对路径, anchorText: 该行原文的**连续子串**（不存行号，行号随编辑漂移）, reason: 为什么必须留宿主 }",
-  "seed": "2026-11-03 首批 10 条；**2026-11-04 B6 删 app_state.rs 6 条 ⇒ 4 条 / 3 文件**（六个字段随 B6 摘出 AppState，字段类型行整体消失）。只收 .tmp/res109-migration-plan.md §A2 里**整文件判 H** 的六个文件；M / P / X / O 桶以及 P/H 混合行（decision_gates、daily_snapshot_store、screenshot_diagnosis）与 services.rs / state.rs 的行**一律不入** —— 那两处 res109 只给了桶计数没给逐行归属，没有逐行证据就不许写进豁免名单。",
-  "todo": "H 桶在 res109 的机械归桶里读数是 35 处 / 9 文件，本名单只点到 4 处 / 3 文件 ⇒ 余 31 处等后续批次按行落名（同批必须补 anchorText，不许只补文件）。**(B6 前为 10 处 / 4 文件；app_state.rs 六条已随字段摘除一并删除 —— 保留即 --check-allowlist 的「锚点腐烂」。)**",
+  "seed": "2026-11-03 首批 10 条；**2026-11-04 B6 删 app_state.rs 6 条 ⇒ 4 条 / 3 文件**（六个字段随 B6 摘出 AppState，字段类型行整体消失）；**2026-11-04 B7b 再删 gateway 1 条 ⇒ 3 条 / 3 文件**（客户端改从 `init/stock_domain_state` 取，显式 `Option<Arc<AStockClient>>` 类型注解消失；`HttpPollingStreamer` 那条仍在）。只收 .tmp/res109-migration-plan.md §A2 里**整文件判 H** 的六个文件；M / P / X / O 桶以及 P/H 混合行（decision_gates、daily_snapshot_store、screenshot_diagnosis）与 services.rs / state.rs 的行**一律不入** —— 那两处 res109 只给了桶计数没给逐行归属，没有逐行证据就不许写进豁免名单。",
+  "todo": "H 桶在 res109 的机械归桶里读数是 35 处 / 9 文件，本名单只点到 3 处 / 3 文件 ⇒ 余 32 处等后续批次按行落名（同批必须补 anchorText，不许只补文件）。**(B6 前为 10 处 / 4 文件；app_state.rs 六条已随字段摘除一并删除 —— 保留即 --check-allowlist 的「锚点腐烂」。)**",
   "entries": [
-    {
-      "file": "src-tauri/src/commands/gateway.rs",
-      "anchorText": "Option<std::sync::Arc<axagent_astock_data::AStockClient>>",
-      "reason": "OpenAI 兼容网关的行情发布口 = 宿主对外的数据面（res109 A2 判「不可消」，§E-7）。迁股票插件时这条读的是宿主持有的 client，不是插件内部件。"
-    },
     {
       "file": "src-tauri/src/commands/gateway.rs",
       "anchorText": "axagent_astock_data::HttpPollingStreamer::new(c)",

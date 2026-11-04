@@ -30,9 +30,8 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
 
-/// 与 finance.rs 既有注册重名的域工具（保留 finance.rs 现实现，跳过注册）。
-pub const REGISTRY_DUPLICATE_TOOLS: [&str; 3] =
-    ["get_north_bound_flow", "get_market_dragon_tiger", "get_cls_flash"];
+// B7b：`REGISTRY_DUPLICATE_TOOLS` 已删除 —— 原先跳过的是 finance.rs 里同名的三个
+// api_tool；那三个工具改为域工具定义后，域侧必须注册它们，跳过即「工具消失」。
 
 /// 域工具定义的薄包装实例。
 ///
@@ -122,10 +121,7 @@ fn is_mutating_tool(name: &str) -> bool {
 pub fn instances_from(definitions: Vec<(String, Value)>) -> Vec<Arc<dyn Tool>> {
     definitions
         .into_iter()
-        .filter_map(|(domain, def)| {
-            let tool = DomainMcpTool::from_definition(domain, &def)?;
-            (!REGISTRY_DUPLICATE_TOOLS.contains(&tool.name.as_str())).then_some(tool)
-        })
+        .filter_map(|(domain, def)| DomainMcpTool::from_definition(domain, &def))
         .map(|t| Arc::new(t) as Arc<dyn Tool>)
         .collect()
 }
@@ -160,13 +156,15 @@ mod tests {
     }
 
     #[test]
-    fn malformed_and_duplicate_definitions_are_skipped() {
+    fn malformed_definitions_are_skipped() {
         let instances = instances_from(fixture());
-        assert_eq!(instances.len(), 2, "3 个合法定义里 1 个与 finance.rs 重名 ⇒ 2 个实例");
+        assert_eq!(instances.len(), 3, "5 个定义里 2 个畸形（无名字 / 空白名字）⇒ 3 个实例");
         assert!(instances.iter().any(|t| t.name() == "get_stock_quote"));
+        // B7b：`REGISTRY_DUPLICATE_TOOLS` 删除后，原先与 finance.rs 重名的三个工具
+        // 必须由域侧注册（跳过即工具消失）。
         assert!(
-            instances.iter().all(|t| t.name() != "get_north_bound_flow"),
-            "重名工具必须跳过，否则静默覆盖 finance.rs 现实现"
+            instances.iter().any(|t| t.name() == "get_north_bound_flow"),
+            "重名跳过机制已退役：同名工具必须由域侧注册，否则该工具整体消失"
         );
     }
 

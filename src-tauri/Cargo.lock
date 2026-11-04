@@ -1675,7 +1675,6 @@ version = "3.0.0"
 dependencies = [
  "async-trait",
  "axagent-analysis-engine",
- "axagent-astock-data",
  "axagent-dao",
  "axagent-document-parser",
  "axagent-harness",

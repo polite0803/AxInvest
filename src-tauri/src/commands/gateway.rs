@@ -574,10 +574,9 @@ pub async fn start_gateway(state: State<'_, AppState>, app: AppHandle) -> Result
         force_ssl: settings.force_ssl,
     };
 
-    // 进程级共享 AStockClient（init/state.rs 启动时注入 tools global_state）。
-    // None 时行情/WS 端点按接缝约定返回 503 兜底。
-    let astock_client: Option<std::sync::Arc<axagent_astock_data::AStockClient>> =
-        axagent_tools::global_state::get_astock_client();
+    // 进程级共享 AStockClient（B7b：改从域运行时状态取；原 `tools::global_state` 槽位已退役）。
+    // 行情/WS 端点按接缝约定在客户端缺席时返回 503 兜底。
+    let astock_client = Some(state.stock().astock_client.clone());
 
     let server = axagent_gateway::server::GatewayServer::start_with_registry(
         state.harness.db().clone(),

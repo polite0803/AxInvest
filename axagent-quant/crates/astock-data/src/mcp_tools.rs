@@ -289,6 +289,31 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
                 "required": ["stock_code"]
             }
         }),
+        // 旧工具名（B7b）：原先住在 `tools/src/tools/finance.rs` 的 `api_tool!` 里，
+        // 经 `global_state` 直连 `AStockClient`。迁到域工具定义后名字保持不变 ——
+        // `data-quality.rhai` 的判据表与历史工作流仍按旧名调用，改名的代价大于收益。
+        json!({
+            "name": "get_research_reports",
+            "description": "获取券商研报（旧名别名，等价 get_stock_research_reports）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "get_concept_blocks",
+            "description": "获取概念板块归属（旧名别名，等价 get_stock_concept_blocks）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
         json!({
             "name": "get_stock_consensus_eps",
             "description": "获取机构一致预期EPS（一致预期EPS、目标价、评级）",
@@ -1240,7 +1265,7 @@ pub async fn execute_mcp_tool(
             let dividends = client.get_dividend_records(code).await.map_err(|e| e.to_string())?;
             serde_json::to_string(&dividends).map_err(|e| e.to_string())
         },
-        "get_stock_research_reports" => {
+        "get_stock_research_reports" | "get_research_reports" => {
             let code = parse_code(arguments);
             let code = code.as_str();
             let reports = client.get_research_reports(code).await.map_err(|e| e.to_string())?;
@@ -1252,7 +1277,7 @@ pub async fn execute_mcp_tool(
             let eps = client.get_consensus_eps(code).await.map_err(|e| e.to_string())?;
             serde_json::to_string(&eps).map_err(|e| e.to_string())
         },
-        "get_stock_concept_blocks" => {
+        "get_stock_concept_blocks" | "get_concept_blocks" => {
             let code = parse_code(arguments);
             let code = code.as_str();
             let blocks = client.get_concept_blocks(code).await.map_err(|e| e.to_string())?;

@@ -1705,9 +1705,8 @@ pub async fn create_app_state_with_resource_dir(
         });
         Arc::new(client)
     };
-    // [2026-09-03 接线恢复] finance.rs 的 5 个 api_tool（研报/概念板块/北向资金/龙虎榜/财联社快讯）
-    // 经 tools::global_state 取客户端，AppState 构造时注入一次。
-    axagent_tools::global_state::set_astock_client(astock_client.clone());
+    // B7b：`tools::global_state` 的 AStockClient 槽位已退役 —— 研报/概念板块/北向资金/
+    // 龙虎榜/财联社快讯 5 个工具改为域工具定义，执行经下面注入的域执行器取同一个客户端。
     // 域工具执行器：定义在启动早期已注册，执行需要客户端，故在客户端就绪后注入。
     crate::init::stock_domain_tools::register_tool_executor(astock_client.clone());
 

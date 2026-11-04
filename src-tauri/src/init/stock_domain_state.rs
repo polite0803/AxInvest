@@ -90,6 +90,14 @@ pub fn stock_domain() -> &'static StockDomainState {
     })
 }
 
+/// 取股票域运行时状态的**非 panic** 版本。
+///
+/// 供「未注入时本来就有合法降级路径」的调用方使用（例：`workflow_run_service`
+/// 的单测不跑 `create_app_state`，旧 `global_state` 槽位在那里同样返回 `None`）。
+pub fn try_stock_domain() -> Option<&'static StockDomainState> {
+    STATE.get().map(|b| b.as_ref())
+}
+
 impl crate::AppState {
     /// 股票域运行时状态（B6：替代原先六个 `AppState` 字段）。
     pub fn stock(&self) -> &'static StockDomainState {

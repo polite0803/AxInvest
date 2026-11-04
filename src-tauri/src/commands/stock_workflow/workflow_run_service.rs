@@ -447,9 +447,11 @@ impl WorkflowRunProvider for WorkflowRunService {
             // 与 `core.rs:822` / `reflection.rs:508` / `serenity.rs:1040` 同款：把模板变量里的
             // `vendor_*` 密钥/代理注入进程级客户端。少了这一步，走接缝的首次股票执行可能
             // 「跑得动但取不到数」（客户端的 vendor 启用状态还是空的）。
-            if let Some(client) = axagent_tools::global_state::get_astock_client() {
+            // B7b：原 `tools::global_state` 槽位已退役；单测不跑 `create_app_state` 时
+            // `try_stock_domain()` 返回 None（与旧槽位未注入同义，跳过注入）。
+            if let Some(domain) = crate::init::stock_domain_state::try_stock_domain() {
                 crate::commands::stock_workflow::decision::inject_vendor_state(
-                    client.as_ref(),
+                    domain.astock_client.as_ref(),
                     loaded.variables.as_ref(),
                 );
             }

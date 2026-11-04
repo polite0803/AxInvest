@@ -57,6 +57,7 @@ use std::collections::BTreeMap;
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr};
 
 use super::extras::Dialect;
+use super::model::TableModel;
 use super::plan::{Change, ChangeKind, Plan, PlanOptions};
 use super::render::{self, RenderError, Rendered};
 use super::safety::{self, AuditRow, DeferDecision, GraveEvidence, Refusal, SafetyConfig};
@@ -796,6 +797,30 @@ pub async fn run(
 /// 那时白名单**看起来配好了却从不生效**，症状只是「明明登记了还是被删了」。
 /// 顺序内建在这个函数里，调用方无从搞错。
 pub async fn cycle(db: &DatabaseConnection, opts: &ApplyOptions) -> Result<ApplyOutcome, DbErr> {
+    cycle_with_external(db, opts, &[]).await
+}
+
+/// [`cycle`] 的**外部声明版**：期望侧 = L1 实体 + L2 声明 + `external`（任务 `#134` 第二片）。
+///
+/// `external` 由调用方（wiring）从插件产物的 `schema.json` 解析而来，见
+/// [`super::external`]。本函数与 [`cycle`] 的唯一差异就是这一份输入 ——
+/// 白名单读取、diff、additive-only 过滤、闸 2 / 3 / 4 / 5 全部走同一条路径。
+///
+/// ## 闸 3 的基数口径
+///
+/// 仍传 `want.tables.len()`，**现在天然包含外部表**：
+///
+/// * 闸 3 只在「本轮期望表数 < 上一轮」时拒绝 ⇒ 装插件抬高基线是允许方向；
+/// * 卸载后声明消失、基线回落 ⇒ 非启动路径会被闸 3 拒（`BaseShrank`）；
+///   启动路径 `last_expected_table_count = None` 且 `additive_only = true` ⇒ 不判、不删。
+///
+/// ⇒ 「卸载不删表」不靠新的表级白名单，而是靠两道既有机制：卸载路径零 DDL +
+///   启动路径 additive-only / 零破坏配额。
+pub async fn cycle_with_external(
+    db: &DatabaseConnection,
+    opts: &ApplyOptions,
+    external: &[TableModel],
+) -> Result<ApplyOutcome, DbErr> {
     let dialect = dialect_of(db)?;
 
     safety::ensure_meta_tables(db).await?;
@@ -805,7 +830,7 @@ pub async fn cycle(db: &DatabaseConnection, opts: &ApplyOptions) -> Result<Apply
     let wl = safety::load_orphan_whitelist(db, now).await?;
 
     let actual = introspect::read(db).await?;
-    let want = expected::build(dialect)?;
+    let want = expected::build_with_external(dialect, external)?;
     let mut p = super::plan::diff_with(
         &want,
         &actual,
@@ -2118,5 +2143,81 @@ mod tests {
         // 幂等：再来一轮不应再有变更。
         let again = bootstrap_schema(&db).await.expect("第三次 bootstrap 应成功");
         assert_eq!(again.executed, 0, "补列后应幂等，实际又执行 {} 条", again.executed);
+    }
+
+    /// 插件表声明的最小模型（与 `external.rs` 测试里的示例同形，但不依赖 JSON）。
+    fn plugin_table() -> TableModel {
+        use crate::reconcile::model::{CheckModel, ColumnModel, IndexModel};
+        let mut t = TableModel::new("plugin_watch_items");
+        let mut id = ColumnModel::new("id", "integer", false);
+        id.primary_key = true;
+        id.auto_increment = true;
+        t.upsert_column(id);
+        let mut code = ColumnModel::new("code", "text", false);
+        code.unique = true;
+        t.upsert_column(code);
+        t.primary_key = vec!["id".to_string()];
+        t.upsert_index(IndexModel::new(
+            "idx_plugin_watch_items_code",
+            vec!["code".to_string()],
+            false,
+        ));
+        t.upsert_check(CheckModel::new("ck_plugin_watch_items_code", "length(code) > 0"));
+        t
+    }
+
+    /// `#134` 端到端：装插件建表 → 重跑幂等 → 声明消失（卸载）后表**仍在**。
+    ///
+    /// 三条断言各自挡一类回归：
+    ///
+    /// 1. 表真的建出来了 —— 防「`build_with_external` 通了但 `cycle` 没把外部声明传下去」；
+    /// 2. 第二轮 `executed == 0` —— 防「每轮都重建一次」的假差异；
+    /// 3. 声明消失后表仍在 —— 这是「卸载不删表」的**行为**判据（不是注释承诺）。
+    #[tokio::test]
+    async fn cycle_with_external_creates_plugin_table_and_uninstall_keeps_it() {
+        let db = mem().await;
+        let external = vec![plugin_table()];
+        let want_with = expected::build_with_external(Dialect::Sqlite, &external)
+            .expect("外部声明应可进期望集");
+
+        let first = cycle_with_external(&db, &bootstrap_options(), &external)
+            .await
+            .expect("首轮 cycle_with_external 应成功");
+        assert!(first.refusal.is_none(), "首轮被拒：{:?}", first.refusal);
+        assert!(first.executed > 0, "一条都没执行 —— 插件表没有被计划和建出");
+        assert_eq!(
+            first.expected_table_count,
+            Some(want_with.tables.len()),
+            "闸 3 的基数必须包含外部表"
+        );
+        let seen = introspect::read(&db).await.expect("introspect 应成功");
+        assert!(
+            seen.table("plugin_watch_items").is_some(),
+            "插件表没有被建出来：外部声明没有穿过 cycle_with_external"
+        );
+
+        let again =
+            cycle_with_external(&db, &bootstrap_options(), &external).await.expect("第二轮应成功");
+        assert_eq!(
+            again.executed, 0,
+            "第二轮又执行了 {} 条 —— 插件表声明不是幂等的",
+            again.executed
+        );
+
+        // 卸载语义：声明消失，但启动路径仍是 additive-only ⇒ 只报告、不 DROP。
+        let uninstalled = cycle_with_external(&db, &bootstrap_options(), &[])
+            .await
+            .expect("卸载后的 cycle_with_external 应成功");
+        assert!(uninstalled.refusal.is_none(), "卸载后一轮被拒：{:?}", uninstalled.refusal);
+        let seen = introspect::read(&db).await.expect("introspect 应成功");
+        assert!(
+            seen.table("plugin_watch_items").is_some(),
+            "卸载后插件表被删了 —— additive_only 没有挡住 DropTable"
+        );
+        assert_eq!(
+            uninstalled.expected_table_count,
+            Some(expected::build(Dialect::Sqlite).expect("基准期望集").tables.len()),
+            "声明消失后基数应回落到实体基数"
+        );
     }
 }

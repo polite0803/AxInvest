@@ -244,7 +244,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 
 | 口径 | 命中 | 备注 |
 |---|---|---|
-| K1：`pub trait` 总数（8 根 2030 个 `.rs`） | **324** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。**2026-11-02 `#81` 再升 1（2009→2010）**：行情 DTO 上收新增 `harness/src/stock_market_types.rs`；`astock-data/src/types.rs` 保留为垫片（未删文件），故只 +1。**同日 C 批再升 1（2010→2011）**：`DataOutcome` 上收新增 `harness/src/data_outcome.rs`；`astock-data/src/outcome.rs` 保留为垫片。**同日 `jobs.store` 接缝再升 2 项**：新增 `harness/src/jobs_store.rs`（文件 +1）与 `JobStoreProvider`（trait +1）⇒ **2012 / 318**。**同日 `workflow.run` 再升 2 项**：新增 `harness/src/workflow_run.rs`（文件 +1）与 `WorkflowRunProvider`（trait +1）⇒ **2013 / 319**。**同日宿主服务再升 1（2013→2014）**：新增 `src-tauri/src/commands/stock_workflow/workflow_run_service.rs`。**同日 `trading.engine` 再升 2 项**：新增 `harness/src/trading_engine.rs`（文件 +1）与 `TradingEngineProvider`（trait +1）⇒ **2015 / 320**。**同日宿主服务再升 1（2015→2016）**：新增 `src-tauri/src/commands/stock_workflow/trading_engine_service.rs`。**2026-11-03 `stock.monitor` + `quote.watcher` 契约再升 4 项**：新增 `harness/src/stock_monitor.rs`、`harness/src/quote_watcher.rs`（文件 +2）与 `StockMonitorProvider`、`QuoteWatcherProvider`（trait +2）⇒ **2018 / 322**；同批从 `analysis-engine/src/monitor.rs`、`cross_stock_aggregator.rs`、`astock-data/src/realtime_quote.rs` 删定义改 `pub use`，垫片文件保留不删 ⇒ 文件数不降。**同日 `#107` 契约 + `#103` 宿主再升 4 项文件 / 2 项 trait**：`harness/src/knowledge_vector.rs`、`harness/src/trajectory_store.rs`（+2 文件 +2 trait ⇒ 324）与 `commands/stock_workflow/monitor_seam_service.rs`、`quote_watcher_service.rs`（+2 文件）⇒ **2022 / 324**。**同日 `#114` 再升 1（2024→2025）**：新增 `axagent-infra/crates/dao/src/repo/trade.rs`（`exists_same_key` 下沉），同批 `market_data.rs` 只做格式、`workflow_run_service.rs` 只换 `DatabaseConnection` 导入源 ⇒ 其余读数不动。**2026-11-03 B1（`#100`）再升 5（2025→2030）**：`harness` 新增 `task_cancel.rs` / `trading_calendar.rs` / `candlestick_pattern.rs` / `divergence.rs` / `news_archive.rs` 五个模块，`astock-data` 原文件全部保留为 `pub use` 垫片（未删文件）⇒ 只 +5；`pub trait` 唯一名不动（324，`NewsArchiveSink` 只是换文件）。 |
+| K1：`pub trait` 总数（8 根 2032 个 `.rs`） | **324** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。**2026-11-02 `#81` 再升 1（2009→2010）**：行情 DTO 上收新增 `harness/src/stock_market_types.rs`；`astock-data/src/types.rs` 保留为垫片（未删文件），故只 +1。**同日 C 批再升 1（2010→2011）**：`DataOutcome` 上收新增 `harness/src/data_outcome.rs`；`astock-data/src/outcome.rs` 保留为垫片。**同日 `jobs.store` 接缝再升 2 项**：新增 `harness/src/jobs_store.rs`（文件 +1）与 `JobStoreProvider`（trait +1）⇒ **2012 / 318**。**同日 `workflow.run` 再升 2 项**：新增 `harness/src/workflow_run.rs`（文件 +1）与 `WorkflowRunProvider`（trait +1）⇒ **2013 / 319**。**同日宿主服务再升 1（2013→2014）**：新增 `src-tauri/src/commands/stock_workflow/workflow_run_service.rs`。**同日 `trading.engine` 再升 2 项**：新增 `harness/src/trading_engine.rs`（文件 +1）与 `TradingEngineProvider`（trait +1）⇒ **2015 / 320**。**同日宿主服务再升 1（2015→2016）**：新增 `src-tauri/src/commands/stock_workflow/trading_engine_service.rs`。**2026-11-03 `stock.monitor` + `quote.watcher` 契约再升 4 项**：新增 `harness/src/stock_monitor.rs`、`harness/src/quote_watcher.rs`（文件 +2）与 `StockMonitorProvider`、`QuoteWatcherProvider`（trait +2）⇒ **2018 / 322**；同批从 `analysis-engine/src/monitor.rs`、`cross_stock_aggregator.rs`、`astock-data/src/realtime_quote.rs` 删定义改 `pub use`，垫片文件保留不删 ⇒ 文件数不降。**同日 `#107` 契约 + `#103` 宿主再升 4 项文件 / 2 项 trait**：`harness/src/knowledge_vector.rs`、`harness/src/trajectory_store.rs`（+2 文件 +2 trait ⇒ 324）与 `commands/stock_workflow/monitor_seam_service.rs`、`quote_watcher_service.rs`（+2 文件）⇒ **2022 / 324**。**同日 `#114` 再升 1（2024→2025）**：新增 `axagent-infra/crates/dao/src/repo/trade.rs`（`exists_same_key` 下沉），同批 `market_data.rs` 只做格式、`workflow_run_service.rs` 只换 `DatabaseConnection` 导入源 ⇒ 其余读数不动。**2026-11-03 B1（`#100`）再升 5（2025→2030）**：`harness` 新增 `task_cancel.rs` / `trading_calendar.rs` / `candlestick_pattern.rs` / `divergence.rs` / `news_archive.rs` 五个模块，`astock-data` 原文件全部保留为 `pub use` 垫片（未删文件）⇒ 只 +5；`pub trait` 唯一名不动（324，`NewsArchiveSink` 只是换文件）。**2026-11-04 `#134` 第二片再升 2（2030→2032）**：新增 `axagent-infra/crates/dao/src/reconcile/external.rs`（插件 `schema.json` 解析）与 `src-tauri/src/init/plugin_schema.rs`（宿主挂载点）；两个文件都没有新增 `pub trait` ⇒ 唯一名仍 324。 |
 | K1 + 有非 harness、非测试实现者 | **240** | ⚠ 这一档**不能**当能力数。~~232 出自一次性 census 工件（`.tmp/traits-full.json`，未入库 ⇒ 谓词无法从仓内代码复现）~~ ⇒ **该说法已作废（`#61` + `#66` 落地后）**：谓词已入库为 `k1DeclaredExternalImplTraitCount`，`--dump-readings` 在现树复现 = **233**（`#62` 后：ToT 拆成两名、两端都仍有生产 impl ⇒ +1），且与本门 audit 侧输出**排序名单逐字相等**（`#66` 的 4.2 档，差分探针 + 两条命令背靠背 + 扫描面常量逐项对照，三条同源性证据齐）⇒ **233 现在是可复算值**，锚点**具备升 `hard:true` 的条件**（升不升、用哪个数由我在收口时一次定）。另两个历史数**只留作解释、不再与 233 并列**：**210** = 单趟扫描缺陷（当时同谓词**两趟交并** = 232，差值恰 **22**；`#62` 后未重测单趟读数）；**269** = 门里最严格的读法（不要求 trait 声明面、不排 std/派生噪声名），**不作文档该锚点值**。⚠ 处置次序仍不能反：**先让谓词可复算，再升 hard** —— 反向必先假红。**同日 `jobs.store` 再 +1（233→234）**：`JobStoreProvider` 在 `runtime-core` 有生产 impl。**同日 `workflow.run` 再 +1（234→235）**：`WorkflowRunProvider` 在 `src-tauri/src/init/workflow_run.rs` 有生产 impl（后迁 `commands/stock_workflow/workflow_run_service.rs`，读数不变）；**同日 `trading.engine` 再 +1（235→236）**：`TradingEngineProvider` 在 `src-tauri/src/commands/stock_workflow/trading_engine_service.rs` 有生产 impl；**同日 `#103` 宿主批再 +2（236→238）**：`StockMonitorProvider` 在 `commands/stock_workflow/monitor_seam_service.rs`、`QuoteWatcherProvider` 在 `quote_watcher_service.rs` 各有生产 impl（`KnowledgeVectorProvider` / `TrajectoryStoreProvider` 仍只有声明 ⇒ 不计，等 `#108`）。 |
 | K1 + K2（键控站点，四次扫描合并去漏报） | **51** 个 trait 面 | 含 15 条已建接缝的 trait。⚠ **2026-11-02 `#33` 实测：这一档不可作论据** —— 谓词真身是**未入库的一次性工件** `.tmp/capability-register3.cjs:44-82`（仓内无处复跑，与 §0.7.2 的 232 同病根），且它要求签名/块内出现 `dyn T` ⇒ 198 条里 **21 条假阴性**，把 PLAN B/C 组落入该桶的 **13 条契约全部吞掉** ⇒ **不许**用「无键控点」论证「这些 trait 只是分层解耦」。谓词入库 = 任务 **#57**；逐条分桶结论见 **§14** |
 | 51 → 同族合并 + K3/K4 判定 | **23 条能力**（另有 3 条移入 §0.7.9 债档，只登记不计数） | ⇒ 本节表格 A+B+C 三组 |
@@ -3457,3 +3457,130 @@ res109 §A2 的机械归桶读数是 **H=35 处 / 9 文件**，但其中 `servic
 2. **注释同样过 clippy**：`doc_lazy_continuation` 的有序列表续行缩进是 4 格（不是 3），写 3 格会红两条；`cargo check` / `cargo test` 都不跑这条（AGENTS 的「三条硬约束」第 1 条）。
 
 **未做（第二片，逐条点名）**：① `schema.json` 形状 + JSON→`TableModel` 反序列化；② `apply::cycle` 的外部声明注入口与闸 3 基数口径；③ 端到端「装插件即建表、卸载不删表」的真库测试（要等 ①② 落地）。
+
+## 69. `#134` 第二片：`schema.json` 形状 + 注入口 + 装/卸真库测试（2026-11-04）
+
+**边界**：本片只把「插件声明 → 宿主建表」这条通道打通，**不做 B4 全量**（20 张股票表转 `schema.json` 属于 `#35`）。
+
+### 69.1 `schema.json` v1 最小形状
+
+位置：**插件安装根**（`PluginSummary.metadata.root`）下的 `schema.json`，可选。缺失 = 该插件不声明表，**不是错误**（大量既有插件只贡献 hooks / 页面 / 命令）。
+
+```json
+{
+  "version": 1,
+  "tables": [
+    {
+      "name": "plugin_stock_watch",
+      "columns": [
+        { "name": "id", "type": "bigint", "primaryKey": true, "autoIncrement": true },
+        { "name": "code", "type": "text" },
+        { "name": "score", "type": "double", "nullable": true },
+        { "name": "created_at", "type": "timestamp", "default": "CURRENT_TIMESTAMP" }
+      ],
+      "indexes": [
+        { "name": "idx_plugin_stock_watch_code", "cols": ["code"], "unique": false }
+      ],
+      "checks": [
+        { "name": "ck_plugin_stock_watch_score", "expr": "score >= 0" }
+      ],
+      "foreignKeys": []
+    }
+  ]
+}
+```
+
+字段全集（**刻意只到这里**）：
+
+| 层 | 字段 | 语义 |
+|---|---|---|
+| 根 | `version` | 必须**恰好**为 `1`；未知版本直接报错，不降级、不猜测 |
+| 表 | `name` / `columns` | 必填 |
+| 表 | `primaryKey` | 复合主键列名数组；缺省 = 用列级 `primaryKey` 表达单列主键 |
+| 表 | `indexes` / `checks` / `foreignKeys` | 选填，缺省为空 |
+| 列 | `name` / `type` | 必填 |
+| 列 | `nullable` | 缺省 **false（NOT NULL）**，与实体侧「默认非空」一致 |
+| 列 | `primaryKey` / `unique` / `autoIncrement` | 布尔，缺省 false |
+| 列 | `default` | **原样 SQL 表达式**（渲染直接拼进 DDL） |
+| 索引 | `name` / `cols` / `unique` | 不支持 `method` / `where`（v1 边界） |
+| CHECK | `name` / `expr` | |
+| 外键 | `name?` / `cols` / `refTable` / `refCols` / `onDelete?` / `onUpdate?` | 动作词表 `Cascade` / `SetNull` / `Restrict` / `NoAction` / `SetDefault` |
+
+**不能声明的**（不是遗漏，是越权）：`extras`（宿主 L2 认领标记）、`renamedFrom`（插件没有实体迁移史）、列 `generated`（v1 边界）。所有结构体 `deny_unknown_fields` ⇒ 拼错一个键就报错，而不是静默忽略。
+
+**类型词表**（JSON token → 期望侧归一串）：
+
+| token | PG | SQLite |
+|---|---|---|
+| `text` | `text` | `text` |
+| `varchar(n)` / `char(n)` | `varchar(n)` / `char(n)` | `text` |
+| `smallint` / `integer` / `bigint` | 同名 | `integer` |
+| `real` / `double` | `real` / `double precision` | `real` |
+| `numeric` / `numeric(p,s)` | 同名 | `real`（亲和性把 decimal 折进 REAL） |
+| `boolean` | `boolean` | `integer`（`BOOL` 折叠） |
+| `blob` | `bytea` | `blob` |
+| `timestamp` / `timestamptz` / `date` / `time` | 同名 | `text` |
+| `json` / `jsonb` / `uuid` | 同名 | `text` |
+| `vector(n)` | `vector(n)` | **拒绝**（SQLite 渲染器无此类型） |
+
+实现**不建第二张映射表**：token → `sea_query::ColumnType` → 复用 `canonical_type_expected(dialect)`。上表是**测试预言**，由回归用例逐行钉住；「双向」指 `canonical_type_actual(canonical_type_expected(ct))` 必须回到同一个串（否则插件写 `TEXT` 与实体产出的 `text` 永远不等）。
+
+**硬判据**（全部是错误，不是 warn）：
+
+1. `version != 1`、任何未知键 ⇒ 报错；
+2. 表名非空、**不以 `_ax_` 开头**（那是宿主簿记命名空间，`safety` 的审计 / 待删表都在这里）、文件内不重名；与实体 / L2 重名由 `build_with_external` 拒；
+3. 主键只能二选一：列级 `primaryKey` **或**表级 `primaryKey` 数组，同时出现 ⇒ 报错；主键列必须存在且 `nullable=false`；
+4. 索引 / 外键引用的**本表列**必须存在；索引 `cols` 非空；索引 / CHECK 名非空；
+5. `autoIncrement` 只允许整数族（`smallint` / `integer` / `bigint`），且与 `default` 互斥；
+6. `default` / `expr` 做**结构校验**：非空、无 `;`、无 `--` / `/*`、引号与括号配平。**它不是 SQL 防火墙** —— 插件本来就是可执行包，这里只挡「语法噪声把整批 DDL 带歪」；
+7. SQLite 上 `vector(n)` ⇒ 报错（该方言渲染会 panic，必须在声明期拒）。
+
+### 69.2 闸 3 基数口径（插件表如何计入）
+
+`cycle_with_external(db, opts, &[TableModel])` 与 `cycle` 的唯一差异是期望侧输入；**基数仍是 `want.tables.len()`，现在天然包含外部表**。
+
+- 闸 3（`safety.rs` 的 `BaseShrank`）只在 `now < last` 时拒绝 ⇒ **装插件抬高基线是允许方向**；
+- 卸载后声明消失、基线回落 ⇒ 非启动路径会被闸 3 拒绝整批（`BaseShrank`）；启动路径 `last_expected_table_count = None` 且 `additive_only = true` ⇒ 不判、不删；
+- ⇒ 「卸载不删表」由**两道既有机制**保证：卸载路径零 DDL + 启动路径 additive-only / 闸 2 零破坏配额。**不引入新的表级白名单**。
+
+**如实登记的边界**：离线探针（非 additive-only）如果**不传**外部声明，插件表会被判孤儿；此时仍受闸 4（导出证据）与闸 5（首见延迟）约束，但「永不 DROP」要靠调用方传齐声明或后续的「插件表归属登记表」——记在 69.5 未做。
+
+### 69.3 挂载点（全部是 wiring，`dao` 不认识插件）
+
+| 时机 | 做什么 |
+|---|---|
+| `plugin_install` 成功后 | 读 `<install_path>/schema.json` → `cycle_with_external(bootstrap_options())` |
+| `plugin_enable` 成功后 | 同上（覆盖「装的时候建表失败」与「库被换掉」） |
+| `plugin_update` 成功后 | 同上（新版本可能新增表；旧表不删） |
+| 启动 `start_plugins` 里 `start_enabled_plugins()` 之后 | 对**全部已安装**插件（含 disabled）各跑一次 —— 表的归属是「安装」，不是「启用」 |
+| `plugin_uninstall` | **零 DDL**（这是本片要测的行为，不是漏写） |
+
+统一用 `bootstrap_options()`：`dry_run=false` + `additive_only=true` + `max_destructive_per_run=0` + `last=None`。
+`schema.json` 缺失 ⇒ no-op；存在但非法 ⇒ 安装 / 启用命令返回错误（带文件路径与字段），启动路径只 `error!` 并继续（绝不让一个坏声明挡住 App 启动）。
+
+### 69.4 验收（2026-11-04 实测）
+
+| 标签 | 命令 | EXIT | 取证 |
+|---|---|---|---|
+| J1 | `cargo check -p axagent-dao --all-targets` | 0 | `Finished` 1m18s；首轮 1 条 `unused variable: expect_args`（`vector` 改成可选参数后该闭包失去调用方）⇒ 已删，后续 J2–J4 在修后源码上复跑 |
+| J2 | `cargo test -p axagent-dao --lib reconcile::external` | 0 | **15 passed / 0 failed**；覆盖类型词表双方言回读、未知版本 / 未知键、`_ax_` 命名空间、主键二选一、列引用、自增约束、默认值结构校验、FK 动作词表、SQLite `vector` 拒绝、重名 |
+| J3 | `cargo test -p axagent-dao --lib reconcile::apply::tests::cycle_with_external` | 0 | **1 passed / 0 failed**（3.04s）：建表 + 闸 3 基数含外部表 + 第二轮 `executed == 0` + 声明消失后表仍在 |
+| J4 | `cargo clippy -p axagent-dao --all-targets -- -D warnings` | 0 | `Finished` 1m26s |
+| J5 | `cargo check -p axagent --all-targets` | 1 → **0** | 首轮 **EXIT 101 / E0282**：安装 / 更新命令的闭包由「函数尾表达式」改成「先绑定再继续用」后，`Ok(...)` 的 `E` 无法推断 ⇒ 给两个闭包补 `-> Result<…, String>`；修后 `Finished` **16m56s** |
+| J6 | `cargo clippy -p axagent --all-targets -- -D warnings` | 0 | `Finished` 15m46s；0 error（首轮 J5 的 E0282 同批修复后一次过） |
+| J7 | `node scripts/check-capability-register.mjs` | 0 | 登记 37 行；`k1RsFileCount` **2030→2032**（本片新增 2 个 `.rs`）同批回写登记表 + PLAN:247；全量 37 项一致 |
+
+### 69.5 未做（逐条点名）
+
+1. 20 张股票表转 `schema.json` —— `#35` 的范围，本片只提供通道；
+2. 离线探针的外部声明输入（`examples/p5_engine_takeover` 目前不认识插件）；
+3. 「插件表归属登记表」—— 让卸载后永不 DROP 不再依赖调用方每次传齐声明；
+4. 索引 `method` / partial `where`、列 `generated` —— v1 显式边界；
+5. 插件 schema 变更（加列 / 加索引）的审计报告入口 —— 当前走既有 `ApplyOutcome`，未投影到前端；
+6. 跨插件 / 插件→宿主的外键**建表顺序**未特判 —— 同一批次里的 `CREATE TABLE` 顺序由 `plan` 决定，外键指向尚未建出的表时由数据库报错（不静默）；B4 若需要跨表外键，先补拓扑排序或拆两轮。
+
+### 69.6 本片踩到的三个坑
+
+1. **新增 `.rs` 文件会抬 K1 文件数**：2030→2032（`reconcile/external.rs` + `init/plugin_schema.rs`）。第五道门因此硬红，必须**同批**改登记表 `value` / `planNumber` / `planPinned` 与 PLAN:247 —— 这不是「放宽判据」，是镜像表跟上盘上事实。
+2. **他人未提交的文档头会让 `planPinned` 集体假红**：PLAN 头部多出 3 行未提交内容时，511–526 段整体下移 3 行 ⇒ 第五道门一次报出 **26 条**「钉句不符」。验证/提交前必须把那 3 行 park 回 HEAD 形态，门绿后再原样交回；**不能**跑 `--repin-plan` 去迁就别人的未提交改动（那会把行号永久钉到未提交状态）。
+3. **`spawn_blocking` 闭包改成「先绑定再继续用」会丢类型推断**：原先 `Ok(Dto{..})` 是函数尾表达式，返回类型由签名决定；绑定成 `let outcome = …??;` 后，闭包内部的 `E` 不再有上下文 ⇒ `E0282`。给闭包显式补 `-> Result<Dto, String>`，不要用 `Ok::<_, String>` 逐点标注（两处形态不一致时会再漂）。

@@ -550,6 +550,7 @@ fn init_mcp_oauth(state: &AppState) {
 
 fn start_plugins(state: &AppState) {
     let plugin_manager = state.plugin_manager.clone();
+    let db = state.harness.db().clone();
 
     tauri::async_runtime::spawn(async move {
         tracing::info!("Initializing plugin system...");
@@ -575,6 +576,15 @@ fn start_plugins(state: &AppState) {
         };
 
         drop(manager);
+
+        // 插件表声明（PLAN-shell-plus-plugins §69.3）：**全部已安装**插件都参与
+        // （含 disabled —— 表的归属是「安装」，不是「启用」）。失败只记日志：
+        // 一个坏声明不能挡住 App 启动；安装 / 启用路径会各自把同一错误交给用户。
+        match crate::init::plugin_schema::reconcile_installed(&db, &plugin_manager, None).await {
+            Ok(0) => {},
+            Ok(n) => tracing::info!("已收敛 {n} 个插件的 schema.json"),
+            Err(e) => tracing::error!("插件 schema.json 收敛失败（不阻塞启动）：{e}"),
+        }
 
         // dashboard 合流（PLAN-plugin-gap-closure §3）：仪表盘面板清单是 PluginManager
         // 的实时只读投影，不再需要独立的 registry reload。

@@ -254,22 +254,34 @@ pub async fn plugin_install(
         );
     }
     let plugin_manager = state.plugin_manager.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut manager = plugin_manager.blocking_write();
-        let outcome = manager.install(&source).map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
-        Ok(InstallOutcomeDto {
-            plugin_id: outcome.plugin_id,
-            version: outcome.version,
-            install_path: outcome.install_path.display().to_string(),
+    let outcome =
+        tauri::async_runtime::spawn_blocking(move || -> Result<InstallOutcomeDto, String> {
+            let mut manager = plugin_manager.blocking_write();
+            let outcome = manager.install(&source).map_err(|e| {
+                String::from(crate::commands::error::ErrorResponse::from_error(
+                    e,
+                    crate::commands::error::ErrorCategory::Unrecoverable,
+                ))
+            })?;
+            Ok(InstallOutcomeDto {
+                plugin_id: outcome.plugin_id,
+                version: outcome.version,
+                install_path: outcome.install_path.display().to_string(),
+            })
         })
-    })
+        .await
+        .map_err(|e| format!("plugin install task panicked: {e}"))??;
+
+    // 插件表声明（PLAN-shell-plus-plugins §69.3）：安装成功后再收敛，失败则把
+    // 「插件已装、建表失败」如实报给用户（下一次启用 / 启动会重试同一份声明）。
+    crate::init::plugin_schema::reconcile_installed(
+        state.harness.db(),
+        &state.plugin_manager,
+        Some(&outcome.plugin_id),
+    )
     .await
-    .map_err(|e| format!("plugin install task panicked: {e}"))?
+    .map_err(|e| format!("插件已安装，但 schema.json 收敛失败：{e}"))?;
+    Ok(outcome)
 }
 
 #[agent_command(domain = plugin, safety = Caution, call_mode = StateInput, description = "启用指定插件")]
@@ -299,6 +311,15 @@ pub async fn plugin_enable(state: State<'_, AppState>, plugin_id: String) -> Res
             warn!("SECURITY: 插件 `{plugin_id}` 护照 `{}` 注册失败: {e}", passport.capability_id);
         }
     }
+    // 插件表声明（PLAN-shell-plus-plugins §69.3）：覆盖「安装时建表失败」与
+    // 「库被换掉」两种情况；已存在且一致时是幂等的（0 条执行）。
+    crate::init::plugin_schema::reconcile_installed(
+        state.harness.db(),
+        &state.plugin_manager,
+        Some(&plugin_id),
+    )
+    .await
+    .map_err(|e| format!("插件已启用，但 schema.json 收敛失败：{e}"))?;
     Ok(())
 }
 
@@ -539,23 +560,34 @@ pub async fn plugin_update(
     plugin_id: String,
 ) -> Result<UpdateOutcomeDto, String> {
     let plugin_manager = state.plugin_manager.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut manager = plugin_manager.blocking_write();
-        let outcome = manager.update(&plugin_id).map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?;
-        Ok(UpdateOutcomeDto {
-            plugin_id: outcome.plugin_id,
-            old_version: outcome.old_version,
-            new_version: outcome.new_version,
-            install_path: outcome.install_path.display().to_string(),
+    let outcome =
+        tauri::async_runtime::spawn_blocking(move || -> Result<UpdateOutcomeDto, String> {
+            let mut manager = plugin_manager.blocking_write();
+            let outcome = manager.update(&plugin_id).map_err(|e| {
+                String::from(crate::commands::error::ErrorResponse::from_error(
+                    e,
+                    crate::commands::error::ErrorCategory::Unrecoverable,
+                ))
+            })?;
+            Ok(UpdateOutcomeDto {
+                plugin_id: outcome.plugin_id,
+                old_version: outcome.old_version,
+                new_version: outcome.new_version,
+                install_path: outcome.install_path.display().to_string(),
+            })
         })
-    })
+        .await
+        .map_err(|e| format!("plugin update task panicked: {e}"))??;
+
+    // 新版本可能新增表声明；旧表**不删**（additive-only，见 PLAN §69.2）。
+    crate::init::plugin_schema::reconcile_installed(
+        state.harness.db(),
+        &state.plugin_manager,
+        Some(&outcome.plugin_id),
+    )
     .await
-    .map_err(|e| format!("plugin update task panicked: {e}"))?
+    .map_err(|e| format!("插件已更新，但 schema.json 收敛失败：{e}"))?;
+    Ok(outcome)
 }
 
 /// 执行插件声明的命名命令（阶段3-① 分发入口，`PLAN-plugin-gap-closure.md` §2）。

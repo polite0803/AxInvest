@@ -48,6 +48,7 @@
 pub mod apply;
 pub mod evidence;
 pub mod expected;
+pub mod external;
 pub mod extras;
 pub mod fingerprint;
 pub mod introspect;
@@ -59,6 +60,7 @@ pub mod status;
 
 pub use apply::{ApplyOptions, ApplyOutcome, ApplyRefusal, SkipReason};
 pub use evidence::{ExportError, ExportOptions, ExportReport, ExportTarget};
+pub use external::{ExternalSchema, ExternalSchemaError, SCHEMA_FILE_NAME};
 pub use extras::Dialect;
 // 只重导出**类型**，不重导出 `render::render` 函数 —— 那会让 `reconcile::render`
 // 同时是模块名（类型命名空间）与函数名（值命名空间）：合法，但读起来像笔误。

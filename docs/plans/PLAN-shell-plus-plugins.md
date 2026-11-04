@@ -3850,3 +3850,26 @@ K1 不变（**2033**）：新文件在 `tests/`（被 `K1_IGNORE` 排除），�
 3. **清单 `integrity` 与宿主 trust-on-install 哈希不是同一值**：前者是打包脚本对 worker 单文件的 sha256，后者是宿主对**整个安装目录**算的（`hash_plugin_directory`），两者各自独立，本片未尝试对齐。
 4. **前端仍未接**（同 §78 未做 3）。
 5. **读数不降**（计划内）：ownedRe 桶仍 123 处 / 22 文件。
+
+## 80. `#35` B4-g 开工决策：纯域逻辑的家（2026-11-04，只决策不搬代码）
+
+**为什么先停下来定这件事**：B4-a ～ B4-f 交付的都是「通道 + 装机链路」，一条域逻辑未搬。往下每一步都要回答同一个问题：**插件只能依赖 foundation（`plugin-proto` 级别），而现有股票域逻辑在 implementor（`analysis-engine` / `astock-data`）里，两边够不着彼此**。不先钉死落位，搬一条就要改一次口径（§54.3 的「−6～−9」就是这么推翻的）。
+
+**三个候选与裁定**：
+
+| 候选 | 裁定 | 理由 |
+|---|---|---|
+| 插件直接依赖 `analysis-engine` | ✖ | implementor 会把 `dao` / `entities` / `astock-data` 拖进插件进程（铁律 2 + 插件不得依赖实现层）；且 `analysis-engine` 是 `astock-data` 的上游，搬它等于先推翻 §64.11 裁定 1（`astock-data` 留宿主） |
+| 把纯逻辑塞进 `harness` | ✖ | `harness` 的定位是「trait 契约 + 纯 DTO」，塞业务解析器会让所有 consumer 共享一份业务代码，且与「股票迁出后主壳不再链接股票逻辑」的终局相反 |
+| **新建插件侧 foundation crate `axagent-stock-core`**（`axagent-plugins/crates/stock-core`） | ✔ | 零 `axagent-*` 依赖 ⇒ 插件可直接链接；宿主过渡期也可链接；终局随插件走（宿主断开依赖即完成迁出）。依赖方向是 implementor → foundation，向下，不构成环 |
+
+**登记要求**（搬之前必须同时做，缺一条就是半成品）：
+1. `axagent-plugins/crates/README.md` 与 AGENTS.md 附区登记角色 = **foundation**（零 `axagent-*` 依赖），并写明「插件与宿主过渡期共用」；
+2. 分层门禁规则 4：由 `plugin-stock`（bin）与 `analysis-engine` 各引用一次 ⇒ 有消费者；
+3. K1 会变：新增 `stock-core/src/lib.rs` + 迁入模块（+2），`analysis-engine/src/intent_parser.rs` 删除（−1）⇒ **净 +1（2033 → 2034）**；同批改 `scripts/capability-register.json` 的 `k1RsFileCount`（`value` / `planNumber` / `planPinned.mustContain`）与 PLAN §0.7.1 的读数说明；
+4. `analysis-engine` 侧留**路径级 re-export**（`pub use axagent_stock_core::intent_parser;`）⇒ 宿主 `stock_analysis.rs` 的 `axagent_analysis_engine::intent_parser::ParsedIntent` 一行不用改，主 crate 无需重编即可保持兼容（迁移期不制造第二套类型）。
+
+**首片选 `intent_parser`（已核过的画像）**：441 行、**只依赖 `serde`**、单一宿主消费方（`commands/stock_analysis.rs:7696` 的 `parse_analysis_intent` 命令入口）、自带 9 条单测、无 DB / 无时钟 / 无 AppState —— 正是 §76 选首刀时用的同一档判据，也是 §49 夹具 worker 注释里点名的「真迁移时直接依赖本体」那个模块。
+**首片验收口径**（照 §76 的 A1–A4 形态）：`cargo test -p axagent-stock-core`（迁入的 9 条原样通过）+ `cargo test -p axagent-analysis-engine`（re-export 后原测试仍指向同一实现）+ 插件新增命令 `parse_analysis_intent` 的真进程用例（用**本体**而非夹具子集）+ `cargo check -p axagent --lib`（证明主 crate 不用改）。
+
+**本片明确不做**：不搬 `astock-data`（§64.11 裁定 1 保留）、不删宿主 `parse_analysis_intent` 命令（commandTotal 不变）、不动 ownedRe 读数（123 / 22）。

@@ -1,17 +1,24 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * 把股票插件 worker 打包成「可投放的插件目录」：`<out>/plugin.json` + `<out>/bin/<worker>`。
+ * 把一个插件 worker 打包成「可投放的插件目录」：`<out>/plugin.json` + `<out>/bin/<worker>`。
  *
  * 为什么要这个脚本（PLAN §74 未做 1）：宿主的 `PluginWorkerDecl.program` 只接受
  * **相对插件安装目录**的路径，而 `cargo build` 的产物在 target 目录 ⇒ 中间缺一步
- * 「把产物摆进插件目录」。本脚本就是那一步，产物落在 git 忽略的 `dist/plugins/`。
+ * 「把产物摆进插件目录」。本脚本就是那一步，产物落在 git 忽略的 `dist/plugins/<插件>/`。
  *
  * 用法：
- *   node scripts/build-plugin-bundle.mjs              # 构建（debug）+ 打包 + 打印路径
- *   node scripts/build-plugin-bundle.mjs --release    # 构建 release
- *   node scripts/build-plugin-bundle.mjs --check      # 打包后真起一次 worker 做握手 + 停机回执
- *   node scripts/build-plugin-bundle.mjs --out <dir>  # 自定义输出目录
+ *   node scripts/build-plugin-bundle.mjs                 # 构建（debug）+ 打包 + 打印路径（缺省 stock）
+ *   node scripts/build-plugin-bundle.mjs --plugin opc     # 打包 opc 插件（#36 骨架）
+ *   node scripts/build-plugin-bundle.mjs --release       # 构建 release
+ *   node scripts/build-plugin-bundle.mjs --check         # 打包后真起一次 worker 做握手 + 停机回执
+ *   node scripts/build-plugin-bundle.mjs --out <dir>     # 自定义输出目录
+ *
+ * 参数化口径（任务 #36 第 1 批）：**一个插件 = `PLUGIN_SPECS` 里一条**，条目的字段就是
+ * 本脚本对插件的全部假设（cargo 包名、前端源目录、`ui.json` 源、清单构造器）。新增插件只加
+ * 一条，不改脚本主体。⚠ **`--plugin stock` 的产物（路径 / 清单字段与键序 / 产物名 / sha256 /
+ * 控制台行）必须与参数化之前逐字一致** —— 下游 `stage-plugin-bundles.mjs` 与既有插件 e2e
+ * 都按那份形状断言，静默失配不会有任何一处报错。
  *
  * `--check` 不造假：它 spawn 的是**打包出来的那个文件**，按 `axagent-plugin-proto`
  * 的长度前缀 JSON 帧发 `describe` / `shutdown`，并核对 integrity 的 sha256 与盘上一致。
@@ -27,22 +34,55 @@ const argv = process.argv.slice(2);
 const release = argv.includes("--release");
 const check = argv.includes("--check");
 const outFlag = argv.indexOf("--out");
-const outRoot = path.resolve(
-  outFlag >= 0 && argv[outFlag + 1] ? argv[outFlag + 1] : path.join(repoRoot, "dist", "plugins", "stock"),
-);
+const pluginFlag = argv.indexOf("--plugin");
+const pluginName = pluginFlag >= 0 && argv[pluginFlag + 1] ? argv[pluginFlag + 1] : "stock";
 
-// 前端贡献的源目录：`web/` 下的文件按**相对路径原样**进产物，`pages[].entry` 即这些相对路径。
-// 目前只有一页通道探针（B8-0）；真实股票 UI 随 B8-1..B8-5 才落进这里。
-const webRoot = path.join(workspaceRoot, "crates", "plugin-stock", "web");
+/**
+ * 插件规格表（键 = `--plugin` 取值）。
+ *
+ * - `packageName`：cargo 包名，同时决定 `cargo build -p` 与产物文件名（`<packageName>[.exe]`）；
+ * - `webDir`：前端贡献源目录（相对 `axagent-plugins/`）；`null` = 无前端贡献 ⇒ 不拷资产、
+ *   且清单不得声明 `pages[]`（`--check` 会拦）；
+ * - `uiSchema`：`ui.json` 源（相对 `axagent-plugins/`）；`null` = 无详情槽声明；
+ * - `manifest(ctx)`：清单构造器，`ctx = { version, binaryName, sha256 }`。**键序即产物键序**
+ *   （`JSON.stringify` 保序），改键序等于改产物，下游比对会当漂移。
+ */
+const PLUGIN_SPECS = {
+  stock: {
+    packageName: "axagent-plugin-stock",
+    // 前端贡献的源目录：`web/` 下的文件按**相对路径原样**进产物，`pages[].entry` 即这些相对路径。
+    // 目前只有一页通道探针（B8-0）；真实股票 UI 随 B8-1..B8-5 才落进这里。
+    webDir: path.join("crates", "plugin-stock", "web"),
+    // UI 贡献声明（任务 #149 第 3 步）：`ui.json` 与 `plugin.json` **同级**落在安装根，
+    // 任务源的 `detailSchema` 只能引用它里面已声明的 key —— 宿主 `build_manifest_task_sources`
+    // 安装期硬校验，「声明了却不在 ui.json 里」等于装不上。故它是清单的一部分，必须由本脚本
+    // 一起产出（前端资产目录 `web/` 只收 html/js/css，扩展名白名单会拒掉 .json）。
+    uiSchema: path.join("crates", "plugin-stock", "ui.json"),
+    manifest: stockManifest,
+  },
+  opc: {
+    packageName: "axagent-plugin-opc",
+    // #36 第 1 批只有 worker 骨架：没有前端页面，也没有 `ui.json` 详情槽 ⇒ 两者皆 null。
+    // 第一批真实页面/详情槽接进来时再改这两处（不要为「以后可能用」预留空目录）。
+    webDir: null,
+    uiSchema: null,
+    manifest: opcManifest,
+  },
+};
+
+const spec = PLUGIN_SPECS[pluginName];
+if (!spec) {
+  fail(`未知插件 --plugin ${pluginName}（可选：${Object.keys(PLUGIN_SPECS).join(" | ")}）`);
+}
+const outRoot = path.resolve(
+  outFlag >= 0 && argv[outFlag + 1] ? argv[outFlag + 1] : path.join(repoRoot, "dist", "plugins", pluginName),
+);
 // 与宿主 `PANEL_ASSET_ALLOWED_EXTS`（axagent-plugins/crates/plugins/src/manager.rs）同口径：
 // 清单校验会拒掉白名单外的扩展名，产物自检必须在**打包期**就报出来，而不是等安装时才失败。
 const PAGE_ASSET_ALLOWED_EXTS = new Set(["html", "htm", "js", "css"]);
 const PAGE_ENTRY = "pages/index.html";
-// UI 贡献声明（任务 #149 第 3 步）：`ui.json` 与 `plugin.json` **同级**落在安装根，
-// 任务源的 `detailSchema` 只能引用它里面已声明的 key —— 宿主 `build_manifest_task_sources`
-// 安装期硬校验，「声明了却不在 ui.json 里」等于装不上。故它是清单的一部分，必须由本脚本
-// 一起产出（前端资产目录 `web/` 只收 html/js/css，扩展名白名单会拒掉 .json）。
-const UI_SCHEMA_SOURCE = path.join(workspaceRoot, "crates", "plugin-stock", "ui.json");
+const webRoot = spec.webDir ? path.join(workspaceRoot, spec.webDir) : null;
+const uiSchemaSource = spec.uiSchema ? path.join(workspaceRoot, spec.uiSchema) : null;
 
 function fail(message) {
   console.error(`[plugin-bundle] ${message}`);
@@ -57,7 +97,7 @@ function run(command, args, options = {}) {
 }
 
 // 1) 构建 worker（宿主与打包用同一份源码，不另存产物）
-run("cargo", ["build", "-p", "axagent-plugin-stock", ...(release ? ["--release"] : [])], {
+run("cargo", ["build", "-p", spec.packageName, ...(release ? ["--release"] : [])], {
   cwd: workspaceRoot,
 });
 
@@ -72,12 +112,12 @@ if (metadataRaw.status !== 0) {
   fail(`cargo metadata 退出码 ${metadataRaw.status}：${metadataRaw.stderr.trim()}`);
 }
 const metadata = JSON.parse(metadataRaw.stdout);
-const workerPackage = metadata.packages.find((p) => p.name === "axagent-plugin-stock");
-if (!workerPackage) fail("cargo metadata 里找不到 axagent-plugin-stock");
+const workerPackage = metadata.packages.find((p) => p.name === spec.packageName);
+if (!workerPackage) fail(`cargo metadata 里找不到 ${spec.packageName}`);
 
 const targetDir = metadata.target_directory;
 const profileDir = release ? "release" : "debug";
-const binaryName = process.platform === "win32" ? "axagent-plugin-stock.exe" : "axagent-plugin-stock";
+const binaryName = process.platform === "win32" ? `${spec.packageName}.exe` : spec.packageName;
 const builtBinary = path.join(targetDir, profileDir, binaryName);
 if (!fs.existsSync(builtBinary)) fail(`构建产物不存在：${builtBinary}`);
 
@@ -93,182 +133,57 @@ const sha256 = createHash("sha256").update(fs.readFileSync(stagedBinary)).digest
 // 3.5) 前端资产：源目录整树拷进安装根。
 //      先按源目录的**顶层子目录**清一遍同名目录 —— 否则源里删掉的页面会作为孤儿留在产物里，
 //      宿主按目录哈希钉锚也看不出「这份资产没有任何声明指向它」。
-if (!fs.existsSync(webRoot)) fail(`前端源目录不存在：${webRoot}`);
-for (const top of fs.readdirSync(webRoot, { withFileTypes: true })) {
-  if (top.isDirectory()) fs.rmSync(path.join(outRoot, top.name), { recursive: true, force: true });
-}
-const webFiles = listFilesRecursive(webRoot);
-if (webFiles.length === 0) fail(`前端源目录为空：${webRoot}`);
-for (const file of webFiles) {
-  const rel = path.relative(webRoot, file).split(path.sep).join("/");
-  const ext = path.extname(rel).slice(1).toLowerCase();
-  if (!PAGE_ASSET_ALLOWED_EXTS.has(ext)) {
-    fail(`前端资产扩展名不在白名单（${[...PAGE_ASSET_ALLOWED_EXTS].join(", ")}）：${rel}`);
+//      `webDir = null` 的插件（#36 骨架期的 opc）没有前端贡献 ⇒ 整段跳过，不建空目录。
+let webFileCount = 0;
+if (webRoot) {
+  if (!fs.existsSync(webRoot)) fail(`前端源目录不存在：${webRoot}`);
+  for (const top of fs.readdirSync(webRoot, { withFileTypes: true })) {
+    if (top.isDirectory()) fs.rmSync(path.join(outRoot, top.name), { recursive: true, force: true });
   }
-  const target = path.join(outRoot, ...rel.split("/"));
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.copyFileSync(file, target);
-}
-if (!fs.existsSync(path.join(outRoot, ...PAGE_ENTRY.split("/")))) {
-  fail(`清单要声明的页面资产不在源目录里：${path.join(webRoot, ...PAGE_ENTRY.split("/"))}`);
+  const webFiles = listFilesRecursive(webRoot);
+  if (webFiles.length === 0) fail(`前端源目录为空：${webRoot}`);
+  for (const file of webFiles) {
+    const rel = path.relative(webRoot, file).split(path.sep).join("/");
+    const ext = path.extname(rel).slice(1).toLowerCase();
+    if (!PAGE_ASSET_ALLOWED_EXTS.has(ext)) {
+      fail(`前端资产扩展名不在白名单（${[...PAGE_ASSET_ALLOWED_EXTS].join(", ")}）：${rel}`);
+    }
+    const target = path.join(outRoot, ...rel.split("/"));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(file, target);
+  }
+  if (!fs.existsSync(path.join(outRoot, ...PAGE_ENTRY.split("/")))) {
+    fail(`清单要声明的页面资产不在源目录里：${path.join(webRoot, ...PAGE_ENTRY.split("/"))}`);
+  }
+  webFileCount = webFiles.length;
 }
 
 // 3.6) UI 声明：原样拷到安装根（不做任何改写）。key 集合在这里先解析一次 ——
 //      `--check` 与清单里的 `detailSchema` 都要它，解析失败必须**在打包期**报错，
-//      而不是等宿主安装时才说「ui.json 不合法」。
-if (!fs.existsSync(UI_SCHEMA_SOURCE)) fail(`UI 声明文件不存在：${UI_SCHEMA_SOURCE}`);
-const uiSchemaRaw = fs.readFileSync(UI_SCHEMA_SOURCE, "utf8");
-let uiSchemaKeys;
-try {
-  uiSchemaKeys = new Set((JSON.parse(uiSchemaRaw).schemas ?? []).map((s) => s.key));
-} catch (error) {
-  fail(`UI 声明不是合法 JSON（${UI_SCHEMA_SOURCE}）：${error.message}`);
+//      而不是等宿主安装时才说「ui.json 不合法」。无 `ui.json` 的插件整段跳过。
+let uiSchemaKeyCount = 0;
+if (uiSchemaSource) {
+  if (!fs.existsSync(uiSchemaSource)) fail(`UI 声明文件不存在：${uiSchemaSource}`);
+  const uiSchemaRaw = fs.readFileSync(uiSchemaSource, "utf8");
+  let uiSchemaKeys;
+  try {
+    uiSchemaKeys = new Set((JSON.parse(uiSchemaRaw).schemas ?? []).map((s) => s.key));
+  } catch (error) {
+    fail(`UI 声明不是合法 JSON（${uiSchemaSource}）：${error.message}`);
+  }
+  fs.copyFileSync(uiSchemaSource, path.join(outRoot, "ui.json"));
+  uiSchemaKeyCount = uiSchemaKeys.size;
 }
-fs.copyFileSync(UI_SCHEMA_SOURCE, path.join(outRoot, "ui.json"));
 
-const manifest = {
-  name: "stock",
-  version: workerPackage.version,
-  description:
-    "股票域功能包：行情工具 get_stock_quote + 5 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录）+ 1 个前端页面与 2 个任务中心任务源",
-  // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
-  // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
-  // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
-  permissions: ["subprocess_execution"],
-  mcp_servers: [],
-  skills: [],
-  agents: [],
-  // 默认启用：前端 `StockSearchBar` 的 NL 意图解析已改走本插件的命名命令，
-  // 宿主同名命令（B4-j 后删除）不再兜底 ⇒ 内置包不默认启用就等于该功能静默失效。
-  defaultEnabled: true,
-  worker: { program: path.posix.join("bin", binaryName) },
-  // 前端页面声明：`entry` 相对安装目录（扩展名走宿主资产白名单），宿主
-  // `PluginManager::resolve_page_asset` 把它解析成安装根内的绝对路径；
-  // 前端只传 `(pluginId, pageId)`，不得自己拼路径。
-  pages: [{ id: "stock-home", title: "股票", entry: PAGE_ENTRY, loading: "bundle" }],
-  // `command` 用 `worker://<名>` 占位：worker 通道不读它（按 `name` 发帧），但若意外
-  // 退回 spawn 通道，这个不存在的程序名会当场失败而不是静默跑别的东西。
-  commands: [
-    {
-      name: "stock_get_quote",
-      description: "获取 A 股个股实时行情（经宿主 market.quote 取数）",
-      command: "worker://stock_get_quote",
-      inputSchema: {
-        type: "object",
-        properties: { stock_code: { type: "string", description: "6 位股票代码，如 600519" } },
-        required: ["stock_code"],
-      },
-    },
-    {
-      name: "parse_analysis_intent",
-      description: "解析自然语言分析意图（纯函数，跑 axagent-stock-core 的权威实现）",
-      command: "worker://parse_analysis_intent",
-      inputSchema: {
-        type: "object",
-        properties: { input: { type: "string", description: "如「调研茅台短线」" } },
-        required: ["input"],
-      },
-    },
-    {
-      // B9-1：宿主同名 Tauri 命令在双声明期仍保留；前端已切到本条，
-      // 删除宿主实现与计数收口走 B9-2（避免同批做「改路由 + 重生成注册表」两件不可回滚的事）。
-      name: "compute_evidence_weights",
-      description: "按市场环境/投资周期/分析师输入计算证据质量权重与共识（纯函数，跑 analysis-engine 权威实现）",
-      command: "worker://compute_evidence_weights",
-      inputSchema: {
-        type: "object",
-        properties: {
-          marketRegime: {
-            type: "object",
-            properties: {
-              regime: { type: "string", description: "bull | bear | sideways | volatile" },
-              confidence: { type: "number", description: "0-1" },
-              volatility: { type: "string", description: "high | low | normal" },
-              description: { type: "string" },
-              volatilityPct: { type: "number" },
-              consecutiveUp: { type: "integer" },
-              consecutiveDown: { type: "integer" },
-            },
-            required: ["regime", "confidence", "volatility", "description"],
-          },
-          timeHorizon: { type: "string", description: "ultra_short | short | mid | long" },
-          analysts: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                analystId: { type: "string" },
-                reportText: { type: "string" },
-                stance: { type: "string" },
-                bullScore: { type: "number" },
-                bearScore: { type: "number" },
-                positionPct: { type: "number" },
-                untrusted: { type: "boolean" },
-              },
-              required: ["analystId"],
-            },
-          },
-          historicalWeights: { type: "object", additionalProperties: { type: "number" } },
-        },
-        required: ["marketRegime", "timeHorizon", "analysts"],
-      },
-    },
-    {
-      // B8-1b 建通道、#150 换取数口：行数据全部来自宿主 `workflow.run` 的 `list_recent`
-      // （在跑 + 已结束），插件只做状态词表翻译（引擎六态 → 中心七态）与形状收敛。
-      name: "list_recent_workflow_runs",
-      description: "列出本插件近期工作流执行（在跑与已结束，经宿主 workflow.run 接缝，返回任务中心行数组）",
-      command: "worker://list_recent_workflow_runs",
-      inputSchema: {
-        type: "object",
-        properties: {
-          limit: { type: "integer", description: "取数上限，宿主夹在 1..=200，缺省 50" },
-          workflowId: { type: "string", description: "只看该 workflow 的执行；缺省 = 全部" },
-        },
-      },
-    },
-    {
-      // #149 第 1 步建通道、第 3 步才进清单：行数据来自宿主 `analysis.record` 的 `list`
-      // （宿主发起的单股分析记录也在内），插件只做状态词表翻译与形状收敛。
-      // `name` 必须与 worker 的 `COMMAND_ANALYSIS_RECORDS` 逐字一致（`list_stock_analysis_records`）。
-      name: "list_stock_analysis_records",
-      description: "列出单股分析记录（经宿主 analysis.record 接缝，只交根记录，返回任务中心行数组）",
-      command: "worker://list_stock_analysis_records",
-      inputSchema: {
-        type: "object",
-        properties: {
-          limit: { type: "integer", description: "取数上限，宿主夹在 1..=200，缺省 50" },
-          offset: { type: "integer", description: "分页偏移，缺省 0" },
-        },
-      },
-    },
-  ],
-  // 任务中心任务源声明（PLAN §97.4）：只给「源标识 + 显示名 + 取数命令」，
-  // 不给渲染。`command` 必须是上面 commands[] 里已声明的名字 —— 宿主清单校验会硬拦，
-  // 这里 `--check` 再自证一次，免得产物装不上才发现。
-  taskSources: [
-    { id: "stock-workflow-runs", title: "股票工作流执行", command: "list_recent_workflow_runs", color: "volcano" },
-    {
-      // 与宿主原 `stockAnalysis.adapter.ts` **同 id**（#149 第 3 步删掉宿主那份后不再重名）：
-      // 插件源的注册是「宿主优先、重名忽略」，同 id 才谈得上「插件源顶替宿主源」。
-      id: "stock-analysis",
-      title: "单股分析",
-      command: "list_stock_analysis_records",
-      color: "gold",
-      // 详情槽指向本插件 `ui.json` 的 key（任务 #149 第 2 步的通道）：
-      // 只写 key，行 id `plugin.<pluginId>.<key>` 由宿主拼（插件拼得出来就能引用别人的 schema）。
-      detailSchema: "stock-analysis-detail",
-    },
-  ],
-  integrity: { algorithm: "sha256", hash: sha256 },
-};
+// 4) 清单：形状归 `PLUGIN_SPECS[*].manifest`，此处只递随产物变化的三个量。
+const manifest = spec.manifest({ version: workerPackage.version, binaryName, sha256 });
 const manifestPath = path.join(outRoot, "plugin.json");
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
 console.log(`[plugin-bundle] 产物目录：${outRoot}`);
 console.log(`[plugin-bundle] worker   ：${stagedBinary}`);
-console.log(`[plugin-bundle] 前端资产 ：${webFiles.length} 个文件（页面入口 ${PAGE_ENTRY}）`);
-console.log(`[plugin-bundle] UI 声明  ：ui.json（${uiSchemaKeys.size} 个 schema key）`);
+if (webRoot) console.log(`[plugin-bundle] 前端资产 ：${webFileCount} 个文件（页面入口 ${PAGE_ENTRY}）`);
+if (uiSchemaSource) console.log(`[plugin-bundle] UI 声明  ：ui.json（${uiSchemaKeyCount} 个 schema key）`);
 console.log(`[plugin-bundle] 清单     ：${manifestPath}`);
 console.log(`[plugin-bundle] sha256   ：${sha256}`);
 
@@ -278,7 +193,13 @@ if (check) {
 
 /** 起一次成品 worker：describe 必须回合法声明，shutdown 必须回执并以 0 退出。 */
 async function checkStagedBundle(declared, root) {
-  checkDeclaredPages(declared, root);
+  // 页面自检只在**声明了前端源**的插件上跑：无前端贡献的插件（opc 骨架）连 pages[] 都不许有，
+  // 否则宿主会去解析一条不存在的资产 —— 那种清单装得上但页面永远打不开。
+  if (webRoot) {
+    checkDeclaredPages(declared, root);
+  } else if ((declared.pages ?? []).length > 0) {
+    fail("--check：本插件未声明前端源（webDir=null），清单不得声明 pages[]");
+  }
   checkDeclaredTaskSources(declared, root);
 
   const program = path.join(root, declared.worker.program);
@@ -470,5 +391,171 @@ function frameReader(stream) {
         waiting.push(waiter);
       });
     },
+  };
+}
+
+/**
+ * stock 清单：**字段、键序、取值来源与参数化之前逐字一致**（任务 #36 的硬要求）。
+ * 唯一改写是把 `workerPackage.version` 换成 `ctx.version`（同一个值，经 `cargo metadata` 取）。
+ */
+function stockManifest({ version, binaryName, sha256 }) {
+  return {
+    name: "stock",
+    version,
+    description:
+      "股票域功能包：行情工具 get_stock_quote + 5 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录）+ 1 个前端页面与 2 个任务中心任务源",
+    // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
+    // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
+    // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
+    permissions: ["subprocess_execution"],
+    mcp_servers: [],
+    skills: [],
+    agents: [],
+    // 默认启用：前端 `StockSearchBar` 的 NL 意图解析已改走本插件的命名命令，
+    // 宿主同名命令（B4-j 后删除）不再兜底 ⇒ 内置包不默认启用就等于该功能静默失效。
+    defaultEnabled: true,
+    worker: { program: path.posix.join("bin", binaryName) },
+    // 前端页面声明：`entry` 相对安装目录（扩展名走宿主资产白名单），宿主
+    // `PluginManager::resolve_page_asset` 把它解析成安装根内的绝对路径；
+    // 前端只传 `(pluginId, pageId)`，不得自己拼路径。
+    pages: [{ id: "stock-home", title: "股票", entry: PAGE_ENTRY, loading: "bundle" }],
+    // `command` 用 `worker://<名>` 占位：worker 通道不读它（按 `name` 发帧），但若意外
+    // 退回 spawn 通道，这个不存在的程序名会当场失败而不是静默跑别的东西。
+    commands: [
+      {
+        name: "stock_get_quote",
+        description: "获取 A 股个股实时行情（经宿主 market.quote 取数）",
+        command: "worker://stock_get_quote",
+        inputSchema: {
+          type: "object",
+          properties: { stock_code: { type: "string", description: "6 位股票代码，如 600519" } },
+          required: ["stock_code"],
+        },
+      },
+      {
+        name: "parse_analysis_intent",
+        description: "解析自然语言分析意图（纯函数，跑 axagent-stock-core 的权威实现）",
+        command: "worker://parse_analysis_intent",
+        inputSchema: {
+          type: "object",
+          properties: { input: { type: "string", description: "如「调研茅台短线」" } },
+          required: ["input"],
+        },
+      },
+      {
+        // B9-1：宿主同名 Tauri 命令在双声明期仍保留；前端已切到本条，
+        // 删除宿主实现与计数收口走 B9-2（避免同批做「改路由 + 重生成注册表」两件不可回滚的事）。
+        name: "compute_evidence_weights",
+        description: "按市场环境/投资周期/分析师输入计算证据质量权重与共识（纯函数，跑 analysis-engine 权威实现）",
+        command: "worker://compute_evidence_weights",
+        inputSchema: {
+          type: "object",
+          properties: {
+            marketRegime: {
+              type: "object",
+              properties: {
+                regime: { type: "string", description: "bull | bear | sideways | volatile" },
+                confidence: { type: "number", description: "0-1" },
+                volatility: { type: "string", description: "high | low | normal" },
+                description: { type: "string" },
+                volatilityPct: { type: "number" },
+                consecutiveUp: { type: "integer" },
+                consecutiveDown: { type: "integer" },
+              },
+              required: ["regime", "confidence", "volatility", "description"],
+            },
+            timeHorizon: { type: "string", description: "ultra_short | short | mid | long" },
+            analysts: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  analystId: { type: "string" },
+                  reportText: { type: "string" },
+                  stance: { type: "string" },
+                  bullScore: { type: "number" },
+                  bearScore: { type: "number" },
+                  positionPct: { type: "number" },
+                  untrusted: { type: "boolean" },
+                },
+                required: ["analystId"],
+              },
+            },
+            historicalWeights: { type: "object", additionalProperties: { type: "number" } },
+          },
+          required: ["marketRegime", "timeHorizon", "analysts"],
+        },
+      },
+      {
+        // B8-1b 建通道、#150 换取数口：行数据全部来自宿主 `workflow.run` 的 `list_recent`
+        // （在跑 + 已结束），插件只做状态词表翻译（引擎六态 → 中心七态）与形状收敛。
+        name: "list_recent_workflow_runs",
+        description: "列出本插件近期工作流执行（在跑与已结束，经宿主 workflow.run 接缝，返回任务中心行数组）",
+        command: "worker://list_recent_workflow_runs",
+        inputSchema: {
+          type: "object",
+          properties: {
+            limit: { type: "integer", description: "取数上限，宿主夹在 1..=200，缺省 50" },
+            workflowId: { type: "string", description: "只看该 workflow 的执行；缺省 = 全部" },
+          },
+        },
+      },
+      {
+        // #149 第 1 步建通道、第 3 步才进清单：行数据来自宿主 `analysis.record` 的 `list`
+        // （宿主发起的单股分析记录也在内），插件只做状态词表翻译与形状收敛。
+        // `name` 必须与 worker 的 `COMMAND_ANALYSIS_RECORDS` 逐字一致（`list_stock_analysis_records`）。
+        name: "list_stock_analysis_records",
+        description: "列出单股分析记录（经宿主 analysis.record 接缝，只交根记录，返回任务中心行数组）",
+        command: "worker://list_stock_analysis_records",
+        inputSchema: {
+          type: "object",
+          properties: {
+            limit: { type: "integer", description: "取数上限，宿主夹在 1..=200，缺省 50" },
+            offset: { type: "integer", description: "分页偏移，缺省 0" },
+          },
+        },
+      },
+    ],
+    // 任务中心任务源声明（PLAN §97.4）：只给「源标识 + 显示名 + 取数命令」，
+    // 不给渲染。`command` 必须是上面 commands[] 里已声明的名字 —— 宿主清单校验会硬拦，
+    // 这里 `--check` 再自证一次，免得产物装不上才发现。
+    taskSources: [
+      { id: "stock-workflow-runs", title: "股票工作流执行", command: "list_recent_workflow_runs", color: "volcano" },
+      {
+        // 与宿主原 `stockAnalysis.adapter.ts` **同 id**（#149 第 3 步删掉宿主那份后不再重名）：
+        // 插件源的注册是「宿主优先、重名忽略」，同 id 才谈得上「插件源顶替宿主源」。
+        id: "stock-analysis",
+        title: "单股分析",
+        command: "list_stock_analysis_records",
+        color: "gold",
+        // 详情槽指向本插件 `ui.json` 的 key（任务 #149 第 2 步的通道）：
+        // 只写 key，行 id `plugin.<pluginId>.<key>` 由宿主拼（插件拼得出来就能引用别人的 schema）。
+        detailSchema: "stock-analysis-detail",
+      },
+    ],
+    integrity: { algorithm: "sha256", hash: sha256 },
+  };
+}
+
+/**
+ * opc 清单（#36 第 1 批）：**只有 worker，没有命令、没有页面、没有任务源**。
+ *
+ * 为什么 `commands: []` 要显式写出来：它是「本批零业务命令」的可核对证据 —— 缺省与空数组
+ * 在宿主侧等价，但读清单的人需要看到「不是漏了，是还没有」。同理**不写** `defaultEnabled`
+ * （宿主缺省 false）：零能力的包默认启用只会让插件列表多一条看不出效果的空条目。
+ */
+function opcManifest({ version, binaryName, sha256 }) {
+  return {
+    name: "opc",
+    version,
+    description: "OPC 域功能包（#36 骨架）：worker 通道已就位，业务命令数为 0，待 P6.2 逐批接入",
+    // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
+    permissions: ["subprocess_execution"],
+    mcp_servers: [],
+    skills: [],
+    agents: [],
+    worker: { program: path.posix.join("bin", binaryName) },
+    commands: [],
+    integrity: { algorithm: "sha256", hash: sha256 },
   };
 }

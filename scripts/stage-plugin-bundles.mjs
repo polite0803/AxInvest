@@ -10,11 +10,15 @@
  * 与宿主的解析路径逐字对齐；多套一层 `resources/` 会让宿主找不到。
  *
  * 为什么需要 target 守卫：`beforeBuildCommand` 同时服务 `tauri android/ios build`，
- * 而 `cargo build -p axagent-plugin-stock` 编出的是**宿主架构**的可执行文件 —— 打进移动端
+ * 而 `cargo build -p <worker>` 编出的是**宿主架构**的可执行文件 —— 打进移动端
  * 包里毫无用处（还白增体积）。因此只在桌面平台暂存；移动端直接跳过并退 0。
  *
  * 识别依据是 Tauri CLI 注入的环境变量（`TAURI_ENV_PLATFORM` / `TAURI_ENV_TARGET_TRIPLE`）。
  * 两个都没有时（手工直跑本脚本）按「桌面」处理 —— 手工运行本来就是想产出产物。
+ *
+ * 多插件（任务 #36 第 1 批）：本脚本只负责**逐插件**转调 `build-plugin-bundle.mjs`，
+ * 插件清单与各自产物形状全在那个脚本的 `PLUGIN_SPECS` 里，这里不复制第二份。
+ * 新增插件 = 下方 `PLUGINS` 数组加一个名字，落点固定 `src-tauri/plugins/bundled/<名字>`。
  */
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -33,14 +37,29 @@ if (isMobile) {
   process.exit(0);
 }
 
+// 暂存的插件清单：**顺序即构建顺序**（串行转调，避免多个 cargo 同时抢锁）。
+// stock 必须排在第一位 —— 它今天的产物形状与单插件版逐字一致，先跑它能让「已存在」
+// 的那份产物在任何新增插件失败时保持有效。
+const PLUGINS = ["stock", "opc"];
+
 // `tauri build --debug` 会置 TAURI_ENV_DEBUG=1；没有它即 release 打包。
 const release = process.env.TAURI_ENV_DEBUG !== "1" && process.env.TAURI_ENV_DEBUG !== "true";
-const outDir = path.join(repoRoot, "src-tauri", "plugins", "bundled", "stock");
-const args = ["scripts/build-plugin-bundle.mjs", "--out", outDir];
-if (release) {
-  args.push("--release");
-}
 
-console.error(`[stage-plugins] 桌面构建 ⇒ 暂存插件产物（${release ? "release" : "debug"}）`);
-const result = spawnSync(process.execPath, args, { stdio: "inherit", cwd: repoRoot });
-process.exit(result.status ?? 1);
+console.error(`[stage-plugins] 桌面构建 ⇒ 暂存 ${PLUGINS.length} 个插件产物（${release ? "release" : "debug"}）`);
+for (const plugin of PLUGINS) {
+  const outDir = path.join(repoRoot, "src-tauri", "plugins", "bundled", plugin);
+  const args = ["scripts/build-plugin-bundle.mjs", "--plugin", plugin, "--out", outDir];
+  if (release) {
+    args.push("--release");
+  }
+  const result = spawnSync(process.execPath, args, { stdio: "inherit", cwd: repoRoot });
+  if (result.error) {
+    console.error(`[stage-plugins] 启动 ${plugin} 打包失败：${result.error.message}`);
+    process.exit(1);
+  }
+  if (result.status !== 0) {
+    console.error(`[stage-plugins] 插件 ${plugin} 打包退出码 ${result.status}`);
+    process.exit(result.status ?? 1);
+  }
+  console.error(`[stage-plugins] ${plugin} ⇒ ${outDir}`);
+}

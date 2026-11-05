@@ -613,6 +613,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "axagent-company-runtime"
+version = "3.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axagent-entities",
+ "axagent-harness",
+ "chrono",
+ "parking_lot",
+ "regex",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zip",
+]
+
+[[package]]
 name = "axagent-dao"
 version = "3.0.0"
 dependencies = [
@@ -703,6 +725,15 @@ dependencies = [
  "uuid",
  "windows",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "axagent-plugin-opc"
+version = "3.0.0"
+dependencies = [
+ "axagent-company-runtime",
+ "axagent-plugin-proto",
+ "serde_json",
 ]
 
 [[package]]

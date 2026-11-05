@@ -7418,6 +7418,7 @@
       "editInOpc": "OPC 디맨드 발견에서 편집",
       "opcDelivery": "OPC 전달 설정",
       "detail": "상세",
+      "open": "열기",
       "retry": "재시도",
       "retryStarted": "재시도 시작됨"
     },

@@ -7418,6 +7418,7 @@
       "editInOpc": "Editar en Descubrimiento de demanda OPC",
       "opcDelivery": "Configuración de entrega OPC",
       "detail": "Detalles",
+      "open": "Abrir",
       "retry": "Reintentar",
       "retryStarted": "Reintento iniciado"
     },

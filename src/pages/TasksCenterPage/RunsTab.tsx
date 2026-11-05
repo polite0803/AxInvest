@@ -20,6 +20,7 @@ import {
 import { RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { getAdapter, getAllAdapters, useTaskSourceRegistry } from "./adapters/registry";
 import { formatDateTime, formatDuration } from "./formatUtils";
 import { StartMoverRecallBatchButton } from "./jobs/StartMoverRecallBatchModal";
@@ -49,6 +50,7 @@ const TRIGGER_KEYS: RunTrigger[] = ["schedule", "manual", "system", "external", 
 export function RunsTab() {
   const { t, i18n } = useTranslation();
   const locale = i18n.language;
+  const navigate = useNavigate();
   // 订阅「注册表多了源」：插件任务源是页面挂载后异步注册的，不订阅则筛选器要等整页刷新。
   const registryVersion = useTaskSourceRegistry();
 
@@ -169,15 +171,35 @@ export function RunsTab() {
       {
         title: t("tasksCenter.column.actions"),
         key: "actions",
-        width: 80,
+        width: 130,
+        // 「打开」= `deepLink` 的宿主侧消费点：适配器一直在产这个字段（cron 每个 run 都带、
+        // 插件源的行也能带），但改造前没有任何组件读它 ⇒ 声明了「可打开」却点不到。
+        // 插件贡献的源没有详情抽屉（§93：第三方 React 不进主 origin）⇒ 这个按钮是它们
+        // 回到原页面的唯一路径。`stopPropagation` 必需：行点击会开详情抽屉，两个动作不能同触发。
         render: (_, r) => (
-          <Button type="link" size="small" onClick={() => selectRun(r)}>
-            {t("tasksCenter.action.detail")}
-          </Button>
+          <Space size={0}>
+            <Button type="link" size="small" onClick={() => selectRun(r)}>
+              {t("tasksCenter.action.detail")}
+            </Button>
+            {r.deepLink
+              ? (
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(r.deepLink!);
+                  }}
+                >
+                  {t("tasksCenter.action.open")}
+                </Button>
+              )
+              : null}
+          </Space>
         ),
       },
     ],
-    [t, locale, selectRun],
+    [t, locale, selectRun, navigate],
   );
 
   return (

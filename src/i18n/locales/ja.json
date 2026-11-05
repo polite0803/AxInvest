@@ -7418,6 +7418,7 @@
       "editInOpc": "OPCデマンド探索で編集",
       "opcDelivery": "OPC配信設定",
       "detail": "詳細",
+      "open": "開く",
       "retry": "再試行",
       "retryStarted": "再試行を開始しました"
     },

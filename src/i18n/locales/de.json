@@ -7418,6 +7418,7 @@
       "editInOpc": "In OPC-Bedarfsentdeckung bearbeiten",
       "opcDelivery": "OPC-Zustellungseinstellungen",
       "detail": "Details",
+      "open": "Öffnen",
       "retry": "Erneut versuchen",
       "retryStarted": "Wiederholung gestartet"
     },

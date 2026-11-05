@@ -4737,3 +4737,53 @@ PLAN §0.10 的前端读数因此从 **52 处 / 38 文件 → 51 处 / 37 文件
 7. **同形态的隐患留了一处**：`jobs/PipelineJobCard.tsx:6` 仍 import `@/stores` barrel。它今天不在适配器图里（只有页面引用）⇒ 不成环；但一旦将来有适配器引用它，100.3 的环原样复发。**没有加防御**（门禁层面「适配器不得 import 经 barrel 拉 store 的组件」是可以写成一条静态检查的，属新判据，未立项）。
 8. **`--update-baseline`（中立性 212→211）与全量门禁同 §98.5-9 继续挂**；`frontendFileCaliber` 已按实测回写（W13），**不代表** #35 阶段终口径收口。
 
+
+## §101 B8-2 第二刀：`deepLink` 的**宿主侧消费者**（#35，2026-11-05）
+
+任务 #152。本批不是从计划表里挑的，是**查 #149 前置时撞出来的缺陷**：为判断「删掉宿主 `stockAnalysis` / `pipeline` 适配器后详情面还剩什么」，逐个去查 `capabilities.openSource` 的消费点，结果是**零** —— `cronAdapter` 每一行都写 `deepLink: "/tasks?tab=schedules"` 且置 `openSource: true`，而全仓没有任何组件读这两个字段（唯一的 `deepLink` 读取者在 `StockAnalysisRunDrawer` 里，它读的是抽屉自己的「打开」按钮）。
+
+### 101.1 三条裁定
+
+| # | 裁定 | 判据 |
+|---|---|---|
+| 1 | 按钮放 **Runs 表操作列**，不放行点击 | 行点击已绑详情抽屉（`selectRun`）。「打开」与「详情」是两种意图（一个跳原页面、一个看摘要），塞进同一个手势会互相顶掉。操作列已是「详情」的位置 ⇒ 并列最自然 |
+| 2 | 只认 `run.deepLink`，**中心不重拼路由** | 路由构造归各源：cron 给 `/tasks?tab=schedules`，stock-analysis 给 `analysisRecordPath(...)`。中心若自己拼，就又把「谁该跳到哪」收回来了 —— 与 §100 同一条纪律 |
+| 3 | 判据用 **`deepLink` 是否存在**，不用 `capabilities.openSource` | 两者今天恒等（`pluginTaskSource.adapter.ts:98` 就是 `Boolean(deepLink)`），但 `openSource` 是**能力矩阵**用的布尔，地址在 `deepLink`。用布尔判存在会让两者有机会分叉（布尔 false 但有地址 ⇒ 静默不出按钮，且查不出为什么）。`openSource` **未删** —— 它是插件行 DTO 的字段，删它要动 `plugin-proto`；记为冗余，见 101.5 |
+
+### 101.2 改动面（13 文件）
+
+| 文件 | 改动 |
+|---|---|
+| `src/pages/TasksCenterPage/RunsTab.tsx` | 操作列 80 → 130 宽；`详情` + 条件渲染的 `打开`；`useNavigate`；`e.stopPropagation()`（否则点「打开」会连带开详情抽屉） |
+| `src/i18n/locales/*.json`（11 个） | 新增 `tasksCenter.action.open`：打开 / 開啟 / Open / 開く / 열기 / Öffnen / Ouvrir / Abrir / Открыть / فتح / खोलें |
+| `src/pages/TasksCenterPage/__tests__/RunsTab.openSource.test.tsx` | **新建** 3 条：带 `deepLink` ⇒ 出按钮且跳到该地址、不打开抽屉；不带 ⇒ 只有「详情」；多行时只有带链接的那行出按钮 |
+
+### 101.3 行为变化（如实列，含新出现的可点路径）
+
+- **cron 源真的能跳了**：改造前那 100% 的 cron 行都声明了 `deepLink` 却点不到；现在每行多一个「打开」，跳到 `/tasks?tab=schedules`。这是**新增的可用路径**，不是纯重构。
+- **插件源获得唯一的返程**：插件贡献的任务源没有详情抽屉（§93 裁「第三方 React 不进主 origin」），抽屉兜底只有一句「暂未接入」；若插件行带 `deepLink`，用户至少能从列表回到原页面。**这是 #149 删宿主适配器的部分替代品，不是全部** —— 见 101.5-1。
+- **i18n 保序 + LF**：11 个 locale 由脚本按「插入到 `action.detail` 之后」重写，写前先验证 `JSON.stringify(parse(x), null, 2)` 与原文件**字节等价**（11/11 `ROUNDTRIP_IDENTICAL`），避免全量重写引入无关 diff；写后逐个抽查键序 `…detail,open,retry…` 与 CR=0。
+
+### 101.4 验证台账（本机，全部真跑）
+
+| # | 命令 | 退码 | 读数 |
+|---|---|---|---|
+| X1 | `dprint fmt`（`RunsTab.tsx` + 新测试） | 0 | 无改写（首跑即合格式） |
+| X2 | `oxlint src/pages/TasksCenterPage --max-warnings=0` | 0 | **0 warnings / 0 errors，43 files** |
+| X3 | `npm run typecheck` | 0 | **1468 个源文件**（+1 = 新测试），退 0 |
+| X4 | `npm run test:run -- RunsTab.openSource` | 0 | **1 file / 3 tests passed** |
+| X5 | `check-i18n-orphan-diff` `--selftest` + 判定 | 0 / 0 | **K 10 435**（+1 = 新键静态引用），U 21，无孤儿 |
+| X6 | `check-jsx-text-i18n` `--selftest` + 判定 | 0 / 0 | 781 个 `.tsx`，命中 51 全在基线，基线外 **0**（新按钮走 `t()`） |
+| X7 | `check-i18n-exemption-budget` `--selftest` + 判定 | 0 / 0 | 存量 142 冻结，无基线外问题 |
+| X8 | `check-component-neutrality` `--selftest` + 判定 | 0 / 0 | 922 文件，基线 212，无新增违规 |
+| X9 | `node scripts/audit-l1-blockers.mjs` | 0 | 前端 **51 处 / 37 文件**（本批不动耦合面：`RunsTab.tsx` 只 import `./adapters/registry`，非域→非域） |
+
+**Rust 侧零改动**：本批纯前端 + locale，一行 `cargo` 未跑。
+
+### 101.5 本批未做
+
+1. **#149 仍不能做**：删宿主 `stockAnalysis` 适配器的后果已查清 —— 那个抽屉是**通往单股分析记录的唯一路径**（`StockAnalysisRunDrawer` 里的「打开」读的正是 `run.deepLink`），而列表级的「打开」只给跳转、不给摘要。⇒ 替换宿主适配器要求 §93 的富卡片通道先落地。`stock-pipeline` 同理（它的抽屉读 `get_pipeline_run_detail` 的逐股明细）。本批的按钮**降低了**这个损失，但没有消除。
+2. **`capabilities.openSource` 成了纯冗余字段**：宿主侧已改判 `deepLink`，插件行仍产出它。收掉要改 `plugin-proto` 的 DTO 与两端校验，属跨语言契约批，不夹带。
+3. **OverviewTab 的 run 卡片未加「打开」**：那里是「最近运行」摘要卡，点击也是开抽屉；要不要加同一个按钮属产品取舍，未动。
+4. **真机未点**：`npm run tauri dev` 里点一次 cron 行的「打开」没走过（同 §99.5-7 / §100.6-3 口径）。
+5. **`--update-baseline` 与全量门禁**同 §98.5-9 继续挂。

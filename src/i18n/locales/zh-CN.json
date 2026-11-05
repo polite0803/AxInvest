@@ -7418,6 +7418,7 @@
       "editInOpc": "在 OPC 需求发现中编辑",
       "opcDelivery": "OPC 投递配置",
       "detail": "详情",
+      "open": "打开",
       "retry": "重试",
       "retryStarted": "已触发重试"
     },

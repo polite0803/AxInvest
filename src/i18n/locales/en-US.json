@@ -7418,6 +7418,7 @@
       "editInOpc": "Edit in OPC Demand Discovery",
       "opcDelivery": "OPC delivery settings",
       "detail": "Details",
+      "open": "Open",
       "retry": "Retry",
       "retryStarted": "Retry triggered"
     },

@@ -7418,6 +7418,7 @@
       "editInOpc": "在 OPC 需求探索中編輯",
       "opcDelivery": "OPC 派送設定",
       "detail": "詳情",
+      "open": "開啟",
       "retry": "重試",
       "retryStarted": "已觸發重試"
     },

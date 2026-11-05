@@ -48,8 +48,8 @@ const MARKET_SEAM: &str = "market.quote";
 /// 任务源取数走的宿主接缝（B8-1b）：工作流执行的运行态只有宿主引擎知道。
 const WORKFLOW_RUN_SEAM: &str = "workflow.run";
 /// 插件贡献的命名命令（manifest `commands[].name` / `taskSources[].command` 必须逐字一致）。
-const COMMAND_ACTIVE_RUNS: &str = "list_active_workflow_runs";
-/// 一次任务源取数的默认上限：与宿主 `list_active` 的缺省值一致，
+const COMMAND_RECENT_RUNS: &str = "list_recent_workflow_runs";
+/// 一次任务源取数的默认上限：与宿主 `list_recent` 的缺省值一致，
 /// 前端泛型适配器不传 limit 时也走这一档（不是插件自己拍的第二个数）。
 const DEFAULT_TASK_SOURCE_LIMIT: u32 = 50;
 
@@ -133,10 +133,10 @@ fn handle_command(
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
             },
         },
-        // 任务源取数：行数据来自宿主 `workflow.run` 的 `list_active`，插件只做状态词表翻译
-        // 与形状收敛（渲染与 run id 拼装归宿主泛型适配器，见 PLAN §97.4）。
-        COMMAND_ACTIVE_RUNS => {
-            let rows = active_workflow_runs(&frame.input, &request.call_chain, peer);
+        // 任务源取数：行数据来自宿主 `workflow.run` 的 `list_recent`（在跑 + 已结束），
+        // 插件只做状态词表翻译与形状收敛（渲染与 run id 拼装归宿主泛型适配器，见 PLAN §97.4）。
+        COMMAND_RECENT_RUNS => {
+            let rows = recent_workflow_runs(&frame.input, &request.call_chain, peer);
             match rows {
                 Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
                 Err((code, message)) => {
@@ -254,8 +254,8 @@ fn evidence_weights(input: &Value) -> Result<Value, (String, String)> {
 
 /// 任务源取数命令：`PluginTaskRunRow[]` 的 JSON 数组（契约见 plugin-proto）。
 ///
-/// 数据一律经宿主 `workflow.run` 的 `list_active` op —— 执行态在宿主引擎里，插件不复制
-/// 一份登记表（禁区 12）。本函数只干两件宿主干不了/不该干的事：
+/// 数据一律经宿主 `workflow.run` 的 `list_recent` op（在跑的 + 已结束的）—— 执行态在宿主
+/// 引擎与宿主登记表里，插件不复制一份（禁区 12）。本函数只干两件宿主干不了/不该干的事：
 /// 1. **状态词表翻译**：引擎六态（`completed` / `partially_completed` / `cancelled` 英式拼法）
 ///    → 任务中心七态（`succeeded` / `canceled` 美式拼法）。表外值一律落 `waiting`，
 ///    **不猜**成某个具体终态（与宿主 `mapRunTrigger` 同一条纪律）。
@@ -263,7 +263,7 @@ fn evidence_weights(input: &Value) -> Result<Value, (String, String)> {
 ///
 /// ⚠ `partially_completed` 归 `succeeded`：它是终态且**确有产出**，判成 `failed` 会把
 /// 「跑完但部分节点没成」的批次误标成失败；细分差异留在 `raw.status` 里，宿主不改口径。
-fn active_workflow_runs(
+fn recent_workflow_runs(
     input: &Value,
     call_chain: &[String],
     peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
@@ -279,7 +279,7 @@ fn active_workflow_runs(
     let reply = peer
         .call_seam(
             WORKFLOW_RUN_SEAM,
-            "list_active",
+            "list_recent",
             json!({ "limit": limit, "workflow_id": workflow_id }),
             call_chain.to_vec(),
         )
@@ -311,9 +311,10 @@ fn active_workflow_runs(
 /// （2026-10-28 已删 `/workflow` 一类旧链，见 `ContentArea.tsx:197`）⇒ 造一个指向 404 的
 /// 深链比没有深链更坏。宿主泛型适配器据此把该 run 的 `openSource` 能力关成 false。
 ///
-/// ⚠ **不交 `finishedAt`**：`list_active` 只含 running / paused 执行（宿主侧过滤见
-/// `workflow_run_service.rs:697`），`updatedAt` 是「最近一次推进」而非结束时刻 ⇒ 拿它当
-/// 结束时间是编读数。耗时因此留空，由宿主按「未知」不显示。
+/// `finishedAt` 只透传宿主的 `finishedAt`，**不由 `updatedAt` 倒推**：宿主对已退出的执行
+/// 才盖这个戳（在跑的行没这键），拿「最近一次推进」冒充结束时刻会让耗时列变成编读数。
+/// 耗时也不在这里算 —— 宿主泛型适配器有两端点就会算（`resolveDurationMs`），插件再算一份
+/// 就是第二套口径。
 fn task_run_row_from_execution(execution: &Value) -> Value {
     let status = execution.get("status").and_then(Value::as_str).unwrap_or_default();
     let execution_id = execution.get("executionId").and_then(Value::as_str).unwrap_or_default();
@@ -332,7 +333,7 @@ fn task_run_row_from_execution(execution: &Value) -> Value {
         // 猜成 schedule 就是把不知道伪装成读数。
         trigger: Some("manual".to_string()),
         started_at: execution.get("createdAt").and_then(Value::as_i64),
-        finished_at: None,
+        finished_at: execution.get("finishedAt").and_then(Value::as_i64),
         duration_ms: None,
         deep_link: None,
         raw: Some(execution.clone()),
@@ -342,9 +343,9 @@ fn task_run_row_from_execution(execution: &Value) -> Value {
 
 /// 引擎六态 → 任务中心七态（词汇表 = `PLUGIN_TASK_RUN_STATES`，表外一律 `waiting`）。
 ///
-/// ⚠ 今天 `list_active` 只吐 running / paused，终态那三条分支是**防御性**的：
-/// 宿主一旦把「近期已结束的批次」纳入同一接缝（B8-2 的候选口径），这里不必改也能翻对；
-/// 在那之前不要在 PLAN 里把它当成实测到达过的路径。
+/// 终态那三条分支今天**实测可达**：宿主 `list_recent` 会把已退出的执行放进同一页
+/// （#150；此前 `list_active` 只吐 running / paused，那三条只是防御性代码）。
+/// 表外值仍落 `waiting` —— 引擎将来加第七态时这里不会误判成某个具体终态。
 fn map_execution_state_to_run_state(status: &str) -> &'static str {
     match status {
         "running" => "running",
@@ -428,6 +429,37 @@ mod tests {
             // `started_at`（蛇形）在列是专门盯 `rename_all = "camelCase"` 漏掉的情形。
             assert!(row.get(absent).is_none(), "缺省字段 / 蛇形键 `{absent}` 不得进帧：{row}");
         }
+    }
+
+    /// 终态行：宿主的 `finishedAt` 必须原样透出（耗时列的唯一依据），但仍不交 `durationMs`。
+    ///
+    /// 这一条是 #150 的正向断言 —— `list_recent` 之前插件永远拿不到 `finishedAt`，
+    /// 「不出现」是当时的正确形状；现在它出现而 `durationMs` 不出现，才说明两端点算耗时
+    /// 这件事只发生在宿主泛型适配器一处（`resolveDurationMs`），插件没造第二套口径。
+    #[test]
+    fn task_run_row_passes_host_finished_at_but_not_duration() {
+        let row = task_run_row_from_execution(&json!({
+            "executionId": "exec-0",
+            "workflowId": "wf-daily",
+            "status": "completed",
+            "createdAt": 1_699_999_990_000_i64,
+            "updatedAt": 1_699_999_999_000_i64,
+            "finishedAt": 1_699_999_999_000_i64,
+        }));
+        assert_eq!(row["state"], "succeeded");
+        assert_eq!(row["finishedAt"], 1_699_999_999_000_i64);
+        assert!(row.get("durationMs").is_none(), "耗时由宿主按两端点算：{row}");
+        assert!(row.get("deepLink").is_none(), "没有站内路由就不交深链：{row}");
+
+        // 在跑行没有该键 ⇒ 不能凭 `updatedAt` 造一个结束时刻
+        let running = task_run_row_from_execution(&json!({
+            "executionId": "exec-1",
+            "workflowId": "wf-daily",
+            "status": "running",
+            "createdAt": 1_700_000_000_000_i64,
+            "updatedAt": 1_700_000_005_000_i64,
+        }));
+        assert!(running.get("finishedAt").is_none(), "在跑行的耗时是未知，不是 0：{running}");
     }
 
     /// `createdAt` 缺失 ⇒ `startedAt` 缺省而非 `null`；宿主按「未知」不显示，不编一个 0 点。

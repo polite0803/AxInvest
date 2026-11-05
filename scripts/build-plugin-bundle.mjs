@@ -196,11 +196,11 @@ const manifest = {
       },
     },
     {
-      // B8-1b：任务中心任务源的取数口。行数据全部来自宿主 `workflow.run` 的 `list_active`，
-      // 插件只做状态词表翻译（引擎六态 → 中心七态）与形状收敛。
-      name: "list_active_workflow_runs",
-      description: "列出本插件在跑的工作流执行（经宿主 workflow.run 接缝，返回任务中心行数组）",
-      command: "worker://list_active_workflow_runs",
+      // B8-1b 建通道、#150 换取数口：行数据全部来自宿主 `workflow.run` 的 `list_recent`
+      // （在跑 + 已结束），插件只做状态词表翻译（引擎六态 → 中心七态）与形状收敛。
+      name: "list_recent_workflow_runs",
+      description: "列出本插件近期工作流执行（在跑与已结束，经宿主 workflow.run 接缝，返回任务中心行数组）",
+      command: "worker://list_recent_workflow_runs",
       inputSchema: {
         type: "object",
         properties: {
@@ -213,7 +213,9 @@ const manifest = {
   // 任务中心任务源声明（PLAN §97.4）：只给「源标识 + 显示名 + 取数命令」，
   // 不给渲染。`command` 必须是上面 commands[] 里已声明的名字 —— 宿主清单校验会硬拦，
   // 这里 `--check` 再自证一次，免得产物装不上才发现。
-  taskSources: [{ id: "stock-workflow-runs", title: "股票工作流执行", command: "list_active_workflow_runs", color: "volcano" }],
+  taskSources: [
+    { id: "stock-workflow-runs", title: "股票工作流执行", command: "list_recent_workflow_runs", color: "volcano" },
+  ],
   integrity: { algorithm: "sha256", hash: sha256 },
 };
 const manifestPath = path.join(outRoot, "plugin.json");

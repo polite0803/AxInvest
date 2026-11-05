@@ -429,7 +429,7 @@ struct HostPeer {
 ///
 /// 同时登记 **`workflow.run` 的两个写 op**（`start` / `cancel`）：发起与取消执行都会改变
 /// 宿主侧运行态（占用并发额度、触发引擎 `cancel`），故要求 `write`；`status` /
-/// `list_active` 只读，不设闸。
+/// `list_active` / `list_recent` 只读，不设闸。
 ///
 /// 再登记 **`trading.engine` 的唯一写 op**（`execute_trade`）：它写用户交易账本。其余五个
 /// op（`get_positions` / `get_trades` / `validate_trade` / `compare_trade` /
@@ -1860,7 +1860,7 @@ impl HostPeer {
                     Err(e) => FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string()),
                 }
             },
-            // ── workflow.run 接缝：异步 job（start 受理 + status / cancel / list_active） ──
+            // ── workflow.run 接缝：异步 job（start 受理 + status / cancel / list_active / list_recent） ──
             // op 参数一律 **snake_case**（与 jobs.store / market.quote 的入站约定一致），而
             // `WorkflowRunRequest` 的线上 DTO 是 **camelCase** —— 故这里逐字段解析后在本层
             // 用结构体字面量构造，**不能**整体把 `args` 反序列化成 `WorkflowRunRequest`
@@ -2012,6 +2012,35 @@ impl HostPeer {
                 let page_limit = limit as usize;
                 let Some(result) =
                     self.block_on(provider.list_active(&owner, workflow_id.as_deref(), page_limit))
+                else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    Ok(page) => to_value("WorkflowRunActivePage", &page),
+                    Err(e) => workflow_run_error(e),
+                }
+            },
+            // `list_recent` = `list_active` 的同形只读 op，只是页内可含**已结束**的执行
+            // （任务中心要答「今天这个插件跑过什么」，只给在跑的会看不见跑完的批次）。
+            // 参数、夹档、错误映射都与 `list_active` 逐字一致 —— 两处不一致会让插件
+            // 换个 op 就换个口径。终态行的 `finishedAt` 由宿主登记，本层不加工。
+            "workflow.run" if op == "list_recent" => {
+                let limit: u32 = match deserialize_optional_arg(&args, "limit", seam) {
+                    Ok(limit) => limit.unwrap_or(50).clamp(1, 200),
+                    Err(response) => return response,
+                };
+                let workflow_id: Option<String> =
+                    match deserialize_optional_arg(&args, "workflow_id", seam) {
+                        Ok(workflow_id) => workflow_id,
+                        Err(response) => return response,
+                    };
+                let Some(provider) = self.registry.get_workflow_run() else {
+                    return self.unavailable(seam);
+                };
+                let owner = self.plugin_id.clone();
+                let page_limit = limit as usize;
+                let Some(result) =
+                    self.block_on(provider.list_recent(&owner, workflow_id.as_deref(), page_limit))
                 else {
                     return no_runtime(seam);
                 };
@@ -8645,7 +8674,7 @@ mod tests {
         assert!(captured.added_job.lock().is_none(), "缺参不得触达 provider");
     }
 
-    // ───── workflow.run 接缝（start / status / cancel / list_active） ─────
+    // ───── workflow.run 接缝（start / status / cancel / list_active / list_recent） ─────
 
     /// 假工作流执行提供者：记录每次调用的 `owner` 与参数，返回可控结果。
     struct FixedWorkflowRunProvider {
@@ -8657,6 +8686,8 @@ mod tests {
         cancel_calls: Mutex<Vec<(String, String)>>,
         /// `list_active` 收到的 `(owner, workflow_id, limit)` 序列。
         list_calls: Mutex<Vec<(String, Option<String>, usize)>>,
+        /// `list_recent` 收到的 `(owner, workflow_id, limit)` 序列。
+        recent_calls: Mutex<Vec<(String, Option<String>, usize)>>,
         /// `Some(msg)` ⇒ `start` 返回 `Err(AxAgentError::Validation(msg))`（模拟宿主拒绝受理）。
         start_rejection: Option<String>,
     }
@@ -8668,6 +8699,7 @@ mod tests {
                 status_calls: Mutex::new(Vec::new()),
                 cancel_calls: Mutex::new(Vec::new()),
                 list_calls: Mutex::new(Vec::new()),
+                recent_calls: Mutex::new(Vec::new()),
                 start_rejection: None,
             }
         }
@@ -8748,8 +8780,49 @@ mod tests {
                     owner_plugin_id: owner.to_string(),
                     created_at: 1_700_000_000_000,
                     updated_at: 1_700_000_001_000,
+                    finished_at: None,
                 }],
                 total: 1,
+            })
+        }
+
+        async fn list_recent(
+            &self,
+            owner: &str,
+            workflow_id: Option<&str>,
+            limit: usize,
+        ) -> axagent_harness::core_error::Result<WorkflowRunActivePage> {
+            self.recent_calls.lock().push((
+                owner.to_string(),
+                workflow_id.map(str::to_string),
+                limit,
+            ));
+            // 一页里同时给「在跑」与「已结束」：这是 `list_recent` 与 `list_active` 唯一的
+            // 形状差别，也是耗时列能不能算出来的分水岭 ⇒ 分派层的线格式要在这里钉住。
+            Ok(WorkflowRunActivePage {
+                executions: vec![
+                    WorkflowRunActiveView {
+                        execution_id: "exec-1".to_string(),
+                        workflow_id: "wf-1".to_string(),
+                        status: axagent_harness::workflow_types::ExecutionStatus::Running,
+                        current_node_id: Some("node-2".to_string()),
+                        owner_plugin_id: owner.to_string(),
+                        created_at: 1_700_000_000_000,
+                        updated_at: 1_700_000_001_000,
+                        finished_at: None,
+                    },
+                    WorkflowRunActiveView {
+                        execution_id: "exec-0".to_string(),
+                        workflow_id: "wf-1".to_string(),
+                        status: axagent_harness::workflow_types::ExecutionStatus::Completed,
+                        current_node_id: Some("node-5".to_string()),
+                        owner_plugin_id: owner.to_string(),
+                        created_at: 1_699_999_990_000,
+                        updated_at: 1_699_999_999_000,
+                        finished_at: Some(1_699_999_999_000),
+                    },
+                ],
+                total: 2,
             })
         }
     }
@@ -8966,6 +9039,75 @@ mod tests {
         );
         assert_eq!(
             captured_default.list_calls.lock().clone(),
+            vec![("plugin.workflow".to_string(), None, 50)],
+            "`limit` 缺省必须为 50，`workflow_id` 缺省必须为 None"
+        );
+    }
+
+    /// `list_recent` 与 `list_active` 的**同形**必须逐字一致，只多一处：页内可含终态行。
+    ///
+    /// 钉三件插件侧看不到、只能从线上验的事：
+    /// 1. 夹档与缺省与 `list_active` 同档（9999⇒200、缺省⇒50 / None）；
+    /// 2. 只读 ⇒ 不带任何权限也能过闸；
+    /// 3. `finishedAt` 在在跑行**整体不出现**、在终态行是 camelCase 的数字 ——
+    ///    插件按「键在不在」决定耗时列，出现一个 `null` 会被读成「0 毫秒」。
+    #[test]
+    fn workflow_run_list_recent_passes_terminal_rows() {
+        let provider = Arc::new(FixedWorkflowRunProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = workflow_run_peer_with_permissions(provider, Vec::new());
+        let response =
+            with_watchdog(Duration::from_secs(5), "workflow.run list_recent", move || {
+                peer.handle_call_seam(
+                    &json!({
+                        "seam": "workflow.run",
+                        "op": "list_recent",
+                        "args": { "limit": 9999, "workflow_id": "wf-1" },
+                    }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code, None, "只读 op 不得被权限闸拦，实际 {response:?}");
+        let value = response.value.expect("成功响应必须带 value");
+        assert_eq!(value["total"], json!(2));
+        assert_eq!(
+            captured.recent_calls.lock().clone(),
+            vec![("plugin.workflow".to_string(), Some("wf-1".to_string()), 200)],
+            "limit=9999 必须与 list_active 同档夹到 200"
+        );
+
+        // 页内按 updated_at 降序 ⇒ [0] 是在跑的 exec-1，[1] 是已结束的 exec-0
+        assert_eq!(value["executions"][0]["executionId"], json!("exec-1"));
+        assert!(
+            value["executions"][0].get("finishedAt").is_none(),
+            "在跑行不得带结束时刻键：{}",
+            value["executions"][0]
+        );
+        assert_eq!(value["executions"][1]["status"], json!("completed"));
+        assert_eq!(value["executions"][1]["finishedAt"], json!(1_699_999_999_000_i64));
+        assert!(
+            value["executions"][1].get("finished_at").is_none(),
+            "不得残留 snake_case 键：{}",
+            value["executions"][1]
+        );
+    }
+
+    /// `list_recent` 的缺省参数与 `list_active` 同档（50 / None）—— 两条分支各夹一份必然漂移。
+    #[test]
+    fn workflow_run_list_recent_defaults_match_list_active() {
+        let provider = Arc::new(FixedWorkflowRunProvider::new());
+        let captured = Arc::clone(&provider);
+        let (peer, _runtime) = workflow_run_peer_with_permissions(provider, Vec::new());
+        let response =
+            with_watchdog(Duration::from_secs(5), "workflow.run list_recent 缺省", move || {
+                peer.handle_call_seam(
+                    &json!({ "seam": "workflow.run", "op": "list_recent", "args": {} }),
+                    &[],
+                )
+            });
+        assert_eq!(response.code, None, "省略可选参数应成功，实际 {response:?}");
+        assert_eq!(
+            captured.recent_calls.lock().clone(),
             vec![("plugin.workflow".to_string(), None, 50)],
             "`limit` 缺省必须为 50，`workflow_id` 缺省必须为 None"
         );

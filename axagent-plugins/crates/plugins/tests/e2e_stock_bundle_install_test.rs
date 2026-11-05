@@ -48,8 +48,8 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
     let market = registry
         .register_market_data(Arc::new(FixedQuoteProvider))
         .expect("行情替身应能注册到 market.quote");
-    // 任务源取数走 `workflow.run` 的 `list_active`（B8-1b）⇒ 这条链要端到端跑通，
-    // 必须把执行接缝也换成替身；真实引擎在测试进程里不存在。
+    // 任务源取数走 `workflow.run` 的 `list_recent`（B8-1b 建通道 / #150 换取数口）⇒
+    // 这条链要端到端跑通，必须把执行接缝也换成替身；真实引擎在测试进程里不存在。
     assert!(
         registry.get_workflow_run().is_none(),
         "测试进程起点：workflow.run 应为空（否则本文件与别的测试串了）"
@@ -152,7 +152,7 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
     );
     let declared = &stock_sources.task_sources[0];
     assert_eq!(declared.id, "stock-workflow-runs");
-    assert_eq!(declared.command, "list_active_workflow_runs");
+    assert_eq!(declared.command, "list_recent_workflow_runs");
 
     // 投影里的 `command` 必须真能执行 —— 否则任务中心会挂一个永远为空的标签。
     let rows_output = manager
@@ -160,7 +160,9 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
         .expect("清单声明的任务源取数命令应能经 worker 通道执行");
     let rows: Value = serde_json::from_str(&rows_output).expect("取数命令应返回 JSON 文本");
     let rows = rows.as_array().expect("任务源取数必须回数组（宿主泛型适配器按数组消费）");
-    assert_eq!(rows.len(), 1, "替身给一条在跑执行 ⇒ 一行：{rows:?}");
+    // #150 换取数口为 `list_recent` ⇒ 替身给「一条在跑 + 一条已结束」，两行都要能落到中心。
+    // 少了后面那行，任务中心就只会显示在跑的批次（跑完即消失），耗时列也永远算不出来。
+    assert_eq!(rows.len(), 2, "在跑 + 已结束各一行：{rows:?}");
     assert_eq!(rows[0]["nativeId"], "exec-1");
     assert_eq!(rows[0]["name"], "wf-1 · exec-1");
     // 引擎 `running` → 中心 `running`；拼法翻译（cancelled→canceled）在纯函数单测里锁。
@@ -169,9 +171,18 @@ fn install_enable_and_execute_a_command_from_the_staged_bundle() {
     assert_eq!(rows[0]["startedAt"], 1_700_000_000_000_i64);
     // 缺省项必须是**不出现**而不是 null：宿主按「字段在不在」决定耗时列与可否打开。
     for absent in ["finishedAt", "durationMs", "deepLink"] {
-        assert!(rows[0].get(absent).is_none(), "缺省字段 `{absent}` 不得进帧：{}", rows[0]);
+        assert!(rows[0].get(absent).is_none(), "在跑行的缺省字段 `{absent}` 不得进帧：{}", rows[0]);
     }
     assert_eq!(rows[0]["raw"]["currentNodeId"], "node-2", "引擎视图原样留在 raw");
+
+    // 已结束那行：引擎 `partially_completed` → 中心 `succeeded`（有产出就不算失败），
+    // 且带宿主盖的 `finishedAt` ⇒ 前端的耗时列由此可算（`durationMs` 不在插件侧算）。
+    assert_eq!(rows[1]["nativeId"], "exec-0");
+    assert_eq!(rows[1]["state"], "succeeded", "终态行的词表翻译：{}", rows[1]);
+    assert_eq!(rows[1]["finishedAt"], 1_699_999_999_000_i64);
+    for absent in ["durationMs", "deepLink"] {
+        assert!(rows[1].get(absent).is_none(), "缺省字段 `{absent}` 不得进帧：{}", rows[1]);
+    }
 
     // 先放 manager（析构时停 worker），再删临时目录（Windows 上占用中的 exe 删不掉）。
     drop(manager);

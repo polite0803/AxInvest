@@ -265,8 +265,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | `message.callback` | `axagent-core/crates/harness/src/platform_callback.rs:21` | 接缝 `message.callback`（内置与插件同入口） | 2 | — |
 | `webhook.dispatch` | `axagent-core/crates/harness/src/webhook_subscription.rs:154` | 接缝 + `axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9` | 4 | — |
 | `system.prompt` | `axagent-core/crates/harness/src/context_contributor.rs:22` | 接缝 `system.prompt.{段名}` | 3 | — |
-| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:3798` 起 `remote_method_not_supported` |
-| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:3890`–`:3938` 一批 `remote_method_not_supported`） |
+| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:4319` 起 `remote_method_not_supported` |
+| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:4387`–`:4435` 一批 `remote_method_not_supported`） |
 | `workflow.optimizer` | `axagent-core/crates/harness/src/workflow_optimization.rs:80` | 接缝 | 2 | 同上 |
 | `workflow.sandbox` | `axagent-core/crates/harness/src/workflow_evolution.rs:263` | 接缝 | 4 | — |
 | `workflow.business_rule` | `axagent-core/crates/harness/src/business_rules.rs:71` | 接缝（已有 e2e worker 产物） | 3 | — |
@@ -4565,7 +4565,79 @@ worker 二进制 **827,392 → 5,703,680 字节（debug）**：analysis-engine �
 3. **插件源只有 `list`**：详情抽屉、步骤、日志、IO、历史、取消/重试全部未接（`RunCapabilities` 只给 `openSource`，且因 98.2-1 恒 false）⇒ 点开一条插件 run 没有抽屉。
 4. **无事件推送**：新执行开始不会自己刷新列表，要重进页面或手动刷新（B3 事件面尚未接到任务中心）。
 5. **卸载/禁用插件后**，已注册的源要等重进任务中心才消失（清单实时扫描，前端只在页面挂载期取一次）。本批刻意不做轮询，也不建第二份源清单。
-6. **`list_active` 之外的取数面未接**：终态批次/历史执行需要宿主新增 op（或在 `workflow.run` 上开「近期已结束」），属 #35 整域搬迁批。
+6. **`list_active` 之外的取数面未接**：终态批次/历史执行需要宿主新增 op（或在 `workflow.run` 上开「近期已结束」），属 #35 整域搬迁批。**〔已由 §99 收口（2026-11-05，`workflow.run` 的 `list_recent`）〕**
 7. **`PLUGIN_TASK_RUN_STATES` 与前端七态仍是人工两份**（前端已用 `Record<RunState, RunState>` 锁住自己那一侧）；跨语言同源要等 B8-3 的生成 DTO。
 8. **vitest 假红的根因未查**：只在测试里绕开（98.3 第三条），没读 vitest mock 源码定论。若后续别的用例再撞，先查这条。
 9. **`--update-baseline` 未跑**（中立性少 1 条存量）、**全量 `clippy --workspace` / `test --workspace` 未跑**：并行批仍在改前端与 Rust，按纪律留到 #35 全部阶段完成后一次收。
+
+## §99 `workflow.run` 的 `list_recent`：让插件任务源看见**已结束**的执行（#35，2026-11-05）
+
+任务 #150。§98.5-6 留的那个口子在本批收掉：`list_active` 只吐 running / paused，所以 §98 建的插件任务源「跑完即消失」，且 98.2-4 判掉的 `finishedAt` 恒缺 ⇒ 耗时列永远空。本批一次做穿 **契约（harness trait + DTO）→ 宿主 provider → worker 分派 → 插件取数命令 → 清单产物 → 前端消费**，六段同批落地。
+
+### 99.1 形态裁定（四条，都是「先判据后动手」的结果）
+
+| # | 裁定 | 判据 |
+|---|---|---|
+| 1 | **新增 op，而不是给 `list_active` 加 `include_finished` 参数** | 加参数会让同一个 op 有两种语义，而两者的排序键、`total` 口径、可达状态集都不同 ⇒ 分页契约说不清。两个 op 各自单义，夹档与缺省逐字同形（分派层两条分支的测试互为镜像） |
+| 2 | **返回类型复用 `WorkflowRunActivePage` / `WorkflowRunActiveView`**，只给行加一个可选 `finished_at` | 两个 op 的行形状只差「是否含终态」⇒ 新造一份 DTO 是重复定义（禁区 12）。`#[serde(default, skip_serializing_if)]` 保证**既有 `list_active` 的线格式一字节没变**（键不出现，不是 `null`），所以 §98 的 e2e 断言「无 `finishedAt`」在同批里仍然是正确的、且改成了正向断言 |
+| 3 | **`finished_at` 只认宿主登记的时刻，不由 `updated_at` 倒推** | 引擎终态行的 `updated_at` 是「最后一次状态写入」；总超时 / 执行体异常终止那两种终态是**宿主**判定的（`terminal_override`），宿主判定的那一刻引擎那边并没有写。⇒ 在 `release_slot` 与 `active = false` 同一次写锁内盖 `finished_at`，`recent_row` 只在该行**已退出额度**时透出。仍在占额度而引擎已写终态的过渡行 ⇒ `None`（宁缺毋造） |
+| 4 | **候选窗口按登记表的 `created_at` 降序取 `limit` 条，再逐条问引擎** | 终态行只在登记表里（`engine.list_active_executions` 过滤掉它们，`engine/mod.rs:5576`），而「谁属于本插件」这条唯一权威也在登记表。反过来按 `updated_at` 选窗口要先给每条登记行问一次引擎 ⇒ 把 N 次查询花在选窗口上。代价：窗口内若有引擎查不到的行会被跳过，本页可能少于 `limit`（`total` 不回退，契约里明写「插件不得据 `total` 推页数」） |
+
+⚠ **`list_recent` 不进 `SEAM_OP_TIMEOUT_OVERRIDES`**：那张表按**实测帧耗时**准入（任务 #140 立的纪律），而本 op 是「内存遍历 + 至多 `limit` 次内存查状态」，没有新 I/O ⇒ 走默认 15 s 预算。登记表随会话内执行数增长，每次调用是 O(n) 遍历 + O(limit) 查询 —— 今天 n 是个位数，未做裁剪（记进 99.5）。
+
+### 99.2 命令改名的连带面（一次改六处，漏一处就是「装得上、取不到数」）
+
+`list_active_workflow_runs` ⇒ **`list_recent_workflow_runs`**。任务源的语义从「在跑的」变成「近期的」，名字不跟着改就是留一句假话（§93 的命名纪律）。六处同批：
+
+1. `plugin-stock/src/main.rs` 的常量与分发（`COMMAND_RECENT_RUNS`，函数名 `recent_workflow_runs`）；
+2. 出站调用的 op 字面量 `list_active` ⇒ `list_recent`；
+3. `scripts/build-plugin-bundle.mjs` 的 `commands[].name` / `command: "worker://…"` / 描述；
+4. 同文件 `taskSources[].command`（宿主清单校验会硬拦「指向不存在的命令」⇒ 3、4 不同批改就装不上）；
+5. `crates/plugin-stock/tests/protocol.rs` 的帧级用例（含 `finishedAt` 正向断言）；
+6. `crates/plugins/tests/{common/mod.rs,e2e_stock_bundle_install_test.rs}` 的替身与端到端断言。
+
+**§98.1 表里「取数」那一行写的旧名不改**：那是 B8-1b 那一批的时点快照，本批用本节记录改名，并把 §98.5-6 标成「已由 §99 收口」——快照不重写，只在原处指路。
+
+### 99.3 可达性变化（把 §98 的三条「防御性」转正）
+
+| 分支 | §98 的说法 | 本批之后 |
+|---|---|---|
+| `completed` / `partially_completed` / `failed` / `cancelled` 四条状态翻译 | 「当前不可达，不许当成实测到达过的路径」 | **可达**：`list_recent` 一页里就能出现终态行，e2e 用 `partially_completed` 走通「终态且有产出 ⇒ `succeeded`」 |
+| `finishedAt` 不交 | 「`list_active` 只含在跑 ⇒ 恒不交」 | **交**，且值只来自宿主登记；`durationMs` 仍不在插件算 —— 两端点相减只在宿主 `resolveDurationMs` 一处 |
+| `deepLink` 不交 | 站内无路由（2026-10-28 删） | **不变**，本批没造深链（代价照旧：这类 run 的 `openSource` 恒 false） |
+| 前端 | —— | **零改动**：`PluginTaskRunRowDto.finishedAt` 与 `resolveDurationMs` 在 §98 就按「有就算、没就算不出」写好，本批一条 TS 都没动 ⇒ 耗时列自动出现 |
+
+### 99.4 验证台账（本机，全部真跑）
+
+| # | 命令 | 退码 | 读数 |
+|---|---|---|---|
+| V1 | `cargo check -p axagent-harness --all-targets`（axagent-core 根） | 0 | 2m41s，日志首行即 `Checking axagent-harness`（不是只吐 Compiling 的假绿形态），0 warning |
+| V2 | `cargo test -p axagent-harness --lib workflow_run` | 0 | **5 passed / 0 failed**（930 被过滤）= 既有 4 条 + 本批 `active_view_finished_at_camel_case_and_absent_when_none`；`default_trait_methods_are_unimplemented` 现含 `list_recent` 一档 ⇒ 默认实现五个方法全是错误 |
+| V3 | `cargo check -p axagent-plugins -p axagent-plugin-stock --all-targets` | 0 | 4m23s（含 `tests/` 与 bin 目标 ⇒ 新分派分支、两处替身、e2e 断言全部编过） |
+| V4 | `cargo clippy -p axagent-plugins -p axagent-plugin-stock --all-targets -- -D warnings` | 0 | 与 CI 同参（`--all-targets` 才 lint 测试目标） |
+| V5 | `cargo clippy -p axagent-harness --all-targets -- -D warnings` | 0 | 契约批的 lint 面（含新测试模块） |
+| V6 | `cargo test -p axagent-plugin-stock` | 0 | bin 单测 **5 passed**（新增「终态行透传 `finishedAt` + 在跑行不出现该键」）；`tests/protocol.rs` **11 passed**（帧级 `command_frame_lists_recent_workflow_runs_as_task_center_rows`：op 是 `list_recent`、`workflowId`→`workflow_id` 翻译、夹档 20 / 缺省 50、错误码原样透传不退化成空数组） |
+| V7 | `cargo test -p axagent-plugins --lib` | 0 | **238 passed / 0 failed**（§98 是 236 ⇒ 本批 +2：`workflow_run_list_recent_passes_terminal_rows`、`workflow_run_list_recent_defaults_match_list_active`） |
+| V8 | `npm run plugin:bundle -- --check` | 0 | 产物清单命令改名生效 + 1 个 taskSource 指向新命令；`sha256 3c620a5251bee7c3…`（§98 是 `a908b260…`）；describe 握手 + shutdown 回执 + 退出码 0 |
+| V9 | `AXAGENT_STOCK_BUNDLE_DIR=dist/plugins/stock cargo test -p axagent-plugins --test e2e_stock_bundle_install_test` | 0 | **1 passed**：装真产物 ⇒ 投影出 `stock-workflow-runs` / `command=list_recent_workflow_runs` ⇒ 回传**两行** —— `exec-1` `running` 无 `finishedAt`、`exec-0` `partially_completed`→`succeeded` **带** `finishedAt=1699999999000`，两行都不带 `durationMs`/`deepLink` |
+| V10 | `cargo check -p axagent --lib`（src-tauri 根） | 0 | **23m06s**，0 warning（`list_recent` 宿主实现 + `RunMeta.finished_at` + `release_slot` 同锁盖戳） |
+| V11 | `__TAURI_WORKSPACE__=true cargo test -p axagent --lib commands::stock_workflow::workflow_run_service` | 0 | **6 passed / 0 failed**（894 过滤），含本批 `recent_row_overrides_terminal_and_gates_finished_at` 的四条判据。⚠ 这条是「`clippy --all-targets` 只 lint 测试、不跑测试」纪律的兑现，不是可省的尾巴 |
+| V12 | `cargo fmt --all --check`（axagent-core / axagent-plugins / src-tauri 三根） | 0 / 0 / 0 | 先用单文件 `rustfmt --check` 定位：三处 diff 全是我自己写的行 ⇒ 手工改成 rustfmt 形态。**不许对他人文件跑写模式** —— `rustfmt file.rs` 会顺 mod 树重写整个模块 |
+| V13 | 第五道门：`--selftest` + 判定（摘 PLAN 头 3 行的副本跑，`cp` 还原后 `cmp` = `RESTORED_IDENTICAL`） | 0 / 0 | 首轮 **2 条硬失败**（`workflow.reflector` / `workflow.evolver` 的三个 `worker.rs` 证据锚点因本批 +29 行位移）⇒ `--repin-code --apply` 回写 4266→4295、4358→4387、4406→4435（token / file / anchorText 一字未动，自动备份 `.tmp/capability-register.*.bak.json`）；复检 `PASS: hard:true 判据全部一致（登记 37 = A11/B8/C4/H1/K10/D3；能力面 Σ=23；锚点 21 项）` |
+| V14 | `node scripts/audit-l1-blockers.mjs` | 0 | Rust 待改写 **99 处 / 16 文件**、H 桶 3 处 ⇒ 合计 **102 / 19**，与登记值逐字相同 ⇒ **本批未动这两个数**；命令读数仍 1542 / 164 模块（本批没加 Tauri 命令，`register_commands.rs` 零 diff） |
+
+**顺手抓出的既存腐烂（V13 同批改）**：`--repin-code` 只管 `evidence[]` 的 `line`，不管**同一张表 `note` 里**与 **PLAN §0.7 表格散文里**的 `worker.rs:3798` / `:3890`–`:3938`。用 `git show HEAD:…worker.rs` 复算：HEAD 上真实位置是 `:4290` / `:4358`–`:4406` —— **本批之前就已差 492 / 468 行**，不是本批改出来的。已把 PLAN:268–269 两行、镜像表两处 `note` 与两处 `planAnchorText` 一起重抄成盘上现值 `:4319` / `:4387`–`:4435`（`grep -n` 给号）。§98.3 第二条立的「散文可定位巡检」**仍未立项**，这次靠人撞 + `git show` 复算才定性 ⇒ 判据缺口继续挂着。
+
+**未跑的 CI 口径全量**：`clippy --workspace --all-targets --all-features -- -D warnings` / `test --workspace` / 全目录 `npm run test:run` 本批**未跑**（理由同 §98.5-9：并行批仍在改同一编译面）。主 crate 只跑了**定点** `--lib commands::stock_workflow::workflow_run_service`，`clippy -p axagent --all-targets`（会编全部 target）也未跑 ⇒ 记进 99.5，**不许当成「已按 CI 口径验过」**。
+
+### 99.5 本批未做
+
+1. **没裁登记表的内存增长**：`RunRegistry.runs` 只增不减（`release_slot` 只翻 `active`、从不删行），`list_recent` 每次调用是 O(n) 遍历 + 至多 O(limit) 次内存查状态。今天 n = 「本次会话该插件发起过的执行数」，量级个位 ⇒ 无感；但任务中心自动刷新会按 `ACTIVE_POLL_MS` 轮询，长期挂着线性变慢。**待办**：给登记加保留窗口（如按 owner 留最近 N 行）或加缓存 —— 两者都会引入第二份状态，需先定口径再动。
+2. **`total` 与本页可能不一致这条没有测试**：契约写明「`total` 取登记匹配数，引擎查不到的行只从本页剔除」，但要造「登记有、引擎无」得 mock `WorkEngine`，而本文件的测试全是纯函数级。今天按「登记表与引擎同生命周期、重启双双清空 ⇒ 实际不出现」把它判成防御性分支，**没有实测到达过**，不许在后续记账里当实测路径引用。
+3. **宿主 `list_recent` 本体未跑过真引擎**：V11 验的是纯函数 `recent_row` 的四条判据；遍历 / 窗口截断 / 页内排序要真 `WorkEngine` 才能测（同 `list_active` 自 §50 以来的既有覆盖面）。已验的是分派层（V7）、插件侧（V6）、真产物端到端（V9）与编译（V10）。
+4. **没有按状态过滤**：任务中心要「只看失败」时只能全量拉回再前端筛；`list_active` / `list_recent` 都没有 status 参数。
+5. **翻页未接**：有 `limit`、有 `total`，没有 offset/cursor ⇒ 一次只拿最近 50 条，历史翻不出来（§98.5-3「插件源只有 list」在这里同样成立）。
+6. **B8-1c 仍挂起**（任务 #149）：宿主 `stockAnalysis.adapter.ts` / `pipeline.adapter.ts` 未删 —— 详情抽屉按 `source` 字面量分派（`RunDetailDrawer.tsx:36`、`:45`），删了会退化 ⇒ 须先做 B8-2 页面/抽屉迁移。本批补齐的是插件源的**数据面**（在跑 + 终态 + 耗时），**详情面**依然缺。
+7. **真机未验**：桌面里打开任务中心、看一条已结束的工作流批次带着耗时出现在插件源下 —— 这条**没在 `npm run tauri dev` 里点过**；已验的是 Rust 侧端到端与单元/分派口径。
+8. **`PLUGIN_TASK_RUN_STATES` 与前端七态仍是两份人工镜像**（同 §98.5-7，等 B8-3 生成 DTO）；`--update-baseline`（中立性棘轮）与全量门禁同 §98.5-9 继续挂。
+

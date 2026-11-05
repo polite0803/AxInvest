@@ -353,7 +353,7 @@ pub use cron_delivery::{
 // ── cron 任务查询 / 写面接缝（DTO + Trait，实现由 runtime-core 注入）──
 pub mod jobs_store;
 pub use jobs_store::{CronJobRunView, CronJobView, JobStoreProvider, NewCronJob, RemoveJobOutcome};
-// ── 工作流执行接缝（异步 job：start 受理 + status / cancel / list_active，实现由宿主 wiring 注入）──
+// ── 工作流执行接缝（异步 job：start 受理 + status / cancel / list_active / list_recent，实现由宿主 wiring 注入）──
 pub mod workflow_run;
 pub use workflow_run::{
     ExecutionView, WorkflowRunActivePage, WorkflowRunActiveView, WorkflowRunCancelOutcome,

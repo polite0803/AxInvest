@@ -5,7 +5,8 @@
 //! 契约在 `axagent-core/crates/harness/src/workflow_run.rs`（已冻结）：`start` 只受理并
 //! **立即**返回 `execution_id`（接缝等待预算 15 s，绝不能 await DAG），执行体在
 //! `tokio::spawn` 里跑；进度与终态经 `event.dispatch` 推给插件；`status` / `cancel` /
-//! `list_active` 一律按 owner 隔离（跨 owner 视同查无）。
+//! `list_active` 一律按 owner 隔离（跨 owner 视同查无）。`list_recent` 在此之上多给
+//! 「已结束的行列」（任务中心的耗时只认宿主登记的 `finished_at`，见 `RunMeta`）。
 //!
 //! ## 宿主自决的执行参数（插件既不给也不该读回）
 //!
@@ -82,7 +83,7 @@ const EVENT_SOURCE: &str = "workflow.run";
 const DEFAULT_TOTAL_TIMEOUT_SECS: u64 = 1800;
 /// `total_timeout_secs` 可接受上限（与 `ExecutionParams` 的 clamp 区间一致）。
 const MAX_TOTAL_TIMEOUT_SECS: u64 = 7200;
-/// `list_active` 的页大小上限（宿主再夹一层，防插件一次拉爆内存）。
+/// `list_active` / `list_recent` 的页大小上限（宿主再夹一层，防插件一次拉爆内存）。
 const MAX_ACTIVE_PAGE: usize = 200;
 
 /// 准入上限（per-owner / 全局「在跑数」）。
@@ -116,6 +117,12 @@ struct RunMeta {
     created_at: i64,
     /// 是否仍占着一个准入额度（受理即 true，执行体收尾即 false）。
     active: bool,
+    /// 宿主判定「这次执行对本插件已经结束」的时刻（毫秒）；在跑的行是 `None`。
+    ///
+    /// 由 `release_slot` 与 `active = false` 同一次写锁内盖（不是引擎的 `updated_at`：
+    /// 总超时那档终态是宿主判的，引擎那边的时刻不等于宿主这边判定的那一刻）。
+    /// `list_recent` 的终态行耗时只认这一个数。
+    finished_at: Option<i64>,
     /// 宿主侧终态覆盖：目前只有「总超时 ⇒ failed」与「执行体异常终止 ⇒ failed」两种。
     /// 引擎的 `cancel` 会无条件把状态覆写成 `cancelled`（`engine/mod.rs:5313`），
     /// 不覆盖的话插件看到的总超时会被误判成「用户取消」。
@@ -175,6 +182,9 @@ async fn release_slot(
         return;
     }
     meta.active = false;
+    // 与 `active = false` 同一次写锁内盖结束时刻：`list_recent` 的耗时列只认这一个数
+    // （见 `RunMeta::finished_at`）。放在锁外取时钟会让两次释放读到不同时刻。
+    meta.finished_at = Some(now_ms());
     if let Some(t) = terminal {
         meta.terminal_override = Some(t);
     }
@@ -197,6 +207,19 @@ fn execution_status_of(status: WorkflowStatus) -> ExecutionStatus {
         WorkflowStatus::Failed => ExecutionStatus::Failed,
         WorkflowStatus::Cancelled => ExecutionStatus::Cancelled,
     }
+}
+
+/// `list_recent` 一行的两处宿主判定（纯函数，判据都值得一测）：
+///
+/// 1. **终态覆盖**：总超时 / 执行体异常终止时引擎那边可能是 `cancelled`，对插件必须
+///    呈现为 `failed` —— 与 [`WorkflowRunProvider::status`] 走的是同一个覆盖，
+///    两处不共用一份判据的话，同一条执行在 `status` 和 `list_recent` 里会说两种话。
+/// 2. **结束时刻**：只有**已退出准入额度**的行才有。仍在占额度的行即便引擎那边已写
+///    成终态（收尾与还额度之间有窗口），也还是 `None` —— 宿主此刻还没判定它结束。
+fn recent_row(meta: &RunMeta, engine_status: ExecutionStatus) -> (ExecutionStatus, Option<i64>) {
+    let status = meta.terminal_override.clone().unwrap_or(engine_status);
+    let finished_at = if meta.active { None } else { meta.finished_at };
+    (status, finished_at)
 }
 
 /// 模板是否在白名单内（纯函数，便于单测锁住「只开 stock- 一族」的口径）。
@@ -331,6 +354,7 @@ impl WorkflowRunService {
                 workflow_id: String::new(),
                 created_at: now_ms(),
                 active: true,
+                finished_at: None,
                 terminal_override: None,
             },
         );
@@ -718,6 +742,8 @@ impl WorkflowRunProvider for WorkflowRunService {
                     owner_plugin_id: owner.to_string(),
                     created_at: info.created_at,
                     updated_at: info.updated_at,
+                    // 本 op 只吐在跑的行（`meta.active` 已过滤）⇒ 结束时刻恒未知
+                    finished_at: None,
                 })
                 .collect()
         };
@@ -728,13 +754,79 @@ impl WorkflowRunProvider for WorkflowRunService {
         views.truncate(limit);
         Ok(WorkflowRunActivePage { executions: views, total })
     }
+
+    async fn list_recent(
+        &self,
+        owner: &str,
+        workflow_id: Option<&str>,
+        limit: usize,
+    ) -> Result<WorkflowRunActivePage, AxAgentError> {
+        let limit = limit.clamp(1, MAX_ACTIVE_PAGE);
+        // 候选窗口取自**登记表**而不是引擎：引擎的 `list_active_executions` 只有
+        // running / paused（`engine/mod.rs:5576`），终态行只能从登记行里找。
+        // 窗口按 `created_at`（受理时刻）降序截断 —— 按 `updated_at` 选窗口要先给
+        // 每条登记行问一次引擎，而登记行的唯一权威信息正是「谁属于本插件」。
+        let (candidates, total) = {
+            let reg = self.runs.read().await;
+            let mut rows: Vec<(String, RunMeta)> = reg
+                .runs
+                .iter()
+                .filter(|(_, meta)| meta.owner == owner)
+                .filter(|(_, meta)| match workflow_id {
+                    // 受理尚未建图的行（`workflow_id` 空串）不匹配任何指定模板
+                    Some(want) => !meta.workflow_id.is_empty() && meta.workflow_id == want,
+                    None => true,
+                })
+                .map(|(id, meta)| (id.clone(), meta.clone()))
+                .collect();
+            let total = rows.len();
+            rows.sort_by_key(|(_, meta)| std::cmp::Reverse(meta.created_at));
+            rows.truncate(limit);
+            (rows, total)
+        };
+
+        let mut views = Vec::with_capacity(candidates.len());
+        for (execution_id, meta) in candidates {
+            let state = match self.engine.get_status(&execution_id).await {
+                Ok(state) => state,
+                // 登记行有、引擎无 ⇒ 与 `status` 同口径按查无跳过（只从本页剔除，
+                // 不回退 `total`：那一档差异对分页无害，契约已写明插件不得据此推页数）
+                Err(WorkEngineError::NotFound(_)) => continue,
+                Err(e) => return Err(AxAgentError::Provider(format!("查询执行状态失败: {e}"))),
+            };
+            let (status, finished_at) = recent_row(&meta, state.status.clone());
+            let engine_workflow_id = state.workflow_id;
+            let current_node_id = state.current_node_id;
+            let created_at = state.created_at;
+            let updated_at = state.updated_at;
+            views.push(WorkflowRunActiveView {
+                execution_id,
+                // 与 `status` 同一口径：登记里有就用登记的（受理时预置的 id），空才回退引擎
+                workflow_id: if meta.workflow_id.is_empty() {
+                    engine_workflow_id
+                } else {
+                    meta.workflow_id
+                },
+                status,
+                current_node_id,
+                owner_plugin_id: owner.to_string(),
+                created_at,
+                updated_at,
+                finished_at,
+            });
+        }
+
+        // 与 `list_active` 同一条页内排序（契约：本页按最近更新优先）
+        views.sort_by_key(|view| std::cmp::Reverse(view.updated_at));
+        Ok(WorkflowRunActivePage { executions: views, total })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        ALLOWED_TEMPLATE_PREFIXES, RunLimits, extract_stock_code, is_template_allowed,
-        merge_variables,
+        ALLOWED_TEMPLATE_PREFIXES, ExecutionStatus, RunLimits, RunMeta, extract_stock_code,
+        is_template_allowed, merge_variables, recent_row,
     };
 
     #[test]
@@ -815,5 +907,40 @@ mod tests {
         let only_base =
             merge_variables(Some(vec![var("a", serde_json::json!(1))]), &[]).expect("应有值");
         assert_eq!(only_base.len(), 1);
+    }
+
+    fn meta(active: bool, finished_at: Option<i64>, override_: Option<ExecutionStatus>) -> RunMeta {
+        RunMeta {
+            owner: "plugin.stock".to_string(),
+            workflow_id: "stock-analysis".to_string(),
+            created_at: 1_700_000_000_000,
+            active,
+            finished_at,
+            terminal_override: override_,
+        }
+    }
+
+    #[test]
+    fn recent_row_overrides_terminal_and_gates_finished_at() {
+        use ExecutionStatus as S;
+
+        // 1. 总超时那档：引擎写的是 `cancelled`，宿主必须让列表与 `status` 说同一句话
+        let timed_out = meta(true, None, Some(S::Failed));
+        assert_eq!(recent_row(&timed_out, S::Cancelled), (S::Failed, None));
+
+        // 2. 无覆盖 ⇒ 原样透出引擎状态（不要在这里发明第七态）
+        let plain = meta(false, Some(1_700_000_009_000), None);
+        assert_eq!(
+            recent_row(&plain, S::PartiallyCompleted),
+            (S::PartiallyCompleted, Some(1_700_000_009_000))
+        );
+
+        // 3. 已还额度却没盖时刻：宁缺毋造（耗时列留空，不拿 `updated_at` 冒充结束时刻）
+        let no_stamp = meta(false, None, None);
+        assert_eq!(recent_row(&no_stamp, S::Completed), (S::Completed, None));
+
+        // 4. 仍占额度的行即使引擎已写成终态也回 `None`：宿主此刻还没判它结束
+        let still_slot = meta(true, None, None);
+        assert_eq!(recent_row(&still_slot, S::Completed), (S::Completed, None));
     }
 }

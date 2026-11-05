@@ -125,14 +125,14 @@ impl ServiceDefinition {
     /// 预置 workflow-run 接缝（工作流执行，异步 job 形态）。
     ///
     /// 宿主独持 `WorkEngine`，插件只持 `execution_id`：`start` 立即返回句柄，
-    /// `status` / `cancel` / `list_active` 按 owner（发起插件）隔离查询。
+    /// `status` / `cancel` / `list_active` / `list_recent` 按 owner（发起插件）隔离查询。
     /// 执行进度走 `event.dispatch`（宿主在 provider 内装进度回调），不进本契约。
     pub fn workflow_run() -> Self {
         Self::new(
             "workflow.run",
             "1.0",
             "axagent_harness::WorkflowRunProvider",
-            "工作流执行：start 受理返回 execution_id，status / cancel / list_active 按 owner 查询",
+            "工作流执行：start 受理返回 execution_id，status / cancel / list_active / list_recent 按 owner 查询",
         )
     }
 

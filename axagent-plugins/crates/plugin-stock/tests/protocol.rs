@@ -362,18 +362,21 @@ fn command_frame_identity_mismatch_and_unknown_command_are_explicit_errors() {
     assert_eq!(worker.recv_response().kind, ResponseKind::Success);
 }
 
-/// B8-1b：任务源取数命令的帧级实证 —— 出站接缝的**参数名口径**与行形状都只有真管道能钉住。
+/// 任务源取数命令的帧级实证 —— 出站接缝的**参数名口径**与行形状都只有真管道能钉住。
 ///
 /// 与 e2e 安装测试的分工：那边锁「清单 → 投影 → 命令能跑通」，这边锁
 /// 「camelCase 入参 → snake_case 接缝参数」的翻译与「引擎状态词 → 中心状态词」的翻译，
 /// 以及接缝出错时命令必须**失败**而不是静默回空数组（空数组在任务中心看起来像「今天没活」）。
+///
+/// B8-1b 建通道，#150 把取数口从 `list_active` 换成 `list_recent`：后者的一页里可以出现
+/// 已结束的执行，`finishedAt` 那一条分支从此是实测路径而不再是防御性代码。
 #[test]
-fn command_frame_lists_active_workflow_runs_as_task_center_rows() {
+fn command_frame_lists_recent_workflow_runs_as_task_center_rows() {
     let mut worker = Worker::spawn();
     worker.send(
         &CommandFrame::new(
             PLUGIN_ID,
-            "list_active_workflow_runs",
+            "list_recent_workflow_runs",
             serde_json::json!({ "limit": 20, "workflowId": "wf-daily" }),
             5_000,
         )
@@ -385,7 +388,7 @@ fn command_frame_lists_active_workflow_runs_as_task_center_rows() {
     let call = worker.recv_request();
     assert_eq!(call.op, ops::CALL_SEAM);
     assert_eq!(call.args["seam"], "workflow.run");
-    assert_eq!(call.args["op"], "list_active");
+    assert_eq!(call.args["op"], "list_recent");
     // 命令入参是 camelCase（全站约定），接缝入参是 snake_case（宿主 deserialize_optional_arg
     // 按 `workflow_id` 取）⇒ 这层翻译发生在插件侧，写错只会让过滤条件静默失效。
     assert_eq!(call.args["args"]["limit"], 20);
@@ -406,6 +409,8 @@ fn command_frame_lists_active_workflow_runs_as_task_center_rows() {
                 "ownerPluginId": PLUGIN_ID,
                 "createdAt": 1_700_000_000_000_i64,
                 "updatedAt": 1_700_000_009_000_i64,
+                // 终态行的结束时刻由宿主登记表盖（不是 `updatedAt`）⇒ 必须原样透出
+                "finishedAt": 1_700_000_008_000_i64,
             }],
             "total": 1,
         }))
@@ -424,22 +429,28 @@ fn command_frame_lists_active_workflow_runs_as_task_center_rows() {
     assert_eq!(rows[0]["state"], "canceled", "状态词表翻译必须发生在插件侧：{:?}", rows[0]);
     assert_eq!(rows[0]["trigger"], "manual");
     assert_eq!(rows[0]["startedAt"], 1_700_000_000_000_i64);
+    assert_eq!(
+        rows[0]["finishedAt"], 1_700_000_008_000_i64,
+        "结束时刻必须透传宿主的值：{}",
+        rows[0]
+    );
     // 缺省项是「不出现」而不是 null：宿主泛型适配器按字段在不在决定耗时列与可否打开。
-    for absent in ["finishedAt", "durationMs", "deepLink"] {
+    // 耗时**不在这里算** —— 两端点相减只发生在宿主 `resolveDurationMs` 一处（不留第二套口径）。
+    for absent in ["durationMs", "deepLink"] {
         assert!(rows[0].get(absent).is_none(), "缺省字段 `{absent}` 不得进帧：{}", rows[0]);
     }
     assert_eq!(rows[0]["raw"]["updatedAt"], 1_700_000_009_000_i64, "引擎视图原样留在 raw");
 
     // 接缝报错 ⇒ 命令失败并**原样透传错误码**，不得退化成空列表。
     worker.send(
-        &CommandFrame::new(PLUGIN_ID, "list_active_workflow_runs", serde_json::json!({}), 5_000)
+        &CommandFrame::new(PLUGIN_ID, "list_recent_workflow_runs", serde_json::json!({}), 5_000)
             .to_frame_request()
             .expect("命令帧应能编成请求")
             .with_id("req-task-rows-2"),
     );
     let second_call = worker.recv_request();
     // 不传 limit ⇒ 插件用与宿主一致的缺省档 50
-    assert_eq!(second_call.args["args"]["limit"], 50, "缺省档应与宿主 list_active 的缺省一致");
+    assert_eq!(second_call.args["args"]["limit"], 50, "缺省档应与宿主 list_recent 的缺省一致");
     assert!(
         second_call.args["args"].get("workflow_id").is_none()
             || second_call.args["args"]["workflow_id"].is_null(),

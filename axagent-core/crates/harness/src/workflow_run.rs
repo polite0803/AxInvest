@@ -9,14 +9,14 @@
 //! **不进本契约**（进度是推送面，不是请求/响应面）。
 //!
 //! **owner 隔离**：`owner` 由 worker 分派层从连接身份（插件 id）注入，
-//! 插件不可伪造、也不能自报他人的 id。`status` / `cancel` / `list_active`
-//! 三个查询/取消方法**一律按 owner 过滤**，跨 owner 视同查无：
+//! 插件不可伪造、也不能自报他人的 id。`status` / `cancel` / `list_active` /
+//! `list_recent` 一律按 owner 过滤，跨 owner 视同查无：
 //! - `status` 查无（含跨 owner）⇒ `Ok(None)`；
 //! - `cancel` 查无（含跨 owner）⇒ `{"cancelled":false,"status":null}`；
 //! - `list_active` 只返回本插件发起的执行（每项带 `owner_plugin_id`，便于日志核对）。
 //!
 //! **权限由分派层强制**：`start` / `cancel` 要求插件已声明 `write` 权限
-//! （`PLUGIN_PERMISSION_DENIED`）；`status` / `list_active` 只读不设闸。
+//! （`PLUGIN_PERMISSION_DENIED`）；`status` / `list_active` / `list_recent` 只读不设闸。
 //! 模板白名单与准入拒绝也在宿主侧判断，provider 用
 //! [`AxAgentError::Validation`] 表达（分派层的 `workflow_run_error` 把它映射为 `WORKFLOW_RUN_REJECTED`）；
 //! 本层只提供契约，不自行校验任何一项。
@@ -125,7 +125,10 @@ pub struct WorkflowRunCancelOutcome {
     pub status: Option<ExecutionStatus>,
 }
 
-/// 在跑执行列表的一项（`list_active` 的返回项）。
+/// 执行列表的一项（`list_active` / `list_recent` 的返回项）。
+///
+/// 两个 op 共用一份行形状：差别只在**是否包含已退出的执行**，不在字段（拆开定义会让
+/// 插件侧写两份行映射，禁区 12）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowRunActiveView {
@@ -137,9 +140,17 @@ pub struct WorkflowRunActiveView {
     pub owner_plugin_id: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// 结束时刻（毫秒）：**仅已退出的执行有**，在跑的一律 `None`（不进帧）。
+    ///
+    /// 为什么不用 `updated_at` 兜：终态行的 `updated_at` 是「引擎最后一次状态写入」，
+    /// 而总超时 / 执行体异常终止那两种终态是**宿主**判定的（`terminal_override`），
+    /// 宿主判定的那一刻与引擎写入的时刻不是同一个数。拿它当结束时间是编读数，
+    /// 任务中心的耗时列会跟着错。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<i64>,
 }
 
-/// `list_active` 的分页结果。
+/// 执行列表的分页结果（`list_active` / `list_recent` 共用）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowRunActivePage {
@@ -155,7 +166,8 @@ pub struct WorkflowRunActivePage {
 /// 默认实现统一返回「该提供者不支持此数据面」，便于外部实现只覆盖关心的 op。
 ///
 /// 所有方法的 `owner` 参数由 worker 分派层从连接身份注入（插件不可伪造）；
-/// 四个方法都必须**秒回** —— `start` 只受理不等待执行体，否则会撞上接缝 15 s 预算。
+/// 每个方法都必须**秒回** —— 只有 `start` 会显得「该等」，它只受理不等待执行体，
+/// 否则会撞上接缝 15 s 预算。
 #[async_trait]
 pub trait WorkflowRunProvider: Send + Sync {
     /// 受理一次执行，立即返回句柄（不等 DAG 跑完）。
@@ -209,6 +221,28 @@ pub trait WorkflowRunProvider: Send + Sync {
     ) -> Result<WorkflowRunActivePage> {
         Err(AxAgentError::Provider(
             "WorkflowRunProvider::list_active 未实现（该提供者不支持此数据面）".into(),
+        ))
+    }
+
+    /// 列本插件**近期**的执行：在跑的 + 已结束的。
+    ///
+    /// 为什么要有它，而不是让调用方去把 `list_active` 与一堆 `status` 拼起来：
+    /// 「哪些执行属于本插件、什么时候结束」只有一直持有登记表的宿主知道 ——
+    /// 插件拿不到别人的 execution id，也没有历史可翻。任务中心的「今天跑过什么」
+    /// 缺这条就只能看见在跑的、跑完即消失（PLAN §98.5-6）。
+    ///
+    /// 入参与返回与 [`Self::list_active`] 同形，只多两处约定：
+    /// - 页内**可含终态行**，终态行的 `finished_at` 必须有值，在跑行为 `None`；
+    /// - `total` 按宿主登记匹配数计（limit 之前），宿主已丢失的执行只从本页剔除、
+    ///   不回退进 `total`（那一档差异对分页无害，但插件不得据此推「还有 N 条可翻」）。
+    async fn list_recent(
+        &self,
+        _owner: &str,
+        _workflow_id: Option<&str>,
+        _limit: usize,
+    ) -> Result<WorkflowRunActivePage> {
+        Err(AxAgentError::Provider(
+            "WorkflowRunProvider::list_recent 未实现（该提供者不支持此数据面）".into(),
         ))
     }
 }
@@ -328,5 +362,40 @@ mod tests {
         let err =
             p.list_active("plugin-a", None, 50).await.expect_err("list_active 默认实现必须是错误");
         assert!(matches!(err, AxAgentError::Provider(_)), "list_active: {err:?}");
+
+        let err =
+            p.list_recent("plugin-a", None, 50).await.expect_err("list_recent 默认实现必须是错误");
+        assert!(matches!(err, AxAgentError::Provider(_)), "list_recent: {err:?}");
+    }
+
+    fn active_view(status: ExecutionStatus, finished_at: Option<i64>) -> WorkflowRunActiveView {
+        WorkflowRunActiveView {
+            execution_id: "exec-1".into(),
+            workflow_id: "wf-1".into(),
+            status,
+            current_node_id: None,
+            owner_plugin_id: "plugin-a".into(),
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_001_000,
+            finished_at,
+        }
+    }
+
+    /// `finished_at` 是 `list_recent` 的终态行**唯一**多出来的字段 ⇒ 它的线格式必须钉死：
+    /// 键名 camelCase（全站约定），且缺省时整体不出现（`list_active` 的既有消费方
+    /// 靠「键在不在」判耗时，出现一个 `null` 会让它们把「未知」读成「0 毫秒」）。
+    #[test]
+    fn active_view_finished_at_camel_case_and_absent_when_none() {
+        let running = serde_json::to_value(active_view(ExecutionStatus::Running, None))
+            .expect("序列化应成功");
+        assert_eq!(running["executionId"], json!("exec-1"));
+        assert_eq!(running["ownerPluginId"], json!("plugin-a"));
+        assert!(running.get("finishedAt").is_none(), "在跑行不得带结束时刻键: {running}");
+        assert!(running.get("finished_at").is_none(), "不得残留 snake_case 键");
+
+        let done =
+            serde_json::to_value(active_view(ExecutionStatus::Completed, Some(1_700_000_009_000)))
+                .expect("序列化应成功");
+        assert_eq!(done["finishedAt"], json!(1_700_000_009_000_i64));
     }
 }

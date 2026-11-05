@@ -25,20 +25,41 @@
  *
  * ## 权限面粒度
  *
- * 插件来源只开 `dynamic_ui_*`（与 `dataSourceSecurity.ALLOWED_INVOKE_PREFIXES` 同一条前缀，
- * 同一个理由：动作来自不可信 schema）。`navigate` / `events` / `storeRead` / `storeWrite` 全部
- * **显式给空数组**：这些 executor 的判据也是「有 permissions 就走白名单」，空数组 = 一律拒绝，
- * 与「不传 permissions」的放行语义相反，故必须显式列出而不是省略。
+ * 插件来源只开**四条只读 / 自身表单数据**命令（见 `PLUGIN_SCHEMA_ALLOWED_COMMANDS`），
+ * **不再给 `dynamic_ui_*` 通配**。理由是一条完整的提权链：`create_dynamic_ui_schema`
+ * 把 `origin` 硬写成 `"user"`、`owner_id` 恒为空（`commands/dynamic_ui.rs` 的 origin 锚），
+ * 而 `"user"` 在本判据里属**可信来源** ⇒ 插件 Schema 只要声明一个 invoke 该命令的动作，
+ * 就能造出一行「可信」Schema，那一行的动作再执行时拿到 `undefined` 权限面 = 完全不受限。
+ * `update_dynamic_ui_schema` / `delete_dynamic_ui_schema` 同理：它们目前只挡 `builtin`，
+ * 不按 `owner_id` 限定目标 ⇒ 插件来源的动作能改写或删除**用户／别的插件**的 Schema，
+ * 改写等于把恶意节点塞进可信树。
  *
- * ⚠ 已知残余（本层不解决，见交付报告）：`dynamic_ui_*` 里包含 `delete/update/create_dynamic_ui_schema`
- * 等写命令，而它们目前**不按 ownerId 限定目标**；要真正收窄得在后端做归属校验。
+ * `navigate` / `events` / `storeRead` / `storeWrite` 全部**显式给空数组**：这些 executor
+ * 的判据也是「有 permissions 就走白名单」，空数组 = 一律拒绝，与「不传 permissions」的
+ * 放行语义相反，故必须显式列出而不是省略。`storeRead: []` 同时管住 dataSource 那条路
+ * （`DataBindingEngine.assertDataSourceCoveredByPermissions`）—— 它原来只按
+ * `dynamic_ui_` 前缀放行，`type: "store"` 的数据源等于直读任意已注册 store。
+ *
+ * ⚠ 已知残余（本层不解决）：四条 `*_form_data` 命令在后端**不按 owner_id 限定 schema_id**，
+ * 故插件仍可读写他人 Schema 的表单数据；要彻底收口得在后端做归属校验（纵深防御，另立项）。
  */
 
 import { useDynamicUIStore } from "@/stores/feature/dynamicUIStore";
 import type { DynamicUISchemaRecord, SkillPermissions } from "@/types";
 
-/** 插件来源 Schema 唯一可用的命令面（与 dataSource 白名单同粒度）。 */
-export const PLUGIN_SCHEMA_ALLOWED_COMMANDS: readonly string[] = ["dynamic_ui_*"];
+/**
+ * 插件来源 Schema 唯一可用的命令面。
+ *
+ * 逐条列出、不给通配：新增一种 origin 或新增一条 `dynamic_ui_*` 命令时，得到的是
+ * 「默认拒绝」而不是「默认放行」。表单数据三条是插件页面向宿主持久化自身状态的唯一通道，
+ * `get_dynamic_ui_schema` 供页面按 id 取自身子 Schema。
+ */
+export const PLUGIN_SCHEMA_ALLOWED_COMMANDS: readonly string[] = [
+  "get_dynamic_ui_schema",
+  "get_dynamic_ui_form_data",
+  "save_dynamic_ui_form_data",
+  "delete_dynamic_ui_form_data",
+];
 
 /** 可信来源：用户 / Agent / 内置。这三类维持改动前的行为（不注入权限面）。 */
 const TRUSTED_SCHEMA_ORIGINS: ReadonlySet<string> = new Set(["builtin", "user", "ai"]);

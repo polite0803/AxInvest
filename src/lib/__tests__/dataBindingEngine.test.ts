@@ -2,6 +2,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import type { SkillPermissions } from "@/types";
 import { resolveDataSource, subscribeDataSource } from "../dynamicUI/DataBindingEngine";
 
 const registryGet = vi.fn();
@@ -238,6 +239,134 @@ describe("DataBindingEngine", () => {
         subscriber.unsubscribe();
         subscriber.unsubscribe();
       }).not.toThrow();
+    });
+  });
+
+  /**
+   * 来源受限权限面在 dataSource 这条路上的执法。
+   *
+   * 每条负控都配一条同型正控：先证明「带上权限面并没有把路整体打死」，
+   * 才谈得上「拒绝是因为判据命中，不是因为链路没起来」。
+   */
+  describe("来源受限权限面", () => {
+    const pluginFace = {
+      commands: ["get_dynamic_ui_form_data", "save_dynamic_ui_form_data"],
+      events: [],
+      storeRead: [],
+      storeWrite: [],
+      navigate: [],
+    } as unknown as SkillPermissions;
+
+    const readProviderStore = {
+      commands: [],
+      storeRead: ["providerStore:proxyUrl"],
+    } as unknown as SkillPermissions;
+
+    it("invoke 端点：面上有则放行（正控）", async () => {
+      const { invoke } = await import("@/lib/invoke");
+      vi.mocked(invoke).mockClear();
+      vi.mocked(invoke).mockResolvedValue({ rows: [] });
+
+      const result = await resolveDataSource(
+        {
+          type: "api",
+          config: { endpoint: "get_dynamic_ui_form_data", method: "invoke", params: { schemaId: "s-1" } },
+        },
+        pluginFace,
+      );
+      expect(invoke).toHaveBeenCalledWith("get_dynamic_ui_form_data", { schemaId: "s-1" });
+      expect(result).toEqual({ rows: [] });
+    });
+
+    it("invoke 端点：dynamic_ui_ 前缀内但不在面上的写命令被拒，且不打 IPC（负控）", async () => {
+      const { invoke } = await import("@/lib/invoke");
+      vi.mocked(invoke).mockClear();
+      vi.mocked(invoke).mockResolvedValue({ ok: true });
+
+      // create_dynamic_ui_schema 会把 origin 硬写成 "user"（可信）⇒ 放行即提权
+      await expect(
+        resolveDataSource(
+          { type: "api", config: { endpoint: "create_dynamic_ui_schema", method: "invoke" } },
+          pluginFace,
+        ),
+      ).rejects.toThrow();
+      await expect(
+        resolveDataSource(
+          { type: "api", config: { endpoint: "delete_dynamic_ui_schema", method: "invoke" } },
+          pluginFace,
+        ),
+      ).rejects.toThrow();
+      expect(invoke).not.toHaveBeenCalled();
+    });
+
+    it("store 端点：storeRead 为空 ⇒ 拒读任意已注册 store（负控）", async () => {
+      registryGet.mockClear();
+      registryGet.mockReturnValue({ get: () => ({ apiKey: "sk" }), subscribe: () => vi.fn() });
+
+      await expect(
+        resolveDataSource({ type: "store", config: { storeName: "providerStore" } }, pluginFace),
+      ).rejects.toThrow();
+      // 判定必须发生在查 registry 之前，否则 store 实例已经到手
+      expect(registryGet).not.toHaveBeenCalled();
+    });
+
+    it("store 端点：storeRead 覆盖到该 store 及其字段 ⇒ 放行（正控）", async () => {
+      registryGet.mockReturnValue({
+        get: () => ({ proxyUrl: "https://p", apiKey: "sk" }),
+        subscribe: () => vi.fn(),
+      });
+
+      const result = await resolveDataSource(
+        { type: "store", config: { storeName: "providerStore", selector: "proxyUrl" } },
+        readProviderStore,
+      );
+      expect(result).toBe("https://p");
+    });
+
+    it("store 端点：覆盖某 store 不等于覆盖其全部字段，未声明字段仍拒（负控）", async () => {
+      registryGet.mockReturnValue({
+        get: () => ({ proxyUrl: "https://p", apiKey: "sk" }),
+        subscribe: () => vi.fn(),
+      });
+
+      await expect(
+        resolveDataSource(
+          { type: "store", config: { storeName: "providerStore", selector: "apiKey" } },
+          readProviderStore,
+        ),
+      ).rejects.toThrow();
+    });
+
+    it("不传权限面（可信来源）⇒ 行为逐字不变（正控：白名单仍生效，面不生效）", async () => {
+      const { invoke } = await import("@/lib/invoke");
+      vi.mocked(invoke).mockClear();
+      vi.mocked(invoke).mockResolvedValue({ ok: true });
+
+      await expect(
+        resolveDataSource({ type: "api", config: { endpoint: "delete_dynamic_ui_schema", method: "invoke" } }),
+      ).resolves.toEqual({ ok: true });
+      await expect(
+        resolveDataSource({ type: "api", config: { endpoint: "get_data", method: "invoke" } }),
+      ).rejects.toThrow();
+    });
+
+    it("subscribeDataSource：受限面在 store 直订阅分支前就拦（回归：该分支绕过 resolveDataSource）", async () => {
+      const onData = vi.fn();
+      const onError = vi.fn();
+      registryGet.mockClear();
+      registryGet.mockReturnValue({ get: () => ({ apiKey: "sk" }), subscribe: () => vi.fn() });
+
+      const subscriber = await subscribeDataSource(
+        { type: "store", config: { storeName: "providerStore" } },
+        onData,
+        onError,
+        pluginFace,
+      );
+      // 初始加载的 reject 只走 onError，流程会继续往下 —— 所以拦截必须发生在订阅之前
+      expect(onError).toHaveBeenCalled();
+      expect(onData).not.toHaveBeenCalled();
+      expect(registryGet).not.toHaveBeenCalled();
+      subscriber.unsubscribe();
     });
   });
 });

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { DataSourceConfig } from "@/types";
+import type { DataSourceConfig, SkillPermissions } from "@/types";
 import { useEffect, useRef, useState } from "react";
 import { resolveDataSource, subscribeDataSource } from "./DataBindingEngine";
 
@@ -11,8 +11,13 @@ interface UseDataSourceResult<T = unknown> {
   refresh: () => Promise<void>;
 }
 
+/**
+ * `permissions` 必须是**所在渲染树**的来源权限面（见 `useSchemaActionPermissions`）。
+ * 不传即视为不受限 ⇒ 只能用于可信来源的树；插件来源的树漏传就是开绕过口。
+ */
 export function useDataSource<T = unknown>(
   config: DataSourceConfig | undefined,
+  permissions?: SkillPermissions,
 ): UseDataSourceResult<T> {
   const [data, setData] = useState<T | undefined>(undefined);
   const [loading, setLoading] = useState<boolean>(!!config);
@@ -29,7 +34,7 @@ export function useDataSource<T = unknown>(
     setLoading(true);
     setError(null);
     try {
-      const result = await resolveDataSource(config);
+      const result = await resolveDataSource(config, permissions);
       setData(result as T);
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
@@ -76,6 +81,7 @@ export function useDataSource<T = unknown>(
               setLoading(false);
             }
           },
+          permissions,
         );
       } catch (err) {
         if (mounted) {
@@ -92,7 +98,7 @@ export function useDataSource<T = unknown>(
         subscriberRef.current = null;
       }
     };
-  }, [config, setData]);
+  }, [config, permissions, setData]);
 
   return { data, loading, error, refresh };
 }

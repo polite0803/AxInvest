@@ -233,6 +233,9 @@ const SchemaNodeRenderer = React.memo(function SchemaNodeRenderer({
           setDataLoading(false);
         }
       },
+      // dataSource 是**第二条** IPC 出口：不带上权限面，插件来源 Schema 只要声明一个
+      // `type: "api"` / `type: "store"` 的数据源就绕过了动作闸（本行曾漏传）。
+      actionPermissions,
     ).then((subscriber) => {
       if (!cancelled && mountedRef.current) {
         subscriberRef.current = subscriber;
@@ -249,7 +252,7 @@ const SchemaNodeRenderer = React.memo(function SchemaNodeRenderer({
         subscriberRef.current = null;
       }
     };
-  }, [schema.dataSource, schema.id, setDataLoading]);
+  }, [schema.dataSource, schema.id, setDataLoading, actionPermissions]);
 
   const mergedContext = useMemo(() => {
     const base = { ...externalContext };

@@ -14,6 +14,11 @@
  * 属不可信输入）。为避免构造任意 schema 绕过前端权限调用任意已注册 Tauri 命令
  * （未鉴权 IPC / SSRF），仅放行动态 UI 渲染自身的命令前缀。
  * 新增可调用的命令时，请在此显式登记其前缀。
+ *
+ * ⚠ 这条**只是第一道**：它按前缀放行，对所有来源同视 ⇒ `dynamic_ui_` 整族（含
+ * `create/update/delete_dynamic_ui_schema` 三条写命令）都在内。插件来源的第二道在
+ * `DataBindingEngine.assertDataSourceCoveredByPermissions`，按该渲染树的权限面逐条判，
+ * 判据见 `schemaActionPermissions.ts`。改这一层不构成对插件的收口，改那一层才构成。
  */
 export const ALLOWED_INVOKE_PREFIXES = ["dynamic_ui_"];
 

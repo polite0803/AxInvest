@@ -44,7 +44,7 @@ describe("来源判定", () => {
     }
   });
 
-  it("插件来源给受限面：只开 dynamic_ui_*，其余维度显式为空", () => {
+  it("插件来源给受限面：只开四条命令，其余维度显式为空", () => {
     const perms = permissionsForSchemaOrigin("plugin");
     expect(perms).toEqual({
       commands: [...PLUGIN_SCHEMA_ALLOWED_COMMANDS],
@@ -53,7 +53,12 @@ describe("来源判定", () => {
       storeWrite: [],
       navigate: [],
     });
-    expect(perms!.commands).toEqual(["dynamic_ui_*"]);
+    expect(perms!.commands).toEqual([
+      "get_dynamic_ui_schema",
+      "get_dynamic_ui_form_data",
+      "save_dynamic_ui_form_data",
+      "delete_dynamic_ui_form_data",
+    ]);
   });
 
   it("判不出来的来源一律按不可信（fail-closed）", () => {
@@ -63,13 +68,34 @@ describe("来源判定", () => {
     }
   });
 
-  it("权限面与 isWildcardMatch 的组合语义：放行 dynamic_ui_*，拒绝其余命令", () => {
+  it("权限面与 isWildcardMatch 的组合语义：放行四条自身命令，拒绝 Schema CRUD", () => {
     const commands = permissionsForSchemaOrigin("plugin")!.commands!;
-    expect(isWildcardMatch("dynamic_ui_list_pins", commands)).toBe(true);
-    expect(isWildcardMatch("dynamic_ui_get_dynamic_ui_form_data", commands)).toBe(true);
+    // 正控：四条放行的命令逐条命中（漏一条即本页无法持久化自身状态）
+    for (const cmd of PLUGIN_SCHEMA_ALLOWED_COMMANDS) {
+      expect(isWildcardMatch(cmd, commands)).toBe(true);
+    }
+    // 负控：提权链上的三条写命令 + 其余 dynamic_ui_* 一律拒绝。
+    // create 把 origin 硬写成 "user"（可信）⇒ 放行它等于让插件自造一个不受限的 Schema；
+    // update / delete 不按 owner_id 限定目标 ⇒ 放行它等于能改写/删除他人 Schema。
+    for (
+      const cmd of [
+        "create_dynamic_ui_schema",
+        "update_dynamic_ui_schema",
+        "delete_dynamic_ui_schema",
+        "restore_dynamic_ui_schema_version",
+        "edit_dynamic_ui_schema_nl",
+        "generate_dynamic_ui_schema_nl",
+        "pin_dynamic_ui_schema",
+        "unpin_dynamic_ui_schema",
+        "list_dynamic_ui_schemas",
+      ]
+    ) {
+      expect(isWildcardMatch(cmd, commands)).toBe(false);
+    }
+    // 非 dynamic_ui 族本来就不在面上
     expect(isWildcardMatch("delete_scheduled_task", commands)).toBe(false);
-    // 前缀必须带尾下划线：只共享 "dynamic_ui" 字面不能算命中
-    expect(isWildcardMatch("dynamic_uix", commands)).toBe(false);
+    // 无通配 ⇒ 前缀相似不再算命中（旧的 "dynamic_ui_*" 形态会把上面全放行）
+    expect(isWildcardMatch("dynamic_ui_anything_else", commands)).toBe(false);
   });
 
   it("非持久化 Schema（无记录）维持现状", () => {
@@ -81,7 +107,7 @@ describe("来源判定", () => {
 describe("按 schemaId 兜底解析", () => {
   it("currentSchema 命中且为插件来源 ⇒ 受限", () => {
     h.state.currentSchema = record("s-1", "plugin");
-    expect(resolveSchemaActionPermissions("s-1")?.commands).toEqual(["dynamic_ui_*"]);
+    expect(resolveSchemaActionPermissions("s-1")?.commands).toEqual([...PLUGIN_SCHEMA_ALLOWED_COMMANDS]);
   });
 
   it("currentSchema 是别的 id ⇒ 不误判（继续找 schemas 列表）", () => {
@@ -91,7 +117,7 @@ describe("按 schemaId 兜底解析", () => {
 
   it("schemas 列表命中插件来源 ⇒ 受限", () => {
     h.state.schemas = [record("s-1", "plugin")];
-    expect(resolveSchemaActionPermissions("s-1")?.commands).toEqual(["dynamic_ui_*"]);
+    expect(resolveSchemaActionPermissions("s-1")?.commands).toEqual([...PLUGIN_SCHEMA_ALLOWED_COMMANDS]);
   });
 
   it("列表命中用户来源 ⇒ 不收紧", () => {

@@ -5273,3 +5273,53 @@ PLAN §0.10 的前端读数因此从 **52 处 / 38 文件 → 51 处 / 37 文件
 
 
 
+
+## §113 插件来源 Schema 的第二条 IPC 出口收口（#165，2026-11-06）
+
+§107 那批把**动作面**（`actions[].type === "invoke"`）按 origin 收成 fail-closed，但留了两处没闭合，本批一起收。
+
+### 113.1 两条绕过面（都是可复现的提权/泄露链，不是假想风险）
+
+1. **动作面给了 `dynamic_ui_*` 通配 ⇒ 通配里含三条写命令**。判据链：
+   - `create_dynamic_ui_schema` 硬写 `origin = "user"`、`owner_id` 恒空（`src-tauri/src/commands/dynamic_ui.rs:362` 起，注释在 `:102`）；
+   - 而 `"user"` 正是 `TRUSTED_SCHEMA_ORIGINS` 的成员 ⇒ 插件只要声明一个 invoke 该命令的 onMount 动作，就**自造出一行「可信」Schema**，那一行渲染时权限面是 `undefined` = 完全不受限。
+   - `update_dynamic_ui_schema` / `delete_dynamic_ui_schema` 只挡 `builtin`，**不按 `owner_id` 限定目标** ⇒ 插件来源的动作能改写／删除用户或别的插件的 Schema；改写等于把恶意节点塞进可信树。
+2. **`dataSource` 是第二条 IPC 出口，完全没接权限面**。`SchemaValidator` 与 `DataBindingEngine` 只过 `ALLOWED_INVOKE_PREFIXES = ["dynamic_ui_"]`（按前缀、对所有来源同视），且 `type: "store"` 的数据源直读任意已注册 store —— 含 `providerStore`（存放提供商配置／代理）。
+   - 更阴的一条：`subscribeDataSource` 里 `type: "store"` 的响应式订阅**绕过 `resolveDataSource`**，而初始加载失败只走 `onError`、流程继续往下 ⇒ 就算在 `resolveDataSource` 里拦，订阅照样起来。
+   - `DynamicUIRenderer.tsx:181-182` 的注释本来就写着「树内**所有** `executeActions` 调用点都必须带上它 —— 任何一处漏传都等于对不可信 schema 放行了一条 IPC」。`:220` 那个 `subscribeDataSource` 调用点就是漏传的那一处。
+
+### 113.2 改动
+
+| 文件 | 改了什么 |
+|---|---|
+| `src/lib/dynamicUI/schemaActionPermissions.ts` | 通配 ⇒ **四条逐条列出**：`get_dynamic_ui_schema` / `get_dynamic_ui_form_data` / `save_dynamic_ui_form_data` / `delete_dynamic_ui_form_data`（不给通配 = 新增命令默认拒绝）；文档块重写，记下 113.1-1 那条链 |
+| `src/lib/dynamicUI/DataBindingEngine.ts` | 新增 `assertDataSourceCoveredByPermissions(config, permissions)`；`resolveDataSource` / `subscribeDataSource` 各接一个可选 `permissions` 入参；订阅路径的判定放在**三条出口之前**且走 `onError` 不抛出（调用方只挂 `.then` 没 `.catch`，抛出即未处理拒绝） |
+| `src/components/dynamicUI/DynamicUIRenderer.tsx` | `:220` 的 `subscribeDataSource` 补传 `actionPermissions`，并加进该 effect 的依赖数组 |
+| `src/lib/dynamicUI/useDataSource.ts` | 同样把面转发给两个引擎入口（当前无生产调用方，转发是为了将来接上时不天然绕过） |
+| `src/lib/dynamicUI/dataSourceSecurity.ts` | 注释点明「这条只是第一道，按前缀放行 ⇒ 含三条写命令；改这层不构成对插件的收口」 |
+| 三个测试文件 | 见 113.3 |
+
+### 113.3 取证
+
+新增判据测试都配了同型正控（先证明「带上权限面没把路整体打死」，才谈得上「拒绝是判据命中，不是链路没起来」）：
+
+- `src/lib/__tests__/schemaActionPermissions.test.ts`：面内四条逐条命中 + 九条面外（含 `create/update/delete/restore/*_nl/pin/unpin/list_dynamic_ui_schemas`）逐条拒；旧通配形态下这九条会**全部**放行，所以这组断言本身就是回归锁。
+- `src/lib/__tests__/dataBindingEngine.test.ts` 新增「来源受限权限面」7 例：invoke 面内放行／面外写命令拒且**不发 IPC**、`storeRead: []` 拒读且**判定发生在查 registry 之前**、`storeName:fieldPath` 覆盖语法（分隔符是**冒号**，见 `src/lib/skillPermissions.ts:86-98` 的 `parseStorePerm`）、覆盖某 store ≠ 覆盖其全部字段、不传面时行为逐字不变、`subscribeDataSource` 在直订阅分支前就拦。
+- `src/components/dynamicUI/__tests__/pluginSchemaActionPermissions.test.tsx`：原先两处**用假命令名**（`dynamic_ui_get_dynamic_ui_form_data` / `dynamic_ui_list_pins`）—— 真实命令名没有 `dynamic_ui_` 前缀，旧通配把它们一并盖过所以没暴露；已换成真名，并补 `create_dynamic_ui_schema` 被拒的提权链用例。
+
+**验证读数**：`npm run typecheck` EXIT=0（**1476** 文件）；`npx dprint check` 8 文件 EXIT=0；`npx oxlint src/lib/dynamicUI src/components/dynamicUI src/lib/__tests__` 0 warnings 0 errors（113 文件）；`node scripts/check-component-neutrality.mjs` PASS 无新增违规；8 文件 `perl -ne '$c++ if /\r$/'` 全 CR=0。
+⚠ **vitest 读数未取得**：`npm run test:run -- <两文件>` 报 `[vitest-pool]: Failed to start threads worker`（120 s，#141 的 SMB worker 启动超时，非本批代码问题）。⇒ 上面 16 条新增/改写断言**在本机没有执行级取证**，判据正确性靠读 `parseStorePerm` / `isWildcardMatch` 源码推演 + 类型面。CI 亦无 vitest 步骤（既存缺口）。
+
+### 113.4 行为面变化（需要知道的代价）
+
+- **只影响 `origin = "plugin"` 的 Schema**。`builtin` / `user` / `ai` 与内存态 Schema 一律维持原行为（面为 `undefined`，两条闸都不介入）。
+- 仓内实样**零影响**：`axagent-plugins/crates/plugin-stock/ui.json` 没有任何 invoke 动作（`grep -n "invoke\|command"` 零命中）。
+- 对**第三方插件**是破坏性收窄：原先能用 `list_dynamic_ui_pins` / `pin_*` / `*_nl` 这类 `dynamic_ui_*` 命令的声明式动作，现在必须走宿主命令面。这是本条改动的目的，不是副作用。
+
+### 113.5 未做
+
+1. **后端 `*_form_data` 不按 `owner_id` 限定 `schema_id`** ⇒ 插件仍可读写他人 Schema 的表单数据（严重度低于 113.1-1 的三条，因为 `save` 本来就能覆盖）。彻底收口要在 `dynamic_ui.rs` 做归属校验，独立成批。
+2. `create/update/delete_dynamic_ui_schema` 的**归属校验**同样没做（本批只在前端动作闸 + dataSource 闸拦住的）。与 1 同批。
+3. `schema_json` 体积上限仍未加（既存延期项）。
+4. `useDataSource` 无生产调用方，本批只做「接上时不天然绕过」的转发；真要启用需带来源解析。
+5. 渲染链级的 dataSource 执法（`DynamicUIRenderer:220` 那一行接线）只在引擎层有单测，没有加组件树测试 —— 本机 vitest 跑不动（#141），加了也无法取证。

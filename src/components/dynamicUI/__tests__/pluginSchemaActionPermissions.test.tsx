@@ -10,9 +10,15 @@
  *
  * 本文件从**真实渲染链**起步（DynamicUIStandalone / DynamicUIRenderer + 真 actionRouter +
  * 真 isWildcardMatch），只把 IPC 换成替身，断言打在「IPC 有没有发生」上：
- * - 插件来源：非 `dynamic_ui_*` 命令被拒且**一次 IPC 都不发**；
- * - 插件来源：`dynamic_ui_*` 放行，且参数原样送达；
+ * - 插件来源：`dynamic_ui_` 前缀内但不在四条面上的命令（`list_dynamic_ui_pins`）与前缀外的
+ *   命令同样被拒，且**一次 IPC 都不发**；
+ * - 插件来源：面内命令（`get_dynamic_ui_form_data`）放行，且参数原样送达；
+ * - 插件来源：`create_dynamic_ui_schema` 被拒 —— 它把 `origin` 硬写成 `"user"`（可信），
+ *   放行等于让插件自造一行不受限的 Schema（提权链，2026-11-06 收窄）；
  * - 用户来源：行为与改动前一致（照发）。
+ *
+ * dataSource 那条第二出口的执法在 `src/lib/__tests__/dataBindingEngine.test.ts` 的
+ * 「来源受限权限面」一节（引擎级正负控）；本文件不重复覆盖，渲染链那侧的接线只是一个入参。
  */
 
 import { act, render, waitFor } from "@testing-library/react";
@@ -142,15 +148,38 @@ describe("插件页面容器那条链（DynamicUIStandalone）", () => {
     expect(h.invoke).not.toHaveBeenCalled();
   });
 
-  it("插件来源 schema 的 dynamic_ui_* invoke：放行，命令与参数原样送达", async () => {
+  it("插件来源 schema 的面内 invoke：放行，命令与参数原样送达", async () => {
     const args = { schemaId: SCHEMA_ID, instanceKey: "main" };
     h.getSchema.mockResolvedValue(
-      makeRecord("plugin", invokeAction("dynamic_ui_get_dynamic_ui_form_data", args)),
+      makeRecord("plugin", invokeAction("get_dynamic_ui_form_data", args)),
     );
     renderStandalone();
 
     await waitFor(() => expect(h.invoke).toHaveBeenCalledTimes(1));
-    expect(h.invoke).toHaveBeenCalledWith("dynamic_ui_get_dynamic_ui_form_data", args);
+    expect(h.invoke).toHaveBeenCalledWith("get_dynamic_ui_form_data", args);
+  });
+
+  it("插件来源 schema 的 create_dynamic_ui_schema：被拒且不发 IPC（提权链）", async () => {
+    // 这条命令把 origin 硬写成 "user"（可信来源）⇒ 一旦放行，插件就能自造一行不受限的 Schema
+    h.getSchema.mockResolvedValue(
+      makeRecord("plugin", invokeAction("create_dynamic_ui_schema", { name: "escalate" })),
+    );
+    renderStandalone();
+    await waitFor(() => expect(h.getSchema).toHaveBeenCalledWith(SCHEMA_ID));
+    await settle();
+
+    expect(h.invoke).not.toHaveBeenCalled();
+  });
+
+  it("插件来源 schema 的 dynamic_ui_* 面外命令：被拒且不发 IPC", async () => {
+    h.getSchema.mockResolvedValue(
+      makeRecord("plugin", invokeAction("list_dynamic_ui_pins", { schemaId: SCHEMA_ID })),
+    );
+    renderStandalone();
+    await waitFor(() => expect(h.getSchema).toHaveBeenCalledWith(SCHEMA_ID));
+    await settle();
+
+    expect(h.invoke).not.toHaveBeenCalled();
   });
 
   it("用户来源 schema：维持现状，照常发 IPC（不收紧）", async () => {
@@ -249,11 +278,18 @@ describe("按 schemaId 兜底（DynamicUIRenderer 直渲染，覆盖路由入口
     expect(h.invoke).not.toHaveBeenCalled();
   });
 
-  it("store 里命中插件来源记录：dynamic_ui_* 放行", async () => {
-    renderWithPluginRecord(invokeAction("dynamic_ui_list_pins"));
+  it("store 里命中插件来源记录：面内命令放行", async () => {
+    renderWithPluginRecord(invokeAction("get_dynamic_ui_form_data"));
 
     await waitFor(() => expect(h.invoke).toHaveBeenCalledTimes(1));
-    expect(h.invoke).toHaveBeenCalledWith("dynamic_ui_list_pins", {});
+    expect(h.invoke).toHaveBeenCalledWith("get_dynamic_ui_form_data", {});
+  });
+
+  it("store 里命中插件来源记录：dynamic_ui_ 前缀内但不在面上（list_pins）被拒", async () => {
+    renderWithPluginRecord(invokeAction("list_dynamic_ui_pins"));
+    await settle();
+
+    expect(h.invoke).not.toHaveBeenCalled();
   });
 
   it("store 里没有对应记录（内存态 Schema）：维持现状", async () => {

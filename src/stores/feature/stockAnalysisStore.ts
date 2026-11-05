@@ -48,7 +48,7 @@ import type {
   StockSearchResult,
   TimelineNode,
   TimelinePhase,
-} from "@/types/stock-analysis";
+} from "@/types";
 import { create } from "zustand";
 
 // ── 模块级缓存 ──

@@ -11,6 +11,7 @@
 use crate::decision_action::{ActionKind, normalize_action};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 // ── 决策仪表盘 7 段式报告 ──
 
@@ -145,7 +146,7 @@ pub struct MarketReviewReport {
     pub generated_at: DateTime<Utc>,
 
     // ── 主要指数 ──
-    pub indices: Vec<IndexQuote>,
+    pub indices: Vec<DashboardIndexQuote>,
 
     // ── 市场概况 ──
     /// 上涨家数
@@ -168,9 +169,14 @@ pub struct MarketReviewReport {
 }
 
 /// 指数行情
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+///
+/// 名目收编（B8-3）：本类型原名 `IndexQuote`，与 `stock_market_types::IndexQuote`
+/// （`get_index_quotes` 的 7 字段行情行）撞名 —— 两者字段集不同（本处只有
+/// name / price / changePct 三项，供复盘报告展示用）。此处改名 `DashboardIndexQuote`
+/// 保留原名给行情行（根导出只出本处这一份，行情那份仍仅按模块路径提供）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct IndexQuote {
+pub struct DashboardIndexQuote {
     /// 指数名称（如 "上证指数"）
     pub name: String,
     /// 点位

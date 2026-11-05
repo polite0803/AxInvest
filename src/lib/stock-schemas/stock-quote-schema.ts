@@ -2,7 +2,7 @@
 // i18n-exempt: StockQuoteCard 的 DynamicUI Schema 纯数据定义，非用户可见 UI 文案。
 
 import type { UISchema } from "@/types";
-import type { StockQuote } from "@/types/stock-analysis";
+import type { StockQuote } from "@/types";
 
 /**
  * StockQuoteCard 的 DynamicUI Schema — 纯数据定义。

@@ -8,6 +8,7 @@
 //! 原路径 `axagent_astock_data::types::*` 由该 crate 的 re-export 垫片继续提供。
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::market_data::{FinancialReport, KLine, StockQuote};
 
@@ -258,7 +259,7 @@ pub struct EpsForecast {
 }
 
 /// 机构一致预期EPS
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ConsensusEPS {
     pub stock_code: String,
@@ -457,7 +458,7 @@ pub struct NorthBoundFlowDaily {
 }
 
 /// 大盘指数行情
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexQuote {
     pub code: String,
@@ -579,7 +580,7 @@ pub struct AdjustmentEvent {
 /// - "formal"            正式财报
 /// - "shareholders_meeting" 股东大会
 /// - "other"             其它披露
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct EarningsEvent {
     pub stock_code: String,

@@ -5076,6 +5076,51 @@ PLAN §0.10 的前端读数因此从 **52 处 / 38 文件 → 51 处 / 37 文件
 2. 剩余 49 处一律未动：③ 类（`horizonLabelKey` / `investPath` / `agentOutput` 整文件域）随股票前端迁出；④ 类（TasksCenterPage / barrel / `useRightPanel`）走贡献面或 B8-5。`SectionHeading` / `investRoutes` / `dualView` 按 §4.3 明确不下沉。
 3. 本批的 5 条前端测试读数缺失（见 W5），需在编译窗口空闲后补跑。
 
+## §110 B8-3 第二刀：股票 DTO 生成 + 前端手写类型收口（#160，2026-11-05）
+
+**立项口径：这是「去重」（禁区 12），不是「降读数」。** `audit-l1-blockers` 的前端计数按 import 串判域，收口手写类型不会让它下降（实测确认 49/36 不变）。
+
+### 110.1 Rust / 生成器
+
+| 改动 | 内容 |
+|---|---|
+| `harness::market_data` | `StockQuote` / `KLine` / `StockSearchResult` 加 `ts_rs::TS` 派生 |
+| `harness::stock_market_types` | `ConsensusEPS` / `IndexQuote` / `EarningsEvent` 加 `TS` |
+| `harness::dashboard_report` | `IndexQuote` → **`DashboardIndexQuote`**（3 字段复盘行与 7 字段行情行撞名，生成名单只能留一个）；`lib.rs` 根导出同步 |
+| `harness::market_data::StockQuote` | `limit_up` / `limit_down` 补 `#[serde(default)]` —— **实测 ts-rs 12 只在 `default` 存在时判可选**，单有 `skip_serializing_if` 仍生成必填，会让类型声称「键必在」而线上载荷缺键 |
+| `schema-gen` | `frontend_dto_decls` 新增 `STOCK` 分节 7 条（6 股票 + `DashboardIndexQuote`），生成物 6 → **13** 个类型 |
+
+**纠正一条既存假判据**：`schema-gen` 原有单测 `option_with_skip_serializing_if_maps_to_optional_field` 的判据模型 `Model.input_price_per_mtok` 实际带 `default`，测的并不是 `skip_serializing_if`。已改名为 `option_with_default_maps_to_optional_field`，并补反手抄 `AgentResult.session_id`（只有 `skip_serializing_if`）钉住「仍必填」。同时修正 `dto.ts` 头注释同一处错误表述（生成物注释必须与生成器行为一致）。
+
+### 110.2 前端收口
+
+| 改动 | 内容 |
+|---|---|
+| `src/types/stock-analysis.ts` | 删 6 个手写接口（`ConsensusEPS` / `StockQuote` / `KLine` / `EarningsEvent` / `StockSearchResult` / `IndexQuote`），保留纯前端的 `EarningsEventType` 联合字面量 |
+| `src/types/index.ts` | 生成物 re-export 名单 6 → 13 |
+| 6 处 import | `stockAnalysisStore.ts` / `CompareView.tsx` / `stock-quote-schema.ts` / `KLineChart.tsx` / `WfDesTab.tsx` 改走 `@/types` barrel（删手写版后深路径会 TS2305） |
+| `MarketReviewReport.indices` | `IndexQuote[]` → `DashboardIndexQuote[]` —— 修掉一处**类型谎言**：后端灌的是 3 字段复盘行，前端却声称 7 字段行情行 |
+
+### 110.3 验证
+
+| # | 命令 | 结果 |
+|---|---|---|
+| V1 | `cd axagent-plugins && cargo run -p schema-gen -- frontend-dto` | EXIT=0，2m35s，生成 13 类型 |
+| V2 | `cd axagent-plugins && cargo test -p schema-gen` | **7 passed**，含 golden 逐字比对 |
+| V3 | `cd axagent-core && cargo check -p axagent-harness` | EXIT=0（agent 实测，2m34s） |
+| V4 | `npm run typecheck` | EXIT=0，**1478** 文件 |
+| V5 | `node scripts/audit-l1-blockers.mjs` | EXIT=0，前端 **49/36 不变**（快照 `AUDIT-l1-blockers-2026-11-05-1749.md`，未提交） |
+| V6 | `dprint check`（7 个前端文件） | 全绿（`WfDesTab.tsx` import 排序修正 1 处） |
+| V7 | `cargo fmt -p <crate> -- --check`（harness / schema-gen / analysis-engine） | 三根全绿 |
+
+### 110.4 未做
+
+1. `MarketReviewReport` 本身仍是前端手写类型（`generatedAt: string` vs 后端 `DateTime<Utc>` 等），本刀只修了 `indices` 一处的字段类型，整体收口留给后续。
+2. 前端 49 处反向阻塞未动（与本次无关；它们多是 store/组件 import，不是类型深导入）。
+3. `frontend-dto --check` 仍未接 CI（B8-3 首刀遗留缺口）。
+4. `EarningsEventType` 目前零消费方（`EarningsEvent.eventType` 已是 `string`），保留作 UI 约束，未删。
+5. 前端单元测试未跑：本机 vitest 在 SMB 上 60 s worker 启动超时（#141），本批改动是纯类型收口，typecheck 已覆盖。
+
 
 
 

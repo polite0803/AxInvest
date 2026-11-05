@@ -859,7 +859,7 @@ fn build_default_checklist(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axagent_harness::{Catalyst, ChecklistItem, IndexQuote, RiskAlert, StockSummary};
+    use axagent_harness::{Catalyst, ChecklistItem, DashboardIndexQuote, RiskAlert, StockSummary};
     use chrono::Utc;
 
     fn make_report() -> DashboardReport {
@@ -962,8 +962,10 @@ mod tests {
             review_date: "2026-07-16".into(),
             generated_at: Utc::now(),
             indices: vec![
-                IndexQuote { name: "上证指数".into(), price: 3200.0, change_pct: 0.5 },
-                IndexQuote { name: "深证成指".into(), price: 10500.0, change_pct: -0.3 },
+                DashboardIndexQuote { name: "上证指数".into(), price: 3200.0, change_pct: 0.5 },
+                DashboardIndexQuote {
+                    name: "深证成指".into(), price: 10500.0, change_pct: -0.3
+                },
             ],
             advancers: Some(2500),
             decliners: Some(2300),

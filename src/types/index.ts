@@ -19,14 +19,35 @@ export type { IpcEventName } from "./generated/events";
 // 但 `src/types/` 里不再保留第二份手写定义（PLAN-shell-plus-plugins §91.3 B8-3 首刀）。
 // 重新生成：`cd axagent-plugins && cargo run -p schema-gen -- frontend-dto`
 import type {
+  ConsensusEPS,
+  DashboardIndexQuote,
+  EarningsEvent,
+  IndexQuote,
+  KLine,
   ModelCapability,
   ModelType,
   ProviderKey,
   ProviderProxyConfig,
   ProviderType,
+  StockQuote,
+  StockSearchResult,
   SubWorkflowOrigin,
 } from "./generated/dto";
-export type { ModelCapability, ModelType, ProviderKey, ProviderProxyConfig, ProviderType, SubWorkflowOrigin };
+export type {
+  ConsensusEPS,
+  DashboardIndexQuote,
+  EarningsEvent,
+  IndexQuote,
+  KLine,
+  ModelCapability,
+  ModelType,
+  ProviderKey,
+  ProviderProxyConfig,
+  ProviderType,
+  StockQuote,
+  StockSearchResult,
+  SubWorkflowOrigin,
+};
 
 // === Provider System ===
 import type { SkillPermissions } from "@/sdk/types";

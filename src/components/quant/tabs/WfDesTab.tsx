@@ -29,8 +29,8 @@ import { useTranslation } from "react-i18next";
 
 import { QuantMetricsCard } from "@/components/quant/charts/QuantMetricsCard";
 import { invoke } from "@/lib/invoke";
+import type { KLine } from "@/types";
 import type { Bar, MetricsReport, WfDesFold, WfDesReport, WfDesRequest } from "@/types/quant";
-import type { KLine } from "@/types/stock-analysis";
 import type { ColumnsType } from "antd/es/table";
 
 const { Title, Text } = Typography;

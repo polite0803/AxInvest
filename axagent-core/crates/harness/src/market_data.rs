@@ -7,6 +7,7 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::as_of::AsOfContext;
 use crate::core_error::{AxAgentError, Result};
@@ -22,7 +23,7 @@ use crate::stock_market_types::{
 // ── DTOs ─────────────────────────────────────────────────────────────────
 
 /// 实时行情
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct StockQuote {
     pub code: String,
@@ -43,10 +44,13 @@ pub struct StockQuote {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub circulating_mv: Option<f64>,
     /// 涨停价
-    #[serde(skip_serializing_if = "Option::is_none")]
+    ///
+    /// `default` 是给 ts-rs 看的：它只在 `default` 存在时把字段判为可选（`?:`），
+    /// 单有 `skip_serializing_if` 仍生成必填 —— 而线上载荷确实可能缺这个键。
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub limit_up: Option<f64>,
     /// 跌停价
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub limit_down: Option<f64>,
     /// 是否ST股票（含*ST）
     #[serde(default)]
@@ -55,7 +59,7 @@ pub struct StockQuote {
 }
 
 /// K线数据
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct KLine {
     pub date: String,
@@ -82,7 +86,7 @@ pub enum AdjType {
 }
 
 /// 股票搜索结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct StockSearchResult {
     pub code: String,

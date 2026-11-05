@@ -4,7 +4,7 @@ import { ensureECharts } from "@/lib/echartsInstance";
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { hueColor } from "@/theme/categoricalColors";
-import type { KLine } from "@/types/stock-analysis";
+import type { KLine } from "@/types";
 import * as echarts from "echarts";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";

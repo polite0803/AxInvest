@@ -1,4 +1,5 @@
 // i18n-exempt: 股票分析类型定义（含后端数据值枚举，如风险等级/催化剂方向中文标识），类型定义非 UI 文案。
+import type { DashboardIndexQuote } from "./generated/dto";
 // ── 运行时工具函数（实现已在 @/lib/stock-analysis-utils.ts） ──
 // 向后兼容的 re-export，新代码应直接从 @/lib/stock-analysis-utils 导入
 export {
@@ -59,87 +60,22 @@ export interface ReflectionFeedbackResult {
   };
 }
 
+// ConsensusEPS / StockQuote / KLine / EarningsEvent / StockSearchResult 的权威定义在
+// `axagent-harness`，由 schema-gen 生成到 `./generated/dto`，见本目录 `index.ts` 的 re-export。
+// 此处不再手写第二份（AGENTS.md 禁区 12）。
+
 /**
- * 机构一致预期 EPS（对应后端 `consensus_eps` 工具返回数据，
- * 权威定义 `astock-data/src/types.rs::ConsensusEPS`，serde `rename_all = camelCase`）。
+ * 财报披露事件类型 —— 纯前端 UI 约束（后端 `event_type` 是 `String`）。
  *
- * 消费端注意：`isEstimated = true` 时该 EPS 是**估算值**（vendor 全失败时按挂牌板块取常数兜底），
- * 不得据此做「超预期 / 不及预期」类判定。`estimateSource` 仅 `isEstimated = true` 时有值。
+ * 只用于展示层分支；不要声明成 `EarningsEvent["eventType"]`，否则等于把
+ * 「后端已放开、前端又收窄」写回类型里。
  */
-export interface ConsensusEPS {
-  stockCode: string;
-  consensusEps: number | null;
-  consensusTargetPrice: number | null;
-  ratingAvg: string | null;
-  ratingCount: number | null;
-  year: string;
-  /** 是否为估算值（非真实一致预期 / 财报数据） */
-  isEstimated: boolean;
-  /** 估算来源，仅 isEstimated = true 时有值（如 "board_constant:star"） */
-  estimateSource?: string | null;
-}
-
-export interface StockQuote {
-  code: string;
-  name: string;
-  price: number;
-  /** 昨收价,涨跌额 = price - preClose(中国股市惯例) */
-  preClose: number;
-  open: number;
-  high: number;
-  low: number;
-  volume: number;
-  amount: number;
-  changePct: number;
-  turnoverRate: number;
-  pe: number | null;
-  pb: number | null;
-  totalMv: number | null;
-  /** 流通市值（元）；后端 circulating_mv，serde rename_all camelCase */
-  circulatingMv: number | null;
-  limitUp: number | null;
-  limitDown: number | null;
-  isSt: boolean;
-  timestamp: string;
-}
-
-export interface KLine {
-  date: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-  amount: number;
-  turnoverRate: number | null;
-  /** 累计复权因子 (R3-A)；None 表示未应用复权。后端 adj_factor */
-  adjFactor: number | null;
-}
-
-/** R3-B 财报披露事件 — 后端 `get_earnings_calendar` 返回结构 */
 export type EarningsEventType =
   | "preliminary"
   | "express"
   | "formal"
   | "shareholders_meeting"
   | "other";
-
-export interface EarningsEvent {
-  stockCode: string;
-  stockName: string;
-  eventDate: string;
-  eventType: EarningsEventType | string;
-  period: string | null;
-  detail: string | null;
-  source: string | null;
-  createdAt: number;
-}
-
-export interface StockSearchResult {
-  code: string;
-  name: string;
-  market: string;
-}
 
 export interface AnalysisConfig {
   maxDebateRounds: number;
@@ -1069,17 +1005,11 @@ export interface DashboardReport {
   integrityPassed: boolean;
 }
 
-/** 指数行情（`get_index_quotes` 的一行） */
-export interface IndexQuote {
-  /** 供应商代码（如 sh000001 / 000001）；历史载荷可能缺省 */
-  code?: string;
-  name: string;
-  price: number;
-  preClose?: number;
-  changePct: number;
-  volume?: number;
-  amount?: number;
-}
+/**
+ * 指数行情（`get_index_quotes` 的一行）与复盘报告的指数行（`DashboardIndexQuote`）
+ * 都由 `./generated/dto` 提供：前者 7 字段全必填，后者只有 name/price/changePct。
+ * 两者语义不同，别互相赋值（见 `MarketReviewReport.indices`）。
+ */
 
 /**
  * 一次取数调用的结论 —— 与后端 `axagent_astock_data::outcome::DataStatus` 的
@@ -1101,7 +1031,7 @@ export interface DataOutcome<T> {
 export interface MarketReviewReport {
   reviewDate: string;
   generatedAt: string;
-  indices: IndexQuote[];
+  indices: DashboardIndexQuote[];
   advancers?: number | null;
   decliners?: number | null;
   limitUp?: number | null;

@@ -2,7 +2,7 @@ import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import i18n from "@/i18n";
 import { ensureECharts } from "@/lib/echartsInstance";
 import { invoke } from "@/lib/invoke";
-import type { StockQuote } from "@/types/stock-analysis";
+import type { StockQuote } from "@/types";
 import { SwapOutlined } from "@ant-design/icons";
 import { Button, Card, Empty, Input, Spin, Tag } from "antd";
 import * as echarts from "echarts";

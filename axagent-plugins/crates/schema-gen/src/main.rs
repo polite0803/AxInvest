@@ -24,6 +24,9 @@ use axagent_harness::agent::{
 use axagent_harness::conversation_model::{
     ContentBlock, ConversationMessage, SessionInfo, TokenUsage,
 };
+use axagent_harness::dashboard_report::DashboardIndexQuote;
+use axagent_harness::market_data::{KLine, StockQuote, StockSearchResult};
+use axagent_harness::stock_market_types::{ConsensusEPS, EarningsEvent, IndexQuote};
 use axagent_harness::types::provider_model::{
     ModelCapability, ModelType, ProviderKey, ProviderProxyConfig, ProviderType,
 };
@@ -403,6 +406,11 @@ fn frontend_dto_cfg() -> ts_rs::Config {
 /// 首刀（B8-3）只收「依赖全为原始类型」的 6 个：`ProviderConfig` / `Model` /
 /// `ModelParamOverrides` 的闭包里有**可选性不兼容**的成员（见 §91.3 交付说明），
 /// 待前端消费点改完再加。
+///
+/// 第二刀（B8-3 续）收股票域 6 个（`market_data` / `stock_market_types`）：目的是
+/// **去重** —— 冲掉 `src/types/stock-analysis.ts` 的手写同名接口（禁区 12）。
+/// 这一刀不改变 `audit-l1-blockers` 的前端读数（那 49 处绝大多数是 store/组件 import，
+/// 不是类型深导入），所以不要拿读数是否下降作为验收判据。
 fn frontend_dto_decls(cfg: &ts_rs::Config) -> Vec<DtoDecl> {
     vec![
         // Provider 域（`axagent-harness::types::provider_model`）
@@ -413,6 +421,16 @@ fn frontend_dto_decls(cfg: &ts_rs::Config) -> Vec<DtoDecl> {
         DtoDecl::new(PROVIDER, "ProviderProxyConfig", gen_export::<ProviderProxyConfig>(cfg)),
         // Workflow 域（`axagent-harness::workflow_types`）
         DtoDecl::new(WORKFLOW, "SubWorkflowOrigin", gen_export::<SubWorkflowOrigin>(cfg)),
+        // 股票域（`axagent-harness::market_data` / `stock_market_types`）——
+        // 冲掉 `src/types/stock-analysis.ts` 里手写的那几个同名接口（禁区 12）。
+        // 六个都是纯原始类型结构、彼此无依赖，声明序即生成序。
+        DtoDecl::new(STOCK, "StockQuote", gen_export::<StockQuote>(cfg)),
+        DtoDecl::new(STOCK, "KLine", gen_export::<KLine>(cfg)),
+        DtoDecl::new(STOCK, "StockSearchResult", gen_export::<StockSearchResult>(cfg)),
+        DtoDecl::new(STOCK, "ConsensusEPS", gen_export::<ConsensusEPS>(cfg)),
+        DtoDecl::new(STOCK, "IndexQuote", gen_export::<IndexQuote>(cfg)),
+        DtoDecl::new(STOCK, "EarningsEvent", gen_export::<EarningsEvent>(cfg)),
+        DtoDecl::new(STOCK, "DashboardIndexQuote", gen_export::<DashboardIndexQuote>(cfg)),
     ]
 }
 
@@ -431,6 +449,7 @@ impl DtoDecl {
 
 const PROVIDER: &str = "Provider 域（`axagent-harness::types::provider_model`）";
 const WORKFLOW: &str = "Workflow 域（`axagent-harness::workflow_types`）";
+const STOCK: &str = "股票域（`axagent-harness::market_data` / `stock_market_types`）";
 
 /// `ts_rs::TS::decl` 的输出是 `type X = …`（不加 `export`，因为原用途是「同文件内校验」）。
 /// 本函数只补一个 `export ` 前缀，其余逐字保留（含 Rust doc 注释投影出的 JSDoc）。
@@ -563,7 +582,7 @@ fn render_frontend_dto() -> String {
     output.push_str("// 映射口径（由 ts-rs 按 serde 属性推导，禁止在本文件手改）：\n");
     output.push_str("// - `#[serde(rename_all = \"camelCase\")]` ⇒ 字段名 camelCase；\n");
     output
-        .push_str("// - `Option<T>` ⇒ `T | null`；带 `skip_serializing_if` 的 ⇒ 可选字段 `?:`；\n");
+        .push_str("// - `Option<T>` ⇒ `T | null`；带 `#[serde(default)]` 的 ⇒ 可选字段 `?:`（只写 `skip_serializing_if` 不算）；\n");
     output.push_str(
         "// - `i64/u64` ⇒ `number`（ts-rs 默认 `bigint`，与 JSON 线上类型不符，生成器已改）。\n\n",
     );
@@ -755,23 +774,31 @@ mod tests {
         assert!(!key.contains("bigint"), "i64 不得落成 bigint（前端 IPC 是 JSON number）：{key}");
     }
 
-    /// `Option<T>` + `#[serde(skip_serializing_if)]` → **可选**字段 `?:`（可缺席，不只是可空）。
+    /// `Option<T>` + `#[serde(default)]` → **可选**字段 `?:`（可缺席，不只是可空）。
     ///
-    /// 判据取 `Model`（不在首刀名单里，但它的 `input_price_per_mtok` 正是这种形态）：
-    /// 生成器对「可缺席」与「必发 null」两种 Option 必须给出不同拼写，否则前端无法用
-    /// 对象字面量省略该字段。
+    /// 判据取 `Model` 的 `input_price_per_mtok`（`#[serde(default, skip_serializing_if)]`）。
+    /// **判据是 `default` 而非 `skip_serializing_if`** —— 2026-11-05 实测：ts-rs 12 只认
+    /// `default`，单写 `skip_serializing_if` 仍生成必填（`StockQuote.limit_up` 原先就是
+    /// 这个形态，会让类型声称「必在」而线上载荷缺键）。反手抄用 `AgentResult.session_id`
+    /// （只有 `skip_serializing_if`）钉住这条规则。
     #[test]
-    fn option_with_skip_serializing_if_maps_to_optional_field() {
+    fn option_with_default_maps_to_optional_field() {
         let model =
             gen_export::<axagent_harness::types::provider_model::Model>(&frontend_dto_cfg());
         assert!(
             model.contains("inputPricePerMtok?: number | null"),
-            "skip_serializing_if 的 Option 应映射成可选字段 `?:`：{model}"
+            "带 default 的 Option 应映射成可选字段 `?:`：{model}"
         );
-        // 反手抄：不带 skip_serializing_if 的 Option 仍是必填可空（同一张结构体里两种形态并存）。
+        // 反手抄 ①：不带 default 的 Option 仍是必填可空。
         assert!(
             model.contains("groupName: string | null"),
             "普通 Option 不应被写成可选字段：{model}"
+        );
+        // 反手抄 ②：只有 skip_serializing_if、没有 default 的 Option 也必须保持必填。
+        let result = gen_export::<axagent_harness::agent::AgentResult>(&frontend_dto_cfg());
+        assert!(
+            result.contains("sessionId: string | null"),
+            "只写 skip_serializing_if 的 Option 不应被判成可选：{result}"
         );
     }
 

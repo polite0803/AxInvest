@@ -60,11 +60,11 @@
     {
       "id": "registryFileLines",
       "label": "register_commands.rs 行数（口径 = split(\"\\n\").length，含末行空元素）",
-      "value": 1609,
+      "value": 1608,
       "check": "registryFileLineCount",
       "hard": false,
       "planMustAppear": false,
-      "note": "只报告：它是 build.rs 产物（禁区 7），行数随新增命令自然变化，与能力登记无关 ⇒ 不参与退出码，但漂移会印出来提醒重算上面三条。⚠ **口径已对齐判据**：`check-capability-register.mjs:1169` 用 `split(\"\\n\").length`（含末行空元素），label 原自陈「纯 LF」= `wc -l` ⇒ 两者恒差 1（HEAD 报 −1、工作区报 +1 都是这一个 1）。#52 立案「一套脚本只许一套行数口径」，本条先把 label 改成判据的真实口径；`wc -l` 口径比本值小 1，属**同一事实的第二种数法**，不是数据漂移（PLAN §15.1 第 5 行留档）。**2026-11-05 B9-2 删 1 条命令 ⇒ split 口径 1609→1608**；同批 B8-1b 加 1 条命令 ⇒ **1608→1609**。"
+      "note": "只报告：它是 build.rs 产物（禁区 7），行数随新增命令自然变化，与能力登记无关 ⇒ 不参与退出码，但漂移会印出来提醒重算上面三条。⚠ **口径已对齐判据**：`check-capability-register.mjs:1169` 用 `split(\"\\n\").length`（含末行空元素），label 原自陈「纯 LF」= `wc -l` ⇒ 两者恒差 1（HEAD 报 −1、工作区报 +1 都是这一个 1）。#52 立案「一套脚本只许一套行数口径」，本条先把 label 改成判据的真实口径；`wc -l` 口径比本值小 1，属**同一事实的第二种数法**，不是数据漂移（PLAN §15.1 第 5 行留档）。**2026-11-05 B9-2 删 1 条命令 ⇒ split 口径 1609→1608**；同批 B8-1b 加 1 条命令 ⇒ **1608→1609**。**2026-11-06 第二轮对账**：主 crate `cargo check -p axagent --lib` 后从盘上量 = **1608**，且 `git status` 对 `src-tauri/src/register_commands.rs` 无输出（产物与 HEAD 逐字相同 ⇒ 不是本次构建改写了它）⇒ 1609 是上一批「B9-2 −1 与 B8-1b +1」两笔相互抵掉后没回灌的滞后值。本条 `hard:false`（只报告，不参与退出码），但对账批的原则是**软锚点也不留过期值**：漂移一旦无人回读，下一批就分不清「产物滞后」与「真漂移」。"
     },
     {
       "id": "commandNameSetParity",
@@ -149,16 +149,16 @@
     {
       "id": "frontendFileCaliber",
       "label": "前端体量（脚本文件名口径 feRe 匹配 src/** 全部 .ts/.tsx）",
-      "value": 84813,
+      "value": 84815,
       "value2": 292,
       "value2Label": "文件",
       "check": "frontendVolume",
       "domainKey": "STOCK",
       "hard": true,
-      "planNumber": "84 813",
+      "planNumber": "84 815",
       "planMustAppear": true,
-      "planPinned": [{ "line": 522, "mustContain": ["292", "84 813", "脚本文件名口径"] }],
-      "note": "PLAN:508 的「脚本文件名口径」读数；行数按 split('\\n') 计数（与 audit-l1-blockers 一致，含末行空元素）。**2026-11-04 #139 再涨 135 行 / 1 文件 ⇒ 85 009 / 294**（`PluginMarketplace.tsx` 渲染 eventStats +29 行、新测试 `PluginMarketplace.eventStats.test.tsx` 106 行）。⚠ **+1 文件是 `feRe` 的既有假阳性**：该正则的 `market` 分支会命中文件名里的 `Marketplace`（`src/components/chat/PluginMarketplace.tsx` 从 #139 之前就在这个口径里）⇒ 本批动的是**插件市场面板**，股票域文件数没变；读数变了是口径定义所致，不改口径（`feRe` 与 `audit-l1-blockers.mjs:48-63` 逐字同源，改它要两处同批）。旧读数 84 874 / 293 只留在 §65 未做 5 与 §66 的交付记录里 —— 那两处记的是 #136 当时的现值。**2026-11-04 B4-j 再涨 155 行 / 1 文件 ⇒ 85 164 / 295**（`StockSearchBar.tsx` 的 NL 解析改走插件命令 +13 行；新增回归 `StockSearchBar.pluginIntent.test.tsx` 142 行。新增的 `src/lib/pluginCommandResolve.ts` 及其单测不命中 `feRe`，不计入本口径）。**2026-11-05 B9-1 再涨 17 行、文件数不变 ⇒ 85 181 / 295**（`src/lib/stock-analysis-utils.ts` 的 `computeEvidenceWeights` 由宿主 invoke 改为「解析插件 → `plugin_execute_command`」，含退役期注释；新增的 `evidenceWeights.pluginRoute.test.ts` 不命中 `feRe`，不计入）。**2026-11-05 B8-1a 再涨 61 行 / 1 文件 ⇒ 85 242 / 296**（死代码退役：宿主 `components/chat/WorkflowAgentCard.tsx` 只剩股票语义的数据契约，改落域内 `components/stock-analysis/workflowChatCard.ts` 61 行；同批删零引用的 `components/chat/MultiLlmVotePanel.tsx`，它不在本口径内）。**2026-11-05 B8-2 第一刀（#151）再涨 6 行、文件数不变 ⇒ 85 248 / 296**：本批改动的 9 个文件里**只有 `adapters/stockAnalysis.adapter.ts` 命中 `feRe`**（路径含 `stock`）⇒ 90→96 行（`git diff --numstat` = 6/0，拆为 `createElement` import 1 + 注释 2 + `renderDetail` 声明 3）。⚠ **本批中性化的四个文件全部不在本口径内**（`RunDetailDrawer.tsx` 211→45、`adapters/types.ts`、`jobs/CronHistoryDrawer.tsx` 145 新、`__tests__/RunDetailDrawer.test.tsx` 新 —— 文件名无 `feRe` 关键词）⇒ 「删了 166 行股票无关代码」与「本口径涨 6 行」同时为真，不是矛盾：本口径数的是**股票域前端体量**，`RunDetailDrawer.tsx` 从来只是「非域文件 import 域文件」的阻塞点，它的行数本来就不计。故涨的 6 行是**详情形态声明从中心搬回域内适配器**的净结果，方向与 #35 一致（耦合归位，体量必然微涨）。**2026-11-05 #149 第 3 步**：删宿主 `stockAnalysis.adapter.ts`（`split('\\n')` 95）与 `jobs/StockAnalysisRunDrawer.tsx`（94）⇒ **−189 行 / −2 文件**；同日工作区另有 −209 行 / −2 文件的并行改动（改名/文档重整批，非本批），故绝对读数 85 248 → **84 850 / 292**，其中只有 189 / 2 可归本批。**2026-11-06 对账批**：`b1b6840b2`（B8-5 第二批）摘股票域类型门面 ⇒ `src/types/stock-analysis.ts` 按 `split('\\n')` 口径 2 337→2 293（−44，口径内文件数不变）⇒ **84 813 / 292**。⚠ 登记值 84 850 与 `c6c4ce198` 那棵树的实际读数 84 857 差 7 行（该批取的是工作区瞬时态，登记时未回灌）⇒ 表上 −37 ≠ 本批代码差 −44，两条都是实测，不是矛盾。"
+      "planPinned": [{ "line": 522, "mustContain": ["292", "84 815", "脚本文件名口径"] }],
+      "note": "PLAN:508 的「脚本文件名口径」读数；行数按 split('\\n') 计数（与 audit-l1-blockers 一致，含末行空元素）。**2026-11-04 #139 再涨 135 行 / 1 文件 ⇒ 85 009 / 294**（`PluginMarketplace.tsx` 渲染 eventStats +29 行、新测试 `PluginMarketplace.eventStats.test.tsx` 106 行）。⚠ **+1 文件是 `feRe` 的既有假阳性**：该正则的 `market` 分支会命中文件名里的 `Marketplace`（`src/components/chat/PluginMarketplace.tsx` 从 #139 之前就在这个口径里）⇒ 本批动的是**插件市场面板**，股票域文件数没变；读数变了是口径定义所致，不改口径（`feRe` 与 `audit-l1-blockers.mjs:48-63` 逐字同源，改它要两处同批）。旧读数 84 874 / 293 只留在 §65 未做 5 与 §66 的交付记录里 —— 那两处记的是 #136 当时的现值。**2026-11-04 B4-j 再涨 155 行 / 1 文件 ⇒ 85 164 / 295**（`StockSearchBar.tsx` 的 NL 解析改走插件命令 +13 行；新增回归 `StockSearchBar.pluginIntent.test.tsx` 142 行。新增的 `src/lib/pluginCommandResolve.ts` 及其单测不命中 `feRe`，不计入本口径）。**2026-11-05 B9-1 再涨 17 行、文件数不变 ⇒ 85 181 / 295**（`src/lib/stock-analysis-utils.ts` 的 `computeEvidenceWeights` 由宿主 invoke 改为「解析插件 → `plugin_execute_command`」，含退役期注释；新增的 `evidenceWeights.pluginRoute.test.ts` 不命中 `feRe`，不计入）。**2026-11-05 B8-1a 再涨 61 行 / 1 文件 ⇒ 85 242 / 296**（死代码退役：宿主 `components/chat/WorkflowAgentCard.tsx` 只剩股票语义的数据契约，改落域内 `components/stock-analysis/workflowChatCard.ts` 61 行；同批删零引用的 `components/chat/MultiLlmVotePanel.tsx`，它不在本口径内）。**2026-11-05 B8-2 第一刀（#151）再涨 6 行、文件数不变 ⇒ 85 248 / 296**：本批改动的 9 个文件里**只有 `adapters/stockAnalysis.adapter.ts` 命中 `feRe`**（路径含 `stock`）⇒ 90→96 行（`git diff --numstat` = 6/0，拆为 `createElement` import 1 + 注释 2 + `renderDetail` 声明 3）。⚠ **本批中性化的四个文件全部不在本口径内**（`RunDetailDrawer.tsx` 211→45、`adapters/types.ts`、`jobs/CronHistoryDrawer.tsx` 145 新、`__tests__/RunDetailDrawer.test.tsx` 新 —— 文件名无 `feRe` 关键词）⇒ 「删了 166 行股票无关代码」与「本口径涨 6 行」同时为真，不是矛盾：本口径数的是**股票域前端体量**，`RunDetailDrawer.tsx` 从来只是「非域文件 import 域文件」的阻塞点，它的行数本来就不计。故涨的 6 行是**详情形态声明从中心搬回域内适配器**的净结果，方向与 #35 一致（耦合归位，体量必然微涨）。**2026-11-05 #149 第 3 步**：删宿主 `stockAnalysis.adapter.ts`（`split('\\n')` 95）与 `jobs/StockAnalysisRunDrawer.tsx`（94）⇒ **−189 行 / −2 文件**；同日工作区另有 −209 行 / −2 文件的并行改动（改名/文档重整批，非本批），故绝对读数 85 248 → **84 850 / 292**，其中只有 189 / 2 可归本批。**2026-11-06 对账批**：`b1b6840b2`（B8-5 第二批）摘股票域类型门面 ⇒ `src/types/stock-analysis.ts` 按 `split('\\n')` 口径 2 337→2 293（−44，口径内文件数不变）⇒ **84 813 / 292**。⚠ 登记值 84 850 与 `c6c4ce198` 那棵树的实际读数 84 857 差 7 行（该批取的是工作区瞬时态，登记时未回灌）⇒ 表上 −37 ≠ 本批代码差 −44，两条都是实测，不是矛盾。**2026-11-06 第二轮对账（`975652a17`）**：+2 行，归属逐文件算过 —— 本口径只数 `STOCK.feRe`（`scripts/check-capability-register.mjs:253`）命中**整条路径**的文件，那批 8 个前端改动里**只有 `src/lib/seed-stock-schemas.ts`（路径含 `stock`）命中** ⇒ `git diff --numstat` +4/−2 = 净 +2；`browserMock.ts`（`Mock` ≠ `market`）、`DynamicUIManagerPage.tsx`、`schemaActionPermissions.ts` 与其 test、`types/dynamicUI.ts`、`types/index.ts`、新增 `browserMock.dynamicUI.test.ts` 全部不命中 ⇒ 它们 −31/−11/−6 等改动对本读数零影响。同理 `SitesTab.tsx`（#167，+11/−6）不命中 ⇒ 那一批也不动本锚。"
     },
     {
       "id": "frontendDirCaliber",
@@ -249,13 +249,13 @@
     {
       "id": "k2KeyedFaces",
       "label": "K2 键控面（入库版谓词·强/弱两档）",
-      "value": 37,
+      "value": 38,
       "value2": 8,
       "check": "k2KeyedHits",
       "hard": false,
       "planMustAppear": false,
       "reason": "入库版 K2 键控谓词的实测读数（强档 trait 面 37 / 弱档 8），八形态判据原文见 `scripts/check-capability-register.mjs` 的 K2 段（①–④ 沿用一次性工件、⑤–⑧ 为 #57 新入库，#66 收窄 ⑥ = 接收者必须是集合）。**只出数**：不改软锚点 `k2TraitFaces`（51 / manual）的现值与口径，也不决定退出码 ⇒ 必须 `hard: false`。扫描面 = 8 根全部 .rs 剪 target/node_modules/gen/tests，实测 317 个 `pub trait`、⑧ 的 impl→trait 反查表 743 个实现类型。",
-      "note": "#57 于 2026-11-02 入库；**2026-11-02 #66 收窄 ⑥ 后重测 = 强 37 / 弱 8**（原 92 / 7 是未收窄读数：⑥ 把 `set_*(Arc<dyn T>)` 全局 DI 注入当注册口，198 样本内 48 条假阳性，收窄后剔除）。**不给 planNumber**（PLAN §0.7 原文无此数，给就是编造锚点）。已知高估面：未剥注释（与冻结读数同口径）；keyed-get 变体（getter 返具体 DTO、块内不含 dyn，实测漏 EmbeddingProvider / McpClientService）未入形态。反向外溢：全树 13 条容器命中在 #33 的 198 样本之外 ⇒ 是 #54 的候选增量，不是本条的错。"
+      "note": "#57 于 2026-11-02 入库；**2026-11-02 #66 收窄 ⑥ 后重测 = 强 37 / 弱 8**（原 92 / 7 是未收窄读数：⑥ 把 `set_*(Arc<dyn T>)` 全局 DI 注入当注册口，198 样本内 48 条假阳性，收窄后剔除）。**不给 planNumber**（PLAN §0.7 原文无此数，给就是编造锚点）。已知高估面：未剥注释（与冻结读数同口径）；keyed-get 变体（getter 返具体 DTO、块内不含 dyn，实测漏 EmbeddingProvider / McpClientService）未入形态。反向外溢：全树 13 条容器命中在 #33 的 198 样本之外 ⇒ 是 #54 的候选增量，不是本条的错。**2026-11-06 第二轮对账**：强档 37→**38**，+1 的来源是本批 `a9e68621a` 在 `worker.rs` 的 `required_permission_for` 新登记 (opc.store, publish_blog_post) 这条二元组键控面（Write 档） —— 该表是 (接缝, op) 二元组键控面，命中 ⑤/⑥ 形态 ⇒ 弱档仍 8 不变。`hard:false` 不影响退出码，但这条涨是**方向正确**的（接缝写面第一次有键控点），不是回归。"
     },
     {
       "id": "remoteSeamCount",
@@ -408,10 +408,10 @@
       "check": "implementorCount",
       "evidence": [
         { "ref": "axagent-core/crates/harness/src/workflow_reflection.rs:190", "file": "axagent-core/crates/harness/src/workflow_reflection.rs", "line": 190, "token": "pub trait WorkflowReflector", "role": "契约" },
-        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:4356", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 4356, "token": "fn remote_method_not_supported", "anchorText": "fn remote_method_not_supported(seam: &str, method: &str) -> String {", "role": "拆分阻塞 D2 证据" }
+        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:4386", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 4386, "token": "fn remote_method_not_supported", "anchorText": "fn remote_method_not_supported(seam: &str, method: &str) -> String {", "role": "拆分阻塞 D2 证据" }
       ],
       "note": "拆分阻塞 **D2**：worker.rs:4380 起 `remote_method_not_supported` ⇒ 接缝已建但远程侧方法未通。键控列原文仅「接缝」二字 ⇒ 行号缺省。⚠ 原登记 `:3798` 是**既存腐烂**（`#150` 落地前在 HEAD 上实测 `:4290`，差 492 行）⇒ 本行行号按盘上重抄，见 PLAN §99.4。**2026-11-06 对账批**：`3fe49c950` 给 `worker.rs` 净加 165 行 ⇒ 本条锚点整体 +61（证据锚 `:4295`→`:4356`、PLAN 行内 `:4319`→`:4380`）；`planLine` 同批由 265 重锚到 268（§0.7 表格区 +3 位移）。",
-      "planAnchorText": "| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:4380` 起 `remote_method_not_supported` |", "planLine": 268
+      "planAnchorText": "| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:4386` 起 `remote_method_not_supported` |", "planLine": 268
     },
     {
       "seamId": "workflow.evolver",
@@ -425,11 +425,11 @@
       "check": "implementorCount",
       "evidence": [
         { "ref": "axagent-core/crates/harness/src/workflow_evolution.rs:172", "file": "axagent-core/crates/harness/src/workflow_evolution.rs", "line": 172, "token": "pub trait WorkflowEvolver", "role": "契约" },
-        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:4448", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 4448, "token": "remote_method_not_supported", "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"run\"))", "role": "拆分阻塞 D2 证据（区间起点）" },
-        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:4496", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 4496, "token": "remote_method_not_supported", "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"is_running\"))", "role": "拆分阻塞 D2 证据（区间止点）" }
+        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:4478", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 4478, "token": "remote_method_not_supported", "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"run\"))", "role": "拆分阻塞 D2 证据（区间起点）" },
+        { "ref": "axagent-plugins/crates/plugins/src/worker.rs:4526", "file": "axagent-plugins/crates/plugins/src/worker.rs", "line": 4526, "token": "remote_method_not_supported", "anchorText": "Err(remote_method_not_supported(\"workflow.evolver\", \"is_running\"))", "role": "拆分阻塞 D2 证据（区间止点）" }
       ],
-      "note": "备注「同上（worker.rs:4448–:4496 一批 remote_method_not_supported）」⇒ 该区间两端都入锚点，端点漂移即红。键控列原文仅「接缝」。⚠ 原登记 `:3890`–`:3938` 是**既存腐烂**（HEAD 上实测 `:4358`–`:4406`）⇒ 与 `workflow.reflector` 同批按盘上重抄。**2026-11-06 对账批**：`3fe49c950` 给 `worker.rs` 净加 165 行 ⇒ 两端点各 +61（`:4387`→`:4448`、`:4435`→`:4496`；⚠ 只按 token 找会让 `set_llm_provider` 那类同名调用冒充端点，故两端都用整行 `anchorText` 复核）；`planLine` 由 266 重锚到 269。",
-      "planAnchorText": "| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:4448`–`:4496` 一批 `remote_method_not_supported`） |", "planLine": 269
+      "note": "备注「同上（worker.rs:4448–:4496 一批 remote_method_not_supported）」⇒ 该区间两端都入锚点，端点漂移即红。键控列原文仅「接缝」。⚠ 原登记 `:3890`–`:3938` 是**既存腐烂**（HEAD 上实测 `:4358`–`:4406`）⇒ 与 `workflow.reflector` 同批按盘上重抄。**2026-11-06 对账批**：`3fe49c950` 给 `worker.rs` 净加 165 行 ⇒ 两端点各 +61（`:4387`→`:4448`、`:4435`→`:4496`；⚠ 只按 token 找会让 `set_llm_provider` 那类同名调用冒充端点，故两端都用整行 `anchorText` 复核）；`planLine` 由 266 重锚到 269。**2026-11-06 第二轮对账**：`a9e68621a`（`opc.store` 写 op 批）给 `worker.rs` 净加 217 行 ⇒ 三端点各 +30（`:4356`→`:4386`、`:4448`→`:4478`、`:4496`→`:4526`，`--repin-code --apply` 回写，token / file / anchorText 一字未动，逐字节备份 `.tmp/capability-register.20261105T231325.bak.json`）；该模式明确不改正文，故 PLAN:268 / :269 两行的**文字**引用（`:4380`、`:4448`–`:4496`）与表内两处 `planAnchorText` 由本批人工同批改指，行号仍 268/269 不变。",
+      "planAnchorText": "| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:4478`–`:4526` 一批 `remote_method_not_supported`） |", "planLine": 269
     },
     {
       "seamId": "workflow.optimizer",

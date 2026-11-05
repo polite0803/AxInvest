@@ -265,8 +265,8 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 | `message.callback` | `axagent-core/crates/harness/src/platform_callback.rs:21` | 接缝 `message.callback`（内置与插件同入口） | 2 | — |
 | `webhook.dispatch` | `axagent-core/crates/harness/src/webhook_subscription.rs:154` | 接缝 + `axagent-infra/crates/rt-webhook/src/webhook_dispatcher.rs:9` | 4 | — |
 | `system.prompt` | `axagent-core/crates/harness/src/context_contributor.rs:22` | 接缝 `system.prompt.{段名}` | 3 | — |
-| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:4380` 起 `remote_method_not_supported` |
-| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:4448`–`:4496` 一批 `remote_method_not_supported`） |
+| `workflow.reflector` | `axagent-core/crates/harness/src/workflow_reflection.rs:190` | 接缝 | 3 | **D2**：`axagent-plugins/crates/plugins/src/worker.rs:4386` 起 `remote_method_not_supported` |
+| `workflow.evolver` | `axagent-core/crates/harness/src/workflow_evolution.rs:172` | 接缝 | 3 | 同上（`axagent-plugins/crates/plugins/src/worker.rs:4478`–`:4526` 一批 `remote_method_not_supported`） |
 | `workflow.optimizer` | `axagent-core/crates/harness/src/workflow_optimization.rs:80` | 接缝 | 2 | 同上 |
 | `workflow.sandbox` | `axagent-core/crates/harness/src/workflow_evolution.rs:263` | 接缝 | 4 | — |
 | `workflow.business_rule` | `axagent-core/crates/harness/src/business_rules.rs:71` | 接缝（已有 e2e worker 产物） | 3 | — |
@@ -519,7 +519,7 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | Cargo.toml 构建边 | 7 条（`src-tauri` 4 + `tools` 1 + 域内 2；B7b 前 `tools` 2） | 1 条（`src-tauri → axagent-company-runtime`） |
 | 前端反向 import（非域 import 域文件） | 47 处 / 34 文件（2026-11-05 #149 第 3 步：删宿主股票源 adapter（`adapters/registry.ts` 与 `__tests__/adapters.test.ts` 各 −1 处）⇒ 49 / 36 → **47 / 34**；49 / 36 出自 B8-2 第一刀 #151，再上一读数 51 / 37 出自 B8-1a） | 28 处 / 11 文件（15 处集中在 `ContentArea.tsx`） |
 | 前端体量（**目录口径**：`components/stock-analysis` / `pages/opc`） | `components/stock-analysis` 212 文件 / 60 938 行（2026-11-06 对账批：−1 文件 = `a13bff03d` B8-4a 把 `_shared/PageHeader.tsx` 下沉出目录，其后 `d5572fb65` + `4224098b5` 两批在目录内净 +10 行）+ store 6 文件 / 4 514 行 | `pages/opc` 20 文件 / 8 859 行 + `OpcPage.tsx` 134 行 |
-| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 292 文件 / 84 813 行（2026-11-05 #149 第 3 步：删宿主股票源 adapter（95 行）与详情抽屉（94 行）⇒ −189 行 / −2 文件；同日工作区另有 −209 行 / −2 文件的并行改动，故绝对读数与上一档再差 209 / 2。**2026-11-06 对账批**：再 −44 = B8-5 第二批摘股票域类型门面（`src/types/stock-analysis.ts` 按 split 口径 2 337→2 293，口径内文件数不变）⇒ 现值 292 / 84 813；⚠ 上一登记值 84 850 比 `c6c4ce198` 那棵树的实际读数 84 857 少 7 行（该批取的是工作区瞬时态），所以表上差 −37 ≠ 本批代码差 −44） | 40 文件 / 12 797 行 |
+| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 292 文件 / 84 815 行（2026-11-05 #149 第 3 步：删宿主股票源 adapter（95 行）与详情抽屉（94 行）⇒ −189 行 / −2 文件；同日工作区另有 −209 行 / −2 文件的并行改动，故绝对读数与上一档再差 209 / 2。**2026-11-06 对账批**：再 −44 = B8-5 第二批摘股票域类型门面（`src/types/stock-analysis.ts` 按 split 口径 2 337→2 293，口径内文件数不变）；同日第二轮对账再 +2 = `975652a17` 的 8 个前端文件里只有 `src/lib/seed-stock-schemas.ts`（路径含 `stock`）命中 `feRe`，+4/−2 ⇒ 现值 292 / 84 815；⚠ 上一登记值 84 850 比 `c6c4ce198` 那棵树的实际读数 84 857 少 7 行（该批取的是工作区瞬时态），所以表上差 −37 ≠ 本批代码差 −44） | 40 文件 / 12 797 行 |
 | entities 表文件 | 20 个 | 28 个 |
 | zh-CN i18n key | 3 527（`stockAnalysis`/`invest`/`quant`/`trade` 是**整段**） | 1 897（`opc` 整段） |
 
@@ -5492,3 +5492,103 @@ PLAN 里那 15 行原本是**当时那一批的实证记录**（含「改前 →
 2. `capability-register.json` 里 `DOMAINS.OPC.ownedRe` **仍缺 plugin-opc 那一支**（§115 归因过的四条判据缺陷之一）。本批**刻意没补**：补它要先决定「OPC 业务迁出后哪些文件算 OPC 域」，那是判据变更，不是对账 —— 判据变更必须与重算 `alsoAt`  occurrence 同批，不能夹在对账里。
 3. 联合态门禁（全量 `clippy --workspace --all-targets --all-features` / `test --workspace` / `fmt --all`）仍未跑 —— 并行期铁律。
 4. 没有把 §116 的 15 行镜像改动反映进 `docs/INDEX.md` 的该文档「对应版本」字段（本 PLAN 是活文档，索引里只登记一条入口，无数字镜像）。
+
+## 117. 并行六路的一轮：三个「我的前提」被执行者推翻 + 一轮对账（2026-11-06）
+
+本轮一次派六路（一路 cargo 写者 + 一路前端写者 + 四路只读取证），落六个提交：
+`b169351a6`（§116 对账）· `fc577c513` #167 出口 camelCase · `2dfce7b51` #172 摘 `./opc` barrel ·
+`ed75ffff7` 本节 113.5 纠偏 · `975652a17` #186 mock 对齐 + #178 首刀 · `a9e68621a` #179 接缝第一个写 op ·
+`ccbd29f74` #189 前置（测试与编译期 bundled 根解耦）。
+
+### 117.1 我写错、被执行者推翻的三条（照惯例逐条留名，不悄悄改）
+
+1. **「`src/types/opc.ts` 的 16 个符号零引用」—— 错，实际 13 个有活消费方**，且正是经我打算摘掉的
+   `index.ts:4` 那行 barrel 取得。若按我的结论落地，`DemandDiscoveryPage` 与 `browserMock` 当场 TS2305。
+   - **根因不是搜索词不对，是判据形式**：我用一次性 node 脚本扫引用面，**它一行都没打印**（连
+     「检查了几个文件」的计数都没输出），我把「探针静默」当成了「命中为零」。全文搜串固然会算多
+     （注释假命中），但**算少的成因必须是「覆盖面没跑成」**，而没跑成一定是可自证的 —— 探针必须
+     自己打印文件数。第二轮派单把这条写成了硬要求：双引擎（`git grep` + 显式遍历）交叉、两侧
+     文件集合与命中行集合逐字一致才算结论，且「超时/空输出 ⇒ 记为探针失败，不许当零命中」。
+     第三引擎（ripgrep 在 `src` 根跑 16 项大 alternation）实测**静默漏项 + 20 s 超时**，已被弃用为判据。
+2. **「接缝时间口径是 epoch 毫秒」—— 错，是 epoch 秒**。判据：`now_ts()` 函数体是
+   `chrono::Utc::now().timestamp()`，而它的文档自述「秒级 `now_ts` 只用于 DB 时间列与跨天计算，
+   `now_ms()` 才是毫秒」。这条是我在上一批（§115）写进契约注释的，连带把 `SitesTab.tsx` 的注释也带歪。
+   - 收口方式不是「改注释」了事：新写的 dao 真库用例用 `(1_000_000_000..100_000_000_000).contains(&published_at)`
+     **机械区分秒与毫秒**（毫秒量级 ≥1e12 必然越界）⇒ 单位从此有运行判据，不再靠散文。
+   - 抄错单位的真实后果也写进了契约注释：不是「数值难看」，是 **KPI 静默少一篇** ——
+     `published_at BETWEEN from AND to` 的窗口两端都是秒，写毫秒会让该行永远落在窗外。
+3. **「后端 `dynamic_ui` 的两条归属校验缺口仍在做」—— 错，早在 `43803e5ac` 就闭合了**。复核证据：
+   统一闸门 `load_schema_for_command`（`src-tauri/src/commands/dynamic_ui.rs:132`）被 7 个调用点使用
+   （`:411` 更新 / `:484` 删除 / `:624` 回滚 / `:689` `:739` `:759` 表单三点 / `:1070` 钉入），
+   判据是 `TRUSTED_SCHEMA_ORIGINS`（`:104`）白名单取反 fail-closed，单测 `:1195` 钉住空串 / `bogus` /
+   `Plugin` / 带空格四种全拒；`create` 在 `:375` 硬写 `origin="user"`、入参静默丢弃。
+   - ⇒ **教训是「审查抓出的绕过要定期回读销账」**：我把它登记成「在做」整整一轮，期间还据此派过单。
+   - 顺带一条判据形态结论：**`owner_id` 不进授权判定是终局形态而非缺口**（非插件行的 `owner_id`
+     恒等于空串 ⇒ 加进判定零区分度），已写进 PLAN 与代码注释，防止下一批再去「补归属校验」。
+
+### 117.2 执行者撞 150 轮上限的处置：leader 接完链，不重派
+
+#179 那路在 150 轮时只绿到第一档（harness `cargo check --all-targets`），报告只剩一句「继续 dao 层」。
+处置是**我自己把剩下的链跑完**（重派会把已落盘的 785 行改动再解释一遍，代价更高）：
+`cargo test -p axagent-harness --lib opc_store` 13 passed · `axagent-dao --lib` 394 passed（含新真库用例）·
+`axagent-plugin-opc --bins` 3 passed · `--test protocol` 6 passed · 四个包的
+`clippy --all-targets -- -D warnings` 全 0 · 主 crate `cargo check -p axagent --lib` 0（13m06s）·
+`npm run plugin:bundle:dev` 0（产物 sha256 `cc2585a9…`，实读新清单
+`permissions=["subprocess_execution","write"]`、`commands=["opc_list_blog_posts","opc_publish_blog_post"]`）。
+过程中两处是我自己的命令写错，都记下来：
+- 链条第 4/5 档丢了 `cd`（仓根无 `Cargo.toml`，cargo 直接报错），而 `echo "S4_EXIT=$?"` 取的是
+  **管道尾端 `tail` 的退出码** ⇒ 假报 EXIT=0。判据：管道后取码必须 `${PIPESTATUS[0]}`。
+- `cargo clippy -p axagent-dao --all-targets` 报 `manual_range_contains`（在被判 -D warnings 提升的
+  是 **test target**，正是 AGENTS.md「必须 `--all-targets`」那条要抓的位置）。按建议改写为
+  `.contains(&now_seconds)` —— 被改写的是 `i64` 区间，**不涉及该 lint 对 NaN 的语义陷阱**
+  （AGENTS.md 记的那次是 `f64`），判据逐情形等价。
+
+### 117.3 三条测试红的归因：不是代码坏了，是测试读盘
+
+`cargo test -p axagent-plugins --lib` 三条 `manager::tests` 红（`agent_command_specs` 断 1 得 7、
+任务源投影断 1 得 2、`ui_json_keys_gate…`）。**A/B 实证**：把 `axagent-plugins/crates/plugins/bundled/{stock,opc}`
+挪开 ⇒ 43 条 manager 用例全绿；按 sha256 复验还原后红回来。
+根因是缺省 bundled 根 = `env!("CARGO_MANIFEST_DIR")/bundled`（`manager.rs:445`、`:1907` 的
+`unwrap_or_else` 回落），而 §116 里我为 dev 加的 `--root` 恰好把产物暂存进同一个目录 ——
+**宿主 dev 模式正是从那里装载，所以「别暂存」不是解法**。
+解法是测试与盘上产物解耦：新增测试助手 `isolated_config()`（把 `bundled_root` 钉到 `config_home`
+下的空目录，随既有 cleanup 一并删），测试 mod 内 **16 个** `PluginManagerConfig::new` 站点按行号逐条换掉
+（不整体替换 —— 助手自身那一处必须保持原样，否则自我递归）。
+复验取的是**破坏条件在位**的正控：暂存产物存在时 `256 passed / 0 failed`。
+⚠ 同类站点在 `crates/plugins/src/lib.rs`（7 处）与 `hooks.rs`（1 处）仍在，已登记 #189。
+
+### 117.4 本轮新抓出的缺陷（都立项了，不在本轮修）
+
+| # | 缺陷 | 严重度判据 |
+|---|---|---|
+| #181 | `command_bridge.rs:1078` 的 `permission_mode` 没进 `execute_tauri_command` 的 `input_schema` ⇒ 恒取 `"default"` ⇒ **Caution 档插件命令一律落 `requires_confirmation` 占位、永不真执行**；`:1092` 的 `is_blocked()` 臂无条件不可达；`:1131` 的 `list_available_commands` 是死臂且 `:1073` 的报错文案让 LLM 去用一个不存在的工具 | **目标口径级别**：#146「插件命名命令并入智能体命令面」到今天只做到投影，而门禁全绿 |
+| #187 | `create_dynamic_ui_schema` 硬写 `origin="user"` 之后，库里**不可能**再有 `origin="ai"` 的行 ⇒ `DynamicUIManagerPage.tsx:553` 的「AI 生成」标签是死 UI 面（`TRUSTED_SCHEMA_ORIGINS` 里的 `"ai"` 是纯装饰） | 静默退化，由 `43803e5ac` 的安全修复带出 |
+| #188 | dev mock 的 `handleCommand` 对入参做**递归** snake_case ⇒ mock 读 `req.schemaJson` 恒 `undefined`，dev 模式下 schemaJson 从未真正落库；且 `*_form_data` / `pin` / `unpin` / `restore` 四条 mock 仍未过闸（后端已过） | 「按 mock 开发 ≠ 按后端行为开发」只收窄了一半 |
+| #185 | `schema_json` 字节上限全仓零落点（列无约束、写一次同步落一份快照、每 schema 留 30 份、`list_versions` 一次拉 50 份全文）⇒ 一条 10 MB 行 ≈ 300 MB 版本表 | 既存延期项，数值定案受「本机 sqlite 该表 0 行、活动库是远端 PG」限制 |
+| #183 | HEAD 上 `npx dprint check` 就报 2 个未格式化文件（`axagent-plugins/Cargo.toml` 的 members 序 + `crates/README.md` 的表格补宽）⇒ 并行期只能定点 fmt | 执行者一度把它归因成「别人在改」，`git status` 干净即证伪 |
+| #175 | `plugin-stock/src/main.rs:727` 既存 rustfmt 债（不带 `-p` 的 `cargo fmt --check` 会把它算进任何一批） | 同上，口径陷阱 |
+
+### 117.5 本轮对账（第五道门）
+
+| 锚点 | 改前 | 盘上实测 | 归属 |
+|---|---|---|---|
+| `frontendFileCaliber`（hard） | 84 813 | **84 815** | `975652a17` 的 8 个前端文件里只有 `seed-stock-schemas.ts`（路径含 `stock`）命中 `feRe`，+4/−2 = 净 +2；其余 −31/−11/−6 全不命中 |
+| `registryFileLines`（soft） | 1609 | **1608** | 产物与 HEAD 逐字相同（`git status` 干净）⇒ 1609 是上一批 ±1 抵掉后没回灌的滞后值 |
+| `k2KeyedFaces` 强档（soft） | 37 | **38** | `a9e68621a` 新登记 (opc.store, publish_blog_post) 二元组键控面 ⇒ 方向正确的涨，弱档仍 8 |
+| `workflow.reflector` / `evolver` 的 `worker.rs` 证据锚点 | :4356 / :4448 / :4496 | **:4386 / :4478 / :4526** | `a9e68621a` 给该文件净加 217 行 ⇒ 三端点各 +30；`--repin-code --apply` 回写（token / file / anchorText 一字未动，逐字节备份 `.tmp/capability-register.20261105T231325.bak.json`），PLAN `:268` / `:269` 两行的**文字**引用与两处 `planAnchorText` 同批改指（重锚模式刻意不改正文） |
+
+复跑：`--selftest` 全绿（覆盖 17/17 类 check，无空洞）⇒ 判定档 `GATE_EXIT=0`、FAIL 0、
+`PASS: hard:true 判据全部一致（登记 37 = A11/B8/C4/H1/K10/D3；能力面 Σ=23；锚点 21 项）`。
+未删锚点、未增删条目、未翻 `hard`、未弱化 `mustContain`、未跑 `--update-baseline`。
+
+### 117.6 未做
+
+1. #179 只做了**一个**写 op。`delete_*`（要先配三态 + 保护 id 名单）、`create_*`（要先引入字节闸）、
+   落地页 / 联系提交 / 排期三族都还没上 —— 见 #180。
+2. 宿主命令 `opc_publish_blog_post` 与 service 写体**都还在**（双声明），前端调用点未切通道 ⇒
+   插件写面今天没有真实消费方，只有帧级测试。`tools/opc.rs:960` 那条整表读也仍在绕过接缝。
+3. #170 / #171 / #181 三条智能体侧缺陷一行未改（取证完整，改动落在主 crate，一次 15–21 分钟档）。
+4. 全量 `cargo clippy --workspace` / `test --workspace` / `cargo fmt --all` 仍未跑（并行期铁律）⇒
+   联合态门禁没验证过，这是本轮七个提交共同的未覆盖项。
+5. 组件中立性棘轮的 4 条已修复 + 3 条腐烂条目未收紧（#177，`--update-baseline` 只能串行窗口做）。
+6. `#32`（OPC 独立仓）照旧被 `#36` 挡着。

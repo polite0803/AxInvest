@@ -79,8 +79,6 @@ export function DynamicUIManagerPage() {
   const [parseError, setParseError] = useState<string | null>(null);
   const [nlPrompt, setNlPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
-  // 本次编辑的 schema 是否由 AI 生成过 —— 决定入库时的 `origin`（来源元数据）
-  const [generatedByAI, setGeneratedByAI] = useState(false);
 
   // 版本历史面板
   const [versionPanelOpen, setVersionPanelOpen] = useState(false);
@@ -124,7 +122,6 @@ export function DynamicUIManagerPage() {
       form.setFieldsValue({ category: "custom", version: "", change_log: "" });
       setTimeout(() => setJsonSchemaText(""), 0);
     }
-    setGeneratedByAI(false);
   }, [editingRecord, editorOpen]);
   // eslint-disable-next-line react-hooks/exhaustive-deps — form/setJsonSchemaText are stable references
 
@@ -209,8 +206,9 @@ export function DynamicUIManagerPage() {
           category: values.category,
           tags: values.tags || [],
           schemaJson: jsonSchemaText,
-          // 来源元数据：AI 参与生成过则记 ai，否则后端默认 user
-          origin: generatedByAI ? "ai" : undefined,
+          // `origin` 不再由前端传：后端 `create_dynamic_ui_schema` 把 origin 硬写成 "user"、
+          // dev mock 同判据（提交 `43803e5ac` 的 origin 锚），传了也是死参数 ⇒ 连带摘掉唯一
+          // 消费它的 `generatedByAI` 状态。列表页的「AI 生成」标签按记录里的 `origin` 显示。
         };
         await createSchema(createParams);
         message.success(t("dynamicUIManager.createSuccess"));
@@ -230,7 +228,6 @@ export function DynamicUIManagerPage() {
     try {
       const result = await generateUIFromNLBackend(nlPrompt);
       setJsonSchemaText(JSON.stringify(result.schema, null, 2));
-      setGeneratedByAI(true);
       form.setFieldsValue({
         title: form.getFieldValue("title") || result.title,
         description: form.getFieldValue("description") || result.description,

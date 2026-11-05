@@ -62,8 +62,10 @@ export async function seedStockSchemas(): Promise<void> {
         category: entry.category,
         tags: entry.tags,
         schemaJson: JSON.stringify(entry.schema, null, 2),
-        // 来源元数据：这批是随应用内置的股票看板，不是用户/AI 产出
-        origin: "builtin",
+        // 不再传 `origin: "builtin"`：后端 `create_dynamic_ui_schema` 把 origin 硬写成 "user"、
+        // `is_builtin` 一并硬编码 0（dev mock 现已同判据，见提交 `43803e5ac` 的 origin 锚）
+        // ⇒ 该入参在生产与开发两侧都是死参数，种子页两侧都以普通用户页落库。
+        // 「让内置股票看板真·内置」需要另开的内置写入通道，不在本批判据内。
       });
     }
   } catch (err) {

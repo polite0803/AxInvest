@@ -76,7 +76,9 @@ describe("来源判定", () => {
     }
     // 负控：提权链上的三条写命令 + 其余 dynamic_ui_* 一律拒绝。
     // create 把 origin 硬写成 "user"（可信）⇒ 放行它等于让插件自造一个不受限的 Schema；
-    // update / delete 不按 owner_id 限定目标 ⇒ 放行它等于能改写/删除他人 Schema。
+    // update / delete 的「只挡 builtin、不限目标」那句旧判据已由后端闭合（提交 43803e5ac：
+    // 统一闸门按 origin 白名单 fail-closed，**不看 owner_id** —— 非插件行的 owner_id 恒空、
+    // 加它零区分度）⇒ 本用例锁的是第一道（前端权限面），后端闸门是第二道（纵深防御）。
     for (
       const cmd of [
         "create_dynamic_ui_schema",

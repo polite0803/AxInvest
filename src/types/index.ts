@@ -1978,8 +1978,6 @@ export interface ImportFromUrlInput {
 
 export type ExportPromptFormat = "json" | "yaml" | "markdown";
 
-export * from "./wiki";
-
 // === Plugin System ===
 
 export interface PluginSummaryDto {
@@ -2299,7 +2297,7 @@ export type {
   UpdateDynamicUIPinParams,
   UpdateDynamicUISchemaParams,
 } from "./dynamicUI";
-export { COMPONENT_REQUIRED_PROPS, VALID_DYNAMIC_COMPONENT_TYPES } from "./dynamicUI";
+export { COMPONENT_REQUIRED_PROPS, TRUSTED_SCHEMA_ORIGINS, VALID_DYNAMIC_COMPONENT_TYPES } from "./dynamicUI";
 
 export interface DashboardStats {
   totalConversations: number;

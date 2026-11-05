@@ -36,6 +36,8 @@ import type { Artifact } from "@/types";
 import type { BackupManifest } from "@/types";
 import type { CreateKnowledgeBaseInput } from "@/types";
 import type { CreateMemoryItemInput, CreateMemoryNamespaceInput } from "@/types";
+// dev mock 的 DynamicUI 归属闸门与前端权限面共用同一份可信来源词表（值导入，非类型）
+import { TRUSTED_SCHEMA_ORIGINS } from "@/types";
 import type {
   CreateDynamicUISchemaParams,
   DynamicUIFormDataRecord,
@@ -1776,6 +1778,46 @@ function saveMockDynamicUIData<T>(key: string, data: T): void {
   } catch (e) {
     console.warn(`Failed to write localStorage key: axagent.mock.dynamicUI.${key}`, e);
   }
+}
+
+/**
+ * 归属拒绝串：与后端 `commands/dynamic_ui.rs` 的 `plugin_owned_error` **逐字同文案**。
+ *
+ * 后端那里刻意不新增错误码（码表 + 11 份 locale 属另批禁改面，半途自造只会显示成裸码串），
+ * 沿用本文件的裸中文错误串形态并把实际 `origin` 带出；mock 跟着同形态，才不会出现
+ * 「真机一条消息、dev 另一条消息」的分叉。
+ */
+function mockSchemaOwnedDenied(action: string, origin: string): string {
+  return `拒绝${action}：该 DynamicUI Schema 的 origin = "${origin}"，归属为插件或不可判定，只能由插件安装/卸载通道管理`;
+}
+
+/** 与后端 `ErrorResponse::err(code)` 同形态的结构化错误串（category 默认 `general`）。 */
+function mockSchemaStructuredError(code: string): string {
+  return JSON.stringify({ code, category: "general" });
+}
+
+/**
+ * dev mock 的统一归属闸门 —— 后端 `load_schema_for_command` 的同判据镜像（提交 `43803e5ac`）：
+ *
+ * 1. 宿主不存在 ⇒ 结构化错误码 `DYNAMIC_UI_SCHEMA_NOT_FOUND`（后端不再放行「任意 id 都能写」）；
+ * 2. `origin` 不在可信白名单 ⇒ 拒绝。白名单即 `TRUSTED_SCHEMA_ORIGINS`（`builtin` / `user` / `ai`
+ *    三条），**fail-closed**：`"plugin"` / 空串 / 未知字面量 / 历史遗留值一律拒。
+ *
+ * `action` 只进拒绝文案，不参与判定。内置行另由调用方按 `isBuiltin` 挡（后端同序：先归属、再内置）。
+ */
+function mockLoadSchemaForCommand(
+  schemas: DynamicUISchemaRecord[],
+  id: string,
+  action: string,
+): DynamicUISchemaRecord {
+  const schema = schemas.find((s) => s.id === id);
+  if (!schema) {
+    throw new Error(mockSchemaStructuredError("DYNAMIC_UI_SCHEMA_NOT_FOUND"));
+  }
+  if (!TRUSTED_SCHEMA_ORIGINS.has(schema.origin)) {
+    throw new Error(mockSchemaOwnedDenied(action, schema.origin));
+  }
+  return schema;
 }
 
 /** 语义化版本号 patch 自增（不传 version 时使用） */
@@ -5313,8 +5355,13 @@ async function executeCommand<T>(
         tags: req.tags,
         version: "1.0.0",
         isBuiltin: false,
-        origin: req.origin ?? "user",
-        ownerId: req.origin === "plugin" ? (req.ownerId ?? "") : "",
+        // 归属是信任锚，不由入参决定 —— 与后端 `create_dynamic_ui_schema` 逐字同形：
+        // `origin` 一律硬写 `"user"`、`ownerId` 恒为空串，`req.origin` / `req.ownerId`
+        // **不采信**（后端 `commands/dynamic_ui.rs` 同注释：采信入参等于让任意调用方
+        // 自造一行「可信」Schema 绕过按来源判定的闸门）。插件来源的行在真机由插件安装
+        // 通道直接落库，dev mock 无该通道 ⇒ 需要插件行时只能直接写 localStorage 造。
+        origin: "user",
+        ownerId: "",
         createdAt: now,
         updatedAt: now,
       };
@@ -5347,11 +5394,14 @@ async function executeCommand<T>(
         throw new Error("Missing id or req parameter");
       }
       const schemas = loadMockDynamicUIData<DynamicUISchemaRecord[]>("schemas", []);
-      const idx = schemas.findIndex((s) => s.id === id);
-      if (idx === -1) {
-        throw new Error("Schema not found");
+      // 统一闸门先于一切写入（后端 `load_schema_for_command`，dynamic_ui.rs 的 update 分支）：
+      // 不存在 / `origin` 非可信白名单（含 `"plugin"`、空串、未知值）⇒ 直接拒。
+      const old = mockLoadSchemaForCommand(schemas, id, "更新");
+      // 闸门之后才挡内置，与后端同序（`is_builtin != 0` ⇒ BUILTIN_NOT_MODIFIABLE）。
+      if (old.isBuiltin) {
+        throw new Error(mockSchemaStructuredError("DYNAMIC_UI_BUILTIN_NOT_MODIFIABLE"));
       }
-      const old = schemas[idx];
+      const idx = schemas.findIndex((s) => s.id === id);
       // 版本号：传了用传入值，否则 patch 自增
       const newVersion = req.version ?? bumpPatchVersion(old.version);
       const updated: DynamicUISchemaRecord = {
@@ -5386,6 +5436,13 @@ async function executeCommand<T>(
     case "delete_dynamic_ui_schema": {
       const { id } = args as { id?: string };
       const schemas = loadMockDynamicUIData<DynamicUISchemaRecord[]>("schemas", []);
+      // 与后端同判据（dynamic_ui.rs 的 delete 分支）：先过统一闸门（不存在 / `origin` 非可信
+      // 白名单 ⇒ 拒），再挡内置。改前这里对任意 id 静默删除 —— dev 能删掉真机删不动的行
+      // （插件拥有 / 内置 / 根本不存在的 id），正是本批要对齐的分叉。
+      const target = mockLoadSchemaForCommand(schemas, id ?? "", "删除");
+      if (target.isBuiltin) {
+        throw new Error(mockSchemaStructuredError("DYNAMIC_UI_BUILTIN_NOT_DELETABLE"));
+      }
       saveMockDynamicUIData(
         "schemas",
         schemas.filter((s) => s.id !== id),

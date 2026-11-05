@@ -249,6 +249,22 @@ export const COMPONENT_REQUIRED_PROPS: Readonly<
  */
 export type DynamicUISchemaOrigin = "builtin" | "user" | "ai" | "plugin";
 
+/**
+ * 「可信来源」白名单（fail-closed 判据的白名单侧）。
+ *
+ * 权威锚点在后端 `src-tauri/src/commands/dynamic_ui.rs` 的同名常量
+ * `TRUSTED_SCHEMA_ORIGINS`（提交 `43803e5ac` 落地），两侧集合必须逐字相同 ——
+ * 漂移就会出现「前端放行、后端拒」或反之的分叉。刻意**不列 `plugin`**：
+ * `plugin` / 空串 / 未知字面量一律落到拒绝侧，因为「未知值」最坏情况下就是「插件写的」，
+ * 放行未知值与 default allow 等价。
+ *
+ * 两个消费方（共用这一份词表，避免第三处重复定义）：
+ * - `src/lib/dynamicUI/schemaActionPermissions.ts` ⇒ 决定是否注入受限动作权限面；
+ * - `src/lib/browserMock.ts` ⇒ dev mock 的 update / delete 归属闸门，必须与真机同判据，
+ *   否则 `npm run dev` 下能改删真机拒掉的行，这类缺陷在开发期完全看不见。
+ */
+export const TRUSTED_SCHEMA_ORIGINS: ReadonlySet<string> = new Set(["builtin", "user", "ai"]);
+
 export interface DynamicUISchemaRecord {
   id: string;
   title: string;
@@ -279,9 +295,15 @@ export interface CreateDynamicUISchemaParams {
   schemaJson: string;
   category: string;
   tags: string[];
-  /** 来源维度（可选，后端默认 `user`） */
+  /**
+   * 已废弃：后端与 dev mock **均忽略此入参**，权威 `origin` 由宿主写入 ——
+   * `create_dynamic_ui_schema` 在函数体里把 `origin` 硬写成 `"user"`
+   * （`src-tauri/src/commands/dynamic_ui.rs` 的 origin 锚，提交 `43803e5ac`），
+   * dev mock 同判据。传 `"ai"` / `"plugin"` 不会改变落库来源，也不得再用于分支。
+   * 字段本身保留，仅为与 Rust 侧 `CreateSchemaRequest` 的 `#[serde(default)]` 废弃入参形状对齐。
+   */
   origin?: DynamicUISchemaOrigin;
-  /** 来源归属（可选，仅 `origin: "plugin"` 时有意义） */
+  /** 已废弃：同 `origin`，值被忽略，落库 `ownerId` 恒为空串（非插件行的归属标识本就无区分度）。 */
   ownerId?: string;
 }
 

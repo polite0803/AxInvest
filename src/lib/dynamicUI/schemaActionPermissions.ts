@@ -15,9 +15,14 @@
  *
  * ## 判据（唯一来源字段）
  *
- * 来源**只取 `DynamicUISchemaRecord.origin`**（后端 `resolve_origin` 写入的合法值集：
- * `builtin | user | ai | plugin`）。`ownerId` 只在 `origin === "plugin"` 时非空，是归属标识，
- * 不参与「可信 / 不可信」判定。
+ * 来源**只取 `DynamicUISchemaRecord.origin`**（合法值集 `builtin | user | ai | plugin`）。
+ * 该字段**不是请求方能左右的东西**：`create_dynamic_ui_schema` 在函数体里把 `origin` **硬写成
+ * `"user"`**、`owner_id` 恒为空串（`src-tauri/src/commands/dynamic_ui.rs` 的 origin 锚，
+ * 提交 `43803e5ac`），请求体的 `origin` / `ownerId` 两个入参被静默丢弃；插件来源的行只能由
+ * 插件安装通道直接落库。
+ * （此处原文写的是「后端 `resolve_origin` 写入」—— **该函数全仓零命中**，属文档幻觉，
+ * 真实落点即上述硬写；当时正是这条幻觉让「origin 可自报」的缺口在被引用而非在被修复。）
+ * `ownerId` 只在 `origin === "plugin"` 时非空，是归属标识，不参与「可信 / 不可信」判定。
  *
  * - 可信（`builtin` / `user` / `ai`）⇒ 返回 `undefined`，即**不注入权限面**，行为与改动前逐字一致。
  * - 其余一切（`plugin` / 空 / 未知字面量）⇒ 返回受限权限面。**判不出来源一律按不可信处理**：
@@ -30,9 +35,17 @@
  * 把 `origin` 硬写成 `"user"`、`owner_id` 恒为空（`commands/dynamic_ui.rs` 的 origin 锚），
  * 而 `"user"` 在本判据里属**可信来源** ⇒ 插件 Schema 只要声明一个 invoke 该命令的动作，
  * 就能造出一行「可信」Schema，那一行的动作再执行时拿到 `undefined` 权限面 = 完全不受限。
- * `update_dynamic_ui_schema` / `delete_dynamic_ui_schema` 同理：它们目前只挡 `builtin`，
- * 不按 `owner_id` 限定目标 ⇒ 插件来源的动作能改写或删除**用户／别的插件**的 Schema，
- * 改写等于把恶意节点塞进可信树。
+ * `update_dynamic_ui_schema` / `delete_dynamic_ui_schema` 当年的同一风险**后端已闭合**
+ * （提交 `43803e5ac`）：两条命令都先过统一闸门 `load_schema_for_command` —— 目标行的 `origin`
+ * 不在 `TRUSTED_SCHEMA_ORIGINS` 内即拒绝（`builtin` / `user` / `ai` 放行，`plugin` / 空串 /
+ * 未知值一律拒），插件拥有的 Schema 只能由插件安装 / 卸载通道改删，内置行另由 `is_builtin` 挡。
+ * ⇒ 原文「它们目前只挡 `builtin`，不按 `owner_id` 限定目标 ⇒ 插件来源的动作能改写或删除
+ * 用户／别的插件的 Schema」已不成立。
+ * ⚠ 后端**只按 origin 白名单、不看 `owner_id`** 是**有意的正确形态**，不是漏了归属校验：
+ * 非插件行的 `owner_id` 恒为空串（`create` 硬写空），加它零区分度 ⇒ 后续批**请勿再来「补
+ * owner_id 校验」**。本层仍对这三条写命令拒绝放行：前端权限面是第一道、后端闸门是第二道
+ * （纵深防御），且 `create` 造出的行永远是可信的 `user` ⇒「插件自造不受限 Schema」那条路
+ * 必须在前端就断掉。
  *
  * `navigate` / `events` / `storeRead` / `storeWrite` 全部**显式给空数组**：这些 executor
  * 的判据也是「有 permissions 就走白名单」，空数组 = 一律拒绝，与「不传 permissions」的
@@ -40,11 +53,17 @@
  * （`DataBindingEngine.assertDataSourceCoveredByPermissions`）—— 它原来只按
  * `dynamic_ui_` 前缀放行，`type: "store"` 的数据源等于直读任意已注册 store。
  *
- * ⚠ 已知残余（本层不解决）：四条 `*_form_data` 命令在后端**不按 owner_id 限定 schema_id**，
- * 故插件仍可读写他人 Schema 的表单数据；要彻底收口得在后端做归属校验（纵深防御，另立项）。
+ * ✅ 曾记为「已知残余（本层不解决）」的那条已由后端闭合（提交 `43803e5ac`）：**三条**
+ * `*_form_data` 命令（save / get / delete —— 原文写「四条」是把白名单里的
+ * `get_dynamic_ui_schema` 一起算了进去，后端实际只有三条）现在同样先过
+ * `load_schema_for_command` ⇒ `schemaId` 指向插件拥有或并不存在的宿主即拒绝，
+ * 插件不再能读写他人 Schema 的表单数据。当时的顾虑（后端不做归属校验）正是那次提交补的闸门。
+ * ⚠ 仍存的读面残余（本层不管、后端有意放行）：`get_dynamic_ui_schema` 是**不限归属的只读投影**
+ * ⇒ 任何来源都能读到他人 Schema 的定义，但**改不动**（写命令全部过闸）。
  */
 
 import { useDynamicUIStore } from "@/stores/feature/dynamicUIStore";
+import { TRUSTED_SCHEMA_ORIGINS } from "@/types";
 import type { DynamicUISchemaRecord, SkillPermissions } from "@/types";
 
 /**
@@ -61,9 +80,13 @@ export const PLUGIN_SCHEMA_ALLOWED_COMMANDS: readonly string[] = [
   "delete_dynamic_ui_form_data",
 ];
 
-/** 可信来源：用户 / Agent / 内置。这三类维持改动前的行为（不注入权限面）。 */
-const TRUSTED_SCHEMA_ORIGINS: ReadonlySet<string> = new Set(["builtin", "user", "ai"]);
-
+/**
+ * 可信来源：用户 / Agent / 内置。这三类维持改动前的行为（不注入权限面）。
+ *
+ * 词表只此一份，落在 `@/types` 的 `TRUSTED_SCHEMA_ORIGINS`（与后端 `commands/dynamic_ui.rs`
+ * 同名常量同集合）：dev mock 的 update / delete 归属闸门读同一份。本文件原先自带一份字面量、
+ * mock 另写一套判据，正是「mock 比真机宽松」那次分叉的形态 ⇒ 新增 origin 词汇只改一处。
+ */
 export function isTrustedSchemaOrigin(origin: unknown): boolean {
   return typeof origin === "string" && TRUSTED_SCHEMA_ORIGINS.has(origin);
 }

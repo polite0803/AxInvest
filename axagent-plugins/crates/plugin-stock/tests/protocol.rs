@@ -577,7 +577,12 @@ fn command_frame_lists_stock_analysis_records_via_host_seam() {
     for absent in ["durationMs", "deepLink"] {
         assert!(rows[0].get(absent).is_none(), "缺省字段 `{absent}` 不得进帧：{}", rows[0]);
     }
-    assert_eq!(rows[0]["raw"]["analysisDate"], "2026-11-05", "记录视图原样留在 raw");
+    // 详情投影：`raw.rows[*]` 是记录原文（节点的 `rows` 对应插件 `ui.json` 的 Table id）。
+    assert_eq!(
+        rows[0]["raw"]["rows"][0]["analysisDate"], "2026-11-05",
+        "记录字段原样落在 raw.rows[0]（详情 schema 的数组入口）：{}",
+        rows[0]
+    );
 
     // 缺省形态：不传 limit / offset ⇒ 两键都不带（缺省档由宿主取，插件不另抄一份）。
     worker.send(

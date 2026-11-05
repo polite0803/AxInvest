@@ -7528,7 +7528,6 @@
     },
     "source": {
       "scheduledCron": "Запланированные задачи",
-      "stockAnalysis": "Анализ отдельной акции",
       "stockPipeline": "Пайплайн анализа акций",
       "timeTravelBatch": "Батч Time-Travel",
       "moverRecallAnalysis": "Дореанализ пропущенных ралли",

@@ -1,5 +1,8 @@
 # AUDIT：任务中心状态模型（2026-10-22）
 
+> 状态：active ｜ 日期：2026-10-22 ｜ 对应版本：v2.9.9
+
+
 > 范围：任务中心（`/tasks`）五个任务源的「列表取数 → 状态映射 → 终态写入 → 时间口径 → 触发标注 → 刷新」全链路。
 > 方法：代码逐文件读 + 现网 PG 读数（2026-10-22 00:10 前后）。只读审计，未改代码。
 > ⚠ 文中的 `文件:行号` 以**审计时点**为准；§6 的改动落地后行号会整体漂移，按函数名/符号名检索。
@@ -25,7 +28,7 @@
 |---|---|---|---|---|---|---|
 | scheduled-cron | 每个任务定义的 `lastResult`（`cron.adapter.ts:32`） | **否** | 任务结束时 `record_run` | `lastRunAt - duration` | 恒 `schedule`（`:82`） | 不涉及（无运行行） |
 | stock-pipeline | `stock_pipeline_runs` 行 | 是（DB 行） | wrapper 统一收口（本轮已修） | `completedAt - startedAt`；interrupted 不写完成时刻 | 恒 `manual`（`pipeline.adapter.ts:39`） | 有（本轮新增） |
-| stock-analysis | `stock_analyses` 根记录 | 是（DB 行） | 工作流完成/失败/取消/超时/回收 | **`updatedAt - createdAt`（不可信，见 P1-1）** | 恒 `manual`（`stockAnalysis.adapter.ts:47`） | 有（`scheduler/restore.rs`） |
+| stock-analysis | `stock_analyses` 根记录 | 是（DB 行） | 工作流完成/失败/取消/超时/回收 | **`updatedAt - createdAt`（不可信，见 P1-1）** | 恒 `manual`（宿主股票源 adapter；该文件已随 #149 第 3 步删除，行号不再可定位） | 有（`scheduler/restore.rs`） |
 | time-travel-batch | 批次表行 | 是（DB 行 + 内存） | 批次结束/回收 | `finishedAtMs - createdAtMs`；interrupted 的结束时刻=回收时刻 | 恒 `manual` | 有 |
 | mover-recall-analysis | 批次表行 | 是（DB 行 + 内存） | 批次结束/回收 | 同上 | **恒 `manual`（cron 批次也标手动）** | 有 |
 
@@ -40,7 +43,7 @@
 
 ### P1-1 单股分析的结束时间/耗时不可信
 
-- 证据：`stock_analyses` 没有完成时刻列，适配器用 `updatedAt - createdAt` 当耗时（`stockAnalysis.adapter.ts:40-52`），而 `updated_at` 会被后续写库（交易意图、结果回写等）顶掉。
+- 证据：`stock_analyses` 没有完成时刻列，适配器用 `updatedAt - createdAt` 当耗时（宿主股票源 adapter，该文件已随 #149 第 3 步删除，行号不再可定位），而 `updated_at` 会被后续写库（交易意图、结果回写等）顶掉。
 - 现网读数：167 条 completed 根记录中，**109 条（65%）`updated_at - created_at ≥ 24 小时`**，最大 1527 小时；这些行的 `trade_intent_status` 均非空。适配器实际取的窗口（最近 50 行 → 27 条根）里 15 条 completed、**0 条漂移** ⇒ 当前屏幕上看不到，但行一旦被回写就会显示「跑了好几天」。
 - 影响：耗时列会在无提示的情况下变错；`finishedAt` 同时决定 `sinceMs` 时间窗过滤与排序。
 - 修法（二选一）：

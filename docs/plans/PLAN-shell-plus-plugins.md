@@ -517,9 +517,9 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | **② 跨包口**（一个功能包的文件调另一个功能包的 crate ⇒ 走 `call_seam`） | **29 处 / 9 文件**，且**全部是 OPC 的文件在调股票 crate** | 0 处 |
 | ③ 域自有文件内引用（随插件整体迁走，**不是障碍**） | 456 处 / 41 文件（2026-11-04 复测：原 444 / 37 的增量来自并行批在域自有文件里加代码，**与 B1/B2 两刀无关** —— 那两刀只动主壳） | 16 处 / 2 文件 |
 | Cargo.toml 构建边 | 7 条（`src-tauri` 4 + `tools` 1 + 域内 2；B7b 前 `tools` 2） | 1 条（`src-tauri → axagent-company-runtime`） |
-| 前端反向 import（非域 import 域文件） | 51 处 / 37 文件（2026-11-05 B8-2 第一刀 #151：`RunDetailDrawer.tsx` 去 source 字面量分派 −1；上一读数 52 / 38 出自 B8-1a） | 28 处 / 11 文件（15 处集中在 `ContentArea.tsx`） |
+| 前端反向 import（非域 import 域文件） | 47 处 / 34 文件（2026-11-05 #149 第 3 步：删宿主股票源 adapter（`adapters/registry.ts` 与 `__tests__/adapters.test.ts` 各 −1 处）⇒ 49 / 36 → **47 / 34**；49 / 36 出自 B8-2 第一刀 #151，再上一读数 51 / 37 出自 B8-1a） | 28 处 / 11 文件（15 处集中在 `ContentArea.tsx`） |
 | 前端体量（**目录口径**：`components/stock-analysis` / `pages/opc`） | `components/stock-analysis` 213 文件 / 60 973 行 + store 6 文件 / 4 514 行 | `pages/opc` 20 文件 / 8 859 行 + `OpcPage.tsx` 134 行 |
-| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 296 文件 / 85 248 行 | 40 文件 / 12 797 行 |
+| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 292 文件 / 84 850 行（2026-11-05 #149 第 3 步：删宿主股票源 adapter（95 行）与详情抽屉（94 行）⇒ −189 行 / −2 文件；同日工作区另有 −209 行 / −2 文件的并行改动，故绝对读数与上一档再差 209 / 2） | 40 文件 / 12 797 行 |
 | entities 表文件 | 20 个 | 28 个 |
 | zh-CN i18n key | 3 527（`stockAnalysis`/`invest`/`quant`/`trade` 是**整段**） | 1 897（`opc` 整段） |
 

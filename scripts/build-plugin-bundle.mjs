@@ -38,6 +38,11 @@ const webRoot = path.join(workspaceRoot, "crates", "plugin-stock", "web");
 // 清单校验会拒掉白名单外的扩展名，产物自检必须在**打包期**就报出来，而不是等安装时才失败。
 const PAGE_ASSET_ALLOWED_EXTS = new Set(["html", "htm", "js", "css"]);
 const PAGE_ENTRY = "pages/index.html";
+// UI 贡献声明（任务 #149 第 3 步）：`ui.json` 与 `plugin.json` **同级**落在安装根，
+// 任务源的 `detailSchema` 只能引用它里面已声明的 key —— 宿主 `build_manifest_task_sources`
+// 安装期硬校验，「声明了却不在 ui.json 里」等于装不上。故它是清单的一部分，必须由本脚本
+// 一起产出（前端资产目录 `web/` 只收 html/js/css，扩展名白名单会拒掉 .json）。
+const UI_SCHEMA_SOURCE = path.join(workspaceRoot, "crates", "plugin-stock", "ui.json");
 
 function fail(message) {
   console.error(`[plugin-bundle] ${message}`);
@@ -108,11 +113,24 @@ if (!fs.existsSync(path.join(outRoot, ...PAGE_ENTRY.split("/")))) {
   fail(`清单要声明的页面资产不在源目录里：${path.join(webRoot, ...PAGE_ENTRY.split("/"))}`);
 }
 
+// 3.6) UI 声明：原样拷到安装根（不做任何改写）。key 集合在这里先解析一次 ——
+//      `--check` 与清单里的 `detailSchema` 都要它，解析失败必须**在打包期**报错，
+//      而不是等宿主安装时才说「ui.json 不合法」。
+if (!fs.existsSync(UI_SCHEMA_SOURCE)) fail(`UI 声明文件不存在：${UI_SCHEMA_SOURCE}`);
+const uiSchemaRaw = fs.readFileSync(UI_SCHEMA_SOURCE, "utf8");
+let uiSchemaKeys;
+try {
+  uiSchemaKeys = new Set((JSON.parse(uiSchemaRaw).schemas ?? []).map((s) => s.key));
+} catch (error) {
+  fail(`UI 声明不是合法 JSON（${UI_SCHEMA_SOURCE}）：${error.message}`);
+}
+fs.copyFileSync(UI_SCHEMA_SOURCE, path.join(outRoot, "ui.json"));
+
 const manifest = {
   name: "stock",
   version: workerPackage.version,
   description:
-    "股票域功能包：行情工具 get_stock_quote + 4 条命名命令（行情/意图解析/证据权重/在跑执行）+ 1 个前端页面与 1 个任务中心任务源",
+    "股票域功能包：行情工具 get_stock_quote + 5 条命名命令（行情/意图解析/证据权重/在跑执行/分析记录）+ 1 个前端页面与 2 个任务中心任务源",
   // worker 由宿主 spawn ⇒ 必须声明 `subprocess_execution`，否则 enable 时
   // `check_subprocess_permission` 直接拒绝（沙箱是从 manifest.permissions 推出来的，
   // 不是 `PluginWorkerConfig::new` 的 permissive 默认值）。
@@ -209,12 +227,38 @@ const manifest = {
         },
       },
     },
+    {
+      // #149 第 1 步建通道、第 3 步才进清单：行数据来自宿主 `analysis.record` 的 `list`
+      // （宿主发起的单股分析记录也在内），插件只做状态词表翻译与形状收敛。
+      // `name` 必须与 worker 的 `COMMAND_ANALYSIS_RECORDS` 逐字一致（`list_stock_analysis_records`）。
+      name: "list_stock_analysis_records",
+      description: "列出单股分析记录（经宿主 analysis.record 接缝，只交根记录，返回任务中心行数组）",
+      command: "worker://list_stock_analysis_records",
+      inputSchema: {
+        type: "object",
+        properties: {
+          limit: { type: "integer", description: "取数上限，宿主夹在 1..=200，缺省 50" },
+          offset: { type: "integer", description: "分页偏移，缺省 0" },
+        },
+      },
+    },
   ],
   // 任务中心任务源声明（PLAN §97.4）：只给「源标识 + 显示名 + 取数命令」，
   // 不给渲染。`command` 必须是上面 commands[] 里已声明的名字 —— 宿主清单校验会硬拦，
   // 这里 `--check` 再自证一次，免得产物装不上才发现。
   taskSources: [
     { id: "stock-workflow-runs", title: "股票工作流执行", command: "list_recent_workflow_runs", color: "volcano" },
+    {
+      // 与宿主原 `stockAnalysis.adapter.ts` **同 id**（#149 第 3 步删掉宿主那份后不再重名）：
+      // 插件源的注册是「宿主优先、重名忽略」，同 id 才谈得上「插件源顶替宿主源」。
+      id: "stock-analysis",
+      title: "单股分析",
+      command: "list_stock_analysis_records",
+      color: "gold",
+      // 详情槽指向本插件 `ui.json` 的 key（任务 #149 第 2 步的通道）：
+      // 只写 key，行 id `plugin.<pluginId>.<key>` 由宿主拼（插件拼得出来就能引用别人的 schema）。
+      detailSchema: "stock-analysis-detail",
+    },
   ],
   integrity: { algorithm: "sha256", hash: sha256 },
 };
@@ -224,6 +268,7 @@ fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 console.log(`[plugin-bundle] 产物目录：${outRoot}`);
 console.log(`[plugin-bundle] worker   ：${stagedBinary}`);
 console.log(`[plugin-bundle] 前端资产 ：${webFiles.length} 个文件（页面入口 ${PAGE_ENTRY}）`);
+console.log(`[plugin-bundle] UI 声明  ：ui.json（${uiSchemaKeys.size} 个 schema key）`);
 console.log(`[plugin-bundle] 清单     ：${manifestPath}`);
 console.log(`[plugin-bundle] sha256   ：${sha256}`);
 
@@ -234,7 +279,7 @@ if (check) {
 /** 起一次成品 worker：describe 必须回合法声明，shutdown 必须回执并以 0 退出。 */
 async function checkStagedBundle(declared, root) {
   checkDeclaredPages(declared, root);
-  checkDeclaredTaskSources(declared);
+  checkDeclaredTaskSources(declared, root);
 
   const program = path.join(root, declared.worker.program);
   if (!fs.existsSync(program)) fail(`--check：清单声明的 worker 不存在：${program}`);
@@ -284,9 +329,21 @@ async function checkStagedBundle(declared, root) {
  * 目的是让「装不上才发现」提前到打包期。宿主侧是权威，这里只是提前一遍 ——
  * 判据漂了会以 e2e 安装测试的形式暴露，不靠本函数兜底。
  */
-function checkDeclaredTaskSources(declared) {
+function checkDeclaredTaskSources(declared, root) {
   const sources = declared.taskSources ?? [];
   const declaredCommands = new Set((declared.commands ?? []).map((c) => c.name));
+  // `detailSchema` 的归属：只能是**本包 `ui.json`** 的 key（#149 第 3 步）。
+  // 与宿主 `build_manifest_task_sources` 同判据：拼别人的 key / 写全行 id 都不许，
+  // 宿主那边还会再按库里现存 schema 复核一次。
+  const uiSchemaPath = path.join(root, "ui.json");
+  let uiKeys = new Set();
+  if (fs.existsSync(uiSchemaPath)) {
+    try {
+      uiKeys = new Set((JSON.parse(fs.readFileSync(uiSchemaPath, "utf8")).schemas ?? []).map((s) => s.key));
+    } catch (error) {
+      fail(`--check：ui.json 不是合法 JSON：${error.message}`);
+    }
+  }
   const seenIds = new Set();
   for (const source of sources) {
     if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(source.id ?? "")) {
@@ -298,7 +355,16 @@ function checkDeclaredTaskSources(declared) {
     if (!declaredCommands.has(source.command)) {
       fail(`--check：任务源 ${source.id} 的 command「${source.command}」不在 commands[] 里`);
     }
+    if (source.detailSchema !== undefined && source.detailSchema !== null && `${source.detailSchema}`.trim() !== "") {
+      if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(source.detailSchema)) {
+        fail(`--check：任务源 ${source.id} 的 detailSchema 必须是 key（不是行 id）：${source.detailSchema}`);
+      }
+      if (!uiKeys.has(source.detailSchema)) {
+        fail(`--check：任务源 ${source.id} 的 detailSchema「${source.detailSchema}」不在 ui.json 里`);
+      }
+    }
   }
+  console.log(`[plugin-bundle] --check ✅ ${sources.length} 个任务源声明自洽（command ∈ commands[]，detailSchema ∈ ui.json）`);
 }
 
 /**

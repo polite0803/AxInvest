@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type {
-  AnalysisSummary,
   BackgroundTaskInfo,
   MoverRecallBatchState,
   PipelineRun,
+  PluginTaskRunRowDto,
+  PluginTaskSourceDto,
   ScheduledTask,
   TimeTravelBatchSummary,
 } from "@/types";
@@ -13,8 +14,8 @@ import { backgroundTasksAdapter, mapBackgroundTask } from "../adapters/backgroun
 import { cronAdapter, mapExecutionRecord, mapLastRun, mapRunningTask } from "../adapters/cron.adapter";
 import { mapBatchSummary as mapMoverBatchSummary } from "../adapters/moverRecallAnalysis.adapter";
 import { mapPipelineRun } from "../adapters/pipeline.adapter";
+import { createPluginTaskSourceAdapter } from "../adapters/pluginTaskSource.adapter";
 import { aggregateRuns } from "../adapters/registry";
-import { mapStockAnalysisRun, stockAnalysisAdapter } from "../adapters/stockAnalysis.adapter";
 import { mapBatchSummary } from "../adapters/timeTravel.adapter";
 import { isNextRunStale } from "../model";
 
@@ -22,6 +23,9 @@ const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 
 vi.mock("@/lib/invoke", () => ({ invoke: invokeMock }));
 vi.mock("@/i18n", () => ({ default: { t: (k: string) => k } }));
+// 插件源适配器在模块层引用 `PluginSchemaCard`（详情槽）；本文件只验取数与映射，
+// 桩掉卡片免得牵出动态 UI 渲染链与 store（那会要求 mock `listen` 等一长串 IPC 面）。
+vi.mock("@/components/chat/PluginSchemaCard", () => ({ PluginSchemaCard: () => null }));
 
 function makeTask(over: Partial<ScheduledTask>): ScheduledTask {
   return {
@@ -332,88 +336,111 @@ describe("pipeline.mapPipelineRun", () => {
   });
 });
 
-describe("stockAnalysis.mapStockAnalysisRun", () => {
-  const base: AnalysisSummary = {
-    id: "a1",
-    stockCode: "300308",
-    stockName: "中际旭创",
-    analysisDate: "2026-10-21",
-    status: "running",
-    decisionAction: null,
-    decisionPositionPct: null,
-    decisionPositionState: null,
-    decisionJson: null,
-    createdAt: 1_000,
-    updatedAt: 1_000,
-    completedAt: null,
-    analysisKind: "live",
-    asOfDate: null,
-    parentAnalysisId: null,
-    templateId: "stock-analysis",
+describe("stock-analysis 插件源（list_stock_analysis_records）", () => {
+  // 宿主 `adapters/stockAnalysis.adapter.ts` 已在 #149 第 3 步删除 —— 这一源的**状态翻译与
+  // 结束时刻判据**搬进了插件 worker（`axagent-plugins/crates/plugin-stock/src/main.rs` 的
+  // `map_analysis_state_to_run_state` / `task_run_row_from_analysis_record`，断言同批搬到
+  // 那边的 `mod tests` 与 `tests/protocol.rs`）。宿主这侧只剩泛型适配器，本块钉住它还能保证的部分：
+  // 取数命令 / 源 id 与 run id / 耗时回推 / 徽章与深链的**行为差异**（不臆造）。
+  const source: PluginTaskSourceDto = {
+    id: "stock-analysis",
+    title: "单股分析",
+    command: "list_stock_analysis_records",
+    color: "gold",
+    detailSchema: "stock-analysis-detail",
   };
 
-  it("running：有开始时间、无结束时刻", () => {
-    const run = mapStockAnalysisRun(base);
+  /** 插件 `list_stock_analysis_records` 吐出的行形状（camelCase；端点缺省即不出现）。 */
+  function pluginRow(over: Partial<PluginTaskRunRowDto> = {}): PluginTaskRunRowDto {
+    return {
+      nativeId: "a1",
+      name: "300308 中际旭创",
+      state: "running",
+      startedAt: 1_000,
+      ...over,
+    };
+  }
+
+  it("取数走 plugin_execute_command，命令名与清单逐字一致，源 id 仍是 stock-analysis", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify([pluginRow()]));
+    const adapter = createPluginTaskSourceAdapter("stock@bundled", source);
+    const runs = await adapter.list();
+
+    expect(invokeMock).toHaveBeenCalledWith("plugin_execute_command", {
+      pluginId: "stock@bundled",
+      name: "list_stock_analysis_records",
+      input: {},
+    });
+    expect(runs).toHaveLength(1);
+    // run id 由宿主按 `${source}:${nativeId}` 拼，源 id 与宿主原源同名字面量
+    expect(runs[0].id).toBe("stock-analysis:a1");
+    expect(runs[0].source).toBe("stock-analysis");
+    expect(runs[0].nativeId).toBe("a1");
+    // 插件行名不带宿主 i18n 前缀（源名由筛选器 / SourceChip 显示）
+    expect(runs[0].name).toBe("300308 中际旭创");
+  });
+
+  it("running：有开始时间、无结束时刻 ⇒ 不显示耗时", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify([pluginRow()]));
+    const [run] = await createPluginTaskSourceAdapter("stock@bundled", source).list();
     expect(run.state).toBe("running");
-    expect(run.source).toBe("stock-analysis");
     expect(run.startedAt).toBe(1_000);
     expect(run.finishedAt).toBeUndefined();
     expect(run.durationMs).toBeUndefined();
-    // 旧 `/stock-analysis/:id` 已于 2026-10-28 从路由表删除 ⇒ 深链必须指向投资工作区，
-    // 否则点「打开」会命中 `path="*"` 的 404 页（用户报的正是这一条）。
-    // 断言按**参数值**取，不钉查询串的拼接顺序（顺序不是契约，参数集合才是）。
-    expect(run.deepLink).not.toContain("/stock-analysis");
-    const link = new URL(run.deepLink!, "http://x");
-    expect(link.pathname).toBe("/invest");
-    expect(link.searchParams.get("tab")).toBe("workspace");
-    expect(link.searchParams.get("view")).toBe("analysis");
-    expect(link.searchParams.get("stockCode")).toBe("300308");
-    expect(link.searchParams.get("stockName")).toBe("中际旭创");
-    expect(link.searchParams.get("analysisId")).toBe("a1");
   });
 
-  it("completed：用 completedAt 作为结束时刻", () => {
-    const run = mapStockAnalysisRun({
-      ...base,
-      status: "completed",
-      updatedAt: 4_000,
-      completedAt: 4_000,
-    });
+  it("completed：耗时由两端点回推（插件只交由 completedAt 换算出的 finishedAt）", async () => {
+    invokeMock.mockResolvedValue(
+      JSON.stringify([pluginRow({ state: "succeeded", startedAt: 1_000, finishedAt: 4_000 })]),
+    );
+    const [run] = await createPluginTaskSourceAdapter("stock@bundled", source).list();
     expect(run.state).toBe("succeeded");
     expect(run.durationMs).toBe(3_000);
   });
 
-  it("completed 但 completedAt 为空：不拿 updatedAt 冒充完成时刻", () => {
-    // 现网 65% 的 completed 行 updated_at 被后续写库顶掉（可达数天）；
-    // 没有 completedAt 时必须显示「-」，不能把编辑时刻算成耗时。
-    const run = mapStockAnalysisRun({
-      ...base,
-      status: "completed",
-      updatedAt: 9_999_999,
-      completedAt: null,
-    });
-    expect(run.finishedAt).toBeUndefined();
-    expect(run.durationMs).toBeUndefined();
+  it("终态但结束时刻未知：不拿别的时刻冒充，也不产出负耗时", async () => {
+    // 现网 65% 的 completed 行 updatedAt 被交易意图审核 / 结果回写顶掉；插件侧只在
+    // completedAt 存在且不倒挂时才交 finishedAt ⇒ 缺了就是缺了，宿主不许凭空补一个。
+    invokeMock.mockResolvedValue(JSON.stringify([
+      pluginRow({ state: "succeeded", startedAt: 1_000 }),
+      pluginRow({ nativeId: "a2", state: "succeeded", startedAt: 5_000, finishedAt: 4_000 }),
+    ]));
+    const runs = await createPluginTaskSourceAdapter("stock@bundled", source).list();
+    expect(runs.find((r) => r.nativeId === "a1")?.durationMs).toBeUndefined();
+    expect(runs.find((r) => r.nativeId === "a2")?.durationMs).toBeUndefined();
   });
 
-  it("interrupted：已取消 + 徽章，但不拿回收时刻伪造耗时", () => {
-    const run = mapStockAnalysisRun({ ...base, status: "interrupted", updatedAt: 9_999_999 });
+  it("interrupted 走 canceled：徽章面由插件放弃（行为差异，不臆造）", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify([pluginRow({ state: "canceled" })]));
+    const [run] = await createPluginTaskSourceAdapter("stock@bundled", source).list();
     expect(run.state).toBe("canceled");
-    expect(run.badges).toEqual(["interrupted"]);
-    expect(run.durationMs).toBeUndefined();
+    // 宿主原 adapter 会给 interrupted 补 ["interrupted"] 徽章；
+    // `PluginTaskRunRow` 没有 badges 字段 ⇒ 现在这一列没有徽章。
+    expect(run.badges).toBeUndefined();
   });
 
-  it("未知状态不默认成 running", () => {
-    expect(mapStockAnalysisRun({ ...base, status: "weird" }).state).toBe("failed");
+  it("表外状态落 waiting（宿主兜底），不猜成 running / failed", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify([pluginRow({ state: "weird" })]));
+    const [run] = await createPluginTaskSourceAdapter("stock@bundled", source).list();
+    expect(run.state).toBe("waiting");
   });
 
-  it("list 只取根记录（replay 子行由 time-travel-batch 代表）", async () => {
-    invokeMock.mockResolvedValue([
-      { ...base, id: "root" },
-      { ...base, id: "child", parentAnalysisId: "root", analysisKind: "replay" },
-    ]);
-    const rows = await stockAnalysisAdapter.list();
-    expect(rows.map((r) => r.nativeId)).toEqual(["root"]);
+  it("不交 deepLink ⇒「打开」按钮不出现（#149 第 3 步记录的行为差异）", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify([pluginRow()]));
+    const [run] = await createPluginTaskSourceAdapter("stock@bundled", source).list();
+    // 宿主原 adapter 会拼 `/invest?tab=workspace&view=analysis&analysisId=…`；插件命令当前
+    // 不交 deepLink，中心的「打开」按 deepLink 在不在显示 ⇒ 该按钮消失。要恢复必须由插件
+    // 提交深链，不是宿主再造第二套 source 分派。
+    expect(run.deepLink).toBeUndefined();
+  });
+
+  it("根记录过滤归插件：宿主只透传（协议级断言在 plugin-stock/tests/protocol.rs）", async () => {
+    // 这条从前断言「宿主按 parentAnalysisId 过滤 replay 子行」；过滤已搬进 worker 的
+    // `stock_analysis_records`，宿主侧只剩透传 ⇒ 这里钉「返回几行就是几行」，
+    // 防止将来长出第二次过滤或凭空补行。
+    invokeMock.mockResolvedValue(JSON.stringify([pluginRow(), pluginRow({ nativeId: "a2" })]));
+    const runs = await createPluginTaskSourceAdapter("stock@bundled", source).list();
+    expect(runs.map((r) => r.nativeId)).toEqual(["a1", "a2"]);
   });
 });
 

@@ -93,7 +93,7 @@ export function createPluginTaskSourceAdapter(
 }
 
 /**
- * 插件 run 的详情形态：沿用宿主详情抽屉的观感（宽度与 `StockAnalysisRunDrawer` 同为 560），
+ * 插件 run 的详情形态：沿用任务中心详情抽屉的观感（宽度 560），
  * 内容交给 `PluginSchemaCard` —— 插件只给 schema id + 数据投影，主 origin 不执行它的代码（§93）。
  *
  * `dataContext` 直接传 `run.raw`（不复制、不改键）：键名与 schema 节点 id 的对齐是插件自己的事

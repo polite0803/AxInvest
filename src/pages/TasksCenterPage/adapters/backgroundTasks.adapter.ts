@@ -11,7 +11,8 @@ import type { TaskSourceAdapter } from "./types";
  * 两个写入来源：chat/agent 的 bash 型后台任务，以及同步慢命令的内嵌台账
  * （`run_tracked`：收盘采集 / 收盘历史补齐 / 荐股策略回测——命令仍同步返回
  * 报告给调用面板，这里只投影运行记录，让手动触发的慢命令有终态与耗时可见）。
- * 状态未知一律映射 failed，不得假 running（同 stockAnalysis 源纪律）。
+ * 状态未知一律映射 failed，不得假 running（同插件股票源的 `map_analysis_state_to_run_state` 纪律，
+ * 宿主侧同纪律的最后一份实现在 #149 第 3 步随 `stockAnalysis.adapter.ts` 一起删除）。
  */
 export const backgroundTasksAdapter: TaskSourceAdapter = {
   id: "background-tasks",

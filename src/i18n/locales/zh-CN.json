@@ -7528,7 +7528,6 @@
     },
     "source": {
       "scheduledCron": "定时任务",
-      "stockAnalysis": "单股分析",
       "stockPipeline": "股票分析管道",
       "timeTravelBatch": "时间旅行批次",
       "moverRecallAnalysis": "漏检补分析批次",

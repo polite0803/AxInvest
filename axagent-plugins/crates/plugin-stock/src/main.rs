@@ -480,7 +480,12 @@ fn task_run_row_from_analysis_record(record: &Value) -> Value {
         finished_at,
         duration_ms: None,
         deep_link: None,
-        raw: Some(record.clone()),
+        // 详情投影：本插件 `ui.json` 的 `stock-analysis-detail` 用 Table 节点 `id = "rows"`，
+        // 宿主泛型适配器把 `run.raw` 原样当 `dataContext` 交给 `PluginSchemaCard`
+        // （`pluginTaskSource.adapter.ts` 的 `dataContext: run.raw`）⇒ 键名必须与节点 id 对齐。
+        // 记录本身**一个字段不减**地落在 `rows[0]` 里：包一层是为了对上 schema 的数组入口，
+        // 不是重新裁剪字段（裁剪等于在插件里造第二套 DTO）。
+        raw: Some(json!({ "rows": [record.clone()] })),
     };
     serde_json::to_value(row).expect("任务源行记录是可序列化的纯数据")
 }
@@ -545,7 +550,10 @@ fn fetch_quote(
 
 #[cfg(test)]
 mod tests {
-    use super::{map_execution_state_to_run_state, task_run_row_from_execution};
+    use super::{
+        map_analysis_state_to_run_state, map_execution_state_to_run_state,
+        task_run_row_from_analysis_record, task_run_row_from_execution,
+    };
     use axagent_plugin_proto::{PLUGIN_TASK_RUN_STATES, is_plugin_task_run_state};
     use serde_json::{Value, json};
 
@@ -656,5 +664,123 @@ mod tests {
         let back: Vec<Value> = serde_json::from_str(&text).expect("宿主 JSON.parse 读得回");
         assert_eq!(back[0]["state"], "paused");
         assert!(back[0].is_object(), "元素必须是对象，宿主泛型适配器按字段取值");
+    }
+
+    /// 单股分析记录的状态翻译（#149 第 3 步：宿主 `stockAnalysis.adapter.ts` 删除后，
+    /// 这张表是唯一权威 ⇒ 原测试断言搬到这里，不再留在前端）。
+    ///
+    /// 覆盖点逐条来自被删的 `mapAnalysisState`：大小写不敏感（宿主列是自由文本）、
+    /// 七态对齐、以及**表外值落 failed 而不是 running**（默认成 running 会让僵死记录
+    /// 一直显示「运行中」并持续轮询）。
+    #[test]
+    fn analysis_status_maps_into_task_center_vocabulary() {
+        let cases = [
+            ("running", "running"),
+            ("RUNNING", "running"),
+            ("completed", "succeeded"),
+            ("failed", "failed"),
+            ("error", "failed"),
+            ("interrupted", "canceled"),
+            ("canceled", "canceled"),
+            ("cancelled", "canceled"),
+            ("paused", "paused"),
+            ("queued", "queued"),
+            ("pending", "queued"),
+            // 表外值：不得默认成 running
+            ("weird", "failed"),
+            ("", "failed"),
+        ];
+        for (from, to) in cases {
+            let mapped = map_analysis_state_to_run_state(from);
+            assert_eq!(mapped, to, "`{from}` 应翻成 `{to}`");
+            assert!(is_plugin_task_run_state(mapped), "映射产出 `{mapped}` 不在七态词表内");
+        }
+    }
+
+    /// 结束时刻只认 `completedAt`，且只在终态透出；`updatedAt` 是编辑时刻，不得冒充完成时刻。
+    ///
+    /// 现网 65% 的 completed 行 `updatedAt` 被交易意图审核 / 结果回写顶掉（可达数天），
+    /// 拿它算耗时会显示「跑了好几天」——这条断言就是那个坑的钉子。
+    #[test]
+    fn analysis_row_uses_completed_at_only_and_drops_updated_at() {
+        let completed = task_run_row_from_analysis_record(&json!({
+            "id": "a1",
+            "stockCode": "300308",
+            "stockName": "中际旭创",
+            "status": "completed",
+            "createdAt": 1_000_i64,
+            "updatedAt": 4_000_i64,
+            "completedAt": 4_000_i64,
+            "parentAnalysisId": null,
+        }));
+        assert_eq!(completed["state"], "succeeded");
+        assert_eq!(completed["startedAt"], 1_000_i64);
+        assert_eq!(completed["finishedAt"], 4_000_i64);
+
+        // completed 但 completedAt 缺失 ⇒ 结束时刻未知（不是拿 updatedAt 顶）
+        let no_completed_at = task_run_row_from_analysis_record(&json!({
+            "id": "a2",
+            "stockCode": "300308",
+            "stockName": "中际旭创",
+            "status": "completed",
+            "createdAt": 1_000_i64,
+            "updatedAt": 9_999_999_i64,
+            "completedAt": null,
+        }));
+        assert!(no_completed_at.get("finishedAt").is_none(), "不得用 updatedAt 冒充：{no_completed_at}");
+
+        // interrupted：算 canceled，且回收时刻不是完成时刻
+        let interrupted = task_run_row_from_analysis_record(&json!({
+            "id": "a3",
+            "status": "interrupted",
+            "createdAt": 1_000_i64,
+            "updatedAt": 9_999_999_i64,
+        }));
+        assert_eq!(interrupted["state"], "canceled");
+        assert!(interrupted.get("finishedAt").is_none(), "回收时刻不得当完成时刻：{interrupted}");
+
+        // 在跑行：只有开始时间
+        let running = task_run_row_from_analysis_record(&json!({
+            "id": "a4",
+            "status": "running",
+            "createdAt": 1_000_i64,
+        }));
+        assert_eq!(running["state"], "running");
+        assert_eq!(running["startedAt"], 1_000_i64);
+        assert!(running.get("finishedAt").is_none());
+    }
+
+    /// 行形状：名字不带宿主 i18n 前缀、触发来源一律 manual、不交 `deepLink`，
+    /// 记录按详情 schema 的节点 id 收进 `raw.rows`（`stock-analysis-detail` 的 Table）。
+    ///
+    /// 后端 adapter 删除后，「打开」按钮随 `deepLink` 一起消失 —— 这条**正向**钉住
+    /// 「不交深链」是当前裁定，而不是漏字段（改裁定要同时改这里与 PLAN §101.5-2）。
+    #[test]
+    fn analysis_row_shape_and_detail_projection() {
+        let record = json!({
+            "id": "a5",
+            "stockCode": "300308",
+            "stockName": "中际旭创",
+            "analysisDate": "2026-11-05",
+            "status": "running",
+            "createdAt": 1_000_i64,
+            "updatedAt": 2_000_i64,
+            "completedAt": null,
+            "analysisKind": "live",
+            "parentAnalysisId": null,
+        });
+        let row = task_run_row_from_analysis_record(&record);
+
+        assert_eq!(row["nativeId"], "a5");
+        assert_eq!(row["name"], "300308 中际旭创", "名字由插件拼，不带宿主 i18n 前缀");
+        assert_eq!(row["trigger"], "manual", "记录表无触发来源列 ⇒ 与宿主原 adapter 同口径");
+        assert!(row.get("deepLink").is_none(), "插件不交深链：{row}");
+        assert!(row.get("durationMs").is_none(), "耗时只由宿主按两端点算：{row}");
+
+        let rows = row["raw"]["rows"].as_array().expect("详情投影必须是 rows 数组");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["analysisDate"], "2026-11-05", "记录字段原样保留，不裁剪");
+        assert_eq!(rows[0]["analysisKind"], "live");
+        assert_eq!(rows[0], record, "投影只包一层数组，不改任何键");
     }
 }

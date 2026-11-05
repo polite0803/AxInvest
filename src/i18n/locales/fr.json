@@ -7528,7 +7528,6 @@
     },
     "source": {
       "scheduledCron": "Tâches planifiées",
-      "stockAnalysis": "Analyse d'une action",
       "stockPipeline": "Pipeline d'analyse d'actions",
       "timeTravelBatch": "Lot Time-Travel",
       "moverRecallAnalysis": "Rattrapage des hausses manquées",

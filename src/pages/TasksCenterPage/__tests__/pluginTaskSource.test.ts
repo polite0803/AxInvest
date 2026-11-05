@@ -208,10 +208,12 @@ describe("registerPluginTaskSources", () => {
   it("与宿主源重名 ⇒ 宿主优先，插件源被忽略并告警", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const added = registerPluginTaskSources([makeInfo("p-clash", [makeSource({ id: "stock-analysis" })])]);
+      // 用仍由宿主注册的源 id（`scheduled-cron`）：股票源 `stock-analysis` 已随 #149 第 3 步
+      // 从宿主注册表摘除，改由插件声明 ⇒ 它不再是「重名」的样例。
+      const added = registerPluginTaskSources([makeInfo("p-clash", [makeSource({ id: "scheduled-cron" })])]);
       expect(added).toBe(0);
       // 被忽略的必须是宿主那份适配器（nameKey 有值、没有纯文本 name）
-      expect(getAdapter("stock-analysis")?.name).toBeUndefined();
+      expect(getAdapter("scheduled-cron")?.name).toBeUndefined();
       expect(warn).toHaveBeenCalled();
     } finally {
       warn.mockRestore();

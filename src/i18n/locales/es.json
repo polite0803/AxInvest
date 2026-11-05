@@ -7528,7 +7528,6 @@
     },
     "source": {
       "scheduledCron": "Tareas programadas",
-      "stockAnalysis": "Análisis de acción individual",
       "stockPipeline": "Pipeline de análisis de acciones",
       "timeTravelBatch": "Lote de viaje en el tiempo",
       "moverRecallAnalysis": "Cobertura de subidas perdidas",

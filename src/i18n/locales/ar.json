@@ -7528,7 +7528,6 @@
     },
     "source": {
       "scheduledCron": "المهام المجدولة",
-      "stockAnalysis": "تحليل سهم فردي",
       "stockPipeline": "خط أنابيب تحليل الأسهم",
       "timeTravelBatch": "دفعة السفر الزمني",
       "moverRecallAnalysis": "تحليل تكميلي لصفقات الارتفاع الفائتة",

@@ -7528,7 +7528,6 @@
     },
     "source": {
       "scheduledCron": "定期タスク",
-      "stockAnalysis": "個別銘柄分析",
       "stockPipeline": "株式分析パイプライン",
       "timeTravelBatch": "タイムトラベルバッチ",
       "moverRecallAnalysis": "大化け株捕捉漏れバックフィル",

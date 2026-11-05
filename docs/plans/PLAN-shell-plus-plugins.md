@@ -1238,7 +1238,7 @@ P6.1 的先决（T2 命令帧）**已落地** ⇒ `#35` 的阻塞从「等派发
 
 ### 14.4 桶4（7 条）= #34 的最终候选（旧「29 个零实现」口径作废待核）
 判据（02:59 修订版）：剔除 trait 定义块与 `impl … for T` 块自身后，**dyn / 泛型 bound / 关联路径 / 实现类型在非自身文件被构造或提及（wiring）四类位点全 0 ⇒ ZERO**；`pub use` 导入行**归为非取用**（这正是 ZERO 从 4→6 的原因）。**⚠ 对抗复核逐条复扫后：7 条里只有 2 条可删。**不可删 4 条（都有生产取用点）：`LlmContentGenerator`（`research_agent.rs:356/403` 直调 `generator.generate_outline/generate_content`）· `TaskExecutorImpl`（`task_executor.rs:314` `executor.execute_task(&context)`）· `SignalService`（`device_signal.rs:55/62/91/175` 调 `self.mark_online/broadcast_signal`；实现零构造 = 未接线，但删 trait 必改方法体）· `FeatureFlagProvider`（`tools/agent.rs:21` `OnceLock<SharedFeatureFlagProvider>` + `:244/:253` 的 `f.is_enabled(...)` 是生产读点）。**可删 2 条**：`IrRenderer`（8 处全在 `ir_renderer.rs:113` 起的 `#[cfg(test)]`）、`KitSlashCommandProcessor`（全仓仅 3 处：def / impl / `pub use` 续行）。`OpcAutomationService` 零取用但属 OPC 迁出族 ⇒ **随 #32 处置，不单独删**。
-硬 ZERO 6（⚠ **本行前两个号是 `#34` 删除前的时点号，故意保留不改**：`harness/src/ir_renderer.rs` 已**整文件删除**、`harness/src/kit_bridge.rs` 现 **119 行** ⇒ `:121` 落在 EOF 外，`--dump-doc-refs` 因此把这条报成「越界 1」（属既存 7 条可疑之一，非新坏；本行是 §14.4 判定「可删 2 条」的依据本身，改号就等于抹掉判据））：`IrRenderer`（`harness/src/ir_renderer.rs:18`）· `KitSlashCommandProcessor`（`harness/src/kit_bridge.rs:121`）· `LlmContentGenerator`（`agent/src/research_agent.rs:51`）· `OpcAutomationService`（`analysis-engine/src/opc/automation.rs:298`，随 #32 处置）· `SignalService`（`harness/src/device_sync.rs:647`）· `TaskExecutorImpl`（`agent/src/task_executor.rs:92`）；B 级 1：`FeatureFlagProvider`（唯一 dyn 位点是别名定义 `feature_flag_provider.rs:17`，生产实现 0）。
+硬 ZERO 6（⚠ **本行前两个号是 `#34` 删除前的时点号，故意保留不改**：`harness/src/ir_renderer.rs` 已**整文件删除**、`harness/src/kit_bridge.rs` 现 **119 行** ⇒ `:121` 落在 EOF 外，`--dump-doc-refs` 因此把这条报成「越界 1」（属既存 7 条可疑之一，非新坏；本行是 §14.4 判定「可删 2 条」的依据本身，改号就等于抹掉判据））：`IrRenderer`（`harness/src/ir_renderer.rs:18`）· `KitSlashCommandProcessor`（`harness/src/kit_bridge.rs:121`）· `LlmContentGenerator`（`agent/src/research_agent.rs:51`）· `OpcAutomationService`（`company-runtime/src/opc/automation.rs:298`，随 #32 处置）· `SignalService`（`harness/src/device_sync.rs:647`）· `TaskExecutorImpl`（`agent/src/task_executor.rs:92`）；B 级 1：`FeatureFlagProvider`（唯一 dyn 位点是别名定义 `feature_flag_provider.rs:17`，生产实现 0）。
 外延观察 6 条**不判删**（有真实 wiring 兜底构造位点，只有 Noop/Mock/Echo/Fail 空壳）：`DecomposerLlmClient`、`LlmSampler`、`LlmEvaluator`、`PluginLifecycle`、`SubTaskHandler`、`TokenUsageSink` ⇒ 属 #34「接口活着、实现空心化」同族。
 ⚠ #34 原口径「**29** 个零实现空接口」与本轮 7 条**不是同一谓词**，出处已定位 = `docs/audits/AUDIT-capability-inventory-2026-11-01.md:21`「空接口（全仓无实现）29」，谓词 = `audit-capability-inventory.mjs:106` 的 `implFiles[t].length === 0`（**含 harness 与测试实现**）⇒ 它数的是「无实现」，本轮数的是「有实现但无取用」，**两个数不能互换**。⇒ #34 的真实候选面从「29」收敛为**「2 可删 + 1 随 #32 + 4 不可删」**。
 
@@ -4892,3 +4892,58 @@ PLAN §0.10 的前端读数因此从 **52 处 / 38 文件 → 51 处 / 37 文件
 1. **股票视图类型一个没生成**（`AnalysisSummary` / `PipelineRun` / `ScheduledTask` 等仍手写）⇒ B8-3 的 −4~−6 完全未兑现，下一刀必须直接对着 `audit-l1-blockers` 的股票清单挑类型。
 2. `frontend-dto --check` 未接 CI：现在只在本地手动跑，漂移靠单测 golden 兜（若 Rust 改了而没人重生成，golden 与生成物会一起过期——**这是本批留下的真缺口**）。
 3. 未跑 `--workspace` 全量 clippy/test（并行批）。
+
+## §105 第六道门：文档 `文件:行号` 引用的段对齐巡检（#153，2026-11-05）
+
+`AGENTS.md` 立了「引用必须段对齐、禁止文件名中段截断」的规矩，但**此前没有任何自动检查**；源码可编译、门禁可全绿，而文档里的行号会持续腐烂。本批把它变成第六道静态门禁 `scripts/check-doc-refs.mjs`（抽取/定位原语与 `check-single-source-facts.mjs` 共用 `scripts/lib/doc-refs.mjs`，判据不分叉）。
+
+### 105.1 分桶与判定
+
+| 桶 | 含义 | 是否判红 |
+|---|---|---|
+| OK | 完整路径 / 唯一后缀 / 唯一 basename 可定位，且行号在文件行数内 | 否 |
+| NONLOC | 同名多份且路径后缀不能消歧（如裸 `mod.rs`） | 否 —— 但这是「**未检查**」，不是通过 |
+| STALE | 文件存在但行号越界（含区间终点） | **红** |
+| BROKEN | 仓内不存在该文件，且找不到截断/换词候选 | **红** |
+| ABBREV | 不存在，但自证到它缩写的真实文件（段内截断 / 同义词） | 只报告（首轮未升红） |
+| EXTERNAL / EPHEMERAL | 跨仓 / 本机绝对路径；`.workbuddy/`、`output/` 等 CI 检出里不存在的目录 | 只报告（环境差异不是文档缺陷） |
+| MALFORMED | 抽出来根本不是路径（表格残片） | 丢弃、只计数（灌进 BROKEN 会让该桶指不回真实风险） |
+
+棘轮基线 `scripts/doc-refs-baseline.json`（342 条，**只减不增**）：键 = `<文档>::<引用串>:<起始行>[-<结束行>]`，**不含文档行号**（文档增删会让行号整体漂移，拿它当键会自己先烂）。`--init-baseline` 仅在文件不存在时可用；`--update-baseline` 先要求本轮无新增。
+
+### 105.2 验证（全部实跑）
+
+| # | 命令 | 读数 |
+|---|---|---|
+| D1 | `node scripts/check-doc-refs.mjs --selftest` | `SELFTEST OK`：三档合法、截断/同义词自证候选、单行与区间终点越界、同名不可消歧、跨仓/环境免检、棘轮正负控 |
+| D2 | `node scripts/check-doc-refs.mjs` | **279 篇 / 7920 条**：OK 6348 ｜ NONLOC 1145 ｜ BROKEN 271 ｜ ABBREV 23 ｜ STALE 71 ｜ EXTERNAL 50 ｜ EPHEMERAL 12 ｜ MALFORMED 0；**基线外新增 0**，退 0 |
+| D3 | CI 接线 | `scripts/ci-check.mjs:543-544`（自检 + 判定两步）与 `.github/workflows/ci.yml:573/576` 逐字同源；由 `src/__tests__/ci.workflow.test.ts` 的对称差集护栏校验 |
+
+### 105.3 上线即抓到的两件事（如实记）
+
+1. **门禁自身会被「已删除未提交」的文件打崩**：文件索引来自 `git ls-files --cached --others`，OPC 子树搬迁期间文档仍指向旧路径 ⇒ `locate()` 返回一个盘上不存在的绝对路径 ⇒ `readFileSync` 抛 `ENOENT`，整道门退非 0 但**不是判红，是崩溃**。已修为「盘上不存在 ⇒ BROKEN」（`check-doc-refs.mjs` 的 `lineCount` 返回 `null`），并加了一条回归钉（`classifyRef` 对索引内有、盘上已删的引用必须判 BROKEN）。
+2. **OPC 搬迁带来 47 条基线外新增**（全部指向 `analysis-engine/src/opc/*`）。处置：**只改目标确实存在的新路径**（`analysis-engine/src/opc/` → `company-runtime/src/opc/`，40 + 8 处，含 4 篇审计快照与 4 篇 PLAN），改完 BROKEN 318 → 271、基线外新增 0。判据写在一次性脚本里：新路径不存在则不替换 —— 否则会把基线内的存量 BROKEN 改成一个**新的引用串**（基线键含引用串），凭空制造新红。**纯移动不改行号**，故 4 篇审计快照的 `:行号` 全部仍有效。
+
+### 105.4 未做（如实列）
+
+1. **ABBREV 23 条未升红**：首轮只报告（存量未知量级），下一轮应先修文档或登记，再把它并入红面。
+2. **NONLOC 1145 条是「未检查」**：同名多份（`mod.rs` / `index.ts`）靠路径后缀消歧不了，本门对它们**没有判断力**，别把「不是红」读成「引用正确」。
+3. 基线 342 条只冻结未修（本轮 `已消失 0`），`--update-baseline` 未跑（并行批期间禁止）。
+4. 未扫 `docs/` 以外的 `.md`（根目录白名单文档不在本门覆盖面内）。
+
+## §106 B8-4 前置：所谓「20 处共享基元」实测只有 **2 处**（#154，2026-11-05）
+
+逐符号判定全文在 `PLAN-shared-primitives-neutrality.md`（51 行判定表，行号可复算）。结论**推翻了 §91.4-2 的前提**：
+
+| 类 | 处 / 文件 | 处置 |
+|---|---|---|
+| ① `feRe` 判据假阳性（quote=引用回复、market=插件/人才市场） | 7 / 6 | 不改代码，登记审计判读口径 |
+| ② **中性可下沉** | **2 / 2**（`PageHeader`、`clearVendorCheckCache`） | B8-4a |
+| ③ 域特定但导入方也是域自有（含 2 处死代码：`office/panels/{TrajectoryPanel,StrategyRoomMiniBar}`） | 20 / 17 | 随股票前端打包迁出，**换目录是洗绿** |
+| ④ 域特定且宿主文件内联域逻辑 | 22 / 12 | 走插件贡献面 / barrel 拆除（B8-1/B8-2/B8-5） |
+
+**对 B8-4 的影响**：§91.3 给 B8-4 的预期读数是 −8～−12，**不成立**。真实可下沉面只有 2 处（预期 51 → 49），其余 42 处属「域随插件走」或「判据误报」，不是共享基元问题。**不得**为了凑读数把 ③ 类符号搬进中性目录。§4.3 已明确列出「不要下沉的东西」，防后人重做一遍。
+
+**未做**：两处下沉本身尚未实现（B8-4a 仍待做）；`feRe` 的盲区（只按**路径名**判域归属，域逻辑写在非域文件里时看不见）只登记未改判据 —— 改判据会让既有审计读数整体漂移，需单独立项。
+
+

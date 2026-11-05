@@ -5318,8 +5318,8 @@ PLAN §0.10 的前端读数因此从 **52 处 / 38 文件 → 51 处 / 37 文件
 
 ### 113.5 未做
 
-1. **后端 `*_form_data` 不按 `owner_id` 限定 `schema_id`** ⇒ 插件仍可读写他人 Schema 的表单数据（严重度低于 113.1-1 的三条，因为 `save` 本来就能覆盖）。彻底收口要在 `dynamic_ui.rs` 做归属校验，独立成批。
-2. `create/update/delete_dynamic_ui_schema` 的**归属校验**同样没做（本批只在前端动作闸 + dataSource 闸拦住的）。与 1 同批。
+1. **已闭合（`43803e5ac`；本会话此前误登记为「在做」，2026-11-06 读源码纠）**：`*_form_data` 三点与 update / delete / 回滚 / 钉入共 7 个调用点全部过统一闸门 —— `src-tauri/src/commands/dynamic_ui.rs:132`（`load_schema_for_command`）被 `:411` / `:484` / `:624` / `:689` / `:739` / `:759` / `:1070` 调用，判据是 `TRUSTED_SCHEMA_ORIGINS`（`src-tauri/src/commands/dynamic_ui.rs:104`）白名单取反 fail-closed（`:112`），单测 `:1195` 钉住空串 / `bogus` / `Plugin` / 带空格四种全拒。**`owner_id` 刻意不进授权判定**（非插件行它恒等于空串 ⇒ 加进去零区分度），这是终局形态，不要再「补归属校验」。
+2. 同批堵死 `origin` 自报：`create_dynamic_ui_schema` 在 `src-tauri/src/commands/dynamic_ui.rs:375` 硬写 `origin="user"`、`owner_id=""`，入参 `req.origin` / `req.owner_id` 被静默丢弃 ⇒ 本条原句「插件仍可读写他人 Schema」在生产路径不成立。**残余在两处**：`src/lib/browserMock.ts`（dev 模式）仍采信 `req.origin` / `req.ownerId`，且它的 update / delete 没有任何闸 ⇒ 按 mock 开发会得出「后端也不拦」的错误结论；`schema_json` 字节上限仍未加（见下条）。两者分别转 #186 / #185。
 3. `schema_json` 体积上限仍未加（既存延期项）。
 4. `useDataSource` 无生产调用方，本批只做「接上时不天然绕过」的转发；真要启用需带来源解析。
 5. 渲染链级的 dataSource 执法（`DynamicUIRenderer:220` 那一行接线）只在引擎层有单测，没有加组件树测试 —— 本机 vitest 跑不动（#141），加了也无法取证。

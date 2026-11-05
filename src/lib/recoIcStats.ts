@@ -1,5 +1,5 @@
 import { invoke } from "@/lib/invoke";
-import type { RecoIcStats } from "@/types";
+import type { RecoIcStats } from "@/types/stock-analysis";
 
 /**
  * `reco_ic_stats` 的唯一取数入口（单飞 + 短 TTL 缓存）。

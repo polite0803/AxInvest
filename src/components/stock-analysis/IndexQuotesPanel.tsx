@@ -1,5 +1,6 @@
 import { invoke } from "@/lib/invoke";
-import type { DataOutcome, DataStatus, IndexQuote } from "@/types";
+import type { IndexQuote } from "@/types";
+import type { DataOutcome, DataStatus } from "@/types/stock-analysis";
 import { Button, Card, Spin, Table } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";

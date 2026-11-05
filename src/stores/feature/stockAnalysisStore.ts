@@ -34,21 +34,18 @@ import {
 } from "@/lib/stock-analysis-utils";
 import { detectFutureReferencesForNode } from "@/lib/timeTravel/futureReferenceDetector";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import type { EarningsEvent, KLine, StockQuote, StockSearchResult } from "@/types";
 import type {
   AnalysisStatus,
   AnalysisSummary,
   AnalystFeedbackOutcome,
   DashboardReport,
   DebateRound,
-  EarningsEvent,
-  KLine,
   StockConsensus,
   StockDecision,
-  StockQuote,
-  StockSearchResult,
   TimelineNode,
   TimelinePhase,
-} from "@/types";
+} from "@/types/stock-analysis";
 import { create } from "zustand";
 
 // ── 模块级缓存 ──

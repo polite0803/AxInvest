@@ -2,7 +2,7 @@
 
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
-import type { MoverRecallAnalysisRequest } from "@/types";
+import type { MoverRecallAnalysisRequest } from "@/types/stock-analysis";
 import { Alert, Button, Form, Input, InputNumber, message, Modal, Space } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";

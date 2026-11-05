@@ -1,5 +1,5 @@
 import { invoke } from "@/lib/invoke";
-import type { ConditionalOrderItem, ConditionalOrderListView } from "@/types";
+import type { ConditionalOrderItem, ConditionalOrderListView } from "@/types/stock-analysis";
 import { DeleteOutlined, PlusOutlined, SwitcherOutlined } from "@ant-design/icons";
 import { Alert, App, Badge, Button, Card, Form, Input, InputNumber, Select, Switch, Table, Tag } from "antd";
 import type { TFunction } from "i18next";

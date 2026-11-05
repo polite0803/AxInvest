@@ -25,7 +25,7 @@ import {
   HORIZON_CAMEL_TO_SNAKE,
   HORIZON_T_SUFFIX,
 } from "@/lib/stock-analysis-utils";
-import type { DecisionsByHorizon, HorizonDecision } from "@/types";
+import type { DecisionsByHorizon, HorizonDecision } from "@/types/stock-analysis";
 import { Tag } from "antd";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";

@@ -1,4 +1,4 @@
-import type { AsOfDegradationEntry } from "@/types";
+import type { AsOfDegradationEntry } from "@/types/stock-analysis";
 import { create } from "zustand";
 
 // ── 类型 ──

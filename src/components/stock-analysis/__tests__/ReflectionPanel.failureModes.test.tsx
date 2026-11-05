@@ -11,7 +11,7 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { FailureModeBoard } from "@/types";
+import type { FailureModeBoard } from "@/types/stock-analysis";
 import { FailureModesSummary } from "../ReflectionPanel";
 
 /** t 替身：回显 key，插值对象拼成 `key|k=v`，断言即可定位到具体文案 key */

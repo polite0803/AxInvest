@@ -2,7 +2,7 @@
 
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
-import type { MoverRecallBatchState, MoverRecallEventItem } from "@/types";
+import type { MoverRecallBatchState, MoverRecallEventItem } from "@/types/stock-analysis";
 import { Alert, Descriptions, Drawer, Empty, Space, Spin, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";

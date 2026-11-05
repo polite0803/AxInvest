@@ -11,7 +11,7 @@ import {
   getDashboardTrendTKey,
 } from "@/lib/stock-analysis-utils";
 import { useSettingsStore } from "@/stores";
-import type { Catalyst, ChecklistItem, DashboardReport, RiskAlert } from "@/types";
+import type { Catalyst, ChecklistItem, DashboardReport, RiskAlert } from "@/types/stock-analysis";
 import { AlertOutlined, BulbOutlined, CheckCircleOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { Alert, Card, Checkbox, Progress, Space, Tag, Typography } from "antd";
 import { useTranslation } from "react-i18next";

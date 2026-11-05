@@ -4,7 +4,7 @@ import { ScheduledAnalysisPanel } from "@/components/stock-analysis/ScheduledAna
 import { useStockJump } from "@/hooks/useStockJump";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
-import type { PortfolioSignalPayload } from "@/types";
+import type { PortfolioSignalPayload } from "@/types/stock-analysis";
 import { Alert, App, Button, Card, Col, Modal, Row, Spin, Statistic, Table, Tabs, Tag } from "antd";
 import type { TFunction } from "i18next";
 import { BarChart3, Calendar, Plus, RefreshCw, Trash2, TrendingDown, TrendingUp, Upload, Wallet } from "lucide-react";

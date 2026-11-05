@@ -16,7 +16,7 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { TierBoard } from "@/types";
+import type { TierBoard } from "@/types/stock-analysis";
 import type { ReflectionRow } from "../ReflectionPanel";
 import { buildAiAssistPrompt, parseActionsFromAccumulated, TierSummary } from "../ReflectionPanel";
 

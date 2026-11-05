@@ -1,6 +1,6 @@
 import i18n from "@/i18n";
 import { useStockAnalysisStore, useUIStore, useWorkspaceStore } from "@/stores";
-import type { StockDecision } from "@/types";
+import type { StockDecision } from "@/types/stock-analysis";
 import { act, render, screen } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";

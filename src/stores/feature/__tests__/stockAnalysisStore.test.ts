@@ -1,5 +1,5 @@
 import { analystNodeId } from "@/lib/stock-analysis-utils";
-import { StockAction } from "@/types";
+import { StockAction } from "@/types/stock-analysis";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { invokeMock, listenMock, unlistenMock } = vi.hoisted(() => ({

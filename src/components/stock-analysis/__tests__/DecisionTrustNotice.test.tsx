@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { HorizonDecision, StockDecision } from "@/types";
+import type { HorizonDecision, StockDecision } from "@/types/stock-analysis";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";

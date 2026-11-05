@@ -13,7 +13,7 @@
 //   全项目只保留一套数据质量判定。
 
 import { analystBaseOf } from "@/lib/stock-analysis-utils";
-import type { DataQualityDiagItem, DataQualityReport } from "@/types";
+import type { DataQualityDiagItem, DataQualityReport } from "@/types/stock-analysis";
 
 /**
  * 分析师节点 ID → data-quality.rhai 的 `diagnostics` 键名（缩写）。

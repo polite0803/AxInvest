@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /* eslint-disable react-refresh/only-export-components */
 
-import type { AgreementBreakdown } from "@/types";
+import type { AgreementBreakdown } from "@/types/stock-analysis";
 import { Tag } from "antd";
 import { useTranslation } from "react-i18next";
 

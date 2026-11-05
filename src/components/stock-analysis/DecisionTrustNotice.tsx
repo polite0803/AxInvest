@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { actionToDirection, parseAction, StockAction } from "@/lib/stock-analysis-utils";
-import type { StockDecision } from "@/types";
+import type { StockDecision } from "@/types/stock-analysis";
 import { Button, Tag, Tooltip } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";

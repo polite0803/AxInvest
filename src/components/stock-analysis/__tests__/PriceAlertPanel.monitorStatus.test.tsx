@@ -30,7 +30,7 @@ vi.mock("@/lib/invoke", () => ({
   isTauri: () => true,
 }));
 
-import type { MonitorStatus } from "@/types";
+import type { MonitorStatus } from "@/types/stock-analysis";
 import { monitorAbsenceSentences, monitorSessionKey, PriceAlertPanel } from "../PriceAlertPanel";
 import type { MonitorStatusState } from "../PriceAlertPanel";
 

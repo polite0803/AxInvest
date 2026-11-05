@@ -37,7 +37,7 @@ const storeState = {
     decisionsByHorizon?:
       | Record<
         string,
-        Partial<import("@/types").HorizonDecision> & { action: string }
+        Partial<import("@/types/stock-analysis").HorizonDecision> & { action: string }
       >
       | null;
   } | null,

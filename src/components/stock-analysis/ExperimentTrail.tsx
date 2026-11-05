@@ -7,7 +7,7 @@
 
 import { getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
-import type { StockDecision } from "@/types";
+import type { StockDecision } from "@/types/stock-analysis";
 import { useTranslation } from "react-i18next";
 
 export function ExperimentTrail() {

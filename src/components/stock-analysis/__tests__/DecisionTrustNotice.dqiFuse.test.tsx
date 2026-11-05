@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { StockDecision } from "@/types";
+import type { StockDecision } from "@/types/stock-analysis";
 import { render, screen } from "@testing-library/react";
 import * as fs from "node:fs";
 import * as path from "node:path";

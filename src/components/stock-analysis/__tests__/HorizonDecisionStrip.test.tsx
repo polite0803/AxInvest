@@ -1,4 +1,4 @@
-import type { DecisionsByHorizon, HorizonDecision } from "@/types";
+import type { DecisionsByHorizon, HorizonDecision } from "@/types/stock-analysis";
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { HorizonDecisionStrip } from "../HorizonDecisionStrip";

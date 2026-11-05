@@ -13,7 +13,7 @@
  *   ③ 档位显示名走本项目 i18n（复用 `HORIZON_T_SUFFIX`，不另立一张四档表）。
  */
 import { HORIZON_T_SUFFIX } from "@/lib/stock-analysis-utils";
-import type { HorizonConfusionRow } from "@/types";
+import type { HorizonConfusionRow } from "@/types/stock-analysis";
 import { useTranslation } from "react-i18next";
 
 interface HorizonConfusionBoardProps {

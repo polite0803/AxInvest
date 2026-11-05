@@ -38,7 +38,7 @@
  * 若某字段在类型里不存在，`z.ZodType<Pick<…>>` 会让 tsc 直接报错。
  */
 
-import type { AnalysisSummary } from "@/types";
+import type { AnalysisSummary } from "@/types/stock-analysis";
 import { z } from "zod";
 
 /** 校验失败时抛出。消息面向排障：点名命令、路径、期望与实际。 */

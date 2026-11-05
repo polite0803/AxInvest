@@ -1,5 +1,5 @@
 // i18n-exempt: 断言全部为计票结构与档位键，无 UI 展示文本。
-import type { DataQualityReport } from "@/types";
+import type { DataQualityReport } from "@/types/stock-analysis";
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { useAnalystConsensusByTier } from "../useAnalystConsensusByTier";

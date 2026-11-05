@@ -15,7 +15,7 @@
  */
 import { readLlmHorizonDecisions } from "@/lib/agentOutput";
 import { getActionColor, getActionTKey, HORIZON_CAMEL_TO_SNAKE, HORIZON_T_SUFFIX } from "@/lib/stock-analysis-utils";
-import type { LlmHorizonDecision } from "@/types";
+import type { LlmHorizonDecision } from "@/types/stock-analysis";
 import { Tag } from "antd";
 import { useTranslation } from "react-i18next";
 

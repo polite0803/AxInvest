@@ -23,7 +23,7 @@ import {
 } from "@/lib/stock-analysis-utils";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
-import type { DataQualityReport, HorizonPriceGroup } from "@/types";
+import type { DataQualityReport, HorizonPriceGroup } from "@/types/stock-analysis";
 import { ExpandOutlined, FilePptOutlined, FileTextOutlined, FileWordOutlined, ReloadOutlined } from "@ant-design/icons";
 import { App, Button, Card, Collapse, Dropdown, Modal, Tag, Tooltip } from "antd";
 import type { TFunction } from "i18next";
@@ -517,7 +517,11 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     const dbh = decision?.decisionsByHorizon;
     if (!dbh) { return []; }
     const entries: Array<
-      { key: "ultraShort" | "short" | "mid" | "long"; tSuffix: string; d: import("@/types").HorizonDecision }
+      {
+        key: "ultraShort" | "short" | "mid" | "long";
+        tSuffix: string;
+        d: import("@/types/stock-analysis").HorizonDecision;
+      }
     > = [];
     for (const { key, tSuffix } of HORIZON_KEYS) {
       const d = dbh[key];

@@ -62,7 +62,7 @@ describe("dqAbbrOf / resolveAnalystDiagnosis —— 四种键形态都认", () =
     diagnostics_by_tier: { mk: { ultra_short: mk(20), mid: mk(80) } },
     missing_analysts: [],
     low_confidence_analysts: [],
-  } as unknown as import("@/types").DataQualityReport;
+  } as unknown as import("@/types/stock-analysis").DataQualityReport;
 
   it("节点 id / store 键 / 带档实例（两种前缀形态）都归一到同一缩写", () => {
     expect(dqAbbrOf("a-market-analyst")).toBe("mk");

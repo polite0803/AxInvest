@@ -8,7 +8,7 @@ import { formatFixed } from "@/lib/format";
 import { invoke } from "@/lib/invoke";
 import { invalidateRecoIcStats, loadRecoIcStats } from "@/lib/recoIcStats";
 import { horizonSuffix } from "@/lib/stock-analysis-utils";
-import type { RecoLoopCell, RecoLoopView } from "@/types";
+import type { RecoLoopCell, RecoLoopView } from "@/types/stock-analysis";
 
 /**
  * 荐股反思闭环面板（2026-10-20）。

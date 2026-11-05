@@ -30,7 +30,7 @@ vi.mock("@/lib/invoke", () => ({
   isTauri: () => true,
 }));
 
-import type { PortfolioSignalPayload } from "@/types";
+import type { PortfolioSignalPayload } from "@/types/stock-analysis";
 import { directionLabel, PortfolioSignalBanner } from "../PortfolioDashboard";
 
 /** 后端 `PortfolioSignal`（`rename_all = "camelCase"`）序列化出的整份形状。 */

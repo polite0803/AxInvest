@@ -14,7 +14,7 @@ import {
 } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
-import type { StockDecision } from "@/types";
+import type { StockDecision } from "@/types/stock-analysis";
 import { Button, Drawer, Tag } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";

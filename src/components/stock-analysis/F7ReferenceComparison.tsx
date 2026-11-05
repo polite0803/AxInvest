@@ -22,7 +22,7 @@
  * 数值缺位 ⇒ 不算差值，也不显示 0 差（0 差＝宣称两侧一致）。
  */
 import { getActionTKey, getRiskTKey, isAbsentDecisionAction, parseAction } from "@/lib/stock-analysis-utils";
-import type { F7ReferenceSnapshot } from "@/types";
+import type { F7ReferenceSnapshot } from "@/types/stock-analysis";
 import { useTranslation } from "react-i18next";
 
 interface F7ReferenceComparisonProps {

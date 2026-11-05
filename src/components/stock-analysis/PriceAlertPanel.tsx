@@ -2,7 +2,7 @@ import { translateBackendError } from "@/lib/errorI18n";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
-import type { ConditionTriggerPayload, MonitorAlertPayload, MonitorStatus } from "@/types";
+import type { ConditionTriggerPayload, MonitorAlertPayload, MonitorStatus } from "@/types/stock-analysis";
 import { BellOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { Alert, App, Badge, Button, Card, Form, Input, InputNumber, Select, Switch, Table, Tabs, Tag } from "antd";
 import type { TFunction } from "i18next";

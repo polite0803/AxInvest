@@ -8,7 +8,7 @@
  * 三态缺席各占一句：归档未启用（没留存）/ 尚未跑过（没检查）/ 有记录。
  */
 import { invoke } from "@/lib/invoke";
-import type { DataStatus } from "@/types";
+import type { DataStatus } from "@/types/stock-analysis";
 import { Card, Spin, Table, Tag, Tooltip } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";

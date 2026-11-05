@@ -15,7 +15,7 @@
  * 离开这一档的两侧动作就没有解读上下文。驱动项是**判据码**，叙事全走 i18n；码表缺席
  * （产端新增值而前端没译）时 `defaultValue` 直出原码 —— 与主档归因同一处置。
  */
-import type { HorizonAgreement, HorizonDivergence } from "@/types";
+import type { HorizonAgreement, HorizonDivergence } from "@/types/stock-analysis";
 import { useTranslation } from "react-i18next";
 
 interface HorizonAgreementListProps {

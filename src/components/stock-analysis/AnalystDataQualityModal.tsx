@@ -8,7 +8,7 @@ import {
 } from "@/lib/dataQualityDiagnosis";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
-import type { DataQualityDiagItem } from "@/types";
+import type { DataQualityDiagItem } from "@/types/stock-analysis";
 import {
   CheckCircleFilled,
   CloseCircleFilled,

@@ -20,7 +20,12 @@ import {
   parseAction,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
-import type { DecisionsByHorizon, F7ReferenceSnapshot, HorizonAgreement, HorizonDivergence } from "@/types";
+import type {
+  DecisionsByHorizon,
+  F7ReferenceSnapshot,
+  HorizonAgreement,
+  HorizonDivergence,
+} from "@/types/stock-analysis";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { HorizonDecisionStrip } from "../HorizonDecisionStrip";

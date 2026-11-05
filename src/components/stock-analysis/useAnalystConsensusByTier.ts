@@ -7,7 +7,7 @@ import {
   HORIZON_T_SUFFIX,
   tallyAnalystSentiment,
 } from "@/lib/stock-analysis-utils";
-import type { DataQualityReport } from "@/types";
+import type { DataQualityReport } from "@/types/stock-analysis";
 import { useMemo, useState } from "react";
 import { cleanToolCallTags } from "./utils";
 

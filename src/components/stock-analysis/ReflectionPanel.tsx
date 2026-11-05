@@ -13,7 +13,7 @@ import type {
   HorizonResultsMap,
   ReflectionFeedbackResult,
   TierBoard,
-} from "@/types";
+} from "@/types/stock-analysis";
 import {
   Button,
   Card,

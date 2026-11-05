@@ -14,7 +14,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
-import type { HorizonResultsMap } from "@/types";
+import type { HorizonResultsMap } from "@/types/stock-analysis";
 import { ExpandedReflectionRow } from "../ReflectionPanel";
 
 // 用 importOriginal 保留真实模块的其余导出：`@/stores` 初始化链路会调用 `isTauri()`，

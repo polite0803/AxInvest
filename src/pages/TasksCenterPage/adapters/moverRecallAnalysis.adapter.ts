@@ -2,7 +2,7 @@
 
 import i18n from "@/i18n";
 import { invoke } from "@/lib/invoke";
-import type { MoverRecallBatchState } from "@/types";
+import type { MoverRecallBatchState } from "@/types/stock-analysis";
 import { createElement } from "react";
 import { MoverRecallBatchDrawer } from "../jobs/MoverRecallBatchDrawer";
 import { mapRunTrigger, runIdOf, type RunState, type UnifiedRun } from "../model";

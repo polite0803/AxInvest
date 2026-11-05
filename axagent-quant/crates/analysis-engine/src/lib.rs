@@ -75,8 +75,8 @@ pub mod universe_scan;
 pub mod mcp_tools;
 pub mod monitor;
 pub mod monthly_report;
-// OPC 业务模块（融合自 opc-types + opc-dao，对齐股票业务架构）
-pub mod opc;
+// OPC 业务模块已于 2026-11-05 整棵子树搬到 `axagent-company-runtime`（crates/company-runtime/src/opc/）：
+// 该子树对股票模块零引用，寄居本 crate 只会让「OPC crate → 股票 crate」多一条假构建边。
 pub mod paper_portfolio;
 pub mod param_replay;
 pub mod portfolio_formula;

@@ -12,7 +12,7 @@ use crate::AppState;
 use sea_orm::ActiveModelTrait;
 use tauri::State;
 
-use axagent_analysis_engine::opc::{
+use axagent_company_runtime::opc::{
     AnalyticsService, BlogPost, ContactSubmission, ContentAsset, ContentAssetService,
     CreateBlogPostInput, CreateContentAssetInput, CreateCustomerInput, CreateInvoiceInput,
     CreateKpiInput, CreateLandingPageInput, CreateProjectInput, CreatePublishScheduleInput,
@@ -24,7 +24,7 @@ use axagent_analysis_engine::opc::{
     UpdateCustomerInput, UpdateInvoiceInput, UpdateProjectInput, UpdatePublishScheduleInput,
 };
 
-use axagent_analysis_engine::opc::capability_pack::{
+use axagent_company_runtime::opc::capability_pack::{
     CAPABILITY_PACKS_DIR, CapabilityMatchPredicate, CapabilityPackManifest, export_capability_pack,
     import_capability_pack, list_capability_pack_enabled_map, resolve_capability_packs_dir,
     set_capability_pack_enabled,
@@ -662,10 +662,10 @@ pub async fn opc_import_capability_pack(
     // 期一·3 能力封闭校验：导入成功后全量对账一次（非阻塞审计，坏只 warning）。
     // 期一·4：把刚导入域包的审计摘要（missing / domain_proposals）随成功信息带回前端展示。
     let base =
-        axagent_analysis_engine::opc::capability_pack::resolve_capability_packs_dir(Some(app_dir));
+        axagent_company_runtime::opc::capability_pack::resolve_capability_packs_dir(Some(app_dir));
     crate::init::state::audit_and_log_capability_packs_capability(&state.capability_indexer, &base)
         .await;
-    let reports = axagent_analysis_engine::opc::capability_pack::audit_capability_packs_capability(
+    let reports = axagent_company_runtime::opc::capability_pack::audit_capability_packs_capability(
         &*state.capability_indexer,
         &base,
     )

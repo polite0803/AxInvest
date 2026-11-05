@@ -10,7 +10,7 @@ use axagent_harness::workflow_types::*;
 use sea_orm::DatabaseConnection;
 
 pub mod domain_workflows;
-// 域包引擎已下沉：实现见 `axagent_analysis_engine::opc::capability_pack`，
+// 域包引擎已下沉：实现见 `axagent_company_runtime::opc::capability_pack`，
 // 工具白名单映射见 `axagent_tools::tools::capability_pack_defs`。
 // 本模块只保留 re-export，维持既有调用面（opc.rs / opc_data.rs / 本文件内部 helper）。
 mod seed_capability_pack_accounting;
@@ -49,14 +49,14 @@ mod seed_domain_testing;
 mod seed_production;
 
 // ── 域包引擎（已下沉，此处 re-export 维持既有调用面）──────────────
-pub use axagent_analysis_engine::opc::capability_pack;
+pub use axagent_company_runtime::opc::capability_pack;
 // ⚠ 只转发有 crate 内使用者的项（`commands` 为私有模块 ⇒ `pub use` 按 `pub(crate) use`
 //   逐项判 `unused_imports`）。下列已删项均因「消费点改走显式全路径」而零消费者：
 //   `LEGACY_CAPABILITY_PACKS_DIR` / `capability_packs_base_dir`（M2 下沉时）；
 //   `CAPABILITY_PACKS_DIR` / `CapabilityPackManifest` / `export_capability_pack` / `import_capability_pack` /
 //   `CapabilityPackAnalysisConfig`（b2 收口）。如需引用请走
-//   `axagent_analysis_engine::opc::*`（glob 已导出）。
-pub use axagent_analysis_engine::opc::capability_pack::{
+//   `axagent_company_runtime::opc::*`（glob 已导出）。
+pub use axagent_company_runtime::opc::capability_pack::{
     copy_dir_recursive, resolve_capability_packs_dir,
 };
 // AnalysisDataSource / CapabilityPackAnalysisConfig 均不在此 re-export：消费方各走显式路径
@@ -653,7 +653,7 @@ mod tests {
     use super::*;
     use sea_orm::{ConnectionTrait, EntityTrait, PaginatorTrait};
     // b2 收口：这两个函数的 re-export 已撤（消费点走显式全路径），测试内保留短名在此引入
-    use axagent_analysis_engine::opc::capability_pack::{
+    use axagent_company_runtime::opc::capability_pack::{
         export_capability_pack, import_capability_pack,
     };
 

@@ -106,11 +106,11 @@
 //! ⇒ **引用请优先认「符号名 + 代码片段」**，行号只作快速定位的辅助；
 //! 若发现某个行号对不上，**以符号名/片段为准**，并顺手把该行号更新为你的当前读数。
 
-use axagent_analysis_engine::opc::{
+use axagent_company_runtime::opc::{
     AnalyticsService, CreateKpiInput, DefaultAnalyticsService, canonical_domain_pack_id,
 };
 // 连接类型经 dao 出口（`crates/dao/src/db.rs` 明文：消费者只需 `use axagent_*::DatabaseConnection`）。
-// 本模块**不含任何 SQL** —— 落库全在 `axagent_analysis_engine::opc::DefaultAnalyticsService`
+// 本模块**不含任何 SQL** —— 落库全在 `axagent_company_runtime::opc::DefaultAnalyticsService`
 // （唯一用法：`DefaultAnalyticsService::new(self.db.clone())`）；直接引 `sea_orm::` 路径
 // 会命中分层门禁 `commands-no-direct-db`（判据：命令层不得直连 sea_orm / axagent_entities）。
 use axagent_dao::db::DatabaseConnection;
@@ -427,9 +427,9 @@ impl ContentMediaKpiPersistHook {
 
     /// 从 runtime.yaml 取该 KPI 的单位；取不到返回空串（不伪造单位）。
     fn unit_of(&self, domain_pack_id: &str, key: &str) -> String {
-        use axagent_analysis_engine::opc::capability_pack;
+        use axagent_company_runtime::opc::capability_pack;
 
-        let base = axagent_analysis_engine::opc::resolve_capability_packs_dir(Some(&self.app_dir));
+        let base = axagent_company_runtime::opc::resolve_capability_packs_dir(Some(&self.app_dir));
         let dir = base.join(domain_pack_id);
         capability_pack::analysis_schema::load_capability_pack(&dir)
             .and_then(|b| b.runtime)

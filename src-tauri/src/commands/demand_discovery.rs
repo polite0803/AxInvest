@@ -43,7 +43,7 @@ use crate::commands::error::ErrorResponse;
 pub async fn opc_scan_capabilities(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    use axagent_analysis_engine::opc::capability::{
+    use axagent_company_runtime::opc::capability::{
         CapabilityEntry, CapabilityInventory, CapabilitySource,
     };
     use axagent_harness::CapabilityKind;

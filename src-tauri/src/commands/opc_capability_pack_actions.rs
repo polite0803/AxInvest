@@ -10,7 +10,7 @@ use tauri::State;
 
 use crate::AppState;
 use axagent_agent_macro::agent_command;
-use axagent_analysis_engine::opc::{CapabilityPackLearningManager, OpcCapabilityPackAnalysisRound};
+use axagent_company_runtime::opc::{CapabilityPackLearningManager, OpcCapabilityPackAnalysisRound};
 use axagent_orchestrator::{ReinforcementLearningConfig, RewardWeightConfig};
 
 /// 域包操作类型
@@ -2245,14 +2245,14 @@ pub async fn opc_execute_analysis(
     capability_pack_id: String,
     days: Option<u32>,
 ) -> Result<serde_json::Value, String> {
-    use axagent_analysis_engine::opc::DefaultDataService;
-    use axagent_analysis_engine::opc::data_service::TimeRange;
+    use axagent_company_runtime::opc::DefaultDataService;
+    use axagent_company_runtime::opc::data_service::TimeRange;
 
     let days = days.unwrap_or(30);
     let time_range = TimeRange::days(days as i64);
 
     let db = app_state.harness.db();
-    let data_service: std::sync::Arc<dyn axagent_analysis_engine::opc::OpcDataService> =
+    let data_service: std::sync::Arc<dyn axagent_company_runtime::opc::OpcDataService> =
         std::sync::Arc::new(DefaultDataService::new(db.clone()));
     // 域包 runtime.yaml 声明的风控阈值（**未声明 = 不启用**，不用默认值兜底）。
     // 阈值住在域包而不是 Rust：本项目的硬编码阈值是既有状态，不是该照抄的规范。
@@ -2506,7 +2506,7 @@ pub async fn opc_execute_workflow(
     days: Option<u32>,
     user_input: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    use axagent_analysis_engine::opc::capability_pack_config as engine_config;
+    use axagent_company_runtime::opc::capability_pack_config as engine_config;
 
     let days = days.unwrap_or(30);
 
@@ -2590,7 +2590,7 @@ pub async fn opc_execute_workflow(
     };
 
     let template_data =
-        axagent_analysis_engine::opc::workflow::generate_capability_pack_template_data(
+        axagent_company_runtime::opc::workflow::generate_capability_pack_template_data(
             &domain_pack_id_normalized,
             &capability_pack_engine_config,
             Some(&tool_resolver),
@@ -2730,7 +2730,7 @@ pub const DOMAIN_PACK_LEARNING_FILE: &str = "learning.yaml";
 ///
 /// manifest 缺失/解析失败时回退 [`DOMAIN_PACK_LEARNING_FILE`]，保持旧域包行为。
 fn learning_file_for_pack(pack_dir: &std::path::Path) -> String {
-    use axagent_analysis_engine::opc::capability_pack::read_manifest;
+    use axagent_company_runtime::opc::capability_pack::read_manifest;
     read_manifest(pack_dir)
         .map(|m| m.learning)
         .unwrap_or_else(|| DOMAIN_PACK_LEARNING_FILE.to_string())
@@ -2753,7 +2753,7 @@ fn capability_pack_learning_config_path(
     // 1) 尝试 app_dir 路径
     if let Some(path) = app_dir {
         let pack_dir = path
-            .join(axagent_analysis_engine::opc::capability_pack::CAPABILITY_PACKS_DIR)
+            .join(axagent_company_runtime::opc::capability_pack::CAPABILITY_PACKS_DIR)
             .join(&dir_id);
         let candidate = pack_dir.join(learning_file_for_pack(&pack_dir));
         if candidate.is_file() {
@@ -2767,7 +2767,7 @@ fn capability_pack_learning_config_path(
 
     // 2) 回退：find_repo_config_dir（CWD 无关，Tauri 生产模式 CWD ≠ 仓库根）
     if let Some(repo_root) = crate::commands::opc_workflows::find_repo_config_dir(
-        axagent_analysis_engine::opc::capability_pack::CAPABILITY_PACKS_DIR,
+        axagent_company_runtime::opc::capability_pack::CAPABILITY_PACKS_DIR,
     ) {
         let pack_dir = repo_root.join(&dir_id);
         let fallback = pack_dir.join(learning_file_for_pack(&pack_dir));
@@ -2965,7 +2965,7 @@ pub fn get_capability_pack_learning_config(
 pub fn get_all_capability_pack_learning_configs(
     app_dir: Option<&std::path::Path>,
 ) -> Vec<CapabilityPackLearningConfigView> {
-    let base = axagent_analysis_engine::opc::capability_pack::resolve_capability_packs_dir(app_dir);
+    let base = axagent_company_runtime::opc::capability_pack::resolve_capability_packs_dir(app_dir);
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&base) {
         for entry in rd.filter_map(Result::ok) {

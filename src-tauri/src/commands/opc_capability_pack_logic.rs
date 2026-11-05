@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axagent_analysis_engine::opc::*;
+use axagent_company_runtime::opc::*;
 
 // ── 通用规则引擎（自由函数，命令直调） ─────────────────────────
 

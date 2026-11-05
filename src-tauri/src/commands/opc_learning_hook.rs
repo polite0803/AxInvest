@@ -61,10 +61,10 @@ pub fn identify_capability_pack_from_template(
     template_id: &str,
     app_dir: Option<&std::path::Path>,
 ) -> Option<String> {
-    use axagent_analysis_engine::opc::capability_pack;
+    use axagent_company_runtime::opc::capability_pack;
 
     // 域包动态注册：扫描 `config/opc/domain_packs/*/`
-    let base = axagent_analysis_engine::opc::resolve_capability_packs_dir(app_dir);
+    let base = axagent_company_runtime::opc::resolve_capability_packs_dir(app_dir);
     if let Ok(rd) = std::fs::read_dir(&base) {
         for entry in rd.filter_map(Result::ok) {
             let dir = entry.path();

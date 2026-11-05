@@ -632,7 +632,7 @@ async fn get_conversation_lineage(
     //   ⇒ **谱系在 PG 上恒为空**，且不报错、不崩，只表现为「没有谱系」。
     //
     //   改法：后端运行期取值（`get_database_backend()`）+ 占位符由
-    //   `placeholder_at` 统一生成 —— 与 `analysis-engine/opc/data_service.rs` 同源，
+    //   `placeholder_at` 统一生成 —— 与 `company-runtime/src/opc/data_service.rs` 同源，
     //   避免调用点各自手写 `?` / `$1` 字面量（`util_fns.rs` 头部把这两种写法
     //   列为仓库真实发生过的缺陷形态 ②③）。
     let be = db.get_database_backend();

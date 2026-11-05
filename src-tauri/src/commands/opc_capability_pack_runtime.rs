@@ -10,18 +10,18 @@ use std::sync::Arc;
 use axagent_agent_macro::agent_command;
 use tauri::State;
 
-use axagent_analysis_engine::opc::*;
+use axagent_company_runtime::opc::*;
 use axagent_dao::db::DatabaseConnection;
 
 use crate::AppState;
 use crate::commands::opc_capability_pack_logic;
-use axagent_analysis_engine::opc::capability_pack;
+use axagent_company_runtime::opc::capability_pack;
 
 /// 定位域包目录：`{industries_dir}/{domain_pack_id}`
 ///
 /// 仅用于 Phase 1 数据接入（读取域包 `analysis.yaml` 数据源配置）。
 fn capability_pack_dir(app_dir: Option<&Path>, domain_pack_id: &str) -> Result<PathBuf, String> {
-    let base = axagent_analysis_engine::opc::resolve_capability_packs_dir(app_dir);
+    let base = axagent_company_runtime::opc::resolve_capability_packs_dir(app_dir);
     let dir = base.join(domain_pack_id);
     if dir.is_dir() {
         Ok(dir)
@@ -40,7 +40,7 @@ fn load_runtime_kpi_meta(
     app_dir: Option<&Path>,
     domain_pack_id: &str,
 ) -> Option<capability_pack::runtime_schema::RuntimeKpiConfig> {
-    let base = axagent_analysis_engine::opc::resolve_capability_packs_dir(app_dir);
+    let base = axagent_company_runtime::opc::resolve_capability_packs_dir(app_dir);
     let candidates = [domain_pack_id.to_string(), domain_pack_id.replace('-', "_")];
     for dir_name in candidates {
         let dir = base.join(&dir_name);

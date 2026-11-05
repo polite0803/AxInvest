@@ -11,20 +11,33 @@ publish = false
 # 依赖方向：implementor 可依赖 harness + entities + dao + opc-entities + trajectory；不依赖 consumer。
 
 [dependencies]
+anyhow = { workspace = true }
 async-trait = "0.1"
 # 2026-11-05（任务 #36，PLAN §0.10.1 桶②）：原 `axagent-analysis-engine` 边已删 —— 本 crate
 # 全树对它零代码引用（仅 `self_improving.rs` 注释里提到 `StockAnalysisRound` 样板），
 # 却被 audit-l1-blockers 记成一条「OPC crate → 股票 crate」构建边。
-# 迁入 `analysis-engine/src/opc/` 时也不需加回：该子树不引用 analysis-engine 的股票模块（只依赖 harness / entities）。
+# 同日 `analysis-engine/src/opc/` 整棵子树搬入本 crate（下方 `opc` 模块），同样不加回该边：
+# 该子树不引用 analysis-engine 的股票模块（只依赖 harness / entities）。
 axagent-entities = { version = "3.0.0", path = "../../../axagent-core/crates/entities" }
 axagent-harness = { version = "3.0.0", path = "../../../axagent-core/crates/harness" }
 chrono = { workspace = true }
+# `opc/vendors.rs` 的进程内 mutex（tokio 锁无同步上下文，见禁区 8 的合法例外段）
+parking_lot = "0.12"
+# `opc/evaluator.rs` 的规则值提取（`regex::Regex::new`）
+regex = "1"
 sea-orm = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# `opc/capability_pack*.rs` 的域包 manifest / KPI 配置解析
+serde_yaml = "0.9"
 thiserror = { workspace = true }
+# `opc/agent.rs` 的 `tokio::time::sleep`（非测试代码）+ `opc/learning.rs` 的 `tokio::sync::RwLock`
+tokio = { workspace = true }
 tracing = { workspace = true }
+# `opc/data_service.rs` / `opc/learning.rs` 的 mock 与样本 ID
+uuid = { workspace = true }
+# `opc/capability_pack.rs` 的 `.opcip` 域包归档（版本/特性与 analysis-engine 原处逐字一致）
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 axagent-dao = { version = "3.0.0", path = "../../../axagent-infra/crates/dao" }
-tokio = { workspace = true, features = ["full"] }

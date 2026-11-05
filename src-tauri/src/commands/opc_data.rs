@@ -2,14 +2,14 @@
 
 //! OPC 域包数据接入层命令
 //!
-//! 与股票业务同架构：从 analysis-engine 引擎的 opc::vendors 模块
+//! 与股票业务同架构：从 company-runtime 引擎的 opc::vendors 模块
 //! 获取 OpCapabilityPackVendor / OpCapabilityPackClient 实现，命令层只负责调用。
 //!
 //! 注：vendor 装配与 OpCapabilityPackClient 构造的权威实现在
 //! `opc_capability_pack_runtime::build_data_client`（内联 db/cache/web/file 装配），
 //! 本文件只保留 analysis.yaml 读取入口。
 
-use axagent_analysis_engine::opc::capability_pack::analysis_schema::CapabilityPackAnalysisConfig;
+use axagent_company_runtime::opc::capability_pack::analysis_schema::CapabilityPackAnalysisConfig;
 
 // ── 域包加载 ─────────────────────────────────────────────────
 

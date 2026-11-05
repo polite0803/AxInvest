@@ -1006,16 +1006,22 @@ dependencies = [
 name = "axagent-company-runtime"
 version = "3.0.0"
 dependencies = [
+ "anyhow",
  "async-trait",
- "axagent-analysis-engine",
  "axagent-entities",
  "axagent-harness",
  "chrono",
+ "parking_lot",
+ "regex",
  "sea-orm",
  "serde",
  "serde_json",
+ "serde_yaml",
  "thiserror 2.0.20",
+ "tokio",
  "tracing",
+ "uuid",
+ "zip 9.0.5",
 ]
 
 [[package]]
@@ -1675,6 +1681,7 @@ version = "3.0.0"
 dependencies = [
  "async-trait",
  "axagent-analysis-engine",
+ "axagent-company-runtime",
  "axagent-dao",
  "axagent-document-parser",
  "axagent-harness",

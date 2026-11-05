@@ -303,7 +303,7 @@ pub mod analysis_schema {
 ///
 /// - **YAML 管元数据**：KPI 的 `key` / `name` / `unit` / `metric_type` 与展示卡片。
 /// - **Rust 管计算**：按 `key` 注册计算器（查哪张表、怎么聚合），见
-///   `analysis_engine::opc::capability_pack_kpi_service`。
+///   `company_runtime::opc::capability_pack_kpi_service`。
 /// - 契约只有一个：`key`。
 ///
 /// `kpi_sources` 段为**废弃配置**（历史遗留：试图把「怎么算」声明化，属于错误
@@ -334,7 +334,7 @@ pub mod runtime_schema {
         ///
         /// `None`、或段内 `min`/`max` 都缺 ⇒ 该键**不参与风控**
         /// （未声明 = 不启用；用默认值兜底等于把硬编码换个位置）。
-        /// 判定逻辑在 `analysis_engine::opc::analysis::OpcRiskGate`，
+        /// 判定逻辑在 `company_runtime::opc::analysis::OpcRiskGate`，
         /// 由命令层经 `opc_capability_pack_runtime::declared_kpi_thresholds` 注入。
         #[serde(default)]
         pub risk: Option<RuntimeKpiRiskRule>,
@@ -560,7 +560,7 @@ pub async fn set_capability_pack_enabled(
 /// 读取全部域包的启用状态（id → enabled）。
 ///
 /// 供 market_list 等 command 层复用：避免 command 直接访问 `opc_capability_packs` 实体，
-/// 保持「command 只经 analysis-engine / dao 访问 DB」的分层纪律（对齐 `commands-no-direct-db`）。
+/// 保持「command 只经 company-runtime / dao 访问 DB」的分层纪律（对齐 `commands-no-direct-db`）。
 /// 不存在于 DB 的域包由调用方回退 manifest 默认。
 pub async fn list_capability_pack_enabled_map(
     db: &DatabaseConnection,
@@ -1137,7 +1137,7 @@ mod tests {
     /// 定位仓库根的域包目录。
     ///
     /// 优先用生产装配路径 `resolve_capability_packs_dir(None)`；当它以相对路径行不被命中
-    /// （如 `cargo test -p axagent-analysis-engine` 在 `src-tauri` 作 cwd 运行时，
+    /// （如 `cargo test -p axagent-company-runtime` 在 `src-tauri` 作 cwd 运行时，
     /// 相对路径解析到 `src-tauri/config/opc/domain_packs` 而该目录不存在）——
     /// 则从当前 cwd 向上回溯仓库根，凑 `config/opc/domain_packs`。
     fn capability_packs_base_for_test() -> PathBuf {

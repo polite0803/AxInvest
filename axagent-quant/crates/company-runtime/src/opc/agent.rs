@@ -10,7 +10,7 @@
 //! 采用 **策略模式** 解耦 LLM 调用：
 //! - `LlmEvaluator` trait 定义 LLM 评估接口
 //! - `ValueAssessmentAgent` 持有 `Box<dyn LlmEvaluator>`，支持注入不同的 LLM 实现
-//! - analysis-engine crate 不直接依赖 agent crate，符合 harness 架构约束
+//! - company-runtime crate 不直接依赖 agent crate，符合 harness 架构约束
 //!
 //! # 评分融合策略
 //!

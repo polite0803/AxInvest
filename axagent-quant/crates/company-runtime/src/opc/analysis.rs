@@ -105,7 +105,7 @@ pub fn risk_scoped_kpi_keys(domain_pack_id: &str) -> &'static [&'static str] {
 
 /// 域包 `runtime.yaml` 为单个 KPI 声明的风控阈值。
 ///
-/// 由命令层从域包解析后注入 —— `analysis-engine` **不读 YAML**，维持与 KPI
+/// 由命令层从域包解析后注入 —— `company-runtime` **不读 YAML**，维持与 KPI
 /// 元数据同一条边界（YAML 管声明，Rust 管判定，唯一契约是 `key`）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeclaredKpiThreshold {
@@ -336,7 +336,7 @@ impl OpcCapabilityPackAnalysisRound {
 
     /// 注入域包 `runtime.yaml` 声明的风控阈值。
     ///
-    /// 阈值不可能由本 crate 自行取得：`analysis-engine` 不读 YAML，也不持有域包
+    /// 阈值不可能由本 crate 自行取得：`company-runtime` 不读 YAML，也不持有域包
     /// 目录 —— 由命令层解析后传入（见 `commands::opc_capability_pack_runtime`）。
     pub fn with_declared_thresholds(
         domain_pack_id: String,

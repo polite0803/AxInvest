@@ -2409,7 +2409,7 @@ async fn register_all_capabilities(
     // 期一·3 能力集封闭校验：护照收集 + 索引重建完成后，对全部启用域包做一次
     // 非阻塞审计（承诺 ⊆ 实际），base 目录用 app_dir（产线）或仓库根（开发）。
     let base =
-        axagent_analysis_engine::opc::capability_pack::resolve_capability_packs_dir(Some(app_dir));
+        axagent_company_runtime::opc::capability_pack::resolve_capability_packs_dir(Some(app_dir));
     audit_and_log_capability_packs_capability(indexer, &base).await;
 
     // 5. 注册系统级能力（CognitiveRouter 编排器等）
@@ -2448,14 +2448,14 @@ pub(crate) async fn audit_and_log_capability_packs_capability(
 ) {
     use std::collections::HashMap;
 
-    let manifests = axagent_analysis_engine::opc::capability_pack::scan_capability_packs(base_dir);
+    let manifests = axagent_company_runtime::opc::capability_pack::scan_capability_packs(base_dir);
     let claim_counts: HashMap<String, usize> = manifests
         .iter()
         .filter(|m| m.enabled)
         .map(|m| (m.id.clone(), m.capabilities.len()))
         .collect();
 
-    let reports = axagent_analysis_engine::opc::capability_pack::audit_capability_packs_capability(
+    let reports = axagent_company_runtime::opc::capability_pack::audit_capability_packs_capability(
         indexer, base_dir,
     )
     .await;

@@ -15,6 +15,10 @@ pub mod error;
 pub mod experience;
 pub mod hiring;
 pub mod org;
+// OPC 业务模块（发票 / 客户 / 项目 / 站点 / 域包 / 编排）。
+// 2026-11-05 从 `axagent-analysis-engine` 整棵子树搬入：该子树对股票模块零引用，
+// 寄居股票 crate 只会让「OPC crate → 股票 crate」多一条假构建边（audit-l1-blockers 29 处）。
+pub mod opc;
 pub mod self_improving;
 pub mod work_item;
 pub mod work_item_service;

@@ -55,6 +55,13 @@ interface SchemaUpdateEventDetail {
   newSchema?: UISchema;
   /** 目标 scope；"__global__" 广播到所有 renderer，否则仅匹配 rendererId */
   scope?: string;
+  /**
+   * 更新来源是否受限（插件来源 Schema）。
+   *
+   * 受限来源**必须**带 scope：缺省 scope 在下面是「广播」，会把恶意节点塞进可信渲染树，
+   * 而节点动作以该树的权限面执行 ⇒ 绕过闸门。故收端对「受限且无 scope」一律丢弃。
+   */
+  sourceRestricted?: boolean;
 }
 
 const NEEDS_CHILD_PREPROCESSING = new Set(["Tabs", "Accordion", "Form"]);
@@ -518,6 +525,10 @@ export const DynamicUIRenderer: React.FC<DynamicUIRendererProps> = React.memo(
     useEffect(() => {
       const handleSchemaUpdate = (event: Event) => {
         const detail = (event as CustomEvent<SchemaUpdateEventDetail>).detail;
+        // 受限来源缺 scope ⇒ 丢弃（否则就是跨树广播，见 detail.sourceRestricted 的注释）
+        if (detail.sourceRestricted && !detail.scope) {
+          return;
+        }
         if (detail.scope && detail.scope !== "__global__" && detail.scope !== rendererId) {
           return;
         }

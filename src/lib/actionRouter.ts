@@ -25,6 +25,14 @@ export interface ActionContext {
    * 插件 Schema 只要调一个权限更宽的目标 skill 的 handler 就绕过了动作闸。
    */
   sourceRestricted?: boolean;
+  /**
+   * 当前渲染树的 scope id（`DynamicUIRenderer` 的 rendererId）。
+   *
+   * 为什么必须进上下文：`update-schema` 经 CustomEvent 广播到**所有** renderer，靠 detail 里的
+   * `scope` 收窄目标。来源受限的树若不带 scope，内层（`chain` / `handler`）派发的更新就没有
+   * 目标约束 ⇒ 能把恶意节点替换进**可信**渲染树，在那里以不受限权限执行（实测绕过路径）。
+   */
+  scope?: string;
   _chainDepth?: number;
   /**
    * 路由导航函数（由 React 调用方注入）。
@@ -603,14 +611,27 @@ export class ActionRouter {
     });
 
     // update-schema: 动态更新 UI Schema（通过 CustomEvent 通知 DynamicUIRenderer）
-    this.declarativeExecutors.set("update-schema", async (action, _ctx) => {
+    this.declarativeExecutors.set("update-schema", async (action, ctx) => {
       if (action.type !== "update-schema") {
         return { success: false, error: i18n.t("actionRouter.typeMismatch") };
+      }
+      // 受限来源：没有 scope 就**不派发**。缺省的 detail.scope 在接收端是「广播到所有
+      // renderer」，等于把恶意节点塞进可信树（`chain` 内层走的就是这条执行器）。
+      if (ctx.sourceRestricted && !ctx.scope) {
+        return { success: false, error: i18n.t("actionRouter.commandPermissionDenied", { command: "update-schema" }) };
       }
       const { schemaId, operation, path, newSchema } = action as Record<string, unknown>;
       window.dispatchEvent(
         new CustomEvent("dynamic-ui:schema-update", {
-          detail: { schemaId, operation, path, newSchema },
+          detail: {
+            schemaId,
+            operation,
+            path,
+            newSchema,
+            // 受限来源强制钉在自己的树上；可信来源维持原行为（不传 scope ⇒ 广播）。
+            scope: ctx.sourceRestricted ? ctx.scope : undefined,
+            sourceRestricted: Boolean(ctx.sourceRestricted),
+          },
         }),
       );
       return { success: true, data: { schemaId, operation } };

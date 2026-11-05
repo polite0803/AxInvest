@@ -174,6 +174,59 @@ describe("插件页面容器那条链（DynamicUIStandalone）", () => {
   });
 });
 
+describe("受限来源的 update-schema 只能改自己的树", () => {
+  const restricted = { commands: ["dynamic_ui_*"], events: [], storeRead: [], storeWrite: [], navigate: [] };
+
+  /** 收集广播事件（渲染树不依赖具体 React 结构，直接钉派发出来的 detail）。 */
+  function collectUpdates() {
+    const events: CustomEvent[] = [];
+    const handler = (e: Event) => events.push(e as CustomEvent);
+    window.addEventListener("dynamic-ui:schema-update", handler);
+    return {
+      events,
+      stop: () => window.removeEventListener("dynamic-ui:schema-update", handler),
+    };
+  }
+
+  const updateAction = {
+    type: "update-schema",
+    schemaId: "root",
+    operation: "replace",
+    path: "/children/0",
+  } as unknown as DynamicAction;
+
+  it("受限来源：派发的更新钉在当前 scope，且标记受限", async () => {
+    const { events, stop } = collectUpdates();
+    const { executeActions } = await import("@/lib/dynamicUI/EventHandlerEngine");
+    await executeActions([updateAction], { permissions: restricted, scope: "dui-self" });
+    stop();
+
+    expect(events).toHaveLength(1);
+    const detail = events[0].detail as { scope?: string; sourceRestricted?: boolean };
+    expect(detail.scope).toBe("dui-self");
+    expect(detail.sourceRestricted).toBe(true);
+  });
+
+  it("受限来源但没有 scope ⇒ 不派发（缺省 scope 等于广播进可信树）", async () => {
+    const { events, stop } = collectUpdates();
+    const { executeActions } = await import("@/lib/dynamicUI/EventHandlerEngine");
+    await executeActions([updateAction], { permissions: restricted });
+    stop();
+
+    expect(events).toHaveLength(0);
+  });
+
+  it("可信来源维持原行为：不带 scope（广播）", async () => {
+    const { events, stop } = collectUpdates();
+    const { executeActions } = await import("@/lib/dynamicUI/EventHandlerEngine");
+    await executeActions([updateAction], {});
+    stop();
+
+    expect(events).toHaveLength(1);
+    expect((events[0].detail as { scope?: string }).scope).toBeUndefined();
+  });
+});
+
 describe("按 schemaId 兜底（DynamicUIRenderer 直渲染，覆盖路由入口）", () => {
   const renderWithPluginRecord = (action: DynamicAction) => {
     h.storeState.currentSchema = makeRecord("plugin", action);

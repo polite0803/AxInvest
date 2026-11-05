@@ -52,6 +52,9 @@ export async function executeActions(
     // 来源受限标记：`permissions` 非空即代表「按来源收紧」（可信来源传的是 undefined），
     // handler 执行器据此拒绝借目标 skill 的 manifest 放宽（见 actionRouter 的同名字段）。
     sourceRestricted: permissions !== undefined,
+    // 当前渲染树 scope：`chain` / `handler` 内层的 update-schema 经 ActionRouter 派发，
+    // 没这个值就只能广播（会被可信树接收）⇒ 受限来源必须钉在自己树上。
+    scope,
   };
 
   for (const action of actions) {
@@ -100,11 +103,9 @@ async function executeUpdateSchema(
     scope?: string;
   };
 
-  // 受限来源只能改自己那棵树：显式 `__global__` 降级为当前 scope；
-  // 连当前 scope 都没有（非 renderer 上下文）时直接丢弃，不退回广播。
-  const targetScope = restricted
-    ? (config.scope && config.scope !== "__global__" ? config.scope : currentScope)
-    : (config.scope ?? currentScope ?? "__global__");
+  // 受限来源只能改自己那棵树：**忽略 config.scope**（插件可以在动作里写死别的 rendererId），
+  // 只认当前渲染树的 scope；连当前 scope 都没有（非 renderer 上下文）时直接丢弃，不退回广播。
+  const targetScope = restricted ? currentScope : (config.scope ?? currentScope ?? "__global__");
   if (!targetScope) {
     console.warn("[DynamicUI] 受限来源的 update-schema 缺少 scope，已丢弃");
     return;

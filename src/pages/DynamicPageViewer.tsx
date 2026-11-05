@@ -3,10 +3,11 @@
 import { DynamicUIRenderer } from "@/components/dynamicUI/DynamicUIRenderer";
 import { SchemaIdContext } from "@/components/dynamicUI/SchemaIdContext";
 import { RouteGuard } from "@/components/shared/RouteGuard";
+import { permissionsForSchemaRecord } from "@/lib/dynamicUI/schemaActionPermissions";
 import { useDynamicUIStore, usePluginStore } from "@/stores";
-import type { DynamicAction, UISchema } from "@/types";
+import type { DynamicAction, DynamicUISchemaRecord, UISchema } from "@/types";
 import { Result, Spin } from "antd";
-import { useEffect, useMemo, useReducer } from "react";
+import { useEffect, useMemo, useReducer, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 
@@ -48,6 +49,9 @@ export function DynamicPageViewer() {
   }
 
   const [viewState, dispatch] = useReducer(viewReducer, { kind: "loading" });
+  // 记录留一份：动作权限面按**这条记录自己的 origin** 判，不靠全局 currentSchema 回查
+  // （回查可能被同屏其它记录覆盖 ⇒ 落 undefined ⇒ 不受限）。
+  const [record, setRecord] = useState<DynamicUISchemaRecord | null>(null);
 
   useEffect(() => {
     if (!schemaId) {
@@ -55,6 +59,7 @@ export function DynamicPageViewer() {
     }
 
     let cancelled = false;
+    setRecord(null);
     dispatch({ type: "start_load" });
 
     getSchema(schemaId)
@@ -64,6 +69,7 @@ export function DynamicPageViewer() {
         if (!parsed) {
           dispatch({ type: "load_error", message: t("dynamicUIManager.invalidSchema") });
         } else {
+          setRecord(record);
           // 插件来源的 Schema 才做动作回流（`origin: "plugin"` 时 `ownerId` 即 pluginId）。
           dispatch({
             type: "load_ok",
@@ -112,13 +118,18 @@ export function DynamicPageViewer() {
   const isError = viewState.kind === "error";
   const errorSubTitle = isError ? viewState.message : undefined;
   const readySchema = viewState.kind === "ready" ? viewState.schema : null;
+  const actionPermissions = useMemo(() => permissionsForSchemaRecord(record), [record]);
 
   return (
     <RouteGuard allowed={readySchema !== null} subTitle={errorSubTitle}>
       {readySchema && (
         <div className="p-6" style={{ flex: 1, overflow: "auto" }}>
           <SchemaIdContext.Provider value={{ schemaId }}>
-            <DynamicUIRenderer schema={readySchema} onAction={handleAction} />
+            <DynamicUIRenderer
+              schema={readySchema}
+              onAction={handleAction}
+              actionPermissions={actionPermissions}
+            />
           </SchemaIdContext.Provider>
         </div>
       )}

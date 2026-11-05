@@ -36,8 +36,9 @@
 
 import { DynamicUIRenderer } from "@/components/dynamicUI/DynamicUIRenderer";
 import { SchemaIdContext } from "@/components/dynamicUI/SchemaIdContext";
+import { permissionsForSchemaRecord } from "@/lib/dynamicUI/schemaActionPermissions";
 import { useDynamicUIStore } from "@/stores";
-import type { DynamicAction, UISchema } from "@/types";
+import type { DynamicAction, DynamicUISchemaRecord, UISchema } from "@/types";
 import { Alert, Spin } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -71,20 +72,25 @@ export function PluginSchemaCard({ spec, onAction, style }: PluginSchemaCardProp
   const { t } = useTranslation();
   const getSchema = useDynamicUIStore((s) => s.getSchema);
   const [schema, setSchema] = useState<UISchema | null>(null);
+  // 记录本身留一份：权限面要从**这张卡自己的记录**判来源，不能靠全局 `currentSchema` 回查
+  // （同屏多张卡片时后加载者会覆盖它 ⇒ 先渲染的那张落到 undefined ⇒ 不受限）。
+  const [record, setRecord] = useState<DynamicUISchemaRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
     setSchema(null);
+    setRecord(null);
     setError(null);
     void (async () => {
       try {
-        const record = await getSchema(spec.schemaId);
+        const loaded = await getSchema(spec.schemaId);
         if (!mounted) {
           return;
         }
         // 与 DynamicUIStandalone.tsx:59 同一口径：库里存的是 schemaJson 串，解析失败按加载失败处理
-        setSchema(JSON.parse(record.schemaJson) as UISchema);
+        setSchema(JSON.parse(loaded.schemaJson) as UISchema);
+        setRecord(loaded);
       } catch (e) {
         if (mounted) {
           setError(e instanceof Error ? e.message : String(e));
@@ -95,6 +101,9 @@ export function PluginSchemaCard({ spec, onAction, style }: PluginSchemaCardProp
       mounted = false;
     };
   }, [spec.schemaId, getSchema]);
+
+  // 来源 → 动作权限面：插件来源注入受限面，其余（user/ai/builtin）undefined 即不收紧。
+  const actionPermissions = useMemo(() => permissionsForSchemaRecord(record), [record]);
 
   // SchemaIdContext 与页面侧同款：表单类节点靠它定位 schema（插件页也是这么包的）
   const schemaIdValue = useMemo(() => ({ schemaId: spec.schemaId }), [spec.schemaId]);
@@ -120,7 +129,12 @@ export function PluginSchemaCard({ spec, onAction, style }: PluginSchemaCardProp
         : schema
         ? (
           <SchemaIdContext.Provider value={schemaIdValue}>
-            <DynamicUIRenderer schema={schema} dataContext={spec.dataContext} onAction={onAction} />
+            <DynamicUIRenderer
+              schema={schema}
+              dataContext={spec.dataContext}
+              onAction={onAction}
+              actionPermissions={actionPermissions}
+            />
           </SchemaIdContext.Provider>
         )
         : (

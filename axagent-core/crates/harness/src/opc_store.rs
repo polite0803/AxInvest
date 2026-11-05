@@ -21,7 +21,7 @@
 //! `opc_blog_posts.content` 是 `column_type = "Text"` 的正文列（博客全文，单条可达数十 KB
 //! 甚至更多），而现网两个消费面都不读它：
 //! - `src/pages/opc/components/SitesTab.tsx` 的 `BlogPost` 声明里**没有** `content`
-//!   （列表列只有 title / slug / status / view_count / tags）；
+//!   （列表列只读 title / slug / published / viewCount / tags，键名与本视图逐字同名）；
 //! - `src/pages/opc/components/DashboardTab.tsx` 只取 `posts.length` 当 KPI 计数。
 //!
 //! 要读正文应走宿主详情面（`SiteService::get_blog_post`，本接缝不承载），裁剪先例见

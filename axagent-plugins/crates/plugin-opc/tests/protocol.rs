@@ -219,7 +219,8 @@ fn identity_check_accepts_any_marketplace_but_rejects_foreign_plugin() {
 /// 2. 调用方没给分页 ⇒ 缺省只带 `offset: 0`、**不带 `limit`**（缺省档归宿主，插件不另抄数字）；
 /// 3. 整表语义：`total` 大于本页 ⇒ 必须再发一帧（`offset` 按**实际取回条数**推进），
 ///    直到取满才回执 —— 前端 `blog_posts_count` 取的就是这个数组的 `length`；
-/// 4. 出参线格式是 snake_case（既存前端的 `interface BlogPost` 与被替代的宿主 DTO 同形），
+/// 4. 出参线格式 = 接缝视图逐字 camelCase（禁区 13：插件出口不得有第二套键名，前端
+///    `SitesTab.tsx` 的 `interface BlogPost` 与表格列 `dataIndex` 就是这套键名），
 ///    且 `content` 不出现。
 #[test]
 fn command_frame_lists_opc_blog_posts_via_host_seam() {
@@ -271,12 +272,33 @@ fn command_frame_lists_opc_blog_posts_via_host_seam() {
     let rows = reply["value"].as_array().expect("列表命令必须回数组").clone();
     assert_eq!(rows.len(), 2, "total=2 必须取尽成 2 行：{rows:?}");
     assert_eq!(rows[0]["id"], "post-1");
-    assert_eq!(rows[0]["view_count"], 42, "viewCount → view_count 是给前端表格列的线格式");
-    assert_eq!(rows[0]["published_at"], 1_700_000_000_000_i64);
+    assert_eq!(rows[0]["viewCount"], 42, "接缝的 camelCase 键必须原样透出（禁区 13）");
+    assert_eq!(rows[0]["publishedAt"], 1_700_000_000_000_i64);
     assert_eq!(rows[1]["id"], "post-2");
-    // 线格式形态锁：camelCase 源键不透出，正文列不出现。
-    for bad in ["viewCount", "publishedAt", "createdAt", "updatedAt", "content"] {
-        assert!(rows[0].get(bad).is_none(), "不得透出接缝侧键 {bad}：{}", rows[0]);
+    // 线格式形态锁：键集合逐字 = 接缝视图的 10 个 camelCase 键，出口不得改写。
+    let mut keys: Vec<String> = rows[0].as_object().expect("行应是对象").keys().cloned().collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "createdAt",
+            "excerpt",
+            "id",
+            "published",
+            "publishedAt",
+            "slug",
+            "tags",
+            "title",
+            "updatedAt",
+            "viewCount"
+        ]
+    );
+    for bad in ["view_count", "published_at", "created_at", "updated_at", "content"] {
+        assert!(
+            rows[0].get(bad).is_none(),
+            "不得出现 snake_case 改写键 / 正文列键 {bad}：{}",
+            rows[0]
+        );
     }
 
     worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));

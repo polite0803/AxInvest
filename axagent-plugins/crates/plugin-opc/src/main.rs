@@ -7,8 +7,9 @@
 //!
 //! #36 第 1 批只有骨架（describe + 帧循环 + shutdown，零业务命令）。**第 3–4 步**接进第一条
 //! 真实链路：命名命令 `opc_list_blog_posts` → 出站只读接缝 `opc.store` 的 `list_blog_posts`
-//! op → 宿主 provider → dao。数据主权（连接池、列裁剪、分页闸）全在宿主侧，本进程只做两件
-//! 宿主干不了的事：线格式适配与「整表语义」的分页取尽（见 [`blog_posts`]）。
+//! op → 宿主 provider → dao。数据主权（连接池、列裁剪、分页闸）全在宿主侧，本进程只做宿主
+//! 做不了的一件事：「整表语义」的分页取尽（见 [`blog_posts`]）。出参线格式逐字透传接缝视图
+//! 的 camelCase，**不再有任何键名适配层**（禁区 13 无例外，判据见该文「出参线格式」一节）。
 //!
 //! 为什么用 `Peer` 而不是自写读循环：插件一旦能主动调宿主，同一条管道上就同时挂着
 //! 「我方请求的响应」与「对端发来的新请求」，朴素读一帧写一帧必然错配。`Peer` 把对端请求
@@ -113,8 +114,8 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
         .into_frame_response();
     }
     let outcome = match frame.command.as_str() {
-        // 博客列表取数：行数据来自宿主 `opc.store` 的 `list_blog_posts`，本命令只做
-        // 线格式适配与整表分页（形状与判据见 [`blog_posts`]）。
+        // 博客列表取数：行数据来自宿主 `opc.store` 的 `list_blog_posts`，本命令只做整表
+        // 分页（形状与判据见 [`blog_posts`]）。
         COMMAND_LIST_BLOG_POSTS => match blog_posts(&frame.input, &request.call_chain, peer) {
             Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
             Err((code, message)) => {
@@ -161,14 +162,23 @@ fn declaration() -> FrameResponse {
 /// 缺省档也交给宿主 ⇒ 本进程里没有第二个 50 / 200，同 `plugin-stock` 的
 /// `stock_analysis_records` 判据）。
 ///
-/// ## 出参为什么是 snake_case
+/// ## 出参线格式 = 接缝视图逐字 camelCase（禁区 13，无例外）
 ///
-/// 接缝视图（`BlogPostView`）按全站约定输出 camelCase，但本命令的**消费方**是既存前端：
-/// `SitesTab.tsx` / `DashboardTab.tsx` 里的 `BlogPost` 接口与被替代的宿主 DTO
-/// （`company-runtime` 的 `BlogPost`，**没有** `#[serde(rename_all)]`）都是 snake_case，且
-/// `SitesTab` 的表格列按 `dataIndex: "view_count"` 取值。本批的改动面只允许「换调用通道」，
-/// 不含改字段名 ⇒ 出口逐字复刻旧命令的线格式，否则那一列静默变空。camelCase 收口是前端的
-/// 独立批次（连同那两个 `interface BlogPost` 一起改），不在这里半途换。
+/// 出参就是接缝视图 `BlogPostView`（契约：harness `src/opc_store.rs`，该结构体带
+/// `#[serde(rename_all = "camelCase")]`）的回帧键名，本进程**不做任何键名改写**：
+/// `publishedAt` / `viewCount` / `createdAt` / `updatedAt` / `excerpt` / `slug` / `tags` /
+/// `title` / `id` / `published`。前端消费方（`src/pages/opc/components/SitesTab.tsx` 的
+/// `interface BlogPost` 与表格列 `dataIndex: "viewCount"`）与这套键名逐字对齐 —— 键名在
+/// 整条链上只有一套。
+///
+/// 这里曾有的一层 camelCase → snake_case 逐字段映射（复刻被删宿主 DTO
+/// `company-runtime::BlogPost` 的蛇形线格式）已删除 —— 那是禁区 13 全站 camelCase 约定的一处
+/// 刻意偏离，迁移初期为了「本批只换通道、不动前端」而临时保留，#167 连同那两个前端消费面
+/// 一起收口。新增命令**不许**再建这种出口适配层：接缝给什么就交什么。
+///
+/// 唯一仍在出口做的形状约束是**字段集合不扩容**：出参逐字 = 接缝回帧里的行对象，接缝哪天
+/// 多给一个字段，它会直接出现在出参里 —— 由 `tests/protocol.rs` 与本文件的键集合用例逐字
+/// 钉住，扩容属于契约变更，要走评审而不是静默发生。
 ///
 /// ## 少掉的字段
 ///
@@ -191,7 +201,8 @@ fn blog_posts(
             args.insert("offset".to_string(), offset);
         }
         let page = call_list_blog_posts(peer, Value::Object(args), call_chain)?;
-        return Ok(Value::Array(post_rows_of(&page).iter().map(blog_post_wire).collect()));
+        // 逐字透传接缝视图（键名 camelCase，禁区 13）：出口不再有第二套键名。
+        return Ok(Value::Array(post_rows_of(&page)));
     }
 
     // 整表语义：offset 按**实际取回的条数**推进（不是按请求的 limit 推进）——最后一页本来就短。
@@ -204,7 +215,7 @@ fn blog_posts(
         // 而空页是越界 offset 的合法回帧（契约：空数组不是错误）—— 只看 `total` 会吊死。
         let total = page.get("total").and_then(Value::as_u64).unwrap_or(0);
         let fetched = posts.len();
-        rows.extend(posts.iter().map(blog_post_wire));
+        rows.extend(posts);
         offset += fetched as u64;
         if fetched == 0 || rows.len() as u64 >= total {
             break;
@@ -236,34 +247,18 @@ fn call_list_blog_posts(
 }
 
 /// 接缝回帧里的 `posts` 数组（缺键 / 非数组 ⇒ 空页，**不** panic）。
+///
+/// 它交出的行**原样**成为命令出参：键名 = 接缝视图的 camelCase，出口不做任何改写
+/// （判据见 [`blog_posts`] 的「出参线格式」一节）。
 fn post_rows_of(page: &Value) -> Vec<Value> {
     page.get("posts").and_then(Value::as_array).cloned().unwrap_or_default()
-}
-
-/// 接缝视图（camelCase）→ 前端既存消费的线格式（snake_case）。
-///
-/// 逐字段点名而非整体搬运：接缝哪天多给一个字段，它不该自动出现在命令出参里
-/// （出参形状的唯一权威是那两位前端消费方 + 被替代的宿主 DTO）。
-fn blog_post_wire(row: &Value) -> Value {
-    json!({
-        "id": row.get("id"),
-        "title": row.get("title"),
-        "slug": row.get("slug"),
-        "excerpt": row.get("excerpt"),
-        "tags": row.get("tags"),
-        "published": row.get("published"),
-        "published_at": row.get("publishedAt"),
-        "view_count": row.get("viewCount"),
-        "created_at": row.get("createdAt"),
-        "updated_at": row.get("updatedAt"),
-    })
 }
 
 // ── 测试 ────────────────────────────────────────────────────────────────
 //
 // 内联测试 mod 追加在文件末尾（`items_after_test_module` 只在 clippy 下暴露）。
 //
-// 只测两件纯函数事：线格式映射（camelCase → snake_case）与回帧取列的容错。
+// 只测两件纯函数事：回帧取列的容错，与「出口零键名改写 + 键集合逐字 camelCase」的形态锁。
 // 「真管道上发帧 / 分页取尽」归 `tests/protocol.rs`（需要真进程与真 stdin/stdout）。
 
 #[cfg(test)]
@@ -285,47 +280,58 @@ mod tests {
         })
     }
 
-    /// 出参键集合 = 被替代的宿主 DTO 的 snake_case 形状。前端表格列按 `dataIndex` 取值，
-    /// 键名漂一个字母不会报错，只会让那一列静默变空 ⇒ 这是本命令唯一的形态锁。
+    /// 出口的「零键名改写」形态锁：命令出参逐字 = 接缝回帧里的行，键集合是那 10 个 camelCase
+    /// 键（禁区 13）。前端表格列按 `dataIndex` 取值，键名漂一个字母不会报错，只会让那一列
+    /// 静默变空 ⇒ 这是本命令唯一的形态锁。
     #[test]
-    fn wire_is_snake_case_and_exactly_the_legacy_keys() {
-        let val = blog_post_wire(&seam_row());
-        let mut keys: Vec<String> = val.as_object().expect("行应是对象").keys().cloned().collect();
+    fn rows_pass_through_verbatim_with_exactly_the_camel_case_keys() {
+        let rows = post_rows_of(&json!({ "posts": [seam_row()] }));
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        // ① 出口没有适配层：交出的行与接缝回帧逐字节相同。
+        assert_eq!(*row, seam_row(), "出参必须逐字透传接缝视图，不得改写键名");
+
+        // ② 键集合逐字钉住：接缝扩容新字段要连同前端一起走评审，不许静默出现在出参里。
+        let mut keys: Vec<String> = row.as_object().expect("行应是对象").keys().cloned().collect();
         keys.sort();
         assert_eq!(
             keys,
             [
-                "created_at",
+                "createdAt",
                 "excerpt",
                 "id",
                 "published",
-                "published_at",
+                "publishedAt",
                 "slug",
                 "tags",
                 "title",
-                "updated_at",
-                "view_count"
+                "updatedAt",
+                "viewCount"
             ]
         );
-        for camel in ["publishedAt", "viewCount", "createdAt", "updatedAt", "content"] {
-            assert!(val.get(camel).is_none(), "不得把接缝的 camelCase / 正文列透出：{camel}");
+
+        // ③ snake_case 改写与正文列一律不许出现。
+        for bad in ["published_at", "view_count", "created_at", "updated_at", "content"] {
+            assert!(row.get(bad).is_none(), "出口不得再造 snake_case / 正文列键：{bad}");
         }
-        assert_eq!(val["view_count"], json!(42));
-        assert_eq!(val["published_at"], json!(1_700_000_000_000_i64));
-        assert_eq!(val["tags"], json!(["opc", "blog"]));
+        assert_eq!(row["viewCount"], json!(42));
+        assert_eq!(row["publishedAt"], json!(1_700_000_000_000_i64));
+        assert_eq!(row["tags"], json!(["opc", "blog"]));
     }
 
-    /// 草稿（`publishedAt = null`）必须透出 `null`：缺键与 `null` 在前端是两种东西
-    /// （`interface BlogPost` 声明的是 `number | null`）。
+    /// 草稿（`publishedAt = null`）必须透出 `null` 且**保留键**：契约里它是 `Option<i64>`，
+    /// 序列化出的就是 `null`；前端把「值为 null」和「键不存在」当成两种东西（后者读出来是
+    /// `undefined`，会落进缺省分支）。
     #[test]
     fn null_stays_null_and_key_still_present() {
         let mut row = seam_row();
         row["publishedAt"] = json!(null);
         row["published"] = json!(false);
-        let val = blog_post_wire(&row);
-        assert_eq!(val["published_at"], json!(null));
-        assert!(val.get("published_at").is_some(), "键必须存在");
-        assert_eq!(val["published"], json!(false));
+        let rows = post_rows_of(&json!({ "posts": [row] }));
+        assert_eq!(rows[0]["publishedAt"], json!(null));
+        assert!(rows[0].get("publishedAt").is_some(), "键必须存在");
+        assert_eq!(rows[0]["published"], json!(false));
     }
 
     #[test]

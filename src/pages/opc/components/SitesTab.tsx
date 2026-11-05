@@ -8,11 +8,12 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 /**
- * 博客列表的取数命令（`plugin.opc` 的命名命令，manifest `commands[].name` 逐字一致）。
+ * 博客列表的取数命令（`plugin.opc` 的命名命令，与 manifest `commands[].name` 逐字一致）。
  *
  * 原先这条是宿主 Tauri 命令 `opc_list_blog_posts`，#36 第 4 步迁入 OPC 插件 ⇒ 宿主侧已删。
- * 线格式（snake_case 键）与那条命令逐字相同，所以本文件的 `interface BlogPost` 与表格列
- * `dataIndex` 都不用动；接缝视图本身是 camelCase，改名发生在插件出口（见 `plugin-opc`）。
+ * 出参线格式 = 接缝视图 `BlogPostView` 的 camelCase 键，插件出口不再做键名改写（禁区 13）⇒
+ * 本文件 `interface BlogPost` 与表格列 `dataIndex` 用的就是那套 camelCase 名，与前端其它
+ * 仍由宿主命令喂的数据（`LandingPage` / `ContactSubmission`，线格式仍是 snake_case）互不相干。
  */
 const LIST_BLOG_POSTS_COMMAND = "opc_list_blog_posts";
 
@@ -26,6 +27,10 @@ interface LandingPage {
   created_at: number;
 }
 
+// 插件命令 `opc_list_blog_posts` 的行类型 = 接缝视图 `BlogPostView` 的本面板已读子集
+// （帧里其实有 10 个 camelCase 键，含 `publishedAt` / `updatedAt`，这里只声明消费到的那些）。
+// ⚠ 时间口径是 epoch **毫秒**（接缝契约），与同文件 `LandingPage.created_at` /
+// `ContactSubmission.created_at`（宿主 DTO，按秒 `* 1000` 渲染）不同单位，别照抄。
 interface BlogPost {
   id: string;
   title: string;
@@ -33,8 +38,8 @@ interface BlogPost {
   excerpt: string;
   tags: string[];
   published: boolean;
-  view_count: number;
-  created_at: number;
+  viewCount: number;
+  createdAt: number;
 }
 
 interface ContactSubmission {
@@ -331,7 +336,7 @@ function BlogPostsPanel() {
       render: (_: unknown, r: BlogPost) =>
         r.published ? <Tag color="green">{t("opc.site.published")}</Tag> : <Tag>{t("opc.site.draftTag")}</Tag>,
     },
-    { title: t("opc.site.columnViews"), dataIndex: "view_count", key: "views", width: 60 },
+    { title: t("opc.site.columnViews"), dataIndex: "viewCount", key: "views", width: 60 },
     {
       title: t("opc.site.columnTags"),
       key: "tags",

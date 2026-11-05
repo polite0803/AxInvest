@@ -47,8 +47,14 @@ const TOOL_SET_VERSION: &str = "0.1.0";
 const MARKET_SEAM: &str = "market.quote";
 /// 任务源取数走的宿主接缝（B8-1b）：工作流执行的运行态只有宿主引擎知道。
 const WORKFLOW_RUN_SEAM: &str = "workflow.run";
+/// 单股分析记录取数走的宿主接缝（#149 第 1 步）：宿主发起的分析记录在 `stock_analyses` 表里，
+/// `workflow.run` 按 owner 隔离看不见。清单声明（`taskSources[]`）留给后续批 —— 本步只把
+/// 出站准入（`calls`）与本命令的实现打通。
+const ANALYSIS_RECORD_SEAM: &str = "analysis.record";
 /// 插件贡献的命名命令（manifest `commands[].name` / `taskSources[].command` 必须逐字一致）。
 const COMMAND_RECENT_RUNS: &str = "list_recent_workflow_runs";
+/// 单股分析记录取数命令（同上：清单声明留给后续批，本步只保证通道可跑）。
+const COMMAND_ANALYSIS_RECORDS: &str = "list_stock_analysis_records";
 /// 一次任务源取数的默认上限：与宿主 `list_recent` 的缺省值一致，
 /// 前端泛型适配器不传 limit 时也走这一档（不是插件自己拍的第二个数）。
 const DEFAULT_TASK_SOURCE_LIMIT: u32 = 50;
@@ -144,6 +150,17 @@ fn handle_command(
                 },
             }
         },
+        // 单股分析记录取数：行数据来自宿主 `analysis.record` 的 `list`（宿主发起的记录也在内）。
+        // 只做「状态词表翻译 + 形状收敛」，行字段与过滤判据见 `stock_analysis_records`。
+        COMMAND_ANALYSIS_RECORDS => {
+            let rows = stock_analysis_records(&frame.input, &request.call_chain, peer);
+            match rows {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
+        },
         other => CommandOutcome::Fault(CommandFault::for_frame(
             &frame,
             error_codes::PLUGIN_COMMAND_UNKNOWN,
@@ -164,7 +181,11 @@ fn declaration() -> FrameResponse {
         serde_json::to_value(PluginDeclaration {
             proto_version: AXAGENT_PLUGIN_PROTO_VERSION,
             subscribe: Vec::new(),
-            calls: vec![MARKET_SEAM.to_string(), WORKFLOW_RUN_SEAM.to_string()],
+            calls: vec![
+                MARKET_SEAM.to_string(),
+                WORKFLOW_RUN_SEAM.to_string(),
+                ANALYSIS_RECORD_SEAM.to_string(),
+            ],
             capabilities: vec![CapabilityDecl {
                 seam: "tool.set".to_string(),
                 op: "exec".to_string(),
@@ -354,6 +375,132 @@ fn map_execution_state_to_run_state(status: &str) -> &'static str {
         "failed" => "failed",
         "cancelled" => "canceled",
         _ => "waiting",
+    }
+}
+
+/// 单股分析记录取数命令：`PluginTaskRunRow[]` 的 JSON 数组。
+///
+/// 数据一律经宿主 `analysis.record` 的 `list` 取 —— 记录表与「宿主发起的记录」只有宿主知道
+/// （`workflow.run` 按 owner 隔离，`list_recent` 一条都看不见宿主发起的分析，判据见
+/// `harness/src/analysis_record.rs` 模块头）。本函数只做宿主干不了的两件事：
+///
+/// 1. **状态词表翻译**：宿主落库值（`completed` / `failed` / `error` / `interrupted` /
+///    `canceled` / `cancelled` / `paused` / `queued` / `pending` / `running`）→ 任务中心七态。
+///    这张表此前住在宿主适配器 `mapAnalysisState`（`stockAnalysis.adapter.ts`），#149 第 2 步
+///    删适配器后**以这里为准**；表外值落 `failed`（沿用宿主适配器的裁定：不得默认成
+///    `running`，否则僵死记录会一直显示「运行中」并触发轮询）。
+/// 2. **根记录收窄**：`parentAnalysisId != null` 的是时间旅行批次的子行（宿主适配器同样只取
+///    根记录，replay 子行由 time-travel 源代表）。⚠ 收窄发生在插件侧 ⇒ 宿主返回的 `total`
+///    仍是整表行数，**不能**当作「根记录总数」参与分页算术（接缝口径就是这样，见契约模块头）。
+///
+/// ⚠ **不交 `deepLink`**：站内路由是宿主的路由契约（`src/lib/investRoutes.ts`），插件侧
+/// 抄一份就会随着宿主改路由静默 404。缺省 ⇒ 该 run 暂不可打开；路由拼装归后续批（与
+/// `task_run_row_from_execution` 的选择同一条判据）。
+fn stock_analysis_records(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut Peer<StdinLock<'static>, StdoutLock<'static>>,
+) -> Result<Value, (String, String)> {
+    // `limit` / `offset` 原样透传：**不在插件侧钳位**（越界由宿主按契约区间拒收），
+    // 缺省也交给宿主 —— 插件再抄一份 50 / 200 就是第二套口径。
+    let mut args = serde_json::Map::new();
+    if let Some(limit) = input.get("limit").filter(|v| !v.is_null()) {
+        args.insert("limit".to_string(), limit.clone());
+    }
+    if let Some(offset) = input.get("offset").filter(|v| !v.is_null()) {
+        args.insert("offset".to_string(), offset.clone());
+    }
+
+    let reply = peer
+        .call_seam(ANALYSIS_RECORD_SEAM, "list", Value::Object(args), call_chain.to_vec())
+        .map_err(|e| {
+            (error_codes::PLUGIN_COMMAND_FAILED.to_string(), format!("分析记录接缝调用失败：{e}"))
+        })?;
+    match reply.kind {
+        ResponseKind::Success => {
+            let page = reply.value.unwrap_or(Value::Null);
+            let records =
+                page.get("records").and_then(Value::as_array).cloned().unwrap_or_default();
+            let rows: Vec<Value> = records
+                .iter()
+                .filter(|record| match record.get("parentAnalysisId") {
+                    // 只交根记录：`null` / 缺键都算根（接缝对 `None` 的线格式是 `null`）。
+                    None | Some(Value::Null) => true,
+                    Some(_) => false,
+                })
+                .map(task_run_row_from_analysis_record)
+                .collect();
+            Ok(Value::Array(rows))
+        },
+        // 接缝报错 ⇒ 命令失败并**原样透传错误码**，不得退化成空列表
+        // （空数组在任务中心看起来像「今天没活」）。
+        ResponseKind::Error => Err((
+            reply.code.unwrap_or_else(|| error_codes::PLUGIN_COMMAND_FAILED.to_string()),
+            reply.message.unwrap_or_else(|| "分析记录接缝返回错误但未说明".to_string()),
+        )),
+    }
+}
+
+/// 分析记录视图（camelCase JSON）→ 任务中心一行。
+///
+/// 收成 [`PluginTaskRunRow`] 再序列化（行形状权威在 plugin-proto，不手搓键名）。
+///
+/// 结束时刻只用**完成时刻** `completedAt`，且仅在终态（succeeded / failed）且
+/// `completedAt >= createdAt` 时透出 —— 宿主 `updatedAt` 会被交易意图审核 / 结果回写顶掉
+/// （现网 65% 的 completed 行漂移 ≥ 24 小时），拿它算耗时会显示「跑了好几天」。耗时不在
+/// 这里算：两端点相减只发生在宿主泛型适配器一处。
+fn task_run_row_from_analysis_record(record: &Value) -> Value {
+    let status = record.get("status").and_then(Value::as_str).unwrap_or_default();
+    let state = map_analysis_state_to_run_state(status);
+    debug_assert!(
+        is_plugin_task_run_state(state),
+        "状态映射产出了表外值 `{state}`：宿主会静默按未知处理"
+    );
+    let id = record.get("id").and_then(Value::as_str).unwrap_or_default();
+    let stock_code = record.get("stockCode").and_then(Value::as_str).unwrap_or_default();
+    let stock_name = record.get("stockName").and_then(Value::as_str).unwrap_or_default();
+    let created_at = record.get("createdAt").and_then(Value::as_i64);
+    let completed_at = record.get("completedAt").and_then(Value::as_i64);
+    let finished_at = match (state, created_at, completed_at) {
+        ("succeeded" | "failed", Some(started), Some(completed)) if completed >= started => {
+            Some(completed)
+        },
+        _ => None,
+    };
+    let row = PluginTaskRunRow {
+        native_id: id.to_string(),
+        // 不含 i18n 前缀：宿主适配器把 `tasksCenter.source.stockAnalysis` 拼在名字前面，
+        // 插件侧不持有那套译键（`PluginTaskRunRow::name` 的「不经宿主 i18n」就指这一格）。
+        name: format!("{stock_code} {stock_name}").trim().to_string(),
+        state: state.to_string(),
+        // 记录表没有触发来源列（`config_id` 现网 0 行有值）⇒ 定时发起的分析无法与手动区分。
+        // 一律标 manual，与宿主适配器同口径（`stockAnalysis.adapter.ts:55` 的注释）。
+        trigger: Some("manual".to_string()),
+        started_at: created_at,
+        finished_at,
+        duration_ms: None,
+        deep_link: None,
+        raw: Some(record.clone()),
+    };
+    serde_json::to_value(row).expect("任务源行记录是可序列化的纯数据")
+}
+
+/// 分析记录落库状态 → 任务中心七态（词汇表 = `PLUGIN_TASK_RUN_STATES`）。
+///
+/// 逐条对齐宿主适配器的 `mapAnalysisState`（`stockAnalysis.adapter.ts`，大小写不敏感：宿主列
+/// 是自由文本）。表外值落 `failed` —— 这不是「已知失败」，而是宿主适配器当时的裁定：
+/// **不得默认成 `running`**（那会让僵死记录继续显示「运行中」并触发轮询）。#149 第 2 步删
+/// 适配器后本表即唯一权威，改默认档必须同时改这一格的理由。
+fn map_analysis_state_to_run_state(status: &str) -> &'static str {
+    match status.to_ascii_lowercase().as_str() {
+        "running" => "running",
+        "paused" => "paused",
+        "completed" => "succeeded",
+        "failed" | "error" => "failed",
+        "interrupted" | "canceled" | "cancelled" => "canceled",
+        "queued" | "pending" => "queued",
+        // 未知状态不得默认成 running（会让僵死记录一直显示运行中并触发轮询）。
+        _ => "failed",
     }
 }
 

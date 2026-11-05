@@ -384,6 +384,14 @@ pub use knowledge_vector::{
     CollectionInfoView, KeywordSearchRequest, KnowledgeChunkView, KnowledgeVectorProvider,
     VectorIndexOutcome, VectorIndexRequest, VectorSearchOutcome, VectorSearchRequest,
 };
+// ── 单股分析记录只读接缝（`analysis.record`，首批只有 `list`；视图裁剪见模块头）──
+// 与 `workflow.run` 的分工：`list_recent` 按 owner 只看插件自己的**执行**，
+// 宿主发起的单股分析记录在 `stock_analyses` 表里 ⇒ 需要一条独立的记录读面。
+pub mod analysis_record;
+pub use analysis_record::{
+    ANALYSIS_RECORD_LIST_DEFAULT_LIMIT, ANALYSIS_RECORD_LIST_LIMIT_RANGE,
+    AnalysisRecordListOutcome, AnalysisRecordProvider, AnalysisRecordView,
+};
 // ── 轨迹库只读接缝（`trajectory.store`，首批无写 op；视图裁剪与 limit 闸见模块头）──
 pub mod trajectory_store;
 pub use trajectory_store::{

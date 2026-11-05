@@ -1759,6 +1759,22 @@ pub async fn create_app_state_with_resource_dir(
         }
     }
 
+    // ── analysis.record 接缝：把 `stock_analyses` 的列表读面暴露给插件（只读 / 唯一 op `list`）──
+    // 为什么必须新建而不是复用 `workflow.run::list_recent`：后者按 owner 隔离，只看插件自己
+    // 发起的**执行**；宿主工作台 / 定时任务发起的单股分析记录在记录表里，插件一条都看不见
+    // （判据见 `harness/src/analysis_record.rs` 模块头）。provider 持 `sea_db` 的同一个句柄
+    // （`DatabaseConnection` 是 Clone 的句柄，与 `harness.db()` 指向同一连接池）。
+    // 失败只 warn，不阻断启动（与 market.quote / jobs.store 同策略）。
+    {
+        let provider: Arc<dyn axagent_harness::AnalysisRecordProvider> = Arc::new(
+            crate::init::analysis_record_service::HostAnalysisRecordStore::new(sea_db.clone()),
+        );
+        match axagent_harness::get_capability_registry().register_analysis_record(provider) {
+            Ok(_) => tracing::info!("analysis.record 接缝已注册 (BuiltIn)"),
+            Err(e) => tracing::warn!("analysis.record 注册失败: {e}"),
+        }
+    }
+
     // ── workflow.run 接缝：把宿主**独持**的 WorkEngine 以「异步 job」形态暴露给插件 ──
     // 契约已冻结（`axagent-core/crates/harness/src/workflow_run.rs`）：`start` 只受理并
     // 立即返回 `execution_id`（接缝预算 15s，绝不能 await DAG）；执行体在 provider 内

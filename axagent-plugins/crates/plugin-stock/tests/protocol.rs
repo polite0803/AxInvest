@@ -91,8 +91,9 @@ fn describe_declares_the_tool_seam_and_its_outbound_call() {
     assert!(caps.contains(&("tool.set", "exec")), "必须声明 tool.set 的执行面：{caps:?}");
     assert_eq!(
         declaration.calls,
-        vec!["market.quote".to_string(), "workflow.run".to_string()],
-        "出站接缝必须逐条声明，否则宿主 handle_call_seam 直接拒调（行情 + 任务源取数）"
+        vec!["market.quote".to_string(), "workflow.run".to_string(), "analysis.record".to_string(),],
+        "出站接缝必须逐条声明，否则宿主 handle_call_seam 直接拒调\
+         （行情 + 工作流任务源 + 单股分析记录）"
     );
 
     worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
@@ -465,6 +466,141 @@ fn command_frame_lists_recent_workflow_runs_as_task_center_rows() {
     assert_eq!(failed.kind, ResponseKind::Error);
     assert_eq!(failed.code.as_deref(), Some("TEST_WORKFLOW_RUN_UNAVAILABLE"));
     assert_eq!(failed.request_id.as_deref(), Some("req-task-rows-2"));
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+    worker.close_stdin();
+    assert!(worker.child.wait().expect("等待 worker 退出").success());
+}
+
+/// 单股分析记录取数命令的帧级实证（#149 第 1 步：宿主查询接缝 `analysis.record`）。
+///
+/// 锁三件事，都是「只有真管道能钉住」的跨层口径：
+/// 1. 出站帧的 seam / op 逐字是 `analysis.record` / `list`（接缝名写错 ⇒ 宿主取不到 provider）；
+/// 2. 命令入参 `limit` / `offset` **原样透传**（插件不钳位：越界由宿主按契约区间拒收，
+///    缺省也交给宿主 ⇒ 插件侧没有第二个 50 / 200）；
+/// 3. 行形状：状态词表翻译（`completed` → `succeeded`）、根记录收窄（`parentAnalysisId`
+///    非空的行被剔除）、结束时刻只取 `completedAt`（不拿 `updatedAt` 倒推）、
+///    `deepLink` / `durationMs` 缺省不出键。
+#[test]
+fn command_frame_lists_stock_analysis_records_via_host_seam() {
+    let mut worker = Worker::spawn();
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "list_stock_analysis_records",
+            serde_json::json!({ "limit": 20, "offset": 40 }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-analysis-rows"),
+    );
+
+    let call = worker.recv_request();
+    assert_eq!(call.op, ops::CALL_SEAM);
+    assert_eq!(call.args["seam"], "analysis.record");
+    assert_eq!(call.args["op"], "list");
+    assert_eq!(call.args["args"]["limit"], 20);
+    assert_eq!(call.args["args"]["offset"], 40, "分页偏移必须原样透传：{:?}", call.args);
+
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!({
+            "records": [
+                {
+                    "id": "analysis-1",
+                    "stockCode": "600519",
+                    "stockName": "贵州茅台",
+                    "analysisDate": "2026-11-05",
+                    "status": "completed",
+                    "decisionAction": "BUY",
+                    "decisionPositionState": "HOLDING",
+                    "decisionPositionPct": 12.5,
+                    "analysisKind": "live",
+                    "asOfDate": null,
+                    "parentAnalysisId": null,
+                    "templateId": "stock-analysis",
+                    "templateVersion": 143,
+                    "decisionTimeHorizon": "short",
+                    "decisionHorizonSource": "branch_pick",
+                    "createdAt": 1_700_000_000_000_i64,
+                    "updatedAt": 1_700_000_900_000_i64,
+                    "completedAt": 1_700_000_050_000_i64,
+                    "executionQuality": 7,
+                },
+                {
+                    // replay 子行：必须被根记录收窄剔除（宿主适配器同一条判据）。
+                    "id": "analysis-2",
+                    "stockCode": "600519",
+                    "stockName": "贵州茅台",
+                    "analysisDate": "2026-10-01",
+                    "status": "completed",
+                    "decisionAction": "HOLD",
+                    "decisionPositionState": null,
+                    "decisionPositionPct": null,
+                    "analysisKind": "replay",
+                    "asOfDate": "2026-10-01",
+                    "parentAnalysisId": "analysis-1",
+                    "templateId": "stock-analysis",
+                    "templateVersion": 143,
+                    "decisionTimeHorizon": "short",
+                    "decisionHorizonSource": "branch_pick",
+                    "createdAt": 1_700_000_000_000_i64,
+                    "updatedAt": 1_700_000_050_000_i64,
+                    "completedAt": 1_700_000_050_000_i64,
+                    "executionQuality": null,
+                },
+            ],
+            "total": 2,
+        }))
+        .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Success);
+    assert_eq!(response.request_id.as_deref(), Some("req-analysis-rows"));
+    let reply = response.value.expect("命令回执必须带 value");
+    assert_eq!(reply["plugin_id"], PLUGIN_ID);
+    let rows = reply["value"].as_array().expect("任务源取数必须回数组");
+    assert_eq!(rows.len(), 1, "replay 子行必须被剔除：{rows:?}");
+    assert_eq!(rows[0]["nativeId"], "analysis-1");
+    assert_eq!(rows[0]["name"], "600519 贵州茅台");
+    assert_eq!(rows[0]["state"], "succeeded", "`completed` → 中心 `succeeded`");
+    assert_eq!(rows[0]["trigger"], "manual", "记录表无触发来源列 ⇒ 一律 manual");
+    assert_eq!(rows[0]["startedAt"], 1_700_000_000_000_i64);
+    assert_eq!(
+        rows[0]["finishedAt"], 1_700_000_050_000_i64,
+        "结束时刻只取 completedAt（updatedAt 被回写顶掉，不得用它倒推）：{}",
+        rows[0]
+    );
+    // 缺省项是「不出现」而不是 null（宿主按字段在不在决定耗时列与可否打开）。
+    for absent in ["durationMs", "deepLink"] {
+        assert!(rows[0].get(absent).is_none(), "缺省字段 `{absent}` 不得进帧：{}", rows[0]);
+    }
+    assert_eq!(rows[0]["raw"]["analysisDate"], "2026-11-05", "记录视图原样留在 raw");
+
+    // 缺省形态：不传 limit / offset ⇒ 两键都不带（缺省档由宿主取，插件不另抄一份）。
+    worker.send(
+        &CommandFrame::new(PLUGIN_ID, "list_stock_analysis_records", serde_json::json!({}), 5_000)
+            .to_frame_request()
+            .expect("命令帧应能编成请求")
+            .with_id("req-analysis-rows-2"),
+    );
+    let second = worker.recv_request();
+    assert_eq!(second.args["seam"], "analysis.record");
+    assert!(
+        second.args["args"].get("limit").is_none() && second.args["args"].get("offset").is_none(),
+        "未指定分页 ⇒ 原样不带：{:?}",
+        second.args
+    );
+    // 接缝报错 ⇒ 命令失败并原样透传错误码（空数组会在任务中心伪装成「今天没活」）。
+    worker.send_response(
+        &FrameResponse::error("TEST_ANALYSIS_RECORD_UNAVAILABLE", "宿主 provider 未注册")
+            .with_id(second.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let failed = worker.recv_response();
+    assert_eq!(failed.kind, ResponseKind::Error);
+    assert_eq!(failed.code.as_deref(), Some("TEST_ANALYSIS_RECORD_UNAVAILABLE"));
 
     worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
     assert_eq!(worker.recv_response().kind, ResponseKind::Success);

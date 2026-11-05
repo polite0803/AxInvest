@@ -218,6 +218,21 @@ impl ServiceDefinition {
         )
     }
 
+    /// 预置 analysis-record 接缝（单股分析记录只读查询，宿主独占实现）。
+    ///
+    /// 宿主把 `stock_analyses` 表的**列表读面**经本接缝以裁剪视图暴露给插件
+    /// （`list` 一个 op）。为什么不能借 `workflow.run` 的 `list_recent`：那条按 owner 隔离、
+    /// 只看得见插件自己发起的**执行**，宿主发起的单股分析记录一条都看不见（判据见
+    /// `analysis_record` 模块头）。首批无写 op ⇒ 不设权限闸。
+    pub fn analysis_record() -> Self {
+        Self::new(
+            "analysis.record",
+            "1.0",
+            "axagent_harness::AnalysisRecordProvider",
+            "单股分析记录只读：list（返回裁剪行视图 + limit 之前的匹配总数）",
+        )
+    }
+
     /// 预置 model-provider 接缝（LLM Provider 适配器，按 provider 类型名注册多实例）。
     ///
     /// 注册 ID 为 `model.provider.{provider_type}`（如 `model.provider.deepseek`）。
@@ -1152,6 +1167,29 @@ impl CapabilityRegistry {
     /// 取回 trajectory.store 接缝上的轨迹库提供者（若已注册）。
     pub fn get_trajectory_store(&self) -> Option<Arc<dyn crate::TrajectoryStoreProvider>> {
         self.provider_as::<dyn crate::TrajectoryStoreProvider>("trajectory.store")
+    }
+
+    // ── analysis.record 接缝（单股分析记录只读提供者，单实例；唯一 op 是读面 `list`） ──
+
+    /// 注册一个单股分析记录提供者（`analysis.record` 接缝）。
+    ///
+    /// 宿主把 `stock_analyses` 的列表读面经本接缝暴露；行视图的裁剪点必须**唯一**
+    /// （在宿主 provider 内），否则「哪些列不过线」会在多处各写一遍并各自漂移。
+    /// 外部实现注册同一接缝即可整体替换。首批无写 op ⇒ 不设权限闸。
+    pub fn register_analysis_record(
+        &self,
+        provider: Arc<dyn crate::AnalysisRecordProvider>,
+    ) -> Result<EffectHandle, CapabilityError> {
+        self.register_seam(
+            ServiceDefinition::analysis_record(),
+            Arc::new(provider),
+            "analysis-record",
+        )
+    }
+
+    /// 取回 analysis.record 接缝上的单股分析记录提供者（若已注册）。
+    pub fn get_analysis_record(&self) -> Option<Arc<dyn crate::AnalysisRecordProvider>> {
+        self.provider_as::<dyn crate::AnalysisRecordProvider>("analysis.record")
     }
 
     // ── system.prompt 接缝（多实例，按段名注册） ────────────────────────────

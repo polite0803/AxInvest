@@ -247,7 +247,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 
 | 口径 | 命中 | 备注 |
 |---|---|---|
-| K1：`pub trait` 总数（8 根 2039 个 `.rs`） | **326** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。**2026-11-02 `#81` 再升 1（2009→2010）**：行情 DTO 上收新增 `harness/src/stock_market_types.rs`；`astock-data/src/types.rs` 保留为垫片（未删文件），故只 +1。**同日 C 批再升 1（2010→2011）**：`DataOutcome` 上收新增 `harness/src/data_outcome.rs`；`astock-data/src/outcome.rs` 保留为垫片。**同日 `jobs.store` 接缝再升 2 项**：新增 `harness/src/jobs_store.rs`（文件 +1）与 `JobStoreProvider`（trait +1）⇒ **2012 / 318**。**同日 `workflow.run` 再升 2 项**：新增 `harness/src/workflow_run.rs`（文件 +1）与 `WorkflowRunProvider`（trait +1）⇒ **2013 / 319**。**同日宿主服务再升 1（2013→2014）**：新增 `src-tauri/src/commands/stock_workflow/workflow_run_service.rs`。**同日 `trading.engine` 再升 2 项**：新增 `harness/src/trading_engine.rs`（文件 +1）与 `TradingEngineProvider`（trait +1）⇒ **2015 / 320**。**同日宿主服务再升 1（2015→2016）**：新增 `src-tauri/src/commands/stock_workflow/trading_engine_service.rs`。**2026-11-03 `stock.monitor` + `quote.watcher` 契约再升 4 项**：新增 `harness/src/stock_monitor.rs`、`harness/src/quote_watcher.rs`（文件 +2）与 `StockMonitorProvider`、`QuoteWatcherProvider`（trait +2）⇒ **2018 / 322**；同批从 `analysis-engine/src/monitor.rs`、`cross_stock_aggregator.rs`、`astock-data/src/realtime_quote.rs` 删定义改 `pub use`，垫片文件保留不删 ⇒ 文件数不降。**同日 `#107` 契约 + `#103` 宿主再升 4 项文件 / 2 项 trait**：`harness/src/knowledge_vector.rs`、`harness/src/trajectory_store.rs`（+2 文件 +2 trait ⇒ 324）与 `commands/stock_workflow/monitor_seam_service.rs`、`quote_watcher_service.rs`（+2 文件）⇒ **2022 / 324**。**同日 `#114` 再升 1（2024→2025）**：新增 `axagent-infra/crates/dao/src/repo/trade.rs`（`exists_same_key` 下沉），同批 `market_data.rs` 只做格式、`workflow_run_service.rs` 只换 `DatabaseConnection` 导入源 ⇒ 其余读数不动。**2026-11-03 B1（`#100`）再升 5（2025→2030）**：`harness` 新增 `task_cancel.rs` / `trading_calendar.rs` / `candlestick_pattern.rs` / `divergence.rs` / `news_archive.rs` 五个模块，`astock-data` 原文件全部保留为 `pub use` 垫片（未删文件）⇒ 只 +5；`pub trait` 唯一名不动（324，`NewsArchiveSink` 只是换文件）。**2026-11-04 `#134` 第二片再升 2（2030→2032）**：新增 `axagent-infra/crates/dao/src/reconcile/external.rs`（插件 `schema.json` 解析）与 `src-tauri/src/init/plugin_schema.rs`（宿主挂载点）；两个文件都没有新增 `pub trait` ⇒ 唯一名仍 324。**2026-11-04 B4-a 骨架再升 1（2032→2033）**：新增 `axagent-plugins/crates/plugin-stock/src/main.rs`（插件侧 worker；纯可执行包、无 `lib.rs`，分层门禁规则 4 对纯可执行包有 `schema-gen` 先例）；同 crate 的 `tests/protocol.rs` 落在 `tests/`，被 `K1_IGNORE` 排除 ⇒ 加 2 个 `.rs` 只升 1；没有新增 `pub trait` ⇒ 唯一名仍 324。**2026-11-04 B4-g 迁出 `intent_parser`（2033→2034）**：新增 foundation crate `axagent-plugins/crates/stock-core`（`src/lib.rs` + `src/intent_parser.rs` = +2），删除 `axagent-quant/crates/analysis-engine/src/intent_parser.rs`（−1）⇒ 净 +1；`analysis-engine` 改路径级 re-export，宿主 `stock_analysis.rs` 一行未改；无新增 `pub trait` ⇒ 仍 324。**2026-11-04 B5 净 +2 文件 / +1 trait（2034→2036 / 324→325）**：`tools/src/tools/astock_data.rs` 换成通用包装 `tools/src/tools/domain_mcp.rs`（改名不增减），新增 `tools/src/domain_tools.rs`（槽位，含 `pub trait DomainToolExecutor` ⇒ +1 唯一名）与 `src-tauri/src/init/stock_domain_tools.rs`（域侧注册 + 执行器实现 ⇒ `k1ExternalImplTraitCount` +1，同一 trait 名只计一次）⇒ 文件 +3 −1 = +2。**2026-11-04 B6 再升 1（2036→2037）**：新增 `src-tauri/src/init/stock_domain_state.rs`（六字段持有 + `AppState::stock()`）；无新增 `pub trait` ⇒ 唯一名仍 325。**2026-11-05 `analysis.record` 接缝再升 2（2037→2039 / 325→326）**：新增 `axagent-core/crates/harness/src/analysis_record.rs`（契约，含 `pub trait AnalysisRecordProvider`）与 `src-tauri/src/init/analysis_record_service.rs`（宿主 provider）；同批 `harness/src/lib.rs` / `capability_registry.rs` / `plugins/src/worker.rs` / `plugin-stock/src/main.rs` 只改既存文件 ⇒ 文件数只 +2。 |
+| K1：`pub trait` 总数（8 根 2041 个 `.rs`） | **326** | 含引擎内部变化点、测试替身、serde 派生面。**2026-11-01 两档各降 1**：`#30` 删除 `harness/src/dojo_extension.rs` 整文件（−460 行），同时少 1 个 `.rs` 与 1 个 `pub trait DojoExtension`。**2026-11-02 文件数升 1（2004→2005）**：`#49` 新增命令帧 e2e 桁块 `axagent-plugins/crates/plugins/src/bin/e2e_command_frame_worker.rs`；同批另一份 `crates/plugins/tests/e2e_command_frame_test.rs` 落在 `tests/`，被扫描面的 `K1_IGNORE` 排除 ⇒ **加 2 个 `.rs` 只升 1 个读数**（这一条是口径事实，不是数据漂移）。权威读数 = `node scripts/check-capability-register.mjs --dump-readings` 的 `k1.rsFiles / k1.pubTraits`。**2026-11-02 收口重测：2009 / 317**（对 HEAD 2004 / 315 的净增溯源：`.rs` = +7 新增〔harness `vector_search.rs`、`vector_store.rs` + 5 个 `plugins/src/bin/e2e_*_worker.rs`〕−2 删除〔两份 `ir_renderer.rs`〕；`pub trait` 唯一名 = +3〔`VectorCollectionAdmin` / `VectorWriter` / `VectorReader`〕−2〔`IrRenderer` / `KitSlashCommandProcessor` 随文件移除〕⇒ 净 +1；**`#62` 再净 +1（316→317）**：ToT 侧 `LlmReasoningProvider` 改名 `TotReasoningProvider`（+1 唯一名），`ProviderRepository` / `SettingsRepository` 两处重复定义并回 1 处（原始命中 −2，唯一名数不变））。**2026-11-02 `#81` 再升 1（2009→2010）**：行情 DTO 上收新增 `harness/src/stock_market_types.rs`；`astock-data/src/types.rs` 保留为垫片（未删文件），故只 +1。**同日 C 批再升 1（2010→2011）**：`DataOutcome` 上收新增 `harness/src/data_outcome.rs`；`astock-data/src/outcome.rs` 保留为垫片。**同日 `jobs.store` 接缝再升 2 项**：新增 `harness/src/jobs_store.rs`（文件 +1）与 `JobStoreProvider`（trait +1）⇒ **2012 / 318**。**同日 `workflow.run` 再升 2 项**：新增 `harness/src/workflow_run.rs`（文件 +1）与 `WorkflowRunProvider`（trait +1）⇒ **2013 / 319**。**同日宿主服务再升 1（2013→2014）**：新增 `src-tauri/src/commands/stock_workflow/workflow_run_service.rs`。**同日 `trading.engine` 再升 2 项**：新增 `harness/src/trading_engine.rs`（文件 +1）与 `TradingEngineProvider`（trait +1）⇒ **2015 / 320**。**同日宿主服务再升 1（2015→2016）**：新增 `src-tauri/src/commands/stock_workflow/trading_engine_service.rs`。**2026-11-03 `stock.monitor` + `quote.watcher` 契约再升 4 项**：新增 `harness/src/stock_monitor.rs`、`harness/src/quote_watcher.rs`（文件 +2）与 `StockMonitorProvider`、`QuoteWatcherProvider`（trait +2）⇒ **2018 / 322**；同批从 `analysis-engine/src/monitor.rs`、`cross_stock_aggregator.rs`、`astock-data/src/realtime_quote.rs` 删定义改 `pub use`，垫片文件保留不删 ⇒ 文件数不降。**同日 `#107` 契约 + `#103` 宿主再升 4 项文件 / 2 项 trait**：`harness/src/knowledge_vector.rs`、`harness/src/trajectory_store.rs`（+2 文件 +2 trait ⇒ 324）与 `commands/stock_workflow/monitor_seam_service.rs`、`quote_watcher_service.rs`（+2 文件）⇒ **2022 / 324**。**同日 `#114` 再升 1（2024→2025）**：新增 `axagent-infra/crates/dao/src/repo/trade.rs`（`exists_same_key` 下沉），同批 `market_data.rs` 只做格式、`workflow_run_service.rs` 只换 `DatabaseConnection` 导入源 ⇒ 其余读数不动。**2026-11-03 B1（`#100`）再升 5（2025→2030）**：`harness` 新增 `task_cancel.rs` / `trading_calendar.rs` / `candlestick_pattern.rs` / `divergence.rs` / `news_archive.rs` 五个模块，`astock-data` 原文件全部保留为 `pub use` 垫片（未删文件）⇒ 只 +5；`pub trait` 唯一名不动（324，`NewsArchiveSink` 只是换文件）。**2026-11-04 `#134` 第二片再升 2（2030→2032）**：新增 `axagent-infra/crates/dao/src/reconcile/external.rs`（插件 `schema.json` 解析）与 `src-tauri/src/init/plugin_schema.rs`（宿主挂载点）；两个文件都没有新增 `pub trait` ⇒ 唯一名仍 324。**2026-11-04 B4-a 骨架再升 1（2032→2033）**：新增 `axagent-plugins/crates/plugin-stock/src/main.rs`（插件侧 worker；纯可执行包、无 `lib.rs`，分层门禁规则 4 对纯可执行包有 `schema-gen` 先例）；同 crate 的 `tests/protocol.rs` 落在 `tests/`，被 `K1_IGNORE` 排除 ⇒ 加 2 个 `.rs` 只升 1；没有新增 `pub trait` ⇒ 唯一名仍 324。**2026-11-04 B4-g 迁出 `intent_parser`（2033→2034）**：新增 foundation crate `axagent-plugins/crates/stock-core`（`src/lib.rs` + `src/intent_parser.rs` = +2），删除 `axagent-quant/crates/analysis-engine/src/intent_parser.rs`（−1）⇒ 净 +1；`analysis-engine` 改路径级 re-export，宿主 `stock_analysis.rs` 一行未改；无新增 `pub trait` ⇒ 仍 324。**2026-11-04 B5 净 +2 文件 / +1 trait（2034→2036 / 324→325）**：`tools/src/tools/astock_data.rs` 换成通用包装 `tools/src/tools/domain_mcp.rs`（改名不增减），新增 `tools/src/domain_tools.rs`（槽位，含 `pub trait DomainToolExecutor` ⇒ +1 唯一名）与 `src-tauri/src/init/stock_domain_tools.rs`（域侧注册 + 执行器实现 ⇒ `k1ExternalImplTraitCount` +1，同一 trait 名只计一次）⇒ 文件 +3 −1 = +2。**2026-11-04 B6 再升 1（2036→2037）**：新增 `src-tauri/src/init/stock_domain_state.rs`（六字段持有 + `AppState::stock()`）；无新增 `pub trait` ⇒ 唯一名仍 325。**2026-11-05 `analysis.record` 接缝再升 2（2037→2039 / 325→326）**：新增 `axagent-core/crates/harness/src/analysis_record.rs`（契约，含 `pub trait AnalysisRecordProvider`）与 `src-tauri/src/init/analysis_record_service.rs`（宿主 provider）；同批 `harness/src/lib.rs` / `capability_registry.rs` / `plugins/src/worker.rs` / `plugin-stock/src/main.rs` 只改既存文件 ⇒ 文件数只 +2。 |
 | K1 + 有非 harness、非测试实现者 | **242** | ⚠ 这一档**不能**当能力数。~~232 出自一次性 census 工件（`.tmp/traits-full.json`，未入库 ⇒ 谓词无法从仓内代码复现）~~ ⇒ **该说法已作废（`#61` + `#66` 落地后）**：谓词已入库为 `k1DeclaredExternalImplTraitCount`，`--dump-readings` 在现树复现 = **233**（`#62` 后：ToT 拆成两名、两端都仍有生产 impl ⇒ +1），且与本门 audit 侧输出**排序名单逐字相等**（`#66` 的 4.2 档，差分探针 + 两条命令背靠背 + 扫描面常量逐项对照，三条同源性证据齐）⇒ **233 现在是可复算值**，锚点**具备升 `hard:true` 的条件**（升不升、用哪个数由我在收口时一次定）。另两个历史数**只留作解释、不再与 233 并列**：**210** = 单趟扫描缺陷（当时同谓词**两趟交并** = 232，差值恰 **22**；`#62` 后未重测单趟读数）；**269** = 门里最严格的读法（不要求 trait 声明面、不排 std/派生噪声名），**不作文档该锚点值**。⚠ 处置次序仍不能反：**先让谓词可复算，再升 hard** —— 反向必先假红。**同日 `jobs.store` 再 +1（233→234）**：`JobStoreProvider` 在 `runtime-core` 有生产 impl。**同日 `workflow.run` 再 +1（234→235）**：`WorkflowRunProvider` 在 `src-tauri/src/init/workflow_run.rs` 有生产 impl（后迁 `commands/stock_workflow/workflow_run_service.rs`，读数不变）；**同日 `trading.engine` 再 +1（235→236）**：`TradingEngineProvider` 在 `src-tauri/src/commands/stock_workflow/trading_engine_service.rs` 有生产 impl；**同日 `#103` 宿主批再 +2（236→238）**：`StockMonitorProvider` 在 `commands/stock_workflow/monitor_seam_service.rs`、`QuoteWatcherProvider` 在 `quote_watcher_service.rs` 各有生产 impl（`KnowledgeVectorProvider` / `TrajectoryStoreProvider` 仍只有声明 ⇒ 不计，等 `#108`）。**2026-11-04 B5 再 +1（240→241）**：`DomainToolExecutor`（`tools/src/domain_tools.rs`）在 `src-tauri/src/init/stock_domain_tools.rs` 有生产 impl。 |
 | K1 + K2（键控站点，四次扫描合并去漏报） | **51** 个 trait 面 | 含 15 条已建接缝的 trait。⚠ **2026-11-02 `#33` 实测：这一档不可作论据** —— 谓词真身是**未入库的一次性工件** `.tmp/capability-register3.cjs:44-82`（仓内无处复跑，与 §0.7.2 的 232 同病根），且它要求签名/块内出现 `dyn T` ⇒ 198 条里 **21 条假阴性**，把 PLAN B/C 组落入该桶的 **13 条契约全部吞掉** ⇒ **不许**用「无键控点」论证「这些 trait 只是分层解耦」。谓词入库 = 任务 **#57**；逐条分桶结论见 **§14** |
 | 51 → 同族合并 + K3/K4 判定 | **23 条能力**（另有 3 条移入 §0.7.9 债档，只登记不计数） | ⇒ 本节表格 A+B+C 三组 |
@@ -302,7 +302,7 @@ if self.proto_version != AXAGENT_PLUGIN_PROTO_VERSION {
 它原来「是一套与 capability 接缝并行的第二插件协议」这一判据不变：自带键控注册表、自己声明工具与命令、自己带健康探针，却不在 15 条接缝里，也不在 `SUPPORTED_REMOTE_SEAMS`。
 ⇒ **已裁定并执行（§0.12.1）：废弃 trait 本体，把 `command_specs/execute_command` 的形状吸收进 L1 命令通道 T2**（生产实现者 0，唯一实现是测试替身）——不给零实现者的第二协议上「权限模型 + 对账 + 兼容窗口」三套成本。
    原记「CLI 派发口无 `input_schema` 且权限写死 `ReadOnly`」**判据低估了实情**：`PluginTool::check_permission`（`plugins/src/types.rs:892`，fn 起点；原写 `:787-826` 在 HEAD 上就已错位 —— 787 是 `pub fn new(`、822 才是该 fn，区间尾也切在函数体里 ⇒ 改钉 fn 起点）全仓零调用方，唯一引用它的 `execute_with_permission_check` 也零调用方 ⇒ 档位在 tools 与 commands **两条路上都是纯装饰**；本批只把命令通道改成真授权（按具体权限名判定，`implies_*` 一字未改），**tool 侧依旧是装饰**，另立批次。
-   同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:838`**（`pub fn execute_plugin_command(`，`--repin-code --apply` 定锚）。行号链：`:708` → `:738`（#75 加 `list_plugin_pages`）→ `:755` → `:787`（B10-1 前插 `agent_command_specs`）→ `:838`（本批 B8-1b 在其前插 `list_plugin_task_sources` 一族）。⚠ 本句原先停在 `:738`，而镜像表登记已随 B10-1 重锚到 `:787` ⇒ **散文引用与镜像表各说一套、两边都不红**（散文不受 evidence 判据管辖），这一条是本批撞出来的既存缺陷，不是新引入的漂移。
+   同批已修的假话：`manager.rs` 原注释自述「按空白切分为程序 + 参数」是假的（命令串整团交 `Command::new`、`args` 恒空，可执行文件查找按宿主 cwd ⇒ **相对路径声明的 command 今天根本跑不通**，见任务 #47）。CLI 派发口现位于 **`plugins/src/manager.rs:875`**（`pub fn execute_plugin_command(`，`--repin-code --apply` 定锚）。行号链：`:708` → `:738`（#75 加 `list_plugin_pages`）→ `:755` → `:787`（B10-1 前插 `agent_command_specs`）→ `:838`（B8-1b 在其前插 `list_plugin_task_sources` 一族）→ `:875`（#149 第 2 步在 `build_plugin_manifest` 一处加 `load_declared_ui_keys` 与两条 membership 校验，`manager.rs` 净增 37 行）。⚠ 本句原先停在 `:738`，而镜像表登记已随 B10-1 重锚到 `:787` ⇒ **散文引用与镜像表各说一套、两边都不红**（散文不受 evidence 判据管辖），这一条是本批撞出来的既存缺陷，不是新引入的漂移。
 
 ### 0.7.7 判为内核，明确不拆 —— 10 条（每条都给不过哪道判据）
 
@@ -5175,6 +5175,98 @@ PLAN §0.10 的前端读数因此从 **52 处 / 38 文件 → 51 处 / 37 文件
 3. `deepLink` 未交（宿主路由契约）；插件命令未透出 `total`（分页仍由宿主泛型 adapter 按数组长度处理）。
 4. 真库端到端未测（需预置 `stock_analyses` 行）；前端零改动。
 5. 第五道门 10 条既存红未修（属他人 PLAN 历史账，重锚会把中间态烘进基线）。
+
+## §112 插件 schema 注册通道 + `detailSchema` 归属校验（#149 第 2 步 Rust 侧，2026-11-05）
+
+### 112.1 结论
+
+插件不再只能「渲染宿主给的 schema」，而是可以**自带** schema：安装根下一份 `ui.json`，
+宿主在安装 / 启用 / 更新 / 启动四个点把它 reconcile 进 `dynamic_ui_schemas`，
+落库时**由宿主盖章** `origin = "plugin"` + `owner_id = pluginId`。同时把
+`taskSources[].detailSchema` 与 `pages[]`（`loading = "schema"`）的 `entry` 都收成
+「**本插件 `ui.json` 的 key**」，安装期 membership 校验 + 运行期按库复核。
+
+### 112.2 `ui.json` 形状
+
+```json
+{
+  "version": 1,
+  "schemas": [
+    {
+      "key": "order-form",
+      "title": "Order Form",
+      "category": "custom",
+      "tags": ["order"],
+      "version": "1.0.0",
+      "schema": { "type": "object", "fields": [] }
+    }
+  ]
+}
+```
+
+| 字段 | 必填 | 校验 |
+|---|---|---|
+| `version` | 是 | 只能是 **1**（不支持即整份拒绝，不按缺省字段猜） |
+| `schemas[].key` | 是 | 形状 = `is_declared_key_shape`（小写字母/数字/`-`，首字符字母或数字，≤ 64）；文件内唯一；**不是行 id** |
+| `schemas[].title` | 是 | 非空 |
+| `schemas[].category` | 否 | 缺省/空白 ⇒ `custom`（与列默认值同口径） |
+| `schemas[].tags` | 否 | 逐项 trim、空串丢弃 |
+| `schemas[].version` | 是 | `major.minor.patch` 形态的数字版本（点数 1–3 段）—— 非法值会让宿主 `semver_gt` 退化成 0.0.0，「内容变了但版本没升」的判据静默失效 |
+| `schemas[].schema` | 是 | 必须是 JSON **object**（序列化进 `schema_json` 列；键序稳定 ⇒ 内容比较可逐字做） |
+
+行 id 恒为 `plugin.{pluginId}.{key}`（`ui_schema::row_id`），前缀 `plugin.{pluginId}.`
+（`owner_prefix`）用于剪枝差集。`ui.json` 里**没有任何字段**能声明 origin / owner / 行 id。
+
+### 112.3 幂等 / 版本 / 剪枝口径
+
+| 情形 | 处置 |
+|---|---|
+| 同 owner + 同 id，内容与 version 都没变 | **no-op**（安装/启用/启动反复跑零写） |
+| 内容变、`version` 升高 | 先写旧版本快照（复用 `create_version_snapshot`）再更新 |
+| 内容变、`version` 未升 | **安装失败**（对齐 `update_dynamic_ui_schema` 的「版本号冲突」口径） |
+| id 已存在但 `origin`/`owner_id` 不符 | **安装失败并报出实际归属，绝不覆盖** |
+| 同 owner 的其他行（本次未声明）且 id 在前缀内 | 剪枝：级联删表数据 + 版本历史 + 本体 |
+| `ui.json` 缺失 / 读失败 / 解析失败 | 本轮跳过，**禁止剪枝**（防瞬时 IO 错误清库） |
+| 插件禁用 | schema **保留**（归属是「安装」不是「启用」）；卸载仍走 `revoke_schemas_owned_by` |
+| 并发 reconcile 撞 PK | 重读该行，按「已存在」分支处置（幂等 / 版本冲突 / 拒绝覆盖），不当作写失败 |
+
+### 112.4 四段接线
+
+| 段 | 文件 | 要点 |
+|---|---|---|
+| 纯解析 + key 校验 | `axagent-plugins/crates/plugins/src/ui_schema.rs`（新） | 零 I/O、零 DB；`parse` / `is_declared_key_shape` / `row_id` / `owner_prefix` |
+| 清单 membership | `plugins/src/manager.rs` | `load_declared_ui_keys` 读 `<root>/ui.json`；`PageSchemaKeyUnknown` / `TaskSourceSchemaKeyUnknown` / `InvalidUiSchemaDeclaration` 三个变体；`pages[]` 与 `taskSources[]` 共用同一 key 集合 |
+| 宿主 reconcile | `src-tauri/src/init/plugin_ui_schema.rs`（新） | `reconcile_ui_schemas` / `retain_owned_detail_schemas`；签名**不收** origin/owner；pluginId 取自 `plugin_registry_report()` |
+| 挂载 + 运行期复核 | `commands/plugin.rs`、`init/services.rs` | install / enable / update / 启动四处；`plugin_list_task_sources` 用 db 复核 `detailSchema`，查无此行即置 `None` |
+
+`detail_schema` 只能是 key（不是行 id）：拼全 id 的活儿在宿主侧 ⇒ **跨插件引用在声明面上写不出来**；
+`pages[].entry`（`loading = "schema"`）同理，顺手补上了这条路径此前**零归属校验**的缺口
+（前端曾直接把 `page.entry` 当 schemaId 用）。
+
+### 112.5 读数
+
+| 度量 | 改前 | 改后 |
+|---|---|---|
+| K1 `.rs` 文件数 | 2039 | **2041**（`plugins/src/ui_schema.rs` + `src-tauri/src/init/plugin_ui_schema.rs`） |
+| K1 `pub trait` 唯一名 | 326 | **326**（本批零新增 trait） |
+| K1 外部实现者 | 242 | **242** |
+
+### 112.6 验证
+
+| # | 命令 | 结果 |
+|---|---|---|
+| V1 | `cd axagent-plugins && cargo test -p axagent-plugins` | EXIT=0，**251 passed / 0 failed**（含 `ui.json` 解析 8 条 + membership 4 条新测） |
+| V2 | `cd src-tauri && cargo check --lib` | EXIT=0，**17m56s**，零 warning |
+| V3 | `cargo fmt -p axagent -- --check` / `cargo fmt -p axagent-plugins -- --check` | 两侧 **EXIT=0** |
+| V4 | `node scripts/check-capability-register.mjs` | 见 §112.7-5：K1 三读数 PASS（2041 / 326 / 242）；总数维持 29 条**既存**硬失败（本批先把自己造成的 2 条漂移修绿：`dojo.extension` 证据行 838→875、PLAN:250 的 2041） |
+
+### 112.7 未做
+
+1. **前端已接（同批完成）**：`detailSchema` → `schemaId` 与 `pages[].entry` → 行 id 两处共用 `src/lib/pluginUiSchema.ts` 的 `pluginSchemaRowId`（后端 `ui_schema::row_id` 的同源镜像，不再各拼一串）；`pluginTaskSource.adapter` 仅在声明了 schema 时挂 `renderDetail`，未声明仍走 `RunDetailDrawer` 的空抽屉兜底。前端验证：`npm run typecheck` EXIT=0（**1479** 文件）、`dprint check` 绿；定点 vitest 因 #141（SMB worker 启动 60 s 超时）未取得读数。
+2. 插件清单实样未改：`plugin-stock` 的 `taskSources[]` 尚未声明 `detailSchema`（第 3 步随源 id 切换一起做）。
+3. `ui.json` 的 schema 体未做结构校验（只验 JSON object）——动态 UI 的字段语法仍归前端加载期判。
+4. 并发 reconcile 的「剪枝 vs 插入」不做事务隔离：极端交错下可能删掉另一路刚写的行，下一轮 reconcile 自愈（幂等重建）。
+5. 第五道门在本工作树已有 **29 条既存红**（PLAN 行号漂移，非本批文件面；任务书里的 10 条是上一批的读数）。本批只同步 `k1RsFileCount` 与 PLAN:250，未重锚/放宽任何判据。
 
 
 

@@ -586,6 +586,17 @@ fn start_plugins(state: &AppState) {
             Err(e) => tracing::error!("插件 schema.json 收敛失败（不阻塞启动）：{e}"),
         }
 
+        // 插件 UI 贡献（任务 #149 第 2 步）：`ui.json` → `dynamic_ui_schemas`。
+        // 与建表同批同口径 —— **全部已安装**插件都参与（含 disabled：归属是「安装」
+        // 不是「启用」，禁用不该让某张表页从界面上消失）。失败只记日志：
+        // 启动期一个坏声明不能挡住 App，安装 / 启用路径会各自把同一错误交给用户。
+        match crate::init::plugin_ui_schema::reconcile_ui_schemas(&db, &plugin_manager, None).await
+        {
+            Ok(0) => {},
+            Ok(n) => tracing::info!("已收敛 {n} 条插件 ui.json 声明的 DynamicUI Schema"),
+            Err(e) => tracing::error!("插件 ui.json 收敛失败（不阻塞启动）：{e}"),
+        }
+
         // dashboard 合流（PLAN-plugin-gap-closure §3）：仪表盘面板清单是 PluginManager
         // 的实时只读投影，不再需要独立的 registry reload。
 

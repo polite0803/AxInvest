@@ -34,6 +34,7 @@ use crate::sandbox::{
 };
 use crate::skill_installer::SkillInstaller;
 use crate::types::*;
+use crate::ui_schema::is_declared_key_shape;
 use crate::worker::{LoadedPlugin, PluginWorkerConfig, WorkerError};
 
 #[derive(Debug, Clone)]
@@ -203,6 +204,29 @@ pub enum PluginManifestValidationError {
         source: String,
         command: String,
     },
+    /// `ui.json` 读取 / 解析 / 校验失败（插件 UI 贡献的声明文件，任务 `#149` 第 2 步）。
+    ///
+    /// 与 `pages[]` / `taskSources[]` 的字段级错误分开：这份文件的缺陷是**整份**的
+    /// （格式版本、JSON 语法、key 形状），逐条报到字段上会让用户改十遍。
+    InvalidUiSchemaDeclaration {
+        detail: String,
+    },
+    /// 页面声明 `loading = "schema"` 时，`entry` 必须是**本插件 `ui.json`** 里声明的 key。
+    ///
+    /// 今天这条路径零归属校验：`entry` 被前端直接当 schemaId 用，指向谁的 schema 都行
+    /// ⇒ 插件可以挂一张宿主/别的插件/用户建的表格页。改动后只能指自己的 key。
+    PageSchemaKeyUnknown {
+        page: String,
+        key: String,
+    },
+    /// 任务源声明 `detailSchema` 时，值必须是**本插件 `ui.json`** 里声明的 key。
+    ///
+    /// 与 [`Self::PageSchemaKeyUnknown`] 同源判据：值是 key 而不是行 id，
+    /// 宿主用 `ui_schema::row_id` 拼全 ⇒ 跨插件引用在声明面上写不出来。
+    TaskSourceSchemaKeyUnknown {
+        source: String,
+        key: String,
+    },
 }
 
 impl Display for PluginManifestValidationError {
@@ -280,6 +304,19 @@ impl Display for PluginManifestValidationError {
             Self::TaskSourceCommandUnknown { source, command } => write!(
                 f,
                 "plugin task source `{source}` references command `{command}`, which is not declared in this manifest's commands[]"
+            ),
+            Self::InvalidUiSchemaDeclaration { detail } => {
+                write!(f, "plugin ui declaration is invalid: {detail}")
+            },
+            Self::PageSchemaKeyUnknown { page, key } => write!(
+                f,
+                "plugin page `{page}` references UI Schema key `{key}`, which is not declared in this plugin's {file}",
+                file = crate::ui_schema::UI_SCHEMA_FILE_NAME
+            ),
+            Self::TaskSourceSchemaKeyUnknown { source, key } => write!(
+                f,
+                "plugin task source `{source}` references UI Schema key `{key}`, which is not declared in this plugin's {file}",
+                file = crate::ui_schema::UI_SCHEMA_FILE_NAME
             ),
         }
     }
@@ -2518,12 +2555,17 @@ fn build_plugin_manifest(
     let tools = build_manifest_tools(root, raw.tools, &mut errors);
     let commands = build_manifest_commands(root, raw.commands, &mut errors);
     validate_dashboard_panels(&raw.dashboard_panels, &mut errors);
-    let pages = build_manifest_pages(raw.pages, &mut errors);
+    // UI 贡献的声明面（任务 #149 第 2 步）：`ui.json` 是本插件 schema 的**唯一**归属来源。
+    // 先读成 key 集合，再让 `pages[]` / `taskSources[]` 做 membership 校验 —— 顺序不能反：
+    // 没有集合就只能「不校验」，等于把跨插件/跨来源引用放行。
+    let ui_keys = load_declared_ui_keys(root, &mut errors);
+    let pages = build_manifest_pages(raw.pages, &ui_keys, &mut errors);
     // 任务源自洽性判据：`command` 必须指向**同一份清单**里已声明的命名命令。
     // 用已校验的 `commands`（而非 raw）取名 ⇒ 指向一条本身非法的命令也算「不存在」，
     // 不会出现「任务源指向一条装不出来的命令」这种只在运行期才暴露的形状。
     let command_names: BTreeSet<&str> = commands.iter().map(|c| c.name.as_str()).collect();
-    let task_sources = build_manifest_task_sources(raw.task_sources, &command_names, &mut errors);
+    let task_sources =
+        build_manifest_task_sources(raw.task_sources, &command_names, &ui_keys, &mut errors);
 
     if !errors.is_empty() {
         return Err(PluginError::ManifestValidation(errors));
@@ -2875,6 +2917,7 @@ fn build_manifest_commands(
 /// 同一份资产声明就会出现「面板能装、页面不能装」这种无法解释的分叉。
 fn build_manifest_pages(
     pages: Vec<RawPluginPage>,
+    ui_keys: &BTreeSet<String>,
     errors: &mut Vec<PluginManifestValidationError>,
 ) -> Vec<PluginPage> {
     let mut seen: BTreeSet<String> = BTreeSet::new();
@@ -2931,8 +2974,8 @@ fn build_manifest_pages(
                 },
             },
         };
-        // 资产形状白名单**只适用于 bundle**：schema 页的 `entry` 是动态 UI Schema 的 id
-        // （形如 `opc.order-form`），按文件路径去验它必然被判成「缺扩展名」。
+        // 资产形状白名单**只适用于 bundle**：schema 页的 `entry` 是本插件 `ui.json` 的
+        // key（形如 `order-form`），按文件路径去验它必然被判成「缺扩展名」。
         // 空 `entry` 已单独报过（上面那条），这里不再叠报同一个缺陷 —— 与
         // `build_manifest_commands` 的「空值只报 EmptyEntryField」保持一致。
         if !entry_missing
@@ -2941,6 +2984,18 @@ fn build_manifest_pages(
         {
             errors
                 .push(PluginManifestValidationError::InvalidPageAsset { page: id.clone(), detail });
+        }
+        // schema 页的 `entry` 是**本插件** `ui.json` 的 key（任务 #149 第 2 步）。
+        // 这条 membership 校验是今天缺失的那道归属闸：此前 `entry` 被前端直接当 schemaId
+        // 送进加载器，插件可以指到宿主的、别的插件的、乃至用户自建的任意 schema。
+        if !entry_missing && loading == PluginPageLoading::Schema {
+            let key = page.entry.trim();
+            if !ui_keys.contains(key) {
+                errors.push(PluginManifestValidationError::PageSchemaKeyUnknown {
+                    page: id.clone(),
+                    key: key.to_string(),
+                });
+            }
         }
 
         validated.push(PluginPage { id, title: page.title, entry: page.entry, loading });
@@ -2958,6 +3013,8 @@ fn build_manifest_pages(
 /// 2. `command` 必须是**同一份清单** `commands[]` 里已声明的命令（`command_names`）——
 ///    指一条不存在的命令 = 声明一个永远为空的源，比报错更坏。
 /// 3. `title` 非空（纯文本，不走宿主 i18n；空标题会让任务中心源列表出现空标签）。
+/// 4. `detailSchema`（任务 `#149` 第 2 步）若声明，必须是**本插件 `ui.json`** 里已声明的 key
+///    （`ui_keys`）—— 声明面只能引用自己的 schema，跨插件引用写不出来。
 ///
 /// ⚠ **不与宿主源清单比名字**：宿主源是前端常量，清单校验期看不到 ⇒ 重名裁决在消费侧
 /// （`adapters/registry.ts::registerAdapter` 幂等，宿主先占位即胜出），与 B10-1 的
@@ -2965,6 +3022,7 @@ fn build_manifest_pages(
 fn build_manifest_task_sources(
     sources: Vec<RawPluginTaskSource>,
     command_names: &BTreeSet<&str>,
+    ui_keys: &BTreeSet<String>,
     errors: &mut Vec<PluginManifestValidationError>,
 ) -> Vec<PluginTaskSource> {
     let mut seen: BTreeSet<String> = BTreeSet::new();
@@ -2980,7 +3038,7 @@ fn build_manifest_task_sources(
             });
             continue;
         }
-        if !is_task_source_id_shape(&id) {
+        if !is_declared_key_shape(&id) {
             errors.push(PluginManifestValidationError::InvalidTaskSourceId {
                 source: id.clone(),
                 detail: "只允许小写字母、数字与 `-`，且首字符须是字母或数字".to_string(),
@@ -3020,20 +3078,59 @@ fn build_manifest_task_sources(
         }
         // 空串色名按「未声明」处理：与 loading / requiredPermission 的空白同判。
         let color = source.color.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
-        validated.push(PluginTaskSource { id, title: source.title, command, color });
+        // `detailSchema` 同理：空白串按「未声明」处理；非空则必须是本插件 `ui.json` 的 key。
+        // 注意存的是 **key**（不是行 id）—— 拼 `plugin.{id}.{key}` 只在宿主侧发生，
+        // 于是「引到别的插件的 schema」在声明面上就没有写法。
+        let detail_schema =
+            source.detail_schema.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
+        if let Some(key) = &detail_schema
+            && !ui_keys.contains(key)
+        {
+            errors.push(PluginManifestValidationError::TaskSourceSchemaKeyUnknown {
+                source: id.clone(),
+                key: key.clone(),
+            });
+            continue;
+        }
+        validated.push(PluginTaskSource { id, title: source.title, command, color, detail_schema });
     }
 
     validated
 }
 
-/// [`build_manifest_task_sources`] 的 id 形状判据（手写扫描，不引 regex 依赖）。
-fn is_task_source_id_shape(id: &str) -> bool {
-    let mut chars = id.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => {},
-        _ => return false,
+/// 读取 `<root>/ui.json` 并返回其声明的 key 集合（任务 `#149` 第 2 步）。
+///
+/// 三种情形分开处置，不能混：
+/// - **文件不存在** ⇒ 空集合（没声明任何 schema，`pages[]` / `taskSources[]` 也就无从引用）；
+/// - **读取失败（非 NotFound）** ⇒ 清单校验错误（IO 错误不能静默当成「无声明」，
+///   否则一次权限/句柄问题会让引用了 schema 的页面被误判成「引用了不存在的 key」）；
+/// - **解析失败** ⇒ 清单校验错误，且错误来自 `ui_schema::parse` 的逐条定位。
+fn load_declared_ui_keys(
+    root: &Path,
+    errors: &mut Vec<PluginManifestValidationError>,
+) -> BTreeSet<String> {
+    let path = root.join(crate::ui_schema::UI_SCHEMA_FILE_NAME);
+    let source = match fs::read_to_string(&path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return BTreeSet::new();
+        },
+        Err(error) => {
+            errors.push(PluginManifestValidationError::InvalidUiSchemaDeclaration {
+                detail: format!("{} 读取失败：{error}", path.display()),
+            });
+            return BTreeSet::new();
+        },
+    };
+    match crate::ui_schema::parse(&source) {
+        Ok(entries) => entries.into_iter().map(|entry| entry.key).collect(),
+        Err(detail) => {
+            errors.push(PluginManifestValidationError::InvalidUiSchemaDeclaration {
+                detail: format!("{} 非法：{detail}", path.display()),
+            });
+            BTreeSet::new()
+        },
     }
-    id.len() <= 64 && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 fn validate_command_entries<'a>(
@@ -4783,6 +4880,7 @@ mod tests {
         installed_dir: &Path,
         plugin_id: &str,
         pages_json: &str,
+        ui_json: Option<&str>,
         pinned: bool,
     ) -> PluginManager {
         std::fs::create_dir_all(installed_dir.join("pages")).expect("创建页面目录");
@@ -4796,6 +4894,13 @@ mod tests {
             ),
         )
         .expect("写入 manifest");
+        // `ui.json` 必须与 manifest 一起在算哈希**之前**落盘：schema 页的 `entry`
+        // 是 `ui.json` 的 key（任务 #149 第 2 步），而锚点是整目录哈希 ——
+        // 后补文件会让「已钉锚点」的夹具在资产解析时被判成内容被篡改。
+        if let Some(ui_json) = ui_json {
+            std::fs::write(installed_dir.join(crate::ui_schema::UI_SCHEMA_FILE_NAME), ui_json)
+                .expect("写入 ui.json");
+        }
 
         let manager = PluginManager::new(PluginManagerConfig::new(temp.to_path_buf()));
         let integrity = if pinned {
@@ -4828,7 +4933,28 @@ mod tests {
     /// 默认形态：插件落在安装根内、锚点已钉死（即 `plugin_install` 之后的真实状态）。
     fn manager_with_page_pack(temp: &Path, pages_json: &str) -> PluginManager {
         let installed = temp.join("plugins").join("installed").join("ui-pages");
-        manager_with_page_pack_at(temp, &installed, "ui-pages", pages_json, true)
+        manager_with_page_pack_at(temp, &installed, "ui-pages", pages_json, None, true)
+    }
+
+    /// `ui.json` 的夹具内容：只声明一份表单，够 schema 页与 `detailSchema` 引用。
+    const SCHEMA_PAGE_UI_JSON: &str = r#"{
+        "version": 1,
+        "schemas": [
+            { "key": "order-form", "title": "Order", "version": "1.0.0", "schema": { "type": "object" } }
+        ]
+    }"#;
+
+    /// 与 [`manager_with_page_pack`] 同形，但带上 `ui.json`（schema 页的 `entry` 指到其中 key）。
+    fn manager_with_schema_page_pack(temp: &Path, pages_json: &str) -> PluginManager {
+        let installed = temp.join("plugins").join("installed").join("ui-pages");
+        manager_with_page_pack_at(
+            temp,
+            &installed,
+            "ui-pages",
+            pages_json,
+            Some(SCHEMA_PAGE_UI_JSON),
+            true,
+        )
     }
 
     /// 未声明 `loading` ⇒ 清单校验错误并指到具体页 —— §0.12.5 裁定 3「不许混用却不声明」。
@@ -4908,24 +5034,24 @@ mod tests {
         }
     }
 
-    /// `entry` 的资产形状校验**只适用于 bundle**；schema 页的 `entry` 是动态 UI Schema 的 id。
+    /// `entry` 的资产形状校验**只适用于 bundle**；schema 页的 `entry` 是本插件 `ui.json` 的 key。
     ///
-    /// 两个方向都要断言：把 schema id 按文件路径验 ⇒ 合法声明被拒（`opc.order-form` 会被
+    /// 两个方向都要断言：把 schema key 按文件路径验 ⇒ 合法声明被拒（`order-form` 会被
     /// 判成「缺扩展名」）；bundle 的越界声明不验 ⇒ 坏声明进仓。后者与面板共用
     /// [`asset_entry_shape_error`]，故合法值与拒因都应与面板逐字同源。
     #[test]
     fn page_entry_validation_follows_declared_loading() {
         let temp = temp_dir("page-schema-ok");
-        let manager = manager_with_page_pack(
+        let manager = manager_with_schema_page_pack(
             &temp,
-            r#"[{ "id": "order", "title": "Order", "entry": "opc.order-form", "loading": "schema" }]"#,
+            r#"[{ "id": "order", "title": "Order", "entry": "order-form", "loading": "schema" }]"#,
         );
         let dir = temp.join("plugins").join("installed").join("ui-pages");
         let manifest =
             load_plugin_from_directory(&dir).expect("schema 页的 entry 不得按文件路径校验");
         assert_eq!(manifest.pages.len(), 1);
         assert_eq!(manifest.pages[0].loading, PluginPageLoading::Schema);
-        assert_eq!(manifest.pages[0].entry, "opc.order-form");
+        assert_eq!(manifest.pages[0].entry, "order-form");
         // schema 页没有文件资产，解析命令必须拒绝（见 resolve_page_asset_refuses_schema_page）。
         assert!(manager.resolve_page_asset("ui-pages", "order").is_err());
         let _ = std::fs::remove_dir_all(&temp);
@@ -5006,9 +5132,9 @@ mod tests {
     #[test]
     fn resolve_page_asset_refuses_schema_page() {
         let temp = temp_dir("page-schema-resolve");
-        let manager = manager_with_page_pack(
+        let manager = manager_with_schema_page_pack(
             &temp,
-            r#"[{ "id": "order", "title": "Order", "entry": "opc.order-form", "loading": "schema" }]"#,
+            r#"[{ "id": "order", "title": "Order", "entry": "order-form", "loading": "schema" }]"#,
         );
 
         let err = manager
@@ -5030,7 +5156,7 @@ mod tests {
         let temp = temp_dir("page-scope");
         let outside = temp.join("external-dev").join("ui-pages");
         let manager =
-            manager_with_page_pack_at(&temp, &outside, "ui-pages", BUNDLE_PAGE_JSON, true);
+            manager_with_page_pack_at(&temp, &outside, "ui-pages", BUNDLE_PAGE_JSON, None, true);
 
         let err =
             manager.resolve_page_asset("ui-pages", "main").expect_err("安装根外的资产应被拒绝");
@@ -5280,13 +5406,16 @@ mod tests {
                     {
                         "id": "order",
                         "title": "Order",
-                        "entry": "opc.order-form",
+                        "entry": "order-form",
                         "loading": "schema"
                     }
                 ]
             }"#,
         )
         .expect("写入 manifest");
+        // schema 页的 `entry` 必须是本插件 `ui.json` 的 key（任务 #149 第 2 步）。
+        std::fs::write(page_pack.join(crate::ui_schema::UI_SCHEMA_FILE_NAME), SCHEMA_PAGE_UI_JSON)
+            .expect("写入 ui.json");
 
         // ② 未声明 pages 的插件：即使有 dashboard_panels 也不得混入页面清单。
         let panel_pack = installed_root.join("panel-pack");
@@ -5351,7 +5480,7 @@ mod tests {
             crate::types::PluginPage {
                 id: "order".to_string(),
                 title: "Order".to_string(),
-                entry: "opc.order-form".to_string(),
+                entry: "order-form".to_string(),
                 loading: crate::types::PluginPageLoading::Schema,
             }
         );
@@ -5410,6 +5539,22 @@ mod tests {
             title: title.to_string(),
             command: command.to_string(),
             color: color.map(str::to_string),
+            detail_schema: None,
+        }
+    }
+
+    /// 带 `detailSchema` 的任务源条目（任务 `#149` 第 2 步的 membership 判据用）。
+    fn task_source_entry_with_schema(
+        id: &str,
+        command: &str,
+        detail_schema: &str,
+    ) -> RawPluginTaskSource {
+        RawPluginTaskSource {
+            id: id.to_string(),
+            title: "标题".to_string(),
+            command: command.to_string(),
+            color: None,
+            detail_schema: Some(detail_schema.to_string()),
         }
     }
 
@@ -5428,6 +5573,7 @@ mod tests {
                 task_source_entry("ghost-runs", "指错命令", "not_declared", None),
             ],
             &names,
+            &BTreeSet::new(),
             &mut errors,
         );
 
@@ -5458,6 +5604,7 @@ mod tests {
             let validated = build_manifest_task_sources(
                 vec![task_source_entry(bad_id, "标题", "rows", None)],
                 &names,
+                &BTreeSet::new(),
                 &mut errors,
             );
             assert!(validated.is_empty(), "`{bad_id}` 不应通过，实际 {validated:?}");
@@ -5472,6 +5619,7 @@ mod tests {
                 task_source_entry("dup", "第二份", "rows", None),
             ],
             &names,
+            &BTreeSet::new(),
             &mut errors,
         );
         assert_eq!(validated.len(), 1);
@@ -5488,6 +5636,7 @@ mod tests {
         let validated = build_manifest_task_sources(
             vec![task_source_entry("no-title", "  ", "rows", None)],
             &names,
+            &BTreeSet::new(),
             &mut errors,
         );
         assert!(validated.is_empty());
@@ -5510,12 +5659,182 @@ mod tests {
         let validated = build_manifest_task_sources(
             vec![task_source_entry("rows-src", "行", "rows", Some("   "))],
             &names,
+            &BTreeSet::new(),
             &mut errors,
         );
 
         assert!(errors.is_empty(), "实际 {errors:?}");
         assert_eq!(validated.len(), 1);
         assert_eq!(validated[0].color, None);
+    }
+
+    // ==== 任务 #149 第 2 步：`ui.json` 声明面（插件 schema 的归属锚）====
+
+    /// 写一个带 `ui.json` 的插件源目录。
+    fn write_plugin_source_with_ui(source: &Path, manifest_body: &str, ui_json: Option<&str>) {
+        let manifest_path = source.join(MANIFEST_RELATIVE_PATH);
+        std::fs::create_dir_all(manifest_path.parent().expect("manifest 有父目录"))
+            .expect("创建 manifest 目录");
+        std::fs::write(&manifest_path, manifest_body).expect("写入 manifest");
+        if let Some(ui_json) = ui_json {
+            std::fs::write(source.join(crate::ui_schema::UI_SCHEMA_FILE_NAME), ui_json)
+                .expect("写入 ui.json");
+        }
+    }
+
+    /// `detailSchema` 必须是**本插件 `ui.json`** 的 key：不符即拒，且文案指得出
+    /// 「哪条源、哪个 key、哪个文件」—— 这是跨插件引用在声明面上的唯一闸门。
+    #[test]
+    fn task_source_detail_schema_must_be_declared_in_plugin_ui_json() {
+        let names: BTreeSet<&str> = ["rows"].into_iter().collect();
+        let ui_keys: BTreeSet<String> = ["order-form".to_string()].into_iter().collect();
+        let mut errors = Vec::new();
+
+        let validated = build_manifest_task_sources(
+            vec![
+                task_source_entry_with_schema("ok-runs", "rows", "order-form"),
+                task_source_entry_with_schema("bad-runs", "rows", "other-plugin-form"),
+            ],
+            &names,
+            &ui_keys,
+            &mut errors,
+        );
+
+        assert_eq!(validated.len(), 1, "实际 {validated:?}");
+        assert_eq!(validated[0].id, "ok-runs");
+        assert_eq!(validated[0].detail_schema.as_deref(), Some("order-form"));
+        assert_eq!(errors.len(), 1, "实际 {errors:?}");
+        assert!(
+            matches!(errors[0], PluginManifestValidationError::TaskSourceSchemaKeyUnknown { .. }),
+            "应报 TaskSourceSchemaKeyUnknown，实际 {:?}",
+            errors[0]
+        );
+        let text = errors[0].to_string();
+        assert!(text.contains("bad-runs"), "文案要指出是哪条源：{text}");
+        assert!(text.contains("other-plugin-form"), "文案要指出是哪个 key：{text}");
+        assert!(text.contains("ui.json"), "文案要指出是哪份声明：{text}");
+    }
+
+    /// 空白的 `detailSchema` 按「未声明」处理（与 color / loading 的空白同判）。
+    #[test]
+    fn task_source_blank_detail_schema_collapses_to_none() {
+        let names: BTreeSet<&str> = ["rows"].into_iter().collect();
+        let mut errors = Vec::new();
+        let validated = build_manifest_task_sources(
+            vec![task_source_entry_with_schema("blank-runs", "rows", "   ")],
+            &names,
+            &BTreeSet::new(),
+            &mut errors,
+        );
+        assert!(errors.is_empty(), "空白串不应触发 membership 校验：{errors:?}");
+        assert_eq!(validated[0].detail_schema, None);
+    }
+
+    /// 端到端：`ui.json` 声明的 key 同时被 `pages[]`（schema 页）与 `taskSources[].detailSchema`
+    /// 引用 ⇒ 装得上；把 key 换成未声明的 ⇒ 装不上且文案点出 key。
+    #[test]
+    fn ui_json_keys_gate_pages_and_task_source_detail_schema() {
+        let ui_json = r#"{
+  "version": 1,
+  "schemas": [
+    { "key": "order-form", "title": "Order", "version": "1.0.0", "schema": { "type": "object" } }
+  ]
+}"#;
+        let manifest = |entry: &str, detail: &str| {
+            format!(
+                r#"{{
+  "name": "ui-decl-demo",
+  "version": "1.0.0",
+  "description": "ui declaration plugin",
+  "defaultEnabled": true,
+  "permissions": ["read"],
+  "commands": [{{ "name": "rows", "description": "rows", "command": "echo" }}],
+  "pages": [{{ "id": "order", "title": "Order", "entry": "{entry}", "loading": "schema" }}],
+  "taskSources": [{{ "id": "demo-runs", "title": "Runs", "command": "rows", "detailSchema": "{detail}" }}]
+}}"#
+            )
+        };
+
+        // ① 两个引用都指向已声明的 key ⇒ 装得上。
+        let source = temp_dir("ui-decl-ok");
+        let config_home = temp_dir("ui-decl-ok-home");
+        std::fs::create_dir_all(&source).expect("创建源目录");
+        write_plugin_source_with_ui(&source, &manifest("order-form", "order-form"), Some(ui_json));
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        manager.install(source.to_str().expect("utf8 path")).expect("引用已声明 key 应装得上");
+        let list = manager.list_plugin_task_sources().expect("任务源投影应成功");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].task_sources[0].detail_schema.as_deref(), Some("order-form"));
+        drop(manager);
+        let _ = std::fs::remove_dir_all(&config_home);
+        let _ = std::fs::remove_dir_all(&source);
+
+        // ② 页面 entry 指到未声明的 key ⇒ 装载期就拒。
+        let source = temp_dir("ui-decl-badpage");
+        let config_home = temp_dir("ui-decl-badpage-home");
+        std::fs::create_dir_all(&source).expect("创建源目录");
+        write_plugin_source_with_ui(&source, &manifest("ghost-form", "order-form"), Some(ui_json));
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let text = manager
+            .install(source.to_str().expect("utf8 path"))
+            .expect_err("引用未声明的 schema key 必须被拒")
+            .to_string();
+        assert!(text.contains("ghost-form"), "文案要指出是哪个 key：{text}");
+        assert!(text.contains("plugin page `order`"), "文案要指出是哪一页：{text}");
+        drop(manager);
+        let _ = std::fs::remove_dir_all(&config_home);
+        let _ = std::fs::remove_dir_all(&source);
+
+        // ③ 任务源 detailSchema 指到未声明的 key ⇒ 装载期就拒。
+        let source = temp_dir("ui-decl-badsrc");
+        let config_home = temp_dir("ui-decl-badsrc-home");
+        std::fs::create_dir_all(&source).expect("创建源目录");
+        write_plugin_source_with_ui(&source, &manifest("order-form", "ghost-form"), Some(ui_json));
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let text = manager
+            .install(source.to_str().expect("utf8 path"))
+            .expect_err("任务源引用未声明的 schema key 必须被拒")
+            .to_string();
+        assert!(text.contains("demo-runs"), "文案要指出是哪条源：{text}");
+        assert!(text.contains("ghost-form"), "文案要指出是哪个 key：{text}");
+        drop(manager);
+        let _ = std::fs::remove_dir_all(&config_home);
+        let _ = std::fs::remove_dir_all(&source);
+
+        // ④ 没有 ui.json 却声明了 schema 页 ⇒ 同样拒（空集合 = 无任何可引用的 key）。
+        let source = temp_dir("ui-decl-missing");
+        let config_home = temp_dir("ui-decl-missing-home");
+        std::fs::create_dir_all(&source).expect("创建源目录");
+        write_plugin_source_with_ui(&source, &manifest("order-form", "order-form"), None);
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let text = manager
+            .install(source.to_str().expect("utf8 path"))
+            .expect_err("没有 ui.json 的 schema 页必须被拒")
+            .to_string();
+        assert!(text.contains("order-form"), "实际 = {text}");
+        drop(manager);
+        let _ = std::fs::remove_dir_all(&config_home);
+        let _ = std::fs::remove_dir_all(&source);
+
+        // ⑤ ui.json 本身非法（版本号 / key 形状）⇒ 报整份声明非法，指到文件名。
+        let source = temp_dir("ui-decl-invalid");
+        let config_home = temp_dir("ui-decl-invalid-home");
+        std::fs::create_dir_all(&source).expect("创建源目录");
+        write_plugin_source_with_ui(
+            &source,
+            &manifest("order-form", "order-form"),
+            Some(r#"{ "version": 9, "schemas": [] }"#),
+        );
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let text = manager
+            .install(source.to_str().expect("utf8 path"))
+            .expect_err("非法 ui.json 必须被拒")
+            .to_string();
+        assert!(text.contains("ui.json"), "实际 = {text}");
+        assert!(text.contains("不受支持"), "实际 = {text}");
+        drop(manager);
+        let _ = std::fs::remove_dir_all(&config_home);
+        let _ = std::fs::remove_dir_all(&source);
     }
 
     /// 端到端：装一个声明了任务源的插件 ⇒ 投影出该源；禁用后仍投影但带 `enabled = false`

@@ -240,7 +240,10 @@ fn parse_semver(v: &str) -> (u32, u32, u32) {
 }
 
 /// 如果 `a > b` 返回 true
-fn semver_gt(a: &str, b: &str) -> bool {
+///
+/// `pub(crate)`：插件 `ui.json` 的 reconcile（`init/plugin_ui_schema.rs`）复用同一套比较，
+/// 免得「内容变了但版本没升」在插件通道与用户通道上判出两种结论。
+pub(crate) fn semver_gt(a: &str, b: &str) -> bool {
     parse_semver(a) > parse_semver(b)
 }
 
@@ -259,7 +262,10 @@ fn now_unix() -> i64 {
 }
 
 /// 创建版本快照
-async fn create_version_snapshot(
+///
+/// `pub(crate)`：插件 `ui.json` 的 reconcile（`init/plugin_ui_schema.rs`）在内容变更时
+/// 走同一条快照路径，版本历史才不会因为「改写入口不同」而断档。
+pub(crate) async fn create_version_snapshot(
     db: &sea_orm::DatabaseConnection,
     schema_id: &str,
     version: &str,

@@ -264,7 +264,8 @@ pub struct PluginPage {
     pub title: String,
     /// 内容定位符，语义由 [`Self::loading`] 决定：
     /// `bundle` ⇒ 相对插件安装目录的资产路径（扩展名走资产白名单）；
-    /// `schema` ⇒ 动态 UI Schema 的 id（不做资产形状校验）。
+    /// `schema` ⇒ **本插件 `ui.json` 里的 key**（不是行 id，见
+    /// [`crate::ui_schema::row_id`]；安装期做 membership 校验）。
     pub entry: String,
     /// 装载形态。**必填**：未声明即清单校验错误 —— §0.12.5 裁定 3「不许混用却不声明」的落点。
     pub loading: PluginPageLoading,
@@ -294,6 +295,14 @@ pub struct PluginTaskSource {
     /// antd Tag 色板名（如 `gold`）；缺省 ⇒ 宿主用默认色。
     #[serde(default)]
     pub color: Option<String>,
+    /// 详情槽 schema：**本插件 `ui.json` 里的 key**（任务 `#149` 第 2 步）。
+    ///
+    /// 刻意不是行 id（`plugin.<pluginId>.<key>`）：插件只能引用自己的声明，
+    /// 拼全 id 的活儿归宿主（`axagent_plugins::ui_schema::row_id`）⇒ 跨插件引用
+    /// 在声明面上就写不出来。安装期做 membership 校验（`build_manifest_task_sources`），
+    /// 运行期由 `plugin_list_task_sources` 再按库复核一次。
+    #[serde(default)]
+    pub detail_schema: Option<String>,
 }
 
 /// `plugin.json` 中 `taskSources[]` 的**未校验**形态。
@@ -307,6 +316,12 @@ pub struct RawPluginTaskSource {
     pub command: String,
     #[serde(default)]
     pub color: Option<String>,
+    /// 详情槽 schema 的 key（`ui.json` 内，见 [`PluginTaskSource::detail_schema`]）。
+    ///
+    /// 本结构体已带 `rename_all = "camelCase"` ⇒ `plugin.json` 写 `detailSchema` 即可，
+    /// 不需要像 `RawPluginManifest::task_sources` 那样再补 alias。
+    #[serde(default)]
+    pub detail_schema: Option<String>,
 }
 
 /// `plugin_list_task_sources` 的返回形状（任务 #148）：某插件贡献的任务源清单 + 启停位。

@@ -1,14 +1,29 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { PluginTaskRunRowDto, PluginTaskSourceDto, PluginTaskSourcesInfoDto } from "@/types";
+import { cleanup, render, waitFor } from "@testing-library/react";
+import { createElement, type ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPluginTaskSourceAdapter } from "../adapters/pluginTaskSource.adapter";
 import { getAdapter, getAllAdapters, registerPluginTaskSources } from "../adapters/registry";
 
-const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
+const { invokeMock, schemaCardSpecs } = vi.hoisted(() => ({
+  invokeMock: vi.fn(),
+  /** 详情槽渲染时 `PluginSchemaCard` 实际收到的 spec（逐次追加）。 */
+  schemaCardSpecs: [] as Array<{ schemaId: string; dataContext?: unknown; title?: string }>,
+}));
 
 vi.mock("@/lib/invoke", () => ({ invoke: invokeMock }));
 vi.mock("@/i18n", () => ({ default: { t: (k: string) => k } }));
+
+// 详情槽只验「规格递对了没有」：卡片本体（动态 UI 库 / 渲染链）有自己的测试，
+// 这里桩掉它，既不用起 store，也不会因 schema 不存在而落 Alert 干扰断言。
+vi.mock("@/components/chat/PluginSchemaCard", () => ({
+  PluginSchemaCard: (props: { spec: { schemaId: string; dataContext?: unknown; title?: string } }) => {
+    schemaCardSpecs.push(props.spec);
+    return createElement("div", { "data-testid": "unit-plugin-schema-card" });
+  },
+}));
 
 function makeSource(over: Partial<PluginTaskSourceDto> = {}): PluginTaskSourceDto {
   return {
@@ -46,7 +61,10 @@ function stubRows(rows: unknown) {
   invokeMock.mockResolvedValue(JSON.stringify(rows));
 }
 
-beforeEach(() => invokeMock.mockReset());
+beforeEach(() => {
+  invokeMock.mockReset();
+  schemaCardSpecs.length = 0;
+});
 
 describe("插件任务源泛型适配器", () => {
   it("取数走 plugin_execute_command，并把行映射成 UnifiedRun", async () => {
@@ -137,6 +155,38 @@ describe("插件任务源泛型适配器", () => {
     }
     expect(caught).toBeInstanceOf(Error);
     expect((caught as Error).message).toBe("worker 已停止");
+  });
+});
+
+describe("插件任务源详情槽（detailSchema，任务 #149 第 2 步）", () => {
+  it("声明 detailSchema ⇒ 挂 renderDetail，渲染后把拼全的 schemaId / run.raw 原样递给 PluginSchemaCard", async () => {
+    stubRows([makeRow({ nativeId: "r-9", name: "示例 · r-9", raw: { rows: [1, 2] } })]);
+    const adapter = createPluginTaskSourceAdapter(
+      "unit-plugin",
+      makeSource({ detailSchema: "order-form" }),
+    );
+    const renderDetail = adapter.renderDetail;
+    if (!renderDetail) {
+      throw new Error("声明了 detailSchema 的源必须挂 renderDetail");
+    }
+
+    const [run] = await adapter.list();
+    const close = vi.fn();
+    render(renderDetail({ run, close }) as ReactElement);
+
+    // Drawer 的子树经 portal 挂载，可能晚一帧进 DOM ⇒ 等卡片被渲染出来再断言
+    await waitFor(() => expect(schemaCardSpecs).toHaveLength(1));
+    // 后端只给 ui.json 的 key，行 id 由宿主拼（PLAN §112.4：拼全 id 的活儿归宿主）
+    expect(schemaCardSpecs[0].schemaId).toBe("plugin.unit-plugin.order-form");
+    // 同一份对象引用：dataContext 与 schema 节点 id 的对齐由插件负责，宿主不复制也不改键
+    expect(schemaCardSpecs[0].dataContext).toBe(run.raw);
+    expect(schemaCardSpecs[0].title).toBe(run.name);
+    cleanup();
+  });
+
+  it("没有 detailSchema ⇒ 不挂 renderDetail（点开一行走中心空抽屉兜底）", () => {
+    const adapter = createPluginTaskSourceAdapter("unit-plugin", makeSource());
+    expect(adapter.renderDetail).toBeUndefined();
   });
 });
 

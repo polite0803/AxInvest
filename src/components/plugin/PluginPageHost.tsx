@@ -14,13 +14,14 @@
  *    - `schema` → 动态 UI 那条既有通道：`DynamicUIStandalone` 内部就是
  *      `useDynamicUIStore.getSchema` + `DynamicUIRenderer`，与 `DynamicPageViewer` 同源；
  *      动作回流也走 `usePluginStore.runUiAction`（同 DynamicPageViewer:88-94 那段）。
- *      ⚠ 这一支**绝不调 `plugin_resolve_page_asset`** —— schema 页的 `entry` 是 schema id 而不是
- *      文件路径，后端 `manager.rs` 那条解析路对它必报错。拿解析命令当「通用取内容」是这里最容易
+ *      ⚠ 这一支**绝不调 `plugin_resolve_page_asset`** —— schema 页的 `entry` 是本插件 `ui.json`
+ *      的 key（不是文件路径，也不是行 id：行 id 由 [`pluginSchemaRowId`] 在宿主侧拼全），
+ *      后端 `manager.rs` 那条解析路对它必报错。拿解析命令当「通用取内容」是这里最容易
  *      犯的错，而且症状是「schema 页永远报错」而不是「分支写错了」。
  *    - `bundle` → `plugin_resolve_page_asset(pluginId, pageId)` → `absolutePath` → `assetUrl()` → iframe `src`。
- *    - `page.entry` **只用于展示与排错，禁止参与路径拼接**：安装目录包含性 + `assetProtocol.scope`
- *      两道防线只在后端那一步解析时成立，前端拼串等于把它们绕过去（`PluginPageDto` 的寻址不变量，
- *      与 panel 粒度是同一条）。
+ *    - `bundle` 分支的 `page.entry` **只用于展示与排错，禁止参与路径拼接**：安装目录包含性 +
+ *      `assetProtocol.scope` 两道防线只在后端那一步解析时成立，前端拼串等于把它们绕过去
+ *      （`PluginPageDto` 的寻址不变量，与 panel 粒度是同一条）。
  *
  * 2. **`sandbox="allow-scripts"`，绝不加 `allow-same-origin`**。加上就等于把插件代码放进主 origin ——
  *    它能读 localStorage 里的 provider key 与会话 token。作为交换，文档是 opaque origin：宿主只能
@@ -64,6 +65,7 @@ import { createPluginBridgeApi, createPluginBridgePermissions } from "@/componen
 import i18n from "@/i18n";
 import { translateBackendError } from "@/lib/errorI18n";
 import { assetUrl, invoke, logIpcError } from "@/lib/invoke";
+import { pluginSchemaRowId } from "@/lib/pluginUiSchema";
 import { createHostApiBridge, type HostApiBridge } from "@/sdk/rpcBridge";
 import {
   isFrameFromSandboxSource,
@@ -91,7 +93,11 @@ const PAGE_ONLY_COMMANDS_MESSAGE =
 export interface PluginPageHostProps {
   /** 宿主绑定的归属：`pluginId` 由调用方给出，iframe 传来的同名字段一律被桥丢弃。 */
   pluginId: string;
-  /** 页面声明本身（`manifest.pages[]` 的一项）。分支只读 `loading`，`entry` 只用于展示。 */
+  /**
+   * 页面声明本身（`manifest.pages[]` 的一项）。分支只读 `loading`：
+   * `schema` ⇒ `entry` 是本插件 `ui.json` 的 key（宿主拼全行 id）；
+   * `bundle` ⇒ `entry` 只用于展示，禁止参与路径拼接。
+   */
   page: PluginPageDto;
   /** 仅用于展示与排错（iframe title、运行时错误日志的归属名）；缺省回落到 `pluginId`。 */
   pluginName?: string;
@@ -126,10 +132,13 @@ function PluginSchemaPage(
     [pluginId, runUiAction],
   );
 
+  // 清单只声明 key（安装期已做 membership 校验）；库里的行 id 由宿主拼全，单点见 `pluginSchemaRowId`。
+  const schemaId = pluginSchemaRowId(pluginId, page.entry);
+
   return (
     <div style={{ flex: 1, overflow: "auto", ...style }}>
-      <SchemaIdContext.Provider value={{ schemaId: page.entry }}>
-        <DynamicUIStandalone schemaId={page.entry} onAction={handleAction} />
+      <SchemaIdContext.Provider value={{ schemaId }}>
+        <DynamicUIStandalone schemaId={schemaId} onAction={handleAction} />
       </SchemaIdContext.Provider>
     </div>
   );

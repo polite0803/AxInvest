@@ -2166,6 +2166,11 @@ export interface PluginTaskSourcesInfoDto {
  * 只声明**数据面**：`command` 是本包 `commands[]` 里已声明的命名命令，其返回体是
  * [`PluginTaskRunRowDto`] 数组。渲染形态不在这里（PLAN §93 裁定：插件不给 React）。
  * `title` 是纯文本、不走宿主 i18n —— 与 `PluginPageDto.title` 同口径。
+ *
+ * `detailSchema` 是**详情槽**的声明（任务 #149 第 2 步）：插件只交**本插件 `ui.json` 里的 key**
+ * （不是动态 UI 库的行 id，拼全 id 由宿主按 `plugin.{pluginId}.{key}` 完成，PLAN §112.4），
+ * 宿主用 `PluginSchemaCard` 画出来 ⇒ 主 origin 里仍不出现任何插件 React 代码。
+ * 缺省/null 时该源不挂 `renderDetail`，点开一行落中心的空抽屉兜底。
  */
 export interface PluginTaskSourceDto {
   id: string;
@@ -2174,6 +2179,8 @@ export interface PluginTaskSourceDto {
   command: string;
   /** antd Tag 色板名；缺省由宿主泛型适配器兜底。 */
   color?: string | null;
+  /** 详情槽用的 schema key（后端 `detail_schema`，本插件 `ui.json` 的 key）；缺省/null ⇒ 无详情。 */
+  detailSchema?: string | null;
 }
 
 /**

@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { PluginSchemaCard } from "@/components/chat/PluginSchemaCard";
 import { invoke } from "@/lib/invoke";
+import { pluginSchemaRowId } from "@/lib/pluginUiSchema";
 import type { PluginTaskRunRowDto, PluginTaskSourceDto } from "@/types";
+import { Drawer } from "antd";
+import { createElement } from "react";
 import { mapRunTrigger, runIdOf, type RunState, type UnifiedRun } from "../model";
-import type { TaskSourceAdapter } from "./types";
+import type { RunDetailContext, TaskSourceAdapter } from "./types";
 
 /**
  * 插件任务源的**泛型适配器**工厂（任务 #148，PLAN §97.4）。
@@ -48,7 +52,7 @@ export function createPluginTaskSourceAdapter(
   pluginId: string,
   source: PluginTaskSourceDto,
 ): TaskSourceAdapter {
-  return {
+  const adapter: TaskSourceAdapter = {
     id: source.id,
     // 插件源没有宿主 i18n key（文案归产物自己负责）⇒ nameKey 留空，渲染侧读 `name`。
     // 留空串而不是删字段：既有 4 个消费点都按 `name ?? t(nameKey)` 取值，字段缺了会 TypeError。
@@ -74,6 +78,45 @@ export function createPluginTaskSourceAdapter(
       return parsed.map((row) => toUnifiedRun(source.id, row as PluginTaskRunRowDto));
     },
   };
+
+  // 详情槽**只在插件声明了 schema 时才挂**（任务 #149 第 2 步）。未声明就原样返回，
+  // 中心 `RunDetailDrawer` 走它自己的空抽屉兜底 —— 与 #151 改造后的既有表现逐字一致，
+  // 所以这里不写「没 schema 也画个空抽屉」的分支（那会变成第二份兜底实现）。
+  if (source.detailSchema) {
+    const schemaId = pluginSchemaRowId(pluginId, source.detailSchema);
+    return {
+      ...adapter,
+      renderDetail: ({ run, close }: RunDetailContext) => renderPluginRunDetail(schemaId, run, close),
+    };
+  }
+  return adapter;
+}
+
+/**
+ * 插件 run 的详情形态：沿用宿主详情抽屉的观感（宽度与 `StockAnalysisRunDrawer` 同为 560），
+ * 内容交给 `PluginSchemaCard` —— 插件只给 schema id + 数据投影，主 origin 不执行它的代码（§93）。
+ *
+ * `dataContext` 直接传 `run.raw`（不复制、不改键）：键名与 schema 节点 id 的对齐是插件自己的事
+ * （`PluginSchemaCard` 契约），宿主在这里做映射就等于有了第二套 DTO。`raw` 在泛型适配器里
+ * 已回退为整行（`toUnifiedRun`），因此插件不显式给 `raw` 时也能拿到取数返回的原始行。
+ */
+function renderPluginRunDetail(schemaId: string, run: UnifiedRun, close: () => void) {
+  return createElement(
+    Drawer,
+    {
+      title: run.name,
+      open: true,
+      onClose: close,
+      styles: { wrapper: { width: 560 } },
+    },
+    createElement(PluginSchemaCard, {
+      spec: {
+        schemaId,
+        dataContext: run.raw as Record<string, unknown> | undefined,
+        title: run.name,
+      },
+    }),
+  );
 }
 
 /** 一行插件记录 → `UnifiedRun`。`id` / `source` 由宿主拼，插件不得自带前缀。 */

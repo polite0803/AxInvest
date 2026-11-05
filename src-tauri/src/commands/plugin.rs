@@ -281,6 +281,16 @@ pub async fn plugin_install(
     )
     .await
     .map_err(|e| format!("插件已安装，但 schema.json 收敛失败：{e}"))?;
+    // 插件 UI 贡献（任务 #149 第 2 步）：`ui.json` → `dynamic_ui_schemas`（origin=plugin）。
+    // 与建表同批挂载，但**失败不回滚安装** —— 表声明失败会让插件跑不起来，UI 失败只是
+    // 少一张表页；错误照样交给用户，下一次启用 / 启动会重试。
+    crate::init::plugin_ui_schema::reconcile_ui_schemas(
+        state.harness.db(),
+        &state.plugin_manager,
+        Some(&outcome.plugin_id),
+    )
+    .await
+    .map_err(|e| format!("插件已安装，但 ui.json 收敛失败：{e}"))?;
     Ok(outcome)
 }
 
@@ -320,6 +330,14 @@ pub async fn plugin_enable(state: State<'_, AppState>, plugin_id: String) -> Res
     )
     .await
     .map_err(|e| format!("插件已启用，但 schema.json 收敛失败：{e}"))?;
+    // 插件 UI 贡献（任务 #149 第 2 步）：同样覆盖「安装时 UI 写入失败」与「库被换掉」。
+    crate::init::plugin_ui_schema::reconcile_ui_schemas(
+        state.harness.db(),
+        &state.plugin_manager,
+        Some(&plugin_id),
+    )
+    .await
+    .map_err(|e| format!("插件已启用，但 ui.json 收敛失败：{e}"))?;
     Ok(())
 }
 
@@ -570,7 +588,7 @@ pub async fn plugin_list_task_sources(
     state: State<'_, AppState>,
 ) -> Result<Vec<axagent_plugins::types::PluginTaskSourcesInfo>, String> {
     let plugin_manager = state.plugin_manager.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let mut infos = tauri::async_runtime::spawn_blocking(move || {
         let manager = plugin_manager.blocking_read();
         manager.list_plugin_task_sources().map_err(|e| {
             String::from(ErrorResponse::from_error(
@@ -580,7 +598,13 @@ pub async fn plugin_list_task_sources(
         })
     })
     .await
-    .map_err(|e| format!("plugin list task sources task panicked: {e}"))?
+    .map_err(|e| format!("plugin list task sources task panicked: {e}"))??;
+    // 运行期复核 `detailSchema` 的归属（任务 #149 第 2 步）：安装期校验只证明「当时声明过」，
+    // 库被换掉 / 行被剪掉 / ui.json 被删都会让那份 key 变成悬空引用。复核不过就置 `None`
+    // —— 详情槽退化成「无详情」，绝不把 key 原样交给前端去加载一张别人的或不存在的地表。
+    crate::init::plugin_ui_schema::retain_owned_detail_schemas(state.harness.db(), &mut infos)
+        .await?;
+    Ok(infos)
 }
 
 #[agent_command(domain = plugin, safety = Caution, call_mode = StateInput, description = "更新指定插件")]
@@ -617,6 +641,15 @@ pub async fn plugin_update(
     )
     .await
     .map_err(|e| format!("插件已更新，但 schema.json 收敛失败：{e}"))?;
+    // UI 贡献**会剪枝**（与表不同）：新版 `ui.json` 里删掉的 key 对应的行要一起清掉，
+    // 否则升级后旧表单页在界面上残留、点开就是一张已经不存在的表。
+    crate::init::plugin_ui_schema::reconcile_ui_schemas(
+        state.harness.db(),
+        &state.plugin_manager,
+        Some(&outcome.plugin_id),
+    )
+    .await
+    .map_err(|e| format!("插件已更新，但 ui.json 收敛失败：{e}"))?;
     Ok(outcome)
 }
 

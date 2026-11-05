@@ -7,6 +7,7 @@ pub mod sandbox;
 pub mod source_audit;
 pub mod source_build;
 pub mod types;
+pub mod ui_schema;
 
 pub mod agent_provider;
 mod hooks;

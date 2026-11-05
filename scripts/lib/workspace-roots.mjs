@@ -48,24 +48,36 @@ export function isWorkspaceRoot(dir) {
 
 /**
  * 探测仓库内全部 Cargo workspace 根（绝对路径，按目录名排序 ⇒ 输出稳定）。
+ *
+ * ⚠ 结果按 `repoRoot` **进程内缓存**：本函数被「每一条引用」调用时（门禁逐条解析路径），
+ *   每次重读 8 个根的 `Cargo.toml` 在 VMware 共享目录上要 ~190ms/次 —— 1.2 万条引用即
+ *   ~38 分钟（`scripts/check-doc-refs.mjs` 首版实测）。同一进程内 workspace 布局不变，
+ *   缓存不改变语义。
  * @param {string} repoRoot 仓库根绝对路径
  * @returns {string[]}
  */
+const workspaceRootsCache = new Map();
 export function discoverWorkspaceRoots(repoRoot) {
+  const key = path.resolve(repoRoot);
+  const cached = workspaceRootsCache.get(key);
+  if (cached) return cached;
   const roots = [];
-  if (isWorkspaceRoot(repoRoot)) roots.push(path.resolve(repoRoot));
+  if (isWorkspaceRoot(key)) roots.push(key);
   let entries = [];
   try {
-    entries = fs.readdirSync(repoRoot, { withFileTypes: true });
+    entries = fs.readdirSync(key, { withFileTypes: true });
   } catch {
+    workspaceRootsCache.set(key, roots);
     return roots;
   }
   for (const e of entries) {
     if (!e.isDirectory() || SKIP_DIR_NAMES.has(e.name)) continue;
-    const dir = path.join(repoRoot, e.name);
+    const dir = path.join(key, e.name);
     if (isWorkspaceRoot(dir)) roots.push(path.resolve(dir));
   }
-  return roots.sort((a, b) => a.localeCompare(b));
+  const out = roots.sort((a, b) => a.localeCompare(b));
+  workspaceRootsCache.set(key, out);
+  return out;
 }
 
 /** 某个 workspace 根下的 `crates/*` 目录（只取一层子目录，不要求已声明 member）。 */

@@ -559,6 +559,22 @@ jobs:
       - name: Check component neutrality (cross-feature coupling ratchet)
         run: node scripts/check-component-neutrality.mjs
 
+      # ── 文档「文件:行号」引用的段对齐（AGENTS.md「文档中的源码引用写法（强制）」）──
+      # 为什么需要：文档里的 `文件:行号` 必须段对齐（完整路径 / 唯一后缀 / 唯一 basename），
+      #   禁止从文件名中间截断或换同义词；但这条规则此前**零自动检查**，只靠人撞
+      #   （`PLAN-shell-plus-plugins.md` §99.4 手工抓到 `worker.rs:3798` 已差 492 行）。
+      #   行号引用随源码编辑持续腐烂，而编译 / clippy / 单测全都不读文档 ⇒ 静默失效。
+      # 判据：只有 BROKEN（仓内不存在且无截断/同义词候选）/ STALE（行号越界）判红；
+      #   ABBREV（自证候选）/ NONLOC（未检查）/ EXTERNAL / EPHEMERAL 只报告；
+      #   存量走 `scripts/doc-refs-baseline.json` 棘轮（只减不增）。
+      # 先 --selftest：点开头路径被截短、裸 `:N` 归并出怪物串，都是首版就踩过的假红。
+      # 命令行与 `scripts/ci-check.mjs` 对应 step **逐字同源**。
+      - name: Check doc line references selftest (anchor alignment / abbreviation / overflow)
+        run: node scripts/check-doc-refs.mjs --selftest
+
+      - name: Check doc line references (anchor alignment / overflow / ratchet)
+        run: node scripts/check-doc-refs.mjs
+
       - name: Contract consistency check (command registration / i18n keys / harness deps / field & event edge supply)
         # 注意：本步用 `--only` **白名单**限定检查段，新增段必须同步加进来，
         # 否则「写了但没跑」—— 这正是本仓库反复出现的「声明了不生效的机制」。

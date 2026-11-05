@@ -528,6 +528,21 @@ if (canRunFrontend) {
   step("组件中立性（跨 feature 耦合）自检", "node scripts/check-component-neutrality.mjs --selftest");
   step("组件中立性（跨 feature 耦合棘轮）", "node scripts/check-component-neutrality.mjs");
 
+  // ── 文档「文件:行号」引用的段对齐门禁（2026-11-04 补）──
+  // 为什么需要：`AGENTS.md`「文档中的源码引用写法（强制）」要求文档里的 `文件:行号` 必须
+  //   **段对齐**（完整路径 / 唯一后缀 / 唯一 basename），禁止从文件名中间截断或换同义词。
+  //   但这条规则此前**没有任何自动检查**，只靠人撞：`PLAN-shell-plus-plugins.md` §99.4 手工
+  //   抓到 `worker.rs:3798` 实际已差 492 行 —— 行号引用会随源码编辑持续腐烂，而编译 / clippy /
+  //   单测 / 现有全部门禁都不读文档 ⇒ 静默失效。
+  // 判据：OK / NONLOC（未检查，自陈）/ BROKEN / ABBREV（自证候选，只报告）/ STALE（越界）；
+  //   只有 BROKEN / STALE 判红，存量走 `scripts/doc-refs-baseline.json` 棘轮（只减不增）。
+  // 为什么先跑 --selftest：本门首版就撒过两次谎 —— 点开头路径被抽取器截短（`.github/…`
+  //   变成 `github/…` ⇒ 假 BROKEN）、承前省略写法与裸 `:N` 归并出 `266/:293` 这类怪物串。
+  //   两条都只在正负对照里才暴露。
+  // 命令行与 `.github/workflows/ci.yml` 对应步骤**逐字同源**。
+  step("文档行号引用自检（三档合法 / 段内截断 / 同义词 / 越界）", "node scripts/check-doc-refs.mjs --selftest");
+  step("文档行号引用（段对齐 / 越界 / 棘轮）", "node scripts/check-doc-refs.mjs");
+
   // ── i18n **五道**互补门禁（2026-09-14 补三道：此前本地镜像**一条都没有**）──
   // 为什么必须五道都在：它们查的是**互不重叠**的东西，缺一条就有一种逃逸路径 ——
   //   ① 硬编码文案：代码里直接写死中文字面量（值层查不到，因为压根没进 locale）

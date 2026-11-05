@@ -110,7 +110,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { discoverWorkspaceRoots, resolveRepoFile } from "./lib/workspace-roots.mjs";
+// 引用抽取 / 定位的原语已下沉到 lib（与 `scripts/check-doc-refs.mjs` **同一份实现**）：
+// 两处判据必须逐字同源，否则同一条行号漂移在两个扫描面上会给出不同结论（见 lib 头部）。
+import {
+  abbrevCandidates,
+  buildBasenameIndex,
+  extractRefs,
+  locateRef,
+} from "./lib/doc-refs.mjs";
+import { discoverWorkspaceRoots } from "./lib/workspace-roots.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
@@ -148,16 +156,9 @@ const rel = (p) => path.relative(ROOT, p).split(path.sep).join("/");
 // 只认「带扩展名的路径 + `:行号`」。**扩展名白名单是刻意的**：不设它的话，
 // `13:43`（时刻）、`HashMap<String,u32>` 之类会把扫描面淹掉 —— 而淹掉之后
 // 没人看输出，于是门禁等于不存在（判据 #7：审计脚本自身会撒谎，先保证信噪比）。
-const EXTS = "rs|ts|tsx|js|mjs|sh|json|toml|md|rhai|py|sql|yml|yaml";
-// 行号允许 `:N`、`:N/M`（同一文件多行，如 `wiki_compiler.rs:671/782`）、`:N-M`（区间）
-const LINE_LIST = String.raw`\d+(?:[/-]\d+)*`;
-const FILE_ANCHOR = new RegExp(
-  String.raw`([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:${EXTS}))\s*:\s*(${LINE_LIST})`,
-  "g",
-);
-// 裸 `:行号`（承接同一段里前一个文件名）。负向先行断言排除 `13:43` 这类时刻：
-// 时刻的 `:` 前面是数字，而引用写法的 `:` 前面是标点 / 空白 / 文件名。
-const BARE_ANCHOR = new RegExp(String.raw`(?<![A-Za-z0-9]):\s*(${LINE_LIST})`, "g");
+// 抽取器本体（`extractRefs` / 正则 / 扩展名白名单）已下沉到 `./lib/doc-refs.mjs`，
+// 与 `check-doc-refs.mjs` 共用**同一份实现**；本脚本只保留自己的扫描面与判据。
+export { extractRefs };
 
 /** 扫描面：全部 workspace 根（自动探测）下的 .rs，排除 target/ 与 node_modules/ */
 function collectRustFiles() {
@@ -210,66 +211,7 @@ function collectRustFiles() {
   return out.sort();
 }
 
-/**
- * 从一段文本里抽出全部引用。纯函数 ⇒ 可被 --selftest 复用（判据 #147②）。
- * @returns {{file:string, line:number, text:string}[]} `text` = 该引用所在的整行
- */
-export function extractRefs(text) {
-  const out = [];
-  for (const [srcLine, raw] of text.split(/\r?\n/).entries()) {
-    // 两个正则都跑在**整行**上，再按 index 归并 —— 必须整行，不能切片：
-    // 切片会让负向先行断言丢掉左边界上下文，`:4:5`（cargo 诊断的 `行:列`）里
-    // 第二个 `:` 会因为在切片里处于是「字符串开头」而被误当成裸引用，
-    // 于是 `--> src/main.rs:4:5` 被读成 `src/main.rs:5`（实测踩到，判据 #7）。
-    const toks = [];
-    for (const a of raw.matchAll(FILE_ANCHOR)) {
-      toks.push({ i: a.index, e: a.index + a[0].length, file: a[1], lines: a[2] });
-    }
-    for (const b of raw.matchAll(BARE_ANCHOR)) {
-      toks.push({ i: b.index, e: b.index + b[0].length, file: null, lines: b[1] });
-    }
-    toks.sort((x, y) => x.i - y.i);
-
-    let lastFile = null;
-    let covered = -1;
-    for (const t of toks) {
-      if (t.i < covered) continue; // 落在前一个带文件名匹配的内部
-      covered = t.e;
-      if (t.file) lastFile = t.file;
-      else if (!lastFile) continue; // 裸引用但本行还不知道文件名 ⇒ 无从判定
-      const f = t.file ?? lastFile;
-      // `:A/B` = 多行清单（每行都要非空）；`:A-B` = 区间（**只判起点非空**，
-      // 终点允许落在空行 —— 实测 `:64-70` 的 70 就是一个空行，硬判它恒定假红）
-      for (const part of t.lines.split("/")) {
-        const mm = part.match(/^(\d+)(?:-(\d+))?$/);
-        if (!mm) continue;
-        // `col` / `end` = 该引用 token 在**本行**里的列区间。软判据用它把「引号值」归给
-        // 文本上最近的那条引用（同一行常有多条引用，见 `quotedTokensOwnedBy`）。
-        out.push({
-          file: f,
-          line: Number(mm[1]),
-          text: raw,
-          srcLine,
-          col: t.i,
-          end: t.e,
-          blankOk: false,
-        });
-        if (mm[2]) {
-          out.push({
-            file: f,
-            line: Number(mm[2]),
-            text: raw,
-            srcLine,
-            col: t.i,
-            end: t.e,
-            blankOk: true,
-          });
-        }
-      }
-    }
-  }
-  return out;
-}
+// extractRefs 的实现已下沉到 ./lib/doc-refs.mjs（与 check-doc-refs.mjs 同一份实现）。
 
 /**
  * 注释块上下文：一个引用所在的「连续 `//` 注释块」。
@@ -399,13 +341,7 @@ export const DECL_SCAN_LINES = 60;
  * @returns {string[]} 疑似被截断的真实文件（仓库相对路径，已排序）
  */
 export function abbrevHitsFor(refFile, index) {
-  const b = refFile.slice(refFile.lastIndexOf("/") + 1);
-  if (!b || !index) return [];
-  const out = [];
-  for (const [name, arr] of index) {
-    if (name.length > b.length && name.endsWith(b)) for (const p of arr) out.push(rel(p));
-  }
-  return out.sort();
+  return abbrevCandidates(refFile, index, ROOT);
 }
 
 /**
@@ -642,14 +578,6 @@ export const CONTROL_FLOW_LINE = /^(?:continue|break|return|continue\s+'[A-Za-z_
 export const CLOSING_LINE = /^(?:[)\]};,]*[)\]};][)\]};,]*|\}\s*else\s*\{?)$/;
 
 
-/**
- * 把一个仓库内引用解析成真实文件（引用写法可能是 `src/…`、`crates/…`、`src-tauri/…`
- * 或新 workspace 前缀）。多根解析统一交给 lib，避免每次拆 workspace 都要改本函数。
- */
-function resolveRef(relPath) {
-  return resolveRepoFile(ROOT, relPath);
-}
-
 // ── 仓库文件索引（按 basename → 全部同名文件）─────────────────────────
 //
 // ⚠ 第一版**没有**这层，直接把「显式路径解析不到」判成「文件不存在」⇒ 实测一次报
@@ -699,30 +627,11 @@ const SKIP_DIRS = new Set([
 ]);
 let basenameIndex = null;
 function getBasenameIndex() {
-  if (basenameIndex) return basenameIndex;
-  basenameIndex = new Map();
-  const walk = (dir) => {
-    let entries;
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (SKIP_DIRS.has(e.name)) continue;
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.isFile()) {
-        if (!basenameIndex.has(e.name)) basenameIndex.set(e.name, []);
-        basenameIndex.get(e.name).push(p);
-      }
-    }
-  };
-  walk(ROOT);
+  // walk 实现已下沉到 ./lib/doc-refs.mjs（`buildBasenameIndex`，与 check-doc-refs.mjs 同一份）；
+  // 本脚本只提供**自己那份** `SKIP_DIRS`（覆盖面口径，理由见上方注释）。
+  if (!basenameIndex) basenameIndex = buildBasenameIndex(ROOT, SKIP_DIRS);
   return basenameIndex;
 }
-
-const norm = (p) => p.split(path.sep).join("/");
 
 // ── 活文档（`.md`）引用体检：扫描面 + 粗筛判据（供 --dump-doc-refs）──────────
 //
@@ -849,23 +758,11 @@ export function classifyNonloc(cands, line, allowHit) {
 
 /**
  * 定位一个引用指向的文件。三分法（`L` / `N` / `B`）—— 纯函数，便于 --selftest 复用。
+ * 实现已下沉到 `./lib/doc-refs.mjs` 的 `locateRef`（与 `check-doc-refs.mjs` 同一份）。
  * @returns {{kind:"L", abs:string} | {kind:"N", why:string} | {kind:"B"}}
  */
 export function locate(refFile, index) {
-  // ① 显式相对路径（含 `/`）：按仓库内的多种基准目录试
-  if (refFile.includes("/")) {
-    const hit = resolveRef(refFile);
-    if (hit) return { kind: "L", abs: hit };
-  }
-  const base = refFile.slice(refFile.lastIndexOf("/") + 1);
-  const cands = index.get(base) ?? [];
-  if (cands.length === 0) return { kind: "B" };
-  if (cands.length === 1) return { kind: "L", abs: cands[0] };
-  // ② 同名多份 ⇒ 用「引用串的路径后缀」消歧（`init/state.rs` 只对应一个真实文件）
-  const want = refFile.replace(/^\.\//, "");
-  const suffix = cands.filter((p) => norm(p).endsWith("/" + want));
-  if (suffix.length === 1) return { kind: "L", abs: suffix[0] };
-  return { kind: "N", why: `同名 ${cands.length} 份、路径后缀也不能消歧（如 \`mod.rs\`/\`lib.rs\`）` };
+  return locateRef(refFile, index, ROOT);
 }
 
 /**

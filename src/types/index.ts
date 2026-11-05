@@ -13,23 +13,26 @@ export * from "./modelSelection";
 // === IPC 事件名契约（由 schema-gen 从后端 axagent_harness::IpcEventName 生成，勿手改） ===
 export type { IpcEventName } from "./generated/events";
 
+// === 后端 DTO 生成物（由 schema-gen 从 axagent-harness 结构体生成，勿手改） ===
+// 权威定义在后端：字段名走 serde 的 `rename_all = "camelCase"`，`Option<T>` 走 `T | null`。
+// 这里只 re-export —— 既有 `import type { ProviderKey } from "@/types"` 的消费方零改动，
+// 但 `src/types/` 里不再保留第二份手写定义（PLAN-shell-plus-plugins §91.3 B8-3 首刀）。
+// 重新生成：`cd axagent-plugins && cargo run -p schema-gen -- frontend-dto`
+import type {
+  ModelCapability,
+  ModelType,
+  ProviderKey,
+  ProviderProxyConfig,
+  ProviderType,
+  SubWorkflowOrigin,
+} from "./generated/dto";
+export type { ModelCapability, ModelType, ProviderKey, ProviderProxyConfig, ProviderType, SubWorkflowOrigin };
+
 // === Provider System ===
 import type { SkillPermissions } from "@/sdk/types";
 import type { RAGPipelineConfig } from "./knowledge";
 import type { NullableModelRef } from "./paired";
 import type { TaskShapeDecision } from "./taskShape";
-
-export type ProviderType =
-  | "openai"
-  | "openai_responses"
-  | "anthropic"
-  | "gemini"
-  | "openclaw"
-  | "hermes"
-  | "ollama"
-  | "llama_cpp"
-  // TypeSafe Jev 决策模型（decisions 端点，非 chat 兼容协议）
-  | "typesafe";
 
 export interface ProviderConfig {
   id: string;
@@ -49,24 +52,6 @@ export interface ProviderConfig {
   sortOrder: number;
   createdAt: number;
   updatedAt: number;
-}
-
-export interface ProviderKey {
-  id: string;
-  providerId: string;
-  keyEncrypted: string;
-  keyPrefix: string;
-  enabled: boolean;
-  lastValidatedAt: number | null;
-  lastError: string | null;
-  rotationIndex: number;
-  createdAt: number;
-}
-
-export interface ProviderProxyConfig {
-  proxyType: string | null;
-  proxyAddress: string | null;
-  proxyPort: number | null;
 }
 
 export interface CreateProviderInput {
@@ -92,13 +77,7 @@ export interface UpdateProviderInput {
 }
 
 // === Model System ===
-export type ModelCapability =
-  | "TextChat"
-  | "Vision"
-  | "FunctionCalling"
-  | "Reasoning"
-  | "RealtimeVoice";
-export type ModelType = "Chat" | "Voice" | "Embedding" | "Decision";
+// `ModelCapability` / `ModelType` 见文件顶部的生成物 re-export（权威在 harness，勿手写）。
 
 export interface Model {
   providerId: string;
@@ -1733,14 +1712,9 @@ export interface ExecutionStatusResponse {
   parentExecutionId: string | null;
 }
 
-/**
- * 子执行归属（后端 `SubWorkflowOrigin`，camelCase 线上拼写）。
- * 只有由 SubWorkflow 节点启动的**子执行**发出的事件才带；顶层执行的事件为 null/缺席。
- */
-export interface SubWorkflowOrigin {
-  parentExecutionId: string;
-  parentNodeId: string;
-}
+// `SubWorkflowOrigin`（子执行归属）见文件顶部的生成物 re-export —— 权威定义在
+// `axagent-harness::workflow_types`。只有由 SubWorkflow 节点启动的**子执行**发出的事件才带它，
+// 顶层执行的事件为 null/缺席（这条语义留在后端 doc 注释里，随生成物一起投影过来）。
 
 /**
  * 一次子执行的实时进度（B-2a）。key = 子执行的 execution_id —— 刻意不用父节点 id 当 key：

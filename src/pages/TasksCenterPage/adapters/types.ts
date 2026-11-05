@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { ReactNode } from "react";
 import type { RunLogLine, RunQuery, RunStep, SourceId, UnifiedRun } from "../model";
+
+/**
+ * 详情形态（点一行弹出的抽屉）的入参。
+ *
+ * 中心只给「这一行 + 关闭动作」两样，**不给源特定 props** —— 各源详情组件要什么
+ * （整条 run 的 raw / 只要 nativeId / 只要 batchId）由该源自己在 `renderDetail` 里安排。
+ */
+export interface RunDetailContext {
+  readonly run: UnifiedRun;
+  readonly close: () => void;
+}
 
 /**
  * 任务源适配器（Task Source Adapter）。
@@ -39,4 +51,16 @@ export interface TaskSourceAdapter {
   getIO?(nativeId: string): Promise<{ input?: unknown; output?: unknown }>;
   getHistory?(nativeId: string): Promise<UnifiedRun[]>;
   readonly eventTopics?: readonly string[];
+  /**
+   * 点一行弹出的**详情形态**，由该源自己声明（任务 #151 / PLAN §100）。
+   *
+   * 为什么放适配器而不是留在中心：这五个源的详情组件 props 本来就各不相同
+   * （pipeline 要整条 run 的 `raw`、批次只要 `nativeId`、cron 只要 `taskId + title`），
+   * 让中心替它们做适配就等于「一个中性分发器知道每个源怎么渲染」—— 于是每加一个源
+   * 都要回来改这个文件，而它正是股票耦合的落脚处。
+   *
+   * ⚠ 这是**宿主内**的渲染位。§93 已裁第三方 React 不得进主 origin ⇒ 插件贡献的源
+   * 今天不声明它；未声明一律走中心的空抽屉兜底，与改造前的表现逐字一致。
+   */
+  renderDetail?(ctx: RunDetailContext): ReactNode;
 }

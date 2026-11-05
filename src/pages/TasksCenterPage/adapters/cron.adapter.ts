@@ -2,7 +2,9 @@
 
 import { invoke } from "@/lib/invoke";
 import type { ScheduledTask, TaskExecutionRecord } from "@/types";
+import { createElement } from "react";
 import { toEpochMs } from "../formatUtils";
+import { CronHistoryDrawer } from "../jobs/CronHistoryDrawer";
 import { mapRunTrigger, type RunBadge, runIdOf, type RunState, type UnifiedRun } from "../model";
 import { canExecuteNow } from "../taskGrouping";
 import type { TaskSourceAdapter } from "./types";
@@ -52,6 +54,16 @@ export const cronAdapter: TaskSourceAdapter = {
     }
     return rows.map((rec) => mapExecutionRecord(nativeId, rec, undefined));
   },
+
+  // 详情形态归本源自述（任务 #151）：执行历史抽屉。它原先是 `RunDetailDrawer.tsx` 里的
+  // 一个内部函数（只有 cron 源用），现在移到 jobs/ 下与本源的其它详情组件同层。
+  renderDetail: ({ run, close }) =>
+    createElement(CronHistoryDrawer, {
+      taskId: run.nativeId,
+      title: run.name,
+      open: true,
+      onClose: close,
+    }),
 };
 
 /** 进程内在跑的任务 → running 行（此时 lastResult 还是上一次的旧结果）。 */

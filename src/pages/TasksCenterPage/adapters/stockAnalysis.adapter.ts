@@ -4,6 +4,8 @@ import i18n from "@/i18n";
 import { analysisRecordPath } from "@/lib/investRoutes";
 import { invoke } from "@/lib/invoke";
 import type { AnalysisSummary } from "@/types";
+import { createElement } from "react";
+import { StockAnalysisRunDrawer } from "../jobs/StockAnalysisRunDrawer";
 import { runIdOf, type RunState, type UnifiedRun } from "../model";
 import type { TaskSourceAdapter } from "./types";
 
@@ -29,6 +31,10 @@ export const stockAnalysisAdapter: TaskSourceAdapter = {
     }
     return rows.filter((r) => !r.parentAnalysisId).map(mapStockAnalysisRun);
   },
+
+  // 详情形态归本源自述（任务 #151）：单股分析摘要 + 「打开」跳投资工作区。
+  // 这一条 import 原先住在中性的 `RunDetailDrawer.tsx` 里，是主壳的股票反向阻塞之一。
+  renderDetail: ({ run, close }) => createElement(StockAnalysisRunDrawer, { run, onClose: close }),
 };
 
 export function mapStockAnalysisRun(row: AnalysisSummary): UnifiedRun {

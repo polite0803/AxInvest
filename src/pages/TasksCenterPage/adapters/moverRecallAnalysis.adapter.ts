@@ -3,6 +3,8 @@
 import i18n from "@/i18n";
 import { invoke } from "@/lib/invoke";
 import type { MoverRecallBatchState } from "@/types";
+import { createElement } from "react";
+import { MoverRecallBatchDrawer } from "../jobs/MoverRecallBatchDrawer";
 import { mapRunTrigger, runIdOf, type RunState, type UnifiedRun } from "../model";
 import type { TaskSourceAdapter } from "./types";
 
@@ -26,6 +28,9 @@ export const moverRecallAnalysisAdapter: TaskSourceAdapter = {
     }
     return rows.map(mapBatchSummary);
   },
+
+  // 详情形态归本源自述（任务 #151）：逐票 as-of 补分析明细，抽屉按 batchId 自己拉。
+  renderDetail: ({ run, close }) => createElement(MoverRecallBatchDrawer, { batchId: run.nativeId, onClose: close }),
 };
 
 export function mapBatchSummary(batch: MoverRecallBatchState): UnifiedRun {

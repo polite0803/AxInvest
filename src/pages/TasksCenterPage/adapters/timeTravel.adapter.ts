@@ -3,6 +3,8 @@
 import i18n from "@/i18n";
 import { invoke } from "@/lib/invoke";
 import type { TimeTravelBatchSummary } from "@/types";
+import { createElement } from "react";
+import { BatchRunDetailDrawer } from "../jobs/BatchRunDetailDrawer";
 import { runIdOf, type RunState, type UnifiedRun } from "../model";
 import type { TaskSourceAdapter } from "./types";
 
@@ -25,6 +27,9 @@ export const timeTravelAdapter: TaskSourceAdapter = {
     }
     return rows.map(mapBatchSummary);
   },
+
+  // 详情形态归本源自述（任务 #151）：批次只要 nativeId，明细由抽屉自己拉。
+  renderDetail: ({ run, close }) => createElement(BatchRunDetailDrawer, { batchId: run.nativeId, onClose: close }),
 };
 
 export function mapBatchSummary(batch: TimeTravelBatchSummary): UnifiedRun {

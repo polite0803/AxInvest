@@ -3,6 +3,8 @@
 import i18n from "@/i18n";
 import { invoke } from "@/lib/invoke";
 import type { PipelineRun } from "@/types";
+import { createElement } from "react";
+import { PipelineRunDetailDrawer } from "../jobs/PipelineRunDetailDrawer";
 import { runIdOf, type RunState, type UnifiedRun } from "../model";
 import type { TaskSourceAdapter } from "./types";
 
@@ -23,6 +25,14 @@ export const pipelineAdapter: TaskSourceAdapter = {
     }
     return rows.map(mapPipelineRun);
   },
+
+  // 详情形态归本源自述（任务 #151）：整条 run 的逐股明细，run 的 `raw` 就是 PipelineRun。
+  // 用 createElement 而不是 JSX：适配器是 .ts，不为一个表达式把五个适配器全改成 .tsx。
+  renderDetail: ({ run, close }) =>
+    createElement(PipelineRunDetailDrawer, {
+      run: (run.raw as PipelineRun | undefined) ?? null,
+      onClose: close,
+    }),
 };
 
 export function mapPipelineRun(run: PipelineRun): UnifiedRun {

@@ -517,9 +517,9 @@ L1 的正确身份是**接缝的消费者**，不是「27 里漏掉的一格」�
 | **② 跨包口**（一个功能包的文件调另一个功能包的 crate ⇒ 走 `call_seam`） | **29 处 / 9 文件**，且**全部是 OPC 的文件在调股票 crate** | 0 处 |
 | ③ 域自有文件内引用（随插件整体迁走，**不是障碍**） | 456 处 / 41 文件（2026-11-04 复测：原 444 / 37 的增量来自并行批在域自有文件里加代码，**与 B1/B2 两刀无关** —— 那两刀只动主壳） | 16 处 / 2 文件 |
 | Cargo.toml 构建边 | 7 条（`src-tauri` 4 + `tools` 1 + 域内 2；B7b 前 `tools` 2） | 1 条（`src-tauri → axagent-company-runtime`） |
-| 前端反向 import（非域 import 域文件） | 52 处 / 38 文件（2026-11-05 B8-1a：删宿主死代码 `WorkflowAgentCard.tsx` 2 处 + `MultiLlmVotePanel.tsx` 1 处） | 28 处 / 11 文件（15 处集中在 `ContentArea.tsx`） |
+| 前端反向 import（非域 import 域文件） | 51 处 / 37 文件（2026-11-05 B8-2 第一刀 #151：`RunDetailDrawer.tsx` 去 source 字面量分派 −1；上一读数 52 / 38 出自 B8-1a） | 28 处 / 11 文件（15 处集中在 `ContentArea.tsx`） |
 | 前端体量（**目录口径**：`components/stock-analysis` / `pages/opc`） | `components/stock-analysis` 213 文件 / 60 973 行 + store 6 文件 / 4 514 行 | `pages/opc` 20 文件 / 8 859 行 + `OpcPage.tsx` 134 行 |
-| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 296 文件 / 85 242 行 | 40 文件 / 12 797 行 |
+| — 同一注册表在**脚本文件名口径**（`feRe` 匹配 `src/**` 全部 .ts/.tsx）下的读数 | 296 文件 / 85 248 行 | 40 文件 / 12 797 行 |
 | entities 表文件 | 20 个 | 28 个 |
 | zh-CN i18n key | 3 527（`stockAnalysis`/`invest`/`quant`/`trade` 是**整段**） | 1 897（`opc` 整段） |
 
@@ -4638,6 +4638,102 @@ worker 二进制 **827,392 → 5,703,680 字节（debug）**：analysis-engine �
 4. **没有按状态过滤**：任务中心要「只看失败」时只能全量拉回再前端筛；`list_active` / `list_recent` 都没有 status 参数。
 5. **翻页未接**：有 `limit`、有 `total`，没有 offset/cursor ⇒ 一次只拿最近 50 条，历史翻不出来（§98.5-3「插件源只有 list」在这里同样成立）。
 6. **B8-1c 仍挂起**（任务 #149）：宿主 `stockAnalysis.adapter.ts` / `pipeline.adapter.ts` 未删 —— 详情抽屉按 `source` 字面量分派（`RunDetailDrawer.tsx:36`、`:45`），删了会退化 ⇒ 须先做 B8-2 页面/抽屉迁移。本批补齐的是插件源的**数据面**（在跑 + 终态 + 耗时），**详情面**依然缺。
+   ⇒ **其中「详情面按 source 字面量分派」这条前置已由 §100（任务 #151）收口**，上面两个行号是 §99 时点快照，勿按现盘行号找。#149 剩余的真实阻塞是**取数接缝**（该源 `list()` 打的是股票域宿主命令），不是分派形态。
 7. **真机未验**：桌面里打开任务中心、看一条已结束的工作流批次带着耗时出现在插件源下 —— 这条**没在 `npm run tauri dev` 里点过**；已验的是 Rust 侧端到端与单元/分派口径。
 8. **`PLUGIN_TASK_RUN_STATES` 与前端七态仍是两份人工镜像**（同 §98.5-7，等 B8-3 生成 DTO）；`--update-baseline`（中立性棘轮）与全量门禁同 §98.5-9 继续挂。
+
+
+## §100 B8-2 第一刀：任务中心**详情面**改由源声明（#35，2026-11-05）
+
+任务 #151。§99.5-6 判掉的「详情面」前置在本批收掉。
+
+**为什么先切这一刀而不是直接删宿主股票源**（#149）：`audit-l1-blockers` 把任务中心的股票反向阻塞记成 10 处 / 6 文件，但只有 `RunDetailDrawer.tsx` 那 1 处是**纯前端就能解**的 —— 其余 9 处要么需要取数接缝（registry 里那两个股票适配器打的仍是股票域宿主命令），要么是产品决策（把审批健康卡从概览 Tab 移走会改 UX）。先做结构上零风险的一处，顺带把 #149 的阻塞理由从「分派形态」纠正为「取数接缝」——后者才是真原因。
+
+### 100.1 形态裁定（四条）
+
+| # | 裁定 | 判据 |
+|---|---|---|
+| 1 | **详情形态由适配器声明（`renderDetail?(ctx): ReactNode`），中心不再认识任何源** | 改造前中心有五条 `selected.source === "…"` 字面量判断，其中一条 import 股票域抽屉组件 ⇒ 中性分发器「知道每个源怎么渲染」。后果是双份的：每加一个源要回来改这个文件，且这个文件永远是域耦合的落脚处。改成注册表取回后，中心只剩「取适配器 → 调它 → 没有就兜底」 |
+| 2 | **`ctx` 只给 `run + close` 两样，不给源特定 props** | 五个详情组件的入参本来就不同（pipeline 要整条 `run.raw`、两个批次只要 `nativeId`、cron 要 `taskId + title`）。中心若替它们拆参数，就等于把五个源的 props 形状抄进中性文件 ⇒ 让各源自己在 `renderDetail` 里从 `ctx` 取所需 |
+| 3 | **`renderDetail` 是**可选**方法，未声明走空抽屉兜底** | §93 已裁「插件只交数据不交渲染」（第三方 React 不得进主 origin）⇒ 插件贡献的源永远不声明它。兜底分支与改造前**逐字一致**（同一个 `Drawer` + `tasksCenter.runs.detailUnavailable`），插件源今天点开的表现没变 |
+| 4 | **适配器用 `createElement` 而不是 JSX** | 五个适配器都是 `.ts`；为一个表达式把它们全改名成 `.tsx` 会把 diff 面扩大到文件重命名。`createElement(Comp, props)` 的 props 仍受 TS 检查 ⇒ 组件改签名照样红 |
+
+**cron 的执行历史抽屉**（`CronHistoryDrawer`）原是 `RunDetailDrawer.tsx` 里的**内部函数**，只有 cron 源用。既然详情形态归源自述，它就不是「中心的一部分」⇒ 原样移成 `jobs/CronHistoryDrawer.tsx`，与本源其它详情组件同层。搬移零逻辑改写。
+
+### 100.2 改动面（10 文件，全在 `src/pages/TasksCenterPage/`）
+
+| 文件 | 改动 |
+|---|---|
+| `adapters/types.ts` | 加 `RunDetailContext`（`:12`）与可选 `renderDetail?(ctx): ReactNode`（`:65`） |
+| `RunDetailDrawer.tsx` | 211 行 → **45 行**；删五条 source 字面量分支与四个抽屉 import，改 `getAdapter(selected.source)?.renderDetail?.({ run, close })`（`:28`） |
+| `jobs/CronHistoryDrawer.tsx` | **新建**（145 行），自原内部函数原样移出，加 `CronHistoryDrawerProps` 命名导出 |
+| `adapters/{pipeline,stockAnalysis,timeTravel,moverRecallAnalysis,cron}.adapter.ts` | 各加一条 `renderDetail` 声明 + 对应抽屉 import |
+| `__tests__/RunDetailDrawer.test.tsx` | **新建** 3 条用例 |
+| `jobs/PipelineRunDetailDrawer.tsx` | `:4` 的 `usePipelineStore` 由 `@/stores` barrel 改为直连 `@/stores/feature/pipelineStore` —— **100.3 那条模块环的断点** |
+
+### 100.3 本批撞出的缺陷：详情面上移把**模块环**接上了
+
+全目录那一跑（100.5 W5）没有白跑 —— 它抓到的不是「某个用例红」，而是**两只测试文件根本没被收集**。链路：
+
+```
+adapters.test.ts 先 import ../adapters/cron.adapter
+  → cron.adapter → jobs/CronHistoryDrawer → @/stores（barrel）
+    → stores/index.ts → feature/taskCenterStore.ts:3 → adapters/registry.ts
+      → registry 求值期就执行 REGISTRY.map(a => a.id)（:34）
+        → 此时 pipeline/cron 适配器还在求值中 ⇒ 数组元素 undefined ⇒ TypeError
+```
+
+**为什么改造前没有这个环**：`@/stores` barrel 原先只被**中心**（`RunDetailDrawer.tsx`）与页面引用，适配器模块一个都不碰它 ⇒ 从适配器一侧进入时不会回到 registry。本批把抽屉 import 搬进适配器，等于把「组件图 ⇄ store 图 ⇄ 注册表图」三者首尾相接。**类型检查抓不到它**（W3 全绿）：环是**求值顺序**问题，不是类型问题 —— 只有「从哪一侧先进入模块图」才决定炸不炸，而页面入口恰好是安全的那一侧，所以**真机上今天也不会红**。这种「测试入口红、应用入口绿」的形态最阴，必须当场断掉而不是靠入口运气。
+
+**断点选在哪**：`PipelineRunDetailDrawer.tsx:4` 是这条环上唯一一处 `@/stores` barrel 引用（其余四个抽屉都不碰 store）。改成直连具体 store 模块（`pipelineStore.ts` 自身只依赖 `invoke` / `@/types` / `zustand`，是叶子），环即断开。
+
+- ⚠ **先试过、被推翻的修法**：给两只测试的 `vi.mock("@/lib/invoke")` 补 `isTauri` 等导出（仓内 `OverviewTab.evolutionApproval.test.tsx` 的 `importOriginal` 展开形态）。它能让 `pluginTaskSource.test.ts` 过，但 `adapters.test.ts` 随即换成 `adapter.id` 的 TypeError —— **因为缺导出只是环的第一个症状，不是根因**。改完根因后这两处 mock 已**还原成零 diff**，不留「放宽替身凑绿」的后门（那条展开形态本身是合法的，但用它盖住环会让下一个 barrel 泄漏继续静默）。
+- 保留 `renderDetail` 的**双向** import 环（`pipeline.adapter ⇄ PipelineRunDetailDrawer`）：两处引用都只发生在函数体/闭包内（`createElement` 在 `renderDetail` 箭头函数里，`mapPipelineState` 在组件 render 里），模块求值期互不取值 ⇒ 安全。断的只是**经过 registry 求值期**那一圈。
+
+
+### 100.4 本批**不做**的 9 处（逐条写原因，不许当「顺手能清」）
+
+| 站点 | 处数 | 为什么本批解不了 |
+|---|---|---|
+| `adapters/registry.ts:12` | 1 | 它 import `stockAnalysis.adapter` 是为了注册。注册表要中性，前提是**那两个股票适配器不再是宿主代码**（= #149，被取数接缝阻塞）或注册面本身插件化（= B8-3） |
+| `OverviewTab.tsx:3,6,7` | 3 | 进化健康卡直接打股票域 store / 命令。移走它会改概览 Tab 的信息架构 ⇒ 属产品决策，按「先说副作用再实现」另批 |
+| `__tests__/OverviewTab.evolutionApproval.test.tsx:2,3` | 2 | 上一条的测试镜像，随它一起走 |
+| `forms/TaskCreateModal.tsx:25,26` | 2 | 创建表单内联股票任务的字段与模板取数；需要 T2 命令通道上的插件字段声明（B8-4） |
+| `__tests__/adapters.test.ts:17` | 1 | 它 import 股票适配器做断言，随 #149 收口 |
+
+PLAN §0.10 的前端读数因此从 **52 处 / 38 文件 → 51 处 / 37 文件**（任务中心 10 处 / 6 文件 → 9 处 / 5 文件），**本批只清掉 1 处** —— 这就是这一刀的体量，别把它读成「任务中心已解耦」。
+
+### 100.5 验证台账（本机，全部真跑）
+
+| # | 命令 | 退码 | 读数 |
+|---|---|---|---|
+| W1 | `dprint fmt` → `dprint check`（本批全部改动文件） | 0 | fmt 首轮改写 3 个文件；断环后对 `jobs/PipelineRunDetailDrawer.tsx` 复查仍 check 全绿 |
+| W2 | `oxlint src/pages/TasksCenterPage --max-warnings=0` | 0 | **Found 0 warnings and 0 errors，42 files**（与 CI 同源；本仓走 oxlint，不是 ESLint） |
+| W3 | `npm run typecheck`（`scripts/check-tsc.mjs`） | 0 | 日志首行「tsc 发现 src 源文件 **1467 个**」⇒ 扫描面非空，不是 UNC 下的静默空跑；`createElement` 的 props 由 tsc 实检。⚠ **它对 100.3 那个模块环完全无感** —— 环是求值顺序问题，不是类型问题。断环后复跑同退 0 |
+| W4 | `npm run test:run -- RunDetailDrawer` | 0 | **1 file / 3 tests passed**（声明源渲染其 MARKER 且带上 `nativeId` / 未声明源落 `detailUnavailable` 兜底 / 源不在注册表也不崩） |
+| W5 | `npm run test:run -- TasksCenterPage`（全目录） | **报 0，实为红** | ⚠ **假绿实例**：后台任务报 exit 0，但日志里 `adapters.test.ts (0 test)` 与 `pluginTaskSource.test.ts (0 test)` 两条带 `❯`，且**没有结尾汇总行** ⇒ 「退 0 ≠ 检查跑了」在本仓再次应验。定点复跑退 **1**，首条错误 `No "isTauri" export is defined on the "@/lib/invoke" mock` ← `cacheStore.ts:40` ← `stores/index.ts:45` ⇒ 顺藤摸到 100.3 的模块环。**这一跑赚回了它的 16 分钟**，判据见本节末「关于验证面」 |
+| W6 | `node scripts/audit-l1-blockers.mjs` | 0 | 前端 **51 处 / 37 文件**（改前 52/38，见 `AUDIT-l1-blockers-2026-11-05-0705.md` 与 `-0944.md` 对照）；`RunDetailDrawer.tsx @15` 条目**消失**；Rust 侧 99/16 + H 桶 3 未动 |
+| W7 | `check-component-neutrality.mjs --selftest` + 判定 | 0 / 0 | 「PASS: 无新增违规（基线 212 条，**本轮已修复 1 条可择机 `--update-baseline` 收紧**）」——并行期**不跑** `--update-baseline`（会把别人未提交的减少钉进棘轮），留 100.6。断环后复跑同读数 |
+| W8 | `check-i18n-orphan-diff.mjs --selftest` + 判定 | 0 / 0 | 「PASS: 无孤儿候选」。⚠ 覆盖面只到**已跟踪**的改动文件（新建两只是 untracked，不进 `git diff HEAD`）⇒ 这条门对本批不覆盖新文件。断环后复跑同退 0，`K` 仍 10 434、判定不变（该门报的是「孤儿候选」，本批一个都没造出来） |
+| W9 | `check-jsx-text-i18n.mjs --selftest` + 判定 | 0 / 0 | 扫 781 个 `.tsx`，命中 51 全在基线，**基线外 0** |
+| W10 | `check-i18n-exemption-budget.mjs --selftest` + 判定 | 0 / 0 | 存量 142 条冻结，无基线外豁免问题 |
+| W11 | 行尾自证：`node` 读 latin1 数 `\r` | 0 | **ALL_ZERO_CR（12 文件）** = 10 个源码文件 + PLAN + `capability-register.json`（本机 `grep -c $'\r'` 是假值，判据只用 latin1） |
+| W12 | 断环后定点复跑 `adapters.test` + `pluginTaskSource` | 0 | `pluginTaskSource.test.ts` **1 file passed**、`adapters.test.ts` **1 file / 40 tests passed**。⚠ 中间一次 `adapters.test` 单跑撞上 `[vitest-pool]: Timeout waiting for worker to respond`（Duration 60.09 s、`transform 0ms` ⇒ worker 没起来，不是本批代码）——即 #141 的 60 s 启动抖动，**重试即绿**，不许把它读成用例红。两只测试的 `vi.mock` 已还原成零 diff（`git diff --stat` 空） |
+| W13 | 第五道门 `--selftest` + 判定（摘 PLAN 头 3 行的副本跑；`cp` 还原后 `cmp` = `RESTORED_IDENTICAL`，共 3 次驻留） | 首轮 0 / **1** ⇒ 复检 0 / 0 | 判定首轮 **1 条硬失败**：`frontendFileCaliber` 登记 85 242 / 实测 **85 248**（差 6）。归因已复算：本批 10 个文件里**只有 `adapters/stockAnalysis.adapter.ts` 命中 `feRe`**，`git diff --numstat` = `6 0`、`split('\n')` 90→96 ⇒ +6 全部由本批造成，且它是**涨**不是降（详情声明从中心搬回域内适配器的净结果）。同批改登记表 `value` / `planNumber` / `planPinned.mustContain` / `note` 四处 + PLAN §0.10.1 表那一行（盘上 `:522`）⇒ 复检 `PASS: hard:true 判据全部一致（登记 37 = A11/B8/C4/H1/K10/D3；能力面 Σ=23；锚点 21 项）`，该锚点转 `PASS: … = 85248`。`frontendDirCaliber`（`components/stock-analysis`）与其余 20 项锚点本批未触及。⚠ 顺带复核 `k2KeyedFaces` 登记 37 / 实测 38 仍是**只报告**档（等并行批落地重算，处置同 §99.4 V13） |
+
+**Rust 侧零改动**：本批一行 `cargo` 都没跑 —— 纯前端 10 文件，`cargo check` / clippy / fmt 与批无关。
+
+**关于验证面**（用户 2026-11-05 纠偏，已入用户级记忆 `feedback-verify-scope-by-risk`）：按新口径，W5 那种「顺手把整目录再扫一遍」默认不该做 —— 本批风险面是「分派形态换了 + 一个内部函数搬家」，`typecheck` + 单文件用例 + grep 引用面按理够。**但 W5 抓到的模块环是 typecheck 结构上抓不到的那类东西**（它只看类型，不看「从哪一侧先进入模块图」）。所以正确的结论不是「全目录不该跑」，而是：**当改动会把组件图接进 store 图/注册表图时，必须跑一次「从被引用方一侧进入」的加载**，而这件事 `adapters.test.ts` 一只文件（约 30 s）就能做到 ⇒ 便宜的定点动作若能命中判据，就不该换贵的全量动作。下次照此收窄。
+
+
+### 100.6 本批未做
+
+1. **中立性棘轮没收紧**：W7 报「已修复 1 条」⇒ `--update-baseline` 应把基线 212→211，但并行批仍在改前端，按纪律留到 #35 阶段末一次收（同 §98.5-9）。
+2. **`renderDetail` 没有真抽屉的渲染测试**：W4 用的是声明式替身（MARKER 组件），验的是**分派机制**；五个真详情组件各自的渲染用例仍住在它们自己的测试里。⇒ 「cron 源点开能看到执行历史表格」这条**没在本批被测过**，只是逐字搬移 + 类型检查过。
+3. **真机未点**：`npm run tauri dev` 里从 Runs 表逐源点开抽屉没走过（同 §99.5-7 口径）。
+4. **`registry.ts` 那 1 处未清**：见 100.4，被 #149 的取数接缝挡住。
+5. **B8-2 的「页面」半边未动**：本批只切详情面，任务中心的**创建表单 / 概览卡 / 注册表**三处站点仍待 B8-4 与 #149。
+6. **模块环只验了一条入口**：100.3 的断环由 `adapters.test.ts`（从适配器一侧进入）与 `pluginTaskSource.test.ts`（从 registry 一侧进入）两条路径证实。其它入口顺序（页面直入、`registerPluginTaskSources` 运行期追加后再进入）**没有穷举**。⚠ 更根本的一条没做：**`registry.ts:34` 仍在模块求值期解引用适配器的 `.id`** —— 把它改成惰性建 `Map`（首次 `getAdapter` 时构建）能从根上免疫这一类环，但会把「加载即崩」换成「静默 undefined 源」，判据方向需要先定，本批不动。
+7. **同形态的隐患留了一处**：`jobs/PipelineJobCard.tsx:6` 仍 import `@/stores` barrel。它今天不在适配器图里（只有页面引用）⇒ 不成环；但一旦将来有适配器引用它，100.3 的环原样复发。**没有加防御**（门禁层面「适配器不得 import 经 barrel 拉 store 的组件」是可以写成一条静态检查的，属新判据，未立项）。
+8. **`--update-baseline`（中立性 212→211）与全量门禁同 §98.5-9 继续挂**；`frontendFileCaliber` 已按实测回写（W13），**不代表** #35 阶段终口径收口。
 

@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { translateBackendError } from "@/lib/errorI18n";
-import { usePipelineStore } from "@/stores";
+// 这里必须绕过 `@/stores` barrel：barrel → taskCenterStore → adapters/registry → 各适配器
+// → 本组件，而 registry 在**模块求值期**就把适配器读成 `.id`（BY_ID），构成环 ⇒ 从适配器
+// 一侧先进入时拿到的绑定还是 undefined（任务 #151 全目录回归实测 TypeError）。直接引具体
+// store 模块（仓内 203 个文件同形态）即可断开，pipelineStore 自身只依赖 invoke/types/zustand。
+import { usePipelineStore } from "@/stores/feature/pipelineStore";
 import type { PipelineAnalysisSummary, PipelineResult, PipelineRun } from "@/types";
 import { Alert, Descriptions, Drawer, Empty, Space, Spin, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";

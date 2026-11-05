@@ -17,7 +17,7 @@ import type {
   SaveDemandSubscriptionInput,
   ScanPolicy,
   SubscriptionScanSummary,
-} from "@/types";
+} from "@/types/opc";
 import { DownOutlined } from "@ant-design/icons";
 import {
   Alert,

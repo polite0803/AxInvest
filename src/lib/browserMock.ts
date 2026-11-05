@@ -16,9 +16,6 @@ import type {
   ConversationBranch,
   ConversationCategory,
   CreateSearchProviderInput,
-  DeliveryInvoice,
-  DemandLead,
-  DemandSubscription,
   GatewayKey,
   KnowledgeBase,
   KnowledgeDocument,
@@ -57,6 +54,7 @@ import type {
   IndexResult,
   RankedCapability,
 } from "@/types";
+import type { DeliveryInvoice, DemandLead, DemandSubscription } from "@/types/opc";
 import { emitBrowserEvent } from "./browserEvents";
 
 interface Fleet {

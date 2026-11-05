@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // === Paired Types (全局同步字段对) ===
-export * from "./opc";
 export * from "./paired";
 
 // === Time Travel（时间旅行批次复盘） ===
@@ -17,6 +16,8 @@ export type { IpcEventName } from "./generated/events";
 // 权威定义在后端：字段名走 serde 的 `rename_all = "camelCase"`，`Option<T>` 走 `T | null`。
 // 这里只 re-export —— 既有 `import type { ProviderKey } from "@/types"` 的消费方零改动，
 // 但 `src/types/` 里不再保留第二份手写定义（PLAN-shell-plus-plugins §91.3 B8-3 首刀）。
+// 单域类型门面不入本 barrel（B8-5 域收敛）：OPC 域类型只经 "@/types/opc" 深路径直取 ——
+// 该域随插件化整体归 OPC 面，由 barrel 汇出等于让全局命名空间替单域演进背书，摘一处即少一处耦合面。
 // 重新生成：`cd axagent-plugins && cargo run -p schema-gen -- frontend-dto`
 import type {
   ConsensusEPS,

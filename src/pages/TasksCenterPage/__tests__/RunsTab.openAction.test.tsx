@@ -14,7 +14,7 @@ import { RunsTab } from "../RunsTab";
  * 「打开」按钮 = `deepLink` 的宿主侧消费点（任务 #152）。
  *
  * 缺陷形态：`cronAdapter` 每一行都写了 `deepLink: "/tasks?tab=schedules"` 并置
- * `capabilities.openSource: true`，而改造前**没有任何组件读这两个字段** ⇒ 能力声明了却点不到。
+ * `deepLink`，而改造前**没有任何组件读这个字段** ⇒ 地址声明了却点不到。
  * 修法是在 Runs 表操作列加一个按钮，因此这里必须钉住两条：
  * 1. 有 `deepLink` 才有按钮，跳的地址就是 run 自带的（中心不重拼路由）；
  * 2. 点击**不能**顺带打开详情抽屉 —— 行上的 onClick 会冒泡触发，两个动作同时发生就是回归。

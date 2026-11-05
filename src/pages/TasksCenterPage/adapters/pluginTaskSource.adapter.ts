@@ -93,10 +93,8 @@ function toUnifiedRun(sourceId: string, row: PluginTaskRunRowDto): UnifiedRun {
     // 插件没给耗时时用两端点算，算不出（缺端点 / 倒挂）就不显示，不编一个数。
     durationMs: resolveDurationMs(row),
     deepLink,
-    capabilities: {
-      // 只有真给了站内路由才算「可打开」：指向不存在的路由会让中心交出 404。
-      openSource: Boolean(deepLink),
-    },
+    // 插件源不声明任何宿主能力：可打开与否只由 `deepLink` 表达（见 §101.5-2）。
+    capabilities: {},
     raw: row.raw ?? row,
   };
 }

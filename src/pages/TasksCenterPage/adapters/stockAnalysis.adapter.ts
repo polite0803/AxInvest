@@ -63,9 +63,8 @@ export function mapStockAnalysisRun(row: AnalysisSummary): UnifiedRun {
     badges: state === "canceled" && row.status === "interrupted" ? ["interrupted"] : undefined,
     // 必须走 `investPath`：2026-10-28 起 `/stock-analysis/:id` 已删除，落到 404 页。
     deepLink: analysisRecordPath({ id: row.id, stockCode: row.stockCode, stockName: row.stockName }),
-    capabilities: {
-      openSource: true,
-    },
+    // 详情面由源自己声明（§100），不靠能力位分发。
+    capabilities: {},
     raw: row,
   };
 }

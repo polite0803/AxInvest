@@ -110,9 +110,7 @@ describe("插件任务源泛型适配器", () => {
     const adapter = createPluginTaskSourceAdapter("unit-plugin", makeSource());
     const runs = await adapter.list();
     const [noLink, withLink] = runs;
-    expect(noLink.capabilities.openSource).toBe(false);
     expect(noLink.deepLink).toBeUndefined();
-    expect(withLink.capabilities.openSource).toBe(true);
     expect(withLink.raw).toEqual({ k: 1 });
   });
 

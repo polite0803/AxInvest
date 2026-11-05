@@ -81,7 +81,6 @@ export function mapRunningTask(task: ScheduledTask): UnifiedRun {
     capabilities: {
       retry: canExecuteNow(task),
       viewHistory: true,
-      openSource: true,
     },
     raw: task,
   };
@@ -125,7 +124,6 @@ export function mapLastRun(task: ScheduledTask): UnifiedRun {
     capabilities: {
       retry: canExecuteNow(task),
       viewHistory: true,
-      openSource: true,
     },
     raw: task,
   };
@@ -155,8 +153,7 @@ export function mapExecutionRecord(
     finishedAt: rec.completed_at ?? undefined,
     durationMs: rec.duration_ms,
     error: rec.error ? { message: rec.error } : undefined,
-    capabilities: {
-      openSource: true,
-    },
+    // 执行历史行没有可重试/看历史等动作（那些挂在任务定义上）⇒ 空能力集。
+    capabilities: {},
   };
 }

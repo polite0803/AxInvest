@@ -92,7 +92,8 @@ export interface RunCapabilities {
   viewSteps?: boolean;
   viewIO?: boolean;
   viewHistory?: boolean;
-  openSource?: boolean;
+  // 「可打开」不看布尔位：唯一的判据是 `deepLink` 是否给出（RunsTab 的操作列直接读它）。
+  // 旧 `openSource` 字段全仓零消费者，留着只会让适配器写出没人读的声明，已删（PLAN §101.5-2）。
 }
 
 export interface RunError {

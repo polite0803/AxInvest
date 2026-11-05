@@ -2,7 +2,7 @@
 
 import i18n from "@/i18n";
 import { invoke } from "@/lib/invoke";
-import type { PipelineRun } from "@/types";
+import type { PipelineRun } from "@/types/pipeline";
 import { createElement } from "react";
 import { PipelineRunDetailDrawer } from "../jobs/PipelineRunDetailDrawer";
 import { runIdOf, type RunState, type UnifiedRun } from "../model";

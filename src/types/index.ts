@@ -2450,5 +2450,6 @@ export * from "./quant";
 // barrel 权威=quant 版，stock-analysis 版消费方走深路径 "@/types/stock-analysis"
 // stock-analysis 已从 barrel 拆除（B8-5 第一批），消费方一律经 "@/types/stock-analysis" 直取
 export * from "./backgroundTask";
-export * from "./pipeline";
+// pipeline 已从 barrel 拆除（B8-5 第二批），5 个消费方一律经 "@/types/pipeline" 直取
+// （PipelineResult / PipelineAnalysisSummary / PipelineSummary / PipelineRun / PipelineStepEvent）
 export type { BacktestResult } from "./quant";

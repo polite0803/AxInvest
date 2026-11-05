@@ -1,43 +1,22 @@
 // i18n-exempt: 股票分析类型定义（含后端数据值枚举，如风险等级/催化剂方向中文标识），类型定义非 UI 文案。
 import type { DashboardIndexQuote } from "./generated/dto";
 // ── 运行时工具函数（实现已在 @/lib/stock-analysis-utils.ts） ──
-// 向后兼容的 re-export，新代码应直接从 @/lib/stock-analysis-utils 导入
+// 向后兼容的 re-export，新代码应直接从 @/lib/stock-analysis-utils 导入。
+// B8-5 第二批：另有 23 个门面名经逐名核验「零消费」（无任何文件从本模块 import 它们），
+// 已摘除 13 + 7 + 3；保留的 6 个各有实证消费方，见 scripts 与本目录 __tests__/stock-analysis.test.ts。
 export {
   classifySentiment,
-  computeEvidenceDrivenConsensus,
-  computeEvidenceWeights,
-  computeStockConsensus,
-  type Consensus,
   getActionColor,
-  getActionTagStyle,
-  getActionTKey,
-  getRiskColor,
-  getRiskTKey,
   getSignalColor,
   parseAction,
-  parseRiskLevel,
-  type Sentiment,
-  STOCK_ACTION_LABELS,
-  STOCK_RISK_LABELS,
   StockAction,
   type StockConsensus,
-  StockRiskLevel,
 } from "@/lib/stock-analysis-utils";
 
-// 证据质量驱动权重的类型定义
-export type {
-  AnalystInput,
-  AnalystWeight,
-  EvidenceConsensus,
-  EvidenceWeightReport,
-  EvidenceWeightRequest,
-  HoldGateResult,
-  MarketRegimeInfo,
-} from "@/lib/stock-analysis-utils";
-
-// StockActionType / StockRiskLevelType 由 @/lib/stock-analysis-utils 导出
+// PositionStateType / StockActionType / StockRiskLevelType 由 @/lib/stock-analysis-utils 导出，
+// 本文件仅内部消费（`StockDecision` 的 action / positionState / riskLevel 三个字段），
+// 全仓无人从本模块 import 这三个名字 ⇒ B8-5 第二批摘掉对外 re-export，import 保留。
 import type { PositionStateType, StockActionType, StockRiskLevelType } from "@/lib/stock-analysis-utils";
-export type { PositionStateType, StockActionType, StockRiskLevelType };
 
 // ── 纯类型定义 ──
 
@@ -63,26 +42,6 @@ export interface ReflectionFeedbackResult {
 // ConsensusEPS / StockQuote / KLine / EarningsEvent / StockSearchResult 的权威定义在
 // `axagent-harness`，由 schema-gen 生成到 `./generated/dto`，见本目录 `index.ts` 的 re-export。
 // 此处不再手写第二份（AGENTS.md 禁区 12）。
-
-/**
- * 财报披露事件类型 —— 纯前端 UI 约束（后端 `event_type` 是 `String`）。
- *
- * 只用于展示层分支；不要声明成 `EarningsEvent["eventType"]`，否则等于把
- * 「后端已放开、前端又收窄」写回类型里。
- */
-export type EarningsEventType =
-  | "preliminary"
-  | "express"
-  | "formal"
-  | "shareholders_meeting"
-  | "other";
-
-export interface AnalysisConfig {
-  maxDebateRounds: number;
-  klinePeriod: string;
-  klineLimit: number;
-  newsLimit: number;
-}
 
 /** 单一周期的一组交易价位（阶段1四周期价位映射，与后端 DTO 逐字段对齐） */
 export interface HorizonPriceGroup {
@@ -2125,9 +2084,6 @@ export interface HitrateGroup {
   /** 该档期望持有交易日（半衰期拟合自变量）；action 分组与 unknown → null */
   holdingDays: number | null;
 }
-
-/** 四周期命中率分组（key 为 ultra_short / short / mid / long / unknown） */
-export type HorizonHitrateGroup = HitrateGroup;
 
 /** 命中率聚合结果 —— 消费 strategy_performance + stock_reflections + stock_analyses */
 /** 一格失败模式计数（PLAN P2-b）。`share` 的分母是**已标注反思行**，不是全部反思行。 */

@@ -2,12 +2,12 @@
 
 import type {
   BackgroundTaskInfo,
-  PipelineRun,
   PluginTaskRunRowDto,
   PluginTaskSourceDto,
   ScheduledTask,
   TimeTravelBatchSummary,
 } from "@/types";
+import type { PipelineRun } from "@/types/pipeline";
 import type { MoverRecallBatchState } from "@/types/stock-analysis";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { backgroundTasksAdapter, mapBackgroundTask } from "../adapters/backgroundTasks.adapter";

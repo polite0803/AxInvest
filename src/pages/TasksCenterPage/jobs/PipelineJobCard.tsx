@@ -4,7 +4,7 @@ import { JobCard } from "@/components/tasks/JobCard";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke, listen } from "@/lib/invoke";
 import { usePipelineStore } from "@/stores";
-import type { PipelineRun, PipelineStepEvent } from "@/types";
+import type { PipelineRun, PipelineStepEvent } from "@/types/pipeline";
 import { Button, Empty, message, Space, Tag, Typography } from "antd";
 import { Pause, Play, Workflow } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";

@@ -5323,3 +5323,53 @@ PLAN §0.10 的前端读数因此从 **52 处 / 38 文件 → 51 处 / 37 文件
 3. `schema_json` 体积上限仍未加（既存延期项）。
 4. `useDataSource` 无生产调用方，本批只做「接上时不天然绕过」的转发；真要启用需带来源解析。
 5. 渲染链级的 dataSource 执法（`DynamicUIRenderer:220` 那一行接线）只在引擎层有单测，没有加组件树测试 —— 本机 vitest 跑不动（#141），加了也无法取证。
+
+## §114 B8-5 第二批：股票域类型门面摘除 + 拆 `./pipeline`（#162，2026-11-06）
+
+### 114.1 先纠一处我自己的口径
+
+上一批收尾时说「31 个符号变成零消费，为下一批铺路」—— **这个数不成立**，执行者按实测推翻：`src/types/stock-analysis.ts` 里传递性零消费的**手写**类型只有 2 个，其余要靠文件头那块**向后兼容 re-export 门面**（29 名，其中 23 名零消费）才凑得出，且仍凑不到 31。⇒ 本批按实测做，**删 25 项**。判据层的教训：**「零消费」的判据是「没有文件把这个模块当导入源要这个名字」，不是「全文搜不到这个串」** —— `Consensus` / `Sentiment` 这类符号的权威定义在 `src/lib/stock-analysis-utils.ts`，61 个文件从那里直引，全文命中会给出一堆假「仍在用」。
+
+### 114.2 已删（25 项，`src/types/stock-analysis.ts` 2336 → 2292 行）
+
+| 档 | 数量 | 内容 |
+|---|---|---|
+| 门面 `export { … } from "@/lib/stock-analysis-utils"` | 13 | `computeEvidenceDrivenConsensus` · `computeEvidenceWeights` · `computeStockConsensus` · `Consensus` · `getActionTagStyle` · `getActionTKey` · `getRiskColor` · `getRiskTKey` · `parseRiskLevel` · `Sentiment` · `STOCK_ACTION_LABELS` · `STOCK_RISK_LABELS` · `StockRiskLevel` |
+| 门面 `export type { … }`（证据权重类型） | 7 | 整块摘除：`AnalystInput` · `AnalystWeight` · `EvidenceConsensus` · `EvidenceWeightReport` · `EvidenceWeightRequest` · `HoldGateResult` · `MarketRegimeInfo` |
+| 门面 `export type`（只摘对外，`import type` 留） | 3 | `PositionStateType` · `StockActionType` · `StockRiskLevelType` —— 本文件内部仍消费它们（`StockDecision.action` / `positionState` / `riskLevel`），**摘 import 会红** |
+| 本文件手写类型 | 2 | `AnalysisConfig` · `HorizonHitrateGroup` |
+
+保留 6 个门面名（`classifySentiment` / `getActionColor` / `getSignalColor` / `parseAction` / `StockAction` / `StockConsensus`）—— 有真实消费方，其中两条来自 `src/types/__tests__/stock-analysis.test.ts` 与 `src/stores/feature/__tests__/stockAnalysisStore.test.ts` 的**相对路径** `from "../stock-analysis"`，**纯文本搜 `@/types/stock-analysis` 搜不到**。
+
+⚠ 顺带纠出一个**扫描器自身的坑**（首版误判 4 个 `HorizonResult*` 为死）：单行 `export type X = …` 的引用 span 若从声明**下一行**起算，就漏掉同行的内部引用 ⇒ 判据必须让 span 起点对齐声明行。
+
+**`EarningsEventType` 我判删**（执行者列为裁定项，理由是我上一批称它「仍在用」）：`grep` 实测全仓唯一命中 = 它自己的定义行，且 `EarningsEvent.eventType` 已是 `string`，删它不动生成物契约。它上面那段「纯前端 UI 约束」的注释同批删 —— **留着就是一段没人兑现的假话**。
+
+### 114.3 任务 B：拆掉 `src/types/index.ts` 的 `export * from "./pipeline"`
+
+判据：`src/types/pipeline.ts` 5 个导出落在 `// === AxInvest 投资域（stock/quant/pipeline） ===` 段内 ⇒ 明确股票域；与 barrel 自身 278 个名字零重名、`src/types/` 内部零交叉、外部消费方仅 5 个文件（对比 `./quant` 11 文件且 `BacktestResult` 与 stock-analysis 同名，`./opc` 属 OPC 域）。改法与第一批逐字同形态（删行 + 原地留说明），5 个消费方改深路径，混合导入块拆两条（`adapters.test.ts`）。
+
+### 114.4 `src/stores/index.ts` 拆不动 —— 这是门禁与 barrel 互相锁死，不是偷懒
+
+股票 store 在 `src/stores/index.ts:102-111`，**68 个消费方**从 `@/stores` 取它们，其中 **36 个落在 `src/components/**` 扫描面内**。`scripts/check-component-neutrality.mjs:82-85` 的 `adjudicateImport` 只匹配 `^src/stores/feature/([^/]+)` ⇒ **`@/stores` barrel 当前完全不入判据**；一旦改深路径就立刻入判据，而 owner 比较是「目录名 vs 剥 `Store` 后缀的文件名」**逐字**比 ⇒ `src/components/stock-analysis/**`（26 文件）取 `stockAnalysisStore` 会因 `"stockAnalysis" ≠ "stock-analysis"` 判成**新增违规**，连目录同源的都不自认。
+⇒ 需要的是**前置裁定**，不是改 import 串。裁定见 114.5-③。
+
+### 114.5 四项裁定（执行者交上来判据不足，逐条裁）
+
+1. **`EarningsEventType`** ⇒ 删（114.2 末段）。我的「仍在用」是错的，按判据走。
+2. **向后兼容门面算不算本批清理对象** ⇒ **算，不回退**。插件化的目标形态就是主壳不再经 `types/` 门面把股票域的**实现函数**（`computeEvidenceWeights` 等）转发出去；这 20 行摘掉后，`src/lib/stock-analysis-utils.ts` 是该符号的唯一可见入口，正是想要的方向。
+3. **`stock-analysis` ↔ `stockAnalysisStore` 命名不同源** ⇒ 判**在门禁侧做 camel↔kebab 归一**，不判重命名 store 文件（重命名要动 68 个消费方，且 `stores/feature/` 下已有同族命名）。⚠ 这条属于**改判据**，必须独立成批：归一后 `src/components/stock-analysis/**` 那批既有基线条目会**变成自认** ⇒ 棘轮应当**下降**，须先出「归一前/后基线条数 + 逐条名单」再动表，不许拿它当「顺手洗白」。未裁定前 `src/stores/index.ts` 保持现状，不是缺陷。
+4. **`scripts/i18n-exemption-budget-baseline.json` 里 30+ 条 `src/components/stock-analysis/**` 豁免项**随股票域迁出怎么处理 ⇒ **迁出批落地后**在并行期之外跑一次 `--update-baseline`，与全仓棘轮收紧同批；本批不碰。
+
+### 114.6 验证
+
+`npm run typecheck` EXIT=0（**1476** 文件，改后复跑）· `npx dprint check` 7 文件 EXIT=0 · `npm run lint:eslint`（oxlint）0 warnings 0 errors / 1452 文件 · `node scripts/check-component-neutrality.mjs` PASS 无新增（基线 212，未跑 `--update-baseline`）· 7 文件 CR=0。
+因三道股票门禁会读本文件的接口键集，**主动加验**：`check-monitor-event-authority.mjs` / `check-reco-loop-status-coverage.mjs` / `check-horizon-decision-keys.mjs` 各 EXIT=0（删 `EarningsEventType` 后复跑仍全 0）。
+⚠ **vitest 读数未取得**（#141）。执行者另补一条本机证据：`npx vitest run <单文件>` 与 `--root .` 两种写法都被空格路径截断成 `Z: Folders/D/OneManager/AxInvest` ⇒ `No test files found`，EXIT=1 —— 与 #142 同一族的根路径症状，不是用例失败。`src/types/__tests__/stock-analysis.test.ts` 是本批的直接相关用例，**没有执行级取证**。
+
+### 114.7 未做
+
+1. `src/stores/index.ts` 股票 store 未拆（114.4，等 114.5-③ 的判据批先行）。
+2. `export * from "./opc"`（`src/types/index.ts:4`，仅 2 个消费方、16 导出、零重名）未拆 —— 属 OPC 域，本批口径限死股票域。**建议下一批首刀就是它**（影响面最小）。
+3. `export * from "./quant"`（`:2448`）未拆（11 消费方 + `BacktestResult` 同名需先定权威）。
+4. `src/types/index.ts` 有**重复 barrel 行** `export * from "./wiki"`（`:1543` 与 `:1980`）—— 与本批两域无关，未动，登记备查。

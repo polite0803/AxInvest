@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
-import type { PipelineResult, PipelineRun, PipelineStepEvent } from "@/types";
+import type { PipelineResult, PipelineRun, PipelineStepEvent } from "@/types/pipeline";
 import { create } from "zustand";
 
 interface PipelineState {

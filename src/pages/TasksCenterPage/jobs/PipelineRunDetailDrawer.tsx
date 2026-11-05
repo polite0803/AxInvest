@@ -6,7 +6,7 @@ import { translateBackendError } from "@/lib/errorI18n";
 // 一侧先进入时拿到的绑定还是 undefined（任务 #151 全目录回归实测 TypeError）。直接引具体
 // store 模块（仓内 203 个文件同形态）即可断开，pipelineStore 自身只依赖 invoke/types/zustand。
 import { usePipelineStore } from "@/stores/feature/pipelineStore";
-import type { PipelineAnalysisSummary, PipelineResult, PipelineRun } from "@/types";
+import type { PipelineAnalysisSummary, PipelineResult, PipelineRun } from "@/types/pipeline";
 import { Alert, Descriptions, Drawer, Empty, Space, Spin, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";

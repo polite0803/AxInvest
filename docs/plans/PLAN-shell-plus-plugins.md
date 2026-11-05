@@ -4787,3 +4787,108 @@ PLAN §0.10 的前端读数因此从 **52 处 / 38 文件 → 51 处 / 37 文件
 3. **OverviewTab 的 run 卡片未加「打开」**：那里是「最近运行」摘要卡，点击也是开抽屉；要不要加同一个按钮属产品取舍，未动。
 4. **真机未点**：`npm run tauri dev` 里点一次 cron 行的「打开」没走过（同 §99.5-7 / §100.6-3 口径）。
 5. **`--update-baseline` 与全量门禁**同 §98.5-9 继续挂。
+
+## §102 任务源详情槽：把 §93 的 schema 卡片接到任务中心（设计，待实现）
+
+**为什么需要它**：#149 删宿主 `stockAnalysis` / `pipeline` 适配器的最后一颗钉子，是**详情面没有替代品**（§101.5-1 已查实：`StockAnalysisRunDrawer` 是通往分析记录的唯一路径）。§93 已裁定插件卡片只许两种形态，「schema 卡片」是首选，但当时只接到 `pages[]`（`PluginPageHost.tsx:108`）与消息侧未建的插槽 —— **任务中心的详情槽不在其中**。
+
+**本设计只钉形态与判据，不含实现**（实现要改 `src/types/**`，该目录正被 B8-3 批占用；避免同批互编）。
+
+### 102.1 三条落点（都已核实存在，不是设想）
+
+| 环 | 现状 | 本设计怎么用 |
+|---|---|---|
+| 清单声明 | `manifest.taskSources[]` 由 `build_manifest_task_sources`（`axagent-plugins/crates/plugins/src/manager.rs:2965`）校验并转写；`plugin_list_task_sources`（同文件 `:695`）只读投影 | 新增可选 `detailSchema: string`（schema id），校验规则同 `pages[].entry` 的 schema 支：**必须是本插件 `schema.json` 里声明的 id**，否则安装期报错（不留到运行期白屏） |
+| schema 注册 | 插件 `schema.json` 在安装/启用/更新时收敛进 dynamic UI 库，`owner_id = pluginId`；卸载时 `revoke_schemas_owned_by` 撤销（`src-tauri/src/commands/plugin.rs:398`） | 宿主**不再新造注册通道**，直接复用：详情槽按 `(pluginId, detailSchema)` 取 |
+| 渲染 | `DynamicUIStandalone`（`src/components/dynamicUI/DynamicUIStandalone.tsx:19`）接受 `schemaId` + `dataContext`（`:169` 把合并后的 context 传给渲染器） | 详情槽 = `<DynamicUIStandalone schemaId={detailSchema} dataContext={run.raw} />`。插件行的 `raw` 已经是插件自带投影（`PluginTaskRunRow.raw`），**不新增取数命令** |
+
+### 102.2 判据（先写死，实现时照做）
+
+1. **插件不交渲染代码**：只交 `(schemaId, 数据)`；宿主侧不出现任何 `import` 插件产物的路径（§93 的安全边界）。
+2. **`renderDetail` 仍是宿主适配器的可选方法**：插件源由 `createPluginTaskSourceAdapter` 在运行时**补上**一个 `renderDetail`，其内容就是上面那一行 —— 于是 §100 的分派机制零改动，中心仍不认识任何源。
+3. **schema 取不到就落既有空抽屉兜底**，不白屏、不抛错（与 §100 未声明分支同形）。
+4. **`deepLink` 与 `detailSchema` 可以同时存在**：详情看结构化数据，`打开` 跳原页面；两者不互斥（列表级「打开」已由 §101 提供）。
+5. **安全面必须先验一条**：schema 的 `onMount` / 事件动作能否触达宿主能力（navigate / IPC）。**结论已出（2026-11-05 实测）：能，且无闸** —— `actions[].type === "invoke"` 在无 `permissions` 上下文时直接调 `invoke()`（`src/lib/actionRouter.ts:325`、`:339`）。细节与影响面见 102.4-1（任务 #155）。**这条不解决，本设计不得实现。**
+
+### 102.3 实现面（预估 6 文件，全部在既有接缝上）
+
+| 文件 | 改动 |
+|---|---|
+| `axagent-plugins/crates/plugin-proto`（`PluginTaskSource` 形状） | 加 `detail_schema: Option<String>`（wire 名 `detailSchema`） |
+| `axagent-plugins/crates/plugins/src/{manager.rs,types.rs}` | Raw 清单解析（多词字段必须逐条 `#[serde(alias)]` —— `RawPluginManifest` 无 `rename_all`，漏 alias 是**静默空值**）、校验「schema 属于本插件」、投影透出 |
+| `src/types/**` | `PluginTaskSourceDto.detailSchema?: string`（**需与 B8-3 批串行**） |
+| `src/pages/TasksCenterPage/adapters/pluginTaskSource.adapter.ts` | 声明 `renderDetail`：有 `detailSchema` ⇒ `createElement(DynamicUIStandalone, …)`；没有 ⇒ 不声明（走兜底） |
+| `__tests__/pluginTaskSource.test.ts` + 一条渲染用例 | 声明透传 / 无声明走兜底 / schema 缺失不崩 |
+
+### 102.4 本设计未定的两件事
+
+1. **⚠ 已实测：声明式 `invoke` 动作没有命令闸 —— 第三方 schema 今天就能调任意 Tauri 命令。** 链路：`SchemaValidator` 只用 `ALLOWED_INVOKE_PREFIXES = ["dynamic_ui_"]` 校验 **`dataSource.config.endpoint`**（`src/lib/dynamicUI/SchemaValidator.ts:225`），而 **`actions[].type === "invoke"` 走另一条路**：`executeActions` 构造 `ActionContext` 时**不传 `permissions`**（`src/lib/dynamicUI/EventHandlerEngine.ts:39-44`），`ActionRouter` 的判据是 `if (ctx.permissions) { …白名单校验… }`（`src/lib/actionRouter.ts:325`）⇒ 无权限对象时**直接 `invoke(action.command, action.args)`**（同文件 `:339`）。
+   - **影响面不止本设计**：`PluginPageHost` 的 schema 分支（`page.loading === "schema"`）今天就用同一条渲染链 ⇒ **插件页 schema 已经具备调用任意已注册 Tauri 命令的能力**。§93 立「第三方不许进主 origin，因为能摸 IPC」这条理由，在**声明式动作**这一侧事实上没有兑现。
+   - **为什么本批不改**：收紧会改变现有 schema 能力的边界（Agent 生成 / 用户导入 / 插件导入三类来源的信任级别不同），必须先定「谁能拿 permissions、白名单给到什么粒度」，属独立安全批（任务 #155）。§102 的详情槽**必须等它落地**，否则等于把这条口子再扩大一处。
+   - **判据方向（供 #155）**：给 schema 记录带来源标记（`owner_id` 已能区分插件），插件来源的 schema 在渲染时注入一份受限 `permissions`（至少 `commands: ["dynamic_ui_*"]` + 显式声明的读命令），用户/Agent 来源维持现状或同样收紧 —— 二者选一都必须先回答「业务命令谁允许」。
+2. **`raw` 的数据形状契约**：`dataContext={run.raw}` 意味着 schema 直接绑定插件给的字段名。要不要在 `plugin-proto` 里给 `raw` 一个「建议形状」（如 `{ summary: [...], rows: [...] }`）以便宿主侧校验 —— 目前 `raw` 是 `unknown`，宿主不校验。倾向**不校验**（校验等于第二套 DTO），但要在文档里写明「schema 与 raw 由插件自己对齐」。
+
+## §104 #36 OPC 迁出：29 处跨包口**全部同源**，路线改为整棵子树搬迁（2026-11-05）
+
+并行批（任务 #158）实测结论，**推翻了 §0.10.1 桶② 的「走 call_seam」默认路线**：
+
+1. **29 处全部是 `axagent_analysis_engine::opc::*`**，没有一处指向真正的股票符号 ⇒ 「改导入源」（①类）与「搬几处」（②类）都不成立，只剩**整棵子树原子搬迁**。
+2. **根因是位置而非依赖**：OPC 业务代码物理寄居在股票 crate `analysis-engine/src/opc/`（28 文件 / 12,899 行，`lib.rs:79 pub mod opc;`），而该子树对 `analysis-engine` 的股票模块**零引用**（全部 `super::` 内部 + harness/entities）⇒ 搬到 `company-runtime/src/opc/` 后**不需要**加回股票依赖，也不产生反向边。
+3. **6 条接缝方案降为备选**：`domain_pack.read/write`、`opc.kpi_data`、`opc.learning`、`opc.business_crud`、`capability.inventory`。其中 `opc.business_crud` 等于把 45 个 service/DTO × 57 条命令全量 RPC 化；`Arc<dyn Trait>` 无法跨进程（`opc.kpi_data`）；`opc_workflows/mod.rs:52,59` 是 `pub use`，**接缝根本转发不了**。⇒ 接缝是在给「位置放错」付网络开销，不是解耦。
+
+### 104.1 本批实际改动（1 处，语义零变化）
+
+| 文件 | 改动 | 依据 |
+|---|---|---|
+| `axagent-quant/crates/company-runtime/Cargo.toml:15` | 删除 `axagent-analysis-engine` 依赖边（留 4 行注释说明） | 全 crate 对它**零代码引用**（`grep -rn "axagent_analysis_engine" …/company-runtime/src` 空；仅 `self_improving.rs` 注释提到 `StockAnalysisRound` 样板）。`axagent-quant/Cargo.lock` 同批少一行 |
+
+**读数**：Cargo 构建边 **8 → 7**（`AUDIT-l1-blockers-2026-11-05-1131.md` → `…-1202.md` 两份快照可对照）。OPC 跨包口**仍 29 / 9 文件**（未动一处，别把构建边 −1 读成跨包口 −1）。
+**验证**（agent 实跑，日志 `.tmp/opc-batch1-*.log`）：`cargo check -p axagent-company-runtime` 退 0；`__TAURI_WORKSPACE__=true cargo test -p axagent-company-runtime --lib` 退 0（**23 passed**）；`cargo clippy -p axagent-company-runtime --all-targets -- -D warnings` 退 0。
+
+### 104.2 搬迁批（下一刀）的范围与授权需求
+
+- **搬什么**：`axagent-quant/crates/analysis-engine/src/opc/` 整棵 → `company-runtime/src/opc/`（或直接新建 `plugin-opc` crate，终局口径见 #32）。`company-runtime` 需补 7 个依赖：`anyhow / parking_lot / regex / serde_yaml / uuid / zip / tokio`。
+- **外部引用 77 行 / 6 文件**（搬迁时逐条改指）：`axagent-runtime/crates/tools/src/tools/opc.rs` 41、`src-tauri/src/commands/opc_*` 29、`src-tauri/src/commands/fleet/mod.rs` 4、`src-tauri/src/init/state.rs` 3。
+- ⚠ 后两者不在本批 agent 的授权面内，且 `tools/opc.rs` 是股票迁移的高频修改点 ⇒ **搬迁必须由 leader 扩权后单独立项**，不要拆给多个 agent 并发改同一批文件。
+- **预期读数**：跨包口 29 → 0；同时 `tools/opc.rs`(41) + `fleet`(4) + `state.rs`(3) = 48 处会从「股票阻塞」正确归到 OPC 面（总数下降 29、归属转移 48，两者不是同一件事）。
+
+### 104.3 本批未做
+
+1. **一处没搬**（改动只有那条无用依赖边）。
+2. 未在 harness 定任何接缝（原路线作废，改搬迁；避免先建再拆）。
+3. 未跑 `--workspace` 全量（并行批仍在跑）。
+
+## §103 B8-3 首刀：schema-gen 扩面出「前端消费型 DTO」（2026-11-05）
+
+任务 #152。**先如实说结论：本批把生成器打通了，但没兑现 §91.3 给 B8-3 的「−4~−6」** —— 前端反向阻塞仍是 **51 处 / 37 文件**（`audit-l1-blockers` 复测）。原因是首刀挑的 6 个类型属于 **Provider / Workflow 域**（`ProviderType` / `ModelType` / `ModelCapability` / `ProviderKey` / `ProviderProxyConfig` / `SubWorkflowOrigin`），不属于股票视图。选它们的理由是「唯一对应 + 已 camelCase + 消费面明确 + 改动可逆」，但代价是**对目标读数零贡献**。
+
+### 103.1 形态
+
+| 环 | 做法 |
+|---|---|
+| 生成模式 | `schema-gen` 新增 `frontend-dto` 子命令（`cargo run -p schema-gen -- frontend-dto`），与既有 `ipc`（只做一致性校验、无人消费）分工：本模式产**前端真正 import 的类型** |
+| 推导 | 用 `ts-rs` 按 serde 属性推导：`rename_all = "camelCase"` ⇒ camelCase 字段；`Option<T>` ⇒ `T \| null`；带 `skip_serializing_if` ⇒ 可选字段 `?:`；`i64/u64` ⇒ `number`（ts-rs 默认 `bigint`，与 JSON 线上不符，生成器显式改掉） |
+| 落点 | `src/types/generated/dto.ts`（生成物，头注释写明勿手改）；`src/types/index.ts` 只 re-export，**删除 6 处手写第二份定义** |
+| 守卫 | `foreign_type_refs` 扫描生成体里的外部类型引用，要求「注册闭包自包含」——漏登记一个类型就报错，而不是留一个悬空引用 |
+
+### 103.2 验证（本机实跑）
+
+| # | 命令 | 退码 | 读数 |
+|---|---|---|---|
+| Y1 | `cargo run -p schema-gen -- frontend-dto` | 0 | 生成 42 行 `dto.ts`；**连跑两次 `cmp` 一致** ⇒ 生成确定性 |
+| Y2 | `__TAURI_WORKSPACE__=true cargo test -p schema-gen` | 0 | **7 passed**：`generated_text_matches_golden_snapshot` / `camel_case_field_names_come_from_serde` / `option_maps_to_nullable_number` / `option_with_skip_serializing_if_maps_to_optional_field` / `enum_variants_follow_serde_spelling` / `foreign_ref_guard_has_teeth_and_no_false_positives` / `registry_closure_is_self_contained` |
+| Y3 | `cargo clippy -p schema-gen --all-targets -- -D warnings` | 0 | 定点 lint（含测试目标） |
+| Y4 | `rustfmt --edition 2024 --check crates/schema-gen/src/main.rs` | 0 | 首轮 4 处 diff 由 leader 用**写模式**修（该 crate 是单文件 bin，无 mod 树，不会误伤） |
+| Y5 | `npm run typecheck` | 0 | **1476 个源文件**（含并行批新增），非空跑 |
+| Y6 | 语义等价复核 | —— | 逐字比对 HEAD 的手写定义：`ProviderType` 9 个变体、`ModelType` / `ModelCapability` 的 PascalCase 拼写、`ProviderProxyConfig` 三字段形状**全部一致**；`interface` → `type` 属结构等价 |
+
+### 103.3 过程事故（如实记）
+
+- 执行 agent 跑了 **39 分钟 / 104 步后异常退出**，留下：生成器与 7 条测试**已写好**、`tests/golden/` **空目录**（`include_str!` 会让测试目标编不过）、`main.rs` 未过 rustfmt。leader 补了 golden（从生成物复制）+ 跑了 fmt 写模式，其余原样保留。
+- 教训：派单里应要求「每完成一个可编译子步就落一次验证」，否则 agent 崩了无法判断完成度；这次靠 `include_str!` 的编译失败点反推出缺口。
+
+### 103.4 未做
+
+1. **股票视图类型一个没生成**（`AnalysisSummary` / `PipelineRun` / `ScheduledTask` 等仍手写）⇒ B8-3 的 −4~−6 完全未兑现，下一刀必须直接对着 `audit-l1-blockers` 的股票清单挑类型。
+2. `frontend-dto --check` 未接 CI：现在只在本地手动跑，漂移靠单测 golden 兜（若 Rust 改了而没人重生成，golden 与生成物会一起过期——**这是本批留下的真缺口**）。
+3. 未跑 `--workspace` 全量 clippy/test（并行批）。

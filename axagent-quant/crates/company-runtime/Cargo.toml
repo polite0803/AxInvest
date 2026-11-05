@@ -12,7 +12,10 @@ publish = false
 
 [dependencies]
 async-trait = "0.1"
-axagent-analysis-engine = { path = "../analysis-engine" }
+# 2026-11-05（任务 #36，PLAN §0.10.1 桶②）：原 `axagent-analysis-engine` 边已删 —— 本 crate
+# 全树对它零代码引用（仅 `self_improving.rs` 注释里提到 `StockAnalysisRound` 样板），
+# 却被 audit-l1-blockers 记成一条「OPC crate → 股票 crate」构建边。
+# 迁入 `analysis-engine/src/opc/` 时也不需加回：该子树不引用 analysis-engine 的股票模块（只依赖 harness / entities）。
 axagent-entities = { version = "3.0.0", path = "../../../axagent-core/crates/entities" }
 axagent-harness = { version = "3.0.0", path = "../../../axagent-core/crates/harness" }
 chrono = { workspace = true }

@@ -538,24 +538,42 @@ function stockManifest({ version, binaryName, sha256 }) {
 }
 
 /**
- * opc 清单（#36 第 1 批）：**只有 worker，没有命令、没有页面、没有任务源**。
+ * opc 清单（#36 第 1 批只有 worker；第 4 批接进首条命名命令）。
  *
- * 为什么 `commands: []` 要显式写出来：它是「本批零业务命令」的可核对证据 —— 缺省与空数组
- * 在宿主侧等价，但读清单的人需要看到「不是漏了，是还没有」。同理**不写** `defaultEnabled`
- * （宿主缺省 false）：零能力的包默认启用只会让插件列表多一条看不出效果的空条目。
+ * `defaultEnabled: true` 的理由与 stock 同一条（第 402 行那段注释）：前端 OPC 站点页 /
+ * 仪表盘的博客列表已改走本插件的命名命令，宿主同名命令已删 ⇒ 内置包不默认启用就等于
+ * 该功能静默失效（`resolvePluginForCommand` 解析不到插件）。
+ * 仍**不写** `pages` / `taskSources` / `uiSchema`：OPC 的页面贡献属后续批。
  */
 function opcManifest({ version, binaryName, sha256 }) {
   return {
     name: "opc",
     version,
-    description: "OPC 域功能包（#36 骨架）：worker 通道已就位，业务命令数为 0，待 P6.2 逐批接入",
+    description:
+      "OPC 域功能包（#36 第 4 批）：worker 通道 + 1 条命名命令（博客列表，经宿主 opc.store 只读接缝取数），待 P6.2 逐批接入",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
     permissions: ["subprocess_execution"],
     mcp_servers: [],
     skills: [],
     agents: [],
+    defaultEnabled: true,
     worker: { program: path.posix.join("bin", binaryName) },
-    commands: [],
+    // `command` 用 `worker://<名>` 占位（同 stock）：worker 通道不读它，但按名发帧的
+    // `name` 必须与 worker 里的 `COMMAND_LIST_BLOG_POSTS` 逐字一致。
+    commands: [
+      {
+        name: "opc_list_blog_posts",
+        description: "列出 OPC 博客文章（经宿主 opc.store 接缝取数，不含正文；不传分页则取尽整表）",
+        command: "worker://opc_list_blog_posts",
+        inputSchema: {
+          type: "object",
+          properties: {
+            limit: { type: "number", description: "单页条数（越界由宿主按契约区间拒收）" },
+            offset: { type: "number", description: "分页偏移；与 limit 都缺省 = 取尽整表" },
+          },
+        },
+      },
+    ],
     integrity: { algorithm: "sha256", hash: sha256 },
   };
 }

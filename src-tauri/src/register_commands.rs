@@ -782,7 +782,6 @@ macro_rules! register_all_commands {
             commands::opc::opc_import_capability_pack,
             commands::opc::opc_import_talent_library,
             commands::opc::opc_kanban_board,
-            commands::opc::opc_list_blog_posts,
             commands::opc::opc_list_contacts,
             commands::opc::opc_list_content_assets,
             commands::opc::opc_list_customers,

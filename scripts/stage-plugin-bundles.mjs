@@ -18,13 +18,39 @@
  *
  * 多插件（任务 #36 第 1 批）：本脚本只负责**逐插件**转调 `build-plugin-bundle.mjs`，
  * 插件清单与各自产物形状全在那个脚本的 `PLUGIN_SPECS` 里，这里不复制第二份。
- * 新增插件 = 下方 `PLUGINS` 数组加一个名字，落点固定 `src-tauri/plugins/bundled/<名字>`。
+ * 新增插件 = 下方 `PLUGINS` 数组加一个名字。
+ *
+ * 落点（任务 #163）：缺省 `src-tauri/plugins/bundled/<名字>`（发布打包用，与
+ * `bundle.resources` 的配置目录对齐）。开发期宿主读的是**编译期默认根**
+ * `axagent-plugins/crates/plugins/bundled/`（见 `PluginManagerConfig::resolve_bundled_root`），
+ * 用 `--root <目录>` 指过去。此前 `package.json` 的两条 `plugin:bundle:*` 脚本把 `--out`
+ * 写死成 `.../stock` —— 那是本清单的**第二份**，新增插件时不会有人想起改它，结果开发期
+ * 盘上根本没有 opc 产物、插件解析不到，功能静默下线。⇒ 两条脚本一律转调本脚本。
+ *
+ * `--debug`：本地脚本用的档。发布路径靠 Tauri 注入的 `TAURI_ENV_DEBUG` 判档，手工直跑时
+ * 缺省是 release；开发期要的是 debug 产物（快、且与 `tauri dev` 同档），故显式给。
  */
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+/** 取 `--root <值>`；缺省是发布落点。 */
+function argRoot() {
+  const argv = process.argv.slice(2);
+  const idx = argv.indexOf("--root");
+  if (idx === -1) {
+    return path.join(repoRoot, "src-tauri", "plugins", "bundled");
+  }
+  const value = argv[idx + 1];
+  if (!value || value.startsWith("--")) {
+    console.error("[stage-plugins] --root 需要跟一个目录");
+    process.exit(2);
+  }
+  return path.resolve(repoRoot, value);
+}
+
 const platform = (process.env.TAURI_ENV_PLATFORM ?? "").toLowerCase();
 const triple = (process.env.TAURI_ENV_TARGET_TRIPLE ?? "").toLowerCase();
 const mobileHints = ["android", "ios"];
@@ -42,12 +68,20 @@ if (isMobile) {
 // 的那份产物在任何新增插件失败时保持有效。
 const PLUGINS = ["stock", "opc"];
 
-// `tauri build --debug` 会置 TAURI_ENV_DEBUG=1；没有它即 release 打包。
-const release = process.env.TAURI_ENV_DEBUG !== "1" && process.env.TAURI_ENV_DEBUG !== "true";
+// `tauri build --debug` 会置 TAURI_ENV_DEBUG=1；没有它即 release 打包。手工直跑要 debug 档
+// 用 `--debug`（`npm run plugin:bundle:stage|:dev` 走的就是这条）。
+const release =
+  process.env.TAURI_ENV_DEBUG !== "1"
+  && process.env.TAURI_ENV_DEBUG !== "true"
+  && !process.argv.includes("--debug");
 
-console.error(`[stage-plugins] 桌面构建 ⇒ 暂存 ${PLUGINS.length} 个插件产物（${release ? "release" : "debug"}）`);
+const bundledRoot = argRoot();
+
+console.error(
+  `[stage-plugins] 桌面构建 ⇒ 暂存 ${PLUGINS.length} 个插件产物到 ${bundledRoot}（${release ? "release" : "debug"}）`,
+);
 for (const plugin of PLUGINS) {
-  const outDir = path.join(repoRoot, "src-tauri", "plugins", "bundled", plugin);
+  const outDir = path.join(bundledRoot, plugin);
   const args = ["scripts/build-plugin-bundle.mjs", "--plugin", plugin, "--out", outDir];
   if (release) {
     args.push("--release");

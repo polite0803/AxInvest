@@ -458,18 +458,6 @@ pub async fn opc_create_blog_post(
     })
 }
 
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出博客文章")]
-#[tauri::command]
-pub async fn opc_list_blog_posts(state: State<'_, AppState>) -> Result<Vec<BlogPost>, String> {
-    let svc = DefaultSiteService::new(state.harness.db().clone());
-    svc.list_blog_posts().await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
 #[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "发布博客文章")]
 #[tauri::command]
 pub async fn opc_publish_blog_post(

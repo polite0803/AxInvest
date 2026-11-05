@@ -1775,6 +1775,20 @@ pub async fn create_app_state_with_resource_dir(
         }
     }
 
+    // ── opc.store 接缝：把 `opc_blog_posts` 的列表读面暴露给插件（只读 / 唯一 op `list_blog_posts`）──
+    // OPC 插件进程不持 `DatabaseConnection`，站点内容一律经接缝取（判据见
+    // `harness/src/opc_store.rs` 模块头）。provider 只调 dao（`axagent-dao` 的
+    // `repo::opc_blog_post`），wiring 层不出现 SQL；持的还是 `sea_db` 的同一个句柄。
+    // 失败只 warn，不阻断启动（与 market.quote / jobs.store / analysis.record 同策略）。
+    {
+        let provider: Arc<dyn axagent_harness::OpcStoreProvider> =
+            Arc::new(crate::init::opc_store_service::HostOpcStore::new(sea_db.clone()));
+        match axagent_harness::get_capability_registry().register_opc_store(provider) {
+            Ok(_) => tracing::info!("opc.store 接缝已注册 (BuiltIn)"),
+            Err(e) => tracing::warn!("opc.store 注册失败: {e}"),
+        }
+    }
+
     // ── workflow.run 接缝：把宿主**独持**的 WorkEngine 以「异步 job」形态暴露给插件 ──
     // 契约已冻结（`axagent-core/crates/harness/src/workflow_run.rs`）：`start` 只受理并
     // 立即返回 `execution_id`（接缝预算 15s，绝不能 await DAG）；执行体在 provider 内

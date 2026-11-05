@@ -233,6 +233,22 @@ impl ServiceDefinition {
         )
     }
 
+    /// 预置 opc-store 接缝（OPC 站点内容只读查询，宿主独占实现）。
+    ///
+    /// 宿主把 `opc_blog_posts` 的**列表读面**经本接缝以列裁剪视图暴露给插件
+    /// （`list_blog_posts` 一个 op；正文列 `content` 连 SELECT 都没有，裁剪判据见 `opc_store`
+    /// 模块头）。命名取 `.store` 族（同 `jobs.store` / `trajectory.store`）：OPC 的站点数据面
+    /// （博客 / 落地页 / 联系提交 / 排期）后续都挂本接缝的**不同 op**，不再一表一条接缝。
+    /// 首批无写 op ⇒ 不设权限闸。
+    pub fn opc_store() -> Self {
+        Self::new(
+            "opc.store",
+            "1.0",
+            "axagent_harness::OpcStoreProvider",
+            "OPC 站点内容只读：list_blog_posts（返回列裁剪行视图 + limit 之前的匹配总数，不含正文）",
+        )
+    }
+
     /// 预置 model-provider 接缝（LLM Provider 适配器，按 provider 类型名注册多实例）。
     ///
     /// 注册 ID 为 `model.provider.{provider_type}`（如 `model.provider.deepseek`）。
@@ -1190,6 +1206,25 @@ impl CapabilityRegistry {
     /// 取回 analysis.record 接缝上的单股分析记录提供者（若已注册）。
     pub fn get_analysis_record(&self) -> Option<Arc<dyn crate::AnalysisRecordProvider>> {
         self.provider_as::<dyn crate::AnalysisRecordProvider>("analysis.record")
+    }
+
+    // ── opc.store 接缝（OPC 站点内容只读提供者，单实例；唯一 op 是读面 `list_blog_posts`） ──
+
+    /// 注册一个 OPC 站点内容提供者（`opc.store` 接缝）。
+    ///
+    /// 宿主把 `opc_blog_posts` 的列表读面经本接缝暴露；列裁剪与 `tags_json` 解码的映射点
+    /// 必须**唯一**（在宿主 provider 内），否则「哪些列不过线」会在多处各写一遍并各自漂移。
+    /// 外部实现注册同一接缝即可整体替换。首批无写 op ⇒ 不设权限闸。
+    pub fn register_opc_store(
+        &self,
+        provider: Arc<dyn crate::OpcStoreProvider>,
+    ) -> Result<EffectHandle, CapabilityError> {
+        self.register_seam(ServiceDefinition::opc_store(), Arc::new(provider), "opc-store")
+    }
+
+    /// 取回 opc.store 接缝上的 OPC 站点内容提供者（若已注册）。
+    pub fn get_opc_store(&self) -> Option<Arc<dyn crate::OpcStoreProvider>> {
+        self.provider_as::<dyn crate::OpcStoreProvider>("opc.store")
     }
 
     // ── system.prompt 接缝（多实例，按段名注册） ────────────────────────────

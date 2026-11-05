@@ -14,6 +14,7 @@ pub mod monitor_emitter;
 pub mod news_archive_sink;
 pub mod notification_adapters;
 pub mod opc_knowledge;
+pub mod opc_store_service;
 pub mod panel_variables;
 pub mod plugin_schema;
 pub mod plugin_ui_schema;

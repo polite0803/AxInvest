@@ -49,6 +49,7 @@ pub mod narrative;
 // entities::narrative_structures（复数，structure 单字段，同表 narrative_structures 已收敛）。
 // 同表双 entity 且列不一致，接线会复活旧 schema 与现行表冲突。属「被取代旧链」，待用户裁决。
 pub mod news_archive;
+pub mod opc_blog_post;
 pub mod opc_delivery;
 pub mod opc_demand;
 pub mod paper_overviews;

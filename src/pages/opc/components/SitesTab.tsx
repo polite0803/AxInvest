@@ -1,10 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
+import { resolvePluginForCommand } from "@/lib/pluginCommandResolve";
 import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
 import { Button, Card, Col, Form, Input, message, Modal, Row, Space, Table, Tabs, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+
+/**
+ * 博客列表的取数命令（`plugin.opc` 的命名命令，manifest `commands[].name` 逐字一致）。
+ *
+ * 原先这条是宿主 Tauri 命令 `opc_list_blog_posts`，#36 第 4 步迁入 OPC 插件 ⇒ 宿主侧已删。
+ * 线格式（snake_case 键）与那条命令逐字相同，所以本文件的 `interface BlogPost` 与表格列
+ * `dataIndex` 都不用动；接缝视图本身是 camelCase，改名发生在插件出口（见 `plugin-opc`）。
+ */
+const LIST_BLOG_POSTS_COMMAND = "opc_list_blog_posts";
 
 interface LandingPage {
   id: string;
@@ -239,8 +249,19 @@ function BlogPostsPanel() {
     setLoading(true);
     (async () => {
       try {
-        const data = await invoke<BlogPost[]>("opc_list_blog_posts");
-        setPosts(data);
+        // 取数改走插件执行通道（#36 第 4 步）：宿主同名命令已删 ⇒ 没有兜底第二条路。
+        // 插件未装 / 未启用按「取数失败」处置，与下面 catch 里既有那条 `loadFailed` 同一路径，
+        // 不新造错误码（新增 UI 文案要齐 11 语言，本批不该引入）。
+        const pluginId = await resolvePluginForCommand(LIST_BLOG_POSTS_COMMAND);
+        if (!pluginId) {
+          throw new Error(`no enabled plugin provides command \`${LIST_BLOG_POSTS_COMMAND}\``);
+        }
+        const raw = await invoke<string>("plugin_execute_command", {
+          pluginId,
+          name: LIST_BLOG_POSTS_COMMAND,
+          input: {},
+        });
+        setPosts(JSON.parse(raw) as BlogPost[]);
       } catch (e) {
         message.error(t("opc.common.loadFailed", { error: String(e) }));
         setPosts([]);

@@ -4,6 +4,7 @@ import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import { cssVar } from "@/lib/cssVar";
 import { ensureECharts } from "@/lib/echartsInstance";
 import { invoke } from "@/lib/invoke";
+import { resolvePluginForCommand } from "@/lib/pluginCommandResolve";
 import {
   DollarOutlined,
   FileTextOutlined,
@@ -15,6 +16,15 @@ import { Button, Card, Col, Empty, message, Row, Space, Spin, Statistic, Tag, Ti
 import * as echarts from "echarts";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+
+/**
+ * 博客列表的取数命令（`plugin.opc` 的命名命令，与 manifest `commands[].name` 逐字一致）。
+ *
+ * 原先这条是宿主 Tauri 命令 `opc_list_blog_posts`，#36 第 4 步迁入 OPC 插件 ⇒ 宿主侧已删。
+ * 本仪表盘只用它的 `length` 当 `blog_posts_count` ⇒ 不传分页时插件必须取尽整表，
+ * 否则这个计数会随接缝的单页上限静默偏小（判据见 `plugin-opc` 的 `blog_posts`）。
+ */
+const LIST_BLOG_POSTS_COMMAND = "opc_list_blog_posts";
 
 interface DashboardSummary {
   total_revenue: number;
@@ -97,7 +107,18 @@ export function DashboardTab() {
         const [assets, schedules, posts, pages] = await Promise.all([
           invoke<ContentAsset[]>("opc_list_content_assets").catch(() => []),
           invoke<PublishSchedule[]>("opc_list_publish_schedules").catch(() => []),
-          invoke<BlogPost[]>("opc_list_blog_posts").catch(() => []),
+          // 取数改走插件执行通道（#36 第 4 步）：宿主同名命令已删。失败与「插件没装」都落
+          // 空数组，与本行既存的 `.catch(() => [])` 语义一致（一条只读查询坏了不拖垮整张图）。
+          (async () => {
+            const pluginId = await resolvePluginForCommand(LIST_BLOG_POSTS_COMMAND);
+            if (!pluginId) { return []; }
+            const raw = await invoke<string>("plugin_execute_command", {
+              pluginId,
+              name: LIST_BLOG_POSTS_COMMAND,
+              input: {},
+            });
+            return JSON.parse(raw) as BlogPost[];
+          })().catch(() => []),
           invoke<LandingPage[]>("opc_list_landing_pages").catch(() => []),
         ]);
         if (cancelled) { return; }

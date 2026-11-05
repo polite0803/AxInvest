@@ -2611,6 +2611,37 @@ impl HostPeer {
                     Err(e) => seam_provider_error(e),
                 }
             },
+            // ── opc.store 接缝：宿主把 `opc_blog_posts` 的**列表读面**暴露给插件 ──
+            // 方向与 analysis.record 同类（宿主 → 插件，见上方先例注释）：只走入站分派，
+            // **不进** `SUPPORTED_REMOTE_SEAMS`（那是「插件提供给宿主」的清单）。
+            // 唯一 op 是读面 ⇒ `required_permission_for` 里**一条都不许加**（同 analysis.record）。
+            // 列裁剪（`content` 连 SELECT 都没有）、`tags_json` 解码与 `limit` 区间闸
+            // （`OPC_BLOG_POST_LIST_LIMIT_RANGE`）全在契约层 + 宿主 provider / dao 侧，
+            // 本层只透传契约 DTO、**一个数字都不写**。
+            "opc.store" if op == "list_blog_posts" => {
+                let Some(provider) = self.registry.get_opc_store() else {
+                    return self.unavailable(seam);
+                };
+                // `limit` / `offset` 都是**可选标量**：缺失 / `null` 都合法（=「宿主取缺省」），
+                // 故走 `deserialize_optional_arg`；给了非数字才落 `SEAM_CALL_INVALID_ARGS`。
+                let limit: Option<usize> = match deserialize_optional_arg(&args, "limit", seam) {
+                    Ok(limit) => limit,
+                    Err(response) => return response,
+                };
+                let offset: Option<usize> = match deserialize_optional_arg(&args, "offset", seam) {
+                    Ok(offset) => offset,
+                    Err(response) => return response,
+                };
+                let Some(result) = self.block_on(provider.list_blog_posts(limit, offset)) else {
+                    return no_runtime(seam);
+                };
+                match result {
+                    // 具名对象 `{"posts": [...], "total": n}`：空表是空数组 + total 0，
+                    // **不是错误**（先例 `jobs.store` 的 `count` 口径）。
+                    Ok(outcome) => to_value("BlogPostListOutcome", &outcome),
+                    Err(e) => seam_provider_error(e),
+                }
+            },
             // `platform.adapter.{平台名}` 的 seam ID 是**动态**的，只能用前缀守卫。
             other if platform_name_from_seam(other).is_some() => {
                 let platform = platform_name_from_seam(other).unwrap_or_default();
@@ -10718,6 +10749,140 @@ mod tests {
                     &[],
                 )
             });
+        assert_eq!(response.kind, ResponseKind::Error);
+        assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_CALL_FAILED));
+    }
+
+    /// 只记录 `(limit, offset)` 的 `opc.store` 提供者：取证分派层两个**可选标量**的翻译，
+    /// 与出参是契约的具名对象（`posts` + `total`）。
+    struct FixedOpcStore {
+        calls: Mutex<Vec<(Option<usize>, Option<usize>)>>,
+    }
+
+    impl FixedOpcStore {
+        fn new() -> Self {
+            Self { calls: Mutex::new(Vec::new()) }
+        }
+    }
+
+    #[async_trait]
+    impl axagent_harness::OpcStoreProvider for FixedOpcStore {
+        async fn list_blog_posts(
+            &self,
+            limit: Option<usize>,
+            offset: Option<usize>,
+        ) -> axagent_harness::core_error::Result<axagent_harness::BlogPostListOutcome> {
+            self.calls.lock().push((limit, offset));
+            Ok(axagent_harness::BlogPostListOutcome { posts: Vec::new(), total: 137 })
+        }
+    }
+
+    /// 一个方法都不覆盖：`list_blog_posts` 吃 trait 默认 `Err(Provider("…未实现…"))`
+    /// ⇒ 用来取证「默认未实现」在分派层落成 `PLUGIN_CALL_FAILED`。
+    struct BareOpcStore;
+
+    #[async_trait]
+    impl axagent_harness::OpcStoreProvider for BareOpcStore {}
+
+    fn opc_store_peer(
+        provider: Arc<dyn axagent_harness::OpcStoreProvider>,
+    ) -> (HostPeer, tokio::runtime::Runtime) {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("async 接缝用例需要 runtime");
+        let registry = Arc::new(CapabilityRegistry::new());
+        registry.register_opc_store(provider).expect("opc.store 接缝应注册成功");
+        let peer = HostPeer {
+            plugin_id: "plugin.opc".to_string(),
+            declared_capabilities: Vec::new(),
+            declared_calls: vec!["opc.store".to_string()],
+            registry,
+            runtime: Some(runtime.handle().clone()),
+            permissions: Vec::new(),
+        };
+        (peer, runtime)
+    }
+
+    /// ① `opc.store` 的 `list_blog_posts`：两个可选标量的三种形态（给值 / 缺省 / 非数字），
+    /// 出参是 `{posts, total}`，**表外 op 明确拒**。
+    ///
+    /// 只读 op ⇒ **不设权限闸**（`permissions` 传空表）：这条同时是那一格的取证 ——
+    /// 若哪天有人往 `required_permission_for` 里加一条 `opc.store` 条目，本用例即红。
+    #[test]
+    fn opc_store_list_blog_posts_forwards_optional_scalars_and_returns_named_outcome() {
+        let store = Arc::new(FixedOpcStore::new());
+        let captured = Arc::clone(&store);
+        let (peer, _runtime) = opc_store_peer(store);
+        let (first, second, bad, unknown_op, calls) =
+            with_watchdog(Duration::from_secs(2), "opc.store list_blog_posts", move || {
+                let first = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "list_blog_posts",
+                        "args": { "limit": 20, "offset": 40 },
+                    }),
+                    &[],
+                );
+                // 缺省形态：两个键都不给（宿主按契约取缺省 limit 与 offset=0）。
+                let second = peer.handle_call_seam(
+                    &json!({ "seam": "opc.store", "op": "list_blog_posts", "args": {} }),
+                    &[],
+                );
+                // 非数字：必须是参数错误，且**不得**触达 provider。
+                let bad = peer.handle_call_seam(
+                    &json!({
+                        "seam": "opc.store",
+                        "op": "list_blog_posts",
+                        "args": { "limit": "二十" },
+                    }),
+                    &[],
+                );
+                // 首批只有 `list_blog_posts` 一个 op：表外 op 不许被兜底接住。
+                let unknown_op = peer.handle_call_seam(
+                    &json!({ "seam": "opc.store", "op": "list_landing_pages", "args": {} }),
+                    &[],
+                );
+                let calls = captured.calls.lock().clone();
+                (first, second, bad, unknown_op, calls)
+            });
+
+        assert_eq!(first.kind, ResponseKind::Success, "第一次调用应成功：{first:?}");
+        let value = first.value.expect("成功帧必须带 value");
+        let mut keys: Vec<String> =
+            value.as_object().expect("出参应是具名对象").keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["posts", "total"], "出参是 {{posts, total}}，不是裸数组：{value}");
+        assert_eq!(value["total"], json!(137));
+        assert_eq!(value["posts"], json!([]), "空页是空数组，不是错误");
+
+        assert_eq!(second.kind, ResponseKind::Success, "缺省形态应成功：{second:?}");
+        assert_eq!(
+            bad.code.as_deref(),
+            Some(error_codes::SEAM_CALL_INVALID_ARGS),
+            "非数字 limit 必须落参数错误：{bad:?}"
+        );
+        assert_eq!(
+            unknown_op.code.as_deref(),
+            Some(error_codes::SEAM_CALL_UNSUPPORTED),
+            "表外 op 必须明确拒，不许落进别的分支：{unknown_op:?}"
+        );
+
+        // 前两次原样进门；第三次被拒 ⇒ 零触达；第四次被拒为「不支持」⇒ 同样零触达。
+        assert_eq!(calls, vec![(Some(20), Some(40)), (None, None)], "两次合法调用应原样透传");
+    }
+
+    /// ② 未覆盖任何方法的 provider ⇒ 默认 `Err(Provider)` 落成 `PLUGIN_CALL_FAILED`
+    /// （与 `analysis.record` / `trajectory.store` 同一条链路）。
+    #[test]
+    fn opc_store_unimplemented_provider_maps_to_call_failed() {
+        let (peer, _runtime) = opc_store_peer(Arc::new(BareOpcStore));
+        let response = with_watchdog(Duration::from_secs(2), "opc.store 未实现", move || {
+            peer.handle_call_seam(
+                &json!({ "seam": "opc.store", "op": "list_blog_posts", "args": {} }),
+                &[],
+            )
+        });
         assert_eq!(response.kind, ResponseKind::Error);
         assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_CALL_FAILED));
     }

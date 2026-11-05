@@ -5373,3 +5373,70 @@ PLAN §0.10 的前端读数因此从 **52 处 / 38 文件 → 51 处 / 37 文件
 2. `export * from "./opc"`（`src/types/index.ts:4`，仅 2 个消费方、16 导出、零重名）未拆 —— 属 OPC 域，本批口径限死股票域。**建议下一批首刀就是它**（影响面最小）。
 3. `export * from "./quant"`（`:2448`）未拆（11 消费方 + `BacktestResult` 同名需先定权威）。
 4. `src/types/index.ts` 有**重复 barrel 行** `export * from "./wiki"`（`:1543` 与 `:1980`）—— 与本批两域无关，未动，登记备查。
+
+## §115 #36 第 3–4 步：`opc.store` 只读接缝 + OPC 第一条端到端插件命令（#163，2026-11-06）
+
+派给 cargo 写通道的执行者在 150 轮上限处被截断（截断时正打算「开始写契约层」，实际盘上已落 845 行改动）⇒ **自检由 leader 接手做完**，下列全部读数是 leader 重跑的。
+
+### 115.1 接缝面（照 `analysis.record` 的形态逐段对齐，四段齐全）
+
+| 段 | 文件 | 行数 | 干什么 |
+|---|---|---|---|
+| 契约 | `axagent-core/crates/harness/src/opc_store.rs` | 324 | `BlogPostView`（10 字段）+ `BlogPostListOutcome{posts,total}` + `trait OpcStoreProvider`，`OPC_BLOG_POST_LIST_LIMIT_RANGE=(1,200)` / `DEFAULT_LIMIT=50` 有编译期 `const _` 自洽断言；9 条单测 |
+| 注册槽 | `capability_registry.rs` + `lib.rs` | +35 / +8 | `ServiceDefinition::opc_store()` + `register_opc_store` / `get_opc_store` |
+| SQL | `axagent-infra/crates/dao/src/repo/opc_blog_post.rs` | 192 | `select_only()` 逐列点名 + `(created_at DESC, id ASC)` + `count_blog_posts`；3 条纯函数单测 |
+| 宿主 provider | `src-tauri/src/init/opc_store_service.rs` | 189 | `HostOpcStore` 只调 dao（**不出现 SQL**，#114 那条），`limit` 越界**拒收不夹取**，闸在 IO 之前 |
+| 分派 | `plugins/src/worker.rs` | +166 | `("opc.store","list_blog_posts")` 分支：两个可选标量走 `deserialize_optional_arg`，出参具名对象；测试替身用 `parking_lot::Mutex`（不是 `std::sync`） |
+| 插件 | `plugin-opc/src/main.rs` | +278 | 首条命名命令 `opc_list_blog_posts`：`calls` 里声明 `opc.store`，不传分页则**按 `total` 翻页取尽** |
+
+三处判断值得记下来（都是执行者自己想到、派单里没写的）：
+
+1. **`content` 正文列连 SELECT 都没有** —— 裁剪做在 SQL 侧，不留「进了宿主内存但没进帧」的中间态（`analysis.record` 那批是复用了既有查询、内存里有正文，这里比它更严）。
+2. **`defaultEnabled: true` 先补齐再删宿主命令** —— 这正是上一批 #149 学到的那道闸：内置包不默认启用 = 删完宿主命令该功能静默失效。
+3. **分页终止看两个条件**（`total` 与空页）—— 只看 `total` 在并发写入下会吊死；`offset` 按**实际取回条数**推进而不是按请求的 `limit` 推进，最后一页本来就短。`DashboardTab` 的 `blog_posts_count` 取的就是这个数组的 `length`，不取尽会把 137 篇显示成 50 篇。
+
+### 115.2 三个必修缺陷（由并行的只读核查抓出，判据 leader 逐条复核过）
+
+删宿主命令这个动作本身没问题，**问题是删完之后插件这条路根本走不通** —— 三个都判在「命令在两条消费通道都拿不到数据」这一档：
+
+- **M1｜worker 第二道身份自检恒失败。** 宿主注入的是**注册表键** `{小写 name}@{marketplace}`（`plugins/src/manager.rs:3636` 的 `plugin_id()`，marketplace 常量在 `plugins/src/core.rs:30`），内置包实为 `opc@bundled`；骨架里写死的却是 `"plugin.opc"` ⇒ 每条真实命令都落 `PLUGIN_COMMAND_ID_MISMATCH`，而那个码不在回退面。**这条是我上一批建骨架（`c6c4ce198`）时带进来的**，当时零命令所以惰性潜伏，接上真命令才炸。修法**不是**照抄 `plugin-stock` 删掉第二道（那道管的是宿主把帧错配到别的 worker，此时「帧绑定值 = 注入值」是一起错的，第一道完全看不见），而是改成只比**名前缀**：`main.rs:40` `const PLUGIN_NAME = "opc"` + `:43/:107` 的 `own_id_belongs_to_this_plugin`。
+- **M2｜测试同源自证。** `tests/protocol.rs` 注入的就是那个错值，所以它绿而功能死。改成宿主真形态（`:24` `opc@bundled`），并补 `identity_check_accepts_any_marketplace_but_rejects_foreign_plugin` 两条：`opc@external` 必须**放行**（拿未知命令名当探针，`PLUGIN_COMMAND_UNKNOWN` 与 `PLUGIN_COMMAND_ID_MISMATCH` 可机械区分）、`stock@bundled` 一致错配必须**拒**。
+- **M3｜本地根本产不出 opc 产物。** `package.json:68-69` 把 `--out` 写死成 `.../stock` —— 那是插件清单的**第二份**，加插件时没人想起改它。改成两条脚本一律转调 `scripts/stage-plugin-bundles.mjs`（清单只剩一份），并给它加 `--root <目录>`（开发期落点是编译期默认根 `axagent-plugins/crates/plugins/bundled/`，与发布落点不同）与 `--debug` 档。
+
+### 115.3 已知偏离：出口手工改回 snake_case
+
+接缝视图按全站约定出 camelCase，但 `plugin-opc` 的命令出口把它逐字段改回 snake_case，为的是与既存前端 `interface BlogPost` 及被替代的宿主 DTO（`company-runtime` 的 `BlogPost` **没有** `#[serde(rename_all)]`）逐字一致 —— 不动前端两个文件的类型与 `dataIndex`。代价：主壳的 snake_case 消费面被留在原处（禁区 13 的方向），且插件里多出一个第二映射点。**登记为 #167**，正解随 OPC 前端类型收口批一起做。
+
+### 115.4 智能体（T1）侧的等价性 —— 结论：没有静默退化，但有三格不等价
+
+只读核查把链路钉到底：`#[agent_command]` 宏**只产元数据**（`inventory::submit!`），交给 LLM 的 tools 是静态表；而 `call_mode = StateInput` 的执行终点 `invoke_state_input` 返回的是占位 JSON（`agent/command_bridge.rs` 的 `"status": "ready_for_invocation"`），全仓不存在「命令 → 工具」的桥。⇒ 宿主那条挂在智能体侧**从来就不可真执行**，是「索引里写着 ✓ 可用 + 调用回假成功」，删掉它降的是幻觉诱因。插件形态反而**真执行**。三格不等价登记为 #170（智能体通道错误无 code；`list_available_commands` 是死臂）与 #171（`inputSchema` 没投影进索引 ⇒ LLM 看不见 `limit/offset`）。
+
+### 115.5 验证（leader 重跑，逐条给退出码）
+
+- 定点 `cargo check --all-targets`：`axagent-harness` EXIT=0（1m59s）· `axagent-dao` EXIT=0（7m49s）· `axagent-plugins` + `axagent-plugin-opc` EXIT=0（3m18s）—— 四者日志里都有真的 `Checking axagent-*` 行，不是只吐 `Compiling`/`Finished`。
+- 主 crate `cargo check --lib`：改前 EXIT=0（20m30s）、fmt 后复跑 EXIT=0（14m51s，尾部 `Checking axagent v3.0.0` ✓）。
+- 定点 `cargo clippy -p … --all-targets -- -D warnings`：plugins+plugin-opc EXIT=0（fmt 后复跑 1m15s）· harness EXIT=0 · dao EXIT=0。
+- `__TAURI_WORKSPACE__=true cargo test -p axagent-harness --lib opc_store` ⇒ **9 passed / 0 failed**（944 filtered）；`-p axagent-dao --lib opc_blog_post` ⇒ **3 passed**（390 filtered）；`-p axagent-plugin-opc --test protocol` ⇒ **5 passed**（含 M2 新用例，改后复跑仍 5/5）；`-p axagent-plugins --lib opc_store` ⇒ **2 passed**（251 filtered）。
+- `cargo fmt --check`：`axagent-core` / `axagent-plugins` / `src-tauri` 三根改前各报 diff（共 8 处，**逐条归属后全部落在本批文件内**，无外人既存债混入），`cargo fmt` 后三根复跑全 EXIT=0；`axagent-infra` 本来即 0。
+- ⚠ **未跑**：全量 `clippy --workspace` / `test --workspace` / `cargo fmt --all`（并行期铁律）。⇒ 本批的联合态门禁仍未验证。
+
+### 115.6 读数变化（登记表与 PLAN 正文由下一批同步，本批未改表）
+
+| 读数 | 改前 | 盘上实测 |
+|---|---|---|
+| `commandTotal` | 1542 | **1541**（`register_commands.rs` 由 build.rs 自动少一行，未手改） |
+| `opcBoundaryCommands` | 138 / 13 模块 | **137 / 13** |
+| K1 `.rs` 文件数 | 2042 | **2045**（+3：`opc_store.rs` / `opc_blog_post.rs` / `opc_store_service.rs`） |
+| K1 `pub trait` | 326 | **327**（+`OpcStoreProvider`） |
+| K1 有外部实现的 trait | 242 | **243**（+`HostOpcStore`） |
+
+⚠ 抄读数时的坑：`--dump-readings` 里与登记表对齐的是 **`k1.declaredExternalTraits`（243）**，不是同段那个 `externalImplTraits: 282` —— 后者把 `Default` / `Clone` / `Debug` / `From` 这些 derive 全算进去了。⇒ 以门自己的 FAIL 文案为准，别按 dump 的字段名猜。
+
+### 115.7 未做
+
+1. `opc.store` 只有**读面一个 op**；写面（发布 / 建草稿 / 删）、落地页 / 联系提交 / 排期三张表都还没挂上来。
+2. OPC 的 T1 工具迁移（41 站点）与 `OpcSendNotification` 的 `set_opc_notify_tx` 零调用方 panic **没碰** —— 那是 #36 后续步骤，且要先修那个既存 panic。
+3. dao 侧**没有真库端到端测**（本批只测行收敛的纯函数）：`SELECT` 是否真的没带 `content`、`ORDER BY id` 是否落进 SQL，都要预置 `opc_blog_posts` 行才能钉，属跨批项。⇒ 「列裁剪做在 SQL 侧」目前只有源码判据，没有运行判据。
+4. 前端两个调用点没有组件级测试（vitest 在 SMB 上跑不动，#141）。
+5. 未跑 `--update-baseline`、未同步 `capability-register.json` 与本 PLAN 的 §0.7/§0.10 镜像数字（第五道门对账批统一做）。
+6. `SiteService::list_blog_posts`（`company-runtime`）宿主侧调用方归零但 `pub trait` 方法不报 dead_code ⇒ 留着是**零调用实现**，待 OPC 整域迁出批一并收口。

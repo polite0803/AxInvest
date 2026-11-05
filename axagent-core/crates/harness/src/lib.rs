@@ -392,6 +392,14 @@ pub use analysis_record::{
     ANALYSIS_RECORD_LIST_DEFAULT_LIMIT, ANALYSIS_RECORD_LIST_LIMIT_RANGE,
     AnalysisRecordListOutcome, AnalysisRecordProvider, AnalysisRecordView,
 };
+// ── OPC 站点内容只读接缝（`opc.store`，首批只有 `list_blog_posts`；列裁剪见模块头）──
+// 与 `analysis.record` 同族（宿主独占一张表的列表读面）；`.store` 命名是给 OPC 站点面
+// 后续 op（落地页 / 联系提交 / 排期）留的同一条接缝，不再一表一条。
+pub mod opc_store;
+pub use opc_store::{
+    BlogPostListOutcome, BlogPostView, OPC_BLOG_POST_LIST_DEFAULT_LIMIT,
+    OPC_BLOG_POST_LIST_LIMIT_RANGE, OpcStoreProvider,
+};
 // ── 轨迹库只读接缝（`trajectory.store`，首批无写 op；视图裁剪与 limit 闸见模块头）──
 pub mod trajectory_store;
 pub use trajectory_store::{

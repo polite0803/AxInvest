@@ -1,0 +1,55 @@
+/* SPDX-License-Identifier: AGPL-3.0-only
+ *
+ * 通用页头（PageHeader）样式。
+ *
+ * 2026-11-05（B8-4a）：从 `src/components/stock-analysis/stock-analysis.css` 原样迁出
+ * （未做任何视觉改动）。原位置只有 `StockAnalysisPage` 引入该 CSS，导致下沉后的
+ * `ReplayWorkbench` / `QuantLab` 头部在独立路由下没有样式；迁到中性目录后由
+ * `PageHeader` 模块自带 import，谁用它谁有样式。
+ *
+ * 类名保留 `sa-` 前缀：股票域单测按 `.sa-header-back` / `.sa-header-title` 断言，
+ * 改名需同步改测试（本批不动股票域测试）。
+ */
+
+.sa-header {
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 12px;
+  display: flex;
+}
+
+.sa-header-title {
+  color: var(--fg);
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sa-header-meta {
+  color: var(--muted);
+  margin-right: auto;
+  font-size: 11px;
+}
+
+.sa-header-back {
+  color: var(--muted);
+  cursor: pointer;
+  background: 0 0;
+  border: none;
+  border-radius: 4px;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  font-family: inherit;
+  font-size: 11.5px;
+  transition: all 0.12s;
+  display: inline-flex;
+}
+
+.sa-header-back:hover {
+  background: var(--accent-bg);
+  color: var(--accent);
+}

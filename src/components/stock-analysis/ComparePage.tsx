@@ -1,6 +1,6 @@
+import { PageHeader } from "@/components/common/PageHeader";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { useTranslation } from "react-i18next";
-import { PageHeader } from "./_shared/PageHeader";
 import { CompareView } from "./CompareView";
 import { PeersPanel } from "./PeersPanel";
 import { SimulationVsBacktestCompare } from "./SimulationVsBacktestCompare";

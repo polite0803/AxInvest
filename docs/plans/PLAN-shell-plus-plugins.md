@@ -4946,4 +4946,133 @@ PLAN §0.10 的前端读数因此从 **52 处 / 38 文件 → 51 处 / 37 文件
 
 **未做**：两处下沉本身尚未实现（B8-4a 仍待做）；`feRe` 的盲区（只按**路径名**判域归属，域逻辑写在非域文件里时看不见）只登记未改判据 —— 改判据会让既有审计读数整体漂移，需单独立项。
 
+## §107 插件 schema 的动作权限闸 + 消息侧卡片插槽（#155/#156/#157，2026-11-05）
+
+### 107.1 安全闸（#155 的实体）
+
+缺陷链路（§102.4-1 已实测）：`dataSource` 的 `config.endpoint` 有 `ALLOWED_INVOKE_PREFIXES=["dynamic_ui_"]`，但**声明式动作**走另一条路 —— `EventHandlerEngine.executeActions` 构造 `ActionContext` 时不传 `permissions`，`ActionRouter` 的判据是「有 `permissions` 才校验」，于是 `actions[].type === "invoke"` 直接 `invoke()`。插件 `schema.json` 收敛出的记录（`origin = "plugin"`）正是经这条链执行 onMount/onClick ⇒ **第三方 schema 可调任意已注册 Tauri 命令**。
+
+| 环 | 做法 |
+|---|---|
+| 判据 | 只取 `DynamicUISchemaRecord.origin`：`builtin/user/ai` 可信（不注入，行为与改动前逐字一致）；`plugin` / 缺失 / 未知字面量一律**受限**（fail-closed，新增 origin 忘了登记得到的是「被收紧」） |
+| 受限面 | `commands: ["dynamic_ui_*"]`；`navigate/events/storeRead/storeWrite` **显式空数组**（这些 executor 的判据也是「有 permissions 就走白名单」，省略等于放行） |
+| 注入点 | `DynamicUIRenderer` 树根注入上下文；`SchemaNodeRenderer` 的 onMount/onUnmount/events、`FormRenderer` 的 onSubmit 全部透传 —— **任一漏传 = 漏一条 IPC** |
+| 连带收口 | `handler` 执行器加 `sourceRestricted`，禁止借目标 skill manifest 放宽；受限来源的 `update-schema` 不得跨 renderer 广播（`__global__` 降级为当前 scope，无 scope 直接丢弃） |
+| 非持久化 schema | 无记录的（Agent 实时生成 / 编辑器 / 预览）维持现状 —— 它们不是插件产物 |
+
+**验证**：`npm run typecheck` 退 0（**1476** 文件）；定点 vitest `schemaActionPermissions` **10 passed**、`pluginSchemaActionPermissions` **7 passed**、`PluginSchemaCard` **5 passed**。
+
+**过程事故（如实记）**：`pluginSchemaActionPermissions.test.tsx` 首轮 **4 失败 / 3 通过** —— 根因是测试没包 `MemoryRouter`，`useNavigate()` 在渲染期抛错，整棵树没起来：**「被拒」的三条是假绿**（树根本没渲染，自然没有 IPC），「放行」的四条拿不到调用。补 Router 后 7/7 绿。⇒ 判据：**「断言不发生」类用例必须先证明渲染树起来了**（本批用 `waitFor(getSchema 被调用)` 兜住其中一条，其余靠正控同文件覆盖）。
+
+### 107.2 消息侧卡片插槽（#157）
+
+- 契约载体是既有的 `Message.meta: Record<string, unknown>`（**不新增 DTO**）：键 `pluginCards`，值 `PluginSchemaCardSpec[]`（`schemaId` + 可选 `dataContext` / `title`）。
+- 渲染用 `DynamicUIRenderer`（`DynamicUIStandalone` 内部那棵树），不 import 任何插件产物；取不到 schema 落 `dynamicUI.schemaNotFound` 的 11 语言既有译文，不抛到消息渲染树。
+- 解析对每条独立校验：坏条目只丢自己，不炸整条消息。`PluginSchemaCardSlot` 在无卡片时返回 `null`（不占位）。
+- **生产者侧今天还没人写 `meta.pluginCards`**（插件产出入消息 meta 的通道不在本批）—— 插槽现网渲染为空，属「通道已通、生产未接」。
+
+### 107.3 独立审查：闸门外仍有绕过路径（已实测）
+
+只读审查（另一路）复核后列出 7 条，其中 **4 条可真利用**：
+
+| # | 绕过 | 现状 | 处置 |
+|---|---|---|---|
+| A | **信任锚可伪造**：`create_dynamic_ui_schema` 直接采信请求里的 `origin` / `owner_id`（`src-tauri/src/commands/dynamic_ui.rs:337`），插件可造一条 `origin:"user"` 的记录把 `invoke` 写进 schemaJson ⇒ 前端按来源判定即放行 | 后端 | **本批修**（改为服务端写死 `origin="user"`、`owner_id=""`；插件注册通道另建） |
+| B | **写命令无归属校验**：update / delete / restore / save-get-delete-form-data / pin / unpin 只拦 `is_builtin`；`get_dynamic_ui_form_data` 连 schema 是否存在都不查（最大泄露面：用户填写值） | 后端 | **本批修**（fail-closed 的 `plugin_owned_denied(origin)` 接在写入口与表单读写） |
+| C | **`chain` 内嵌 `update-schema` 绕过 scope 收敛**：顶层被拦，内层经 `ActionRouter` 派发的 detail **无 scope** ⇒ 接收端当广播处理，可把恶意节点替换进**可信**渲染树并以不受限权限执行 | 前端 | **本批已修**：`ActionContext.scope` + 受限来源强制带 scope、无 scope 直接拒发/拒收（3 条回归用例） |
+| D | **回查全局单槽 `currentSchema` 的时序洞**：同屏两张插件卡片时后加载者覆盖前者 ⇒ 先渲染的回查落空 ⇒ `undefined` ⇒ 不受限 | 前端 | **本批已修**：`PluginSchemaCard` / `DynamicPageViewer` 直接用自己那条记录算权限面 |
+| E | `dataSource` 的 store 读取不受 `storeRead` 约束；`api` 分支允许任意 http(s) 出站 | 前端 | 未修（要改 `subscribeDataSource` 签名与数据源分派，单独立项） |
+| F | `function` 执行器无权限判定 | 前端 | 当前 `registerCustomHandler` **零调用点**、不可达；规则缺位，待接线时补 |
+| G | 受限 `update-schema` 仍采信 `config.scope` | 前端 | **本批已修**：受限来源忽略 `config.scope`，只认当前渲染树 scope |
+
+**另一个事实（推翻 §102.1 的前提）**：插件的 `schema.json` **注册通道尚未实现** —— 全仓只有撤销面 `revoke_schemas_owned_by`，没有任何代码写入 `origin="plugin"`。§102.1 写的「安装/启用时收敛进库」目前不成立，§102 的详情槽因此还不能接线。
+
+### 107.4 未做
+
+1. 前端 E（dataSource 读面权限）未修：`subscribeDataSource` 没有 permissions 入参，属独立改造。
+2. 其余未声明 `actionPermissions` 的渲染入口（`AgentUIRenderer` / `DynamicUIPreview` / `VisualEditor` / `SkillPageRenderer` 等 8 处）目前靠 `schemaId` 回查兜底；它们无记录时按「不受限」处理，是否收紧取决于那些入口的来源模型，未在本批裁。
+3. 插件产出入消息 `meta` 的通道未建。
+4. 未跑全量 vitest（定点 + typecheck）。
+
+## §108 #36 搬迁落地：OPC 子树整棵迁入 company-runtime（2026-11-05）
+
+§104 裁定的路线（不用接缝，整棵搬）已执行完毕。
+
+### 108.1 改动
+
+| 环 | 内容 |
+|---|---|
+| 搬迁 | `axagent-quant/crates/analysis-engine/src/opc/`（25 模块 + `opc_adapter/` 3 文件）→ `axagent-quant/crates/company-runtime/src/opc/`；`analysis-engine/src/lib.rs` 删 `pub mod opc;` 并留一行说明 |
+| 依赖 | `company-runtime` 补 `parking_lot` / `regex` / `serde_yaml` / `uuid` / `zip`（各带用途注释）；**不加回** `axagent-analysis-engine` 边（该子树对股票模块零引用） |
+| 宿主引用 | `src-tauri/src/commands/opc*.rs` / `fleet/mod.rs` / `init/state.rs` / `demand_discovery.rs` / `conversations_search.rs` / `tools/opc.rs` 共 48 处改指 `axagent_company_runtime::opc::*`；`src-tauri/Cargo.toml` 与 `tools/Cargo.toml` 加依赖边 |
+| 文档 | 指向旧路径的 48 处引用同批改指（**纯移动、行号不变**，4 篇审计快照也逐条核对未越界） |
+
+### 108.2 读数（`audit-l1-blockers` 复算，快照 `AUDIT-l1-blockers-2026-11-05-1356.md`）
+
+| 度量 | 改前 | 改后 |
+|---|---|---|
+| Rust 跨包口（OPC） | 29 处 / 9 文件 | **0 处 / 0 文件** |
+| Cargo 构建边（OPC） | 7 | **2** |
+| Rust 待改写 · 股票桶 | 99 处 / 16 文件 | **51 处 / 13 文件** |
+| Rust 待改写 · OPC 桶 | 0（全记在股票桶） | **48 处 / 3 文件**（归属转移，不是新增） |
+| 前端反向阻塞 | 51 / 37（股票）、28 / 11（OPC） | **不变** |
+
+> ⚠ 别看错：「待改写 99 → 51」不是修好了 48 处，而是**归属从股票桶转到 OPC 桶**（`tools/opc.rs` 41 + fleet 4 + state.rs 3）。总数只降了「跨包口」那 29 处。
+
+### 108.3 验证（实跑）
+
+| # | 命令 | 结果 |
+|---|---|---|
+| Z1 | `cargo check -p axagent-company-runtime` | 首轮 **E0433**（1 error，缺依赖）→ 补后 `Finished in 30.01s`，EXIT=0 |
+| Z2 | `__TAURI_WORKSPACE__=true cargo test -p axagent-company-runtime --lib` | **104 passed; 0 failed**（33.08s），EXIT=0 |
+| Z3 | `cd src-tauri && cargo check --lib` | **Finished in 15m21s**，EXIT=0，0 error |
+| Z4 | `node scripts/check-doc-refs.mjs` | 基线外新增 0（搬迁带来的 47 条已改指；改指脚本的判据是「新路径确实存在才替换」） |
+
+> **过程事故**：执行 agent 的主 crate 检查日志停在 `Checking axagent-runtime` 就再没有输出，且 cargo 进程已不在 —— 该轮**没有完成**。Z3 是 leader 重跑的，不要把它读成 agent 自报。
+
+### 108.4 未做
+
+1. **`company-runtime` 搬迁后未跑 clippy**（本批只跑 check + test；上一批的 clippy 是针对「删依赖边」那次，不能替这一批作证）。
+2. 未跑 `--workspace` 全量 clippy / test。
+3. `company-runtime` 现为 **implementor 依赖 consumer 面**的检查点：它被 `tools`（hybrid）与 `src-tauri`（wiring）依赖，方向合法；但 `company-runtime → entities` 的传递依赖是否符合 hybrid 的「禁止 entities」判据，未在本批裁（既有先例，未新增边）。
+4. 距 #32（独立仓）还差：`plugin-opc` crate 拆分与插件化立项，不在本批。
+
+## §109 B8-4a：两处真中性基元下沉完成（#154 落地，2026-11-05）
+
+### 109.1 改动
+
+| 符号 | 做法 |
+|---|---|
+| `PageHeader` | 移到 `src/components/common/PageHeader.tsx`（中性目录白名单内）；`showTimeAnchor?: boolean` → 中性的 `anchor?: ReactNode` 插槽，**删掉对 `time-travel/PageTimeAnchor` 的反向 import**（否则中立性门禁当场红）；`.sa-header*` 4 条样式（42 行）从中性组件自带 `pageHeader.css`，修掉「独立路由下头部无样式」的既有隐患（`stock-analysis.css` 留指针注释）；原 `stock-analysis/_shared/PageHeader.tsx` 删除（改后零引用）；6 个调用点改指新路径，`ReplayWorkbench` 改传 `anchor={<PageTimeAnchor />}` |
+| `clearVendorCheckCache` | 改为中性失效广播 `src/lib/cacheInvalidation.ts`（`onInvalidate` / `invalidate(topic)`）：缓存持有方（股票侧 `vendorCheck.ts`）在模块加载时订阅 `vendor-config`，宿主 `DataVendorsTab` 只广播 —— **宿主不再 import 股票域文件**。懒加载时序安全：域模块未加载时本就没有缓存可失效 |
+
+### 109.2 读数
+
+| 度量 | 改前 | 改后 |
+|---|---|---|
+| 前端股票反向阻塞 | 51 处 / 37 文件 | **49 处 / 36 文件** |
+| 组件中立性（原始 / 基线） | 原始 225（白名单后） | 原始 **222**，PASS；已修复 4 条 |
+
+> 首轮曾读到 50：`cacheInvalidation.ts` 的注释里写了字面 `import("@/components/stock-analysis/vendorCheck")`，被 `feRe` 按**文本**误命中 —— 改措辞后归 49。这正是 §106 记的「`feRe` 按名字判域」盲区的又一次实证。
+
+### 109.3 验证
+
+| # | 命令 | 结果 |
+|---|---|---|
+| W1 | `npm run typecheck` | EXIT=0，**1477** 文件 |
+| W2 | `node scripts/audit-l1-blockers.mjs` | EXIT=0，51/37 → **49/36**（快照 `AUDIT-l1-blockers-2026-11-05-1413.md` / `-1418.md`，未提交） |
+| W3 | `node scripts/check-component-neutrality.mjs` | **PASS**（原始 225 → 222） |
+| W4 | `node scripts/check-jsx-text-i18n.mjs` | **PASS**（基线外 0） |
+| W5 | 定点 vitest | **未取得读数**：14:04 那轮 2 文件 / 16 tests 通过、其余 5 文件 worker 启动超时；此后 7 次单文件重试（threads / forks 两池）全部卡在 vitest 硬编码 60 s；用**无关文件** `browserEvents.test.ts` 复现同样失败 ⇒ 环境问题（SMB + 并发 cargo 编译），不是本批改动 |
+
+### 109.4 未做
+
+1. **`--update-baseline` 未跑**：已修复的 4 条中立性引用里有 1 条属 chat 批次在途改动，收紧会把别人的中间态烘进棘轮基线。
+2. 剩余 49 处一律未动：③ 类（`horizonLabelKey` / `investPath` / `agentOutput` 整文件域）随股票前端迁出；④ 类（TasksCenterPage / barrel / `useRightPanel`）走贡献面或 B8-5。`SectionHeading` / `investRoutes` / `dualView` 按 §4.3 明确不下沉。
+3. 本批的 5 条前端测试读数缺失（见 W5），需在编译窗口空闲后补跑。
+
+
+
+
+
 

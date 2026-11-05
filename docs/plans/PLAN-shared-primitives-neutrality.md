@@ -63,7 +63,7 @@
 
 | # | 引用位置 | 被引用符号 | 判定 | 依据（原文 / 调用点） | 难度 | 批次 |
 |---|---|---|---|---|---|---|
-| B1 | `src/components/time-travel/ReplayWorkbench.tsx:1` | `PageHeader` | **中性→可下沉** | `src/components/stock-analysis/_shared/PageHeader.tsx:28-51` 只渲染「返回键 + `t(titleKey)` 标题 + `meta` + `actions` + 可选锚点」，无任何域语义；被 4 个 stock 页 + `ReplayWorkbench` + `src/components/quant/QuantLab.tsx:13` 共用 | 中（锚点槽 + CSS 寄生，见 §4.1） | B8-4a |
+| B1 | `src/components/time-travel/ReplayWorkbench.tsx:1` | `PageHeader` | **中性→可下沉**（**B8-4a 已下沉**） | `src/components/common/PageHeader.tsx` 只渲染「返回键 + `t(titleKey)` 标题 + `meta` + `actions` + 可选锚点」，无任何域语义；被 4 个 stock 页 + `ReplayWorkbench` + `src/components/quant/QuantLab.tsx:13` 共用 | 中（锚点槽 + CSS 寄生，见 §4.1） | B8-4a |
 | B2 | `src/components/settings/DataVendorsTab.tsx:446` | `clearVendorCheckCache` | **中性（机制中性，宿主调用）** | `src/components/stock-analysis/vendorCheck.ts:59-61` 函数体只有 `enabledCache = null;`；调用点 `src/components/settings/DataVendorsTab.tsx:444-448` 的语义是「保存 vendor 配置后失效缓存」，与股票无关 | 低-中（改成中性失效事件，见 §4.2） | B8-4a |
 
 ### 2.3 ③ 域特定，但导入方也是域自有（20 处 / 17 文件）—— 迁出后自然消失
@@ -149,7 +149,7 @@
 ### 4.1 `PageHeader` → `src/components/common/PageHeader.tsx`
 
 - **必须同时做的三件事**（少一件就变成新的跨 feature 引用或样式丢失）：
-  1. **锚点改插槽**：把 `showTimeAnchor?: boolean`（`src/components/stock-analysis/_shared/PageHeader.tsx:21`）换成 `anchor?: ReactNode`，删掉同文件 `:1` 那行对 `@/components/time-travel/PageTimeAnchor` 的 import。否则 `common/PageHeader` → `time-travel/PageTimeAnchor` 会当场触发中立性门禁（`time-travel` 不在 `NEUTRAL_PREFIXES`），基线只减不增 ⇒ 直接红。
+  1. **锚点改插槽**（**B8-4a 已按此落地**）：原 `showTimeAnchor?: boolean` 换成 `anchor?: ReactNode`（`src/components/common/PageHeader.tsx`），并删掉对 `@/components/time-travel/PageTimeAnchor` 的 import。否则 `common/PageHeader` → `time-travel/PageTimeAnchor` 会当场触发中立性门禁（`time-travel` 不在 `NEUTRAL_PREFIXES`），基线只减不增 ⇒ 直接红。
   2. **唯一传 `showTimeAnchor` 的调用点**：`src/components/time-travel/ReplayWorkbench.tsx:67-72`（`showTimeAnchor` 在 `:71`）改为 `anchor={<PageTimeAnchor />}`。
   3. **CSS 一起搬**：组件用的 `.sa-header / .sa-header-title / .sa-header-meta / .sa-header-back` 定义在 `src/components/stock-analysis/stock-analysis.css:49-90`，而该 CSS **只被** `src/components/stock-analysis/StockAnalysisPage.tsx:45` 引入 ⇒ 今天的 `ReplayWorkbench` / `QuantLab` 头部在独立路由下**根本没有样式**（既有隐患，非本轮引入）。下沉时把这 42 行迁到中性样式（或改 Tailwind 类）并让组件自带 import。
 - **调用点全量**（6 处 import）：`src/components/stock-analysis/{BacktestPage,ComparePage,TradePage,WatchlistPage}.tsx`、`src/components/time-travel/ReplayWorkbench.tsx:1`、`src/components/quant/QuantLab.tsx:13`。

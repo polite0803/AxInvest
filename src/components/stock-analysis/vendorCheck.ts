@@ -1,3 +1,4 @@
+import { onInvalidate } from "@/lib/cacheInvalidation";
 import { invoke } from "@/lib/invoke";
 import { message } from "@/lib/toast";
 import i18next from "i18next";
@@ -27,6 +28,15 @@ export type VendorCheckResult =
 let enabledCache: { set: Set<string>; ts: number } | null = null;
 const CACHE_TTL_MS = 30_000;
 
+/**
+ * 设置页保存 vendor 配置后广播 `vendor-config` 失效（B8-4a：
+ * `src/lib/cacheInvalidation.ts`）。本模块在加载时订阅 —— 缓存归本模块所有，
+ * 失效动作也留在本模块，宿主不必认识股票域。
+ */
+onInvalidate("vendor-config", () => {
+  enabledCache = null;
+});
+
 async function getEnabledVendors(): Promise<Set<string> | null> {
   if (enabledCache && Date.now() - enabledCache.ts < CACHE_TTL_MS) {
     return enabledCache.set;
@@ -53,11 +63,6 @@ async function getEnabledVendors(): Promise<Set<string> | null> {
   } catch {
     return null;
   }
-}
-
-/** 清除缓存（在设置页保存 vendor 后由调用方主动调用）*/
-export function clearVendorCheckCache() {
-  enabledCache = null;
 }
 
 /**

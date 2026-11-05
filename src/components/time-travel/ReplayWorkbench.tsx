@@ -1,5 +1,6 @@
-import { PageHeader } from "@/components/stock-analysis/_shared/PageHeader";
+import { PageHeader } from "@/components/common/PageHeader";
 import { AsOfDatePicker } from "@/components/time-travel/AsOfDatePicker";
+import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
 import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBadge";
 import { ReplaySweep } from "@/components/time-travel/ReplaySweep";
 import { TimeTravelBatchCard } from "@/components/time-travel/TimeTravelBatchCard";
@@ -68,7 +69,7 @@ export function ReplayWorkbench() {
         titleKey="replayWorkbench.title"
         backTo="/invest"
         backLabelKey="nav.chat"
-        showTimeAnchor
+        anchor={<PageTimeAnchor />}
       />
       <div style={{ padding: "24px 16px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>

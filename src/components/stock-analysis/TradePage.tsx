@@ -1,6 +1,6 @@
+import { PageHeader } from "@/components/common/PageHeader";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { useTranslation } from "react-i18next";
-import { PageHeader } from "./_shared/PageHeader";
 import { ExecutionReplayPanel } from "./ExecutionReplayPanel";
 import { PortfolioMonitorPanel } from "./PortfolioMonitorPanel";
 import { TradeImportPanel } from "./TradeImportPanel";

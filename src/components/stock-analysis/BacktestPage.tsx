@@ -1,10 +1,10 @@
+import { PageHeader } from "@/components/common/PageHeader";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { Tabs } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
-import { PageHeader } from "./_shared/PageHeader";
 import { SectionHeading } from "./_shared/SectionHeading";
 import { BacktestChart } from "./BacktestChart";
 import { BacktestPanel } from "./BacktestPanel";

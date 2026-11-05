@@ -43,6 +43,8 @@ import { resolveTimelineJump } from "./timelineJump";
 import { useAnalystConsensusByTier } from "./useAnalystConsensusByTier";
 import "./dual-view";
 import "./stock-analysis.css";
+// `.sa-header*` 已迁到中性目录（B8-4a）；本页内联头部仍用这些类，故并列引入。
+import "@/components/common/pageHeader.css";
 import { AnalysisHistoryButton } from "./AnalysisHistoryButton";
 import { DualViewRenderer } from "./dual-view";
 import { EventCalendarPanel } from "./EventCalendarPanel";

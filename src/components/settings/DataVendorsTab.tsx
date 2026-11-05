@@ -2,6 +2,7 @@
  * 数据源 Tab — Vendor 开关 + 健康检测 + 固定工具依赖融合展示。
  */
 import type { Variable } from "@/components/workflow/types";
+import { invalidate } from "@/lib/cacheInvalidation";
 import { invoke } from "@/lib/invoke";
 import { toDbVariable } from "@/lib/workflowVariables";
 import { App, Button, Card, Input, Select, Space, Spin, Switch, Table, Tag } from "antd";
@@ -441,11 +442,9 @@ export function DataVendorsTab() {
           variables: merged,
         },
       });
-      // 通知侧栏面板的 vendor 缓存失效，下次进入时按新值重新检查
-      try {
-        const { clearVendorCheckCache } = await import("@/components/stock-analysis/vendorCheck");
-        clearVendorCheckCache();
-      } catch { /* 浏览器模式或路径不存在时跳过 */ }
+      // 通知侧栏面板的 vendor 缓存失效，下次进入时按新值重新检查。
+      // 走中性广播（B8-4a）：宿主不认识股票域的缓存实现，由 `vendorCheck` 自己订阅。
+      invalidate("vendor-config");
       message.success(t("stockAnalysis.settings.saveSuccess"));
     } catch (e) {
       console.error("[DataVendorsTab] save failed:", e);

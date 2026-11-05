@@ -119,6 +119,8 @@ async function executeUpdateSchema(
         path: config.path,
         newSchema: config.newSchema,
         scope: targetScope,
+        // 与 ActionRouter 的内层派发同形：接收端据此拒收「受限但无 scope」的更新。
+        sourceRestricted: restricted,
       },
     }),
   );

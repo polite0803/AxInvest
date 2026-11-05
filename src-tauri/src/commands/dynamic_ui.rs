@@ -18,7 +18,8 @@ use axagent_entities::dynamic_ui_schemas::{
 };
 use axagent_runtime::llm_bridge::build_llm_bridge_from_db;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder, QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Order, QueryFilter, QueryOrder,
+    QuerySelect, Set,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -83,39 +84,65 @@ pub struct CreateSchemaRequest {
     pub schema_json: String,
     pub category: String,
     pub tags: Vec<String>,
-    /// 来源维度（可选，默认 `user`）。取值见 [`SCHEMA_ORIGINS`]。
+    /// 已废弃：保留仅为兼容旧前端 / Agent 的入参形状，**值被忽略**。
+    /// 本命令创建的行一律 `origin = "user"`（见函数体注释）。
     #[serde(default)]
     pub origin: Option<String>,
-    /// 来源归属（可选）。仅 `origin = "plugin"` 时非空，= pluginId。
+    /// 已废弃：同上，值被忽略（本命令创建的行 `owner_id` 恒为空串）。
     #[serde(default)]
     pub owner_id: Option<String>,
 }
 
-/// `origin` 的合法取值集（`PLAN-everything-is-plugin.md` §10.4 G-a）。
+/// 用户侧命令面允许操作的 `origin`（`PLAN-everything-is-plugin.md` §10.4 G-a）。
 ///
-/// 建索引而不建 CHECK 约束：本列是**纯展示元数据**，改词汇表不该需要一次 DDL；
-/// 合法性在写入路径（[`resolve_origin`]）把关即可。
-pub const SCHEMA_ORIGINS: &[&str] = &["builtin", "user", "ai", "plugin"];
+/// 词汇表本身是 `builtin` / `user` / `ai` / `plugin`，但这里刻意**只列三种**、
+/// 不列 `plugin`：判定必须建立在白名单上，`plugin` / 空串 / 未知字面量都落到拒绝侧。
+/// 与前端 `TRUSTED_SCHEMA_ORIGINS`（`schemaActionPermissions.ts:44`）同集合 ——
+/// 两侧集合若漂移，就会出现「前端放行、后端拒」或反之的分叉。
+/// 注意 `create_dynamic_ui_schema` **不接受**外部传入的 `origin` / `owner_id`
+/// （见该函数注释），插件来源的行只能由插件安装通道直接落库。
+const TRUSTED_SCHEMA_ORIGINS: &[&str] = &["builtin", "user", "ai"];
 
-/// 解析并校验请求里的 `origin` / `owner_id`。
+/// 归属判定（fail-closed）：`origin` 是否属于「插件拥有 / 无法判定」。
 ///
-/// 缺省 = `user` + 空归属。非法值直接拒绝（不静默降级为 `user`）——静默降级会让
-/// 「来源」这件事在用户不知情时失真，而这正是本列要解决的问题。
-fn resolve_origin(
-    origin: Option<String>,
-    owner_id: Option<String>,
-) -> Result<(String, String), String> {
-    let origin = origin.unwrap_or_else(|| "user".to_string());
-    if !SCHEMA_ORIGINS.contains(&origin.as_str()) {
-        return Err(ErrorResponse::err(dynamic_ui_err::INVALID_ORIGIN));
+/// 只有 `builtin` / `user` / `ai` 这三种**可判定为非插件**的来源放行；`"plugin"`、
+/// 空串、历史遗留值、未来新增词汇一律拒绝 —— 判定必须建立在白名单上，因为
+/// 「未知值」在最坏情况下就是「插件写的」（插件注册通道一旦上线，它就是唯一
+/// 会写入新词的生产路径）。放行未知值与 `default allow` 等价。
+fn plugin_owned_denied(origin: &str) -> bool {
+    !TRUSTED_SCHEMA_ORIGINS.contains(&origin)
+}
+
+/// 插件拥有 / 归属不可判定时的统一拒绝串。
+///
+/// 不新增错误码：`commands/error_code.rs` 与 11 份 locale 都在本任务禁改面内，
+/// 半途自造一个码前端只会显示成裸码串。这里沿用本文件既有的裸错误串形态
+/// （同 `"DynamicUI Schema 不存在"` / `"版本号冲突：…"`），并把实际 `origin`
+/// 原样带出，便于日志定位是谁写的这一行。
+fn plugin_owned_error(action: &str, origin: &str) -> String {
+    format!(
+        "拒绝{action}：该 DynamicUI Schema 的 origin = \"{origin}\"，归属为插件或不可判定，只能由插件安装/卸载通道管理"
+    )
+}
+
+/// 读一行 Schema 并做归属校验 —— 本文件所有「按 schemaId 操作」命令的统一闸门。
+///
+/// 不存在 ⇒ `DYNAMIC_UI_SCHEMA_NOT_FOUND`（不再放行「任意 id 都能写表单」）；
+/// 插件拥有 / 归属不可判定 ⇒ 明确拒绝。`action` 只进错误文案，不参与判定。
+async fn load_schema_for_command(
+    db: &DatabaseConnection,
+    schema_id: &str,
+    action: &str,
+) -> Result<SchemaModel, String> {
+    let model = SchemaEntity::find_by_id(schema_id.to_string())
+        .one(db)
+        .await
+        .map_err(|e| format!("查询Schema失败: {e}"))?
+        .ok_or_else(|| ErrorResponse::err(dynamic_ui_err::SCHEMA_NOT_FOUND))?;
+    if plugin_owned_denied(&model.origin) {
+        return Err(plugin_owned_error(action, &model.origin));
     }
-    // 归属只在 plugin 来源下有意义：别让 `user` 的行留着陈旧 owner（卸载时会被误扫）。
-    let owner_id = if origin == "plugin" {
-        owner_id.unwrap_or_default()
-    } else {
-        String::new()
-    };
-    Ok((origin, owner_id))
+    Ok(model)
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -334,7 +361,13 @@ pub async fn create_dynamic_ui_schema(
     let id = Uuid::new_v4().to_string();
     let now = now_iso();
     let tags_json = serde_json::to_string(&req.tags).unwrap_or_else(|_| "[]".to_string());
-    let (origin, owner_id) = resolve_origin(req.origin, req.owner_id)?;
+    // 归属是信任锚，不能由请求自填：采信 `req.origin` 等于让任意调用方（含插件）
+    // 造一条 `origin:"user"` 的行绕过前端按来源判定的闸门。
+    // 本命令是用户 / Agent 建 UI 的唯一真实入口 ⇒ 一律 `user` + 空归属；
+    // 插件的 schema 由插件安装通道直接落库（写入 `origin = "plugin"` + pluginId），
+    // 不走本命令，因此这里不需要（也不允许）区分来源。
+    let origin = "user".to_string();
+    let owner_id = String::new();
 
     let active = SchemaActiveModel {
         id: Set(id.clone()),
@@ -368,11 +401,8 @@ pub async fn update_dynamic_ui_schema(
     req: UpdateSchemaRequest,
 ) -> Result<DynamicUISchemaDTO, String> {
     let db = state.harness.db();
-    let model = SchemaEntity::find_by_id(id.clone())
-        .one(db)
-        .await
-        .map_err(|e| format!("查询Schema失败: {e}"))?
-        .ok_or_else(|| "DynamicUI Schema 不存在".to_string())?;
+    // 归属闸门先于一切写入：插件拥有的 Schema 只能由插件通道改。
+    let model = load_schema_for_command(db, &id, "更新").await?;
 
     if model.is_builtin != 0 {
         return Err(ErrorResponse::err(dynamic_ui_err::BUILTIN_NOT_MODIFIABLE));
@@ -444,11 +474,8 @@ pub async fn delete_dynamic_ui_schema(
     id: String,
 ) -> Result<(), String> {
     let db = state.harness.db();
-    let model = SchemaEntity::find_by_id(id.clone())
-        .one(db)
-        .await
-        .map_err(|e| format!("查询Schema失败: {e}"))?
-        .ok_or_else(|| "DynamicUI Schema 不存在".to_string())?;
+    // 归属闸门：插件拥有的 Schema 只随插件卸载被 `revoke_schemas_owned_by` 撤销。
+    let model = load_schema_for_command(db, &id, "删除").await?;
 
     if model.is_builtin != 0 {
         return Err(ErrorResponse::err(dynamic_ui_err::BUILTIN_NOT_DELETABLE));
@@ -587,11 +614,8 @@ pub async fn restore_dynamic_ui_schema_version(
 ) -> Result<DynamicUISchemaDTO, String> {
     let db = state.harness.db();
 
-    let schema = SchemaEntity::find_by_id(&schema_id)
-        .one(db)
-        .await
-        .map_err(|e| format!("查询Schema失败: {e}"))?
-        .ok_or_else(|| "DynamicUI Schema 不存在".to_string())?;
+    // 归属闸门：回滚等价于改写 schema_json，插件拥有的行一律拒绝。
+    let schema = load_schema_for_command(db, &schema_id, "回滚").await?;
 
     if schema.is_builtin != 0 {
         return Err(ErrorResponse::err(dynamic_ui_err::BUILTIN_NOT_ROLLBACK));
@@ -654,6 +678,9 @@ pub async fn save_dynamic_ui_form_data(
     req: SaveFormDataRequest,
 ) -> Result<DynamicUIFormDataDTO, String> {
     let db = state.harness.db();
+    // 归属闸门：表单数据以 schema 为宿主，宿主不存在 / 属插件时不得落库
+    // （否则插件可借任意 schemaId 预置数据，等用户 UI 一并读取）。
+    load_schema_for_command(db, &req.schema_id, "保存表单数据").await?;
     let instance_key = req.instance_key.unwrap_or_else(|| "default".to_string());
     let now = now_iso();
 
@@ -690,10 +717,23 @@ pub async fn get_dynamic_ui_form_data(
     schema_id: String,
     instance_key: Option<String>,
 ) -> Result<Option<DynamicUIFormDataDTO>, String> {
-    let db = state.harness.db();
+    get_form_data_impl(state.harness.db(), &schema_id, instance_key).await
+}
+
+/// 读表单数据的实现体（抽出来是为了能在单测里直接喂连接池断言「拒绝且不泄露」）。
+///
+/// 闸门在查询**之前**：宿主 schema 不存在或属插件时直接返回 `Err`，
+/// 不查表、不组装 DTO —— 这是本文件最大的一处泄露面（任意 schemaId 换任意表单值）。
+async fn get_form_data_impl(
+    db: &DatabaseConnection,
+    schema_id: &str,
+    instance_key: Option<String>,
+) -> Result<Option<DynamicUIFormDataDTO>, String> {
+    // 读也要拦：插件拥有的表单数据不该被用户命令面读出（反向亦然）。
+    load_schema_for_command(db, schema_id, "读取表单数据").await?;
     let key = instance_key.unwrap_or_else(|| "default".to_string());
     let model = FormDataEntity::find()
-        .filter(FormDataColumn::SchemaId.eq(&schema_id))
+        .filter(FormDataColumn::SchemaId.eq(schema_id))
         .filter(FormDataColumn::InstanceKey.eq(key))
         .one(db)
         .await
@@ -709,6 +749,8 @@ pub async fn delete_dynamic_ui_form_data(
     instance_key: Option<String>,
 ) -> Result<(), String> {
     let db = state.harness.db();
+    // 归属闸门：删除同样按宿主 schema 判定，插件行只能随插件卸载清理。
+    load_schema_for_command(db, &schema_id, "删除表单数据").await?;
     let key = instance_key.unwrap_or_else(|| "default".to_string());
     FormDataEntity::delete_many()
         .filter(FormDataColumn::SchemaId.eq(&schema_id))
@@ -1017,6 +1059,10 @@ pub async fn pin_dynamic_ui_schema(
     let db = state.harness.db();
     let now = now_iso();
 
+    // 归属闸门：钉入是「用户把自己的页面挂到导航」的动作，宿主必须是用户侧页面
+    // （同时挡掉「钉一个根本不存在的 schemaId」造出悬空导航项）。
+    load_schema_for_command(db, &schema_id, "钉入").await?;
+
     // 先查 existing，再算 position（避免 update 时 max 包含自身的 race，D-09）
     let existing = PinEntity::find_by_id(schema_id.clone())
         .one(db)
@@ -1075,10 +1121,116 @@ pub async fn unpin_dynamic_ui_schema(
     schema_id: String,
 ) -> Result<(), String> {
     let db = state.harness.db();
+    // 归属闸门：只拦「宿主存在且属插件」的钉入。宿主已不存在时放行 ——
+    // `delete_dynamic_ui_schema` 不级联 pins 表，若这里也要求宿主存在，
+    // 被删 schema 遗留的悬空钉入就永远无法清理（且此时已无任何数据可被影响）。
+    if let Some(schema) = SchemaEntity::find_by_id(schema_id.clone())
+        .one(db)
+        .await
+        .map_err(|e| format!("查询Schema失败: {e}"))?
+    {
+        if plugin_owned_denied(&schema.origin) {
+            return Err(plugin_owned_error("取消钉入", &schema.origin));
+        }
+    }
     PinEntity::delete_by_id(schema_id.clone())
         .exec(db)
         .await
         .map_err(|e| format!("取消钉入失败: {e}"))?;
     tracing::info!(schema_id = %schema_id, "取消钉入 DynamicUI");
     Ok(())
+}
+
+// ── 归属校验单测（⚠ 必须保持在文件末尾：插在中间会触发 clippy::items_after_test_module） ──
+#[cfg(test)]
+mod origin_guard_tests {
+    use super::*;
+
+    /// 直插一行 Schema：模拟「插件安装通道」的写库路径（`create_dynamic_ui_schema`
+    /// 只写 `origin = "user"`，造不出插件行 —— 这本身就是本次修复的目标）。
+    async fn seed_schema(db: &DatabaseConnection, id: &str, origin: &str, owner_id: &str) {
+        let now = now_iso();
+        SchemaActiveModel {
+            id: Set(id.to_string()),
+            title: Set("测试页面".to_string()),
+            description: Set(String::new()),
+            schema_json: Set(
+                r#"{"version":"1.0","id":"root","type":"Container","props":{}}"#.to_string()
+            ),
+            category: Set("custom".to_string()),
+            tags: Set("[]".to_string()),
+            version: Set("1.0.0".to_string()),
+            is_builtin: Set(0),
+            origin: Set(origin.to_string()),
+            owner_id: Set(owner_id.to_string()),
+            created_at: Set(now.clone()),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("测试：应能插入 schema 行");
+    }
+
+    async fn seed_form_data(db: &DatabaseConnection, schema_id: &str, payload: &str) {
+        FormDataActiveModel {
+            id: Set(Uuid::new_v4().to_string()),
+            schema_id: Set(schema_id.to_string()),
+            form_data_json: Set(payload.to_string()),
+            instance_key: Set("default".to_string()),
+            updated_at: Set(now_iso()),
+        }
+        .insert(db)
+        .await
+        .expect("测试：应能插入表单数据行");
+    }
+
+    /// 判定必须建立在**白名单**上：任何不可判定为「非插件」的 origin 一律拒。
+    #[test]
+    fn plugin_owned_denied_is_fail_closed() {
+        // 拒：插件 / 空（历史行）/ 未知 / 大小写变体（将来若有人写 `Plugin` 也不放行）
+        for origin in ["plugin", "", "bogus", "Plugin", "PLUGIN", " plugin", "user "] {
+            assert!(plugin_owned_denied(origin), "origin = {origin:?} 必须拒绝（fail-closed）");
+        }
+        // 放行：三个可判定为非插件的来源
+        for origin in ["builtin", "user", "ai"] {
+            assert!(!plugin_owned_denied(origin), "origin = {origin:?} 必须放行");
+        }
+    }
+
+    /// 副作用断言：读表单数据对 `origin = "plugin"` 的宿主返回 Err，且响应里**没有**表单值；
+    /// 同一行数据换成 `origin = "user"` 就正常读出 —— 证明差异只来自归属闸门。
+    #[tokio::test]
+    async fn get_form_data_rejects_plugin_owned_schema_without_leaking_values() {
+        let handle = axagent_dao::db::create_test_pool().await.expect("测试：创建连接池应成功");
+        let db = &handle.conn;
+
+        seed_schema(db, "schema-plugin", "plugin", "acme-plugin").await;
+        seed_form_data(db, "schema-plugin", r#"{"token":"LEAK_SECRET"}"#).await;
+
+        let err = get_form_data_impl(db, "schema-plugin", None)
+            .await
+            .expect_err("插件拥有的 schema 必须拒绝读取");
+        assert!(err.contains("plugin"), "拒绝原因应带出实际 origin：{err}");
+        assert!(
+            !err.contains("LEAK_SECRET"),
+            "拒绝响应不得回显任何表单值（否则等于把泄露面挪进错误串）：{err}"
+        );
+
+        // 正向对照：同一实现、同样有数据，只有 origin 不同
+        seed_schema(db, "schema-user", "user", "").await;
+        seed_form_data(db, "schema-user", r#"{"token":"USER_DATA"}"#).await;
+        let got = get_form_data_impl(db, "schema-user", None)
+            .await
+            .expect("用户 schema 应可正常读取")
+            .expect("数据行应存在");
+        assert!(got.form_data_json.contains("USER_DATA"));
+
+        // 宿主不存在 ⇒ 不再放行（此前任意 schemaId 都能写/读表单）
+        let missing =
+            get_form_data_impl(db, "schema-absent", None).await.expect_err("宿主不存在必须拒绝");
+        assert!(
+            missing.contains("DYNAMIC_UI_SCHEMA_NOT_FOUND"),
+            "缺失宿主应回既有错误码：{missing}"
+        );
+    }
 }

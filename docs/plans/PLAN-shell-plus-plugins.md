@@ -4960,9 +4960,14 @@ PLAN §0.10 的前端读数因此从 **52 处 / 38 文件 → 51 处 / 37 文件
 | 连带收口 | `handler` 执行器加 `sourceRestricted`，禁止借目标 skill manifest 放宽；受限来源的 `update-schema` 不得跨 renderer 广播（`__global__` 降级为当前 scope，无 scope 直接丢弃） |
 | 非持久化 schema | 无记录的（Agent 实时生成 / 编辑器 / 预览）维持现状 —— 它们不是插件产物 |
 
-**验证**：`npm run typecheck` 退 0（**1476** 文件）；定点 vitest `schemaActionPermissions` **10 passed**、`pluginSchemaActionPermissions` **7 passed**、`PluginSchemaCard` **5 passed**。
+**验证**：`npm run typecheck` 退 0（**1477** 文件）；`cargo check --lib` 退 0（18m01s，零 warning）；`cargo test --lib commands::dynamic_ui` **2 passed**（表驱动 7 拒 3 放行 + 副作用用例：`origin="plugin"` 返回 Err 且串内无 `LEAK_SECRET`，同数据 `origin="user"` 正控）。前端定点 vitest（`--pool=forks`）**28 passed**：`schemaActionPermissions` 10、`pluginSchemaActionPermissions` 10、`PluginSchemaCard` 5、`cacheInvalidation` 3。
 
-**过程事故（如实记）**：`pluginSchemaActionPermissions.test.tsx` 首轮 **4 失败 / 3 通过** —— 根因是测试没包 `MemoryRouter`，`useNavigate()` 在渲染期抛错，整棵树没起来：**「被拒」的三条是假绿**（树根本没渲染，自然没有 IPC），「放行」的四条拿不到调用。补 Router 后 7/7 绿。⇒ 判据：**「断言不发生」类用例必须先证明渲染树起来了**（本批用 `waitFor(getSchema 被调用)` 兜住其中一条，其余靠正控同文件覆盖）。
+**本机 vitest 的可用姿势（重要）**：threads 池的 worker 启动超时硬编码 60 s，而本机 jsdom 启动已达 **46 s**（`cacheInvalidation` 单文件实测 `environment 46.28s`），叠加负载后必超时；换 `--pool=forks` 可跑（同一文件 Duration 62.6 s）。**这不是代码问题**，用无关文件复现即可判环境。
+
+**过程事故（如实记）**：这条 10 例文件先后暴露两个**用例自身**的错误，都不是被测逻辑的问题——
+1. 首轮 4 失败：测试没包 `MemoryRouter`，`useNavigate()` 在渲染期抛错，整棵树没起来 ⇒ **「被拒」的三条是假绿**（树根本没渲染，自然没有 IPC）。
+2. 第二轮 2 失败：`update-schema` 在 `EventHandlerEngine` 顶层读的是 `action.config`（内层 chain 才读顶层字段），我却写在顶层 ⇒ 两条静默不派发，另一条因抛错而「假绿」。
+两轮都靠**同文件的正控用例**（「放行」那条必须真的有 IPC）才暴露出来 —— 判据：**「断言不发生」类用例必须与正控配对**。
 
 ### 107.2 消息侧卡片插槽（#157）
 
@@ -4977,8 +4982,8 @@ PLAN §0.10 的前端读数因此从 **52 处 / 38 文件 → 51 处 / 37 文件
 
 | # | 绕过 | 现状 | 处置 |
 |---|---|---|---|
-| A | **信任锚可伪造**：`create_dynamic_ui_schema` 直接采信请求里的 `origin` / `owner_id`（`src-tauri/src/commands/dynamic_ui.rs:337`），插件可造一条 `origin:"user"` 的记录把 `invoke` 写进 schemaJson ⇒ 前端按来源判定即放行 | 后端 | **本批修**（改为服务端写死 `origin="user"`、`owner_id=""`；插件注册通道另建） |
-| B | **写命令无归属校验**：update / delete / restore / save-get-delete-form-data / pin / unpin 只拦 `is_builtin`；`get_dynamic_ui_form_data` 连 schema 是否存在都不查（最大泄露面：用户填写值） | 后端 | **本批修**（fail-closed 的 `plugin_owned_denied(origin)` 接在写入口与表单读写） |
+| A | **信任锚可伪造**：`create_dynamic_ui_schema` 直接采信请求里的 `origin` / `owner_id`（`src-tauri/src/commands/dynamic_ui.rs:337`），插件可造一条 `origin:"user"` 的记录把 `invoke` 写进 schemaJson ⇒ 前端按来源判定即放行 | 后端 | **已修**：该命令一律写 `origin="user"` / `owner_id=""`，请求字段标注废弃；插件来源只能由安装通道直接落库 |
+| B | **写命令无归属校验**：update / delete / restore / save-get-delete-form-data / pin / unpin 只拦 `is_builtin`；`get_dynamic_ui_form_data` 连 schema 是否存在都不查（最大泄露面：用户填写值） | 后端 | **已修**：`plugin_owned_denied(origin)`（白名单 `builtin/user/ai`，`plugin`/空/未知一律拒）+ 统一闸门 `load_schema_for_command` 接在 8 个入口 |
 | C | **`chain` 内嵌 `update-schema` 绕过 scope 收敛**：顶层被拦，内层经 `ActionRouter` 派发的 detail **无 scope** ⇒ 接收端当广播处理，可把恶意节点替换进**可信**渲染树并以不受限权限执行 | 前端 | **本批已修**：`ActionContext.scope` + 受限来源强制带 scope、无 scope 直接拒发/拒收（3 条回归用例） |
 | D | **回查全局单槽 `currentSchema` 的时序洞**：同屏两张插件卡片时后加载者覆盖前者 ⇒ 先渲染的回查落空 ⇒ `undefined` ⇒ 不受限 | 前端 | **本批已修**：`PluginSchemaCard` / `DynamicPageViewer` 直接用自己那条记录算权限面 |
 | E | `dataSource` 的 store 读取不受 `storeRead` 约束；`api` 分支允许任意 http(s) 出站 | 前端 | 未修（要改 `subscribeDataSource` 签名与数据源分派，单独立项） |

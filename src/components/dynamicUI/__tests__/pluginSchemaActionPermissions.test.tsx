@@ -188,11 +188,11 @@ describe("受限来源的 update-schema 只能改自己的树", () => {
     };
   }
 
+  // ⚠ `EventHandlerEngine` 的顶层 update-schema 读的是 `action.config`（内层 chain 才读顶层字段），
+  //   写错层级会让三条用例里的两条静默不派发、另一条因抛错而「假绿」。
   const updateAction = {
     type: "update-schema",
-    schemaId: "root",
-    operation: "replace",
-    path: "/children/0",
+    config: { schemaId: "root", operation: "replace", path: "/children/0" },
   } as unknown as DynamicAction;
 
   it("受限来源：派发的更新钉在当前 scope，且标记受限", async () => {
@@ -216,14 +216,17 @@ describe("受限来源的 update-schema 只能改自己的树", () => {
     expect(events).toHaveLength(0);
   });
 
-  it("可信来源维持原行为：不带 scope（广播）", async () => {
+  it("可信来源维持原行为：缺省走 __global__（广播）", async () => {
     const { events, stop } = collectUpdates();
     const { executeActions } = await import("@/lib/dynamicUI/EventHandlerEngine");
     await executeActions([updateAction], {});
     stop();
 
     expect(events).toHaveLength(1);
-    expect((events[0].detail as { scope?: string }).scope).toBeUndefined();
+    const detail = events[0].detail as { scope?: string; sourceRestricted?: boolean };
+    // 事件层一直用 `__global__` 表达「广播」（接收端把 `__global__` 与缺省视为同一档）
+    expect(detail.scope).toBe("__global__");
+    expect(detail.sourceRestricted).toBe(false);
   });
 });
 

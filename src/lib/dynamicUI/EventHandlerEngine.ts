@@ -2,7 +2,7 @@
 
 import { getActionRouter, getDefaultNavigate } from "@/lib/actionRouter";
 import type { ActionContext } from "@/lib/actionRouter";
-import type { DynamicAction, EventHandler, UISchema } from "@/types";
+import type { DynamicAction, EventHandler, SkillPermissions, UISchema } from "@/types";
 
 /**
  * 事件处理引擎：解析 EventHandler 并执行 DynamicAction。
@@ -22,6 +22,14 @@ export interface ExecuteActionsOptions {
   scope?: string;
   /** 路由导航函数；未提供时回退到模块级默认导航器 */
   navigate?: (path: string) => void;
+  /**
+   * 来源受限时的动作权限面（插件来源 Schema 注入）。
+   *
+   * ⚠ 语义是「**有就收紧**」：`ActionRouter` 各 executor 的判据是 `if (ctx.permissions)` 才走白名单，
+   * 省略即放行。故不可信来源必须传出与本选项一致的对象，不能靠缺省值表达「不允许」。
+   * `undefined` = 不受限，仅表示来源可信（用户 / Agent / 技能），不是「忘了传」的借口。
+   */
+  permissions?: SkillPermissions;
 }
 
 /**
@@ -32,7 +40,7 @@ export async function executeActions(
   actions: DynamicAction[],
   options: ExecuteActionsOptions = {},
 ): Promise<void> {
-  const { context, onAction, scope, navigate } = options;
+  const { context, onAction, scope, navigate, permissions } = options;
   const router = getActionRouter();
   const actionCtx: ActionContext = {
     skillName: context?.skillName
@@ -40,6 +48,10 @@ export async function executeActions(
       : "DynamicUI",
     pageParams: (context?.pageParams as Record<string, string>) || {},
     navigate: navigate ?? getDefaultNavigate() ?? undefined,
+    permissions,
+    // 来源受限标记：`permissions` 非空即代表「按来源收紧」（可信来源传的是 undefined），
+    // handler 执行器据此拒绝借目标 skill 的 manifest 放宽（见 actionRouter 的同名字段）。
+    sourceRestricted: permissions !== undefined,
   };
 
   for (const action of actions) {
@@ -47,7 +59,9 @@ export async function executeActions(
       onAction(action);
     }
     if (action.type === "update-schema") {
-      await executeUpdateSchema(action, scope);
+      // 来源受限时禁止跨 renderer 广播（`scope: "__global__"`）：
+      // 注入别的渲染树等于让不可信 schema 借目标树的权限面执行自己的动作。
+      await executeUpdateSchema(action, scope, Boolean(permissions));
     } else {
       await router.execute(
         {
@@ -76,6 +90,7 @@ export async function executeActions(
 async function executeUpdateSchema(
   action: DynamicAction,
   currentScope: string | undefined,
+  restricted = false,
 ): Promise<void> {
   const config = action.config as {
     schemaId: string;
@@ -85,7 +100,15 @@ async function executeUpdateSchema(
     scope?: string;
   };
 
-  const targetScope = config.scope ?? currentScope ?? "__global__";
+  // 受限来源只能改自己那棵树：显式 `__global__` 降级为当前 scope；
+  // 连当前 scope 都没有（非 renderer 上下文）时直接丢弃，不退回广播。
+  const targetScope = restricted
+    ? (config.scope && config.scope !== "__global__" ? config.scope : currentScope)
+    : (config.scope ?? currentScope ?? "__global__");
+  if (!targetScope) {
+    console.warn("[DynamicUI] 受限来源的 update-schema 缺少 scope，已丢弃");
+    return;
+  }
 
   window.dispatchEvent(
     new CustomEvent("dynamic-ui:schema-update", {
@@ -108,6 +131,8 @@ async function executeUpdateSchema(
  * @param context - 数据上下文
  * @param onAction - action 执行回调（透传给 executeActions）
  * @param scope - renderer scope id
+ * @param navigate - 路由导航函数
+ * @param permissions - 来源受限时的动作权限面（插件来源注入；省略 = 不受限）
  */
 export function handleEvents(
   handlers: EventHandler[],
@@ -115,6 +140,7 @@ export function handleEvents(
   onAction?: (action: DynamicAction) => void,
   scope?: string,
   navigate?: (path: string) => void,
+  permissions?: SkillPermissions,
 ): Record<string, (...args: unknown[]) => void> {
   const bindings: Record<string, (...args: unknown[]) => void> = {};
 
@@ -133,7 +159,7 @@ export function handleEvents(
   for (const [trigger, actions] of grouped) {
     bindings[trigger] = (...args: unknown[]) => {
       const eventContext = { ...context, _eventArgs: args };
-      void executeActions(actions, { context: eventContext, onAction, scope, navigate });
+      void executeActions(actions, { context: eventContext, onAction, scope, navigate, permissions });
     };
   }
 

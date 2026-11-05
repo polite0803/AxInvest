@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /* eslint-disable react-refresh/only-export-components */
 
+import { useSchemaActionPermissions } from "@/components/dynamicUI/SchemaActionPermissionsContext";
 import { useSchemaId } from "@/components/dynamicUI/SchemaIdContext";
 import { useSchemaRenderer } from "@/components/dynamicUI/SchemaRenderContext";
 import { evaluateConditions } from "@/lib/dynamicUI/ConditionalRenderer";
@@ -30,6 +31,9 @@ export const FormRenderer: React.FC<DynamicUIProps> = ({
   const [formValues, setFormValues] = useState<Record<string, unknown>>({});
   const { renderSchema } = useSchemaRenderer();
   const { schemaId } = useSchemaId();
+  // 提交时执行的是 onSubmit 里的声明式动作 ⇒ 必须继承所在渲染树的权限面，
+  // 否则插件来源 Schema 只要把 invoke 放进 onSubmit 就绕过了动作闸（本组件直接调 executeActions）。
+  const actionPermissions = useSchemaActionPermissions();
   const navigate = useNavigate();
   const saveFormData = useDynamicUIStore((s) => s.saveFormData);
   const loadFormData = useDynamicUIStore((s) => s.loadFormData);
@@ -152,7 +156,12 @@ export const FormRenderer: React.FC<DynamicUIProps> = ({
             values,
           },
         }));
-        await executeActions(enrichedActions, { context: submitContext, onAction, navigate });
+        await executeActions(enrichedActions, {
+          context: submitContext,
+          onAction,
+          navigate,
+          permissions: actionPermissions,
+        });
       } else if (onAction) {
         onAction({
           type: "store",

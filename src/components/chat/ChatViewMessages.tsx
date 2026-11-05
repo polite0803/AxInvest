@@ -84,6 +84,7 @@ import { getStreamingLoadingState, shouldRenderAssistantMarkdownFromContent } fr
 import { CognitiveDecisionCard } from "./CognitiveDecisionCard";
 import { MultiModelDisplay, type MultiModelDisplayMode } from "./MultiModelDisplay";
 import { PermissionCard } from "./PermissionCard";
+import { PluginSchemaCardSlot } from "./PluginSchemaCardSlot";
 import { QuoteBlock } from "./QuoteBlock";
 import { ToolCallBlockView } from "./ToolCallBlockView";
 import { ToolCallCard } from "./ToolCallCard";
@@ -1306,6 +1307,11 @@ export function useChatViewMessages({
                   </button>
                 )}
               </div>
+              {
+                /* 插件 schema 卡片：契约 = Message.meta.pluginCards[]，宿主只按 (schemaId, dataContext)
+                   渲染，不 import 任何插件产物（PLAN-shell-plus-plugins.md §93；见 PluginSchemaCardSlot.tsx） */
+              }
+              <PluginSchemaCardSlot meta={msg?.meta} />
               {msgPermissions.map((pr) => {
                 const resolvedTc = agentToolCalls[pr.toolUseId];
                 const permStatus = resolvedTc?.approvalStatus === "approved"

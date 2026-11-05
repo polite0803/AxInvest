@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { DynamicUIRenderer } from "@/components/dynamicUI/DynamicUIRenderer";
+import { permissionsForSchemaRecord } from "@/lib/dynamicUI/schemaActionPermissions";
 import { useDynamicUIStore } from "@/stores";
-import type { DynamicAction, UISchema } from "@/types";
+import type { DynamicAction, SkillPermissions, UISchema } from "@/types";
 import { Alert, Spin } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -27,6 +28,9 @@ export function DynamicUIStandalone({
   const { getSchema, loadFormData, saveFormData } = useDynamicUIStore();
   const { t } = useTranslation();
   const [schema, setSchema] = useState<UISchema | null>(null);
+  // 来源 → 动作权限面：插件来源（`origin === "plugin"`）注入受限面，其余（user/ai/builtin）
+  // 保持 undefined 即行为不变。判据与理由见 schemaActionPermissions.ts 文件头。
+  const [actionPermissions, setActionPermissions] = useState<SkillPermissions | undefined>(undefined);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +62,8 @@ export function DynamicUIStandalone({
         }
         const parsed = JSON.parse(record.schemaJson) as UISchema;
         setSchema(parsed);
+        // 与 schema 同一次提交里设定：来源判定只依赖这条记录，不引入第二个加载状态。
+        setActionPermissions(permissionsForSchemaRecord(record));
         const savedData = await loadFormData(schemaId, instanceKey);
         if (!mounted) {
           return;
@@ -168,6 +174,7 @@ export function DynamicUIStandalone({
       schema={schema}
       dataContext={mergedContext}
       onAction={handleAction}
+      actionPermissions={actionPermissions}
     />
   );
 }

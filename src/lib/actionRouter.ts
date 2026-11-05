@@ -16,6 +16,15 @@ export interface ActionContext {
   pageParams?: Record<string, string>;
   triggerEvent?: Event;
   permissions?: SkillPermissions;
+  /**
+   * `permissions` 是否由**来源**绑定（插件来源 Schema 注入的受限面）。
+   *
+   * 与 `permissions` 分开是因为「有权限面」本身不足以判断能不能放宽：技能（可信来源）
+   * 也总是带 manifest 声明的权限面，而它的 `handler` 执行器允许切到目标技能的声明
+   * （P1 #15 的跨 skill 引用）。来源受限的树则**只许收窄、不许借道放宽** —— 否则
+   * 插件 Schema 只要调一个权限更宽的目标 skill 的 handler 就绕过了动作闸。
+   */
+  sourceRestricted?: boolean;
   _chainDepth?: number;
   /**
    * 路由导航函数（由 React 调用方注入）。
@@ -549,7 +558,11 @@ export class ActionRouter {
           const targetSkill = useSkillExtensionStore
             .getState()
             .skills.find((s) => s.name === handlerSkillName);
-          handlerPermissions = targetSkill?.manifest?.permissions ?? ctx.permissions;
+          // 来源受限（插件 Schema 注入的受限面）不借目标 skill 的声明放宽：
+          // 换成目标 skill 的 permissions 就等于把动作闸交给另一个 manifest。
+          handlerPermissions = ctx.sourceRestricted
+            ? ctx.permissions
+            : (targetSkill?.manifest?.permissions ?? ctx.permissions);
         }
 
         const handlerCtx: ActionContext = {

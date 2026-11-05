@@ -4,14 +4,24 @@ import { componentRegistry } from "@/lib/dynamicUI/ComponentRegistry";
 import { evaluateConditions } from "@/lib/dynamicUI/ConditionalRenderer";
 import { type DataSourceSubscriber, subscribeDataSource } from "@/lib/dynamicUI/DataBindingEngine";
 import { executeActions, getLifecycleHandlers, handleEvents } from "@/lib/dynamicUI/EventHandlerEngine";
+import { resolveSchemaActionPermissions } from "@/lib/dynamicUI/schemaActionPermissions";
 import { validateSchema } from "@/lib/dynamicUI/SchemaValidator";
 import { getStyleSanitizer } from "@/lib/security/styleSanitizer";
 import { useSecurityStore } from "@/stores/feature/securityStore";
-import type { DynamicAction, DynamicImportance, DynamicStatus, DynamicUIProps, UISchema } from "@/types";
+import type {
+  DynamicAction,
+  DynamicImportance,
+  DynamicStatus,
+  DynamicUIProps,
+  SkillPermissions,
+  UISchema,
+} from "@/types";
 import { Alert, Badge, Skeleton, Tag } from "antd";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { SchemaActionPermissionsContext, useSchemaActionPermissions } from "./SchemaActionPermissionsContext";
+import { useSchemaId } from "./SchemaIdContext";
 import { SchemaRenderContext } from "./SchemaRenderContext";
 
 // ── 语义化：重要性权重（值越大越优先渲染） ──
@@ -161,6 +171,9 @@ const SchemaNodeRenderer = React.memo(function SchemaNodeRenderer({
 }: SchemaNodeRendererProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  // 来源受限时的动作权限面（由 DynamicUIRenderer 在树根注入）。树内**所有** executeActions
+  // 调用点都必须带上它 —— 任何一处漏传都等于对不可信 schema 放行了一条 IPC。
+  const actionPermissions = useSchemaActionPermissions();
   const [resolvedData, setResolvedData] = useState<unknown>(null);
   const [dataError, setDataError] = useState<Error | null>(null);
   const [dataLoading, setDataLoading] = useState<boolean>(!!schema.dataSource);
@@ -257,7 +270,13 @@ const SchemaNodeRenderer = React.memo(function SchemaNodeRenderer({
     if (schema.events) {
       const { onMount } = getLifecycleHandlers(schema.events);
       if (onMount.length > 0) {
-        void executeActions(onMount, { context: mergedContextRef.current, onAction, scope, navigate })
+        void executeActions(onMount, {
+          context: mergedContextRef.current,
+          onAction,
+          scope,
+          navigate,
+          permissions: actionPermissions,
+        })
           .catch((err) => console.error("[DynamicUIRenderer] onMount lifecycle action failed", err));
       }
     }
@@ -265,12 +284,18 @@ const SchemaNodeRenderer = React.memo(function SchemaNodeRenderer({
       if (schema.events) {
         const { onUnmount } = getLifecycleHandlers(schema.events);
         if (onUnmount.length > 0) {
-          void executeActions(onUnmount, { context: mergedContextRef.current, onAction, scope, navigate })
+          void executeActions(onUnmount, {
+            context: mergedContextRef.current,
+            onAction,
+            scope,
+            navigate,
+            permissions: actionPermissions,
+          })
             .catch((err) => console.error("[DynamicUIRenderer] onUnmount lifecycle action failed", err));
         }
       }
     };
-  }, [schema.events, schema.id, onAction, scope, navigate]);
+  }, [schema.events, schema.id, onAction, scope, navigate, actionPermissions]);
 
   const entry = componentRegistry.get(schema.type);
 
@@ -343,8 +368,8 @@ const SchemaNodeRenderer = React.memo(function SchemaNodeRenderer({
   }, [schema.children, schema.type, renderSchema]);
 
   const eventBindings = useMemo(
-    () => handleEvents(schema.events || [], mergedContext, onAction, scope, navigate),
-    [schema.events, mergedContext, onAction, scope, navigate],
+    () => handleEvents(schema.events || [], mergedContext, onAction, scope, navigate, actionPermissions),
+    [schema.events, mergedContext, onAction, scope, navigate, actionPermissions],
   );
 
   if (!shouldRender) {
@@ -458,9 +483,23 @@ const SchemaNodeRenderer = React.memo(function SchemaNodeRenderer({
 
 SchemaNodeRenderer.displayName = "SchemaNodeRenderer";
 
-export const DynamicUIRenderer: React.FC<DynamicUIProps> = React.memo(
-  ({ schema: initialSchema, dataContext: externalContext, onAction }) => {
+/**
+ * `DynamicUIRenderer` 的 props：在 `DynamicUIProps` 之上多一个**可选**的权限面注入点。
+ * 不放进 `@/types` 是为了不跨面改动类型（`DynamicUIProps` 被组件注册表等广泛引用）。
+ */
+interface DynamicUIRendererProps extends DynamicUIProps {
+  /**
+   * 来源受限时由调用方直接给出的动作权限面（插件来源 Schema）。
+   * 省略时按 `SchemaIdContext.schemaId` 从 store 记录里判来源（见
+   * `resolveSchemaActionPermissions`）；两条路都判不出来源 ⇒ 不受限（内存态 Schema）。
+   */
+  actionPermissions?: SkillPermissions;
+}
+
+export const DynamicUIRenderer: React.FC<DynamicUIRendererProps> = React.memo(
+  ({ schema: initialSchema, dataContext: externalContext, onAction, actionPermissions }) => {
     const { t } = useTranslation();
+    const { schemaId } = useSchemaId();
     const [schema, setSchema] = useState<UISchema>(initialSchema);
     const schemaRef = useRef(schema);
     const rendererId = useMemo(() => genRendererId(), []);
@@ -504,6 +543,15 @@ export const DynamicUIRenderer: React.FC<DynamicUIProps> = React.memo(
     }, [rendererId]);
 
     const validation = useMemo(() => validateSchema(schema), [schema]);
+
+    // 来源 → 动作权限面。显式注入优先（插件页面容器那条链由记录解析后传进来）；
+    // 否则按 schemaId 回落到 store 里已加载的记录（覆盖「直接以路由打开」那条入口）。
+    // 两条都判不出来源 ⇒ undefined ⇒ 不受限：那只可能是内存态 Schema（Agent / 编辑器 / 预览）。
+    const effectiveActionPermissions = useMemo(
+      () => actionPermissions ?? resolveSchemaActionPermissions(schemaId),
+      [actionPermissions, schemaId],
+    );
+
     if (!validation.valid) {
       return (
         <Alert
@@ -527,14 +575,16 @@ export const DynamicUIRenderer: React.FC<DynamicUIProps> = React.memo(
     }
 
     return (
-      <SchemaErrorBoundary schemaId={schema.id} t={t}>
-        <SchemaNodeRenderer
-          schema={schema}
-          externalContext={externalContext}
-          onAction={onAction}
-          scope={rendererId}
-        />
-      </SchemaErrorBoundary>
+      <SchemaActionPermissionsContext.Provider value={effectiveActionPermissions ?? null}>
+        <SchemaErrorBoundary schemaId={schema.id} t={t}>
+          <SchemaNodeRenderer
+            schema={schema}
+            externalContext={externalContext}
+            onAction={onAction}
+            scope={rendererId}
+          />
+        </SchemaErrorBoundary>
+      </SchemaActionPermissionsContext.Provider>
     );
   },
 );

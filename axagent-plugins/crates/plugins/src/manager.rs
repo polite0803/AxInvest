@@ -3994,6 +3994,25 @@ mod tests {
         std::env::temp_dir().join(format!("plugins-{label}-{nanos}"))
     }
 
+    /// 测试专用配置：把 bundled 根**钉到一个空目录**。
+    ///
+    /// 为什么必须钉：生产缺省的 bundled 根就是 `env!("CARGO_MANIFEST_DIR")/bundled`
+    /// （见 [`PluginManager::bundled_root`]，`PluginManagerConfig::resolve_bundled_root(None)` 与它同源），
+    /// 而本机 `npm run plugin:bundle:dev` 会把 stock/opc 的 dev 产物暂存进同一个目录
+    /// （宿主 dev 模式正从这里装载）⇒ 不钉住，任何「投影条数 / 名单集合」断言都随盘上暂存产物涨落。
+    /// 实测：暂存在位时 `agent_command_specs` 从 1 条读成 7 条、任务源投影从 1 变 2，三条用例红，
+    /// 而产品代码零改动 —— 红的是测试对环境的耦合，不是插件运行器的缺陷。
+    ///
+    /// 空目录落在 `config_home` 之下，随各用例既有的 cleanup 一并删除，不额外留残渣。
+    fn isolated_config(config_home: impl Into<PathBuf>) -> PluginManagerConfig {
+        let config_home = config_home.into();
+        let mut config = PluginManagerConfig::new(config_home.clone());
+        let empty_bundled = config_home.join("bundled-isolated");
+        std::fs::create_dir_all(&empty_bundled).expect("建空的 bundled 隔离目录");
+        config.bundled_root = Some(empty_bundled);
+        config
+    }
+
     fn demo_manifest_with_capabilities() -> PluginManifest {
         PluginManifest {
             name: "demo".into(),
@@ -4062,7 +4081,7 @@ mod tests {
             }"#,
         )
         .expect("写入 manifest");
-        let manager = PluginManager::new(PluginManagerConfig::new(temp));
+        let manager = PluginManager::new(isolated_config(temp));
         let list = manager.list_dashboard_plugins().expect("清单投影应成功");
         let entry = list
             .iter()
@@ -4098,7 +4117,7 @@ mod tests {
         std::fs::write(installed.join("ui").join("panel.html"), "<html>hi</html>")
             .expect("写入面板资产");
 
-        let manager = PluginManager::new(PluginManagerConfig::new(temp.to_path_buf()));
+        let manager = PluginManager::new(isolated_config(temp.to_path_buf()));
         let mut registry = InstalledPluginRegistry::default();
         // 与真实 install 同形：钉下目录哈希。不钉则 read_panel_asset 按 fail-closed 拒绝，
         // 夹具就会把「未建立锚点」误验成「资产读取本身可用」。
@@ -4286,7 +4305,7 @@ mod tests {
     #[test]
     fn plugin_capabilities_register_and_rollback() {
         let registry = CapabilityRegistry::new();
-        let config = PluginManagerConfig::new(temp_dir("p3cap"));
+        let config = isolated_config(temp_dir("p3cap"));
         let mut manager = PluginManager::new(config).with_capability_registry(&registry);
         let manifest = demo_manifest_with_capabilities();
 
@@ -4309,7 +4328,7 @@ mod tests {
 
     #[test]
     fn plugin_capabilities_without_registry_is_noop() {
-        let config = PluginManagerConfig::new(temp_dir("p3noop"));
+        let config = isolated_config(temp_dir("p3noop"));
         let mut manager = PluginManager::new(config);
         let manifest = demo_manifest_with_capabilities();
 
@@ -4354,7 +4373,7 @@ mod tests {
 
     #[test]
     fn plugin_passports_mapping_marks_source_and_evolvability() {
-        let config = PluginManagerConfig::new(temp_dir("p3passmap"));
+        let config = isolated_config(temp_dir("p3passmap"));
         let manager = PluginManager::new(config);
         let manifest = manifest_with_passport_sources();
 
@@ -4405,7 +4424,7 @@ mod tests {
 
     #[test]
     fn plugin_passports_register_tracks_ids_and_rollback() {
-        let config = PluginManagerConfig::new(temp_dir("p3passlife"));
+        let config = isolated_config(temp_dir("p3passlife"));
         let mut manager = PluginManager::new(config);
         let manifest = manifest_with_passport_sources();
 
@@ -4546,7 +4565,7 @@ mod tests {
             let config_home = temp_dir(&format!("{label}-home"));
             let decl = command_decl_json(&source, extra_fields_json, relative);
             write_command_plugin_source(&source, &format!("{label}-demo"), permissions_json, &decl);
-            let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+            let mut manager = PluginManager::new(isolated_config(&config_home));
             let outcome = manager
                 .install(source.to_str().expect("utf8 path"))
                 .unwrap_or_else(|e| panic!("install 应成功: {e}"));
@@ -4902,7 +4921,7 @@ mod tests {
                 .expect("写入 ui.json");
         }
 
-        let manager = PluginManager::new(PluginManagerConfig::new(temp.to_path_buf()));
+        let manager = PluginManager::new(isolated_config(temp.to_path_buf()));
         let integrity = if pinned {
             hash_plugin_directory(installed_dir)
                 .ok()
@@ -5435,7 +5454,7 @@ mod tests {
 
         // ③ 坏插件：registry 里登记了记录，但安装目录已不存在 ⇒ 发现期按陈旧记录剔除，
         // 不产生加载失败，其余插件照常返回（单个坏插件不拖垮整份清单）。
-        let manager = PluginManager::new(PluginManagerConfig::new(temp.clone()));
+        let manager = PluginManager::new(isolated_config(temp.clone()));
         let ghost_root = installed_root.join("ghost-pack");
         let mut registry = InstalledPluginRegistry::default();
         registry.plugins.insert(
@@ -5760,7 +5779,7 @@ mod tests {
         let config_home = temp_dir("ui-decl-ok-home");
         std::fs::create_dir_all(&source).expect("创建源目录");
         write_plugin_source_with_ui(&source, &manifest("order-form", "order-form"), Some(ui_json));
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         manager.install(source.to_str().expect("utf8 path")).expect("引用已声明 key 应装得上");
         let list = manager.list_plugin_task_sources().expect("任务源投影应成功");
         assert_eq!(list.len(), 1);
@@ -5774,7 +5793,7 @@ mod tests {
         let config_home = temp_dir("ui-decl-badpage-home");
         std::fs::create_dir_all(&source).expect("创建源目录");
         write_plugin_source_with_ui(&source, &manifest("ghost-form", "order-form"), Some(ui_json));
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         let text = manager
             .install(source.to_str().expect("utf8 path"))
             .expect_err("引用未声明的 schema key 必须被拒")
@@ -5790,7 +5809,7 @@ mod tests {
         let config_home = temp_dir("ui-decl-badsrc-home");
         std::fs::create_dir_all(&source).expect("创建源目录");
         write_plugin_source_with_ui(&source, &manifest("order-form", "ghost-form"), Some(ui_json));
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         let text = manager
             .install(source.to_str().expect("utf8 path"))
             .expect_err("任务源引用未声明的 schema key 必须被拒")
@@ -5806,7 +5825,7 @@ mod tests {
         let config_home = temp_dir("ui-decl-missing-home");
         std::fs::create_dir_all(&source).expect("创建源目录");
         write_plugin_source_with_ui(&source, &manifest("order-form", "order-form"), None);
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         let text = manager
             .install(source.to_str().expect("utf8 path"))
             .expect_err("没有 ui.json 的 schema 页必须被拒")
@@ -5825,7 +5844,7 @@ mod tests {
             &manifest("order-form", "order-form"),
             Some(r#"{ "version": 9, "schemas": [] }"#),
         );
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         let text = manager
             .install(source.to_str().expect("utf8 path"))
             .expect_err("非法 ui.json 必须被拒")
@@ -5862,7 +5881,7 @@ mod tests {
         )
         .expect("写入 manifest");
 
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         manager.install(source.to_str().expect("utf8 path")).expect("装带任务源的插件应通过校验");
 
         let list = manager.list_plugin_task_sources().expect("任务源投影应成功");
@@ -5905,7 +5924,7 @@ mod tests {
         )
         .expect("写入 manifest");
 
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         let error = manager
             .install(source.to_str().expect("utf8 path"))
             .expect_err("指向不存在命令的任务源必须被拒");

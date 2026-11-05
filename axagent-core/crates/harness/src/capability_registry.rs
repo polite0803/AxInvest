@@ -233,19 +233,23 @@ impl ServiceDefinition {
         )
     }
 
-    /// 预置 opc-store 接缝（OPC 站点内容只读查询，宿主独占实现）。
+    /// 预置 opc-store 接缝（OPC 站点内容数据面，宿主独占实现）。
     ///
-    /// 宿主把 `opc_blog_posts` 的**列表读面**经本接缝以列裁剪视图暴露给插件
-    /// （`list_blog_posts` 一个 op；正文列 `content` 连 SELECT 都没有，裁剪判据见 `opc_store`
-    /// 模块头）。命名取 `.store` 族（同 `jobs.store` / `trajectory.store`）：OPC 的站点数据面
+    /// 宿主把 `opc_blog_posts` 的列表读面经本接缝以列裁剪视图暴露给插件
+    /// （`list_blog_posts`；正文列 `content` 连 SELECT 都没有，裁剪判据见 `opc_store`
+    /// 模块头），并开放**写 op** `publish_blog_post`（只 `Set` published / published_at /
+    /// updated_at 三列；缺行回 `PublishBlogPostOutcome::NotFound` 这个正常值，不是错误码）。
+    /// 命名取 `.store` 族（同 `jobs.store` / `trajectory.store`）：OPC 的站点数据面
     /// （博客 / 落地页 / 联系提交 / 排期）后续都挂本接缝的**不同 op**，不再一表一条接缝。
-    /// 首批无写 op ⇒ 不设权限闸。
+    /// ⚠ 权限闸**只加写 op**（`write`，判在 `worker.rs` 的 `required_permission_for`）；
+    /// 读 op 一条都不加 —— 给读缝加闸会让只读插件被无端拒掉。
     pub fn opc_store() -> Self {
         Self::new(
             "opc.store",
             "1.0",
             "axagent_harness::OpcStoreProvider",
-            "OPC 站点内容只读：list_blog_posts（返回列裁剪行视图 + limit 之前的匹配总数，不含正文）",
+            "OPC 站点内容：list_blog_posts（列裁剪行视图 + limit 之前的匹配总数，不含正文）\
+             / publish_blog_post（写三列，要 write 权限）",
         )
     }
 

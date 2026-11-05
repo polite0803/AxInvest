@@ -2,9 +2,9 @@
 
 //! `opc.store` 接缝的**宿主侧实现**（wiring 层，只调 dao，不直连库）。
 //!
-//! 契约在 `axagent-core/crates/harness/src/opc_store.rs`（首批**只读**，唯一 op =
-//! `list_blog_posts`）。本文件只做两件事：入参闸（`limit` / `offset`）与
-//! 「dao 行 → 契约视图」的逐字段映射。
+//! 契约在 `axagent-core/crates/harness/src/opc_store.rs`，现下两个 op：读面
+//! `list_blog_posts` + 写面 `publish_blog_post`。本文件只做两件事：入参闸（`limit` /
+//! `offset` / `id`）与「dao 行 → 契约视图」的逐字段映射（写面没有视图，只有两态枚举）。
 //!
 //! ## 为什么不在这层写 SQL
 //!
@@ -29,8 +29,8 @@
 //!   「取尽整表」的分页算术，夹取后「我给 500 却只回 200」会让它把下一页 offset 算错
 //!   （同 `analysis_record_service.rs` 的 `resolve_limit` 判据）；
 //! - `offset`：`None` ⇒ `0`；无上限（越界 offset 就是一次空页，`total` 照常返回）。
-//!
-//! 闸在 IO **之前**执行：越界参数不该换来一次全表扫描。
+//! - `id`（写 op）：空 / 全空白 ⇒ `Err(Validation)`；缺 id 属入参非法，与「id 合法但表里没有这篇」
+//!   是两件事 —— 后者回 `NotFound` 正常值。三处闸都在 IO **之前**：非法参数不该换来一次主键查询。
 
 use async_trait::async_trait;
 use axagent_dao::repo::opc_blog_post::{BlogPostListRow, count_blog_posts, list_blog_posts};
@@ -38,7 +38,7 @@ use axagent_harness::DatabaseConnection;
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::opc_store::{
     BlogPostListOutcome, BlogPostView, OPC_BLOG_POST_LIST_DEFAULT_LIMIT,
-    OPC_BLOG_POST_LIST_LIMIT_RANGE, OpcStoreProvider,
+    OPC_BLOG_POST_LIST_LIMIT_RANGE, OpcStoreProvider, PublishBlogPostOutcome,
 };
 
 /// `opc.store` 的宿主实现。
@@ -110,14 +110,48 @@ impl OpcStoreProvider for HostOpcStore {
 
         Ok(BlogPostListOutcome { posts: rows.into_iter().map(blog_post_view).collect(), total })
     }
+
+    /// 发布（写 op）：闸 → dao → 两态枚举。**没有 SQL、没有 `sea_orm` 导入**（分层纪律见模块头）。
+    ///
+    /// 「缺行」在这里是 `Ok(NotFound)` 而不是错误 —— 判据钉在契约的
+    /// [`PublishBlogPostOutcome`]，本层只负责把它从 dao 的 `bool` 翻译成契约枚举，
+    /// 不在这里再判一次「行在不在」。
+    async fn publish_blog_post(&self, id: String) -> Result<PublishBlogPostOutcome> {
+        // 闸在 IO 之前（空 id 不该换来一次主键查询）。
+        require_publish_id(&id)?;
+        // dao 写函数**全限定调用**：本文件的 `impl` 那一行被登记表按行号钉住，
+        // 往上方 `use axagent_dao::...` 那一条里加名字会让它换行、impl 行整体下移 ⇒
+        // 行中性改法就是把新符号留在这里（`use` 列表只加了契约枚举，宽度够）。
+        let found = axagent_dao::repo::opc_blog_post::set_blog_post_published(&self.db, &id)
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("opc.store::publish_blog_post 发布失败: {e}"))
+            })?;
+        Ok(if found { PublishBlogPostOutcome::Published } else { PublishBlogPostOutcome::NotFound })
+    }
+}
+
+/// 写 op 的入参闸：`id` 空 / 全空白 ⇒ `Err(Validation)`。
+///
+/// 为什么在 provider 而不是分派层：读 op 的两个可选参数闸也在 provider（分派层
+/// 「只透传契约 DTO、一个数字都不写」的分工）。两处各判一半 ⇒ 迟早有一处漏。
+fn require_publish_id(id: &str) -> Result<()> {
+    if id.trim().is_empty() {
+        return Err(AxAgentError::Validation(
+            "opc.store::publish_blog_post 的 id 不能为空（缺 id 属入参非法，不是「没有这篇」）"
+                .into(),
+        ));
+    }
+    Ok(())
 }
 
 // ── 测试 ──────────────────────────────────────────────────────────────────
 //
 // 内联测试 mod 追加在文件末尾（`items_after_test_module` 只在 clippy 下暴露）。
 //
-// 只测本文件自己的两件事：`limit` 闸与映射键集合。dao 的行收敛（哨兵 / `tags_json`）
-// 在 `repo/opc_blog_post.rs` 测；真库端到端属需要预置 `opc_blog_posts` 行的跨批项。
+// 只测本文件自己的三件事：`limit` 闸、`id` 闸、映射键集合。dao 的行收敛（哨兵 / `tags_json`）
+// 与**发布写面的真库端到端**（命中 / 缺行 / 秒级量级）都在 `repo/opc_blog_post.rs` 测 ——
+// 本层不重复开库，只保证「闸 + 翻译」这两件本层职责不静默漂移。
 
 #[cfg(test)]
 mod tests {
@@ -185,5 +219,18 @@ mod tests {
         let val = serde_json::to_value(blog_post_view(row)).expect("序列化应成功");
         assert_eq!(val["publishedAt"], json!(null), "未发布不得回退成 createdAt");
         assert_eq!(val["tags"], json!([]), "无标签 = 空数组，不是缺失");
+    }
+
+    /// 写 op 的 `id` 闸：空串与**纯空白**都拒（空白 id 走到 dao 是一次必然缺行的主键查询，
+    /// 落成 `NotFound` 读数 —— 那是把参数错误伪装成业务结果）。合法值一律放行。
+    #[test]
+    fn publish_id_gate_rejects_blank_but_does_not_trim() {
+        for bad in ["", " ", "  ", "\t", "\n", "\u{00a0}"] {
+            let err = require_publish_id(bad).expect_err("空白 id 必须拒收");
+            assert!(matches!(err, AxAgentError::Validation(_)), "应落 Validation：{err:?}");
+        }
+        // 只判「有没有内容」，不替调用方 trim 出第二个值：带前后空格的 id 原样交给 dao。
+        assert!(require_publish_id(" post-1 ").is_ok(), "非空白即放行，本层不改写 id");
+        assert!(require_publish_id("post-1").is_ok());
     }
 }

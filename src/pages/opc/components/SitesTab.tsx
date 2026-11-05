@@ -29,8 +29,8 @@ interface LandingPage {
 
 // 插件命令 `opc_list_blog_posts` 的行类型 = 接缝视图 `BlogPostView` 的本面板已读子集
 // （帧里其实有 10 个 camelCase 键，含 `publishedAt` / `updatedAt`，这里只声明消费到的那些）。
-// ⚠ 时间口径是 epoch **毫秒**（接缝契约），与同文件 `LandingPage.created_at` /
-// `ContactSubmission.created_at`（宿主 DTO，按秒 `* 1000` 渲染）不同单位，别照抄。
+// 时间口径与同文件 `LandingPage.created_at` / `ContactSubmission.created_at` **是同一个单位**：
+// epoch 秒（这几列由宿主 `now_ts()` 写入，`now_ms()` 才是毫秒）⇒ 渲染要 `* 1000`。
 interface BlogPost {
   id: string;
   title: string;

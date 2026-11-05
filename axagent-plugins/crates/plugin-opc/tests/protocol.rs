@@ -380,3 +380,124 @@ fn seam_error_is_propagated_as_command_failure() {
     worker.close_stdin();
     assert!(worker.child.wait().expect("等待 worker 退出").success());
 }
+
+/// `opc_publish_blog_post` 的帧级实证（本批：OPC **第一条写面**命令）。
+///
+/// 锁四件只有真管道能钉住的跨层口径：
+/// 1. 出站帧的 seam / op 逐字 = `opc.store` / `publish_blog_post` —— op 名写错会落
+///    `SEAM_CALL_UNSUPPORTED`，前端只看得见「发布失败」，归因成本极高；
+/// 2. 出站 `args` **只有 `id` 一个键**、值与命令入参逐字相同（不带 `content`、不套
+///    `request` 外层 —— 嵌套形态是 `knowledge.vector` 那类 DTO op 的约定，这里没有 DTO）；
+/// 3. 两态都走 payload：`"published"` 与 `"not_found"` 都是 `ResponseKind::Success`，
+///    值**原样**成为命令出参（不包装、不改写、不补默认）；
+/// 4. 宿主侧真失败 ⇒ 原样透传错误码，不退化成「成功但没发布」。
+#[test]
+fn command_frame_publishes_a_blog_post_via_host_seam() {
+    let mut worker = Worker::spawn();
+
+    // ① + ③ 命中态。
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "opc_publish_blog_post",
+            serde_json::json!({ "id": "post-7" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-publish"),
+    );
+    let call = worker.recv_request();
+    assert_eq!(call.op, ops::CALL_SEAM, "写面同样经 call_seam 出站");
+    assert_eq!(call.args["seam"], "opc.store");
+    assert_eq!(call.args["op"], "publish_blog_post", "op 名必须逐字");
+    let args = call.args["args"].as_object().expect("出站 args 应是对象");
+    assert_eq!(
+        args.keys().cloned().collect::<Vec<String>>(),
+        vec!["id".to_string()],
+        "写面入参只有 id 一个键（不许顺手带上正文或其它字段）：{args:?}"
+    );
+    assert_eq!(args["id"], "post-7", "id 必须逐字透传，插件侧不做任何加工");
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!("published"))
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Success, "命中应回成功：{response:?}");
+    assert_eq!(response.request_id.as_deref(), Some("req-publish"));
+    let reply = response.value.expect("命令回执必须带 value");
+    assert_eq!(reply["plugin_id"], PLUGIN_ID);
+    assert_eq!(reply["value"], serde_json::json!("published"), "两态串逐字透出，不建包装对象");
+
+    // ② 缺行态：仍然 Success，值 `"not_found"` —— **不许**借错误码表达。
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "opc_publish_blog_post",
+            serde_json::json!({ "id": "gone" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-absent"),
+    );
+    let call = worker.recv_request();
+    assert_eq!(call.args["op"], "publish_blog_post");
+    worker.send_response(
+        &FrameResponse::success(serde_json::json!("not_found"))
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_eq!(
+        response.kind,
+        ResponseKind::Success,
+        "「这一篇不在表里」是正常结果，落成错误就等于让前端把两件事读成一件事：{response:?}"
+    );
+    assert_eq!(response.code, None, "成功帧不该带错误码：{response:?}");
+    assert_eq!(
+        response.value.expect("命令回执必须带 value")["value"],
+        serde_json::json!("not_found")
+    );
+
+    // ④ 真失败：错误码原样透传，不退化成「成功但没发布」。
+    worker.send(
+        &CommandFrame::new(
+            PLUGIN_ID,
+            "opc_publish_blog_post",
+            serde_json::json!({ "id": "post-9" }),
+            5_000,
+        )
+        .to_frame_request()
+        .expect("命令帧应能编成请求")
+        .with_id("req-fault"),
+    );
+    let call = worker.recv_request();
+    worker.send_response(
+        &FrameResponse::error("TEST_SEAM_WRITE_FAILED", "宿主写库失败")
+            .with_id(call.request_id.clone().expect("出站请求必须带 request_id")),
+    );
+    let response = worker.recv_response();
+    assert_eq!(response.kind, ResponseKind::Error, "接缝真失败必须让命令失败");
+    assert_eq!(response.code.as_deref(), Some("TEST_SEAM_WRITE_FAILED"));
+    assert_eq!(response.request_id.as_deref(), Some("req-fault"));
+
+    // ⑤ 缺 `id`：命令层就拒，**不发接缝帧**（下一条从 stdout 读到的必须是本命令的错误回执）。
+    worker.send(
+        &CommandFrame::new(PLUGIN_ID, "opc_publish_blog_post", serde_json::json!({}), 5_000)
+            .to_frame_request()
+            .expect("命令帧应能编成请求")
+            .with_id("req-no-id"),
+    );
+    let response = worker.recv_response();
+    assert_eq!(
+        response.code.as_deref(),
+        Some(error_codes::PLUGIN_COMMAND_INVALID_ARGS),
+        "缺 id 属命令层参数错误，不该换来一次注定失败的帧：{response:?}"
+    );
+    assert_eq!(response.request_id.as_deref(), Some("req-no-id"));
+
+    worker.send(&FrameRequest::new(ops::SHUTDOWN, serde_json::json!({})));
+    assert_eq!(worker.recv_response().kind, ResponseKind::Success);
+    worker.close_stdin();
+    assert!(worker.child.wait().expect("等待 worker 退出").success());
+}

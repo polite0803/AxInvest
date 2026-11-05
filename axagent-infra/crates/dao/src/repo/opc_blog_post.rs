@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `opc_blog_posts` 的**列表读面** —— SQL 边界的唯一实现。
+//! `opc_blog_posts` 的**列表读面 + 发布写面** —— SQL 边界的唯一实现。
 //!
 //! ## 为什么在 dao 而不是宿主 provider 里直接查
 //!
@@ -25,11 +25,25 @@
 //!
 //! 主序仍与它替代的宿主查询（`company-runtime` 的 `DefaultSiteService::list_blog_posts`）
 //! 逐字一致：`created_at` 降序 = 最新在前。
+//!
+//! ## 写面的单位口径：`set_blog_post_published` 落 epoch **秒**
+//!
+//! 三个 `Set` 逐字段抄现写体 `axagent-quant/crates/company-runtime/src/opc/site.rs` 的
+//! `publish_blog_post`（同一条 SQL 位点；迁出中途两条写通道并存的裁定见 #144 那条先例）：
+//! 时刻取 `axagent_harness::util_fns::now_ts()`，其函数体是
+//! `chrono::Utc::now().timestamp()` ⇒ **秒**，不是 `now_ms()`（那个是运行时侧的毫秒统一）。
+//!
+//! 判据不是审美而是**同列同单位**：`company-runtime` 的 `data_service` 按
+//! `published_at BETWEEN from AND to` 数「本周期发布了几篇」，而 `from` / `to` 由 `TimeRange`
+//! 给出、同为秒（该处注释已逐字核对过）。这里写成毫秒 ⇒ 新发布的行永远落在窗口之外，
+//! 看板上的发布篇数**静默少一篇**（没有报错，只有数不对）。
 
 use axagent_entities::opc_blog_posts;
 use axagent_harness::core_error::Result;
+use axagent_harness::util_fns::now_ts;
 use sea_orm::{
-    DatabaseConnection, EntityTrait, FromQueryResult, PaginatorTrait, QueryOrder, QuerySelect,
+    ActiveModelTrait, DatabaseConnection, EntityTrait, FromQueryResult, PaginatorTrait, QueryOrder,
+    QuerySelect, Set,
 };
 
 /// 列表读面的一行 —— 接缝视图需要的**全部**列，刻意不含 `content`。
@@ -132,13 +146,45 @@ pub async fn count_blog_posts(db: &DatabaseConnection) -> Result<u64> {
     Ok(opc_blog_posts::Entity::find().count(db).await?)
 }
 
+/// 发布（写面）：把 `id` 那行置为已发布 —— 只 `Set` 三列，**既不读也不写 `content`**。
+///
+/// 返回值是**可判别结果**而不是错误：`true` = 命中并已 UPDATE；`false` = `id` 不在表里，
+/// 一条 UPDATE 都不发（先 `find_by_id` 再改，正是为了「缺行不发写」这条）。接缝侧落成
+/// [`axagent_harness::PublishBlogPostOutcome::NotFound`]。
+///
+/// ⚠ 与同族删除路径的对照：`src-tauri/src/commands/opc.rs` 里那两条裸
+/// `Entity::delete_by_id(..).exec(..)` 不检 `rows_affected` ⇒ 删不存在的 id 也回成功，
+/// 与本函数刻意做的「缺行可判别」正好相反 —— 那两条属收口项（PLAN §115.2 已记），不属本批。
+///
+/// 不做「已发布则跳过」：现写体就是无条件 `Set`，重复发布会把 `published_at` / `updated_at`
+/// 刷成本次时刻。两条写通道（本接缝与 `site.rs` 的 service 方法）必须逐字同行为，
+/// 否则「这次发布走的是哪条路」会改变读数。
+pub async fn set_blog_post_published(db: &DatabaseConnection, id: &str) -> Result<bool> {
+    let Some(entity) = opc_blog_posts::Entity::find_by_id(id).one(db).await? else {
+        return Ok(false);
+    };
+    // 单位：epoch 秒（判据见模块头「写面的单位口径」一节）。
+    let now = now_ts();
+    let mut am: opc_blog_posts::ActiveModel = entity.into();
+    am.published = Set(1);
+    am.published_at = Set(Some(now));
+    am.updated_at = Set(now);
+    am.update(db).await?;
+    Ok(true)
+}
+
 // ── 测试 ────────────────────────────────────────────────────────────────
 //
 // 内联测试 mod 追加在文件末尾（`items_after_test_module` 只在 clippy 下暴露）。
 //
-// 这里只测本文件自己的两件纯函数事：行收敛（哨兵列 → bool、`tags_json` → 数组）。
-// 真库端到端（列裁剪是否真的没 SELECT `content`、`ORDER BY id` 是否落进 SQL）属
-// 需要预置 `opc_blog_posts` 行的跨批项，本批不开。
+// 三件纯函数事（行收敛：哨兵列 → bool、`tags_json` → 数组）+ **一条真库端到端**：
+// 写面 [`set_blog_post_published`] 的命中 / 缺行两态，以及「落库时刻是秒级量级」这条单位判据。
+//
+// 真库为什么必须开：单位抄错在类型层面完全合法（两侧都是 `i64`），编译器与序列化都抓不到，
+// 而它的代价是 KPI 窗口静默少一篇（判据见模块头）—— 只有把行真写进 `opc_blog_posts`
+// 再读回来，才量得出 `published_at` 到底是秒还是毫秒。建表走 `create_test_pool` 的
+// 生产同一条 `initialize_schema`，不手连 `sqlite::memory:`（池 >1 时每连接各一个内存库，
+// 建表与写入会落在不同库上 —— 该坑的原文在 `repo/opc_demand.rs` 的同名用例里）。
 
 #[cfg(test)]
 mod tests {
@@ -188,5 +234,82 @@ mod tests {
             let row = BlogPostListRow::from(raw);
             assert!(row.tags.is_empty(), "`tags_json = {bad:?}` 应落空数组，实际 {:?}", row.tags);
         }
+    }
+
+    /// 真库端到端：发布写面的**命中 / 缺行**两态 + 「只动三列」+ **秒级量级**的单位判据。
+    ///
+    /// 四件事各挡一类静默缺陷：
+    /// - 缺行返回 `false` 且**整表行数不变** —— 挡「不检结果就回成功」（同族删除路径的既存债）；
+    /// - `content` / `slug` / `created_at` 读回原值 —— 挡「顺手把整行 ActiveModel 重写一遍」
+    ///   把正文列或对外路由键改掉；
+    /// - `published_at` 落在秒级区间 —— 毫秒（≥1e12）会直接越界，这正是 `data_service`
+    ///   的 KPI 窗口静默少一篇的成因；
+    /// - 重复发布仍然 `true` —— 挡「已发布就跳过」这种把同一 op 变成两种读数的改写。
+    #[tokio::test]
+    async fn set_blog_post_published_hits_and_misses_against_real_db() {
+        let handle = crate::db::create_test_pool().await.expect("测试库应能建起来");
+        let db = handle.conn.clone();
+        // 预置一条草稿行：正文列给非空值，才好验证「写面不碰正文」；created_at 用历史秒值。
+        let seeded = 1_700_000_000_i64;
+        let draft = opc_blog_posts::ActiveModel {
+            id: Set("post-publish-e2e".to_string()),
+            title: Set("端到端草稿".to_string()),
+            slug: Set("publish-e2e".to_string()),
+            excerpt: Set("摘要".to_string()),
+            content: Set("正文正文正文".to_string()),
+            tags_json: Set(r#"["opc"]"#.to_string()),
+            published: Set(0),
+            published_at: Set(None),
+            view_count: Set(0),
+            created_at: Set(seeded),
+            updated_at: Set(seeded),
+        };
+        draft.insert(&db).await.expect("预置草稿行应能插入");
+
+        // ① 命中：回 true，且只有那三列变了。
+        assert!(
+            set_blog_post_published(&db, "post-publish-e2e").await.unwrap(),
+            "命中已存在的 id 必须回 true"
+        );
+        let row = opc_blog_posts::Entity::find_by_id("post-publish-e2e")
+            .one(&db)
+            .await
+            .unwrap()
+            .expect("命中路径之后行必须还在");
+        assert_eq!(row.published, 1, "published 哨兵必须置 1");
+        assert!(row.published_at.is_some(), "发布动作必须写 published_at（草稿态本是 NULL）");
+        assert!(row.updated_at > seeded, "updated_at 必须被刷成本次时刻，实际 {}", row.updated_at);
+        assert_eq!(row.content, "正文正文正文", "写面不得碰正文列");
+        assert_eq!(row.slug, "publish-e2e", "slug 是对外路由键（表上 unique），发布不改它");
+        assert_eq!(row.created_at, seeded, "created_at 不归本 op 管");
+        assert_eq!(row.title, "端到端草稿", "标题原样");
+
+        // ② 单位口径：秒级量级。当前 epoch 秒 ~1.7e9，毫秒 ~1.7e12 ⇒ 上界 1e11 能机械区分。
+        let now_seconds = row.published_at.expect("已发布必有发布时刻");
+        assert!(
+            (1_000_000_000..100_000_000_000).contains(&now_seconds),
+            "published_at 必须是 epoch **秒**（毫秒量级 ≥1e12 会越出本区间）：{now_seconds}"
+        );
+        assert_eq!(
+            row.updated_at, now_seconds,
+            "两列必须同一个 now（本函数只取一次时钟；现写体是两次 now_ts()，秒粒度下跨秒会不等）"
+        );
+
+        // ③ 缺行：回 false，且**一条 UPDATE / INSERT 都不发**（整表行数仍为 1）。
+        assert!(
+            !set_blog_post_published(&db, "post-does-not-exist").await.unwrap(),
+            "缺行必须回 false（接缝侧落成 NotFound，不是错误码）"
+        );
+        assert_eq!(
+            opc_blog_posts::Entity::find().count(&db).await.unwrap(),
+            1,
+            "缺行路径不得写入任何行"
+        );
+
+        // ④ 重复发布：仍然 true，且时刻再次落到「本次」（现写体是无条件 Set，不跳过）。
+        assert!(
+            set_blog_post_published(&db, "post-publish-e2e").await.unwrap(),
+            "重复发布仍须 true"
+        );
     }
 }

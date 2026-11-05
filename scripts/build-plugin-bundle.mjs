@@ -550,16 +550,21 @@ function opcManifest({ version, binaryName, sha256 }) {
     name: "opc",
     version,
     description:
-      "OPC 域功能包（#36 第 4 批）：worker 通道 + 1 条命名命令（博客列表，经宿主 opc.store 只读接缝取数），待 P6.2 逐批接入",
+      "OPC 域功能包（#36 第 5 批）：worker 通道 + 2 条命名命令（博客列表 = 只读接缝取数、发布博客 = 写面第一 op），待 P6.2 逐批接入",
     // 同 stock：worker 由宿主 spawn ⇒ 不声明 `subprocess_execution` 会被 enable 直接拒绝。
-    permissions: ["subprocess_execution"],
+    // ⚠ `write` 是**本批新加**的第二条：宿主分派层 `worker.rs` 的 `required_permission_for`
+    // 给 `("opc.store","publish_blog_post")` 登记了 `Write`，而 `has_permission` 是**精确
+    // `contains`**（刻意不套 `implies_*`，免得 `subprocess_execution` 这类宽权限悄悄补齐写面
+    // 准入）⇒ 清单缺这一条时登记即拒：命令会在接缝调用前落 `PLUGIN_PERMISSION_DENIED`，
+    // 表现为「插件装得上、describe 正常、发布恒失败」。权限与 op 登记必须同批。
+    permissions: ["subprocess_execution", "write"],
     mcp_servers: [],
     skills: [],
     agents: [],
     defaultEnabled: true,
     worker: { program: path.posix.join("bin", binaryName) },
     // `command` 用 `worker://<名>` 占位（同 stock）：worker 通道不读它，但按名发帧的
-    // `name` 必须与 worker 里的 `COMMAND_LIST_BLOG_POSTS` 逐字一致。
+    // `name` 必须与 worker 里的 `COMMAND_LIST_BLOG_POSTS` / `COMMAND_PUBLISH_BLOG_POST` 逐字一致。
     commands: [
       {
         name: "opc_list_blog_posts",
@@ -571,6 +576,20 @@ function opcManifest({ version, binaryName, sha256 }) {
             limit: { type: "number", description: "单页条数（越界由宿主按契约区间拒收）" },
             offset: { type: "number", description: "分页偏移；与 limit 都缺省 = 取尽整表" },
           },
+        },
+      },
+      {
+        // 双声明中途形态（先例 #144）：宿主 `commands/opc.rs` 的同名 Tauri 命令**仍在**，
+        // 走 service 并回整行 BlogPost；本条走插件通道，回宿主的两态枚举串。前端切通道属下一批。
+        name: "opc_publish_blog_post",
+        description: "发布一篇 OPC 博客（经宿主 opc.store 写面；回 published / not_found 两态）",
+        command: "worker://opc_publish_blog_post",
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "文章 id（接缝主键；空值由宿主 provider 拒收）" },
+          },
+          required: ["id"],
         },
       },
     ],

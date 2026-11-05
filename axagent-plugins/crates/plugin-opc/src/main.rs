@@ -7,8 +7,10 @@
 //!
 //! #36 第 1 批只有骨架（describe + 帧循环 + shutdown，零业务命令）。**第 3–4 步**接进第一条
 //! 真实链路：命名命令 `opc_list_blog_posts` → 出站只读接缝 `opc.store` 的 `list_blog_posts`
-//! op → 宿主 provider → dao。数据主权（连接池、列裁剪、分页闸）全在宿主侧，本进程只做宿主
-//! 做不了的一件事：「整表语义」的分页取尽（见 [`blog_posts`]）。出参线格式逐字透传接缝视图
+//! op → 宿主 provider → dao。**本批（写面第一个 op）**加第二条命令 `opc_publish_blog_post` →
+//! 同一接缝的 `publish_blog_post` op：宿主侧要 `write` 权限，出参是两态枚举的逐字透传（判据见
+//! [`publish_blog_post`]）。数据主权（连接池、列裁剪、分页闸、写列清单）全在宿主侧，本进程只做
+//! 宿主做不了的一件事：「整表语义」的分页取尽（见 [`blog_posts`]）。出参线格式逐字透传接缝视图
 //! 的 camelCase，**不再有任何键名适配层**（禁区 13 无例外，判据见该文「出参线格式」一节）。
 //!
 //! 为什么用 `Peer` 而不是自写读循环：插件一旦能主动调宿主，同一条管道上就同时挂着
@@ -45,15 +47,24 @@ fn own_id_belongs_to_this_plugin(own_id: &str) -> bool {
     own_id == PLUGIN_NAME || own_id.starts_with(&format!("{PLUGIN_NAME}@"))
 }
 
-/// 出站宿主查询接缝：OPC 站点内容的只读读面（契约见 harness `src/opc_store.rs`）。
-/// 本插件不持 `DatabaseConnection`，一切表读都走它。
+/// 出站宿主接缝：OPC 站点内容的数据面（契约见 harness `src/opc_store.rs`）。
+/// 本插件不持 `DatabaseConnection`，一切表读表写都走它。
 const OPC_STORE_SEAM: &str = "opc.store";
-/// `opc.store` 首批唯一的 op（表外 op 在宿主分派层落 `SEAM_CALL_UNSUPPORTED`）。
+/// 读 op（表外 op 在宿主分派层落 `SEAM_CALL_UNSUPPORTED`）。
 const OPC_STORE_LIST_BLOG_POSTS: &str = "list_blog_posts";
+/// 写 op：把一行博客置为已发布。宿主侧要 `write` 权限（`worker.rs` 的
+/// `required_permission_for`），故**本插件清单必须声明 `write`** —— `subprocess_execution`
+/// 补不齐它（`has_permission` 是精确 `contains`），少声明一条就是 `PLUGIN_PERMISSION_DENIED`。
+const OPC_STORE_PUBLISH_BLOG_POST: &str = "publish_blog_post";
 
 /// 本插件承接的命名命令（manifest `commands[].name` 必须与它逐字一致：宿主
 /// `execute_plugin_command` 先按清单查命令，未声明的那条直接 `NotFound`）。
 const COMMAND_LIST_BLOG_POSTS: &str = "opc_list_blog_posts";
+/// 发布命令。**与宿主 Tauri 命令同名**（`src-tauri/src/commands/opc.rs` 的
+/// `opc_publish_blog_post` 仍在，走 service 并回整行 `BlogPost`）—— 这是迁出中途的
+/// **双声明**既接受形态（先例 #144：宿主命令保留到前端切完通道那一批再删），
+/// 两条通道分别是「IPC 命令」与「插件命令」，前端按 `resolvePluginForCommand` 择路。
+const COMMAND_PUBLISH_BLOG_POST: &str = "opc_publish_blog_post";
 
 fn main() -> ExitCode {
     match serve(handle) {
@@ -121,6 +132,15 @@ fn handle_command(request: &FrameRequest, peer: &mut WorkerPeer) -> FrameRespons
             Err((code, message)) => {
                 CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
             },
+        },
+        // 发布一篇博客：唯一写面，本命令只做入参形状 + 逐字透出宿主的两态结果。
+        COMMAND_PUBLISH_BLOG_POST => {
+            match publish_blog_post(&frame.input, &request.call_chain, peer) {
+                Ok(value) => CommandOutcome::Reply(CommandReply::for_frame(&frame, value)),
+                Err((code, message)) => {
+                    CommandOutcome::Fault(CommandFault::for_frame(&frame, code, message))
+                },
+            }
         },
         other => CommandOutcome::Fault(CommandFault::for_frame(
             &frame,
@@ -200,7 +220,8 @@ fn blog_posts(
         if let Some(offset) = explicit_offset {
             args.insert("offset".to_string(), offset);
         }
-        let page = call_list_blog_posts(peer, Value::Object(args), call_chain)?;
+        let page =
+            call_opc_store(peer, OPC_STORE_LIST_BLOG_POSTS, Value::Object(args), call_chain)?;
         // 逐字透传接缝视图（键名 camelCase，禁区 13）：出口不再有第二套键名。
         return Ok(Value::Array(post_rows_of(&page)));
     }
@@ -209,7 +230,12 @@ fn blog_posts(
     let mut rows: Vec<Value> = Vec::new();
     let mut offset: u64 = 0;
     loop {
-        let page = call_list_blog_posts(peer, json!({ "offset": offset }), call_chain)?;
+        let page = call_opc_store(
+            peer,
+            OPC_STORE_LIST_BLOG_POSTS,
+            json!({ "offset": offset }),
+            call_chain,
+        )?;
         let posts = post_rows_of(&page);
         // 两个终止条件都要：`total` 只在该次调用内自洽（并发写入下可能小于已取行数），
         // 而空页是越界 offset 的合法回帧（契约：空数组不是错误）—— 只看 `total` 会吊死。
@@ -224,19 +250,22 @@ fn blog_posts(
     Ok(Value::Array(rows))
 }
 
-/// 发一次 `opc.store::list_blog_posts` 帧，把宿主侧的失败落成命令失败。
+/// 发一次 `opc.store` 的帧（op 由调用方给），把宿主侧的失败落成命令失败。
 ///
-/// 接缝报错 ⇒ **原样透传错误码**，不退化成空列表：空数组在页面上长得和「一篇都没有」一样。
-fn call_list_blog_posts(
+/// 接缝报错 ⇒ **原样透传错误码**，不退化成空列表 / 假成功：空数组在页面上长得和
+/// 「一篇都没有」一样，而「发布失败」被吞掉更直接 —— 用户看见「已发布」但库里没动。
+///
+/// 读面与写面共用这一条（只差 `op` 与 `args` 两个参数）：两份「解 `ResponseKind`、
+/// 缺码兜底、缺文案兜底」的实现对齐在同一处才不会漂移（禁区 12）。
+fn call_opc_store(
     peer: &mut WorkerPeer,
+    op: &str,
     args: Value,
     call_chain: &[String],
 ) -> Result<Value, (String, String)> {
-    let reply = peer
-        .call_seam(OPC_STORE_SEAM, OPC_STORE_LIST_BLOG_POSTS, args, call_chain.to_vec())
-        .map_err(|e| {
-            (error_codes::PLUGIN_COMMAND_FAILED.to_string(), format!("OPC 站点接缝调用失败：{e}"))
-        })?;
+    let reply = peer.call_seam(OPC_STORE_SEAM, op, args, call_chain.to_vec()).map_err(|e| {
+        (error_codes::PLUGIN_COMMAND_FAILED.to_string(), format!("OPC 站点接缝调用失败：{e}"))
+    })?;
     match reply.kind {
         ResponseKind::Success => Ok(reply.value.unwrap_or(Value::Null)),
         ResponseKind::Error => Err((
@@ -244,6 +273,38 @@ fn call_list_blog_posts(
             reply.message.unwrap_or_else(|| "OPC 站点接缝返回错误但未说明".to_string()),
         )),
     }
+}
+
+/// `opc_publish_blog_post`：发布一篇博客（本插件**唯一**的写面）。
+///
+/// ## 入参只有 `id`，且只判形状
+///
+/// 命令层只看 `id` 在不在、是不是字符串（不是 ⇒ `PLUGIN_COMMAND_INVALID_ARGS`，**不发帧**）；
+/// 「非空」这条语义闸留在宿主 provider（`opc_store_service.rs` 的 `require_publish_id`）。
+/// 分两层各判一半会漂移，故刻意分工成「形状 / 语义」而不是两处都判空白。
+/// 正文 `content` 从来不是本命令的入参 —— 接缝那侧也没读它。
+///
+/// ## 出参 = 接缝的两态枚举串，逐字透传
+///
+/// `"published"` / `"not_found"`（契约：`PublishBlogPostOutcome`，`#[serde(rename_all =
+/// "snake_case")]`）。这里**不建包装对象、不改取值、不建适配层**（禁区 13 那条判据同样
+/// 管枚举）：「这一篇不在表里」是**正常结果**，插件侧不许把它翻成错误码 —— 翻了就等于让
+/// 前端分不出「发布失败」与「本来就没有这篇」。
+fn publish_blog_post(
+    input: &Value,
+    call_chain: &[String],
+    peer: &mut WorkerPeer,
+) -> Result<Value, (String, String)> {
+    let Some(id) = input.get("id").and_then(Value::as_str) else {
+        return Err((
+            error_codes::PLUGIN_COMMAND_INVALID_ARGS.to_string(),
+            "opc_publish_blog_post 需要字符串 id（形状判在命令层，非空判在宿主 provider）"
+                .to_string(),
+        ));
+    };
+    // 出站帧的 args 只有一个键 `id` —— 逐字与接缝 op 的入参同名，不套 `request` 外层
+    // （那是 `knowledge.vector` / `stock.monitor` 的嵌套 DTO 形态；这里没有 DTO）。
+    call_opc_store(peer, OPC_STORE_PUBLISH_BLOG_POST, json!({ "id": id }), call_chain)
 }
 
 /// 接缝回帧里的 `posts` 数组（缺键 / 非数组 ⇒ 空页，**不** panic）。
@@ -260,6 +321,11 @@ fn post_rows_of(page: &Value) -> Vec<Value> {
 //
 // 只测两件纯函数事：回帧取列的容错，与「出口零键名改写 + 键集合逐字 camelCase」的形态锁。
 // 「真管道上发帧 / 分页取尽」归 `tests/protocol.rs`（需要真进程与真 stdin/stdout）。
+//
+// ⚠ 写面 [`publish_blog_post`] 在这里**没有**对应用例，不是漏测而是够不着：它的签名要
+// `&mut WorkerPeer`（真管道才构造得出来），入参形状与两态透传全部归 `tests/protocol.rs`
+// 的 `command_frame_publishes_a_blog_post_via_host_seam` 钉住 —— 那里同时锁出站帧的
+// seam / op 逐字、`args` 只有 `id` 一个键、以及 `not_found` 走 payload 不走错误码。
 
 #[cfg(test)]
 mod tests {

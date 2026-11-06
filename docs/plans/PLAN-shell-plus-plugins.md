@@ -6730,3 +6730,35 @@ ALLOWLIST 塞新门，所以合法出路只有「把 CI 补上」这一条（另
 **连带影响（如实登记）**：这一步让 CI 第一次真正跑前端单测 ⇒ 若本地全量套件存在既存红/环境依赖用例，
 接入后第一轮 CI 会立刻暴露（这正是本步的目的，不是副作用）；本机全量结果见下一条。「CI 侧首次运行」本身
 无法在本机验证（没有 runner），只能由推送后的第一轮 CI 证实 —— 未推送前不冒充「CI 已绿」。
+
+### 128.13 #212：数据源侧两条 NL 命令改为「必须显式声明」（#196 裁定的余项）
+
+**裁定回顾（#196）**：`ALLOWED_INVOKE_COMMANDS` 16 条里 14 条 `dynamic_ui_*` CRUD 属**同一信任域**
+（创建面硬写 `origin="user"`、`ai` 只可能是存量行）⇒ 不收紧；只有两条
+`edit_dynamic_ui_schema_nl` / `generate_dynamic_ui_schema_nl` 会**消耗用户模型额度并产新行**，
+按本仓既有纪律「会改行为/扣额度的面不与只读展示面同档」，必须单独收口。
+
+**实现**：`DataBindingEngine.ts` 顶部加 `LLM_COST_INVOKE_COMMANDS`（2 条），并在
+`assertDataSourceCoveredByPermissions` **最前面**判 —— 这一步刻意放在 `if (!permissions) return;` **之前**：
+该早返回的语义是「permissions 缺省 = 不受限」，若不提前判，宿主来源（`undefined`）照样能用一条声明式
+dataSource 去跑 NL 生成，本裁定就落空。判据与道二共用 `isWildcardMatch`（声明了、含通配命中才算声明）。
+宿主 UI 自己直接 `invoke` 这两条命令的路径**不受影响**（本闸只作用于 Schema 声明的 dataSource）。
+
+**文案**：新增 `dataBinding.llmCostCommandRequiresPermission`，**11 份 locale 逐语言补齐**（禁区 2），
+插入位置统一在 `dataBinding` 段末（`fetchMethodForbidden` 之后）；插入脚本先 `JSON.parse` 再落盘、
+逐文件核 CR=0（LF 保持）。
+
+**判据（`dataBindingEngine.test.ts` 新增 3 条）**：
+① 负控：`permissions` 缺省时两条 NL 命令都拒，且 `invoke` **一次都没被调用**；
+② 正控：显式声明该命令后放行并真的调用（证明不是「一律拒」）；
+③ 负控：同档普通只读命令（`list_dynamic_ui_schemas`）在缺省时**仍然放行**（证明新闸没误伤 14 条 CRUD）。
+
+**验证**：`npm run test:run -- --pool=forks src/lib/__tests__/dataBindingEngine.test.ts`
+⇒ **37 passed (37)**（改前 34 条）；`check-tsc.mjs` EXIT=0（1477 文件）；
+`npx dprint check` 覆盖 3 个改动文件 + 11 份 locale EXIT=0（无 "No files found"）；
+i18n 五道门全绿：`check-i18n-key-parity`（11 语言 key 集合一致）、`check-i18n-placeholder-usage`、
+`check-i18n-untranslated`、`check-i18n-orphan-diff`、`check-jsx-text-i18n`、`check-i18n-exemption-budget` 均 EXIT=0。
+
+**边界（明写，不装齐全）**：① 声明了**通配**（`*`）也算「已声明」—— 与既有 `isWildcardMatch` 语义一致，
+不为这两条另造一套；② 本闸只覆盖 dataSource；**动作面**（`executeActions`）若也能触发这两条命令，
+它走的是另一张 `PLUGIN_SCHEMA_ALLOWED_COMMANDS` 表（本轮未改，且那张表本身要求显式声明）⇒ 行为一致，未额外验证。

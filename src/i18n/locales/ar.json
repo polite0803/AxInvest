@@ -2144,7 +2144,8 @@
     "apiEndpointForbidden": "نقطة نهاية API \"{{endpoint}}\" غير مسموح بها وتم حظرها",
     "fetchEndpointPermissionDenied": "هذا المصدر غير مخوّل بالوصول إلى نقطة نهاية fetch \"{{endpoint}}\"؛ تم حظر الطلب",
     "fetchInitFieldForbidden": "حقل طلب fetch \"{{field}}\" غير مسموح به؛ تم حظر الطلب",
-    "fetchMethodForbidden": "طريقة fetch \"{{method}}\" غير مسموح بها (يُدعم GET/POST فقط)؛ تم حظر الطلب"
+    "fetchMethodForbidden": "طريقة fetch \"{{method}}\" غير مسموح بها (يُدعم GET/POST فقط)؛ تم حظر الطلب",
+    "llmCostCommandRequiresPermission": "لا يمكن لمصادر البيانات استدعاء الأمر «{{command}}» لأنه يستهلك حصة النموذج؛ يجب أولاً الإعلان صراحةً عن إذن هذا الأمر"
   },
   "datasetManager": {
     "action": "إجراء",

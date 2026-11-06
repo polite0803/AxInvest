@@ -2144,7 +2144,8 @@
     "apiEndpointForbidden": "El endpoint de API \"{{endpoint}}\" no está permitido y se ha bloqueado",
     "fetchEndpointPermissionDenied": "Este origen no tiene permiso para acceder al endpoint fetch \"{{endpoint}}\"; la solicitud fue bloqueada",
     "fetchInitFieldForbidden": "El campo de solicitud fetch \"{{field}}\" no está permitido; la solicitud fue bloqueada",
-    "fetchMethodForbidden": "El método fetch \"{{method}}\" no está permitido (solo se admiten GET/POST); la solicitud fue bloqueada"
+    "fetchMethodForbidden": "El método fetch \"{{method}}\" no está permitido (solo se admiten GET/POST); la solicitud fue bloqueada",
+    "llmCostCommandRequiresPermission": "Las fuentes de datos no pueden invocar el comando «{{command}}» porque consume cuota del modelo; declare primero explícitamente el permiso del comando"
   },
   "datasetManager": {
     "action": "Acción",

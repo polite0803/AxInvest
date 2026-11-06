@@ -2144,7 +2144,8 @@
     "apiEndpointForbidden": "API エンドポイント \"{{endpoint}}\" は許可されておらず、呼び出しをブロックしました",
     "fetchEndpointPermissionDenied": "このソースには fetch エンドポイント \"{{endpoint}}\" へのアクセス権限がなく、リクエストをブロックしました",
     "fetchInitFieldForbidden": "fetch リクエストフィールド \"{{field}}\" は許可されていないため、リクエストをブロックしました",
-    "fetchMethodForbidden": "fetch メソッド \"{{method}}\" は許可されていません（GET/POST のみ対応）。リクエストをブロックしました"
+    "fetchMethodForbidden": "fetch メソッド \"{{method}}\" は許可されていません（GET/POST のみ対応）。リクエストをブロックしました",
+    "llmCostCommandRequiresPermission": "データソースからモデル使用量を消費するコマンド「{{command}}」は呼び出せません。先にそのコマンド権限を明示的に宣言してください"
   },
   "datasetManager": {
     "action": "アクション",

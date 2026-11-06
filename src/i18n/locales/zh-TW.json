@@ -2144,7 +2144,8 @@
     "apiEndpointForbidden": "API 端點「{{endpoint}}」不在白名單內，已阻止呼叫",
     "fetchEndpointPermissionDenied": "目前來源沒有存取 fetch 端點「{{endpoint}}」的權限，已阻止請求",
     "fetchInitFieldForbidden": "fetch 請求參數「{{field}}」不在允許範圍內，已阻止請求",
-    "fetchMethodForbidden": "fetch 請求方法「{{method}}」不被允許（僅支援 GET/POST），已阻止請求"
+    "fetchMethodForbidden": "fetch 請求方法「{{method}}」不被允許（僅支援 GET/POST），已阻止請求",
+    "llmCostCommandRequiresPermission": "資料來源不能呼叫會消耗模型額度的指令「{{command}}」，必須先明示宣告該指令權限"
   },
   "datasetManager": {
     "action": "動作",

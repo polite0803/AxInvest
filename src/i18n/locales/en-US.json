@@ -2144,7 +2144,8 @@
     "apiEndpointForbidden": "API endpoint \"{{endpoint}}\" is not allowed and was blocked",
     "fetchEndpointPermissionDenied": "This origin is not allowed to fetch endpoint \"{{endpoint}}\"; the request was blocked",
     "fetchInitFieldForbidden": "fetch request field \"{{field}}\" is not allowed; the request was blocked",
-    "fetchMethodForbidden": "fetch method \"{{method}}\" is not allowed (only GET/POST are supported); the request was blocked"
+    "fetchMethodForbidden": "fetch method \"{{method}}\" is not allowed (only GET/POST are supported); the request was blocked",
+    "llmCostCommandRequiresPermission": "Data sources may not invoke the command “{{command}}” because it consumes model quota; declare that command permission explicitly first"
   },
   "datasetManager": {
     "action": "Action",

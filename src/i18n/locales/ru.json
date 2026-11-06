@@ -2144,7 +2144,8 @@
     "apiEndpointForbidden": "Конечная точка API \"{{endpoint}}\" не разрешена и была заблокирована",
     "fetchEndpointPermissionDenied": "Этому источнику не разрешён доступ к конечной точке fetch \"{{endpoint}}\"; запрос заблокирован",
     "fetchInitFieldForbidden": "Поле запроса fetch \"{{field}}\" не разрешено; запрос заблокирован",
-    "fetchMethodForbidden": "Метод fetch \"{{method}}\" не разрешён (поддерживаются только GET/POST); запрос заблокирован"
+    "fetchMethodForbidden": "Метод fetch \"{{method}}\" не разрешён (поддерживаются только GET/POST); запрос заблокирован",
+    "llmCostCommandRequiresPermission": "Источники данных не могут вызывать команду «{{command}}», так как она расходует квоту модели; сначала явно объявите разрешение на команду"
   },
   "datasetManager": {
     "action": "Действие",

@@ -33,10 +33,36 @@ export interface DataSourceSubscriber {
  *
  * `permissions === undefined` 表示不受限（可信来源 / 内存态 Schema），行为逐字不变。
  */
+/**
+ * 会**消耗用户模型额度并产新行**的 invoke 命令（#212 / #196 裁定的余项）。
+ *
+ * 与其余 14 条 `dynamic_ui_*` CRUD 的区别不是「危险等级」，而是**会改行为 + 扣额度**：
+ * 本仓既有纪律是这类面不与只读/展示面同档放。所以即使 `permissions === undefined`
+ * （宿主第一方 schema 不受限）也**不许经数据源发起** —— 必须显式声明该命令权限。
+ * 宿主 UI 自己直接 `invoke` 这两条命令的路径不受影响（本闸只作用于 Schema 声明的 dataSource）。
+ */
+const LLM_COST_INVOKE_COMMANDS: ReadonlySet<string> = new Set([
+  "edit_dynamic_ui_schema_nl",
+  "generate_dynamic_ui_schema_nl",
+]);
+
 function assertDataSourceCoveredByPermissions(
   config: DataSourceConfig,
   permissions: SkillPermissions | undefined,
 ): void {
+  // #212：额度消耗面先于「permissions 缺省即放行」判 —— 否则宿主来源（undefined）照样能
+  // 用一条声明式数据源去跑 NL 生成。声明了（含通配命中）才放行，与下一步同一套匹配函数。
+  if (config.type === "api") {
+    const { endpoint, method } = config.config as { endpoint: unknown; method?: string };
+    if (method === "invoke" && LLM_COST_INVOKE_COMMANDS.has(String(endpoint))) {
+      const declared = permissions ? isWildcardMatch(String(endpoint), permissions.commands ?? []) : false;
+      if (!declared) {
+        throw new Error(
+          i18n.t("dataBinding.llmCostCommandRequiresPermission", { command: String(endpoint) }),
+        );
+      }
+    }
+  }
   if (!permissions) {
     return;
   }

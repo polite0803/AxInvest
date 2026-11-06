@@ -570,4 +570,50 @@ describe("DataBindingEngine", () => {
       subscriber.unsubscribe();
     });
   });
+
+  // ── #212：会扣模型额度的 NL 命令，数据源侧必须显式声明（permissions 缺省也不放行）──
+  describe("额度消耗面（#212）", () => {
+    const nlConfig = (endpoint: string) => ({
+      type: "api" as const,
+      config: { endpoint, method: "invoke" as const },
+    });
+
+    it("permissions 缺省（宿主来源）也不许经数据源发起 NL 命令（负控）", async () => {
+      const { invoke } = await import("@/lib/invoke");
+      vi.mocked(invoke).mockClear();
+      vi.mocked(invoke).mockResolvedValue({ ok: true });
+
+      await expect(resolveDataSource(nlConfig("generate_dynamic_ui_schema_nl"))).rejects.toThrow(
+        /消耗模型额度|quota/i,
+      );
+      await expect(resolveDataSource(nlConfig("edit_dynamic_ui_schema_nl"))).rejects.toThrow(
+        /消耗模型额度|quota/i,
+      );
+      expect(invoke).not.toHaveBeenCalled();
+    });
+
+    it("显式声明该命令后放行（正控：证明不是「一律拒」）", async () => {
+      const { invoke } = await import("@/lib/invoke");
+      vi.mocked(invoke).mockClear();
+      vi.mocked(invoke).mockResolvedValue({ ok: true });
+
+      const face = {
+        commands: ["generate_dynamic_ui_schema_nl"],
+        events: [],
+        storeRead: [],
+        storeWrite: [],
+        navigate: [],
+      } as unknown as SkillPermissions;
+      await resolveDataSource(nlConfig("generate_dynamic_ui_schema_nl"), face);
+      expect(invoke).toHaveBeenCalledWith("generate_dynamic_ui_schema_nl", undefined);
+    });
+
+    it("同档的普通只读命令在 permissions 缺省时仍放行（负控：新闸不得误伤 14 条 CRUD）", async () => {
+      const { invoke } = await import("@/lib/invoke");
+      vi.mocked(invoke).mockClear();
+      vi.mocked(invoke).mockResolvedValue({ rows: [] });
+      await resolveDataSource(nlConfig("list_dynamic_ui_schemas"));
+      expect(invoke).toHaveBeenCalledWith("list_dynamic_ui_schemas", undefined);
+    });
+  });
 });

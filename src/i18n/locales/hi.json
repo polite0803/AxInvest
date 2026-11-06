@@ -2144,7 +2144,8 @@
     "apiEndpointForbidden": "API एंडपॉइंट \"{{endpoint}}\" की अनुमति नहीं है और इसे ब्लॉक किया गया",
     "fetchEndpointPermissionDenied": "इस स्रोत को fetch एंडपॉइंट \"{{endpoint}}\" तक पहुँचने की अनुमति नहीं है; अनुरोध ब्लॉक कर दिया गया",
     "fetchInitFieldForbidden": "fetch अनुरोध फ़ील्ड \"{{field}}\" की अनुमति नहीं है; अनुरोध ब्लॉक कर दिया गया",
-    "fetchMethodForbidden": "fetch मेथड \"{{method}}\" की अनुमति नहीं है (केवल GET/POST समर्थित); अनुरोध ब्लॉक कर दिया गया"
+    "fetchMethodForbidden": "fetch मेथड \"{{method}}\" की अनुमति नहीं है (केवल GET/POST समर्थित); अनुरोध ब्लॉक कर दिया गया",
+    "llmCostCommandRequiresPermission": "डेटा स्रोत कमांड «{{command}}» को नहीं बुला सकते क्योंकि यह मॉडल कोटा खर्च करता है; पहले उस कमांड की अनुमति स्पष्ट रूप से घोषित करें"
   },
   "datasetManager": {
     "action": "कार्रवाई",

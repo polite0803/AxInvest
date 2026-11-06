@@ -8,15 +8,21 @@
 //
 // 规则（静态 import 图，目标 resolve 后判定；动态 import()/require 不在本门职责）：
 //   owner = src/components/<X>/** 的 X（X = shared/layout/common/... 一级目录名）
-//   违规 = import 目标 resolve 后落在（owner 比较一律先过 normOwner 归一，理由见该函数注释）
-//     · src/stores/feature/<B>Store   且 norm(B) != norm(owner)（B 为剥 Store 后缀的目录名）
-//     · src/components/<B>/**         且 norm(B) != norm(owner) 且 norm(B) 不属 norm(NEUTRAL_PREFIXES)
+//   违规 = import 目标 resolve 后落在
+//     · src/stores/feature/<B>Store   且 normOwner(B) != normOwner(owner)（B 为剥 Store 后缀的目录名）
+//     · src/components/<B>/**         且 normOwner(B) != normOwner(owner) 且 B 未逐字登记在 NEUTRAL_PREFIXES
+//   **两支故意不同判据**（2026-11-05 任务 #200）：owner 比较问「是不是同一个模块的两种命名形」⇒ 归一；
+//   NEUTRAL 成员资格问「是不是人登记过的中性目录」⇒ 逐字命中登记表。理由见 normOwner 注释的作用域段。
 //   @/ 别名与 ../ 相对路径统一 resolve 成 src/… posix 路径再判，避免两套口径。
 //
 // NEUTRAL_PREFIXES（共享 UI 基元 / 纯类型目录，天然跨 feature，**不许被「优化」删掉**）：
 //   layout / common / shared / dynamicUI——2026-10-31 实测：Tooltip 69 处、
 //   DropdownMenu 25、AntdList 16、MonacoEditor/ErrorBoundary 等，删除判定会把
-//   门禁变成 210+ 假阳性灾难。新增中性目录必须在此登记并写明理由。
+//   门禁变成 210+ 假阳性灾难。新增中性目录必须在此**逐字登记并写明理由**（AGENTS.md「组件中立性规范」），
+//   不许由命名形态自动推导 —— 否则「把目录改成 kebab 形」就白拿豁免，等于静默扩面。
+//
+// 空洞通过防护（2026-11-05 任务 #199）：src/components 缺失 / 扫描面塌方 ⇒ **退 1**，不再「跳过 = 通过」。
+//   --selftest 全是纯函数断言、不碰真实树，拦不住「扫描器看不见任何文件」这种退化（棘轮会静默变绿）。
 //
 // 白名单 scripts/component-neutrality-allowlist.json：
 //   fileExemptions  [{ file, targets: [精确 import 串], reason }] —— 精确到文件+目标
@@ -32,7 +38,8 @@
 //   node scripts/check-component-neutrality.mjs --selftest         # 内建正负对照
 //   node scripts/check-component-neutrality.mjs --update-baseline  # 收紧棘轮基线
 //
-// 退出码：0 = 无新增违规（或 selftest 全过）；1 = 有新违规 / selftest 失败。
+// 退出码：0 = 无新增违规（或 selftest 全过）；
+//         1 = 有新违规 / 扫描面塌方（空洞通过）/ src/components 缺失 / selftest 失败。
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -50,6 +57,7 @@ const BASELINE_PATH = join(root, "scripts", "component-neutrality-baseline.json"
 const ALLOWLIST_PATH = join(root, "scripts", "component-neutrality-allowlist.json");
 
 // ── 共享 UI 基元目录（目标侧中性；改动必须同步头部注释）──
+// 登记表 = **唯一权威**，匹配时逐字命中（精确匹配，不随 normOwner 归一；理由见 normOwner 作用域段）。
 const NEUTRAL_PREFIXES = ["layout", "common", "shared", "dynamicUI"];
 
 // ── 与存量实测同一套 resolve（@/ 别名 + 相对路径 → src/… posix）──
@@ -115,8 +123,20 @@ export function adjudicateImport(resolvedTarget) {
  *   ⇒ 不加「剥后缀」之类新语义（剥 `Store` 后缀是既有判据，见 adjudicateImport，本批不动）。
  *
  * 作用域（关键，越界即洗白）：
- *   ✔ 只作用于 owner 归属推导与比较 —— owner 支、targetOwner 支、NEUTRAL 那次 includes **三支同批**
- *     （NEUTRAL 若不归一，dynamicUI 会在 NEUTRAL 支与 owner 支口径不一致）。
+ *   ✔ 只作用于 **owner 归属推导与比较的两支** —— selfOwner 支与 targetOwner 支（`findViolations` 里的
+ *     `normOwner(j.targetOwner) === normOwner(selfOwner)`，两支一起，一字不可拆）。
+ *   ✘ **不作用于 NEUTRAL 成员资格**（`isNeutralOwner`）。2026-11-05 任务 #200 把它退回精确匹配，
+ *     并**推翻了本文件此前那句「NEUTRAL 不归一会和 owner 支分裂成两套口径」** —— 那句话把两类
+ *     语义不同的比较当成了同一件事，是错的。两支故意不同判据：
+ *       · owner 比较问「这两个名字是不是**同一个模块**的两种命名形」（目录 kebab vs store camel）
+ *         ⇒ 归一是正确判据，#168 批 A 据此消掉 22 条同 owner 假阳性；
+ *       · NEUTRAL 问「这个目录名是不是**人登记过**的中性件目录」——AGENTS.md「组件中立性规范」明文
+ *         「新增中性目录必须登记进脚本 NEUTRAL_PREFIXES 并写明理由，不许静默扩」。登记是**人的决定**，
+ *         命名形态推不出来。若一并归一，把某个 feature 目录改名成 `dynamic-ui` 这种「未登记的 kebab
+ *         变体」就**白拿豁免** ⇒ 扩面动作从「改一行登记表 + 写理由 + 被评审」退化成「改目录名」，
+ *         白名单与棘轮同时形同虚设。
+ *     真实数据上收窄的影响为 **0**（已独立复量：现存 4 个登记名没有任何 kebab/snake 变体出现在
+ *     import 图里，判定档读数逐字不变）⇒ selftest ③d 因此可以从正控翻成负控而不改账面。
  *   ✘ 不作用于棘轮键：键仍是 `file + " → " + target`（target = import 字面量原文）。
  *     键里**不含 targetOwner** ⇒ 把归一并入键会让 212 条基线全部失配 ⇒ 那是洗白，不是修判据。
  *   ✘ 不作用于白名单匹配：白名单比的是 `file` 与 import 字面量/前缀，不是目录名（见 main 的过滤段）。
@@ -126,9 +146,15 @@ export function adjudicateImport(resolvedTarget) {
  */
 export function normOwner(name) { return name.toLowerCase().replace(/[-_]/g, ""); }
 
-/** NEUTRAL 判定与 owner 判定同口径（登记面保持原样字面量，归一只发生在比较时）*/
+/**
+ * NEUTRAL 成员资格 = **逐字命中登记表**，不随 normOwner 归一（2026-11-05 任务 #200 收窄，leader 裁定）。
+ * 为什么与 owner 两支故意不同判据（而不是「口径分裂」）：见 normOwner 注释的作用域段 ——
+ * owner 支问「是不是同一个模块的两种写法」，本支问「是不是登记过的中性目录」，后者是人的决定。
+ * 钉住它的两条 selftest 断言：③c（登记名原形 dynamicUI 仍豁免，正控）、
+ * ③d（未登记的 kebab 变体 dynamic-ui 必须报违规，负控）。
+ */
 function isNeutralOwner(targetOwner) {
-  return NEUTRAL_PREFIXES.some((n) => normOwner(n) === normOwner(targetOwner));
+  return NEUTRAL_PREFIXES.includes(targetOwner);
 }
 
 /** 纯函数：给定文件内容 → 违规条目列表（selftest 与正式跑共用）。 */
@@ -144,8 +170,9 @@ export function findViolations({ file, content, owner }) {
     if (!selfOwner) { continue; }
     const j = adjudicateImport(resolved);
     if (!j) { continue; }
-    // 三支比较同走 normOwner（owner 支 / targetOwner 支 / NEUTRAL 支）；
-    // 但 targetOwner 与 target 在条目里**存原形**，棘轮键不受归一影响（见 normOwner 注释的作用域）。
+    // owner 两支（selfOwner / targetOwner）同走 normOwner 归一；NEUTRAL 支逐字命中登记表（#200）。
+    // 两支故意不同判据的理由见 normOwner 注释的作用域段，不要「顺手统一」成三支一起归一或一起全等。
+    // targetOwner 与 target 在条目里**存原形**，棘轮键不受归一影响（见 normOwner 注释的作用域）。
     const sameOwner = normOwner(j.targetOwner) === normOwner(selfOwner);
     const isViolation = j.kind === "store" ? !sameOwner : !sameOwner && !isNeutralOwner(j.targetOwner);
     if (isViolation) {
@@ -166,10 +193,62 @@ function collectFiles(dir, out) {
   return out;
 }
 
+/**
+ * 空洞通过（hollow pass）防护 —— 2026-11-05 任务 #199。
+ *
+ * 拦的是什么：这道门是**棘轮**，判据是「本轮违规集合 ⊆ 基线集合」。扫描器一旦看不见文件
+ *   （`src/components` 被改名/搬迁、根路径写错、后缀口径退化、构建产物目录被清空），
+ *   违规集合就是空集 ⇒ 空集是任何集合的子集 ⇒ **PASS 退 0**。此后新写的跨域引用永远不会被拦，
+ *   门从棘轮静默退化成「永远绿」。CI 里 `--selftest` 先跑的那一步**救不了它**：selftest 全是
+ *   纯函数断言、不碰真实树（见 runSelftest 头注释「不碰真实 src」），扫描器瞎掉时它照样全绿。
+ *
+ * 双条件锚（**都不是魔法数**，两条各自兜住对方退化的那一半）：
+ *   a) 绝对下界 `scannedFilesCount >= MIN_SCANNED_FILES`：
+ *      兜住「基线缺失/损坏/为空 ⇒ 条件 b 退化成 `>= 0`」这一支（历史上基线文件曾不存在，见 --update-baseline
+ *      的 isFirstEstablish 分支，那不是假想情形）。
+ *      取值理由：2026-11-05 实测扫描面 = **927** 个 .ts/.tsx（本文件尾部报告即读数量）。
+ *      取 **1/3 向下取整到百位 = 300**：允许一次「把组件拆到别处 / 大规模合并目录」的重构（账面腰斩两次
+ *      仍不误红），但拦住任何数量级的塌方（0、个位数、只剩一个子目录）。锚是**比例**不是瞬时读数，
+ *      所以不随每次提交漂移；漂移的是报告里那个 927。
+ *   b) 相对锚 `scannedFilesCount >= 基线里出现的不同 file 数`（仅基线非空时生效）：
+ *      这条**随棘轮自更新**，是人写的数字里唯一机械可解释的那个：212 条基线键覆盖 **157** 个不同
+ *      `src/components/**` 文件，而每一条键的 file 都必然来自某一轮真实扫描 ⇒「扫描面」的下界
+ *      天然就是「基线面」。扫描面掉到基线面以下 ⇒ 有一批**仍在被账面保护的引用所在的文件根本没被读到**
+ *      ⇒ 判定不作数。收紧基线时该下界同步下降，不需要有人记得改常量。
+ *      为什么用**计数**而不是「基线 file ⊆ 扫描 file」的集合包含：实测 157 个基线 file 里已有 **2 个
+ *      在磁盘上不存在**（存量修复时文件被删/搬走，棘轮键残留属正常 decay，靠 --update-baseline 收干），
+ *      集合包含会当场误红。计数只问「读到的面积够不够」，不问「每一个历史 file 是否还在」，
+ *      正好是要的语义强度。
+ *
+ * 纯函数，不读盘 ⇒ selftest 可以用注入数字做正负控（真实树上「927 ≥ 300」是永真断言，钉不住退化）。
+ */
+const MIN_SCANNED_FILES = 300;
+
+export function scanFloorFailures(scannedFilesCount, baselineFilesCount) {
+  const problems = [];
+  if (scannedFilesCount < MIN_SCANNED_FILES) {
+    problems.push(
+      `条件 a（绝对下界）：本轮只扫描到 ${scannedFilesCount} 个 .ts/.tsx，< 下界 ${MIN_SCANNED_FILES}` +
+        `（2026-11-05 实测扫描面 927 的 1/3）—— 扫描面塌方时「0 条新违规」不代表「没有违规」。`,
+    );
+  }
+  if (baselineFilesCount > 0 && scannedFilesCount < baselineFilesCount) {
+    problems.push(
+      `条件 b（相对基线面）：本轮扫描到 ${scannedFilesCount} 个不同 file < 棘轮基线里出现的 ` +
+        `${baselineFilesCount} 个不同 file —— 有仍在基线账面里的文件没被读到，判定不作数。`,
+    );
+  }
+  return problems;
+}
+
 // ── selftest：正负对照（不碰真实 src）──
+// ⚠ 本函数**只测判据逻辑**，从不读真实文件树 ⇒ 它拦不住「扫描器看不见任何文件」这类退化，
+//   那件事由 main 里的空洞通过防护（scanFloorFailures）负责；本函数用**注入数字**验它自己的判据（⑥）。
 function runSelftest() {
   let fail = 0;
+  let total = 0;
   const check = (cond, msg) => {
+    total++;
     if (!cond) { console.error(`SELFTEST FAIL：${msg}`); fail++; }
   };
 
@@ -276,36 +355,63 @@ function runSelftest() {
   check(n2c.length === 1 && n2c[0].kind === "component",
     "归一负控：两个 kebab 目录（stock-analysis vs stock-workspace）归一后仍不等 ⇒ 仍红");
 
-  // ③ 负控：camel 目录 dynamicUI 的 NEUTRAL 支与 owner 支口径必须一致
+  // ③ NEUTRAL 支（精确匹配，#200）与 owner 支（归一，#168）两套判据**各自**钉死
   const n3 = findViolations({
     file: "src/components/dynamicUI/Renderer.tsx",
     content: 'import { Tooltip } from "@/components/layout/Tooltip";\nimport { C } from "@/components/common/PageHeader";\n',
     owner: "dynamicUI",
   });
-  check(n3.length === 0, "归一负控③a：dynamicUI（camel 目录）引 NEUTRAL 目录仍豁免");
+  check(n3.length === 0, "NEUTRAL 正控③a：dynamicUI（camel 目录）引登记名 layout/common ⇒ 豁免");
   const n3b = findViolations({
     file: "src/components/dynamicUI/Renderer.tsx",
     content: 'import { A } from "@/components/chat/Bubble";\n',
     owner: "dynamicUI",
   });
-  check(n3b.length === 1, "归一负控③b：dynamicUI 引别域（chat）仍红，NEUTRAL 归一不许顺手扩面");
-  // NEUTRAL 归一的真正靶心：owner 是 kebab 形时，target 的 camel NEUTRAL 名仍须被豁免
+  check(n3b.length === 1, "NEUTRAL 负控③b：dynamicUI 引未登记域（chat）仍红，中性豁免面不许靠命名形态自动扩");
+  // ③c 登记面**原形**必须仍被豁免（收窄 NEUTRAL 支后仍如此 —— 这条是「精确匹配没把 4 个登记名判漏」的正控）
   const n3c = findViolations({
     file: "src/components/stock-analysis/X.tsx",
     content: 'import { R } from "@/components/dynamicUI/DynamicUIRenderer";\n',
     owner: "stock-analysis",
   });
-  check(n3c.length === 0, "归一负控③c：kebab owner 引 camel NEUTRAL（dynamicUI）仍豁免（NEUTRAL 支与 owner 支同口径）");
-  // ③d NEUTRAL 支归一的「形敏」自证：现存 4 个登记名（layout/common/shared/dynamicUI）没有 kebab 变体，
-  //   ⇒ NEUTRAL 归一在今天的真实数据上与旧行为**逐字等价**（键差集「消失 22 条全是 store 支、新增 0」即其证据）。
-  //   这条合成用例钉的是「口径必须一致」这个设计约束本身：中性名的任何 -/_ 与大小写变体都算命中，
-  //   否则将来有人把中性目录改名成 kebab（dynamic-ui）就会让 NEUTRAL 支与 owner 支分裂成两套口径。
+  check(n3c.length === 0, "NEUTRAL 正控③c：kebab owner 引登记名原形 dynamicUI 仍豁免（登记表逐字命中即可）");
+  // ③d 负控（**#200 判据反转**：#168 批 A 曾把这条钉成正控「dynamic-ui 也算中性」）：
+  //   `dynamic-ui` **不在** NEUTRAL_PREFIXES 登记表里 ⇒ 必须报违规。中性目录的扩面是人的登记决定
+  //   （AGENTS.md「组件中立性规范」：新增必须登记 + 写明理由，不许静默扩），不许由命名形态推导出来。
+  //   真实数据影响为 0：现存 4 个登记名没有任何 kebab/snake 变体出现在 import 图里，
+  //   故本条从正控翻成负控时判定档读数逐字不变（2026-11-05 复量：202 / 199 / PASS 基线 212）。
   const n3d = findViolations({
     file: "src/components/stock-analysis/X.tsx",
     content: 'import { R } from "@/components/dynamic-ui/DynamicUIRenderer";\n',
     owner: "stock-analysis",
   });
-  check(n3d.length === 0, "归一负控③d：NEUTRAL 按形敏匹配（登记面仍写 dynamicUI，比较时归一），不许出现两套口径");
+  check(n3d.length === 1 && n3d[0].targetOwner === "dynamic-ui",
+    "NEUTRAL 负控③d：未登记的 kebab 变体 dynamic-ui **必须**报违规 ⇒ 中性扩面只能改 NEUTRAL_PREFIXES 登记表，改名白拿豁免即红");
+  // ③e 正控（#200 补，与 ③d 互为犄角）：owner 两支**仍归一**不许被「一起退回全等」。
+  //   同一文件里同时命中 store 支（stockAnalysisStore）与 component 支（camel 目录 stockAnalysis）的
+  //   同 owner 两种写法（n1 只钉 store 支、n1c 只钉 llm-wiki 组），下一次有人把三支一起改成全等 ⇒ 本条立刻红
+  //   （③d 只守 NEUTRAL 那一支，守不了这两支）。
+  const n3e = findViolations({
+    file: "src/components/stock-analysis/BacktestPage.tsx",
+    content: 'import { A } from "@/stores/feature/stockAnalysisStore";\nimport { B } from "@/components/stockAnalysis/Panel";\n',
+    owner: "stock-analysis",
+  });
+  check(n3e.length === 0,
+    "owner 支仍归一③e（正控）：kebab 目录 stock-analysis 引同 owner 的 camel store 支 + camel 组件支两支都豁免 ⇒ 三支一起退回全等即红");
+
+  // ⑥ 空洞通过防护（#199）的判据本身 —— 注入数字做正负控，不碰真实树
+  //   （真实树上「927 ≥ 300」是永真断言，扫描器瞎掉时也不会变，钉不住退化）。
+  check(scanFloorFailures(927, 157).length === 0,
+    "空洞防护正控：真实树实测形状（扫描 927 file / 基线 157 个不同 file）必须放行");
+  check(scanFloorFailures(MIN_SCANNED_FILES, 0).length === 0,
+    "空洞防护正控：恰好落在下界 + 基线为空（b 退化）⇒ 放行，证明下界不含越界强度");
+  check(scanFloorFailures(0, 0).length === 1,
+    "空洞防护负控 a：扫描 0 file 且基线为空 ⇒ 仍红（条件 a 兜住 b 退化成 >= 0 的那一支）");
+  check(scanFloorFailures(MIN_SCANNED_FILES - 1, 0).length === 1,
+    "空洞防护负控 a′：扫描数恰为下界-1 ⇒ 红（边界钉死在「< 下界」，不许松成「只剩一个子目录也算正常」）");
+  const floorB = scanFloorFailures(1000, 1001);
+  check(floorB.length === 1 && floorB[0].includes("条件 b"),
+    "空洞防护负控 b：条件 a 已过（1000 ≥ 300）但基线面 1001 > 扫描面 1000 ⇒ 红，且报的是条件 b ⇒ 两条锚各自独立生效");
 
   // 未合并组自证：gatewayLink（store 剥后缀名）与 gateway / link（两个不同目录）不许归一成同名
   const n4 = findViolations({
@@ -333,9 +439,12 @@ function runSelftest() {
 
   if (fail > 0) { return false; }
   console.log(
-    "SELFTEST OK：resolve（@/ 与相对路径）/ 自引剥后缀 / 中性目录豁免 / 跨 feature 双向负控 / " +
-      "归一正控 3 组同 owner（stockAnalysis·multiAgent·llmWiki）/ 归一负控 5 路（providerStore·跨 kebab·dynamicUI 双口径·gatewayLink 未合并）/ " +
-      "norm 不剥后缀 / 棘轮键存原形 全部通过"
+    `SELFTEST OK（共 ${total} 条断言 · 失败 ${fail}）：` +
+      "resolve（@/ 与相对路径）/ 自引剥后缀 / 跨 feature 双向负控 / " +
+      "owner 两支归一正控 3 组同 owner（stockAnalysis·multiAgent·llmWiki）+ ③e 双支合钉 / " +
+      "owner 归一负控（providerStore·跨 kebab·multiAgent×stockAnalysis·gatewayLink 未合并）/ " +
+      "NEUTRAL 精确匹配（③c 登记名豁免·③d 未登记变体必须红）/ norm 不剥后缀 / " +
+      "棘轮键存原形 / 空洞通过防护双锚（a 绝对下界·b 相对基线面）全部通过"
   );
   return true;
 }
@@ -344,8 +453,11 @@ function runSelftest() {
 if (SELFTEST) { process.exit(runSelftest() ? 0 : 1); }
 
 if (!existsSync(SRC_COMPONENTS)) {
-  console.log("⚠ src/components 不存在 —— 跳过 ≠ 通过，本轮未验证组件中立性。");
-  process.exit(0);
+  console.error(`FAIL: src/components 不存在（应含本仓全部组件目录）—— 本轮对组件中立性**零验证**，` +
+    `「没读到」不等于「没有违规」，门禁按红处理。`);
+  console.error(`  两种可能，都必须有人当场判：① 目录被改名/搬迁 ⇒ 同步本文件的 SRC_COMPONENTS 并复核扫描数；` +
+    `② 构建/裁剪产物 ⇒ 门禁不该在无源码的树里跑（此时 CI 该 skip 整个 step，而不是让它报绿）。`);
+  process.exit(1);
 }
 
 const allowlist = existsSync(ALLOWLIST_PATH)
@@ -376,11 +488,25 @@ const effective = allViolations.filter((v) => {
 console.log(`\n=== 组件中立性检查 ===`);
 console.log(`扫描 ${files.length} 文件 · 原始跨域引用 ${allViolations.length} · 白名单豁免后 ${effective.length}`);
 
-// 棘轮比对
+// 读取棘轮基线（下面的空洞通过防护的条件 b 要用它的 file 面积，故先于比对读）
 let baseline = { entries: [] };
 if (existsSync(BASELINE_PATH)) {
-  try { baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8")); } catch { /* 损坏按空处理 */ }
+  try { baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8")); } catch { /* 损坏按空处理 —— 由下面的条件 a 兜住 */ }
 }
+
+// ── 空洞通过防护（#199）：必须早于棘轮比对 / PASS 输出 / --update-baseline 写入 ──
+// 扫描面塌方时 effective 会是空集，空集 ⊆ 任何基线 ⇒ 后面所有分支都会「正确地」报绿；
+// 更糟的是 --update-baseline 会照抄这个空集，把 212 条棘轮一次洗成 0 条。所以在这里就叫停。
+const scannedFileCount = new Set(files).size;
+const baselineFileCount = new Set((baseline.entries ?? []).map((e) => e.file)).size;
+const floorProblems = scanFloorFailures(scannedFileCount, baselineFileCount);
+if (floorProblems.length > 0) {
+  console.error(`\nFAIL: 扫描面塌方 —— 「0 条新违规」不等于「没有违规」，本轮判定不作数：`);
+  for (const p of floorProblems) { console.error(`  · ${p}`); }
+  console.error(`  先恢复被扫描的源码面 / 修 collectFiles 口径；**禁止**用 --update-baseline 把空集写进基线洗账面。`);
+  process.exit(1);
+}
+// 棘轮比对
 const baseKeys = new Set((baseline.entries ?? []).map((e) => e.file + " → " + e.target));
 const curKeys = new Set(effective.map((v) => v.file + " → " + v.target));
 const newViolations = effective.filter((v) => !baseKeys.has(v.file + " → " + v.target));

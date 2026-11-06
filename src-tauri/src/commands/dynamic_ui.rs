@@ -649,20 +649,26 @@ pub async fn list_dynamic_ui_schema_versions(
     state: State<'_, AppState>,
     schema_id: String,
 ) -> Result<ListVersionsResponse, String> {
-    let db = state.harness.db();
+    list_dynamic_ui_schema_versions_impl(state.harness.db(), &schema_id).await
+}
 
-    // 获取当前 schema 信息
-    let schema = SchemaEntity::find_by_id(&schema_id)
-        .one(db)
-        .await
-        .map_err(|e| format!("查询Schema失败: {e}"))?
-        .ok_or_else(|| ErrorResponse::err(dynamic_ui_err::SCHEMA_NOT_FOUND))?;
+/// 版本列表的实现体（与命令壳分离，便于归属闸门的测试直接打靶）。
+///
+/// **归属闸门（缺陷 #192-⑨）**：改前这里直接 `find_by_id` 取 schema 行、**不判 origin**
+/// ⇒ 插件拥有的 schema 的版本历史（每份都含 `schema_json` 全文快照）可被任意命令面读出，
+/// 与 `get_dynamic_ui_schema` / `restore_*` / `pin` / 表单数据各路径的判据不一致。
+/// 现在统一走 `load_schema_for_command`（插件行与归属不可判定行一律拒，`PermissionDenied`）。
+async fn list_dynamic_ui_schema_versions_impl(
+    db: &DatabaseConnection,
+    schema_id: &str,
+) -> Result<ListVersionsResponse, String> {
+    let schema = load_schema_for_command(db, schema_id, "读取版本列表").await?;
 
     let current_version = schema.version;
 
     // 查询版本历史（按时间倒序）
     let models = VersionEntity::find()
-        .filter(axagent_entities::dynamic_ui_schema_versions::Column::SchemaId.eq(&schema_id))
+        .filter(axagent_entities::dynamic_ui_schema_versions::Column::SchemaId.eq(schema_id))
         .order_by(axagent_entities::dynamic_ui_schema_versions::Column::CreatedAt, Order::Desc)
         .limit(50)
         .all(db)
@@ -682,12 +688,25 @@ pub async fn get_dynamic_ui_schema_version(
     state: State<'_, AppState>,
     version_id: i64,
 ) -> Result<DynamicUISchemaVersionDTO, String> {
-    let db = state.harness.db();
+    get_dynamic_ui_schema_version_impl(state.harness.db(), version_id).await
+}
+
+/// 版本详情的实现体。
+///
+/// **归属闸门（缺陷 #192-⑨）**：版本行挂在哪张 schema 上，就按那张 schema 的 origin 判 ——
+/// 改前只按 `version_id` 取行即返回 ⇒ 插件拥有的 schema 的版本快照（`schema_json` 全文）
+/// 可被任意命令面读出。边界：schema 行已不存在（孤儿版本）⇒ 按 `SCHEMA_NOT_FOUND` 拒
+/// （fail-closed，不猜归属）。
+async fn get_dynamic_ui_schema_version_impl(
+    db: &DatabaseConnection,
+    version_id: i64,
+) -> Result<DynamicUISchemaVersionDTO, String> {
     let model = VersionEntity::find_by_id(version_id)
         .one(db)
         .await
         .map_err(|e| format!("查询版本失败: {e}"))?
         .ok_or_else(|| format!("版本 {} 不存在", version_id))?;
+    load_schema_for_command(db, &model.schema_id, "读取版本详情").await?;
     Ok(version_model_to_dto(model))
 }
 
@@ -1319,6 +1338,66 @@ mod origin_guard_tests {
             missing.contains("DYNAMIC_UI_SCHEMA_NOT_FOUND"),
             "缺失宿主应回既有错误码：{missing}"
         );
+    }
+
+    // ── #192-⑨ 钉桩：版本读面必须与其它路径同一套归属闸门 ──
+
+    /// 直插一条版本快照（模拟插件通道/正常更新留下的历史行）。
+    async fn seed_version(db: &DatabaseConnection, schema_id: &str, payload: &str) -> i64 {
+        let am = VersionActiveModel {
+            schema_id: Set(schema_id.to_string()),
+            version: Set("1.0.0".to_string()),
+            title: Set("快照标题".to_string()),
+            description: Set(String::new()),
+            schema_json: Set(payload.to_string()),
+            category: Set("custom".to_string()),
+            tags: Set("[]".to_string()),
+            change_log: Set(String::new()),
+            created_at: Set(now_unix()),
+            ..Default::default()
+        };
+        am.insert(db).await.expect("测试：插入版本快照应成功").id
+    }
+
+    /// 改前：两个版本读命令只按 id 取行，**不判 origin** ⇒ 插件行的全文快照可被任意读。
+    #[tokio::test]
+    async fn version_reads_reject_plugin_owned_schema() {
+        let handle = axagent_dao::db::create_test_pool().await.expect("测试：创建连接池应成功");
+        let db = &handle.conn;
+
+        seed_schema(db, "schema-plugin-v", "plugin", "acme-plugin").await;
+        let v_plugin = seed_version(db, "schema-plugin-v", r#"{"secret":"PLUGIN_ONLY"}"#).await;
+
+        let err = list_dynamic_ui_schema_versions_impl(db, "schema-plugin-v")
+            .await
+            .expect_err("插件拥有 schema 的版本列表必须拒绝");
+        assert!(err.contains("DYNAMIC_UI_INVALID_ORIGIN"), "必须回既有已译码：{err}");
+        assert!(!err.contains("PLUGIN_ONLY"), "拒绝串不得回显快照内容：{err}");
+
+        let err2 = get_dynamic_ui_schema_version_impl(db, v_plugin)
+            .await
+            .expect_err("插件拥有 schema 的版本详情必须拒绝");
+        assert!(err2.contains("DYNAMIC_UI_INVALID_ORIGIN"), "必须回既有已译码：{err2}");
+        assert!(!err2.contains("PLUGIN_ONLY"), "拒绝串不得回显快照内容：{err2}");
+
+        // 正向对照：同一实现、同样的行，只有 origin 不同 ⇒ 必须能读出（防「一律拒」凑绿）
+        seed_schema(db, "schema-user-v", "user", "").await;
+        let v_user = seed_version(db, "schema-user-v", r#"{"ok":"USER_OK"}"#).await;
+        let list = list_dynamic_ui_schema_versions_impl(db, "schema-user-v")
+            .await
+            .expect("用户 schema 的版本列表应可读");
+        assert_eq!(list.versions.len(), 1, "用户 schema 的那一条版本必须列出来");
+        assert_eq!(list.versions[0].id, v_user, "列出的必须正是刚插入的那条");
+        let got = get_dynamic_ui_schema_version_impl(db, v_user)
+            .await
+            .expect("用户 schema 的版本详情应可读");
+        assert!(got.schema_json.contains("USER_OK"), "正向对照必须拿到真实内容");
+
+        // 负控：schema 行不存在（孤儿版本）⇒ 列表按 SCHEMA_NOT_FOUND 拒，不猜归属
+        let missing = list_dynamic_ui_schema_versions_impl(db, "schema-absent-v")
+            .await
+            .expect_err("缺失 schema 必须拒绝");
+        assert!(missing.contains("DYNAMIC_UI_SCHEMA_NOT_FOUND"), "缺失应回既有错误码：{missing}");
     }
 
     // ── 缺陷 #185 钉桩：归属拒绝必须带码，schema_json 必须有上限 ──

@@ -5764,20 +5764,30 @@ async function executeCommand<T>(
     // ── DynamicUI 版本管理 ────────────────────────────────────────────
     case "list_dynamic_ui_schema_versions": {
       const { schema_id } = args as { schema_id?: string };
+      // 归属闸门与后端同一判据（#192-⑨）：改前**两侧都漏**——插件拥有的 row 的版本历史
+      // （每份含 schema_json 全文快照）可被任意命令面读出；后端已补 `load_schema_for_command`，
+      // 这里补同一个 mock 闸门（`mockLoadSchemaForCommand`，与 restore 分支共用），dev 才不会掩盖它。
+      const schemas = loadMockDynamicUIData<DynamicUISchemaRecord[]>("schemas", []);
+      const host = mockLoadSchemaForCommand(schemas, schema_id ?? "", "读取版本列表");
       const versions = loadMockDynamicUIData<DynamicUISchemaVersion[]>("versions", []);
       const filtered = versions.filter((v) => v.schemaId === schema_id);
-      const schemas = loadMockDynamicUIData<DynamicUISchemaRecord[]>("schemas", []);
-      const schema = schemas.find((s) => s.id === schema_id);
       const response: ListVersionsResponse = {
         versions: filtered,
-        currentVersion: schema?.version ?? "",
+        currentVersion: host.version,
       };
       return response as T;
     }
     case "get_dynamic_ui_schema_version": {
       const { version_id } = args as { version_id?: number };
       const versions = loadMockDynamicUIData<DynamicUISchemaVersion[]>("versions", []);
-      const version = versions.find((v) => v.id === version_id) ?? null;
+      const version = versions.find((v) => v.id === version_id);
+      if (!version) {
+        // 与后端同文案（get_dynamic_ui_schema_version_impl 的 `版本 {id} 不存在`）
+        throw new Error(`版本 ${version_id} 不存在`);
+      }
+      // 归属闸门按**版本行所属 schema** 判（后端同口径）；schema 行不存在 ⇒ SCHEMA_NOT_FOUND
+      const schemasV = loadMockDynamicUIData<DynamicUISchemaRecord[]>("schemas", []);
+      mockLoadSchemaForCommand(schemasV, version.schemaId, "读取版本详情");
       return version as T;
     }
     case "restore_dynamic_ui_schema_version": {

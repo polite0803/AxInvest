@@ -6704,6 +6704,14 @@ mock 的 `create_artifact` / `update_artifact` 不再写这三样（注释指向
 **未做**：① 未接 CI（它是普查器不是门禁；接 CI 要走 `ci-check.mjs` + `ci.yml` 两处同源，另批）；② 那 10 处
 「有兜底」未统一成 `readMockReqField`（改了只是形态一致，无行为收益）；③ 跨模块传入的 args 派生对象判不出（见脚本头「已知边界」）。
 
+**验证（本机实测）**：`cargo fmt --check -p axagent` **EXIT=0**；
+`cargo clippy -p axagent --all-targets --all-features -- -D warnings` **EXIT=0**；
+`cargo test -p axagent --lib commands::dynamic_ui` ⇒ `test result: ok. 7 passed; 0 failed; 911 filtered out`
+（改前同档 6 条，新增的正是 `version_reads_reject_plugin_owned_schema` 这一条）。
+前端侧：`node scripts/check-tsc.mjs` **EXIT=0**（1477 文件）、`npx dprint check src/lib/browserMock.ts` **EXIT=0**
+（日志无 "No files found"）。排查过的调用面：`dynamicUIStore.loadVersions` catch 后 `return []`、
+`getVersion` catch 后 `return null` ⇒ 插件行显示空历史而不是泄露内容，不抛白屏。
+
 ### 128.12 #205：`.github/workflows/ci.yml` 补 vitest 步骤（用户按次授权后落地）
 
 **为什么这不是「给护栏塞白名单」**：`src/__tests__/ci.workflow.test.ts` 的对称差集护栏在 HEAD 上红 1 条 ——

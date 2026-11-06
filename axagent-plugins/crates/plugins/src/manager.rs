@@ -3996,9 +3996,34 @@ pub(super) fn remove_dir_all_with_retry(path: &Path, max_retries: u32) -> Result
     Ok(())
 }
 
+/// 测试辅助（#189）：**唯一**的 `PluginManagerConfig` 构造入口。
+///
+/// 为什么需要：`PluginManagerConfig::new` 的缺省 `bundled_root` 是
+/// `env!("CARGO_MANIFEST_DIR")/bundled`，而 `npm run plugin:bundle:dev` 会把 stock/opc 的
+/// dev 产物**暂存到同一目录**（宿主 dev 模式也从这里装载）⇒ 任何「插件数量」类断言都会随盘上
+/// 产物涨落。测试必须把 `bundled_root` 钉到一个空目录，否则本地绿/红取决于有没有跑过打包脚本。
+///
+/// 放在 `manager` 下而不是各测试模块内：`lib.rs` / `hooks.rs` / `manager.rs` 三处测试共用**同一份**
+/// 实现（禁区 12：禁止重复定义）。
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::PluginManagerConfig;
+    use std::path::Path;
+
+    pub(crate) fn isolated_config(config_home: impl AsRef<Path>) -> PluginManagerConfig {
+        let config_home = config_home.as_ref().to_path_buf();
+        let mut config = PluginManagerConfig::new(config_home.clone());
+        let empty_bundled = config_home.join("bundled-isolated");
+        std::fs::create_dir_all(&empty_bundled).expect("建空的 bundled 隔离目录");
+        config.bundled_root = Some(empty_bundled);
+        config
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::manager::test_support::isolated_config;
     use axagent_harness::{
         CapabilityDomain, CapabilityEvolvability, CapabilityKind, CapabilityRegistry,
         CapabilitySource,
@@ -4022,15 +4047,6 @@ mod tests {
     /// 而产品代码零改动 —— 红的是测试对环境的耦合，不是插件运行器的缺陷。
     ///
     /// 空目录落在 `config_home` 之下，随各用例既有的 cleanup 一并删除，不额外留残渣。
-    fn isolated_config(config_home: impl Into<PathBuf>) -> PluginManagerConfig {
-        let config_home = config_home.into();
-        let mut config = PluginManagerConfig::new(config_home.clone());
-        let empty_bundled = config_home.join("bundled-isolated");
-        std::fs::create_dir_all(&empty_bundled).expect("建空的 bundled 隔离目录");
-        config.bundled_root = Some(empty_bundled);
-        config
-    }
-
     fn demo_manifest_with_capabilities() -> PluginManifest {
         PluginManifest {
             name: "demo".into(),
@@ -4135,7 +4151,7 @@ mod tests {
         std::fs::write(installed.join("ui").join("panel.html"), "<html>hi</html>")
             .expect("写入面板资产");
 
-        let manager = PluginManager::new(isolated_config(temp.to_path_buf()));
+        let manager = PluginManager::new(isolated_config(temp));
         let mut registry = InstalledPluginRegistry::default();
         // 与真实 install 同形：钉下目录哈希。不钉则 read_panel_asset 按 fail-closed 拒绝，
         // 夹具就会把「未建立锚点」误验成「资产读取本身可用」。
@@ -4939,7 +4955,7 @@ mod tests {
                 .expect("写入 ui.json");
         }
 
-        let manager = PluginManager::new(isolated_config(temp.to_path_buf()));
+        let manager = PluginManager::new(isolated_config(temp));
         let integrity = if pinned {
             hash_plugin_directory(installed_dir)
                 .ok()
@@ -6036,5 +6052,53 @@ mod bundled_root_tests {
     #[test]
     fn falls_back_to_the_source_tree_without_any_resource_dir() {
         assert_eq!(PluginManagerConfig::resolve_bundled_root(None), PluginManager::bundled_root());
+    }
+
+    /// #189 反向钉桩：测试代码不得绕过 `test_support::isolated_config` 直接构造配置。
+    ///
+    /// 缺省 `bundled_root` 指向仓内 `bundled/`，而 `npm run plugin:bundle:dev` 会把 stock/opc 的
+    /// dev 产物暂存到那里 ⇒ 一旦有测试直接 `PluginManagerConfig::new`，计数类断言就会随「有没有跑过
+    /// 打包脚本」而涨落（本地绿、别人机器红）。
+    ///
+    /// 判据只看**代码行**（剥 `//` 起首行，避免把注释里的说明算成构造点）；唯一合法构造点是
+    /// `test_support` 模块自身那一处，逐文件钉数量（多一处即红）。
+    #[test]
+    fn tests_do_not_construct_plugin_manager_config_directly() {
+        fn code_lines_only(src: &str) -> String {
+            src.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n")
+        }
+        // 拼出靶串，避免本测试自身的源码被算成一次「构造点」（判据被自己的样本喂假）。
+        let needle = concat!("PluginManagerConfig", "::new(");
+        let lib_raw = include_str!("lib.rs");
+        let lib = code_lines_only(lib_raw);
+        let hooks = code_lines_only(include_str!("hooks.rs"));
+        let manager = code_lines_only(include_str!("manager.rs"));
+        // lib.rs 只允许**两个**例外：`discovers_builtin_and_bundled_plugins` 与
+        // `default_bundled_root_loads_repo_bundles_as_installed_plugins` —— 它们的判据就是
+        // 「缺省 bundled 根能装出 Bundled 插件」，钉到空目录会让断言恒假。两处都必须带 `#189 例外` 标注。
+        assert_eq!(
+            lib.matches(needle).count(),
+            2,
+            "lib.rs 只允许两个已标注例外；新用例一律走 `test_support::isolated_config`（#189）"
+        );
+        assert_eq!(
+            lib_raw.matches("#189 例外").count(),
+            2,
+            "lib.rs 的两个例外必须各带一条 `#189 例外` 标注（数量漂移即说明有人加/删了例外）"
+        );
+        assert_eq!(
+            hooks.matches(needle).count(),
+            0,
+            "hooks.rs 的测试必须走 `test_support::isolated_config`（#189）"
+        );
+        assert_eq!(
+            manager.matches(needle).count(),
+            1,
+            "manager.rs 只允许 `test_support` 内出现唯一一处构造点（#189）"
+        );
+        // 正控：那唯一一处必须落在 `test_support` 模块内（否则说明隔离构造本身被换掉了）
+        let module_at = manager.find("mod test_support").expect("test_support 模块必须存在");
+        let construct_at = manager.find(needle).expect("必须保留唯一构造点");
+        assert!(construct_at > module_at, "唯一构造点必须在 `test_support` 模块内");
     }
 }

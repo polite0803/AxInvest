@@ -6850,3 +6850,36 @@ i18n 五道门全绿：`check-i18n-key-parity`（11 语言 key 集合一致）�
 **边界**：① mock 的版本 `id` 用 `Date.now()`，同一毫秒内连续两次写入会撞 id —— 本批的剪枝/排序都带 `|| b.id - a.id`
 的次级比较把顺序稳定下来，但**没有**改成单调 id（那属于 mock 数据模型问题，另批）；② 剪枝按 `createdAt` 排序，
 与后端 SQL 的 `CreatedAt Desc` 同键，但没有模拟 SQL 的并列处理（后端并列时顺序未定义）。
+
+### 128.17 #189：`lib.rs` / `hooks.rs` 的插件测试同样钉死 bundled 根隔离（含反向钉桩）
+
+**病灶**：`PluginManagerConfig::new` 的缺省 `bundled_root` 是 `env!("CARGO_MANIFEST_DIR")/bundled`，
+而 `npm run plugin:bundle:dev` 会把 stock/opc 的 dev 产物**暂存到同一目录**（宿主 dev 模式也从这里装载）
+⇒ 任何「插件数量 / 列表内容」类断言都会随**盘上有没有跑过打包脚本**而涨落（本地绿、别人机器红）。
+上一轮只把 `manager.rs` 的 16 个站点改走隔离构造；`lib.rs`（26 处）与 `hooks.rs`（1 处）还以同样方式构造。
+
+**修法**：把隔离构造抽成**唯一入口** `manager::test_support::isolated_config`（禁区 12：三处测试共用一份实现，
+不再各写一份）；三文件全部改走它。签名放宽为 `impl AsRef<Path>`，调用点可直接传 `&PathBuf` / 值 / 临时目录。
+
+**两个刻意例外（都在 `lib.rs`）**：`discovers_builtin_and_bundled_plugins` 与
+`default_bundled_root_loads_repo_bundles_as_installed_plugins` —— 它们的判据**就是**「缺省 bundled 根能装出
+Bundled 插件」，钉到空目录会让断言恒假。两处都带 `#189 例外` 标注，并由下面的钉桩测试核对标注数量（2 条）。
+
+**反向钉桩（新测试 `tests_do_not_construct_plugin_manager_config_directly`）**：逐文件钉死构造点数量 ——
+`lib.rs` **2**（且 `#189 例外` 标注也必须 **2**，数量漂移即说明有人加/删了例外）、`hooks.rs` **0**、
+`manager.rs` **1**（且必须在 `test_support` 模块内，正控）。靶串用 `concat!("PluginManagerConfig", "::new(")`
+拼出来 —— 第一版直接写完整字面量，测试**把自己的源码算成 4 次构造**（`319 passed / 3 failed` 里的那 3 条之一），
+这正是「判据被自己的样本喂假」的形态，用拼接规避；注释行仍按 `//` 起首剥掉再计数。
+
+**关于「给 CI 加一条『暂存产物在位时仍须全绿』的口径」——决定：不加**。理由：CI 上该暂存目录通常为空
+（打包脚本只在本地 dev 流程跑）⇒ 这条口径在 CI 上**恒绿、等于空转**，属于「声明了机制但从不执行」的反面。
+有效保障是①测试不依赖该目录（本批的隔离构造）+②静态钉桩挡住回退（本批的反向测试）。
+
+**验证**：`cargo fmt --check -p axagent-plugins` **EXIT=0**；
+`cargo clippy -p axagent-plugins --all-targets --all-features -- -D warnings` **EXIT=0**（两次拦下：`to_path_buf`
+冗余 → 改成 let-chain 后又被 `needless_borrows_for_generic_args` 拦 `&temp`，最终按 clippy 建议传值）；
+`cargo test -p axagent-plugins --lib` ⇒ **262 passed / 0 failed**（本批开始前是 259 passed / 3 failed：3 条即
+钉桩自计数 + 两个「缺省 bundled 根」用例被误隔离）。
+
+**未做**：① 「暂存产物在位时全量复跑」这一次没有重做（上一轮 `manager.rs` 改造时做过一次正控；本批靠静态钉桩
++ 两个例外用例仍绿间接证明）；② 未把 `isolated_config` 提升为**非 test** 的公共 API（它是测试专用，不进产物）。

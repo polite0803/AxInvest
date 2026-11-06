@@ -37,6 +37,7 @@ pub use worker::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::manager::test_support::isolated_config;
     use serde_json::Value;
     use std::collections::BTreeMap;
     use std::fs;
@@ -693,6 +694,8 @@ mod tests {
     #[test]
     fn discovers_builtin_and_bundled_plugins() {
         let _guard = env_guard();
+        // #189 例外：本用例验证的正是「缺省 bundled 根能装出 Bundled 插件」，必须用真实配置
+        // （钉到空目录就变成「找不到 Bundled」⇒ 断言失去意义）。因此它不计入隔离规则。
         let manager = PluginManager::new(PluginManagerConfig::new(temp_dir("discover")));
         let plugins = manager.list_plugins().expect("plugins should list");
         assert!(plugins.iter().any(|plugin| plugin.metadata.kind == PluginKind::Builtin));
@@ -706,7 +709,7 @@ mod tests {
         let source_root = temp_dir("source");
         write_external_plugin(&source_root, "demo", "1.0.0");
 
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         let install = manager
             .install(source_root.to_str().expect("utf8 path"))
             .expect("install should succeed");
@@ -752,7 +755,7 @@ mod tests {
         let bundled_root = temp_dir("bundled-root");
         write_bundled_plugin(&bundled_root.join("starter"), "starter", "0.1.0", false);
 
-        let mut config = PluginManagerConfig::new(&config_home);
+        let mut config = isolated_config(&config_home);
         config.bundled_root = Some(bundled_root.clone());
         let manager = PluginManager::new(config);
 
@@ -778,6 +781,8 @@ mod tests {
     fn default_bundled_root_loads_repo_bundles_as_installed_plugins() {
         let _guard = env_guard();
         let config_home = temp_dir("default-bundled-home");
+        // #189 例外：本用例专门验证**缺省** bundled 根（仓内 `bundled/`）的自动安装，
+        // 钉到空目录会让断言恒假。它不计入隔离规则。
         let manager = PluginManager::new(PluginManagerConfig::new(&config_home));
 
         let installed =
@@ -805,7 +810,7 @@ mod tests {
 }"#,
         );
 
-        let mut config = PluginManagerConfig::new(&config_home);
+        let mut config = isolated_config(&config_home);
         config.bundled_root = Some(bundled_root.clone());
         config.install_root = Some(config_home.join("plugins").join("installed"));
         let manager = PluginManager::new(config);
@@ -859,7 +864,7 @@ mod tests {
 }"#,
         );
 
-        let mut config = PluginManagerConfig::new(&config_home);
+        let mut config = isolated_config(&config_home);
         config.bundled_root = Some(bundled_root.clone());
         config.install_root = Some(install_root.clone());
         let manager = PluginManager::new(config);
@@ -902,7 +907,7 @@ mod tests {
         let install_root = config_home.join("plugins").join("installed");
         let missing_install_path = temp_dir("registry-prune-missing");
 
-        let mut config = PluginManagerConfig::new(&config_home);
+        let mut config = isolated_config(&config_home);
         config.bundled_root = Some(bundled_root.clone());
         config.install_root = Some(install_root);
         let manager = PluginManager::new(config);
@@ -943,7 +948,7 @@ mod tests {
         let bundled_root = temp_dir("bundled-state-root");
         write_bundled_plugin(&bundled_root.join("starter"), "starter", "0.1.0", false);
 
-        let mut config = PluginManagerConfig::new(&config_home);
+        let mut config = isolated_config(&config_home);
         config.bundled_root = Some(bundled_root.clone());
         let mut manager = PluginManager::new(config.clone());
 
@@ -953,7 +958,7 @@ mod tests {
             Some(&true)
         );
 
-        let mut reloaded_config = PluginManagerConfig::new(&config_home);
+        let mut reloaded_config = isolated_config(&config_home);
         reloaded_config.bundled_root = Some(bundled_root.clone());
         reloaded_config.enabled_plugins = load_enabled_plugins(&manager.settings_path());
         let reloaded_manager = PluginManager::new(reloaded_config);
@@ -977,7 +982,7 @@ mod tests {
         let bundled_root = temp_dir("bundled-disabled-root");
         write_bundled_plugin(&bundled_root.join("starter"), "starter", "0.1.0", true);
 
-        let mut config = PluginManagerConfig::new(&config_home);
+        let mut config = isolated_config(&config_home);
         config.bundled_root = Some(bundled_root.clone());
         let mut manager = PluginManager::new(config);
 
@@ -987,7 +992,7 @@ mod tests {
             Some(&false)
         );
 
-        let mut reloaded_config = PluginManagerConfig::new(&config_home);
+        let mut reloaded_config = isolated_config(&config_home);
         reloaded_config.bundled_root = Some(bundled_root.clone());
         reloaded_config.enabled_plugins = load_enabled_plugins(&manager.settings_path());
         let reloaded_manager = PluginManager::new(reloaded_config);
@@ -1010,7 +1015,7 @@ mod tests {
         let config_home = temp_dir("validate-home");
         let source_root = temp_dir("validate-source");
         write_external_plugin(&source_root, "validator", "1.0.0");
-        let manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let manager = PluginManager::new(isolated_config(&config_home));
         let manifest = manager
             .validate_plugin_source(source_root.to_str().expect("utf8 path"))
             .expect("manifest should validate");
@@ -1026,7 +1031,7 @@ mod tests {
         let source_root = temp_dir("registry-source");
         write_external_plugin(&source_root, "registry-demo", "1.0.0");
 
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         manager.install(source_root.to_str().expect("utf8 path")).expect("install should succeed");
         manager.disable("registry-demo@external").expect("disable should succeed");
 
@@ -1052,7 +1057,7 @@ mod tests {
         write_external_plugin(&external_root.join("valid"), "valid-report", "1.0.0");
         write_broken_plugin(&external_root.join("broken"), "broken-report");
 
-        let mut config = PluginManagerConfig::new(&config_home);
+        let mut config = isolated_config(&config_home);
         config.external_dirs = vec![external_root.clone()];
         let manager = PluginManager::new(config);
 
@@ -1092,7 +1097,7 @@ mod tests {
         write_external_plugin(&install_root.join("valid"), "installed-valid", "1.0.0");
         write_broken_plugin(&install_root.join("broken"), "installed-broken");
 
-        let mut config = PluginManagerConfig::new(&config_home);
+        let mut config = isolated_config(&config_home);
         config.bundled_root = Some(bundled_root.clone());
         config.install_root = Some(install_root);
         let manager = PluginManager::new(config);
@@ -1119,7 +1124,7 @@ mod tests {
         let source_root = temp_dir("broken-source");
         write_broken_plugin(&source_root, "broken");
 
-        let manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let manager = PluginManager::new(isolated_config(&config_home));
 
         // when
         let error = manager
@@ -1129,7 +1134,7 @@ mod tests {
         // then
         assert!(error.to_string().contains("does not exist"));
 
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         let install_error = manager
             .install(source_root.to_str().expect("utf8 path"))
             .expect_err("install should reject invalid hook paths");
@@ -1147,7 +1152,7 @@ mod tests {
         let source_root = temp_dir("broken-failure-source");
         write_broken_failure_hook_plugin(&source_root, "broken-failure");
 
-        let manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let manager = PluginManager::new(isolated_config(&config_home));
 
         // when
         let error = manager
@@ -1157,7 +1162,7 @@ mod tests {
         // then
         assert!(error.to_string().contains("does not exist"));
 
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         let install_error = manager
             .install(source_root.to_str().expect("utf8 path"))
             .expect_err("install should reject invalid failure hook paths");
@@ -1174,7 +1179,7 @@ mod tests {
         let source_root = temp_dir("lifecycle-source");
         let _ = write_lifecycle_plugin(&source_root, "lifecycle-demo", "1.0.0");
 
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         let install = manager
             .install(source_root.to_str().expect("utf8 path"))
             .expect("install should succeed");
@@ -1203,7 +1208,7 @@ mod tests {
         let source_root = temp_dir("tool-source");
         write_tool_plugin(&source_root, "tool-demo", "1.0.0");
 
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         manager.install(source_root.to_str().expect("utf8 path")).expect("install should succeed");
 
         let tools = manager.aggregated_tools().expect("tools should aggregate");
@@ -1233,7 +1238,7 @@ mod tests {
         let source_root = temp_dir("cmdgate-source");
         write_command_plugin(&source_root, "cmd-gate", "1.0.0", false);
 
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         let install = manager
             .install(source_root.to_str().expect("utf8 path"))
             .expect("install should succeed");
@@ -1279,7 +1284,7 @@ mod tests {
         let source_root = temp_dir("cmdexec-source");
         write_command_plugin(&source_root, "cmd-exec", "1.0.0", true);
 
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         let install = manager
             .install(source_root.to_str().expect("utf8 path"))
             .expect("install should succeed");
@@ -1314,7 +1319,7 @@ mod tests {
 }"#,
         );
 
-        let mut config = PluginManagerConfig::new(&config_home);
+        let mut config = isolated_config(&config_home);
         config.bundled_root = Some(bundled_root.clone());
         config.install_root = Some(install_root);
         let manager = PluginManager::new(config);
@@ -1343,7 +1348,7 @@ mod tests {
 }"#,
         );
 
-        let mut config = PluginManagerConfig::new(&config_home);
+        let mut config = isolated_config(&config_home);
         config.bundled_root = Some(bundled_root.clone());
         config.install_root = Some(install_root);
         let manager = PluginManager::new(config);
@@ -1386,7 +1391,7 @@ mod tests {
         );
 
         // Create PluginManager with isolated bundled_root - it should use the temp config_home, not host ~/.claw/
-        let mut config = PluginManagerConfig::new(&config_home);
+        let mut config = isolated_config(&config_home);
         config.bundled_root = Some(bundled_root.clone());
         let manager = PluginManager::new(config);
 
@@ -1443,7 +1448,7 @@ mod tests {
                     write_lifecycle_plugin(&source_root, &format!("parallel-{thread_id}"), "1.0.0");
 
                 // Create PluginManager and install
-                let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+                let mut manager = PluginManager::new(isolated_config(&config_home));
                 let install_result = manager.install(source_root.to_str().expect("utf8 path"));
 
                 match install_result {

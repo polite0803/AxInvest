@@ -514,7 +514,8 @@ enum TimeoutOutput {
 #[cfg(test)]
 mod tests {
     use super::{HookRunResult, HookRunner};
-    use crate::{PluginManager, PluginManagerConfig};
+    use crate::PluginManager;
+    use crate::manager::test_support::isolated_config;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -605,7 +606,9 @@ mod tests {
             "plugin failure two",
         );
 
-        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        // #189：bundled 根隔离 —— 缺省根指向 `CARGO_MANIFEST_DIR/bundled`，而打包脚本会把
+        // stock/opc 的 dev 产物暂存到那里 ⇒ 计数类断言随盘上产物涨落，测试必须走隔离构造。
+        let mut manager = PluginManager::new(isolated_config(&config_home));
         manager
             .install(first_source_root.to_str().expect("utf8 path"))
             .expect("first plugin install should succeed");

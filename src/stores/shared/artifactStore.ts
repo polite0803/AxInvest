@@ -120,7 +120,9 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
     try {
       const result = await invoke<ExecutionResult>("execute_sandbox", {
         code: artifact.content,
-        language: artifact.language || artifact.format,
+        // 后端 `Artifact`（harness rag_voice_etc.rs:628-637）没有 `language` 列，
+        // 语言口径就是 `format`（#210 摘掉 TS 侧的幽灵字段后，这里不再读它）。
+        language: artifact.format,
       });
       const executionResult = {
         ...result,

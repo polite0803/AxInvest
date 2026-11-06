@@ -6651,3 +6651,28 @@ TS 侧曾在 `UpdateArtifactInput` 里多声明 `language` / `previewMode` / `me
 3. **CI 接线未动**：#205（`ci.yml` 补 vitest 步骤）需用户授权；`audit-l1-blockers.mjs --selftest` 与 `--require-no-unverified` 均未接 CI/`ci-check.mjs`。
 4. **`docs/` 侧 241 个未提交文件**（167 改 + 68 新 + 7 删）是前序会话留下的文档元信息批（给每篇文档头部加 `> 状态｜日期｜对应版本` 三行），**我没有动**。后果要如实记：pre-commit 的全树 CRLF 扫描持续命中其中未跟踪的 `docs/reference/skill-manifest-v2-example.json` ⇒ 本会话每一批都只能 `SKIP_SIMPLE_GIT_HOOKS=1` + 自证。这批需要一个专门的收口动作（入库或逐条归因），否则每个批都要重复解释一遍。
 5. **本机无真实数据分布**（sqlite 0 行、活动库是远端 PG）⇒ 本批所有阈值（256 KiB）与「历史 origin="ai" 行」类结论只按代码路径与设计论证给出，**不许写成「按实测」**。
+
+### 128.9 #210 前半：artifact 的幽灵字段摘除（前后端 DTO 对齐，禁区 13）
+
+**缺陷**：TS 侧 `Artifact` 与 `UpdateArtifactInput` 各声明了 `language` / `previewMode` / `metadata` 三个字段，
+而后端**一处都没有** —— `Artifact`（`axagent-core/crates/harness/src/types/rag_voice_etc.rs:628-637`）只有
+`id/conversation_id/kind/title/content/format/pinned/updated_at`，`CreateArtifactInput`（同文件 `:866-873`）与
+`UpdateArtifactInput`（同文件 `:876-881`）也没有这三列。后果有两层：① 真机下这三项**永远不会落地**（serde 静默丢）；
+② dev mock 却在 localStorage 里替它们持久化 ⇒ 制造出「预览模式/语言/元数据能保存」这个**只在 mock 存在的假象**
+（守 #192 同族口径：mock 必须与真机同语义，否则 dev 恰恰掩盖真机缺陷）。
+
+**改动**：两个类型各删这三个字段（`ArtifactLanguage` / `ArtifactPreviewMode` 两个别名**保留** —— 它们仍被
+`CodePreview` / `SplitView` 的 props 与 store 的本地预览态使用，与「产物行里有没有这列」是两件事）；
+mock 的 `create_artifact` / `update_artifact` 不再写这三样（注释指向后端行号与 #210）；`artifactStore.executeCode`
+里 `artifact.language || artifact.format` 改为直接 `artifact.format`（后端无 language 列，语言口径就是 format），
+并注明 `execute_sandbox(code, language)` 的 `language` 参数是**另一回事**（`src-tauri/src/commands/sandbox.rs:9`，确实存在）。
+
+**验证**：`node scripts/check-tsc.mjs` **EXIT=0**（覆盖 1477 个源文件）；`npx dprint check` 三文件 **EXIT=0**
+且日志无 "No files found"；`node scripts/check-doc-refs.mjs` **EXIT=0**；残留引用机械复核 ——
+`artifact.language` / `artifact.previewMode` / `artifact.metadata` / `Artifact["metadata"]` /
+`Artifact["previewMode"]` / `Artifact["language"]` 六种形态在 `src/**` **0 命中**。
+
+**未做（仍在 #210）**：`update_artifact` 的 `id` 面 fail-closed —— 未知 id 时 mock 现在返回 `undefined`，
+而 `artifactStore.updateArtifact` 会把该行覆盖成 `undefined`。**必须先核 dao 层对未知 id 的真实语义**
+（返回 Err 还是 no-op）才能定 mock 该抛还是该 no-op；不凭猜改。另：`Artifact` 的其余字段面（如 `kind`
+的枚举取值域）未逐项与后端字符串常量对齐，属 #192 同族、另批。

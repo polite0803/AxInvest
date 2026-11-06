@@ -4050,16 +4050,11 @@ async function executeCommand<T>(
         content: input.content ?? "",
         kind: input.kind ?? "note",
         format: input.format ?? "text",
-        language: input.language,
-        // #201 顺带核（previewMode）：这是 snake 化后的 camel 直读 ⇒ 改前恒 undefined，
-        // 预览模式在 dev mock 里从来没真正落过库。改走 readMockReqField。
-        // ⚠ 后端 harness CreateArtifactInput / UpdateArtifactInput（
-        // axagent-core/crates/harness/src/types/rag_voice_etc.rs:866 / :876）
-        // **没有 preview_mode / language / metadata 字段** ⇒ 真机下这几项不会持久化，
-        // 这里保留的是 mock 本地持久化（前端 TS UpdateArtifactInput 已声明该字段）。
-        // 前后端 DTO 差异属另一档，见 laneFE 汇报。
-        previewMode: readMockReqField<Artifact["previewMode"]>(input, "previewMode"),
-        metadata: input.metadata,
+        // ⚠ #210：后端 `Artifact`（axagent-core/crates/harness/src/types/rag_voice_etc.rs:628-637）
+        // 与 `CreateArtifactInput`（同文件 :866-873）**都没有** language / previewMode / metadata
+        // 三列 ⇒ 真机下它们根本不会落地。改前 mock 在本地多存了三样、前端类型也声明了，
+        // 于是 dev 里「预览模式/语言/元数据能保存」是个只在 mock 存在的假象（守 #192 同族口径：
+        // mock 必须与真机同语义）。这里与类型一并摘除，不再持久化。
         pinned: false,
         updatedAt: new Date().toISOString(),
       };
@@ -4091,16 +4086,8 @@ async function executeCommand<T>(
         if (artInput.format !== undefined) {
           arts2[ai].format = artInput.format;
         }
-        if (artInput.language !== undefined) {
-          arts2[ai].language = artInput.language;
-        }
-        // input 内层的 camel 键经递归 snake 化后恒 undefined ⇒ previewMode 改走
-        // readMockReqField（后端 UpdateArtifactInput 无该字段，属 mock 本地持久化，
-        // 差异说明见 create_artifact 分支注释）
-        const artPreviewMode = readMockReqField<Artifact["previewMode"]>(artInput, "previewMode");
-        if (artPreviewMode !== undefined) {
-          arts2[ai].previewMode = artPreviewMode;
-        }
+        // #210：language / previewMode / metadata 后端没有对应列（见 create_artifact 分支注释）
+        // ⇒ mock 不再本地持久化，避免 dev 里出现「能保存、真机存不住」的假象。
         if (artInput.pinned !== undefined) {
           arts2[ai].pinned = artInput.pinned;
         }

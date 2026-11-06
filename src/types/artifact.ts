@@ -32,13 +32,6 @@ export type Artifact = {
   title: string;
   content: string;
   format: ArtifactFormat;
-  language?: ArtifactLanguage;
-  previewMode?: ArtifactPreviewMode;
-  metadata?: {
-    lineCount?: number;
-    lastExecuted?: string;
-    executionOutput?: string;
-  };
   pinned: boolean;
   updatedAt: string;
 };
@@ -56,8 +49,5 @@ export type UpdateArtifactInput = {
   title?: string;
   content?: string;
   format?: ArtifactFormat;
-  language?: ArtifactLanguage;
-  previewMode?: ArtifactPreviewMode;
-  metadata?: Artifact["metadata"];
   pinned?: boolean;
 };

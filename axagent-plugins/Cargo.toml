@@ -8,11 +8,11 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/plugins",
-  "crates/stock-core",
-  "crates/plugin-stock",
   "crates/plugin-opc",
+  "crates/plugin-stock",
+  "crates/plugins",
   "crates/schema-gen",
+  "crates/stock-core",
 ]
 
 [workspace.package]

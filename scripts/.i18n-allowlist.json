@@ -1,8 +1,8 @@
 {
   "version": "2",
-  "generated": "2026-10-31",
-  "total_entries": 421,
-  "total_files": 421,
+  "generated": "2026-11-06",
+  "total_entries": 418,
+  "total_files": 418,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -719,12 +719,6 @@
       "phase": 3
     },
     {
-      "file": "src/components/settings/EngineDetailPanel.tsx",
-      "lines": "211",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
       "file": "src/components/settings/GeneralSettings.tsx",
       "lines": "24,84",
       "reason": "历史硬编码基线（注释/内部日志/数据/技术字符串）",
@@ -763,18 +757,6 @@
     {
       "file": "src/components/settings/ProactiveSettings.tsx",
       "lines": "11,12,13",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/settings/PromptImportModal.tsx",
-      "lines": "82,87,132",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/settings/PromptTemplatesSettings.tsx",
-      "lines": "33,242,275,297,387,393,476,548",
       "reason": "硬编码中文字符串",
       "phase": 3
     },

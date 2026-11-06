@@ -5,7 +5,6 @@ import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { message } from "@/lib/toast";
 import { useUIStore } from "@/stores";
-import { useAgentStore } from "@/stores/feature/agentStore";
 import type {
   AgentBehaviorMode,
   AgentProfile,
@@ -71,7 +70,29 @@ const emptyProfile = (): CreateAgentProfileInput => ({
   tags: [],
 });
 
-export function AgentProfileManager() {
+/**
+ * agentStore 的读写面由调用页注入（2026-11-07 任务 #194 D 类第二批）。
+ *
+ * 为什么不直接 `useAgentStore`：本组件住在 `components/settings/`，而 store 归 agent 特性，
+ * 直接读会构成跨 feature 耦合（`scripts/check-component-neutrality.mjs` 的 settings→agent 键）。
+ * 归属在 settings 是正确的（这是「设置 → Agents」页签），故按「props 下传」处置：
+ * 读数收在 `src/pages/SettingsPage.tsx`（不在扫描面），逐层透传到本组件。
+ */
+export interface AgentProfileStoreActions {
+  loadProfiles: () => Promise<void>;
+  getAllProfiles: () => AgentProfile[];
+  createCustomProfile: (input: CreateAgentProfileInput) => Promise<AgentProfile>;
+  updateCustomProfile: (id: string, input: UpdateAgentProfileInput) => Promise<AgentProfile>;
+  deleteCustomProfile: (id: string) => Promise<void>;
+}
+
+export function AgentProfileManager({
+  loadProfiles,
+  getAllProfiles,
+  updateCustomProfile,
+  createCustomProfile,
+  deleteCustomProfile,
+}: AgentProfileStoreActions) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const deviceLayout = useUIStore((s) => s.deviceLayout);
@@ -91,12 +112,6 @@ export function AgentProfileManager() {
   const [expertOptions, setExpertOptions] = useState<
     { value: string; label: string }[]
   >([]);
-
-  const loadProfiles = useAgentStore((s) => s.loadProfiles);
-  const getAllProfiles = useAgentStore((s) => s.getAllProfiles);
-  const updateCustomProfile = useAgentStore((s) => s.updateCustomProfile);
-  const createCustomProfile = useAgentStore((s) => s.createCustomProfile);
-  const deleteCustomProfile = useAgentStore((s) => s.deleteCustomProfile);
 
   const loadRoles = useCallback(async () => {
     try {

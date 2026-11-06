@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { EngineDetailPanel } from "@/components/settings/EngineDetailPanel";
+// 归属：evolution 特性（2026-11-07 任务 #194 D 类第二批，自 `components/settings/` 迁入）。
+// 与本目录同名的 store 是 `@/stores/feature/evolutionStore`，故本目录组件读它不算跨域
+// （见 `scripts/check-component-neutrality.mjs` 的 owner 归一规则）。
 import { useEvolutionStore } from "@/stores/feature/evolutionStore";
 import type { EngineStatus } from "@/stores/feature/evolutionStore";
 import type { RuntimeToolInfo } from "@/types";
@@ -23,6 +25,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { EngineDetailPanel } from "./EngineDetailPanel";
 
 const { Text, Paragraph } = Typography;
 

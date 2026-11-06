@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { SettingsSidebar } from "@/components/settings";
+import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { SkillPageRenderer } from "@/components/skill/SkillPageRenderer";
 import { useAgentContext } from "@/hooks/useAgentContext";
 import { useSkillExtensionStore, useUIStore } from "@/stores";
+import { useAgentStore } from "@/stores/feature/agentStore";
 import type { SettingsSection } from "@/types";
 import { Button, Result, Spin, theme } from "antd";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 /* Lazy-load settings sections on demand to avoid blocking first paint with 30+ eager imports. */
@@ -83,13 +85,15 @@ const LazyAdvancedSettings = lazy(() =>
   import("@/components/settings/AdvancedSettings").then((m) => ({ default: m.AdvancedSettings }))
 );
 const LazyPromptTemplatesSettings = lazy(() =>
-  import("@/components/settings/PromptTemplatesSettings").then((m) => ({ default: m.PromptTemplatesSettings }))
+  import("@/components/prompt-template/PromptTemplatesSettings").then((m) => ({
+    default: m.PromptTemplatesSettings,
+  }))
 );
 const LazyAcpSettings = lazy(() =>
   import("@/components/settings/AcpSettings").then((m) => ({ default: m.AcpSettings }))
 );
 const LazyEvolutionSettings = lazy(() =>
-  import("@/components/settings/EvolutionSettings").then((m) => ({ default: m.EvolutionSettings }))
+  import("@/components/evolution/EvolutionSettings").then((m) => ({ default: m.EvolutionSettings }))
 );
 const LazyImageGenSettings = lazy(() =>
   import("@/components/settings/ImageGenSettings").then((m) => ({ default: m.ImageGenSettings }))
@@ -135,6 +139,35 @@ function SectionFallback() {
     <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
       <Spin />
     </div>
+  );
+}
+
+/**
+ * appConfig 段（2026-11-07 任务 #194 D 类第二批）。
+ *
+ * `SettingsPanel` → `AgentsTab` → `AgentProfileManager` 需要的 agentStore 动作面在此（页面层）
+ * 读取后逐层下传：页面不在组件中立性门禁的扫描面，下层 settings 组件因此不再直接 import agentStore。
+ */
+function AppConfigSection() {
+  const loadProfiles = useAgentStore((s) => s.loadProfiles);
+  const getAllProfiles = useAgentStore((s) => s.getAllProfiles);
+  const createCustomProfile = useAgentStore((s) => s.createCustomProfile);
+  const updateCustomProfile = useAgentStore((s) => s.updateCustomProfile);
+  const deleteCustomProfile = useAgentStore((s) => s.deleteCustomProfile);
+  const agentProfileActions = useMemo(
+    () => ({
+      loadProfiles,
+      getAllProfiles,
+      createCustomProfile,
+      updateCustomProfile,
+      deleteCustomProfile,
+    }),
+    [loadProfiles, getAllProfiles, createCustomProfile, updateCustomProfile, deleteCustomProfile],
+  );
+  return (
+    <Suspense fallback={<SectionFallback />}>
+      <LazySettingsPanel agentProfileActions={agentProfileActions} />
+    </Suspense>
   );
 }
 
@@ -224,11 +257,7 @@ const SECTION_COMPONENTS: Record<SettingsSection, () => React.ReactNode> = {
       <LazyBackupCenter />
     </Suspense>
   ),
-  appConfig: () => (
-    <Suspense fallback={<SectionFallback />}>
-      <LazySettingsPanel />
-    </Suspense>
-  ),
+  appConfig: () => <AppConfigSection />,
   skillsHub: () => (
     <Suspense fallback={<SectionFallback />}>
       <LazySkillsPage />
@@ -266,7 +295,10 @@ const SECTION_COMPONENTS: Record<SettingsSection, () => React.ReactNode> = {
   ),
   promptTemplates: () => (
     <Suspense fallback={<SectionFallback />}>
-      <LazyPromptTemplatesSettings />
+      {/* promptTemplate 特性自带内容、不带卡片：分组容器由其归属迁出后在此提供（任务 #194） */}
+      <SettingsGroup>
+        <LazyPromptTemplatesSettings />
+      </SettingsGroup>
     </Suspense>
   ),
   acp: () => (

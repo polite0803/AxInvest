@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+// 归属：promptTemplate 特性（2026-11-07 任务 #194 D 类第二批，自 `components/settings/` 迁入）。
+// 唯一消费方是本目录的 `PromptTemplatesSettings`。
 import { showBackendError } from "@/lib/errorI18n";
 import { usePromptTemplateStore } from "@/stores/feature/promptTemplateStore";
 import type { ImportPromptResult, ImportPromptTemplateInput } from "@/types";

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+// 归属：evolution 特性（2026-11-07 任务 #194 D 类第二批，自 `components/settings/` 迁入）。
+// 唯一消费方是本目录的 `EvolutionSettings`。
 import type { ConfigField } from "@/components/common/EngineConfigForm";
 import { EngineConfigForm } from "@/components/common/EngineConfigForm";
 import { useEvolutionStore } from "@/stores/feature/evolutionStore";

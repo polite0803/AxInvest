@@ -7,7 +7,6 @@ export { CloudWorkspaceSelector as CloudWorkspaceSettings } from "./CloudWorkspa
 export { DashboardPluginsSettings } from "./DashboardPluginsSettings";
 export { DataManager } from "./DataManager";
 export { DisplaySettings } from "./DisplaySettings";
-export { EvolutionSettings } from "./EvolutionSettings";
 export { GatewayConfigPanel } from "./GatewayConfigPanel";
 export { GeneralSettings } from "./GeneralSettings";
 export { LocalToolSettings } from "./LocalToolSettings";
@@ -36,7 +35,6 @@ export { BackupCenter } from "./BackupCenter";
 export { CacheConfigPanel } from "./CacheConfigPanel";
 export { DynamicPagesSettings } from "./DynamicPagesSettings";
 export { ImageGenSettings } from "./ImageGenSettings";
-export { PromptTemplatesSettings } from "./PromptTemplatesSettings";
 export { StorageSpaceManager } from "./StorageSpaceManager";
 export { ThemeManager } from "./ThemeManager";
 export { UserProfileSettings } from "./UserProfileSettings";

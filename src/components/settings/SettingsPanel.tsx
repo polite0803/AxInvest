@@ -45,10 +45,19 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentProfileManager } from "./AgentProfileManager";
+import type { AgentProfileStoreActions } from "./AgentProfileManager";
 import { HookExecutionLog } from "./HookExecutionLog";
 import { SettingsGroup } from "./SettingsGroup";
 
 const { Text } = Typography;
+
+/**
+ * 面板入参（2026-11-07 任务 #194 D 类第二批）：Agents 页签里 `AgentProfileManager` 的
+ * agentStore 动作面由页面注入，本面板只做透传（见 `AgentProfileStoreActions` 的归属说明）。
+ */
+interface SettingsPanelProps {
+  agentProfileActions: AgentProfileStoreActions;
+}
 
 interface HookEventItem {
   event: string;
@@ -564,7 +573,7 @@ function FeaturesTab() {
   );
 }
 
-function AgentsTab() {
+function AgentsTab({ agentProfileActions }: { agentProfileActions: AgentProfileStoreActions }) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const [agents, setAgents] = useState<AgentDisplay[]>([]);
@@ -615,7 +624,7 @@ function AgentsTab() {
 
   return (
     <div className="p-6 pb-12">
-      <AgentProfileManager />
+      <AgentProfileManager {...agentProfileActions} />
       <Divider style={{ margin: "20px 0" }} />
       <div
         style={{
@@ -1014,7 +1023,7 @@ function HooksTab() {
   );
 }
 
-export function SettingsPanel() {
+export function SettingsPanel({ agentProfileActions }: SettingsPanelProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const { saveConfig, loadConfig } = useAppConfigStore();
@@ -1059,7 +1068,7 @@ export function SettingsPanel() {
           {t("settings.agent.agents")}
         </span>
       ),
-      children: <AgentsTab />,
+      children: <AgentsTab agentProfileActions={agentProfileActions} />,
     },
     {
       key: "hooks",

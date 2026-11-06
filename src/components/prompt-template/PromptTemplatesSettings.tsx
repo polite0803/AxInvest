@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+// 归属：promptTemplate 特性（2026-11-07 任务 #194 D 类第二批，自 `components/settings/` 迁入）。
+// 与本目录同名的 store 是 `@/stores/feature/promptTemplateStore`，故本目录组件读它不算跨域。
+// ⚠ 外层卡片 chrome（原 `settings/SettingsGroup`）已上移到调用方 `src/pages/SettingsPage.tsx`：
+//    本组件只产内容，不再自带 `Card`；换调用方时须自行加同样的分组容器。
 import { DropdownMenu } from "@/components/layout/DropdownMenu";
 import { showBackendError } from "@/lib/errorI18n";
 import { usePromptTemplateStore } from "@/stores/feature/promptTemplateStore";
@@ -26,7 +30,6 @@ import { App, Button, Empty, Form, Input, Modal, Select, Space, Spin, Tag, theme
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PromptImportModal } from "./PromptImportModal";
-import { SettingsGroup } from "./SettingsGroup";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -236,7 +239,7 @@ export function PromptTemplatesSettings() {
   }
 
   return (
-    <SettingsGroup>
+    <>
       <div className="px-4 py-3">
         {/* 工具栏 */}
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -565,6 +568,6 @@ export function PromptTemplatesSettings() {
           )}
         </div>
       </Modal>
-    </SettingsGroup>
+    </>
   );
 }

@@ -197,7 +197,7 @@ __TAURI_WORKSPACE__=true cargo test -p axagent --lib commands::knowledge_source
 
 1. **IPC 调用**：必须通过 `@/lib/invoke` 的 `invoke<T>()`，禁止直接 `import { invoke } from "@tauri-apps/api/core"`
 2. **国际化**：新增 UI 文本必须在 locales/ 下全部 11 种语言文件中添加 key，禁止仅添加 zh-CN
-3. **类型导入**：从 `@/types` 导入，不从子路径（如 `@/types/agent`）导入
+3. **类型导入**：从 `@/types` 导入，不从子路径（如 `@/types/agent`）导入。**封闭例外（缺陷 #198，只许逐条点名、不许泛化）**：已摘除宿主 barrel 门面的**迁出中域类型**必须经深路径直取 —— 当前封闭清单为 `@/types/quant`、`@/types/stock-analysis`、`@/types/pipeline`、`@/types/opc`（依据 `src/types/index.ts:19` 与 `:2446-2452` 的拆除登记注释；要新增条目，必须先在 `src/types/index.ts` 同处登记门面拆除，再进本清单，否则仍算违规）。**为什么必须开这个例外**：#35/#36 的迁出判据正是「域类型不再经宿主门面出现」，而本条的字面口径会让每一次摘门面都要么让禁区 3 变红、要么让迁出停摆（三刀已落地：`./pipeline`、`./opc`、`./quant`，且 `@/types/quant`、`@/types/stock-analysis` 在改判前就各有 19 / 73 条深路径先例）。跨域共享 DTO 一律仍从 `@/types` 取，例外只覆盖上列四个域。
 4. **组件导出**：命名导出，不用默认导出（`export function X` ✓，`export default function X` ✗）。例外：`src/i18n/index.ts` 的 `export default i18n` 属 react-i18next 框架惯例（`initReactI18next` 返回值需默认导出），合法
 5. **Tailwind**：不要创建 tailwind.config.js 或 postcss.config.js（Tailwind 4 用 vite 插件方式）
 6. **Monaco Editor**：新增语言高亮必须在 vite.config.ts 的 `SHIKI_ALLOWED_LANGS` 中添加，不加入白名单不会打包
@@ -222,7 +222,7 @@ __TAURI_WORKSPACE__=true cargo test -p axagent --lib commands::knowledge_source
 - **已有定义 → 必须复用**：通过 `pub use` re-export 或 `import` 引用已有定义
 - **需要扩展 → 扩展而非重定义**：给已有类型加字段/方法，不要新建同义类型
 - **后端权威来源层级**：所有共享数据模型（DTO、事件、配置等）的权威定义在 `axagent-harness`；`runtime-core` 作为上层抽象，通过 re-export 使用 harness 中的类型，并仅依赖 harness 提供的 trait 接口
-- **前端权威来源**：类型定义在 `src/types/`，store 应 import 而非重定义 interface
+- **前端权威来源**：类型定义在 `src/types/`，store 应 import 而非重定义 interface；宿主 barrel（`src/types/index.ts`）只留**跨域共享 DTO**，**域内类型归域本身**（已摘门面的域经深路径直取，封闭清单以前端禁区 3 为准 —— 两处必须同批改，不许只改一头）
 - **Tauri 命令一致性**：删除后端命令时必须同步清理前端调用方；新增命令时前端类型须与后端 DTO 一致
 - **删除前确认零引用**：删除任何文件/模块/函数/命令前，用 grep 确认全项目引用为零
 - **浮层触发组件必须透传 ref**：任何自定义组件被 antd 浮层组件（Popover / Popconfirm / Tooltip / Dropdown / Select 等）作为 children 时，必须 `forwardRef` 并把 ref 透传到真实 DOM 元素。否则 rc-trigger 无法定位触发器，弹层会落到视口左下角并立即消失（React 19 已移除 findDOMNode，无法兜底）。模式参考 `src/components/layout/Tooltip.tsx` 的 `setTriggerRef` 透传实现。新增这类组件时，用 grep 检查其是否被浮层包裹并相应转发 ref

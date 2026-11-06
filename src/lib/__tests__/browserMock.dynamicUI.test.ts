@@ -79,7 +79,8 @@ function makeFormRecord(patch: Partial<DynamicUIFormDataRecord> = {}): DynamicUI
     id: "f-1",
     schemaId: "s-1",
     formDataJson: '{"secret":true}',
-    instanceKey: "__default__",
+    // #192-⑥ 起默认键与后端一致（`"default"`；改前是 mock 自造的字面量 `"__default__"`）
+    instanceKey: "default",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...patch,
   };
@@ -174,6 +175,7 @@ describe("create：origin 是宿主写的信任锚，入参一律不采信", () 
       req: {
         title: "AI 生成页",
         description: "",
+        schemaJson: "{}",
         category: "custom",
         tags: [],
         origin: "ai",
@@ -191,6 +193,7 @@ describe("create：origin 是宿主写的信任锚，入参一律不采信", () 
       req: {
         title: "伪装插件页",
         description: "",
+        schemaJson: "{}",
         category: "custom",
         tags: [],
         origin: "plugin",
@@ -249,7 +252,7 @@ describe("update：归属闸门 + 内置守卫", () => {
     expect(JSON.parse(msg)).toMatchObject({ code: "DYNAMIC_UI_SCHEMA_NOT_FOUND" });
   });
 
-  it("正控：可信来源（user / ai / builtin 非内置位）正常改写并自增版本", async () => {
+  it("正控：可信来源正常改写；**只改元数据时版本不变**（#192-①：与后端一致，改前一律自增）", async () => {
     for (const origin of ["user", "ai"] as const) {
       seed(makeRecord({ origin }));
       const updated = await handleCommand<DynamicUISchemaRecord>("update_dynamic_ui_schema", {
@@ -257,8 +260,8 @@ describe("update：归属闸门 + 内置守卫", () => {
         req: { title: `改过-${origin}` },
       });
       expect(updated.title).toBe(`改过-${origin}`);
-      expect(updated.version).toBe("1.0.1");
-      expect(stored()[0]?.version).toBe("1.0.1");
+      expect(updated.version).toBe("1.0.0");
+      expect(stored()[0]?.version).toBe("1.0.0");
     }
   });
 });
@@ -702,5 +705,132 @@ describe("req 嵌套入参的键形兼容：schemaJson / formDataJson 真正落�
     const rows = storedForm();
     expect(rows).toHaveLength(2);
     expect(rows.find((r) => r.instanceKey === "k1")?.formDataJson).toBe('{"v":2}');
+  });
+});
+
+// ── #192：mock 与后端的 dynamic_ui 语义差逐条对齐（每条都对应一个后端实现体判据）──
+describe("#192 语义对齐", () => {
+  it("update：改了 schemaJson 未传 version ⇒ patch 自增，且为**旧内容**落一条历史快照", async () => {
+    seed(makeRecord({ version: "1.2.3", schemaJson: '{"v":1}' }));
+    seedVersions();
+    const updated = await handleCommand<DynamicUISchemaRecord>("update_dynamic_ui_schema", {
+      id: "s-1",
+      req: { schemaJson: '{"v":2}', changeLog: "改内容" },
+    });
+    expect(updated.version).toBe("1.2.4");
+    expect(updated.schemaJson).toBe('{"v":2}');
+    const vs = storedVersions();
+    expect(vs).toHaveLength(1);
+    // 后端 `create_version_snapshot` 记的是**旧**版本号 + 旧内容（改前 mock 记的是新内容）
+    expect(vs[0]!.version).toBe("1.2.3");
+    expect(vs[0]!.schemaJson).toBe('{"v":1}');
+    expect(vs[0]!.changeLog).toBe("改内容");
+  });
+
+  it("update：显式版本不高于当前 ⇒ 报「版本号冲突」且行未变；更高版本被采纳（正负控成对）", async () => {
+    seed(makeRecord({ version: "2.0.0" }));
+    const msg = await rejectMessage(() =>
+      handleCommand("update_dynamic_ui_schema", { id: "s-1", req: { version: "1.9.9", title: "x" } })
+    );
+    expect(msg).toContain("版本号冲突");
+    expect(stored()[0]!.version).toBe("2.0.0");
+    expect(stored()[0]!.title).toBe("测试页面");
+
+    const ok = await handleCommand<DynamicUISchemaRecord>("update_dynamic_ui_schema", {
+      id: "s-1",
+      req: { version: "2.0.1" },
+    });
+    expect(ok.version).toBe("2.0.1");
+  });
+
+  it("create：缺必填字段 ⇒ fail-closed 并点名缺失字段（后端 serde 直接拒）", async () => {
+    const msg = await rejectMessage(() => handleCommand("create_dynamic_ui_schema", { req: { title: "只有标题" } }));
+    expect(msg).toContain("缺少必填字段");
+    expect(msg).toContain("schemaJson");
+    expect(stored()).toHaveLength(0);
+  });
+
+  it("delete：级联删表单数据（后端 delete 分支先删 form_data）", async () => {
+    seed(makeRecord());
+    seedForm(makeFormRecord());
+    await handleCommand("delete_dynamic_ui_schema", { id: "s-1" });
+    expect(stored()).toHaveLength(0);
+    expect(storedForm()).toHaveLength(0);
+  });
+
+  it("pin：新钉入按**组内** max+1；已有钉入不传 position ⇒ 保留原位（D-09）", async () => {
+    seed(makeRecord({ id: "s-1" }), makeRecord({ id: "s-2" }));
+    seedPins(makePin({ schemaId: "other", groupName: "g", position: 5 }));
+    const first = await handleCommand<DynamicUIPinRecord>("pin_dynamic_ui_schema", {
+      schemaId: "s-1",
+      title: "A",
+      groupName: "g",
+    });
+    expect(first.position).toBe(6); // 组内 max(5)+1，而不是全局
+    const otherGroup = await handleCommand<DynamicUIPinRecord>("pin_dynamic_ui_schema", {
+      schemaId: "s-2",
+      title: "B",
+      groupName: "h",
+    });
+    expect(otherGroup.position).toBe(0); // 新组从 0 起（改前取全局 max 会跳号）
+    const again = await handleCommand<DynamicUIPinRecord>("pin_dynamic_ui_schema", {
+      schemaId: "s-1",
+      title: "A2",
+      groupName: "g",
+    });
+    expect(again.position).toBe(6); // 已有钉入、未传 position ⇒ 不被顶到末尾
+  });
+
+  it("pin：缺 title / group_name ⇒ 抛（后端那两项是非 Option 参数）", async () => {
+    seed(makeRecord());
+    const noTitle = await rejectMessage(() =>
+      handleCommand("pin_dynamic_ui_schema", { schemaId: "s-1", groupName: "g" })
+    );
+    expect(noTitle).toContain("title");
+    const noGroup = await rejectMessage(() => handleCommand("pin_dynamic_ui_schema", { schemaId: "s-1", title: "A" }));
+    expect(noGroup).toContain("group_name");
+    expect(storedPins()).toHaveLength(0);
+  });
+
+  it('表单数据：默认 instanceKey 与后端同为 "default"（可存可读）', async () => {
+    seed(makeRecord());
+    await handleCommand("save_dynamic_ui_form_data", {
+      req: { schemaId: "s-1", formDataJson: '{"a":1}' },
+    });
+    expect(storedForm()[0]!.instanceKey).toBe("default");
+    const back = await handleCommand<DynamicUIFormDataRecord>("get_dynamic_ui_form_data", {
+      schemaId: "s-1",
+    });
+    expect(back.formDataJson).toBe('{"a":1}');
+  });
+
+  it("restore：改写前先给当前内容落一条「回滚前存档」快照", async () => {
+    seed(makeRecord({ version: "2.0.0", schemaJson: '{"live":true}' }));
+    seedVersions(makeVersion({ id: 11, version: "1.0.0", schemaJson: '{"old":true}' }));
+    const restored = await handleCommand<DynamicUISchemaRecord>("restore_dynamic_ui_schema_version", {
+      schemaId: "s-1",
+      versionId: 11,
+    });
+    expect(restored.version).toBe("1.0.0");
+    const vs = storedVersions();
+    expect(vs).toHaveLength(2);
+    const snapshot = vs.find((v) => v.changeLog.includes("回滚前存档"));
+    expect(snapshot, "必须留下回滚前存档").toBeTruthy();
+    expect(snapshot!.schemaJson).toBe('{"live":true}');
+    expect(snapshot!.version).toBe("2.0.0");
+  });
+
+  it("plugin_uninstall：级联撤销该插件的 UI Schema（后端 revoke_schemas_owned_by 的本地镜像）", async () => {
+    seed(
+      makeRecord({ id: "p-1", origin: "plugin", ownerId: "vendor.x" }),
+      makeRecord({ id: "u-1", origin: "user" }),
+    );
+    seedVersions(makeVersion({ schemaId: "p-1" }));
+    seedForm(makeFormRecord({ schemaId: "p-1" }));
+    await handleCommand("plugin_uninstall", { pluginId: "vendor.x" });
+    // 插件行及其附属清掉，用户行保留（`origin="plugin"` **且** `owner_id` 匹配才撤）
+    expect(stored().map((s) => s.id)).toEqual(["u-1"]);
+    expect(storedVersions()).toHaveLength(0);
+    expect(storedForm()).toHaveLength(0);
   });
 });

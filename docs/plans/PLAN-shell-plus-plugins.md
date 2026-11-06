@@ -6797,3 +6797,33 @@ i18n 五道门全绿：`check-i18n-key-parity`（11 语言 key 集合一致）�
 **边界（明写）**：① 两个上限面（`PANEL_ASSET_MAX_BYTES` 2 MiB 面板资产 / `ui.json` 4 MiB 声明）语义不同，**未合并**；
 ② 插件 worker 运行期若还有别的 schema 注入路径（不经 `ui.json`），本批**未普查**；③ 读取侧 metadata 早挡
 在 metadata 读不到时不报错（保持既有错误语义），因此真正的大小判据仍以 `parse` 里的字符串长度复核为准。
+
+### 128.15 #192：dev mock 与后端 dynamic_ui 语义差逐条对齐（9 条 + 2 条收尾）
+
+**裁定原则**：逐条读后端实现体，能对齐的**对齐**，无法对齐的**写明刻意分歧 + 理由**；不许留成语义差。
+
+| # | 后端判据（实现体） | mock 改法 |
+|---|---|---|
+| ①② | `update_dynamic_ui_schema` 的版本更替三分支：显式 `version` 必须 `semver_gt` 当前（否则「版本号冲突」）；未传且改了 `schema_json` ⇒ `bump_patch`；只改元数据 ⇒ 版本不变。并且 `create_version_snapshot` 记的是**旧**内容 | 新增 `parseSemver` / `semverGt`，`bumpPatchVersion` 改成后端语义（非法/缺段按 0 再 +1）；三分支落齐；快照只记旧版本号 + 旧内容（改前每次 push **新**内容，历史语义相反） |
+| ③ | restore 改写前 `create_version_snapshot(..., "回滚前存档（回滚到 X）")` | 补齐该写路径（改前 mock 回滚会丢当前内容，真机里那条历史还在） |
+| ④ | delete 先删 `form_data`、再删 `versions`、最后删主行 | mock 补 form_data 级联（改前残留能被读到） |
+| ⑤ | pin：显式 `position` 用之；未传 + 已有钉入 ⇒ **保留原位**（D-09）；未传 + 新钉入 ⇒ **该分组内** max+1 | 三条规则落齐（改前取**全局** max+1 ⇒ 跨组跳号、已有项被顶到末尾） |
+| ⑥ | 表单数据默认 `instance_key = "default"` | 三处 `"__default__"` → `"default"`。**代价明写**：既有 dev 行读不回 —— dev 数据不是持久资产，同 C4「不做迁移」裁定 |
+| ⑦ | 卸载调 `revoke_schemas_owned_by(owner_id)`：`origin="plugin"` **且** `owner_id` 匹配，逐个走公开删除路径 ⇒ 级联 form_data / versions | `plugin_uninstall` 补该级联（含 pins，删主行后悬空钉入无意义） |
+| ⑧ | `CreateSchemaRequest` 的 title / description / schemaJson / category / tags **全为**非 Option（serde 缺字段直接拒 IPC） | create 侧 `fail-closed` 并**一次列出全部**缺失字段（改前 schemaJson 落空串、其余透传 ⇒ 能造出真机造不出的行） |
+| ⑩ | `pin_dynamic_ui_schema(schema_id, title: String, group_name: String, position: Option<i32>)` | 缺 title / group_name ⇒ 抛（改前落空串） |
+| — | 后端 `add_knowledge_document` 收 `mime_type` | mock 改为读调用方（改前硬编码 `text/plain`，会掩盖调用方传错键形） |
+| `Artifact.kind` | 后端 `kind: String` + 注释列出 5 值，**不做枚举校验** | **裁定不动后端**：加枚举要附带 migration 与历史值兼容，收益只是编译期；在 `src/types/artifact.ts` 的 `ArtifactKind` 上注明取值域来源与该裁定。前端收窄保留 |
+
+**因此被修正的两条既有断言（是「源码对齐后端」而不是放宽判据）**：
+① 原「正控：可信来源正常改写并**自增版本**」断言 metadata-only 也升 patch —— 那正是分歧本身，改为断言**版本不变**；
+② 两条 create 夹具（`origin="ai"` / `origin="plugin"`）缺 `schemaJson` —— 后端 serde 本就会拒，补上该字段后仍验证「origin 不被采信」的原判据。
+
+**验证（本机）**：`npm run test:run -- --pool=forks src/lib/__tests__/browserMock.dynamicUI.test.ts`
+⇒ **53 passed (53)**（改前 43 条：新增 10 条，含两对正负控 —— 版本冲突/采纳、pin 组内位置/保留原位）；
+`node scripts/check-tsc.mjs` **EXIT=0**（1477 文件）；`npx dprint check` 三个文件 **EXIT=0**；
+`node scripts/scan-mock-camel-reads.mjs` **EXIT=0**（死点仍 0 / 有兜底 10 —— 本批没有引入新的 camel 直读）。
+
+**未做（转 #215）**：`list_dynamic_ui_schema_versions` 的后端 `.limit(50)` 与 `cleanup_old_versions(…, 30)`
+两处版本表上限，mock 都没镜像（前者 dev 返回全部、后者需先证「是否真被 update 调用」再决定要不要对齐 ——
+**不对着死代码对齐**）。另：mock 侧没有 `schema_json` 字节上限（dev 无 DB 列），属 #213 家族但不在其判据面内。

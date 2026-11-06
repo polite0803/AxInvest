@@ -5351,7 +5351,9 @@ PLAN §0.10 的前端读数因此从 **52 处 / 38 文件 → 51 处 / 37 文件
 
 ### 114.4 `src/stores/index.ts` 拆不动 —— 这是门禁与 barrel 互相锁死，不是偷懒
 
-股票 store 在 `src/stores/index.ts:102-111`，**68 个消费方**从 `@/stores` 取它们，其中 **36 个落在 `src/components/**` 扫描面内**。`scripts/check-component-neutrality.mjs:82-85` 的 `adjudicateImport` 只匹配 `^src/stores/feature/([^/]+)` ⇒ **`@/stores` barrel 当前完全不入判据**；一旦改深路径就立刻入判据，而 owner 比较是「目录名 vs 剥 `Store` 后缀的文件名」**逐字**比 ⇒ `src/components/stock-analysis/**`（26 文件）取 `stockAnalysisStore` 会因 `"stockAnalysis" ≠ "stock-analysis"` 判成**新增违规**，连目录同源的都不自认。
+股票 store 在 `src/stores/index.ts:102-111`，**68 个消费方**从 `@/stores` 取它们，其中 **36 个落在 `src/components/**` 扫描面内**。`scripts/check-component-neutrality.mjs:89` 的 `adjudicateImport` 只匹配 `^src/stores/feature/([^/]+)` ⇒ **`@/stores` barrel 当前完全不入判据**；一旦改深路径就立刻入判据，而 owner 比较当时是「目录名 vs 剥 `Store` 后缀的文件名」**逐字**比 ⇒ `src/components/stock-analysis/**`（26 文件）取 `stockAnalysisStore` 会因 `"stockAnalysis" ≠ "stock-analysis"` 判成**新增违规**，连目录同源的都不自认。
+⚠ 两处后续：① 这个 `:82-85` 的行号锚已被批 A（`7594e32d1` 插 40 行）与批 C（`#199/#200` 再插行）两次推走，现值 **`:89`**（`adjudicateImport` 声明行）；
+② 「逐字比」那半句的预测**已被批 A 归一消掉**（§118），所以本行真正剩下的代价是「拆桶 ⇒ 240 条新键入判据」，量化见 §121.3。
 ⇒ 需要的是**前置裁定**，不是改 import 串。裁定见 114.5-③。
 
 ### 114.5 四项裁定（执行者交上来判据不足，逐条裁）
@@ -5660,10 +5662,17 @@ HEAD 早已含归一判据，全等版只能从 `7594e32d1^` = `708fc1b80` 取�
 基线本身钉在 `d2652a980`（10-31），**早于**这两次修复（11-05）⇒ 真形态是「**修掉未钉**」，
 不是「并行期未提交」。所以批 B 可以钉，前提是钉的那一刻 `src/**` 零 ` M`（见 §121）。
 
-锚点复核：文件 1–92 行一字未动 ⇒ `docs/plans/PLAN-shared-primitives-neutrality.md:147` 引用的
+锚点复核（批 A 当时）：文件 1–92 行一字未动 ⇒ `docs/plans/PLAN-shared-primitives-neutrality.md:147` 引用的
 `check-component-neutrality.mjs:53`（`NEUTRAL_PREFIXES` 那行）与本文件 `:82-85` 引用的
 `adjudicateImport` 两条正则（PLAN:5354）仍在原位、仍逐字可指。
 `component-neutrality-baseline.json` 与 `component-neutrality-allowlist.json` 相对 HEAD **零 diff**。
+
+⚠ **本段的两个行号已被批 C（#199 + #200，提交见 §123）推翻**：那一批把 `NEUTRAL_PREFIXES` 的登记常量
+从中段**上移**、并在 `adjudicateImport` 之前插了防护函数 ⇒ 现值 `:61` 与 `:89`（`grep -n` 复量）。
+这正是记忆里那条「改脚本头注释/中段插行会让别处『逐字抄自 X:m-n』的引用集体腐烂，必须同批改指」的复发实例——
+**批 A 当年刻意保住 1–92 行，批 C 没能保住**，因为它必须在 `main` 之前定义 `scanFloorFailures`。
+本段的**结论**（基线与白名单零 diff、判据变更单独成批）不受影响；三处引用已同批改指（本节、
+PLAN:5354、`PLAN-shared-primitives-neutrality.md:147`）。
 
 ### 118.4 未做
 
@@ -5846,6 +5855,68 @@ camel 优先、回落 `camelToSnake`），落点 create `:5383` / update `:5444`
    但钉账要的是「那一刻」的干净面）。
 4. 顺带做一次**基线 `kind` / `targetOwner` 字段重算**：基线条目自带这两列，而 #177 只按 `file+target` 建键比对，
    目录搬迁过的条目这两列可能已陈旧（不影响棘轮，影响按组排期的读数）。
+
+## 123. 中立性批 C：空洞通过防护 + NEUTRAL 支收窄（#199 + #200，2026-11-06）
+
+一个文件 `scripts/check-component-neutrality.mjs`（**+154 / −28，430 → 556 行**）。两件事同文件、
+由同一执行者做完，但**判据性质不同**：#199 是「让门在自己看不见代码时退成永远绿」的漏洞修掉，
+#200 是把批 A 多让出去的一步**收回来**。两件事都没有动棘轮（基线与白名单相对 HEAD 零 diff，
+`--update-baseline` 未跑）。
+
+### 123.1 #199 双锚（`scanFloorFailures`，脚本 `:227`）
+
+- 条件 a 绝对下界 `MIN_SCANNED_FILES = 300`（实测扫描面 927 的约 1/3，取比例而非瞬时读数 ⇒ 锚不随每次提交漂）；
+  它兜的是「基线缺失/损坏/为空 ⇒ 条件 b 退化成 `>= 0`」那一支（`isFirstEstablish` 分支证明这不是假想情形）。
+- 条件 b 相对基线面「本轮扫描到的不同 file 数 ≥ 基线里出现的不同 file 数」（现值 212 键 / **157** 个不同 file）。
+  ⚠ **刻意不是集合包含**：基线 157 个 file 里已有 **2 个磁盘上不存在**（存量修复时删/搬，正常 decay），
+  写成 `基线 file ⊆ 扫描 file` 会当场误红。
+- 拦截点在「报告行之后、棘轮比对与写盘之前」，并明写不许用 `--update-baseline` 把空集钉成新基线。
+- 目录缺失一支从 `console.log` + `exit(0)` 改成 `console.error` + `exit(1)`，文案去掉「跳过」二字。
+- 变异体复现（临时副本，跑完即删）：防护**去掉** ⇒ 「扫描 0 文件 · 原始 0」+ `PASS（已修复 **212** 条）` **EXIT=0**
+  （账面还会显示「全部修好」，这就是空洞通过最危险的形态）；防护**在位** ⇒ 双锚各一条 **EXIT=1**。
+
+### 123.2 #200 NEUTRAL 支退回精确匹配
+
+`isNeutralOwner` 由 `NEUTRAL_PREFIXES.some((n) => normOwner(n) === normOwner(targetOwner))` 改回
+`NEUTRAL_PREFIXES.includes(targetOwner)`；`findViolations` 里 owner 两支的 `normOwner` **一字未动**
+（diff 上那一行无 `+/-` 可验）。判据写进注释：owner 支问「是不是同一模块的两种命名形」⇒ 归一；
+NEUTRAL 支问「是不是人登记过的中性目录」（AGENTS.md 明文不许静默扩）⇒ 逐字命中；
+一并归一会让「把目录改名成 `dynamic-ui`」白拿豁免，扩面动作从「改登记表 + 写理由」退化成「改名字」。
+
+- selftest ③d **判据反转**：原来钉「`dynamic-ui` 也算中性（不报）」，现在钉「未登记的 kebab 变体**必须**报违规」。
+- 新正控 ③e：`stock-analysis` 目录同时引 `stockAnalysisStore`（store 支）与 `@/components/stockAnalysis/Panel`（组件支），
+  两支都必须豁免 ⇒ 有人把三支一起退回全等即红。（首次跑时误用 `llmWiki` 当同 owner 组件形，
+  selftest 当场红，改对 ⇒ 顺带证明 ③e 真在钉东西。）
+- 真实数据影响为 0 的二次印证：判定档读数**逐字不变**
+  `扫描 927 文件 · 原始跨域引用 202 · 白名单豁免后 199` + `PASS（基线 212，已修复 26）`，`EXIT=0`；
+  变异体 A（NEUTRAL 退回归一）⇒ selftest 只红 ③d 一条、判定档读数仍逐字不变。
+- 四个中性名在真实 import 图里**只以登记表原形出现**（`layout 100 / shared 44 / common 39 / dynamicUI 21`，
+  一级目录里无任何 kebab/snake/首字母大写变体）⇒ 收窄不会误报，残余代价是将来改名时一次浮出 21 条，
+  而这正是收窄想要的行为。
+
+### 123.3 断言计数从此由脚本自己报
+
+`check()` 自计并打印 `SELFTEST OK（共 31 条断言 · 失败 0）`。演进：首建 `d2652a980` **9** →
+批 A `7594e32d1` **25**（那批实为「原 9 + 补 16」，我此前在 §118 写的「原 12 条 + 本批 15 条」两个数都错，
+已在原地订正）→ 本批 **31**（+③e 1 条、+双锚防护 5 条）。
+
+### 123.4 本批的连带代价（已同批改指，别当已解决）
+
+批 C 在 `adjudicateImport` 之前插函数、并把 `NEUTRAL_PREFIXES` 常量上移 ⇒
+`§118.3` 里「文件 1–92 行一字未动」的前提**不再成立**：`NEUTRAL_PREFIXES` `:53` → **`:61`**、
+`adjudicateImport` `:82-85` → **`:89`**。三处文档引用已同批改指
+（本节、PLAN:5354、`PLAN-shared-primitives-neutrality.md:147`），批 A 当年的「仍在原位」记述原地保留并加 ⚠ 标注。
+⇒ 复发的判据：**门禁脚本只要在中段插行，就必须把「逐字抄自 X:m-n」形态的引用一起改**；
+本仓这类引用已经烂过两次（`#131` / `#55` 的重锚模式就是为它做的），能不改行号就不改。
+
+### 123.5 未做
+
+1. 两件都在判据面上，**基线未钉**（#177 仍是独立批，需要 `src/**` 零 ` M` 的窗口）。
+2. 未跑 vitest `src/__tests__/ci.workflow.test.ts`：CI 两侧命令行一字未动，对称差集护栏输入面不变；
+   但本机 vitest 今天全天起不来（见 §122.6-1），这条属「未验证」而不是「验证通过」。
+3. `scanFloorFailures` 的下界 300 是**比例锚**，代码规模若缩到 300 以下它会误红 —— 那属于「规模萎缩到需要重新选锚」
+   的信号，不是缺陷，但没有登记表能自动提醒，靠人。
+4. 首建批（`d2652a980`）留在脚本第 3 行的 `team-lead-15 规格` 字样是人名标记，与本轮无关，未动。
 
 ## 122. 独立审查轮 + #182 落地轮：绕过面、三条既存缺陷、以及一处报告质量记账（lane R / lane N，2026-11-06）
 

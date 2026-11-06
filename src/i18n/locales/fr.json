@@ -2141,7 +2141,10 @@
     "apiRequestFailed": "La requête API a échoué : {{statusText}}",
     "storeNotRegistered": "Le magasin \"{{storeName}}\" n'est pas enregistré",
     "unknownSourceType": "Type de source de données inconnu : {{type}}",
-    "apiEndpointForbidden": "Le point d'accès API \"{{endpoint}}\" n'est pas autorisé et a été bloqué"
+    "apiEndpointForbidden": "Le point d'accès API \"{{endpoint}}\" n'est pas autorisé et a été bloqué",
+    "fetchEndpointPermissionDenied": "Cette source n'est pas autorisée à accéder au point d'accès fetch \"{{endpoint}}\" ; la requête a été bloquée",
+    "fetchInitFieldForbidden": "Le champ de requête fetch \"{{field}}\" n'est pas autorisé ; la requête a été bloquée",
+    "fetchMethodForbidden": "La méthode fetch \"{{method}}\" n'est pas autorisée (seuls GET/POST sont pris en charge) ; la requête a été bloquée"
   },
   "datasetManager": {
     "action": "Action",

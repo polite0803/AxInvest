@@ -2141,7 +2141,10 @@
     "apiRequestFailed": "API अनुरोध विफल: {{statusText}}",
     "storeNotRegistered": "स्टोर \"{{storeName}}\" पंजीकृत नहीं है",
     "unknownSourceType": "अज्ञात डेटा स्रोत प्रकार: {{type}}",
-    "apiEndpointForbidden": "API एंडपॉइंट \"{{endpoint}}\" की अनुमति नहीं है और इसे ब्लॉक किया गया"
+    "apiEndpointForbidden": "API एंडपॉइंट \"{{endpoint}}\" की अनुमति नहीं है और इसे ब्लॉक किया गया",
+    "fetchEndpointPermissionDenied": "इस स्रोत को fetch एंडपॉइंट \"{{endpoint}}\" तक पहुँचने की अनुमति नहीं है; अनुरोध ब्लॉक कर दिया गया",
+    "fetchInitFieldForbidden": "fetch अनुरोध फ़ील्ड \"{{field}}\" की अनुमति नहीं है; अनुरोध ब्लॉक कर दिया गया",
+    "fetchMethodForbidden": "fetch मेथड \"{{method}}\" की अनुमति नहीं है (केवल GET/POST समर्थित); अनुरोध ब्लॉक कर दिया गया"
   },
   "datasetManager": {
     "action": "कार्रवाई",

@@ -2141,7 +2141,10 @@
     "apiRequestFailed": "API 请求失败：{{statusText}}",
     "storeNotRegistered": "Store \"{{storeName}}\" 未注册",
     "unknownSourceType": "未知数据源类型：{{type}}",
-    "apiEndpointForbidden": "API 端点 \"{{endpoint}}\" 不在白名单内，已阻止调用"
+    "apiEndpointForbidden": "API 端点 \"{{endpoint}}\" 不在白名单内，已阻止调用",
+    "fetchEndpointPermissionDenied": "当前来源没有访问 fetch 端点 \"{{endpoint}}\" 的权限，已阻止请求",
+    "fetchInitFieldForbidden": "fetch 请求参数 \"{{field}}\" 不在允许范围内，已阻止请求",
+    "fetchMethodForbidden": "fetch 请求方法 \"{{method}}\" 不被允许（仅支持 GET/POST），已阻止请求"
   },
   "datasetManager": {
     "action": "操作",

@@ -2141,7 +2141,10 @@
     "apiRequestFailed": "API 요청 실패: {{statusText}}",
     "storeNotRegistered": "저장소 \"{{storeName}}\"가 등록되지 않음",
     "unknownSourceType": "알 수 없는 데이터 소스 유형: {{type}}",
-    "apiEndpointForbidden": "API 엔드포인트 \"{{endpoint}}\"은(는) 허용되지 않아 차단되었습니다"
+    "apiEndpointForbidden": "API 엔드포인트 \"{{endpoint}}\"은(는) 허용되지 않아 차단되었습니다",
+    "fetchEndpointPermissionDenied": "이 소스는 fetch 엔드포인트 \"{{endpoint}}\"에 접근할 권한이 없어 요청이 차단되었습니다",
+    "fetchInitFieldForbidden": "fetch 요청 필드 \"{{field}}\"이(가) 허용되지 않아 요청이 차단되었습니다",
+    "fetchMethodForbidden": "fetch 메서드 \"{{method}}\"은(는) 허용되지 않습니다(GET/POST만 지원). 요청이 차단되었습니다"
   },
   "datasetManager": {
     "action": "작업",

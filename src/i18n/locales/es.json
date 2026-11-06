@@ -2141,7 +2141,10 @@
     "apiRequestFailed": "Solicitud API fallida: {{statusText}}",
     "storeNotRegistered": "Almacén \"{{storeName}}\" no registrado",
     "unknownSourceType": "Tipo de fuente de datos desconocido: {{type}}",
-    "apiEndpointForbidden": "El endpoint de API \"{{endpoint}}\" no está permitido y se ha bloqueado"
+    "apiEndpointForbidden": "El endpoint de API \"{{endpoint}}\" no está permitido y se ha bloqueado",
+    "fetchEndpointPermissionDenied": "Este origen no tiene permiso para acceder al endpoint fetch \"{{endpoint}}\"; la solicitud fue bloqueada",
+    "fetchInitFieldForbidden": "El campo de solicitud fetch \"{{field}}\" no está permitido; la solicitud fue bloqueada",
+    "fetchMethodForbidden": "El método fetch \"{{method}}\" no está permitido (solo se admiten GET/POST); la solicitud fue bloqueada"
   },
   "datasetManager": {
     "action": "Acción",

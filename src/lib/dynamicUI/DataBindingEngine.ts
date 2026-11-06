@@ -5,7 +5,7 @@ import { invoke } from "@/lib/invoke";
 import { isStoreReadCovered, isWildcardMatch } from "@/lib/skillPermissions";
 import { useExecutionStore } from "@/stores/feature/executionStore";
 import type { DataSourceConfig, SkillPermissions } from "@/types";
-import { isAllowedFetchUrl, isAllowedInvokeEndpoint } from "./dataSourceSecurity";
+import { isAllowedFetchUrl, isAllowedInvokeEndpoint, toSafeFetchInit } from "./dataSourceSecurity";
 import { getNestedValue } from "./utils";
 
 /**
@@ -25,11 +25,11 @@ export interface DataSourceSubscriber {
 /**
  * 来源受限的渲染树在取 dataSource 前必须过的第二道闸。
  *
- * `dataSourceSecurity` 那道是按**前缀**对所有 Schema 放行的，而 `dynamic_ui_` 前缀里含
- * `create/update/delete_dynamic_ui_schema` 一族写命令；插件来源的权限面（`commands` /
- * `storeRead`）若不在这里执行，dataSource 这条路就等于绕过了动作闸 —— 与
- * `executeActions` 那条是同一个绕过面（`store` 类型直读任意已注册 store，
- * 包括存放密钥的 `providerStore`）。
+ * `dataSourceSecurity` 那道是按**显式命令枚举 / URL 协议**对所有 Schema 放行的，而
+ * `ALLOWED_INVOKE_COMMANDS` 里含 `create/update/delete_dynamic_ui_schema` 一族写命令；
+ * 插件来源的权限面（`commands` / `storeRead`）若不在这里执行，dataSource 这条路就等于
+ * 绕过了动作闸 —— 与 `executeActions` 那条是同一个绕过面（`store` 类型直读任意已注册
+ * store，包括存放密钥的 `providerStore`）。
  *
  * `permissions === undefined` 表示不受限（可信来源 / 内存态 Schema），行为逐字不变。
  */
@@ -45,11 +45,16 @@ function assertDataSourceCoveredByPermissions(
       endpoint: string;
       method: "invoke" | "fetch";
     };
-    if (
-      method === "invoke"
-      && !isWildcardMatch(String(endpoint), permissions.commands ?? [])
-    ) {
-      throw new Error(i18n.t("actionRouter.commandPermissionDenied", { command: String(endpoint) }));
+    // invoke 与 fetch 同判据、不同文案：权限面的 `commands` 列表既装命令名也装 fetch 端点
+    // （`isWildcardMatch` 支持尾部 `*`，可声明 `https://api.example.com/*` 这类端点族）。
+    // 粒度必须落在「端点」上 —— `params` 无法校验是本仓既有裁定（见
+    // `schemaActionPermissions.ts` 文件头「核心判据」）。#206：fetch 分支此前**一条权限
+    // 都不查**，插件声明任意 https/localhost URL 即可带自定义 header 出网。
+    if (!isWildcardMatch(String(endpoint), permissions.commands ?? [])) {
+      if (method === "invoke") {
+        throw new Error(i18n.t("actionRouter.commandPermissionDenied", { command: String(endpoint) }));
+      }
+      throw new Error(i18n.t("dataBinding.fetchEndpointPermissionDenied", { endpoint: String(endpoint) }));
     }
   }
   if (config.type === "store") {
@@ -111,7 +116,13 @@ export async function resolveDataSource(
       if (typeof endpoint !== "string" || !isAllowedFetchUrl(endpoint)) {
         throw new Error(i18n.t("dataBinding.apiEndpointForbidden", { endpoint: String(endpoint) }));
       }
-      const response = await fetch(endpoint, params as RequestInit);
+      // #206：Schema 原文的 params 不再整体当 RequestInit 透传 —— 只接受白名单字段
+      // （method ∈ GET/POST、headers ∈ 内容协商类、body 仅限 POST 的字符串体），其余拒绝。
+      const safeInit = toSafeFetchInit(params);
+      if (!safeInit.ok) {
+        throw new Error(i18n.t(safeInit.messageKey, safeInit.params));
+      }
+      const response = await fetch(endpoint, safeInit.init);
       if (!response.ok) {
         throw new Error(i18n.t("dataBinding.apiRequestFailed", { statusText: response.statusText }));
       }

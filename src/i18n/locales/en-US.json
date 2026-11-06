@@ -2141,7 +2141,10 @@
     "apiRequestFailed": "API request failed: {{statusText}}",
     "storeNotRegistered": "Store \"{{storeName}}\" not registered",
     "unknownSourceType": "Unknown data source type: {{type}}",
-    "apiEndpointForbidden": "API endpoint \"{{endpoint}}\" is not allowed and was blocked"
+    "apiEndpointForbidden": "API endpoint \"{{endpoint}}\" is not allowed and was blocked",
+    "fetchEndpointPermissionDenied": "This origin is not allowed to fetch endpoint \"{{endpoint}}\"; the request was blocked",
+    "fetchInitFieldForbidden": "fetch request field \"{{field}}\" is not allowed; the request was blocked",
+    "fetchMethodForbidden": "fetch method \"{{method}}\" is not allowed (only GET/POST are supported); the request was blocked"
   },
   "datasetManager": {
     "action": "Action",

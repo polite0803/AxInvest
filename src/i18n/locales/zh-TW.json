@@ -2141,7 +2141,10 @@
     "apiRequestFailed": "API 請求失敗：{{statusText}}",
     "storeNotRegistered": "儲存區「{{storeName}}」未註冊",
     "unknownSourceType": "未知的資料來源類型：{{type}}",
-    "apiEndpointForbidden": "API 端點「{{endpoint}}」不在白名單內，已阻止呼叫"
+    "apiEndpointForbidden": "API 端點「{{endpoint}}」不在白名單內，已阻止呼叫",
+    "fetchEndpointPermissionDenied": "目前來源沒有存取 fetch 端點「{{endpoint}}」的權限，已阻止請求",
+    "fetchInitFieldForbidden": "fetch 請求參數「{{field}}」不在允許範圍內，已阻止請求",
+    "fetchMethodForbidden": "fetch 請求方法「{{method}}」不被允許（僅支援 GET/POST），已阻止請求"
   },
   "datasetManager": {
     "action": "動作",

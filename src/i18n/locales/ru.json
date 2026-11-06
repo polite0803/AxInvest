@@ -2141,7 +2141,10 @@
     "apiRequestFailed": "Запрос API не удался: {{statusText}}",
     "storeNotRegistered": "Хранилище \"{{storeName}}\" не зарегистрировано",
     "unknownSourceType": "Неизвестный тип источника данных: {{type}}",
-    "apiEndpointForbidden": "Конечная точка API \"{{endpoint}}\" не разрешена и была заблокирована"
+    "apiEndpointForbidden": "Конечная точка API \"{{endpoint}}\" не разрешена и была заблокирована",
+    "fetchEndpointPermissionDenied": "Этому источнику не разрешён доступ к конечной точке fetch \"{{endpoint}}\"; запрос заблокирован",
+    "fetchInitFieldForbidden": "Поле запроса fetch \"{{field}}\" не разрешено; запрос заблокирован",
+    "fetchMethodForbidden": "Метод fetch \"{{method}}\" не разрешён (поддерживаются только GET/POST); запрос заблокирован"
   },
   "datasetManager": {
     "action": "Действие",

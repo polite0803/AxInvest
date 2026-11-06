@@ -93,16 +93,35 @@ describe("DataBindingEngine", () => {
     });
 
     describe("api 类型", () => {
-      it("invoke 方法应调用 invoke", async () => {
+      it("invoke 方法应调用 invoke（真实命令名，#204 回归）", async () => {
         const { invoke } = await import("@/lib/invoke");
+        vi.mocked(invoke).mockClear();
         vi.mocked(invoke).mockResolvedValue({ ok: true });
 
+        // 必须用仓内真实存在的命令名：上一版这里写的是 `dynamic_ui_get_schema` ——
+        // 一条不存在的命令，只为凑过 `startsWith("dynamic_ui_")` 的旧前缀判据而存在。
+        // 本仓命令名动词前置，真实形态是 `get_dynamic_ui_schema`。
         const result = await resolveDataSource({
           type: "api",
-          config: { endpoint: "dynamic_ui_get_schema", method: "invoke", params: { id: 1 } },
+          config: { endpoint: "get_dynamic_ui_schema", method: "invoke", params: { id: 1 } },
         });
-        expect(invoke).toHaveBeenCalledWith("dynamic_ui_get_schema", { id: 1 });
+        expect(invoke).toHaveBeenCalledWith("get_dynamic_ui_schema", { id: 1 });
         expect(result).toEqual({ ok: true });
+      });
+
+      it("invoke 方法应拒绝旧前缀形态的假命令名（负控，锁死 #204 的成因）", async () => {
+        const { invoke } = await import("@/lib/invoke");
+        vi.mocked(invoke).mockClear();
+        vi.mocked(invoke).mockResolvedValue({ ok: true });
+
+        // `dynamic_ui_` 前缀开头但不是任何真实命令 ⇒ 显式枚举白名单必须拒
+        await expect(
+          resolveDataSource({
+            type: "api",
+            config: { endpoint: "dynamic_ui_get_schema", method: "invoke" },
+          }),
+        ).rejects.toThrow();
+        expect(invoke).not.toHaveBeenCalled();
       });
 
       it("invoke 方法应阻止白名单外的端点", async () => {
@@ -144,6 +163,135 @@ describe("DataBindingEngine", () => {
             config: { endpoint: "https://api.example.com", method: "fetch" },
           }),
         ).rejects.toThrow();
+      });
+
+      // ── #206：RequestInit 白名单化（Schema 原文不再整体透传）──────────────
+      // 每组负控前都有同型正控先证明 fetch 真的带着收敛后的 init 执行了。
+      describe("fetch RequestInit 白名单（#206）", () => {
+        const mockFetchOk = () => {
+          const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: () => Promise.resolve({ ok: 1 }),
+          });
+          globalThis.fetch = fetchMock;
+          return fetchMock;
+        };
+
+        it("正控：白名单内字段（GET + content-type 头）收敛后原样传给 fetch", async () => {
+          const fetchMock = mockFetchOk();
+
+          await resolveDataSource({
+            type: "api",
+            config: {
+              endpoint: "https://api.example.com/x",
+              method: "fetch",
+              params: { method: "get", headers: { "Content-Type": "application/json" } },
+            },
+          });
+          expect(fetchMock).toHaveBeenCalledWith("https://api.example.com/x", {
+            method: "GET",
+            headers: { "Content-Type": "application/json" },
+          });
+        });
+
+        it("正控：POST + 字符串 body 放行", async () => {
+          const fetchMock = mockFetchOk();
+
+          await resolveDataSource({
+            type: "api",
+            config: {
+              endpoint: "https://api.example.com/x",
+              method: "fetch",
+              params: { method: "POST", body: '{"a":1}' },
+            },
+          });
+          expect(fetchMock).toHaveBeenCalledWith("https://api.example.com/x", {
+            method: "POST",
+            body: '{"a":1}',
+          });
+        });
+
+        it("无 params 时以空 init 请求（正控）", async () => {
+          const fetchMock = mockFetchOk();
+
+          await resolveDataSource({
+            type: "api",
+            config: { endpoint: "https://api.example.com/x", method: "fetch" },
+          });
+          expect(fetchMock).toHaveBeenCalledWith("https://api.example.com/x", {});
+        });
+
+        it("负控：白名单外字段（credentials）被拒且不发请求", async () => {
+          const fetchMock = mockFetchOk();
+
+          await expect(
+            resolveDataSource({
+              type: "api",
+              config: {
+                endpoint: "https://api.example.com/x",
+                method: "fetch",
+                params: { credentials: "include" },
+              },
+            }),
+          ).rejects.toThrow();
+          expect(fetchMock).not.toHaveBeenCalled();
+        });
+
+        it("负控：Authorization 头被拒（跨域凭据面不容 Schema 伪造）", async () => {
+          const fetchMock = mockFetchOk();
+
+          await expect(
+            resolveDataSource({
+              type: "api",
+              config: {
+                endpoint: "https://api.example.com/x",
+                method: "fetch",
+                params: { headers: { Authorization: "Bearer sk-xxx" } },
+              },
+            }),
+          ).rejects.toThrow();
+          expect(fetchMock).not.toHaveBeenCalled();
+        });
+
+        it("负控：非 GET/POST 方法（PUT/DELETE）被拒", async () => {
+          const fetchMock = mockFetchOk();
+
+          await expect(
+            resolveDataSource({
+              type: "api",
+              config: { endpoint: "https://api.example.com/x", method: "fetch", params: { method: "PUT" } },
+            }),
+          ).rejects.toThrow();
+          await expect(
+            resolveDataSource({
+              type: "api",
+              config: { endpoint: "https://api.example.com/x", method: "fetch", params: { method: "DELETE" } },
+            }),
+          ).rejects.toThrow();
+          expect(fetchMock).not.toHaveBeenCalled();
+        });
+
+        it("负控：GET 携带 body 被拒；非字符串 body 被拒", async () => {
+          const fetchMock = mockFetchOk();
+
+          await expect(
+            resolveDataSource({
+              type: "api",
+              config: { endpoint: "https://api.example.com/x", method: "fetch", params: { body: "x" } },
+            }),
+          ).rejects.toThrow();
+          await expect(
+            resolveDataSource({
+              type: "api",
+              config: {
+                endpoint: "https://api.example.com/x",
+                method: "fetch",
+                params: { method: "POST", body: { obj: 1 } },
+              },
+            }),
+          ).rejects.toThrow();
+          expect(fetchMock).not.toHaveBeenCalled();
+        });
       });
     });
 
@@ -311,6 +459,45 @@ describe("DataBindingEngine", () => {
         ),
       ).rejects.toThrow();
       expect(invoke).not.toHaveBeenCalled();
+    });
+
+    // ── #206：fetch 端点同样必须过权限面（此前 fetch 分支一条权限都不查）──────
+    it("fetch 端点：面上没有该端点 ⇒ 拒且不发请求（负控，插件档现状 = 全部拒）", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+      globalThis.fetch = fetchMock;
+
+      // pluginFace.commands 只有命令名 `get_dynamic_ui_schema`，不含任何 URL ⇒
+      // 插件来源声明 fetch 数据源 today 一律 fail-closed
+      await expect(
+        resolveDataSource(
+          { type: "api", config: { endpoint: "https://api.example.com/x", method: "fetch" } },
+          pluginFace,
+        ),
+      ).rejects.toThrow();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("fetch 端点：面上以通配声明该端点族 ⇒ 放行（同文件正控，证明负控不是链路没起来）", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: 1 }),
+      });
+      globalThis.fetch = fetchMock;
+
+      const fetchFace = {
+        commands: ["https://api.example.com/*"],
+        events: [],
+        storeRead: [],
+        storeWrite: [],
+        navigate: [],
+      } as unknown as SkillPermissions;
+
+      const result = await resolveDataSource(
+        { type: "api", config: { endpoint: "https://api.example.com/x", method: "fetch" } },
+        fetchFace,
+      );
+      expect(fetchMock).toHaveBeenCalledWith("https://api.example.com/x", {});
+      expect(result).toEqual({ data: 1 });
     });
 
     it("store 端点：storeRead 为空 ⇒ 拒读任意已注册 store（负控）", async () => {

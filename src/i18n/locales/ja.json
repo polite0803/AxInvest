@@ -2141,7 +2141,10 @@
     "apiRequestFailed": "APIリクエスト失敗: {{statusText}}",
     "storeNotRegistered": "ストア \"{{storeName}}\" は登録されていません",
     "unknownSourceType": "不明なデータソースタイプ: {{type}}",
-    "apiEndpointForbidden": "API エンドポイント \"{{endpoint}}\" は許可されておらず、呼び出しをブロックしました"
+    "apiEndpointForbidden": "API エンドポイント \"{{endpoint}}\" は許可されておらず、呼び出しをブロックしました",
+    "fetchEndpointPermissionDenied": "このソースには fetch エンドポイント \"{{endpoint}}\" へのアクセス権限がなく、リクエストをブロックしました",
+    "fetchInitFieldForbidden": "fetch リクエストフィールド \"{{field}}\" は許可されていないため、リクエストをブロックしました",
+    "fetchMethodForbidden": "fetch メソッド \"{{method}}\" は許可されていません（GET/POST のみ対応）。リクエストをブロックしました"
   },
   "datasetManager": {
     "action": "アクション",

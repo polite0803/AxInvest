@@ -5,7 +5,7 @@
  *
  * ## 为什么需要这一层
  *
- * `dataSource` 那条路早就有白名单（`SchemaValidator` 用 `ALLOWED_INVOKE_PREFIXES` 校验
+ * `dataSource` 那条路早就有白名单（`SchemaValidator` 用 `ALLOWED_INVOKE_COMMANDS` 显式枚举校验
  * `config.endpoint`），但**声明式动作**（`events[].actions[].type === "invoke"`）走的是另一条路：
  * `EventHandlerEngine.executeActions` 构造 `ActionContext` 时若不传 `permissions`，
  * `ActionRouter` 的 invoke executor 会**跳过**白名单判定直接 `invoke()`（判据是

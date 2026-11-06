@@ -1,5 +1,5 @@
 import i18n from "@/i18n";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";

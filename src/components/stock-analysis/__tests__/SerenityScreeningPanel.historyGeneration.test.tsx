@@ -1,6 +1,6 @@
 import i18n from "@/i18n";
 import { useSerenityStore } from "@/stores/feature/serenityStore";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { App } from "antd";
 import { I18nextProvider } from "react-i18next";

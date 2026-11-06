@@ -22,7 +22,7 @@ import {
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
 import { useSettingsStore, useStockAnalysisStore, useUIStore } from "@/stores";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import type { DataQualityReport, HorizonPriceGroup } from "@/types/stock-analysis";
 import { ExpandOutlined, FilePptOutlined, FileTextOutlined, FileWordOutlined, ReloadOutlined } from "@ant-design/icons";
 import { App, Button, Card, Collapse, Dropdown, Modal, Tag, Tooltip } from "antd";

@@ -1,4 +1,4 @@
-import { type DegradationSummary, summarizeDegradations, useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { type DegradationSummary, summarizeDegradations, useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import { DatePicker, Segmented, Space, Tag, Tooltip } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { AlertTriangle, Clock, Zap } from "lucide-react";

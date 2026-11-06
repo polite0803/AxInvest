@@ -22,7 +22,7 @@ vi.mock("@/lib/invoke", () => ({
 
 // PanelEmpty 只读 mode（live 时 noData 不升级成 replayDegraded），按最小面替身。
 const anchor = { mode: "live", asOfDate: null as string | null };
-vi.mock("@/stores/feature/timeAnchorStore", () => ({
+vi.mock("@/stores/shared/timeAnchorStore", () => ({
   useTimeAnchorStore: (selector: (s: { mode: string; asOfDate: string | null }) => unknown) => selector(anchor),
 }));
 

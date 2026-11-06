@@ -12,7 +12,7 @@ const timeAnchorState: Record<string, unknown> = {
   asOfDate: null,
   mode: "live",
 };
-vi.mock("@/stores/feature/timeAnchorStore", () => ({
+vi.mock("@/stores/shared/timeAnchorStore", () => ({
   useTimeAnchorStore: (selector: (s: typeof timeAnchorState) => unknown) => selector(timeAnchorState),
 }));
 

@@ -1,5 +1,5 @@
 import i18n from "@/i18n";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import { act, render, screen } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

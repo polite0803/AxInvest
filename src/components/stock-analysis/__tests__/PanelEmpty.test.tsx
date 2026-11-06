@@ -18,7 +18,7 @@ const anchorState: { mode: "live" | "replay" | "backtest_sweep"; degradationCoun
   degradationCount: 0,
 };
 
-vi.mock("@/stores/feature/timeAnchorStore", () => ({
+vi.mock("@/stores/shared/timeAnchorStore", () => ({
   useTimeAnchorStore: (selector: (s: typeof anchorState) => unknown) => selector(anchorState),
 }));
 

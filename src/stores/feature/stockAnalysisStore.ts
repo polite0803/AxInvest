@@ -33,7 +33,7 @@ import {
   StockAction,
 } from "@/lib/stock-analysis-utils";
 import { detectFutureReferencesForNode } from "@/lib/timeTravel/futureReferenceDetector";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import type { EarningsEvent, KLine, StockQuote, StockSearchResult } from "@/types";
 import type {
   AnalysisStatus,

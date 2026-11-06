@@ -15,7 +15,7 @@ vi.mock("@/lib/invoke", () => ({
 }));
 
 import { inferStage, syncTimeAnchorForRun, useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 
 /**
  * 测试覆盖范围（弥补审计中的"Store 逻辑、事件处理、辩论同步、错误路径、进度计算"无覆盖的问题）：

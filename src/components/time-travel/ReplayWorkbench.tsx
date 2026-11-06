@@ -5,7 +5,7 @@ import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBad
 import { ReplaySweep } from "@/components/time-travel/ReplaySweep";
 import { TimeTravelBatchCard } from "@/components/time-travel/TimeTravelBatchCard";
 import { investPath } from "@/lib/investRoutes";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import { Alert, Button, Card, Empty, Space, Typography } from "antd";
 import { RotateCcw, Zap } from "lucide-react";
 import { useState } from "react";

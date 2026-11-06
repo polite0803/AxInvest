@@ -22,7 +22,7 @@ vi.mock("@/lib/invoke", () => ({
 // 时间锚点按最小面替身：被测组件只用 mode / asOfDate 两个选择器，
 // 拉真 store 会把整棵 store 树带进 jsdom（重且易崩，同 ReflectionPanel.cronConfig.test.tsx 的处置）。
 const anchor = { mode: "live", asOfDate: null as string | null };
-vi.mock("@/stores/feature/timeAnchorStore", () => ({
+vi.mock("@/stores/shared/timeAnchorStore", () => ({
   useTimeAnchorStore: (selector: (s: { mode: string; asOfDate: string | null }) => unknown) => selector(anchor),
 }));
 

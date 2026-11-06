@@ -12,7 +12,7 @@ import {
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import type { TaskAccepted } from "@/types";
 import type {
   BacktestComparisonResponse,

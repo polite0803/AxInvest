@@ -1,4 +1,4 @@
-import { summarizeDegradations, timeAnchorHelpers, useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { summarizeDegradations, timeAnchorHelpers, useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { isValidPastDate, todayIso, DATE_RE } = timeAnchorHelpers;

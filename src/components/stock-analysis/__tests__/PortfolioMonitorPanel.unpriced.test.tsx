@@ -36,7 +36,7 @@ vi.mock("@/stores/feature/stockAnalysisStore", () => ({
     }),
 }));
 
-vi.mock("@/stores/feature/timeAnchorStore", () => ({
+vi.mock("@/stores/shared/timeAnchorStore", () => ({
   useTimeAnchorStore: (sel: (s: Record<string, unknown>) => unknown) => sel({ asOfDate: null, mode: "live" }),
 }));
 

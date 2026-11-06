@@ -1,4 +1,4 @@
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import { Button } from "antd";
 import { Sparkles, X } from "lucide-react";
 import { useTranslation } from "react-i18next";

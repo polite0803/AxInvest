@@ -1,4 +1,4 @@
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import { SettingOutlined } from "@ant-design/icons";
 import { Alert, Button, Empty, Space, Typography } from "antd";
 import { AlertTriangle, Clock } from "lucide-react";

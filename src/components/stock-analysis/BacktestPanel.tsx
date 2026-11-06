@@ -1,7 +1,7 @@
 import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBadge";
 import { useTrackedTask } from "@/hooks/useTrackedTask";
 import { invoke } from "@/lib/invoke";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import type { TaskAccepted } from "@/types";
 import type { BacktestComparisonResponse, BacktestStats, GroupBacktestResult } from "@/types/stock-analysis";
 import { Alert, Button, Card, Empty, InputNumber, Segmented, Spin, Statistic, Table, Tag, Tooltip } from "antd";

@@ -34,7 +34,7 @@ import {
   type EvolutionStrategySummaryRow,
   useStockAnalysisStore,
 } from "@/stores/feature/stockAnalysisStore";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import { evolutionStatusMeta, formatEvolutionTime, parseTrigger } from "./evolution-ui-utils";
 import { EvolutionApprovalDrawer } from "./EvolutionApprovalDrawer";
 

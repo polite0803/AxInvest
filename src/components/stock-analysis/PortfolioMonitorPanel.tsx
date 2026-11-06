@@ -13,7 +13,7 @@ import { useTranslation } from "react-i18next";
 
 import { portfolioRiskColor, portfolioRiskTKey } from "@/lib/stock-analysis-utils";
 import { type PortfolioCorrelationCell, useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 
 function fmtMoney(n: number | undefined): string {
   if (n === undefined || n === null) { return "—"; }

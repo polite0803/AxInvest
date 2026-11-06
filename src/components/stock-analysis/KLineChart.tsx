@@ -2,7 +2,7 @@ import { useIsDarkTheme } from "@/hooks/useIsDarkTheme";
 import { cssVar } from "@/lib/cssVar";
 import { ensureECharts } from "@/lib/echartsInstance";
 import { useStockAnalysisStore } from "@/stores";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import { hueColor } from "@/theme/categoricalColors";
 import type { KLine } from "@/types";
 import * as echarts from "echarts";

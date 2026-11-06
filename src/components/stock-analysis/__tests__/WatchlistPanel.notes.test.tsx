@@ -37,7 +37,7 @@ vi.mock("@/lib/invoke", () => ({
   isTauri: () => false,
 }));
 
-vi.mock("@/stores/feature/timeAnchorStore", () => ({
+vi.mock("@/stores/shared/timeAnchorStore", () => ({
   useTimeAnchorStore: (selector: (s: Record<string, unknown>) => unknown) => selector({ asOfDate: null, mode: "live" }),
 }));
 

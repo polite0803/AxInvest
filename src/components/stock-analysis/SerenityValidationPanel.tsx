@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { invoke } from "@/lib/invoke";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 
 /**
  * `serenity_validation_summary` 的返回形态（后端 DTO 为 camelCase）。

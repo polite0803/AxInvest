@@ -2,7 +2,7 @@ import { JobCard } from "@/components/tasks/JobCard";
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { horizonLabelKey } from "@/lib/stock-analysis-utils";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import type { TimeTravelBatchAnalysis, TimeTravelBatchState, TimeTravelPeriod } from "@/types";
 import {
   Alert,

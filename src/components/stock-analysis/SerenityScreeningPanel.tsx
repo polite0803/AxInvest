@@ -10,7 +10,7 @@ import {
   type TrendInfo,
   useSerenityStore,
 } from "@/stores/feature/serenityStore";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import { type AsOfDegradationEntry } from "@/types/stock-analysis";
 import {
   AlertOutlined,

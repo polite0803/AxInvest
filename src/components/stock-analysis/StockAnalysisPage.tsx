@@ -8,7 +8,7 @@ import { investPath } from "@/lib/investRoutes";
 import { invoke } from "@/lib/invoke";
 import { horizonLabelKey } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import { Button, Collapse, Dropdown, Segmented } from "antd";
 import {
   ArrowLeftRight,

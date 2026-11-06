@@ -1,4 +1,4 @@
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { useTimeAnchorStore } from "@/stores/shared/timeAnchorStore";
 import { Tag, Tooltip } from "antd";
 import { Clock } from "lucide-react";
 import { useTranslation } from "react-i18next";

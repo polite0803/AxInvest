@@ -6,7 +6,6 @@ data_sources:
   - Bash
   - FileRead
   - WebSearch
-  - OpcSendNotification
 ---
 
 # 安全补丁管理专家工作方法论
@@ -26,7 +25,7 @@ data_sources:
 - `Bash` — 执行系统命令检查系统版本、已安装补丁列表、服务状态等
 - `FileRead` — 读取补丁清单、资产清单、变更记录、部署脚本等文档
 - `WebSearch` — 搜索安全公告、CVE详情、补丁发布信息、兼容性说明等
-- `OpcSendNotification` — 发送补丁通知给相关干系人（系统管理员、业务负责人等）
+- 补丁通知：把通知正文（含目标干系人名单）作为输出交付，由用户手工发送（本系统未提供站内通知工具）
 
 ## 输出格式
 

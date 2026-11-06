@@ -27,12 +27,12 @@ use std::sync::Arc;
 //      「必失败」，正是任务 #115 对 `alert_tx` 判定的同一形态缺陷（「写进一条没人听的频道」）。
 //      让它真正可用需要另建通知 worker + 渠道配置接线，属新功能，不在缺陷修复授权内。
 // ⇒ 裁定：**退役该工具面**（与 `alert_tx` 同批收口口径）。panic 分支随实现体一并消失。
-// ⚠ 各 OPC 域包 / 专家清单里仍有 **31 处** `td("OpcSendNotification")` 之类的**声明**
-//    （`commands/opc_workflows/seed_*.rs`、`commands/opc_setup/*`）。它们只是写进 DB 模板
-//    的 ToolDef 名字串，删改会牵动逐文件的 `TEMPLATE_VERSION` 递增（会让已安装库整体重导
-//    模板、覆盖用户改动），属行为面改动 ⇒ 本批不动，登记给 OPC→L1 插件迁移（任务 #36）。
-//    现状影响：这些声明指向的工具**既不在注册表、也无 ToolDef 生产路径** ⇒ 调不到，
-//    与退役前的行为一致（退役前是「resolver 判 `known=false` ⇒ 工具未注册」）。
+// ⚠ 各 OPC 域包 / 专家清单里原本还有 **31 处** `td("OpcSendNotification")` 之类的**声明**
+//    （`commands/opc_workflows/seed_*.rs`、`commands/opc_setup/*`）—— 2026-11-07 任务 #208
+//    已把它们全部清理，并同步递增 11 个逐文件 `TEMPLATE_VERSION`（让已安装库重导模板，
+//    这是退役声明唯一生效路径）。配合 `config/agent_roles.yaml`、`config/opc/domain_packs/
+//    sales_growth/manifest.yaml` 与 5 份 `agency_experts/opc/**` 专家 prompt 的同批去声明，
+//    现在全仓（除文档与退役判据测试）已无该工具名的活声明。
 
 fn get_db() -> Result<Arc<sea_orm::DatabaseConnection>, ToolError> {
     crate::global_state::get_sea_db()

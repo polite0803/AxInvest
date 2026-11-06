@@ -57,6 +57,7 @@ pub fn domain_tool_defs(names: &[String]) -> Vec<axagent_harness::workflow_types
 /// ⇒ 「补个生产者」只会把必 panic 换成必失败（任务 #115 对 `alert_tx` 的同一判据）。
 /// 故实现体已从 `opc.rs` 删除，本白名单也不再为它产出 ToolDef —— 域包若仍声明该名字，
 /// 这里会**静默跳过**（不产出 ToolDef），而不是产出一个必失败的工具面。
+/// （2026-11-07 任务 #208 已把 31 处活声明全部清理，剩余零命中；本白名单的跳过分支保留为兜底。）
 pub fn opc_tool_defs(names: &[String]) -> Vec<axagent_harness::workflow_types::ToolDef> {
     use crate::Tool;
     let candidates: Vec<Arc<dyn Tool>> = vec![

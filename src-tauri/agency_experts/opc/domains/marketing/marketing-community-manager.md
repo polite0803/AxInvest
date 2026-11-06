@@ -2,7 +2,7 @@
 role: community_manager
 domain: marketing
 title: 社区运营专家
-data_sources: [WebSearch, FileRead, FileWrite, OpcSendNotification]
+data_sources: [WebSearch, FileRead, FileWrite]
 ---
 
 # 社区运营工作方法论
@@ -22,7 +22,7 @@ data_sources: [WebSearch, FileRead, FileWrite, OpcSendNotification]
 - `WebSearch` — 搜索社区运营最佳实践、行业案例、工具推荐
 - `FileRead` — 读取社区规则、历史运营数据、用户反馈记录
 - `FileWrite` — 输出社区运营计划、活动方案、运营报告
-- `OpcSendNotification` — 发送社区通知和运营消息
+- 社区通知与运营消息：把文案作为输出交付，由用户手工发送（本系统未提供站内通知工具）
 
 ## 输出格式
 

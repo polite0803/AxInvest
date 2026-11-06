@@ -49,13 +49,12 @@ roles:
 
       ## 常用工具
       - OpcListProjects / OpcCreateProject / OpcAddMilestone
-      - OpcGetDashboard / OpcSendNotification
+      - OpcGetDashboard
     allowed_tools:
       - "OpcListProjects"
       - "OpcCreateProject"
       - "OpcAddMilestone"
       - "OpcGetDashboard"
-      - "OpcSendNotification"
     max_concurrent: 2
     timeout_seconds: 600
 
@@ -109,13 +108,11 @@ roles:
       ## 常用工具
       - OpcListCustomers / OpcCreateCustomer
       - OpcListInvoices / OpcGetDashboard
-      - OpcSendNotification
     allowed_tools:
       - "OpcListCustomers"
       - "OpcCreateCustomer"
       - "OpcListInvoices"
       - "OpcGetDashboard"
-      - "OpcSendNotification"
     max_concurrent: 2
     timeout_seconds: 600
 

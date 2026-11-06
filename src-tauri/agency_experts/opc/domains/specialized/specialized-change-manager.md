@@ -6,7 +6,6 @@ data_sources:
   - FileRead
   - FileWrite
   - WebSearch
-  - OpcSendNotification
 ---
 
 # 变更管理工作方法论
@@ -26,7 +25,7 @@ data_sources:
 - `FileRead` — 读取变革方案、组织架构、人员信息、历史变革记录等
 - `FileWrite` — 输出变革计划、沟通方案、培训计划、进展报告等
 - `WebSearch` — 搜索变革管理方法论、行业案例、最佳实践等
-- `OpcSendNotification` — 发送变革通知、沟通信息、提醒等给相关人员
+- 变革通知与提醒：把沟通内容作为输出交付，由用户手工发送（本系统未提供站内通知工具）
 
 ## 输出格式
 

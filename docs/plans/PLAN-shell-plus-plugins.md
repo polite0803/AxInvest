@@ -6923,3 +6923,130 @@ Bundled 插件」，钉到空目录会让断言恒假。两处都带 `#189 例�
 provider 侧 `check_content_budget`，`MAX_FRAME_LEN` 64 MiB 不算 op 预算）。另：`create_publish_schedule` 目前
 **不校验** `content_ref_id` 指向的行是否存在（`content_ref_type` 多态、无外键）；本轮把前端那个必错的 id 修掉后，
 正常流程不再产生悬空引用，但**跨表引用校验**列为候选（要按类型枚举，未做）。
+
+### 128.19 #181 取证与裁定：`permission_mode` 不是「没人生产」，而是**授权结论被写在 LLM 入参里**
+
+取证 lane（只读、8 根逐根扫）的结论与我原登记的前提有出入，按证据重写：
+
+**根因链（四跳，全部 `file:line` 可复核）**：
+1. `src-tauri/src/commands/agent/command_bridge.rs:1206` 用 `input["permission_mode"].as_str().unwrap_or("default")` 取授权档位 —— 也就是说**授权结论取自 LLM 的工具入参**；
+2. 而该工具 `input_schema` 只声明 `command` / `args`（同文件 `:707-720`，`required: ["command","args"]`），LLM 根本不知道有这个键；
+3. `build_chat_tools()`（`:864-880`）原样取自那张表 ⇒ LLM 侧不会传；
+4. `create_handler`（`:900-912`）把入参字符串解析后**直送** `dispatch_command`，中间无任何宿主注入 ⇒ 该键**全仓零写点**（DB 层有 7 处写 `permission_mode` 的站，但没有一处写进 `input[...]`）。
+
+**比台账更糟的一点**：`CommandSafety::requires_confirmation()` 排在 `is_allowed()` **之后**（`:1227`）、且对 Caution 恒真 ⇒ `is_allowed(Caution,"full_access")` 那条臂**从派发口结构上不可达**；而 `requires_confirmation` 的产物**全仓零消费方**（`src/**` 搜 `requires_confirmation|requiresConfirmation` = 0）⇒ **Caution 级插件命令当前是死胡同：即使用户在弹窗点「允许」也不会执行**。Dangerous 则恒拒、且回的是**裸中文串**（无错误码，与 AGENTS.md「后端错误码 i18n」规范冲突）。
+
+**裁定（我采纳，候选 A 的落地形态 A-min）**：**不再让 LLM 入参参与授权决策**，改由 wiring 层按「命令声明（`safety`，宿主侧权威，`:1191-1205`）× 会话档位」算出 `CommandDecision`：
+- `Safe` ⇒ Execute；`Caution` ⇒ **Execute**（确认责任已由**运行时门**在非 `full_access` 档承担 —— 该门按工具名 `execute_tauri_command` 弹窗：`conversation.rs:1089-1103`）；`Dangerous` ⇒ Block；**未知档位 ⇒ Block（fail-closed）**。
+- 机械改动：`conversation_id` 从 `agent/mod.rs:1464` 逐层透传（`build_command_handlers` → `create_handler` → `execute_command` → `dispatch_command`，4 个签名各 +1 参）；`:1206-1244` 收敛成决策分支，删掉死占位。
+- 不新增 schema 字段，**并且要加反向锁**：`build_tool_defs()` 里该工具的 `input_schema.properties.permission_mode` 必须为 null（防有人「修」回 LLM 自证授权）。
+
+**同批必须修的生产侧两件（否则决策读到的仍是 default）**：
+- P1 停用「创建会话即回 default」：`axagent-ai/crates/agent/src/session_manager.rs:572` 的 `upsert_agent_session(..., Some("default"))`；
+- P2 回包补字段：`AgentGetSessionResponse`（`payloads.rs:307-317`）缺 `permissionMode`，导致前端 `InputArea.tsx:343-345` 读回恒 undefined。
+
+**为什么否决候选 B（把档位字符串透传下去）**：改动面与 A 完全相同，但① 保留「LLM 入参参与授权」这个错误结构；② `:1227` 不一起改的话「拿到非 default」也不改变任何结果，缺陷只修一半；③ 判据只能是同义反复（`assert_eq!(threaded,"full_access")`），而 A 有纯函数 3×3 真值表可假红。
+
+**本 lane 记的「本该抓却恒绿」清单（10 条）里最该记住的三条**：
+- `command_bridge.rs:3080` 的 `assert!(!CommandSafety::Caution.is_allowed("default"))` —— **把缺陷现状写成了契约**；
+- 该文件 23 条 `#[test]` **无一条进入** `"execute_tauri_command"` 臂（`dispatch_command` 私有 + 需 AppHandle/DB）；
+- `scripts/` 全量**没有**「派发处 `input[...]` 读取的键 ⊆ 工具 `input_schema` 声明的键」这条机械门 ⇒ 「读一个没人写的键」在所有门下都绿。
+
+**未做（登记）**：① 本批**未跑 cargo**（两条 Rust lane 正在编译）⇒ 上述行为矩阵是**静态读链推断**，未经运行时验证；② 未构造真插件清单跑 `agent_query` 端到端复现「Caution 不执行」；③ 弹窗是否把**命令名**渲染出来未确认（决定 A-min 的「运行时门已确认过具体命令」是否成立）——属前端 lane 面；④ 「`input[...]` vs `input_schema`」新门禁未设计（要进 `ci-check.mjs` + `ci.yml` 两处并过对称差集护栏）。
+
+### 128.20 #178④ 裁定：本批**零改动**是正确处置（前置未满足，转 #216）
+
+取证（只读）结论，我逐条复核：
+- 审批卡**不在 OPC 目录**：`src/pages/TasksCenterPage/OverviewTab.tsx:3/38/117/267` —— 数据走宿主
+  `stockAnalysisStore.pendingEvolutionPlans`（`src/stores/feature/stockAnalysisStore.ts:2073` ← `list_pending_evolution_plans`），
+  抽屉是 `@/components/stock-analysis/EvolutionApprovalDrawer`。
+- 三条声明面都没有对应位：`pages[]`（整页）、`dashboard_panels`（只有 position/size，唯一消费方 DashboardPage）、
+  `task_sources[]`（只有 run 行；`pluginTaskSource.adapter.ts:139-140` 明写插件源不声明宿主能力）。
+- 审批**动作**按 `args.historyId` 自由寻址 ⇒ 被 `PLUGIN_SCHEMA_ALLOWED_COMMANDS` 的 fail-closed 判据原则性禁止
+  （`src/lib/dynamicUI/schemaActionPermissions.ts:121-123` + 文件头 `:44-46`）。
+- B8-1 卡片注册表本体未建，且现键口径只覆盖「消息类型 / task run 类型」，**不覆盖非 run 概览卡**。
+
+⇒ 「改数据来源读既有贡献面投影」在当前形态下**没有可指向的投影**，硬做只能伪造贡献面。前置三件登记为 **#216**
+（扩键口径裁决 + `task_cards[]`/`summary_command` 声明 + 审批动作迁出），完成后再做 ④ 的 3 条 import 摘除。
+
+**纠正取证 lane 的一处事实误判**：它断言「`axagent-plugins` 是独立仓、本检出不存在」——
+`src-tauri/Cargo.toml:14`/`:151` 的 `../axagent-plugins` 就是仓根下的 `axagent-plugins/`，**清单可在本仓改并编译验证**。
+其主结论（无声明位 / 动作被原则性封住 / 注册表未建）不受此影响。
+
+### 128.21 #194 取证：D 类四族 = **21 键 / 20 文件**，并给出可执行批次序
+
+**读数（同一工作区，末次为准）**：门禁 `142 文件级违规 / 139 豁免后 / 基线 139`；`--selftest` 31 条断言全绿。
+⚠ 会话内读数漂移 3 次（155→143→142）**不是门禁问题**：并行 lane 正在落 B 类下沉且未提交（`D gateway/tokenFormat.ts` + `?? lib/tokenFormat.ts` 等），按纪律未 stash/checkout。
+
+**四族构成（族内用门禁自身纯函数复算，`--selftest` 之外另建只读探针）**：
+
+| 族 | 基线键 | 原始实例 | 关键性质 |
+|---|---|---|---|
+| `evolution` | **7** | 13 | 4 文件各有「值 import + 类型 import」两行；另 1 条在 `shared/PageContextProvider` 已被白名单豁免 |
+| `agent` | **5** | 5 | 含 1 个零调用点死件（`ExpertBadge`） |
+| `llmWiki` | **5** | 5 | 含 1 个纯类型键（`WikiOperation`，真身在 `@/types/llmWiki.ts`） |
+| `promptTemplate` | **4** | 4 | 含 1 个零调用点死件（`WorkflowPromptTemplateSelector`） |
+| `timeAnchor` | **0** | 0 | 已由 `6a54f8634` 迁层关闭 |
+| 合计 | **21 键 / 20 文件** | 28 | `InputArea.tsx` 同时占 llmWiki 与 promptTemplate 两族 |
+
+**一条决定方案的机械判据（取证 lane 提出，我采纳）**：门禁判的是**导入方一级目录 owner** ⇒
+① 在 `src/components` 内部把 store 读取「上移一层」**不消键，只把键挪到另一个文件**（且新键不在基线 ⇒ 当场红）；
+② 只有三种动作真消键：**上移到 `src/pages/**`（不在扫描面）**、**组件搬进目标 owner 目录（C 类）**、**store 迁层**。
+⚠ 第三种的边界：`adjudicateImport` 只匹配 `^src/stores/feature/`，所以「把 store 搬去 `stores/shared`」能让键消失 ——
+**但必须先用 AGENTS.md 的 store 分类证明归属确实错层，不许为了门禁变绿而搬**（本批四族里只有 5 键属此类，且拆 store 跨 lane）。
+
+**批次序（按风险×收益；每批都附「触碰目录」与跨 lane 冲突点）**：
+1. **零判断三件套（7 键，139→132）**：`L-1` 纯类型改 `@/types`；`L-2` 两页（`IngestPage` / `WikiEditorPage`，**本就从同一 store 读**）下传 props 给 `IngestPanel` / `LintReport`；`E-1` 删 skill 三死件（`SkillEvolutionViewer` / `SkillABTestResults` / `SkillVersionTimeline`，零调用点）；`P-1` 删 `WorkflowPromptTemplateSelector`（零调用点）。触碰 `components/{wiki,skill,workflow/Panels}` + 两个 page + baseline + 11 locale（`components_skill_*` 三组孤儿键）。**不碰 chat、不碰 stores、无需产品裁定。**
+2. **settings 归属搬迁（6 键，132→126）**：`evolution` 2 键搬 `components/evolution/`、`promptTemplate` 2 键搬 `components/prompt-template/`、`AgentProfileManager`、`SourceManager` —— 全属 C 类，**必须先有归属裁定**（且同批删 `settings/index.ts` 的两行重导出，否则新键当场红）。
+3. **workflow 页级 props（3 键，126→123）**：`AIPanel`/`EvolutionTab` 的 `useEvolutionStore` + `useFlowNodes`；同批改 `workflowComponents.test.tsx` 4 处 `<AIPanel>`；**前置裁定**：`getSkillEvolutionHistory`/`getABTestResults` 是完全忽略 `skillId` 的写死 mock，保留还是删要先定。
+4. **chat 目录（5 键，123→118）——必须最后**：与在飞 lane 同目录（`ChatMarkdownNodes` 等 5 个文件正在改），且 `InputArea.tsx` 还牵扯 barrel 后的真消费方；另叠加 `agentStore.currentToolCall` **只初始化与清除、从无写入点**（真值在 `executionStore`）这一禁区 12 现症 —— 修它属改 `src/stores/**`，另立批。
+
+**取证纠了我三处**：① 任务里写的「§115 / §120 / §193」**都不载 D 类内容**（§115 是 opc.store 只读接缝；§120 是排期与第五道门；**全文没有 §193**）——权威描述在 `:5805`（§121.2 D 通道表）与 `:6460`（§126.5-4）；② `timeAnchor` 那条历史登记已闭合（基线 186→139 的链条可回溯）；③ `llmWiki` 登记 4 / 实测 5 的**差额未归因**（两个候选都只是「推」，未改任何数）。
+
+**本批不做的事（明确）**：不跑 `--update-baseline`（工作区有未提交的 12 条减少，收紧会把它们烘进棘轮）；不改 `src/stores/**`；不动 `src/components/chat/**`（在飞）。探针件 `.tmp/laneE194-probe.mjs` 在 D 批收口时删除。
+
+## 129. 2026-11-07 收口批：#208 后半 + #193 交付 + 验证口径变更（#217/#216 登记）
+
+### 129.1 #208 收口：`OpcSendNotification` 声明的**行为面**清零
+
+| 面 | 内容 | 证据 |
+|---|---|---|
+| 前半（已提交 `10062f194`） | 删 31 处名字声明：`opc_setup/**` 数组 12 + `td(...)` 4 + `td_desc(...)` 15；同批递增 **11 个逐文件 `TEMPLATE_VERSION`**（域包 5→6、6→7、4→5、4→5；领域 7 个 4→5） | `git show --numstat 10062f194`；`grep -c 'OpcSendNotification'` 逐文件归零 |
+| 后半（本批） | `config/agent_roles.yaml` 4 处（2 个角色的 prompt 清单 + `allowed_tools`）、`config/opc/domain_packs/sales_growth/manifest.yaml` 3 行 predicate 块、5 份 `src-tauri/agency_experts/opc/**` 专家 prompt（`data_sources` 摘除 + 正文改写为「输出内容交用户手工发送」） | `git diff -U2 -- config/ src-tauri/agency_experts/opc/` |
+| 残留复扫 | `config` / `src` / `src-tauri` **0 命中**；`axagent-runtime` 3 处与 `scripts` 1 处均为**退役判据注释/测试/登记表叙述**，非活声明 ⇒ 本批把三处过期措辞改为「已于 #208 清理」，并回写 `scripts/capability-register.json` 的 `countTraitNote` 末句 | `grep -rn OpcSendNotification` 逐根（`axagent-core/plugins/quant/runtime/kit/ai/infra/scripts`） |
+
+**版本面裁定（不留推测）**：`config/opc/domain_packs/*/manifest.yaml` 的 `capabilities` **不落 DB** ——
+`upsert_capability_pack_registry`（`axagent-quant/crates/company-runtime/src/opc/capability_pack.rs:493`）
+只写 `id/name/icon/description/version/enabled/pack_path/installed_at/updated_at` 八列，`capabilities`
+由消费方**每次现读 manifest.yaml**。⇒ 删 predicate 无需递增该 manifest 的 `version`（递增也不触发重 seed：
+`ensure_opc_capability_packs_seeded` 的 upsert 无条件执行，`already_seeded` 只跳过日志分支）。真正让**已安装库**
+跟上的是那 11 个 Rust `TEMPLATE_VERSION`。
+
+定点验证：`cargo test -p axagent --lib commands::opc_setup` → `test result: ok. 5 passed; 0 failed; 916 filtered out`（EXIT=0）。
+
+### 129.2 #193 交付：中立性 A/B 批 12 条已落（基线仍 139，收紧转 #217）
+
+- **改前**：927 文件 / 原始 155 / 豁免后 152 / 基线 139。**改后**（我复核实跑）：929 文件（+2 shim）/ 原始 142 / 豁免后 139（唯一键 **127**）/ `PASS EXIT=0` / 「已修复 12 条」。
+- A 类 2：`ToolUpgradeSuggestion` 定义迁 `src/types/workflow.ts`（旧位留薄 re-export）、删 `settings/index.ts` 的零消费方跨域再导出。
+- B 类 10：`formatTokenCount/formatDuration/formatSpeed` → `src/lib/tokenFormat.ts`；`ChartPreview` → `components/shared/`；`JobCard` → `components/common/`；`EngineConfigForm` → `components/common/`（两处消费方全量改 import、不留 shim）。
+- **三处旧路径保留薄 re-export 的理由**：`docs/audits/AUDIT-duplication-2026-09-13.md:177` 按 `gateway/tokenFormat.ts:23`、`PLAN:729` 按 `ArtifactPreview/ChartPreview.tsx:33`、`src/pages/**` 存量消费方按 `tasks/JobCard.tsx` 取证 ⇒ 删文件会让 `check-doc-refs` 判 BROKEN，而 docs/pages 不在该批可改范围。**shim 是过渡态，不是终态**：下次改指文档时同批删。
+- 该批**纠了我两处**：① 我说的「A25 / B22」与实测不符 —— 组件→组件 51 条中 A 类候选仅 12、B 类候选 10、其余 29 是行为面，另有 88 条「组件→`stores/feature`」不属本批；② 我说的 `--pool=forks` 本机不适用（`scripts/vitest-run.mjs` 自证 SMB 上 forks 池 60 s 起不来，默认 `threads` + `--no-file-parallelism`）。
+- **未做**（转新任务 **#217**）：基线 139→127 收紧必须有安静窗口（现有多路写手在改 `src/**`）；A 类另 11 条被 5 处**按行号**引用 `workflow.types.ts` 的活文档钉住（搬内容即 STALE/BROKEN），须与「类型下沉 + 同批改指文档」一起做；剩余 27 条行为面按族裁定。
+
+### 129.3 验证口径变更（用户 2026-11-07 明确要求）
+
+共享 target 锁下「每条 lane 各跑一次全量 clippy/test」是纯排队浪费（单条 20–40 分钟）。新口径：
+**Rust lane 只做 `cargo fmt --check -p <crate>` + `cargo check -p <crate>` + 一条定点 `cargo test -p <crate> --lib <模块>`；
+全量 `cargo clippy --workspace --all-targets --all-features -- -D warnings` 由 leader 在所有 Rust lane 交回后跑一次**（联合态才有意义）。
+已派出去、收不回来的 lane：收到交付后**不复跑它的 clippy**，只把它的落盘文件纳入那一次联合验证。
+
+### 129.4 本批在跑 / 新派（文件面互不相交）
+
+| lane | 任务 | 文件面 |
+|---|---|---|
+| B180 | #180①② `RemoveOutcome` 三态 + 保护 id / 字节闸 | `axagent-core/crates/harness/src/opc_store.rs`、`src-tauri/src/init/opc_store_service.rs` |
+| C193 | #193 中立性 A/B（**已交回**，见 §129.2） | `src/components/{chat,gateway,shared,tasks,settings}/**`、`src/lib/**`、`src/types/**` |
+| G181 | #181 A-min 授权决策移到派发层 | `axagent-plugins/crates/plugins/src/worker.rs` 等 |
+| H194 | #194 首批 7 键（139→132） | `src/components/{wiki,skill,workflow}/**`、两个 page |
+| I194b2（新） | #194 第二批 settings 族（6 键，132→126） | `src/components/settings/**`、`src/pages/{SettingsPage,KnowledgeHubPage}.tsx` |
+| J216spec（新，只读） | #216 三件前置的规格与决策表 | 只写 `.tmp/laneJ216-spec.md` |

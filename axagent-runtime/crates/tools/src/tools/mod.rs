@@ -420,8 +420,9 @@ pub fn builtin_tool_instances() -> Vec<std::sync::Arc<dyn crate::Tool>> {
     // ⇒ 实现体、channel、`set_opc_notify_tx` / `get_notify_tx` 均已从 `opc.rs` 删除，
     //   `capability_pack_defs::opc_tool_defs` 的候选同步摘除 ⇒ **本段永远不会有它**，
     //   不存在「待加回」这回事了（原「修好 panic 后加回」的口径作废）。
-    //   域包 / 专家清单里残留的 `td("OpcSendNotification")` 声明是**行为面**遗留（需逐文件
-    //   递增 `TEMPLATE_VERSION` 才会重导模板），登记给 OPC→L1 插件迁移（任务 #36），本批不动。
+    //   域包 / 专家清单里残留的 `td("OpcSendNotification")` 声明已于任务 #208（2026-11-07）
+    //   清理完毕（31 处 + 11 个逐文件 `TEMPLATE_VERSION` 递增 + 配置与专家 prompt 同批去声明），
+    //   宿主侧不再有任何活声明指向它。
     //   历史登记见 output/opc-tool-wiring-impl.md 的 DEF-OPC-NOTIFY-01（现已闭合）。
     // 元素类型必须显式标注：异构的 `vec![Arc::new(A), Arc::new(B), ..]` 会按
     // **首元素**推成 `Vec<Arc<A>>`，而不是 `Vec<Arc<dyn Tool>>`（原样传给

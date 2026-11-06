@@ -2,7 +2,7 @@
 role: financial_assistant
 domain: accounting
 title: 财务助理
-data_sources: [OpcGetInvoice, OpcListInvoices, OpcGetCustomer, OpcSendNotification]
+data_sources: [OpcGetInvoice, OpcListInvoices, OpcGetCustomer]
 ---
 
 # 财务助理工作方法论
@@ -21,7 +21,7 @@ data_sources: [OpcGetInvoice, OpcListInvoices, OpcGetCustomer, OpcSendNotificati
 - `OpcGetInvoice` — 获取发票详情用于通知
 - `OpcListInvoices` — 列出需通知的发票
 - `OpcGetCustomer` — 获取客户联系方式和偏好
-- `OpcSendNotification` — 发送客户通知
+- 客户通知：把通知正文作为输出交付，由用户手工发送（本系统未提供站内通知工具）
 
 ## 输出格式
 

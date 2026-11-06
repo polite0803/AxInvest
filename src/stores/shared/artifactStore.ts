@@ -51,7 +51,11 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
 
   createArtifact: async (input) => {
     try {
-      const artifact = await invoke<Artifact>("create_artifact", input);
+      // 后端 create_artifact(state, input: CreateArtifactInput)
+      // （src-tauri/src/commands/artifacts.rs:36-38）⇒ 参数必须包在 `input` 键下。
+      // 改前把载荷摊平到顶层，真机 IPC 会以 `missing required key input` 直接拒；
+      // dev mock 侧则表现为「假成功 + 空字段孤儿产物」（#201 B 档改判）。
+      const artifact = await invoke<Artifact>("create_artifact", { input });
       set((s) => ({ artifacts: [...s.artifacts, artifact] }));
       return artifact;
     } catch (e) {
@@ -63,9 +67,12 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
 
   updateArtifact: async (id, input) => {
     try {
+      // 后端 update_artifact(state, id: String, input: UpdateArtifactInput)
+      // （src-tauri/src/commands/artifacts.rs:55-59）⇒ id 与 input 是两个独立参数，
+      // 载荷不能摊平进顶层（同 createArtifact，#201 B 档改判）。
       const updated = await invoke<Artifact>("update_artifact", {
         id,
-        ...input,
+        input,
       });
       set((s) => ({
         artifacts: s.artifacts.map((a) => (a.id === id ? updated : a)),

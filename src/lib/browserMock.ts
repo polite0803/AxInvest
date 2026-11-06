@@ -2209,7 +2209,8 @@ async function executeCommand<T>(
       return undefined as T;
     }
     case "reorder_providers": {
-      const { providerIds } = args as { providerIds?: string[] };
+      // #201 A 档：直接解构 camel 键经 snake 化后恒 undefined，改用 readMockReqField 兼容读
+      const providerIds = readMockReqField<string[]>(args, "providerIds");
       const providers = getStore<Provider[]>("providers", []);
       if (providerIds) {
         const providerMap = new Map(providers.map((p) => [p.id, p]));
@@ -2236,7 +2237,8 @@ async function executeCommand<T>(
       return undefined as T;
     }
     case "list_narrative_structures": {
-      const { isTemplate, genre } = args as { isTemplate?: boolean; genre?: string };
+      const { genre } = args as { genre?: string };
+      const isTemplate = readMockReqField<boolean>(args, "isTemplate");
       const all = getStore<NarrativeStructureRecord[]>("narrative_structures", []);
       return all.filter((n) =>
         (isTemplate === undefined || n.isTemplate === isTemplate)
@@ -2257,7 +2259,7 @@ async function executeCommand<T>(
         description: input.description,
         genre: input.genre,
         structure: input.structure,
-        isTemplate: input.isTemplate ?? false,
+        isTemplate: readMockReqField<boolean>(input, "isTemplate") ?? false,
         version: 1,
         createdAt: now,
         updatedAt: now,
@@ -2337,7 +2339,7 @@ async function executeCommand<T>(
       return key as T;
     }
     case "delete_provider_key": {
-      const { keyId } = args as { keyId?: string };
+      const keyId = readMockReqField<string>(args, "keyId");
       const providers = getStore<Provider[]>("providers", []);
       for (const p of providers) {
         p.keys = p.keys.filter((k) => k.id !== keyId);
@@ -2346,7 +2348,8 @@ async function executeCommand<T>(
       return undefined as T;
     }
     case "toggle_provider_key": {
-      const { keyId, enabled } = args as { keyId?: string; enabled?: boolean };
+      const { enabled } = args as { enabled?: boolean };
+      const keyId = readMockReqField<string>(args, "keyId");
       const providers = getStore<Provider[]>("providers", []);
       for (const p of providers) {
         for (const k of p.keys) {
@@ -2361,15 +2364,15 @@ async function executeCommand<T>(
     case "validate_provider_key":
       return true as T;
     case "save_models": {
-      const { providerId, models } = args as {
-        providerId?: string;
+      const models = (args as {
         models?: Array<{
           model_id: string;
           name: string;
           mode?: string;
           enabled?: boolean;
         }>;
-      };
+      }).models;
+      const providerId = readMockReqField<string>(args, "providerId");
       const providers = getStore<Provider[]>("providers", []);
       const idx = providers.findIndex((p) => p.id === providerId);
       if (idx !== -1 && models) {
@@ -2379,11 +2382,9 @@ async function executeCommand<T>(
       return undefined as T;
     }
     case "toggle_model": {
-      const { providerId, modelId, enabled } = args as {
-        providerId?: string;
-        modelId?: string;
-        enabled?: boolean;
-      };
+      const { enabled } = args as { enabled?: boolean };
+      const providerId = readMockReqField<string>(args, "providerId");
+      const modelId = readMockReqField<string>(args, "modelId");
       const providers = getStore<Provider[]>("providers", []);
       const pIdx = providers.findIndex((p) => p.id === providerId);
       if (pIdx !== -1) {
@@ -2399,11 +2400,9 @@ async function executeCommand<T>(
       throw new Error("Model not found");
     }
     case "update_model_params": {
-      const { providerId, modelId, overrides } = args as {
-        providerId?: string;
-        modelId?: string;
-        overrides?: Record<string, unknown>;
-      };
+      const { overrides } = args as { overrides?: Record<string, unknown> };
+      const providerId = readMockReqField<string>(args, "providerId");
+      const modelId = readMockReqField<string>(args, "modelId");
       const providers = getStore<Provider[]>("providers", []);
       const pIdx = providers.findIndex((p) => p.id === providerId);
       if (pIdx !== -1) {
@@ -2436,10 +2435,10 @@ async function executeCommand<T>(
         (c) => c.isArchived,
       ) as T;
     case "create_conversation": {
-      const { title, modelId, providerId, systemPrompt } = args as Record<
-        string,
-        unknown
-      >;
+      const { title } = args as Record<string, unknown>;
+      const modelId = readMockReqField<string>(args, "modelId");
+      const providerId = readMockReqField<string>(args, "providerId");
+      const systemPrompt = readMockReqField<string>(args, "systemPrompt");
       const conv = {
         id: genId(),
         title,
@@ -2477,23 +2476,28 @@ async function executeCommand<T>(
         if (input.title !== undefined) {
           convs[idx].title = input.title;
         }
-        if (input.categoryId !== undefined) {
-          convs[idx].categoryId = input.categoryId;
+        const categoryId = readMockReqField<string | null>(input, "categoryId");
+        if (categoryId !== undefined) {
+          convs[idx].categoryId = categoryId;
         }
-        if (input.providerId !== undefined) {
-          convs[idx].providerId = input.providerId;
+        const providerId = readMockReqField<string>(input, "providerId");
+        if (providerId !== undefined) {
+          convs[idx].providerId = providerId;
         }
-        if (input.modelId !== undefined) {
-          convs[idx].modelId = input.modelId;
+        const modelId = readMockReqField<string>(input, "modelId");
+        if (modelId !== undefined) {
+          convs[idx].modelId = modelId;
         }
         if (input.temperature !== undefined) {
           convs[idx].temperature = input.temperature;
         }
-        if (input.maxTokens !== undefined) {
-          convs[idx].maxTokens = input.maxTokens;
+        const maxTokens = readMockReqField<number | null>(input, "maxTokens");
+        if (maxTokens !== undefined) {
+          convs[idx].maxTokens = maxTokens;
         }
-        if (input.topP !== undefined) {
-          convs[idx].topP = input.topP;
+        const topP = readMockReqField<number | null>(input, "topP");
+        if (topP !== undefined) {
+          convs[idx].topP = topP;
         }
         convs[idx].updatedAt = nowTs();
         setStore("conversations", convs);
@@ -2555,10 +2559,10 @@ async function executeCommand<T>(
       const cat: ConversationCategory = {
         id: genId(),
         name: input.name,
-        iconType: input.iconType ?? null,
-        iconValue: input.iconValue ?? null,
-        systemPrompt: input.systemPrompt ?? null,
-        defaultModel: input.defaultModel ?? null,
+        iconType: readMockReqField<string>(input, "iconType") ?? null,
+        iconValue: readMockReqField<string>(input, "iconValue") ?? null,
+        systemPrompt: readMockReqField<string>(input, "systemPrompt") ?? null,
+        defaultModel: readMockReqField<ConversationCategory["defaultModel"]>(input, "defaultModel") ?? null,
         sortOrder: maxOrder + 1,
         isCollapsed: false,
         createdAt: nowTs(),
@@ -2582,17 +2586,24 @@ async function executeCommand<T>(
         if (input.name !== undefined) {
           cats[idx].name = input.name;
         }
-        if (input.iconType !== undefined) {
-          cats[idx].iconType = input.iconType;
+        const iconType = readMockReqField<string | null>(input, "iconType");
+        if (iconType !== undefined) {
+          cats[idx].iconType = iconType;
         }
-        if (input.iconValue !== undefined) {
-          cats[idx].iconValue = input.iconValue;
+        const iconValue = readMockReqField<string | null>(input, "iconValue");
+        if (iconValue !== undefined) {
+          cats[idx].iconValue = iconValue;
         }
-        if (input.systemPrompt !== undefined) {
-          cats[idx].systemPrompt = input.systemPrompt;
+        const systemPrompt = readMockReqField<string | null>(input, "systemPrompt");
+        if (systemPrompt !== undefined) {
+          cats[idx].systemPrompt = systemPrompt;
         }
-        if (input.defaultModel !== undefined) {
-          cats[idx].defaultModel = input.defaultModel;
+        const defaultModel = readMockReqField<ConversationCategory["defaultModel"]>(
+          input,
+          "defaultModel",
+        );
+        if (defaultModel !== undefined) {
+          cats[idx].defaultModel = defaultModel;
         }
         cats[idx].updatedAt = nowTs();
         setStore("conversation_categories", cats);
@@ -2617,7 +2628,7 @@ async function executeCommand<T>(
       return undefined as T;
     }
     case "reorder_conversation_categories": {
-      const { categoryIds } = args as { categoryIds: string[] };
+      const categoryIds = readMockReqField<string[]>(args, "categoryIds") ?? [];
       const cats = getStore<ConversationCategory[]>(
         "conversation_categories",
         [],
@@ -2649,7 +2660,18 @@ async function executeCommand<T>(
     }
     case "agent_get_session": {
       // 浏览器 mock：与会话层持久化对齐后端 upsert 语义（有则返回，无则创建）
-      const { conversationId } = (args ?? {}) as { conversationId?: string };
+      // #201 B 档（路径错位）：后端形参名就叫 request（commands/agent/mod.rs:3568
+      // request: AgentGetSessionRequest），调用方也确以 { request: {...} } 传参
+      // （stores/feature/agentStore.ts:244、components/chat/InputArea.tsx:339）
+      // ⇒ 原先在顶层读 conversationId 恒 undefined。先解 request 层，再逐键走
+      // readMockReqField —— 解包形态照抄本文件 cognitive_query（case 在 :2778、解包在 :2791）。
+      const rawArgs = (args ?? {}) as { request?: Record<string, unknown> };
+      // `{ request: {...} }`（真机 / handleCommand 路径）优先，顶层直传（直调
+      // executeCommand 的路径）兜底；args 省略时退化为空对象，与原 `(args ?? {})`
+      // 同等空安全 —— plan_authorize :2966 的单行写法在 args 为 undefined 时会 TypeError，
+      // 故未照抄它，取 cognitive_query 的两步形态。
+      const req = (rawArgs.request ?? rawArgs) as Record<string, unknown>;
+      const conversationId = readMockReqField<string>(req, "conversationId");
       if (!conversationId) {
         return null as T;
       }
@@ -2687,13 +2709,22 @@ async function executeCommand<T>(
     }
     case "agent_update_session": {
       // 浏览器 mock：持久化会话字段（cwd / permissionMode / name / metadata），模拟后端 upsert
-      const { conversationId, cwd, permissionMode, name, metadata } = (args ?? {}) as {
-        conversationId?: string;
-        cwd?: string | null;
-        permissionMode?: string | null;
-        name?: string | null;
-        metadata?: Record<string, unknown> | null;
-      };
+      // #201 B 档（路径错位）：后端形参名就叫 request（commands/agent/mod.rs:3537
+      // request: AgentUpdateSessionRequest），调用方全部以 { request: {...} } 传参
+      // （stores/feature/agentStore.ts:263 / :279、components/chat/InputArea.tsx:482 / :541 / :828、
+      // components/chat/ChatSidebar.tsx:1478 / :1489）⇒ 原先在顶层读键恒 undefined：
+      // conversationId 恒缺失 ⇒ 恒走「返回空会话」分支，cwd/permissionMode 从未真正落库。
+      const rawArgs = (args ?? {}) as { request?: Record<string, unknown> };
+      // 解包形态照抄本文件 cognitive_query：`{ request: {...} }`（真机 / handleCommand 路径）
+      // 优先，顶层直传（直调 executeCommand 的路径）兜底；args 省略时退化为空对象，
+      // 与原 `(args ?? {})` 同等空安全 —— 单行写法在 args 为 undefined 时会 TypeError。
+      // 逐键走 readMockReqField，兼容「直调 executeCommand 不经 handleCommand」的 camel 原形状。
+      const req = (rawArgs.request ?? rawArgs) as Record<string, unknown>;
+      const conversationId = readMockReqField<string>(req, "conversationId");
+      const cwd = readMockReqField<string | null>(req, "cwd");
+      const permissionMode = readMockReqField<string | null>(req, "permissionMode");
+      const name = readMockReqField<string | null>(req, "name");
+      const metadata = readMockReqField<Record<string, unknown> | null>(req, "metadata");
       if (!conversationId) {
         return {
           conversationId: "",
@@ -2847,7 +2878,17 @@ async function executeCommand<T>(
     }
     case "plan_generate": {
       // Browser mock: return a draft plan for review
-      const { conversationId, content } = args as { conversationId: string; content: string };
+      // #201 B 档（路径错位）：后端形参名就叫 request（commands/plan.rs:913
+      // request: PlanGenerateRequest，字段 conversationId / content），调用方以
+      // { request } 传参（stores/feature/planStore.ts:108）⇒ 原先顶层读键恒 undefined，
+      // 生成的草稿计划 conversationId 恒空串、title 恒 "Mock Plan"。
+      const rawArgs = (args ?? {}) as { request?: Record<string, unknown> };
+      // 解包形态照抄本文件 cognitive_query：`{ request: {...} }`（真机 / handleCommand 路径）
+      // 优先，顶层直传（直调 executeCommand 的路径）兜底；args 省略时退化为空对象，
+      // 与原 `(args ?? {})` 同等空安全 —— 单行写法在 args 为 undefined 时会 TypeError。
+      const req = (rawArgs.request ?? rawArgs) as Record<string, unknown>;
+      const conversationId = readMockReqField<string>(req, "conversationId");
+      const content = readMockReqField<string>(req, "content");
       const planId = genId();
       const now = Date.now();
       return {
@@ -2896,11 +2937,20 @@ async function executeCommand<T>(
       return undefined as T;
     }
     case "plan_activate": {
-      const { planId } = args as { planId: string; conversationId: string };
+      // #201 B 档（路径错位）：后端形参名就叫 request（commands/plan.rs:1432
+      // request: PlanActivateRequest，字段 conversationId / planId），调用方以
+      // { request: { conversationId, planId } } 传参（stores/feature/planStore.ts:294）
+      // ⇒ 原先顶层读键恒 undefined，恢复出来的计划 id / conversationId 全为空。
+      const rawArgs = (args ?? {}) as { request?: Record<string, unknown> };
+      // 解包形态照抄本文件 cognitive_query：`{ request: {...} }`（真机 / handleCommand 路径）
+      // 优先，顶层直传（直调 executeCommand 的路径）兜底；args 省略时退化为空对象，
+      // 与原 `(args ?? {})` 同等空安全 —— 单行写法在 args 为 undefined 时会 TypeError。
+      const req = (rawArgs.request ?? rawArgs) as Record<string, unknown>;
+      const planId = readMockReqField<string>(req, "planId");
       const now = Date.now();
       return {
         id: planId,
-        conversationId: (args as { conversationId: string }).conversationId,
+        conversationId: readMockReqField<string>(req, "conversationId"),
         userMessageId: genId(),
         title: "Restored Plan",
         steps: [],
@@ -2943,11 +2993,12 @@ async function executeCommand<T>(
     }
     case "send_message": {
       const raw = (args as { params?: unknown }).params ?? args;
-      const { conversationId, content, attachments } = raw as {
-        conversationId: string;
+      const { content, attachments } = raw as {
         content: string;
         attachments?: unknown[];
       };
+      // #201 A 档：conversationId 为 camel 死键读法，snake 化后恒 undefined，改兼容读
+      const conversationId = readMockReqField<string>(raw, "conversationId");
       const userMsgId = genId();
       const userMsg = {
         id: userMsgId,
@@ -2982,22 +3033,16 @@ async function executeCommand<T>(
       return userMsg as T;
     }
     case "list_messages": {
-      const { conversationId } = args as { conversationId?: string };
+      const conversationId = readMockReqField<string>(args, "conversationId");
       const msgs = getStore<Message[]>("messages", []).filter(
         (m) => m.conversationId === conversationId,
       );
       return msgs as T;
     }
     case "list_messages_page": {
-      const {
-        conversationId,
-        limit = 10,
-        beforeMessageId = null,
-      } = args as {
-        conversationId: string;
-        limit?: number;
-        beforeMessageId?: string | null;
-      };
+      const { limit = 10 } = args as { limit?: number };
+      const conversationId = readMockReqField<string>(args, "conversationId");
+      const beforeMessageId = readMockReqField<string | null>(args, "beforeMessageId") ?? null;
       const allMessages = getStore<Message[]>("messages", [])
         .filter((m) => m.conversationId === conversationId)
         .sort((a, b) => a.createdAt - b.createdAt);
@@ -3025,10 +3070,8 @@ async function executeCommand<T>(
     }
     case "regenerate_message": {
       const regenRaw = (args as { params?: unknown }).params ?? args;
-      const { conversationId: regenConvId, userMessageId: regenUserMsgId } = regenRaw as {
-        conversationId?: string;
-        userMessageId?: string;
-      };
+      const regenConvId = readMockReqField<string>(regenRaw, "conversationId");
+      const regenUserMsgId = readMockReqField<string>(regenRaw, "userMessageId");
       const regenMsgs = getStore<Message[]>("messages", []);
       const convMsgs = regenMsgs.filter(
         (m) => m.conversationId === regenConvId,
@@ -3087,17 +3130,15 @@ async function executeCommand<T>(
       return undefined as T;
     }
     case "list_message_versions": {
-      const { parentMessageId } = args as { parentMessageId?: string };
+      const parentMessageId = readMockReqField<string>(args, "parentMessageId");
       const allMsgs = getStore<Message[]>("messages", []);
       return allMsgs.filter(
         (m) => m.parentMessageId === parentMessageId,
       ) as T;
     }
     case "switch_message_version": {
-      const { parentMessageId: switchParent, messageId: switchTarget } = args as {
-        parentMessageId?: string;
-        messageId?: string;
-      };
+      const switchParent = readMockReqField<string>(args, "parentMessageId");
+      const switchTarget = readMockReqField<string>(args, "messageId");
       const switchMsgs = getStore<Message[]>("messages", []);
       for (const m of switchMsgs) {
         if (m.parentMessageId === switchParent && m.role === "assistant") {
@@ -3108,7 +3149,7 @@ async function executeCommand<T>(
       return undefined as T;
     }
     case "delete_message_group": {
-      const { userMessageId } = args as { userMessageId?: string };
+      const userMessageId = readMockReqField<string>(args, "userMessageId");
       const delMsgs = getStore<Message[]>("messages", []);
       const filtered = delMsgs.filter(
         (m) => m.id !== userMessageId && m.parentMessageId !== userMessageId,
@@ -3200,24 +3241,40 @@ async function executeCommand<T>(
     case "list_search_providers":
       return getStore("search_providers", []) as T;
     case "create_search_provider": {
+      // #201 C6：调用方形状是对的（stores/feature/searchStore.ts:195-197 传 { input }，
+      // 后端 commands/search.rs:48 收 input: CreateSearchProviderInput），缺陷只在键形 ——
+      // handleCommand 已把 input 内层键递归 snake 化，camel 直读恒 undefined ⇒
+      // providerType 恒 undefined、hasApiKey 恒 false（凭据位丢失，列表上「已配置密钥」
+      // 永不点亮）、resultLimit / timeoutMs 恒落默认值。单词键（name / endpoint / enabled）
+      // 转换前后逐字相同，保持直读。apiKey 只是布尔凭据位（!! 判定），mock 不存密钥本体。
       const sps = getStore<SearchProvider[]>("search_providers", []);
       const spInput = (args as { input?: CreateSearchProviderInput }).input
         ?? ({} as CreateSearchProviderInput);
       const sp: SearchProvider = {
         id: genId(),
         name: spInput.name,
-        providerType: spInput.providerType,
+        // providerType 两侧都是契约必填（后端非 Option / TS 非可选），mock 历来不校验入参，
+        // 缺失时与改前一样落 undefined ⇒ 用断言保持既有形状，不发明默认值。
+        providerType: readMockReqField<SearchProvider["providerType"]>(
+          spInput,
+          "providerType",
+        ) as SearchProvider["providerType"],
         endpoint: spInput.endpoint,
-        hasApiKey: !!spInput.apiKey,
+        hasApiKey: !!readMockReqField<string>(spInput, "apiKey"),
         enabled: spInput.enabled ?? true,
-        resultLimit: spInput.resultLimit ?? 10,
-        timeoutMs: spInput.timeoutMs ?? 5000,
+        resultLimit: readMockReqField<number>(spInput, "resultLimit") ?? 10,
+        timeoutMs: readMockReqField<number>(spInput, "timeoutMs") ?? 5000,
       };
       sps.push(sp);
       setStore("search_providers", sps);
       return sp as T;
     }
     case "update_search_provider": {
+      // #201 C6：调用方形状是对的（stores/feature/searchStore.ts:203-206 传 { id, input }，
+      // 后端 commands/search.rs:79 收 id: String + input）⇒ 只改键形读法。
+      // 下面四处 camel 直读在 snake 化后的 input 上恒 undefined ⇒ 这四个字段在 dev mock
+      // 里**静默 no-op**（改了等于没改）。形态照抄本文件 update_conversation 的 A 档写法：
+      // 先读进局部常量，再判 undefined 后写回 store（store 侧对象是本 mock 自己造的 camel 形状）。
       const sps2 = getStore<SearchProvider[]>("search_providers", []);
       const spUpdateId = (args as { id?: string }).id;
       const spInput = (args as { input?: Partial<CreateSearchProviderInput> }).input ?? {};
@@ -3238,17 +3295,21 @@ async function executeCommand<T>(
         if (spInput.language !== undefined) {
           sps2[spi].language = spInput.language;
         }
-        if (spInput.safeSearch !== undefined) {
-          sps2[spi].safeSearch = spInput.safeSearch;
+        const spSafeSearch = readMockReqField<boolean>(spInput, "safeSearch");
+        if (spSafeSearch !== undefined) {
+          sps2[spi].safeSearch = spSafeSearch;
         }
-        if (spInput.resultLimit !== undefined) {
-          sps2[spi].resultLimit = spInput.resultLimit;
+        const spResultLimit = readMockReqField<number>(spInput, "resultLimit");
+        if (spResultLimit !== undefined) {
+          sps2[spi].resultLimit = spResultLimit;
         }
-        if (spInput.timeoutMs !== undefined) {
-          sps2[spi].timeoutMs = spInput.timeoutMs;
+        const spTimeoutMs = readMockReqField<number>(spInput, "timeoutMs");
+        if (spTimeoutMs !== undefined) {
+          sps2[spi].timeoutMs = spTimeoutMs;
         }
-        if (spInput.apiKey !== undefined) {
-          sps2[spi].hasApiKey = !!spInput.apiKey;
+        const spApiKey = readMockReqField<string>(spInput, "apiKey");
+        if (spApiKey !== undefined) {
+          sps2[spi].hasApiKey = !!spApiKey;
         }
         setStore("search_providers", sps2);
         return sps2[spi] as T;
@@ -3435,7 +3496,7 @@ async function executeCommand<T>(
         id: genId(),
         name: input.name,
         description: input.description,
-        embeddingProvider: input.embeddingProvider,
+        embeddingProvider: readMockReqField<string>(input, "embeddingProvider"),
         enabled: input.enabled ?? true,
         sortOrder: kbs.length,
         documents: [],
@@ -3483,8 +3544,8 @@ async function executeCommand<T>(
           updated_at: number;
         })[]
       >("knowledge_bases", []);
-      const { baseId, ...docInput } = args as {
-        baseId?: string;
+      const baseId = readMockReqField<string>(args, "baseId");
+      const docInput = args as {
         title?: string;
         sourcePath?: string;
       };
@@ -3576,7 +3637,7 @@ async function executeCommand<T>(
         id: genId(),
         name: input.name,
         scope: input.scope ?? "global",
-        embeddingProvider: input.embeddingProvider,
+        embeddingProvider: readMockReqField<string>(input, "embeddingProvider"),
         sortOrder: mns.length,
         items: [],
         created_at: nowTs(),
@@ -3600,11 +3661,12 @@ async function executeCommand<T>(
       >("memory_namespaces", []);
       const inputMem = (args as { input?: CreateMemoryItemInput }).input
         ?? ({} as CreateMemoryItemInput);
-      const mni = mns3.findIndex((n) => n.id === inputMem?.namespaceId);
+      const memNamespaceId = readMockReqField<string>(inputMem, "namespaceId");
+      const mni = mns3.findIndex((n) => n.id === memNamespaceId);
       if (mni >= 0) {
         const item: MemoryItem = {
           id: genId(),
-          namespaceId: inputMem.namespaceId!,
+          namespaceId: memNamespaceId!,
           title: inputMem.title ?? "",
           content: inputMem.content ?? "",
           source: inputMem.source ?? "manual",
@@ -3616,7 +3678,7 @@ async function executeCommand<T>(
           accessCount: 0,
           decayRate: 0.02,
           updatedAt: new Date().toISOString(),
-          applicabilityTags: inputMem.applicabilityTags ?? [],
+          applicabilityTags: readMockReqField<string[]>(inputMem, "applicabilityTags") ?? [],
           confirmed: inputMem.confirmed ?? 0,
         };
         mns3[mni].items = [...(mns3[mni].items || []), item];
@@ -3631,9 +3693,13 @@ async function executeCommand<T>(
         "memory_namespaces",
         [],
       );
-      const ns = mns4.find(
-        (n) => n.id === (args as { namespaceId?: string })?.namespaceId,
-      );
+      // #201 补漏（A 档同形态）：后端形参是顶层 namespace_id（commands/memory.rs:215），
+      // 调用方传 { namespaceId }（stores/feature/memoryStore.ts:119，且
+      // stores/feature/__tests__/memoryStore.test.ts:174 钉的就是这个 camel 传参）
+      // ⇒ handleCommand snake 化后顶层 camel 直读恒 undefined ⇒ **恒返回 []**
+      // （记忆条目在 dev mock 里从来没有列出来过）。纯键形死点，不改路径。
+      const memListNsId = readMockReqField<string>(args, "namespaceId");
+      const ns = mns4.find((n) => n.id === memListNsId);
       return (ns?.items ?? []) as T;
     }
     case "delete_memory_item": {
@@ -3960,17 +4026,39 @@ async function executeCommand<T>(
       ) as T;
     }
     case "create_artifact": {
-      const input = (args as { input?: Partial<Artifact> }).input ?? {};
+      // #201 B 档改判（mock 侧 fail-closed）：后端签名是 create_artifact(state, input:
+      // CreateArtifactInput)（commands/artifacts.rs:36-38），故真机 IPC 缺 `input` 键会以
+      // `missing required key input` 直接拒绝（禁区 13：命令参数按 camelCase 校验）。
+      // 原先这里的 `?? {}` 把「调用方把载荷摊平到顶层」吞成**静默假成功** —— 建出一条
+      // conversationId / title / content 全空的孤儿产物，UI 上还显示「已保存」。
+      // 现与真机同口径：input 缺失即抛（该串是 dev mock 诊断串，非 UI 文案 ⇒ 不进 locales）。
+      const input = readMockReqField<Partial<Artifact>>(args, "input");
+      if (input === undefined) {
+        throw new Error(
+          "create_artifact: missing required key `input` —— 调用方须传 { input }（与真机 IPC 同口径 fail-closed，见 #201）",
+        );
+      }
       const arts = getStore<Artifact[]>("artifacts", []);
       const art: Artifact = {
         id: genId(),
-        conversationId: input.conversationId ?? "",
+        // ⚠ 调用方形状修好后（{ input }），convertToSnakeCase 是**递归**的 ⇒ input 内层键
+        // 同样被 snake 化，故 conversationId 也属 camel 死点，必须一并改走 readMockReqField
+        // —— 否则「修好形状」之后建出来的仍是 conversationId 全空的孤儿产物，缺陷原地复发。
+        // 其余单词键（title / content / kind / format / language / metadata）转换前后逐字相同。
+        conversationId: readMockReqField<string>(input, "conversationId") ?? "",
         title: input.title ?? "Untitled",
         content: input.content ?? "",
         kind: input.kind ?? "note",
         format: input.format ?? "text",
         language: input.language,
-        previewMode: input.previewMode,
+        // #201 顺带核（previewMode）：这是 snake 化后的 camel 直读 ⇒ 改前恒 undefined，
+        // 预览模式在 dev mock 里从来没真正落过库。改走 readMockReqField。
+        // ⚠ 后端 harness CreateArtifactInput / UpdateArtifactInput（
+        // axagent-core/crates/harness/src/types/rag_voice_etc.rs:866 / :876）
+        // **没有 preview_mode / language / metadata 字段** ⇒ 真机下这几项不会持久化，
+        // 这里保留的是 mock 本地持久化（前端 TS UpdateArtifactInput 已声明该字段）。
+        // 前后端 DTO 差异属另一档，见 laneFE 汇报。
+        previewMode: readMockReqField<Artifact["previewMode"]>(input, "previewMode"),
         metadata: input.metadata,
         pinned: false,
         updatedAt: new Date().toISOString(),
@@ -3980,11 +4068,20 @@ async function executeCommand<T>(
       return art as T;
     }
     case "update_artifact": {
+      // #201 B 档改判（mock 侧 fail-closed）：后端签名是
+      // update_artifact(state, id: String, input: UpdateArtifactInput)
+      // （commands/artifacts.rs:55-59）⇒ 真机缺 input 键以 `missing required key input` 拒。
+      // 原先 artInput 为 undefined 时整段 if 静默跳过并返回 undefined ⇒「假成功」，
+      // 而调用方 artifactStore.updateArtifact 会把 map 里该行覆盖成 undefined。
       const arts2 = getStore<Artifact[]>("artifacts", []);
-      const artInput = (args as { id?: string; input?: Partial<Artifact> })
-        .input;
+      const artInput = readMockReqField<Partial<Artifact>>(args, "input");
+      if (artInput === undefined) {
+        throw new Error(
+          "update_artifact: missing required key `input` —— 调用方须传 { id, input }（与真机 IPC 同口径 fail-closed，见 #201）",
+        );
+      }
       const ai = arts2.findIndex((a) => a.id === (args as { id?: string }).id);
-      if (ai >= 0 && artInput) {
+      if (ai >= 0) {
         if (artInput.title !== undefined) {
           arts2[ai].title = artInput.title;
         }
@@ -3997,8 +4094,12 @@ async function executeCommand<T>(
         if (artInput.language !== undefined) {
           arts2[ai].language = artInput.language;
         }
-        if (artInput.previewMode !== undefined) {
-          arts2[ai].previewMode = artInput.previewMode;
+        // input 内层的 camel 键经递归 snake 化后恒 undefined ⇒ previewMode 改走
+        // readMockReqField（后端 UpdateArtifactInput 无该字段，属 mock 本地持久化，
+        // 差异说明见 create_artifact 分支注释）
+        const artPreviewMode = readMockReqField<Artifact["previewMode"]>(artInput, "previewMode");
+        if (artPreviewMode !== undefined) {
+          arts2[ai].previewMode = artPreviewMode;
         }
         if (artInput.pinned !== undefined) {
           arts2[ai].pinned = artInput.pinned;
@@ -4179,36 +4280,49 @@ async function executeCommand<T>(
     case "get_program_policies":
       return getStore<ProgramPolicy[]>("program_policies", []) as T;
     case "save_program_policy": {
+      // #201 C4（采纳）：调用方形状是对的（stores/feature/gatewayStore.ts:270-272 传 { input }，
+      // 后端 commands/gateway.rs:788 收 input: SaveProgramPolicyInput，字段 program_name 等，
+      // harness/src/types/rag_voice_etc.rs:928 #[serde(rename_all = "camelCase")]）⇒ 只改键形。
+      // 缺陷在 handleCommand 已把 input 内层键递归 snake 化 ⇒ 这 6 个 camel 直读（改前展开成
+      // 12 处访问，两个分支各 6 处）恒 undefined，后果三件事叠加：
+      //   ① findIndex 恒 -1 ⇒ 每次都落到「新增」分支 ⇒ 同一 programName **重复插行**；
+      //   ② 新行的 programName 恒 undefined ⇒ 下一轮仍匹配不上，重复无上限累积；
+      //   ③ allowedProviderIds / allowedModelIds 恒序列化成 "[]"，defaultProviderId /
+      //      defaultModelId / rateLimitPerMinute 恒 undefined ⇒ 策略内容整体丢失（假成功）。
+      // 裁定：**不写 localStorage 去重迁移** —— dev mock 数据不是持久资产、本机无真实分布；
+      // 代价明写在案：**存量重复行不会自动合并**，需要时在 UI 上手删多余行。
       const sppList = getStore<ProgramPolicy[]>("program_policies", []);
       const sppInput = (args as { input?: SaveProgramPolicyInput }).input
         ?? ({} as SaveProgramPolicyInput);
-      const sppIdx = sppList.findIndex(
-        (p) => p.programName === sppInput.programName,
-      );
+      const sppProgramName = readMockReqField<string>(sppInput, "programName");
+      const sppAllowedProviderIds = readMockReqField<string[]>(sppInput, "allowedProviderIds");
+      const sppAllowedModelIds = readMockReqField<string[]>(sppInput, "allowedModelIds");
+      const sppDefaultProviderId = readMockReqField<string>(sppInput, "defaultProviderId");
+      const sppDefaultModelId = readMockReqField<string>(sppInput, "defaultModelId");
+      const sppRateLimitPerMinute = readMockReqField<number>(sppInput, "rateLimitPerMinute");
+      const sppIdx = sppList.findIndex((p) => p.programName === sppProgramName);
       if (sppIdx >= 0) {
         sppList[sppIdx] = {
           ...sppList[sppIdx],
-          allowedProviderIdsJson: JSON.stringify(
-            sppInput.allowedProviderIds ?? [],
-          ),
-          allowedModelIdsJson: JSON.stringify(sppInput.allowedModelIds ?? []),
-          defaultProviderId: sppInput.defaultProviderId,
-          defaultModelId: sppInput.defaultModelId,
-          rateLimitPerMinute: sppInput.rateLimitPerMinute,
+          allowedProviderIdsJson: JSON.stringify(sppAllowedProviderIds ?? []),
+          allowedModelIdsJson: JSON.stringify(sppAllowedModelIds ?? []),
+          defaultProviderId: sppDefaultProviderId,
+          defaultModelId: sppDefaultModelId,
+          rateLimitPerMinute: sppRateLimitPerMinute,
         };
         setStore("program_policies", sppList);
         return sppList[sppIdx] as T;
       }
       const sppNew: ProgramPolicy = {
         id: genId(),
-        programName: sppInput.programName,
-        allowedProviderIdsJson: JSON.stringify(
-          sppInput.allowedProviderIds ?? [],
-        ),
-        allowedModelIdsJson: JSON.stringify(sppInput.allowedModelIds ?? []),
-        defaultProviderId: sppInput.defaultProviderId,
-        defaultModelId: sppInput.defaultModelId,
-        rateLimitPerMinute: sppInput.rateLimitPerMinute,
+        // programName 两侧都是契约必填（后端非 Option / TS 非可选），mock 历来不校验入参
+        // ⇒ 缺失时与改前一样落 undefined，这里用断言保持既有形状，不发明默认值。
+        programName: sppProgramName as string,
+        allowedProviderIdsJson: JSON.stringify(sppAllowedProviderIds ?? []),
+        allowedModelIdsJson: JSON.stringify(sppAllowedModelIds ?? []),
+        defaultProviderId: sppDefaultProviderId,
+        defaultModelId: sppDefaultModelId,
+        rateLimitPerMinute: sppRateLimitPerMinute,
       };
       sppList.push(sppNew);
       setStore("program_policies", sppList);
@@ -5163,11 +5277,11 @@ async function executeCommand<T>(
       return session as T;
     }
     case "deactivate_platform_session": {
-      const input = args as { sessionId: string };
+      const targetSessionId = readMockReqField<string>(args, "sessionId");
       const sessions = getStore<PlatformSession[]>("platform_sessions", []);
       setStore(
         "platform_sessions",
-        sessions.map((s) => s.sessionId === input.sessionId ? { ...s, isActive: false } : s),
+        sessions.map((s) => s.sessionId === targetSessionId ? { ...s, isActive: false } : s),
       );
       return undefined as T;
     }
@@ -5231,11 +5345,17 @@ async function executeCommand<T>(
     }
     case "plugin_enable":
     case "plugin_disable": {
+      // #201 C2（采纳）：后端形参是顶层 plugin_id（commands/plugin.rs:299 / :382），
+      // 调用方传 { pluginId }（stores/feature/pluginStore.ts:102 / :120 / :138、
+      // components/settings/DashboardPluginsSettings.tsx:106 / :108 / :124）⇒ 只改键形读法。
+      // 改前：camel 直读恒 undefined ⇒ pluginId 恒 "" ⇒ findIndex 恒 -1 ⇒
+      // 启停在 dev mock 里是**静默 no-op**（列表状态永远不变），且 C3 的「已启用」判定
+      // 依赖这里写回的 enabled，故 C1/C2/C3 必须同批改。
       const allPlugins = getStore<Array<Record<string, unknown>>>(
         "plugins",
         [],
       );
-      const pluginId = (args?.pluginId as string) || "";
+      const pluginId = readMockReqField<string>(args, "pluginId") || "";
       const idx = allPlugins.findIndex((p) => p.id === pluginId);
       if (idx !== -1) {
         allPlugins[idx] = {
@@ -5248,14 +5368,16 @@ async function executeCommand<T>(
     }
     case "plugin_uninstall": {
       let allPlugins = getStore<Array<Record<string, unknown>>>("plugins", []);
-      const pluginId = (args?.pluginId as string) || "";
+      // #201 C1（采纳）：同 C2 —— 改前 pluginId 恒 "" ⇒ filter 删不掉任何行 ⇒
+      // 卸载在 dev mock 里是静默 no-op（UI 上插件永远卸不掉）。
+      const pluginId = readMockReqField<string>(args, "pluginId") || "";
       allPlugins = allPlugins.filter((p) => p.id !== pluginId);
       setStore("plugins", allPlugins);
       return undefined as T;
     }
     case "plugin_update": {
       return {
-        pluginId: (args?.pluginId as string) || "",
+        pluginId: readMockReqField<string>(args, "pluginId") || "",
         version: "0.0.0",
         installPath: "",
       } as T;
@@ -5267,7 +5389,12 @@ async function executeCommand<T>(
     case "plugin_ui_action": {
       // mock 不模拟 manifest 的 `worker` 声明，用「插件存在且已启用」近似
       // 「宿主侧有可用 worker」；不满足时抛与后端同码的结构化错误。
-      const pluginId = (args?.pluginId as string) || "";
+      // #201 C3（采纳，随 C1/C2 同批）：后端形参是顶层 plugin_id + action
+      // （commands/plugin.rs:440），调用方传 { pluginId, action }
+      // （stores/feature/pluginStore.ts:182）⇒ 只改键形读法。改前 pluginId 恒 ""
+      // ⇒ target 恒 undefined ⇒ 该命令在 dev mock 里**必然抛错**（面板动作全部不可用）。
+      // 「已启用」判定读的是 C2 写回的 enabled，所以 C3 单独改不够，三处必须同批。
+      const pluginId = readMockReqField<string>(args, "pluginId") || "";
       const allPlugins = getStore<Array<Record<string, unknown>>>("plugins", []);
       const target = allPlugins.find((p) => p.id === pluginId);
       if (!target || target.enabled === false) {
@@ -6031,15 +6158,19 @@ async function executeCommand<T>(
         config?: Record<string, unknown>;
       };
       const now = Math.floor(Date.now() / 1000);
+      // #201 A 档：input 经 handleCommand 递归 snake 化后键名是 platform_type / base_url，
+      // 直读 camel 恒 undefined ⇒ 走兼容读（调用方实际传 snake 键，属 census 登记的到达路径）。
+      const platformType = readMockReqField<string>(input, "platformType");
+      const baseUrl = readMockReqField<string>(input, "baseUrl");
       const existingIdx = PRESET_MOCK_PLATFORMS.findIndex((p) => p.id === input.id);
       let platform: MarketPlatform;
       if (existingIdx >= 0) {
         platform = {
           ...PRESET_MOCK_PLATFORMS[existingIdx],
           ...(input.name !== undefined ? { name: input.name } : {}),
-          ...(input.platformType !== undefined ? { platformType: input.platformType } : {}),
+          ...(platformType !== undefined ? { platformType } : {}),
           ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
-          ...(input.baseUrl !== undefined ? { baseUrl: input.baseUrl } : {}),
+          ...(baseUrl !== undefined ? { baseUrl } : {}),
           ...(input.config !== undefined ? { config: input.config } : {}),
           updatedAt: now,
         };
@@ -6048,11 +6179,11 @@ async function executeCommand<T>(
         platform = buildMockPlatform(
           input.id || `mp-${Date.now()}`,
           input.name || "New Platform",
-          input.baseUrl ?? null,
+          baseUrl ?? null,
         );
         platform = {
           ...platform,
-          platformType: input.platformType || "manual",
+          platformType: platformType || "manual",
           enabled: input.enabled ?? true,
           config: input.config ?? null,
           createdAt: now,
@@ -6073,11 +6204,18 @@ async function executeCommand<T>(
     }
 
     case "opc_list_leads": {
-      const { minScore, status } = (args ?? {}) as {
+      // #201 C5（采纳）：后端是顶层三个形参 limit / min_score / status
+      // （commands/opc_demand_discovery.rs:62-66），调用方按 camel 传参
+      // （pages/DemandDiscoveryPage.tsx:276-280）⇒ 只改键形，不动路径。
+      // 改前 minScore 恒 undefined ⇒ typeof 判据恒 false ⇒ 「按商业价值分过滤」
+      // 在 dev mock 里**完全不生效**（滑条拖到最高照样列出全部线索，与真机口径相反）。
+      // status / limit 是单词键，转换前后逐字相同，保持原读法。
+      const { status } = (args ?? {}) as {
         limit?: number;
         minScore?: number;
         status?: string;
       };
+      const minScore = readMockReqField<number>(args, "minScore");
       let filtered = typeof minScore === "number"
         ? MOCK_DEMAND_LEADS.filter((l) => l.commercialValueScore >= minScore)
         : [...MOCK_DEMAND_LEADS];
@@ -6107,7 +6245,8 @@ async function executeCommand<T>(
     }
 
     case "opc_update_lead_status": {
-      const { leadId, status } = (args ?? {}) as { leadId?: string; status?: string };
+      const { status } = (args ?? {}) as { status?: string };
+      const leadId = readMockReqField<string>(args, "leadId");
       const lead = MOCK_DEMAND_LEADS.find((l) => l.id === leadId);
       if (!lead) {
         throw new Error(`需求线索不存在: ${leadId}`);
@@ -6126,7 +6265,7 @@ async function executeCommand<T>(
     }
 
     case "opc_convert_lead_to_workflow": {
-      const { leadId } = (args ?? {}) as { leadId?: string };
+      const leadId = readMockReqField<string>(args, "leadId");
       const lead = MOCK_DEMAND_LEADS.find((l) => l.id === leadId);
       if (!lead) {
         throw new Error(`需求线索不存在: ${leadId}`);
@@ -6159,7 +6298,7 @@ async function executeCommand<T>(
     }
 
     case "opc_run_lead_workflow": {
-      const { leadId } = (args ?? {}) as { leadId?: string };
+      const leadId = readMockReqField<string>(args, "leadId");
       const lead = MOCK_DEMAND_LEADS.find((l) => l.id === leadId);
       if (!lead) {
         throw new Error(`需求线索不存在: ${leadId}`);
@@ -6186,8 +6325,20 @@ async function executeCommand<T>(
       const painHits = ["难", "痛点", "慢", "费", "麻烦", "need", "frustrating", "difficult", "lack", "missing"]
         .filter((k) => text.includes(k)).length;
       const painScore = Math.min(100, 40 + painHits * 12);
-      const budgetMin = typeof input?.budgetMin === "number" ? input.budgetMin : null;
-      const budgetMax = typeof input?.budgetMax === "number" ? input.budgetMax : null;
+      // #201 C5（采纳）：调用方形状是对的（pages/DemandDiscoveryPage.tsx:634 传 { input }，
+      // 后端 commands/opc_demand_discovery.rs:152 收 input: SaveDemandLeadInput）⇒ 只改键形。
+      // 改前这 7 个 camel 读点（两个分支展开成 12 处访问）在 snake 化后的 input 上恒 undefined ⇒
+      // 预算三态恒 null、budgetScore 恒 40（中性）、confidence 恒 0.4，且补录表单里填的
+      // 币种 / 联系人 / 邮箱 / 电话 / 来源链接**全部丢失**（列表上这几列永远是空）。
+      const inputBudgetMin = readMockReqField<number>(input, "budgetMin");
+      const inputBudgetMax = readMockReqField<number>(input, "budgetMax");
+      const budgetMin = typeof inputBudgetMin === "number" ? inputBudgetMin : null;
+      const budgetMax = typeof inputBudgetMax === "number" ? inputBudgetMax : null;
+      const rawBudgetCurrency = readMockReqField<string>(input, "budgetCurrency");
+      const rawContactName = readMockReqField<string>(input, "contactName");
+      const rawContactEmail = readMockReqField<string>(input, "contactEmail");
+      const rawContactPhone = readMockReqField<string>(input, "contactPhone");
+      const rawSourceUrl = readMockReqField<string>(input, "sourceUrl");
       // 有预算信号 → 预算分高；无预算 → 中性
       const budgetScore = budgetMin !== null || budgetMax !== null ? 75 : 40;
       const commercialValueScore = Math.round(painScore * 0.4 + budgetScore * 0.3 + 50 * 0.3);
@@ -6198,21 +6349,15 @@ async function executeCommand<T>(
         description,
         budgetMin,
         budgetMax,
-        budgetCurrency: typeof input?.budgetCurrency === "string" && input.budgetCurrency
-          ? input.budgetCurrency
+        // 以下五处：保留「非空字符串才采信，否则回落默认值」的原判据，
+        // 只是取值改走上面的 readMockReqField 局部常量。
+        budgetCurrency: typeof rawBudgetCurrency === "string" && rawBudgetCurrency
+          ? rawBudgetCurrency
           : "CNY",
-        contactName: typeof input?.contactName === "string" && input.contactName
-          ? input.contactName
-          : null,
-        contactEmail: typeof input?.contactEmail === "string" && input.contactEmail
-          ? input.contactEmail
-          : null,
-        contactPhone: typeof input?.contactPhone === "string" && input.contactPhone
-          ? input.contactPhone
-          : null,
-        sourceUrl: typeof input?.sourceUrl === "string" && input.sourceUrl
-          ? input.sourceUrl
-          : null,
+        contactName: typeof rawContactName === "string" && rawContactName ? rawContactName : null,
+        contactEmail: typeof rawContactEmail === "string" && rawContactEmail ? rawContactEmail : null,
+        contactPhone: typeof rawContactPhone === "string" && rawContactPhone ? rawContactPhone : null,
+        sourceUrl: typeof rawSourceUrl === "string" && rawSourceUrl ? rawSourceUrl : null,
         status: "new",
         confidence: budgetMin !== null || budgetMax !== null ? 0.7 : 0.4,
         painScore,
@@ -6244,11 +6389,13 @@ async function executeCommand<T>(
         if (typeof input?.enabled === "boolean") {
           existing.enabled = input.enabled;
         }
-        if (typeof input?.intervalHours === "number") {
-          existing.intervalHours = input.intervalHours;
+        const intervalHours = readMockReqField<number>(input, "intervalHours");
+        const minScore = readMockReqField<number>(input, "minScore");
+        if (typeof intervalHours === "number") {
+          existing.intervalHours = intervalHours;
         }
-        if (typeof input?.minScore === "number") {
-          existing.minScore = input.minScore;
+        if (typeof minScore === "number") {
+          existing.minScore = minScore;
         }
         if (Array.isArray(input?.platforms)) {
           existing.platforms = input.platforms as string[];
@@ -6263,12 +6410,14 @@ async function executeCommand<T>(
       if (MOCK_DEMAND_SUBSCRIPTIONS.some((s) => s.keyword === keyword)) {
         throw new Error(`订阅词已存在: ${keyword}`);
       }
+      const newIntervalHours = readMockReqField<number>(input, "intervalHours");
+      const newMinScore = readMockReqField<number>(input, "minScore");
       const row: DemandSubscription = {
         id: `sub-${Date.now()}`,
         keyword,
         enabled: input?.enabled === false ? false : true,
-        intervalHours: typeof input?.intervalHours === "number" ? input.intervalHours : 6,
-        minScore: typeof input?.minScore === "number" ? input.minScore : 60,
+        intervalHours: typeof newIntervalHours === "number" ? newIntervalHours : 6,
+        minScore: typeof newMinScore === "number" ? newMinScore : 60,
         platforms: Array.isArray(input?.platforms) ? (input.platforms as string[]) : [],
         lastScannedAt: null,
         lastHitCount: 0,
@@ -6290,7 +6439,7 @@ async function executeCommand<T>(
     }
 
     case "opc_run_subscription_scan": {
-      const { onlyDue } = (args ?? {}) as { onlyDue?: boolean };
+      const onlyDue = readMockReqField<boolean>(args, "onlyDue");
       const now = Math.floor(Date.now() / 1000);
       const due = onlyDue === false
         ? MOCK_DEMAND_SUBSCRIPTIONS.filter((s) => s.enabled)
@@ -6322,7 +6471,7 @@ async function executeCommand<T>(
     }
 
     case "opc_ensure_demand_scan_job": {
-      const { cronExpression } = (args ?? {}) as { cronExpression?: string };
+      const cronExpression = readMockReqField<string>(args, "cronExpression");
       const cron = cronExpression ?? "0 */6 * * *";
       // 5 字段校验（与后端 validate_cron_expression 同规则）
       if (cron.trim().split(/\s+/).length !== 5) {
@@ -6348,7 +6497,8 @@ async function executeCommand<T>(
     case "opc_match_lead_capabilities": {
       // 能力匹配 mock：与后端 opc_demand_capability 同口径（required 映射 + 门槛判定），
       // 检索侧用固定假候选模拟（浏览器模式无 RAG）
-      const { leadId, topK } = (args ?? {}) as { leadId?: string; topK?: number };
+      const topK = readMockReqField<number>(args, "topK");
+      const leadId = readMockReqField<string>(args, "leadId");
       const lead = MOCK_DEMAND_LEADS.find((l) => l.id === leadId);
       if (!lead) { throw new Error(`线索不存在: ${leadId}`); }
       const limit = Math.min(Math.max(topK ?? 8, 1), 20);
@@ -6427,7 +6577,7 @@ async function executeCommand<T>(
     }
 
     case "opc_create_invoice_from_lead": {
-      const { leadId } = (args ?? {}) as { leadId?: string };
+      const leadId = readMockReqField<string>(args, "leadId");
       const lead = MOCK_DEMAND_LEADS.find((l) => l.id === leadId);
       if (!lead) { throw new Error(`线索不存在: ${leadId}`); }
       // 与后端同规则：仅 won 线索可开票；已有发票幂等返回
@@ -6456,10 +6606,10 @@ async function executeCommand<T>(
     }
 
     case "opc_update_invoice_status": {
-      const { invoiceId, status } = (args ?? {}) as {
-        invoiceId?: string;
+      const { status } = (args ?? {}) as {
         status?: "draft" | "sent" | "paid";
       };
+      const invoiceId = readMockReqField<string>(args, "invoiceId");
       const inv = MOCK_INVOICES.find((i) => i.id === invoiceId);
       if (!inv) { throw new Error(`发票不存在: ${invoiceId}`); }
       // 与后端同规则：draft → sent → paid 单向，同状态幂等
@@ -6481,7 +6631,7 @@ async function executeCommand<T>(
     }
 
     case "opc_delete_invoice": {
-      const { invoiceId } = (args ?? {}) as { invoiceId?: string };
+      const invoiceId = readMockReqField<string>(args, "invoiceId");
       const idx = MOCK_INVOICES.findIndex((i) => i.id === invoiceId);
       if (idx >= 0) { MOCK_INVOICES.splice(idx, 1); }
       return { ok: true } as unknown as T;
@@ -6534,7 +6684,12 @@ async function executeCommand<T>(
         } as T;
       }
       const passports = readCapabilityPassports();
-      const idx = passports.findIndex((p) => p.capabilityId === passport.capabilityId);
+      // 入参 passport 经 handleCommand 递归 snake 化后真实键是 capability_id；
+      // 存量记录可能是两种键形 ⇒ 两侧都走兼容读，避免恒 undefined 互相「命中」。
+      const incomingCapId = readMockReqField<string>(passport, "capabilityId");
+      const idx = passports.findIndex(
+        (p) => readMockReqField<string>(p, "capabilityId") === incomingCapId,
+      );
       if (idx >= 0) {
         passports[idx] = passport;
       } else {

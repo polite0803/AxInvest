@@ -121,7 +121,11 @@ async function saveToArtifact(
   };
 
   try {
-    await invoke("create_artifact", input as unknown as Record<string, unknown>);
+    // 后端 create_artifact(state, input: CreateArtifactInput)
+    // （src-tauri/src/commands/artifacts.rs:36-38）⇒ 载荷必须包在 `input` 键下。
+    // 改前摊平到顶层：真机 IPC 以 `missing required key input` 拒；dev mock 侧则
+    // 假成功并落一条全空孤儿产物（#201 B 档改判）。双 unknown 断言随形状修正一并去掉。
+    await invoke("create_artifact", { input });
     message.success(t("imageGen.savedToArtifact"));
   } catch {
     // 静默失败，不阻断主流程

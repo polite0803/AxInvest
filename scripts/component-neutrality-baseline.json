@@ -608,58 +608,16 @@
       "targetOwner": "time-travel"
     },
     {
-      "file": "src/components/stock-analysis/BacktestPanel.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/stock-analysis/DecisionBanner.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/stock-analysis/EvolutionDriftPanel.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/stock-analysis/KLineChart.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/stock-analysis/PanelEmpty.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
       "file": "src/components/stock-analysis/PaperPortfolioDashboard.tsx",
       "target": "@/stores/feature/paperPortfolioStore",
       "kind": "store",
       "targetOwner": "paperPortfolio"
     },
     {
-      "file": "src/components/stock-analysis/PortfolioMonitorPanel.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
       "file": "src/components/stock-analysis/RecommendationPanel.tsx",
       "target": "@/components/time-travel/ReplayBadge",
       "kind": "component",
       "targetOwner": "time-travel"
-    },
-    {
-      "file": "src/components/stock-analysis/RecommendationPanel.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
     },
     {
       "file": "src/components/stock-analysis/ReflectionPanel.tsx",
@@ -692,18 +650,6 @@
       "targetOwner": "serenity"
     },
     {
-      "file": "src/components/stock-analysis/SerenityScreeningPanel.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/stock-analysis/SerenityValidationPanel.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
       "file": "src/components/stock-analysis/StockAnalysisPage.tsx",
       "target": "@/components/settings/StockAnalysisSettings",
       "kind": "component",
@@ -722,12 +668,6 @@
       "targetOwner": "time-travel"
     },
     {
-      "file": "src/components/stock-analysis/StockAnalysisPage.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
       "file": "src/components/stock-analysis/StockAnalysisSettingsModal.tsx",
       "target": "@/components/settings/StockAnalysisSettings",
       "kind": "component",
@@ -738,36 +678,6 @@
       "target": "@/components/settings/StockAnalysisConfigPanel",
       "kind": "component",
       "targetOwner": "settings"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/RecommendationPanel.asOfDate.test.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/RecommendationPanel.horizonPresentation.test.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/RecommendationPanel.seedPoolOrigin.test.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/RecommendationPanel.syntheticMarking.test.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/ScreenerPage.test.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
     },
     {
       "file": "src/components/stock-analysis/__tests__/ScreenerToWorkspace.integration.test.tsx",
@@ -788,22 +698,10 @@
       "targetOwner": "serenity"
     },
     {
-      "file": "src/components/stock-analysis/__tests__/SerenityScreeningPanel.asOfRunScope.test.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
       "file": "src/components/stock-analysis/__tests__/SerenityScreeningPanel.historyGeneration.test.tsx",
       "target": "@/stores/feature/serenityStore",
       "kind": "store",
       "targetOwner": "serenity"
-    },
-    {
-      "file": "src/components/stock-analysis/__tests__/SerenityScreeningPanel.historyGeneration.test.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
     },
     {
       "file": "src/components/stock-analysis/__tests__/SerenityScreeningPanel.nodeFailure.test.tsx",
@@ -890,12 +788,6 @@
       "targetOwner": "stock-analysis"
     },
     {
-      "file": "src/components/stock-workspace/DecisionHeroBar.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
       "file": "src/components/stock-workspace/StockWorkspaceShell.tsx",
       "target": "@/components/stock-analysis/AgentStockUIHost",
       "kind": "component",
@@ -956,58 +848,16 @@
       "targetOwner": "theme"
     },
     {
-      "file": "src/components/time-travel/PageTimeAnchor.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/time-travel/ReplayBadge.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
       "file": "src/components/time-travel/ReplaySweep.tsx",
       "target": "@/components/tasks/JobCard",
       "kind": "component",
       "targetOwner": "tasks"
     },
     {
-      "file": "src/components/time-travel/ReplayWorkbench.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/time-travel/TimeAnchorTour.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
       "file": "src/components/time-travel/TimeTravelBatchCard.tsx",
       "target": "@/components/tasks/JobCard",
       "kind": "component",
       "targetOwner": "tasks"
-    },
-    {
-      "file": "src/components/time-travel/TimeTravelBatchCard.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/time-travel/__tests__/ReplayWorkbench.test.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
-    },
-    {
-      "file": "src/components/time-travel/__tests__/TimeAnchorTour.test.tsx",
-      "target": "@/stores/feature/timeAnchorStore",
-      "kind": "store",
-      "targetOwner": "timeAnchor"
     },
     {
       "file": "src/components/viz/VizBlockRenderer.tsx",

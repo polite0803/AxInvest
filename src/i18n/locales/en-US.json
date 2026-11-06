@@ -6769,19 +6769,6 @@
     "sectionDeveloper": "Developer Tools"
   },
   "skill": {
-    "abTest": {
-      "change": "Change",
-      "conclusion": "Conclusion: Version A won {{winCountA}} items, Version B won {{winCountB}} items.",
-      "metric": "Metric",
-      "noData": "No A/B test data yet",
-      "noDifference": " No significant difference between the two versions.",
-      "recommendA": " Recommended to adopt Version A.",
-      "recommendB": " Recommended to adopt Version B.",
-      "tie": "Tie",
-      "versionA": "Version A",
-      "versionB": "Version B",
-      "winner": "Winner"
-    },
     "addFrontend": "Add Frontend Extension",
     "agentGenerated": "Agent Generated",
     "analyzeError": "AI analysis failed: {{error}}",
@@ -6806,22 +6793,6 @@
     "editPlaceholder": "Write the full skill content...",
     "editTitle": "Edit Skill",
     "entryFileEmpty": "Entry file \"{{entry}}\" is empty or does not exist",
-    "evolution": {
-      "abTestResults": "A/B Test Results",
-      "confirmRollback": "Confirm Rollback",
-      "currentVersion": "Current Version",
-      "latestEvolution": "Latest Evolution",
-      "newVersion": "New (v{{version}})",
-      "noHistory": "This skill has no evolution history yet",
-      "none": "None",
-      "oldVersion": "Old (v{{version}})",
-      "rollback": "Rollback",
-      "rollbackConfirmMessage": "Are you sure you want to roll back to v{{version}}? This will discard all evolution changes after that version.",
-      "rollbackFailed": "Rollback failed: {{error}}",
-      "rollbackSuccess": "Successfully rolled back to v{{version}}",
-      "totalEvolutions": "Total Evolutions",
-      "viewDiff": "View Diff"
-    },
     "exportFailed": "Export Failed",
     "exportPublishable": "Export as Publishable Format",
     "exported": "Skill Exported",
@@ -9852,7 +9823,6 @@
       "noLoopBodySteps": "No loop body steps",
       "noLoopSteps": "No loop body steps yet",
       "noSteps": "No steps",
-      "noTemplates": "No templates found",
       "noToolsAvailable": "No tools available",
       "notSet": "Not set",
       "opContains": "Contains",
@@ -9911,7 +9881,6 @@
       "routingPrompt": "Routing prompt",
       "routingPromptPlaceholder": "Describe the routing decision logic",
       "scheduleTrigger": "⏰ Schedule",
-      "searchTemplate": "Search template...",
       "seconds": "Seconds",
       "selectContextSources": "Select context sources...",
       "selectExpert": "Select Expert",
@@ -9920,7 +9889,6 @@
       "selectNodeToAdd": "Select node to add",
       "selectRole": "Select Role",
       "selectSubWorkflow": "Select sub-workflow...",
-      "selectTemplate": "Select Template",
       "selectTool": "Select tool...",
       "selectTools": "Select tools...",
       "showTools": "Show tools",
@@ -10724,9 +10692,6 @@
   },
   "settingsPanel": {
     "featureFlags": "Feature Flags"
-  },
-  "skillTimeline": {
-    "promptDiff": "Prompt Diff"
   },
   "subWorkflowNode": {
     "collapse": "Collapse",
@@ -15424,28 +15389,6 @@
     "disconnectedHint": "The app was idle in the background. The IPC channel may have been disconnected.",
     "reconnecting": "Reconnecting…",
     "retry": "Retry"
-  },
-  "components_skill_SkillABTestResults": {
-    "两个版本无明显差异": " No significant difference between the two versions.",
-    "优胜": "Winner",
-    "变化": "Change",
-    "平局": "Tie",
-    "指标": "Metric",
-    "推荐采用版本_A": " Recommending Version A.",
-    "推荐采用版本_B": " Recommending Version B.",
-    "暂无_A_B_测试数据": "No A/B Test Data",
-    "版本_A": "Version A",
-    "版本_B": "Version B"
-  },
-  "components_skill_SkillEvolutionViewer": {
-    "A_B_测试结果": "A/B Test Results",
-    "当前版本": "Current Version",
-    "总进化次数": "Total Evolutions",
-    "最近进化": "Latest Evolution"
-  },
-  "components_skill_SkillVersionTimeline": {
-    "暂无进化历史": "No Evolution History",
-    "确认回滚": "Confirm Rollback"
   },
   "stockAnalysis": {
     "decisionExplanation": {

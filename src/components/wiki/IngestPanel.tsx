@@ -3,7 +3,6 @@
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke, listen, type UnlistenFn } from "@/lib/invoke";
 import { message } from "@/lib/toast";
-import { useLlmWikiStore } from "@/stores/feature/llmWikiStore";
 import { useWikiStore } from "@/stores/feature/wikiStore";
 import type { FolderImportPreviewItem, FolderImportResult, IngestResult } from "@/types";
 import { DeleteOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, UploadOutlined } from "@ant-design/icons";
@@ -17,11 +16,31 @@ const { Dragger } = Upload;
 interface IngestPanelProps {
   wikiId: string;
   onClose?: () => void;
+  /** 摄取单个来源（file / url / folder 三种形态统一入口） */
+  ingestSource: (
+    wikiId: string,
+    sourceType: string,
+    path: string,
+    url?: string,
+    title?: string,
+  ) => Promise<IngestResult | null>;
+  /** 文件夹导入预扫描：仅列出待导入文件，不落库 */
+  importFolderPreview: (folderPath: string) => Promise<FolderImportPreviewItem[]>;
+  /** 执行文件夹导入 */
+  importFolder: (
+    wikiId: string,
+    folderPath: string,
+  ) => Promise<FolderImportResult | null>;
 }
 
-export function IngestPanel({ wikiId, onClose }: IngestPanelProps) {
+export function IngestPanel({
+  wikiId,
+  onClose,
+  ingestSource,
+  importFolderPreview,
+  importFolder,
+}: IngestPanelProps) {
   const { t } = useTranslation();
-  const { ingestSource, importFolderPreview, importFolder } = useLlmWikiStore();
   const [form] = Form.useForm();
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);

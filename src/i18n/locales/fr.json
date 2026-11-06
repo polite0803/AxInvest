@@ -6769,19 +6769,6 @@
     "sectionDeveloper": "Outils de developpement"
   },
   "skill": {
-    "abTest": {
-      "change": "Modifier",
-      "conclusion": "Conclusion : La version A a gagné {{winCountA}} éléments, la version B a gagné {{winCountB}} éléments.",
-      "metric": "Métrique",
-      "noData": "Pas encore de données de test A/B",
-      "noDifference": "No significant difference between the two versions.",
-      "recommendA": "Recommended to adopt Version A.",
-      "recommendB": "Recommended to adopt Version B.",
-      "tie": "Égalité",
-      "versionA": "Version A",
-      "versionB": "Version B",
-      "winner": "Gagnant"
-    },
     "addFrontend": "Add Frontend",
     "agentGenerated": "Généré par l'agent",
     "analyzeError": "Analyse IA échouée : {{error}}",
@@ -6806,22 +6793,6 @@
     "editPlaceholder": "Écrivez le contenu complet de la compétence...",
     "editTitle": "Modifier la compétence",
     "entryFileEmpty": "Le fichier d'entrée « {{entry}} » est vide ou n'existe pas",
-    "evolution": {
-      "abTestResults": "Résultats du test A/B",
-      "confirmRollback": "Confirmer le retour",
-      "currentVersion": "Version actuelle",
-      "latestEvolution": "Dernière évolution",
-      "newVersion": "Nouveau (v{{version}})",
-      "noHistory": "Cette compétence n'a pas encore d'historique d'évolution",
-      "none": "Aucun",
-      "oldVersion": "Ancien (v{{version}})",
-      "rollback": "Revenir",
-      "rollbackConfirmMessage": "Êtes-vous sûr de vouloir revenir à la v{{version}} ? Cela annulera toutes les modifications d'évolution après cette version.",
-      "rollbackFailed": "Échec du rollback : {{error}}",
-      "rollbackSuccess": "Retour à v{{version}} réussi",
-      "totalEvolutions": "Nombre total d'évolutions",
-      "viewDiff": "Voir la différence"
-    },
     "exportFailed": "Échec de l'exportation",
     "exportPublishable": "Export Publishable",
     "exported": "Compétence exportée",
@@ -9843,7 +9814,6 @@
       "noLoopBodySteps": "Aucune étape de corps de boucle",
       "noLoopSteps": "Aucune étape de corps de boucle pour le moment",
       "noSteps": "Aucune étape",
-      "noTemplates": "Aucun modèle trouvé",
       "noToolsAvailable": "Aucun outil disponible",
       "notSet": "Non défini",
       "opContains": "Contient",
@@ -9902,7 +9872,6 @@
       "routingPrompt": "Prompt de routage",
       "routingPromptPlaceholder": "Décrire la logique de routage",
       "scheduleTrigger": "Planifié",
-      "searchTemplate": "Rechercher un modèle…",
       "seconds": "Secondes",
       "selectContextSources": "Sélectionner des sources de contexte...",
       "selectExpert": "Sélectionner un expert",
@@ -9911,7 +9880,6 @@
       "selectNodeToAdd": "Sélectionner un nœud à ajouter",
       "selectRole": "Select role",
       "selectSubWorkflow": "Sélectionner un sous-workflow...",
-      "selectTemplate": "Sélectionner un modèle",
       "selectTool": "Choisir l'outil",
       "selectTools": "Sélectionner des outils...",
       "showTools": "Afficher les outils",
@@ -10724,9 +10692,6 @@
   },
   "settingsPanel": {
     "featureFlags": "Indicateurs de fonctionnalité"
-  },
-  "skillTimeline": {
-    "promptDiff": "Différence d'invite"
   },
   "subWorkflowNode": {
     "collapse": "Réduire",
@@ -18903,28 +18868,6 @@
     "nodeTimeoutSummary": "Nœuds en délai : {{nodes}}",
     "nodeSoonTimeoutSummary": "Nœuds bientôt en délai : {{nodes}}",
     "cancelExecution": "Annuler l'exécution"
-  },
-  "components_skill_SkillABTestResults": {
-    "暂无_A_B_测试数据": "Aucune donnée de test A/B disponible",
-    "指标": "Indicateur",
-    "版本_A": "Version A",
-    "版本_B": "Version B",
-    "变化": "Variation",
-    "优胜": "Gagnant",
-    "平局": "Égalité",
-    "推荐采用版本_A": " Version A recommandée.",
-    "推荐采用版本_B": " Version B recommandée.",
-    "两个版本无明显差异": " Aucune différence notable entre les deux versions."
-  },
-  "components_skill_SkillEvolutionViewer": {
-    "当前版本": "Version actuelle",
-    "总进化次数": "Nombre total d'évolutions",
-    "最近进化": "Évolution récente",
-    "A_B_测试结果": "Résultats des tests A/B"
-  },
-  "components_skill_SkillVersionTimeline": {
-    "暂无进化历史": "Aucun historique d'évolution",
-    "确认回滚": "Confirmer la restauration"
   },
   "errorRecovery": {
     "noError": "Aucune erreur à restaurer actuellement",

@@ -3,8 +3,8 @@
 import { Tooltip } from "@/components/layout/Tooltip";
 import { invoke } from "@/lib/invoke";
 import { message } from "@/lib/toast";
-import { LintResult, useLlmWikiStore } from "@/stores/feature/llmWikiStore";
 import { useWikiStore } from "@/stores/feature/wikiStore";
+import type { LintResult } from "@/types";
 import {
   CheckCircleOutlined,
   EyeOutlined,
@@ -20,12 +20,15 @@ const { Text } = Typography;
 
 interface LintReportProps {
   wikiId: string;
+  /** 对单篇笔记重跑 lint，返回更新后的结果 */
+  lintNote: (noteId: string) => Promise<LintResult | null>;
+  /** 重新计算单篇笔记的质量分 */
+  updateLintScore: (noteId: string) => Promise<number | null>;
 }
 
-export function LintReport({ wikiId }: LintReportProps) {
+export function LintReport({ wikiId, lintNote, updateLintScore }: LintReportProps) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
-  const { lintNote, updateLintScore } = useLlmWikiStore();
   const { notes } = useWikiStore();
   const [lintResults, setLintResults] = useState<LintResult[]>([]);
   const [loading, setLoading] = useState(false);

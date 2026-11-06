@@ -35,6 +35,9 @@ export function IngestPage() {
     loadWikis,
     selectWiki,
     deleteSource,
+    ingestSource,
+    importFolderPreview,
+    importFolder,
   } = useLlmWikiStore();
 
   const [activeTab, setActiveTab] = useState("upload");
@@ -203,7 +206,14 @@ export function IngestPage() {
                     {t("wiki.ingest.upload")}
                   </span>
                 ),
-                children: <IngestPanel wikiId={displayWikiId} />,
+                children: (
+                  <IngestPanel
+                    wikiId={displayWikiId}
+                    ingestSource={ingestSource}
+                    importFolderPreview={importFolderPreview}
+                    importFolder={importFolder}
+                  />
+                ),
               },
               {
                 key: "history",

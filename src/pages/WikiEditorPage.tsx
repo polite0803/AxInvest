@@ -65,7 +65,7 @@ export function WikiEditorPage({ noteId, onBack }: WikiEditorPageProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { getNote, updateNote, deleteNote, notes, loadNotes, exportNoteHtml } = useWikiStore();
-  const { operations, loadOperations } = useLlmWikiStore();
+  const { operations, loadOperations, lintNote, updateLintScore } = useLlmWikiStore();
 
   const [note, setNote] = useState<Note | null>(null);
   const [content, setContent] = useState("");
@@ -480,7 +480,11 @@ export function WikiEditorPage({ noteId, onBack }: WikiEditorPageProps) {
           onCancel={() => setLintOpen(false)}
           title={t("wiki.lintReport")}
         >
-          <LintReport wikiId={note.vaultId} />
+          <LintReport
+            wikiId={note.vaultId}
+            lintNote={lintNote}
+            updateLintScore={updateLintScore}
+          />
         </BaseModal>
       )}
 

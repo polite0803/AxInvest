@@ -6769,19 +6769,6 @@
     "sectionDeveloper": "Herramientas de desarrollador"
   },
   "skill": {
-    "abTest": {
-      "change": "Cambiar",
-      "conclusion": "Conclusión: La Versión A ganó {{winCountA}} elementos, la Versión B ganó {{winCountB}} elementos.",
-      "metric": "Métrica",
-      "noData": "Aún no hay datos de prueba A/B",
-      "noDifference": "No significant difference between the two versions.",
-      "recommendA": "Recommended to adopt Version A.",
-      "recommendB": "Recommended to adopt Version B.",
-      "tie": "Empate",
-      "versionA": "Versión A",
-      "versionB": "Versión B",
-      "winner": "Ganador"
-    },
     "addFrontend": "Add Frontend",
     "agentGenerated": "Generado por agente",
     "analyzeError": "Análisis IA fallido: {{error}}",
@@ -6806,22 +6793,6 @@
     "editPlaceholder": "Escriba el contenido completo de la habilidad...",
     "editTitle": "Editar habilidad",
     "entryFileEmpty": "El archivo de entrada \"{{entry}}\" está vacío o no existe",
-    "evolution": {
-      "abTestResults": "Resultados de la prueba A/B",
-      "confirmRollback": "Confirmar reversión",
-      "currentVersion": "Versión actual",
-      "latestEvolution": "Última evolución",
-      "newVersion": "Nueva (v{{version}})",
-      "noHistory": "Esta habilidad aún no tiene historial de evolución",
-      "none": "Ninguno",
-      "oldVersion": "Antigua (v{{version}})",
-      "rollback": "Reversión",
-      "rollbackConfirmMessage": "¿Estás seguro de que quieres revertir a v{{version}}? Esto descartará todos los cambios de evolución posteriores a esa versión.",
-      "rollbackFailed": "Reversión fallida: {{error}}",
-      "rollbackSuccess": "Reversión a v{{version}} exitosa",
-      "totalEvolutions": "Evoluciones totales",
-      "viewDiff": "Ver diferencias"
-    },
     "exportFailed": "Exportación fallida",
     "exportPublishable": "Export Publishable",
     "exported": "Habilidad exportada",
@@ -9843,7 +9814,6 @@
       "noLoopBodySteps": "Sin pasos del cuerpo del bucle",
       "noLoopSteps": "Aún no hay pasos del cuerpo del bucle",
       "noSteps": "Sin pasos",
-      "noTemplates": "No se encontraron plantillas",
       "noToolsAvailable": "Sin herramientas disponibles",
       "notSet": "No establecido",
       "opContains": "Contiene",
@@ -9902,7 +9872,6 @@
       "routingPrompt": "Prompt de enrutamiento",
       "routingPromptPlaceholder": "Describa la lógica de enrutamiento",
       "scheduleTrigger": "Programado",
-      "searchTemplate": "Buscar plantilla…",
       "seconds": "Segundos",
       "selectContextSources": "Seleccionar fuentes de contexto...",
       "selectExpert": "Seleccionar experto",
@@ -9911,7 +9880,6 @@
       "selectNodeToAdd": "Seleccionar nodo para añadir",
       "selectRole": "Select role",
       "selectSubWorkflow": "Seleccionar subflujo de trabajo...",
-      "selectTemplate": "Seleccionar plantilla",
       "selectTool": "Seleccionar herramienta",
       "selectTools": "Seleccionar herramientas...",
       "showTools": "Mostrar herramientas",
@@ -10724,9 +10692,6 @@
   },
   "settingsPanel": {
     "featureFlags": "Indicadores de funcionalidad"
-  },
-  "skillTimeline": {
-    "promptDiff": "Diferencia de prompt"
   },
   "subWorkflowNode": {
     "collapse": "Colapsar",
@@ -18903,28 +18868,6 @@
     "nodeTimeoutSummary": "Nodos con tiempo agotado: {{nodes}}",
     "nodeSoonTimeoutSummary": "Nodos próximos a agotar tiempo: {{nodes}}",
     "cancelExecution": "Cancelar ejecución"
-  },
-  "components_skill_SkillABTestResults": {
-    "暂无_A_B_测试数据": "Aún no hay datos de pruebas A/B",
-    "指标": "Métrica",
-    "版本_A": "Versión A",
-    "版本_B": "Versión B",
-    "变化": "Cambio",
-    "优胜": "Ganador",
-    "平局": "Empate",
-    "推荐采用版本_A": " Se recomienda adoptar la versión A.",
-    "推荐采用版本_B": " Se recomienda adoptar la versión B.",
-    "两个版本无明显差异": " No hay diferencias significativas entre ambas versiones."
-  },
-  "components_skill_SkillEvolutionViewer": {
-    "当前版本": "Versión actual",
-    "总进化次数": "Número total de evoluciones",
-    "最近进化": "Evolución reciente",
-    "A_B_测试结果": "Resultados de pruebas A/B"
-  },
-  "components_skill_SkillVersionTimeline": {
-    "暂无进化历史": "Aún no hay historial de evolución",
-    "确认回滚": "Confirmar reversión"
   },
   "errorRecovery": {
     "noError": "No hay errores que requieran recuperación",

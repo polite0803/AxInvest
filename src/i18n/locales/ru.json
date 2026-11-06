@@ -6769,19 +6769,6 @@
     "sectionDeveloper": "Инструменты разработчика"
   },
   "skill": {
-    "abTest": {
-      "change": "Изменить",
-      "conclusion": "Итог: Версия A выиграла {{winCountA}} пунктов, Версия B выиграла {{winCountB}} пунктов.",
-      "metric": "Метрика",
-      "noData": "Нет данных A/B-теста",
-      "noDifference": "No significant difference between the two versions.",
-      "recommendA": "Recommended to adopt Version A.",
-      "recommendB": "Recommended to adopt Version B.",
-      "tie": "Ничья",
-      "versionA": "Версия A",
-      "versionB": "Версия B",
-      "winner": "Победитель"
-    },
     "addFrontend": "Add Frontend",
     "agentGenerated": "Сгенерировано агентом",
     "analyzeError": "Ошибка анализа ИИ: {{error}}",
@@ -6806,22 +6793,6 @@
     "editPlaceholder": "Напишите полное содержимое навыка...",
     "editTitle": "Редактировать навык",
     "entryFileEmpty": "Входной файл «{{entry}}» пуст или не существует",
-    "evolution": {
-      "abTestResults": "Результаты A/B-теста",
-      "confirmRollback": "Подтвердить откат",
-      "currentVersion": "Текущая версия",
-      "latestEvolution": "Последняя эволюция",
-      "newVersion": "Новая (v{{version}})",
-      "noHistory": "У этого навыка пока нет истории эволюции",
-      "none": "Нет",
-      "oldVersion": "Старая (v{{version}})",
-      "rollback": "Откат",
-      "rollbackConfirmMessage": "Вы уверены, что хотите откатиться до v{{version}}? Это отменит все изменения эволюции после этой версии.",
-      "rollbackFailed": "Откат не удался: {{error}}",
-      "rollbackSuccess": "Откат к v{{version}} выполнен",
-      "totalEvolutions": "Всего эволюций",
-      "viewDiff": "Просмотреть различия"
-    },
     "exportFailed": "Ошибка экспорта",
     "exportPublishable": "Export Publishable",
     "exported": "Навык экспортирован",
@@ -9843,7 +9814,6 @@
       "noLoopBodySteps": "Нет шагов тела цикла",
       "noLoopSteps": "Пока нет шагов тела цикла",
       "noSteps": "Нет шагов",
-      "noTemplates": "Шаблоны не найдены",
       "noToolsAvailable": "Нет доступных инструментов",
       "notSet": "Не задано",
       "opContains": "Содержит",
@@ -9902,7 +9872,6 @@
       "routingPrompt": "Промпт маршрутизации",
       "routingPromptPlaceholder": "Опишите логику маршрутизации",
       "scheduleTrigger": "По расписанию",
-      "searchTemplate": "Поиск шаблона…",
       "seconds": "Секунды",
       "selectContextSources": "Выбрать источники контекста...",
       "selectExpert": "Выберите эксперта",
@@ -9911,7 +9880,6 @@
       "selectNodeToAdd": "Выберите узел для добавления",
       "selectRole": "Select role",
       "selectSubWorkflow": "Выберите подпроцесс...",
-      "selectTemplate": "Выбрать шаблон",
       "selectTool": "Выбрать инструмент",
       "selectTools": "Выбрать инструменты...",
       "showTools": "Показать инструменты",
@@ -10724,9 +10692,6 @@
   },
   "settingsPanel": {
     "featureFlags": "Флаги функций"
-  },
-  "skillTimeline": {
-    "promptDiff": "Разница в подсказках"
   },
   "subWorkflowNode": {
     "collapse": "Свернуть",
@@ -18903,28 +18868,6 @@
     "nodeTimeoutSummary": "Узлы с таймаутом: {{nodes}}",
     "nodeSoonTimeoutSummary": "Узлы со скорым таймаутом: {{nodes}}",
     "cancelExecution": "Отменить выполнение"
-  },
-  "components_skill_SkillABTestResults": {
-    "暂无_A_B_测试数据": "Данных A/B-тестирования пока нет",
-    "指标": "Метрика",
-    "版本_A": "Версия A",
-    "版本_B": "Версия B",
-    "变化": "Изменение",
-    "优胜": "Победитель",
-    "平局": "Ничья",
-    "推荐采用版本_A": " Рекомендуется версия A.",
-    "推荐采用版本_B": " Рекомендуется версия B.",
-    "两个版本无明显差异": "Существенных различий между версиями нет."
-  },
-  "components_skill_SkillEvolutionViewer": {
-    "当前版本": "Текущая версия",
-    "总进化次数": "Всего эволюций",
-    "最近进化": "Последняя эволюция",
-    "A_B_测试结果": "Результаты A/B-тестирования"
-  },
-  "components_skill_SkillVersionTimeline": {
-    "暂无进化历史": "История эволюции пока отсутствует",
-    "确认回滚": "Подтвердить откат"
   },
   "errorRecovery": {
     "noError": "Нет ошибок, требующих восстановления",

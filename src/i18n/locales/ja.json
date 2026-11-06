@@ -6769,19 +6769,6 @@
     "sectionDeveloper": "開発者ツール"
   },
   "skill": {
-    "abTest": {
-      "change": "変更",
-      "conclusion": "結論: バージョンAが{{winCountA}}項目、バージョンBが{{winCountB}}項目で勝利しました。",
-      "metric": "指標",
-      "noData": "A/Bテストデータはまだありません",
-      "noDifference": "No significant difference between the two versions.",
-      "recommendA": "Recommended to adopt Version A.",
-      "recommendB": "Recommended to adopt Version B.",
-      "tie": "引き分け",
-      "versionA": "バージョンA",
-      "versionB": "バージョンB",
-      "winner": "勝者"
-    },
     "addFrontend": "Add Frontend",
     "agentGenerated": "エージェント生成",
     "analyzeError": "AI分析に失敗しました: {{error}}",
@@ -6806,22 +6793,6 @@
     "editPlaceholder": "完全なスキルコンテンツを記述...",
     "editTitle": "スキルを編集",
     "entryFileEmpty": "エントリファイル「{{entry}}」は空か存在しません",
-    "evolution": {
-      "abTestResults": "A/Bテスト結果",
-      "confirmRollback": "ロールバックを確認",
-      "currentVersion": "現在のバージョン",
-      "latestEvolution": "最新の進化",
-      "newVersion": "新規 (v{{version}})",
-      "noHistory": "このスキルにはまだ進化履歴がありません",
-      "none": "なし",
-      "oldVersion": "旧 (v{{version}})",
-      "rollback": "ロールバック",
-      "rollbackConfirmMessage": "v{{version}}にロールバックしてもよろしいですか？そのバージョン以降のすべての進化変更が破棄されます。",
-      "rollbackFailed": "ロールバックに失敗しました：{{error}}",
-      "rollbackSuccess": "v{{version}} にロールバックしました",
-      "totalEvolutions": "総進化回数",
-      "viewDiff": "差分を表示"
-    },
     "exportFailed": "スキルのエクスポートに失敗しました",
     "exportPublishable": "Export Publishable",
     "exported": "スキルをエクスポートしました",
@@ -9843,7 +9814,6 @@
       "noLoopBodySteps": "ループ本体のステップなし",
       "noLoopSteps": "ループステップなし",
       "noSteps": "ステップなし",
-      "noTemplates": "テンプレートが見つかりません",
       "noToolsAvailable": "利用可能なツールがありません",
       "notSet": "未設定",
       "opContains": "含む",
@@ -9902,7 +9872,6 @@
       "routingPrompt": "ルーティングプロンプト",
       "routingPromptPlaceholder": "ルーティングの判定ロジックを記述",
       "scheduleTrigger": "スケジュールトリガー",
-      "searchTemplate": "テンプレート検索…",
       "seconds": "秒",
       "selectContextSources": "コンテキストソースを選択",
       "selectExpert": "専門家を選択",
@@ -9911,7 +9880,6 @@
       "selectNodeToAdd": "追加するノードを選択",
       "selectRole": "ロールを選択",
       "selectSubWorkflow": "サブワークフローを選択",
-      "selectTemplate": "テンプレート選択",
       "selectTool": "ツールを選択",
       "selectTools": "ツールを選択",
       "showTools": "ツールを表示",
@@ -10724,9 +10692,6 @@
   },
   "settingsPanel": {
     "featureFlags": "機能フラグ"
-  },
-  "skillTimeline": {
-    "promptDiff": "プロンプト差分"
   },
   "subWorkflowNode": {
     "collapse": "折りたたむ",
@@ -18903,28 +18868,6 @@
     "nodeTimeoutSummary": "タイムアウトしたノード: {{nodes}}",
     "nodeSoonTimeoutSummary": "タイムアウト間近のノード: {{nodes}}",
     "cancelExecution": "実行をキャンセル"
-  },
-  "components_skill_SkillABTestResults": {
-    "暂无_A_B_测试数据": "暂无 A/B 测试数据",
-    "指标": "指标",
-    "版本_A": "版本 A",
-    "版本_B": "版本 B",
-    "变化": "变化",
-    "优胜": "优胜",
-    "平局": "平局",
-    "推荐采用版本_A": " 推荐采用版本 A。",
-    "推荐采用版本_B": " 推荐采用版本 B。",
-    "两个版本无明显差异": " 两个版本无明显差异。"
-  },
-  "components_skill_SkillEvolutionViewer": {
-    "当前版本": "当前版本",
-    "总进化次数": "总进化次数",
-    "最近进化": "最近进化",
-    "A_B_测试结果": "A/B 测试结果"
-  },
-  "components_skill_SkillVersionTimeline": {
-    "暂无进化历史": "暂无进化历史",
-    "确认回滚": "确认回滚"
   },
   "errorRecovery": {
     "noError": "当前无错误需要恢复",

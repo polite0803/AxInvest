@@ -6769,19 +6769,6 @@
     "sectionDeveloper": "개발자 도구"
   },
   "skill": {
-    "abTest": {
-      "change": "변경",
-      "conclusion": "결론: 버전 A가 {{winCountA}}개 항목에서 승리, 버전 B가 {{winCountB}}개 항목에서 승리했습니다.",
-      "metric": "지표",
-      "noData": "아직 A/B 테스트 데이터가 없습니다",
-      "noDifference": "No significant difference between the two versions.",
-      "recommendA": "Recommended to adopt Version A.",
-      "recommendB": "Recommended to adopt Version B.",
-      "tie": "무승부",
-      "versionA": "버전 A",
-      "versionB": "버전 B",
-      "winner": "승자"
-    },
     "addFrontend": "Add Frontend",
     "agentGenerated": "에이전트 생성",
     "analyzeError": "AI 분석 실패: {{error}}",
@@ -6806,22 +6793,6 @@
     "editPlaceholder": "스킬의 전체 내용을 작성하세요...",
     "editTitle": "스킬 편집",
     "entryFileEmpty": "엔트리 파일 \"{{entry}}\"이(가) 비어 있거나 존재하지 않습니다",
-    "evolution": {
-      "abTestResults": "A/B 테스트 결과",
-      "confirmRollback": "롤백 확인",
-      "currentVersion": "현재 버전",
-      "latestEvolution": "최신 진화",
-      "newVersion": "신규(v{{version}})",
-      "noHistory": "이 스킬에는 아직 진화 기록이 없습니다",
-      "none": "없음",
-      "oldVersion": "이전(v{{version}})",
-      "rollback": "롤백",
-      "rollbackConfirmMessage": "v{{version}}으로 롤백하시겠습니까? 해당 버전 이후의 모든 진화 변경 사항이 삭제됩니다.",
-      "rollbackFailed": "롤백 실패: {{error}}",
-      "rollbackSuccess": "v{{version}}로 롤백 성공",
-      "totalEvolutions": "총 진화 횟수",
-      "viewDiff": "차이 보기"
-    },
     "exportFailed": "내보내기 실패",
     "exportPublishable": "Export Publishable",
     "exported": "스킬 내보내기 완료",
@@ -9843,7 +9814,6 @@
       "noLoopBodySteps": "루프 본문 단계 없음",
       "noLoopSteps": "루프 본문 단계가 아직 없습니다",
       "noSteps": "단계 없음",
-      "noTemplates": "템플릿 없음",
       "noToolsAvailable": "사용 가능한 도구 없음",
       "notSet": "설정 안 됨",
       "opContains": "포함",
@@ -9902,7 +9872,6 @@
       "routingPrompt": "라우팅 프롬프트",
       "routingPromptPlaceholder": "라우팅 결정 로직 설명",
       "scheduleTrigger": "예약 트리거",
-      "searchTemplate": "템플릿 검색…",
       "seconds": "초",
       "selectContextSources": "컨텍스트 소스 선택...",
       "selectExpert": "전문가 선택",
@@ -9911,7 +9880,6 @@
       "selectNodeToAdd": "추가할 노드 선택",
       "selectRole": "Select role",
       "selectSubWorkflow": "하위 워크플로우 선택...",
-      "selectTemplate": "템플릿 선택",
       "selectTool": "도구 선택",
       "selectTools": "도구 선택...",
       "showTools": "도구 표시",
@@ -10724,9 +10692,6 @@
   },
   "settingsPanel": {
     "featureFlags": "기능 플래그"
-  },
-  "skillTimeline": {
-    "promptDiff": "프롬프트 차이"
   },
   "subWorkflowNode": {
     "collapse": "접기",
@@ -18903,28 +18868,6 @@
     "nodeTimeoutSummary": "시간 초과 노드: {{nodes}}",
     "nodeSoonTimeoutSummary": "시간 초과 임박 노드: {{nodes}}",
     "cancelExecution": "실행 취소"
-  },
-  "components_skill_SkillABTestResults": {
-    "暂无_A_B_测试数据": "아직 A/B 테스트 데이터가 없습니다",
-    "指标": "지표",
-    "版本_A": "버전 A",
-    "版本_B": "버전 B",
-    "变化": "변화",
-    "优胜": "우세",
-    "平局": "무승부",
-    "推荐采用版本_A": " 버전 A 채택을 권장합니다.",
-    "推荐采用版本_B": " 버전 B 채택을 권장합니다.",
-    "两个版本无明显差异": " 두 버전 간 뚜렷한 차이가 없습니다."
-  },
-  "components_skill_SkillEvolutionViewer": {
-    "当前版本": "현재 버전",
-    "总进化次数": "총 진화 횟수",
-    "最近进化": "최근 진화",
-    "A_B_测试结果": "A/B 테스트 결과"
-  },
-  "components_skill_SkillVersionTimeline": {
-    "暂无进化历史": "아직 진화 이력이 없습니다",
-    "确认回滚": "롤백 확인"
   },
   "errorRecovery": {
     "noError": "현재 복구할 오류가 없습니다",

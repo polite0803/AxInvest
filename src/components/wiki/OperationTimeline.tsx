@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { Tooltip } from "@/components/layout/Tooltip";
-import { WikiOperation } from "@/stores/feature/llmWikiStore";
+import type { WikiOperation } from "@/types";
 import {
   ExperimentOutlined,
   LoadingOutlined,

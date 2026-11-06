@@ -6769,19 +6769,6 @@
     "sectionDeveloper": "Entwicklerwerkzeuge"
   },
   "skill": {
-    "abTest": {
-      "change": "Ändern",
-      "conclusion": "Fazit: Version A gewann {{winCountA}} Elemente, Version B gewann {{winCountB}} Elemente.",
-      "metric": "Metrik",
-      "noData": "Noch keine A/B-Testdaten",
-      "noDifference": "No significant difference between the two versions.",
-      "recommendA": "Recommended to adopt Version A.",
-      "recommendB": "Recommended to adopt Version B.",
-      "tie": "Unentschieden",
-      "versionA": "Version A",
-      "versionB": "Version B",
-      "winner": "Gewinner"
-    },
     "addFrontend": "Add Frontend",
     "agentGenerated": "Agent-generiert",
     "analyzeError": "KI-Analyse fehlgeschlagen: {{error}}",
@@ -6806,22 +6793,6 @@
     "editPlaceholder": "Schreiben Sie den vollständigen Fähigkeiteninhalt...",
     "editTitle": "Fähigkeit bearbeiten",
     "entryFileEmpty": "Einstiegsdatei \"{{entry}}\" ist leer oder existiert nicht",
-    "evolution": {
-      "abTestResults": "A/B-Testergebnisse",
-      "confirmRollback": "Rollback bestätigen",
-      "currentVersion": "Aktuelle Version",
-      "latestEvolution": "Neueste Evolution",
-      "newVersion": "Neu (v{{version}})",
-      "noHistory": "Diese Fähigkeit hat noch keine Evolutionshistorie",
-      "none": "Keine",
-      "oldVersion": "Alt (v{{version}})",
-      "rollback": "Rollback",
-      "rollbackConfirmMessage": "Sind Sie sicher, dass Sie auf v{{version}} zurücksetzen möchten? Dadurch werden alle Evolutionsänderungen nach dieser Version verworfen.",
-      "rollbackFailed": "Rollback fehlgeschlagen: {{error}}",
-      "rollbackSuccess": "Erfolgreich zu v{{version}} zurückgesetzt",
-      "totalEvolutions": "Gesamte Evolutionen",
-      "viewDiff": "Diff anzeigen"
-    },
     "exportFailed": "Export fehlgeschlagen",
     "exportPublishable": "Export Publishable",
     "exported": "Skill exportiert",
@@ -9843,7 +9814,6 @@
       "noLoopBodySteps": "Keine Schleifenkörperschritte",
       "noLoopSteps": "Noch keine Schleifenkörperschritte",
       "noSteps": "Keine Schritte",
-      "noTemplates": "Keine Vorlagen gefunden",
       "noToolsAvailable": "Keine Werkzeuge verfügbar",
       "notSet": "Nicht festgelegt",
       "opContains": "Enthält",
@@ -9902,7 +9872,6 @@
       "routingPrompt": "Routing-Prompt",
       "routingPromptPlaceholder": "Routing-Logik beschreiben",
       "scheduleTrigger": "Zeitplan",
-      "searchTemplate": "Vorlage suchen…",
       "seconds": "Sekunden",
       "selectContextSources": "Kontextquellen auswählen...",
       "selectExpert": "Experten auswählen",
@@ -9911,7 +9880,6 @@
       "selectNodeToAdd": "Knoten zum Hinzufügen auswählen",
       "selectRole": "Select role",
       "selectSubWorkflow": "Unter-Workflow auswählen...",
-      "selectTemplate": "Vorlage wählen",
       "selectTool": "Werkzeug wählen",
       "selectTools": "Werkzeuge auswählen...",
       "showTools": "Werkzeuge anzeigen",
@@ -10724,9 +10692,6 @@
   },
   "settingsPanel": {
     "featureFlags": "Feature Flags"
-  },
-  "skillTimeline": {
-    "promptDiff": "Prompt-Diff"
   },
   "subWorkflowNode": {
     "collapse": "Einklappen",
@@ -18903,28 +18868,6 @@
     "nodeTimeoutSummary": "Zeitüberschrittene Knoten: {{nodes}}",
     "nodeSoonTimeoutSummary": "Bald zeitüberschrittene Knoten: {{nodes}}",
     "cancelExecution": "Ausführung abbrechen"
-  },
-  "components_skill_SkillABTestResults": {
-    "暂无_A_B_测试数据": "Noch keine A/B-Test-Daten",
-    "指标": "Kennzahl",
-    "版本_A": "Version A",
-    "版本_B": "Version B",
-    "变化": "Änderung",
-    "优胜": "Sieger",
-    "平局": "Unentschieden",
-    "推荐采用版本_A": " Version A wird empfohlen.",
-    "推荐采用版本_B": " Version B wird empfohlen.",
-    "两个版本无明显差异": " Kein signifikanter Unterschied zwischen den beiden Versionen."
-  },
-  "components_skill_SkillEvolutionViewer": {
-    "当前版本": "Aktuelle Version",
-    "总进化次数": "Gesamtzahl der Evolutionen",
-    "最近进化": "Letzte Evolution",
-    "A_B_测试结果": "A/B-Testergebnisse"
-  },
-  "components_skill_SkillVersionTimeline": {
-    "暂无进化历史": "Noch keine Evolutionshistorie",
-    "确认回滚": "Rollback bestätigen"
   },
   "errorRecovery": {
     "noError": "Derzeit keine Fehler zur Wiederherstellung",

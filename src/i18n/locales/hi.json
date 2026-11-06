@@ -6769,19 +6769,6 @@
     "sectionDeveloper": "डेवलपर टूल"
   },
   "skill": {
-    "abTest": {
-      "change": "बदलें",
-      "conclusion": "निष्कर्ष: संस्करण A ने {{winCountA}} आइटम जीते, संस्करण B ने {{winCountB}} आइटम जीते।",
-      "metric": "मीट्रिक",
-      "noData": "अभी तक कोई A/B परीक्षण डेटा नहीं है",
-      "noDifference": "No significant difference between the two versions.",
-      "recommendA": "Recommended to adopt Version A.",
-      "recommendB": "Recommended to adopt Version B.",
-      "tie": "बराबरी",
-      "versionA": "संस्करण A",
-      "versionB": "संस्करण B",
-      "winner": "विजेता"
-    },
     "addFrontend": "Add Frontend",
     "agentGenerated": "एजेंट द्वारा जेनरेट",
     "analyzeError": "AI विश्लेषण विफल: {{error}}",
@@ -6806,22 +6793,6 @@
     "editPlaceholder": "पूरी स्किल कंटेंट लिखें...",
     "editTitle": "स्किल संपादित करें",
     "entryFileEmpty": "प्रविष्टि फ़ाइल \"{{entry}}\" खाली है या मौजूद नहीं है",
-    "evolution": {
-      "abTestResults": "A/B परीक्षण परिणाम",
-      "confirmRollback": "रोलबैक की पुष्टि करें",
-      "currentVersion": "वर्तमान संस्करण",
-      "latestEvolution": "नवीनतम विकास",
-      "newVersion": "नया (v{{version}})",
-      "noHistory": "इस कौशल का अभी तक कोई विकास इतिहास नहीं है",
-      "none": "कोई नहीं",
-      "oldVersion": "पुराना (v{{version}})",
-      "rollback": "रोलबैक",
-      "rollbackConfirmMessage": "क्या आप v{{version}} पर वापस जाना चाहते हैं? इससे उस संस्करण के बाद के सभी विकास परिवर्तन हट जाएंगे।",
-      "rollbackFailed": "रॉलबैक विफल: {{error}}",
-      "rollbackSuccess": "v{{version}} पर सफलतापूर्वक रॉलबैक",
-      "totalEvolutions": "कुल विकास",
-      "viewDiff": "अंतर देखें"
-    },
     "exportFailed": "निर्यात विफल",
     "exportPublishable": "Export Publishable",
     "exported": "स्किल निर्यात किया गया",
@@ -9843,7 +9814,6 @@
       "noLoopBodySteps": "लूप बॉडी चरण नहीं",
       "noLoopSteps": "अभी तक लूप बॉडी चरण नहीं हैं",
       "noSteps": "कोई चरण नहीं",
-      "noTemplates": "कोई टेम्पलेट नहीं मिला",
       "noToolsAvailable": "कोई टूल नहीं",
       "notSet": "सेट नहीं",
       "opContains": "शामिल है",
@@ -9902,7 +9872,6 @@
       "routingPrompt": "रूटिंग प्रॉम्प्ट",
       "routingPromptPlaceholder": "रूटिंग लॉजिक बताएँ",
       "scheduleTrigger": "अनुसूचित",
-      "searchTemplate": "टेम्पलेट खोजें…",
       "seconds": "सेकंड",
       "selectContextSources": "संदर्भ स्रोत चुनें...",
       "selectExpert": "विशेषज्ञ चुनें",
@@ -9911,7 +9880,6 @@
       "selectNodeToAdd": "जोड़ने के लिए नोड चुनें",
       "selectRole": "Select role",
       "selectSubWorkflow": "उप-वर्कफ़्लो चुनें...",
-      "selectTemplate": "टेम्पलेट चुनें",
       "selectTool": "उपकरण चुनें",
       "selectTools": "उपकरण चुनें...",
       "showTools": "टूल दिखाएँ",
@@ -10724,9 +10692,6 @@
   },
   "settingsPanel": {
     "featureFlags": "फीचर फ़्लैग"
-  },
-  "skillTimeline": {
-    "promptDiff": "प्रॉम्प्ट अंतर"
   },
   "subWorkflowNode": {
     "collapse": "संक्षिप्त करें",
@@ -18903,28 +18868,6 @@
     "nodeTimeoutSummary": "टाइमआउट नोड्स: {{nodes}}",
     "nodeSoonTimeoutSummary": "जल्द टाइमआउट नोड्स: {{nodes}}",
     "cancelExecution": "निष्पादन रद्द करें"
-  },
-  "components_skill_SkillABTestResults": {
-    "暂无_A_B_测试数据": "अभी कोई A/B परीक्षण डेटा नहीं",
-    "指标": "मेट्रिक",
-    "版本_A": "संस्करण A",
-    "版本_B": "संस्करण B",
-    "变化": "परिवर्तन",
-    "优胜": "विजेता",
-    "平局": "बराबरी",
-    "推荐采用版本_A": " संस्करण A अपनाने की सिफ़ारिश है।",
-    "推荐采用版本_B": " संस्करण B अपनाने की सिफ़ारिश है।",
-    "两个版本无明显差异": "दोनों संस्करणों में कोई स्पष्ट अंतर नहीं है।"
-  },
-  "components_skill_SkillEvolutionViewer": {
-    "当前版本": "वर्तमान संस्करण",
-    "总进化次数": "कुल विकास संख्या",
-    "最近进化": "नवीनतम विकास",
-    "A_B_测试结果": "A/B परीक्षण परिणाम"
-  },
-  "components_skill_SkillVersionTimeline": {
-    "暂无进化历史": "अभी कोई विकास इतिहास नहीं",
-    "确认回滚": "रोलबैक की पुष्टि करें"
   },
   "errorRecovery": {
     "noError": "वर्तमान में पुनर्प्राप्ति हेतु कोई त्रुटि नहीं",

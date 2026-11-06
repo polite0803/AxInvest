@@ -6769,19 +6769,6 @@
     "sectionDeveloper": "開發者工具"
   },
   "skill": {
-    "abTest": {
-      "change": "變化",
-      "conclusion": "結論：版本 A 勝出 {{winCountA}} 項，版本 B 勝出 {{winCountB}} 項。",
-      "metric": "指標",
-      "noData": "暫無 A/B 測試資料",
-      "noDifference": "  兩個版本無明顯差異。",
-      "recommendA": "  推薦採用版本 A。",
-      "recommendB": "  推薦採用版本 B。",
-      "tie": "平手",
-      "versionA": "版本A",
-      "versionB": "版本B",
-      "winner": "勝出"
-    },
     "addFrontend": "Add Frontend",
     "agentGenerated": "智能體生成",
     "analyzeError": "智能分析失敗: {{error}}",
@@ -6806,22 +6793,6 @@
     "editPlaceholder": "編寫完整的技能內容...",
     "editTitle": "編輯技能",
     "entryFileEmpty": "入口文件 \"{{entry}}\" 為空或不存在",
-    "evolution": {
-      "abTestResults": "A/B 測試結果",
-      "confirmRollback": "確認回滾",
-      "currentVersion": "目前版本",
-      "latestEvolution": "最近進化",
-      "newVersion": "新版本 (v{{version}})",
-      "noHistory": "該技能暫無進化歷史",
-      "none": "無",
-      "oldVersion": "舊版 (v{{version}})",
-      "rollback": "回滾",
-      "rollbackConfirmMessage": "確定要回滾到 v{{version}} 嗎？此操作將丟棄之後的所有進化變更。",
-      "rollbackFailed": "回滾失敗：{{error}}",
-      "rollbackSuccess": "已成功回滾到 v{{version}}",
-      "totalEvolutions": "總進化次數",
-      "viewDiff": "檢視 Diff"
-    },
     "exportFailed": "導出失敗",
     "exportPublishable": "Export Publishable",
     "exported": "技能已導出",
@@ -9843,7 +9814,6 @@
       "noLoopBodySteps": "無循環體步驟",
       "noLoopSteps": "無循環步驟",
       "noSteps": "無步驟",
-      "noTemplates": "未找到範本",
       "noToolsAvailable": "無可用工具",
       "notSet": "未設置",
       "opContains": "包含",
@@ -9902,7 +9872,6 @@
       "routingPrompt": "路由提示詞",
       "routingPromptPlaceholder": "描述路由決策邏輯",
       "scheduleTrigger": "定時觸發",
-      "searchTemplate": "搜尋範本…",
       "seconds": "秒",
       "selectContextSources": "選擇上下文來源",
       "selectExpert": "選擇專家",
@@ -9911,7 +9880,6 @@
       "selectNodeToAdd": "選擇要添加的節點",
       "selectRole": "選擇角色",
       "selectSubWorkflow": "選擇子工作流",
-      "selectTemplate": "選擇範本",
       "selectTool": "選擇工具",
       "selectTools": "選擇工具",
       "showTools": "顯示工具",
@@ -10724,9 +10692,6 @@
   },
   "settingsPanel": {
     "featureFlags": "功能標誌"
-  },
-  "skillTimeline": {
-    "promptDiff": "提示差異"
   },
   "subWorkflowNode": {
     "collapse": "折疊",
@@ -14542,28 +14507,6 @@
   "compare": {
     "title": "對標研究",
     "placeholder": "對比同業公司"
-  },
-  "components_skill_SkillABTestResults": {
-    "暂无_A_B_测试数据": "[TODO] 暂无 A/B 测试数据",
-    "指标": "[TODO] 指标",
-    "版本_A": "[TODO] 版本 A",
-    "版本_B": "[TODO] 版本 B",
-    "变化": "[TODO] 变化",
-    "优胜": "[TODO] 优胜",
-    "平局": "[TODO] 平局",
-    "推荐采用版本_A": "[TODO]  推荐采用版本 A。",
-    "推荐采用版本_B": "[TODO]  推荐采用版本 B。",
-    "两个版本无明显差异": "[TODO]  两个版本无明显差异。"
-  },
-  "components_skill_SkillEvolutionViewer": {
-    "当前版本": "[TODO] 当前版本",
-    "总进化次数": "[TODO] 总进化次数",
-    "最近进化": "[TODO] 最近进化",
-    "A_B_测试结果": "[TODO] A/B 测试结果"
-  },
-  "components_skill_SkillVersionTimeline": {
-    "暂无进化历史": "[TODO] 暂无进化历史",
-    "确认回滚": "[TODO] 确认回滚"
   },
   "dualView": {
     "notRegistered": "未註冊的 dual view: {{id}}",

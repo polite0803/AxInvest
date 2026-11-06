@@ -560,22 +560,10 @@
       "targetOwner": "chat"
     },
     {
-      "file": "src/components/skill/SkillABTestResults.tsx",
-      "target": "@/stores/feature/evolutionStore",
-      "kind": "store",
-      "targetOwner": "evolution"
-    },
-    {
       "file": "src/components/skill/SkillChatCommands.tsx",
       "target": "@/stores/feature/skillExtensionStore",
       "kind": "store",
       "targetOwner": "skillExtension"
-    },
-    {
-      "file": "src/components/skill/SkillEvolutionViewer.tsx",
-      "target": "@/stores/feature/evolutionStore",
-      "kind": "store",
-      "targetOwner": "evolution"
     },
     {
       "file": "src/components/skill/SkillStatusBar.tsx",
@@ -588,12 +576,6 @@
       "target": "@/stores/feature/skillExtensionStore",
       "kind": "store",
       "targetOwner": "skillExtension"
-    },
-    {
-      "file": "src/components/skill/SkillVersionTimeline.tsx",
-      "target": "@/stores/feature/evolutionStore",
-      "kind": "store",
-      "targetOwner": "evolution"
     },
     {
       "file": "src/components/stock-analysis/AnalysisProgress.tsx",
@@ -734,24 +716,6 @@
       "targetOwner": "chat"
     },
     {
-      "file": "src/components/wiki/IngestPanel.tsx",
-      "target": "@/stores/feature/llmWikiStore",
-      "kind": "store",
-      "targetOwner": "llmWiki"
-    },
-    {
-      "file": "src/components/wiki/LintReport.tsx",
-      "target": "@/stores/feature/llmWikiStore",
-      "kind": "store",
-      "targetOwner": "llmWiki"
-    },
-    {
-      "file": "src/components/wiki/OperationTimeline.tsx",
-      "target": "@/stores/feature/llmWikiStore",
-      "kind": "store",
-      "targetOwner": "llmWiki"
-    },
-    {
       "file": "src/components/workflow/AIPanel/AIPanel.tsx",
       "target": "@/stores/feature/evolutionStore",
       "kind": "store",
@@ -816,12 +780,6 @@
       "target": "@/stores/feature/expertStore",
       "kind": "store",
       "targetOwner": "expert"
-    },
-    {
-      "file": "src/components/workflow/Panels/PropertyPanels/WorkflowPromptTemplateSelector.tsx",
-      "target": "@/stores/feature/promptTemplateStore",
-      "kind": "store",
-      "targetOwner": "promptTemplate"
     },
     {
       "file": "src/components/workflow/WorkflowEditor.tsx",

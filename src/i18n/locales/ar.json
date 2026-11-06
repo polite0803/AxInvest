@@ -6769,19 +6769,6 @@
     "sectionDeveloper": "أدوات المطوّر"
   },
   "skill": {
-    "abTest": {
-      "change": "تغيير",
-      "conclusion": "الخلاصة: الإصدار أ فاز بـ {{winCountA}} عنصرًا، والإصدار ب فاز بـ {{winCountB}} عنصرًا.",
-      "metric": "المقياس",
-      "noData": "لا توجد بيانات اختبار A/B بعد",
-      "noDifference": "No significant difference between the two versions.",
-      "recommendA": "Recommended to adopt Version A.",
-      "recommendB": "Recommended to adopt Version B.",
-      "tie": "تعادل",
-      "versionA": "الإصدار أ",
-      "versionB": "الإصدار ب",
-      "winner": "الفائز"
-    },
     "addFrontend": "Add Frontend",
     "agentGenerated": "أنشأه الوكيل",
     "analyzeError": "فشل تحليل الذكاء الاصطناعي: {{error}}",
@@ -6806,22 +6793,6 @@
     "editPlaceholder": "اكتب محتوى المهارة الكامل...",
     "editTitle": "تحرير المهارة",
     "entryFileEmpty": "ملف الدخول \"{{entry}}\" فارغ أو غير موجود",
-    "evolution": {
-      "abTestResults": "نتائج اختبار A/B",
-      "confirmRollback": "تأكيد التراجع",
-      "currentVersion": "الإصدار الحالي",
-      "latestEvolution": "أحدث تطور",
-      "newVersion": "جديد (الإصدار {{version}})",
-      "noHistory": "لا توجد سجلات تطور لهذه المهارة بعد",
-      "none": "لا شيء",
-      "oldVersion": "قديم (الإصدار {{version}})",
-      "rollback": "تراجع",
-      "rollbackConfirmMessage": "هل أنت متأكد من رغبتك في التراجع إلى الإصدار {{version}}؟ سيؤدي هذا إلى تجاهل جميع تغييرات التطور بعد ذلك الإصدار.",
-      "rollbackFailed": "فشل التراجع: {{error}}",
-      "rollbackSuccess": "تم التراجع إلى v{{version}} بنجاح",
-      "totalEvolutions": "إجمالي التطورات",
-      "viewDiff": "عرض الفرق"
-    },
     "exportFailed": "فشل التصدير",
     "exportPublishable": "Export Publishable",
     "exported": "تم تصدير المهارة",
@@ -9843,7 +9814,6 @@
       "noLoopBodySteps": "لا توجد خطوات لجسم الحلقة",
       "noLoopSteps": "لا توجد خطوات لجسم الحلقة بعد",
       "noSteps": "لا توجد خطوات",
-      "noTemplates": "لا توجد قوالب",
       "noToolsAvailable": "لا أدوات متاحة",
       "notSet": "غير محدد",
       "opContains": "يحتوي على",
@@ -9902,7 +9872,6 @@
       "routingPrompt": "موجِّه التوجيه",
       "routingPromptPlaceholder": "صف منطق التوجيه",
       "scheduleTrigger": "مجدول",
-      "searchTemplate": "البحث عن قالب…",
       "seconds": "ثوانٍ",
       "selectContextSources": "تحديد مصادر السياق...",
       "selectExpert": "اختر خبيرًا",
@@ -9911,7 +9880,6 @@
       "selectNodeToAdd": "اختر عقدة لإضافتها",
       "selectRole": "Select role",
       "selectSubWorkflow": "اختر سير عمل فرعي...",
-      "selectTemplate": "اختر قالبًا",
       "selectTool": "اختر الأداة",
       "selectTools": "تحديد الأدوات...",
       "showTools": "إظهار الأدوات",
@@ -10724,9 +10692,6 @@
   },
   "settingsPanel": {
     "featureFlags": "علامات الميزات"
-  },
-  "skillTimeline": {
-    "promptDiff": "فرق المطالبة"
   },
   "subWorkflowNode": {
     "collapse": "طي",
@@ -18903,28 +18868,6 @@
     "nodeTimeoutSummary": "العقدات التي انتهى وقتها: {{nodes}}",
     "nodeSoonTimeoutSummary": "العقدات القريبة من انتهاء الوقت: {{nodes}}",
     "cancelExecution": "إلغاء التنفيذ"
-  },
-  "components_skill_SkillABTestResults": {
-    "暂无_A_B_测试数据": "لا توجد بيانات اختبار A/B حالياً",
-    "指标": "المؤشر",
-    "版本_A": "الإصدار A",
-    "版本_B": "الإصدار B",
-    "变化": "التغيير",
-    "优胜": "الفائز",
-    "平局": "تعادل",
-    "推荐采用版本_A": " يُوصى باستخدام الإصدار A.",
-    "推荐采用版本_B": " يُوصى باستخدام الإصدار B.",
-    "两个版本无明显差异": " لا يوجد فرق ملحوظ بين الإصدارين."
-  },
-  "components_skill_SkillEvolutionViewer": {
-    "当前版本": "الإصدار الحالي",
-    "总进化次数": "إجمالي مرات التطور",
-    "最近进化": "آخر تطور",
-    "A_B_测试结果": "نتائج اختبار A/B"
-  },
-  "components_skill_SkillVersionTimeline": {
-    "暂无进化历史": "لا يوجد سجل تطور",
-    "确认回滚": "تأكيد التراجع"
   },
   "errorRecovery": {
     "noError": "لا توجد أخطاء حالياً بحاجة إلى استعادة",

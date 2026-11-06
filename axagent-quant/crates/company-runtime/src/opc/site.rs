@@ -176,6 +176,17 @@ pub trait SiteService: Send + Sync {
     async fn list_blog_posts(&self) -> OpcResult<Vec<BlogPost>>;
     async fn publish_blog_post(&self, id: &str) -> OpcResult<BlogPost>;
 
+    /// 删除落地页（#180-③）。
+    ///
+    /// 判据：**缺行 ⇒ `OpcError::NotFound`**。宿主命令层此前用裸
+    /// `Entity::delete_by_id(..).exec(..)` 且不检 `rows_affected` ⇒ 删不存在的 id 也回成功，
+    /// 同族的 `delete_content_asset` / `delete_invoice` 却回 `NotFound` —— 两种口径并存会让
+    /// 「删一个不存在的行」在前端表现为一次假成功。走 service 才能与同族对齐。
+    async fn delete_landing_page(&self, id: &str) -> OpcResult<()>;
+
+    /// 删除博客文章（#180-③）。判据同上：缺行 ⇒ `OpcError::NotFound`。
+    async fn delete_blog_post(&self, id: &str) -> OpcResult<()>;
+
     async fn submit_contact(
         &self,
         name: &str,
@@ -215,6 +226,12 @@ impl SiteService for NoopSiteService {
         Ok(Vec::new())
     }
     async fn publish_blog_post(&self, _: &str) -> OpcResult<BlogPost> {
+        Err(OpcError::NotFound("SiteService not implemented".into()))
+    }
+    async fn delete_landing_page(&self, _: &str) -> OpcResult<()> {
+        Err(OpcError::NotFound("SiteService not implemented".into()))
+    }
+    async fn delete_blog_post(&self, _: &str) -> OpcResult<()> {
         Err(OpcError::NotFound("SiteService not implemented".into()))
     }
     async fn submit_contact(
@@ -395,6 +412,28 @@ impl SiteService for DefaultSiteService {
         am.updated_at = Set(now_ts());
         let updated = am.update(&self.db).await.map_err(|e| OpcError::Database(e.to_string()))?;
         Ok(blog_entity_to_dto(updated))
+    }
+
+    async fn delete_landing_page(&self, id: &str) -> OpcResult<()> {
+        let result = axagent_entities::opc_landing_pages::Entity::delete_by_id(id)
+            .exec(&self.db)
+            .await
+            .map_err(|e| OpcError::Database(e.to_string()))?;
+        if result.rows_affected == 0 {
+            return Err(OpcError::NotFound(format!("LandingPage {id}")));
+        }
+        Ok(())
+    }
+
+    async fn delete_blog_post(&self, id: &str) -> OpcResult<()> {
+        let result = axagent_entities::opc_blog_posts::Entity::delete_by_id(id)
+            .exec(&self.db)
+            .await
+            .map_err(|e| OpcError::Database(e.to_string()))?;
+        if result.rows_affected == 0 {
+            return Err(OpcError::NotFound(format!("BlogPost {id}")));
+        }
+        Ok(())
     }
 
     async fn submit_contact(
@@ -659,5 +698,64 @@ impl PublishScheduleService for DefaultSiteService {
         }
 
         Ok(published_results)
+    }
+}
+
+// ── 测试（#180-③：删除缺行必须 `NotFound`，不是静默成功） ──────────────
+//
+// 内联测试 mod 追加在文件末尾（`items_after_test_module` 只在 clippy 下暴露）。
+#[cfg(test)]
+mod delete_tests {
+    use super::*;
+
+    /// 宿主命令层此前用裸 `Entity::delete_by_id(..).exec(..)` 且**不检 `rows_affected`**
+    /// ⇒ 删不存在的 id 也回成功；同族 `delete_content_asset` 却回 `NotFound`。
+    /// 本用例钉两条：① 缺行 ⇒ `NotFound`（与同族一致）；② 真行删得掉且删后取不到。
+    #[tokio::test]
+    async fn delete_reports_not_found_for_missing_and_ok_for_existing() {
+        let handle = axagent_dao::db::create_test_pool().await.expect("测试：创建连接池应成功");
+        let svc = DefaultSiteService::new(handle.conn.clone());
+
+        // 负控：缺行
+        assert!(
+            matches!(svc.delete_landing_page("absent-lp").await, Err(OpcError::NotFound(_))),
+            "删不存在的落地页必须回 NotFound（改前裸 delete 会回 Ok）"
+        );
+        assert!(
+            matches!(svc.delete_blog_post("absent-post").await, Err(OpcError::NotFound(_))),
+            "删不存在的博客文章必须回 NotFound"
+        );
+
+        // 正控：先真建再删，且删后取不到
+        let lp = svc
+            .create_landing_page(CreateLandingPageInput {
+                title: "落地页".into(),
+                slug: "lp-delete-test".into(),
+                description: String::new(),
+                content: String::new(),
+            })
+            .await
+            .expect("创建落地页应成功");
+        svc.delete_landing_page(&lp.id).await.expect("删除落地页应成功");
+        assert!(
+            matches!(svc.get_landing_page(&lp.id).await, Err(OpcError::NotFound(_))),
+            "删后必须取不到（证明删的是真行而不是静默 no-op）"
+        );
+
+        let post = svc
+            .create_blog_post(CreateBlogPostInput {
+                title: "文章".into(),
+                slug: "post-delete-test".into(),
+                excerpt: String::new(),
+                content: String::new(),
+                tags: Vec::new(),
+            })
+            .await
+            .expect("创建博客文章应成功");
+        svc.delete_blog_post(&post.id).await.expect("删除博客文章应成功");
+        assert!(
+            matches!(svc.get_blog_post(&post.id).await, Err(OpcError::NotFound(_))),
+            "删后必须取不到"
+        );
     }
 }

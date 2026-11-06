@@ -739,35 +739,33 @@ pub async fn opc_create_work_item(
 }
 
 /// 删除落地页（修复 P0-5：前端 SitesTab 调用但后端缺失）。
+///
+/// #180-③：改前是裸 `Entity::delete_by_id(..).exec(..)` —— 越过 service、且**不检
+/// `rows_affected`** ⇒ 删不存在的 id 也回成功，与同族 `delete_content_asset` / `delete_invoice`
+/// 的 `NotFound` 口径打架。现在走 service，缺行统一 `NotFound`。
 #[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "删除落地页")]
 #[tauri::command]
 pub async fn opc_delete_landing_page(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    use axagent_entities::opc_landing_pages;
-    use sea_orm::EntityTrait;
-    let db = state.harness.db();
-    opc_landing_pages::Entity::delete_by_id(&id).exec(db).await.map_err(|e| {
+    let svc = DefaultSiteService::new(state.harness.db().clone());
+    svc.delete_landing_page(&id).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,
         ))
-    })?;
-    Ok(())
+    })
 }
 
-/// 删除博客文章（修复 P0-5）。
+/// 删除博客文章（修复 P0-5）。#180-③：判据同上（走 service，缺行 ⇒ `NotFound`）。
 #[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "删除博客文章")]
 #[tauri::command]
 pub async fn opc_delete_blog_post(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    use axagent_entities::opc_blog_posts;
-    use sea_orm::EntityTrait;
-    let db = state.harness.db();
-    opc_blog_posts::Entity::delete_by_id(&id).exec(db).await.map_err(|e| {
+    let svc = DefaultSiteService::new(state.harness.db().clone());
+    svc.delete_blog_post(&id).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,
         ))
-    })?;
-    Ok(())
+    })
 }
 
 // ── Content Asset Commands ──────────────────────────────────────────

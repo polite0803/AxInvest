@@ -573,16 +573,20 @@ function ContentCreationWizard() {
   const handleFinish = async () => {
     setLoading(true);
     try {
-      const assetId = wizardData.asset_id || crypto.randomUUID();
-      await invoke("opc_create_content_asset", {
+      // #180-④：改前用 `wizardData.asset_id || crypto.randomUUID()` 当后端 id —— 但本分支**总是新建**，
+      // 后端会自己 `gen_id()` 生成真 id ⇒ 排期落一个悬空 `content_ref_id`、直发 `opc_update_content_asset`
+      // 打到不存在的行（回 NotFound）。改为直接取 create 的返回值。
+      const created = await invoke<ContentAsset>("opc_create_content_asset", {
         input: {
           title: wizardData.title,
           content_type: "article",
           body: wizardData.body,
           tags: wizardData.tags ? wizardData.tags.split(",").map((s) => s.trim()).filter(Boolean) : [],
-          status: "draft",
+          // ⚠ 不传 status：`CreateContentAssetInput` 没有该字段（serde 会静默丢弃），
+          // 新建恒为 draft；发布/排期走下面的 update / schedule（裁定见 PLAN §128.18）。
         },
       });
+      const assetId = created.id;
 
       if (wizardData.publish_type === "scheduled" && wizardData.scheduled_at) {
         await invoke("opc_create_publish_schedule", {

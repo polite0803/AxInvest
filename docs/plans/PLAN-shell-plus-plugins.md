@@ -6883,3 +6883,43 @@ Bundled 插件」，钉到空目录会让断言恒假。两处都带 `#189 例�
 
 **未做**：① 「暂存产物在位时全量复跑」这一次没有重做（上一轮 `manager.rs` 改造时做过一次正控；本批靠静态钉桩
 + 两个例外用例仍绿间接证明）；② 未把 `isolated_config` 提升为**非 test** 的公共 API（它是测试专用，不进产物）。
+
+### 128.18 #180 ③④：两处裸删除收口 + 内容向导的 id 错位（①② 接缝 op 仍未做）
+
+**③ `commands/opc.rs` 两条裸 `Entity::delete_by_id(..).exec(..)`**（`opc_delete_landing_page` / `opc_delete_blog_post`）：
+越过 service、且**不检 `rows_affected`** ⇒ 删不存在的 id 也回成功，与同族 `delete_content_asset` / `delete_invoice`
+的 `NotFound` 口径打架。改法：给 `SiteService` 补 `delete_landing_page` / `delete_blog_post`（trait + `NoopSiteService`
+桩 + `DefaultSiteService` 实现，`rows_affected == 0 ⇒ OpcError::NotFound`），两条命令改走 service。
+测试 `opc::site::delete_tests::delete_reports_not_found_for_missing_and_ok_for_existing`：负控 缺行 ⇒ `NotFound` ×2；
+正控 真建再删、且删后 `get_*` 回 `NotFound`（证明删的是真行而不是静默 no-op）。
+
+⚠ **途中踩的两个坑（记下来免得下次重演）**：`site.rs` 里有 4 个 trait/impl 边界（`SiteService` / `ContentAssetService`
+/ `PublishScheduleService` 各自的 impl），我第一次把两个 impl 方法按「`delete_content_asset` 之后」插入 ⇒ 插进了
+`ContentAssetService` 的 impl 块，编译报 `E0407 method is not a member of trait`；搬位置时又用「按行号切 22 行」误删了
+`impl ContentAssetService` 的收尾 `}`，报 `unclosed delimiter`。**正确姿势：先 `grep -n "^impl .* for "` 列边界，再按
+方法名定位插入点；按行号切割前必须把首尾行打印出来对一遍。**
+
+**④ `ContentMediaTab.tsx` 的 id 错位 —— 真缺陷，已修**：`handleFinish` 里 `wizardData.asset_id || crypto.randomUUID()`
+当后端 id，但该分支**总是新建**，后端 `create_content_asset` 自己 `gen_id()` ⇒ 结果的 id 与后端那行不一致：
+排期落下**悬空 `content_ref_id`**、直发调 `opc_update_content_asset` 打到不存在的行（回 NotFound），而 UI 已经弹了
+「已发布/已排期」。改法：取 `opc_create_content_asset` 的**返回值**（`created.id`）；同时去掉载荷里那个
+`status: "draft"`。
+
+**④ 的一半是断言前提有误（纠正，不改后端）**：任务描述说「`site.rs:459` 把 `status` 写死 draft 忽略入参」——
+实测 `CreateContentAssetInput`（`company-runtime/src/opc/content_asset.rs:25-30`）**根本没有 `status` 字段**，
+所以「忽略入参」不成立：新建恒 `draft`、发布走随后的 `opc_update_content_asset` 是**既有设计**（前端传的
+`status` 被 serde 静默丢弃）。本批只把前端那个**无意义字段**删掉并在注释里写明，**没有**给 DTO 加 status
+（加了等于新增一条「新建即发布」的写面，需另裁）。
+
+**验证**：`cargo fmt --check -p axagent-company-runtime` **EXIT=0**；
+`cargo clippy -p axagent-company-runtime --all-targets --all-features -- -D warnings` **EXIT=0**（6m12s）；
+`cargo test -p axagent-company-runtime --lib delete_tests` ⇒ **1 passed / 0 failed**（104 filtered）；
+`cargo clippy -p axagent --all-targets --all-features -- -D warnings` ⇒ EXIT=0（20m25s）；
+`node scripts/check-tsc.mjs` EXIT=0（1477 文件）；`npx dprint check`（TSX）EXIT=0。
+
+**未做（仍是 #180 的 ①②）**：`delete_blog_post` / `create_blog_post` 作为 **opc.store 接缝 op** 落地
+（前者要 `RemoveOutcome{Removed,NotFound,Protected}` 三态 + 保护 id 名单，照 `jobs_store.rs` / `cron_job.rs` /
+`init/state.rs` 三件套；后者要引入字节闸，照 `knowledge_vector.rs` 的 `KNOWLEDGE_CONTENT_MAX_BYTES` 与
+provider 侧 `check_content_budget`，`MAX_FRAME_LEN` 64 MiB 不算 op 预算）。另：`create_publish_schedule` 目前
+**不校验** `content_ref_id` 指向的行是否存在（`content_ref_type` 多态、无外键）；本轮把前端那个必错的 id 修掉后，
+正常流程不再产生悬空引用，但**跨表引用校验**列为候选（要按类型枚举，未做）。

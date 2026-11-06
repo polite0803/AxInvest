@@ -13,27 +13,26 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::OnceLock;
 
-/// OPC 通知消息（通过 channel 发送到后台 worker）
-pub struct OpcNotification {
-    pub platform: String,
-    pub chat_id: String,
-    pub message: String,
-}
-
-/// OPC 通知发送 channel（由 wiring 层注入）
-static OPC_NOTIFY_TX: OnceLock<tokio::sync::mpsc::UnboundedSender<OpcNotification>> =
-    OnceLock::new();
-
-/// 注入通知发送 channel（由 wiring 层在初始化时调用一次）
-pub fn set_opc_notify_tx(tx: tokio::sync::mpsc::UnboundedSender<OpcNotification>) {
-    let _ = OPC_NOTIFY_TX.set(tx);
-}
-
-fn get_notify_tx() -> &'static tokio::sync::mpsc::UnboundedSender<OpcNotification> {
-    OPC_NOTIFY_TX.get().expect("OPC notify tx not initialized")
-}
+// ⚠ 已退役（缺陷 #184）：原先这里有
+// `OpcNotification` + `static OPC_NOTIFY_TX: OnceLock<UnboundedSender<..>>`
+// + `set_opc_notify_tx()` + `get_notify_tx()`，以及 `OpcSendNotificationTool`
+// （`OpcSendNotification`）。退役理由：
+//   ① `get_notify_tx()` 是 `OPC_NOTIFY_TX.get().expect("OPC notify tx not initialized")`
+//      —— **同步 panic**，位于工具执行路径（`Tool::call`）内；
+//   ② `set_opc_notify_tx` 全仓**零调用者** ⇒ 该 `OnceLock` 恒未初始化 ⇒ 一旦注册即必 panic；
+//   ③ 更要害的是 `OpcNotification` 也**零接收端**：全仓没有任何 `Receiver` / 消费循环 /
+//      通知 worker 读这条 channel。所以「补一个生产者」（在 wiring 层注入一次 tx）并不成立 ——
+//      `UnboundedSender` 在无接收端时 `send` 恒 `Err`，补完只是把「必 panic」换成
+//      「必失败」，正是任务 #115 对 `alert_tx` 判定的同一形态缺陷（「写进一条没人听的频道」）。
+//      让它真正可用需要另建通知 worker + 渠道配置接线，属新功能，不在缺陷修复授权内。
+// ⇒ 裁定：**退役该工具面**（与 `alert_tx` 同批收口口径）。panic 分支随实现体一并消失。
+// ⚠ 各 OPC 域包 / 专家清单里仍有 **31 处** `td("OpcSendNotification")` 之类的**声明**
+//    （`commands/opc_workflows/seed_*.rs`、`commands/opc_setup/*`）。它们只是写进 DB 模板
+//    的 ToolDef 名字串，删改会牵动逐文件的 `TEMPLATE_VERSION` 递增（会让已安装库整体重导
+//    模板、覆盖用户改动），属行为面改动 ⇒ 本批不动，登记给 OPC→L1 插件迁移（任务 #36）。
+//    现状影响：这些声明指向的工具**既不在注册表、也无 ToolDef 生产路径** ⇒ 调不到，
+//    与退役前的行为一致（退役前是「resolver 判 `known=false` ⇒ 工具未注册」）。
 
 fn get_db() -> Result<Arc<sea_orm::DatabaseConnection>, ToolError> {
     crate::global_state::get_sea_db()
@@ -1202,72 +1201,6 @@ impl Tool for OpcCreateBlogPostTool {
                 p.id,
             ))),
             Err(e) => Err(ToolError::execution_failed(format!("创建博客文章失败: {e}"))),
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// 通知发送工具
-// ═══════════════════════════════════════════════════════════════════
-
-pub struct OpcSendNotificationTool;
-
-#[async_trait]
-impl Tool for OpcSendNotificationTool {
-    fn name(&self) -> &str {
-        "OpcSendNotification"
-    }
-    fn description(&self) -> &str {
-        "通过已配置的消息平台（Telegram/钉钉/飞书等）发送通知给客户或群组。\
-         需要先在设置中配置消息渠道。支持的平台：telegram, dingtalk, feishu, slack, discord, wechat, whatsapp, qq。"
-    }
-    fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "platform": {
-                    "type": "string",
-                    "enum": ["telegram", "dingtalk", "feishu", "slack", "discord", "wechat", "whatsapp", "qq"],
-                    "description": "消息平台名称"
-                },
-                "chat_id": { "type": "string", "description": "目标用户或群的ID" },
-                "message": { "type": "string", "description": "消息内容" }
-            },
-            "required": ["platform", "chat_id", "message"]
-        })
-    }
-    fn category(&self) -> ToolCategory {
-        ToolCategory::Communication
-    }
-    fn domain(&self) -> ToolDomain {
-        ToolDomain::Automation
-    }
-
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let platform = input
-            .get("platform")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::invalid_input("缺少必需参数: platform"))?
-            .to_string();
-        let chat_id = input
-            .get("chat_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::invalid_input("缺少必需参数: chat_id"))?
-            .to_string();
-        let message = input
-            .get("message")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::invalid_input("缺少必需参数: message"))?
-            .to_string();
-
-        let tx = get_notify_tx();
-        match tx.send(OpcNotification { platform, chat_id, message }) {
-            Ok(_) => Ok(ToolResult::success(
-                "## 通知已排队发送\n\n消息已提交到通知队列，后台 worker 将异步发送。",
-            )),
-            Err(e) => Err(ToolError::execution_failed(format!(
-                "通知发送失败（队列已满或 worker 未启动）: {e}"
-            ))),
         }
     }
 }

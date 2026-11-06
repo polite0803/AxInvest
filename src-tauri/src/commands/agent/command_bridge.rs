@@ -447,7 +447,7 @@ async fn execute_plugin_agent_command(
     let args = args.clone();
     tauri::async_runtime::spawn_blocking(move || {
         manager.blocking_read().execute_plugin_command(&plugin_id, &command, &args).map_err(
-            |error| String::from(crate::commands::plugin::plugin_command_error_response(&error)),
+            |error| String::from(crate::commands::error::plugin_command_error_response(&error)),
         )
     })
     .await

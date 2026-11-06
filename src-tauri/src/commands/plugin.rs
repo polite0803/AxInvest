@@ -687,7 +687,7 @@ pub async fn plugin_execute_command(
                 &name,
                 &input.unwrap_or_else(|| serde_json::json!({})),
             )
-            .map_err(|e| String::from(plugin_command_error_response(&e)))
+            .map_err(|e| String::from(crate::commands::error::plugin_command_error_response(&e)))
     })
     .await
     .map_err(|e| format!("plugin execute_command task panicked: {e}"))?
@@ -817,64 +817,9 @@ pub struct UpdateOutcomeDto {
     pub install_path: String,
 }
 
-/// 命名命令派发口的错误归类（任务 #49）：`PluginError` → 结构化 `ErrorResponse`。
-///
-/// 禁止裸字符串：所有分支都产出「码 + 分类 + 详情」三元组，前端按 `category` 做
-/// 重试/授权/放弃分支，按 `code` 走 i18n。原先所有失败塌进
-/// `from_error(.., Unrecoverable)`（`COMMON_INTERNAL`），命令超时与「插件没跑出来」
-/// 无法区分 —— 现在超时是 `COMMON_TIMEOUT` / `general`。
-///
-/// ⚠ **超时不得标记为 `Retryable`**：宿主只是「没等到」结果，worker 侧的调用可能
-/// 仍在执行并已产生副作用（见 `worker.rs:1463` 的「超时不等价于取消」说明）。若归为
-/// `Retryable`，前端按分类自动/引导重试即构成**二次执行**。故归默认的 `general`：
-/// 仍按 error 级展示，但不进自动重试分支。调用方若确需重试，必须先确认该命令幂等。
-///
-/// ⚠ **本批刻意不新增错误码**：11 份 locale 文件当前是他会话未提交改动，而
-/// `check-errorcode-alignment.mjs` 要求「后端码 ⊆ zh-CN error 段」，只加码不补译 CI
-/// 直接红。故复用既有已译码；待 locale 解冻应补 `PLUGIN_COMMAND_TIMEOUT` /
-/// `PLUGIN_COMMAND_FAILED` / `PLUGIN_COMMAND_NOT_FOUND` /
-/// `PLUGIN_COMMAND_PERMISSION_DENIED` 专码族（清单见任务 #49 交接报告），
-/// 只需把下面的常量换成 `error_code::plugin::*`，分类逻辑不动。
-///
-/// `pub(crate)`（任务 #170）：**智能体侧同一个映射的唯一入口**。此前本函数是模块私有，
-/// 于是 `commands/agent/command_bridge.rs::execute_plugin_agent_command` 只能把
-/// `PluginError` 拼成裸中文串，LLM 拿到的是「插件命令执行失败：xxx」这种既无码也无
-/// 分类的文本 —— 同一个失败，前端路径有结构化错误、智能体路径没有。两处共用一份映射
-/// 而不是复制第二份（禁区 12：禁止重复定义）。
-pub(crate) fn plugin_command_error_response(
-    error: &axagent_plugins::PluginError,
-) -> crate::commands::error::ErrorResponse {
-    use crate::commands::error::ErrorCategory;
-    use crate::commands::error_code::common;
-    use axagent_plugins::PluginError;
-    let detail = error.to_string();
-    match error {
-        // 预算耗尽、结果未回：**不等于取消**，worker 可能仍在跑完（副作用已发生），
-        // 故归默认 `general`，不引导自动重试；仅在调用方确认命令幂等后才可重试。
-        PluginError::CommandTimeout(_) => {
-            ErrorResponse::new(common::TIMEOUT).with_category(ErrorCategory::General).with_detail(
-                format!("{detail}；超时不等于取消：插件可能仍在执行，重试可能导致副作用重复"),
-            )
-        },
-        // 授权门槛拒绝：引导用户核对插件权限声明，不重试。
-        PluginError::PermissionDenied(_) => ErrorResponse::new(common::INTERNAL)
-            .with_category(ErrorCategory::PermissionDenied)
-            .with_detail(detail),
-        // 插件/命令不存在：输入侧可修正（改名、重装、换插件）。
-        PluginError::NotFound(_) => ErrorResponse::new(common::INVALID_INPUT)
-            .with_category(ErrorCategory::Validation)
-            .with_detail(detail),
-        // 其余（worker 帧往返失败、worker 自报协议码、形状校验……）：命令跑出了错，
-        // 协议码保留在 detail 原文里（如 `PLUGIN_COMMAND_FAILED: …`），不吞。
-        other => ErrorResponse::new(common::INTERNAL)
-            .with_category(ErrorCategory::Unrecoverable)
-            .with_detail(other.to_string()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::commands::error::plugin_command_error_response;
 
     /// 映射结果必须能按 `ErrorResponse` 解析回来（不是裸字符串），并返回 (code, category)。
     fn mapped(error: &axagent_plugins::PluginError) -> (String, String, Option<String>) {

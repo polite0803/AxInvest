@@ -51,9 +51,12 @@ pub fn domain_tool_defs(names: &[String]) -> Vec<axagent_harness::workflow_types
 /// `UnifiedToolRegistry`，`init/services.rs` ToolResolver 的 `known` 分支即可接通
 /// 执行路径，工作流 AgentNode 只要 `tools` / `exposed_tools` 含工具名即可调用。
 ///
-/// ⚠️ `OpcSendNotification` 是唯一例外：它**不在注册表里**（其 `call` 依赖的
-/// `set_opc_notify_tx` 零调用者，注册即必 panic），所以这里给它保留 ToolDef
-/// 只会让 LLM 看到一个调用必失败的工具。修好 panic 后再把两边同时补上。
+/// ⚠️ `OpcSendNotification` **已退役**（缺陷 #184，2026-11 本批）：它的 `call` 走
+/// `opc.rs` 的 `OPC_NOTIFY_TX.get().expect("OPC notify tx not initialized")`，而
+/// `set_opc_notify_tx` 全仓零调用者 ⇒ 注册即必 panic；同时 `OpcNotification` **零接收端**
+/// ⇒ 「补个生产者」只会把必 panic 换成必失败（任务 #115 对 `alert_tx` 的同一判据）。
+/// 故实现体已从 `opc.rs` 删除，本白名单也不再为它产出 ToolDef —— 域包若仍声明该名字，
+/// 这里会**静默跳过**（不产出 ToolDef），而不是产出一个必失败的工具面。
 pub fn opc_tool_defs(names: &[String]) -> Vec<axagent_harness::workflow_types::ToolDef> {
     use crate::Tool;
     let candidates: Vec<Arc<dyn Tool>> = vec![
@@ -71,7 +74,6 @@ pub fn opc_tool_defs(names: &[String]) -> Vec<axagent_harness::workflow_types::T
         std::sync::Arc::new(crate::tools::opc::OpcCreateLandingPageTool),
         std::sync::Arc::new(crate::tools::opc::OpcCreateBlogPostTool),
         std::sync::Arc::new(crate::tools::opc::OpcListContactsTool),
-        std::sync::Arc::new(crate::tools::opc::OpcSendNotificationTool),
         std::sync::Arc::new(crate::tools::opc::OpcRecordKpiTool),
         std::sync::Arc::new(crate::tools::opc::OpcListKpisTool),
         std::sync::Arc::new(crate::tools::opc::OpcSearchWikiTool),

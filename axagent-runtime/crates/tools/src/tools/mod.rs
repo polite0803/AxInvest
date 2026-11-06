@@ -408,13 +408,21 @@ pub fn builtin_tool_instances() -> Vec<std::sync::Arc<dyn crate::Tool>> {
     // 与 `opc_demand_scan::OpcDiscoverLeadsTool`（上方 :144 已注册）不重复：
     // 那段是 demand-discovery 的 Loop 体工具，与本段 26 个无交集。
     //
-    // ⚠️ `OpcSendNotification` **故意未列入**：它的 `call` 走
-    // `opc.rs` 的 `get_notify_tx()`，而该函数是
-    // `OPC_NOTIFY_TX.get().expect("OPC notify tx not initialized")`，
-    // 且 `set_opc_notify_tx` 目前**全仓零调用者** ⇒ 一旦注册即「可达且必 panic」。
-    // 待该 panic 改成返回 `Err`（工具返回 Err 会被上层处理，panic 不会）后，
-    // 再把 `opc::OpcSendNotificationTool` 加回本段。见 output/opc-tool-wiring-impl.md
-    // 的 DEF-OPC-NOTIFY-01。
+    // ⚠️ `OpcSendNotification` **已退役**（缺陷 #184，2026-11 本批）—— 原先它「故意未列入」，
+    // 理由是 `opc.rs` 的 `get_notify_tx()` 用 `expect("OPC notify tx not initialized")`
+    // 同步 panic，而 `set_opc_notify_tx` 全仓零调用者 ⇒ 一旦注册即「可达且必 panic」。
+    // 本批裁定并落地**退役**而非补生产者，两个独立理由：
+    //   ① `OpcNotification` 全仓**零接收端**（没有 `Receiver`、没有通知 worker 消费它）⇒
+    //      即便注入 `tx`，`UnboundedSender::send` 也恒 `Err` ⇒ 只是把「必 panic」换成
+    //      「必失败」，与任务 #115 判 `alert_tx`「写进一条没人听的频道」同一形态；
+    //      要让它真能用得先建通知 worker + 渠道接线，属新功能，不在缺陷修复授权内。
+    //   ② 工具执行路径里的同步 panic 本身不可留（上层只能捕获 `Err`，捕不了 panic）。
+    // ⇒ 实现体、channel、`set_opc_notify_tx` / `get_notify_tx` 均已从 `opc.rs` 删除，
+    //   `capability_pack_defs::opc_tool_defs` 的候选同步摘除 ⇒ **本段永远不会有它**，
+    //   不存在「待加回」这回事了（原「修好 panic 后加回」的口径作废）。
+    //   域包 / 专家清单里残留的 `td("OpcSendNotification")` 声明是**行为面**遗留（需逐文件
+    //   递增 `TEMPLATE_VERSION` 才会重导模板），登记给 OPC→L1 插件迁移（任务 #36），本批不动。
+    //   历史登记见 output/opc-tool-wiring-impl.md 的 DEF-OPC-NOTIFY-01（现已闭合）。
     // 元素类型必须显式标注：异构的 `vec![Arc::new(A), Arc::new(B), ..]` 会按
     // **首元素**推成 `Vec<Arc<A>>`，而不是 `Vec<Arc<dyn Tool>>`（原样传给
     // `registry.register_all` 时由形参兜底，改走 `tools.extend` 后没人兜底）。
@@ -493,5 +501,96 @@ pub fn init_extensions(
     agent::set_plugin_agent_provider(plugin_agent_provider);
     if let Some(runner) = delegate_task_runner {
         multi_agent::set_delegate_task_runner(runner);
+    }
+}
+
+// ── OpcSendNotification 退役事实钉桩（缺陷 #184）──
+// ⚠ 必须保持在文件末尾：插在中间会触发 clippy::items_after_test_module。
+#[cfg(test)]
+mod opc_send_notification_retired_tests {
+    /// 退役判据 ①：内置工具实例集里**永远不该**再出现 `OpcSendNotification`。
+    ///
+    /// 它原先「故意未列入」，本批把实现体一并删了。若有人日后「顺手加回」，
+    /// 这条测试会红 —— 加回的前提是先建通知 worker（有真实接收端），
+    /// 而不是把一条 `expect` 型 panic 重新接进工具执行路径。
+    #[test]
+    fn builtin_tool_instances_excludes_retired_opc_send_notification() {
+        let instances = super::builtin_tool_instances();
+        // 正控先行：内置实例集必须**真的起来了**（含一个在活的 OPC 工具），否则下面那条
+        // 「不含退役名」的断言会因为「函数坏掉 / 返回空集」而假绿 —— 本仓既有教训：
+        // 「断言不发生」的负控必须与同族正控配对。
+        assert!(
+            instances.iter().any(|t| t.name() == "OpcListCustomers"),
+            "正控失效：应能在内置实例集里找到在活的 `OpcListCustomers`"
+        );
+        let hit = instances.iter().any(|t| t.name() == "OpcSendNotification");
+        assert!(!hit, "`OpcSendNotification` 已退役（#184）：不得重新进入内置工具注册集");
+    }
+
+    /// 退役判据 ②：域包工具白名单也不得为它产出 ToolDef —— 产出 ToolDef 等于
+    /// 让 LLM 看见一个不存在的能力（历史形态：LLM 调得到、执行必失败）。
+    ///
+    /// 同时正向对照：白名单里仍活的 `OpcListCustomers` 必须照常产出，
+    /// 否则本断言会因「整个函数坏掉」而假绿。
+    #[test]
+    fn opc_tool_defs_skips_retired_name_but_keeps_live_ones() {
+        use crate::tools::capability_pack_defs::opc_tool_defs;
+        let names: Vec<String> =
+            ["OpcSendNotification", "OpcListCustomers"].iter().map(|s| (*s).to_string()).collect();
+        let produced: Vec<String> = opc_tool_defs(&names).into_iter().map(|d| d.name).collect();
+        assert!(
+            !produced.iter().any(|n| n == "OpcSendNotification"),
+            "退役工具不应产出 ToolDef，实际产出：{produced:?}"
+        );
+        assert!(
+            produced.iter().any(|n| n == "OpcListCustomers"),
+            "正向对照失效：在活的工具应产出 ToolDef，实际产出：{produced:?}"
+        );
+    }
+
+    /// 退役判据 ③：工具执行路径里不得再有「未初始化即 panic」这类同步 panic 串。
+    /// 逐字锚定原 panic 消息，防止有人只删调用点、把 `expect` 留在源码里。
+    ///
+    /// ⚠ 判据只作用在**代码行**上：上面的退役说明注释必然要引用被删掉的串原文
+    /// （`expect("OPC notify tx not initialized")`、`set_opc_notify_tx`），不剥行注释就是
+    /// 自证失败（2026-11-06 实测：本用例因自己的注释红了一次）。
+    /// 固有边界：本判据只剥 `//` 起始行，若将来把这两个串包进 `/* */` 块注释，会漏判 ——
+    /// 那是「源码文本判据」这一形态的天花板，要更强判据得改行为级（构造实例并调用）。
+    #[test]
+    fn opc_module_has_no_uninitialized_channel_panic() {
+        let src = code_lines_only(include_str!("opc.rs"));
+        assert!(
+            !src.contains("OPC notify tx not initialized"),
+            "`opc.rs` 不应再包含 OPC channel 的 panic 串（#184 已退役）"
+        );
+        assert!(
+            !src.contains("set_opc_notify_tx"),
+            "`opc.rs` 不应再保留零调用者的注入入口 `set_opc_notify_tx`"
+        );
+    }
+
+    /// 只留非注释行（判据 ③ 的靶面预处理）。
+    fn code_lines_only(src: &str) -> String {
+        src.lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// `code_lines_only` 自身的正负控：剥注释这件事不能只靠肉眼认定 ——
+    /// 正控证明注释里的串确实被剥掉，负控证明代码行里的同名串**不会**被剥（否则判据 ③
+    /// 会因为预处理过头而永远绿）。用中性假 token 取材：若拿真串当样本，字符串字面量本身
+    /// 就是一行代码，判据会被自己的样本喂假。
+    #[test]
+    fn code_lines_only_strips_comments_but_keeps_code() {
+        const TOKEN: &str = "ZZZ_SENTINEL_TOKEN";
+        let sample = format!("// {TOKEN} in a comment\n    let x = \"{TOKEN}\";\n");
+        let kept = code_lines_only(&sample);
+        assert_eq!(
+            kept.matches(TOKEN).count(),
+            1,
+            "注释里的一处必须被剥掉、代码里的一处必须留下，实际保留 {kept:?}"
+        );
+        assert!(kept.trim_start().starts_with("let x"), "剩下的应是代码行：{kept}");
     }
 }

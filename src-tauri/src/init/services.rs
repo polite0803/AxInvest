@@ -2009,8 +2009,8 @@ pub async fn inject_work_engine_tool_resolver(state: &AppState) {
 ///
 /// ## 为什么要有组件版（R-3d，2026-10-26）
 ///
-/// `inject_work_engine_tool_resolver(state)` 只在 `src/init/services.rs:2148`
-/// （**Tauri 应用路径**）与 `axagent-batch-rerun.rs:784` 被调用 ⇒
+/// `inject_work_engine_tool_resolver(state)` **当时只在**两个点被调用（2026-10-26，见上一节标题）：
+/// `src-tauri/src/init/services.rs:2189`（**Tauri 应用路径**）与 `src-tauri/src/bin/axagent-batch-rerun.rs:789` ⇒
 /// **另两个入口拿不到 resolver**：
 /// - `axagent-validate-backfill`（CLI，本轮用它跑回放批次）
 /// - `server_main`（无头服务）

@@ -113,22 +113,93 @@ fn plugin_owned_denied(origin: &str) -> bool {
     !TRUSTED_SCHEMA_ORIGINS.contains(&origin)
 }
 
-/// 插件拥有 / 归属不可判定时的统一拒绝串。
+/// 插件拥有 / 归属不可判定时的统一拒绝响应（缺陷 #185：此前回**裸中文串**，前端无法 i18n、
+/// 也无法按分类分支）。
 ///
-/// 不新增错误码：`commands/error_code.rs` 与 11 份 locale 都在本任务禁改面内，
-/// 半途自造一个码前端只会显示成裸码串。这里沿用本文件既有的裸错误串形态
-/// （同 `"DynamicUI Schema 不存在"` / `"版本号冲突：…"`），并把实际 `origin`
-/// 原样带出，便于日志定位是谁写的这一行。
+/// **复用既有已译码 `DYNAMIC_UI_INVALID_ORIGIN`**，不新增码：11 份 locale 本轮是他路 lane
+/// 的未解冻面，而 `scripts/check-errorcode-alignment.mjs` 的判据是「后端码 ⊆ zh-CN error 段」
+/// **且** 11 语言码集合逐字一致 ⇒ 只加码不补译 CI 直接红。同形克制见本仓
+/// `commands/error.rs` 的 `plugin_command_error_response`（该函数**不可复用**于此：它只接受
+/// `&axagent_plugins::PluginError`，而这里的拒绝来自 DB 行的 `origin` 列，不是插件执行失败）。
+///
+/// 分类给 `PermissionDenied` 而不是 `Validation`：这不是参数格式错，而是「这一行的归属不是
+/// 当前调用方」，前端按分类走授权引导、不进自动重试。
+///
+/// 精确原因（实际 `origin` + 触发的 `action`）进 `detail` **与** `params`：复用码的译文只说
+/// 「来源不合法」，不带具体值 ⇒ 定位「谁写了这一行」全靠 detail；params 留给专码补译后插值。
+///
+/// ⚠ 待 locale 解冻应补专码 `DYNAMIC_UI_PLUGIN_OWNED`，届时只换下面这一行常量，
+///   分类与 detail 组装逻辑不动。
 fn plugin_owned_error(action: &str, origin: &str) -> String {
-    format!(
-        "拒绝{action}：该 DynamicUI Schema 的 origin = \"{origin}\"，归属为插件或不可判定，只能由插件安装/卸载通道管理"
+    String::from(
+        ErrorResponse::new(dynamic_ui_err::INVALID_ORIGIN)
+            .with_category(crate::commands::error::ErrorCategory::PermissionDenied)
+            .with_detail(format!(
+                "拒绝{action}：该 DynamicUI Schema 的 origin = \"{origin}\"，\
+                 归属为插件或不可判定，只能由插件安装/卸载通道管理"
+            ))
+            .with_param("action", action)
+            .with_param("origin", origin),
     )
+}
+
+/// `schema_json` 的字节上限（缺陷 #185：创建 / 更新路径此前**完全不设上限**，
+/// 任意大的串直接 `Set(...)` 落 SQLite TEXT 列）。
+///
+/// **设计取值 256 KiB —— 不是实测**（本仓没有真实的用户 Schema 体积分布可依据），
+/// 论证是「为什么是这个量级」：
+/// - 必须放行合法输入：DynamicUI Schema 是**页面结构描述**而非数据容器，节点是
+///   `{type,props,children}` 骨架，表单**数据**走 `form_data_json` 另一张表。
+///   按每个节点 ≈ 200 字节（中文 label + props）计，256 KiB ≈ 1300 个节点，
+///   已远超任何人工或 NL2UI 生成的单页规模。
+/// - 必须挡住无上限：这一串要 ① 经 IPC 整串往返 ② 被 `serde_json` 解析
+///   ③ **每次改内容再落一份全文版本快照**，而 `cleanup_old_versions` 在更新路径里
+///   保留 30 份 ⇒ 单次写入的实际持久占用被放大到 ≈ 31 倍。
+///   256 KiB × 31 ≈ 8 MiB / Schema，是可控口径；不设上限时这一格无界。
+/// - **为什么不复用 `harness::KNOWLEDGE_CONTENT_MAX_BYTES`（64 KiB）**：那条是
+///   embedding **计费预算**，本条是「页面结构规模 + 版本快照放大」—— 两件不同的事，
+///   数值相同也不得合并（判据先例：`PLAN-shell-plus-plugins.md` §58.2-④ 明确撤回过
+///   「借一个数值巧合的常量当权威」，合并会把两处判定假性绑死，改计费预算即误伤 Schema 上限）。
+///   同理不复用 `TEXT_PREVIEW_MAX_BYTES`（那是**截断**预览口径，本闸不截断）。
+const SCHEMA_JSON_MAX_BYTES: usize = 256 * 1024;
+
+/// `schema_json` 预算闸：超限 ⇒ 带码 `Err`，**不截断**。
+///
+/// 按**字节**计（UTF-8），与仓内既有预算闸口径逐字一致：中文 JSON 的字符数远小于
+/// 字节数，按字符判会放行约三倍于预算的正文。
+/// 拒收而非截断：截断产出**非法 JSON**（半棵树 + 未闭合括号），前端 `JSON.parse` 当场崩，
+/// 比拒收更糟；且那半棵树会作为「新版本」盖上唯一可用的旧版本。
+///
+/// ⚠ **只在外部输入入口调用**（`create_dynamic_ui_schema` / `update_dynamic_ui_schema`）。
+/// 以下写库点**刻意不拦**，别「顺手补齐」：
+/// - `create_version_snapshot` 转发的是**库里已过闸**的串，再判一次只会在
+///   历史超限行上让「更新」与「记快照」分叉成半写状态；
+/// - `restore_dynamic_ui_schema_version` 回滚写回既有快照 —— 对已入库字节设闸
+///   会把输入校验变成数据锁定（超限的历史行再也回滚不回去）。
+/// - `init/plugin_ui_schema.rs`（插件 `ui.json` 安装通道）是**同族缺陷的另一处入口**，
+///   本批未纳入（见交付报告「未做」），不要误判为「全仓 schema_json 已有上限」。
+fn check_schema_json_budget(schema_json: &str) -> Result<(), String> {
+    let bytes = schema_json.len();
+    if bytes > SCHEMA_JSON_MAX_BYTES {
+        return Err(String::from(
+            ErrorResponse::new(crate::commands::error_code::common::INVALID_INPUT)
+                .with_category(crate::commands::error::ErrorCategory::Validation)
+                .with_detail(format!(
+                    "schema_json 是 {bytes} 字节，越出上限 {SCHEMA_JSON_MAX_BYTES} 字节：\
+                     超限拒收不截断（截断会产出非法 JSON，并盖上唯一可用的旧版本）"
+                ))
+                .with_param("bytes", bytes.to_string())
+                .with_param("limitBytes", SCHEMA_JSON_MAX_BYTES.to_string()),
+        ));
+    }
+    Ok(())
 }
 
 /// 读一行 Schema 并做归属校验 —— 本文件所有「按 schemaId 操作」命令的统一闸门。
 ///
 /// 不存在 ⇒ `DYNAMIC_UI_SCHEMA_NOT_FOUND`（不再放行「任意 id 都能写表单」）；
-/// 插件拥有 / 归属不可判定 ⇒ 明确拒绝。`action` 只进错误文案，不参与判定。
+/// 插件拥有 / 归属不可判定 ⇒ `DYNAMIC_UI_INVALID_ORIGIN`（`PermissionDenied`，
+/// detail 带实际 `origin`）。`action` 只进错误文案，不参与判定。
 async fn load_schema_for_command(
     db: &DatabaseConnection,
     schema_id: &str,
@@ -353,7 +424,7 @@ pub async fn get_dynamic_ui_schema(
         .one(db)
         .await
         .map_err(|e| format!("查询Schema失败: {e}"))?
-        .ok_or_else(|| "DynamicUI Schema 不存在".to_string())?;
+        .ok_or_else(|| ErrorResponse::err(dynamic_ui_err::SCHEMA_NOT_FOUND))?;
     Ok(model_to_dto(model))
 }
 
@@ -363,6 +434,9 @@ pub async fn create_dynamic_ui_schema(
     state: State<'_, AppState>,
     req: CreateSchemaRequest,
 ) -> Result<DynamicUISchemaDTO, String> {
+    // 预算闸先于一切写入与 uuid / 时间戳生成：超限的 Schema 一行都不该落库
+    // （落一半会留下「有主行无快照」或「有快照无主行」的半写状态）。
+    check_schema_json_budget(&req.schema_json)?;
     let db = state.harness.db();
     let id = Uuid::new_v4().to_string();
     let now = now_iso();
@@ -412,6 +486,13 @@ pub async fn update_dynamic_ui_schema(
 
     if model.is_builtin != 0 {
         return Err(ErrorResponse::err(dynamic_ui_err::BUILTIN_NOT_MODIFIABLE));
+    }
+
+    // 预算闸必须在**任何写入之前**：本函数随后要为旧内容落一份全文版本快照
+    // （`create_version_snapshot`），超限的新串若在那之后才拒，就会留下
+    // 「旧版本已进历史、主行仍是旧内容、新版本没落」的多余快照。
+    if let Some(ref schema_json) = req.schema_json {
+        check_schema_json_budget(schema_json)?;
     }
 
     // ── 版本更替逻辑 ──
@@ -575,7 +656,7 @@ pub async fn list_dynamic_ui_schema_versions(
         .one(db)
         .await
         .map_err(|e| format!("查询Schema失败: {e}"))?
-        .ok_or_else(|| "DynamicUI Schema 不存在".to_string())?;
+        .ok_or_else(|| ErrorResponse::err(dynamic_ui_err::SCHEMA_NOT_FOUND))?;
 
     let current_version = schema.version;
 
@@ -1238,5 +1319,104 @@ mod origin_guard_tests {
             missing.contains("DYNAMIC_UI_SCHEMA_NOT_FOUND"),
             "缺失宿主应回既有错误码：{missing}"
         );
+    }
+
+    // ── 缺陷 #185 钉桩：归属拒绝必须带码，schema_json 必须有上限 ──
+
+    /// `plugin_owned_error` 此前返回**裸中文串** ⇒ 前端无法 i18n、无法按 `category`
+    /// 走授权引导。这里钉住「结构化三元组」而不是钉住某句中文措辞。
+    #[test]
+    fn plugin_owned_error_returns_coded_response_not_bare_string() {
+        let raw = plugin_owned_error("更新", "plugin");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&raw).expect("归属拒绝必须是可解析的 ErrorResponse JSON");
+        assert_eq!(
+            parsed.get("code").and_then(|v| v.as_str()),
+            Some("DYNAMIC_UI_INVALID_ORIGIN"),
+            "必须复用既有已译码，而不是自造一个前端没译的码串：{raw}"
+        );
+        assert_eq!(
+            parsed.get("category").and_then(|v| v.as_str()),
+            Some("permission_denied"),
+            "归属拒绝是授权问题，不是格式错：分类错 ⇒ 前端进自动重试分支"
+        );
+        let detail = parsed.get("detail").and_then(|v| v.as_str()).unwrap_or_default();
+        assert!(detail.contains("plugin"), "detail 必须带出实际 origin：{detail}");
+        assert!(detail.contains("更新"), "detail 必须带出被拒的 action：{detail}");
+        assert_eq!(
+            parsed.get("params").and_then(|p| p.get("origin")).and_then(|v| v.as_str()),
+            Some("plugin"),
+            "params 供专码补译后插值：{raw}"
+        );
+    }
+
+    /// 拒绝串里**不得**混进被保护的数据本体（与上面既有的「不泄露表单值」判据同族）。
+    #[test]
+    fn plugin_owned_error_does_not_leak_row_values() {
+        let raw = plugin_owned_error("取消钉入", "");
+        assert!(!raw.contains("LEAK_SECRET"), "错误响应只描述归属，不回显行内容：{raw}");
+        // 空 origin（历史行）同样必须带码，不能退回裸串
+        assert!(raw.contains("DYNAMIC_UI_INVALID_ORIGIN"), "未知来源同样必须带码：{raw}");
+    }
+
+    /// 上限必须按**字节**判，不是按字符判：中文 JSON 的字符数 ≈ 字节数 / 3，
+    /// 按字符判会放行约三倍于预算的正文（与仓内既有预算闸同口径）。
+    #[test]
+    fn schema_json_budget_is_byte_based_not_char_based() {
+        // 边界：恰好等于上限放行（`>` 而非 `>=`，上限本身是合法值）
+        assert_eq!(SCHEMA_JSON_MAX_BYTES, 256 * 1024, "上限是设计取值，改动须同步本钉桩");
+        assert!(check_schema_json_budget(&"a".repeat(SCHEMA_JSON_MAX_BYTES)).is_ok());
+        let err = check_schema_json_budget(&"a".repeat(SCHEMA_JSON_MAX_BYTES + 1))
+            .expect_err("超 1 字节必须拒");
+        assert!(
+            err.contains("COMMON_INVALID_INPUT"),
+            "超限必须回既有已译码（本批 locale 未解冻，不许自造新码）：{err}"
+        );
+        assert!(err.contains("validation"), "超限是输入校验错，分类须为 validation：{err}");
+
+        // 按字符判的失效证明：上限数量的中文汉字，字节数是 3 倍 ⇒ 必须拒
+        let cjk_chars = SCHEMA_JSON_MAX_BYTES;
+        let cjk = "语".repeat(cjk_chars);
+        assert!(
+            cjk.len() > SCHEMA_JSON_MAX_BYTES && cjk.chars().count() == SCHEMA_JSON_MAX_BYTES,
+            "测试前提：汉字按 UTF-8 是 3 字节，字符数恰好等于上限时字节数已越界"
+        );
+        assert!(
+            check_schema_json_budget(&cjk).is_err(),
+            "按字节判必须拒掉「字符数=上限」的中文正文（按字符判会放行）"
+        );
+    }
+
+    /// 拒收**不截断**，且超限的错误文案不得让调用方误读成「已保存部分内容」。
+    /// 同时正向对照：一个真实量级的合法 Schema 必须过闸（否则上限形同禁用功能）。
+    #[test]
+    fn schema_json_budget_rejects_without_truncating_and_passes_real_schemas() {
+        let err = check_schema_json_budget(&"{".repeat(SCHEMA_JSON_MAX_BYTES + 10))
+            .expect_err("超限必须拒");
+        assert!(err.contains("拒收"), "文案必须表明整串未落库（不截断）：{err}");
+        assert!(
+            !err.contains(&"a".repeat(1024)),
+            "错误响应不得回显正文内容（超限串可以很大）：{}",
+            &err[..err.len().min(200)]
+        );
+
+        // 正向对照：一份 200 字段的表单页 Schema（合法规模）必须过闸
+        let mut props =
+            String::from(r#"{"version":"1.0","id":"root","type":"Container","children":["#);
+        for i in 0..200 {
+            if i > 0 {
+                props.push(',');
+            }
+            props.push_str(&format!(
+                r#"{{"id":"f{i}","type":"Input","props":{{"name":"field_{i}","label":"字段{i}"}}}}"#
+            ));
+        }
+        props.push_str("]}");
+        assert!(
+            props.len() < SCHEMA_JSON_MAX_BYTES,
+            "测试前提：200 字段表单页应远小于上限，实际 {} 字节",
+            props.len()
+        );
+        assert!(check_schema_json_budget(&props).is_ok(), "合法规模的 Schema 必须放行");
     }
 }

@@ -6703,3 +6703,22 @@ mock 的 `create_artifact` / `update_artifact` 不再写这三样（注释指向
 
 **未做**：① 未接 CI（它是普查器不是门禁；接 CI 要走 `ci-check.mjs` + `ci.yml` 两处同源，另批）；② 那 10 处
 「有兜底」未统一成 `readMockReqField`（改了只是形态一致，无行为收益）；③ 跨模块传入的 args 派生对象判不出（见脚本头「已知边界」）。
+
+### 128.12 #205：`.github/workflows/ci.yml` 补 vitest 步骤（用户按次授权后落地）
+
+**为什么这不是「给护栏塞白名单」**：`src/__tests__/ci.workflow.test.ts` 的对称差集护栏在 HEAD 上红 1 条 ——
+`ci-check.mjs` 有 `node scripts/vitest-run.mjs run`（归一为 `scripts/vitest-run.mjs run`）而 `ci.yml` **没有**
+⇒ 「本地严、CI 松」，本地全量绿才拦得住的问题在 CI 上根本不跑。AGENTS.md「CI 接线」一节明写不许为绕护栏往
+ALLOWLIST 塞新门，所以合法出路只有「把 CI 补上」这一条（另一条「把本地步骤删掉」等于把 vitest 赶出验证面，不采）。
+
+**改动**：在 `frontend-check` job 的 `TypeScript type check` 之后、`Build frontend` 之前插入一步，
+`run` 与本地镜像**逐字同源**：`node scripts/vitest-run.mjs run`（护栏按归一化后的命令比对两侧）。
+放在 tsc 之后而不是 dprint 之前：本步是分钟级，纯静态门（含「三个门禁必须早于 dprint」那一条）仍保持最前置。
+
+**验证**：`src/__tests__/ci.workflow.test.ts` 由 **1 failed / 24 passed → 25 passed**（`--pool=forks`，
+`Test Files 1 passed (1)`）；该文件的「结构完整（步骤缩进 6 空格 / 无错位 run）」与「三个门禁早于 dprint」两条
+断言同时通过 ⇒ 新步骤没有把 YAML 结构或顺序判据弄坏。
+
+**连带影响（如实登记）**：这一步让 CI 第一次真正跑前端单测 ⇒ 若本地全量套件存在既存红/环境依赖用例，
+接入后第一轮 CI 会立刻暴露（这正是本步的目的，不是副作用）；本机全量结果见下一条。「CI 侧首次运行」本身
+无法在本机验证（没有 runner），只能由推送后的第一轮 CI 证实 —— 未推送前不冒充「CI 已绿」。

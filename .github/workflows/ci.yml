@@ -444,6 +444,14 @@ jobs:
       - name: TypeScript type check
         run: npm run typecheck
 
+      - name: Vitest unit tests
+        # 任务 #205：本地镜像 `scripts/ci-check.mjs` 早就有 `node scripts/vitest-run.mjs run`
+        # （统一入口：规避 vite 8 配置加载器在 VMware 共享目录上把 root 解析成畸形串，
+        # 以及 realpath 把映射盘解析成 UNC 再作 cwd），而 CI **从无单元测试步骤** ⇒
+        # 本地严、CI 松，违规可绕过 CI 合入（`ci.workflow.test.ts` 的对称差集护栏一直在报这一条）。
+        # 此处与本地**逐字同源**：护栏按归一化后的 `scripts/vitest-run.mjs run` 比对两侧。
+        run: node scripts/vitest-run.mjs run
+
       - name: Build frontend
         run: npm run build
 

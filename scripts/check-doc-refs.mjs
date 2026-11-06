@@ -32,6 +32,17 @@
 //   · MALFORMED —— 抽取出来的串根本不是路径（散文 / 表格残片）⇒ 丢弃，只计数
 //                  实证：`bash.rs:266/:293` 这类写法旁边若还有裸 `:293`，归并时会拼出含
 //                  反引号 / 中文的怪物串。判成 BROKEN 只会给基线灌垃圾（桶就指不回真实风险了）。
+//   · UNVERIFIED —— （2026-11-06 追加，任务 #203）**读盘失败 = 未检查，不是通过**：
+//                  本仓跑在 SMB / VMware 共享目录上，`fs.readFileSync` / `readdirSync` 会**偶发**
+//                  抛 EBADF / EIO / EPERM / `UNKNOWN(errno -4094)`（libuv 对 SMB 专有 NTSTATUS
+//                  码映射不出来，统一降级成 -4094 —— 实测形态，见下「I/O 兜底」注释块）。
+//                  此前这两种错**直接把整道门打崩**：退 1、一行判定都没有 ⇒ 排查方向被引偏
+//                  （本会话实证：把「工具读不到盘」当成了「文档引用坏了」去查）。
+//                  ⚠ 反方向更危险：`catch { /* 跳过 */ }` 会让这些引用**静默进「健康」桶**
+//                     —— 「门禁退 0」≠「检查跑了」（AGENTS.md「按目标口径验收」的假绿形态）。
+//                  故：确定性「盘上确无此文件」仍走既有 BROKEN（**只有 ENOENT**，语义逐字不变）；
+//                  瞬时错重试若干次仍失败 ⇒ 落本桶（引用级），文档 / 目录级读不到 ⇒ 同记入本桶的
+//                  来源清单。本桶**默认只报告、不影响退出码**，加严要显式给 `--require-no-unverified`。
 //   · SYMDRIFT —— （2026-11-05 追加，任务 #182 ②）**独立的第二层计数，不改动上面任何一个桶**：
 //                  上面各桶只回答「**指不指得到**」（文件存在 + 行号在范围内），
 //                  不回答「**那一行是不是所述符号**」。实测反例：
@@ -41,11 +52,18 @@
 //                    `PASS`（长期假绿）。判据与保守口径见下方「行内符号一致性」注释块。
 //
 // 退出码：0 = 无新增 BROKEN / STALE；1 = 有新增（或 selftest 失败）；
-//         2 = 脚本自身失效（扫描面 0 篇文档 / 基线不可读）。
+//         2 = 脚本自身失效（扫描面 0 篇文档 / **一篇文档都没读成功** / 基线不可读 / 参数非法）。
 //   ⚠ ABBREV 首轮**只报告**（存量未知且量级可能很大）；判据未放宽 —— 它只是还没被提升为红。
 //   ⚠ SYMDRIFT 同样**默认只报告**（存量已实测，见下），且**不进棘轮基线**（基线键面仍是
 //     BROKEN/STALE，不改）；要让它退非 0 必须显式给 `--require-symbol-match`，
 //     升与不升由对账批裁定 —— CI 与 `ci-check.mjs` 的命令行**都不带**该开关。
+//   ⚠ UNVERIFIED（读盘失败）**默认也只报告**，理由与本仓既有两道巡检门同型：
+//     把「盘的抖动」变成红灯会把排查方向引向不存在的文档缺陷（本会话已实证一次），
+//     而巡检门的价值在于**读数可信 + 覆盖面自陈**。但两件事必须硬：
+//       ① 读不到的引用**不许**静默算检查过 ⇒ UNVERIFIED 的数量 + 样例一律打印（不进 OK 桶）；
+//       ② `docs.length > 0` 却**一篇文档都没读成功** ⇒ 本门一行没跑 ⇒ 退 2（与「扫描面为 0」
+//          同档：那不是盘的抖动，是门本身失效）。要连「部分读不到」也判红，显式给
+//          `--require-no-unverified`（CI 与 `ci-check.mjs` 的命令行**都不带**，加严由对账批裁定）。
 //
 // ── 行内符号一致性（SYMDRIFT）的判据 ────────────────────────────────
 // 五条，**逐条都是往「宁可漏报」的方向收敛**（散文里绝大多数反引号不是符号，
@@ -76,6 +94,9 @@
 //   · 常规运行：基线内的存量不拦，基线外新增 → 红；基线内已消失 → 打印「可收紧」，不红；
 //   · `--init-baseline`：**仅当基线文件不存在**时建立（首轮冻结存量；存在则拒绝，不许洗白）；
 //   · `--update-baseline`：收紧（先跑常规运行确认无新增，否则拒绝执行）。
+//   · ⚠ 两个写基线的开关都**在未检查面非空时无条件拒绝**（退 2，见 `refuseBaselineWrite`）：
+//     读不到的引用会从本轮读数里消失，而「消失」正是基线认定「已修复」的口径 —— 不放这道闸，
+//     一次 SMB 抖动就能静默删掉一批仍然有效的存量条目（那是盘的抖动代劳的洗白）。
 //
 // 用法：
 //   node scripts/check-doc-refs.mjs
@@ -86,6 +107,7 @@
 //   node scripts/check-doc-refs.mjs --require-symbol-match # 把 SYMDRIFT 提升为红（**默认不开**）
 //   node scripts/check-doc-refs.mjs --sym-include-dotted   # 把点号接缝名也算符号（读数虚高，仅对账）
 //   node scripts/check-doc-refs.mjs --sym-window=5         # 放大折行窗口复核（只影响 SYMDRIFT 读数）
+//   node scripts/check-doc-refs.mjs --require-no-unverified # 把 UNVERIFIED（读盘失败）提升为红（**默认不开**）
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -116,6 +138,11 @@ const UPDATE_BASELINE = args.includes("--update-baseline");
 // SYMDRIFT 的**唯一**升硬开关。默认关 ⇒ 既有退出码与桶计数逐字不变（CI 与 ci-check.mjs
 // 的命令行都不带它，所以本地绿 / CI 绿口径不受本批影响）。
 const REQUIRE_SYMBOL_MATCH = args.includes("--require-symbol-match");
+// UNVERIFIED（读盘失败）的**唯一**升硬开关。默认关 ⇒ 既有退出码与桶计数逐字不变
+// （CI 与 `ci-check.mjs` 的命令行都不带它）。理由见文件头「退出码」段第 ⚠ UNVERIFIED 条：
+// 本门跑在 SMB / VMware 共享目录上，盘的瞬时抖动不该变成红灯；但**读不到必须被看见**，
+// 所以「打印」一侧是硬的（数量 + 样例），只有「退码」一侧留给开关。
+const REQUIRE_NO_UNVERIFIED = args.includes("--require-no-unverified");
 // 把 `notify.channel` 这类**点号接缝名**也当符号比对（默认 **否**，理由见 `comparableSymbolSpan`）。
 // 只是读数口径开关：开着它 SYMDRIFT 会虚高（本仓实测主要是能力登记表那一族），不进 CI 命令行。
 const INCLUDE_DOTTED = args.includes("--sym-include-dotted");
@@ -157,13 +184,278 @@ const EXTERNAL_PATH_RE = /(?:^|\/)[A-Za-z0-9_.-]+-\d+\.\d+\.\d+\//;
 /** 本机绝对路径（`D:\…`、`\\host\…`、`/home/…`）—— 换机器即失效，属环境相关。 */
 const ABSOLUTE_PATH_RE = /^(?:[A-Za-z]:[\\/]|\\\\|\/)/;
 
-/** 遍历 `docs/` 收全部 `.md`（绝对路径，排序保证输出稳定）。 */
-export function listDocFiles(root) {
+// ── I/O 兜底（任务 #203）：SMB / VMware 共享目录上的瞬时读错 ──────────────────
+// 缺陷形态（改动前实测，两条都是**整道门崩溃**：退 1、一行判定都没有）：
+//   · `auditDocs` 读文档正文（原第 625 行）**完全没有 try/catch** —— 注入 EPERM 即崩栈；
+//   · `readLines` 只兜 `ENOENT`，其它 code 一律 `throw` —— 注入 `errno -4094` 即崩栈。
+// 分类口径按 **Node 实际抛出的 `e.code`** 写（本机 node v24.19.0 逐条对过
+//   `util.getSystemErrorMap()` 与 `os.constants.errno`）：
+//   · **瞬时（重试有意义）**：`EBADF`(9，句柄被回收) · `EIO`(5) · `EPERM`(1，杀软/索引器/hgfs 抢锁)
+//     · `EACCES`(13，Windows 上与 EPERM 同样常由文件被占用引起) · `EAGAIN`(11) · `EBUSY`(16)
+//     · `EMFILE`(24) / `ENFILE`(23)（fd 耗尽，退避后通常即可）· `ENOTCONN` · `ESHUTDOWN`
+//     · `UNKNOWN` = **errno -4094**，libuv 对 SMB 专有 NTSTATUS 码**映射不出来**时统一降级成它
+//       （`getSystemErrorMap().get(-4094)` = `["UNKNOWN","unknown error"]`）。
+//       ⚠ 这一条是 SMB 上**最常见**的形态，按 code 白名单分类时漏了它等于没兜（leader 报的
+//       「errno -4094」在 `e.code` 一侧就是字符串 `"UNKNOWN"`，两者都要认）。
+//   · **确定性（重试无意义）**：`ENOENT`(2) · `ENOTDIR`(20) · `EISDIR`(21) · `EINVAL`(22)
+//     · `ELOOP`(40) · `ENAMETOOLONG`(38)。
+//     ⚠ 其中**只有 `ENOENT`** 保留既有语义（索引内有、盘上已删 ⇒ 与「仓内无此文件」同判 BROKEN，
+//     `readLines` 注释与既有 selftest 钉死）。其余确定性错误说明的是「**我们的读取方式**出了问题」
+//     而不是「引用坏了」⇒ 判 BROKEN 会把工具故障记成文档缺陷（假红），判 OK 是假绿，
+//     故与瞬时错一样落 UNVERIFIED。
+//   · 判据**两头都收**：认不准的错误一律 UNVERIFIED（既不算通过也不算红），
+//     因为 UNVERIFIED 的代价只是「这一条没查」，而误判 BROKEN/OK 的代价是「读数不可信」。
+
+/** 瞬时 I/O 错误码（`e.code`）——重试可能成功。 */
+const TRANSIENT_IO_CODES = new Set([
+  "EBADF", "EIO", "EPERM", "EACCES", "EAGAIN", "EWOULDBLOCK", "EBUSY",
+  "EMFILE", "ENFILE", "ENOTCONN", "ESHUTDOWN", "UNKNOWN",
+]);
+/** 确定性错误码 —— 重试恒失败，不付费。 */
+const STATIC_IO_CODES = new Set(["ENOENT", "ENOTDIR", "EISDIR", "EINVAL", "ELOOP", "ENAMETOOLONG"]);
+/** errno 为 -4094（libuv UNKNOWN）时的显式识别：某些封装只填 `errno` 不填 `code`。 */
+const UV_UNKNOWN_ERRNO = -4094;
+
+/**
+ * 重试次数与退避（**理由写在这里，改动必须连同理由一起改**）：
+ *   · `IO_RETRY_ATTEMPTS = 3`（1 次正常 + 2 次重试）：SMB/hgfs 的瞬时错来自
+ *     「readdir 快照与 open 之间的竞态」与「客户端句柄缓存失效」，第二次 open 基本必然成功
+ *     （本仓 `readLines` 的 ENOENT 兜底注释记录过同型现象：文件确实在，只是那一瞬读不到）；
+ *     再多只是把「挂载真死了」这件事拖成分钟级卡死 —— **卡死与崩溃同样是「没有判定输出」**。
+ *   · `30ms → 90ms`（×3 递增，最坏单次 120ms）：30ms 远大于 hgfs 的往返抖动（个位数 ms），
+ *     又远小于人可感知的卡顿；递增而非固定，是给「服务端忙」留退避空间。
+ *   · `IO_RETRY_BUDGET_MS = 5000` 全局预算：扫描面实测 286 篇文档 + 约 1900 个目标文件，
+ *     挂载整体失联时「每条都重试满」= 上百秒，比崩溃更糟（CI 会被判超时）。预算耗尽后
+ *     **立即停止重试**并置 `exhausted` ⇒ 后续读错直接落 UNVERIFIED，并在打印里自陈预算耗尽。
+ */
+const IO_RETRY_ATTEMPTS = 3;
+const IO_RETRY_BASE_MS = 30;
+const IO_RETRY_FACTOR = 3;
+const IO_RETRY_BUDGET_MS = 5000;
+
+/** 读盘失败的哨兵值 —— 与 `null`（既有「盘上确无此文件」语义）**必须**区分开。 */
+export const UNREADABLE = Symbol("unreadable");
+
+/**
+ * 同步睡眠。本脚本全程同步（`readFileSync` 系），不能用 `setTimeout`；
+ * `Atomics.wait` 在 Node **主线程可用**（只有浏览器 JS 禁），故不引入 busy-wait。
+ * SharedArrayBuffer 极端不可用时退回忙等 —— 宁可烧 CPU 也不许把退避变成 0（那等于没退避）。
+ */
+export function syncSleepMs(ms) {
+  if (!(ms > 0)) return;
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.ceil(ms));
+  } catch {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      /* 忙等兜底 */
+    }
+  }
+}
+
+/**
+ * 纯函数：该 fs 错误属瞬时（可重试）/ 确定性（不重试）/ 「文件确实没有」（既有 BROKEN 语义）。
+ * ⚠ 兜底方向刻意是 **transient**：认不准的错误（含 `errno === -4094` 但没带 `code` 的封装、
+ *   含被 `throw "字符串"` 的极端形态）代价只是**多试两次然后落 UNVERIFIED**；
+ *   若兜底成 static/missing，一个我们没认出来的错就会被判成「仓内查无此文件」（假红）
+ *   或「盘上确无此文件」，两者都比多花 120ms 严重。
+ *   `UV_UNKNOWN_ERRNO` 常量保留是为了让「-4094 归哪档」在源码里可查（见上方实测注）。
+ */
+export function classifyIoError(e) {
+  const code = e && typeof e.code === "string" ? e.code : "";
+  if (code === "ENOENT") return "missing";
+  if (STATIC_IO_CODES.has(code)) return "static";
+  if (TRANSIENT_IO_CODES.has(code)) return "transient";
+  return "transient"; // 认不准 ⇒ 按瞬时处理（理由见上）
+}
+
+/** 错误自陈串（进 UNVERIFIED 桶的 `why`，逐条要能指回是哪一次读、报什么错）。 */
+function ioErrDesc(e) {
+  const code = e && typeof e.code === "string" ? e.code : "?";
+  const errno = e && typeof e.errno === "number" ? e.errno : "?";
+  return `${code}(errno ${errno})`;
+}
+
+/**
+ * 读盘失败的登记表（**覆盖面自陈的数据源**）。
+ * @param {number} budgetMs 全局退避预算（selftest 里取 0 以验证「耗尽后不再重试」）
+ */
+export function makeIoNotes(budgetMs = IO_RETRY_BUDGET_MS) {
+  const notes = {
+    retries: 0, // 实际执行的重试「次数」（不含首次尝试）——正控用它证明重试真的在跑
+    retryMs: 0, // 累计退避睡眠毫秒
+    budgetMs,
+    exhausted: false, // 预算是否已耗尽（耗尽 ⇒ 只试一次就落未检查）
+    failures: [], // 每条 = { kind, at, code, errno, err, attempts, sleptMs }
+    byTarget: new Map(), // kind+at ⇒ 条目（同一路径被上千条引用命中只记一次）
+    record(kind, at, e, attempts, sleptMs) {
+      const key = `${kind}\u0000${at}`;
+      if (this.byTarget.has(key)) return this.byTarget.get(key);
+      const item = { kind, at, code: e?.code ?? "?", errno: e?.errno ?? "?", err: ioErrDesc(e), attempts, sleptMs };
+      this.byTarget.set(key, item);
+      this.failures.push(item);
+      return item;
+    },
+    find(kind, at) {
+      return this.byTarget.get(`${kind}\u0000${at}`);
+    },
+    count(kind) {
+      return this.failures.filter((f) => f.kind === kind).length;
+    },
+  };
+  return notes;
+}
+
+/**
+ * 带重试的读取包装。**不抛**（这正是本任务要修的缺陷）。
+ * @param {() => T} read 真正执行读取的闭包
+ * @param {object} notes makeIoNotes() 的产物
+ * @param {{kind?:string, at?:string, sleep?:(ms:number)=>void, label?:string}} opts
+ *   `kind`：`target`（引用的目标文件）｜`doc`（文档正文）｜`dir`（文档目录遍历）
+ * @returns {{ok:boolean, value?:T, missing?:boolean, error?:Error, attempts:number, waitedMs:number}}
+ *   `missing=true` **只**在 ENOENT 时出现 ⇒ 调用方按既有「盘上确无此文件」判据处理（BROKEN）；
+ *   其余 `ok:false` 一律是「未检查」，不许复用既有桶。
+ */
+export function withIoRetry(read, notes, opts = {}) {
+  const kind = opts.kind ?? "target";
+  const at = opts.at ?? (opts.label ?? "");
+  const sleep = opts.sleep ?? syncSleepMs;
+  let attempt = 0;
+  let waited = 0;
+  for (;;) {
+    attempt++;
+    try {
+      return { ok: true, value: read(), attempts: attempt, waitedMs: waited };
+    } catch (e) {
+      const cls = classifyIoError(e);
+      // 确定性错误（含 ENOENT）：**不重试**。这条同时是「重试不许把『文件不存在』判据拖慢」
+      // 的实现保证 —— 仓内 BROKEN 存量实测 271 条，逐条重试会白付 ~33 秒。
+      if (cls !== "transient") {
+        // ENOENT 既有语义（BROKEN / 目录 no-op）不进未检查面；其余确定性错误**要记**，
+        // 否则调用方落 UNVERIFIED 时 `why` 指不回「哪一次读、报什么错」。
+        if (cls === "static") notes.record(kind, at, e, attempt, waited);
+        return { ok: false, missing: cls === "missing", error: e, attempts: attempt, waitedMs: waited };
+      }
+      const canRetryAgain = attempt < IO_RETRY_ATTEMPTS && notes.retryMs < notes.budgetMs;
+      if (!canRetryAgain) {
+        if (notes.retryMs >= notes.budgetMs) notes.exhausted = true;
+        notes.record(kind, at, e, attempt, waited);
+        return { ok: false, missing: false, error: e, attempts: attempt, waitedMs: waited };
+      }
+      const wait = IO_RETRY_BASE_MS * IO_RETRY_FACTOR ** (attempt - 1);
+      notes.retries++;
+      notes.retryMs += wait;
+      waited += wait;
+      sleep(wait);
+    }
+  }
+}
+
+/**
+ * `readdirSync` 的兜底封装。
+ *   · 成功 ⇒ 返回条目；
+ *   · **目录确实不存在（ENOENT）** ⇒ 抛出，让调用方走既有「安全 no-op 返回」⇒ 上层再用
+ *     「扫描面 0 篇 ⇒ 退 2」判据自陈（既有 selftest 负控：`listDocFiles(tmp/nope)` 必须仍是 0，
+ *     且**不进**未检查面 —— 那里没有任何东西被跳过，指不回真实风险）；
+ *   · 其它读不到 ⇒ 已由 `withIoRetry` 记入未检查面，这里**返回空数组**（不抛：抛会被上层
+ *     的 catch 吞成「目录不存在」，正是本任务要消灭的静默形态）。
+ */
+function readDirSyncRetry(dir, notes) {
+  const r = withIoRetry(() => fs.readdirSync(dir, { withFileTypes: true }), notes, { kind: "dir", at: dir });
+  if (r.ok) return r.value;
+  if (r.missing) {
+    const e = new Error(`ENOENT: no such directory ${dir}`);
+    e.code = "ENOENT";
+    throw e;
+  }
+  return [];
+}
+
+/**
+ * 读一个「引用的目标文件」正文。ENOENT ⇒ `null`（既有 BROKEN 语义）；
+ * 其它读不到 ⇒ `UNREADABLE`（未检查）。**永不抛**。
+ */
+export function readFileSafe(abs, notes, kind = "target") {
+  const r = withIoRetry(() => fs.readFileSync(abs, "utf8"), notes, { kind, at: abs });
+  if (r.ok) return r.value;
+  return r.missing ? null : UNREADABLE;
+}
+
+/**
+ * 读**一篇文档**的正文（`kind:"doc"`）。与目标文件侧的判据**刻意不同**：
+ *   · 目标文件 ENOENT ⇒ `null` ⇒ 既有 BROKEN（「仓内查无此文件」）—— 语义逐字不变；
+ *   · 文档 ENOENT ⇒ **仍记入未检查面**。理由：文档清单是几秒前 `readdirSync` 出来的，
+ *     此刻读不到只可能是竞态 / 挂载抖动，而「这篇文档里的引用」一条都没被检查过 ——
+ *     把它静默跳过 = 扫描面凭空变小而读数看上去完全正常，正是本任务点名的假绿形态。
+ * @returns {string|symbol} 正文，或 `UNREADABLE`
+ */
+export function readDocText(abs, notes) {
+  const r = withIoRetry(() => fs.readFileSync(abs, "utf8"), notes, { kind: "doc", at: abs });
+  if (r.ok) return r.value;
+  if (!notes.find("doc", abs)) notes.record("doc", abs, r.error, r.attempts, r.waitedMs);
+  return UNREADABLE;
+}
+
+/**
+ * 纯函数：读盘失败的**覆盖面**摘要（三个来源分档，互不混同）。
+ * @param {object} notes
+ * @param {number} unverifiedRefs 落入 UNVERIFIED 桶的引用条数（由 counts 提供）
+ */
+export function ioCoverageSummary(notes, unverifiedRefs) {
+  return {
+    refs: unverifiedRefs,
+    targets: notes.count("target"),
+    docs: notes.count("doc"),
+    dirs: notes.count("dir"),
+    retries: notes.retries,
+    retryMs: notes.retryMs,
+    exhausted: notes.exhausted,
+    any: unverifiedRefs + notes.failures.length > 0,
+  };
+}
+
+/** 纯函数：UNVERIFIED 是否进退出码。**默认关** ⇒ 恒 false ⇒ 退码与改动前逐字相同。 */
+export function unverifiedHardFail(cov, requireNoUnverified) {
+  return requireNoUnverified && cov.any;
+}
+
+/**
+ * 纯函数：本轮存在未检查面时是否**必须拒绝**写棘轮基线（`--init-baseline` / `--update-baseline`）。
+ * 判据：基线的键面是 BROKEN/STALE 引用。文档读不到 ⇒ 它里面的引用**从本轮读数里消失** ⇒
+ *   `diffAgainstBaseline` 会把它们算成「本轮已消失（可收紧）」，`writeBaseline` 于是**静默删掉
+ *   一批本来仍然有效的存量条目** —— 那是比假绿更糟的假收紧（违反「不许用基线洗白」同条禁令，
+ *   只是这次的「洗白」是盘的抖动代劳的）。故这一条**不是开关，是无条件硬拦**。
+ */
+export function refuseBaselineWrite(cov) {
+  return cov.any;
+}
+
+/**
+ * 纯函数：本门是否**一行都没跑**（与「扫描面为 0」同档的自身失效 ⇒ 退 2）。
+ * ⚠ 这一条与「部分读不到 ⇒ 默认只报告」不矛盾：部分读不到是盘的抖动（不该红），
+ *   而「收到 N 篇文档、0 篇读成功」= 门本身没有产出任何判定 ⇒ 报「通过」就是假绿。
+ * @param {number} docsSeen listDocFiles 收到的文档数
+ * @param {number} docsRead 正文读取成功的文档数
+ */
+export function scanProducedNothing(docsSeen, docsRead) {
+  return docsSeen === 0 || (docsSeen > 0 && docsRead === 0);
+}
+
+/**
+ * 遍历 `docs/` 收全部 `.md`（绝对路径，排序保证输出稳定）。
+ * @param {string} root
+ * @param {object} [notes] 读盘失败登记表；**不传**时自产一份（selftest 单参调用保持既有行为）
+ *   ⚠ 目录级 `readdirSync` 失败此前是 `catch { return; }` —— 静默丢文档 = **静默缩小扫描面**，
+ *   正是「门禁退 0 ≠ 检查跑了」的形态。现在：ENOENT（目录本就不存在）仍静默（既有负控），
+ *   瞬时错重试后仍失败 ⇒ 记 `kind:"dir"` 进未检查面，由 summary 打印。
+ */
+export function listDocFiles(root, notes) {
+  const ioNotes = notes ?? makeIoNotes();
   const out = [];
   const walk = (dir) => {
     let entries;
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      entries = readDirSyncRetry(dir, ioNotes);
     } catch {
       return; // 目录不存在 = 安全 no-op（调用方另有「扫描面为 0 即红」的判据）
     }
@@ -260,17 +552,28 @@ export function isMalformedRef(refFile) {
  * 结果缓存由调用方持有（同一目标文件常被多条引用命中）。
  * ⚠ 2026-11-05 起 `lineCache` 缓存的是**行数组**（`readLines`）而非行数 —— 符号一致性判据
  * 需要逐行内容。语义逐字不变：读不到（ENOENT）⇒ `null` ⇒ 调用方判 BROKEN。
+ * ⚠ 2026-11-06（任务 #203）新增第三种返回：`UNREADABLE` ⇒ **盘在那一瞬间没读到**，
+ * 调用方判 UNVERIFIED（未检查），**既不是** BROKEN（那是「仓内查无此文件」的客观判据）
+ * **也不是** OK。ENOENT 的既有语义一条没改。
  */
-function lineCount(abs, cache) {
-  const lines = readLines(abs, cache);
+function lineCount(abs, cache, notes) {
+  const lines = readLines(abs, cache, notes);
+  if (lines === UNREADABLE) return UNREADABLE;
   return lines === null ? null : lines.length;
 }
 
 /**
  * 读目标文件正文并按行切（LRU，上限 `LINES_CACHE_MAX` 个文件 —— 不设上限等于把整仓读进内存）。
  * 负缓存（读不到的文件记 `null`）与 `lineCount` 原有一致，不重复抛。
+ * ⚠ 改动前的 `if (e.code !== "ENOENT") throw e;` **就是本任务修的崩溃点之一**：
+ *   SMB 上的 EPERM / EBADF / `UNKNOWN(-4094)` 会把整道门打崩（退 1、零判定输出）。
+ *   现在读盘一律走 `withIoRetry`（永不抛），瞬时错重试 `IO_RETRY_ATTEMPTS` 次，
+ *   仍失败 ⇒ `UNREADABLE`。
+ * ⚠ `UNREADABLE` **进缓存**：同一目标文件常被几十条引用命中，逐条重试等于把盘的抖动
+ *   放大成几十倍；一次判定的代价只付一遍。代价是「这一瞬间读不到」在本次运行内不回滚 ——
+ *   可接受：巡检门每次都重跑，且未检查面会被打印出来（不是静默通过）。
  */
-export function readLines(abs, cache) {
+export function readLines(abs, cache, notes) {
   if (cache.has(abs)) {
     const hit = cache.get(abs);
     cache.delete(abs); // 重新插入 ⇒ 移到队尾（LRU）
@@ -278,17 +581,16 @@ export function readLines(abs, cache) {
     return hit;
   }
   let lines = null;
-  try {
-    const text = fs.readFileSync(abs, "utf8");
+  const text = readFileSafe(abs, notes ?? makeIoNotes(), "target");
+  if (text === UNREADABLE) {
+    cache.set(abs, UNREADABLE);
+    if (cache.size > LINES_CACHE_MAX) cache.delete(cache.keys().next().value);
+    return UNREADABLE;
+  }
+  if (text !== null) {
     lines = text.split(/\r?\n/);
     if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  } catch (e) {
-    // 文件索引来自 `git ls-files --cached`：工作区里**已删除但尚未提交**的文件仍在索引中
-    // （实测：opc 子树搬迁期间，文档仍指向旧路径 ⇒ readFileSync 抛 ENOENT 把整道门禁打崩）。
-    // 盘上不存在 = 引用不可定位 ⇒ 与「仓内无此文件」同判 BROKEN，不能抛异常。
-    if (e.code !== "ENOENT") throw e;
-    lines = null;
-  }
+  } // text === null ⇒ ENOENT：索引内有、盘上已删 ⇒ 与「仓内无此文件」同判 BROKEN（语义逐字不变）
   cache.set(abs, lines);
   if (cache.size > LINES_CACHE_MAX) cache.delete(cache.keys().next().value);
   return lines;
@@ -440,21 +742,25 @@ function occurrenceLines(lines, abs, tok, occCache) {
 
 /**
  * 第二层判据（SYMDRIFT）。就地给命中的引用写 `r.symDrift = { symbols, window, actual, forms }`。
- * @param {{refs:object[], windowBelow?:number, lineCache?:Map<string, string[]|null>,
- *          includeDotted?:boolean}} opts
+ * @param {{refs:object[], windowBelow?:number, lineCache?:Map<string, string[]|null|symbol>,
+ *          includeDotted?:boolean, notes?:object}} opts
  * @returns {{drift:object[], withSymbol:number, checked:number, absent:number, dottedSkipped:number,
- *            byForm:Record<string,number>, windowBelow:number}}
+ *            byForm:Record<string,number>, windowBelow:number, unreadableTargets:number}}
  *   · `withSymbol`     —— 句中给出可比对符号的引用条数（判据②，**不含**被排除的点号接缝名）
  *   · `checked`        —— 其中符号确实存在于目标文件、真正进入行窗比对的条数（判据③）
  *   · `absent`         —— 符号在目标文件里零出现 ⇒ **跳过**（不是「通过」，是「未检」）
  *   · `dottedSkipped`  —— 只给出 `notify.channel` 这类点号接缝名的引用条数 ⇒ 判据② 排除（未检）
  *   · `byForm`         —— 漂移按形态计数（`ident` / `decl` / `path` / `dotted`），供对账升硬时取舍
+ *   · `unreadableTargets` —— （任务 #203）第一层已判 OK、但第二层重读正文时读不到的目标文件
+ *     **所覆盖的引用条数** ⇒ 第二层未检。必须计数自陈：`lineCache` 是 LRU（上限 400 个文件，
+ *     实测扫描面 ~1900 个目标文件），条目会被逐出后重读，SMB 上重读**确实可能**失败。
  */
 export function auditSymbolDrift({
   refs,
   windowBelow = WINDOW_BELOW_DEFAULT,
   lineCache = new Map(),
   includeDotted = false,
+  notes = undefined,
 }) {
   const occCache = new Map();
   attributeAllLines(refs);
@@ -477,9 +783,17 @@ export function auditSymbolDrift({
   let withSymbol = 0;
   let checked = 0;
   let absent = 0;
+  let unreadable = 0;
+  const ioNotes = notes ?? makeIoNotes();
   for (const [abs, list] of byTarget) {
-    const lines = readLines(abs, lineCache);
-    if (lines === null) continue; // 盘上已删 ⇒ 既有桶已判 BROKEN，不在此叠第二层
+    const lines = readLines(abs, lineCache, ioNotes);
+    // 读盘失败的目标文件：`null` = 盘上确无（既有桶已判 BROKEN），`UNREADABLE` = 没读到
+    // （既有桶已判 UNVERIFIED）⇒ 两种都**不叠第二层**，也不在此处再记一次。
+    if (lines === null) continue;
+    if (lines === UNREADABLE) {
+      unreadable += list.length; // 第二层对这些引用**没跑** ⇒ 计数自陈，不许静默算比过
+      continue;
+    }
     for (const { r, usable } of list) {
       withSymbol++;
       const toks = [...new Set(usable.flatMap((c) => c.syms))];
@@ -508,7 +822,16 @@ export function auditSymbolDrift({
       drift.push(r);
     }
   }
-  return { drift, withSymbol, checked, absent, dottedSkipped: dottedOnly.length, byForm, windowBelow };
+  return {
+    drift,
+    withSymbol,
+    checked,
+    absent,
+    dottedSkipped: dottedOnly.length,
+    byForm,
+    windowBelow,
+    unreadableTargets: unreadable,
+  };
 }
 
 /** 按（文档, 文档行）分组后逐行做符号归属（`attributeSymbolsToLine` 需要同行上下文）。 */
@@ -537,8 +860,8 @@ export function parseSymWindowFlag(flag) {
 }
 
 /**
- * 单条引用判定（纯函数：文件系统只经 `lineCount` / `index` 访问）。
- * @returns {{bucket:string, target?:string, abs?:string, candidates?:string[], kind?:string, lines?:number}}
+ * 单条引用判定（文件系统只经 `lineCount` / `index` 访问）。
+ * @returns {{bucket:string, target?:string, abs?:string, candidates?:string[], kind?:string, lines?:number, why?:string}}
  */
 export function classifyRef(ref, ctx) {
   const { refFile, start, end } = ref;
@@ -557,8 +880,21 @@ export function classifyRef(ref, ctx) {
     // 找不到候选 ⇒ 明确「无候选」，绝不猜（猜出来的桶指向不了真实风险，见 AGENTS.md）
     return { bucket: "BROKEN", candidates: [] };
   }
-  const n = lineCount(loc.abs, ctx.lineCache);
+  const n = lineCount(loc.abs, ctx.lineCache, ctx.notes);
   if (n === null) return { bucket: "BROKEN", candidates: [] };
+  // 读盘失败（瞬时错重试仍失败 / 非 ENOENT 的确定性错）⇒ **未检查**。
+  // ⚠ 三条硬约束：① 不许判 OK（那是「检查且通过」）；② 不许判 BROKEN（那会说谎：
+  //    「仓内查无此文件」，而文件其实在，只是我们没读到 —— 会把人引向改一处根本没错的引用）；
+  //    ③ 不许与既有 BROKEN/NONLOC 桶混同，故独立成桶并自带 `why`（错误码 + 尝试次数）。
+  if (n === UNREADABLE) {
+    const f = ctx.notes && ctx.notes.find("target", loc.abs);
+    return {
+      bucket: "UNVERIFIED",
+      target: ctx.repoRel(loc.abs),
+      abs: loc.abs,
+      why: f ? `读不出正文：${f.err}（尝试 ${f.attempts} 次${f.sleptMs ? `，退避 ${f.sleptMs}ms` : ""}）` : "读不出正文（原因未登记）",
+    };
+  }
   const overflow = start > n || (end && end > n);
   return {
     bucket: overflow ? "STALE" : "OK",
@@ -596,18 +932,24 @@ function expandRefFile(ref) {
 }
 
 /**
- * 扫描 + 判定（纯函数：不写盘、不 exit）。selftest 与正式跑共用这一条路径。
+ * 扫描 + 判定（不写盘、不 exit）。selftest 与正式跑共用这一条路径。
  *
  * @param {{root:string, docs:string[], index:Map<string,string[]>, repoRel:(abs:string)=>string,
- *          resolve?:(refFile:string)=>(string|null)}} opts
+ *          resolve?:(refFile:string)=>(string|null), notes?:object}} opts
  *   `resolve` 缺省走 `locateRef` 的逐条 stat 解析（selftest 用）；批量跑必须传内存解析器
  *   （见 `makeFileSetResolver`，理由：SMB 上逐条 stat ~190ms）。
- * @returns {{refs:object[], counts:Record<string,number>, docs:number, lineCache:Map<string,string[]|null>}}
+ *   `notes` 缺省自产一份（读盘失败登记表）；正式跑必须传同一份给 main，否则未检查面没人打印。
+ * @returns {{refs:object[], counts:Record<string,number>, docs:number, docsRead:number,
+ *            lineCache:Map<string,string[]|null|symbol>, notes:object}}
  *   ⚠ `counts` 的**桶口径不含 SYMDRIFT** —— 第二层判据（`auditSymbolDrift`）只往引用对象上挂
  *   `symDrift` / `symAbsent` 字段，**不改 `bucket`**，所以既有各桶计数与退出码逐字不变。
+ *   ⚠ `docsRead` = 正文真的读到手的文档篇数。**只统计成功**，不靠 `docs.length` 反推 ——
+ *   改动前读不到一篇文档会让 `refs` 变少而 `docs` 不变，summary 看上去毫无异常（假绿形态）。
  */
-export function auditDocs({ root, docs, index, repoRel, resolve }) {
+export function auditDocs({ root, docs, index, repoRel, resolve, notes }) {
   const lineCache = new Map();
+  const ioNotes = notes ?? makeIoNotes();
+  let docsRead = 0;
   // 同一条引用常被多份文档重复引用（登记表 / 汇总页）⇒ 解析结果按引用串缓存，
   // 否则同一目标会被 stat（或查集合）上千次。
   const locCache = new Map();
@@ -617,12 +959,18 @@ export function auditDocs({ root, docs, index, repoRel, resolve }) {
     }
     return locCache.get(refFile);
   };
-  const ctx = { root, index, repoRel, lineCache, locate };
+  const ctx = { root, index, repoRel, lineCache, locate, notes: ioNotes };
   const seen = new Set();
   const refs = [];
   for (const abs of docs) {
     const docRel = repoRel(abs);
-    const text = fs.readFileSync(abs, "utf8");
+    // ⚠ 改动前这里是**裸 `fs.readFileSync`**（无任何 try/catch）⇒ SMB 瞬时错直接打崩整道门
+    //   （实测：注入 EPERM ⇒ 退 1、零判定输出）。兜底**不许**写成「catch 后 continue 什么都不记」：
+    //   那等于静默缩小扫描面，比崩溃更糟（崩溃至少是响的）。故读不到的文档记 `kind:"doc"`，
+    //   由 summary 打印「N 篇文档没读到 ⇒ 其内引用面整体未检查」，并参与「一篇都没读成功 ⇒ 退 2」的判据。
+    const text = readDocText(abs, ioNotes);
+    if (text === UNREADABLE) continue; // 记入未检查面；该文档的引用一条不产生（不猜、不记 OK）
+    docsRead++;
     // `extractRefs` 把 `:A-B` 拆成两条（起点 + 终点），`:A/B` 拆成两条多行清单。
     // 同一个 token（同一列区间）归并成**一条**引用：区间终点只是边界，不是另一条引用。
     const toks = new Map();
@@ -673,7 +1021,8 @@ export function auditDocs({ root, docs, index, repoRel, resolve }) {
   const counts = {};
   for (const r of refs) counts[r.bucket] = (counts[r.bucket] ?? 0) + 1;
   // `lineCache` 一并返回：第二层（SYMDRIFT）复用同一份正文缓存，避免 SMB 上把目标文件读两遍。
-  return { refs, counts, docs: docs.length, lineCache };
+  // `notes` 一并返回：未检查面（读盘失败）是**覆盖面数据**，必须由调用方打印，不许留在函数里蒸发。
+  return { refs, counts, docs: docs.length, docsRead, lineCache, notes: ioNotes };
 }
 
 /** 纯函数：与基线比对。返回 {newViolations, fixedCount, baseSize}。 */
@@ -691,13 +1040,23 @@ export function hardViolations(refs) {
   return refs.filter((r) => r.bucket === "BROKEN" || r.bucket === "STALE");
 }
 
+// ── selftest 断言计数（任务 #203 自证要求 1）─────────────────────────
+// 为什么必须自己数并打印：`--selftest` 此前只打印「通过与否」，**不打印跑了多少条**。
+// 于是「补了 M 条断言」这件事无法被第三方核对 —— 而本仓踩过的正是「断言写了但扫描面
+// 没起来 ⇒ 一条没执行 ⇒ 照样绿」。这里数的是**执行**次数（含循环展开），不是源码行数，
+// 两者实测不同（`for (const [at, why] of [...])` 那族一条调用点跑 6 次）。
+let ASSERT_RUN = 0;
+let ASSERT_FAIL = 0;
+
 // ── selftest：正负对照（临时目录，不依赖仓内真实文件）────────────────
 function runSelftest() {
   let fail = 0;
   const check = (cond, msg, extra) => {
+    ASSERT_RUN++;
     if (!cond) {
       console.error(`SELFTEST FAIL：${msg}${extra === undefined ? "" : `（实际 ${JSON.stringify(extra)}）`}`);
       fail++;
+      ASSERT_FAIL++;
     }
   };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "doc-refs-selftest-"));
@@ -832,9 +1191,11 @@ function runSelftest() {
 function runSymbolSelftest() {
   let fail = 0;
   const check = (cond, msg, extra) => {
+    ASSERT_RUN++;
     if (!cond) {
       console.error(`SELFTEST FAIL：${msg}${extra === undefined ? "" : `（实际 ${JSON.stringify(extra)}）`}`);
       fail++;
+      ASSERT_FAIL++;
     }
   };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "doc-refs-symtest-"));
@@ -1015,8 +1376,249 @@ export function symRefsAllOk(refs) {
   return refs.every((r) => !r.symDrift || r.bucket === "OK");
 }
 
+// ── selftest（第三层）：I/O 兜底（任务 #203）────────────────────────
+// 独立临时目录 + **临时 monkeypatch `fs`**（SMB 的瞬时错无法在现场按指令复现，注入是唯一能
+// 逐类覆盖 `e.code` 的办法；`finally` 里逐字还原，不留全局副作用）。
+// 正反控配对（缺任一条都不算覆盖）：
+//   正控 —— 注入的错**真的**把未检查桶填上了（引用级 / 文档级 / 目录级 / 第二层 四路各自验证）；
+//   负控 —— 正常路径与既有「文件不存在」判据**不进**该桶，且重试没有拖慢它。
+function runIoSelftest() {
+  let fail = 0;
+  const check = (cond, msg, extra) => {
+    ASSERT_RUN++;
+    if (!cond) {
+      console.error(`SELFTEST FAIL：${msg}${extra === undefined ? "" : `（实际 ${JSON.stringify(extra)}）`}`);
+      fail++;
+      ASSERT_FAIL++;
+    }
+  };
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "doc-refsiotest-"));
+  const origReadFileSync = fs.readFileSync;
+  const origReaddirSync = fs.readdirSync;
+  try {
+    const write = (rel, content) => {
+      const abs = path.join(tmp, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, content, "utf8");
+    };
+    write("src/ok.rs", "fn ok() {}\n");
+    write("src/recovered.rs", "fn rec() {}\n");
+    write("src/dead-eperm.rs", "fn d() {}\n");
+    write("src/dead-unknown.rs", "fn d2() {}\n");
+    write("src/dead-eisdir.rs", "fn d3() {}\n");
+    write("src/flip.rs", "pub struct FlipProbe;\n");
+    write("src/short.rs", "l1\nl2\nl3\n");
+    write(
+      "docs/io-alive.md",
+      [
+        "见 `src/ok.rs:1`（正常路径 ⇒ 仍判 OK，不落未检查桶）",
+        "见 `src/recovered.rs:1`（首次 EBADF、重试即成功 ⇒ 判 OK 且付 1 次退避）",
+        "见 `src/dead-eperm.rs:1`（恒 EPERM ⇒ 重试仍失败 ⇒ 未检查，**不是** OK 也**不是** BROKEN）",
+        "见 `src/dead-unknown.rs:2`（SMB 实际形态 `UNKNOWN` / errno -4094 ⇒ 未检查）",
+        "见 `src/dead-eisdir.rs:3`（确定性非 ENOENT ⇒ 未检查，且**不重试**）",
+        "见 `src/no_such_anywhere.rs:6`（既有判据：仓内查无此文件 ⇒ BROKEN，不许被本批改判）",
+        "见 `src/short.rs:99`（既有判据：行号越界 ⇒ STALE）",
+        "",
+      ].join("\n"),
+    );
+    write("docs/io-back.md", "见 `src/ok.rs:1`（文档正文首次读失败、重试成功 ⇒ 该引用必须被检查到）\n");
+    // ⚠ 这篇「列在目录里但每次读都 ENOENT」—— readdir 与 open 之间的竞态（SMB 上真实形态）。
+    //   文档侧的 ENOENT **必须**进未检查面：目标文件侧的 ENOENT 有既有 BROKEN 语义可归，
+    //   而「文档读不到」没有任何桶可归 ⇒ 不登记就是静默缩水（变异测试实测过这一条会漏）。
+    write("docs/io-vanish.md", "见 `src/short.rs:2`（文档 ENOENT ⇒ 这条不许产出，但篇目必须被登记）\n");
+    // 这篇文档**恒读不到**：它里面的「越界引用」一条都不许产生 —— 产生即说明我们在猜。
+    write("docs/io-dead.md", "见 `src/short.rs:99`（读不到 ⇒ 这条不许进 STALE，也不许进 OK）\n");
+    // 这篇在一个**整目录读不到**的子目录里 ⇒ 同上，一条不许产生，但目录级未检查要被登记。
+    write("docs/sub/io-sub-deep.md", "见 `src/short.rs:2`（目录 readdir 恒 EPERM ⇒ 不许静默消失）\n");
+    write("docs/io-flip.md", "见 `src/flip.rs:1` 的 `FlipProbe`（第一层读成功、第二层重读失败 ⇒ 第二层未检自陈）\n");
+
+    // ── 注入器：按 basename 匹配，`plan(name, n)` 返回 Error 表示「第 n 次读就失败」────
+    const E = (code, errno) => {
+      const e = new Error(`${code}: selftest 注入（任务 #203）`);
+      e.code = code;
+      e.errno = errno;
+      return e;
+    };
+    const plan = new Map([
+      ["dead-eperm.rs", () => E("EPERM", 1)],
+      ["dead-unknown.rs", () => E("UNKNOWN", -4094)],
+      ["dead-eisdir.rs", () => E("EISDIR", 21)],
+      ["recovered.rs", (n) => (n === 1 ? E("EBADF", 9) : null)],
+      ["flip.rs", (n) => (n >= 2 ? E("EIO", 5) : null)],
+      ["io-dead.md", () => E("EPERM", 1)],
+      ["io-vanish.md", () => E("ENOENT", 2)],
+      ["io-back.md", (n) => (n === 1 ? E("EBADF", 9) : null)],
+    ]);
+    const dirPlan = new Map([["sub", () => E("EPERM", 1)]]);
+    const hits = new Map();
+
+    const index = buildBasenameIndex(tmp, SKIP_DIRS); // 先按真实文件系统建索引（未被污染）
+    fs.readFileSync = function (p, ...rest) {
+      const name = path.basename(String(p));
+      const f = plan.get(name);
+      if (f) {
+        const n = (hits.get(name) ?? 0) + 1;
+        hits.set(name, n);
+        const err = f(n);
+        if (err) throw err;
+      }
+      return origReadFileSync.call(fs, p, ...rest);
+    };
+    fs.readdirSync = function (p, ...rest) {
+      const name = path.basename(String(p));
+      const f = dirPlan.get(name);
+      if (f) {
+        const n = (hits.get("dir:" + name) ?? 0) + 1;
+        hits.set("dir:" + name, n);
+        const err = f(n);
+        if (err) throw err;
+      }
+      return origReaddirSync.call(fs, p, ...rest);
+    };
+
+    const notes = makeIoNotes();
+    const docs = listDocFiles(tmp, notes);
+    // 正控（目录级）：`docs/sub` 恒 EPERM ⇒ 篇目里**没有** io-sub-deep.md，但被登记为未检查面
+    check(!docs.some((d) => d.endsWith(path.join("sub", "io-sub-deep.md"))), "目录读不到时该目录下的文档不得进入扫描面（不猜）");
+    check(notes.count("dir") === 1, "目录级 readdir 失败必须记 1 条未检查（此前是 `catch { return; }` 静默丢文档）", notes.failures);
+    check(docs.length === 5, "文档面应为 5 篇（io-alive / io-back / io-dead / io-vanish / io-flip；sub 整目录读不到 ⇒ 0 篇）", docs.length);
+
+    const repoRel = (abs) => path.relative(tmp, abs).split(path.sep).join("/");
+    const { refs, counts, docsRead, lineCache } = auditDocs({ root: tmp, docs, index, repoRel, notes });
+
+    check(docsRead === 3, "读成功的文档篇数 = 3（io-dead.md 那篇没读到，必须由 docsRead 如实自陈）", docsRead);
+
+    // ── 正控 ①：真·读不到 ⇒ 判 UNVERIFIED，**既不判健康也不判 BROKEN**（要求 ①）──
+    const bucketOf = (name) => refs.filter((r) => r.refFile.endsWith(name)).map((r) => r.bucket);
+    check(bucketOf("src/dead-eperm.rs").join() === "UNVERIFIED", "恒 EPERM 的目标文件必须落 UNVERIFIED（不是 OK / 不是 BROKEN）", bucketOf("src/dead-eperm.rs"));
+    check(bucketOf("src/dead-unknown.rs").join() === "UNVERIFIED", "errno -4094 / code UNKNOWN（SMB 最常见形态）必须落 UNVERIFIED", bucketOf("src/dead-unknown.rs"));
+    check(bucketOf("src/dead-eisdir.rs").join() === "UNVERIFIED", "确定性非 ENOENT 的读错同样落 UNVERIFIED（判 BROKEN 会把工具故障记成文档缺陷）", bucketOf("src/dead-eisdir.rs"));
+    check(counts.UNVERIFIED === 3, "「未检查」桶计数必须恰为 3", counts.UNVERIFIED);
+    check(counts.OK === 4, "正常路径 + 重试成功 的引用必须仍判 OK（共 4 条）", counts.OK);
+
+    // ── 正控 ②：未检查桶的**来源**逐项可指回（哪一次读、报什么错、退避多久）──
+    const d1 = refs.find((r) => r.refFile.endsWith("src/dead-eperm.rs"));
+    const f1 = notes.find("target", d1?.abs ?? "");
+    check(!!f1 && f1.attempts === IO_RETRY_ATTEMPTS, "恒失败的目标文件必须重试满 3 次才落未检查", f1);
+    check(!!f1 && f1.sleptMs === IO_RETRY_BASE_MS + IO_RETRY_BASE_MS * IO_RETRY_FACTOR, "退避必须逐字是 30ms + 90ms（改动先改理由再改数）", f1?.sleptMs);
+    check(/EPERM/.test(String(d1?.why)), "UNVERIFIED 的 why 必须带错误码（每条要指回是哪一次读）", d1?.why);
+    const dU = refs.find((r) => r.refFile.endsWith("src/dead-unknown.rs"));
+    check(notes.find("target", dU?.abs ?? "")?.errno === -4094, "UNKNOWN 必须按 errno -4094 登记（否则按 code 白名单漏网）", notes.find("target", dU?.abs ?? ""));
+
+    // ── 正控 ③：重试**真的救回来了**（不是 catch 里跳过）──
+    check(bucketOf("src/recovered.rs").join() === "OK", "第 2 次读成功的引用必须判 OK（证明重试在跑，而不是被跳过）", bucketOf("src/recovered.rs"));
+    const recF = notes.failures.filter((x) => x.kind === "target" && x.at.endsWith("recovered.rs"));
+    check(recF.length === 0, "重试成功的那条**不得**留在未检查面", recF);
+    check(bucketOf("src/ok.rs").length === 2, "同一目标被两篇文档引用 ⇒ 两条都在（文档侧重试成功那篇的引用没被静默丢）", bucketOf("src/ok.rs"));
+
+    // ── 正控 ④：文档级读不到 ⇒ 该文档的引用**一条不产生**，且被登记 ──
+    // 文档侧 ENOENT（readdir 与 open 之间的竞态）也要登记 —— 变异测试实测：删掉 `readDocText`
+    // 里那句显式 `notes.record` 后，**只有这两条**会红（EPERM 那条由 `withIoRetry` 兜住，测不出来）。
+    const vanishAbs = docs.find((d) => d.endsWith("io-vanish.md")) ?? "";
+    check(!!notes.find("doc", vanishAbs) && notes.find("doc", vanishAbs).code === "ENOENT", "文档读成 ENOENT 仍必须登记进未检查面", notes.find("doc", vanishAbs));
+    check(!refs.some((r) => r.doc === "docs/io-vanish.md"), "ENOENT 的文档不许凭空产出引用（它那条本可判 OK）");
+    check(!refs.some((r) => r.doc === "docs/io-dead.md"), "读不到的文档不得凭空产出引用（既不判红也不判健康）", refs.filter((r) => r.doc === "docs/io-dead.md"));
+    check(notes.count("doc") === 2, "文档级读不到必须记 2 条（EPERM 的 io-dead + ENOENT 竞态的 io-vanish）", notes.failures);
+    check(counts.STALE === 1, "越界引用只能来自**读成功**的那篇文档（io-dead.md 里同一条不许重复判 STALE）", counts.STALE);
+
+    // ── 负控 ①（要求 ③）：既有「文件不存在」判据**没被改判、也没被拖慢** ──
+    check(counts.BROKEN === 1, "既有 BROKEN 判据不变：仓内查无此文件仍是 BROKEN", counts.BROKEN);
+    const ghost = refs.find((r) => r.refFile.endsWith("src/no_such_anywhere.rs"));
+    check(!!ghost && ghost.bucket === "BROKEN" && ghost.candidates.length === 0, "无候选仍明确报「无候选」（不许退化成 UNVERIFIED）");
+    const enotes = makeIoNotes();
+    const ectx = { locate: () => ({ kind: "L", abs: path.join(tmp, "src", "gone.ts") }), index, root: tmp, repoRel, lineCache: new Map(), notes: enotes };
+    check(classifyRef({ refFile: "gone.ts", start: 1 }, ectx).bucket === "BROKEN", "索引内有、盘上已删（ENOENT）⇒ 仍判 BROKEN（既有语义逐字不变）");
+    check(enotes.retries === 0 && enotes.failures.length === 0, "ENOENT 路径必须**零重试**（重试不许把「文件不存在」判据拖慢）", { retries: enotes.retries, failures: enotes.failures.length });
+    // 负控 ②：正常路径完全不落未检查面
+    check(counts.UNVERIFIED === 3 && notes.failures.length === 6, "未检查面来源数恰为 6（3 目标 + 2 文档 + 1 目录），无多余条目", notes.failures.length);
+    check(!refs.some((r) => r.bucket === "UNVERIFIED" && r.refFile.endsWith("src/ok.rs")), "可读的正常引用绝不落未检查桶（负控）");
+
+    // ── 正控 ⑤：第一层读成功、第二层重读失败 ⇒ 第二层未检**计数自陈** ──
+    const symShared = auditSymbolDrift({ refs: [...refs], windowBelow: 2, lineCache, notes });
+    check(symShared.unreadableTargets === 0, "复用同一份正文缓存时第二层不该出现重读失败（负控）", symShared.unreadableTargets);
+    const symFresh = auditSymbolDrift({ refs: [...refs], windowBelow: 2, lineCache: new Map(), notes });
+    check(symFresh.unreadableTargets === 1, "缓存逐出后重读失败（LRU 上限 400，实测面 ~1900 个文件 ⇒ 真实存在）必须被计数", symFresh.unreadableTargets);
+    // 第二层重读失败**也要**进未检查面登记（翻篇：3 个目标 → 4 个），否则那一条只留下
+    // `unreadableTargets` 一个数字，报告里指不回是哪个文件。
+    check(notes.failures.length === 7 && notes.count("target") === 4, "第二层重读失败必须同样登记（3+1 个目标 / 共 7 个来源）", { n: notes.failures.length, t: notes.count("target") });
+
+    // ── 覆盖面摘要 + 升硬开关（退码口径的正负控）──
+    const cov = ioCoverageSummary(notes, counts.UNVERIFIED ?? 0);
+    check(cov.refs === 3 && cov.targets === 4 && cov.docs === 2 && cov.dirs === 1, "覆盖面摘要必须分档给出四个数（引用 3 / 目标 4（含第二层重读那 1 个）/ 文档 2 / 目录 1）", cov);
+    check(cov.retries === 12, `累计重试必须恰为 12 次（recovered 1 + dead-eperm 2 + dead-unknown 2 + flip 2 + io-back 1 + io-dead 2 + 目录 2）`, cov.retries);
+    check(cov.exhausted === false, "本面预算未耗尽（660ms < 5000ms）", cov.retryMs);
+    check(unverifiedHardFail(cov, false) === false, "默认（不带开关）⇒ UNVERIFIED **不**进退出码 ⇒ 盘的抖动不变红灯");
+    check(unverifiedHardFail(cov, true) === true, "--require-no-unverified ⇒ 未检查面非空即判红（显式加严开关可用）");
+    check(unverifiedHardFail(ioCoverageSummary(makeIoNotes(), 0), true) === false, "未检查面为空时即便带开关也不许判红（负控）");
+    // 基线写入门禁：未检查面非空 ⇒ **无条件**拒绝 --init/--update-baseline（不是开关）
+    check(refuseBaselineWrite(cov) === true, "有未检查面时必须拒绝写棘轮基线（读不到的引用会被当成「已修复」而洗白基线）");
+    check(refuseBaselineWrite(ioCoverageSummary(makeIoNotes(), 0)) === false, "干净一轮（零未检查）照旧允许写基线（负控，不许挡正常收紧）");
+    check(hardViolations(refs).length === counts.BROKEN + counts.STALE, "判红面仍是且仅是 BROKEN + STALE（UNVERIFIED 不得混入既有红面）", hardViolations(refs).map((r) => r.bucket));
+
+    // ── 「一篇都没读成功 ⇒ 门本身失效」的判据（退 2 档，与盘的抖动不同）──
+    check(scanProducedNothing(0, 0) === true, "扫描面 0 篇 ⇒ 门失效（既有判据不变）");
+    check(scanProducedNothing(5, 0) === true, "收到 5 篇但一篇都没读到 ⇒ 门失效，不许报「无违规」");
+    check(scanProducedNothing(5, 4) === false, "部分读不到 ⇒ 不是门失效（那是未检查面，默认只报告）");
+
+    // ── 退避预算：耗尽后**立即停止重试**（卡死与崩溃同样是「没有判定输出」）──
+    const tight = makeIoNotes(0);
+    const t1 = readFileSafe(path.join(tmp, "src", "dead-eperm.rs"), tight, "target");
+    check(t1 === UNREADABLE, "预算为 0 时仍要落 UNREADABLE（未检查），不许退回抛异常打崩门禁", t1);
+    check(tight.retries === 0 && tight.exhausted === true, "预算耗尽 ⇒ 一次都不重试并置 exhausted（既不卡死也不静默）", tight);
+    check(tight.failures.length === 1, "预算耗尽仍要登记未检查面（否则「没重试」就等同于「没这回事」）", tight.failures.length);
+
+    // ── 错误分类单测（按 Node 实际 `e.code` 归档，见上方注释块的实测依据）──
+    check(classifyIoError(E("ENOENT", 2)) === "missing", "ENOENT ⇒ 既有的「盘上确无此文件」路径");
+    check(classifyIoError(E("EISDIR", 21)) === "static", "EISDIR/ENOTDIR/EINVAL/ELOOP/ENAMETOOLONG ⇒ 确定性，不重试");
+    check(classifyIoError(E("EBADF", 9)) === "transient", "EBADF ⇒ 瞬时（句柄被回收）");
+    check(classifyIoError(E("EPERM", 1)) === "transient", "EPERM ⇒ 瞬时（杀软 / 索引器 / hgfs 抢锁）");
+    check(classifyIoError(E("UNKNOWN", -4094)) === "transient", "UNKNOWN ⇒ 瞬时（SMB 映射不出来的 NTSTATUS）");
+    check(classifyIoError({ errno: UV_UNKNOWN_ERRNO }) === "transient", "只带 errno -4094 没带 code 的 SMB 封装 ⇒ 按瞬时处理（兜底方向）");
+    check(classifyIoError({ code: "ENOENT", errno: -4094 }) === "missing", "code 与 errno 打架时以 code 为准 ⇒ 不许把 ENOENT 降级成瞬时");
+    // 非 Error 形态的抛出（`throw "字符串"`）也不许把门打崩 —— 这是「整道门崩溃」的另一种形态
+    let thrown = null;
+    try {
+      withIoRetry(() => {
+        throw "不是 Error 的抛出";
+      }, makeIoNotes());
+    } catch (e) {
+      thrown = e;
+    }
+    check(thrown === null, "withIoRetry 对任意抛出值都不得外抛（否则又回到「退非 0 且零判定输出」）", thrown);
+    check(classifyIoError(E("ESOMETHING_ELSE", 999)) === "transient", "认不准的错误按瞬时处理 ⇒ 代价只是多试一次，落未检查而非误判");
+    check(syncSleepMs(0) === undefined && syncSleepMs(-5) === undefined, "syncSleepMs 对非正值 no-op（预算耗尽时不空转）");
+  } finally {
+    fs.readFileSync = origReadFileSync;
+    fs.readdirSync = origReaddirSync;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  if (fail > 0) return false;
+  console.log(
+    "SELFTEST OK（第三层 I/O 兜底）：恒 EPERM / UNKNOWN(errno -4094) / 确定性非 ENOENT ⇒ UNVERIFIED（既不判 OK 也不判 BROKEN）；" +
+      "重试成功 ⇒ 判 OK 且不留痕（证明重试真的在跑）；文档 / 目录读不到 ⇒ 该面一条不产出但被登记，篇数与 docsRead 对齐；" +
+      "ENOENT 仍判 BROKEN 且零重试（既有判据没被改判也没被拖慢）；LRU 逐出后第二层重读失败 ⇒ 计数自陈；" +
+      "退避预算耗尽后停止重试但仍登记；默认只报告、--require-no-unverified 才判红；一篇都没读成功 ⇒ 判门失效（退 2）",
+  );
+  return true;
+}
+
 // ── main ────────────────────────────────────────────────────────────
-if (SELFTEST) process.exit(runSelftest() && runSymbolSelftest() ? 0 : 1);
+if (SELFTEST) {
+  // ⚠ 三段**都要跑**再合并结果（原式 `runSelftest() && runSymbolSelftest()` 短路：第一段红就
+  // 看不到后两段的失败）。断言条数按**执行**口径打印，并**逐段拆分** —— 自证要求
+  // 「原 N + 补 M = 总 K」必须能被第三方逐字核对，只打印「OK」或只打印总数都核不了。
+  const segA = ASSERT_RUN;
+  const r1 = runSelftest();
+  const segB = ASSERT_RUN;
+  const r2 = runSymbolSelftest();
+  const segC = ASSERT_RUN;
+  const r3 = runIoSelftest();
+  console.log(
+    `SELFTEST 断言合计 ${ASSERT_RUN} 条（执行口径，含循环展开）= 基础判据 ${segB - segA}` +
+      ` + 第二层 SYMDRIFT ${segC - segB} + 第三层 I/O 兜底 ${ASSERT_RUN - segC}；失败 ${ASSERT_FAIL} 条`,
+  );
+  process.exit(r1 && r2 && r3 ? 0 : 1);
+}
 
 const SYM_WINDOW = parseSymWindowFlag(WINDOW_FLAG);
 if (SYM_WINDOW === null) {
@@ -1026,17 +1628,29 @@ if (SYM_WINDOW === null) {
 
 const repoFiles = listRepoFiles(ROOT, SKIP_DIRS);
 const index = indexFromFileList(repoFiles.files);
-const docs = listDocFiles(ROOT);
+// 读盘失败登记表：**目录遍历 + 文档正文 + 目标正文 + 第二层重读**共用同一份 ⇒ 退避预算是
+// 全局的（见 `IO_RETRY_BUDGET_MS` 的理由），未检查面也只需在一处打印。
+const ioNotes = makeIoNotes();
+const docs = listDocFiles(ROOT, ioNotes);
 if (docs.length === 0) {
   console.error("✖ 扫描面为空 —— docs/**/*.md 一篇都没收到（路径约定变了？），不是「没有引用」");
   process.exit(2);
 }
 const repoRel = (abs) => path.relative(ROOT, abs).split(path.sep).join("/");
 const resolveRef = makeFileSetResolver(ROOT, repoFiles.files);
-const { refs, counts, lineCache } = auditDocs({ root: ROOT, docs, index, repoRel, resolve: resolveRef });
+const { refs, counts, docsRead, lineCache } = auditDocs({ root: ROOT, docs, index, repoRel, resolve: resolveRef, notes: ioNotes });
+// 「收到 N 篇、0 篇读成功」= 本门一行判定都没产出 ⇒ 与「扫描面 0 篇」同档（退 2 自陈）。
+// ⚠ 不是把盘的抖动判红：部分读不到仍走「未检查面 + 默认只报告」；这里拦的是**全盲**。
+if (scanProducedNothing(docs.length, docsRead)) {
+  console.error(
+    `✖ 扫描面 ${docs.length} 篇文档，正文读取成功 ${docsRead} 篇 —— 一条引用都没被检查过，` +
+      `这不是「没有违规」而是「本门没跑」（读盘失败样例：${ioNotes.failures.slice(0, 3).map((f) => `${f.kind} ${f.at} ${f.err}`).join(" ｜ ") || "无"}）`,
+  );
+  process.exit(2);
+}
 const hard = hardViolations(refs);
 // 第二层（SYMDRIFT）：复用同一份正文缓存；**不改桶、不改键**，只往引用对象上挂 symDrift/symAbsent。
-const sym = auditSymbolDrift({ refs, windowBelow: SYM_WINDOW, lineCache, includeDotted: INCLUDE_DOTTED });
+const sym = auditSymbolDrift({ refs, windowBelow: SYM_WINDOW, lineCache, includeDotted: INCLUDE_DOTTED, notes: ioNotes });
 const symHard = symbolHardViolations(sym.drift, REQUIRE_SYMBOL_MATCH);
 
 const BASELINE_NOTE =
@@ -1062,6 +1676,10 @@ function writeBaseline(keys) {
   );
 }
 
+// 未检查面（读盘失败）的覆盖面摘要 —— **无条件进 summary**，因为「这条门有没有真的跑完」
+// 本身就是读数的一部分：只在出错时才打印的自陈，等于让正常路径与全盲路径长得一样。
+const cov = ioCoverageSummary(ioNotes, counts.UNVERIFIED ?? 0);
+
 const summary =
   `扫描 ${docs.length} 篇文档 · 引用 ${refs.length} 条` +
   ` ｜ OK ${counts.OK ?? 0} ｜ NONLOC（未检查）${counts.NONLOC ?? 0} ｜ BROKEN ${counts.BROKEN ?? 0}` +
@@ -1073,7 +1691,14 @@ const summary =
   ` ｜ SYMDRIFT ${sym.drift.length}（第二层·符号不在所指行${REQUIRE_SYMBOL_MATCH ? "**判红**" : "只报告"}；` +
   `可比对符号 ${sym.withSymbol} 条 / 进入比对 ${sym.checked} 条 / 符号零存在跳过 ${sym.absent} 条 /` +
   ` 点号接缝名排除 ${sym.dottedSkipped} 条 / 窗口 +${sym.windowBelow} 行` +
-  `；漂移按形态 ${Object.entries(sym.byForm).map(([k, v]) => `${k} ${v}`).join(" / ") || "无"}）`;
+  `；漂移按形态 ${Object.entries(sym.byForm).map(([k, v]) => `${k} ${v}`).join(" / ") || "无"}）` +
+  // 第三层（任务 #203）：读盘失败 = **未检查**，与上面任何桶都不混同，也不改它们的读数。
+  // 四个来源分档给数：引用条数（判进 UNVERIFIED 桶）／目标文件个数／文档篇数／文档目录个数。
+  // ⚠ 后面三项为 0 时也照样打印 —— 「没读到」这件事必须永远可见。
+  ` ｜ UNVERIFIED（未检查·读盘失败）${cov.refs} 条引用 / ${cov.targets} 个目标 / ${cov.docs} 篇文档 / ${cov.dirs} 个目录` +
+  `（重试 ${cov.retries} 次 · 退避 ${cov.retryMs}ms${cov.exhausted ? " · **预算耗尽后已停止重试**" : ""}` +
+  ` · ${REQUIRE_NO_UNVERIFIED ? "**判红**" : "只报告"}）` +
+  (sym.unreadableTargets > 0 ? `（其中第二层重读失败 ${sym.unreadableTargets} 条未比对）` : "");
 
 if (DUMP) {
   for (const r of refs) {
@@ -1088,6 +1713,12 @@ if (DUMP) {
     else if (r.bucket === "EXTERNAL") detail = "→ 跨仓 / 绝对路径（免检，只报告）";
     else if (r.bucket === "EPHEMERAL") detail = "→ 环境相关目录（免检，只报告）";
     else if (r.bucket === "MALFORMED") detail = "→ 不是路径形态（散文 / 表格残片，已丢弃）";
+    // UNVERIFIED 逐条点名（读盘失败的目标 + 错误码 + 尝试次数）——每条都要能指回是哪一次读。
+    // ⚠ 输出行的**字段顺序 / 分隔与既有各桶逐字相同**（`文档:行  引用串  桶  详情`）；
+    //   桶名 `UNVERIFIED` 比既有最长桶名（EPHEMERAL / MALFORMED，9 字符）宽 1，
+    //   故这一列的 `padEnd(9)` 对它不生效 —— **刻意不改 padEnd**：改了会让既有 8 类桶的输出
+    //   整体位移，而 `--dump-doc-refs` 的形态有别的文档在抄（见 AGENTS.md「段对齐」一节）。
+    else if (r.bucket === "UNVERIFIED") detail = `→ ${r.target} ${r.why} ⇒ **未检查**（不是通过，也不是引用坏了）`;
     // 第二层附注（不改上面任何桶的读数）：符号一致 / 符号漂移 / 符号零存在（未检）/ 仅接缝名（未检）
     if (r.symDrift) {
       detail +=
@@ -1106,6 +1737,18 @@ if (DUMP) {
 
 const baseKeys = loadBaselineKeys();
 const { newViolations, fixedCount, baseSize } = diffAgainstBaseline(baseKeys, hard);
+
+// 未检查面非空 ⇒ **无条件拒绝**动基线（判据见 `refuseBaselineWrite`）：读不到的引用会让
+// 本轮读数变小，而基线收紧正是拿「本轮没有」当「已修复」—— 盘的抖动不该代劳洗白。
+if ((INIT_BASELINE || UPDATE_BASELINE) && refuseBaselineWrite(cov)) {
+  console.error(
+    `\n✖ ${INIT_BASELINE ? "--init-baseline" : "--update-baseline"} 拒绝执行：本轮有未检查面` +
+      `（引用 ${cov.refs} 条 / 目标 ${cov.targets} 个 / 文档 ${cov.docs} 篇 / 目录 ${cov.dirs} 个读盘失败）。` +
+      `读不到的引用**不会出现在本轮读数里**，基线会把它们误当「已修复」而收紧 —— 那是洗白，与盘的抖动同源的风险。` +
+      `请在挂载 / 杀软 / 索引器稳定后重跑（常规巡检不受本条影响：不带这两个开关时照旧只报告）。`,
+  );
+  process.exit(2);
+}
 
 if (INIT_BASELINE) {
   if (fs.existsSync(BASELINE_PATH)) {
@@ -1151,6 +1794,36 @@ if (nonloc.length > 0) {
   if (nonloc.length > 10) console.log(`   … 其余 ${nonloc.length - 10} 条省略`);
 }
 
+// ── 未检查面（读盘失败）报告 ───────────────────────────────────────
+// 三个来源**分档打印**（引用 / 目标文件 / 文档 / 目录），样例至少若干条，逐条带错误码与
+// 尝试次数 —— 「有一条没查」必须指得回是哪一条，否则这个桶和没有一样（AGENTS.md 判据 #7）。
+const unverifiedRefs = refs.filter((r) => r.bucket === "UNVERIFIED");
+if (cov.any) {
+  console.log(
+    `\n⚠ UNVERIFIED 未检查面（SMB / VMware 共享目录读盘失败，**不是**文档缺陷，也**不是**检查通过）：` +
+      `\n   引用 ${cov.refs} 条 ｜ 目标文件 ${cov.targets} 个 ｜ 文档 ${cov.docs} 篇 ｜ 文档目录 ${cov.dirs} 个` +
+      `\n   重试 ${cov.retries} 次（每次上限 ${IO_RETRY_ATTEMPTS} 尝试、退避 ${IO_RETRY_BASE_MS}ms→${IO_RETRY_BASE_MS * IO_RETRY_FACTOR}ms）` +
+      `· 累计退避 ${cov.retryMs}ms${cov.exhausted ? " ⇒ **预算已耗尽，后续读错不再重试**（盘的抖动升级为整块失联的信号）" : ""}` +
+      `\n   ${REQUIRE_NO_UNVERIFIED ? "本桶**已判红**（--require-no-unverified）" : `本桶默认**只报告**（不影响退出码）；要判红请加 --require-no-unverified`}`,
+  );
+  for (const f of ioNotes.failures.slice(0, 12)) {
+    const kindLabel = f.kind === "target" ? "目标" : f.kind === "doc" ? "文档" : "目录";
+    console.log(`   ⚠ [${kindLabel}] ${f.at} —— ${f.err}，尝试 ${f.attempts} 次${f.sleptMs ? `（退避 ${f.sleptMs}ms）` : ""}`);
+  }
+  if (ioNotes.failures.length > 12) console.log(`   … 其余 ${ioNotes.failures.length - 12} 个读盘失败点省略（--dump-doc-refs 看逐条引用）`);
+  if (unverifiedRefs.length > 0) {
+    console.log(`   其中判进 UNVERIFIED 桶的引用（这些条的**行号**都没比过）：`);
+    for (const r of unverifiedRefs.slice(0, 10)) {
+      const ref = r.end !== r.start ? `${r.refFile}:${r.start}-${r.end}` : `${r.refFile}:${r.start}`;
+      console.log(`      ⚠ ${r.doc}:${r.docLine} → ${ref} —— ${r.why}`);
+    }
+    if (unverifiedRefs.length > 10) console.log(`      … 其余 ${unverifiedRefs.length - 10} 条省略`);
+  }
+  console.log(
+    `   处置：盘的瞬时抖动无需改文档；**同一批失败点反复出现**才是真问题 —— 先查挂载 / 杀软 /` +
+      ` 索引器，再考虑重跑本门。未检查的条数不影响上面各桶的读数（那些是**真读过**的）。`,
+  );
+}
 // ── 第二层（SYMDRIFT）报告面 ───────────────────────────────────────
 // 语义与 ABBREV 同档：**默认只报告**，不影响退出码。`--require-symbol-match` 才判红。
 // 逐条必须点到「符号实际在第几行」，否则这条判据指不回真实风险（同 ABBREV 的自证要求）。
@@ -1195,6 +1868,19 @@ if (symHard.length > 0) {
   console.error(
     `\n✖ --require-symbol-match：SYMDRIFT ${symHard.length} 条判红（引用可定位但所指行不是所述符号）。` +
       `上面已逐条点名实际行；不带该开关时本桶只报告、退码与既往逐字相同。`,
+  );
+  process.exit(1);
+}
+
+// 第三层（任务 #203）升硬开关：**只有显式给了 --require-no-unverified 才会走到这里退 1**。
+// 默认不开的理由（与 `--require-symbol-match` 同型判据）：本门是巡检门，盘的瞬时抖动不是文档缺陷，
+// 把它判红只会把排查方向引向不存在的引用错误（本会话已实证一次）；而 CI / `ci-check.mjs` 的
+// 命令行都不带该开关 ⇒ **默认退码与改动前逐字相同**。改动前不同的是：崩溃（退 1、零输出）
+// 现在变成了「有判定输出 + 未检查面自陈」。
+if (unverifiedHardFail(cov, REQUIRE_NO_UNVERIFIED)) {
+  console.error(
+    `\n✖ --require-no-unverified：未检查面非空（引用 ${cov.refs} 条 / 目标 ${cov.targets} 个 / 文档 ${cov.docs} 篇 / 目录 ${cov.dirs} 个` +
+      `，重试 ${cov.retries} 次后仍读不到）。上面已逐条点名错误码；不带该开关时本桶只报告、退码与既往逐字相同。`,
   );
   process.exit(1);
 }

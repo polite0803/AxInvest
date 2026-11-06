@@ -202,6 +202,19 @@
       "note": "PLAN §0.10.1 原记「OPC = 0 处」，⚠ 0 ≠ OPC 干净：`tools/src/tools/opc.rs` 的 41 处当时 import 的是股票 crate，记在股票名下（audit-l1-blockers 判读口径 4）。**2026-11-06 对账批改读数**：`84d8c357b` 把那 41 处 + `commands/fleet/mod.rs` 4 处 + `init/state.rs` 3 处改指 `axagent_company_runtime::` ⇒ 按同一判据（`DOMAINS.OPC.useRe`）它们**现在**就是 OPC 的主壳反向阻塞 ⇒ **48 处 / 3 文件**（与 `l1ForeignStock` 的 −48 精确配对，总量守恒）。⚠ 本条不是「口径被放宽」：`ownedRe` 一字未动，插件侧（`axagent-plugins/crates/plugin-opc/`）对 `axagent_company_runtime::` 直连实测 **0** 处 ⇒ 48 全部落在主壳（`axagent-runtime/crates/tools` + `src-tauri/src`），判据没有把插件自己的代码算进阻塞面。不给 planNumber / planMustAppear：PLAN 的行内读数由 §0.10.1 表行承载，本锚点守的是盘上事实。"
     },
     {
+      "id": "feForeignReverse",
+      "label": "前端反向阻塞（非域 import 域文件，audit-l1-blockers §3 feRe 口径：STOCK 处数/文件数 + OPC 处数/文件数）",
+      "value": 56,
+      "value2": 43,
+      "value2Label": "文件",
+      "feReadings": { "STOCK": { "points": 56, "files": 43 }, "OPC": { "points": 29, "files": 11 } },
+      "check": "manual",
+      "hard": false,
+      "planMustAppear": false,
+      "reason": "软锚点（任务 #207 第一轮，先例 k2TraitFaces）：本门判定跑用子进程复算 `node scripts/audit-l1-blockers.mjs --fe-json`（**复算器 = 权威脚本 §3 自身，仓内无第二套扫描器**），对照结果只进「只报告」档、不决定退出码。登记四数出自 2026-11-06 HEAD 597491f1f（工作树与 --before HEAD 提交树读数逐字相等）。",
+      "note": "PLAN §0.10 镜像行（PLAN:520）的 47/34 在现树实为 56/43 · 29/11 而第五道门全程绿 —— 缺陷本体就是这个口径**一个锚都没有**（PLAN §125.7 已逐提交归因）。本锚点按 §125.7 固化次序登记为第一轮软锚：**升 hard 的前置条件**（三条全满足才许改 check 为机器种类 + hard:true，且反向必先假红）① --fe-json 在 ≥2 个连续批里的输出与判定档打印、PLAN:520 抄数逐字相等（复现稳定），并用 --before <commit> 在至少一次迁层/搬迁批前后取数证明本口径净 0（2026-11-06 已验 6a54f8634 与 6a54f8634~1 两侧均 56/43 · 29/11）；② 升 hard 前先做反向对照 —— 故意把 feReadings 改错，切机器种类 + hard:true 后判定档**必须**红（k2TraitFaces 教训：复算器出自一次性工件才永远停在 manual，本条复算器已入库，不许无理由停软）；③ 升 hard 同批 leader 核 PLAN:520 镜像行与登记值逐字一致（PLAN 由 leader 写，本轮刻意不给 planNumber —— 56/43/29/11 四个数一个 planNumber 表达不全，硬塞就是编造锚点，沿用 l1ForeignOpc 同款裁定）。改 value/feReadings 的前置：任何读数变化必须同批回写 PLAN:520 并逐条归因（禁止借 --fe-json 的新读数把旧读数洗成绿）。口径警示：§3 feRe 用文件整条路径判归属且**不剥注释行**（audit --selftest 锁定此形态），命名不规范者会误判，PLAN 判读口径 3 已声明需人工认领异常行。"
+    },
+    {
       "id": "k1RsFileCount",
       "label": "K1 扫描面 .rs 文件数（8 根）",
       "value": 2045,

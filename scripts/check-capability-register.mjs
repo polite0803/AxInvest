@@ -97,6 +97,13 @@
 //   check 都必须有「登记≠实测 ⇒ 必被抓出」的负控 + 「登记=实测 ⇒ 不假阳性」的正控（全走合成读数，
 //   零盘扫描）。--selftest 每次印「已覆盖 check 种类 N / 表内实际使用 M」，出现空洞即自检红。
 //
+// 前端反向阻塞复算（任务 #207，2026-11-06）：本门**不重写第二套扫描器** —— PLAN §125.7 加锚次序
+//   ①「先让复算器可机械复现」的落地形态 = 判定跑里子进程调 `scripts/audit-l1-blockers.mjs --fe-json`
+//   （复算器 = 权威脚本 §3 自身，其 feRe 判据由该脚本 --selftest 锁定），结果只进「只报告」档。
+//   锚点 `feForeignReverse` 本轮按 **check:"manual" / hard:false** 的软锚点登记（先例 `k2TraitFaces`），
+//   复算不符只印 ⚠、不决定退出码；升 hard 的前置条件逐条写在该锚点 note 里（次序③，且反向必先假红）。
+//   子进程失败/输出不可解析 ⇒ 印「复算未出数 —— 跳过 ≠ 通过」，同样不判红、更不许借缺数改登记值。
+//
 // 用法：
 //   node scripts/check-capability-register.mjs                  # 门禁：复算全部实测读数并与镜像表逐行对账
 //   node scripts/check-capability-register.mjs --selftest       # 内建正负对照（纯函数、零盘扫描、先于任何 IO 短路）
@@ -204,6 +211,7 @@
 //   抖动路径最多再跑一轮复算；`--selftest` 零盘扫描，不受影响。
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { REG_PATH, parseRegistry, domainOf, unassigned } from "./lib/command-domains.mjs";
@@ -855,6 +863,9 @@ export function reconcile(register, readings, planText) {
     const n = readings.commandNames;
     reports.push(`[只报告] 契约 A 名字集合（#58 分流依据，复用 check-contracts 判据 ⇒ 零新解析器）：defined ${n.definedCount} / 已注册名 ${n.registeredNameCount} / 产物条目 ${n.entriesCount} · 已定义未注册 ${n.unregistered.length}${n.unregistered.length ? `（首条 ${n.unregistered[0]}）⇒ commandTotal 不符时判**产物滞后**，跑 \`cargo check\` 重生成后复跑本门` : "（⇒ 不符时按**真漂移**判）"} · 孤儿注册 ${n.orphanRegistered.length}${n.orphanRegistered.length ? `（首条 ${n.orphanRegistered[0]}；check-contracts 判 warning，不改分流）` : ""}`);
   }
+  // 前端反向（任务 #207）：**无条件印**这一行 —— 连 feForeign/feForeignError 双双 undefined 也要印，
+  // 否则将来谁把 collectReadings 里的子进程删掉，这行会静默消失（判据死亡的形态恰是「少印一行」）。
+  reports.push(feForeignRecomputeReport(register, readings));
 
   // ③ 逐条登记项
   let machineRows = 0;
@@ -911,6 +922,36 @@ export function reconcile(register, readings, planText) {
   for (const s of plan.soft) { reports.push(`[只报告] ${s}`); }
 
   return { hardFails, reports, manualLines, anchorResults, entryResults, planPassed: plan.passed, counts: { total: register.entries.length, machine: machineRows, report: reports.length, manual: manualRows } };
+}
+
+/** 前端反向复算对照（任务 #207）。纯函数：读数由 collectReadings 的子进程注入，--selftest 用合成读数
+ *  走**同一实现**（禁止两套）。只出报告档文本，永不返回硬失败 —— 锚点 feForeignReverse 本轮是
+ *  check:"manual" / hard:false 的软锚点，升 hard 的前置条件在其 note（次序：复现稳定 → 反向假红 → 同批 PLAN）。 */
+export function feForeignRecomputeReport(register, readings) {
+  const f = readings.feForeign;
+  const a = register.anchors.find((x) => x.id === "feForeignReverse") ?? null;
+  if (!f) {
+    return `[只报告] 前端反向复算未出数（子进程 \`scripts/audit-l1-blockers.mjs --fe-json\`：${readings.feForeignError ?? "读数缺失 —— collectReadings 未产出 feForeign/feForeignError"}）—— 软锚点 feForeignReverse 本轮无对照；跳过 ≠ 通过，也不许借缺数改登记值。`;
+  }
+  const act = { STOCK: f.stock, OPC: f.opc };
+  const fmt = (o) => `${o.points} 处 / ${o.files} 文件`;
+  const head = `[只报告] 前端反向（复算器 = audit-l1-blockers.mjs --fe-json 权威 §3 自身，basis=${f.basis ?? "?"}${f.commit ? ` commit=${String(f.commit).slice(0, 7)}` : ""}，不决定退出码）：实测 STOCK ${fmt(f.stock)} · OPC ${fmt(f.opc)}`;
+  if (!a) {
+    return `${head} —— ⚠ 表内无软锚点 feForeignReverse ⇒ 复算无对照对象（读数已印出；补登记是升 hard 的前置步骤，不许反过来删读数）。`;
+  }
+  const reg = a.feReadings ?? {};
+  const diffs = [];
+  for (const dk of ["STOCK", "OPC"]) {
+    const r = reg[dk];
+    if (!r) { diffs.push(`${dk} 锚点缺登记值（feReadings.${dk}）`); continue; }
+    if (r.points !== act[dk].points || r.files !== act[dk].files) {
+      diffs.push(`${dk} 登记 ${r.points} 处 / ${r.files} 文件 / 实测 ${act[dk].points} 处 / ${act[dk].files} 文件（差 ${act[dk].points - r.points >= 0 ? "+" : ""}${act[dk].points - r.points} 处 / ${act[dk].files - r.files >= 0 ? "+" : ""}${act[dk].files - r.files} 文件）`);
+    }
+  }
+  const tail = diffs.length
+    ? ` ⇒ ⚠ 复算不符：${diffs.join("；")}。本轮是 check:manual / hard:false 的**软锚点 ⇒ 不判红**（先例 k2TraitFaces）；改 PLAN §0.10 镜像行或改登记值前，必须先逐条归因差额（PLAN §125.7 的教训：47/34 腐烂时第五道门全程绿，就是因为这个口径一个锚都没有）。`
+    : " ⇒ 复算相符（软锚点登记值与权威复算逐字相等）。";
+  return `${head} —— 对照软锚点 feForeignReverse 登记 STOCK ${reg.STOCK ? fmt(reg.STOCK) : "?"} · OPC ${reg.OPC ? fmt(reg.OPC) : "?"}${tail}`;
 }
 
 // ── K2 键控分发谓词（任务 #57，2026-11-02）─────────────────────────────────
@@ -1683,6 +1724,9 @@ function fixture() {
       // #57 / #58 新增的两类 check（fixture 侧必须与真实表同档：k2KeyedHits=hard:false、commandNameSetCount=hard:true）
       { id: "k2Keyed", label: "K2 键控面（强/弱）", value: 3, value2: 1, check: "k2KeyedHits", hard: false },
       { id: "commandNameSet", label: "契约 A 名集合=产物条目数", value: 10, check: "commandNameSetCount", hard: true },
+      // ⚠ #207 的前端反向软锚点 feForeignReverse **刻意不进通用 fixture**：它 check:"manual"，进 fixture
+      //   会被「覆盖度反向校验」认账、逼着新增一类 check ⇒ 与本设计相反（它不占机器复检名额，对照走
+      //   feForeignRecomputeReport 的「只报告」档）。它的用例在 ㉙ 系列自配表与读数。
     ],
     entries: [
       { seamId: "a.one", group: "A", trait: "TraitOne", expect: { implementors: 2, seam: "已建", remote: true }, check: "implementorCount", planAnchorText: "登记项一 a.one 已建。", planLine: 5, evidence: [{ ref: "f.rs:3", file: "f.rs", line: 3, token: "pub trait TraitOne" }] },
@@ -2541,8 +2585,45 @@ function runSelftest() {
     check(cfgTestRanges("").length === 0 && cfgTestRanges("fn a() {}\n").length === 0, "正控㉗m：无 `#[cfg(test)]` 的文件 ⇒ 零区间（空文件也算），且 collectReadings 侧有 includes 短路 ⇒ 不给全树加无谓扫描");
   }
 
+  // ㉙系列（任务 #207，前端反向复算对照）：软锚点只报告不判红 · 复算不符必印 · 复算失败必印 · 删锚/判据死亡必点名
+  {
+    const mkFe = () => {
+      const fx = fixture();
+      fx.register.anchors.push({ id: "feForeignReverse", label: "前端反向阻塞（软锚点）", value: 4, value2: 2, value2Label: "文件", check: "manual", hard: false, planMustAppear: false, feReadings: { STOCK: { points: 4, files: 2 }, OPC: { points: 1, files: 1 } } });
+      fx.readings.feForeign = { basis: "worktree", commit: null, stock: { points: 4, files: 2 }, opc: { points: 1, files: 1 }, perFile: [] };
+      return fx;
+    };
+    const fe0 = mkFe();
+    const r0 = reconcile(fe0.register, fe0.readings, fe0.plan);
+    check(r0.hardFails.length === 0 && r0.reports.some((x) => x.includes("前端反向") && x.includes("复算相符")), `正控㉙a：复算=登记 ⇒ 只报告档印「复算相符」且零硬失败（实得 hard=${r0.hardFails.length}）`);
+    const feBad = mkFe();
+    feBad.readings.feForeign.stock.points = 5;
+    const rBad = reconcile(feBad.register, feBad.readings, feBad.plan);
+    check(rBad.hardFails.length === 0 && rBad.reports.some((x) => x.includes("⚠ 复算不符") && x.includes("STOCK 登记 4 处 / 2 文件 / 实测 5 处")), "负控㉙b：复算≠登记 ⇒ 必印逐域差额，但软锚点不判红（本轮未升 hard；升 hard 后此档必须改判红，前置条件见锚点 note）");
+    const feBad2 = mkFe();
+    feBad2.readings.feForeign.opc.files = 2;
+    const rBad2 = reconcile(feBad2.register, feBad2.readings, feBad2.plan);
+    check(rBad2.hardFails.length === 0 && rBad2.reports.some((x) => x.includes("OPC 登记 1 处 / 1 文件 / 实测 1 处 / 2 文件")), "负控㉙c：只改**文件数**也必须被抓出（处数与文件数是两本账，少一本就是半个锚）");
+    const feNil = mkFe();
+    delete feNil.readings.feForeign;
+    feNil.readings.feForeignError = "退出码 2（演示）";
+    const rNil = reconcile(feNil.register, feNil.readings, feNil.plan);
+    check(rNil.hardFails.length === 0 && rNil.reports.some((x) => x.includes("前端反向复算未出数") && x.includes("跳过 ≠ 通过")), "负控㉙d：子进程失败 ⇒ 印「未出数 —— 跳过 ≠ 通过」，不判红也不静默");
+    const feNoAnchor = fixture();
+    feNoAnchor.readings.feForeign = { basis: "worktree", commit: null, stock: { points: 4, files: 2 }, opc: { points: 1, files: 1 }, perFile: [] };
+    const rNA = reconcile(feNoAnchor.register, feNoAnchor.readings, feNoAnchor.plan);
+    check(rNA.hardFails.length === 0 && rNA.reports.some((x) => x.includes("表内无软锚点 feForeignReverse")), "负控㉙e：锚点被删而复算照跑 ⇒ 必须点名「无对照对象」（不许让删锚变成静默绿）");
+    const feDead = fixture();
+    const rDead = reconcile(feDead.register, feDead.readings, feDead.plan);
+    check(rDead.hardFails.length === 0 && rDead.reports.some((x) => x.includes("前端反向复算未出数")), "负控㉙f：feForeign/feForeignError 双缺（collectReadings 侧 spawn 被删的死亡形态）⇒ 对照行仍必须印出 —— 打印是无条件的");
+    const feSkew = mkFe();
+    feSkew.register.anchors.find((a) => a.id === "feForeignReverse").value = 9;
+    const rSkew = reconcile(feSkew.register, feSkew.readings, feSkew.plan);
+    check(rSkew.hardFails.length === 0 && rSkew.reports.some((x) => x.includes("复算相符")), "正控㉙g：对照判据看的是 feReadings（四数一体），不是 value/value2 —— 软锚点 self-skew 不判红也不改变对照口径");
+  }
+
   if (fail > 0) { return false; }
-  console.log("SELFTEST OK：命令数改红 · 分组漂移红 · 证据行号漂移红 · 未归属非空红 · 旧读数出段红 · 禁语红 · manual 不算通过 · 接缝/远程/实现者负控 · 逐类 anchor check 负控+正控 · 锚点内部自洽（value/planNumber/mustContain）· 藏数进 hard:false/manual 锚点必红（跨锚点宽容只认 hard:true 且机器复检的锚点数）· planNumber 数字边界 · --repin-plan 重锚（唯一命中才回写 / 歧义与零命中与缺键一律拒写 / 回写后 PLAN 对账归零 / 只改行号不动判据 / 行号锚点没被降成全文模糊匹配 / 定点替换不唯一就整次拒绝）· --repin-code 代码锚点重锚（整行定位键唯一才回写 / 零命中与歧义与缺键一律拒写 / 同 token 双条目靠整行键各自解歧 / 默认 dry-run 零写盘 / 内存版与文本版不一致拒写 / 从盘上复检不过回滚 / 判定档照样红）· K2 八形态正负对照（映射型容器强 / 顺序型容器无自述键不升强 / ⑦ 只判弱键控 / ⑧ 无 impl→trait 反查不命中 / k2KeyedHits 永不升硬）· 契约 A 分流（产物滞后专码仍判红且点名 cargo check / 名集合一致才按真漂移 / 名集合低估点名 / 判据不引用产物行数）· planOld.alsoAt（段内放行 / 段外仍红 / 腐烂双报且专码可区分 / 不填该字段逐字等价旧行为 / 越界与无键判腐烂 / --repin-plan 按最小包络重锚且歧义零命中缺键拒写 / 文本版成对定点替换不唯一即整次拒写 / alsoAt 数字 token 同受锚点自洽管辖、挪数字不能拆判据）· k1DeclaredExternalImplTraitCount 两趟语义（站点面 ∩ 声明面、与遍历次序无关、未声明名不计、单趟就地判定必丢条目、读数缺字段不许按 undefined 静默比绿）· K2 ⑥ 接收者收窄（集合接收者进强 / 单槽 setter 与 Option·字段写入不计且不留形态 / 集合标记在窗口内计、出窗不计 / vec![ 与 .insert( 也算集合接收者 / 动词表与 3 行参数窗口未动）· test 块内实现单列（区间 = mod 头行到闭合行两端都含 / 块内外两本账不串 / 同文件多 test mod 边界各自闭合 / 属性后跟 fn 不开区间 / 花括号配平闭合 / 无属性零区间）· 干净读数零假阳性 全部通过");
+  console.log("SELFTEST OK：命令数改红 · 分组漂移红 · 证据行号漂移红 · 未归属非空红 · 旧读数出段红 · 禁语红 · manual 不算通过 · 接缝/远程/实现者负控 · 逐类 anchor check 负控+正控 · 锚点内部自洽（value/planNumber/mustContain）· 藏数进 hard:false/manual 锚点必红（跨锚点宽容只认 hard:true 且机器复检的锚点数）· planNumber 数字边界 · --repin-plan 重锚（唯一命中才回写 / 歧义与零命中与缺键一律拒写 / 回写后 PLAN 对账归零 / 只改行号不动判据 / 行号锚点没被降成全文模糊匹配 / 定点替换不唯一就整次拒绝）· --repin-code 代码锚点重锚（整行定位键唯一才回写 / 零命中与歧义与缺键一律拒写 / 同 token 双条目靠整行键各自解歧 / 默认 dry-run 零写盘 / 内存版与文本版不一致拒写 / 从盘上复检不过回滚 / 判定档照样红）· K2 八形态正负对照（映射型容器强 / 顺序型容器无自述键不升强 / ⑦ 只判弱键控 / ⑧ 无 impl→trait 反查不命中 / k2KeyedHits 永不升硬）· 契约 A 分流（产物滞后专码仍判红且点名 cargo check / 名集合一致才按真漂移 / 名集合低估点名 / 判据不引用产物行数）· planOld.alsoAt（段内放行 / 段外仍红 / 腐烂双报且专码可区分 / 不填该字段逐字等价旧行为 / 越界与无键判腐烂 / --repin-plan 按最小包络重锚且歧义零命中缺键拒写 / 文本版成对定点替换不唯一即整次拒写 / alsoAt 数字 token 同受锚点自洽管辖、挪数字不能拆判据）· k1DeclaredExternalImplTraitCount 两趟语义（站点面 ∩ 声明面、与遍历次序无关、未声明名不计、单趟就地判定必丢条目、读数缺字段不许按 undefined 静默比绿）· K2 ⑥ 接收者收窄（集合接收者进强 / 单槽 setter 与 Option·字段写入不计且不留形态 / 集合标记在窗口内计、出窗不计 / vec![ 与 .insert( 也算集合接收者 / 动词表与 3 行参数窗口未动）· test 块内实现单列（区间 = mod 头行到闭合行两端都含 / 块内外两本账不串 / 同文件多 test mod 边界各自闭合 / 属性后跟 fn 不开区间 / 花括号配平闭合 / 无属性零区间）· 前端反向复算对照 #207（复算相符正控 ㉙a/㉙g · 逐域差额/只改文件数/子进程失败/删锚/判据死亡 五负控 ㉙b–㉙f，全部只报告不判红）· 干净读数零假阳性 全部通过");
   return true;
 }
 
@@ -2655,6 +2736,25 @@ function collectReadings(register) {
         }
       }
       rd.l1[dk] = { hits, files: hitFiles.size };
+    }
+  }
+
+  // 前端反向阻塞（任务 #207）：**门内不重写第二套扫描器** ⇒ 子进程调权威脚本自身的机器可读档
+  // `scripts/audit-l1-blockers.mjs --fe-json`（其 §3 判据由该脚本 --selftest 锁定；工作树口径，约 3~10 s）。
+  // 失败只落 feForeignError ⇒ 由 feForeignRecomputeReport 印进「只报告」档，**不进 hardFails**
+  //（本轮锚点 feForeignReverse 是 check:manual / hard:false 的软锚点，先例 k2TraitFaces）。
+  {
+    const r = spawnSync(process.execPath, [join(ROOT, "scripts", "audit-l1-blockers.mjs"), "--fe-json"], { encoding: "utf8", maxBuffer: 1 << 26 });
+    if (r.error) {
+      rd.feForeignError = `子进程无法启动：${r.error.message}`;
+    } else if (r.status !== 0) {
+      rd.feForeignError = `退出码 ${r.status}（stderr 首行：${(r.stderr || "").split("\n")[0] || "空"}）`;
+    } else {
+      try {
+        rd.feForeign = JSON.parse(r.stdout);
+      } catch (e) {
+        rd.feForeignError = `stdout 不是合法 JSON（${e.message}；前 120 字符：${String(r.stdout).slice(0, 120)}）`;
+      }
     }
   }
 

@@ -6762,3 +6762,38 @@ i18n 五道门全绿：`check-i18n-key-parity`（11 语言 key 集合一致）�
 **边界（明写，不装齐全）**：① 声明了**通配**（`*`）也算「已声明」—— 与既有 `isWildcardMatch` 语义一致，
 不为这两条另造一套；② 本闸只覆盖 dataSource；**动作面**（`executeActions`）若也能触发这两条命令，
 它走的是另一张 `PLUGIN_SCHEMA_ALLOWED_COMMANDS` 表（本轮未改，且那张表本身要求显式声明）⇒ 行为一致，未额外验证。
+
+### 128.14 #213：插件 `ui.json` 安装通道补体积/条数上限（#185 刻意未纳入的另一处入口）
+
+**前置核查（先证后改）**：`ui.json` 有**两条独立读入口**，都**没有**任何体积上限 ——
+① `axagent-plugins/crates/plugins/src/manager.rs` 的 `load_declared_ui_keys`（清单校验期）；
+② `src-tauri/src/init/plugin_ui_schema.rs` 的 `reconcile_one`（落库收敛期）。
+仓库里唯一同族上限是 `PANEL_ASSET_MAX_BYTES = 2 MiB`（`manager.rs`），但它只管 dashboard 面板的
+`frontendEntry` **资产**，**不覆盖** `ui.json` ⇒ 原来这条通道可以把任意大的 schema 直接写进
+`dynamic_ui_schemas.schema_json`（宿主写入闸 `SCHEMA_JSON_MAX_BYTES` 只管命令面，管不到安装通道）。
+
+**权威落点**（关键设计选择）：判据集中到 `ui_schema::parse` —— 两条入口都经由它，所以**单点权威**；
+另在读取侧各加一次 `metadata().len()` 早挡，避免把超大文件先读进内存再判（否则 OOM 发生在判据之前）。
+读取侧刻意只在 metadata **读到** 时才判，读不到时保持既有 NotFound / IO 错误语义（不改变错误分类）。
+
+**常量与口径**（`ui_schema.rs`）：
+| 常量 | 值 | 理由 |
+|---|---|---|
+| `UI_SCHEMA_ENTRY_MAX_BYTES` | **256 KiB** | 与宿主写入闸 `SCHEMA_JSON_MAX_BYTES` **同量级同口径**：插件 schema 落同一列；两处数值要改必须同批改 |
+| `UI_SCHEMA_FILE_MAX_BYTES` | **4 MiB** | 读取侧早挡；≈16 × 单条上限，足够多页面插件 |
+| `UI_SCHEMA_MAX_ENTRIES` | **64** | 防「很多条小 schema 累加成大文件」 |
+
+一律**按字节**判（中文 schema 字符数 ≈ 字节数 / 3，按字符判会放行约三倍预算），超限**整份拒绝、不截断**。
+
+**判据（`ui_schema` 单测 +4，共 12 passed）**：① 文件超限在解析前被拒；② 单条超限被拒且错误**带 `schemas[0]` 下标与 key**；
+③ 远低于上限的单条照常解析（防「一律拒」）；④ 条数超限被拒，**恰好等于上限必须放行**（上限本身合法，正控）。
+
+**验证**：`cargo fmt --check -p axagent-plugins` 与 `-p axagent` 均 **EXIT=0**；`cargo test -p axagent-plugins --lib ui_schema`
+⇒ **12 passed / 0 failed**（249 filtered）；`cargo clippy -p axagent-plugins --all-targets --all-features -- -D warnings`
+**EXIT=0**、`cargo clippy -p axagent --all-targets --all-features -- -D warnings` **EXIT=0**（19m59s）。
+中途 plugins 侧报过一次 `collapsible_if`（两处读取侧早挡写在 `if let Ok(meta) = … { if meta.len() > … {` 里）——
+按 clippy 的 let-chain 形态合并后转绿，**没有**用 `#[allow]` 压掉。
+
+**边界（明写）**：① 两个上限面（`PANEL_ASSET_MAX_BYTES` 2 MiB 面板资产 / `ui.json` 4 MiB 声明）语义不同，**未合并**；
+② 插件 worker 运行期若还有别的 schema 注入路径（不经 `ui.json`），本批**未普查**；③ 读取侧 metadata 早挡
+在 metadata 读不到时不报错（保持既有错误语义），因此真正的大小判据仍以 `parse` 里的字符串长度复核为准。

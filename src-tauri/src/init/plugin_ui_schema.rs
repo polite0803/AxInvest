@@ -106,6 +106,18 @@ async fn reconcile_one(
     root: &Path,
 ) -> Result<usize, String> {
     let path = root.join(UI_SCHEMA_FILE_NAME);
+    // #213：读取前先用 metadata 挡体积（避免把超大 ui.json 读进内存）；解析里还有一道按字符串长度的复核。
+    // metadata 读不到时不在这里报错 —— 交给下面的读取分支保持既有 NotFound / IO 错误语义。
+    if let Ok(meta) = tokio::fs::metadata(&path).await
+        && meta.len() > ui_schema::UI_SCHEMA_FILE_MAX_BYTES
+    {
+        return Err(format!(
+            "插件 `{plugin_id}` 的 {} 体积 {} 字节超过上限 {} 字节",
+            path.display(),
+            meta.len(),
+            ui_schema::UI_SCHEMA_FILE_MAX_BYTES
+        ));
+    }
     let source = match tokio::fs::read_to_string(&path).await {
         Ok(source) => source,
         // 没有声明文件 = 没有 UI 贡献。**不剪枝**：文件缺失可能是升级过程中的瞬态。

@@ -33,6 +33,20 @@ pub const UI_SCHEMA_FILE_NAME: &str = "ui.json";
 /// 让旧宿主报「不支持」而不是按缺省字段猜。
 pub const UI_SCHEMA_FORMAT_VERSION: u32 = 1;
 
+/// 单条声明 schema 的字节上限（序列化后）。
+///
+/// 与宿主写入闸 `SCHEMA_JSON_MAX_BYTES`（`src-tauri/src/commands/dynamic_ui.rs`，256 KiB 设计取值）
+/// **同量级同口径**：插件声明的 schema 最终落进同一列 `dynamic_ui_schemas.schema_json`。
+/// 宿主侧设了闸而这条通道不设，等于留一个绕过口（缺陷 #213）。两处数值要改必须同批改。
+pub const UI_SCHEMA_ENTRY_MAX_BYTES: usize = 256 * 1024;
+
+/// `ui.json` 全文上限：在**读取侧**先挡（避免把超大文件读进内存），解析里再按字符串长度复核。
+/// 4 MiB ≈ 16 × 单条上限，足够多页面插件；超限整份拒绝（fail-closed，**不截断**）。
+pub const UI_SCHEMA_FILE_MAX_BYTES: u64 = 4 * 1024 * 1024;
+
+/// 单份 `ui.json` 最多声明的条目数（防「很多条小 schema 累加成大文件」）。
+pub const UI_SCHEMA_MAX_ENTRIES: usize = 64;
+
 /// 插件 schema 行的 id 前缀（`plugin`）。
 pub const PLUGIN_SCHEMA_ID_PREFIX: &str = "plugin";
 
@@ -120,12 +134,29 @@ pub fn owner_prefix(plugin_id: &str) -> String {
 /// 返回**已归一化**的声明表（顺序与文件一致）。错误信息按「第几条 / 哪个 key」定位，
 /// 一次列出全部缺陷（与清单校验的聚合口径一致），不让用户改一条试一次。
 pub fn parse(source: &str) -> Result<Vec<UiSchemaDeclaration>, String> {
+    // #213：先把「整份文件」挡在解析之前。读取侧另有一道 `metadata().len()` 的早挡（避免把超大文件
+    // 读进内存），这里按**字符串长度**复核 —— 两条入口（清单校验 / 落库收敛）都经由本函数，
+    // 所以判据落在这里才是单点权威。
+    if source.len() as u64 > UI_SCHEMA_FILE_MAX_BYTES {
+        return Err(format!(
+            "ui.json 体积 {} 字节超过上限 {} 字节（整份拒绝，不截断）",
+            source.len(),
+            UI_SCHEMA_FILE_MAX_BYTES
+        ));
+    }
     let raw: RawUiSchemaFile =
         serde_json::from_str(source).map_err(|e| format!("ui.json 解析失败：{e}"))?;
     if raw.version != UI_SCHEMA_FORMAT_VERSION {
         return Err(format!(
             "ui.json 的版本 {} 不受支持（本宿主只支持 {}）",
             raw.version, UI_SCHEMA_FORMAT_VERSION
+        ));
+    }
+    if raw.schemas.len() > UI_SCHEMA_MAX_ENTRIES {
+        return Err(format!(
+            "ui.json 声明了 {} 条 schema，超过上限 {} 条",
+            raw.schemas.len(),
+            UI_SCHEMA_MAX_ENTRIES
         ));
     }
 
@@ -181,6 +212,16 @@ pub fn parse(source: &str) -> Result<Vec<UiSchemaDeclaration>, String> {
             .collect();
         let schema_json = serde_json::to_string(&entry.schema)
             .map_err(|e| format!("{at} 的 schema 序列化失败：{e}"))?;
+        // #213：单条上限与宿主写入闸同口径（插件 schema 落在同一列）。按**字节**判，
+        // 不用字符数 —— 中文 schema 的字符数 ≈ 字节数 / 3，按字符判会放行约三倍于预算的正文。
+        if schema_json.len() > UI_SCHEMA_ENTRY_MAX_BYTES {
+            errors.push(format!(
+                "{at}（key `{key}`）的 schema 序列化后 {} 字节，超过上限 {} 字节",
+                schema_json.len(),
+                UI_SCHEMA_ENTRY_MAX_BYTES
+            ));
+            continue;
+        }
         out.push(UiSchemaDeclaration { key, title, category, tags, version, schema_json });
     }
 
@@ -311,5 +352,59 @@ mod tests {
         for bad in ["", "A", "a.b", "a b", "-a", too_long.as_str()] {
             assert!(!is_declared_key_shape(bad), "`{bad}` 应非法");
         }
+    }
+
+    // ── #213：体积/条数上限（插件通道与宿主写入闸同口径）──
+
+    fn one_entry_with_pad(key: &str, pad_bytes: usize) -> String {
+        format!(
+            r#"{{ "version": 1, "schemas": [ {{ "key": "{key}", "title": "T", "version": "1.0.0", "schema": {{ "pad": "{pad}" }} }} ] }}"#,
+            pad = "x".repeat(pad_bytes)
+        )
+    }
+
+    #[test]
+    fn oversized_ui_json_file_is_rejected_before_parse() {
+        // 略超文件上限即可（不需要真的构造 4 MiB 合法 JSON —— 判据在解析之前）
+        let source = " ".repeat(UI_SCHEMA_FILE_MAX_BYTES as usize + 1);
+        let err = parse(&source).expect_err("超过文件上限必须拒");
+        assert!(err.contains("超过上限"), "错误应点明体积上限：{err}");
+    }
+
+    #[test]
+    fn oversized_single_entry_is_rejected_with_index_and_key() {
+        let source = one_entry_with_pad("big", UI_SCHEMA_ENTRY_MAX_BYTES);
+        let err = parse(&source).expect_err("单条超限必须拒");
+        assert!(err.contains("schemas[0]"), "错误应带下标定位：{err}");
+        assert!(err.contains("big"), "错误应带 key 定位：{err}");
+        assert!(err.contains("超过上限"), "错误应点明上限：{err}");
+    }
+
+    #[test]
+    fn entry_under_the_cap_still_parses() {
+        let source = one_entry_with_pad("ok", 1024);
+        let parsed = parse(&source).expect("远低于上限的单条必须照常解析");
+        assert_eq!(parsed.len(), 1);
+        assert!(parsed[0].schema_json.len() < UI_SCHEMA_ENTRY_MAX_BYTES);
+    }
+
+    #[test]
+    fn too_many_entries_are_rejected() {
+        let entries: Vec<String> = (0..=UI_SCHEMA_MAX_ENTRIES)
+            .map(|i| {
+                format!(r#"{{ "key": "k{i}", "title": "T", "version": "1.0.0", "schema": {{}} }}"#)
+            })
+            .collect();
+        let source = format!(r#"{{ "version": 1, "schemas": [ {} ] }}"#, entries.join(","));
+        let err = parse(&source).expect_err("条数超限必须拒");
+        assert!(err.contains("超过上限"), "错误应点明条数上限：{err}");
+        // 正控：恰好等于上限必须放行（上限本身合法）
+        let at_cap: Vec<String> = (0..UI_SCHEMA_MAX_ENTRIES)
+            .map(|i| {
+                format!(r#"{{ "key": "k{i}", "title": "T", "version": "1.0.0", "schema": {{}} }}"#)
+            })
+            .collect();
+        let ok = format!(r#"{{ "version": 1, "schemas": [ {} ] }}"#, at_cap.join(","));
+        assert_eq!(parse(&ok).expect("恰好等于上限应放行").len(), UI_SCHEMA_MAX_ENTRIES);
     }
 }

@@ -3113,6 +3113,21 @@ fn load_declared_ui_keys(
     errors: &mut Vec<PluginManifestValidationError>,
 ) -> BTreeSet<String> {
     let path = root.join(crate::ui_schema::UI_SCHEMA_FILE_NAME);
+    // #213：读取前先用 metadata 挡体积（避免把超大 ui.json 读进内存）。metadata 读不到时不在这里报错，
+    // 交给下面的读取分支保持既有 NotFound / IO 错误语义。
+    if let Ok(meta) = fs::metadata(&path)
+        && meta.len() > crate::ui_schema::UI_SCHEMA_FILE_MAX_BYTES
+    {
+        errors.push(PluginManifestValidationError::InvalidUiSchemaDeclaration {
+            detail: format!(
+                "{} 体积 {} 字节超过上限 {} 字节",
+                path.display(),
+                meta.len(),
+                crate::ui_schema::UI_SCHEMA_FILE_MAX_BYTES
+            ),
+        });
+        return BTreeSet::new();
+    }
     let source = match fs::read_to_string(&path) {
         Ok(source) => source,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {

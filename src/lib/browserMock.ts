@@ -3555,7 +3555,12 @@ async function executeCommand<T>(
           id: genId(),
           knowledgeBaseId: baseId!,
           title: docInput.title ?? "Untitled",
-          sourcePath: docInput.sourcePath ?? "",
+          // #211 普查抓到的死点：调用方（knowledgeStore.ts:250-255）传 camel `sourcePath`，
+          // 经递归 snake 化后是 `source_path` ⇒ 直读 `docInput.sourcePath` 恒 undefined，
+          // 文档的 sourcePath 一直是空串（且无 snake 兜底，不像同文件其它 camel+snake 写法）。
+          sourcePath: readMockReqField<string>(docInput, "sourcePath") ?? "",
+          // ⚠ 刻意仍是硬编码：mock 不落真实文件，size/mime 都由真机扫描得出；
+          // 这一条属 #192（mock 与后端语义差）已登记项，别当成漏改。
           mimeType: "text/plain",
           sizeBytes: 0,
           indexingStatus: "pending",

@@ -6680,3 +6680,26 @@ mock 的 `create_artifact` / `update_artifact` 不再写这三样（注释指向
 判据：正控 = 已存在 id 仍正常更新并写回；负控 = 未知 id 抛错（调用方走 catch 分支，不再污染列表）。
 另：`Artifact.kind` 的取值域（`draft|note|report|snippet|checklist`）未与后端字符串常量逐项对齐
 （`rag_voice_etc.rs:631` 只是注释，后端实际是 `String` 不收窄）⇒ 归 #192 同族，另批。
+
+### 128.10 #211：把 #201 的一次性普查器固化为 `scripts/scan-mock-camel-reads.mjs`（并抓出 1 处漏改）
+
+#201 的普查只覆盖「解构 / 直接成员访问」两种形态，漏掉了**内联表达式**里的读点（三元 / 可选链 /
+`filter` 回调内读外层 args / `obj["camelKey"]` 计算属性）。本批把它固化成脚本，并用它扫出并修掉了上一批漏掉的一处真死点。
+
+**判据（机械；精度靠两条纪律，缺一条就不可用）**：
+1. **按 `case` 块定作用域**求「args 派生名」。第一版用**文件级**集合 ⇒ `p` / `title` / `input` 这类常见名在别处绑定过就被全局当派生，实测 **112 条命中里九成是箭头参数与本地字符串变量**。改成块作用域后降到 12 条。
+2. **派生只认直投影**：右侧必须整体是载体（`args` / `input` / `req`，可带括号、`as T`、`?? {}`），或 `载体.input|request|args|payload`，或 `readMockReqField(...)` 的结果。第一版「右侧只要提到派生名就算」把 `const lead = MOCK_LEADS.find(…leadId…)` 也当派生 ⇒ 又造出 75 条噪声。收紧后 **12 条**。
+3. 两条降噪：camel 名后面紧跟 `(` 的是**方法调用**（`startsWith` / `toLowerCase`），不是读键；同一行已有 `<base>.snake_key` 兜底的标 `covered`（能跑通），**不计死亡**，但仍列出供人工复核方向。
+4. 自检 **14 条（正控 6 / 负控 6）**，含两条专防上面踩过的坑（跨 `case` 同名不得牵连、函数参数同名不得牵连）+ 一条专防「兜底被误判成死点」。
+
+**它抓到的真死点（上一批漏改）**：`add_knowledge_document` 的 `docInput.sourcePath` —— 调用方
+（`src/stores/feature/knowledgeStore.ts:250-255`）传 camel `sourcePath`，后端签名是 `source_path`
+（`src-tauri/src/commands/knowledge.rs:703-709`），mock 却直读 `docInput.sourcePath ?? ""` 且**没有 snake 兜底**
+⇒ 文档的 `sourcePath` 一直是空串。已改走 `readMockReqField`。同 case 的 `mimeType: "text/plain"` 是**刻意硬编码**
+（mock 不落真实文件），已在注释里声明并归 #192，不算漏改。
+
+**当前读数**：`死点 0 处 / 有兜底 10 处`（10 处全是 `camel ?? snake` 的「camel 恒假、snake 生效」写法 —— 能跑通，
+但与 `readMockReqField` 两套形态并存，属可清理项，未在本批动）。`--selftest` EXIT=0；扫描面 435 个 `case` 块。
+
+**未做**：① 未接 CI（它是普查器不是门禁；接 CI 要走 `ci-check.mjs` + `ci.yml` 两处同源，另批）；② 那 10 处
+「有兜底」未统一成 `readMockReqField`（改了只是形态一致，无行为收益）；③ 跨模块传入的 args 派生对象判不出（见脚本头「已知边界」）。

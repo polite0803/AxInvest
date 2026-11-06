@@ -1820,6 +1820,31 @@ function mockLoadSchemaForCommand(
   return schema;
 }
 
+/**
+ * 读取嵌套 `req` 里的字段，**同时兼容 camelCase 与 snake_case 两种键形**。
+ *
+ * 为什么需要：`handleCommand` 在入口对入参做了**递归** snake_case 化
+ * （定义见 `camelToSnake` / `convertToSnakeCase`，调用点是 handleCommand 里的
+ * `const convertedArgs = args ? convertToSnakeCase(args) : args`）。于是前端按
+ * `CreateDynamicUISchemaParams` 传的 `schemaJson`，进到 `executeCommand` 时真实键名是
+ * `schema_json` —— 处理函数只读 `req.schemaJson` 的那条写法**恒得 `undefined`**，
+ * dev 模式下 Schema 内容从来没真正落库（缺陷批 #188 第 2 件）。同理中招的还有
+ * `formDataJson` / `instanceKey` / `changeLog` / `schemaId`；单词键（`title` /
+ * `description` / `category` / `tags` / `version`）转换前后逐字相同，不受影响。
+ *
+ * 刻意**不去改递归转换本身**：那是全 mock 面几十个命令共同的入参形状，改它等于重写
+ * 所有命令的读键，破坏面远超本批收益。只在读取处兼容，代价一个函数。
+ * camelCase 优先命中 —— 直调 `executeCommand`（不经 `handleCommand`）的路径保持原形状。
+ */
+function readMockReqField<T>(req: unknown, camelKey: string): T | undefined {
+  if (req === null || typeof req !== "object") {
+    return undefined;
+  }
+  const obj = req as Record<string, unknown>;
+  const value = obj[camelKey] ?? obj[camelToSnake(camelKey)];
+  return value === undefined ? undefined : (value as T);
+}
+
 /** 语义化版本号 patch 自增（不传 version 时使用） */
 function bumpPatchVersion(version: string): string {
   const parts = version.split(".");
@@ -5350,7 +5375,12 @@ async function executeCommand<T>(
         id: genId(),
         title: req.title,
         description: req.description,
-        schemaJson: req.schemaJson,
+        // 键形兼容读取：`req.schemaJson` 经 handleCommand 递归 snake 化后实际是
+        // `schema_json`，改前这里恒写 `undefined`（JSON.stringify 静默丢键 ⇒ 落库的
+        // 行连 `schemaJson` 字段都没有）。见 `readMockReqField` 注释。
+        // 缺字段时落空串而不是 undefined：真机由 serde 直接报「缺 schema_json」，
+        // dev 没有那层，写空串至少不造出「字段缺失的行」这种真机不存在的形态。
+        schemaJson: readMockReqField<string>(req, "schemaJson") ?? "",
         category: req.category,
         tags: req.tags,
         version: "1.0.0",
@@ -5408,7 +5438,10 @@ async function executeCommand<T>(
         ...old,
         title: req.title ?? old.title,
         description: req.description ?? old.description,
-        schemaJson: req.schemaJson ?? old.schemaJson,
+        // 键形兼容读取（同 create）：改前恒 `undefined` ⇒ `?? old.schemaJson` 把旧值原样写回，
+        // 表现为「dev 改 Schema 内容永远不生效」。显式不传 = 保留旧值，与后端
+        // `Option<String>` 语义一致。
+        schemaJson: readMockReqField<string>(req, "schemaJson") ?? old.schemaJson,
         category: req.category ?? old.category,
         tags: req.tags ?? old.tags,
         version: newVersion,
@@ -5427,7 +5460,7 @@ async function executeCommand<T>(
         schemaJson: updated.schemaJson,
         category: updated.category,
         tags: updated.tags,
-        changeLog: req.changeLog ?? "update",
+        changeLog: readMockReqField<string>(req, "changeLog") ?? "update",
         createdAt: Date.now(),
       });
       saveMockDynamicUIData("versions", versions);
@@ -5462,17 +5495,33 @@ async function executeCommand<T>(
       if (!req) {
         throw new Error("Missing req parameter");
       }
-      const instanceKey = req.instanceKey ?? "__default__";
+      // 键形兼容读取：`schemaId` / `formDataJson` / `instanceKey` 三个字段经
+      // handleCommand 递归 snake 化后分别是 `schema_id` / `form_data_json` / `instance_key`。
+      // 改前直读 camelCase ⇒ `schemaId` 恒 `undefined`：闸门会失去判定对象（本批加闸门的
+      // 前提），落库行也匹配不到宿主（等于表单数据全塌到一条 `schemaId` 缺失的行上）。
+      const schemaId = readMockReqField<string>(req, "schemaId") ?? "";
+      // 归属闸门先于任何读写（后端 dynamic_ui.rs:689）：宿主不存在 / 属插件 ⇒ 不落库。
+      // 否则插件可借任意 schemaId 预置数据，等用户 UI 一并读出。
+      mockLoadSchemaForCommand(
+        loadMockDynamicUIData<DynamicUISchemaRecord[]>("schemas", []),
+        schemaId,
+        "保存表单数据",
+      );
+      const formDataJson = readMockReqField<string>(req, "formDataJson") ?? "";
+      // 默认 instanceKey 沿用 mock 既有的 `"__default__"`（后端是 `"default"`）——
+      // 这条属**本批不动**的既存差异，理由：改它会让已有 dev 数据全部读不回，
+      // 且它不在「闸门/归属」判据面上。已登记进交付报告的语义差清单。
+      const instanceKey = readMockReqField<string>(req, "instanceKey") ?? "__default__";
       const records = loadMockDynamicUIData<DynamicUIFormDataRecord[]>("formData", []);
       const idx = records.findIndex(
-        (r) => r.schemaId === req.schemaId && r.instanceKey === instanceKey,
+        (r) => r.schemaId === schemaId && r.instanceKey === instanceKey,
       );
       const now = new Date().toISOString();
       const record: DynamicUIFormDataRecord = {
         id: idx !== -1 ? records[idx].id : genId(),
-        schemaId: req.schemaId,
+        schemaId: schemaId,
         instanceKey: instanceKey,
-        formDataJson: req.formDataJson,
+        formDataJson: formDataJson,
         updatedAt: now,
       };
       if (idx !== -1) {
@@ -5488,6 +5537,14 @@ async function executeCommand<T>(
         schema_id?: string;
         instance_key?: string | null;
       };
+      // 读也要拦（后端 dynamic_ui.rs:739，闸门在查询**之前**）：
+      // 这是本文件最大的一处泄露面 —— 改前任意 schemaId 都能换出他人的表单值。
+      // 拒时不查表、不组装 DTO，故拒绝串里不会出现任何被读到的内容。
+      mockLoadSchemaForCommand(
+        loadMockDynamicUIData<DynamicUISchemaRecord[]>("schemas", []),
+        schema_id ?? "",
+        "读取表单数据",
+      );
       const instanceKey = instance_key ?? "__default__";
       const records = loadMockDynamicUIData<DynamicUIFormDataRecord[]>("formData", []);
       const record = records.find(
@@ -5500,6 +5557,12 @@ async function executeCommand<T>(
         schema_id?: string;
         instance_key?: string | null;
       };
+      // 删除同样按宿主 schema 判定（后端 dynamic_ui.rs:759）：插件行只能随插件卸载清理。
+      mockLoadSchemaForCommand(
+        loadMockDynamicUIData<DynamicUISchemaRecord[]>("schemas", []),
+        schema_id ?? "",
+        "删除表单数据",
+      );
       const instanceKey = instance_key ?? "__default__";
       const records = loadMockDynamicUIData<DynamicUIFormDataRecord[]>("formData", []);
       saveMockDynamicUIData(
@@ -5526,6 +5589,14 @@ async function executeCommand<T>(
       if (!schema_id) {
         throw new Error("Missing schema_id");
       }
+      // 归属闸门先于 upsert（后端 dynamic_ui.rs:1070）：钉入是「用户把自己的页面挂到导航」
+      // 的动作，宿主必须是用户侧页面；同一道闸门还挡掉「钉一个根本不存在的 schemaId」
+      // 造出悬空导航项。改前这里无条件写 pins ⇒ dev 能给插件页面钉导航。
+      mockLoadSchemaForCommand(
+        loadMockDynamicUIData<DynamicUISchemaRecord[]>("schemas", []),
+        schema_id,
+        "钉入",
+      );
       const pins = loadMockDynamicUIData<DynamicUIPinRecord[]>("pins", []);
       const idx = pins.findIndex((p) => p.schemaId === schema_id);
       const now = new Date().toISOString();
@@ -5549,6 +5620,15 @@ async function executeCommand<T>(
     }
     case "unpin_dynamic_ui_schema": {
       const { schema_id } = args as { schema_id?: string };
+      // 取消钉入是**唯一**「宿主不存在则放行」的例外 —— 逐字读后端 dynamic_ui.rs:1130 的
+      // 注释确认（不是转述）：`delete_dynamic_ui_schema` 不级联 pins 表，若这里也要求
+      // 宿主存在，被删 schema 遗留的悬空钉入就永远清不掉（且此时已无任何数据可被影响）。
+      // ⇒ 判据是「宿主存在 **且** origin 非可信」才拒；不存在 ⇒ 继续删 pin。
+      const host = loadMockDynamicUIData<DynamicUISchemaRecord[]>("schemas", [])
+        .find((s) => s.id === schema_id);
+      if (host && !TRUSTED_SCHEMA_ORIGINS.has(host.origin)) {
+        throw new Error(mockSchemaOwnedDenied("取消钉入", host.origin));
+      }
       const pins = loadMockDynamicUIData<DynamicUIPinRecord[]>("pins", []);
       saveMockDynamicUIData(
         "pins",
@@ -5581,34 +5661,50 @@ async function executeCommand<T>(
         schema_id?: string;
         version_id?: number;
       };
-      const versions = loadMockDynamicUIData<DynamicUISchemaVersion[]>("versions", []);
-      const version = versions.find(
-        (v) => v.id === version_id && v.schemaId === schema_id,
-      );
-      if (!version) {
-        throw new Error("Version not found");
-      }
       const schemas = loadMockDynamicUIData<DynamicUISchemaRecord[]>("schemas", []);
+      // 与后端**同判据 + 同顺序**（`restore_dynamic_ui_schema_version`，dynamic_ui.rs:616 起）：
+      //   1. 归属闸门 `load_schema_for_command`（:624，action 串「回滚」）—— 回滚等价于改写
+      //      schema_json，插件拥有 / 归属不可判定的行一律拒；宿主不存在 ⇒ NOT_FOUND；
+      //   2. 内置守卫（:626）⇒ DYNAMIC_UI_BUILTIN_NOT_ROLLBACK；
+      //   3. 才去版本表按 id 取快照（:630），取不到 ⇒ 「版本 {id} 不存在」（与后端同文案）；
+      //   4. 校验版本归属（:637）⇒ 「版本 {id} 不属于 Schema {schemaId}，拒绝回滚」。
+      // 改前 1/2/4 三步**全无**：只按 `id + schemaId` 联合查找，把「版本不存在」与
+      // 「跨 Schema」两种情形混成一条 `Version not found`，且插件行、内置行都能回滚。
+      const host = mockLoadSchemaForCommand(schemas, schema_id ?? "", "回滚");
+      if (host.isBuiltin) {
+        throw new Error(mockSchemaStructuredError("DYNAMIC_UI_BUILTIN_NOT_ROLLBACK"));
+      }
+      // 过了闸门 ⇒ 该行必然存在，索引稳定（不再是改前的 `idx === -1` 手工兜底）
       const idx = schemas.findIndex((s) => s.id === schema_id);
-      if (idx === -1) {
-        throw new Error("Schema not found");
+      const versions = loadMockDynamicUIData<DynamicUISchemaVersion[]>("versions", []);
+      const version = versions.find((v) => v.id === version_id);
+      if (!version) {
+        throw new Error(`版本 ${version_id} 不存在`);
+      }
+      if (version.schemaId !== schema_id) {
+        throw new Error(
+          `版本 ${version_id} 不属于 Schema ${schema_id}，拒绝回滚`,
+        );
       }
       const restored: DynamicUISchemaRecord = {
-        id: schemas[idx].id,
+        id: host.id,
         title: version.title,
         description: version.description,
         schemaJson: version.schemaJson,
         category: version.category,
         tags: version.tags,
         version: version.version,
-        isBuiltin: schemas[idx].isBuiltin,
-        origin: schemas[idx].origin,
-        ownerId: schemas[idx].ownerId,
-        createdAt: schemas[idx].createdAt,
+        isBuiltin: host.isBuiltin,
+        origin: host.origin,
+        ownerId: host.ownerId,
+        createdAt: host.createdAt,
         updatedAt: new Date().toISOString(),
       };
       schemas[idx] = restored;
       saveMockDynamicUIData("schemas", schemas);
+      // ⚠ 后端在改写前还会写一条「回滚前存档」快照（dynamic_ui.rs:643 `create_version_snapshot`），
+      // mock 没有该通道 ⇒ 属本批**不补**的既存语义差，已登记进交付报告（补它等于新增版本写入
+      // 路径，不是闸门；且会与 update 分支的同名缺口一起登记更成体系）。
       return restored as T;
     }
 
